@@ -5,6 +5,7 @@ const {
   routes,
   smsClosureCodeSpy,
   smsClosureCompleteSpy,
+  smsClosureReadySpy,
   smsSendCodeSpy,
   syncConfirmSpy,
   wechatCreateSpy,
@@ -29,6 +30,7 @@ const {
     routes,
     smsClosureCodeSpy: vi.fn(async () => ({ ok: true })),
     smsClosureCompleteSpy: vi.fn(async () => ({ ok: true })),
+    smsClosureReadySpy: vi.fn(() => true),
     smsSendCodeSpy: vi.fn(async () => ({ ok: true, cooldownMs: 60_000 })),
     syncConfirmSpy: vi.fn<() => Promise<{ ok: true } | { ok: false; reason: string }>>(
       async () => ({ ok: true }),
@@ -106,6 +108,7 @@ vi.mock('./sms.js', () => ({
     verifyCode: vi.fn(),
     sendAccountClosureCode: smsClosureCodeSpy,
     sendAccountClosureComplete: smsClosureCompleteSpy,
+    isAccountClosureReady: smsClosureReadySpy,
   })),
 }));
 
@@ -119,7 +122,12 @@ vi.mock('./sync-to-vultr.js', () => ({
 
 function makeResponse() {
   const state: { status: number; body: unknown } = { status: 200, body: undefined };
+  const headers = new Map<string, string>();
   const response = {
+    setHeader(name: string, value: string) {
+      headers.set(name.toLowerCase(), value);
+      return response;
+    },
     status(code: number) {
       state.status = code;
       return response;
@@ -133,7 +141,7 @@ function makeResponse() {
       return response;
     },
   };
-  return { response, state };
+  return { headers, response, state };
 }
 
 await import('./index.js');
@@ -252,7 +260,36 @@ describe('account-closure SMS routes', () => {
   beforeEach(() => {
     smsClosureCodeSpy.mockClear();
     smsClosureCompleteSpy.mockClear();
+    smsClosureReadySpy.mockReset();
+    smsClosureReadySpy.mockReturnValue(true);
     smsSendCodeSpy.mockClear();
+  });
+
+  it('exposes only an authenticated readiness result for the closure SMS path', async () => {
+    const handler = routes.get('GET /api/internal/account-closure/health');
+    if (!handler) throw new Error('closure health route was not registered');
+
+    const unauthorized = makeResponse();
+    await handler({ headers: {} }, unauthorized.response);
+    expect(unauthorized.state).toEqual({ status: 401, body: { error: 'unauthorized' } });
+    expect(unauthorized.headers.get('cache-control')).toBe('no-store');
+
+    const ready = makeResponse();
+    await handler({ headers: { 'x-internal-secret': 'cn-test-secret' } }, ready.response);
+    expect(ready.state).toEqual({
+      status: 200,
+      body: { status: 'ok', accountClosureSms: 'ready' },
+    });
+    expect(ready.headers.get('cache-control')).toBe('no-store');
+
+    smsClosureReadySpy.mockReturnValue(false);
+    const unavailable = makeResponse();
+    await handler({ headers: { 'x-internal-secret': 'cn-test-secret' } }, unavailable.response);
+    expect(unavailable.state).toEqual({
+      status: 503,
+      body: { status: 'unavailable', accountClosureSms: 'unavailable' },
+    });
+    expect(unavailable.headers.get('cache-control')).toBe('no-store');
   });
 
   it.each([undefined, 'wrong-secret'])(
