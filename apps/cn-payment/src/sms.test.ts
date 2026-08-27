@@ -141,7 +141,7 @@ describe('SmsAdapter account-closure isolation', () => {
       phoneNumbers: '13800138000',
       templateCode: 'CLOSURE_VERIFY_TEMPLATE',
     });
-    expect(JSON.parse(request.templateParam ?? '{}').code).toBe('654321');
+    expect(JSON.parse(request.templateParam ?? '{}')).toEqual({ code: '654321' });
     expect(adapter.verifyCode('13800138000', '654321')).toEqual({
       ok: false,
       error: 'invalid_code',
