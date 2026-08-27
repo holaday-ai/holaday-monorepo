@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/mysql2';
 import mysql from 'mysql2/promise';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -133,6 +133,99 @@ describe.sequential('account closure atomic freeze and exact immediate effects',
       .from(apiKeys)
       .where(eq(apiKeys.userId, user.id));
     expect(key?.revokedAt).toBeInstanceOf(Date);
+  });
+
+  it('marks every unstarted category step skipped when withdrawal wins', async () => {
+    const user = await createUser();
+    const requestedAt = new Date('2026-08-26T03:15:00.000Z');
+    const withdrawnAt = new Date('2026-08-27T03:15:00.000Z');
+    const frozen = await freezeAccountForClosure(db, {
+      userId: user.id,
+      expectedAuthVersion: 3,
+      requestExternalId: `acl_${randomBytes(10).toString('hex')}`,
+      requestedAt,
+      reasonCode: 'privacy',
+    });
+    await db
+      .update(accountClosureSteps)
+      .set({
+        nextAttemptAt: new Date('2026-08-27T03:00:00.000Z'),
+        leaseOwner: 'stale-withdrawal-test-lease',
+        leaseUntil: new Date('2026-08-27T03:30:00.000Z'),
+      })
+      .where(eq(accountClosureSteps.requestId, frozen.requestId));
+
+    await withdrawAccountClosureRequest(db, {
+      requestId: frozen.requestId,
+      userId: user.id,
+      now: withdrawnAt,
+    });
+
+    const steps = await db
+      .select({
+        status: accountClosureSteps.status,
+        finishedAt: accountClosureSteps.finishedAt,
+        nextAttemptAt: accountClosureSteps.nextAttemptAt,
+        leaseOwner: accountClosureSteps.leaseOwner,
+        leaseUntil: accountClosureSteps.leaseUntil,
+      })
+      .from(accountClosureSteps)
+      .where(eq(accountClosureSteps.requestId, frozen.requestId));
+    expect(steps).toHaveLength(DATA_CATEGORY_IDS.length);
+    expect(
+      steps.every(
+        (step) =>
+          step.status === 'skipped' &&
+          step.finishedAt?.getTime() === withdrawnAt.getTime() &&
+          step.nextAttemptAt === null &&
+          step.leaseOwner === null &&
+          step.leaseUntil === null,
+      ),
+    ).toBe(true);
+  });
+
+  it('rolls back cancellation when the category-step set is incomplete', async () => {
+    const user = await createUser();
+    const frozen = await freezeAccountForClosure(db, {
+      userId: user.id,
+      expectedAuthVersion: 3,
+      requestExternalId: `acl_${randomBytes(10).toString('hex')}`,
+      requestedAt: new Date('2026-08-26T03:20:00.000Z'),
+      reasonCode: 'privacy',
+    });
+    await db
+      .delete(accountClosureSteps)
+      .where(
+        and(
+          eq(accountClosureSteps.requestId, frozen.requestId),
+          eq(accountClosureSteps.categoryId, DATA_CATEGORY_IDS[0]),
+        ),
+      );
+
+    await expect(
+      withdrawAccountClosureRequest(db, {
+        requestId: frozen.requestId,
+        userId: user.id,
+        now: new Date('2026-08-27T03:20:00.000Z'),
+      }),
+    ).rejects.toMatchObject({ code: 'USER_STATE_CONFLICT' });
+
+    const [request] = await db
+      .select({ status: accountClosureRequests.status })
+      .from(accountClosureRequests)
+      .where(eq(accountClosureRequests.id, frozen.requestId));
+    const [restoredUser] = await db
+      .select({ status: users.status })
+      .from(users)
+      .where(eq(users.id, user.id));
+    const remainingSteps = await db
+      .select({ status: accountClosureSteps.status })
+      .from(accountClosureSteps)
+      .where(eq(accountClosureSteps.requestId, frozen.requestId));
+    expect(request?.status).toBe('pending_grace');
+    expect(restoredUser?.status).toBe('closure_pending');
+    expect(remainingSteps).toHaveLength(DATA_CATEGORY_IDS.length - 1);
+    expect(remainingSteps.every((step) => step.status === 'pending')).toBe(true);
   });
 
   it('loses the freeze CAS after a concurrent authentication version change', async () => {
