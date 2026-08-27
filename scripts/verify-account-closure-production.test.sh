@@ -16,6 +16,7 @@ cat > "$HARNESS_DIR/repo/scripts/load-deploy-env.sh" <<'STUB'
 : "${VULTR_PASSWORD:=unit-vultr-secret}"
 : "${ALIYUN_PASSWORD:=unit-aliyun-secret}"
 export VULTR_PASSWORD ALIYUN_PASSWORD
+echo 'source-private-diagnostic' >&2
 STUB
 
 cat > "$HARNESS_DIR/repo/scripts/ssh-password-auth.sh" <<'STUB'
@@ -36,20 +37,21 @@ STUB
 
 cat > "$HARNESS_DIR/bin/ssh" <<'STUB'
 #!/usr/bin/env bash
+echo 'ssh-private-diagnostic' >&2
 if [[ "$*" == *"207.148.70.106"* ]]; then
   case "${TEST_PROFILE:-dormant}" in
     dormant)
-      printf '%s\n' '{"orchestrator":{"processCount":1,"uid":998,"rssBytes":377487360,"accountClosureEnabled":false,"accountClosureWorkerEnabled":false,"legacyFeedbackSanitized":false,"legacyAnalyticsLogsSanitized":false,"hmacPresent":false,"hmacLength":0,"allowlistCount":0,"privateEmailReady":false,"workerCount":0,"workerUid":null,"workerRssBytes":0,"workerListenerCount":0,"ignoredSecret":"remote-private-secret"},"database":{"verified":true,"closureTableCount":5,"queueTotal":0}}'
+      printf '%s\n' '{"orchestrator":{"processCount":1,"uid":998,"rssBytes":377487360,"accountClosureEnabled":false,"accountClosureWorkerEnabled":false,"legacyFeedbackSanitized":false,"legacyAnalyticsLogsSanitized":false,"hmacPresent":false,"hmacLength":0,"allowlistCount":0,"privateEmailReady":false,"workerCount":0,"workerUid":null,"workerRssBytes":0,"workerListenerCount":0,"workerManaged":true,"workerConfigurationMatchesOrchestrator":true,"configurationMatchesFile":true,"ignoredSecret":"remote-private-secret"},"database":{"verified":true,"closureTableCount":5,"queueTotal":0}}'
       ;;
     ready)
-      printf '%s\n' '{"orchestrator":{"processCount":1,"uid":998,"rssBytes":377487360,"accountClosureEnabled":false,"accountClosureWorkerEnabled":false,"legacyFeedbackSanitized":true,"legacyAnalyticsLogsSanitized":true,"hmacPresent":true,"hmacLength":40,"allowlistCount":1,"privateEmailReady":true,"workerCount":0,"workerUid":null,"workerRssBytes":0,"workerListenerCount":0,"ignoredSecret":"remote-private-secret"},"database":{"verified":true,"closureTableCount":5,"queueTotal":0}}'
+      printf '%s\n' '{"orchestrator":{"processCount":1,"uid":998,"rssBytes":377487360,"accountClosureEnabled":false,"accountClosureWorkerEnabled":false,"legacyFeedbackSanitized":true,"legacyAnalyticsLogsSanitized":true,"hmacPresent":true,"hmacLength":40,"allowlistCount":1,"privateEmailReady":true,"workerCount":0,"workerUid":null,"workerRssBytes":0,"workerListenerCount":0,"workerManaged":true,"workerConfigurationMatchesOrchestrator":true,"configurationMatchesFile":true,"ignoredSecret":"remote-private-secret"},"database":{"verified":true,"closureTableCount":5,"queueTotal":0}}'
       ;;
     running)
-      printf '%s\n' '{"orchestrator":{"processCount":1,"uid":998,"rssBytes":377487360,"accountClosureEnabled":true,"accountClosureWorkerEnabled":true,"legacyFeedbackSanitized":true,"legacyAnalyticsLogsSanitized":true,"hmacPresent":true,"hmacLength":40,"allowlistCount":1,"privateEmailReady":true,"workerCount":1,"workerUid":998,"workerRssBytes":492830720,"workerListenerCount":0,"ignoredSecret":"remote-private-secret"},"database":{"verified":true,"closureTableCount":5,"queueTotal":5}}'
+      printf '%s\n' '{"orchestrator":{"processCount":1,"uid":998,"rssBytes":377487360,"accountClosureEnabled":true,"accountClosureWorkerEnabled":true,"legacyFeedbackSanitized":true,"legacyAnalyticsLogsSanitized":true,"hmacPresent":true,"hmacLength":40,"allowlistCount":1,"privateEmailReady":true,"workerCount":1,"workerUid":998,"workerRssBytes":492830720,"workerListenerCount":0,"workerManaged":true,"workerConfigurationMatchesOrchestrator":true,"configurationMatchesFile":true,"ignoredSecret":"remote-private-secret"},"database":{"verified":true,"closureTableCount":5,"queueTotal":0}}'
       ;;
   esac
 else
-  printf '%s\n' '{"cnPayment":{"accountClosureSmsEnabled":true,"credentialsPresent":true,"signPresent":true,"verifyTemplatePresent":true,"completeTemplatePresent":true,"ignoredTemplate":"SMS_PRIVATE_TEMPLATE"}}'
+  printf '%s\n' '{"cnPayment":{"processCount":1,"configurationMatchesFile":true,"accountClosureSmsEnabled":true,"credentialsPresent":true,"signPresent":true,"verifyTemplatePresent":true,"completeTemplatePresent":true,"ignoredTemplate":"SMS_PRIVATE_TEMPLATE"}}'
 fi
 STUB
 
@@ -114,7 +116,9 @@ for value in \
   unit-aliyun-secret \
   remote-private-secret \
   SMS_PRIVATE_TEMPLATE \
-  private-health-payload; do
+  private-health-payload \
+  source-private-diagnostic \
+  ssh-private-diagnostic; do
   if grep -RFq "$value" "$HARNESS_DIR"/*.out; then
     echo "FAIL: sensitive probe value leaked: $value" >&2
     exit 1

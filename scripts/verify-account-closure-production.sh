@@ -9,9 +9,15 @@ VULTR_HOST="${VULTR_HOST:-root@207.148.70.106}"
 ALIYUN_HOST="${ALIYUN_HOST:-root@47.99.169.186}"
 
 # shellcheck source=scripts/load-deploy-env.sh
-source "$SCRIPT_DIR/load-deploy-env.sh"
+if ! source "$SCRIPT_DIR/load-deploy-env.sh" >/dev/null 2>&1; then
+  echo 'ACCOUNT_CLOSURE_PREFLIGHT status=error reason=deployment-auth-load-failed' >&2
+  exit 1
+fi
 # shellcheck source=scripts/ssh-password-auth.sh
-source "$SCRIPT_DIR/ssh-password-auth.sh"
+if ! source "$SCRIPT_DIR/ssh-password-auth.sh" >/dev/null 2>&1; then
+  echo 'ACCOUNT_CLOSURE_PREFLIGHT status=error reason=ssh-helper-load-failed' >&2
+  exit 1
+fi
 
 case "$MODE" in
   dormant | canary-ready | canary-running) ;;
@@ -40,7 +46,10 @@ SSH_OPTS=(
   -o ServerAliveInterval=10
   -o ServerAliveCountMax=3
 )
-CHECK_SCRIPT_B64="$(base64 <"$CHECK_SCRIPT" | tr -d '\n')"
+if ! CHECK_SCRIPT_B64="$(base64 <"$CHECK_SCRIPT" 2>/dev/null | tr -d '\n')"; then
+  echo 'ACCOUNT_CLOSURE_PREFLIGHT status=error reason=checker-read-failed' >&2
+  exit 1
+fi
 
 health_ok() {
   local body
@@ -64,13 +73,13 @@ if health_ok 'https://hd-app.orangebench.tech/api/healthz'; then ORANGEBENCH_HEA
 HEALTH_JSON="{\"holaday\":$HOLADAY_HEALTH,\"orangebench\":$ORANGEBENCH_HEALTH}"
 
 if ! ORCHESTRATOR_JSON="$("${VULTR_AUTH[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "set -e; cd /opt/holaday-monorepo; set -a; . apps/orchestrator/.env; set +a; printf '%s' '$CHECK_SCRIPT_B64' | base64 --decode | node --input-type=module - collect-orchestrator")"; then
+  "set -e; cd /opt/holaday-monorepo; printf '%s' '$CHECK_SCRIPT_B64' | base64 --decode | node --input-type=module - collect-orchestrator /opt/holaday-monorepo/apps/orchestrator/.env" 2>/dev/null)"; then
   echo 'ACCOUNT_CLOSURE_PREFLIGHT status=error reason=orchestrator-read-failed' >&2
   exit 1
 fi
 
 if ! CN_PAYMENT_JSON="$("${ALIYUN_AUTH[@]}" ssh "${SSH_OPTS[@]}" "$ALIYUN_HOST" \
-  "set -e; cd /opt/holaday-cn-payment/src; set -a; . apps/cn-payment/.env; set +a; printf '%s' '$CHECK_SCRIPT_B64' | base64 --decode | node --input-type=module - collect-cn-payment")"; then
+  "set -e; cd /opt/holaday-cn-payment/src; printf '%s' '$CHECK_SCRIPT_B64' | base64 --decode | node --input-type=module - collect-cn-payment /opt/holaday-cn-payment/src/apps/cn-payment/.env" 2>/dev/null)"; then
   echo 'ACCOUNT_CLOSURE_PREFLIGHT status=error reason=cn-payment-read-failed' >&2
   exit 1
 fi

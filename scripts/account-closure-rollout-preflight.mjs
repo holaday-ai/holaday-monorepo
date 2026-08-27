@@ -1,10 +1,33 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { parseEnv } from 'node:util';
 
 const MODES = new Set(['dormant', 'canary-ready', 'canary-running']);
 const WORKER_MEMORY_LIMIT_BYTES = 512 * 1024 * 1024;
+const ORCHESTRATOR_CONFIG_KEYS = [
+  'ACCOUNT_CLOSURE_ENABLED',
+  'ACCOUNT_CLOSURE_WORKER_ENABLED',
+  'ACCOUNT_CLOSURE_ALLOWLIST',
+  'ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED',
+  'ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED',
+  'ACCOUNT_CLOSURE_HMAC_SECRET',
+  'RESEND_API_KEY',
+];
+const WORKER_CONFIG_KEYS = [
+  ...ORCHESTRATOR_CONFIG_KEYS,
+  'ALIYUN_SMS_URL',
+  'INTERNAL_SHARED_SECRET',
+];
+const CN_PAYMENT_CONFIG_KEYS = [
+  'ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED',
+  'ALIYUN_ACCESS_KEY_ID',
+  'ALIYUN_ACCESS_KEY_SECRET',
+  'ALIYUN_SMS_SIGN_NAME',
+  'ALIYUN_SMS_ACCOUNT_CLOSURE_VERIFY_TEMPLATE_CODE',
+  'ALIYUN_SMS_ACCOUNT_CLOSURE_COMPLETE_TEMPLATE_CODE',
+];
 
 function enabled(value) {
   return value === true || value === 'true';
@@ -20,6 +43,10 @@ function countAllowlist(value) {
     .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean).length;
+}
+
+export function environmentKeysMatch(left, right, keys) {
+  return keys.every((key) => String(left?.[key] ?? '') === String(right?.[key] ?? ''));
 }
 
 /**
@@ -69,18 +96,26 @@ function onlineProcesses(pm2Rows, name) {
  * Reduce PM2's environment-heavy process list to the runtime facts permitted
  * in an account-closure release record.
  */
-export function summarizePm2Runtime(pm2Rows, { inspectProcess, listenerPids }) {
+export function summarizePm2Runtime(
+  pm2Rows,
+  { inspectProcess, listenerPids, discoveredWorkerPids = new Set() },
+) {
   const orchestrators = onlineProcesses(pm2Rows, 'holaday-orchestrator');
-  const workers = onlineProcesses(pm2Rows, 'holaday-account-closure-worker');
+  const managedWorkers = onlineProcesses(pm2Rows, 'holaday-account-closure-worker');
+  const managedWorkerPids = new Set(managedWorkers.map((row) => Number(row.pid)));
+  if (!(discoveredWorkerPids instanceof Set)) throw new Error('worker process scan failed');
   const orchestratorProcess =
     orchestrators.length === 1 ? inspectProcess(orchestrators[0].pid) : null;
-  const workerProcess = workers.length === 1 ? inspectProcess(workers[0].pid) : null;
-  const workerPid = workers.length === 1 ? workers[0].pid : null;
+  const workerPid = discoveredWorkerPids.size === 1 ? [...discoveredWorkerPids][0] : null;
+  const workerProcess = workerPid === null ? null : inspectProcess(workerPid);
+  const workerManaged =
+    managedWorkerPids.size === discoveredWorkerPids.size &&
+    [...managedWorkerPids].every((pid) => discoveredWorkerPids.has(pid));
   return {
     processCount: orchestrators.length,
     uid: orchestratorProcess?.uid ?? -1,
     rssBytes: orchestratorProcess?.rssBytes ?? -1,
-    workerCount: workers.length,
+    workerCount: discoveredWorkerPids.size,
     workerUid: workerProcess?.uid ?? null,
     workerRssBytes: workerProcess?.rssBytes ?? 0,
     workerListenerCount:
@@ -89,6 +124,7 @@ export function summarizePm2Runtime(pm2Rows, { inspectProcess, listenerPids }) {
           ? 0
           : -1
         : Number(listenerPids.has(workerPid)),
+    workerManaged,
   };
 }
 
@@ -102,14 +138,49 @@ function inspectLinuxProcess(pid) {
   };
 }
 
-function readListenerPids() {
-  const result = spawnSync('ss', ['-H', '-ltnp'], {
-    encoding: 'utf8',
-    timeout: 10_000,
-  });
-  if (result.status !== 0) throw new Error('listener inspection failed');
+function readProcessEnvironment(pid) {
+  const environment = {};
+  const entries = readFileSync(`/proc/${pid}/environ`).toString('utf8').split('\0');
+  for (const entry of entries) {
+    const separator = entry.indexOf('=');
+    if (separator <= 0) continue;
+    environment[entry.slice(0, separator)] = entry.slice(separator + 1);
+  }
+  return environment;
+}
+
+function discoverClosureWorkerPids(repoRoot) {
+  const expectedCwd = realpathSync(`${repoRoot}/apps/orchestrator`);
+  const expectedEntry = `${expectedCwd}/dist/account-closure/worker-entry.js`;
   const pids = new Set();
-  for (const match of result.stdout.matchAll(/pid=(\d+)/g)) pids.add(Number(match[1]));
+  for (const entry of readdirSync('/proc', { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
+    const pid = Number(entry.name);
+    try {
+      const cwd = realpathSync(`/proc/${pid}/cwd`);
+      const args = readFileSync(`/proc/${pid}/cmdline`).toString('utf8').split('\0');
+      if (cwd === expectedCwd && args.includes(expectedEntry)) pids.add(pid);
+    } catch {
+      // The process may exit during the read-only scan; absence is handled by
+      // the PM2/discovered PID reconciliation below.
+    }
+  }
+  return pids;
+}
+
+function readListenerPids() {
+  const pids = new Set();
+  for (const args of [
+    ['-H', '-ltnp'],
+    ['-H', '-lunp'],
+  ]) {
+    const result = spawnSync('ss', args, {
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+    if (result.status !== 0) throw new Error('listener inspection failed');
+    for (const match of result.stdout.matchAll(/pid=(\d+)/g)) pids.add(Number(match[1]));
+  }
   return pids;
 }
 
@@ -128,6 +199,13 @@ function readPm2Rows() {
 export function loadMysqlFromCwd(cwd) {
   const requireFromCwd = createRequire(`${realpathSync(cwd)}/apps/orchestrator/package.json`);
   return requireFromCwd('mysql2/promise');
+}
+
+function readConfiguredEnvironment(path) {
+  if (typeof path !== 'string' || !path.startsWith('/')) {
+    throw new Error('invalid environment file path');
+  }
+  return parseEnv(readFileSync(path, 'utf8'));
 }
 
 async function inspectProductionDatabase(env) {
@@ -180,14 +258,56 @@ async function inspectProductionDatabase(env) {
   }
 }
 
-async function collectOrchestratorSnapshot(env) {
-  const environment = summarizeOrchestratorEnvironment(env);
-  const runtime = summarizePm2Runtime(readPm2Rows(), {
+async function collectOrchestratorSnapshot(environmentFile) {
+  const configuredEnvironment = readConfiguredEnvironment(environmentFile);
+  const pm2Rows = readPm2Rows();
+  const orchestrators = onlineProcesses(pm2Rows, 'holaday-orchestrator');
+  const runtimeEnvironment =
+    orchestrators.length === 1 ? readProcessEnvironment(orchestrators[0].pid) : {};
+  const discoveredWorkerPids = discoverClosureWorkerPids(process.cwd());
+  const environment = summarizeOrchestratorEnvironment(runtimeEnvironment);
+  const runtime = summarizePm2Runtime(pm2Rows, {
     inspectProcess: inspectLinuxProcess,
     listenerPids: readListenerPids(),
+    discoveredWorkerPids,
   });
-  const database = await inspectProductionDatabase(env);
-  return { orchestrator: { ...environment, ...runtime }, database };
+  let workerConfigurationMatchesOrchestrator = discoveredWorkerPids.size === 0;
+  if (discoveredWorkerPids.size === 1 && orchestrators.length === 1) {
+    const workerEnvironment = readProcessEnvironment([...discoveredWorkerPids][0]);
+    workerConfigurationMatchesOrchestrator = environmentKeysMatch(
+      runtimeEnvironment,
+      workerEnvironment,
+      WORKER_CONFIG_KEYS,
+    );
+  }
+  const database = await inspectProductionDatabase(runtimeEnvironment);
+  return {
+    orchestrator: {
+      ...environment,
+      ...runtime,
+      configurationMatchesFile:
+        orchestrators.length === 1 &&
+        environmentKeysMatch(configuredEnvironment, runtimeEnvironment, ORCHESTRATOR_CONFIG_KEYS),
+      workerConfigurationMatchesOrchestrator,
+    },
+    database,
+  };
+}
+
+function collectCnPaymentSnapshot(environmentFile) {
+  const configuredEnvironment = readConfiguredEnvironment(environmentFile);
+  const pm2Rows = readPm2Rows();
+  const processes = onlineProcesses(pm2Rows, 'holaday-cn-payment');
+  const runtimeEnvironment = processes.length === 1 ? readProcessEnvironment(processes[0].pid) : {};
+  return {
+    cnPayment: {
+      ...summarizeCnPaymentEnvironment(runtimeEnvironment),
+      processCount: processes.length,
+      configurationMatchesFile:
+        processes.length === 1 &&
+        environmentKeysMatch(configuredEnvironment, runtimeEnvironment, CN_PAYMENT_CONFIG_KEYS),
+    },
+  };
 }
 
 function safeNumber(value) {
@@ -219,6 +339,11 @@ export function evaluateAccountClosureRollout(mode, snapshot) {
     checks,
     'orchestrator-process',
     orchestrator.processCount === 1 && orchestrator.uid === 998,
+  );
+  addCheck(
+    checks,
+    'orchestrator-config-consistent',
+    orchestrator.configurationMatchesFile === true,
   );
 
   if (mode === 'dormant') {
@@ -253,7 +378,9 @@ export function evaluateAccountClosureRollout(mode, snapshot) {
     addCheck(
       checks,
       'closure-sms-ready',
-      cnPayment.accountClosureSmsEnabled === true &&
+      cnPayment.processCount === 1 &&
+        cnPayment.configurationMatchesFile === true &&
+        cnPayment.accountClosureSmsEnabled === true &&
         cnPayment.credentialsPresent === true &&
         cnPayment.signPresent === true &&
         cnPayment.verifyTemplatePresent === true &&
@@ -277,6 +404,12 @@ export function evaluateAccountClosureRollout(mode, snapshot) {
           orchestrator.accountClosureWorkerEnabled === true,
       );
       addCheck(checks, 'single-worker', orchestrator.workerCount === 1);
+      addCheck(checks, 'worker-managed', orchestrator.workerManaged === true);
+      addCheck(
+        checks,
+        'worker-config-consistent',
+        orchestrator.workerConfigurationMatchesOrchestrator === true,
+      );
       addCheck(checks, 'worker-uid', orchestrator.workerUid === 998);
       addCheck(
         checks,
@@ -285,6 +418,7 @@ export function evaluateAccountClosureRollout(mode, snapshot) {
           orchestrator.workerRssBytes < WORKER_MEMORY_LIMIT_BYTES,
       );
       addCheck(checks, 'worker-portless', orchestrator.workerListenerCount === 0);
+      addCheck(checks, 'queue-empty', database.queueTotal === 0);
     }
   }
 
@@ -302,7 +436,7 @@ export function evaluateAccountClosureRollout(mode, snapshot) {
       workerRssMiB:
         safeNumber(orchestrator.workerRssBytes) < 0
           ? -1
-          : Math.round(orchestrator.workerRssBytes / (1024 * 1024)),
+          : Math.floor(orchestrator.workerRssBytes / (1024 * 1024)),
       queueTotal: safeNumber(database.queueTotal),
     },
   };
@@ -352,12 +486,13 @@ async function evaluateMain() {
 
 async function collectorMain(command) {
   try {
+    const environmentFile = process.argv[3] ?? '';
     if (command === 'collect-orchestrator') {
-      console.log(JSON.stringify(await collectOrchestratorSnapshot(process.env)));
+      console.log(JSON.stringify(await collectOrchestratorSnapshot(environmentFile)));
       return;
     }
     if (command === 'collect-cn-payment') {
-      console.log(JSON.stringify({ cnPayment: summarizeCnPaymentEnvironment(process.env) }));
+      console.log(JSON.stringify(collectCnPaymentSnapshot(environmentFile)));
       return;
     }
     throw new Error('unsupported collector');

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  environmentKeysMatch,
   evaluateAccountClosureRollout,
   formatAccountClosureRolloutResult,
   loadMysqlFromCwd,
@@ -40,8 +41,13 @@ function readySnapshot() {
       workerUid: null,
       workerRssBytes: 0,
       workerListenerCount: 0,
+      workerManaged: true,
+      workerConfigurationMatchesOrchestrator: true,
+      configurationMatchesFile: true,
     },
     cnPayment: {
+      processCount: 1,
+      configurationMatchesFile: true,
       accountClosureSmsEnabled: true,
       credentialsPresent: true,
       signPresent: true,
@@ -87,6 +93,17 @@ test('canary-ready passes with reviewed prerequisites while API and worker remai
   assert.deepEqual(result.failedChecks, []);
 });
 
+test('canary-ready rejects configuration-file drift from either live process', () => {
+  const snapshot = readySnapshot();
+  snapshot.orchestrator.configurationMatchesFile = false;
+  snapshot.cnPayment.configurationMatchesFile = false;
+
+  const result = evaluateAccountClosureRollout('canary-ready', snapshot);
+
+  assert.equal(result.ready, false);
+  assert.deepEqual(result.failedChecks, ['orchestrator-config-consistent', 'closure-sms-ready']);
+});
+
 test('canary-running requires one uid 998, portless worker below 512 MiB and both flags on', () => {
   const snapshot = readySnapshot();
   snapshot.orchestrator.accountClosureEnabled = true;
@@ -99,6 +116,55 @@ test('canary-running requires one uid 998, portless worker below 512 MiB and bot
 
   assert.equal(result.ready, true);
   assert.deepEqual(result.failedChecks, []);
+});
+
+test('canary-running rejects unmanaged or stale-config worker processes', () => {
+  const snapshot = readySnapshot();
+  snapshot.orchestrator.accountClosureEnabled = true;
+  snapshot.orchestrator.accountClosureWorkerEnabled = true;
+  snapshot.orchestrator.workerCount = 1;
+  snapshot.orchestrator.workerUid = 998;
+  snapshot.orchestrator.workerRssBytes = 479 * MiB;
+  snapshot.orchestrator.workerManaged = false;
+  snapshot.orchestrator.workerConfigurationMatchesOrchestrator = false;
+
+  const result = evaluateAccountClosureRollout('canary-running', snapshot);
+
+  assert.equal(result.ready, false);
+  assert.deepEqual(result.failedChecks, ['worker-managed', 'worker-config-consistent']);
+});
+
+test('canary-running rejects active queue entries before synthetic exercise begins', () => {
+  const snapshot = readySnapshot();
+  snapshot.orchestrator.accountClosureEnabled = true;
+  snapshot.orchestrator.accountClosureWorkerEnabled = true;
+  snapshot.orchestrator.workerCount = 1;
+  snapshot.orchestrator.workerUid = 998;
+  snapshot.orchestrator.workerRssBytes = 479 * MiB;
+  snapshot.database.queueTotal = 1;
+
+  const result = evaluateAccountClosureRollout('canary-running', snapshot);
+
+  assert.equal(result.ready, false);
+  assert.deepEqual(result.failedChecks, ['queue-empty']);
+});
+
+test('canary-running rejects exactly 512 MiB and never rounds a passing RSS up to 512', () => {
+  const blockedSnapshot = readySnapshot();
+  blockedSnapshot.orchestrator.accountClosureEnabled = true;
+  blockedSnapshot.orchestrator.accountClosureWorkerEnabled = true;
+  blockedSnapshot.orchestrator.workerCount = 1;
+  blockedSnapshot.orchestrator.workerUid = 998;
+  blockedSnapshot.orchestrator.workerRssBytes = 512 * MiB;
+  const blocked = evaluateAccountClosureRollout('canary-running', blockedSnapshot);
+
+  const passingSnapshot = structuredClone(blockedSnapshot);
+  passingSnapshot.orchestrator.workerRssBytes = 512 * MiB - 1;
+  const passing = evaluateAccountClosureRollout('canary-running', passingSnapshot);
+
+  assert.deepEqual(blocked.failedChecks, ['worker-memory-ceiling']);
+  assert.equal(passing.ready, true);
+  assert.equal(passing.summary.workerRssMiB, 511);
 });
 
 test('bad canary configuration fails closed with fixed check names', () => {
@@ -149,7 +215,7 @@ test('environment summaries and formatted output never contain secret, ID, or te
   const snapshot = {
     ...readySnapshot(),
     orchestrator: { ...readySnapshot().orchestrator, ...orchestrator },
-    cnPayment,
+    cnPayment: { ...readySnapshot().cnPayment, ...cnPayment },
   };
   const output = formatAccountClosureRolloutResult(
     evaluateAccountClosureRollout('canary-ready', snapshot),
@@ -196,6 +262,7 @@ test('PM2 runtime summary keeps only process count, uid, RSS, and listener count
         return pid === 101 ? { uid: 998, rssBytes: 360 * MiB } : { uid: 998, rssBytes: 470 * MiB };
       },
       listenerPids: new Set([101]),
+      discoveredWorkerPids: new Set([202]),
     },
   );
 
@@ -207,12 +274,47 @@ test('PM2 runtime summary keeps only process count, uid, RSS, and listener count
     workerUid: 998,
     workerRssBytes: 470 * MiB,
     workerListenerCount: 0,
+    workerManaged: true,
   });
   assert.equal(JSON.stringify(runtime).includes(pm2Secret), false);
+});
+
+test('PM2 runtime summary detects a managed worker plus an unmanaged duplicate', () => {
+  const runtime = summarizePm2Runtime(
+    [
+      { name: 'holaday-orchestrator', pid: 101, pm2_env: { status: 'online' } },
+      { name: 'holaday-account-closure-worker', pid: 202, pm2_env: { status: 'online' } },
+    ],
+    {
+      inspectProcess: () => ({ uid: 998, rssBytes: 100 * MiB }),
+      listenerPids: new Set(),
+      discoveredWorkerPids: new Set([202, 303]),
+    },
+  );
+
+  assert.equal(runtime.workerCount, 2);
+  assert.equal(runtime.workerManaged, false);
 });
 
 test('production MySQL dependency resolves from cwd when the collector runs through stdin', () => {
   const mysql = loadMysqlFromCwd(process.cwd());
 
   assert.equal(typeof mysql.createConnection, 'function');
+});
+
+test('environment drift compares exact whitelisted values without returning them', () => {
+  const keys = ['ACCOUNT_CLOSURE_HMAC_SECRET', 'ACCOUNT_CLOSURE_ALLOWLIST'];
+  const fileEnvironment = {
+    ACCOUNT_CLOSURE_HMAC_SECRET: 'a'.repeat(40),
+    ACCOUNT_CLOSURE_ALLOWLIST: 'usr_synthetic_file',
+  };
+  const runtimeEnvironment = {
+    ACCOUNT_CLOSURE_HMAC_SECRET: 'b'.repeat(40),
+    ACCOUNT_CLOSURE_ALLOWLIST: 'usr_synthetic_runtime',
+  };
+
+  const matches = environmentKeysMatch(fileEnvironment, runtimeEnvironment, keys);
+
+  assert.equal(matches, false);
+  assert.equal(typeof matches, 'boolean');
 });

@@ -64,6 +64,13 @@ configuration presence only. Its output is limited to booleans, counts,
 lengths, fixed check names, and worker RSS; it never prints secrets, allowlist
 entries, template IDs, user IDs, or queue-row content.
 
+Readiness is based on the live service process environments, with exact
+whitelisted comparison against the current env files. File/runtime drift,
+workers found under `/proc` but not owned by the expected PM2 entry, any TCP or
+UDP worker listener, and a non-empty active queue all fail closed. The
+`canary-running` check is therefore run immediately after enabling and before
+submitting the synthetic closure request.
+
 ```bash
 # Current dark-launch invariant: both flags off, no worker, empty queue.
 ./scripts/verify-account-closure-production.sh dormant
