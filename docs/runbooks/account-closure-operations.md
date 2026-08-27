@@ -56,6 +56,35 @@ requests over rolling application or database state backward.
 
 Changing the allowlist never accelerates the fixed 168-hour grace period.
 
+## Read-only rollout preflight
+
+Run the privacy-safe production preflight before every rollout transition. It
+reads public health, aggregate closure-table counts, PM2 process facts, and
+configuration presence only. Its output is limited to booleans, counts,
+lengths, fixed check names, and worker RSS; it never prints secrets, allowlist
+entries, template IDs, user IDs, or queue-row content.
+
+```bash
+# Current dark-launch invariant: both flags off, no worker, empty queue.
+./scripts/verify-account-closure-production.sh dormant
+
+# Before enabling: reviewed prerequisites/configuration are ready, while both
+# flags remain off. The confirmation is an operator attestation and never
+# carries or prints the synthetic external ID.
+ACCOUNT_CLOSURE_PREFLIGHT_SYNTHETIC_ALLOWLIST_CONFIRMED=true \
+  ./scripts/verify-account-closure-production.sh canary-ready
+
+# After enabling the one-identity synthetic canary.
+ACCOUNT_CLOSURE_PREFLIGHT_SYNTHETIC_ALLOWLIST_CONFIRMED=true \
+  ./scripts/verify-account-closure-production.sh canary-running
+```
+
+The synthetic-allowlist confirmation may be set only after an authorized
+operator verifies that the single configured entry is the dedicated synthetic
+identity. It is not a substitute for the two-person legacy-sanitation review.
+Any failed check blocks the transition; the preflight never changes flags,
+processes, data, secrets, or deployment state.
+
 ## Privacy-safe queue inspection
 
 Use aggregate counts and random request external IDs only. Do not select
