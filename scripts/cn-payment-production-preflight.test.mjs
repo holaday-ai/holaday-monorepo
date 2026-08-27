@@ -6,6 +6,8 @@ import { verifyCnPaymentProduction } from './cn-payment-production-preflight.mjs
 const completeEnv = {
   CN_PAYMENT_URL: 'https://hd-pay.orangebench.tech',
   INTERNAL_SHARED_SECRET: 'internal-secret',
+  CN_PAYMENT_PREFLIGHT_HEALTH_ATTEMPTS: '1',
+  CN_PAYMENT_PREFLIGHT_HEALTH_RETRY_MS: '1',
 };
 
 function response(status, payload) {
@@ -77,6 +79,53 @@ test('fails closed when WeChat callback verification is not confirmed', async ()
     ),
     /WeChat callback verification is not ready/,
   );
+});
+
+test('retries a transient health GET without repeating either payment order', async () => {
+  let healthAttempts = 0;
+  const orderProviders = [];
+
+  const result = await verifyCnPaymentProduction(
+    {
+      ...completeEnv,
+      CN_PAYMENT_PREFLIGHT_HEALTH_ATTEMPTS: '2',
+    },
+    async (url, options = {}) => {
+      if (url.endsWith('/healthz')) {
+        healthAttempts += 1;
+        if (healthAttempts === 1) {
+          throw new TypeError('temporary network failure');
+        }
+        return response(200, {
+          status: 'ok',
+          providers: { wechat: 'ready', alipay: 'ready' },
+          callbackVerification: { wechat: 'public_key' },
+          bridge: 'ready',
+        });
+      }
+
+      const provider = JSON.parse(options.body).provider;
+      orderProviders.push(provider);
+      if (provider === 'wechat') {
+        return response(200, {
+          provider: 'wechat',
+          outTradeNo: 'pay_wechat',
+          codeUrl: 'weixin://wxpay/bizpayurl?pr=secret-token',
+          amountCents: 2900,
+        });
+      }
+      return response(200, {
+        provider: 'alipay',
+        outTradeNo: 'pay_alipay',
+        payUrl: 'https://unitradeprod.alipay.com/pay/checkout.htm?token=secret-token',
+        amountCents: 2900,
+      });
+    },
+  );
+
+  assert.equal(result.status, 'ready');
+  assert.equal(healthAttempts, 2);
+  assert.deepEqual(orderProviders, ['wechat', 'alipay']);
 });
 
 test('rejects a provider order with the wrong amount', async () => {

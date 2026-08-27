@@ -2,6 +2,8 @@ import { pathToFileURL } from 'node:url';
 
 const DEFAULT_EXPECTED_AMOUNT_CENTS = 2900;
 const DEFAULT_TIMEOUT_MS = 15000;
+const DEFAULT_HEALTH_ATTEMPTS = 3;
+const DEFAULT_HEALTH_RETRY_MS = 1000;
 
 function fail(message) {
   throw new Error(`CN payment production preflight failed: ${message}`);
@@ -43,6 +45,15 @@ function positiveInteger(value, fallback, label) {
   return parsed;
 }
 
+function nonNegativeInteger(value, fallback, label) {
+  if (value === undefined || value === '') return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    fail(`${label} must be a non-negative integer`);
+  }
+  return parsed;
+}
+
 async function requestJson(fetchImpl, url, options, label) {
   let response;
   try {
@@ -63,6 +74,46 @@ async function requestJson(fetchImpl, url, options, label) {
   } catch {
     fail(`${label} returned invalid JSON`);
   }
+}
+
+function validateGatewayHealth(health) {
+  if (health?.status !== 'ok') {
+    fail('gateway health check is not ok');
+  }
+  if (health?.providers?.wechat !== 'ready') {
+    fail('WeChat provider is not ready');
+  }
+  if (health?.providers?.alipay !== 'ready') {
+    fail('Alipay provider is not ready');
+  }
+  if (!['platform_certificate', 'public_key'].includes(health?.callbackVerification?.wechat)) {
+    fail('WeChat callback verification is not ready');
+  }
+  if (health?.bridge !== 'ready') {
+    fail('Vultr settlement bridge is not ready');
+  }
+}
+
+async function requestHealthyGateway(fetchImpl, url, timeoutMs, attempts, retryMs) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const health = await requestJson(
+        fetchImpl,
+        url,
+        { signal: AbortSignal.timeout(timeoutMs) },
+        'gateway health check',
+      );
+      validateGatewayHealth(health);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts && retryMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, retryMs));
+      }
+    }
+  }
+  throw lastError;
 }
 
 function validateWechatOrder(order, expectedAmountCents) {
@@ -117,28 +168,24 @@ export async function verifyCnPaymentProduction(env = process.env, fetchImpl = f
     DEFAULT_TIMEOUT_MS,
     'CN_PAYMENT_PREFLIGHT_TIMEOUT_MS',
   );
+  const healthAttempts = positiveInteger(
+    env.CN_PAYMENT_PREFLIGHT_HEALTH_ATTEMPTS,
+    DEFAULT_HEALTH_ATTEMPTS,
+    'CN_PAYMENT_PREFLIGHT_HEALTH_ATTEMPTS',
+  );
+  const healthRetryMs = nonNegativeInteger(
+    env.CN_PAYMENT_PREFLIGHT_HEALTH_RETRY_MS,
+    DEFAULT_HEALTH_RETRY_MS,
+    'CN_PAYMENT_PREFLIGHT_HEALTH_RETRY_MS',
+  );
 
-  const health = await requestJson(
+  await requestHealthyGateway(
     fetchImpl,
     `${gatewayUrl}/healthz`,
-    { signal: AbortSignal.timeout(timeoutMs) },
-    'gateway health check',
+    timeoutMs,
+    healthAttempts,
+    healthRetryMs,
   );
-  if (health?.status !== 'ok') {
-    fail('gateway health check is not ok');
-  }
-  if (health?.providers?.wechat !== 'ready') {
-    fail('WeChat provider is not ready');
-  }
-  if (health?.providers?.alipay !== 'ready') {
-    fail('Alipay provider is not ready');
-  }
-  if (!['platform_certificate', 'public_key'].includes(health?.callbackVerification?.wechat)) {
-    fail('WeChat callback verification is not ready');
-  }
-  if (health?.bridge !== 'ready') {
-    fail('Vultr settlement bridge is not ready');
-  }
 
   const orderBody = {
     userId: 'production-payment-preflight',
