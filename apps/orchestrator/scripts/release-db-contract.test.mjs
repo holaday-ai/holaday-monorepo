@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import {
+  STOCK_PREFERENCE_REQUIRED_COLUMNS,
+  STOCK_PREFERENCE_REQUIRED_TABLES,
   assertDatabaseReadyForAppRollout,
   findDuplicateMigrationNumbers,
   findMissingRequiredIndexes,
@@ -94,6 +96,26 @@ describe('numbered migration filename contract', () => {
       verifier,
       /feedback_cases:\s*\[[\s\S]*'external_id'[\s\S]*'user_id'[\s\S]*'closure_request_id'[\s\S]*'message'[\s\S]*'context'[\s\S]*'user_agent'[\s\S]*'hold_reason'[\s\S]*'restricted_at'[\s\S]*'created_at'/,
     );
+  });
+});
+
+describe('release database table and column contract', () => {
+  it('requires the privacy-bounded stock preference schema', () => {
+    assert.deepEqual(STOCK_PREFERENCE_REQUIRED_TABLES, [
+      'stock_preference_profiles',
+      'stock_preference_signals',
+    ]);
+    assert.deepEqual(STOCK_PREFERENCE_REQUIRED_COLUMNS, {
+      stock_preference_profiles: ['user_id', 'enabled', 'manual_preferences_json', 'cleared_at'],
+      stock_preference_signals: [
+        'user_id',
+        'kind',
+        'dedupe_hash',
+        'payload_json',
+        'data_as_of',
+        'occurred_at',
+      ],
+    });
   });
 });
 

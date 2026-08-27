@@ -16,7 +16,9 @@ describe('stock preference schema', () => {
       'updatedAt',
     ]);
 
-    const indexes = getTableConfig(stockPreferenceProfiles).indexes.map((index) => index.config.name);
+    const indexes = getTableConfig(stockPreferenceProfiles).indexes.map(
+      (index) => index.config.name,
+    );
     expect(indexes).toContain('uk_stock_preference_profiles_user');
     expect(Object.keys(getTableColumns(stockPreferenceProfiles))).not.toEqual(
       expect.arrayContaining(['riskTolerance', 'income', 'assets', 'debt', 'suitability']),
@@ -35,18 +37,25 @@ describe('stock preference schema', () => {
       'createdAt',
     ]);
 
-    const indexes = getTableConfig(stockPreferenceSignals).indexes.map((index) => index.config.name);
-    expect(indexes).toEqual(expect.arrayContaining([
-      'uk_stock_preference_signals_user_hash',
-      'ix_stock_preference_signals_user_time',
-    ]));
+    const indexes = getTableConfig(stockPreferenceSignals).indexes.map(
+      (index) => index.config.name,
+    );
+    expect(indexes).toEqual(
+      expect.arrayContaining([
+        'uk_stock_preference_signals_user_hash',
+        'ix_stock_preference_signals_user_time',
+      ]),
+    );
     expect(Object.keys(getTableColumns(stockPreferenceSignals))).not.toEqual(
       expect.arrayContaining(['prompt', 'candidateJson', 'note', 'freeText']),
     );
   });
 
   it('ships a purely additive numbered migration with cascading user cleanup', () => {
-    const migrationUrl = new URL('../../../drizzle/0048_stock_preference_profiles.sql', import.meta.url);
+    const migrationUrl = new URL(
+      '../../../drizzle/0048_stock_preference_profiles.sql',
+      import.meta.url,
+    );
     expect(existsSync(migrationUrl)).toBe(true);
     if (!existsSync(migrationUrl)) return;
 
@@ -58,15 +67,5 @@ describe('stock preference schema', () => {
     expect(migration.match(/ON DELETE CASCADE/g)).toHaveLength(2);
     expect(migration).not.toMatch(/\b(?:ALTER|DROP|TRUNCATE|RENAME)\b/i);
     expect(migration).not.toMatch(/^\s*(?:DELETE|UPDATE)\b/im);
-  });
-
-  it('requires both preference tables and their privacy-bounded columns at release time', () => {
-    const verifierUrl = new URL('../../../scripts/verify-db-schema.ts', import.meta.url);
-    const verifier = readFileSync(verifierUrl, 'utf8');
-
-    expect(verifier).toContain("'stock_preference_profiles'");
-    expect(verifier).toContain("'stock_preference_signals'");
-    expect(verifier).toContain("stock_preference_profiles: ['user_id', 'enabled', 'manual_preferences_json', 'cleared_at']");
-    expect(verifier).toContain("stock_preference_signals: ['user_id', 'kind', 'dedupe_hash', 'payload_json', 'data_as_of', 'occurred_at']");
   });
 });

@@ -56,6 +56,35 @@ requests over rolling application or database state backward.
 
 Changing the allowlist never accelerates the fixed 168-hour grace period.
 
+### Canary exit criteria
+
+The synthetic submit-and-withdraw canary is complete only when all of the
+following are true in one privacy-safe observation:
+
+- submission freezes the synthetic account and creates exactly 13 steps;
+- verified withdrawal restores only request-owned effects and the account can
+  sign in again;
+- the cancelled request has exactly 13 `skipped` steps, zero
+  `pending`/`retryable`/`leased`/`blocked` steps, and the aggregate active queue
+  is empty;
+- the single worker remains uid `998`, owns no listener, stays below the RSS
+  ceiling, and the `canary-running` preflight passes all checks;
+- temporary synthetic credentials are invalidated after the browser recovery
+  check without changing the verified recovery destination.
+
+A cancelled request with any active step is a release blocker even if the user
+can sign in again. Do not repair it by deleting rows or marking work complete.
+Fix the withdrawal transaction, require the exact 13-row invariant, and use a
+separately authorized, request-scoped transaction for any pre-fix residual
+rows; a count other than 13 must roll back.
+
+The submit-and-withdraw canary does not prove destructive completion. Before
+employee expansion, the accelerated integration release gate must remain green
+and a separate synthetic identity must complete the full staged completion
+path without shortening the 168-hour production deadline. General availability
+still requires the full seven-day observation window in step 7; elapsed time is
+a release gate and cannot be replaced by a small successful sample.
+
 ## Read-only rollout preflight
 
 Run the privacy-safe production preflight before every rollout transition. It
