@@ -69,8 +69,38 @@ grep -Fq -- '--uid "$RUN_UID"' "$RUNTIME_SCRIPT" \
   || fail "worker and application must share the dedicated uid"
 grep -Fq 'BUILT_ENTRY="$ORCHESTRATOR_DIR/dist/account-closure/worker-entry.js"' "$WORKER_START_SCRIPT" \
   || fail "worker start helper must target the built portless worker entry"
-grep -Fq 'exec "$NODE_BIN" "$BUILT_ENTRY"' "$WORKER_START_SCRIPT" \
+
+# The built worker imports workspace packages whose production exports still
+# point at TypeScript source. Exercise the helper itself and prove it registers
+# the same in-process tsx loader used by the healthy orchestrator runtime while
+# keeping the built worker as the PM2-owned entrypoint.
+worker_harness="$(mktemp -d)"
+worker_repo="$worker_harness/repo"
+worker_node="$worker_harness/node"
+worker_args="$worker_harness/node-args"
+mkdir -p "$worker_repo/scripts" "$worker_repo/apps/orchestrator/dist/account-closure"
+cp "$WORKER_START_SCRIPT" "$worker_repo/scripts/start-account-closure-worker-production.sh"
+: > "$worker_repo/apps/orchestrator/dist/account-closure/worker-entry.js"
+cat > "$worker_node" <<'FAKE_NODE'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$WORKER_NODE_ARGS_FILE"
+FAKE_NODE
+chmod +x "$worker_node" "$worker_repo/scripts/start-account-closure-worker-production.sh"
+WORKER_NODE_ARGS_FILE="$worker_args" \
+ORCHESTRATOR_NODE_BIN="$worker_node" \
+ORCHESTRATOR_REPO_ROOT="$worker_repo" \
+  "$worker_repo/scripts/start-account-closure-worker-production.sh"
+worker_node_args=()
+while IFS= read -r worker_arg; do
+  worker_node_args[${#worker_node_args[@]}]="$worker_arg"
+done < "$worker_args"
+[[ "${#worker_node_args[@]}" == 3 ]] \
+  || fail "worker Node process must receive the tsx loader and built entry"
+[[ "${worker_node_args[0]}" == "--import" && "${worker_node_args[1]}" == "tsx" ]] \
+  || fail "worker must register the in-process tsx workspace loader"
+[[ "${worker_node_args[2]}" == "$worker_repo/apps/orchestrator/dist/account-closure/worker-entry.js" ]] \
   || fail "worker must remain the PM2-owned built Node process"
+rm -rf "$worker_harness"
 grep -Eq '^unset PM2_HOME$' "$WORKER_START_SCRIPT" \
   || fail "worker child must not inherit root PM2 state"
 if grep -Eq 'HTTP_PORT|WS_PORT|listen\(' "$WORKER_START_SCRIPT"; then

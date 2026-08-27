@@ -27,4 +27,4 @@ unset PM2_HOME
 }
 
 cd "$ORCHESTRATOR_DIR"
-exec "$NODE_BIN" "$BUILT_ENTRY"
+exec "$NODE_BIN" --import tsx "$BUILT_ENTRY"
