@@ -5,7 +5,10 @@ import {
   environmentKeysMatch,
   evaluateAccountClosureRollout,
   formatAccountClosureRolloutResult,
+  isExpectedEntrypoint,
   loadMysqlFromCwd,
+  parseEnvironmentFile,
+  probeAuthenticatedSmsGateway,
   summarizeCnPaymentEnvironment,
   summarizeOrchestratorEnvironment,
   summarizePm2Runtime,
@@ -42,8 +45,11 @@ function readySnapshot() {
       workerRssBytes: 0,
       workerListenerCount: 0,
       workerManaged: true,
+      workerCwdExpected: true,
       workerConfigurationMatchesOrchestrator: true,
       configurationMatchesFile: true,
+      smsGatewayConfigured: true,
+      smsGatewayReady: true,
     },
     cnPayment: {
       processCount: 1,
@@ -53,6 +59,7 @@ function readySnapshot() {
       signPresent: true,
       verifyTemplatePresent: true,
       completeTemplatePresent: true,
+      internalSecretPresent: true,
     },
   };
 }
@@ -104,6 +111,16 @@ test('canary-ready rejects configuration-file drift from either live process', (
   assert.deepEqual(result.failedChecks, ['orchestrator-config-consistent', 'closure-sms-ready']);
 });
 
+test('canary-ready rejects an unauthenticated or unavailable SMS gateway', () => {
+  const snapshot = readySnapshot();
+  snapshot.orchestrator.smsGatewayReady = false;
+
+  const result = evaluateAccountClosureRollout('canary-ready', snapshot);
+
+  assert.equal(result.ready, false);
+  assert.deepEqual(result.failedChecks, ['closure-sms-ready']);
+});
+
 test('canary-running requires one uid 998, portless worker below 512 MiB and both flags on', () => {
   const snapshot = readySnapshot();
   snapshot.orchestrator.accountClosureEnabled = true;
@@ -118,7 +135,7 @@ test('canary-running requires one uid 998, portless worker below 512 MiB and bot
   assert.deepEqual(result.failedChecks, []);
 });
 
-test('canary-running rejects unmanaged or stale-config worker processes', () => {
+test('canary-running rejects unmanaged, wrong-directory, or stale-config worker processes', () => {
   const snapshot = readySnapshot();
   snapshot.orchestrator.accountClosureEnabled = true;
   snapshot.orchestrator.accountClosureWorkerEnabled = true;
@@ -126,12 +143,17 @@ test('canary-running rejects unmanaged or stale-config worker processes', () => 
   snapshot.orchestrator.workerUid = 998;
   snapshot.orchestrator.workerRssBytes = 479 * MiB;
   snapshot.orchestrator.workerManaged = false;
+  snapshot.orchestrator.workerCwdExpected = false;
   snapshot.orchestrator.workerConfigurationMatchesOrchestrator = false;
 
   const result = evaluateAccountClosureRollout('canary-running', snapshot);
 
   assert.equal(result.ready, false);
-  assert.deepEqual(result.failedChecks, ['worker-managed', 'worker-config-consistent']);
+  assert.deepEqual(result.failedChecks, [
+    'worker-managed',
+    'worker-cwd',
+    'worker-config-consistent',
+  ]);
 });
 
 test('canary-running rejects active queue entries before synthetic exercise begins', () => {
@@ -211,6 +233,7 @@ test('environment summaries and formatted output never contain secret, ID, or te
     ALIYUN_SMS_SIGN_NAME: 'private-sign-name',
     ALIYUN_SMS_ACCOUNT_CLOSURE_VERIFY_TEMPLATE_CODE: verifyTemplate,
     ALIYUN_SMS_ACCOUNT_CLOSURE_COMPLETE_TEMPLATE_CODE: completeTemplate,
+    INTERNAL_SHARED_SECRET: 'private-cn-shared-secret',
   });
   const snapshot = {
     ...readySnapshot(),
@@ -259,10 +282,13 @@ test('PM2 runtime summary keeps only process count, uid, RSS, and listener count
     ],
     {
       inspectProcess(pid) {
-        return pid === 101 ? { uid: 998, rssBytes: 360 * MiB } : { uid: 998, rssBytes: 470 * MiB };
+        return pid === 101
+          ? { uid: 998, rssBytes: 360 * MiB, cwd: '/opt/holaday-monorepo/apps/orchestrator' }
+          : { uid: 998, rssBytes: 470 * MiB, cwd: '/opt/holaday-monorepo/apps/orchestrator' };
       },
       listenerPids: new Set([101]),
       discoveredWorkerPids: new Set([202]),
+      expectedWorkerCwd: '/opt/holaday-monorepo/apps/orchestrator',
     },
   );
 
@@ -275,6 +301,7 @@ test('PM2 runtime summary keeps only process count, uid, RSS, and listener count
     workerRssBytes: 470 * MiB,
     workerListenerCount: 0,
     workerManaged: true,
+    workerCwdExpected: true,
   });
   assert.equal(JSON.stringify(runtime).includes(pm2Secret), false);
 });
@@ -286,14 +313,88 @@ test('PM2 runtime summary detects a managed worker plus an unmanaged duplicate',
       { name: 'holaday-account-closure-worker', pid: 202, pm2_env: { status: 'online' } },
     ],
     {
-      inspectProcess: () => ({ uid: 998, rssBytes: 100 * MiB }),
+      inspectProcess: () => ({
+        uid: 998,
+        rssBytes: 100 * MiB,
+        cwd: '/opt/holaday-monorepo/apps/orchestrator',
+      }),
       listenerPids: new Set(),
       discoveredWorkerPids: new Set([202, 303]),
+      expectedWorkerCwd: '/opt/holaday-monorepo/apps/orchestrator',
     },
   );
 
   assert.equal(runtime.workerCount, 2);
   assert.equal(runtime.workerManaged, false);
+});
+
+test('worker entrypoint recognition resolves both relative and absolute argv paths', () => {
+  const cwd = process.cwd();
+  const expected = `${cwd}/scripts/account-closure-rollout-preflight.mjs`;
+
+  assert.equal(
+    isExpectedEntrypoint(cwd, ['node', 'scripts/account-closure-rollout-preflight.mjs'], expected),
+    true,
+  );
+  assert.equal(isExpectedEntrypoint('/tmp', ['node', expected], expected), true);
+  assert.equal(isExpectedEntrypoint(cwd, ['node', 'scripts/not-the-worker.js'], expected), false);
+});
+
+test('environment file parser supports production dotenv syntax without executing shell', () => {
+  const parsed = parseEnvironmentFile(`
+    # comment
+    SIMPLE=value
+    export SPACED = "value with # hash"
+    SINGLE='literal # value'
+    COMMENTED=value # trailing comment
+    ESCAPED="line\\nnext"
+  `);
+
+  assert.deepEqual(parsed, {
+    SIMPLE: 'value',
+    SPACED: 'value with # hash',
+    SINGLE: 'literal # value',
+    COMMENTED: 'value',
+    ESCAPED: 'line\nnext',
+  });
+});
+
+test('authenticated SMS probe fails closed unless HTTPS URL and shared secret both work', async () => {
+  let calls = 0;
+  const fetchReady = async (url, options) => {
+    calls += 1;
+    assert.equal(url, 'https://sms.test/api/internal/account-closure/health');
+    assert.equal(options.redirect, 'error');
+    assert.equal(options.headers['x-internal-secret'], 'shared-secret-value');
+    return {
+      ok: true,
+      json: async () => ({ status: 'ok', accountClosureSms: 'ready' }),
+    };
+  };
+
+  assert.equal(await probeAuthenticatedSmsGateway({}, fetchReady), false);
+  assert.equal(
+    await probeAuthenticatedSmsGateway(
+      { ALIYUN_SMS_URL: 'http://sms.test', INTERNAL_SHARED_SECRET: 'shared-secret-value' },
+      fetchReady,
+    ),
+    false,
+  );
+  assert.equal(
+    await probeAuthenticatedSmsGateway(
+      { ALIYUN_SMS_URL: 'https://sms.test', INTERNAL_SHARED_SECRET: 'short' },
+      fetchReady,
+    ),
+    false,
+  );
+  assert.equal(
+    await probeAuthenticatedSmsGateway(
+      { ALIYUN_SMS_URL: 'https://sms.test', INTERNAL_SHARED_SECRET: 'shared-secret-value' },
+      fetchReady,
+    ),
+    true,
+  );
+  assert.equal(calls, 1);
 });
 
 test('production MySQL dependency resolves from cwd when the collector runs through stdin', () => {

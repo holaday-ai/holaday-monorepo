@@ -36,9 +36,15 @@ if [[ -z "${VULTR_PASSWORD:-}" || -z "${ALIYUN_PASSWORD:-}" ]]; then
   exit 1
 fi
 
-build_ssh_password_prefix "$VULTR_PASSWORD"
+if ! build_ssh_password_prefix "$VULTR_PASSWORD" >/dev/null 2>&1; then
+  echo 'ACCOUNT_CLOSURE_PREFLIGHT status=error reason=vultr-auth-build-failed' >&2
+  exit 1
+fi
 VULTR_AUTH=("${SSH_PASSWORD_PREFIX[@]}")
-build_ssh_password_prefix "$ALIYUN_PASSWORD"
+if ! build_ssh_password_prefix "$ALIYUN_PASSWORD" >/dev/null 2>&1; then
+  echo 'ACCOUNT_CLOSURE_PREFLIGHT status=error reason=aliyun-auth-build-failed' >&2
+  exit 1
+fi
 ALIYUN_AUTH=("${SSH_PASSWORD_PREFIX[@]}")
 SSH_OPTS=(
   -o StrictHostKeyChecking=yes
@@ -96,8 +102,18 @@ if ! SNAPSHOT="$(node -e '
   exit 1
 fi
 
-if ! printf '%s' "$SNAPSHOT" | \
+CHECK_OUTPUT=''
+if CHECK_OUTPUT="$(printf '%s' "$SNAPSHOT" | \
   ACCOUNT_CLOSURE_PREFLIGHT_SYNTHETIC_ALLOWLIST_CONFIRMED="${ACCOUNT_CLOSURE_PREFLIGHT_SYNTHETIC_ALLOWLIST_CONFIRMED:-false}" \
-  node "$CHECK_SCRIPT" "$MODE"; then
+  node "$CHECK_SCRIPT" "$MODE" 2>/dev/null)"; then
+  CHECK_STATUS=0
+else
+  CHECK_STATUS=$?
+fi
+SAFE_RESULT_PATTERN='^ACCOUNT_CLOSURE_PREFLIGHT mode=(dormant|canary-ready|canary-running) status=(ready|blocked) checks=[0-9]+/[0-9]+ failed=[a-z0-9,-]+ hmac=(present|absent) hmacLength=-?[0-9]+ allowlistCount=-?[0-9]+ workerCount=-?[0-9]+ workerRssMiB=-?[0-9]+ queueTotal=-?[0-9]+$'
+if [[ ! "$CHECK_OUTPUT" =~ $SAFE_RESULT_PATTERN ]]; then
+  echo 'ACCOUNT_CLOSURE_PREFLIGHT status=error reason=checker-runtime-failed' >&2
   exit 1
 fi
+printf '%s\n' "$CHECK_OUTPUT"
+exit "$CHECK_STATUS"

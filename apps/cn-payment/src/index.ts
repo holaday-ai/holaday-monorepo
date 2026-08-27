@@ -381,6 +381,19 @@ async function main(): Promise<void> {
     })
     .strict();
 
+  app.get('/api/internal/account-closure/health', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (req.headers['x-internal-secret'] !== env.INTERNAL_SHARED_SECRET) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    const ready = sms.isAccountClosureReady();
+    res.status(ready ? 200 : 503).json({
+      status: ready ? 'ok' : 'unavailable',
+      accountClosureSms: ready ? 'ready' : 'unavailable',
+    });
+  });
+
   app.post('/api/internal/account-closure/code', async (req, res) => {
     if (req.headers['x-internal-secret'] !== env.INTERNAL_SHARED_SECRET) {
       res.status(401).json({ error: 'unauthorized' });

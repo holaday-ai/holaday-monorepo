@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseEnv } from 'node:util';
 
 const MODES = new Set(['dormant', 'canary-ready', 'canary-running']);
 const WORKER_MEMORY_LIMIT_BYTES = 512 * 1024 * 1024;
@@ -14,12 +14,10 @@ const ORCHESTRATOR_CONFIG_KEYS = [
   'ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED',
   'ACCOUNT_CLOSURE_HMAC_SECRET',
   'RESEND_API_KEY',
-];
-const WORKER_CONFIG_KEYS = [
-  ...ORCHESTRATOR_CONFIG_KEYS,
   'ALIYUN_SMS_URL',
   'INTERNAL_SHARED_SECRET',
 ];
+const WORKER_CONFIG_KEYS = [...ORCHESTRATOR_CONFIG_KEYS];
 const CN_PAYMENT_CONFIG_KEYS = [
   'ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED',
   'ALIYUN_ACCESS_KEY_ID',
@@ -27,6 +25,7 @@ const CN_PAYMENT_CONFIG_KEYS = [
   'ALIYUN_SMS_SIGN_NAME',
   'ALIYUN_SMS_ACCOUNT_CLOSURE_VERIFY_TEMPLATE_CODE',
   'ALIYUN_SMS_ACCOUNT_CLOSURE_COMPLETE_TEMPLATE_CODE',
+  'INTERNAL_SHARED_SECRET',
 ];
 
 function enabled(value) {
@@ -82,7 +81,71 @@ export function summarizeCnPaymentEnvironment(env) {
     signPresent: present(env.ALIYUN_SMS_SIGN_NAME),
     verifyTemplatePresent: present(env.ALIYUN_SMS_ACCOUNT_CLOSURE_VERIFY_TEMPLATE_CODE),
     completeTemplatePresent: present(env.ALIYUN_SMS_ACCOUNT_CLOSURE_COMPLETE_TEMPLATE_CODE),
+    internalSecretPresent: present(env.INTERNAL_SHARED_SECRET),
   };
+}
+
+export function parseEnvironmentFile(content) {
+  const environment = {};
+  for (const sourceLine of String(content).split(/\r?\n/)) {
+    const line = sourceLine.trim();
+    if (line === '' || line.startsWith('#')) continue;
+    const match = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!match) throw new Error('invalid environment file');
+    const [, key, rawValue] = match;
+    let value = rawValue.trim();
+    if (value.startsWith("'") || value.startsWith('"')) {
+      const quote = value[0];
+      if (value.length < 2 || !value.endsWith(quote)) throw new Error('invalid environment file');
+      value = value.slice(1, -1);
+      if (quote === '"') {
+        value = value.replace(/\\(n|r|t|\\|")/g, (_match, escaped) => {
+          if (escaped === 'n') return '\n';
+          if (escaped === 'r') return '\r';
+          if (escaped === 't') return '\t';
+          return escaped;
+        });
+      }
+    } else {
+      value = value.replace(/\s+#.*$/, '').trim();
+    }
+    environment[key] = value;
+  }
+  return environment;
+}
+
+function smsGatewayConfigured(env) {
+  if (
+    !present(env.ALIYUN_SMS_URL) ||
+    !present(env.INTERNAL_SHARED_SECRET) ||
+    env.INTERNAL_SHARED_SECRET.trim().length < 16
+  ) {
+    return false;
+  }
+  try {
+    const url = new URL(env.ALIYUN_SMS_URL);
+    return url.protocol === 'https:' && url.username === '' && url.password === '';
+  } catch {
+    return false;
+  }
+}
+
+export async function probeAuthenticatedSmsGateway(env, fetchImpl = fetch) {
+  if (!smsGatewayConfigured(env)) return false;
+  try {
+    const baseUrl = env.ALIYUN_SMS_URL.replace(/\/+$/, '');
+    const response = await fetchImpl(`${baseUrl}/api/internal/account-closure/health`, {
+      method: 'GET',
+      redirect: 'error',
+      headers: { 'x-internal-secret': env.INTERNAL_SHARED_SECRET },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return false;
+    const body = await response.json();
+    return body?.status === 'ok' && body?.accountClosureSms === 'ready';
+  } catch {
+    return false;
+  }
 }
 
 function onlineProcesses(pm2Rows, name) {
@@ -98,7 +161,7 @@ function onlineProcesses(pm2Rows, name) {
  */
 export function summarizePm2Runtime(
   pm2Rows,
-  { inspectProcess, listenerPids, discoveredWorkerPids = new Set() },
+  { inspectProcess, listenerPids, discoveredWorkerPids = new Set(), expectedWorkerCwd },
 ) {
   const orchestrators = onlineProcesses(pm2Rows, 'holaday-orchestrator');
   const managedWorkers = onlineProcesses(pm2Rows, 'holaday-account-closure-worker');
@@ -125,6 +188,7 @@ export function summarizePm2Runtime(
           : -1
         : Number(listenerPids.has(workerPid)),
     workerManaged,
+    workerCwdExpected: workerProcess === null || workerProcess.cwd === expectedWorkerCwd,
   };
 }
 
@@ -135,6 +199,7 @@ function inspectLinuxProcess(pid) {
   return {
     uid: uidMatch ? Number(uidMatch[1]) : -1,
     rssBytes: rssMatch ? Number(rssMatch[1]) * 1024 : -1,
+    cwd: realpathSync(`/proc/${pid}/cwd`),
   };
 }
 
@@ -149,6 +214,24 @@ function readProcessEnvironment(pid) {
   return environment;
 }
 
+export function isExpectedEntrypoint(cwd, args, expectedEntry) {
+  let canonicalExpected;
+  try {
+    canonicalExpected = realpathSync(expectedEntry);
+  } catch {
+    return false;
+  }
+  return args.some((argument) => {
+    if (typeof argument !== 'string' || argument === '' || argument.startsWith('-')) return false;
+    const candidate = isAbsolute(argument) ? argument : resolve(cwd, argument);
+    try {
+      return realpathSync(candidate) === canonicalExpected;
+    } catch {
+      return false;
+    }
+  });
+}
+
 function discoverClosureWorkerPids(repoRoot) {
   const expectedCwd = realpathSync(`${repoRoot}/apps/orchestrator`);
   const expectedEntry = `${expectedCwd}/dist/account-closure/worker-entry.js`;
@@ -159,7 +242,7 @@ function discoverClosureWorkerPids(repoRoot) {
     try {
       const cwd = realpathSync(`/proc/${pid}/cwd`);
       const args = readFileSync(`/proc/${pid}/cmdline`).toString('utf8').split('\0');
-      if (cwd === expectedCwd && args.includes(expectedEntry)) pids.add(pid);
+      if (isExpectedEntrypoint(cwd, args, expectedEntry)) pids.add(pid);
     } catch {
       // The process may exit during the read-only scan; absence is handled by
       // the PM2/discovered PID reconciliation below.
@@ -205,7 +288,7 @@ function readConfiguredEnvironment(path) {
   if (typeof path !== 'string' || !path.startsWith('/')) {
     throw new Error('invalid environment file path');
   }
-  return parseEnv(readFileSync(path, 'utf8'));
+  return parseEnvironmentFile(readFileSync(path, 'utf8'));
 }
 
 async function inspectProductionDatabase(env) {
@@ -270,6 +353,7 @@ async function collectOrchestratorSnapshot(environmentFile) {
     inspectProcess: inspectLinuxProcess,
     listenerPids: readListenerPids(),
     discoveredWorkerPids,
+    expectedWorkerCwd: realpathSync(`${process.cwd()}/apps/orchestrator`),
   });
   let workerConfigurationMatchesOrchestrator = discoveredWorkerPids.size === 0;
   if (discoveredWorkerPids.size === 1 && orchestrators.length === 1) {
@@ -281,6 +365,8 @@ async function collectOrchestratorSnapshot(environmentFile) {
     );
   }
   const database = await inspectProductionDatabase(runtimeEnvironment);
+  const gatewayConfigured = smsGatewayConfigured(runtimeEnvironment);
+  const gatewayReady = await probeAuthenticatedSmsGateway(runtimeEnvironment);
   return {
     orchestrator: {
       ...environment,
@@ -289,6 +375,8 @@ async function collectOrchestratorSnapshot(environmentFile) {
         orchestrators.length === 1 &&
         environmentKeysMatch(configuredEnvironment, runtimeEnvironment, ORCHESTRATOR_CONFIG_KEYS),
       workerConfigurationMatchesOrchestrator,
+      smsGatewayConfigured: gatewayConfigured,
+      smsGatewayReady: gatewayReady,
     },
     database,
   };
@@ -384,7 +472,10 @@ export function evaluateAccountClosureRollout(mode, snapshot) {
         cnPayment.credentialsPresent === true &&
         cnPayment.signPresent === true &&
         cnPayment.verifyTemplatePresent === true &&
-        cnPayment.completeTemplatePresent === true,
+        cnPayment.completeTemplatePresent === true &&
+        cnPayment.internalSecretPresent === true &&
+        orchestrator.smsGatewayConfigured === true &&
+        orchestrator.smsGatewayReady === true,
     );
 
     if (mode === 'canary-ready') {
@@ -405,6 +496,7 @@ export function evaluateAccountClosureRollout(mode, snapshot) {
       );
       addCheck(checks, 'single-worker', orchestrator.workerCount === 1);
       addCheck(checks, 'worker-managed', orchestrator.workerManaged === true);
+      addCheck(checks, 'worker-cwd', orchestrator.workerCwdExpected === true);
       addCheck(
         checks,
         'worker-config-consistent',
