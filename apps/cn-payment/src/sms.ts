@@ -193,7 +193,7 @@ export class SmsAdapter {
   async sendAccountClosureCode(
     rawPhone: string,
     code: string,
-    action: 'begin' | 'cancel',
+    _action: 'begin' | 'cancel',
   ): Promise<SmsDeliveryResult> {
     const phone = rawPhone.trim();
     if (!this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED) {
@@ -203,10 +203,9 @@ export class SmsAdapter {
     if (!/^\d{6}$/.test(code)) return { ok: false, error: 'invalid_payload' };
     const templateCode = this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_VERIFY_TEMPLATE_CODE;
     if (!this.client || !templateCode) return { ok: false, error: 'sms_not_configured' };
-    return this.sendDelivery(phone, templateCode, {
-      code,
-      action: action === 'begin' ? '关闭账号' : '撤回账号关闭',
-    });
+    // Aliyun verification templates support one custom variable. The fixed
+    // template copy describes this as an account-closure-related operation.
+    return this.sendDelivery(phone, templateCode, { code });
   }
 
   async sendAccountClosureComplete(
