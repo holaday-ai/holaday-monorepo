@@ -30,7 +30,7 @@ const {
     routes,
     smsClosureCodeSpy: vi.fn(async () => ({ ok: true })),
     smsClosureCompleteSpy: vi.fn(async () => ({ ok: true })),
-    smsClosureReadySpy: vi.fn(() => true),
+    smsClosureReadySpy: vi.fn(async () => true),
     smsSendCodeSpy: vi.fn(async () => ({ ok: true, cooldownMs: 60_000 })),
     syncConfirmSpy: vi.fn<() => Promise<{ ok: true } | { ok: false; reason: string }>>(
       async () => ({ ok: true }),
@@ -261,7 +261,7 @@ describe('account-closure SMS routes', () => {
     smsClosureCodeSpy.mockClear();
     smsClosureCompleteSpy.mockClear();
     smsClosureReadySpy.mockReset();
-    smsClosureReadySpy.mockReturnValue(true);
+    smsClosureReadySpy.mockResolvedValue(true);
     smsSendCodeSpy.mockClear();
   });
 
@@ -282,7 +282,7 @@ describe('account-closure SMS routes', () => {
     });
     expect(ready.headers.get('cache-control')).toBe('no-store');
 
-    smsClosureReadySpy.mockReturnValue(false);
+    smsClosureReadySpy.mockResolvedValue(false);
     const unavailable = makeResponse();
     await handler({ headers: { 'x-internal-secret': 'cn-test-secret' } }, unavailable.response);
     expect(unavailable.state).toEqual({

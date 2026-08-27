@@ -6,6 +6,25 @@ function makeAdapter(overrides: Partial<Env> = {}) {
   const sendSms = vi.fn<
     (request: unknown) => Promise<{ body: { code: string; requestId: string } }>
   >(async () => ({ body: { code: 'OK', requestId: 'request-1' } }));
+  const getSmsTemplate = vi.fn<
+    (request: { templateCode?: string }) => Promise<{
+      body: {
+        code: string;
+        message: string;
+        requestId: string;
+        templateCode?: string;
+        templateStatus: string;
+      };
+    }>
+  >(async (request) => ({
+    body: {
+      code: 'OK',
+      message: 'OK',
+      requestId: 'request-template-1',
+      templateCode: request.templateCode,
+      templateStatus: '1',
+    },
+  }));
   const logger = {
     info: vi.fn(),
     warn: vi.fn(),
@@ -31,8 +50,12 @@ function makeAdapter(overrides: Partial<Env> = {}) {
     ...overrides,
   } as Env;
   const adapter = new SmsAdapter(env, logger as never);
-  (adapter as unknown as { client: { sendSms: typeof sendSms } }).client = { sendSms };
-  return { adapter, sendSms, logger };
+  (
+    adapter as unknown as {
+      client: { sendSms: typeof sendSms; getSmsTemplate: typeof getSmsTemplate };
+    }
+  ).client = { sendSms, getSmsTemplate };
+  return { adapter, getSmsTemplate, sendSms, logger };
 }
 
 const productionSmsEnv = {
@@ -102,6 +125,38 @@ describe('production closure SMS configuration', () => {
 });
 
 describe('SmsAdapter account-closure isolation', () => {
+  it.each(['CLOSURE_VERIFY_TEMPLATE', 'CLOSURE_COMPLETE_TEMPLATE'])(
+    'blocks closure readiness while dedicated template %s is still under review',
+    async (pendingTemplate) => {
+      const { adapter, getSmsTemplate } = makeAdapter();
+      getSmsTemplate.mockImplementation(async (request) => ({
+        body: {
+          code: 'OK',
+          message: 'OK',
+          requestId: 'request-template-pending',
+          templateCode: request.templateCode,
+          templateStatus: request.templateCode === pendingTemplate ? '0' : '1',
+        },
+      }));
+
+      expect(await adapter.isAccountClosureReady()).toBe(false);
+    },
+  );
+
+  it('fails closure readiness closed when Aliyun cannot prove template approval', async () => {
+    const { adapter, getSmsTemplate } = makeAdapter();
+    getSmsTemplate.mockRejectedValueOnce(new Error('provider unavailable'));
+
+    expect(await adapter.isAccountClosureReady()).toBe(false);
+  });
+
+  it('marks closure SMS ready only after both dedicated templates are approved', async () => {
+    const { adapter, getSmsTemplate } = makeAdapter();
+
+    expect(await adapter.isAccountClosureReady()).toBe(true);
+    expect(getSmsTemplate).toHaveBeenCalledTimes(2);
+  });
+
   it('fails closure delivery closed when the feature is disabled', async () => {
     const { adapter, sendSms } = makeAdapter({ ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED: false });
 

@@ -23,6 +23,7 @@ import type { Logger } from 'pino';
 // hands back the raw CJS exports object, where `.default` is the
 // class regardless of node loader version.
 const require = createRequire(import.meta.url);
+import { GetSmsTemplateRequest } from '@alicloud/dysmsapi20170525/dist/models/GetSmsTemplateRequest.js';
 import { SendSmsRequest } from '@alicloud/dysmsapi20170525/dist/models/SendSmsRequest.js';
 import * as OpenApi from '@alicloud/openapi-client';
 import type { Env } from './config/env.js';
@@ -30,6 +31,7 @@ import type { Env } from './config/env.js';
 type DysmsapiCtor = new (
   config: InstanceType<typeof OpenApi.Config>,
 ) => {
+  getSmsTemplate(req: InstanceType<typeof GetSmsTemplateRequest>): Promise<unknown>;
   sendSms(req: InstanceType<typeof SendSmsRequest>): Promise<unknown>;
 };
 const dysmsapiModule: unknown = require('@alicloud/dysmsapi20170525');
@@ -108,13 +110,32 @@ export class SmsAdapter {
     return this.client !== null && Boolean(this.env.ALIYUN_SMS_TEMPLATE_CODE);
   }
 
-  isAccountClosureReady(): boolean {
-    return (
-      this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED === true &&
-      this.client !== null &&
-      Boolean(this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_VERIFY_TEMPLATE_CODE) &&
-      Boolean(this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_COMPLETE_TEMPLATE_CODE)
-    );
+  async isAccountClosureReady(): Promise<boolean> {
+    const templateCodes = [
+      this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_VERIFY_TEMPLATE_CODE,
+      this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_COMPLETE_TEMPLATE_CODE,
+    ];
+    if (
+      this.env.ALIYUN_SMS_ACCOUNT_CLOSURE_ENABLED !== true ||
+      this.client === null ||
+      templateCodes.some((templateCode) => !templateCode)
+    ) {
+      return false;
+    }
+
+    try {
+      for (const templateCode of templateCodes) {
+        const response = (await this.client.getSmsTemplate(
+          new GetSmsTemplateRequest({ templateCode }),
+        )) as { body?: { code?: string; templateStatus?: string } };
+        if (response.body?.code !== 'OK' || response.body.templateStatus !== '1') {
+          return false;
+        }
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**

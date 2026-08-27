@@ -69,7 +69,13 @@ whitelisted comparison against the current env files. File/runtime drift,
 workers found under `/proc` but not owned by the expected PM2 entry, any TCP or
 UDP worker listener, and a non-empty active queue all fail closed. The
 `canary-running` check is therefore run immediately after enabling and before
-submitting the synthetic closure request.
+submitting the synthetic closure request. The authenticated CN Payment probe
+also calls Aliyun `GetSmsTemplate` for both dedicated closure templates and is
+ready only when both return `TemplateStatus=1`. A configured template that is
+still under review, rejected, cancelled, or cannot be queried keeps the rollout
+blocked without sending an SMS. The CN Payment RAM identity therefore needs the
+read-only `dysms:GetSmsTemplate` permission in addition to its reviewed send
+permission.
 
 ```bash
 # Current dark-launch invariant: both flags off, no worker, empty queue.
