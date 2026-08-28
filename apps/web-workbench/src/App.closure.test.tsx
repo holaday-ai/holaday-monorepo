@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 
-import { setClosureRecovery } from '@/lib/auth';
+import { clearClosureRecovery, setClosureRecovery } from '@/lib/auth';
 import { cleanup, render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Outlet } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 
@@ -10,8 +10,10 @@ vi.mock('@/components/AdminLayout', () => ({
   AdminLayout: () => <div>admin shell</div>,
 }));
 vi.mock('@/components/AppShell', () => ({
-  AppShell: () => <div>product shell</div>,
+  AppShell: () => <><div>product shell</div><Outlet /></>,
 }));
+vi.mock('@/pages/ImagePage', () => ({ ImagePage: () => <div>image studio route</div> }));
+vi.mock('@/pages/VideoPage', () => ({ VideoPage: () => <div>video studio route</div> }));
 vi.mock('@/pages/LoginPage', () => ({ LoginPage: () => <div>login page</div> }));
 vi.mock('@/pages/RegisterPage', () => ({ RegisterPage: () => <div>register page</div> }));
 vi.mock('@/pages/RedirectIfAuthed', () => ({
@@ -28,6 +30,7 @@ vi.mock('@/pages/AccountClosureRecoveryPage', async (importOriginal) => {
 
 beforeEach(() => {
   vi.stubGlobal('sessionStorage', memoryStorage());
+  clearClosureRecovery();
 });
 
 afterEach(() => {
@@ -47,6 +50,25 @@ describe('App account-closure recovery route', () => {
 
     expect(await screen.findByText('专用账号关闭恢复页')).toBeTruthy();
     expect(screen.queryByText('product shell')).toBeNull();
+  });
+
+  it('routes image and video to separate product workspaces', async () => {
+    const { unmount } = render(
+      <MemoryRouter initialEntries={['/image']}>
+        <App />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText('image studio route')).toBeTruthy();
+    expect(screen.queryByText('video studio route')).toBeNull();
+    unmount();
+
+    render(
+      <MemoryRouter initialEntries={['/video']}>
+        <App />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText('video studio route')).toBeTruthy();
+    expect(screen.queryByText('image studio route')).toBeNull();
   });
 });
 

@@ -944,6 +944,37 @@ export class FileService {
   }
 
   /**
+   * Explicitly keep a generated output in the caller's file library. The
+   * storage object is reused in place: only the ownership-scoped index row is
+   * reclassified from expiring `output` to durable `input`.
+   */
+  async saveOutputToLibraryForUser(
+    fileExternalId: string,
+    userIdInternal: number,
+  ): Promise<boolean> {
+    const row = await this.readableRowForUser(fileExternalId, userIdInternal);
+    if (!row) return false;
+    if (row.kind === 'input') return true;
+    if (row.kind !== 'output') return false;
+    const now = new Date();
+    const notExpired = or(isNull(taskFiles.expiresAt), gt(taskFiles.expiresAt, now));
+    if (!notExpired) return false;
+    const result = await this.db
+      .update(taskFiles)
+      .set({ kind: 'input', expiresAt: null })
+      .where(
+        and(
+          eq(taskFiles.externalId, fileExternalId),
+          eq(taskFiles.userId, userIdInternal),
+          eq(taskFiles.kind, 'output'),
+          eq(taskFiles.status, 'active'),
+          notExpired,
+        ),
+      );
+    return readAffectedRows(result) === 1;
+  }
+
+  /**
    * Mint a short-lived public GET URL for an uploaded file (ownership,
    * active status, expiry and backing-object existence checked). Phase 2
    * 第二期: the pet i2v lane needs a PUBLIC img_url

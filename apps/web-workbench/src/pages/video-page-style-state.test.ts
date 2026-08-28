@@ -1,14 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_IMAGE_COUNT,
-  IP_VIDEO_ASPECT_RATIO,
   IP_ASSET_AUTHORIZATION_COPY,
-  buildImageCreationOptions,
-  buildImageFileOrder,
+  IP_VIDEO_ASPECT_RATIO,
   buildCloneVideoIntent,
-  buildImageIntentForSubmit,
-  buildImageIntentWithMode,
   buildIpVideoIntent,
   buildVideoIntentWithCreativeStyles,
   creativeModelDisplayName,
@@ -17,10 +12,19 @@ import {
   currentMediaDownloadPayload,
   inferVideoStyleOption,
   normalVideoParametersAfterTabReturn,
-  supportsReferenceVideo,
 } from './VideoPage';
 
 describe('video creative style state', () => {
+  it('contains only video creation branches while preserving the static-image quote choice', () => {
+    const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).not.toContain('ImageModeChooser');
+    expect(source).not.toContain('ImageStyleDialog');
+    expect(source).not.toContain("mode === 'image'");
+    expect(source).toContain("confirmVideo('confirm_image')");
+    expect(source).toContain("creativeTaskPath('image'");
+  });
+
   it('keeps ignored IP engine and identity summaries out of the parameter bar', () => {
     const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
 
@@ -31,10 +35,8 @@ describe('video creative style state', () => {
   it('keeps history details readable in narrow workbench panes and exposes the real video', () => {
     const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
 
-    expect(source).toContain(
-      'grid-cols-[repeat(auto-fit,minmax(min(100%,22rem),1fr))]',
-    );
-    expect(source).not.toContain("md:grid-cols-[minmax(260px,520px)_1fr]");
+    expect(source).toContain('grid-cols-[repeat(auto-fit,minmax(min(100%,22rem),1fr))]');
+    expect(source).not.toContain('md:grid-cols-[minmax(260px,520px)_1fr]');
     expect(source).toContain('播放成片');
     expect(source).toContain('基础成片检查通过');
     expect(source).toContain('videoAudioVerificationBadge');
@@ -64,30 +66,16 @@ describe('video creative style state', () => {
     expect(wizardSource).toContain('requestId !== loadRequestRef.current');
     expect(wizardSource).toContain('disabled={uploadingVoice || clearing}');
     expect(wizardSource).toContain('disabled={uploadingVideo || clearing}');
-    expect(wizardSource).toContain('disabled={!anyAsset || clearing || uploadingVoice || uploadingVideo}');
+    expect(wizardSource).toContain(
+      'disabled={!anyAsset || clearing || uploadingVoice || uploadingVideo}',
+    );
   });
 
-  it('defaults image generation to one output to avoid silent duplicate spend', () => {
-    expect(DEFAULT_IMAGE_COUNT).toBe(1);
-    expect(buildImageCreationOptions('nano_banana_2', '1:1')).toEqual({
-      model: 'nano_banana_2',
-      aspectRatio: '1:1',
-      imageCount: 1,
-    });
-  });
-
-  it('keeps failed image retries inside the image workspace', () => {
+  it('keeps failed media retries and confirmed tasks inside the correct workspace', () => {
     expect(creativeRetryPath('image')).toBe('/image');
     expect(creativeRetryPath('video')).toBe('/video');
-  });
-
-  it('keeps confirmed media tasks inside the workspace that created them', () => {
-    expect(creativeTaskPath('image', 'task image/1')).toBe(
-      '/image?task=task%20image%2F1',
-    );
-    expect(creativeTaskPath('video', 'task video/1')).toBe(
-      '/video?task=task%20video%2F1',
-    );
+    expect(creativeTaskPath('image', 'task image/1')).toBe('/image?task=task%20image%2F1');
+    expect(creativeTaskPath('video', 'task video/1')).toBe('/video?task=task%20video%2F1');
   });
 
   it('labels paid video models with the connected provider versions', () => {
@@ -115,56 +103,6 @@ describe('video creative style state', () => {
       size: 123,
       expiresAt: '2026-08-01T00:00:00.000Z',
       unavailable: true,
-    });
-  });
-
-  it('does not advertise reference-video input for image generation', () => {
-    expect(supportsReferenceVideo('image')).toBe(false);
-    expect(supportsReferenceVideo('video')).toBe(true);
-  });
-
-  it('preserves an explicit multi-image selection', () => {
-    expect(buildImageCreationOptions('nano_banana_pro', '4:3', 3)).toEqual({
-      model: 'nano_banana_pro',
-      aspectRatio: '4:3',
-      imageCount: 3,
-    });
-  });
-
-  it('passes locked-subject mode as structured image metadata', () => {
-    expect(
-      buildImageCreationOptions('nano_banana_2', '1:1', 1, 'lock_subject', 'file_subject'),
-    ).toEqual({
-      model: 'nano_banana_2',
-      aspectRatio: '1:1',
-      imageCount: 1,
-      mode: 'lock_subject',
-      subjectFileId: 'file_subject',
-    });
-  });
-
-  it('puts the explicitly selected subject first without dropping other references', () => {
-    expect(
-      buildImageFileOrder(
-        [
-          { clientId: 'style', fileId: 'file_style', mimetype: 'image/png', status: 'ready' },
-          { clientId: 'notes', fileId: 'file_notes', mimetype: 'text/plain', status: 'ready' },
-          { clientId: 'subject', fileId: 'file_subject', mimetype: 'image/jpeg', status: 'ready' },
-          { clientId: 'pending', fileId: '', mimetype: 'image/png', status: 'uploading' },
-        ],
-        'lock_subject',
-        'subject',
-      ),
-    ).toEqual(['file_subject', 'file_style', 'file_notes']);
-  });
-
-  it('does not stamp a subject id onto free image generation', () => {
-    expect(
-      buildImageCreationOptions('nano_banana_2', '1:1', 1, 'free', 'file_subject'),
-    ).toEqual({
-      model: 'nano_banana_2',
-      aspectRatio: '1:1',
-      imageCount: 1,
     });
   });
 
@@ -237,31 +175,12 @@ describe('video creative style state', () => {
     expect(IP_ASSET_AUTHORIZATION_COPY).not.toContain('均为本人');
   });
 
-  it('keeps IP videos aligned to the required portrait base instead of inheriting normal-video ratio', () => {
+  it('keeps IP videos aligned to the required portrait base instead of inheriting normal ratio', () => {
     const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
 
     expect(IP_VIDEO_ASPECT_RATIO).toBe('9:16');
     expect(source).toContain('label="画幅"');
     expect(source).toContain('value="9:16"');
     expect(source).toContain('description="跟随竖屏底版"');
-  });
-
-  it('keeps normal image prompts lightweight in free mode', () => {
-    expect(buildImageIntentWithMode('生成一张夏日海报', 'random', 'free')).toBe('生成一张夏日海报');
-  });
-
-  it('keeps internal model metadata out of the image prompt', () => {
-    expect(buildImageIntentForSubmit('生成一张夏日海报', 'random', 'free')).toBe(
-      '生成一张夏日海报',
-    );
-  });
-
-  it('adds subject consistency constraints for locked-subject image mode', () => {
-    const result = buildImageIntentWithMode('把这只狗放到雪山背景里', 'cinematic', 'lock_subject');
-
-    expect(result).toContain('图片风格要求：电影感构图');
-    expect(result).toContain('主体一致性要求：请以用户上传的第一张图片作为锁定主角。');
-    expect(result).toContain('保持主角身份');
-    expect(result).toContain('只根据用户描述改变背景、风格、光线、场景、动作、姿态、构图和系列化画面。');
   });
 });

@@ -135,6 +135,50 @@ describe('normaliseDetailStepStatus', () => {
 });
 
 describe('toUiTask', () => {
+  it('hydrates safe image studio metadata from tasks.list', () => {
+    const task = toUiTask({
+      taskId: 'tsk_image_meta',
+      intent: '做一张夏日新品海报',
+      title: null,
+      status: 'completed',
+      result: {
+        metadata: {
+          imageOptions: {
+            model: 'nano_banana_pro',
+            style: 'vibrant',
+            aspectRatio: '3:4',
+            imageCount: 1,
+            goal: 'commercial',
+            commercialUse: 'poster',
+            changeTargets: ['background'],
+            visiblePrompt: '做一张夏日新品海报',
+          },
+          subjectConsistency: {
+            checked: 1,
+            passed: 1,
+            failed: 0,
+            reasons: ['not user-facing'],
+          },
+        },
+      },
+      errorMessage: null,
+      createdAt: new Date('2026-08-28T00:00:00Z'),
+      opusUsed: false,
+      starred: false,
+      starredAt: null,
+      projectId: null,
+      verificationPassed: null,
+      failureLevel: null,
+    } as never);
+
+    expect(task.imageOptions).toMatchObject({
+      goal: 'commercial',
+      commercialUse: 'poster',
+      visiblePrompt: '做一张夏日新品海报',
+    });
+    expect(task.subjectConsistency).toEqual({ checked: 1, passed: 1, failed: 0 });
+  });
+
   it('hydrates a persisted video quote awaiting kind from tasks.list', () => {
     const task = toUiTask({
       taskId: 'tsk_video_quote',
@@ -818,6 +862,47 @@ describe('refreshTaskList', () => {
 });
 
 describe('selectTask detail hydration', () => {
+  it('hydrates the same safe image metadata from task detail', async () => {
+    detailQuery.mockResolvedValueOnce({
+      taskId: 'tsk_image_detail',
+      intent: '主角不变，换到海边',
+      title: null,
+      status: 'completed',
+      createdAt: '2026-08-28T00:00:00.000Z',
+      steps: [],
+      result: {
+        summary: '已生成 2 张图片',
+        metadata: {
+          imageOptions: {
+            model: 'nano_banana_2',
+            aspectRatio: '1:1',
+            imageCount: 2,
+            mode: 'lock_subject',
+            goal: 'lock_subject',
+            changeTargets: ['background'],
+            visiblePrompt: '主角不变，换到海边',
+          },
+          subjectConsistency: { checked: 2, passed: 1, failed: 1, reasons: ['private'] },
+        },
+      },
+    } as never);
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_image_detail', status: 'completed' })],
+    });
+
+    useTaskStore.getState().selectTask('tsk_image_detail', 'ui');
+    await vi.waitFor(() => {
+      expect(useTaskStore.getState().tasks[0]).toMatchObject({
+        imageOptions: {
+          style: 'random',
+          goal: 'lock_subject',
+          visiblePrompt: '主角不变，换到海边',
+        },
+        subjectConsistency: { checked: 2, passed: 1, failed: 1 },
+      });
+    });
+  });
+
   it('clears browser takeover state when switching tasks', () => {
     detailQuery.mockResolvedValueOnce({
       intent: '打开 https://example.com',

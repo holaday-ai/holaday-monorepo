@@ -1,3 +1,5 @@
+import type { ImageCreationOptions } from './image';
+
 /**
  * UI-facing task model. The real backend types (TaskStatus from the
  * orchestrator DB + ServerMessage from shared-types) are richer; this
@@ -125,6 +127,10 @@ export interface UiTask {
    * isolation, the type chip, and the IP-only "生成中较慢" hint.
    */
   videoType?: 'normal' | 'pet' | 'ip_person';
+  /** Validated image generation settings persisted with image tasks. */
+  imageOptions?: ImageCreationOptions;
+  /** Aggregate-only identity verification counts. Internal model reasons are never exposed. */
+  subjectConsistency?: { checked: number; passed: number; failed: number };
   /**
    * Phase 4 R1 — terminal metadata.attachments[] hydrated from
    * `tasks.detail.result.metadata.attachments` (L1 auto-screenshot

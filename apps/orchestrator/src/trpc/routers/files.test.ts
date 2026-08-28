@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { __filesRouterInternals } from './files.js';
 
 const {
+  fileAvailabilityItems,
   fileIsAvailableInLibrary,
   fileMatchesLibraryFilter,
   libraryFilenameSearchTerms,
   normalizeLibraryFilename,
+  saveLibraryOutput,
 } = __filesRouterInternals;
 
 describe('files router legacy filename compatibility', () => {
@@ -111,5 +113,40 @@ describe('files router library deletion', () => {
       code: 'NOT_FOUND',
       message: 'file not found',
     });
+  });
+});
+
+describe('files router image result lifecycle', () => {
+  it('returns only caller-scoped boolean availability in input order', async () => {
+    const isReadableForUser = vi.fn(
+      async (fileId: string, userId: number) => fileId === 'file_active' && userId === 7,
+    );
+
+    await expect(
+      fileAvailabilityItems(
+        { isReadableForUser },
+        ['file_active', 'file_expired', 'file_foreign'],
+        7,
+      ),
+    ).resolves.toEqual([
+      { fileId: 'file_active', available: true },
+      { fileId: 'file_expired', available: false },
+      { fileId: 'file_foreign', available: false },
+    ]);
+    expect(isReadableForUser).toHaveBeenCalledTimes(3);
+  });
+
+  it('saves an owned output and keeps missing and foreign files indistinguishable', async () => {
+    const saveOutputToLibraryForUser = vi
+      .fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+
+    await expect(
+      saveLibraryOutput({ saveOutputToLibraryForUser }, 'file_owned', 7),
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      saveLibraryOutput({ saveOutputToLibraryForUser }, 'file_foreign', 7),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND', message: 'file not found' });
   });
 });

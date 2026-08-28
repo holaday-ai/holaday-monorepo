@@ -55,6 +55,7 @@ const BillingPage = lazyRoute(() => import('@/pages/BillingPage'), 'BillingPage'
 const ConnectionsPage = lazyRoute(() => import('@/pages/ConnectionsPage'), 'ConnectionsPage');
 const FilesPage = lazyRoute(() => import('@/pages/FilesPage'), 'FilesPage');
 const HistoryPage = lazyRoute(() => import('@/pages/HistoryPage'), 'HistoryPage');
+const ImagePage = lazyRoute(() => import('@/pages/ImagePage'), 'ImagePage');
 const NotFoundPage = lazyRoute(() => import('@/pages/NotFoundPage'), 'NotFoundPage');
 const PartnerPage = lazyRoute(() => import('@/pages/PartnerPage'), 'PartnerPage');
 const PlanPage = lazyRoute(() => import('@/pages/PlanPage'), 'PlanPage');
@@ -197,7 +198,7 @@ export function App(): JSX.Element {
             <Route path="/starred" element={lazyElement(<StarredPage />)} />
             <Route path="/files" element={lazyElement(<FilesPage />)} />
             <Route path="/video" element={<VideoGate />} />
-            <Route path="/image" element={<VideoGate mode="image" />} />
+            <Route path="/image" element={lazyElement(<ImagePage />)} />
             <Route path="/planned" element={lazyElement(<PlannedTasksPage />)} />
             <Route path="/planned/legacy-scheduled" element={lazyElement(<ScheduledPage />)} />
             <Route path="/planned/legacy-batch" element={lazyElement(<BatchPage />)} />
@@ -288,6 +289,6 @@ function lazyElement(children: ReactNode): JSX.Element {
  * generation when a capability is unavailable, but the shell should not
  * hide the page or bounce to Home because an older rollout flag is false.
  */
-function VideoGate({ mode = 'video' }: { mode?: 'video' | 'image' }): JSX.Element {
-  return lazyElement(<VideoPage mode={mode} />);
+function VideoGate(): JSX.Element {
+  return lazyElement(<VideoPage />);
 }

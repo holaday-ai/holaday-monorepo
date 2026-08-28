@@ -7,6 +7,7 @@ import { humaniseTaskError } from '@/lib/error-copy';
 import { pageErrorMessage } from '@/lib/page-error-copy';
 import { hdDebug } from '@/lib/hd-debug';
 import { trpc } from '@/lib/trpc';
+import { parseImageTaskMeta } from '@/components/image/image-task-meta';
 import type {
   UiAwaitingUser,
   UiCaptchaWait,
@@ -627,6 +628,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const planStatus = normalizeTaskPlanStatus(detail.planStatus);
         const resultObj = isTaskListRecord(detail.result) ? detail.result : {};
         const metadata = isTaskListRecord(resultObj.metadata) ? resultObj.metadata : {};
+        const imageTaskMeta = parseImageTaskMeta(metadata);
         const finalScreenshot =
           safeTaskListText(resultObj.finalScreenshot).length > 0
             ? safeTaskListText(resultObj.finalScreenshot)
@@ -741,6 +743,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                     ...(attachments ? { attachments } : {}),
                     ...(expertWorkflowId ? { expertWorkflowId } : {}),
                     ...(expertMode ? { expertMode } : {}),
+                    ...imageTaskMeta,
                     ...(stockContext ? { stockContext } : {}),
                     failedChecks,
                     verificationPassed,
@@ -773,6 +776,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             ...(attachments ? { attachments } : {}),
             ...(expertWorkflowId ? { expertWorkflowId } : {}),
             ...(expertMode ? { expertMode } : {}),
+            ...imageTaskMeta,
             ...(stockContext ? { stockContext } : {}),
             failedChecks,
             verificationPassed,
@@ -2595,6 +2599,7 @@ export function toUiTask(row: ListRow): UiTask {
   const rowResult = (row as { result?: unknown }).result;
   const resultObj = isTaskListRecord(rowResult) ? rowResult : {};
   const metadata = isTaskListRecord(resultObj.metadata) ? resultObj.metadata : {};
+  const imageTaskMeta = parseImageTaskMeta(metadata);
   const summaryFromResult = extractSummary(rowResult);
   const failedChecks = extractFailedChecks(rowResult);
   const executionMode = extractExecutionMode(rowResult);
@@ -2671,6 +2676,7 @@ export function toUiTask(row: ListRow): UiTask {
     ...(attachments ? { attachments } : {}),
     ...(expertWorkflowId ? { expertWorkflowId } : {}),
     ...(expertMode ? { expertMode } : {}),
+    ...imageTaskMeta,
     ...(finalScreenshot ? { finalScreenshot } : {}),
     ...(finalUrl ? { finalUrl } : {}),
     ...(finalViewport ? { finalViewport } : {}),
