@@ -1,144 +1,144 @@
-# Holaday "Continue Editing" Design
+# Holaday「继续剪辑」设计方案
 
-## Status and scope
+## 状态与范围
 
-**Status:** approved product design; implementation has not started.
+**状态：** 产品设计已确认，尚未开始实现。
 
-Holaday will extend video generation with a lightweight, AI-assisted "Continue Editing" capability. It is not a standalone editor, a new top-level navigation destination, or a self-built nonlinear video editor.
+Holaday 将在视频生成能力上延伸出一个轻量、AI 协助的「继续剪辑」能力。它不是独立的视频编辑器、不是新的顶层导航目的地，也不自研非线性剪辑引擎。
 
-The capability applies to:
+该能力适用于：
 
-- ordinary generated videos;
-- reference/recreation videos, retaining their reference and style context;
-- IP-person videos, retaining the named locked-subject/identity-consistency constraint;
-- videos uploaded by the user; and
-- a selection of several compatible video results that the user wants combined.
+- 普通生成视频；
+- 复刻视频，并保留参考素材与风格上下文；
+- IP 人物视频，并保留已命名的锁定主角／主体一致性约束；
+- 用户自行上传的视频；以及
+- 用户选择后希望拼接的多条兼容视频结果。
 
-The user-facing entry label is **Continue Editing** (`继续剪辑`). The editing panel is titled **AI Helps You Edit** (`AI 帮你剪辑`).
+面向用户的入口统一为 **「继续剪辑」**，面板标题为 **「AI 帮你剪辑」**。
 
-## Product principles
+## 产品原则
 
-1. **Contextual, not a product within the product.** Continue Editing opens from a successful video result, a video history/file item, or video upload. It remains in the video experience.
-2. **AI makes the edit; the user directs it.** Users can select guided operations or describe the outcome in natural language. Holaday turns the request into a limited, explainable scene-level change.
-3. **Scene is the editing unit.** A multi-part result is a sequence of editable scenes. Holaday changes the smallest possible scope rather than regenerating the whole video.
-4. **Preserve the original.** Every completed operation creates a version. The source video and every prior render remain recoverable.
-5. **Cost is an affordance, not a confirmation dialog.** Free/reversible operations run directly. A paid generation action displays a small credit icon and amount in its button; pressing that button authorizes execution. The server remains the source of truth for pricing and debiting.
-6. **No silent destructive AI edit.** AI may propose a rough cut, but it only changes the user's source after a direct user instruction or an explicit click on a guided action.
+1. **嵌在原场景，而不是产品里的另一个产品。** 用户从成功视频结果、视频历史／文件项或视频上传入口打开继续剪辑，始终处在视频体验内。
+2. **AI 执行，用户指挥。** 用户可以点引导操作或用自然语言表达结果；Holaday 将其变为范围有限、可解释的场景级改动。
+3. **场景是编辑单位。** 多段结果是一组可编辑场景。系统尽可能只改受影响的部分，而不是重生成整支视频。
+4. **保留原始版本。** 每个已完成操作都会创建一个新版本；源视频和每次历史渲染都可以恢复。
+5. **费用是操作提示，不是确认弹窗。** 无消耗或可逆操作直接执行；付费生成操作在按钮中显示小币标与数额，点击该按钮即授权执行。价格和扣减仍以服务端为准。
+6. **AI 不得静默破坏性改片。** AI 可以提出粗剪建议，但只能在用户明确指令或点击引导操作后修改用户素材。
 
-## Entry points
+## 入口
 
-| Context | Entry | Default behavior |
+| 场景 | 入口 | 默认行为 |
 | --- | --- | --- |
-| A completed ordinary, recreation, or IP-person video | `继续剪辑` beside Download and Regenerate | Opens that video as an editing project. |
-| A generated video in history or the Files video filter | `继续剪辑` | Reopens or creates the corresponding project. |
-| Upload area on the video page | `上传视频，继续剪辑` | Ingests a user-owned video into a new editing project. |
-| Several compatible video result cards selected together | `把选中的 N 段串成一条` | Creates a project with the selected results in order. |
+| 成功生成的普通、复刻或 IP 人物视频 | 下载、再生成旁的 `继续剪辑` | 将该视频打开为一个编辑项目。 |
+| 视频历史或文件库「视频」筛选中的生成视频 | `继续剪辑` | 重新打开或创建对应编辑项目。 |
+| 视频页上传区域 | `上传视频，继续剪辑` | 将用户拥有权的视频导入一个新编辑项目。 |
+| 选中多条兼容视频结果卡 | `把选中的 N 段串成一条` | 按选择顺序创建包含多段素材的项目。 |
 
-The entry is hidden for failed, unavailable, or unauthorized artifacts. It does not appear as a global sidebar item.
+失败、不可用或无权访问的成片不展示入口；不在全局侧边栏中新增「剪辑」入口。
 
-## Interaction model
+## 交互模型
 
-The initial panel contains:
+初始面板包含：
 
-- a video preview and current version selector;
-- a short, ordered strip of scene cards with thumbnail, duration, source, captions, and operation state;
-- an AI instruction composer, for example: "删掉中间停顿，把第 2 段改快一点";
-- context-sensitive suggestions, such as "统一这 4 段节奏" or "为竖版重排字幕"; and
-- Undo / version history.
+- 视频预览与当前版本选择器；
+- 一条简短、有序的场景卡带，每张卡显示缩略图、时长、来源、字幕和操作状态；
+- AI 指令输入框，例如「删掉中间停顿，把第 2 段改快一点」；
+- 上下文相关建议，例如「统一这 4 段的节奏」或「为竖版重排字幕」；
+- 撤销和版本历史。
 
-A precise visual editor is progressively disclosed, not required. It embeds the selected editing SDK's trimmed timeline/canvas controls in the same panel for operations such as exact trim, scene reorder, subtitle timing, and audio adjustment.
+精细可视化编辑按需展开，而非首次必需。它在同一面板嵌入所选 SDK 的精简时间线／画布控件，用于精确裁剪、场景排序、字幕时间和音频调整。
 
-### Default editing constraints by source
+### 不同来源的默认编辑约束
 
-| Source | Permitted default edits | Context retained for regeneration |
+| 来源 | 默认允许编辑 | 重生成时保留的上下文 |
 | --- | --- | --- |
-| Ordinary generated video | trim, reorder, captions, audio, resize, replace/re-generate scene | original prompt and generation parameters |
-| Recreation video | same operations | original reference assets and style constraints |
-| IP-person video | same operations, except identity-changing replacement | locked-subject identity consistency and original source permissions |
-| User upload | trim, remove pauses, captions, combine, audio, add generated inserts | original source asset; no implicit identity or style claim |
+| 普通生成视频 | 裁剪、排序、字幕、音频、改画幅、替换／重生成场景 | 原始提示词与生成参数 |
+| 复刻视频 | 同上 | 原参考素材与风格约束 |
+| IP 人物视频 | 同上，但不允许改变身份的替换 | 锁定主角的身份一致性与原始素材权限 |
+| 用户上传视频 | 裁剪、删除停顿、字幕、拼接、音频、插入生成片段 | 原始源素材；不默认声称人物身份或风格 |
 
-## Project and version model
+## 项目与版本模型
 
-Holaday owns a vendor-neutral editable-project record. The chosen SDK is an editing/runtime implementation, not the product's sole source of truth.
+Holaday 自己拥有一个不绑定单一供应商的可编辑项目记录；选定 SDK 是编辑／运行时实现，不是产品唯一的数据真相。
 
-Each project records:
+每个项目记录：
 
-- owner and authorization context;
-- original task IDs and uploaded source file IDs;
-- ordered scenes, each with source type, asset reference, timeline range, captions, audio and generation context where available;
-- canvas/output configuration (aspect ratio, dimensions, format);
-- SDK project document/checkpoint;
-- immutable version records with parent version, operation diff, render status, output file, credit debit reference, and timestamps.
+- 所有者与授权上下文；
+- 原任务 ID 与上传源文件 ID；
+- 有序场景：来源类型、素材引用、时间线范围、字幕、音频，以及存在时的生成上下文；
+- 画布／输出配置（画幅、尺寸、格式）；
+- SDK 项目文档／检查点；
+- 不可变版本记录：父版本、操作差异、渲染状态、输出文件、币扣减引用和时间戳。
 
-Generated videos that have scene-level source data are imported as several scenes. Historical final-MP4-only artifacts are imported as one scene: they can be trimmed, captioned, re-framed, mixed, and overlaid, but cannot reliably regenerate an original individual shot.
+具备场景级源数据的生成视频会作为多段场景导入。只有历史最终 MP4 的视频会作为一个场景导入：仍可裁剪、加字幕、重构画幅、混音和叠加，但不能可靠地重生成其中一条原始镜头。
 
-## Execution flow
+## 执行流程
 
-1. A generated artifact or uploaded video is ingested into an editable project.
-2. For uploads, Holaday creates a preview rendition, extracts basic media metadata, detects candidate scene boundaries/silence, transcribes speech, and proposes editable scene cards. The original uploaded file is retained unchanged.
-3. The user gives an instruction or clicks a suggested action.
-4. The AI planning layer produces a typed operation plan constrained to the selected scene(s): e.g. trim ranges, reorder, update captions, replace asset, or regenerate a named scene.
-5. Holaday shows the affected scene(s) and the resulting action. It executes no-cost edits directly. A generation action presents its server-priced `◈ N` button; the click is the authorization.
-6. The execution layer applies the operation, creates a child version, emits progress, and produces a preview/render.
-7. The new output is delivered through Holaday's existing artifact delivery path. The user can keep editing, compare versions, restore a version, or download.
+1. 将生成成片或用户上传视频导入一个可编辑项目。
+2. 对上传视频，Holaday 创建预览版本、提取基础媒体元数据、识别候选镜头边界／静音段、转录语音，并生成可编辑场景卡建议。原始上传文件保持不变。
+3. 用户输入指令或点击建议操作。
+4. AI 规划层生成受所选场景约束的类型化操作计划，例如裁剪范围、排序、更新字幕、替换素材或重生成指定场景。
+5. Holaday 展示受影响场景与将执行的动作。无消耗编辑直接执行；生成类操作展示服务端定价的 `◈ N` 按钮，点击即为授权。
+6. 执行层应用该操作、创建子版本、推送进度，并生成预览／成片。
+7. 新输出沿用 Holaday 现有的文件交付链路。用户可继续编辑、比较版本、恢复版本或下载。
 
-## Provider boundary
+## 供应商边界
 
-### Primary: IMG.LY CE.SDK
+### 首选：IMG.LY CE.SDK
 
-Use IMG.LY CE.SDK for embedded browser editing UI, timeline/canvas operations, project checkpoints, preview, and supported rendering integration. It is selected for its mature white-label web editor, configurable controls, captions/audio/timeline functionality, and server-capable creative engine.
+IMG.LY CE.SDK 用于嵌入式浏览器编辑 UI、时间线／画布操作、项目检查点、预览和受支持的渲染集成。选择它是因为其白标 Web 编辑器成熟、控件可配置、支持字幕／音频／时间线，并有面向服务端的创意引擎能力。
 
-Before procurement and implementation, validate its commercial license, permitted deployment hostnames, server-render requirements, supported browser/codec matrix, and pricing for Holaday's intended usage.
+在采购和实现前，必须验证其商业授权、允许部署的主机名、服务端渲染要求、支持的浏览器／编解码器矩阵，以及对 Holaday 使用方式的定价。
 
-### Fallback POC: Twick
+### POC 备选：Twick
 
-Twick is the lower-cost/self-hosted fallback to evaluate if the IMG.LY commercial and operational terms do not fit. It can supply a React editing surface and self-managed render path, but Holaday then takes greater responsibility for rendering, browser compatibility, storage integration, monitoring, and support.
+若 IMG.LY 的商业条款或运行要求不合适，评估成本更低、可自托管的 Twick。它能提供 React 编辑界面和自管渲染路径，但 Holaday 将承担更多渲染、浏览器兼容、存储集成、监控和支持责任。
 
-### Not a dependency: OpenMontage
+### 不作为依赖：OpenMontage
 
-OpenMontage may inform scene-review and production-gate interaction ideas. It is not used as the embedded editor or runtime because its agent-production scope is broader than this feature and its AGPL licensing is unsuitable as a default dependency for Holaday's product integration.
+OpenMontage 可以借鉴场景审核和制作关卡的交互思路，但不作为嵌入式编辑器或运行时。其 agent 视频生产范围远大于本功能，且 AGPL 授权不适合作为 Holaday 默认产品集成依赖。
 
-## Billing and authorization
+## 计费与授权
 
-- The client never computes a price or debits credit.
-- The server produces a short-lived action quote for each paid operation, linked to user, project, base version, operation plan, and price.
-- The visible CTA includes the price, for example `重新生成这一段  ◈ 12`. Clicking it atomically validates the quote, checks balance, debits credit, and begins the job.
-- If balance is insufficient, execution does not begin; the UI states the shortfall and routes to the existing recharge path.
-- A render or generation failure follows the established refund/credit policy and remains visible in version history.
+- 客户端永不自行计算价格或扣减币。
+- 服务端为每个付费操作生成短生命周期的动作报价，绑定用户、项目、基础版本、操作计划和价格。
+- 可见 CTA 携带价格，例如 `重新生成这一段  ◈ 12`。点击后原子校验报价、检查余额、扣减币并开始任务。
+- 余额不足时不开始执行；界面提示差额并跳转到现有充值路径。
+- 渲染或生成失败时，遵循既定退款／退币政策，并在版本历史中可见。
 
-## Security, privacy, and content boundaries
+## 安全、隐私与内容边界
 
-- Verify project ownership and asset authorization on every read, mutation, render, and download.
-- Use short-lived, scoped URLs for editor/media access; never expose provider secrets to the browser.
-- At upload, ask the user to confirm they have the rights to process and publish the video. Do not silently make a user upload public or reuse it as shared training/material.
-- Preserve locked-subject constraints for IP-person edits, including scene re-generation; do not treat a generic replacement request as permission to alter the named subject.
-- Enforce media type, duration, size, codec, and retention limits defined during implementation planning.
+- 每次读取、修改、渲染和下载都校验项目所有权与素材授权。
+- 编辑器／媒体访问使用短生命周期、范围受限的 URL；浏览器中不得暴露供应商密钥。
+- 上传时要求用户确认其拥有处理和发布该视频的权利。不得静默公开用户上传内容，也不得将其复用为共享训练／素材。
+- IP 人物编辑与场景重生成必须保留锁定主角约束；不得把泛化的「替换」请求视为改变该主体的授权。
+- 媒体类型、时长、大小、编解码器与留存限制在实施计划阶段定义并执行。
 
-## First POC and acceptance criteria
+## 首期 POC 与验收标准
 
-The POC is intentionally narrow and uses the chosen SDK rather than custom timeline work.
+POC 有意收窄范围，使用选定 SDK，而不做自定义时间线工作。
 
-It must demonstrate:
+必须演示：
 
-1. open a generated video from `继续剪辑` and perform a trim;
-2. import two generated clips or one user upload and combine/reorder them;
-3. transcribe/edit captions and export a 9:16 version;
-4. regenerate exactly one generated scene with a visible `◈ N` action;
-5. preserve the original and restore a previous version;
-6. deliver the finished render through the existing authenticated artifact UX;
-7. reject an attempted operation from a different user or stale paid action; and
-8. prove cost/debit correctness, preview/render completion, undo behavior, and a supported-browser/codec baseline.
+1. 从 `继续剪辑` 打开一条生成视频并完成裁剪；
+2. 导入两条生成片段或一条用户上传视频，并完成拼接／排序；
+3. 转录／编辑字幕并导出 9:16 版本；
+4. 以可见的 `◈ N` 操作重生成且仅重生成一个生成场景；
+5. 保留原片并恢复前一版本；
+6. 将最终渲染通过现有认证文件交付体验提供给用户；
+7. 拒绝其他用户或过期付费动作发起的操作；
+8. 证明成本／扣减正确性、预览／渲染完成、撤销行为，以及支持浏览器／编解码器的基线。
 
-Measure: successful edit-to-export rate, median time to first preview, paid-action cost accuracy, render failure/refund rate, version-restore success rate, and how often users complete an edit without opening the precision timeline.
+衡量指标：编辑到导出成功率、首次预览中位耗时、付费动作价格准确性、渲染失败／退款率、版本恢复成功率，以及用户无需打开精细时间线即可完成编辑的比例。
 
-## Explicitly out of scope
+## 明确不在范围内
 
-- a standalone Video Editor navigation area;
-- a self-built nonlinear timeline/canvas engine;
-- professional multi-track post-production, keyframe/VFX tooling, collaborative live editing, or a stock-media marketplace;
-- automatic destructive editing without a user instruction; and
-- re-generating individual original shots where only a historical final MP4 exists.
+- 独立的视频编辑器导航区；
+- 自建非线性时间线／画布引擎；
+- 专业级多轨后期、关键帧／VFX 工具、协同实时剪辑或素材市场；
+- 未经用户指令的自动破坏性剪辑；
+- 对只保留历史最终 MP4 的视频重生成其中一条原始镜头。
 
-## Follow-up after approval
+## 确认后的后续工作
 
-Create an implementation plan only after this design is reviewed and accepted. The plan will include a licensing/technical spike for IMG.LY, an adapter contract, project/version persistence, billing action semantics, upload ingestion, and the POC test matrix. No production code is authorized by this design alone.
+仅在本设计经审阅确认后，才编写实施计划。计划将包含 IMG.LY 的授权／技术 Spike、适配器契约、项目／版本持久化、计费动作语义、上传导入和 POC 测试矩阵。本设计本身不授权任何生产代码实现。
