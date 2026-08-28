@@ -289,6 +289,6 @@ function lazyElement(children: ReactNode): JSX.Element {
  * generation when a capability is unavailable, but the shell should not
  * hide the page or bounce to Home because an older rollout flag is false.
  */
-function VideoGate({ mode = 'video' }: { mode?: 'video' | 'image' }): JSX.Element {
-  return lazyElement(<VideoPage mode={mode} />);
+function VideoGate(): JSX.Element {
+  return lazyElement(<VideoPage />);
 }

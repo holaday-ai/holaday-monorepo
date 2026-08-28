@@ -9,13 +9,10 @@ import {
   creativeHistoryLoadReducer,
   creativeHistoryPreviewAvailability,
   filterCreativeHistoryRows,
-  isImageLane,
-  isLockedSubjectImageIntent,
   isVideoLane,
   mergeCreativeHistoryRows,
   nextCreativeHistoryVisibleCount,
   showImageOption,
-  toImageRow,
   toVideoRow,
   videoAudioVerificationBadge,
 } from './video-history-row';
@@ -285,15 +282,6 @@ describe('isVideoLane', () => {
     expect(isVideoLane('video_creation_consumed')).toBe(true);
     expect(isVideoLane('generate')).toBe(false);
     expect(isVideoLane(undefined)).toBe(false);
-  });
-});
-
-describe('isImageLane', () => {
-  it('matches image execution metadata', () => {
-    expect(isImageLane({ executionMode: 'image' })).toBe(true);
-    expect(isImageLane({ finalExecutionMode: 'image' })).toBe(true);
-    expect(isImageLane({ lane: 'video_creation' })).toBe(false);
-    expect(isImageLane(undefined)).toBe(false);
   });
 });
 
@@ -644,177 +632,7 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
   });
 });
 
-describe('toImageRow — 图片历史 only lists completed image outputs', () => {
-  const imageAtt = {
-    fileId: 'file_img',
-    downloadUrl: '/api/files/file_img/download',
-    filename: 'holaday-image-1.png',
-    mimetype: 'image/png',
-    sizeBytes: 900_000,
-  };
-
-  function imageRow(over: Record<string, unknown> = {}): unknown {
-    return {
-      taskId: 'tsk_img',
-      intent: '生成图片：极简工作台插画',
-      title: null,
-      status: 'completed',
-      createdAt: '2026-07-01T00:00:00.000Z',
-      result: { metadata: { executionMode: 'image', attachments: [imageAtt] } },
-      ...over,
-    };
-  }
-
-  it('completed image task + valid image attachment → row with thumbnail payload', () => {
-    const out = toImageRow(imageRow());
-    expect(out?.taskId).toBe('tsk_img');
-    expect(out?.posterUrl).toBe('/api/files/file_img/download');
-    expect(out?.download).toEqual({
-      fileId: 'file_img',
-      downloadUrl: '/api/files/file_img/download',
-      filename: 'holaday-image-1.png',
-      size: 900_000,
-    });
-  });
-
-  it('keeps every generated image in a multi-output history row', () => {
-    const secondImage = {
-      ...imageAtt,
-      fileId: 'file_img_2',
-      downloadUrl: '/api/files/file_img_2/download',
-      filename: 'holaday-image-2.png',
-      sizeBytes: 750_000,
-    };
-    const out = toImageRow(
-      imageRow({
-        result: {
-          metadata: {
-            executionMode: 'image',
-            attachments: [imageAtt, secondImage],
-          },
-        },
-      }),
-    );
-
-    expect(out?.downloads).toEqual([
-      expect.objectContaining({ fileId: 'file_img', filename: 'holaday-image-1.png' }),
-      expect.objectContaining({ fileId: 'file_img_2', filename: 'holaday-image-2.png' }),
-    ]);
-  });
-
-  it('normalizes image backend /files URLs before rendering previews', () => {
-    const out = toImageRow(
-      imageRow({
-        result: {
-          metadata: {
-            executionMode: 'image',
-            attachments: [{ ...imageAtt, downloadUrl: '/files/file_img/download' }],
-          },
-        },
-      }),
-    );
-    expect(out?.download?.downloadUrl).toBe('/api/files/file_img/download');
-    expect(out?.posterUrl).toBe('/api/files/file_img/download');
-  });
-
-  it('normalizes trusted absolute production download URLs onto the current app origin', () => {
-    const out = toImageRow(
-      imageRow({
-        result: {
-          metadata: {
-            executionMode: 'image',
-            attachments: [
-              {
-                ...imageAtt,
-                downloadUrl: 'https://holaday.ai/files/file_img/download?token=short-lived',
-              },
-            ],
-          },
-        },
-      }),
-    );
-
-    expect(out?.download?.downloadUrl).toBe(
-      '/api/files/file_img/download?token=short-lived',
-    );
-  });
-
-  it('accepts image extension when mimetype is absent', () => {
-    const out = toImageRow(
-      imageRow({
-        result: {
-          metadata: {
-            finalExecutionMode: 'image',
-            attachments: [{ ...imageAtt, mimetype: undefined, filename: 'generated.webp' }],
-          },
-        },
-      }),
-    );
-    expect(out?.download?.filename).toBe('generated.webp');
-  });
-
-  it('DROPS failed or non-image outputs', () => {
-    expect(toImageRow(imageRow({ status: 'failed' }))).toBeNull();
-    expect(
-      toImageRow(imageRow({ result: { metadata: { executionMode: 'image', attachments: [] } } })),
-    ).toBeNull();
-    expect(
-      toImageRow(
-        imageRow({
-          result: {
-            metadata: {
-              executionMode: 'image',
-              attachments: [{ ...imageAtt, filename: 'notes.txt', mimetype: 'text/plain' }],
-            },
-          },
-        }),
-      ),
-    ).toBeNull();
-  });
-
-  it('keeps review-needed image outputs when a downloadable image exists', () => {
-    const out = toImageRow(imageRow({ status: 'partial_success' }));
-    expect(out?.status).toBe('partial_success');
-    expect(out?.posterUrl).toBe('/api/files/file_img/download');
-  });
-
-  it('carries the persisted pin state into creative history', () => {
-    const starredAt = '2026-07-23T08:30:00.000Z';
-    const out = toImageRow(imageRow({ starred: true, starredAt }));
-    expect(out?.starred).toBe(true);
-    expect(out?.starredAt).toBe(starredAt);
-  });
-
-  it('carries structured locked-subject metadata into image history', () => {
-    const out = toImageRow(
-      imageRow({
-        result: {
-          metadata: {
-            executionMode: 'image',
-            imageOptions: {
-              model: 'nano_banana_2',
-              aspectRatio: '1:1',
-              imageCount: 1,
-              mode: 'lock_subject',
-              subjectFileId: 'file_subject',
-            },
-            attachments: [imageAtt],
-          },
-        },
-      }),
-    );
-
-    expect(out?.imageMode).toBe('lock_subject');
-  });
-});
-
 describe('creative history filters', () => {
-  const imageDownload = {
-    fileId: 'file_img',
-    downloadUrl: '/api/files/file_img/download',
-    filename: 'holaday-image.jpg',
-    size: 512_000,
-  };
   const videoDownload = {
     fileId: 'file_video',
     downloadUrl: '/api/files/file_video/download',
@@ -822,24 +640,6 @@ describe('creative history filters', () => {
     size: 3_000_000,
   };
   const rows = [
-    {
-      taskId: 'img_pinned',
-      intent: '生成图片：置顶图片',
-      title: null,
-      status: 'completed',
-      createdAt: '2026-07-23T00:00:00.000Z',
-      download: imageDownload,
-      starred: true,
-    },
-    {
-      taskId: 'img_regular',
-      intent: '生成图片：普通图片',
-      title: null,
-      status: 'completed',
-      createdAt: '2026-07-22T00:00:00.000Z',
-      download: imageDownload,
-      starred: false,
-    },
     {
       taskId: 'video_pinned',
       intent: '生成视频：置顶视频',
@@ -852,20 +652,9 @@ describe('creative history filters', () => {
     },
   ];
 
-  it('shows only persisted pinned image rows in the pinned filter', () => {
-    expect(
-      filterCreativeHistoryRows(rows, {
-        mode: 'image',
-        filter: 'pinned',
-        now: Date.parse('2026-07-24T00:00:00.000Z'),
-      }).map((row) => row.taskId),
-    ).toEqual(['img_pinned']);
-  });
-
   it('keeps video history scoped to the active video type', () => {
     expect(
       filterCreativeHistoryRows(rows, {
-        mode: 'video',
         videoType: 'normal',
         filter: 'all',
         now: Date.parse('2026-07-24T00:00:00.000Z'),
@@ -895,23 +684,6 @@ describe('creative history filters', () => {
 });
 
 describe('creative history display copy', () => {
-  const lockedIntent = [
-    '生成图片：Keep the same blue ceramic mug on a walnut table.',
-    '主体一致性要求：请以用户上传的第一张图片作为锁定主角。',
-    '尽量保持主角身份与商品结构不变。',
-  ].join('\n\n');
-
-  it('hides internal subject-consistency instructions from the visible title', () => {
-    expect(creativeHistoryDisplayTitle({ title: null, intent: lockedIntent }, 'image')).toBe(
-      'Keep the same blue ceramic mug on a walnut table.',
-    );
-  });
-
-  it('detects locked-subject image history so the UI can show a concise badge', () => {
-    expect(isLockedSubjectImageIntent(lockedIntent)).toBe(true);
-    expect(isLockedSubjectImageIntent('生成图片：普通产品图')).toBe(false);
-  });
-
   it('replaces leaked IP onboarding boilerplate with the product type label', () => {
     const internalCopy = [
       '· 声音样本在克隆出声纹后即刻删除,我们只保留声纹用于合成。',
@@ -919,57 +691,45 @@ describe('creative history display copy', () => {
       '· 一键清除会删掉云端声纹 + 出镜底版 + 授权记录。',
     ].join(' ');
     expect(
-      creativeHistoryDisplayTitle(
-        {
-          title: internalCopy,
-          intent: internalCopy,
-          videoType: 'ip_person',
-        },
-        'video',
-      ),
+      creativeHistoryDisplayTitle({
+        title: internalCopy,
+        intent: internalCopy,
+        videoType: 'ip_person',
+      }),
     ).toBe('IP人物视频');
   });
 
   it('keeps a real user video prompt visible', () => {
     expect(
-      creativeHistoryDisplayTitle(
-        {
-          title: null,
-          intent: '让西高地在海边奔跑，镜头平稳跟随。',
-          videoType: 'normal',
-        },
-        'video',
-      ),
+      creativeHistoryDisplayTitle({
+        title: null,
+        intent: '让西高地在海边奔跑，镜头平稳跟随。',
+        videoType: 'normal',
+      }),
     ).toBe('让西高地在海边奔跑，镜头平稳跟随。');
   });
 
   it('shows the user note instead of clone-video routing instructions', () => {
     expect(
-      creativeHistoryDisplayTitle(
-        {
-          title: null,
-          intent: [
-            '复刻视频：使用上传照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。',
-            '任务备注（仅用于记录，不改变本次模型输入）：把主角换成我的西高地。',
-          ].join('\n'),
-          videoType: 'pet',
-        },
-        'video',
-      ),
+      creativeHistoryDisplayTitle({
+        title: null,
+        intent: [
+          '复刻视频：使用上传照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。',
+          '任务备注（仅用于记录，不改变本次模型输入）：把主角换成我的西高地。',
+        ].join('\n'),
+        videoType: 'pet',
+      }),
     ).toBe('把主角换成我的西高地。');
   });
 
   it('uses the clone-video label when there is no user note', () => {
     expect(
-      creativeHistoryDisplayTitle(
-        {
-          title: null,
-          intent:
-            '复刻视频：使用上传照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。',
-          videoType: 'pet',
-        },
-        'video',
-      ),
+      creativeHistoryDisplayTitle({
+        title: null,
+        intent:
+          '复刻视频：使用上传照片替换参考视频中的主角，并保留参考视频的动作、镜头、节奏和音频。',
+        videoType: 'pet',
+      }),
     ).toBe('复刻视频');
   });
 });

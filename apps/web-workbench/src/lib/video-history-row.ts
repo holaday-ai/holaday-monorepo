@@ -1,9 +1,9 @@
 import type { FileDownloadPayload } from '@/components/FileDownloadCard';
+import { normaliseAttachmentDownloadUrl } from '@/lib/attachment-download-url';
 import {
   type DownloadFileAvailability,
   downloadFileAvailability,
 } from '@/lib/file-download-card-copy';
-import { normaliseAttachmentDownloadUrl } from '@/lib/attachment-download-url';
 
 /**
  * Pure helpers for the /video 生成历史 list. Extracted from VideoPage so
@@ -17,7 +17,6 @@ const SUPPORTED_VIDEO_QUALITY_GATE_VERSIONS = new Set([
   'video-final-v3',
   CURRENT_VIDEO_QUALITY_GATE_VERSION,
 ]);
-export type CreativeHistoryMode = 'video' | 'image';
 export type CreativeHistoryFilter = 'all' | 'recent' | 'pinned';
 export type CreativeHistoryTerminalStatus = 'completed' | 'partial_success';
 
@@ -49,10 +48,6 @@ export interface VideoResultMeta {
   finalExecutionMode?: string;
   visualMode?: string;
   videoType?: string;
-  imageOptions?: {
-    mode?: 'free' | 'lock_subject';
-    subjectFileId?: string;
-  };
   qualityVerification?: {
     status?: string;
     gateVersion?: string;
@@ -92,12 +87,8 @@ export interface VideoRow {
   status: string;
   createdAt: string | number | Date;
   download?: FileDownloadPayload;
-  /** All downloadable outputs for multi-image tasks; `download` remains the primary artifact. */
-  downloads?: FileDownloadPayload[];
   /** Backend-stamped type — drives per-tab history isolation + the type chip. */
   videoType?: VideoType;
-  /** Structured image mode persisted by the image execution lane. */
-  imageMode?: 'free' | 'lock_subject';
   /** First-frame poster (R2, Bearer-gated) — rendered as a lazy thumbnail. */
   posterUrl?: string;
   /** Server confirmed the separate poster file is no longer available. */
@@ -293,10 +284,6 @@ export function canLoadOlderCreativeHistory(options: {
 
 export function isVideoLane(lane: string | undefined): boolean {
   return typeof lane === 'string' && lane.startsWith('video_creation');
-}
-
-export function isImageLane(meta: VideoResultMeta | undefined): boolean {
-  return meta?.executionMode === 'image' || meta?.finalExecutionMode === 'image';
 }
 
 /** Narrow an unknown metadata.videoType to the enum, else undefined. */
@@ -515,78 +502,19 @@ export function toVideoRow(raw: unknown): VideoRow | null {
   };
 }
 
-export function toImageRow(raw: unknown): VideoRow | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const r = raw as {
-    taskId?: string;
-    intent?: string;
-    title?: string | null;
-    status?: string;
-    createdAt?: string | number | Date;
-    starred?: boolean;
-    starredAt?: string | number | Date | null;
-    result?: { metadata?: VideoResultMeta } | null;
-  };
-  const meta = r.result?.metadata;
-  if (!isImageLane(meta)) return null;
-  if (!r.taskId || !r.status || !isDownloadableTerminalOutput(r.status)) return null;
-  const downloads = (meta?.attachments ?? []).flatMap((att) => {
-    if (!att.fileId || !att.downloadUrl || !att.filename || typeof att.sizeBytes !== 'number') {
-      return [];
-    }
-    const isImage =
-      (typeof att.mimetype === 'string' && att.mimetype.startsWith('image/')) ||
-      /\.(png|jpe?g|webp|gif)$/i.test(att.filename);
-    if (!isImage) return [];
-    const downloadUrl = normaliseAttachmentDownloadUrl(att.downloadUrl);
-    if (!downloadUrl) return [];
-    return [
-      {
-        fileId: att.fileId,
-        downloadUrl,
-        filename: att.filename,
-        size: att.sizeBytes,
-        ...(typeof att.expiresAt === 'string' ? { expiresAt: att.expiresAt } : {}),
-        ...(att.availability === 'unavailable' ? { unavailable: true } : {}),
-      },
-    ];
-  });
-  const download = downloads[0];
-  if (!download) return null;
-  return {
-    taskId: r.taskId,
-    intent: r.intent ?? '',
-    title: r.title ?? null,
-    status: r.status,
-    createdAt: r.createdAt ?? new Date(),
-    download,
-    downloads,
-    posterUrl: download.downloadUrl,
-    ...(meta?.imageOptions?.mode ? { imageMode: meta.imageOptions.mode } : {}),
-    starred: r.starred === true,
-    starredAt: r.starredAt ?? null,
-  };
-}
-
 export function filterCreativeHistoryRows(
   rows: readonly VideoRow[],
   {
-    mode,
     videoType,
     filter,
     now = Date.now(),
   }: {
-    mode: CreativeHistoryMode;
     videoType?: VideoType;
     filter: CreativeHistoryFilter;
     now?: number;
   },
 ): VideoRow[] {
-  const scopedRows = rows.filter((row) => {
-    const filename = row.download?.filename ?? '';
-    const imageFile = /\.(png|jpe?g|webp|gif)$/i.test(filename);
-    return mode === 'image' ? imageFile : !imageFile && (row.videoType ?? 'normal') === videoType;
-  });
+  const scopedRows = rows.filter((row) => (row.videoType ?? 'normal') === videoType);
   if (filter === 'recent') {
     return scopedRows.filter((row) => isRecentCreativeHistoryRow(row.createdAt, now));
   }
@@ -596,24 +524,16 @@ export function filterCreativeHistoryRows(
 
 export function creativeHistoryDisplayTitle(
   row: Pick<VideoRow, 'title' | 'intent' | 'videoType'>,
-  mode: CreativeHistoryMode,
 ): string {
   const source = row.title?.trim() || row.intent.trim();
-  if (mode !== 'image') {
-    if (isIpOnboardingCopy(source)) {
-      const intent = row.intent.trim();
-      if (intent && intent !== source && !isIpOnboardingCopy(intent)) {
-        return cleanVideoHistoryTitle(intent, row.videoType);
-      }
-      return videoHistoryFallbackTitle('ip_person');
+  if (isIpOnboardingCopy(source)) {
+    const intent = row.intent.trim();
+    if (intent && intent !== source && !isIpOnboardingCopy(intent)) {
+      return cleanVideoHistoryTitle(intent, row.videoType);
     }
-    return cleanVideoHistoryTitle(source, row.videoType);
+    return videoHistoryFallbackTitle('ip_person');
   }
-  const withoutInternalInstructions = source.split(/主体一致性要求[：:]/u, 1)[0]?.trim() ?? '';
-  const withoutLanePrefix = withoutInternalInstructions
-    .replace(/^生成(?:一张)?图片[：:]\s*/u, '')
-    .trim();
-  return withoutLanePrefix || '图片作品';
+  return cleanVideoHistoryTitle(source, row.videoType);
 }
 
 function cleanVideoHistoryTitle(source: string, videoType: VideoType | undefined): string {
@@ -632,10 +552,6 @@ function videoHistoryFallbackTitle(videoType: VideoType | undefined): string {
   if (videoType === 'pet') return '复刻视频';
   if (videoType === 'ip_person') return 'IP人物视频';
   return '视频作品';
-}
-
-export function isLockedSubjectImageIntent(intent: string): boolean {
-  return /主体一致性要求[：:]/u.test(intent);
 }
 
 function isDownloadableTerminalOutput(status: string): boolean {

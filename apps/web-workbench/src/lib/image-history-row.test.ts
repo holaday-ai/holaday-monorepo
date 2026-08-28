@@ -1,6 +1,9 @@
 import type { UiTask } from '@/types/task';
 import { describe, expect, it } from 'vitest';
 import {
+  filterImageHistoryRows,
+  imageHistoryDisplayTitle,
+  imageHistoryListInput,
   imageHistoryLoadReducer,
   imageResultActions,
   mergeImageHistoryRows,
@@ -128,6 +131,25 @@ describe('toImageHistoryRow', () => {
     );
     expect(row?.downloads.map(({ filename }) => filename)).toEqual(['out.webp']);
   });
+
+  it('normalizes legacy and trusted production file routes onto the current app origin', () => {
+    const row = mappedRow({
+      attachments: [
+        { ...imageAttachment, downloadUrl: '/files/file_img_1/download' },
+        {
+          ...imageAttachment,
+          fileId: 'file_img_2',
+          filename: 'second.png',
+          downloadUrl: 'https://holaday.ai/files/file_img_2/download?token=short-lived',
+        },
+      ],
+    });
+
+    expect(row.downloads.map(({ downloadUrl }) => downloadUrl)).toEqual([
+      '/api/files/file_img_1/download',
+      '/api/files/file_img_2/download?token=short-lived',
+    ]);
+  });
 });
 
 describe('image result actions', () => {
@@ -178,6 +200,25 @@ describe('image history state', () => {
       'tsk_image',
       'tsk_second',
     ]);
+  });
+
+  it('uses persisted filters and the visible brief instead of internal routing copy', () => {
+    const pinned = mappedRow({ starred: true });
+    const regular = { ...mappedRow(), taskId: 'tsk_regular', starred: false };
+    expect(filterImageHistoryRows([pinned, regular], 'pinned')).toEqual([pinned]);
+    expect(imageHistoryListInput('pinned')).toEqual({
+      limit: 50,
+      status: ['completed', 'partial_success'],
+      starred: true,
+    });
+    expect(
+      imageHistoryListInput('recent', undefined, Date.parse('2026-08-28T00:00:00.000Z')),
+    ).toEqual({
+      limit: 50,
+      status: ['completed', 'partial_success'],
+      dateFrom: new Date('2026-08-21T00:00:00.000Z'),
+    });
+    expect(imageHistoryDisplayTitle(pinned)).toBe('把背景换成海边');
   });
 
   it('keeps the last successful rows when a refresh fails and rolls back an optimistic pin', () => {

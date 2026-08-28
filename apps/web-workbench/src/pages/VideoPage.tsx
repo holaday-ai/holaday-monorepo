@@ -1,13 +1,73 @@
+import { AttachmentChip, type DraftAttachment } from '@/components/AttachmentChip';
+import { FileDownloadCard, type FileDownloadPayload } from '@/components/FileDownloadCard';
+import { LazyPosterImg } from '@/components/LazyPosterImg';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { useToast } from '@/components/ui/toast';
+import { revokeCreativePreviewUrls } from '@/lib/creative-preview-urls';
+import { createMediaActionGuard } from '@/lib/media-action-guard';
+import { normalizeTaskHubCursor } from '@/lib/task-hub-state';
+import { trpc } from '@/lib/trpc';
 import {
-  reconcileNormalVideoParameters,
-  type NormalVideoModelId,
-} from '@holaday/shared-types';
+  isFileUnavailable,
+  markFileUnavailable,
+  useUnavailableFiles,
+} from '@/lib/unavailable-file-registry';
+import { uploadFailureMessage, uploadFile, uploadMediaFile } from '@/lib/upload-file';
+import { cn } from '@/lib/utils';
+import {
+  type CreativeHistoryFilter,
+  type VideoRow,
+  type VideoType,
+  canChangeCreativeHistoryFilter,
+  canLoadOlderCreativeHistory,
+  creativeHistoryArtifactAvailability,
+  creativeHistoryDisplayTitle,
+  creativeHistoryListInput,
+  creativeHistoryLoadReducer,
+  creativeHistoryPreviewAvailability,
+  filterCreativeHistoryRows,
+  nextCreativeHistoryVisibleCount,
+  showImageOption,
+  toVideoRow,
+  videoAudioVerificationBadge,
+} from '@/lib/video-history-row';
+import { ipRenderingHint } from '@/lib/video-ip-estimate';
+import {
+  currentMediaTaskText,
+  currentMediaTaskTitle,
+  hydrateMissingMediaTask,
+  isVideoTaskRunning,
+  resolveVideoAwaitingKind,
+  selectStepsFor,
+  videoTabForTaskType,
+  videoTaskStatusIconKind,
+  videoTaskStatusLabel,
+} from '@/lib/video-task-selectors';
+import { PageContainer, Section } from '@/pages/PageShell';
+import { useTaskStore } from '@/stores/task-store';
+import type { UiTask, UiTerminalAttachment } from '@/types/task';
+import {
+  type NormalVideoModel,
+  type VideoAspect,
+  type VideoCreationOptions,
+  type VideoDuration,
+  type VideoModel,
+  type VideoResolution,
+  type VideoStyleOption,
+  cloneModeFromVideoModel,
+  estimateCloneCny,
+  estimateIpVideo,
+  estimatePerSegmentCny,
+  normalVideoModelFromSelection,
+} from '@/types/video';
+import { type NormalVideoModelId, reconcileNormalVideoParameters } from '@holaday/shared-types';
 import {
   AlertCircle,
   ArrowUp,
-  ChevronDown,
   Check,
   CheckCircle2,
+  ChevronDown,
   CircleSlash,
   Clapperboard,
   Clock,
@@ -30,75 +90,6 @@ import {
 import * as React from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { AttachmentChip, type DraftAttachment } from '@/components/AttachmentChip';
-import {
-  FileDownloadCard,
-  type FileDownloadPayload,
-} from '@/components/FileDownloadCard';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { useToast } from '@/components/ui/toast';
-import { revokeCreativePreviewUrls } from '@/lib/creative-preview-urls';
-import { createMediaActionGuard } from '@/lib/media-action-guard';
-import { trpc } from '@/lib/trpc';
-import { uploadFailureMessage, uploadFile, uploadMediaFile } from '@/lib/upload-file';
-import { cn } from '@/lib/utils';
-import {
-  currentMediaTaskTitle,
-  currentMediaTaskText,
-  hydrateMissingMediaTask,
-  isVideoTaskRunning,
-  resolveVideoAwaitingKind,
-  selectStepsFor,
-  videoTabForTaskType,
-  videoTaskStatusIconKind,
-  videoTaskStatusLabel,
-} from '@/lib/video-task-selectors';
-import {
-  canChangeCreativeHistoryFilter,
-  canLoadOlderCreativeHistory,
-  creativeHistoryArtifactAvailability,
-  creativeHistoryDisplayTitle,
-  creativeHistoryListInput,
-  creativeHistoryLoadReducer,
-  creativeHistoryPreviewAvailability,
-  filterCreativeHistoryRows,
-  isLockedSubjectImageIntent,
-  nextCreativeHistoryVisibleCount,
-  showImageOption,
-  toImageRow,
-  toVideoRow,
-  videoAudioVerificationBadge,
-  type CreativeHistoryFilter,
-  type VideoRow,
-  type VideoType,
-} from '@/lib/video-history-row';
-import { normalizeTaskHubCursor } from '@/lib/task-hub-state';
-import {
-  isFileUnavailable,
-  markFileUnavailable,
-  useUnavailableFiles,
-} from '@/lib/unavailable-file-registry';
-import { ipRenderingHint } from '@/lib/video-ip-estimate';
-import { LazyPosterImg } from '@/components/LazyPosterImg';
-import { PageContainer, Section } from '@/pages/PageShell';
-import { useTaskStore } from '@/stores/task-store';
-import type { ImageCreationOptions, ImageModel } from '@/types/image';
-import type { UiTask, UiTerminalAttachment } from '@/types/task';
-import {
-  cloneModeFromVideoModel,
-  estimateCloneCny,
-  estimateIpVideo,
-  estimatePerSegmentCny,
-  normalVideoModelFromSelection,
-  type NormalVideoModel,
-  type VideoAspect,
-  type VideoCreationOptions,
-  type VideoDuration,
-  type VideoModel,
-  type VideoResolution,
-  type VideoStyleOption,
-} from '@/types/video';
 
 /**
  * 视频任务 — Phase 2 第一期独立视频界面(骨架 + 普通可用)。
@@ -112,20 +103,14 @@ import {
 type CreativeMode = 'video' | 'image';
 
 export function creativeRetryPath(mode: CreativeMode): '/video' | '/image' {
-  return mode === 'image' ? '/image' : '/video';
+  return mode === 'video' ? '/video' : '/image';
 }
 
 export function creativeTaskPath(mode: CreativeMode, taskId: string): string {
   return `${creativeRetryPath(mode)}?task=${encodeURIComponent(taskId)}`;
 }
 
-export function supportsReferenceVideo(mode: CreativeMode): boolean {
-  return mode === 'video';
-}
-
-export function currentMediaDownloadPayload(
-  attachment: UiTerminalAttachment,
-): FileDownloadPayload {
+export function currentMediaDownloadPayload(attachment: UiTerminalAttachment): FileDownloadPayload {
   return {
     fileId: attachment.fileId,
     filename: attachment.filename,
@@ -140,25 +125,7 @@ const CREATIVE_HISTORY_VISIBLE_PAGE_SIZE = 4;
 const CREATIVE_HISTORY_SCAN_PAGES_PER_CLICK = 5;
 export const IP_VIDEO_ASPECT_RATIO: VideoAspect = '9:16';
 type VideoTab = 'normal' | 'pet' | 'ip';
-type ImageGenerationMode = 'free' | 'lock_subject';
-type CreativeModelValue = VideoModel | ImageModel;
-type ImageStyleKey =
-  | 'random'
-  | 'cinematic'
-  | 'creative'
-  | 'dynamic'
-  | 'fashion'
-  | 'portrait'
-  | 'stock_photo'
-  | 'vibrant'
-  | 'anime'
-  | 'illustration'
-  | 'logo'
-  | 'watercolor'
-  | 'line_art'
-  | 'fantasy'
-  | 'product'
-  | 'three_d_render';
+type CreativeModelValue = VideoModel;
 type CreativeStyleGroup = 'vibe' | 'lighting' | 'color';
 type CreativeStylePreviewSubject = 'default' | 'human';
 type CreativeStyleKey =
@@ -203,7 +170,6 @@ type CreativeStyleKey =
 const CREATIVE_ACCEPT_IMAGES = '.png,.jpg,.jpeg,.webp,.gif,image/*';
 const CREATIVE_ACCEPT_REFERENCE_VIDEO = '.mp4,.mov,video/mp4,video/quicktime';
 const CREATIVE_MAX_ATTACHMENTS = 5;
-export const DEFAULT_IMAGE_COUNT: 1 | 2 | 3 | 4 = 1;
 
 export function normalVideoParametersAfterTabReturn(
   model: VideoModel,
@@ -229,53 +195,10 @@ export function normalVideoParametersAfterTabReturn(
   };
 }
 
-export function buildImageCreationOptions(
-  model: ImageModel,
-  aspectRatio: VideoAspect,
-  imageCount: 1 | 2 | 3 | 4 = DEFAULT_IMAGE_COUNT,
-  mode: ImageGenerationMode = 'free',
-  subjectFileId?: string,
-): ImageCreationOptions {
-  return {
-    model,
-    aspectRatio,
-    imageCount,
-    ...(mode === 'lock_subject' ? { mode } : {}),
-    ...(mode === 'lock_subject' && subjectFileId ? { subjectFileId } : {}),
-  };
-}
-
-type ImageFileOrderAttachment = Pick<
-  DraftAttachment,
-  'clientId' | 'fileId' | 'mimetype' | 'status'
->;
-
-export function buildImageFileOrder(
-  attachments: readonly ImageFileOrderAttachment[],
-  mode: ImageGenerationMode,
-  subjectClientId?: string | null,
-): string[] {
-  const ready = attachments.filter(
-    (attachment) => attachment.status === 'ready' && Boolean(attachment.fileId),
-  );
-  if (mode !== 'lock_subject') return ready.map((attachment) => attachment.fileId);
-  const subject =
-    ready.find(
-      (attachment) =>
-        attachment.clientId === subjectClientId && attachment.mimetype.startsWith('image/'),
-    ) ??
-    ready.find((attachment) => attachment.mimetype.startsWith('image/'));
-  if (!subject) return ready.map((attachment) => attachment.fileId);
-  return [
-    subject.fileId,
-    ...ready
-      .filter((attachment) => attachment.fileId !== subject.fileId)
-      .map((attachment) => attachment.fileId),
-  ];
-}
-
-const CREATIVE_SECTION_CLASS = 'rounded-[22px] border-[#EFEFEF] bg-white shadow-[0_14px_34px_rgba(17,24,39,0.04)]';
-const CREATIVE_PRICE_SECTION_CLASS = 'rounded-[22px] border-[#EFEFEF] bg-white shadow-[0_14px_34px_rgba(17,24,39,0.04)]';
+const CREATIVE_SECTION_CLASS =
+  'rounded-[22px] border-[#EFEFEF] bg-white shadow-[0_14px_34px_rgba(17,24,39,0.04)]';
+const CREATIVE_PRICE_SECTION_CLASS =
+  'rounded-[22px] border-[#EFEFEF] bg-white shadow-[0_14px_34px_rgba(17,24,39,0.04)]';
 const CREATIVE_ASPECT_OPTIONS: ReadonlyArray<{ value: VideoAspect; label: string }> = [
   { value: '1:1', label: '1:1' },
   { value: '16:9', label: '16:9' },
@@ -302,49 +225,6 @@ interface CreativeModelOption {
   badges: readonly string[];
   tone: string;
 }
-
-const IMAGE_MODEL_OPTIONS: ReadonlyArray<CreativeModelOption> = [
-  {
-    value: 'nano_banana_2',
-    name: 'Nano Banana',
-    version: '2',
-    description: '默认图片模型，适合日常文生图、图生图和主体一致性生成，优先快速稳定出图。',
-    badges: ['默认', '快速', '图生图'],
-    tone: 'from-[#FFE24A] via-[#FFB23F] to-[#42C0EF]',
-  },
-  {
-    value: 'nano_banana_pro',
-    name: 'Nano Banana',
-    version: 'Pro',
-    description: '高质量图片模型，适合海报、带字图、营销图、复杂构图和更高保真的成片。',
-    badges: ['高质量', '带字图', '营销图'],
-    tone: 'from-[#111827] via-[#6154F4] to-[#42C0EF]',
-  },
-];
-
-const IMAGE_STYLE_OPTIONS: ReadonlyArray<{
-  key: ImageStyleKey;
-  label: string;
-  description: string;
-  prompt?: string;
-}> = [
-  { key: 'random', label: 'Random', description: '让模型按内容自动选择' },
-  { key: 'cinematic', label: 'Cinematic', description: '电影感光影与镜头语言', prompt: '电影感构图，真实镜头语言，细腻光影，高级色彩分级' },
-  { key: 'creative', label: 'Creative', description: '更有创意的视觉表达', prompt: '创意视觉表达，构图大胆，形式感强，但主体清晰可读' },
-  { key: 'dynamic', label: 'Dynamic', description: '动势强、画面有张力', prompt: '动态构图，强动势，画面有速度感和张力' },
-  { key: 'fashion', label: 'Fashion', description: '时尚大片与 editorial 质感', prompt: '时尚大片质感，editorial 摄影风格，精致造型与高级布光' },
-  { key: 'portrait', label: 'Portrait', description: '人物肖像与面部表现优先', prompt: '高质量肖像摄影，面部清晰，表情自然，肤色准确，背景干净' },
-  { key: 'stock_photo', label: 'Stock Photo', description: '商业图库质感，干净可用', prompt: '商业图库照片质感，真实自然，构图干净，可直接用于内容配图' },
-  { key: 'vibrant', label: 'Vibrant', description: '鲜艳明快，高饱和', prompt: '鲜艳明快，高饱和色彩，画面有活力，视觉冲击强' },
-  { key: 'anime', label: 'Anime', description: '二次元动画质感', prompt: '原创二次元动画风格，线条清晰，色彩干净，画面有故事感' },
-  { key: 'illustration', label: 'Illustration', description: '扁平插画与叙事图', prompt: '现代扁平插画风格，造型友好，色块清晰，适合说明类画面' },
-  { key: 'logo', label: 'Logo', description: '标志与图形识别', prompt: '简洁标志设计风格，几何图形明确，不加入真实品牌或可识别商标' },
-  { key: 'watercolor', label: 'Watercolor', description: '水彩纸感与柔和色', prompt: '水彩插画风格，纸张纹理，柔和晕染，层次自然' },
-  { key: 'line_art', label: 'Line Art', description: '黑白线稿细节', prompt: '黑白线稿风格，细节丰富，线条干净，适合填色和结构表达' },
-  { key: 'fantasy', label: 'Fantasy', description: '奇幻史诗感', prompt: '原创奇幻史诗风格，戏剧化光影，宏大氛围，不引用现有 IP' },
-  { key: 'product', label: 'Product', description: '商品棚拍质感', prompt: '高端商品棚拍风格，干净背景，精致布光，主体轮廓清楚' },
-  { key: 'three_d_render', label: '3D Render', description: '3D 渲染与图标质感', prompt: '高质量 3D 渲染风格，光滑材质，柔和反射，现代图标质感' },
-];
 
 const CREATIVE_MODEL_OPTIONS: ReadonlyArray<CreativeModelOption> = [
   {
@@ -392,7 +272,10 @@ const CLONE_MODEL_OPTIONS: ReadonlyArray<CreativeModelOption> = [
   },
 ];
 
-const STYLE_GROUPS: Record<CreativeStyleGroup, { title: string; subtitle: string; icon: typeof Sparkles }> = {
+const STYLE_GROUPS: Record<
+  CreativeStyleGroup,
+  { title: string; subtitle: string; icon: typeof Sparkles }
+> = {
   vibe: { title: '氛围', subtitle: '风格基调', icon: Sparkles },
   lighting: { title: '光感', subtitle: '光线效果', icon: Lightbulb },
   color: { title: '色彩', subtitle: '配色倾向', icon: Palette },
@@ -400,60 +283,293 @@ const STYLE_GROUPS: Record<CreativeStyleGroup, { title: string; subtitle: string
 
 const STYLE_OPTIONS_BY_GROUP: Record<
   CreativeStyleGroup,
-  ReadonlyArray<{ key: CreativeStyleKey; label: string; description: string; prompt?: string; swatch: string }>
+  ReadonlyArray<{
+    key: CreativeStyleKey;
+    label: string;
+    description: string;
+    prompt?: string;
+    swatch: string;
+  }>
 > = {
   vibe: [
-    { key: 'random', label: '随机', description: '让模型按内容自动选择', swatch: 'from-[#FCE7F3] via-[#E0F2FE] to-[#FEF3C7]' },
-    { key: 'clay', label: '黏土', description: '柔软手作质感', prompt: '黏土动画质感，柔软圆润，手作感', swatch: 'from-[#D9B99B] via-[#F2D8BF] to-[#8DAA91]' },
-    { key: 'color_sketch', label: '彩色手绘', description: '轻快插画线稿', prompt: '彩色手绘草图风格，线条轻盈，保留动感', swatch: 'from-[#FDE68A] via-[#F9A8D4] to-[#93C5FD]' },
-    { key: 'logo', label: '标志化', description: '图形符号更强', prompt: '简洁标志化构图，图形感强，主体明确', swatch: 'from-[#111827] via-[#FFFFFF] to-[#EA1F59]' },
-    { key: 'papercraft', label: '纸艺', description: '纸张层次与剪贴', prompt: '纸艺剪贴质感，多层纸张，柔和阴影', swatch: 'from-[#F7E8D0] via-[#FFFFFF] to-[#FCA5A5]' },
-    { key: 'pro_photo', label: '专业摄影', description: '商业摄影质感', prompt: '专业摄影质感，真实镜头语言，清晰主体', swatch: 'from-[#111827] via-[#6B7280] to-[#F8FAFC]' },
-    { key: 'sci_fi', label: '科幻', description: '未来感科技视觉', prompt: '科幻未来感，发光细节，科技场景', swatch: 'from-[#0F172A] via-[#1D4ED8] to-[#22D3EE]' },
-    { key: 'sketch', label: '素描', description: '黑白线稿质感', prompt: '素描线稿风格，黑白铅笔质感', swatch: 'from-[#111827] via-[#9CA3AF] to-[#F9FAFB]' },
-    { key: 'stock_footage', label: '素材片', description: '自然素材库镜头', prompt: '高质量素材片镜头，自然真实，少夸张特效', swatch: 'from-[#14532D] via-[#86EFAC] to-[#EFF6FF]' },
+    {
+      key: 'random',
+      label: '随机',
+      description: '让模型按内容自动选择',
+      swatch: 'from-[#FCE7F3] via-[#E0F2FE] to-[#FEF3C7]',
+    },
+    {
+      key: 'clay',
+      label: '黏土',
+      description: '柔软手作质感',
+      prompt: '黏土动画质感，柔软圆润，手作感',
+      swatch: 'from-[#D9B99B] via-[#F2D8BF] to-[#8DAA91]',
+    },
+    {
+      key: 'color_sketch',
+      label: '彩色手绘',
+      description: '轻快插画线稿',
+      prompt: '彩色手绘草图风格，线条轻盈，保留动感',
+      swatch: 'from-[#FDE68A] via-[#F9A8D4] to-[#93C5FD]',
+    },
+    {
+      key: 'logo',
+      label: '标志化',
+      description: '图形符号更强',
+      prompt: '简洁标志化构图，图形感强，主体明确',
+      swatch: 'from-[#111827] via-[#FFFFFF] to-[#EA1F59]',
+    },
+    {
+      key: 'papercraft',
+      label: '纸艺',
+      description: '纸张层次与剪贴',
+      prompt: '纸艺剪贴质感，多层纸张，柔和阴影',
+      swatch: 'from-[#F7E8D0] via-[#FFFFFF] to-[#FCA5A5]',
+    },
+    {
+      key: 'pro_photo',
+      label: '专业摄影',
+      description: '商业摄影质感',
+      prompt: '专业摄影质感，真实镜头语言，清晰主体',
+      swatch: 'from-[#111827] via-[#6B7280] to-[#F8FAFC]',
+    },
+    {
+      key: 'sci_fi',
+      label: '科幻',
+      description: '未来感科技视觉',
+      prompt: '科幻未来感，发光细节，科技场景',
+      swatch: 'from-[#0F172A] via-[#1D4ED8] to-[#22D3EE]',
+    },
+    {
+      key: 'sketch',
+      label: '素描',
+      description: '黑白线稿质感',
+      prompt: '素描线稿风格，黑白铅笔质感',
+      swatch: 'from-[#111827] via-[#9CA3AF] to-[#F9FAFB]',
+    },
+    {
+      key: 'stock_footage',
+      label: '素材片',
+      description: '自然素材库镜头',
+      prompt: '高质量素材片镜头，自然真实，少夸张特效',
+      swatch: 'from-[#14532D] via-[#86EFAC] to-[#EFF6FF]',
+    },
   ],
   lighting: [
-    { key: 'random', label: '随机', description: '自动匹配光线', swatch: 'from-[#FEF3C7] via-[#E0F2FE] to-[#FCE7F3]' },
-    { key: 'backlight', label: '逆光', description: '轮廓光突出', prompt: '逆光轮廓，主体边缘有柔和高光', swatch: 'from-[#020617] via-[#64748B] to-[#FFFFFF]' },
-    { key: 'candle_lit', label: '烛光', description: '暖调低照度', prompt: '烛光暖调，低照度，温柔阴影', swatch: 'from-[#1C1917] via-[#B45309] to-[#FED7AA]' },
-    { key: 'chiaroscuro', label: '明暗对照', description: '强烈戏剧阴影', prompt: '明暗对照强烈，戏剧化阴影', swatch: 'from-[#000000] via-[#44403C] to-[#F5F5F4]' },
-    { key: 'film_haze', label: '胶片雾感', description: '轻柔散射', prompt: '胶片雾感，柔和散射光，低对比', swatch: 'from-[#94A3B8] via-[#E2E8F0] to-[#FDE68A]' },
-    { key: 'foggy', label: '薄雾', description: '空气感更强', prompt: '薄雾环境，空气透视明显，氛围朦胧', swatch: 'from-[#CBD5E1] via-[#F8FAFC] to-[#BAE6FD]' },
-    { key: 'golden_hour', label: '黄金时刻', description: '日落暖光', prompt: '黄金时刻日落暖光，皮肤和环境偏暖', swatch: 'from-[#7C2D12] via-[#F97316] to-[#FEF3C7]' },
-    { key: 'hardlight', label: '硬光', description: '边界清晰的阴影', prompt: '硬光照明，阴影边界清晰，反差强', swatch: 'from-[#111827] via-[#F59E0B] to-[#FFFFFF]' },
-    { key: 'lens_flare', label: '镜头光斑', description: '有镜头眩光', prompt: '自然镜头光斑，适度眩光，电影感', swatch: 'from-[#7DD3FC] via-[#F9A8D4] to-[#FDE68A]' },
-    { key: 'light_art', label: '光绘', description: '彩色光轨', prompt: '光绘效果，彩色光轨，动势明显', swatch: 'from-[#0F172A] via-[#A855F7] to-[#22D3EE]' },
-    { key: 'low_key', label: '低调光', description: '暗背景高质感', prompt: '低调光，暗背景，主体局部被打亮', swatch: 'from-[#020617] via-[#111827] to-[#64748B]' },
-    { key: 'luminous', label: '明亮发光', description: '高亮通透', prompt: '明亮通透，主体有柔和发光感', swatch: 'from-[#ECFEFF] via-[#FFFFFF] to-[#FBCFE8]' },
-    { key: 'mystical', label: '神秘', description: '梦幻微光', prompt: '神秘梦幻微光，细腻粒子和柔和暗部', swatch: 'from-[#1E1B4B] via-[#6D28D9] to-[#C4B5FD]' },
-    { key: 'rainy', label: '雨天', description: '潮湿反光', prompt: '雨天湿润反光，柔和阴天光线', swatch: 'from-[#0F172A] via-[#64748B] to-[#BAE6FD]' },
-    { key: 'soft_light', label: '柔光', description: '干净自然', prompt: '柔和漫射光，皮肤和物体边缘自然', swatch: 'from-[#FDF2F8] via-[#FFFFFF] to-[#DBEAFE]' },
-    { key: 'volumetric', label: '体积光', description: '空间光束', prompt: '体积光束穿过空间，层次清楚', swatch: 'from-[#0F172A] via-[#D97706] to-[#FDE68A]' },
+    {
+      key: 'random',
+      label: '随机',
+      description: '自动匹配光线',
+      swatch: 'from-[#FEF3C7] via-[#E0F2FE] to-[#FCE7F3]',
+    },
+    {
+      key: 'backlight',
+      label: '逆光',
+      description: '轮廓光突出',
+      prompt: '逆光轮廓，主体边缘有柔和高光',
+      swatch: 'from-[#020617] via-[#64748B] to-[#FFFFFF]',
+    },
+    {
+      key: 'candle_lit',
+      label: '烛光',
+      description: '暖调低照度',
+      prompt: '烛光暖调，低照度，温柔阴影',
+      swatch: 'from-[#1C1917] via-[#B45309] to-[#FED7AA]',
+    },
+    {
+      key: 'chiaroscuro',
+      label: '明暗对照',
+      description: '强烈戏剧阴影',
+      prompt: '明暗对照强烈，戏剧化阴影',
+      swatch: 'from-[#000000] via-[#44403C] to-[#F5F5F4]',
+    },
+    {
+      key: 'film_haze',
+      label: '胶片雾感',
+      description: '轻柔散射',
+      prompt: '胶片雾感，柔和散射光，低对比',
+      swatch: 'from-[#94A3B8] via-[#E2E8F0] to-[#FDE68A]',
+    },
+    {
+      key: 'foggy',
+      label: '薄雾',
+      description: '空气感更强',
+      prompt: '薄雾环境，空气透视明显，氛围朦胧',
+      swatch: 'from-[#CBD5E1] via-[#F8FAFC] to-[#BAE6FD]',
+    },
+    {
+      key: 'golden_hour',
+      label: '黄金时刻',
+      description: '日落暖光',
+      prompt: '黄金时刻日落暖光，皮肤和环境偏暖',
+      swatch: 'from-[#7C2D12] via-[#F97316] to-[#FEF3C7]',
+    },
+    {
+      key: 'hardlight',
+      label: '硬光',
+      description: '边界清晰的阴影',
+      prompt: '硬光照明，阴影边界清晰，反差强',
+      swatch: 'from-[#111827] via-[#F59E0B] to-[#FFFFFF]',
+    },
+    {
+      key: 'lens_flare',
+      label: '镜头光斑',
+      description: '有镜头眩光',
+      prompt: '自然镜头光斑，适度眩光，电影感',
+      swatch: 'from-[#7DD3FC] via-[#F9A8D4] to-[#FDE68A]',
+    },
+    {
+      key: 'light_art',
+      label: '光绘',
+      description: '彩色光轨',
+      prompt: '光绘效果，彩色光轨，动势明显',
+      swatch: 'from-[#0F172A] via-[#A855F7] to-[#22D3EE]',
+    },
+    {
+      key: 'low_key',
+      label: '低调光',
+      description: '暗背景高质感',
+      prompt: '低调光，暗背景，主体局部被打亮',
+      swatch: 'from-[#020617] via-[#111827] to-[#64748B]',
+    },
+    {
+      key: 'luminous',
+      label: '明亮发光',
+      description: '高亮通透',
+      prompt: '明亮通透，主体有柔和发光感',
+      swatch: 'from-[#ECFEFF] via-[#FFFFFF] to-[#FBCFE8]',
+    },
+    {
+      key: 'mystical',
+      label: '神秘',
+      description: '梦幻微光',
+      prompt: '神秘梦幻微光，细腻粒子和柔和暗部',
+      swatch: 'from-[#1E1B4B] via-[#6D28D9] to-[#C4B5FD]',
+    },
+    {
+      key: 'rainy',
+      label: '雨天',
+      description: '潮湿反光',
+      prompt: '雨天湿润反光，柔和阴天光线',
+      swatch: 'from-[#0F172A] via-[#64748B] to-[#BAE6FD]',
+    },
+    {
+      key: 'soft_light',
+      label: '柔光',
+      description: '干净自然',
+      prompt: '柔和漫射光，皮肤和物体边缘自然',
+      swatch: 'from-[#FDF2F8] via-[#FFFFFF] to-[#DBEAFE]',
+    },
+    {
+      key: 'volumetric',
+      label: '体积光',
+      description: '空间光束',
+      prompt: '体积光束穿过空间，层次清楚',
+      swatch: 'from-[#0F172A] via-[#D97706] to-[#FDE68A]',
+    },
   ],
   color: [
-    { key: 'random', label: '随机', description: '自动匹配色彩', swatch: 'from-[#FCE7F3] via-[#DDD6FE] to-[#CCFBF1]' },
-    { key: 'autumn', label: '秋日', description: '橙棕暖调', prompt: '秋日橙棕暖调，柔和复古', swatch: 'from-[#7C2D12] via-[#D97706] to-[#FDE68A]' },
-    { key: 'complementary', label: '互补色', description: '色彩对比明确', prompt: '互补色搭配，主次分明，视觉对比强', swatch: 'from-[#2563EB] via-[#FFFFFF] to-[#F97316]' },
-    { key: 'cool', label: '冷调', description: '蓝青冷色', prompt: '冷调蓝青色彩，清爽克制', swatch: 'from-[#0F172A] via-[#0EA5E9] to-[#CCFBF1]' },
-    { key: 'dark', label: '暗色', description: '深色高级感', prompt: '暗色调，高级感，低饱和', swatch: 'from-[#020617] via-[#1F2937] to-[#4B5563]' },
-    { key: 'earthy', label: '大地色', description: '自然低饱和', prompt: '大地色系，低饱和，自然温和', swatch: 'from-[#3F2A1D] via-[#A16207] to-[#D6D3D1]' },
-    { key: 'electric', label: '电光', description: '高饱和霓虹', prompt: '电光霓虹色，高饱和，强视觉冲击', swatch: 'from-[#0F172A] via-[#D946EF] to-[#22D3EE]' },
-    { key: 'iridescent', label: '虹彩', description: '流动渐变', prompt: '虹彩渐变，色彩流动，梦幻光泽', swatch: 'from-[#F0ABFC] via-[#67E8F9] to-[#FDE68A]' },
-    { key: 'pastel', label: '粉彩', description: '柔和浅色', prompt: '粉彩色调，浅色柔和，轻盈干净', swatch: 'from-[#FBCFE8] via-[#BFDBFE] to-[#FEF3C7]' },
-    { key: 'split', label: '分离色调', description: '阴影高光分色', prompt: '分离色调，阴影和高光有明确色彩分层', swatch: 'from-[#0F172A] via-[#7C3AED] to-[#F59E0B]' },
-    { key: 'terracotta_teal', label: '陶土青绿', description: '暖冷平衡', prompt: '陶土橙与青绿色搭配，温暖又清爽', swatch: 'from-[#C2410C] via-[#FDE68A] to-[#0F766E]' },
-    { key: 'ultraviolet', label: '紫外线', description: '紫蓝未来感', prompt: '紫外线紫蓝色调，未来感，高对比', swatch: 'from-[#2E1065] via-[#7E22CE] to-[#60A5FA]' },
-    { key: 'vibrant', label: '鲜艳', description: '明快高饱和', prompt: '鲜艳明快，高饱和，画面有活力', swatch: 'from-[#EA1F59] via-[#F97316] to-[#22C55E]' },
-    { key: 'warm', label: '暖调', description: '舒适柔暖', prompt: '暖色调，舒适亲和，柔和光泽', swatch: 'from-[#B45309] via-[#FDBA74] to-[#FFF7ED]' },
+    {
+      key: 'random',
+      label: '随机',
+      description: '自动匹配色彩',
+      swatch: 'from-[#FCE7F3] via-[#DDD6FE] to-[#CCFBF1]',
+    },
+    {
+      key: 'autumn',
+      label: '秋日',
+      description: '橙棕暖调',
+      prompt: '秋日橙棕暖调，柔和复古',
+      swatch: 'from-[#7C2D12] via-[#D97706] to-[#FDE68A]',
+    },
+    {
+      key: 'complementary',
+      label: '互补色',
+      description: '色彩对比明确',
+      prompt: '互补色搭配，主次分明，视觉对比强',
+      swatch: 'from-[#2563EB] via-[#FFFFFF] to-[#F97316]',
+    },
+    {
+      key: 'cool',
+      label: '冷调',
+      description: '蓝青冷色',
+      prompt: '冷调蓝青色彩，清爽克制',
+      swatch: 'from-[#0F172A] via-[#0EA5E9] to-[#CCFBF1]',
+    },
+    {
+      key: 'dark',
+      label: '暗色',
+      description: '深色高级感',
+      prompt: '暗色调，高级感，低饱和',
+      swatch: 'from-[#020617] via-[#1F2937] to-[#4B5563]',
+    },
+    {
+      key: 'earthy',
+      label: '大地色',
+      description: '自然低饱和',
+      prompt: '大地色系，低饱和，自然温和',
+      swatch: 'from-[#3F2A1D] via-[#A16207] to-[#D6D3D1]',
+    },
+    {
+      key: 'electric',
+      label: '电光',
+      description: '高饱和霓虹',
+      prompt: '电光霓虹色，高饱和，强视觉冲击',
+      swatch: 'from-[#0F172A] via-[#D946EF] to-[#22D3EE]',
+    },
+    {
+      key: 'iridescent',
+      label: '虹彩',
+      description: '流动渐变',
+      prompt: '虹彩渐变，色彩流动，梦幻光泽',
+      swatch: 'from-[#F0ABFC] via-[#67E8F9] to-[#FDE68A]',
+    },
+    {
+      key: 'pastel',
+      label: '粉彩',
+      description: '柔和浅色',
+      prompt: '粉彩色调，浅色柔和，轻盈干净',
+      swatch: 'from-[#FBCFE8] via-[#BFDBFE] to-[#FEF3C7]',
+    },
+    {
+      key: 'split',
+      label: '分离色调',
+      description: '阴影高光分色',
+      prompt: '分离色调，阴影和高光有明确色彩分层',
+      swatch: 'from-[#0F172A] via-[#7C3AED] to-[#F59E0B]',
+    },
+    {
+      key: 'terracotta_teal',
+      label: '陶土青绿',
+      description: '暖冷平衡',
+      prompt: '陶土橙与青绿色搭配，温暖又清爽',
+      swatch: 'from-[#C2410C] via-[#FDE68A] to-[#0F766E]',
+    },
+    {
+      key: 'ultraviolet',
+      label: '紫外线',
+      description: '紫蓝未来感',
+      prompt: '紫外线紫蓝色调，未来感，高对比',
+      swatch: 'from-[#2E1065] via-[#7E22CE] to-[#60A5FA]',
+    },
+    {
+      key: 'vibrant',
+      label: '鲜艳',
+      description: '明快高饱和',
+      prompt: '鲜艳明快，高饱和，画面有活力',
+      swatch: 'from-[#EA1F59] via-[#F97316] to-[#22C55E]',
+    },
+    {
+      key: 'warm',
+      label: '暖调',
+      description: '舒适柔暖',
+      prompt: '暖色调，舒适亲和，柔和光泽',
+      swatch: 'from-[#B45309] via-[#FDBA74] to-[#FFF7ED]',
+    },
   ],
 };
 
-interface VideoPageProps {
-  mode?: CreativeMode;
-}
-
-export function VideoPage({ mode = 'video' }: VideoPageProps): JSX.Element {
+export function VideoPage(): JSX.Element {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const tasks = useTaskStore((s) => s.tasks);
@@ -461,12 +577,12 @@ export function VideoPage({ mode = 'video' }: VideoPageProps): JSX.Element {
   const selectTask = useTaskStore((s) => s.selectTask);
   const [videoTab, setVideoTab] = React.useState<VideoTab>('normal');
   const taskId = searchParams.get('task');
-  const currentTask = taskId ? tasks.find((task) => task.taskId === taskId) ?? null : null;
+  const currentTask = taskId ? (tasks.find((task) => task.taskId === taskId) ?? null) : null;
   const handleTaskCreated = React.useCallback(
     (createdTaskId: string) => {
-      navigate(creativeTaskPath(mode, createdTaskId));
+      navigate(creativeTaskPath('video', createdTaskId));
     },
-    [mode, navigate],
+    [navigate],
   );
 
   // History can link to tasks older than the first list page. Hydrate the
@@ -474,13 +590,10 @@ export function VideoPage({ mode = 'video' }: VideoPageProps): JSX.Element {
   const hydratedTaskIds = React.useRef<Set<string>>(new Set());
   React.useEffect(() => {
     const already = taskId ? hydratedTaskIds.current.has(taskId) : false;
-    hydrateMissingMediaTask(
-      { taskId, hasTask: Boolean(currentTask), already },
-      (missingTaskId) => {
-        hydratedTaskIds.current.add(missingTaskId);
-        selectTask(missingTaskId, 'url');
-      },
-    );
+    hydrateMissingMediaTask({ taskId, hasTask: Boolean(currentTask), already }, (missingTaskId) => {
+      hydratedTaskIds.current.add(missingTaskId);
+      selectTask(missingTaskId, 'url');
+    });
   }, [currentTask, selectTask, taskId]);
 
   React.useEffect(() => {
@@ -494,47 +607,36 @@ export function VideoPage({ mode = 'video' }: VideoPageProps): JSX.Element {
   }, [currentTask?.status, refreshTasks, taskId]);
 
   React.useEffect(() => {
-    if (mode !== 'video' || !taskId) return;
+    if (!taskId) return;
     const taskTab = videoTabForTaskType(currentTask?.videoType);
     if (taskTab) setVideoTab(taskTab);
-  }, [currentTask?.videoType, mode, taskId]);
+  }, [currentTask?.videoType, taskId]);
 
   return (
     <CreativeStudioPage
-      mode={mode}
-      videoTab={mode === 'video' ? videoTab : undefined}
-      onVideoTabChange={
-        mode === 'video'
-          ? (nextTab) => {
-              setVideoTab(nextTab);
-              if (taskId) navigate('/video');
-            }
-          : undefined
-      }
+      videoTab={videoTab}
+      onVideoTabChange={(nextTab) => {
+        setVideoTab(nextTab);
+        if (taskId) navigate('/video');
+      }}
       onTaskCreated={handleTaskCreated}
-      historyRefreshKey={currentTask ? `${currentTask.taskId}:${currentTask.status}` : taskId ?? ''}
+      historyRefreshKey={
+        currentTask ? `${currentTask.taskId}:${currentTask.status}` : (taskId ?? '')
+      }
       currentTaskPanel={
-        taskId ? (
-          <CurrentVideoTaskPanel
-            taskId={taskId}
-            task={currentTask}
-            preferredConfirm={mode === 'image' ? 'image' : 'video'}
-          />
-        ) : null
+        taskId ? <CurrentVideoTaskPanel taskId={taskId} task={currentTask} /> : null
       }
     />
   );
 }
 
 function CreativeStudioPage({
-  mode,
   videoTab = 'normal',
   onVideoTabChange,
   onTaskCreated,
   historyRefreshKey,
   currentTaskPanel,
 }: {
-  mode: CreativeMode;
   videoTab?: VideoTab;
   onVideoTabChange?(tab: VideoTab): void;
   onTaskCreated(taskId: string): void;
@@ -545,23 +647,15 @@ function CreativeStudioPage({
   const createTask = useTaskStore((s) => s.createTask);
   const [prompt, setPrompt] = React.useState('');
   const [model, setModel] = React.useState<VideoModel>('veo_fast');
-  const [imageModel, setImageModel] = React.useState<ImageModel>('nano_banana_2');
   const [modelPickerOpen, setModelPickerOpen] = React.useState(false);
   const [stylePickerOpen, setStylePickerOpen] = React.useState<CreativeStyleGroup | null>(null);
-  const [imageStylePickerOpen, setImageStylePickerOpen] = React.useState(false);
   const [referenceVideoDialogOpen, setReferenceVideoDialogOpen] = React.useState(false);
-  const [imageStyle, setImageStyle] = React.useState<ImageStyleKey>('random');
-  const [imageGenerationMode, setImageGenerationMode] = React.useState<ImageGenerationMode>('free');
-  const [subjectAttachmentClientId, setSubjectAttachmentClientId] = React.useState<string | null>(
-    null,
-  );
   const [vibeStyle, setVibeStyle] = React.useState<CreativeStyleKey>('random');
   const [lightingStyle, setLightingStyle] = React.useState<CreativeStyleKey>('random');
   const [colorStyle, setColorStyle] = React.useState<CreativeStyleKey>('random');
   const [durationSeconds, setDurationSeconds] = React.useState<VideoDuration>(8);
-  const [aspectRatio, setAspectRatio] = React.useState<VideoAspect>(mode === 'image' ? '1:1' : '16:9');
+  const [aspectRatio, setAspectRatio] = React.useState<VideoAspect>('16:9');
   const [resolution, setResolution] = React.useState<VideoResolution>('1080p');
-  const [imageCount, setImageCount] = React.useState<1 | 2 | 3 | 4>(DEFAULT_IMAGE_COUNT);
   const [attachments, setAttachments] = React.useState<DraftAttachment[]>([]);
   const attachmentsRef = React.useRef(attachments);
   attachmentsRef.current = attachments;
@@ -570,29 +664,10 @@ function CreativeStudioPage({
   const imageInputRef = React.useRef<HTMLInputElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const previousVideoTabRef = React.useRef<VideoTab>(videoTab);
-  const isImage = mode === 'image';
-  const isCloneVideo = !isImage && videoTab === 'pet';
-  const isIpVideo = !isImage && videoTab === 'ip';
-  const accent = isImage ? '#42C0EF' : '#EA1F59';
-  const softBg = isImage ? 'bg-[#42C0EF]/10' : 'bg-[#EA1F59]/10';
-  const title = isImage ? '图片任务' : '用AI创作视频';
-  const placeholder = isImage
-    ? '描述你想让 HOLA DAY 创作的图片内容 ...'
-    : '描述你想让 HOLA DAY 创作的视频内容 ...';
-  const submitLabel = isImage ? '生成图片' : '生成视频';
-  const readyImageAttachments = attachments.filter(
-    (attachment) => attachment.status === 'ready' && attachment.fileId && attachment.mimetype.startsWith('image/'),
-  );
-  const selectedSubjectAttachment =
-    readyImageAttachments.find(
-      (attachment) => attachment.clientId === subjectAttachmentClientId,
-    ) ??
-    readyImageAttachments[0] ??
-    null;
-
-  React.useEffect(() => {
-    setAspectRatio(isImage ? '1:1' : '16:9');
-  }, [isImage]);
+  const isCloneVideo = videoTab === 'pet';
+  const isIpVideo = videoTab === 'ip';
+  const accent = '#EA1F59';
+  const softBg = 'bg-[#EA1F59]/10';
 
   React.useEffect(
     () => () => {
@@ -604,7 +679,7 @@ function CreativeStudioPage({
   React.useEffect(() => {
     const previous = previousVideoTabRef.current;
     previousVideoTabRef.current = videoTab;
-    if (isImage || previous === videoTab) return;
+    if (previous === videoTab) return;
     if (videoTab === 'pet') {
       setModel('wan_animate_std');
       return;
@@ -615,7 +690,7 @@ function CreativeStudioPage({
       setResolution(next.resolution);
       setDurationSeconds(next.durationSeconds);
     }
-  }, [durationSeconds, isImage, model, resolution, videoTab]);
+  }, [durationSeconds, model, resolution, videoTab]);
 
   function applyNormalVideoModel(nextModel: NormalVideoModel): void {
     const next = reconcileNormalVideoParameters(
@@ -693,7 +768,9 @@ function CreativeStudioPage({
       };
       setAttachments((prev) => [...prev, draft]);
       try {
-        const meta = isCreativeReferenceVideo(file) ? await uploadMediaFile(file) : await uploadFile(file);
+        const meta = isCreativeReferenceVideo(file)
+          ? await uploadMediaFile(file)
+          : await uploadFile(file);
         setAttachments((prev) =>
           prev.map((attachment) =>
             attachment.clientId === clientId
@@ -730,79 +807,50 @@ function CreativeStudioPage({
   async function handleSubmit(): Promise<void> {
     const intent = prompt.trim();
     if (intent.length < 4) {
-      toast.show(isImage ? '请先描述想生成的图片内容' : '请先描述想生成的视频内容', 'error');
+      toast.show('请先描述想生成的视频内容', 'error');
       return;
     }
     if (attachments.some((attachment) => attachment.status === 'uploading')) {
       toast.show('文件上传中，请稍候');
       return;
     }
-    if (isImage && imageGenerationMode === 'lock_subject' && !selectedSubjectAttachment) {
-      toast.show('请先上传一张清晰的主角图', 'error');
-      return;
-    }
     if (!submitGuard.acquire()) return;
     setSubmitting(true);
-    const fileIds = buildImageFileOrder(
-      attachments,
-      imageGenerationMode,
-      selectedSubjectAttachment?.clientId,
-    );
+    const fileIds = attachments
+      .filter((attachment) => attachment.status === 'ready' && attachment.fileId)
+      .map((attachment) => attachment.fileId);
     const styledVideoIntent = buildVideoIntentWithCreativeStyles(intent, {
       vibe: vibeStyle,
       lighting: lightingStyle,
       color: colorStyle,
     });
-    const styledImageIntent = buildImageIntentForSubmit(intent, imageStyle, imageGenerationMode);
     const normalVideoModel = normalVideoModelFromSelection(model);
-    const finalIntent = isImage
-      ? `生成图片：${styledImageIntent}`
-      : styledVideoIntent;
-    const imageOptions = buildImageCreationOptions(
-      imageModel,
-      aspectRatio,
-      imageCount,
-      imageGenerationMode,
-      selectedSubjectAttachment?.fileId,
-    );
     try {
-      const res = isImage
-        ? await createTask(
-            finalIntent,
-            fileIds,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            imageOptions,
-          )
-        : await createTask(finalIntent, fileIds, undefined, undefined, undefined, undefined, {
-            tab: 'normal',
-            model: normalVideoModel,
-            style: inferVideoStyleOption('auto', {
-              vibe: vibeStyle,
-              lighting: lightingStyle,
-              color: colorStyle,
-            }),
-            aspectRatio,
-            resolution,
-            durationSeconds,
-          });
+      const res = await createTask(
+        styledVideoIntent,
+        fileIds,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          tab: 'normal',
+          model: normalVideoModel,
+          style: inferVideoStyleOption('auto', {
+            vibe: vibeStyle,
+            lighting: lightingStyle,
+            color: colorStyle,
+          }),
+          aspectRatio,
+          resolution,
+          durationSeconds,
+        },
+      );
       if ('error' in res) {
         toast.show(res.error || '提交失败，请重试', 'error');
         return;
       }
-      if (isImage) {
-        for (const attachment of attachments) {
-          if (attachment.previewDataUrl?.startsWith('blob:')) URL.revokeObjectURL(attachment.previewDataUrl);
-        }
-        setAttachments([]);
-        setSubjectAttachmentClientId(null);
-        setPrompt('');
-      }
-      toast.show(isImage ? '已提交，图片生成中' : '已提交，请确认报价后开始制作', 'info', 3000);
+      toast.show('已提交，请确认报价后开始制作', 'info', 3000);
       onTaskCreated(res.taskId);
     } catch (err) {
       toast.show(err instanceof Error ? err.message : '提交失败，请重试', 'error');
@@ -817,62 +865,39 @@ function CreativeStudioPage({
       <PageContainer width="wide" className="max-w-[1220px] pb-14 pt-10 md:px-12 md:pt-12">
         <div className="relative overflow-hidden rounded-none">
           <div className="pointer-events-none absolute right-20 top-5 hidden h-32 w-[320px] items-center justify-center opacity-80 md:flex">
-            <div className={cn('flex h-20 w-20 rotate-[-10deg] items-center justify-center rounded-[24px] bg-white shadow-[0_18px_42px_rgba(17,24,39,0.08)]', isImage && 'text-[#42C0EF]', !isImage && 'text-[#EA1F59]')}>
-              {isImage ? <ImagePlus className="h-12 w-12" /> : <Clapperboard className="h-12 w-12" />}
+            <div className="flex h-20 w-20 rotate-[-10deg] items-center justify-center rounded-[24px] bg-white text-[#EA1F59] shadow-[0_18px_42px_rgba(17,24,39,0.08)]">
+              <Clapperboard className="h-12 w-12" />
             </div>
             <div className="ml-4 flex h-[72px] w-[72px] rotate-[8deg] items-center justify-center rounded-[22px] bg-[#EA1F59]/10 text-[#EA1F59] shadow-[0_14px_32px_rgba(234,31,89,0.10)]">
               <Sparkles className="h-8 w-8" />
             </div>
-            <div className={cn('ml-3 flex h-14 w-14 rotate-[14deg] items-center justify-center rounded-[18px] bg-white shadow-[0_14px_30px_rgba(17,24,39,0.06)]', isImage ? 'text-[#42C0EF]' : 'text-[#EA1F59]')}>
-              {isImage ? <VideoIcon className="h-8 w-8" /> : <ImagePlus className="h-8 w-8" />}
+            <div className="ml-3 flex h-14 w-14 rotate-[14deg] items-center justify-center rounded-[18px] bg-white text-[#EA1F59] shadow-[0_14px_30px_rgba(17,24,39,0.06)]">
+              <ImagePlus className="h-8 w-8" />
             </div>
           </div>
           <header className="relative z-10 mb-5">
             <h1 className="text-[30px] font-semibold leading-tight tracking-normal text-[#111827] md:text-[34px]">
-              {title}
-              <Sparkles
-                className={cn(
-                  'ml-2 inline h-5 w-5 align-super',
-                  isImage ? 'text-[#42C0EF]' : 'text-[#EA1F59]',
-                )}
-              />
+              用 AI 创作视频
+              <Sparkles className="ml-2 inline h-5 w-5 align-super text-[#EA1F59]" />
             </h1>
           </header>
 
-          {!isImage && onVideoTabChange && (
-            <CreativeTypeTabs
-              value={videoTab}
-              onChange={onVideoTabChange}
-              accent={accent}
-            />
-          )}
+          {onVideoTabChange ? (
+            <CreativeTypeTabs value={videoTab} onChange={onVideoTabChange} accent={accent} />
+          ) : null}
 
           <div className="relative z-40 mt-5 rounded-[22px] border border-[#EFEFEF] bg-white px-5 py-4 shadow-[0_16px_42px_rgba(17,24,39,0.05)]">
             <div
               className={cn(
                 'grid grid-cols-1 gap-3 2xl:items-end',
-                isImage
-                  ? 'sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-[260px_minmax(360px,1fr)_230px_190px]'
-                  : isCloneVideo
-                    ? 'sm:grid-cols-2 2xl:grid-cols-[260px_minmax(360px,1fr)]'
-                    : isIpVideo
-                      ? 'max-w-[760px]'
-                      : 'sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-[190px_minmax(340px,1fr)_150px_210px_190px]',
+                isCloneVideo
+                  ? 'sm:grid-cols-2 2xl:grid-cols-[260px_minmax(360px,1fr)]'
+                  : isIpVideo
+                    ? 'max-w-[760px]'
+                    : 'sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-[190px_minmax(340px,1fr)_150px_210px_190px]',
               )}
             >
-              {isImage ? (
-                <div className="sm:col-span-2 xl:col-span-1">
-                  <CreativeModelPicker
-                    value={imageModel}
-                    options={IMAGE_MODEL_OPTIONS}
-                    open={modelPickerOpen}
-                    onOpenChange={setModelPickerOpen}
-                    onChange={(value) => setImageModel(value as ImageModel)}
-                    accent={accent}
-                    modelKind="image"
-                  />
-                </div>
-              ) : isCloneVideo ? (
+              {isCloneVideo ? (
                 <CreativeModelPicker
                   value={model}
                   options={CLONE_MODEL_OPTIONS}
@@ -880,7 +905,6 @@ function CreativeStudioPage({
                   onOpenChange={setModelPickerOpen}
                   onChange={(value) => setModel(value as VideoModel)}
                   accent={accent}
-                  modelKind="video"
                 />
               ) : !isIpVideo ? (
                 <CreativeModelPicker
@@ -890,18 +914,9 @@ function CreativeStudioPage({
                   onOpenChange={setModelPickerOpen}
                   onChange={(value) => applyNormalVideoModel(value as NormalVideoModel)}
                   accent={accent}
-                  modelKind="video"
                 />
               ) : null}
-              {isImage ? (
-                <ImageStyleSummaryPicker
-                  value={imageStyle}
-                  open={imageStylePickerOpen}
-                  onOpenChange={setImageStylePickerOpen}
-                  onChange={setImageStyle}
-                  accent={accent}
-                />
-              ) : videoTab === 'normal' ? (
+              {videoTab === 'normal' ? (
                 <CreativeStyleSummaryPicker
                   vibe={vibeStyle}
                   lighting={lightingStyle}
@@ -921,7 +936,7 @@ function CreativeStudioPage({
                   description="动作、镜头、节奏、时长和音频均以参考视频为准"
                 />
               ) : null}
-              {!isImage && videoTab === 'normal' && (
+              {videoTab === 'normal' ? (
                 <CreativeSegment
                   label="时长"
                   value={durationSeconds}
@@ -933,13 +948,9 @@ function CreativeStudioPage({
                   accent={accent}
                   compact
                 />
-              )}
+              ) : null}
               {isIpVideo ? (
-                <CreativeReadonlyField
-                  label="画幅"
-                  value="9:16"
-                  description="跟随竖屏底版"
-                />
+                <CreativeReadonlyField label="画幅" value="9:16" description="跟随竖屏底版" />
               ) : !isCloneVideo ? (
                 <CreativeSegment
                   label="比例"
@@ -948,29 +959,10 @@ function CreativeStudioPage({
                   onChange={(value) => setAspectRatio(value as VideoAspect)}
                   accent={accent}
                   compact
-                  className={
-                    isImage
-                      ? 'sm:col-span-2 xl:col-span-1'
-                      : 'md:col-span-2 2xl:col-span-1'
-                  }
+                  className="md:col-span-2 2xl:col-span-1"
                 />
               ) : null}
-              {isImage ? (
-                <CreativeSegment
-                  label="生成数量"
-                  value={imageCount}
-                  options={[
-                    { value: 1, label: '1' },
-                    { value: 2, label: '2' },
-                    { value: 3, label: '3' },
-                    { value: 4, label: '4' },
-                  ]}
-                  onChange={(value) => setImageCount(value as 1 | 2 | 3 | 4)}
-                  accent={accent}
-                  compact
-                  className="sm:col-span-2 xl:col-span-1"
-                />
-              ) : videoTab === 'normal' ? (
+              {videoTab === 'normal' ? (
                 <CreativeSelect
                   label="画质"
                   value={resolution === '1080p' ? '1080p 高清' : '720p 标清'}
@@ -983,32 +975,17 @@ function CreativeStudioPage({
             </div>
           </div>
 
-          {isImage ? (
-            <ImageModeChooser
-              value={imageGenerationMode}
-              onChange={setImageGenerationMode}
-              onAddSubject={() => imageInputRef.current?.click()}
-              subjectImageName={selectedSubjectAttachment?.filename}
-              referenceImageCount={Math.max(0, readyImageAttachments.length - 1)}
-              accent={accent}
-            />
-          ) : null}
-
-          {!isImage && videoTab !== 'normal' ? (
+          {videoTab !== 'normal' ? (
             <>
               <div className="relative z-10 mt-5 rounded-[26px] border border-[#EFEFEF] bg-white p-5 shadow-[0_16px_42px_rgba(17,24,39,0.05)]">
                 {videoTab === 'pet' ? (
-                  <PetVideoForm
-                    onTaskCreated={onTaskCreated}
-                    model={model}
-                  />
+                  <PetVideoForm onTaskCreated={onTaskCreated} model={model} />
                 ) : (
                   <IpOnboardingWizard onTaskCreated={onTaskCreated} />
                 )}
                 {currentTaskPanel ? <div className="mt-6">{currentTaskPanel}</div> : null}
               </div>
-              <CreativeHistory
-                mode="video"
+              <VideoHistory
                 accent={accent}
                 softBg={softBg}
                 videoType={videoTab === 'pet' ? 'pet' : 'ip_person'}
@@ -1017,123 +994,99 @@ function CreativeStudioPage({
             </>
           ) : (
             <>
-
-          <div className="relative z-10 mt-5 rounded-[24px] border border-[#EFEFEF] bg-white p-6 shadow-[0_16px_42px_rgba(17,24,39,0.05)]">
-            <Textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder={placeholder}
-              rows={6}
-              className="min-h-[168px] resize-none border-0 bg-transparent p-0 text-[16px] font-semibold leading-7 text-[#111827] placeholder:text-[#DCDDDD] focus-visible:ring-0"
-            />
-            {attachments.length > 0 ? (
-              <div className="mt-5 flex flex-wrap gap-2 border-t border-[#EFEFEF] pt-4">
-                {attachments.map((attachment, index) => (
-                  <AttachmentChip
-                    key={attachment.clientId ?? `${attachment.filename}-${index}`}
-                    attachment={attachment}
-                    onRemove={() => removeCreativeAttachment(attachment.clientId, index)}
-                    badge={
-                      isImage &&
-                      imageGenerationMode === 'lock_subject' &&
-                      attachment.status === 'ready' &&
-                      attachment.mimetype.startsWith('image/')
-                        ? attachment.clientId === selectedSubjectAttachment?.clientId
-                          ? '主角'
-                          : '参考'
-                        : undefined
-                    }
-                    actionLabel={
-                      isImage &&
-                      imageGenerationMode === 'lock_subject' &&
-                      attachment.status === 'ready' &&
-                      attachment.mimetype.startsWith('image/') &&
-                      attachment.clientId !== selectedSubjectAttachment?.clientId
-                        ? '设为主角'
-                        : undefined
-                    }
-                    onAction={
-                      attachment.clientId
-                        ? () => setSubjectAttachmentClientId(attachment.clientId ?? null)
-                        : undefined
-                    }
-                  />
-                ))}
-              </div>
-            ) : null}
-            <div className="mt-5 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 text-[#ADADAD]">
-                <button
-                  type="button"
-                  title={isImage && imageGenerationMode === 'lock_subject' ? '添加主角图' : '添加参考图'}
-                  aria-label={isImage && imageGenerationMode === 'lock_subject' ? '添加主角图' : '添加参考图'}
-                  onClick={() => imageInputRef.current?.click()}
-                  className="rounded-[8px] p-1.5 outline-none hover:bg-[#EFEFEF] hover:text-[#595757] focus-visible:bg-[#EA1F59]/10 focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
-                >
-                  <ImagePlus className="h-5 w-5" />
-                </button>
-                {supportsReferenceVideo(mode) ? (
+              <div className="relative z-10 mt-5 rounded-[24px] border border-[#EFEFEF] bg-white p-6 shadow-[0_16px_42px_rgba(17,24,39,0.05)]">
+                <Textarea
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  placeholder="描述你想生成的视频内容、镜头和氛围…"
+                  rows={6}
+                  className="min-h-[168px] resize-none border-0 bg-transparent p-0 text-[16px] font-semibold leading-7 text-[#111827] placeholder:text-[#DCDDDD] focus-visible:ring-0"
+                />
+                {attachments.length > 0 ? (
+                  <div className="mt-5 flex flex-wrap gap-2 border-t border-[#EFEFEF] pt-4">
+                    {attachments.map((attachment, index) => (
+                      <AttachmentChip
+                        key={attachment.clientId ?? `${attachment.filename}-${index}`}
+                        attachment={attachment}
+                        onRemove={() => removeCreativeAttachment(attachment.clientId, index)}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                <div className="mt-5 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3 text-[#ADADAD]">
+                    <button
+                      type="button"
+                      title="添加参考图"
+                      aria-label="添加参考图"
+                      onClick={() => imageInputRef.current?.click()}
+                      className="rounded-[8px] p-1.5 outline-none hover:bg-[#EFEFEF] hover:text-[#595757] focus-visible:bg-[#EA1F59]/10 focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+                    >
+                      <ImagePlus className="h-5 w-5" />
+                    </button>
+                    <button
+                      type="button"
+                      title="添加参考视频"
+                      aria-label="添加参考视频"
+                      onClick={() => setReferenceVideoDialogOpen(true)}
+                      className="rounded-[8px] p-1.5 outline-none hover:bg-[#EFEFEF] hover:text-[#595757] focus-visible:bg-[#EA1F59]/10 focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+                    >
+                      <VideoIcon className="h-5 w-5" />
+                    </button>
+                    <input
+                      ref={imageInputRef}
+                      type="file"
+                      accept={CREATIVE_ACCEPT_IMAGES}
+                      multiple
+                      className="hidden"
+                      onChange={(event) => {
+                        if (event.target.files) void ingestCreativeFiles(event.target.files, true);
+                        event.target.value = '';
+                      }}
+                    />
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept={CREATIVE_ACCEPT_REFERENCE_VIDEO}
+                      className="hidden"
+                      onChange={(event) => {
+                        if (event.target.files) {
+                          void ingestCreativeFiles(event.target.files).finally(() =>
+                            setReferenceVideoDialogOpen(false),
+                          );
+                        }
+                        event.target.value = '';
+                      }}
+                    />
+                  </div>
                   <button
                     type="button"
-                    title="添加参考视频"
-                    aria-label="添加参考视频"
-                    onClick={() => setReferenceVideoDialogOpen(true)}
-                    className="rounded-[8px] p-1.5 outline-none hover:bg-[#EFEFEF] hover:text-[#595757] focus-visible:bg-[#EA1F59]/10 focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+                    onClick={() => void handleSubmit()}
+                    disabled={submitting}
+                    className="inline-flex h-[46px] min-h-[46px] items-center gap-2 rounded-full border border-[#EA1F59] bg-[#EA1F59] px-4 py-2 text-[15px] font-semibold text-white shadow-[0_12px_26px_rgba(87,71,156,0.15)] transition-all hover:bg-[#EA1F59]/90 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <VideoIcon className="h-5 w-5" />
+                    {submitting ? '提交中…' : '生成视频'}
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/18">
+                      {submitting ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <ArrowUp className="h-5 w-5" />
+                      )}
+                    </span>
                   </button>
+                </div>
+                {referenceVideoDialogOpen ? (
+                  <ReferenceVideoUploadDialog
+                    onClose={() => setReferenceVideoDialogOpen(false)}
+                    onChoose={() => fileInputRef.current?.click()}
+                  />
                 ) : null}
-                <input
-                  ref={imageInputRef}
-                  type="file"
-                  accept={CREATIVE_ACCEPT_IMAGES}
-                  multiple
-                  className="hidden"
-                  onChange={(event) => {
-                    if (event.target.files) void ingestCreativeFiles(event.target.files, true);
-                    event.target.value = '';
-                  }}
-                />
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept={CREATIVE_ACCEPT_REFERENCE_VIDEO}
-                  className="hidden"
-                  onChange={(event) => {
-                    if (event.target.files) {
-                      void ingestCreativeFiles(event.target.files).finally(() => setReferenceVideoDialogOpen(false));
-                    }
-                    event.target.value = '';
-                  }}
-                />
               </div>
-              <button
-                type="button"
-                onClick={() => void handleSubmit()}
-                disabled={submitting}
-                className={cn(
-                  'inline-flex h-[46px] min-h-[46px] items-center gap-2 rounded-full border px-4 py-2 text-[15px] font-semibold text-white shadow-[0_12px_26px_rgba(87,71,156,0.15)] transition-all disabled:cursor-not-allowed disabled:opacity-60',
-                  isImage
-                    ? 'border-[#42C0EF] bg-[#42C0EF] hover:bg-[#42C0EF]/90'
-                    : 'border-[#EA1F59] bg-[#EA1F59] hover:bg-[#EA1F59]/90',
-                )}
-              >
-                {submitting ? '提交中…' : submitLabel}
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/18">
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-5 w-5" />}
-                </span>
-              </button>
-            </div>
-            {supportsReferenceVideo(mode) && referenceVideoDialogOpen ? (
-              <ReferenceVideoUploadDialog
-                onClose={() => setReferenceVideoDialogOpen(false)}
-                onChoose={() => fileInputRef.current?.click()}
-              />
-            ) : null}
-          </div>
 
-          {currentTaskPanel ? <div className="relative z-10 mt-6">{currentTaskPanel}</div> : null}
-          <CreativeHistory mode={mode} accent={accent} softBg={softBg} refreshKey={historyRefreshKey} />
+              {currentTaskPanel ? (
+                <div className="relative z-10 mt-6">{currentTaskPanel}</div>
+              ) : null}
+              <VideoHistory accent={accent} softBg={softBg} refreshKey={historyRefreshKey} />
             </>
           )}
         </div>
@@ -1169,11 +1122,7 @@ function CreativeTypeTabs({
                 ? 'bg-white shadow-[0_8px_18px_rgba(17,24,39,0.07)]'
                 : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:text-[#111827]',
             )}
-            style={
-              active
-                ? { borderColor: `${accent}55`, color: accent }
-                : undefined
-            }
+            style={active ? { borderColor: `${accent}55`, color: accent } : undefined}
           >
             <Icon className="h-4 w-4" />
             {tab.label}
@@ -1184,131 +1133,17 @@ function CreativeTypeTabs({
   );
 }
 
-function ImageModeChooser({
-  value,
-  onChange,
-  onAddSubject,
-  subjectImageName,
-  referenceImageCount,
-  accent,
-}: {
-  value: ImageGenerationMode;
-  onChange(value: ImageGenerationMode): void;
-  onAddSubject(): void;
-  subjectImageName?: string;
-  referenceImageCount: number;
-  accent: string;
-}): JSX.Element {
-  const locked = value === 'lock_subject';
-  return (
-    <section className="relative z-30 mt-5 rounded-[22px] border border-[#EFEFEF] bg-white p-4 shadow-[0_14px_34px_rgba(17,24,39,0.04)]">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="text-[13px] font-semibold text-[#ADADAD]">图片生成方式</div>
-          <div className="mt-1 text-[13px] leading-5 text-[#6B7280]">
-            选择一张主角图作为身份锚点；其他图片只作风格或场景参考。
-          </div>
-        </div>
-        {locked ? (
-          <button
-            type="button"
-            onClick={onAddSubject}
-            className="inline-flex h-9 items-center gap-2 rounded-full border border-[#DCDDDD] bg-white px-3 text-[13px] font-semibold text-[#111827] hover:border-[#ADADAD]"
-          >
-            <ImagePlus className="h-4 w-4" />
-            {subjectImageName ? '添加参考图' : '添加主角图'}
-          </button>
-        ) : null}
-      </div>
-      <div className="grid gap-3 md:grid-cols-2">
-        <ImageModeOption
-          active={!locked}
-          icon={<Sparkles className="h-5 w-5" />}
-          title="自由创作"
-          description="从文字和参考图生成，不强制保持同一主体。"
-          onClick={() => onChange('free')}
-          accent={accent}
-        />
-        <ImageModeOption
-          active={locked}
-          icon={<Lock className="h-5 w-5" />}
-          title="锁定主角"
-          description="上传人物、宠物、商品或 IP 图后，优先保持主体身份，只换背景、风格、光线、动作和构图。"
-          meta={
-            subjectImageName
-              ? `主角：${subjectImageName}${referenceImageCount > 0 ? ` · ${referenceImageCount} 张参考图` : ''}`
-              : '需要 1 张清晰主角图'
-          }
-          onClick={() => onChange('lock_subject')}
-          accent={accent}
-        />
-      </div>
-    </section>
-  );
-}
-
-function ImageModeOption({
-  active,
-  icon,
-  title,
-  description,
-  meta,
-  onClick,
-  accent,
-}: {
-  active: boolean;
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-  meta?: string;
-  onClick(): void;
-  accent: string;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'group flex min-h-[92px] items-start gap-3 rounded-[16px] border bg-white p-4 text-left transition-colors',
-        active ? 'shadow-[0_10px_24px_rgba(17,24,39,0.05)]' : 'border-[#EFEFEF] hover:border-[#DCDDDD]',
-      )}
-      style={active ? { borderColor: accent, backgroundColor: `${accent}0D` } : undefined}
-    >
-      <span
-        className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] bg-[#F6F7F9] text-[#595757]"
-        style={active ? { backgroundColor: `${accent}18`, color: accent } : undefined}
-      >
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2">
-          <span className="text-[15px] font-semibold text-[#111827]">{title}</span>
-          {active ? (
-            <span className="flex h-5 w-5 items-center justify-center rounded-full text-white" style={{ backgroundColor: accent }}>
-              <Check className="h-3.5 w-3.5" />
-            </span>
-          ) : null}
-        </span>
-        <span className="mt-1 block text-[13px] leading-5 text-[#6B7280]">{description}</span>
-        {meta ? (
-          <span
-            className="mt-2 block truncate text-[12px] font-semibold text-[#8B93A6]"
-            title={meta}
-          >
-            {meta}
-          </span>
-        ) : null}
-      </span>
-    </button>
-  );
-}
-
 function isCreativeReferenceVideo(file: File): boolean {
   return file.type.startsWith('video/') || /\.(mp4|mov)$/i.test(file.name);
 }
 
-function modelOptionFor(model: CreativeModelValue, options: ReadonlyArray<CreativeModelOption> = CREATIVE_MODEL_OPTIONS): CreativeModelOption {
-  return options.find((option) => option.value === model) ?? options[0] ?? CREATIVE_MODEL_OPTIONS[0];
+function modelOptionFor(
+  model: CreativeModelValue,
+  options: ReadonlyArray<CreativeModelOption> = CREATIVE_MODEL_OPTIONS,
+): CreativeModelOption {
+  return (
+    options.find((option) => option.value === model) ?? options[0] ?? CREATIVE_MODEL_OPTIONS[0]
+  );
 }
 
 function modelOptionDisplayName(option: CreativeModelOption): string {
@@ -1320,57 +1155,25 @@ export function creativeModelDisplayName(model: NormalVideoModel): string {
 }
 
 function modelPreviewSrc(model: CreativeModelValue): string {
-  if (model === 'nano_banana_2') return '/video-style-previews/models/nano_banana_2.svg';
-  if (model === 'nano_banana_pro') return '/video-style-previews/models/nano_banana_pro.svg';
   if (model === 'wanxiang') return '/video-style-previews/models/wanxiang.svg';
   return `/video-style-previews/models/${model}.png`;
 }
 
-function imageStyleOptionFor(key: ImageStyleKey): (typeof IMAGE_STYLE_OPTIONS)[number] {
-  return IMAGE_STYLE_OPTIONS.find((option) => option.key === key) ?? IMAGE_STYLE_OPTIONS[0];
+function styleOptionFor(
+  group: CreativeStyleGroup,
+  key: CreativeStyleKey,
+): (typeof STYLE_OPTIONS_BY_GROUP)[CreativeStyleGroup][number] {
+  return (
+    STYLE_OPTIONS_BY_GROUP[group].find((option) => option.key === key) ??
+    STYLE_OPTIONS_BY_GROUP[group][0]
+  );
 }
 
-function imageStylePreviewSrc(key: ImageStyleKey): string {
-  return `/image-style-previews/${key}.png`;
-}
-
-function buildImageIntentWithStyle(intent: string, imageStyle: ImageStyleKey): string {
-  const option = imageStyleOptionFor(imageStyle);
-  if (option.key === 'random' || !option.prompt) return intent;
-  return `${intent}\n\n图片风格要求：${option.prompt}。`;
-}
-
-export function buildImageIntentWithMode(
-  intent: string,
-  imageStyle: ImageStyleKey,
-  imageMode: ImageGenerationMode,
+function stylePreviewSrc(
+  group: CreativeStyleGroup,
+  key: CreativeStyleKey,
+  subject: CreativeStylePreviewSubject,
 ): string {
-  const styled = buildImageIntentWithStyle(intent, imageStyle);
-  if (imageMode !== 'lock_subject') return styled;
-  return [
-    styled,
-    [
-      '主体一致性要求：请以用户上传的第一张图片作为锁定主角。',
-      '尽量保持主角身份、脸型五官、毛色/花纹、商品结构、Logo/包装关键特征或 IP 核心造型不变。',
-      '只根据用户描述改变背景、风格、光线、场景、动作、姿态、构图和系列化画面。',
-      '如果上传图与描述冲突，优先保留上传图中的主角身份，并在可行范围内执行描述变化。',
-    ].join('\n'),
-  ].join('\n\n');
-}
-
-export function buildImageIntentForSubmit(
-  intent: string,
-  imageStyle: ImageStyleKey,
-  imageMode: ImageGenerationMode,
-): string {
-  return buildImageIntentWithMode(intent, imageStyle, imageMode);
-}
-
-function styleOptionFor(group: CreativeStyleGroup, key: CreativeStyleKey): (typeof STYLE_OPTIONS_BY_GROUP)[CreativeStyleGroup][number] {
-  return STYLE_OPTIONS_BY_GROUP[group].find((option) => option.key === key) ?? STYLE_OPTIONS_BY_GROUP[group][0];
-}
-
-function stylePreviewSrc(group: CreativeStyleGroup, key: CreativeStyleKey, subject: CreativeStylePreviewSubject): string {
   if (subject === 'human') return `/video-style-previews/human/${group}/${key}.png`;
   return `/video-style-previews/${group}/${key}.png`;
 }
@@ -1432,7 +1235,6 @@ function CreativeModelPicker({
   onOpenChange,
   onChange,
   accent,
-  modelKind = 'video',
 }: {
   value: CreativeModelValue;
   options?: ReadonlyArray<CreativeModelOption>;
@@ -1440,14 +1242,9 @@ function CreativeModelPicker({
   onOpenChange(open: boolean): void;
   onChange(value: CreativeModelValue): void;
   accent: string;
-  modelKind?: CreativeMode;
 }): JSX.Element {
   const selected = modelOptionFor(value, options);
   const effectiveValue = selected.value;
-  const modelCopy =
-    modelKind === 'image'
-      ? '只显示当前图片任务真实接入的模型。'
-      : '只显示当前视频任务真实接入的模型。';
   return (
     <div className="relative">
       <div className="mb-2 text-[13px] font-semibold text-[#ADADAD]">AI 模型</div>
@@ -1473,19 +1270,24 @@ function CreativeModelPicker({
         <ChevronDown className="h-4 w-4 text-[#595757]" />
       </button>
       {open ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-8" onMouseDown={() => onOpenChange(false)}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-8"
+          onMouseDown={() => onOpenChange(false)}
+        >
           <div
             role="dialog"
             aria-modal="true"
-            aria-label={modelKind === 'image' ? '选择图片模型' : '选择视频模型'}
+            aria-label="选择视频模型"
             className="max-h-[min(720px,calc(100vh-56px))] w-full max-w-[620px] overflow-hidden rounded-[24px] border border-[#DCDDDD] bg-white shadow-[0_28px_80px_rgba(17,24,39,0.24)]"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4 border-b border-[#EFEFEF] px-5 py-4">
-          <div>
-            <h2 className="text-[18px] font-semibold text-[#111827]">Models</h2>
-                <p className="mt-1 text-[12px] text-[#8B93A6]">{modelCopy}</p>
-          </div>
+              <div>
+                <h2 className="text-[18px] font-semibold text-[#111827]">Models</h2>
+                <p className="mt-1 text-[12px] text-[#8B93A6]">
+                  只显示当前视频任务真实接入的模型。
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => onOpenChange(false)}
@@ -1526,15 +1328,23 @@ function CreativeModelPicker({
                           {modelOptionDisplayName(option)}
                         </span>
                         {active ? (
-                          <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold text-white" style={{ backgroundColor: accent }}>
+                          <span
+                            className="rounded-full px-2 py-0.5 text-[11px] font-semibold text-white"
+                            style={{ backgroundColor: accent }}
+                          >
                             已选择
                           </span>
                         ) : null}
                       </span>
-                      <span className="mt-1 block text-[12px] leading-5 text-[#595757]">{option.description}</span>
+                      <span className="mt-1 block text-[12px] leading-5 text-[#595757]">
+                        {option.description}
+                      </span>
                       <span className="mt-2 flex flex-wrap gap-1.5">
                         {option.badges.map((badge) => (
-                          <span key={badge} className="rounded-full bg-[#EFEFEF] px-2 py-0.5 text-[11px] font-medium text-[#595757]">
+                          <span
+                            key={badge}
+                            className="rounded-full bg-[#EFEFEF] px-2 py-0.5 text-[11px] font-medium text-[#595757]"
+                          >
                             {badge}
                           </span>
                         ))}
@@ -1625,138 +1435,19 @@ function CreativeStyleSummaryPicker({
 function CreativeStyleIcon(): JSX.Element {
   return (
     <span className="relative flex h-7 w-7 shrink-0 overflow-hidden rounded-[8px] bg-[#0F172A] shadow-[inset_0_1px_1px_rgba(255,255,255,0.42),0_8px_16px_rgba(17,24,39,0.16)]">
-      <span className="absolute inset-0 bg-[radial-gradient(circle_at_24%_22%,rgba(255,255,255,0.78)_0%,rgba(255,255,255,0.18)_18%,rgba(255,255,255,0)_34%),linear-gradient(135deg,#1E9BFF_0%,#6F5BFF_38%,#EA1F59_72%,#FFB23F_100%)]" aria-hidden />
-      <span className="absolute -left-2 top-3 h-6 w-8 rotate-[-18deg] rounded-full bg-white/18 blur-[2px]" aria-hidden />
-      <span className="absolute bottom-1 right-1 h-2.5 w-2.5 rounded-full bg-white/22 blur-[1px]" aria-hidden />
+      <span
+        className="absolute inset-0 bg-[radial-gradient(circle_at_24%_22%,rgba(255,255,255,0.78)_0%,rgba(255,255,255,0.18)_18%,rgba(255,255,255,0)_34%),linear-gradient(135deg,#1E9BFF_0%,#6F5BFF_38%,#EA1F59_72%,#FFB23F_100%)]"
+        aria-hidden
+      />
+      <span
+        className="absolute -left-2 top-3 h-6 w-8 rotate-[-18deg] rounded-full bg-white/18 blur-[2px]"
+        aria-hidden
+      />
+      <span
+        className="absolute bottom-1 right-1 h-2.5 w-2.5 rounded-full bg-white/22 blur-[1px]"
+        aria-hidden
+      />
     </span>
-  );
-}
-
-function ImageStyleSummaryPicker({
-  value,
-  open,
-  onOpenChange,
-  onChange,
-  accent,
-}: {
-  value: ImageStyleKey;
-  open: boolean;
-  onOpenChange(open: boolean): void;
-  onChange(value: ImageStyleKey): void;
-  accent: string;
-}): JSX.Element {
-  const selected = imageStyleOptionFor(value);
-  return (
-    <div className="sm:col-span-2 xl:col-span-1">
-      <div className="mb-2 text-[13px] font-semibold text-[#ADADAD]">风格样式</div>
-      <button
-        type="button"
-        onClick={() => onOpenChange(true)}
-        className="flex h-11 w-full min-w-0 items-center gap-3 rounded-[10px] border border-[#DCDDDD] bg-white px-3 text-left transition-colors hover:border-[#ADADAD] focus:border-[#42C0EF] focus:outline-none"
-      >
-        <CreativeStyleIcon />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[11px] leading-none text-[#8B93A6]">图片风格</span>
-          <span className="block truncate text-[13px] font-semibold leading-5 text-[#111827]">
-            {selected.label}
-          </span>
-        </span>
-        <ChevronDown className="h-4 w-4 shrink-0 text-[#595757]" />
-      </button>
-      {open ? (
-        <ImageStyleDialog
-          value={value}
-          onChange={onChange}
-          onClose={() => onOpenChange(false)}
-          accent={accent}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function ImageStyleDialog({
-  value,
-  onChange,
-  onClose,
-  accent,
-}: {
-  value: ImageStyleKey;
-  onChange(value: ImageStyleKey): void;
-  onClose(): void;
-  accent: string;
-}): JSX.Element {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-8" onMouseDown={onClose}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="选择图片风格"
-        className="max-h-[min(760px,calc(100vh-56px))] w-full max-w-[760px] overflow-hidden rounded-[24px] border border-white/20 bg-[#151515] text-white shadow-[0_28px_80px_rgba(0,0,0,0.34)]"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
-          <div>
-            <h2 className="text-[18px] font-semibold text-white">图片风格</h2>
-            <p className="mt-1 text-[12px] text-white/55">选择会写进图片提示词；随机则交给模型自行判断。</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-[8px] bg-white/10 p-2 text-white/70 hover:bg-white/15 hover:text-white"
-            aria-label="关闭图片风格选择"
-            title="关闭图片风格选择"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="max-h-[620px] overflow-y-auto p-5">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {IMAGE_STYLE_OPTIONS.map((option) => {
-              const active = option.key === value;
-              return (
-                <button
-                  key={option.key}
-                  type="button"
-                  onClick={() => {
-                    onChange(option.key);
-                    onClose();
-                  }}
-                  aria-label={`${option.label}：${option.description}`}
-                  title={option.description}
-                  className={cn(
-                    'group overflow-hidden rounded-[12px] border bg-[#222222] text-left transition-colors',
-                    active
-                      ? 'shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_12px_28px_rgba(0,0,0,0.24)]'
-                      : 'border-white/10 hover:border-white/28',
-                  )}
-                  style={active ? { borderColor: accent } : undefined}
-                >
-                  <span className="relative flex aspect-square items-end overflow-hidden bg-[#111827]">
-                    <img
-                      src={imageStylePreviewSrc(option.key)}
-                      alt=""
-                      className="absolute inset-0 h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
-                      aria-hidden
-                    />
-                    <span className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/88 via-black/42 to-transparent" />
-                    {active ? (
-                      <span className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full text-white" style={{ backgroundColor: accent }}>
-                        <Check className="h-4 w-4" />
-                      </span>
-                    ) : null}
-                    <span className="relative z-10 w-full px-3 pb-2 drop-shadow-[0_1px_2px_rgba(0,0,0,0.72)]">
-                      <span className="block text-[13px] font-semibold text-white">{option.label}</span>
-                      <span className="mt-0.5 block truncate text-[11px] font-medium text-white/78">{option.description}</span>
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -1779,7 +1470,10 @@ function CreativeStyleDialog({
 }): JSX.Element {
   const title = STYLE_GROUPS[activeGroup].title;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-8" onMouseDown={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-8"
+      onMouseDown={onClose}
+    >
       <div
         role="dialog"
         aria-modal="true"
@@ -1790,7 +1484,9 @@ function CreativeStyleDialog({
         <div className="flex items-start justify-between gap-4 px-5 pb-3 pt-4">
           <div>
             <h2 className="text-[18px] font-semibold text-white">{title}</h2>
-            <p className="mt-1 text-[12px] text-white/55">选择会写进视频提示词；随机则交给模型自行判断。</p>
+            <p className="mt-1 text-[12px] text-white/55">
+              选择会写进视频提示词；随机则交给模型自行判断。
+            </p>
           </div>
           <button
             type="button"
@@ -1852,7 +1548,10 @@ function CreativeStyleDialog({
                     />
                     <span className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/62 to-transparent" />
                     {active ? (
-                      <span className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full text-white" style={{ backgroundColor: accent }}>
+                      <span
+                        className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full text-white"
+                        style={{ backgroundColor: accent }}
+                      >
                         <Check className="h-4 w-4" />
                       </span>
                     ) : null}
@@ -1879,7 +1578,10 @@ function ReferenceVideoUploadDialog({
 }): React.ReactPortal | null {
   if (typeof document === 'undefined') return null;
   return createPortal(
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[#111827]/28 px-4 py-8 backdrop-blur-[1px]" onMouseDown={onClose}>
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-[#111827]/28 px-4 py-8 backdrop-blur-[1px]"
+      onMouseDown={onClose}
+    >
       <div
         role="dialog"
         aria-modal="true"
@@ -1890,7 +1592,9 @@ function ReferenceVideoUploadDialog({
         <div className="flex items-start justify-between gap-4 border-b border-[#EFEFEF] px-5 py-4">
           <div>
             <h2 className="text-[17px] font-semibold text-[#111827]">添加参考视频</h2>
-            <p className="mt-1 text-[12px] leading-5 text-[#8B93A6]">用于参考动作、节奏、镜头或构图。</p>
+            <p className="mt-1 text-[12px] leading-5 text-[#8B93A6]">
+              用于参考动作、节奏、镜头或构图。
+            </p>
           </div>
           <button
             type="button"
@@ -1906,7 +1610,10 @@ function ReferenceVideoUploadDialog({
           <div className="rounded-[20px] border border-[#EFEFEF] bg-[#FAFAFA] p-4">
             <div className="flex items-start gap-3">
               <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-[14px] bg-[linear-gradient(135deg,#EA1F59_0%,#8A63FF_55%,#1E9BFF_100%)] text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.48),0_10px_20px_rgba(234,31,89,0.16)]">
-                <span className="absolute inset-0 bg-[radial-gradient(circle_at_28%_18%,rgba(255,255,255,0.62),rgba(255,255,255,0)_35%)]" aria-hidden />
+                <span
+                  className="absolute inset-0 bg-[radial-gradient(circle_at_28%_18%,rgba(255,255,255,0.62),rgba(255,255,255,0)_35%)]"
+                  aria-hidden
+                />
                 <Clapperboard className="relative h-5 w-5" aria-hidden />
               </div>
               <div className="min-w-0 flex-1">
@@ -1915,18 +1622,35 @@ function ReferenceVideoUploadDialog({
                   支持 MP4 / MOV。建议上传清晰、较短的视频片段，最终以生成结果为准。
                 </div>
                 <div className="mt-3 flex flex-wrap gap-1.5">
-                  <span className="rounded-full bg-white px-2 py-1 text-[11px] font-medium text-[#595757] ring-1 ring-[#EFEFEF]">MP4</span>
-                  <span className="rounded-full bg-white px-2 py-1 text-[11px] font-medium text-[#595757] ring-1 ring-[#EFEFEF]">MOV</span>
-                  <span className="rounded-full bg-white px-2 py-1 text-[11px] font-medium text-[#595757] ring-1 ring-[#EFEFEF]">动作参考</span>
-                  <span className="rounded-full bg-white px-2 py-1 text-[11px] font-medium text-[#595757] ring-1 ring-[#EFEFEF]">镜头参考</span>
+                  <span className="rounded-full bg-white px-2 py-1 text-[11px] font-medium text-[#595757] ring-1 ring-[#EFEFEF]">
+                    MP4
+                  </span>
+                  <span className="rounded-full bg-white px-2 py-1 text-[11px] font-medium text-[#595757] ring-1 ring-[#EFEFEF]">
+                    MOV
+                  </span>
+                  <span className="rounded-full bg-white px-2 py-1 text-[11px] font-medium text-[#595757] ring-1 ring-[#EFEFEF]">
+                    动作参考
+                  </span>
+                  <span className="rounded-full bg-white px-2 py-1 text-[11px] font-medium text-[#595757] ring-1 ring-[#EFEFEF]">
+                    镜头参考
+                  </span>
                 </div>
               </div>
             </div>
             <div className="mt-5 flex items-center justify-end gap-2">
-              <Button type="button" variant="outline" className="h-9 rounded-full px-4 text-[13px]" onClick={onClose}>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-full px-4 text-[13px]"
+                onClick={onClose}
+              >
                 取消
               </Button>
-              <Button type="button" className="h-9 rounded-full bg-[#EA1F59] px-4 text-[13px] hover:bg-[#EA1F59]/90" onClick={onChoose}>
+              <Button
+                type="button"
+                className="h-9 rounded-full bg-[#EA1F59] px-4 text-[13px] hover:bg-[#EA1F59]/90"
+                onClick={onChoose}
+              >
                 选择视频
               </Button>
             </div>
@@ -1992,7 +1716,9 @@ function CreativeSelect({
         aria-expanded={open}
       >
         <span className="truncate">{value === 'auto' ? 'Auto' : value}</span>
-        <ChevronDown className={cn('h-4 w-4 text-[#595757] transition-transform', open && 'rotate-180')} />
+        <ChevronDown
+          className={cn('h-4 w-4 text-[#595757] transition-transform', open && 'rotate-180')}
+        />
       </button>
       {open ? (
         <div
@@ -2058,7 +1784,9 @@ function CreativeSegment<T extends string | number>({
               className={cn(
                 'flex h-9 min-w-0 flex-1 items-center justify-center whitespace-nowrap rounded-[8px] px-3 text-[14px] font-semibold leading-none transition-colors',
                 compact && 'px-3',
-                active ? 'bg-white shadow-[0_1px_4px_rgba(15,23,42,0.08)]' : 'text-[#111827] hover:bg-white/60',
+                active
+                  ? 'bg-white shadow-[0_1px_4px_rgba(15,23,42,0.08)]'
+                  : 'text-[#111827] hover:bg-white/60',
               )}
               style={active ? { color: accent } : undefined}
             >
@@ -2071,16 +1799,14 @@ function CreativeSegment<T extends string | number>({
   );
 }
 
-function CreativeHistory({
-  mode,
-  accent,
-  softBg,
+function VideoHistory({
+  accent = '#EA1F59',
+  softBg = 'bg-[#EA1F59]/10',
   videoType = 'normal',
   refreshKey,
 }: {
-  mode: CreativeMode;
-  accent: string;
-  softBg: string;
+  accent?: string;
+  softBg?: string;
   videoType?: VideoType;
   refreshKey?: string;
 }): JSX.Element {
@@ -2095,9 +1821,7 @@ function CreativeHistory({
   const [filter, setFilter] = React.useState<CreativeHistoryFilter>('all');
   const [pinningTaskId, setPinningTaskId] = React.useState<string | null>(null);
   const [nextCursor, setNextCursor] = React.useState<number | null>(null);
-  const [visibleCount, setVisibleCount] = React.useState(
-    CREATIVE_HISTORY_VISIBLE_PAGE_SIZE,
-  );
+  const [visibleCount, setVisibleCount] = React.useState(CREATIVE_HISTORY_VISIBLE_PAGE_SIZE);
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [loadMoreError, setLoadMoreError] = React.useState(false);
   const mountedRef = React.useRef(true);
@@ -2119,8 +1843,6 @@ function CreativeHistory({
       let cursor: number | null = null;
       const list: VideoRow[] = [];
       let foundVisibleRow = false;
-      const mapper = mode === 'image' ? toImageRow : toVideoRow;
-
       for (
         let page = 0;
         !foundVisibleRow && page < CREATIVE_HISTORY_SCAN_PAGES_PER_CLICK;
@@ -2132,12 +1854,11 @@ function CreativeHistory({
         if (!mountedRef.current || requestId !== loadRequestRef.current) return;
 
         const pageRows = (res?.tasks ?? [])
-          .map(mapper)
+          .map(toVideoRow)
           .filter((value): value is VideoRow => value != null);
         list.push(...pageRows);
         foundVisibleRow =
           filterCreativeHistoryRows(pageRows, {
-            mode,
             videoType,
             filter,
           }).length > 0;
@@ -2152,7 +1873,7 @@ function CreativeHistory({
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       dispatchLoad({ type: 'failure' });
     }
-  }, [filter, mode, videoType]);
+  }, [filter, videoType]);
 
   React.useEffect(() => {
     dispatchLoad({ type: 'reset' });
@@ -2160,7 +1881,7 @@ function CreativeHistory({
     setVisibleCount(CREATIVE_HISTORY_VISIBLE_PAGE_SIZE);
     setLoadingMore(false);
     setLoadMoreError(false);
-  }, [filter, mode, videoType]);
+  }, [filter, videoType]);
 
   React.useEffect(() => {
     void loadHistory();
@@ -2173,8 +1894,8 @@ function CreativeHistory({
 
   const visible = React.useMemo(() => {
     if (!rows) return rows;
-    return filterCreativeHistoryRows(rows, { mode, videoType, filter });
-  }, [filter, mode, rows, videoType]);
+    return filterCreativeHistoryRows(rows, { videoType, filter });
+  }, [filter, rows, videoType]);
 
   React.useEffect(() => {
     if (!rows) return;
@@ -2182,12 +1903,7 @@ function CreativeHistory({
       if (row.posterUnavailable && row.posterUrl) {
         markFileUnavailable(row.posterUrl);
       }
-      const downloads =
-        row.downloads && row.downloads.length > 0
-          ? row.downloads
-          : row.download
-            ? [row.download]
-            : [];
+      const downloads = row.download ? [row.download] : [];
       downloads.forEach((download) => {
         if (download.unavailable) {
           markFileUnavailable({
@@ -2211,10 +1927,10 @@ function CreativeHistory({
 
   const emptyCopy =
     filter === 'pinned'
-      ? `暂无置顶${mode === 'image' ? '图片' : '视频'}作品。`
+      ? '暂无置顶视频作品。'
       : filter === 'recent'
-        ? `最近 7 天暂无${mode === 'image' ? '图片' : '视频'}作品。`
-        : `暂无${mode === 'image' ? '图片' : '视频'}作品，先在上方创建一个。`;
+        ? '最近 7 天暂无视频作品。'
+        : '暂无视频作品，先在上方创建一个。';
 
   const loadOlderHistory = React.useCallback(async () => {
     if (
@@ -2237,23 +1953,17 @@ function CreativeHistory({
     try {
       for (
         let page = 0;
-        cursor !== null &&
-        !foundVisibleRow &&
-        page < CREATIVE_HISTORY_SCAN_PAGES_PER_CLICK;
+        cursor !== null && !foundVisibleRow && page < CREATIVE_HISTORY_SCAN_PAGES_PER_CLICK;
         page += 1
       ) {
-        const res = await trpc.tasks.list.query(
-          creativeHistoryListInput(filter, cursor),
-        );
+        const res = await trpc.tasks.list.query(creativeHistoryListInput(filter, cursor));
         if (!mountedRef.current || requestId !== loadRequestRef.current) return;
 
-        const mapper = mode === 'image' ? toImageRow : toVideoRow;
         const pageRows = (res?.tasks ?? [])
-          .map(mapper)
+          .map(toVideoRow)
           .filter((value): value is VideoRow => value != null);
         collected.push(...pageRows);
-        foundVisibleRow =
-          filterCreativeHistoryRows(pageRows, { mode, videoType, filter }).length > 0;
+        foundVisibleRow = filterCreativeHistoryRows(pageRows, { videoType, filter }).length > 0;
         cursor = normalizeTaskHubCursor(res?.nextCursor);
       }
 
@@ -2272,7 +1982,7 @@ function CreativeHistory({
         setLoadingMore(false);
       }
     }
-  }, [filter, loading, loadingMore, mode, nextCursor, videoType]);
+  }, [filter, loading, loadingMore, nextCursor, videoType]);
 
   const handleTogglePin = React.useCallback(
     async (row: VideoRow) => {
@@ -2309,11 +2019,7 @@ function CreativeHistory({
     <section className="relative z-10 mt-10 rounded-[28px] border border-[#EFEFEF] bg-white p-5 shadow-[0_16px_40px_rgba(17,24,39,0.04)]">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div className="inline-flex items-center gap-2 text-[15px] font-semibold text-[#111827]">
-          <span
-            className="h-2 w-2 rounded-full"
-            style={{ backgroundColor: accent }}
-            aria-hidden
-          />
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: accent }} aria-hidden />
           历史生成
         </div>
         <div className="flex gap-5 text-[14px] font-semibold">
@@ -2366,8 +2072,12 @@ function CreativeHistory({
             role="alert"
           >
             <AlertCircle className="h-7 w-7 text-[#EA1F59]" aria-hidden />
-            <div className="mt-3 text-[14px] font-semibold text-[#111827]">历史生成暂时无法加载</div>
-            <div className="mt-1 text-[13px] text-muted-foreground">请检查网络后重试，加载失败不会删除已有作品。</div>
+            <div className="mt-3 text-[14px] font-semibold text-[#111827]">
+              历史生成暂时无法加载
+            </div>
+            <div className="mt-1 text-[13px] text-muted-foreground">
+              请检查网络后重试，加载失败不会删除已有作品。
+            </div>
             <Button
               type="button"
               size="sm"
@@ -2392,12 +2102,7 @@ function CreativeHistory({
       ) : (
         <div className="space-y-5">
           {visible.slice(0, visibleCount).map((row) => {
-            const downloads =
-              row.downloads && row.downloads.length > 0
-                ? row.downloads
-                : row.download
-                  ? [row.download]
-                  : [];
+            const downloads = row.download ? [row.download] : [];
             const availabilityAwareDownloads = downloads.map((download) =>
               isFileUnavailable(
                 { fileId: download.fileId, url: download.downloadUrl },
@@ -2408,7 +2113,7 @@ function CreativeHistory({
             );
             const download = availabilityAwareDownloads[0];
             if (!download) return null;
-            const displayTitle = creativeHistoryDisplayTitle(row, mode);
+            const displayTitle = creativeHistoryDisplayTitle(row);
             const artifactUnavailable =
               creativeHistoryArtifactAvailability(download) === 'unavailable';
             const previewAvailability = creativeHistoryPreviewAvailability({
@@ -2419,123 +2124,98 @@ function CreativeHistory({
             });
             const artifactExpired = previewAvailability === 'expired';
             const previewUnavailable = previewAvailability === 'unavailable';
-            const audioVerificationBadge = videoAudioVerificationBadge(
-              row.qualityVerification,
-            );
+            const audioVerificationBadge = videoAudioVerificationBadge(row.qualityVerification);
             return (
-            <article
-              key={row.taskId}
-              className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,22rem),1fr))] gap-5 rounded-[26px] bg-white p-4 shadow-[0_16px_40px_rgba(89,87,87,0.06)]"
-            >
-              <button
-                type="button"
-                onClick={() => navigate(`/${mode}?task=${encodeURIComponent(row.taskId)}`)}
-                className={cn(
-                  'relative overflow-hidden rounded-[22px] text-left',
-                  artifactExpired || previewUnavailable
-                    ? 'min-h-[160px]'
-                    : 'min-h-[210px]',
-                  softBg,
-                )}
+              <article
+                key={row.taskId}
+                className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,22rem),1fr))] gap-5 rounded-[26px] bg-white p-4 shadow-[0_16px_40px_rgba(89,87,87,0.06)]"
               >
-                {artifactExpired ? (
-                  <div className="flex h-full min-h-[160px] flex-col items-center justify-center px-5 text-center text-[#8B93A6]">
-                    <Clock className="h-6 w-6" aria-hidden />
-                    <span className="mt-3 text-[13px] font-semibold text-[#595757]">
-                      文件已过期
-                    </span>
-                    <span className="mt-1 text-[11px] leading-5">
-                      历史记录仍保留，预览与下载已停止。
-                    </span>
-                  </div>
-                ) : previewUnavailable ? (
-                  <div className="flex h-full min-h-[160px] flex-col items-center justify-center px-5 text-center text-[#8B93A6]">
-                    <CircleSlash className="h-6 w-6" aria-hidden />
-                    <span className="mt-3 text-[13px] font-semibold text-[#595757]">
-                      {artifactUnavailable ? '文件已失效' : '预览已失效'}
-                    </span>
-                    <span className="mt-1 text-[11px] leading-5">
-                      {artifactUnavailable
-                        ? '历史记录仍保留，预览与下载已停止。'
-                        : '成片记录仍保留，可在右侧尝试下载。'}
-                    </span>
-                  </div>
-                ) : mode === 'image' && availabilityAwareDownloads.length > 1 ? (
-                  <div className="grid h-full min-h-[210px] grid-cols-2 gap-1 overflow-hidden rounded-[22px] bg-[#F2F3F5]">
-                    {availabilityAwareDownloads.slice(0, 4).map((item, index) =>
-                      item.unavailable ? (
-                        <div
-                          key={item.fileId}
-                          className="flex min-h-[210px] items-center justify-center bg-[#F7F7F8] text-[#ADADAD]"
-                        >
-                          <CircleSlash className="h-6 w-6" aria-hidden />
-                        </div>
-                      ) : (
-                        <LazyPosterImg
-                          key={item.fileId}
-                          posterUrl={item.downloadUrl}
-                          alt={`${displayTitle} 第 ${index + 1} 张`}
-                          className="h-full min-h-[210px] w-full object-cover"
-                        />
-                      ),
-                    )}
-                  </div>
-                ) : row.posterUrl ? (
-                  <LazyPosterImg
-                    posterUrl={row.posterUrl}
-                    alt={displayTitle}
-                    className="h-full w-full rounded-[22px] object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full min-h-[210px] items-center justify-center text-[#ADADAD]">
-                    {mode === 'image' ? <ImagePlus className="h-10 w-10" /> : <Clapperboard className="h-10 w-10" />}
-                  </div>
-                )}
-                {mode === 'video' && !artifactExpired && !previewUnavailable ? (
-                  <span className="absolute bottom-4 left-4 inline-flex items-center gap-2 rounded-full bg-black/70 px-3 py-2 text-[12px] font-semibold text-white shadow-sm backdrop-blur-sm">
-                    <Play className="h-3.5 w-3.5 fill-current" aria-hidden />
-                    播放成片
-                  </span>
-                ) : null}
-              </button>
-              <div className="flex min-w-0 flex-col justify-between py-3 pr-3">
-                <div>
-                  <div className="mb-5 flex items-center justify-end gap-2">
-                    <span className="text-[13px] font-semibold text-[#ADADAD]">
-                      {formatDateOnly(row.createdAt)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => void handleTogglePin(row)}
-                      disabled={pinningTaskId !== null}
-                      aria-pressed={row.starred === true}
-                      aria-label={row.starred ? '取消置顶作品' : '置顶作品'}
-                      title={row.starred ? '取消置顶作品' : '置顶作品'}
-                      className={cn(
-                        'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border transition-colors focus-visible:outline-none focus-visible:ring-2',
-                        row.starred
-                          ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59] focus-visible:ring-[#EA1F59]/20'
-                          : 'border-[#DCDDDD] bg-white text-[#ADADAD] hover:border-[#EA1F59]/30 hover:text-[#EA1F59] focus-visible:ring-[#EA1F59]/20',
-                      )}
-                    >
-                      {pinningTaskId === row.taskId ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Pin className={cn('h-3.5 w-3.5', row.starred && 'fill-current')} />
-                      )}
-                    </button>
-                  </div>
-                  <h2 className="line-clamp-3 text-[15px] font-semibold leading-7 text-[#8B93A6]">
-                    {displayTitle}
-                  </h2>
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    {row.status === 'partial_success' ? (
-                      <span className="rounded-full bg-[#FFC910]/20 px-3 py-1 text-[11px] font-medium text-[#8A6A00]">
-                        {videoTaskStatusLabel(row.status)}
+                <button
+                  type="button"
+                  onClick={() => navigate(creativeTaskPath('video', row.taskId))}
+                  className={cn(
+                    'relative overflow-hidden rounded-[22px] text-left',
+                    artifactExpired || previewUnavailable ? 'min-h-[160px]' : 'min-h-[210px]',
+                    softBg,
+                  )}
+                >
+                  {artifactExpired ? (
+                    <div className="flex h-full min-h-[160px] flex-col items-center justify-center px-5 text-center text-[#8B93A6]">
+                      <Clock className="h-6 w-6" aria-hidden />
+                      <span className="mt-3 text-[13px] font-semibold text-[#595757]">
+                        文件已过期
                       </span>
-                    ) : null}
-                    {mode === 'video' ? (
-                      row.qualityVerification?.status === 'passed' ? (
+                      <span className="mt-1 text-[11px] leading-5">
+                        历史记录仍保留，预览与下载已停止。
+                      </span>
+                    </div>
+                  ) : previewUnavailable ? (
+                    <div className="flex h-full min-h-[160px] flex-col items-center justify-center px-5 text-center text-[#8B93A6]">
+                      <CircleSlash className="h-6 w-6" aria-hidden />
+                      <span className="mt-3 text-[13px] font-semibold text-[#595757]">
+                        {artifactUnavailable ? '文件已失效' : '预览已失效'}
+                      </span>
+                      <span className="mt-1 text-[11px] leading-5">
+                        {artifactUnavailable
+                          ? '历史记录仍保留，预览与下载已停止。'
+                          : '成片记录仍保留，可在右侧尝试下载。'}
+                      </span>
+                    </div>
+                  ) : row.posterUrl ? (
+                    <LazyPosterImg
+                      posterUrl={row.posterUrl}
+                      alt={displayTitle}
+                      className="h-full w-full rounded-[22px] object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full min-h-[210px] items-center justify-center text-[#ADADAD]">
+                      <Clapperboard className="h-10 w-10" />
+                    </div>
+                  )}
+                  {!artifactExpired && !previewUnavailable ? (
+                    <span className="absolute bottom-4 left-4 inline-flex items-center gap-2 rounded-full bg-black/70 px-3 py-2 text-[12px] font-semibold text-white shadow-sm backdrop-blur-sm">
+                      <Play className="h-3.5 w-3.5 fill-current" aria-hidden />
+                      播放成片
+                    </span>
+                  ) : null}
+                </button>
+                <div className="flex min-w-0 flex-col justify-between py-3 pr-3">
+                  <div>
+                    <div className="mb-5 flex items-center justify-end gap-2">
+                      <span className="text-[13px] font-semibold text-[#ADADAD]">
+                        {formatDateOnly(row.createdAt)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void handleTogglePin(row)}
+                        disabled={pinningTaskId !== null}
+                        aria-pressed={row.starred === true}
+                        aria-label={row.starred ? '取消置顶作品' : '置顶作品'}
+                        title={row.starred ? '取消置顶作品' : '置顶作品'}
+                        className={cn(
+                          'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border transition-colors focus-visible:outline-none focus-visible:ring-2',
+                          row.starred
+                            ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59] focus-visible:ring-[#EA1F59]/20'
+                            : 'border-[#DCDDDD] bg-white text-[#ADADAD] hover:border-[#EA1F59]/30 hover:text-[#EA1F59] focus-visible:ring-[#EA1F59]/20',
+                        )}
+                      >
+                        {pinningTaskId === row.taskId ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Pin className={cn('h-3.5 w-3.5', row.starred && 'fill-current')} />
+                        )}
+                      </button>
+                    </div>
+                    <h2 className="line-clamp-3 text-[15px] font-semibold leading-7 text-[#8B93A6]">
+                      {displayTitle}
+                    </h2>
+                    <div className="mt-5 flex flex-wrap gap-2">
+                      {row.status === 'partial_success' ? (
+                        <span className="rounded-full bg-[#FFC910]/20 px-3 py-1 text-[11px] font-medium text-[#8A6A00]">
+                          {videoTaskStatusLabel(row.status)}
+                        </span>
+                      ) : null}
+                      {row.qualityVerification?.status === 'passed' ? (
                         <>
                           <span
                             className="inline-flex items-center gap-1 rounded-full bg-[#15A371]/10 px-3 py-1 text-[11px] font-medium text-[#0C7A55]"
@@ -2568,41 +2248,29 @@ function CreativeHistory({
                           <Clock className="h-3 w-3" aria-hidden />
                           未记录当前基础检查
                         </span>
-                      )
-                    ) : null}
-                    {mode === 'video' && row.videoType ? (
-                      <span className="rounded-full bg-[#EA1F59]/10 px-3 py-1 text-[11px] font-medium text-[#595757]">
-                        {videoTypeLabel(row.videoType)}
-                      </span>
-                    ) : null}
-                    {mode === 'image' &&
-                    (row.imageMode === 'lock_subject' ||
-                      isLockedSubjectImageIntent(row.intent)) ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[#42C0EF]/10 px-3 py-1 text-[11px] font-medium text-[#237B9D]">
-                        <Lock className="h-3 w-3" />
-                        锁定主角
-                      </span>
-                    ) : null}
-                    {download.filename ? (
-                      <span className="rounded-full px-3 py-1 text-[11px] font-medium text-[#595757]" style={{ backgroundColor: `${accent}1A` }}>
-                        {availabilityAwareDownloads.length > 1
-                          ? `${availabilityAwareDownloads.length} 个 ${fileKindLabel(download.filename)}`
-                          : fileKindLabel(download.filename)}
-                      </span>
-                    ) : null}
+                      )}
+                      {row.videoType ? (
+                        <span className="rounded-full bg-[#EA1F59]/10 px-3 py-1 text-[11px] font-medium text-[#595757]">
+                          {videoTypeLabel(row.videoType)}
+                        </span>
+                      ) : null}
+                      {download.filename ? (
+                        <span
+                          className="rounded-full px-3 py-1 text-[11px] font-medium text-[#595757]"
+                          style={{ backgroundColor: `${accent}1A` }}
+                        >
+                          {fileKindLabel(download.filename)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="mt-5 space-y-2">
+                    {availabilityAwareDownloads.map((item) => (
+                      <FileDownloadCard key={item.fileId} payload={item} showPreview={false} />
+                    ))}
                   </div>
                 </div>
-                <div className="mt-5 space-y-2">
-                  {availabilityAwareDownloads.map((item) => (
-                    <FileDownloadCard
-                      key={item.fileId}
-                      payload={item}
-                      showPreview={false}
-                    />
-                  ))}
-                </div>
-              </div>
-            </article>
+              </article>
             );
           })}
         </div>
@@ -2611,10 +2279,7 @@ function CreativeHistory({
       (visibleCount < visible.length || nextCursor !== null || loadMoreError) ? (
         <div className="mt-6 flex flex-col items-center gap-3 border-t border-[#EFEFEF] pt-5">
           {loadMoreError ? (
-            <div
-              className="inline-flex items-center gap-2 text-[13px] text-[#8B93A6]"
-              role="alert"
-            >
+            <div className="inline-flex items-center gap-2 text-[13px] text-[#8B93A6]" role="alert">
               <AlertCircle className="h-4 w-4 text-[#EA1F59]" aria-hidden />
               更早作品暂时无法加载，当前内容已保留。
             </div>
@@ -2664,11 +2329,9 @@ function CreativeHistory({
 function CurrentVideoTaskPanel({
   taskId,
   task,
-  preferredConfirm = 'video',
 }: {
   taskId: string;
   task: UiTask | null;
-  preferredConfirm?: 'video' | 'image';
 }): JSX.Element {
   const navigate = useNavigate();
   const toast = useToast();
@@ -2682,10 +2345,7 @@ function CurrentVideoTaskPanel({
   const abortTask = useTaskStore((s) => s.abortTask);
   const [confirming, setConfirming] = React.useState<string | null>(null);
   const [actionGuard] = React.useState(createMediaActionGuard);
-  const awaitingKind = resolveVideoAwaitingKind(
-    task?.awaitingKind,
-    awaiting?.awaitingKind,
-  );
+  const awaitingKind = resolveVideoAwaitingKind(task?.awaitingKind, awaiting?.awaitingKind);
   const latestStep = steps[steps.length - 1];
   const liveText = currentMediaTaskText({
     status: task?.status ?? 'unknown',
@@ -2707,7 +2367,11 @@ function CurrentVideoTaskPanel({
         toast.show('已取消，未产生费用', 'info', 2000);
       } else {
         toast.show('已确认，开始制作', 'info', 2000);
-        navigate(creativeTaskPath(preferredConfirm, result.taskId));
+        navigate(
+          choice === 'confirm_image'
+            ? creativeTaskPath('image', result.taskId)
+            : creativeTaskPath('video', result.taskId),
+        );
       }
     } catch (err) {
       toast.show(err instanceof Error ? err.message : '操作失败，请重试', 'error');
@@ -2740,7 +2404,7 @@ function CurrentVideoTaskPanel({
   // task alone. We send the user back to the form (cleared ?task=) where the
   // 报价卡→确认制作 flow is the inherent spend confirmation (防误点).
   function retryFailed(): void {
-    navigate(creativeRetryPath(preferredConfirm));
+    navigate(creativeRetryPath('video'));
   }
 
   return (
@@ -2753,7 +2417,7 @@ function CurrentVideoTaskPanel({
         <div className="flex flex-wrap items-center gap-3 py-2 text-[13px] text-muted-foreground">
           <span className="inline-flex min-w-0 items-center gap-2">
             <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-            正在同步{preferredConfirm === 'image' ? '图片' : '视频'}任务…
+            正在同步视频任务…
           </span>
           <Button
             type="button"
@@ -2798,17 +2462,13 @@ function CurrentVideoTaskPanel({
               <Button
                 type="button"
                 size="sm"
-                onClick={() => void confirmVideo(preferredConfirm === 'image' ? 'confirm_image' : 'confirm_video')}
+                onClick={() => void confirmVideo('confirm_video')}
                 disabled={confirming !== null}
               >
-                {confirming === 'confirm_video' || confirming === 'confirm_image'
-                  ? '提交中…'
-                  : preferredConfirm === 'image'
-                    ? '确认生成图片'
-                    : '确认制作'}
+                {confirming === 'confirm_video' ? '提交中…' : '确认制作'}
               </Button>
               {/* B2 — 真人换口型没法降级成静图，ip_person 不出「图片版」。 */}
-              {preferredConfirm !== 'image' && showImageOption(task.videoType) && (
+              {showImageOption(task.videoType) && (
                 <Button
                   type="button"
                   variant="outline"
@@ -2929,7 +2589,9 @@ const SEG_ESTIMATE = 5;
 const NB_USD_PER_IMG = 0.067;
 const USD_TO_CNY = 7.3;
 
-export function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => void }): JSX.Element {
+export function NormalVideoForm({
+  onTaskCreated,
+}: { onTaskCreated: (taskId: string) => void }): JSX.Element {
   const toast = useToast();
   const createTask = useTaskStore((s) => s.createTask);
 
@@ -2954,9 +2616,24 @@ export function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: str
     }
     if (!submitGuard.acquire()) return;
     setSubmitting(true);
-    const opts: VideoCreationOptions = { tab: 'normal', model, style, aspectRatio, resolution, durationSeconds };
+    const opts: VideoCreationOptions = {
+      tab: 'normal',
+      model,
+      style,
+      aspectRatio,
+      resolution,
+      durationSeconds,
+    };
     try {
-      const res = await createTask(intent, undefined, undefined, undefined, undefined, undefined, opts);
+      const res = await createTask(
+        intent,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        opts,
+      );
       if ('error' in res) {
         toast.show(res.error || '提交失败,请重试', 'error');
         return;
@@ -2990,9 +2667,24 @@ export function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: str
         <div className="space-y-5">
           <SegGroup label="模型" value={model} options={MODEL_OPTIONS} onChange={setModel} />
           <SegGroup label="风格" value={style} options={STYLE_OPTIONS} onChange={setStyle} />
-          <SegGroup label="尺寸" value={aspectRatio} options={ASPECT_OPTIONS} onChange={setAspectRatio} />
-          <SegGroup label="画质" value={resolution} options={RES_OPTIONS} onChange={setResolution} />
-          <SegGroup label="时长" value={durationSeconds} options={DURATION_OPTIONS} onChange={setDurationSeconds} />
+          <SegGroup
+            label="尺寸"
+            value={aspectRatio}
+            options={ASPECT_OPTIONS}
+            onChange={setAspectRatio}
+          />
+          <SegGroup
+            label="画质"
+            value={resolution}
+            options={RES_OPTIONS}
+            onChange={setResolution}
+          />
+          <SegGroup
+            label="时长"
+            value={durationSeconds}
+            options={DURATION_OPTIONS}
+            onChange={setDurationSeconds}
+          />
         </div>
       </Section>
 
@@ -3016,7 +2708,12 @@ export function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: str
 
       <div className="flex items-center justify-end gap-3">
         <span className="text-[12px] text-muted-foreground">提交后先报价,不会立即扣费</span>
-        <Button type="button" onClick={() => void handleSubmit()} disabled={submitting} className="min-w-[120px]">
+        <Button
+          type="button"
+          onClick={() => void handleSubmit()}
+          disabled={submitting}
+          className="min-w-[120px]"
+        >
           {submitting ? (
             <>
               <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
@@ -3051,7 +2748,11 @@ export function PetVideoForm({
   const createTask = useTaskStore((s) => s.createTask);
 
   const [prompt, setPrompt] = React.useState('');
-  const [photo, setPhoto] = React.useState<{ fileId: string; name: string; previewUrl: string } | null>(null);
+  const [photo, setPhoto] = React.useState<{
+    fileId: string;
+    name: string;
+    previewUrl: string;
+  } | null>(null);
   const [referenceVideo, setReferenceVideo] = React.useState<{
     fileId: string;
     name: string;
@@ -3182,7 +2883,15 @@ export function PetVideoForm({
       cloneMode,
     };
     try {
-      const res = await createTask(finalIntent, undefined, undefined, undefined, undefined, undefined, opts);
+      const res = await createTask(
+        finalIntent,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        opts,
+      );
       if ('error' in res) {
         toast.show(res.error || '提交失败,请重试', 'error');
         return;
@@ -3221,7 +2930,12 @@ export function PetVideoForm({
             <div className="min-w-0 flex-1">
               <div className="truncate text-[13px] text-foreground">{photo.name}</div>
               <div className="mt-1 flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => photoRef.current?.click()} disabled={uploadingPhoto}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => photoRef.current?.click()}
+                  disabled={uploadingPhoto}
+                >
                   {uploadingPhoto ? '上传中…' : '换一张'}
                 </Button>
                 <button
@@ -3242,7 +2956,11 @@ export function PetVideoForm({
             disabled={uploadingPhoto}
             className="flex w-full flex-col items-center justify-center gap-2 rounded-[20px] border border-dashed border-[#DCDDDD] bg-white py-10 text-muted-foreground transition-colors hover:border-[#EA1F59]/40 hover:text-[#EA1F59] disabled:opacity-60"
           >
-            {uploadingPhoto ? <Loader2 className="h-6 w-6 animate-spin" /> : <ImagePlus className="h-6 w-6" />}
+            {uploadingPhoto ? (
+              <Loader2 className="h-6 w-6 animate-spin" />
+            ) : (
+              <ImagePlus className="h-6 w-6" />
+            )}
             <span className="text-[13px]">{uploadingPhoto ? '上传中…' : '点击上传主角照片'}</span>
             <span className="text-[11px] text-muted-foreground">JPG / PNG / WebP</span>
           </button>
@@ -3271,12 +2989,16 @@ export function PetVideoForm({
               onLoadedMetadata={(event) => {
                 const duration = event.currentTarget.duration;
                 setReferenceVideo((current) =>
-                  current && Number.isFinite(duration) ? { ...current, durationSeconds: duration } : current,
+                  current && Number.isFinite(duration)
+                    ? { ...current, durationSeconds: duration }
+                    : current,
                 );
               }}
             />
             <div className="flex min-w-0 flex-col justify-center">
-              <div className="truncate text-[13px] font-medium text-foreground">{referenceVideo.name}</div>
+              <div className="truncate text-[13px] font-medium text-foreground">
+                {referenceVideo.name}
+              </div>
               <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
                 保留它的动作、镜头、节奏、时长和音频；只替换为上方主角。
               </p>
@@ -3286,7 +3008,12 @@ export function PetVideoForm({
                   : '正在读取视频时长…'}
               </div>
               <div className="mt-3 flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => videoRef.current?.click()} disabled={uploadingVideo}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => videoRef.current?.click()}
+                  disabled={uploadingVideo}
+                >
                   {uploadingVideo ? '上传中…' : '换一个视频'}
                 </Button>
                 <button
@@ -3307,14 +3034,24 @@ export function PetVideoForm({
             disabled={uploadingVideo}
             className="flex w-full flex-col items-center justify-center gap-2 rounded-[20px] border border-dashed border-[#DCDDDD] bg-white py-10 text-muted-foreground transition-colors hover:border-[#EA1F59]/40 hover:text-[#EA1F59] disabled:opacity-60"
           >
-            {uploadingVideo ? <Loader2 className="h-6 w-6 animate-spin" /> : <VideoIcon className="h-6 w-6" />}
+            {uploadingVideo ? (
+              <Loader2 className="h-6 w-6 animate-spin" />
+            ) : (
+              <VideoIcon className="h-6 w-6" />
+            )}
             <span className="text-[13px]">{uploadingVideo ? '上传中…' : '点击上传参考视频'}</span>
-            <span className="text-[11px] text-muted-foreground">MP4 / MOV · 2-30 秒 · 不超过 200 MB</span>
+            <span className="text-[11px] text-muted-foreground">
+              MP4 / MOV · 2-30 秒 · 不超过 200 MB
+            </span>
           </button>
         )}
       </Section>
 
-      <Section title="任务备注（可选）" description="备注仅用于任务记录，不会改变参考视频的动作、镜头、节奏或音频。" className={CREATIVE_SECTION_CLASS}>
+      <Section
+        title="任务备注（可选）"
+        description="备注仅用于任务记录，不会改变参考视频的动作、镜头、节奏或音频。"
+        className={CREATIVE_SECTION_CLASS}
+      >
         <Textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
@@ -3331,11 +3068,14 @@ export function PetVideoForm({
           </span>
           <span className="text-[13px] text-muted-foreground">
             {selectedCloneModel.name} {selectedCloneModel.version}
-            {referenceVideo?.durationSeconds ? ` · 参考视频 ${referenceVideo.durationSeconds.toFixed(1)} 秒` : ''}
+            {referenceVideo?.durationSeconds
+              ? ` · 参考视频 ${referenceVideo.durationSeconds.toFixed(1)} 秒`
+              : ''}
           </span>
         </div>
         <p className="mt-2 text-[11px] text-muted-foreground">
-          此处为 Wan Animate 基础价；提交后由服务端检查参考视频声音，有声视频的确认报价会包含口型同步。
+          此处为 Wan Animate
+          基础价；提交后由服务端检查参考视频声音，有声视频的确认报价会包含口型同步。
           供应商仅对成功输出的实际秒数计费，失败不计费。
           <span className="font-medium text-[#595757]"> 确认报价后才开始生成。</span>
         </p>
@@ -3343,7 +3083,12 @@ export function PetVideoForm({
 
       <div className="flex items-center justify-end gap-3">
         <span className="text-[12px] text-muted-foreground">提交后先报价,不会立即扣费</span>
-        <Button type="button" onClick={() => void handleSubmit()} disabled={submitting} className="min-w-[120px]">
+        <Button
+          type="button"
+          onClick={() => void handleSubmit()}
+          disabled={submitting}
+          className="min-w-[120px]"
+        >
           {submitting ? (
             <>
               <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
@@ -3408,26 +3153,6 @@ function SegGroup<T extends string | number>({
         })}
       </div>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 生成历史
-// ---------------------------------------------------------------------------
-
-// VideoResultMeta / VideoRow / isVideoLane / toVideoRow moved to
-// '@/lib/video-history-row' so the "only successful 成片" filter is
-// unit-testable. toVideoRow drops failed / cancelled / awaiting
-// (报价 stub) / executing rows, but keeps downloadable partial-success output.
-
-function VideoHistory({ videoType }: { videoType: VideoType }): JSX.Element {
-  return (
-    <CreativeHistory
-      mode="video"
-      accent="#EA1F59"
-      softBg="bg-[#EA1F59]/10"
-      videoType={videoType}
-    />
   );
 }
 
@@ -3642,8 +3367,20 @@ export function IpOnboardingWizard({
 
   return (
     <div className="space-y-6">
-      <input ref={voiceRef} type="file" accept=".wav,.mp3,.m4a,audio/wav,audio/mpeg,audio/mp4" className="hidden" onChange={(e) => void handleVoice(e)} />
-      <input ref={videoRef} type="file" accept=".mp4,.mov,video/mp4,video/quicktime" className="hidden" onChange={(e) => void handleVideo(e)} />
+      <input
+        ref={voiceRef}
+        type="file"
+        accept=".wav,.mp3,.m4a,audio/wav,audio/mpeg,audio/mp4"
+        className="hidden"
+        onChange={(e) => void handleVoice(e)}
+      />
+      <input
+        ref={videoRef}
+        type="file"
+        accept=".mp4,.mov,video/mp4,video/quicktime"
+        className="hidden"
+        onChange={(e) => void handleVideo(e)}
+      />
 
       <Section
         title="IP人物视频素材准备"
@@ -3669,23 +3406,27 @@ export function IpOnboardingWizard({
             </div>
           ) : null}
           {/* Step 1 — 声音 */}
-          <WizardStep
-            index={1}
-            done={status.hasVoice}
-            icon={Mic}
-            title="声音(克隆)"
-            locked={false}
-          >
+          <WizardStep index={1} done={status.hasVoice} icon={Mic} title="声音(克隆)" locked={false}>
             <div className="space-y-2">
               {status.hasVoice ? (
                 <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
                   <span>声音已就绪 ✓</span>
-                  <Button variant="outline" size="sm" onClick={() => voiceRef.current?.click()} disabled={uploadingVoice || clearing}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => voiceRef.current?.click()}
+                    disabled={uploadingVoice || clearing}
+                  >
                     {uploadingVoice ? '上传中…' : '重新上传'}
                   </Button>
                 </div>
               ) : (
-                <Button type="button" size="sm" onClick={() => voiceRef.current?.click()} disabled={uploadingVoice || clearing}>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => voiceRef.current?.click()}
+                  disabled={uploadingVoice || clearing}
+                >
                   {uploadingVoice ? (
                     <>
                       <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
@@ -3714,7 +3455,12 @@ export function IpOnboardingWizard({
               {status.hasBaseVideo ? (
                 <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
                   <span>底版已就绪 ✓</span>
-                  <Button variant="outline" size="sm" onClick={() => videoRef.current?.click()} disabled={uploadingVideo || clearing}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => videoRef.current?.click()}
+                    disabled={uploadingVideo || clearing}
+                  >
                     {uploadingVideo ? '上传中…' : '重新上传'}
                   </Button>
                 </div>
@@ -3725,7 +3471,12 @@ export function IpOnboardingWizard({
                       原出镜底版当前不可用，请稍后重试；若持续出现，请重新上传。
                     </p>
                   ) : null}
-                  <Button type="button" size="sm" onClick={() => videoRef.current?.click()} disabled={uploadingVideo || clearing}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => videoRef.current?.click()}
+                    disabled={uploadingVideo || clearing}
+                  >
                     {uploadingVideo ? (
                       <>
                         <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
@@ -3740,7 +3491,11 @@ export function IpOnboardingWizard({
                 </div>
               )}
               <p className="text-[11px] leading-relaxed text-muted-foreground">
-                MP4 / MOV,10-60 秒竖屏口播。<span className="font-medium text-[#595757]">为保证人物视频质量:正脸面对镜头、光线均匀打亮脸部、画面只有你一人、对焦清晰、安静环境、嘴部不被遮挡。</span>侧脸/逆光/模糊会明显变差。
+                MP4 / MOV,10-60 秒竖屏口播。
+                <span className="font-medium text-[#595757]">
+                  为保证人物视频质量:正脸面对镜头、光线均匀打亮脸部、画面只有你一人、对焦清晰、安静环境、嘴部不被遮挡。
+                </span>
+                侧脸/逆光/模糊会明显变差。
               </p>
             </div>
           </WizardStep>
@@ -3753,7 +3508,9 @@ export function IpOnboardingWizard({
       ) : (
         <Section className={CREATIVE_SECTION_CLASS}>
           <div className="flex items-center justify-between gap-3">
-            <span className="text-[13px] text-muted-foreground">完成声音克隆和出镜底版，即可解锁「IP人物视频」生成。</span>
+            <span className="text-[13px] text-muted-foreground">
+              完成声音克隆和出镜底版，即可解锁「IP人物视频」生成。
+            </span>
             <Button type="button" disabled className="min-w-[140px]">
               <Lock className="mr-1.5 h-4 w-4" />
               生成(未就绪)
@@ -3765,7 +3522,10 @@ export function IpOnboardingWizard({
       {/* 隐私 + 清除 */}
       <Section title="隐私与素材管理" className={CREATIVE_SECTION_CLASS}>
         <ul className="mb-3 space-y-1 text-[12px] leading-relaxed text-muted-foreground">
-          <li>· 声音样本在克隆出声纹后<span className="font-medium text-[#595757]">即刻删除</span>,我们只保留声纹用于合成。</li>
+          <li>
+            · 声音样本在克隆出声纹后<span className="font-medium text-[#595757]">即刻删除</span>
+            ,我们只保留声纹用于合成。
+          </li>
           <li>· 出镜底版加密存储、仅用于你已确认授权的 IP 视频,可随时删除/重传。</li>
           <li>· 一键清除会删掉云端声纹 + 出镜底版 + 授权记录。</li>
         </ul>
@@ -3828,7 +3588,15 @@ function IpGenerateForm({
     };
     try {
       await trpc.videoOnboarding.authorize.mutate();
-      const res = await createTask(finalIntent, undefined, undefined, undefined, undefined, undefined, opts);
+      const res = await createTask(
+        finalIntent,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        opts,
+      );
       if ('error' in res) {
         toast.show(res.error || '提交失败,请重试', 'error');
         return;
@@ -3845,81 +3613,85 @@ function IpGenerateForm({
 
   return (
     <div className="space-y-6">
-    <Section
-      title="生成视频"
-      description="素材已就绪 —— 使用已准备的声音和出镜底版，把文案口播出来。"
-      className={CREATIVE_SECTION_CLASS}
-    >
-      <div className="space-y-5">
-        <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-          <CheckCircle2 className="h-4 w-4 text-[#EA1F59]" />
-          使用你已上传的声音 + 出镜底版(可在上方重传/清除)。
-        </div>
-        <Textarea
-          value={copy}
-          onChange={(e) => setCopy(e.target.value)}
-          placeholder="写你要口播的文案,会用已准备的声音讲出来(单条 ≤40 秒,约 160 字内)。"
-          rows={4}
-          className="min-h-[150px] resize-y rounded-[18px] border-[#EFEFEF] bg-white text-[15px] leading-7"
-        />
-        <div className="rounded-[18px] border border-[#EFEFEF] bg-white px-4 py-3">
-          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-            <span className="text-xl font-semibold text-[#EA1F59]">约 ¥{est.videoCny}</span>
-            <span className="text-[13px] text-muted-foreground">
-              Qwen Voice + Sync Lipsync 3.0 · {IP_VIDEO_ASPECT_RATIO} · 约 {est.chars} 字
-            </span>
+      <Section
+        title="生成视频"
+        description="素材已就绪 —— 使用已准备的声音和出镜底版，把文案口播出来。"
+        className={CREATIVE_SECTION_CLASS}
+      >
+        <div className="space-y-5">
+          <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+            <CheckCircle2 className="h-4 w-4 text-[#EA1F59]" />
+            使用你已上传的声音 + 出镜底版(可在上方重传/清除)。
           </div>
-          {est.maybeTooLong && (
-            <p className="mt-1 text-[11px] text-[#B45309]">⚠️ 文案偏长,可能超过 40 秒上限;过长会被拒,请适当截短。</p>
-          )}
-          <p className="mt-1 text-[11px] text-muted-foreground">提交后会先给预估报价,确认后才扣费。</p>
-        </div>
-        {/* per-generate 授权确认:用户点生成前勾选,提交时写入后端授权记录。 */}
-        <div className="rounded-[16px] border border-[#EFEFEF] bg-white px-4 py-3">
-          <div className="text-[13px] font-semibold text-[#111827]">素材授权声明</div>
-          <label className="mt-2 flex cursor-pointer items-start gap-2 text-[12px] leading-relaxed text-foreground">
-            <input
-              type="checkbox"
-              checked={consent}
-              onChange={(e) => setConsent(e.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-[#EA1F59]"
-            />
-            <span>
-              {IP_ASSET_AUTHORIZATION_COPY}
-              <Link to="/terms" target="_blank" className="text-[#EA1F59] underline">
-                《服务条款》
-              </Link>
-              与
-              <Link to="/privacy" target="_blank" className="text-[#EA1F59] underline">
-                《隐私政策》
-              </Link>
-              。
-            </span>
-          </label>
-        </div>
-        <div className="flex items-center justify-end gap-3">
-          <span className="text-[12px] text-muted-foreground">提交后先报价,不会立即扣费</span>
-          <Button
-            type="button"
-            onClick={() => void handleSubmit()}
-            disabled={submitting || !consent}
-            className="min-w-[120px]"
-          >
-            {submitting ? (
-              <>
-                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                提交中…
-              </>
-            ) : (
-              <>
-                <Sparkles className="mr-1.5 h-4 w-4" />
-                生成视频
-              </>
+          <Textarea
+            value={copy}
+            onChange={(e) => setCopy(e.target.value)}
+            placeholder="写你要口播的文案,会用已准备的声音讲出来(单条 ≤40 秒,约 160 字内)。"
+            rows={4}
+            className="min-h-[150px] resize-y rounded-[18px] border-[#EFEFEF] bg-white text-[15px] leading-7"
+          />
+          <div className="rounded-[18px] border border-[#EFEFEF] bg-white px-4 py-3">
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+              <span className="text-xl font-semibold text-[#EA1F59]">约 ¥{est.videoCny}</span>
+              <span className="text-[13px] text-muted-foreground">
+                Qwen Voice + Sync Lipsync 3.0 · {IP_VIDEO_ASPECT_RATIO} · 约 {est.chars} 字
+              </span>
+            </div>
+            {est.maybeTooLong && (
+              <p className="mt-1 text-[11px] text-[#B45309]">
+                ⚠️ 文案偏长,可能超过 40 秒上限;过长会被拒,请适当截短。
+              </p>
             )}
-          </Button>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              提交后会先给预估报价,确认后才扣费。
+            </p>
+          </div>
+          {/* per-generate 授权确认:用户点生成前勾选,提交时写入后端授权记录。 */}
+          <div className="rounded-[16px] border border-[#EFEFEF] bg-white px-4 py-3">
+            <div className="text-[13px] font-semibold text-[#111827]">素材授权声明</div>
+            <label className="mt-2 flex cursor-pointer items-start gap-2 text-[12px] leading-relaxed text-foreground">
+              <input
+                type="checkbox"
+                checked={consent}
+                onChange={(e) => setConsent(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-[#EA1F59]"
+              />
+              <span>
+                {IP_ASSET_AUTHORIZATION_COPY}
+                <Link to="/terms" target="_blank" className="text-[#EA1F59] underline">
+                  《服务条款》
+                </Link>
+                与
+                <Link to="/privacy" target="_blank" className="text-[#EA1F59] underline">
+                  《隐私政策》
+                </Link>
+                。
+              </span>
+            </label>
+          </div>
+          <div className="flex items-center justify-end gap-3">
+            <span className="text-[12px] text-muted-foreground">提交后先报价,不会立即扣费</span>
+            <Button
+              type="button"
+              onClick={() => void handleSubmit()}
+              disabled={submitting || !consent}
+              className="min-w-[120px]"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  提交中…
+                </>
+              ) : (
+                <>
+                  <Sparkles className="mr-1.5 h-4 w-4" />
+                  生成视频
+                </>
+              )}
+            </Button>
+          </div>
         </div>
-      </div>
-    </Section>
+      </Section>
     </div>
   );
 }
@@ -3940,7 +3712,13 @@ function WizardStep({
   children: React.ReactNode;
 }): JSX.Element {
   return (
-    <div className={cn('flex gap-3 rounded-[18px] border bg-white p-4', done ? 'border-[#EA1F59]/30' : 'border-[#DCDDDD]', locked && 'opacity-60')}>
+    <div
+      className={cn(
+        'flex gap-3 rounded-[18px] border bg-white p-4',
+        done ? 'border-[#EA1F59]/30' : 'border-[#DCDDDD]',
+        locked && 'opacity-60',
+      )}
+    >
       <span
         className={cn(
           'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[13px] font-medium',
