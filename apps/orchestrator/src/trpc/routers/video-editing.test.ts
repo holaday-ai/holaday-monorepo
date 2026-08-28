@@ -197,6 +197,52 @@ describe('video editing router', () => {
     ).rejects.toMatchObject({ code: 'NOT_FOUND', message: '视频不存在' });
   });
 
+  it('imports multiple owned sources in selection order and creates one combined document', async () => {
+    const importSource = vi.fn(async ({ sourceFileId }: { sourceFileId: string }) => {
+      const index = sourceFileId === 'file_a' ? 1 : 2;
+      return {
+        sourceKind: 'upload' as const,
+        sourceTaskId: null,
+        sourceFileId: 30 + index,
+        document: {
+          aspectRatio: '16:9' as const,
+          scenes: [
+            {
+              ...DOCUMENT.scenes[0]!,
+              id: 'scene_1',
+              sourceFileId,
+              order: 0,
+            },
+          ],
+        },
+        capabilities: { sceneRegeneration: false },
+        preview: {
+          url: `/api/files/${sourceFileId}/download`,
+          expiresAt: new Date('2026-08-28T00:15:00Z'),
+        },
+      };
+    });
+    const fixture = caller({ runtime: runtime({ importSource }) });
+
+    await fixture.caller.createProject({ sourceFileIds: ['file_b', 'file_a'] });
+
+    expect(importSource.mock.calls.map(([input]) => input.sourceFileId)).toEqual([
+      'file_b',
+      'file_a',
+    ]);
+    expect(fixture.runtime.repository.createFromSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceFileId: 32,
+        document: expect.objectContaining({
+          scenes: [
+            expect.objectContaining({ sourceFileId: 'file_b', order: 0 }),
+            expect.objectContaining({ sourceFileId: 'file_a', order: 1 }),
+          ],
+        }),
+      }),
+    );
+  });
+
   it('maps a foreign project to NOT_FOUND without leaking ownership', async () => {
     const editingRuntime = runtime({
       repository: {

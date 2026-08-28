@@ -255,28 +255,72 @@ export function createVideoEditingRouter(dependencies: VideoEditingRouterDepende
 
     createProject: protectedProcedure
       .input(
-        z
-          .object({
-            sourceFileId: externalIdSchema,
-            sourceTaskId: externalIdSchema.optional(),
-          })
-          .strict(),
+        z.union([
+          z
+            .object({
+              sourceFileId: externalIdSchema,
+              sourceTaskId: externalIdSchema.optional(),
+            })
+            .strict(),
+          z
+            .object({
+              sourceFileIds: z.array(externalIdSchema).min(1).max(8),
+            })
+            .strict()
+            .refine((value) => new Set(value.sourceFileIds).size === value.sourceFileIds.length, {
+              message: '不能重复选择同一段视频',
+              path: ['sourceFileIds'],
+            }),
+        ]),
       )
       .mutation(({ ctx, input }) =>
         withRuntime(dependencies, ctx, async (runtime, user) => {
-          const imported = await runtime.importSource({ userId: user.id, ...input });
+          const sourceFileIds =
+            'sourceFileIds' in input ? input.sourceFileIds : [input.sourceFileId];
+          const importedSources: ImportedVideoSource[] = [];
+          for (const sourceFileId of sourceFileIds) {
+            importedSources.push(
+              await runtime.importSource({
+                userId: user.id,
+                sourceFileId,
+                ...('sourceTaskId' in input ? { sourceTaskId: input.sourceTaskId } : {}),
+              }),
+            );
+          }
+          const imported = importedSources[0];
+          if (!imported) throw new Error('至少需要一段视频');
+          const sourceKinds = new Set(importedSources.map((source) => source.sourceKind));
+          const sourceTaskIds = new Set(importedSources.map((source) => source.sourceTaskId));
+          const document: VideoEditDocument = {
+            aspectRatio: imported.document.aspectRatio,
+            scenes: importedSources.flatMap((source, sourceIndex) =>
+              source.document.scenes.map((scene, sceneIndex) => ({
+                ...scene,
+                id:
+                  importedSources.length === 1
+                    ? scene.id
+                    : `scene_${sourceIndex + 1}_${sceneIndex + 1}`,
+                order: 0,
+              })),
+            ),
+          };
+          document.scenes = document.scenes.map((scene, order) => ({ ...scene, order }));
           const created = await runtime.repository.createFromSource({
             userId: user.id,
-            sourceTaskId: imported.sourceTaskId,
+            sourceTaskId: sourceTaskIds.size === 1 ? imported.sourceTaskId : null,
             sourceFileId: imported.sourceFileId,
-            sourceKind: imported.sourceKind,
-            document: imported.document,
+            sourceKind: sourceKinds.size === 1 ? imported.sourceKind : 'upload',
+            document,
           });
           return {
             project: projectView(created.project),
             currentVersion: versionView(created.currentVersion),
             preview: imported.preview,
-            capabilities: imported.capabilities,
+            capabilities: {
+              sceneRegeneration: importedSources.every(
+                (source) => source.capabilities.sceneRegeneration,
+              ),
+            },
           };
         }),
       ),

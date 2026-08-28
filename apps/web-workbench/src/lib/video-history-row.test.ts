@@ -296,6 +296,7 @@ describe('toVideoRow — 生成历史 only lists completed 成片 with an attach
       filename: 'holaday-video.mp4',
       size: 6_000_000,
     });
+    expect(out?.mimetype).toBe('video/mp4');
   });
 
   it('carries the persisted pin state into video history', () => {
