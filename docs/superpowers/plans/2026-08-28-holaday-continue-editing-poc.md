@@ -148,7 +148,7 @@ Commit: `feat(video-editing): add guarded editor adapter`
 - Create: `apps/orchestrator/src/db/schema/video-editing.ts`
 - Test: `apps/orchestrator/src/db/schema/video-editing.test.ts`
 - Modify: `apps/orchestrator/src/db/schema/index.ts`
-- Create: `apps/orchestrator/drizzle/0051_video_editing_projects.sql`
+- Create: `apps/orchestrator/drizzle/0053_video_editing_projects.sql`
 - Modify: `apps/orchestrator/scripts/verify-db-schema.ts`
 - Create: `apps/orchestrator/src/video-editing/types.ts`
 - Create: `apps/orchestrator/src/video-editing/project-repository.ts`

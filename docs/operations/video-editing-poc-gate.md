@@ -46,7 +46,7 @@
 
 发布前运行 `pnpm test:video-editing-preflight`。功能关闭时它只返回
 `production_disabled_pending_commercial_license`，不会探测或输出许可证、白名单内容；只有准备打开
-canary 时，才会要求书面授权主机名、非空白名单、0051/0052 生产数据库验证和两个健康端点全部通过。
+canary 时，才会要求书面授权主机名、非空白名单、0053/0054 生产数据库验证和两个健康端点全部通过。
 
 ## 回滚
 

@@ -75,7 +75,7 @@ test('requires both editing migrations and green production health', async () =>
       fetchImpl: async () => response(200, { status: 'ok' }),
       verifySchema: async () => false,
     }),
-    /schema 0051\/0052 is not verified/,
+    /schema 0053\/0054 is not verified/,
   );
 
   await assert.rejects(
@@ -102,7 +102,7 @@ test('passes only with the complete canary contract and never returns secrets', 
     provider: 'cesdk',
     licenseConfigured: true,
     licenseLength: completeEnv.CESDK_LICENSE.length,
-    schema: '0051+0052',
+    schema: '0053+0054',
     health: 'ok',
   });
   assert.deepEqual(requests, [

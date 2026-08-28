@@ -105,7 +105,7 @@ describe('video editing schema', () => {
 
   it('ships one additive numbered migration with ownership and version constraints', () => {
     const migrationUrl = new URL(
-      '../../../drizzle/0051_video_editing_projects.sql',
+      '../../../drizzle/0053_video_editing_projects.sql',
       import.meta.url,
     );
     expect(existsSync(migrationUrl)).toBe(true);

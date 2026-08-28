@@ -48,6 +48,12 @@ import { userProfiles } from '../../db/schema/user-profiles.js';
 import { userSiteStats } from '../../db/schema/user-site-stats.js';
 import { users } from '../../db/schema/users.js';
 import { verificationCodes } from '../../db/schema/verification-codes.js';
+import {
+  videoEditActionQuotes,
+  videoEditProjects,
+  videoEditRenderAttempts,
+  videoEditVersions,
+} from '../../db/schema/video-editing.js';
 import { watchlists } from '../../db/schema/watchlists.js';
 import { webhookIdempotency } from '../../db/schema/webhook-idempotency.js';
 import type { StorageProvider } from '../../files/storage-provider.js';
@@ -248,6 +254,9 @@ describe.sequential('account closure relational handlers', () => {
       'scheduled_tasks',
       'tasks',
       'projects',
+      'video_edit_action_quotes',
+      'video_edit_projects',
+      'video_edit_render_attempts',
     ]) {
       expect(await ownedCount(tableName, target.id)).toBe(0);
       expect(await ownedCount(tableName, other.id)).toBeGreaterThan(0);
@@ -662,6 +671,85 @@ describe.sequential('account closure relational handlers', () => {
     const firstTaskId = ownedTasks[0]?.id;
     if (!firstTaskId) throw new Error('expected seeded task');
     deletedRows.push({ tableName: 'tasks', id: firstTaskId });
+
+    const [renderFileInsert] = await db.insert(taskFiles).values({
+      externalId: `file_render_${suffix}`,
+      userId: user.id,
+      taskId: firstTaskId,
+      kind: 'output',
+      filename: 'private-render.mp4',
+      mimetype: 'video/mp4',
+      sizeBytes: 1,
+      storagePath: `task6/${suffix}/private-render.mp4`,
+    });
+    const renderFileId = Number(renderFileInsert.insertId);
+    blockerRows.push({ tableName: 'task_files', id: renderFileId });
+
+    const [videoProjectInsert] = await db.insert(videoEditProjects).values({
+      externalId: `vedp_${suffix}`,
+      userId: user.id,
+      sourceTaskId: firstTaskId,
+      sourceFileId: renderFileId,
+      sourceKind: 'generated',
+      provider: 'cesdk',
+    });
+    const videoProjectId = Number(videoProjectInsert.insertId);
+    deletedRows.push({ tableName: 'video_edit_projects', id: videoProjectId });
+
+    const [videoVersionInsert] = await db.insert(videoEditVersions).values({
+      externalId: `vedv_${suffix}`,
+      projectId: videoProjectId,
+      revision: 1,
+      documentJson: {
+        aspectRatio: '16:9',
+        scenes: [
+          {
+            id: `scene_${suffix}`,
+            sourceFileId: `file_render_${suffix}`,
+            sourceStartMs: 0,
+            sourceEndMs: 1_000,
+            order: 0,
+            caption: 'private caption',
+            audioGain: 1,
+            generationContext: null,
+          },
+        ],
+      },
+    });
+    const videoVersionId = Number(videoVersionInsert.insertId);
+    deletedRows.push({ tableName: 'video_edit_versions', id: videoVersionId });
+    await db
+      .update(videoEditProjects)
+      .set({ currentVersionId: videoVersionId })
+      .where(eq(videoEditProjects.id, videoProjectId));
+
+    const [videoQuoteInsert] = await db.insert(videoEditActionQuotes).values({
+      externalId: `vedq_${suffix}`,
+      userId: user.id,
+      projectId: videoProjectId,
+      baseVersionId: videoVersionId,
+      operationHash: `${user.id}`.padStart(64, '7'),
+      operationJson: [{ kind: 'caption', sceneId: `scene_${suffix}`, text: 'private edit' }],
+      costUnits: 12,
+      expiresAt: new Date('2026-08-27T00:00:00.000Z'),
+    });
+    deletedRows.push({
+      tableName: 'video_edit_action_quotes',
+      id: Number(videoQuoteInsert.insertId),
+    });
+
+    const [renderAttemptInsert] = await db.insert(videoEditRenderAttempts).values({
+      externalId: `vedr_${suffix}`,
+      userId: user.id,
+      projectId: videoProjectId,
+      versionId: videoVersionId,
+      outputFileId: renderFileId,
+      expiresAt: new Date('2026-08-27T00:00:00.000Z'),
+    });
+    deletedRows.push({
+      tableName: 'video_edit_render_attempts',
+      id: Number(renderAttemptInsert.insertId),
+    });
 
     const [stepInsert] = await db.insert(taskSteps).values({
       externalId: `step_${suffix}`,

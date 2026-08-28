@@ -53,7 +53,7 @@ export async function verifyVideoEditingProduction(
     blocked('licensed hostname scope is incomplete');
   }
 
-  if (!(await verifySchema())) blocked('schema 0051/0052 is not verified');
+  if (!(await verifySchema())) blocked('schema 0053/0054 is not verified');
   for (const endpoint of HEALTH_ENDPOINTS) {
     let response;
     try {
@@ -76,7 +76,7 @@ export async function verifyVideoEditingProduction(
     provider: 'cesdk',
     licenseConfigured: true,
     licenseLength: license.length,
-    schema: '0051+0052',
+    schema: '0053+0054',
     health: 'ok',
   };
 }

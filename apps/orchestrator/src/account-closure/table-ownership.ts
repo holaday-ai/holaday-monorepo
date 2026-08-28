@@ -59,6 +59,10 @@ export const ACCOUNT_CLOSURE_TABLE_OWNERSHIP: readonly AccountClosureTableOwners
     'task_events',
     'task_steps',
     'tasks',
+    'video_edit_action_quotes',
+    'video_edit_projects',
+    'video_edit_render_attempts',
+    'video_edit_versions',
   ),
   ...own('cross_task_memory', 'execution_memory', 'execution_stats'),
   ...own(

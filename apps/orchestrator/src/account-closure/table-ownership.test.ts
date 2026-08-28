@@ -23,4 +23,22 @@ describe('account closure persistence table ownership', () => {
       ),
     ).toBe(true);
   });
+
+  it('routes every user-owned video editing table through task execution cleanup', () => {
+    const owners = Object.fromEntries(
+      ACCOUNT_CLOSURE_TABLE_OWNERSHIP.map(({ tableName, categoryId }) => [tableName, categoryId]),
+    );
+
+    expect({
+      video_edit_projects: owners.video_edit_projects,
+      video_edit_versions: owners.video_edit_versions,
+      video_edit_action_quotes: owners.video_edit_action_quotes,
+      video_edit_render_attempts: owners.video_edit_render_attempts,
+    }).toEqual({
+      video_edit_projects: 'task_execution',
+      video_edit_versions: 'task_execution',
+      video_edit_action_quotes: 'task_execution',
+      video_edit_render_attempts: 'task_execution',
+    });
+  });
 });
