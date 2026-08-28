@@ -195,6 +195,23 @@ const baseEnvSchema = z.object({
   VIDEO_CREATION_ALLOWLIST: z.string().default(''),
 
   /**
+   * Embedded “继续剪辑” gate. Default OFF until the CE.SDK commercial
+   * license, hostname scope, and browser/codec release matrix pass the
+   * production preflight. The browser never receives this server-side
+   * rollout decision or the license string through the public API.
+   */
+  VIDEO_EDITING_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /** Empty means all authenticated users only after the feature flag is on. */
+  VIDEO_EDITING_ALLOWLIST: z.string().default(''),
+  /** Vendor choice stays explicit so an unreviewed SDK cannot become a fallback. */
+  VIDEO_EDITING_PROVIDER: z.literal('cesdk').default('cesdk'),
+  /** Commercial/evaluation value; never log or expose it through tRPC. */
+  CESDK_LICENSE: z.string().default(''),
+
+  /**
    * Phase 1 #1 — template fill. When true, the 'template_fill' lane
    * fills a user-uploaded Office template (.docx/.xlsx) deterministically
    * and returns the filled file. When false (default), template_fill
