@@ -993,6 +993,35 @@ export class FileService {
     return this.storage.getSignedUrl(row.storagePath, { expiresInSeconds });
   }
 
+  /**
+   * Return a short-lived browser preview location after checking ownership,
+   * row lifecycle, and backing-object existence. R2 receives a signed URL;
+   * local storage falls back to the existing authenticated download route.
+   * The expiry describes how long the caller may retain this response and is
+   * deliberately not suitable for persistence in an editing document.
+   */
+  async getScopedPreviewForUser(
+    fileExternalId: string,
+    userIdInternal: number,
+    ttlSeconds = 900,
+  ): Promise<{
+    url: string;
+    expiresAt: Date;
+    delivery: 'signed' | 'authenticated';
+  } | null> {
+    const row = await this.readableRowForUser(fileExternalId, userIdInternal);
+    if (!row) return null;
+    const boundedTtlSeconds = Math.min(3_600, Math.max(60, Math.floor(ttlSeconds)));
+    const signedUrl = await this.storage.getSignedUrl(row.storagePath, {
+      expiresInSeconds: boundedTtlSeconds,
+    });
+    return {
+      url: signedUrl ?? `/api/files/${encodeURIComponent(fileExternalId)}/download`,
+      expiresAt: new Date(Date.now() + boundedTtlSeconds * 1_000),
+      delivery: signedUrl ? 'signed' : 'authenticated',
+    };
+  }
+
   private async readableRowForUser(
     fileExternalId: string,
     userIdInternal: number,
