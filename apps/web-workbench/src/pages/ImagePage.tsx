@@ -82,7 +82,7 @@ export function ImagePage(): JSX.Element {
       void refreshTasks?.();
     }, 4_000);
     return () => window.clearInterval(timer);
-  }, [currentTaskId, currentTaskNeedsResultSync, currentTaskStatus, refreshTasks]);
+  }, [currentTaskNeedsResultSync, currentTaskStatus, refreshTasks]);
 
   function switchGoal(goal: ImageStudioDraft['goal']): void {
     setDraft((current) => switchImageCreationGoal(current, goal));
@@ -123,7 +123,12 @@ export function ImagePage(): JSX.Element {
   }
 
   async function handleFilesSelected(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
-    const availableSlots = Math.max(0, 5 - attachmentsRef.current.length);
+    const replacingSubjectId =
+      draft.goal === 'lock_subject' ? draft.subjectAttachmentClientId : null;
+    const availableSlots = Math.max(
+      0,
+      5 - attachmentsRef.current.length + (replacingSubjectId ? 1 : 0),
+    );
     const selected = Array.from(event.target.files ?? []).slice(0, availableSlots);
     event.target.value = '';
     if (selected.length === 0) {
@@ -137,6 +142,12 @@ export function ImagePage(): JSX.Element {
       setInlineError(null);
     }
     if (valid.length === 0) return;
+
+    const replacedSubject = replacingSubjectId
+      ? attachmentsRef.current.find(
+          (attachment) => (attachment.clientId ?? attachment.fileId) === replacingSubjectId,
+        )
+      : undefined;
 
     const pending = valid.map((file) => {
       const clientId = `image_${Date.now().toString(36)}_${++attachmentCounterRef.current}`;
@@ -157,18 +168,16 @@ export function ImagePage(): JSX.Element {
 
     setDraft((current) => ({
       ...current,
-      attachments: [...current.attachments, ...pending.map(({ attachment }) => attachment)].slice(
-        0,
-        5,
-      ),
+      attachments: [...current.attachments, ...pending.map(({ attachment }) => attachment)],
       subjectAttachmentClientId:
-        current.goal === 'lock_subject' && !current.subjectAttachmentClientId
+        current.goal === 'lock_subject'
           ? (pending[0]?.clientId ?? null)
           : current.subjectAttachmentClientId,
     }));
     setUploading(true);
     await Promise.all(
       pending.map(async ({ clientId, file }) => {
+        const replacingSubject = Boolean(replacingSubjectId) && clientId === pending[0]?.clientId;
         try {
           const uploaded = await uploadFile(file);
           updateAttachment(clientId, (attachment) => ({
@@ -180,13 +189,38 @@ export function ImagePage(): JSX.Element {
             status: 'ready',
             errorMessage: undefined,
           }));
+          if (replacingSubject) {
+            setDraft((current) => ({
+              ...current,
+              attachments: current.attachments.filter(
+                (attachment) => (attachment.clientId ?? attachment.fileId) !== replacingSubjectId,
+              ),
+            }));
+            if (replacedSubject?.previewDataUrl?.startsWith('blob:')) {
+              URL.revokeObjectURL(replacedSubject.previewDataUrl);
+            }
+          }
         } catch (error) {
           const message = uploadFailureMessage(error);
-          updateAttachment(clientId, (attachment) => ({
-            ...attachment,
-            status: 'error',
-            errorMessage: message,
-          }));
+          if (replacingSubject) {
+            const replacement = pending[0]?.attachment;
+            setDraft((current) => ({
+              ...current,
+              attachments: current.attachments.filter(
+                (attachment) => (attachment.clientId ?? attachment.fileId) !== clientId,
+              ),
+              subjectAttachmentClientId: replacingSubjectId,
+            }));
+            if (replacement?.previewDataUrl?.startsWith('blob:')) {
+              URL.revokeObjectURL(replacement.previewDataUrl);
+            }
+          } else {
+            updateAttachment(clientId, (attachment) => ({
+              ...attachment,
+              status: 'error',
+              errorMessage: message,
+            }));
+          }
           setInlineError(message);
         }
       }),
@@ -306,9 +340,15 @@ export function ImagePage(): JSX.Element {
   }
 
   return (
-    <main className="min-h-full bg-[#FBF8F3] px-4 py-7 text-[#342E39] sm:px-6 lg:px-8">
-      <div className="mx-auto w-full max-w-[1200px]">
-        <div className="rounded-[30px] border border-[#E8E0E7] bg-[#FFFDF9] p-4 shadow-[0_18px_48px_rgba(62,48,69,0.06)] sm:p-6 lg:p-7">
+    <main className="min-h-full bg-[#FBFAF7] px-4 py-5 text-[#342E39] sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-[1220px]">
+        <header className="mb-5 px-1">
+          <h1 className="text-[32px] font-semibold tracking-[-0.04em] text-[#27212D] sm:text-[38px]">
+            图片任务
+          </h1>
+        </header>
+
+        <div className="rounded-[26px] border border-[#E8E1E7] bg-white p-4 shadow-[0_14px_38px_rgba(62,48,69,0.05)] sm:p-5 lg:p-7">
           <ImageGoalPicker
             value={draft.goal}
             commercialUse={draft.commercialUse}
@@ -330,6 +370,48 @@ export function ImagePage(): JSX.Element {
               draft={draft}
               uploading={uploading}
               inlineError={inlineError}
+              actions={
+                <>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <button
+                      ref={settingsTriggerRef}
+                      type="button"
+                      onClick={() => setSettingsOpen(true)}
+                      className="inline-flex min-h-11 items-center gap-3 rounded-xl border border-[#E2DAE3] bg-[#FBF9FC] px-3 text-left transition-colors hover:border-[#CFC1D2] hover:bg-white motion-reduce:transition-none"
+                    >
+                      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#F0E9FA] text-[#73529B]">
+                        <Settings2 className="h-4 w-4" aria-hidden />
+                      </span>
+                      <span>
+                        <span className="block text-sm font-semibold text-[#423A46]">生成设置</span>
+                        <span className="mt-0.5 block text-xs text-[#7A707D]">
+                          {settingSummary(draft)}
+                        </span>
+                      </span>
+                    </button>
+
+                    <Button
+                      type="button"
+                      onClick={() => void handleSubmit()}
+                      disabled={Boolean(validationMessage) || submitting}
+                      className="min-h-12 rounded-xl bg-[#D62958] px-8 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(214,41,88,0.2)] hover:bg-[#BE214B] sm:w-[48%]"
+                    >
+                      {submitting ? (
+                        <Loader2
+                          className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none"
+                          aria-hidden
+                        />
+                      ) : (
+                        <Sparkles className="mr-2 h-4 w-4" aria-hidden />
+                      )}
+                      {submitting ? '提交中…' : '开始生成'}
+                    </Button>
+                  </div>
+                  <p className="mt-2 min-h-5 text-right text-xs text-[#7D737F]" aria-live="polite">
+                    {validationMessage ?? '设置已就绪，可以开始生成'}
+                  </p>
+                </>
+              }
               onPromptChange={(prompt) => setDraft((current) => ({ ...current, prompt }))}
               onToggleChangeTarget={toggleChangeTarget}
               onChooseImages={() => fileInputRef.current?.click()}
@@ -340,56 +422,23 @@ export function ImagePage(): JSX.Element {
             />
           </div>
 
-          <div className="mt-4 flex flex-col gap-3 rounded-[22px] border border-[#E8E0E8] bg-white p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
-            <button
-              ref={settingsTriggerRef}
-              type="button"
-              onClick={() => setSettingsOpen(true)}
-              className="inline-flex min-h-11 items-center gap-3 rounded-xl px-2 text-left transition-colors hover:bg-[#F8F3F8] motion-reduce:transition-none"
-            >
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#F0E9FA] text-[#73529B]">
-                <Settings2 className="h-4 w-4" aria-hidden />
-              </span>
-              <span>
-                <span className="block text-sm font-semibold text-[#423A46]">生成设置</span>
-                <span className="mt-0.5 block text-xs text-[#7A707D]">{settingSummary(draft)}</span>
-              </span>
-            </button>
-
-            <Button
-              type="button"
-              onClick={() => void handleSubmit()}
-              disabled={Boolean(validationMessage) || submitting}
-              className="min-h-12 rounded-xl bg-[#D62958] px-8 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(214,41,88,0.2)] hover:bg-[#BE214B]"
-            >
-              {submitting ? (
-                <Loader2
-                  className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none"
-                  aria-hidden
-                />
-              ) : (
-                <Sparkles className="mr-2 h-4 w-4" aria-hidden />
-              )}
-              {submitting ? '提交中…' : '开始生成'}
-            </Button>
-          </div>
-
-          <p className="mt-2 min-h-5 text-right text-xs text-[#7D737F]" aria-live="polite">
-            {validationMessage ?? '设置已就绪，可以开始生成'}
-          </p>
-
           {!currentTask ? (
-            <section className="mt-4 flex flex-col gap-4 rounded-[22px] border border-[#E8E0E8] bg-[#FCFAFD] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
+            <section className="mt-4 grid gap-4 rounded-[20px] border border-[#E8E1E8] bg-[#FCFBFD] px-5 py-4 sm:grid-cols-[minmax(240px,0.9fr)_minmax(320px,1.1fr)] sm:items-center">
+              <div className="min-w-0">
                 <h2 className="text-sm font-semibold text-[#433A47]">生成后可以继续修改</h2>
                 <p className="mt-1 text-xs leading-5 text-[#7B717F]">
                   围绕同一张结果继续调整背景、风格、光线或构图，不必从头开始。
                 </p>
+                <span className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[#755990]">
+                  继续改这张 · 保持主角 · 复用设置
+                  <ArrowRight className="h-4 w-4" aria-hidden />
+                </span>
               </div>
-              <span className="inline-flex items-center gap-2 text-xs font-semibold text-[#755990]">
-                继续改这张 · 保持主角 · 复用设置
-                <ArrowRight className="h-4 w-4" aria-hidden />
-              </span>
+              <img
+                src="/design-ref/image-continuation-preview.jpg"
+                alt="同一主角在城市、雪景和暖阳场景中的连续创作示意"
+                className="h-[96px] w-full rounded-[14px] object-cover shadow-[0_6px_18px_rgba(51,43,59,0.1)]"
+              />
             </section>
           ) : null}
         </div>

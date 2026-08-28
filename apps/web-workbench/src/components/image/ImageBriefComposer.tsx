@@ -1,3 +1,7 @@
+import { AttachmentChip } from '@/components/AttachmentChip';
+import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
+import type { ImageChangeTarget } from '@/types/image';
 import {
   Crop,
   ImagePlus,
@@ -6,11 +10,9 @@ import {
   Sparkles,
   SunMedium,
   Wallpaper,
+  X,
 } from 'lucide-react';
-import { AttachmentChip } from '@/components/AttachmentChip';
-import { Textarea } from '@/components/ui/textarea';
-import { cn } from '@/lib/utils';
-import type { ImageChangeTarget } from '@/types/image';
+import type { ReactNode } from 'react';
 import type { ImageStudioDraft } from './image-studio-state';
 
 const CHANGE_TARGET_OPTIONS: ReadonlyArray<{
@@ -29,6 +31,7 @@ export interface ImageBriefComposerProps {
   draft: ImageStudioDraft;
   uploading: boolean;
   inlineError: string | null;
+  actions?: ReactNode;
   onPromptChange(value: string): void;
   onToggleChangeTarget(value: ImageChangeTarget): void;
   onChooseImages(): void;
@@ -40,6 +43,7 @@ export function ImageBriefComposer({
   draft,
   uploading,
   inlineError,
+  actions,
   onPromptChange,
   onToggleChangeTarget,
   onChooseImages,
@@ -56,18 +60,56 @@ export function ImageBriefComposer({
 
   return (
     <section
+      aria-label="图片创作区"
       className={cn(
-        'grid overflow-hidden rounded-[26px] border border-[#E7DFE8] bg-[#FFFEFB] shadow-[0_12px_30px_rgba(62,50,68,0.045)]',
-        lockSubject ? 'lg:grid-cols-[minmax(220px,280px)_minmax(0,1fr)]' : 'grid-cols-1',
+        'grid overflow-hidden rounded-[22px] border border-[#E6DFE6] bg-white shadow-[0_8px_24px_rgba(62,50,68,0.04)]',
+        lockSubject ? 'lg:grid-cols-[minmax(220px,270px)_minmax(0,1fr)]' : 'grid-cols-1',
       )}
     >
       {lockSubject ? (
-        <div className="border-b border-[#E7DFE8] bg-[#F8FBFF] p-4 sm:p-5 lg:border-b-0 lg:border-r">
+        <div className="border-b border-[#E7DFE8] bg-[#FBFCFF] p-4 lg:border-b-0 lg:border-r">
           <div className="text-sm font-semibold text-[#342E39]">添加主角图</div>
           <p className="mt-1 text-xs leading-5 text-[#7B717F]">
             人物、宠物、商品或 IP；建议主体清晰。
           </p>
-          {subject ? (
+          {subject?.previewDataUrl ? (
+            <div className="relative mt-4 overflow-hidden rounded-[16px] border border-[#DED5E1] bg-white p-2 shadow-[0_8px_18px_rgba(62,50,68,0.08)]">
+              <div className="relative overflow-hidden rounded-xl bg-[#F3EFF5]">
+                <img
+                  src={subject.previewDataUrl}
+                  alt="主角图预览"
+                  draggable={false}
+                  className="h-[174px] w-full object-cover"
+                />
+                <span className="absolute left-2.5 top-2.5 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-semibold text-[#5F4771] shadow-sm backdrop-blur">
+                  主角
+                </span>
+                <button
+                  type="button"
+                  aria-label="移除主角图"
+                  title="移除主角图"
+                  onClick={() => onRemoveAttachment(subject.clientId ?? subject.fileId)}
+                  className="absolute right-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-white/95 text-[#6C626F] shadow-sm transition-colors hover:bg-[#FFF0F3] hover:text-[#B51E49] motion-reduce:transition-none"
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+              </div>
+              <div className="flex min-w-0 items-center justify-between gap-2 px-1 pb-0.5 pt-2.5">
+                <span className="truncate text-[11px] text-[#766C79]">{subject.filename}</span>
+                <button
+                  type="button"
+                  aria-label="更换主角图"
+                  title="更换主角图"
+                  onClick={onChooseImages}
+                  disabled={uploading}
+                  className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-[#66516F] transition-colors hover:bg-[#F4EEF7] disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
+                >
+                  <ImagePlus className="h-3.5 w-3.5" aria-hidden />
+                  {uploading ? '正在更换…' : '更换图片'}
+                </button>
+              </div>
+            </div>
+          ) : subject ? (
             <div className="mt-4">
               <AttachmentChip
                 attachment={subject}
@@ -82,7 +124,7 @@ export function ImageBriefComposer({
               title="添加主角图"
               onClick={onChooseImages}
               disabled={uploading}
-              className="mt-4 flex min-h-[150px] w-full flex-col items-center justify-center rounded-[18px] border border-dashed border-[#CFC3D2] bg-[#FDF9FF] px-4 text-center text-[#675B6D] transition-colors hover:border-[#9C87AA] hover:bg-[#FAF3FF] disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
+              className="mt-3 flex min-h-[142px] w-full flex-col items-center justify-center rounded-[16px] border border-dashed border-[#CFC3D2] bg-[#FDF9FF] px-4 text-center text-[#675B6D] transition-colors hover:border-[#9C87AA] hover:bg-[#FAF3FF] disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
             >
               <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#EEE6FF] text-[#7252A0]">
                 <ImagePlus className="h-5 w-5" aria-hidden />
@@ -96,11 +138,11 @@ export function ImageBriefComposer({
         </div>
       ) : null}
 
-      <div className="p-4 sm:p-5">
+      <div className="p-4 sm:p-[18px]">
         {lockSubject ? (
-          <div role="group" aria-label="想改什么">
-            <div className="text-sm font-semibold text-[#342E39]">想改什么？</div>
-            <div className="mt-3 flex flex-wrap gap-2">
+          <fieldset aria-label="想改什么" className="min-w-0 border-0 p-0">
+            <legend className="text-sm font-semibold text-[#342E39]">想改什么？</legend>
+            <div className="mt-2.5 flex flex-wrap gap-2">
               {CHANGE_TARGET_OPTIONS.map((option) => {
                 const selected = draft.changeTargets.includes(option.value);
                 const Icon = option.icon;
@@ -111,7 +153,7 @@ export function ImageBriefComposer({
                     aria-pressed={selected}
                     onClick={() => onToggleChangeTarget(option.value)}
                     className={cn(
-                      'inline-flex min-h-11 items-center gap-2 rounded-xl border px-3.5 text-sm font-medium transition-colors motion-reduce:transition-none',
+                      'inline-flex min-h-10 items-center gap-2 rounded-xl border px-3.5 text-sm font-medium transition-colors motion-reduce:transition-none',
                       selected
                         ? 'border-[#9B84BE] bg-[#F2ECFF] text-[#604582]'
                         : 'border-transparent bg-[#F6F2F6] text-[#5F5663] hover:border-[#D9CEDC] hover:bg-white',
@@ -123,10 +165,10 @@ export function ImageBriefComposer({
                 );
               })}
             </div>
-          </div>
+          </fieldset>
         ) : null}
 
-        <label htmlFor="image-studio-prompt" className={cn('block', lockSubject && 'mt-5')}>
+        <label htmlFor="image-studio-prompt" className={cn('block', lockSubject && 'mt-4')}>
           <span className="flex items-center gap-2 text-sm font-semibold text-[#342E39]">
             <Sparkles className="h-4 w-4 text-[#D62958]" aria-hidden />
             描述你想要的最终画面
@@ -145,7 +187,7 @@ export function ImageBriefComposer({
                 ? '例如：为新品香水制作一张夏日海报，留出标题空间，画面明亮精致'
                 : '例如：一间洒满午后阳光的治愈系客厅，奶油色沙发和绿植'
           }
-          className="mt-3 min-h-[154px] resize-y rounded-[18px] border-[#DED4DF] bg-white px-4 py-3 text-[15px] leading-7 text-[#342E39] shadow-none placeholder:text-[#A399A6] focus-visible:ring-[#D62958]/20"
+          className="mt-2.5 min-h-[132px] resize-y rounded-[16px] border-[#DED4DF] bg-white px-4 py-3 text-[15px] leading-7 text-[#342E39] shadow-none placeholder:text-[#A399A6] focus-visible:ring-[#D62958]/20"
         />
         <div className="mt-2 flex items-start justify-between gap-3 text-xs text-[#887D8B]">
           <span>把重点说清楚即可，生成后还可以继续调整。</span>
@@ -187,6 +229,8 @@ export function ImageBriefComposer({
             {inlineError}
           </p>
         ) : null}
+
+        {actions ? <div className="mt-4 border-t border-[#EEE8EE] pt-4">{actions}</div> : null}
       </div>
     </section>
   );

@@ -70,6 +70,23 @@ afterEach(() => {
 });
 
 describe('ImagePage task creation', () => {
+  it('uses one page-level heading and keeps the goal question at level two', () => {
+    render(<ImagePage />);
+
+    const pageHeadings = screen.getAllByRole('heading', { level: 1 });
+    expect(pageHeadings).toHaveLength(1);
+    expect(pageHeadings[0]?.textContent).toBe('图片任务');
+    expect(screen.getByRole('heading', { level: 2, name: '今天想做什么图？' })).toBeTruthy();
+  });
+
+  it('groups generation settings and submission inside the creation region', () => {
+    render(<ImagePage />);
+
+    const creationRegion = screen.getByRole('region', { name: '图片创作区' });
+    expect(within(creationRegion).getByRole('button', { name: /生成设置/ })).toBeTruthy();
+    expect(within(creationRegion).getByRole('button', { name: '开始生成' })).toBeTruthy();
+  });
+
   it('refreshes a completed image task once when its result metadata has not arrived yet', async () => {
     window.history.replaceState({}, '', '/image?task=tsk_image_sync');
     mocks.tasks = [
@@ -138,6 +155,61 @@ describe('ImagePage task creation', () => {
 
     expect(screen.getByRole('button', { name: '开始生成' }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByText('请先添加一张清晰的主角图')).toBeTruthy();
+  });
+
+  it('replaces the current subject when a new anchor image is chosen', async () => {
+    const user = userEvent.setup();
+    mocks.uploadFile
+      .mockResolvedValueOnce({
+        fileId: 'file_first_subject',
+        filename: 'first-subject.png',
+        mimetype: 'image/png',
+        size: 100,
+      })
+      .mockResolvedValueOnce({
+        fileId: 'file_second_subject',
+        filename: 'second-subject.png',
+        mimetype: 'image/png',
+        size: 120,
+      });
+    render(<ImagePage />);
+
+    await user.click(screen.getByRole('button', { name: /锁定主角/ }));
+    const input = screen.getByLabelText('添加图片');
+    await user.upload(input, new File(['first'], 'first-subject.png', { type: 'image/png' }));
+    await waitFor(() => expect(screen.getByText('first-subject.png')).toBeTruthy());
+
+    expect(screen.getByRole('button', { name: '更换主角图' })).toBeTruthy();
+    await user.upload(input, new File(['second'], 'second-subject.png', { type: 'image/png' }));
+
+    await waitFor(() => expect(screen.getByText('second-subject.png')).toBeTruthy());
+    expect(screen.queryByText('first-subject.png')).toBeNull();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:first-subject.png');
+  });
+
+  it('keeps the current subject when its replacement upload fails', async () => {
+    const user = userEvent.setup();
+    mocks.uploadFile
+      .mockResolvedValueOnce({
+        fileId: 'file_first_subject',
+        filename: 'first-subject.png',
+        mimetype: 'image/png',
+        size: 100,
+      })
+      .mockRejectedValueOnce(new Error('上传失败'));
+    render(<ImagePage />);
+
+    await user.click(screen.getByRole('button', { name: /锁定主角/ }));
+    const input = screen.getByLabelText('添加图片');
+    await user.upload(input, new File(['first'], 'first-subject.png', { type: 'image/png' }));
+    await waitFor(() => expect(screen.getByText('first-subject.png')).toBeTruthy());
+
+    await user.upload(input, new File(['second'], 'second-subject.png', { type: 'image/png' }));
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('上传失败'));
+    expect(screen.getByText('first-subject.png')).toBeTruthy();
+    expect(screen.queryByText('second-subject.png')).toBeNull();
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:first-subject.png');
   });
 
   it('orders the selected subject first, creates once, then clears only transient draft fields', async () => {

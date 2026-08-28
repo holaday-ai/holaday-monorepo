@@ -1,22 +1,22 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import type { CommercialImageUse, ImageChangeTarget } from '@/types/image';
+import { cleanup, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import * as React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ImageBriefComposer } from './ImageBriefComposer';
 import { ImageGenerationSettings } from './ImageGenerationSettings';
 import { ImageGoalPicker } from './ImageGoalPicker';
 import {
+  type ImageStudioDraft,
+  type ImageStudioSettingKey,
   createImageStudioDraft,
   setImageStudioSetting,
   switchImageCreationGoal,
-  type ImageStudioDraft,
-  type ImageStudioSettingKey,
 } from './image-studio-state';
-import type { CommercialImageUse, ImageChangeTarget } from '@/types/image';
 
 afterEach(cleanup);
 
@@ -82,10 +82,11 @@ function Harness(): JSX.Element {
 }
 
 describe('image studio form', () => {
-  it('leads with the product capability before asking for a creation goal', () => {
+  it('leads directly with the creation goal without duplicating the page heading', () => {
     render(<Harness />);
 
-    expect(screen.getByRole('heading', { level: 1, name: '图片创作' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
+    expect(screen.getByRole('heading', { level: 2, name: '今天想做什么图？' })).toBeTruthy();
     expect(screen.getByRole('group', { name: '今天想做什么图' })).toBeTruthy();
   });
 
@@ -114,6 +115,41 @@ describe('image studio form', () => {
     expect(background.getAttribute('aria-pressed')).toBe('false');
     await user.click(background);
     expect(background.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('shows a ready subject as the visual anchor instead of a compact file chip', () => {
+    const draft: ImageStudioDraft = {
+      ...createImageStudioDraft('lock_subject'),
+      subjectAttachmentClientId: 'subject_ready',
+      attachments: [
+        {
+          clientId: 'subject_ready',
+          fileId: 'file_subject_ready',
+          filename: 'subject.png',
+          mimetype: 'image/png',
+          size: 2_048,
+          status: 'ready',
+          previewDataUrl: 'data:image/png;base64,c3ViamVjdA==',
+        },
+      ],
+    };
+
+    render(
+      <ImageBriefComposer
+        draft={draft}
+        uploading={false}
+        inlineError={null}
+        onPromptChange={() => undefined}
+        onToggleChangeTarget={() => undefined}
+        onChooseImages={() => undefined}
+        onRemoveAttachment={() => undefined}
+        onSetSubject={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole('img', { name: '主角图预览' })).toBeTruthy();
+    expect(screen.getByText('subject.png')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '移除主角图' })).toBeTruthy();
   });
 
   it('shows three understandable commercial uses', async () => {
