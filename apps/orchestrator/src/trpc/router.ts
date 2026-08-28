@@ -22,6 +22,7 @@ import { skillsRouter } from './routers/skills.js';
 import { stocksRouter } from './routers/stocks.js';
 import { tasksRouter } from './routers/tasks.js';
 import { usageRouter } from './routers/usage.js';
+import { videoEditingRouter } from './routers/video-editing.js';
 import { videoOnboardingRouter } from './routers/video-onboarding.js';
 import { watchlistsRouter } from './routers/watchlists.js';
 import { publicProcedure, router } from './trpc.js';
@@ -58,6 +59,7 @@ export const appRouter = router({
   admin: adminRouter,
   watchlists: watchlistsRouter,
   videoOnboarding: videoOnboardingRouter,
+  videoEditing: videoEditingRouter,
 });
 
 export type AppRouter = typeof appRouter;

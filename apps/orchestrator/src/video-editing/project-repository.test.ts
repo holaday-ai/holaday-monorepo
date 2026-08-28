@@ -106,7 +106,7 @@ class MemoryVideoEditProjectStore implements VideoEditProjectStore {
     return quote;
   }
 
-  async findQuoteForUpdate(externalId: string, userId: number, projectId: number) {
+  async findQuote(externalId: string, userId: number, projectId: number, lock = false) {
     const quote =
       this.quotes.find(
         (candidate) =>
@@ -114,7 +114,7 @@ class MemoryVideoEditProjectStore implements VideoEditProjectStore {
           candidate.userId === userId &&
           candidate.projectId === projectId,
       ) ?? null;
-    if (quote) this.lockedQuoteIds.push(quote.id);
+    if (quote && lock) this.lockedQuoteIds.push(quote.id);
     return quote;
   }
 

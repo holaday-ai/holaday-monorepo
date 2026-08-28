@@ -71,10 +71,11 @@ export interface VideoEditProjectStore {
   insertQuote(
     input: Omit<VideoEditActionQuoteRecord, 'id' | 'createdAt'>,
   ): Promise<VideoEditActionQuoteRecord>;
-  findQuoteForUpdate(
+  findQuote(
     externalId: string,
     userId: number,
     projectId: number,
+    lock?: boolean,
   ): Promise<VideoEditActionQuoteRecord | null>;
   markQuoteConsumed(quoteId: number, consumedAt: Date): Promise<boolean>;
 }
@@ -179,8 +180,8 @@ class DrizzleVideoEditProjectStore implements VideoEditProjectStore {
     };
   }
 
-  async findQuoteForUpdate(externalId: string, userId: number, projectId: number) {
-    const [row] = await this.db
+  async findQuote(externalId: string, userId: number, projectId: number, lock = false) {
+    const query = this.db
       .select()
       .from(videoEditActionQuotes)
       .where(
@@ -190,8 +191,9 @@ class DrizzleVideoEditProjectStore implements VideoEditProjectStore {
           eq(videoEditActionQuotes.projectId, projectId),
         ),
       )
-      .limit(1)
-      .for('update');
+      .limit(1);
+    const rows = lock ? await query.for('update') : await query;
+    const [row] = rows;
     return row ? asQuoteRecord(row) : null;
   }
 
@@ -235,6 +237,10 @@ export interface AppendVideoEditVersionInput {
 export type ConsumeVideoEditQuoteResult =
   | { status: 'consumed'; quote: VideoEditActionQuoteRecord }
   | { status: 'not_found' | 'expired' | 'already_consumed' | 'mismatch' | 'stale_base' };
+
+export type CheckVideoEditQuoteResult =
+  | { status: 'valid'; quote: VideoEditActionQuoteRecord }
+  | Exclude<ConsumeVideoEditQuoteResult, { status: 'consumed' }>;
 
 export class VideoEditProjectRepository {
   constructor(private readonly store: VideoEditProjectStore) {}
@@ -357,27 +363,55 @@ export class VideoEditProjectRepository {
     now?: Date;
   }): Promise<ConsumeVideoEditQuoteResult> {
     return this.store.transaction(async (store) => {
-      const project = await store.findOwnedProject(input.projectId, input.userId, true);
-      if (!project) return { status: 'not_found' };
-      const quote = await store.findQuoteForUpdate(input.quoteId, input.userId, project.id);
-      if (!quote) return { status: 'not_found' };
-      if (quote.status !== 'pending') return { status: 'already_consumed' };
-      if (quote.expiresAt.getTime() <= (input.now ?? new Date()).getTime()) {
-        return { status: 'expired' };
-      }
-      const baseVersion = await store.findVersionByExternalId(project.id, input.baseVersionId);
-      if (!baseVersion || quote.baseVersionId !== baseVersion.id) return { status: 'mismatch' };
-      if (project.currentVersionId !== baseVersion.id) return { status: 'stale_base' };
-      if (quote.operationHash !== input.operationHash) return { status: 'mismatch' };
+      const checked = await this.checkQuoteWithStore(store, input, true);
+      if (checked.status !== 'valid') return checked;
       const consumedAt = input.now ?? new Date();
-      if (!(await store.markQuoteConsumed(quote.id, consumedAt))) {
+      if (!(await store.markQuoteConsumed(checked.quote.id, consumedAt))) {
         return { status: 'already_consumed' };
       }
       return {
         status: 'consumed',
-        quote: { ...quote, status: 'consumed', consumedAt },
+        quote: { ...checked.quote, status: 'consumed', consumedAt },
       };
     });
+  }
+
+  async checkQuote(input: {
+    userId: number;
+    projectId: string;
+    baseVersionId: string;
+    quoteId: string;
+    operationHash: string;
+    now?: Date;
+  }): Promise<CheckVideoEditQuoteResult> {
+    return this.checkQuoteWithStore(this.store, input, false);
+  }
+
+  private async checkQuoteWithStore(
+    store: VideoEditProjectStore,
+    input: {
+      userId: number;
+      projectId: string;
+      baseVersionId: string;
+      quoteId: string;
+      operationHash: string;
+      now?: Date;
+    },
+    lock: boolean,
+  ): Promise<CheckVideoEditQuoteResult> {
+    const project = await store.findOwnedProject(input.projectId, input.userId, lock);
+    if (!project) return { status: 'not_found' };
+    const quote = await store.findQuote(input.quoteId, input.userId, project.id, lock);
+    if (!quote) return { status: 'not_found' };
+    if (quote.status !== 'pending') return { status: 'already_consumed' };
+    if (quote.expiresAt.getTime() <= (input.now ?? new Date()).getTime()) {
+      return { status: 'expired' };
+    }
+    const baseVersion = await store.findVersionByExternalId(project.id, input.baseVersionId);
+    if (!baseVersion || quote.baseVersionId !== baseVersion.id) return { status: 'mismatch' };
+    if (project.currentVersionId !== baseVersion.id) return { status: 'stale_base' };
+    if (quote.operationHash !== input.operationHash) return { status: 'mismatch' };
+    return { status: 'valid', quote };
   }
 
   private async appendVersionInTransaction(
