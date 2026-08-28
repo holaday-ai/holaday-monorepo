@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
 
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SceneStrip } from './SceneStrip';
 import type { VideoEditingDocument } from './video-editing-state';
+
+afterEach(cleanup);
 
 const SCENES: VideoEditingDocument['scenes'] = [
   {
@@ -53,5 +55,23 @@ describe('SceneStrip', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '选择第 2 段' }));
     expect(onSelect).toHaveBeenCalledWith('scene_2');
+  });
+
+  it('uses the matching source preview for a multi-video scene', () => {
+    const firstScene = SCENES.at(0);
+    if (!firstScene) throw new Error('expected scene fixture');
+    render(
+      <SceneStrip
+        scenes={[{ ...firstScene, sourceFileId: 'file_second' }]}
+        previewUrl="/fallback.mp4"
+        scenePreviews={{ file_second: { url: '/second.mp4' } }}
+        selectedSceneId={null}
+        onSelect={() => undefined}
+      />,
+    );
+
+    expect(screen.getByLabelText('第 1 段缩略预览').getAttribute('src')).toBe(
+      '/second.mp4#t=0.001',
+    );
   });
 });

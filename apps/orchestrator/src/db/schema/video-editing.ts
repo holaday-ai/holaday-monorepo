@@ -120,9 +120,45 @@ export const videoEditActionQuotes = mysqlTable(
   ],
 );
 
+export const videoEditRenderAttempts = mysqlTable(
+  'video_edit_render_attempts',
+  {
+    id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
+    externalId: varchar('external_id', { length: 32 }).notNull(),
+    userId: bigint('user_id', { mode: 'number', unsigned: true })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    projectId: bigint('project_id', { mode: 'number', unsigned: true })
+      .notNull()
+      .references(() => videoEditProjects.id, { onDelete: 'cascade' }),
+    versionId: bigint('version_id', { mode: 'number', unsigned: true })
+      .notNull()
+      .references(() => videoEditVersions.id, { onDelete: 'cascade' }),
+    outputFileId: bigint('output_file_id', { mode: 'number', unsigned: true })
+      .notNull()
+      .references(() => taskFiles.id, { onDelete: 'cascade' }),
+    status: varchar('status', { length: 16 }).notNull().default('pending'),
+    expiresAt: datetime('expires_at', { mode: 'date', fsp: 3 }).notNull(),
+    completedAt: datetime('completed_at', { mode: 'date', fsp: 3 }),
+    createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP(3)`),
+  },
+  (table) => [
+    uniqueIndex('uk_video_edit_render_attempts_external_id').on(table.externalId),
+    index('ix_video_edit_render_attempts_user_status_expiry').on(
+      table.userId,
+      table.status,
+      table.expiresAt,
+    ),
+  ],
+);
+
 export type VideoEditProject = typeof videoEditProjects.$inferSelect;
 export type NewVideoEditProject = typeof videoEditProjects.$inferInsert;
 export type VideoEditVersion = typeof videoEditVersions.$inferSelect;
 export type NewVideoEditVersion = typeof videoEditVersions.$inferInsert;
 export type VideoEditActionQuote = typeof videoEditActionQuotes.$inferSelect;
 export type NewVideoEditActionQuote = typeof videoEditActionQuotes.$inferInsert;
+export type VideoEditRenderAttempt = typeof videoEditRenderAttempts.$inferSelect;
+export type NewVideoEditRenderAttempt = typeof videoEditRenderAttempts.$inferInsert;

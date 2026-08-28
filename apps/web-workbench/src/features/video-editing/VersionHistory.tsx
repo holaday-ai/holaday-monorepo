@@ -62,6 +62,7 @@ export function VersionHistory({
                     disabled={busy}
                     onClick={() => setPendingRestoreId(version.id)}
                     aria-label={`恢复版本 ${version.revision}`}
+                    title={`恢复版本 ${version.revision}`}
                     className="inline-flex h-9 items-center gap-1.5 rounded-[8px] border border-[#DED6E0] px-3 text-[11px] font-medium text-[#655B69] transition hover:border-[#CBB9CF] hover:bg-[#FAF7FB] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <RotateCcw className="h-3 w-3" aria-hidden="true" />
@@ -77,6 +78,7 @@ export function VersionHistory({
                       type="button"
                       disabled={busy}
                       aria-label={`确认恢复版本 ${version.revision}`}
+                      title={`确认恢复版本 ${version.revision}`}
                       onClick={() => {
                         setPendingRestoreId(null);
                         onRestore(version.id);

@@ -1,11 +1,11 @@
+import {
+  type VideoEditingClient,
+  VideoEditingPanel,
+} from '@/features/video-editing/VideoEditingPanel';
+import type { VideoEditingProjectData } from '@/features/video-editing/video-editing-state';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import {
-  VideoEditingPanel,
-  type VideoEditingClient,
-} from '@/features/video-editing/VideoEditingPanel';
-import type { VideoEditingProjectData } from '@/features/video-editing/video-editing-state';
 import '@/index.css';
 
 const SOURCE_URL = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
@@ -144,9 +144,21 @@ const client: VideoEditingClient = {
       version: { ...project.currentVersion, id: 'vedv_restored', revision: 4 },
     };
   },
+  async beginExport() {
+    return { status: 'upload_unavailable' };
+  },
+  async completeClientExport() {
+    return { status: 'not_found' };
+  },
+  async failExport() {
+    return { status: 'failed' };
+  },
 };
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+const root = document.getElementById('root');
+if (!root) throw new Error('QA root is missing');
+
+ReactDOM.createRoot(root).render(
   <React.StrictMode>
     <BrowserRouter>
       <div className="min-h-screen bg-[linear-gradient(180deg,#FFF_0%,#FCFAFD_46%,#F8FBFD_100%)]">

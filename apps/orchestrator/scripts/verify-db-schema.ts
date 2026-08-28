@@ -65,6 +65,7 @@ const REQUIRED_TABLES = [
   'verification_codes',
   'video_edit_action_quotes',
   'video_edit_projects',
+  'video_edit_render_attempts',
   'video_edit_versions',
   'webhook_idempotency',
 ] as const;
@@ -149,6 +150,15 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'base_version_id',
     'operation_hash',
     'cost_units',
+    'status',
+    'expires_at',
+  ],
+  video_edit_render_attempts: [
+    'external_id',
+    'user_id',
+    'project_id',
+    'version_id',
+    'output_file_id',
     'status',
     'expires_at',
   ],

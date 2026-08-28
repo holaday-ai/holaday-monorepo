@@ -1,3 +1,4 @@
+import { FileDownloadCard, type FileDownloadPayload } from '@/components/FileDownloadCard';
 import { trpc } from '@/lib/trpc';
 import { PageContainer } from '@/pages/PageShell';
 import {
@@ -5,6 +6,7 @@ import {
   ArrowLeft,
   Check,
   ChevronDown,
+  Download,
   History,
   LoaderCircle,
   Save,
@@ -26,6 +28,7 @@ import {
   videoEditingReducer,
 } from './video-editing-state';
 import type { VideoEditorAdapter } from './video-editor-adapter';
+import type { MountedVideoEditor } from './video-editor-adapter';
 
 type PlanningResult =
   | { status: 'ready' | 'suggestion'; plan: VideoEditingPlan }
@@ -50,6 +53,20 @@ type ConsumeResult =
         | 'mismatch'
         | 'stale_base';
     };
+
+type BeginExportResult =
+  | {
+      status: 'ready';
+      renderAttemptId: string;
+      uploadUrl: string;
+      requiredHeaders: Record<string, string>;
+      expiresAt: Date | string;
+    }
+  | { status: 'not_found' | 'stale_version' | 'already_rendering' | 'upload_unavailable' };
+
+type CompleteExportResult =
+  | { status: 'completed'; file: FileDownloadPayload }
+  | { status: 'not_found' | 'stale_version' | 'expired' | 'failed' | 'invalid_output' };
 
 export interface VideoEditingClient {
   getProject(input: { projectId: string }): Promise<VideoEditingProjectData>;
@@ -82,6 +99,17 @@ export interface VideoEditingClient {
     baseVersionId: string;
     targetVersionId: string;
   }): Promise<{ version: VideoEditingVersion }>;
+  beginExport(input: { projectId: string; versionId: string }): Promise<BeginExportResult>;
+  completeClientExport(input: {
+    projectId: string;
+    versionId: string;
+    renderAttemptId: string;
+  }): Promise<CompleteExportResult>;
+  failExport(input: {
+    projectId: string;
+    versionId: string;
+    renderAttemptId: string;
+  }): Promise<{ status: 'failed' | 'not_found' }>;
 }
 
 export function VideoEditingRoute(): JSX.Element {
@@ -108,6 +136,16 @@ const defaultClient: VideoEditingClient = {
   restoreVersion: (input) =>
     trpc.videoEditing.restoreVersion.mutate(input) as unknown as Promise<{
       version: VideoEditingVersion;
+    }>,
+  beginExport: (input) =>
+    trpc.videoEditing.beginExport.mutate(input) as unknown as Promise<BeginExportResult>,
+  completeClientExport: (input) =>
+    trpc.videoEditing.completeClientExport.mutate(
+      input,
+    ) as unknown as Promise<CompleteExportResult>,
+  failExport: (input) =>
+    trpc.videoEditing.failExport.mutate(input) as unknown as Promise<{
+      status: 'failed' | 'not_found';
     }>,
 };
 
@@ -193,7 +231,9 @@ export function VideoEditingPanel({
   const [editorUnavailable, setEditorUnavailable] = React.useState(false);
   const [editorReady, setEditorReady] = React.useState(false);
   const [draftSdkDocument, setDraftSdkDocument] = React.useState<string | null>(null);
+  const [exportedFile, setExportedFile] = React.useState<FileDownloadPayload | null>(null);
   const editorHostRef = React.useRef<HTMLDivElement | null>(null);
+  const editorRef = React.useRef<MountedVideoEditor | null>(null);
   const requestIdRef = React.useRef(0);
   const actionLockRef = React.useRef(false);
   const busy = isVideoEditingBusy(state);
@@ -213,6 +253,7 @@ export function VideoEditingPanel({
       (project) => {
         if (!active) return;
         dispatch({ type: 'load_succeeded', requestId, data: project });
+        setExportedFile(project.output ?? null);
         setSelectedSceneId(project.currentVersion.document.scenes[0]?.id ?? null);
       },
       (error: unknown) => {
@@ -250,6 +291,7 @@ export function VideoEditingPanel({
             return;
           }
           mounted = editor;
+          editorRef.current = editor;
           setEditorReady(true);
         },
         () => {
@@ -258,6 +300,7 @@ export function VideoEditingPanel({
       );
     return () => {
       active = false;
+      editorRef.current = null;
       if (mounted) void mounted.destroy();
     };
   }, [adapter, data]);
@@ -332,6 +375,7 @@ export function VideoEditingPanel({
         summary: state.plan.summary,
         operations: state.plan.operations,
       });
+      setExportedFile(null);
       dispatch({ type: 'version_succeeded', requestId, version: result.version });
       setQuote(null);
     } catch (error) {
@@ -353,6 +397,7 @@ export function VideoEditingPanel({
         sdkDocument: draftSdkDocument,
       });
       setDraftSdkDocument(null);
+      setExportedFile(null);
       dispatch({ type: 'version_succeeded', requestId, version: result.version });
     } catch (error) {
       dispatch({ type: 'request_failed', requestId, error: failureFrom(error) });
@@ -372,9 +417,62 @@ export function VideoEditingPanel({
         baseVersionId: data.currentVersion.id,
         targetVersionId,
       });
+      setExportedFile(null);
       dispatch({ type: 'version_succeeded', requestId, version: result.version });
     } catch (error) {
       dispatch({ type: 'request_failed', requestId, error: failureFrom(error) });
+    } finally {
+      actionLockRef.current = false;
+    }
+  }
+
+  async function exportVideo(): Promise<void> {
+    const editor = editorRef.current;
+    if (!data || !editor || actionLockRef.current || busy) return;
+    actionLockRef.current = true;
+    const requestId = nextRequestId();
+    const versionId = data.currentVersion.id;
+    let renderAttemptId: string | null = null;
+    dispatch({ type: 'request_started', requestId, status: 'rendering' });
+    try {
+      const started = await client.beginExport({ projectId, versionId });
+      if (started.status !== 'ready') {
+        throw new Error(
+          started.status === 'stale_version' ? 'stale version' : 'export unavailable',
+        );
+      }
+      renderAttemptId = started.renderAttemptId;
+      const blob = await editor.exportMp4();
+      const upload = await fetch(started.uploadUrl, {
+        method: 'PUT',
+        headers: started.requiredHeaders,
+        body: blob,
+      });
+      if (!upload.ok) throw new Error('upload failed');
+      const completed = await client.completeClientExport({
+        projectId,
+        versionId,
+        renderAttemptId,
+      });
+      if (completed.status !== 'completed') throw new Error(completed.status);
+      setExportedFile(completed.file);
+      dispatch({
+        type: 'version_succeeded',
+        requestId,
+        version: { ...data.currentVersion, renderStatus: 'completed' },
+      });
+    } catch (error) {
+      if (renderAttemptId) {
+        await client.failExport({ projectId, versionId, renderAttemptId }).catch(() => undefined);
+      }
+      dispatch({
+        type: 'request_failed',
+        requestId,
+        error:
+          error instanceof Error && error.message === 'stale version'
+            ? 'stale_version'
+            : 'render_failed',
+      });
     } finally {
       actionLockRef.current = false;
     }
@@ -469,17 +567,43 @@ export function VideoEditingPanel({
                 {data.currentVersion.document.aspectRatio} · 版本 {data.currentVersion.revision}
               </div>
             </div>
-            {draftSdkDocument && (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {draftSdkDocument && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void saveEditorDocument()}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-[9px] bg-[#EA1F59] px-3 text-xs font-semibold text-white shadow-[0_8px_20px_rgba(234,31,89,0.18)] disabled:opacity-50"
+                >
+                  <Save className="h-3.5 w-3.5" aria-hidden="true" />
+                  保存精细修改
+                </button>
+              )}
               <button
                 type="button"
-                disabled={busy}
-                onClick={() => void saveEditorDocument()}
-                className="inline-flex h-9 items-center gap-1.5 rounded-[9px] bg-[#EA1F59] px-3 text-xs font-semibold text-white shadow-[0_8px_20px_rgba(234,31,89,0.18)] disabled:opacity-50"
+                disabled={
+                  busy ||
+                  !editorReady ||
+                  Boolean(draftSdkDocument) ||
+                  data.currentVersion.renderStatus === 'completed'
+                }
+                onClick={() => void exportVideo()}
+                aria-label="导出 MP4"
+                title={draftSdkDocument ? '请先保存精细修改' : '导出当前版本为 MP4'}
+                className="inline-flex h-9 items-center gap-1.5 rounded-[9px] border border-[#DDD4DF] bg-white px-3 text-xs font-semibold text-[#574D5B] shadow-sm transition hover:border-[#CDB8D0] hover:bg-[#FFF8FB] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <Save className="h-3.5 w-3.5" aria-hidden="true" />
-                保存精细修改
+                {state.status === 'rendering' ? (
+                  <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+                {state.status === 'rendering'
+                  ? '正在导出…'
+                  : data.currentVersion.renderStatus === 'completed'
+                    ? '已导出'
+                    : '导出 MP4'}
               </button>
-            )}
+            </div>
           </div>
 
           <div className="relative aspect-video overflow-hidden rounded-[22px] bg-[#17131A] shadow-inner">
@@ -521,10 +645,27 @@ export function VideoEditingPanel({
           <SceneStrip
             scenes={data.currentVersion.document.scenes}
             previewUrl={data.preview.url}
+            scenePreviews={data.scenePreviews}
             selectedSceneId={selectedSceneId}
             affectedSceneIds={state.plan?.affectedSceneIds}
             onSelect={setSelectedSceneId}
           />
+          {exportedFile && (
+            <section
+              aria-labelledby="video-export-title"
+              className="mt-5 rounded-[18px] border border-[#E7DFE8] bg-[#FCFAFC] p-4"
+            >
+              <div>
+                <h2 id="video-export-title" className="text-sm font-semibold text-[#332D35]">
+                  导出完成
+                </h2>
+                <p className="mt-0.5 text-[11px] leading-5 text-[#817784]">
+                  成品已保留在文件中，可随时下载；原视频和历史版本不会被覆盖。
+                </p>
+              </div>
+              <FileDownloadCard payload={exportedFile} showPreview={false} />
+            </section>
+          )}
         </main>
 
         <aside className="space-y-4 lg:sticky lg:top-20">

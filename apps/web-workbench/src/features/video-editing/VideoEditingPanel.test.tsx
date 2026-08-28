@@ -11,7 +11,10 @@ import type {
 } from './video-editing-state';
 import type { VideoEditorAdapter } from './video-editor-adapter';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const PROJECT: VideoEditingProjectData = {
   project: {
@@ -63,6 +66,23 @@ function client(plan: VideoEditingPlan): VideoEditingClient {
     consumePaidOperation: vi.fn(async () => ({ status: 'started' as const, taskId: 'tsk_regen' })),
     saveSdkDocument: vi.fn(async () => ({ version: NEXT_VERSION })),
     restoreVersion: vi.fn(async () => ({ version: NEXT_VERSION })),
+    beginExport: vi.fn(async () => ({
+      status: 'ready' as const,
+      renderAttemptId: 'vedr_attempt',
+      uploadUrl: 'https://upload.example/video',
+      requiredHeaders: { 'Content-Type': 'video/mp4' },
+      expiresAt: new Date(),
+    })),
+    completeClientExport: vi.fn(async () => ({
+      status: 'completed' as const,
+      file: {
+        fileId: 'file_output',
+        filename: 'holaday-edited.mp4',
+        size: 12,
+        downloadUrl: '/api/files/file_output/download',
+      },
+    })),
+    failExport: vi.fn(async () => ({ status: 'failed' as const })),
   };
 }
 
@@ -166,5 +186,63 @@ describe('VideoEditingPanel', () => {
 
     expect(await screen.findByText(/精细时间线暂不可用/)).toBeTruthy();
     expect(screen.getByLabelText('当前视频预览')).toBeTruthy();
+  });
+
+  it('exports once through a server-bound upload target and shows the retained file', async () => {
+    const editingClient = client({
+      summary: '更新字幕',
+      affectedSceneIds: [],
+      operations: [],
+      requiresQuote: false,
+    });
+    const exportMp4 = vi.fn(async () => new Blob(['edited-video'], { type: 'video/mp4' }));
+    const editorAdapter = adapter({
+      mount: vi.fn(async () => ({
+        exportMp4,
+        serialize: vi.fn(async () => 'sdk-document'),
+        destroy: vi.fn(async () => undefined),
+      })),
+    });
+    const upload = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal('fetch', upload);
+    renderPanel(editingClient, editorAdapter);
+    await waitFor(() => expect(editorAdapter.mount).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: '导出 MP4' }));
+
+    await waitFor(() => expect(editingClient.completeClientExport).toHaveBeenCalledTimes(1));
+    expect(exportMp4).toHaveBeenCalledTimes(1);
+    expect(upload).toHaveBeenCalledWith(
+      'https://upload.example/video',
+      expect.objectContaining({
+        method: 'PUT',
+        headers: { 'Content-Type': 'video/mp4' },
+      }),
+    );
+    expect(await screen.findByText('holaday-edited.mp4')).toBeTruthy();
+  });
+
+  it('shows a retained current-version export after reopening the project', async () => {
+    const editingClient = client({
+      summary: '更新字幕',
+      affectedSceneIds: [],
+      operations: [],
+      requiresQuote: false,
+    });
+    editingClient.getProject = vi.fn(async () => ({
+      ...PROJECT,
+      currentVersion: { ...PROJECT.currentVersion, renderStatus: 'completed' as const },
+      output: {
+        fileId: 'file_output',
+        filename: 'holaday-edited.mp4',
+        size: 12,
+        downloadUrl: '/api/files/file_output/download',
+      },
+    }));
+
+    renderPanel(editingClient, adapter());
+
+    expect(await screen.findByText('holaday-edited.mp4')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '导出 MP4' }).hasAttribute('disabled')).toBe(true);
   });
 });

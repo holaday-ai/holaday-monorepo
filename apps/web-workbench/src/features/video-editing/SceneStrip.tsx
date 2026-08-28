@@ -9,12 +9,14 @@ function durationLabel(startMs: number, endMs: number): string {
 export function SceneStrip({
   scenes,
   previewUrl,
+  scenePreviews = {},
   selectedSceneId,
   affectedSceneIds = [],
   onSelect,
 }: {
   scenes: VideoEditingDocument['scenes'];
   previewUrl: string;
+  scenePreviews?: Record<string, { url: string }>;
   selectedSceneId: string | null;
   affectedSceneIds?: string[];
   onSelect(sceneId: string): void;
@@ -40,11 +42,13 @@ export function SceneStrip({
           const willChange = affected.has(scene.id);
           const generated = scene.generationContext !== null;
           const seekSeconds = Math.max(0.001, scene.sourceStartMs / 1_000);
+          const scenePreviewUrl = scenePreviews[scene.sourceFileId]?.url ?? previewUrl;
           return (
             <button
               key={scene.id}
               type="button"
               aria-label={`选择第 ${index + 1} 段`}
+              title={`选择第 ${index + 1} 段`}
               aria-pressed={selected}
               onClick={() => onSelect(scene.id)}
               className={`group min-w-[78vw] snap-start overflow-hidden rounded-[18px] border bg-white text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/35 sm:min-w-0 ${
@@ -56,7 +60,7 @@ export function SceneStrip({
               <div className="relative aspect-video overflow-hidden bg-[#F7F3F8]">
                 <video
                   aria-label={`第 ${index + 1} 段缩略预览`}
-                  src={`${previewUrl}#t=${seekSeconds}`}
+                  src={`${scenePreviewUrl}#t=${seekSeconds}`}
                   muted
                   playsInline
                   preload="metadata"

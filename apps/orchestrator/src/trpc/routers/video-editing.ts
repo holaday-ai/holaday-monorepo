@@ -32,6 +32,11 @@ import {
   VideoEditQuoteService,
 } from '../../video-editing/quote-service.js';
 import {
+  DrizzleVideoEditRenderStore,
+  VideoEditRenderService,
+  createVideoEditRenderFilePort,
+} from '../../video-editing/render-service.js';
+import {
   type ImportedVideoSource,
   type ScopedVideoPreview,
   VideoSourceImportError,
@@ -83,6 +88,10 @@ export interface VideoEditingRuntime {
     sourceTaskId?: string;
   }): Promise<ImportedVideoSource>;
   getProjectPreview(project: StoredVideoEditProject, userId: number): Promise<ScopedVideoPreview>;
+  getScenePreviews(
+    document: VideoEditDocument,
+    userId: number,
+  ): Promise<Record<string, ScopedVideoPreview>>;
   planInstruction(input: {
     instruction: string;
     document: VideoEditDocument;
@@ -98,6 +107,10 @@ export interface VideoEditingRuntime {
     costUnits: number;
     operations: VideoEditOperation[];
   }): Promise<{ taskId: string }>;
+  renderService: Pick<
+    VideoEditRenderService,
+    'beginExport' | 'completeClientExport' | 'failExport' | 'getOutput'
+  >;
 }
 
 export interface VideoEditingRouterDependencies {
@@ -316,6 +329,12 @@ export function createVideoEditingRouter(dependencies: VideoEditingRouterDepende
             project: projectView(created.project),
             currentVersion: versionView(created.currentVersion),
             preview: imported.preview,
+            scenePreviews: Object.fromEntries(
+              importedSources.flatMap((source) =>
+                source.document.scenes.map((scene) => [scene.sourceFileId, source.preview]),
+              ),
+            ),
+            output: null,
             capabilities: {
               sceneRegeneration: importedSources.every(
                 (source) => source.capabilities.sceneRegeneration,
@@ -330,15 +349,24 @@ export function createVideoEditingRouter(dependencies: VideoEditingRouterDepende
       .query(({ ctx, input }) =>
         withRuntime(dependencies, ctx, async (runtime, user) => {
           const loaded = await runtime.repository.getOwnedProject(input.projectId, user.id);
-          const [preview, versions] = await Promise.all([
+          const [preview, versions, scenePreviews, output] = await Promise.all([
             runtime.getProjectPreview(loaded.project, user.id),
             runtime.repository.listVersions(input.projectId, user.id),
+            runtime.getScenePreviews(loaded.currentVersion.documentJson, user.id),
+            loaded.currentVersion.outputFileId === null
+              ? Promise.resolve(null)
+              : runtime.renderService.getOutput({
+                  userId: user.id,
+                  outputFileId: loaded.currentVersion.outputFileId,
+                }),
           ]);
           return {
             project: projectView(loaded.project),
             currentVersion: versionView(loaded.currentVersion),
             versions: versions.map(versionView),
             preview,
+            scenePreviews,
+            output,
           };
         }),
       ),
@@ -483,6 +511,50 @@ export function createVideoEditingRouter(dependencies: VideoEditingRouterDepende
         }),
       ),
 
+    beginExport: protectedProcedure
+      .input(z.object({ projectId: externalIdSchema, versionId: externalIdSchema }).strict())
+      .mutation(({ ctx, input }) =>
+        withRuntime(dependencies, ctx, (runtime, user) =>
+          runtime.renderService.beginExport({
+            userId: user.id,
+            userExternalId: user.externalId,
+            ...input,
+          }),
+        ),
+      ),
+
+    completeClientExport: protectedProcedure
+      .input(
+        z
+          .object({
+            projectId: externalIdSchema,
+            versionId: externalIdSchema,
+            renderAttemptId: externalIdSchema,
+          })
+          .strict(),
+      )
+      .mutation(({ ctx, input }) =>
+        withRuntime(dependencies, ctx, (runtime, user) =>
+          runtime.renderService.completeClientExport({ userId: user.id, ...input }),
+        ),
+      ),
+
+    failExport: protectedProcedure
+      .input(
+        z
+          .object({
+            projectId: externalIdSchema,
+            versionId: externalIdSchema,
+            renderAttemptId: externalIdSchema,
+          })
+          .strict(),
+      )
+      .mutation(({ ctx, input }) =>
+        withRuntime(dependencies, ctx, (runtime, user) =>
+          runtime.renderService.failExport({ userId: user.id, ...input }),
+        ),
+      ),
+
     restoreVersion: protectedProcedure
       .input(
         z
@@ -547,6 +619,16 @@ const productionDependencies: VideoEditingRouterDependencies = {
         return ffprobeDurationMs(preview.url, { timeoutMs: 30_000 });
       },
     });
+    const renderFiles = createVideoEditRenderFilePort(fileService);
+    const renderService = new VideoEditRenderService({
+      store: new DrizzleVideoEditRenderStore(ctx.db),
+      files: renderFiles,
+      probeDurationMs: async (file, userId) => {
+        const url = await fileService.signedReadUrl(file.externalId, userId, 300);
+        if (!url) throw new Error('export duration probe requires signed storage');
+        return ffprobeDurationMs(url, { timeoutMs: 30_000 });
+      },
+    });
     return {
       repository,
       importSource: (input) => importVideoSource(input, sourceDependencies),
@@ -564,6 +646,15 @@ const productionDependencies: VideoEditingRouterDependencies = {
         if (!preview) throw new TRPCError({ code: 'NOT_FOUND', message: '视频文件已不可用' });
         return preview;
       },
+      async getScenePreviews(document, userId) {
+        const previews: Record<string, ScopedVideoPreview> = {};
+        const sourceFileIds = [...new Set(document.scenes.map((scene) => scene.sourceFileId))];
+        for (const sourceFileId of sourceFileIds) {
+          const preview = await fileService.getScopedPreviewForUser(sourceFileId, userId, 900);
+          if (preview) previews[sourceFileId] = preview;
+        }
+        return previews;
+      },
       planInstruction(input) {
         if (!plannerClient) return Promise.resolve({ status: 'planner_unavailable' as const });
         return planVideoEditInstruction({ ...input, client: plannerClient });
@@ -578,6 +669,7 @@ const productionDependencies: VideoEditingRouterDependencies = {
       async executePaidOperation() {
         throw new Error('scene regeneration execution is not enabled');
       },
+      renderService,
     };
   },
 };

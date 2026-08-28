@@ -117,6 +117,12 @@ function runtime(overrides: Partial<VideoEditingRuntime> = {}): VideoEditingRunt
       url: '/api/files/file_video/download',
       expiresAt: new Date('2026-08-28T00:15:00Z'),
     })),
+    getScenePreviews: vi.fn(async () => ({
+      file_video: {
+        url: '/api/files/file_video/download',
+        expiresAt: new Date('2026-08-28T00:15:00Z'),
+      },
+    })),
     planInstruction: vi.fn(async () => ({
       status: 'ready' as const,
       plan: {
@@ -142,6 +148,27 @@ function runtime(overrides: Partial<VideoEditingRuntime> = {}): VideoEditingRunt
     },
     billing: { consume: vi.fn(), refund: vi.fn() },
     executePaidOperation: vi.fn(),
+    renderService: {
+      beginExport: vi.fn(async () => ({
+        status: 'ready' as const,
+        renderAttemptId: 'vedr_attempt',
+        uploadUrl: 'https://upload.example/video',
+        requiredHeaders: { 'Content-Type': 'video/mp4' },
+        expiresAt: new Date('2026-08-28T00:15:00Z'),
+      })),
+      completeClientExport: vi.fn(async () => ({
+        status: 'completed' as const,
+        file: {
+          fileId: 'file_output',
+          filename: 'holaday-edited.mp4',
+          size: 8_000_000,
+          downloadUrl: '/api/files/file_output/download',
+          expiresAt: '2026-09-27T00:00:00.000Z',
+        },
+      })),
+      failExport: vi.fn(async () => ({ status: 'failed' as const })),
+      getOutput: vi.fn(async () => null),
+    },
     ...overrides,
   };
 }
@@ -198,6 +225,8 @@ describe('video editing router', () => {
   });
 
   it('imports multiple owned sources in selection order and creates one combined document', async () => {
+    const firstScene = DOCUMENT.scenes.at(0);
+    if (!firstScene) throw new Error('expected source scene fixture');
     const importSource = vi.fn(async ({ sourceFileId }: { sourceFileId: string }) => {
       const index = sourceFileId === 'file_a' ? 1 : 2;
       return {
@@ -208,7 +237,7 @@ describe('video editing router', () => {
           aspectRatio: '16:9' as const,
           scenes: [
             {
-              ...DOCUMENT.scenes[0]!,
+              ...firstScene,
               id: 'scene_1',
               sourceFileId,
               order: 0,
@@ -260,7 +289,7 @@ describe('video editing router', () => {
     });
   });
 
-  it('returns only external project/version data plus a fresh preview', async () => {
+  it('returns only external project/version data plus fresh source previews', async () => {
     const fixture = caller();
     const result = await fixture.caller.getProject({ projectId: 'vedp_project' });
 
@@ -269,9 +298,81 @@ describe('video editing router', () => {
       currentVersion: { id: 'vedv_current', revision: 1, document: DOCUMENT },
       versions: [{ id: 'vedv_current', revision: 1 }],
       preview: { url: '/api/files/file_video/download' },
+      scenePreviews: {
+        file_video: { url: '/api/files/file_video/download' },
+      },
+      output: null,
     });
     expect(JSON.stringify(result)).not.toContain('"id":41');
     expect(JSON.stringify(result)).not.toContain('"projectId":41');
+  });
+
+  it('returns the retained current-version output after reload', async () => {
+    const completed = {
+      ...CURRENT_VERSION,
+      outputFileId: 71,
+      renderStatus: 'completed' as const,
+    };
+    const editingRuntime = runtime({
+      repository: {
+        ...runtime().repository,
+        getOwnedProject: vi.fn(async () => ({
+          project: {
+            id: 41,
+            externalId: 'vedp_project',
+            userId: 7,
+            sourceTaskId: 21,
+            sourceFileId: 31,
+            sourceKind: 'generated' as const,
+            provider: 'cesdk' as const,
+            status: 'active' as const,
+            currentVersionId: 51,
+            createdAt: new Date('2026-08-28T00:00:00Z'),
+            updatedAt: new Date('2026-08-28T00:00:00Z'),
+          },
+          currentVersion: completed,
+        })),
+      },
+      renderService: {
+        ...runtime().renderService,
+        getOutput: vi.fn(async () => ({
+          fileId: 'file_output',
+          filename: 'holaday-edited.mp4',
+          size: 8_000_000,
+          downloadUrl: '/api/files/file_output/download',
+        })),
+      },
+    });
+    const fixture = caller({ runtime: editingRuntime });
+
+    await expect(fixture.caller.getProject({ projectId: 'vedp_project' })).resolves.toMatchObject({
+      output: { fileId: 'file_output' },
+    });
+    expect(editingRuntime.renderService.getOutput).toHaveBeenCalledWith({
+      userId: 7,
+      outputFileId: 71,
+    });
+  });
+
+  it('routes export lifecycle through the ownership-bound render service', async () => {
+    const fixture = caller();
+    await expect(
+      fixture.caller.beginExport({ projectId: 'vedp_project', versionId: 'vedv_current' }),
+    ).resolves.toMatchObject({ status: 'ready', renderAttemptId: 'vedr_attempt' });
+    await expect(
+      fixture.caller.completeClientExport({
+        projectId: 'vedp_project',
+        versionId: 'vedv_current',
+        renderAttemptId: 'vedr_attempt',
+      }),
+    ).resolves.toMatchObject({ status: 'completed', file: { fileId: 'file_output' } });
+    await expect(
+      fixture.caller.failExport({
+        projectId: 'vedp_project',
+        versionId: 'vedv_current',
+        renderAttemptId: 'vedr_attempt',
+      }),
+    ).resolves.toEqual({ status: 'failed' });
   });
 
   it('applies free operations against the exact current base version', async () => {

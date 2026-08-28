@@ -56,6 +56,7 @@ export const ID_PREFIXES = {
   videoEditProject: 'vedp',
   videoEditVersion: 'vedv',
   videoEditQuote: 'vedq',
+  videoEditRender: 'vedr',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

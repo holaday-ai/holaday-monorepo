@@ -2,7 +2,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { getTableColumns } from 'drizzle-orm';
 import { getTableConfig } from 'drizzle-orm/mysql-core';
 import { describe, expect, it } from 'vitest';
-import { videoEditActionQuotes, videoEditProjects, videoEditVersions } from './video-editing.js';
+import {
+  videoEditActionQuotes,
+  videoEditProjects,
+  videoEditRenderAttempts,
+  videoEditVersions,
+} from './video-editing.js';
 
 function indexNames(table: Parameters<typeof getTableConfig>[0]): string[] {
   return getTableConfig(table).indexes.map((index) => index.config.name);
@@ -77,6 +82,27 @@ describe('video editing schema', () => {
     );
   });
 
+  it('binds each client export attempt to one owned project version and output file', () => {
+    expect(Object.keys(getTableColumns(videoEditRenderAttempts))).toEqual([
+      'id',
+      'externalId',
+      'userId',
+      'projectId',
+      'versionId',
+      'outputFileId',
+      'status',
+      'expiresAt',
+      'completedAt',
+      'createdAt',
+    ]);
+    expect(indexNames(videoEditRenderAttempts)).toEqual(
+      expect.arrayContaining([
+        'uk_video_edit_render_attempts_external_id',
+        'ix_video_edit_render_attempts_user_status_expiry',
+      ]),
+    );
+  });
+
   it('ships one additive numbered migration with ownership and version constraints', () => {
     const migrationUrl = new URL(
       '../../../drizzle/0051_video_editing_projects.sql',
@@ -103,14 +129,12 @@ describe('video editing schema', () => {
     expect(verifier).toContain("'video_edit_projects'");
     expect(verifier).toContain("'video_edit_versions'");
     expect(verifier).toContain("'video_edit_action_quotes'");
-    expect(verifier).toMatch(
-      /video_edit_projects:\s*\[[\s\S]*?'current_version_id',?\s*\]/,
-    );
+    expect(verifier).toContain("'video_edit_render_attempts'");
+    expect(verifier).toMatch(/video_edit_projects:\s*\[[\s\S]*?'current_version_id',?\s*\]/);
     expect(verifier).toContain(
       "video_edit_versions: ['external_id', 'project_id', 'revision', 'document_json', 'render_status']",
     );
-    expect(verifier).toMatch(
-      /video_edit_action_quotes:\s*\[[\s\S]*?'expires_at',?\s*\]/,
-    );
+    expect(verifier).toMatch(/video_edit_action_quotes:\s*\[[\s\S]*?'expires_at',?\s*\]/);
+    expect(verifier).toMatch(/video_edit_render_attempts:\s*\[[\s\S]*?'expires_at',?\s*\]/);
   });
 });

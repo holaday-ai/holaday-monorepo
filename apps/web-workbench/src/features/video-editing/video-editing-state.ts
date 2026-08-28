@@ -1,3 +1,5 @@
+import type { FileDownloadPayload } from '@/components/FileDownloadCard';
+
 export type VideoEditingStatus =
   | 'loading'
   | 'ready'
@@ -74,6 +76,8 @@ export interface VideoEditingProjectData {
   currentVersion: VideoEditingVersion;
   versions: VideoEditingVersion[];
   preview: { url: string; expiresAt?: Date | string };
+  scenePreviews?: Record<string, { url: string; expiresAt?: Date | string }>;
+  output?: FileDownloadPayload | null;
 }
 
 export interface VideoEditingState {
