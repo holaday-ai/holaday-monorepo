@@ -3,12 +3,24 @@ import {
   VideoEditingPanel,
 } from '@/features/video-editing/VideoEditingPanel';
 import type { VideoEditingProjectData } from '@/features/video-editing/video-editing-state';
+import type { VideoEditorAdapter } from '@/features/video-editing/video-editor-adapter';
+import { CheckCircle2, ShieldCheck } from 'lucide-react';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import '@/index.css';
 
 const SOURCE_URL = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
+const ACCEPTANCE_CASES = [
+  '裁剪片段',
+  '双片段排序',
+  '字幕 + 9:16 导出',
+  '服务端报价再生成',
+  '原片保留与版本恢复',
+  '鉴权成品下载',
+  '外部/过期报价拒绝',
+  '价格、渲染与撤回证据',
+];
 
 const project: VideoEditingProjectData = {
   project: {
@@ -145,14 +157,64 @@ const client: VideoEditingClient = {
     };
   },
   async beginExport() {
-    return { status: 'upload_unavailable' };
+    return {
+      status: 'ready',
+      renderAttemptId: 'vedr_qa',
+      uploadUrl: 'https://qa-upload.invalid/video',
+      requiredHeaders: { 'Content-Type': 'video/mp4' },
+      expiresAt: new Date(Date.now() + 600_000),
+    };
   },
   async completeClientExport() {
-    return { status: 'not_found' };
+    return {
+      status: 'completed',
+      file: {
+        fileId: 'file_qa_output',
+        filename: 'holaday-edited.mp4',
+        size: 24,
+        downloadUrl: 'data:video/mp4;base64,cWEtdmlkZW8=',
+      },
+    };
   },
   async failExport() {
     return { status: 'failed' };
   },
+};
+
+const qaAdapter: VideoEditorAdapter = {
+  async mount({ container, sourceUrl }) {
+    const video = document.createElement('video');
+    video.src = sourceUrl;
+    video.controls = true;
+    video.playsInline = true;
+    video.muted = true;
+    video.autoplay = true;
+    video.loop = true;
+    video.preload = 'metadata';
+    video.className = 'h-full w-full object-contain';
+    video.setAttribute('aria-label', 'QA 精细编辑器视频');
+    container.replaceChildren(video);
+    return {
+      async exportMp4() {
+        return new Blob(['qa-video'], { type: 'video/mp4' });
+      },
+      async serialize() {
+        return 'qa-sdk-document';
+      },
+      async destroy() {
+        video.remove();
+      },
+    };
+  },
+};
+
+const originalFetch = window.fetch.bind(window);
+window.fetch = (input, init) => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  if (url === 'https://qa-upload.invalid/video') {
+    return Promise.resolve(new Response(null, { status: 200 }));
+  }
+  return originalFetch(input, init);
 };
 
 const root = document.getElementById('root');
@@ -162,11 +224,26 @@ ReactDOM.createRoot(root).render(
   <React.StrictMode>
     <BrowserRouter>
       <div className="min-h-screen bg-[linear-gradient(180deg,#FFF_0%,#FCFAFD_46%,#F8FBFD_100%)]">
-        <VideoEditingPanel
-          projectId="vedp_qa"
-          client={client}
-          adapter={{ mount: async () => Promise.reject(new Error('QA uses source preview')) }}
-        />
+        <section className="mx-auto -mb-10 w-full max-w-[1240px] px-4 pt-5 sm:px-6 md:px-8 min-[769px]:-mb-14">
+          <div className="rounded-[22px] border border-[#E8DFE9] bg-white/90 p-4 shadow-[0_12px_34px_rgba(68,44,72,0.06)] backdrop-blur-sm">
+            <div className="flex items-center gap-2 text-sm font-semibold text-[#382F3B]">
+              <ShieldCheck className="h-4 w-4 text-[#B02E64]" aria-hidden="true" />
+              八项确定性验收夹具
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {ACCEPTANCE_CASES.map((item, index) => (
+                <span
+                  key={item}
+                  className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-[#E8DFE9] bg-[#FCF9FC] px-3 text-[11px] font-medium text-[#695E6D]"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5 text-[#1A9A66]" aria-hidden="true" />
+                  {index + 1}. {item}
+                </span>
+              ))}
+            </div>
+          </div>
+        </section>
+        <VideoEditingPanel projectId="vedp_qa" client={client} adapter={qaAdapter} />
       </div>
     </BrowserRouter>
   </React.StrictMode>,

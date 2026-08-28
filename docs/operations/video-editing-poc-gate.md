@@ -44,6 +44,10 @@
 10. 免费编辑不扣费；付费场景重生成仅使用服务端报价，过期/重放/基础版本变化全部拒绝。
 11. 健康检查、错误率、导出失败率与退款路径可观察，回滚负责人明确。
 
+发布前运行 `pnpm test:video-editing-preflight`。功能关闭时它只返回
+`production_disabled_pending_commercial_license`，不会探测或输出许可证、白名单内容；只有准备打开
+canary 时，才会要求书面授权主机名、非空白名单、0051/0052 生产数据库验证和两个健康端点全部通过。
+
 ## 回滚
 
 1. 将 `VIDEO_EDITING_ENABLED=false`。
