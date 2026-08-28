@@ -511,6 +511,7 @@ export function ImagePage(): JSX.Element {
             <ImageResultPanel
               task={currentTask}
               row={currentResult ?? undefined}
+              continuationDisabled={draftLocked}
               onContinue={continueFromResult}
             />
           </div>
@@ -518,6 +519,7 @@ export function ImagePage(): JSX.Element {
 
         <ImageHistory
           refreshKey={currentTask ? `${currentTask.taskId}:${currentTask.status}` : undefined}
+          continuationDisabled={draftLocked}
           onContinue={continueFromResult}
         />
       </div>

@@ -19,6 +19,7 @@ const HISTORY_SCAN_PAGE_LIMIT = 4;
 
 interface ImageHistoryProps {
   refreshKey?: string;
+  continuationDisabled?: boolean;
   onContinue(
     action: ImageContinuationAction,
     row: ImageHistoryRow,
@@ -26,7 +27,11 @@ interface ImageHistoryProps {
   ): void | Promise<void>;
 }
 
-export function ImageHistory({ refreshKey, onContinue }: ImageHistoryProps): JSX.Element {
+export function ImageHistory({
+  refreshKey,
+  continuationDisabled = false,
+  onContinue,
+}: ImageHistoryProps): JSX.Element {
   const toast = useToast();
   const togglePin = useTaskStore((state) => state.togglePin);
   const [{ rows, loading, error }, dispatch] = React.useReducer(imageHistoryLoadReducer, {
@@ -213,7 +218,12 @@ export function ImageHistory({ refreshKey, onContinue }: ImageHistoryProps): JSX
               >
                 <Pin className={row.starred ? 'h-4 w-4 fill-current' : 'h-4 w-4'} aria-hidden />
               </button>
-              <ImageResultPanel row={row} compact onContinue={onContinue} />
+              <ImageResultPanel
+                row={row}
+                compact
+                continuationDisabled={continuationDisabled}
+                onContinue={onContinue}
+              />
             </div>
           ))}
         </div>
