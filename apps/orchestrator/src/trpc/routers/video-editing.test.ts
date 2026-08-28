@@ -94,6 +94,10 @@ function runtime(overrides: Partial<VideoEditingRuntime> = {}): VideoEditingRunt
         documentJson: input.document,
         operationJson: input.operations,
       })),
+      initializeSdkDocument: vi.fn(async (input) => ({
+        ...CURRENT_VERSION,
+        sdkDocument: input.sdkDocument,
+      })),
       restoreVersion: vi.fn(async () => ({
         ...CURRENT_VERSION,
         id: 52,
@@ -177,6 +181,8 @@ function caller(
   input: {
     enabled?: boolean;
     allowlist?: string;
+    browserLicense?: string;
+    sceneRegenerationEnabled?: boolean;
     runtime?: VideoEditingRuntime;
   } = {},
 ) {
@@ -184,7 +190,11 @@ function caller(
   const dependencies: VideoEditingRouterDependencies = {
     featureConfig: {
       enabled: input.enabled ?? true,
-      allowlist: input.allowlist ?? '',
+      allowlist: input.allowlist ?? 'usr_one',
+      licenseConfigured: true,
+      hostnameScopeConfigured: true,
+      browserLicense: input.browserLicense ?? 'browser-license',
+      sceneRegenerationEnabled: input.sceneRegenerationEnabled ?? false,
     },
     resolveUser: vi.fn(async () => ({ id: 7, externalId: 'usr_one', plan: 'pro' as const })),
     createRuntime: vi.fn(() => editingRuntime),
@@ -294,6 +304,8 @@ describe('video editing router', () => {
     const result = await fixture.caller.getProject({ projectId: 'vedp_project' });
 
     expect(result).toMatchObject({
+      editor: { license: 'browser-license' },
+      capabilities: { sceneRegeneration: false },
       project: { id: 'vedp_project', sourceKind: 'generated', status: 'active' },
       currentVersion: { id: 'vedv_current', revision: 1, document: DOCUMENT },
       versions: [{ id: 'vedv_current', revision: 1 }],
@@ -305,6 +317,49 @@ describe('video editing router', () => {
     });
     expect(JSON.stringify(result)).not.toContain('"id":41');
     expect(JSON.stringify(result)).not.toContain('"projectId":41');
+  });
+
+  it('offers scene regeneration only when every scene has generation provenance', async () => {
+    const enabled = caller({ sceneRegenerationEnabled: true });
+    await expect(enabled.caller.getProject({ projectId: 'vedp_project' })).resolves.toMatchObject({
+      capabilities: { sceneRegeneration: true },
+    });
+
+    const withoutProvenance = runtime({
+      repository: {
+        ...runtime().repository,
+        getOwnedProject: vi.fn(async () => ({
+          project: {
+            id: 41,
+            externalId: 'vedp_project',
+            userId: 7,
+            sourceTaskId: null,
+            sourceFileId: 31,
+            sourceKind: 'upload' as const,
+            provider: 'cesdk' as const,
+            status: 'active' as const,
+            currentVersionId: 51,
+            createdAt: new Date('2026-08-28T00:00:00Z'),
+            updatedAt: new Date('2026-08-28T00:00:00Z'),
+          },
+          currentVersion: {
+            ...CURRENT_VERSION,
+            documentJson: {
+              ...DOCUMENT,
+              scenes: DOCUMENT.scenes.map((scene) => ({
+                ...scene,
+                generationContext: null,
+              })),
+            },
+          },
+        })),
+      },
+    });
+    const disabled = caller({ sceneRegenerationEnabled: true, runtime: withoutProvenance });
+
+    await expect(disabled.caller.getProject({ projectId: 'vedp_project' })).resolves.toMatchObject({
+      capabilities: { sceneRegeneration: false },
+    });
   });
 
   it('returns the retained current-version output after reload', async () => {
@@ -420,6 +475,28 @@ describe('video editing router', () => {
     ).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 
+  it('materializes the compiled CE.SDK scene on the same immutable revision', async () => {
+    const editingRuntime = runtime();
+    const fixture = caller({ runtime: editingRuntime });
+
+    await expect(
+      fixture.caller.initializeSdkDocument({
+        projectId: 'vedp_project',
+        baseVersionId: 'vedv_current',
+        sdkDocument: 'UBQ2-compiled',
+      }),
+    ).resolves.toMatchObject({
+      version: { id: 'vedv_current', revision: 1, sdkDocument: 'UBQ2-compiled' },
+    });
+    expect(editingRuntime.repository.initializeSdkDocument).toHaveBeenCalledWith({
+      userId: 7,
+      projectId: 'vedp_project',
+      baseVersionId: 'vedv_current',
+      sdkDocument: 'UBQ2-compiled',
+    });
+    expect(editingRuntime.repository.appendVersion).not.toHaveBeenCalled();
+  });
+
   it('requires a quote for regeneration instead of applying it as a free edit', async () => {
     const fixture = caller();
     await expect(
@@ -430,6 +507,20 @@ describe('video editing router', () => {
         operations: [{ kind: 'regenerate_scene', sceneId: 'scene_1', prompt: '改成清晨' }],
       }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('rejects paid scene regeneration before quote or charge while its real pipeline is off', async () => {
+    const fixture = caller();
+
+    await expect(
+      fixture.caller.quotePaidOperation({
+        projectId: 'vedp_project',
+        baseVersionId: 'vedv_current',
+        summary: '重新生成第一段',
+        operations: [{ kind: 'regenerate_scene', sceneId: 'scene_1', prompt: '改成清晨' }],
+      }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    expect(fixture.runtime.quoteService.createQuote).not.toHaveBeenCalled();
   });
 });
 

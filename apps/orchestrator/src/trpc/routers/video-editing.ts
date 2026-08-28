@@ -2,7 +2,7 @@ import type { PlanId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { ffprobeDurationMs } from '../../agent/video/ffmpeg-exec.js';
+import { ffprobeDurationMs, ffprobeVideoMetadata } from '../../agent/video/ffmpeg-exec.js';
 import { env } from '../../config/env.js';
 import { taskFiles } from '../../db/schema/task-files.js';
 import { users } from '../../db/schema/users.js';
@@ -10,6 +10,7 @@ import { FileService } from '../../files/file-service.js';
 import {
   type VideoEditingFeatureConfig,
   canAccessVideoEditing,
+  hasLicensedVideoEditingHostnames,
   videoEditingCapability,
 } from '../../video-editing/feature-access.js';
 import {
@@ -78,6 +79,9 @@ export interface VideoEditingRuntime {
     appendVersion(
       input: Parameters<VideoEditProjectRepository['appendVersion']>[0],
     ): ReturnType<VideoEditProjectRepository['appendVersion']>;
+    initializeSdkDocument(
+      input: Parameters<VideoEditProjectRepository['initializeSdkDocument']>[0],
+    ): ReturnType<VideoEditProjectRepository['initializeSdkDocument']>;
     restoreVersion(
       input: Parameters<VideoEditProjectRepository['restoreVersion']>[0],
     ): ReturnType<VideoEditProjectRepository['restoreVersion']>;
@@ -167,6 +171,15 @@ function mapVideoEditError(error: unknown): never {
 function requireAccess(dependencies: VideoEditingRouterDependencies, userExternalId: string): void {
   if (!canAccessVideoEditing(dependencies.featureConfig, userExternalId)) {
     throw new TRPCError({ code: 'FORBIDDEN', message: '继续剪辑暂未开放' });
+  }
+}
+
+function requireSceneRegeneration(dependencies: VideoEditingRouterDependencies): void {
+  if (dependencies.featureConfig.sceneRegenerationEnabled !== true) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: '片段重新生成暂未开放，未创建报价或扣除额度',
+    });
   }
 }
 
@@ -336,9 +349,9 @@ export function createVideoEditingRouter(dependencies: VideoEditingRouterDepende
             ),
             output: null,
             capabilities: {
-              sceneRegeneration: importedSources.every(
-                (source) => source.capabilities.sceneRegeneration,
-              ),
+              sceneRegeneration:
+                dependencies.featureConfig.sceneRegenerationEnabled === true &&
+                importedSources.every((source) => source.capabilities.sceneRegeneration),
             },
           };
         }),
@@ -367,6 +380,14 @@ export function createVideoEditingRouter(dependencies: VideoEditingRouterDepende
             preview,
             scenePreviews,
             output,
+            editor: { license: dependencies.featureConfig.browserLicense ?? '' },
+            capabilities: {
+              sceneRegeneration:
+                dependencies.featureConfig.sceneRegenerationEnabled === true &&
+                loaded.currentVersion.documentJson.scenes.every(
+                  (scene) => scene.generationContext !== null,
+                ),
+            },
           };
         }),
       ),
@@ -440,6 +461,7 @@ export function createVideoEditingRouter(dependencies: VideoEditingRouterDepende
       )
       .mutation(({ ctx, input }) =>
         withRuntime(dependencies, ctx, async (runtime, user) => {
+          requireSceneRegeneration(dependencies);
           const loaded = await runtime.repository.getOwnedProject(input.projectId, user.id);
           const validated = validateVideoEditPlan(
             { summary: input.summary, operations: input.operations },
@@ -467,6 +489,7 @@ export function createVideoEditingRouter(dependencies: VideoEditingRouterDepende
       )
       .mutation(({ ctx, input }) =>
         withRuntime(dependencies, ctx, async (runtime, user) => {
+          requireSceneRegeneration(dependencies);
           const loaded = await runtime.repository.getOwnedProject(input.projectId, user.id);
           return runtime.quoteService.consumeAndExecute(
             { userId: user.id, ...input },
@@ -483,6 +506,26 @@ export function createVideoEditingRouter(dependencies: VideoEditingRouterDepende
                 }),
             },
           );
+        }),
+      ),
+
+    initializeSdkDocument: protectedProcedure
+      .input(
+        z
+          .object({
+            projectId: externalIdSchema,
+            baseVersionId: externalIdSchema,
+            sdkDocument: z.string().min(1).max(5_000_000),
+          })
+          .strict(),
+      )
+      .mutation(({ ctx, input }) =>
+        withRuntime(dependencies, ctx, async (runtime, user) => {
+          const version = await runtime.repository.initializeSdkDocument({
+            userId: user.id,
+            ...input,
+          });
+          return { version: versionView(version) };
         }),
       ),
 
@@ -579,6 +622,14 @@ const productionDependencies: VideoEditingRouterDependencies = {
     enabled: env.VIDEO_EDITING_ENABLED,
     allowlist: env.VIDEO_EDITING_ALLOWLIST,
     licenseConfigured: Boolean(env.CESDK_LICENSE),
+    hostnameScopeConfigured: hasLicensedVideoEditingHostnames({
+      licensedHostnames: env.CESDK_LICENSED_HOSTNAMES,
+      stagingHostname: env.VIDEO_EDITING_STAGING_HOSTNAME,
+    }),
+    browserLicense: env.CESDK_LICENSE,
+    // Deliberately code-locked until provider execution, atomic billing/refund,
+    // async completion, and child-version reconciliation are implemented.
+    sceneRegenerationEnabled: false,
   },
   async resolveUser(ctx) {
     const [row] = await ctx.db
@@ -623,10 +674,10 @@ const productionDependencies: VideoEditingRouterDependencies = {
     const renderService = new VideoEditRenderService({
       store: new DrizzleVideoEditRenderStore(ctx.db),
       files: renderFiles,
-      probeDurationMs: async (file, userId) => {
+      probeVideoMetadata: async (file, userId) => {
         const url = await fileService.signedReadUrl(file.externalId, userId, 300);
         if (!url) throw new Error('export duration probe requires signed storage');
-        return ffprobeDurationMs(url, { timeoutMs: 30_000 });
+        return ffprobeVideoMetadata(url, { timeoutMs: 30_000 });
       },
     });
     return {

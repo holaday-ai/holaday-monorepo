@@ -1,5 +1,5 @@
 import { newExternalId } from '@holaday/shared-types';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows, readInsertId } from '../db/mysql-result.js';
 import {
@@ -69,6 +69,7 @@ export interface VideoEditProjectStore {
     currentVersionId: number,
     updatedAt: Date,
   ): Promise<boolean>;
+  attachSdkDocument(projectId: number, versionId: number, sdkDocument: string): Promise<boolean>;
   insertQuote(
     input: Omit<VideoEditActionQuoteRecord, 'id' | 'createdAt'>,
   ): Promise<VideoEditActionQuoteRecord>;
@@ -178,6 +179,20 @@ class DrizzleVideoEditProjectStore implements VideoEditProjectStore {
       .update(videoEditProjects)
       .set({ currentVersionId, updatedAt })
       .where(eq(videoEditProjects.id, projectId));
+    return readAffectedRows(result) === 1;
+  }
+
+  async attachSdkDocument(projectId: number, versionId: number, sdkDocument: string) {
+    const result = await this.db
+      .update(videoEditVersions)
+      .set({ sdkDocument })
+      .where(
+        and(
+          eq(videoEditVersions.projectId, projectId),
+          eq(videoEditVersions.id, versionId),
+          isNull(videoEditVersions.sdkDocument),
+        ),
+      );
     return readAffectedRows(result) === 1;
   }
 
@@ -315,6 +330,26 @@ export class VideoEditProjectRepository {
 
   async appendVersion(input: AppendVideoEditVersionInput): Promise<VideoEditVersionRecord> {
     return this.store.transaction((store) => this.appendVersionInTransaction(store, input));
+  }
+
+  async initializeSdkDocument(input: {
+    userId: number;
+    projectId: string;
+    baseVersionId: string;
+    sdkDocument: string;
+  }): Promise<VideoEditVersionRecord> {
+    return this.store.transaction(async (store) => {
+      const project = await this.requireOwnedProject(store, input.projectId, input.userId, true);
+      const currentVersion = await this.requireCurrentVersion(store, project, input.baseVersionId);
+      if (currentVersion.sdkDocument !== null) {
+        if (currentVersion.sdkDocument === input.sdkDocument) return currentVersion;
+        throw new VideoEditRepositoryError('CONFLICT', '当前视频版本已经完成初始化');
+      }
+      if (!(await store.attachSdkDocument(project.id, currentVersion.id, input.sdkDocument))) {
+        throw new VideoEditRepositoryError('CONFLICT', '视频版本刚刚发生变化，请刷新后重试');
+      }
+      return { ...currentVersion, sdkDocument: input.sdkDocument };
+    });
   }
 
   async restoreVersion(input: {

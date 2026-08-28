@@ -66,6 +66,8 @@ const PROJECT: VideoEditingProjectData = {
     file_b: { url: '/file-b.mp4' },
   },
   output: null,
+  editor: { license: 'browser-license' },
+  capabilities: { sceneRegeneration: false },
 };
 
 function nextVersion(overrides: Partial<VideoEditingVersion> = {}): VideoEditingVersion {
@@ -94,6 +96,12 @@ function qaClient(plan: VideoEditingPlan): VideoEditingClient {
       quote: { id: 'vedq_qa', costUnits: 12, expiresAt: new Date(Date.now() + 60_000) },
     })),
     consumePaidOperation: vi.fn(async () => ({ status: 'started' as const, taskId: 'tsk_regen' })),
+    initializeSdkDocument: vi.fn(async (input) => ({
+      version:
+        input.baseVersionId === PROJECT.currentVersion.id
+          ? { ...PROJECT.currentVersion, sdkDocument: input.sdkDocument }
+          : nextVersion({ sdkDocument: input.sdkDocument }),
+    })),
     saveSdkDocument: vi.fn(async () => ({ version: nextVersion() })),
     restoreVersion: vi.fn(async () => ({ version: nextVersion({ operations: null }) })),
     beginExport: vi.fn(async () => ({
@@ -136,10 +144,14 @@ function open(client: VideoEditingClient, adapter = qaAdapter()) {
 
 async function previewInstruction(instruction: string): Promise<void> {
   await screen.findByRole('heading', { name: 'AI 帮你剪辑' });
-  fireEvent.change(screen.getByLabelText('告诉 AI 想怎么剪'), {
+  const instructionInput = screen.getByLabelText('告诉 AI 想怎么剪');
+  await waitFor(() => expect(instructionInput.hasAttribute('disabled')).toBe(false));
+  fireEvent.change(instructionInput, {
     target: { value: instruction },
   });
-  fireEvent.click(screen.getByRole('button', { name: '预览修改' }));
+  const previewButton = screen.getByRole('button', { name: '预览修改' });
+  await waitFor(() => expect(previewButton.hasAttribute('disabled')).toBe(false));
+  fireEvent.click(previewButton);
 }
 
 describe('continue editing POC acceptance', () => {
@@ -191,7 +203,8 @@ describe('continue editing POC acceptance', () => {
     await previewInstruction('改成 9:16 并更新第一段字幕');
     fireEvent.click(await screen.findByRole('button', { name: '应用这 2 项修改' }));
     await waitFor(() => expect(client.applyFreeOperations).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(adapter.mount).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(adapter.mount).toHaveBeenCalledTimes(4));
+    expect(client.initializeSdkDocument).toHaveBeenCalledTimes(2);
     fireEvent.click(screen.getByRole('button', { name: '导出 MP4' }));
 
     expect(await screen.findByText('holaday-edited.mp4')).toBeTruthy();
@@ -203,7 +216,7 @@ describe('continue editing POC acceptance', () => {
     });
   });
 
-  it('shows the exact server quote and rejects an expired regeneration without changing version', async () => {
+  it('keeps scene regeneration fail-closed without quoting or charging', async () => {
     const plan: VideoEditingPlan = {
       summary: '重新生成第一段。',
       affectedSceneIds: ['scene_a'],
@@ -211,13 +224,13 @@ describe('continue editing POC acceptance', () => {
       requiresQuote: true,
     };
     const client = qaClient(plan);
-    client.consumePaidOperation = vi.fn(async () => ({ status: 'expired' as const }));
     open(client);
     await previewInstruction('重新生成第一段');
-    fireEvent.click(await screen.findByRole('button', { name: '重新生成这一段 ◈ 12' }));
 
-    expect(await screen.findByText('本次生成没有完成，原版本仍然可用。')).toBeTruthy();
+    expect(await screen.findByText(/片段重新生成还未开放/)).toBeTruthy();
     expect(screen.getAllByText('版本 3').length).toBeGreaterThan(0);
+    expect(client.quotePaidOperation).not.toHaveBeenCalled();
+    expect(client.consumePaidOperation).not.toHaveBeenCalled();
     expect(client.applyFreeOperations).not.toHaveBeenCalled();
   });
 

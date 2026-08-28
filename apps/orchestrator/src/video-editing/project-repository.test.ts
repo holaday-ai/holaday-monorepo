@@ -102,6 +102,15 @@ class MemoryVideoEditProjectStore implements VideoEditProjectStore {
     return true;
   }
 
+  async attachSdkDocument(projectId: number, versionId: number, sdkDocument: string) {
+    const version = this.versions.find(
+      (candidate) => candidate.projectId === projectId && candidate.id === versionId,
+    );
+    if (!version || version.sdkDocument !== null) return false;
+    version.sdkDocument = sdkDocument;
+    return true;
+  }
+
   async insertQuote(input: Omit<VideoEditActionQuoteRecord, 'id' | 'createdAt'>) {
     const quote = {
       id: this.nextQuoteId++,
@@ -221,6 +230,34 @@ describe('video editing project repository', () => {
     expect(store.projects[0]?.currentVersionId).toBe(next.id);
     expect(store.transactions).toBe(2);
     expect(store.lockedProjectIds).toEqual([created.project.id]);
+  });
+
+  it('attaches the compiled SDK materialization to the current revision without inventing history', async () => {
+    const { repository, store } = repositoryFixture();
+    const created = await createProject(repository);
+
+    const materialized = await repository.initializeSdkDocument({
+      userId: 7,
+      projectId: created.project.externalId,
+      baseVersionId: created.currentVersion.externalId,
+      sdkDocument: 'UBQ2-compiled',
+    });
+
+    expect(materialized).toMatchObject({
+      id: created.currentVersion.id,
+      externalId: created.currentVersion.externalId,
+      revision: 1,
+      sdkDocument: 'UBQ2-compiled',
+    });
+    expect(store.versions).toHaveLength(1);
+    await expect(
+      repository.initializeSdkDocument({
+        userId: 7,
+        projectId: created.project.externalId,
+        baseVersionId: created.currentVersion.externalId,
+        sdkDocument: 'UBQ2-different',
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 
   it('rejects an append when another writer already advanced the base version', async () => {

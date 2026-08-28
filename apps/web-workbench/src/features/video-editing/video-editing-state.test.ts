@@ -22,6 +22,8 @@ const PROJECT: VideoEditingProjectData = {
   },
   versions: [],
   preview: { url: '/video.mp4' },
+  editor: { license: 'browser-license' },
+  capabilities: { sceneRegeneration: false },
 };
 
 describe('videoEditingReducer', () => {
@@ -76,6 +78,7 @@ describe('videoEditingReducer', () => {
     'planner_unavailable',
     'stale_version',
     'insufficient_balance',
+    'scene_regeneration_unavailable',
     'render_failed',
     'source_unavailable',
   ] as const)('exposes the explicit %s failure state', (error) => {

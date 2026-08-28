@@ -44,7 +44,7 @@ export interface VideoEditRenderStore {
     createdAt: Date;
   }): Promise<
     | { status: 'started'; attempt: VideoEditRenderAttemptRecord }
-    | { status: 'not_found' | 'stale_version' | 'already_rendering' }
+    | { status: 'not_found' | 'stale_version' | 'version_not_ready' | 'already_rendering' }
   >;
   findAttempt(input: {
     userId: number;
@@ -126,7 +126,10 @@ export class VideoEditRenderService {
     private readonly dependencies: {
       store: VideoEditRenderStore;
       files: VideoEditRenderFilePort;
-      probeDurationMs(file: VideoEditRenderFile, userId: number): Promise<number>;
+      probeVideoMetadata(
+        file: VideoEditRenderFile,
+        userId: number,
+      ): Promise<{ durationMs: number; width: number; height: number }>;
       now?: () => Date;
     },
   ) {}
@@ -144,7 +147,14 @@ export class VideoEditRenderService {
         requiredHeaders: Record<string, string>;
         expiresAt: Date;
       }
-    | { status: 'not_found' | 'stale_version' | 'already_rendering' | 'upload_unavailable' }
+    | {
+        status:
+          | 'not_found'
+          | 'stale_version'
+          | 'version_not_ready'
+          | 'already_rendering'
+          | 'upload_unavailable';
+      }
   > {
     const now = this.dependencies.now?.() ?? new Date();
     const expiresAt = new Date(now.getTime() + EXPORT_ATTEMPT_TTL_MS);
@@ -209,9 +219,17 @@ export class VideoEditRenderService {
       return { status: 'invalid_output' };
     }
     try {
-      const durationMs = await this.dependencies.probeDurationMs(completed.file, input.userId);
-      if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs > MAX_EXPORT_DURATION_MS) {
-        throw new Error('invalid export duration');
+      const metadata = await this.dependencies.probeVideoMetadata(completed.file, input.userId);
+      if (
+        !Number.isFinite(metadata.durationMs) ||
+        metadata.durationMs <= 0 ||
+        metadata.durationMs > MAX_EXPORT_DURATION_MS ||
+        !Number.isFinite(metadata.width) ||
+        metadata.width <= 0 ||
+        !Number.isFinite(metadata.height) ||
+        metadata.height <= 0
+      ) {
+        throw new Error('invalid export video stream');
       }
     } catch {
       await this.dependencies.files.discard(completed.file.externalId, input.userId);
@@ -348,6 +366,7 @@ export class DrizzleVideoEditRenderStore implements VideoEditRenderStore {
         .limit(1)
         .for('update');
       if (!version) return { status: 'stale_version' as const };
+      if (version.sdkDocument === null) return { status: 'version_not_ready' as const };
       if (version.renderStatus !== 'idle' && version.renderStatus !== 'failed') {
         return { status: 'already_rendering' as const };
       }

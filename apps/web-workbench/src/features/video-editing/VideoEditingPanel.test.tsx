@@ -41,11 +41,13 @@ const PROJECT: VideoEditingProjectData = {
         },
       ],
     },
-    sdkDocument: null,
+    sdkDocument: 'UBQ2-existing',
     renderStatus: 'idle',
   },
   versions: [],
   preview: { url: '/video.mp4' },
+  editor: { license: 'browser-license' },
+  capabilities: { sceneRegeneration: false },
 };
 
 const NEXT_VERSION: VideoEditingVersion = {
@@ -64,6 +66,9 @@ function client(plan: VideoEditingPlan): VideoEditingClient {
       quote: { id: 'vedq_exact', costUnits: 12, expiresAt: new Date() },
     })),
     consumePaidOperation: vi.fn(async () => ({ status: 'started' as const, taskId: 'tsk_regen' })),
+    initializeSdkDocument: vi.fn(async (input) => ({
+      version: { ...PROJECT.currentVersion, sdkDocument: input.sdkDocument },
+    })),
     saveSdkDocument: vi.fn(async () => ({ version: NEXT_VERSION })),
     restoreVersion: vi.fn(async () => ({ version: NEXT_VERSION })),
     beginExport: vi.fn(async () => ({
@@ -120,6 +125,41 @@ describe('VideoEditingPanel', () => {
     expect(screen.getByText('当前视频')).toBeTruthy();
     expect(await screen.findByRole('button', { name: '选择第 1 段' })).toBeTruthy();
     await waitFor(() => expect(editorAdapter.mount).toHaveBeenCalledTimes(1));
+    expect(editorAdapter.mount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        license: 'browser-license',
+        document: PROJECT.currentVersion.document,
+        sourceUrls: { file_video: '/video.mp4' },
+      }),
+    );
+  });
+
+  it('persists a newly compiled CE.SDK scene on the same revision before enabling export', async () => {
+    const editingClient = client({
+      summary: '更新字幕',
+      affectedSceneIds: [],
+      operations: [],
+      requiresQuote: false,
+    });
+    editingClient.getProject = vi.fn(async () => ({
+      ...PROJECT,
+      currentVersion: { ...PROJECT.currentVersion, sdkDocument: null },
+    }));
+    const editorAdapter = adapter();
+
+    renderPanel(editingClient, editorAdapter);
+
+    await waitFor(() => expect(editingClient.initializeSdkDocument).toHaveBeenCalledTimes(1));
+    expect(editingClient.initializeSdkDocument).toHaveBeenCalledWith({
+      projectId: 'vedp_project',
+      baseVersionId: 'vedv_1',
+      sdkDocument: 'sdk-document',
+    });
+    await waitFor(() => expect(editorAdapter.mount).toHaveBeenCalledTimes(2));
+    expect(editorAdapter.mount).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sceneDocument: 'sdk-document' }),
+    );
+    expect(screen.getByRole('button', { name: '导出 MP4' }).hasAttribute('disabled')).toBe(false);
   });
 
   it('previews affected scenes and applies a free plan once', async () => {
@@ -154,6 +194,10 @@ describe('VideoEditingPanel', () => {
       requiresQuote: true,
     };
     const editingClient = client(plan);
+    editingClient.getProject = vi.fn(async () => ({
+      ...PROJECT,
+      capabilities: { sceneRegeneration: true },
+    }));
     renderPanel(editingClient, adapter());
     await screen.findByRole('heading', { name: 'AI 帮你剪辑' });
 
@@ -173,6 +217,27 @@ describe('VideoEditingPanel', () => {
     );
   });
 
+  it('does not create a quote or charge when scene regeneration is not available', async () => {
+    const plan: VideoEditingPlan = {
+      summary: '重新生成第一段',
+      affectedSceneIds: ['scene_1'],
+      operations: [{ kind: 'regenerate_scene', sceneId: 'scene_1', prompt: '改成清晨' }],
+      requiresQuote: true,
+    };
+    const editingClient = client(plan);
+    renderPanel(editingClient, adapter());
+    await screen.findByRole('heading', { name: 'AI 帮你剪辑' });
+
+    fireEvent.change(screen.getByLabelText('告诉 AI 想怎么剪'), {
+      target: { value: '重新生成第一段' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '预览修改' }));
+
+    expect(await screen.findByText(/片段重新生成还未开放/)).toBeTruthy();
+    expect(editingClient.quotePaidOperation).not.toHaveBeenCalled();
+    expect(editingClient.consumePaidOperation).not.toHaveBeenCalled();
+  });
+
   it('keeps the source preview usable when the fine editor cannot load', async () => {
     const editingClient = client({
       summary: '更新字幕',
@@ -186,6 +251,57 @@ describe('VideoEditingPanel', () => {
 
     expect(await screen.findByText(/精细时间线暂不可用/)).toBeTruthy();
     expect(screen.getByLabelText('当前视频预览')).toBeTruthy();
+  });
+
+  it('fails closed instead of mounting a second scene with the wrong source URL', async () => {
+    const editingClient = client({
+      summary: '交换片段',
+      affectedSceneIds: [],
+      operations: [],
+      requiresQuote: false,
+    });
+    const firstScene = PROJECT.currentVersion.document.scenes[0];
+    if (!firstScene) throw new Error('expected scene fixture');
+    editingClient.getProject = vi.fn(async () => ({
+      ...PROJECT,
+      currentVersion: {
+        ...PROJECT.currentVersion,
+        document: {
+          ...PROJECT.currentVersion.document,
+          scenes: [
+            firstScene,
+            { ...firstScene, id: 'scene_2', sourceFileId: 'file_missing', order: 1 },
+          ],
+        },
+      },
+      scenePreviews: { file_video: { url: '/video.mp4' } },
+    }));
+    const editorAdapter = adapter();
+
+    renderPanel(editingClient, editorAdapter);
+
+    expect(await screen.findByText(/精细时间线暂不可用/)).toBeTruthy();
+    expect(editorAdapter.mount).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('当前视频预览')).toBeTruthy();
+  });
+
+  it('renders clarification-only plans without an invalid zero-operation apply action', async () => {
+    const editingClient = client({
+      summary: '请告诉我想调整哪一段。',
+      affectedSceneIds: [],
+      operations: [],
+      requiresQuote: false,
+    });
+    renderPanel(editingClient, adapter());
+    await screen.findByRole('heading', { name: 'AI 帮你剪辑' });
+
+    fireEvent.change(screen.getByLabelText('告诉 AI 想怎么剪'), {
+      target: { value: '帮我优化一下' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '预览修改' }));
+
+    expect(await screen.findByText('请告诉我想调整哪一段。')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /应用这 0 项修改/ })).toBeNull();
   });
 
   it('exports once through a server-bound upload target and shows the retained file', async () => {

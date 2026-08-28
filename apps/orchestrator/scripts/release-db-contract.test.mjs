@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, it } from 'node:test';
+import ts from 'typescript';
 import {
   STOCK_PREFERENCE_REQUIRED_COLUMNS,
   STOCK_PREFERENCE_REQUIRED_TABLES,
@@ -96,6 +97,19 @@ describe('numbered migration filename contract', () => {
       verifier,
       /feedback_cases:\s*\[[\s\S]*'external_id'[\s\S]*'user_id'[\s\S]*'closure_request_id'[\s\S]*'message'[\s\S]*'context'[\s\S]*'user_agent'[\s\S]*'hold_reason'[\s\S]*'restricted_at'[\s\S]*'created_at'/,
     );
+  });
+
+  it('keeps the production schema verifier syntactically valid TypeScript', () => {
+    const verifier = readFileSync(new URL('./verify-db-schema.ts', import.meta.url), 'utf8');
+    const compiled = ts.transpileModule(verifier, {
+      compilerOptions: { module: ts.ModuleKind.NodeNext, target: ts.ScriptTarget.ES2022 },
+      fileName: 'verify-db-schema.ts',
+      reportDiagnostics: true,
+    });
+    const syntaxErrors = (compiled.diagnostics ?? [])
+      .filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)
+      .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'));
+    assert.deepEqual(syntaxErrors, []);
   });
 });
 

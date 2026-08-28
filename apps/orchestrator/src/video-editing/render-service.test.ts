@@ -32,7 +32,7 @@ function fixture(
   overrides: {
     store?: Partial<VideoEditRenderStore>;
     files?: Partial<VideoEditRenderFilePort>;
-    durationMs?: number;
+    metadata?: { durationMs: number; width: number; height: number };
   } = {},
 ) {
   const store: VideoEditRenderStore = {
@@ -61,7 +61,9 @@ function fixture(
     service: new VideoEditRenderService({
       store,
       files,
-      probeDurationMs: vi.fn(async () => overrides.durationMs ?? 30_000),
+      probeVideoMetadata: vi.fn(
+        async () => overrides.metadata ?? { durationMs: 30_000, width: 1080, height: 1920 },
+      ),
       now: () => new Date('2026-08-28T00:00:00Z'),
     }),
   };
@@ -107,6 +109,22 @@ describe('VideoEditRenderService', () => {
       }),
     ).resolves.toEqual({ status: 'not_found' });
     expect(f.files.discard).toHaveBeenCalledWith(FILE.externalId, 8);
+  });
+
+  it('discards the reserved file when the immutable version has no editor materialization', async () => {
+    const f = fixture({
+      store: { beginAttempt: vi.fn(async () => ({ status: 'version_not_ready' }) as const) },
+    });
+
+    await expect(
+      f.service.beginExport({
+        userId: 7,
+        userExternalId: 'usr_one',
+        projectId: 'vedp_project',
+        versionId: 'vedv_unmaterialized',
+      }),
+    ).resolves.toEqual({ status: 'version_not_ready' });
+    expect(f.files.discard).toHaveBeenCalledWith(FILE.externalId, 7);
   });
 
   it('rejects a foreign, mismatched, or expired attempt before touching uploaded bytes', async () => {
@@ -166,6 +184,21 @@ describe('VideoEditRenderService', () => {
       }),
     ).resolves.toEqual({ status: 'invalid_output' });
     expect(f.store.failAttempt).toHaveBeenCalled();
+    expect(f.store.completeAttempt).not.toHaveBeenCalled();
+    expect(f.files.discard).toHaveBeenCalledWith(FILE.externalId, 7);
+  });
+
+  it('rejects an MP4-labelled object that has no decodable video frame dimensions', async () => {
+    const f = fixture({ metadata: { durationMs: 30_000, width: 0, height: 0 } });
+
+    await expect(
+      f.service.completeClientExport({
+        userId: 7,
+        projectId: 'vedp_project',
+        versionId: 'vedv_current',
+        renderAttemptId: 'vedr_attempt',
+      }),
+    ).resolves.toEqual({ status: 'invalid_output' });
     expect(f.store.completeAttempt).not.toHaveBeenCalled();
     expect(f.files.discard).toHaveBeenCalledWith(FILE.externalId, 7);
   });

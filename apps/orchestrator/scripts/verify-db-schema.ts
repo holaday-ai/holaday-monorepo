@@ -134,6 +134,7 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'notification_status',
     'issued_at',
     'completed_at',
+  ],
   video_edit_projects: [
     'external_id',
     'user_id',

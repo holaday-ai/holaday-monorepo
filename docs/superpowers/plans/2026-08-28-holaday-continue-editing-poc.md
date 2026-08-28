@@ -4,7 +4,7 @@
 
 **Goal:** Add a feature-gated, user-owned “继续剪辑” vertical slice that opens an existing or uploaded video, applies bounded scene-level edits, preserves immutable versions, and exports a new Holaday file without exposing supplier credentials or charging outside the server.
 
-**Architecture:** Holaday owns the project, scene, version, quote, and file-delivery records. A narrow `VideoEditorAdapter` hides IMG.LY CE.SDK behind a browser-only lazy import; the POC runs in CE.SDK evaluation mode locally and stays disabled in production until a commercial license and browser/codec gate are approved. The first vertical slice supports trim, reorder, captions, 9:16 reframing, restore, and export; paid scene regeneration is represented by a server-authoritative quoted operation and reuses the existing video generation/task boundary rather than letting the browser deduct quota.
+**Architecture:** Holaday owns the project, scene, version, and file-delivery records. A narrow `VideoEditorAdapter` hides IMG.LY CE.SDK behind a browser-only lazy import; the POC runs in CE.SDK evaluation mode locally and stays disabled in production until a commercial license and browser/codec gate are approved. The first vertical slice supports trim, reorder, captions, 9:16 reframing, restore, and export. Paid scene regeneration remains code-locked off until real provider execution, atomic billing/refund, asynchronous completion, and child-version reconciliation are implemented.
 
 **Tech Stack:** React 18, Vite 6, TypeScript 5.7, tRPC 11, Drizzle ORM/MySQL, Vitest, Testing Library, Zustand, IMG.LY `@cesdk/cesdk-js` Web SDK, existing Holaday `FileService`/R2 delivery.
 
@@ -15,10 +15,10 @@
 - The user-facing entry is `继续剪辑`; the panel title is `AI 帮你剪辑`; no new top-level navigation item is allowed.
 - The original video is immutable and every completed edit creates a child version.
 - The browser never calculates price, deducts quota, or receives supplier secrets.
-- A paid operation is authorized only by clicking a server-priced `◈ N` action; the quote is bound to user, project, base version, operation plan, and expiry.
+- The POC never creates a quote or deducts quota for scene regeneration; the UI explains that the capability is not yet open.
 - A final MP4 without scene-level source metadata imports as one scene and may be trimmed, captioned, reframed, mixed, or overlaid, but not falsely offered single-shot regeneration.
 - IP-person projects preserve the named locked-subject constraint for every scene regeneration.
-- All project, media, version, quote, render, restore, and download reads/writes enforce ownership.
+- All project, media, version, render, restore, and download reads/writes enforce ownership; dormant quote records remain unreachable from production.
 - URLs for source media and exports are short-lived and scoped; no vendor key is rendered into HTML, logs, task results, or persisted client state.
 - `VIDEO_EDITING_ENABLED` defaults to `false`; `VIDEO_EDITING_ALLOWLIST` defaults to empty; production stays off until the commercial-license gate is explicitly satisfied.
 - DivineAPI Translator and its OpenAI-key configuration remain untouched.
@@ -142,7 +142,7 @@ Commit: `feat(video-editing): add guarded editor adapter`
 
 ---
 
-### Task 2: Persist user-owned projects, immutable versions, and action quotes
+### Task 2: Persist user-owned projects and immutable versions; keep action quotes dormant
 
 **Files:**
 - Create: `apps/orchestrator/src/db/schema/video-editing.ts`
@@ -230,7 +230,7 @@ Tests must prove:
 
 - [ ] **Step 6: Implement repository transactions**
 
-`appendVersion` must lock the project row, verify `currentVersionId === baseVersionId`, insert the child version, then update only `current_version_id` and `updated_at`. `consumeQuote` must atomically transition `pending → consumed`; expired, mismatched, or already-consumed quotes return typed outcomes and do not mutate quota.
+`appendVersion` must lock the project row, verify `currentVersionId === baseVersionId`, insert the child version, then update only `current_version_id` and `updated_at`. The quote schema/service remains covered by unit tests for a later phase, but production routes stay code-locked and cannot create, consume, or charge a quote in this POC.
 
 - [ ] **Step 7: Verify migration contract and commit**
 
@@ -385,13 +385,13 @@ Prove: flag off denies all mutating procedures; flag on plus empty allowlist per
 
 Every procedure must return `NOT_FOUND` for a foreign project/version/file. `applyFreeOperations` and `saveSdkDocument` require the supplied base version to equal the project's current version or return `CONFLICT`. `restoreVersion` validates the target belongs to the project and creates a child version.
 
-- [ ] **Step 3: Write quote tests before implementation**
+- [ ] **Step 3: Preserve quote contract tests for the deferred phase**
 
-Use a canonical JSON hash of `{ projectId, baseVersionId, operations }`. Free operations return no quote. `regenerate_scene` returns a 10-minute pending quote with server-owned `costUnits`. A changed operation, changed base version, foreign user, expired quote, or replayed quote cannot be consumed. A failed downstream generation calls the existing quota refund path exactly once.
+Keep the canonical JSON hash and quote service tests as a deferred contract. Production `quotePaidOperation` and `consumePaidOperation` must fail before reaching that service, so the POC creates no quote and mutates no quota.
 
-- [ ] **Step 4: Implement the router and quote service**
+- [ ] **Step 4: Implement free-edit routes and fail closed on paid routes**
 
-The router returns scene/document data and fresh preview URLs but never raw internal IDs, storage paths, environment fields, or vendor credentials. `consumePaidOperation` calls one repository transaction that consumes quota and quote, then starts the existing video generation path with `source_context` containing project/version/scene IDs and locked-subject metadata.
+The router returns scene/document data and fresh preview URLs but never raw internal IDs, storage paths, environment fields, or vendor credentials. Both paid routes return `PRECONDITION_FAILED` before quote or billing work. Real generation execution and atomic billing/refund are deferred.
 
 - [ ] **Step 5: Verify and commit**
 
@@ -438,7 +438,7 @@ Tests prove:
 2. Scene cards expose thumbnail, duration, source, caption, selected state, and operation state.
 3. Entering “改成竖版并更新第一段字幕” previews affected scenes before apply.
 4. A free plan applies immediately from `应用这 2 项修改`.
-5. A paid plan shows `重新生成这一段  ◈ 12`; click calls the exact quote ID once.
+5. A paid regeneration plan fails closed with `片段重新生成还未开放`, and calls neither quote nor consume.
 6. Version restore warns that it creates a new version and preserves the source.
 7. All icon-only controls have both `aria-label` and native `title`.
 
@@ -575,7 +575,7 @@ The test fails production enablement unless all of these are true: a non-empty c
 
 - [ ] **Step 2: Add a deterministic authenticated QA fixture**
 
-The QA page must demonstrate the eight spec acceptance cases with owned sample artifacts: trim; two-clip reorder; caption plus 9:16 export; one quoted scene regeneration; source preservation and restore; authenticated output download; foreign/expired quote rejection; and visible cost/render/undo evidence. It must not contain production credentials, user data, or a bypass route.
+The QA page must demonstrate the eight safe POC acceptance cases with owned sample artifacts: trim; two-clip reorder; caption plus 9:16 export; regeneration default-off messaging; no quote/charge side effect; source preservation and restore; authenticated output download; and visible render/undo evidence. It must not contain production credentials, user data, or a bypass route.
 
 - [ ] **Step 3: Run the full verification matrix**
 
@@ -597,7 +597,7 @@ Expected: every command passes; the preflight intentionally reports `production_
 
 - [ ] **Step 4: Browser-verify the full POC at fixed viewports**
 
-Use the user-selected in-app browser. Verify 1440×900 and 390×844 states for entry, project loading, scene selection, AI plan preview, free apply, paid quote CTA, export, version restore, insufficient balance, SDK fallback, expired media, and keyboard focus. Capture same-state screenshots before/after and compare them together; fix cropping, density, typography, radius, spacing, and focus defects before release.
+Use the user-selected in-app browser. Verify 1440×900 and 390×844 states for entry, project loading, scene selection, AI plan preview, free apply, regeneration-unavailable messaging, export, version restore, SDK fallback, expired media, and keyboard focus. Capture same-state screenshots before/after and compare them together; fix cropping, density, typography, radius, spacing, and focus defects before release.
 
 - [ ] **Step 5: Commit and release only the safe surface**
 
@@ -609,7 +609,7 @@ Push and create a PR after all tests pass. Merge/deploy the code with `VIDEO_EDI
 
 ## Self-review record
 
-- **Spec coverage:** Entries, embedded panel, generated/clone/IP/upload sources, compatible multi-clip import, AI plan preview, free vs quoted execution, immutable versions, restore, export/file delivery, ownership, scoped URLs, locked-subject preservation, trial/licensing gate, and all eight POC acceptance cases map to Tasks 1–9.
+- **Spec coverage:** Entries, embedded panel, generated/clone/IP/upload sources, compatible multi-clip import, AI plan preview, free execution, paid-regeneration fail-closed behavior, immutable versions, restore, export/file delivery, ownership, scoped URLs, locked-subject preservation, trial/licensing gate, and all eight safe POC acceptance cases map to Tasks 1–9.
 - **Deliberate POC limit:** Transcription/silence detection is represented by typed scene operations and source-import metadata; production-grade speech processing is not invented in the browser and must use an approved provider in a follow-up plan after this POC proves the editing loop.
 - **Production truth boundary:** Evaluation-mode CE.SDK is permitted only for local/staging POC. Production remains disabled until the commercial license, hostname coverage, browser/codec matrix, and render terms are documented and the preflight passes.
 - **Type consistency:** `VideoEditDocument`, `VideoEditOperation`, `VideoEditPlan`, project/version IDs, quote hash, and adapter signatures are defined once and consumed consistently by later tasks.

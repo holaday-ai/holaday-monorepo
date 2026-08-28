@@ -15,11 +15,11 @@ const ACCEPTANCE_CASES = [
   '裁剪片段',
   '双片段排序',
   '字幕 + 9:16 导出',
-  '服务端报价再生成',
+  '片段重生成默认关闭',
   '原片保留与版本恢复',
   '鉴权成品下载',
-  '外部/过期报价拒绝',
-  '价格、渲染与撤回证据',
+  '无报价与扣费副作用',
+  '渲染与撤回证据',
 ];
 
 const project: VideoEditingProjectData = {
@@ -98,6 +98,8 @@ const project: VideoEditingProjectData = {
     },
   ],
   preview: { url: SOURCE_URL },
+  editor: { license: 'qa-browser-license' },
+  capabilities: { sceneRegeneration: false },
 };
 
 const client: VideoEditingClient = {
@@ -140,13 +142,13 @@ const client: VideoEditingClient = {
     };
   },
   async quotePaidOperation() {
-    return {
-      status: 'quoted',
-      quote: { id: 'vedq_qa', costUnits: 12, expiresAt: new Date(Date.now() + 600_000) },
-    };
+    throw new Error('scene regeneration is intentionally unavailable in this POC');
   },
   async consumePaidOperation() {
-    return { status: 'started', taskId: 'tsk_qa_regeneration' };
+    throw new Error('scene regeneration is intentionally unavailable in this POC');
+  },
+  async initializeSdkDocument({ sdkDocument }) {
+    return { version: { ...project.currentVersion, sdkDocument } };
   },
   async saveSdkDocument() {
     return { version: project.currentVersion };
@@ -228,7 +230,7 @@ ReactDOM.createRoot(root).render(
           <div className="rounded-[22px] border border-[#E8DFE9] bg-white/90 p-4 shadow-[0_12px_34px_rgba(68,44,72,0.06)] backdrop-blur-sm">
             <div className="flex items-center gap-2 text-sm font-semibold text-[#382F3B]">
               <ShieldCheck className="h-4 w-4 text-[#B02E64]" aria-hidden="true" />
-              八项确定性验收夹具
+              八项安全验收夹具
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
               {ACCEPTANCE_CASES.map((item, index) => (

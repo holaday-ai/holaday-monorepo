@@ -13,6 +13,7 @@ export type VideoEditingFailure =
   | 'planner_unavailable'
   | 'stale_version'
   | 'insufficient_balance'
+  | 'scene_regeneration_unavailable'
   | 'render_failed'
   | 'source_unavailable';
 
@@ -78,6 +79,8 @@ export interface VideoEditingProjectData {
   preview: { url: string; expiresAt?: Date | string };
   scenePreviews?: Record<string, { url: string; expiresAt?: Date | string }>;
   output?: FileDownloadPayload | null;
+  editor: { license: string };
+  capabilities: { sceneRegeneration: boolean };
 }
 
 export interface VideoEditingState {

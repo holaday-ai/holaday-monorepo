@@ -16,6 +16,8 @@ describe('video editing environment contract', () => {
       VIDEO_EDITING_ALLOWLIST: '',
       VIDEO_EDITING_PROVIDER: 'cesdk',
       CESDK_LICENSE: '',
+      CESDK_LICENSED_HOSTNAMES: '',
+      VIDEO_EDITING_STAGING_HOSTNAME: '',
     });
   });
 
@@ -26,6 +28,8 @@ describe('video editing environment contract', () => {
       VIDEO_EDITING_ALLOWLIST: 'usr_one,usr_two',
       VIDEO_EDITING_PROVIDER: 'cesdk',
       CESDK_LICENSE: 'commercial-license',
+      CESDK_LICENSED_HOSTNAMES: 'holaday.ai,hd-app.orangebench.tech,staging.holaday.internal',
+      VIDEO_EDITING_STAGING_HOSTNAME: 'staging.holaday.internal',
     });
 
     expect(parsed).toMatchObject({
@@ -33,6 +37,8 @@ describe('video editing environment contract', () => {
       VIDEO_EDITING_ALLOWLIST: 'usr_one,usr_two',
       VIDEO_EDITING_PROVIDER: 'cesdk',
       CESDK_LICENSE: 'commercial-license',
+      CESDK_LICENSED_HOSTNAMES: 'holaday.ai,hd-app.orangebench.tech,staging.holaday.internal',
+      VIDEO_EDITING_STAGING_HOSTNAME: 'staging.holaday.internal',
     });
   });
 

@@ -1,8 +1,12 @@
+import type { VideoEditingDocument } from './video-editing-state';
+
 export interface VideoEditorMountInput {
   container: HTMLElement;
   license: string | null;
   sceneDocument: string | null;
   sourceUrl: string;
+  sourceUrls: Record<string, string>;
+  document: VideoEditingDocument;
   locale: 'zh-CN';
   onDocumentChanged(document: string): void;
 }

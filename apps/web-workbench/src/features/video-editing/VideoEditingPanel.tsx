@@ -62,7 +62,14 @@ type BeginExportResult =
       requiredHeaders: Record<string, string>;
       expiresAt: Date | string;
     }
-  | { status: 'not_found' | 'stale_version' | 'already_rendering' | 'upload_unavailable' };
+  | {
+      status:
+        | 'not_found'
+        | 'stale_version'
+        | 'version_not_ready'
+        | 'already_rendering'
+        | 'upload_unavailable';
+    };
 
 type CompleteExportResult =
   | { status: 'completed'; file: FileDownloadPayload }
@@ -89,6 +96,11 @@ export interface VideoEditingClient {
     quoteId: string;
     operations: VideoEditingPlan['operations'];
   }): Promise<ConsumeResult>;
+  initializeSdkDocument(input: {
+    projectId: string;
+    baseVersionId: string;
+    sdkDocument: string;
+  }): Promise<{ version: VideoEditingVersion }>;
   saveSdkDocument(input: {
     projectId: string;
     baseVersionId: string;
@@ -129,6 +141,10 @@ const defaultClient: VideoEditingClient = {
     trpc.videoEditing.quotePaidOperation.mutate(input) as unknown as Promise<QuoteResult>,
   consumePaidOperation: (input) =>
     trpc.videoEditing.consumePaidOperation.mutate(input) as unknown as Promise<ConsumeResult>,
+  initializeSdkDocument: (input) =>
+    trpc.videoEditing.initializeSdkDocument.mutate(input) as unknown as Promise<{
+      version: VideoEditingVersion;
+    }>,
   saveSdkDocument: (input) =>
     trpc.videoEditing.saveSdkDocument.mutate(input) as unknown as Promise<{
       version: VideoEditingVersion;
@@ -153,6 +169,8 @@ const FAILURE_COPY: Record<VideoEditingFailure, string> = {
   planner_unavailable: 'AI 暂时没有给出可靠的修改方案。原版本未变，请稍后重试。',
   stale_version: '这个项目刚刚产生了新版本。请刷新后再应用修改。',
   insufficient_balance: '当前额度不足，未开始重新生成。',
+  scene_regeneration_unavailable:
+    '片段重新生成还未开放，不会创建报价或扣除额度。其他剪辑功能可正常使用。',
   render_failed: '本次生成没有完成，原版本仍然可用。',
   source_unavailable: '原视频暂时不可用，无法继续剪辑。',
 };
@@ -234,6 +252,7 @@ export function VideoEditingPanel({
   const [exportedFile, setExportedFile] = React.useState<FileDownloadPayload | null>(null);
   const editorHostRef = React.useRef<HTMLDivElement | null>(null);
   const editorRef = React.useRef<MountedVideoEditor | null>(null);
+  const initializedVersionIdsRef = React.useRef(new Set<string>());
   const requestIdRef = React.useRef(0);
   const actionLockRef = React.useRef(false);
   const busy = isVideoEditingBusy(state);
@@ -273,37 +292,71 @@ export function VideoEditingPanel({
     let mounted: Awaited<ReturnType<VideoEditorAdapter['mount']>> | null = null;
     setEditorReady(false);
     setEditorUnavailable(false);
-    void adapter
-      .mount({
-        container: host,
-        license: null,
-        sceneDocument: data.currentVersion.sdkDocument,
-        sourceUrl: data.preview.url,
-        locale: 'zh-CN',
-        onDocumentChanged: (document) => {
-          if (active) setDraftSdkDocument(document);
-        },
-      })
-      .then(
-        (editor) => {
-          if (!active) {
-            void editor.destroy();
-            return;
+    void (async () => {
+      try {
+        const sourceFileIds = new Set(
+          data.currentVersion.document.scenes.map((scene) => scene.sourceFileId),
+        );
+        const sourceUrls = Object.fromEntries(
+          [...sourceFileIds].map((sourceFileId) => {
+            const scopedUrl = data.scenePreviews?.[sourceFileId]?.url;
+            if (scopedUrl) return [sourceFileId, scopedUrl];
+            if (sourceFileIds.size === 1) return [sourceFileId, data.preview.url];
+            throw new Error(`Missing scoped preview for source ${sourceFileId}`);
+          }),
+        );
+        const editor = await adapter.mount({
+          container: host,
+          license: data.editor.license,
+          sceneDocument: data.currentVersion.sdkDocument,
+          sourceUrl: data.preview.url,
+          sourceUrls,
+          document: data.currentVersion.document,
+          locale: 'zh-CN',
+          onDocumentChanged: (document) => {
+            if (active) setDraftSdkDocument(document);
+          },
+        });
+        if (!active) {
+          void editor.destroy();
+          return;
+        }
+        mounted = editor;
+        if (data.currentVersion.sdkDocument === null) {
+          if (initializedVersionIdsRef.current.has(data.currentVersion.id)) {
+            throw new Error('CE.SDK scene initialization did not persist');
           }
-          mounted = editor;
-          editorRef.current = editor;
-          setEditorReady(true);
-        },
-        () => {
-          if (active) setEditorUnavailable(true);
-        },
-      );
+          initializedVersionIdsRef.current.add(data.currentVersion.id);
+          const sdkDocument = await editor.serialize();
+          if (!active) return;
+          const requestId = nextRequestId();
+          dispatch({ type: 'request_started', requestId, status: 'applying' });
+          const result = await client.initializeSdkDocument({
+            projectId,
+            baseVersionId: data.currentVersion.id,
+            sdkDocument,
+          });
+          if (!active) return;
+          dispatch({ type: 'version_succeeded', requestId, version: result.version });
+          return;
+        }
+        editorRef.current = editor;
+        setEditorReady(true);
+      } catch (error) {
+        if (!active) return;
+        setEditorUnavailable(true);
+        if (data.currentVersion.sdkDocument === null) {
+          const requestId = nextRequestId();
+          dispatch({ type: 'request_failed', requestId, error: failureFrom(error) });
+        }
+      }
+    })();
     return () => {
       active = false;
       editorRef.current = null;
       if (mounted) void mounted.destroy();
     };
-  }, [adapter, data]);
+  }, [adapter, client, data, nextRequestId, projectId]);
 
   async function planInstruction(): Promise<void> {
     if (!data || !instruction.trim() || actionLockRef.current || busy) return;
@@ -318,6 +371,14 @@ export function VideoEditingPanel({
         return;
       }
       if (result.plan.requiresQuote) {
+        if (!data.capabilities.sceneRegeneration) {
+          dispatch({
+            type: 'request_failed',
+            requestId,
+            error: 'scene_regeneration_unavailable',
+          });
+          return;
+        }
         const quoted = await client.quotePaidOperation({
           projectId,
           baseVersionId: data.currentVersion.id,
@@ -745,21 +806,23 @@ export function VideoEditingPanel({
                     </li>
                   ))}
                 </ul>
-                <button
-                  type="button"
-                  disabled={busy || (state.plan.requiresQuote && !quote)}
-                  onClick={() => void applyPlan()}
-                  aria-label={
-                    state.plan.requiresQuote
+                {state.plan.operations.length > 0 && (
+                  <button
+                    type="button"
+                    disabled={busy || (state.plan.requiresQuote && !quote)}
+                    onClick={() => void applyPlan()}
+                    aria-label={
+                      state.plan.requiresQuote
+                        ? paidLabel
+                        : `应用这 ${state.plan.operations.length} 项修改`
+                    }
+                    className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-[10px] bg-[#EA1F59] px-3 text-xs font-semibold text-white shadow-[0_8px_20px_rgba(234,31,89,0.17)] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {state.plan.requiresQuote
                       ? paidLabel
-                      : `应用这 ${state.plan.operations.length} 项修改`
-                  }
-                  className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-[10px] bg-[#EA1F59] px-3 text-xs font-semibold text-white shadow-[0_8px_20px_rgba(234,31,89,0.17)] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {state.plan.requiresQuote
-                    ? paidLabel
-                    : `应用这 ${state.plan.operations.length} 项修改`}
-                </button>
+                      : `应用这 ${state.plan.operations.length} 项修改`}
+                  </button>
+                )}
               </div>
             )}
           </section>
