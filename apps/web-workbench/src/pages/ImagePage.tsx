@@ -55,7 +55,12 @@ export function ImagePage(): JSX.Element {
   const currentTask = currentTaskId
     ? tasks.find((task) => task.taskId === currentTaskId)
     : undefined;
+  const currentTaskStatus = currentTask?.status;
   const currentResult = currentTask ? toImageHistoryRow(currentTask) : null;
+  const currentTaskNeedsResultSync =
+    Boolean(currentTask) &&
+    (currentTaskStatus === 'completed' || currentTaskStatus === 'partial_success') &&
+    currentResult === null;
 
   attachmentsRef.current = draft.attachments;
 
@@ -63,16 +68,21 @@ export function ImagePage(): JSX.Element {
 
   React.useEffect(() => {
     if (
-      !currentTask ||
-      ['completed', 'partial_success', 'failed', 'cancelled'].includes(currentTask.status)
+      !currentTaskStatus ||
+      (['completed', 'partial_success', 'failed', 'cancelled'].includes(currentTaskStatus) &&
+        !currentTaskNeedsResultSync)
     ) {
+      return;
+    }
+    if (currentTaskNeedsResultSync) {
+      void refreshTasks?.();
       return;
     }
     const timer = window.setInterval(() => {
       void refreshTasks?.();
     }, 4_000);
     return () => window.clearInterval(timer);
-  }, [currentTask, refreshTasks]);
+  }, [currentTaskId, currentTaskNeedsResultSync, currentTaskStatus, refreshTasks]);
 
   function switchGoal(goal: ImageStudioDraft['goal']): void {
     setDraft((current) => switchImageCreationGoal(current, goal));

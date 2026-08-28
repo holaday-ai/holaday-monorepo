@@ -7,14 +7,22 @@ import { ImagePage } from './ImagePage';
 
 const mocks = vi.hoisted(() => ({
   createTask: vi.fn(),
+  refreshTasks: vi.fn(),
+  tasks: [] as Array<Record<string, unknown>>,
+  selectedTaskId: null as string | null,
   navigate: vi.fn(),
   uploadFile: vi.fn(),
   toast: vi.fn(),
 }));
 
 vi.mock('@/stores/task-store', () => ({
-  useTaskStore: (selector: (state: { createTask: typeof mocks.createTask }) => unknown) =>
-    selector({ createTask: mocks.createTask }),
+  useTaskStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({
+      createTask: mocks.createTask,
+      refreshTasks: mocks.refreshTasks,
+      tasks: mocks.tasks,
+      selectedTaskId: mocks.selectedTaskId,
+    }),
 }));
 
 vi.mock('@/lib/upload-file', async (importOriginal) => {
@@ -41,7 +49,11 @@ vi.mock('react-router-dom', async (importOriginal) => {
 });
 
 beforeEach(() => {
+  window.history.replaceState({}, '', '/image');
   mocks.createTask.mockReset();
+  mocks.refreshTasks.mockReset();
+  mocks.tasks = [];
+  mocks.selectedTaskId = null;
   mocks.navigate.mockReset();
   mocks.uploadFile.mockReset();
   mocks.toast.mockReset();
@@ -58,6 +70,34 @@ afterEach(() => {
 });
 
 describe('ImagePage task creation', () => {
+  it('refreshes a completed image task once when its result metadata has not arrived yet', async () => {
+    window.history.replaceState({}, '', '/image?task=tsk_image_sync');
+    mocks.tasks = [
+      {
+        taskId: 'tsk_image_sync',
+        intent: '生成图片：夏日商品海报',
+        title: null,
+        status: 'completed',
+        tickCount: 1,
+        createdAt: new Date('2026-08-28T06:00:00.000Z'),
+        executionMode: 'image',
+        imageOptions: {
+          model: 'nano_banana_2',
+          aspectRatio: '4:3',
+          imageCount: 2,
+          mode: 'free',
+          goal: 'commercial',
+          commercialUse: 'product',
+          visiblePrompt: '夏日商品海报',
+        },
+      },
+    ];
+
+    render(<ImagePage />);
+
+    await waitFor(() => expect(mocks.refreshTasks).toHaveBeenCalledTimes(1));
+  });
+
   it('never uploads more than the five-file task boundary across selections', async () => {
     const user = userEvent.setup();
     mocks.uploadFile.mockImplementation(async (file: File) => ({
