@@ -47,6 +47,7 @@ export function ImagePage(): JSX.Element {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const attachmentCounterRef = React.useRef(0);
   const uploadInFlightRef = React.useRef(false);
+  const continuationRequestRef = React.useRef(0);
   const attachmentsRef = React.useRef(draft.attachments);
   const composerRef = React.useRef<HTMLDivElement>(null);
 
@@ -86,17 +87,24 @@ export function ImagePage(): JSX.Element {
     return () => window.clearInterval(timer);
   }, [currentTaskId, currentTaskNeedsResultSync, currentTaskStatus, refreshTasks]);
 
+  function invalidatePendingContinuation(): void {
+    continuationRequestRef.current += 1;
+  }
+
   function switchGoal(goal: ImageStudioDraft['goal']): void {
     if (uploadInFlightRef.current) return;
+    invalidatePendingContinuation();
     setDraft((current) => switchImageCreationGoal(current, goal));
   }
 
   function switchCommercialUse(use: CommercialImageUse): void {
     if (uploadInFlightRef.current) return;
+    invalidatePendingContinuation();
     setDraft((current) => switchImageCreationGoal(current, 'commercial', use));
   }
 
   function toggleChangeTarget(target: ImageChangeTarget): void {
+    invalidatePendingContinuation();
     setDraft((current) => ({
       ...current,
       changeTargets: current.changeTargets.includes(target)
@@ -109,6 +117,7 @@ export function ImagePage(): JSX.Element {
     key: K,
     value: ImageStudioDraft[K],
   ): void {
+    invalidatePendingContinuation();
     setDraft((current) => setImageStudioSetting(current, key, value));
   }
 
@@ -150,6 +159,7 @@ export function ImagePage(): JSX.Element {
       setInlineError(null);
     }
     if (valid.length === 0) return;
+    invalidatePendingContinuation();
 
     const replacedSubject = replacingSubjectId
       ? attachmentsRef.current.find(
@@ -243,6 +253,7 @@ export function ImagePage(): JSX.Element {
 
   function removeAttachment(clientId: string): void {
     if (uploadInFlightRef.current) return;
+    invalidatePendingContinuation();
     setDraft((current) => {
       const removed = current.attachments.find(
         (attachment) => (attachment.clientId ?? attachment.fileId) === clientId,
@@ -289,6 +300,7 @@ export function ImagePage(): JSX.Element {
 
   async function handleSubmit(): Promise<void> {
     if (validationMessage || submitting || !submitGuard.acquire()) return;
+    invalidatePendingContinuation();
     setSubmitting(true);
     setInlineError(null);
     try {
@@ -333,12 +345,13 @@ export function ImagePage(): JSX.Element {
     selectedFileId?: string,
   ): Promise<void> {
     if (uploadInFlightRef.current) return;
+    const requestId = ++continuationRequestRef.current;
     if (action === 'keep_subject') {
       const subjectFileId = row.imageOptions.subjectFileId;
       if (!subjectFileId) return;
       try {
         const result = await trpc.files.availability.query({ fileIds: [subjectFileId] });
-        if (uploadInFlightRef.current) return;
+        if (uploadInFlightRef.current || requestId !== continuationRequestRef.current) return;
         if (result.items[0]?.available !== true) {
           replaceDraft(createImageStudioDraft('lock_subject'));
           setInlineError('原主角图已失效，请重新上传主角');
@@ -346,11 +359,12 @@ export function ImagePage(): JSX.Element {
           return;
         }
       } catch {
+        if (requestId !== continuationRequestRef.current) return;
         setInlineError('暂时无法核对主角图，请稍后重试');
         return;
       }
     }
-    if (uploadInFlightRef.current) return;
+    if (uploadInFlightRef.current || requestId !== continuationRequestRef.current) return;
     replaceDraft(continuationDraftFromImageTask(row, action, selectedFileId));
     setInlineError(null);
     composerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -438,14 +452,18 @@ export function ImagePage(): JSX.Element {
                   </p>
                 </>
               }
-              onPromptChange={(prompt) => setDraft((current) => ({ ...current, prompt }))}
+              onPromptChange={(prompt) => {
+                invalidatePendingContinuation();
+                setDraft((current) => ({ ...current, prompt }));
+              }}
               onToggleChangeTarget={toggleChangeTarget}
               onChooseImages={() => fileInputRef.current?.click()}
               onRemoveAttachment={removeAttachment}
-              onSetSubject={(clientId) =>
-                !uploadInFlightRef.current &&
-                setDraft((current) => ({ ...current, subjectAttachmentClientId: clientId }))
-              }
+              onSetSubject={(clientId) => {
+                if (uploadInFlightRef.current) return;
+                invalidatePendingContinuation();
+                setDraft((current) => ({ ...current, subjectAttachmentClientId: clientId }));
+              }}
             />
           </div>
 

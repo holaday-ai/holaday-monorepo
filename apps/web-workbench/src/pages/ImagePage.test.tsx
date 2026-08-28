@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   selectedTaskId: null as string | null,
   navigate: vi.fn(),
   uploadFile: vi.fn(),
+  availabilityQuery: vi.fn(),
   toast: vi.fn(),
   historyContinue: null as
     | null
@@ -36,6 +37,14 @@ vi.mock('@/lib/upload-file', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/upload-file')>();
   return { ...actual, uploadFile: mocks.uploadFile };
 });
+
+vi.mock('@/lib/trpc', () => ({
+  trpc: {
+    files: {
+      availability: { query: mocks.availabilityQuery },
+    },
+  },
+}));
 
 vi.mock('@/components/ui/toast', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/components/ui/toast')>();
@@ -66,6 +75,7 @@ beforeEach(() => {
   mocks.selectedTaskId = null;
   mocks.navigate.mockReset();
   mocks.uploadFile.mockReset();
+  mocks.availabilityQuery.mockReset();
   mocks.toast.mockReset();
   mocks.historyContinue = null;
   vi.stubGlobal('URL', {
@@ -374,6 +384,80 @@ describe('ImagePage task creation', () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:current-reference.png');
   });
 
+  it('keeps the latest history continuation when an earlier subject check resolves later', async () => {
+    let resolveAvailability!: (value: { items: Array<{ available: boolean }> }) => void;
+    mocks.availabilityQuery.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveAvailability = resolve;
+      }),
+    );
+    render(<ImagePage />);
+
+    let firstContinuation!: Promise<void>;
+    await act(async () => {
+      firstContinuation = mocks.historyContinue?.(
+        'keep_subject',
+        historyRow({ subjectFileId: 'file_history_subject', goal: 'lock_subject' }),
+      ) as Promise<void>;
+    });
+
+    await act(async () => {
+      await mocks.historyContinue?.('reuse_settings', historyRow());
+    });
+
+    resolveAvailability({ items: [{ available: true }] });
+    await act(async () => {
+      await firstContinuation;
+    });
+
+    const goals = screen.getByRole('group', { name: '今天想做什么图' });
+    expect(
+      within(goals)
+        .getByRole('button', { name: /灵感创作/ })
+        .getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(screen.queryByText('主角参考图')).toBeNull();
+  });
+
+  it('does not let an older subject check overwrite an upload that finishes first', async () => {
+    const user = userEvent.setup();
+    let resolveAvailability!: (value: { items: Array<{ available: boolean }> }) => void;
+    mocks.availabilityQuery.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveAvailability = resolve;
+      }),
+    );
+    mocks.uploadFile.mockResolvedValueOnce({
+      fileId: 'file_new_reference',
+      filename: 'new-reference.png',
+      mimetype: 'image/png',
+      size: 180,
+    });
+    render(<ImagePage />);
+
+    let pendingContinuation!: Promise<void>;
+    await act(async () => {
+      pendingContinuation = mocks.historyContinue?.(
+        'keep_subject',
+        historyRow({ subjectFileId: 'file_history_subject', goal: 'lock_subject' }),
+      ) as Promise<void>;
+    });
+
+    await user.upload(
+      screen.getByLabelText('添加图片'),
+      new File(['new'], 'new-reference.png', { type: 'image/png' }),
+    );
+    await waitFor(() => expect(screen.getByText('new-reference.png')).toBeTruthy());
+
+    resolveAvailability({ items: [{ available: true }] });
+    await act(async () => {
+      await pendingContinuation;
+    });
+
+    expect(screen.getByText('new-reference.png')).toBeTruthy();
+    expect(screen.queryByText('主角参考图')).toBeNull();
+  });
+
   it('orders the selected subject first, creates once, then clears only transient draft fields', async () => {
     const user = userEvent.setup();
     mocks.uploadFile
@@ -482,7 +566,7 @@ describe('ImagePage task creation', () => {
   });
 });
 
-function historyRow(): Record<string, unknown> {
+function historyRow(imageOptionOverrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     taskId: 'tsk_history_continue',
     title: '历史图片',
@@ -498,6 +582,7 @@ function historyRow(): Record<string, unknown> {
       mode: 'free',
       goal: 'inspiration',
       visiblePrompt: '历史图片',
+      ...imageOptionOverrides,
     },
     starred: false,
     starredAt: null,
