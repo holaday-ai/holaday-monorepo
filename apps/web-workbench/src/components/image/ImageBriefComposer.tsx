@@ -89,7 +89,8 @@ export function ImageBriefComposer({
                   aria-label="移除主角图"
                   title="移除主角图"
                   onClick={() => onRemoveAttachment(subject.clientId ?? subject.fileId)}
-                  className="absolute right-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-white/95 text-[#6C626F] shadow-sm transition-colors hover:bg-[#FFF0F3] hover:text-[#B51E49] motion-reduce:transition-none"
+                  disabled={uploading}
+                  className="absolute right-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-white/95 text-[#6C626F] shadow-sm transition-colors hover:bg-[#FFF0F3] hover:text-[#B51E49] disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
                 >
                   <X className="h-4 w-4" aria-hidden />
                 </button>
@@ -110,12 +111,24 @@ export function ImageBriefComposer({
               </div>
             </div>
           ) : subject ? (
-            <div className="mt-4">
+            <div className="mt-4 space-y-2.5">
               <AttachmentChip
                 attachment={subject}
                 badge="主角"
+                disabled={uploading}
                 onRemove={() => onRemoveAttachment(subject.clientId ?? subject.fileId)}
               />
+              <button
+                type="button"
+                aria-label="更换主角图"
+                title="更换主角图"
+                onClick={onChooseImages}
+                disabled={uploading}
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[#DED5E1] bg-white px-3 text-xs font-semibold text-[#66516F] transition-colors hover:bg-[#F4EEF7] disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
+              >
+                <ImagePlus className="h-3.5 w-3.5" aria-hidden />
+                {uploading ? '正在更换…' : '更换图片'}
+              </button>
             </div>
           ) : (
             <button
@@ -212,6 +225,7 @@ export function ImageBriefComposer({
               <AttachmentChip
                 key={attachment.clientId ?? attachment.fileId}
                 attachment={attachment}
+                disabled={uploading}
                 actionLabel={lockSubject && attachment.status === 'ready' ? '设为主角' : undefined}
                 onAction={
                   lockSubject && attachment.status === 'ready'

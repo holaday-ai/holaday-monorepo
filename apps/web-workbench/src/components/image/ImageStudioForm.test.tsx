@@ -152,6 +152,39 @@ describe('image studio form', () => {
     expect(screen.getByRole('button', { name: '移除主角图' })).toBeTruthy();
   });
 
+  it('keeps a replacement entry visible for a restored subject without a local preview', () => {
+    const draft: ImageStudioDraft = {
+      ...createImageStudioDraft('lock_subject'),
+      subjectAttachmentClientId: 'subject_restored',
+      attachments: [
+        {
+          clientId: 'subject_restored',
+          fileId: 'file_subject_restored',
+          filename: 'restored-subject.png',
+          mimetype: 'image/png',
+          size: 2_048,
+          status: 'ready',
+        },
+      ],
+    };
+
+    render(
+      <ImageBriefComposer
+        draft={draft}
+        uploading={false}
+        inlineError={null}
+        onPromptChange={() => undefined}
+        onToggleChangeTarget={() => undefined}
+        onChooseImages={() => undefined}
+        onRemoveAttachment={() => undefined}
+        onSetSubject={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText('restored-subject.png')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '更换主角图' })).toBeTruthy();
+  });
+
   it('shows three understandable commercial uses', async () => {
     const user = userEvent.setup();
     render(<Harness />);

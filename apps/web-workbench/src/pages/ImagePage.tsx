@@ -46,6 +46,7 @@ export function ImagePage(): JSX.Element {
   const settingsTriggerRef = React.useRef<HTMLButtonElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const attachmentCounterRef = React.useRef(0);
+  const uploadInFlightRef = React.useRef(false);
   const attachmentsRef = React.useRef(draft.attachments);
   const composerRef = React.useRef<HTMLDivElement>(null);
 
@@ -66,6 +67,7 @@ export function ImagePage(): JSX.Element {
 
   React.useEffect(() => () => revokeCreativePreviewUrls(attachmentsRef.current), []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: task id must restart result sync when two tasks share the same status.
   React.useEffect(() => {
     if (
       !currentTaskStatus ||
@@ -82,13 +84,15 @@ export function ImagePage(): JSX.Element {
       void refreshTasks?.();
     }, 4_000);
     return () => window.clearInterval(timer);
-  }, [currentTaskNeedsResultSync, currentTaskStatus, refreshTasks]);
+  }, [currentTaskId, currentTaskNeedsResultSync, currentTaskStatus, refreshTasks]);
 
   function switchGoal(goal: ImageStudioDraft['goal']): void {
+    if (uploadInFlightRef.current) return;
     setDraft((current) => switchImageCreationGoal(current, goal));
   }
 
   function switchCommercialUse(use: CommercialImageUse): void {
+    if (uploadInFlightRef.current) return;
     setDraft((current) => switchImageCreationGoal(current, 'commercial', use));
   }
 
@@ -123,6 +127,10 @@ export function ImagePage(): JSX.Element {
   }
 
   async function handleFilesSelected(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    if (uploadInFlightRef.current) {
+      event.target.value = '';
+      return;
+    }
     const replacingSubjectId =
       draft.goal === 'lock_subject' ? draft.subjectAttachmentClientId : null;
     const availableSlots = Math.max(
@@ -174,61 +182,67 @@ export function ImagePage(): JSX.Element {
           ? (pending[0]?.clientId ?? null)
           : current.subjectAttachmentClientId,
     }));
+    uploadInFlightRef.current = true;
     setUploading(true);
-    await Promise.all(
-      pending.map(async ({ clientId, file }) => {
-        const replacingSubject = Boolean(replacingSubjectId) && clientId === pending[0]?.clientId;
-        try {
-          const uploaded = await uploadFile(file);
-          updateAttachment(clientId, (attachment) => ({
-            ...attachment,
-            fileId: uploaded.fileId,
-            filename: uploaded.filename,
-            mimetype: uploaded.mimetype,
-            size: uploaded.size,
-            status: 'ready',
-            errorMessage: undefined,
-          }));
-          if (replacingSubject) {
-            setDraft((current) => ({
-              ...current,
-              attachments: current.attachments.filter(
-                (attachment) => (attachment.clientId ?? attachment.fileId) !== replacingSubjectId,
-              ),
-            }));
-            if (replacedSubject?.previewDataUrl?.startsWith('blob:')) {
-              URL.revokeObjectURL(replacedSubject.previewDataUrl);
-            }
-          }
-        } catch (error) {
-          const message = uploadFailureMessage(error);
-          if (replacingSubject) {
-            const replacement = pending[0]?.attachment;
-            setDraft((current) => ({
-              ...current,
-              attachments: current.attachments.filter(
-                (attachment) => (attachment.clientId ?? attachment.fileId) !== clientId,
-              ),
-              subjectAttachmentClientId: replacingSubjectId,
-            }));
-            if (replacement?.previewDataUrl?.startsWith('blob:')) {
-              URL.revokeObjectURL(replacement.previewDataUrl);
-            }
-          } else {
+    try {
+      await Promise.all(
+        pending.map(async ({ clientId, file }) => {
+          const replacingSubject = Boolean(replacingSubjectId) && clientId === pending[0]?.clientId;
+          try {
+            const uploaded = await uploadFile(file);
             updateAttachment(clientId, (attachment) => ({
               ...attachment,
-              status: 'error',
-              errorMessage: message,
+              fileId: uploaded.fileId,
+              filename: uploaded.filename,
+              mimetype: uploaded.mimetype,
+              size: uploaded.size,
+              status: 'ready',
+              errorMessage: undefined,
             }));
+            if (replacingSubject) {
+              setDraft((current) => ({
+                ...current,
+                attachments: current.attachments.filter(
+                  (attachment) => (attachment.clientId ?? attachment.fileId) !== replacingSubjectId,
+                ),
+              }));
+              if (replacedSubject?.previewDataUrl?.startsWith('blob:')) {
+                URL.revokeObjectURL(replacedSubject.previewDataUrl);
+              }
+            }
+          } catch (error) {
+            const message = uploadFailureMessage(error);
+            if (replacingSubject) {
+              const replacement = pending[0]?.attachment;
+              setDraft((current) => ({
+                ...current,
+                attachments: current.attachments.filter(
+                  (attachment) => (attachment.clientId ?? attachment.fileId) !== clientId,
+                ),
+                subjectAttachmentClientId: replacingSubjectId,
+              }));
+              if (replacement?.previewDataUrl?.startsWith('blob:')) {
+                URL.revokeObjectURL(replacement.previewDataUrl);
+              }
+            } else {
+              updateAttachment(clientId, (attachment) => ({
+                ...attachment,
+                status: 'error',
+                errorMessage: message,
+              }));
+            }
+            setInlineError(message);
           }
-          setInlineError(message);
-        }
-      }),
-    );
-    setUploading(false);
+        }),
+      );
+    } finally {
+      uploadInFlightRef.current = false;
+      setUploading(false);
+    }
   }
 
   function removeAttachment(clientId: string): void {
+    if (uploadInFlightRef.current) return;
     setDraft((current) => {
       const removed = current.attachments.find(
         (attachment) => (attachment.clientId ?? attachment.fileId) === clientId,
@@ -352,6 +366,7 @@ export function ImagePage(): JSX.Element {
           <ImageGoalPicker
             value={draft.goal}
             commercialUse={draft.commercialUse}
+            disabled={uploading}
             onChange={switchGoal}
             onCommercialUseChange={switchCommercialUse}
           />
@@ -363,6 +378,7 @@ export function ImagePage(): JSX.Element {
               multiple
               accept="image/png,image/jpeg,image/webp"
               aria-label="添加图片"
+              disabled={uploading}
               className="sr-only"
               onChange={(event) => void handleFilesSelected(event)}
             />
@@ -417,6 +433,7 @@ export function ImagePage(): JSX.Element {
               onChooseImages={() => fileInputRef.current?.click()}
               onRemoveAttachment={removeAttachment}
               onSetSubject={(clientId) =>
+                !uploadInFlightRef.current &&
                 setDraft((current) => ({ ...current, subjectAttachmentClientId: clientId }))
               }
             />
@@ -437,6 +454,8 @@ export function ImagePage(): JSX.Element {
               <img
                 src="/design-ref/image-continuation-preview.jpg"
                 alt="同一主角在城市、雪景和暖阳场景中的连续创作示意"
+                loading="lazy"
+                decoding="async"
                 className="h-[96px] w-full rounded-[14px] object-cover shadow-[0_6px_18px_rgba(51,43,59,0.1)]"
               />
             </section>

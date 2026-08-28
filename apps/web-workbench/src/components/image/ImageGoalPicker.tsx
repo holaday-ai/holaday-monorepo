@@ -57,6 +57,7 @@ const COMMERCIAL_USES: ReadonlyArray<{ id: CommercialImageUse; label: string }> 
 interface ImageGoalPickerProps {
   value: ImageCreationGoal;
   commercialUse?: CommercialImageUse;
+  disabled?: boolean;
   onChange(value: ImageCreationGoal): void;
   onCommercialUseChange(value: CommercialImageUse): void;
 }
@@ -64,6 +65,7 @@ interface ImageGoalPickerProps {
 export function ImageGoalPicker({
   value,
   commercialUse,
+  disabled = false,
   onChange,
   onCommercialUseChange,
 }: ImageGoalPickerProps): JSX.Element {
@@ -85,9 +87,10 @@ export function ImageGoalPicker({
               key={goal.id}
               type="button"
               aria-pressed={selected}
+              disabled={disabled}
               onClick={() => onChange(goal.id)}
               className={cn(
-                'group relative min-h-[220px] overflow-hidden rounded-[20px] border bg-white text-left shadow-[0_8px_22px_rgba(58,45,64,0.045)] transition duration-200 motion-reduce:transform-none motion-reduce:transition-none',
+                'group relative min-h-[220px] overflow-hidden rounded-[20px] border bg-white text-left shadow-[0_8px_22px_rgba(58,45,64,0.045)] transition duration-200 disabled:cursor-wait disabled:opacity-70 motion-reduce:transform-none motion-reduce:transition-none',
                 selected
                   ? cn('ring-2', goal.selectedTone)
                   : 'border-[#E9E1E8] hover:-translate-y-0.5 hover:border-[#CFC3D0] hover:shadow-[0_16px_34px_rgba(58,45,64,0.08)] motion-reduce:hover:translate-y-0',
@@ -97,6 +100,7 @@ export function ImageGoalPicker({
                 src={goal.image}
                 alt=""
                 aria-hidden
+                decoding="async"
                 className={cn('h-[140px] w-full object-cover', goal.imagePosition)}
               />
               {selected ? (
@@ -145,9 +149,10 @@ export function ImageGoalPicker({
                 key={use.id}
                 type="button"
                 aria-pressed={selected}
+                disabled={disabled}
                 onClick={() => onCommercialUseChange(use.id)}
                 className={cn(
-                  'min-h-11 rounded-xl border px-4 text-sm font-semibold transition-colors motion-reduce:transition-none',
+                  'min-h-11 rounded-xl border px-4 text-sm font-semibold transition-colors disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none',
                   selected
                     ? 'border-[#E9A98B] bg-white text-[#9B553F] shadow-sm'
                     : 'border-transparent text-[#7D6A60] hover:bg-white/70',

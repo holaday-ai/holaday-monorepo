@@ -115,6 +115,48 @@ describe('ImagePage task creation', () => {
     await waitFor(() => expect(mocks.refreshTasks).toHaveBeenCalledTimes(1));
   });
 
+  it('refreshes again when navigation switches between completed tasks with the same status', async () => {
+    window.history.replaceState({}, '', '/image?task=tsk_image_first');
+    mocks.tasks = [
+      {
+        taskId: 'tsk_image_first',
+        intent: '生成图片：第一张',
+        title: null,
+        status: 'completed',
+        tickCount: 1,
+        createdAt: new Date('2026-08-28T06:00:00.000Z'),
+        executionMode: 'image',
+        imageOptions: {
+          model: 'nano_banana_2',
+          aspectRatio: '1:1',
+          imageCount: 1,
+          mode: 'free',
+          goal: 'inspiration',
+          visiblePrompt: '第一张',
+        },
+      },
+    ];
+
+    const view = render(<ImagePage />);
+    await waitFor(() => expect(mocks.refreshTasks).toHaveBeenCalledTimes(1));
+
+    window.history.replaceState({}, '', '/image?task=tsk_image_second');
+    mocks.tasks = [
+      {
+        ...mocks.tasks[0],
+        taskId: 'tsk_image_second',
+        intent: '生成图片：第二张',
+        imageOptions: {
+          ...(mocks.tasks[0]?.imageOptions as Record<string, unknown>),
+          visiblePrompt: '第二张',
+        },
+      },
+    ];
+    view.rerender(<ImagePage />);
+
+    await waitFor(() => expect(mocks.refreshTasks).toHaveBeenCalledTimes(2));
+  });
+
   it('never uploads more than the five-file task boundary across selections', async () => {
     const user = userEvent.setup();
     mocks.uploadFile.mockImplementation(async (file: File) => ({
@@ -185,6 +227,55 @@ describe('ImagePage task creation', () => {
     await waitFor(() => expect(screen.getByText('second-subject.png')).toBeTruthy());
     expect(screen.queryByText('first-subject.png')).toBeNull();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:first-subject.png');
+  });
+
+  it('freezes subject and goal mutations while a replacement upload is pending', async () => {
+    const user = userEvent.setup();
+    let resolveReplacement!: (value: {
+      fileId: string;
+      filename: string;
+      mimetype: string;
+      size: number;
+    }) => void;
+    mocks.uploadFile
+      .mockResolvedValueOnce({
+        fileId: 'file_first_subject',
+        filename: 'first-subject.png',
+        mimetype: 'image/png',
+        size: 100,
+      })
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveReplacement = resolve;
+        }),
+      );
+    render(<ImagePage />);
+
+    await user.click(screen.getByRole('button', { name: /锁定主角/ }));
+    const input = screen.getByLabelText('添加图片');
+    await user.upload(input, new File(['first'], 'first-subject.png', { type: 'image/png' }));
+    await waitFor(() => expect(screen.getByText('first-subject.png')).toBeTruthy());
+
+    await user.upload(input, new File(['second'], 'second-subject.png', { type: 'image/png' }));
+    await waitFor(() => expect(screen.getByText('second-subject.png')).toBeTruthy());
+
+    expect(screen.getByRole('button', { name: '移除主角图' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '更换主角图' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: /灵感创作/ }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '设为主角' }).hasAttribute('disabled')).toBe(true);
+    expect(
+      screen.getByRole('button', { name: '移除附件：first-subject.png' }).hasAttribute('disabled'),
+    ).toBe(true);
+
+    resolveReplacement({
+      fileId: 'file_second_subject',
+      filename: 'second-subject.png',
+      mimetype: 'image/png',
+      size: 120,
+    });
+
+    await waitFor(() => expect(screen.queryByText('first-subject.png')).toBeNull());
+    expect(screen.getByText('second-subject.png')).toBeTruthy();
   });
 
   it('keeps the current subject when its replacement upload fails', async () => {
