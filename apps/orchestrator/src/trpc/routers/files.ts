@@ -43,7 +43,54 @@ async function deleteLibraryFile(
   return { ok: true };
 }
 
+async function fileAvailabilityItems(
+  fileService: Pick<FileService, 'isReadableForUser'>,
+  fileIds: readonly string[],
+  userId: number,
+): Promise<Array<{ fileId: string; available: boolean }>> {
+  return Promise.all(
+    fileIds.map(async (fileId) => ({
+      fileId,
+      available: await fileService.isReadableForUser(fileId, userId),
+    })),
+  );
+}
+
+async function saveLibraryOutput(
+  fileService: Pick<FileService, 'saveOutputToLibraryForUser'>,
+  fileId: string,
+  userId: number,
+): Promise<{ ok: true }> {
+  const saved = await fileService.saveOutputToLibraryForUser(fileId, userId);
+  if (!saved) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'file not found' });
+  }
+  return { ok: true };
+}
+
 export const filesRouter = router({
+  availability: protectedProcedure
+    .input(
+      z.object({
+        fileIds: z.array(z.string().min(1).max(64)).min(1).max(5),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const userId = await requireUserId(ctx);
+      const fileService = new FileService(ctx.db, ctx.logger);
+      return {
+        items: await fileAvailabilityItems(fileService, input.fileIds, userId),
+      };
+    }),
+
+  saveOutput: protectedProcedure
+    .input(z.object({ fileId: z.string().min(1).max(64) }))
+    .mutation(async ({ ctx, input }) => {
+      const userId = await requireUserId(ctx);
+      const fileService = new FileService(ctx.db, ctx.logger);
+      return saveLibraryOutput(fileService, input.fileId, userId);
+    }),
+
   /**
    * List the caller's uploaded input files. Accepts a `type` filter:
    *   - 'all'       (default): every input file
@@ -171,8 +218,10 @@ function libraryFilenameSearchTerms(query: string): string[] {
 
 export const __filesRouterInternals = {
   deleteLibraryFile,
+  fileAvailabilityItems,
   fileIsAvailableInLibrary,
   fileMatchesLibraryFilter,
   libraryFilenameSearchTerms,
   normalizeLibraryFilename,
+  saveLibraryOutput,
 };

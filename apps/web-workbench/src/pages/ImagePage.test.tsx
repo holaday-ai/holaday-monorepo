@@ -27,6 +27,14 @@ vi.mock('@/components/ui/toast', async (importOriginal) => {
   return { ...actual, useToast: () => ({ show: mocks.toast }) };
 });
 
+vi.mock('@/components/image/ImageHistory', () => ({
+  ImageHistory: () => <div data-testid="image-history" />,
+}));
+
+vi.mock('@/components/image/ImageResultPanel', () => ({
+  ImageResultPanel: () => <div data-testid="image-result" />,
+}));
+
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
   return { ...actual, useNavigate: () => mocks.navigate };
@@ -63,15 +71,15 @@ describe('ImagePage task creation', () => {
 
     await user.upload(
       input,
-      [1, 2, 3, 4].map((number) =>
-        new File([String(number)], `first-${number}.png`, { type: 'image/png' }),
+      [1, 2, 3, 4].map(
+        (number) => new File([String(number)], `first-${number}.png`, { type: 'image/png' }),
       ),
     );
     await waitFor(() => expect(mocks.uploadFile).toHaveBeenCalledTimes(4));
     await user.upload(
       input,
-      [1, 2, 3].map((number) =>
-        new File([String(number)], `second-${number}.png`, { type: 'image/png' }),
+      [1, 2, 3].map(
+        (number) => new File([String(number)], `second-${number}.png`, { type: 'image/png' }),
       ),
     );
 
@@ -153,15 +161,18 @@ describe('ImagePage task creation', () => {
     );
 
     resolveCreate({ taskId: 'tsk_image_created' });
-    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('/image?task=tsk_image_created'));
+    await waitFor(() =>
+      expect(mocks.navigate).toHaveBeenCalledWith('/image?task=tsk_image_created'),
+    );
 
     expect(
-      (screen.getByRole('textbox', { name: '描述你想要的最终画面' }) as HTMLTextAreaElement)
-        .value,
+      (screen.getByRole('textbox', { name: '描述你想要的最终画面' }) as HTMLTextAreaElement).value,
     ).toBe('');
     const goals = screen.getByRole('group', { name: '今天想做什么图' });
     expect(
-      within(goals).getByRole('button', { name: /锁定主角/ }).getAttribute('aria-pressed'),
+      within(goals)
+        .getByRole('button', { name: /锁定主角/ })
+        .getAttribute('aria-pressed'),
     ).toBe('true');
     expect(screen.getByRole('button', { name: '添加主角图' })).toBeTruthy();
   });
@@ -190,8 +201,7 @@ describe('ImagePage task creation', () => {
     await user.click(screen.getByRole('button', { name: '开始生成' }));
 
     expect(
-      (screen.getByRole('textbox', { name: '描述你想要的最终画面' }) as HTMLTextAreaElement)
-        .value,
+      (screen.getByRole('textbox', { name: '描述你想要的最终画面' }) as HTMLTextAreaElement).value,
     ).toBe('把主角放到夏日海边');
     expect(screen.getByText('subject.png')).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toContain('服务暂时不可用');

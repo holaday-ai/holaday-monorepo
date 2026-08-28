@@ -1,5 +1,7 @@
+import type { ImageHistoryRow } from '@/lib/image-history-row';
 import { describe, expect, it } from 'vitest';
 import {
+  continuationDraftFromImageTask,
   createImageStudioDraft,
   setImageStudioSetting,
   switchImageCreationGoal,
@@ -89,5 +91,61 @@ describe('image studio draft state', () => {
 
     expect(restored.attachments).toHaveLength(1);
     expect(restored.subjectAttachmentClientId).toBeNull();
+  });
+
+  it('builds the three exact continuation drafts without leaking hidden task text', () => {
+    const row: ImageHistoryRow = {
+      taskId: 'tsk_image',
+      title: null,
+      intent: '生成图片：内部路由文本不应进入编辑器',
+      status: 'completed',
+      createdAt: new Date('2026-08-28T00:00:00.000Z'),
+      starred: false,
+      starredAt: null,
+      imageOptions: {
+        goal: 'lock_subject',
+        mode: 'lock_subject',
+        model: 'nano_banana_pro',
+        style: 'vibrant',
+        aspectRatio: '3:4',
+        imageCount: 2,
+        subjectFileId: 'file_subject',
+        changeTargets: ['background'],
+        visiblePrompt: '把背景换成海边',
+      },
+      downloads: [
+        {
+          fileId: 'file_result',
+          filename: 'result.png',
+          downloadUrl: '/api/files/file_result/download',
+          size: 123,
+          expiresAt: '2026-09-01T00:00:00.000Z',
+        },
+      ],
+    };
+
+    expect(continuationDraftFromImageTask(row, 'continue_edit', 'file_result')).toMatchObject({
+      goal: 'lock_subject',
+      prompt: '把背景换成海边',
+      attachments: [
+        { fileId: 'file_result', status: 'ready' },
+        { fileId: 'file_subject', status: 'ready' },
+      ],
+      subjectAttachmentClientId: 'continued_file_subject',
+    });
+    expect(continuationDraftFromImageTask(row, 'keep_subject')).toMatchObject({
+      prompt: '',
+      attachments: [{ fileId: 'file_subject' }],
+      subjectAttachmentClientId: 'continued_file_subject',
+    });
+    expect(continuationDraftFromImageTask(row, 'reuse_settings')).toMatchObject({
+      prompt: '',
+      attachments: [],
+      subjectAttachmentClientId: null,
+      model: 'nano_banana_pro',
+      style: 'vibrant',
+      aspectRatio: '3:4',
+      imageCount: 2,
+    });
   });
 });

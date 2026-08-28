@@ -1,33 +1,42 @@
-import { ArrowRight, Loader2, Settings2, Sparkles } from 'lucide-react';
-import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
 import { ImageBriefComposer } from '@/components/image/ImageBriefComposer';
 import { ImageGenerationSettings } from '@/components/image/ImageGenerationSettings';
 import { ImageGoalPicker } from '@/components/image/ImageGoalPicker';
+import { ImageHistory } from '@/components/image/ImageHistory';
+import { ImageResultPanel } from '@/components/image/ImageResultPanel';
 import {
   buildImageCreationOptions,
   buildImageFileOrder,
   buildImageIntentForSubmit,
 } from '@/components/image/image-studio-options';
 import {
+  type ImageContinuationAction,
+  type ImageStudioDraft,
+  type ImageStudioSettingKey,
+  continuationDraftFromImageTask,
   createImageStudioDraft,
   setImageStudioSetting,
   switchImageCreationGoal,
-  type ImageStudioDraft,
-  type ImageStudioSettingKey,
 } from '@/components/image/image-studio-state';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { revokeCreativePreviewUrls } from '@/lib/creative-preview-urls';
+import { type ImageHistoryRow, toImageHistoryRow } from '@/lib/image-history-row';
 import { createMediaActionGuard } from '@/lib/media-action-guard';
+import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { useTaskStore } from '@/stores/task-store';
 import type { CommercialImageUse, ImageChangeTarget } from '@/types/image';
+import { ArrowRight, Loader2, Settings2, Sparkles } from 'lucide-react';
+import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 
 export function ImagePage(): JSX.Element {
   const navigate = useNavigate();
   const toast = useToast();
   const createTask = useTaskStore((state) => state.createTask);
+  const tasks = useTaskStore((state) => state.tasks) ?? [];
+  const selectedTaskId = useTaskStore((state) => state.selectedTaskId);
+  const refreshTasks = useTaskStore((state) => state.refreshTasks);
   const [draft, setDraft] = React.useState(() => createImageStudioDraft('inspiration'));
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
@@ -38,13 +47,32 @@ export function ImagePage(): JSX.Element {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const attachmentCounterRef = React.useRef(0);
   const attachmentsRef = React.useRef(draft.attachments);
+  const composerRef = React.useRef<HTMLDivElement>(null);
+
+  const queryTaskId =
+    typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('task');
+  const currentTaskId = queryTaskId ?? selectedTaskId;
+  const currentTask = currentTaskId
+    ? tasks.find((task) => task.taskId === currentTaskId)
+    : undefined;
+  const currentResult = currentTask ? toImageHistoryRow(currentTask) : null;
 
   attachmentsRef.current = draft.attachments;
 
-  React.useEffect(
-    () => () => revokeCreativePreviewUrls(attachmentsRef.current),
-    [],
-  );
+  React.useEffect(() => () => revokeCreativePreviewUrls(attachmentsRef.current), []);
+
+  React.useEffect(() => {
+    if (
+      !currentTask ||
+      ['completed', 'partial_success', 'failed', 'cancelled'].includes(currentTask.status)
+    ) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refreshTasks?.();
+    }, 4_000);
+    return () => window.clearInterval(timer);
+  }, [currentTask, refreshTasks]);
 
   function switchGoal(goal: ImageStudioDraft['goal']): void {
     setDraft((current) => switchImageCreationGoal(current, goal));
@@ -72,7 +100,9 @@ export function ImagePage(): JSX.Element {
 
   function updateAttachment(
     clientId: string,
-    update: (attachment: ImageStudioDraft['attachments'][number]) => ImageStudioDraft['attachments'][number],
+    update: (
+      attachment: ImageStudioDraft['attachments'][number],
+    ) => ImageStudioDraft['attachments'][number],
   ): void {
     setDraft((current) => ({
       ...current,
@@ -117,10 +147,13 @@ export function ImagePage(): JSX.Element {
 
     setDraft((current) => ({
       ...current,
-      attachments: [...current.attachments, ...pending.map(({ attachment }) => attachment)].slice(0, 5),
+      attachments: [...current.attachments, ...pending.map(({ attachment }) => attachment)].slice(
+        0,
+        5,
+      ),
       subjectAttachmentClientId:
         current.goal === 'lock_subject' && !current.subjectAttachmentClientId
-          ? pending[0]?.clientId ?? null
+          ? (pending[0]?.clientId ?? null)
           : current.subjectAttachmentClientId,
     }));
     setUploading(true);
@@ -164,16 +197,18 @@ export function ImagePage(): JSX.Element {
       );
       const nextSubject =
         current.subjectAttachmentClientId === clientId
-          ? attachments.find(
+          ? (attachments.find(
               (attachment) =>
                 attachment.status === 'ready' && attachment.mimetype.startsWith('image/'),
-            )?.clientId ?? null
+            )?.clientId ?? null)
           : current.subjectAttachmentClientId;
       return { ...current, attachments, subjectAttachmentClientId: nextSubject };
     });
   }
 
-  function readySubject(current: ImageStudioDraft): ImageStudioDraft['attachments'][number] | undefined {
+  function readySubject(
+    current: ImageStudioDraft,
+  ): ImageStudioDraft['attachments'][number] | undefined {
     return current.attachments.find(
       (attachment) =>
         attachment.clientId === current.subjectAttachmentClientId &&
@@ -201,11 +236,7 @@ export function ImagePage(): JSX.Element {
     try {
       const subject = readySubject(draft);
       const mode = draft.goal === 'lock_subject' ? 'lock_subject' : 'free';
-      const fileIds = buildImageFileOrder(
-        draft.attachments,
-        mode,
-        draft.subjectAttachmentClientId,
-      );
+      const fileIds = buildImageFileOrder(draft.attachments, mode, draft.subjectAttachmentClientId);
       const result = await createTask(
         `生成图片：${buildImageIntentForSubmit(draft)}`,
         fileIds.length > 0 ? fileIds : undefined,
@@ -238,6 +269,32 @@ export function ImagePage(): JSX.Element {
     }
   }
 
+  async function continueFromResult(
+    action: ImageContinuationAction,
+    row: ImageHistoryRow,
+    selectedFileId?: string,
+  ): Promise<void> {
+    if (action === 'keep_subject') {
+      const subjectFileId = row.imageOptions.subjectFileId;
+      if (!subjectFileId) return;
+      try {
+        const result = await trpc.files.availability.query({ fileIds: [subjectFileId] });
+        if (result.items[0]?.available !== true) {
+          setDraft(createImageStudioDraft('lock_subject'));
+          setInlineError('原主角图已失效，请重新上传主角');
+          composerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
+        }
+      } catch {
+        setInlineError('暂时无法核对主角图，请稍后重试');
+        return;
+      }
+    }
+    setDraft(continuationDraftFromImageTask(row, action, selectedFileId));
+    setInlineError(null);
+    composerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
   return (
     <main className="min-h-full bg-[#FBF8F3] px-4 py-7 text-[#342E39] sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-[1200px]">
@@ -249,7 +306,7 @@ export function ImagePage(): JSX.Element {
             onCommercialUseChange={switchCommercialUse}
           />
 
-          <div className="mt-4">
+          <div ref={composerRef} className="mt-4">
             <input
               ref={fileInputRef}
               type="file"
@@ -285,9 +342,7 @@ export function ImagePage(): JSX.Element {
               </span>
               <span>
                 <span className="block text-sm font-semibold text-[#423A46]">生成设置</span>
-                <span className="mt-0.5 block text-xs text-[#7A707D]">
-                  {settingSummary(draft)}
-                </span>
+                <span className="mt-0.5 block text-xs text-[#7A707D]">{settingSummary(draft)}</span>
               </span>
             </button>
 
@@ -298,7 +353,10 @@ export function ImagePage(): JSX.Element {
               className="min-h-12 rounded-xl bg-[#D62958] px-8 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(214,41,88,0.2)] hover:bg-[#BE214B]"
             >
               {submitting ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+                <Loader2
+                  className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none"
+                  aria-hidden
+                />
               ) : (
                 <Sparkles className="mr-2 h-4 w-4" aria-hidden />
               )}
@@ -310,19 +368,36 @@ export function ImagePage(): JSX.Element {
             {validationMessage ?? '设置已就绪，可以开始生成'}
           </p>
 
-          <section className="mt-4 flex flex-col gap-4 rounded-[22px] border border-[#E8E0E8] bg-[#FCFAFD] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-sm font-semibold text-[#433A47]">生成后可以继续修改</h2>
-              <p className="mt-1 text-xs leading-5 text-[#7B717F]">
-                围绕同一张结果继续调整背景、风格、光线或构图，不必从头开始。
-              </p>
-            </div>
-            <span className="inline-flex items-center gap-2 text-xs font-semibold text-[#755990]">
-              继续改这张 · 保持主角 · 复用设置
-              <ArrowRight className="h-4 w-4" aria-hidden />
-            </span>
-          </section>
+          {!currentTask ? (
+            <section className="mt-4 flex flex-col gap-4 rounded-[22px] border border-[#E8E0E8] bg-[#FCFAFD] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-[#433A47]">生成后可以继续修改</h2>
+                <p className="mt-1 text-xs leading-5 text-[#7B717F]">
+                  围绕同一张结果继续调整背景、风格、光线或构图，不必从头开始。
+                </p>
+              </div>
+              <span className="inline-flex items-center gap-2 text-xs font-semibold text-[#755990]">
+                继续改这张 · 保持主角 · 复用设置
+                <ArrowRight className="h-4 w-4" aria-hidden />
+              </span>
+            </section>
+          ) : null}
         </div>
+
+        {currentTask ? (
+          <div className="mt-6">
+            <ImageResultPanel
+              task={currentTask}
+              row={currentResult ?? undefined}
+              onContinue={continueFromResult}
+            />
+          </div>
+        ) : null}
+
+        <ImageHistory
+          refreshKey={currentTask ? `${currentTask.taskId}:${currentTask.status}` : undefined}
+          onContinue={continueFromResult}
+        />
       </div>
 
       <ImageGenerationSettings
