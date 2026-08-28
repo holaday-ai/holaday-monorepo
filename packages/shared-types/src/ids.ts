@@ -52,6 +52,10 @@ export const ID_PREFIXES = {
   watchlist: 'wl',
   // Deterministic stock-risk monitor linked one-to-one with a planned task.
   stockRiskMonitor: 'srm',
+  // Embedded video editing projects, immutable revisions, and one-use quotes.
+  videoEditProject: 'vedp',
+  videoEditVersion: 'vedv',
+  videoEditQuote: 'vedq',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

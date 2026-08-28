@@ -63,6 +63,9 @@ const REQUIRED_TABLES = [
   'user_site_stats',
   'users',
   'verification_codes',
+  'video_edit_action_quotes',
+  'video_edit_projects',
+  'video_edit_versions',
   'webhook_idempotency',
 ] as const;
 
@@ -130,6 +133,24 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'notification_status',
     'issued_at',
     'completed_at',
+  video_edit_projects: [
+    'external_id',
+    'user_id',
+    'source_kind',
+    'provider',
+    'status',
+    'current_version_id',
+  ],
+  video_edit_versions: ['external_id', 'project_id', 'revision', 'document_json', 'render_status'],
+  video_edit_action_quotes: [
+    'external_id',
+    'user_id',
+    'project_id',
+    'base_version_id',
+    'operation_hash',
+    'cost_units',
+    'status',
+    'expires_at',
   ],
   energy_daily_metrics: [
     'metric_date',

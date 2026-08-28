@@ -148,7 +148,7 @@ Commit: `feat(video-editing): add guarded editor adapter`
 - Create: `apps/orchestrator/src/db/schema/video-editing.ts`
 - Test: `apps/orchestrator/src/db/schema/video-editing.test.ts`
 - Modify: `apps/orchestrator/src/db/schema/index.ts`
-- Create: `apps/orchestrator/drizzle/0049_video_editing_projects.sql`
+- Create: `apps/orchestrator/drizzle/0051_video_editing_projects.sql`
 - Modify: `apps/orchestrator/scripts/verify-db-schema.ts`
 - Create: `apps/orchestrator/src/video-editing/types.ts`
 - Create: `apps/orchestrator/src/video-editing/project-repository.ts`
@@ -571,7 +571,7 @@ Commit: `feat(video-editing): export immutable video versions`
 
 - [ ] **Step 1: Add the production preflight test**
 
-The test fails production enablement unless all of these are true: a non-empty commercial CE.SDK license is supplied, explicit licensed hostnames include production/staging, `VIDEO_EDITING_ENABLED=true`, allowlist is non-empty for canary, schema 0049 is applied, and health is green. It must never print the license or allowlist values.
+The test fails production enablement unless all of these are true: a non-empty commercial CE.SDK license is supplied, explicit licensed hostnames include production/staging, `VIDEO_EDITING_ENABLED=true`, allowlist is non-empty for canary, schema 0051 is applied, and health is green. It must never print the license or allowlist values.
 
 - [ ] **Step 2: Add a deterministic authenticated QA fixture**
 
