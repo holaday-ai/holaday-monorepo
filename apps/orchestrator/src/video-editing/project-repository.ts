@@ -1,5 +1,5 @@
 import { newExternalId } from '@holaday/shared-types';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows, readInsertId } from '../db/mysql-result.js';
 import {
@@ -61,6 +61,7 @@ export interface VideoEditProjectStore {
     projectId: number,
     externalId: string,
   ): Promise<VideoEditVersionRecord | null>;
+  listVersions(projectId: number): Promise<VideoEditVersionRecord[]>;
   insertProject(input: Omit<StoredVideoEditProject, 'id'>): Promise<StoredVideoEditProject>;
   insertVersion(input: Omit<VideoEditVersionRecord, 'id'>): Promise<VideoEditVersionRecord>;
   updateProjectCurrentVersion(
@@ -151,6 +152,15 @@ class DrizzleVideoEditProjectStore implements VideoEditProjectStore {
       )
       .limit(1);
     return row ? asVersionRecord(row) : null;
+  }
+
+  async listVersions(projectId: number) {
+    const rows = await this.db
+      .select()
+      .from(videoEditVersions)
+      .where(eq(videoEditVersions.projectId, projectId))
+      .orderBy(desc(videoEditVersions.revision));
+    return rows.map(asVersionRecord);
   }
 
   async insertProject(input: Omit<StoredVideoEditProject, 'id'>) {
@@ -296,6 +306,11 @@ export class VideoEditProjectRepository {
       throw new VideoEditRepositoryError('NOT_FOUND', '视频剪辑项目不存在');
     }
     return { project, currentVersion };
+  }
+
+  async listVersions(projectId: string, userId: number): Promise<VideoEditVersionRecord[]> {
+    const project = await this.requireOwnedProject(this.store, projectId, userId);
+    return this.store.listVersions(project.id);
   }
 
   async appendVersion(input: AppendVideoEditVersionInput): Promise<VideoEditVersionRecord> {

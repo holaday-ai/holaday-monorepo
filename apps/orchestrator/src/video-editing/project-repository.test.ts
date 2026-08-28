@@ -76,6 +76,12 @@ class MemoryVideoEditProjectStore implements VideoEditProjectStore {
     );
   }
 
+  async listVersions(projectId: number) {
+    return this.versions
+      .filter((candidate) => candidate.projectId === projectId)
+      .sort((left, right) => right.revision - left.revision);
+  }
+
   async insertProject(input: Omit<StoredProject, 'id'>) {
     const project = { id: this.nextProjectId++, ...structuredClone(input) };
     this.projects.push(project);
@@ -149,6 +155,26 @@ async function createProject(
 }
 
 describe('video editing project repository', () => {
+  it('lists owned immutable versions newest first without exposing another project', async () => {
+    const { repository } = repositoryFixture();
+    const created = await createProject(repository);
+    await repository.appendVersion({
+      userId: 7,
+      projectId: created.project.externalId,
+      baseVersionId: created.currentVersion.externalId,
+      document: BASE_DOCUMENT,
+      operations: [],
+    });
+
+    await expect(repository.listVersions(created.project.externalId, 7)).resolves.toMatchObject([
+      { revision: 2 },
+      { revision: 1 },
+    ]);
+    await expect(repository.listVersions(created.project.externalId, 8)).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    } satisfies Partial<VideoEditRepositoryError>);
+  });
+
   it('loads only a project owned by the requesting user', async () => {
     const { repository } = repositoryFixture();
     const created = await createProject(repository);

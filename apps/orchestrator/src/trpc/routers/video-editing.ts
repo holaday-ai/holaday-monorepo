@@ -69,6 +69,7 @@ export interface VideoEditingRuntime {
       input: Parameters<VideoEditProjectRepository['createFromSource']>[0],
     ): ReturnType<VideoEditProjectRepository['createFromSource']>;
     getOwnedProject(projectId: string, userId: number): Promise<OwnedProjectResult>;
+    listVersions(projectId: string, userId: number): Promise<VideoEditVersionRecord[]>;
     appendVersion(
       input: Parameters<VideoEditProjectRepository['appendVersion']>[0],
     ): ReturnType<VideoEditProjectRepository['appendVersion']>;
@@ -285,10 +286,14 @@ export function createVideoEditingRouter(dependencies: VideoEditingRouterDepende
       .query(({ ctx, input }) =>
         withRuntime(dependencies, ctx, async (runtime, user) => {
           const loaded = await runtime.repository.getOwnedProject(input.projectId, user.id);
-          const preview = await runtime.getProjectPreview(loaded.project, user.id);
+          const [preview, versions] = await Promise.all([
+            runtime.getProjectPreview(loaded.project, user.id),
+            runtime.repository.listVersions(input.projectId, user.id),
+          ]);
           return {
             project: projectView(loaded.project),
             currentVersion: versionView(loaded.currentVersion),
+            versions: versions.map(versionView),
             preview,
           };
         }),

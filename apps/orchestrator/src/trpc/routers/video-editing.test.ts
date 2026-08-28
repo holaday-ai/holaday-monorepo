@@ -84,6 +84,7 @@ function runtime(overrides: Partial<VideoEditingRuntime> = {}): VideoEditingRunt
         },
         currentVersion: CURRENT_VERSION,
       })),
+      listVersions: vi.fn(async () => [CURRENT_VERSION]),
       appendVersion: vi.fn(async (input) => ({
         ...CURRENT_VERSION,
         id: 52,
@@ -220,6 +221,7 @@ describe('video editing router', () => {
     expect(result).toMatchObject({
       project: { id: 'vedp_project', sourceKind: 'generated', status: 'active' },
       currentVersion: { id: 'vedv_current', revision: 1, document: DOCUMENT },
+      versions: [{ id: 'vedv_current', revision: 1 }],
       preview: { url: '/api/files/file_video/download' },
     });
     expect(JSON.stringify(result)).not.toContain('"id":41');
