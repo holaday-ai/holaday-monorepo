@@ -484,6 +484,41 @@ export const stockTaskContextInput = z.object({
   evidenceIds: z.array(z.string().min(1).max(160)).max(50),
 });
 
+export const imageCreationOptionsInput = z.object({
+  model: z.enum(['nano_banana_2', 'nano_banana_pro']).optional(),
+  style: z
+    .enum([
+      'random',
+      'cinematic',
+      'creative',
+      'dynamic',
+      'fashion',
+      'portrait',
+      'stock_photo',
+      'vibrant',
+      'anime',
+      'illustration',
+      'logo',
+      'watercolor',
+      'line_art',
+      'fantasy',
+      'product',
+      'three_d_render',
+    ])
+    .optional(),
+  aspectRatio: z.enum(['9:16', '16:9', '1:1', '4:3', '3:4']),
+  imageCount: z.number().int().min(1).max(4),
+  mode: z.enum(['free', 'lock_subject']).optional(),
+  subjectFileId: z.string().min(1).max(64).optional(),
+  goal: z.enum(['inspiration', 'lock_subject', 'commercial']).optional(),
+  commercialUse: z.enum(['product', 'poster', 'social_cover']).optional(),
+  changeTargets: z
+    .array(z.enum(['background', 'style', 'lighting', 'action', 'composition']))
+    .max(5)
+    .optional(),
+  visiblePrompt: z.string().trim().min(1).max(4_000).optional(),
+});
+
 const createInput = z.object({
   intent: z.string().min(1).max(4_000),
   /**
@@ -595,15 +630,7 @@ const createInput = z.object({
       durationSeconds: z.number().int().min(3).max(15).optional(),
     })
     .optional(),
-  imageOptions: z
-    .object({
-      model: z.enum(['nano_banana_2', 'nano_banana_pro']).optional(),
-      aspectRatio: z.enum(['9:16', '16:9', '1:1', '4:3', '3:4']),
-      imageCount: z.number().int().min(1).max(4),
-      mode: z.enum(['free', 'lock_subject']).optional(),
-      subjectFileId: z.string().min(1).max(64).optional(),
-    })
-    .optional(),
+  imageOptions: imageCreationOptionsInput.optional(),
 });
 
 const ASHARE_SKILL_IDS = new Set(['a-share-market-briefing', 'a-share-analyst']);

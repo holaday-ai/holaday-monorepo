@@ -1,6 +1,7 @@
 import type { DraftAttachment } from '@/components/AttachmentChip';
 import type {
   CommercialImageUse,
+  ImageChangeTarget,
   ImageCreationGoal,
   ImageCreationOptions,
   ImageModel,
@@ -73,6 +74,26 @@ export const IMAGE_ASPECT_OPTIONS: ReadonlyArray<{ value: VideoAspect; label: st
   { value: '9:16', label: '9:16' },
   { value: '4:3', label: '4:3' },
   { value: '3:4', label: '3:4' },
+];
+
+export const IMAGE_CREATION_GOALS: readonly ImageCreationGoal[] = [
+  'inspiration',
+  'lock_subject',
+  'commercial',
+];
+
+export const COMMERCIAL_IMAGE_USES: readonly CommercialImageUse[] = [
+  'product',
+  'poster',
+  'social_cover',
+];
+
+export const IMAGE_CHANGE_TARGETS: readonly ImageChangeTarget[] = [
+  'background',
+  'style',
+  'lighting',
+  'action',
+  'composition',
 ];
 
 export const IMAGE_GOAL_PRESETS: Readonly<{
