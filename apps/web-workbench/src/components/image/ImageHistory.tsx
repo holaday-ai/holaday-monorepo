@@ -167,7 +167,7 @@ export function ImageHistory({ refreshKey, onContinue }: ImageHistoryProps): JSX
               type="button"
               aria-pressed={filter === value}
               onClick={() => setFilter(value)}
-              className="min-h-10 rounded-lg px-3 text-xs font-semibold text-[#6D6370] aria-pressed:bg-white aria-pressed:text-[#6F4D8B] aria-pressed:shadow-sm"
+              className="min-h-11 rounded-lg px-3 text-xs font-semibold text-[#6D6370] transition-colors aria-pressed:bg-white aria-pressed:text-[#6F4D8B] aria-pressed:shadow-sm motion-reduce:transition-none"
             >
               {label}
             </button>
@@ -191,7 +191,7 @@ export function ImageHistory({ refreshKey, onContinue }: ImageHistoryProps): JSX
           <button
             type="button"
             onClick={() => void load()}
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 font-semibold"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 font-semibold"
           >
             <RotateCcw className="h-3.5 w-3.5" aria-hidden />
             重试
@@ -209,7 +209,7 @@ export function ImageHistory({ refreshKey, onContinue }: ImageHistoryProps): JSX
                 title={row.starred ? '取消置顶' : '置顶'}
                 disabled={pinningTaskId !== null}
                 onClick={() => void toggleRowPin(row)}
-                className="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-xl border border-[#E6DFE6] bg-white/90 text-[#7B6E7E] shadow-sm disabled:opacity-50"
+                className="absolute right-3 top-3 z-10 flex h-11 w-11 items-center justify-center rounded-xl border border-[#E6DFE6] bg-white/90 text-[#7B6E7E] shadow-sm transition-colors hover:bg-white disabled:opacity-50 motion-reduce:transition-none"
               >
                 <Pin className={row.starred ? 'h-4 w-4 fill-current' : 'h-4 w-4'} aria-hidden />
               </button>

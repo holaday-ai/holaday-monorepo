@@ -50,6 +50,7 @@ export function ImageResultPanel({
     const state = liveState(status);
     return (
       <section
+        role="status"
         aria-live="polite"
         className="rounded-[22px] border border-[#E8E0E8] bg-white px-5 py-5 shadow-[0_12px_32px_rgba(62,48,69,0.05)]"
       >
@@ -95,7 +96,8 @@ export function ImageResultPanel({
 
   return (
     <section
-      aria-live="polite"
+      role={compact ? undefined : 'status'}
+      aria-live={compact ? undefined : 'polite'}
       className={
         compact
           ? 'rounded-[20px] border border-[#E8E0E8] bg-[#FFFDF9] p-4'
@@ -160,7 +162,7 @@ export function ImageResultPanel({
                   type="button"
                   disabled={!actions.continueEdit}
                   onClick={() => void onContinue('continue_edit', row, download.fileId)}
-                  className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[#DDCFE7] bg-[#F8F3FB] px-3 text-xs font-semibold text-[#6F4E8B] disabled:cursor-not-allowed disabled:opacity-45"
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[#DDCFE7] bg-[#F8F3FB] px-3 text-xs font-semibold text-[#6F4E8B] transition-colors hover:bg-[#F2EAF8] disabled:cursor-not-allowed disabled:opacity-45 motion-reduce:transition-none"
                 >
                   <RefreshCcw className="h-3.5 w-3.5" aria-hidden />
                   继续改这张
@@ -175,7 +177,7 @@ export function ImageResultPanel({
                   }
                   title={saved ? '已保存到文件库' : '保存到文件库'}
                   onClick={() => void saveOutput(download.fileId)}
-                  className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[#E4DFE4] bg-white px-3 text-xs font-semibold text-[#5F5762] disabled:cursor-not-allowed disabled:opacity-55"
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[#E4DFE4] bg-white px-3 text-xs font-semibold text-[#5F5762] transition-colors hover:bg-[#F9F6F8] disabled:cursor-not-allowed disabled:opacity-55 motion-reduce:transition-none"
                 >
                   {saved ? (
                     <Check className="h-3.5 w-3.5" aria-hidden />
@@ -195,7 +197,7 @@ export function ImageResultPanel({
           <button
             type="button"
             onClick={() => void onContinue('keep_subject', row)}
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[#CDE9E0] bg-[#F0FBF7] px-3 text-xs font-semibold text-[#2A725D]"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[#D9CFE5] bg-[#F7F2FB] px-3 text-xs font-semibold text-[#6F4E8B] transition-colors hover:bg-[#F1EAF7] motion-reduce:transition-none"
           >
             <Sparkles className="h-3.5 w-3.5" aria-hidden />
             保持主角
@@ -204,7 +206,7 @@ export function ImageResultPanel({
         <button
           type="button"
           onClick={() => void onContinue('reuse_settings', row)}
-          className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[#E4DFE4] bg-white px-3 text-xs font-semibold text-[#5F5762]"
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[#E4DFE4] bg-white px-3 text-xs font-semibold text-[#5F5762] transition-colors hover:bg-[#F9F6F8] motion-reduce:transition-none"
         >
           <Copy className="h-3.5 w-3.5" aria-hidden />
           复用设置

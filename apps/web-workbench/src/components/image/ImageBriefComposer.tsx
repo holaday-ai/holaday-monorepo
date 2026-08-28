@@ -57,14 +57,16 @@ export function ImageBriefComposer({
   return (
     <section
       className={cn(
-        'grid gap-3',
+        'grid overflow-hidden rounded-[26px] border border-[#E7DFE8] bg-[#FFFEFB] shadow-[0_12px_30px_rgba(62,50,68,0.045)]',
         lockSubject ? 'lg:grid-cols-[minmax(220px,280px)_minmax(0,1fr)]' : 'grid-cols-1',
       )}
     >
       {lockSubject ? (
-        <div className="rounded-[24px] border border-[#E7DFE8] bg-[#FFFEFB] p-4 shadow-[0_10px_24px_rgba(62,50,68,0.04)]">
+        <div className="border-b border-[#E7DFE8] bg-[#F8FBFF] p-4 sm:p-5 lg:border-b-0 lg:border-r">
           <div className="text-sm font-semibold text-[#342E39]">添加主角图</div>
-          <p className="mt-1 text-xs leading-5 text-[#7B717F]">人物、宠物、商品或 IP；建议主体清晰。</p>
+          <p className="mt-1 text-xs leading-5 text-[#7B717F]">
+            人物、宠物、商品或 IP；建议主体清晰。
+          </p>
           {subject ? (
             <div className="mt-4">
               <AttachmentChip
@@ -85,14 +87,16 @@ export function ImageBriefComposer({
               <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#EEE6FF] text-[#7252A0]">
                 <ImagePlus className="h-5 w-5" aria-hidden />
               </span>
-              <span className="mt-3 text-sm font-semibold">{uploading ? '正在上传…' : '添加主角图'}</span>
+              <span className="mt-3 text-sm font-semibold">
+                {uploading ? '正在上传…' : '添加主角图'}
+              </span>
               <span className="mt-1 text-[11px] text-[#8A7E8D]">JPG / PNG / WebP</span>
             </button>
           )}
         </div>
       ) : null}
 
-      <div className="rounded-[24px] border border-[#E7DFE8] bg-[#FFFEFB] p-4 shadow-[0_10px_24px_rgba(62,50,68,0.04)] sm:p-5">
+      <div className="p-4 sm:p-5">
         {lockSubject ? (
           <div role="group" aria-label="想改什么">
             <div className="text-sm font-semibold text-[#342E39]">想改什么？</div>

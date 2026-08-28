@@ -7,10 +7,7 @@ import {
   IMAGE_MODEL_OPTIONS,
   IMAGE_STYLE_OPTIONS,
 } from './image-studio-options';
-import type {
-  ImageStudioDraft,
-  ImageStudioSettingKey,
-} from './image-studio-state';
+import type { ImageStudioDraft, ImageStudioSettingKey } from './image-studio-state';
 
 interface ImageGenerationSettingsProps {
   open: boolean;
@@ -36,7 +33,7 @@ export function ImageGenerationSettings({
             event.preventDefault();
             returnFocusRef.current?.focus();
           }}
-          className="fixed left-1/2 top-1/2 z-[91] max-h-[88vh] w-[min(960px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[28px] border border-[#E7DEE7] bg-[#FFFDF8] p-5 text-[#342E39] shadow-[0_28px_80px_rgba(52,38,59,0.18)] outline-none sm:p-7"
+          className="fixed z-[91] overflow-y-auto border border-[#E7DEE7] bg-[#FFFDF8] p-5 text-[#342E39] shadow-[0_28px_80px_rgba(52,38,59,0.18)] outline-none motion-reduce:transform-none motion-reduce:transition-none max-md:inset-x-0 max-md:bottom-0 max-md:max-h-[92vh] max-md:w-full max-md:rounded-t-[28px] max-md:rounded-b-none max-md:border-x-0 max-md:border-b-0 md:left-1/2 md:top-1/2 md:max-h-[88vh] md:w-[min(960px,calc(100vw-24px))] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-[28px] md:p-7"
         >
           <div className="flex items-start justify-between gap-4 pr-12">
             <div>
@@ -79,13 +76,20 @@ export function ImageGenerationSettings({
                       )}
                     >
                       <span className="flex items-center justify-between gap-3">
-                        <span className="font-semibold">{option.name} {option.version}</span>
+                        <span className="font-semibold">
+                          {option.name} {option.version}
+                        </span>
                         {selected ? <Check className="h-4 w-4 text-[#347AD6]" aria-hidden /> : null}
                       </span>
-                      <span className="mt-2 block text-xs leading-5 text-[#776D7A]">{option.description}</span>
+                      <span className="mt-2 block text-xs leading-5 text-[#776D7A]">
+                        {option.description}
+                      </span>
                       <span className="mt-2 flex flex-wrap gap-1.5">
                         {option.badges.map((badge) => (
-                          <span key={badge} className="rounded-full bg-[#EEF5FF] px-2 py-1 text-[10px] font-semibold text-[#3E6EAA]">
+                          <span
+                            key={badge}
+                            className="rounded-full bg-[#EEF5FF] px-2 py-1 text-[10px] font-semibold text-[#3E6EAA]"
+                          >
                             {badge}
                           </span>
                         ))}
@@ -117,11 +121,13 @@ export function ImageGenerationSettings({
                         src={`/image-style-previews/${option.key}.png`}
                         alt=""
                         aria-hidden
-                        className="aspect-[4/3] w-full object-cover"
+                        className="aspect-[4/3] w-full bg-[#F7F3F5] object-contain p-1"
                       />
                       <span className="flex min-h-11 items-center justify-between gap-1 px-2 py-1.5 text-[11px] font-semibold text-[#504755]">
                         {option.label}
-                        {selected ? <Check className="h-3.5 w-3.5 shrink-0 text-[#7953A5]" aria-hidden /> : null}
+                        {selected ? (
+                          <Check className="h-3.5 w-3.5 shrink-0 text-[#7953A5]" aria-hidden />
+                        ) : null}
                       </span>
                     </button>
                   );
@@ -164,7 +170,10 @@ export function ImageGenerationSettings({
   );
 }
 
-function SettingGroup({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
+function SettingGroup({
+  label,
+  children,
+}: { label: string; children: React.ReactNode }): JSX.Element {
   return (
     <fieldset aria-label={label} className="min-w-0">
       <legend className="mb-3 text-sm font-semibold text-[#423A46]">{label}</legend>

@@ -4,6 +4,8 @@ import type { ImageHistoryRow } from '@/lib/image-history-row';
 import type { UiTask } from '@/types/task';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ImageResultPanel } from './ImageResultPanel';
 
@@ -86,6 +88,7 @@ describe('ImageResultPanel', () => {
   ] as const)('renders the truthful %s state', (status, copy) => {
     render(<ImageResultPanel task={task({ status })} onContinue={vi.fn()} />);
     expect(screen.getByText(copy)).toBeTruthy();
+    expect(screen.getByRole('status').getAttribute('aria-live')).toBe('polite');
   });
 
   it('shows a verified badge only for a complete positive consistency check', () => {
@@ -106,6 +109,14 @@ describe('ImageResultPanel', () => {
     );
     expect(screen.queryByText('已核对主角一致性')).toBeNull();
     expect(screen.getByText('已筛除 1 张')).toBeTruthy();
+  });
+
+  it('does not turn every compact history card into a live region', () => {
+    const { container } = render(
+      <ImageResultPanel row={row()} compact onContinue={vi.fn()} />,
+    );
+
+    expect(container.querySelector('[role="status"]')).toBeNull();
   });
 
   it('saves an available output once and disables duplicate submission', async () => {
@@ -147,5 +158,19 @@ describe('ImageResultPanel', () => {
     expect(screen.queryByTestId('download-card')).toBeNull();
     expect(screen.getByRole('button', { name: '保持主角' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '复用设置' })).toBeTruthy();
+  });
+
+  it('keeps every result and history action at least 44px tall', () => {
+    const resultSource = readFileSync(
+      resolve(process.cwd(), 'src/components/image/ImageResultPanel.tsx'),
+      'utf8',
+    );
+    const historySource = readFileSync(
+      resolve(process.cwd(), 'src/components/image/ImageHistory.tsx'),
+      'utf8',
+    );
+
+    expect(resultSource).not.toContain('min-h-10');
+    expect(historySource).not.toContain('min-h-10');
   });
 });

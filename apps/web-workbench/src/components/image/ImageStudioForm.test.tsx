@@ -2,6 +2,8 @@
 
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import * as React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ImageBriefComposer } from './ImageBriefComposer';
@@ -80,13 +82,22 @@ function Harness(): JSX.Element {
 }
 
 describe('image studio form', () => {
+  it('leads with the product capability before asking for a creation goal', () => {
+    render(<Harness />);
+
+    expect(screen.getByRole('heading', { level: 1, name: '图片创作' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: '今天想做什么图' })).toBeTruthy();
+  });
+
   it('presents three clear creation goals before technical settings', () => {
     render(<Harness />);
 
     const goals = screen.getByRole('group', { name: '今天想做什么图' });
     expect(within(goals).getAllByRole('button')).toHaveLength(3);
     expect(
-      within(goals).getByRole('button', { name: /灵感创作/ }).getAttribute('aria-pressed'),
+      within(goals)
+        .getByRole('button', { name: /灵感创作/ })
+        .getAttribute('aria-pressed'),
     ).toBe('true');
   });
 
@@ -126,14 +137,39 @@ describe('image studio form', () => {
     await user.click(trigger);
 
     const dialog = screen.getByRole('dialog', { name: '生成设置' });
-    expect(within(dialog).getByRole('group', { name: '模型' }).querySelectorAll('button')).toHaveLength(2);
-    expect(within(dialog).getByRole('group', { name: '风格' }).querySelectorAll('button')).toHaveLength(16);
-    expect(within(dialog).getByRole('group', { name: '比例' }).querySelectorAll('button')).toHaveLength(5);
-    expect(within(dialog).getByRole('group', { name: '生成数量' }).querySelectorAll('button')).toHaveLength(4);
+    expect(
+      within(dialog).getByRole('group', { name: '模型' }).querySelectorAll('button'),
+    ).toHaveLength(2);
+    expect(
+      within(dialog).getByRole('group', { name: '风格' }).querySelectorAll('button'),
+    ).toHaveLength(16);
+    expect(
+      within(dialog).getByRole('group', { name: '比例' }).querySelectorAll('button'),
+    ).toHaveLength(5);
+    expect(
+      within(dialog).getByRole('group', { name: '生成数量' }).querySelectorAll('button'),
+    ).toHaveLength(4);
 
     await user.keyboard('{Escape}');
 
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it('keeps goal motion optional and turns the settings dialog into a mobile bottom sheet', () => {
+    const goalSource = readFileSync(
+      resolve(process.cwd(), 'src/components/image/ImageGoalPicker.tsx'),
+      'utf8',
+    );
+    const settingsSource = readFileSync(
+      resolve(process.cwd(), 'src/components/image/ImageGenerationSettings.tsx'),
+      'utf8',
+    );
+
+    expect(goalSource).toContain('motion-reduce:transition-none');
+    expect(goalSource).toContain('motion-reduce:transform-none');
+    expect(settingsSource).toContain('max-md:bottom-0');
+    expect(settingsSource).toContain('max-md:rounded-b-none');
+    expect(settingsSource).toContain('object-contain');
   });
 });

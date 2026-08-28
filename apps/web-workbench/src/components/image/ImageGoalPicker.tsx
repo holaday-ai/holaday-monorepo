@@ -9,6 +9,8 @@ const IMAGE_GOALS: ReadonlyArray<{
   image: string;
   imagePosition: string;
   tone: string;
+  selectedTone: string;
+  checkTone: string;
   icon: typeof Lightbulb;
 }> = [
   {
@@ -18,6 +20,8 @@ const IMAGE_GOALS: ReadonlyArray<{
     image: '/image-style-previews/illustration.png',
     imagePosition: 'object-center',
     tone: 'bg-[#FFF1EA] text-[#C8664C]',
+    selectedTone: 'border-[#EBA083] bg-[#FFFCFA] ring-[#F1B49D]/20',
+    checkTone: 'bg-[#E98F72]',
     icon: Lightbulb,
   },
   {
@@ -27,6 +31,8 @@ const IMAGE_GOALS: ReadonlyArray<{
     image: '/image-style-previews/portrait.png',
     imagePosition: 'object-center',
     tone: 'bg-[#EAF4FF] text-[#3678C6]',
+    selectedTone: 'border-[#72A9E9] bg-[#FBFDFF] ring-[#8FBAEB]/20',
+    checkTone: 'bg-[#5E9DE4]',
     icon: LockKeyhole,
   },
   {
@@ -35,7 +41,9 @@ const IMAGE_GOALS: ReadonlyArray<{
     description: '快速制作商品图、海报与社媒封面',
     image: '/image-style-previews/product.png',
     imagePosition: 'object-center',
-    tone: 'bg-[#E8F8EE] text-[#34865B]',
+    tone: 'bg-[#F0EAFE] text-[#7354A4]',
+    selectedTone: 'border-[#A58AD0] bg-[#FDFBFF] ring-[#B49DD8]/20',
+    checkTone: 'bg-[#9274C2]',
     icon: ShoppingBag,
   },
 ];
@@ -62,16 +70,24 @@ export function ImageGoalPicker({
   return (
     <section className="space-y-4">
       <div>
-        <p className="text-sm font-semibold tracking-[0.08em] text-[#8D8291]">图片创作工作台</p>
+        <p className="text-xs font-semibold tracking-[0.12em] text-[#9A8298]">
+          HOLA DAY IMAGE STUDIO
+        </p>
         <h1 className="mt-2 text-[28px] font-semibold tracking-[-0.03em] text-[#302936] sm:text-[34px]">
-          今天想做什么图？
+          图片创作
         </h1>
         <p className="mt-2 text-sm leading-6 text-[#746A78]">
-          先选目标，HOLA DAY 会帮你配好合适的生成方式。
+          告诉 HOLA DAY 你要做什么，我们会先配好合适的模型、比例与生成数量。
         </p>
       </div>
 
-      <div role="group" aria-label="今天想做什么图" className="grid gap-3 md:grid-cols-3">
+      <div>
+        <h2 className="text-lg font-semibold tracking-[-0.02em] text-[#3B3340] sm:text-xl">
+          今天想做什么图？
+        </h2>
+      </div>
+
+      <div role="group" aria-label="今天想做什么图" className="grid gap-3 sm:grid-cols-3">
         {IMAGE_GOALS.map((goal) => {
           const selected = goal.id === value;
           const Icon = goal.icon;
@@ -82,9 +98,9 @@ export function ImageGoalPicker({
               aria-pressed={selected}
               onClick={() => onChange(goal.id)}
               className={cn(
-                'group relative min-h-[214px] overflow-hidden rounded-[24px] border bg-white text-left shadow-[0_12px_30px_rgba(58,45,64,0.05)] transition duration-200 motion-reduce:transition-none',
+                'group relative min-h-[206px] overflow-hidden rounded-[24px] border bg-white text-left shadow-[0_12px_30px_rgba(58,45,64,0.05)] transition duration-200 motion-reduce:transform-none motion-reduce:transition-none',
                 selected
-                  ? 'border-[#4B8EEA] ring-2 ring-[#4B8EEA]/15'
+                  ? cn('ring-2', goal.selectedTone)
                   : 'border-[#E9E1E8] hover:-translate-y-0.5 hover:border-[#CFC3D0] hover:shadow-[0_16px_34px_rgba(58,45,64,0.08)] motion-reduce:hover:translate-y-0',
               )}
             >
@@ -92,22 +108,34 @@ export function ImageGoalPicker({
                 src={goal.image}
                 alt=""
                 aria-hidden
-                className={cn('h-[132px] w-full object-cover', goal.imagePosition)}
+                className={cn('h-[96px] w-full object-cover', goal.imagePosition)}
               />
               <span className="flex items-center gap-3 px-4 py-3.5">
-                <span className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl', goal.tone)}>
+                <span
+                  className={cn(
+                    'flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl',
+                    goal.tone,
+                  )}
+                >
                   <Icon className="h-5 w-5" aria-hidden />
                 </span>
                 <span className="min-w-0">
                   <span className="flex items-center gap-2 text-[16px] font-semibold text-[#302936]">
                     {goal.title}
                     {selected ? (
-                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#4B8EEA] text-white">
+                      <span
+                        className={cn(
+                          'inline-flex h-5 w-5 items-center justify-center rounded-full text-white',
+                          goal.checkTone,
+                        )}
+                      >
                         <Check className="h-3 w-3" aria-hidden />
                       </span>
                     ) : null}
                   </span>
-                  <span className="mt-1 block text-xs leading-5 text-[#766D7B]">{goal.description}</span>
+                  <span className="mt-1 block text-xs leading-5 text-[#766D7B]">
+                    {goal.description}
+                  </span>
                 </span>
               </span>
             </button>
