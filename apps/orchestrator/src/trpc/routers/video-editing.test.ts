@@ -430,6 +430,35 @@ describe('video editing router', () => {
     ).resolves.toEqual({ status: 'failed' });
   });
 
+  it('passes the selected scene through the planning boundary', async () => {
+    const editingRuntime = runtime();
+    const fixture = caller({ runtime: editingRuntime });
+
+    await fixture.caller.planInstruction({
+      projectId: 'vedp_project',
+      instruction: '裁掉这一段开头 1 秒',
+      selectedSceneId: 'scene_2',
+    });
+
+    expect(editingRuntime.planInstruction).toHaveBeenCalledWith(
+      expect.objectContaining({ selectedSceneId: 'scene_2' }),
+    );
+  });
+
+  it('rejects a stale selected scene before invoking the planner', async () => {
+    const editingRuntime = runtime();
+    const fixture = caller({ runtime: editingRuntime });
+
+    await expect(
+      fixture.caller.planInstruction({
+        projectId: 'vedp_project',
+        instruction: '裁掉这一段开头 1 秒',
+        selectedSceneId: 'scene_missing',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(editingRuntime.planInstruction).not.toHaveBeenCalled();
+  });
+
   it('applies free operations against the exact current base version', async () => {
     const editingRuntime = runtime();
     const fixture = caller({ runtime: editingRuntime });

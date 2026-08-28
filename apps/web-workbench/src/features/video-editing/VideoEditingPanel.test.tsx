@@ -186,6 +186,31 @@ describe('VideoEditingPanel', () => {
     await waitFor(() => expect(editingClient.applyFreeOperations).toHaveBeenCalledTimes(1));
   });
 
+  it('sends the selected scene with a selection-relative instruction', async () => {
+    const editingClient = client({
+      summary: '裁掉当前片段开头',
+      affectedSceneIds: ['scene_1'],
+      operations: [{ kind: 'trim', sceneId: 'scene_1', startMs: 500, endMs: 4_000 }],
+      requiresQuote: false,
+    });
+    renderPanel(editingClient, adapter());
+    await screen.findByRole('heading', { name: 'AI 帮你剪辑' });
+
+    fireEvent.click(await screen.findByRole('button', { name: '选择第 1 段' }));
+    fireEvent.change(screen.getByLabelText('告诉 AI 想怎么剪'), {
+      target: { value: '裁掉这一段开头半秒' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '预览修改' }));
+
+    await waitFor(() =>
+      expect(editingClient.planInstruction).toHaveBeenCalledWith({
+        projectId: 'vedp_project',
+        instruction: '裁掉这一段开头半秒',
+        selectedSceneId: 'scene_1',
+      }),
+    );
+  });
+
   it('uses the exact server quote once for a paid scene regeneration', async () => {
     const plan: VideoEditingPlan = {
       summary: '重新生成第一段',
@@ -336,6 +361,47 @@ describe('VideoEditingPanel', () => {
       }),
     );
     expect(await screen.findByText('holaday-edited.mp4')).toBeTruthy();
+  });
+
+  it('recovers a completed export when the completion response is lost', async () => {
+    const editingClient = client({
+      summary: '更新字幕',
+      affectedSceneIds: [],
+      operations: [],
+      requiresQuote: false,
+    });
+    editingClient.completeClientExport = vi.fn(async () => {
+      throw new Error('response lost');
+    });
+    editingClient.failExport = vi.fn(async () => ({
+      status: 'completed' as const,
+      file: {
+        fileId: 'file_output',
+        filename: 'holaday-edited.mp4',
+        size: 12,
+        downloadUrl: '/api/files/file_output/download',
+      },
+    }));
+    const exportMp4 = vi.fn(async () => new Blob(['edited-video'], { type: 'video/mp4' }));
+    const editorAdapter = adapter({
+      mount: vi.fn(async () => ({
+        exportMp4,
+        serialize: vi.fn(async () => 'sdk-document'),
+        destroy: vi.fn(async () => undefined),
+      })),
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 200 })),
+    );
+    renderPanel(editingClient, editorAdapter);
+    await waitFor(() => expect(editorAdapter.mount).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: '导出 MP4' }));
+
+    expect(await screen.findByRole('heading', { name: '导出完成' })).toBeTruthy();
+    expect(editingClient.failExport).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/本次生成没有完成/)).toBeNull();
   });
 
   it('shows a retained current-version export after reopening the project', async () => {

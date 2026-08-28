@@ -9,6 +9,7 @@ import type { VideoEditDocument, VideoEditSourceKind } from './types.js';
 export interface VideoEditPlannerClient {
   plan(input: {
     instruction: string;
+    selectedSceneId?: string;
     document: VideoEditDocument;
     sourceKind: VideoEditSourceKind;
   }): Promise<unknown>;
@@ -41,6 +42,7 @@ function clarificationPlan(): VideoEditPlan {
 
 export async function planVideoEditInstruction(input: {
   instruction: string;
+  selectedSceneId?: string;
   document: VideoEditDocument;
   sourceKind: VideoEditSourceKind;
   client: VideoEditPlannerClient;
@@ -51,6 +53,7 @@ export async function planVideoEditInstruction(input: {
   try {
     const raw = await input.client.plan({
       instruction: input.instruction.trim(),
+      ...(input.selectedSceneId ? { selectedSceneId: input.selectedSceneId } : {}),
       document: input.document,
       sourceKind: input.sourceKind,
     });
@@ -79,6 +82,7 @@ operations 最多 20 项，只允许以下六种：
 5. {"kind":"remove_silence","sceneId":"...","ranges":[{"startMs":0,"endMs":1000}]}
 6. {"kind":"regenerate_scene","sceneId":"...","prompt":"..."}
 不得增加字段，不得编造场景，不得省略排序中的场景。裁剪时间相对该场景从 0 开始。
+selectedSceneId 是用户当前明确选中的片段；“这一段”“当前片段”等指代必须绑定到它。
 不得改变人物身份、锁定主体或参考素材。IP 人物重新生成时必须沿用服务端已有锁定主体，JSON 中不要输出主体或文件标识。
 不确定时返回 operations: []，summary 说明需要用户明确哪一段和修改目标。`;
 
@@ -120,6 +124,7 @@ export function createOpenAIVideoEditPlannerClient(input: {
             role: 'user',
             content: JSON.stringify({
               instruction: request.instruction,
+              selectedSceneId: request.selectedSceneId ?? null,
               sourceKind: request.sourceKind,
               document: plannerDocument(request.document),
             }),

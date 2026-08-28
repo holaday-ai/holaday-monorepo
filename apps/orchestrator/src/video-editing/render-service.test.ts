@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  DrizzleVideoEditRenderStore,
   type VideoEditRenderAttemptRecord,
   type VideoEditRenderFile,
   type VideoEditRenderFilePort,
@@ -41,7 +42,7 @@ function fixture(
     completeAttempt: vi.fn(
       async () => ({ status: 'completed', attempt: { ...ATTEMPT, status: 'completed' } }) as const,
     ),
-    failAttempt: vi.fn(async () => ({ status: 'failed' }) as const),
+    failAttempt: vi.fn(async () => ({ status: 'failed', attempt: ATTEMPT }) as const),
     ...overrides.store,
   };
   const files: VideoEditRenderFilePort = {
@@ -70,6 +71,63 @@ function fixture(
 }
 
 describe('VideoEditRenderService', () => {
+  it('atomically releases an expired pending attempt before starting a retry', async () => {
+    let selectIndex = 0;
+    const updates: Array<Record<string, unknown>> = [];
+    const transaction = {
+      select: () => {
+        selectIndex += 1;
+        const rows =
+          selectIndex === 1
+            ? [{ id: 41, externalId: 'vedp_project', userId: 7, currentVersionId: 51 }]
+            : [
+                {
+                  id: 51,
+                  externalId: 'vedv_current',
+                  sdkDocument: 'UBQ2-scene',
+                  renderStatus: 'rendering',
+                },
+              ];
+        const chain = {
+          from: () => chain,
+          where: () => chain,
+          limit: () => chain,
+          for: async () => rows,
+        };
+        return chain;
+      },
+      update: () => ({
+        set: (values: Record<string, unknown>) => {
+          updates.push(values);
+          return { where: async () => [{ affectedRows: 1 }] };
+        },
+      }),
+      insert: () => ({ values: async () => [{ insertId: 82 }] }),
+    };
+    const store = new DrizzleVideoEditRenderStore({
+      transaction: async (run: (tx: typeof transaction) => unknown) => run(transaction),
+    } as never);
+
+    await expect(
+      store.beginAttempt({
+        userId: 7,
+        projectId: 'vedp_project',
+        versionId: 'vedv_current',
+        renderAttemptId: 'vedr_retry',
+        outputFileId: 72,
+        expiresAt: new Date('2026-08-28T00:30:00Z'),
+        createdAt: new Date('2026-08-28T00:15:01Z'),
+      }),
+    ).resolves.toMatchObject({ status: 'started', attempt: { externalId: 'vedr_retry' } });
+    expect(updates).toEqual(
+      expect.arrayContaining([
+        { status: 'failed' },
+        { renderStatus: 'failed' },
+        { renderStatus: 'rendering' },
+      ]),
+    );
+  });
+
   it('binds a new upload target to the owned current version', async () => {
     const f = fixture();
     await expect(
@@ -226,6 +284,52 @@ describe('VideoEditRenderService', () => {
     ).resolves.toMatchObject({ status: 'completed', file: { fileId: 'file_output' } });
     expect(f.files.complete).not.toHaveBeenCalled();
     expect(f.store.completeAttempt).not.toHaveBeenCalled();
+  });
+
+  it('preserves and returns a completed output when a late failure report races completion', async () => {
+    const completedAttempt = {
+      ...ATTEMPT,
+      status: 'completed' as const,
+      completedAt: new Date('2026-08-28T00:00:00Z'),
+    };
+    const f = fixture({
+      store: {
+        failAttempt: vi.fn(async () => ({
+          status: 'completed' as const,
+          attempt: completedAttempt,
+        })),
+      },
+    });
+
+    await expect(
+      f.service.failExport({
+        userId: 7,
+        projectId: 'vedp_project',
+        versionId: 'vedv_current',
+        renderAttemptId: 'vedr_attempt',
+      }),
+    ).resolves.toMatchObject({ status: 'completed', file: { fileId: 'file_output' } });
+    expect(f.files.discard).not.toHaveBeenCalled();
+  });
+
+  it('locks and fails a pending attempt before discarding its reserved output', async () => {
+    const f = fixture({
+      store: {
+        failAttempt: vi.fn(async () => ({ status: 'failed' as const, attempt: ATTEMPT })),
+      },
+    });
+
+    await expect(
+      f.service.failExport({
+        userId: 7,
+        projectId: 'vedp_project',
+        versionId: 'vedv_current',
+        renderAttemptId: 'vedr_attempt',
+      }),
+    ).resolves.toEqual({ status: 'failed' });
+    expect(vi.mocked(f.store.failAttempt).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(f.files.discard).mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
   });
 
   it('returns an owned retained output for project reload', async () => {

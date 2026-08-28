@@ -1,5 +1,5 @@
 import { newExternalId } from '@holaday/shared-types';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, lte } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows, readInsertId } from '../db/mysql-result.js';
 import type { taskFiles } from '../db/schema/task-files.js';
@@ -74,7 +74,11 @@ export interface VideoEditRenderStore {
     versionId: string;
     renderAttemptId: string;
     failedAt: Date;
-  }): Promise<{ status: 'failed' | 'not_found' }>;
+  }): Promise<
+    | { status: 'failed'; attempt: VideoEditRenderAttemptRecord }
+    | { status: 'completed'; attempt: VideoEditRenderAttemptRecord }
+    | { status: 'not_found' }
+  >;
 }
 
 export interface VideoEditRenderFilePort {
@@ -253,14 +257,18 @@ export class VideoEditRenderService {
     projectId: string;
     versionId: string;
     renderAttemptId: string;
-  }): Promise<{ status: 'failed' | 'not_found' }> {
+  }): Promise<
+    { status: 'failed' | 'not_found' } | { status: 'completed'; file: VideoEditDownloadPayload }
+  > {
     const now = this.dependencies.now?.() ?? new Date();
-    const found = await this.dependencies.store.findAttempt({ ...input, now });
-    if (found.status === 'pending') {
-      const file = await this.dependencies.files.get(found.attempt.outputFileId, input.userId);
-      if (file) await this.dependencies.files.discard(file.externalId, input.userId);
+    const failed = await this.dependencies.store.failAttempt({ ...input, failedAt: now });
+    if (failed.status === 'not_found') return failed;
+    const file = await this.dependencies.files.get(failed.attempt.outputFileId, input.userId);
+    if (failed.status === 'completed') {
+      return file ? { status: 'completed', file: outputPayload(file) } : { status: 'failed' };
     }
-    return this.dependencies.store.failAttempt({ ...input, failedAt: now });
+    if (file) await this.dependencies.files.discard(file.externalId, input.userId);
+    return { status: 'failed' };
   }
 
   async getOutput(input: {
@@ -367,7 +375,28 @@ export class DrizzleVideoEditRenderStore implements VideoEditRenderStore {
         .for('update');
       if (!version) return { status: 'stale_version' as const };
       if (version.sdkDocument === null) return { status: 'version_not_ready' as const };
-      if (version.renderStatus !== 'idle' && version.renderStatus !== 'failed') {
+      let renderStatus = version.renderStatus;
+      if (renderStatus === 'rendering') {
+        const expired = await transaction
+          .update(videoEditRenderAttempts)
+          .set({ status: 'failed' })
+          .where(
+            and(
+              eq(videoEditRenderAttempts.projectId, project.id),
+              eq(videoEditRenderAttempts.versionId, version.id),
+              eq(videoEditRenderAttempts.status, 'pending'),
+              lte(videoEditRenderAttempts.expiresAt, input.createdAt),
+            ),
+          );
+        if (readAffectedRows(expired) > 0) {
+          await transaction
+            .update(videoEditVersions)
+            .set({ renderStatus: 'failed' })
+            .where(eq(videoEditVersions.id, version.id));
+          renderStatus = 'failed';
+        }
+      }
+      if (renderStatus !== 'idle' && renderStatus !== 'failed') {
         return { status: 'already_rendering' as const };
       }
       const result = await transaction.insert(videoEditRenderAttempts).values({
@@ -405,33 +434,52 @@ export class DrizzleVideoEditRenderStore implements VideoEditRenderStore {
   }
 
   async findAttempt(input: Parameters<VideoEditRenderStore['findAttempt']>[0]) {
-    const [row] = await this.db
-      .select({
-        attempt: videoEditRenderAttempts,
-        projectExternalId: videoEditProjects.externalId,
-        currentVersionId: videoEditProjects.currentVersionId,
-        versionExternalId: videoEditVersions.externalId,
-      })
-      .from(videoEditRenderAttempts)
-      .innerJoin(videoEditProjects, eq(videoEditRenderAttempts.projectId, videoEditProjects.id))
-      .innerJoin(videoEditVersions, eq(videoEditRenderAttempts.versionId, videoEditVersions.id))
-      .where(
-        and(
-          eq(videoEditRenderAttempts.externalId, input.renderAttemptId),
-          eq(videoEditRenderAttempts.userId, input.userId),
-          eq(videoEditProjects.externalId, input.projectId),
-          eq(videoEditVersions.externalId, input.versionId),
-        ),
-      )
-      .limit(1);
-    if (!row) return { status: 'not_found' as const };
-    if (row.currentVersionId !== row.attempt.versionId) return { status: 'stale_version' as const };
-    if (row.attempt.status === 'completed') {
-      return { status: 'completed' as const, attempt: renderAttempt(row.attempt) };
-    }
-    if (row.attempt.status === 'failed') return { status: 'failed' as const };
-    if (row.attempt.expiresAt <= input.now) return { status: 'expired' as const };
-    return { status: 'pending' as const, attempt: renderAttempt(row.attempt) };
+    return this.db.transaction(async (transaction) => {
+      const [row] = await transaction
+        .select({
+          attempt: videoEditRenderAttempts,
+          projectExternalId: videoEditProjects.externalId,
+          currentVersionId: videoEditProjects.currentVersionId,
+          versionExternalId: videoEditVersions.externalId,
+        })
+        .from(videoEditRenderAttempts)
+        .innerJoin(videoEditProjects, eq(videoEditRenderAttempts.projectId, videoEditProjects.id))
+        .innerJoin(videoEditVersions, eq(videoEditRenderAttempts.versionId, videoEditVersions.id))
+        .where(
+          and(
+            eq(videoEditRenderAttempts.externalId, input.renderAttemptId),
+            eq(videoEditRenderAttempts.userId, input.userId),
+            eq(videoEditProjects.externalId, input.projectId),
+            eq(videoEditVersions.externalId, input.versionId),
+          ),
+        )
+        .limit(1)
+        .for('update');
+      if (!row) return { status: 'not_found' as const };
+      if (row.currentVersionId !== row.attempt.versionId)
+        return { status: 'stale_version' as const };
+      if (row.attempt.status === 'completed') {
+        return { status: 'completed' as const, attempt: renderAttempt(row.attempt) };
+      }
+      if (row.attempt.status === 'failed') return { status: 'failed' as const };
+      if (row.attempt.expiresAt <= input.now) {
+        await transaction
+          .update(videoEditRenderAttempts)
+          .set({ status: 'failed' })
+          .where(
+            and(
+              eq(videoEditRenderAttempts.id, row.attempt.id),
+              eq(videoEditRenderAttempts.status, 'pending'),
+            ),
+          );
+        await transaction
+          .update(videoEditVersions)
+          .set({ renderStatus: 'failed' })
+          .where(eq(videoEditVersions.id, row.attempt.versionId));
+        return { status: 'expired' as const };
+      }
+      return { status: 'pending' as const, attempt: renderAttempt(row.attempt) };
+    });
   }
 
   async completeAttempt(input: Parameters<VideoEditRenderStore['completeAttempt']>[0]) {
@@ -511,17 +559,28 @@ export class DrizzleVideoEditRenderStore implements VideoEditRenderStore {
         .limit(1)
         .for('update');
       if (!row) return { status: 'not_found' as const };
+      if (row.attempt.status === 'completed') {
+        return { status: 'completed' as const, attempt: renderAttempt(row.attempt) };
+      }
+      if (row.attempt.status !== 'pending') {
+        return { status: 'failed' as const, attempt: renderAttempt(row.attempt) };
+      }
       await transaction
         .update(videoEditRenderAttempts)
         .set({ status: 'failed' })
-        .where(eq(videoEditRenderAttempts.id, row.attempt.id));
+        .where(
+          and(
+            eq(videoEditRenderAttempts.id, row.attempt.id),
+            eq(videoEditRenderAttempts.status, 'pending'),
+          ),
+        );
       if (row.currentVersionId === row.attempt.versionId) {
         await transaction
           .update(videoEditVersions)
           .set({ renderStatus: 'failed' })
           .where(eq(videoEditVersions.id, row.attempt.versionId));
       }
-      return { status: 'failed' as const };
+      return { status: 'failed' as const, attempt: renderAttempt(row.attempt) };
     });
   }
 }

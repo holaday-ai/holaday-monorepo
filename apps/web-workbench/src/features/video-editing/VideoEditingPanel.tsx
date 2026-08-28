@@ -77,7 +77,11 @@ type CompleteExportResult =
 
 export interface VideoEditingClient {
   getProject(input: { projectId: string }): Promise<VideoEditingProjectData>;
-  planInstruction(input: { projectId: string; instruction: string }): Promise<PlanningResult>;
+  planInstruction(input: {
+    projectId: string;
+    instruction: string;
+    selectedSceneId?: string;
+  }): Promise<PlanningResult>;
   applyFreeOperations(input: {
     projectId: string;
     baseVersionId: string;
@@ -121,7 +125,9 @@ export interface VideoEditingClient {
     projectId: string;
     versionId: string;
     renderAttemptId: string;
-  }): Promise<{ status: 'failed' | 'not_found' }>;
+  }): Promise<
+    { status: 'failed' | 'not_found' } | { status: 'completed'; file: FileDownloadPayload }
+  >;
 }
 
 export function VideoEditingRoute(): JSX.Element {
@@ -160,9 +166,12 @@ const defaultClient: VideoEditingClient = {
       input,
     ) as unknown as Promise<CompleteExportResult>,
   failExport: (input) =>
-    trpc.videoEditing.failExport.mutate(input) as unknown as Promise<{
-      status: 'failed' | 'not_found';
-    }>,
+    trpc.videoEditing.failExport.mutate(input) as unknown as Promise<
+      | {
+          status: 'failed' | 'not_found';
+        }
+      | { status: 'completed'; file: FileDownloadPayload }
+    >,
 };
 
 const FAILURE_COPY: Record<VideoEditingFailure, string> = {
@@ -365,7 +374,11 @@ export function VideoEditingPanel({
     dispatch({ type: 'request_started', requestId, status: 'planning' });
     setQuote(null);
     try {
-      const result = await client.planInstruction({ projectId, instruction: instruction.trim() });
+      const result = await client.planInstruction({
+        projectId,
+        instruction: instruction.trim(),
+        ...(selectedSceneId ? { selectedSceneId } : {}),
+      });
       if (result.status === 'planner_unavailable') {
         dispatch({ type: 'request_failed', requestId, error: 'planner_unavailable' });
         return;
@@ -523,17 +536,31 @@ export function VideoEditingPanel({
         version: { ...data.currentVersion, renderStatus: 'completed' },
       });
     } catch (error) {
+      let recoveredCompletion = false;
       if (renderAttemptId) {
-        await client.failExport({ projectId, versionId, renderAttemptId }).catch(() => undefined);
+        const recovery = await client
+          .failExport({ projectId, versionId, renderAttemptId })
+          .catch(() => undefined);
+        if (recovery?.status === 'completed') {
+          recoveredCompletion = true;
+          setExportedFile(recovery.file);
+          dispatch({
+            type: 'version_succeeded',
+            requestId,
+            version: { ...data.currentVersion, renderStatus: 'completed' },
+          });
+        }
       }
-      dispatch({
-        type: 'request_failed',
-        requestId,
-        error:
-          error instanceof Error && error.message === 'stale version'
-            ? 'stale_version'
-            : 'render_failed',
-      });
+      if (!recoveredCompletion) {
+        dispatch({
+          type: 'request_failed',
+          requestId,
+          error:
+            error instanceof Error && error.message === 'stale version'
+              ? 'stale_version'
+              : 'render_failed',
+        });
+      }
     } finally {
       actionLockRef.current = false;
     }

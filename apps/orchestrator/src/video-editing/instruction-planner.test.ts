@@ -68,6 +68,25 @@ describe('video edit instruction planner', () => {
     });
   });
 
+  it('passes the selected scene as explicit planning context', async () => {
+    const plannerClient = client({
+      summary: '裁掉当前片段开头 1 秒',
+      operations: [{ kind: 'trim', sceneId: 'scene_2', startMs: 1_000, endMs: 4_000 }],
+    });
+
+    await planVideoEditInstruction({
+      instruction: '裁掉这一段开头 1 秒',
+      selectedSceneId: 'scene_2',
+      document: DOCUMENT,
+      sourceKind: 'generated',
+      client: plannerClient,
+    });
+
+    expect(plannerClient.plan).toHaveBeenCalledWith(
+      expect.objectContaining({ selectedSceneId: 'scene_2' }),
+    );
+  });
+
   it('requires an exact full-scene reorder', async () => {
     const plannerClient = client({
       summary: '把第 3 段放到最前面',

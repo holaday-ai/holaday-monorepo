@@ -98,6 +98,7 @@ export interface VideoEditingRuntime {
   ): Promise<Record<string, ScopedVideoPreview>>;
   planInstruction(input: {
     instruction: string;
+    selectedSceneId?: string;
     document: VideoEditDocument;
     sourceKind: VideoEditProjectRecord['sourceKind'];
   }): Promise<VideoEditPlanningResult>;
@@ -398,14 +399,24 @@ export function createVideoEditingRouter(dependencies: VideoEditingRouterDepende
           .object({
             projectId: externalIdSchema,
             instruction: z.string().trim().min(1).max(500),
+            selectedSceneId: z.string().trim().min(1).max(80).optional(),
           })
           .strict(),
       )
       .mutation(({ ctx, input }) =>
         withRuntime(dependencies, ctx, async (runtime, user) => {
           const loaded = await runtime.repository.getOwnedProject(input.projectId, user.id);
+          if (
+            input.selectedSceneId &&
+            !loaded.currentVersion.documentJson.scenes.some(
+              (scene) => scene.id === input.selectedSceneId,
+            )
+          ) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: '选中的片段已不可用' });
+          }
           return runtime.planInstruction({
             instruction: input.instruction,
+            ...(input.selectedSceneId ? { selectedSceneId: input.selectedSceneId } : {}),
             document: loaded.currentVersion.documentJson,
             sourceKind: loaded.project.sourceKind,
           });
