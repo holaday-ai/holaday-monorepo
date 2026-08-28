@@ -332,13 +332,15 @@ export function ImagePage(): JSX.Element {
     row: ImageHistoryRow,
     selectedFileId?: string,
   ): Promise<void> {
+    if (uploadInFlightRef.current) return;
     if (action === 'keep_subject') {
       const subjectFileId = row.imageOptions.subjectFileId;
       if (!subjectFileId) return;
       try {
         const result = await trpc.files.availability.query({ fileIds: [subjectFileId] });
+        if (uploadInFlightRef.current) return;
         if (result.items[0]?.available !== true) {
-          setDraft(createImageStudioDraft('lock_subject'));
+          replaceDraft(createImageStudioDraft('lock_subject'));
           setInlineError('原主角图已失效，请重新上传主角');
           composerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
           return;
@@ -348,9 +350,17 @@ export function ImagePage(): JSX.Element {
         return;
       }
     }
-    setDraft(continuationDraftFromImageTask(row, action, selectedFileId));
+    if (uploadInFlightRef.current) return;
+    replaceDraft(continuationDraftFromImageTask(row, action, selectedFileId));
     setInlineError(null);
     composerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function replaceDraft(nextDraft: ImageStudioDraft): void {
+    const previousAttachments = attachmentsRef.current;
+    attachmentsRef.current = nextDraft.attachments;
+    revokeCreativePreviewUrls(previousAttachments);
+    setDraft(nextDraft);
   }
 
   return (

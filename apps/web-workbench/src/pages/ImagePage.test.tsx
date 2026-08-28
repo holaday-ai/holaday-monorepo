@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ImagePage } from './ImagePage';
@@ -13,6 +13,13 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   uploadFile: vi.fn(),
   toast: vi.fn(),
+  historyContinue: null as
+    | null
+    | ((
+        action: string,
+        row: Record<string, unknown>,
+        selectedFileId?: string,
+      ) => void | Promise<void>),
 }));
 
 vi.mock('@/stores/task-store', () => ({
@@ -36,7 +43,10 @@ vi.mock('@/components/ui/toast', async (importOriginal) => {
 });
 
 vi.mock('@/components/image/ImageHistory', () => ({
-  ImageHistory: () => <div data-testid="image-history" />,
+  ImageHistory: ({ onContinue }: { onContinue: NonNullable<typeof mocks.historyContinue> }) => {
+    mocks.historyContinue = onContinue;
+    return <div data-testid="image-history" />;
+  },
 }));
 
 vi.mock('@/components/image/ImageResultPanel', () => ({
@@ -57,6 +67,7 @@ beforeEach(() => {
   mocks.navigate.mockReset();
   mocks.uploadFile.mockReset();
   mocks.toast.mockReset();
+  mocks.historyContinue = null;
   vi.stubGlobal('URL', {
     ...URL,
     createObjectURL: vi.fn((file: File) => `blob:${file.name}`),
@@ -303,6 +314,66 @@ describe('ImagePage task creation', () => {
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:first-subject.png');
   });
 
+  it('keeps a pending upload intact when a history continuation is requested', async () => {
+    const user = userEvent.setup();
+    let resolveUpload!: (value: {
+      fileId: string;
+      filename: string;
+      mimetype: string;
+      size: number;
+    }) => void;
+    mocks.uploadFile.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveUpload = resolve;
+      }),
+    );
+    render(<ImagePage />);
+
+    await user.upload(
+      screen.getByLabelText('添加图片'),
+      new File(['pending'], 'pending-reference.png', { type: 'image/png' }),
+    );
+    await waitFor(() => expect(screen.getByText('pending-reference.png')).toBeTruthy());
+
+    await act(async () => {
+      await mocks.historyContinue?.('reuse_settings', historyRow());
+    });
+
+    resolveUpload({
+      fileId: 'file_pending_reference',
+      filename: 'pending-reference.png',
+      mimetype: 'image/png',
+      size: 140,
+    });
+
+    await waitFor(() => expect(screen.getByText('pending-reference.png')).toBeTruthy());
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:pending-reference.png');
+  });
+
+  it('releases current local previews before loading a history continuation draft', async () => {
+    const user = userEvent.setup();
+    mocks.uploadFile.mockResolvedValueOnce({
+      fileId: 'file_current_reference',
+      filename: 'current-reference.png',
+      mimetype: 'image/png',
+      size: 160,
+    });
+    render(<ImagePage />);
+
+    await user.upload(
+      screen.getByLabelText('添加图片'),
+      new File(['current'], 'current-reference.png', { type: 'image/png' }),
+    );
+    await waitFor(() => expect(screen.getByText('current-reference.png')).toBeTruthy());
+
+    await act(async () => {
+      await mocks.historyContinue?.('reuse_settings', historyRow());
+    });
+
+    expect(screen.queryByText('current-reference.png')).toBeNull();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:current-reference.png');
+  });
+
   it('orders the selected subject first, creates once, then clears only transient draft fields', async () => {
     const user = userEvent.setup();
     mocks.uploadFile
@@ -410,3 +481,25 @@ describe('ImagePage task creation', () => {
     expect(screen.getByRole('alert').textContent).toContain('服务暂时不可用');
   });
 });
+
+function historyRow(): Record<string, unknown> {
+  return {
+    taskId: 'tsk_history_continue',
+    title: '历史图片',
+    intent: '生成图片：历史图片',
+    status: 'completed',
+    createdAt: new Date('2026-08-28T06:00:00.000Z'),
+    downloads: [],
+    imageOptions: {
+      model: 'nano_banana_2',
+      style: 'random',
+      aspectRatio: '1:1',
+      imageCount: 1,
+      mode: 'free',
+      goal: 'inspiration',
+      visiblePrompt: '历史图片',
+    },
+    starred: false,
+    starredAt: null,
+  };
+}
