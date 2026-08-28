@@ -42,3 +42,4 @@ export * from './stock-risk-monitors.js';
 export * from './energy-analytics.js';
 export * from './account-closures.js';
 export * from './feedback-cases.js';
+export * from './video-editing.js';

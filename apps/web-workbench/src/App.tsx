@@ -82,6 +82,11 @@ const StockDiscoveryPage = lazyRoute(
 const StockTasksPage = lazyRoute(loadStockTasksPageRoute, 'StockTasksPage');
 const TermsPage = lazyRoute(() => import('@/pages/TermsPage'), 'TermsPage');
 const UsagePage = lazyRoute(() => import('@/pages/UsagePage'), 'UsagePage');
+const VideoEditingRoute = lazy(() =>
+  import('@/features/video-editing/VideoEditingPanel').then((module) => ({
+    default: module.VideoEditingRoute,
+  })),
+);
 const VideoPage = lazy(() =>
   import('@/pages/VideoPage').then((module) => ({ default: module.VideoPage })),
 );
@@ -198,6 +203,7 @@ export function App(): JSX.Element {
             <Route path="/starred" element={lazyElement(<StarredPage />)} />
             <Route path="/files" element={lazyElement(<FilesPage />)} />
             <Route path="/video" element={<VideoGate />} />
+            <Route path="/video/edit/:projectId" element={lazyElement(<VideoEditingRoute />)} />
             <Route path="/image" element={lazyElement(<ImagePage />)} />
             <Route path="/planned" element={lazyElement(<PlannedTasksPage />)} />
             <Route path="/planned/legacy-scheduled" element={lazyElement(<ScheduledPage />)} />

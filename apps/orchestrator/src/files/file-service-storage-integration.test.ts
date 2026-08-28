@@ -27,6 +27,7 @@ import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { FileService } from './file-service.js';
 import {
   LocalStorageProvider,
   _resetSharedStorageProviderForTesting,
@@ -106,5 +107,46 @@ describe('FileService → shared StorageProvider plumbing (Codex P5 fix)', () =>
     });
     const got = await shared.get(storagePath);
     expect(got?.equals(buf)).toBe(true);
+  });
+
+  it('returns a scoped preview with the requested TTL and an authenticated local fallback', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-28T01:00:00Z'));
+    const row = {
+      id: 31,
+      externalId: 'file_owned_video',
+      userId: 7,
+      taskId: null,
+      kind: 'input',
+      filename: 'clip.mp4',
+      mimetype: 'video/mp4',
+      sizeBytes: 1_024,
+      storagePath: '/opaque/file_owned_video',
+      status: 'active',
+      createdAt: new Date('2026-08-28T00:00:00Z'),
+      expiresAt: null,
+    };
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: () => ({ limit: async () => [row] }),
+        }),
+      }),
+    };
+    const storage = {
+      stat: vi.fn(async () => ({ sizeBytes: row.sizeBytes })),
+      getSignedUrl: vi.fn(async () => null),
+    };
+    const service = new FileService(db as never, fakeLogger, storage as never);
+
+    await expect(service.getScopedPreviewForUser(row.externalId, 7, 900)).resolves.toEqual({
+      url: '/api/files/file_owned_video/download',
+      expiresAt: new Date('2026-08-28T01:15:00Z'),
+      delivery: 'authenticated',
+    });
+    expect(storage.getSignedUrl).toHaveBeenCalledWith(row.storagePath, {
+      expiresInSeconds: 900,
+    });
+    vi.useRealTimers();
   });
 });

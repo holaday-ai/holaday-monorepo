@@ -87,6 +87,10 @@ export interface VideoRow {
   status: string;
   createdAt: string | number | Date;
   download?: FileDownloadPayload;
+  /** All downloadable outputs for multi-image tasks; `download` remains the primary artifact. */
+  downloads?: FileDownloadPayload[];
+  /** MIME for continue-editing eligibility; legacy video rows infer video/mp4 from the lane. */
+  mimetype?: string;
   /** Backend-stamped type — drives per-tab history isolation + the type chip. */
   videoType?: VideoType;
   /** First-frame poster (R2, Bearer-gated) — rendered as a lazy thumbnail. */
@@ -493,6 +497,10 @@ export function toVideoRow(raw: unknown): VideoRow | null {
       ...(typeof att.expiresAt === 'string' ? { expiresAt: att.expiresAt } : {}),
       ...(att.availability === 'unavailable' ? { unavailable: true } : {}),
     },
+    mimetype:
+      typeof att.mimetype === 'string' && att.mimetype.startsWith('video/')
+        ? att.mimetype
+        : 'video/mp4',
     ...(videoType ? { videoType } : {}),
     ...(posterUrl ? { posterUrl } : {}),
     ...(att.posterAvailability === 'unavailable' ? { posterUnavailable: true } : {}),

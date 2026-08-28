@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  Check,
   Download,
   Copy,
   Eye,
@@ -12,6 +13,7 @@ import {
   MoreHorizontal,
   Plus,
   Search,
+  Scissors,
   Trash2,
 } from 'lucide-react';
 import * as React from 'react';
@@ -60,6 +62,12 @@ import {
 import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
+import {
+  canCombineVideoRows,
+  canContinueEditing,
+  createVideoEditingProject,
+  type VideoEditingEntryArtifact,
+} from '@/features/video-editing/video-edit-entry';
 
 type UiFile = NormalizedFileRow;
 
@@ -92,6 +100,10 @@ export function FilesPage(): JSX.Element {
   const [previewing, setPreviewing] = React.useState<FilePreviewPayload | null>(
     null,
   );
+  const [videoEditingEnabled, setVideoEditingEnabled] = React.useState(false);
+  const [selectionMode, setSelectionMode] = React.useState(false);
+  const [selectedVideoFileIds, setSelectedVideoFileIds] = React.useState<string[]>([]);
+  const [editingFileId, setEditingFileId] = React.useState<string | null>(null);
   const unavailableFiles = useUnavailableFiles();
   const debouncedQuery = useDebouncedValue(q.trim(), 250);
 
@@ -169,6 +181,27 @@ export function FilesPage(): JSX.Element {
     };
   }, [refresh]);
 
+  React.useEffect(() => {
+    let active = true;
+    void trpc.videoEditing.capability.query().then(
+      (result) => {
+        if (active) setVideoEditingEnabled(result.enabled);
+      },
+      () => {
+        if (active) setVideoEditingEnabled(false);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (filter === 'videos') return;
+    setSelectionMode(false);
+    setSelectedVideoFileIds([]);
+  }, [filter]);
+
   function downloadUrl(fileId: string): string {
     return `/api/files/${encodeURIComponent(fileId)}/download`;
   }
@@ -224,6 +257,47 @@ export function FilesPage(): JSX.Element {
       },
     });
   }
+
+  function editingArtifact(file: UiFile): VideoEditingEntryArtifact {
+    return {
+      fileId: file.fileId,
+      mimetype: file.mimetype,
+      availability: isFileUnavailable(
+        { fileId: file.fileId, url: downloadUrl(file.fileId) },
+        unavailableFiles,
+      )
+        ? 'unavailable'
+        : 'active',
+    };
+  }
+
+  async function openEditingProject(sourceFileIds: string[]): Promise<void> {
+    if (editingFileId || sourceFileIds.length === 0) return;
+    setEditingFileId(sourceFileIds.length === 1 ? sourceFileIds[0]! : 'combined');
+    try {
+      const { projectId } = await createVideoEditingProject({
+        sourceFileIds,
+        create: (input) => trpc.videoEditing.createProject.mutate(input),
+      });
+      navigate(`/video/edit/${encodeURIComponent(projectId)}`);
+    } catch (error) {
+      toast.show(error instanceof Error ? error.message : '暂时无法打开剪辑', 'error');
+    } finally {
+      if (mountedRef.current) setEditingFileId(null);
+    }
+  }
+
+  function toggleVideoSelection(fileId: string): void {
+    setSelectedVideoFileIds((current) =>
+      current.includes(fileId) ? current.filter((id) => id !== fileId) : [...current, fileId],
+    );
+  }
+
+  const selectedVideoFiles = selectedVideoFileIds.flatMap((fileId) => {
+    const file = files.find((candidate) => candidate.fileId === fileId);
+    return file ? [editingArtifact(file)] : [];
+  });
+  const combination = canCombineVideoRows(selectedVideoFiles);
 
   const emptyCopy = filesEmptyCopy({ query: q, filter });
   const summary = loading
@@ -286,16 +360,61 @@ export function FilesPage(): JSX.Element {
               onClick={() => setFilter('documents')}
             />
           </div>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="搜索文件名…"
-              className="w-full rounded-[8px] border border-[#DCDDDD] bg-white py-1.5 pl-8 pr-3 text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)] focus-visible:border-[#ADADAD] focus-visible:outline-none sm:w-64"
-            />
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            {videoEditingEnabled && filter === 'videos' ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setSelectionMode((current) => !current);
+                  setSelectedVideoFileIds([]);
+                }}
+                className="h-8 gap-1.5 border-[#E0D2DF] bg-white text-[#6E5667] hover:bg-[#FFF7FA] hover:text-[#C02B66]"
+              >
+                <Scissors className="h-3.5 w-3.5" aria-hidden />
+                {selectionMode ? '退出拼接' : '选择视频拼接'}
+              </Button>
+            ) : null}
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="搜索文件名…"
+                className="w-full rounded-[8px] border border-[#DCDDDD] bg-white py-1.5 pl-8 pr-3 text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)] focus-visible:border-[#ADADAD] focus-visible:outline-none sm:w-64"
+              />
+            </div>
           </div>
         </div>
+
+        {selectionMode ? (
+          <div className="mb-4 flex flex-col gap-3 rounded-[16px] border border-[#E8DDE8] bg-[linear-gradient(120deg,#FFF9FB,#F6F8FF)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-[13px] font-semibold text-[#3B333D]">
+                已按顺序选择 {selectedVideoFileIds.length} 段
+              </div>
+              <div className="mt-0.5 text-[11px] text-[#817783]">
+                {combination.reason ?? '将按选择顺序创建一个可恢复的新剪辑项目。'}
+              </div>
+            </div>
+            <Button
+              type="button"
+              disabled={!combination.compatible || editingFileId !== null}
+              onClick={() => void openEditingProject(combination.sourceFileIds)}
+              className="h-10 shrink-0 gap-2 rounded-[10px]"
+            >
+              {editingFileId === 'combined' ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              ) : (
+                <Scissors className="h-4 w-4" aria-hidden />
+              )}
+              {editingFileId === 'combined'
+                ? '正在创建…'
+                : `把选中的 ${selectedVideoFileIds.length} 段串成一条`}
+            </Button>
+          </div>
+        ) : null}
 
         {loading ? (
           <PageLoadingPanel label="文件加载中" description="正在整理文件库" />
@@ -337,6 +456,15 @@ export function FilesPage(): JSX.Element {
                   )}
                   onPreview={() => onPreview(f)}
                   onUseInNewTask={() => onUseInNewTask(f)}
+                  canContinueEditing={canContinueEditing({
+                    capabilityEnabled: videoEditingEnabled,
+                    artifact: editingArtifact(f),
+                  })}
+                  editing={editingFileId === f.fileId}
+                  selectionMode={selectionMode}
+                  selected={selectedVideoFileIds.includes(f.fileId)}
+                  onContinueEditing={() => void openEditingProject([f.fileId])}
+                  onToggleSelection={() => toggleVideoSelection(f.fileId)}
                   onDownload={() => void onDownload(f)}
                   onCopyReference={() => void onCopyReference(f)}
                   onDelete={() => setPendingDelete(f)}
@@ -429,6 +557,12 @@ function FileRow({
   unavailable,
   onPreview,
   onUseInNewTask,
+  canContinueEditing: showContinueEditing,
+  editing,
+  selectionMode,
+  selected,
+  onContinueEditing,
+  onToggleSelection,
   onDownload,
   onCopyReference,
   onDelete,
@@ -437,6 +571,12 @@ function FileRow({
   unavailable: boolean;
   onPreview: () => void;
   onUseInNewTask: () => void;
+  canContinueEditing: boolean;
+  editing: boolean;
+  selectionMode: boolean;
+  selected: boolean;
+  onContinueEditing: () => void;
+  onToggleSelection: () => void;
   onDownload: () => void;
   onCopyReference: () => void;
   onDelete: () => void;
@@ -496,6 +636,43 @@ function FileRow({
       {/* Always-visible primary action + More menu. No hover-only
           opacity tricks — every action is reachable on touch. */}
       <div className="flex shrink-0 items-center gap-1">
+        {showContinueEditing && selectionMode ? (
+          <IconTooltip label={selected ? '取消选择' : '选择用于拼接'}>
+            <button
+              type="button"
+              onClick={onToggleSelection}
+              aria-pressed={selected}
+              aria-label={`${selected ? '取消选择' : '选择'} ${file.filename}`}
+              title={`${selected ? '取消选择' : '选择'} ${file.filename}`}
+              className={cn(
+                'inline-flex h-8 w-8 items-center justify-center rounded-md border transition-colors',
+                selected
+                  ? 'border-[#EA1F59] bg-[#EA1F59] text-white'
+                  : 'border-[#DCDDDD] bg-white text-[#8B8390] hover:border-[#EA1F59]/40 hover:text-[#EA1F59]',
+              )}
+            >
+              <Check className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          </IconTooltip>
+        ) : null}
+        {showContinueEditing && !selectionMode ? (
+          <IconTooltip label="继续剪辑">
+            <button
+              type="button"
+              onClick={onContinueEditing}
+              disabled={editing}
+              aria-label={`继续剪辑 ${file.filename}`}
+              title={`继续剪辑 ${file.filename}`}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#7A6473] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] disabled:cursor-wait disabled:opacity-60"
+            >
+              {editing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <Scissors className="h-3.5 w-3.5" aria-hidden />
+              )}
+            </button>
+          </IconTooltip>
+        ) : null}
         <IconTooltip label="用于新任务">
           <button
             type="button"

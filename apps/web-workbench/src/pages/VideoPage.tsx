@@ -4,6 +4,10 @@ import { LazyPosterImg } from '@/components/LazyPosterImg';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
+import {
+  canContinueEditing,
+  createVideoEditingProject,
+} from '@/features/video-editing/video-edit-entry';
 import { revokeCreativePreviewUrls } from '@/lib/creative-preview-urls';
 import { createMediaActionGuard } from '@/lib/media-action-guard';
 import { normalizeTaskHubCursor } from '@/lib/task-hub-state';
@@ -80,6 +84,7 @@ import {
   Palette,
   Pin,
   Play,
+  Scissors,
   Sparkles,
   Trash2,
   UserRound,
@@ -643,6 +648,7 @@ function CreativeStudioPage({
   historyRefreshKey?: string;
   currentTaskPanel: React.ReactNode;
 }): JSX.Element {
+  const navigate = useNavigate();
   const toast = useToast();
   const createTask = useTaskStore((s) => s.createTask);
   const [prompt, setPrompt] = React.useState('');
@@ -660,14 +666,53 @@ function CreativeStudioPage({
   const attachmentsRef = React.useRef(attachments);
   attachmentsRef.current = attachments;
   const [submitting, setSubmitting] = React.useState(false);
+  const [videoEditingEnabled, setVideoEditingEnabled] = React.useState(false);
+  const [uploadingForEditing, setUploadingForEditing] = React.useState(false);
   const [submitGuard] = React.useState(createMediaActionGuard);
   const imageInputRef = React.useRef<HTMLInputElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const editingUploadRef = React.useRef<HTMLInputElement>(null);
   const previousVideoTabRef = React.useRef<VideoTab>(videoTab);
   const isCloneVideo = videoTab === 'pet';
   const isIpVideo = videoTab === 'ip';
   const accent = '#EA1F59';
   const softBg = 'bg-[#EA1F59]/10';
+
+  React.useEffect(() => {
+    let active = true;
+    void trpc.videoEditing.capability.query().then(
+      (result) => {
+        if (active) setVideoEditingEnabled(result.enabled);
+      },
+      () => {
+        if (active) setVideoEditingEnabled(false);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function uploadForEditing(file: File): Promise<void> {
+    if (uploadingForEditing || !videoEditingEnabled) return;
+    if (!file.type.startsWith('video/')) {
+      toast.show('请选择视频文件', 'error');
+      return;
+    }
+    setUploadingForEditing(true);
+    try {
+      const uploaded = await uploadMediaFile(file);
+      const { projectId } = await createVideoEditingProject({
+        sourceFileIds: [uploaded.fileId],
+        create: (input) => trpc.videoEditing.createProject.mutate(input),
+      });
+      navigate(`/video/edit/${encodeURIComponent(projectId)}`);
+    } catch (error) {
+      toast.show(uploadFailureMessage(error), 'error');
+    } finally {
+      setUploadingForEditing(false);
+    }
+  }
 
   React.useEffect(
     () => () => {
@@ -1082,6 +1127,44 @@ function CreativeStudioPage({
                   />
                 ) : null}
               </div>
+
+              {videoEditingEnabled ? (
+                <div className="relative z-10 mt-3 flex flex-col gap-3 rounded-[18px] border border-[#E9E1EA] bg-[linear-gradient(120deg,#FFF9FB,#F7F8FF)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-[13px] font-semibold text-[#332E37]">
+                      已有视频也能继续创作
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-[#847B87]">
+                      原视频会保留，每次修改都生成新版本。
+                    </div>
+                  </div>
+                  <input
+                    ref={editingUploadRef}
+                    type="file"
+                    accept="video/*,.mp4,.mov,.webm"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void uploadForEditing(file);
+                      event.target.value = '';
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={uploadingForEditing}
+                    onClick={() => editingUploadRef.current?.click()}
+                    className="h-10 shrink-0 gap-2 rounded-[10px] border-[#DFCADA] bg-white px-4 text-[#7C4560] hover:bg-[#FFF5F8] hover:text-[#B72D5C]"
+                  >
+                    {uploadingForEditing ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                    ) : (
+                      <Scissors className="h-4 w-4" aria-hidden />
+                    )}
+                    {uploadingForEditing ? '正在导入…' : '上传视频，继续剪辑'}
+                  </Button>
+                </div>
+              ) : null}
 
               {currentTaskPanel ? (
                 <div className="relative z-10 mt-6">{currentTaskPanel}</div>
@@ -1824,6 +1907,8 @@ function VideoHistory({
   const [visibleCount, setVisibleCount] = React.useState(CREATIVE_HISTORY_VISIBLE_PAGE_SIZE);
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [loadMoreError, setLoadMoreError] = React.useState(false);
+  const [videoEditingEnabled, setVideoEditingEnabled] = React.useState(false);
+  const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null);
   const mountedRef = React.useRef(true);
   const loadRequestRef = React.useRef(0);
 
@@ -1831,6 +1916,21 @@ function VideoHistory({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    let active = true;
+    void trpc.videoEditing.capability.query().then(
+      (result) => {
+        if (active) setVideoEditingEnabled(result.enabled);
+      },
+      () => {
+        if (active) setVideoEditingEnabled(false);
+      },
+    );
+    return () => {
+      active = false;
     };
   }, []);
 
@@ -2013,6 +2113,25 @@ function VideoHistory({
       }
     },
     [pinningTaskId, toast, togglePin],
+  );
+
+  const handleContinueEditing = React.useCallback(
+    async (row: VideoRow, fileId: string) => {
+      if (editingTaskId) return;
+      setEditingTaskId(row.taskId);
+      try {
+        const { projectId } = await createVideoEditingProject({
+          sourceFileIds: [fileId],
+          create: (input) => trpc.videoEditing.createProject.mutate(input),
+        });
+        navigate(`/video/edit/${encodeURIComponent(projectId)}`);
+      } catch (error) {
+        toast.show(error instanceof Error ? error.message : '暂时无法打开剪辑', 'error');
+      } finally {
+        if (mountedRef.current) setEditingTaskId(null);
+      }
+    },
+    [editingTaskId, navigate, toast],
   );
 
   return (
@@ -2265,6 +2384,32 @@ function VideoHistory({
                     </div>
                   </div>
                   <div className="mt-5 space-y-2">
+                    {canContinueEditing({
+                      capabilityEnabled: videoEditingEnabled,
+                      artifact: {
+                        fileId: download.fileId,
+                        mimetype: row.mimetype ?? 'video/mp4',
+                        availability: download.unavailable ? 'unavailable' : 'active',
+                        expiresAt: download.expiresAt,
+                      },
+                      taskStatus: row.status,
+                    }) ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={editingTaskId !== null}
+                        onClick={() => void handleContinueEditing(row, download.fileId)}
+                        className="h-9 w-full gap-2 border-[#E0D2DF] bg-white text-[#6E5667] hover:bg-[#FFF7FA] hover:text-[#C02B66]"
+                      >
+                        {editingTaskId === row.taskId ? (
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                        ) : (
+                          <Scissors className="h-4 w-4" aria-hidden />
+                        )}
+                        {editingTaskId === row.taskId ? '正在打开…' : '继续剪辑'}
+                      </Button>
+                    ) : null}
                     {availabilityAwareDownloads.map((item) => (
                       <FileDownloadCard key={item.fileId} payload={item} showPreview={false} />
                     ))}
@@ -2344,6 +2489,8 @@ function CurrentVideoTaskPanel({
   const selectTask = useTaskStore((s) => s.selectTask);
   const abortTask = useTaskStore((s) => s.abortTask);
   const [confirming, setConfirming] = React.useState<string | null>(null);
+  const [videoEditingEnabled, setVideoEditingEnabled] = React.useState(false);
+  const [editingFileId, setEditingFileId] = React.useState<string | null>(null);
   const [actionGuard] = React.useState(createMediaActionGuard);
   const awaitingKind = resolveVideoAwaitingKind(task?.awaitingKind, awaiting?.awaitingKind);
   const latestStep = steps[steps.length - 1];
@@ -2356,6 +2503,37 @@ function CurrentVideoTaskPanel({
     latestStepSummary: latestStep?.actionSummary,
     resultText: task?.resultText,
   });
+
+  React.useEffect(() => {
+    let active = true;
+    void trpc.videoEditing.capability.query().then(
+      (result) => {
+        if (active) setVideoEditingEnabled(result.enabled);
+      },
+      () => {
+        if (active) setVideoEditingEnabled(false);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function continueEditing(attachment: UiTerminalAttachment): Promise<void> {
+    if (editingFileId) return;
+    setEditingFileId(attachment.fileId);
+    try {
+      const { projectId } = await createVideoEditingProject({
+        sourceFileIds: [attachment.fileId],
+        create: (input) => trpc.videoEditing.createProject.mutate(input),
+      });
+      navigate(`/video/edit/${encodeURIComponent(projectId)}`);
+    } catch (error) {
+      toast.show(error instanceof Error ? error.message : '暂时无法打开剪辑', 'error');
+    } finally {
+      setEditingFileId(null);
+    }
+  }
 
   async function confirmVideo(choice: 'confirm_video' | 'confirm_image' | 'cancel'): Promise<void> {
     if (!actionGuard.acquire()) return;
@@ -2524,12 +2702,41 @@ function CurrentVideoTaskPanel({
           {task.attachments && task.attachments.length > 0 && (
             <div className="space-y-2 border-t border-[#DCDDDD]/70 pt-3">
               <div className="text-[11px] font-medium text-muted-foreground">产出文件</div>
-              {task.attachments.map((attachment) => (
-                <FileDownloadCard
-                  key={attachment.fileId}
-                  payload={currentMediaDownloadPayload(attachment)}
-                />
-              ))}
+              {task.attachments.map((attachment) => {
+                const showContinueEditing = canContinueEditing({
+                  capabilityEnabled: videoEditingEnabled,
+                  artifact: {
+                    fileId: attachment.fileId,
+                    mimetype: attachment.mimetype,
+                    availability:
+                      attachment.availability === 'unavailable' ? 'unavailable' : 'active',
+                    expiresAt: attachment.expiresAt,
+                  },
+                  taskStatus: task.status,
+                });
+                return (
+                  <div key={attachment.fileId} className="space-y-2">
+                    <FileDownloadCard payload={currentMediaDownloadPayload(attachment)} />
+                    {showContinueEditing ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={editingFileId !== null}
+                        onClick={() => void continueEditing(attachment)}
+                        className="h-9 gap-2 border-[#E0D2DF] bg-white text-[#6E5667] hover:bg-[#FFF7FA] hover:text-[#C02B66]"
+                      >
+                        {editingFileId === attachment.fileId ? (
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                        ) : (
+                          <Scissors className="h-4 w-4" aria-hidden />
+                        )}
+                        {editingFileId === attachment.fileId ? '正在打开…' : '继续剪辑'}
+                      </Button>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

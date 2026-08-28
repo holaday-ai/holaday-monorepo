@@ -48,6 +48,7 @@ export const FILES_ROOT = process.env.HOLADAY_FILES_ROOT ?? '/tmp/holaday-files'
  */
 export const DEFAULT_OUTPUT_FILE_TTL_DAYS = 30;
 export const TEMPORARY_OUTPUT_TTL_MS = 15 * 60 * 1000;
+export const MAX_CLIENT_VIDEO_EXPORT_BYTES = 200 * 1024 * 1024;
 export function outputFileTtlMs(): number {
   const raw = Number(process.env.OUTPUT_FILE_TTL_DAYS);
   const days = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_OUTPUT_FILE_TTL_DAYS;
@@ -630,6 +631,129 @@ export class FileService {
     return { fileId: externalId, uploadUrl: signed.url, storagePath: signed.storagePath };
   }
 
+  /** Reserve a short-lived, user-owned output row and direct upload target for browser video export. */
+  async createPendingClientOutput(opts: {
+    userIdInternal: number;
+    userExternalId: string;
+    filename: string;
+    expiresAt: Date;
+  }): Promise<{
+    row: TaskFile;
+    uploadUrl: string;
+    requiredHeaders: Record<string, string>;
+  } | null> {
+    const externalId = newExternalId('file');
+    const safeFilename = sanitiseFilename(opts.filename);
+    const signed = await this.storage.getSignedPutUrl({
+      userExternalId: opts.userExternalId,
+      kind: 'output',
+      fileExternalId: externalId,
+      filename: safeFilename,
+      contentType: 'video/mp4',
+      expiresInSeconds: Math.max(
+        60,
+        Math.min(900, Math.floor((opts.expiresAt.getTime() - Date.now()) / 1_000)),
+      ),
+    });
+    if (!signed) return null;
+    await this.db.insert(taskFiles).values({
+      externalId,
+      userId: opts.userIdInternal,
+      taskId: null,
+      kind: 'output',
+      filename: safeFilename,
+      mimetype: 'video/mp4',
+      sizeBytes: 0,
+      storagePath: signed.storagePath,
+      status: 'pending',
+      expiresAt: opts.expiresAt,
+    });
+    const [row] = await this.db
+      .select()
+      .from(taskFiles)
+      .where(eq(taskFiles.externalId, externalId))
+      .limit(1);
+    if (!row) throw new Error('createPendingClientOutput: row vanished after insert');
+    return {
+      row,
+      uploadUrl: signed.url,
+      requiredHeaders: { 'Content-Type': 'video/mp4' },
+    };
+  }
+
+  async getClientOutputForUser(
+    fileIdInternal: number,
+    userIdInternal: number,
+  ): Promise<TaskFile | null> {
+    const [row] = await this.db
+      .select()
+      .from(taskFiles)
+      .where(and(eq(taskFiles.id, fileIdInternal), eq(taskFiles.userId, userIdInternal)))
+      .limit(1);
+    if (!row || row.kind !== 'output' || row.status === 'expired') return null;
+    return row;
+  }
+
+  async confirmClientOutput(
+    fileExternalId: string,
+    userIdInternal: number,
+  ): Promise<
+    | { status: 'completed'; row: TaskFile }
+    | { status: 'not_found' | 'not_uploaded' | 'too_large' | 'invalid_mime' }
+  > {
+    const [row] = await this.db
+      .select()
+      .from(taskFiles)
+      .where(and(eq(taskFiles.externalId, fileExternalId), eq(taskFiles.userId, userIdInternal)))
+      .limit(1);
+    if (!row || row.kind !== 'output' || row.status === 'expired') {
+      return { status: 'not_found' };
+    }
+    if (row.status === 'active') return { status: 'completed', row };
+    if (row.status !== 'pending' || (row.expiresAt && row.expiresAt <= new Date())) {
+      return { status: 'not_found' };
+    }
+    const meta = await this.storage.stat(row.storagePath);
+    if (!meta || meta.sizeBytes <= 0) return { status: 'not_uploaded' };
+    if (meta.sizeBytes > MAX_CLIENT_VIDEO_EXPORT_BYTES) return { status: 'too_large' };
+    if (meta.contentType && meta.contentType.split(';', 1)[0]?.trim() !== 'video/mp4') {
+      return { status: 'invalid_mime' };
+    }
+    const expiresAt = new Date(Date.now() + outputFileTtlMs());
+    await this.db
+      .update(taskFiles)
+      .set({ status: 'active', sizeBytes: meta.sizeBytes, expiresAt })
+      .where(
+        and(
+          eq(taskFiles.externalId, fileExternalId),
+          eq(taskFiles.userId, userIdInternal),
+          eq(taskFiles.status, 'pending'),
+        ),
+      );
+    const [updated] = await this.db
+      .select()
+      .from(taskFiles)
+      .where(eq(taskFiles.externalId, fileExternalId))
+      .limit(1);
+    return updated?.status === 'active'
+      ? { status: 'completed', row: updated }
+      : { status: 'not_found' };
+  }
+
+  async discardClientOutput(fileExternalId: string, userIdInternal: number): Promise<void> {
+    const [row] = await this.db
+      .select()
+      .from(taskFiles)
+      .where(and(eq(taskFiles.externalId, fileExternalId), eq(taskFiles.userId, userIdInternal)))
+      .limit(1);
+    if (!row || row.kind !== 'output') return;
+    await this.storage.delete(row.storagePath);
+    await this.db
+      .update(taskFiles)
+      .set({ status: 'expired', expiresAt: new Date() })
+      .where(eq(taskFiles.id, row.id));
+  }
+
   /**
    * Phase 1 (video) — finalize a presigned-PUT upload. Verifies the
    * object actually landed (HEAD), reads its REAL size (the client's
@@ -991,6 +1115,35 @@ export class FileService {
     const row = await this.readableRowForUser(fileExternalId, userIdInternal);
     if (!row) return null;
     return this.storage.getSignedUrl(row.storagePath, { expiresInSeconds });
+  }
+
+  /**
+   * Return a short-lived browser preview location after checking ownership,
+   * row lifecycle, and backing-object existence. R2 receives a signed URL;
+   * local storage falls back to the existing authenticated download route.
+   * The expiry describes how long the caller may retain this response and is
+   * deliberately not suitable for persistence in an editing document.
+   */
+  async getScopedPreviewForUser(
+    fileExternalId: string,
+    userIdInternal: number,
+    ttlSeconds = 900,
+  ): Promise<{
+    url: string;
+    expiresAt: Date;
+    delivery: 'signed' | 'authenticated';
+  } | null> {
+    const row = await this.readableRowForUser(fileExternalId, userIdInternal);
+    if (!row) return null;
+    const boundedTtlSeconds = Math.min(3_600, Math.max(60, Math.floor(ttlSeconds)));
+    const signedUrl = await this.storage.getSignedUrl(row.storagePath, {
+      expiresInSeconds: boundedTtlSeconds,
+    });
+    return {
+      url: signedUrl ?? `/api/files/${encodeURIComponent(fileExternalId)}/download`,
+      expiresAt: new Date(Date.now() + boundedTtlSeconds * 1_000),
+      delivery: signedUrl ? 'signed' : 'authenticated',
+    };
   }
 
   private async readableRowForUser(

@@ -195,6 +195,26 @@ const baseEnvSchema = z.object({
   VIDEO_CREATION_ALLOWLIST: z.string().default(''),
 
   /**
+   * Embedded “继续剪辑” gate. Default OFF until the CE.SDK commercial
+   * license, hostname scope, and browser/codec release matrix pass the
+   * production preflight. Only an allowlisted editor session may receive
+   * the browser-visible CE.SDK license material approved by IMG.LY.
+   */
+  VIDEO_EDITING_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /** Initial production enablement is canary-only; an empty value fails closed. */
+  VIDEO_EDITING_ALLOWLIST: z.string().default(''),
+  /** Vendor choice stays explicit so an unreviewed SDK cannot become a fallback. */
+  VIDEO_EDITING_PROVIDER: z.literal('cesdk').default('cesdk'),
+  /** Browser-visible CE.SDK license material; never log it or expose it outside the gated editor. */
+  CESDK_LICENSE: z.string().default(''),
+  /** Written CE.SDK hostname scope, validated again by the runtime gate. */
+  CESDK_LICENSED_HOSTNAMES: z.string().default(''),
+  /** Explicit staging hostname covered by the commercial license. */
+  VIDEO_EDITING_STAGING_HOSTNAME: z.string().default(''),
+  /**
    * Phase 1 #1 — template fill. When true, the 'template_fill' lane
    * fills a user-uploaded Office template (.docx/.xlsx) deterministically
    * and returns the filled file. When false (default), template_fill
