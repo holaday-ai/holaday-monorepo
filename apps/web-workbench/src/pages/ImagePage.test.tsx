@@ -535,6 +535,62 @@ describe('ImagePage task creation', () => {
     expect(screen.getByRole('button', { name: '添加主角图' })).toBeTruthy();
   });
 
+  it('freezes every draft mutation while task creation is pending', async () => {
+    const user = userEvent.setup();
+    mocks.uploadFile.mockResolvedValue({
+      fileId: 'file_submitted_reference',
+      filename: 'submitted-reference.png',
+      mimetype: 'image/png',
+      size: 200,
+    });
+    let resolveCreate!: (value: { taskId: string }) => void;
+    mocks.createTask.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+    render(<ImagePage />);
+
+    await user.type(
+      screen.getByRole('textbox', { name: '描述你想要的最终画面' }),
+      '制作一张明亮的夏日海报',
+    );
+    const input = screen.getByLabelText('添加图片');
+    await user.upload(
+      input,
+      new File(['submitted'], 'submitted-reference.png', { type: 'image/png' }),
+    );
+    await waitFor(() => expect(screen.getByText('submitted-reference.png')).toBeTruthy());
+
+    await user.click(screen.getByRole('button', { name: '开始生成' }));
+    await waitFor(() => expect(mocks.createTask).toHaveBeenCalledTimes(1));
+
+    expect(input.hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: /锁定主角/ }).hasAttribute('disabled')).toBe(true);
+    expect(
+      screen.getByRole('textbox', { name: '描述你想要的最终画面' }).hasAttribute('disabled'),
+    ).toBe(true);
+
+    await user.upload(input, new File(['late'], 'late-reference.png', { type: 'image/png' }));
+    await act(async () => {
+      await mocks.historyContinue?.('reuse_settings', historyRow());
+    });
+
+    expect(mocks.uploadFile).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('submitted-reference.png')).toBeTruthy();
+    expect(screen.queryByText('late-reference.png')).toBeNull();
+
+    resolveCreate({ taskId: 'tsk_submit_locked' });
+    await waitFor(() =>
+      expect(mocks.navigate).toHaveBeenCalledWith('/image?task=tsk_submit_locked'),
+    );
+
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:submitted-reference.png');
+    expect(URL.createObjectURL).not.toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'late-reference.png' }),
+    );
+  });
+
   it('retains the complete draft when task creation fails', async () => {
     const user = userEvent.setup();
     mocks.uploadFile.mockResolvedValueOnce({

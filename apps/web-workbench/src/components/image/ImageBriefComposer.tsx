@@ -30,6 +30,7 @@ const CHANGE_TARGET_OPTIONS: ReadonlyArray<{
 export interface ImageBriefComposerProps {
   draft: ImageStudioDraft;
   uploading: boolean;
+  disabled?: boolean;
   inlineError: string | null;
   actions?: ReactNode;
   onPromptChange(value: string): void;
@@ -42,6 +43,7 @@ export interface ImageBriefComposerProps {
 export function ImageBriefComposer({
   draft,
   uploading,
+  disabled = uploading,
   inlineError,
   actions,
   onPromptChange,
@@ -89,7 +91,7 @@ export function ImageBriefComposer({
                   aria-label="移除主角图"
                   title="移除主角图"
                   onClick={() => onRemoveAttachment(subject.clientId ?? subject.fileId)}
-                  disabled={uploading}
+                  disabled={disabled}
                   className="absolute right-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-white/95 text-[#6C626F] shadow-sm transition-colors hover:bg-[#FFF0F3] hover:text-[#B51E49] disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
                 >
                   <X className="h-4 w-4" aria-hidden />
@@ -102,7 +104,7 @@ export function ImageBriefComposer({
                   aria-label="更换主角图"
                   title="更换主角图"
                   onClick={onChooseImages}
-                  disabled={uploading}
+                  disabled={disabled}
                   className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-[#66516F] transition-colors hover:bg-[#F4EEF7] disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
                 >
                   <ImagePlus className="h-3.5 w-3.5" aria-hidden />
@@ -115,7 +117,7 @@ export function ImageBriefComposer({
               <AttachmentChip
                 attachment={subject}
                 badge="主角"
-                disabled={uploading}
+                disabled={disabled}
                 onRemove={() => onRemoveAttachment(subject.clientId ?? subject.fileId)}
               />
               <button
@@ -123,7 +125,7 @@ export function ImageBriefComposer({
                 aria-label="更换主角图"
                 title="更换主角图"
                 onClick={onChooseImages}
-                disabled={uploading}
+                disabled={disabled}
                 className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[#DED5E1] bg-white px-3 text-xs font-semibold text-[#66516F] transition-colors hover:bg-[#F4EEF7] disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
               >
                 <ImagePlus className="h-3.5 w-3.5" aria-hidden />
@@ -136,7 +138,7 @@ export function ImageBriefComposer({
               aria-label="添加主角图"
               title="添加主角图"
               onClick={onChooseImages}
-              disabled={uploading}
+              disabled={disabled}
               className="mt-3 flex min-h-[142px] w-full flex-col items-center justify-center rounded-[16px] border border-dashed border-[#CFC3D2] bg-[#FDF9FF] px-4 text-center text-[#675B6D] transition-colors hover:border-[#9C87AA] hover:bg-[#FAF3FF] disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
             >
               <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#EEE6FF] text-[#7252A0]">
@@ -164,9 +166,10 @@ export function ImageBriefComposer({
                     key={option.value}
                     type="button"
                     aria-pressed={selected}
+                    disabled={disabled}
                     onClick={() => onToggleChangeTarget(option.value)}
                     className={cn(
-                      'inline-flex min-h-10 items-center gap-2 rounded-xl border px-3.5 text-sm font-medium transition-colors motion-reduce:transition-none',
+                      'inline-flex min-h-10 items-center gap-2 rounded-xl border px-3.5 text-sm font-medium transition-colors disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none',
                       selected
                         ? 'border-[#9B84BE] bg-[#F2ECFF] text-[#604582]'
                         : 'border-transparent bg-[#F6F2F6] text-[#5F5663] hover:border-[#D9CEDC] hover:bg-white',
@@ -192,6 +195,7 @@ export function ImageBriefComposer({
           aria-label="描述你想要的最终画面"
           value={draft.prompt}
           maxLength={4_000}
+          disabled={disabled}
           onChange={(event) => onPromptChange(event.target.value)}
           placeholder={
             lockSubject
@@ -211,7 +215,7 @@ export function ImageBriefComposer({
           <button
             type="button"
             onClick={onChooseImages}
-            disabled={uploading}
+            disabled={disabled}
             className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#D8CFDA] bg-white px-4 text-sm font-semibold text-[#625666] transition-colors hover:border-[#AF9AB5] hover:bg-[#FBF8FC] disabled:opacity-60 motion-reduce:transition-none"
           >
             <ImagePlus className="h-4 w-4" aria-hidden />
@@ -225,7 +229,7 @@ export function ImageBriefComposer({
               <AttachmentChip
                 key={attachment.clientId ?? attachment.fileId}
                 attachment={attachment}
-                disabled={uploading}
+                disabled={disabled}
                 actionLabel={lockSubject && attachment.status === 'ready' ? '设为主角' : undefined}
                 onAction={
                   lockSubject && attachment.status === 'ready'

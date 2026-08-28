@@ -47,6 +47,7 @@ export function ImagePage(): JSX.Element {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const attachmentCounterRef = React.useRef(0);
   const uploadInFlightRef = React.useRef(false);
+  const submitInFlightRef = React.useRef(false);
   const continuationRequestRef = React.useRef(0);
   const attachmentsRef = React.useRef(draft.attachments);
   const composerRef = React.useRef<HTMLDivElement>(null);
@@ -91,19 +92,24 @@ export function ImagePage(): JSX.Element {
     continuationRequestRef.current += 1;
   }
 
+  function draftIsLocked(): boolean {
+    return uploadInFlightRef.current || submitInFlightRef.current;
+  }
+
   function switchGoal(goal: ImageStudioDraft['goal']): void {
-    if (uploadInFlightRef.current) return;
+    if (draftIsLocked()) return;
     invalidatePendingContinuation();
     setDraft((current) => switchImageCreationGoal(current, goal));
   }
 
   function switchCommercialUse(use: CommercialImageUse): void {
-    if (uploadInFlightRef.current) return;
+    if (draftIsLocked()) return;
     invalidatePendingContinuation();
     setDraft((current) => switchImageCreationGoal(current, 'commercial', use));
   }
 
   function toggleChangeTarget(target: ImageChangeTarget): void {
+    if (draftIsLocked()) return;
     invalidatePendingContinuation();
     setDraft((current) => ({
       ...current,
@@ -117,6 +123,7 @@ export function ImagePage(): JSX.Element {
     key: K,
     value: ImageStudioDraft[K],
   ): void {
+    if (draftIsLocked()) return;
     invalidatePendingContinuation();
     setDraft((current) => setImageStudioSetting(current, key, value));
   }
@@ -136,7 +143,7 @@ export function ImagePage(): JSX.Element {
   }
 
   async function handleFilesSelected(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
-    if (uploadInFlightRef.current) {
+    if (draftIsLocked()) {
       event.target.value = '';
       return;
     }
@@ -252,7 +259,7 @@ export function ImagePage(): JSX.Element {
   }
 
   function removeAttachment(clientId: string): void {
-    if (uploadInFlightRef.current) return;
+    if (draftIsLocked()) return;
     invalidatePendingContinuation();
     setDraft((current) => {
       const removed = current.attachments.find(
@@ -301,6 +308,7 @@ export function ImagePage(): JSX.Element {
   async function handleSubmit(): Promise<void> {
     if (validationMessage || submitting || !submitGuard.acquire()) return;
     invalidatePendingContinuation();
+    submitInFlightRef.current = true;
     setSubmitting(true);
     setInlineError(null);
     try {
@@ -322,7 +330,9 @@ export function ImagePage(): JSX.Element {
         setInlineError(result.error || '提交失败，请重试');
         return;
       }
-      revokeCreativePreviewUrls(draft.attachments);
+      const submittedAttachments = attachmentsRef.current;
+      attachmentsRef.current = [];
+      revokeCreativePreviewUrls(submittedAttachments);
       setDraft((current) => ({
         ...current,
         prompt: '',
@@ -334,6 +344,7 @@ export function ImagePage(): JSX.Element {
     } catch (error) {
       setInlineError(error instanceof Error ? error.message : '提交失败，请重试');
     } finally {
+      submitInFlightRef.current = false;
       submitGuard.release();
       setSubmitting(false);
     }
@@ -344,14 +355,14 @@ export function ImagePage(): JSX.Element {
     row: ImageHistoryRow,
     selectedFileId?: string,
   ): Promise<void> {
-    if (uploadInFlightRef.current) return;
+    if (draftIsLocked()) return;
     const requestId = ++continuationRequestRef.current;
     if (action === 'keep_subject') {
       const subjectFileId = row.imageOptions.subjectFileId;
       if (!subjectFileId) return;
       try {
         const result = await trpc.files.availability.query({ fileIds: [subjectFileId] });
-        if (uploadInFlightRef.current || requestId !== continuationRequestRef.current) return;
+        if (draftIsLocked() || requestId !== continuationRequestRef.current) return;
         if (result.items[0]?.available !== true) {
           replaceDraft(createImageStudioDraft('lock_subject'));
           setInlineError('原主角图已失效，请重新上传主角');
@@ -364,7 +375,7 @@ export function ImagePage(): JSX.Element {
         return;
       }
     }
-    if (uploadInFlightRef.current || requestId !== continuationRequestRef.current) return;
+    if (draftIsLocked() || requestId !== continuationRequestRef.current) return;
     replaceDraft(continuationDraftFromImageTask(row, action, selectedFileId));
     setInlineError(null);
     composerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -376,6 +387,8 @@ export function ImagePage(): JSX.Element {
     revokeCreativePreviewUrls(previousAttachments);
     setDraft(nextDraft);
   }
+
+  const draftLocked = uploading || submitting;
 
   return (
     <main className="min-h-full bg-[#FBFAF7] px-4 py-5 text-[#342E39] sm:px-6 lg:px-8">
@@ -390,7 +403,7 @@ export function ImagePage(): JSX.Element {
           <ImageGoalPicker
             value={draft.goal}
             commercialUse={draft.commercialUse}
-            disabled={uploading}
+            disabled={draftLocked}
             onChange={switchGoal}
             onCommercialUseChange={switchCommercialUse}
           />
@@ -402,13 +415,14 @@ export function ImagePage(): JSX.Element {
               multiple
               accept="image/png,image/jpeg,image/webp"
               aria-label="添加图片"
-              disabled={uploading}
+              disabled={draftLocked}
               className="sr-only"
               onChange={(event) => void handleFilesSelected(event)}
             />
             <ImageBriefComposer
               draft={draft}
               uploading={uploading}
+              disabled={draftLocked}
               inlineError={inlineError}
               actions={
                 <>
@@ -416,8 +430,9 @@ export function ImagePage(): JSX.Element {
                     <button
                       ref={settingsTriggerRef}
                       type="button"
+                      disabled={draftLocked}
                       onClick={() => setSettingsOpen(true)}
-                      className="inline-flex min-h-11 items-center gap-3 rounded-xl border border-[#E2DAE3] bg-[#FBF9FC] px-3 text-left transition-colors hover:border-[#CFC1D2] hover:bg-white motion-reduce:transition-none"
+                      className="inline-flex min-h-11 items-center gap-3 rounded-xl border border-[#E2DAE3] bg-[#FBF9FC] px-3 text-left transition-colors hover:border-[#CFC1D2] hover:bg-white disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
                     >
                       <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#F0E9FA] text-[#73529B]">
                         <Settings2 className="h-4 w-4" aria-hidden />
@@ -453,6 +468,7 @@ export function ImagePage(): JSX.Element {
                 </>
               }
               onPromptChange={(prompt) => {
+                if (draftIsLocked()) return;
                 invalidatePendingContinuation();
                 setDraft((current) => ({ ...current, prompt }));
               }}
@@ -460,7 +476,7 @@ export function ImagePage(): JSX.Element {
               onChooseImages={() => fileInputRef.current?.click()}
               onRemoveAttachment={removeAttachment}
               onSetSubject={(clientId) => {
-                if (uploadInFlightRef.current) return;
+                if (draftIsLocked()) return;
                 invalidatePendingContinuation();
                 setDraft((current) => ({ ...current, subjectAttachmentClientId: clientId }));
               }}
