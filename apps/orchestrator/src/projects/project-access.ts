@@ -1,5 +1,6 @@
 import { and, eq, isNotNull, isNull, or } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
+import { readAffectedRows } from '../db/mysql-result.js';
 import { organizationMembers } from '../db/schema/organization-members.js';
 import { organizations } from '../db/schema/organizations.js';
 import { projectMembers } from '../db/schema/project-members.js';
@@ -11,12 +12,12 @@ import {
   PROJECT_ROLES,
   type ProjectRole,
   canDeleteTeamProject,
+  canRemoveProjectMember,
   canRenameTeamProject,
 } from '../organizations/organization-permissions.js';
 
 export type ProjectAccessErrorCode = 'NOT_FOUND' | 'FORBIDDEN';
 
-/** Domain-only failure; transport adapters decide how to render it. */
 export class ProjectAccessError extends Error {
   constructor(public readonly code: ProjectAccessErrorCode) {
     super(code === 'NOT_FOUND' ? 'project not found' : 'project action forbidden');
@@ -24,17 +25,10 @@ export class ProjectAccessError extends Error {
   }
 }
 
-/** Only external IDs from the authenticated request may cross this boundary. */
 export interface ProjectAccessInput {
   actorExternalId: string;
   projectExternalId: string;
 }
-
-type ProjectMutationAction = 'rename' | 'manage_members' | 'delete';
-type ProjectAccessTransaction = Pick<DB, 'select' | 'insert' | 'update' | 'delete'>;
-type ProjectMutationGrant<Action extends ProjectMutationAction> = ProjectAccess & {
-  readonly action: Action;
-};
 
 export interface PersonalProjectAccess {
   projectId: number;
@@ -57,26 +51,11 @@ export interface OrganizationProjectAccess {
 }
 
 export type ProjectAccess = PersonalProjectAccess | OrganizationProjectAccess;
-type PublicProjectAccess = Readonly<ProjectAccess>;
-type ProjectActionExecutor<Result> = (access: PublicProjectAccess) => Promise<Result> | Result;
-
-/** A live rename capability; it expires before its enclosing transaction resolves. */
-export interface RenameProjectSession {
-  readonly action: 'rename';
-  rename<Result>(executor: ProjectActionExecutor<Result>): Promise<Result>;
-}
-
-/** A live project-membership management capability. */
-export interface ProjectMemberManagementSession {
-  readonly action: 'manage_members';
-  manageMembers<Result>(executor: ProjectActionExecutor<Result>): Promise<Result>;
-}
-
-/** A live project deletion capability. */
-export interface DeleteProjectSession {
-  readonly action: 'delete';
-  delete<Result>(executor: ProjectActionExecutor<Result>): Promise<Result>;
-}
+type ProjectMutationAction = 'rename' | 'manage_members' | 'delete';
+type ProjectAccessTransaction = Pick<DB, 'select' | 'update' | 'delete'>;
+type ProjectMutationGrant<Action extends ProjectMutationAction> = ProjectAccess & {
+  readonly action: Action;
+};
 
 interface ProjectAccessSnapshot {
   projectId: number;
@@ -100,14 +79,14 @@ interface ProjectAccessSnapshot {
   projectMemberStatus: string | null;
 }
 
-interface LiveCapability {
-  readonly tx: ProjectAccessTransaction;
-  readonly grant: ProjectMutationGrant<ProjectMutationAction>;
-  active: boolean;
-  used: boolean;
+interface TargetProjectMemberSnapshot {
+  id: number;
+  externalId: string;
+  projectId: number;
+  userId: number;
+  role: string;
+  status: string;
 }
-
-const capabilities = new WeakMap<object, LiveCapability>();
 
 function hidden(): never {
   throw new ProjectAccessError('NOT_FOUND');
@@ -125,11 +104,7 @@ function isProjectRole(role: string | null): role is ProjectRole {
   return role !== null && (PROJECT_ROLES as readonly string[]).includes(role);
 }
 
-/**
- * One actor- and project-bound snapshot for personal and team projects. The
- * joins stay LEFT so the personal branch remains visible; the WHERE branch
- * separately requires all organization/project membership rows for teams.
- */
+/** One actor/project-bound snapshot; LEFT joins preserve the personal branch. */
 function buildProjectAccessSnapshotQuery(
   db: Pick<DB, 'select'>,
   input: ProjectAccessInput,
@@ -200,6 +175,31 @@ function buildProjectAccessSnapshotQuery(
   return lock ? query.for('update').limit(1) : query.limit(1);
 }
 
+function buildLockedTargetMemberQuery(
+  db: Pick<DB, 'select'>,
+  projectId: number,
+  targetProjectMemberExternalId: string,
+) {
+  return db
+    .select({
+      id: projectMembers.id,
+      externalId: projectMembers.externalId,
+      projectId: projectMembers.projectId,
+      userId: projectMembers.userId,
+      role: projectMembers.role,
+      status: projectMembers.status,
+    })
+    .from(projectMembers)
+    .where(
+      and(
+        eq(projectMembers.projectId, projectId),
+        eq(projectMembers.externalId, targetProjectMemberExternalId),
+      ),
+    )
+    .for('update')
+    .limit(1);
+}
+
 function snapshotToAccess(
   snapshot: ProjectAccessSnapshot | undefined,
   input: ProjectAccessInput,
@@ -211,7 +211,6 @@ function snapshotToAccess(
   ) {
     return hidden();
   }
-
   if (snapshot.organizationInternalId === null) {
     if (
       snapshot.projectOwnerUserId !== snapshot.actorUserId ||
@@ -234,7 +233,6 @@ function snapshotToAccess(
       projectRole: null,
     };
   }
-
   if (
     snapshot.organizationRowId !== snapshot.organizationInternalId ||
     snapshot.organizationExternalId === null ||
@@ -252,7 +250,6 @@ function snapshotToAccess(
   ) {
     return hidden();
   }
-
   return {
     projectId: snapshot.projectId,
     scope: 'organization',
@@ -277,7 +274,6 @@ async function loadProjectAccess(
   return snapshotToAccess(snapshot, input);
 }
 
-/** Read-only access has no transaction or row-lock side effects. */
 export async function requireReadableProject(
   db: Pick<DB, 'select'>,
   input: ProjectAccessInput,
@@ -293,7 +289,6 @@ function authorizeMutation<Action extends ProjectMutationAction>(
     if (action === 'manage_members') return forbidden();
     return { ...access, action };
   }
-
   const context = {
     organizationId: access.organizationExternalId,
     projectOrganizationId: access.organizationExternalId,
@@ -317,104 +312,122 @@ function authorizeMutation<Action extends ProjectMutationAction>(
   return { ...access, action };
 }
 
-function requireLiveAction<Action extends ProjectMutationAction>(
-  session: object,
-  action: Action,
-): ProjectMutationGrant<Action> {
-  const capability = capabilities.get(session);
-  if (!capability?.active || capability.grant.action !== action) return forbidden();
-  capability.used = true;
-  return capability.grant as ProjectMutationGrant<Action>;
-}
-
-function freezeAccess(access: ProjectAccess): PublicProjectAccess {
-  return Object.freeze({ ...access }) as PublicProjectAccess;
-}
-
-function createRenameSession(): RenameProjectSession {
-  const session = {
-    action: 'rename' as const,
-    async rename<Result>(executor: ProjectActionExecutor<Result>): Promise<Result> {
-      const liveGrant = requireLiveAction(session, 'rename');
-      return executor(freezeAccess(liveGrant));
-    },
-  };
-  return Object.freeze(session);
-}
-
-function createMemberManagementSession(): ProjectMemberManagementSession {
-  const session = {
-    action: 'manage_members' as const,
-    async manageMembers<Result>(executor: ProjectActionExecutor<Result>): Promise<Result> {
-      const liveGrant = requireLiveAction(session, 'manage_members');
-      return executor(freezeAccess(liveGrant));
-    },
-  };
-  return Object.freeze(session);
-}
-
-function createDeleteSession(): DeleteProjectSession {
-  const session = {
-    action: 'delete' as const,
-    async delete<Result>(executor: ProjectActionExecutor<Result>): Promise<Result> {
-      const liveGrant = requireLiveAction(session, 'delete');
-      return executor(freezeAccess(liveGrant));
-    },
-  };
-  return Object.freeze(session);
-}
-
-async function withLiveSession<Action extends ProjectMutationAction, Session, Result>(
+async function withAuthorizedMutation<Action extends ProjectMutationAction, Result>(
   db: DB,
   input: ProjectAccessInput,
   action: Action,
-  createSession: () => Session,
-  executor: (session: Session) => Promise<Result>,
+  write: (tx: ProjectAccessTransaction, grant: ProjectMutationGrant<Action>) => Promise<Result>,
 ): Promise<Result> {
   return db.transaction(async (tx) => {
     const access = await loadProjectAccess(tx, input, true);
     const grant = authorizeMutation(access, action);
-    const session = createSession();
-    capabilities.set(session as object, { tx, grant, active: true, used: false });
-    try {
-      const result = await executor(session);
-      if (!capabilities.get(session as object)?.used) return forbidden();
-      return result;
-    } finally {
-      const capability = capabilities.get(session as object);
-      if (capability) capability.active = false;
-    }
+    return write(tx, grant);
   });
 }
 
-/** Executes rename work only within a locked, live rename session. */
-export function withRenameProjectSession<Result>(
-  db: DB,
-  input: ProjectAccessInput,
-  executor: (session: RenameProjectSession) => Promise<Result>,
-): Promise<Result> {
-  return withLiveSession(db, input, 'rename', createRenameSession, executor);
+function requireExactlyOne(result: unknown): void {
+  if (readAffectedRows(result) !== 1) hidden();
 }
 
-/** Executes project-membership work only within a locked, live member session. */
-export function withProjectMemberManagementSession<Result>(
-  db: DB,
-  input: ProjectAccessInput,
-  executor: (session: ProjectMemberManagementSession) => Promise<Result>,
-): Promise<Result> {
-  return withLiveSession(db, input, 'manage_members', createMemberManagementSession, executor);
+function publicAccess(grant: ProjectMutationGrant<ProjectMutationAction>): ProjectAccess {
+  const { action: _action, ...access } = grant;
+  return access;
 }
 
-/** Executes deletion work only within a locked, live delete session. */
-export function withDeleteProjectSession<Result>(
+export async function renameProjectWithAccess(
   db: DB,
   input: ProjectAccessInput,
-  executor: (session: DeleteProjectSession) => Promise<Result>,
-): Promise<Result> {
-  return withLiveSession(db, input, 'delete', createDeleteSession, executor);
+  update: { name: string },
+) {
+  return withAuthorizedMutation(db, input, 'rename', async (tx, grant) => {
+    const result = await tx
+      .update(projects)
+      .set({ name: update.name })
+      .where(
+        and(eq(projects.id, grant.projectId), eq(projects.externalId, input.projectExternalId)),
+      );
+    requireExactlyOne(result);
+    return { ...publicAccess(grant), name: update.name };
+  });
+}
+
+export async function removeProjectMemberWithAccess(
+  db: DB,
+  input: ProjectAccessInput,
+  targetProjectMemberExternalId: string,
+) {
+  return withAuthorizedMutation(db, input, 'manage_members', async (tx, grant) => {
+    const [target] = (await buildLockedTargetMemberQuery(
+      tx,
+      grant.projectId,
+      targetProjectMemberExternalId,
+    )) as TargetProjectMemberSnapshot[];
+    if (
+      !target ||
+      target.projectId !== grant.projectId ||
+      target.status !== 'active' ||
+      !isProjectRole(target.role)
+    ) {
+      return hidden();
+    }
+    if (grant.scope === 'personal') return forbidden();
+    const decision = canRemoveProjectMember({
+      organizationId: grant.organizationExternalId,
+      projectOrganizationId: grant.organizationExternalId,
+      targetProjectId: String(grant.projectId),
+      actorOrganizationMember: {
+        organizationId: grant.organizationExternalId,
+        userId: 'authoritative-actor',
+        role: grant.organizationRole,
+        status: 'active',
+      },
+      actorProjectMember: {
+        projectId: String(grant.projectId),
+        userId: 'authoritative-actor',
+        role: grant.projectRole,
+        status: 'active',
+      },
+      targetProjectMember: {
+        projectId: String(target.projectId),
+        userId: String(target.userId),
+        role: target.role,
+        status: target.status,
+      },
+    });
+    if (!decision.allowed) return forbidden();
+    const result = await tx
+      .update(projectMembers)
+      .set({ status: 'inactive' })
+      .where(
+        and(
+          eq(projectMembers.id, target.id),
+          eq(projectMembers.projectId, grant.projectId),
+          eq(projectMembers.status, 'active'),
+        ),
+      );
+    requireExactlyOne(result);
+    return {
+      ...publicAccess(grant),
+      projectMemberId: target.externalId,
+      status: 'inactive' as const,
+    };
+  });
+}
+
+export async function deleteProjectWithAccess(db: DB, input: ProjectAccessInput) {
+  return withAuthorizedMutation(db, input, 'delete', async (tx, grant) => {
+    const result = await tx
+      .delete(projects)
+      .where(
+        and(eq(projects.id, grant.projectId), eq(projects.externalId, input.projectExternalId)),
+      );
+    requireExactlyOne(result);
+    return publicAccess(grant);
+  });
 }
 
 export const __projectAccessInternals = {
   buildProjectAccessSnapshotQuery,
+  buildLockedTargetMemberQuery,
   snapshotToAccess,
 };
