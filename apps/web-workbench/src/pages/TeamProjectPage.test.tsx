@@ -88,6 +88,10 @@ const PROJECT_MEMBERS: ProjectMembersOutput = [
   },
 ];
 
+function trpcError(code: 'NOT_FOUND' | 'FORBIDDEN' | 'UNAUTHORIZED'): Error {
+  return Object.assign(new Error(code.toLowerCase()), { data: { code } });
+}
+
 beforeEach(() => {
   shell.teamProjectsEnabled = true;
   api.projectGet.mockReset().mockResolvedValue(TEAM_PROJECT);
@@ -155,16 +159,20 @@ describe('TeamProjectPage normalized detail states', () => {
     expect(screen.queryByText('不应显示')).toBeNull();
   });
 
-  it('shows not found separately for a server NOT_FOUND response', async () => {
-    api.projectGet.mockRejectedValue(
-      Object.assign(new Error('project not found'), { data: { code: 'NOT_FOUND' } }),
-    );
+  it.each(['NOT_FOUND', 'FORBIDDEN', 'UNAUTHORIZED'] as const)(
+    'fails closed without rendering detail after an initial hidden overview %s response',
+    async (code) => {
+      api.projectGet.mockRejectedValue(trpcError(code));
 
-    renderPage();
+      renderPage();
 
-    expect(await screen.findByRole('heading', { name: '找不到这个项目' })).toBeTruthy();
-    expect(screen.queryByText('项目详情暂时无法加载')).toBeNull();
-  });
+      expect(await screen.findByRole('heading', { name: '找不到这个项目' })).toBeTruthy();
+      expect(screen.queryByText('项目详情暂时无法加载')).toBeNull();
+      expect(screen.queryByRole('region', { name: '项目概览' })).toBeNull();
+      expect(screen.queryByRole('region', { name: '项目成员' })).toBeNull();
+      expect(screen.queryByText('当前角色：仅查看')).toBeNull();
+    },
+  );
 
   it('shows a full detail error when the project has no prior normalized row', async () => {
     api.projectGet.mockRejectedValue(new Error('project offline'));
@@ -228,6 +236,52 @@ describe('TeamProjectPage normalized detail states', () => {
     expect(screen.getByText('成员列表更新失败，当前保留上次结果')).toBeTruthy();
     expect(screen.getByRole('heading', { name: '增长计划' })).toBeTruthy();
     expect(screen.getByText('Lin')).toBeTruthy();
+  });
+
+  it('clears stale overview and roster when a refreshed overview becomes unauthorized', async () => {
+    const user = userEvent.setup();
+    api.projectGet
+      .mockResolvedValueOnce(TEAM_PROJECT)
+      .mockRejectedValueOnce(trpcError('FORBIDDEN'));
+    api.projectMembers.mockResolvedValue(PROJECT_MEMBERS);
+    renderPage();
+    expect(await screen.findByText('Lin')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '刷新项目详情' }));
+
+    expect(await screen.findByRole('heading', { name: '找不到这个项目' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: '项目概览' })).toBeNull();
+    expect(screen.queryByRole('region', { name: '项目成员' })).toBeNull();
+    expect(screen.queryByText('Lin')).toBeNull();
+    expect(screen.queryByText('当前角色：仅查看')).toBeNull();
+  });
+
+  it('invalidates the overview when the initial member request reports a hidden resource', async () => {
+    api.projectMembers.mockRejectedValue(trpcError('UNAUTHORIZED'));
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: '找不到这个项目' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: '项目概览' })).toBeNull();
+    expect(screen.queryByRole('region', { name: '项目成员' })).toBeNull();
+    expect(screen.queryByText('当前角色：仅查看')).toBeNull();
+  });
+
+  it('clears stale overview and roster when a refreshed member request becomes hidden', async () => {
+    const user = userEvent.setup();
+    api.projectGet.mockResolvedValue(TEAM_PROJECT);
+    api.projectMembers
+      .mockResolvedValueOnce(PROJECT_MEMBERS)
+      .mockRejectedValueOnce(trpcError('NOT_FOUND'));
+    renderPage();
+    expect(await screen.findByText('Lin')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '刷新项目详情' }));
+
+    expect(await screen.findByRole('heading', { name: '找不到这个项目' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: '项目概览' })).toBeNull();
+    expect(screen.queryByRole('region', { name: '项目成员' })).toBeNull();
+    expect(screen.queryByText('Lin')).toBeNull();
   });
 
   it('keeps project-detail refresh and retry targets at least 44px tall', async () => {

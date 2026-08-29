@@ -1,4 +1,5 @@
 import { useAppShellContext } from '@/components/AppShell';
+import { classifyHiddenWorkspaceError } from '@/components/projects/team-workspace-error';
 import { Button } from '@/components/ui/button';
 import { normalizeProjectRows } from '@/lib/project-page-state';
 import { type AppRouter, trpc } from '@/lib/trpc';
@@ -96,33 +97,33 @@ export function TeamProjectPage(): JSX.Element {
 
     const projectRequest = task12ProjectDetailClient.projects.get.query({ projectId });
     const memberRequest = task12ProjectDetailClient.projects.members.query({ projectId });
+    const invalidateHiddenDetail = (): void => {
+      if (!mountedRef.current || requestRef.current !== requestId) return;
+      requestRef.current = requestId + 1;
+      setDetail({
+        projectId,
+        project: null,
+        loading: false,
+        error: null,
+        notFound: true,
+      });
+      setMembers({ projectId, rows: [], loading: false, error: null });
+    };
 
     void projectRequest.then(
       (response) => {
         if (!mountedRef.current || requestRef.current !== requestId) return;
         const project = normalizeTeamProject(response, projectId);
         if (!project) {
-          setDetail({
-            projectId,
-            project: null,
-            loading: false,
-            error: null,
-            notFound: true,
-          });
+          invalidateHiddenDetail();
           return;
         }
         setDetail({ projectId, project, loading: false, error: null, notFound: false });
       },
       (error: unknown) => {
         if (!mountedRef.current || requestRef.current !== requestId) return;
-        if (isNotFoundError(error)) {
-          setDetail({
-            projectId,
-            project: null,
-            loading: false,
-            error: null,
-            notFound: true,
-          });
+        if (classifyHiddenWorkspaceError(error)) {
+          invalidateHiddenDetail();
           return;
         }
         setDetail((current) => {
@@ -148,8 +149,12 @@ export function TeamProjectPage(): JSX.Element {
           error: null,
         });
       },
-      () => {
+      (error: unknown) => {
         if (!mountedRef.current || requestRef.current !== requestId) return;
+        if (classifyHiddenWorkspaceError(error)) {
+          invalidateHiddenDetail();
+          return;
+        }
         setMembers((current) => {
           const staleRows = current.projectId === projectId ? current.rows : [];
           return {
@@ -461,14 +466,6 @@ function normalizeProjectMemberRows(value: unknown, projectId: string): UiProjec
       },
     ];
   });
-}
-
-function isNotFoundError(error: unknown): boolean {
-  if (!isRecord(error)) return false;
-  const data = ownValue(error, 'data');
-  if (isRecord(data) && ownValue(data, 'code') === 'NOT_FOUND') return true;
-  const message = ownText(error, 'message');
-  return /not[ _-]?found/i.test(message);
 }
 
 function isProjectMemberRole(value: unknown): value is ProjectMemberRole {

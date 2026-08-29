@@ -3,6 +3,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { OrganizationInviteDialog } from '@/components/projects/OrganizationInviteDialog';
 import { OrganizationMembersPanel } from '@/components/projects/OrganizationMembersPanel';
 import { WorkspaceSwitcher } from '@/components/projects/WorkspaceSwitcher';
+import { classifyHiddenWorkspaceError } from '@/components/projects/team-workspace-error';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -215,7 +216,7 @@ export function ProjectsPage(): JSX.Element {
       return nextOrganizations;
     } catch (error) {
       if (!mountedRef.current || organizationRequestRef.current !== requestId) return null;
-      if (isHiddenResourceError(error)) {
+      if (classifyHiddenWorkspaceError(error)) {
         const currentOrganizationId = selectedOrganizationIdRef.current;
         organizationsRef.current = [];
         setOrganizations([]);
@@ -278,7 +279,7 @@ export function ProjectsPage(): JSX.Element {
           ) {
             return;
           }
-          if (isHiddenResourceError(error)) {
+          if (classifyHiddenWorkspaceError(error)) {
             invalidateWorkspace(organizationId);
             return;
           }
@@ -319,7 +320,7 @@ export function ProjectsPage(): JSX.Element {
           ) {
             return;
           }
-          if (isHiddenResourceError(error)) {
+          if (classifyHiddenWorkspaceError(error)) {
             invalidateWorkspace(organizationId);
             return;
           }
@@ -379,6 +380,21 @@ export function ProjectsPage(): JSX.Element {
     }
   }, []);
 
+  const reconcileMembershipMutation = async (organizationId: string): Promise<boolean> => {
+    if (selectedOrganizationIdRef.current !== organizationId) return false;
+    const organizationFuture = refreshOrganizations();
+    const workspaceFuture = refreshOrganizationWorkspace(organizationId);
+    const nextOrganizations = await organizationFuture;
+    if (!mountedRef.current || selectedOrganizationIdRef.current !== organizationId) return false;
+    if (nextOrganizations === null) {
+      invalidateWorkspace(organizationId);
+      return false;
+    }
+    await workspaceFuture;
+    if (!mountedRef.current || selectedOrganizationIdRef.current !== organizationId) return false;
+    return true;
+  };
+
   const createPersonalProject = async (): Promise<void> => {
     setPersonalNameTouched(true);
     if (!personalCreateState.canSubmit || creatingPersonalNow) return;
@@ -433,7 +449,11 @@ export function ProjectsPage(): JSX.Element {
       }
       return true;
     } catch (error) {
-      if (mountedRef.current) toast.show(pageActionError('创建团队项目失败', error), 'error');
+      if (mountedRef.current && classifyHiddenWorkspaceError(error)) {
+        invalidateWorkspace(organizationId);
+      } else if (mountedRef.current) {
+        toast.show(pageActionError('创建团队项目失败', error), 'error');
+      }
       return false;
     }
   };
@@ -451,7 +471,16 @@ export function ProjectsPage(): JSX.Element {
         await refreshPersonalProjects();
       }
     } catch (error) {
-      if (mountedRef.current) toast.show(pageActionError('删除失败', error), 'error');
+      if (
+        mountedRef.current &&
+        project.scope === 'organization' &&
+        project.organizationId &&
+        classifyHiddenWorkspaceError(error)
+      ) {
+        invalidateWorkspace(project.organizationId);
+      } else if (mountedRef.current) {
+        toast.show(pageActionError('删除失败', error), 'error');
+      }
     }
   };
 
@@ -467,16 +496,15 @@ export function ProjectsPage(): JSX.Element {
         memberId,
         managerMemberId,
       });
-      if (!mountedRef.current) return false;
+      if (!mountedRef.current || selectedOrganizationIdRef.current !== organizationId) return false;
       toast.show('直属上级已更新');
-      const refreshes: Promise<unknown>[] = [refreshOrganizations()];
-      if (selectedOrganizationIdRef.current === organizationId) {
-        refreshes.push(refreshOrganizationWorkspace(organizationId));
-      }
-      await Promise.all(refreshes);
-      return true;
+      return reconcileMembershipMutation(organizationId);
     } catch (error) {
-      if (mountedRef.current) toast.show(pageActionError('更新直属上级失败', error), 'error');
+      if (mountedRef.current && classifyHiddenWorkspaceError(error)) {
+        invalidateWorkspace(organizationId);
+      } else if (mountedRef.current) {
+        toast.show(pageActionError('更新直属上级失败', error), 'error');
+      }
       return false;
     }
   };
@@ -490,16 +518,15 @@ export function ProjectsPage(): JSX.Element {
         memberId,
         role,
       });
-      if (!mountedRef.current) return false;
+      if (!mountedRef.current || selectedOrganizationIdRef.current !== organizationId) return false;
       toast.show('成员角色已更新');
-      const refreshes: Promise<unknown>[] = [refreshOrganizations()];
-      if (selectedOrganizationIdRef.current === organizationId) {
-        refreshes.push(refreshOrganizationWorkspace(organizationId));
-      }
-      await Promise.all(refreshes);
-      return true;
+      return reconcileMembershipMutation(organizationId);
     } catch (error) {
-      if (mountedRef.current) toast.show(pageActionError('更新成员角色失败', error), 'error');
+      if (mountedRef.current && classifyHiddenWorkspaceError(error)) {
+        invalidateWorkspace(organizationId);
+      } else if (mountedRef.current) {
+        toast.show(pageActionError('更新成员角色失败', error), 'error');
+      }
       return false;
     }
   };
@@ -512,15 +539,15 @@ export function ProjectsPage(): JSX.Element {
         organizationId,
         memberId: member.memberId,
       });
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || selectedOrganizationIdRef.current !== organizationId) return;
       toast.show(`已移除成员「${member.displayName}」`);
-      const refreshes: Promise<unknown>[] = [refreshOrganizations()];
-      if (selectedOrganizationIdRef.current === organizationId) {
-        refreshes.push(refreshOrganizationWorkspace(organizationId));
-      }
-      await Promise.all(refreshes);
+      await reconcileMembershipMutation(organizationId);
     } catch (error) {
-      if (mountedRef.current) toast.show(pageActionError('移除成员失败', error), 'error');
+      if (mountedRef.current && classifyHiddenWorkspaceError(error)) {
+        invalidateWorkspace(organizationId);
+      } else if (mountedRef.current) {
+        toast.show(pageActionError('移除成员失败', error), 'error');
+      }
     }
   };
 
@@ -636,6 +663,7 @@ export function ProjectsPage(): JSX.Element {
               onDelete={setPendingDelete}
             />
             <OrganizationMembersPanel
+              key={selectedOrganization.organizationId}
               organization={selectedOrganization}
               members={selectedMembers.rows}
               loading={selectedMembers.loading}
@@ -725,6 +753,7 @@ export function ProjectsPage(): JSX.Element {
           inviteRoles={organizationActions.inviteRoles}
           members={selectedMembers.rows}
           onClose={() => setInviteOpen(false)}
+          onHiddenResource={() => invalidateWorkspace(selectedOrganization.organizationId)}
         />
       ) : null}
       <ConfirmDialog
@@ -801,6 +830,7 @@ function ProjectCollection({
   onDelete?: (project: UiProject) => void;
 }): JSX.Element {
   const hasProjects = projects.length > 0;
+  const isTeamCollection = title === '团队项目';
   const errorCopy = projectLoadErrorCopy(error);
   return (
     <section aria-label={title}>
@@ -818,7 +848,14 @@ function ProjectCollection({
       {error && hasProjects ? (
         <div className="mb-3 flex items-center justify-between gap-3 rounded-[8px] border border-[#EA1F59]/20 bg-white px-3 py-2 text-xs text-[#595757]">
           <span>{staleTitle}</span>
-          <button type="button" onClick={onRetry} className="font-medium text-[#EA1F59]">
+          <button
+            type="button"
+            onClick={onRetry}
+            className={cn(
+              'font-medium text-[#EA1F59]',
+              isTeamCollection && 'inline-flex h-11 items-center justify-center px-3',
+            )}
+          >
             重试
           </button>
         </div>
@@ -834,7 +871,10 @@ function ProjectCollection({
           <button
             type="button"
             onClick={onRetry}
-            className="mt-1 inline-flex h-8 items-center rounded-md bg-[#EA1F59] px-3 text-xs font-medium text-white transition hover:bg-[#EA1F59]/90"
+            className={cn(
+              'mt-1 inline-flex items-center rounded-md bg-[#EA1F59] px-3 text-xs font-medium text-white transition hover:bg-[#EA1F59]/90',
+              isTeamCollection ? 'h-11' : 'h-8',
+            )}
           >
             重试
           </button>
@@ -848,7 +888,10 @@ function ProjectCollection({
             <button
               type="button"
               onClick={onCreate}
-              className="mt-1 inline-flex h-8 items-center gap-1.5 rounded-md bg-[#EA1F59] px-3 text-xs font-medium text-white transition hover:bg-[#EA1F59]/90"
+              className={cn(
+                'mt-1 inline-flex items-center gap-1.5 rounded-md bg-[#EA1F59] px-3 text-xs font-medium text-white transition hover:bg-[#EA1F59]/90',
+                isTeamCollection ? 'h-11' : 'h-8',
+              )}
             >
               <Plus className="h-3.5 w-3.5" />
               {title === '团队项目' ? '新建团队项目' : '新建项目'}
@@ -892,7 +935,10 @@ function ProjectCollection({
                       type="button"
                       aria-label={`项目 ${project.name} 操作`}
                       title="更多"
-                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/60 hover:text-foreground"
+                      className={cn(
+                        'inline-flex shrink-0 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/60 hover:text-foreground',
+                        project.scope === 'organization' ? 'h-11 w-11' : 'h-8 w-8',
+                      )}
                     >
                       <MoreHorizontal className="h-4 w-4" />
                     </button>
@@ -1262,38 +1308,4 @@ function isCurrentWorkspaceRequest(input: {
     input.selectedOrganizationId === input.organizationId &&
     input.generations.get(input.organizationId) === input.requestGeneration
   );
-}
-
-function isHiddenResourceError(error: unknown): boolean {
-  const code = trpcErrorCode(error);
-  return code === 'NOT_FOUND' || code === 'FORBIDDEN' || code === 'UNAUTHORIZED';
-}
-
-function trpcErrorCode(error: unknown): string | null {
-  if (!isUnknownRecord(error)) return null;
-  const directCode = ownUnknownText(error, 'code');
-  if (directCode) return directCode;
-  const data = ownUnknownRecord(error, 'data');
-  const dataCode = data ? ownUnknownText(data, 'code') : '';
-  if (dataCode) return dataCode;
-  const shape = ownUnknownRecord(error, 'shape');
-  const shapeData = shape ? ownUnknownRecord(shape, 'data') : null;
-  return shapeData ? ownUnknownText(shapeData, 'code') || null : null;
-}
-
-function isUnknownRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function ownUnknownRecord(
-  value: Record<string, unknown>,
-  key: string,
-): Record<string, unknown> | null {
-  const candidate = Object.prototype.hasOwnProperty.call(value, key) ? value[key] : null;
-  return isUnknownRecord(candidate) ? candidate : null;
-}
-
-function ownUnknownText(value: Record<string, unknown>, key: string): string {
-  const candidate = Object.prototype.hasOwnProperty.call(value, key) ? value[key] : null;
-  return typeof candidate === 'string' ? candidate : '';
 }

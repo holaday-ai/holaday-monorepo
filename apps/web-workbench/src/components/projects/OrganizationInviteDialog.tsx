@@ -1,3 +1,4 @@
+import { classifyHiddenWorkspaceError } from '@/components/projects/team-workspace-error';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import {
@@ -21,6 +22,7 @@ interface OrganizationInviteDialogProps {
   inviteRoles: readonly InvitationRole[];
   members: readonly UiOrganizationMember[];
   onClose(): void;
+  onHiddenResource(): void;
 }
 
 const INVITATION_ROLE_LABEL: Record<InvitationRole, string> = {
@@ -41,6 +43,7 @@ export function OrganizationInviteDialog({
   inviteRoles,
   members,
   onClose,
+  onHiddenResource,
 }: OrganizationInviteDialogProps): JSX.Element {
   const toast = useToast();
   const mountedRef = React.useRef(true);
@@ -95,6 +98,14 @@ export function OrganizationInviteDialog({
       setInviteLink(next);
     } catch (caught) {
       if (mountedRef.current && requestGenerationRef.current === requestGeneration) {
+        if (classifyHiddenWorkspaceError(caught)) {
+          requestGenerationRef.current += 1;
+          setInviteLink(clearInviteLinkState());
+          setError(null);
+          setCreating(false);
+          onHiddenResource();
+          return;
+        }
         setError(pageActionError('邀请链接生成失败', caught));
       }
     } finally {

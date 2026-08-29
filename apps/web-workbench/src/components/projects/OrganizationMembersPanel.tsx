@@ -247,7 +247,7 @@ function CollectionMessage({
         <button
           type="button"
           onClick={onAction}
-          className="mt-2 text-xs font-medium text-[#EA1F59]"
+          className="mt-2 inline-flex h-11 items-center justify-center px-3 text-xs font-medium text-[#EA1F59]"
         >
           {actionLabel}
         </button>
