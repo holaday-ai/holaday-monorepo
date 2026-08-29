@@ -281,7 +281,19 @@ async function lockActiveManagerMembership(
   return { ...manager, role: manager.role as OrganizationRole };
 }
 
-function buildLockedInvitationByHashQuery(db: Pick<DB, 'select'>, hash: string) {
+function buildInvitationOrganizationLookupQuery(db: Pick<DB, 'select'>, hash: string) {
+  return db
+    .select({ organizationId: organizationInvitations.organizationId })
+    .from(organizationInvitations)
+    .where(eq(organizationInvitations.tokenHash, hash))
+    .limit(1);
+}
+
+function buildLockedInvitationByHashQuery(
+  db: Pick<DB, 'select'>,
+  organizationId: number,
+  hash: string,
+) {
   return db
     .select({
       id: organizationInvitations.id,
@@ -295,15 +307,21 @@ function buildLockedInvitationByHashQuery(db: Pick<DB, 'select'>, hash: string) 
       revokedAt: organizationInvitations.revokedAt,
     })
     .from(organizationInvitations)
-    .where(eq(organizationInvitations.tokenHash, hash))
+    .where(
+      and(
+        eq(organizationInvitations.organizationId, organizationId),
+        eq(organizationInvitations.tokenHash, hash),
+      ),
+    )
     .for('update');
 }
 
 async function lockInvitationByHash(
   db: Pick<DB, 'select'>,
+  organizationId: number,
   hash: string,
 ): Promise<InvitationSnapshot | null> {
-  const [invitation] = await buildLockedInvitationByHashQuery(db, hash);
+  const [invitation] = await buildLockedInvitationByHashQuery(db, organizationId, hash);
   return invitation ?? null;
 }
 
@@ -468,13 +486,15 @@ export async function acceptInvitation(input: AcceptInvitationInput) {
   const hash = tokenHash(input.token);
 
   return input.db.transaction(async (tx) => {
-    // Lock the token row before its organization switch so acceptance cannot observe an
-    // enabled organization and later consume after a rollback.
-    const invitation = await lockInvitationByHash(tx, hash);
+    // This lookup determines lock scope only and never leaves the transaction.
+    // Every invitation-mutating path locks the organization before the invitation.
+    const [candidate] = await buildInvitationOrganizationLookupQuery(tx, hash);
+    if (!candidate) throw new InvitationServiceError('INVITATION_NOT_AVAILABLE');
+    const organization = await lockActiveEnabledOrganizationById(tx, candidate.organizationId);
+    const invitation = await lockInvitationByHash(tx, organization.id, hash);
     if (!invitation || !isInvitationTargetRole(invitation.role)) {
       throw new InvitationServiceError('INVITATION_NOT_AVAILABLE');
     }
-    const organization = await lockActiveEnabledOrganizationById(tx, invitation.organizationId);
     const member = await lockMembershipForUser(tx, organization.id, actorUserId);
     await requireActiveInvitationManager(tx, organization.id, invitation.managerUserId);
     const acceptedAt = nowFrom(input);
@@ -550,4 +570,5 @@ export const __organizationInvitationServiceInternals = {
   buildLockedActiveManagerMembershipQuery,
   buildLockedInvitationByExternalIdQuery,
   buildLockedInvitationByHashQuery,
+  buildInvitationOrganizationLookupQuery,
 };

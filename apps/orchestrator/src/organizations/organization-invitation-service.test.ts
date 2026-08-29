@@ -161,17 +161,18 @@ const openInvitation = {
   acceptedAt: null,
   revokedAt: null,
 };
+const invitationOrganization = { organizationId: 20 };
 
 describe('organization invitation service', () => {
   it('does not consume an invitation when its organization switch is disabled under lock', async () => {
-    const fake = makeDb([[actor], [openInvitation], []]);
+    const fake = makeDb([[actor], [invitationOrganization], []]);
 
     await expect(
       acceptInvitation({ db: fake.db, actorExternalId: 'usr_new', token, now: () => now }),
     ).rejects.toMatchObject({ code: 'INVITATION_NOT_AVAILABLE' });
     expect(fake.events).toEqual([
       'select:users:none:outside',
-      'select:organization_invitations:update:tx',
+      'select:organization_invitations:none:tx',
       'select:organizations:update:tx',
     ]);
     expect(fake.inserts).toEqual([]);
@@ -294,7 +295,12 @@ describe('organization invitation service', () => {
     async (_label, invitation, operation) => {
       const fake =
         operation === 'accept'
-          ? makeDb([[actor], [invitation], [{ id: 20, externalId: 'org_design' }]])
+          ? makeDb([
+              [actor],
+              [invitationOrganization],
+              [{ id: 20, externalId: 'org_design' }],
+              [invitation],
+            ])
           : makeDb([
               [actor],
               [ownerMembership],
@@ -331,8 +337,9 @@ describe('organization invitation service', () => {
           ? makeDb(
               [
                 [actor],
-                [invitation],
+                [invitationOrganization],
                 [{ id: 20, externalId: 'org_design' }],
+                [invitation],
                 [],
                 [managerMembership],
               ],
@@ -410,7 +417,12 @@ describe('organization invitation service', () => {
     ['revoked', { ...openInvitation, revokedAt: now }],
     ['already accepted', { ...openInvitation, acceptedAt: now }],
   ])('rejects a %s invitation without exposing token state', async (_label, invitation) => {
-    const fake = makeDb([[actor], [invitation], [{ id: 20, externalId: 'org_design' }]]);
+    const fake = makeDb([
+      [actor],
+      [invitationOrganization],
+      [{ id: 20, externalId: 'org_design' }],
+      [invitation],
+    ]);
 
     await expect(
       acceptInvitation({ db: fake.db, actorExternalId: 'usr_new', token, now: () => now }),
@@ -422,8 +434,9 @@ describe('organization invitation service', () => {
   it('accepts once by creating a membership from invitation role and manager, then guards the invitation update', async () => {
     const fake = makeDb([
       [actor],
-      [openInvitation],
+      [invitationOrganization],
       [{ id: 20, externalId: 'org_design' }],
+      [openInvitation],
       [],
       [managerMembership],
     ]);
@@ -455,8 +468,9 @@ describe('organization invitation service', () => {
     ]);
     expect(fake.events).toEqual([
       'select:users:none:outside',
-      'select:organization_invitations:update:tx',
+      'select:organization_invitations:none:tx',
       'select:organizations:update:tx',
+      'select:organization_invitations:update:tx',
       'select:organization_members:update:tx',
       'select:organization_members:update:tx',
       'update:organization_invitations:tx',
@@ -468,8 +482,9 @@ describe('organization invitation service', () => {
     const inactive = { id: 40, externalId: 'omem_existing', status: 'inactive' };
     const fake = makeDb([
       [actor],
-      [openInvitation],
+      [invitationOrganization],
       [{ id: 20, externalId: 'org_design' }],
+      [openInvitation],
       [inactive],
       [managerMembership],
     ]);
@@ -498,8 +513,9 @@ describe('organization invitation service', () => {
     const active = { id: 40, externalId: 'omem_existing', status: 'active' };
     const fake = makeDb([
       [actor],
-      [openInvitation],
+      [invitationOrganization],
       [{ id: 20, externalId: 'org_design' }],
+      [openInvitation],
       [active],
       [managerMembership],
     ]);
@@ -516,8 +532,9 @@ describe('organization invitation service', () => {
   it('does not create a reporting line to a manager who is no longer active in the organization', async () => {
     const fake = makeDb([
       [actor],
-      [openInvitation],
+      [invitationOrganization],
       [{ id: 20, externalId: 'org_design' }],
+      [openInvitation],
       [],
       [],
     ]);
@@ -537,8 +554,9 @@ describe('organization invitation service', () => {
     async (_label, role) => {
       const fake = makeDb([
         [actor],
-        [{ ...openInvitation, role }],
+        [invitationOrganization],
         [{ id: 20, externalId: 'org_design' }],
+        [{ ...openInvitation, role }],
         [],
         [managerMembership],
       ]);
@@ -560,8 +578,9 @@ describe('organization invitation service', () => {
       const inactive = { id: 40, externalId: 'omem_existing', status: 'inactive' };
       const fake = makeDb([
         [actor],
-        [{ ...openInvitation, role }],
+        [invitationOrganization],
         [{ id: 20, externalId: 'org_design' }],
+        [{ ...openInvitation, role }],
         [inactive],
         [managerMembership],
       ]);
@@ -577,7 +596,14 @@ describe('organization invitation service', () => {
 
   it('rejects a concurrent replay when the guarded acceptance update affects no rows', async () => {
     const fake = makeDb(
-      [[actor], [openInvitation], [{ id: 20, externalId: 'org_design' }], [], [managerMembership]],
+      [
+        [actor],
+        [invitationOrganization],
+        [{ id: 20, externalId: 'org_design' }],
+        [openInvitation],
+        [],
+        [managerMembership],
+      ],
       [0],
     );
 
@@ -624,6 +650,55 @@ describe('organization invitation service', () => {
     ]);
   });
 
+  it('uses an organization-first lock sequence for concurrent accept and revoke of one invitation', async () => {
+    const accepting = makeDb([
+      [actor],
+      [invitationOrganization],
+      [{ id: 20, externalId: 'org_design' }],
+      [openInvitation],
+      [],
+      [managerMembership],
+    ]);
+    const revoking = makeDb([
+      [actor],
+      [ownerMembership],
+      [{ id: 20, externalId: 'org_design' }],
+      [ownerMembership],
+      [openInvitation],
+    ]);
+
+    await acceptInvitation({
+      db: accepting.db,
+      actorExternalId: 'usr_new',
+      token,
+      now: () => now,
+    });
+    await revokeInvitation({
+      db: revoking.db,
+      actorExternalId: 'usr_owner',
+      organizationExternalId: 'org_design',
+      invitationExternalId: 'oinv_design',
+      now: () => now,
+    });
+
+    const lockedTables = (events: string[]) =>
+      events
+        .filter((event) => event.startsWith('select:') && event.endsWith(':update:tx'))
+        .map((event) => event.split(':')[1]);
+
+    // A deterministic two-connection model: neither path requests the invitation lock before
+    // the organization lock, so accept and revoke cannot form the former inverse wait cycle.
+    expect(lockedTables(accepting.events).slice(0, 2)).toEqual([
+      'organizations',
+      'organization_invitations',
+    ]);
+    expect(lockedTables(revoking.events)).toEqual([
+      'organizations',
+      'organization_members',
+      'organization_invitations',
+    ]);
+  });
+
   it('cannot revoke an accepted invitation or revive a revoked invitation', async () => {
     for (const invitation of [
       { ...openInvitation, acceptedAt: now },
@@ -664,7 +739,10 @@ describe('organization invitation service', () => {
       .buildLockedActiveManagerMembershipQuery(db, 20, 'omem_manager')
       .toSQL();
     const lockedToken = __organizationInvitationServiceInternals
-      .buildLockedInvitationByHashQuery(db, tokenHash)
+      .buildLockedInvitationByHashQuery(db, 20, tokenHash)
+      .toSQL();
+    const invitationOrganizationLookup = __organizationInvitationServiceInternals
+      .buildInvitationOrganizationLookupQuery(db, tokenHash)
       .toSQL();
     const lockedEnabledOrganization = __organizationInvitationServiceInternals
       .buildLockedActiveEnabledOrganizationByIdQuery(db, 20)
@@ -687,14 +765,23 @@ describe('organization invitation service', () => {
     expect(manager.sql).toContain('`organization_members`.`organization_id` = ?');
     expect(manager.sql).toContain('`organization_members`.`external_id` = ?');
     expect(manager.sql).toContain('`organization_members`.`status` = ?');
+    expect(invitationOrganizationLookup.sql).toContain(
+      '`organization_invitations`.`token_hash` = ?',
+    );
+    expect(invitationOrganizationLookup.params).toEqual([tokenHash, 1]);
+    expect(invitationOrganizationLookup.sql).not.toContain('for update');
+    expect(lockedToken.sql).toContain('`organization_invitations`.`organization_id` = ?');
     expect(lockedToken.sql).toContain('`organization_invitations`.`token_hash` = ?');
-    expect(lockedToken.params).toEqual([tokenHash]);
+    expect(lockedToken.params).toEqual([20, tokenHash]);
+    expect(lockedToken.sql).toContain('for update');
     expect(lockedEnabledOrganization.sql).toContain('`organizations`.`id` = ?');
     expect(lockedEnabledOrganization.sql).toContain('`organizations`.`status` = ?');
     expect(lockedEnabledOrganization.sql).toContain('`organizations`.`team_projects_enabled` = ?');
     expect(lockedEnabledOrganization.params).toEqual([20, 'active', true]);
+    expect(lockedEnabledOrganization.sql).toContain('for update');
     expect(revoke.sql).toContain('`organization_invitations`.`organization_id` = ?');
     expect(revoke.sql).toContain('`organization_invitations`.`external_id` = ?');
+    expect(revoke.sql).toContain('for update');
   });
 
   it('keeps failures domain-only', () => {
