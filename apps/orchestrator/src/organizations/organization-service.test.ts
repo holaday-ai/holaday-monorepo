@@ -225,10 +225,9 @@ function expectValidatedManagerJoin(sql: string): void {
   const normalized = normalizedSql(sql);
   const managerMembershipJoin =
     'left join `organization_members` `organization_manager_memberships` on ';
+  const managerUserJoin = 'left join `users` `organization_manager_users` on ';
   const membershipJoinIndex = normalized.indexOf(managerMembershipJoin);
-  const managerUserJoinIndex = normalized.indexOf(
-    'left join `users` `organization_manager_users` on ',
-  );
+  const managerUserJoinIndex = normalized.indexOf(managerUserJoin);
 
   expect(membershipJoinIndex).toBeGreaterThanOrEqual(0);
   expect(managerUserJoinIndex).toBeGreaterThan(membershipJoinIndex);
@@ -241,10 +240,43 @@ function expectValidatedManagerJoin(sql: string): void {
   );
   expect(managerMembershipOn).toContain('`organization_manager_memberships`.`status` = ?');
   expect(managerMembershipOn).toContain('`organization_manager_memberships`.`role` in (?, ?, ?)');
-  expect(normalized.slice(managerUserJoinIndex)).toContain(
+  const managerUserOnStart = managerUserJoinIndex + managerUserJoin.length;
+  const remainingSql = normalized.slice(managerUserOnStart);
+  const managerUserOnEnd = [
+    ' left join ',
+    ' inner join ',
+    ' right join ',
+    ' full join ',
+    ' cross join ',
+    ' join ',
+    ' where ',
+    ' group by ',
+    ' order by ',
+    ' having ',
+    ' limit ',
+    ' for update',
+  ]
+    .map((clause) => remainingSql.indexOf(clause))
+    .filter((index) => index >= 0)
+    .reduce((earliest, index) => Math.min(earliest, index), remainingSql.length);
+  const managerUserOn = remainingSql.slice(0, managerUserOnEnd);
+  expect(managerUserOn).toContain(
     '`organization_manager_users`.`id` = `organization_manager_memberships`.`user_id`',
   );
+  expect(managerUserOn).not.toContain('`organization_members`.`manager_user_id`');
 }
+
+const validManagerJoinSql = `
+  select * from \`organization_members\`
+  left join \`organization_members\` \`organization_manager_memberships\` on
+    \`organization_manager_memberships\`.\`organization_id\` = \`organization_members\`.\`organization_id\`
+    and \`organization_manager_memberships\`.\`user_id\` = \`organization_members\`.\`manager_user_id\`
+    and \`organization_manager_memberships\`.\`status\` = ?
+    and \`organization_manager_memberships\`.\`role\` in (?, ?, ?)
+  left join \`users\` \`organization_manager_users\` on
+    \`organization_manager_users\`.\`id\` = \`organization_manager_memberships\`.\`user_id\`
+  where \`organization_members\`.\`status\` = ?
+`;
 
 function eventSequence(fake: ReturnType<typeof makeDb>): string[] {
   return fake.events.map(
@@ -389,6 +421,15 @@ describe('organization service', () => {
     expect(query.params).toEqual(
       expect.arrayContaining([1, 'active', 'owner', 'admin', 'manager']),
     );
+  });
+
+  it('rejects a manager-user join mutated to also bind directly to the base membership', () => {
+    const unsafeSql = validManagerJoinSql.replace(
+      '`organization_manager_users`.`id` = `organization_manager_memberships`.`user_id`',
+      '`organization_manager_users`.`id` = `organization_manager_memberships`.`user_id` and `organization_manager_users`.`id` = `organization_members`.`manager_user_id`',
+    );
+
+    expect(() => expectValidatedManagerJoin(unsafeSql)).toThrow();
   });
 
   it('builds a same-organization, deterministic membership lock query', () => {
