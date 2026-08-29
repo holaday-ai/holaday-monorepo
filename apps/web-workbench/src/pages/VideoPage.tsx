@@ -4,6 +4,14 @@ import { LazyPosterImg } from '@/components/LazyPosterImg';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
+import { VideoCreationScenarioPicker } from '@/components/video/VideoCreationScenarioPicker';
+import { VideoCreationStoryboard } from '@/components/video/VideoCreationStoryboard';
+import {
+  type VideoCreationScenarioId,
+  scenarioForVideoTab,
+  videoCreationScenario,
+  videoTabForScenario,
+} from '@/components/video/video-creation-scenarios';
 import {
   canContinueEditing,
   createVideoEditingProject,
@@ -26,6 +34,7 @@ import {
   canChangeCreativeHistoryFilter,
   canLoadOlderCreativeHistory,
   creativeHistoryArtifactAvailability,
+  creativeHistoryCardPresentation,
   creativeHistoryDisplayTitle,
   creativeHistoryListInput,
   creativeHistoryLoadReducer,
@@ -68,14 +77,12 @@ import {
 import { type NormalVideoModelId, reconcileNormalVideoParameters } from '@holaday/shared-types';
 import {
   AlertCircle,
-  ArrowUp,
   Check,
   CheckCircle2,
   ChevronDown,
   CircleSlash,
   Clapperboard,
   Clock,
-  Film,
   ImagePlus,
   Lightbulb,
   Loader2,
@@ -85,9 +92,9 @@ import {
   Pin,
   Play,
   Scissors,
+  Settings2,
   Sparkles,
   Trash2,
-  UserRound,
   Video as VideoIcon,
   X,
   XCircle,
@@ -210,16 +217,6 @@ const CREATIVE_ASPECT_OPTIONS: ReadonlyArray<{ value: VideoAspect; label: string
   { value: '9:16', label: '9:16' },
   { value: '4:3', label: '4:3' },
   { value: '3:4', label: '3:4' },
-];
-
-const VIDEO_TABS: ReadonlyArray<{
-  id: VideoTab;
-  label: string;
-  icon: typeof Film;
-}> = [
-  { id: 'normal', label: '普通视频', icon: Film },
-  { id: 'pet', label: '复刻视频', icon: VideoIcon },
-  { id: 'ip', label: 'IP人物视频', icon: UserRound },
 ];
 
 interface CreativeModelOption {
@@ -651,11 +648,17 @@ function CreativeStudioPage({
   const navigate = useNavigate();
   const toast = useToast();
   const createTask = useTaskStore((s) => s.createTask);
-  const [prompt, setPrompt] = React.useState('');
+  const [scenarioId, setScenarioId] = React.useState<VideoCreationScenarioId>(() =>
+    scenarioForVideoTab(videoTab),
+  );
+  const [prompt, setPrompt] = React.useState(
+    () => videoCreationScenario('product_highlight').defaultPrompt,
+  );
   const [model, setModel] = React.useState<VideoModel>('veo_fast');
   const [modelPickerOpen, setModelPickerOpen] = React.useState(false);
   const [stylePickerOpen, setStylePickerOpen] = React.useState<CreativeStyleGroup | null>(null);
   const [referenceVideoDialogOpen, setReferenceVideoDialogOpen] = React.useState(false);
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [vibeStyle, setVibeStyle] = React.useState<CreativeStyleKey>('random');
   const [lightingStyle, setLightingStyle] = React.useState<CreativeStyleKey>('random');
   const [colorStyle, setColorStyle] = React.useState<CreativeStyleKey>('random');
@@ -677,6 +680,7 @@ function CreativeStudioPage({
   const isIpVideo = videoTab === 'ip';
   const accent = '#EA1F59';
   const softBg = 'bg-[#EA1F59]/10';
+  const activeScenario = videoCreationScenario(scenarioId);
 
   React.useEffect(() => {
     let active = true;
@@ -736,6 +740,23 @@ function CreativeStudioPage({
       setDurationSeconds(next.durationSeconds);
     }
   }, [durationSeconds, model, resolution, videoTab]);
+
+  React.useEffect(() => {
+    setScenarioId((current) => scenarioForVideoTab(videoTab, current));
+  }, [videoTab]);
+
+  function handleScenarioChange(nextScenarioId: VideoCreationScenarioId): void {
+    const nextScenario = videoCreationScenario(nextScenarioId);
+    const nextTab = videoTabForScenario(nextScenarioId);
+    setScenarioId(nextScenarioId);
+    setSettingsOpen(false);
+    if (nextTab === 'normal') {
+      setPrompt(nextScenario.defaultPrompt);
+      setAspectRatio(nextScenario.aspect === '9:16' ? '9:16' : '16:9');
+      applyNormalVideoDuration(8);
+    }
+    onVideoTabChange?.(nextTab);
+  }
 
   function applyNormalVideoModel(nextModel: NormalVideoModel): void {
     const next = reconcileNormalVideoParameters(
@@ -906,32 +927,31 @@ function CreativeStudioPage({
   }
 
   return (
-    <div className="min-h-full bg-white">
-      <PageContainer width="wide" className="max-w-[1220px] pb-14 pt-10 md:px-12 md:pt-12">
+    <main className="min-h-full bg-[#FBFAF7] text-[#342E39]">
+      <PageContainer width="wide" className="max-w-[1220px] pb-14 pt-7 md:px-10 md:pt-9">
         <div className="relative overflow-hidden rounded-none">
-          <div className="pointer-events-none absolute right-20 top-5 hidden h-32 w-[320px] items-center justify-center opacity-80 md:flex">
-            <div className="flex h-20 w-20 rotate-[-10deg] items-center justify-center rounded-[24px] bg-white text-[#EA1F59] shadow-[0_18px_42px_rgba(17,24,39,0.08)]">
-              <Clapperboard className="h-12 w-12" />
-            </div>
-            <div className="ml-4 flex h-[72px] w-[72px] rotate-[8deg] items-center justify-center rounded-[22px] bg-[#EA1F59]/10 text-[#EA1F59] shadow-[0_14px_32px_rgba(234,31,89,0.10)]">
-              <Sparkles className="h-8 w-8" />
-            </div>
-            <div className="ml-3 flex h-14 w-14 rotate-[14deg] items-center justify-center rounded-[18px] bg-white text-[#EA1F59] shadow-[0_14px_30px_rgba(17,24,39,0.06)]">
-              <ImagePlus className="h-8 w-8" />
-            </div>
-          </div>
           <header className="relative z-10 mb-5">
-            <h1 className="text-[30px] font-semibold leading-tight tracking-normal text-[#111827] md:text-[34px]">
-              用 AI 创作视频
-              <Sparkles className="ml-2 inline h-5 w-5 align-super text-[#EA1F59]" />
+            <h1 className="text-[32px] font-semibold leading-tight tracking-[-0.04em] text-[#27212D] md:text-[38px]">
+              视频创作
             </h1>
           </header>
 
           {onVideoTabChange ? (
-            <CreativeTypeTabs value={videoTab} onChange={onVideoTabChange} accent={accent} />
+            <div className="relative z-10 rounded-[26px] border border-[#E8E1E7] bg-white p-4 shadow-[0_14px_38px_rgba(62,48,69,0.05)] sm:p-5">
+              <VideoCreationScenarioPicker
+                value={scenarioId}
+                disabled={submitting}
+                onChange={handleScenarioChange}
+              />
+            </div>
           ) : null}
 
-          <div className="relative z-40 mt-5 rounded-[22px] border border-[#EFEFEF] bg-white px-5 py-4 shadow-[0_16px_42px_rgba(17,24,39,0.05)]">
+          <div
+            className={cn(
+              'relative z-40 mt-4 rounded-[20px] border border-[#E8E1E7] bg-white px-5 py-4 shadow-[0_12px_32px_rgba(62,48,69,0.045)]',
+              videoTab === 'normal' && !settingsOpen && 'hidden',
+            )}
+          >
             <div
               className={cn(
                 'grid grid-cols-1 gap-3 2xl:items-end',
@@ -1039,94 +1059,138 @@ function CreativeStudioPage({
             </>
           ) : (
             <>
-              <div className="relative z-10 mt-5 rounded-[24px] border border-[#EFEFEF] bg-white p-6 shadow-[0_16px_42px_rgba(17,24,39,0.05)]">
-                <Textarea
-                  value={prompt}
-                  onChange={(event) => setPrompt(event.target.value)}
-                  placeholder="描述你想生成的视频内容、镜头和氛围…"
-                  rows={6}
-                  className="min-h-[168px] resize-none border-0 bg-transparent p-0 text-[16px] font-semibold leading-7 text-[#111827] placeholder:text-[#DCDDDD] focus-visible:ring-0"
-                />
-                {attachments.length > 0 ? (
-                  <div className="mt-5 flex flex-wrap gap-2 border-t border-[#EFEFEF] pt-4">
-                    {attachments.map((attachment, index) => (
-                      <AttachmentChip
-                        key={attachment.clientId ?? `${attachment.filename}-${index}`}
-                        attachment={attachment}
-                        onRemove={() => removeCreativeAttachment(attachment.clientId, index)}
-                      />
-                    ))}
-                  </div>
-                ) : null}
-                <div className="mt-5 flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3 text-[#ADADAD]">
-                    <button
-                      type="button"
-                      title="添加参考图"
-                      aria-label="添加参考图"
-                      onClick={() => imageInputRef.current?.click()}
-                      className="rounded-[8px] p-1.5 outline-none hover:bg-[#EFEFEF] hover:text-[#595757] focus-visible:bg-[#EA1F59]/10 focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
-                    >
-                      <ImagePlus className="h-5 w-5" />
-                    </button>
-                    <button
-                      type="button"
-                      title="添加参考视频"
-                      aria-label="添加参考视频"
-                      onClick={() => setReferenceVideoDialogOpen(true)}
-                      className="rounded-[8px] p-1.5 outline-none hover:bg-[#EFEFEF] hover:text-[#595757] focus-visible:bg-[#EA1F59]/10 focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
-                    >
-                      <VideoIcon className="h-5 w-5" />
-                    </button>
-                    <input
-                      ref={imageInputRef}
-                      type="file"
-                      accept={CREATIVE_ACCEPT_IMAGES}
-                      multiple
-                      className="hidden"
-                      onChange={(event) => {
-                        if (event.target.files) void ingestCreativeFiles(event.target.files, true);
-                        event.target.value = '';
-                      }}
-                    />
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept={CREATIVE_ACCEPT_REFERENCE_VIDEO}
-                      className="hidden"
-                      onChange={(event) => {
-                        if (event.target.files) {
-                          void ingestCreativeFiles(event.target.files).finally(() =>
-                            setReferenceVideoDialogOpen(false),
-                          );
-                        }
-                        event.target.value = '';
-                      }}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleSubmit()}
-                    disabled={submitting}
-                    className="inline-flex h-[46px] min-h-[46px] items-center gap-2 rounded-full border border-[#EA1F59] bg-[#EA1F59] px-4 py-2 text-[15px] font-semibold text-white shadow-[0_12px_26px_rgba(87,71,156,0.15)] transition-all hover:bg-[#EA1F59]/90 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {submitting ? '提交中…' : '生成视频'}
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/18">
-                      {submitting ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <ArrowUp className="h-5 w-5" />
-                      )}
-                    </span>
-                  </button>
+              <section
+                aria-label="视频创作工作台"
+                className="relative z-10 mt-4 grid gap-0 overflow-hidden rounded-[26px] border border-[#E8E1E7] bg-white shadow-[0_14px_38px_rgba(62,48,69,0.05)] xl:grid-cols-[1.08fr_0.92fr]"
+              >
+                <div className="border-b border-[#EEE7ED] bg-[#FCFAFC] p-5 xl:border-b-0 xl:border-r sm:p-6">
+                  <VideoCreationStoryboard scenario={activeScenario} />
                 </div>
-                {referenceVideoDialogOpen ? (
-                  <ReferenceVideoUploadDialog
-                    onClose={() => setReferenceVideoDialogOpen(false)}
-                    onChoose={() => fileInputRef.current?.click()}
+                <section aria-labelledby="video-brief-heading" className="p-5 sm:p-6">
+                  <h2 id="video-brief-heading" className="text-[16px] font-semibold text-[#3C3440]">
+                    告诉 HOLA DAY 你的重点
+                  </h2>
+                  <Textarea
+                    value={prompt}
+                    onChange={(event) => setPrompt(event.target.value)}
+                    placeholder="描述你想生成的视频内容、镜头和氛围…"
+                    rows={4}
+                    aria-label="告诉 HOLA DAY 你的重点"
+                    className="mt-3 min-h-[128px] resize-none rounded-[16px] border-[#E8E1E7] bg-[#FFFEFF] px-4 py-3 text-[14px] font-medium leading-6 text-[#403744] placeholder:text-[#B5ABB7] focus-visible:ring-[#D62958]/20"
                   />
-                ) : null}
-              </div>
+                  {attachments.length > 0 ? (
+                    <div className="mt-5 flex flex-wrap gap-2 border-t border-[#EFEFEF] pt-4">
+                      {attachments.map((attachment, index) => (
+                        <AttachmentChip
+                          key={attachment.clientId ?? `${attachment.filename}-${index}`}
+                          attachment={attachment}
+                          onRemove={() => removeCreativeAttachment(attachment.clientId, index)}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="mt-4 flex items-end justify-between gap-4">
+                    <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        title="添加参考图"
+                        aria-label="添加参考图"
+                        onClick={() => imageInputRef.current?.click()}
+                        className="flex min-h-12 items-center gap-3 rounded-[14px] border border-[#E7DDE4] bg-[#FFF9FB] px-3 text-left text-[#A62B51] outline-none transition-colors hover:border-[#D9BCCA] hover:bg-white focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+                      >
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[#FBE6EC]">
+                          <ImagePlus className="h-4 w-4" aria-hidden />
+                        </span>
+                        <span>
+                          <span className="block text-[12px] font-semibold text-[#4B414D]">
+                            产品或主角素材
+                          </span>
+                          <span className="mt-0.5 block text-[10px] text-[#8B808D]">
+                            最多 5 张图片
+                          </span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        title="添加参考视频"
+                        aria-label="添加参考视频"
+                        onClick={() => setReferenceVideoDialogOpen(true)}
+                        className="flex min-h-12 items-center gap-3 rounded-[14px] border border-[#DDE6E8] bg-[#F5FCFC] px-3 text-left text-[#347D83] outline-none transition-colors hover:border-[#BFD6D8] hover:bg-white focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+                      >
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[#DFF3F2]">
+                          <VideoIcon className="h-4 w-4" aria-hidden />
+                        </span>
+                        <span>
+                          <span className="block text-[12px] font-semibold text-[#4B414D]">
+                            参考视频（可选）
+                          </span>
+                          <span className="mt-0.5 block text-[10px] text-[#8B808D]">
+                            动作或镜头参考
+                          </span>
+                        </span>
+                      </button>
+                      <input
+                        ref={imageInputRef}
+                        type="file"
+                        accept={CREATIVE_ACCEPT_IMAGES}
+                        multiple
+                        className="hidden"
+                        onChange={(event) => {
+                          if (event.target.files)
+                            void ingestCreativeFiles(event.target.files, true);
+                          event.target.value = '';
+                        }}
+                      />
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept={CREATIVE_ACCEPT_REFERENCE_VIDEO}
+                        className="hidden"
+                        onChange={(event) => {
+                          if (event.target.files) {
+                            void ingestCreativeFiles(event.target.files).finally(() =>
+                              setReferenceVideoDialogOpen(false),
+                            );
+                          }
+                          event.target.value = '';
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[14px] bg-[#F8F5F8] px-3 py-2.5">
+                    <span className="inline-flex items-center gap-2 text-[11px] text-[#746A77]">
+                      <Sparkles className="h-3.5 w-3.5 text-[#D62958]" aria-hidden />
+                      AI 将自动安排镜头、节奏与转场
+                    </span>
+                    <button
+                      type="button"
+                      aria-expanded={settingsOpen}
+                      onClick={() => setSettingsOpen((open) => !open)}
+                      className="inline-flex min-h-9 items-center gap-2 rounded-[10px] px-3 text-[11px] font-semibold text-[#5E5362] hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+                    >
+                      <Settings2 className="h-3.5 w-3.5" aria-hidden />
+                      {settingsOpen ? '收起生成设置' : '查看生成设置'}
+                    </button>
+                  </div>
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handleSubmit()}
+                      disabled={submitting}
+                      className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[13px] border border-[#D62958] bg-[#D62958] px-6 text-[14px] font-semibold text-white shadow-[0_10px_24px_rgba(214,41,88,0.2)] transition-all hover:bg-[#BE214B] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:min-w-[250px]"
+                    >
+                      {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+                      {submitting ? '提交中…' : '生成这条视频'}
+                    </button>
+                  </div>
+                  {referenceVideoDialogOpen ? (
+                    <ReferenceVideoUploadDialog
+                      onClose={() => setReferenceVideoDialogOpen(false)}
+                      onChoose={() => fileInputRef.current?.click()}
+                    />
+                  ) : null}
+                </section>
+              </section>
 
               {videoEditingEnabled ? (
                 <div className="relative z-10 mt-3 flex flex-col gap-3 rounded-[18px] border border-[#E9E1EA] bg-[linear-gradient(120deg,#FFF9FB,#F7F8FF)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1164,7 +1228,24 @@ function CreativeStudioPage({
                     {uploadingForEditing ? '正在导入…' : '上传视频，继续剪辑'}
                   </Button>
                 </div>
-              ) : null}
+              ) : (
+                <div className="relative z-10 mt-3 flex items-center gap-3 rounded-[18px] border border-[#E8E1E7] bg-white px-4 py-3 text-[#6F6472]">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] bg-[#F4EDF3] text-[#A95170]">
+                    <Scissors className="h-4 w-4" aria-hidden />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 text-[12px] font-semibold text-[#443A47]">
+                      继续剪辑
+                      <span className="rounded-full bg-[#F5EFF4] px-2 py-0.5 text-[10px] font-semibold text-[#8A7080]">
+                        即将开放
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[10px] leading-4 text-[#877D89]">
+                      许可与稳定性验证完成后开放，当前生成结果和原视频都不会被覆盖。
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {currentTaskPanel ? (
                 <div className="relative z-10 mt-6">{currentTaskPanel}</div>
@@ -1174,45 +1255,7 @@ function CreativeStudioPage({
           )}
         </div>
       </PageContainer>
-    </div>
-  );
-}
-
-function CreativeTypeTabs({
-  value,
-  onChange,
-  accent,
-}: {
-  value: VideoTab;
-  onChange(tab: VideoTab): void;
-  accent: string;
-}): JSX.Element {
-  return (
-    <div className="relative z-10 flex flex-wrap gap-2" role="tablist" aria-label="视频类型">
-      {VIDEO_TABS.map((tab) => {
-        const Icon = tab.icon;
-        const active = tab.id === value;
-        return (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            onClick={() => onChange(tab.id)}
-            className={cn(
-              'inline-flex h-10 items-center gap-2 rounded-full border px-4 text-[13px] font-semibold transition-colors',
-              active
-                ? 'bg-white shadow-[0_8px_18px_rgba(17,24,39,0.07)]'
-                : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:text-[#111827]',
-            )}
-            style={active ? { borderColor: `${accent}55`, color: accent } : undefined}
-          >
-            <Icon className="h-4 w-4" />
-            {tab.label}
-          </button>
-        );
-      })}
-    </div>
+    </main>
   );
 }
 
@@ -1237,8 +1280,10 @@ export function creativeModelDisplayName(model: NormalVideoModel): string {
   return modelOptionDisplayName(modelOptionFor(model, CREATIVE_MODEL_OPTIONS));
 }
 
-function modelPreviewSrc(model: CreativeModelValue): string {
-  if (model === 'wanxiang') return '/video-style-previews/models/wanxiang.svg';
+export function modelPreviewSrc(model: CreativeModelValue): string {
+  if (model === 'wanxiang' || model === 'wan_animate_std' || model === 'wan_animate_pro') {
+    return '/video-style-previews/models/wanxiang.svg';
+  }
   return `/video-style-previews/models/${model}.png`;
 }
 
@@ -2241,6 +2286,7 @@ function VideoHistory({
               posterUnavailable: row.posterUnavailable,
               unavailablePosterUrls,
             });
+            const cardPresentation = creativeHistoryCardPresentation(previewAvailability);
             const artifactExpired = previewAvailability === 'expired';
             const previewUnavailable = previewAvailability === 'unavailable';
             const audioVerificationBadge = videoAudioVerificationBadge(row.qualityVerification);
@@ -2253,13 +2299,14 @@ function VideoHistory({
                   type="button"
                   onClick={() => navigate(creativeTaskPath('video', row.taskId))}
                   className={cn(
-                    'relative overflow-hidden rounded-[22px] text-left',
-                    artifactExpired || previewUnavailable ? 'min-h-[160px]' : 'min-h-[210px]',
+                    'relative overflow-hidden rounded-[18px] text-left',
+                    cardPresentation.compact && 'self-start',
                     softBg,
                   )}
+                  style={{ minHeight: cardPresentation.minHeight }}
                 >
                   {artifactExpired ? (
-                    <div className="flex h-full min-h-[160px] flex-col items-center justify-center px-5 text-center text-[#8B93A6]">
+                    <div className="flex h-full min-h-[112px] flex-col items-center justify-center px-5 text-center text-[#8B93A6]">
                       <Clock className="h-6 w-6" aria-hidden />
                       <span className="mt-3 text-[13px] font-semibold text-[#595757]">
                         文件已过期
@@ -2269,7 +2316,7 @@ function VideoHistory({
                       </span>
                     </div>
                   ) : previewUnavailable ? (
-                    <div className="flex h-full min-h-[160px] flex-col items-center justify-center px-5 text-center text-[#8B93A6]">
+                    <div className="flex h-full min-h-[112px] flex-col items-center justify-center px-5 text-center text-[#8B93A6]">
                       <CircleSlash className="h-6 w-6" aria-hidden />
                       <span className="mt-3 text-[13px] font-semibold text-[#595757]">
                         {artifactUnavailable ? '文件已失效' : '预览已失效'}
@@ -2287,7 +2334,7 @@ function VideoHistory({
                       className="h-full w-full rounded-[22px] object-cover"
                     />
                   ) : (
-                    <div className="flex h-full min-h-[210px] items-center justify-center text-[#ADADAD]">
+                    <div className="flex h-full min-h-[184px] items-center justify-center text-[#ADADAD]">
                       <Clapperboard className="h-10 w-10" />
                     </div>
                   )}

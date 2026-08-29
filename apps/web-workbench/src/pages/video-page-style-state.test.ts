@@ -11,6 +11,7 @@ import {
   creativeTaskPath,
   currentMediaDownloadPayload,
   inferVideoStyleOption,
+  modelPreviewSrc,
   normalVideoParametersAfterTabReturn,
 } from './VideoPage';
 
@@ -30,6 +31,31 @@ describe('video creative style state', () => {
 
     expect(source).not.toContain('label="生成引擎"');
     expect(source).not.toContain('label="人物一致性"');
+  });
+
+  it('moves the page from technical tabs to the selected scenario-first creation flow', () => {
+    const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('视频创作');
+    expect(source).toContain('VideoCreationScenarioPicker');
+    expect(source).toContain('VideoCreationStoryboard');
+    expect(source).toContain('aria-label="视频创作工作台"');
+    expect(source).toContain('告诉 HOLA DAY 你的重点');
+    expect(source).toContain('查看生成设置');
+    expect(source).toContain('生成这条视频');
+  });
+
+  it('keeps unavailable editing honest instead of exposing a disabled production action', () => {
+    const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('继续剪辑');
+    expect(source).toContain('即将开放');
+  });
+
+  it('prevents compact unavailable history previews from stretching to the detail-column height', () => {
+    const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain("cardPresentation.compact && 'self-start'");
   });
 
   it('keeps history details readable in narrow workbench panes and exposes the real video', () => {
@@ -82,6 +108,11 @@ describe('video creative style state', () => {
     expect(creativeModelDisplayName('veo_fast')).toBe('Veo 3.1 Fast');
     expect(creativeModelDisplayName('veo_standard')).toBe('Veo 3.1 Standard');
     expect(creativeModelDisplayName('happyhorse')).toBe('Happy Horse 1.1');
+  });
+
+  it('uses an existing local model thumbnail for both clone-video models', () => {
+    expect(modelPreviewSrc('wan_animate_std')).toBe('/video-style-previews/models/wanxiang.svg');
+    expect(modelPreviewSrc('wan_animate_pro')).toBe('/video-style-previews/models/wanxiang.svg');
   });
 
   it('preserves server-confirmed file loss in the current-task download card', () => {

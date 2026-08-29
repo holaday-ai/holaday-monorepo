@@ -4,6 +4,7 @@ import {
   canChangeCreativeHistoryFilter,
   canLoadOlderCreativeHistory,
   creativeHistoryArtifactAvailability,
+  creativeHistoryCardPresentation,
   creativeHistoryDisplayTitle,
   creativeHistoryListInput,
   creativeHistoryLoadReducer,
@@ -107,6 +108,21 @@ describe('creative history preview availability', () => {
         now,
       }),
     ).toBe('missing');
+  });
+});
+
+describe('creative history card presentation', () => {
+  it('keeps expired and unavailable previews truthful without letting them dominate the page', () => {
+    expect(creativeHistoryCardPresentation('expired')).toEqual({ compact: true, minHeight: 112 });
+    expect(creativeHistoryCardPresentation('unavailable')).toEqual({
+      compact: true,
+      minHeight: 112,
+    });
+    expect(creativeHistoryCardPresentation('available')).toEqual({
+      compact: false,
+      minHeight: 184,
+    });
+    expect(creativeHistoryCardPresentation('missing')).toEqual({ compact: false, minHeight: 184 });
   });
 });
 
