@@ -49,6 +49,64 @@ final result: passed
 
 ---
 
+# 视频创作场景工作室 Design QA（2026-08-29）
+
+## 对照目标与状态
+
+- Source visual truth: `/Users/yaleiqi/.codex/generated_images/019fea2f-b33b-7560-9d5a-5a381b4cfd37/exec-73ae20ee-6edf-468a-bfd4-34e8d711ba05.png`。
+- Browser-rendered implementation: `http://127.0.0.1:5191/video`。
+- Desktop implementation evidence: `/private/tmp/video-scenario-studio-local-04.png`。
+- Workbench evidence: `/private/tmp/video-scenario-studio-workbench-viewport-03.png`。
+- Same-input comparison: `/private/tmp/video-design-comparison-04.png`。
+- State: authenticated local `/video`，默认选中「产品高光短片」，生成设置折叠，未提交付费生成。
+
+## Viewport and normalization
+
+- Source: 1487 × 1058 px；implementation: 1280 × 720 CSS px and screenshot pixels，deviceScaleFactor 1。
+- Source was normalized to 1280 × 720 and placed beside the 1280 × 720 browser capture in one 2560 × 720 comparison input。
+- The live application keeps the real 304 px sidebar and a shorter browser viewport，so the lower history region is verified in the separately scrolled workbench capture rather than compressed into the first viewport。
+
+## Visual and content fidelity
+
+- Hierarchy: H1 → four scenario cards → two-column storyboard and brief → compact continuing-editing state → history，matching the selected scenario-first direction。
+- Assets: all four scenario cards and the three product storyboard beats use real generated JPEG assets with `object-fit: cover`; no placeholder box, emoji, CSS illustration, or handcrafted SVG substitutes for imagery。
+- Typography and color: retained the existing HOLA DAY sans-serif stack, warm-white surfaces, berry selection/CTA, low-noise gray-violet borders, 22–26 px radii, and restrained shadow tokens。
+- Scenario truthfulness: production-supported durations are shown as 8 秒、2–30 秒参考 and ≤40 秒口播 instead of copying unsupported concept durations；the two normal-video storyboards also divide the real 8-second output into 2 秒、4 秒、2 秒 beats。
+- Storyboard: the opening, product close-up, and closing frames are visually distinct; the former duplicate product frame was replaced in the second visual pass。
+- Continue editing: the unavailable commercial editing capability is explicitly rendered as `即将开放`; the current video and generated result are stated as not overwritten。
+
+## Interaction, accessibility, and browser QA
+
+- Four scenario cards are semantic buttons with `aria-pressed`; the selected product card has a visible pink focus/selection boundary without the earlier blue browser outline。
+- Switching to「复刻一段动作」opens the existing real main-character/reference-video form；switching to「IP 人物口播」opens the existing onboarding/authorization flow；switching back restores the scenario prompt and collapses advanced settings。
+- `查看生成设置` opens the preserved model, duration, aspect, resolution, and style controls; the primary CTA remains the existing quote-before-charge path and was intentionally not submitted during visual QA。
+- The main creation area is exposed as the labelled region `视频创作工作台`；scenario selection and generation controls retain keyboard focus rings and semantic labels。
+- Browser logs contained only Vite hot-refresh debug entries and the React development hint; no warning, runtime error, blank page, or framework overlay was observed。
+
+## Comparison history
+
+### Pass 1
+
+- P2: storyboard reused the same product image for two beats, reducing the perceived shot progression。
+- P2: the selected scenario card retained the browser's blue focus outline, competing with the intended berry selection state。
+- Fix: generated two additional product-detail/closing assets, made all three beats distinct, and added a consistent `focus-visible` ring treatment。
+
+### Final pass
+
+- The combined input confirms the selected reference hierarchy, density, image-led scenario cards, two-column workbench, warm palette, and primary CTA are all preserved in the live application shell。
+- Intentional deviation: durations and unavailable editing status follow real production capability rather than concept-only labels。
+- No actionable P0, P1, or P2 visual, content, interaction, or accessibility finding remains on the changed surface。
+
+## Automated gates at visual sign-off
+
+- Scenario-first and video regression suite: 8 files, 95 tests passed before final release verification。
+- Page style state after labelled-region addition: 1 file, 19 tests passed。
+- Final full Web tests, typecheck, lint, build, and `git diff --check` are run as the release gate after this report update。
+
+final result: passed
+
+---
+
 # 股市 AI 研究命令台与移动任务导航 Design QA（2026-08-19）
 
 ## 对照目标与状态

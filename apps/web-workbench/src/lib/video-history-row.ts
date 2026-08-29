@@ -180,6 +180,14 @@ export type CreativeHistoryPreviewAvailability =
   | 'unavailable'
   | 'missing';
 
+export function creativeHistoryCardPresentation(availability: CreativeHistoryPreviewAvailability): {
+  compact: boolean;
+  minHeight: number;
+} {
+  const compact = availability === 'expired' || availability === 'unavailable';
+  return compact ? { compact: true, minHeight: 112 } : { compact: false, minHeight: 184 };
+}
+
 export function creativeHistoryPreviewAvailability(options: {
   download: Pick<FileDownloadPayload, 'expiresAt' | 'unavailable'> | undefined;
   posterUrl?: string;
