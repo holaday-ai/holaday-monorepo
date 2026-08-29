@@ -6,6 +6,7 @@ import { EmailCodeError, createEmailCodeService } from '../../auth/email-code.js
 import { MfaError, MfaService } from '../../auth/mfa-service.js';
 import { AuthError, AuthService } from '../../auth/service.js';
 import { users } from '../../db/schema/users.js';
+import { isTeamProjectsEnabledFor } from '../../organizations/team-project-access.js';
 import { protectedProcedure, publicProcedure, router } from '../trpc.js';
 
 const registerInput = z.object({
@@ -438,6 +439,7 @@ export const authRouter = router({
       // this to show/hide the「视频任务」sidebar entry + guard /video.
       // Single source with the tasks.ts fork (agent/video/video-access.ts).
       videoEnabled: isVideoEnabledFor(ctx.userId),
+      teamProjectsEnabled: isTeamProjectsEnabledFor(ctx.userId),
     };
   }),
 });

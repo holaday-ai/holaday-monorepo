@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  normalizeAuthMeProfile,
-  preferredAuthDisplayName,
-} from './auth-me-state';
+import { normalizeAuthMeProfile, preferredAuthDisplayName } from './auth-me-state';
 
 describe('auth.me state helpers', () => {
   it('normalizes auth profile payloads before app shell rendering', () => {
@@ -17,6 +14,7 @@ describe('auth.me state helpers', () => {
         selectedRoles: [' researcher ', null, { unsafe: true }, 'operator'],
         role: 'admin',
         videoEnabled: true,
+        teamProjectsEnabled: true,
       }),
     ).toEqual({
       userId: 'u1',
@@ -28,6 +26,7 @@ describe('auth.me state helpers', () => {
       selectedRoles: ['researcher', 'operator'],
       role: 'admin',
       videoEnabled: true,
+      teamProjectsEnabled: true,
     });
   });
 
@@ -42,6 +41,7 @@ describe('auth.me state helpers', () => {
       selectedRoles: [],
       role: 'user',
       videoEnabled: false,
+      teamProjectsEnabled: false,
     });
     expect(
       normalizeAuthMeProfile({
@@ -58,6 +58,20 @@ describe('auth.me state helpers', () => {
     });
   });
 
+  it.each([
+    ['absent', {}],
+    ['null', { teamProjectsEnabled: null }],
+    ['false', { teamProjectsEnabled: false }],
+    ['a truthy string', { teamProjectsEnabled: 'true' }],
+    ['a truthy number', { teamProjectsEnabled: 1 }],
+  ])('defaults team workspace rollout state to false for %s', (_label, payload) => {
+    expect(normalizeAuthMeProfile(payload).teamProjectsEnabled).toBe(false);
+  });
+
+  it('accepts only literal true for team workspace rollout state', () => {
+    expect(normalizeAuthMeProfile({ teamProjectsEnabled: true }).teamProjectsEnabled).toBe(true);
+  });
+
   it('chooses stable display names without rendering objects', () => {
     expect(preferredAuthDisplayName({ displayName: ' Yale ', email: 'x@example.com' })).toBe(
       'Yale',
@@ -65,9 +79,7 @@ describe('auth.me state helpers', () => {
     expect(preferredAuthDisplayName({ displayName: '138****8000', phone: '13800138000' })).toBe(
       '用户_8000',
     );
-    expect(preferredAuthDisplayName({ displayName: '', email: ' yale@example.com ' })).toBe(
-      'yale',
-    );
+    expect(preferredAuthDisplayName({ displayName: '', email: ' yale@example.com ' })).toBe('yale');
     expect(
       preferredAuthDisplayName({
         displayName: { unsafe: true },
