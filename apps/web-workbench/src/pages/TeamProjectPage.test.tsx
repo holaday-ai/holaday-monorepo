@@ -1,22 +1,33 @@
 // @vitest-environment happy-dom
 
+import type { AppRouter } from '@/lib/trpc';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { inferRouterClient } from '@trpc/client';
+import type { inferRouterOutputs } from '@trpc/server';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { App } from '../App';
 import { TeamProjectPage } from './TeamProjectPage';
 
+type WorkspaceClient = inferRouterClient<AppRouter>;
+type RouterOutputs = inferRouterOutputs<AppRouter>;
+type TeamProjectOutput = RouterOutputs['projects']['get'];
+type ProjectMembersOutput = RouterOutputs['projects']['members'];
+
 const api = vi.hoisted(() => ({
-  projectGet: vi.fn(),
-  projectMembers: vi.fn(),
+  projectGet: vi.fn<WorkspaceClient['projects']['get']['query']>(),
+  projectMembers: vi.fn<WorkspaceClient['projects']['members']['query']>(),
 }));
 
 const shell = vi.hoisted(() => ({
   teamProjectsEnabled: true,
+  refreshProjects: vi.fn(),
 }));
 
-vi.mock('@/components/AppShell', () => ({
-  useAppShellContext: () => ({
+vi.mock('@/components/AppShell', async () => {
+  const { Outlet } = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  const appShellContext = () => ({
     me: {
       userId: 'usr_current',
       email: 'viewer@example.test',
@@ -29,8 +40,14 @@ vi.mock('@/components/AppShell', () => ({
       videoEnabled: false,
       teamProjectsEnabled: shell.teamProjectsEnabled,
     },
-  }),
-}));
+    projects: [],
+    refreshProjects: shell.refreshProjects,
+  });
+  return {
+    AppShell: () => <Outlet context={appShellContext()} />,
+    useAppShellContext: appShellContext,
+  };
+});
 
 vi.mock('@/lib/trpc', () => ({
   trpc: {
@@ -52,9 +69,9 @@ const TEAM_PROJECT = {
   organizationId: 'org_design',
   organizationName: '设计团队',
   memberRole: 'viewer',
-};
+} satisfies TeamProjectOutput;
 
-const PROJECT_MEMBERS = [
+const PROJECT_MEMBERS: ProjectMembersOutput = [
   {
     projectMemberId: 'pmem_lead',
     userId: 'usr_lead',
@@ -91,8 +108,8 @@ function renderPage(projectId = 'prj_team'): void {
 
 describe('TeamProjectPage normalized detail states', () => {
   it('starts project and member loads together, then shows overview, roster, and current role', async () => {
-    let resolveProject: ((value: unknown) => void) | undefined;
-    let resolveMembers: ((value: unknown) => void) | undefined;
+    let resolveProject: ((value: TeamProjectOutput) => void) | undefined;
+    let resolveMembers: ((value: ProjectMembersOutput) => void) | undefined;
     api.projectGet.mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -130,7 +147,7 @@ describe('TeamProjectPage normalized detail states', () => {
       scope: 'organization',
       organizationId: 'org_design',
       memberRole: 'super-admin',
-    });
+    } as never);
 
     renderPage();
 
@@ -168,7 +185,7 @@ describe('TeamProjectPage normalized detail states', () => {
   });
 
   it('shows member loading independently after the project overview is ready', async () => {
-    let resolveMembers: ((value: unknown) => void) | undefined;
+    let resolveMembers: ((value: ProjectMembersOutput) => void) | undefined;
     api.projectMembers.mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -212,9 +229,35 @@ describe('TeamProjectPage normalized detail states', () => {
     expect(screen.getByRole('heading', { name: '增长计划' })).toBeTruthy();
     expect(screen.getByText('Lin')).toBeTruthy();
   });
+
+  it('keeps project-detail refresh and retry targets at least 44px tall', async () => {
+    renderPage();
+
+    const refresh = await screen.findByRole('button', { name: '刷新项目详情' });
+    expect(refresh.classList.contains('h-11')).toBe(true);
+
+    cleanup();
+    api.projectGet.mockRejectedValue(new Error('project offline'));
+    renderPage();
+
+    const retry = await screen.findByRole('button', { name: '重新加载' });
+    expect(retry.classList.contains('h-11')).toBe(true);
+  });
 });
 
 describe('TeamProjectPage rollout and viewer boundaries', () => {
+  it('is reached through the real App nested project-detail route', async () => {
+    render(
+      <MemoryRouter initialEntries={['/projects/prj_team']}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole('heading', { name: '增长计划' })).toBeTruthy();
+    expect(api.projectGet).toHaveBeenCalledWith({ projectId: 'prj_team' });
+    expect(api.projectMembers).toHaveBeenCalledWith({ projectId: 'prj_team' });
+  });
+
   it('does not fetch or expose team detail while the rollout gate is off', async () => {
     shell.teamProjectsEnabled = false;
 

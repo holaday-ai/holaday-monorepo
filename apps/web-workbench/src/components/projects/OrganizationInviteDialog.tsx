@@ -8,8 +8,9 @@ import {
   normalizeInviteLinkState,
 } from '@/lib/organization-page-state';
 import { pageActionError } from '@/lib/page-error-copy';
-import { trpc } from '@/lib/trpc';
+import { type AppRouter, trpc } from '@/lib/trpc';
 import * as Dialog from '@radix-ui/react-dialog';
+import type { inferRouterClient } from '@trpc/client';
 import { Check, Copy, Link2, X } from 'lucide-react';
 import * as React from 'react';
 
@@ -28,20 +29,10 @@ const INVITATION_ROLE_LABEL: Record<InvitationRole, string> = {
   member: '成员',
 };
 
-interface Task12InvitationClient {
-  readonly organizations: {
-    readonly createInvitation: {
-      mutate(input: {
-        readonly organizationId: string;
-        readonly role: InvitationRole;
-        readonly managerMemberId?: string;
-      }): Promise<unknown>;
-    };
-  };
-}
+type Task12InvitationClient = Pick<inferRouterClient<AppRouter>, 'organizations'>;
 
-// Treat the one-time-link response as untrusted until Task 11 normalization.
-const task12InvitationClient = trpc as unknown as Task12InvitationClient;
+// The client contract is inferred from AppRouter; the response still crosses the normalizer.
+const task12InvitationClient: Task12InvitationClient = trpc;
 
 export function OrganizationInviteDialog({
   open,
@@ -52,6 +43,8 @@ export function OrganizationInviteDialog({
   onClose,
 }: OrganizationInviteDialogProps): JSX.Element {
   const toast = useToast();
+  const mountedRef = React.useRef(true);
+  const requestGenerationRef = React.useRef(0);
   const [role, setRole] = React.useState<InvitationRole>(() => inviteRoles[0] ?? 'member');
   const [managerMemberId, setManagerMemberId] = React.useState('');
   const [inviteLink, setInviteLink] = React.useState<InviteLinkState>(() => clearInviteLinkState());
@@ -62,7 +55,16 @@ export function OrganizationInviteDialog({
     (member) => member.role === 'owner' || member.role === 'admin' || member.role === 'manager',
   );
 
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestGenerationRef.current += 1;
+    };
+  }, []);
+
   const close = React.useCallback(() => {
+    requestGenerationRef.current += 1;
     setInviteLink(clearInviteLinkState());
     setError(null);
     setCreating(false);
@@ -73,6 +75,8 @@ export function OrganizationInviteDialog({
 
   const createLink = async (): Promise<void> => {
     if (creating || !inviteRoles.includes(selectedRole)) return;
+    const requestGeneration = requestGenerationRef.current + 1;
+    requestGenerationRef.current = requestGeneration;
     setCreating(true);
     setError(null);
     setInviteLink(clearInviteLinkState());
@@ -82,6 +86,7 @@ export function OrganizationInviteDialog({
         role: selectedRole,
         ...(managerMemberId ? { managerMemberId } : {}),
       });
+      if (!mountedRef.current || requestGenerationRef.current !== requestGeneration) return;
       const next = normalizeInviteLinkState(response, organizationId);
       if (next.status !== 'ready') {
         setError('邀请链接无效，请重新生成');
@@ -89,9 +94,13 @@ export function OrganizationInviteDialog({
       }
       setInviteLink(next);
     } catch (caught) {
-      setError(pageActionError('邀请链接生成失败', caught));
+      if (mountedRef.current && requestGenerationRef.current === requestGeneration) {
+        setError(pageActionError('邀请链接生成失败', caught));
+      }
     } finally {
-      setCreating(false);
+      if (mountedRef.current && requestGenerationRef.current === requestGeneration) {
+        setCreating(false);
+      }
     }
   };
 
@@ -109,7 +118,7 @@ export function OrganizationInviteDialog({
     <Dialog.Root
       open={open}
       onOpenChange={(nextOpen) => {
-        if (!nextOpen && !creating) close();
+        if (!nextOpen) close();
       }}
     >
       <Dialog.Portal>
@@ -128,9 +137,8 @@ export function OrganizationInviteDialog({
               type="button"
               aria-label="关闭邀请对话框"
               title="关闭"
-              disabled={creating}
               onClick={close}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#595757] hover:bg-[#EFEFEF]/70"
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-[#595757] hover:bg-[#EFEFEF]/70"
             >
               <X className="h-4 w-4" />
             </button>
@@ -160,14 +168,14 @@ export function OrganizationInviteDialog({
                 </p>
               </div>
               <div className="flex justify-end gap-2">
-                <Button type="button" variant="ghost" size="sm" onClick={close}>
+                <Button type="button" variant="ghost" size="sm" onClick={close} className="h-11">
                   关闭
                 </Button>
                 <Button
                   type="button"
                   size="sm"
                   onClick={() => void copyLink()}
-                  className="bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90"
+                  className="h-11 bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90"
                 >
                   <Copy className="h-3.5 w-3.5" />
                   复制邀请链接
@@ -182,7 +190,7 @@ export function OrganizationInviteDialog({
                   aria-label="成员角色"
                   value={selectedRole}
                   onChange={(event) => setRole(event.target.value as InvitationRole)}
-                  className="mt-1.5 h-9 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-sm text-foreground focus-visible:border-[#ADADAD] focus-visible:outline-none"
+                  className="mt-1.5 h-11 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-sm text-foreground outline-none focus-visible:border-[#EA1F59]/45 focus-visible:ring-2 focus-visible:ring-[#EA1F59]/30 focus-visible:ring-offset-1"
                 >
                   {inviteRoles.map((candidate) => (
                     <option key={candidate} value={candidate}>
@@ -198,7 +206,7 @@ export function OrganizationInviteDialog({
                     aria-label="直属上级（可选）"
                     value={managerMemberId}
                     onChange={(event) => setManagerMemberId(event.target.value)}
-                    className="mt-1.5 h-9 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-sm text-foreground focus-visible:border-[#ADADAD] focus-visible:outline-none"
+                    className="mt-1.5 h-11 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-sm text-foreground outline-none focus-visible:border-[#EA1F59]/45 focus-visible:ring-2 focus-visible:ring-[#EA1F59]/30 focus-visible:ring-offset-1"
                   >
                     <option value="">暂不设置</option>
                     {managerCandidates.map((candidate) => (
@@ -215,7 +223,7 @@ export function OrganizationInviteDialog({
                 </p>
               ) : null}
               <div className="flex justify-end gap-2">
-                <Button type="button" variant="ghost" size="sm" onClick={close} disabled={creating}>
+                <Button type="button" variant="ghost" size="sm" onClick={close} className="h-11">
                   取消
                 </Button>
                 <Button
@@ -223,7 +231,7 @@ export function OrganizationInviteDialog({
                   size="sm"
                   onClick={() => void createLink()}
                   disabled={creating || inviteRoles.length === 0}
-                  className="bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90"
+                  className="h-11 bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90"
                 >
                   <Link2 className="h-3.5 w-3.5" />
                   {creating ? '生成中…' : '生成邀请链接'}

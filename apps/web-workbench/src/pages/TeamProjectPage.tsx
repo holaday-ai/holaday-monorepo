@@ -1,10 +1,11 @@
 import { useAppShellContext } from '@/components/AppShell';
 import { Button } from '@/components/ui/button';
 import { normalizeProjectRows } from '@/lib/project-page-state';
-import { trpc } from '@/lib/trpc';
+import { type AppRouter, trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
 import type { UiProject } from '@/types/task';
+import type { inferRouterClient } from '@trpc/client';
 import { FolderKanban, RefreshCw, Users } from 'lucide-react';
 import * as React from 'react';
 import { useParams } from 'react-router-dom';
@@ -40,19 +41,10 @@ const PROJECT_ROLE_LABEL: Record<ProjectMemberRole, string> = {
   viewer: '仅查看',
 };
 
-interface Task12ProjectDetailClient {
-  readonly projects: {
-    readonly get: {
-      query(input: { readonly projectId: string }): Promise<unknown>;
-    };
-    readonly members: {
-      query(input: { readonly projectId: string }): Promise<unknown>;
-    };
-  };
-}
+type Task12ProjectDetailClient = Pick<inferRouterClient<AppRouter>, 'projects'>;
 
-// Detail payloads cross an explicit unknown boundary before local rebuilding.
-const task12ProjectDetailClient = trpc as unknown as Task12ProjectDetailClient;
+// Detail procedures stay coupled to AppRouter while local normalization rebuilds UI rows.
+const task12ProjectDetailClient: Task12ProjectDetailClient = trpc;
 
 /**
  * Team project detail consumes only locally normalized API rows. Both detail
@@ -214,6 +206,7 @@ export function TeamProjectPage(): JSX.Element {
             size="sm"
             onClick={refresh}
             disabled={detail.loading || membersLoading}
+            className="h-11"
           >
             <RefreshCw
               className={cn('h-3.5 w-3.5', (detail.loading || membersLoading) && 'animate-spin')}
@@ -402,7 +395,7 @@ function ProjectErrorState({ onRefresh }: { readonly onRefresh: () => void }): J
         <p className="mt-1 text-sm text-muted-foreground">
           请稍后重试，或返回项目列表查看其他项目。
         </p>
-        <Button type="button" variant="outline" size="sm" className="mt-4" onClick={onRefresh}>
+        <Button type="button" variant="outline" size="sm" className="mt-4 h-11" onClick={onRefresh}>
           重新加载
         </Button>
       </div>

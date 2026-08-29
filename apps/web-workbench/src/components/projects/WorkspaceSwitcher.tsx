@@ -51,7 +51,7 @@ export function WorkspaceSwitcher({
             title="刷新团队空间"
             disabled={loading}
             onClick={onRefresh}
-            className="h-8 w-8 px-0 text-[#595757] hover:bg-[#EFEFEF]/70 hover:text-[#EA1F59]"
+            className="h-11 w-11 px-0 text-[#595757] hover:bg-[#EFEFEF]/70 hover:text-[#EA1F59]"
           >
             <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
           </Button>
@@ -59,7 +59,7 @@ export function WorkspaceSwitcher({
             type="button"
             size="sm"
             onClick={onCreateOrganization}
-            className="bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90"
+            className="h-11 bg-[#EA1F59] px-4 text-white hover:bg-[#EA1F59]/90"
           >
             <Plus className="h-3.5 w-3.5" />
             创建团队
@@ -101,7 +101,11 @@ export function WorkspaceSwitcher({
       ) : error && !hasOrganizations ? (
         <div className="mt-3 flex items-center justify-between gap-3 rounded-[8px] border border-[#EA1F59]/20 bg-[#EA1F59]/[0.035] px-3 py-2 text-xs text-[#595757]">
           <span>团队工作区暂时无法加载</span>
-          <button type="button" onClick={onRefresh} className="font-medium text-[#EA1F59]">
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="inline-flex h-11 items-center px-2 font-medium text-[#EA1F59]"
+          >
             重试
           </button>
         </div>
@@ -118,7 +122,7 @@ export function WorkspaceSwitcher({
 
 function workspaceButtonClass(active: boolean): string {
   return cn(
-    'inline-flex h-9 shrink-0 items-center gap-2 rounded-[8px] border px-3 text-xs font-medium transition-colors',
+    'inline-flex h-11 shrink-0 items-center gap-2 rounded-[8px] border px-3 text-xs font-medium transition-colors',
     active
       ? 'border-[#EA1F59]/35 bg-[#EA1F59]/[0.055] text-[#EA1F59]'
       : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:text-foreground',

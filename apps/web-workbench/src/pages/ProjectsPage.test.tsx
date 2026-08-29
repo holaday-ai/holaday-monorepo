@@ -1,24 +1,34 @@
 // @vitest-environment happy-dom
 
 import { ToastProvider } from '@/components/ui/toast';
+import type { AppRouter } from '@/lib/trpc';
 import type { UiProject } from '@/types/task';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import type { inferRouterClient } from '@trpc/client';
+import type { inferRouterOutputs } from '@trpc/server';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProjectsPage } from './ProjectsPage';
 
+type WorkspaceClient = inferRouterClient<AppRouter>;
+type RouterOutputs = inferRouterOutputs<AppRouter>;
+type OrganizationListOutput = RouterOutputs['organizations']['list'];
+type OrganizationMembersOutput = RouterOutputs['organizations']['members'];
+type ProjectListOutput = RouterOutputs['projects']['list'];
+type TeamProjectOutput = RouterOutputs['projects']['get'];
+
 const api = vi.hoisted(() => ({
-  organizationsList: vi.fn(),
-  organizationsCreate: vi.fn(),
-  organizationMembers: vi.fn(),
-  createInvitation: vi.fn(),
-  updateReportingLine: vi.fn(),
-  updateMemberRole: vi.fn(),
-  deactivateMember: vi.fn(),
-  projectsList: vi.fn(),
-  projectsCreate: vi.fn(),
-  projectsDelete: vi.fn(),
+  organizationsList: vi.fn<WorkspaceClient['organizations']['list']['query']>(),
+  organizationsCreate: vi.fn<WorkspaceClient['organizations']['create']['mutate']>(),
+  organizationMembers: vi.fn<WorkspaceClient['organizations']['members']['query']>(),
+  createInvitation: vi.fn<WorkspaceClient['organizations']['createInvitation']['mutate']>(),
+  updateReportingLine: vi.fn<WorkspaceClient['organizations']['updateReportingLine']['mutate']>(),
+  updateMemberRole: vi.fn<WorkspaceClient['organizations']['updateMemberRole']['mutate']>(),
+  deactivateMember: vi.fn<WorkspaceClient['organizations']['deactivateMember']['mutate']>(),
+  projectsList: vi.fn<WorkspaceClient['projects']['list']['query']>(),
+  projectsCreate: vi.fn<WorkspaceClient['projects']['create']['mutate']>(),
+  projectsDelete: vi.fn<WorkspaceClient['projects']['delete']['mutate']>(),
 }));
 
 const shell = vi.hoisted(() => ({
@@ -107,9 +117,9 @@ const ORGANIZATION_FIXTURES = {
     managerDisplayName: 'Manager',
     activeMemberCount: 3,
   },
-} as const;
+} as const satisfies Record<string, OrganizationListOutput[number]>;
 
-const ORGANIZATION_MEMBERS = [
+const ORGANIZATION_MEMBERS: OrganizationMembersOutput = [
   {
     memberId: 'omem_owner',
     userId: 'usr_owner',
@@ -131,7 +141,6 @@ const ORGANIZATION_MEMBERS = [
     status: 'active',
   },
   {
-    organizationId: 'org_design',
     memberId: 'omem_member',
     userId: 'usr_member',
     displayName: 'Member',
@@ -154,7 +163,11 @@ const TEAM_PROJECT_RESPONSE = {
   organizationId: 'org_design',
   organizationName: '设计团队',
   memberRole: 'lead',
-};
+} satisfies TeamProjectOutput;
+
+function trpcError(code: 'NOT_FOUND' | 'FORBIDDEN' | 'UNAUTHORIZED'): Error {
+  return Object.assign(new Error(code.toLowerCase()), { data: { code } });
+}
 
 beforeEach(() => {
   shell.teamProjectsEnabled = false;
@@ -173,7 +186,7 @@ beforeEach(() => {
     role: 'owner',
   });
   api.projectsCreate.mockResolvedValue({ projectId: 'prj_new', name: '新项目' });
-  api.projectsDelete.mockResolvedValue({ ok: true });
+  api.projectsDelete.mockResolvedValue({ ok: true, projectId: 'prj_deleted' });
   Object.defineProperty(navigator, 'clipboard', {
     configurable: true,
     value: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -187,9 +200,15 @@ function pageElement(path = '/projects'): JSX.Element {
     <MemoryRouter initialEntries={[path]}>
       <ToastProvider>
         <ProjectsPage />
+        <LocationProbe />
       </ToastProvider>
     </MemoryRouter>
   );
+}
+
+function LocationProbe(): JSX.Element {
+  const location = useLocation();
+  return <output data-testid="location-probe">{`${location.pathname}${location.search}`}</output>;
 }
 
 function renderPage(path = '/projects'): ReturnType<typeof render> {
@@ -243,10 +262,19 @@ describe('ProjectsPage team workspace gate', () => {
     expect(document.activeElement).toBe(nameInput);
   });
 
+  it('restores the gate-off personal grid to three columns at the 1024px lg breakpoint', () => {
+    renderPage();
+
+    const personalCard = screen.getByText('个人研究').closest('article');
+    const projectGrid = personalCard?.parentElement;
+    expect(projectGrid?.classList.contains('lg:grid-cols-3')).toBe(true);
+    expect(projectGrid?.classList.contains('xl:grid-cols-3')).toBe(false);
+  });
+
   it('shows the workspace switcher and starts personal and organization loads without waiting for either one', async () => {
     const user = userEvent.setup();
     let resolvePersonal: ((value: { ok: true; projects: UiProject[] }) => void) | undefined;
-    let resolveOrganizations: ((value: unknown[]) => void) | undefined;
+    let resolveOrganizations: ((value: OrganizationListOutput) => void) | undefined;
     shell.teamProjectsEnabled = true;
     shell.projects = [];
     shell.refreshProjects.mockImplementation(
@@ -289,6 +317,17 @@ describe('ProjectsPage team workspace gate', () => {
     expect(within(dialog).getByText(/任务本身不会被删除/)).toBeTruthy();
   });
 
+  it('keeps the legacy personal-card destination on the workbench project query', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const personalProjectButton = screen.getByText('个人研究').closest('button');
+    expect(personalProjectButton).toBeTruthy();
+    await user.click(personalProjectButton as HTMLButtonElement);
+
+    expect(screen.getByTestId('location-probe').textContent).toBe('/?project=prj_personal');
+  });
+
   it('fails closed to the personal workspace if the rollout gate turns off after organization selection', async () => {
     const user = userEvent.setup();
     shell.teamProjectsEnabled = true;
@@ -314,8 +353,8 @@ describe('ProjectsPage team workspace gate', () => {
 describe('ProjectsPage organization workspace', () => {
   it('loads team projects and members in parallel after selecting an organization', async () => {
     const user = userEvent.setup();
-    let resolveProjects: ((value: unknown[]) => void) | undefined;
-    let resolveMembers: ((value: unknown[]) => void) | undefined;
+    let resolveProjects: ((value: ProjectListOutput) => void) | undefined;
+    let resolveMembers: ((value: OrganizationMembersOutput) => void) | undefined;
     shell.teamProjectsEnabled = true;
     api.organizationsList.mockResolvedValue([ORGANIZATION_FIXTURES.owner]);
     api.projectsList.mockImplementation(
@@ -349,7 +388,7 @@ describe('ProjectsPage organization workspace', () => {
   });
 
   it('renders a resolved team-project collection while the independent member request is still loading', async () => {
-    let resolveMembers: ((value: unknown[]) => void) | undefined;
+    let resolveMembers: ((value: OrganizationMembersOutput) => void) | undefined;
     api.projectsList.mockResolvedValue([TEAM_PROJECT_RESPONSE]);
     api.organizationMembers.mockImplementation(
       () =>
@@ -451,21 +490,123 @@ describe('ProjectsPage organization workspace', () => {
     },
   );
 
-  it('does not offer team-project mutation to an organization admin whose project role is viewer', async () => {
-    const user = userEvent.setup();
-    shell.teamProjectsEnabled = true;
-    api.organizationsList.mockResolvedValue([ORGANIZATION_FIXTURES.admin]);
-    api.projectsList.mockResolvedValue([{ ...TEAM_PROJECT_RESPONSE, memberRole: 'viewer' }]);
-    api.organizationMembers.mockResolvedValue(ORGANIZATION_MEMBERS);
-    renderPage();
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
-    await screen.findByText('增长计划');
+  it.each([
+    ['reporting line', '设置 Member 的直属上级', 'omem_owner', 'updateReportingLine'],
+    ['role', '更改 Member 的角色', 'manager', 'updateMemberRole'],
+  ] as const)(
+    'resets the controlled %s selection after a failed mutation',
+    async (_label, accessibleName, value, mutationName) => {
+      const user = await openOrganization('owner');
+      api[mutationName].mockRejectedValue(new Error('mutation offline'));
+      const select = screen.getByLabelText(accessibleName) as HTMLSelectElement;
 
-    await user.click(screen.getByRole('button', { name: '项目 增长计划 操作' }));
+      await user.selectOptions(select, value);
 
-    expect(screen.queryByRole('menuitem', { name: '删除项目' })).toBeNull();
-    expect(screen.queryByRole('menuitem', { name: '重命名项目' })).toBeNull();
+      await waitFor(() => expect(api[mutationName]).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(select.value).toBe(''));
+    },
+  );
+
+  it('shows a visible focus ring when keyboard focus reaches a member select', async () => {
+    const user = await openOrganization('owner');
+    const select = screen.getByLabelText('设置 Member 的直属上级');
+
+    for (let tabCount = 0; tabCount < 30 && document.activeElement !== select; tabCount += 1) {
+      await user.tab();
+    }
+
+    expect(document.activeElement).toBe(select);
+    expect(select.classList.contains('focus-visible:ring-2')).toBe(true);
+    expect(select.classList.contains('focus-visible:ring-[#EA1F59]/30')).toBe(true);
   });
+
+  it('keeps new workspace, member, invitation, and creation targets at least 44px tall', async () => {
+    const user = await openOrganization('owner');
+    const workspace = screen.getByRole('region', { name: '工作区切换' });
+    const members = screen.getByRole('region', { name: '团队成员' });
+    const workspaceTargets = [
+      within(workspace).getByRole('button', { name: '刷新团队空间' }),
+      within(workspace).getByRole('button', { name: '创建团队' }),
+      within(workspace).getByRole('button', { name: '个人空间' }),
+      within(workspace).getByRole('button', { name: /设计团队/ }),
+    ];
+    const memberTargets = [
+      within(members).getByRole('button', { name: '刷新团队成员' }),
+      within(members).getByLabelText('设置 Member 的直属上级'),
+      within(members).getByLabelText('更改 Member 的角色'),
+      within(members).getByRole('button', { name: '移除 Member' }),
+    ];
+    const organizationTargets = [
+      screen.getByRole('button', { name: '邀请成员' }),
+      screen.getByRole('button', { name: '新建团队项目' }),
+      screen.getByRole('button', { name: '刷新工作区' }),
+    ];
+
+    for (const target of [...workspaceTargets, ...memberTargets, ...organizationTargets]) {
+      expect(target.classList.contains('h-11')).toBe(true);
+    }
+
+    await user.click(screen.getByRole('button', { name: '邀请成员' }));
+    const invitationDialog = screen.getByRole('dialog', { name: /邀请成员加入/ });
+    const invitationTargets = [
+      within(invitationDialog).getByRole('button', { name: '关闭邀请对话框' }),
+      within(invitationDialog).getByLabelText('成员角色'),
+      within(invitationDialog).getByLabelText('直属上级（可选）'),
+      within(invitationDialog).getByRole('button', { name: '取消' }),
+      within(invitationDialog).getByRole('button', { name: '生成邀请链接' }),
+    ];
+    for (const target of invitationTargets) {
+      expect(target.classList.contains('h-11')).toBe(true);
+    }
+
+    await user.click(within(invitationDialog).getByRole('button', { name: '取消' }));
+    await user.click(screen.getByRole('button', { name: '创建团队' }));
+    const creationDialog = screen.getByRole('dialog', { name: '创建团队空间' });
+    const creationTargets = [
+      within(creationDialog).getByRole('button', { name: '关闭创建团队空间' }),
+      within(creationDialog).getByLabelText('团队名称'),
+      within(creationDialog).getByRole('button', { name: '取消' }),
+      within(creationDialog).getByRole('button', { name: '创建团队' }),
+    ];
+    for (const target of creationTargets) {
+      expect(target.classList.contains('h-11')).toBe(true);
+    }
+  });
+
+  it.each([
+    ['owner', 'lead', true],
+    ['owner', 'member', true],
+    ['owner', 'viewer', true],
+    ['admin', 'lead', true],
+    ['admin', 'member', true],
+    ['admin', 'viewer', true],
+    ['manager', 'lead', false],
+    ['manager', 'member', false],
+    ['manager', 'viewer', false],
+    ['member', 'lead', false],
+    ['member', 'member', false],
+    ['member', 'viewer', false],
+  ] as const)(
+    'derives team-project delete for organization %s and project %s as %s',
+    async (organizationRole, projectRole, canDelete) => {
+      const user = userEvent.setup();
+      const teamProject = {
+        ...TEAM_PROJECT_RESPONSE,
+        memberRole: projectRole,
+      } satisfies TeamProjectOutput;
+      shell.teamProjectsEnabled = true;
+      api.organizationsList.mockResolvedValue([ORGANIZATION_FIXTURES[organizationRole]]);
+      api.projectsList.mockResolvedValue([teamProject]);
+      api.organizationMembers.mockResolvedValue(ORGANIZATION_MEMBERS);
+      renderPage();
+      await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+      await screen.findByText('增长计划');
+
+      await user.click(screen.getByRole('button', { name: '项目 增长计划 操作' }));
+
+      expect(screen.queryByRole('menuitem', { name: '删除项目' }) !== null).toBe(canDelete);
+    },
+  );
 
   it('creates an organization and a team project through scoped dialogs', async () => {
     const user = await openOrganization('manager');
@@ -475,6 +616,7 @@ describe('ProjectsPage organization workspace', () => {
         organizationId: 'org_new',
         name: '新团队',
         role: 'owner',
+        managerDisplayName: null,
         activeMemberCount: 1,
       },
     ]);
@@ -500,6 +642,104 @@ describe('ProjectsPage organization workspace', () => {
 });
 
 describe('ProjectsPage invitation plaintext lifecycle', () => {
+  it('resets invite state across workspaces and ignores a late response from the previous workspace', async () => {
+    const user = userEvent.setup();
+    let resolveDesignInvite:
+      | ((value: { invitationId: string; inviteUrl: string; expiresAt: string }) => void)
+      | undefined;
+    shell.teamProjectsEnabled = true;
+    api.organizationsList.mockResolvedValue([
+      ORGANIZATION_FIXTURES.owner,
+      {
+        organizationId: 'org_ops',
+        name: '运营团队',
+        role: 'manager',
+        managerDisplayName: 'Owner',
+        activeMemberCount: 2,
+      },
+    ]);
+    api.organizationMembers.mockResolvedValue(ORGANIZATION_MEMBERS);
+    api.createInvitation.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveDesignInvite = resolve;
+        }),
+    );
+    renderPage();
+
+    const operationsWorkspace = await screen.findByRole('button', { name: /运营团队/ });
+    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await user.click(screen.getByRole('button', { name: '邀请成员' }));
+    const designDialog = screen.getByRole('dialog', { name: '邀请成员加入设计团队' });
+    await user.selectOptions(
+      within(designDialog).getByRole('combobox', { name: /直属上级/ }),
+      'omem_manager',
+    );
+    await user.click(within(designDialog).getByRole('button', { name: '生成邀请链接' }));
+
+    fireEvent.click(operationsWorkspace);
+    await user.click(await screen.findByRole('button', { name: '邀请成员' }));
+    const operationsDialog = screen.getByRole('dialog', { name: '邀请成员加入运营团队' });
+    expect(
+      (within(operationsDialog).getByRole('combobox', { name: /直属上级/ }) as HTMLSelectElement)
+        .value,
+    ).toBe('');
+    expect(
+      (
+        within(operationsDialog).getByRole('button', {
+          name: '生成邀请链接',
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+
+    resolveDesignInvite?.({
+      invitationId: 'oinv_design',
+      inviteUrl: '/organizations/invitations/accept?token=design-secret',
+      expiresAt: '2026-09-06T00:00:00.000Z',
+    });
+    await waitFor(() =>
+      expect(
+        within(operationsDialog).queryByDisplayValue(
+          '/organizations/invitations/accept?token=design-secret',
+        ),
+      ).toBeNull(),
+    );
+  });
+
+  it('allows closing an invitation while it is being generated and discards the late plaintext', async () => {
+    const user = await openOrganization('owner');
+    let resolveInvite:
+      | ((value: { invitationId: string; inviteUrl: string; expiresAt: string }) => void)
+      | undefined;
+    api.createInvitation.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveInvite = resolve;
+        }),
+    );
+
+    await user.click(screen.getByRole('button', { name: '邀请成员' }));
+    const dialog = screen.getByRole('dialog', { name: '邀请成员加入设计团队' });
+    await user.click(within(dialog).getByRole('button', { name: '生成邀请链接' }));
+    const closeButton = within(dialog).getByRole('button', { name: '关闭邀请对话框' });
+    expect((closeButton as HTMLButtonElement).disabled).toBe(false);
+    await user.click(closeButton);
+    expect(screen.queryByRole('dialog', { name: '邀请成员加入设计团队' })).toBeNull();
+
+    resolveInvite?.({
+      invitationId: 'oinv_late',
+      inviteUrl: '/organizations/invitations/accept?token=late-secret',
+      expiresAt: '2026-09-06T00:00:00.000Z',
+    });
+    await user.click(screen.getByRole('button', { name: '邀请成员' }));
+    const reopened = screen.getByRole('dialog', { name: '邀请成员加入设计团队' });
+    await waitFor(() =>
+      expect(
+        within(reopened).queryByDisplayValue('/organizations/invitations/accept?token=late-secret'),
+      ).toBeNull(),
+    );
+  });
+
   it('shows a valid invite URL and expiry, copies it, and clears plaintext when closed', async () => {
     const user = await openOrganization('owner');
     const writeText = vi.spyOn(navigator.clipboard, 'writeText');
@@ -662,6 +902,30 @@ describe('ProjectsPage selected team-project collection states', () => {
     expect(await screen.findByText('团队项目更新失败，当前保留上次结果')).toBeTruthy();
     expect(screen.getByText('增长计划')).toBeTruthy();
   });
+
+  it.each(['NOT_FOUND', 'FORBIDDEN'] as const)(
+    'invalidates a selected workspace and its open invite after a hidden-resource %s response',
+    async (code) => {
+      api.projectsList
+        .mockResolvedValueOnce([TEAM_PROJECT_RESPONSE])
+        .mockRejectedValueOnce(trpcError(code));
+      api.organizationMembers.mockResolvedValue(ORGANIZATION_MEMBERS);
+      const user = await selectOrganization();
+      expect(await screen.findByText('增长计划')).toBeTruthy();
+      const refreshWorkspace = screen.getByRole('button', { name: '刷新工作区' });
+
+      await user.click(screen.getByRole('button', { name: '邀请成员' }));
+      expect(screen.getByRole('dialog', { name: '邀请成员加入设计团队' })).toBeTruthy();
+      fireEvent.click(refreshWorkspace);
+
+      expect(await screen.findByRole('heading', { name: '个人项目' })).toBeTruthy();
+      expect(screen.queryByText('增长计划')).toBeNull();
+      expect(screen.queryByText('Member')).toBeNull();
+      expect(screen.queryByRole('dialog', { name: '邀请成员加入设计团队' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '邀请成员' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '新建团队项目' })).toBeNull();
+    },
+  );
 });
 
 describe('ProjectsPage selected member collection states', () => {
@@ -695,5 +959,195 @@ describe('ProjectsPage selected member collection states', () => {
 
     expect(await screen.findByText('成员列表更新失败，当前保留上次结果')).toBeTruthy();
     expect(screen.getByText('Member')).toBeTruthy();
+  });
+});
+
+describe('ProjectsPage workspace mutation reconciliation', () => {
+  it('keeps the newly selected workspace live when an earlier workspace mutation settles late', async () => {
+    const user = userEvent.setup();
+    let resolveRoleUpdate: ((value: { ok: true }) => void) | undefined;
+    let resolveOperationsProjects: ((value: ProjectListOutput) => void) | undefined;
+    let resolveOperationsMembers: ((value: OrganizationMembersOutput) => void) | undefined;
+    const operationsOrganization = {
+      organizationId: 'org_ops',
+      name: '运营团队',
+      role: 'owner',
+      managerDisplayName: null,
+      activeMemberCount: 1,
+    } as const;
+    const operationsProject = {
+      ...TEAM_PROJECT_RESPONSE,
+      projectId: 'prj_ops',
+      name: '运营节奏',
+      organizationId: 'org_ops',
+      organizationName: '运营团队',
+    } satisfies TeamProjectOutput;
+    const operationsMembers: OrganizationMembersOutput = [
+      {
+        memberId: 'omem_ops_owner',
+        userId: 'usr_ops_owner',
+        displayName: 'Ops Owner',
+        avatarUrl: null,
+        role: 'owner',
+        managerUserId: null,
+        managerDisplayName: null,
+        status: 'active',
+      },
+    ];
+    shell.teamProjectsEnabled = true;
+    api.organizationsList.mockResolvedValue([ORGANIZATION_FIXTURES.owner, operationsOrganization]);
+    api.projectsList.mockImplementation((input) => {
+      const organizationId = input?.organizationId;
+      if (organizationId === 'org_ops') {
+        return new Promise((resolve) => {
+          resolveOperationsProjects = resolve;
+        });
+      }
+      return Promise.resolve([TEAM_PROJECT_RESPONSE]);
+    });
+    api.organizationMembers.mockImplementation(({ organizationId }) => {
+      if (organizationId === 'org_ops') {
+        return new Promise((resolve) => {
+          resolveOperationsMembers = resolve;
+        });
+      }
+      return Promise.resolve(ORGANIZATION_MEMBERS);
+    });
+    api.updateMemberRole.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRoleUpdate = resolve;
+        }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await screen.findByText('增长计划');
+    await user.selectOptions(screen.getByLabelText('更改 Member 的角色'), 'manager');
+    await waitFor(() => expect(api.updateMemberRole).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole('button', { name: /运营团队/ }));
+    await waitFor(() =>
+      expect(api.projectsList).toHaveBeenCalledWith({ organizationId: 'org_ops' }),
+    );
+
+    resolveRoleUpdate?.({ ok: true });
+    resolveOperationsProjects?.([operationsProject]);
+    resolveOperationsMembers?.(operationsMembers);
+
+    expect(await screen.findByText('运营节奏')).toBeTruthy();
+    expect(await screen.findByText('Ops Owner')).toBeTruthy();
+    expect(screen.queryByLabelText('团队项目加载中')).toBeNull();
+    expect(screen.queryByLabelText('团队成员加载中')).toBeNull();
+  });
+
+  it('refreshes the organization summary after a reporting-line mutation', async () => {
+    const user = await openOrganization('owner');
+    api.updateReportingLine.mockResolvedValue({ ok: true });
+
+    await user.selectOptions(screen.getByLabelText('设置 Member 的直属上级'), 'omem_owner');
+
+    await waitFor(() => expect(api.updateReportingLine).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.organizationsList).toHaveBeenCalledTimes(2));
+  });
+
+  it('reconciles a self role change before rendering organization actions again', async () => {
+    const user = userEvent.setup();
+    const currentAdmin: OrganizationMembersOutput[number] = {
+      memberId: 'omem_current',
+      userId: 'usr_current',
+      displayName: 'Current Admin',
+      avatarUrl: null,
+      role: 'admin',
+      managerUserId: 'usr_owner',
+      managerDisplayName: 'Owner',
+      status: 'active',
+    };
+    const memberOrganization = {
+      ...ORGANIZATION_FIXTURES.member,
+      managerDisplayName: 'Owner',
+    };
+    shell.teamProjectsEnabled = true;
+    api.organizationsList
+      .mockResolvedValueOnce([ORGANIZATION_FIXTURES.admin])
+      .mockResolvedValue([memberOrganization]);
+    api.projectsList.mockResolvedValue([TEAM_PROJECT_RESPONSE]);
+    api.organizationMembers
+      .mockResolvedValueOnce([ORGANIZATION_MEMBERS[0], currentAdmin, ORGANIZATION_MEMBERS[2]])
+      .mockResolvedValue([
+        ORGANIZATION_MEMBERS[0],
+        { ...currentAdmin, role: 'member' },
+        ORGANIZATION_MEMBERS[2],
+      ]);
+    api.updateMemberRole.mockResolvedValue({ ok: true });
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await user.selectOptions(screen.getByLabelText('更改 Current Admin 的角色'), 'member');
+
+    expect(await screen.findByText('当前身份：成员 · 3 位活跃成员')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '邀请成员' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '新建团队项目' })).toBeNull();
+    expect(screen.queryByLabelText('更改 Current Admin 的角色')).toBeNull();
+  });
+
+  it('refreshes the active member count after removing another member', async () => {
+    const user = userEvent.setup();
+    shell.teamProjectsEnabled = true;
+    api.organizationsList
+      .mockResolvedValueOnce([ORGANIZATION_FIXTURES.owner])
+      .mockResolvedValue([{ ...ORGANIZATION_FIXTURES.owner, activeMemberCount: 2 }]);
+    api.projectsList.mockResolvedValue([TEAM_PROJECT_RESPONSE]);
+    api.organizationMembers
+      .mockResolvedValueOnce(ORGANIZATION_MEMBERS)
+      .mockResolvedValue(ORGANIZATION_MEMBERS.slice(0, 2));
+    api.deactivateMember.mockResolvedValue({ ok: true });
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await user.click(await screen.findByRole('button', { name: '移除 Member' }));
+    await user.click(
+      within(screen.getByRole('dialog', { name: '移除这位团队成员？' })).getByRole('button', {
+        name: '移除成员',
+      }),
+    );
+
+    expect(await screen.findByText('当前身份：所有者 · 2 位活跃成员')).toBeTruthy();
+    expect(screen.getByText('2 位活跃成员')).toBeTruthy();
+    expect(screen.queryByText('Member')).toBeNull();
+  });
+
+  it('falls back to personal space after the current member is deactivated', async () => {
+    const user = userEvent.setup();
+    const currentAdmin: OrganizationMembersOutput[number] = {
+      memberId: 'omem_current',
+      userId: 'usr_current',
+      displayName: 'Current Admin',
+      avatarUrl: null,
+      role: 'admin',
+      managerUserId: 'usr_owner',
+      managerDisplayName: 'Owner',
+      status: 'active',
+    };
+    shell.teamProjectsEnabled = true;
+    api.organizationsList
+      .mockResolvedValueOnce([ORGANIZATION_FIXTURES.admin])
+      .mockResolvedValue([]);
+    api.projectsList.mockResolvedValue([TEAM_PROJECT_RESPONSE]);
+    api.organizationMembers.mockResolvedValue([ORGANIZATION_MEMBERS[0], currentAdmin]);
+    api.deactivateMember.mockResolvedValue({ ok: true });
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await user.click(await screen.findByRole('button', { name: '移除 Current Admin' }));
+    await user.click(
+      within(screen.getByRole('dialog', { name: '移除这位团队成员？' })).getByRole('button', {
+        name: '移除成员',
+      }),
+    );
+
+    expect(await screen.findByRole('heading', { name: '个人项目' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /设计团队/ })).toBeNull();
+    expect(screen.queryByText('增长计划')).toBeNull();
+    expect(screen.queryByRole('region', { name: '团队成员' })).toBeNull();
   });
 });

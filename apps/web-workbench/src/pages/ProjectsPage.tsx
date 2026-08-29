@@ -28,11 +28,12 @@ import {
   projectLoadErrorCopy,
   projectNameState,
 } from '@/lib/project-page-state';
-import { trpc } from '@/lib/trpc';
+import { type AppRouter, trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
 import type { UiProject } from '@/types/task';
 import * as Dialog from '@radix-ui/react-dialog';
+import type { inferRouterClient } from '@trpc/client';
 import {
   AlertCircle,
   Building2,
@@ -60,50 +61,10 @@ const ORGANIZATION_ROLE_LABEL: Record<OrganizationRole, string> = {
   member: '成员',
 };
 
-interface Task12WorkspaceClient {
-  readonly organizations: {
-    readonly list: { query(): Promise<unknown> };
-    readonly create: { mutate(input: { readonly name: string }): Promise<unknown> };
-    readonly members: {
-      query(input: { readonly organizationId: string }): Promise<unknown>;
-    };
-    readonly updateReportingLine: {
-      mutate(input: {
-        readonly organizationId: string;
-        readonly memberId: string;
-        readonly managerMemberId: string;
-      }): Promise<unknown>;
-    };
-    readonly updateMemberRole: {
-      mutate(input: {
-        readonly organizationId: string;
-        readonly memberId: string;
-        readonly role: OrganizationRole;
-      }): Promise<unknown>;
-    };
-    readonly deactivateMember: {
-      mutate(input: {
-        readonly organizationId: string;
-        readonly memberId: string;
-      }): Promise<unknown>;
-    };
-  };
-  readonly projects: {
-    readonly list: {
-      query(input: { readonly organizationId: string }): Promise<unknown>;
-    };
-    readonly create: {
-      mutate(input: {
-        readonly name: string;
-        readonly organizationId: string;
-      }): Promise<unknown>;
-    };
-  };
-}
+type Task12WorkspaceClient = Pick<inferRouterClient<AppRouter>, 'organizations' | 'projects'>;
 
-// The shared install can lag the worktree router during phased delivery. Keep
-// new endpoint outputs unknown so Task 11 normalization remains the UI boundary.
-const task12WorkspaceClient = trpc as unknown as Task12WorkspaceClient;
+// Keep the Task 12 surface named while deriving every procedure directly from AppRouter.
+const task12WorkspaceClient: Task12WorkspaceClient = trpc;
 
 /**
  * Personal projects keep the established no-input AppShell collection. The
@@ -119,7 +80,10 @@ export function ProjectsPage(): JSX.Element {
   const mountedRef = React.useRef(false);
   const personalRequestRef = React.useRef(0);
   const organizationRequestRef = React.useRef(0);
-  const workspaceRequestRef = React.useRef(0);
+  const workspaceRequestGenerationRef = React.useRef(new Map<string, number>());
+  const selectedOrganizationIdRef = React.useRef<string | null>(null);
+  const teamProjectsEnabledRef = React.useRef(teamProjectsEnabled);
+  const organizationsRef = React.useRef<readonly UiOrganization[]>([]);
 
   const [personalProjects, setPersonalProjects] = React.useState<UiProject[]>(() =>
     shellProjects.filter((project) => project.scope === 'personal'),
@@ -154,6 +118,9 @@ export function ProjectsPage(): JSX.Element {
   );
   const selectedOrganization = selectedWorkspace.organization;
   const selectedOrganizationId = selectedWorkspace.organizationId;
+  teamProjectsEnabledRef.current = teamProjectsEnabled;
+  selectedOrganizationIdRef.current = selectedOrganizationId;
+  organizationsRef.current = organizations;
   const organizationActions = selectedOrganization
     ? organizationActionVisibility(selectedOrganization.role)
     : null;
@@ -164,6 +131,31 @@ export function ProjectsPage(): JSX.Element {
     personalProjects.map((project) => project.name),
   );
   const showPersonalCreateError = personalNameTouched && personalCreateState.error !== null;
+
+  const invalidateWorkspace = React.useCallback(
+    (organizationId: string, removeOrganization = true): void => {
+      if (selectedOrganizationIdRef.current !== organizationId) return;
+      bumpWorkspaceGeneration(workspaceRequestGenerationRef.current, organizationId);
+      selectedOrganizationIdRef.current = null;
+      setSelectedWorkspaceValue(null);
+      setTeamProjects(emptyScopedCollection());
+      setMembers(emptyScopedCollection());
+      setCreateTeamProjectOpen(false);
+      setInviteOpen(false);
+      setPendingDelete(null);
+      setPendingMemberRemoval(null);
+      if (removeOrganization) {
+        setOrganizations((current) => {
+          const next = current.filter(
+            (organization) => organization.organizationId !== organizationId,
+          );
+          organizationsRef.current = next;
+          return next;
+        });
+      }
+    },
+    [],
+  );
 
   const refreshPersonalProjects = React.useCallback(async () => {
     const requestId = personalRequestRef.current + 1;
@@ -185,7 +177,7 @@ export function ProjectsPage(): JSX.Element {
   }, [refreshProjects, toast]);
 
   const refreshOrganizations = React.useCallback(async () => {
-    if (!teamProjectsEnabled) return null;
+    if (!teamProjectsEnabledRef.current) return null;
     const requestId = organizationRequestRef.current + 1;
     organizationRequestRef.current = requestId;
     setOrganizationsLoading(true);
@@ -194,57 +186,150 @@ export function ProjectsPage(): JSX.Element {
       const response = await task12WorkspaceClient.organizations.list.query();
       const nextOrganizations = normalizeOrganizationRows(response);
       if (!mountedRef.current || organizationRequestRef.current !== requestId) return null;
+      const currentOrganizationId = selectedOrganizationIdRef.current;
+      const previousOrganization = currentOrganizationId
+        ? organizationsRef.current.find(
+            (organization) => organization.organizationId === currentOrganizationId,
+          )
+        : null;
+      const nextOrganization = currentOrganizationId
+        ? nextOrganizations.find(
+            (organization) => organization.organizationId === currentOrganizationId,
+          )
+        : null;
+      organizationsRef.current = nextOrganizations;
       setOrganizations(nextOrganizations);
       setOrganizationsLoading(false);
+      if (currentOrganizationId && !nextOrganization) {
+        invalidateWorkspace(currentOrganizationId, false);
+      } else if (
+        previousOrganization &&
+        nextOrganization &&
+        previousOrganization.role !== nextOrganization.role
+      ) {
+        setInviteOpen(false);
+        setCreateTeamProjectOpen(false);
+        setPendingDelete(null);
+        setPendingMemberRemoval(null);
+      }
       return nextOrganizations;
     } catch (error) {
       if (!mountedRef.current || organizationRequestRef.current !== requestId) return null;
+      if (isHiddenResourceError(error)) {
+        const currentOrganizationId = selectedOrganizationIdRef.current;
+        organizationsRef.current = [];
+        setOrganizations([]);
+        setOrganizationsError(null);
+        setOrganizationsLoading(false);
+        if (currentOrganizationId) invalidateWorkspace(currentOrganizationId, false);
+        return [];
+      }
       setOrganizationsError(pageErrorMessage(error));
       setOrganizationsLoading(false);
       return null;
     }
-  }, [teamProjectsEnabled]);
+  }, [invalidateWorkspace]);
 
-  const refreshOrganizationWorkspace = React.useCallback(async (organizationId: string) => {
-    const requestId = workspaceRequestRef.current + 1;
-    workspaceRequestRef.current = requestId;
-    setTeamProjects((current) => startScopedRefresh(current, organizationId));
-    setMembers((current) => startScopedRefresh(current, organizationId));
+  const refreshOrganizationWorkspace = React.useCallback(
+    async (organizationId: string) => {
+      if (!teamProjectsEnabledRef.current || selectedOrganizationIdRef.current !== organizationId) {
+        return;
+      }
+      const requestGeneration = bumpWorkspaceGeneration(
+        workspaceRequestGenerationRef.current,
+        organizationId,
+      );
+      setTeamProjects((current) => startScopedRefresh(current, organizationId));
+      setMembers((current) => startScopedRefresh(current, organizationId));
 
-    const projectFuture = task12WorkspaceClient.projects.list.query({ organizationId });
-    const memberFuture = task12WorkspaceClient.organizations.members.query({ organizationId });
-    const settleProjects = projectFuture.then(
-      (response) => {
-        if (!mountedRef.current || workspaceRequestRef.current !== requestId) return;
-        setTeamProjects({
-          organizationId,
-          rows: normalizeProjectRows(response, { organizationId }),
-          loading: false,
-          error: null,
-        });
-      },
-      (error: unknown) => {
-        if (!mountedRef.current || workspaceRequestRef.current !== requestId) return;
-        setTeamProjects((current) => finishScopedFailure(current, organizationId, error));
-      },
-    );
-    const settleMembers = memberFuture.then(
-      (response) => {
-        if (!mountedRef.current || workspaceRequestRef.current !== requestId) return;
-        setMembers({
-          organizationId,
-          rows: normalizeOrganizationMemberRows(response, organizationId),
-          loading: false,
-          error: null,
-        });
-      },
-      (error: unknown) => {
-        if (!mountedRef.current || workspaceRequestRef.current !== requestId) return;
-        setMembers((current) => finishScopedFailure(current, organizationId, error));
-      },
-    );
-    await Promise.all([settleProjects, settleMembers]);
-  }, []);
+      const projectFuture = task12WorkspaceClient.projects.list.query({ organizationId });
+      const memberFuture = task12WorkspaceClient.organizations.members.query({ organizationId });
+      const settleProjects = projectFuture.then(
+        (response) => {
+          if (
+            !isCurrentWorkspaceRequest({
+              mounted: mountedRef.current,
+              teamProjectsEnabled: teamProjectsEnabledRef.current,
+              selectedOrganizationId: selectedOrganizationIdRef.current,
+              generations: workspaceRequestGenerationRef.current,
+              organizationId,
+              requestGeneration,
+            })
+          ) {
+            return;
+          }
+          setTeamProjects({
+            organizationId,
+            rows: normalizeProjectRows(response, { organizationId }),
+            loading: false,
+            error: null,
+          });
+        },
+        (error: unknown) => {
+          if (
+            !isCurrentWorkspaceRequest({
+              mounted: mountedRef.current,
+              teamProjectsEnabled: teamProjectsEnabledRef.current,
+              selectedOrganizationId: selectedOrganizationIdRef.current,
+              generations: workspaceRequestGenerationRef.current,
+              organizationId,
+              requestGeneration,
+            })
+          ) {
+            return;
+          }
+          if (isHiddenResourceError(error)) {
+            invalidateWorkspace(organizationId);
+            return;
+          }
+          setTeamProjects((current) => finishScopedFailure(current, organizationId, error));
+        },
+      );
+      const settleMembers = memberFuture.then(
+        (response) => {
+          if (
+            !isCurrentWorkspaceRequest({
+              mounted: mountedRef.current,
+              teamProjectsEnabled: teamProjectsEnabledRef.current,
+              selectedOrganizationId: selectedOrganizationIdRef.current,
+              generations: workspaceRequestGenerationRef.current,
+              organizationId,
+              requestGeneration,
+            })
+          ) {
+            return;
+          }
+          setMembers({
+            organizationId,
+            rows: normalizeOrganizationMemberRows(response, organizationId),
+            loading: false,
+            error: null,
+          });
+        },
+        (error: unknown) => {
+          if (
+            !isCurrentWorkspaceRequest({
+              mounted: mountedRef.current,
+              teamProjectsEnabled: teamProjectsEnabledRef.current,
+              selectedOrganizationId: selectedOrganizationIdRef.current,
+              generations: workspaceRequestGenerationRef.current,
+              organizationId,
+              requestGeneration,
+            })
+          ) {
+            return;
+          }
+          if (isHiddenResourceError(error)) {
+            invalidateWorkspace(organizationId);
+            return;
+          }
+          setMembers((current) => finishScopedFailure(current, organizationId, error));
+        },
+      );
+      await Promise.all([settleProjects, settleMembers]);
+    },
+    [invalidateWorkspace],
+  );
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -254,22 +339,32 @@ export function ProjectsPage(): JSX.Element {
       mountedRef.current = false;
       personalRequestRef.current += 1;
       organizationRequestRef.current += 1;
-      workspaceRequestRef.current += 1;
+      workspaceRequestGenerationRef.current.clear();
     };
   }, [refreshOrganizations, refreshPersonalProjects, teamProjectsEnabled]);
 
   React.useEffect(() => {
     if (!teamProjectsEnabled || !selectedOrganizationId) {
-      workspaceRequestRef.current += 1;
+      setTeamProjects(emptyScopedCollection());
+      setMembers(emptyScopedCollection());
+      setCreateTeamProjectOpen(false);
+      setInviteOpen(false);
+      setPendingDelete(null);
+      setPendingMemberRemoval(null);
       return;
     }
     void refreshOrganizationWorkspace(selectedOrganizationId);
     return () => {
-      workspaceRequestRef.current += 1;
+      bumpWorkspaceGeneration(workspaceRequestGenerationRef.current, selectedOrganizationId);
     };
   }, [refreshOrganizationWorkspace, selectedOrganizationId, teamProjectsEnabled]);
 
   const selectWorkspace = React.useCallback((organizationId: string | null) => {
+    const previousOrganizationId = selectedOrganizationIdRef.current;
+    if (previousOrganizationId) {
+      bumpWorkspaceGeneration(workspaceRequestGenerationRef.current, previousOrganizationId);
+    }
+    selectedOrganizationIdRef.current = organizationId;
     setSelectedWorkspaceValue(organizationId);
     setCreatingPersonal(false);
     setPersonalName('');
@@ -278,6 +373,10 @@ export function ProjectsPage(): JSX.Element {
     setInviteOpen(false);
     setPendingDelete(null);
     setPendingMemberRemoval(null);
+    if (!organizationId) {
+      setTeamProjects(emptyScopedCollection());
+      setMembers(emptyScopedCollection());
+    }
   }, []);
 
   const createPersonalProject = async (): Promise<void> => {
@@ -308,6 +407,7 @@ export function ProjectsPage(): JSX.Element {
         return false;
       }
       setOrganizations((current) => normalizeOrganizationRows([...current, created]));
+      selectedOrganizationIdRef.current = created.organizationId;
       setSelectedWorkspaceValue(created.organizationId);
       toast.show(`已创建团队「${created.name}」`);
       void refreshOrganizations();
@@ -319,15 +419,18 @@ export function ProjectsPage(): JSX.Element {
   };
 
   const createTeamProject = async (name: string): Promise<boolean> => {
-    if (!selectedOrganizationId) return false;
+    const organizationId = selectedOrganizationIdRef.current;
+    if (!organizationId) return false;
     try {
       await task12WorkspaceClient.projects.create.mutate({
         name,
-        organizationId: selectedOrganizationId,
+        organizationId,
       });
       if (!mountedRef.current) return false;
       toast.show(`已创建团队项目「${name}」`);
-      void refreshOrganizationWorkspace(selectedOrganizationId);
+      if (selectedOrganizationIdRef.current === organizationId) {
+        void refreshOrganizationWorkspace(organizationId);
+      }
       return true;
     } catch (error) {
       if (mountedRef.current) toast.show(pageActionError('创建团队项目失败', error), 'error');
@@ -341,7 +444,9 @@ export function ProjectsPage(): JSX.Element {
       if (!mountedRef.current) return;
       toast.show('项目已删除');
       if (project.scope === 'organization' && project.organizationId) {
-        await refreshOrganizationWorkspace(project.organizationId);
+        if (selectedOrganizationIdRef.current === project.organizationId) {
+          await refreshOrganizationWorkspace(project.organizationId);
+        }
       } else {
         await refreshPersonalProjects();
       }
@@ -350,48 +455,70 @@ export function ProjectsPage(): JSX.Element {
     }
   };
 
-  const updateReportingLine = async (memberId: string, managerMemberId: string): Promise<void> => {
-    if (!selectedOrganizationId) return;
+  const updateReportingLine = async (
+    memberId: string,
+    managerMemberId: string,
+  ): Promise<boolean> => {
+    const organizationId = selectedOrganizationIdRef.current;
+    if (!organizationId) return false;
     try {
       await task12WorkspaceClient.organizations.updateReportingLine.mutate({
-        organizationId: selectedOrganizationId,
+        organizationId,
         memberId,
         managerMemberId,
       });
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) return false;
       toast.show('直属上级已更新');
-      await refreshOrganizationWorkspace(selectedOrganizationId);
+      const refreshes: Promise<unknown>[] = [refreshOrganizations()];
+      if (selectedOrganizationIdRef.current === organizationId) {
+        refreshes.push(refreshOrganizationWorkspace(organizationId));
+      }
+      await Promise.all(refreshes);
+      return true;
     } catch (error) {
       if (mountedRef.current) toast.show(pageActionError('更新直属上级失败', error), 'error');
+      return false;
     }
   };
 
-  const updateMemberRole = async (memberId: string, role: OrganizationRole): Promise<void> => {
-    if (!selectedOrganizationId) return;
+  const updateMemberRole = async (memberId: string, role: OrganizationRole): Promise<boolean> => {
+    const organizationId = selectedOrganizationIdRef.current;
+    if (!organizationId) return false;
     try {
       await task12WorkspaceClient.organizations.updateMemberRole.mutate({
-        organizationId: selectedOrganizationId,
+        organizationId,
         memberId,
         role,
       });
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) return false;
       toast.show('成员角色已更新');
-      await refreshOrganizationWorkspace(selectedOrganizationId);
+      const refreshes: Promise<unknown>[] = [refreshOrganizations()];
+      if (selectedOrganizationIdRef.current === organizationId) {
+        refreshes.push(refreshOrganizationWorkspace(organizationId));
+      }
+      await Promise.all(refreshes);
+      return true;
     } catch (error) {
       if (mountedRef.current) toast.show(pageActionError('更新成员角色失败', error), 'error');
+      return false;
     }
   };
 
   const deactivateMember = async (member: UiOrganizationMember): Promise<void> => {
-    if (!selectedOrganizationId) return;
+    const organizationId = selectedOrganizationIdRef.current;
+    if (!organizationId) return;
     try {
       await task12WorkspaceClient.organizations.deactivateMember.mutate({
-        organizationId: selectedOrganizationId,
+        organizationId,
         memberId: member.memberId,
       });
       if (!mountedRef.current) return;
       toast.show(`已移除成员「${member.displayName}」`);
-      await refreshOrganizationWorkspace(selectedOrganizationId);
+      const refreshes: Promise<unknown>[] = [refreshOrganizations()];
+      if (selectedOrganizationIdRef.current === organizationId) {
+        refreshes.push(refreshOrganizationWorkspace(organizationId));
+      }
+      await Promise.all(refreshes);
     } catch (error) {
       if (mountedRef.current) toast.show(pageActionError('移除成员失败', error), 'error');
     }
@@ -425,6 +552,7 @@ export function ProjectsPage(): JSX.Element {
                   variant="outline"
                   size="sm"
                   onClick={() => setInviteOpen(true)}
+                  className="h-11"
                 >
                   邀请成员
                 </Button>
@@ -434,7 +562,7 @@ export function ProjectsPage(): JSX.Element {
                   type="button"
                   size="sm"
                   onClick={() => setCreateTeamProjectOpen(true)}
-                  className="bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90"
+                  className="h-11 bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90"
                 >
                   <Plus className="h-4 w-4" />
                   新建团队项目
@@ -504,11 +632,8 @@ export function ProjectsPage(): JSX.Element {
                   : undefined
               }
               onOpen={(project) => navigate(`/projects/${encodeURIComponent(project.projectId)}`)}
-              onDelete={
-                selectedOrganization.role === 'owner' || selectedOrganization.role === 'admin'
-                  ? setPendingDelete
-                  : undefined
-              }
+              organizationRole={selectedOrganization.role}
+              onDelete={setPendingDelete}
             />
             <OrganizationMembersPanel
               organization={selectedOrganization}
@@ -591,9 +716,10 @@ export function ProjectsPage(): JSX.Element {
         onClose={() => setCreateTeamProjectOpen(false)}
         onSubmit={createTeamProject}
       />
-      {selectedOrganization && organizationActions ? (
+      {teamProjectsEnabled && inviteOpen && selectedOrganization && organizationActions ? (
         <OrganizationInviteDialog
-          open={inviteOpen}
+          key={selectedOrganization.organizationId}
+          open
           organizationId={selectedOrganization.organizationId}
           organizationName={selectedOrganization.name}
           inviteRoles={organizationActions.inviteRoles}
@@ -655,6 +781,7 @@ function ProjectCollection({
   onRetry,
   onCreate,
   onOpen,
+  organizationRole,
   onDelete,
 }: {
   title?: string;
@@ -670,6 +797,7 @@ function ProjectCollection({
   onRetry(): void;
   onCreate?: () => void;
   onOpen(project: UiProject): void;
+  organizationRole?: OrganizationRole;
   onDelete?: (project: UiProject) => void;
 }): JSX.Element {
   const hasProjects = projects.length > 0;
@@ -728,7 +856,7 @@ function ProjectCollection({
           ) : null}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((project) => (
             <article
               key={project.projectId}
@@ -774,8 +902,7 @@ function ProjectCollection({
                       <FolderOpen className="text-muted-foreground" />
                       <span>{project.scope === 'organization' ? '查看项目' : '打开项目'}</span>
                     </DropdownMenuItem>
-                    {onDelete &&
-                    (project.scope === 'personal' || project.memberRole !== 'viewer') ? (
+                    {onDelete && canDeleteProject(project, organizationRole) ? (
                       <DropdownMenuItem
                         onSelect={() => onDelete(project)}
                         className="text-[#EA1F59] focus:bg-[#EA1F59]/[0.06] focus:text-[#EA1F59]"
@@ -927,7 +1054,14 @@ function OrganizationWorkspaceSummary({
             ) : null}
           </div>
         </div>
-        <Button type="button" variant="outline" size="sm" disabled={loading} onClick={onRefresh}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={loading}
+          onClick={onRefresh}
+          className="h-11"
+        >
           <RefreshCw className={loading ? 'animate-spin' : undefined} />
           刷新工作区
         </Button>
@@ -1002,7 +1136,7 @@ function CreateNameDialog({
               aria-label={`关闭${title}`}
               title="关闭"
               onClick={close}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#595757] hover:bg-[#EFEFEF]/70"
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-[#595757] hover:bg-[#EFEFEF]/70"
             >
               <X className="h-4 w-4" />
             </button>
@@ -1015,7 +1149,7 @@ function CreateNameDialog({
               maxLength={PROJECT_NAME_MAX_LENGTH}
               onBlur={() => setTouched(true)}
               onChange={(event) => setName(event.target.value)}
-              className="mt-1.5 h-9 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-sm text-foreground focus-visible:border-[#ADADAD] focus-visible:outline-none"
+              className="mt-1.5 h-11 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-sm text-foreground focus-visible:border-[#ADADAD] focus-visible:outline-none"
             />
           </label>
           {touched && error ? (
@@ -1024,7 +1158,14 @@ function CreateNameDialog({
             </p>
           ) : null}
           <div className="mt-5 flex justify-end gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={close} disabled={busy}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={close}
+              disabled={busy}
+              className="h-11"
+            >
               取消
             </Button>
             <Button
@@ -1032,7 +1173,7 @@ function CreateNameDialog({
               size="sm"
               disabled={busy || Boolean(error)}
               onClick={() => void submit()}
-              className="bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90"
+              className="h-11 bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90"
             >
               {busy ? '创建中…' : submitLabel}
             </Button>
@@ -1087,4 +1228,72 @@ function scopedRowsFor<T>(
   if (!organizationId) return emptyScopedCollection();
   if (state.organizationId === organizationId) return state;
   return { organizationId, rows: [], loading: true, error: null };
+}
+
+function canDeleteProject(project: UiProject, organizationRole?: OrganizationRole): boolean {
+  if (project.scope === 'personal') return true;
+  if (
+    project.memberRole !== 'lead' &&
+    project.memberRole !== 'member' &&
+    project.memberRole !== 'viewer'
+  ) {
+    return false;
+  }
+  return organizationRole === 'owner' || organizationRole === 'admin';
+}
+
+function bumpWorkspaceGeneration(generations: Map<string, number>, organizationId: string): number {
+  const nextGeneration = (generations.get(organizationId) ?? 0) + 1;
+  generations.set(organizationId, nextGeneration);
+  return nextGeneration;
+}
+
+function isCurrentWorkspaceRequest(input: {
+  readonly mounted: boolean;
+  readonly teamProjectsEnabled: boolean;
+  readonly selectedOrganizationId: string | null;
+  readonly generations: ReadonlyMap<string, number>;
+  readonly organizationId: string;
+  readonly requestGeneration: number;
+}): boolean {
+  return (
+    input.mounted &&
+    input.teamProjectsEnabled &&
+    input.selectedOrganizationId === input.organizationId &&
+    input.generations.get(input.organizationId) === input.requestGeneration
+  );
+}
+
+function isHiddenResourceError(error: unknown): boolean {
+  const code = trpcErrorCode(error);
+  return code === 'NOT_FOUND' || code === 'FORBIDDEN' || code === 'UNAUTHORIZED';
+}
+
+function trpcErrorCode(error: unknown): string | null {
+  if (!isUnknownRecord(error)) return null;
+  const directCode = ownUnknownText(error, 'code');
+  if (directCode) return directCode;
+  const data = ownUnknownRecord(error, 'data');
+  const dataCode = data ? ownUnknownText(data, 'code') : '';
+  if (dataCode) return dataCode;
+  const shape = ownUnknownRecord(error, 'shape');
+  const shapeData = shape ? ownUnknownRecord(shape, 'data') : null;
+  return shapeData ? ownUnknownText(shapeData, 'code') || null : null;
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function ownUnknownRecord(
+  value: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | null {
+  const candidate = Object.prototype.hasOwnProperty.call(value, key) ? value[key] : null;
+  return isUnknownRecord(candidate) ? candidate : null;
+}
+
+function ownUnknownText(value: Record<string, unknown>, key: string): string {
+  const candidate = Object.prototype.hasOwnProperty.call(value, key) ? value[key] : null;
+  return typeof candidate === 'string' ? candidate : '';
 }
