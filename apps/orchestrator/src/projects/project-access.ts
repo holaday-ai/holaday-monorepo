@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, or } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { organizationMembers } from '../db/schema/organization-members.js';
 import { organizations } from '../db/schema/organizations.js';
@@ -24,20 +24,17 @@ export class ProjectAccessError extends Error {
   }
 }
 
+/** Only external IDs from the authenticated request may cross this boundary. */
 export interface ProjectAccessInput {
-  db: DB;
   actorExternalId: string;
   projectExternalId: string;
 }
 
-/**
- * The action is mandatory so a caller cannot accidentally use rename-level
- * access for a later, more sensitive mutation such as deletion.
- */
-export type ProjectMutationAction = 'rename' | 'remove_member' | 'delete';
+export type ProjectMutationAction = 'rename' | 'manage_members' | 'delete';
 
-export interface MutableProjectAccessInput extends ProjectAccessInput {
-  action: ProjectMutationAction;
+export interface MutableProjectAccessInput<Action extends ProjectMutationAction>
+  extends ProjectAccessInput {
+  action: Action;
 }
 
 export interface PersonalProjectAccess {
@@ -62,64 +59,89 @@ export interface OrganizationProjectAccess {
 
 export type ProjectAccess = PersonalProjectAccess | OrganizationProjectAccess;
 
-interface ProjectSnapshot {
-  id: number;
-  externalId: string;
-  ownerUserId: number;
+declare const projectAccessTransactionBrand: unique symbol;
+declare const projectMutationGrantBrand: unique symbol;
+
+/**
+ * A transaction capability created only by withProjectAccessTransaction. It
+ * makes a later router write type-dependent on the same transaction that
+ * locked and authorized its project access snapshot.
+ */
+export type ProjectAccessTransaction = Pick<DB, 'select' | 'insert' | 'update' | 'delete'> & {
+  readonly [projectAccessTransactionBrand]: 'project-access-transaction';
+};
+
+/** A mutation grant is invariant in its exact action via its discriminator. */
+export type ProjectMutationGrant<Action extends ProjectMutationAction> = ProjectAccess & {
+  readonly action: Action;
+  readonly [projectMutationGrantBrand]: Action;
+};
+
+interface ProjectAccessSnapshot {
+  projectId: number;
+  projectExternalId: string;
+  projectOwnerUserId: number;
+  actorUserId: number;
   organizationInternalId: number | null;
   organizationExternalId: string | null;
   organizationName: string | null;
   organizationStatus: string | null;
   teamProjectsEnabled: boolean | null;
+  organizationMemberOrganizationId: number | null;
+  organizationMemberUserId: number | null;
+  organizationMemberRole: string | null;
+  organizationMemberStatus: string | null;
+  projectMemberProjectId: number | null;
+  projectMemberUserId: number | null;
+  projectMemberRole: string | null;
+  projectMemberStatus: string | null;
 }
 
-interface OrganizationMembershipSnapshot {
-  organizationId: number;
-  userId: number;
-  role: string;
-  status: string;
+function hidden(): never {
+  throw new ProjectAccessError('NOT_FOUND');
 }
 
-interface ProjectMembershipSnapshot {
-  projectId: number;
-  userId: number;
-  role: string;
-  status: string;
+function isOrganizationRole(role: string | null): role is OrganizationRole {
+  return role !== null && (ORGANIZATION_ROLES as readonly string[]).includes(role);
 }
 
-/** Resolve the authenticated external actor once at the access boundary. */
-async function resolveActorUserId(
-  db: Pick<DB, 'select'>,
-  actorExternalId: string,
-): Promise<number> {
-  const [actor] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.externalId, actorExternalId))
-    .limit(1);
-  // An invalid/stale authenticated identity must not disclose project state either.
-  if (!actor) throw new ProjectAccessError('NOT_FOUND');
-  return actor.id;
+function isProjectRole(role: string | null): role is ProjectRole {
+  return role !== null && (PROJECT_ROLES as readonly string[]).includes(role);
 }
 
 /**
- * Team organizations are joined only when active and enabled. A team project
- * with no matching joined organization is intentionally indistinguishable
- * from a nonexistent project at this boundary.
+ * One actor- and project-bound snapshot for personal and team projects. The
+ * query itself excludes stale organization/member rows; the shape checks below
+ * deliberately repeat those bindings so a fake or malformed driver row cannot
+ * evade the tenant boundary.
  */
-function buildProjectLookupQuery(db: Pick<DB, 'select'>, projectExternalId: string) {
-  return db
+function buildProjectAccessSnapshotQuery(
+  db: Pick<DB, 'select'>,
+  input: ProjectAccessInput,
+  lock: boolean,
+) {
+  const query = db
     .select({
-      id: projects.id,
-      externalId: projects.externalId,
-      ownerUserId: projects.userId,
+      projectId: projects.id,
+      projectExternalId: projects.externalId,
+      projectOwnerUserId: projects.userId,
+      actorUserId: users.id,
       organizationInternalId: projects.organizationId,
       organizationExternalId: organizations.externalId,
       organizationName: organizations.name,
       organizationStatus: organizations.status,
       teamProjectsEnabled: organizations.teamProjectsEnabled,
+      organizationMemberOrganizationId: organizationMembers.organizationId,
+      organizationMemberUserId: organizationMembers.userId,
+      organizationMemberRole: organizationMembers.role,
+      organizationMemberStatus: organizationMembers.status,
+      projectMemberProjectId: projectMembers.projectId,
+      projectMemberUserId: projectMembers.userId,
+      projectMemberRole: projectMembers.role,
+      projectMemberStatus: projectMembers.status,
     })
     .from(projects)
+    .innerJoin(users, eq(users.externalId, input.actorExternalId))
     .leftJoin(
       organizations,
       and(
@@ -128,109 +150,46 @@ function buildProjectLookupQuery(db: Pick<DB, 'select'>, projectExternalId: stri
         eq(organizations.teamProjectsEnabled, true),
       ),
     )
-    .where(eq(projects.externalId, projectExternalId))
-    .limit(1);
-}
-
-function buildOrganizationMembershipQuery(
-  db: Pick<DB, 'select'>,
-  organizationId: number,
-  actorUserId: number,
-) {
-  return db
-    .select({
-      organizationId: organizationMembers.organizationId,
-      userId: organizationMembers.userId,
-      role: organizationMembers.role,
-      status: organizationMembers.status,
-    })
-    .from(organizationMembers)
-    .where(
+    .leftJoin(
+      organizationMembers,
       and(
-        eq(organizationMembers.organizationId, organizationId),
-        eq(organizationMembers.userId, actorUserId),
+        eq(organizationMembers.organizationId, organizations.id),
+        eq(organizationMembers.userId, users.id),
         eq(organizationMembers.status, 'active'),
       ),
     )
-    .limit(1);
-}
-
-function buildProjectMembershipQuery(
-  db: Pick<DB, 'select'>,
-  projectId: number,
-  actorUserId: number,
-) {
-  return db
-    .select({
-      projectId: projectMembers.projectId,
-      userId: projectMembers.userId,
-      role: projectMembers.role,
-      status: projectMembers.status,
-    })
-    .from(projectMembers)
-    .where(
+    .leftJoin(
+      projectMembers,
       and(
-        eq(projectMembers.projectId, projectId),
-        eq(projectMembers.userId, actorUserId),
+        eq(projectMembers.projectId, projects.id),
+        eq(projectMembers.userId, users.id),
         eq(projectMembers.status, 'active'),
       ),
     )
-    .limit(1);
+    .where(
+      and(
+        eq(projects.externalId, input.projectExternalId),
+        or(
+          and(isNull(projects.organizationId), eq(projects.userId, users.id)),
+          and(
+            isNotNull(projects.organizationId),
+            isNotNull(organizations.id),
+            isNotNull(organizationMembers.id),
+            isNotNull(projectMembers.id),
+          ),
+        ),
+      ),
+    );
+  return lock ? query.for('update').limit(1) : query.limit(1);
 }
 
-function hidden(): never {
-  throw new ProjectAccessError('NOT_FOUND');
-}
+function snapshotToAccess(snapshot: ProjectAccessSnapshot | undefined): ProjectAccess {
+  if (!snapshot) return hidden();
 
-function isActiveOrganizationMembership(
-  membership: OrganizationMembershipSnapshot | undefined,
-  organizationId: number,
-  actorUserId: number,
-): membership is OrganizationMembershipSnapshot {
-  return (
-    membership?.organizationId === organizationId &&
-    membership.userId === actorUserId &&
-    membership.status === 'active'
-  );
-}
-
-function isActiveProjectMembership(
-  membership: ProjectMembershipSnapshot | undefined,
-  projectId: number,
-  actorUserId: number,
-): membership is ProjectMembershipSnapshot {
-  return (
-    membership?.projectId === projectId &&
-    membership.userId === actorUserId &&
-    membership.status === 'active'
-  );
-}
-
-function isOrganizationRole(role: string): role is OrganizationRole {
-  return (ORGANIZATION_ROLES as readonly string[]).includes(role);
-}
-
-function isProjectRole(role: string): role is ProjectRole {
-  return (PROJECT_ROLES as readonly string[]).includes(role);
-}
-
-/**
- * Returns only authoritative access context. Team access is possible only
- * after the project, active enabled organization, active org membership, and
- * active project membership all bind to the same resolved actor.
- */
-export async function requireReadableProject(input: ProjectAccessInput): Promise<ProjectAccess> {
-  const actorUserId = await resolveActorUserId(input.db, input.actorExternalId);
-  const [project] = (await buildProjectLookupQuery(
-    input.db,
-    input.projectExternalId,
-  )) as ProjectSnapshot[];
-  if (!project) return hidden();
-
-  if (project.organizationInternalId === null) {
-    if (project.ownerUserId !== actorUserId) return hidden();
+  if (snapshot.organizationInternalId === null) {
+    if (snapshot.projectOwnerUserId !== snapshot.actorUserId) return hidden();
     return {
-      projectId: project.id,
+      projectId: snapshot.projectId,
       scope: 'personal',
       organizationInternalId: null,
       organizationExternalId: null,
@@ -241,62 +200,69 @@ export async function requireReadableProject(input: ProjectAccessInput): Promise
   }
 
   if (
-    project.organizationExternalId === null ||
-    project.organizationName === null ||
-    project.organizationStatus !== 'active' ||
-    project.teamProjectsEnabled !== true
+    snapshot.organizationExternalId === null ||
+    snapshot.organizationName === null ||
+    snapshot.organizationStatus !== 'active' ||
+    snapshot.teamProjectsEnabled !== true ||
+    snapshot.organizationMemberOrganizationId !== snapshot.organizationInternalId ||
+    snapshot.organizationMemberUserId !== snapshot.actorUserId ||
+    snapshot.organizationMemberStatus !== 'active' ||
+    snapshot.projectMemberProjectId !== snapshot.projectId ||
+    snapshot.projectMemberUserId !== snapshot.actorUserId ||
+    snapshot.projectMemberStatus !== 'active' ||
+    !isOrganizationRole(snapshot.organizationMemberRole) ||
+    !isProjectRole(snapshot.projectMemberRole)
   ) {
-    return hidden();
-  }
-
-  const [organizationMembership] = (await buildOrganizationMembershipQuery(
-    input.db,
-    project.organizationInternalId,
-    actorUserId,
-  )) as OrganizationMembershipSnapshot[];
-  if (
-    !isActiveOrganizationMembership(
-      organizationMembership,
-      project.organizationInternalId,
-      actorUserId,
-    )
-  ) {
-    return hidden();
-  }
-
-  const [projectMembership] = (await buildProjectMembershipQuery(
-    input.db,
-    project.id,
-    actorUserId,
-  )) as ProjectMembershipSnapshot[];
-  if (!isActiveProjectMembership(projectMembership, project.id, actorUserId)) return hidden();
-  if (!isOrganizationRole(organizationMembership.role) || !isProjectRole(projectMembership.role)) {
     return hidden();
   }
 
   return {
-    projectId: project.id,
+    projectId: snapshot.projectId,
     scope: 'organization',
-    organizationInternalId: project.organizationInternalId,
-    organizationExternalId: project.organizationExternalId,
-    organizationName: project.organizationName,
-    organizationRole: organizationMembership.role,
-    projectRole: projectMembership.role,
+    organizationInternalId: snapshot.organizationInternalId,
+    organizationExternalId: snapshot.organizationExternalId,
+    organizationName: snapshot.organizationName,
+    organizationRole: snapshot.organizationMemberRole,
+    projectRole: snapshot.projectMemberRole,
   };
 }
 
-/**
- * Applies the Task 4 permission matrix after (and only after) readable access
- * has established the tenant and both membership boundaries. Removing a
- * specific member still requires its own target-membership binding later.
- */
-export async function requireMutableProject(
-  input: MutableProjectAccessInput,
+async function loadProjectAccess(
+  db: Pick<DB, 'select'>,
+  input: ProjectAccessInput,
+  lock: boolean,
 ): Promise<ProjectAccess> {
-  const access = await requireReadableProject(input);
+  const [snapshot] = (await buildProjectAccessSnapshotQuery(
+    db,
+    input,
+    lock,
+  )) as ProjectAccessSnapshot[];
+  return snapshotToAccess(snapshot);
+}
+
+/** Read-only project access has no transaction or row lock side effects. */
+export async function requireReadableProject(
+  db: Pick<DB, 'select'>,
+  input: ProjectAccessInput,
+): Promise<ProjectAccess> {
+  return loadProjectAccess(db, input, false);
+}
+
+/** Runs authorization and the caller's write callback inside one DB transaction. */
+export async function withProjectAccessTransaction<Result>(
+  db: DB,
+  callback: (tx: ProjectAccessTransaction) => Promise<Result>,
+): Promise<Result> {
+  return db.transaction(async (tx) => callback(tx as unknown as ProjectAccessTransaction));
+}
+
+function accessDecision<Action extends ProjectMutationAction>(
+  access: ProjectAccess,
+  action: Action,
+): void {
   if (access.scope === 'personal') {
-    if (input.action === 'remove_member') throw new ProjectAccessError('FORBIDDEN');
-    return access;
+    if (action === 'manage_members') throw new ProjectAccessError('FORBIDDEN');
+    return;
   }
 
   const context = {
@@ -317,13 +283,67 @@ export async function requireMutableProject(
     },
   };
   const decision =
-    input.action === 'delete' ? canDeleteTeamProject(context) : canRenameTeamProject(context);
+    action === 'delete' ? canDeleteTeamProject(context) : canRenameTeamProject(context);
   if (!decision.allowed) throw new ProjectAccessError('FORBIDDEN');
-  return access;
+}
+
+/**
+ * Mutable access only accepts the branded transaction and locks the complete
+ * joined access snapshot before returning an action-specific grant.
+ */
+export async function requireMutableProject<Action extends ProjectMutationAction>(
+  tx: ProjectAccessTransaction,
+  input: MutableProjectAccessInput<Action>,
+): Promise<ProjectMutationGrant<Action>> {
+  const access = await loadProjectAccess(tx, input, true);
+  accessDecision(access, input.action);
+  return { ...access, action: input.action } as ProjectMutationGrant<Action>;
+}
+
+/**
+ * The write-oriented entrypoint: callers receive an exact action grant and
+ * its originating transaction together, so a Task 9 write cannot be placed
+ * after an independently committed access check.
+ */
+export async function withMutableProjectAccess<Action extends ProjectMutationAction, Result>(
+  db: DB,
+  input: MutableProjectAccessInput<Action>,
+  callback: (tx: ProjectAccessTransaction, grant: ProjectMutationGrant<Action>) => Promise<Result>,
+): Promise<Result> {
+  return withProjectAccessTransaction(db, async (tx) => {
+    const grant = await requireMutableProject(tx, input);
+    return callback(tx, grant);
+  });
+}
+
+function requireGrantAction<Action extends ProjectMutationAction>(
+  grant: ProjectMutationGrant<Action>,
+  action: Action,
+): ProjectMutationGrant<Action> {
+  if (grant.action !== action) throw new ProjectAccessError('FORBIDDEN');
+  return grant;
+}
+
+/** Task 9 write helpers consume the matching action grant, never plain access. */
+export function requireRenameProjectGrant(
+  grant: ProjectMutationGrant<'rename'>,
+): ProjectMutationGrant<'rename'> {
+  return requireGrantAction(grant, 'rename');
+}
+
+export function requireMemberManagementProjectGrant(
+  grant: ProjectMutationGrant<'manage_members'>,
+): ProjectMutationGrant<'manage_members'> {
+  return requireGrantAction(grant, 'manage_members');
+}
+
+export function requireDeleteProjectGrant(
+  grant: ProjectMutationGrant<'delete'>,
+): ProjectMutationGrant<'delete'> {
+  return requireGrantAction(grant, 'delete');
 }
 
 export const __projectAccessInternals = {
-  buildProjectLookupQuery,
-  buildOrganizationMembershipQuery,
-  buildProjectMembershipQuery,
+  buildProjectAccessSnapshotQuery,
+  snapshotToAccess,
 };
