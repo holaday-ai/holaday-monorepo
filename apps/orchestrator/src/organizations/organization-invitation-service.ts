@@ -58,6 +58,16 @@ export interface AcceptInvitationInput {
   now?: () => Date;
 }
 
+/**
+ * Safe preflight for the router's organization rollout check. The token never
+ * leaves this service and an unavailable token remains indistinguishable from
+ * a disabled or missing organization at the router boundary.
+ */
+export interface ResolveInvitationOrganizationInput {
+  db: DB;
+  token: string;
+}
+
 export interface RevokeInvitationInput {
   db: DB;
   actorExternalId: string;
@@ -274,6 +284,28 @@ function buildTokenLookupQuery(db: Pick<DB, 'select'>, hash: string) {
     .from(organizationInvitations)
     .where(eq(organizationInvitations.tokenHash, hash))
     .limit(1);
+}
+
+function buildInvitationOrganizationLookupQuery(db: Pick<DB, 'select'>, hash: string) {
+  return db
+    .select({ organizationId: organizations.externalId })
+    .from(organizationInvitations)
+    .innerJoin(organizations, eq(organizations.id, organizationInvitations.organizationId))
+    .where(and(eq(organizationInvitations.tokenHash, hash), eq(organizations.status, 'active')))
+    .limit(1);
+}
+
+/**
+ * Resolves only the external organization id needed to enforce the router's
+ * rollout switch before an acceptance can consume the one-time invitation.
+ */
+export async function resolveInvitationOrganization(input: ResolveInvitationOrganizationInput) {
+  const [organization] = await buildInvitationOrganizationLookupQuery(
+    input.db,
+    tokenHash(input.token),
+  );
+  if (!organization) throw new InvitationServiceError('INVITATION_NOT_AVAILABLE');
+  return organization;
 }
 
 function buildLockedInvitationByHashQuery(
@@ -556,5 +588,6 @@ export const __organizationInvitationServiceInternals = {
   buildLockedActiveManagerMembershipQuery,
   buildLockedInvitationByExternalIdQuery,
   buildLockedInvitationByHashQuery,
+  buildInvitationOrganizationLookupQuery,
   buildTokenLookupQuery,
 };

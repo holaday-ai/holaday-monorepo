@@ -11,6 +11,7 @@ import { filesRouter } from './routers/files.js';
 import { llmCallsRouter } from './routers/llm-calls.js';
 import { memoryRouter } from './routers/memory.js';
 import { notificationChannelsRouter, notificationsRouter } from './routers/notifications.js';
+import { organizationsRouter } from './routers/organizations.js';
 import { partnerRouter } from './routers/partner.js';
 import { paymentRouter } from './routers/payment.js';
 import { plannedTasksRouter } from './routers/planned-tasks.js';
@@ -54,6 +55,7 @@ export const appRouter = router({
   connections: connectionsRouter,
   usage: usageRouter,
   notifications: notificationsRouter,
+  organizations: organizationsRouter,
   notificationChannels: notificationChannelsRouter,
   partner: partnerRouter,
   admin: adminRouter,

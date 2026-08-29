@@ -8,6 +8,7 @@ import {
   __organizationInvitationServiceInternals,
   acceptInvitation,
   createInvitation,
+  resolveInvitationOrganization,
   revokeInvitation,
 } from './organization-invitation-service.js';
 
@@ -163,6 +164,25 @@ const openInvitation = {
 };
 
 describe('organization invitation service', () => {
+  it('resolves only an invitation organization external id from a plaintext token', async () => {
+    const fake = makeDb([[{ organizationId: 'org_design' }]]);
+
+    await expect(resolveInvitationOrganization({ db: fake.db, token })).resolves.toEqual({
+      organizationId: 'org_design',
+    });
+    expect(fake.events).toEqual(['select:organization_invitations:none:outside']);
+  });
+
+  it('collapses an absent token before exposing an invitation organization', async () => {
+    const fake = makeDb([[]]);
+
+    await expect(
+      resolveInvitationOrganization({ db: fake.db, token: 'missing-token' }),
+    ).rejects.toMatchObject({
+      code: 'INVITATION_NOT_AVAILABLE',
+    });
+  });
+
   it('stores only a SHA-256 hash of a 32-byte URL-safe token and returns plaintext once', async () => {
     const fake = makeDb([
       [actor],
