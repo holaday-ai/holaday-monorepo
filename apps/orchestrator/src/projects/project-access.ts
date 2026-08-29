@@ -1,3 +1,4 @@
+import { newExternalId } from '@holaday/shared-types';
 import { and, eq, isNotNull, isNull, or } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
@@ -16,11 +17,17 @@ import {
   canRenameTeamProject,
 } from '../organizations/organization-permissions.js';
 
-export type ProjectAccessErrorCode = 'NOT_FOUND' | 'FORBIDDEN';
+export type ProjectAccessErrorCode = 'NOT_FOUND' | 'FORBIDDEN' | 'CONFLICT';
 
 export class ProjectAccessError extends Error {
   constructor(public readonly code: ProjectAccessErrorCode) {
-    super(code === 'NOT_FOUND' ? 'project not found' : 'project action forbidden');
+    super(
+      code === 'NOT_FOUND'
+        ? 'project not found'
+        : code === 'CONFLICT'
+          ? 'project member already exists'
+          : 'project action forbidden',
+    );
     this.name = 'ProjectAccessError';
   }
 }
@@ -52,7 +59,7 @@ export interface OrganizationProjectAccess {
 
 export type ProjectAccess = PersonalProjectAccess | OrganizationProjectAccess;
 type ProjectMutationAction = 'rename' | 'manage_members' | 'delete';
-type ProjectAccessTransaction = Pick<DB, 'select' | 'update' | 'delete'>;
+type ProjectAccessTransaction = Pick<DB, 'select' | 'insert' | 'update' | 'delete'>;
 type ProjectMutationGrant<Action extends ProjectMutationAction> = ProjectAccess & {
   readonly action: Action;
 };
@@ -88,12 +95,27 @@ interface TargetProjectMemberSnapshot {
   status: string;
 }
 
+interface TargetOrganizationMemberSnapshot {
+  id: number;
+  externalId: string;
+  organizationId: number;
+  userId: number;
+  status: string;
+  userExternalId: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+}
+
 function hidden(): never {
   throw new ProjectAccessError('NOT_FOUND');
 }
 
 function forbidden(): never {
   throw new ProjectAccessError('FORBIDDEN');
+}
+
+function conflict(): never {
+  throw new ProjectAccessError('CONFLICT');
 }
 
 function isOrganizationRole(role: string | null): role is OrganizationRole {
@@ -196,6 +218,55 @@ function buildLockedTargetMemberQuery(
         eq(projectMembers.externalId, targetProjectMemberExternalId),
       ),
     )
+    .for('update')
+    .limit(1);
+}
+
+function buildLockedTargetOrganizationMemberQuery(
+  db: Pick<DB, 'select'>,
+  organizationId: number,
+  targetOrganizationMemberExternalId: string,
+) {
+  return db
+    .select({
+      id: organizationMembers.id,
+      externalId: organizationMembers.externalId,
+      organizationId: organizationMembers.organizationId,
+      userId: organizationMembers.userId,
+      status: organizationMembers.status,
+      userExternalId: users.externalId,
+      displayName: users.displayName,
+      avatarUrl: users.avatarUrl,
+    })
+    .from(organizationMembers)
+    .innerJoin(users, eq(users.id, organizationMembers.userId))
+    .where(
+      and(
+        eq(organizationMembers.organizationId, organizationId),
+        eq(organizationMembers.externalId, targetOrganizationMemberExternalId),
+        eq(organizationMembers.status, 'active'),
+      ),
+    )
+    .for('update')
+    .limit(1);
+}
+
+function buildLockedProjectMemberByUserQuery(
+  db: Pick<DB, 'select'>,
+  projectId: number,
+  userId: number,
+) {
+  return db
+    .select({
+      id: projectMembers.id,
+      externalId: projectMembers.externalId,
+      projectId: projectMembers.projectId,
+      userId: projectMembers.userId,
+      role: projectMembers.role,
+      status: projectMembers.status,
+    })
+    .from(projectMembers)
+    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)))
     .for('update')
     .limit(1);
 }
@@ -414,6 +485,80 @@ export async function removeProjectMemberWithAccess(
   });
 }
 
+export async function addProjectMemberWithAccess(
+  db: DB,
+  input: ProjectAccessInput,
+  targetOrganizationMemberExternalId: string,
+  role: ProjectRole,
+) {
+  return withAuthorizedMutation(db, input, 'manage_members', async (tx, grant) => {
+    if (grant.scope === 'personal') return forbidden();
+    const [target] = (await buildLockedTargetOrganizationMemberQuery(
+      tx,
+      grant.organizationInternalId,
+      targetOrganizationMemberExternalId,
+    )) as TargetOrganizationMemberSnapshot[];
+    if (
+      !target ||
+      target.organizationId !== grant.organizationInternalId ||
+      target.status !== 'active'
+    ) {
+      return hidden();
+    }
+    const [existing] = (await buildLockedProjectMemberByUserQuery(
+      tx,
+      grant.projectId,
+      target.userId,
+    )) as TargetProjectMemberSnapshot[];
+    if (
+      existing &&
+      (existing.projectId !== grant.projectId ||
+        existing.userId !== target.userId ||
+        !isProjectRole(existing.role) ||
+        (existing.status !== 'active' && existing.status !== 'inactive'))
+    ) {
+      return hidden();
+    }
+    if (existing?.status === 'active') return conflict();
+
+    let projectMemberExternalId: string;
+    if (existing) {
+      const result = await tx
+        .update(projectMembers)
+        .set({ role, status: 'active' })
+        .where(
+          and(
+            eq(projectMembers.id, existing.id),
+            eq(projectMembers.projectId, grant.projectId),
+            eq(projectMembers.userId, target.userId),
+            eq(projectMembers.status, 'inactive'),
+          ),
+        );
+      requireExactlyOne(result);
+      projectMemberExternalId = existing.externalId;
+    } else {
+      projectMemberExternalId = newExternalId('projectMember');
+      const result = await tx.insert(projectMembers).values({
+        externalId: projectMemberExternalId,
+        projectId: grant.projectId,
+        userId: target.userId,
+        role,
+        status: 'active',
+      });
+      requireExactlyOne(result);
+    }
+
+    return {
+      ...publicAccess(grant),
+      projectMemberId: projectMemberExternalId,
+      userId: target.userExternalId,
+      displayName: target.displayName,
+      avatarUrl: target.avatarUrl,
+      role,
+    };
+  });
+}
+
 export async function deleteProjectWithAccess(db: DB, input: ProjectAccessInput) {
   return withAuthorizedMutation(db, input, 'delete', async (tx, grant) => {
     const result = await tx
@@ -428,6 +573,8 @@ export async function deleteProjectWithAccess(db: DB, input: ProjectAccessInput)
 
 export const __projectAccessInternals = {
   buildProjectAccessSnapshotQuery,
+  buildLockedProjectMemberByUserQuery,
   buildLockedTargetMemberQuery,
+  buildLockedTargetOrganizationMemberQuery,
   snapshotToAccess,
 };

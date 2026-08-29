@@ -5,6 +5,7 @@ import * as schema from '../db/schema/index.js';
 import {
   ProjectAccessError,
   __projectAccessInternals,
+  addProjectMemberWithAccess,
   deleteProjectWithAccess,
   removeProjectMemberWithAccess,
   renameProjectWithAccess,
@@ -14,7 +15,7 @@ import {
 type Executor = 'root' | 'tx';
 type Query = { table: string; lock: 'update' | null; executor: Executor };
 type Write = {
-  kind: 'update' | 'delete';
+  kind: 'insert' | 'update' | 'delete';
   table: string;
   values?: Record<string, unknown>;
   executor: Executor;
@@ -109,13 +110,27 @@ function makeDb(selectResults: unknown[][], affectedRows: number[] = []) {
       },
     };
   };
+  const makeInsert = (executor: Executor) => (table: unknown) => {
+    return {
+      async values(values: Record<string, unknown>) {
+        writes.push({ kind: 'insert', table: tableName(table), values, executor });
+        events.push(`${executor}:insert:${tableName(table)}`);
+        if (executor === 'root') {
+          throw new Error('test fake rejected root insert during a project mutation');
+        }
+        return writeResult();
+      },
+    };
+  };
   const tx = {
     select: makeSelect('tx'),
+    insert: makeInsert('tx'),
     update: makeUpdate('tx'),
     delete: makeDelete('tx'),
   };
   const db = {
     select: makeSelect('root'),
+    insert: makeInsert('root'),
     update: makeUpdate('root'),
     delete: makeDelete('root'),
     async transaction<Result>(callback: (tx: unknown) => Promise<Result>): Promise<Result> {
@@ -182,6 +197,16 @@ const targetMember = {
   userId: 2,
   role: 'member',
   status: 'active',
+};
+const targetOrganizationMember = {
+  id: 301,
+  externalId: 'omem_target',
+  organizationId: 20,
+  userId: 2,
+  status: 'active',
+  userExternalId: 'usr_target',
+  displayName: 'Mina',
+  avatarUrl: null,
 };
 const input = { actorExternalId: 'usr_member', projectExternalId: 'prj_design' };
 
@@ -315,6 +340,67 @@ describe('project access mutations', () => {
     ]);
   });
 
+  it('adds an active same-organization target through the locked access transaction', async () => {
+    const fake = makeDb([[teamSnapshot], [targetOrganizationMember], []], [1]);
+
+    await expect(
+      addProjectMemberWithAccess(fake.db, input, 'omem_target', 'viewer'),
+    ).resolves.toMatchObject({
+      projectMemberId: expect.stringMatching(/^pmem_/),
+      userId: 'usr_target',
+      displayName: 'Mina',
+      avatarUrl: null,
+      role: 'viewer',
+    });
+    expect(fake.queries).toEqual([
+      { table: 'projects', lock: 'update', executor: 'tx' },
+      { table: 'organization_members', lock: 'update', executor: 'tx' },
+      { table: 'project_members', lock: 'update', executor: 'tx' },
+    ]);
+    expect(fake.writes).toEqual([
+      expect.objectContaining({
+        kind: 'insert',
+        table: 'project_members',
+        executor: 'tx',
+        values: expect.objectContaining({ projectId: 200, userId: 2, role: 'viewer' }),
+      }),
+    ]);
+  });
+
+  it('hides an inactive or cross-organization add target before a membership write', async () => {
+    const fake = makeDb([
+      [teamSnapshot],
+      [{ ...targetOrganizationMember, organizationId: 21, status: 'inactive' }],
+    ]);
+
+    await expect(
+      addProjectMemberWithAccess(fake.db, input, 'omem_target', 'member'),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(fake.writes).toEqual([]);
+  });
+
+  it('rejects a duplicate active project membership without inserting', async () => {
+    const fake = makeDb([[teamSnapshot], [targetOrganizationMember], [targetMember]]);
+
+    await expect(
+      addProjectMemberWithAccess(fake.db, input, 'omem_target', 'member'),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(fake.writes).toEqual([]);
+  });
+
+  it('hides a tampered existing membership bound to another project or user', async () => {
+    const fake = makeDb([
+      [teamSnapshot],
+      [targetOrganizationMember],
+      [{ ...targetMember, projectId: 201, userId: 3 }],
+    ]);
+
+    await expect(
+      addProjectMemberWithAccess(fake.db, input, 'omem_target', 'member'),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(fake.writes).toEqual([]);
+  });
+
   it.each([
     ['a cross-project target', { ...targetMember, projectId: 201 }],
     ['an inactive target', { ...targetMember, status: 'inactive' }],
@@ -409,6 +495,12 @@ describe('project access mutations', () => {
     const target = __projectAccessInternals
       .buildLockedTargetMemberQuery(mockDb, 200, 'pmem_target')
       .toSQL();
+    const organizationTarget = __projectAccessInternals
+      .buildLockedTargetOrganizationMemberQuery(mockDb, 20, 'omem_target')
+      .toSQL();
+    const existingProjectMember = __projectAccessInternals
+      .buildLockedProjectMemberByUserQuery(mockDb, 200, 2)
+      .toSQL();
     const accessSql = normalizedSql(access.sql);
     const targetSql = normalizedSql(target.sql);
 
@@ -430,6 +522,21 @@ describe('project access mutations', () => {
     expect(targetSql).toContain('`project_members`.`external_id` = ?');
     expect(targetSql).toContain('for update');
     expect(target.params).toEqual([200, 'pmem_target', 1]);
+    expect(normalizedSql(organizationTarget.sql)).toContain(
+      '`organization_members`.`organization_id` = ?',
+    );
+    expect(normalizedSql(organizationTarget.sql)).toContain(
+      '`organization_members`.`external_id` = ?',
+    );
+    expect(normalizedSql(organizationTarget.sql)).toContain('`organization_members`.`status` = ?');
+    expect(normalizedSql(organizationTarget.sql)).toContain('for update');
+    expect(organizationTarget.params).toEqual([20, 'omem_target', 'active', 1]);
+    expect(normalizedSql(existingProjectMember.sql)).toContain(
+      '`project_members`.`project_id` = ?',
+    );
+    expect(normalizedSql(existingProjectMember.sql)).toContain('`project_members`.`user_id` = ?');
+    expect(normalizedSql(existingProjectMember.sql)).toContain('for update');
+    expect(existingProjectMember.params).toEqual([200, 2, 1]);
   });
 
   it('uses domain-only errors', () => {
