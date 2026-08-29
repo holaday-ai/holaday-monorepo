@@ -23,6 +23,7 @@ export type InvitationServiceErrorCode =
   | 'ORGANIZATION_NOT_FOUND'
   | 'MEMBER_NOT_FOUND'
   | 'PERMISSION_DENIED'
+  | 'INVITATION_GENERATION_FAILED'
   /** Deliberately covers absent, expired, revoked, accepted, and raced invitation tokens. */
   | 'INVITATION_NOT_AVAILABLE';
 
@@ -84,7 +85,7 @@ interface InvitationSnapshot {
   externalId: string;
   organizationId: number;
   tokenHash: string;
-  role: OrganizationRole;
+  role: string;
   managerUserId: number | null;
   expiresAt: Date;
   acceptedAt: Date | null;
@@ -100,7 +101,13 @@ function tokenHash(token: string): string {
 }
 
 function createToken(random: (size: number) => Buffer): string {
-  return random(32).toString('base64url');
+  const bytes = random(32);
+  if (bytes.length !== 32) throw new InvitationServiceError('INVITATION_GENERATION_FAILED');
+  return bytes.toString('base64url');
+}
+
+function isInvitationTargetRole(role: string): role is Exclude<OrganizationRole, 'owner'> {
+  return role === 'admin' || role === 'manager' || role === 'member';
 }
 
 function requireAllowed(decision: PermissionDecision): void {
@@ -126,12 +133,12 @@ async function resolveActorUserId(db: DB, actorExternalId: string): Promise<numb
   return actor.id;
 }
 
-async function requireActiveActorMembership(
+function buildActiveActorMembershipQuery(
   db: Pick<DB, 'select'>,
   actorUserId: number,
   organizationExternalId: string,
-): Promise<MembershipSnapshot> {
-  const [member] = await db
+) {
+  return db
     .select({
       id: organizationMembers.id,
       externalId: organizationMembers.externalId,
@@ -151,6 +158,14 @@ async function requireActiveActorMembership(
       ),
     )
     .limit(1);
+}
+
+async function requireActiveActorMembership(
+  db: Pick<DB, 'select'>,
+  actorUserId: number,
+  organizationExternalId: string,
+): Promise<MembershipSnapshot> {
+  const [member] = await buildActiveActorMembershipQuery(db, actorUserId, organizationExternalId);
   if (!member) throw new InvitationServiceError('ORGANIZATION_NOT_FOUND');
   return { ...member, role: member.role as OrganizationRole };
 }
@@ -183,12 +198,12 @@ async function lockActiveOrganizationById(
   return organization;
 }
 
-async function lockActiveActorMembership(
+function buildLockedActiveActorMembershipQuery(
   db: Pick<DB, 'select'>,
   actorUserId: number,
   organizationId: number,
-): Promise<MembershipSnapshot> {
-  const [member] = await db
+) {
+  return db
     .select({
       id: organizationMembers.id,
       externalId: organizationMembers.externalId,
@@ -206,16 +221,24 @@ async function lockActiveActorMembership(
       ),
     )
     .for('update');
+}
+
+async function lockActiveActorMembership(
+  db: Pick<DB, 'select'>,
+  actorUserId: number,
+  organizationId: number,
+): Promise<MembershipSnapshot> {
+  const [member] = await buildLockedActiveActorMembershipQuery(db, actorUserId, organizationId);
   if (!member) throw new InvitationServiceError('ORGANIZATION_NOT_FOUND');
   return { ...member, role: member.role as OrganizationRole };
 }
 
-async function lockActiveManagerMembership(
+function buildLockedActiveManagerMembershipQuery(
   db: Pick<DB, 'select'>,
   organizationId: number,
   externalId: string,
-): Promise<MembershipSnapshot> {
-  const [manager] = await db
+) {
+  return db
     .select({
       id: organizationMembers.id,
       externalId: organizationMembers.externalId,
@@ -233,6 +256,14 @@ async function lockActiveManagerMembership(
       ),
     )
     .for('update');
+}
+
+async function lockActiveManagerMembership(
+  db: Pick<DB, 'select'>,
+  organizationId: number,
+  externalId: string,
+): Promise<MembershipSnapshot> {
+  const [manager] = await buildLockedActiveManagerMembershipQuery(db, organizationId, externalId);
   if (!manager) throw new InvitationServiceError('MEMBER_NOT_FOUND');
   return { ...manager, role: manager.role as OrganizationRole };
 }
@@ -245,12 +276,12 @@ function buildTokenLookupQuery(db: Pick<DB, 'select'>, hash: string) {
     .limit(1);
 }
 
-async function lockInvitationByHash(
+function buildLockedInvitationByHashQuery(
   db: Pick<DB, 'select'>,
   organizationId: number,
   hash: string,
-): Promise<InvitationSnapshot | null> {
-  const [invitation] = await db
+) {
+  return db
     .select({
       id: organizationInvitations.id,
       externalId: organizationInvitations.externalId,
@@ -270,15 +301,23 @@ async function lockInvitationByHash(
       ),
     )
     .for('update');
-  return invitation ? { ...invitation, role: invitation.role as OrganizationRole } : null;
 }
 
-async function lockInvitationByExternalId(
+async function lockInvitationByHash(
+  db: Pick<DB, 'select'>,
+  organizationId: number,
+  hash: string,
+): Promise<InvitationSnapshot | null> {
+  const [invitation] = await buildLockedInvitationByHashQuery(db, organizationId, hash);
+  return invitation ?? null;
+}
+
+function buildLockedInvitationByExternalIdQuery(
   db: Pick<DB, 'select'>,
   organizationId: number,
   externalId: string,
-): Promise<InvitationSnapshot | null> {
-  const [invitation] = await db
+) {
+  return db
     .select({
       id: organizationInvitations.id,
       externalId: organizationInvitations.externalId,
@@ -298,7 +337,15 @@ async function lockInvitationByExternalId(
       ),
     )
     .for('update');
-  return invitation ? { ...invitation, role: invitation.role as OrganizationRole } : null;
+}
+
+async function lockInvitationByExternalId(
+  db: Pick<DB, 'select'>,
+  organizationId: number,
+  externalId: string,
+): Promise<InvitationSnapshot | null> {
+  const [invitation] = await buildLockedInvitationByExternalIdQuery(db, organizationId, externalId);
+  return invitation ?? null;
 }
 
 async function lockMembershipForUser(
@@ -427,17 +474,20 @@ export async function acceptInvitation(input: AcceptInvitationInput) {
   const lookup = await buildTokenLookupQuery(input.db, hash);
   const tokenLookup = lookup[0];
   if (!tokenLookup) throw new InvitationServiceError('INVITATION_NOT_AVAILABLE');
-  const acceptedAt = nowFrom(input);
 
   return input.db.transaction(async (tx) => {
     // Lock order is organization -> invitation -> membership. The preflight hash lookup never writes.
     const organization = await lockActiveOrganizationById(tx, tokenLookup.organizationId);
     const invitation = await lockInvitationByHash(tx, organization.id, hash);
-    if (!invitation || !invitationAvailable(invitation, acceptedAt)) {
+    if (!invitation || !isInvitationTargetRole(invitation.role)) {
       throw new InvitationServiceError('INVITATION_NOT_AVAILABLE');
     }
     const member = await lockMembershipForUser(tx, organization.id, actorUserId);
     await requireActiveInvitationManager(tx, organization.id, invitation.managerUserId);
+    const acceptedAt = nowFrom(input);
+    if (!invitationAvailable(invitation, acceptedAt)) {
+      throw new InvitationServiceError('INVITATION_NOT_AVAILABLE');
+    }
     const consumed = await buildConsumeInvitationQuery(tx, invitation.id, acceptedAt);
     if (readAffectedRows(consumed) !== 1)
       throw new InvitationServiceError('INVITATION_NOT_AVAILABLE');
@@ -475,7 +525,6 @@ export async function acceptInvitation(input: AcceptInvitationInput) {
 export async function revokeInvitation(input: RevokeInvitationInput): Promise<{ ok: true }> {
   const actorUserId = await resolveActorUserId(input.db, input.actorExternalId);
   await requireActiveActorMembership(input.db, actorUserId, input.organizationExternalId);
-  const revokedAt = nowFrom(input);
 
   await input.db.transaction(async (tx) => {
     const organization = await lockActiveOrganization(tx, input.organizationExternalId);
@@ -485,10 +534,14 @@ export async function revokeInvitation(input: RevokeInvitationInput): Promise<{ 
       organization.id,
       input.invitationExternalId,
     );
-    if (!invitation || !invitationAvailable(invitation, revokedAt)) {
+    if (!invitation || !isInvitationTargetRole(invitation.role)) {
       throw new InvitationServiceError('INVITATION_NOT_AVAILABLE');
     }
+    const revokedAt = nowFrom(input);
     requireAllowed(canInviteOrganizationMember(asPermissionMembership(actor), invitation.role));
+    if (!invitationAvailable(invitation, revokedAt)) {
+      throw new InvitationServiceError('INVITATION_NOT_AVAILABLE');
+    }
     const revoked = await buildRevokeInvitationQuery(tx, invitation.id, revokedAt);
     if (readAffectedRows(revoked) !== 1)
       throw new InvitationServiceError('INVITATION_NOT_AVAILABLE');
@@ -497,6 +550,11 @@ export async function revokeInvitation(input: RevokeInvitationInput): Promise<{ 
 }
 
 export const __organizationInvitationServiceInternals = {
+  buildActiveActorMembershipQuery,
   buildConsumeInvitationQuery,
+  buildLockedActiveActorMembershipQuery,
+  buildLockedActiveManagerMembershipQuery,
+  buildLockedInvitationByExternalIdQuery,
+  buildLockedInvitationByHashQuery,
   buildTokenLookupQuery,
 };
