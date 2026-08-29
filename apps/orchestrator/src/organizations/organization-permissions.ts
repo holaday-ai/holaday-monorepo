@@ -2,6 +2,19 @@
 export const ORGANIZATION_ROLES = ['owner', 'admin', 'manager', 'member'] as const;
 export type OrganizationRole = (typeof ORGANIZATION_ROLES)[number];
 
+/** Roles that may appear as a current reporting manager. */
+export const REPORTING_MANAGER_ROLES = [
+  'owner',
+  'admin',
+  'manager',
+] as const satisfies readonly OrganizationRole[];
+
+export function isReportingManagerRole(
+  role: OrganizationRole,
+): role is (typeof REPORTING_MANAGER_ROLES)[number] {
+  return (REPORTING_MANAGER_ROLES as readonly OrganizationRole[]).includes(role);
+}
+
 /** Project roles are scoped to one project and never bypass organization membership. */
 export const PROJECT_ROLES = ['lead', 'member', 'viewer'] as const;
 export type ProjectRole = (typeof PROJECT_ROLES)[number];
@@ -128,15 +141,13 @@ export function canSetReportingLine(input: ReportingLineInput): PermissionDecisi
   const { actor, member, manager } = input;
   const targetDecision = validateOrganizationTarget(actor, member);
   if (!targetDecision.allowed) return targetDecision;
-  if (!['owner', 'admin', 'manager'].includes(actor.role)) {
+  if (!isReportingManagerRole(actor.role)) {
     return deny('organization_role_not_permitted');
   }
   if (member.userId === manager.userId) return deny('manager_cannot_be_self');
   if (manager.organizationId !== member.organizationId) return deny('manager_outside_organization');
   if (!isActive(manager)) return deny('manager_organization_membership_inactive');
-  return ['owner', 'admin', 'manager'].includes(manager.role)
-    ? allow()
-    : deny('manager_role_not_permitted');
+  return isReportingManagerRole(manager.role) ? allow() : deny('manager_role_not_permitted');
 }
 
 /**

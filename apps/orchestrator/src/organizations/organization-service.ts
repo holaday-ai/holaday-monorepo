@@ -2,7 +2,7 @@ import { newExternalId } from '@holaday/shared-types';
 import { and, count, eq, inArray, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/mysql-core';
 import type { DB } from '../db/client.js';
-import { readInsertId } from '../db/mysql-result.js';
+import { readAffectedRows, readInsertId } from '../db/mysql-result.js';
 import { organizationMembers } from '../db/schema/organization-members.js';
 import { organizations } from '../db/schema/organizations.js';
 import { projectMembers } from '../db/schema/project-members.js';
@@ -13,12 +13,15 @@ import {
   type OrganizationRole,
   type PermissionDecision,
   type PermissionReason,
+  REPORTING_MANAGER_ROLES,
   canChangeOrganizationMemberRole,
   canDeactivateOrganizationMember,
   canSetReportingLine,
+  isReportingManagerRole,
 } from './organization-permissions.js';
 
 const managerUsers = alias(users, 'organization_manager_users');
+const managerMemberships = alias(organizationMembers, 'organization_manager_memberships');
 
 export type OrganizationServiceErrorCode =
   | 'UNKNOWN_ACTOR'
@@ -137,8 +140,9 @@ async function requireActiveActorMembership(
 async function findOrganizationMember(
   db: Pick<DB, 'select'>,
   memberExternalId: string,
+  forUpdate = false,
 ): Promise<OrganizationMemberSnapshot | null> {
-  const [row] = await db
+  const query = db
     .select({
       id: organizationMembers.id,
       externalId: organizationMembers.externalId,
@@ -150,18 +154,51 @@ async function findOrganizationMember(
     })
     .from(organizationMembers)
     .innerJoin(organizations, eq(organizations.id, organizationMembers.organizationId))
-    .where(eq(organizationMembers.externalId, memberExternalId))
-    .limit(1);
+    .where(eq(organizationMembers.externalId, memberExternalId));
+  const [row] = forUpdate ? await query.for('update') : await query.limit(1);
   return row ? { ...row, role: row.role as OrganizationRole } : null;
 }
 
 async function requireOrganizationMember(
   db: Pick<DB, 'select'>,
   memberExternalId: string,
+  forUpdate = false,
 ): Promise<OrganizationMemberSnapshot> {
-  const member = await findOrganizationMember(db, memberExternalId);
+  const member = await findOrganizationMember(db, memberExternalId, forUpdate);
   if (!member) throw new OrganizationServiceError('MEMBER_NOT_FOUND');
   return member;
+}
+
+async function lockActiveOrganization(
+  db: Pick<DB, 'select'>,
+  organizationExternalId: string,
+): Promise<number> {
+  const [organization] = await db
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(
+      and(eq(organizations.externalId, organizationExternalId), eq(organizations.status, 'active')),
+    )
+    .for('update');
+  if (!organization) throw new OrganizationServiceError('ORGANIZATION_NOT_FOUND');
+  return organization.id;
+}
+
+async function clearActiveReportingLines(
+  db: Pick<DB, 'update'>,
+  organizationId: number,
+  managerUserId: number,
+): Promise<void> {
+  await db
+    .update(organizationMembers)
+    .set({ managerUserId: null })
+    .where(
+      and(
+        eq(organizationMembers.organizationId, organizationId),
+        eq(organizationMembers.managerUserId, managerUserId),
+        eq(organizationMembers.status, 'active'),
+      ),
+    );
 }
 
 /** Locks every active owner before a demotion or deactivation decision. */
@@ -182,10 +219,8 @@ async function lockActiveOwners(db: Pick<DB, 'select'>, organizationId: number):
 
 export async function createOrganization(input: CreateOrganizationInput) {
   const actorUserId = await resolveActorUserId(input.db, input.actorExternalId);
-  // This worktree's package symlink may still point at the pre-Task-1 shared types source;
-  // fresh installs receive the committed organization/organizationMember prefixes.
-  const organizationExternalId = newExternalId('organization' as never);
-  const ownerMembershipExternalId = newExternalId('organizationMember' as never);
+  const organizationExternalId = newExternalId('organization');
+  const ownerMembershipExternalId = newExternalId('organizationMember');
 
   await input.db.transaction(async (tx) => {
     const inserted = await tx.insert(organizations).values({
@@ -214,9 +249,8 @@ export async function createOrganization(input: CreateOrganizationInput) {
   };
 }
 
-export async function listOrganizationsForUser(input: OrganizationListInput) {
-  const actorUserId = await resolveActorUserId(input.db, input.actorExternalId);
-  const memberships = await input.db
+function buildOrganizationListQuery(db: Pick<DB, 'select'>, actorUserId: number) {
+  return db
     .select({
       organizationId: organizations.id,
       organizationExternalId: organizations.externalId,
@@ -227,7 +261,16 @@ export async function listOrganizationsForUser(input: OrganizationListInput) {
     })
     .from(organizationMembers)
     .innerJoin(organizations, eq(organizations.id, organizationMembers.organizationId))
-    .leftJoin(managerUsers, eq(managerUsers.id, organizationMembers.managerUserId))
+    .leftJoin(
+      managerMemberships,
+      and(
+        eq(managerMemberships.organizationId, organizationMembers.organizationId),
+        eq(managerMemberships.userId, organizationMembers.managerUserId),
+        eq(managerMemberships.status, 'active'),
+        inArray(managerMemberships.role, [...REPORTING_MANAGER_ROLES]),
+      ),
+    )
+    .leftJoin(managerUsers, eq(managerUsers.id, managerMemberships.userId))
     .where(
       and(
         eq(organizationMembers.userId, actorUserId),
@@ -235,6 +278,11 @@ export async function listOrganizationsForUser(input: OrganizationListInput) {
         eq(organizations.status, 'active'),
       ),
     );
+}
+
+export async function listOrganizationsForUser(input: OrganizationListInput) {
+  const actorUserId = await resolveActorUserId(input.db, input.actorExternalId);
+  const memberships = await buildOrganizationListQuery(input.db, actorUserId);
 
   if (memberships.length === 0) return [];
 
@@ -268,14 +316,8 @@ export async function listOrganizationsForUser(input: OrganizationListInput) {
   }));
 }
 
-export async function listOrganizationMembers(input: OrganizationScopedInput) {
-  const actorUserId = await resolveActorUserId(input.db, input.actorExternalId);
-  const actor = await requireActiveActorMembership(
-    input.db,
-    actorUserId,
-    input.organizationExternalId,
-  );
-  const rows = await input.db
+function buildActiveMemberListQuery(db: Pick<DB, 'select'>, organizationId: number) {
+  return db
     .select({
       memberExternalId: organizationMembers.externalId,
       userExternalId: users.externalId,
@@ -287,13 +329,32 @@ export async function listOrganizationMembers(input: OrganizationScopedInput) {
     })
     .from(organizationMembers)
     .innerJoin(users, eq(users.id, organizationMembers.userId))
-    .leftJoin(managerUsers, eq(managerUsers.id, organizationMembers.managerUserId))
+    .leftJoin(
+      managerMemberships,
+      and(
+        eq(managerMemberships.organizationId, organizationMembers.organizationId),
+        eq(managerMemberships.userId, organizationMembers.managerUserId),
+        eq(managerMemberships.status, 'active'),
+        inArray(managerMemberships.role, [...REPORTING_MANAGER_ROLES]),
+      ),
+    )
+    .leftJoin(managerUsers, eq(managerUsers.id, managerMemberships.userId))
     .where(
       and(
-        eq(organizationMembers.organizationId, actor.organizationId),
+        eq(organizationMembers.organizationId, organizationId),
         eq(organizationMembers.status, 'active'),
       ),
     );
+}
+
+export async function listOrganizationMembers(input: OrganizationScopedInput) {
+  const actorUserId = await resolveActorUserId(input.db, input.actorExternalId);
+  const actor = await requireActiveActorMembership(
+    input.db,
+    actorUserId,
+    input.organizationExternalId,
+  );
+  const rows = await buildActiveMemberListQuery(input.db, actor.organizationId);
 
   return rows.map((row) => ({
     memberId: row.memberExternalId,
@@ -309,33 +370,35 @@ export async function listOrganizationMembers(input: OrganizationScopedInput) {
 
 export async function updateReportingLine(input: ReportingLineInput): Promise<{ ok: true }> {
   const actorUserId = await resolveActorUserId(input.db, input.actorExternalId);
-  const actor = await requireActiveActorMembership(
-    input.db,
-    actorUserId,
-    input.organizationExternalId,
-  );
-  const target = await requireOrganizationMember(input.db, input.targetMemberExternalId);
-  const manager = await requireOrganizationMember(input.db, input.managerMemberExternalId);
-  requireAllowed(
-    canSetReportingLine({
-      actor: asPermissionMembership(actor),
-      member: asPermissionMembership(target),
-      manager: asPermissionMembership(manager),
-    }),
-  );
-
-  await input.db
-    .update(organizationMembers)
-    .set({ managerUserId: manager.userId })
-    .where(and(eq(organizationMembers.id, target.id), eq(organizationMembers.status, 'active')));
+  await requireActiveActorMembership(input.db, actorUserId, input.organizationExternalId);
+  await input.db.transaction(async (tx) => {
+    await lockActiveOrganization(tx, input.organizationExternalId);
+    const actor = await requireActiveActorMembership(tx, actorUserId, input.organizationExternalId);
+    const target = await requireOrganizationMember(tx, input.targetMemberExternalId, true);
+    const manager = await requireOrganizationMember(tx, input.managerMemberExternalId, true);
+    requireAllowed(
+      canSetReportingLine({
+        actor: asPermissionMembership(actor),
+        member: asPermissionMembership(target),
+        manager: asPermissionMembership(manager),
+      }),
+    );
+    const result = await tx
+      .update(organizationMembers)
+      .set({ managerUserId: manager.userId })
+      .where(and(eq(organizationMembers.id, target.id), eq(organizationMembers.status, 'active')));
+    if (readAffectedRows(result) !== 1) throw new OrganizationServiceError('MEMBER_NOT_FOUND');
+  });
   return { ok: true };
 }
 
 export async function updateMemberRole(input: MemberRoleInput): Promise<{ ok: true }> {
   const actorUserId = await resolveActorUserId(input.db, input.actorExternalId);
+  await requireActiveActorMembership(input.db, actorUserId, input.organizationExternalId);
   await input.db.transaction(async (tx) => {
+    await lockActiveOrganization(tx, input.organizationExternalId);
     const actor = await requireActiveActorMembership(tx, actorUserId, input.organizationExternalId);
-    const target = await requireOrganizationMember(tx, input.targetMemberExternalId);
+    const target = await requireOrganizationMember(tx, input.targetMemberExternalId, true);
     const ownerCount = await lockActiveOwners(tx, actor.organizationId);
     requireAllowed(
       canChangeOrganizationMemberRole({
@@ -349,15 +412,20 @@ export async function updateMemberRole(input: MemberRoleInput): Promise<{ ok: tr
       .update(organizationMembers)
       .set({ role: input.nextRole })
       .where(and(eq(organizationMembers.id, target.id), eq(organizationMembers.status, 'active')));
+    if (isReportingManagerRole(target.role) && !isReportingManagerRole(input.nextRole)) {
+      await clearActiveReportingLines(tx, actor.organizationId, target.userId);
+    }
   });
   return { ok: true };
 }
 
 export async function deactivateMember(input: DeactivateMemberInput): Promise<{ ok: true }> {
   const actorUserId = await resolveActorUserId(input.db, input.actorExternalId);
+  await requireActiveActorMembership(input.db, actorUserId, input.organizationExternalId);
   await input.db.transaction(async (tx) => {
+    await lockActiveOrganization(tx, input.organizationExternalId);
     const actor = await requireActiveActorMembership(tx, actorUserId, input.organizationExternalId);
-    const target = await requireOrganizationMember(tx, input.targetMemberExternalId);
+    const target = await requireOrganizationMember(tx, input.targetMemberExternalId, true);
     const ownerCount = await lockActiveOwners(tx, actor.organizationId);
     requireAllowed(
       canDeactivateOrganizationMember({
@@ -381,6 +449,14 @@ export async function deactivateMember(input: DeactivateMemberInput): Promise<{ 
           sql`exists (select 1 from ${projects} where ${projects.id} = ${projectMembers.projectId} and ${projects.organizationId} = ${actor.organizationId})`,
         ),
       );
+    if (isReportingManagerRole(target.role)) {
+      await clearActiveReportingLines(tx, actor.organizationId, target.userId);
+    }
   });
   return { ok: true };
 }
+
+export const __organizationServiceInternals = {
+  buildActiveMemberListQuery,
+  buildOrganizationListQuery,
+};

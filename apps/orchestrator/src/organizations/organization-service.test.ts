@@ -1,7 +1,10 @@
+import { drizzle } from 'drizzle-orm/mysql2';
 import { describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
+import * as schema from '../db/schema/index.js';
 import {
   OrganizationServiceError,
+  __organizationServiceInternals,
   createOrganization,
   deactivateMember,
   listOrganizationMembers,
@@ -12,15 +15,23 @@ import {
 
 type Insert = { table: string; values: Record<string, unknown>; inTransaction: boolean };
 type Update = { table: string; values: Record<string, unknown>; inTransaction: boolean };
+type Query = {
+  from: string;
+  joins: Array<{ kind: 'inner' | 'left'; table: string }>;
+  predicates: unknown[];
+  forUpdate: boolean;
+  inTransaction: boolean;
+};
 
 /**
  * The service boundary needs only selects plus transaction-scoped writes. This deliberately
  * small Drizzle-shaped fake returns programmed select results and records real service effects.
  */
-function makeDb(selectResults: unknown[][]) {
+function makeDb(selectResults: unknown[][], updateAffectedRows: number[] = []) {
   const inserts: Insert[] = [];
   const updates: Update[] = [];
   const deletes: string[] = [];
+  const queries: Query[] = [];
   let transactionCalls = 0;
   let transactionDepth = 0;
   let nextInsertId = 100;
@@ -33,25 +44,57 @@ function makeDb(selectResults: unknown[][]) {
 
   const takeSelectResult = () => selectResults.shift() ?? [];
   type SelectBuilder = {
-    from: () => SelectBuilder;
-    innerJoin: () => SelectBuilder;
-    leftJoin: () => SelectBuilder;
-    where: () => SelectBuilder;
+    from: (table: unknown) => SelectBuilder;
+    innerJoin: (table: unknown) => SelectBuilder;
+    leftJoin: (table: unknown) => SelectBuilder;
+    where: (predicate: unknown) => SelectBuilder;
     groupBy: () => SelectBuilder;
     orderBy: () => SelectBuilder;
     for: () => SelectBuilder;
     limit: () => Promise<unknown[]>;
   };
   const selectBuilder = (): SelectBuilder => {
-    const finish = () => Promise.resolve(takeSelectResult());
+    const query: Query = {
+      from: '',
+      joins: [],
+      predicates: [],
+      forUpdate: false,
+      inTransaction: false,
+    };
+    let result: Promise<unknown[]> | undefined;
+    const finish = () => {
+      result ??= Promise.resolve(takeSelectResult());
+      queries.push({
+        ...query,
+        joins: [...query.joins],
+        predicates: [...query.predicates],
+        inTransaction: transactionDepth > 0,
+      });
+      return result;
+    };
     const builder: SelectBuilder = {
-      from: () => selectBuilder(),
-      innerJoin: () => selectBuilder(),
-      leftJoin: () => selectBuilder(),
-      where: () => selectBuilder(),
-      groupBy: () => selectBuilder(),
-      orderBy: () => selectBuilder(),
-      for: () => selectBuilder(),
+      from: (table: unknown) => {
+        query.from = tableName(table);
+        return builder;
+      },
+      innerJoin: (table: unknown) => {
+        query.joins.push({ kind: 'inner', table: tableName(table) });
+        return builder;
+      },
+      leftJoin: (table: unknown) => {
+        query.joins.push({ kind: 'left', table: tableName(table) });
+        return builder;
+      },
+      where: (predicate: unknown) => {
+        query.predicates.push(predicate);
+        return builder;
+      },
+      groupBy: () => builder,
+      orderBy: () => builder,
+      for: () => {
+        query.forUpdate = true;
+        return builder;
+      },
       limit: finish,
     };
     Object.defineProperty(builder, 'then', {
@@ -81,7 +124,7 @@ function makeDb(selectResults: unknown[][]) {
                 values,
                 inTransaction: transactionDepth > 0,
               });
-              return [{ affectedRows: 1 }];
+              return [{ affectedRows: updateAffectedRows.shift() ?? 1 }];
             },
           };
         },
@@ -111,6 +154,7 @@ function makeDb(selectResults: unknown[][]) {
     inserts,
     updates,
     deletes,
+    queries,
     get transactionCalls() {
       return transactionCalls;
     },
@@ -136,6 +180,13 @@ const member = {
   role: 'member',
   status: 'active',
 };
+const manager = {
+  ...member,
+  id: 12,
+  externalId: 'omem_manager',
+  userId: 3,
+  role: 'manager',
+};
 
 describe('organization service', () => {
   it('creates the canary organization and its owner membership in one transaction', async () => {
@@ -148,6 +199,7 @@ describe('organization service', () => {
     });
 
     expect(result).toMatchObject({ name: 'Design team', role: 'owner', teamProjectsEnabled: true });
+    expect(result.organizationId).toMatch(/^org_/);
     expect(fake.transactionCalls).toBe(1);
     expect(fake.inserts).toEqual([
       expect.objectContaining({
@@ -155,6 +207,7 @@ describe('organization service', () => {
         inTransaction: true,
         values: expect.objectContaining({
           name: 'Design team',
+          externalId: expect.stringMatching(/^org_/),
           ownerUserId: 1,
           status: 'active',
           teamProjectsEnabled: true,
@@ -165,6 +218,7 @@ describe('organization service', () => {
         inTransaction: true,
         values: expect.objectContaining({
           organizationId: 100,
+          externalId: expect.stringMatching(/^omem_/),
           userId: 1,
           role: 'owner',
           status: 'active',
@@ -240,6 +294,27 @@ describe('organization service', () => {
     ]);
   });
 
+  it('binds manager display names through an active authorized same-organization membership', () => {
+    const mockDb = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
+    const query = __organizationServiceInternals.buildActiveMemberListQuery(mockDb, 20).toSQL();
+
+    expect(query.sql).toContain('`organization_manager_memberships`');
+    expect(query.sql).toContain('`organization_members`.`organization_id`');
+    expect(query.params).toEqual(
+      expect.arrayContaining([20, 'active', 'owner', 'admin', 'manager']),
+    );
+  });
+
+  it('applies the same active authorized manager binding to organization-list manager names', () => {
+    const mockDb = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
+    const query = __organizationServiceInternals.buildOrganizationListQuery(mockDb, 1).toSQL();
+
+    expect(query.sql).toContain('`organization_manager_memberships`');
+    expect(query.params).toEqual(
+      expect.arrayContaining([1, 'active', 'owner', 'admin', 'manager']),
+    );
+  });
+
   it.each([
     [
       'inactive',
@@ -267,7 +342,14 @@ describe('organization service', () => {
   ] as const)(
     'rejects a %s reporting manager through the shared permission decision',
     async (_label, manager, reason) => {
-      const fake = makeDb([[actor], [actorMembership], [member], [manager]]);
+      const fake = makeDb([
+        [actor],
+        [actorMembership],
+        [{ id: 20 }],
+        [actorMembership],
+        [member],
+        [manager],
+      ]);
 
       await expect(
         updateReportingLine({
@@ -282,8 +364,74 @@ describe('organization service', () => {
     },
   );
 
+  it('updates a reporting line only inside a transaction that issues a row lock', async () => {
+    const fake = makeDb([
+      [actor],
+      [actorMembership],
+      [{ id: 20 }],
+      [actorMembership],
+      [member],
+      [manager],
+    ]);
+
+    await expect(
+      updateReportingLine({
+        db: fake.db,
+        actorExternalId: 'usr_owner',
+        organizationExternalId: 'org_design',
+        targetMemberExternalId: 'omem_member',
+        managerMemberExternalId: 'omem_manager',
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(fake.transactionCalls).toBe(1);
+    const organizationLockIndex = fake.queries.findIndex(
+      (query) => query.from === 'organizations' && query.forUpdate && query.inTransaction,
+    );
+    const lockedMemberIndex = fake.queries.findIndex(
+      (query, index) =>
+        index > organizationLockIndex &&
+        query.from === 'organization_members' &&
+        query.forUpdate &&
+        query.inTransaction,
+    );
+    expect(organizationLockIndex).toBeGreaterThanOrEqual(0);
+    expect(lockedMemberIndex).toBeGreaterThan(organizationLockIndex);
+    expect(fake.updates).toEqual([
+      expect.objectContaining({
+        table: 'organization_members',
+        inTransaction: true,
+        values: { managerUserId: 3 },
+      }),
+    ]);
+  });
+
+  it('rejects a reporting update when the active target disappears before the write', async () => {
+    const fake = makeDb(
+      [[actor], [actorMembership], [{ id: 20 }], [actorMembership], [member], [manager]],
+      [0],
+    );
+
+    await expect(
+      updateReportingLine({
+        db: fake.db,
+        actorExternalId: 'usr_owner',
+        organizationExternalId: 'org_design',
+        targetMemberExternalId: 'omem_member',
+        managerMemberExternalId: 'omem_manager',
+      }),
+    ).rejects.toMatchObject({ code: 'MEMBER_NOT_FOUND' });
+  });
+
   it('deactivates organization and team-project memberships in one transaction without deleting audit rows', async () => {
-    const fake = makeDb([[actor], [actorMembership], [member], [{ id: 10 }, { id: 12 }]]);
+    const fake = makeDb([
+      [actor],
+      [actorMembership],
+      [{ id: 20 }],
+      [actorMembership],
+      [member],
+      [{ id: 10 }, { id: 12 }],
+    ]);
 
     await expect(
       deactivateMember({
@@ -312,7 +460,14 @@ describe('organization service', () => {
 
   it('does not deactivate the last owner', async () => {
     const owner = { ...actorMembership, externalId: 'omem_owner' };
-    const fake = makeDb([[actor], [actorMembership], [owner], [{ id: 10 }]]);
+    const fake = makeDb([
+      [actor],
+      [actorMembership],
+      [{ id: 20 }],
+      [actorMembership],
+      [owner],
+      [{ id: 10 }],
+    ]);
 
     await expect(
       deactivateMember({
@@ -330,7 +485,14 @@ describe('organization service', () => {
 
   it('does not demote the last owner', async () => {
     const owner = { ...actorMembership, externalId: 'omem_owner' };
-    const fake = makeDb([[actor], [actorMembership], [owner], [{ id: 10 }]]);
+    const fake = makeDb([
+      [actor],
+      [actorMembership],
+      [{ id: 20 }],
+      [actorMembership],
+      [owner],
+      [{ id: 10 }],
+    ]);
 
     await expect(
       updateMemberRole({
@@ -345,6 +507,63 @@ describe('organization service', () => {
       reason: 'last_owner_must_remain',
     });
     expect(fake.updates).toEqual([]);
+  });
+
+  it('clears active subordinate reporting lines when deactivating their manager', async () => {
+    const fake = makeDb([
+      [actor],
+      [actorMembership],
+      [{ id: 20 }],
+      [actorMembership],
+      [manager],
+      [{ id: 10 }],
+    ]);
+
+    await expect(
+      deactivateMember({
+        db: fake.db,
+        actorExternalId: 'usr_owner',
+        organizationExternalId: 'org_design',
+        targetMemberExternalId: 'omem_manager',
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(fake.updates).toContainEqual(
+      expect.objectContaining({
+        table: 'organization_members',
+        inTransaction: true,
+        values: { managerUserId: null },
+      }),
+    );
+  });
+
+  it('clears active subordinate reporting lines when a manager becomes a member', async () => {
+    const fake = makeDb([
+      [actor],
+      [actorMembership],
+      [{ id: 20 }],
+      [actorMembership],
+      [manager],
+      [{ id: 10 }],
+    ]);
+
+    await expect(
+      updateMemberRole({
+        db: fake.db,
+        actorExternalId: 'usr_owner',
+        organizationExternalId: 'org_design',
+        targetMemberExternalId: 'omem_manager',
+        nextRole: 'member',
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(fake.updates).toContainEqual(
+      expect.objectContaining({
+        table: 'organization_members',
+        inTransaction: true,
+        values: { managerUserId: null },
+      }),
+    );
   });
 
   it('keeps domain failures free of tRPC errors', () => {
