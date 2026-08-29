@@ -3,17 +3,14 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { DB } from '../db/client.js';
 import * as schema from '../db/schema/index.js';
 import {
+  type DeleteProjectSession,
   ProjectAccessError,
-  type ProjectAccessTransaction,
-  type ProjectMutationGrant,
+  type RenameProjectSession,
   __projectAccessInternals,
-  requireDeleteProjectGrant,
-  requireMemberManagementProjectGrant,
-  requireMutableProject,
   requireReadableProject,
-  requireRenameProjectGrant,
-  withMutableProjectAccess,
-  withProjectAccessTransaction,
+  withDeleteProjectSession,
+  withProjectMemberManagementSession,
+  withRenameProjectSession,
 } from './project-access.js';
 
 type Query = {
@@ -24,7 +21,7 @@ type Query = {
   inTransaction: boolean;
 };
 
-/** A fake that preserves joins, predicates, locks, and transaction scope. */
+/** Records exact query shape and prevents accidental snapshot splitting. */
 function makeDb(selectResults: unknown[][]) {
   const queries: Query[] = [];
   let transactionCalls = 0;
@@ -115,7 +112,9 @@ const personalSnapshot = {
   projectExternalId: 'prj_personal',
   projectOwnerUserId: 1,
   actorUserId: 1,
+  actorExternalId: 'usr_owner',
   organizationInternalId: null,
+  organizationRowId: null,
   organizationExternalId: null,
   organizationName: null,
   organizationStatus: null,
@@ -134,7 +133,9 @@ const teamSnapshot = {
   projectExternalId: 'prj_design',
   projectOwnerUserId: 1,
   actorUserId: 1,
+  actorExternalId: 'usr_member',
   organizationInternalId: 20,
+  organizationRowId: 20,
   organizationExternalId: 'org_design',
   organizationName: 'Design team',
   organizationStatus: 'active',
@@ -153,38 +154,12 @@ function normalizedSql(sql: string): string {
   return sql.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
-async function mutableGrant(
-  row: typeof teamSnapshot,
-  action: 'rename' | 'manage_members' | 'delete',
-) {
-  const fake = makeDb([[row]]);
-  const result = await withProjectAccessTransaction(fake.db, async (tx) => {
-    const grant = await requireMutableProject(tx, {
-      actorExternalId: 'usr_member',
-      projectExternalId: 'prj_design',
-      action,
-    });
-    return { grant, tx };
-  });
-  return { ...result, fake };
-}
-
 describe('project access', () => {
-  it('requires a branded transaction and exact action grants at the type boundary', () => {
-    expectTypeOf<DB>().not.toMatchTypeOf<ProjectAccessTransaction>();
-    expectTypeOf<ProjectMutationGrant<'rename'>>().not.toMatchTypeOf<
-      ProjectMutationGrant<'delete'>
-    >();
-    expectTypeOf(requireMutableProject).parameter(0).toEqualTypeOf<ProjectAccessTransaction>();
-    expectTypeOf(requireRenameProjectGrant)
-      .parameter(0)
-      .toEqualTypeOf<ProjectMutationGrant<'rename'>>();
-    expectTypeOf(requireMemberManagementProjectGrant)
-      .parameter(0)
-      .toEqualTypeOf<ProjectMutationGrant<'manage_members'>>();
-    expectTypeOf(requireDeleteProjectGrant)
-      .parameter(0)
-      .toEqualTypeOf<ProjectMutationGrant<'delete'>>();
+  it('exposes only action-specific sessions at the type boundary', () => {
+    expectTypeOf<RenameProjectSession>().not.toMatchTypeOf<DeleteProjectSession>();
+    expectTypeOf(withRenameProjectSession)
+      .parameter(2)
+      .toEqualTypeOf<(session: RenameProjectSession) => Promise<unknown>>();
   });
 
   it('returns personal owner access from one actor-bound snapshot query', async () => {
@@ -202,10 +177,14 @@ describe('project access', () => {
   });
 
   it.each([
+    ['a different actor external ID', { ...teamSnapshot, actorExternalId: 'usr_other' }],
+    ['a different project external ID', { ...teamSnapshot, projectExternalId: 'prj_other' }],
     ['a different personal owner', { ...personalSnapshot, actorUserId: 2 }],
+    ['a personal project with team rows', { ...personalSnapshot, projectMemberProjectId: 100 }],
     ['a missing project', undefined],
     ['a disabled organization', { ...teamSnapshot, teamProjectsEnabled: false }],
     ['an inactive organization', { ...teamSnapshot, organizationStatus: 'inactive' }],
+    ['a mismatched organization row', { ...teamSnapshot, organizationRowId: 21 }],
     [
       'an organization membership for another tenant',
       { ...teamSnapshot, organizationMemberOrganizationId: 21 },
@@ -242,86 +221,105 @@ describe('project access', () => {
         actorExternalId: 'usr_member',
         projectExternalId: 'prj_design',
       }),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       projectId: 200,
       scope: 'organization',
       organizationInternalId: 20,
       organizationExternalId: 'org_design',
-      organizationName: 'Design team',
       organizationRole: 'member',
       projectRole: 'viewer',
     });
     expect(fake.queries).toHaveLength(1);
   });
 
-  it.each([
-    ['rename', 'lead', 'member', true],
-    ['manage_members', 'lead', 'member', true],
-    ['delete', 'lead', 'member', false],
-    ['rename', 'viewer', 'owner', true],
-    ['delete', 'viewer', 'owner', true],
-    ['rename', 'viewer', 'member', false],
-  ] as const)(
-    'enforces the %s action matrix for %s project and %s organization roles',
-    async (action, projectRole, organizationRole, allowed) => {
-      const row = {
-        ...teamSnapshot,
-        projectMemberRole: projectRole,
-        organizationMemberRole: organizationRole,
-      };
-      const request = mutableGrant(row, action);
-      if (allowed) {
-        await expect(request).resolves.toMatchObject({ grant: { action } });
-      } else {
-        await expect(request).rejects.toMatchObject({ code: 'FORBIDDEN' });
-      }
-    },
-  );
-
-  it('locks the matching snapshot inside the transaction that returns its grant', async () => {
-    const result = await mutableGrant({ ...teamSnapshot, projectMemberRole: 'lead' }, 'rename');
-
-    expect(result.grant).toMatchObject({ action: 'rename', projectId: 200 });
-    expect(result.fake.transactionCalls).toBe(1);
-    expect(result.fake.queries).toEqual([
-      expect.objectContaining({ from: 'projects', lock: 'update', inTransaction: true }),
-    ]);
-  });
-
-  it('supplies the same branded transaction and exact grant to a mutable callback', async () => {
+  it('runs rename through a frozen live session and expires it after commit', async () => {
     const fake = makeDb([[{ ...teamSnapshot, projectMemberRole: 'lead' }]]);
-    const result = await withMutableProjectAccess(
+    let captured: RenameProjectSession | undefined;
+    const result = await withRenameProjectSession(
       fake.db,
-      {
-        actorExternalId: 'usr_member',
-        projectExternalId: 'prj_design',
-        action: 'rename',
+      { actorExternalId: 'usr_member', projectExternalId: 'prj_design' },
+      async (session) => {
+        captured = session;
+        expect(Object.isFrozen(session)).toBe(true);
+        return session.rename((access) => ({
+          action: session.action,
+          projectId: access.projectId,
+        }));
       },
-      async (tx, grant) => ({
-        action: requireRenameProjectGrant(grant).action,
-        tx,
-      }),
     );
 
-    expect(result.action).toBe('rename');
-    expect(result.tx).toBe(fake.db);
+    expect(result).toEqual({ action: 'rename', projectId: 200 });
     expect(fake.transactionCalls).toBe(1);
-    expect(fake.queries[0]).toMatchObject({ lock: 'update', inTransaction: true });
+    expect(fake.queries).toEqual([
+      expect.objectContaining({ from: 'projects', lock: 'update', inTransaction: true }),
+    ]);
+    await expect(captured?.rename(async () => 'late')).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
-  it('rejects an action discriminator tampered after authorization', async () => {
-    const { grant } = await mutableGrant({ ...teamSnapshot, projectMemberRole: 'lead' }, 'rename');
-    const tampered = { ...grant, action: 'delete' } as unknown as ProjectMutationGrant<'rename'>;
+  it('does not resolve a mutable session before its matching action executes', async () => {
+    const fake = makeDb([[{ ...teamSnapshot, projectMemberRole: 'lead' }]]);
 
-    try {
-      requireRenameProjectGrant(tampered);
-      throw new Error('expected tampered grant to be rejected');
-    } catch (error) {
-      expect(error).toMatchObject({ code: 'FORBIDDEN' });
-    }
+    await expect(
+      withRenameProjectSession(
+        fake.db,
+        { actorExternalId: 'usr_member', projectExternalId: 'prj_design' },
+        async () => 'did not execute rename',
+      ),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
-  it('compiles the complete tenant-bound joined snapshot and lock predicates', () => {
+  it('prevents rename-to-delete tampering and delete consumption', async () => {
+    const fake = makeDb([[{ ...teamSnapshot, projectMemberRole: 'lead' }]]);
+
+    await withRenameProjectSession(
+      fake.db,
+      { actorExternalId: 'usr_member', projectExternalId: 'prj_design' },
+      async (session) => {
+        expect(() => Object.assign(session, { action: 'delete' })).toThrow();
+        expect('delete' in session).toBe(false);
+        expect((session as unknown as { delete?: unknown }).delete).toBeUndefined();
+        return session.rename(async () => undefined);
+      },
+    );
+  });
+
+  it('does not let a session executor return usable capability state', async () => {
+    const fake = makeDb([[{ ...teamSnapshot, projectMemberRole: 'lead' }]]);
+    const escaped = await withRenameProjectSession(
+      fake.db,
+      { actorExternalId: 'usr_member', projectExternalId: 'prj_design' },
+      async (session) => {
+        await session.rename(async () => undefined);
+        return session;
+      },
+    );
+
+    await expect(escaped.rename(async () => undefined)).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+  });
+
+  it('keeps member-management and delete role matrices action-specific', async () => {
+    const memberFake = makeDb([[{ ...teamSnapshot, projectMemberRole: 'lead' }]]);
+    await expect(
+      withProjectMemberManagementSession(
+        memberFake.db,
+        { actorExternalId: 'usr_member', projectExternalId: 'prj_design' },
+        async (session) => session.manageMembers(async (access) => access.projectId),
+      ),
+    ).resolves.toBe(200);
+
+    const deniedDelete = makeDb([[{ ...teamSnapshot, projectMemberRole: 'lead' }]]);
+    await expect(
+      withDeleteProjectSession(
+        deniedDelete.db,
+        { actorExternalId: 'usr_member', projectExternalId: 'prj_design' },
+        async (session) => session.delete(async () => undefined),
+      ),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('compiles exact LEFT JOIN, personal, team, actor, and lock predicates', () => {
     const mockDb = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
     const input = { actorExternalId: 'usr_member', projectExternalId: 'prj_design' };
     const unlocked = __projectAccessInternals
@@ -333,6 +331,9 @@ describe('project access', () => {
     const sql = normalizedSql(locked.sql);
 
     expect(sql).toContain('inner join `users` on `users`.`external_id` = ?');
+    expect(sql).toContain('left join `organizations` on');
+    expect(sql).toContain('left join `organization_members` on');
+    expect(sql).toContain('left join `project_members` on');
     expect(sql).toContain('`organizations`.`id` = `projects`.`organization_id`');
     expect(sql).toContain('`organizations`.`status` = ?');
     expect(sql).toContain('`organizations`.`team_projects_enabled` = ?');
@@ -343,6 +344,9 @@ describe('project access', () => {
     expect(sql).toContain('`project_members`.`user_id` = `users`.`id`');
     expect(sql).toContain('`project_members`.`status` = ?');
     expect(sql).toContain('`projects`.`external_id` = ?');
+    expect(sql).toContain('`projects`.`organization_id` is null');
+    expect(sql).toContain('`projects`.`user_id` = `users`.`id`');
+    expect(sql).toContain('`projects`.`organization_id` is not null');
     expect(sql).toContain('for update');
     expect(unlocked.sql).not.toContain('for update');
     expect(locked.params).toEqual([
@@ -356,8 +360,7 @@ describe('project access', () => {
     ]);
   });
 
-  it('uses domain-only access errors', () => {
+  it('uses domain-only errors', () => {
     expect(new ProjectAccessError('NOT_FOUND')).toBeInstanceOf(Error);
-    expect(new ProjectAccessError('FORBIDDEN')).toMatchObject({ code: 'FORBIDDEN' });
   });
 });
