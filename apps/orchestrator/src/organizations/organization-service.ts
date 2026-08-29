@@ -1,5 +1,5 @@
 import { newExternalId } from '@holaday/shared-types';
-import { and, count, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/mysql-core';
 import type { DB } from '../db/client.js';
 import { readAffectedRows, readInsertId } from '../db/mysql-result.js';
@@ -79,6 +79,11 @@ interface OrganizationMemberSnapshot {
   status: string;
 }
 
+interface LockedOrganization {
+  id: number;
+  externalId: string;
+}
+
 function asPermissionMembership(snapshot: OrganizationMemberSnapshot): OrganizationMembership {
   return {
     organizationId: snapshot.organizationExternalId,
@@ -136,35 +141,61 @@ async function requireActiveActorMembership(
   return { ...row, role: row.role as OrganizationRole };
 }
 
-/** Lookup stays private so callers can only address target memberships through their external id. */
-async function findOrganizationMember(
+/**
+ * Every mutation locks members only after its organization row is locked. The organization id
+ * is part of the predicate, so a supplied foreign membership cannot acquire another tenant lock.
+ */
+function buildLockOrganizationMembersQuery(
   db: Pick<DB, 'select'>,
-  memberExternalId: string,
-  forUpdate = false,
-): Promise<OrganizationMemberSnapshot | null> {
-  const query = db
+  organizationId: number,
+  memberExternalIds: readonly string[],
+) {
+  return db
     .select({
       id: organizationMembers.id,
       externalId: organizationMembers.externalId,
       organizationId: organizationMembers.organizationId,
-      organizationExternalId: organizations.externalId,
       userId: organizationMembers.userId,
       role: organizationMembers.role,
       status: organizationMembers.status,
     })
     .from(organizationMembers)
-    .innerJoin(organizations, eq(organizations.id, organizationMembers.organizationId))
-    .where(eq(organizationMembers.externalId, memberExternalId));
-  const [row] = forUpdate ? await query.for('update') : await query.limit(1);
-  return row ? { ...row, role: row.role as OrganizationRole } : null;
+    .where(
+      and(
+        eq(organizationMembers.organizationId, organizationId),
+        inArray(organizationMembers.externalId, [...memberExternalIds]),
+      ),
+    )
+    .orderBy(asc(organizationMembers.externalId))
+    .for('update');
 }
 
-async function requireOrganizationMember(
+async function lockOrganizationMembers(
   db: Pick<DB, 'select'>,
+  organization: LockedOrganization,
+  memberExternalIds: readonly string[],
+): Promise<Map<string, OrganizationMemberSnapshot>> {
+  const externalIds = [...new Set(memberExternalIds)].sort((left, right) =>
+    left.localeCompare(right),
+  );
+  const rows = await buildLockOrganizationMembersQuery(db, organization.id, externalIds);
+  return new Map(
+    rows.map((row) => [
+      row.externalId,
+      {
+        ...row,
+        organizationExternalId: organization.externalId,
+        role: row.role as OrganizationRole,
+      },
+    ]),
+  );
+}
+
+function requireLockedOrganizationMember(
+  members: ReadonlyMap<string, OrganizationMemberSnapshot>,
   memberExternalId: string,
-  forUpdate = false,
-): Promise<OrganizationMemberSnapshot> {
-  const member = await findOrganizationMember(db, memberExternalId, forUpdate);
+): OrganizationMemberSnapshot {
+  const member = members.get(memberExternalId);
   if (!member) throw new OrganizationServiceError('MEMBER_NOT_FOUND');
   return member;
 }
@@ -172,16 +203,48 @@ async function requireOrganizationMember(
 async function lockActiveOrganization(
   db: Pick<DB, 'select'>,
   organizationExternalId: string,
-): Promise<number> {
+): Promise<LockedOrganization> {
   const [organization] = await db
-    .select({ id: organizations.id })
+    .select({ id: organizations.id, externalId: organizations.externalId })
     .from(organizations)
     .where(
       and(eq(organizations.externalId, organizationExternalId), eq(organizations.status, 'active')),
     )
     .for('update');
   if (!organization) throw new OrganizationServiceError('ORGANIZATION_NOT_FOUND');
-  return organization.id;
+  return organization;
+}
+
+/** The actor is re-read and locked inside the transaction after the organization lock. */
+async function requireLockedActiveActorMembership(
+  db: Pick<DB, 'select'>,
+  actorUserId: number,
+  organization: LockedOrganization,
+): Promise<OrganizationMemberSnapshot> {
+  const [row] = await db
+    .select({
+      id: organizationMembers.id,
+      externalId: organizationMembers.externalId,
+      organizationId: organizationMembers.organizationId,
+      userId: organizationMembers.userId,
+      role: organizationMembers.role,
+      status: organizationMembers.status,
+    })
+    .from(organizationMembers)
+    .where(
+      and(
+        eq(organizationMembers.organizationId, organization.id),
+        eq(organizationMembers.userId, actorUserId),
+        eq(organizationMembers.status, 'active'),
+      ),
+    )
+    .for('update');
+  if (!row) throw new OrganizationServiceError('ORGANIZATION_NOT_FOUND');
+  return {
+    ...row,
+    organizationExternalId: organization.externalId,
+    role: row.role as OrganizationRole,
+  };
 }
 
 async function clearActiveReportingLines(
@@ -213,6 +276,7 @@ async function lockActiveOwners(db: Pick<DB, 'select'>, organizationId: number):
         eq(organizationMembers.status, 'active'),
       ),
     )
+    .orderBy(asc(organizationMembers.externalId))
     .for('update');
   return owners.length;
 }
@@ -372,10 +436,14 @@ export async function updateReportingLine(input: ReportingLineInput): Promise<{ 
   const actorUserId = await resolveActorUserId(input.db, input.actorExternalId);
   await requireActiveActorMembership(input.db, actorUserId, input.organizationExternalId);
   await input.db.transaction(async (tx) => {
-    await lockActiveOrganization(tx, input.organizationExternalId);
-    const actor = await requireActiveActorMembership(tx, actorUserId, input.organizationExternalId);
-    const target = await requireOrganizationMember(tx, input.targetMemberExternalId, true);
-    const manager = await requireOrganizationMember(tx, input.managerMemberExternalId, true);
+    const organization = await lockActiveOrganization(tx, input.organizationExternalId);
+    const actor = await requireLockedActiveActorMembership(tx, actorUserId, organization);
+    const lockedMembers = await lockOrganizationMembers(tx, organization, [
+      input.targetMemberExternalId,
+      input.managerMemberExternalId,
+    ]);
+    const target = requireLockedOrganizationMember(lockedMembers, input.targetMemberExternalId);
+    const manager = requireLockedOrganizationMember(lockedMembers, input.managerMemberExternalId);
     requireAllowed(
       canSetReportingLine({
         actor: asPermissionMembership(actor),
@@ -396,10 +464,13 @@ export async function updateMemberRole(input: MemberRoleInput): Promise<{ ok: tr
   const actorUserId = await resolveActorUserId(input.db, input.actorExternalId);
   await requireActiveActorMembership(input.db, actorUserId, input.organizationExternalId);
   await input.db.transaction(async (tx) => {
-    await lockActiveOrganization(tx, input.organizationExternalId);
-    const actor = await requireActiveActorMembership(tx, actorUserId, input.organizationExternalId);
-    const target = await requireOrganizationMember(tx, input.targetMemberExternalId, true);
-    const ownerCount = await lockActiveOwners(tx, actor.organizationId);
+    const organization = await lockActiveOrganization(tx, input.organizationExternalId);
+    const actor = await requireLockedActiveActorMembership(tx, actorUserId, organization);
+    const target = requireLockedOrganizationMember(
+      await lockOrganizationMembers(tx, organization, [input.targetMemberExternalId]),
+      input.targetMemberExternalId,
+    );
+    const ownerCount = await lockActiveOwners(tx, organization.id);
     requireAllowed(
       canChangeOrganizationMemberRole({
         actor: asPermissionMembership(actor),
@@ -408,12 +479,13 @@ export async function updateMemberRole(input: MemberRoleInput): Promise<{ ok: tr
         ownerCount,
       }),
     );
-    await tx
+    const result = await tx
       .update(organizationMembers)
       .set({ role: input.nextRole })
       .where(and(eq(organizationMembers.id, target.id), eq(organizationMembers.status, 'active')));
+    if (readAffectedRows(result) !== 1) throw new OrganizationServiceError('MEMBER_NOT_FOUND');
     if (isReportingManagerRole(target.role) && !isReportingManagerRole(input.nextRole)) {
-      await clearActiveReportingLines(tx, actor.organizationId, target.userId);
+      await clearActiveReportingLines(tx, organization.id, target.userId);
     }
   });
   return { ok: true };
@@ -423,10 +495,13 @@ export async function deactivateMember(input: DeactivateMemberInput): Promise<{ 
   const actorUserId = await resolveActorUserId(input.db, input.actorExternalId);
   await requireActiveActorMembership(input.db, actorUserId, input.organizationExternalId);
   await input.db.transaction(async (tx) => {
-    await lockActiveOrganization(tx, input.organizationExternalId);
-    const actor = await requireActiveActorMembership(tx, actorUserId, input.organizationExternalId);
-    const target = await requireOrganizationMember(tx, input.targetMemberExternalId, true);
-    const ownerCount = await lockActiveOwners(tx, actor.organizationId);
+    const organization = await lockActiveOrganization(tx, input.organizationExternalId);
+    const actor = await requireLockedActiveActorMembership(tx, actorUserId, organization);
+    const target = requireLockedOrganizationMember(
+      await lockOrganizationMembers(tx, organization, [input.targetMemberExternalId]),
+      input.targetMemberExternalId,
+    );
+    const ownerCount = await lockActiveOwners(tx, organization.id);
     requireAllowed(
       canDeactivateOrganizationMember({
         actor: asPermissionMembership(actor),
@@ -435,10 +510,11 @@ export async function deactivateMember(input: DeactivateMemberInput): Promise<{ 
       }),
     );
 
-    await tx
+    const deactivated = await tx
       .update(organizationMembers)
       .set({ status: 'inactive' })
       .where(and(eq(organizationMembers.id, target.id), eq(organizationMembers.status, 'active')));
+    if (readAffectedRows(deactivated) !== 1) throw new OrganizationServiceError('MEMBER_NOT_FOUND');
     await tx
       .update(projectMembers)
       .set({ status: 'inactive' })
@@ -446,11 +522,11 @@ export async function deactivateMember(input: DeactivateMemberInput): Promise<{ 
         and(
           eq(projectMembers.userId, target.userId),
           eq(projectMembers.status, 'active'),
-          sql`exists (select 1 from ${projects} where ${projects.id} = ${projectMembers.projectId} and ${projects.organizationId} = ${actor.organizationId})`,
+          sql`exists (select 1 from ${projects} where ${projects.id} = ${projectMembers.projectId} and ${projects.organizationId} = ${organization.id})`,
         ),
       );
     if (isReportingManagerRole(target.role)) {
-      await clearActiveReportingLines(tx, actor.organizationId, target.userId);
+      await clearActiveReportingLines(tx, organization.id, target.userId);
     }
   });
   return { ok: true };
@@ -458,5 +534,6 @@ export async function deactivateMember(input: DeactivateMemberInput): Promise<{ 
 
 export const __organizationServiceInternals = {
   buildActiveMemberListQuery,
+  buildLockOrganizationMembersQuery,
   buildOrganizationListQuery,
 };

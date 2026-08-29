@@ -19,7 +19,14 @@ type Query = {
   from: string;
   joins: Array<{ kind: 'inner' | 'left'; table: string }>;
   predicates: unknown[];
-  forUpdate: boolean;
+  lockStrength: 'update' | null;
+  ordered: boolean;
+  inTransaction: boolean;
+};
+type Event = {
+  kind: 'select' | 'update';
+  table: string;
+  lockStrength: 'update' | null;
   inTransaction: boolean;
 };
 
@@ -32,6 +39,7 @@ function makeDb(selectResults: unknown[][], updateAffectedRows: number[] = []) {
   const updates: Update[] = [];
   const deletes: string[] = [];
   const queries: Query[] = [];
+  const events: Event[] = [];
   let transactionCalls = 0;
   let transactionDepth = 0;
   let nextInsertId = 100;
@@ -50,7 +58,7 @@ function makeDb(selectResults: unknown[][], updateAffectedRows: number[] = []) {
     where: (predicate: unknown) => SelectBuilder;
     groupBy: () => SelectBuilder;
     orderBy: () => SelectBuilder;
-    for: () => SelectBuilder;
+    for: (strength: 'update') => SelectBuilder;
     limit: () => Promise<unknown[]>;
   };
   const selectBuilder = (): SelectBuilder => {
@@ -58,18 +66,29 @@ function makeDb(selectResults: unknown[][], updateAffectedRows: number[] = []) {
       from: '',
       joins: [],
       predicates: [],
-      forUpdate: false,
+      lockStrength: null,
+      ordered: false,
       inTransaction: false,
     };
     let result: Promise<unknown[]> | undefined;
+    let recorded = false;
     const finish = () => {
       result ??= Promise.resolve(takeSelectResult());
-      queries.push({
-        ...query,
-        joins: [...query.joins],
-        predicates: [...query.predicates],
-        inTransaction: transactionDepth > 0,
-      });
+      if (!recorded) {
+        recorded = true;
+        queries.push({
+          ...query,
+          joins: [...query.joins],
+          predicates: [...query.predicates],
+          inTransaction: transactionDepth > 0,
+        });
+        events.push({
+          kind: 'select',
+          table: query.from,
+          lockStrength: query.lockStrength,
+          inTransaction: transactionDepth > 0,
+        });
+      }
       return result;
     };
     const builder: SelectBuilder = {
@@ -90,9 +109,12 @@ function makeDb(selectResults: unknown[][], updateAffectedRows: number[] = []) {
         return builder;
       },
       groupBy: () => builder,
-      orderBy: () => builder,
-      for: () => {
-        query.forUpdate = true;
+      orderBy: () => {
+        query.ordered = true;
+        return builder;
+      },
+      for: (strength: 'update') => {
+        query.lockStrength = strength;
         return builder;
       },
       limit: finish,
@@ -122,6 +144,12 @@ function makeDb(selectResults: unknown[][], updateAffectedRows: number[] = []) {
               updates.push({
                 table: tableName(table),
                 values,
+                inTransaction: transactionDepth > 0,
+              });
+              events.push({
+                kind: 'update',
+                table: tableName(table),
+                lockStrength: null,
                 inTransaction: transactionDepth > 0,
               });
               return [{ affectedRows: updateAffectedRows.shift() ?? 1 }];
@@ -155,6 +183,7 @@ function makeDb(selectResults: unknown[][], updateAffectedRows: number[] = []) {
     updates,
     deletes,
     queries,
+    events,
     get transactionCalls() {
       return transactionCalls;
     },
@@ -187,6 +216,53 @@ const manager = {
   userId: 3,
   role: 'manager',
 };
+
+function normalizedSql(sql: string): string {
+  return sql.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function expectValidatedManagerJoin(sql: string): void {
+  const normalized = normalizedSql(sql);
+  const managerMembershipJoin =
+    'left join `organization_members` `organization_manager_memberships` on ';
+  const membershipJoinIndex = normalized.indexOf(managerMembershipJoin);
+  const managerUserJoinIndex = normalized.indexOf(
+    'left join `users` `organization_manager_users` on ',
+  );
+
+  expect(membershipJoinIndex).toBeGreaterThanOrEqual(0);
+  expect(managerUserJoinIndex).toBeGreaterThan(membershipJoinIndex);
+  const managerMembershipOn = normalized.slice(membershipJoinIndex, managerUserJoinIndex);
+  expect(managerMembershipOn).toContain(
+    '`organization_manager_memberships`.`organization_id` = `organization_members`.`organization_id`',
+  );
+  expect(managerMembershipOn).toContain(
+    '`organization_manager_memberships`.`user_id` = `organization_members`.`manager_user_id`',
+  );
+  expect(managerMembershipOn).toContain('`organization_manager_memberships`.`status` = ?');
+  expect(managerMembershipOn).toContain('`organization_manager_memberships`.`role` in (?, ?, ?)');
+  expect(normalized.slice(managerUserJoinIndex)).toContain(
+    '`organization_manager_users`.`id` = `organization_manager_memberships`.`user_id`',
+  );
+}
+
+function eventSequence(fake: ReturnType<typeof makeDb>): string[] {
+  return fake.events.map(
+    (event) =>
+      `${event.kind}:${event.table}:${event.lockStrength ?? 'none'}:${event.inTransaction ? 'tx' : 'outside'}`,
+  );
+}
+
+function lockedMemberShapes(fake: ReturnType<typeof makeDb>) {
+  return fake.queries
+    .filter(
+      (query) =>
+        query.from === 'organization_members' &&
+        query.inTransaction &&
+        query.lockStrength === 'update',
+    )
+    .map((query) => ({ lockStrength: query.lockStrength, ordered: query.ordered }));
+}
 
 describe('organization service', () => {
   it('creates the canary organization and its owner membership in one transaction', async () => {
@@ -298,7 +374,7 @@ describe('organization service', () => {
     const mockDb = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
     const query = __organizationServiceInternals.buildActiveMemberListQuery(mockDb, 20).toSQL();
 
-    expect(query.sql).toContain('`organization_manager_memberships`');
+    expectValidatedManagerJoin(query.sql);
     expect(query.sql).toContain('`organization_members`.`organization_id`');
     expect(query.params).toEqual(
       expect.arrayContaining([20, 'active', 'owner', 'admin', 'manager']),
@@ -309,10 +385,25 @@ describe('organization service', () => {
     const mockDb = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
     const query = __organizationServiceInternals.buildOrganizationListQuery(mockDb, 1).toSQL();
 
-    expect(query.sql).toContain('`organization_manager_memberships`');
+    expectValidatedManagerJoin(query.sql);
     expect(query.params).toEqual(
       expect.arrayContaining([1, 'active', 'owner', 'admin', 'manager']),
     );
+  });
+
+  it('builds a same-organization, deterministic membership lock query', () => {
+    const mockDb = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
+    const query = __organizationServiceInternals
+      .buildLockOrganizationMembersQuery(mockDb, 20, ['omem_manager', 'omem_member'])
+      .toSQL();
+    const sql = normalizedSql(query.sql);
+
+    expect(sql).toContain(
+      'where (`organization_members`.`organization_id` = ? and `organization_members`.`external_id` in (?, ?))',
+    );
+    expect(sql).toContain('order by `organization_members`.`external_id` asc for update');
+    expect(sql).not.toContain('join `organizations`');
+    expect(query.params).toEqual([20, 'omem_manager', 'omem_member']);
   });
 
   it.each([
@@ -326,18 +417,6 @@ describe('organization service', () => {
       { ...member, externalId: 'omem_manager', userId: 3, role: 'member' },
       'manager_role_not_permitted',
     ],
-    [
-      'another organization',
-      {
-        ...member,
-        externalId: 'omem_manager',
-        organizationId: 99,
-        organizationExternalId: 'org_other',
-        userId: 3,
-        role: 'manager',
-      },
-      'manager_outside_organization',
-    ],
     ['the target user', member, 'manager_cannot_be_self'],
   ] as const)(
     'rejects a %s reporting manager through the shared permission decision',
@@ -345,10 +424,9 @@ describe('organization service', () => {
       const fake = makeDb([
         [actor],
         [actorMembership],
-        [{ id: 20 }],
+        [{ id: 20, externalId: 'org_design' }],
         [actorMembership],
-        [member],
-        [manager],
+        [member, manager],
       ]);
 
       await expect(
@@ -368,10 +446,9 @@ describe('organization service', () => {
     const fake = makeDb([
       [actor],
       [actorMembership],
-      [{ id: 20 }],
+      [{ id: 20, externalId: 'org_design' }],
       [actorMembership],
-      [member],
-      [manager],
+      [member, manager],
     ]);
 
     await expect(
@@ -386,13 +463,14 @@ describe('organization service', () => {
 
     expect(fake.transactionCalls).toBe(1);
     const organizationLockIndex = fake.queries.findIndex(
-      (query) => query.from === 'organizations' && query.forUpdate && query.inTransaction,
+      (query) =>
+        query.from === 'organizations' && query.lockStrength === 'update' && query.inTransaction,
     );
     const lockedMemberIndex = fake.queries.findIndex(
       (query, index) =>
         index > organizationLockIndex &&
         query.from === 'organization_members' &&
-        query.forUpdate &&
+        query.lockStrength === 'update' &&
         query.inTransaction,
     );
     expect(organizationLockIndex).toBeGreaterThanOrEqual(0);
@@ -404,11 +482,29 @@ describe('organization service', () => {
         values: { managerUserId: 3 },
       }),
     ]);
+    expect(eventSequence(fake)).toEqual([
+      'select:users:none:outside',
+      'select:organization_members:none:outside',
+      'select:organizations:update:tx',
+      'select:organization_members:update:tx',
+      'select:organization_members:update:tx',
+      'update:organization_members:none:tx',
+    ]);
+    expect(lockedMemberShapes(fake)).toEqual([
+      { lockStrength: 'update', ordered: false },
+      { lockStrength: 'update', ordered: true },
+    ]);
   });
 
   it('rejects a reporting update when the active target disappears before the write', async () => {
     const fake = makeDb(
-      [[actor], [actorMembership], [{ id: 20 }], [actorMembership], [member], [manager]],
+      [
+        [actor],
+        [actorMembership],
+        [{ id: 20, externalId: 'org_design' }],
+        [actorMembership],
+        [member, manager],
+      ],
       [0],
     );
 
@@ -423,11 +519,126 @@ describe('organization service', () => {
     ).rejects.toMatchObject({ code: 'MEMBER_NOT_FOUND' });
   });
 
+  it('does not lock a foreign organization membership while assigning a reporting line', async () => {
+    const fake = makeDb([
+      [actor],
+      [actorMembership],
+      [{ id: 20, externalId: 'org_design' }],
+      [actorMembership],
+      [member],
+    ]);
+
+    await expect(
+      updateReportingLine({
+        db: fake.db,
+        actorExternalId: 'usr_owner',
+        organizationExternalId: 'org_design',
+        targetMemberExternalId: 'omem_member',
+        managerMemberExternalId: 'omem_manager',
+      }),
+    ).rejects.toMatchObject({ code: 'MEMBER_NOT_FOUND' });
+    const lockedMemberQueries = fake.queries.filter(
+      (query) =>
+        query.from === 'organization_members' &&
+        query.lockStrength === 'update' &&
+        query.inTransaction,
+    );
+    expect(lockedMemberQueries).toHaveLength(2);
+    expect(lockedMemberQueries.every((query) => query.joins.length === 0)).toBe(true);
+    expect(lockedMemberQueries.some((query) => query.ordered)).toBe(true);
+    expect(
+      fake.queries.filter(
+        (query) => query.from === 'organizations' && query.inTransaction && query.lockStrength,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('does not lock a foreign target membership while assigning a reporting line', async () => {
+    const fake = makeDb([
+      [actor],
+      [actorMembership],
+      [{ id: 20, externalId: 'org_design' }],
+      [actorMembership],
+      [manager],
+    ]);
+
+    await expect(
+      updateReportingLine({
+        db: fake.db,
+        actorExternalId: 'usr_owner',
+        organizationExternalId: 'org_design',
+        targetMemberExternalId: 'omem_foreign_target',
+        managerMemberExternalId: 'omem_manager',
+      }),
+    ).rejects.toMatchObject({ code: 'MEMBER_NOT_FOUND' });
+
+    expect(
+      fake.queries.filter(
+        (query) => query.from === 'organizations' && query.inTransaction && query.lockStrength,
+      ),
+    ).toHaveLength(1);
+    const lockedMemberQueries = fake.queries.filter(
+      (query) =>
+        query.from === 'organization_members' &&
+        query.lockStrength === 'update' &&
+        query.inTransaction,
+    );
+    expect(lockedMemberQueries).toHaveLength(2);
+    expect(lockedMemberQueries.every((query) => query.joins.length === 0)).toBe(true);
+  });
+
+  it('rejects a role update when its active target row disappears before the write', async () => {
+    const fake = makeDb(
+      [
+        [actor],
+        [actorMembership],
+        [{ id: 20, externalId: 'org_design' }],
+        [actorMembership],
+        [member],
+        [{ id: 10 }],
+      ],
+      [0],
+    );
+
+    await expect(
+      updateMemberRole({
+        db: fake.db,
+        actorExternalId: 'usr_owner',
+        organizationExternalId: 'org_design',
+        targetMemberExternalId: 'omem_member',
+        nextRole: 'manager',
+      }),
+    ).rejects.toMatchObject({ code: 'MEMBER_NOT_FOUND' });
+  });
+
+  it('rejects a deactivation when its active target row disappears before the write', async () => {
+    const fake = makeDb(
+      [
+        [actor],
+        [actorMembership],
+        [{ id: 20, externalId: 'org_design' }],
+        [actorMembership],
+        [member],
+        [{ id: 10 }],
+      ],
+      [0],
+    );
+
+    await expect(
+      deactivateMember({
+        db: fake.db,
+        actorExternalId: 'usr_owner',
+        organizationExternalId: 'org_design',
+        targetMemberExternalId: 'omem_member',
+      }),
+    ).rejects.toMatchObject({ code: 'MEMBER_NOT_FOUND' });
+  });
+
   it('deactivates organization and team-project memberships in one transaction without deleting audit rows', async () => {
     const fake = makeDb([
       [actor],
       [actorMembership],
-      [{ id: 20 }],
+      [{ id: 20, externalId: 'org_design' }],
       [actorMembership],
       [member],
       [{ id: 10 }, { id: 12 }],
@@ -456,6 +667,57 @@ describe('organization service', () => {
       }),
     ]);
     expect(fake.deletes).toEqual([]);
+    expect(eventSequence(fake)).toEqual([
+      'select:users:none:outside',
+      'select:organization_members:none:outside',
+      'select:organizations:update:tx',
+      'select:organization_members:update:tx',
+      'select:organization_members:update:tx',
+      'select:organization_members:update:tx',
+      'update:organization_members:none:tx',
+      'update:project_members:none:tx',
+    ]);
+    expect(lockedMemberShapes(fake)).toEqual([
+      { lockStrength: 'update', ordered: false },
+      { lockStrength: 'update', ordered: true },
+      { lockStrength: 'update', ordered: true },
+    ]);
+  });
+
+  it('locks the organization, then members and owners, before a role mutation', async () => {
+    const fake = makeDb([
+      [actor],
+      [actorMembership],
+      [{ id: 20, externalId: 'org_design' }],
+      [actorMembership],
+      [member],
+      [{ id: 10 }],
+    ]);
+
+    await expect(
+      updateMemberRole({
+        db: fake.db,
+        actorExternalId: 'usr_owner',
+        organizationExternalId: 'org_design',
+        targetMemberExternalId: 'omem_member',
+        nextRole: 'manager',
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(eventSequence(fake)).toEqual([
+      'select:users:none:outside',
+      'select:organization_members:none:outside',
+      'select:organizations:update:tx',
+      'select:organization_members:update:tx',
+      'select:organization_members:update:tx',
+      'select:organization_members:update:tx',
+      'update:organization_members:none:tx',
+    ]);
+    expect(lockedMemberShapes(fake)).toEqual([
+      { lockStrength: 'update', ordered: false },
+      { lockStrength: 'update', ordered: true },
+      { lockStrength: 'update', ordered: true },
+    ]);
   });
 
   it('does not deactivate the last owner', async () => {
@@ -463,7 +725,7 @@ describe('organization service', () => {
     const fake = makeDb([
       [actor],
       [actorMembership],
-      [{ id: 20 }],
+      [{ id: 20, externalId: 'org_design' }],
       [actorMembership],
       [owner],
       [{ id: 10 }],
@@ -488,7 +750,7 @@ describe('organization service', () => {
     const fake = makeDb([
       [actor],
       [actorMembership],
-      [{ id: 20 }],
+      [{ id: 20, externalId: 'org_design' }],
       [actorMembership],
       [owner],
       [{ id: 10 }],
@@ -513,7 +775,7 @@ describe('organization service', () => {
     const fake = makeDb([
       [actor],
       [actorMembership],
-      [{ id: 20 }],
+      [{ id: 20, externalId: 'org_design' }],
       [actorMembership],
       [manager],
       [{ id: 10 }],
@@ -541,7 +803,7 @@ describe('organization service', () => {
     const fake = makeDb([
       [actor],
       [actorMembership],
-      [{ id: 20 }],
+      [{ id: 20, externalId: 'org_design' }],
       [actorMembership],
       [manager],
       [{ id: 10 }],
