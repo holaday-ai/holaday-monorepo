@@ -47,6 +47,9 @@ type FakeMembershipState = {
   organizationMembershipStatus: 'active' | 'inactive';
   projectMembershipStatuses: Array<'active' | 'inactive'>;
 };
+type FakeDbOptions = {
+  failTransactionAfterCallback?: boolean;
+};
 
 /**
  * The service boundary needs only selects plus transaction-scoped writes. This deliberately
@@ -59,6 +62,7 @@ function makeDb(
     organizationMembershipStatus: 'active',
     projectMembershipStatuses: ['active'],
   },
+  options: FakeDbOptions = {},
 ) {
   const inserts: Insert[] = [];
   const updates: Update[] = [];
@@ -244,7 +248,11 @@ function makeDb(
         projectMembershipStatuses: [...state.projectMembershipStatuses],
       };
       try {
-        return await callback(tx);
+        const result = await callback(tx);
+        if (options.failTransactionAfterCallback) {
+          throw new Error('organization service fake injected post-callback transaction failure');
+        }
+        return result;
       } catch (error) {
         transactionRollbacks += 1;
         state.organizationMembershipStatus = stateSnapshot.organizationMembershipStatus;
@@ -1002,6 +1010,50 @@ describe('organization service', () => {
         targetMemberExternalId: 'omem_member',
       }),
     ).rejects.toMatchObject({ code: 'MEMBER_NOT_FOUND' });
+    expect(fake.transactionRollbacks).toBe(1);
+    expect(fake.updates.map((update) => update.table)).toEqual([
+      'organization_members',
+      'project_members',
+    ]);
+    expect(fake.updates.every((update) => update.executor === 'tx')).toBe(true);
+    expect(fake.state).toEqual({
+      organizationMembershipStatus: 'active',
+      projectMembershipStatuses: ['active'],
+    });
+  });
+
+  it('restores both membership statuses when the transaction fails after both updates succeed', async () => {
+    const fake = makeDb(
+      [
+        [actor],
+        [actorMembership],
+        [{ id: 20, externalId: 'org_design' }],
+        [actorMembership],
+        [member],
+        [{ id: 10 }],
+        [{ projectId: 200 }],
+        [{ id: 200, organizationId: 20 }],
+        [
+          { id: 300, projectId: 200, userId: 2, role: 'member', status: 'active' },
+          { id: 301, projectId: 200, userId: 3, role: 'lead', status: 'active' },
+        ],
+      ],
+      [1, 1],
+      {
+        organizationMembershipStatus: 'active',
+        projectMembershipStatuses: ['active'],
+      },
+      { failTransactionAfterCallback: true },
+    );
+
+    await expect(
+      deactivateMember({
+        db: fake.db,
+        actorExternalId: 'usr_owner',
+        organizationExternalId: 'org_design',
+        targetMemberExternalId: 'omem_member',
+      }),
+    ).rejects.toThrow('organization service fake injected post-callback transaction failure');
     expect(fake.transactionRollbacks).toBe(1);
     expect(fake.updates.map((update) => update.table)).toEqual([
       'organization_members',
