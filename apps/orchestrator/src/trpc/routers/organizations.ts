@@ -79,6 +79,12 @@ function invitationUrl(token: string): string {
 
 function mapDomainError(error: unknown): never {
   if (error instanceof OrganizationServiceError || error instanceof InvitationServiceError) {
+    if (error instanceof OrganizationServiceError && error.code === 'SOLE_PROJECT_LEAD') {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'project must retain an active lead',
+      });
+    }
     if (error.code === 'PERMISSION_DENIED') {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'organization permission denied' });
     }

@@ -14,20 +14,35 @@ import { users } from '../db/schema/users.js';
 import { deleteProjectWithAccess } from './project-access.js';
 import { createTeamProject } from './team-project-service.js';
 
-const databaseUrl = process.env.TEAM_PROJECTS_INTEGRATION_DATABASE_URL;
-const integrationDescribe = databaseUrl ? describe : describe.skip;
+const DESTRUCTIVE_OPT_IN = 'DESTROY_FRESH_HOLADAY_TEAM_PROJECTS_IT_DATABASE';
 
-function requireIsolatedTestDatabase(rawUrl: string): void {
-  const parsed = new URL(rawUrl);
-  const databaseName = parsed.pathname.replace(/^\//, '');
-  if (parsed.protocol !== 'mysql:' || !/(?:test|integration)/i.test(databaseName)) {
+function requireIntegrationEnvironment(): string {
+  const rawUrl = process.env.TEAM_PROJECTS_INTEGRATION_DATABASE_URL;
+  if (!rawUrl) {
+    throw new Error('TEAM_PROJECTS_INTEGRATION_DATABASE_URL is required for this integration file');
+  }
+  if (process.env.TEAM_PROJECTS_INTEGRATION_CONFIRM_DESTROY !== DESTRUCTIVE_OPT_IN) {
     throw new Error(
-      'TEAM_PROJECTS_INTEGRATION_DATABASE_URL must be a mysql URL whose database name contains test or integration',
+      `TEAM_PROJECTS_INTEGRATION_CONFIRM_DESTROY must exactly equal ${DESTRUCTIVE_OPT_IN}`,
     );
   }
+  const parsed = new URL(rawUrl);
+  const databaseName = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
+  if (
+    parsed.protocol !== 'mysql:' ||
+    !databaseName.startsWith('holaday_team_projects_it_') ||
+    /(?:prod|production|stage|staging|shared)/i.test(databaseName)
+  ) {
+    throw new Error(
+      'integration database must use the holaday_team_projects_it_ prefix and cannot contain production, staging, or shared tokens',
+    );
+  }
+  return rawUrl;
 }
 
-integrationDescribe('team project MySQL persistence', () => {
+const databaseUrl = requireIntegrationEnvironment();
+
+describe('team project MySQL persistence', () => {
   let pool: ReturnType<typeof mysql.createPool>;
   let db: DB;
   let actorUserId = 0;
@@ -37,15 +52,41 @@ integrationDescribe('team project MySQL persistence', () => {
   let uniqueName = '';
 
   beforeAll(async () => {
-    requireIsolatedTestDatabase(databaseUrl as string);
     pool = mysql.createPool({
-      uri: databaseUrl as string,
+      uri: databaseUrl,
       connectionLimit: 2,
       timezone: 'Z',
       dateStrings: false,
       supportBigNumbers: true,
       bigNumberStrings: false,
     });
+    const [freshnessRows] = await pool.query<mysql.RowDataPacket[]>(`
+      SELECT
+        (SELECT COUNT(*) FROM users) AS users_count,
+        (SELECT COUNT(*) FROM organizations) AS organizations_count,
+        (SELECT COUNT(*) FROM organization_members) AS organization_members_count,
+        (SELECT COUNT(*) FROM projects) AS projects_count,
+        (SELECT COUNT(*) FROM project_members) AS project_members_count,
+        (SELECT COUNT(*) FROM tasks) AS tasks_count
+    `);
+    const freshness = freshnessRows[0];
+    if (!freshness || Object.values(freshness).some((value) => Number(value) !== 0)) {
+      throw new Error(
+        'integration database must be freshly migrated with all mutated tables empty',
+      );
+    }
+    const [foreignKeys] = await pool.query<mysql.RowDataPacket[]>(`
+      SELECT DELETE_RULE AS deleteRule
+      FROM information_schema.REFERENTIAL_CONSTRAINTS
+      WHERE CONSTRAINT_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'tasks'
+        AND REFERENCED_TABLE_NAME = 'projects'
+    `);
+    if (foreignKeys.length !== 1 || foreignKeys[0]?.deleteRule !== 'SET NULL') {
+      throw new Error(
+        'integration database is not migrated with tasks.project_id ON DELETE SET NULL',
+      );
+    }
     db = drizzle(pool, { schema, mode: 'default', casing: 'snake_case' });
   });
 

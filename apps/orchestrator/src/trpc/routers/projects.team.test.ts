@@ -51,22 +51,52 @@ function makePersonalDb() {
   const inserted: Array<{ table: string; values: Record<string, unknown> }> = [];
   const updated: Array<{ table: string; values: Record<string, unknown> }> = [];
   const deleted: string[] = [];
+  const personalSnapshot = {
+    projectId: 10,
+    projectExternalId: 'prj_personal',
+    projectOwnerUserId: 7,
+    actorUserId: 7,
+    actorExternalId: 'usr_personal',
+    organizationInternalId: null,
+    organizationRowId: null,
+    organizationExternalId: null,
+    organizationName: null,
+    organizationStatus: null,
+    teamProjectsEnabled: null,
+    organizationMemberOrganizationId: null,
+    organizationMemberUserId: null,
+    organizationMemberRole: null,
+    organizationMemberStatus: null,
+    projectMemberProjectId: null,
+    projectMemberUserId: null,
+    projectMemberRole: null,
+    projectMemberStatus: null,
+  };
 
   const db = {
     select() {
       return {
         from(table: unknown) {
           const name = tableName(table);
+          const hasResolvedUser = selectedTables.includes('users');
           selectedTables.push(name);
           const result =
             name === 'users'
               ? [{ id: 7 }]
               : name === 'projects'
-                ? projectRows
+                ? hasResolvedUser
+                  ? projectRows
+                  : [personalSnapshot]
                 : name === 'tasks'
                   ? [{ projectId: 10, n: 3 }]
                   : [];
           const builder = {
+            innerJoin() {
+              return builder;
+            },
+            leftJoin() {
+              return builder;
+            },
             where() {
               return builder;
             },
@@ -107,27 +137,6 @@ function makePersonalDb() {
       };
     },
     async transaction<Result>(callback: (executor: unknown) => Promise<Result>) {
-      const personalSnapshot = {
-        projectId: 10,
-        projectExternalId: 'prj_personal',
-        projectOwnerUserId: 7,
-        actorUserId: 7,
-        actorExternalId: 'usr_personal',
-        organizationInternalId: null,
-        organizationRowId: null,
-        organizationExternalId: null,
-        organizationName: null,
-        organizationStatus: null,
-        teamProjectsEnabled: null,
-        organizationMemberOrganizationId: null,
-        organizationMemberUserId: null,
-        organizationMemberRole: null,
-        organizationMemberStatus: null,
-        projectMemberProjectId: null,
-        projectMemberUserId: null,
-        projectMemberRole: null,
-        projectMemberStatus: null,
-      };
       const tx = {
         select() {
           return {
@@ -145,7 +154,9 @@ function makePersonalDb() {
                 for() {
                   return builder;
                 },
-                limit: async () => [personalSnapshot],
+                limit: async () => [
+                  { id: 10, externalId: 'prj_personal', userId: 7, organizationId: null },
+                ],
               };
               return builder;
             },
@@ -189,7 +200,7 @@ function makeTeamListDb() {
           const rows =
             name === 'users'
               ? [{ id: 7 }]
-              : name === 'organizations'
+              : name === 'organization_members'
                 ? [
                     {
                       organizationInternalId: 30,
@@ -262,7 +273,8 @@ function makeTeamCreateDb(
   const tx = {
     select() {
       return {
-        from() {
+        from(table: unknown) {
+          const selectedTable = tableName(table);
           const builder = {
             innerJoin() {
               return builder;
@@ -273,7 +285,10 @@ function makeTeamCreateDb(
             for() {
               return builder;
             },
-            limit: async () => [actor],
+            limit: async () => {
+              events.push(`tx:select:${selectedTable}`);
+              return [actor];
+            },
           };
           return builder;
         },
@@ -448,6 +463,51 @@ const targetProjectMember = {
   status: 'active',
 };
 
+function canonicalRouterMutationReads(
+  snapshot = readableTeamSnapshot,
+  memberships: unknown[] = [
+    {
+      ...targetProjectMember,
+      id: 40,
+      externalId: 'pmem_actor',
+      userId: 7,
+      role: snapshot.projectMemberRole,
+      status: snapshot.projectMemberStatus,
+    },
+  ],
+): [unknown[], unknown[], unknown[], unknown[], unknown[]] {
+  return [
+    [snapshot],
+    [
+      {
+        id: 30,
+        externalId: 'org_design',
+        name: 'Design',
+        status: 'active',
+        teamProjectsEnabled: true,
+      },
+    ],
+    [
+      {
+        id: 30,
+        externalId: 'omem_actor',
+        organizationId: 30,
+        userId: 7,
+        role: snapshot.organizationMemberRole,
+        status: snapshot.organizationMemberStatus,
+      },
+    ],
+    [{ id: 20, externalId: 'prj_team', userId: 7, organizationId: 30 }],
+    memberships,
+  ];
+}
+
+function canonicalRouterAddReads(): unknown[][] {
+  const [candidate, organization, actorMember, project, memberships] =
+    canonicalRouterMutationReads();
+  return [candidate, organization, actorMember, [targetOrganizationMember], project, memberships];
+}
+
 function makeAccessMutationDb(selectResults: unknown[][], affectedRows: number[] = []) {
   const writes: Array<{
     kind: 'insert' | 'update' | 'delete';
@@ -526,6 +586,7 @@ function makeAccessMutationDb(selectResults: unknown[][], affectedRows: number[]
 
 function makeConsistentReadDb(selectResults: unknown[][]) {
   const events: string[] = [];
+  const transactionConfigs: unknown[] = [];
   const take = () => selectResults.shift() ?? [];
   const tx = {
     select() {
@@ -567,7 +628,11 @@ function makeConsistentReadDb(selectResults: unknown[][]) {
       events.push('root:select:forbidden');
       throw new Error('consistent team reads must not use the root executor');
     },
-    async transaction<Result>(callback: (executor: typeof tx) => Promise<Result>) {
+    async transaction<Result>(
+      callback: (executor: typeof tx) => Promise<Result>,
+      config?: unknown,
+    ) {
+      transactionConfigs.push(config);
       events.push('root:transaction:begin');
       try {
         const value = await callback(tx);
@@ -579,7 +644,7 @@ function makeConsistentReadDb(selectResults: unknown[][]) {
       }
     },
   };
-  return { db, events };
+  return { db, events, transactionConfigs };
 }
 
 describe('projects router personal compatibility', () => {
@@ -691,7 +756,7 @@ describe('projects router team workspaces', () => {
       },
     ]);
     expect(teamProjectsEnabledFor).toHaveBeenCalledWith('usr_member');
-    expect(fake.selectedTables).toEqual(['organizations', 'projects']);
+    expect(fake.selectedTables).toEqual(['organization_members', 'projects']);
   });
 
   it('returns NOT_FOUND instead of an empty tenant oracle for an unavailable organization', async () => {
@@ -778,7 +843,7 @@ describe('projects router team workspaces', () => {
     ).resolves.toHaveLength(1);
     expect(fake.events).toEqual([
       'root:transaction:begin',
-      'tx:select:organizations',
+      'tx:select:organization_members',
       'tx:select:projects',
       'root:transaction:commit',
     ]);
@@ -830,6 +895,9 @@ describe('projects router team workspaces', () => {
       expect(fake.events[0]).toBe('root:transaction:begin');
       expect(fake.events).not.toContain('root:select:forbidden');
       expect(fake.events.at(-1)).toBe('root:transaction:commit');
+      expect(fake.transactionConfigs).toEqual([
+        { isolationLevel: 'repeatable read', accessMode: 'read only' },
+      ]);
     },
   );
 
@@ -848,7 +916,7 @@ describe('projects router team workspaces', () => {
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     expect(fake.events).toEqual([
       'root:transaction:begin',
-      'tx:select:organizations',
+      'tx:select:organization_members',
       'root:transaction:rollback',
     ]);
   });
@@ -908,14 +976,14 @@ describe('projects router team workspaces', () => {
     const memberSql = members.sql.toLowerCase().replace(/\s+/g, ' ').trim();
 
     expect(creatorSql).toContain('`users`.`external_id` = ?');
-    expect(creatorSql).toContain('`organization_members`.`organization_id` = `organizations`.`id`');
-    expect(creatorSql).toContain('`organization_members`.`user_id` = `users`.`id`');
+    expect(creatorSql).toContain('`organizations`.`id` = `organization_members`.`organization_id`');
+    expect(creatorSql).toContain('`users`.`id` = `organization_members`.`user_id`');
     expect(creatorSql).toContain('`organization_members`.`status` = ?');
     expect(creatorSql).toContain('`organizations`.`external_id` = ?');
     expect(creatorSql).toContain('`organizations`.`status` = ?');
     expect(creatorSql).toContain('`organizations`.`team_projects_enabled` = ?');
     expect(creatorSql).toContain('for update');
-    expect(creator.params).toEqual(['usr_member', 'active', 'org_design', 'active', true, 1]);
+    expect(creator.params).toEqual(['org_design', 'active', true, 'usr_member', 'active', 1]);
     expect(detail.params).toEqual([20, 'prj_team', 1]);
     expect(memberSql).toContain('`project_members`.`project_id` = ?');
     expect(memberSql).toContain('`project_members`.`status` = ?');
@@ -1005,7 +1073,14 @@ describe('projects router team workspaces', () => {
       projectMemberRole: null,
       projectMemberStatus: null,
     };
-    const personalRename = makeAccessMutationDb([[personalSnapshot], [personalSnapshot]], [1]);
+    const personalRename = makeAccessMutationDb(
+      [
+        [personalSnapshot],
+        [personalSnapshot],
+        [{ id: 10, externalId: 'prj_personal', userId: 7, organizationId: null }],
+      ],
+      [1],
+    );
     const renameCaller = projectsRouter.createCaller({
       db: hiddenRename.db,
       userId: 'usr_member',
@@ -1088,6 +1163,8 @@ describe('projects router team workspaces', () => {
     ]);
     expect(fake.events).toEqual([
       'root:transaction:begin',
+      'tx:select:organizations',
+      'tx:select:organization_members',
       'tx:insert:projects',
       'tx:insert:project_members',
       'root:transaction:commit',
@@ -1131,6 +1208,8 @@ describe('projects router team workspaces', () => {
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     expect(fake.events).toEqual([
       'root:transaction:begin',
+      'tx:select:organizations',
+      'tx:select:organization_members',
       'tx:insert:projects',
       'root:transaction:rollback',
     ]);
@@ -1230,7 +1309,7 @@ describe('projects router team workspaces', () => {
   });
 
   it('adds an active organization member and returns only collaboration fields', async () => {
-    const fake = makeAccessMutationDb([[readableTeamSnapshot], [targetOrganizationMember], []]);
+    const fake = makeAccessMutationDb(canonicalRouterAddReads());
     const caller = projectsRouter.createCaller({
       db: fake.db,
       userId: 'usr_member',
@@ -1269,20 +1348,16 @@ describe('projects router team workspaces', () => {
 
   it('removes the project-bound target through Task 7 without trusting an organization id', async () => {
     const fake = makeAccessMutationDb(
-      [
-        [readableTeamSnapshot],
-        [targetProjectMember],
-        [
-          {
-            ...targetProjectMember,
-            id: 40,
-            externalId: 'pmem_actor',
-            userId: 7,
-            role: 'lead',
-          },
-          targetProjectMember,
-        ],
-      ],
+      canonicalRouterMutationReads(readableTeamSnapshot, [
+        {
+          ...targetProjectMember,
+          id: 40,
+          externalId: 'pmem_actor',
+          userId: 7,
+          role: 'lead',
+        },
+        targetProjectMember,
+      ]),
       [1],
     );
     const caller = projectsRouter.createCaller({
@@ -1315,8 +1390,41 @@ describe('projects router team workspaces', () => {
     ]);
   });
 
+  it('maps sole-project-lead removal to an accurate conflict message', async () => {
+    const actorProjectMember = {
+      ...targetProjectMember,
+      id: 40,
+      externalId: 'pmem_actor',
+      userId: 7,
+      role: 'lead',
+    };
+    const fake = makeAccessMutationDb(
+      canonicalRouterMutationReads(readableTeamSnapshot, [actorProjectMember]),
+    );
+    const caller = projectsRouter.createCaller({
+      db: fake.db,
+      userId: 'usr_member',
+      logger: fakeLogger,
+    } as never);
+
+    await expect(
+      (
+        caller as unknown as {
+          removeMember: (input: {
+            projectId: string;
+            projectMemberId: string;
+          }) => Promise<unknown>;
+        }
+      ).removeMember({ projectId: 'prj_team', projectMemberId: 'pmem_actor' }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: 'project must retain an active lead',
+    });
+    expect(fake.writes).toEqual([]);
+  });
+
   it('renames a team project through the transaction-bound Task 7 operation', async () => {
-    const fake = makeAccessMutationDb([[readableTeamSnapshot]], [1]);
+    const fake = makeAccessMutationDb(canonicalRouterMutationReads(), [1]);
     const caller = projectsRouter.createCaller({
       db: fake.db,
       userId: 'usr_member',
@@ -1360,10 +1468,9 @@ describe('projects router team workspaces', () => {
   );
 
   it('denies viewer rename and project-lead delete before any write', async () => {
-    const viewer = makeAccessMutationDb([
-      [{ ...readableTeamSnapshot, projectMemberRole: 'viewer' }],
-    ]);
-    const lead = makeAccessMutationDb([[readableTeamSnapshot]]);
+    const viewerSnapshot = { ...readableTeamSnapshot, projectMemberRole: 'viewer' };
+    const viewer = makeAccessMutationDb(canonicalRouterMutationReads(viewerSnapshot));
+    const lead = makeAccessMutationDb(canonicalRouterMutationReads());
     const viewerCaller = projectsRouter.createCaller({
       db: viewer.db,
       userId: 'usr_member',
@@ -1387,7 +1494,7 @@ describe('projects router team workspaces', () => {
 
   it('deletes only the authorized project and relies on the task FK to set project_id null', async () => {
     const ownerSnapshot = { ...readableTeamSnapshot, organizationMemberRole: 'owner' };
-    const fake = makeAccessMutationDb([[ownerSnapshot]], [1]);
+    const fake = makeAccessMutationDb(canonicalRouterMutationReads(ownerSnapshot), [1]);
     const caller = projectsRouter.createCaller({
       db: fake.db,
       userId: 'usr_member',

@@ -386,6 +386,21 @@ describe('organizationsRouter', () => {
     await expectNotFound(caller.acceptInvitation({ token: 'unavailable-token' }));
   });
 
+  it('maps sole-project-lead deactivation to an accurate conflict', async () => {
+    const { OrganizationServiceError } = await import(
+      '../../organizations/organization-service.js'
+    );
+    deactivateMemberMock.mockRejectedValue(new OrganizationServiceError('SOLE_PROJECT_LEAD'));
+    const caller = makeCaller();
+
+    await expect(
+      caller.deactivateMember({ organizationId: 'org_design', memberId: 'omem_lead' }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: 'project must retain an active lead',
+    });
+  });
+
   it.each(['invalid', 'expired', 'replayed'])(
     'returns the same unavailable response when invitation acceptance is %s',
     async () => {

@@ -41,6 +41,7 @@ function makeDb(selectResults: unknown[][], updateAffectedRows: number[] = []) {
   const queries: Query[] = [];
   const events: Event[] = [];
   let transactionCalls = 0;
+  let transactionRollbacks = 0;
   let transactionDepth = 0;
   let nextInsertId = 100;
 
@@ -171,6 +172,9 @@ function makeDb(selectResults: unknown[][], updateAffectedRows: number[] = []) {
       transactionDepth += 1;
       try {
         return await callback(db);
+      } catch (error) {
+        transactionRollbacks += 1;
+        throw error;
       } finally {
         transactionDepth -= 1;
       }
@@ -186,6 +190,9 @@ function makeDb(selectResults: unknown[][], updateAffectedRows: number[] = []) {
     events,
     get transactionCalls() {
       return transactionCalls;
+    },
+    get transactionRollbacks() {
+      return transactionRollbacks;
     },
   };
 }
@@ -445,6 +452,30 @@ describe('organization service', () => {
     expect(sql).toContain('order by `organization_members`.`external_id` asc for update');
     expect(sql).not.toContain('join `organizations`');
     expect(query.params).toEqual([20, 'omem_manager', 'omem_member']);
+  });
+
+  it('compiles affected-project and active-membership locks in deterministic id order', () => {
+    const mockDb = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
+    const candidates = __organizationServiceInternals
+      .buildTargetActiveProjectIdsQuery(mockDb, 20, 2)
+      .toSQL();
+    const projectLocks = __organizationServiceInternals
+      .buildLockedProjectsQuery(mockDb, 20, [200, 201])
+      .toSQL();
+    const membershipLocks = __organizationServiceInternals
+      .buildLockedActiveProjectMembershipsQuery(mockDb, [200, 201])
+      .toSQL();
+
+    expect(normalizedSql(candidates.sql)).toContain('`projects`.`organization_id` = ?');
+    expect(normalizedSql(candidates.sql)).toContain('`project_members`.`user_id` = ?');
+    expect(normalizedSql(candidates.sql)).toContain('`project_members`.`status` = ?');
+    expect(candidates.params).toEqual([2, 'active', 20]);
+    expect(normalizedSql(projectLocks.sql)).toContain('order by `projects`.`id` asc for update');
+    expect(projectLocks.params).toEqual([20, 200, 201]);
+    expect(normalizedSql(membershipLocks.sql)).toContain(
+      'order by `project_members`.`project_id` asc, `project_members`.`id` asc for update',
+    );
+    expect(membershipLocks.params).toEqual([200, 201, 'active']);
   });
 
   it.each([
@@ -715,6 +746,7 @@ describe('organization service', () => {
       'select:organization_members:update:tx',
       'select:organization_members:update:tx',
       'select:organization_members:update:tx',
+      'select:projects:none:tx',
       'update:organization_members:none:tx',
       'update:project_members:none:tx',
     ]);
@@ -722,6 +754,145 @@ describe('organization service', () => {
       { lockStrength: 'update', ordered: false },
       { lockStrength: 'update', ordered: true },
       { lockStrength: 'update', ordered: true },
+    ]);
+  });
+
+  it('rejects organization deactivation when the target is a project sole lead', async () => {
+    const fake = makeDb([
+      [actor],
+      [actorMembership],
+      [{ id: 20, externalId: 'org_design' }],
+      [actorMembership],
+      [member],
+      [{ id: 10 }],
+      [{ projectId: 200 }],
+      [{ id: 200, organizationId: 20 }],
+      [{ id: 300, projectId: 200, userId: 2, role: 'lead', status: 'active' }],
+    ]);
+
+    await expect(
+      deactivateMember({
+        db: fake.db,
+        actorExternalId: 'usr_owner',
+        organizationExternalId: 'org_design',
+        targetMemberExternalId: 'omem_member',
+      }),
+    ).rejects.toMatchObject({
+      code: 'SOLE_PROJECT_LEAD',
+      message: 'SOLE_PROJECT_LEAD',
+    });
+    expect(fake.updates).toEqual([]);
+    expect(fake.transactionRollbacks).toBe(1);
+    expect(
+      fake.queries.map(
+        (query) =>
+          `${query.from}:${query.lockStrength ?? 'none'}:${query.ordered ? 'ordered' : 'plain'}`,
+      ),
+    ).toEqual([
+      'users:none:plain',
+      'organization_members:none:plain',
+      'organizations:update:plain',
+      'organization_members:update:plain',
+      'organization_members:update:ordered',
+      'organization_members:update:ordered',
+      'projects:none:ordered',
+      'projects:update:ordered',
+      'project_members:update:ordered',
+    ]);
+  });
+
+  it('allows deactivation when another active project lead remains', async () => {
+    const fake = makeDb(
+      [
+        [actor],
+        [actorMembership],
+        [{ id: 20, externalId: 'org_design' }],
+        [actorMembership],
+        [member],
+        [{ id: 10 }],
+        [{ projectId: 200 }],
+        [{ id: 200, organizationId: 20 }],
+        [
+          { id: 300, projectId: 200, userId: 2, role: 'lead', status: 'active' },
+          { id: 301, projectId: 200, userId: 3, role: 'lead', status: 'active' },
+        ],
+      ],
+      [1, 1],
+    );
+
+    await expect(
+      deactivateMember({
+        db: fake.db,
+        actorExternalId: 'usr_owner',
+        organizationExternalId: 'org_design',
+        targetMemberExternalId: 'omem_member',
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(fake.transactionRollbacks).toBe(0);
+  });
+
+  it('rejects the whole multi-project deactivation if any affected project would lose its lead', async () => {
+    const fake = makeDb([
+      [actor],
+      [actorMembership],
+      [{ id: 20, externalId: 'org_design' }],
+      [actorMembership],
+      [member],
+      [{ id: 10 }],
+      [{ projectId: 200 }, { projectId: 201 }],
+      [
+        { id: 200, organizationId: 20 },
+        { id: 201, organizationId: 20 },
+      ],
+      [
+        { id: 300, projectId: 200, userId: 2, role: 'member', status: 'active' },
+        { id: 301, projectId: 200, userId: 3, role: 'lead', status: 'active' },
+        { id: 302, projectId: 201, userId: 2, role: 'lead', status: 'active' },
+      ],
+    ]);
+
+    await expect(
+      deactivateMember({
+        db: fake.db,
+        actorExternalId: 'usr_owner',
+        organizationExternalId: 'org_design',
+        targetMemberExternalId: 'omem_member',
+      }),
+    ).rejects.toMatchObject({ code: 'SOLE_PROJECT_LEAD' });
+    expect(fake.updates).toEqual([]);
+  });
+
+  it('rolls back both status updates when an affected project-membership update is zero-row', async () => {
+    const fake = makeDb(
+      [
+        [actor],
+        [actorMembership],
+        [{ id: 20, externalId: 'org_design' }],
+        [actorMembership],
+        [member],
+        [{ id: 10 }],
+        [{ projectId: 200 }],
+        [{ id: 200, organizationId: 20 }],
+        [
+          { id: 300, projectId: 200, userId: 2, role: 'member', status: 'active' },
+          { id: 301, projectId: 200, userId: 3, role: 'lead', status: 'active' },
+        ],
+      ],
+      [1, 0],
+    );
+
+    await expect(
+      deactivateMember({
+        db: fake.db,
+        actorExternalId: 'usr_owner',
+        organizationExternalId: 'org_design',
+        targetMemberExternalId: 'omem_member',
+      }),
+    ).rejects.toMatchObject({ code: 'MEMBER_NOT_FOUND' });
+    expect(fake.transactionRollbacks).toBe(1);
+    expect(fake.updates.map((update) => update.table)).toEqual([
+      'organization_members',
+      'project_members',
     ]);
   });
 

@@ -60,7 +60,9 @@ function mapProjectAccessError(error: unknown): never {
         error.code === 'NOT_FOUND'
           ? 'project not found'
           : error.code === 'CONFLICT'
-            ? 'project member already exists'
+            ? error.reason === 'SOLE_PROJECT_LEAD'
+              ? 'project must retain an active lead'
+              : 'project member already exists'
             : 'project action forbidden',
     });
   }

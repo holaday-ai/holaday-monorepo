@@ -12,7 +12,12 @@ import {
   type OrganizationRole,
   canCreateTeamProject,
 } from '../organizations/organization-permissions.js';
-import { type ProjectAccessInput, requireReadableProjectForUpdate } from './project-access.js';
+import { type ProjectAccessInput, requireReadableProject } from './project-access.js';
+
+const CONSISTENT_READ_TRANSACTION = {
+  isolationLevel: 'repeatable read',
+  accessMode: 'read only',
+} as const;
 
 export type TeamProjectServiceErrorCode = 'NOT_FOUND' | 'FORBIDDEN';
 
@@ -138,23 +143,18 @@ function buildActiveTeamOrganizationMembershipQuery(
       organizationRole: organizationMembers.role,
       organizationMemberStatus: organizationMembers.status,
     })
-    .from(organizations)
-    .innerJoin(users, eq(users.externalId, actorExternalId))
+    .from(organizationMembers)
     .innerJoin(
-      organizationMembers,
+      organizations,
       and(
-        eq(organizationMembers.organizationId, organizations.id),
-        eq(organizationMembers.userId, users.id),
-        eq(organizationMembers.status, 'active'),
-      ),
-    )
-    .where(
-      and(
+        eq(organizations.id, organizationMembers.organizationId),
         eq(organizations.externalId, organizationExternalId),
         eq(organizations.status, 'active'),
         eq(organizations.teamProjectsEnabled, true),
       ),
     )
+    .innerJoin(users, eq(users.id, organizationMembers.userId))
+    .where(and(eq(users.externalId, actorExternalId), eq(organizationMembers.status, 'active')))
     .limit(1);
 }
 
@@ -175,16 +175,31 @@ function buildTeamProjectCreatorQuery(
       organizationRole: organizationMembers.role,
       organizationMemberStatus: organizationMembers.status,
     })
-    .from(organizations)
-    .innerJoin(users, eq(users.externalId, actorExternalId))
+    .from(organizationMembers)
     .innerJoin(
-      organizationMembers,
+      organizations,
       and(
-        eq(organizationMembers.organizationId, organizations.id),
-        eq(organizationMembers.userId, users.id),
-        eq(organizationMembers.status, 'active'),
+        eq(organizations.id, organizationMembers.organizationId),
+        eq(organizations.externalId, organizationExternalId),
+        eq(organizations.status, 'active'),
+        eq(organizations.teamProjectsEnabled, true),
       ),
     )
+    .innerJoin(users, eq(users.id, organizationMembers.userId))
+    .where(and(eq(users.externalId, actorExternalId), eq(organizationMembers.status, 'active')))
+    .for('update')
+    .limit(1);
+}
+
+function buildLockedTeamOrganizationQuery(db: Pick<DB, 'select'>, organizationExternalId: string) {
+  return db
+    .select({
+      organizationInternalId: organizations.id,
+      organizationExternalId: organizations.externalId,
+      organizationStatus: organizations.status,
+      teamProjectsEnabled: organizations.teamProjectsEnabled,
+    })
+    .from(organizations)
     .where(
       and(
         eq(organizations.externalId, organizationExternalId),
@@ -245,7 +260,7 @@ export async function listTeamProjects(input: {
   organizationExternalId: string;
 }) {
   return input.db.transaction(async (tx) => {
-    const [membership] = (await buildTeamProjectCreatorQuery(
+    const [membership] = (await buildActiveTeamOrganizationMembershipQuery(
       tx,
       input.actorExternalId,
       input.organizationExternalId,
@@ -268,7 +283,7 @@ export async function listTeamProjects(input: {
       organizationName: project.organizationName,
       memberRole: project.memberRole,
     }));
-  });
+  }, CONSISTENT_READ_TRANSACTION);
 }
 
 export async function createTeamProject(input: {
@@ -281,12 +296,25 @@ export async function createTeamProject(input: {
   const projectExternalId = newExternalId('project');
   const creatorMembershipExternalId = newExternalId('projectMember');
   return input.db.transaction(async (tx) => {
+    const [lockedOrganization] = await buildLockedTeamOrganizationQuery(
+      tx,
+      input.organizationExternalId,
+    );
+    if (
+      !lockedOrganization ||
+      lockedOrganization.organizationExternalId !== input.organizationExternalId ||
+      lockedOrganization.organizationStatus !== 'active' ||
+      lockedOrganization.teamProjectsEnabled !== true
+    ) {
+      return hidden();
+    }
     const [row] = (await buildTeamProjectCreatorQuery(
       tx,
       input.actorExternalId,
       input.organizationExternalId,
     )) as ActiveTeamMembership[];
     const actor = validateMembership(row, input.actorExternalId, input.organizationExternalId);
+    if (actor.organizationInternalId !== lockedOrganization.organizationInternalId) return hidden();
     const permission = canCreateTeamProject({
       organizationId: actor.organizationExternalId,
       userId: String(actor.actorUserId),
@@ -327,7 +355,7 @@ export async function createTeamProject(input: {
 
 export async function getTeamProjectWithAccess(db: DB, input: ProjectAccessInput) {
   return db.transaction(async (tx) => {
-    const access = await requireReadableProjectForUpdate(tx, input);
+    const access = await requireReadableProject(tx, input);
     if (access.scope !== 'organization') return hidden();
     const [project] = await buildProjectDetailQuery(tx, access.projectId, input.projectExternalId);
     if (!project || project.externalId !== input.projectExternalId) return hidden();
@@ -339,21 +367,23 @@ export async function getTeamProjectWithAccess(db: DB, input: ProjectAccessInput
       organizationName: access.organizationName,
       memberRole: access.projectRole,
     };
-  });
+  }, CONSISTENT_READ_TRANSACTION);
 }
 
 export async function listProjectMembersWithAccess(db: DB, input: ProjectAccessInput) {
   return db.transaction(async (tx) => {
-    const access = await requireReadableProjectForUpdate(tx, input);
+    const access = await requireReadableProject(tx, input);
     if (access.scope !== 'organization') return hidden();
     return buildActiveProjectMembersQuery(tx, access.projectId);
-  });
+  }, CONSISTENT_READ_TRANSACTION);
 }
 
 export const __teamProjectServiceInternals = {
   buildActiveProjectMembersQuery,
   buildActiveTeamOrganizationMembershipQuery,
   buildProjectDetailQuery,
+  buildLockedTeamOrganizationQuery,
   buildTeamProjectCreatorQuery,
   buildTeamProjectListQuery,
+  CONSISTENT_READ_TRANSACTION,
 };

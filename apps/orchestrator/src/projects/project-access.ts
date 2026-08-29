@@ -18,14 +18,20 @@ import {
 } from '../organizations/organization-permissions.js';
 
 export type ProjectAccessErrorCode = 'NOT_FOUND' | 'FORBIDDEN' | 'CONFLICT';
+export type ProjectAccessConflictReason = 'DUPLICATE_MEMBER' | 'SOLE_PROJECT_LEAD';
 
 export class ProjectAccessError extends Error {
-  constructor(public readonly code: ProjectAccessErrorCode) {
+  constructor(
+    public readonly code: ProjectAccessErrorCode,
+    public readonly reason?: ProjectAccessConflictReason,
+  ) {
     super(
       code === 'NOT_FOUND'
         ? 'project not found'
         : code === 'CONFLICT'
-          ? 'project member already exists'
+          ? reason === 'SOLE_PROJECT_LEAD'
+            ? 'project must retain an active lead'
+            : 'project member already exists'
           : 'project action forbidden',
     );
     this.name = 'ProjectAccessError';
@@ -106,6 +112,30 @@ interface TargetOrganizationMemberSnapshot {
   avatarUrl: string | null;
 }
 
+interface LockedOrganizationSnapshot {
+  id: number;
+  externalId: string;
+  name: string;
+  status: string;
+  teamProjectsEnabled: boolean;
+}
+
+interface LockedOrganizationMemberSnapshot {
+  id: number;
+  externalId: string;
+  organizationId: number;
+  userId: number;
+  role: string;
+  status: string;
+}
+
+interface LockedProjectSnapshot {
+  id: number;
+  externalId: string;
+  userId: number;
+  organizationId: number | null;
+}
+
 function hidden(): never {
   throw new ProjectAccessError('NOT_FOUND');
 }
@@ -114,8 +144,8 @@ function forbidden(): never {
   throw new ProjectAccessError('FORBIDDEN');
 }
 
-function conflict(): never {
-  throw new ProjectAccessError('CONFLICT');
+function conflict(reason: ProjectAccessConflictReason): never {
+  throw new ProjectAccessError('CONFLICT', reason);
 }
 
 function isOrganizationRole(role: string | null): role is OrganizationRole {
@@ -127,12 +157,8 @@ function isProjectRole(role: string | null): role is ProjectRole {
 }
 
 /** One actor/project-bound snapshot; LEFT joins preserve the personal branch. */
-function buildProjectAccessSnapshotQuery(
-  db: Pick<DB, 'select'>,
-  input: ProjectAccessInput,
-  lock: boolean,
-) {
-  const query = db
+function buildProjectAccessSnapshotQuery(db: Pick<DB, 'select'>, input: ProjectAccessInput) {
+  return db
     .select({
       projectId: projects.id,
       projectExternalId: projects.externalId,
@@ -193,15 +219,11 @@ function buildProjectAccessSnapshotQuery(
           ),
         ),
       ),
-    );
-  return lock ? query.for('update').limit(1) : query.limit(1);
+    )
+    .limit(1);
 }
 
-function buildLockedTargetMemberQuery(
-  db: Pick<DB, 'select'>,
-  projectId: number,
-  targetProjectMemberExternalId: string,
-) {
+function buildLockedProjectMembershipsQuery(db: Pick<DB, 'select'>, projectId: number) {
   return db
     .select({
       id: projectMembers.id,
@@ -212,30 +234,88 @@ function buildLockedTargetMemberQuery(
       status: projectMembers.status,
     })
     .from(projectMembers)
+    .where(eq(projectMembers.projectId, projectId))
+    .orderBy(asc(projectMembers.id))
+    .for('update');
+}
+
+function buildLockedOrganizationQuery(
+  db: Pick<DB, 'select'>,
+  organizationId: number,
+  organizationExternalId: string,
+) {
+  return db
+    .select({
+      id: organizations.id,
+      externalId: organizations.externalId,
+      name: organizations.name,
+      status: organizations.status,
+      teamProjectsEnabled: organizations.teamProjectsEnabled,
+    })
+    .from(organizations)
     .where(
       and(
-        eq(projectMembers.projectId, projectId),
-        eq(projectMembers.externalId, targetProjectMemberExternalId),
+        eq(organizations.id, organizationId),
+        eq(organizations.externalId, organizationExternalId),
+        eq(organizations.status, 'active'),
+        eq(organizations.teamProjectsEnabled, true),
       ),
     )
     .for('update')
     .limit(1);
 }
 
-function buildLockedActiveProjectMembershipsQuery(db: Pick<DB, 'select'>, projectId: number) {
+function buildLockedActorOrganizationMemberQuery(
+  db: Pick<DB, 'select'>,
+  organizationId: number,
+  actorUserId: number,
+) {
   return db
     .select({
-      id: projectMembers.id,
-      externalId: projectMembers.externalId,
-      projectId: projectMembers.projectId,
-      userId: projectMembers.userId,
-      role: projectMembers.role,
-      status: projectMembers.status,
+      id: organizationMembers.id,
+      externalId: organizationMembers.externalId,
+      organizationId: organizationMembers.organizationId,
+      userId: organizationMembers.userId,
+      role: organizationMembers.role,
+      status: organizationMembers.status,
     })
-    .from(projectMembers)
-    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.status, 'active')))
-    .orderBy(asc(projectMembers.externalId))
-    .for('update');
+    .from(organizationMembers)
+    .where(
+      and(
+        eq(organizationMembers.organizationId, organizationId),
+        eq(organizationMembers.userId, actorUserId),
+        eq(organizationMembers.status, 'active'),
+      ),
+    )
+    .for('update')
+    .limit(1);
+}
+
+function buildLockedProjectQuery(
+  db: Pick<DB, 'select'>,
+  projectId: number,
+  projectExternalId: string,
+  organizationId: number | null,
+) {
+  return db
+    .select({
+      id: projects.id,
+      externalId: projects.externalId,
+      userId: projects.userId,
+      organizationId: projects.organizationId,
+    })
+    .from(projects)
+    .where(
+      and(
+        eq(projects.id, projectId),
+        eq(projects.externalId, projectExternalId),
+        organizationId === null
+          ? isNull(projects.organizationId)
+          : eq(projects.organizationId, organizationId),
+      ),
+    )
+    .for('update')
+    .limit(1);
 }
 
 function buildLockedTargetOrganizationMemberQuery(
@@ -263,26 +343,6 @@ function buildLockedTargetOrganizationMemberQuery(
         eq(organizationMembers.status, 'active'),
       ),
     )
-    .for('update')
-    .limit(1);
-}
-
-function buildLockedProjectMemberByUserQuery(
-  db: Pick<DB, 'select'>,
-  projectId: number,
-  userId: number,
-) {
-  return db
-    .select({
-      id: projectMembers.id,
-      externalId: projectMembers.externalId,
-      projectId: projectMembers.projectId,
-      userId: projectMembers.userId,
-      role: projectMembers.role,
-      status: projectMembers.status,
-    })
-    .from(projectMembers)
-    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)))
     .for('update')
     .limit(1);
 }
@@ -351,13 +411,8 @@ function snapshotToAccess(
 async function loadProjectAccess(
   db: Pick<DB, 'select'>,
   input: ProjectAccessInput,
-  lock: boolean,
 ): Promise<ProjectAccess> {
-  const [snapshot] = (await buildProjectAccessSnapshotQuery(
-    db,
-    input,
-    lock,
-  )) as ProjectAccessSnapshot[];
+  const [snapshot] = (await buildProjectAccessSnapshotQuery(db, input)) as ProjectAccessSnapshot[];
   return snapshotToAccess(snapshot, input);
 }
 
@@ -365,15 +420,7 @@ export async function requireReadableProject(
   db: Pick<DB, 'select'>,
   input: ProjectAccessInput,
 ): Promise<ProjectAccess> {
-  return loadProjectAccess(db, input, false);
-}
-
-/** For callers that own the surrounding transaction and consume the access immediately. */
-export async function requireReadableProjectForUpdate(
-  tx: Pick<DB, 'select'>,
-  input: ProjectAccessInput,
-): Promise<ProjectAccess> {
-  return loadProjectAccess(tx, input, true);
+  return loadProjectAccess(db, input);
 }
 
 function authorizeMutation<Action extends ProjectMutationAction>(
@@ -407,16 +454,156 @@ function authorizeMutation<Action extends ProjectMutationAction>(
   return { ...access, action };
 }
 
+type CanonicalMutationLocks = {
+  projectMemberships: TargetProjectMemberSnapshot[];
+  targetOrganizationMember?: TargetOrganizationMemberSnapshot;
+};
+
+async function lockCanonicalMutationAccess(
+  tx: ProjectAccessTransaction,
+  input: ProjectAccessInput,
+  candidate: ProjectAccessSnapshot,
+  targetOrganizationMemberExternalId?: string,
+): Promise<{ access: ProjectAccess; locks: CanonicalMutationLocks }> {
+  const candidateAccess = snapshotToAccess(candidate, input);
+
+  if (candidateAccess.scope === 'personal') {
+    const [project] = (await buildLockedProjectQuery(
+      tx,
+      candidate.projectId,
+      input.projectExternalId,
+      null,
+    )) as LockedProjectSnapshot[];
+    if (
+      !project ||
+      project.userId !== candidate.actorUserId ||
+      project.organizationId !== null ||
+      project.externalId !== input.projectExternalId
+    ) {
+      return hidden();
+    }
+    return { access: candidateAccess, locks: { projectMemberships: [] } };
+  }
+
+  // Team mutations always lock tenant state before the project. The candidate lookup is
+  // deliberately nonlocking and supplies identifiers only; no candidate authorization field is
+  // trusted after this point.
+  const [organization] = (await buildLockedOrganizationQuery(
+    tx,
+    candidateAccess.organizationInternalId,
+    candidateAccess.organizationExternalId,
+  )) as LockedOrganizationSnapshot[];
+  if (
+    !organization ||
+    organization.id !== candidateAccess.organizationInternalId ||
+    organization.externalId !== candidateAccess.organizationExternalId ||
+    organization.status !== 'active' ||
+    organization.teamProjectsEnabled !== true
+  ) {
+    return hidden();
+  }
+  const [actorOrganizationMember] = (await buildLockedActorOrganizationMemberQuery(
+    tx,
+    organization.id,
+    candidate.actorUserId,
+  )) as LockedOrganizationMemberSnapshot[];
+  if (
+    !actorOrganizationMember ||
+    actorOrganizationMember.organizationId !== organization.id ||
+    actorOrganizationMember.userId !== candidate.actorUserId ||
+    actorOrganizationMember.status !== 'active' ||
+    !isOrganizationRole(actorOrganizationMember.role)
+  ) {
+    return hidden();
+  }
+
+  let targetOrganizationMember: TargetOrganizationMemberSnapshot | undefined;
+  if (targetOrganizationMemberExternalId) {
+    [targetOrganizationMember] = (await buildLockedTargetOrganizationMemberQuery(
+      tx,
+      organization.id,
+      targetOrganizationMemberExternalId,
+    )) as TargetOrganizationMemberSnapshot[];
+    if (
+      !targetOrganizationMember ||
+      targetOrganizationMember.organizationId !== organization.id ||
+      targetOrganizationMember.status !== 'active'
+    ) {
+      return hidden();
+    }
+  }
+
+  // Lock the project only after organization and organization-member locks.
+  const [lockedProject] = (await buildLockedProjectQuery(
+    tx,
+    candidate.projectId,
+    input.projectExternalId,
+    organization.id,
+  )) as LockedProjectSnapshot[];
+  if (
+    !lockedProject ||
+    lockedProject.id !== candidate.projectId ||
+    lockedProject.externalId !== input.projectExternalId ||
+    lockedProject.organizationId !== organization.id
+  ) {
+    return hidden();
+  }
+  const projectMemberships = (await buildLockedProjectMembershipsQuery(
+    tx,
+    lockedProject.id,
+  )) as TargetProjectMemberSnapshot[];
+  if (
+    projectMemberships.some(
+      (membership) =>
+        membership.projectId !== lockedProject.id ||
+        !isProjectRole(membership.role) ||
+        (membership.status !== 'active' && membership.status !== 'inactive'),
+    )
+  ) {
+    return hidden();
+  }
+  const actorProjectMember = projectMemberships.find(
+    (membership) => membership.userId === candidate.actorUserId && membership.status === 'active',
+  );
+  if (!actorProjectMember || !isProjectRole(actorProjectMember.role)) return hidden();
+
+  return {
+    access: {
+      projectId: lockedProject.id,
+      scope: 'organization',
+      organizationInternalId: organization.id,
+      organizationExternalId: organization.externalId,
+      organizationName: organization.name,
+      organizationRole: actorOrganizationMember.role,
+      projectRole: actorProjectMember.role,
+    },
+    locks: { projectMemberships, targetOrganizationMember },
+  };
+}
+
 async function withAuthorizedMutation<Action extends ProjectMutationAction, Result>(
   db: DB,
   input: ProjectAccessInput,
   action: Action,
-  write: (tx: ProjectAccessTransaction, grant: ProjectMutationGrant<Action>) => Promise<Result>,
+  write: (
+    tx: ProjectAccessTransaction,
+    grant: ProjectMutationGrant<Action>,
+    locks: CanonicalMutationLocks,
+  ) => Promise<Result>,
+  targetOrganizationMemberExternalId?: string,
 ): Promise<Result> {
+  const [candidate] = (await buildProjectAccessSnapshotQuery(db, input)) as ProjectAccessSnapshot[];
+  if (!candidate) return hidden();
+  snapshotToAccess(candidate, input);
   return db.transaction(async (tx) => {
-    const access = await loadProjectAccess(tx, input, true);
+    const { access, locks } = await lockCanonicalMutationAccess(
+      tx,
+      input,
+      candidate,
+      targetOrganizationMemberExternalId,
+    );
     const grant = authorizeMutation(access, action);
-    return write(tx, grant);
+    return write(tx, grant, locks);
   });
 }
 
@@ -451,12 +638,10 @@ export async function removeProjectMemberWithAccess(
   input: ProjectAccessInput,
   targetProjectMemberExternalId: string,
 ) {
-  return withAuthorizedMutation(db, input, 'manage_members', async (tx, grant) => {
-    const [target] = (await buildLockedTargetMemberQuery(
-      tx,
-      grant.projectId,
-      targetProjectMemberExternalId,
-    )) as TargetProjectMemberSnapshot[];
+  return withAuthorizedMutation(db, input, 'manage_members', async (tx, grant, locks) => {
+    const target = locks.projectMemberships.find(
+      (membership) => membership.externalId === targetProjectMemberExternalId,
+    );
     if (
       !target ||
       target.projectId !== grant.projectId ||
@@ -490,25 +675,14 @@ export async function removeProjectMemberWithAccess(
       },
     });
     if (!decision.allowed) return forbidden();
-    const activeMemberships = (await buildLockedActiveProjectMembershipsQuery(
-      tx,
-      grant.projectId,
-    )) as TargetProjectMemberSnapshot[];
-    if (
-      activeMemberships.some(
-        (membership) =>
-          membership.projectId !== grant.projectId ||
-          membership.status !== 'active' ||
-          !isProjectRole(membership.role),
-      )
-    ) {
-      return hidden();
-    }
+    const activeMemberships = locks.projectMemberships.filter(
+      (membership) => membership.status === 'active',
+    );
     if (
       target.role === 'lead' &&
       activeMemberships.filter((membership) => membership.role === 'lead').length <= 1
     ) {
-      return conflict();
+      return conflict('SOLE_PROJECT_LEAD');
     }
     const result = await tx
       .update(projectMembers)
@@ -535,72 +709,72 @@ export async function addProjectMemberWithAccess(
   targetOrganizationMemberExternalId: string,
   role: ProjectRole,
 ) {
-  return withAuthorizedMutation(db, input, 'manage_members', async (tx, grant) => {
-    if (grant.scope === 'personal') return forbidden();
-    const [target] = (await buildLockedTargetOrganizationMemberQuery(
-      tx,
-      grant.organizationInternalId,
-      targetOrganizationMemberExternalId,
-    )) as TargetOrganizationMemberSnapshot[];
-    if (
-      !target ||
-      target.organizationId !== grant.organizationInternalId ||
-      target.status !== 'active'
-    ) {
-      return hidden();
-    }
-    const [existing] = (await buildLockedProjectMemberByUserQuery(
-      tx,
-      grant.projectId,
-      target.userId,
-    )) as TargetProjectMemberSnapshot[];
-    if (
-      existing &&
-      (existing.projectId !== grant.projectId ||
-        existing.userId !== target.userId ||
-        !isProjectRole(existing.role) ||
-        (existing.status !== 'active' && existing.status !== 'inactive'))
-    ) {
-      return hidden();
-    }
-    if (existing?.status === 'active') return conflict();
+  return withAuthorizedMutation(
+    db,
+    input,
+    'manage_members',
+    async (tx, grant, locks) => {
+      if (grant.scope === 'personal') return forbidden();
+      const target = locks.targetOrganizationMember;
+      if (
+        !target ||
+        target.organizationId !== grant.organizationInternalId ||
+        target.status !== 'active'
+      ) {
+        return hidden();
+      }
+      const existing = locks.projectMemberships.find(
+        (membership) => membership.userId === target.userId,
+      );
+      if (
+        existing &&
+        (existing.projectId !== grant.projectId ||
+          existing.userId !== target.userId ||
+          !isProjectRole(existing.role) ||
+          (existing.status !== 'active' && existing.status !== 'inactive'))
+      ) {
+        return hidden();
+      }
+      if (existing?.status === 'active') return conflict('DUPLICATE_MEMBER');
 
-    let projectMemberExternalId: string;
-    if (existing) {
-      const result = await tx
-        .update(projectMembers)
-        .set({ role, status: 'active' })
-        .where(
-          and(
-            eq(projectMembers.id, existing.id),
-            eq(projectMembers.projectId, grant.projectId),
-            eq(projectMembers.userId, target.userId),
-            eq(projectMembers.status, 'inactive'),
-          ),
-        );
-      requireExactlyOne(result);
-      projectMemberExternalId = existing.externalId;
-    } else {
-      projectMemberExternalId = newExternalId('projectMember');
-      const result = await tx.insert(projectMembers).values({
-        externalId: projectMemberExternalId,
-        projectId: grant.projectId,
-        userId: target.userId,
+      let projectMemberExternalId: string;
+      if (existing) {
+        const result = await tx
+          .update(projectMembers)
+          .set({ role, status: 'active' })
+          .where(
+            and(
+              eq(projectMembers.id, existing.id),
+              eq(projectMembers.projectId, grant.projectId),
+              eq(projectMembers.userId, target.userId),
+              eq(projectMembers.status, 'inactive'),
+            ),
+          );
+        requireExactlyOne(result);
+        projectMemberExternalId = existing.externalId;
+      } else {
+        projectMemberExternalId = newExternalId('projectMember');
+        const result = await tx.insert(projectMembers).values({
+          externalId: projectMemberExternalId,
+          projectId: grant.projectId,
+          userId: target.userId,
+          role,
+          status: 'active',
+        });
+        requireExactlyOne(result);
+      }
+
+      return {
+        ...publicAccess(grant),
+        projectMemberId: projectMemberExternalId,
+        userId: target.userExternalId,
+        displayName: target.displayName,
+        avatarUrl: target.avatarUrl,
         role,
-        status: 'active',
-      });
-      requireExactlyOne(result);
-    }
-
-    return {
-      ...publicAccess(grant),
-      projectMemberId: projectMemberExternalId,
-      userId: target.userExternalId,
-      displayName: target.displayName,
-      avatarUrl: target.avatarUrl,
-      role,
-    };
-  });
+      };
+    },
+    targetOrganizationMemberExternalId,
+  );
 }
 
 export async function deleteProjectWithAccess(db: DB, input: ProjectAccessInput) {
@@ -617,9 +791,10 @@ export async function deleteProjectWithAccess(db: DB, input: ProjectAccessInput)
 
 export const __projectAccessInternals = {
   buildProjectAccessSnapshotQuery,
-  buildLockedActiveProjectMembershipsQuery,
-  buildLockedProjectMemberByUserQuery,
-  buildLockedTargetMemberQuery,
+  buildLockedActorOrganizationMemberQuery,
+  buildLockedOrganizationQuery,
+  buildLockedProjectMembershipsQuery,
+  buildLockedProjectQuery,
   buildLockedTargetOrganizationMemberQuery,
   snapshotToAccess,
 };

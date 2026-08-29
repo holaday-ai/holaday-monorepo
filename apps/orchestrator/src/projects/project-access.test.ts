@@ -219,6 +219,66 @@ const targetOrganizationMember = {
 };
 const input = { actorExternalId: 'usr_member', projectExternalId: 'prj_design' };
 
+function canonicalTeamReads(
+  snapshot = teamSnapshot,
+  memberships: unknown[] = [
+    {
+      ...actorProjectMember,
+      role: snapshot.projectMemberRole,
+      status: snapshot.projectMemberStatus,
+    },
+  ],
+): [unknown[], unknown[], unknown[], unknown[], unknown[]] {
+  return [
+    [snapshot],
+    [
+      {
+        id: 20,
+        externalId: 'org_design',
+        name: 'Design team',
+        status: 'active',
+        teamProjectsEnabled: true,
+      },
+    ],
+    [
+      {
+        id: 10,
+        externalId: 'omem_actor',
+        organizationId: 20,
+        userId: 1,
+        role: snapshot.organizationMemberRole,
+        status: snapshot.organizationMemberStatus,
+      },
+    ],
+    [{ id: 200, externalId: 'prj_design', userId: 1, organizationId: 20 }],
+    memberships,
+  ];
+}
+
+function canonicalAddReads(
+  snapshot = teamSnapshot,
+  target: unknown[] = [targetOrganizationMember],
+  memberships: unknown[] = [actorProjectMember],
+): unknown[][] {
+  const [candidate, organization, actorOrganizationMember, project, projectMemberships] =
+    canonicalTeamReads(snapshot, memberships);
+  return [candidate, organization, actorOrganizationMember, target, project, projectMemberships];
+}
+
+function canonicalPersonalReads(snapshot = personalSnapshot): unknown[][] {
+  return [
+    [snapshot],
+    [
+      {
+        id: snapshot.projectId,
+        externalId: snapshot.projectExternalId,
+        userId: snapshot.projectOwnerUserId,
+        organizationId: null,
+      },
+    ],
+  ];
+}
+
 function normalizedSql(sql: string): string {
   return sql.toLowerCase().replace(/\s+/g, ' ').trim();
 }
@@ -252,12 +312,18 @@ describe('project access mutations', () => {
   });
 
   it('renames exactly the authorized project in the locked authorization transaction', async () => {
-    const fake = makeDb([[teamSnapshot]], [1]);
+    const fake = makeDb(canonicalTeamReads(), [1]);
 
     await expect(renameProjectWithAccess(fake.db, input, { name: 'Renamed' })).resolves.toEqual(
       expect.objectContaining({ projectId: 200, name: 'Renamed', scope: 'organization' }),
     );
-    expect(fake.queries).toEqual([{ table: 'projects', lock: 'update', executor: 'tx' }]);
+    expect(fake.queries).toEqual([
+      { table: 'projects', lock: null, executor: 'root' },
+      { table: 'organizations', lock: 'update', executor: 'tx' },
+      { table: 'organization_members', lock: 'update', executor: 'tx' },
+      { table: 'projects', lock: 'update', executor: 'tx' },
+      { table: 'project_members', lock: 'update', executor: 'tx' },
+    ]);
     expect(fake.writes).toEqual([
       {
         kind: 'update',
@@ -267,8 +333,12 @@ describe('project access mutations', () => {
       },
     ]);
     expect(fake.events).toEqual([
+      'root:select:projects:none',
       'root:transaction:begin',
+      'tx:select:organizations:update',
+      'tx:select:organization_members:update',
       'tx:select:projects:update',
+      'tx:select:project_members:update',
       'tx:update:projects',
       'root:transaction:commit',
     ]);
@@ -276,7 +346,7 @@ describe('project access mutations', () => {
 
   it('preserves personal owner-only read and rename compatibility', async () => {
     const ownerRead = makeDb([[personalSnapshot]]);
-    const ownerRename = makeDb([[personalSnapshot]], [1]);
+    const ownerRename = makeDb(canonicalPersonalReads(), [1]);
     const nonOwner = makeDb([[{ ...personalSnapshot, actorUserId: 2 }]]);
     const personalInput = { actorExternalId: 'usr_owner', projectExternalId: 'prj_personal' };
 
@@ -294,11 +364,14 @@ describe('project access mutations', () => {
       code: 'NOT_FOUND',
     });
     expect(ownerRead.queries).toEqual([{ table: 'projects', lock: null, executor: 'root' }]);
-    expect(ownerRename.queries).toEqual([{ table: 'projects', lock: 'update', executor: 'tx' }]);
+    expect(ownerRename.queries).toEqual([
+      { table: 'projects', lock: null, executor: 'root' },
+      { table: 'projects', lock: 'update', executor: 'tx' },
+    ]);
   });
 
   it('does not provide a delete callback or delete write on the rename path', async () => {
-    const fake = makeDb([[teamSnapshot]], [1]);
+    const fake = makeDb(canonicalTeamReads(), [1]);
     const result = await renameProjectWithAccess(fake.db, input, { name: 'Renamed' });
 
     expect(result).not.toHaveProperty('action');
@@ -307,12 +380,12 @@ describe('project access mutations', () => {
   });
 
   it('allows a project lead to rename and remove members but denies delete before a write', async () => {
-    const rename = makeDb([[teamSnapshot]], [1]);
+    const rename = makeDb(canonicalTeamReads(), [1]);
     const remove = makeDb(
-      [[teamSnapshot], [targetMember], [actorProjectMember, targetMember]],
+      canonicalTeamReads(teamSnapshot, [targetMember, actorProjectMember]),
       [1],
     );
-    const deniedDelete = makeDb([[teamSnapshot]]);
+    const deniedDelete = makeDb(canonicalTeamReads());
 
     await expect(
       renameProjectWithAccess(rename.db, input, { name: 'Renamed' }),
@@ -326,10 +399,14 @@ describe('project access mutations', () => {
     await expect(deleteProjectWithAccess(deniedDelete.db, input)).rejects.toMatchObject({
       code: 'FORBIDDEN',
     });
-    expect(remove.queries).toEqual([
-      { table: 'projects', lock: 'update', executor: 'tx' },
-      { table: 'project_members', lock: 'update', executor: 'tx' },
-      { table: 'project_members', lock: 'update', executor: 'tx' },
+    expect(
+      remove.queries.map((query) => `${query.executor}:${query.table}:${query.lock ?? 'none'}`),
+    ).toEqual([
+      'root:projects:none',
+      'tx:organizations:update',
+      'tx:organization_members:update',
+      'tx:projects:update',
+      'tx:project_members:update',
     ]);
     expect(remove.writes).toEqual([
       expect.objectContaining({
@@ -339,23 +416,29 @@ describe('project access mutations', () => {
       }),
     ]);
     expect(remove.events).toEqual([
+      'root:select:projects:none',
       'root:transaction:begin',
+      'tx:select:organizations:update',
+      'tx:select:organization_members:update',
       'tx:select:projects:update',
-      'tx:select:project_members:update',
       'tx:select:project_members:update',
       'tx:update:project_members',
       'root:transaction:commit',
     ]);
     expect(deniedDelete.writes).toEqual([]);
     expect(deniedDelete.events).toEqual([
+      'root:select:projects:none',
       'root:transaction:begin',
+      'tx:select:organizations:update',
+      'tx:select:organization_members:update',
       'tx:select:projects:update',
+      'tx:select:project_members:update',
       'root:transaction:rollback',
     ]);
   });
 
   it('adds an active same-organization target through the locked access transaction', async () => {
-    const fake = makeDb([[teamSnapshot], [targetOrganizationMember], []], [1]);
+    const fake = makeDb(canonicalAddReads(), [1]);
 
     await expect(
       addProjectMemberWithAccess(fake.db, input, 'omem_target', 'viewer'),
@@ -367,8 +450,11 @@ describe('project access mutations', () => {
       role: 'viewer',
     });
     expect(fake.queries).toEqual([
-      { table: 'projects', lock: 'update', executor: 'tx' },
+      { table: 'projects', lock: null, executor: 'root' },
+      { table: 'organizations', lock: 'update', executor: 'tx' },
       { table: 'organization_members', lock: 'update', executor: 'tx' },
+      { table: 'organization_members', lock: 'update', executor: 'tx' },
+      { table: 'projects', lock: 'update', executor: 'tx' },
       { table: 'project_members', lock: 'update', executor: 'tx' },
     ]);
     expect(fake.writes).toEqual([
@@ -382,10 +468,11 @@ describe('project access mutations', () => {
   });
 
   it('hides an inactive or cross-organization add target before a membership write', async () => {
-    const fake = makeDb([
-      [teamSnapshot],
-      [{ ...targetOrganizationMember, organizationId: 21, status: 'inactive' }],
-    ]);
+    const fake = makeDb(
+      canonicalAddReads(teamSnapshot, [
+        { ...targetOrganizationMember, organizationId: 21, status: 'inactive' },
+      ]),
+    );
 
     await expect(
       addProjectMemberWithAccess(fake.db, input, 'omem_target', 'member'),
@@ -394,7 +481,13 @@ describe('project access mutations', () => {
   });
 
   it('rejects a duplicate active project membership without inserting', async () => {
-    const fake = makeDb([[teamSnapshot], [targetOrganizationMember], [targetMember]]);
+    const fake = makeDb(
+      canonicalAddReads(
+        teamSnapshot,
+        [targetOrganizationMember],
+        [actorProjectMember, targetMember],
+      ),
+    );
 
     await expect(
       addProjectMemberWithAccess(fake.db, input, 'omem_target', 'member'),
@@ -404,7 +497,10 @@ describe('project access mutations', () => {
 
   it('reactivates an inactive membership with its stable external id and requested role', async () => {
     const inactive = { ...targetMember, status: 'inactive' };
-    const fake = makeDb([[teamSnapshot], [targetOrganizationMember], [inactive]], [1]);
+    const fake = makeDb(
+      canonicalAddReads(teamSnapshot, [targetOrganizationMember], [actorProjectMember, inactive]),
+      [1],
+    );
 
     await expect(
       addProjectMemberWithAccess(fake.db, input, 'omem_target', 'viewer'),
@@ -424,11 +520,13 @@ describe('project access mutations', () => {
   });
 
   it('hides a tampered existing membership bound to another project or user', async () => {
-    const fake = makeDb([
-      [teamSnapshot],
-      [targetOrganizationMember],
-      [{ ...targetMember, projectId: 201, userId: 3 }],
-    ]);
+    const fake = makeDb(
+      canonicalAddReads(
+        teamSnapshot,
+        [targetOrganizationMember],
+        [actorProjectMember, { ...targetMember, projectId: 201, userId: 3 }],
+      ),
+    );
 
     await expect(
       addProjectMemberWithAccess(fake.db, input, 'omem_target', 'member'),
@@ -440,7 +538,7 @@ describe('project access mutations', () => {
     ['a cross-project target', { ...targetMember, projectId: 201 }],
     ['an inactive target', { ...targetMember, status: 'inactive' }],
   ] as const)('hides %s before a remove write', async (_label, target) => {
-    const fake = makeDb([[teamSnapshot], [target]]);
+    const fake = makeDb(canonicalTeamReads(teamSnapshot, [actorProjectMember, target]));
 
     await expect(
       removeProjectMemberWithAccess(fake.db, input, 'pmem_target'),
@@ -449,7 +547,7 @@ describe('project access mutations', () => {
   });
 
   it('fails and rolls back a zero-row guarded member removal', async () => {
-    const fake = makeDb([[teamSnapshot], [targetMember], [actorProjectMember, targetMember]], [0]);
+    const fake = makeDb(canonicalTeamReads(teamSnapshot, [actorProjectMember, targetMember]), [0]);
 
     await expect(
       removeProjectMemberWithAccess(fake.db, input, 'pmem_target'),
@@ -458,9 +556,11 @@ describe('project access mutations', () => {
       expect.objectContaining({ kind: 'update', table: 'project_members', executor: 'tx' }),
     ]);
     expect(fake.events).toEqual([
+      'root:select:projects:none',
       'root:transaction:begin',
+      'tx:select:organizations:update',
+      'tx:select:organization_members:update',
       'tx:select:projects:update',
-      'tx:select:project_members:update',
       'tx:select:project_members:update',
       'tx:update:project_members',
       'root:transaction:rollback',
@@ -475,10 +575,14 @@ describe('project access mutations', () => {
       userId: 1,
       role: 'lead',
     };
-    const fake = makeDb([[teamSnapshot], [actorMember], [actorMember]]);
+    const fake = makeDb(canonicalTeamReads(teamSnapshot, [actorMember]));
 
     await expect(removeProjectMemberWithAccess(fake.db, input, 'pmem_actor')).rejects.toMatchObject(
-      { code: 'CONFLICT' },
+      {
+        code: 'CONFLICT',
+        reason: 'SOLE_PROJECT_LEAD',
+        message: 'project must retain an active lead',
+      },
     );
     expect(fake.writes).toEqual([]);
     expect(fake.events.at(-1)).toBe('root:transaction:rollback');
@@ -493,7 +597,10 @@ describe('project access mutations', () => {
       userId: 3,
       role: 'lead',
     };
-    const fake = makeDb([[teamSnapshot], [targetLead], [targetLead, otherLead]], [1]);
+    const fake = makeDb(
+      canonicalTeamReads(teamSnapshot, [actorProjectMember, targetLead, otherLead]),
+      [1],
+    );
 
     await expect(
       removeProjectMemberWithAccess(fake.db, input, 'pmem_target'),
@@ -509,7 +616,7 @@ describe('project access mutations', () => {
       userId: 1,
       role: 'lead',
     };
-    const fake = makeDb([[teamSnapshot], [targetMember], [actorLead, targetMember]], [1]);
+    const fake = makeDb(canonicalTeamReads(teamSnapshot, [actorLead, targetMember]), [1]);
 
     await expect(
       removeProjectMemberWithAccess(fake.db, input, 'pmem_target'),
@@ -518,7 +625,7 @@ describe('project access mutations', () => {
   });
 
   it('fails stably and rolls back a zero-row guarded rename without success', async () => {
-    const fake = makeDb([[teamSnapshot]], [0]);
+    const fake = makeDb(canonicalTeamReads(), [0]);
 
     await expect(
       renameProjectWithAccess(fake.db, input, { name: 'Not persisted' }),
@@ -527,7 +634,15 @@ describe('project access mutations', () => {
       code: 'NOT_FOUND',
       message: 'project not found',
     });
-    expect(fake.queries).toEqual([{ table: 'projects', lock: 'update', executor: 'tx' }]);
+    expect(
+      fake.queries.map((query) => `${query.executor}:${query.table}:${query.lock ?? 'none'}`),
+    ).toEqual([
+      'root:projects:none',
+      'tx:organizations:update',
+      'tx:organization_members:update',
+      'tx:projects:update',
+      'tx:project_members:update',
+    ]);
     expect(fake.writes).toEqual([
       {
         kind: 'update',
@@ -537,8 +652,12 @@ describe('project access mutations', () => {
       },
     ]);
     expect(fake.events).toEqual([
+      'root:select:projects:none',
       'root:transaction:begin',
+      'tx:select:organizations:update',
+      'tx:select:organization_members:update',
       'tx:select:projects:update',
+      'tx:select:project_members:update',
       'tx:update:projects',
       'root:transaction:rollback',
     ]);
@@ -546,7 +665,8 @@ describe('project access mutations', () => {
   });
 
   it('fails and rolls back a zero-row guarded delete', async () => {
-    const fake = makeDb([[{ ...teamSnapshot, organizationMemberRole: 'owner' }]], [0]);
+    const ownerSnapshot = { ...teamSnapshot, organizationMemberRole: 'owner' as const };
+    const fake = makeDb(canonicalTeamReads(ownerSnapshot), [0]);
 
     await expect(deleteProjectWithAccess(fake.db, input)).rejects.toMatchObject({
       code: 'NOT_FOUND',
@@ -554,10 +674,22 @@ describe('project access mutations', () => {
     expect(fake.writes).toEqual([
       expect.objectContaining({ kind: 'delete', table: 'projects', executor: 'tx' }),
     ]);
-    expect(fake.queries).toEqual([{ table: 'projects', lock: 'update', executor: 'tx' }]);
+    expect(
+      fake.queries.map((query) => `${query.executor}:${query.table}:${query.lock ?? 'none'}`),
+    ).toEqual([
+      'root:projects:none',
+      'tx:organizations:update',
+      'tx:organization_members:update',
+      'tx:projects:update',
+      'tx:project_members:update',
+    ]);
     expect(fake.events).toEqual([
+      'root:select:projects:none',
       'root:transaction:begin',
+      'tx:select:organizations:update',
+      'tx:select:organization_members:update',
       'tx:select:projects:update',
+      'tx:select:project_members:update',
       'tx:delete:projects',
       'root:transaction:rollback',
     ]);
@@ -573,31 +705,31 @@ describe('project access mutations', () => {
     expect(fake.queries).toEqual([{ table: 'projects', lock: null, executor: 'root' }]);
   });
 
-  it('compiles locked access and target-member predicates with exact parameters', () => {
+  it('compiles a nonlocking candidate followed by canonical tenant-first lock predicates', () => {
     const mockDb = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
-    const access = __projectAccessInternals
-      .buildProjectAccessSnapshotQuery(mockDb, input, true)
+    const access = __projectAccessInternals.buildProjectAccessSnapshotQuery(mockDb, input).toSQL();
+    const organization = __projectAccessInternals
+      .buildLockedOrganizationQuery(mockDb, 20, 'org_design')
       .toSQL();
-    const target = __projectAccessInternals
-      .buildLockedTargetMemberQuery(mockDb, 200, 'pmem_target')
+    const actorOrganizationMember = __projectAccessInternals
+      .buildLockedActorOrganizationMemberQuery(mockDb, 20, 1)
       .toSQL();
     const organizationTarget = __projectAccessInternals
       .buildLockedTargetOrganizationMemberQuery(mockDb, 20, 'omem_target')
       .toSQL();
-    const existingProjectMember = __projectAccessInternals
-      .buildLockedProjectMemberByUserQuery(mockDb, 200, 2)
+    const project = __projectAccessInternals
+      .buildLockedProjectQuery(mockDb, 200, 'prj_design', 20)
       .toSQL();
-    const activeProjectMemberships = __projectAccessInternals
-      .buildLockedActiveProjectMembershipsQuery(mockDb, 200)
+    const projectMemberships = __projectAccessInternals
+      .buildLockedProjectMembershipsQuery(mockDb, 200)
       .toSQL();
     const accessSql = normalizedSql(access.sql);
-    const targetSql = normalizedSql(target.sql);
 
     expect(accessSql).toContain('left join `organizations` on');
     expect(accessSql).toContain('`projects`.`organization_id` is null');
     expect(accessSql).toContain('`projects`.`user_id` = `users`.`id`');
     expect(accessSql).toContain('`project_members`.`project_id` = `projects`.`id`');
-    expect(accessSql).toContain('for update');
+    expect(accessSql).not.toContain('for update');
     expect(access.params).toEqual([
       'usr_member',
       'active',
@@ -607,10 +739,20 @@ describe('project access mutations', () => {
       'prj_design',
       1,
     ]);
-    expect(targetSql).toContain('`project_members`.`project_id` = ?');
-    expect(targetSql).toContain('`project_members`.`external_id` = ?');
-    expect(targetSql).toContain('for update');
-    expect(target.params).toEqual([200, 'pmem_target', 1]);
+    expect(normalizedSql(organization.sql)).toContain('`organizations`.`id` = ?');
+    expect(normalizedSql(organization.sql)).toContain('`organizations`.`status` = ?');
+    expect(normalizedSql(organization.sql)).toContain(
+      '`organizations`.`team_projects_enabled` = ?',
+    );
+    expect(normalizedSql(organization.sql)).toContain('for update');
+    expect(organization.params).toEqual([20, 'org_design', 'active', true, 1]);
+    expect(normalizedSql(actorOrganizationMember.sql)).toContain(
+      '`organization_members`.`organization_id` = ?',
+    );
+    expect(normalizedSql(actorOrganizationMember.sql)).toContain(
+      '`organization_members`.`user_id` = ?',
+    );
+    expect(actorOrganizationMember.params).toEqual([20, 1, 'active', 1]);
     expect(normalizedSql(organizationTarget.sql)).toContain(
       '`organization_members`.`organization_id` = ?',
     );
@@ -620,18 +762,14 @@ describe('project access mutations', () => {
     expect(normalizedSql(organizationTarget.sql)).toContain('`organization_members`.`status` = ?');
     expect(normalizedSql(organizationTarget.sql)).toContain('for update');
     expect(organizationTarget.params).toEqual([20, 'omem_target', 'active', 1]);
-    expect(normalizedSql(existingProjectMember.sql)).toContain(
-      '`project_members`.`project_id` = ?',
+    expect(normalizedSql(project.sql)).toContain('`projects`.`organization_id` = ?');
+    expect(normalizedSql(project.sql)).toContain('for update');
+    expect(project.params).toEqual([200, 'prj_design', 20, 1]);
+    expect(normalizedSql(projectMemberships.sql)).toContain('`project_members`.`project_id` = ?');
+    expect(normalizedSql(projectMemberships.sql)).toContain(
+      'order by `project_members`.`id` asc for update',
     );
-    expect(normalizedSql(existingProjectMember.sql)).toContain('`project_members`.`user_id` = ?');
-    expect(normalizedSql(existingProjectMember.sql)).toContain('for update');
-    expect(existingProjectMember.params).toEqual([200, 2, 1]);
-    expect(normalizedSql(activeProjectMemberships.sql)).toContain(
-      '`project_members`.`project_id` = ?',
-    );
-    expect(normalizedSql(activeProjectMemberships.sql)).toContain('`project_members`.`status` = ?');
-    expect(normalizedSql(activeProjectMemberships.sql)).toContain('for update');
-    expect(activeProjectMemberships.params).toEqual([200, 'active']);
+    expect(projectMemberships.params).toEqual([200]);
   });
 
   it('uses domain-only errors', () => {

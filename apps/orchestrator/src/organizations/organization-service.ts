@@ -11,6 +11,7 @@ import { users } from '../db/schema/users.js';
 import {
   type OrganizationMembership,
   type OrganizationRole,
+  PROJECT_ROLES,
   type PermissionDecision,
   type PermissionReason,
   REPORTING_MANAGER_ROLES,
@@ -27,7 +28,8 @@ export type OrganizationServiceErrorCode =
   | 'UNKNOWN_ACTOR'
   | 'ORGANIZATION_NOT_FOUND'
   | 'MEMBER_NOT_FOUND'
-  | 'PERMISSION_DENIED';
+  | 'PERMISSION_DENIED'
+  | 'SOLE_PROJECT_LEAD';
 
 /** Domain-only failure that the tRPC adapter can map without coupling this service to HTTP. */
 export class OrganizationServiceError extends Error {
@@ -208,7 +210,11 @@ async function lockActiveOrganization(
     .select({ id: organizations.id, externalId: organizations.externalId })
     .from(organizations)
     .where(
-      and(eq(organizations.externalId, organizationExternalId), eq(organizations.status, 'active')),
+      and(
+        eq(organizations.externalId, organizationExternalId),
+        eq(organizations.status, 'active'),
+        eq(organizations.teamProjectsEnabled, true),
+      ),
     )
     .for('update');
   if (!organization) throw new OrganizationServiceError('ORGANIZATION_NOT_FOUND');
@@ -279,6 +285,59 @@ async function lockActiveOwners(db: Pick<DB, 'select'>, organizationId: number):
     .orderBy(asc(organizationMembers.externalId))
     .for('update');
   return owners.length;
+}
+
+function buildTargetActiveProjectIdsQuery(
+  db: Pick<DB, 'select'>,
+  organizationId: number,
+  targetUserId: number,
+) {
+  return db
+    .select({ projectId: projects.id })
+    .from(projects)
+    .innerJoin(
+      projectMembers,
+      and(
+        eq(projectMembers.projectId, projects.id),
+        eq(projectMembers.userId, targetUserId),
+        eq(projectMembers.status, 'active'),
+      ),
+    )
+    .where(eq(projects.organizationId, organizationId))
+    .orderBy(asc(projects.id));
+}
+
+function buildLockedProjectsQuery(
+  db: Pick<DB, 'select'>,
+  organizationId: number,
+  projectIds: readonly number[],
+) {
+  return db
+    .select({ id: projects.id, organizationId: projects.organizationId })
+    .from(projects)
+    .where(and(eq(projects.organizationId, organizationId), inArray(projects.id, [...projectIds])))
+    .orderBy(asc(projects.id))
+    .for('update');
+}
+
+function buildLockedActiveProjectMembershipsQuery(
+  db: Pick<DB, 'select'>,
+  projectIds: readonly number[],
+) {
+  return db
+    .select({
+      id: projectMembers.id,
+      projectId: projectMembers.projectId,
+      userId: projectMembers.userId,
+      role: projectMembers.role,
+      status: projectMembers.status,
+    })
+    .from(projectMembers)
+    .where(
+      and(inArray(projectMembers.projectId, [...projectIds]), eq(projectMembers.status, 'active')),
+    )
+    .orderBy(asc(projectMembers.projectId), asc(projectMembers.id))
+    .for('update');
 }
 
 export async function createOrganization(input: CreateOrganizationInput) {
@@ -510,12 +569,64 @@ export async function deactivateMember(input: DeactivateMemberInput): Promise<{ 
       }),
     );
 
+    const affectedProjectRows = await buildTargetActiveProjectIdsQuery(
+      tx,
+      organization.id,
+      target.userId,
+    );
+    const affectedProjectIds = affectedProjectRows.map((row) => row.projectId);
+    if (affectedProjectIds.length > 0) {
+      const lockedProjects = await buildLockedProjectsQuery(
+        tx,
+        organization.id,
+        affectedProjectIds,
+      );
+      if (
+        lockedProjects.length !== affectedProjectIds.length ||
+        lockedProjects.some(
+          (project, index) =>
+            project.id !== affectedProjectIds[index] || project.organizationId !== organization.id,
+        )
+      ) {
+        throw new OrganizationServiceError('MEMBER_NOT_FOUND');
+      }
+      const lockedMemberships = await buildLockedActiveProjectMembershipsQuery(
+        tx,
+        affectedProjectIds,
+      );
+      if (
+        lockedMemberships.some(
+          (membership) =>
+            !affectedProjectIds.includes(membership.projectId) ||
+            membership.status !== 'active' ||
+            !(PROJECT_ROLES as readonly string[]).includes(membership.role),
+        )
+      ) {
+        throw new OrganizationServiceError('MEMBER_NOT_FOUND');
+      }
+      for (const projectId of affectedProjectIds) {
+        const memberships = lockedMemberships.filter(
+          (membership) => membership.projectId === projectId,
+        );
+        const targetMembership = memberships.find(
+          (membership) => membership.userId === target.userId,
+        );
+        if (!targetMembership) throw new OrganizationServiceError('MEMBER_NOT_FOUND');
+        if (
+          targetMembership.role === 'lead' &&
+          memberships.filter((membership) => membership.role === 'lead').length <= 1
+        ) {
+          throw new OrganizationServiceError('SOLE_PROJECT_LEAD');
+        }
+      }
+    }
+
     const deactivated = await tx
       .update(organizationMembers)
       .set({ status: 'inactive' })
       .where(and(eq(organizationMembers.id, target.id), eq(organizationMembers.status, 'active')));
     if (readAffectedRows(deactivated) !== 1) throw new OrganizationServiceError('MEMBER_NOT_FOUND');
-    await tx
+    const deactivatedProjectMemberships = await tx
       .update(projectMembers)
       .set({ status: 'inactive' })
       .where(
@@ -525,6 +636,12 @@ export async function deactivateMember(input: DeactivateMemberInput): Promise<{ 
           sql`exists (select 1 from ${projects} where ${projects.id} = ${projectMembers.projectId} and ${projects.organizationId} = ${organization.id})`,
         ),
       );
+    if (
+      affectedProjectIds.length > 0 &&
+      readAffectedRows(deactivatedProjectMemberships) !== affectedProjectIds.length
+    ) {
+      throw new OrganizationServiceError('MEMBER_NOT_FOUND');
+    }
     if (isReportingManagerRole(target.role)) {
       await clearActiveReportingLines(tx, organization.id, target.userId);
     }
@@ -534,6 +651,9 @@ export async function deactivateMember(input: DeactivateMemberInput): Promise<{ 
 
 export const __organizationServiceInternals = {
   buildActiveMemberListQuery,
+  buildLockedActiveProjectMembershipsQuery,
+  buildLockedProjectsQuery,
   buildLockOrganizationMembersQuery,
   buildOrganizationListQuery,
+  buildTargetActiveProjectIdsQuery,
 };
