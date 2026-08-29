@@ -12,6 +12,11 @@ import { projects } from '../db/schema/projects.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
 import { deleteProjectWithAccess } from './project-access.js';
+import {
+  PROJECT_TASK_FOREIGN_KEY_QUERY,
+  type ProjectTaskForeignKeyRow,
+  assertExactProjectTaskForeignKey,
+} from './team-project-integration-safety.js';
 import { createTeamProject } from './team-project-service.js';
 
 const DESTRUCTIVE_OPT_IN = 'DESTROY_FRESH_HOLADAY_TEAM_PROJECTS_IT_DATABASE';
@@ -75,18 +80,10 @@ describe('team project MySQL persistence', () => {
         'integration database must be freshly migrated with all mutated tables empty',
       );
     }
-    const [foreignKeys] = await pool.query<mysql.RowDataPacket[]>(`
-      SELECT DELETE_RULE AS deleteRule
-      FROM information_schema.REFERENTIAL_CONSTRAINTS
-      WHERE CONSTRAINT_SCHEMA = DATABASE()
-        AND TABLE_NAME = 'tasks'
-        AND REFERENCED_TABLE_NAME = 'projects'
-    `);
-    if (foreignKeys.length !== 1 || foreignKeys[0]?.deleteRule !== 'SET NULL') {
-      throw new Error(
-        'integration database is not migrated with tasks.project_id ON DELETE SET NULL',
-      );
-    }
+    const [foreignKeys] = await pool.query<Array<mysql.RowDataPacket & ProjectTaskForeignKeyRow>>(
+      PROJECT_TASK_FOREIGN_KEY_QUERY,
+    );
+    assertExactProjectTaskForeignKey(foreignKeys);
     db = drizzle(pool, { schema, mode: 'default', casing: 'snake_case' });
   });
 

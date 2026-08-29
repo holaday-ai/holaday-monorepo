@@ -13,8 +13,19 @@ import {
   updateReportingLine,
 } from './organization-service.js';
 
-type Insert = { table: string; values: Record<string, unknown>; inTransaction: boolean };
-type Update = { table: string; values: Record<string, unknown>; inTransaction: boolean };
+type Executor = 'root' | 'tx';
+type Insert = {
+  table: string;
+  values: Record<string, unknown>;
+  inTransaction: boolean;
+  executor: Executor;
+};
+type Update = {
+  table: string;
+  values: Record<string, unknown>;
+  inTransaction: boolean;
+  executor: Executor;
+};
 type Query = {
   from: string;
   joins: Array<{ kind: 'inner' | 'left'; table: string }>;
@@ -22,19 +33,33 @@ type Query = {
   lockStrength: 'update' | null;
   ordered: boolean;
   inTransaction: boolean;
+  executor: Executor;
 };
 type Event = {
   kind: 'select' | 'update';
   table: string;
   lockStrength: 'update' | null;
   inTransaction: boolean;
+  executor: Executor;
+};
+
+type FakeMembershipState = {
+  organizationMembershipStatus: 'active' | 'inactive';
+  projectMembershipStatuses: Array<'active' | 'inactive'>;
 };
 
 /**
  * The service boundary needs only selects plus transaction-scoped writes. This deliberately
  * small Drizzle-shaped fake returns programmed select results and records real service effects.
  */
-function makeDb(selectResults: unknown[][], updateAffectedRows: number[] = []) {
+function makeDb(
+  selectResults: unknown[][],
+  updateAffectedRows: number[] = [],
+  initialState: FakeMembershipState = {
+    organizationMembershipStatus: 'active',
+    projectMembershipStatuses: ['active'],
+  },
+) {
   const inserts: Insert[] = [];
   const updates: Update[] = [];
   const deletes: string[] = [];
@@ -44,6 +69,10 @@ function makeDb(selectResults: unknown[][], updateAffectedRows: number[] = []) {
   let transactionRollbacks = 0;
   let transactionDepth = 0;
   let nextInsertId = 100;
+  const state: FakeMembershipState = {
+    organizationMembershipStatus: initialState.organizationMembershipStatus,
+    projectMembershipStatuses: [...initialState.projectMembershipStatuses],
+  };
 
   const tableName = (table: unknown) => {
     if (!table || typeof table !== 'object') return '';
@@ -62,14 +91,21 @@ function makeDb(selectResults: unknown[][], updateAffectedRows: number[] = []) {
     for: (strength: 'update') => SelectBuilder;
     limit: () => Promise<unknown[]>;
   };
-  const selectBuilder = (): SelectBuilder => {
+  const rejectRootDuringTransaction = (executor: Executor, operation: string) => {
+    if (executor === 'root' && transactionDepth > 0) {
+      throw new Error(`organization service fake rejected root ${operation} inside transaction`);
+    }
+  };
+  const selectBuilder = (executor: Executor): SelectBuilder => {
+    rejectRootDuringTransaction(executor, 'select');
     const query: Query = {
       from: '',
       joins: [],
       predicates: [],
       lockStrength: null,
       ordered: false,
-      inTransaction: false,
+      inTransaction: executor === 'tx',
+      executor,
     };
     let result: Promise<unknown[]> | undefined;
     let recorded = false;
@@ -81,13 +117,15 @@ function makeDb(selectResults: unknown[][], updateAffectedRows: number[] = []) {
           ...query,
           joins: [...query.joins],
           predicates: [...query.predicates],
-          inTransaction: transactionDepth > 0,
+          inTransaction: executor === 'tx',
+          executor,
         });
         events.push({
           kind: 'select',
           table: query.from,
           lockStrength: query.lockStrength,
-          inTransaction: transactionDepth > 0,
+          inTransaction: executor === 'tx',
+          executor,
         });
       }
       return result;
@@ -127,53 +165,90 @@ function makeDb(selectResults: unknown[][], updateAffectedRows: number[] = []) {
     return builder;
   };
 
+  const makeInsert = (executor: Executor) => (table: unknown) => {
+    rejectRootDuringTransaction(executor, 'insert');
+    return {
+      async values(values: Record<string, unknown>) {
+        inserts.push({
+          table: tableName(table),
+          values,
+          inTransaction: executor === 'tx',
+          executor,
+        });
+        return [{ insertId: nextInsertId++ }];
+      },
+    };
+  };
+  const makeUpdate = (executor: Executor) => (table: unknown) => {
+    rejectRootDuringTransaction(executor, 'update');
+    return {
+      set(values: Record<string, unknown>) {
+        return {
+          async where() {
+            const selectedTable = tableName(table);
+            const affectedRows = updateAffectedRows.shift() ?? 1;
+            updates.push({
+              table: selectedTable,
+              values,
+              inTransaction: executor === 'tx',
+              executor,
+            });
+            events.push({
+              kind: 'update',
+              table: selectedTable,
+              lockStrength: null,
+              inTransaction: executor === 'tx',
+              executor,
+            });
+            if (affectedRows > 0 && values.status === 'inactive') {
+              if (selectedTable === 'organization_members') {
+                state.organizationMembershipStatus = 'inactive';
+              }
+              if (selectedTable === 'project_members') {
+                state.projectMembershipStatuses = state.projectMembershipStatuses.map(
+                  () => 'inactive',
+                );
+              }
+            }
+            return [{ affectedRows }];
+          },
+        };
+      },
+    };
+  };
+  const makeDelete = (executor: Executor) => (table: unknown) => {
+    rejectRootDuringTransaction(executor, 'delete');
+    return {
+      async where() {
+        deletes.push(tableName(table));
+        return [{ affectedRows: 1 }];
+      },
+    };
+  };
+  const tx = {
+    select: () => selectBuilder('tx'),
+    insert: makeInsert('tx'),
+    update: makeUpdate('tx'),
+    delete: makeDelete('tx'),
+  };
   const db = {
-    select: () => selectBuilder(),
-    insert(table: unknown) {
-      return {
-        async values(values: Record<string, unknown>) {
-          inserts.push({ table: tableName(table), values, inTransaction: transactionDepth > 0 });
-          return [{ insertId: nextInsertId++ }];
-        },
-      };
-    },
-    update(table: unknown) {
-      return {
-        set(values: Record<string, unknown>) {
-          return {
-            async where() {
-              updates.push({
-                table: tableName(table),
-                values,
-                inTransaction: transactionDepth > 0,
-              });
-              events.push({
-                kind: 'update',
-                table: tableName(table),
-                lockStrength: null,
-                inTransaction: transactionDepth > 0,
-              });
-              return [{ affectedRows: updateAffectedRows.shift() ?? 1 }];
-            },
-          };
-        },
-      };
-    },
-    delete(table: unknown) {
-      return {
-        async where() {
-          deletes.push(tableName(table));
-          return [{ affectedRows: 1 }];
-        },
-      };
-    },
-    async transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T> {
+    select: () => selectBuilder('root'),
+    insert: makeInsert('root'),
+    update: makeUpdate('root'),
+    delete: makeDelete('root'),
+    async transaction<T>(callback: (transactionExecutor: typeof tx) => Promise<T>): Promise<T> {
       transactionCalls += 1;
       transactionDepth += 1;
+      const stateSnapshot: FakeMembershipState = {
+        organizationMembershipStatus: state.organizationMembershipStatus,
+        projectMembershipStatuses: [...state.projectMembershipStatuses],
+      };
       try {
-        return await callback(db);
+        return await callback(tx);
       } catch (error) {
         transactionRollbacks += 1;
+        state.organizationMembershipStatus = stateSnapshot.organizationMembershipStatus;
+        state.projectMembershipStatuses = [...stateSnapshot.projectMembershipStatuses];
         throw error;
       } finally {
         transactionDepth -= 1;
@@ -188,6 +263,13 @@ function makeDb(selectResults: unknown[][], updateAffectedRows: number[] = []) {
     deletes,
     queries,
     events,
+    tx,
+    get state(): FakeMembershipState {
+      return {
+        organizationMembershipStatus: state.organizationMembershipStatus,
+        projectMembershipStatuses: [...state.projectMembershipStatuses],
+      };
+    },
     get transactionCalls() {
       return transactionCalls;
     },
@@ -304,6 +386,23 @@ function lockedMemberShapes(fake: ReturnType<typeof makeDb>) {
 }
 
 describe('organization service', () => {
+  it('uses distinct root and transaction executors and rejects root access inside callbacks', async () => {
+    const fake = makeDb([]);
+
+    expect(fake.tx).not.toBe(fake.db);
+    await fake.db.transaction(async (tx) => {
+      expect(tx).toBe(fake.tx);
+      expect(() => fake.db.select()).toThrow(
+        'organization service fake rejected root select inside transaction',
+      );
+      expect(() => fake.db.update(schema.organizationMembers)).toThrow(
+        'organization service fake rejected root update inside transaction',
+      );
+    });
+    expect(fake.queries).toEqual([]);
+    expect(fake.updates).toEqual([]);
+  });
+
   it('creates the canary organization and its owner membership in one transaction', async () => {
     const fake = makeDb([[actor]]);
 
@@ -726,6 +825,16 @@ describe('organization service', () => {
     ).resolves.toEqual({ ok: true });
 
     expect(fake.transactionCalls).toBe(1);
+    expect(fake.queries.map((query) => query.executor)).toEqual([
+      'root',
+      'root',
+      'tx',
+      'tx',
+      'tx',
+      'tx',
+      'tx',
+    ]);
+    expect(fake.updates.every((update) => update.executor === 'tx')).toBe(true);
     expect(fake.updates).toEqual([
       expect.objectContaining({
         table: 'organization_members',
@@ -879,6 +988,10 @@ describe('organization service', () => {
         ],
       ],
       [1, 0],
+      {
+        organizationMembershipStatus: 'active',
+        projectMembershipStatuses: ['active'],
+      },
     );
 
     await expect(
@@ -894,6 +1007,11 @@ describe('organization service', () => {
       'organization_members',
       'project_members',
     ]);
+    expect(fake.updates.every((update) => update.executor === 'tx')).toBe(true);
+    expect(fake.state).toEqual({
+      organizationMembershipStatus: 'active',
+      projectMembershipStatuses: ['active'],
+    });
   });
 
   it('locks the organization, then members and owners, before a role mutation', async () => {
