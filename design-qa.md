@@ -56,7 +56,7 @@ final result: passed
 - Source visual truth: `/Users/yaleiqi/.codex/generated_images/019fea2f-b33b-7560-9d5a-5a381b4cfd37/exec-73ae20ee-6edf-468a-bfd4-34e8d711ba05.png`。
 - Browser-rendered implementation: `http://127.0.0.1:5191/video`。
 - Desktop implementation evidence: `/private/tmp/video-scenario-studio-local-04.png`。
-- Workbench evidence: `/private/tmp/video-scenario-studio-workbench-viewport-03.png`。
+- Workbench evidence: `/private/tmp/video-scenario-studio-workbench-viewport-04.png`。
 - Same-input comparison: `/private/tmp/video-design-comparison-04.png`。
 - State: authenticated local `/video`，默认选中「产品高光短片」，生成设置折叠，未提交付费生成。
 
@@ -99,9 +99,9 @@ final result: passed
 
 ## Automated gates at visual sign-off
 
-- Scenario-first and video regression suite: 8 files, 95 tests passed before final release verification。
-- Page style state after labelled-region addition: 1 file, 19 tests passed。
-- Final full Web tests, typecheck, lint, build, and `git diff --check` are run as the release gate after this report update。
+- Scenario-first page, component, history, type and tooltip suite: 8 files, 92 tests passed after review fixes。
+- Page integration coverage verifies all four lane transitions, selection without side effects, and the real normal-video task payload。
+- Full Web suite: 232 files, 1672 tests passed after review fixes；typecheck, lint, production build, targeted Biome, and `git diff --check` passed。
 
 final result: passed
 

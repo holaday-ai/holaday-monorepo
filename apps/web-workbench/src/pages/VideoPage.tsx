@@ -2298,7 +2298,11 @@ function VideoHistory({
                 <button
                   type="button"
                   onClick={() => navigate(creativeTaskPath('video', row.taskId))}
-                  className={cn('relative overflow-hidden rounded-[18px] text-left', softBg)}
+                  className={cn(
+                    'relative overflow-hidden rounded-[18px] text-left',
+                    cardPresentation.compact && 'self-start',
+                    softBg,
+                  )}
                   style={{ minHeight: cardPresentation.minHeight }}
                 >
                   {artifactExpired ? (

@@ -52,6 +52,12 @@ describe('video creative style state', () => {
     expect(source).toContain('即将开放');
   });
 
+  it('prevents compact unavailable history previews from stretching to the detail-column height', () => {
+    const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain("cardPresentation.compact && 'self-start'");
+  });
+
   it('keeps history details readable in narrow workbench panes and exposes the real video', () => {
     const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
 

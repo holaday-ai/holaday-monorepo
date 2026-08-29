@@ -31,7 +31,7 @@
 - Produces: `VideoCreationScenarioId`, `VIDEO_CREATION_SCENARIOS`, `videoTabForScenario(id)`, `scenarioForVideoTab(tab, preferredNormal?)`。
 - Produces: `<VideoCreationScenarioPicker value onChange disabled />`。
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 expect(videoTabForScenario('product_highlight')).toBe('normal');
@@ -39,16 +39,16 @@ expect(videoTabForScenario('action_remake')).toBe('pet');
 expect(videoTabForScenario('ip_presenter')).toBe('ip');
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pnpm --filter @holaday/web-workbench exec vitest run src/components/video/video-creation-scenarios.test.ts src/components/video/VideoCreationScenarioPicker.test.tsx`
 Expected: FAIL because the scene model and picker do not exist.
 
-- [ ] **Step 3: Implement the minimal scene model and accessible picker**
+- [x] **Step 3: Implement the minimal scene model and accessible picker**
 
 Create immutable scenario definitions with title, description, duration, aspect, image path, default prompt, video tab and storyboard beats. Render them as image-backed buttons with `aria-pressed` and a visible selected state.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm --filter @holaday/web-workbench exec vitest run src/components/video/video-creation-scenarios.test.ts src/components/video/VideoCreationScenarioPicker.test.tsx`
 Expected: PASS.
@@ -65,7 +65,7 @@ Expected: PASS.
 - Consumes: `VIDEO_CREATION_SCENARIOS` and `VideoCreationScenarioId` from Task 1.
 - Produces: `VideoCreationStoryboard` and scenario-aware `/video` composition without changing `VideoCreationOptions` contracts.
 
-- [ ] **Step 1: Write failing tests for storyboard copy and source structure**
+- [x] **Step 1: Write failing tests for storyboard copy and source structure**
 
 ```ts
 expect(screen.getByRole('heading', { name: '这次想完成哪种视频？' })).toBeTruthy();
@@ -74,15 +74,15 @@ expect(source).toContain('继续剪辑');
 expect(source).toContain('即将开放');
 ```
 
-- [ ] **Step 2: Run tests to verify they fail for the missing workbench**
+- [x] **Step 2: Run tests to verify they fail for the missing workbench**
 
 Run the new component test and `video-page-style-state.test.ts`; expected failure is missing scene workbench copy/structure.
 
-- [ ] **Step 3: Implement the two-column workbench**
+- [x] **Step 3: Implement the two-column workbench**
 
 Move the normal-video prompt, attachments and submit CTA into the right column; render scenario storyboard on the left. Put model/style/duration/aspect/resolution controls in an expandable generation-settings panel and preserve the current submit handler unchanged.
 
-- [ ] **Step 4: Verify normal, clone and IP behavior**
+- [x] **Step 4: Verify normal, clone and IP behavior**
 
 Run targeted page, video type, IP estimate and history tests; expected all PASS.
 
@@ -100,19 +100,19 @@ Run targeted page, video type, IP estimate and history tests; expected all PASS.
 - Consumes: image paths stored in the scene model.
 - Produces: real scenario imagery and a smaller expired-history presentation while preserving availability semantics.
 
-- [ ] **Step 1: Generate and inspect four slot-fit real image assets**
+- [x] **Step 1: Generate and inspect four slot-fit real image assets**
 
-Use built-in ImageGen with one prompt per asset, 16:9 card composition, consistent warm editorial direction, no embedded text or logos. Copy final files into `public/design-ref/`.
+Use built-in ImageGen with one prompt per asset, 16:9 card composition, and a consistent warm editorial direction. Product shots may retain the selected source's intentional `HOLA DAY` bottle label; unrelated logos or malformed text are not allowed. Copy final files into `public/design-ref/`.
 
-- [ ] **Step 2: Write the failing compact-history regression assertion**
+- [x] **Step 2: Write the failing compact-history regression assertion**
 
 Assert that expired/unavailable presentation is classified compactly and still reports the truthful unavailable state.
 
-- [ ] **Step 3: Implement compact history layout and pending edit label**
+- [x] **Step 3: Implement compact history layout and pending edit label**
 
 Reduce expired placeholder height and keep filters, pin, title, date, download state and navigation visible. When editing capability is false, render the non-interactive copy `继续剪辑 · 即将开放`.
 
-- [ ] **Step 4: Run history and accessibility tests**
+- [x] **Step 4: Run history and accessibility tests**
 
 Run `video-history-row.test.ts` and `control-tooltip.test.ts`; expected PASS.
 
@@ -122,22 +122,21 @@ Run `video-history-row.test.ts` and `control-tooltip.test.ts`; expected PASS.
 - Create: `design-qa.md`
 
 **Interfaces:**
-- Consumes: selected 1440×1024 visual target and local browser capture.
+- Consumes: selected visual target normalized to the available 1280×720 in-app browser viewport, plus a scrolled workbench capture of the same rendered state.
 - Produces: passed design QA, reviewed commit, merged PR, deployed application and production verification evidence.
 
-- [ ] **Step 1: Run full web verification**
+- [x] **Step 1: Run full web verification**
 
 Run targeted tests, full web tests, typecheck, lint, build and `git diff --check`; expected zero new failures.
 
-- [ ] **Step 2: Capture implementation at the target viewport and compare**
+- [x] **Step 2: Capture implementation at the available in-app browser viewport and compare**
 
-Open the local `/video` page in the in-app browser, exercise scenario changes and settings, capture `1440 x 1024`, combine it with the selected source and inspect full and focused regions.
+Open the local `/video` page in the in-app browser, exercise scenario changes and settings, capture the actual `1280 x 720` viewport, normalize the selected source to that same viewport, combine both inputs, and inspect full and focused regions. Record the viewport constraint rather than claiming an unavailable 1440×1024 capture.
 
-- [ ] **Step 3: Fix every P0/P1/P2 finding and record QA**
+- [x] **Step 3: Fix every P0/P1/P2 finding and record QA**
 
 Repeat capture and comparison until `design-qa.md` ends with exactly `final result: passed`.
 
 - [ ] **Step 4: Review, PR, merge, deploy and verify**
 
 Request code review for the final commit range, fix all Critical/Important findings, push, create/ready/merge the PR, deploy only `application`, verify both health endpoints and production `/video` without submitting a paid generation.
-
