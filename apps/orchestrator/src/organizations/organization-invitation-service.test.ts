@@ -8,7 +8,6 @@ import {
   __organizationInvitationServiceInternals,
   acceptInvitation,
   createInvitation,
-  resolveInvitationOrganization,
   revokeInvitation,
 } from './organization-invitation-service.js';
 
@@ -164,23 +163,19 @@ const openInvitation = {
 };
 
 describe('organization invitation service', () => {
-  it('resolves only an invitation organization external id from a plaintext token', async () => {
-    const fake = makeDb([[{ organizationId: 'org_design' }]]);
-
-    await expect(resolveInvitationOrganization({ db: fake.db, token })).resolves.toEqual({
-      organizationId: 'org_design',
-    });
-    expect(fake.events).toEqual(['select:organization_invitations:none:outside']);
-  });
-
-  it('collapses an absent token before exposing an invitation organization', async () => {
-    const fake = makeDb([[]]);
+  it('does not consume an invitation when its organization switch is disabled under lock', async () => {
+    const fake = makeDb([[actor], [openInvitation], []]);
 
     await expect(
-      resolveInvitationOrganization({ db: fake.db, token: 'missing-token' }),
-    ).rejects.toMatchObject({
-      code: 'INVITATION_NOT_AVAILABLE',
-    });
+      acceptInvitation({ db: fake.db, actorExternalId: 'usr_new', token, now: () => now }),
+    ).rejects.toMatchObject({ code: 'INVITATION_NOT_AVAILABLE' });
+    expect(fake.events).toEqual([
+      'select:users:none:outside',
+      'select:organization_invitations:update:tx',
+      'select:organizations:update:tx',
+    ]);
+    expect(fake.inserts).toEqual([]);
+    expect(fake.updates).toEqual([]);
   });
 
   it('stores only a SHA-256 hash of a 32-byte URL-safe token and returns plaintext once', async () => {
@@ -299,12 +294,7 @@ describe('organization invitation service', () => {
     async (_label, invitation, operation) => {
       const fake =
         operation === 'accept'
-          ? makeDb([
-              [actor],
-              [{ organizationId: 20 }],
-              [{ id: 20, externalId: 'org_design' }],
-              [invitation],
-            ])
+          ? makeDb([[actor], [invitation], [{ id: 20, externalId: 'org_design' }]])
           : makeDb([
               [actor],
               [ownerMembership],
@@ -341,9 +331,8 @@ describe('organization invitation service', () => {
           ? makeDb(
               [
                 [actor],
-                [{ organizationId: 20 }],
-                [{ id: 20, externalId: 'org_design' }],
                 [invitation],
+                [{ id: 20, externalId: 'org_design' }],
                 [],
                 [managerMembership],
               ],
@@ -421,12 +410,7 @@ describe('organization invitation service', () => {
     ['revoked', { ...openInvitation, revokedAt: now }],
     ['already accepted', { ...openInvitation, acceptedAt: now }],
   ])('rejects a %s invitation without exposing token state', async (_label, invitation) => {
-    const fake = makeDb([
-      [actor],
-      [{ organizationId: 20 }],
-      [{ id: 20, externalId: 'org_design' }],
-      [invitation],
-    ]);
+    const fake = makeDb([[actor], [invitation], [{ id: 20, externalId: 'org_design' }]]);
 
     await expect(
       acceptInvitation({ db: fake.db, actorExternalId: 'usr_new', token, now: () => now }),
@@ -438,9 +422,8 @@ describe('organization invitation service', () => {
   it('accepts once by creating a membership from invitation role and manager, then guards the invitation update', async () => {
     const fake = makeDb([
       [actor],
-      [{ organizationId: 20 }],
-      [{ id: 20, externalId: 'org_design' }],
       [openInvitation],
+      [{ id: 20, externalId: 'org_design' }],
       [],
       [managerMembership],
     ]);
@@ -472,9 +455,8 @@ describe('organization invitation service', () => {
     ]);
     expect(fake.events).toEqual([
       'select:users:none:outside',
-      'select:organization_invitations:none:outside',
-      'select:organizations:update:tx',
       'select:organization_invitations:update:tx',
+      'select:organizations:update:tx',
       'select:organization_members:update:tx',
       'select:organization_members:update:tx',
       'update:organization_invitations:tx',
@@ -486,9 +468,8 @@ describe('organization invitation service', () => {
     const inactive = { id: 40, externalId: 'omem_existing', status: 'inactive' };
     const fake = makeDb([
       [actor],
-      [{ organizationId: 20 }],
-      [{ id: 20, externalId: 'org_design' }],
       [openInvitation],
+      [{ id: 20, externalId: 'org_design' }],
       [inactive],
       [managerMembership],
     ]);
@@ -517,9 +498,8 @@ describe('organization invitation service', () => {
     const active = { id: 40, externalId: 'omem_existing', status: 'active' };
     const fake = makeDb([
       [actor],
-      [{ organizationId: 20 }],
-      [{ id: 20, externalId: 'org_design' }],
       [openInvitation],
+      [{ id: 20, externalId: 'org_design' }],
       [active],
       [managerMembership],
     ]);
@@ -536,9 +516,8 @@ describe('organization invitation service', () => {
   it('does not create a reporting line to a manager who is no longer active in the organization', async () => {
     const fake = makeDb([
       [actor],
-      [{ organizationId: 20 }],
-      [{ id: 20, externalId: 'org_design' }],
       [openInvitation],
+      [{ id: 20, externalId: 'org_design' }],
       [],
       [],
     ]);
@@ -558,9 +537,8 @@ describe('organization invitation service', () => {
     async (_label, role) => {
       const fake = makeDb([
         [actor],
-        [{ organizationId: 20 }],
-        [{ id: 20, externalId: 'org_design' }],
         [{ ...openInvitation, role }],
+        [{ id: 20, externalId: 'org_design' }],
         [],
         [managerMembership],
       ]);
@@ -582,9 +560,8 @@ describe('organization invitation service', () => {
       const inactive = { id: 40, externalId: 'omem_existing', status: 'inactive' };
       const fake = makeDb([
         [actor],
-        [{ organizationId: 20 }],
-        [{ id: 20, externalId: 'org_design' }],
         [{ ...openInvitation, role }],
+        [{ id: 20, externalId: 'org_design' }],
         [inactive],
         [managerMembership],
       ]);
@@ -600,14 +577,7 @@ describe('organization invitation service', () => {
 
   it('rejects a concurrent replay when the guarded acceptance update affects no rows', async () => {
     const fake = makeDb(
-      [
-        [actor],
-        [{ organizationId: 20 }],
-        [{ id: 20, externalId: 'org_design' }],
-        [openInvitation],
-        [],
-        [managerMembership],
-      ],
+      [[actor], [openInvitation], [{ id: 20, externalId: 'org_design' }], [], [managerMembership]],
       [0],
     );
 
@@ -679,11 +649,8 @@ describe('organization invitation service', () => {
     }
   });
 
-  it('compiles the token lookup and guarded consume queries with their tenant predicates', () => {
+  it('compiles locked invitation, enabled-organization, and guarded consume queries', () => {
     const db = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
-    const tokenLookup = __organizationInvitationServiceInternals
-      .buildTokenLookupQuery(db, tokenHash)
-      .toSQL();
     const consume = __organizationInvitationServiceInternals
       .buildConsumeInvitationQuery(db, 30, now)
       .toSQL();
@@ -697,12 +664,14 @@ describe('organization invitation service', () => {
       .buildLockedActiveManagerMembershipQuery(db, 20, 'omem_manager')
       .toSQL();
     const lockedToken = __organizationInvitationServiceInternals
-      .buildLockedInvitationByHashQuery(db, 20, tokenHash)
+      .buildLockedInvitationByHashQuery(db, tokenHash)
+      .toSQL();
+    const lockedEnabledOrganization = __organizationInvitationServiceInternals
+      .buildLockedActiveEnabledOrganizationByIdQuery(db, 20)
       .toSQL();
     const revoke = __organizationInvitationServiceInternals
       .buildLockedInvitationByExternalIdQuery(db, 20, 'oinv_design')
       .toSQL();
-    expect(tokenLookup.sql).toContain('`organization_invitations`.`token_hash` = ?');
     expect(consume.sql).toContain('`organization_invitations`.`id` = ?');
     expect(consume.sql).toContain('`organization_invitations`.`accepted_at` is null');
     expect(consume.sql).toContain('`organization_invitations`.`revoked_at` is null');
@@ -718,8 +687,12 @@ describe('organization invitation service', () => {
     expect(manager.sql).toContain('`organization_members`.`organization_id` = ?');
     expect(manager.sql).toContain('`organization_members`.`external_id` = ?');
     expect(manager.sql).toContain('`organization_members`.`status` = ?');
-    expect(lockedToken.sql).toContain('`organization_invitations`.`organization_id` = ?');
     expect(lockedToken.sql).toContain('`organization_invitations`.`token_hash` = ?');
+    expect(lockedToken.params).toEqual([tokenHash]);
+    expect(lockedEnabledOrganization.sql).toContain('`organizations`.`id` = ?');
+    expect(lockedEnabledOrganization.sql).toContain('`organizations`.`status` = ?');
+    expect(lockedEnabledOrganization.sql).toContain('`organizations`.`team_projects_enabled` = ?');
+    expect(lockedEnabledOrganization.params).toEqual([20, 'active', true]);
     expect(revoke.sql).toContain('`organization_invitations`.`organization_id` = ?');
     expect(revoke.sql).toContain('`organization_invitations`.`external_id` = ?');
   });

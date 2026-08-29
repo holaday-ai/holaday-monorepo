@@ -8,7 +8,6 @@ import {
   InvitationServiceError,
   acceptInvitation,
   createInvitation,
-  resolveInvitationOrganization,
   revokeInvitation,
 } from '../../organizations/organization-invitation-service.js';
 import { ORGANIZATION_ROLES } from '../../organizations/organization-permissions.js';
@@ -48,7 +47,12 @@ async function requireEnabledOrganization(
   db: Pick<DB, 'select'>,
   organizationId: string,
 ): Promise<void> {
-  const [organization] = await db
+  const [organization] = await buildEnabledOrganizationQuery(db, organizationId);
+  if (!organization) throw new TRPCError({ code: 'NOT_FOUND', message: 'organization not found' });
+}
+
+function buildEnabledOrganizationQuery(db: Pick<DB, 'select'>, organizationId: string) {
+  return db
     .select({ externalId: organizations.externalId })
     .from(organizations)
     .where(
@@ -59,7 +63,18 @@ async function requireEnabledOrganization(
       ),
     )
     .limit(1);
-  if (!organization) throw new TRPCError({ code: 'NOT_FOUND', message: 'organization not found' });
+}
+
+function buildInvitationUrl(baseUrl: string, token: string): string {
+  const path = '/organizations/invitations/accept';
+  if (baseUrl === '') return `${path}?token=${encodeURIComponent(token)}`;
+  const url = new URL(path, baseUrl);
+  url.searchParams.set('token', token);
+  return url.toString();
+}
+
+function invitationUrl(token: string): string {
+  return buildInvitationUrl(appEnv.HOLADAY_PUBLIC_BASE_URL, token);
 }
 
 function mapDomainError(error: unknown): never {
@@ -78,11 +93,6 @@ async function callDomain<T>(operation: () => Promise<T>): Promise<T> {
   } catch (error) {
     return mapDomainError(error);
   }
-}
-
-function invitationUrl(token: string): string {
-  const baseUrl = appEnv.HOLADAY_PUBLIC_BASE_URL.replace(/\/+$/, '');
-  return `${baseUrl}/organizations/invitations/accept?token=${encodeURIComponent(token)}`;
 }
 
 export const organizationsRouter = router({
@@ -162,10 +172,6 @@ export const organizationsRouter = router({
   acceptInvitation: teamProjectsProcedure
     .input(z.object({ token: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const invitation = await callDomain(() =>
-        resolveInvitationOrganization({ db: ctx.db, token: input.token }),
-      );
-      await requireEnabledOrganization(ctx.db, invitation.organizationId);
       const accepted = await callDomain(() =>
         acceptInvitation({ db: ctx.db, actorExternalId: ctx.userId, token: input.token }),
       );
@@ -243,4 +249,9 @@ export const organizationsRouter = router({
     }),
 });
 
-export const __organizationsRouterInternals = { invitationUrl, requireEnabledOrganization };
+export const __organizationsRouterInternals = {
+  buildEnabledOrganizationQuery,
+  buildInvitationUrl,
+  invitationUrl,
+  requireEnabledOrganization,
+};

@@ -1,4 +1,6 @@
+import { drizzle } from 'drizzle-orm/mysql2';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as schema from '../../db/schema/index.js';
 
 const {
   enabledForUser,
@@ -11,7 +13,6 @@ const {
   createInvitationMock,
   acceptInvitationMock,
   revokeInvitationMock,
-  resolveInvitationOrganizationMock,
 } = vi.hoisted(() => ({
   enabledForUser: vi.fn<(userId: string) => boolean>(),
   createOrganizationMock: vi.fn(),
@@ -23,7 +24,6 @@ const {
   createInvitationMock: vi.fn(),
   acceptInvitationMock: vi.fn(),
   revokeInvitationMock: vi.fn(),
-  resolveInvitationOrganizationMock: vi.fn(),
 }));
 
 vi.mock('../../organizations/team-project-access.js', () => ({
@@ -52,12 +52,11 @@ vi.mock('../../organizations/organization-invitation-service.js', async (importO
     createInvitation: createInvitationMock,
     acceptInvitation: acceptInvitationMock,
     revokeInvitation: revokeInvitationMock,
-    resolveInvitationOrganization: resolveInvitationOrganizationMock,
   };
 });
 
 import { appRouter } from '../router.js';
-import { organizationsRouter } from './organizations.js';
+import { __organizationsRouterInternals, organizationsRouter } from './organizations.js';
 
 class OrganizationGateDb {
   constructor(private readonly enabledOrganizationIds = new Set(['org_design'])) {}
@@ -116,7 +115,6 @@ function allDomainCalls() {
     createInvitationMock,
     acceptInvitationMock,
     revokeInvitationMock,
-    resolveInvitationOrganizationMock,
   ];
 }
 
@@ -147,7 +145,6 @@ describe('organizationsRouter', () => {
       tokenHash: 'never-returned',
       expiresAt: new Date('2026-09-06T00:00:00.000Z'),
     });
-    resolveInvitationOrganizationMock.mockResolvedValue({ organizationId: 'org_design' });
     acceptInvitationMock.mockResolvedValue({ membershipId: 'omem_new', status: 'joined' });
     revokeInvitationMock.mockResolvedValue({ ok: true });
   });
@@ -220,13 +217,25 @@ describe('organizationsRouter', () => {
     expect(deactivateMemberMock).not.toHaveBeenCalled();
   });
 
-  it('does not consume an invitation after its organization rollback', async () => {
-    resolveInvitationOrganizationMock.mockResolvedValue({ organizationId: 'org_rolled_back' });
-    const caller = makeCaller(new OrganizationGateDb());
+  it('compiles the authoritative enabled-organization gate with exact predicates', () => {
+    const db = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
+    const query = __organizationsRouterInternals
+      .buildEnabledOrganizationQuery(db, 'org_design')
+      .toSQL();
 
-    await expectNotFound(caller.acceptInvitation({ token: 'token' }));
-    expect(resolveInvitationOrganizationMock).toHaveBeenCalledTimes(1);
-    expect(acceptInvitationMock).not.toHaveBeenCalled();
+    expect(query.sql).toContain('`organizations`.`external_id` = ?');
+    expect(query.sql).toContain('`organizations`.`status` = ?');
+    expect(query.sql).toContain('`organizations`.`team_projects_enabled` = ?');
+    expect(query.params).toEqual(['org_design', 'active', true, 1]);
+  });
+
+  it('builds invitation URLs from a canonical public origin with URL semantics', () => {
+    expect(__organizationsRouterInternals.buildInvitationUrl('', 'opaque token')).toBe(
+      '/organizations/invitations/accept?token=opaque%20token',
+    );
+    expect(
+      __organizationsRouterInternals.buildInvitationUrl('https://holaday.example', 'opaque token'),
+    ).toBe('https://holaday.example/organizations/invitations/accept?token=opaque+token');
   });
 
   it('normalizes a created name and rejects empty or oversized normalized values', async () => {
@@ -364,9 +373,7 @@ describe('organizationsRouter', () => {
     updateMemberRoleMock.mockRejectedValue(
       new OrganizationServiceError('PERMISSION_DENIED', 'owner_protected'),
     );
-    resolveInvitationOrganizationMock.mockRejectedValue(
-      new InvitationServiceError('INVITATION_NOT_AVAILABLE'),
-    );
+    acceptInvitationMock.mockRejectedValue(new InvitationServiceError('INVITATION_NOT_AVAILABLE'));
     const caller = makeCaller();
 
     await expect(

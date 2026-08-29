@@ -25,6 +25,31 @@ loadDotenvAllowingEmpty(resolve(repoRoot, '.env'));
 loadDotenvAllowingEmpty(resolve(repoRoot, '.env.local'));
 loadDotenvAllowingEmpty(resolve(process.cwd(), '.env.local'));
 
+type NodeEnvironment = 'development' | 'test' | 'production';
+
+/** Canonical origin used for public, bearer-token invitation URLs. */
+export function parseHoladayPublicBaseUrl(value: string, nodeEnv: NodeEnvironment): string {
+  if (value === '') return '';
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('HOLADAY_PUBLIC_BASE_URL must be an absolute HTTP(S) origin');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('HOLADAY_PUBLIC_BASE_URL must use HTTP(S)');
+  }
+  if (url.username || url.password) {
+    throw new Error('HOLADAY_PUBLIC_BASE_URL must not include credentials');
+  }
+  if (url.pathname !== '/' || url.search || url.hash) {
+    throw new Error('HOLADAY_PUBLIC_BASE_URL must be an origin without path, query, or hash');
+  }
+  if (nodeEnv === 'production' && url.protocol !== 'https:') {
+    throw new Error('HOLADAY_PUBLIC_BASE_URL must use HTTPS in production');
+  }
+  return url.origin;
+}
 const baseEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
@@ -490,28 +515,47 @@ const baseEnvSchema = z.object({
     .transform((v) => v === 'true'),
 });
 
-export const envSchema = baseEnvSchema.superRefine((value, ctx) => {
-  const closureEnabled = value.ACCOUNT_CLOSURE_ENABLED || value.ACCOUNT_CLOSURE_WORKER_ENABLED;
-  if (closureEnabled && value.ACCOUNT_CLOSURE_HMAC_SECRET.trim().length < 32) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['ACCOUNT_CLOSURE_HMAC_SECRET'],
-      message: 'ACCOUNT_CLOSURE_HMAC_SECRET must be at least 32 chars when closure is enabled',
-    });
-  }
-  for (const prerequisite of [
-    'ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED',
-    'ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED',
-  ] as const) {
-    if (closureEnabled && !value[prerequisite]) {
+export const envSchema = baseEnvSchema
+  .superRefine((environment, ctx) => {
+    const closureEnabled =
+      environment.ACCOUNT_CLOSURE_ENABLED || environment.ACCOUNT_CLOSURE_WORKER_ENABLED;
+    if (closureEnabled && environment.ACCOUNT_CLOSURE_HMAC_SECRET.trim().length < 32) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: [prerequisite],
-        message: `${prerequisite} must be true when account closure is enabled`,
+        path: ['ACCOUNT_CLOSURE_HMAC_SECRET'],
+        message: 'ACCOUNT_CLOSURE_HMAC_SECRET must be at least 32 chars when closure is enabled',
       });
     }
-  }
-});
+    for (const prerequisite of [
+      'ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED',
+      'ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED',
+    ] as const) {
+      if (closureEnabled && !environment[prerequisite]) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [prerequisite],
+          message: `${prerequisite} must be true when account closure is enabled`,
+        });
+      }
+    }
+
+    try {
+      parseHoladayPublicBaseUrl(environment.HOLADAY_PUBLIC_BASE_URL, environment.NODE_ENV);
+    } catch (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['HOLADAY_PUBLIC_BASE_URL'],
+        message: error instanceof Error ? error.message : 'invalid HOLADAY_PUBLIC_BASE_URL',
+      });
+    }
+  })
+  .transform((environment) => ({
+    ...environment,
+    HOLADAY_PUBLIC_BASE_URL: parseHoladayPublicBaseUrl(
+      environment.HOLADAY_PUBLIC_BASE_URL,
+      environment.NODE_ENV,
+    ),
+  }));
 
 export type Env = z.infer<typeof envSchema>;
 
