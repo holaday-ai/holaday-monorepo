@@ -22,18 +22,42 @@ describe('team projects access gate', () => {
   });
 
   it('fails closed for a whitespace-only configured allowlist', () => {
+    const parsed = parseTeamProjectsAllowlist('   ');
+
+    expect(parsed.allowAll).toBe(false);
+    expect(parsed.allowlist).toEqual(new Set());
+    expect(computeTeamProjectsEnabled(true, parsed.allowlist, 'usr_b', parsed.allowAll)).toBe(
+      false,
+    );
+  });
+
+  it('keeps separator-only configuration fail closed', () => {
     const parsed = parseTeamProjectsAllowlist(' , ');
 
-    expect(
-      computeTeamProjectsEnabled(true, parsed.allowlist, 'usr_b', parsed.allowAll),
-    ).toBe(false);
+    expect(parsed.allowAll).toBe(false);
+    expect(parsed.allowlist).toEqual(new Set());
+    expect(computeTeamProjectsEnabled(true, parsed.allowlist, 'usr_b', parsed.allowAll)).toBe(
+      false,
+    );
+  });
+
+  it('treats only the exact empty value as intentional allow-all', () => {
+    const parsed = parseTeamProjectsAllowlist('');
+
+    expect(parsed.allowAll).toBe(true);
+    expect(parsed.allowlist).toEqual(new Set());
+    expect(computeTeamProjectsEnabled(true, parsed.allowlist, 'usr_b', parsed.allowAll)).toBe(
+      true,
+    );
   });
 
   it('fails closed when a non-empty CSV contains blank entries', () => {
     const parsed = parseTeamProjectsAllowlist('usr_a,,usr_b');
 
-    expect(
-      computeTeamProjectsEnabled(true, parsed.allowlist, 'usr_a', parsed.allowAll),
-    ).toBe(false);
+    expect(parsed.allowAll).toBe(false);
+    expect(parsed.allowlist).toEqual(new Set());
+    expect(computeTeamProjectsEnabled(true, parsed.allowlist, 'usr_a', parsed.allowAll)).toBe(
+      false,
+    );
   });
 });
