@@ -57,6 +57,11 @@ export const ID_PREFIXES = {
   videoEditVersion: 'vedv',
   videoEditQuote: 'vedq',
   videoEditRender: 'vedr',
+  // Phase 1 — team workspace organizations and memberships.
+  organization: 'org',
+  organizationMember: 'omem',
+  organizationInvitation: 'oinv',
+  projectMember: 'pmem',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;
