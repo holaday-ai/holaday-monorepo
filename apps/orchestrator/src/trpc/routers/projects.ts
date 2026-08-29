@@ -26,8 +26,8 @@ import {
   TeamProjectServiceError,
   __teamProjectServiceInternals,
   createTeamProject,
-  getTeamProjectRecord,
-  listActiveProjectMembers,
+  getTeamProjectWithAccess,
+  listProjectMembersWithAccess,
   listTeamProjects,
 } from '../../projects/team-project-service.js';
 import { protectedProcedure, router } from '../trpc.js';
@@ -103,6 +103,21 @@ async function requirePersonalOrEnabledMutation(
   }
 }
 
+function buildPersonalProjectListQuery(db: Pick<DB, 'select'>, userId: number) {
+  return db
+    .select({
+      id: projects.id,
+      externalId: projects.externalId,
+      name: projects.name,
+      description: projects.description,
+      createdAt: projects.createdAt,
+      updatedAt: projects.updatedAt,
+    })
+    .from(projects)
+    .where(and(eq(projects.userId, userId), isNull(projects.organizationId)))
+    .orderBy(desc(projects.updatedAt));
+}
+
 export const projectsRouter = router({
   /**
    * List the caller's projects, most-recently-updated first, with a
@@ -125,18 +140,7 @@ export const projectsRouter = router({
       }
 
       const userId = await requireUserId(ctx);
-      const rows = await ctx.db
-        .select({
-          id: projects.id,
-          externalId: projects.externalId,
-          name: projects.name,
-          description: projects.description,
-          createdAt: projects.createdAt,
-          updatedAt: projects.updatedAt,
-        })
-        .from(projects)
-        .where(and(eq(projects.userId, userId), isNull(projects.organizationId)))
-        .orderBy(desc(projects.updatedAt));
+      const rows = await buildPersonalProjectListQuery(ctx.db, userId);
       if (rows.length === 0) return [];
       // Count tasks per project. One round-trip — group + filter to
       // the caller's projects only. Projects with zero tasks return
@@ -169,17 +173,13 @@ export const projectsRouter = router({
       if (!isTeamProjectsEnabledFor(ctx.userId)) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'project not found' });
       }
-      const access = await callProjectAccess(() =>
-        requireReadableProject(ctx.db, {
-          actorExternalId: ctx.userId,
-          projectExternalId: input.projectId,
-        }),
-      );
-      if (access.scope !== 'organization') {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'project not found' });
-      }
       const project = await callTeamProjectService(() =>
-        getTeamProjectRecord(ctx.db, access.projectId, input.projectId),
+        callProjectAccess(() =>
+          getTeamProjectWithAccess(ctx.db, {
+            actorExternalId: ctx.userId,
+            projectExternalId: input.projectId,
+          }),
+        ),
       );
       return {
         projectId: project.externalId,
@@ -188,10 +188,10 @@ export const projectsRouter = router({
         createdAt: project.createdAt,
         updatedAt: project.updatedAt,
         taskCount: project.taskCount,
-        scope: access.scope,
-        organizationId: access.organizationExternalId,
-        organizationName: access.organizationName,
-        memberRole: access.projectRole,
+        scope: project.scope,
+        organizationId: project.organizationId,
+        organizationName: project.organizationName,
+        memberRole: project.memberRole,
       };
     }),
 
@@ -201,16 +201,14 @@ export const projectsRouter = router({
       if (!isTeamProjectsEnabledFor(ctx.userId)) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'project not found' });
       }
-      const access = await callProjectAccess(() =>
-        requireReadableProject(ctx.db, {
-          actorExternalId: ctx.userId,
-          projectExternalId: input.projectId,
-        }),
+      const members = await callTeamProjectService(() =>
+        callProjectAccess(() =>
+          listProjectMembersWithAccess(ctx.db, {
+            actorExternalId: ctx.userId,
+            projectExternalId: input.projectId,
+          }),
+        ),
       );
-      if (access.scope !== 'organization') {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'project not found' });
-      }
-      const members = await listActiveProjectMembers(ctx.db, access.projectId);
       return members.map((member) => ({
         projectMemberId: member.projectMemberId,
         userId: member.userId,
@@ -351,4 +349,5 @@ export const projectsRouter = router({
 
 export const __projectsRouterInternals = {
   ...__teamProjectServiceInternals,
+  buildPersonalProjectListQuery,
 };

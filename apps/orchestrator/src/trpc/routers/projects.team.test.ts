@@ -180,7 +180,7 @@ function makeTeamListDb() {
     memberRole: 'lead',
     taskCount: 4,
   };
-  const db = {
+  const tx = {
     select() {
       return {
         from(table: unknown) {
@@ -218,12 +218,21 @@ function makeTeamListDb() {
             groupBy() {
               return builder;
             },
+            for() {
+              return builder;
+            },
             orderBy: async () => rows,
             limit: async () => rows.slice(0, 1),
           };
           return builder;
         },
       };
+    },
+  };
+  const db = {
+    ...tx,
+    async transaction<Result>(callback: (executor: typeof tx) => Promise<Result>) {
+      return callback(tx);
     },
   };
   return { db, selectedTables };
@@ -334,7 +343,7 @@ function makeTeamGetDb(snapshot = readableTeamSnapshot) {
     taskCount: 4,
   };
   const results = [[snapshot], [detail]];
-  const db = {
+  const tx = {
     select() {
       const rows = results.shift() ?? [];
       return {
@@ -352,11 +361,20 @@ function makeTeamGetDb(snapshot = readableTeamSnapshot) {
             groupBy() {
               return builder;
             },
+            for() {
+              return builder;
+            },
             limit: async () => rows,
           };
           return builder;
         },
       };
+    },
+  };
+  const db = {
+    ...tx,
+    async transaction<Result>(callback: (executor: typeof tx) => Promise<Result>) {
+      return callback(tx);
     },
   };
   return { db };
@@ -376,7 +394,7 @@ function makeTeamMembersDb() {
     },
   ];
   const results = [[readableTeamSnapshot], rows];
-  const db = {
+  const tx = {
     select() {
       const result = results.shift() ?? [];
       return {
@@ -391,12 +409,21 @@ function makeTeamMembersDb() {
             where() {
               return builder;
             },
+            for() {
+              return builder;
+            },
             orderBy: async () => result,
             limit: async () => result,
           };
           return builder;
         },
       };
+    },
+  };
+  const db = {
+    ...tx,
+    async transaction<Result>(callback: (executor: typeof tx) => Promise<Result>) {
+      return callback(tx);
     },
   };
   return { db };
@@ -447,8 +474,14 @@ function makeAccessMutationDb(selectResults: unknown[][], affectedRows: number[]
             for() {
               return builder;
             },
+            orderBy() {
+              return builder;
+            },
             limit: async () => rows,
           };
+          Object.defineProperty(builder, 'then', {
+            value: (resolve: (value: unknown[]) => unknown) => Promise.resolve(rows).then(resolve),
+          });
           return builder;
         },
       };
@@ -491,6 +524,64 @@ function makeAccessMutationDb(selectResults: unknown[][], affectedRows: number[]
   return { db, writes };
 }
 
+function makeConsistentReadDb(selectResults: unknown[][]) {
+  const events: string[] = [];
+  const take = () => selectResults.shift() ?? [];
+  const tx = {
+    select() {
+      return {
+        from(table: unknown) {
+          const selectedTable = tableName(table);
+          const builder = {
+            innerJoin() {
+              return builder;
+            },
+            leftJoin() {
+              return builder;
+            },
+            where() {
+              return builder;
+            },
+            groupBy() {
+              return builder;
+            },
+            for() {
+              return builder;
+            },
+            limit: async () => {
+              events.push(`tx:select:${selectedTable}`);
+              return take();
+            },
+            orderBy: async () => {
+              events.push(`tx:select:${selectedTable}`);
+              return take();
+            },
+          };
+          return builder;
+        },
+      };
+    },
+  };
+  const db = {
+    select() {
+      events.push('root:select:forbidden');
+      throw new Error('consistent team reads must not use the root executor');
+    },
+    async transaction<Result>(callback: (executor: typeof tx) => Promise<Result>) {
+      events.push('root:transaction:begin');
+      try {
+        const value = await callback(tx);
+        events.push('root:transaction:commit');
+        return value;
+      } catch (error) {
+        events.push('root:transaction:rollback');
+        throw error;
+      }
+    },
+  };
+  return { db, events };
+}
+
 describe('projects router personal compatibility', () => {
   beforeEach(() => {
     teamProjectsEnabledFor.mockReset();
@@ -515,6 +606,16 @@ describe('projects router personal compatibility', () => {
     expect(fake.selectedTables).not.toContain('organization_members');
     expect(fake.selectedTables).not.toContain('project_members');
     expect(teamProjectsEnabledFor).not.toHaveBeenCalled();
+  });
+
+  it('compiles the personal list with creator binding and an explicit null organization scope', () => {
+    const db = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
+    const query = __projectsRouterInternals.buildPersonalProjectListQuery(db, 7).toSQL();
+    const compiled = query.sql.toLowerCase().replace(/\s+/g, ' ').trim();
+
+    expect(compiled).toContain('`projects`.`user_id` = ?');
+    expect(compiled).toContain('`projects`.`organization_id` is null');
+    expect(query.params).toEqual([7]);
   });
 
   it('keeps personal create output and does not assign an organization', async () => {
@@ -594,7 +695,7 @@ describe('projects router team workspaces', () => {
   });
 
   it('returns NOT_FOUND instead of an empty tenant oracle for an unavailable organization', async () => {
-    const db = {
+    const tx = {
       select() {
         return {
           from() {
@@ -611,12 +712,21 @@ describe('projects router team workspaces', () => {
               groupBy() {
                 return builder;
               },
+              for() {
+                return builder;
+              },
               orderBy: async () => [],
               limit: async () => [],
             };
             return builder;
           },
         };
+      },
+    };
+    const db = {
+      ...tx,
+      async transaction<Result>(callback: (executor: typeof tx) => Promise<Result>) {
+        return callback(tx);
       },
     };
     const caller = projectsRouter.createCaller({
@@ -631,6 +741,141 @@ describe('projects router team workspaces', () => {
       }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
+
+  it('runs organization authorization and list payload on one transaction executor', async () => {
+    const membership = {
+      organizationInternalId: 30,
+      organizationExternalId: 'org_design',
+      organizationStatus: 'active',
+      teamProjectsEnabled: true,
+      actorUserId: 7,
+      actorExternalId: 'usr_member',
+      organizationRole: 'manager',
+      organizationMemberStatus: 'active',
+    };
+    const project = {
+      externalId: 'prj_team',
+      name: 'Launch',
+      description: null,
+      createdAt: new Date('2026-08-10T00:00:00.000Z'),
+      updatedAt: new Date('2026-08-11T00:00:00.000Z'),
+      organizationId: 'org_design',
+      organizationName: 'Design',
+      memberRole: 'lead',
+      taskCount: 0,
+    };
+    const fake = makeConsistentReadDb([[membership], [project]]);
+    const caller = projectsRouter.createCaller({
+      db: fake.db,
+      userId: 'usr_member',
+      logger: fakeLogger,
+    } as never);
+
+    await expect(
+      (caller.list as unknown as (input: { organizationId: string }) => Promise<unknown>)({
+        organizationId: 'org_design',
+      }),
+    ).resolves.toHaveLength(1);
+    expect(fake.events).toEqual([
+      'root:transaction:begin',
+      'tx:select:organizations',
+      'tx:select:projects',
+      'root:transaction:commit',
+    ]);
+  });
+
+  it.each([
+    [
+      'get',
+      [
+        [readableTeamSnapshot],
+        [
+          {
+            externalId: 'prj_team',
+            name: 'Launch',
+            description: null,
+            createdAt: new Date('2026-08-10T00:00:00.000Z'),
+            updatedAt: new Date('2026-08-11T00:00:00.000Z'),
+            taskCount: 0,
+          },
+        ],
+      ],
+    ],
+    [
+      'members',
+      [
+        [readableTeamSnapshot],
+        [
+          {
+            projectMemberId: 'pmem_member',
+            userId: 'usr_collaborator',
+            displayName: 'Mina',
+            avatarUrl: null,
+            role: 'member',
+          },
+        ],
+      ],
+    ],
+  ] as const)(
+    'runs %s authorization and payload on one transaction executor',
+    async (procedure, results) => {
+      const fake = makeConsistentReadDb(results.map((rows) => [...rows]));
+      const caller = projectsRouter.createCaller({
+        db: fake.db,
+        userId: 'usr_member',
+        logger: fakeLogger,
+      } as never) as unknown as Record<string, (input: { projectId: string }) => Promise<unknown>>;
+
+      await expect(caller[procedure]?.({ projectId: 'prj_team' })).resolves.toBeDefined();
+      expect(fake.events[0]).toBe('root:transaction:begin');
+      expect(fake.events).not.toContain('root:select:forbidden');
+      expect(fake.events.at(-1)).toBe('root:transaction:commit');
+    },
+  );
+
+  it('does not fetch an organization list payload after the locked membership recheck disappears', async () => {
+    const fake = makeConsistentReadDb([[], [{ externalId: 'prj_must_not_leak' }]]);
+    const caller = projectsRouter.createCaller({
+      db: fake.db,
+      userId: 'usr_member',
+      logger: fakeLogger,
+    } as never);
+
+    await expect(
+      (caller.list as unknown as (input: { organizationId: string }) => Promise<unknown>)({
+        organizationId: 'org_design',
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(fake.events).toEqual([
+      'root:transaction:begin',
+      'tx:select:organizations',
+      'root:transaction:rollback',
+    ]);
+  });
+
+  it.each([
+    ['get', { ...readableTeamSnapshot, teamProjectsEnabled: false }],
+    ['members', { ...readableTeamSnapshot, projectMemberStatus: 'inactive' }],
+  ] as const)(
+    'does not fetch a %s payload after the locked authorization row becomes invalid',
+    async (procedure, snapshot) => {
+      const fake = makeConsistentReadDb([[snapshot], [{ externalId: 'must_not_leak' }]]);
+      const caller = projectsRouter.createCaller({
+        db: fake.db,
+        userId: 'usr_member',
+        logger: fakeLogger,
+      } as never) as unknown as Record<string, (input: { projectId: string }) => Promise<unknown>>;
+
+      await expect(caller[procedure]?.({ projectId: 'prj_team' })).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+      expect(fake.events).toEqual([
+        'root:transaction:begin',
+        'tx:select:projects',
+        'root:transaction:rollback',
+      ]);
+    },
+  );
 
   it('compiles the team list with every tenant, rollout, and membership predicate', () => {
     const db = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
@@ -1023,7 +1268,23 @@ describe('projects router team workspaces', () => {
   });
 
   it('removes the project-bound target through Task 7 without trusting an organization id', async () => {
-    const fake = makeAccessMutationDb([[readableTeamSnapshot], [targetProjectMember]], [1]);
+    const fake = makeAccessMutationDb(
+      [
+        [readableTeamSnapshot],
+        [targetProjectMember],
+        [
+          {
+            ...targetProjectMember,
+            id: 40,
+            externalId: 'pmem_actor',
+            userId: 7,
+            role: 'lead',
+          },
+          targetProjectMember,
+        ],
+      ],
+      [1],
+    );
     const caller = projectsRouter.createCaller({
       db: fake.db,
       userId: 'usr_member',
@@ -1071,6 +1332,32 @@ describe('projects router team workspaces', () => {
       { kind: 'update', table: 'projects', values: { name: 'Renamed' } },
     ]);
   });
+
+  it.each(['rename', 'delete'] as const)(
+    'hides a direct cross-tenant %s mutation before any write',
+    async (procedure) => {
+      const crossTenant = {
+        ...readableTeamSnapshot,
+        organizationRowId: 31,
+        organizationExternalId: 'org_other',
+        organizationMemberOrganizationId: 31,
+        organizationMemberRole: 'owner',
+      };
+      const fake = makeAccessMutationDb([[crossTenant]], [1]);
+      const caller = projectsRouter.createCaller({
+        db: fake.db,
+        userId: 'usr_member',
+        logger: fakeLogger,
+      } as never);
+
+      const action =
+        procedure === 'rename'
+          ? caller.rename({ projectId: 'prj_team', name: 'Hidden' })
+          : caller.delete({ projectId: 'prj_team' });
+      await expect(action).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      expect(fake.writes).toEqual([]);
+    },
+  );
 
   it('denies viewer rename and project-lead delete before any write', async () => {
     const viewer = makeAccessMutationDb([

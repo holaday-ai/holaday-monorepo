@@ -38,6 +38,7 @@ function makeDb(selectResults: unknown[][], affectedRows: number[] = []) {
     innerJoin: () => SelectBuilder;
     leftJoin: () => SelectBuilder;
     where: () => SelectBuilder;
+    orderBy: () => SelectBuilder;
     for: (strength: 'update') => SelectBuilder;
     limit: () => Promise<unknown[]>;
   };
@@ -61,6 +62,7 @@ function makeDb(selectResults: unknown[][], affectedRows: number[] = []) {
       innerJoin: () => builder,
       leftJoin: () => builder,
       where: () => builder,
+      orderBy: () => builder,
       for(strength) {
         lock = strength;
         return builder;
@@ -198,6 +200,13 @@ const targetMember = {
   role: 'member',
   status: 'active',
 };
+const actorProjectMember = {
+  ...targetMember,
+  id: 302,
+  externalId: 'pmem_actor',
+  userId: 1,
+  role: 'lead',
+};
 const targetOrganizationMember = {
   id: 301,
   externalId: 'omem_target',
@@ -299,7 +308,10 @@ describe('project access mutations', () => {
 
   it('allows a project lead to rename and remove members but denies delete before a write', async () => {
     const rename = makeDb([[teamSnapshot]], [1]);
-    const remove = makeDb([[teamSnapshot], [targetMember]], [1]);
+    const remove = makeDb(
+      [[teamSnapshot], [targetMember], [actorProjectMember, targetMember]],
+      [1],
+    );
     const deniedDelete = makeDb([[teamSnapshot]]);
 
     await expect(
@@ -317,6 +329,7 @@ describe('project access mutations', () => {
     expect(remove.queries).toEqual([
       { table: 'projects', lock: 'update', executor: 'tx' },
       { table: 'project_members', lock: 'update', executor: 'tx' },
+      { table: 'project_members', lock: 'update', executor: 'tx' },
     ]);
     expect(remove.writes).toEqual([
       expect.objectContaining({
@@ -328,6 +341,7 @@ describe('project access mutations', () => {
     expect(remove.events).toEqual([
       'root:transaction:begin',
       'tx:select:projects:update',
+      'tx:select:project_members:update',
       'tx:select:project_members:update',
       'tx:update:project_members',
       'root:transaction:commit',
@@ -388,6 +402,27 @@ describe('project access mutations', () => {
     expect(fake.writes).toEqual([]);
   });
 
+  it('reactivates an inactive membership with its stable external id and requested role', async () => {
+    const inactive = { ...targetMember, status: 'inactive' };
+    const fake = makeDb([[teamSnapshot], [targetOrganizationMember], [inactive]], [1]);
+
+    await expect(
+      addProjectMemberWithAccess(fake.db, input, 'omem_target', 'viewer'),
+    ).resolves.toMatchObject({
+      projectMemberId: 'pmem_target',
+      userId: 'usr_target',
+      role: 'viewer',
+    });
+    expect(fake.writes).toEqual([
+      {
+        kind: 'update',
+        table: 'project_members',
+        values: { role: 'viewer', status: 'active' },
+        executor: 'tx',
+      },
+    ]);
+  });
+
   it('hides a tampered existing membership bound to another project or user', async () => {
     const fake = makeDb([
       [teamSnapshot],
@@ -414,7 +449,7 @@ describe('project access mutations', () => {
   });
 
   it('fails and rolls back a zero-row guarded member removal', async () => {
-    const fake = makeDb([[teamSnapshot], [targetMember]], [0]);
+    const fake = makeDb([[teamSnapshot], [targetMember], [actorProjectMember, targetMember]], [0]);
 
     await expect(
       removeProjectMemberWithAccess(fake.db, input, 'pmem_target'),
@@ -426,9 +461,60 @@ describe('project access mutations', () => {
       'root:transaction:begin',
       'tx:select:projects:update',
       'tx:select:project_members:update',
+      'tx:select:project_members:update',
       'tx:update:project_members',
       'root:transaction:rollback',
     ]);
+  });
+
+  it('rejects self-removal when the actor is the sole active project lead', async () => {
+    const actorMember = {
+      ...targetMember,
+      id: 302,
+      externalId: 'pmem_actor',
+      userId: 1,
+      role: 'lead',
+    };
+    const fake = makeDb([[teamSnapshot], [actorMember], [actorMember]]);
+
+    await expect(removeProjectMemberWithAccess(fake.db, input, 'pmem_actor')).rejects.toMatchObject(
+      { code: 'CONFLICT' },
+    );
+    expect(fake.writes).toEqual([]);
+    expect(fake.events.at(-1)).toBe('root:transaction:rollback');
+  });
+
+  it('allows one of two active leads to be removed after locking both memberships', async () => {
+    const targetLead = { ...targetMember, role: 'lead' };
+    const otherLead = {
+      ...targetMember,
+      id: 302,
+      externalId: 'pmem_other_lead',
+      userId: 3,
+      role: 'lead',
+    };
+    const fake = makeDb([[teamSnapshot], [targetLead], [targetLead, otherLead]], [1]);
+
+    await expect(
+      removeProjectMemberWithAccess(fake.db, input, 'pmem_target'),
+    ).resolves.toMatchObject({ projectMemberId: 'pmem_target', status: 'inactive' });
+    expect(fake.writes).toHaveLength(1);
+  });
+
+  it('allows an ordinary member removal while preserving the active lead', async () => {
+    const actorLead = {
+      ...targetMember,
+      id: 302,
+      externalId: 'pmem_actor',
+      userId: 1,
+      role: 'lead',
+    };
+    const fake = makeDb([[teamSnapshot], [targetMember], [actorLead, targetMember]], [1]);
+
+    await expect(
+      removeProjectMemberWithAccess(fake.db, input, 'pmem_target'),
+    ).resolves.toMatchObject({ projectMemberId: 'pmem_target', status: 'inactive' });
+    expect(fake.writes).toHaveLength(1);
   });
 
   it('fails stably and rolls back a zero-row guarded rename without success', async () => {
@@ -501,6 +587,9 @@ describe('project access mutations', () => {
     const existingProjectMember = __projectAccessInternals
       .buildLockedProjectMemberByUserQuery(mockDb, 200, 2)
       .toSQL();
+    const activeProjectMemberships = __projectAccessInternals
+      .buildLockedActiveProjectMembershipsQuery(mockDb, 200)
+      .toSQL();
     const accessSql = normalizedSql(access.sql);
     const targetSql = normalizedSql(target.sql);
 
@@ -537,6 +626,12 @@ describe('project access mutations', () => {
     expect(normalizedSql(existingProjectMember.sql)).toContain('`project_members`.`user_id` = ?');
     expect(normalizedSql(existingProjectMember.sql)).toContain('for update');
     expect(existingProjectMember.params).toEqual([200, 2, 1]);
+    expect(normalizedSql(activeProjectMemberships.sql)).toContain(
+      '`project_members`.`project_id` = ?',
+    );
+    expect(normalizedSql(activeProjectMemberships.sql)).toContain('`project_members`.`status` = ?');
+    expect(normalizedSql(activeProjectMemberships.sql)).toContain('for update');
+    expect(activeProjectMemberships.params).toEqual([200, 'active']);
   });
 
   it('uses domain-only errors', () => {

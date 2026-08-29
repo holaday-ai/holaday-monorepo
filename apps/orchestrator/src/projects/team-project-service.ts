@@ -12,6 +12,7 @@ import {
   type OrganizationRole,
   canCreateTeamProject,
 } from '../organizations/organization-permissions.js';
+import { type ProjectAccessInput, requireReadableProjectForUpdate } from './project-access.js';
 
 export type TeamProjectServiceErrorCode = 'NOT_FOUND' | 'FORBIDDEN';
 
@@ -243,29 +244,31 @@ export async function listTeamProjects(input: {
   actorExternalId: string;
   organizationExternalId: string;
 }) {
-  const [membership] = (await buildActiveTeamOrganizationMembershipQuery(
-    input.db,
-    input.actorExternalId,
-    input.organizationExternalId,
-  )) as ActiveTeamMembership[];
-  validateMembership(membership, input.actorExternalId, input.organizationExternalId);
-  const rows = await buildTeamProjectListQuery(
-    input.db,
-    input.actorExternalId,
-    input.organizationExternalId,
-  );
-  return rows.map((project) => ({
-    projectId: project.externalId,
-    name: project.name,
-    description: project.description,
-    createdAt: project.createdAt,
-    updatedAt: project.updatedAt,
-    taskCount: Number(project.taskCount),
-    scope: 'organization' as const,
-    organizationId: project.organizationId,
-    organizationName: project.organizationName,
-    memberRole: project.memberRole,
-  }));
+  return input.db.transaction(async (tx) => {
+    const [membership] = (await buildTeamProjectCreatorQuery(
+      tx,
+      input.actorExternalId,
+      input.organizationExternalId,
+    )) as ActiveTeamMembership[];
+    validateMembership(membership, input.actorExternalId, input.organizationExternalId);
+    const rows = await buildTeamProjectListQuery(
+      tx,
+      input.actorExternalId,
+      input.organizationExternalId,
+    );
+    return rows.map((project) => ({
+      projectId: project.externalId,
+      name: project.name,
+      description: project.description,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+      taskCount: Number(project.taskCount),
+      scope: 'organization' as const,
+      organizationId: project.organizationId,
+      organizationName: project.organizationName,
+      memberRole: project.memberRole,
+    }));
+  });
 }
 
 export async function createTeamProject(input: {
@@ -322,18 +325,29 @@ export async function createTeamProject(input: {
   });
 }
 
-export async function getTeamProjectRecord(
-  db: Pick<DB, 'select'>,
-  projectId: number,
-  projectExternalId: string,
-) {
-  const [project] = await buildProjectDetailQuery(db, projectId, projectExternalId);
-  if (!project || project.externalId !== projectExternalId) return hidden();
-  return { ...project, taskCount: Number(project.taskCount) };
+export async function getTeamProjectWithAccess(db: DB, input: ProjectAccessInput) {
+  return db.transaction(async (tx) => {
+    const access = await requireReadableProjectForUpdate(tx, input);
+    if (access.scope !== 'organization') return hidden();
+    const [project] = await buildProjectDetailQuery(tx, access.projectId, input.projectExternalId);
+    if (!project || project.externalId !== input.projectExternalId) return hidden();
+    return {
+      ...project,
+      taskCount: Number(project.taskCount),
+      scope: access.scope,
+      organizationId: access.organizationExternalId,
+      organizationName: access.organizationName,
+      memberRole: access.projectRole,
+    };
+  });
 }
 
-export async function listActiveProjectMembers(db: Pick<DB, 'select'>, projectId: number) {
-  return buildActiveProjectMembersQuery(db, projectId);
+export async function listProjectMembersWithAccess(db: DB, input: ProjectAccessInput) {
+  return db.transaction(async (tx) => {
+    const access = await requireReadableProjectForUpdate(tx, input);
+    if (access.scope !== 'organization') return hidden();
+    return buildActiveProjectMembersQuery(tx, access.projectId);
+  });
 }
 
 export const __teamProjectServiceInternals = {

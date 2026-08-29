@@ -1,5 +1,5 @@
 import { newExternalId } from '@holaday/shared-types';
-import { and, eq, isNotNull, isNull, or } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull, or } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import { organizationMembers } from '../db/schema/organization-members.js';
@@ -222,6 +222,22 @@ function buildLockedTargetMemberQuery(
     .limit(1);
 }
 
+function buildLockedActiveProjectMembershipsQuery(db: Pick<DB, 'select'>, projectId: number) {
+  return db
+    .select({
+      id: projectMembers.id,
+      externalId: projectMembers.externalId,
+      projectId: projectMembers.projectId,
+      userId: projectMembers.userId,
+      role: projectMembers.role,
+      status: projectMembers.status,
+    })
+    .from(projectMembers)
+    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.status, 'active')))
+    .orderBy(asc(projectMembers.externalId))
+    .for('update');
+}
+
 function buildLockedTargetOrganizationMemberQuery(
   db: Pick<DB, 'select'>,
   organizationId: number,
@@ -352,6 +368,14 @@ export async function requireReadableProject(
   return loadProjectAccess(db, input, false);
 }
 
+/** For callers that own the surrounding transaction and consume the access immediately. */
+export async function requireReadableProjectForUpdate(
+  tx: Pick<DB, 'select'>,
+  input: ProjectAccessInput,
+): Promise<ProjectAccess> {
+  return loadProjectAccess(tx, input, true);
+}
+
 function authorizeMutation<Action extends ProjectMutationAction>(
   access: ProjectAccess,
   action: Action,
@@ -466,6 +490,26 @@ export async function removeProjectMemberWithAccess(
       },
     });
     if (!decision.allowed) return forbidden();
+    const activeMemberships = (await buildLockedActiveProjectMembershipsQuery(
+      tx,
+      grant.projectId,
+    )) as TargetProjectMemberSnapshot[];
+    if (
+      activeMemberships.some(
+        (membership) =>
+          membership.projectId !== grant.projectId ||
+          membership.status !== 'active' ||
+          !isProjectRole(membership.role),
+      )
+    ) {
+      return hidden();
+    }
+    if (
+      target.role === 'lead' &&
+      activeMemberships.filter((membership) => membership.role === 'lead').length <= 1
+    ) {
+      return conflict();
+    }
     const result = await tx
       .update(projectMembers)
       .set({ status: 'inactive' })
@@ -573,6 +617,7 @@ export async function deleteProjectWithAccess(db: DB, input: ProjectAccessInput)
 
 export const __projectAccessInternals = {
   buildProjectAccessSnapshotQuery,
+  buildLockedActiveProjectMembershipsQuery,
   buildLockedProjectMemberByUserQuery,
   buildLockedTargetMemberQuery,
   buildLockedTargetOrganizationMemberQuery,
