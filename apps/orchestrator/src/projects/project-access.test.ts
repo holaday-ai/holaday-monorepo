@@ -11,12 +11,13 @@ import {
   requireReadableProject,
 } from './project-access.js';
 
-type Query = { table: string; lock: 'update' | null; inTransaction: boolean };
+type Executor = 'root' | 'tx';
+type Query = { table: string; lock: 'update' | null; executor: Executor };
 type Write = {
   kind: 'update' | 'delete';
   table: string;
   values?: Record<string, unknown>;
-  inTransaction: boolean;
+  executor: Executor;
 };
 
 /** A transaction fake that makes locked reads, writes, and rollback observable. */
@@ -24,7 +25,6 @@ function makeDb(selectResults: unknown[][], affectedRows: number[] = []) {
   const queries: Query[] = [];
   const writes: Write[] = [];
   const events: string[] = [];
-  let transactionDepth = 0;
   const tableName = (table: unknown) => {
     if (!table || typeof table !== 'object') return '';
     const name = (table as Record<symbol, unknown>)[Symbol.for('drizzle:Name')];
@@ -40,15 +40,15 @@ function makeDb(selectResults: unknown[][], affectedRows: number[] = []) {
     for: (strength: 'update') => SelectBuilder;
     limit: () => Promise<unknown[]>;
   };
-  const select = (): SelectBuilder => {
+  const makeSelect = (executor: Executor) => (): SelectBuilder => {
     let table = '';
     let lock: 'update' | null = null;
     let completed: Promise<unknown[]> | undefined;
     const finish = () => {
-      completed ??= Promise.resolve(take());
-      if (!queries.some((query) => query.table === table && query.lock === lock)) {
-        queries.push({ table, lock, inTransaction: transactionDepth > 0 });
-        events.push(`select:${table}:${lock ?? 'none'}`);
+      if (!completed) {
+        queries.push({ table, lock, executor });
+        events.push(`${executor}:select:${table}:${lock ?? 'none'}`);
+        completed = Promise.resolve(take());
       }
       return completed;
     };
@@ -72,55 +72,65 @@ function makeDb(selectResults: unknown[][], affectedRows: number[] = []) {
     });
     return builder;
   };
+  const makeUpdate = (executor: Executor) => (table: unknown) => {
+    return {
+      set(values: Record<string, unknown>) {
+        return {
+          async where() {
+            writes.push({
+              kind: 'update',
+              table: tableName(table),
+              values,
+              executor,
+            });
+            events.push(`${executor}:update:${tableName(table)}`);
+            if (executor === 'root') {
+              throw new Error('test fake rejected root update during a project mutation');
+            }
+            return writeResult();
+          },
+        };
+      },
+    };
+  };
+  const makeDelete = (executor: Executor) => (table: unknown) => {
+    return {
+      async where() {
+        writes.push({
+          kind: 'delete',
+          table: tableName(table),
+          executor,
+        });
+        events.push(`${executor}:delete:${tableName(table)}`);
+        if (executor === 'root') {
+          throw new Error('test fake rejected root delete during a project mutation');
+        }
+        return writeResult();
+      },
+    };
+  };
+  const tx = {
+    select: makeSelect('tx'),
+    update: makeUpdate('tx'),
+    delete: makeDelete('tx'),
+  };
   const db = {
-    select,
-    update(table: unknown) {
-      return {
-        set(values: Record<string, unknown>) {
-          return {
-            async where() {
-              writes.push({
-                kind: 'update',
-                table: tableName(table),
-                values,
-                inTransaction: transactionDepth > 0,
-              });
-              events.push(`update:${tableName(table)}`);
-              return writeResult();
-            },
-          };
-        },
-      };
-    },
-    delete(table: unknown) {
-      return {
-        async where() {
-          writes.push({
-            kind: 'delete',
-            table: tableName(table),
-            inTransaction: transactionDepth > 0,
-          });
-          events.push(`delete:${tableName(table)}`);
-          return writeResult();
-        },
-      };
-    },
+    select: makeSelect('root'),
+    update: makeUpdate('root'),
+    delete: makeDelete('root'),
     async transaction<Result>(callback: (tx: unknown) => Promise<Result>): Promise<Result> {
-      transactionDepth += 1;
-      events.push('begin');
+      events.push('root:transaction:begin');
       try {
-        const result = await callback(db);
-        events.push('commit');
+        const result = await callback(tx);
+        events.push('root:transaction:commit');
         return result;
       } catch (error) {
-        events.push('rollback');
+        events.push('root:transaction:rollback');
         throw error;
-      } finally {
-        transactionDepth -= 1;
       }
     },
   };
-  return { db: db as unknown as DB, queries, writes, events };
+  return { db: db as unknown as DB, tx, queries, writes, events };
 }
 
 const teamSnapshot = {
@@ -187,24 +197,47 @@ describe('project access mutations', () => {
     expectTypeOf(deleteProjectWithAccess).parameters.toEqualTypeOf<[DB, typeof input]>();
   });
 
+  it('uses a distinct transaction executor and rejects root writes in the test harness', async () => {
+    const fake = makeDb([]);
+
+    expect(fake.tx).not.toBe(fake.db);
+    await expect(
+      fake.db
+        .update(schema.projects)
+        .set({ name: 'Wrong executor' })
+        .where(undefined as never),
+    ).rejects.toThrow('test fake rejected root update during a project mutation');
+    expect(fake.writes).toEqual([
+      {
+        kind: 'update',
+        table: 'projects',
+        values: { name: 'Wrong executor' },
+        executor: 'root',
+      },
+    ]);
+  });
+
   it('renames exactly the authorized project in the locked authorization transaction', async () => {
     const fake = makeDb([[teamSnapshot]], [1]);
 
     await expect(renameProjectWithAccess(fake.db, input, { name: 'Renamed' })).resolves.toEqual(
       expect.objectContaining({ projectId: 200, name: 'Renamed', scope: 'organization' }),
     );
-    expect(fake.queries).toEqual([
-      expect.objectContaining({ table: 'projects', lock: 'update', inTransaction: true }),
-    ]);
+    expect(fake.queries).toEqual([{ table: 'projects', lock: 'update', executor: 'tx' }]);
     expect(fake.writes).toEqual([
-      expect.objectContaining({
+      {
         kind: 'update',
         table: 'projects',
         values: { name: 'Renamed' },
-        inTransaction: true,
-      }),
+        executor: 'tx',
+      },
     ]);
-    expect(fake.events).toEqual(['begin', 'select:projects:update', 'update:projects', 'commit']);
+    expect(fake.events).toEqual([
+      'root:transaction:begin',
+      'tx:select:projects:update',
+      'tx:update:projects',
+      'root:transaction:commit',
+    ]);
   });
 
   it('preserves personal owner-only read and rename compatibility', async () => {
@@ -226,6 +259,8 @@ describe('project access mutations', () => {
     await expect(requireReadableProject(nonOwner.db, personalInput)).rejects.toMatchObject({
       code: 'NOT_FOUND',
     });
+    expect(ownerRead.queries).toEqual([{ table: 'projects', lock: null, executor: 'root' }]);
+    expect(ownerRename.queries).toEqual([{ table: 'projects', lock: 'update', executor: 'tx' }]);
   });
 
   it('does not provide a delete callback or delete write on the rename path', async () => {
@@ -254,8 +289,30 @@ describe('project access mutations', () => {
     await expect(deleteProjectWithAccess(deniedDelete.db, input)).rejects.toMatchObject({
       code: 'FORBIDDEN',
     });
+    expect(remove.queries).toEqual([
+      { table: 'projects', lock: 'update', executor: 'tx' },
+      { table: 'project_members', lock: 'update', executor: 'tx' },
+    ]);
+    expect(remove.writes).toEqual([
+      expect.objectContaining({
+        kind: 'update',
+        table: 'project_members',
+        executor: 'tx',
+      }),
+    ]);
+    expect(remove.events).toEqual([
+      'root:transaction:begin',
+      'tx:select:projects:update',
+      'tx:select:project_members:update',
+      'tx:update:project_members',
+      'root:transaction:commit',
+    ]);
     expect(deniedDelete.writes).toEqual([]);
-    expect(deniedDelete.events).toEqual(['begin', 'select:projects:update', 'rollback']);
+    expect(deniedDelete.events).toEqual([
+      'root:transaction:begin',
+      'tx:select:projects:update',
+      'root:transaction:rollback',
+    ]);
   });
 
   it.each([
@@ -277,9 +334,43 @@ describe('project access mutations', () => {
       removeProjectMemberWithAccess(fake.db, input, 'pmem_target'),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     expect(fake.writes).toEqual([
-      expect.objectContaining({ kind: 'update', table: 'project_members', inTransaction: true }),
+      expect.objectContaining({ kind: 'update', table: 'project_members', executor: 'tx' }),
     ]);
-    expect(fake.events.at(-1)).toBe('rollback');
+    expect(fake.events).toEqual([
+      'root:transaction:begin',
+      'tx:select:projects:update',
+      'tx:select:project_members:update',
+      'tx:update:project_members',
+      'root:transaction:rollback',
+    ]);
+  });
+
+  it('fails stably and rolls back a zero-row guarded rename without success', async () => {
+    const fake = makeDb([[teamSnapshot]], [0]);
+
+    await expect(
+      renameProjectWithAccess(fake.db, input, { name: 'Not persisted' }),
+    ).rejects.toMatchObject({
+      name: 'ProjectAccessError',
+      code: 'NOT_FOUND',
+      message: 'project not found',
+    });
+    expect(fake.queries).toEqual([{ table: 'projects', lock: 'update', executor: 'tx' }]);
+    expect(fake.writes).toEqual([
+      {
+        kind: 'update',
+        table: 'projects',
+        values: { name: 'Not persisted' },
+        executor: 'tx',
+      },
+    ]);
+    expect(fake.events).toEqual([
+      'root:transaction:begin',
+      'tx:select:projects:update',
+      'tx:update:projects',
+      'root:transaction:rollback',
+    ]);
+    expect(fake.events).not.toContain('root:transaction:commit');
   });
 
   it('fails and rolls back a zero-row guarded delete', async () => {
@@ -289,9 +380,15 @@ describe('project access mutations', () => {
       code: 'NOT_FOUND',
     });
     expect(fake.writes).toEqual([
-      expect.objectContaining({ kind: 'delete', table: 'projects', inTransaction: true }),
+      expect.objectContaining({ kind: 'delete', table: 'projects', executor: 'tx' }),
     ]);
-    expect(fake.events.at(-1)).toBe('rollback');
+    expect(fake.queries).toEqual([{ table: 'projects', lock: 'update', executor: 'tx' }]);
+    expect(fake.events).toEqual([
+      'root:transaction:begin',
+      'tx:select:projects:update',
+      'tx:delete:projects',
+      'root:transaction:rollback',
+    ]);
   });
 
   it('keeps readable access read-only and validates tampered snapshot identities', async () => {
@@ -301,6 +398,7 @@ describe('project access mutations', () => {
       code: 'NOT_FOUND',
     });
     expect(fake.writes).toEqual([]);
+    expect(fake.queries).toEqual([{ table: 'projects', lock: null, executor: 'root' }]);
   });
 
   it('compiles locked access and target-member predicates with exact parameters', () => {
