@@ -3,6 +3,7 @@ import {
   type OrganizationMembership,
   type OrganizationRole,
   type ProjectAccessContext,
+  type ProjectMemberRemovalContext,
   type ProjectRole,
   canChangeOrganizationMemberRole,
   canCreateTeamProject,
@@ -38,11 +39,45 @@ function projectContext(
   return {
     organizationId,
     projectOrganizationId: organizationId,
+    targetProjectId: 'prj_alpha',
     actorOrganizationMember: actor,
     actorProjectMember: {
       projectId: 'prj_alpha',
       userId: actor.userId,
       role,
+      status: 'active',
+    },
+    ...overrides,
+  };
+}
+
+function projectContextForRoles(
+  organizationRole: OrganizationRole,
+  projectRole: ProjectRole,
+): ProjectAccessContext {
+  const actor = organizationMember(organizationRole);
+  return projectContext(projectRole, {
+    actorOrganizationMember: actor,
+    actorProjectMember: {
+      projectId: 'prj_alpha',
+      userId: actor.userId,
+      role: projectRole,
+      status: 'active',
+    },
+  });
+}
+
+function removalContext(
+  projectRole: ProjectRole,
+  overrides: Partial<ProjectMemberRemovalContext> = {},
+): ProjectMemberRemovalContext {
+  const context = projectContext(projectRole);
+  return {
+    ...context,
+    targetProjectMember: {
+      projectId: context.targetProjectId,
+      userId: 'usr_target',
+      role: 'member',
       status: 'active',
     },
     ...overrides,
@@ -115,7 +150,7 @@ describe('organization permission matrix', () => {
       expect(canRenameTeamProject(context)).toEqual(
         canRename ? { allowed: true } : { allowed: false, reason: 'project_role_not_permitted' },
       );
-      expect(canRemoveProjectMember(context)).toEqual(
+      expect(canRemoveProjectMember(removalContext(role))).toEqual(
         canRemove ? { allowed: true } : { allowed: false, reason: 'project_role_not_permitted' },
       );
       expect(canDeleteTeamProject(context)).toEqual(
@@ -141,6 +176,42 @@ describe('organization permission matrix', () => {
           }),
         ),
       ).toEqual({ allowed: true });
+    },
+  );
+
+  it.each([
+    ['owner', 'lead', true, true, true],
+    ['owner', 'member', true, true, true],
+    ['owner', 'viewer', true, true, true],
+    ['admin', 'lead', true, true, true],
+    ['admin', 'member', true, true, true],
+    ['admin', 'viewer', true, true, true],
+    ['manager', 'lead', true, true, false],
+    ['manager', 'member', false, false, false],
+    ['manager', 'viewer', false, false, false],
+    ['member', 'lead', true, true, false],
+    ['member', 'member', false, false, false],
+    ['member', 'viewer', false, false, false],
+  ] as const)(
+    '%s organization role with %s project role permits rename/remove/delete: %s/%s/%s',
+    (organizationRole, projectRole, renameAllowed, removeAllowed, deleteAllowed) => {
+      const context = projectContextForRoles(organizationRole, projectRole);
+      const expected = (allowed: boolean) =>
+        allowed ? { allowed: true } : { allowed: false, reason: 'project_role_not_permitted' };
+
+      expect(canRenameTeamProject(context)).toEqual(expected(renameAllowed));
+      expect(
+        canRemoveProjectMember({
+          ...context,
+          targetProjectMember: {
+            projectId: context.targetProjectId,
+            userId: 'usr_target',
+            role: 'member',
+            status: 'active',
+          },
+        }),
+      ).toEqual(expected(removeAllowed));
+      expect(canDeleteTeamProject(context)).toEqual(expected(deleteAllowed));
     },
   );
 });
@@ -212,7 +283,7 @@ describe('organization permission denials', () => {
       'a project from another organization',
       () =>
         canRemoveProjectMember(
-          projectContext('lead', { projectOrganizationId: otherOrganizationId }),
+          removalContext('lead', { projectOrganizationId: otherOrganizationId }),
         ),
       'project_outside_organization',
     ],
@@ -228,6 +299,163 @@ describe('organization permission denials', () => {
         manager: organizationMember('member', { userId: 'usr_manager' }),
       }),
     ).toEqual({ allowed: false, reason: 'manager_role_not_permitted' });
+  });
+
+  it.each([
+    [
+      'an inactive proposed manager',
+      () =>
+        canSetReportingLine({
+          actor: organizationMember('owner'),
+          member: organizationMember('member', { userId: 'usr_report' }),
+          manager: organizationMember('manager', { userId: 'usr_manager', status: 'inactive' }),
+        }),
+      'manager_organization_membership_inactive',
+    ],
+    [
+      'a member inviting an owner',
+      () => canInviteOrganizationMember(organizationMember('member'), 'owner'),
+      'owner_invitation_forbidden',
+    ],
+    [
+      'an actor whose organization membership is outside the requested organization',
+      () =>
+        canRenameTeamProject(
+          projectContext('lead', {
+            actorOrganizationMember: organizationMember('member', {
+              organizationId: otherOrganizationId,
+            }),
+          }),
+        ),
+      'actor_outside_organization',
+    ],
+    [
+      'a project membership belonging to another actor',
+      () =>
+        canDeleteTeamProject(
+          projectContext('member', {
+            actorProjectMember: {
+              projectId: 'prj_alpha',
+              userId: 'usr_other',
+              role: 'member',
+              status: 'active',
+            },
+          }),
+        ),
+      'project_membership_actor_mismatch',
+    ],
+  ] as const)('denies %s', (_label, check, reason) => {
+    expect(check()).toEqual({ allowed: false, reason });
+  });
+
+  it.each([
+    [
+      'rename when the actor project membership is for another project',
+      () =>
+        canRenameTeamProject(
+          projectContext('lead', {
+            targetProjectId: 'prj_beta',
+          }),
+        ),
+      'actor_project_membership_wrong_project',
+    ],
+    [
+      'delete when the actor project membership is for another project',
+      () =>
+        canDeleteTeamProject(
+          projectContext('lead', {
+            targetProjectId: 'prj_beta',
+          }),
+        ),
+      'actor_project_membership_wrong_project',
+    ],
+    [
+      'removal when the actor project membership is for another project',
+      () =>
+        canRemoveProjectMember(
+          removalContext('lead', {
+            targetProjectId: 'prj_beta',
+          }),
+        ),
+      'actor_project_membership_wrong_project',
+    ],
+    [
+      'removal when the target membership is for another project',
+      () =>
+        canRemoveProjectMember(
+          removalContext('lead', {
+            targetProjectMember: {
+              projectId: 'prj_beta',
+              userId: 'usr_target',
+              role: 'member',
+              status: 'active',
+            },
+          }),
+        ),
+      'target_project_membership_wrong_project',
+    ],
+  ] as const)('denies %s', (_label, check, reason) => {
+    expect(check()).toEqual({ allowed: false, reason });
+  });
+
+  it.each([
+    [
+      'rename when the organization membership is inactive',
+      () =>
+        canRenameTeamProject(
+          projectContext('lead', {
+            actorOrganizationMember: organizationMember('member', { status: 'inactive' }),
+          }),
+        ),
+      'actor_organization_membership_inactive',
+    ],
+    [
+      'remove when the project membership is inactive',
+      () =>
+        canRemoveProjectMember(
+          removalContext('lead', {
+            actorProjectMember: {
+              projectId: 'prj_alpha',
+              userId: 'usr_member',
+              role: 'lead',
+              status: 'inactive',
+            },
+          }),
+        ),
+      'actor_project_membership_inactive',
+    ],
+    [
+      'remove when the target project membership is inactive',
+      () =>
+        canRemoveProjectMember(
+          removalContext('lead', {
+            targetProjectMember: {
+              projectId: 'prj_alpha',
+              userId: 'usr_target',
+              role: 'member',
+              status: 'inactive',
+            },
+          }),
+        ),
+      'target_project_membership_inactive',
+    ],
+    [
+      'delete when the project membership is inactive',
+      () =>
+        canDeleteTeamProject(
+          projectContext('member', {
+            actorProjectMember: {
+              projectId: 'prj_alpha',
+              userId: 'usr_member',
+              role: 'member',
+              status: 'inactive',
+            },
+          }),
+        ),
+      'actor_project_membership_inactive',
+    ],
+  ] as const)('requires active membership to %s', (_label, check, reason) => {
+    expect(check()).toEqual({ allowed: false, reason });
   });
 
   it('protects an owner from a non-owner role change and deactivation', () => {

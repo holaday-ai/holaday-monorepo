@@ -21,6 +21,9 @@ export type PermissionReason =
   | 'last_owner_must_remain'
   | 'actor_project_membership_inactive'
   | 'project_membership_actor_mismatch'
+  | 'actor_project_membership_wrong_project'
+  | 'target_project_membership_inactive'
+  | 'target_project_membership_wrong_project'
   | 'project_outside_organization'
   | 'project_role_not_permitted';
 
@@ -45,8 +48,13 @@ export interface ProjectMembership {
 export interface ProjectAccessContext {
   organizationId: string;
   projectOrganizationId: string;
+  targetProjectId: string;
   actorOrganizationMember: OrganizationMembership;
   actorProjectMember: ProjectMembership;
+}
+
+export interface ProjectMemberRemovalContext extends ProjectAccessContext {
+  targetProjectMember: ProjectMembership;
 }
 
 interface ReportingLineInput {
@@ -96,7 +104,7 @@ export function canCreateTeamProject(actor: OrganizationMembership): PermissionD
 }
 
 /**
- * Invitation policy deliberately has no owner path. Only an owner can invite
+ * Invitation policy deliberately has no owner path. Only an owner or admin can invite
  * administrators; managers may invite managers and members.
  */
 export function canInviteOrganizationMember(
@@ -178,6 +186,9 @@ function validateProjectAccess(context: ProjectAccessContext): PermissionDecisio
   if (actorProjectMember.userId !== actorOrganizationMember.userId) {
     return deny('project_membership_actor_mismatch');
   }
+  if (actorProjectMember.projectId !== context.targetProjectId) {
+    return deny('actor_project_membership_wrong_project');
+  }
   return allow();
 }
 
@@ -196,9 +207,14 @@ export function canRenameTeamProject(context: ProjectAccessContext): PermissionD
   return canManageProject(context);
 }
 
-/** Project leads may manage project membership only after both membership boundaries pass. */
-export function canRemoveProjectMember(context: ProjectAccessContext): PermissionDecision {
-  return canManageProject(context);
+/** Project leads may manage membership only within the authorized target project. */
+export function canRemoveProjectMember(context: ProjectMemberRemovalContext): PermissionDecision {
+  const accessDecision = canManageProject(context);
+  if (!accessDecision.allowed) return accessDecision;
+  if (!isActive(context.targetProjectMember)) return deny('target_project_membership_inactive');
+  return context.targetProjectMember.projectId === context.targetProjectId
+    ? allow()
+    : deny('target_project_membership_wrong_project');
 }
 
 /** Project deletion remains an organization owner/admin decision, never a lead decision. */
