@@ -194,6 +194,14 @@ const baseEnvSchema = z.object({
   /** Gradual rollout: allowed user externalIds (CSV). Empty = all (when ENABLED). */
   VIDEO_CREATION_ALLOWLIST: z.string().default(''),
 
+  /** Team project workspace gradual-rollout gate. Default OFF until vetted. */
+  TEAM_PROJECTS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  /** Allowed user externalIds for team project workspaces (CSV). Empty = all when enabled. */
+  TEAM_PROJECTS_ALLOWLIST: z.string().default(''),
+
   /**
    * Embedded “继续剪辑” gate. Default OFF until the CE.SDK commercial
    * license, hostname scope, and browser/codec release matrix pass the
