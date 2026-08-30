@@ -378,6 +378,7 @@ integrationDescribe('Task 10 real-MySQL evidence and AI contribution boundaries'
     return {
       actorExternalId: fixture.responsible.externalId,
       workItemExternalId: fixture.workItemExternalId,
+      expectedVersion: 7,
       idempotencyKey: key,
       source,
       metadata: { evidenceType, confidence: 'verified' },
@@ -831,6 +832,7 @@ integrationDescribe('Task 10 real-MySQL evidence and AI contribution boundaries'
       const input = {
         actorExternalId: fixture.responsible.externalId,
         workItemExternalId: fixture.workItemExternalId,
+        expectedVersion: 7,
         executionTaskId: task.externalId,
         requestedScope: 'Summarize the verified execution result',
         idempotencyKey: 'task10-ai-frozen-replay',
@@ -904,6 +906,7 @@ integrationDescribe('Task 10 real-MySQL evidence and AI contribution boundaries'
       const base = {
         actorExternalId: fixture.responsible.externalId,
         workItemExternalId: fixture.workItemExternalId,
+        expectedVersion: 7,
         executionTaskId: task.externalId,
         requestedScope: 'Concurrent Task 10 contribution',
       } as const;

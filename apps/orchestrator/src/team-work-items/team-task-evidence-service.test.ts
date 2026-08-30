@@ -369,7 +369,19 @@ function createHarness(
     },
     ...overrides,
   };
-  return { repository, service: new TeamTaskEvidenceService(repository, dependencies) };
+  const rawService = new TeamTaskEvidenceService(repository, dependencies);
+  const versioned = (input: unknown) =>
+    typeof input === 'object' && input !== null && !Array.isArray(input)
+      ? { expectedVersion: repository.workItem.version, ...input }
+      : input;
+  const service = {
+    bindEvidence: (input: unknown) => rawService.bindEvidence(versioned(input)),
+    recordAiContribution: (input: unknown) => rawService.recordAiContribution(versioned(input)),
+    confirmAiContribution: (input: unknown) => rawService.confirmAiContribution(versioned(input)),
+    getEvidencePackage: (input: unknown) => rawService.getEvidencePackage(input),
+    preflight: (input: unknown) => rawService.preflight(input),
+  };
+  return { repository, rawService, service };
 }
 
 function expectCode(error: unknown, code: string) {
@@ -378,6 +390,38 @@ function expectCode(error: unknown, code: string) {
 }
 
 describe('TeamTaskEvidenceService core', () => {
+  it('requires expectedVersion on every evidence mutation', async () => {
+    const { rawService } = createHarness();
+    await expect(
+      rawService.bindEvidence({
+        actorExternalId: ids.actor,
+        workItemExternalId: ids.workItem,
+        idempotencyKey: 'missing-evidence-version',
+        source: { kind: 'evidenceArtifact', evidenceArtifactId: ids.artifact },
+      }),
+    ).rejects.toSatisfy((error: unknown) => {
+      expectCode(error, 'INVALID_INPUT');
+      return true;
+    });
+  });
+
+  it('rejects stale evidence mutations when the router supplies expectedVersion', async () => {
+    const { service } = createHarness();
+
+    await expect(
+      service.bindEvidence({
+        actorExternalId: ids.actor,
+        workItemExternalId: ids.workItem,
+        expectedVersion: 6,
+        idempotencyKey: 'stale-evidence-version',
+        source: { kind: 'evidenceArtifact', evidenceArtifactId: ids.artifact },
+      }),
+    ).rejects.toSatisfy((error: unknown) => {
+      expectCode(error, 'CONFLICT');
+      return true;
+    });
+  });
+
   it('requires exactly one evidence source kind', async () => {
     const { service } = createHarness();
 

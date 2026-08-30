@@ -22,6 +22,7 @@ import { scheduledTasksRouter } from './routers/scheduled-tasks.js';
 import { skillsRouter } from './routers/skills.js';
 import { stocksRouter } from './routers/stocks.js';
 import { tasksRouter } from './routers/tasks.js';
+import { teamTasksRouter } from './routers/team-tasks.js';
 import { usageRouter } from './routers/usage.js';
 import { videoEditingRouter } from './routers/video-editing.js';
 import { videoOnboardingRouter } from './routers/video-onboarding.js';
@@ -38,6 +39,7 @@ export const appRouter = router({
   energy: energyRouter,
   auth: authRouter,
   tasks: tasksRouter,
+  teamTasks: teamTasksRouter,
   llmCalls: llmCallsRouter,
   feedback: feedbackRouter,
   memory: memoryRouter,

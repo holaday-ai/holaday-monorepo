@@ -430,6 +430,11 @@ function idempotencyKey(value: unknown): string {
   return key;
 }
 
+function expectedVersion(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) return fail('INVALID_INPUT');
+  return value as number;
+}
+
 function stableJson(value: unknown, seen = new WeakSet<object>()): string {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') {
     return JSON.stringify(value);
@@ -1166,7 +1171,7 @@ export class TeamTaskEvidenceService {
       !isRecord(input) ||
       !exactOptionalKeys(
         input,
-        ['actorExternalId', 'workItemExternalId', 'idempotencyKey', 'source'],
+        ['actorExternalId', 'workItemExternalId', 'expectedVersion', 'idempotencyKey', 'source'],
         ['target', 'metadata'],
       )
     ) {
@@ -1175,6 +1180,7 @@ export class TeamTaskEvidenceService {
     const actorExternalId = text(input.actorExternalId, 32, 'user');
     const workItemExternalId = text(input.workItemExternalId, 32, 'teamWorkItem');
     const idempotency = idempotencyKey(input.idempotencyKey);
+    const requiredVersion = expectedVersion(input.expectedVersion);
     const source = evidenceSource(input.source);
     const target = evidenceTarget(input.target);
     const safeMetadata = metadata(input.metadata);
@@ -1184,6 +1190,7 @@ export class TeamTaskEvidenceService {
       source,
       target,
       metadata: safeMetadata,
+      expectedVersion: requiredVersion,
     });
     return this.runTransaction(() =>
       this.repository.transaction(async (tx) => {
@@ -1210,6 +1217,7 @@ export class TeamTaskEvidenceService {
           },
         );
         if (previous) return previous;
+        if (workItem.version !== requiredVersion) fail('CONFLICT');
 
         let evidenceArtifactId: number | null = null;
         let taskFileId: number | null = null;
@@ -1313,13 +1321,18 @@ export class TeamTaskEvidenceService {
   async recordAiContribution(input: unknown): Promise<TeamTaskEvidenceReceipt> {
     if (
       !isRecord(input) ||
-      !exactKeys(input, [
-        'actorExternalId',
-        'workItemExternalId',
-        'executionTaskId',
-        'requestedScope',
-        'idempotencyKey',
-      ])
+      !exactOptionalKeys(
+        input,
+        [
+          'actorExternalId',
+          'workItemExternalId',
+          'executionTaskId',
+          'requestedScope',
+          'expectedVersion',
+          'idempotencyKey',
+        ],
+        [],
+      )
     ) {
       return fail('INVALID_INPUT');
     }
@@ -1328,11 +1341,13 @@ export class TeamTaskEvidenceService {
     const executionTaskExternalId = text(input.executionTaskId, 32, 'task');
     const requestedScope = text(input.requestedScope, 2_000);
     const idempotency = idempotencyKey(input.idempotencyKey);
+    const requiredVersion = expectedVersion(input.expectedVersion);
     const hash = requestHash('record_ai_contribution', {
       actorExternalId,
       workItemExternalId,
       executionTaskExternalId,
       requestedScope,
+      expectedVersion: requiredVersion,
     });
     return this.runTransaction(() =>
       this.repository.transaction(async (tx) => {
@@ -1359,6 +1374,7 @@ export class TeamTaskEvidenceService {
           },
         );
         if (previous) return previous;
+        if (workItem.version !== requiredVersion) fail('CONFLICT');
         const executionTask = await tx.lockExecutionTask(executionTaskExternalId);
         if (
           !executionTask ||
@@ -1424,7 +1440,14 @@ export class TeamTaskEvidenceService {
       !isRecord(input) ||
       !exactOptionalKeys(
         input,
-        ['actorExternalId', 'workItemExternalId', 'aiContributionId', 'status', 'idempotencyKey'],
+        [
+          'actorExternalId',
+          'workItemExternalId',
+          'aiContributionId',
+          'status',
+          'expectedVersion',
+          'idempotencyKey',
+        ],
         ['humanChangesSummary'],
       )
     ) {
@@ -1443,12 +1466,14 @@ export class TeamTaskEvidenceService {
         : text(input.humanChangesSummary, 1_000);
     if ((status === 'modified') !== (humanChangesSummary !== null)) return fail('INVALID_INPUT');
     const idempotency = idempotencyKey(input.idempotencyKey);
+    const requiredVersion = expectedVersion(input.expectedVersion);
     const hash = requestHash('confirm_ai_contribution', {
       actorExternalId,
       workItemExternalId,
       aiContributionExternalId,
       status,
       humanChangesSummary,
+      expectedVersion: requiredVersion,
     });
     return this.runTransaction(() =>
       this.repository.transaction(async (tx) => {
@@ -1475,6 +1500,7 @@ export class TeamTaskEvidenceService {
           },
         );
         if (previous) return previous;
+        if (workItem.version !== requiredVersion) fail('CONFLICT');
         const contribution = await tx.lockAiContribution(aiContributionExternalId);
         if (
           !contribution ||
