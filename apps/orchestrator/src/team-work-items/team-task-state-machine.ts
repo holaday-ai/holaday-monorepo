@@ -1,3 +1,5 @@
+import { parseIsoUtcInstant } from './acceptance-contract.js';
+
 export const TEAM_TASK_STATES = [
   'draft',
   'ready',
@@ -103,6 +105,8 @@ export interface TeamTaskRevisionSnapshot {
 }
 
 export type TeamTaskTransitionErrorCode =
+  | 'INVALID_CURRENT'
+  | 'INVALID_COMMAND'
   | 'INVALID_TRANSITION'
   | 'APPEAL_OPEN'
   | 'FINAL_DECISION_REQUIRED'
@@ -117,12 +121,15 @@ export type TeamTaskTransitionErrorCode =
   | 'SUBMITTED_AT_INVALID'
   | 'DUE_AT_INVALID'
   | 'REVISION_FAILED_CRITERIA_REQUIRED'
+  | 'REVISION_FAILED_CRITERIA_INVALID'
   | 'REVISION_FAILED_CRITERIA_TOO_LONG'
   | 'REVISION_FAILED_CRITERIA_COUNT_EXCEEDED'
   | 'REVISION_EVIDENCE_REQUIRED'
+  | 'REVISION_EVIDENCE_INVALID'
   | 'REVISION_EVIDENCE_TOO_LONG'
   | 'REVISION_EVIDENCE_COUNT_EXCEEDED'
   | 'REVISION_INSTRUCTIONS_REQUIRED'
+  | 'REVISION_INSTRUCTIONS_INVALID'
   | 'REVISION_INSTRUCTIONS_TOO_LONG'
   | 'REVISION_INSTRUCTIONS_COUNT_EXCEEDED'
   | 'REVISION_DEADLINE_INVALID'
@@ -148,36 +155,67 @@ const REVISION_EVIDENCE_REFERENCE_MAX_COUNT = 100;
 const REVISION_INSTRUCTION_MAX_LENGTH = 1_000;
 const REVISION_INSTRUCTION_MAX_COUNT = 50;
 
-const simpleTransitions: Partial<
-  Record<TeamTaskState, Partial<Record<TeamTaskCommand['type'], TeamTaskState>>>
-> = {
-  draft: { publish: 'ready', cancel: 'cancelled' },
-  ready: { assign: 'assigned', make_claimable: 'claimable', cancel: 'cancelled' },
-  assigned: { accept_assignment: 'accepted_by_member', cancel: 'cancelled' },
-  claimable: { claim: 'accepted_by_member', cancel: 'cancelled' },
-  accepted_by_member: { start: 'in_progress', cancel: 'cancelled' },
-  in_progress: { block: 'blocked', submit: 'submitted', cancel: 'cancelled' },
-  blocked: { unblock: 'in_progress', cancel: 'cancelled' },
-  submitted: { start_review: 'in_review' },
-  in_review: {
-    request_revision: 'revision_requested',
-    accept: 'accepted',
-    reject_final: 'rejected_final',
-  },
-  revision_requested: { resubmit: 'resubmitted' },
-  resubmitted: { start_review: 'in_review' },
-  accepted: { complete: 'completed' },
-  completed: { archive: 'archived' },
-  cancelled: { archive: 'archived' },
-  rejected_final: { archive: 'archived' },
-};
+const stateAllowlist = new Set<string>(TEAM_TASK_STATES);
+const commandAllowlist = new Set<string>(TEAM_TASK_COMMAND_TYPES);
+const simpleTransitions = new Map<string, TeamTaskState>([
+  ['draft:publish', 'ready'],
+  ['draft:cancel', 'cancelled'],
+  ['ready:assign', 'assigned'],
+  ['ready:make_claimable', 'claimable'],
+  ['ready:cancel', 'cancelled'],
+  ['assigned:accept_assignment', 'accepted_by_member'],
+  ['assigned:cancel', 'cancelled'],
+  ['claimable:claim', 'accepted_by_member'],
+  ['claimable:cancel', 'cancelled'],
+  ['accepted_by_member:start', 'in_progress'],
+  ['accepted_by_member:cancel', 'cancelled'],
+  ['in_progress:block', 'blocked'],
+  ['in_progress:submit', 'submitted'],
+  ['in_progress:cancel', 'cancelled'],
+  ['blocked:unblock', 'in_progress'],
+  ['blocked:cancel', 'cancelled'],
+  ['submitted:start_review', 'in_review'],
+  ['in_review:request_revision', 'revision_requested'],
+  ['in_review:accept', 'accepted'],
+  ['in_review:reject_final', 'rejected_final'],
+  ['revision_requested:resubmit', 'resubmitted'],
+  ['resubmitted:start_review', 'in_review'],
+  ['accepted:complete', 'completed'],
+  ['completed:archive', 'archived'],
+  ['cancelled:archive', 'archived'],
+  ['rejected_final:archive', 'archived'],
+]);
 
 function reject(code: TeamTaskTransitionErrorCode): TeamTaskTransitionResult {
   return { ok: false, code };
 }
 
-function validTime(value: unknown): value is string {
-  return typeof value === 'string' && value.trim() !== '' && Number.isFinite(Date.parse(value));
+function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasOwn(value: object, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function validCurrent(value: unknown): value is TeamTaskCurrent {
+  return (
+    isRecord(value) &&
+    hasOwn(value, 'state') &&
+    typeof value.state === 'string' &&
+    stateAllowlist.has(value.state) &&
+    hasOwn(value, 'appealOpen') &&
+    typeof value.appealOpen === 'boolean'
+  );
+}
+
+function validCommand(value: unknown): value is TeamTaskCommand {
+  return (
+    isRecord(value) &&
+    hasOwn(value, 'type') &&
+    typeof value.type === 'string' &&
+    commandAllowlist.has(value.type)
+  );
 }
 
 function uniqueTrimmed(values: readonly string[]): string[] {
@@ -210,9 +248,11 @@ function validateBlock(
   if (nextAction.length > BLOCK_NEXT_ACTION_MAX_LENGTH) {
     return reject('BLOCK_NEXT_ACTION_TOO_LONG');
   }
-  if (!validTime(command.now)) return reject('BLOCK_REFERENCE_TIME_INVALID');
-  if (!validTime(command.reviewAt)) return reject('BLOCK_REVIEW_AT_INVALID');
-  if (Date.parse(command.reviewAt) <= Date.parse(command.now)) {
+  const now = parseIsoUtcInstant(command.now);
+  if (!now) return reject('BLOCK_REFERENCE_TIME_INVALID');
+  const reviewAt = parseIsoUtcInstant(command.reviewAt);
+  if (!reviewAt) return reject('BLOCK_REVIEW_AT_INVALID');
+  if (reviewAt.epochMs <= now.epochMs) {
     return reject('BLOCK_REVIEW_AT_NOT_FUTURE');
   }
   if (typeof command.affectsDueDate !== 'boolean') {
@@ -224,7 +264,7 @@ function validateBlock(
     blocker: {
       responsibleParty,
       nextAction,
-      reviewAt: command.reviewAt,
+      reviewAt: reviewAt.canonical,
       affectsDueDate: command.affectsDueDate,
     },
   };
@@ -234,15 +274,17 @@ function validateSubmission(
   command: Extract<TeamTaskCommand, { type: 'submit' | 'resubmit' }>,
   state: 'submitted' | 'resubmitted',
 ): TeamTaskTransitionResult {
-  if (!validTime(command.submittedAt)) return reject('SUBMITTED_AT_INVALID');
-  if (!validTime(command.dueAt)) return reject('DUE_AT_INVALID');
+  const submittedAt = parseIsoUtcInstant(command.submittedAt);
+  if (!submittedAt) return reject('SUBMITTED_AT_INVALID');
+  const dueAt = parseIsoUtcInstant(command.dueAt);
+  if (!dueAt) return reject('DUE_AT_INVALID');
   return {
     ok: true,
     state,
     submission: {
-      submittedAt: command.submittedAt,
-      dueAt: command.dueAt,
-      submittedOnTime: Date.parse(command.submittedAt) <= Date.parse(command.dueAt),
+      submittedAt: submittedAt.canonical,
+      dueAt: dueAt.canonical,
+      submittedOnTime: submittedAt.epochMs <= dueAt.epochMs,
     },
   };
 }
@@ -253,13 +295,19 @@ function validateRevision(
   if (!Array.isArray(command.failedCriterionIds)) {
     return reject('REVISION_FAILED_CRITERIA_REQUIRED');
   }
+  if (command.failedCriterionIds.length === 0) {
+    return reject('REVISION_FAILED_CRITERIA_REQUIRED');
+  }
   if (command.failedCriterionIds.length > REVISION_CRITERION_ID_MAX_COUNT) {
     return reject('REVISION_FAILED_CRITERIA_COUNT_EXCEEDED');
   }
-  const failedCriterionIds = uniqueTrimmed(
-    command.failedCriterionIds.filter((value): value is string => typeof value === 'string'),
-  ).filter(Boolean);
-  if (failedCriterionIds.length === 0) return reject('REVISION_FAILED_CRITERIA_REQUIRED');
+  if (command.failedCriterionIds.some((value) => typeof value !== 'string')) {
+    return reject('REVISION_FAILED_CRITERIA_INVALID');
+  }
+  const failedCriterionIds = uniqueTrimmed(command.failedCriterionIds);
+  if (failedCriterionIds.some((value) => value === '')) {
+    return reject('REVISION_FAILED_CRITERIA_REQUIRED');
+  }
   if (failedCriterionIds.some((value) => value.length > REVISION_CRITERION_ID_MAX_LENGTH)) {
     return reject('REVISION_FAILED_CRITERIA_TOO_LONG');
   }
@@ -272,13 +320,15 @@ function validateRevision(
   const seenEvidence = new Set<string>();
   for (const item of command.evidenceReferences) {
     if (
-      (item?.kind !== 'evidence' && item?.kind !== 'missing_evidence') ||
+      !isRecord(item) ||
+      (item.kind !== 'evidence' && item.kind !== 'missing_evidence') ||
       typeof item.reference !== 'string' ||
-      item.reference.trim() === ''
+      !hasOwn(item, 'reference')
     ) {
-      continue;
+      return reject('REVISION_EVIDENCE_INVALID');
     }
     const reference = item.reference.trim();
+    if (reference === '') return reject('REVISION_EVIDENCE_REQUIRED');
     if (reference.length > REVISION_EVIDENCE_REFERENCE_MAX_LENGTH) {
       return reject('REVISION_EVIDENCE_TOO_LONG');
     }
@@ -292,20 +342,28 @@ function validateRevision(
   if (!Array.isArray(command.revisionInstructions)) {
     return reject('REVISION_INSTRUCTIONS_REQUIRED');
   }
+  if (command.revisionInstructions.length === 0) {
+    return reject('REVISION_INSTRUCTIONS_REQUIRED');
+  }
   if (command.revisionInstructions.length > REVISION_INSTRUCTION_MAX_COUNT) {
     return reject('REVISION_INSTRUCTIONS_COUNT_EXCEEDED');
   }
-  const revisionInstructions = uniqueTrimmed(
-    command.revisionInstructions.filter((value): value is string => typeof value === 'string'),
-  ).filter(Boolean);
-  if (revisionInstructions.length === 0) return reject('REVISION_INSTRUCTIONS_REQUIRED');
+  if (command.revisionInstructions.some((value) => typeof value !== 'string')) {
+    return reject('REVISION_INSTRUCTIONS_INVALID');
+  }
+  const revisionInstructions = uniqueTrimmed(command.revisionInstructions);
+  if (revisionInstructions.some((value) => value === '')) {
+    return reject('REVISION_INSTRUCTIONS_REQUIRED');
+  }
   if (revisionInstructions.some((value) => value.length > REVISION_INSTRUCTION_MAX_LENGTH)) {
     return reject('REVISION_INSTRUCTIONS_TOO_LONG');
   }
 
-  if (!validTime(command.reviewAt)) return reject('REVISION_REFERENCE_TIME_INVALID');
-  if (!validTime(command.newDeadline)) return reject('REVISION_DEADLINE_INVALID');
-  if (Date.parse(command.newDeadline) <= Date.parse(command.reviewAt)) {
+  const reviewAt = parseIsoUtcInstant(command.reviewAt);
+  if (!reviewAt) return reject('REVISION_REFERENCE_TIME_INVALID');
+  const newDeadline = parseIsoUtcInstant(command.newDeadline);
+  if (!newDeadline) return reject('REVISION_DEADLINE_INVALID');
+  if (newDeadline.epochMs <= reviewAt.epochMs) {
     return reject('REVISION_DEADLINE_NOT_FUTURE');
   }
   return {
@@ -315,7 +373,7 @@ function validateRevision(
       failedCriterionIds,
       evidenceReferences,
       revisionInstructions,
-      newDeadline: command.newDeadline,
+      newDeadline: newDeadline.canonical,
     },
   };
 }
@@ -324,7 +382,9 @@ export function transitionTeamTask(
   current: TeamTaskCurrent,
   command: TeamTaskCommand,
 ): TeamTaskTransitionResult {
-  const target = simpleTransitions[current.state]?.[command.type];
+  if (!validCurrent(current)) return reject('INVALID_CURRENT');
+  if (!validCommand(command)) return reject('INVALID_COMMAND');
+  const target = simpleTransitions.get(`${current.state}:${command.type}`);
   if (!target) return reject('INVALID_TRANSITION');
 
   if (command.type === 'reject_final') {

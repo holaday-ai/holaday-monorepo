@@ -82,6 +82,60 @@ const legalTransitions = [
 ])[];
 
 describe('team task state machine', () => {
+  it.each([
+    [null, { type: 'publish' }, 'INVALID_CURRENT'],
+    [undefined, { type: 'publish' }, 'INVALID_CURRENT'],
+    [{ appealOpen: false }, { type: 'publish' }, 'INVALID_CURRENT'],
+    [{ state: 'unknown', appealOpen: false }, { type: 'publish' }, 'INVALID_CURRENT'],
+    [{ state: 'toString', appealOpen: false }, { type: 'publish' }, 'INVALID_CURRENT'],
+    [{ state: 'draft' }, { type: 'publish' }, 'INVALID_CURRENT'],
+    [{ state: 'draft', appealOpen: 'false' }, { type: 'publish' }, 'INVALID_CURRENT'],
+  ] as const)('fails closed for malformed current %#', (malformedCurrent, command, code) => {
+    expect(
+      transitionTeamTask(
+        malformedCurrent as unknown as Parameters<typeof transitionTeamTask>[0],
+        command as TeamTaskCommand,
+      ),
+    ).toEqual({ ok: false, code });
+  });
+
+  it('requires state to be an own property of current', () => {
+    const inheritedState = Object.assign(Object.create({ state: 'draft' }), {
+      appealOpen: false,
+    });
+    expect(
+      transitionTeamTask(
+        inheritedState as Parameters<typeof transitionTeamTask>[0],
+        validCommands.publish,
+      ),
+    ).toEqual({ ok: false, code: 'INVALID_CURRENT' });
+  });
+
+  it.each([
+    [null, 'INVALID_COMMAND'],
+    [undefined, 'INVALID_COMMAND'],
+    [{}, 'INVALID_COMMAND'],
+    [{ type: 'unknown' }, 'INVALID_COMMAND'],
+    [{ type: 'toString' }, 'INVALID_COMMAND'],
+  ] as const)('fails closed for malformed command %#', (malformedCommand, code) => {
+    expect(
+      transitionTeamTask(
+        current('draft'),
+        malformedCommand as unknown as Parameters<typeof transitionTeamTask>[1],
+      ),
+    ).toEqual({ ok: false, code });
+  });
+
+  it('requires type to be an own property of command', () => {
+    const inheritedType = Object.create({ type: 'publish' });
+    expect(
+      transitionTeamTask(
+        current('draft'),
+        inheritedType as Parameters<typeof transitionTeamTask>[1],
+      ),
+    ).toEqual({ ok: false, code: 'INVALID_COMMAND' });
+  });
+
   it.each(legalTransitions)('allows %s --%s--> %s', (from, commandType, to) => {
     expect(transitionTeamTask(current(from), validCommands[commandType])).toMatchObject({
       ok: true,
@@ -259,6 +313,31 @@ describe('team task state machine', () => {
     ).toEqual({ ok: false, code });
   });
 
+  it.each([
+    ['failedCriterionIds', ['criterion-1', 42], 'REVISION_FAILED_CRITERIA_INVALID'],
+    [
+      'evidenceReferences',
+      [{ kind: 'evidence', reference: 'artifact-1' }, null],
+      'REVISION_EVIDENCE_INVALID',
+    ],
+    [
+      'evidenceReferences',
+      [
+        { kind: 'evidence', reference: 'artifact-1' },
+        { kind: 'evidence', reference: 42 },
+      ],
+      'REVISION_EVIDENCE_INVALID',
+    ],
+    ['revisionInstructions', ['Correct row 4', {}], 'REVISION_INSTRUCTIONS_INVALID'],
+  ] as const)('rejects the whole revision request for mixed malformed %s', (field, value, code) => {
+    expect(
+      transitionTeamTask(current('in_review'), {
+        ...validCommands.request_revision,
+        [field]: value,
+      } as unknown as TeamTaskCommand),
+    ).toEqual({ ok: false, code });
+  });
+
   it('normalizes revision fields while preserving missing-evidence semantics', () => {
     expect(
       transitionTeamTask(current('in_review'), {
@@ -316,6 +395,78 @@ describe('team task state machine', () => {
         [field]: value,
       }),
     ).toEqual({ ok: false, code });
+  });
+
+  it.each([
+    ['submittedAt', '2026-09-31T00:00:00.000Z', 'SUBMITTED_AT_INVALID'],
+    ['submittedAt', '2026-09-01T00:00:00', 'SUBMITTED_AT_INVALID'],
+    ['submittedAt', '2026-09-01T00:00:00.0000Z', 'SUBMITTED_AT_INVALID'],
+    ['dueAt', '2026-09-31T00:00:00.000Z', 'DUE_AT_INVALID'],
+  ] as const)('rejects non-strict submission timestamp %s', (field, value, code) => {
+    expect(
+      transitionTeamTask(current('in_progress'), {
+        ...validCommands.submit,
+        [field]: value,
+      }),
+    ).toEqual({ ok: false, code });
+  });
+
+  it.each([
+    [
+      'block',
+      current('in_progress'),
+      { ...validCommands.block, reviewAt: '2026-09-31T00:00:00.000Z' },
+      'BLOCK_REVIEW_AT_INVALID',
+    ],
+    [
+      'block reference',
+      current('in_progress'),
+      { ...validCommands.block, now: '2026-09-31T00:00:00.000Z' },
+      'BLOCK_REFERENCE_TIME_INVALID',
+    ],
+    [
+      'revision deadline',
+      current('in_review'),
+      { ...validCommands.request_revision, newDeadline: '2026-09-31T00:00:00.000Z' },
+      'REVISION_DEADLINE_INVALID',
+    ],
+    [
+      'revision reference',
+      current('in_review'),
+      { ...validCommands.request_revision, reviewAt: '2026-09-31T00:00:00.000Z' },
+      'REVISION_REFERENCE_TIME_INVALID',
+    ],
+  ] as const)('rejects impossible ISO UTC calendar date for %s', (_label, task, command, code) => {
+    expect(transitionTeamTask(task, command as TeamTaskCommand)).toEqual({ ok: false, code });
+  });
+
+  it('canonicalizes accepted ISO UTC instants in returned snapshots', () => {
+    expect(
+      transitionTeamTask(current('in_progress'), {
+        ...validCommands.block,
+        now: '2026-08-31T00:00:00Z',
+        reviewAt: '2026-08-31T01:00:00Z',
+      }),
+    ).toMatchObject({ blocker: { reviewAt: '2026-08-31T01:00:00.000Z' } });
+    expect(
+      transitionTeamTask(current('in_progress'), {
+        type: 'submit',
+        submittedAt: '2026-08-31T00:00:00Z',
+        dueAt: '2026-09-01T00:00:00Z',
+      }),
+    ).toMatchObject({
+      submission: {
+        submittedAt: '2026-08-31T00:00:00.000Z',
+        dueAt: '2026-09-01T00:00:00.000Z',
+      },
+    });
+    expect(
+      transitionTeamTask(current('in_review'), {
+        ...validCommands.request_revision,
+        reviewAt: '2026-08-31T00:00:00Z',
+        newDeadline: '2026-09-02T00:00:00Z',
+      }),
+    ).toMatchObject({ revision: { newDeadline: '2026-09-02T00:00:00.000Z' } });
   });
 
   it.each([

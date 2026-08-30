@@ -33,16 +33,22 @@ export interface NormalizedAcceptanceContract {
 }
 
 export type AcceptanceContractErrorCode =
+  | 'INVALID_INPUT'
+  | 'INVALID_CONTEXT'
   | 'REFERENCE_TIME_INVALID'
   | 'OBJECTIVE_REQUIRED'
   | 'OBJECTIVE_TOO_LONG'
   | 'DELIVERABLE_REQUIRED'
+  | 'DELIVERABLE_INVALID'
   | 'DELIVERABLE_TOO_LONG'
+  | 'DELIVERABLE_COUNT_EXCEEDED'
   | 'CRITERION_REQUIRED'
+  | 'CRITERION_INVALID'
   | 'CRITERION_ID_REQUIRED'
   | 'CRITERION_ID_TOO_LONG'
   | 'CRITERION_DESCRIPTION_REQUIRED'
   | 'CRITERION_DESCRIPTION_TOO_LONG'
+  | 'CRITERION_COUNT_EXCEEDED'
   | 'DUPLICATE_CRITERION_ID'
   | 'UNLIMITED_OBLIGATION'
   | 'EVIDENCE_TYPE_REQUIRED'
@@ -56,6 +62,7 @@ export type AcceptanceContractErrorCode =
   | 'ARBITRATOR_ID_REQUIRED'
   | 'ARBITRATOR_ID_TOO_LONG'
   | 'APPROVER_ARBITRATOR_CONFLICT'
+  | 'RESPONSIBLE_PERSON_ID_INVALID'
   | 'RESPONSIBLE_PERSON_ID_TOO_LONG'
   | 'APPROVER_RESPONSIBLE_CONFLICT'
   | 'ARBITRATOR_RESPONSIBLE_CONFLICT'
@@ -69,27 +76,51 @@ export type AcceptanceContractValidationResult =
 
 const OBJECTIVE_MAX_LENGTH = 2_000;
 const DELIVERABLE_MAX_LENGTH = 500;
+const DELIVERABLE_MAX_COUNT = 50;
 const CRITERION_ID_MAX_LENGTH = 100;
 const CRITERION_DESCRIPTION_MAX_LENGTH = 1_000;
+const CRITERION_MAX_COUNT = 100;
 const EVIDENCE_TYPE_MAX_LENGTH = 100;
 const EVIDENCE_TYPE_MAX_COUNT = 50;
 const EVIDENCE_DESCRIPTION_MAX_LENGTH = 500;
 const ACTOR_ID_MAX_LENGTH = 128;
 const UNLIMITED_OBLIGATION = /做\s*到\s*满\s*意\s*为\s*止/u;
+const ISO_UTC_INSTANT_MAX_LENGTH = 24;
+const ISO_UTC_INSTANT_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?Z$/u;
+
+export interface ParsedIsoUtcInstant {
+  canonical: string;
+  epochMs: number;
+}
+
+export function parseIsoUtcInstant(value: unknown): ParsedIsoUtcInstant | null {
+  if (typeof value !== 'string' || value.length > ISO_UTC_INSTANT_MAX_LENGTH) return null;
+  const match = ISO_UTC_INSTANT_PATTERN.exec(value);
+  if (!match) return null;
+  const [, year, month, day, hour, minute, second, fraction = ''] = match;
+  const canonical = `${year}-${month}-${day}T${hour}:${minute}:${second}.${fraction.padEnd(3, '0')}Z`;
+  const epochMs = Date.parse(canonical);
+  if (!Number.isFinite(epochMs) || new Date(epochMs).toISOString() !== canonical) return null;
+  return { canonical, epochMs };
+}
 
 function reject(code: AcceptanceContractErrorCode): AcceptanceContractValidationResult {
   return { ok: false, code };
 }
 
-function validTime(value: unknown): value is string {
-  return typeof value === 'string' && value.trim() !== '' && Number.isFinite(Date.parse(value));
+function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export function validateAcceptanceContract(
   input: AcceptanceContractInput,
   context: { now: string },
 ): AcceptanceContractValidationResult {
-  if (!validTime(context.now)) return reject('REFERENCE_TIME_INVALID');
+  if (!isRecord(input)) return reject('INVALID_INPUT');
+  if (!isRecord(context)) return reject('INVALID_CONTEXT');
+  const referenceTime = parseIsoUtcInstant(context.now);
+  if (!referenceTime) return reject('REFERENCE_TIME_INVALID');
 
   if (typeof input.objective !== 'string' || input.objective.trim() === '') {
     return reject('OBJECTIVE_REQUIRED');
@@ -97,12 +128,17 @@ export function validateAcceptanceContract(
   const objective = input.objective.trim();
   if (objective.length > OBJECTIVE_MAX_LENGTH) return reject('OBJECTIVE_TOO_LONG');
 
-  if (!Array.isArray(input.deliverables)) return reject('DELIVERABLE_REQUIRED');
-  const deliverables = input.deliverables
-    .filter((value): value is string => typeof value === 'string')
-    .map((value) => value.trim())
-    .filter(Boolean);
-  if (deliverables.length === 0) return reject('DELIVERABLE_REQUIRED');
+  if (!Array.isArray(input.deliverables) || input.deliverables.length === 0) {
+    return reject('DELIVERABLE_REQUIRED');
+  }
+  if (input.deliverables.length > DELIVERABLE_MAX_COUNT) {
+    return reject('DELIVERABLE_COUNT_EXCEEDED');
+  }
+  if (input.deliverables.some((value) => typeof value !== 'string')) {
+    return reject('DELIVERABLE_INVALID');
+  }
+  const deliverables = input.deliverables.map((value) => value.trim());
+  if (deliverables.some((value) => value === '')) return reject('DELIVERABLE_REQUIRED');
   if (deliverables.some((value) => value.length > DELIVERABLE_MAX_LENGTH)) {
     return reject('DELIVERABLE_TOO_LONG');
   }
@@ -110,10 +146,12 @@ export function validateAcceptanceContract(
   if (!Array.isArray(input.criteria) || input.criteria.length === 0) {
     return reject('CRITERION_REQUIRED');
   }
+  if (input.criteria.length > CRITERION_MAX_COUNT) return reject('CRITERION_COUNT_EXCEEDED');
   const criteria: AcceptanceCriterionInput[] = [];
   const criterionKeys = new Set<string>();
   for (const criterion of input.criteria) {
-    if (typeof criterion?.id !== 'string' || criterion.id.trim() === '') {
+    if (!isRecord(criterion)) return reject('CRITERION_INVALID');
+    if (typeof criterion.id !== 'string' || criterion.id.trim() === '') {
       return reject('CRITERION_ID_REQUIRED');
     }
     const id = criterion.id.trim();
@@ -131,14 +169,6 @@ export function validateAcceptanceContract(
     criteria.push({ id, description });
   }
 
-  if (
-    [objective, ...deliverables, ...criteria.map((criterion) => criterion.description)].some(
-      (value) => UNLIMITED_OBLIGATION.test(value),
-    )
-  ) {
-    return reject('UNLIMITED_OBLIGATION');
-  }
-
   if (!Array.isArray(input.requiredEvidenceTypes) || input.requiredEvidenceTypes.length === 0) {
     return reject('EVIDENCE_TYPE_REQUIRED');
   }
@@ -148,7 +178,8 @@ export function validateAcceptanceContract(
   const requiredEvidenceTypes: RequiredEvidenceTypeInput[] = [];
   const evidenceTypeKeys = new Set<string>();
   for (const evidenceType of input.requiredEvidenceTypes) {
-    if (typeof evidenceType?.type !== 'string' || evidenceType.type.trim() === '') {
+    if (!isRecord(evidenceType)) return reject('EVIDENCE_TYPE_REQUIRED');
+    if (typeof evidenceType.type !== 'string' || evidenceType.type.trim() === '') {
       return reject('EVIDENCE_TYPE_REQUIRED');
     }
     const type = evidenceType.type.trim();
@@ -169,6 +200,18 @@ export function validateAcceptanceContract(
     requiredEvidenceTypes.push(description === undefined ? { type } : { type, description });
   }
 
+  const contractProse = [
+    objective,
+    ...deliverables,
+    ...criteria.flatMap((criterion) => [criterion.id, criterion.description]),
+    ...requiredEvidenceTypes.flatMap((evidenceType) =>
+      evidenceType.description === undefined ? [] : [evidenceType.description],
+    ),
+  ];
+  if (contractProse.some((value) => UNLIMITED_OBLIGATION.test(value))) {
+    return reject('UNLIMITED_OBLIGATION');
+  }
+
   if (typeof input.approverId !== 'string' || input.approverId.trim() === '') {
     return reject('APPROVER_ID_REQUIRED');
   }
@@ -180,6 +223,9 @@ export function validateAcceptanceContract(
   const arbitratorId = input.arbitratorId.trim();
   if (arbitratorId.length > ACTOR_ID_MAX_LENGTH) return reject('ARBITRATOR_ID_TOO_LONG');
   if (approverId === arbitratorId) return reject('APPROVER_ARBITRATOR_CONFLICT');
+  if (input.responsiblePersonId !== undefined && typeof input.responsiblePersonId !== 'string') {
+    return reject('RESPONSIBLE_PERSON_ID_INVALID');
+  }
   const responsiblePersonId = input.responsiblePersonId?.trim();
   if (responsiblePersonId && responsiblePersonId.length > ACTOR_ID_MAX_LENGTH) {
     return reject('RESPONSIBLE_PERSON_ID_TOO_LONG');
@@ -191,8 +237,9 @@ export function validateAcceptanceContract(
     return reject('ARBITRATOR_RESPONSIBLE_CONFLICT');
   }
 
-  if (!validTime(input.dueAt)) return reject('DUE_AT_INVALID');
-  if (Date.parse(input.dueAt) <= Date.parse(context.now)) return reject('DUE_AT_NOT_FUTURE');
+  const dueAt = parseIsoUtcInstant(input.dueAt);
+  if (!dueAt) return reject('DUE_AT_INVALID');
+  if (dueAt.epochMs <= referenceTime.epochMs) return reject('DUE_AT_NOT_FUTURE');
   if (
     !Number.isInteger(input.maxRevisionRounds) ||
     input.maxRevisionRounds < 0 ||
@@ -211,7 +258,7 @@ export function validateAcceptanceContract(
       approverId,
       arbitratorId,
       ...(responsiblePersonId ? { responsiblePersonId } : {}),
-      dueAt: new Date(input.dueAt).toISOString(),
+      dueAt: dueAt.canonical,
       maxRevisionRounds: input.maxRevisionRounds,
     },
   };
