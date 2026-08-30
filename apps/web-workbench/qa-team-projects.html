@@ -1,0 +1,1212 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Holaday 团队项目空间 Phase 1 QA</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #222126;
+        --muted: #6f6c76;
+        --line: #dedde2;
+        --soft-line: #efedf1;
+        --paper: #ffffff;
+        --canvas: #f8f8fa;
+        --brand: #e91f59;
+        --brand-soft: #fff1f5;
+        --violet: #57479c;
+        --violet-soft: #f3f0ff;
+        --blue: #167c9a;
+        --blue-soft: #eefaff;
+        --warning: #9a6322;
+        --warning-soft: #fff8ec;
+        --danger: #9a3b55;
+        --danger-soft: #fff4f6;
+        --shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+        font-family:
+          Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: var(--canvas);
+        color: var(--ink);
+      }
+
+      body {
+        min-width: 320px;
+      }
+
+      button,
+      select,
+      input {
+        font: inherit;
+      }
+
+      button,
+      select {
+        min-height: 44px;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+      }
+
+      :focus-visible {
+        outline: 3px solid rgba(233, 31, 89, 0.34);
+        outline-offset: 2px;
+      }
+
+      .skip-link {
+        position: fixed;
+        left: 16px;
+        top: -80px;
+        z-index: 100;
+        display: inline-flex;
+        min-height: 44px;
+        align-items: center;
+        border-radius: 8px;
+        background: var(--ink);
+        color: white;
+        padding: 10px 14px;
+      }
+
+      .skip-link:focus {
+        top: 16px;
+      }
+
+      .app-shell {
+        min-height: 100vh;
+      }
+
+      .qa-bar {
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.96);
+      }
+
+      .qa-bar-inner,
+      .page {
+        width: min(1180px, calc(100% - 40px));
+        margin: 0 auto;
+      }
+
+      .qa-bar-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        min-height: 68px;
+      }
+
+      .qa-kicker,
+      .eyebrow {
+        margin: 0;
+        color: var(--brand);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+
+      .qa-title {
+        margin: 3px 0 0;
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      .scenario-field {
+        display: grid;
+        gap: 5px;
+        min-width: 265px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .scenario-field select {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: white;
+        color: var(--ink);
+        padding: 0 36px 0 12px;
+      }
+
+      .page {
+        padding: 34px 0 56px;
+      }
+
+      .page-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 22px;
+      }
+
+      .page-header h1 {
+        margin: 4px 0 0;
+        font-size: clamp(26px, 3vw, 34px);
+        line-height: 1.15;
+        letter-spacing: -0.03em;
+      }
+
+      .page-header p:last-child {
+        margin: 9px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .page-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: white;
+        color: #4e4b55;
+        padding: 0 15px;
+        font-size: 13px;
+        font-weight: 650;
+        text-decoration: none;
+        transition:
+          border-color 120ms ease,
+          background-color 120ms ease,
+          color 120ms ease;
+      }
+
+      .button:hover {
+        border-color: #b7b4bd;
+      }
+
+      .button.primary {
+        border-color: var(--brand);
+        background: var(--brand);
+        color: white;
+      }
+
+      .button.primary:hover {
+        background: #d81c53;
+      }
+
+      .button.quiet {
+        border-color: transparent;
+        background: transparent;
+      }
+
+      .button.danger {
+        border-color: rgba(233, 31, 89, 0.22);
+        color: var(--brand);
+      }
+
+      .summary-pill {
+        display: inline-flex;
+        min-height: 44px;
+        align-items: center;
+        border: 1px solid var(--soft-line);
+        border-radius: 999px;
+        background: white;
+        color: var(--muted);
+        padding: 0 13px;
+        font-size: 12px;
+      }
+
+      .surface {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--paper);
+        box-shadow: var(--shadow);
+      }
+
+      .workspace-switcher {
+        padding: 14px;
+      }
+
+      .surface-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .surface-head h2,
+      .surface-head h3 {
+        margin: 0;
+        font-size: 15px;
+      }
+
+      .surface-head p {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      .workspace-tabs {
+        display: flex;
+        gap: 8px;
+        margin-top: 14px;
+        overflow-x: auto;
+        padding-bottom: 2px;
+      }
+
+      .workspace-tab {
+        flex: 0 0 auto;
+        min-height: 44px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: white;
+        color: #595757;
+        padding: 0 13px;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .workspace-tab[aria-pressed="true"] {
+        border-color: rgba(233, 31, 89, 0.36);
+        background: var(--brand-soft);
+        color: var(--brand);
+      }
+
+      .role-badge,
+      .access-badge {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        background: #f0eef2;
+        color: #625f68;
+        padding: 3px 7px;
+        font-size: 10px;
+        font-weight: 650;
+      }
+
+      .workspace-tab .role-badge {
+        margin-left: 6px;
+      }
+
+      .workspace-summary {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 18px;
+        margin-top: 16px;
+        padding: 17px;
+      }
+
+      .workspace-summary h2 {
+        margin: 4px 0 0;
+        font-size: 19px;
+      }
+
+      .workspace-summary p {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .workspace-stats {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(92px, 1fr));
+        gap: 8px;
+      }
+
+      .stat {
+        min-width: 100px;
+        border-radius: 8px;
+        background: #fafafa;
+        padding: 10px 12px;
+      }
+
+      .stat span {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .stat strong {
+        display: block;
+        margin-top: 3px;
+        font-size: 15px;
+      }
+
+      .content-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.85fr);
+        align-items: start;
+        gap: 16px;
+        margin-top: 16px;
+      }
+
+      .projects,
+      .members {
+        padding: 17px;
+      }
+
+      .project-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .project-card {
+        min-width: 0;
+        border: 1px solid var(--soft-line);
+        border-radius: 9px;
+        background: #fff;
+        padding: 15px;
+      }
+
+      .project-card h3 {
+        overflow-wrap: anywhere;
+        margin: 0;
+        font-size: 15px;
+      }
+
+      .project-card p {
+        min-height: 40px;
+        margin: 7px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.65;
+      }
+
+      .project-meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 14px;
+        border-top: 1px solid var(--soft-line);
+        padding-top: 12px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .project-card .button {
+        width: 100%;
+        margin-top: 12px;
+      }
+
+      .member-list {
+        display: grid;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .member-row {
+        border: 1px solid var(--soft-line);
+        border-radius: 8px;
+        background: #fafafa;
+        padding: 12px;
+      }
+
+      .member-row strong {
+        display: block;
+        overflow-wrap: anywhere;
+        font-size: 13px;
+      }
+
+      .member-row p {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .member-actions {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+        border-top: 1px solid var(--soft-line);
+        padding-top: 10px;
+      }
+
+      .member-actions select,
+      .member-actions button {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: white;
+        color: #4e4b55;
+        padding: 0 10px;
+        font-size: 12px;
+      }
+
+      .boundary-note {
+        margin-top: 16px;
+        border: 1px solid #e7e7e7;
+        border-radius: 8px;
+        background: #fafafa;
+        color: var(--muted);
+        padding: 12px 14px;
+        font-size: 12px;
+        line-height: 1.6;
+      }
+
+      .state-panel {
+        margin-top: 16px;
+        padding: 24px;
+        text-align: center;
+      }
+
+      .state-panel h2 {
+        margin: 0;
+        font-size: 17px;
+      }
+
+      .state-panel p {
+        margin: 8px auto 0;
+        max-width: 560px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.65;
+      }
+
+      .state-panel .button {
+        margin-top: 15px;
+      }
+
+      .state-panel.error {
+        border-color: rgba(233, 31, 89, 0.22);
+        background: var(--danger-soft);
+      }
+
+      .state-panel.expired {
+        border-color: #ead8bc;
+        background: var(--warning-soft);
+      }
+
+      .empty-box {
+        margin-top: 14px;
+        border: 1px dashed #cbc8cf;
+        border-radius: 9px;
+        color: var(--muted);
+        padding: 34px 18px;
+        text-align: center;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 80;
+        display: grid;
+        place-items: center;
+        background: rgba(17, 24, 39, 0.38);
+        padding: 16px;
+      }
+
+      .overlay[hidden] {
+        display: none;
+      }
+
+      .dialog {
+        width: min(440px, 100%);
+        max-height: calc(100vh - 32px);
+        overflow-y: auto;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: white;
+        box-shadow: 0 20px 60px rgba(17, 24, 39, 0.2);
+        padding: 20px;
+      }
+
+      .dialog-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .dialog h2 {
+        margin: 0;
+        font-size: 17px;
+      }
+
+      .dialog p {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+
+      .iconless-close {
+        width: 44px;
+        min-width: 44px;
+        border: 0;
+        border-radius: 8px;
+        background: #f7f7f8;
+        color: #4e4b55;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .field {
+        display: grid;
+        gap: 7px;
+        margin-top: 16px;
+        color: #4e4b55;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .field select,
+      .field input {
+        width: 100%;
+        min-height: 44px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: white;
+        color: var(--ink);
+        padding: 0 12px;
+        font-size: 13px;
+        font-weight: 400;
+      }
+
+      .invite-result {
+        margin-top: 16px;
+        border: 1px solid rgba(22, 124, 154, 0.25);
+        border-radius: 9px;
+        background: var(--blue-soft);
+        padding: 13px;
+      }
+
+      .invite-result strong {
+        color: var(--blue);
+        font-size: 12px;
+      }
+
+      .dialog-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 18px;
+      }
+
+      .toast {
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        z-index: 95;
+        border-radius: 9px;
+        background: #25232a;
+        color: white;
+        padding: 11px 14px;
+        box-shadow: 0 12px 28px rgba(17, 24, 39, 0.2);
+        font-size: 12px;
+      }
+
+      .toast[hidden] {
+        display: none;
+      }
+
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+
+      @media (max-width: 760px) {
+        .qa-bar-inner,
+        .page {
+          width: min(100% - 24px, 1180px);
+        }
+
+        .qa-bar-inner,
+        .page-header,
+        .workspace-summary {
+          grid-template-columns: 1fr;
+          align-items: stretch;
+        }
+
+        .qa-bar-inner {
+          display: grid;
+          gap: 12px;
+          padding: 14px 0;
+        }
+
+        .scenario-field {
+          min-width: 0;
+        }
+
+        .page {
+          padding: 24px 0 40px;
+        }
+
+        .page-header {
+          display: grid;
+          gap: 16px;
+        }
+
+        .page-actions {
+          justify-content: stretch;
+        }
+
+        .page-actions > * {
+          flex: 1 1 auto;
+        }
+
+        .workspace-summary {
+          display: grid;
+        }
+
+        .content-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .project-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .members {
+          order: 2;
+        }
+
+        .dialog-actions {
+          display: grid;
+          grid-template-columns: 1fr;
+        }
+
+        .dialog-actions .button {
+          width: 100%;
+        }
+
+        .toast {
+          right: 12px;
+          bottom: 12px;
+          left: 12px;
+          text-align: center;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+    <div class="app-shell">
+      <header class="qa-bar">
+        <div class="qa-bar-inner">
+          <div>
+            <p class="qa-kicker">HOLADAY QA · 仅合成数据</p>
+            <p class="qa-title">团队项目空间 Phase 1 交互夹具</p>
+          </div>
+          <label class="scenario-field" for="scenario-select">
+            验证场景
+            <select id="scenario-select" aria-describedby="scenario-help">
+              <option value="personal">个人空间</option>
+              <option value="owner" selected>所有者 · 已填充组织</option>
+              <option value="manager">主管</option>
+              <option value="member">成员</option>
+              <option value="viewer">项目观察者</option>
+              <option value="empty">空组织</option>
+              <option value="populated">已填充组织</option>
+              <option value="expired">邀请已过期</option>
+              <option value="error">加载错误</option>
+            </select>
+          </label>
+          <span id="scenario-help" class="sr-only">切换后页面会渲染对应角色或数据状态</span>
+        </div>
+      </header>
+
+      <main id="main-content" class="page" tabindex="-1">
+        <div id="fixture-root"></div>
+      </main>
+    </div>
+
+    <div id="invite-overlay" class="overlay" hidden>
+      <section
+        id="invite-dialog"
+        class="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="invite-title"
+        aria-describedby="invite-description"
+      >
+        <div class="dialog-head">
+          <div>
+            <h2 id="invite-title">邀请成员加入示例协作组</h2>
+            <p id="invite-description">链接只在本次创建后显示，请通过可信渠道发送。</p>
+          </div>
+          <button id="invite-close" class="iconless-close" type="button" aria-label="关闭邀请对话框">
+            关闭
+          </button>
+        </div>
+        <div id="invite-form">
+          <label class="field" for="invite-role">
+            成员角色
+            <select id="invite-role">
+              <option value="manager">主管</option>
+              <option value="member" selected>成员</option>
+            </select>
+          </label>
+          <label class="field" for="invite-manager">
+            直属上级（可选）
+            <select id="invite-manager">
+              <option value="">暂不设置</option>
+              <option value="synthetic-owner">林岚（合成）</option>
+              <option value="synthetic-manager">周屿（合成）</option>
+            </select>
+          </label>
+          <div class="dialog-actions">
+            <button id="invite-cancel" type="button" class="button quiet">取消</button>
+            <button id="invite-generate" type="button" class="button primary">生成邀请链接</button>
+          </div>
+        </div>
+        <div id="invite-result" class="invite-result" hidden>
+          <strong>邀请链接已生成</strong>
+          <label class="field" for="invite-url">
+            一次性邀请链接
+            <input id="invite-url" type="text" readonly value="" />
+          </label>
+          <p>有效期至 2026 年 9 月 6 日 18:00</p>
+          <div class="dialog-actions">
+            <button id="invite-result-close" type="button" class="button quiet">关闭</button>
+            <button id="invite-copy" type="button" class="button primary">复制邀请链接</button>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+    <script>
+      (() => {
+        'use strict';
+
+        const createSyntheticInviteUrl = () =>
+          new URL(
+            ['qa-only', 'synthetic', 'link', 'not-a-real-token'].join('-'),
+            'https://qa.invalid/invitations/',
+          ).href;
+        const scenarios = {
+          personal: {
+            title: '项目',
+            description: '按项目分组管理你的任务',
+            team: false,
+            label: '个人空间',
+          },
+          owner: {
+            title: '项目',
+            description: '在个人项目与团队工作区之间切换',
+            team: true,
+            role: '所有者',
+            projectRole: '负责人',
+            label: '所有者 · 已填充组织',
+            projects: 3,
+            members: 4,
+            canInvite: true,
+            canCreate: true,
+            canAdmin: true,
+          },
+          manager: {
+            title: '项目',
+            description: '在个人项目与团队工作区之间切换',
+            team: true,
+            role: '主管',
+            projectRole: '负责人',
+            label: '主管',
+            projects: 2,
+            members: 4,
+            canInvite: true,
+            canCreate: true,
+            canAdmin: true,
+            limitedAdmin: true,
+          },
+          member: {
+            title: '项目',
+            description: '在个人项目与团队工作区之间切换',
+            team: true,
+            role: '成员',
+            projectRole: '成员',
+            label: '成员',
+            projects: 2,
+            members: 4,
+          },
+          viewer: {
+            title: '项目',
+            description: '在个人项目与团队工作区之间切换',
+            team: true,
+            role: '成员',
+            projectRole: '观察者',
+            label: '项目观察者',
+            projects: 1,
+            members: 4,
+            viewer: true,
+          },
+          empty: {
+            title: '项目',
+            description: '在个人项目与团队工作区之间切换',
+            team: true,
+            role: '所有者',
+            projectRole: '负责人',
+            label: '空组织',
+            projects: 0,
+            members: 1,
+            canInvite: true,
+            canCreate: true,
+            canAdmin: true,
+            empty: true,
+          },
+          populated: {
+            title: '项目',
+            description: '在个人项目与团队工作区之间切换',
+            team: true,
+            role: '管理员',
+            projectRole: '成员',
+            label: '已填充组织',
+            projects: 3,
+            members: 4,
+            canInvite: true,
+            canCreate: true,
+            canAdmin: true,
+          },
+          expired: {
+            title: '邀请链接',
+            description: '一次性邀请状态',
+            team: false,
+            label: '邀请已过期',
+            expired: true,
+          },
+          error: {
+            title: '项目',
+            description: '在个人项目与团队工作区之间切换',
+            team: true,
+            role: '成员',
+            projectRole: '成员',
+            label: '加载错误',
+            error: true,
+          },
+        };
+
+        const personalProjects = [
+          ['内容整理', '整理本周收集的资料与任务线索。', '5 项任务'],
+          ['个人学习计划', '记录课程进度和下一步练习。', '3 项任务'],
+          ['旅行准备', '仅自己可见的出行清单。', '8 项任务'],
+        ];
+        const teamProjects = [
+          ['春季内容上线', '汇总素材、页面验收和上线前检查。', '7 项任务'],
+          ['客户体验改进', '整理反馈并推进本轮交付。', '4 项任务'],
+          ['品牌资料库', '统一团队可复用的品牌资料。', '2 项任务'],
+        ];
+        const members = [
+          ['林岚（合成）', '所有者', '未设置直属上级'],
+          ['周屿（合成）', '主管', '上级：林岚（合成）'],
+          ['沈禾（合成）', '成员', '上级：周屿（合成）'],
+          ['许澄（合成）', '成员', '上级：周屿（合成）'],
+        ];
+
+        const root = document.getElementById('fixture-root');
+        const scenarioSelect = document.getElementById('scenario-select');
+        const overlay = document.getElementById('invite-overlay');
+        const dialog = document.getElementById('invite-dialog');
+        const inviteForm = document.getElementById('invite-form');
+        const inviteResult = document.getElementById('invite-result');
+        const inviteUrl = document.getElementById('invite-url');
+        const toast = document.getElementById('toast');
+        let activeBeforeDialog = null;
+        let toastTimer = null;
+
+        function projectCards(items, count, role, personal) {
+          return items
+            .slice(0, count)
+            .map(
+              ([name, description, tasks]) => `
+                <article class="project-card">
+                  <h3>${name}</h3>
+                  <p>${description}</p>
+                  <div class="project-meta">
+                    <span>${tasks}</span>
+                    <span class="access-badge">${personal ? '仅自己可见' : role}</span>
+                  </div>
+                  <button type="button" class="button" aria-label="打开项目：${name}">打开项目</button>
+                </article>`,
+            )
+            .join('');
+        }
+
+        function memberRows(state) {
+          const visibleMembers = members.slice(0, state.members || 0);
+          return visibleMembers
+            .map(([name, role, manager], index) => {
+              const canManage =
+                state.canAdmin &&
+                index > 0 &&
+                (!state.limitedAdmin || role === '成员');
+              return `
+                <article class="member-row">
+                  <strong>${name}</strong>
+                  <p>${role} · ${manager}</p>
+                  ${
+                    canManage
+                      ? `<div class="member-actions">
+                          <label class="sr-only" for="manager-${index}">设置 ${name} 的直属上级</label>
+                          <select id="manager-${index}" aria-label="设置 ${name} 的直属上级">
+                            <option>设置直属上级</option>
+                            <option>林岚（合成）</option>
+                            <option>周屿（合成）</option>
+                          </select>
+                          <button type="button" aria-label="移除 ${name}">移除 ${name}</button>
+                        </div>`
+                      : ''
+                  }
+                </article>`;
+            })
+            .join('');
+        }
+
+        function renderPersonal(state) {
+          root.innerHTML = `
+            ${pageHeader(state, '<span class="summary-pill">3 个项目</span><button class="button primary" type="button">新建项目</button>')}
+            <section class="surface projects" aria-labelledby="personal-projects-title">
+              <div class="surface-head">
+                <div>
+                  <h2 id="personal-projects-title">个人项目</h2>
+                  <p>仅自己可见的任务分组。</p>
+                </div>
+              </div>
+              <div class="project-grid">${projectCards(personalProjects, 3, '', true)}</div>
+            </section>`;
+        }
+
+        function pageHeader(state, actions) {
+          return `
+            <header class="page-header">
+              <div>
+                <p class="eyebrow">${state.label}</p>
+                <h1>${state.title}</h1>
+                <p>${state.description}</p>
+              </div>
+              <div class="page-actions">${actions || ''}</div>
+            </header>`;
+        }
+
+        function renderTeam(state) {
+          const actions = [
+            `<span class="summary-pill">${state.projects || 0} 个团队项目</span>`,
+            state.canInvite
+              ? '<button id="open-invite" class="button" type="button">邀请成员</button>'
+              : '',
+            state.canCreate
+              ? '<button class="button primary" type="button">新建团队项目</button>'
+              : '',
+          ].join('');
+
+          const projectBody = state.empty
+            ? '<div class="empty-box">还没有团队项目<br />创建第一个团队项目，明确成员与协作边界。</div>'
+            : `<div class="project-grid">${projectCards(
+                teamProjects,
+                state.projects || 0,
+                state.projectRole || '成员',
+                false,
+              )}</div>`;
+          const memberBody = state.empty
+            ? '<div class="empty-box">当前只有组织所有者</div>'
+            : `<div class="member-list">${memberRows(state)}</div>`;
+
+          root.innerHTML = `
+            ${pageHeader(state, actions)}
+            <section class="surface workspace-switcher" aria-label="工作区切换">
+              <div class="surface-head">
+                <div>
+                  <h2>工作区</h2>
+                  <p>切换个人项目或你已加入的团队空间。</p>
+                </div>
+                <button class="button quiet" type="button" aria-label="刷新团队空间">刷新</button>
+              </div>
+              <div class="workspace-tabs" aria-label="可用工作区">
+                <button class="workspace-tab" type="button" aria-pressed="false">个人空间</button>
+                <button class="workspace-tab" type="button" aria-pressed="true">
+                  示例协作组 <span class="role-badge">${state.role}</span>
+                </button>
+              </div>
+            </section>
+            <section class="surface workspace-summary" aria-labelledby="workspace-name">
+              <div>
+                <p class="eyebrow">当前工作区</p>
+                <h2 id="workspace-name">示例协作组</h2>
+                <p>合成组织 · 当前角色：${state.role}${state.viewer ? ' · 项目权限：观察者' : ''}</p>
+              </div>
+              <div class="workspace-stats" aria-label="工作区概览">
+                <div class="stat"><span>团队项目</span><strong>${state.projects || 0}</strong></div>
+                <div class="stat"><span>活跃成员</span><strong>${state.members || 1}</strong></div>
+              </div>
+            </section>
+            ${
+              state.viewer
+                ? '<p class="boundary-note" role="status">你以观察者身份查看项目；本页不显示修改或成员管理操作。</p>'
+                : ''
+            }
+            <div class="content-grid">
+              <section class="surface projects" aria-labelledby="team-projects-title">
+                <div class="surface-head">
+                  <div>
+                    <h2 id="team-projects-title">团队项目</h2>
+                    <p>当前工作区的主要内容。</p>
+                  </div>
+                </div>
+                ${projectBody}
+              </section>
+              <aside class="surface members" aria-labelledby="members-title">
+                <div class="surface-head">
+                  <div>
+                    <h2 id="members-title">团队成员</h2>
+                    <p>${state.members || 1} 位活跃成员</p>
+                  </div>
+                  <button class="button quiet" type="button" aria-label="刷新团队成员">刷新</button>
+                </div>
+                ${memberBody}
+              </aside>
+            </div>
+            <p class="boundary-note">团队任务执行将在后续阶段开放。当前可先查看项目概览与成员；本阶段不展示任务、奖励或报告的伪操作入口。</p>`;
+
+          const openInvite = document.getElementById('open-invite');
+          if (openInvite) openInvite.addEventListener('click', () => openInviteDialog(openInvite));
+        }
+
+        function renderExpired(state) {
+          root.innerHTML = `
+            ${pageHeader(state, '')}
+            <section class="surface state-panel expired" aria-labelledby="expired-title">
+              <h2 id="expired-title">这个邀请链接已过期</h2>
+              <p>请联系示例协作组的管理员重新生成邀请链接。过期链接不会显示组织成员或项目内容。</p>
+              <button type="button" class="button">返回个人项目</button>
+            </section>`;
+        }
+
+        function renderError(state) {
+          root.innerHTML = `
+            ${pageHeader(state, '<span class="summary-pill">团队数据不可用</span>')}
+            <section class="surface workspace-switcher" aria-label="工作区切换">
+              <div class="surface-head"><div><h2>工作区</h2><p>个人项目仍可使用，团队数据暂时不可用。</p></div></div>
+              <div class="workspace-tabs"><button class="workspace-tab" type="button" aria-pressed="true">个人空间</button></div>
+            </section>
+            <section class="surface state-panel error" aria-labelledby="error-title">
+              <h2 id="error-title">团队工作区暂时无法加载</h2>
+              <p>未显示上次可能过期的成员权限或项目操作。你可以稍后重试，个人项目不会受影响。</p>
+              <button id="retry-load" type="button" class="button primary">重试加载</button>
+            </section>`;
+          document.getElementById('retry-load').addEventListener('click', () => {
+            showToast('合成错误状态已重新检查');
+          });
+        }
+
+        function render() {
+          closeInviteDialog(false);
+          const state = scenarios[scenarioSelect.value] || scenarios.owner;
+          document.title = `Holaday 团队项目 QA · ${state.label}`;
+          if (state.expired) renderExpired(state);
+          else if (state.error) renderError(state);
+          else if (!state.team) renderPersonal(state);
+          else renderTeam(state);
+        }
+
+        function dialogFocusables() {
+          return Array.from(
+            dialog.querySelectorAll(
+              'button:not([disabled]), select:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+            ),
+          ).filter((element) => !element.closest('[hidden]'));
+        }
+
+        function openInviteDialog(trigger) {
+          activeBeforeDialog = trigger;
+          inviteUrl.value = '';
+          inviteResult.hidden = true;
+          inviteForm.hidden = false;
+          overlay.hidden = false;
+          document.body.style.overflow = 'hidden';
+          document.getElementById('invite-close').focus();
+        }
+
+        function closeInviteDialog(restoreFocus = true) {
+          if (overlay.hidden) return;
+          inviteUrl.value = '';
+          inviteResult.hidden = true;
+          inviteForm.hidden = false;
+          overlay.hidden = true;
+          document.body.style.overflow = '';
+          if (restoreFocus && activeBeforeDialog && document.contains(activeBeforeDialog)) {
+            activeBeforeDialog.focus();
+          }
+          activeBeforeDialog = null;
+        }
+
+        function showToast(message) {
+          if (toastTimer) window.clearTimeout(toastTimer);
+          toast.textContent = message;
+          toast.hidden = false;
+          toastTimer = window.setTimeout(() => {
+            toast.hidden = true;
+            toast.textContent = '';
+          }, 2600);
+        }
+
+        overlay.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            closeInviteDialog(true);
+            return;
+          }
+          if (event.key !== 'Tab') return;
+          const focusables = dialogFocusables();
+          if (focusables.length === 0) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        });
+
+        document.getElementById('invite-close').addEventListener('click', () => closeInviteDialog(true));
+        document.getElementById('invite-cancel').addEventListener('click', () => closeInviteDialog(true));
+        document.getElementById('invite-result-close').addEventListener('click', () =>
+          closeInviteDialog(true),
+        );
+        document.getElementById('invite-generate').addEventListener('click', () => {
+          inviteForm.hidden = true;
+          inviteResult.hidden = false;
+          inviteUrl.value = createSyntheticInviteUrl();
+          document.getElementById('invite-result-close').focus();
+        });
+        document.getElementById('invite-copy').addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(inviteUrl.value);
+            showToast('邀请链接已复制');
+          } catch {
+            inviteUrl.select();
+            showToast('复制失败，请手动复制');
+          }
+        });
+        scenarioSelect.addEventListener('change', render);
+
+        render();
+      })();
+    </script>
+  </body>
+</html>
