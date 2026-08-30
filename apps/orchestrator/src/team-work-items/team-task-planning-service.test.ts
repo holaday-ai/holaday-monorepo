@@ -339,6 +339,12 @@ class MemoryRepository implements PlanningRepository {
       },
       lockWorkItemByExternalId: async (workItemExternalId) =>
         structuredClone(this.state.workItems.get(workItemExternalId) ?? null),
+      lockWorkItemsByMilestone: async (milestoneId) =>
+        structuredClone(
+          [...this.state.workItems.values()]
+            .filter((workItem) => workItem.milestoneId === milestoneId)
+            .sort((left, right) => left.id - right.id),
+        ),
       findEventByIdempotencyKey: async (organizationId, idempotencyKey) =>
         structuredClone(
           this.state.events.find(
@@ -1599,6 +1605,33 @@ describe('TeamTaskPlanningService', () => {
       'NOT_FOUND',
     );
   });
+
+  it.each(['completed', 'cancelled'] as const)(
+    'rejects closing a milestone while it still contains an active work item (%s)',
+    async (status) => {
+      const { repository, service } = createHarness();
+      const target = repository.state.workItems.get(ids.target);
+      if (!target) throw new Error('missing target fixture');
+      target.milestoneId = 1;
+      target.status = 'in_progress';
+
+      await expectCode(
+        service.updateMilestone({
+          actorExternalId: ids.lead,
+          milestoneExternalId: ids.milestone,
+          status,
+          expectedVersion: 1,
+          idempotencyKey: `milestone-close-active-${status}`,
+        }),
+        'CONFLICT',
+      );
+      expect(repository.state.milestones.get(ids.milestone)).toMatchObject({
+        status: 'open',
+        version: 1,
+      });
+      expect(repository.state.planningEvents).toHaveLength(0);
+    },
+  );
 
   it('reorders distinct milestones atomically and gives concurrent requests one winner', async () => {
     const { repository, service } = createHarness();

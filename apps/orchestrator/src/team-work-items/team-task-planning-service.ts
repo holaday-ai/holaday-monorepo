@@ -128,6 +128,7 @@ export interface PlanningTransaction {
     workItemExternalId: string,
   ): Promise<{ access: TeamTaskProjectAccessSnapshot; workItem: PlanningWorkItemRow } | null>;
   lockWorkItemByExternalId(workItemExternalId: string): Promise<PlanningWorkItemRow | null>;
+  lockWorkItemsByMilestone(milestoneId: number): Promise<PlanningWorkItemRow[]>;
   findEventByIdempotencyKey(
     organizationId: number,
     idempotencyKey: string,
@@ -312,6 +313,12 @@ const CONTRACT_VERSION_MUTABLE_STATES = new Set<TeamTaskState>([
   'accepted_by_member',
   'in_progress',
   'blocked',
+]);
+const CLOSED_WORK_ITEM_STATES = new Set<TeamTaskState>([
+  'completed',
+  'cancelled',
+  'rejected_final',
+  'archived',
 ]);
 
 function fail(code: TeamTaskServiceErrorCode): never {
@@ -1067,6 +1074,12 @@ export class TeamTaskPlanningService {
         if (previous) return previous;
         requireManagement(access);
         if (loaded.milestone.version !== expectedVersion) return fail('VERSION_CONFLICT');
+        if (update.status && update.status !== 'open') {
+          const attachedWorkItems = await tx.lockWorkItemsByMilestone(loaded.milestone.id);
+          if (attachedWorkItems.some((workItem) => !CLOSED_WORK_ITEM_STATES.has(workItem.status))) {
+            return fail('CONFLICT');
+          }
+        }
         const version = loaded.milestone.version + 1;
         if (
           !(await tx.updateMilestone(loaded.milestone.id, loaded.milestone.version, {
@@ -2116,6 +2129,32 @@ class DrizzlePlanningTransaction implements PlanningTransaction {
       .for('update')
       .limit(1);
     return normalizeWorkItem(row);
+  }
+
+  async lockWorkItemsByMilestone(milestoneId: number) {
+    const rows = await this.db
+      .select({
+        id: teamWorkItems.id,
+        externalId: teamWorkItems.externalId,
+        organizationId: teamWorkItems.organizationId,
+        projectId: teamWorkItems.projectId,
+        projectExternalId: projects.externalId,
+        createdByUserId: teamWorkItems.createdByUserId,
+        status: teamWorkItems.status,
+        version: teamWorkItems.version,
+        currentContractVersionId: teamWorkItems.currentContractVersionId,
+        dueAt: teamWorkItems.dueAt,
+        blockerJson: teamWorkItems.blockerJson,
+        milestoneId: teamWorkItems.milestoneId,
+      })
+      .from(teamWorkItems)
+      .innerJoin(projects, eq(projects.id, teamWorkItems.projectId))
+      .where(eq(teamWorkItems.milestoneId, milestoneId))
+      .orderBy(teamWorkItems.id)
+      .for('update');
+    return rows
+      .map((row) => normalizeWorkItem(row))
+      .filter((row): row is PlanningWorkItemRow => row !== null);
   }
 
   async findEventByIdempotencyKey(organizationId: number, idempotencyKey: string) {
