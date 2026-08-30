@@ -29,6 +29,7 @@ export const teamMilestones = mysqlTable(
     title: varchar('title', { length: 255 }).notNull(),
     description: text('description'),
     status: varchar('status', { length: 24 }).notNull().default('open'),
+    version: int('version', { unsigned: true }).notNull().default(1),
     sortOrder: int('sort_order', { unsigned: true }).notNull().default(0),
     dueAt: datetime('due_at', { mode: 'date', fsp: 3 }),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })

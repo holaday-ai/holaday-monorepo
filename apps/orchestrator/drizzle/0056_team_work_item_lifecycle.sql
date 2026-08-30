@@ -11,6 +11,7 @@ CREATE TABLE `team_milestones` (
   `title` VARCHAR(255) NOT NULL,
   `description` TEXT NULL,
   `status` VARCHAR(24) NOT NULL DEFAULT 'open',
+  `version` INT UNSIGNED NOT NULL DEFAULT 1,
   `sort_order` INT UNSIGNED NOT NULL DEFAULT 0,
   `due_at` DATETIME(3) NULL,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -315,6 +316,33 @@ CREATE TABLE `team_work_item_events` (
     FOREIGN KEY (`actor_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_team_work_item_events_contract_lineage`
     FOREIGN KEY (`contract_version_id`, `work_item_id`, `organization_id`, `project_id`) REFERENCES `acceptance_contract_versions` (`id`, `work_item_id`, `organization_id`, `project_id`) ON DELETE RESTRICT
+);
+--> statement-breakpoint
+CREATE TABLE `team_project_planning_events` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `external_id` VARCHAR(32) NOT NULL,
+  `organization_id` BIGINT UNSIGNED NOT NULL,
+  `project_id` BIGINT UNSIGNED NOT NULL,
+  `milestone_id` BIGINT UNSIGNED NULL,
+  `actor_user_id` BIGINT UNSIGNED NOT NULL,
+  `event_type` VARCHAR(48) NOT NULL,
+  `idempotency_key` VARCHAR(64) NOT NULL,
+  `metadata_json` JSON NULL,
+  `occurred_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_team_project_planning_events_external_id` (`external_id`),
+  UNIQUE KEY `uk_team_project_planning_events_organization_idempotency` (`organization_id`, `idempotency_key`),
+  KEY `ix_team_project_planning_events_tenant_type` (`organization_id`, `project_id`, `event_type`),
+  KEY `ix_team_project_planning_events_milestone_time` (`milestone_id`, `occurred_at`),
+  KEY `ix_team_project_planning_events_actor` (`actor_user_id`, `occurred_at`),
+  CONSTRAINT `fk_team_project_planning_events_organization`
+    FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_project_planning_events_project_tenant`
+    FOREIGN KEY (`project_id`, `organization_id`) REFERENCES `projects` (`id`, `organization_id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_project_planning_events_milestone_lineage`
+    FOREIGN KEY (`milestone_id`, `organization_id`, `project_id`) REFERENCES `team_milestones` (`id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_project_planning_events_actor`
+    FOREIGN KEY (`actor_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
 );
 --> statement-breakpoint
 CREATE TABLE `team_evidence_bindings` (

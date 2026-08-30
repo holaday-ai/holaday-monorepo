@@ -27,6 +27,7 @@ const TEAM_WORK_ITEM_TABLES = [
   'team_work_item_appeals',
   'team_arbitration_decisions',
   'team_work_item_events',
+  'team_project_planning_events',
   'team_evidence_bindings',
   'team_ai_contributions',
 ];
@@ -184,11 +185,11 @@ describe('team work item lifecycle schema contract', () => {
     ].map(([, name]) => name);
     const contractNames = TEAM_WORK_ITEM_SCHEMA_CONTRACT.foreignKeys.map(({ name }) => name);
 
-    assert.equal(migrationNames.length, 55);
+    assert.equal(migrationNames.length, 59);
     assert.deepEqual([...migrationNames].sort(), [...contractNames].sort());
   });
 
-  it('creates all twelve lifecycle tables and the deferred current-contract foreign key', () => {
+  it('creates every lifecycle table and the deferred current-contract foreign key', () => {
     const migration = readTeamWorkItemLifecycleMigration();
     const createdTables = [...migration.matchAll(/CREATE TABLE `([^`]+)`/g)].map(
       ([, table]) => table,
@@ -230,6 +231,7 @@ describe('team work item lifecycle schema contract', () => {
       /UNIQUE KEY `uk_team_work_item_submissions_work_item_version` \(`work_item_id`, `submission_version`\)/,
       /UNIQUE KEY `uk_team_work_item_appeals_submission` \(`submission_id`\)/,
       /UNIQUE KEY `uk_team_work_item_events_organization_idempotency` \(`organization_id`, `idempotency_key`\)/,
+      /UNIQUE KEY `uk_team_project_planning_events_organization_idempotency` \(`organization_id`, `idempotency_key`\)/,
       /KEY `ix_team_work_items_tenant_status` \(`organization_id`, `project_id`, `status`\)/,
     ];
     for (const fragment of requiredFragments) assert.match(migration, fragment);
@@ -260,6 +262,8 @@ describe('team work item lifecycle schema contract', () => {
     assert.match(verifier, /TEAM_WORK_ITEM_REQUIRED_INDEXES/);
     assert.match(verifier, /responsible_active_key/);
     assert.match(verifier, /current_contract_version_id/);
+    assert.match(verifier, /team_project_planning_events/);
+    assert.match(verifier, /team_milestones:[\s\S]*?'version'/);
     assert.match(verifier, /usage_snapshot_json/);
     for (const tenantIndex of [
       'ix_team_milestones_tenant_status',
@@ -272,6 +276,7 @@ describe('team work item lifecycle schema contract', () => {
       'ix_team_work_item_appeals_tenant_status',
       'ix_team_arbitration_decisions_tenant',
       'ix_team_work_item_events_tenant_type',
+      'ix_team_project_planning_events_tenant_type',
       'ix_team_evidence_bindings_tenant',
       'ix_team_ai_contributions_tenant',
     ]) {

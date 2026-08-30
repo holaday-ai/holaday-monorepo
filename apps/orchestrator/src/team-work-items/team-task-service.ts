@@ -8,6 +8,7 @@ import { organizationMembers } from '../db/schema/organization-members.js';
 import { organizations } from '../db/schema/organizations.js';
 import { projectMembers } from '../db/schema/project-members.js';
 import { projects } from '../db/schema/projects.js';
+import { teamProjectPlanningEvents } from '../db/schema/team-project-planning-events.js';
 import { teamWorkItemAssignments } from '../db/schema/team-work-item-assignments.js';
 import { teamWorkItemEvents } from '../db/schema/team-work-item-events.js';
 import { teamWorkItems } from '../db/schema/team-work-items.js';
@@ -191,6 +192,11 @@ export interface TeamTaskTransaction {
     organizationId: number,
     idempotencyKey: string,
   ): Promise<TeamTaskEventRow | null>;
+  lockOrganizationIdempotencyScope(organizationId: number): Promise<boolean>;
+  hasPlanningEventByIdempotencyKey(
+    organizationId: number,
+    idempotencyKey: string,
+  ): Promise<boolean>;
   insertWorkItem(row: NewWorkItem): Promise<number>;
   updateWorkItem(
     workItemId: number,
@@ -433,6 +439,12 @@ function isDuplicateError(error: unknown): boolean {
   );
 }
 
+function isLockConflict(error: unknown): boolean {
+  return (
+    isRecord(error) && (error.code === 'ER_LOCK_DEADLOCK' || error.code === 'ER_LOCK_WAIT_TIMEOUT')
+  );
+}
+
 function assertAccess(
   access: TeamTaskProjectAccessSnapshot | null,
   actorExternalId: string,
@@ -621,10 +633,17 @@ export class TeamTaskService {
       return await run();
     } catch (error) {
       if (error instanceof TeamTaskServiceError) throw error;
+      if (isLockConflict(error)) return fail('CONFLICT');
       if (isDuplicateError(error)) {
-        const recovered = await recover();
-        if (recovered) return recovered;
-        return fail('CONFLICT');
+        try {
+          const recovered = await recover();
+          if (recovered) return recovered;
+          return fail('CONFLICT');
+        } catch (recoveryError) {
+          if (recoveryError instanceof TeamTaskServiceError) throw recoveryError;
+          if (isLockConflict(recoveryError)) return fail('CONFLICT');
+          throw recoveryError;
+        }
       }
       throw error;
     }
@@ -658,6 +677,12 @@ export class TeamTaskService {
           this.dependencies,
         );
         permission('create', access);
+        if (!(await tx.lockOrganizationIdempotencyScope(access.organizationId))) {
+          return fail('CONFLICT');
+        }
+        if (await tx.hasPlanningEventByIdempotencyKey(access.organizationId, idempotencyKey)) {
+          return fail('CONFLICT');
+        }
         const previous = replay(
           await tx.findEventByIdempotencyKey(access.organizationId, idempotencyKey),
           hash,
@@ -721,6 +746,12 @@ export class TeamTaskService {
           actorExternalId,
           this.dependencies,
         );
+        if (!(await tx.lockOrganizationIdempotencyScope(access.organizationId))) {
+          return fail('CONFLICT');
+        }
+        if (await tx.hasPlanningEventByIdempotencyKey(access.organizationId, idempotencyKey)) {
+          return fail('CONFLICT');
+        }
         return replay(
           await tx.findEventByIdempotencyKey(access.organizationId, idempotencyKey),
           hash,
@@ -1252,6 +1283,12 @@ export class TeamTaskService {
         ) {
           return fail('NOT_FOUND');
         }
+        if (!(await tx.lockOrganizationIdempotencyScope(access.organizationId))) {
+          return fail('CONFLICT');
+        }
+        if (await tx.hasPlanningEventByIdempotencyKey(access.organizationId, idempotencyKey)) {
+          return fail('CONFLICT');
+        }
         const previous = replay(
           await tx.findEventByIdempotencyKey(access.organizationId, idempotencyKey),
           hash,
@@ -1263,6 +1300,12 @@ export class TeamTaskService {
       this.repository.transaction(async (tx) => {
         const loaded = await tx.lockWorkItemAccess(actorExternalId, workItemExternalId);
         const access = assertAccess(loaded?.access ?? null, actorExternalId, this.dependencies);
+        if (!(await tx.lockOrganizationIdempotencyScope(access.organizationId))) {
+          return fail('CONFLICT');
+        }
+        if (await tx.hasPlanningEventByIdempotencyKey(access.organizationId, idempotencyKey)) {
+          return fail('CONFLICT');
+        }
         return replay(
           await tx.findEventByIdempotencyKey(access.organizationId, idempotencyKey),
           hash,
@@ -1411,6 +1454,30 @@ class DrizzleTeamTaskTransaction implements TeamTaskTransaction {
       return null;
     }
     return { ...row, fromState: row.fromState, toState: row.toState };
+  }
+
+  async lockOrganizationIdempotencyScope(organizationId: number) {
+    const [row] = await this.db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, organizationId))
+      .for('update')
+      .limit(1);
+    return row?.id === organizationId;
+  }
+
+  async hasPlanningEventByIdempotencyKey(organizationId: number, idempotencyKey: string) {
+    const [row] = await this.db
+      .select({ id: teamProjectPlanningEvents.id })
+      .from(teamProjectPlanningEvents)
+      .where(
+        and(
+          eq(teamProjectPlanningEvents.organizationId, organizationId),
+          eq(teamProjectPlanningEvents.idempotencyKey, idempotencyKey),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
   }
 
   async insertWorkItem(row: NewWorkItem) {

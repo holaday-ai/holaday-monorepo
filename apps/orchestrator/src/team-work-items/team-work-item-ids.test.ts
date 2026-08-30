@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import { ID_PREFIXES, isExternalId, newExternalId } from '@holaday/shared-types';
+import { describe, expect, it } from 'vitest';
 
 const teamWorkItemKinds = [
   ['teamMilestone', 'tml'],
@@ -11,6 +11,7 @@ const teamWorkItemKinds = [
   ['teamAppeal', 'tap'],
   ['teamArbitrationDecision', 'tad'],
   ['teamWorkItemEvent', 'twe'],
+  ['teamProjectPlanningEvent', 'tpe'],
   ['teamEvidenceBinding', 'teb'],
   ['teamAiContribution', 'tai'],
 ] as const;

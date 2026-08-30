@@ -50,6 +50,7 @@ type State = {
   assignments: Map<string, TeamTaskAssignmentRow>;
   contracts: TeamTaskContractRow[];
   events: TeamTaskEventRow[];
+  planningIdempotencyKeys: string[];
 };
 
 function cloneState(state: State): State {
@@ -62,6 +63,7 @@ function cloneState(state: State): State {
     ),
     contracts: structuredClone(state.contracts),
     events: structuredClone(state.events),
+    planningIdempotencyKeys: structuredClone(state.planningIdempotencyKeys),
   };
 }
 
@@ -199,6 +201,7 @@ class MemoryRepository implements TeamTaskRepository {
       assignments: new Map(),
       contracts: [],
       events: [],
+      planningIdempotencyKeys: [],
     };
   }
 
@@ -237,6 +240,9 @@ class MemoryRepository implements TeamTaskRepository {
               event.organizationId === organizationId && event.idempotencyKey === idempotencyKey,
           ) ?? null,
         ),
+      lockOrganizationIdempotencyScope: async (organizationId) => organizationId === 10,
+      hasPlanningEventByIdempotencyKey: async (organizationId, idempotencyKey) =>
+        organizationId === 10 && this.state.planningIdempotencyKeys.includes(idempotencyKey),
       insertWorkItem: async (row) => {
         const id = this.nextWorkItemId++;
         this.state.workItems.set(row.externalId, { ...structuredClone(row), id });
@@ -1003,6 +1009,71 @@ describe('TeamTaskService', () => {
         memberExternalId: ids.memberMembership,
         expectedVersion: 2,
         idempotencyKey: 'duplicate-claim',
+      }),
+      'CONFLICT',
+    );
+  });
+
+  it('rejects an idempotency key already owned by the planning event family', async () => {
+    const { repository, service } = createHarness();
+    repository.state.planningIdempotencyKeys.push('shared-across-families');
+    await expectCode(
+      service.createDraft({
+        actorExternalId: ids.actor,
+        projectExternalId: ids.project,
+        title: '不可复用幂等键',
+        description: null,
+        assignmentMode: 'first_come',
+        expectedVersion: 0,
+        idempotencyKey: 'shared-across-families',
+      }),
+      'CONFLICT',
+    );
+    expect(repository.state.workItems).toHaveLength(0);
+  });
+
+  it.each(['ER_LOCK_DEADLOCK', 'ER_LOCK_WAIT_TIMEOUT'])(
+    'maps %s after transaction rollback to a stable conflict',
+    async (code) => {
+      const { repository, service } = createHarness();
+      repository.transaction = async () => {
+        const error = new Error('raw database lock error') as Error & { code: string };
+        error.code = code;
+        throw error;
+      };
+      await expectCode(
+        service.createDraft({
+          actorExternalId: ids.actor,
+          projectExternalId: ids.project,
+          title: '锁错误归一化',
+          description: null,
+          assignmentMode: 'first_come',
+          expectedVersion: 0,
+          idempotencyKey: `lock-${code}`,
+        }),
+        'CONFLICT',
+      );
+    },
+  );
+
+  it('does not leak a lock timeout raised by duplicate recovery', async () => {
+    const { repository, service } = createHarness();
+    let attempt = 0;
+    repository.transaction = async () => {
+      attempt += 1;
+      const error = new Error('raw database error') as Error & { code: string };
+      error.code = attempt === 1 ? 'ER_DUP_ENTRY' : 'ER_LOCK_WAIT_TIMEOUT';
+      throw error;
+    };
+    await expectCode(
+      service.createDraft({
+        actorExternalId: ids.actor,
+        projectExternalId: ids.project,
+        title: '恢复阶段锁错误',
+        description: null,
+        assignmentMode: 'first_come',
+        expectedVersion: 0,
+        idempotencyKey: 'recovery-lock-timeout',
       }),
       'CONFLICT',
     );

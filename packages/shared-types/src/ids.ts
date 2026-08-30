@@ -72,6 +72,7 @@ export const ID_PREFIXES = {
   teamAppeal: 'tap',
   teamArbitrationDecision: 'tad',
   teamWorkItemEvent: 'twe',
+  teamProjectPlanningEvent: 'tpe',
   teamEvidenceBinding: 'teb',
   teamAiContribution: 'tai',
 } as const;

@@ -21,6 +21,7 @@ export * from './team-work-item-reviews.js';
 export * from './team-work-item-appeals.js';
 export * from './team-arbitration-decisions.js';
 export * from './team-work-item-events.js';
+export * from './team-project-planning-events.js';
 export * from './team-evidence-bindings.js';
 export * from './team-ai-contributions.js';
 export * from './scheduled-tasks.js';

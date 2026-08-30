@@ -8,6 +8,7 @@ const externalIdTables = [
   'team_work_item_appeals',
   'team_arbitration_decisions',
   'team_work_item_events',
+  'team_project_planning_events',
   'team_evidence_bindings',
   'team_ai_contributions',
 ];
@@ -78,6 +79,11 @@ const tenantIndexes = [
   [
     'team_work_item_events',
     'ix_team_work_item_events_tenant_type',
+    ['organization_id', 'project_id', 'event_type'],
+  ],
+  [
+    'team_project_planning_events',
+    'ix_team_project_planning_events_tenant_type',
     ['organization_id', 'project_id', 'event_type'],
   ],
   [
@@ -177,6 +183,12 @@ const businessIndexes = [
     'organization_id',
     'idempotency_key',
   ]),
+  index(
+    'team_project_planning_events',
+    'uk_team_project_planning_events_organization_idempotency',
+    true,
+    ['organization_id', 'idempotency_key'],
+  ),
 ];
 
 const workItemLineage = (table, name) =>
@@ -358,6 +370,20 @@ export const TEAM_WORK_ITEM_SCHEMA_CONTRACT = {
       ['id'],
     ),
     foreignKey(
+      'team_project_planning_events',
+      'fk_team_project_planning_events_organization',
+      ['organization_id'],
+      'organizations',
+      ['id'],
+    ),
+    foreignKey(
+      'team_project_planning_events',
+      'fk_team_project_planning_events_actor',
+      ['actor_user_id'],
+      'users',
+      ['id'],
+    ),
+    foreignKey(
       'team_evidence_bindings',
       'fk_team_evidence_bindings_organization',
       ['organization_id'],
@@ -426,6 +452,20 @@ export const TEAM_WORK_ITEM_SCHEMA_CONTRACT = {
       ['current_contract_version_id', 'id', 'organization_id', 'project_id'],
       'acceptance_contract_versions',
       ['id', 'work_item_id', 'organization_id', 'project_id'],
+    ),
+    foreignKey(
+      'team_project_planning_events',
+      'fk_team_project_planning_events_project_tenant',
+      ['project_id', 'organization_id'],
+      'projects',
+      ['id', 'organization_id'],
+    ),
+    foreignKey(
+      'team_project_planning_events',
+      'fk_team_project_planning_events_milestone_lineage',
+      ['milestone_id', 'organization_id', 'project_id'],
+      'team_milestones',
+      ['id', 'organization_id', 'project_id'],
     ),
     workItemLineage(
       'team_work_item_assignments',
@@ -531,6 +571,7 @@ export const TEAM_WORK_ITEM_SCHEMA_CONTRACT = {
     ),
   ],
   columns: [
+    column('team_milestones', 'version', 'int', 'int unsigned', false, { defaultValue: '1' }),
     column('team_work_items', 'title', 'varchar', 'varchar(255)', false),
     column('team_work_items', 'version', 'int', 'int unsigned', false, { defaultValue: '1' }),
     column('team_work_items', 'blocker_json', 'json', 'json', true),
@@ -560,6 +601,8 @@ export const TEAM_WORK_ITEM_SCHEMA_CONTRACT = {
     column('team_arbitration_decisions', 'evidence_refs_json', 'json', 'json', false),
     column('team_work_item_events', 'contract_version_id', 'bigint', 'bigint unsigned', true),
     column('team_work_item_events', 'metadata_json', 'json', 'json', true),
+    column('team_project_planning_events', 'milestone_id', 'bigint', 'bigint unsigned', true),
+    column('team_project_planning_events', 'metadata_json', 'json', 'json', true),
     column('team_evidence_bindings', 'submission_id', 'bigint', 'bigint unsigned', true),
     column('team_evidence_bindings', 'review_id', 'bigint', 'bigint unsigned', true),
     column('team_evidence_bindings', 'appeal_id', 'bigint', 'bigint unsigned', true),
