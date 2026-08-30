@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   datetime,
+  foreignKey,
   index,
   json,
   mysqlTable,
@@ -10,7 +11,6 @@ import {
   varchar,
 } from 'drizzle-orm/mysql-core';
 import { organizations } from './organizations.js';
-import { projects } from './projects.js';
 import { teamWorkItemAppeals } from './team-work-item-appeals.js';
 import { teamWorkItems } from './team-work-items.js';
 import { users } from './users.js';
@@ -23,15 +23,9 @@ export const teamArbitrationDecisions = mysqlTable(
     organizationId: bigint('organization_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => organizations.id, { onDelete: 'restrict' }),
-    projectId: bigint('project_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => projects.id, { onDelete: 'restrict' }),
-    workItemId: bigint('work_item_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => teamWorkItems.id, { onDelete: 'restrict' }),
-    appealId: bigint('appeal_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => teamWorkItemAppeals.id, { onDelete: 'restrict' }),
+    projectId: bigint('project_id', { mode: 'number', unsigned: true }).notNull(),
+    workItemId: bigint('work_item_id', { mode: 'number', unsigned: true }).notNull(),
+    appealId: bigint('appeal_id', { mode: 'number', unsigned: true }).notNull(),
     arbitratorUserId: bigint('arbitrator_user_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
@@ -48,6 +42,21 @@ export const teamArbitrationDecisions = mysqlTable(
   (table) => [
     uniqueIndex('uk_team_arbitration_decisions_external_id').on(table.externalId),
     uniqueIndex('uk_team_arbitration_decisions_appeal').on(table.appealId),
+    foreignKey({
+      name: 'fk_team_arbitration_decisions_work_item_lineage',
+      columns: [table.workItemId, table.organizationId, table.projectId],
+      foreignColumns: [teamWorkItems.id, teamWorkItems.organizationId, teamWorkItems.projectId],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'fk_team_arbitration_decisions_appeal_lineage',
+      columns: [table.appealId, table.workItemId, table.organizationId, table.projectId],
+      foreignColumns: [
+        teamWorkItemAppeals.id,
+        teamWorkItemAppeals.workItemId,
+        teamWorkItemAppeals.organizationId,
+        teamWorkItemAppeals.projectId,
+      ],
+    }).onDelete('restrict'),
     index('ix_team_arbitration_decisions_tenant').on(
       table.organizationId,
       table.projectId,

@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   datetime,
+  foreignKey,
   index,
   json,
   mysqlTable,
@@ -9,9 +10,7 @@ import {
   uniqueIndex,
   varchar,
 } from 'drizzle-orm/mysql-core';
-import { acceptanceContractVersions } from './acceptance-contract-versions.js';
 import { organizations } from './organizations.js';
-import { projects } from './projects.js';
 import { teamWorkItemSubmissions } from './team-work-item-submissions.js';
 import { teamWorkItems } from './team-work-items.js';
 import { users } from './users.js';
@@ -24,18 +23,13 @@ export const teamWorkItemReviews = mysqlTable(
     organizationId: bigint('organization_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => organizations.id, { onDelete: 'restrict' }),
-    projectId: bigint('project_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => projects.id, { onDelete: 'restrict' }),
-    workItemId: bigint('work_item_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => teamWorkItems.id, { onDelete: 'restrict' }),
-    submissionId: bigint('submission_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => teamWorkItemSubmissions.id, { onDelete: 'restrict' }),
-    contractVersionId: bigint('contract_version_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => acceptanceContractVersions.id, { onDelete: 'restrict' }),
+    projectId: bigint('project_id', { mode: 'number', unsigned: true }).notNull(),
+    workItemId: bigint('work_item_id', { mode: 'number', unsigned: true }).notNull(),
+    submissionId: bigint('submission_id', { mode: 'number', unsigned: true }).notNull(),
+    contractVersionId: bigint('contract_version_id', {
+      mode: 'number',
+      unsigned: true,
+    }).notNull(),
     reviewerUserId: bigint('reviewer_user_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
@@ -53,6 +47,41 @@ export const teamWorkItemReviews = mysqlTable(
   (table) => [
     uniqueIndex('uk_team_work_item_reviews_external_id').on(table.externalId),
     uniqueIndex('uk_team_work_item_reviews_submission').on(table.submissionId),
+    uniqueIndex('uk_team_work_item_reviews_id_lineage').on(
+      table.id,
+      table.submissionId,
+      table.workItemId,
+      table.organizationId,
+      table.projectId,
+    ),
+    uniqueIndex('uk_team_work_item_reviews_id_tenant_item').on(
+      table.id,
+      table.workItemId,
+      table.organizationId,
+      table.projectId,
+    ),
+    foreignKey({
+      name: 'fk_team_work_item_reviews_work_item_lineage',
+      columns: [table.workItemId, table.organizationId, table.projectId],
+      foreignColumns: [teamWorkItems.id, teamWorkItems.organizationId, teamWorkItems.projectId],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'fk_team_work_item_reviews_submission_lineage',
+      columns: [
+        table.submissionId,
+        table.contractVersionId,
+        table.workItemId,
+        table.organizationId,
+        table.projectId,
+      ],
+      foreignColumns: [
+        teamWorkItemSubmissions.id,
+        teamWorkItemSubmissions.contractVersionId,
+        teamWorkItemSubmissions.workItemId,
+        teamWorkItemSubmissions.organizationId,
+        teamWorkItemSubmissions.projectId,
+      ],
+    }).onDelete('restrict'),
     index('ix_team_work_item_reviews_tenant_decision').on(
       table.organizationId,
       table.projectId,

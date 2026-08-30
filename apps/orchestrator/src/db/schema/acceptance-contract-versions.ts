@@ -1,7 +1,9 @@
 import { sql } from 'drizzle-orm';
 import {
+  type AnyMySqlColumn,
   bigint,
   datetime,
+  foreignKey,
   index,
   int,
   json,
@@ -11,9 +13,12 @@ import {
   varchar,
 } from 'drizzle-orm/mysql-core';
 import { organizations } from './organizations.js';
-import { projects } from './projects.js';
 import { teamWorkItems } from './team-work-items.js';
 import { users } from './users.js';
+
+function workItemLineageColumns(): [AnyMySqlColumn, AnyMySqlColumn, AnyMySqlColumn] {
+  return [teamWorkItems.id, teamWorkItems.organizationId, teamWorkItems.projectId];
+}
 
 export const acceptanceContractVersions = mysqlTable(
   'acceptance_contract_versions',
@@ -23,12 +28,8 @@ export const acceptanceContractVersions = mysqlTable(
     organizationId: bigint('organization_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => organizations.id, { onDelete: 'restrict' }),
-    projectId: bigint('project_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => projects.id, { onDelete: 'restrict' }),
-    workItemId: bigint('work_item_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => teamWorkItems.id, { onDelete: 'restrict' }),
+    projectId: bigint('project_id', { mode: 'number', unsigned: true }).notNull(),
+    workItemId: bigint('work_item_id', { mode: 'number', unsigned: true }).notNull(),
     version: int('version', { unsigned: true }).notNull(),
     objective: text('objective').notNull(),
     deliverablesJson: json('deliverables_json').notNull(),
@@ -61,6 +62,17 @@ export const acceptanceContractVersions = mysqlTable(
       table.workItemId,
       table.version,
     ),
+    uniqueIndex('uk_acceptance_contract_versions_id_lineage').on(
+      table.id,
+      table.workItemId,
+      table.organizationId,
+      table.projectId,
+    ),
+    foreignKey({
+      name: 'fk_acceptance_contract_versions_work_item_lineage',
+      columns: [table.workItemId, table.organizationId, table.projectId],
+      foreignColumns: workItemLineageColumns(),
+    }).onDelete('restrict'),
     index('ix_acceptance_contract_versions_tenant').on(
       table.organizationId,
       table.projectId,

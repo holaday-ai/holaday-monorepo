@@ -1,7 +1,14 @@
 import { sql } from 'drizzle-orm';
-import { bigint, datetime, index, mysqlTable, uniqueIndex, varchar } from 'drizzle-orm/mysql-core';
+import {
+  bigint,
+  datetime,
+  foreignKey,
+  index,
+  mysqlTable,
+  uniqueIndex,
+  varchar,
+} from 'drizzle-orm/mysql-core';
 import { organizations } from './organizations.js';
-import { projects } from './projects.js';
 import { teamWorkItems } from './team-work-items.js';
 import { users } from './users.js';
 
@@ -13,12 +20,8 @@ export const teamWorkItemAssignments = mysqlTable(
     organizationId: bigint('organization_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => organizations.id, { onDelete: 'restrict' }),
-    projectId: bigint('project_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => projects.id, { onDelete: 'restrict' }),
-    workItemId: bigint('work_item_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => teamWorkItems.id, { onDelete: 'restrict' }),
+    projectId: bigint('project_id', { mode: 'number', unsigned: true }).notNull(),
+    workItemId: bigint('work_item_id', { mode: 'number', unsigned: true }).notNull(),
     userId: bigint('user_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
@@ -47,6 +50,11 @@ export const teamWorkItemAssignments = mysqlTable(
   (table) => [
     uniqueIndex('uk_team_work_item_assignments_external_id').on(table.externalId),
     uniqueIndex('uk_team_work_item_assignments_responsible_active').on(table.responsibleActiveKey),
+    foreignKey({
+      name: 'fk_team_work_item_assignments_work_item_lineage',
+      columns: [table.workItemId, table.organizationId, table.projectId],
+      foreignColumns: [teamWorkItems.id, teamWorkItems.organizationId, teamWorkItems.projectId],
+    }).onDelete('restrict'),
     index('ix_team_work_item_assignments_tenant_status').on(
       table.organizationId,
       table.projectId,

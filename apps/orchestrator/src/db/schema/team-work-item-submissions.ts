@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   datetime,
+  foreignKey,
   index,
   int,
   json,
@@ -13,7 +14,6 @@ import {
 } from 'drizzle-orm/mysql-core';
 import { acceptanceContractVersions } from './acceptance-contract-versions.js';
 import { organizations } from './organizations.js';
-import { projects } from './projects.js';
 import { teamWorkItems } from './team-work-items.js';
 import { users } from './users.js';
 
@@ -25,15 +25,12 @@ export const teamWorkItemSubmissions = mysqlTable(
     organizationId: bigint('organization_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => organizations.id, { onDelete: 'restrict' }),
-    projectId: bigint('project_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => projects.id, { onDelete: 'restrict' }),
-    workItemId: bigint('work_item_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => teamWorkItems.id, { onDelete: 'restrict' }),
-    contractVersionId: bigint('contract_version_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => acceptanceContractVersions.id, { onDelete: 'restrict' }),
+    projectId: bigint('project_id', { mode: 'number', unsigned: true }).notNull(),
+    workItemId: bigint('work_item_id', { mode: 'number', unsigned: true }).notNull(),
+    contractVersionId: bigint('contract_version_id', {
+      mode: 'number',
+      unsigned: true,
+    }).notNull(),
     submittedByUserId: bigint('submitted_by_user_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
@@ -52,6 +49,34 @@ export const teamWorkItemSubmissions = mysqlTable(
       table.workItemId,
       table.submissionVersion,
     ),
+    uniqueIndex('uk_team_work_item_submissions_id_lineage').on(
+      table.id,
+      table.contractVersionId,
+      table.workItemId,
+      table.organizationId,
+      table.projectId,
+    ),
+    uniqueIndex('uk_team_work_item_submissions_id_tenant_item').on(
+      table.id,
+      table.workItemId,
+      table.organizationId,
+      table.projectId,
+    ),
+    foreignKey({
+      name: 'fk_team_work_item_submissions_work_item_lineage',
+      columns: [table.workItemId, table.organizationId, table.projectId],
+      foreignColumns: [teamWorkItems.id, teamWorkItems.organizationId, teamWorkItems.projectId],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'fk_team_work_item_submissions_contract_lineage',
+      columns: [table.contractVersionId, table.workItemId, table.organizationId, table.projectId],
+      foreignColumns: [
+        acceptanceContractVersions.id,
+        acceptanceContractVersions.workItemId,
+        acceptanceContractVersions.organizationId,
+        acceptanceContractVersions.projectId,
+      ],
+    }).onDelete('restrict'),
     index('ix_team_work_item_submissions_tenant').on(
       table.organizationId,
       table.projectId,

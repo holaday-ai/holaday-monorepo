@@ -7,6 +7,7 @@ import {
   STOCK_PREFERENCE_REQUIRED_TABLES,
   findMissingRequiredIndexes,
 } from './release-db-contract.mjs';
+import { findTeamWorkItemSchemaViolations } from './team-work-item-schema-contract.mjs';
 
 function loadDotenvAllowingEmpty(path: string): void {
   const result = loadDotenv({ path, override: false });
@@ -148,6 +149,7 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'project_id',
     'milestone_id',
     'created_by_user_id',
+    'title',
     'assignment_mode',
     'status',
     'version',
@@ -807,8 +809,26 @@ async function main(): Promise<void> {
     const tables = new Set(tableRows.map((r) => r.table_name));
     const missingTables = REQUIRED_TABLES.filter((t) => !tables.has(t));
 
-    const [columnRows] = await conn.query<Array<{ table_name: string; column_name: string }>>(
-      `SELECT table_name AS table_name, column_name AS column_name
+    const [columnRows] = await conn.query<
+      Array<{
+        table_name: string;
+        column_name: string;
+        data_type: string;
+        column_type: string;
+        is_nullable: string;
+        column_default: string | null;
+        extra: string;
+        generation_expression: string;
+      }>
+    >(
+      `SELECT table_name AS table_name,
+              column_name AS column_name,
+              data_type AS data_type,
+              column_type AS column_type,
+              is_nullable AS is_nullable,
+              column_default AS column_default,
+              extra AS extra,
+              generation_expression AS generation_expression
        FROM information_schema.columns
        WHERE table_schema = ?`,
       [database],
@@ -854,7 +874,45 @@ async function main(): Promise<void> {
       ...findMissingTeamWorkItemIndexes(indexRows),
     ];
 
-    if (missingTables.length > 0 || missingColumns.length > 0 || missingIndexes.length > 0) {
+    const [foreignKeyRows] = await conn.query<
+      Array<{
+        table_name: string;
+        constraint_name: string;
+        delete_rule: string;
+        ordinal_position: number;
+        column_name: string;
+        referenced_table_name: string;
+        referenced_column_name: string;
+      }>
+    >(
+      `SELECT kcu.table_name AS table_name,
+              kcu.constraint_name AS constraint_name,
+              rc.delete_rule AS delete_rule,
+              kcu.ordinal_position AS ordinal_position,
+              kcu.column_name AS column_name,
+              kcu.referenced_table_name AS referenced_table_name,
+              kcu.referenced_column_name AS referenced_column_name
+       FROM information_schema.key_column_usage AS kcu
+       INNER JOIN information_schema.referential_constraints AS rc
+         ON rc.constraint_schema = kcu.constraint_schema
+        AND rc.table_name = kcu.table_name
+        AND rc.constraint_name = kcu.constraint_name
+       WHERE kcu.table_schema = ?
+         AND kcu.referenced_table_name IS NOT NULL`,
+      [database],
+    );
+    const lifecycleViolations = findTeamWorkItemSchemaViolations({
+      columns: columnRows,
+      indexes: indexRows,
+      foreignKeys: foreignKeyRows,
+    });
+
+    if (
+      missingTables.length > 0 ||
+      missingColumns.length > 0 ||
+      missingIndexes.length > 0 ||
+      lifecycleViolations.length > 0
+    ) {
       console.error(`Database schema verification failed for ${database}.`);
       if (missingTables.length > 0) {
         console.error(`Missing tables: ${missingTables.join(', ')}`);
@@ -864,6 +922,9 @@ async function main(): Promise<void> {
       }
       if (missingIndexes.length > 0) {
         console.error(`Missing indexes: ${missingIndexes.join(', ')}`);
+      }
+      if (lifecycleViolations.length > 0) {
+        console.error(`Invalid lifecycle schema: ${lifecycleViolations.join('; ')}`);
       }
       console.error('Run the numbered migrations or drizzle push before starting orchestrator.');
       process.exitCode = 1;

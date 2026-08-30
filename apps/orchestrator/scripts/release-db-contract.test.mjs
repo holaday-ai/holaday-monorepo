@@ -13,6 +13,7 @@ import {
   isSkippableAlreadyAppliedError,
   splitMigrationStatements,
 } from './release-db-contract.mjs';
+import { TEAM_WORK_ITEM_SCHEMA_CONTRACT } from './team-work-item-schema-contract.mjs';
 
 const TEAM_WORK_ITEM_LIFECYCLE_MIGRATION = '0056_team_work_item_lifecycle.sql';
 const TEAM_WORK_ITEM_TABLES = [
@@ -150,6 +151,33 @@ describe('numbered migration filename contract', () => {
 });
 
 describe('team work item lifecycle schema contract', () => {
+  it('enforces tenant and immutable-parent lineage with ordered composite foreign keys', () => {
+    const migration = readTeamWorkItemLifecycleMigration();
+    const normalizedMigration = migration.replace(/\s+/g, ' ');
+    const requiredFragments = [
+      /ALTER TABLE `projects` ADD UNIQUE KEY `uk_projects_id_organization` \(`id`, `organization_id`\)/,
+      /ALTER TABLE `tasks` ADD UNIQUE KEY `uk_tasks_id_project_user` \(`id`, `project_id`, `user_id`\)/,
+      /CONSTRAINT `fk_team_milestones_project_tenant`[\s\S]*?FOREIGN KEY \(`project_id`, `organization_id`\) REFERENCES `projects` \(`id`, `organization_id`\) ON DELETE RESTRICT/,
+      /UNIQUE KEY `uk_team_work_items_id_tenant` \(`id`, `organization_id`, `project_id`\)/,
+      /CONSTRAINT `fk_team_work_items_current_contract_lineage`[\s\S]*?FOREIGN KEY \(`current_contract_version_id`, `id`, `organization_id`, `project_id`\) REFERENCES `acceptance_contract_versions` \(`id`, `work_item_id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
+      /CONSTRAINT `fk_team_work_item_dependencies_predecessor_lineage`[\s\S]*?FOREIGN KEY \(`depends_on_work_item_id`, `organization_id`, `project_id`\) REFERENCES `team_work_items` \(`id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
+      /CONSTRAINT `fk_team_work_item_submissions_contract_lineage`[\s\S]*?FOREIGN KEY \(`contract_version_id`, `work_item_id`, `organization_id`, `project_id`\) REFERENCES `acceptance_contract_versions` \(`id`, `work_item_id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
+      /CONSTRAINT `fk_team_work_item_reviews_submission_lineage`[\s\S]*?FOREIGN KEY \(`submission_id`, `contract_version_id`, `work_item_id`, `organization_id`, `project_id`\) REFERENCES `team_work_item_submissions` \(`id`, `contract_version_id`, `work_item_id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
+      /CONSTRAINT `fk_team_work_item_appeals_review_lineage`[\s\S]*?FOREIGN KEY \(`review_id`, `submission_id`, `work_item_id`, `organization_id`, `project_id`\) REFERENCES `team_work_item_reviews` \(`id`, `submission_id`, `work_item_id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
+      /CONSTRAINT `fk_team_ai_contributions_execution_task_lineage`[\s\S]*?FOREIGN KEY \(`execution_task_id`, `project_id`, `contributed_by_user_id`\) REFERENCES `tasks` \(`id`, `project_id`, `user_id`\) ON DELETE RESTRICT/,
+      /CONSTRAINT `fk_team_evidence_bindings_ai_lineage`[\s\S]*?FOREIGN KEY \(`ai_contribution_id`, `work_item_id`, `organization_id`, `project_id`\) REFERENCES `team_ai_contributions` \(`id`, `work_item_id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
+    ];
+    for (const fragment of requiredFragments) assert.match(migration, fragment);
+    for (const foreignKey of TEAM_WORK_ITEM_SCHEMA_CONTRACT.foreignKeys) {
+      assert.ok(
+        normalizedMigration.includes(
+          `CONSTRAINT \`${foreignKey.name}\` FOREIGN KEY (${foreignKey.columns.map((column) => `\`${column}\``).join(', ')}) REFERENCES \`${foreignKey.referencedTable}\` (${foreignKey.referencedColumns.map((column) => `\`${column}\``).join(', ')}) ON DELETE RESTRICT`,
+        ),
+        `missing ordered composite FK ${foreignKey.name}`,
+      );
+    }
+  });
+
   it('creates all twelve lifecycle tables and the deferred current-contract foreign key', () => {
     const migration = readTeamWorkItemLifecycleMigration();
     const createdTables = [...migration.matchAll(/CREATE TABLE `([^`]+)`/g)].map(
@@ -159,7 +187,7 @@ describe('team work item lifecycle schema contract', () => {
     assert.deepEqual(createdTables, TEAM_WORK_ITEM_TABLES);
     assert.match(
       migration,
-      /ALTER TABLE `team_work_items`[\s\S]*ADD COLUMN `current_contract_version_id` BIGINT UNSIGNED NULL[\s\S]*FOREIGN KEY \(`current_contract_version_id`\) REFERENCES `acceptance_contract_versions` \(`id`\) ON DELETE RESTRICT/,
+      /ALTER TABLE `team_work_items`[\s\S]*ADD COLUMN `current_contract_version_id` BIGINT UNSIGNED NULL[\s\S]*FOREIGN KEY \(`current_contract_version_id`, `id`, `organization_id`, `project_id`\) REFERENCES `acceptance_contract_versions` \(`id`, `work_item_id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
     );
   });
 
@@ -239,10 +267,8 @@ describe('team work item lifecycle schema contract', () => {
     ]) {
       assert.match(verifier, new RegExp(`name: '${tenantIndex}'`));
     }
-    assert.match(
-      workItemSchema,
-      /currentContractVersionId:[\s\S]*references\(\(\): AnyMySqlColumn => acceptanceContractVersions\.id, \{[\s\S]*onDelete: 'restrict'/,
-    );
+    assert.match(workItemSchema, /fk_team_work_items_current_contract_lineage/);
+    assert.match(workItemSchema, /foreignColumns: currentContractLineageColumns\(\)/);
   });
 });
 

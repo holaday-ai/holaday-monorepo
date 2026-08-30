@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   datetime,
+  foreignKey,
   index,
   mysqlTable,
   text,
@@ -9,9 +10,7 @@ import {
   varchar,
 } from 'drizzle-orm/mysql-core';
 import { organizations } from './organizations.js';
-import { projects } from './projects.js';
 import { teamWorkItemReviews } from './team-work-item-reviews.js';
-import { teamWorkItemSubmissions } from './team-work-item-submissions.js';
 import { teamWorkItems } from './team-work-items.js';
 import { users } from './users.js';
 
@@ -23,18 +22,10 @@ export const teamWorkItemAppeals = mysqlTable(
     organizationId: bigint('organization_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => organizations.id, { onDelete: 'restrict' }),
-    projectId: bigint('project_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => projects.id, { onDelete: 'restrict' }),
-    workItemId: bigint('work_item_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => teamWorkItems.id, { onDelete: 'restrict' }),
-    submissionId: bigint('submission_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => teamWorkItemSubmissions.id, { onDelete: 'restrict' }),
-    reviewId: bigint('review_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => teamWorkItemReviews.id, { onDelete: 'restrict' }),
+    projectId: bigint('project_id', { mode: 'number', unsigned: true }).notNull(),
+    workItemId: bigint('work_item_id', { mode: 'number', unsigned: true }).notNull(),
+    submissionId: bigint('submission_id', { mode: 'number', unsigned: true }).notNull(),
+    reviewId: bigint('review_id', { mode: 'number', unsigned: true }).notNull(),
     openedByUserId: bigint('opened_by_user_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
@@ -54,6 +45,34 @@ export const teamWorkItemAppeals = mysqlTable(
   (table) => [
     uniqueIndex('uk_team_work_item_appeals_external_id').on(table.externalId),
     uniqueIndex('uk_team_work_item_appeals_submission').on(table.submissionId),
+    uniqueIndex('uk_team_work_item_appeals_id_tenant_item').on(
+      table.id,
+      table.workItemId,
+      table.organizationId,
+      table.projectId,
+    ),
+    foreignKey({
+      name: 'fk_team_work_item_appeals_work_item_lineage',
+      columns: [table.workItemId, table.organizationId, table.projectId],
+      foreignColumns: [teamWorkItems.id, teamWorkItems.organizationId, teamWorkItems.projectId],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'fk_team_work_item_appeals_review_lineage',
+      columns: [
+        table.reviewId,
+        table.submissionId,
+        table.workItemId,
+        table.organizationId,
+        table.projectId,
+      ],
+      foreignColumns: [
+        teamWorkItemReviews.id,
+        teamWorkItemReviews.submissionId,
+        teamWorkItemReviews.workItemId,
+        teamWorkItemReviews.organizationId,
+        teamWorkItemReviews.projectId,
+      ],
+    }).onDelete('restrict'),
     index('ix_team_work_item_appeals_tenant_status').on(
       table.organizationId,
       table.projectId,

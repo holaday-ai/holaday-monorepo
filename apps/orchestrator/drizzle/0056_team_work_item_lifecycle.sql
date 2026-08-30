@@ -1,3 +1,7 @@
+ALTER TABLE `projects` ADD UNIQUE KEY `uk_projects_id_organization` (`id`, `organization_id`);
+--> statement-breakpoint
+ALTER TABLE `tasks` ADD UNIQUE KEY `uk_tasks_id_project_user` (`id`, `project_id`, `user_id`);
+--> statement-breakpoint
 CREATE TABLE `team_milestones` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `external_id` VARCHAR(32) NOT NULL,
@@ -13,12 +17,13 @@ CREATE TABLE `team_milestones` (
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_team_milestones_external_id` (`external_id`),
+  UNIQUE KEY `uk_team_milestones_id_tenant` (`id`, `organization_id`, `project_id`),
   KEY `ix_team_milestones_tenant_status` (`organization_id`, `project_id`, `status`),
   KEY `ix_team_milestones_project_sort` (`project_id`, `sort_order`),
   CONSTRAINT `fk_team_milestones_organization`
     FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_milestones_project`
-    FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_milestones_project_tenant`
+    FOREIGN KEY (`project_id`, `organization_id`) REFERENCES `projects` (`id`, `organization_id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_team_milestones_created_by`
     FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
 );
@@ -43,15 +48,16 @@ CREATE TABLE `team_work_items` (
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_team_work_items_external_id` (`external_id`),
+  UNIQUE KEY `uk_team_work_items_id_tenant` (`id`, `organization_id`, `project_id`),
   KEY `ix_team_work_items_tenant_status` (`organization_id`, `project_id`, `status`),
   KEY `ix_team_work_items_project_due` (`project_id`, `due_at`),
   KEY `ix_team_work_items_milestone` (`milestone_id`, `status`),
   CONSTRAINT `fk_team_work_items_organization`
     FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_items_project`
-    FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_items_milestone`
-    FOREIGN KEY (`milestone_id`) REFERENCES `team_milestones` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_work_items_project_tenant`
+    FOREIGN KEY (`project_id`, `organization_id`) REFERENCES `projects` (`id`, `organization_id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_work_items_milestone_lineage`
+    FOREIGN KEY (`milestone_id`, `organization_id`, `project_id`) REFERENCES `team_milestones` (`id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_team_work_items_created_by`
     FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
 );
@@ -78,10 +84,8 @@ CREATE TABLE `team_work_item_assignments` (
   KEY `ix_team_work_item_assignments_user_status` (`user_id`, `status`),
   CONSTRAINT `fk_team_work_item_assignments_organization`
     FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_assignments_project`
-    FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_assignments_work_item`
-    FOREIGN KEY (`work_item_id`) REFERENCES `team_work_items` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_work_item_assignments_work_item_lineage`
+    FOREIGN KEY (`work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_items` (`id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_team_work_item_assignments_user`
     FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_team_work_item_assignments_offered_by`
@@ -102,12 +106,10 @@ CREATE TABLE `team_work_item_dependencies` (
   KEY `ix_team_work_item_dependencies_predecessor` (`depends_on_work_item_id`),
   CONSTRAINT `fk_team_work_item_dependencies_organization`
     FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_dependencies_project`
-    FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_dependencies_work_item`
-    FOREIGN KEY (`work_item_id`) REFERENCES `team_work_items` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_dependencies_predecessor`
-    FOREIGN KEY (`depends_on_work_item_id`) REFERENCES `team_work_items` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_work_item_dependencies_work_item_lineage`
+    FOREIGN KEY (`work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_items` (`id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_work_item_dependencies_predecessor_lineage`
+    FOREIGN KEY (`depends_on_work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_items` (`id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_team_work_item_dependencies_created_by`
     FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
 );
@@ -135,14 +137,13 @@ CREATE TABLE `acceptance_contract_versions` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_acceptance_contract_versions_external_id` (`external_id`),
   UNIQUE KEY `uk_acceptance_contract_versions_work_item_version` (`work_item_id`, `version`),
+  UNIQUE KEY `uk_acceptance_contract_versions_id_lineage` (`id`, `work_item_id`, `organization_id`, `project_id`),
   KEY `ix_acceptance_contract_versions_tenant` (`organization_id`, `project_id`, `work_item_id`),
   KEY `ix_acceptance_contract_versions_approver` (`approver_user_id`, `confirmed_at`),
   CONSTRAINT `fk_acceptance_contract_versions_organization`
     FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_acceptance_contract_versions_project`
-    FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_acceptance_contract_versions_work_item`
-    FOREIGN KEY (`work_item_id`) REFERENCES `team_work_items` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_acceptance_contract_versions_work_item_lineage`
+    FOREIGN KEY (`work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_items` (`id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_acceptance_contract_versions_approver`
     FOREIGN KEY (`approver_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_acceptance_contract_versions_arbitrator`
@@ -156,8 +157,8 @@ CREATE TABLE `acceptance_contract_versions` (
 ALTER TABLE `team_work_items`
   ADD COLUMN `current_contract_version_id` BIGINT UNSIGNED NULL,
   ADD KEY `ix_team_work_items_current_contract` (`current_contract_version_id`),
-  ADD CONSTRAINT `fk_team_work_items_current_contract`
-    FOREIGN KEY (`current_contract_version_id`) REFERENCES `acceptance_contract_versions` (`id`) ON DELETE RESTRICT;
+  ADD CONSTRAINT `fk_team_work_items_current_contract_lineage`
+    FOREIGN KEY (`current_contract_version_id`, `id`, `organization_id`, `project_id`) REFERENCES `acceptance_contract_versions` (`id`, `work_item_id`, `organization_id`, `project_id`) ON DELETE RESTRICT;
 --> statement-breakpoint
 CREATE TABLE `team_work_item_submissions` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -176,16 +177,16 @@ CREATE TABLE `team_work_item_submissions` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_team_work_item_submissions_external_id` (`external_id`),
   UNIQUE KEY `uk_team_work_item_submissions_work_item_version` (`work_item_id`, `submission_version`),
+  UNIQUE KEY `uk_team_work_item_submissions_id_lineage` (`id`, `contract_version_id`, `work_item_id`, `organization_id`, `project_id`),
+  UNIQUE KEY `uk_team_work_item_submissions_id_tenant_item` (`id`, `work_item_id`, `organization_id`, `project_id`),
   KEY `ix_team_work_item_submissions_tenant` (`organization_id`, `project_id`, `work_item_id`),
   KEY `ix_team_work_item_submissions_submitter` (`submitted_by_user_id`, `submitted_at`),
   CONSTRAINT `fk_team_work_item_submissions_organization`
     FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_submissions_project`
-    FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_submissions_work_item`
-    FOREIGN KEY (`work_item_id`) REFERENCES `team_work_items` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_submissions_contract`
-    FOREIGN KEY (`contract_version_id`) REFERENCES `acceptance_contract_versions` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_work_item_submissions_work_item_lineage`
+    FOREIGN KEY (`work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_items` (`id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_work_item_submissions_contract_lineage`
+    FOREIGN KEY (`contract_version_id`, `work_item_id`, `organization_id`, `project_id`) REFERENCES `acceptance_contract_versions` (`id`, `work_item_id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_team_work_item_submissions_submitted_by`
     FOREIGN KEY (`submitted_by_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
 );
@@ -210,18 +211,16 @@ CREATE TABLE `team_work_item_reviews` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_team_work_item_reviews_external_id` (`external_id`),
   UNIQUE KEY `uk_team_work_item_reviews_submission` (`submission_id`),
+  UNIQUE KEY `uk_team_work_item_reviews_id_lineage` (`id`, `submission_id`, `work_item_id`, `organization_id`, `project_id`),
+  UNIQUE KEY `uk_team_work_item_reviews_id_tenant_item` (`id`, `work_item_id`, `organization_id`, `project_id`),
   KEY `ix_team_work_item_reviews_tenant_decision` (`organization_id`, `project_id`, `decision`),
   KEY `ix_team_work_item_reviews_reviewer` (`reviewer_user_id`, `reviewed_at`),
   CONSTRAINT `fk_team_work_item_reviews_organization`
     FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_reviews_project`
-    FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_reviews_work_item`
-    FOREIGN KEY (`work_item_id`) REFERENCES `team_work_items` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_reviews_submission`
-    FOREIGN KEY (`submission_id`) REFERENCES `team_work_item_submissions` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_reviews_contract`
-    FOREIGN KEY (`contract_version_id`) REFERENCES `acceptance_contract_versions` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_work_item_reviews_work_item_lineage`
+    FOREIGN KEY (`work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_items` (`id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_work_item_reviews_submission_lineage`
+    FOREIGN KEY (`submission_id`, `contract_version_id`, `work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_item_submissions` (`id`, `contract_version_id`, `work_item_id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_team_work_item_reviews_reviewer`
     FOREIGN KEY (`reviewer_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
 );
@@ -245,18 +244,15 @@ CREATE TABLE `team_work_item_appeals` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_team_work_item_appeals_external_id` (`external_id`),
   UNIQUE KEY `uk_team_work_item_appeals_submission` (`submission_id`),
+  UNIQUE KEY `uk_team_work_item_appeals_id_tenant_item` (`id`, `work_item_id`, `organization_id`, `project_id`),
   KEY `ix_team_work_item_appeals_tenant_status` (`organization_id`, `project_id`, `status`),
   KEY `ix_team_work_item_appeals_opened_by` (`opened_by_user_id`, `opened_at`),
   CONSTRAINT `fk_team_work_item_appeals_organization`
     FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_appeals_project`
-    FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_appeals_work_item`
-    FOREIGN KEY (`work_item_id`) REFERENCES `team_work_items` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_appeals_submission`
-    FOREIGN KEY (`submission_id`) REFERENCES `team_work_item_submissions` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_appeals_review`
-    FOREIGN KEY (`review_id`) REFERENCES `team_work_item_reviews` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_work_item_appeals_work_item_lineage`
+    FOREIGN KEY (`work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_items` (`id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_work_item_appeals_review_lineage`
+    FOREIGN KEY (`review_id`, `submission_id`, `work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_item_reviews` (`id`, `submission_id`, `work_item_id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_team_work_item_appeals_opened_by`
     FOREIGN KEY (`opened_by_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
 );
@@ -283,12 +279,10 @@ CREATE TABLE `team_arbitration_decisions` (
   KEY `ix_team_arbitration_decisions_arbitrator` (`arbitrator_user_id`, `decided_at`),
   CONSTRAINT `fk_team_arbitration_decisions_organization`
     FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_arbitration_decisions_project`
-    FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_arbitration_decisions_work_item`
-    FOREIGN KEY (`work_item_id`) REFERENCES `team_work_items` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_arbitration_decisions_appeal`
-    FOREIGN KEY (`appeal_id`) REFERENCES `team_work_item_appeals` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_arbitration_decisions_work_item_lineage`
+    FOREIGN KEY (`work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_items` (`id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_arbitration_decisions_appeal_lineage`
+    FOREIGN KEY (`appeal_id`, `work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_item_appeals` (`id`, `work_item_id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_team_arbitration_decisions_arbitrator`
     FOREIGN KEY (`arbitrator_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
 );
@@ -315,14 +309,12 @@ CREATE TABLE `team_work_item_events` (
   KEY `ix_team_work_item_events_actor` (`actor_user_id`, `occurred_at`),
   CONSTRAINT `fk_team_work_item_events_organization`
     FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_events_project`
-    FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_events_work_item`
-    FOREIGN KEY (`work_item_id`) REFERENCES `team_work_items` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_work_item_events_work_item_lineage`
+    FOREIGN KEY (`work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_items` (`id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_team_work_item_events_actor`
     FOREIGN KEY (`actor_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_work_item_events_contract`
-    FOREIGN KEY (`contract_version_id`) REFERENCES `acceptance_contract_versions` (`id`) ON DELETE RESTRICT
+  CONSTRAINT `fk_team_work_item_events_contract_lineage`
+    FOREIGN KEY (`contract_version_id`, `work_item_id`, `organization_id`, `project_id`) REFERENCES `acceptance_contract_versions` (`id`, `work_item_id`, `organization_id`, `project_id`) ON DELETE RESTRICT
 );
 --> statement-breakpoint
 CREATE TABLE `team_evidence_bindings` (
@@ -353,16 +345,14 @@ CREATE TABLE `team_evidence_bindings` (
   KEY `ix_team_evidence_bindings_task_file` (`task_file_id`),
   CONSTRAINT `fk_team_evidence_bindings_organization`
     FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_evidence_bindings_project`
-    FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_evidence_bindings_work_item`
-    FOREIGN KEY (`work_item_id`) REFERENCES `team_work_items` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_evidence_bindings_submission`
-    FOREIGN KEY (`submission_id`) REFERENCES `team_work_item_submissions` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_evidence_bindings_review`
-    FOREIGN KEY (`review_id`) REFERENCES `team_work_item_reviews` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_evidence_bindings_appeal`
-    FOREIGN KEY (`appeal_id`) REFERENCES `team_work_item_appeals` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_evidence_bindings_work_item_lineage`
+    FOREIGN KEY (`work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_items` (`id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_evidence_bindings_submission_lineage`
+    FOREIGN KEY (`submission_id`, `work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_item_submissions` (`id`, `work_item_id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_evidence_bindings_review_lineage`
+    FOREIGN KEY (`review_id`, `work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_item_reviews` (`id`, `work_item_id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_evidence_bindings_appeal_lineage`
+    FOREIGN KEY (`appeal_id`, `work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_item_appeals` (`id`, `work_item_id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_team_evidence_bindings_artifact`
     FOREIGN KEY (`evidence_artifact_id`) REFERENCES `evidence_artifacts` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_team_evidence_bindings_task_file`
@@ -390,21 +380,20 @@ CREATE TABLE `team_ai_contributions` (
   `confirmed_at` DATETIME(3) NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_team_ai_contributions_external_id` (`external_id`),
+  UNIQUE KEY `uk_team_ai_contributions_id_tenant_item` (`id`, `work_item_id`, `organization_id`, `project_id`),
   KEY `ix_team_ai_contributions_tenant` (`organization_id`, `project_id`, `work_item_id`),
   KEY `ix_team_ai_contributions_execution_task` (`execution_task_id`),
   KEY `ix_team_ai_contributions_contributor` (`contributed_by_user_id`, `created_at`),
   CONSTRAINT `fk_team_ai_contributions_organization`
     FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_ai_contributions_project`
-    FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_ai_contributions_work_item`
-    FOREIGN KEY (`work_item_id`) REFERENCES `team_work_items` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_ai_contributions_work_item_lineage`
+    FOREIGN KEY (`work_item_id`, `organization_id`, `project_id`) REFERENCES `team_work_items` (`id`, `organization_id`, `project_id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_team_ai_contributions_contributed_by`
     FOREIGN KEY (`contributed_by_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `fk_team_ai_contributions_execution_task`
-    FOREIGN KEY (`execution_task_id`) REFERENCES `tasks` (`id`) ON DELETE RESTRICT
+  CONSTRAINT `fk_team_ai_contributions_execution_task_lineage`
+    FOREIGN KEY (`execution_task_id`, `project_id`, `contributed_by_user_id`) REFERENCES `tasks` (`id`, `project_id`, `user_id`) ON DELETE RESTRICT
 );
 --> statement-breakpoint
 ALTER TABLE `team_evidence_bindings`
-  ADD CONSTRAINT `fk_team_evidence_bindings_ai_contribution`
-    FOREIGN KEY (`ai_contribution_id`) REFERENCES `team_ai_contributions` (`id`) ON DELETE RESTRICT;
+  ADD CONSTRAINT `fk_team_evidence_bindings_ai_lineage`
+    FOREIGN KEY (`ai_contribution_id`, `work_item_id`, `organization_id`, `project_id`) REFERENCES `team_ai_contributions` (`id`, `work_item_id`, `organization_id`, `project_id`) ON DELETE RESTRICT;

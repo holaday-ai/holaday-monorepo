@@ -3,6 +3,7 @@ import {
   type AnyMySqlColumn,
   bigint,
   datetime,
+  foreignKey,
   index,
   int,
   json,
@@ -17,6 +18,20 @@ import { projects } from './projects.js';
 import { teamMilestones } from './team-milestones.js';
 import { users } from './users.js';
 
+function currentContractLineageColumns(): [
+  AnyMySqlColumn,
+  AnyMySqlColumn,
+  AnyMySqlColumn,
+  AnyMySqlColumn,
+] {
+  return [
+    acceptanceContractVersions.id,
+    acceptanceContractVersions.workItemId,
+    acceptanceContractVersions.organizationId,
+    acceptanceContractVersions.projectId,
+  ];
+}
+
 export const teamWorkItems = mysqlTable(
   'team_work_items',
   {
@@ -25,13 +40,8 @@ export const teamWorkItems = mysqlTable(
     organizationId: bigint('organization_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => organizations.id, { onDelete: 'restrict' }),
-    projectId: bigint('project_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => projects.id, { onDelete: 'restrict' }),
-    milestoneId: bigint('milestone_id', { mode: 'number', unsigned: true }).references(
-      () => teamMilestones.id,
-      { onDelete: 'restrict' },
-    ),
+    projectId: bigint('project_id', { mode: 'number', unsigned: true }).notNull(),
+    milestoneId: bigint('milestone_id', { mode: 'number', unsigned: true }),
     createdByUserId: bigint('created_by_user_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
@@ -43,7 +53,7 @@ export const teamWorkItems = mysqlTable(
     currentContractVersionId: bigint('current_contract_version_id', {
       mode: 'number',
       unsigned: true,
-    }).references((): AnyMySqlColumn => acceptanceContractVersions.id, { onDelete: 'restrict' }),
+    }),
     dueAt: datetime('due_at', { mode: 'date', fsp: 3 }),
     blockerJson: json('blocker_json'),
     revisionRound: int('revision_round', { unsigned: true }).notNull().default(0),
@@ -58,6 +68,22 @@ export const teamWorkItems = mysqlTable(
   },
   (table) => [
     uniqueIndex('uk_team_work_items_external_id').on(table.externalId),
+    uniqueIndex('uk_team_work_items_id_tenant').on(table.id, table.organizationId, table.projectId),
+    foreignKey({
+      name: 'fk_team_work_items_project_tenant',
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [projects.id, projects.organizationId],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'fk_team_work_items_milestone_lineage',
+      columns: [table.milestoneId, table.organizationId, table.projectId],
+      foreignColumns: [teamMilestones.id, teamMilestones.organizationId, teamMilestones.projectId],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'fk_team_work_items_current_contract_lineage',
+      columns: [table.currentContractVersionId, table.id, table.organizationId, table.projectId],
+      foreignColumns: currentContractLineageColumns(),
+    }).onDelete('restrict'),
     index('ix_team_work_items_tenant_status').on(
       table.organizationId,
       table.projectId,

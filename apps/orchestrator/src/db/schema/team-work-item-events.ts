@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   datetime,
+  foreignKey,
   index,
   json,
   mysqlTable,
@@ -10,7 +11,6 @@ import {
 } from 'drizzle-orm/mysql-core';
 import { acceptanceContractVersions } from './acceptance-contract-versions.js';
 import { organizations } from './organizations.js';
-import { projects } from './projects.js';
 import { teamWorkItems } from './team-work-items.js';
 import { users } from './users.js';
 
@@ -22,22 +22,15 @@ export const teamWorkItemEvents = mysqlTable(
     organizationId: bigint('organization_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => organizations.id, { onDelete: 'restrict' }),
-    projectId: bigint('project_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => projects.id, { onDelete: 'restrict' }),
-    workItemId: bigint('work_item_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => teamWorkItems.id, { onDelete: 'restrict' }),
+    projectId: bigint('project_id', { mode: 'number', unsigned: true }).notNull(),
+    workItemId: bigint('work_item_id', { mode: 'number', unsigned: true }).notNull(),
     actorUserId: bigint('actor_user_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
     eventType: varchar('event_type', { length: 48 }).notNull(),
     fromState: varchar('from_state', { length: 32 }),
     toState: varchar('to_state', { length: 32 }),
-    contractVersionId: bigint('contract_version_id', { mode: 'number', unsigned: true }).references(
-      () => acceptanceContractVersions.id,
-      { onDelete: 'restrict' },
-    ),
+    contractVersionId: bigint('contract_version_id', { mode: 'number', unsigned: true }),
     idempotencyKey: varchar('idempotency_key', { length: 64 }).notNull(),
     metadataJson: json('metadata_json'),
     occurredAt: datetime('occurred_at', { mode: 'date', fsp: 3 })
@@ -50,6 +43,21 @@ export const teamWorkItemEvents = mysqlTable(
       table.organizationId,
       table.idempotencyKey,
     ),
+    foreignKey({
+      name: 'fk_team_work_item_events_work_item_lineage',
+      columns: [table.workItemId, table.organizationId, table.projectId],
+      foreignColumns: [teamWorkItems.id, teamWorkItems.organizationId, teamWorkItems.projectId],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'fk_team_work_item_events_contract_lineage',
+      columns: [table.contractVersionId, table.workItemId, table.organizationId, table.projectId],
+      foreignColumns: [
+        acceptanceContractVersions.id,
+        acceptanceContractVersions.workItemId,
+        acceptanceContractVersions.organizationId,
+        acceptanceContractVersions.projectId,
+      ],
+    }).onDelete('restrict'),
     index('ix_team_work_item_events_item_time').on(table.workItemId, table.occurredAt),
     index('ix_team_work_item_events_tenant_type').on(
       table.organizationId,

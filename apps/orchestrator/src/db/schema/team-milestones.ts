@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   datetime,
+  foreignKey,
   index,
   int,
   mysqlTable,
@@ -21,9 +22,7 @@ export const teamMilestones = mysqlTable(
     organizationId: bigint('organization_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => organizations.id, { onDelete: 'restrict' }),
-    projectId: bigint('project_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => projects.id, { onDelete: 'restrict' }),
+    projectId: bigint('project_id', { mode: 'number', unsigned: true }).notNull(),
     createdByUserId: bigint('created_by_user_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
@@ -42,6 +41,12 @@ export const teamMilestones = mysqlTable(
   },
   (table) => [
     uniqueIndex('uk_team_milestones_external_id').on(table.externalId),
+    uniqueIndex('uk_team_milestones_id_tenant').on(table.id, table.organizationId, table.projectId),
+    foreignKey({
+      name: 'fk_team_milestones_project_tenant',
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [projects.id, projects.organizationId],
+    }).onDelete('restrict'),
     index('ix_team_milestones_tenant_status').on(
       table.organizationId,
       table.projectId,

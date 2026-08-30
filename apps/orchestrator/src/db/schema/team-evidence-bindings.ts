@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   datetime,
+  foreignKey,
   index,
   json,
   mysqlTable,
@@ -10,7 +11,6 @@ import {
 } from 'drizzle-orm/mysql-core';
 import { evidenceArtifacts } from './evidence-artifacts.js';
 import { organizations } from './organizations.js';
-import { projects } from './projects.js';
 import { taskFiles } from './task-files.js';
 import { teamAiContributions } from './team-ai-contributions.js';
 import { teamWorkItemAppeals } from './team-work-item-appeals.js';
@@ -27,28 +27,12 @@ export const teamEvidenceBindings = mysqlTable(
     organizationId: bigint('organization_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => organizations.id, { onDelete: 'restrict' }),
-    projectId: bigint('project_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => projects.id, { onDelete: 'restrict' }),
-    workItemId: bigint('work_item_id', { mode: 'number', unsigned: true })
-      .notNull()
-      .references(() => teamWorkItems.id, { onDelete: 'restrict' }),
-    submissionId: bigint('submission_id', { mode: 'number', unsigned: true }).references(
-      () => teamWorkItemSubmissions.id,
-      { onDelete: 'restrict' },
-    ),
-    reviewId: bigint('review_id', { mode: 'number', unsigned: true }).references(
-      () => teamWorkItemReviews.id,
-      { onDelete: 'restrict' },
-    ),
-    appealId: bigint('appeal_id', { mode: 'number', unsigned: true }).references(
-      () => teamWorkItemAppeals.id,
-      { onDelete: 'restrict' },
-    ),
-    aiContributionId: bigint('ai_contribution_id', { mode: 'number', unsigned: true }).references(
-      () => teamAiContributions.id,
-      { onDelete: 'restrict' },
-    ),
+    projectId: bigint('project_id', { mode: 'number', unsigned: true }).notNull(),
+    workItemId: bigint('work_item_id', { mode: 'number', unsigned: true }).notNull(),
+    submissionId: bigint('submission_id', { mode: 'number', unsigned: true }),
+    reviewId: bigint('review_id', { mode: 'number', unsigned: true }),
+    appealId: bigint('appeal_id', { mode: 'number', unsigned: true }),
+    aiContributionId: bigint('ai_contribution_id', { mode: 'number', unsigned: true }),
     evidenceArtifactId: bigint('evidence_artifact_id', {
       mode: 'number',
       unsigned: true,
@@ -69,6 +53,51 @@ export const teamEvidenceBindings = mysqlTable(
   },
   (table) => [
     uniqueIndex('uk_team_evidence_bindings_external_id').on(table.externalId),
+    foreignKey({
+      name: 'fk_team_evidence_bindings_work_item_lineage',
+      columns: [table.workItemId, table.organizationId, table.projectId],
+      foreignColumns: [teamWorkItems.id, teamWorkItems.organizationId, teamWorkItems.projectId],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'fk_team_evidence_bindings_submission_lineage',
+      columns: [table.submissionId, table.workItemId, table.organizationId, table.projectId],
+      foreignColumns: [
+        teamWorkItemSubmissions.id,
+        teamWorkItemSubmissions.workItemId,
+        teamWorkItemSubmissions.organizationId,
+        teamWorkItemSubmissions.projectId,
+      ],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'fk_team_evidence_bindings_review_lineage',
+      columns: [table.reviewId, table.workItemId, table.organizationId, table.projectId],
+      foreignColumns: [
+        teamWorkItemReviews.id,
+        teamWorkItemReviews.workItemId,
+        teamWorkItemReviews.organizationId,
+        teamWorkItemReviews.projectId,
+      ],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'fk_team_evidence_bindings_appeal_lineage',
+      columns: [table.appealId, table.workItemId, table.organizationId, table.projectId],
+      foreignColumns: [
+        teamWorkItemAppeals.id,
+        teamWorkItemAppeals.workItemId,
+        teamWorkItemAppeals.organizationId,
+        teamWorkItemAppeals.projectId,
+      ],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'fk_team_evidence_bindings_ai_lineage',
+      columns: [table.aiContributionId, table.workItemId, table.organizationId, table.projectId],
+      foreignColumns: [
+        teamAiContributions.id,
+        teamAiContributions.workItemId,
+        teamAiContributions.organizationId,
+        teamAiContributions.projectId,
+      ],
+    }).onDelete('restrict'),
     index('ix_team_evidence_bindings_tenant').on(
       table.organizationId,
       table.projectId,
