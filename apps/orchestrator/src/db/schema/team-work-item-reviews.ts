@@ -4,6 +4,7 @@ import {
   datetime,
   foreignKey,
   index,
+  int,
   json,
   mysqlTable,
   text,
@@ -35,6 +36,7 @@ export const teamWorkItemReviews = mysqlTable(
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
     reviewDelegationId: bigint('review_delegation_id', { mode: 'number', unsigned: true }),
+    reviewAttempt: int('review_attempt', { unsigned: true }).notNull().default(1),
     decision: varchar('decision', { length: 32 }).notNull(),
     failedCriterionIdsJson: json('failed_criterion_ids_json'),
     evidenceRefsJson: json('evidence_refs_json'),
@@ -48,7 +50,10 @@ export const teamWorkItemReviews = mysqlTable(
   },
   (table) => [
     uniqueIndex('uk_team_work_item_reviews_external_id').on(table.externalId),
-    uniqueIndex('uk_team_work_item_reviews_submission').on(table.submissionId),
+    uniqueIndex('uk_team_work_item_reviews_submission_attempt').on(
+      table.submissionId,
+      table.reviewAttempt,
+    ),
     uniqueIndex('uk_team_work_item_reviews_id_lineage').on(
       table.id,
       table.submissionId,

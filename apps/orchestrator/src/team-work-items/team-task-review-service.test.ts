@@ -85,6 +85,20 @@ class MemoryTransaction implements ReviewTransaction {
   planningEvents: ReviewPlanningEventRow[] = [];
   submissions: ReviewSubmissionRow[] = [];
   reviews: ReviewDecisionRow[] = [];
+  returnForReviewAuthorizations = new Map<
+    number,
+    {
+      appealId: number;
+      decisionId: number;
+      reviewId: number;
+      submissionId: number;
+      contractVersionId: number;
+      workItemId: number;
+      organizationId: number;
+      projectId: number;
+      decidedAt: Date;
+    }
+  >();
   locks: string[] = [];
 
   async lockWorkItemAccess(actorExternalId: string) {
@@ -152,6 +166,16 @@ class MemoryTransaction implements ReviewTransaction {
   async lockReviewBySubmissionId(submissionId: number) {
     this.locks.push('review');
     return this.reviews.find((review) => review.submissionId === submissionId) ?? null;
+  }
+  async lockReviewsBySubmissionId(submissionId: number) {
+    this.locks.push('reviews');
+    return this.reviews
+      .filter((review) => review.submissionId === submissionId)
+      .sort((left, right) => left.reviewAttempt - right.reviewAttempt);
+  }
+  async lockReturnForReviewDecision(reviewId: number) {
+    this.locks.push('return-decision');
+    return this.returnForReviewAuthorizations.get(reviewId) ?? null;
   }
   async insertSubmission(row: Omit<ReviewSubmissionRow, 'id'>) {
     const id = this.submissions.length + 100;
@@ -349,8 +373,22 @@ describe('TeamTaskReviewService review and limited rework', () => {
       submissionId: ext('tsb', 's'),
     });
     expect(repo.tx.reviews).toHaveLength(1);
-    expect(repo.tx.reviews[0]).toMatchObject({ reviewDelegationId: null });
+    expect(repo.tx.reviews[0]).toMatchObject({ reviewDelegationId: null, reviewAttempt: 1 });
+    expect(accepted).toMatchObject({ reviewAttempt: 1 });
     expect(repo.tx.events).toHaveLength(1);
+    const eventMetadata = repo.tx.events[0]?.metadata;
+    if (
+      typeof eventMetadata !== 'object' ||
+      eventMetadata === null ||
+      !('receipt' in eventMetadata) ||
+      typeof eventMetadata.receipt !== 'object' ||
+      eventMetadata.receipt === null
+    ) {
+      throw new Error('missing review receipt fixture');
+    }
+    Object.assign(eventMetadata.receipt, { reviewAttempt: 101 });
+    await expect(subject.review(acceptInput())).rejects.toMatchObject({ code: 'CONFLICT' });
+    Object.assign(eventMetadata.receipt, { reviewAttempt: 1 });
     expect(await subject.review(acceptInput())).toEqual(accepted);
     repo.tx.access.actorOrganizationRole = 'manager';
     await expect(
@@ -377,6 +415,86 @@ describe('TeamTaskReviewService review and limited rework', () => {
         idempotencyKey: 'close-1',
       }),
     ).toEqual(closed);
+  });
+
+  it('creates exactly one bounded next review attempt after a strictly bound return-for-review decision', async () => {
+    const { repo, service: subject } = submittedForReview();
+    repo.tx.workItem.status = 'resubmitted';
+    repo.tx.workItem.revisionRound = 2;
+    repo.tx.reviews.push({
+      id: 200,
+      externalId: ext('trv', 'h'),
+      organizationId: 1,
+      projectId: 2,
+      workItemId: 3,
+      submissionId: 100,
+      contractVersionId: 5,
+      reviewerUserId: 20,
+      reviewDelegationId: null,
+      reviewAttempt: 1,
+      decision: 'request_revision',
+      failedCriterionIds: ['quality'],
+      evidenceReferences: [{ kind: 'evidence', reference: 'artifact://one' }],
+      revisionInstructions: ['Fix quality.'],
+      rationale: 'Quality failed.',
+      newDueAt: new Date('2026-09-01T04:00:00.000Z'),
+      reviewedAt: new Date('2026-08-30T04:00:00.000Z'),
+      createdAt: new Date('2026-08-30T04:00:00.000Z'),
+    });
+
+    await expect(
+      subject.review({
+        ...acceptInput(),
+        expectedVersion: 4,
+        idempotencyKey: 'review-attempt-without-return',
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(repo.tx.reviews).toHaveLength(1);
+
+    repo.tx.returnForReviewAuthorizations.set(200, {
+      appealId: 300,
+      decisionId: 400,
+      reviewId: 200,
+      submissionId: 100,
+      contractVersionId: 5,
+      workItemId: 3,
+      organizationId: 1,
+      projectId: 9,
+      decidedAt: new Date('2026-08-31T03:00:00.000Z'),
+    });
+
+    await expect(
+      subject.review({
+        ...acceptInput(),
+        expectedVersion: 4,
+        idempotencyKey: 'review-attempt-foreign-return',
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(repo.tx.reviews).toHaveLength(1);
+    const returnAuthorization = repo.tx.returnForReviewAuthorizations.get(200);
+    if (!returnAuthorization) throw new Error('missing return authorization fixture');
+    returnAuthorization.projectId = 2;
+
+    const result = await subject.review({
+      ...acceptInput(),
+      expectedVersion: 4,
+      idempotencyKey: 'review-attempt-2',
+    });
+    expect(result).toMatchObject({
+      command: 'accept_submission',
+      reviewAttempt: 2,
+      state: 'accepted',
+      revisionRound: 2,
+    });
+    expect(repo.tx.reviews).toHaveLength(2);
+    expect(repo.tx.reviews[1]).toMatchObject({ reviewAttempt: 2, submissionId: 100 });
+    expect(repo.tx.workItem.revisionRound).toBe(2);
+
+    repo.tx.workItem.status = 'resubmitted';
+    repo.tx.workItem.version = 4;
+    await expect(
+      subject.review({ ...acceptInput(), idempotencyKey: 'review-attempt-3' }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 
   it('allows only an in-window, active, same-project delegated approver with no assignment conflict', async () => {

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { isExternalId, newExternalId } from '@holaday/shared-types';
-import { and, desc, eq, gte, isNull, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, isNull, lte } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows, readInsertId } from '../db/mysql-result.js';
 import { acceptanceContractVersions } from '../db/schema/acceptance-contract-versions.js';
@@ -8,8 +8,10 @@ import { organizationMembers } from '../db/schema/organization-members.js';
 import { organizations } from '../db/schema/organizations.js';
 import { projectMembers } from '../db/schema/project-members.js';
 import { projects } from '../db/schema/projects.js';
+import { teamArbitrationDecisions } from '../db/schema/team-arbitration-decisions.js';
 import { teamProjectPlanningEvents } from '../db/schema/team-project-planning-events.js';
 import { teamTaskReviewDelegations } from '../db/schema/team-task-review-delegations.js';
+import { teamWorkItemAppeals } from '../db/schema/team-work-item-appeals.js';
 import { teamWorkItemAssignments } from '../db/schema/team-work-item-assignments.js';
 import { teamWorkItemEvents } from '../db/schema/team-work-item-events.js';
 import { teamWorkItemReviews } from '../db/schema/team-work-item-reviews.js';
@@ -114,6 +116,7 @@ export interface ReviewDecisionRow {
   contractVersionId: number;
   reviewerUserId: number;
   reviewDelegationId: number | null;
+  reviewAttempt: number;
   decision: 'accepted' | 'request_revision';
   failedCriterionIds: string[] | null;
   evidenceReferences: TeamTaskEvidenceReference[] | null;
@@ -122,6 +125,18 @@ export interface ReviewDecisionRow {
   newDueAt: Date | null;
   reviewedAt: Date;
   createdAt: Date;
+}
+
+export interface ReturnForReviewAuthorizationRow {
+  appealId: number;
+  decisionId: number;
+  reviewId: number;
+  submissionId: number;
+  contractVersionId: number;
+  workItemId: number;
+  organizationId: number;
+  projectId: number;
+  decidedAt: Date;
 }
 
 export type ReviewEventRow = TeamTaskEventRow;
@@ -159,7 +174,15 @@ export interface ReviewTransaction {
     workItemId: number,
     externalId: string,
   ): Promise<ReviewSubmissionRow | null>;
-  lockReviewBySubmissionId(submissionId: number): Promise<ReviewDecisionRow | null>;
+  lockReviewsBySubmissionId(submissionId: number): Promise<ReviewDecisionRow[] | null>;
+  lockReturnForReviewDecision(
+    reviewId: number,
+    submissionId: number,
+    contractVersionId: number,
+    workItemId: number,
+    organizationId: number,
+    projectId: number,
+  ): Promise<ReturnForReviewAuthorizationRow | null>;
   insertSubmission(row: Omit<ReviewSubmissionRow, 'id'>): Promise<number>;
   insertReview(row: Omit<ReviewDecisionRow, 'id'>): Promise<number>;
   updateWorkItem(
@@ -195,6 +218,7 @@ export type ReviewReceipt =
       workItemId: string;
       submissionId: string;
       reviewDelegationId: string | null;
+      reviewAttempt: number;
       state: TeamTaskState;
       version: number;
       revisionRound: number;
@@ -220,6 +244,8 @@ const defaults: Dependencies = {
   isLifecycleEnabled: isTeamTaskLifecycleEnabledFor,
   newId: (kind) => newExternalId(kind),
 };
+
+const MAX_REVIEW_ATTEMPTS = 100;
 
 function fail(code: TeamTaskReviewServiceErrorCode): never {
   throw new TeamTaskReviewServiceError(code);
@@ -295,6 +321,14 @@ function receiptFromEvent(event: ReviewEventRow, hash: string): ReviewReceipt {
   if (!isRecord(event.metadata) || event.metadata.requestHash !== hash) return fail('CONFLICT');
   const receipt = event.metadata.receipt;
   if (!isRecord(receipt) || typeof receipt.command !== 'string') return fail('CONFLICT');
+  if (
+    (receipt.command === 'accept_submission' || receipt.command === 'request_revision') &&
+    (!Number.isSafeInteger(receipt.reviewAttempt) ||
+      (receipt.reviewAttempt as number) < 1 ||
+      (receipt.reviewAttempt as number) > MAX_REVIEW_ATTEMPTS)
+  ) {
+    return fail('CONFLICT');
+  }
   return receipt as unknown as ReviewReceipt;
 }
 
@@ -356,6 +390,48 @@ function oneResponsible(assignments: TeamTaskAssignmentRow[]) {
 
 function eventMetadata(hash: string, receipt: ReviewReceipt) {
   return { requestHash: hash, receipt };
+}
+
+function verifyReviewHistory(
+  reviews: ReviewDecisionRow[],
+  submission: ReviewSubmissionRow,
+  workItem: ReviewWorkItemRow,
+  contract: ReviewContractRow,
+) {
+  if (reviews.length > MAX_REVIEW_ATTEMPTS) return fail('CONFLICT');
+  for (let index = 0; index < reviews.length; index += 1) {
+    const review = reviews[index];
+    if (
+      !review ||
+      review.reviewAttempt !== index + 1 ||
+      review.organizationId !== workItem.organizationId ||
+      review.projectId !== workItem.projectId ||
+      review.workItemId !== workItem.id ||
+      review.submissionId !== submission.id ||
+      review.contractVersionId !== contract.id
+    ) {
+      return fail('CONFLICT');
+    }
+  }
+}
+
+function verifyReturnAuthorization(
+  authorization: ReturnForReviewAuthorizationRow,
+  review: ReviewDecisionRow,
+  submission: ReviewSubmissionRow,
+  workItem: ReviewWorkItemRow,
+  contract: ReviewContractRow,
+) {
+  if (
+    authorization.reviewId !== review.id ||
+    authorization.submissionId !== submission.id ||
+    authorization.contractVersionId !== contract.id ||
+    authorization.workItemId !== workItem.id ||
+    authorization.organizationId !== workItem.organizationId ||
+    authorization.projectId !== workItem.projectId
+  ) {
+    return fail('NOT_FOUND');
+  }
 }
 
 function isLockConflict(error: unknown) {
@@ -570,7 +646,31 @@ export class TeamTaskReviewService {
       ) {
         return fail('NOT_FOUND');
       }
-      if (await tx.lockReviewBySubmissionId(submission.id)) return fail('CONFLICT');
+      const reviewHistory = await tx.lockReviewsBySubmissionId(submission.id);
+      if (!reviewHistory) return fail('CONFLICT');
+      verifyReviewHistory(reviewHistory, submission, workItem, contract);
+      let reviewAttempt = 1;
+      const previousReview = reviewHistory.at(-1);
+      if (previousReview) {
+        if (previousReview.reviewAttempt >= MAX_REVIEW_ATTEMPTS) return fail('CONFLICT');
+        const returnAuthorization = await tx.lockReturnForReviewDecision(
+          previousReview.id,
+          submission.id,
+          contract.id,
+          workItem.id,
+          workItem.organizationId,
+          workItem.projectId,
+        );
+        if (!returnAuthorization) return fail('CONFLICT');
+        verifyReturnAuthorization(
+          returnAuthorization,
+          previousReview,
+          submission,
+          workItem,
+          contract,
+        );
+        reviewAttempt = previousReview.reviewAttempt + 1;
+      }
       const isDirect = access.actorUserId === contract.approverUserId;
       if (!(await tx.loadActiveUser(workItem.organizationId, contract.approverUserId))) {
         return fail('NOT_FOUND');
@@ -670,6 +770,7 @@ export class TeamTaskReviewService {
         contractVersionId: contract.id,
         reviewerUserId: access.actorUserId,
         reviewDelegationId: effectiveDelegation?.id ?? null,
+        reviewAttempt,
         decision,
         failedCriterionIds: normalizedRevision?.failedCriterionIds ?? null,
         evidenceReferences: normalizedRevision?.evidenceReferences ?? null,
@@ -696,6 +797,7 @@ export class TeamTaskReviewService {
         workItemId,
         submissionId,
         reviewDelegationId: effectiveDelegation?.externalId ?? null,
+        reviewAttempt,
         state: nextState,
         version: expectedVersion + 1,
         revisionRound,
@@ -1169,13 +1271,72 @@ class DrizzleReviewTransaction implements ReviewTransaction {
     return deliverables ? { ...row, deliverables } : null;
   }
 
-  async lockReviewBySubmissionId(submissionId: number) {
-    const [row] = await this.db
+  async lockReviewsBySubmissionId(submissionId: number) {
+    const rows = await this.db
       .select()
       .from(teamWorkItemReviews)
       .where(eq(teamWorkItemReviews.submissionId, submissionId))
+      .orderBy(asc(teamWorkItemReviews.reviewAttempt), asc(teamWorkItemReviews.id))
+      .for('update');
+    const reviews: ReviewDecisionRow[] = [];
+    for (const row of rows) {
+      const review = this.normalizeReview(row);
+      if (!review) return null;
+      reviews.push(review);
+    }
+    return reviews;
+  }
+
+  async lockReturnForReviewDecision(
+    reviewId: number,
+    submissionId: number,
+    contractVersionId: number,
+    workItemId: number,
+    organizationId: number,
+    projectId: number,
+  ) {
+    const [row] = await this.db
+      .select({
+        appealId: teamWorkItemAppeals.id,
+        decisionId: teamArbitrationDecisions.id,
+        reviewId: teamWorkItemAppeals.reviewId,
+        submissionId: teamWorkItemAppeals.submissionId,
+        contractVersionId: teamWorkItemReviews.contractVersionId,
+        workItemId: teamWorkItemAppeals.workItemId,
+        organizationId: teamWorkItemAppeals.organizationId,
+        projectId: teamWorkItemAppeals.projectId,
+        decidedAt: teamArbitrationDecisions.decidedAt,
+      })
+      .from(teamWorkItemAppeals)
+      .innerJoin(
+        teamWorkItemReviews,
+        and(
+          eq(teamWorkItemReviews.id, teamWorkItemAppeals.reviewId),
+          eq(teamWorkItemReviews.submissionId, teamWorkItemAppeals.submissionId),
+        ),
+      )
+      .innerJoin(
+        teamArbitrationDecisions,
+        eq(teamArbitrationDecisions.appealId, teamWorkItemAppeals.id),
+      )
+      .where(
+        and(
+          eq(teamWorkItemAppeals.reviewId, reviewId),
+          eq(teamWorkItemAppeals.submissionId, submissionId),
+          eq(teamWorkItemReviews.contractVersionId, contractVersionId),
+          eq(teamWorkItemAppeals.workItemId, workItemId),
+          eq(teamWorkItemAppeals.organizationId, organizationId),
+          eq(teamWorkItemAppeals.projectId, projectId),
+          eq(teamWorkItemAppeals.status, 'appeal_resolved'),
+          eq(teamArbitrationDecisions.decision, 'return_for_review'),
+        ),
+      )
       .for('update')
       .limit(1);
+    return row ?? null;
+  }
+
+  private normalizeReview(row: typeof teamWorkItemReviews.$inferSelect) {
     if (!row || (row.decision !== 'accepted' && row.decision !== 'request_revision')) return null;
     const failedCriterionIds =
       row.failedCriterionIdsJson === null ? null : normalizeStrings(row.failedCriterionIdsJson);
@@ -1229,6 +1390,7 @@ class DrizzleReviewTransaction implements ReviewTransaction {
         contractVersionId: row.contractVersionId,
         reviewerUserId: row.reviewerUserId,
         reviewDelegationId: row.reviewDelegationId,
+        reviewAttempt: row.reviewAttempt,
         decision: row.decision,
         failedCriterionIdsJson: row.failedCriterionIds,
         evidenceRefsJson: row.evidenceReferences,

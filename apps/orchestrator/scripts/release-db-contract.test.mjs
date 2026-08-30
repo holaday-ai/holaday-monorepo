@@ -16,6 +16,7 @@ import {
 import { TEAM_WORK_ITEM_SCHEMA_CONTRACT } from './team-work-item-schema-contract.mjs';
 
 const TEAM_WORK_ITEM_LIFECYCLE_MIGRATION = '0056_team_work_item_lifecycle.sql';
+const TEAM_WORK_ITEM_REVIEW_ATTEMPT_MIGRATION = '0057_team_work_item_review_attempts.sql';
 const TEAM_WORK_ITEM_TABLES = [
   'team_milestones',
   'team_work_items',
@@ -36,6 +37,13 @@ const TEAM_WORK_ITEM_TABLES = [
 function readTeamWorkItemLifecycleMigration() {
   return readFileSync(
     new URL(`../drizzle/${TEAM_WORK_ITEM_LIFECYCLE_MIGRATION}`, import.meta.url),
+    'utf8',
+  );
+}
+
+function readTeamWorkItemReviewAttemptMigration() {
+  return readFileSync(
+    new URL(`../drizzle/${TEAM_WORK_ITEM_REVIEW_ATTEMPT_MIGRATION}`, import.meta.url),
     'utf8',
   );
 }
@@ -68,6 +76,25 @@ describe('numbered migration filename contract', () => {
 
     const statements = splitMigrationStatements(readTeamWorkItemLifecycleMigration());
     assert.deepEqual(findNonAdditiveMigrationStatements(statements), []);
+  });
+
+  it('ships the next review-attempt migration and verifies its final column and unique key', () => {
+    const files = readdirSync(new URL('../drizzle/', import.meta.url));
+    assert.equal(
+      files.filter((file) => file === TEAM_WORK_ITEM_REVIEW_ATTEMPT_MIGRATION).length,
+      1,
+    );
+    const migration = readTeamWorkItemReviewAttemptMigration();
+    assert.match(
+      migration,
+      /ALTER TABLE `team_work_item_reviews`[\s\S]*?ADD COLUMN `review_attempt` INT UNSIGNED NOT NULL DEFAULT 1[\s\S]*?DROP INDEX `uk_team_work_item_reviews_submission`[\s\S]*?ADD UNIQUE KEY `uk_team_work_item_reviews_submission_attempt` \(`submission_id`, `review_attempt`\)/,
+    );
+    const verifier = readFileSync(new URL('./verify-db-schema.ts', import.meta.url), 'utf8');
+    assert.match(verifier, /team_work_item_reviews:\s*\[[\s\S]*?'review_attempt'/);
+    assert.match(
+      verifier,
+      /name: 'uk_team_work_item_reviews_submission_attempt',[\s\S]*?columns: \['submission_id', 'review_attempt'\]/,
+    );
   });
 
   it('ships closure migrations as discoverable additive migrations', () => {
@@ -349,6 +376,20 @@ describe('numbered migration replay safety', () => {
         {
           file: '0044_payments_provider_order_unique.sql',
           statement: 'DROP INDEX `ix_payments_provider_order` ON `payments`',
+        },
+      ),
+      true,
+    );
+  });
+
+  it('treats the Task 9 review-attempt legacy index as already dropped on replay', () => {
+    assert.equal(
+      isSkippableAlreadyAppliedError(
+        { code: 'ER_CANT_DROP_FIELD_OR_KEY' },
+        {
+          file: '0057_team_work_item_review_attempts.sql',
+          statement:
+            'ALTER TABLE `team_work_item_reviews`\n  DROP INDEX `uk_team_work_item_reviews_submission`',
         },
       ),
       true,

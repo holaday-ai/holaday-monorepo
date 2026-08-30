@@ -501,16 +501,6 @@ function requireMember(
   return member;
 }
 
-function requireOrganizationMember(
-  member: TeamTaskOrganizationMemberSnapshot | null,
-  organizationId: number,
-): TeamTaskOrganizationMemberSnapshot {
-  if (!member || member.organizationId !== organizationId || !member.organizationMembershipActive) {
-    return fail('NOT_FOUND');
-  }
-  return member;
-}
-
 function ensureVersion(workItem: TeamTaskWorkItemRow, expectedVersion: number): void {
   if (workItem.version !== expectedVersion) fail('VERSION_CONFLICT');
 }
@@ -798,12 +788,14 @@ export class TeamTaskService {
           access.organizationId,
           access.projectId,
         );
-        const arbitrator = requireOrganizationMember(
-          await tx.loadActiveOrganizationMember(
+        const arbitrator = requireMember(
+          await tx.loadActiveMember(
             access.organizationId,
+            access.projectId,
             validated.contract.arbitratorId,
           ),
           access.organizationId,
+          access.projectId,
         );
         const contractExternalId = this.dependencies.newId('acceptanceContractVersion');
         const dueAt = new Date(validated.contract.dueAt);

@@ -276,7 +276,7 @@ class MemoryRepository implements PlanningRepository {
             userExternalId: ids.arbitratorUser,
             organizationMemberExternalId: ids.arbitratorMembership,
             organizationMembershipActive: true,
-            projectMembershipActive: false,
+            projectMembershipActive: true,
             projectRole: 'member',
           },
         ],
@@ -1184,6 +1184,28 @@ describe('TeamTaskPlanningService', () => {
       dueAt: new Date('2026-09-02T01:00:00.000Z'),
     });
     expect(repository.state.events).toHaveLength(1);
+  });
+
+  it('rejects a new contract version whose arbitrator is not an active project member', async () => {
+    const { repository, service } = createHarness();
+    const arbitrator = repository.state.members.get(ids.arbitratorMembership);
+    expect(arbitrator).toBeDefined();
+    if (!arbitrator) throw new Error('missing arbitrator fixture');
+    arbitrator.projectMembershipActive = false;
+
+    await expectCode(
+      service.createContractVersion({
+        actorExternalId: ids.lead,
+        workItemExternalId: ids.target,
+        contract: contract(),
+        versionNote: '仲裁人必须仍在项目内',
+        expectedVersion: 1,
+        idempotencyKey: 'inactive-project-arbitrator-dedicated',
+      }),
+      'NOT_FOUND',
+    );
+    expect(repository.state.contracts).toHaveLength(1);
+    expect(repository.state.events).toHaveLength(0);
   });
 
   it('blocks a second proposal while the latest contract version is still pending', async () => {

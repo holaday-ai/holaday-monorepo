@@ -567,13 +567,16 @@ describe('TeamTaskService', () => {
     ).toHaveLength(1);
   });
 
-  it('allows the independent arbitrator to be an active organization member outside the project', async () => {
+  it('rejects an arbitrator who is active in the organization but not the project', async () => {
     const { repository, service } = createHarness();
     present(repository.state.members.get(ids.arbitratorMembership)).projectMembershipActive = false;
     const draft = await createDraft(service);
-    const published = await publish(service, draft.workItemId, 'org-arbitrator');
-    expect(published).toMatchObject({ state: 'ready', version: 2 });
-    expect(repository.state.contracts[0]).toMatchObject({ arbitratorUserId: 5 });
+    await expectCode(publish(service, draft.workItemId, 'org-arbitrator'), 'NOT_FOUND');
+    expect(repository.state.contracts).toHaveLength(0);
+    expect(repository.state.workItems.get(draft.workItemId)).toMatchObject({
+      status: 'draft',
+      version: 1,
+    });
   });
 
   it('rejects responsiblePersonId at publish because assignment owns responsible selection', async () => {

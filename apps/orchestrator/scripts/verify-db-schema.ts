@@ -229,6 +229,7 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'contract_version_id',
     'reviewer_user_id',
     'review_delegation_id',
+    'review_attempt',
     'decision',
     'failed_criterion_ids_json',
     'evidence_refs_json',
@@ -687,9 +688,9 @@ const TEAM_WORK_ITEM_REQUIRED_INDEXES: readonly RequiredIndex[] = [
   },
   {
     table: 'team_work_item_reviews',
-    name: 'uk_team_work_item_reviews_submission',
+    name: 'uk_team_work_item_reviews_submission_attempt',
     unique: true,
-    columns: ['submission_id'],
+    columns: ['submission_id', 'review_attempt'],
   },
   {
     table: 'team_task_review_delegations',
