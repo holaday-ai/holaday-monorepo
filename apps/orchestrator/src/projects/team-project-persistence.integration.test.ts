@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/mysql2';
 import mysql from 'mysql2/promise';
@@ -13,104 +14,126 @@ import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
 import { deleteProjectWithAccess } from './project-access.js';
 import {
-  PROJECT_TASK_FOREIGN_KEY_QUERY,
-  type ProjectTaskForeignKeyRow,
-  assertExactProjectTaskForeignKey,
+  assertConnectionTargetsValidatedSchema,
+  parseTeamProjectsIntegrationTarget,
+  preflightTeamProjectsIntegrationDatabase,
 } from './team-project-integration-safety.js';
+import { matchesCreatorLeadInsertInvocation } from './team-project-persistence-harness.js';
+import { buildIntegrationFixtureExternalId } from './team-project-race-fixtures.js';
+import {
+  createAffectedRowsOverride,
+  createMysqlBoundaryRecorder,
+  instrumentMysqlConnection,
+  runBoundedCleanup,
+  runWithActiveTimeout,
+} from './team-project-race-harness.js';
 import { createTeamProject } from './team-project-service.js';
 
-const DESTRUCTIVE_OPT_IN = 'DESTROY_FRESH_HOLADAY_TEAM_PROJECTS_IT_DATABASE';
+const CLEANUP_TIMEOUT_MS = 5_000;
+const OPERATION_TIMEOUT_MS = 15_000;
+const MYSQL_LOCK_WAIT_TIMEOUT_SECONDS = 10;
 
-function requireIntegrationEnvironment(): string {
+type MysqlConnection = Awaited<ReturnType<typeof mysql.createConnection>>;
+
+function requireIntegrationEnvironment() {
   const rawUrl = process.env.TEAM_PROJECTS_INTEGRATION_DATABASE_URL;
   if (!rawUrl) {
     throw new Error('TEAM_PROJECTS_INTEGRATION_DATABASE_URL is required for this integration file');
   }
-  if (process.env.TEAM_PROJECTS_INTEGRATION_CONFIRM_DESTROY !== DESTRUCTIVE_OPT_IN) {
-    throw new Error(
-      `TEAM_PROJECTS_INTEGRATION_CONFIRM_DESTROY must exactly equal ${DESTRUCTIVE_OPT_IN}`,
-    );
-  }
-  const parsed = new URL(rawUrl);
-  const databaseName = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
-  if (
-    parsed.protocol !== 'mysql:' ||
-    !databaseName.startsWith('holaday_team_projects_it_') ||
-    /(?:prod|production|stage|staging|shared)/i.test(databaseName)
-  ) {
-    throw new Error(
-      'integration database must use the holaday_team_projects_it_ prefix and cannot contain production, staging, or shared tokens',
-    );
-  }
-  return rawUrl;
+  return parseTeamProjectsIntegrationTarget({
+    rawUrl,
+    confirmDestroy: process.env.TEAM_PROJECTS_INTEGRATION_CONFIRM_DESTROY,
+  });
 }
 
-const databaseUrl = requireIntegrationEnvironment();
+const integrationTarget = requireIntegrationEnvironment();
 
-describe('team project MySQL persistence', () => {
-  let pool: ReturnType<typeof mysql.createPool>;
+describe.sequential('team project MySQL persistence', () => {
+  let connection: MysqlConnection;
   let db: DB;
   let actorUserId = 0;
   let organizationId = 0;
   let actorExternalId = '';
   let organizationExternalId = '';
   let uniqueName = '';
+  let fixtureSerial = 0;
+
+  async function cleanupFixtureRows(): Promise<void> {
+    await assertConnectionTargetsValidatedSchema(connection, integrationTarget);
+    await connection.query('DELETE FROM tasks');
+    await connection.query('DELETE FROM project_members');
+    await connection.query('DELETE FROM projects');
+    await connection.query('DELETE FROM organization_invitations');
+    await connection.query('DELETE FROM organization_members');
+    await connection.query('DELETE FROM organizations');
+    await connection.query('DELETE FROM users');
+  }
 
   beforeAll(async () => {
-    pool = mysql.createPool({
-      uri: databaseUrl,
-      connectionLimit: 2,
-      timezone: 'Z',
-      dateStrings: false,
-      supportBigNumbers: true,
-      bigNumberStrings: false,
-    });
-    const [freshnessRows] = await pool.query<mysql.RowDataPacket[]>(`
-      SELECT
-        (SELECT COUNT(*) FROM users) AS users_count,
-        (SELECT COUNT(*) FROM organizations) AS organizations_count,
-        (SELECT COUNT(*) FROM organization_members) AS organization_members_count,
-        (SELECT COUNT(*) FROM projects) AS projects_count,
-        (SELECT COUNT(*) FROM project_members) AS project_members_count,
-        (SELECT COUNT(*) FROM tasks) AS tasks_count
-    `);
-    const freshness = freshnessRows[0];
-    if (!freshness || Object.values(freshness).some((value) => Number(value) !== 0)) {
-      throw new Error(
-        'integration database must be freshly migrated with all mutated tables empty',
+    connection = await mysql.createConnection({ ...integrationTarget.connectionConfig });
+    await assertConnectionTargetsValidatedSchema(connection, integrationTarget);
+    await connection.query(
+      `SET SESSION innodb_lock_wait_timeout = ${MYSQL_LOCK_WAIT_TIMEOUT_SECONDS}`,
+    );
+    const observerProbe = await mysql.createConnection({ ...integrationTarget.connectionConfig });
+    try {
+      await assertConnectionTargetsValidatedSchema(observerProbe, integrationTarget);
+      const [[probeThread]] = await observerProbe.query<
+        Array<mysql.RowDataPacket & { threadId: number }>
+      >('SELECT CONNECTION_ID() AS threadId');
+      if (!probeThread) throw new Error('persistence observer probe connection id unavailable');
+      await preflightTeamProjectsIntegrationDatabase(connection, integrationTarget, {
+        observerProbeThreadId: Number(probeThread.threadId),
+      });
+    } finally {
+      await runBoundedCleanup(
+        [
+          {
+            label: 'close persistence observer preflight probe',
+            run: () => observerProbe.end(),
+            onTimeout: () => observerProbe.destroy(),
+            onFailure: () => observerProbe.destroy(),
+          },
+        ],
+        CLEANUP_TIMEOUT_MS,
       );
     }
-    const [foreignKeys] = await pool.query<Array<mysql.RowDataPacket & ProjectTaskForeignKeyRow>>(
-      PROJECT_TASK_FOREIGN_KEY_QUERY,
-    );
-    assertExactProjectTaskForeignKey(foreignKeys);
-    db = drizzle(pool, { schema, mode: 'default', casing: 'snake_case' });
+    db = drizzle(connection, {
+      schema,
+      mode: 'default',
+      casing: 'snake_case',
+    }) as unknown as DB;
   });
 
   beforeEach(async () => {
-    const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-    actorExternalId = `usr_it_${suffix}`;
-    organizationExternalId = `org_it_${suffix}`;
-    uniqueName = `team-project-it-${suffix}`;
+    fixtureSerial += 1;
+    const fixtureCase = `persistence-${fixtureSerial}`;
+    actorExternalId = buildIntegrationFixtureExternalId(fixtureCase, 'users', 'actor');
+    organizationExternalId = buildIntegrationFixtureExternalId(
+      fixtureCase,
+      'organizations',
+      'primary',
+    );
+    uniqueName = `team-project-${fixtureSerial}`;
 
     actorUserId = readInsertId(
       await db.insert(users).values({
         externalId: actorExternalId,
-        email: `${suffix}@team-project.integration.test`,
+        email: `${actorExternalId}@team-project.integration.test`,
         passwordHash: 'integration-test-only',
       }),
     );
     organizationId = readInsertId(
       await db.insert(organizations).values({
         externalId: organizationExternalId,
-        name: `Integration ${suffix}`,
+        name: `Integration ${fixtureSerial}`,
         ownerUserId: actorUserId,
         status: 'active',
         teamProjectsEnabled: true,
       }),
     );
     await db.insert(organizationMembers).values({
-      externalId: `omem_it_${suffix}`,
+      externalId: buildIntegrationFixtureExternalId(fixtureCase, 'organization_members', 'owner'),
       organizationId,
       userId: actorUserId,
       role: 'owner',
@@ -119,65 +142,116 @@ describe('team project MySQL persistence', () => {
   });
 
   afterEach(async () => {
-    if (!actorUserId) return;
-    await db.delete(tasks).where(eq(tasks.userId, actorUserId));
-    await db.delete(projects).where(eq(projects.userId, actorUserId));
-    await db.delete(organizationMembers).where(eq(organizationMembers.userId, actorUserId));
-    await db.delete(organizations).where(eq(organizations.id, organizationId));
-    await db.delete(users).where(eq(users.id, actorUserId));
-    actorUserId = 0;
-    organizationId = 0;
+    try {
+      await runBoundedCleanup(
+        [
+          {
+            label: 'clean persistence integration fixture rows',
+            run: cleanupFixtureRows,
+            onTimeout: () => connection.destroy(),
+            onFailure: () => connection.destroy(),
+          },
+        ],
+        CLEANUP_TIMEOUT_MS,
+      );
+    } finally {
+      actorUserId = 0;
+      organizationId = 0;
+    }
   });
 
   afterAll(async () => {
-    await pool?.end();
+    if (!connection) return;
+    await runBoundedCleanup(
+      [
+        {
+          label: 'close persistence admin connection',
+          run: () => connection.end(),
+          onTimeout: () => connection.destroy(),
+          onFailure: () => connection.destroy(),
+        },
+      ],
+      CLEANUP_TIMEOUT_MS,
+    );
   });
 
-  it('rolls back the project row when creator-lead insertion reports zero affected rows', async () => {
-    const failingDb = {
-      transaction: <Result>(callback: (tx: unknown) => Promise<Result>) =>
-        db.transaction(async (tx) => {
-          const txProxy = new Proxy(tx as object, {
-            get(target, property) {
-              if (property === 'insert') {
-                return (table: unknown) => {
-                  if (table === projectMembers) {
-                    return { values: async () => [{ affectedRows: 0, insertId: 0 }] };
-                  }
-                  const insert = Reflect.get(target, property, target) as (
-                    value: unknown,
-                  ) => unknown;
-                  return insert.call(target, table);
-                };
-              }
-              const value = Reflect.get(target, property, target);
-              return typeof value === 'function' ? value.bind(target) : value;
-            },
-          });
-          return callback(txProxy);
-        }),
-    } as unknown as DB;
+  it('executes the creator-lead insert and rolls back both rows after its result reports zero affected rows', async () => {
+    const failingConnection = await mysql.createConnection({
+      ...integrationTarget.connectionConfig,
+    });
+    try {
+      await assertConnectionTargetsValidatedSchema(failingConnection, integrationTarget);
+      await failingConnection.query(
+        `SET SESSION innodb_lock_wait_timeout = ${MYSQL_LOCK_WAIT_TIMEOUT_SECONDS}`,
+      );
+      const recorder = createMysqlBoundaryRecorder();
+      const zeroCreatorLeadResult = createAffectedRowsOverride({
+        matches: (invocation) => matchesCreatorLeadInsertInvocation(invocation, { actorUserId }),
+        affectedRows: 0,
+      });
+      const instrumented = instrumentMysqlConnection(
+        failingConnection,
+        [],
+        [zeroCreatorLeadResult],
+        recorder,
+      );
+      const failingDb = drizzle(instrumented, {
+        schema,
+        mode: 'default',
+        casing: 'snake_case',
+      }) as unknown as DB;
 
-    await expect(
-      createTeamProject({
-        db: failingDb,
-        actorExternalId,
-        organizationExternalId,
-        name: uniqueName,
-        description: null,
-      }),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(
+        runWithActiveTimeout(
+          createTeamProject({
+            db: failingDb,
+            actorExternalId,
+            organizationExternalId,
+            name: uniqueName,
+            description: null,
+          }),
+          {
+            label: 'creator-lead zero-row rollback',
+            timeoutMs: OPERATION_TIMEOUT_MS,
+            settleTimeoutMs: CLEANUP_TIMEOUT_MS,
+            onTimeout: () => failingConnection.destroy(),
+          },
+        ),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
 
-    const persisted = await db
-      .select({ id: projects.id })
-      .from(projects)
-      .where(eq(projects.userId, actorUserId));
-    expect(persisted).toEqual([]);
+      const creatorLeadInserts = recorder
+        .sqlInvocations()
+        .filter((invocation) => matchesCreatorLeadInsertInvocation(invocation, { actorUserId }));
+      expect(creatorLeadInserts).toHaveLength(1);
+      expect(recorder.transactionActions()).toEqual(['begin', 'rollback']);
+      const persistedProjects = await db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(eq(projects.userId, actorUserId));
+      const persistedMemberships = await db
+        .select({ id: projectMembers.id })
+        .from(projectMembers)
+        .where(eq(projectMembers.userId, actorUserId));
+      expect(persistedProjects).toEqual([]);
+      expect(persistedMemberships).toEqual([]);
+    } finally {
+      await runBoundedCleanup(
+        [
+          {
+            label: 'close creator-lead failing connection',
+            run: () => failingConnection.end(),
+            onTimeout: () => failingConnection.destroy(),
+            onFailure: () => failingConnection.destroy(),
+          },
+        ],
+        CLEANUP_TIMEOUT_MS,
+      );
+    }
   });
 
   it('deletes only the project while preserving its task with a null project id', async () => {
-    const suffix = actorExternalId.replace('usr_', '');
-    const projectExternalId = `prj_${suffix}`;
+    const fixtureCase = `persistence-delete-${fixtureSerial}`;
+    const projectExternalId = buildIntegrationFixtureExternalId(fixtureCase, 'projects', 'primary');
     const projectId = readInsertId(
       await db.insert(projects).values({
         externalId: projectExternalId,
@@ -187,13 +261,16 @@ describe('team project MySQL persistence', () => {
       }),
     );
     await db.insert(projectMembers).values({
-      externalId: `pmem_${suffix}`,
+      externalId: buildIntegrationFixtureExternalId(fixtureCase, 'project_members', 'owner-lead'),
       projectId,
       userId: actorUserId,
       role: 'lead',
       status: 'active',
     });
-    const taskExternalId = `tsk_${suffix}`;
+    const taskExternalId = `tsk_${createHash('sha256')
+      .update(fixtureCase)
+      .digest('hex')
+      .slice(0, 21)}`;
     await db.insert(tasks).values({
       externalId: taskExternalId,
       userId: actorUserId,
@@ -202,7 +279,12 @@ describe('team project MySQL persistence', () => {
     });
 
     await expect(
-      deleteProjectWithAccess(db, { actorExternalId, projectExternalId }),
+      runWithActiveTimeout(deleteProjectWithAccess(db, { actorExternalId, projectExternalId }), {
+        label: 'project delete task-FK persistence',
+        timeoutMs: OPERATION_TIMEOUT_MS,
+        settleTimeoutMs: CLEANUP_TIMEOUT_MS,
+        onTimeout: () => connection.destroy(),
+      }),
     ).resolves.toMatchObject({ projectId, scope: 'organization' });
 
     const persistedProject = await db

@@ -1,36 +1,49 @@
 import { drizzle } from 'drizzle-orm/mysql2';
 import { describe, expect, it } from 'vitest';
 import * as schema from '../db/schema/index.js';
+import { __organizationInvitationServiceInternals } from '../organizations/organization-invitation-service.js';
+import { __organizationServiceInternals } from '../organizations/organization-service.js';
 import { __projectAccessInternals } from './project-access.js';
 import {
+  compileSqlBoundary,
   createAffectedRowsOverride,
+  createMysqlBoundaryRecorder,
   createSqlCheckpoint,
   instrumentMysqlConnection,
-  isOrganizationLockSql,
-  isOrganizationMembershipSnapshotSql,
-  isProjectAccessSnapshotSql,
+  matchesSqlBoundary,
+  runBoundedCleanup,
+  runWithActiveTimeout,
+  sqlInvocation,
 } from './team-project-race-harness.js';
 import { __teamProjectServiceInternals } from './team-project-service.js';
 
-describe('team project race harness', () => {
+const mockDb = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
+
+describe('team project race harness exact SQL boundaries', () => {
   it.each(['query', 'execute'] as const)(
-    'holds a matched %s after the real operation until the barrier releases',
+    'holds a matched %s only after the exact SQL and parameters execute',
     async (method) => {
+      const compiled = __organizationServiceInternals
+        .buildLockOrganizationMembersQuery(mockDb, 41, ['omem_actor_111111111111'])
+        .toSQL();
+      const boundary = compileSqlBoundary(compiled);
       const connection = {
-        query: async (sql: string) => ({ method: 'query', sql }),
-        execute: async (sql: string) => ({ method: 'execute', sql }),
+        query: async (sql: string, parameters: unknown[]) => ({ method: 'query', sql, parameters }),
+        execute: async (sql: string, parameters: unknown[]) => ({
+          method: 'execute',
+          sql,
+          parameters,
+        }),
       };
       const checkpoint = createSqlCheckpoint({
-        label: `${method}-organization-lock`,
+        label: `${method}-organization-member-lock`,
         phase: 'after',
-        matches: (sql) => sql.includes('from `organizations`') && sql.includes('for update'),
+        matches: (invocation) => matchesSqlBoundary(boundary, invocation),
       });
       const instrumented = instrumentMysqlConnection(connection, [checkpoint]);
 
       let settled = false;
-      const pending = instrumented[method](
-        'select `id` from `organizations` where `external_id` = ? for update',
-      );
+      const pending = instrumented[method](compiled.sql, compiled.params);
       void pending.finally(() => {
         settled = true;
       });
@@ -42,65 +55,308 @@ describe('team project race harness', () => {
       checkpoint.release();
       await expect(pending).resolves.toEqual({
         method,
-        sql: 'select `id` from `organizations` where `external_id` = ? for update',
+        sql: compiled.sql,
+        parameters: compiled.params,
       });
     },
   );
 
-  it('does not pause a non-matching statement', async () => {
-    const connection = {
-      query: async (sql: string) => sql,
-    };
-    const checkpoint = createSqlCheckpoint({
-      label: 'organization-lock',
-      phase: 'after',
-      matches: (sql) => sql.includes('for update'),
-    });
-    const instrumented = instrumentMysqlConnection(connection, [checkpoint]);
+  it('rejects wrong tenant parameters, removed tenant predicates, and structurally similar SQL', () => {
+    const compiled = __organizationServiceInternals
+      .buildLockOrganizationMembersQuery(mockDb, 41, [
+        'omem_actor_111111111111',
+        'omem_target_222222222222',
+      ])
+      .toSQL();
+    const boundary = compileSqlBoundary(compiled);
+    const exact = sqlInvocation('execute', compiled.sql, compiled.params);
+    const wrongTenant = sqlInvocation('execute', compiled.sql, [99, ...compiled.params.slice(1)]);
+    const tenantUnscopedSql = compiled.sql.replace('`organization_id` = ? and ', '');
+    const tenantUnscoped = sqlInvocation('execute', tenantUnscopedSql, compiled.params.slice(1));
+    const similar = sqlInvocation(
+      'execute',
+      'select `id` from `organization_members` where `organization_id` = ? for update',
+      [41],
+    );
 
-    await expect(instrumented.query('select 1')).resolves.toBe('select 1');
-    expect(checkpoint.wasReached()).toBe(false);
+    expect(matchesSqlBoundary(boundary, exact)).toBe(true);
+    expect(matchesSqlBoundary(boundary, wrongTenant)).toBe(false);
+    expect(matchesSqlBoundary(boundary, tenantUnscoped)).toBe(false);
+    expect(matchesSqlBoundary(boundary, similar)).toBe(false);
   });
 
-  it('reports zero affected rows once after a matched real update result', async () => {
+  it('recognizes every compiled production boundary used by invitation, organization, and project races', () => {
+    const digest = 'a'.repeat(64);
+    const compiledQueries = [
+      __organizationInvitationServiceInternals
+        .buildLockedActiveEnabledOrganizationByIdQuery(mockDb, 41)
+        .toSQL(),
+      __organizationInvitationServiceInternals
+        .buildLockedInvitationByHashQuery(mockDb, 41, digest)
+        .toSQL(),
+      __organizationInvitationServiceInternals
+        .buildLockedInvitationByExternalIdQuery(mockDb, 41, 'oinv_case_111111111111')
+        .toSQL(),
+      __organizationInvitationServiceInternals
+        .buildLockedActiveActorMembershipQuery(mockDb, 7, 41)
+        .toSQL(),
+      __organizationServiceInternals
+        .buildLockOrganizationMembersQuery(mockDb, 41, [
+          'omem_actor_111111111111',
+          'omem_target_222222222222',
+        ])
+        .toSQL(),
+      __organizationServiceInternals.buildLockedProjectsQuery(mockDb, 41, [51, 52]).toSQL(),
+      __organizationServiceInternals
+        .buildLockedActiveProjectMembershipsQuery(mockDb, [51, 52])
+        .toSQL(),
+      __projectAccessInternals
+        .buildProjectAccessSnapshotQuery(mockDb, {
+          actorExternalId: 'usr_actor_111111111111',
+          projectExternalId: 'prj_case_222222222222',
+        })
+        .toSQL(),
+      __projectAccessInternals
+        .buildLockedOrganizationQuery(mockDb, 41, 'org_case_111111111111')
+        .toSQL(),
+      __projectAccessInternals
+        .buildLockedProjectQuery(mockDb, 51, 'prj_case_222222222222', 41)
+        .toSQL(),
+      __projectAccessInternals
+        .buildLockedTargetOrganizationMemberQuery(mockDb, 41, 'omem_target_222222222222')
+        .toSQL(),
+      __projectAccessInternals.buildLockedProjectMembershipsQuery(mockDb, 51).toSQL(),
+      __teamProjectServiceInternals
+        .buildActiveTeamOrganizationMembershipQuery(
+          mockDb,
+          'usr_actor_111111111111',
+          'org_case_111111111111',
+        )
+        .toSQL(),
+      __teamProjectServiceInternals
+        .buildTeamProjectListQuery(mockDb, 'usr_actor_111111111111', 'org_case_111111111111')
+        .toSQL(),
+      __teamProjectServiceInternals
+        .buildTeamProjectCreatorQuery(mockDb, 'usr_actor_111111111111', 'org_case_111111111111')
+        .toSQL(),
+      __teamProjectServiceInternals
+        .buildLockedTeamOrganizationQuery(mockDb, 'org_case_111111111111')
+        .toSQL(),
+      __teamProjectServiceInternals.buildActiveProjectMembersQuery(mockDb, 51).toSQL(),
+    ];
+
+    const boundaries = compiledQueries.map((query) => compileSqlBoundary(query));
+    expect(new Set(boundaries.map((boundary) => boundary.normalizedSql)).size).toBe(
+      compiledQueries.length,
+    );
+    for (const [index, query] of compiledQueries.entries()) {
+      const boundary = boundaries[index];
+      if (!boundary) throw new Error(`missing compiled boundary at index ${index}`);
+      expect(matchesSqlBoundary(boundary, sqlInvocation('execute', query.sql, query.params))).toBe(
+        true,
+      );
+      expect(
+        matchesSqlBoundary(
+          boundary,
+          sqlInvocation('execute', `${query.sql} and 1 = 1`, query.params),
+        ),
+      ).toBe(false);
+    }
+  });
+});
+
+describe('team project race harness instrumentation', () => {
+  it('reports zero affected rows once only after the matched real update result', async () => {
+    const calls: string[] = [];
     const connection = {
-      execute: async (sql: string) => [{ affectedRows: 1, marker: sql }, []] as const,
+      execute: async (sql: string, _parameters?: readonly unknown[]) => {
+        calls.push(sql);
+        return [{ affectedRows: 1, marker: sql }, []] as const;
+      },
     };
+    const exactSql = 'UPDATE `organization_members` SET `role` = ? WHERE `id` = ?';
+    const boundary = compileSqlBoundary({ sql: exactSql, params: ['member', 7] });
     const override = createAffectedRowsOverride({
-      matches: (sql) =>
-        sql.startsWith('update `organization_members`') && sql.includes('set `role` = ?'),
+      matches: (invocation) => matchesSqlBoundary(boundary, invocation),
       affectedRows: 0,
     });
     const instrumented = instrumentMysqlConnection(connection, [], [override]);
 
-    const first = await instrumented.execute(
-      'UPDATE `organization_members` SET `role` = ? WHERE `id` = ?',
-    );
-    const second = await instrumented.execute(
-      'UPDATE `organization_members` SET `role` = ? WHERE `id` = ?',
-    );
+    const first = await instrumented.execute(exactSql, ['member', 7]);
+    const second = await instrumented.execute(exactSql, ['member', 7]);
 
+    expect(calls).toEqual([exactSql, exactSql]);
     expect(first[0]).toMatchObject({ affectedRows: 0 });
     expect(second[0]).toMatchObject({ affectedRows: 1 });
   });
 
-  it('recognizes the real compiled SQL boundaries used by the race barriers', () => {
-    const mockDb = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
-    const organizationLock = __teamProjectServiceInternals
-      .buildLockedTeamOrganizationQuery(mockDb, 'org_integration')
-      .toSQL().sql;
-    const organizationMembershipSnapshot = __teamProjectServiceInternals
-      .buildActiveTeamOrganizationMembershipQuery(mockDb, 'usr_integration', 'org_integration')
-      .toSQL().sql;
-    const projectAccessSnapshot = __projectAccessInternals
-      .buildProjectAccessSnapshotQuery(mockDb, {
-        actorExternalId: 'usr_integration',
-        projectExternalId: 'prj_integration',
-      })
-      .toSQL().sql;
+  it('records successful transaction boundaries and only sanitized SQL parameters', async () => {
+    const recorder = createMysqlBoundaryRecorder();
+    const connection = {
+      beginTransaction: async () => undefined,
+      commit: async () => undefined,
+      rollback: async () => undefined,
+      execute: async (_sql?: unknown, _parameters?: readonly unknown[]) =>
+        [{ affectedRows: 1 }, []] as const,
+    };
+    const instrumented = instrumentMysqlConnection(connection, [], [], recorder);
 
-    expect(isOrganizationLockSql(organizationLock)).toBe(true);
-    expect(isOrganizationMembershipSnapshotSql(organizationMembershipSnapshot)).toBe(true);
-    expect(isProjectAccessSnapshotSql(projectAccessSnapshot)).toBe(true);
+    await instrumented.beginTransaction();
+    await instrumented.execute('SELECT ? AS member_id, ? AS secret', [
+      'omem_actor_111111111111',
+      'sensitive-invitation-value',
+    ]);
+    await instrumented.commit();
+    await instrumented.beginTransaction();
+    await instrumented.rollback();
+
+    expect(recorder.transactionActions()).toEqual(['begin', 'commit', 'begin', 'rollback']);
+    expect(recorder.sqlInvocations()).toEqual([
+      expect.objectContaining({
+        parameters: [
+          { kind: 'fixture-id', value: 'omem_actor_111111111111' },
+          { kind: 'redacted-string', length: 26 },
+        ],
+      }),
+    ]);
+    expect(JSON.stringify(recorder.events)).not.toContain('sensitive-invitation-value');
+  });
+
+  it('records Drizzle transaction SQL boundaries without treating savepoints as endpoint commits', async () => {
+    const recorder = createMysqlBoundaryRecorder();
+    const connection = instrumentMysqlConnection(
+      {
+        query: async (_sql?: unknown, _parameters?: readonly unknown[]) => [[], []] as const,
+      },
+      [],
+      [],
+      recorder,
+    );
+
+    await connection.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+    await connection.query('START TRANSACTION READ ONLY');
+    await connection.query('SAVEPOINT sp1');
+    await connection.query('ROLLBACK TO SAVEPOINT sp1');
+    await connection.query('COMMIT');
+    await connection.query('BEGIN');
+    await connection.query('ROLLBACK');
+
+    expect(recorder.transactionActions()).toEqual(['begin', 'commit', 'begin', 'rollback']);
+  });
+});
+
+describe('team project race harness bounded lifecycle', () => {
+  it('actively aborts and observes operation settlement after a timeout', async () => {
+    let rejectOperation = (_error: Error): void => {};
+    const operation = new Promise<never>((_resolve, reject) => {
+      rejectOperation = reject;
+    });
+    let abortCalls = 0;
+
+    await expect(
+      runWithActiveTimeout(operation, {
+        label: 'blocked race endpoint',
+        timeoutMs: 10,
+        settleTimeoutMs: 50,
+        onTimeout: () => {
+          abortCalls += 1;
+          rejectOperation(new Error('connection destroyed'));
+        },
+      }),
+    ).rejects.toThrow('blocked race endpoint timed out after 10ms; operation settled after abort');
+    expect(abortCalls).toBe(1);
+  });
+
+  it('bounds and reports both abort and operation-settlement failures', async () => {
+    const startedAt = Date.now();
+    await expect(
+      runWithActiveTimeout(new Promise<never>(() => {}), {
+        label: 'wedged endpoint',
+        timeoutMs: 5,
+        settleTimeoutMs: 15,
+        onTimeout: async () => {
+          throw new Error('destroy failed');
+        },
+      }),
+    ).rejects.toThrow(
+      'wedged endpoint timed out after 5ms; abort failed: destroy failed; operation did not settle within 15ms',
+    );
+    expect(Date.now() - startedAt).toBeLessThan(250);
+  });
+
+  it('runs every cleanup action with a bound and reports failures without swallowing them', async () => {
+    const calls: string[] = [];
+    await expect(
+      runBoundedCleanup(
+        [
+          {
+            label: 'release checkpoint',
+            run: () => {
+              calls.push('release');
+            },
+          },
+          {
+            label: 'rollback manual transaction',
+            run: async () => {
+              calls.push('rollback');
+              throw new Error('rollback rejected');
+            },
+          },
+          {
+            label: 'close admin',
+            run: () => new Promise<never>(() => {}),
+          },
+        ],
+        15,
+      ),
+    ).rejects.toThrow(
+      'cleanup failures: rollback manual transaction failed: rollback rejected; close admin timed out after 15ms',
+    );
+    expect(calls).toEqual(['release', 'rollback']);
+  });
+
+  it('destroys an endpoint when graceful close rejects and still reports both failures', async () => {
+    let destroyCalls = 0;
+    await expect(
+      runBoundedCleanup(
+        [
+          {
+            label: 'close endpoint',
+            run: async () => {
+              throw new Error('end rejected');
+            },
+            onFailure: () => {
+              destroyCalls += 1;
+              throw new Error('destroy rejected');
+            },
+          },
+        ],
+        15,
+      ),
+    ).rejects.toThrow(
+      'cleanup failures: close endpoint failed: end rejected; close endpoint failure handler failed: destroy rejected',
+    );
+    expect(destroyCalls).toBe(1);
+  });
+
+  it('releases a checkpoint in finally when an observer fails', async () => {
+    const checkpoint = createSqlCheckpoint({
+      label: 'observer-finally',
+      phase: 'before',
+      matches: () => true,
+    });
+    const pending = checkpoint.notify('before', sqlInvocation('query', 'SELECT 1'));
+    await checkpoint.waitUntilReached(50);
+
+    await expect(
+      (async () => {
+        try {
+          throw new Error('observer unavailable');
+        } finally {
+          checkpoint.release();
+        }
+      })(),
+    ).rejects.toThrow('observer unavailable');
+    await expect(pending).resolves.toBeUndefined();
   });
 });
