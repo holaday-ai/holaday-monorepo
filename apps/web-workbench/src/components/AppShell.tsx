@@ -27,6 +27,7 @@ import {
 // so it's available globally even before the user opens /scheduled.
 import '@/pages/scheduled-calendar/calendar-styles.css';
 import { useToast } from '@/components/ui/toast';
+import { loadAppShellPersonalProjects } from '@/lib/app-shell-projects';
 import { clearAccessToken, getAccessToken } from '@/lib/auth';
 import {
   normalizeAuthMeProfile,
@@ -50,9 +51,8 @@ import {
   resolveProjectFilteredTasks,
   type ProjectTaskFilterState,
 } from '@/lib/project-task-filter-state';
-import { normalizeProjectRows } from '@/lib/project-page-state';
 import { shouldKeepProjectFilterForPickedTask } from '@/lib/task-selection-url-state';
-import { type AppRouter, trpc } from '@/lib/trpc';
+import { trpc } from '@/lib/trpc';
 import {
   networkTransitionToast,
   normalizeTaskActionCount,
@@ -74,10 +74,8 @@ import {
 import type { UiProject, UiTask } from '@/types/task';
 import { applyHistoryRetention } from '@/utils/time-buckets';
 import { PLAN_CATALOGUE, type PlanId } from '@holaday/shared-types';
-import type { inferRouterClient } from '@trpc/client';
 
 type MeProfile = NormalizedAuthMeProfile;
-type ProjectsListQuery = inferRouterClient<AppRouter>['projects']['list']['query'];
 
 interface OutletContext {
   me: MeProfile | null;
@@ -92,13 +90,6 @@ interface OutletContext {
 type ProjectRefreshResult =
   | { ok: true; projects: UiProject[] }
   | { error: string };
-
-export async function loadAppShellPersonalProjects(
-  query: ProjectsListQuery,
-): Promise<UiProject[]> {
-  const list = await query();
-  return normalizeProjectRows(list).filter((project) => project.scope === 'personal');
-}
 
 /**
  * The one and only authed shell. Every authed route renders inside
