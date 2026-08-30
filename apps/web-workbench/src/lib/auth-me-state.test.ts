@@ -15,6 +15,7 @@ describe('auth.me state helpers', () => {
         role: 'admin',
         videoEnabled: true,
         teamProjectsEnabled: true,
+        teamTaskLifecycleEnabled: true,
       }),
     ).toEqual({
       userId: 'u1',
@@ -27,6 +28,7 @@ describe('auth.me state helpers', () => {
       role: 'admin',
       videoEnabled: true,
       teamProjectsEnabled: true,
+      teamTaskLifecycleEnabled: true,
     });
   });
 
@@ -42,6 +44,7 @@ describe('auth.me state helpers', () => {
       role: 'user',
       videoEnabled: false,
       teamProjectsEnabled: false,
+      teamTaskLifecycleEnabled: false,
     });
     expect(
       normalizeAuthMeProfile({
@@ -70,6 +73,22 @@ describe('auth.me state helpers', () => {
 
   it('accepts only literal true for team workspace rollout state', () => {
     expect(normalizeAuthMeProfile({ teamProjectsEnabled: true }).teamProjectsEnabled).toBe(true);
+  });
+
+  it.each([
+    ['absent', {}],
+    ['null', { teamTaskLifecycleEnabled: null }],
+    ['false', { teamTaskLifecycleEnabled: false }],
+    ['a truthy string', { teamTaskLifecycleEnabled: 'true' }],
+    ['a truthy number', { teamTaskLifecycleEnabled: 1 }],
+  ])('defaults team task lifecycle rollout state to false for %s', (_label, payload) => {
+    expect(normalizeAuthMeProfile(payload).teamTaskLifecycleEnabled).toBe(false);
+  });
+
+  it('accepts only literal true for team task lifecycle rollout state', () => {
+    expect(
+      normalizeAuthMeProfile({ teamTaskLifecycleEnabled: true }).teamTaskLifecycleEnabled,
+    ).toBe(true);
   });
 
   it('chooses stable display names without rendering objects', () => {
