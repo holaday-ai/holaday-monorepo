@@ -80,6 +80,14 @@ describe('team work item production schema verifier', () => {
     assert.match(findTeamWorkItemSchemaViolations(actual).join('\n'), /responsible_active_key/);
   });
 
+  it('accepts the escaped generated expression returned by MySQL 8.4', () => {
+    const actual = validInformationSchema();
+    const column = actual.columns.find((row) => row.column_name === 'responsible_active_key');
+    column.generation_expression =
+      "(case when ((`role` = _utf8mb4\\'responsible\\') and (`status` = _utf8mb4\\'accepted\\')) then `work_item_id` else NULL end)";
+    assert.deepEqual(findTeamWorkItemSchemaViolations(actual), []);
+  });
+
   it('rejects signed or default-zero work item version metadata', () => {
     const actual = validInformationSchema();
     const column = actual.columns.find(

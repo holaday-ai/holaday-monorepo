@@ -366,6 +366,7 @@ function normalizeExpression(value) {
     .toLowerCase()
     .replaceAll('`', '')
     .replace(/_utf8mb4/g, '')
+    .replaceAll("\\'", "'")
     .replace(/[()\s]+/g, ' ')
     .trim();
 }
