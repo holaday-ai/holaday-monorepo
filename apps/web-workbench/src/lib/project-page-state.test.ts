@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment happy-dom
+
+import { loadAppShellPersonalProjects } from '@/components/AppShell';
+import type { AppRouter } from '@/lib/trpc';
+import type { inferRouterClient } from '@trpc/client';
+import { describe, expect, it, vi } from 'vitest';
 import {
   PROJECT_NAME_MAX_LENGTH,
   normalizeProjectName,
@@ -8,7 +13,72 @@ import {
   projectNameState,
 } from './project-page-state';
 
+type ProjectsListQuery = inferRouterClient<AppRouter>['projects']['list']['query'];
+
+const PERSONAL_PROJECT_RESPONSE = {
+  projectId: 'prj_personal',
+  name: ' Personal plan ',
+  description: ' Legacy project ',
+  createdAt: '2026-08-01T00:00:00.000Z',
+  updatedAt: '2026-08-02T00:00:00.000Z',
+  taskCount: 3.8,
+} as const;
+
+const TEAM_PROJECT_RESPONSE = {
+  projectId: 'prj_team',
+  name: ' Team plan ',
+  description: ' Organization project ',
+  createdAt: '2026-08-03T00:00:00.000Z',
+  updatedAt: '2026-08-04T00:00:00.000Z',
+  taskCount: 5,
+  scope: 'organization',
+  organizationId: 'org_design',
+  organizationName: ' Design ',
+  memberRole: 'lead',
+} as const;
+
 describe('project page state helpers', () => {
+  it('loads the AppShell collection through the no-input personal query and excludes team rows', async () => {
+    const query = vi
+      .fn<ProjectsListQuery>()
+      .mockResolvedValue([PERSONAL_PROJECT_RESPONSE, TEAM_PROJECT_RESPONSE]);
+
+    const projects = await loadAppShellPersonalProjects(query);
+
+    expect(query.mock.calls).toEqual([[]]);
+    expect(projects).toEqual([
+      {
+        projectId: 'prj_personal',
+        name: 'Personal plan',
+        description: 'Legacy project',
+        createdAt: '2026-08-01T00:00:00.000Z',
+        updatedAt: '2026-08-02T00:00:00.000Z',
+        taskCount: 3,
+        scope: 'personal',
+        organizationId: null,
+        organizationName: null,
+        memberRole: null,
+      },
+    ]);
+  });
+
+  it('keeps a Task 12 team refresh separate from the AppShell personal collection', async () => {
+    const query = vi
+      .fn<ProjectsListQuery>()
+      .mockResolvedValueOnce([PERSONAL_PROJECT_RESPONSE])
+      .mockResolvedValueOnce([TEAM_PROJECT_RESPONSE]);
+
+    const shellProjects = await loadAppShellPersonalProjects(query);
+    const teamProjects = normalizeProjectRows(await query({ organizationId: 'org_design' }), {
+      organizationId: 'org_design',
+    });
+
+    expect(query.mock.calls).toEqual([[], [{ organizationId: 'org_design' }]]);
+    expect(shellProjects.map((project) => project.projectId)).toEqual(['prj_personal']);
+    expect(teamProjects.map((project) => project.projectId)).toEqual(['prj_team']);
+    expect(shellProjects.map((project) => project.projectId)).toEqual(['prj_personal']);
+  });
+
   it('normalizes project names by trimming surrounding whitespace', () => {
     expect(normalizeProjectName('  Campaign plan  ')).toBe('Campaign plan');
   });

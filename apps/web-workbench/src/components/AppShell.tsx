@@ -52,7 +52,7 @@ import {
 } from '@/lib/project-task-filter-state';
 import { normalizeProjectRows } from '@/lib/project-page-state';
 import { shouldKeepProjectFilterForPickedTask } from '@/lib/task-selection-url-state';
-import { trpc } from '@/lib/trpc';
+import { type AppRouter, trpc } from '@/lib/trpc';
 import {
   networkTransitionToast,
   normalizeTaskActionCount,
@@ -74,8 +74,10 @@ import {
 import type { UiProject, UiTask } from '@/types/task';
 import { applyHistoryRetention } from '@/utils/time-buckets';
 import { PLAN_CATALOGUE, type PlanId } from '@holaday/shared-types';
+import type { inferRouterClient } from '@trpc/client';
 
 type MeProfile = NormalizedAuthMeProfile;
+type ProjectsListQuery = inferRouterClient<AppRouter>['projects']['list']['query'];
 
 interface OutletContext {
   me: MeProfile | null;
@@ -90,6 +92,13 @@ interface OutletContext {
 type ProjectRefreshResult =
   | { ok: true; projects: UiProject[] }
   | { error: string };
+
+export async function loadAppShellPersonalProjects(
+  query: ProjectsListQuery,
+): Promise<UiProject[]> {
+  const list = await query();
+  return normalizeProjectRows(list).filter((project) => project.scope === 'personal');
+}
 
 /**
  * The one and only authed shell. Every authed route renders inside
@@ -220,8 +229,7 @@ export function AppShell(): JSX.Element {
     const requestId = projectRefreshRequestRef.current + 1;
     projectRefreshRequestRef.current = requestId;
     try {
-      const list = await trpc.projects.list.query();
-      const nextProjects = normalizeProjectRows(list);
+      const nextProjects = await loadAppShellPersonalProjects(trpc.projects.list.query);
       if (mountedRef.current && projectRefreshRequestRef.current === requestId) {
         setProjects(nextProjects);
       }
