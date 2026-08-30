@@ -11,6 +11,10 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProjectsPage } from './ProjectsPage';
 
+const workspaceSwitcherCapture = vi.hoisted(() => ({
+  onSelectOrganization: null as ((organizationId: string | null) => void) | null,
+}));
+
 type WorkspaceClient = inferRouterClient<AppRouter>;
 type RouterOutputs = inferRouterOutputs<AppRouter>;
 type OrganizationListOutput = RouterOutputs['organizations']['list'];
@@ -75,6 +79,18 @@ vi.mock('@/lib/trpc', () => ({
     },
   },
 }));
+
+vi.mock('@/components/projects/WorkspaceSwitcher', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/projects/WorkspaceSwitcher')>();
+  const React = await import('react');
+  return {
+    ...actual,
+    WorkspaceSwitcher: (props: Parameters<typeof actual.WorkspaceSwitcher>[0]) => {
+      workspaceSwitcherCapture.onSelectOrganization = props.onSelectOrganization;
+      return React.createElement(actual.WorkspaceSwitcher, props);
+    },
+  };
+});
 
 const PERSONAL_PROJECT: UiProject = {
   projectId: 'prj_personal',
@@ -679,7 +695,9 @@ describe('ProjectsPage organization workspace', () => {
 
       expect(screen.getByLabelText('设置 Member 的直属上级')).toBeTruthy();
       expect(screen.getByLabelText('更改 Member 的角色')).toBeTruthy();
-      expect(screen.getByRole('button', { name: '移除 Member' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: '移除 Member' }).getAttribute('title')).toBe(
+        '移除 Member',
+      );
     },
   );
 
@@ -1749,7 +1767,8 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     const lateRoleUpdate = deferred<never>();
     api.updateMemberRole.mockImplementation(() => lateRoleUpdate.promise);
     const user = await openDesignAlongsideOperations();
-    const designWorkspace = screen.getByRole('button', { name: /设计团队/ });
+    const staleSelectWorkspace = workspaceSwitcherCapture.onSelectOrganization;
+    expect(staleSelectWorkspace).not.toBeNull();
     const operationsWorkspace = screen.getByRole('button', { name: /运营团队/ });
 
     await user.selectOptions(screen.getByLabelText('更改 Member 的角色'), 'manager');
@@ -1763,7 +1782,10 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
       await Promise.resolve();
     });
     expect(screen.queryByRole('button', { name: /设计团队/ })).toBeNull();
-    fireEvent.click(designWorkspace);
+    await act(async () => {
+      staleSelectWorkspace?.(ORGANIZATION_FIXTURES.owner.organizationId);
+      await Promise.resolve();
+    });
     expect(screen.getByText('运营节奏')).toBeTruthy();
     expect(screen.queryByText('增长计划')).toBeNull();
 

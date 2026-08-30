@@ -212,6 +212,7 @@ export function OrganizationMembersPanel({
                       <button
                         type="button"
                         aria-label={`移除 ${member.displayName}`}
+                        title={`移除 ${member.displayName}`}
                         disabled={busyAction !== null}
                         onClick={() =>
                           void runAction(deactivateActionKey, () => onDeactivate(member))
