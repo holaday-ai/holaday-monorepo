@@ -147,6 +147,27 @@ describe('account closure durable worker', () => {
     );
   });
 
+  it('persists the declared anonymized team-task outcome into the durable step receipt', async () => {
+    const repo = repository(claim({ categoryId: 'task_execution' }));
+    const anonymizingHandler: AccountClosureHandler = {
+      categoryId: 'task_execution',
+      version: 1,
+      retentionOutcomes: ['anonymized'],
+      run: vi.fn().mockResolvedValue({
+        kind: 'complete',
+        processed: 3,
+        retention: 'anonymized',
+      }),
+    };
+
+    expect(
+      await runAccountClosureWorkerTick(deps({ repository: repo, handler: anonymizingHandler })),
+    ).toBe('progress');
+    expect(repo.markStepSucceeded).toHaveBeenCalledWith(
+      expect.objectContaining({ retentionOutcome: 'anonymized', processedCount: 3 }),
+    );
+  });
+
   it('rejects a completed retention outcome the production handler did not declare', async () => {
     const repo = repository();
     const undeclared = handler({

@@ -67,4 +67,41 @@ describe('data category registry', () => {
       'IP',
     );
   });
+
+  it('registers retained team-work facts and a privacy-safe export boundary', () => {
+    const taskExecution = dataCategories.find((item) => item.id === 'task_execution');
+    const serialized = JSON.stringify(taskExecution);
+    for (const fact of ['提交', '评审', '申诉', '仲裁决定', '证据绑定', 'AI 协助贡献']) {
+      expect(serialized).toContain(fact);
+    }
+    expect(serialized).toContain('永久保留业务事实');
+    for (const excluded of ['私人原文', '原始 AI prompt', '存储路径', '内部数字 ID']) {
+      expect(serialized).toContain(`导出排除${excluded}`);
+    }
+    expect(taskExecution?.exportVisibility).toEqual({
+      include: ['externalId', 'status', 'summaryMetadata'],
+      exclude: ['私人原文', '原始 AI prompt', '存储路径', '内部数字 ID'],
+    });
+  });
+
+  it('fails governance audit if the task export allowlist contract is removed', () => {
+    const malformed = structuredClone(governanceRegistry) as unknown as {
+      categories: Array<Record<string, unknown>>;
+    };
+    const task = malformed.categories.find((category) => category.id === 'task_execution');
+    if (!task) throw new Error('task category fixture missing');
+    Reflect.deleteProperty(task, 'exportVisibility');
+    const report = auditGovernanceRegistry(malformed as never, {
+      repoRoot: fileURLToPath(new URL('../../../../', import.meta.url)),
+      verifyEvidenceFiles: false,
+    });
+    expect(report.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          registryId: 'category:task_execution',
+        }),
+      ]),
+    );
+  });
 });

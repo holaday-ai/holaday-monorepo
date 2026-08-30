@@ -36,7 +36,12 @@ const RETENTION_RULE_KINDS = [
   'mixed',
   'unknown',
 ] as const;
-const LOCAL_RETENTION_REGIME_IDS = ['task_30d', 'audit_180d', 'manual_hold'] as const;
+const LOCAL_RETENTION_REGIME_IDS = [
+  'task_30d',
+  'audit_180d',
+  'manual_hold',
+  'team_business_fact_permanent',
+] as const;
 
 const SECRET_VALUE =
   /-----BEGIN (?:[A-Z ]+)?PRIVATE KEY-----|(?:^|[^A-Za-z0-9])(?:sk-|ghp_|xoxb-|xoxp-)[A-Za-z0-9_-]+|Bearer\s+\S+|(?:document\.)?cookie\s*(?:=|:)|set-cookie\s*:|\b(?:password|passwd|api[_-]?key|client[_-]?secret|access[_-]?token|credential)\s*(?:=|:)\s*(?:["'][^"']*|[^\s;,]+)/i;
@@ -805,6 +810,30 @@ function validateGovernanceRegistryStructure(
       requireStringList(category, key, registryId);
     }
     requireEnum(category, 'sensitivity', SENSITIVITIES, registryId);
+    if (category.id === 'task_execution') {
+      if (!isRecord(category.exportVisibility)) {
+        addIssue(
+          'error',
+          'required_array_empty',
+          registryId,
+          'task_execution exportVisibility must be an auditable allowlist contract.',
+        );
+      } else {
+        const include = stringArray(category.exportVisibility.include);
+        const exclude = stringArray(category.exportVisibility.exclude);
+        if (
+          include.join('|') !== 'externalId|status|summaryMetadata' ||
+          exclude.join('|') !== '私人原文|原始 AI prompt|存储路径|内部数字 ID'
+        ) {
+          addIssue(
+            'error',
+            'invalid_enum_value',
+            registryId,
+            'task_execution exportVisibility must match the approved privacy-safe contract.',
+          );
+        }
+      }
+    }
     validateEvidence(category.evidence, registryId);
   }
 

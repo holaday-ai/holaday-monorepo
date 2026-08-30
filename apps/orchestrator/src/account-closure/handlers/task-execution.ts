@@ -1,4 +1,4 @@
-import { createDbUserFileClosureStore, deleteUserFilesPage } from '../../files/file-service.js';
+import { deleteUserFilesPage } from '../../files/file-service.js';
 import {
   type AccountClosureHandler,
   ClosureHandlerError,
@@ -11,12 +11,19 @@ import {
 } from '../handler-contract.js';
 import { deleteUserEvidencePage } from './media-assets.js';
 import {
+  TEAM_WORK_ITEM_CLOSURE_TARGETS,
+  assertTeamWorkItemClosureSafe,
+  createTeamSafeUserFileClosureStore,
+  hasRetainedTeamWorkFacts,
+  minimizeRetainedTeamWorkSources,
+} from './team-work-items.js';
+import {
   TEAM_WORKSPACE_CLOSURE_TARGETS,
   assertTeamWorkspaceClosureSafe,
 } from './team-workspace.js';
 
 const deferredObjectRows = [
-  directUserRows('task_files'),
+  TEAM_WORK_ITEM_CLOSURE_TARGETS.unretainedTaskFiles,
   directUserRows('evidence_artifacts', 'owner_user_id'),
   rowsOwnedThroughParent({
     tableName: 'evidence_artifacts',
@@ -50,6 +57,7 @@ const taskExecutionRelationalClosureHandler = createRelationalDeleteHandler({
     // stock-monitor children must be handled by their own governed categories
     // before task parents can be removed without relying on FK side effects.
     await assertNoOwnedRows(context, [...deferredObjectRows, ...crossCategoryDependencies]);
+    await assertTeamWorkItemClosureSafe(context);
     await assertTeamWorkspaceClosureSafe(context);
   },
   targets: [
@@ -222,12 +230,14 @@ const taskExecutionRelationalClosureHandler = createRelationalDeleteHandler({
     directUserRows('batch_tasks'),
     directUserRows('planned_tasks'),
     directUserRows('scheduled_tasks'),
+    TEAM_WORK_ITEM_CLOSURE_TARGETS.assignments,
+    TEAM_WORK_ITEM_CLOSURE_TARGETS.reviewDelegations,
     TEAM_WORKSPACE_CLOSURE_TARGETS.teamProjectAssociations,
     TEAM_WORKSPACE_CLOSURE_TARGETS.organizationAssociations,
     TEAM_WORKSPACE_CLOSURE_TARGETS.invitationsManaged,
     TEAM_WORKSPACE_CLOSURE_TARGETS.invitationsCreated,
     TEAM_WORKSPACE_CLOSURE_TARGETS.reportingLines,
-    directUserRows('tasks'),
+    TEAM_WORK_ITEM_CLOSURE_TARGETS.unretainedTasks,
     TEAM_WORKSPACE_CLOSURE_TARGETS.personalProjects,
   ],
 });
@@ -242,7 +252,7 @@ const taskExecutionRelationalClosureHandler = createRelationalDeleteHandler({
 export const taskExecutionClosureHandler: AccountClosureHandler = {
   categoryId: 'task_execution',
   version: 1,
-  retentionOutcomes: ['deleted', 'not_present'],
+  retentionOutcomes: ['deleted', 'anonymized', 'not_present'],
   async run(context) {
     context.signal.throwIfAborted();
     const pageSize = Math.min(context.pageSize, 100);
@@ -250,6 +260,11 @@ export const taskExecutionClosureHandler: AccountClosureHandler = {
       throw new ClosureHandlerError('INVARIANT_VIOLATION');
     }
     const previousProcessed = context.checkpoint?.processedCount ?? 0;
+    const minimized = await minimizeRetainedTeamWorkSources(context, pageSize);
+    if (minimized > 0) {
+      const processed = previousProcessed + minimized;
+      return { kind: 'continue', checkpoint: { processedCount: processed }, processed };
+    }
     const filePage = await deleteUserFilesPage(
       {
         userIdInternal: context.request.userId,
@@ -258,7 +273,7 @@ export const taskExecutionClosureHandler: AccountClosureHandler = {
         categoryId: 'task_execution',
       },
       {
-        store: createDbUserFileClosureStore(context.db),
+        store: createTeamSafeUserFileClosureStore(context.db),
         storage: context.storage,
         signal: context.signal,
       },
@@ -284,6 +299,11 @@ export const taskExecutionClosureHandler: AccountClosureHandler = {
     }
 
     context.signal.throwIfAborted();
-    return taskExecutionRelationalClosureHandler.run(context);
+    const relationalResult = await taskExecutionRelationalClosureHandler.run(context);
+    if (relationalResult.kind === 'continue') return relationalResult;
+    if (await hasRetainedTeamWorkFacts(context.db, context.request.userId)) {
+      return { ...relationalResult, retention: 'anonymized' };
+    }
+    return relationalResult;
   },
 };
