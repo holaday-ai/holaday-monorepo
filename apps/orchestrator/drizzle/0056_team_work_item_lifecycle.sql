@@ -201,6 +201,7 @@ CREATE TABLE `team_work_item_reviews` (
   `submission_id` BIGINT UNSIGNED NOT NULL,
   `contract_version_id` BIGINT UNSIGNED NOT NULL,
   `reviewer_user_id` BIGINT UNSIGNED NOT NULL,
+  `review_delegation_id` BIGINT UNSIGNED NULL,
   `decision` VARCHAR(32) NOT NULL,
   `failed_criterion_ids_json` JSON NULL,
   `evidence_refs_json` JSON NULL,
@@ -225,6 +226,42 @@ CREATE TABLE `team_work_item_reviews` (
   CONSTRAINT `fk_team_work_item_reviews_reviewer`
     FOREIGN KEY (`reviewer_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
 );
+--> statement-breakpoint
+CREATE TABLE `team_task_review_delegations` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `external_id` VARCHAR(32) NOT NULL,
+  `organization_id` BIGINT UNSIGNED NOT NULL,
+  `project_id` BIGINT UNSIGNED NOT NULL,
+  `delegator_user_id` BIGINT UNSIGNED NOT NULL,
+  `delegate_user_id` BIGINT UNSIGNED NOT NULL,
+  `valid_from` DATETIME(3) NOT NULL,
+  `valid_until` DATETIME(3) NOT NULL,
+  `revoked_at` DATETIME(3) NULL,
+  `revoked_by_user_id` BIGINT UNSIGNED NULL,
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_team_task_review_delegations_external_id` (`external_id`),
+  UNIQUE KEY `uk_team_task_review_delegations_id_lineage` (`id`, `organization_id`, `project_id`, `delegate_user_id`),
+  UNIQUE KEY `uk_team_task_review_delegations_grant` (`organization_id`, `project_id`, `delegator_user_id`, `delegate_user_id`, `valid_from`),
+  KEY `ix_team_task_review_delegations_tenant_window` (`organization_id`, `project_id`, `delegator_user_id`, `delegate_user_id`, `valid_from`, `valid_until`),
+  CHECK (`valid_until` > `valid_from`),
+  CHECK (`delegator_user_id` <> `delegate_user_id`),
+  CHECK ((`revoked_at` IS NULL AND `revoked_by_user_id` IS NULL) OR (`revoked_at` IS NOT NULL AND `revoked_by_user_id` IS NOT NULL AND `revoked_at` >= `valid_from`)),
+  CONSTRAINT `fk_team_task_review_delegations_organization`
+    FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_task_review_delegations_project_tenant`
+    FOREIGN KEY (`project_id`, `organization_id`) REFERENCES `projects` (`id`, `organization_id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_task_review_delegations_delegator`
+    FOREIGN KEY (`delegator_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_task_review_delegations_delegate`
+    FOREIGN KEY (`delegate_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_team_task_review_delegations_revoked_by`
+    FOREIGN KEY (`revoked_by_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
+);
+--> statement-breakpoint
+ALTER TABLE `team_work_item_reviews`
+  ADD CONSTRAINT `fk_team_work_item_reviews_delegation_lineage`
+    FOREIGN KEY (`review_delegation_id`, `organization_id`, `project_id`, `reviewer_user_id`) REFERENCES `team_task_review_delegations` (`id`, `organization_id`, `project_id`, `delegate_user_id`) ON DELETE RESTRICT;
 --> statement-breakpoint
 CREATE TABLE `team_work_item_appeals` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

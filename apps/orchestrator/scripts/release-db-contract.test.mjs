@@ -24,6 +24,7 @@ const TEAM_WORK_ITEM_TABLES = [
   'acceptance_contract_versions',
   'team_work_item_submissions',
   'team_work_item_reviews',
+  'team_task_review_delegations',
   'team_work_item_appeals',
   'team_arbitration_decisions',
   'team_work_item_events',
@@ -164,6 +165,7 @@ describe('team work item lifecycle schema contract', () => {
       /CONSTRAINT `fk_team_work_item_dependencies_predecessor_lineage`[\s\S]*?FOREIGN KEY \(`depends_on_work_item_id`, `organization_id`, `project_id`\) REFERENCES `team_work_items` \(`id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
       /CONSTRAINT `fk_team_work_item_submissions_contract_lineage`[\s\S]*?FOREIGN KEY \(`contract_version_id`, `work_item_id`, `organization_id`, `project_id`\) REFERENCES `acceptance_contract_versions` \(`id`, `work_item_id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
       /CONSTRAINT `fk_team_work_item_reviews_submission_lineage`[\s\S]*?FOREIGN KEY \(`submission_id`, `contract_version_id`, `work_item_id`, `organization_id`, `project_id`\) REFERENCES `team_work_item_submissions` \(`id`, `contract_version_id`, `work_item_id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
+      /CONSTRAINT `fk_team_work_item_reviews_delegation_lineage`[\s\S]*?FOREIGN KEY \(`review_delegation_id`, `organization_id`, `project_id`, `reviewer_user_id`\) REFERENCES `team_task_review_delegations` \(`id`, `organization_id`, `project_id`, `delegate_user_id`\) ON DELETE RESTRICT/,
       /CONSTRAINT `fk_team_work_item_appeals_review_lineage`[\s\S]*?FOREIGN KEY \(`review_id`, `submission_id`, `work_item_id`, `organization_id`, `project_id`\) REFERENCES `team_work_item_reviews` \(`id`, `submission_id`, `work_item_id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
       /CONSTRAINT `fk_team_ai_contributions_execution_task_lineage`[\s\S]*?FOREIGN KEY \(`execution_task_id`, `project_id`, `contributed_by_user_id`\) REFERENCES `tasks` \(`id`, `project_id`, `user_id`\) ON DELETE RESTRICT/,
       /CONSTRAINT `fk_team_evidence_bindings_ai_lineage`[\s\S]*?FOREIGN KEY \(`ai_contribution_id`, `work_item_id`, `organization_id`, `project_id`\) REFERENCES `team_ai_contributions` \(`id`, `work_item_id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
@@ -185,7 +187,7 @@ describe('team work item lifecycle schema contract', () => {
     ].map(([, name]) => name);
     const contractNames = TEAM_WORK_ITEM_SCHEMA_CONTRACT.foreignKeys.map(({ name }) => name);
 
-    assert.equal(migrationNames.length, 59);
+    assert.equal(migrationNames.length, 65);
     assert.deepEqual([...migrationNames].sort(), [...contractNames].sort());
   });
 
@@ -284,6 +286,34 @@ describe('team work item lifecycle schema contract', () => {
     }
     assert.match(workItemSchema, /fk_team_work_items_current_contract_lineage/);
     assert.match(workItemSchema, /foreignColumns: currentContractLineageColumns\(\)/);
+  });
+
+  it('models bounded and auditable review delegation without cross-project authority', () => {
+    const migration = readTeamWorkItemLifecycleMigration();
+    assert.match(
+      migration,
+      /CREATE TABLE `team_task_review_delegations`[\s\S]*?`organization_id` BIGINT UNSIGNED NOT NULL[\s\S]*?`project_id` BIGINT UNSIGNED NOT NULL[\s\S]*?`delegator_user_id` BIGINT UNSIGNED NOT NULL[\s\S]*?`delegate_user_id` BIGINT UNSIGNED NOT NULL[\s\S]*?`valid_from` DATETIME\(3\) NOT NULL[\s\S]*?`valid_until` DATETIME\(3\) NOT NULL[\s\S]*?`revoked_at` DATETIME\(3\) NULL[\s\S]*?`revoked_by_user_id` BIGINT UNSIGNED NULL/,
+    );
+    assert.match(migration, /CHECK \(`valid_until` > `valid_from`\)/);
+    assert.match(migration, /CHECK \(`delegator_user_id` <> `delegate_user_id`\)/);
+    assert.match(
+      migration,
+      /CONSTRAINT `fk_team_task_review_delegations_project_tenant`[\s\S]*?FOREIGN KEY \(`project_id`, `organization_id`\) REFERENCES `projects` \(`id`, `organization_id`\) ON DELETE RESTRICT/,
+    );
+    assert.match(
+      migration,
+      /UNIQUE KEY `uk_team_task_review_delegations_id_lineage` \(`id`, `organization_id`, `project_id`, `delegate_user_id`\)/,
+    );
+    assert.match(
+      migration,
+      /CREATE TABLE `team_work_item_reviews`[\s\S]*?`review_delegation_id` BIGINT UNSIGNED NULL/,
+    );
+    const verifier = readFileSync(new URL('./verify-db-schema.ts', import.meta.url), 'utf8');
+    assert.match(
+      verifier,
+      /team_task_review_delegations:\s*\[[\s\S]*?'external_id'[\s\S]*?'organization_id'[\s\S]*?'project_id'[\s\S]*?'delegator_user_id'[\s\S]*?'delegate_user_id'[\s\S]*?'valid_from'[\s\S]*?'valid_until'[\s\S]*?'revoked_at'[\s\S]*?'revoked_by_user_id'[\s\S]*?'created_at'/,
+    );
+    assert.match(verifier, /team_work_item_reviews:\s*\[[\s\S]*?'review_delegation_id'/);
   });
 });
 

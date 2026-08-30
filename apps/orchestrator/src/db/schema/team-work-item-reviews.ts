@@ -11,6 +11,7 @@ import {
   varchar,
 } from 'drizzle-orm/mysql-core';
 import { organizations } from './organizations.js';
+import { teamTaskReviewDelegations } from './team-task-review-delegations.js';
 import { teamWorkItemSubmissions } from './team-work-item-submissions.js';
 import { teamWorkItems } from './team-work-items.js';
 import { users } from './users.js';
@@ -33,6 +34,7 @@ export const teamWorkItemReviews = mysqlTable(
     reviewerUserId: bigint('reviewer_user_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
+    reviewDelegationId: bigint('review_delegation_id', { mode: 'number', unsigned: true }),
     decision: varchar('decision', { length: 32 }).notNull(),
     failedCriterionIdsJson: json('failed_criterion_ids_json'),
     evidenceRefsJson: json('evidence_refs_json'),
@@ -80,6 +82,21 @@ export const teamWorkItemReviews = mysqlTable(
         teamWorkItemSubmissions.workItemId,
         teamWorkItemSubmissions.organizationId,
         teamWorkItemSubmissions.projectId,
+      ],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'fk_team_work_item_reviews_delegation_lineage',
+      columns: [
+        table.reviewDelegationId,
+        table.organizationId,
+        table.projectId,
+        table.reviewerUserId,
+      ],
+      foreignColumns: [
+        teamTaskReviewDelegations.id,
+        teamTaskReviewDelegations.organizationId,
+        teamTaskReviewDelegations.projectId,
+        teamTaskReviewDelegations.delegateUserId,
       ],
     }).onDelete('restrict'),
     index('ix_team_work_item_reviews_tenant_decision').on(

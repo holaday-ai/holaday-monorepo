@@ -18,6 +18,7 @@ export * from './team-work-item-dependencies.js';
 export * from './acceptance-contract-versions.js';
 export * from './team-work-item-submissions.js';
 export * from './team-work-item-reviews.js';
+export * from './team-task-review-delegations.js';
 export * from './team-work-item-appeals.js';
 export * from './team-arbitration-decisions.js';
 export * from './team-work-item-events.js';

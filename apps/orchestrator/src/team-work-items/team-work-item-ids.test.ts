@@ -8,6 +8,7 @@ const teamWorkItemKinds = [
   ['acceptanceContractVersion', 'acv'],
   ['teamSubmission', 'tsb'],
   ['teamReview', 'trv'],
+  ['teamTaskReviewDelegation', 'trd'],
   ['teamAppeal', 'tap'],
   ['teamArbitrationDecision', 'tad'],
   ['teamWorkItemEvent', 'twe'],
