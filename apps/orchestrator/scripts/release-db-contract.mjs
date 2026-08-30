@@ -95,6 +95,102 @@ export function splitMigrationStatements(sql) {
 
 export const REQUIRED_INDEXES = [
   {
+    table: 'organizations',
+    name: 'uk_organizations_external_id',
+    unique: true,
+    columns: ['external_id'],
+  },
+  {
+    table: 'organizations',
+    name: 'ix_organizations_owner',
+    unique: false,
+    columns: ['owner_user_id'],
+  },
+  {
+    table: 'organizations',
+    name: 'ix_organizations_status',
+    unique: false,
+    columns: ['status'],
+  },
+  {
+    table: 'organization_members',
+    name: 'uk_organization_members_external_id',
+    unique: true,
+    columns: ['external_id'],
+  },
+  {
+    table: 'organization_members',
+    name: 'uk_organization_members_organization_user',
+    unique: true,
+    columns: ['organization_id', 'user_id'],
+  },
+  {
+    table: 'organization_members',
+    name: 'ix_organization_members_organization_status',
+    unique: false,
+    columns: ['organization_id', 'status'],
+  },
+  {
+    table: 'organization_members',
+    name: 'ix_organization_members_user_status',
+    unique: false,
+    columns: ['user_id', 'status'],
+  },
+  {
+    table: 'organization_members',
+    name: 'ix_organization_members_manager_status',
+    unique: false,
+    columns: ['organization_id', 'manager_user_id', 'status'],
+  },
+  {
+    table: 'organization_invitations',
+    name: 'uk_organization_invitations_external_id',
+    unique: true,
+    columns: ['external_id'],
+  },
+  {
+    table: 'organization_invitations',
+    name: 'uk_organization_invitations_token_hash',
+    unique: true,
+    columns: ['token_hash'],
+  },
+  {
+    table: 'organization_invitations',
+    name: 'ix_organization_invitations_active',
+    unique: false,
+    columns: ['organization_id', 'accepted_at', 'revoked_at', 'expires_at'],
+  },
+  {
+    table: 'projects',
+    name: 'ix_projects_organization_id',
+    unique: false,
+    columns: ['organization_id'],
+  },
+  {
+    table: 'project_members',
+    name: 'uk_project_members_external_id',
+    unique: true,
+    columns: ['external_id'],
+  },
+  {
+    table: 'project_members',
+    name: 'uk_project_members_project_user',
+    unique: true,
+    columns: ['project_id', 'user_id'],
+  },
+  {
+    table: 'project_members',
+    name: 'ix_project_members_project_status',
+    unique: false,
+    columns: ['project_id', 'status'],
+  },
+  {
+    table: 'project_members',
+    name: 'ix_project_members_user_status',
+    unique: false,
+    columns: ['user_id', 'status'],
+  },
+  {
     table: 'feedback_cases',
     name: 'uk_feedback_cases_external_id',
     unique: true,

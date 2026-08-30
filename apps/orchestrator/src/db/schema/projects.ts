@@ -7,6 +7,7 @@ import {
   uniqueIndex,
   varchar,
 } from 'drizzle-orm/mysql-core';
+import { organizations } from './organizations.js';
 import { users } from './users.js';
 
 /**
@@ -25,6 +26,10 @@ export const projects = mysqlTable(
     userId: bigint('user_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: bigint('organization_id', { mode: 'number', unsigned: true }).references(
+      () => organizations.id,
+      { onDelete: 'restrict' },
+    ),
     name: varchar('name', { length: 100 }).notNull(),
     description: varchar('description', { length: 500 }),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
@@ -38,6 +43,7 @@ export const projects = mysqlTable(
   (t) => [
     uniqueIndex('uk_projects_external_id').on(t.externalId),
     index('ix_projects_user_id').on(t.userId),
+    index('ix_projects_organization_id').on(t.organizationId),
   ],
 );
 

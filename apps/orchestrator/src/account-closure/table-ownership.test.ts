@@ -41,4 +41,22 @@ describe('account closure persistence table ownership', () => {
       video_edit_render_attempts: 'task_execution',
     });
   });
+
+  it('routes every team workspace table through task execution cleanup', () => {
+    const owners = Object.fromEntries(
+      ACCOUNT_CLOSURE_TABLE_OWNERSHIP.map(({ tableName, categoryId }) => [tableName, categoryId]),
+    );
+
+    expect({
+      organizations: owners.organizations,
+      organization_members: owners.organization_members,
+      organization_invitations: owners.organization_invitations,
+      project_members: owners.project_members,
+    }).toEqual({
+      organizations: 'task_execution',
+      organization_members: 'task_execution',
+      organization_invitations: 'task_execution',
+      project_members: 'task_execution',
+    });
+  });
 });

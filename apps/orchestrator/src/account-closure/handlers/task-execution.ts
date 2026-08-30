@@ -10,6 +10,10 @@ import {
   rowsOwnedThroughThreeParents,
 } from '../handler-contract.js';
 import { deleteUserEvidencePage } from './media-assets.js';
+import {
+  TEAM_WORKSPACE_CLOSURE_TARGETS,
+  assertTeamWorkspaceClosureSafe,
+} from './team-workspace.js';
 
 const deferredObjectRows = [
   directUserRows('task_files'),
@@ -46,6 +50,7 @@ const taskExecutionRelationalClosureHandler = createRelationalDeleteHandler({
     // stock-monitor children must be handled by their own governed categories
     // before task parents can be removed without relying on FK side effects.
     await assertNoOwnedRows(context, [...deferredObjectRows, ...crossCategoryDependencies]);
+    await assertTeamWorkspaceClosureSafe(context);
   },
   targets: [
     // Claims can carry private text and point at Task 7 evidence. Links are
@@ -217,8 +222,13 @@ const taskExecutionRelationalClosureHandler = createRelationalDeleteHandler({
     directUserRows('batch_tasks'),
     directUserRows('planned_tasks'),
     directUserRows('scheduled_tasks'),
+    TEAM_WORKSPACE_CLOSURE_TARGETS.teamProjectAssociations,
+    TEAM_WORKSPACE_CLOSURE_TARGETS.organizationAssociations,
+    TEAM_WORKSPACE_CLOSURE_TARGETS.invitationsManaged,
+    TEAM_WORKSPACE_CLOSURE_TARGETS.invitationsCreated,
+    TEAM_WORKSPACE_CLOSURE_TARGETS.reportingLines,
     directUserRows('tasks'),
-    directUserRows('projects'),
+    TEAM_WORKSPACE_CLOSURE_TARGETS.personalProjects,
   ],
 });
 

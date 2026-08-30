@@ -31,6 +31,11 @@ describe('numbered migration filename contract', () => {
     assert.deepEqual(findDuplicateMigrationNumbers(files), []);
   });
 
+  it('ships the team project foundation migration exactly once', () => {
+    const files = readdirSync(new URL('../drizzle/', import.meta.url));
+    assert.equal(files.filter((file) => file === '0055_team_project_foundation.sql').length, 1);
+  });
+
   it('ships closure migrations as discoverable additive migrations', () => {
     const files = readdirSync(new URL('../drizzle/', import.meta.url));
     const statements = ['0051_account_closures.sql', '0052_feedback_cases.sql'].flatMap(
@@ -190,6 +195,17 @@ describe('numbered migration replay safety', () => {
 });
 
 describe('release database index contract', () => {
+  function indexRows(table_name, index_name, unique, columns) {
+    return columns.map((column_name, index) => ({
+      table_name,
+      index_name,
+      non_unique: unique ? 0 : 1,
+      seq_in_index: index + 1,
+      column_name,
+      sub_part: null,
+    }));
+  }
+
   const validRows = [
     {
       table_name: 'feedback_cases',
@@ -487,6 +503,52 @@ describe('release database index contract', () => {
       column_name: 'expires_at',
       sub_part: null,
     },
+    ...indexRows('organizations', 'uk_organizations_external_id', true, ['external_id']),
+    ...indexRows('organizations', 'ix_organizations_owner', false, ['owner_user_id']),
+    ...indexRows('organizations', 'ix_organizations_status', false, ['status']),
+    ...indexRows('organization_members', 'uk_organization_members_external_id', true, [
+      'external_id',
+    ]),
+    ...indexRows('organization_members', 'uk_organization_members_organization_user', true, [
+      'organization_id',
+      'user_id',
+    ]),
+    ...indexRows('organization_members', 'ix_organization_members_organization_status', false, [
+      'organization_id',
+      'status',
+    ]),
+    ...indexRows('organization_members', 'ix_organization_members_user_status', false, [
+      'user_id',
+      'status',
+    ]),
+    ...indexRows('organization_members', 'ix_organization_members_manager_status', false, [
+      'organization_id',
+      'manager_user_id',
+      'status',
+    ]),
+    ...indexRows('organization_invitations', 'uk_organization_invitations_external_id', true, [
+      'external_id',
+    ]),
+    ...indexRows('organization_invitations', 'uk_organization_invitations_token_hash', true, [
+      'token_hash',
+    ]),
+    ...indexRows('organization_invitations', 'ix_organization_invitations_active', false, [
+      'organization_id',
+      'accepted_at',
+      'revoked_at',
+      'expires_at',
+    ]),
+    ...indexRows('projects', 'ix_projects_organization_id', false, ['organization_id']),
+    ...indexRows('project_members', 'uk_project_members_external_id', true, ['external_id']),
+    ...indexRows('project_members', 'uk_project_members_project_user', true, [
+      'project_id',
+      'user_id',
+    ]),
+    ...indexRows('project_members', 'ix_project_members_project_status', false, [
+      'project_id',
+      'status',
+    ]),
+    ...indexRows('project_members', 'ix_project_members_user_status', false, ['user_id', 'status']),
   ];
 
   it('accepts the required unique payment provider-order index', () => {

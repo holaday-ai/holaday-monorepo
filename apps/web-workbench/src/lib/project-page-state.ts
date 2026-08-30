@@ -63,30 +63,53 @@ export function projectCountSummary(options: {
   readonly loading: boolean;
   readonly error: string | null;
 }): string {
-  if (options.loading && options.count > 0)
-    return `正在刷新 ${options.count} 个项目…`;
+  if (options.loading && options.count > 0) return `正在刷新 ${options.count} 个项目…`;
   if (options.loading) return '项目加载中…';
-  if (options.error && options.count > 0)
-    return `共 ${options.count} 个项目，上次刷新失败`;
+  if (options.error && options.count > 0) return `共 ${options.count} 个项目，上次刷新失败`;
   if (options.error) return '项目暂时无法加载';
   if (options.count === 0) return '尚无项目';
   return `共 ${options.count} 个项目`;
 }
 
-export function normalizeProjectRows(value: unknown): UiProject[] {
+export function normalizeProjectRows(
+  value: unknown,
+  options: { readonly organizationId?: string } = {},
+): UiProject[] {
   if (!Array.isArray(value)) return [];
+  const requestedOrganizationId = safeProjectText(options.organizationId);
   return value.flatMap((entry) => {
     if (!isRecord(entry)) return [];
-    const projectId = safeProjectText(entry.projectId);
+    const projectId = safeProjectOwnText(entry, 'projectId');
     if (!projectId) return [];
+    const rawScope = ownValue(entry, 'scope');
+    const scope = rawScope === undefined ? 'personal' : rawScope;
+    if (scope !== 'personal' && scope !== 'organization') return [];
+
+    let organizationId: string | null = null;
+    let organizationName: string | null = null;
+    let memberRole: UiProject['memberRole'] = null;
+    if (scope === 'organization') {
+      organizationId = safeProjectOwnText(entry, 'organizationId') || null;
+      if (!organizationId) return [];
+      if (requestedOrganizationId && organizationId !== requestedOrganizationId) return [];
+      organizationName = safeProjectOwnNullableText(entry, 'organizationName');
+      const rawMemberRole = ownValue(entry, 'memberRole');
+      if (!isProjectMemberRole(rawMemberRole)) return [];
+      memberRole = rawMemberRole;
+    }
+
     return [
       {
         projectId,
-        name: safeProjectText(entry.name) || '未命名项目',
-        description: safeProjectNullableText(entry.description),
-        createdAt: safeProjectDate(entry.createdAt) ?? new Date(0),
-        updatedAt: safeProjectDate(entry.updatedAt) ?? new Date(0),
-        taskCount: safeProjectCount(entry.taskCount),
+        name: safeProjectOwnText(entry, 'name') || '未命名项目',
+        description: safeProjectOwnNullableText(entry, 'description'),
+        createdAt: safeProjectDate(ownValue(entry, 'createdAt')) ?? new Date(0),
+        updatedAt: safeProjectDate(ownValue(entry, 'updatedAt')) ?? new Date(0),
+        taskCount: safeProjectCount(ownValue(entry, 'taskCount')),
+        scope,
+        organizationId,
+        organizationName,
+        memberRole,
       },
     ];
   });
@@ -96,8 +119,12 @@ function safeProjectText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function safeProjectNullableText(value: unknown): string | null {
-  const text = safeProjectText(value);
+function safeProjectOwnText(value: Record<string, unknown>, key: string): string {
+  return safeProjectText(ownValue(value, key));
+}
+
+function safeProjectOwnNullableText(value: Record<string, unknown>, key: string): string | null {
+  const text = safeProjectOwnText(value, key);
   return text || null;
 }
 
@@ -116,4 +143,12 @@ function safeProjectCount(value: unknown): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function ownValue(value: Record<string, unknown>, key: string): unknown {
+  return Object.prototype.hasOwnProperty.call(value, key) ? value[key] : undefined;
+}
+
+function isProjectMemberRole(value: unknown): value is NonNullable<UiProject['memberRole']> {
+  return value === 'lead' || value === 'member' || value === 'viewer';
 }

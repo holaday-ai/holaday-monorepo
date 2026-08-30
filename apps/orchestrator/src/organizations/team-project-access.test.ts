@@ -1,0 +1,63 @@
+import { describe, expect, it } from 'vitest';
+import {
+  computeTeamProjectsEnabled,
+  parseTeamProjectsAllowlist,
+} from './team-project-access.js';
+
+describe('team projects access gate', () => {
+  it('stays off when the global flag is disabled', () => {
+    expect(computeTeamProjectsEnabled(false, new Set(['usr_a']), 'usr_a')).toBe(false);
+  });
+
+  it('allows an allowlisted user when the global flag is enabled', () => {
+    expect(computeTeamProjectsEnabled(true, new Set(['usr_a']), 'usr_a')).toBe(true);
+  });
+
+  it('rejects a non-allowlisted user when the global flag is enabled', () => {
+    expect(computeTeamProjectsEnabled(true, new Set(['usr_a']), 'usr_b')).toBe(false);
+  });
+
+  it('allows all users when enabled with an empty allowlist', () => {
+    expect(computeTeamProjectsEnabled(true, new Set(), 'usr_b')).toBe(true);
+  });
+
+  it('fails closed for a whitespace-only configured allowlist', () => {
+    const parsed = parseTeamProjectsAllowlist('   ');
+
+    expect(parsed.allowAll).toBe(false);
+    expect(parsed.allowlist).toEqual(new Set());
+    expect(computeTeamProjectsEnabled(true, parsed.allowlist, 'usr_b', parsed.allowAll)).toBe(
+      false,
+    );
+  });
+
+  it('keeps separator-only configuration fail closed', () => {
+    const parsed = parseTeamProjectsAllowlist(' , ');
+
+    expect(parsed.allowAll).toBe(false);
+    expect(parsed.allowlist).toEqual(new Set());
+    expect(computeTeamProjectsEnabled(true, parsed.allowlist, 'usr_b', parsed.allowAll)).toBe(
+      false,
+    );
+  });
+
+  it('treats only the exact empty value as intentional allow-all', () => {
+    const parsed = parseTeamProjectsAllowlist('');
+
+    expect(parsed.allowAll).toBe(true);
+    expect(parsed.allowlist).toEqual(new Set());
+    expect(computeTeamProjectsEnabled(true, parsed.allowlist, 'usr_b', parsed.allowAll)).toBe(
+      true,
+    );
+  });
+
+  it('fails closed when a non-empty CSV contains blank entries', () => {
+    const parsed = parseTeamProjectsAllowlist('usr_a,,usr_b');
+
+    expect(parsed.allowAll).toBe(false);
+    expect(parsed.allowlist).toEqual(new Set());
+    expect(computeTeamProjectsEnabled(true, parsed.allowlist, 'usr_a', parsed.allowAll)).toBe(
+      false,
+    );
+  });
+});

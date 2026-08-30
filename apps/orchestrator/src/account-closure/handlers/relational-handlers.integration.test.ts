@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
+import mysql from 'mysql2/promise';
 import { pino } from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { apiKeys } from '../../db/schema/api-keys.js';
@@ -19,6 +20,8 @@ import { explorationRuns } from '../../db/schema/exploration-runs.js';
 import { notificationChannels, notifications } from '../../db/schema/notifications.js';
 import { operationPathSteps } from '../../db/schema/operation-path-steps.js';
 import { operationPaths } from '../../db/schema/operation-paths.js';
+import { organizationMembers } from '../../db/schema/organization-members.js';
+import { organizations } from '../../db/schema/organizations.js';
 import { pendingCookies } from '../../db/schema/pending-cookies.js';
 import {
   plannedTaskItems,
@@ -27,6 +30,7 @@ import {
   plannedTaskRuns,
   plannedTasks,
 } from '../../db/schema/planned-tasks.js';
+import { projectMembers } from '../../db/schema/project-members.js';
 import { projects } from '../../db/schema/projects.js';
 import { scheduledTasks } from '../../db/schema/scheduled-tasks.js';
 import { sessions } from '../../db/schema/sessions.js';
@@ -74,6 +78,10 @@ import { feedbackSupportClosureHandler } from './feedback-support.js';
 import { mediaAssetsClosureHandler } from './media-assets.js';
 import { stockPreferenceProfileClosureHandler } from './stock-preference-profile.js';
 import { taskExecutionClosureHandler } from './task-execution.js';
+import {
+  TEAM_WORKSPACE_CLOSURE_TARGETS,
+  assertTeamWorkspaceClosureSafe,
+} from './team-workspace.js';
 
 const PRODUCTION_HANDLERS = {
   account_security: accountSecurityClosureHandler,
@@ -216,6 +224,303 @@ describe.sequential('account closure relational handlers', () => {
     await expect(handler.run(context(taskFilePage.checkpoint))).rejects.toMatchObject({
       code: 'HANDLER_DEFERRED',
     });
+  });
+
+  it('transfers organization and team-project responsibility before account closure cleanup', async () => {
+    const organizationExternalId = `org_acl_${target.id}`;
+    const projectExternalId = `prj_acl_team_${target.id}`;
+    const [organizationInsert] = await db.insert(organizations).values({
+      externalId: organizationExternalId,
+      name: 'Account closure transfer fixture',
+      ownerUserId: target.id,
+      status: 'active',
+      teamProjectsEnabled: true,
+    });
+    const organizationId = Number(organizationInsert.insertId);
+    const [projectInsert] = await db.insert(projects).values({
+      externalId: projectExternalId,
+      userId: target.id,
+      organizationId,
+      name: 'Shared project must survive',
+    });
+    const projectId = Number(projectInsert.insertId);
+    await db.insert(organizationMembers).values({
+      externalId: `omem_acl_${target.id}`,
+      organizationId,
+      userId: target.id,
+      role: 'owner',
+      status: 'active',
+    });
+    await db.insert(organizationMembers).values({
+      externalId: `omem_acl_replacement_${target.id}`,
+      organizationId,
+      userId: other.id,
+      role: 'owner',
+      status: 'active',
+    });
+    await db.insert(projectMembers).values({
+      externalId: `pmem_acl_${target.id}`,
+      projectId,
+      userId: target.id,
+      role: 'lead',
+      status: 'active',
+    });
+    await db.insert(projectMembers).values({
+      externalId: `pmem_acl_replacement_${target.id}`,
+      projectId,
+      userId: other.id,
+      role: 'lead',
+      status: 'active',
+    });
+
+    try {
+      await expect(assertTeamWorkspaceClosureSafe(context(null))).resolves.toBeUndefined();
+      const closureContext = context(null);
+      const projectIds =
+        await TEAM_WORKSPACE_CLOSURE_TARGETS.teamProjectAssociations.selectOwnedIds(
+          closureContext,
+          100,
+        );
+      const organizationIds =
+        await TEAM_WORKSPACE_CLOSURE_TARGETS.organizationAssociations.selectOwnedIds(
+          closureContext,
+          100,
+        );
+      await expect(
+        TEAM_WORKSPACE_CLOSURE_TARGETS.teamProjectAssociations.deleteOwnedIds(
+          closureContext,
+          projectIds,
+        ),
+      ).resolves.toBe(1);
+      await expect(
+        TEAM_WORKSPACE_CLOSURE_TARGETS.organizationAssociations.deleteOwnedIds(
+          closureContext,
+          organizationIds,
+        ),
+      ).resolves.toBe(1);
+
+      const [organization] = await db
+        .select({ ownerUserId: organizations.ownerUserId })
+        .from(organizations)
+        .where(eq(organizations.id, organizationId));
+      const [project] = await db
+        .select({ userId: projects.userId })
+        .from(projects)
+        .where(eq(projects.id, projectId));
+      expect(organization?.ownerUserId).toBe(other.id);
+      expect(project?.userId).toBe(other.id);
+      expect(await rowExists({ tableName: 'projects', id: projectId })).toBe(true);
+      const [organizationMembership] = await db
+        .select({ count: sql<number>`COUNT(*)` })
+        .from(organizationMembers)
+        .where(
+          sql`${organizationMembers.organizationId} = ${organizationId} AND ${organizationMembers.userId} = ${target.id}`,
+        );
+      const [projectMembership] = await db
+        .select({ count: sql<number>`COUNT(*)` })
+        .from(projectMembers)
+        .where(
+          sql`${projectMembers.projectId} = ${projectId} AND ${projectMembers.userId} = ${target.id}`,
+        );
+      expect(Number(organizationMembership?.count)).toBe(0);
+      expect(Number(projectMembership?.count)).toBe(0);
+    } finally {
+      await db.delete(projectMembers).where(eq(projectMembers.projectId, projectId));
+      await db.delete(projects).where(eq(projects.id, projectId));
+      await db
+        .delete(organizationMembers)
+        .where(eq(organizationMembers.organizationId, organizationId));
+      await db.delete(organizations).where(eq(organizations.id, organizationId));
+    }
+  });
+
+  it('fails closed when another owner is deactivated while closure waits on the organization lock', async () => {
+    const organizationExternalId = `org_acl_race_${target.id}`;
+    const targetMembershipExternalId = `omem_acl_race_${target.id}`;
+    const replacementMembershipExternalId = `omem_acl_race_other_${target.id}`;
+    const [organizationInsert] = await db.insert(organizations).values({
+      externalId: organizationExternalId,
+      name: 'Account closure organization race',
+      ownerUserId: target.id,
+      status: 'active',
+      teamProjectsEnabled: true,
+    });
+    const organizationId = Number(organizationInsert.insertId);
+    await db.insert(organizationMembers).values([
+      {
+        externalId: targetMembershipExternalId,
+        organizationId,
+        userId: target.id,
+        role: 'owner',
+        status: 'active',
+      },
+      {
+        externalId: replacementMembershipExternalId,
+        organizationId,
+        userId: other.id,
+        role: 'owner',
+        status: 'active',
+      },
+    ]);
+    const competitor = await mysql.createConnection(process.env.DATABASE_URL ?? '');
+    let transactionOpen = false;
+    try {
+      await expect(assertTeamWorkspaceClosureSafe(context(null))).resolves.toBeUndefined();
+      const closureContext = context(null);
+      const ids = await TEAM_WORKSPACE_CLOSURE_TARGETS.organizationAssociations.selectOwnedIds(
+        closureContext,
+        100,
+      );
+      expect(ids).toEqual([organizationId]);
+
+      await competitor.beginTransaction();
+      transactionOpen = true;
+      await competitor.execute('SELECT id FROM organizations WHERE id = ? FOR UPDATE', [
+        organizationId,
+      ]);
+      await competitor.execute(
+        "UPDATE organization_members SET status = 'inactive' WHERE organization_id = ? AND user_id = ?",
+        [organizationId, other.id],
+      );
+
+      const outcome = TEAM_WORKSPACE_CLOSURE_TARGETS.organizationAssociations
+        .deleteOwnedIds(closureContext, ids)
+        .then(
+          (value) => ({ ok: true as const, value }),
+          (error: unknown) => ({ ok: false as const, error }),
+        );
+      expect(await settlesWithin(outcome, 75)).toBe(false);
+      await competitor.commit();
+      transactionOpen = false;
+
+      const result = await outcome;
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected locked organization cleanup to fail closed');
+      expect(result.error).toMatchObject({ code: 'CAPABILITY_CHANGED' });
+      const [organization] = await db
+        .select({ ownerUserId: organizations.ownerUserId })
+        .from(organizations)
+        .where(eq(organizations.id, organizationId));
+      const [targetMembership] = await db
+        .select({ status: organizationMembers.status })
+        .from(organizationMembers)
+        .where(eq(organizationMembers.externalId, targetMembershipExternalId));
+      expect(organization?.ownerUserId).toBe(target.id);
+      expect(targetMembership?.status).toBe('active');
+    } finally {
+      if (transactionOpen) await competitor.rollback();
+      await competitor.end();
+      await db
+        .delete(organizationMembers)
+        .where(eq(organizationMembers.organizationId, organizationId));
+      await db.delete(organizations).where(eq(organizations.id, organizationId));
+    }
+  });
+
+  it('fails closed when another lead is removed while closure waits on the project lock', async () => {
+    const organizationExternalId = `org_acl_project_race_${target.id}`;
+    const projectExternalId = `prj_acl_project_race_${target.id}`;
+    const targetProjectMembershipExternalId = `pmem_acl_project_race_${target.id}`;
+    const [organizationInsert] = await db.insert(organizations).values({
+      externalId: organizationExternalId,
+      name: 'Account closure project race',
+      ownerUserId: target.id,
+      status: 'active',
+      teamProjectsEnabled: true,
+    });
+    const organizationId = Number(organizationInsert.insertId);
+    await db.insert(organizationMembers).values([
+      {
+        externalId: `omem_acl_project_race_${target.id}`,
+        organizationId,
+        userId: target.id,
+        role: 'owner',
+        status: 'active',
+      },
+      {
+        externalId: `omem_acl_project_race_other_${target.id}`,
+        organizationId,
+        userId: other.id,
+        role: 'owner',
+        status: 'active',
+      },
+    ]);
+    const [projectInsert] = await db.insert(projects).values({
+      externalId: projectExternalId,
+      userId: target.id,
+      organizationId,
+      name: 'Account closure project race',
+    });
+    const projectId = Number(projectInsert.insertId);
+    await db.insert(projectMembers).values([
+      {
+        externalId: targetProjectMembershipExternalId,
+        projectId,
+        userId: target.id,
+        role: 'lead',
+        status: 'active',
+      },
+      {
+        externalId: `pmem_acl_project_race_other_${target.id}`,
+        projectId,
+        userId: other.id,
+        role: 'lead',
+        status: 'active',
+      },
+    ]);
+    const competitor = await mysql.createConnection(process.env.DATABASE_URL ?? '');
+    let transactionOpen = false;
+    try {
+      await expect(assertTeamWorkspaceClosureSafe(context(null))).resolves.toBeUndefined();
+      const closureContext = context(null);
+      const ids = await TEAM_WORKSPACE_CLOSURE_TARGETS.teamProjectAssociations.selectOwnedIds(
+        closureContext,
+        100,
+      );
+      expect(ids).toEqual([projectId]);
+
+      await competitor.beginTransaction();
+      transactionOpen = true;
+      await competitor.execute('SELECT id FROM projects WHERE id = ? FOR UPDATE', [projectId]);
+      await competitor.execute('DELETE FROM project_members WHERE project_id = ? AND user_id = ?', [
+        projectId,
+        other.id,
+      ]);
+
+      const outcome = TEAM_WORKSPACE_CLOSURE_TARGETS.teamProjectAssociations
+        .deleteOwnedIds(closureContext, ids)
+        .then(
+          (value) => ({ ok: true as const, value }),
+          (error: unknown) => ({ ok: false as const, error }),
+        );
+      expect(await settlesWithin(outcome, 75)).toBe(false);
+      await competitor.commit();
+      transactionOpen = false;
+
+      const result = await outcome;
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected locked project cleanup to fail closed');
+      expect(result.error).toMatchObject({ code: 'CAPABILITY_CHANGED' });
+      const [project] = await db
+        .select({ userId: projects.userId })
+        .from(projects)
+        .where(eq(projects.id, projectId));
+      const [targetMembership] = await db
+        .select({ status: projectMembers.status })
+        .from(projectMembers)
+        .where(eq(projectMembers.externalId, targetProjectMembershipExternalId));
+      expect(project?.userId).toBe(target.id);
+      expect(targetMembership?.status).toBe('active');
+    } finally {
+      if (transactionOpen) await competitor.rollback();
+      await competitor.end();
+      await db.delete(projectMembers).where(eq(projectMembers.projectId, projectId));
+      await db.delete(projects).where(eq(projects.id, projectId));
+      await db
+        .delete(organizationMembers)
+        .where(eq(organizationMembers.organizationId, organizationId));
+      await db.delete(organizations).where(eq(organizations.id, organizationId));
+    }
   });
 
   it('deletes every existing relational category child-first without touching the other account or users', async () => {
@@ -562,6 +867,16 @@ describe.sequential('account closure relational handlers', () => {
       checkpoint,
       pageSize: 100,
     };
+  }
+
+  async function settlesWithin(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+    return Promise.race([
+      promise.then(
+        () => true,
+        () => true,
+      ),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+    ]);
   }
 
   async function runToCompletion(
