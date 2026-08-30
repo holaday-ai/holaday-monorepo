@@ -166,6 +166,23 @@ const TEAM_PROJECT_RESPONSE = {
   memberRole: 'lead',
 } satisfies TeamProjectOutput;
 
+const OPERATIONS_ORGANIZATION = {
+  organizationId: 'org_ops',
+  name: '运营团队',
+  role: 'member',
+  managerDisplayName: 'Ops Manager',
+  activeMemberCount: 2,
+} as const satisfies OrganizationListOutput[number];
+
+const OPERATIONS_PROJECT = {
+  ...TEAM_PROJECT_RESPONSE,
+  projectId: 'prj_ops',
+  name: '运营节奏',
+  organizationId: 'org_ops',
+  organizationName: '运营团队',
+  memberRole: 'member',
+} satisfies TeamProjectOutput;
+
 function trpcError(code: 'NOT_FOUND' | 'FORBIDDEN' | 'UNAUTHORIZED'): Error {
   return Object.assign(new Error(code.toLowerCase()), { data: { code } });
 }
@@ -214,6 +231,169 @@ function LocationProbe(): JSX.Element {
 
 function renderPage(path = '/projects'): ReturnType<typeof render> {
   return render(pageElement(path));
+}
+
+function deferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T | PromiseLike<T>) => void;
+  readonly reject: (reason?: unknown) => void;
+} {
+  let resolve: (value: T | PromiseLike<T>) => void = () => undefined;
+  let reject: (reason?: unknown) => void = () => undefined;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
+const OFFSCREEN_MUTATION_CASES = [
+  ['team-project creation', 'create-project', '创建团队项目失败'],
+  ['team-project deletion', 'delete-project', '删除失败'],
+  ['reporting-line update', 'reporting-line', '更新直属上级失败'],
+  ['member-role update', 'member-role', '更新成员角色失败'],
+  ['member removal', 'remove-member', '移除成员失败'],
+  ['invitation creation', 'invite', '邀请链接生成失败'],
+] as const;
+
+type OffscreenMutationAction = (typeof OFFSCREEN_MUTATION_CASES)[number][1];
+
+function deferWorkspaceMutation(action: OffscreenMutationAction, promise: Promise<never>): void {
+  if (action === 'create-project') {
+    api.projectsCreate.mockImplementation(() => promise);
+  } else if (action === 'delete-project') {
+    api.projectsDelete.mockImplementation(() => promise);
+  } else if (action === 'reporting-line') {
+    api.updateReportingLine.mockImplementation(() => promise);
+  } else if (action === 'member-role') {
+    api.updateMemberRole.mockImplementation(() => promise);
+  } else if (action === 'remove-member') {
+    api.deactivateMember.mockImplementation(() => promise);
+  } else {
+    api.createInvitation.mockImplementation(() => promise);
+  }
+}
+
+function deferSuccessfulWorkspaceMutation(action: OffscreenMutationAction): {
+  readonly promise: Promise<unknown>;
+  readonly resolve: () => void;
+} {
+  if (action === 'create-project') {
+    const future = deferred<{ projectId: string; name: string }>();
+    api.projectsCreate.mockImplementation(() => future.promise);
+    return {
+      promise: future.promise,
+      resolve: () => future.resolve({ projectId: 'prj_late', name: '延迟项目' }),
+    };
+  }
+  if (action === 'delete-project') {
+    const future = deferred<{ ok: true; projectId: string }>();
+    api.projectsDelete.mockImplementation(() => future.promise);
+    return {
+      promise: future.promise,
+      resolve: () => future.resolve({ ok: true, projectId: 'prj_team' }),
+    };
+  }
+  if (action === 'reporting-line') {
+    const future = deferred<{ ok: true }>();
+    api.updateReportingLine.mockImplementation(() => future.promise);
+    return { promise: future.promise, resolve: () => future.resolve({ ok: true }) };
+  }
+  if (action === 'member-role') {
+    const future = deferred<{ ok: true }>();
+    api.updateMemberRole.mockImplementation(() => future.promise);
+    return { promise: future.promise, resolve: () => future.resolve({ ok: true }) };
+  }
+  if (action === 'remove-member') {
+    const future = deferred<{ ok: true }>();
+    api.deactivateMember.mockImplementation(() => future.promise);
+    return { promise: future.promise, resolve: () => future.resolve({ ok: true }) };
+  }
+  const future = deferred<InvitationOutput>();
+  api.createInvitation.mockImplementation(() => future.promise);
+  return {
+    promise: future.promise,
+    resolve: () =>
+      future.resolve({
+        invitationId: 'oinv_late_success',
+        inviteUrl: '/organizations/invitations/accept?token=late-success-secret',
+        expiresAt: '2026-09-06T00:00:00.000Z',
+      }),
+  };
+}
+
+function workspaceMutationSuccessCopy(action: OffscreenMutationAction): RegExp {
+  if (action === 'create-project') return /已创建团队项目/;
+  if (action === 'delete-project') return /项目已删除/;
+  if (action === 'reporting-line') return /直属上级已更新/;
+  if (action === 'member-role') return /成员角色已更新/;
+  if (action === 'remove-member') return /已移除成员/;
+  return /late-success-secret/;
+}
+
+function workspaceMutationCallCount(action: OffscreenMutationAction): number {
+  if (action === 'create-project') return api.projectsCreate.mock.calls.length;
+  if (action === 'delete-project') return api.projectsDelete.mock.calls.length;
+  if (action === 'reporting-line') return api.updateReportingLine.mock.calls.length;
+  if (action === 'member-role') return api.updateMemberRole.mock.calls.length;
+  if (action === 'remove-member') return api.deactivateMember.mock.calls.length;
+  return api.createInvitation.mock.calls.length;
+}
+
+async function beginWorkspaceMutation(
+  user: ReturnType<typeof userEvent.setup>,
+  action: OffscreenMutationAction,
+): Promise<void> {
+  if (action === 'create-project') {
+    await user.click(screen.getByRole('button', { name: '新建团队项目' }));
+    const dialog = screen.getByRole('dialog', { name: '新建团队项目' });
+    await user.type(within(dialog).getByLabelText('项目名称'), '延迟项目');
+    await user.click(within(dialog).getByRole('button', { name: '创建项目' }));
+  } else if (action === 'delete-project') {
+    await user.click(screen.getByRole('button', { name: '项目 增长计划 操作' }));
+    await user.click(await screen.findByRole('menuitem', { name: '删除项目' }));
+    await user.click(
+      within(screen.getByRole('dialog', { name: '删除这个项目？' })).getByRole('button', {
+        name: '删除项目',
+      }),
+    );
+  } else if (action === 'reporting-line') {
+    await user.selectOptions(screen.getByLabelText('设置 Member 的直属上级'), 'omem_owner');
+  } else if (action === 'member-role') {
+    await user.selectOptions(screen.getByLabelText('更改 Member 的角色'), 'manager');
+  } else if (action === 'remove-member') {
+    await user.click(screen.getByRole('button', { name: '移除 Member' }));
+    await user.click(
+      within(screen.getByRole('dialog', { name: '移除这位团队成员？' })).getByRole('button', {
+        name: '移除成员',
+      }),
+    );
+  } else {
+    await user.click(screen.getByRole('button', { name: '邀请成员' }));
+    await user.click(
+      within(screen.getByRole('dialog', { name: '邀请成员加入设计团队' })).getByRole('button', {
+        name: '生成邀请链接',
+      }),
+    );
+  }
+}
+
+async function openDesignAlongsideOperations(): Promise<ReturnType<typeof userEvent.setup>> {
+  const user = userEvent.setup();
+  shell.teamProjectsEnabled = true;
+  api.organizationsList.mockResolvedValue([ORGANIZATION_FIXTURES.owner, OPERATIONS_ORGANIZATION]);
+  api.projectsList.mockImplementation((input) =>
+    Promise.resolve(
+      input?.organizationId === OPERATIONS_ORGANIZATION.organizationId
+        ? [OPERATIONS_PROJECT]
+        : [TEAM_PROJECT_RESPONSE],
+    ),
+  );
+  api.organizationMembers.mockResolvedValue(ORGANIZATION_MEMBERS);
+  renderPage();
+  await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+  await screen.findByText('增长计划');
+  return user;
 }
 
 function expectPersonalSurfaceWithoutTeamControls(): void {
@@ -968,6 +1148,108 @@ describe('ProjectsPage organization collection states', () => {
       expect(screen.queryByText(/创建团队失败/)).toBeNull();
     },
   );
+
+  it.each(['success', 'failure'] as const)(
+    'discards late organization creation %s after a hidden list revokes the team surface',
+    async (settlement) => {
+      const user = userEvent.setup();
+      const lateCreate = deferred<{
+        organizationId: string;
+        name: string;
+        role: 'owner';
+      }>();
+      shell.teamProjectsEnabled = true;
+      api.organizationsList
+        .mockResolvedValueOnce([ORGANIZATION_FIXTURES.owner])
+        .mockRejectedValueOnce(trpcError('UNAUTHORIZED'));
+      api.organizationsCreate.mockImplementation(() => lateCreate.promise);
+      renderPage();
+
+      const refreshOrganizations = await screen.findByRole('button', { name: '刷新团队空间' });
+      await user.click(screen.getByRole('button', { name: '创建团队' }));
+      const dialog = screen.getByRole('dialog', { name: '创建团队空间' });
+      await user.type(within(dialog).getByLabelText('团队名称'), '幽灵团队');
+      await user.click(within(dialog).getByRole('button', { name: '创建团队' }));
+      await waitFor(() => expect(api.organizationsCreate).toHaveBeenCalledTimes(1));
+
+      fireEvent.click(refreshOrganizations);
+      await waitFor(expectPersonalSurfaceWithoutTeamControls);
+
+      await act(async () => {
+        if (settlement === 'success') {
+          lateCreate.resolve({
+            organizationId: 'org_ghost',
+            name: '幽灵团队',
+            role: 'owner',
+          });
+          await lateCreate.promise;
+        } else {
+          lateCreate.reject(new Error('late organization create offline'));
+          await lateCreate.promise.catch(() => undefined);
+        }
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expectPersonalSurfaceWithoutTeamControls();
+      expect(api.organizationsList).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText(/幽灵团队/)).toBeNull();
+      expect(screen.queryByText(/已创建团队/)).toBeNull();
+      expect(screen.queryByText(/创建团队失败/)).toBeNull();
+      expect(screen.queryByRole('dialog', { name: '创建团队空间' })).toBeNull();
+    },
+  );
+
+  it.each(['success', 'failure'] as const)(
+    'discards late organization creation %s after the rollout gate cycles off and on',
+    async (settlement) => {
+      const user = userEvent.setup();
+      const lateCreate = deferred<{
+        organizationId: string;
+        name: string;
+        role: 'owner';
+      }>();
+      shell.teamProjectsEnabled = true;
+      api.organizationsList.mockResolvedValue([ORGANIZATION_FIXTURES.owner]);
+      api.organizationsCreate.mockImplementation(() => lateCreate.promise);
+      const view = renderPage();
+
+      await user.click(await screen.findByRole('button', { name: '创建团队' }));
+      const dialog = screen.getByRole('dialog', { name: '创建团队空间' });
+      await user.type(within(dialog).getByLabelText('团队名称'), '旧周期团队');
+      await user.click(within(dialog).getByRole('button', { name: '创建团队' }));
+      await waitFor(() => expect(api.organizationsCreate).toHaveBeenCalledTimes(1));
+
+      shell.teamProjectsEnabled = false;
+      view.rerender(pageElement());
+      expectPersonalSurfaceWithoutTeamControls();
+      shell.teamProjectsEnabled = true;
+      view.rerender(pageElement());
+      await screen.findByRole('region', { name: '工作区切换' });
+
+      await act(async () => {
+        if (settlement === 'success') {
+          lateCreate.resolve({
+            organizationId: 'org_old_generation',
+            name: '旧周期团队',
+            role: 'owner',
+          });
+          await lateCreate.promise;
+        } else {
+          lateCreate.reject(new Error('old generation create offline'));
+          await lateCreate.promise.catch(() => undefined);
+        }
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(await screen.findByRole('button', { name: /设计团队/ })).toBeTruthy();
+      expect(api.organizationsList).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText(/旧周期团队/)).toBeNull();
+      expect(screen.queryByText(/已创建团队/)).toBeNull();
+      expect(screen.queryByText(/创建团队失败/)).toBeNull();
+    },
+  );
 });
 
 describe('ProjectsPage selected team-project collection states', () => {
@@ -1268,6 +1550,329 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     expect(screen.queryByLabelText('团队项目加载中')).toBeNull();
     expect(screen.queryByLabelText('团队成员加载中')).toBeNull();
   });
+
+  it('keeps an off-screen self-demotion uncertain until an authoritative organization refresh settles', async () => {
+    const user = userEvent.setup();
+    let resolveRoleUpdate: ((value: { ok: true }) => void) | undefined;
+    let roleUpdatePromise: Promise<{ ok: true }> | undefined;
+    let resolveAuthorityRefresh: ((value: OrganizationListOutput) => void) | undefined;
+    let authorityRefreshPromise: Promise<OrganizationListOutput> | undefined;
+    const currentAdmin: OrganizationMembersOutput[number] = {
+      memberId: 'omem_current',
+      userId: 'usr_current',
+      displayName: 'Current Admin',
+      avatarUrl: null,
+      role: 'admin',
+      managerUserId: 'usr_owner',
+      managerDisplayName: 'Owner',
+      status: 'active',
+    };
+    const operationsOrganization = {
+      organizationId: 'org_ops',
+      name: '运营团队',
+      role: 'member',
+      managerDisplayName: 'Ops Manager',
+      activeMemberCount: 2,
+    } as const;
+    const memberOrganization = {
+      ...ORGANIZATION_FIXTURES.member,
+      managerDisplayName: 'Owner',
+    };
+    const operationsProject = {
+      ...TEAM_PROJECT_RESPONSE,
+      projectId: 'prj_ops',
+      name: '运营节奏',
+      organizationId: 'org_ops',
+      organizationName: '运营团队',
+      memberRole: 'member',
+    } satisfies TeamProjectOutput;
+    shell.teamProjectsEnabled = true;
+    api.organizationsList
+      .mockResolvedValueOnce([ORGANIZATION_FIXTURES.admin, operationsOrganization])
+      .mockImplementationOnce(() => {
+        authorityRefreshPromise = new Promise((resolve) => {
+          resolveAuthorityRefresh = resolve;
+        });
+        return authorityRefreshPromise;
+      });
+    api.projectsList.mockImplementation((input) =>
+      Promise.resolve(
+        input?.organizationId === 'org_ops' ? [operationsProject] : [TEAM_PROJECT_RESPONSE],
+      ),
+    );
+    api.organizationMembers.mockImplementation(({ organizationId }) =>
+      Promise.resolve(
+        organizationId === 'org_design'
+          ? [ORGANIZATION_MEMBERS[0], currentAdmin, ORGANIZATION_MEMBERS[2]]
+          : ORGANIZATION_MEMBERS,
+      ),
+    );
+    api.updateMemberRole.mockImplementation(() => {
+      roleUpdatePromise = new Promise((resolve) => {
+        resolveRoleUpdate = resolve;
+      });
+      return roleUpdatePromise;
+    });
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await user.selectOptions(screen.getByLabelText('更改 Current Admin 的角色'), 'member');
+    await waitFor(() => expect(api.updateMemberRole).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole('button', { name: /运营团队/ }));
+    expect(await screen.findByText('运营节奏')).toBeTruthy();
+
+    await act(async () => {
+      resolveRoleUpdate?.({ ok: true });
+      await roleUpdatePromise;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(api.organizationsList).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole('button', { name: /设计团队/ }));
+    expect(await screen.findByText('当前身份：管理员 · 3 位活跃成员')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '邀请成员' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '新建团队项目' })).toBeNull();
+    expect(screen.queryByLabelText('更改 Current Admin 的角色')).toBeNull();
+
+    await act(async () => {
+      resolveAuthorityRefresh?.([memberOrganization, operationsOrganization]);
+      await authorityRefreshPromise;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByText('当前身份：成员 · 3 位活跃成员')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '邀请成员' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '新建团队项目' })).toBeNull();
+  });
+
+  it('keeps an off-screen self-deactivation uncertain until the authoritative list removes it', async () => {
+    const user = userEvent.setup();
+    const lateDeactivation = deferred<{ ok: true }>();
+    const authorityRefresh = deferred<OrganizationListOutput>();
+    const currentAdmin: OrganizationMembersOutput[number] = {
+      memberId: 'omem_current',
+      userId: 'usr_current',
+      displayName: 'Current Admin',
+      avatarUrl: null,
+      role: 'admin',
+      managerUserId: 'usr_owner',
+      managerDisplayName: 'Owner',
+      status: 'active',
+    };
+    shell.teamProjectsEnabled = true;
+    api.organizationsList
+      .mockResolvedValueOnce([ORGANIZATION_FIXTURES.admin, OPERATIONS_ORGANIZATION])
+      .mockImplementationOnce(() => authorityRefresh.promise);
+    api.projectsList.mockImplementation((input) =>
+      Promise.resolve(
+        input?.organizationId === OPERATIONS_ORGANIZATION.organizationId
+          ? [OPERATIONS_PROJECT]
+          : [TEAM_PROJECT_RESPONSE],
+      ),
+    );
+    api.organizationMembers.mockImplementation(({ organizationId }) =>
+      Promise.resolve(
+        organizationId === 'org_design'
+          ? [ORGANIZATION_MEMBERS[0], currentAdmin, ORGANIZATION_MEMBERS[2]]
+          : ORGANIZATION_MEMBERS,
+      ),
+    );
+    api.deactivateMember.mockImplementation(() => lateDeactivation.promise);
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    const operationsWorkspace = screen.getByRole('button', { name: /运营团队/ });
+    await user.click(screen.getByRole('button', { name: '移除 Current Admin' }));
+    await user.click(
+      within(screen.getByRole('dialog', { name: '移除这位团队成员？' })).getByRole('button', {
+        name: '移除成员',
+      }),
+    );
+    await waitFor(() => expect(api.deactivateMember).toHaveBeenCalledTimes(1));
+    fireEvent.click(operationsWorkspace);
+    expect(await screen.findByText('运营节奏')).toBeTruthy();
+
+    await act(async () => {
+      lateDeactivation.resolve({ ok: true });
+      await lateDeactivation.promise;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(api.organizationsList).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole('button', { name: /设计团队/ }));
+    expect(await screen.findByText('当前身份：管理员 · 3 位活跃成员')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '邀请成员' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '新建团队项目' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '移除 Current Admin' })).toBeNull();
+
+    await act(async () => {
+      authorityRefresh.resolve([OPERATIONS_ORGANIZATION]);
+      await authorityRefresh.promise;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByRole('heading', { name: '个人项目' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /设计团队/ })).toBeNull();
+  });
+
+  it.each(OFFSCREEN_MUTATION_CASES)(
+    'tombstones workspace A after its late hidden %s failure settles under workspace B',
+    async (_label, action) => {
+      const lateMutation = deferred<never>();
+      deferWorkspaceMutation(action, lateMutation.promise);
+      const user = await openDesignAlongsideOperations();
+      const operationsWorkspace = screen.getByRole('button', { name: /运营团队/ });
+
+      await beginWorkspaceMutation(user, action);
+      await waitFor(() => expect(workspaceMutationCallCount(action)).toBe(1));
+      fireEvent.click(operationsWorkspace);
+      expect(await screen.findByText('运营节奏')).toBeTruthy();
+
+      await act(async () => {
+        lateMutation.reject(trpcError('FORBIDDEN'));
+        await lateMutation.promise.catch(() => undefined);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(screen.getByText('运营节奏')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /设计团队/ })).toBeNull();
+      expect(screen.queryByText(/失败/)).toBeNull();
+    },
+  );
+
+  it('clears a workspace tombstone only after a later authoritative list includes the organization', async () => {
+    const lateRoleUpdate = deferred<never>();
+    api.updateMemberRole.mockImplementation(() => lateRoleUpdate.promise);
+    const user = await openDesignAlongsideOperations();
+    const designWorkspace = screen.getByRole('button', { name: /设计团队/ });
+    const operationsWorkspace = screen.getByRole('button', { name: /运营团队/ });
+
+    await user.selectOptions(screen.getByLabelText('更改 Member 的角色'), 'manager');
+    await waitFor(() => expect(api.updateMemberRole).toHaveBeenCalledTimes(1));
+    fireEvent.click(operationsWorkspace);
+    expect(await screen.findByText('运营节奏')).toBeTruthy();
+    await act(async () => {
+      lateRoleUpdate.reject(trpcError('FORBIDDEN'));
+      await lateRoleUpdate.promise.catch(() => undefined);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole('button', { name: /设计团队/ })).toBeNull();
+    fireEvent.click(designWorkspace);
+    expect(screen.getByText('运营节奏')).toBeTruthy();
+    expect(screen.queryByText('增长计划')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: '刷新团队空间' }));
+
+    const restoredWorkspace = await screen.findByRole('button', { name: /设计团队/ });
+    await user.click(restoredWorkspace);
+    expect(await screen.findByText('增长计划')).toBeTruthy();
+  });
+
+  it('does not let an organization list started before a hidden result clear the newer tombstone', async () => {
+    const user = userEvent.setup();
+    const lateRoleUpdate = deferred<never>();
+    const olderOrganizationList = deferred<OrganizationListOutput>();
+    shell.teamProjectsEnabled = true;
+    api.organizationsList
+      .mockResolvedValueOnce([ORGANIZATION_FIXTURES.owner, OPERATIONS_ORGANIZATION])
+      .mockImplementationOnce(() => olderOrganizationList.promise)
+      .mockResolvedValue([ORGANIZATION_FIXTURES.owner, OPERATIONS_ORGANIZATION]);
+    api.projectsList.mockImplementation((input) =>
+      Promise.resolve(
+        input?.organizationId === OPERATIONS_ORGANIZATION.organizationId
+          ? [OPERATIONS_PROJECT]
+          : [TEAM_PROJECT_RESPONSE],
+      ),
+    );
+    api.organizationMembers.mockResolvedValue(ORGANIZATION_MEMBERS);
+    api.updateMemberRole.mockImplementation(() => lateRoleUpdate.promise);
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await user.selectOptions(screen.getByLabelText('更改 Member 的角色'), 'manager');
+    await waitFor(() => expect(api.updateMemberRole).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole('button', { name: /运营团队/ }));
+    expect(await screen.findByText('运营节奏')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '刷新团队空间' }));
+    await waitFor(() => expect(api.organizationsList).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      lateRoleUpdate.reject(trpcError('FORBIDDEN'));
+      await lateRoleUpdate.promise.catch(() => undefined);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole('button', { name: /设计团队/ })).toBeNull();
+
+    await act(async () => {
+      olderOrganizationList.resolve([ORGANIZATION_FIXTURES.owner, OPERATIONS_ORGANIZATION]);
+      await olderOrganizationList.promise;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole('button', { name: /设计团队/ })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: '刷新团队空间' }));
+    expect(await screen.findByRole('button', { name: /设计团队/ })).toBeTruthy();
+  });
+
+  it.each(OFFSCREEN_MUTATION_CASES)(
+    'keeps workspace A available and workspace B silent after its late generic %s failure',
+    async (_label, action, failureCopy) => {
+      const lateMutation = deferred<never>();
+      deferWorkspaceMutation(action, lateMutation.promise);
+      const user = await openDesignAlongsideOperations();
+      const operationsWorkspace = screen.getByRole('button', { name: /运营团队/ });
+
+      await beginWorkspaceMutation(user, action);
+      await waitFor(() => expect(workspaceMutationCallCount(action)).toBe(1));
+      fireEvent.click(operationsWorkspace);
+      expect(await screen.findByText('运营节奏')).toBeTruthy();
+
+      await act(async () => {
+        lateMutation.reject(new Error('workspace A mutation offline'));
+        await lateMutation.promise.catch(() => undefined);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(screen.queryByText(new RegExp(failureCopy))).toBeNull();
+      const designWorkspace = screen.getByRole('button', { name: /设计团队/ });
+      await user.click(designWorkspace);
+      expect(await screen.findByText('增长计划')).toBeTruthy();
+    },
+  );
+
+  it.each(OFFSCREEN_MUTATION_CASES)(
+    'keeps workspace B silent after workspace A late %s success',
+    async (_label, action) => {
+      const lateMutation = deferSuccessfulWorkspaceMutation(action);
+      const user = await openDesignAlongsideOperations();
+      const operationsWorkspace = screen.getByRole('button', { name: /运营团队/ });
+
+      await beginWorkspaceMutation(user, action);
+      await waitFor(() => expect(workspaceMutationCallCount(action)).toBe(1));
+      fireEvent.click(operationsWorkspace);
+      expect(await screen.findByText('运营节奏')).toBeTruthy();
+
+      await act(async () => {
+        lateMutation.resolve();
+        await lateMutation.promise;
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(screen.getByText('运营节奏')).toBeTruthy();
+      expect(screen.queryByText(workspaceMutationSuccessCopy(action))).toBeNull();
+      expect(screen.getByRole('button', { name: /设计团队/ })).toBeTruthy();
+    },
+  );
 
   it('does not show a generic mutation failure from workspace A after selecting workspace B', async () => {
     const user = userEvent.setup();

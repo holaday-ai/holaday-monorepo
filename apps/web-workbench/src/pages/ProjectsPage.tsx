@@ -70,6 +70,11 @@ type OrganizationRefreshOutcome =
   | { readonly status: 'retryable' }
   | { readonly status: 'superseded' };
 
+interface OrganizationAuthorityState {
+  readonly status: 'uncertain' | 'tombstoned';
+  readonly generation: number;
+}
+
 // Keep the Task 12 surface named while deriving every procedure directly from AppRouter.
 const task12WorkspaceClient: Task12WorkspaceClient = trpc;
 
@@ -87,13 +92,14 @@ export function ProjectsPage(): JSX.Element {
   const mountedRef = React.useRef(false);
   const personalRequestRef = React.useRef(0);
   const organizationRequestRef = React.useRef(0);
+  const teamSurfaceGenerationRef = React.useRef(0);
   const workspaceRequestGenerationRef = React.useRef(new Map<string, number>());
   const selectedOrganizationIdRef = React.useRef<string | null>(null);
   const teamProjectsEnabledRef = React.useRef(teamProjectsEnabled);
   const previousTeamProjectsEnabledRef = React.useRef(teamProjectsEnabled);
   const teamSurfaceRevokedRef = React.useRef(false);
   const organizationsRef = React.useRef<readonly UiOrganization[]>([]);
-  const authorityUncertainOrganizationIdRef = React.useRef<string | null>(null);
+  const organizationAuthorityStateRef = React.useRef(new Map<string, OrganizationAuthorityState>());
 
   const [personalProjects, setPersonalProjects] = React.useState<UiProject[]>(() =>
     shellProjects.filter((project) => project.scope === 'personal'),
@@ -104,9 +110,7 @@ export function ProjectsPage(): JSX.Element {
   const [organizationsLoading, setOrganizationsLoading] = React.useState(teamProjectsEnabled);
   const [organizationsError, setOrganizationsError] = React.useState<string | null>(null);
   const [teamSurfaceRevoked, setTeamSurfaceRevoked] = React.useState(false);
-  const [authorityUncertainOrganizationId, setAuthorityUncertainOrganizationId] = React.useState<
-    string | null
-  >(null);
+  const [, setOrganizationAuthorityRevision] = React.useState(0);
   const [selectedWorkspaceValue, setSelectedWorkspaceValue] = React.useState<string | null>(null);
   const [teamProjects, setTeamProjects] =
     React.useState<ScopedCollectionState<UiProject>>(emptyScopedCollection);
@@ -137,7 +141,8 @@ export function ProjectsPage(): JSX.Element {
   selectedOrganizationIdRef.current = selectedOrganizationId;
   organizationsRef.current = organizations;
   const organizationAuthorityUncertain =
-    selectedOrganizationId !== null && authorityUncertainOrganizationId === selectedOrganizationId;
+    selectedOrganizationId !== null &&
+    organizationAuthorityStateRef.current.get(selectedOrganizationId)?.status === 'uncertain';
   const organizationActions = selectedOrganization
     ? organizationActionVisibility(
         organizationAuthorityUncertain ? 'member' : selectedOrganization.role,
@@ -152,6 +157,7 @@ export function ProjectsPage(): JSX.Element {
   const showPersonalCreateError = personalNameTouched && personalCreateState.error !== null;
 
   const revokeTeamSurface = React.useCallback((): void => {
+    teamSurfaceGenerationRef.current += 1;
     teamSurfaceRevokedRef.current = true;
     teamProjectsEnabledRef.current = false;
     organizationRequestRef.current += 1;
@@ -160,9 +166,9 @@ export function ProjectsPage(): JSX.Element {
     }
     selectedOrganizationIdRef.current = null;
     organizationsRef.current = [];
-    authorityUncertainOrganizationIdRef.current = null;
+    organizationAuthorityStateRef.current.clear();
     setTeamSurfaceRevoked(true);
-    setAuthorityUncertainOrganizationId(null);
+    setOrganizationAuthorityRevision((current) => current + 1);
     setOrganizations([]);
     setOrganizationsLoading(false);
     setOrganizationsError(null);
@@ -178,19 +184,29 @@ export function ProjectsPage(): JSX.Element {
 
   const invalidateWorkspace = React.useCallback(
     (organizationId: string, removeOrganization = true): void => {
-      if (selectedOrganizationIdRef.current !== organizationId) return;
+      if (!mountedRef.current) return;
+      if (removeOrganization) {
+        const current = organizationAuthorityStateRef.current.get(organizationId);
+        organizationAuthorityStateRef.current.set(organizationId, {
+          status: 'tombstoned',
+          generation: (current?.generation ?? 0) + 1,
+        });
+      } else {
+        organizationAuthorityStateRef.current.delete(organizationId);
+      }
+      setOrganizationAuthorityRevision((revision) => revision + 1);
       bumpWorkspaceGeneration(workspaceRequestGenerationRef.current, organizationId);
-      selectedOrganizationIdRef.current = null;
-      setSelectedWorkspaceValue(null);
-      setTeamProjects(emptyScopedCollection());
-      setMembers(emptyScopedCollection());
-      setCreateTeamProjectOpen(false);
-      setInviteOpen(false);
-      setPendingDelete(null);
-      setPendingMemberRemoval(null);
-      if (authorityUncertainOrganizationIdRef.current === organizationId) {
-        authorityUncertainOrganizationIdRef.current = null;
-        setAuthorityUncertainOrganizationId(null);
+      const workspaceIsCurrent = selectedOrganizationIdRef.current === organizationId;
+      if (!workspaceIsCurrent && !removeOrganization) return;
+      if (workspaceIsCurrent) {
+        selectedOrganizationIdRef.current = null;
+        setSelectedWorkspaceValue(null);
+        setTeamProjects(emptyScopedCollection());
+        setMembers(emptyScopedCollection());
+        setCreateTeamProjectOpen(false);
+        setInviteOpen(false);
+        setPendingDelete(null);
+        setPendingMemberRemoval(null);
       }
       if (removeOrganization) {
         setOrganizations((current) => {
@@ -205,18 +221,19 @@ export function ProjectsPage(): JSX.Element {
     [],
   );
 
-  const suppressUncertainOrganizationAuthority = React.useCallback(
-    (organizationId: string): void => {
-      if (selectedOrganizationIdRef.current !== organizationId) return;
-      authorityUncertainOrganizationIdRef.current = organizationId;
-      setAuthorityUncertainOrganizationId(organizationId);
-      setCreateTeamProjectOpen(false);
-      setInviteOpen(false);
-      setPendingDelete(null);
-      setPendingMemberRemoval(null);
-    },
-    [],
-  );
+  const markOrganizationAuthorityUncertain = React.useCallback((organizationId: string): void => {
+    const current = organizationAuthorityStateRef.current.get(organizationId);
+    organizationAuthorityStateRef.current.set(organizationId, {
+      status: 'uncertain',
+      generation: (current?.generation ?? 0) + 1,
+    });
+    setOrganizationAuthorityRevision((revision) => revision + 1);
+    if (selectedOrganizationIdRef.current !== organizationId) return;
+    setCreateTeamProjectOpen(false);
+    setInviteOpen(false);
+    setPendingDelete(null);
+    setPendingMemberRemoval(null);
+  }, []);
 
   const refreshPersonalProjects = React.useCallback(async () => {
     const requestId = personalRequestRef.current + 1;
@@ -241,18 +258,25 @@ export function ProjectsPage(): JSX.Element {
     if (!teamProjectsEnabledRef.current) return { status: 'superseded' };
     const requestId = organizationRequestRef.current + 1;
     organizationRequestRef.current = requestId;
+    const authorityGenerations = snapshotAuthorityGenerations(
+      organizationAuthorityStateRef.current,
+    );
     setOrganizationsLoading(true);
     setOrganizationsError(null);
     try {
       const response = await task12WorkspaceClient.organizations.list.query();
-      const nextOrganizations = normalizeOrganizationRows(response);
+      const normalizedOrganizations = normalizeOrganizationRows(response);
       if (!mountedRef.current || organizationRequestRef.current !== requestId) {
         return { status: 'superseded' };
       }
       teamSurfaceRevokedRef.current = false;
       setTeamSurfaceRevoked(false);
-      authorityUncertainOrganizationIdRef.current = null;
-      setAuthorityUncertainOrganizationId(null);
+      const nextOrganizations = reconcileOrganizationAuthority(
+        normalizedOrganizations,
+        organizationAuthorityStateRef.current,
+        authorityGenerations,
+      );
+      setOrganizationAuthorityRevision((revision) => revision + 1);
       const currentOrganizationId = selectedOrganizationIdRef.current;
       const previousOrganization = currentOrganizationId
         ? organizationsRef.current.find(
@@ -398,10 +422,11 @@ export function ProjectsPage(): JSX.Element {
   React.useEffect(() => {
     if (previousTeamProjectsEnabledRef.current === teamProjectsEnabled) return;
     previousTeamProjectsEnabledRef.current = teamProjectsEnabled;
+    teamSurfaceGenerationRef.current += 1;
     teamSurfaceRevokedRef.current = false;
-    authorityUncertainOrganizationIdRef.current = null;
+    organizationAuthorityStateRef.current.clear();
     setTeamSurfaceRevoked(false);
-    setAuthorityUncertainOrganizationId(null);
+    setOrganizationAuthorityRevision((current) => current + 1);
     if (!teamProjectsEnabled) {
       organizationRequestRef.current += 1;
       organizationsRef.current = [];
@@ -420,6 +445,7 @@ export function ProjectsPage(): JSX.Element {
       mountedRef.current = false;
       personalRequestRef.current += 1;
       organizationRequestRef.current += 1;
+      teamSurfaceGenerationRef.current += 1;
       workspaceRequestGenerationRef.current.clear();
     };
   }, [refreshOrganizations, refreshPersonalProjects, teamProjectsEnabled]);
@@ -441,7 +467,10 @@ export function ProjectsPage(): JSX.Element {
   }, [refreshOrganizationWorkspace, selectedOrganizationId, teamSurfaceEnabled]);
 
   const selectWorkspace = React.useCallback((organizationId: string | null) => {
-    if (organizationId !== null && authorityUncertainOrganizationIdRef.current === organizationId) {
+    if (
+      organizationId !== null &&
+      organizationAuthorityStateRef.current.get(organizationId)?.status === 'tombstoned'
+    ) {
       return;
     }
     const previousOrganizationId = selectedOrganizationIdRef.current;
@@ -467,14 +496,16 @@ export function ProjectsPage(): JSX.Element {
     organizationId: string,
     authorityMayHaveChanged = false,
   ): Promise<boolean> => {
-    if (selectedOrganizationIdRef.current !== organizationId) return false;
-    if (authorityMayHaveChanged) suppressUncertainOrganizationAuthority(organizationId);
+    const workspaceIsCurrent = selectedOrganizationIdRef.current === organizationId;
+    if (!workspaceIsCurrent && !authorityMayHaveChanged) return false;
+    if (authorityMayHaveChanged) markOrganizationAuthorityUncertain(organizationId);
     const organizationFuture = refreshOrganizations();
-    const workspaceFuture = refreshOrganizationWorkspace(organizationId);
+    const workspaceFuture = workspaceIsCurrent
+      ? refreshOrganizationWorkspace(organizationId)
+      : Promise.resolve();
     const outcome = await organizationFuture;
     if (!mountedRef.current) return false;
     if (outcome.status === 'hidden' || outcome.status === 'superseded') return false;
-    if (selectedOrganizationIdRef.current !== organizationId) return false;
     if (outcome.status === 'retryable') {
       await workspaceFuture;
       return false;
@@ -504,11 +535,19 @@ export function ProjectsPage(): JSX.Element {
   };
 
   const createOrganization = async (name: string): Promise<boolean> => {
+    const teamSurfaceGeneration = teamSurfaceGenerationRef.current;
     try {
       const response = await task12WorkspaceClient.organizations.create.mutate({ name });
+      if (
+        !mountedRef.current ||
+        !teamProjectsEnabledRef.current ||
+        teamSurfaceGenerationRef.current !== teamSurfaceGeneration
+      ) {
+        return false;
+      }
       const [created] = normalizeOrganizationRows([response]);
-      if (!mountedRef.current || !created) {
-        if (mountedRef.current) toast.show('团队创建结果无效，请刷新后重试', 'error');
+      if (!created) {
+        toast.show('团队创建结果无效，请刷新后重试', 'error');
         return false;
       }
       setOrganizations((current) => normalizeOrganizationRows([...current, created]));
@@ -518,9 +557,16 @@ export function ProjectsPage(): JSX.Element {
       void refreshOrganizations();
       return true;
     } catch (error) {
-      if (mountedRef.current && classifyHiddenWorkspaceError(error)) {
+      if (
+        !mountedRef.current ||
+        !teamProjectsEnabledRef.current ||
+        teamSurfaceGenerationRef.current !== teamSurfaceGeneration
+      ) {
+        return false;
+      }
+      if (classifyHiddenWorkspaceError(error)) {
         revokeTeamSurface();
-      } else if (mountedRef.current) {
+      } else {
         toast.show(pageActionError('创建团队失败', error), 'error');
       }
       return false;
@@ -535,21 +581,18 @@ export function ProjectsPage(): JSX.Element {
         name,
         organizationId,
       });
-      if (!mountedRef.current) return false;
+      if (!mountedRef.current || selectedOrganizationIdRef.current !== organizationId) return false;
       toast.show(`已创建团队项目「${name}」`);
-      if (selectedOrganizationIdRef.current === organizationId) {
-        void refreshOrganizationWorkspace(organizationId);
-      }
+      void refreshOrganizationWorkspace(organizationId);
       return true;
     } catch (error) {
-      if (!mountedRef.current || selectedOrganizationIdRef.current !== organizationId) {
-        return false;
-      }
+      if (!mountedRef.current) return false;
       if (classifyHiddenWorkspaceError(error)) {
         invalidateWorkspace(organizationId);
-      } else {
-        toast.show(pageActionError('创建团队项目失败', error), 'error');
+        return false;
       }
+      if (selectedOrganizationIdRef.current !== organizationId) return false;
+      toast.show(pageActionError('创建团队项目失败', error), 'error');
       return false;
     }
   };
@@ -558,22 +601,15 @@ export function ProjectsPage(): JSX.Element {
     try {
       await trpc.projects.delete.mutate({ projectId: project.projectId });
       if (!mountedRef.current) return;
-      toast.show('项目已删除');
       if (project.scope === 'organization' && project.organizationId) {
-        if (selectedOrganizationIdRef.current === project.organizationId) {
-          await refreshOrganizationWorkspace(project.organizationId);
-        }
+        if (selectedOrganizationIdRef.current !== project.organizationId) return;
+        toast.show('项目已删除');
+        await refreshOrganizationWorkspace(project.organizationId);
       } else {
+        toast.show('项目已删除');
         await refreshPersonalProjects();
       }
     } catch (error) {
-      if (
-        project.scope === 'organization' &&
-        project.organizationId &&
-        (!mountedRef.current || selectedOrganizationIdRef.current !== project.organizationId)
-      ) {
-        return;
-      }
       if (
         mountedRef.current &&
         project.scope === 'organization' &&
@@ -581,9 +617,17 @@ export function ProjectsPage(): JSX.Element {
         classifyHiddenWorkspaceError(error)
       ) {
         invalidateWorkspace(project.organizationId);
-      } else if (mountedRef.current) {
-        toast.show(pageActionError('删除失败', error), 'error');
+        return;
       }
+      if (!mountedRef.current) return;
+      if (
+        project.scope === 'organization' &&
+        project.organizationId &&
+        selectedOrganizationIdRef.current !== project.organizationId
+      ) {
+        return;
+      }
+      toast.show(pageActionError('删除失败', error), 'error');
     }
   };
 
@@ -603,12 +647,13 @@ export function ProjectsPage(): JSX.Element {
       toast.show('直属上级已更新');
       return reconcileMembershipMutation(organizationId);
     } catch (error) {
-      if (!mountedRef.current || selectedOrganizationIdRef.current !== organizationId) return false;
+      if (!mountedRef.current) return false;
       if (classifyHiddenWorkspaceError(error)) {
         invalidateWorkspace(organizationId);
-      } else {
-        toast.show(pageActionError('更新直属上级失败', error), 'error');
+        return false;
       }
+      if (selectedOrganizationIdRef.current !== organizationId) return false;
+      toast.show(pageActionError('更新直属上级失败', error), 'error');
       return false;
     }
   };
@@ -625,16 +670,24 @@ export function ProjectsPage(): JSX.Element {
         memberId,
         role,
       });
-      if (!mountedRef.current || selectedOrganizationIdRef.current !== organizationId) return false;
+      if (!mountedRef.current) return false;
+      if (updatesCurrentUser) {
+        if (selectedOrganizationIdRef.current === organizationId) {
+          toast.show('成员角色已更新');
+        }
+        return reconcileMembershipMutation(organizationId, true);
+      }
+      if (selectedOrganizationIdRef.current !== organizationId) return false;
       toast.show('成员角色已更新');
-      return reconcileMembershipMutation(organizationId, updatesCurrentUser);
+      return reconcileMembershipMutation(organizationId);
     } catch (error) {
-      if (!mountedRef.current || selectedOrganizationIdRef.current !== organizationId) return false;
+      if (!mountedRef.current) return false;
       if (classifyHiddenWorkspaceError(error)) {
         invalidateWorkspace(organizationId);
-      } else {
-        toast.show(pageActionError('更新成员角色失败', error), 'error');
+        return false;
       }
+      if (selectedOrganizationIdRef.current !== organizationId) return false;
+      toast.show(pageActionError('更新成员角色失败', error), 'error');
       return false;
     }
   };
@@ -648,16 +701,25 @@ export function ProjectsPage(): JSX.Element {
         organizationId,
         memberId: member.memberId,
       });
-      if (!mountedRef.current || selectedOrganizationIdRef.current !== organizationId) return;
+      if (!mountedRef.current) return;
+      if (deactivatesCurrentUser) {
+        if (selectedOrganizationIdRef.current === organizationId) {
+          toast.show(`已移除成员「${member.displayName}」`);
+        }
+        await reconcileMembershipMutation(organizationId, true);
+        return;
+      }
+      if (selectedOrganizationIdRef.current !== organizationId) return;
       toast.show(`已移除成员「${member.displayName}」`);
-      await reconcileMembershipMutation(organizationId, deactivatesCurrentUser);
+      await reconcileMembershipMutation(organizationId);
     } catch (error) {
-      if (!mountedRef.current || selectedOrganizationIdRef.current !== organizationId) return;
+      if (!mountedRef.current) return;
       if (classifyHiddenWorkspaceError(error)) {
         invalidateWorkspace(organizationId);
-      } else {
-        toast.show(pageActionError('移除成员失败', error), 'error');
+        return;
       }
+      if (selectedOrganizationIdRef.current !== organizationId) return;
+      toast.show(pageActionError('移除成员失败', error), 'error');
     }
   };
 
@@ -1399,6 +1461,42 @@ function canDeleteProject(project: UiProject, organizationRole?: OrganizationRol
     return false;
   }
   return organizationRole === 'owner' || organizationRole === 'admin';
+}
+
+function snapshotAuthorityGenerations(
+  states: ReadonlyMap<string, OrganizationAuthorityState>,
+): ReadonlyMap<string, number> {
+  return new Map(
+    Array.from(states, ([organizationId, state]) => [organizationId, state.generation] as const),
+  );
+}
+
+function reconcileOrganizationAuthority(
+  organizations: readonly UiOrganization[],
+  states: Map<string, OrganizationAuthorityState>,
+  requestGenerations: ReadonlyMap<string, number>,
+): UiOrganization[] {
+  const authoritativeOrganizationIds = new Set(
+    organizations.map((organization) => organization.organizationId),
+  );
+  const visibleOrganizations = organizations.filter((organization) => {
+    const state = states.get(organization.organizationId);
+    if (!state) return true;
+    if (state.generation !== (requestGenerations.get(organization.organizationId) ?? 0)) {
+      return false;
+    }
+    states.delete(organization.organizationId);
+    return true;
+  });
+
+  for (const [organizationId, state] of states) {
+    if (authoritativeOrganizationIds.has(organizationId)) continue;
+    if (state.generation === (requestGenerations.get(organizationId) ?? 0)) {
+      states.delete(organizationId);
+    }
+  }
+
+  return visibleOrganizations;
 }
 
 function bumpWorkspaceGeneration(generations: Map<string, number>, organizationId: string): number {

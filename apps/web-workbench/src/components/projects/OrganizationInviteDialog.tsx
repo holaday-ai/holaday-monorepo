@@ -97,15 +97,17 @@ export function OrganizationInviteDialog({
       }
       setInviteLink(next);
     } catch (caught) {
-      if (mountedRef.current && requestGenerationRef.current === requestGeneration) {
-        if (classifyHiddenWorkspaceError(caught)) {
+      if (classifyHiddenWorkspaceError(caught)) {
+        onHiddenResource();
+        if (mountedRef.current && requestGenerationRef.current === requestGeneration) {
           requestGenerationRef.current += 1;
           setInviteLink(clearInviteLinkState());
           setError(null);
           setCreating(false);
-          onHiddenResource();
-          return;
         }
+        return;
+      }
+      if (mountedRef.current && requestGenerationRef.current === requestGeneration) {
         setError(pageActionError('邀请链接生成失败', caught));
       }
     } finally {
