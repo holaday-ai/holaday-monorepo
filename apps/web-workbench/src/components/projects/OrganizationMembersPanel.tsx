@@ -14,6 +14,7 @@ interface OrganizationMembersPanelProps {
   members: readonly UiOrganizationMember[];
   loading: boolean;
   error: string | null;
+  actionsSuppressed?: boolean;
   onRefresh(): void;
   onUpdateReportingLine(memberId: string, managerMemberId: string): Promise<boolean>;
   onUpdateRole(memberId: string, role: OrganizationRole): Promise<boolean>;
@@ -32,6 +33,7 @@ export function OrganizationMembersPanel({
   members,
   loading,
   error,
+  actionsSuppressed = false,
   onRefresh,
   onUpdateReportingLine,
   onUpdateRole,
@@ -157,9 +159,10 @@ export function OrganizationMembersPanel({
                     </div>
                   </div>
                 </div>
-                {visibility.canSetReportingLine ||
-                visibility.canChangeRole ||
-                visibility.canDeactivate ? (
+                {!actionsSuppressed &&
+                (visibility.canSetReportingLine ||
+                  visibility.canChangeRole ||
+                  visibility.canDeactivate) ? (
                   <div className="mt-3 flex flex-col gap-2 border-t border-[#EFEFEF] pt-3">
                     {visibility.canSetReportingLine ? (
                       <select
