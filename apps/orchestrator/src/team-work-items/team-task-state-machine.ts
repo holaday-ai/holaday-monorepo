@@ -1,4 +1,4 @@
-import { parseIsoUtcInstant } from './acceptance-contract.js';
+import { hasDenseArrayEntries, parseIsoUtcInstant } from './acceptance-contract.js';
 
 export const TEAM_TASK_STATES = [
   'draft',
@@ -298,6 +298,9 @@ function validateRevision(
   if (command.failedCriterionIds.length === 0) {
     return reject('REVISION_FAILED_CRITERIA_REQUIRED');
   }
+  if (!hasDenseArrayEntries(command.failedCriterionIds)) {
+    return reject('REVISION_FAILED_CRITERIA_INVALID');
+  }
   if (command.failedCriterionIds.length > REVISION_CRITERION_ID_MAX_COUNT) {
     return reject('REVISION_FAILED_CRITERIA_COUNT_EXCEEDED');
   }
@@ -313,6 +316,9 @@ function validateRevision(
   }
 
   if (!Array.isArray(command.evidenceReferences)) return reject('REVISION_EVIDENCE_REQUIRED');
+  if (!hasDenseArrayEntries(command.evidenceReferences)) {
+    return reject('REVISION_EVIDENCE_INVALID');
+  }
   if (command.evidenceReferences.length > REVISION_EVIDENCE_REFERENCE_MAX_COUNT) {
     return reject('REVISION_EVIDENCE_COUNT_EXCEEDED');
   }
@@ -344,6 +350,9 @@ function validateRevision(
   }
   if (command.revisionInstructions.length === 0) {
     return reject('REVISION_INSTRUCTIONS_REQUIRED');
+  }
+  if (!hasDenseArrayEntries(command.revisionInstructions)) {
+    return reject('REVISION_INSTRUCTIONS_INVALID');
   }
   if (command.revisionInstructions.length > REVISION_INSTRUCTION_MAX_COUNT) {
     return reject('REVISION_INSTRUCTIONS_COUNT_EXCEEDED');

@@ -123,6 +123,16 @@ describe('acceptance contract validator', () => {
     ).toEqual({ ok: false, code });
   });
 
+  it('rejects a sparse deliverables array instead of preserving a JSON null hole', () => {
+    const deliverables = ['PDF report'];
+    deliverables.length = 2;
+
+    expect(validateAcceptanceContract(validContract({ deliverables }), { now: NOW })).toEqual({
+      ok: false,
+      code: 'DELIVERABLE_INVALID',
+    });
+  });
+
   it.each([
     [[{ id: 'accuracy', description: 'Totals match' }, null], 'CRITERION_INVALID'],
     [[{ id: 'accuracy', description: 'Totals match' }, 42], 'CRITERION_INVALID'],
@@ -133,6 +143,18 @@ describe('acceptance contract validator', () => {
         { now: NOW },
       ),
     ).toEqual({ ok: false, code });
+  });
+
+  it('rejects a sparse criteria array with a stable criterion-shape code', () => {
+    const criteria: AcceptanceContractInput['criteria'] = [
+      { id: 'accuracy', description: 'Totals match' },
+    ];
+    criteria.length = 2;
+
+    expect(validateAcceptanceContract(validContract({ criteria }), { now: NOW })).toEqual({
+      ok: false,
+      code: 'CRITERION_INVALID',
+    });
   });
 
   it('rejects a mixed malformed required-evidence array instead of dropping entries', () => {
@@ -146,6 +168,17 @@ describe('acceptance contract validator', () => {
         }),
         { now: NOW },
       ),
+    ).toEqual({ ok: false, code: 'EVIDENCE_TYPE_REQUIRED' });
+  });
+
+  it('rejects a sparse required-evidence array with a stable evidence code', () => {
+    const requiredEvidenceTypes: AcceptanceContractInput['requiredEvidenceTypes'] = [
+      { type: 'source_document', description: 'Spreadsheet' },
+    ];
+    requiredEvidenceTypes.length = 2;
+
+    expect(
+      validateAcceptanceContract(validContract({ requiredEvidenceTypes }), { now: NOW }),
     ).toEqual({ ok: false, code: 'EVIDENCE_TYPE_REQUIRED' });
   });
 

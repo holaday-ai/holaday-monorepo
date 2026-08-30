@@ -338,6 +338,42 @@ describe('team task state machine', () => {
     ).toEqual({ ok: false, code });
   });
 
+  it('rejects sparse failed criterion IDs without throwing', () => {
+    const failedCriterionIds = ['criterion-1'];
+    failedCriterionIds.length = 2;
+
+    expect(
+      transitionTeamTask(current('in_review'), {
+        ...validCommands.request_revision,
+        failedCriterionIds,
+      }),
+    ).toEqual({ ok: false, code: 'REVISION_FAILED_CRITERIA_INVALID' });
+  });
+
+  it('rejects sparse revision instructions without throwing', () => {
+    const revisionInstructions = ['Correct row 4'];
+    revisionInstructions.length = 2;
+
+    expect(
+      transitionTeamTask(current('in_review'), {
+        ...validCommands.request_revision,
+        revisionInstructions,
+      }),
+    ).toEqual({ ok: false, code: 'REVISION_INSTRUCTIONS_INVALID' });
+  });
+
+  it('rejects sparse evidence references with a stable evidence code', () => {
+    const evidenceReferences = [{ kind: 'evidence' as const, reference: 'artifact-1' }];
+    evidenceReferences.length = 2;
+
+    expect(
+      transitionTeamTask(current('in_review'), {
+        ...validCommands.request_revision,
+        evidenceReferences,
+      }),
+    ).toEqual({ ok: false, code: 'REVISION_EVIDENCE_INVALID' });
+  });
+
   it('normalizes revision fields while preserving missing-evidence semantics', () => {
     expect(
       transitionTeamTask(current('in_review'), {

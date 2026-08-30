@@ -105,6 +105,13 @@ export function parseIsoUtcInstant(value: unknown): ParsedIsoUtcInstant | null {
   return { canonical, epochMs };
 }
 
+export function hasDenseArrayEntries(values: readonly unknown[]): boolean {
+  for (let index = 0; index < values.length; index += 1) {
+    if (!Object.prototype.hasOwnProperty.call(values, index)) return false;
+  }
+  return true;
+}
+
 function reject(code: AcceptanceContractErrorCode): AcceptanceContractValidationResult {
   return { ok: false, code };
 }
@@ -131,6 +138,7 @@ export function validateAcceptanceContract(
   if (!Array.isArray(input.deliverables) || input.deliverables.length === 0) {
     return reject('DELIVERABLE_REQUIRED');
   }
+  if (!hasDenseArrayEntries(input.deliverables)) return reject('DELIVERABLE_INVALID');
   if (input.deliverables.length > DELIVERABLE_MAX_COUNT) {
     return reject('DELIVERABLE_COUNT_EXCEEDED');
   }
@@ -146,6 +154,7 @@ export function validateAcceptanceContract(
   if (!Array.isArray(input.criteria) || input.criteria.length === 0) {
     return reject('CRITERION_REQUIRED');
   }
+  if (!hasDenseArrayEntries(input.criteria)) return reject('CRITERION_INVALID');
   if (input.criteria.length > CRITERION_MAX_COUNT) return reject('CRITERION_COUNT_EXCEEDED');
   const criteria: AcceptanceCriterionInput[] = [];
   const criterionKeys = new Set<string>();
@@ -172,6 +181,7 @@ export function validateAcceptanceContract(
   if (!Array.isArray(input.requiredEvidenceTypes) || input.requiredEvidenceTypes.length === 0) {
     return reject('EVIDENCE_TYPE_REQUIRED');
   }
+  if (!hasDenseArrayEntries(input.requiredEvidenceTypes)) return reject('EVIDENCE_TYPE_REQUIRED');
   if (input.requiredEvidenceTypes.length > EVIDENCE_TYPE_MAX_COUNT) {
     return reject('EVIDENCE_TYPE_COUNT_EXCEEDED');
   }
