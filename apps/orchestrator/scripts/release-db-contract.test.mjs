@@ -14,6 +14,29 @@ import {
   splitMigrationStatements,
 } from './release-db-contract.mjs';
 
+const TEAM_WORK_ITEM_LIFECYCLE_MIGRATION = '0056_team_work_item_lifecycle.sql';
+const TEAM_WORK_ITEM_TABLES = [
+  'team_milestones',
+  'team_work_items',
+  'team_work_item_assignments',
+  'team_work_item_dependencies',
+  'acceptance_contract_versions',
+  'team_work_item_submissions',
+  'team_work_item_reviews',
+  'team_work_item_appeals',
+  'team_arbitration_decisions',
+  'team_work_item_events',
+  'team_evidence_bindings',
+  'team_ai_contributions',
+];
+
+function readTeamWorkItemLifecycleMigration() {
+  return readFileSync(
+    new URL(`../drizzle/${TEAM_WORK_ITEM_LIFECYCLE_MIGRATION}`, import.meta.url),
+    'utf8',
+  );
+}
+
 describe('numbered migration filename contract', () => {
   it('rejects two migrations with the same numeric prefix', () => {
     assert.deepEqual(
@@ -34,6 +57,14 @@ describe('numbered migration filename contract', () => {
   it('ships the team project foundation migration exactly once', () => {
     const files = readdirSync(new URL('../drizzle/', import.meta.url));
     assert.equal(files.filter((file) => file === '0055_team_project_foundation.sql').length, 1);
+  });
+
+  it('ships the additive team work item lifecycle migration exactly once', () => {
+    const files = readdirSync(new URL('../drizzle/', import.meta.url));
+    assert.equal(files.filter((file) => file === TEAM_WORK_ITEM_LIFECYCLE_MIGRATION).length, 1);
+
+    const statements = splitMigrationStatements(readTeamWorkItemLifecycleMigration());
+    assert.deepEqual(findNonAdditiveMigrationStatements(statements), []);
   });
 
   it('ships closure migrations as discoverable additive migrations', () => {
@@ -115,6 +146,103 @@ describe('numbered migration filename contract', () => {
       .filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)
       .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'));
     assert.deepEqual(syntaxErrors, []);
+  });
+});
+
+describe('team work item lifecycle schema contract', () => {
+  it('creates all twelve lifecycle tables and the deferred current-contract foreign key', () => {
+    const migration = readTeamWorkItemLifecycleMigration();
+    const createdTables = [...migration.matchAll(/CREATE TABLE `([^`]+)`/g)].map(
+      ([, table]) => table,
+    );
+
+    assert.deepEqual(createdTables, TEAM_WORK_ITEM_TABLES);
+    assert.match(
+      migration,
+      /ALTER TABLE `team_work_items`[\s\S]*ADD COLUMN `current_contract_version_id` BIGINT UNSIGNED NULL[\s\S]*FOREIGN KEY \(`current_contract_version_id`\) REFERENCES `acceptance_contract_versions` \(`id`\) ON DELETE RESTRICT/,
+    );
+  });
+
+  it('uses public external ids while keeping dependency edges internal', () => {
+    const migration = readTeamWorkItemLifecycleMigration();
+    for (const table of TEAM_WORK_ITEM_TABLES.filter(
+      (candidate) => candidate !== 'team_work_item_dependencies',
+    )) {
+      assert.match(
+        migration,
+        new RegExp(
+          `CREATE TABLE \`${table}\`[\\s\\S]*?UNIQUE KEY \`uk_${table}_external_id\` \\(\`external_id\`\\)`,
+        ),
+      );
+    }
+    const dependencyStatement = splitMigrationStatements(migration).find((statement) =>
+      statement.startsWith('CREATE TABLE `team_work_item_dependencies`'),
+    );
+    assert.ok(dependencyStatement);
+    assert.doesNotMatch(dependencyStatement, /`external_id`/);
+  });
+
+  it('enforces lifecycle uniqueness and tenant query indexes in MySQL DDL', () => {
+    const migration = readTeamWorkItemLifecycleMigration();
+    const requiredFragments = [
+      /`responsible_active_key` BIGINT UNSIGNED GENERATED ALWAYS AS \(CASE WHEN `role` = 'responsible' AND `status` = 'accepted' THEN `work_item_id` ELSE NULL END\) STORED/,
+      /UNIQUE KEY `uk_team_work_item_assignments_responsible_active` \(`responsible_active_key`\)/,
+      /UNIQUE KEY `uk_team_work_item_dependencies_edge` \(`work_item_id`, `depends_on_work_item_id`\)/,
+      /UNIQUE KEY `uk_acceptance_contract_versions_work_item_version` \(`work_item_id`, `version`\)/,
+      /UNIQUE KEY `uk_team_work_item_submissions_work_item_version` \(`work_item_id`, `submission_version`\)/,
+      /UNIQUE KEY `uk_team_work_item_appeals_submission` \(`submission_id`\)/,
+      /UNIQUE KEY `uk_team_work_item_events_organization_idempotency` \(`organization_id`, `idempotency_key`\)/,
+      /KEY `ix_team_work_items_tenant_status` \(`organization_id`, `project_id`, `status`\)/,
+    ];
+    for (const fragment of requiredFragments) assert.match(migration, fragment);
+  });
+
+  it('keeps lifecycle, review, appeal, arbitration, event, and audit evidence rows restrictive', () => {
+    const migration = readTeamWorkItemLifecycleMigration();
+    const foreignKeys = [...migration.matchAll(/FOREIGN KEY \([^;]+?ON DELETE (\w+(?: NULL)?)/g)];
+    assert.ok(foreignKeys.length > 0);
+    assert.deepEqual([...new Set(foreignKeys.map((match) => match[1]))], ['RESTRICT']);
+  });
+
+  it('exports every Drizzle table and verifies lifecycle tables, columns, and indexes', () => {
+    const schemaIndex = readFileSync(new URL('../src/db/schema/index.ts', import.meta.url), 'utf8');
+    const workItemSchema = readFileSync(
+      new URL('../src/db/schema/team-work-items.ts', import.meta.url),
+      'utf8',
+    );
+    const verifier = readFileSync(new URL('./verify-db-schema.ts', import.meta.url), 'utf8');
+    const schemaFiles = TEAM_WORK_ITEM_TABLES.map((table) => table.replaceAll('_', '-'));
+
+    for (const schemaFile of schemaFiles) {
+      assert.match(schemaIndex, new RegExp(`export \\* from './${schemaFile}\\.js';`));
+    }
+    for (const table of TEAM_WORK_ITEM_TABLES) {
+      assert.match(verifier, new RegExp(`'${table}'`));
+    }
+    assert.match(verifier, /TEAM_WORK_ITEM_REQUIRED_INDEXES/);
+    assert.match(verifier, /responsible_active_key/);
+    assert.match(verifier, /current_contract_version_id/);
+    assert.match(verifier, /usage_snapshot_json/);
+    for (const tenantIndex of [
+      'ix_team_milestones_tenant_status',
+      'ix_team_work_items_tenant_status',
+      'ix_team_work_item_assignments_tenant_status',
+      'ix_team_work_item_dependencies_tenant',
+      'ix_acceptance_contract_versions_tenant',
+      'ix_team_work_item_submissions_tenant',
+      'ix_team_work_item_reviews_tenant_decision',
+      'ix_team_work_item_appeals_tenant_status',
+      'ix_team_arbitration_decisions_tenant',
+      'ix_team_work_item_events_tenant_type',
+      'ix_team_evidence_bindings_tenant',
+      'ix_team_ai_contributions_tenant',
+    ]) {
+      assert.match(verifier, new RegExp(`name: '${tenantIndex}'`));
+    }
+    assert.match(
+      workItemSchema,
+      /currentContractVersionId:[\s\S]*references\(\(\): AnyMySqlColumn => acceptanceContractVersions\.id, \{[\s\S]*onDelete: 'restrict'/,
+    );
   });
 });
 
