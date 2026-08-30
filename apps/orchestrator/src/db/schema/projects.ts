@@ -1,12 +1,5 @@
 import { sql } from 'drizzle-orm';
-import {
-  bigint,
-  datetime,
-  index,
-  mysqlTable,
-  uniqueIndex,
-  varchar,
-} from 'drizzle-orm/mysql-core';
+import { bigint, datetime, index, mysqlTable, uniqueIndex, varchar } from 'drizzle-orm/mysql-core';
 import { organizations } from './organizations.js';
 import { users } from './users.js';
 
@@ -42,6 +35,7 @@ export const projects = mysqlTable(
   },
   (t) => [
     uniqueIndex('uk_projects_external_id').on(t.externalId),
+    uniqueIndex('uk_projects_id_organization').on(t.id, t.organizationId),
     index('ix_projects_user_id').on(t.userId),
     index('ix_projects_organization_id').on(t.organizationId),
   ],

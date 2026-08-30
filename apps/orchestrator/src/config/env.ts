@@ -227,6 +227,14 @@ const baseEnvSchema = z.object({
   /** Allowed user externalIds for team project workspaces (CSV). Empty = all when enabled. */
   TEAM_PROJECTS_ALLOWLIST: z.string().default(''),
 
+  /** Team task lifecycle rollout, nested under the team-project gate. */
+  TEAM_TASK_LIFECYCLE_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  /** Allowed user externalIds for the Phase 2 task lifecycle. Empty = all when enabled. */
+  TEAM_TASK_LIFECYCLE_ALLOWLIST: z.string().default(''),
+
   /**
    * Embedded “继续剪辑” gate. Default OFF until the CE.SDK commercial
    * license, hostname scope, and browser/codec release matrix pass the

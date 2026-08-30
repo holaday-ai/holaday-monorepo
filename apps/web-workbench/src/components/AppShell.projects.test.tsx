@@ -77,6 +77,7 @@ const AUTH_ME = {
   role: 'user',
   videoEnabled: false,
   teamProjectsEnabled: true,
+  teamTaskLifecycleEnabled: false,
 } satisfies RouterOutputs['auth']['me'];
 
 const PERSONAL_PROJECT = {

@@ -11,6 +11,7 @@ export interface NormalizedAuthMeProfile {
    *  allowlist). Gates the「视频任务」sidebar entry + /video route. */
   readonly videoEnabled: boolean;
   readonly teamProjectsEnabled: boolean;
+  readonly teamTaskLifecycleEnabled: boolean;
 }
 
 export function normalizeAuthMeProfile(value: unknown): NormalizedAuthMeProfile {
@@ -26,6 +27,7 @@ export function normalizeAuthMeProfile(value: unknown): NormalizedAuthMeProfile 
     role: raw.role === 'admin' ? 'admin' : 'user',
     videoEnabled: Boolean(raw.videoEnabled),
     teamProjectsEnabled: raw.teamProjectsEnabled === true,
+    teamTaskLifecycleEnabled: raw.teamTaskLifecycleEnabled === true,
   };
 }
 

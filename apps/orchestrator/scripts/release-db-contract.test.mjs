@@ -13,6 +13,32 @@ import {
   isSkippableAlreadyAppliedError,
   splitMigrationStatements,
 } from './release-db-contract.mjs';
+import { TEAM_WORK_ITEM_SCHEMA_CONTRACT } from './team-work-item-schema-contract.mjs';
+
+const TEAM_WORK_ITEM_LIFECYCLE_MIGRATION = '0056_team_work_item_lifecycle.sql';
+const TEAM_WORK_ITEM_TABLES = [
+  'team_milestones',
+  'team_work_items',
+  'team_work_item_assignments',
+  'team_work_item_dependencies',
+  'acceptance_contract_versions',
+  'team_work_item_submissions',
+  'team_work_item_reviews',
+  'team_task_review_delegations',
+  'team_work_item_appeals',
+  'team_arbitration_decisions',
+  'team_work_item_events',
+  'team_project_planning_events',
+  'team_evidence_bindings',
+  'team_ai_contributions',
+];
+
+function readTeamWorkItemLifecycleMigration() {
+  return readFileSync(
+    new URL(`../drizzle/${TEAM_WORK_ITEM_LIFECYCLE_MIGRATION}`, import.meta.url),
+    'utf8',
+  );
+}
 
 describe('numbered migration filename contract', () => {
   it('rejects two migrations with the same numeric prefix', () => {
@@ -34,6 +60,14 @@ describe('numbered migration filename contract', () => {
   it('ships the team project foundation migration exactly once', () => {
     const files = readdirSync(new URL('../drizzle/', import.meta.url));
     assert.equal(files.filter((file) => file === '0055_team_project_foundation.sql').length, 1);
+  });
+
+  it('ships the additive team work item lifecycle migration exactly once', () => {
+    const files = readdirSync(new URL('../drizzle/', import.meta.url));
+    assert.equal(files.filter((file) => file === TEAM_WORK_ITEM_LIFECYCLE_MIGRATION).length, 1);
+
+    const statements = splitMigrationStatements(readTeamWorkItemLifecycleMigration());
+    assert.deepEqual(findNonAdditiveMigrationStatements(statements), []);
   });
 
   it('ships closure migrations as discoverable additive migrations', () => {
@@ -115,6 +149,171 @@ describe('numbered migration filename contract', () => {
       .filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)
       .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'));
     assert.deepEqual(syntaxErrors, []);
+  });
+});
+
+describe('team work item lifecycle schema contract', () => {
+  it('enforces tenant and immutable-parent lineage with ordered composite foreign keys', () => {
+    const migration = readTeamWorkItemLifecycleMigration();
+    const normalizedMigration = migration.replace(/\s+/g, ' ');
+    const requiredFragments = [
+      /ALTER TABLE `projects` ADD UNIQUE KEY `uk_projects_id_organization` \(`id`, `organization_id`\)/,
+      /ALTER TABLE `tasks` ADD UNIQUE KEY `uk_tasks_id_project_user` \(`id`, `project_id`, `user_id`\)/,
+      /CONSTRAINT `fk_team_milestones_project_tenant`[\s\S]*?FOREIGN KEY \(`project_id`, `organization_id`\) REFERENCES `projects` \(`id`, `organization_id`\) ON DELETE RESTRICT/,
+      /UNIQUE KEY `uk_team_work_items_id_tenant` \(`id`, `organization_id`, `project_id`\)/,
+      /CONSTRAINT `fk_team_work_items_current_contract_lineage`[\s\S]*?FOREIGN KEY \(`current_contract_version_id`, `id`, `organization_id`, `project_id`\) REFERENCES `acceptance_contract_versions` \(`id`, `work_item_id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
+      /CONSTRAINT `fk_team_work_item_dependencies_predecessor_lineage`[\s\S]*?FOREIGN KEY \(`depends_on_work_item_id`, `organization_id`, `project_id`\) REFERENCES `team_work_items` \(`id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
+      /CONSTRAINT `fk_team_work_item_submissions_contract_lineage`[\s\S]*?FOREIGN KEY \(`contract_version_id`, `work_item_id`, `organization_id`, `project_id`\) REFERENCES `acceptance_contract_versions` \(`id`, `work_item_id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
+      /CONSTRAINT `fk_team_work_item_reviews_submission_lineage`[\s\S]*?FOREIGN KEY \(`submission_id`, `contract_version_id`, `work_item_id`, `organization_id`, `project_id`\) REFERENCES `team_work_item_submissions` \(`id`, `contract_version_id`, `work_item_id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
+      /CONSTRAINT `fk_team_work_item_reviews_delegation_lineage`[\s\S]*?FOREIGN KEY \(`review_delegation_id`, `organization_id`, `project_id`, `reviewer_user_id`\) REFERENCES `team_task_review_delegations` \(`id`, `organization_id`, `project_id`, `delegate_user_id`\) ON DELETE RESTRICT/,
+      /CONSTRAINT `fk_team_work_item_appeals_review_lineage`[\s\S]*?FOREIGN KEY \(`review_id`, `submission_id`, `work_item_id`, `organization_id`, `project_id`\) REFERENCES `team_work_item_reviews` \(`id`, `submission_id`, `work_item_id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
+      /CONSTRAINT `fk_team_ai_contributions_execution_task_lineage`[\s\S]*?FOREIGN KEY \(`execution_task_id`, `project_id`, `contributed_by_user_id`\) REFERENCES `tasks` \(`id`, `project_id`, `user_id`\) ON DELETE RESTRICT/,
+      /CONSTRAINT `fk_team_evidence_bindings_ai_lineage`[\s\S]*?FOREIGN KEY \(`ai_contribution_id`, `work_item_id`, `organization_id`, `project_id`\) REFERENCES `team_ai_contributions` \(`id`, `work_item_id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
+    ];
+    for (const fragment of requiredFragments) assert.match(migration, fragment);
+    for (const foreignKey of TEAM_WORK_ITEM_SCHEMA_CONTRACT.foreignKeys) {
+      assert.ok(
+        normalizedMigration.includes(
+          `CONSTRAINT \`${foreignKey.name}\` FOREIGN KEY (${foreignKey.columns.map((column) => `\`${column}\``).join(', ')}) REFERENCES \`${foreignKey.referencedTable}\` (${foreignKey.referencedColumns.map((column) => `\`${column}\``).join(', ')}) ON DELETE RESTRICT`,
+        ),
+        `missing ordered composite FK ${foreignKey.name}`,
+      );
+    }
+  });
+
+  it('keeps the migration and canonical verifier FK name sets exactly synchronized', () => {
+    const migrationNames = [
+      ...readTeamWorkItemLifecycleMigration().matchAll(/CONSTRAINT `([^`]+)`/g),
+    ].map(([, name]) => name);
+    const contractNames = TEAM_WORK_ITEM_SCHEMA_CONTRACT.foreignKeys.map(({ name }) => name);
+
+    assert.equal(migrationNames.length, 65);
+    assert.deepEqual([...migrationNames].sort(), [...contractNames].sort());
+  });
+
+  it('creates every lifecycle table and the deferred current-contract foreign key', () => {
+    const migration = readTeamWorkItemLifecycleMigration();
+    const createdTables = [...migration.matchAll(/CREATE TABLE `([^`]+)`/g)].map(
+      ([, table]) => table,
+    );
+
+    assert.deepEqual(createdTables, TEAM_WORK_ITEM_TABLES);
+    assert.match(
+      migration,
+      /ALTER TABLE `team_work_items`[\s\S]*ADD COLUMN `current_contract_version_id` BIGINT UNSIGNED NULL[\s\S]*FOREIGN KEY \(`current_contract_version_id`, `id`, `organization_id`, `project_id`\) REFERENCES `acceptance_contract_versions` \(`id`, `work_item_id`, `organization_id`, `project_id`\) ON DELETE RESTRICT/,
+    );
+  });
+
+  it('uses public external ids while keeping dependency edges internal', () => {
+    const migration = readTeamWorkItemLifecycleMigration();
+    for (const table of TEAM_WORK_ITEM_TABLES.filter(
+      (candidate) => candidate !== 'team_work_item_dependencies',
+    )) {
+      assert.match(
+        migration,
+        new RegExp(
+          `CREATE TABLE \`${table}\`[\\s\\S]*?UNIQUE KEY \`uk_${table}_external_id\` \\(\`external_id\`\\)`,
+        ),
+      );
+    }
+    const dependencyStatement = splitMigrationStatements(migration).find((statement) =>
+      statement.startsWith('CREATE TABLE `team_work_item_dependencies`'),
+    );
+    assert.ok(dependencyStatement);
+    assert.doesNotMatch(dependencyStatement, /`external_id`/);
+  });
+
+  it('enforces lifecycle uniqueness and tenant query indexes in MySQL DDL', () => {
+    const migration = readTeamWorkItemLifecycleMigration();
+    const requiredFragments = [
+      /`responsible_active_key` BIGINT UNSIGNED GENERATED ALWAYS AS \(CASE WHEN `role` = 'responsible' AND `status` = 'accepted' THEN `work_item_id` ELSE NULL END\) STORED/,
+      /UNIQUE KEY `uk_team_work_item_assignments_responsible_active` \(`responsible_active_key`\)/,
+      /UNIQUE KEY `uk_team_work_item_dependencies_edge` \(`work_item_id`, `depends_on_work_item_id`\)/,
+      /UNIQUE KEY `uk_acceptance_contract_versions_work_item_version` \(`work_item_id`, `version`\)/,
+      /UNIQUE KEY `uk_team_work_item_submissions_work_item_version` \(`work_item_id`, `submission_version`\)/,
+      /UNIQUE KEY `uk_team_work_item_appeals_submission` \(`submission_id`\)/,
+      /UNIQUE KEY `uk_team_work_item_events_organization_idempotency` \(`organization_id`, `idempotency_key`\)/,
+      /UNIQUE KEY `uk_team_project_planning_events_organization_idempotency` \(`organization_id`, `idempotency_key`\)/,
+      /KEY `ix_team_work_items_tenant_status` \(`organization_id`, `project_id`, `status`\)/,
+    ];
+    for (const fragment of requiredFragments) assert.match(migration, fragment);
+  });
+
+  it('keeps lifecycle, review, appeal, arbitration, event, and audit evidence rows restrictive', () => {
+    const migration = readTeamWorkItemLifecycleMigration();
+    const foreignKeys = [...migration.matchAll(/FOREIGN KEY \([^;]+?ON DELETE (\w+(?: NULL)?)/g)];
+    assert.ok(foreignKeys.length > 0);
+    assert.deepEqual([...new Set(foreignKeys.map((match) => match[1]))], ['RESTRICT']);
+  });
+
+  it('exports every Drizzle table and verifies lifecycle tables, columns, and indexes', () => {
+    const schemaIndex = readFileSync(new URL('../src/db/schema/index.ts', import.meta.url), 'utf8');
+    const workItemSchema = readFileSync(
+      new URL('../src/db/schema/team-work-items.ts', import.meta.url),
+      'utf8',
+    );
+    const verifier = readFileSync(new URL('./verify-db-schema.ts', import.meta.url), 'utf8');
+    const schemaFiles = TEAM_WORK_ITEM_TABLES.map((table) => table.replaceAll('_', '-'));
+
+    for (const schemaFile of schemaFiles) {
+      assert.match(schemaIndex, new RegExp(`export \\* from './${schemaFile}\\.js';`));
+    }
+    for (const table of TEAM_WORK_ITEM_TABLES) {
+      assert.match(verifier, new RegExp(`'${table}'`));
+    }
+    assert.match(verifier, /TEAM_WORK_ITEM_REQUIRED_INDEXES/);
+    assert.match(verifier, /responsible_active_key/);
+    assert.match(verifier, /current_contract_version_id/);
+    assert.match(verifier, /team_project_planning_events/);
+    assert.match(verifier, /team_milestones:[\s\S]*?'version'/);
+    assert.match(verifier, /usage_snapshot_json/);
+    for (const tenantIndex of [
+      'ix_team_milestones_tenant_status',
+      'ix_team_work_items_tenant_status',
+      'ix_team_work_item_assignments_tenant_status',
+      'ix_team_work_item_dependencies_tenant',
+      'ix_acceptance_contract_versions_tenant',
+      'ix_team_work_item_submissions_tenant',
+      'ix_team_work_item_reviews_tenant_decision',
+      'ix_team_work_item_appeals_tenant_status',
+      'ix_team_arbitration_decisions_tenant',
+      'ix_team_work_item_events_tenant_type',
+      'ix_team_project_planning_events_tenant_type',
+      'ix_team_evidence_bindings_tenant',
+      'ix_team_ai_contributions_tenant',
+    ]) {
+      assert.match(verifier, new RegExp(`name: '${tenantIndex}'`));
+    }
+    assert.match(workItemSchema, /fk_team_work_items_current_contract_lineage/);
+    assert.match(workItemSchema, /foreignColumns: currentContractLineageColumns\(\)/);
+  });
+
+  it('models bounded and auditable review delegation without cross-project authority', () => {
+    const migration = readTeamWorkItemLifecycleMigration();
+    assert.match(
+      migration,
+      /CREATE TABLE `team_task_review_delegations`[\s\S]*?`organization_id` BIGINT UNSIGNED NOT NULL[\s\S]*?`project_id` BIGINT UNSIGNED NOT NULL[\s\S]*?`delegator_user_id` BIGINT UNSIGNED NOT NULL[\s\S]*?`delegate_user_id` BIGINT UNSIGNED NOT NULL[\s\S]*?`valid_from` DATETIME\(3\) NOT NULL[\s\S]*?`valid_until` DATETIME\(3\) NOT NULL[\s\S]*?`revoked_at` DATETIME\(3\) NULL[\s\S]*?`revoked_by_user_id` BIGINT UNSIGNED NULL/,
+    );
+    assert.match(migration, /CHECK \(`valid_until` > `valid_from`\)/);
+    assert.match(migration, /CHECK \(`delegator_user_id` <> `delegate_user_id`\)/);
+    assert.match(
+      migration,
+      /CONSTRAINT `fk_team_task_review_delegations_project_tenant`[\s\S]*?FOREIGN KEY \(`project_id`, `organization_id`\) REFERENCES `projects` \(`id`, `organization_id`\) ON DELETE RESTRICT/,
+    );
+    assert.match(
+      migration,
+      /UNIQUE KEY `uk_team_task_review_delegations_id_lineage` \(`id`, `organization_id`, `project_id`, `delegate_user_id`\)/,
+    );
+    assert.match(
+      migration,
+      /CREATE TABLE `team_work_item_reviews`[\s\S]*?`review_delegation_id` BIGINT UNSIGNED NULL/,
+    );
+    const verifier = readFileSync(new URL('./verify-db-schema.ts', import.meta.url), 'utf8');
+    assert.match(
+      verifier,
+      /team_task_review_delegations:\s*\[[\s\S]*?'external_id'[\s\S]*?'organization_id'[\s\S]*?'project_id'[\s\S]*?'delegator_user_id'[\s\S]*?'delegate_user_id'[\s\S]*?'valid_from'[\s\S]*?'valid_until'[\s\S]*?'revoked_at'[\s\S]*?'revoked_by_user_id'[\s\S]*?'created_at'/,
+    );
+    assert.match(verifier, /team_work_item_reviews:\s*\[[\s\S]*?'review_delegation_id'/);
   });
 });
 
