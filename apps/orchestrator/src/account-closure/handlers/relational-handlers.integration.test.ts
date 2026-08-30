@@ -19,6 +19,8 @@ import { explorationRuns } from '../../db/schema/exploration-runs.js';
 import { notificationChannels, notifications } from '../../db/schema/notifications.js';
 import { operationPathSteps } from '../../db/schema/operation-path-steps.js';
 import { operationPaths } from '../../db/schema/operation-paths.js';
+import { organizationMembers } from '../../db/schema/organization-members.js';
+import { organizations } from '../../db/schema/organizations.js';
 import { pendingCookies } from '../../db/schema/pending-cookies.js';
 import {
   plannedTaskItems,
@@ -27,6 +29,7 @@ import {
   plannedTaskRuns,
   plannedTasks,
 } from '../../db/schema/planned-tasks.js';
+import { projectMembers } from '../../db/schema/project-members.js';
 import { projects } from '../../db/schema/projects.js';
 import { scheduledTasks } from '../../db/schema/scheduled-tasks.js';
 import { sessions } from '../../db/schema/sessions.js';
@@ -74,6 +77,7 @@ import { feedbackSupportClosureHandler } from './feedback-support.js';
 import { mediaAssetsClosureHandler } from './media-assets.js';
 import { stockPreferenceProfileClosureHandler } from './stock-preference-profile.js';
 import { taskExecutionClosureHandler } from './task-execution.js';
+import { assertTeamWorkspaceClosureSafe } from './team-workspace.js';
 
 const PRODUCTION_HANDLERS = {
   account_security: accountSecurityClosureHandler,
@@ -216,6 +220,58 @@ describe.sequential('account closure relational handlers', () => {
     await expect(handler.run(context(taskFilePage.checkpoint))).rejects.toMatchObject({
       code: 'HANDLER_DEFERRED',
     });
+  });
+
+  it('requires team-project creator responsibility to transfer before account closure', async () => {
+    const organizationExternalId = `org_acl_${target.id}`;
+    const projectExternalId = `prj_acl_team_${target.id}`;
+    const [organizationInsert] = await db.insert(organizations).values({
+      externalId: organizationExternalId,
+      name: 'Account closure transfer fixture',
+      ownerUserId: other.id,
+      status: 'active',
+      teamProjectsEnabled: true,
+    });
+    const organizationId = Number(organizationInsert.insertId);
+    const [projectInsert] = await db.insert(projects).values({
+      externalId: projectExternalId,
+      userId: target.id,
+      organizationId,
+      name: 'Shared project must survive',
+    });
+    const projectId = Number(projectInsert.insertId);
+    await db.insert(organizationMembers).values({
+      externalId: `omem_acl_${target.id}`,
+      organizationId,
+      userId: target.id,
+      role: 'member',
+      status: 'active',
+    });
+    await db.insert(projectMembers).values({
+      externalId: `pmem_acl_${target.id}`,
+      projectId,
+      userId: target.id,
+      role: 'member',
+      status: 'active',
+    });
+
+    try {
+      await expect(assertTeamWorkspaceClosureSafe(context(null))).rejects.toMatchObject({
+        code: 'CAPABILITY_CHANGED',
+      });
+      expect(await rowExists({ tableName: 'projects', id: projectId })).toBe(true);
+
+      await db.update(projects).set({ userId: other.id }).where(eq(projects.id, projectId));
+      await expect(assertTeamWorkspaceClosureSafe(context(null))).resolves.toBeUndefined();
+      expect(await rowExists({ tableName: 'projects', id: projectId })).toBe(true);
+    } finally {
+      await db.delete(projectMembers).where(eq(projectMembers.projectId, projectId));
+      await db.delete(projects).where(eq(projects.id, projectId));
+      await db
+        .delete(organizationMembers)
+        .where(eq(organizationMembers.organizationId, organizationId));
+      await db.delete(organizations).where(eq(organizations.id, organizationId));
+    }
   });
 
   it('deletes every existing relational category child-first without touching the other account or users', async () => {

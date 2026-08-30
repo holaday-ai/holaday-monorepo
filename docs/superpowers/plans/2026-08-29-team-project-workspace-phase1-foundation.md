@@ -40,7 +40,7 @@
 - Create: `apps/orchestrator/src/db/schema/project-members.ts`
 - Modify: `apps/orchestrator/src/db/schema/projects.ts`
 - Modify: `apps/orchestrator/src/db/schema/index.ts`
-- Create: `apps/orchestrator/drizzle/0051_team_project_foundation.sql`
+- Create: `apps/orchestrator/drizzle/0055_team_project_foundation.sql`
 - Modify: `apps/orchestrator/scripts/verify-db-schema.ts`
 - Test: `apps/orchestrator/scripts/release-db-contract.test.mjs`
 
@@ -125,23 +125,23 @@ expect(isExternalId(newExternalId('projectMember'), 'projectMember')).toBe(true)
 - Create: `apps/orchestrator/src/db/schema/project-members.ts`
 - Modify: `apps/orchestrator/src/db/schema/projects.ts`
 - Modify: `apps/orchestrator/src/db/schema/index.ts`
-- Create: `apps/orchestrator/drizzle/0051_team_project_foundation.sql`
+- Create: `apps/orchestrator/drizzle/0055_team_project_foundation.sql`
 - Modify: `apps/orchestrator/scripts/verify-db-schema.ts`
 
-- [ ] Add a failing schema contract assertion in `release-db-contract.test.mjs` that migration `0051_team_project_foundation.sql` exists once and contains the four new tables plus nullable `projects.organization_id`.
-- [ ] Run `node --test apps/orchestrator/scripts/release-db-contract.test.mjs`; expect failure because migration 0051 is absent.
+- [ ] Add a failing schema contract assertion in `release-db-contract.test.mjs` that migration `0055_team_project_foundation.sql` exists once and contains the four new tables plus nullable `projects.organization_id`.
+- [ ] Run `node --test apps/orchestrator/scripts/release-db-contract.test.mjs`; expect failure because migration 0055 is absent.
 - [ ] Define `organizations` with `externalId`, `name`, `ownerUserId`, `status`, `teamProjectsEnabled` default false, timestamps and indexes on external ID, owner and status.
 - [ ] Define `organizationMembers` with `externalId`, `organizationId`, `userId`, `role`, nullable `managerUserId`, `status`, `joinedAt`, timestamps; add unique `(organizationId, userId)` and lookup indexes.
 - [ ] Define `organizationInvitations` with `externalId`, `organizationId`, `tokenHash` (64-char SHA-256 hex), `role`, nullable `managerUserId`, `invitedByUserId`, `expiresAt`, `acceptedAt`, `revokedAt`, timestamps; unique token hash and active lookup indexes.
 - [ ] Define `projectMembers` with `externalId`, `projectId`, `userId`, `role`, `status`, timestamps; unique `(projectId, userId)` and user/project lookup indexes.
 - [ ] Extend `projects` with nullable `organizationId` using `ON DELETE RESTRICT`; retain non-null `userId` and all existing indexes.
 - [ ] Export all four schemas from `schema/index.ts`.
-- [ ] Write additive migration 0051 in dependency order: organizations → organization_members → organization_invitations → projects.organization_id → project_members.
+- [ ] Write additive migration 0055 in dependency order: organizations → organization_members → organization_invitations → projects.organization_id → project_members.
 - [ ] Do not backfill `organization_id`; existing rows remain personal projects.
 - [ ] Add required tables, columns and critical indexes to `verify-db-schema.ts`.
 - [ ] Re-run `node --test apps/orchestrator/scripts/release-db-contract.test.mjs`; expect pass.
 - [ ] Run `pnpm --filter @holaday/orchestrator typecheck`; expect pass.
-- [ ] Commit: `git add apps/orchestrator/src/db/schema apps/orchestrator/drizzle/0051_team_project_foundation.sql apps/orchestrator/scripts/verify-db-schema.ts apps/orchestrator/scripts/release-db-contract.test.mjs && git commit -m "feat(orchestrator): add team workspace schema"`
+- [ ] Commit: `git add apps/orchestrator/src/db/schema apps/orchestrator/drizzle/0055_team_project_foundation.sql apps/orchestrator/scripts/verify-db-schema.ts apps/orchestrator/scripts/release-db-contract.test.mjs && git commit -m "feat(orchestrator): add team workspace schema"`
 
 ## Task 3: Add a Default-off Team Workspace Gate
 
@@ -364,7 +364,7 @@ expect(computeTeamProjectsEnabled(true, new Set(), 'usr_b')).toBe(true);
 - [ ] Run `pnpm --filter @holaday/web-workbench test`; expect exit 0.
 - [ ] Run `pnpm --filter @holaday/web-workbench typecheck`; expect exit 0.
 - [ ] Run `pnpm --filter @holaday/web-workbench build`; expect exit 0.
-- [ ] Run `pnpm --filter @holaday/orchestrator db:verify` against the isolated test database after applying 0051; expect all required tables/columns/indexes present.
+- [ ] Run `pnpm --filter @holaday/orchestrator db:verify` against the isolated test database after applying 0055; expect all required tables/columns/indexes present.
 - [ ] Run `pnpm lint` only after targeted lint/build gates; if repository-wide pre-existing Biome issues remain, record exact untouched paths and run targeted Biome/ESLint on every changed file.
 - [ ] Run `git diff --check`; expect no whitespace errors.
 - [ ] Review `git status --short` and confirm unrelated `.claude/`, `qa-artifacts/`, `skills/*`, dream export and design drafts remain untouched.
@@ -397,7 +397,7 @@ expect(computeTeamProjectsEnabled(true, new Set(), 'usr_b')).toBe(true);
 - [ ] For every valid review finding: reproduce, add failing test, fix, rerun focused and affected package gates, reply with evidence, resolve thread.
 - [ ] Merge only when checks pass and no unresolved tenant/security review remains.
 - [ ] Before deployment, capture `/api/healthz`, current application revision, orchestrator process health, database migration level and `TEAM_PROJECTS_ENABLED=false` baseline.
-- [ ] Apply migration 0051 before enabling the feature; verify schema; deploy application with feature still disabled.
+- [ ] Apply migration 0055 before enabling the feature; verify schema; deploy application with feature still disabled.
 - [ ] Verify production personal projects: list, create, rename, move a task, delete project, task preservation.
 - [ ] Enable `TEAM_PROJECTS_ENABLED=true` with `TEAM_PROJECTS_ALLOWLIST` containing only the synthetic test accounts; ensure only the synthetic organization has `team_projects_enabled=true`, restart Orchestrator and verify health.
 - [ ] With synthetic accounts, verify create organization, copy invite, accept once, reject replay, set manager, create team project, project membership and unauthorized cross-tenant denial.
@@ -410,7 +410,7 @@ expect(computeTeamProjectsEnabled(true, new Set(), 'usr_b')).toBe(true);
 
 Phase 1 is complete only when the final handoff contains:
 
-- PR number, merge commit, deployed application revision and migration 0051 status.
+- PR number, merge commit, deployed application revision and migration 0055 status.
 - Exact test/typecheck/build results and any known repository-wide lint limitation.
 - Production health before/after, whitelist scope and old personal-project regression result.
 - Positive team flow plus negative cross-tenant, expired/replayed invite and inactive-member results.

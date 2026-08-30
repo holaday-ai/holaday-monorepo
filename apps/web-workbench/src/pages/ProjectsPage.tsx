@@ -438,6 +438,7 @@ export function ProjectsPage(): JSX.Element {
   }, [teamProjectsEnabled]);
 
   React.useEffect(() => {
+    const workspaceRequestGenerations = workspaceRequestGenerationRef.current;
     mountedRef.current = true;
     void refreshPersonalProjects();
     if (teamProjectsEnabled && !teamSurfaceRevokedRef.current) void refreshOrganizations();
@@ -446,11 +447,12 @@ export function ProjectsPage(): JSX.Element {
       personalRequestRef.current += 1;
       organizationRequestRef.current += 1;
       teamSurfaceGenerationRef.current += 1;
-      workspaceRequestGenerationRef.current.clear();
+      workspaceRequestGenerations.clear();
     };
   }, [refreshOrganizations, refreshPersonalProjects, teamProjectsEnabled]);
 
   React.useEffect(() => {
+    const workspaceRequestGenerations = workspaceRequestGenerationRef.current;
     if (!teamSurfaceEnabled || !selectedOrganizationId) {
       setTeamProjects(emptyScopedCollection());
       setMembers(emptyScopedCollection());
@@ -462,7 +464,7 @@ export function ProjectsPage(): JSX.Element {
     }
     void refreshOrganizationWorkspace(selectedOrganizationId);
     return () => {
-      bumpWorkspaceGeneration(workspaceRequestGenerationRef.current, selectedOrganizationId);
+      bumpWorkspaceGeneration(workspaceRequestGenerations, selectedOrganizationId);
     };
   }, [refreshOrganizationWorkspace, selectedOrganizationId, teamSurfaceEnabled]);
 
