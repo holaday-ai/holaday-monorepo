@@ -300,6 +300,15 @@ const defaultDependencies: TeamTaskPlanningServiceDependencies = {
   newId: (kind) => newExternalId(kind),
 };
 
+const MAX_PROJECT_MILESTONES = 100;
+const DEPENDENCY_MUTABLE_STATES = new Set<TeamTaskState>([
+  'draft',
+  'ready',
+  'assigned',
+  'claimable',
+  'accepted_by_member',
+]);
+
 function fail(code: TeamTaskServiceErrorCode): never {
   throw new TeamTaskServiceError(code);
 }
@@ -957,6 +966,8 @@ export class TeamTaskPlanningService {
         );
         if (previous) return previous;
         requireManagement(access);
+        const milestones = await tx.listMilestones(access.organizationId, access.projectId);
+        if (milestones.length >= MAX_PROJECT_MILESTONES) return fail('CONFLICT');
         const milestoneExternalId = this.dependencies.newId('teamMilestone');
         const milestoneId = await tx.insertMilestone({
           externalId: milestoneExternalId,
@@ -1238,6 +1249,7 @@ export class TeamTaskPlanningService {
         if (previous) return previous;
         requireManagement(access);
         if (loaded.workItem.version !== expectedVersion) return fail('VERSION_CONFLICT');
+        if (!DEPENDENCY_MUTABLE_STATES.has(loaded.workItem.status)) return fail('CONFLICT');
         const prerequisite = await tx.lockWorkItemByExternalId(dependsOnWorkItemExternalId);
         if (
           !prerequisite ||

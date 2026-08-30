@@ -757,6 +757,38 @@ describe('TeamTaskPlanningService', () => {
     expect(repository.state.dependencies).toHaveLength(0);
   });
 
+  it.each([
+    'in_progress',
+    'blocked',
+    'submitted',
+    'in_review',
+    'revision_requested',
+    'resubmitted',
+    'accepted',
+    'completed',
+    'cancelled',
+    'rejected_final',
+    'archived',
+  ] as const)('rejects dependency changes after execution has started in %s', async (status) => {
+    const { repository, service } = createHarness();
+    const target = repository.state.workItems.get(ids.target);
+    expect(target).toBeDefined();
+    if (!target) throw new Error('missing target fixture');
+    target.status = status;
+    await expectCode(
+      service.addDependency({
+        actorExternalId: ids.lead,
+        workItemExternalId: ids.target,
+        dependsOnWorkItemExternalId: ids.prerequisite,
+        expectedVersion: 1,
+        idempotencyKey: `dependency-after-start-${status}`,
+      }),
+      'CONFLICT',
+    );
+    expect(repository.state.dependencies).toHaveLength(0);
+    expect(repository.state.events).toHaveLength(0);
+  });
+
   it('starts only for the active responsible after every prerequisite is completed', async () => {
     const { repository, service } = createHarness();
     repository.state.dependencies.push({
@@ -1428,6 +1460,43 @@ describe('TeamTaskPlanningService', () => {
       eventType: 'milestone_created',
       actorUserId: 1,
     });
+  });
+
+  it('caps a project at the same 100 milestones accepted by full reordering', async () => {
+    const { repository, service } = createHarness();
+    for (let index = 2; index < 100; index += 1) {
+      const externalId = `tml_${String(index).padStart(21, '0')}`;
+      repository.state.milestones.set(externalId, {
+        id: 1000 + index,
+        externalId,
+        organizationId: 10,
+        projectId: 20,
+        createdByUserId: 1,
+        title: `里程碑 ${index}`,
+        description: null,
+        status: 'open',
+        version: 1,
+        sortOrder: index,
+        dueAt: null,
+      });
+    }
+    await expectCode(
+      service.createMilestone({
+        actorExternalId: ids.lead,
+        projectExternalId: ids.project,
+        title: '第 101 个里程碑',
+        sortOrder: 100,
+        expectedVersion: 0,
+        idempotencyKey: 'milestone-project-cap',
+      }),
+      'CONFLICT',
+    );
+    expect(
+      [...repository.state.milestones.values()].filter(
+        (milestone) => milestone.organizationId === 10 && milestone.projectId === 20,
+      ),
+    ).toHaveLength(100);
+    expect(repository.state.planningEvents).toHaveLength(0);
   });
 
   it('updates a same-tenant milestone with optimistic concurrency and hidden foreign IDs', async () => {
