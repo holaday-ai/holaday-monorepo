@@ -62,6 +62,18 @@ export const ID_PREFIXES = {
   organizationMember: 'omem',
   organizationInvitation: 'oinv',
   projectMember: 'pmem',
+  // Phase 2 — team work items, acceptance, review, and evidence links.
+  teamMilestone: 'tml',
+  teamWorkItem: 'twi',
+  teamWorkItemAssignment: 'twa',
+  acceptanceContractVersion: 'acv',
+  teamSubmission: 'tsb',
+  teamReview: 'trv',
+  teamAppeal: 'tap',
+  teamArbitrationDecision: 'tad',
+  teamWorkItemEvent: 'twe',
+  teamEvidenceBinding: 'teb',
+  teamAiContribution: 'tai',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;
