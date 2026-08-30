@@ -9,7 +9,7 @@
 ## 1. 验证环境
 
 - 目标流程：打开 QA 夹具 → 切换角色或数据场景 → 核对可见操作 → 打开邀请对话框 → 生成并复制合成邀请链接 → 关闭并刷新。
-- 浏览器：Codex 应用内 Browser，可用且全程使用；没有改用 Chrome、Computer Use 或独立 Playwright。
+- 浏览器：修复轮次开始时 Codex 应用内 Browser 的既有连接已断开；按 Browser troubleshooting 复核后，`iab` 后端仍不可用。依 Product Design Browser Choice 与任务授权，改用已连接的 Chrome extension 验证本机夹具；没有使用 Computer Use 或独立 Playwright。该 fallback 在结论与报告中明确保留。
 - 直接 `file://` 访问被 Browser 安全策略拒绝；随后通过本机只读静态服务器 `127.0.0.1:41915` 验证同一文件。
 - Product Design 保存上下文 preflight 返回 `missing`；因此以当前工作树中的 `WorkspaceSwitcher`、`OrganizationMembersPanel`、`OrganizationInviteDialog`、`ProjectsPage` 和 `TeamProjectPage` 为视觉与交互依据。
 - 全部姓名、组织、项目和链接均为明显合成数据；未使用真实员工、客户、邮箱、手机号、用户 ID 或可用邀请 token。
@@ -19,54 +19,67 @@
 | 场景 | 期望行为 | 当前证据 |
 | --- | --- | --- |
 | 个人空间 | 只显示个人项目；不显示组织、邀请或团队创建入口 | 通过：3 个个人项目，团队入口 0 |
-| 所有者 | 团队项目为主；可邀请、建项目和管理非所有者成员 | 通过：3 个项目，3 个可见移除操作 |
-| 主管 | 可邀请和创建项目；成员管理范围小于所有者 | 通过：2 个项目，2 个可见移除操作 |
+| 所有者 | 团队项目为主；可邀请管理员、主管或成员；可设置汇报关系，并对非唯一所有者目标变更角色或停用 | 通过：直属上级选择 4 个、角色选择 3 个、移除 3 个；唯一所有者无角色变更或移除入口 |
+| 主管 | 可邀请主管或成员、创建项目，并在有候选人时设置汇报关系；不可变更角色或停用成员 | 通过：直属上级选择 4 个、角色选择 0 个、移除 0 个 |
 | 成员 | 可查看已加入项目；无邀请、团队创建或成员管理操作 | 通过：对应操作均为 0 |
 | 项目观察者 | 可打开项目；明确只读；无修改或成员管理操作 | 通过：观察者提示存在，修改操作 0 |
 | 空组织 | 保留邀请和创建入口；项目与成员区域各有独立空状态 | 通过：2 个空状态，不伪造内容 |
-| 已填充组织 | 展示管理员可见的项目与成员次级管理区 | 通过：3 个项目、4 位合成成员 |
+| 已填充组织 | 展示管理员可见的项目与成员次级管理区；可邀请管理员、主管或成员，但不可管理所有者 | 通过：直属上级选择 4 个、非所有者角色选择 3 个、非所有者移除 3 个；所有者无角色变更或移除入口 |
 | 邀请已过期 | 仅显示过期说明，不泄露组织或项目内容 | 通过：过期状态唯一显示 |
 | 加载错误 | 不保留可能过期的权限操作；个人空间仍可辨识；提供重试 | 通过：团队操作 0，重试 1 |
 
 所有九个场景在 390 px DOM 布局检查中均满足 `scrollWidth === clientWidth`，且奖励、报告、团队任务执行等未来功能的可操作控件数量为 0。
 
+权限选项与生产 `organizationActionVisibility` / `memberActionVisibility` 一致：
+
+- 所有者邀请角色：管理员、主管、成员；主管目标的角色选项为所有者、管理员、成员；成员目标为所有者、管理员、主管。
+- 管理员邀请角色：管理员、主管、成员；主管目标的角色选项为管理员、成员；成员目标为管理员、主管，不出现所有者。
+- 主管邀请角色：主管、成员；所有成员仅显示符合条件的直属上级选择，不显示角色变更或停用。
+- 每个直属上级选择都排除当前目标本人；所有者、主管、管理员三个受影响场景的自指候选计数均为 0。
+
+修复前同一组可执行 DOM 断言真实失败：主管移除 2、主管汇报关系选择 2、所有者自指候选 1、所有者与管理员角色选择均为 0、两者邀请角色都缺少管理员。修复后同组断言失败数为 0。
+
 ## 3. 响应式与视觉层级
 
 | 宽度 | 截图尺寸 | 横向溢出 | 结果 |
 | --- | --- | --- | --- |
-| 1440 | 1440 × 1359 | 无 | 通过；项目卡片占主栏，成员管理为窄次栏 |
-| 1024 | 1024 × 1355 | 无 | 通过；项目卡片和成员操作没有裁切 |
-| 390 | 390 × 2298 | 无 | 通过；项目在成员区之前单列排列，操作完整可见 |
+| 1440 所有者 | 1440 × 1580 | 无 | 通过；项目卡片占主栏，成员权限控件保持窄次栏且完整可见 |
+| 1024 所有者 | 1024 × 1576 | 无 | 通过；汇报关系、角色与移除操作没有裁切 |
+| 1024 主管 | 1024 × 1264 | 无 | 通过；每位成员仅显示汇报关系选择，没有角色或移除操作 |
+| 1024 管理员 | 1024 × 1576 | 无 | 通过；所有者管理边界与非所有者角色操作均清晰可见 |
+| 390 所有者 | 390 × 2519 | 无 | 通过；项目在成员区之前单列排列，新增权限控件完整可见 |
 | 390 邀请结果 | 390 × 844 | 无 | 通过；对话框、关闭与复制操作均在视口内 |
 
 当前运行接受的证据保存在：
 
-- `.superpowers/sdd/2026-08-29-team-project-workspace-phase1-foundation/task-15-artifacts/01-owner-1440.jpg`
-- `.superpowers/sdd/2026-08-29-team-project-workspace-phase1-foundation/task-15-artifacts/02-owner-1024.jpg`
-- `.superpowers/sdd/2026-08-29-team-project-workspace-phase1-foundation/task-15-artifacts/03-owner-390.jpg`
-- `.superpowers/sdd/2026-08-29-team-project-workspace-phase1-foundation/task-15-artifacts/04-invite-ready-390.jpg`
-- `.superpowers/sdd/2026-08-29-team-project-workspace-phase1-foundation/task-15-artifacts/browser-assertions.json`
+- `.superpowers/sdd/2026-08-29-team-project-workspace-phase1-foundation/task-15-artifacts/01-owner-1440-fix1.png`
+- `.superpowers/sdd/2026-08-29-team-project-workspace-phase1-foundation/task-15-artifacts/02-owner-1024-fix1.png`
+- `.superpowers/sdd/2026-08-29-team-project-workspace-phase1-foundation/task-15-artifacts/03-owner-390-fix1.png`
+- `.superpowers/sdd/2026-08-29-team-project-workspace-phase1-foundation/task-15-artifacts/04-invite-ready-390-fix1.png`
+- `.superpowers/sdd/2026-08-29-team-project-workspace-phase1-foundation/task-15-artifacts/05-manager-1024-fix1.png`
+- `.superpowers/sdd/2026-08-29-team-project-workspace-phase1-foundation/task-15-artifacts/06-admin-1024-fix1.png`
+- `.superpowers/sdd/2026-08-29-team-project-workspace-phase1-foundation/task-15-artifacts/browser-assertions-fix1.json`
 
 这些运行证据位于 `.superpowers/` 忽略目录，只包含合成数据，不进入提交。确定性 HTML 夹具本身会提交，便于复跑。
 
-补拍观察者 1024 图时，Browser 在从移动端放大后返回了与当前计算布局不一致的陈旧光栅。该图已改名为 `REJECTED-05-viewer-1024-stale-raster.jpg`，未被接受或用于任何通过结论；必需的 1024 主截图已在独立稳定状态中通过。
+旧轮次的四张权限截图与断言 JSON 因控件已改变而统一改名为 `REJECTED-R0-*`，没有用于本轮结论。早先补拍观察者 1024 图时得到的陈旧光栅仍保留为 `REJECTED-05-viewer-1024-stale-raster.jpg`，同样不用于任何通过结论。
 
 ## 4. 键盘与无障碍检查
 
 | 检查 | 当前运行结果 |
 | --- | --- |
 | 页面结构 | 1 个 `main`、1 个可见 `h1`；对话框使用 `role="dialog"` 与 `aria-modal="true"` |
-| Tab 顺序 | 无正数 `tabindex`；焦点顺序按 DOM 从跳转链接、场景选择、页面主操作、工作区、项目到成员管理 |
-| 可见焦点 | 跳转链接、场景选择和邀请按钮均显示 3 px 实线焦点环 |
+| Tab 顺序 | 无正数 `tabindex`；实际键盘序列验证为跳转链接 → 场景选择 → 邀请成员，之后继续按 DOM 顺序进入页面内容 |
+| 可见焦点 | 跳转链接与场景选择均显示 3 px 实线焦点环；页面主操作和成员控件共用同一 `:focus-visible` 规则 |
 | 对话框首焦点 | 打开后落在“关闭邀请对话框” |
 | 焦点陷阱 | 首控件 `Shift+Tab` 回到“生成邀请链接”；末控件 `Tab` 回到关闭按钮 |
 | Escape | 关闭对话框并把焦点还给“邀请成员”触发按钮 |
-| 可访问名称 | 页面 17 个移动端可见交互控件、邀请表单全部有名称；无空名称按钮 |
+| 可访问名称 | 所有者场景 22 个移动端可见交互控件、邀请表单全部有名称；无空名称按钮 |
 | 移动端目标尺寸 | 390 px 下页面与邀请对话框全部可见操作至少 44 × 44 px；没有水平裁切 |
 | 复制反馈 | 成功后 `role="status"` 显示“邀请链接已复制” |
 | 空态与错误 | 空组织、邀请过期、加载错误各自独立，不以颜色作为唯一提示 |
 
-浏览器的默认页面级 `Tab` 注入在该运行中不会推进原生焦点，因此页面主顺序以真实 DOM 可聚焦顺序、无正数 `tabindex` 和逐控件可见焦点共同验证；对话框内部的 `Tab` / `Shift+Tab` / `Escape` 是实际键盘事件验证。此限制不影响已确认的对话框焦点陷阱，但仍建议生产 canary 用至少一种桌面浏览器做一次人工连续 Tab 走查。
+本轮 Chrome fallback 中，页面开头的 `Shift+Tab` / `Tab` 连续顺序与对话框内部的 `Tab` / `Shift+Tab` / `Escape` 均为实际键盘事件验证。生产 canary 仍应补一次完整页面人工连续 Tab 与屏幕阅读器走查。
 
 ## 5. 邀请明文与日志边界
 

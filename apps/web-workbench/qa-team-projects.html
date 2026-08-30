@@ -757,10 +757,7 @@
         <div id="invite-form">
           <label class="field" for="invite-role">
             成员角色
-            <select id="invite-role">
-              <option value="manager">主管</option>
-              <option value="member" selected>成员</option>
-            </select>
+            <select id="invite-role"></select>
           </label>
           <label class="field" for="invite-manager">
             直属上级（可选）
@@ -816,9 +813,9 @@
             label: '所有者 · 已填充组织',
             projects: 3,
             members: 4,
-            canInvite: true,
             canCreate: true,
-            canAdmin: true,
+            organizationRole: 'owner',
+            inviteRoles: ['admin', 'manager', 'member'],
           },
           manager: {
             title: '项目',
@@ -829,10 +826,9 @@
             label: '主管',
             projects: 2,
             members: 4,
-            canInvite: true,
             canCreate: true,
-            canAdmin: true,
-            limitedAdmin: true,
+            organizationRole: 'manager',
+            inviteRoles: ['manager', 'member'],
           },
           member: {
             title: '项目',
@@ -843,6 +839,7 @@
             label: '成员',
             projects: 2,
             members: 4,
+            organizationRole: 'member',
           },
           viewer: {
             title: '项目',
@@ -854,6 +851,7 @@
             projects: 1,
             members: 4,
             viewer: true,
+            organizationRole: 'member',
           },
           empty: {
             title: '项目',
@@ -864,9 +862,9 @@
             label: '空组织',
             projects: 0,
             members: 1,
-            canInvite: true,
             canCreate: true,
-            canAdmin: true,
+            organizationRole: 'owner',
+            inviteRoles: ['admin', 'manager', 'member'],
             empty: true,
           },
           populated: {
@@ -878,9 +876,9 @@
             label: '已填充组织',
             projects: 3,
             members: 4,
-            canInvite: true,
             canCreate: true,
-            canAdmin: true,
+            organizationRole: 'admin',
+            inviteRoles: ['admin', 'manager', 'member'],
           },
           expired: {
             title: '邀请链接',
@@ -897,6 +895,7 @@
             projectRole: '成员',
             label: '加载错误',
             error: true,
+            organizationRole: 'member',
           },
         };
 
@@ -910,11 +909,39 @@
           ['客户体验改进', '整理反馈并推进本轮交付。', '4 项任务'],
           ['品牌资料库', '统一团队可复用的品牌资料。', '2 项任务'],
         ];
+        const roleLabels = {
+          owner: '所有者',
+          admin: '管理员',
+          manager: '主管',
+          member: '成员',
+        };
+        const organizationRoles = ['owner', 'admin', 'manager', 'member'];
+        const nonOwnerRoles = ['admin', 'manager', 'member'];
         const members = [
-          ['林岚（合成）', '所有者', '未设置直属上级'],
-          ['周屿（合成）', '主管', '上级：林岚（合成）'],
-          ['沈禾（合成）', '成员', '上级：周屿（合成）'],
-          ['许澄（合成）', '成员', '上级：周屿（合成）'],
+          {
+            memberId: 'synthetic-owner',
+            name: '林岚（合成）',
+            role: 'owner',
+            manager: '未设置直属上级',
+          },
+          {
+            memberId: 'synthetic-manager',
+            name: '周屿（合成）',
+            role: 'manager',
+            manager: '上级：林岚（合成）',
+          },
+          {
+            memberId: 'synthetic-member-a',
+            name: '沈禾（合成）',
+            role: 'member',
+            manager: '上级：周屿（合成）',
+          },
+          {
+            memberId: 'synthetic-member-b',
+            name: '许澄（合成）',
+            role: 'member',
+            manager: '上级：周屿（合成）',
+          },
         ];
 
         const root = document.getElementById('fixture-root');
@@ -923,6 +950,7 @@
         const dialog = document.getElementById('invite-dialog');
         const inviteForm = document.getElementById('invite-form');
         const inviteResult = document.getElementById('invite-result');
+        const inviteRole = document.getElementById('invite-role');
         const inviteUrl = document.getElementById('invite-url');
         const toast = document.getElementById('toast');
         let activeBeforeDialog = null;
@@ -946,31 +974,76 @@
             .join('');
         }
 
+        function isReportingManagerRole(role) {
+          return role === 'owner' || role === 'admin' || role === 'manager';
+        }
+
+        function memberActionVisibility(state, target, visibleMembers) {
+          const managerCandidates = isReportingManagerRole(state.organizationRole)
+            ? visibleMembers.filter(
+                (candidate) =>
+                  isReportingManagerRole(candidate.role) &&
+                  candidate.memberId !== target.memberId,
+              )
+            : [];
+          const ownerCount = visibleMembers.filter((member) => member.role === 'owner').length;
+          const canManageNonOwner =
+            state.organizationRole === 'owner' || state.organizationRole === 'admin';
+          const canManageOwner = state.organizationRole === 'owner' && ownerCount > 1;
+          const canManageTarget =
+            target.role === 'owner' ? canManageOwner : canManageNonOwner;
+          const availableRoles =
+            state.organizationRole === 'owner' ? organizationRoles : nonOwnerRoles;
+
+          return {
+            managerCandidates,
+            roleOptions: canManageTarget
+              ? availableRoles.filter((role) => role !== target.role)
+              : [],
+            canDeactivate: canManageTarget,
+          };
+        }
+
         function memberRows(state) {
           const visibleMembers = members.slice(0, state.members || 0);
           return visibleMembers
-            .map(([name, role, manager], index) => {
-              const canManage =
-                state.canAdmin &&
-                index > 0 &&
-                (!state.limitedAdmin || role === '成员');
+            .map((member, index) => {
+              const { managerCandidates, roleOptions, canDeactivate } = memberActionVisibility(
+                state,
+                member,
+                visibleMembers,
+              );
+              const actions = [
+                managerCandidates.length > 0
+                  ? `<label class="sr-only" for="manager-${index}">设置 ${member.name} 的直属上级</label>
+                    <select id="manager-${index}" aria-label="设置 ${member.name} 的直属上级">
+                      <option value="">设置直属上级</option>
+                      ${managerCandidates
+                        .map(
+                          (candidate) =>
+                            `<option value="${candidate.memberId}">${candidate.name}</option>`,
+                        )
+                        .join('')}
+                    </select>`
+                  : '',
+                roleOptions.length > 0
+                  ? `<label class="sr-only" for="role-${index}">更改 ${member.name} 的角色</label>
+                    <select id="role-${index}" aria-label="更改 ${member.name} 的角色">
+                      <option value="">更改角色</option>
+                      ${roleOptions
+                        .map((role) => `<option value="${role}">${roleLabels[role]}</option>`)
+                        .join('')}
+                    </select>`
+                  : '',
+                canDeactivate
+                  ? `<button type="button" aria-label="移除 ${member.name}">移除 ${member.name}</button>`
+                  : '',
+              ].join('');
               return `
                 <article class="member-row">
-                  <strong>${name}</strong>
-                  <p>${role} · ${manager}</p>
-                  ${
-                    canManage
-                      ? `<div class="member-actions">
-                          <label class="sr-only" for="manager-${index}">设置 ${name} 的直属上级</label>
-                          <select id="manager-${index}" aria-label="设置 ${name} 的直属上级">
-                            <option>设置直属上级</option>
-                            <option>林岚（合成）</option>
-                            <option>周屿（合成）</option>
-                          </select>
-                          <button type="button" aria-label="移除 ${name}">移除 ${name}</button>
-                        </div>`
-                      : ''
-                  }
+                  <strong>${member.name}</strong>
+                  <p>${roleLabels[member.role]} · ${member.manager}</p>
+                  ${actions ? `<div class="member-actions">${actions}</div>` : ''}
                 </article>`;
             })
             .join('');
@@ -1005,7 +1078,7 @@
         function renderTeam(state) {
           const actions = [
             `<span class="summary-pill">${state.projects || 0} 个团队项目</span>`,
-            state.canInvite
+            state.inviteRoles?.length
               ? '<button id="open-invite" class="button" type="button">邀请成员</button>'
               : '',
             state.canCreate
@@ -1082,7 +1155,9 @@
             <p class="boundary-note">团队任务执行将在后续阶段开放。当前可先查看项目概览与成员；本阶段不展示任务、奖励或报告的伪操作入口。</p>`;
 
           const openInvite = document.getElementById('open-invite');
-          if (openInvite) openInvite.addEventListener('click', () => openInviteDialog(openInvite));
+          if (openInvite) {
+            openInvite.addEventListener('click', () => openInviteDialog(openInvite, state));
+          }
         }
 
         function renderExpired(state) {
@@ -1130,8 +1205,14 @@
           ).filter((element) => !element.closest('[hidden]'));
         }
 
-        function openInviteDialog(trigger) {
+        function openInviteDialog(trigger, state) {
           activeBeforeDialog = trigger;
+          inviteRole.innerHTML = state.inviteRoles
+            .map(
+              (role) =>
+                `<option value="${role}"${role === 'member' ? ' selected' : ''}>${roleLabels[role]}</option>`,
+            )
+            .join('');
           inviteUrl.value = '';
           inviteResult.hidden = true;
           inviteForm.hidden = false;
