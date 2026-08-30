@@ -309,15 +309,52 @@ export function sqlInvocation(
   };
 }
 
-export function compileSqlBoundary(compiled: {
-  sql: string;
-  params: readonly unknown[];
-}): SqlBoundary {
+export function compileSqlBoundary(
+  compiled: {
+    sql: string;
+    params: readonly unknown[];
+  },
+  options: { dynamicDateParameterIndexes?: readonly number[] } = {},
+): SqlBoundary {
   const expectedParameters = [...compiled.params];
+  const dynamicDateParameterIndexes = new Set(options.dynamicDateParameterIndexes ?? []);
+  const dateEpoch = (value: unknown): number | undefined => {
+    if (value instanceof Date) {
+      const epoch = value.getTime();
+      return Number.isNaN(epoch) ? undefined : epoch;
+    }
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/.test(value)) {
+      return undefined;
+    }
+    const epoch = Date.parse(`${value.replace(' ', 'T')}Z`);
+    return Number.isNaN(epoch) ? undefined : epoch;
+  };
+  for (const index of dynamicDateParameterIndexes) {
+    if (
+      !Number.isSafeInteger(index) ||
+      index < 0 ||
+      index >= expectedParameters.length ||
+      dateEpoch(expectedParameters[index]) === undefined
+    ) {
+      throw new Error('dynamic SQL boundary parameter must reference a compiled MySQL date');
+    }
+  }
   return {
     normalizedSql: normalizeSql(compiled.sql),
     parameterCount: expectedParameters.length,
-    [boundaryMatchesKey]: (parameters) => isDeepStrictEqual(parameters, expectedParameters),
+    [boundaryMatchesKey]: (parameters) =>
+      parameters.length === expectedParameters.length &&
+      expectedParameters.every((expected, index) => {
+        if (dynamicDateParameterIndexes.has(index)) {
+          return dateEpoch(parameters[index]) !== undefined;
+        }
+        if (expected instanceof Date) {
+          const actualEpoch = dateEpoch(parameters[index]);
+          if (actualEpoch === undefined) return false;
+          return actualEpoch === expected.getTime();
+        }
+        return isDeepStrictEqual(parameters[index], expected);
+      }),
   };
 }
 

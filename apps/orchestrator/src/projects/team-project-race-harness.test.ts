@@ -87,6 +87,52 @@ describe('team project race harness exact SQL boundaries', () => {
     expect(matchesSqlBoundary(boundary, similar)).toBe(false);
   });
 
+  it('matches mysql2-encoded dates while allowing only declared generated update timestamps', () => {
+    const acceptedAt = '2026-08-30 12:00:00.000';
+    const compiledUpdatedAt = '2026-08-30 12:00:00.100';
+    const boundary = compileSqlBoundary(
+      {
+        sql: 'UPDATE `organization_invitations` SET `accepted_at` = ?, `updated_at` = ? WHERE `id` = ? AND `expires_at` > ?',
+        params: [acceptedAt, compiledUpdatedAt, 9, acceptedAt],
+      },
+      { dynamicDateParameterIndexes: [1] },
+    );
+
+    expect(
+      matchesSqlBoundary(
+        boundary,
+        sqlInvocation('query', boundary.normalizedSql, [
+          '2026-08-30 12:00:00.000',
+          '2026-08-30 12:00:00.250',
+          9,
+          '2026-08-30 12:00:00.000',
+        ]),
+      ),
+    ).toBe(true);
+    expect(
+      matchesSqlBoundary(
+        boundary,
+        sqlInvocation('query', boundary.normalizedSql, [
+          '2026-08-30 12:00:00.001',
+          '2026-08-30 12:00:00.250',
+          9,
+          '2026-08-30 12:00:00.000',
+        ]),
+      ),
+    ).toBe(false);
+    expect(
+      matchesSqlBoundary(
+        boundary,
+        sqlInvocation('query', boundary.normalizedSql, [
+          '2026-08-30 12:00:00.000',
+          'not-a-runtime-date',
+          9,
+          '2026-08-30 12:00:00.000',
+        ]),
+      ),
+    ).toBe(false);
+  });
+
   it('recognizes every compiled production boundary used by invitation, organization, and project races', () => {
     const digest = 'a'.repeat(64);
     const compiledQueries = [

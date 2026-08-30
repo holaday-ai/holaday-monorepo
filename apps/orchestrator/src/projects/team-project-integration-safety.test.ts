@@ -23,6 +23,13 @@ const exactForeignKey: ProjectTaskForeignKeyRow = {
   deleteRule: 'SET NULL',
 };
 
+const TRANSACTION_OBSERVER_CAPABILITY_QUERY = `SELECT
+  transactions.THREAD_ID AS transactionThreadId
+FROM performance_schema.events_transactions_current AS transactions
+INNER JOIN performance_schema.threads AS threads
+  ON threads.THREAD_ID = transactions.THREAD_ID
+WHERE 1 = 0`;
+
 describe('team project integration safety', () => {
   it('builds an explicit loopback mysql2 config without retaining the raw URI', () => {
     const target = parseTeamProjectsIntegrationTarget({
@@ -233,6 +240,7 @@ describe('team project integration safety', () => {
     performanceSchemaEnabled?: number;
     visibleProbeSessions?: number;
     capabilityError?: Error;
+    transactionCapabilityError?: Error;
   }) {
     return {
       query: vi.fn(async (sql: string, parameters?: readonly unknown[]) => {
@@ -268,6 +276,12 @@ describe('team project integration safety', () => {
           if (overrides?.capabilityError) throw overrides.capabilityError;
           return [[], []];
         }
+        if (sql === TRANSACTION_OBSERVER_CAPABILITY_QUERY) {
+          if (overrides?.transactionCapabilityError) {
+            throw overrides.transactionCapabilityError;
+          }
+          return [[], []];
+        }
         if (sql === TEAM_PROJECTS_LOCK_OBSERVER_VISIBILITY_QUERY) {
           expect(parameters).toEqual([4321]);
           return [[{ visibleProbeSessions: overrides?.visibleProbeSessions ?? 1 }], []];
@@ -292,6 +306,7 @@ describe('team project integration safety', () => {
       [TEAM_PROJECTS_ISOLATION_QUERY],
       [TEAM_PROJECTS_PERFORMANCE_SCHEMA_QUERY],
       [TEAM_PROJECTS_LOCK_OBSERVER_CAPABILITY_QUERY],
+      [TRANSACTION_OBSERVER_CAPABILITY_QUERY],
       [TEAM_PROJECTS_LOCK_OBSERVER_VISIBILITY_QUERY, [4321]],
     ]);
     expect(connection.query.mock.calls.every(([sql]) => /^\s*select\b/i.test(sql))).toBe(true);
@@ -322,6 +337,10 @@ describe('team project integration safety', () => {
     ['performance_schema disabled', { performanceSchemaEnabled: 0 }],
     ['probe session not visible', { visibleProbeSessions: 0 }],
     ['observer tables forbidden', { capabilityError: new Error('SELECT denied') }],
+    [
+      'transaction observer table forbidden',
+      { transactionCapabilityError: new Error('SELECT denied') },
+    ],
   ] as const)('fails the mandatory race gate when %s', async (_label, overrides) => {
     const connection = preflightConnection(overrides);
 

@@ -147,6 +147,21 @@ INNER JOIN performance_schema.threads AS blocking
   ON blocking.THREAD_ID = waits.BLOCKING_THREAD_ID
 WHERE 1 = 0`;
 
+export const TEAM_PROJECTS_TRANSACTION_OBSERVER_CAPABILITY_QUERY = `SELECT
+  transactions.THREAD_ID AS transactionThreadId
+FROM performance_schema.events_transactions_current AS transactions
+INNER JOIN performance_schema.threads AS threads
+  ON threads.THREAD_ID = transactions.THREAD_ID
+WHERE 1 = 0`;
+
+export const TEAM_PROJECTS_ACTIVE_TRANSACTION_COUNT_QUERY = `SELECT
+  COUNT(*) AS activeTransactionCount
+FROM performance_schema.events_transactions_current AS transactions
+INNER JOIN performance_schema.threads AS threads
+  ON threads.THREAD_ID = transactions.THREAD_ID
+WHERE threads.PROCESSLIST_ID IN (?, ?)
+  AND transactions.STATE = 'ACTIVE'`;
+
 export const TEAM_PROJECTS_LOCK_OBSERVER_VISIBILITY_QUERY = `SELECT
   COUNT(*) AS visibleProbeSessions
 FROM performance_schema.threads
@@ -246,6 +261,14 @@ export async function preflightTeamProjectsIntegrationDatabase(
   } catch {
     throw new Error(
       'TASK14_LOCK_OBSERVER_UNSUPPORTED: performance_schema lock-wait tables are not queryable',
+    );
+  }
+
+  try {
+    await connection.query(TEAM_PROJECTS_TRANSACTION_OBSERVER_CAPABILITY_QUERY);
+  } catch {
+    throw new Error(
+      'TASK14_LOCK_OBSERVER_UNSUPPORTED: performance_schema transaction observer is not queryable',
     );
   }
 

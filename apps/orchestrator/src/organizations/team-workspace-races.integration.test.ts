@@ -12,6 +12,7 @@ import {
   removeProjectMemberWithAccess,
 } from '../projects/project-access.js';
 import {
+  TEAM_PROJECTS_ACTIVE_TRANSACTION_COUNT_QUERY,
   assertConnectionTargetsValidatedSchema,
   parseTeamProjectsIntegrationTarget,
   preflightTeamProjectsIntegrationDatabase,
@@ -388,27 +389,19 @@ async function runOrganizationLockRace(input: {
         secondEndpoint.connection.destroy();
       },
     });
-    const transactionStates = await runWithActiveTimeout(
-      Promise.all(
-        [firstEndpoint, secondEndpoint].map(async (endpoint) => {
-          const [[row]] = await endpoint.connection.query<
-            Array<mysql.RowDataPacket & { inTransaction: number }>
-          >('SELECT @@session.in_transaction AS inTransaction');
-          return Number(row?.inTransaction ?? -1);
-        }),
-      ),
-      {
-        label: `${input.caseName} transaction-state verification`,
-        timeoutMs: CLEANUP_TIMEOUT_MS,
-        settleTimeoutMs: CLEANUP_TIMEOUT_MS,
-        onTimeout: () => {
-          firstEndpoint.connection.destroy();
-          secondEndpoint.connection.destroy();
-        },
-      },
-    );
+    const [transactionRows] = await runMysqlLockObserverExecute({
+      label: `${input.caseName} transaction-state observer execute`,
+      execute: () =>
+        admin.execute<Array<mysql.RowDataPacket & { activeTransactionCount: number }>>(
+          TEAM_PROJECTS_ACTIVE_TRANSACTION_COUNT_QUERY,
+          [firstEndpoint.threadId, secondEndpoint.threadId],
+        ),
+      destroy: () => admin.destroy(),
+      timeoutMs: CLEANUP_TIMEOUT_MS,
+      settleTimeoutMs: CLEANUP_TIMEOUT_MS,
+    });
     operationsSettled = true;
-    if (transactionStates.some((state) => state !== 0)) {
+    if (Number(transactionRows[0]?.activeTransactionCount ?? -1) !== 0) {
       throw new Error('race operation left a mysql2 session inside a transaction');
     }
     return {
@@ -838,6 +831,7 @@ describe.sequential('team workspace MySQL invitation races', () => {
       __organizationInvitationServiceInternals
         .buildConsumeInvitationQuery(compileDb, invitation.id, operationNow)
         .toSQL(),
+      { dynamicDateParameterIndexes: [1] },
     );
     const consumeRecorder: SqlResultOverride = {
       transform(invocation, result) {
@@ -1238,6 +1232,7 @@ describe.sequential('team workspace MySQL organization races', () => {
           ),
         )
         .toSQL(),
+      { dynamicDateParameterIndexes: [1] },
     );
     const override = createAffectedRowsOverride({
       matches: (invocation) => matchesSqlBoundary(updateBoundary, invocation),
