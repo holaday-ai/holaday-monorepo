@@ -162,6 +162,7 @@ export interface PlanningTransaction {
   listDependencies(organizationId: number, projectId: number): Promise<PlanningDependencyRow[]>;
   insertDependency(row: NewDependency): Promise<void>;
   listPrerequisites(workItemId: number): Promise<PlanningWorkItemRow[]>;
+  hasCompletedArchiveEvent(workItemId: number): Promise<boolean>;
   listAssignments(workItemId: number): Promise<TeamTaskAssignmentRow[]>;
   loadActiveMember(
     organizationId: number,
@@ -1427,7 +1428,14 @@ export class TeamTaskPlanningService {
         ) {
           return fail('CONFLICT');
         }
-        const incomplete = prerequisites.filter((item) => item.status !== 'completed');
+        const incomplete: PlanningWorkItemRow[] = [];
+        for (const prerequisite of prerequisites) {
+          const satisfied =
+            prerequisite.status === 'completed' ||
+            (prerequisite.status === 'archived' &&
+              (await tx.hasCompletedArchiveEvent(prerequisite.id)));
+          if (!satisfied) incomplete.push(prerequisite);
+        }
         const responsible = await this.activeResponsible(tx, access, workItem);
         let command: Extract<
           PlanningReceipt,
@@ -2426,6 +2434,21 @@ class DrizzlePlanningTransaction implements PlanningTransaction {
       .where(eq(teamWorkItemDependencies.workItemId, workItemId))
       .for('update');
     return rows.map(normalizeWorkItem).filter((row): row is PlanningWorkItemRow => row !== null);
+  }
+
+  async hasCompletedArchiveEvent(workItemId: number) {
+    const [row] = await this.db
+      .select({ id: teamWorkItemEvents.id })
+      .from(teamWorkItemEvents)
+      .where(
+        and(
+          eq(teamWorkItemEvents.workItemId, workItemId),
+          eq(teamWorkItemEvents.fromState, 'completed'),
+          eq(teamWorkItemEvents.toState, 'archived'),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
   }
 
   async listAssignments(workItemId: number) {

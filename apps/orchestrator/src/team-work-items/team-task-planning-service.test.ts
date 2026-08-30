@@ -439,6 +439,13 @@ class MemoryRepository implements PlanningRepository {
           [...this.state.workItems.values()].filter((item) => prerequisiteIds.includes(item.id)),
         );
       },
+      hasCompletedArchiveEvent: async (workItemId) =>
+        this.state.events.some(
+          (event) =>
+            event.workItemId === workItemId &&
+            event.fromState === 'completed' &&
+            event.toState === 'archived',
+        ),
       listAssignments: async (workItemId) =>
         structuredClone(
           this.state.assignments.filter((assignment) => assignment.workItemId === workItemId),
@@ -825,6 +832,87 @@ describe('TeamTaskPlanningService', () => {
       version: 2,
     });
     expect(repository.state.events).toHaveLength(1);
+  });
+
+  it('treats an archived prerequisite as complete only when its archive event preserves completion', async () => {
+    const { repository, service } = createHarness();
+    const prerequisite = repository.state.workItems.get(ids.prerequisite);
+    if (!prerequisite) throw new Error('missing prerequisite fixture');
+    prerequisite.status = 'archived';
+    repository.state.dependencies.push({
+      id: 1,
+      organizationId: 10,
+      projectId: 20,
+      workItemId: 1,
+      dependsOnWorkItemId: 2,
+      createdByUserId: 1,
+    });
+    repository.state.events.push({
+      externalId: 'twe_ArchiveSuccess11111111',
+      organizationId: 10,
+      projectId: 20,
+      workItemId: 2,
+      actorUserId: 1,
+      eventType: 'task_archived',
+      fromState: 'completed',
+      toState: 'archived',
+      contractVersionId: 1,
+      idempotencyKey: 'archive-completed-prerequisite',
+      metadata: {},
+      occurredAt: new Date(NOW),
+    });
+
+    const started = await service.start({
+      actorExternalId: ids.member,
+      workItemExternalId: ids.target,
+      expectedVersion: 1,
+      idempotencyKey: 'start-after-success-archive',
+    });
+    expect(started).toMatchObject({
+      command: 'start',
+      state: 'in_progress',
+      incompletePrerequisiteCount: 0,
+      overrideApplied: false,
+    });
+  });
+
+  it('keeps a failed archived prerequisite incomplete', async () => {
+    const { repository, service } = createHarness();
+    const prerequisite = repository.state.workItems.get(ids.prerequisite);
+    if (!prerequisite) throw new Error('missing prerequisite fixture');
+    prerequisite.status = 'archived';
+    repository.state.dependencies.push({
+      id: 1,
+      organizationId: 10,
+      projectId: 20,
+      workItemId: 1,
+      dependsOnWorkItemId: 2,
+      createdByUserId: 1,
+    });
+    repository.state.events.push({
+      externalId: 'twe_ArchiveFailure11111111',
+      organizationId: 10,
+      projectId: 20,
+      workItemId: 2,
+      actorUserId: 1,
+      eventType: 'task_archived',
+      fromState: 'rejected_final',
+      toState: 'archived',
+      contractVersionId: 1,
+      idempotencyKey: 'archive-failed-prerequisite',
+      metadata: {},
+      occurredAt: new Date(NOW),
+    });
+
+    await expectCode(
+      service.start({
+        actorExternalId: ids.member,
+        workItemExternalId: ids.target,
+        expectedVersion: 1,
+        idempotencyKey: 'start-after-failed-archive',
+      }),
+      'CONFLICT',
+    );
   });
 
   it('blocks start on unfinished prerequisites unless a lead records a bounded explicit override', async () => {
