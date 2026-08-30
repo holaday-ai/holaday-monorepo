@@ -12,10 +12,12 @@ import {
   removeProjectMemberWithAccess,
 } from '../projects/project-access.js';
 import {
-  TEAM_PROJECTS_ACTIVE_TRANSACTION_COUNT_QUERY,
+  TEAM_PROJECTS_TRANSACTION_SESSIONS_QUERY,
   assertConnectionTargetsValidatedSchema,
+  assertTeamProjectsTransactionSessions,
   parseTeamProjectsIntegrationTarget,
   preflightTeamProjectsIntegrationDatabase,
+  requireTeamProjectsConnectionId,
 } from '../projects/team-project-integration-safety.js';
 import { assertInvitationReplayMemberWrite } from '../projects/team-project-invitation-race-harness.js';
 import { assertForeignReportingLineIsolationEvidence } from '../projects/team-project-organization-race-harness.js';
@@ -272,7 +274,7 @@ async function openEndpoint(
     const [[thread]] = await connection.query<Array<mysql.RowDataPacket & { threadId: number }>>(
       'SELECT CONNECTION_ID() AS threadId',
     );
-    if (!thread) throw new Error('integration connection id unavailable');
+    const threadId = requireTeamProjectsConnectionId(thread?.threadId);
     const endpoint = createMysqlRaceEndpoint({
       connection,
       checkpoints,
@@ -286,7 +288,7 @@ async function openEndpoint(
     return {
       connection: endpoint.connection,
       db,
-      threadId: Number(thread.threadId),
+      threadId,
       recorder: endpoint.recorder,
     };
   } catch (error) {
@@ -392,18 +394,20 @@ async function runOrganizationLockRace(input: {
     const [transactionRows] = await runMysqlLockObserverExecute({
       label: `${input.caseName} transaction-state observer execute`,
       execute: () =>
-        admin.execute<Array<mysql.RowDataPacket & { activeTransactionCount: number }>>(
-          TEAM_PROJECTS_ACTIVE_TRANSACTION_COUNT_QUERY,
-          [firstEndpoint.threadId, secondEndpoint.threadId],
-        ),
+        admin.execute<mysql.RowDataPacket[]>(TEAM_PROJECTS_TRANSACTION_SESSIONS_QUERY, [
+          firstEndpoint.threadId,
+          secondEndpoint.threadId,
+        ]),
       destroy: () => admin.destroy(),
       timeoutMs: CLEANUP_TIMEOUT_MS,
       settleTimeoutMs: CLEANUP_TIMEOUT_MS,
     });
+    assertTeamProjectsTransactionSessions(transactionRows, {
+      connectionIds: [firstEndpoint.threadId, secondEndpoint.threadId],
+      schemaName: integrationTarget.schemaName,
+      activeConnectionIds: [],
+    });
     operationsSettled = true;
-    if (Number(transactionRows[0]?.activeTransactionCount ?? -1) !== 0) {
-      throw new Error('race operation left a mysql2 session inside a transaction');
-    }
     return {
       first,
       second,
@@ -684,13 +688,8 @@ beforeAll(async () => {
   await admin.query(`SET SESSION innodb_lock_wait_timeout = ${MYSQL_LOCK_WAIT_TIMEOUT_SECONDS}`);
   const observerProbe = await mysql.createConnection({ ...integrationTarget.connectionConfig });
   try {
-    await assertConnectionTargetsValidatedSchema(observerProbe, integrationTarget);
-    const [[probeThread]] = await observerProbe.query<
-      Array<mysql.RowDataPacket & { threadId: number }>
-    >('SELECT CONNECTION_ID() AS threadId');
-    if (!probeThread) throw new Error('observer probe connection id unavailable');
     const preflight = await preflightTeamProjectsIntegrationDatabase(admin, integrationTarget, {
-      observerProbeThreadId: Number(probeThread.threadId),
+      observerProbeConnection: observerProbe,
     });
     isolationLevel = preflight.isolationLevel;
   } finally {

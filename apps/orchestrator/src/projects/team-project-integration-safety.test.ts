@@ -6,7 +6,6 @@ import {
   TEAM_PROJECTS_INTEGRATION_CONFIRM_DESTROY,
   TEAM_PROJECTS_ISOLATION_QUERY,
   TEAM_PROJECTS_LOCK_OBSERVER_CAPABILITY_QUERY,
-  TEAM_PROJECTS_LOCK_OBSERVER_VISIBILITY_QUERY,
   TEAM_PROJECTS_PERFORMANCE_SCHEMA_QUERY,
   assertConnectionTargetsValidatedSchema,
   assertExactProjectTaskForeignKey,
@@ -238,14 +237,43 @@ describe('team project integration safety', () => {
     foreignKeys?: readonly ProjectTaskForeignKeyRow[];
     isolationLevel?: string;
     performanceSchemaEnabled?: number;
-    visibleProbeSessions?: number;
+    adminConnectionId?: unknown;
+    probeConnectionId?: unknown;
     capabilityError?: Error;
     transactionCapabilityError?: Error;
+    transactionObservationError?: Error;
+    transactionRows?: (input: {
+      adminConnectionId: unknown;
+      probeConnectionId: unknown;
+      probeTransactionActive: boolean;
+    }) => readonly Record<string, unknown>[];
   }) {
-    return {
-      query: vi.fn(async (sql: string, parameters?: readonly unknown[]) => {
+    const adminConnectionId =
+      overrides && 'adminConnectionId' in overrides ? overrides.adminConnectionId : 4300;
+    const probeConnectionId =
+      overrides && 'probeConnectionId' in overrides ? overrides.probeConnectionId : 4321;
+    let probeTransactionActive = false;
+    const transactionRow = (
+      connectionId: unknown,
+      activeTransactionCount: number,
+      rowOverrides: Record<string, unknown> = {},
+    ) => ({
+      connectionId,
+      databaseName: validTarget().schemaName,
+      instrumented: 'YES',
+      activeTransactionCount,
+      transactionInstrumentEnabled: 1,
+      currentTransactionConsumerEnabled: 1,
+      threadInstrumentationConsumerEnabled: 1,
+      ...rowOverrides,
+    });
+    const connection = {
+      query: vi.fn(async (sql: string, _parameters?: readonly unknown[]) => {
         if (sql === 'SELECT DATABASE() AS databaseName') {
           return [[{ databaseName: overrides?.databaseName ?? validTarget().schemaName }], []];
+        }
+        if (sql === 'SELECT CONNECTION_ID() AS connectionId') {
+          return [[{ connectionId: adminConnectionId }], []];
         }
         if (sql === TEAM_PROJECTS_EMPTY_TABLES_QUERY) {
           return [
@@ -282,38 +310,169 @@ describe('team project integration safety', () => {
           }
           return [[], []];
         }
-        if (sql === TEAM_PROJECTS_LOCK_OBSERVER_VISIBILITY_QUERY) {
-          expect(parameters).toEqual([4321]);
-          return [[{ visibleProbeSessions: overrides?.visibleProbeSessions ?? 1 }], []];
+        if (
+          sql.includes('performance_schema.events_transactions_current') &&
+          sql.includes('performance_schema.setup_instruments') &&
+          sql.includes('performance_schema.setup_consumers')
+        ) {
+          if (overrides?.transactionObservationError) {
+            throw overrides.transactionObservationError;
+          }
+          const rows = overrides?.transactionRows?.({
+            adminConnectionId,
+            probeConnectionId,
+            probeTransactionActive,
+          }) ?? [
+            transactionRow(adminConnectionId, 0),
+            transactionRow(probeConnectionId, probeTransactionActive ? 1 : 0),
+          ];
+          return [[...rows], []];
         }
         throw new Error(`unexpected preflight query: ${sql}`);
       }),
     };
+    const observerProbeConnection = {
+      query: vi.fn(async (sql: string) => {
+        if (sql === 'SELECT DATABASE() AS databaseName') {
+          return [[{ databaseName: validTarget().schemaName }], []];
+        }
+        if (sql === 'SELECT CONNECTION_ID() AS connectionId') {
+          return [[{ connectionId: probeConnectionId }], []];
+        }
+        if (sql === 'START TRANSACTION') {
+          probeTransactionActive = true;
+          return [[], []];
+        }
+        if (sql === 'ROLLBACK') {
+          probeTransactionActive = false;
+          return [[], []];
+        }
+        throw new Error(`unexpected observer probe query: ${sql}`);
+      }),
+    };
+    return { connection, observerProbeConnection, transactionRow };
   }
 
-  it('preflights exact schema, emptiness, FK, isolation, and lock-observer capability before fixtures', async () => {
-    const connection = preflightConnection();
+  it('proves a known probe transaction is visible as active and then inactive before fixtures', async () => {
+    const { connection, observerProbeConnection } = preflightConnection();
 
     await expect(
       preflightTeamProjectsIntegrationDatabase(connection, validTarget(), {
-        observerProbeThreadId: 4321,
+        observerProbeConnection,
       }),
     ).resolves.toEqual({ isolationLevel: 'REPEATABLE-READ' });
-    expect(connection.query.mock.calls).toEqual([
-      ['SELECT DATABASE() AS databaseName'],
-      [TEAM_PROJECTS_EMPTY_TABLES_QUERY],
-      [PROJECT_TASK_FOREIGN_KEY_QUERY],
-      [TEAM_PROJECTS_ISOLATION_QUERY],
-      [TEAM_PROJECTS_PERFORMANCE_SCHEMA_QUERY],
-      [TEAM_PROJECTS_LOCK_OBSERVER_CAPABILITY_QUERY],
-      [TRANSACTION_OBSERVER_CAPABILITY_QUERY],
-      [TEAM_PROJECTS_LOCK_OBSERVER_VISIBILITY_QUERY, [4321]],
-    ]);
     expect(connection.query.mock.calls.every(([sql]) => /^\s*select\b/i.test(sql))).toBe(true);
   });
 
+  it('rejects a constant-zero transaction observer even though both sessions are visible', async () => {
+    const { connection, observerProbeConnection, transactionRow } = preflightConnection({
+      transactionRows: ({ adminConnectionId, probeConnectionId }) => [
+        transactionRow(adminConnectionId, 0),
+        transactionRow(probeConnectionId, 0),
+      ],
+    });
+
+    await expect(
+      preflightTeamProjectsIntegrationDatabase(connection, validTarget(), {
+        observerProbeConnection,
+      }),
+    ).rejects.toThrow('TASK14_TRANSACTION_OBSERVER_UNSUPPORTED');
+  });
+
+  it('rejects a transaction observer that cannot see the probe become inactive', async () => {
+    const { connection, observerProbeConnection, transactionRow } = preflightConnection({
+      transactionRows: ({ adminConnectionId, probeConnectionId }) => [
+        transactionRow(adminConnectionId, 0),
+        transactionRow(probeConnectionId, 1),
+      ],
+    });
+
+    await expect(
+      preflightTeamProjectsIntegrationDatabase(connection, validTarget(), {
+        observerProbeConnection,
+      }),
+    ).rejects.toThrow('TASK14_TRANSACTION_OBSERVER_UNSUPPORTED');
+  });
+
+  it.each([
+    [
+      'a missing endpoint session',
+      (row: ReturnType<ReturnType<typeof preflightConnection>['transactionRow']>) => [row],
+    ],
+    [
+      'a schema-mismatched endpoint',
+      (
+        row: ReturnType<ReturnType<typeof preflightConnection>['transactionRow']>,
+        other: ReturnType<ReturnType<typeof preflightConnection>['transactionRow']>,
+      ) => [row, { ...other, databaseName: 'holaday_team_projects_it_other' }],
+    ],
+    [
+      'an uninstrumented endpoint',
+      (
+        row: ReturnType<ReturnType<typeof preflightConnection>['transactionRow']>,
+        other: ReturnType<ReturnType<typeof preflightConnection>['transactionRow']>,
+      ) => [row, { ...other, instrumented: 'NO' }],
+    ],
+    [
+      'a disabled transaction instrument',
+      (
+        row: ReturnType<ReturnType<typeof preflightConnection>['transactionRow']>,
+        other: ReturnType<ReturnType<typeof preflightConnection>['transactionRow']>,
+      ) => [row, { ...other, transactionInstrumentEnabled: 0 }],
+    ],
+    [
+      'a disabled current-transaction consumer',
+      (
+        row: ReturnType<ReturnType<typeof preflightConnection>['transactionRow']>,
+        other: ReturnType<ReturnType<typeof preflightConnection>['transactionRow']>,
+      ) => [row, { ...other, currentTransactionConsumerEnabled: 0 }],
+    ],
+    [
+      'a disabled thread-instrumentation consumer',
+      (
+        row: ReturnType<ReturnType<typeof preflightConnection>['transactionRow']>,
+        other: ReturnType<ReturnType<typeof preflightConnection>['transactionRow']>,
+      ) => [row, { ...other, threadInstrumentationConsumerEnabled: 0 }],
+    ],
+  ])('rejects %s instead of treating zero active transactions as proof', async (_label, mutate) => {
+    const { connection, observerProbeConnection, transactionRow } = preflightConnection({
+      transactionRows: ({ adminConnectionId, probeConnectionId, probeTransactionActive }) =>
+        mutate(
+          transactionRow(adminConnectionId, 0),
+          transactionRow(probeConnectionId, probeTransactionActive ? 1 : 0),
+        ),
+    });
+
+    await expect(
+      preflightTeamProjectsIntegrationDatabase(connection, validTarget(), {
+        observerProbeConnection,
+      }),
+    ).rejects.toThrow('TASK14_TRANSACTION_OBSERVER_UNSUPPORTED');
+  });
+
+  it.each([
+    ['a zero endpoint id', 0, 4321],
+    ['an unsafe endpoint id', Number.MAX_SAFE_INTEGER + 1, 4321],
+    ['a non-numeric endpoint id', null, 4321],
+    ['duplicate endpoint ids', 4321, 4321],
+  ])(
+    'rejects %s before trusting observer rows',
+    async (_label, adminConnectionId, probeConnectionId) => {
+      const { connection, observerProbeConnection } = preflightConnection({
+        adminConnectionId,
+        probeConnectionId,
+      });
+
+      await expect(
+        preflightTeamProjectsIntegrationDatabase(connection, validTarget(), {
+          observerProbeConnection,
+        }),
+      ).rejects.toThrow('TASK14_TRANSACTION_OBSERVER_UNSUPPORTED');
+    },
+  );
+
   it('rejects a dirty schema before observer probing or any mutation', async () => {
-    const connection = preflightConnection({
+    const { connection, observerProbeConnection } = preflightConnection({
       counts: {
         usersCount: 1,
         organizationsCount: 0,
@@ -327,7 +486,7 @@ describe('team project integration safety', () => {
 
     await expect(
       preflightTeamProjectsIntegrationDatabase(connection, validTarget(), {
-        observerProbeThreadId: 4321,
+        observerProbeConnection,
       }),
     ).rejects.toThrow('integration database must be freshly migrated and empty');
     expect(connection.query).toHaveBeenCalledTimes(2);
@@ -335,28 +494,29 @@ describe('team project integration safety', () => {
 
   it.each([
     ['performance_schema disabled', { performanceSchemaEnabled: 0 }],
-    ['probe session not visible', { visibleProbeSessions: 0 }],
     ['observer tables forbidden', { capabilityError: new Error('SELECT denied') }],
     [
       'transaction observer table forbidden',
       { transactionCapabilityError: new Error('SELECT denied') },
     ],
   ] as const)('fails the mandatory race gate when %s', async (_label, overrides) => {
-    const connection = preflightConnection(overrides);
+    const { connection, observerProbeConnection } = preflightConnection(overrides);
 
     await expect(
       preflightTeamProjectsIntegrationDatabase(connection, validTarget(), {
-        observerProbeThreadId: 4321,
+        observerProbeConnection,
       }),
     ).rejects.toThrow('TASK14_LOCK_OBSERVER_UNSUPPORTED');
   });
 
   it('rejects the wrong deployed isolation level before observer probing', async () => {
-    const connection = preflightConnection({ isolationLevel: 'READ-COMMITTED' });
+    const { connection, observerProbeConnection } = preflightConnection({
+      isolationLevel: 'READ-COMMITTED',
+    });
 
     await expect(
       preflightTeamProjectsIntegrationDatabase(connection, validTarget(), {
-        observerProbeThreadId: 4321,
+        observerProbeConnection,
       }),
     ).rejects.toThrow('must use the deployed REPEATABLE-READ isolation');
     expect(connection.query).toHaveBeenCalledTimes(4);

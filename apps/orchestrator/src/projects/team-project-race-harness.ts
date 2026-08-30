@@ -318,16 +318,84 @@ export function compileSqlBoundary(
 ): SqlBoundary {
   const expectedParameters = [...compiled.params];
   const dynamicDateParameterIndexes = new Set(options.dynamicDateParameterIndexes ?? []);
+  const dateComponentsEpoch = (components: {
+    year: number;
+    month: number;
+    day: number;
+    hour: number;
+    minute: number;
+    second: number;
+    millisecond: number;
+  }): number | undefined => {
+    if (
+      components.year < 1000 ||
+      components.year > 9999 ||
+      components.month < 1 ||
+      components.month > 12 ||
+      components.day < 1 ||
+      components.day > 31 ||
+      components.hour < 0 ||
+      components.hour > 23 ||
+      components.minute < 0 ||
+      components.minute > 59 ||
+      components.second < 0 ||
+      components.second > 59 ||
+      components.millisecond < 0 ||
+      components.millisecond > 999
+    ) {
+      return undefined;
+    }
+    const roundTrip = new Date(0);
+    roundTrip.setUTCFullYear(components.year, components.month - 1, components.day);
+    roundTrip.setUTCHours(
+      components.hour,
+      components.minute,
+      components.second,
+      components.millisecond,
+    );
+    if (
+      roundTrip.getUTCFullYear() !== components.year ||
+      roundTrip.getUTCMonth() !== components.month - 1 ||
+      roundTrip.getUTCDate() !== components.day ||
+      roundTrip.getUTCHours() !== components.hour ||
+      roundTrip.getUTCMinutes() !== components.minute ||
+      roundTrip.getUTCSeconds() !== components.second ||
+      roundTrip.getUTCMilliseconds() !== components.millisecond
+    ) {
+      return undefined;
+    }
+    return roundTrip.getTime();
+  };
   const dateEpoch = (value: unknown): number | undefined => {
     if (value instanceof Date) {
       const epoch = value.getTime();
-      return Number.isNaN(epoch) ? undefined : epoch;
+      if (!Number.isFinite(epoch)) return undefined;
+      const roundTripEpoch = dateComponentsEpoch({
+        year: value.getUTCFullYear(),
+        month: value.getUTCMonth() + 1,
+        day: value.getUTCDate(),
+        hour: value.getUTCHours(),
+        minute: value.getUTCMinutes(),
+        second: value.getUTCSeconds(),
+        millisecond: value.getUTCMilliseconds(),
+      });
+      return roundTripEpoch === epoch ? epoch : undefined;
     }
-    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/.test(value)) {
+    if (typeof value !== 'string') {
       return undefined;
     }
-    const epoch = Date.parse(`${value.replace(' ', 'T')}Z`);
-    return Number.isNaN(epoch) ? undefined : epoch;
+    const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})\.(\d{3})$/.exec(value);
+    if (!match) return undefined;
+    const [, year, month, day, hour, minute, second, millisecond] = match;
+    return dateComponentsEpoch({
+      year: Number(year),
+      month: Number(month),
+      day: Number(day),
+      hour: Number(hour),
+      minute: Number(minute),
+      second: Number(second),
+      millisecond: Number(millisecond),
+    });
   };
   for (const index of dynamicDateParameterIndexes) {
     if (

@@ -80,13 +80,8 @@ describe.sequential('team project MySQL persistence', () => {
     );
     const observerProbe = await mysql.createConnection({ ...integrationTarget.connectionConfig });
     try {
-      await assertConnectionTargetsValidatedSchema(observerProbe, integrationTarget);
-      const [[probeThread]] = await observerProbe.query<
-        Array<mysql.RowDataPacket & { threadId: number }>
-      >('SELECT CONNECTION_ID() AS threadId');
-      if (!probeThread) throw new Error('persistence observer probe connection id unavailable');
       await preflightTeamProjectsIntegrationDatabase(connection, integrationTarget, {
-        observerProbeThreadId: Number(probeThread.threadId),
+        observerProbeConnection: observerProbe,
       });
     } finally {
       await runBoundedCleanup(

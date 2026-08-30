@@ -21,6 +21,21 @@ import { __teamProjectServiceInternals } from './team-project-service.js';
 
 const mockDb = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
 
+function mysqlUtcDate(
+  year: number,
+  month: number,
+  day: number,
+  hour = 0,
+  minute = 0,
+  second = 0,
+  millisecond = 0,
+): Date {
+  const value = new Date(0);
+  value.setUTCFullYear(year, month - 1, day);
+  value.setUTCHours(hour, minute, second, millisecond);
+  return value;
+}
+
 describe('team project race harness exact SQL boundaries', () => {
   it.each(['query', 'execute'] as const)(
     'holds a matched %s only after the exact SQL and parameters execute',
@@ -131,6 +146,67 @@ describe('team project race harness exact SQL boundaries', () => {
         ]),
       ),
     ).toBe(false);
+  });
+
+  it.each([
+    ['year 0001 string', '0001-01-01 00:00:00.000'],
+    ['year 0999 string', '0999-12-31 23:59:59.999'],
+    ['invalid non-leap day', '2023-02-29 00:00:00.000'],
+    ['invalid leap-month day', '2024-02-30 00:00:00.000'],
+    ['invalid 30-day month', '2026-04-31 12:00:00.000'],
+    ['month zero', '2026-00-01 00:00:00.000'],
+    ['month thirteen', '2026-13-01 00:00:00.000'],
+    ['day zero', '2026-01-00 00:00:00.000'],
+    ['hour twenty-four', '2026-01-01 24:00:00.000'],
+    ['year 10000 string', '10000-01-01 00:00:00.000'],
+    ['year 0999 Date', mysqlUtcDate(999, 12, 31, 23, 59, 59, 999)],
+    ['year 10000 Date', mysqlUtcDate(10_000, 1, 1)],
+  ])('rejects %s as a compiled dynamic MySQL DATETIME slot', (_label, value) => {
+    expect(() =>
+      compileSqlBoundary(
+        { sql: 'UPDATE `projects` SET `updated_at` = ?', params: [value] },
+        { dynamicDateParameterIndexes: [0] },
+      ),
+    ).toThrow('dynamic SQL boundary parameter must reference a compiled MySQL date');
+  });
+
+  it.each([
+    ['year 0001 string', '0001-01-01 00:00:00.000'],
+    ['year 0999 string', '0999-12-31 23:59:59.999'],
+    ['invalid non-leap day', '2023-02-29 00:00:00.000'],
+    ['invalid leap-month day', '2024-02-30 00:00:00.000'],
+    ['invalid 30-day month', '2026-04-31 12:00:00.000'],
+    ['month zero', '2026-00-01 00:00:00.000'],
+    ['month thirteen', '2026-13-01 00:00:00.000'],
+    ['day zero', '2026-01-00 00:00:00.000'],
+    ['hour twenty-four', '2026-01-01 24:00:00.000'],
+    ['year 10000 string', '10000-01-01 00:00:00.000'],
+    ['year 0999 Date', mysqlUtcDate(999, 12, 31, 23, 59, 59, 999)],
+    ['year 10000 Date', mysqlUtcDate(10_000, 1, 1)],
+  ])('rejects %s as a runtime dynamic MySQL DATETIME slot', (_label, value) => {
+    const sql = 'UPDATE `projects` SET `updated_at` = ?';
+    const boundary = compileSqlBoundary(
+      { sql, params: ['2026-08-30 12:00:00.000'] },
+      { dynamicDateParameterIndexes: [0] },
+    );
+
+    expect(matchesSqlBoundary(boundary, sqlInvocation('query', sql, [value]))).toBe(false);
+  });
+
+  it.each([
+    ['lower-bound string', '1000-01-01 00:00:00.000'],
+    ['valid leap-day string', '2024-02-29 23:59:59.999'],
+    ['upper-bound string', '9999-12-31 23:59:59.999'],
+    ['lower-bound Date', mysqlUtcDate(1000, 1, 1)],
+    ['upper-bound Date', mysqlUtcDate(9999, 12, 31, 23, 59, 59, 999)],
+  ])('accepts %s for a declared runtime MySQL DATETIME slot', (_label, value) => {
+    const sql = 'UPDATE `projects` SET `updated_at` = ?';
+    const boundary = compileSqlBoundary(
+      { sql, params: ['2026-08-30 12:00:00.000'] },
+      { dynamicDateParameterIndexes: [0] },
+    );
+
+    expect(matchesSqlBoundary(boundary, sqlInvocation('query', sql, [value]))).toBe(true);
   });
 
   it('recognizes every compiled production boundary used by invitation, organization, and project races', () => {

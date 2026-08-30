@@ -154,18 +154,32 @@ INNER JOIN performance_schema.threads AS threads
   ON threads.THREAD_ID = transactions.THREAD_ID
 WHERE 1 = 0`;
 
-export const TEAM_PROJECTS_ACTIVE_TRANSACTION_COUNT_QUERY = `SELECT
-  COUNT(*) AS activeTransactionCount
-FROM performance_schema.events_transactions_current AS transactions
-INNER JOIN performance_schema.threads AS threads
-  ON threads.THREAD_ID = transactions.THREAD_ID
-WHERE threads.PROCESSLIST_ID IN (?, ?)
-  AND transactions.STATE = 'ACTIVE'`;
+export const TEAM_PROJECTS_CONNECTION_ID_QUERY = 'SELECT CONNECTION_ID() AS connectionId';
 
-export const TEAM_PROJECTS_LOCK_OBSERVER_VISIBILITY_QUERY = `SELECT
-  COUNT(*) AS visibleProbeSessions
-FROM performance_schema.threads
-WHERE PROCESSLIST_ID = ?`;
+export const TEAM_PROJECTS_TRANSACTION_SESSIONS_QUERY = `SELECT
+  threads.PROCESSLIST_ID AS connectionId,
+  threads.PROCESSLIST_DB AS databaseName,
+  threads.INSTRUMENTED AS instrumented,
+  MAX(CASE WHEN transactions.STATE = 'ACTIVE' THEN 1 ELSE 0 END) AS activeTransactionCount,
+  (SELECT COUNT(*)
+    FROM performance_schema.setup_instruments
+    WHERE NAME = 'transaction' AND ENABLED = 'YES') AS transactionInstrumentEnabled,
+  (SELECT COUNT(*)
+    FROM performance_schema.setup_consumers
+    WHERE NAME = 'events_transactions_current' AND ENABLED = 'YES') AS currentTransactionConsumerEnabled,
+  (SELECT COUNT(*)
+    FROM performance_schema.setup_consumers
+    WHERE NAME = 'thread_instrumentation' AND ENABLED = 'YES') AS threadInstrumentationConsumerEnabled
+FROM performance_schema.threads AS threads
+LEFT JOIN performance_schema.events_transactions_current AS transactions
+  ON transactions.THREAD_ID = threads.THREAD_ID
+WHERE threads.PROCESSLIST_ID IN (?, ?)
+  AND threads.TYPE = 'FOREGROUND'
+GROUP BY
+  threads.PROCESSLIST_ID,
+  threads.PROCESSLIST_DB,
+  threads.INSTRUMENTED
+ORDER BY threads.PROCESSLIST_ID`;
 
 export const PROJECT_TASK_FOREIGN_KEY_QUERY = `
   SELECT
@@ -219,10 +233,109 @@ function firstObjectRow(result: unknown): PreflightRow | undefined {
   return row && typeof row === 'object' ? (row as PreflightRow) : undefined;
 }
 
+function transactionObserverError(detail: string): Error {
+  return new Error(`TASK14_TRANSACTION_OBSERVER_UNSUPPORTED: ${detail}`);
+}
+
+export function requireTeamProjectsConnectionId(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+    throw transactionObserverError('mysql connection id is missing or unsafe');
+  }
+  return value;
+}
+
+export function assertTeamProjectsTransactionSessions(
+  rows: readonly unknown[],
+  input: {
+    connectionIds: readonly [unknown, unknown];
+    schemaName: string;
+    activeConnectionIds: readonly unknown[];
+  },
+): void {
+  const connectionIds = input.connectionIds.map(requireTeamProjectsConnectionId) as [
+    number,
+    number,
+  ];
+  if (connectionIds[0] === connectionIds[1]) {
+    throw transactionObserverError('mysql connection ids must be distinct');
+  }
+  const expectedConnectionIds = new Set(connectionIds);
+  const activeConnectionIds = new Set(
+    input.activeConnectionIds.map(requireTeamProjectsConnectionId),
+  );
+  if ([...activeConnectionIds].some((connectionId) => !expectedConnectionIds.has(connectionId))) {
+    throw transactionObserverError('active connection id is not one of the observed sessions');
+  }
+  if (rows.length !== connectionIds.length) {
+    throw transactionObserverError('observer did not return both endpoint sessions');
+  }
+
+  const observedConnectionIds = new Set<number>();
+  for (const candidate of rows) {
+    if (!candidate || typeof candidate !== 'object') {
+      throw transactionObserverError('observer returned a malformed endpoint session');
+    }
+    const row = candidate as PreflightRow;
+    const connectionId = requireTeamProjectsConnectionId(row.connectionId);
+    if (!expectedConnectionIds.has(connectionId) || observedConnectionIds.has(connectionId)) {
+      throw transactionObserverError('observer returned an unexpected or duplicate endpoint');
+    }
+    observedConnectionIds.add(connectionId);
+    if (row.databaseName !== input.schemaName) {
+      throw transactionObserverError('observed endpoint is not bound to the validated schema');
+    }
+    if (row.instrumented !== 'YES') {
+      throw transactionObserverError('observed endpoint is not instrumented');
+    }
+    if (
+      Number(row.transactionInstrumentEnabled) !== 1 ||
+      Number(row.currentTransactionConsumerEnabled) !== 1 ||
+      Number(row.threadInstrumentationConsumerEnabled) !== 1
+    ) {
+      throw transactionObserverError('transaction instrumentation or consumers are disabled');
+    }
+    const activeTransactionCount = Number(row.activeTransactionCount);
+    if (
+      !Number.isSafeInteger(activeTransactionCount) ||
+      activeTransactionCount < 0 ||
+      activeTransactionCount > 1 ||
+      activeTransactionCount !== (activeConnectionIds.has(connectionId) ? 1 : 0)
+    ) {
+      throw transactionObserverError('active transaction state did not match the required state');
+    }
+  }
+}
+
+async function readTeamProjectsConnectionId(
+  connection: SchemaAssertionConnection,
+): Promise<number> {
+  const row = firstObjectRow(await connection.query(TEAM_PROJECTS_CONNECTION_ID_QUERY));
+  return requireTeamProjectsConnectionId(row?.connectionId);
+}
+
+async function assertObservedTransactionSessions(
+  connection: SchemaAssertionConnection,
+  input: {
+    connectionIds: readonly [number, number];
+    schemaName: string;
+    activeConnectionIds: readonly number[];
+  },
+): Promise<void> {
+  let rows: unknown[];
+  try {
+    rows = resultRows(
+      await connection.query(TEAM_PROJECTS_TRANSACTION_SESSIONS_QUERY, [...input.connectionIds]),
+    );
+  } catch {
+    throw transactionObserverError('transaction session observer query failed');
+  }
+  assertTeamProjectsTransactionSessions(rows, input);
+}
+
 export async function preflightTeamProjectsIntegrationDatabase(
   connection: SchemaAssertionConnection,
   target: ValidatedTeamProjectsIntegrationTarget,
-  input: { observerProbeThreadId: number },
+  input: { observerProbeConnection: SchemaAssertionConnection },
 ): Promise<{ isolationLevel: 'REPEATABLE-READ' }> {
   await assertConnectionTargetsValidatedSchema(connection, target);
 
@@ -272,23 +385,34 @@ export async function preflightTeamProjectsIntegrationDatabase(
     );
   }
 
-  let visibility: PreflightRow | undefined;
+  await assertConnectionTargetsValidatedSchema(input.observerProbeConnection, target);
+  const observerConnectionId = await readTeamProjectsConnectionId(connection);
+  const probeConnectionId = await readTeamProjectsConnectionId(input.observerProbeConnection);
+  if (observerConnectionId === probeConnectionId) {
+    throw transactionObserverError('mysql connection ids must be distinct');
+  }
+
+  let probeTransactionStarted = false;
   try {
-    visibility = firstObjectRow(
-      await connection.query(TEAM_PROJECTS_LOCK_OBSERVER_VISIBILITY_QUERY, [
-        input.observerProbeThreadId,
-      ]),
-    );
+    await input.observerProbeConnection.query('START TRANSACTION');
+    probeTransactionStarted = true;
+    await assertObservedTransactionSessions(connection, {
+      connectionIds: [observerConnectionId, probeConnectionId],
+      schemaName: target.schemaName,
+      activeConnectionIds: [probeConnectionId],
+    });
   } catch {
-    throw new Error(
-      'TASK14_LOCK_OBSERVER_UNSUPPORTED: observer cannot inspect independent sessions',
-    );
+    throw transactionObserverError('known active probe transaction was not observed');
+  } finally {
+    if (probeTransactionStarted) {
+      await input.observerProbeConnection.query('ROLLBACK');
+    }
   }
-  if (Number(visibility?.visibleProbeSessions) !== 1) {
-    throw new Error(
-      'TASK14_LOCK_OBSERVER_UNSUPPORTED: observer cannot inspect independent sessions',
-    );
-  }
+  await assertObservedTransactionSessions(connection, {
+    connectionIds: [observerConnectionId, probeConnectionId],
+    schemaName: target.schemaName,
+    activeConnectionIds: [],
+  });
 
   return { isolationLevel: 'REPEATABLE-READ' };
 }
