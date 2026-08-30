@@ -141,7 +141,9 @@ export function buildIntegrationFixtureExternalId(
     .slice(0, TASK14_EXTERNAL_ID_HASH_LENGTH);
   const readableBudget =
     TASK14_EXTERNAL_ID_MAX_LENGTH - prefix.length - TASK14_EXTERNAL_ID_HASH_LENGTH - 2;
-  const readable = (readableFixturePart(caseName, key) || 'fixture').slice(0, readableBudget);
+  const readable = (readableFixturePart(caseName, key) || 'fixture')
+    .slice(0, readableBudget)
+    .replace(/_+$/g, '');
   return `${prefix}_${readable}_${digest}`;
 }
 

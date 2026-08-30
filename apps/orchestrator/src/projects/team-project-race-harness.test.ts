@@ -8,6 +8,7 @@ import {
   compileSqlBoundary,
   createAffectedRowsOverride,
   createMysqlBoundaryRecorder,
+  createMysqlRaceEndpoint,
   createSqlCheckpoint,
   instrumentMysqlConnection,
   matchesSqlBoundary,
@@ -167,6 +168,81 @@ describe('team project race harness exact SQL boundaries', () => {
 });
 
 describe('team project race harness instrumentation', () => {
+  it('exposes the recorder-instrumented endpoint for direct transaction and SQL methods', async () => {
+    const rawConnection = {
+      beginTransaction: async () => undefined,
+      commit: async () => undefined,
+      rollback: async () => undefined,
+      query: async (_sql?: unknown, _parameters?: readonly unknown[]) => [[], []] as const,
+      execute: async (_sql?: unknown, _parameters?: readonly unknown[]) =>
+        [{ affectedRows: 1 }, []] as const,
+    };
+    const endpoint = createMysqlRaceEndpoint({
+      connection: rawConnection,
+      checkpoints: [],
+      resultOverrides: [],
+    });
+
+    await endpoint.connection.beginTransaction();
+    await endpoint.connection.execute(
+      'UPDATE organizations SET team_projects_enabled = ? WHERE id = ?',
+      [false, 41],
+    );
+    await endpoint.connection.commit();
+    await endpoint.connection.beginTransaction();
+    await endpoint.connection.query('SELECT id FROM organizations WHERE id = ? FOR UPDATE', [41]);
+    await endpoint.connection.rollback();
+
+    expect(endpoint.recorder.transactionActions()).toEqual([
+      'begin',
+      'commit',
+      'begin',
+      'rollback',
+    ]);
+    expect(endpoint.recorder.sqlInvocations()).toEqual([
+      expect.objectContaining({ method: 'execute' }),
+      expect.objectContaining({ method: 'query' }),
+    ]);
+  });
+
+  it('records one SQL attempt before delegate settlement and marks its successful outcome', async () => {
+    let resolveExecute = (_result: readonly unknown[]): void => {};
+    const delegateResult = new Promise<readonly unknown[]>((resolve) => {
+      resolveExecute = resolve;
+    });
+    const recorder = createMysqlBoundaryRecorder();
+    const connection = instrumentMysqlConnection(
+      {
+        execute: async (_sql?: unknown, _parameters?: readonly unknown[]) => delegateResult,
+      },
+      [],
+      [],
+      recorder,
+    );
+
+    const pending = connection.execute('UPDATE organization_members SET role = ? WHERE id = ?', [
+      'member',
+      41,
+    ]);
+    await Promise.resolve();
+
+    expect(recorder.sqlInvocations()).toEqual([
+      expect.objectContaining({
+        method: 'execute',
+        outcome: 'pending',
+        parameters: [
+          { kind: 'sql-literal', value: 'member' },
+          { kind: 'number', value: 41 },
+        ],
+      }),
+    ]);
+
+    resolveExecute([{ affectedRows: 1 }, []]);
+    await expect(pending).resolves.toEqual([{ affectedRows: 1 }, []]);
+    expect(recorder.sqlInvocations()).toHaveLength(1);
+    expect(recorder.sqlInvocations()[0]).toMatchObject({ outcome: 'success' });
+  });
+
   it('reports zero affected rows once only after the matched real update result', async () => {
     const calls: string[] = [];
     const connection = {

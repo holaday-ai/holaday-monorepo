@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 export type SqlCheckpointPhase = 'before' | 'after';
 export type MysqlSqlMethod = 'query' | 'execute';
+export type MysqlSqlOutcome = 'pending' | 'success' | 'rejected';
 export type MysqlTransactionAction = 'begin' | 'commit' | 'rollback';
 
 export type SanitizedSqlParameter =
@@ -62,14 +63,21 @@ export type MysqlBoundaryEvent =
       method: MysqlSqlMethod;
       normalizedSql: string;
       parameters: readonly SanitizedSqlParameter[];
+      outcome: MysqlSqlOutcome;
     };
+
+export interface MysqlSqlAttempt {
+  settle(outcome: Exclude<MysqlSqlOutcome, 'pending'>): void;
+}
 
 export interface MysqlBoundaryRecorder {
   readonly events: readonly MysqlBoundaryEvent[];
   transactionActions(): MysqlTransactionAction[];
   sqlInvocations(): Array<Extract<MysqlBoundaryEvent, { kind: 'sql' }>>;
   /** Internal test-harness hook. */
-  recordSql(invocation: MysqlSqlInvocation): void;
+  recordSql(invocation: MysqlSqlInvocation, outcome?: Exclude<MysqlSqlOutcome, 'pending'>): void;
+  /** Internal runtime-interception hook. */
+  recordSqlAttempt(invocation: MysqlSqlInvocation): MysqlSqlAttempt;
   /** Internal test-harness hook. */
   recordTransaction(action: MysqlTransactionAction): void;
 }
@@ -380,15 +388,32 @@ export function createAffectedRowsOverride(input: {
 
 export function createMysqlBoundaryRecorder(): MysqlBoundaryRecorder {
   const events: MysqlBoundaryEvent[] = [];
+  const appendSqlEvent = (invocation: MysqlSqlInvocation, outcome: MysqlSqlOutcome) => {
+    const event: Extract<MysqlBoundaryEvent, { kind: 'sql' }> = {
+      kind: 'sql',
+      method: invocation.method,
+      normalizedSql: invocation.normalizedSql,
+      parameters: invocation.parameters.map((parameter) => ({ ...parameter })),
+      outcome,
+    };
+    events.push(event);
+    return event;
+  };
   return {
     events,
-    recordSql(invocation) {
-      events.push({
-        kind: 'sql',
-        method: invocation.method,
-        normalizedSql: invocation.normalizedSql,
-        parameters: invocation.parameters.map((parameter) => ({ ...parameter })),
-      });
+    recordSql(invocation, outcome = 'success') {
+      appendSqlEvent(invocation, outcome);
+    },
+    recordSqlAttempt(invocation) {
+      const event = appendSqlEvent(invocation, 'pending');
+      let settled = false;
+      return {
+        settle(outcome) {
+          if (settled) throw new Error('SQL attempt outcome was already recorded');
+          settled = true;
+          event.outcome = outcome;
+        },
+      };
     },
     recordTransaction(action) {
       events.push({ kind: 'transaction', action });
@@ -433,8 +458,15 @@ export function instrumentMysqlConnection<Connection extends object>(
         return async (...args: unknown[]) => {
           const invocation = sqlInvocation(property, args[0], args[1]);
           for (const checkpoint of checkpoints) await checkpoint.notify('before', invocation);
-          let result = await Reflect.apply(value, target, args);
-          recorder?.recordSql(invocation);
+          const attempt = recorder?.recordSqlAttempt(invocation);
+          let result: unknown;
+          try {
+            result = await Reflect.apply(value, target, args);
+          } catch (error) {
+            attempt?.settle('rejected');
+            throw error;
+          }
+          attempt?.settle('success');
           const transactionAction = transactionActionFromSql(invocation.normalizedSql);
           if (transactionAction) recorder?.recordTransaction(transactionAction);
           for (const override of resultOverrides) result = override.transform(invocation, result);
@@ -457,4 +489,21 @@ export function instrumentMysqlConnection<Connection extends object>(
       return typeof value === 'function' ? value.bind(target) : value;
     },
   });
+}
+
+export function createMysqlRaceEndpoint<Connection extends object>(input: {
+  connection: Connection;
+  checkpoints: readonly SqlCheckpoint[];
+  resultOverrides?: readonly SqlResultOverride[];
+}): { connection: Connection; recorder: MysqlBoundaryRecorder } {
+  const recorder = createMysqlBoundaryRecorder();
+  return {
+    connection: instrumentMysqlConnection(
+      input.connection,
+      input.checkpoints,
+      input.resultOverrides,
+      recorder,
+    ),
+    recorder,
+  };
 }

@@ -29,9 +29,8 @@ import {
   type SqlResultOverride,
   compileSqlBoundary,
   createAffectedRowsOverride,
-  createMysqlBoundaryRecorder,
+  createMysqlRaceEndpoint,
   createSqlCheckpoint,
-  instrumentMysqlConnection,
   matchesSqlBoundary,
   runBoundedCleanup,
   runMysqlLockObserverExecute,
@@ -273,19 +272,22 @@ async function openEndpoint(
       'SELECT CONNECTION_ID() AS threadId',
     );
     if (!thread) throw new Error('integration connection id unavailable');
-    const recorder = createMysqlBoundaryRecorder();
-    const instrumented = instrumentMysqlConnection(
+    const endpoint = createMysqlRaceEndpoint({
       connection,
       checkpoints,
       resultOverrides,
-      recorder,
-    );
-    const db = drizzle(instrumented, {
+    });
+    const db = drizzle(endpoint.connection, {
       schema,
       mode: 'default',
       casing: 'snake_case',
     }) as unknown as DB;
-    return { connection, db, threadId: Number(thread.threadId), recorder };
+    return {
+      connection: endpoint.connection,
+      db,
+      threadId: Number(thread.threadId),
+      recorder: endpoint.recorder,
+    };
   } catch (error) {
     openConnections.delete(connection);
     connection.destroy();

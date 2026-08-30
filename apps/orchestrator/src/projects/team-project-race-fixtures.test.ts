@@ -5,6 +5,7 @@ import {
   enumerateTask14FixtureExternalIds,
   task14FixtureExternalId,
 } from './team-project-race-fixtures.js';
+import { sqlInvocation } from './team-project-race-harness.js';
 
 const expectedCases = [
   'invitation-replay',
@@ -63,7 +64,42 @@ describe('Task14 deterministic integration fixture ids', () => {
         `${entry.caseName}/${entry.table}/${entry.key}`,
       ).toBeLessThanOrEqual(32);
       expect(entry.externalId).toMatch(/_[0-9a-f]{12}$/);
+      expect(entry.externalId).toMatch(
+        /^(?:usr|org|omem|oinv|prj|pmem)_[a-z0-9]+(?:_[a-z0-9]+)*_[0-9a-f]{12}$/,
+      );
     }
+  });
+
+  it('keeps all 140 manifest ids as exact production-sanitized fixture evidence', () => {
+    const entries = enumerateTask14FixtureExternalIds();
+
+    for (const entry of entries) {
+      expect(
+        sqlInvocation('execute', 'SELECT ?', [entry.externalId]).parameters,
+        `${entry.caseName}/${entry.table}/${entry.key}`,
+      ).toEqual([{ kind: 'fixture-id', value: entry.externalId }]);
+    }
+  });
+
+  it('keeps requested and foreign organization evidence distinguishable in the long inverse case', () => {
+    const organizations = enumerateTask14FixtureExternalIds().filter(
+      (entry) =>
+        entry.caseName === 'foreign-target-local-manager' && entry.table === 'organizations',
+    );
+    const requested = organizations.find((entry) => entry.key === 'requested');
+    const foreign = organizations.find((entry) => entry.key === 'foreign');
+    if (!requested || !foreign) throw new Error('missing inverse foreign organization fixtures');
+
+    expect(requested.externalId).not.toBe(foreign.externalId);
+    expect(
+      sqlInvocation('execute', 'SELECT ? AS requested_id, ? AS foreign_id', [
+        requested.externalId,
+        foreign.externalId,
+      ]).parameters,
+    ).toEqual([
+      { kind: 'fixture-id', value: requested.externalId },
+      { kind: 'fixture-id', value: foreign.externalId },
+    ]);
   });
 
   it('reserves the deterministic hash suffix when long readable prefixes share their first 32 characters', () => {
