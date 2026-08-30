@@ -571,14 +571,44 @@ export const TEAM_WORK_ITEM_SCHEMA_CONTRACT = {
   ],
 };
 
+function stripWrappingParentheses(value) {
+  let result = value;
+  while (result.startsWith('(') && result.endsWith(')')) {
+    let depth = 0;
+    let wrapsEntireExpression = true;
+    for (let index = 0; index < result.length; index += 1) {
+      if (result[index] === '(') depth += 1;
+      if (result[index] === ')') depth -= 1;
+      if (depth === 0 && index < result.length - 1) {
+        wrapsEntireExpression = false;
+        break;
+      }
+    }
+    if (!wrapsEntireExpression || depth !== 0) break;
+    result = result.slice(1, -1).trim();
+  }
+  return result;
+}
+
 function normalizeExpression(value) {
-  return String(value ?? '')
+  const normalized = String(value ?? '')
     .toLowerCase()
     .replaceAll('`', '')
     .replace(/_utf8mb4/g, '')
     .replaceAll("\\'", "'")
-    .replace(/[()\s]+/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
+  return stripWrappingParentheses(normalized);
+}
+
+function isEquivalentResponsibleActiveExpression(actual, canonical) {
+  const accepted = new Set([
+    normalizeExpression(canonical),
+    normalizeExpression(
+      "CASE WHEN ((role = 'responsible') AND (status = 'accepted')) THEN work_item_id ELSE NULL END",
+    ),
+  ]);
+  return accepted.has(normalizeExpression(actual));
 }
 
 export function findTeamWorkItemSchemaViolations({ columns, indexes, foreignKeys }) {
@@ -652,8 +682,12 @@ export function findTeamWorkItemSchemaViolations({ columns, indexes, foreignKeys
     }
     if (matches && required.extra) {
       matches = String(actual.extra).toUpperCase().includes(required.extra);
-      const expression = normalizeExpression(actual.generation_expression);
-      matches = matches && expression === normalizeExpression(required.generationExpression);
+      matches =
+        matches &&
+        isEquivalentResponsibleActiveExpression(
+          actual.generation_expression,
+          required.generationExpression,
+        );
     }
     if (!matches) violations.push(`column ${required.table}.${required.name} has invalid metadata`);
   }

@@ -88,6 +88,14 @@ describe('team work item production schema verifier', () => {
     assert.deepEqual(findTeamWorkItemSchemaViolations(actual), []);
   });
 
+  it('rejects inner grouping that changes AND comparison precedence', () => {
+    const actual = validInformationSchema();
+    const column = actual.columns.find((row) => row.column_name === 'responsible_active_key');
+    column.generation_expression =
+      "CASE WHEN (role = 'responsible' AND status) = 'accepted' THEN work_item_id ELSE NULL END";
+    assert.match(findTeamWorkItemSchemaViolations(actual).join('\n'), /responsible_active_key/);
+  });
+
   for (const [label, expression] of [
     [
       'not-equal operators',
