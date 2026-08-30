@@ -10,6 +10,10 @@ export const TEAM_TASK_ACTIONS = [
   'review',
   'appeal',
   'arbitrate',
+  'bind_evidence',
+  'record_ai_contribution',
+  'confirm_ai_contribution',
+  'read_evidence_package',
   'close',
   'archive',
 ] as const;
@@ -22,6 +26,7 @@ export type TeamTaskPermissionReason =
   | 'management_role_required'
   | 'designated_approver_required'
   | 'responsible_member_required'
+  | 'assigned_member_required'
   | 'creator_responsible_self_approval_forbidden'
   | 'responsible_cannot_review_own_work'
   | 'responsible_cannot_arbitrate_own_work'
@@ -45,6 +50,8 @@ export interface TeamTaskPermissionContext {
   actorProjectMembershipActive: boolean | null;
   actorIsCreator: boolean;
   actorIsResponsible: boolean;
+  /** Accepted collaborator assignment on the locked work item. */
+  actorIsCollaborator?: boolean;
   actorIsLatestReviewer: boolean;
   actorIsDesignatedApprover: boolean;
   actorIsDesignatedIndependentArbitrator: boolean;
@@ -81,6 +88,7 @@ function passesMemberships(
   if (context.actorProjectMembershipActive !== true || context.actorProjectRole === null) {
     return deny('actor_project_membership_inactive');
   }
+  if (action === 'read_evidence_package') return allow();
   if (context.actorProjectRole === 'viewer') return deny('viewer_cannot_mutate');
   return allow();
 }
@@ -110,6 +118,18 @@ export function decideTeamTaskPermission(
   }
 
   if (action === 'claim') return allow();
+
+  if (
+    action === 'bind_evidence' ||
+    action === 'record_ai_contribution' ||
+    action === 'confirm_ai_contribution'
+  ) {
+    return context.actorIsResponsible || context.actorIsCollaborator === true
+      ? allow()
+      : deny('assigned_member_required');
+  }
+
+  if (action === 'read_evidence_package') return allow();
 
   if (action === 'submit' || action === 'appeal') {
     return context.actorIsResponsible ? allow() : deny('responsible_member_required');
