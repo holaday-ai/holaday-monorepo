@@ -561,6 +561,34 @@ describe('organization service', () => {
     expect(query.params).toEqual([20, 'omem_manager', 'omem_member']);
   });
 
+  it('compiles reporting-line preflight and transaction locks with exact tenant parameters', () => {
+    const mockDb = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
+    const preflight = __organizationServiceInternals
+      .buildActiveActorMembershipQuery(mockDb, 7, 'org_design')
+      .toSQL();
+    const organizationLock = __organizationServiceInternals
+      .buildLockedActiveOrganizationQuery(mockDb, 'org_design')
+      .toSQL();
+    const actorLock = __organizationServiceInternals
+      .buildLockedActiveActorMembershipQuery(mockDb, 7, {
+        id: 20,
+        externalId: 'org_design',
+      })
+      .toSQL();
+
+    expect(normalizedSql(preflight.sql)).toContain('`organizations`.`external_id` = ?');
+    expect(normalizedSql(preflight.sql)).not.toContain('for update');
+    expect(preflight.params).toEqual(['org_design', 'active', 7, 'active', 1]);
+    expect(normalizedSql(organizationLock.sql)).toContain(
+      '`organizations`.`team_projects_enabled` = ?',
+    );
+    expect(normalizedSql(organizationLock.sql)).toContain('for update');
+    expect(organizationLock.params).toEqual(['org_design', 'active', true]);
+    expect(normalizedSql(actorLock.sql)).toContain('`organization_members`.`organization_id` = ?');
+    expect(normalizedSql(actorLock.sql)).toContain('for update');
+    expect(actorLock.params).toEqual([20, 7, 'active']);
+  });
+
   it('compiles affected-project and active-membership locks in deterministic id order', () => {
     const mockDb = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
     const candidates = __organizationServiceInternals

@@ -972,6 +972,22 @@ describe('projects router team workspaces', () => {
       .toSQL();
     const detail = __projectsRouterInternals.buildProjectDetailQuery(db, 20, 'prj_team').toSQL();
     const members = __projectsRouterInternals.buildActiveProjectMembersQuery(db, 20).toSQL();
+    const creatorLead = __projectsRouterInternals
+      .buildTeamProjectCreatorMembershipInsert(db, {
+        externalId: 'pmem_generated',
+        projectId: 20,
+        userId: 7,
+      })
+      .toSQL();
+    const projectInsert = __projectsRouterInternals
+      .buildTeamProjectInsert(db, {
+        externalId: 'prj_generated',
+        userId: 7,
+        organizationId: 30,
+        name: 'Launch',
+        description: 'Team launch',
+      })
+      .toSQL();
     const creatorSql = creator.sql.toLowerCase().replace(/\s+/g, ' ').trim();
     const memberSql = members.sql.toLowerCase().replace(/\s+/g, ' ').trim();
 
@@ -988,6 +1004,10 @@ describe('projects router team workspaces', () => {
     expect(memberSql).toContain('`project_members`.`project_id` = ?');
     expect(memberSql).toContain('`project_members`.`status` = ?');
     expect(members.params).toEqual([20, 'active']);
+    expect(creatorLead.sql).toContain('insert into `project_members`');
+    expect(creatorLead.params).toEqual(['pmem_generated', 20, 7, 'lead', 'active']);
+    expect(projectInsert.sql).toContain('insert into `projects`');
+    expect(projectInsert.params).toEqual(['prj_generated', 7, 30, 'Launch', 'Team launch']);
   });
 
   it('fails every team-only procedure closed before database access when the user gate is off', async () => {

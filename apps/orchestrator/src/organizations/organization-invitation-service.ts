@@ -439,6 +439,47 @@ function buildRevokeInvitationQuery(db: Pick<DB, 'update'>, invitationId: number
     );
 }
 
+type AcceptedInvitationMembershipValues = {
+  role: Exclude<OrganizationRole, 'owner'>;
+  managerUserId: number | null;
+  joinedAt: Date;
+};
+
+function buildCreateInvitationMembershipQuery(
+  db: Pick<DB, 'insert'>,
+  input: AcceptedInvitationMembershipValues & {
+    externalId: string;
+    organizationId: number;
+    userId: number;
+  },
+) {
+  return db.insert(organizationMembers).values({
+    externalId: input.externalId,
+    organizationId: input.organizationId,
+    userId: input.userId,
+    role: input.role,
+    managerUserId: input.managerUserId,
+    status: 'active',
+    joinedAt: input.joinedAt,
+  });
+}
+
+function buildReactivateInvitationMembershipQuery(
+  db: Pick<DB, 'update'>,
+  membershipId: number,
+  input: AcceptedInvitationMembershipValues,
+) {
+  return db
+    .update(organizationMembers)
+    .set({
+      status: 'active',
+      role: input.role,
+      managerUserId: input.managerUserId,
+      joinedAt: input.joinedAt,
+    })
+    .where(eq(organizationMembers.id, membershipId));
+}
+
 export async function createInvitation(input: CreateInvitationInput) {
   const actorUserId = await resolveActorUserId(input.db, input.actorExternalId);
   await requireActiveActorMembership(input.db, actorUserId, input.organizationExternalId);
@@ -509,26 +550,21 @@ export async function acceptInvitation(input: AcceptInvitationInput) {
       return { membershipId: member.externalId, status: 'already_member' as const };
     }
     if (member) {
-      await tx
-        .update(organizationMembers)
-        .set({
-          status: 'active',
-          role: invitation.role,
-          managerUserId: invitation.managerUserId,
-          joinedAt: acceptedAt,
-        })
-        .where(eq(organizationMembers.id, member.id));
+      await buildReactivateInvitationMembershipQuery(tx, member.id, {
+        role: invitation.role,
+        managerUserId: invitation.managerUserId,
+        joinedAt: acceptedAt,
+      });
       return { membershipId: member.externalId, status: 'reactivated' as const };
     }
 
     const membershipExternalId = newExternalId('organizationMember');
-    await tx.insert(organizationMembers).values({
+    await buildCreateInvitationMembershipQuery(tx, {
       externalId: membershipExternalId,
       organizationId: organization.id,
       userId: actorUserId,
       role: invitation.role,
       managerUserId: invitation.managerUserId,
-      status: 'active',
       joinedAt: acceptedAt,
     });
     return { membershipId: membershipExternalId, status: 'joined' as const };
@@ -564,6 +600,7 @@ export async function revokeInvitation(input: RevokeInvitationInput): Promise<{ 
 
 export const __organizationInvitationServiceInternals = {
   buildActiveActorMembershipQuery,
+  buildCreateInvitationMembershipQuery,
   buildConsumeInvitationQuery,
   buildLockedActiveActorMembershipQuery,
   buildLockedActiveEnabledOrganizationByIdQuery,
@@ -571,4 +608,5 @@ export const __organizationInvitationServiceInternals = {
   buildLockedInvitationByExternalIdQuery,
   buildLockedInvitationByHashQuery,
   buildInvitationOrganizationLookupQuery,
+  buildReactivateInvitationMembershipQuery,
 };

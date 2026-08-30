@@ -158,13 +158,39 @@ export async function runWithActiveTimeout<T>(
   throw new Error(details.join('; '));
 }
 
+export async function runMysqlLockObserverExecute<T>(input: {
+  label: string;
+  execute: () => Promise<T>;
+  destroy: () => unknown | Promise<unknown>;
+  timeoutMs: number;
+  settleTimeoutMs: number;
+}): Promise<T> {
+  try {
+    return await runWithActiveTimeout(Promise.resolve().then(input.execute), {
+      label: input.label,
+      timeoutMs: input.timeoutMs,
+      settleTimeoutMs: input.settleTimeoutMs,
+      onTimeout: input.destroy,
+    });
+  } catch (error) {
+    const message = errorMessage(error);
+    const detail = message.startsWith(`${input.label} timed out after `)
+      ? message
+      : `${input.label} failed: ${message}`;
+    const unsupported = new Error(`TASK14_LOCK_OBSERVER_UNSUPPORTED: ${detail}`);
+    unsupported.cause = error;
+    throw unsupported;
+  }
+}
+
 export async function runBoundedCleanup(
   actions: readonly BoundedCleanupAction[],
   timeoutMs: number,
 ): Promise<void> {
   const failures: string[] = [];
   for (const action of actions) {
-    const outcome = await observeWithin(observe(Promise.resolve().then(action.run)), timeoutMs);
+    const observedAction = observe(Promise.resolve().then(action.run));
+    const outcome = await observeWithin(observedAction, timeoutMs);
     if (outcome.status === 'timed-out') {
       failures.push(`${action.label} timed out after ${timeoutMs}ms`);
       if (action.onTimeout) {
@@ -176,6 +202,18 @@ export async function runBoundedCleanup(
           failures.push(`${action.label} timeout handler timed out after ${timeoutMs}ms`);
         } else if (abort.status === 'rejected') {
           failures.push(`${action.label} timeout handler failed: ${errorMessage(abort.reason)}`);
+        }
+        const settlement = await observeWithin(observedAction, timeoutMs);
+        if (settlement.status === 'fulfilled') {
+          failures.push(`${action.label} settled after timeout handler`);
+        } else if (settlement.status === 'rejected') {
+          failures.push(
+            `${action.label} rejected after timeout handler: ${errorMessage(settlement.reason)}`,
+          );
+        } else {
+          failures.push(
+            `${action.label} did not settle within ${timeoutMs}ms after timeout handler`,
+          );
         }
       }
     } else if (outcome.status === 'rejected') {

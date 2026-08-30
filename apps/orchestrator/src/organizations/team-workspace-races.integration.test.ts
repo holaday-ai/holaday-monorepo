@@ -16,13 +16,14 @@ import {
   parseTeamProjectsIntegrationTarget,
   preflightTeamProjectsIntegrationDatabase,
 } from '../projects/team-project-integration-safety.js';
+import { assertInvitationReplayMemberWrite } from '../projects/team-project-invitation-race-harness.js';
+import { assertForeignReportingLineIsolationEvidence } from '../projects/team-project-organization-race-harness.js';
 import {
   type Task14RaceCaseName,
   task14FixtureExternalId,
 } from '../projects/team-project-race-fixtures.js';
 import {
   type MysqlBoundaryRecorder,
-  type SanitizedSqlParameter,
   type SqlBoundary,
   type SqlCheckpoint,
   type SqlResultOverride,
@@ -33,8 +34,8 @@ import {
   instrumentMysqlConnection,
   matchesSqlBoundary,
   runBoundedCleanup,
+  runMysqlLockObserverExecute,
   runWithActiveTimeout,
-  sqlInvocation,
 } from '../projects/team-project-race-harness.js';
 import {
   __teamProjectServiceInternals,
@@ -43,6 +44,11 @@ import {
   listProjectMembersWithAccess,
   listTeamProjects,
 } from '../projects/team-project-service.js';
+import {
+  assertDisabledOrganizationRow,
+  assertInvitationPendingRow,
+  assertInvitationTerminalRow,
+} from '../projects/team-project-terminal-state-harness.js';
 import {
   __organizationInvitationServiceInternals,
   acceptInvitation,
@@ -320,8 +326,12 @@ async function waitForLockWait(waitingThreadId: number, blockingThreadId: number
   const startedAt = performance.now();
   const deadline = startedAt + LOCK_WAIT_TIMEOUT_MS;
   while (performance.now() < deadline) {
-    const [rows] = await admin.execute<mysql.RowDataPacket[]>(
-      `SELECT requesting.PROCESSLIST_ID AS waitingThreadId,
+    const remainingMs = Math.max(1, Math.ceil(deadline - performance.now()));
+    const [rows] = await runMysqlLockObserverExecute({
+      label: 'performance-schema lock-wait observer execute',
+      execute: () =>
+        admin.execute<mysql.RowDataPacket[]>(
+          `SELECT requesting.PROCESSLIST_ID AS waitingThreadId,
               blocking.PROCESSLIST_ID AS blockingThreadId
        FROM performance_schema.data_lock_waits AS waits
        INNER JOIN performance_schema.threads AS requesting
@@ -330,8 +340,12 @@ async function waitForLockWait(waitingThreadId: number, blockingThreadId: number
          ON blocking.THREAD_ID = waits.BLOCKING_THREAD_ID
        WHERE requesting.PROCESSLIST_ID = ?
          AND blocking.PROCESSLIST_ID = ?`,
-      [waitingThreadId, blockingThreadId],
-    );
+          [waitingThreadId, blockingThreadId],
+        ),
+      destroy: () => admin.destroy(),
+      timeoutMs: Math.min(CLEANUP_TIMEOUT_MS, remainingMs),
+      settleTimeoutMs: CLEANUP_TIMEOUT_MS,
+    });
     if (rows.length > 0) return performance.now() - startedAt;
     await new Promise<void>((resolve) => setTimeout(resolve, 20));
   }
@@ -854,14 +868,13 @@ describe.sequential('team workspace MySQL invitation races', () => {
     expect(race.first.ok).toBe(true);
     if (race.first.ok) expect(race.first.value).toMatchObject({ status: 'joined' });
     expectDomainError(race.second, 'INVITATION_NOT_AVAILABLE');
-    const [invitationRow] = await databaseRows<
+    const invitationRows = await databaseRows<
       mysql.RowDataPacket & { acceptedAt: Date | null; revokedAt: Date | null }
     >(
       'SELECT accepted_at AS acceptedAt, revoked_at AS revokedAt FROM organization_invitations WHERE id = ?',
       [invitation.id],
     );
-    expect(invitationRow?.acceptedAt).toBeInstanceOf(Date);
-    expect(invitationRow?.revokedAt).toBeNull();
+    assertInvitationTerminalRow(invitationRows, 'accepted');
     expect(consumeQueryCount).toBe(1);
     const members = await databaseRows<
       mysql.RowDataPacket & { status: string; role: string; pairCount: number }
@@ -873,6 +886,16 @@ describe.sequential('team workspace MySQL invitation races', () => {
     );
     expect(members).toHaveLength(1);
     expect(members[0]).toMatchObject({ status: 'active', role: 'member', pairCount: 1 });
+    assertInvitationReplayMemberWrite({
+      winner: race.firstRecorder,
+      loser: race.secondRecorder,
+      expectedKind: 'create',
+      organizationId: organization.id,
+      actorUserId: invitee.id,
+      role: 'member',
+      managerUserId: null,
+      acceptedAt: operationNow,
+    });
     expect(race.firstRecorder.transactionActions()).toEqual(['begin', 'commit']);
     expect(race.secondRecorder.transactionActions()).toEqual(['begin', 'rollback']);
     expect(deadlockCount([race.first, race.second])).toBe(0);
@@ -937,15 +960,13 @@ describe.sequential('team workspace MySQL invitation races', () => {
       expect(race.first.ok).toBe(true);
       expectDomainError(race.second, 'INVITATION_NOT_AVAILABLE');
 
-      const [invitationRow] = await databaseRows<
+      const invitationRows = await databaseRows<
         mysql.RowDataPacket & { acceptedAt: Date | null; revokedAt: Date | null }
       >(
         'SELECT accepted_at AS acceptedAt, revoked_at AS revokedAt FROM organization_invitations WHERE id = ?',
         [invitation.id],
       );
-      const accepted = invitationRow?.acceptedAt instanceof Date;
-      const revoked = invitationRow?.revokedAt instanceof Date;
-      expect(Number(accepted) + Number(revoked)).toBe(1);
+      assertInvitationTerminalRow(invitationRows, firstKind === 'accept' ? 'accepted' : 'revoked');
       const membershipRows = await databaseRows<
         mysql.RowDataPacket & { status: string; role: string }
       >('SELECT status, role FROM organization_members WHERE organization_id = ? AND user_id = ?', [
@@ -1034,24 +1055,24 @@ describe.sequential('team workspace MySQL invitation races', () => {
     const blockerDurationMs = performance.now() - blockerStartedAt;
 
     expectDomainError(outcome, 'INVITATION_NOT_AVAILABLE');
-    const [invitationRow] = await databaseRows<
+    const invitationRows = await databaseRows<
       mysql.RowDataPacket & { acceptedAt: Date | null; revokedAt: Date | null }
     >(
       'SELECT accepted_at AS acceptedAt, revoked_at AS revokedAt FROM organization_invitations WHERE id = ?',
       [invitation.id],
     );
-    expect(invitationRow).toMatchObject({ acceptedAt: null, revokedAt: null });
+    assertInvitationPendingRow(invitationRows);
     const [membershipRow] = await databaseRows<mysql.RowDataPacket & { rowCount: number }>(
       'SELECT COUNT(*) AS rowCount FROM organization_members WHERE organization_id = ? AND user_id = ?',
       [organization.id, invitee.id],
     );
     expect(Number(membershipRow?.rowCount)).toBe(0);
-    const [organizationRow] = await databaseRows<
+    const organizationRows = await databaseRows<
       mysql.RowDataPacket & { teamProjectsEnabled: number }
     >('SELECT team_projects_enabled AS teamProjectsEnabled FROM organizations WHERE id = ?', [
       organization.id,
     ]);
-    expect(Boolean(organizationRow?.teamProjectsEnabled)).toBe(false);
+    assertDisabledOrganizationRow(organizationRows);
     expect(blocker.recorder.transactionActions()).toEqual(['begin', 'commit']);
     expect(accepter.recorder.transactionActions()).toEqual(['begin', 'rollback']);
     expect(deadlockCount([outcome])).toBe(0);
@@ -1399,50 +1420,17 @@ describe.sequential('team workspace MySQL organization races', () => {
       const blockerDurationMs = performance.now() - blockerStartedAt;
 
       expectDomainError(outcome, 'MEMBER_NOT_FOUND');
-      const expectedMemberLock = __organizationServiceInternals
-        .buildLockOrganizationMembersQuery(
-          compileDb,
-          requestedOrganization.id,
-          [
-            foreignIsTarget ? foreignMembership.externalId : localTargetMembership.externalId,
-            foreignIsTarget ? localManagerMembership.externalId : foreignMembership.externalId,
-          ].sort((left, right) => left.localeCompare(right)),
-        )
-        .toSQL();
-      const memberLockEvents = operationEndpoint.recorder
-        .sqlInvocations()
-        .filter(
-          (event) => event.normalizedSql === compileSqlBoundary(expectedMemberLock).normalizedSql,
-        );
-      expect(memberLockEvents).toContainEqual(
-        expect.objectContaining({
-          parameters: sqlInvocation('execute', expectedMemberLock.sql, expectedMemberLock.params)
-            .parameters,
-        }),
-      );
-      expect(memberLockEvents).toHaveLength(1);
-      expect(memberLockEvents[0]?.parameters[0]).toEqual({
-        kind: 'number',
-        value: requestedOrganization.id,
-      });
-      const organizationFixtureParameters = operationEndpoint.recorder
-        .sqlInvocations()
-        .flatMap((event) => event.parameters)
-        .filter(
-          (parameter): parameter is Extract<SanitizedSqlParameter, { kind: 'fixture-id' }> =>
-            parameter.kind === 'fixture-id' && parameter.value.startsWith('org_'),
-        );
-      expect(organizationFixtureParameters).toEqual(
-        expect.arrayContaining([{ kind: 'fixture-id', value: requestedOrganization.externalId }]),
-      );
-      expect(
-        organizationFixtureParameters.every(
-          (parameter) => parameter.value === requestedOrganization.externalId,
-        ),
-      ).toBe(true);
-      expect(organizationFixtureParameters).not.toContainEqual({
-        kind: 'fixture-id',
-        value: foreignOrganization.externalId,
+      assertForeignReportingLineIsolationEvidence({
+        recorder: operationEndpoint.recorder,
+        requestedOrganizationId: requestedOrganization.id,
+        requestedOrganizationExternalId: requestedOrganization.externalId,
+        foreignOrganizationId: foreignOrganization.id,
+        foreignOrganizationExternalId: foreignOrganization.externalId,
+        actorUserId: actor.id,
+        localMemberExternalId: foreignIsTarget
+          ? localManagerMembership.externalId
+          : localTargetMembership.externalId,
+        foreignMemberExternalId: foreignMembership.externalId,
       });
 
       const [inactiveResult] = await admin.execute<mysql.ResultSetHeader>(

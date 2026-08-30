@@ -12,6 +12,7 @@ import {
   instrumentMysqlConnection,
   matchesSqlBoundary,
   runBoundedCleanup,
+  runMysqlLockObserverExecute,
   runWithActiveTimeout,
   sqlInvocation,
 } from './team-project-race-harness.js';
@@ -246,6 +247,51 @@ describe('team project race harness instrumentation', () => {
 });
 
 describe('team project race harness bounded lifecycle', () => {
+  it('actively destroys and settles a wedged performance-schema execute', async () => {
+    let rejectExecute = (_error: Error): void => {};
+    const executeResult = new Promise<never>((_resolve, reject) => {
+      rejectExecute = reject;
+    });
+    let executeCalls = 0;
+    let destroyCalls = 0;
+
+    await expect(
+      runMysqlLockObserverExecute({
+        label: 'performance-schema lock observer',
+        execute: () => {
+          executeCalls += 1;
+          return executeResult;
+        },
+        destroy: () => {
+          destroyCalls += 1;
+          rejectExecute(new Error('observer connection destroyed'));
+        },
+        timeoutMs: 10,
+        settleTimeoutMs: 50,
+      }),
+    ).rejects.toThrow(
+      'TASK14_LOCK_OBSERVER_UNSUPPORTED: performance-schema lock observer timed out after 10ms; operation settled after abort',
+    );
+    expect(executeCalls).toBe(1);
+    expect(destroyCalls).toBe(1);
+  });
+
+  it('classifies an immediate performance-schema execute rejection as unsupported', async () => {
+    await expect(
+      runMysqlLockObserverExecute({
+        label: 'performance-schema lock observer',
+        execute: async () => {
+          throw new Error('observer permission revoked');
+        },
+        destroy: () => undefined,
+        timeoutMs: 10,
+        settleTimeoutMs: 50,
+      }),
+    ).rejects.toThrow(
+      'TASK14_LOCK_OBSERVER_UNSUPPORTED: performance-schema lock observer failed: observer permission revoked',
+    );
+  });
+
   it('actively aborts and observes operation settlement after a timeout', async () => {
     let rejectOperation = (_error: Error): void => {};
     const operation = new Promise<never>((_resolve, reject) => {
@@ -313,6 +359,67 @@ describe('team project race harness bounded lifecycle', () => {
       'cleanup failures: rollback manual transaction failed: rollback rejected; close admin timed out after 15ms',
     );
     expect(calls).toEqual(['release', 'rollback']);
+  });
+
+  it('re-observes a cleanup action that fulfills after its timeout handler aborts it', async () => {
+    let resolveAction = (): void => {};
+    const action = new Promise<void>((resolve) => {
+      resolveAction = resolve;
+    });
+
+    await expect(
+      runBoundedCleanup(
+        [
+          {
+            label: 'late successful close',
+            run: () => action,
+            onTimeout: resolveAction,
+          },
+        ],
+        10,
+      ),
+    ).rejects.toThrow(
+      'cleanup failures: late successful close timed out after 10ms; late successful close settled after timeout handler',
+    );
+  });
+
+  it('re-observes and reports a cleanup action that rejects after its timeout handler aborts it', async () => {
+    let rejectAction = (_error: Error): void => {};
+    const action = new Promise<void>((_resolve, reject) => {
+      rejectAction = reject;
+    });
+
+    await expect(
+      runBoundedCleanup(
+        [
+          {
+            label: 'late rejected rollback',
+            run: () => action,
+            onTimeout: () => rejectAction(new Error('rollback rejected after destroy')),
+          },
+        ],
+        10,
+      ),
+    ).rejects.toThrow(
+      'cleanup failures: late rejected rollback timed out after 10ms; late rejected rollback rejected after timeout handler: rollback rejected after destroy',
+    );
+  });
+
+  it('reports when a timed-out cleanup action remains pending after its timeout handler', async () => {
+    await expect(
+      runBoundedCleanup(
+        [
+          {
+            label: 'permanently wedged admin close',
+            run: () => new Promise<never>(() => {}),
+            onTimeout: () => undefined,
+          },
+        ],
+        10,
+      ),
+    ).rejects.toThrow(
+      'cleanup failures: permanently wedged admin close timed out after 10ms; permanently wedged admin close did not settle within 10ms after timeout handler',
+    );
   });
 
   it('destroys an endpoint when graceful close rejects and still reports both failures', async () => {

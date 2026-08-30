@@ -254,6 +254,32 @@ function buildActiveProjectMembersQuery(db: Pick<DB, 'select'>, projectId: numbe
     .orderBy(asc(projectMembers.createdAt));
 }
 
+function buildTeamProjectCreatorMembershipInsert(
+  db: Pick<DB, 'insert'>,
+  input: { externalId: string; projectId: number; userId: number },
+) {
+  return db.insert(projectMembers).values({
+    externalId: input.externalId,
+    projectId: input.projectId,
+    userId: input.userId,
+    role: 'lead',
+    status: 'active',
+  });
+}
+
+function buildTeamProjectInsert(
+  db: Pick<DB, 'insert'>,
+  input: {
+    externalId: string;
+    userId: number;
+    organizationId: number;
+    name: string;
+    description: string | null;
+  },
+) {
+  return db.insert(projects).values(input);
+}
+
 export async function listTeamProjects(input: {
   db: DB;
   actorExternalId: string;
@@ -323,7 +349,7 @@ export async function createTeamProject(input: {
     });
     if (!permission.allowed) throw new TeamProjectServiceError('FORBIDDEN');
 
-    const insertedProject = await tx.insert(projects).values({
+    const insertedProject = await buildTeamProjectInsert(tx, {
       externalId: projectExternalId,
       userId: actor.actorUserId,
       organizationId: actor.organizationInternalId,
@@ -332,12 +358,10 @@ export async function createTeamProject(input: {
     });
     if (readAffectedRows(insertedProject) !== 1) return hidden();
     const projectId = readInsertId(insertedProject);
-    const insertedMembership = await tx.insert(projectMembers).values({
+    const insertedMembership = await buildTeamProjectCreatorMembershipInsert(tx, {
       externalId: creatorMembershipExternalId,
       projectId,
       userId: actor.actorUserId,
-      role: 'lead',
-      status: 'active',
     });
     if (readAffectedRows(insertedMembership) !== 1) return hidden();
     readInsertId(insertedMembership);
@@ -383,7 +407,9 @@ export const __teamProjectServiceInternals = {
   buildActiveTeamOrganizationMembershipQuery,
   buildProjectDetailQuery,
   buildLockedTeamOrganizationQuery,
+  buildTeamProjectCreatorMembershipInsert,
   buildTeamProjectCreatorQuery,
+  buildTeamProjectInsert,
   buildTeamProjectListQuery,
   CONSISTENT_READ_TRANSACTION,
 };

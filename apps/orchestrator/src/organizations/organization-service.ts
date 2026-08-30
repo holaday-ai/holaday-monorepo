@@ -113,12 +113,12 @@ async function resolveActorUserId(db: DB, actorExternalId: string): Promise<numb
 }
 
 /** All organization-scoped operations begin with this active tenant-bound actor lookup. */
-async function requireActiveActorMembership(
+function buildActiveActorMembershipQuery(
   db: Pick<DB, 'select'>,
   actorUserId: number,
   organizationExternalId: string,
-): Promise<OrganizationMemberSnapshot> {
-  const [row] = await db
+) {
+  return db
     .select({
       id: organizationMembers.id,
       externalId: organizationMembers.externalId,
@@ -139,6 +139,14 @@ async function requireActiveActorMembership(
       ),
     )
     .limit(1);
+}
+
+async function requireActiveActorMembership(
+  db: Pick<DB, 'select'>,
+  actorUserId: number,
+  organizationExternalId: string,
+): Promise<OrganizationMemberSnapshot> {
+  const [row] = await buildActiveActorMembershipQuery(db, actorUserId, organizationExternalId);
   if (!row) throw new OrganizationServiceError('ORGANIZATION_NOT_FOUND');
   return { ...row, role: row.role as OrganizationRole };
 }
@@ -202,11 +210,11 @@ function requireLockedOrganizationMember(
   return member;
 }
 
-async function lockActiveOrganization(
+function buildLockedActiveOrganizationQuery(
   db: Pick<DB, 'select'>,
   organizationExternalId: string,
-): Promise<LockedOrganization> {
-  const [organization] = await db
+) {
+  return db
     .select({ id: organizations.id, externalId: organizations.externalId })
     .from(organizations)
     .where(
@@ -217,17 +225,24 @@ async function lockActiveOrganization(
       ),
     )
     .for('update');
+}
+
+async function lockActiveOrganization(
+  db: Pick<DB, 'select'>,
+  organizationExternalId: string,
+): Promise<LockedOrganization> {
+  const [organization] = await buildLockedActiveOrganizationQuery(db, organizationExternalId);
   if (!organization) throw new OrganizationServiceError('ORGANIZATION_NOT_FOUND');
   return organization;
 }
 
 /** The actor is re-read and locked inside the transaction after the organization lock. */
-async function requireLockedActiveActorMembership(
+function buildLockedActiveActorMembershipQuery(
   db: Pick<DB, 'select'>,
   actorUserId: number,
   organization: LockedOrganization,
-): Promise<OrganizationMemberSnapshot> {
-  const [row] = await db
+) {
+  return db
     .select({
       id: organizationMembers.id,
       externalId: organizationMembers.externalId,
@@ -245,6 +260,14 @@ async function requireLockedActiveActorMembership(
       ),
     )
     .for('update');
+}
+
+async function requireLockedActiveActorMembership(
+  db: Pick<DB, 'select'>,
+  actorUserId: number,
+  organization: LockedOrganization,
+): Promise<OrganizationMemberSnapshot> {
+  const [row] = await buildLockedActiveActorMembershipQuery(db, actorUserId, organization);
   if (!row) throw new OrganizationServiceError('ORGANIZATION_NOT_FOUND');
   return {
     ...row,
@@ -650,7 +673,10 @@ export async function deactivateMember(input: DeactivateMemberInput): Promise<{ 
 }
 
 export const __organizationServiceInternals = {
+  buildActiveActorMembershipQuery,
   buildActiveMemberListQuery,
+  buildLockedActiveActorMembershipQuery,
+  buildLockedActiveOrganizationQuery,
   buildLockedActiveProjectMembershipsQuery,
   buildLockedProjectsQuery,
   buildLockOrganizationMembersQuery,

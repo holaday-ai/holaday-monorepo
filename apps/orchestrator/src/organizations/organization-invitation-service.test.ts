@@ -750,6 +750,23 @@ describe('organization invitation service', () => {
     const revoke = __organizationInvitationServiceInternals
       .buildLockedInvitationByExternalIdQuery(db, 20, 'oinv_design')
       .toSQL();
+    const createMembership = __organizationInvitationServiceInternals
+      .buildCreateInvitationMembershipQuery(db, {
+        externalId: 'omem_generated',
+        organizationId: 20,
+        userId: 1,
+        role: 'member',
+        managerUserId: 2,
+        joinedAt: now,
+      })
+      .toSQL();
+    const reactivateMembership = __organizationInvitationServiceInternals
+      .buildReactivateInvitationMembershipQuery(db, 10, {
+        role: 'member',
+        managerUserId: 2,
+        joinedAt: now,
+      })
+      .toSQL();
     expect(consume.sql).toContain('`organization_invitations`.`id` = ?');
     expect(consume.sql).toContain('`organization_invitations`.`accepted_at` is null');
     expect(consume.sql).toContain('`organization_invitations`.`revoked_at` is null');
@@ -782,6 +799,26 @@ describe('organization invitation service', () => {
     expect(revoke.sql).toContain('`organization_invitations`.`organization_id` = ?');
     expect(revoke.sql).toContain('`organization_invitations`.`external_id` = ?');
     expect(revoke.sql).toContain('for update');
+    expect(createMembership.sql).toContain('insert into `organization_members`');
+    expect(createMembership.params).toEqual([
+      'omem_generated',
+      20,
+      1,
+      'member',
+      2,
+      'active',
+      '2026-08-30 12:00:00.000',
+    ]);
+    expect(reactivateMembership.sql).toContain('update `organization_members`');
+    expect(reactivateMembership.sql).toContain('where `organization_members`.`id` = ?');
+    expect(reactivateMembership.params).toEqual([
+      'member',
+      2,
+      'active',
+      '2026-08-30 12:00:00.000',
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/),
+      10,
+    ]);
   });
 
   it('keeps failures domain-only', () => {

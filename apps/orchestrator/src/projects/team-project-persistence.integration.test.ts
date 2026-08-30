@@ -18,7 +18,10 @@ import {
   parseTeamProjectsIntegrationTarget,
   preflightTeamProjectsIntegrationDatabase,
 } from './team-project-integration-safety.js';
-import { matchesCreatorLeadInsertInvocation } from './team-project-persistence-harness.js';
+import {
+  createTeamProjectInsertIdCapture,
+  matchesCreatorLeadInsertInvocation,
+} from './team-project-persistence-harness.js';
 import { buildIntegrationFixtureExternalId } from './team-project-race-fixtures.js';
 import {
   createAffectedRowsOverride,
@@ -185,14 +188,26 @@ describe.sequential('team project MySQL persistence', () => {
         `SET SESSION innodb_lock_wait_timeout = ${MYSQL_LOCK_WAIT_TIMEOUT_SECONDS}`,
       );
       const recorder = createMysqlBoundaryRecorder();
+      const projectIdCapture = createTeamProjectInsertIdCapture({
+        actorUserId,
+        organizationId,
+        name: uniqueName,
+        description: null,
+      });
       const zeroCreatorLeadResult = createAffectedRowsOverride({
-        matches: (invocation) => matchesCreatorLeadInsertInvocation(invocation, { actorUserId }),
+        matches: (invocation) => {
+          const projectId = projectIdCapture.projectId();
+          return (
+            projectId !== undefined &&
+            matchesCreatorLeadInsertInvocation(invocation, { actorUserId, projectId })
+          );
+        },
         affectedRows: 0,
       });
       const instrumented = instrumentMysqlConnection(
         failingConnection,
         [],
-        [zeroCreatorLeadResult],
+        [projectIdCapture, zeroCreatorLeadResult],
         recorder,
       );
       const failingDb = drizzle(instrumented, {
@@ -219,19 +234,23 @@ describe.sequential('team project MySQL persistence', () => {
         ),
       ).rejects.toMatchObject({ code: 'NOT_FOUND' });
 
-      const creatorLeadInserts = recorder
-        .sqlInvocations()
-        .filter((invocation) => matchesCreatorLeadInsertInvocation(invocation, { actorUserId }));
+      const attemptedProjectId = projectIdCapture.requireProjectId();
+      const creatorLeadInserts = recorder.sqlInvocations().filter((invocation) =>
+        matchesCreatorLeadInsertInvocation(invocation, {
+          actorUserId,
+          projectId: attemptedProjectId,
+        }),
+      );
       expect(creatorLeadInserts).toHaveLength(1);
       expect(recorder.transactionActions()).toEqual(['begin', 'rollback']);
       const persistedProjects = await db
         .select({ id: projects.id })
         .from(projects)
-        .where(eq(projects.userId, actorUserId));
+        .where(eq(projects.id, attemptedProjectId));
       const persistedMemberships = await db
         .select({ id: projectMembers.id })
         .from(projectMembers)
-        .where(eq(projectMembers.userId, actorUserId));
+        .where(eq(projectMembers.projectId, attemptedProjectId));
       expect(persistedProjects).toEqual([]);
       expect(persistedMemberships).toEqual([]);
     } finally {
