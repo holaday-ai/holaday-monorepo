@@ -2,6 +2,7 @@
 // project gate. Keep parsing and decisions pure so every consumer shares the
 // same fail-closed behavior without reading environment variables itself.
 
+import { isExternalId } from '@holaday/shared-types';
 import { env as appEnv } from '../config/env.js';
 import { isTeamProjectsEnabledFor } from '../organizations/team-project-access.js';
 
@@ -16,7 +17,7 @@ export function parseTeamTaskLifecycleAllowlist(raw: string): ParsedTeamTaskLife
   if (raw === '') return { allowlist: new Set(), allowAll: true };
 
   const entries = raw.split(',').map((value) => value.trim());
-  if (entries.some((entry) => entry === '')) {
+  if (entries.some((entry) => entry === '' || !isExternalId(entry, 'user'))) {
     return { allowlist: new Set(), allowAll: false };
   }
 
@@ -32,7 +33,7 @@ export function computeTeamTaskLifecycleUserEnabled(
   teamTaskLifecycleEnabled: boolean,
   allowlist: ReadonlySet<string>,
   userExternalId: string,
-  allowAll = allowlist.size === 0,
+  allowAll: boolean,
 ): boolean {
   if (!teamProjectsEnabled || !teamTaskLifecycleEnabled) return false;
   return allowAll || allowlist.has(userExternalId);
@@ -48,7 +49,7 @@ export function computeTeamTaskLifecycleEnabled(
   organizationTeamProjectsEnabled: boolean,
   allowlist: ReadonlySet<string>,
   userExternalId: string,
-  allowAll = allowlist.size === 0,
+  allowAll: boolean,
 ): boolean {
   return (
     organizationTeamProjectsEnabled === true &&

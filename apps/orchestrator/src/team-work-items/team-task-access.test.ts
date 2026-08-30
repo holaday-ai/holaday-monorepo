@@ -5,23 +5,26 @@ import {
   parseTeamTaskLifecycleAllowlist,
 } from './team-task-access.js';
 
+const canaryUserId = 'usr_EeYpvsvLtyDzN4VLQi7BT';
+const secondUserId = 'usr_AbCdEfGhJkLmNpQrStUv2';
+
 describe('team task lifecycle access gate', () => {
   it.each([
-    ['the phase two global flag is disabled', false, true, true, 'usr_canary', false],
-    ['the phase one user gate is disabled', true, false, true, 'usr_canary', false],
+    ['the phase two global flag is disabled', false, true, true, canaryUserId, false],
+    ['the phase one user gate is disabled', true, false, true, canaryUserId, false],
     [
       'the user is missing from a non-empty phase two allowlist',
       true,
       true,
       true,
-      'usr_other',
+      secondUserId,
       false,
     ],
-    ['the user is in a non-empty phase two allowlist', true, true, true, 'usr_canary', true],
+    ['the user is in a non-empty phase two allowlist', true, true, true, canaryUserId, true],
   ] as const)(
     'returns %s for the user-level nested gate',
     (_label, phaseTwoEnabled, phaseOneEnabled, allowlistContainsUser, userExternalId, expected) => {
-      const allowlist = allowlistContainsUser ? new Set(['usr_canary']) : new Set(['usr_other']);
+      const allowlist = allowlistContainsUser ? new Set([canaryUserId]) : new Set([secondUserId]);
 
       expect(
         computeTeamTaskLifecycleUserEnabled(
@@ -44,29 +47,59 @@ describe('team task lifecycle access gate', () => {
         true,
         true,
         parsed.allowlist,
-        'usr_anyone',
+        canaryUserId,
         parsed.allowAll,
       ),
     ).toBe(true);
   });
 
-  it.each([' ', ' usr_canary, ', 'usr_canary,,usr_other'] as const)(
-    'fails closed for malformed non-empty phase two allowlist %j',
-    (raw) => {
-      const parsed = parseTeamTaskLifecycleAllowlist(raw);
+  it.each([
+    [canaryUserId, [canaryUserId]],
+    [`${canaryUserId},${secondUserId}`, [canaryUserId, secondUserId]],
+  ] as const)('accepts canonical user IDs in a configured allowlist', (raw, expectedIds) => {
+    const parsed = parseTeamTaskLifecycleAllowlist(raw);
 
-      expect(parsed).toEqual({ allowlist: new Set(), allowAll: false });
+    expect(parsed).toEqual({ allowlist: new Set(expectedIds), allowAll: false });
+    for (const userExternalId of expectedIds) {
       expect(
         computeTeamTaskLifecycleUserEnabled(
           true,
           true,
           parsed.allowlist,
-          'usr_canary',
+          userExternalId,
           parsed.allowAll,
         ),
-      ).toBe(false);
-    },
-  );
+      ).toBe(true);
+    }
+  });
+
+  it.each([
+    ' ',
+    ` ${canaryUserId}, `,
+    `${canaryUserId},,${secondUserId}`,
+    `${canaryUserId},not-a-user-id`,
+    'tsk_EeYpvsvLtyDzN4VLQi7BT',
+    'usr_short',
+  ] as const)('fails closed for malformed non-empty phase two allowlist %j', (raw) => {
+    const parsed = parseTeamTaskLifecycleAllowlist(raw);
+
+    expect(parsed).toEqual({ allowlist: new Set(), allowAll: false });
+    expect(
+      computeTeamTaskLifecycleUserEnabled(
+        true,
+        true,
+        parsed.allowlist,
+        canaryUserId,
+        parsed.allowAll,
+      ),
+    ).toBe(false);
+  });
+
+  it('does not infer allow-all from a malformed empty set', () => {
+    expect(computeTeamTaskLifecycleUserEnabled(true, true, new Set(), canaryUserId, false)).toBe(
+      false,
+    );
+  });
 
   it('requires the organization team-project flag after the user-level nested gate passes', () => {
     expect(
@@ -74,8 +107,8 @@ describe('team task lifecycle access gate', () => {
         true,
         true,
         true,
-        new Set(['usr_canary']),
-        'usr_canary',
+        new Set([canaryUserId]),
+        canaryUserId,
         false,
       ),
     ).toBe(true);
@@ -84,8 +117,8 @@ describe('team task lifecycle access gate', () => {
         true,
         true,
         false,
-        new Set(['usr_canary']),
-        'usr_canary',
+        new Set([canaryUserId]),
+        canaryUserId,
         false,
       ),
     ).toBe(false);
