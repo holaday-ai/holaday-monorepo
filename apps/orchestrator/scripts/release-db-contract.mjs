@@ -7,10 +7,17 @@ const SKIPPABLE_ALREADY_APPLIED_CODES = new Set([
   'ER_MULTIPLE_PRI_KEY',
 ]);
 
-const REPLAYABLE_MISSING_DROP = {
-  file: '0044_payments_provider_order_unique.sql',
-  statement: 'DROP INDEX `ix_payments_provider_order` ON `payments`',
-};
+const REPLAYABLE_MISSING_DROPS = [
+  {
+    file: '0044_payments_provider_order_unique.sql',
+    statement: 'DROP INDEX `ix_payments_provider_order` ON `payments`',
+  },
+  {
+    file: '0057_team_work_item_review_attempts.sql',
+    statement:
+      'ALTER TABLE `team_work_item_reviews`\n  DROP INDEX `uk_team_work_item_reviews_submission`',
+  },
+];
 
 export const REQUIRED_PRE_APP_ROLLOUT_MIGRATIONS = [
   '0051_account_closures.sql',
@@ -73,8 +80,9 @@ export function isSkippableAlreadyAppliedError(error, context = {}) {
     if (SKIPPABLE_ALREADY_APPLIED_CODES.has(error.code)) return true;
     return (
       error.code === 'ER_CANT_DROP_FIELD_OR_KEY' &&
-      context.file === REPLAYABLE_MISSING_DROP.file &&
-      context.statement?.trim() === REPLAYABLE_MISSING_DROP.statement
+      REPLAYABLE_MISSING_DROPS.some(
+        ({ file, statement }) => context.file === file && context.statement?.trim() === statement,
+      )
     );
   }
   const message = error.message ?? '';

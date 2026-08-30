@@ -1661,14 +1661,18 @@ export class TeamTaskPlanningService {
         ) {
           return fail('NOT_FOUND');
         }
-        const arbitrator = await tx.loadActiveOrganizationMember(
+        const arbitrator = await tx.loadActiveMember(
           access.organizationId,
+          access.projectId,
           validated.contract.arbitratorId,
         );
         if (
           !arbitrator ||
           arbitrator.organizationId !== access.organizationId ||
-          !arbitrator.organizationMembershipActive
+          arbitrator.projectId !== access.projectId ||
+          !arbitrator.organizationMembershipActive ||
+          !arbitrator.projectMembershipActive ||
+          arbitrator.projectRole === 'viewer'
         ) {
           return fail('NOT_FOUND');
         }

@@ -59,6 +59,7 @@ describe('governance lifecycle registry', () => {
       'task_30d',
       'audit_180d',
       'manual_hold',
+      'team_business_fact_permanent',
     ]);
 
     const task30d = task?.localRegimes?.find((regime) => regime.id === 'task_30d');
@@ -73,6 +74,12 @@ describe('governance lifecycle registry', () => {
 
     const audit = task?.localRegimes?.find((regime) => regime.id === 'audit_180d');
     expect(audit?.automationStatus).toBe('not_implemented');
+
+    const teamFacts = task?.localRegimes?.find(
+      (regime) => regime.id === 'team_business_fact_permanent',
+    );
+    expect(teamFacts?.boundary).toContain('永久保留');
+    expect(teamFacts?.boundary).toContain('账号墓碑');
     expect(audit?.boundary).toContain('没有已核实的 180 天写入器');
 
     const hold = task?.localRegimes?.find((regime) => regime.id === 'manual_hold');

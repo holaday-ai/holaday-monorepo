@@ -11,6 +11,7 @@ import {
 import { partnerMemberships } from '../db/schema/partner.js';
 import { taskQuotas } from '../db/schema/task-quotas.js';
 import { users } from '../db/schema/users.js';
+import { assertNoActiveTeamWorkItemResponsibilitiesForFinalization } from './handlers/team-work-items.js';
 import { assertNoTeamWorkspaceAssociationsForFinalization } from './handlers/team-workspace.js';
 
 export type TombstoneFinalizationErrorCode =
@@ -170,6 +171,7 @@ export async function finalizeUserTombstone(input: {
     }
 
     try {
+      await assertNoActiveTeamWorkItemResponsibilitiesForFinalization(tx, input.userId);
       await assertNoTeamWorkspaceAssociationsForFinalization(tx, input.userId);
     } catch {
       throw new TombstoneFinalizationError('FINALIZATION_PRECONDITION_FAILED');

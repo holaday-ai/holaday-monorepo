@@ -195,7 +195,10 @@ const businessIndexes = [
     'work_item_id',
     'submission_version',
   ]),
-  index('team_work_item_reviews', 'uk_team_work_item_reviews_submission', true, ['submission_id']),
+  index('team_work_item_reviews', 'uk_team_work_item_reviews_submission_attempt', true, [
+    'submission_id',
+    'review_attempt',
+  ]),
   index('team_task_review_delegations', 'uk_team_task_review_delegations_grant', true, [
     'organization_id',
     'project_id',
@@ -665,6 +668,9 @@ export const TEAM_WORK_ITEM_SCHEMA_CONTRACT = {
     column('team_work_item_reviews', 'evidence_refs_json', 'json', 'json', true),
     column('team_work_item_reviews', 'revision_instructions_json', 'json', 'json', true),
     column('team_work_item_reviews', 'review_delegation_id', 'bigint', 'bigint unsigned', true),
+    column('team_work_item_reviews', 'review_attempt', 'int', 'int unsigned', false, {
+      defaultValue: '1',
+    }),
     column('team_task_review_delegations', 'valid_from', 'datetime', 'datetime(3)', false),
     column('team_task_review_delegations', 'valid_until', 'datetime', 'datetime(3)', false),
     column('team_task_review_delegations', 'revoked_at', 'datetime', 'datetime(3)', true),

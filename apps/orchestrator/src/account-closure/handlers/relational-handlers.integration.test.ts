@@ -1,8 +1,10 @@
 import { randomBytes } from 'node:crypto';
+import { newExternalId } from '@holaday/shared-types';
 import { eq, sql } from 'drizzle-orm';
 import mysql from 'mysql2/promise';
 import { pino } from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { acceptanceContractVersions } from '../../db/schema/acceptance-contract-versions.js';
 import { apiKeys } from '../../db/schema/api-keys.js';
 import { batchTaskItems, batchTasks } from '../../db/schema/batch-tasks.js';
 import { canaryResults } from '../../db/schema/canary-results.js';
@@ -47,6 +49,13 @@ import { taskEvents } from '../../db/schema/task-events.js';
 import { taskFiles } from '../../db/schema/task-files.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
 import { tasks } from '../../db/schema/tasks.js';
+import { teamAiContributions } from '../../db/schema/team-ai-contributions.js';
+import { teamEvidenceBindings } from '../../db/schema/team-evidence-bindings.js';
+import { teamProjectPlanningEvents } from '../../db/schema/team-project-planning-events.js';
+import { teamTaskReviewDelegations } from '../../db/schema/team-task-review-delegations.js';
+import { teamWorkItemAssignments } from '../../db/schema/team-work-item-assignments.js';
+import { teamWorkItemEvents } from '../../db/schema/team-work-item-events.js';
+import { teamWorkItems } from '../../db/schema/team-work-items.js';
 import { userMfaRecoveryCodes } from '../../db/schema/user-mfa-recovery-codes.js';
 import { userProfiles } from '../../db/schema/user-profiles.js';
 import { userSiteStats } from '../../db/schema/user-site-stats.js';
@@ -78,6 +87,11 @@ import { feedbackSupportClosureHandler } from './feedback-support.js';
 import { mediaAssetsClosureHandler } from './media-assets.js';
 import { stockPreferenceProfileClosureHandler } from './stock-preference-profile.js';
 import { taskExecutionClosureHandler } from './task-execution.js';
+import {
+  TEAM_WORK_ITEM_CLOSURE_TARGETS,
+  assertTeamWorkItemClosureSafe,
+  minimizeRetainedTeamWorkSources,
+} from './team-work-items.js';
 import {
   TEAM_WORKSPACE_CLOSURE_TARGETS,
   assertTeamWorkspaceClosureSafe,
@@ -224,6 +238,291 @@ describe.sequential('account closure relational handlers', () => {
     await expect(handler.run(context(taskFilePage.checkpoint))).rejects.toMatchObject({
       code: 'HANDLER_DEFERRED',
     });
+  });
+
+  it('blocks active team duties, then deactivates only the closing account associations and retains facts', async () => {
+    const [organizationInsert] = await db.insert(organizations).values({
+      externalId: newExternalId('organization'),
+      name: 'Task 12 closure integration',
+      ownerUserId: other.id,
+      status: 'active',
+      teamProjectsEnabled: true,
+    });
+    const organizationId = Number(organizationInsert.insertId);
+    const [projectInsert] = await db.insert(projects).values({
+      externalId: newExternalId('project'),
+      userId: other.id,
+      organizationId,
+      name: 'Task 12 retained project',
+    });
+    const projectId = Number(projectInsert.insertId);
+    const [workItemInsert] = await db.insert(teamWorkItems).values({
+      externalId: newExternalId('teamWorkItem'),
+      organizationId,
+      projectId,
+      createdByUserId: other.id,
+      title: 'Retained business fact',
+      assignmentMode: 'assigned',
+      status: 'draft',
+    });
+    const workItemId = Number(workItemInsert.insertId);
+    const [assignmentInsert] = await db.insert(teamWorkItemAssignments).values({
+      externalId: newExternalId('teamWorkItemAssignment'),
+      organizationId,
+      projectId,
+      workItemId,
+      userId: target.id,
+      role: 'responsible',
+      status: 'accepted',
+      offeredByUserId: other.id,
+    });
+    const assignmentId = Number(assignmentInsert.insertId);
+
+    await expect(assertTeamWorkItemClosureSafe(context(null))).rejects.toMatchObject({
+      code: 'CAPABILITY_CHANGED',
+    });
+    await db
+      .update(teamWorkItemAssignments)
+      .set({ role: 'collaborator' })
+      .where(eq(teamWorkItemAssignments.id, assignmentId));
+    const [otherAssignmentInsert] = await db.insert(teamWorkItemAssignments).values({
+      externalId: newExternalId('teamWorkItemAssignment'),
+      organizationId,
+      projectId,
+      workItemId,
+      userId: other.id,
+      role: 'responsible',
+      status: 'accepted',
+      offeredByUserId: other.id,
+    });
+    const otherAssignmentId = Number(otherAssignmentInsert.insertId);
+    const [contractInsert] = await db.insert(acceptanceContractVersions).values({
+      externalId: newExternalId('acceptanceContractVersion'),
+      organizationId,
+      projectId,
+      workItemId,
+      version: 1,
+      objective: 'Retain review contract',
+      deliverablesJson: [],
+      criteriaJson: [],
+      requiredEvidenceTypesJson: [],
+      approverUserId: other.id,
+      arbitratorUserId: other.id,
+      dueAt: new Date('2026-09-30T00:00:00.000Z'),
+      createdByUserId: other.id,
+      confirmedByUserId: other.id,
+      confirmedAt: new Date('2026-08-31T00:00:00.000Z'),
+    });
+    const contractId = Number(contractInsert.insertId);
+    await db
+      .update(teamWorkItems)
+      .set({ currentContractVersionId: contractId })
+      .where(eq(teamWorkItems.id, workItemId));
+    const [delegationInsert] = await db.insert(teamTaskReviewDelegations).values({
+      externalId: newExternalId('teamTaskReviewDelegation'),
+      organizationId,
+      projectId,
+      delegatorUserId: other.id,
+      delegateUserId: target.id,
+      validFrom: new Date('2026-08-01T00:00:00.000Z'),
+      validUntil: new Date('2026-10-01T00:00:00.000Z'),
+    });
+    const delegationId = Number(delegationInsert.insertId);
+
+    const [executionTaskInsert] = await db.insert(tasks).values({
+      externalId: newExternalId('task'),
+      userId: target.id,
+      projectId,
+      status: 'completed',
+      origin: 'user',
+      intent: 'private retained execution intent',
+      result: { private: 'private execution result' },
+      sourceContext: { private: 'private source context' },
+      originalSummary: 'private original summary',
+    });
+    const executionTaskId = Number(executionTaskInsert.insertId);
+    const [taskFileInsert] = await db.insert(taskFiles).values({
+      externalId: newExternalId('file'),
+      userId: target.id,
+      taskId: executionTaskId,
+      kind: 'input',
+      filename: 'private-input.txt',
+      mimetype: 'text/plain',
+      sizeBytes: 20,
+      storagePath: `private/task12-${target.id}.txt`,
+    });
+    const taskFileId = Number(taskFileInsert.insertId);
+    const [artifactInsert] = await db.insert(evidenceArtifacts).values({
+      externalId: newExternalId('evidenceArtifact'),
+      ownerUserId: target.id,
+      taskId: executionTaskId,
+      artifactKind: 'document',
+      purpose: 'task_evidence',
+      r2Bucket: 'private-bucket',
+      r2Key: `private/task12-${target.id}.json`,
+      contentType: 'application/json',
+      sizeBytes: 20,
+      sha256: 'cd'.repeat(32),
+      capturedAt: new Date('2026-08-30T00:00:00.000Z'),
+      collectorLane: 'task12-integration',
+      rawExcerpt: 'private raw evidence',
+      metadataJson: { private: 'private metadata' },
+    });
+    const artifactId = Number(artifactInsert.insertId);
+    const [contributionInsert] = await db.insert(teamAiContributions).values({
+      externalId: newExternalId('teamAiContribution'),
+      organizationId,
+      projectId,
+      workItemId,
+      contributedByUserId: target.id,
+      executionTaskId,
+      requestedScope: 'retained scope fact',
+      inputSourceSummaryJson: { inputFiles: 1, evidenceArtifacts: 1 },
+      resultVersion: 'sha256:retained-version',
+      usageSnapshotJson: { taskUnits: 1 },
+      unverifiedRisksJson: ['not-reviewed'],
+    });
+    const contributionId = Number(contributionInsert.insertId);
+    await db.insert(teamEvidenceBindings).values([
+      {
+        externalId: newExternalId('teamEvidenceBinding'),
+        organizationId,
+        projectId,
+        workItemId,
+        taskFileId,
+        sourceKind: 'taskFile',
+        metadataJson: { evidenceType: 'source_document' },
+        boundByUserId: target.id,
+      },
+      {
+        externalId: newExternalId('teamEvidenceBinding'),
+        organizationId,
+        projectId,
+        workItemId,
+        evidenceArtifactId: artifactId,
+        sourceKind: 'evidenceArtifact',
+        metadataJson: { evidenceType: 'source_document' },
+        boundByUserId: target.id,
+      },
+    ]);
+
+    await expect(assertTeamWorkItemClosureSafe(context(null))).resolves.toBeUndefined();
+    const conflictingEventExternalId = newExternalId('teamWorkItemEvent');
+    await db.insert(teamWorkItemEvents).values({
+      externalId: conflictingEventExternalId,
+      organizationId,
+      projectId,
+      workItemId,
+      actorUserId: target.id,
+      eventType: 'forced_transaction_failure',
+      idempotencyKey: `acr:acl_relational_test:a:${assignmentId}`,
+    });
+    await expect(
+      TEAM_WORK_ITEM_CLOSURE_TARGETS.assignments.deleteOwnedIds(context(null), [assignmentId]),
+    ).rejects.toThrow();
+    const [rolledBackAssignment] = await db
+      .select({ status: teamWorkItemAssignments.status })
+      .from(teamWorkItemAssignments)
+      .where(eq(teamWorkItemAssignments.id, assignmentId));
+    expect(rolledBackAssignment?.status).toBe('accepted');
+    await db
+      .delete(teamWorkItemEvents)
+      .where(eq(teamWorkItemEvents.externalId, conflictingEventExternalId));
+    expect(
+      await TEAM_WORK_ITEM_CLOSURE_TARGETS.assignments.deleteOwnedIds(context(null), [
+        assignmentId,
+      ]),
+    ).toBe(1);
+    expect(
+      await TEAM_WORK_ITEM_CLOSURE_TARGETS.reviewDelegations.deleteOwnedIds(context(null), [
+        delegationId,
+      ]),
+    ).toBe(1);
+
+    const [assignment] = await db
+      .select({ status: teamWorkItemAssignments.status })
+      .from(teamWorkItemAssignments)
+      .where(eq(teamWorkItemAssignments.id, assignmentId));
+    const [delegation] = await db
+      .select({ revokedAt: teamTaskReviewDelegations.revokedAt })
+      .from(teamTaskReviewDelegations)
+      .where(eq(teamTaskReviewDelegations.id, delegationId));
+    expect(assignment?.status).toBe('removed');
+    const [otherAssignment] = await db
+      .select({ status: teamWorkItemAssignments.status })
+      .from(teamWorkItemAssignments)
+      .where(eq(teamWorkItemAssignments.id, otherAssignmentId));
+    expect(otherAssignment?.status).toBe('accepted');
+    expect(delegation?.revokedAt).toBeInstanceOf(Date);
+    expect(
+      await db
+        .select({ id: teamWorkItems.id })
+        .from(teamWorkItems)
+        .where(eq(teamWorkItems.id, workItemId)),
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ id: acceptanceContractVersions.id })
+        .from(acceptanceContractVersions)
+        .where(eq(acceptanceContractVersions.id, contractId)),
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ id: teamWorkItemEvents.id })
+        .from(teamWorkItemEvents)
+        .where(eq(teamWorkItemEvents.workItemId, workItemId)),
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ id: teamProjectPlanningEvents.id })
+        .from(teamProjectPlanningEvents)
+        .where(eq(teamProjectPlanningEvents.projectId, projectId)),
+    ).toHaveLength(1);
+
+    await expect(minimizeRetainedTeamWorkSources(context(null), 100)).resolves.toBe(1);
+    await expect(minimizeRetainedTeamWorkSources(context(null), 100)).resolves.toBe(1);
+    await expect(minimizeRetainedTeamWorkSources(context(null), 100)).resolves.toBe(1);
+    await expect(minimizeRetainedTeamWorkSources(context(null), 100)).resolves.toBe(0);
+    expect(
+      await TEAM_WORK_ITEM_CLOSURE_TARGETS.unretainedTasks.selectOwnedIds(context(null), 100),
+    ).not.toContain(executionTaskId);
+    const [retainedTask] = await db.select().from(tasks).where(eq(tasks.id, executionTaskId));
+    const [retainedFile] = await db.select().from(taskFiles).where(eq(taskFiles.id, taskFileId));
+    const [retainedArtifact] = await db
+      .select()
+      .from(evidenceArtifacts)
+      .where(eq(evidenceArtifacts.id, artifactId));
+    expect(retainedTask).toMatchObject({
+      intent: '[account closed]',
+      result: null,
+      sourceContext: null,
+      originalSummary: null,
+    });
+    expect(retainedFile).toMatchObject({
+      filename: 'retained-evidence',
+      storagePath: '',
+      sizeBytes: 0,
+      status: 'expired',
+    });
+    expect(retainedArtifact).toMatchObject({
+      ownerUserId: null,
+      taskId: null,
+      r2Key: '',
+      rawExcerpt: null,
+      sizeBytes: 0,
+    });
+    expect(
+      await db
+        .select({ id: teamAiContributions.id })
+        .from(teamAiContributions)
+        .where(eq(teamAiContributions.id, contributionId)),
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ id: teamEvidenceBindings.id })
+        .from(teamEvidenceBindings)
+        .where(eq(teamEvidenceBindings.workItemId, workItemId)),
+    ).toHaveLength(2);
   });
 
   it('transfers organization and team-project responsibility before account closure cleanup', async () => {
@@ -534,7 +833,7 @@ describe.sequential('account closure relational handlers', () => {
     ] as const;
     for (const categoryId of categories) {
       const result = await runToCompletion(productionHandler(categoryId));
-      expect(result.retention).toBe('deleted');
+      expect(result.retention).toBe(categoryId === 'task_execution' ? 'anonymized' : 'deleted');
       expect(result.processed).toBeGreaterThan(0);
     }
 
@@ -557,7 +856,6 @@ describe.sequential('account closure relational handlers', () => {
       'batch_tasks',
       'planned_tasks',
       'scheduled_tasks',
-      'tasks',
       'projects',
       'video_edit_action_quotes',
       'video_edit_projects',
@@ -566,6 +864,10 @@ describe.sequential('account closure relational handlers', () => {
       expect(await ownedCount(tableName, target.id)).toBe(0);
       expect(await ownedCount(tableName, other.id)).toBeGreaterThan(0);
     }
+    // The one execution task referenced by an immutable AI contribution is
+    // retained as a minimized FK shell; ordinary target tasks were deleted.
+    expect(await ownedCount('tasks', target.id)).toBe(1);
+    expect(await ownedCount('tasks', other.id)).toBeGreaterThan(0);
     expect(await emailOwnedCount('verification_codes', target.email)).toBe(0);
     expect(await emailOwnedCount('verification_codes', other.email)).toBe(1);
     for (const row of targetTaskGraph.deletedRows) {
@@ -589,7 +891,7 @@ describe.sequential('account closure relational handlers', () => {
       await expect(productionHandler(categoryId).run(context(null))).resolves.toEqual({
         kind: 'complete',
         processed: 0,
-        retention: 'not_present',
+        retention: categoryId === 'task_execution' ? 'anonymized' : 'not_present',
       });
     }
   });
@@ -814,7 +1116,7 @@ describe.sequential('account closure relational handlers', () => {
     });
     await expect(taskExecutionClosureHandler.run(context(null))).resolves.toMatchObject({
       kind: 'complete',
-      retention: 'not_present',
+      retention: 'anonymized',
     });
     await expect(crossTaskMemoryClosureHandler.run(context(null))).resolves.toMatchObject({
       kind: 'complete',

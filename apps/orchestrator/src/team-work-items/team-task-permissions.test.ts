@@ -84,6 +84,35 @@ describe('team task lifecycle permission matrix', () => {
     expect(decideTeamTaskPermission(action, context(overrides))).toEqual(expected);
   });
 
+  it.each(['bind_evidence', 'record_ai_contribution', 'confirm_ai_contribution'] as const)(
+    'requires an accepted responsible or collaborator assignment to %s',
+    (action) => {
+      expect(decideTeamTaskPermission(action, context({ actorIsResponsible: true }))).toEqual({
+        allowed: true,
+      });
+      expect(decideTeamTaskPermission(action, context({ actorIsCollaborator: true }))).toEqual({
+        allowed: true,
+      });
+      expect(decideTeamTaskPermission(action, context())).toEqual({
+        allowed: false,
+        reason: 'assigned_member_required',
+      });
+      expect(
+        decideTeamTaskPermission(
+          action,
+          context({ actorProjectRole: 'viewer', actorIsResponsible: true }),
+        ),
+      ).toEqual({ allowed: false, reason: 'viewer_cannot_mutate' });
+    },
+  );
+
+  it('allows active project viewers to read the evidence package', () => {
+    expect(decideTeamTaskPermission('read_evidence_package', context())).toEqual({ allowed: true });
+    expect(
+      decideTeamTaskPermission('read_evidence_package', context({ actorProjectRole: 'viewer' })),
+    ).toEqual({ allowed: true });
+  });
+
   it.each([
     ['review', { actorIsDesignatedApprover: true }, { allowed: true }],
     [
@@ -174,6 +203,9 @@ describe('team task lifecycle permission matrix', () => {
       'submit',
       'review',
       'appeal',
+      'bind_evidence',
+      'record_ai_contribution',
+      'confirm_ai_contribution',
       'close',
       'archive',
     ];
