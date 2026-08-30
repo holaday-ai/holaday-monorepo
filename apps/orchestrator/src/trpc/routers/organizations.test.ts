@@ -231,11 +231,11 @@ describe('organizationsRouter', () => {
 
   it('builds invitation URLs from a canonical public origin with URL semantics', () => {
     expect(__organizationsRouterInternals.buildInvitationUrl('', 'opaque token')).toBe(
-      '/organizations/invitations/accept?token=opaque%20token',
+      '/organizations/invitations/accept#token=opaque+token',
     );
     expect(
       __organizationsRouterInternals.buildInvitationUrl('https://holaday.example', 'opaque token'),
-    ).toBe('https://holaday.example/organizations/invitations/accept?token=opaque+token');
+    ).toBe('https://holaday.example/organizations/invitations/accept#token=opaque+token');
   });
 
   it('normalizes a created name and rejects empty or oversized normalized values', async () => {
@@ -326,7 +326,7 @@ describe('organizationsRouter', () => {
       caller.createInvitation({ organizationId: 'org_design', role: 'member' }),
     ).resolves.toEqual({
       invitationId: 'oinv_123',
-      inviteUrl: '/organizations/invitations/accept?token=plaintext-token',
+      inviteUrl: '/organizations/invitations/accept#token=plaintext-token',
       expiresAt: new Date('2026-09-06T00:00:00.000Z'),
     });
     await expect(

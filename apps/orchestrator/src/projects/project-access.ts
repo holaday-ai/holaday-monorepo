@@ -456,6 +456,7 @@ function authorizeMutation<Action extends ProjectMutationAction>(
 
 type CanonicalMutationLocks = {
   projectMemberships: TargetProjectMemberSnapshot[];
+  projectOwnerUserId?: number;
   targetOrganizationMember?: TargetOrganizationMemberSnapshot;
 };
 
@@ -482,7 +483,10 @@ async function lockCanonicalMutationAccess(
     ) {
       return hidden();
     }
-    return { access: candidateAccess, locks: { projectMemberships: [] } };
+    return {
+      access: candidateAccess,
+      locks: { projectMemberships: [], projectOwnerUserId: project.userId },
+    };
   }
 
   // Team mutations always lock tenant state before the project. The candidate lookup is
@@ -577,7 +581,11 @@ async function lockCanonicalMutationAccess(
       organizationRole: actorOrganizationMember.role,
       projectRole: actorProjectMember.role,
     },
-    locks: { projectMemberships, targetOrganizationMember },
+    locks: {
+      projectMemberships,
+      projectOwnerUserId: lockedProject.userId,
+      targetOrganizationMember,
+    },
   };
 }
 
@@ -683,6 +691,17 @@ export async function removeProjectMemberWithAccess(
       activeMemberships.filter((membership) => membership.role === 'lead').length <= 1
     ) {
       return conflict('SOLE_PROJECT_LEAD');
+    }
+    if (locks.projectOwnerUserId === target.userId) {
+      const replacement = activeMemberships.find(
+        (membership) => membership.userId !== target.userId && membership.role === 'lead',
+      );
+      if (!replacement) return conflict('SOLE_PROJECT_LEAD');
+      const transferred = await tx
+        .update(projects)
+        .set({ userId: replacement.userId })
+        .where(and(eq(projects.id, grant.projectId), eq(projects.userId, target.userId)));
+      requireExactlyOne(transferred);
     }
     const result = await tx
       .update(projectMembers)

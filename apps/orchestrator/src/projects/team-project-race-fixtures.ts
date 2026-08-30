@@ -16,6 +16,8 @@ export type Task14RaceCaseName =
   | 'accept-first'
   | 'revoke-first'
   | 'organization-disable-accept'
+  | 'organization-disable-create-invitation'
+  | 'organization-disable-revoke-invitation'
   | 'report-first-demotion'
   | 'demotion-first-report'
   | 'report-first-deactivation'
@@ -90,6 +92,8 @@ export const TASK14_RACE_FIXTURE_PLANS: readonly Task14RaceFixturePlan[] = [
   { caseName: 'accept-first', fixtures: invitationFixtures },
   { caseName: 'revoke-first', fixtures: invitationFixtures },
   { caseName: 'organization-disable-accept', fixtures: invitationFixtures },
+  { caseName: 'organization-disable-create-invitation', fixtures: invitationFixtures },
+  { caseName: 'organization-disable-revoke-invitation', fixtures: invitationFixtures },
   { caseName: 'report-first-demotion', fixtures: reportingFixtures },
   { caseName: 'demotion-first-report', fixtures: reportingFixtures },
   { caseName: 'report-first-deactivation', fixtures: reportingFixtures },

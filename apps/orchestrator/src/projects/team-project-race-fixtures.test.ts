@@ -12,6 +12,8 @@ const expectedCases = [
   'accept-first',
   'revoke-first',
   'organization-disable-accept',
+  'organization-disable-create-invitation',
+  'organization-disable-revoke-invitation',
   'report-first-demotion',
   'demotion-first-report',
   'report-first-deactivation',
@@ -29,11 +31,11 @@ const expectedCases = [
 ] as const;
 
 describe('Task14 deterministic integration fixture ids', () => {
-  it('enumerates every declared fixture id for all 18 race cases without a per-table collision', () => {
+  it('enumerates every declared fixture id for all 20 race cases without a per-table collision', () => {
     expect(TASK14_RACE_FIXTURE_PLANS.map((plan) => plan.caseName)).toEqual(expectedCases);
 
     const entries = enumerateTask14FixtureExternalIds();
-    expect(entries).toHaveLength(140);
+    expect(entries).toHaveLength(150);
     expect(
       Object.fromEntries(
         [...new Set(entries.map((entry) => entry.table))].map((table) => [
@@ -42,10 +44,10 @@ describe('Task14 deterministic integration fixture ids', () => {
         ]),
       ),
     ).toEqual({
-      users: 47,
-      organizations: 20,
-      organization_members: 43,
-      organization_invitations: 4,
+      users: 51,
+      organizations: 22,
+      organization_members: 45,
+      organization_invitations: 6,
       projects: 8,
       project_members: 18,
     });
@@ -70,7 +72,7 @@ describe('Task14 deterministic integration fixture ids', () => {
     }
   });
 
-  it('keeps all 140 manifest ids as exact production-sanitized fixture evidence', () => {
+  it('keeps all 150 manifest ids as exact production-sanitized fixture evidence', () => {
     const entries = enumerateTask14FixtureExternalIds();
 
     for (const entry of entries) {

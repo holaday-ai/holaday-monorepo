@@ -164,6 +164,35 @@ const openInvitation = {
 const invitationOrganization = { organizationId: 20 };
 
 describe('organization invitation service', () => {
+  it.each(['create', 'revoke'] as const)(
+    'does not %s an invitation when the organization switch closes before the transaction lock',
+    async (operation) => {
+      const fake = makeDb([[actor], [ownerMembership], []]);
+      const mutation =
+        operation === 'create'
+          ? createInvitation({
+              db: fake.db,
+              actorExternalId: 'usr_owner',
+              organizationExternalId: 'org_design',
+              role: 'member',
+              now: () => now,
+              randomBytes: fixedRandom,
+            })
+          : revokeInvitation({
+              db: fake.db,
+              actorExternalId: 'usr_owner',
+              organizationExternalId: 'org_design',
+              invitationExternalId: 'oinv_design',
+              now: () => now,
+            });
+
+      await expect(mutation).rejects.toMatchObject({ code: 'ORGANIZATION_NOT_FOUND' });
+      expect(fake.inserts).toEqual([]);
+      expect(fake.updates).toEqual([]);
+      expect(fake.events.at(-1)).toBe('select:organizations:update:tx');
+    },
+  );
+
   it('does not consume an invitation when its organization switch is disabled under lock', async () => {
     const fake = makeDb([[actor], [invitationOrganization], []]);
 
@@ -747,6 +776,9 @@ describe('organization invitation service', () => {
     const lockedEnabledOrganization = __organizationInvitationServiceInternals
       .buildLockedActiveEnabledOrganizationByIdQuery(db, 20)
       .toSQL();
+    const lockedEnabledOrganizationByExternalId = __organizationInvitationServiceInternals
+      .buildLockedActiveEnabledOrganizationQuery(db, 'org_design')
+      .toSQL();
     const revoke = __organizationInvitationServiceInternals
       .buildLockedInvitationByExternalIdQuery(db, 20, 'oinv_design')
       .toSQL();
@@ -787,6 +819,11 @@ describe('organization invitation service', () => {
     );
     expect(invitationOrganizationLookup.params).toEqual([tokenHash, 1]);
     expect(invitationOrganizationLookup.sql).not.toContain('for update');
+    expect(lockedEnabledOrganizationByExternalId.sql).toContain(
+      '`organizations`.`team_projects_enabled` = ?',
+    );
+    expect(lockedEnabledOrganizationByExternalId.sql).toContain('for update');
+    expect(lockedEnabledOrganizationByExternalId.params).toEqual(['org_design', 'active', true]);
     expect(lockedToken.sql).toContain('`organization_invitations`.`organization_id` = ?');
     expect(lockedToken.sql).toContain('`organization_invitations`.`token_hash` = ?');
     expect(lockedToken.params).toEqual([20, tokenHash]);

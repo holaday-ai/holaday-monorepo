@@ -332,7 +332,7 @@ function deferSuccessfulWorkspaceMutation(action: OffscreenMutationAction): {
     resolve: () =>
       future.resolve({
         invitationId: 'oinv_late_success',
-        inviteUrl: '/organizations/invitations/accept?token=late-success-secret',
+        inviteUrl: '/organizations/invitations/accept#token=late-success-secret',
         expiresAt: '2026-09-06T00:00:00.000Z',
       }),
   };
@@ -669,7 +669,7 @@ describe('ProjectsPage organization workspace', () => {
     await user.click(screen.getByRole('button', { name: /运营团队/ }));
     api.createInvitation.mockResolvedValue({
       invitationId: 'oinv_manager',
-      inviteUrl: '/organizations/invitations/accept?token=manager-secret',
+      inviteUrl: '/organizations/invitations/accept#token=manager-secret',
       expiresAt: '2026-09-06T00:00:00.000Z',
     });
     await user.click(screen.getByRole('button', { name: '邀请成员' }));
@@ -912,7 +912,7 @@ describe('ProjectsPage invitation plaintext lifecycle', () => {
     await act(async () => {
       resolveDesignInvite?.({
         invitationId: 'oinv_design',
-        inviteUrl: '/organizations/invitations/accept?token=design-secret',
+        inviteUrl: '/organizations/invitations/accept#token=design-secret',
         expiresAt: '2026-09-06T00:00:00.000Z',
       });
       await designInvitePromise;
@@ -920,7 +920,7 @@ describe('ProjectsPage invitation plaintext lifecycle', () => {
     });
     expect(
       within(operationsDialog).queryByDisplayValue(
-        '/organizations/invitations/accept?token=design-secret',
+        '/organizations/invitations/accept#token=design-secret',
       ),
     ).toBeNull();
   });
@@ -947,14 +947,14 @@ describe('ProjectsPage invitation plaintext lifecycle', () => {
 
     resolveInvite?.({
       invitationId: 'oinv_late',
-      inviteUrl: '/organizations/invitations/accept?token=late-secret',
+      inviteUrl: '/organizations/invitations/accept#token=late-secret',
       expiresAt: '2026-09-06T00:00:00.000Z',
     });
     await user.click(screen.getByRole('button', { name: '邀请成员' }));
     const reopened = screen.getByRole('dialog', { name: '邀请成员加入设计团队' });
     await waitFor(() =>
       expect(
-        within(reopened).queryByDisplayValue('/organizations/invitations/accept?token=late-secret'),
+        within(reopened).queryByDisplayValue('/organizations/invitations/accept#token=late-secret'),
       ).toBeNull(),
     );
   });
@@ -962,7 +962,7 @@ describe('ProjectsPage invitation plaintext lifecycle', () => {
   it('shows a valid invite URL and expiry, copies it, and clears plaintext when closed', async () => {
     const user = await openOrganization('owner');
     const writeText = vi.spyOn(navigator.clipboard, 'writeText');
-    const inviteUrl = '/organizations/invitations/accept?token=one-time-secret';
+    const inviteUrl = '/organizations/invitations/accept#token=one-time-secret';
     api.createInvitation.mockResolvedValue({
       invitationId: 'oinv_123',
       inviteUrl,
@@ -1006,7 +1006,7 @@ describe('ProjectsPage invitation plaintext lifecycle', () => {
       label: 'invalid expiry',
       response: {
         invitationId: 'oinv_bad_expiry',
-        inviteUrl: '/organizations/invitations/accept?token=secret',
+        inviteUrl: '/organizations/invitations/accept#token=secret',
         expiresAt: 'not-a-date',
       },
     },
@@ -1120,7 +1120,7 @@ describe('ProjectsPage organization collection states', () => {
       if (openDialog === 'invite') {
         api.createInvitation.mockResolvedValue({
           invitationId: 'oinv_revoked',
-          inviteUrl: '/organizations/invitations/accept?token=revoked-secret',
+          inviteUrl: '/organizations/invitations/accept#token=revoked-secret',
           expiresAt: '2026-09-06T00:00:00.000Z',
         });
         await user.click(screen.getByRole('button', { name: '邀请成员' }));
@@ -1128,7 +1128,7 @@ describe('ProjectsPage organization collection states', () => {
         await user.click(within(dialog).getByRole('button', { name: '生成邀请链接' }));
         expect(
           await within(dialog).findByDisplayValue(
-            '/organizations/invitations/accept?token=revoked-secret',
+            '/organizations/invitations/accept#token=revoked-secret',
           ),
         ).toBeTruthy();
       } else if (openDialog === 'removal') {

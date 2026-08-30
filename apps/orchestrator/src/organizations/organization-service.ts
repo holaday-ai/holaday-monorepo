@@ -84,6 +84,13 @@ interface OrganizationMemberSnapshot {
 interface LockedOrganization {
   id: number;
   externalId: string;
+  ownerUserId: number;
+}
+
+interface LockedOwner {
+  id: number;
+  externalId: string;
+  userId: number;
 }
 
 function asPermissionMembership(snapshot: OrganizationMemberSnapshot): OrganizationMembership {
@@ -215,7 +222,11 @@ function buildLockedActiveOrganizationQuery(
   organizationExternalId: string,
 ) {
   return db
-    .select({ id: organizations.id, externalId: organizations.externalId })
+    .select({
+      id: organizations.id,
+      externalId: organizations.externalId,
+      ownerUserId: organizations.ownerUserId,
+    })
     .from(organizations)
     .where(
       and(
@@ -240,7 +251,7 @@ async function lockActiveOrganization(
 function buildLockedActiveActorMembershipQuery(
   db: Pick<DB, 'select'>,
   actorUserId: number,
-  organization: LockedOrganization,
+  organization: Pick<LockedOrganization, 'id' | 'externalId'>,
 ) {
   return db
     .select({
@@ -294,9 +305,16 @@ async function clearActiveReportingLines(
 }
 
 /** Locks every active owner before a demotion or deactivation decision. */
-async function lockActiveOwners(db: Pick<DB, 'select'>, organizationId: number): Promise<number> {
+async function lockActiveOwners(
+  db: Pick<DB, 'select'>,
+  organizationId: number,
+): Promise<LockedOwner[]> {
   const owners = await db
-    .select({ id: organizationMembers.id })
+    .select({
+      id: organizationMembers.id,
+      externalId: organizationMembers.externalId,
+      userId: organizationMembers.userId,
+    })
     .from(organizationMembers)
     .where(
       and(
@@ -307,7 +325,28 @@ async function lockActiveOwners(db: Pick<DB, 'select'>, organizationId: number):
     )
     .orderBy(asc(organizationMembers.externalId))
     .for('update');
-  return owners.length;
+  return owners;
+}
+
+async function transferDesignatedOwnerIfNeeded(
+  db: Pick<DB, 'update'>,
+  organization: LockedOrganization,
+  targetUserId: number,
+  targetRemainsOwner: boolean,
+  owners: readonly LockedOwner[],
+): Promise<void> {
+  if (targetRemainsOwner || organization.ownerUserId !== targetUserId) return;
+  const replacement = owners.find((owner) => owner.userId !== targetUserId);
+  if (!replacement) {
+    throw new OrganizationServiceError('PERMISSION_DENIED', 'last_owner_must_remain');
+  }
+  const result = await db
+    .update(organizations)
+    .set({ ownerUserId: replacement.userId })
+    .where(and(eq(organizations.id, organization.id), eq(organizations.ownerUserId, targetUserId)));
+  if (readAffectedRows(result) !== 1) {
+    throw new OrganizationServiceError('ORGANIZATION_NOT_FOUND');
+  }
 }
 
 function buildTargetActiveProjectIdsQuery(
@@ -336,7 +375,7 @@ function buildLockedProjectsQuery(
   projectIds: readonly number[],
 ) {
   return db
-    .select({ id: projects.id, organizationId: projects.organizationId })
+    .select({ id: projects.id, userId: projects.userId, organizationId: projects.organizationId })
     .from(projects)
     .where(and(eq(projects.organizationId, organizationId), inArray(projects.id, [...projectIds])))
     .orderBy(asc(projects.id))
@@ -552,14 +591,21 @@ export async function updateMemberRole(input: MemberRoleInput): Promise<{ ok: tr
       await lockOrganizationMembers(tx, organization, [input.targetMemberExternalId]),
       input.targetMemberExternalId,
     );
-    const ownerCount = await lockActiveOwners(tx, organization.id);
+    const owners = await lockActiveOwners(tx, organization.id);
     requireAllowed(
       canChangeOrganizationMemberRole({
         actor: asPermissionMembership(actor),
         target: asPermissionMembership(target),
         nextRole: input.nextRole,
-        ownerCount,
+        ownerCount: owners.length,
       }),
+    );
+    await transferDesignatedOwnerIfNeeded(
+      tx,
+      organization,
+      target.userId,
+      input.nextRole === 'owner',
+      owners,
     );
     const result = await tx
       .update(organizationMembers)
@@ -583,14 +629,15 @@ export async function deactivateMember(input: DeactivateMemberInput): Promise<{ 
       await lockOrganizationMembers(tx, organization, [input.targetMemberExternalId]),
       input.targetMemberExternalId,
     );
-    const ownerCount = await lockActiveOwners(tx, organization.id);
+    const owners = await lockActiveOwners(tx, organization.id);
     requireAllowed(
       canDeactivateOrganizationMember({
         actor: asPermissionMembership(actor),
         target: asPermissionMembership(target),
-        ownerCount,
+        ownerCount: owners.length,
       }),
     );
+    await transferDesignatedOwnerIfNeeded(tx, organization, target.userId, false, owners);
 
     const affectedProjectRows = await buildTargetActiveProjectIdsQuery(
       tx,
@@ -628,6 +675,8 @@ export async function deactivateMember(input: DeactivateMemberInput): Promise<{ 
         throw new OrganizationServiceError('MEMBER_NOT_FOUND');
       }
       for (const projectId of affectedProjectIds) {
+        const project = lockedProjects.find((candidate) => candidate.id === projectId);
+        if (!project) throw new OrganizationServiceError('MEMBER_NOT_FOUND');
         const memberships = lockedMemberships.filter(
           (membership) => membership.projectId === projectId,
         );
@@ -640,6 +689,19 @@ export async function deactivateMember(input: DeactivateMemberInput): Promise<{ 
           memberships.filter((membership) => membership.role === 'lead').length <= 1
         ) {
           throw new OrganizationServiceError('SOLE_PROJECT_LEAD');
+        }
+        if (project.userId === target.userId) {
+          const replacement = memberships.find(
+            (membership) => membership.userId !== target.userId && membership.role === 'lead',
+          );
+          if (!replacement) throw new OrganizationServiceError('SOLE_PROJECT_LEAD');
+          const transfer = await tx
+            .update(projects)
+            .set({ userId: replacement.userId })
+            .where(and(eq(projects.id, projectId), eq(projects.userId, target.userId)));
+          if (readAffectedRows(transfer) !== 1) {
+            throw new OrganizationServiceError('MEMBER_NOT_FOUND');
+          }
         }
       }
     }

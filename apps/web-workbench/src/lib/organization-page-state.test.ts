@@ -119,7 +119,7 @@ describe('organization page state helpers', () => {
     const ready = normalizeInviteLinkState(
       {
         invitationId: ' oinv_123 ',
-        inviteUrl: ' /organizations/invitations/accept?token=plaintext-token ',
+        inviteUrl: ' /organizations/invitations/accept#token=plaintext-token ',
         expiresAt: '2026-09-06T00:00:00.000Z',
       },
       'org_design',
@@ -129,7 +129,7 @@ describe('organization page state helpers', () => {
       status: 'ready',
       organizationId: 'org_design',
       invitationId: 'oinv_123',
-      inviteUrl: '/organizations/invitations/accept?token=plaintext-token',
+      inviteUrl: '/organizations/invitations/accept#token=plaintext-token',
       expiresAt: '2026-09-06T00:00:00.000Z',
     });
     expect(clearInviteLinkState()).toEqual({ status: 'idle' });
@@ -139,7 +139,7 @@ describe('organization page state helpers', () => {
         {
           organizationId: 'org_other',
           invitationId: 'oinv_cross',
-          inviteUrl: '/organizations/invitations/accept?token=other',
+          inviteUrl: '/organizations/invitations/accept#token=other',
           expiresAt: '2026-09-06T00:00:00.000Z',
         },
         'org_design',
@@ -149,7 +149,7 @@ describe('organization page state helpers', () => {
       normalizeInviteLinkState(
         Object.create({
           invitationId: 'oinv_inherited',
-          inviteUrl: '/organizations/invitations/accept?token=inherited',
+          inviteUrl: '/organizations/invitations/accept#token=inherited',
           expiresAt: '2026-09-06T00:00:00.000Z',
         }),
         'org_design',

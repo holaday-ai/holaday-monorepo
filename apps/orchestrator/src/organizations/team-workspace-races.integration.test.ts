@@ -54,6 +54,7 @@ import {
 import {
   __organizationInvitationServiceInternals,
   acceptInvitation,
+  createInvitation as createOrganizationInvitation,
   revokeInvitation,
 } from './organization-invitation-service.js';
 import {
@@ -763,7 +764,7 @@ afterAll(async () => {
         .map((item) => item.finalActiveLeads)
         .filter((value): value is number => value !== undefined),
     };
-    expect(aggregate.cases).toBe(18);
+    expect(aggregate.cases).toBe(20);
     expect(aggregate.deadlocks).toBe(0);
     expect(aggregate.finalActiveOwners).toEqual([1, 1, 1]);
     expect(aggregate.finalActiveLeads).toEqual([1, 1]);
@@ -1073,6 +1074,178 @@ describe.sequential('team workspace MySQL invitation races', () => {
     expect(deadlockCount([outcome])).toBe(0);
     evidence.push({
       case: 'organization-disable-accept',
+      lockWaitMs,
+      firstDurationMs: blockerDurationMs,
+      secondDurationMs: outcome.durationMs,
+      deadlocks: 0,
+    });
+  });
+
+  it('rejects invitation creation after a waiting organization switch is disabled', async () => {
+    const caseName = 'organization-disable-create-invitation';
+    const owner = await createUser(caseName, 'owner');
+    const organization = await createOrganization(owner.id, caseName);
+    await createOrganizationMember({
+      caseName,
+      key: 'owner',
+      organizationId: organization.id,
+      userId: owner.id,
+      role: 'owner',
+    });
+    const blocker = await openEndpoint();
+    const creator = await openEndpoint();
+    let blockerTransactionOpen = false;
+    let lockWaitMs = 0;
+    let outcome: OperationOutcome;
+    const blockerStartedAt = performance.now();
+    try {
+      await blocker.connection.beginTransaction();
+      blockerTransactionOpen = true;
+      const [disabled] = await blocker.connection.execute<mysql.ResultSetHeader>(
+        'UPDATE organizations SET team_projects_enabled = FALSE WHERE id = ?',
+        [organization.id],
+      );
+      expect(disabled.affectedRows).toBe(1);
+      const creation = capture(
+        createOrganizationInvitation({
+          db: creator.db,
+          actorExternalId: owner.externalId,
+          organizationExternalId: organization.externalId,
+          role: 'member',
+        }),
+      );
+      lockWaitMs = await waitForLockWait(creator.threadId, blocker.threadId);
+      await runWithActiveTimeout(blocker.connection.commit(), {
+        label: 'organization-disable-create blocker commit',
+        timeoutMs: CLEANUP_TIMEOUT_MS,
+        settleTimeoutMs: CLEANUP_TIMEOUT_MS,
+        onTimeout: () => blocker.connection.destroy(),
+      });
+      blockerTransactionOpen = false;
+      outcome = await runWithActiveTimeout(creation, {
+        label: caseName,
+        timeoutMs: OPERATION_TIMEOUT_MS,
+        settleTimeoutMs: CLEANUP_TIMEOUT_MS,
+        onTimeout: () => creator.connection.destroy(),
+      });
+    } finally {
+      if (blockerTransactionOpen) {
+        await runBoundedCleanup(
+          [
+            {
+              label: 'rollback organization-disable-create blocker',
+              run: () => blocker.connection.rollback(),
+              onTimeout: () => blocker.connection.destroy(),
+              onFailure: () => blocker.connection.destroy(),
+            },
+          ],
+          CLEANUP_TIMEOUT_MS,
+        );
+      }
+    }
+    const blockerDurationMs = performance.now() - blockerStartedAt;
+
+    expectDomainError(outcome, 'ORGANIZATION_NOT_FOUND');
+    const [invitationRow] = await databaseRows<mysql.RowDataPacket & { rowCount: number }>(
+      'SELECT COUNT(*) AS rowCount FROM organization_invitations WHERE organization_id = ?',
+      [organization.id],
+    );
+    expect(Number(invitationRow?.rowCount)).toBe(0);
+    expect(blocker.recorder.transactionActions()).toEqual(['begin', 'commit']);
+    expect(creator.recorder.transactionActions()).toEqual(['begin', 'rollback']);
+    expect(deadlockCount([outcome])).toBe(0);
+    evidence.push({
+      case: caseName,
+      lockWaitMs,
+      firstDurationMs: blockerDurationMs,
+      secondDurationMs: outcome.durationMs,
+      deadlocks: 0,
+    });
+  });
+
+  it('rejects invitation revocation after a waiting organization switch is disabled', async () => {
+    const caseName = 'organization-disable-revoke-invitation';
+    const owner = await createUser(caseName, 'owner');
+    const organization = await createOrganization(owner.id, caseName);
+    await createOrganizationMember({
+      caseName,
+      key: 'owner',
+      organizationId: organization.id,
+      userId: owner.id,
+      role: 'owner',
+    });
+    const invitation = await createInvitation({
+      caseName,
+      organizationId: organization.id,
+      invitedByUserId: owner.id,
+      secret: randomBytes(32).toString('base64url'),
+    });
+    const blocker = await openEndpoint();
+    const revoker = await openEndpoint();
+    let blockerTransactionOpen = false;
+    let lockWaitMs = 0;
+    let outcome: OperationOutcome;
+    const blockerStartedAt = performance.now();
+    try {
+      await blocker.connection.beginTransaction();
+      blockerTransactionOpen = true;
+      const [disabled] = await blocker.connection.execute<mysql.ResultSetHeader>(
+        'UPDATE organizations SET team_projects_enabled = FALSE WHERE id = ?',
+        [organization.id],
+      );
+      expect(disabled.affectedRows).toBe(1);
+      const revocation = capture(
+        revokeInvitation({
+          db: revoker.db,
+          actorExternalId: owner.externalId,
+          organizationExternalId: organization.externalId,
+          invitationExternalId: invitation.externalId,
+        }),
+      );
+      lockWaitMs = await waitForLockWait(revoker.threadId, blocker.threadId);
+      await runWithActiveTimeout(blocker.connection.commit(), {
+        label: 'organization-disable-revoke blocker commit',
+        timeoutMs: CLEANUP_TIMEOUT_MS,
+        settleTimeoutMs: CLEANUP_TIMEOUT_MS,
+        onTimeout: () => blocker.connection.destroy(),
+      });
+      blockerTransactionOpen = false;
+      outcome = await runWithActiveTimeout(revocation, {
+        label: caseName,
+        timeoutMs: OPERATION_TIMEOUT_MS,
+        settleTimeoutMs: CLEANUP_TIMEOUT_MS,
+        onTimeout: () => revoker.connection.destroy(),
+      });
+    } finally {
+      if (blockerTransactionOpen) {
+        await runBoundedCleanup(
+          [
+            {
+              label: 'rollback organization-disable-revoke blocker',
+              run: () => blocker.connection.rollback(),
+              onTimeout: () => blocker.connection.destroy(),
+              onFailure: () => blocker.connection.destroy(),
+            },
+          ],
+          CLEANUP_TIMEOUT_MS,
+        );
+      }
+    }
+    const blockerDurationMs = performance.now() - blockerStartedAt;
+
+    expectDomainError(outcome, 'ORGANIZATION_NOT_FOUND');
+    const invitationRows = await databaseRows<
+      mysql.RowDataPacket & { acceptedAt: Date | null; revokedAt: Date | null }
+    >(
+      'SELECT accepted_at AS acceptedAt, revoked_at AS revokedAt FROM organization_invitations WHERE id = ?',
+      [invitation.id],
+    );
+    assertInvitationPendingRow(invitationRows);
+    expect(blocker.recorder.transactionActions()).toEqual(['begin', 'commit']);
+    expect(revoker.recorder.transactionActions()).toEqual(['begin', 'rollback']);
+    expect(deadlockCount([outcome])).toBe(0);
+    evidence.push({
+      case: caseName,
       lockWaitMs,
       firstDurationMs: blockerDurationMs,
       secondDurationMs: outcome.durationMs,

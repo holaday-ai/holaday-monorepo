@@ -273,7 +273,8 @@ function safeInviteUrl(value: unknown): string {
       (parsed.protocol === 'http:' || parsed.protocol === 'https:');
     if (!isHttp || (!isRelative && parsed.origin === 'https://holaday.invalid')) return '';
     if (parsed.pathname !== '/organizations/invitations/accept') return '';
-    if (!parsed.searchParams.get('token')) return '';
+    if (parsed.search) return '';
+    if (!new URLSearchParams(parsed.hash.slice(1)).get('token')) return '';
     return text;
   } catch {
     return '';

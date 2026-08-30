@@ -818,6 +818,47 @@ describe('organization service', () => {
     ).rejects.toMatchObject({ code: 'MEMBER_NOT_FOUND' });
   });
 
+  it('moves designated ownership before demoting the current designated owner', async () => {
+    const replacementOwner = {
+      ...member,
+      id: 12,
+      externalId: 'omem_replacement_owner',
+      userId: 2,
+      role: 'owner',
+    };
+    const fake = makeDb([
+      [actor],
+      [actorMembership],
+      [{ id: 20, externalId: 'org_design', ownerUserId: 1 }],
+      [actorMembership],
+      [actorMembership],
+      [actorMembership, replacementOwner],
+    ]);
+
+    await expect(
+      updateMemberRole({
+        db: fake.db,
+        actorExternalId: 'usr_owner',
+        organizationExternalId: 'org_design',
+        targetMemberExternalId: 'omem_actor',
+        nextRole: 'admin',
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(fake.updates).toEqual([
+      expect.objectContaining({
+        table: 'organizations',
+        values: { ownerUserId: 2 },
+        inTransaction: true,
+      }),
+      expect.objectContaining({
+        table: 'organization_members',
+        values: { role: 'admin' },
+        inTransaction: true,
+      }),
+    ]);
+  });
+
   it('rejects a deactivation when its active target row disappears before the write', async () => {
     const fake = makeDb(
       [
@@ -899,6 +940,41 @@ describe('organization service', () => {
       { lockStrength: 'update', ordered: false },
       { lockStrength: 'update', ordered: true },
       { lockStrength: 'update', ordered: true },
+    ]);
+  });
+
+  it('transfers every team-project creator FK before deactivating that member', async () => {
+    const fake = makeDb([
+      [actor],
+      [actorMembership],
+      [{ id: 20, externalId: 'org_design', ownerUserId: 1 }],
+      [actorMembership],
+      [member],
+      [{ id: 10, externalId: 'omem_actor', userId: 1 }],
+      [{ projectId: 200 }],
+      [{ id: 200, userId: member.userId, organizationId: 20 }],
+      [
+        { id: 300, projectId: 200, userId: member.userId, role: 'lead', status: 'active' },
+        { id: 301, projectId: 200, userId: actor.id, role: 'lead', status: 'active' },
+      ],
+    ]);
+
+    await expect(
+      deactivateMember({
+        db: fake.db,
+        actorExternalId: 'usr_owner',
+        organizationExternalId: 'org_design',
+        targetMemberExternalId: member.externalId,
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(fake.updates.slice(0, 3)).toEqual([
+      expect.objectContaining({ table: 'projects', values: { userId: actor.id } }),
+      expect.objectContaining({
+        table: 'organization_members',
+        values: { status: 'inactive' },
+      }),
+      expect.objectContaining({ table: 'project_members', values: { status: 'inactive' } }),
     ]);
   });
 

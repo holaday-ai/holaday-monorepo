@@ -11,6 +11,8 @@ import {
   accountClosureSteps,
 } from '../db/schema/account-closures.js';
 import { evidenceArtifacts } from '../db/schema/evidence-artifacts.js';
+import { organizationMembers } from '../db/schema/organization-members.js';
+import { organizations } from '../db/schema/organizations.js';
 import {
   holaCreditLedgerEntries,
   partnerActivityEvents,
@@ -371,6 +373,51 @@ describe.sequential('account closure tombstone finalization', () => {
     for (const subject of [incomplete, unaccepted, mismatch, arbitraryReceipt]) {
       const [unchanged] = await db.select().from(users).where(eq(users.id, subject.id)).limit(1);
       expect(unchanged).toMatchObject({ status: 'closure_processing', email: subject.email });
+    }
+  });
+
+  it('fails closed before tombstoning when team-workspace responsibility reappears', async () => {
+    const subject = await createUser('team-residue', { status: 'closure_processing' });
+    const replacement = await createUser('team-residue-replacement');
+    const requestId = await createFinalizationRequest(subject.id, {
+      notificationStatus: 'accepted',
+    });
+    const [organizationInsert] = await db.insert(organizations).values({
+      externalId: uniqueId('org_tombstone_residue'),
+      name: 'Tombstone residue fixture',
+      ownerUserId: subject.id,
+      status: 'active',
+      teamProjectsEnabled: true,
+    });
+    const organizationId = Number(organizationInsert.insertId);
+    await db.insert(organizationMembers).values([
+      {
+        externalId: uniqueId('omem_tombstone_subject'),
+        organizationId,
+        userId: subject.id,
+        role: 'owner',
+        status: 'active',
+      },
+      {
+        externalId: uniqueId('omem_tombstone_replacement'),
+        organizationId,
+        userId: replacement.id,
+        role: 'owner',
+        status: 'active',
+      },
+    ]);
+
+    try {
+      await expect(finalizeRequest(requestId, subject.id)).rejects.toMatchObject({
+        code: 'FINALIZATION_PRECONDITION_FAILED',
+      });
+      const [unchanged] = await db.select().from(users).where(eq(users.id, subject.id)).limit(1);
+      expect(unchanged).toMatchObject({ status: 'closure_processing', email: subject.email });
+    } finally {
+      await db
+        .delete(organizationMembers)
+        .where(eq(organizationMembers.organizationId, organizationId));
+      await db.delete(organizations).where(eq(organizations.id, organizationId));
     }
   });
 

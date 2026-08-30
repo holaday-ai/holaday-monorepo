@@ -140,6 +140,7 @@ import {
   restorableBrowserTarget,
 } from '../../browser-pool/browser-session-recovery.js';
 import { env as appEnv } from '../../config/env.js';
+import type { DB } from '../../db/client.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
 import { projects } from '../../db/schema/projects.js';
 import { skills } from '../../db/schema/skills.js';
@@ -8048,11 +8049,11 @@ export const tasksRouter = router({
         );
       }
       if (input.projectId) {
-        const [projRow] = await ctx.db
-          .select({ id: projects.id })
-          .from(projects)
-          .where(and(eq(projects.externalId, input.projectId), eq(projects.userId, userRow.id)))
-          .limit(1);
+        const [projRow] = await buildPersonalProjectLookupQuery(
+          ctx.db,
+          userRow.id,
+          input.projectId,
+        );
         if (!projRow) {
           // Unknown project for this user → return empty rather
           // than 404 so the SPA renders an empty state.
@@ -9767,11 +9768,11 @@ export const tasksRouter = router({
       }
       let projectInternalId: number | null = null;
       if (input.projectId) {
-        const [projRow] = await ctx.db
-          .select({ id: projects.id })
-          .from(projects)
-          .where(and(eq(projects.externalId, input.projectId), eq(projects.userId, userRow.id)))
-          .limit(1);
+        const [projRow] = await buildPersonalProjectLookupQuery(
+          ctx.db,
+          userRow.id,
+          input.projectId,
+        );
         if (!projRow) {
           throw new TRPCError({
             code: 'NOT_FOUND',
@@ -10582,12 +10583,36 @@ function unionAllowedOrigins(catalogue: SkillCatalogueEntry[]): readonly string[
   return out;
 }
 
+/**
+ * The legacy task list and move mutation are personal-workspace operations.
+ * A team project can also have the caller in `projects.user_id` as its
+ * creator/custodian, so ownership alone is not a sufficient scope check.
+ */
+function buildPersonalProjectLookupQuery(
+  db: Pick<DB, 'select'>,
+  userId: number,
+  projectExternalId: string,
+) {
+  return db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(
+      and(
+        eq(projects.externalId, projectExternalId),
+        eq(projects.userId, userId),
+        isNull(projects.organizationId),
+      ),
+    )
+    .limit(1);
+}
+
 export const __tasksInternals = {
   assertVideoImageChoiceAllowed,
   assertManualSkillSelectionEnabled,
   buildVideoExecutionMetadata,
   buildPlannerIntent,
   buildPlannerSkillCatalogue,
+  buildPersonalProjectLookupQuery,
   claimVideoConfirmWithQuota,
   resolveTaskDispatchSkillId,
   resolveTaskSkillContext,

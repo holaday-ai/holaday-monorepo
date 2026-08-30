@@ -170,17 +170,31 @@ async function requireActiveActorMembership(
   return { ...member, role: member.role as OrganizationRole };
 }
 
+function buildLockedActiveEnabledOrganizationQuery(
+  db: Pick<DB, 'select'>,
+  organizationExternalId: string,
+) {
+  return db
+    .select({ id: organizations.id, externalId: organizations.externalId })
+    .from(organizations)
+    .where(
+      and(
+        eq(organizations.externalId, organizationExternalId),
+        eq(organizations.status, 'active'),
+        eq(organizations.teamProjectsEnabled, true),
+      ),
+    )
+    .for('update');
+}
+
 async function lockActiveOrganization(
   db: Pick<DB, 'select'>,
   organizationExternalId: string,
 ): Promise<LockedOrganization> {
-  const [organization] = await db
-    .select({ id: organizations.id, externalId: organizations.externalId })
-    .from(organizations)
-    .where(
-      and(eq(organizations.externalId, organizationExternalId), eq(organizations.status, 'active')),
-    )
-    .for('update');
+  const [organization] = await buildLockedActiveEnabledOrganizationQuery(
+    db,
+    organizationExternalId,
+  );
   if (!organization) throw new InvitationServiceError('ORGANIZATION_NOT_FOUND');
   return organization;
 }
@@ -603,6 +617,7 @@ export const __organizationInvitationServiceInternals = {
   buildCreateInvitationMembershipQuery,
   buildConsumeInvitationQuery,
   buildLockedActiveActorMembershipQuery,
+  buildLockedActiveEnabledOrganizationQuery,
   buildLockedActiveEnabledOrganizationByIdQuery,
   buildLockedActiveManagerMembershipQuery,
   buildLockedInvitationByExternalIdQuery,

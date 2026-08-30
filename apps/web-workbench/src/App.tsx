@@ -66,6 +66,11 @@ const PlannedTasksPage = lazyRoute(
 const PrivacyPage = lazyRoute(() => import('@/pages/PrivacyPage'), 'PrivacyPage');
 const ProfilePage = lazyRoute(() => import('@/pages/ProfilePage'), 'ProfilePage');
 const ProjectsPage = lazyRoute(() => import('@/pages/ProjectsPage'), 'ProjectsPage');
+const OrganizationInvitationAcceptPage = lazy(() =>
+  import('@/pages/OrganizationInvitationAcceptPage').then((module) => ({
+    default: module.OrganizationInvitationAcceptPage,
+  })),
+);
 const TeamProjectPage = lazyRoute(() => import('@/pages/TeamProjectPage'), 'TeamProjectPage');
 const RolesPage = lazyRoute(() => import('@/pages/RolesPage'), 'RolesPage');
 const ScheduledPage = lazyRoute(
@@ -202,6 +207,10 @@ export function App(): JSX.Element {
             <Route path="/stocks/discovery" element={lazyElement(<StockDiscoveryPage />)} />
             <Route path="/projects" element={lazyElement(<ProjectsPage />)} />
             <Route path="/projects/:projectId" element={lazyElement(<TeamProjectPage />)} />
+            <Route
+              path="/organizations/invitations/accept"
+              element={lazyElement(<OrganizationInvitationAcceptPage />)}
+            />
             <Route path="/starred" element={lazyElement(<StarredPage />)} />
             <Route path="/files" element={lazyElement(<FilesPage />)} />
             <Route path="/video" element={<VideoGate />} />

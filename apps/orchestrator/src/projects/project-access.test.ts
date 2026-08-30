@@ -250,7 +250,14 @@ function canonicalTeamReads(
         status: snapshot.organizationMemberStatus,
       },
     ],
-    [{ id: 200, externalId: 'prj_design', userId: 1, organizationId: 20 }],
+    [
+      {
+        id: 200,
+        externalId: 'prj_design',
+        userId: snapshot.projectOwnerUserId,
+        organizationId: 20,
+      },
+    ],
     memberships,
   ];
 }
@@ -434,6 +441,31 @@ describe('project access mutations', () => {
       'tx:select:projects:update',
       'tx:select:project_members:update',
       'root:transaction:rollback',
+    ]);
+  });
+
+  it('transfers project custody to another active lead before removing the custodian', async () => {
+    const creator = { ...targetMember, role: 'lead' };
+    const snapshot = { ...teamSnapshot, projectOwnerUserId: creator.userId };
+    const fake = makeDb(canonicalTeamReads(snapshot, [creator, actorProjectMember]), [1, 1]);
+
+    await expect(
+      removeProjectMemberWithAccess(fake.db, input, creator.externalId),
+    ).resolves.toMatchObject({ projectMemberId: creator.externalId, status: 'inactive' });
+
+    expect(fake.writes).toEqual([
+      expect.objectContaining({
+        kind: 'update',
+        table: 'projects',
+        values: { userId: actorProjectMember.userId },
+        executor: 'tx',
+      }),
+      expect.objectContaining({
+        kind: 'update',
+        table: 'project_members',
+        values: { status: 'inactive' },
+        executor: 'tx',
+      }),
     ]);
   });
 

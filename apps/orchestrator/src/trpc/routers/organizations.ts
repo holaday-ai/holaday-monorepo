@@ -67,9 +67,10 @@ function buildEnabledOrganizationQuery(db: Pick<DB, 'select'>, organizationId: s
 
 function buildInvitationUrl(baseUrl: string, token: string): string {
   const path = '/organizations/invitations/accept';
-  if (baseUrl === '') return `${path}?token=${encodeURIComponent(token)}`;
+  const fragment = new URLSearchParams({ token }).toString();
+  if (baseUrl === '') return `${path}#${fragment}`;
   const url = new URL(path, baseUrl);
-  url.searchParams.set('token', token);
+  url.hash = fragment;
   return url.toString();
 }
 
