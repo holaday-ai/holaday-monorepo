@@ -88,6 +88,44 @@ describe('team work item production schema verifier', () => {
     assert.deepEqual(findTeamWorkItemSchemaViolations(actual), []);
   });
 
+  for (const [label, expression] of [
+    [
+      'not-equal operators',
+      "CASE WHEN role <> 'responsible' AND status <> 'accepted' THEN work_item_id ELSE NULL END",
+    ],
+    [
+      'OR instead of AND',
+      "CASE WHEN role = 'responsible' OR status = 'accepted' THEN work_item_id ELSE NULL END",
+    ],
+    [
+      'swapped THEN and ELSE values',
+      "CASE WHEN role = 'responsible' AND status = 'accepted' THEN NULL ELSE work_item_id END",
+    ],
+  ]) {
+    it(`rejects ${label} in the generated expression`, () => {
+      const actual = validInformationSchema();
+      const column = actual.columns.find((row) => row.column_name === 'responsible_active_key');
+      column.generation_expression = expression;
+      assert.match(findTeamWorkItemSchemaViolations(actual).join('\n'), /responsible_active_key/);
+    });
+  }
+
+  for (const [label, constraintName] of [
+    ['organization', 'fk_team_work_items_organization'],
+    ['event actor', 'fk_team_work_item_events_actor'],
+    ['evidence artifact', 'fk_team_evidence_bindings_artifact'],
+    ['evidence task file', 'fk_team_evidence_bindings_task_file'],
+    ['AI contributor', 'fk_team_ai_contributions_contributed_by'],
+  ]) {
+    it(`rejects a missing ${label} foreign key`, () => {
+      const actual = validInformationSchema();
+      actual.foreignKeys = actual.foreignKeys.filter(
+        (row) => row.constraint_name !== constraintName,
+      );
+      assert.match(findTeamWorkItemSchemaViolations(actual).join('\n'), new RegExp(constraintName));
+    });
+  }
+
   it('rejects signed or default-zero work item version metadata', () => {
     const actual = validInformationSchema();
     const column = actual.columns.find(

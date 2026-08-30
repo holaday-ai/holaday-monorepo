@@ -178,6 +178,16 @@ describe('team work item lifecycle schema contract', () => {
     }
   });
 
+  it('keeps the migration and canonical verifier FK name sets exactly synchronized', () => {
+    const migrationNames = [
+      ...readTeamWorkItemLifecycleMigration().matchAll(/CONSTRAINT `([^`]+)`/g),
+    ].map(([, name]) => name);
+    const contractNames = TEAM_WORK_ITEM_SCHEMA_CONTRACT.foreignKeys.map(({ name }) => name);
+
+    assert.equal(migrationNames.length, 55);
+    assert.deepEqual([...migrationNames].sort(), [...contractNames].sort());
+  });
+
   it('creates all twelve lifecycle tables and the deferred current-contract foreign key', () => {
     const migration = readTeamWorkItemLifecycleMigration();
     const createdTables = [...migration.matchAll(/CREATE TABLE `([^`]+)`/g)].map(
