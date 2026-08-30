@@ -308,6 +308,11 @@ const DEPENDENCY_MUTABLE_STATES = new Set<TeamTaskState>([
   'claimable',
   'accepted_by_member',
 ]);
+const CONTRACT_VERSION_MUTABLE_STATES = new Set<TeamTaskState>([
+  'accepted_by_member',
+  'in_progress',
+  'blocked',
+]);
 
 function fail(code: TeamTaskServiceErrorCode): never {
   throw new TeamTaskServiceError(code);
@@ -1349,6 +1354,7 @@ export class TeamTaskPlanningService {
         ) {
           return fail('NOT_FOUND');
         }
+        if (milestone.status !== 'open') return fail('CONFLICT');
         const version = workItem.version + 1;
         if (
           !(await tx.updateWorkItem(workItem.id, workItem.version, {
@@ -1609,7 +1615,7 @@ export class TeamTaskPlanningService {
       async (tx, access, workItem) => {
         requireManagement(access);
         if (workItem.version !== expectedVersion) return fail('VERSION_CONFLICT');
-        if (!['accepted_by_member', 'in_progress', 'blocked'].includes(workItem.status)) {
+        if (!CONTRACT_VERSION_MUTABLE_STATES.has(workItem.status)) {
           return fail('CONFLICT');
         }
         const responsible = await this.activeResponsible(tx, access, workItem);
@@ -1761,6 +1767,7 @@ export class TeamTaskPlanningService {
       hash,
       async (tx, access, workItem) => {
         if (workItem.version !== expectedVersion) return fail('VERSION_CONFLICT');
+        if (!CONTRACT_VERSION_MUTABLE_STATES.has(workItem.status)) return fail('CONFLICT');
         const responsible = await this.activeResponsible(tx, access, workItem);
         requireResponsiblePermission(access, responsible.userId === access.actorUserId);
         if (workItem.currentContractVersionId === null) return fail('CONFLICT');

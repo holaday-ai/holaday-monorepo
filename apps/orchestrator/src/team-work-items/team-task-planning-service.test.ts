@@ -1274,6 +1274,60 @@ describe('TeamTaskPlanningService', () => {
     );
   });
 
+  it('rejects pending contract decisions after the task leaves contract-mutable states', async () => {
+    const closedStates = [
+      'draft',
+      'ready',
+      'assigned',
+      'claimable',
+      'submitted',
+      'in_review',
+      'revision_requested',
+      'resubmitted',
+      'accepted',
+      'completed',
+      'cancelled',
+      'rejected_final',
+      'archived',
+    ] as const;
+    for (const status of closedStates) {
+      for (const command of ['confirm', 'reject'] as const) {
+        const { repository, service } = createHarness();
+        const created = await service.createContractVersion({
+          actorExternalId: ids.lead,
+          workItemExternalId: ids.target,
+          contract: contract(),
+          versionNote: '范围变更',
+          expectedVersion: 1,
+          idempotencyKey: `decision-state-create-${status}-${command}`,
+        });
+        const target = repository.state.workItems.get(ids.target);
+        expect(target).toBeDefined();
+        if (!target) throw new Error('missing target fixture');
+        target.status = status;
+        const input = {
+          actorExternalId: ids.member,
+          workItemExternalId: ids.target,
+          contractVersionExternalId: created.contractVersionId,
+          expectedVersion: 2,
+          idempotencyKey: `decision-state-${status}-${command}`,
+        };
+        await expectCode(
+          command === 'confirm'
+            ? service.confirmContractVersion(input)
+            : service.rejectContractVersion({ ...input, rejectionReason: '当前阶段不能再变更' }),
+          'CONFLICT',
+        );
+        expect(repository.state.workItems.get(ids.target)).toMatchObject({
+          status,
+          version: 2,
+          currentContractVersionId: 1,
+        });
+        expect(repository.state.events).toHaveLength(1);
+      }
+    }
+  });
+
   it('uses the latest immutable contract number after a rejected proposal', async () => {
     const { repository, service } = createHarness();
     const first = await service.createContractVersion({
@@ -1658,6 +1712,32 @@ describe('TeamTaskPlanningService', () => {
       'NOT_FOUND',
     );
   });
+
+  it.each(['completed', 'cancelled'] as const)(
+    'rejects assigning work to a %s milestone',
+    async (status) => {
+      const { repository, service } = createHarness();
+      const milestone = repository.state.milestones.get(ids.milestone);
+      expect(milestone).toBeDefined();
+      if (!milestone) throw new Error('missing milestone fixture');
+      milestone.status = status;
+      await expectCode(
+        service.assignMilestone({
+          actorExternalId: ids.lead,
+          workItemExternalId: ids.target,
+          milestoneExternalId: ids.milestone,
+          expectedVersion: 1,
+          idempotencyKey: `attach-${status}-milestone`,
+        }),
+        'CONFLICT',
+      );
+      expect(repository.state.workItems.get(ids.target)).toMatchObject({
+        milestoneId: null,
+        version: 1,
+      });
+      expect(repository.state.events).toHaveLength(0);
+    },
+  );
 
   it('treats work-item and planning events as one organization idempotency namespace', async () => {
     const workFirst = createHarness();
