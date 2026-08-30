@@ -159,8 +159,12 @@ describe('team project race harness exact SQL boundaries', () => {
     ['day zero', '2026-01-00 00:00:00.000'],
     ['hour twenty-four', '2026-01-01 24:00:00.000'],
     ['year 10000 string', '10000-01-01 00:00:00.000'],
+    ['upper-bound .500 string', '9999-12-31 23:59:59.500'],
+    ['upper-bound .999 string', '9999-12-31 23:59:59.999'],
     ['year 0999 Date', mysqlUtcDate(999, 12, 31, 23, 59, 59, 999)],
     ['year 10000 Date', mysqlUtcDate(10_000, 1, 1)],
+    ['upper-bound .500 Date', mysqlUtcDate(9999, 12, 31, 23, 59, 59, 500)],
+    ['upper-bound .999 Date', mysqlUtcDate(9999, 12, 31, 23, 59, 59, 999)],
   ])('rejects %s as a compiled dynamic MySQL DATETIME slot', (_label, value) => {
     expect(() =>
       compileSqlBoundary(
@@ -181,8 +185,12 @@ describe('team project race harness exact SQL boundaries', () => {
     ['day zero', '2026-01-00 00:00:00.000'],
     ['hour twenty-four', '2026-01-01 24:00:00.000'],
     ['year 10000 string', '10000-01-01 00:00:00.000'],
+    ['upper-bound .500 string', '9999-12-31 23:59:59.500'],
+    ['upper-bound .999 string', '9999-12-31 23:59:59.999'],
     ['year 0999 Date', mysqlUtcDate(999, 12, 31, 23, 59, 59, 999)],
     ['year 10000 Date', mysqlUtcDate(10_000, 1, 1)],
+    ['upper-bound .500 Date', mysqlUtcDate(9999, 12, 31, 23, 59, 59, 500)],
+    ['upper-bound .999 Date', mysqlUtcDate(9999, 12, 31, 23, 59, 59, 999)],
   ])('rejects %s as a runtime dynamic MySQL DATETIME slot', (_label, value) => {
     const sql = 'UPDATE `projects` SET `updated_at` = ?';
     const boundary = compileSqlBoundary(
@@ -196,11 +204,14 @@ describe('team project race harness exact SQL boundaries', () => {
   it.each([
     ['lower-bound string', '1000-01-01 00:00:00.000'],
     ['valid leap-day string', '2024-02-29 23:59:59.999'],
-    ['upper-bound string', '9999-12-31 23:59:59.999'],
+    ['upper-bound string', '9999-12-31 23:59:59.499'],
     ['lower-bound Date', mysqlUtcDate(1000, 1, 1)],
-    ['upper-bound Date', mysqlUtcDate(9999, 12, 31, 23, 59, 59, 999)],
+    ['upper-bound Date', mysqlUtcDate(9999, 12, 31, 23, 59, 59, 499)],
   ])('accepts %s for a declared runtime MySQL DATETIME slot', (_label, value) => {
     const sql = 'UPDATE `projects` SET `updated_at` = ?';
+    expect(() =>
+      compileSqlBoundary({ sql, params: [value] }, { dynamicDateParameterIndexes: [0] }),
+    ).not.toThrow();
     const boundary = compileSqlBoundary(
       { sql, params: ['2026-08-30 12:00:00.000'] },
       { dynamicDateParameterIndexes: [0] },

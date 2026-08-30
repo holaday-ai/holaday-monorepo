@@ -341,7 +341,14 @@ export function compileSqlBoundary(
       components.second < 0 ||
       components.second > 59 ||
       components.millisecond < 0 ||
-      components.millisecond > 999
+      components.millisecond > 999 ||
+      (components.year === 9999 &&
+        components.month === 12 &&
+        components.day === 31 &&
+        components.hour === 23 &&
+        components.minute === 59 &&
+        components.second === 59 &&
+        components.millisecond > 499)
     ) {
       return undefined;
     }

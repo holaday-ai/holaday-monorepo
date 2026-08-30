@@ -7,8 +7,10 @@ import {
   TEAM_PROJECTS_ISOLATION_QUERY,
   TEAM_PROJECTS_LOCK_OBSERVER_CAPABILITY_QUERY,
   TEAM_PROJECTS_PERFORMANCE_SCHEMA_QUERY,
+  TEAM_PROJECTS_TRANSACTION_SESSIONS_QUERY,
   assertConnectionTargetsValidatedSchema,
   assertExactProjectTaskForeignKey,
+  assertTeamProjectsTransactionSessions,
   parseTeamProjectsIntegrationTarget,
   preflightTeamProjectsIntegrationDatabase,
 } from './team-project-integration-safety.js';
@@ -263,6 +265,7 @@ describe('team project integration safety', () => {
       instrumented: 'YES',
       activeTransactionCount,
       transactionInstrumentEnabled: 1,
+      globalInstrumentationConsumerEnabled: 1,
       currentTransactionConsumerEnabled: 1,
       threadInstrumentationConsumerEnabled: 1,
       ...rowOverrides,
@@ -326,7 +329,17 @@ describe('team project integration safety', () => {
             transactionRow(adminConnectionId, 0),
             transactionRow(probeConnectionId, probeTransactionActive ? 1 : 0),
           ];
-          return [[...rows], []];
+          const selectsGlobalInstrumentation = sql.includes(
+            "WHERE NAME = 'global_instrumentation' AND ENABLED = 'YES'",
+          );
+          return [
+            rows.map((row) => {
+              if (selectsGlobalInstrumentation) return row;
+              const { globalInstrumentationConsumerEnabled: _omitted, ...projectedRow } = row;
+              return projectedRow;
+            }),
+            [],
+          ];
         }
         throw new Error(`unexpected preflight query: ${sql}`);
       }),
@@ -362,6 +375,32 @@ describe('team project integration safety', () => {
       }),
     ).resolves.toEqual({ isolationLevel: 'REPEATABLE-READ' });
     expect(connection.query.mock.calls.every(([sql]) => /^\s*select\b/i.test(sql))).toBe(true);
+    expect(
+      connection.query.mock.calls.filter(
+        ([sql]) => sql === TEAM_PROJECTS_TRANSACTION_SESSIONS_QUERY,
+      ),
+    ).toEqual([
+      [TEAM_PROJECTS_TRANSACTION_SESSIONS_QUERY, [4300, 4321]],
+      [TEAM_PROJECTS_TRANSACTION_SESSIONS_QUERY, [4300, 4321]],
+    ]);
+  });
+
+  it('rejects global instrumentation disabled after preflight for inactive race endpoints', () => {
+    const { transactionRow } = preflightConnection();
+
+    expect(() =>
+      assertTeamProjectsTransactionSessions(
+        [
+          transactionRow(4300, 0),
+          transactionRow(4321, 0, { globalInstrumentationConsumerEnabled: 0 }),
+        ],
+        {
+          connectionIds: [4300, 4321],
+          schemaName: validTarget().schemaName,
+          activeConnectionIds: [],
+        },
+      ),
+    ).toThrow('TASK14_TRANSACTION_OBSERVER_UNSUPPORTED');
   });
 
   it('rejects a constant-zero transaction observer even though both sessions are visible', async () => {
@@ -426,6 +465,13 @@ describe('team project integration safety', () => {
         row: ReturnType<ReturnType<typeof preflightConnection>['transactionRow']>,
         other: ReturnType<ReturnType<typeof preflightConnection>['transactionRow']>,
       ) => [row, { ...other, currentTransactionConsumerEnabled: 0 }],
+    ],
+    [
+      'a disabled global-instrumentation consumer',
+      (
+        row: ReturnType<ReturnType<typeof preflightConnection>['transactionRow']>,
+        other: ReturnType<ReturnType<typeof preflightConnection>['transactionRow']>,
+      ) => [row, { ...other, globalInstrumentationConsumerEnabled: 0 }],
     ],
     [
       'a disabled thread-instrumentation consumer',

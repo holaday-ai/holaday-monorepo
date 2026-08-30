@@ -166,6 +166,9 @@ export const TEAM_PROJECTS_TRANSACTION_SESSIONS_QUERY = `SELECT
     WHERE NAME = 'transaction' AND ENABLED = 'YES') AS transactionInstrumentEnabled,
   (SELECT COUNT(*)
     FROM performance_schema.setup_consumers
+    WHERE NAME = 'global_instrumentation' AND ENABLED = 'YES') AS globalInstrumentationConsumerEnabled,
+  (SELECT COUNT(*)
+    FROM performance_schema.setup_consumers
     WHERE NAME = 'events_transactions_current' AND ENABLED = 'YES') AS currentTransactionConsumerEnabled,
   (SELECT COUNT(*)
     FROM performance_schema.setup_consumers
@@ -289,6 +292,7 @@ export function assertTeamProjectsTransactionSessions(
     }
     if (
       Number(row.transactionInstrumentEnabled) !== 1 ||
+      Number(row.globalInstrumentationConsumerEnabled) !== 1 ||
       Number(row.currentTransactionConsumerEnabled) !== 1 ||
       Number(row.threadInstrumentationConsumerEnabled) !== 1
     ) {
