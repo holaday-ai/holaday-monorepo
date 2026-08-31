@@ -45,6 +45,7 @@ type EvidenceMutation = {
 export interface TeamTasksRouterServices {
   query: {
     list: DomainMethod<{ actorId: string; projectId: string }>;
+    planningOptions: DomainMethod<{ actorId: string; projectId: string }>;
     get: DomainMethod<{ actorId: string; projectId: string; workItemId: string }>;
     archive: DomainMethod<{
       actorId: string;
@@ -78,6 +79,8 @@ export interface TeamTasksRouterServices {
     selectClaim: DomainMethod<WorkMutation & { assignmentExternalId: string }>;
   };
   planning: {
+    assignMilestone: DomainMethod<WorkMutation & { milestoneExternalId: string }>;
+    addDependency: DomainMethod<WorkMutation & { dependsOnWorkItemExternalId: string }>;
     start: DomainMethod<WorkMutation & { overrideReason?: string }>;
     block: DomainMethod<
       WorkMutation & {
@@ -96,7 +99,7 @@ export interface TeamTasksRouterServices {
     review: DomainMethod<
       ReviewMutation & {
         submissionId: string;
-        decision: 'accepted' | 'request_revision';
+        decision: 'accepted' | 'request_revision' | 'escalate_arbitration';
         rationale?: string | null;
         failedCriterionIds?: string[];
         evidenceReferences?: Array<{ kind: 'evidence' | 'missing_evidence'; reference: string }>;
@@ -277,6 +280,11 @@ export function createTeamTasksRouter(
       .query(({ ctx, input }) =>
         call(() => services(ctx.db).query.list({ actorId: ctx.userId, ...input })),
       ),
+    planningOptions: protectedProcedure
+      .input(z.object({ projectId }))
+      .query(({ ctx, input }) =>
+        call(() => services(ctx.db).query.planningOptions({ actorId: ctx.userId, ...input })),
+      ),
     get: protectedProcedure
       .input(z.object({ projectId, workItemId }))
       .query(({ ctx, input }) =>
@@ -440,6 +448,36 @@ export function createTeamTasksRouter(
         ),
       ),
     ),
+    assignMilestone: protectedProcedure
+      .input(mutationBase.extend({ milestoneId: id('teamMilestone') }))
+      .mutation(({ ctx, input }) =>
+        call(() =>
+          scopedMutation(services(ctx.db), ctx.userId, input, () =>
+            services(ctx.db).planning.assignMilestone({
+              actorExternalId: ctx.userId,
+              workItemExternalId: input.workItemId,
+              milestoneExternalId: input.milestoneId,
+              expectedVersion: input.expectedVersion,
+              idempotencyKey: input.idempotencyKey,
+            }),
+          ),
+        ),
+      ),
+    addDependency: protectedProcedure
+      .input(mutationBase.extend({ dependsOnWorkItemId: id('teamWorkItem') }))
+      .mutation(({ ctx, input }) =>
+        call(() =>
+          scopedMutation(services(ctx.db), ctx.userId, input, () =>
+            services(ctx.db).planning.addDependency({
+              actorExternalId: ctx.userId,
+              workItemExternalId: input.workItemId,
+              dependsOnWorkItemExternalId: input.dependsOnWorkItemId,
+              expectedVersion: input.expectedVersion,
+              idempotencyKey: input.idempotencyKey,
+            }),
+          ),
+        ),
+      ),
     createContractVersion: protectedProcedure
       .input(mutationBase.extend({ contract, versionNote: boundedText(1_000) }))
       .mutation(({ ctx, input }) =>
@@ -496,7 +534,7 @@ export function createTeamTasksRouter(
       .input(
         mutationBase.extend({
           submissionId: id('teamSubmission'),
-          decision: z.enum(['accepted', 'request_revision']),
+          decision: z.enum(['accepted', 'request_revision', 'escalate_arbitration']),
           rationale: z.string().trim().max(4_000).nullable().optional(),
           failedCriterionIds: z.array(boundedText(100)).min(1).max(100).optional(),
           evidenceReferences: evidenceReferences.optional(),

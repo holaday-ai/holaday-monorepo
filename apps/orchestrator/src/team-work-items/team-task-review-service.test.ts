@@ -670,6 +670,30 @@ describe('TeamTaskReviewService review and limited rework', () => {
     expect(repo.tx.workItem.revisionRound).toBe(2);
   });
 
+  it('records a final review handoff that opens the real appeal path without a third rework', async () => {
+    const { repo, service: subject } = submittedForReview();
+    repo.tx.workItem.revisionRound = 2;
+
+    const result = await subject.review({
+      ...acceptInput(),
+      decision: 'escalate_arbitration',
+      idempotencyKey: 'final-arbitration-handoff',
+    });
+
+    expect(result).toMatchObject({
+      command: 'request_revision',
+      state: 'revision_requested',
+      revisionRound: 2,
+    });
+    expect(repo.tx.reviews[0]).toMatchObject({
+      decision: 'request_revision',
+      failedCriterionIds: null,
+      revisionInstructions: null,
+      newDueAt: null,
+    });
+    expect(repo.tx.workItem).toMatchObject({ status: 'revision_requested', revisionRound: 2 });
+  });
+
   it('fails closed for inactive organization/project actors before exact receipt replay', async () => {
     const newSubmission = service();
     newSubmission.repo.tx.access.actorOrganizationMembershipActive = false;

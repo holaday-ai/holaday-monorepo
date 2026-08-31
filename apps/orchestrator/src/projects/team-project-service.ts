@@ -243,13 +243,23 @@ function buildActiveProjectMembersQuery(db: Pick<DB, 'select'>, projectId: numbe
   return db
     .select({
       projectMemberId: projectMembers.externalId,
+      organizationMemberId: organizationMembers.externalId,
       userId: users.externalId,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
       role: projectMembers.role,
     })
     .from(projectMembers)
+    .innerJoin(projects, eq(projects.id, projectMembers.projectId))
     .innerJoin(users, eq(users.id, projectMembers.userId))
+    .innerJoin(
+      organizationMembers,
+      and(
+        eq(organizationMembers.organizationId, projects.organizationId),
+        eq(organizationMembers.userId, projectMembers.userId),
+        eq(organizationMembers.status, 'active'),
+      ),
+    )
     .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.status, 'active')))
     .orderBy(asc(projectMembers.createdAt));
 }

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { isExternalId, newExternalId } from '@holaday/shared-types';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/mysql-core';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import { acceptanceContractVersions } from '../db/schema/acceptance-contract-versions.js';
@@ -8,9 +9,13 @@ import { organizationMembers } from '../db/schema/organization-members.js';
 import { organizations } from '../db/schema/organizations.js';
 import { projectMembers } from '../db/schema/project-members.js';
 import { projects } from '../db/schema/projects.js';
+import { teamMilestones } from '../db/schema/team-milestones.js';
 import { teamProjectPlanningEvents } from '../db/schema/team-project-planning-events.js';
 import { teamWorkItemAppeals } from '../db/schema/team-work-item-appeals.js';
+import { teamWorkItemAssignments } from '../db/schema/team-work-item-assignments.js';
 import { teamWorkItemEvents } from '../db/schema/team-work-item-events.js';
+import { teamWorkItemReviews } from '../db/schema/team-work-item-reviews.js';
+import { teamWorkItemSubmissions } from '../db/schema/team-work-item-submissions.js';
 import { teamWorkItems } from '../db/schema/team-work-items.js';
 import { users } from '../db/schema/users.js';
 import { isTeamTaskLifecycleEnabledFor } from './team-task-access.js';
@@ -22,6 +27,9 @@ import {
   TeamTaskServiceError,
 } from './team-task-service.js';
 import { type TeamTaskState, transitionTeamTask } from './team-task-state-machine.js';
+
+const contractApproverUsers = alias(users, 'team_task_contract_approver_users');
+const contractArbitratorUsers = alias(users, 'team_task_contract_arbitrator_users');
 
 export interface TeamTaskQueryRow {
   id: number;
@@ -51,8 +59,65 @@ export interface TeamTaskDto {
   version: number;
   dueAt: string | null;
   revisionRound: number;
+  responsibleUserId: string | null;
+  responsibleDisplayName: string | null;
+  responsibleAssignmentId: string | null;
+  responsibleAssignmentStatus: 'offered' | 'applied' | 'accepted' | null;
+  myPendingAssignmentId: string | null;
+  myPendingAssignmentRole: 'responsible' | 'collaborator' | null;
+  myPendingAssignmentStatus: 'offered' | 'applied' | null;
+  canSelectClaim: boolean;
+  claimApplicants: Array<{ assignmentId: string; userId: string; displayName: string | null }>;
+  collaboratorUserIds: string[];
+  milestoneId: string | null;
+  milestone: string | null;
+  submittedOnTime: boolean | null;
+  latestSubmissionId: string | null;
+  latestReviewId: string | null;
+  accepted: boolean | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TeamTaskListDisplayRow {
+  workItemId: number;
+  milestoneExternalId: string | null;
+  milestoneTitle: string | null;
+  assignments: Array<{
+    assignmentExternalId: string;
+    userExternalId: string;
+    displayName: string | null;
+    role: 'responsible' | 'collaborator';
+    status: 'offered' | 'applied' | 'accepted';
+  }>;
+  submittedOnTime: boolean | null;
+  latestSubmissionInternalId: number | null;
+  latestSubmissionExternalId: string | null;
+  latestReviewExternalId: string | null;
+}
+
+export interface TeamTaskDetailDisplay {
+  contract: {
+    version: number;
+    objective: string;
+    criteria: Array<{ id: string; description: string }>;
+    approverUserId: string;
+    arbitratorUserId: string;
+  } | null;
+  timeline: Array<{ eventType: string; occurredAt: Date }>;
+}
+
+export interface TeamTaskDetailDto extends TeamTaskDto {
+  contract: TeamTaskDetailDisplay['contract'];
+  timeline: Array<{
+    kind: 'contract' | 'assignment' | 'block' | 'submission' | 'review' | 'appeal' | 'ai';
+    label: string;
+    at: string;
+  }>;
+}
+
+export interface TeamTaskPlanningOptionsDto {
+  milestones: Array<{ id: string; title: string }>;
 }
 
 export interface ArchiveReceipt {
@@ -84,6 +149,21 @@ export interface TeamTaskQueryTransaction {
     projectId: string,
   ): Promise<TeamTaskProjectAccessSnapshot | null>;
   listWorkItems(organizationId: number, projectId: number): Promise<TeamTaskQueryRow[]>;
+  listOpenMilestones(
+    organizationId: number,
+    projectId: number,
+  ): Promise<Array<{ externalId: string; title: string }>>;
+  loadListDisplayRows(
+    organizationId: number,
+    projectId: number,
+    workItemIds: number[],
+  ): Promise<TeamTaskListDisplayRow[]>;
+  loadDetailDisplay(
+    organizationId: number,
+    projectId: number,
+    workItemId: number,
+    currentContractVersionId: number | null,
+  ): Promise<TeamTaskDetailDisplay>;
   lockWorkItemAccess(
     actorId: string,
     workItemId: string,
@@ -163,7 +243,66 @@ function assertAccess(
   return access;
 }
 
-function dto(row: TeamTaskQueryRow, projectId: string): TeamTaskDto {
+const EMPTY_DISPLAY: TeamTaskListDisplayRow = {
+  workItemId: 0,
+  milestoneExternalId: null,
+  milestoneTitle: null,
+  assignments: [],
+  submittedOnTime: null,
+  latestSubmissionInternalId: null,
+  latestSubmissionExternalId: null,
+  latestReviewExternalId: null,
+};
+
+function buildMilestoneDisplayQuery(
+  db: Pick<DB, 'select'>,
+  organizationId: number,
+  projectId: number,
+  workItemIds: number[],
+) {
+  return db
+    .select({
+      workItemId: teamWorkItems.id,
+      milestoneExternalId: teamMilestones.externalId,
+      milestoneTitle: teamMilestones.title,
+    })
+    .from(teamWorkItems)
+    .leftJoin(
+      teamMilestones,
+      and(
+        eq(teamMilestones.id, teamWorkItems.milestoneId),
+        eq(teamMilestones.organizationId, teamWorkItems.organizationId),
+        eq(teamMilestones.projectId, teamWorkItems.projectId),
+      ),
+    )
+    .where(
+      and(
+        eq(teamWorkItems.organizationId, organizationId),
+        eq(teamWorkItems.projectId, projectId),
+        inArray(teamWorkItems.id, workItemIds),
+      ),
+    );
+}
+
+function dto(
+  row: TeamTaskQueryRow,
+  projectId: string,
+  actorId: string,
+  canSelectClaim: boolean,
+  display: TeamTaskListDisplayRow = EMPTY_DISPLAY,
+): TeamTaskDto {
+  const responsible =
+    display.assignments.find(
+      (assignment) => assignment.role === 'responsible' && assignment.status === 'accepted',
+    ) ??
+    display.assignments.find(
+      (assignment) => assignment.role === 'responsible' && assignment.status === 'offered',
+    );
+  const myPendingAssignment = display.assignments.find(
+    (assignment) =>
+      assignment.userExternalId === actorId &&
+      (assignment.status === 'offered' || assignment.status === 'applied'),
+  );
   return {
     id: row.externalId,
     projectId,
@@ -174,9 +313,76 @@ function dto(row: TeamTaskQueryRow, projectId: string): TeamTaskDto {
     version: row.version,
     dueAt: row.dueAt?.toISOString() ?? null,
     revisionRound: row.revisionRound,
+    responsibleUserId: responsible?.userExternalId ?? null,
+    responsibleDisplayName: responsible?.displayName ?? null,
+    responsibleAssignmentId: responsible?.assignmentExternalId ?? null,
+    responsibleAssignmentStatus: responsible?.status ?? null,
+    myPendingAssignmentId: myPendingAssignment?.assignmentExternalId ?? null,
+    myPendingAssignmentRole: myPendingAssignment?.role ?? null,
+    myPendingAssignmentStatus:
+      myPendingAssignment?.status === 'offered' || myPendingAssignment?.status === 'applied'
+        ? myPendingAssignment.status
+        : null,
+    canSelectClaim,
+    claimApplicants: canSelectClaim
+      ? display.assignments
+          .filter(
+            (assignment) => assignment.role === 'responsible' && assignment.status === 'applied',
+          )
+          .map((assignment) => ({
+            assignmentId: assignment.assignmentExternalId,
+            userId: assignment.userExternalId,
+            displayName: assignment.displayName,
+          }))
+      : [],
+    collaboratorUserIds: display.assignments
+      .filter(
+        (assignment) => assignment.role === 'collaborator' && assignment.status === 'accepted',
+      )
+      .map((assignment) => assignment.userExternalId),
+    milestoneId: display.milestoneExternalId,
+    milestone: display.milestoneTitle,
+    submittedOnTime: display.submittedOnTime,
+    latestSubmissionId: display.latestSubmissionExternalId,
+    latestReviewId: display.latestReviewExternalId,
+    accepted:
+      row.status === 'accepted' || row.status === 'completed'
+        ? true
+        : row.status === 'revision_requested' || row.status === 'rejected_final'
+          ? false
+          : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+function timelineDto(
+  row: TeamTaskDetailDisplay['timeline'][number],
+): TeamTaskDetailDto['timeline'][number] | null {
+  const event = timelineEvent(row.eventType);
+  return event ? { ...event, at: row.occurredAt.toISOString() } : null;
+}
+
+function timelineEvent(
+  eventType: string,
+): Omit<TeamTaskDetailDto['timeline'][number], 'at'> | null {
+  if (eventType.includes('contract')) return { kind: 'contract', label: '验收契约已确认' };
+  if (eventType.includes('assignment') || eventType.includes('claim'))
+    return { kind: 'assignment', label: '任务指派已更新' };
+  if (eventType.includes('unblock')) return { kind: 'block', label: '任务阻塞已解除' };
+  if (eventType.includes('block')) return { kind: 'block', label: '任务已标记阻塞' };
+  if (eventType.includes('submit')) return { kind: 'submission', label: '任务版本已提交' };
+  if (
+    eventType.includes('review') ||
+    eventType.includes('accepted') ||
+    eventType.includes('revision')
+  )
+    return { kind: 'review', label: '验收结果已更新' };
+  if (eventType.includes('appeal') || eventType.includes('arbitr'))
+    return { kind: 'appeal', label: '申诉或仲裁状态已更新' };
+  if (eventType.includes('ai_contribution'))
+    return { kind: 'ai', label: 'AI 贡献已提交，等待人工确认' };
+  return null;
 }
 
 function requestHash(input: object): string {
@@ -212,7 +418,7 @@ function parseArchiveReceipt(
   };
 }
 
-export const __teamTaskQueryInternals = { parseArchiveReceipt };
+export const __teamTaskQueryInternals = { parseArchiveReceipt, buildMilestoneDisplayQuery };
 
 export class TeamTaskQueryService {
   private readonly dependencies: Dependencies;
@@ -245,14 +451,27 @@ export class TeamTaskQueryService {
           actorId,
           this.dependencies,
         );
-        return (await tx.listWorkItems(access.organizationId, access.projectId)).map((row) =>
-          dto(row, projectId),
+        const rows = await tx.listWorkItems(access.organizationId, access.projectId);
+        const displayRows = await tx.loadListDisplayRows(
+          access.organizationId,
+          access.projectId,
+          rows.map((row) => row.id),
+        );
+        const displayByWorkItem = new Map(displayRows.map((row) => [row.workItemId, row]));
+        const canSelectClaim =
+          access.actorProjectRole !== 'viewer' &&
+          (access.actorProjectRole === 'lead' ||
+            access.actorOrganizationRole === 'owner' ||
+            access.actorOrganizationRole === 'admin' ||
+            access.actorOrganizationRole === 'manager');
+        return rows.map((row) =>
+          dto(row, projectId, actorId, canSelectClaim, displayByWorkItem.get(row.id)),
         );
       }),
     );
   }
 
-  async get(input: unknown): Promise<TeamTaskDto> {
+  async get(input: unknown): Promise<TeamTaskDetailDto> {
     if (!record(input)) return fail('INVALID_INPUT');
     const actorId = external(input.actorId, 'user');
     const projectId = external(input.projectId, 'project');
@@ -262,7 +481,55 @@ export class TeamTaskQueryService {
         const loaded = await tx.lockWorkItemAccess(actorId, workItemId);
         const access = assertAccess(loaded?.access ?? null, actorId, this.dependencies);
         if (!loaded || access.projectExternalId !== projectId) return fail('NOT_FOUND');
-        return dto(loaded.workItem, projectId);
+        const [display] = await tx.loadListDisplayRows(access.organizationId, access.projectId, [
+          loaded.workItem.id,
+        ]);
+        const detail = await tx.loadDetailDisplay(
+          access.organizationId,
+          access.projectId,
+          loaded.workItem.id,
+          loaded.workItem.currentContractVersionId,
+        );
+        return {
+          ...dto(
+            loaded.workItem,
+            projectId,
+            actorId,
+            access.actorProjectRole !== 'viewer' &&
+              (access.actorProjectRole === 'lead' ||
+                access.actorOrganizationRole === 'owner' ||
+                access.actorOrganizationRole === 'admin' ||
+                access.actorOrganizationRole === 'manager'),
+            display,
+          ),
+          contract: detail.contract,
+          timeline: detail.timeline.flatMap((row) => {
+            const normalized = timelineDto(row);
+            return normalized ? [normalized] : [];
+          }),
+        } satisfies TeamTaskDetailDto;
+      }),
+    );
+  }
+
+  async planningOptions(input: unknown): Promise<TeamTaskPlanningOptionsDto> {
+    if (!record(input)) return fail('INVALID_INPUT');
+    const actorId = external(input.actorId, 'user');
+    const projectId = external(input.projectId, 'project');
+    return this.run(() =>
+      this.repository.transaction(async (tx) => {
+        const access = assertAccess(
+          await tx.loadProjectAccess(actorId, projectId),
+          actorId,
+          this.dependencies,
+        );
+        const milestones = await tx.listOpenMilestones(access.organizationId, access.projectId);
+        return {
+          milestones: milestones.slice(0, 100).map((milestone) => ({
+            id: milestone.externalId,
+            title: milestone.title.slice(0, 255),
+          })),
+        };
       }),
     );
   }
@@ -504,6 +771,203 @@ class DrizzleQueryTransaction implements TeamTaskQueryTransaction {
     return rows.map((row) => this.normalizeItem(row));
   }
 
+  async listOpenMilestones(organizationId: number, projectId: number) {
+    return this.db
+      .select({ externalId: teamMilestones.externalId, title: teamMilestones.title })
+      .from(teamMilestones)
+      .where(
+        and(
+          eq(teamMilestones.organizationId, organizationId),
+          eq(teamMilestones.projectId, projectId),
+          eq(teamMilestones.status, 'open'),
+        ),
+      )
+      .orderBy(asc(teamMilestones.sortOrder), asc(teamMilestones.id))
+      .limit(100);
+  }
+
+  async loadListDisplayRows(
+    organizationId: number,
+    projectId: number,
+    workItemIds: number[],
+  ): Promise<TeamTaskListDisplayRow[]> {
+    if (workItemIds.length === 0) return [];
+    // A transaction may be backed by one MySQL connection. Keep these fixed-count
+    // batch reads sequential instead of issuing concurrent commands on that connection.
+    const assignmentRows = await this.db
+      .select({
+        workItemId: teamWorkItemAssignments.workItemId,
+        assignmentExternalId: teamWorkItemAssignments.externalId,
+        userExternalId: users.externalId,
+        displayName: users.displayName,
+        role: teamWorkItemAssignments.role,
+        status: teamWorkItemAssignments.status,
+      })
+      .from(teamWorkItemAssignments)
+      .innerJoin(users, eq(users.id, teamWorkItemAssignments.userId))
+      .where(
+        and(
+          eq(teamWorkItemAssignments.organizationId, organizationId),
+          eq(teamWorkItemAssignments.projectId, projectId),
+          inArray(teamWorkItemAssignments.workItemId, workItemIds),
+          inArray(teamWorkItemAssignments.status, ['offered', 'applied', 'accepted']),
+        ),
+      )
+      .orderBy(asc(teamWorkItemAssignments.id));
+    const milestoneRows = await buildMilestoneDisplayQuery(
+      this.db,
+      organizationId,
+      projectId,
+      workItemIds,
+    );
+    const submissionRows = await this.db
+      .select({
+        id: teamWorkItemSubmissions.id,
+        workItemId: teamWorkItemSubmissions.workItemId,
+        externalId: teamWorkItemSubmissions.externalId,
+        submittedOnTime: teamWorkItemSubmissions.submittedOnTime,
+        submissionVersion: teamWorkItemSubmissions.submissionVersion,
+      })
+      .from(teamWorkItemSubmissions)
+      .where(
+        and(
+          eq(teamWorkItemSubmissions.organizationId, organizationId),
+          eq(teamWorkItemSubmissions.projectId, projectId),
+          inArray(teamWorkItemSubmissions.workItemId, workItemIds),
+        ),
+      )
+      .orderBy(desc(teamWorkItemSubmissions.submissionVersion));
+    const reviewRows = await this.db
+      .select({
+        workItemId: teamWorkItemReviews.workItemId,
+        submissionId: teamWorkItemReviews.submissionId,
+        externalId: teamWorkItemReviews.externalId,
+        reviewAttempt: teamWorkItemReviews.reviewAttempt,
+      })
+      .from(teamWorkItemReviews)
+      .where(
+        and(
+          eq(teamWorkItemReviews.organizationId, organizationId),
+          eq(teamWorkItemReviews.projectId, projectId),
+          inArray(teamWorkItemReviews.workItemId, workItemIds),
+        ),
+      )
+      .orderBy(desc(teamWorkItemReviews.reviewAttempt), desc(teamWorkItemReviews.id));
+
+    const byId = new Map<number, TeamTaskListDisplayRow>();
+    for (const workItemId of workItemIds) {
+      byId.set(workItemId, { ...EMPTY_DISPLAY, workItemId, assignments: [] });
+    }
+    for (const row of assignmentRows) {
+      if (
+        (row.role !== 'responsible' && row.role !== 'collaborator') ||
+        (row.status !== 'offered' && row.status !== 'applied' && row.status !== 'accepted')
+      )
+        continue;
+      byId.get(row.workItemId)?.assignments.push({
+        assignmentExternalId: row.assignmentExternalId,
+        userExternalId: row.userExternalId,
+        displayName: row.displayName,
+        role: row.role,
+        status: row.status,
+      });
+    }
+    for (const row of milestoneRows) {
+      const display = byId.get(row.workItemId);
+      if (display) {
+        display.milestoneExternalId = row.milestoneExternalId;
+        display.milestoneTitle = row.milestoneTitle;
+      }
+    }
+    const seenSubmission = new Set<number>();
+    for (const row of submissionRows) {
+      if (seenSubmission.has(row.workItemId)) continue;
+      seenSubmission.add(row.workItemId);
+      const display = byId.get(row.workItemId);
+      if (display) {
+        display.submittedOnTime = row.submittedOnTime === true;
+        display.latestSubmissionInternalId = row.id;
+        display.latestSubmissionExternalId = row.externalId;
+      }
+    }
+    const seenReview = new Set<number>();
+    for (const row of reviewRows) {
+      if (seenReview.has(row.workItemId)) continue;
+      const display = byId.get(row.workItemId);
+      if (!display || display.latestSubmissionInternalId !== row.submissionId) continue;
+      seenReview.add(row.workItemId);
+      display.latestReviewExternalId = row.externalId;
+    }
+    return workItemIds.flatMap((id) => {
+      const display = byId.get(id);
+      return display ? [display] : [];
+    });
+  }
+
+  async loadDetailDisplay(
+    organizationId: number,
+    projectId: number,
+    workItemId: number,
+    currentContractVersionId: number | null,
+  ): Promise<TeamTaskDetailDisplay> {
+    const contracts = currentContractVersionId
+      ? await this.db
+          .select({
+            version: acceptanceContractVersions.version,
+            objective: acceptanceContractVersions.objective,
+            criteria: acceptanceContractVersions.criteriaJson,
+            approverUserId: contractApproverUsers.externalId,
+            arbitratorUserId: contractArbitratorUsers.externalId,
+          })
+          .from(acceptanceContractVersions)
+          .innerJoin(
+            contractApproverUsers,
+            eq(contractApproverUsers.id, acceptanceContractVersions.approverUserId),
+          )
+          .innerJoin(
+            contractArbitratorUsers,
+            eq(contractArbitratorUsers.id, acceptanceContractVersions.arbitratorUserId),
+          )
+          .where(
+            and(
+              eq(acceptanceContractVersions.id, currentContractVersionId),
+              eq(acceptanceContractVersions.organizationId, organizationId),
+              eq(acceptanceContractVersions.projectId, projectId),
+              eq(acceptanceContractVersions.workItemId, workItemId),
+            ),
+          )
+          .limit(1)
+      : [];
+    const timeline = await this.db
+      .select({
+        eventType: teamWorkItemEvents.eventType,
+        occurredAt: teamWorkItemEvents.occurredAt,
+      })
+      .from(teamWorkItemEvents)
+      .where(
+        and(
+          eq(teamWorkItemEvents.organizationId, organizationId),
+          eq(teamWorkItemEvents.projectId, projectId),
+          eq(teamWorkItemEvents.workItemId, workItemId),
+        ),
+      )
+      .orderBy(asc(teamWorkItemEvents.occurredAt), asc(teamWorkItemEvents.id))
+      .limit(200);
+    const current = contracts[0];
+    return {
+      contract: current
+        ? {
+            version: current.version,
+            objective: current.objective.slice(0, 4_000),
+            criteria: normalizeDisplayCriteria(current.criteria),
+            approverUserId: current.approverUserId,
+            arbitratorUserId: current.arbitratorUserId,
+          }
+        : null,
+      timeline,
+    };
+  }
+
   async lockWorkItemAccess(actorId: string, workItemId: string) {
     const [item] = await this.db
       .select(this.itemSelect())
@@ -646,6 +1110,17 @@ class DrizzleQueryTransaction implements TeamTaskQueryTransaction {
       occurredAt: event.occurredAt,
     });
   }
+}
+
+function normalizeDisplayCriteria(value: unknown): Array<{ id: string; description: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 100).flatMap((entry) => {
+    if (!record(entry)) return [];
+    const id = typeof entry.id === 'string' ? entry.id.trim().slice(0, 100) : '';
+    const description =
+      typeof entry.description === 'string' ? entry.description.trim().slice(0, 1_000) : '';
+    return id && description ? [{ id, description }] : [];
+  });
 }
 
 export class DrizzleTeamTaskQueryRepository implements TeamTaskQueryRepository {

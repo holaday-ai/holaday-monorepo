@@ -676,31 +676,40 @@ describe('TeamTaskService', () => {
     });
   });
 
-  it('rejects direct acceptance when the proposed responsible is the frozen approver', async () => {
+  it('rejects a direct responsible offer when the proposed member is the frozen approver', async () => {
     const { repository, service } = createHarness();
     const draft = await createDraft(service);
     await publish(service, draft.workItemId);
-    const offer = await service.offerAssignment({
-      actorExternalId: ids.actor,
-      workItemExternalId: draft.workItemId,
-      targetMemberExternalId: ids.approverMembership,
-      role: 'responsible',
-      expectedVersion: 2,
-      idempotencyKey: 'offer-approver',
-    });
     await expectCode(
-      service.respondToAssignment({
-        actorExternalId: ids.approverUser,
+      service.offerAssignment({
+        actorExternalId: ids.actor,
         workItemExternalId: draft.workItemId,
-        assignmentExternalId: receiptAssignmentId(offer),
-        response: 'accept',
-        expectedVersion: 3,
-        idempotencyKey: 'accept-approver',
+        targetMemberExternalId: ids.approverMembership,
+        role: 'responsible',
+        expectedVersion: 2,
+        idempotencyKey: 'offer-approver',
       }),
       'CONFLICT',
     );
-    expect(repository.state.assignments.get(receiptAssignmentId(offer))?.status).toBe('offered');
+    expect(repository.state.assignments.size).toBe(0);
     expect(repository.state.contracts[0]).toMatchObject({ confirmedByUserId: null });
+  });
+
+  it('rejects a leader-select application from the frozen approver before exposing it', async () => {
+    const { repository, service } = createHarness();
+    const draft = await createDraft(service, 'leader_select');
+    await publish(service, draft.workItemId);
+    await expectCode(
+      service.claim({
+        actorExternalId: ids.approverUser,
+        workItemExternalId: draft.workItemId,
+        memberExternalId: ids.approverMembership,
+        expectedVersion: 2,
+        idempotencyKey: 'apply-approver',
+      }),
+      'CONFLICT',
+    );
+    expect(repository.state.assignments.size).toBe(0);
   });
 
   it('rejects first-come acquisition when the proposed responsible is the frozen arbitrator', async () => {

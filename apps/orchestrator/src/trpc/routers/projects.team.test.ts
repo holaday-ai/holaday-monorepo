@@ -399,6 +399,7 @@ function makeTeamMembersDb() {
   const rows = [
     {
       projectMemberId: 'pmem_member',
+      organizationMemberId: 'omem_collaborator',
       userId: 'usr_collaborator',
       displayName: 'Mina',
       avatarUrl: 'https://cdn.example/mina.png',
@@ -1003,7 +1004,12 @@ describe('projects router team workspaces', () => {
     expect(detail.params).toEqual([20, 'prj_team', 1]);
     expect(memberSql).toContain('`project_members`.`project_id` = ?');
     expect(memberSql).toContain('`project_members`.`status` = ?');
-    expect(members.params).toEqual([20, 'active']);
+    expect(memberSql).toContain(
+      '`organization_members`.`organization_id` = `projects`.`organization_id`',
+    );
+    expect(memberSql).toContain('`organization_members`.`user_id` = `project_members`.`user_id`');
+    expect(memberSql).toContain('`organization_members`.`status` = ?');
+    expect(members.params).toEqual(['active', 20, 'active']);
     expect(creatorLead.sql).toContain('insert into `project_members`');
     expect(creatorLead.params).toEqual(['pmem_generated', 20, 7, 'lead', 'active']);
     expect(projectInsert.sql).toContain('insert into `projects`');
@@ -1316,6 +1322,7 @@ describe('projects router team workspaces', () => {
     expect(result).toEqual([
       {
         projectMemberId: 'pmem_member',
+        organizationMemberId: 'omem_collaborator',
         userId: 'usr_collaborator',
         displayName: 'Mina',
         avatarUrl: 'https://cdn.example/mina.png',

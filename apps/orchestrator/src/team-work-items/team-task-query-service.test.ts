@@ -1,12 +1,15 @@
+import { drizzle } from 'drizzle-orm/mysql2';
 import { describe, expect, it } from 'vitest';
+import * as schema from '../db/schema/index.js';
 import {
+  type TeamTaskListDisplayRow,
   type TeamTaskQueryRepository,
   type TeamTaskQueryRow,
   TeamTaskQueryService,
   type TeamTaskQueryTransaction,
   __teamTaskQueryInternals,
 } from './team-task-query-service.js';
-import { TeamTaskServiceError } from './team-task-service.js';
+import { type TeamTaskProjectAccessSnapshot, TeamTaskServiceError } from './team-task-service.js';
 
 const actorId = 'usr_Actor1111111111111111';
 const projectId = 'prj_Project11111111111111';
@@ -49,13 +52,14 @@ const item = {
 };
 
 class MemoryRepository implements TeamTaskQueryRepository, TeamTaskQueryTransaction {
-  access = access;
+  access: TeamTaskProjectAccessSnapshot = access;
   item: TeamTaskQueryRow = item;
   unresolved = false;
   event: Awaited<ReturnType<TeamTaskQueryTransaction['findArchiveEvent']>> = null;
   planningConflict = false;
   transactionError: unknown = null;
   failAppend = false;
+  displayLoads = 0;
 
   transaction<T>(work: (tx: TeamTaskQueryTransaction) => Promise<T>) {
     if (this.transactionError) return Promise.reject(this.transactionError);
@@ -71,6 +75,60 @@ class MemoryRepository implements TeamTaskQueryRepository, TeamTaskQueryTransact
   }
   async listWorkItems() {
     return [this.item];
+  }
+  async listOpenMilestones() {
+    return [{ externalId: 'tml_Open111111111111111111', title: 'Open milestone' }];
+  }
+  async loadListDisplayRows(): Promise<TeamTaskListDisplayRow[]> {
+    this.displayLoads += 1;
+    return [
+      {
+        workItemId: 30,
+        milestoneExternalId: 'tml_ReleaseM31111111111111',
+        milestoneTitle: 'Release M3',
+        assignments: [
+          {
+            assignmentExternalId: 'twa_Responsible111111111111',
+            userExternalId: actorId,
+            displayName: 'Project lead',
+            role: 'responsible' as const,
+            status: 'accepted' as const,
+          },
+          {
+            assignmentExternalId: 'twa_Collaborator1111111111',
+            userExternalId: 'usr_Collaborator111111111',
+            displayName: 'Collaborator',
+            role: 'collaborator' as const,
+            status: 'accepted' as const,
+          },
+        ],
+        submittedOnTime: true,
+        latestSubmissionInternalId: 91,
+        latestSubmissionExternalId: 'tsb_Submission111111111111',
+        latestReviewExternalId: 'trv_Review11111111111111111',
+      },
+    ];
+  }
+  async loadDetailDisplay() {
+    return {
+      contract: {
+        version: 2,
+        objective: 'Ship a bounded report.',
+        criteria: [{ id: 'criterion-output', description: 'Include three verified sections.' }],
+        approverUserId: actorId,
+        arbitratorUserId: 'usr_Arbitrator11111111111',
+      },
+      timeline: [
+        {
+          eventType: 'contract_confirmed',
+          occurredAt: new Date('2026-08-30T08:00:00.000Z'),
+        },
+        {
+          eventType: 'ai_contribution_recorded',
+          occurredAt: new Date('2026-08-31T09:00:00.000Z'),
+        },
+      ],
+    };
   }
   async lockWorkItemAccess() {
     return { access: this.access, workItem: this.item };
@@ -114,6 +172,21 @@ function service(repository = new MemoryRepository(), lifecycleEnabled = true) {
 }
 
 describe('TeamTaskQueryService', () => {
+  it('scopes milestone display joins to the work item tenant lineage', () => {
+    const db = drizzle.mock({ schema, mode: 'default', casing: 'snake_case' });
+    const query = __teamTaskQueryInternals.buildMilestoneDisplayQuery(db, 10, 20, [30, 31]).toSQL();
+    const sql = query.sql.toLowerCase().replace(/\s+/g, ' ').trim();
+
+    expect(sql).toContain('`team_milestones`.`id` = `team_work_items`.`milestone_id`');
+    expect(sql).toContain(
+      '`team_milestones`.`organization_id` = `team_work_items`.`organization_id`',
+    );
+    expect(sql).toContain('`team_milestones`.`project_id` = `team_work_items`.`project_id`');
+    expect(sql).toContain('`team_work_items`.`organization_id` = ?');
+    expect(sql).toContain('`team_work_items`.`project_id` = ?');
+    expect(query.params).toEqual([10, 20, 30, 31]);
+  });
+
   it('rebuilds only an exact bounded archive receipt and rejects metadata pollution', () => {
     const valid = {
       command: 'archive',
@@ -140,7 +213,7 @@ describe('TeamTaskQueryService', () => {
   });
 
   it('lists only sanitized project task DTOs after both rollout gates and active membership', async () => {
-    const { service: subject } = service();
+    const { service: subject, repository } = service();
     await expect(subject.list({ actorId, projectId })).resolves.toEqual([
       {
         id: workItemId,
@@ -152,10 +225,214 @@ describe('TeamTaskQueryService', () => {
         version: 4,
         dueAt: '2026-09-01T00:00:00.000Z',
         revisionRound: 1,
+        responsibleUserId: actorId,
+        responsibleDisplayName: 'Project lead',
+        responsibleAssignmentId: 'twa_Responsible111111111111',
+        responsibleAssignmentStatus: 'accepted',
+        myPendingAssignmentId: null,
+        myPendingAssignmentRole: null,
+        myPendingAssignmentStatus: null,
+        canSelectClaim: true,
+        claimApplicants: [],
+        collaboratorUserIds: ['usr_Collaborator111111111'],
+        milestoneId: 'tml_ReleaseM31111111111111',
+        milestone: 'Release M3',
+        submittedOnTime: true,
+        latestSubmissionId: 'tsb_Submission111111111111',
+        latestReviewId: 'trv_Review11111111111111111',
+        accepted: true,
         createdAt: '2026-08-30T00:00:00.000Z',
         updatedAt: '2026-08-31T00:00:00.000Z',
       },
     ]);
+    expect(repository.displayLoads).toBe(1);
+  });
+
+  it('derives acceptance from the current canonical state rather than a historical review', async () => {
+    const repository = new MemoryRepository();
+    repository.item = { ...repository.item, status: 'revision_requested' };
+
+    const [row] = await service(repository).service.list({ actorId, projectId });
+
+    expect(row?.accepted).toBe(false);
+  });
+
+  it('keeps leader-select applicants separate from a selected responsible assignment', async () => {
+    const repository = new MemoryRepository();
+    repository.item = { ...repository.item, assignmentMode: 'leader_select', status: 'claimable' };
+    repository.loadListDisplayRows = async () => [
+      {
+        workItemId: 30,
+        milestoneExternalId: null,
+        milestoneTitle: null,
+        assignments: [
+          {
+            assignmentExternalId: 'twa_Applicant11111111111111',
+            userExternalId: actorId,
+            displayName: 'Applicant',
+            role: 'responsible',
+            status: 'applied',
+          },
+        ],
+        submittedOnTime: null,
+        latestSubmissionInternalId: null,
+        latestSubmissionExternalId: null,
+        latestReviewExternalId: null,
+      },
+    ];
+
+    const [row] = await service(repository).service.list({ actorId, projectId });
+
+    expect(row).toMatchObject({
+      responsibleUserId: null,
+      responsibleAssignmentId: null,
+      myPendingAssignmentId: 'twa_Applicant11111111111111',
+      myPendingAssignmentRole: 'responsible',
+      myPendingAssignmentStatus: 'applied',
+      canSelectClaim: true,
+      claimApplicants: [
+        {
+          assignmentId: 'twa_Applicant11111111111111',
+          userId: actorId,
+          displayName: 'Applicant',
+        },
+      ],
+    });
+  });
+
+  it('does not expose leader-select applicants to a viewer', async () => {
+    const repository = new MemoryRepository();
+    repository.access = { ...repository.access, actorProjectRole: 'viewer' };
+    repository.item = { ...repository.item, assignmentMode: 'leader_select', status: 'claimable' };
+    repository.loadListDisplayRows = async () => [
+      {
+        workItemId: 30,
+        milestoneExternalId: null,
+        milestoneTitle: null,
+        assignments: [
+          {
+            assignmentExternalId: 'twa_Applicant11111111111111',
+            userExternalId: 'usr_Applicant1111111111111',
+            displayName: 'Applicant',
+            role: 'responsible',
+            status: 'applied',
+          },
+        ],
+        submittedOnTime: null,
+        latestSubmissionInternalId: null,
+        latestSubmissionExternalId: null,
+        latestReviewExternalId: null,
+      },
+    ];
+
+    const [row] = await service(repository).service.list({ actorId, projectId });
+
+    expect(row).toMatchObject({ canSelectClaim: false, claimApplicants: [] });
+  });
+
+  it('exposes claim selection capability to an organization manager on the project', async () => {
+    const repository = new MemoryRepository();
+    repository.access = {
+      ...repository.access,
+      actorProjectRole: 'member',
+      actorOrganizationRole: 'manager',
+    };
+    repository.item = { ...repository.item, assignmentMode: 'leader_select', status: 'claimable' };
+    repository.loadListDisplayRows = async () => [
+      {
+        workItemId: 30,
+        milestoneExternalId: null,
+        milestoneTitle: null,
+        assignments: [
+          {
+            assignmentExternalId: 'twa_Applicant11111111111111',
+            userExternalId: 'usr_Applicant1111111111111',
+            displayName: 'Applicant',
+            role: 'responsible',
+            status: 'applied',
+          },
+        ],
+        submittedOnTime: null,
+        latestSubmissionInternalId: null,
+        latestSubmissionExternalId: null,
+        latestReviewExternalId: null,
+      },
+    ];
+
+    const [row] = await service(repository).service.list({ actorId, projectId });
+
+    expect(row).toMatchObject({
+      canSelectClaim: true,
+      claimApplicants: [{ assignmentId: 'twa_Applicant11111111111111' }],
+    });
+  });
+
+  it('keeps acceptance unknown until a submitted task receives a canonical review outcome', async () => {
+    const repository = new MemoryRepository();
+    repository.item = { ...repository.item, status: 'submitted' };
+
+    const [row] = await service(repository).service.list({ actorId, projectId });
+
+    expect(row?.accepted).toBeNull();
+  });
+
+  it('returns bounded open milestone options behind the same project access boundary', async () => {
+    await expect(service().service.planningOptions({ actorId, projectId })).resolves.toEqual({
+      milestones: [{ id: 'tml_Open111111111111111111', title: 'Open milestone' }],
+    });
+  });
+
+  it('returns a bounded current contract and normalized timeline without raw event metadata', async () => {
+    const { service: subject } = service();
+
+    await expect(subject.get({ actorId, projectId, workItemId })).resolves.toEqual({
+      id: workItemId,
+      projectId,
+      title: 'Launch report',
+      description: 'Prepare the bounded launch report.',
+      assignmentMode: 'direct',
+      state: 'completed',
+      version: 4,
+      dueAt: '2026-09-01T00:00:00.000Z',
+      revisionRound: 1,
+      responsibleUserId: actorId,
+      responsibleDisplayName: 'Project lead',
+      responsibleAssignmentId: 'twa_Responsible111111111111',
+      responsibleAssignmentStatus: 'accepted',
+      myPendingAssignmentId: null,
+      myPendingAssignmentRole: null,
+      myPendingAssignmentStatus: null,
+      canSelectClaim: true,
+      claimApplicants: [],
+      collaboratorUserIds: ['usr_Collaborator111111111'],
+      milestoneId: 'tml_ReleaseM31111111111111',
+      milestone: 'Release M3',
+      submittedOnTime: true,
+      latestSubmissionId: 'tsb_Submission111111111111',
+      latestReviewId: 'trv_Review11111111111111111',
+      accepted: true,
+      createdAt: '2026-08-30T00:00:00.000Z',
+      updatedAt: '2026-08-31T00:00:00.000Z',
+      contract: {
+        version: 2,
+        objective: 'Ship a bounded report.',
+        criteria: [{ id: 'criterion-output', description: 'Include three verified sections.' }],
+        approverUserId: actorId,
+        arbitratorUserId: 'usr_Arbitrator11111111111',
+      },
+      timeline: [
+        {
+          kind: 'contract',
+          label: '验收契约已确认',
+          at: '2026-08-30T08:00:00.000Z',
+        },
+        {
+          kind: 'ai',
+          label: 'AI 贡献已提交，等待人工确认',
+          at: '2026-08-31T09:00:00.000Z',
+        },
+      ],
+    });
   });
 
   it('hides a resource when projectId does not match the work-item lineage', async () => {
