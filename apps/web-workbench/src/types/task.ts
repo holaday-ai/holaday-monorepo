@@ -100,7 +100,13 @@ export interface UiTask {
    * panel to take over the screen. Missing == 'clarification'
    * (chat composer is enough).
    */
-  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'permission' | 'browser_action' | 'video_quote';
+  awaitingKind?:
+    | 'clarification'
+    | 'login'
+    | 'captcha'
+    | 'permission'
+    | 'browser_action'
+    | 'video_quote';
   /**
    * Which dispatcher lane this task is running in. Source order:
    *   - `result.executionMode` (set on awaiting_user park from generate)
@@ -221,6 +227,10 @@ export interface UiProject {
   createdAt: Date | string;
   updatedAt: Date | string;
   taskCount: number;
+  scope: 'personal' | 'organization';
+  organizationId: string | null;
+  organizationName: string | null;
+  memberRole: 'lead' | 'member' | 'viewer' | null;
 }
 
 /**
@@ -339,7 +349,13 @@ export interface UiAwaitingUser {
    * onto the task's awaitingKind so refreshing tasks.detail
    * preserves the BrowserPanel's expand/banner decision.
    */
-  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'permission' | 'browser_action' | 'video_quote';
+  awaitingKind?:
+    | 'clarification'
+    | 'login'
+    | 'captcha'
+    | 'permission'
+    | 'browser_action'
+    | 'video_quote';
   /**
    * Legacy task-controller batch confirmation. Kept structured so the
    * stream can render every pending item and call tasks.confirm with an

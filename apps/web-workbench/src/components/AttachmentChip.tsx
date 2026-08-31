@@ -1,6 +1,6 @@
-import { File, FileSpreadsheet, FileText, Image as ImageIcon, Loader2, X } from 'lucide-react';
 import { attachmentChipCopy } from '@/lib/attachment-chip-copy';
 import { cn } from '@/lib/utils';
+import { File, FileSpreadsheet, FileText, Image as ImageIcon, Loader2, X } from 'lucide-react';
 
 export interface DraftAttachment {
   /** Client-only id for matching async upload / preview callbacks. */
@@ -30,6 +30,7 @@ interface Props {
   badge?: string;
   actionLabel?: string;
   onAction?(): void;
+  disabled?: boolean;
 }
 
 /**
@@ -48,6 +49,7 @@ export function AttachmentChip({
   badge,
   actionLabel,
   onAction,
+  disabled = false,
 }: Props): JSX.Element {
   const isError = attachment.status === 'error';
   const isUploading = attachment.status === 'uploading';
@@ -88,9 +90,7 @@ export function AttachmentChip({
         <span
           className={cn(
             'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] border bg-white',
-            isError
-              ? 'border-[#EA1F59]/25 text-[#EA1F59]'
-              : 'border-[#DCDDDD] text-[#595757]',
+            isError ? 'border-[#EA1F59]/25 text-[#EA1F59]' : 'border-[#DCDDDD] text-[#595757]',
           )}
         >
           <FileTypeIcon mimetype={attachment.mimetype} />
@@ -120,7 +120,8 @@ export function AttachmentChip({
         <button
           type="button"
           onClick={onAction}
-          className="shrink-0 rounded-[6px] px-1.5 py-1 text-[10px] font-semibold text-[#237B9D] transition-colors hover:bg-[#42C0EF]/10"
+          disabled={disabled}
+          className="shrink-0 rounded-[6px] px-1.5 py-1 text-[10px] font-semibold text-[#237B9D] transition-colors hover:bg-[#42C0EF]/10 disabled:cursor-wait disabled:opacity-50"
         >
           {actionLabel}
         </button>
@@ -128,9 +129,10 @@ export function AttachmentChip({
       <button
         type="button"
         onClick={onRemove}
+        disabled={disabled}
         aria-label={copy.removeLabel}
         title={copy.removeLabel}
-        className="shrink-0 rounded-[6px] p-0.5 text-[#ADADAD] transition-colors hover:bg-[#EFEFEF]/70 hover:text-[#595757] dark:hover:bg-white/10"
+        className="shrink-0 rounded-[6px] p-0.5 text-[#ADADAD] transition-colors hover:bg-[#EFEFEF]/70 hover:text-[#595757] disabled:cursor-wait disabled:opacity-50 dark:hover:bg-white/10"
       >
         <X className="h-3.5 w-3.5" />
       </button>
@@ -141,7 +143,9 @@ export function AttachmentChip({
 function FileTypeIcon({ mimetype }: { mimetype: string }): JSX.Element {
   const cn = 'h-3.5 w-3.5 shrink-0';
   if (mimetype.startsWith('image/')) return <ImageIcon className={cn} />;
-  if (mimetype.includes('spreadsheet') || mimetype === 'text/csv') return <FileSpreadsheet className={cn} />;
-  if (mimetype === 'application/pdf' || mimetype.startsWith('text/')) return <FileText className={cn} />;
+  if (mimetype.includes('spreadsheet') || mimetype === 'text/csv')
+    return <FileSpreadsheet className={cn} />;
+  if (mimetype === 'application/pdf' || mimetype.startsWith('text/'))
+    return <FileText className={cn} />;
   return <File className={cn} />;
 }

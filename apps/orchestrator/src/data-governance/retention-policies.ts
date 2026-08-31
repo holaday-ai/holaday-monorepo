@@ -120,6 +120,27 @@ export const retentionPolicies: readonly RetentionPolicyDefinition[] = [
           ),
         ],
       },
+      {
+        id: 'team_business_fact_permanent',
+        boundary:
+          '团队任务的提交、评审、申诉、仲裁决定、事件、证据绑定与 AI 贡献作为业务审计事实永久保留；账号关闭后仅保留账号墓碑关联，私人任务原文、对象与存储路径必须最小化。',
+        automationStatus: 'implemented',
+        activation: {
+          mode: 'feature_conditional',
+          enabledByDefault: false,
+          configKeys: ['TEAM_PROJECTS_ENABLED'],
+        },
+        evidence: [
+          source(
+            'apps/orchestrator/src/account-closure/handlers/team-work-items.ts',
+            '团队任务关闭处理器保留业务事实并最小化被引用的任务、文件与证据源。',
+          ),
+          source(
+            'apps/orchestrator/src/account-closure/tombstone-service.ts',
+            '最终关闭保留去标识账号墓碑供不可变业务事实引用。',
+          ),
+        ],
+      },
     ],
   },
   {

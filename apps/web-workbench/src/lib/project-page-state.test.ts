@@ -61,7 +61,9 @@ describe('project page state helpers', () => {
     expect(projectCountSummary({ count: 3, loading: true, error: null })).toBe(
       '正在刷新 3 个项目…',
     );
-    expect(projectCountSummary({ count: 0, loading: false, error: 'offline' })).toBe('项目暂时无法加载');
+    expect(projectCountSummary({ count: 0, loading: false, error: 'offline' })).toBe(
+      '项目暂时无法加载',
+    );
     expect(projectCountSummary({ count: 3, loading: false, error: 'offline' })).toBe(
       '共 3 个项目，上次刷新失败',
     );
@@ -103,6 +105,10 @@ describe('project page state helpers', () => {
         createdAt: '2026-05-25T00:00:00.000Z',
         updatedAt: '2026-05-25T01:00:00.000Z',
         taskCount: 3,
+        scope: 'personal',
+        organizationId: null,
+        organizationName: null,
+        memberRole: null,
       },
       {
         projectId: 'proj_b',
@@ -111,7 +117,83 @@ describe('project page state helpers', () => {
         createdAt: new Date(0),
         updatedAt: new Date(0),
         taskCount: 0,
+        scope: 'personal',
+        organizationId: null,
+        organizationName: null,
+        memberRole: null,
       },
     ]);
+  });
+
+  it('normalizes an organization project only with complete tenant metadata', () => {
+    const raw = {
+      projectId: ' prj_team ',
+      name: ' Launch ',
+      description: null,
+      createdAt: '2026-08-10T00:00:00.000Z',
+      updatedAt: '2026-08-11T00:00:00.000Z',
+      taskCount: 4.9,
+      scope: 'organization',
+      organizationId: ' org_design ',
+      organizationName: ' Design ',
+      memberRole: 'lead',
+    };
+
+    const normalized = normalizeProjectRows([raw], { organizationId: 'org_design' });
+
+    expect(normalized).toEqual([
+      {
+        projectId: 'prj_team',
+        name: 'Launch',
+        description: null,
+        createdAt: '2026-08-10T00:00:00.000Z',
+        updatedAt: '2026-08-11T00:00:00.000Z',
+        taskCount: 4,
+        scope: 'organization',
+        organizationId: 'org_design',
+        organizationName: 'Design',
+        memberRole: 'lead',
+      },
+    ]);
+    expect(normalized[0]).not.toBe(raw);
+  });
+
+  it('rejects malformed or cross-tenant organization project rows instead of downgrading them', () => {
+    const inheritedTeam = Object.create({
+      projectId: 'prj_inherited',
+      name: 'Inherited',
+      scope: 'organization',
+      organizationId: 'org_design',
+      memberRole: 'lead',
+    });
+
+    expect(
+      normalizeProjectRows(
+        [
+          {
+            projectId: 'prj_missing_org',
+            name: 'Missing tenant',
+            scope: 'organization',
+            memberRole: 'lead',
+          },
+          {
+            projectId: 'prj_bad_role',
+            name: 'Truthy role',
+            scope: 'organization',
+            organizationId: 'org_design',
+            memberRole: { lead: true },
+          },
+          {
+            projectId: 'prj_other',
+            name: 'Other tenant',
+            scope: 'organization',
+            organizationId: 'org_other',
+            memberRole: 'viewer',
+          },
+          inheritedTeam,
+        ],
+        { organizationId: 'org_design' },
+      ),
+    ).toEqual([]);
   });
 });

@@ -1,4 +1,16 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { teamProjectsEnabledFor, teamTaskLifecycleEnabledForUser } = vi.hoisted(() => ({
+  teamProjectsEnabledFor: vi.fn<(userId: string) => boolean>(),
+  teamTaskLifecycleEnabledForUser: vi.fn<(userId: string) => boolean>(),
+}));
+
+vi.mock('../../organizations/team-project-access.js', () => ({
+  isTeamProjectsEnabledFor: teamProjectsEnabledFor,
+}));
+vi.mock('../../team-work-items/team-task-access.js', () => ({
+  isTeamTaskLifecycleEnabledForUser: teamTaskLifecycleEnabledForUser,
+}));
 import { authRouter } from './auth.js';
 
 afterEach(() => {
@@ -7,6 +19,11 @@ afterEach(() => {
 });
 
 describe('auth router — unexpected error masking', () => {
+  beforeEach(() => {
+    teamProjectsEnabledFor.mockReset();
+    teamTaskLifecycleEnabledForUser.mockReset();
+  });
+
   it('does not leak raw database errors from password login', async () => {
     const db = {
       select: () => ({
@@ -90,4 +107,69 @@ describe('auth router — unexpected error masking', () => {
       },
     );
   });
+});
+
+describe('auth router — profile rollout state', () => {
+  beforeEach(() => {
+    teamProjectsEnabledFor.mockReset();
+    teamProjectsEnabledFor.mockImplementation((userId) => userId !== 'usr_phase1_off');
+    teamTaskLifecycleEnabledForUser.mockReset();
+    teamTaskLifecycleEnabledForUser.mockImplementation((userId) => userId === 'usr_canary');
+  });
+
+  it.each([
+    ['usr_canary', true, true],
+    ['usr_phase2_off', true, false],
+    ['usr_phase1_off', false, false],
+  ] as const)(
+    'publishes the shared team-project gate result for %s',
+    async (userId, expectedTeamProjectsEnabled, expectedTeamTaskLifecycleEnabled) => {
+      const planExpiresAt = new Date('2026-09-30T00:00:00.000Z');
+      const db = {
+        select: () => ({
+          from: () => ({
+            where: () => ({
+              limit: async () => [
+                {
+                  externalId: userId,
+                  email: 'person@example.com',
+                  phone: '13800138000',
+                  displayName: 'Person',
+                  avatarUrl: 'https://example.com/avatar.png',
+                  plan: 'pro',
+                  planExpiresAt,
+                  selectedRoles: ['researcher'],
+                  role: 'user',
+                },
+              ],
+            }),
+          }),
+        }),
+      };
+      const caller = authRouter.createCaller({
+        db,
+        logger: { error: vi.fn() },
+        userId,
+        browserPool: null,
+      } as never);
+
+      await expect(caller.me()).resolves.toEqual({
+        userId,
+        email: 'person@example.com',
+        phone: '13800138000',
+        displayName: 'Person',
+        avatarUrl: 'https://example.com/avatar.png',
+        plan: 'pro',
+        planExpiresAt,
+        multiUser: false,
+        selectedRoles: ['researcher'],
+        role: 'user',
+        videoEnabled: false,
+        teamProjectsEnabled: expectedTeamProjectsEnabled,
+        teamTaskLifecycleEnabled: expectedTeamTaskLifecycleEnabled,
+      });
+      expect(teamProjectsEnabledFor).toHaveBeenCalledWith(userId);
+      expect(teamTaskLifecycleEnabledForUser).toHaveBeenCalledWith(userId);
+    },
+  );
 });

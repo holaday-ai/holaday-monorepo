@@ -54,7 +54,11 @@ export type RetentionPolicyId =
   | 'media_mixed'
   | 'analytics_configured_mixed';
 
-export type LocalRetentionRegimeId = 'task_30d' | 'audit_180d' | 'manual_hold';
+export type LocalRetentionRegimeId =
+  | 'task_30d'
+  | 'audit_180d'
+  | 'manual_hold'
+  | 'team_business_fact_permanent';
 
 export type RightsCapabilityId =
   | 'account_manual_request'
@@ -103,6 +107,10 @@ export interface DataCategoryDefinition {
   readonly retentionPolicyId: RetentionPolicyId;
   readonly rightsCapabilityId: RightsCapabilityId;
   readonly evidence: readonly SourceEvidence[];
+  readonly exportVisibility?: {
+    readonly include: readonly string[];
+    readonly exclude: readonly string[];
+  };
 }
 
 export interface ProcessorDefinition {

@@ -11,6 +11,8 @@ import {
 import { partnerMemberships } from '../db/schema/partner.js';
 import { taskQuotas } from '../db/schema/task-quotas.js';
 import { users } from '../db/schema/users.js';
+import { assertNoActiveTeamWorkItemResponsibilitiesForFinalization } from './handlers/team-work-items.js';
+import { assertNoTeamWorkspaceAssociationsForFinalization } from './handlers/team-workspace.js';
 
 export type TombstoneFinalizationErrorCode =
   | 'FINALIZATION_PRECONDITION_FAILED'
@@ -165,6 +167,13 @@ export async function finalizeUserTombstone(input: {
       user.baseVideoFileId !== null ||
       user.videoSelfUseAuthorizedAt !== null
     ) {
+      throw new TombstoneFinalizationError('FINALIZATION_PRECONDITION_FAILED');
+    }
+
+    try {
+      await assertNoActiveTeamWorkItemResponsibilitiesForFinalization(tx, input.userId);
+      await assertNoTeamWorkspaceAssociationsForFinalization(tx, input.userId);
+    } catch {
       throw new TombstoneFinalizationError('FINALIZATION_PRECONDITION_FAILED');
     }
 

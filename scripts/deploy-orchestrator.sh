@@ -48,10 +48,14 @@ source "$SCRIPT_DIR/auto-smoke-summary.sh"
 RUNTIME_HELPER="$SCRIPT_DIR/orchestrator-runtime.sh"
 START_HELPER="$SCRIPT_DIR/start-orchestrator-production.sh"
 WORKER_START_HELPER="$SCRIPT_DIR/start-account-closure-worker-production.sh"
+DEPLOY_SAFETY_HELPER="$SCRIPT_DIR/team-task-lifecycle-deploy-safety.mjs"
 REMOTE_RUNTIME_DIR="/var/lib/holaday-deploy"
 REMOTE_RUNTIME_HELPER="$REMOTE_RUNTIME_DIR/orchestrator-runtime.sh"
 REMOTE_START_HELPER="$REMOTE_RUNTIME_DIR/start-orchestrator-production.sh"
 REMOTE_WORKER_START_HELPER="$REMOTE_RUNTIME_DIR/start-account-closure-worker-production.sh"
+REMOTE_DEPLOY_SAFETY_HELPER="$REMOTE_RUNTIME_DIR/team-task-lifecycle-deploy-safety.mjs"
+REMOTE_DEPLOY_SAFETY_LOCK_DIR="$REMOTE_RUNTIME_DIR/locks"
+REMOTE_DEPLOY_SAFETY_LOCK="$REMOTE_DEPLOY_SAFETY_LOCK_DIR/team-task-lifecycle.lock"
 ORCHESTRATOR_RUN_USER="${ORCHESTRATOR_RUN_USER:-holaday}"
 ORCHESTRATOR_RUN_GROUP="${ORCHESTRATOR_RUN_GROUP:-$ORCHESTRATOR_RUN_USER}"
 
@@ -69,6 +73,10 @@ if [[ ! -f "$START_HELPER" ]]; then
 fi
 if [[ ! -f "$WORKER_START_HELPER" ]]; then
   echo "❌ Closure worker production start helper missing: $WORKER_START_HELPER" >&2
+  exit 1
+fi
+if [[ ! -f "$DEPLOY_SAFETY_HELPER" ]]; then
+  echo "❌ Team task lifecycle deploy safety helper missing: $DEPLOY_SAFETY_HELPER" >&2
   exit 1
 fi
 if ! [[ "$ORCHESTRATOR_RUN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
@@ -133,30 +141,46 @@ stage_runtime_helper() {
   echo "→ Staging non-root runtime helpers"
   run_with_retry "Vultr runtime-helper directory" \
     "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-    "install -d -o root -g root -m 755 '$REMOTE_RUNTIME_DIR'"
+    "install -d -o root -g root -m 755 '$REMOTE_RUNTIME_DIR' && \
+     install -d -o root -g root -m 700 '$REMOTE_DEPLOY_SAFETY_LOCK_DIR' && \
+     command -v flock >/dev/null"
   run_with_retry "Vultr runtime-helper upload" \
     "${VULTR_AUTH_PREFIX[@]}" scp "${SSH_OPTS[@]}" \
-    "$RUNTIME_HELPER" "$START_HELPER" "$WORKER_START_HELPER" "$VULTR_HOST:$REMOTE_RUNTIME_DIR/"
+    "$RUNTIME_HELPER" "$START_HELPER" "$WORKER_START_HELPER" "$DEPLOY_SAFETY_HELPER" \
+    "$VULTR_HOST:$REMOTE_RUNTIME_DIR/"
   run_with_retry "Vultr runtime-helper permissions" \
     "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-    "chown root:root '$REMOTE_RUNTIME_HELPER' '$REMOTE_START_HELPER' '$REMOTE_WORKER_START_HELPER' && \
+    "chown root:root '$REMOTE_RUNTIME_HELPER' '$REMOTE_START_HELPER' '$REMOTE_WORKER_START_HELPER' '$REMOTE_DEPLOY_SAFETY_HELPER' && \
      chmod 700 '$REMOTE_RUNTIME_HELPER' && \
-     chmod 755 '$REMOTE_START_HELPER' '$REMOTE_WORKER_START_HELPER'"
+     chmod 755 '$REMOTE_START_HELPER' '$REMOTE_WORKER_START_HELPER' '$REMOTE_DEPLOY_SAFETY_HELPER'"
 }
 
 restart_orchestrator_as_runtime_user() {
   local label="$1"
-  local force_worker_disabled="${2:-0}"
+  local force_safety_disabled="${2:-0}"
   run_with_retry "$label" \
     "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
       cd /opt/holaday-monorepo && \
       set -a && . apps/orchestrator/.env && set +a && \
-      if [[ '$force_worker_disabled' == '1' ]]; then export ACCOUNT_CLOSURE_WORKER_ENABLED=false; fi && \
+      if [[ '$force_safety_disabled' == '1' ]]; then \
+        export ACCOUNT_CLOSURE_WORKER_ENABLED=false; \
+        export TEAM_TASK_LIFECYCLE_ENABLED=false; \
+      fi && \
       ORCHESTRATOR_RUN_USER='$ORCHESTRATOR_RUN_USER' \
       ORCHESTRATOR_RUN_GROUP='$ORCHESTRATOR_RUN_GROUP' \
       ORCHESTRATOR_START_SCRIPT='$REMOTE_START_HELPER' \
       ACCOUNT_CLOSURE_WORKER_START_SCRIPT='$REMOTE_WORKER_START_HELPER' \
-      '$REMOTE_RUNTIME_HELPER' restart /opt/holaday-monorepo"
+      '$REMOTE_RUNTIME_HELPER' restart /opt/holaday-monorepo && \
+      node '$REMOTE_DEPLOY_SAFETY_HELPER' verify-process holaday-orchestrator"
+}
+
+persist_team_task_lifecycle_off() {
+  if ! run_with_retry "Vultr lifecycle safety default" \
+    "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "flock --exclusive --timeout 60 '$REMOTE_DEPLOY_SAFETY_LOCK' \
+      node '$REMOTE_DEPLOY_SAFETY_HELPER' persist /opt/holaday-monorepo/apps/orchestrator/.env"; then
+    return 1
+  fi
 }
 
 # Roll the live deploy back to a known-good commit + rebuild + restart
@@ -167,6 +191,10 @@ rollback() {
   local rollback_output rollback_rc
 
   echo "⚠️  Database changes are forward-only; code rollback does not revert applied migrations." >&2
+  if ! persist_team_task_lifecycle_off; then
+    echo "❌ Rollback could not persist the lifecycle safety default; manual recovery is required" >&2
+    return 1
+  fi
   if [[ -z "$target" ]]; then
     echo "❌ No rollback target captured — manual recovery is required" >&2
     return 1
@@ -310,9 +338,15 @@ if ! run_with_retry "Vultr database migration gate" \
     set -a && . apps/orchestrator/.env && set +a && \
     test -f apps/orchestrator/drizzle/0051_account_closures.sql && \
     test -f apps/orchestrator/drizzle/0052_feedback_cases.sql && \
+    test -f apps/orchestrator/drizzle/0056_team_work_item_lifecycle.sql && \
     pnpm --filter @holaday/orchestrator db:migrate:numbered && \
     pnpm --filter @holaday/orchestrator db:verify"; then
   abort_with_rollback "database migration/schema verification failed"
+fi
+
+echo "→ Persisting team task lifecycle safety default (disabled)"
+if ! persist_team_task_lifecycle_off; then
+  abort_with_rollback "lifecycle safety default could not be persisted"
 fi
 
 echo "→ PM2 restart as dedicated non-root runtime user"

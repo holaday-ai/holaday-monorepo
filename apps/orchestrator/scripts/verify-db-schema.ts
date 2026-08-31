@@ -7,6 +7,7 @@ import {
   STOCK_PREFERENCE_REQUIRED_TABLES,
   findMissingRequiredIndexes,
 } from './release-db-contract.mjs';
+import { findTeamWorkItemSchemaViolations } from './team-work-item-schema-contract.mjs';
 
 function loadDotenvAllowingEmpty(path: string): void {
   const result = loadDotenv({ path, override: false });
@@ -39,6 +40,9 @@ const REQUIRED_TABLES = [
   'feedback_cases',
   'notifications',
   'notification_channels',
+  'organization_invitations',
+  'organization_members',
+  'organizations',
   'payments',
   'pending_cookies',
   'planned_task_items',
@@ -47,6 +51,21 @@ const REQUIRED_TABLES = [
   'planned_task_runs',
   'planned_tasks',
   'projects',
+  'project_members',
+  'team_milestones',
+  'team_work_items',
+  'team_work_item_assignments',
+  'team_work_item_dependencies',
+  'acceptance_contract_versions',
+  'team_work_item_submissions',
+  'team_work_item_reviews',
+  'team_task_review_delegations',
+  'team_work_item_appeals',
+  'team_arbitration_decisions',
+  'team_work_item_events',
+  'team_project_planning_events',
+  'team_evidence_bindings',
+  'team_ai_contributions',
   'scheduled_tasks',
   'sessions',
   'skills',
@@ -71,6 +90,257 @@ const REQUIRED_TABLES = [
 ] as const;
 
 const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
+  organizations: [
+    'external_id',
+    'name',
+    'owner_user_id',
+    'status',
+    'team_projects_enabled',
+    'created_at',
+    'updated_at',
+  ],
+  organization_members: [
+    'external_id',
+    'organization_id',
+    'user_id',
+    'role',
+    'manager_user_id',
+    'status',
+    'joined_at',
+    'created_at',
+    'updated_at',
+  ],
+  organization_invitations: [
+    'external_id',
+    'organization_id',
+    'token_hash',
+    'role',
+    'manager_user_id',
+    'invited_by_user_id',
+    'expires_at',
+    'accepted_at',
+    'revoked_at',
+    'created_at',
+    'updated_at',
+  ],
+  project_members: [
+    'external_id',
+    'project_id',
+    'user_id',
+    'role',
+    'status',
+    'created_at',
+    'updated_at',
+  ],
+  projects: ['user_id', 'organization_id'],
+  team_milestones: [
+    'external_id',
+    'organization_id',
+    'project_id',
+    'created_by_user_id',
+    'title',
+    'status',
+    'version',
+    'sort_order',
+    'due_at',
+    'created_at',
+    'updated_at',
+  ],
+  team_work_items: [
+    'external_id',
+    'organization_id',
+    'project_id',
+    'milestone_id',
+    'created_by_user_id',
+    'title',
+    'assignment_mode',
+    'status',
+    'version',
+    'current_contract_version_id',
+    'due_at',
+    'blocker_json',
+    'revision_round',
+    'closed_at',
+    'created_at',
+    'updated_at',
+  ],
+  team_work_item_assignments: [
+    'external_id',
+    'organization_id',
+    'project_id',
+    'work_item_id',
+    'user_id',
+    'role',
+    'status',
+    'responsible_active_key',
+    'offered_by_user_id',
+    'responded_at',
+    'created_at',
+    'updated_at',
+  ],
+  team_work_item_dependencies: [
+    'organization_id',
+    'project_id',
+    'work_item_id',
+    'depends_on_work_item_id',
+    'created_by_user_id',
+    'created_at',
+  ],
+  acceptance_contract_versions: [
+    'external_id',
+    'organization_id',
+    'project_id',
+    'work_item_id',
+    'version',
+    'objective',
+    'deliverables_json',
+    'criteria_json',
+    'required_evidence_types_json',
+    'approver_user_id',
+    'arbitrator_user_id',
+    'due_at',
+    'max_revision_rounds',
+    'version_note',
+    'created_by_user_id',
+    'confirmed_by_user_id',
+    'confirmed_at',
+    'created_at',
+  ],
+  team_work_item_submissions: [
+    'external_id',
+    'organization_id',
+    'project_id',
+    'work_item_id',
+    'contract_version_id',
+    'submitted_by_user_id',
+    'submission_version',
+    'summary',
+    'deliverables_json',
+    'submitted_on_time',
+    'submitted_at',
+    'created_at',
+  ],
+  team_work_item_reviews: [
+    'external_id',
+    'organization_id',
+    'project_id',
+    'work_item_id',
+    'submission_id',
+    'contract_version_id',
+    'reviewer_user_id',
+    'review_delegation_id',
+    'review_attempt',
+    'decision',
+    'failed_criterion_ids_json',
+    'evidence_refs_json',
+    'revision_instructions_json',
+    'rationale',
+    'new_due_at',
+    'reviewed_at',
+    'created_at',
+  ],
+  team_task_review_delegations: [
+    'external_id',
+    'organization_id',
+    'project_id',
+    'delegator_user_id',
+    'delegate_user_id',
+    'valid_from',
+    'valid_until',
+    'revoked_at',
+    'revoked_by_user_id',
+    'created_at',
+  ],
+  team_work_item_appeals: [
+    'external_id',
+    'organization_id',
+    'project_id',
+    'work_item_id',
+    'submission_id',
+    'review_id',
+    'opened_by_user_id',
+    'dispute_type',
+    'grounds',
+    'status',
+    'opened_at',
+    'resolved_at',
+    'created_at',
+    'updated_at',
+  ],
+  team_arbitration_decisions: [
+    'external_id',
+    'organization_id',
+    'project_id',
+    'work_item_id',
+    'appeal_id',
+    'arbitrator_user_id',
+    'conflict_snapshot_json',
+    'decision',
+    'criterion_ids_json',
+    'evidence_refs_json',
+    'rationale',
+    'decided_at',
+    'created_at',
+  ],
+  team_work_item_events: [
+    'external_id',
+    'organization_id',
+    'project_id',
+    'work_item_id',
+    'actor_user_id',
+    'event_type',
+    'from_state',
+    'to_state',
+    'contract_version_id',
+    'idempotency_key',
+    'metadata_json',
+    'occurred_at',
+  ],
+  team_project_planning_events: [
+    'external_id',
+    'organization_id',
+    'project_id',
+    'milestone_id',
+    'actor_user_id',
+    'event_type',
+    'idempotency_key',
+    'metadata_json',
+    'occurred_at',
+  ],
+  team_evidence_bindings: [
+    'external_id',
+    'organization_id',
+    'project_id',
+    'work_item_id',
+    'submission_id',
+    'review_id',
+    'appeal_id',
+    'ai_contribution_id',
+    'evidence_artifact_id',
+    'task_file_id',
+    'source_kind',
+    'controlled_external_ref',
+    'metadata_json',
+    'bound_by_user_id',
+    'created_at',
+  ],
+  team_ai_contributions: [
+    'external_id',
+    'organization_id',
+    'project_id',
+    'work_item_id',
+    'contributed_by_user_id',
+    'execution_task_id',
+    'requested_scope',
+    'input_source_summary_json',
+    'result_version',
+    'usage_snapshot_json',
+    'human_confirmation_status',
+    'human_changes_summary',
+    'unverified_risks_json',
+    'created_at',
+    'confirmed_at',
+  ],
   account_closure_requests: [
     'external_id',
     'user_id',
@@ -364,6 +634,237 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
   notifications: ['planned_task_id'],
 };
 
+type RequiredIndex = {
+  table: string;
+  name: string;
+  unique: boolean;
+  columns: readonly string[];
+};
+
+const TEAM_WORK_ITEM_REQUIRED_INDEXES: readonly RequiredIndex[] = [
+  ...[
+    'team_milestones',
+    'team_work_items',
+    'team_work_item_assignments',
+    'acceptance_contract_versions',
+    'team_work_item_submissions',
+    'team_work_item_reviews',
+    'team_task_review_delegations',
+    'team_work_item_appeals',
+    'team_arbitration_decisions',
+    'team_work_item_events',
+    'team_project_planning_events',
+    'team_evidence_bindings',
+    'team_ai_contributions',
+  ].map((table) => ({
+    table,
+    name: `uk_${table}_external_id`,
+    unique: true,
+    columns: ['external_id'],
+  })),
+  {
+    table: 'team_work_item_assignments',
+    name: 'uk_team_work_item_assignments_responsible_active',
+    unique: true,
+    columns: ['responsible_active_key'],
+  },
+  {
+    table: 'team_work_item_dependencies',
+    name: 'uk_team_work_item_dependencies_edge',
+    unique: true,
+    columns: ['work_item_id', 'depends_on_work_item_id'],
+  },
+  {
+    table: 'acceptance_contract_versions',
+    name: 'uk_acceptance_contract_versions_work_item_version',
+    unique: true,
+    columns: ['work_item_id', 'version'],
+  },
+  {
+    table: 'team_work_item_submissions',
+    name: 'uk_team_work_item_submissions_work_item_version',
+    unique: true,
+    columns: ['work_item_id', 'submission_version'],
+  },
+  {
+    table: 'team_work_item_reviews',
+    name: 'uk_team_work_item_reviews_submission_attempt',
+    unique: true,
+    columns: ['submission_id', 'review_attempt'],
+  },
+  {
+    table: 'team_task_review_delegations',
+    name: 'uk_team_task_review_delegations_id_lineage',
+    unique: true,
+    columns: ['id', 'organization_id', 'project_id', 'delegate_user_id'],
+  },
+  {
+    table: 'team_task_review_delegations',
+    name: 'uk_team_task_review_delegations_grant',
+    unique: true,
+    columns: [
+      'organization_id',
+      'project_id',
+      'delegator_user_id',
+      'delegate_user_id',
+      'valid_from',
+    ],
+  },
+  {
+    table: 'team_work_item_appeals',
+    name: 'uk_team_work_item_appeals_submission',
+    unique: true,
+    columns: ['submission_id'],
+  },
+  {
+    table: 'team_arbitration_decisions',
+    name: 'uk_team_arbitration_decisions_appeal',
+    unique: true,
+    columns: ['appeal_id'],
+  },
+  {
+    table: 'team_work_item_events',
+    name: 'uk_team_work_item_events_organization_idempotency',
+    unique: true,
+    columns: ['organization_id', 'idempotency_key'],
+  },
+  {
+    table: 'team_project_planning_events',
+    name: 'uk_team_project_planning_events_organization_idempotency',
+    unique: true,
+    columns: ['organization_id', 'idempotency_key'],
+  },
+  {
+    table: 'team_milestones',
+    name: 'ix_team_milestones_tenant_status',
+    unique: false,
+    columns: ['organization_id', 'project_id', 'status'],
+  },
+  {
+    table: 'team_work_items',
+    name: 'ix_team_work_items_tenant_status',
+    unique: false,
+    columns: ['organization_id', 'project_id', 'status'],
+  },
+  {
+    table: 'team_work_item_assignments',
+    name: 'ix_team_work_item_assignments_tenant_status',
+    unique: false,
+    columns: ['organization_id', 'project_id', 'status'],
+  },
+  {
+    table: 'team_work_item_dependencies',
+    name: 'ix_team_work_item_dependencies_tenant',
+    unique: false,
+    columns: ['organization_id', 'project_id'],
+  },
+  {
+    table: 'acceptance_contract_versions',
+    name: 'ix_acceptance_contract_versions_tenant',
+    unique: false,
+    columns: ['organization_id', 'project_id', 'work_item_id'],
+  },
+  {
+    table: 'team_work_item_submissions',
+    name: 'ix_team_work_item_submissions_tenant',
+    unique: false,
+    columns: ['organization_id', 'project_id', 'work_item_id'],
+  },
+  {
+    table: 'team_work_item_reviews',
+    name: 'ix_team_work_item_reviews_tenant_decision',
+    unique: false,
+    columns: ['organization_id', 'project_id', 'decision'],
+  },
+  {
+    table: 'team_task_review_delegations',
+    name: 'ix_team_task_review_delegations_tenant_window',
+    unique: false,
+    columns: [
+      'organization_id',
+      'project_id',
+      'delegator_user_id',
+      'delegate_user_id',
+      'valid_from',
+      'valid_until',
+    ],
+  },
+  {
+    table: 'team_work_item_appeals',
+    name: 'ix_team_work_item_appeals_tenant_status',
+    unique: false,
+    columns: ['organization_id', 'project_id', 'status'],
+  },
+  {
+    table: 'team_arbitration_decisions',
+    name: 'ix_team_arbitration_decisions_tenant',
+    unique: false,
+    columns: ['organization_id', 'project_id', 'decided_at'],
+  },
+  {
+    table: 'team_work_item_events',
+    name: 'ix_team_work_item_events_tenant_type',
+    unique: false,
+    columns: ['organization_id', 'project_id', 'event_type'],
+  },
+  {
+    table: 'team_project_planning_events',
+    name: 'ix_team_project_planning_events_tenant_type',
+    unique: false,
+    columns: ['organization_id', 'project_id', 'event_type'],
+  },
+  {
+    table: 'team_evidence_bindings',
+    name: 'ix_team_evidence_bindings_tenant',
+    unique: false,
+    columns: ['organization_id', 'project_id', 'work_item_id'],
+  },
+  {
+    table: 'team_ai_contributions',
+    name: 'ix_team_ai_contributions_tenant',
+    unique: false,
+    columns: ['organization_id', 'project_id', 'work_item_id'],
+  },
+];
+
+function findMissingTeamWorkItemIndexes(
+  rows: ReadonlyArray<{
+    table_name: string;
+    index_name: string;
+    non_unique: number;
+    seq_in_index: number;
+    column_name: string;
+    sub_part: number | null;
+  }>,
+): string[] {
+  const byIndex = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const key = `${row.table_name}\0${row.index_name}`;
+    byIndex.set(key, [...(byIndex.get(key) ?? []), row]);
+  }
+
+  const missing: string[] = [];
+  for (const required of TEAM_WORK_ITEM_REQUIRED_INDEXES) {
+    const actual = (byIndex.get(`${required.table}\0${required.name}`) ?? [])
+      .slice()
+      .sort((left, right) => Number(left.seq_in_index) - Number(right.seq_in_index));
+    const columns = actual.map((row) => row.column_name);
+    const unique = actual.length > 0 && actual.every((row) => Number(row.non_unique) === 0);
+    const fullColumns = actual.every((row) => row.sub_part == null);
+    if (
+      columns.length !== required.columns.length ||
+      columns.some((column, index) => column !== required.columns[index]) ||
+      (required.unique && !unique) ||
+      !fullColumns
+    ) {
+      missing.push(
+        `${required.table}.${required.name}${required.unique ? ' UNIQUE' : ''}(${required.columns.join(', ')})`,
+      );
+    }
+  }
+  return missing;
+}
+
 async function main(): Promise<void> {
   const url = process.env.DATABASE_URL ?? 'mysql://holaday:holaday-dev@127.0.0.1:3306/holaday';
   const conn = await mysql.createConnection({ uri: url });
@@ -381,8 +882,26 @@ async function main(): Promise<void> {
     const tables = new Set(tableRows.map((r) => r.table_name));
     const missingTables = REQUIRED_TABLES.filter((t) => !tables.has(t));
 
-    const [columnRows] = await conn.query<Array<{ table_name: string; column_name: string }>>(
-      `SELECT table_name AS table_name, column_name AS column_name
+    const [columnRows] = await conn.query<
+      Array<{
+        table_name: string;
+        column_name: string;
+        data_type: string;
+        column_type: string;
+        is_nullable: string;
+        column_default: string | null;
+        extra: string;
+        generation_expression: string;
+      }>
+    >(
+      `SELECT table_name AS table_name,
+              column_name AS column_name,
+              data_type AS data_type,
+              column_type AS column_type,
+              is_nullable AS is_nullable,
+              column_default AS column_default,
+              extra AS extra,
+              generation_expression AS generation_expression
        FROM information_schema.columns
        WHERE table_schema = ?`,
       [database],
@@ -423,9 +942,50 @@ async function main(): Promise<void> {
        WHERE table_schema = ?`,
       [database],
     );
-    const missingIndexes = findMissingRequiredIndexes(indexRows);
+    const missingIndexes = [
+      ...findMissingRequiredIndexes(indexRows),
+      ...findMissingTeamWorkItemIndexes(indexRows),
+    ];
 
-    if (missingTables.length > 0 || missingColumns.length > 0 || missingIndexes.length > 0) {
+    const [foreignKeyRows] = await conn.query<
+      Array<{
+        table_name: string;
+        constraint_name: string;
+        delete_rule: string;
+        ordinal_position: number;
+        column_name: string;
+        referenced_table_name: string;
+        referenced_column_name: string;
+      }>
+    >(
+      `SELECT kcu.table_name AS table_name,
+              kcu.constraint_name AS constraint_name,
+              rc.delete_rule AS delete_rule,
+              kcu.ordinal_position AS ordinal_position,
+              kcu.column_name AS column_name,
+              kcu.referenced_table_name AS referenced_table_name,
+              kcu.referenced_column_name AS referenced_column_name
+       FROM information_schema.key_column_usage AS kcu
+       INNER JOIN information_schema.referential_constraints AS rc
+         ON rc.constraint_schema = kcu.constraint_schema
+        AND rc.table_name = kcu.table_name
+        AND rc.constraint_name = kcu.constraint_name
+       WHERE kcu.table_schema = ?
+         AND kcu.referenced_table_name IS NOT NULL`,
+      [database],
+    );
+    const lifecycleViolations = findTeamWorkItemSchemaViolations({
+      columns: columnRows,
+      indexes: indexRows,
+      foreignKeys: foreignKeyRows,
+    });
+
+    if (
+      missingTables.length > 0 ||
+      missingColumns.length > 0 ||
+      missingIndexes.length > 0 ||
+      lifecycleViolations.length > 0
+    ) {
       console.error(`Database schema verification failed for ${database}.`);
       if (missingTables.length > 0) {
         console.error(`Missing tables: ${missingTables.join(', ')}`);
@@ -435,6 +995,9 @@ async function main(): Promise<void> {
       }
       if (missingIndexes.length > 0) {
         console.error(`Missing indexes: ${missingIndexes.join(', ')}`);
+      }
+      if (lifecycleViolations.length > 0) {
+        console.error(`Invalid lifecycle schema: ${lifecycleViolations.join('; ')}`);
       }
       console.error('Run the numbered migrations or drizzle push before starting orchestrator.');
       process.exitCode = 1;

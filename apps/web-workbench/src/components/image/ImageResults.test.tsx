@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { ImageHistoryRow } from '@/lib/image-history-row';
 import type { UiTask } from '@/types/task';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ImageResultPanel } from './ImageResultPanel';
 
@@ -112,9 +112,7 @@ describe('ImageResultPanel', () => {
   });
 
   it('does not turn every compact history card into a live region', () => {
-    const { container } = render(
-      <ImageResultPanel row={row()} compact onContinue={vi.fn()} />,
-    );
+    const { container } = render(<ImageResultPanel row={row()} compact onContinue={vi.fn()} />);
 
     expect(container.querySelector('[role="status"]')).toBeNull();
   });
@@ -158,6 +156,24 @@ describe('ImageResultPanel', () => {
     expect(screen.queryByTestId('download-card')).toBeNull();
     expect(screen.getByRole('button', { name: '保持主角' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '复用设置' })).toBeTruthy();
+  });
+
+  it('exposes continuation actions as disabled while the draft is locked', () => {
+    render(
+      <ImageResultPanel
+        task={task({ status: 'completed' })}
+        row={row()}
+        continuationDisabled
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '继续改这张' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '保持主角' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '复用设置' }).hasAttribute('disabled')).toBe(true);
+    expect(
+      screen.getByRole('button', { name: '保存 result.png 到文件库' }).hasAttribute('disabled'),
+    ).toBe(false);
   });
 
   it('keeps every result and history action at least 44px tall', () => {

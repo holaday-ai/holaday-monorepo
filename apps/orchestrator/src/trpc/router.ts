@@ -11,6 +11,7 @@ import { filesRouter } from './routers/files.js';
 import { llmCallsRouter } from './routers/llm-calls.js';
 import { memoryRouter } from './routers/memory.js';
 import { notificationChannelsRouter, notificationsRouter } from './routers/notifications.js';
+import { organizationsRouter } from './routers/organizations.js';
 import { partnerRouter } from './routers/partner.js';
 import { paymentRouter } from './routers/payment.js';
 import { plannedTasksRouter } from './routers/planned-tasks.js';
@@ -21,6 +22,7 @@ import { scheduledTasksRouter } from './routers/scheduled-tasks.js';
 import { skillsRouter } from './routers/skills.js';
 import { stocksRouter } from './routers/stocks.js';
 import { tasksRouter } from './routers/tasks.js';
+import { teamTasksRouter } from './routers/team-tasks.js';
 import { usageRouter } from './routers/usage.js';
 import { videoEditingRouter } from './routers/video-editing.js';
 import { videoOnboardingRouter } from './routers/video-onboarding.js';
@@ -37,6 +39,7 @@ export const appRouter = router({
   energy: energyRouter,
   auth: authRouter,
   tasks: tasksRouter,
+  teamTasks: teamTasksRouter,
   llmCalls: llmCallsRouter,
   feedback: feedbackRouter,
   memory: memoryRouter,
@@ -54,6 +57,7 @@ export const appRouter = router({
   connections: connectionsRouter,
   usage: usageRouter,
   notifications: notificationsRouter,
+  organizations: organizationsRouter,
   notificationChannels: notificationChannelsRouter,
   partner: partnerRouter,
   admin: adminRouter,

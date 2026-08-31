@@ -41,4 +41,47 @@ describe('account closure persistence table ownership', () => {
       video_edit_render_attempts: 'task_execution',
     });
   });
+
+  it('routes every team workspace table through task execution cleanup', () => {
+    const owners = Object.fromEntries(
+      ACCOUNT_CLOSURE_TABLE_OWNERSHIP.map(({ tableName, categoryId }) => [tableName, categoryId]),
+    );
+
+    expect({
+      organizations: owners.organizations,
+      organization_members: owners.organization_members,
+      organization_invitations: owners.organization_invitations,
+      project_members: owners.project_members,
+    }).toEqual({
+      organizations: 'task_execution',
+      organization_members: 'task_execution',
+      organization_invitations: 'task_execution',
+      project_members: 'task_execution',
+    });
+  });
+
+  it('routes all twelve team work-item lifecycle fact tables through task execution', () => {
+    const owners = Object.fromEntries(
+      ACCOUNT_CLOSURE_TABLE_OWNERSHIP.map(({ tableName, categoryId }) => [tableName, categoryId]),
+    );
+    const lifecycleFactTables = [
+      'team_work_item_assignments',
+      'team_work_item_dependencies',
+      'acceptance_contract_versions',
+      'team_work_item_submissions',
+      'team_work_item_reviews',
+      'team_task_review_delegations',
+      'team_work_item_appeals',
+      'team_arbitration_decisions',
+      'team_work_item_events',
+      'team_project_planning_events',
+      'team_evidence_bindings',
+      'team_ai_contributions',
+    ] as const;
+
+    expect(lifecycleFactTables).toHaveLength(12);
+    expect(Object.fromEntries(lifecycleFactTables.map((table) => [table, owners[table]]))).toEqual(
+      Object.fromEntries(lifecycleFactTables.map((table) => [table, 'task_execution'])),
+    );
+  });
 });

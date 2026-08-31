@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Holaday 团队任务生命周期 Canary QA</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #25242a;
+        --muted: #73707a;
+        --line: #e4e1e6;
+        --canvas: #faf9fb;
+        --paper: #fff;
+        --brand: #e91f59;
+        --brand-soft: #fff2f6;
+        --violet: #6754ad;
+        --violet-soft: #f4f1ff;
+        --green: #28745b;
+        --green-soft: #eef9f4;
+        --amber: #91611d;
+        --amber-soft: #fff8e9;
+        font-family:
+          Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-width: 320px;
+        margin: 0;
+        background: var(--canvas);
+        color: var(--ink);
+      }
+
+      :focus-visible {
+        outline: 3px solid rgba(233, 31, 89, 0.32);
+        outline-offset: 3px;
+      }
+
+      .skip-link {
+        position: fixed;
+        top: -80px;
+        left: 16px;
+        z-index: 5;
+        min-height: 44px;
+        border-radius: 8px;
+        background: var(--ink);
+        color: #fff;
+        padding: 12px 16px;
+      }
+
+      .skip-link:focus {
+        top: 16px;
+      }
+
+      .shell {
+        width: min(1120px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 40px 0 64px;
+      }
+
+      header {
+        display: grid;
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+
+      .eyebrow {
+        margin: 0;
+        color: var(--brand);
+        font-size: 12px;
+        font-weight: 750;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        max-width: 760px;
+        margin: 0;
+        font-size: clamp(30px, 5vw, 48px);
+        line-height: 1.08;
+        letter-spacing: -0.04em;
+      }
+
+      header > p:last-child {
+        max-width: 760px;
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.7;
+      }
+
+      .boundary {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+
+      .metric,
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--paper);
+      }
+
+      .metric {
+        min-height: 96px;
+        padding: 16px;
+      }
+
+      .metric strong {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--violet);
+        font-size: 20px;
+      }
+
+      .metric span {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .notice {
+        margin: 0 0 18px;
+        border: 1px solid #f0d7df;
+        border-radius: 12px;
+        background: var(--brand-soft);
+        padding: 14px 16px;
+        color: #71334a;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      .panel {
+        padding: 20px;
+      }
+
+      .panel + .panel {
+        margin-top: 18px;
+      }
+
+      .panel h2 {
+        margin: 0 0 5px;
+        font-size: 18px;
+      }
+
+      .panel > p {
+        margin: 0 0 18px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .stages,
+      .scenarios {
+        display: grid;
+        gap: 10px;
+      }
+
+      .stages {
+        grid-template-columns: repeat(4, 1fr);
+      }
+
+      .stage,
+      .scenario {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px;
+      }
+
+      .stage {
+        min-height: 132px;
+      }
+
+      .stage span,
+      .scenario small {
+        color: var(--muted);
+      }
+
+      .stage h3 {
+        margin: 8px 0 6px;
+        font-size: 15px;
+      }
+
+      .stage p,
+      .scenario p {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .scenarios {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .scenario {
+        display: grid;
+        grid-template-columns: 34px 1fr auto;
+        gap: 10px;
+        align-items: start;
+      }
+
+      .index {
+        display: grid;
+        width: 30px;
+        height: 30px;
+        place-items: center;
+        border-radius: 8px;
+        background: var(--violet-soft);
+        color: var(--violet);
+        font-weight: 750;
+      }
+
+      .scenario h3 {
+        margin: 1px 0 4px;
+        font-size: 14px;
+      }
+
+      .tag {
+        border-radius: 999px;
+        background: var(--amber-soft);
+        color: var(--amber);
+        padding: 5px 8px;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .rollback {
+        border-color: #d8eadf;
+        background: var(--green-soft);
+      }
+
+      .rollback ol {
+        margin: 12px 0 0;
+        padding-left: 20px;
+        color: #315d4d;
+        line-height: 1.8;
+      }
+
+      @media (max-width: 800px) {
+        .boundary,
+        .stages {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      @media (max-width: 560px) {
+        .shell {
+          width: min(100% - 24px, 1120px);
+          padding-top: 24px;
+        }
+
+        .boundary,
+        .stages,
+        .scenarios {
+          grid-template-columns: 1fr;
+        }
+
+        .scenario {
+          grid-template-columns: 34px 1fr;
+        }
+
+        .tag {
+          grid-column: 2;
+          justify-self: start;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到 Canary 清单</a>
+    <main class="shell" id="main">
+      <header>
+        <p class="eyebrow">Phase 2 · 发布运行夹具</p>
+        <h1>团队任务生命周期 Canary</h1>
+        <p>
+          这是确定性人工核对页，不连接生产、不保存身份，也不代表场景已经通过。真实结论只来自当次安全预检和四个合成账号、两个合成组织的有限 Canary。
+        </p>
+      </header>
+
+      <section class="boundary" aria-label="Canary 边界">
+        <article class="metric"><strong>4</strong><span>已双人确认的合成账号</span></article>
+        <article class="metric"><strong>2</strong><span>已双人确认的合成组织</span></article>
+        <article class="metric"><strong>0</strong><span>可达非合成组织</span></article>
+        <article class="metric"><strong>13 / 13</strong><span>启用后必须真实通过的场景</span></article>
+      </section>
+
+      <p class="notice" role="note">
+        当前数字是验收阈值，不是生产观测值。禁止把历史 Phase 1 身份、手填通过数或静态页面当成真实 Canary 证据；只有实际 API/浏览器 QA 执行器生成的同 revision、owner-only receipt 才能进入预检。
+      </p>
+
+      <section class="panel" aria-labelledby="stages-title">
+        <h2 id="stages-title">四段门禁</h2>
+        <p>每段都重新采集只含布尔值和计数的快照；前一段通过不替代下一段检查。</p>
+        <div class="stages">
+          <article class="stage"><span>01</span><h3>默认关闭</h3><p>健康、revision、UID、迁移、阶段一 smoke 全绿，生命周期保持关闭。</p></article>
+          <article class="stage"><span>02</span><h3>Canary 就绪</h3><p>确认 4 × 2 合成边界，且四个账号不可达任何已启用非合成组织。</p></article>
+          <article class="stage"><span>03</span><h3>有限启用</h3><p>开关开启后完成全部 13 项，不用 AI 结果替代人工验收。</p></article>
+          <article class="stage"><span>04</span><h3>24 小时观察</h3><p>白名单不变，只读复盘错误、冲突、状态和延迟，不自动扩大。</p></article>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="scenarios-title">
+        <h2 id="scenarios-title">13 项真实场景</h2>
+        <p>每项都应产生唯一标准状态与幂等事件；未执行前状态一律视为“待验证”。</p>
+        <div class="scenarios">
+          <article class="scenario"><span class="index">1</span><div><h3>直接指派闭环</h3><p>发布、接受、开始、阻塞、提交、人工通过、关闭。</p></div><span class="tag">待验证</span></article>
+          <article class="scenario"><span class="index">2</span><div><h3>公开认领竞争</h3><p>并发只保留一个负责人，无孤儿 assignment。</p></div><span class="tag">待验证</span></article>
+          <article class="scenario"><span class="index">3</span><div><h3>有效返工</h3><p>criterion、证据、指令、新期限全部齐全。</p></div><span class="tag">待验证</span></article>
+          <article class="scenario"><span class="index">4</span><div><h3>模糊驳回</h3><p>无限责任或缺字段请求不写 review/event。</p></div><span class="tag">待验证</span></article>
+          <article class="scenario"><span class="index">5</span><div><h3>两轮上限</h3><p>第二轮后只保留通过或正式申诉。</p></div><span class="tag">待验证</span></article>
+          <article class="scenario"><span class="index">6</span><div><h3>正式申诉</h3><p>一次正式记录，重复请求返回同一 receipt。</p></div><span class="tag">待验证</span></article>
+          <article class="scenario"><span class="index">7</span><div><h3>独立仲裁</h3><p>仲裁人不与负责人、验收人冲突，决定唯一。</p></div><span class="tag">待验证</span></article>
+          <article class="scenario"><span class="index">8</span><div><h3>跨租户隐藏</h3><p>替换任何外部资源 ID 都不泄露存在性。</p></div><span class="tag">待验证</span></article>
+          <article class="scenario"><span class="index">9</span><div><h3>Inactive 竞争</h3><p>精确成员行锁证明等待与提交失活拒绝，且工单、事件和幂等记录零新增。</p></div><span class="tag">待验证</span></article>
+          <article class="scenario"><span class="index">10</span><div><h3>幂等与陈旧版本</h3><p>同 key 返回首次结果；新 key 旧版本明确冲突。</p></div><span class="tag">待验证</span></article>
+          <article class="scenario"><span class="index">11</span><div><h3>AI 权限边界</h3><p>AI 可贡献内容，但不能验收、申诉或仲裁。</p></div><span class="tag">待验证</span></article>
+          <article class="scenario"><span class="index">12</span><div><h3>按时与验收独立</h3><p>按时提交和人工验收分别记录；未知保持未知。</p></div><span class="tag">待验证</span></article>
+          <article class="scenario"><span class="index">13</span><div><h3>阶段一回归</h3><p>个人项目、任务移动和文件行为保持不变。</p></div><span class="tag">待验证</span></article>
+        </div>
+      </section>
+
+      <section class="panel rollback" aria-labelledby="rollback-title">
+        <h2 id="rollback-title">任一失败即收口</h2>
+        <ol>
+          <li>设置团队任务生命周期为关闭并重启 Orchestrator。</li>
+          <li>复核两个 healthz、单进程 UID 998 与阶段一 smoke。</li>
+          <li>保留迁移和审计记录，使用前向修复；不改变账户注销及其他无关功能状态。</li>
+        </ol>
+      </section>
+    </main>
+  </body>
+</html>

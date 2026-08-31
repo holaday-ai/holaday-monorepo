@@ -11,6 +11,8 @@ import {
   accountClosureSteps,
 } from '../db/schema/account-closures.js';
 import { evidenceArtifacts } from '../db/schema/evidence-artifacts.js';
+import { organizationMembers } from '../db/schema/organization-members.js';
+import { organizations } from '../db/schema/organizations.js';
 import {
   holaCreditLedgerEntries,
   partnerActivityEvents,
@@ -25,9 +27,12 @@ import {
   partnerWithdrawalRequests,
 } from '../db/schema/partner.js';
 import { payments } from '../db/schema/payments.js';
+import { projects } from '../db/schema/projects.js';
 import { taskFiles } from '../db/schema/task-files.js';
 import { taskQuotas } from '../db/schema/task-quotas.js';
 import { tasks } from '../db/schema/tasks.js';
+import { teamWorkItemAssignments } from '../db/schema/team-work-item-assignments.js';
+import { teamWorkItems } from '../db/schema/team-work-items.js';
 import { users } from '../db/schema/users.js';
 import { watchlists } from '../db/schema/watchlists.js';
 import type { StorageProvider } from '../files/storage-provider.js';
@@ -67,6 +72,62 @@ describe.sequential('account closure tombstone finalization', () => {
 
   afterAll(async () => {
     await cleanup();
+  });
+
+  it('fails final tombstoning while an accepted team-work responsibility remains', async () => {
+    const subject = await createUser('team-duty', { status: 'closure_processing' });
+    const owner = await createUser('team-duty-owner');
+    const [organizationResult] = await db.insert(organizations).values({
+      externalId: uniqueId('org_team_duty'),
+      name: 'Task 12 finalization guard',
+      ownerUserId: owner.id,
+      status: 'active',
+      teamProjectsEnabled: true,
+    });
+    const organizationId = Number(organizationResult.insertId);
+    const [projectResult] = await db.insert(projects).values({
+      externalId: uniqueId('prj_team_duty'),
+      userId: owner.id,
+      organizationId,
+      name: 'Finalization guard project',
+    });
+    const projectId = Number(projectResult.insertId);
+    const [workItemResult] = await db.insert(teamWorkItems).values({
+      externalId: uniqueId('twi_team_duty'),
+      organizationId,
+      projectId,
+      createdByUserId: owner.id,
+      title: 'Must be reassigned',
+      assignmentMode: 'assigned',
+      status: 'assigned',
+    });
+    await db.insert(teamWorkItemAssignments).values({
+      externalId: uniqueId('twa_team_duty'),
+      organizationId,
+      projectId,
+      workItemId: Number(workItemResult.insertId),
+      userId: subject.id,
+      role: 'responsible',
+      status: 'accepted',
+      offeredByUserId: owner.id,
+    });
+    const requestId = await createFinalizationRequest(subject.id, {
+      notificationStatus: 'accepted',
+    });
+
+    await expect(finalizeRequest(requestId, subject.id)).rejects.toMatchObject({
+      code: 'FINALIZATION_PRECONDITION_FAILED',
+    });
+    const [request] = await db
+      .select({ status: accountClosureRequests.status })
+      .from(accountClosureRequests)
+      .where(eq(accountClosureRequests.id, requestId));
+    const [user] = await db
+      .select({ status: users.status })
+      .from(users)
+      .where(eq(users.id, subject.id));
+    expect(request?.status).toBe('processing');
+    expect(user?.status).toBe('closure_processing');
   });
 
   it('minimizes financial records, finalizes only the old tombstone, and permits clean identity reuse', async () => {
@@ -371,6 +432,51 @@ describe.sequential('account closure tombstone finalization', () => {
     for (const subject of [incomplete, unaccepted, mismatch, arbitraryReceipt]) {
       const [unchanged] = await db.select().from(users).where(eq(users.id, subject.id)).limit(1);
       expect(unchanged).toMatchObject({ status: 'closure_processing', email: subject.email });
+    }
+  });
+
+  it('fails closed before tombstoning when team-workspace responsibility reappears', async () => {
+    const subject = await createUser('team-residue', { status: 'closure_processing' });
+    const replacement = await createUser('team-residue-replacement');
+    const requestId = await createFinalizationRequest(subject.id, {
+      notificationStatus: 'accepted',
+    });
+    const [organizationInsert] = await db.insert(organizations).values({
+      externalId: uniqueId('org_tombstone_residue'),
+      name: 'Tombstone residue fixture',
+      ownerUserId: subject.id,
+      status: 'active',
+      teamProjectsEnabled: true,
+    });
+    const organizationId = Number(organizationInsert.insertId);
+    await db.insert(organizationMembers).values([
+      {
+        externalId: uniqueId('omem_tombstone_subject'),
+        organizationId,
+        userId: subject.id,
+        role: 'owner',
+        status: 'active',
+      },
+      {
+        externalId: uniqueId('omem_tombstone_replacement'),
+        organizationId,
+        userId: replacement.id,
+        role: 'owner',
+        status: 'active',
+      },
+    ]);
+
+    try {
+      await expect(finalizeRequest(requestId, subject.id)).rejects.toMatchObject({
+        code: 'FINALIZATION_PRECONDITION_FAILED',
+      });
+      const [unchanged] = await db.select().from(users).where(eq(users.id, subject.id)).limit(1);
+      expect(unchanged).toMatchObject({ status: 'closure_processing', email: subject.email });
+    } finally {
+      await db
+        .delete(organizationMembers)
+        .where(eq(organizationMembers.organizationId, organizationId));
+      await db.delete(organizations).where(eq(organizations.id, organizationId));
     }
   });
 

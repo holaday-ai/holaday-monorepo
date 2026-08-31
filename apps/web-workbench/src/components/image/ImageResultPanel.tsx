@@ -26,6 +26,7 @@ interface ImageResultPanelProps {
   row?: ImageHistoryRow;
   now?: number;
   compact?: boolean;
+  continuationDisabled?: boolean;
   onContinue(
     action: ImageContinuationAction,
     row: ImageHistoryRow,
@@ -38,6 +39,7 @@ export function ImageResultPanel({
   row,
   now = Date.now(),
   compact = false,
+  continuationDisabled = false,
   onContinue,
 }: ImageResultPanelProps): JSX.Element | null {
   const [savedFiles, setSavedFiles] = React.useState<ReadonlySet<string>>(new Set());
@@ -49,6 +51,7 @@ export function ImageResultPanel({
   if (!row) {
     const state = liveState(status);
     return (
+      // biome-ignore lint/a11y/useSemanticElements: the live task card is a labelled section with heading hierarchy.
       <section
         role="status"
         aria-live="polite"
@@ -160,7 +163,7 @@ export function ImageResultPanel({
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
-                  disabled={!actions.continueEdit}
+                  disabled={continuationDisabled || !actions.continueEdit}
                   onClick={() => void onContinue('continue_edit', row, download.fileId)}
                   className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[#DDCFE7] bg-[#F8F3FB] px-3 text-xs font-semibold text-[#6F4E8B] transition-colors hover:bg-[#F2EAF8] disabled:cursor-not-allowed disabled:opacity-45 motion-reduce:transition-none"
                 >
@@ -196,8 +199,9 @@ export function ImageResultPanel({
         {actions.keepSubject ? (
           <button
             type="button"
+            disabled={continuationDisabled}
             onClick={() => void onContinue('keep_subject', row)}
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[#D9CFE5] bg-[#F7F2FB] px-3 text-xs font-semibold text-[#6F4E8B] transition-colors hover:bg-[#F1EAF7] motion-reduce:transition-none"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[#D9CFE5] bg-[#F7F2FB] px-3 text-xs font-semibold text-[#6F4E8B] transition-colors hover:bg-[#F1EAF7] disabled:cursor-wait disabled:opacity-45 motion-reduce:transition-none"
           >
             <Sparkles className="h-3.5 w-3.5" aria-hidden />
             保持主角
@@ -205,8 +209,9 @@ export function ImageResultPanel({
         ) : null}
         <button
           type="button"
+          disabled={continuationDisabled}
           onClick={() => void onContinue('reuse_settings', row)}
-          className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[#E4DFE4] bg-white px-3 text-xs font-semibold text-[#5F5762] transition-colors hover:bg-[#F9F6F8] motion-reduce:transition-none"
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[#E4DFE4] bg-white px-3 text-xs font-semibold text-[#5F5762] transition-colors hover:bg-[#F9F6F8] disabled:cursor-wait disabled:opacity-45 motion-reduce:transition-none"
         >
           <Copy className="h-3.5 w-3.5" aria-hidden />
           复用设置

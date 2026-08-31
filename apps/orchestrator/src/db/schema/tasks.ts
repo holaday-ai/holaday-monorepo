@@ -182,6 +182,7 @@ export const tasks = mysqlTable(
   },
   (t) => [
     uniqueIndex('uk_tasks_external_id').on(t.externalId),
+    uniqueIndex('uk_tasks_id_project_user').on(t.id, t.projectId, t.userId),
     index('ix_tasks_user_id_created_at').on(t.userId, t.createdAt),
     index('ix_tasks_status').on(t.status),
     index('ix_tasks_session_id').on(t.sessionId),

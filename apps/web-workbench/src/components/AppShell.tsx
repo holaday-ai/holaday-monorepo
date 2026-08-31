@@ -27,6 +27,7 @@ import {
 // so it's available globally even before the user opens /scheduled.
 import '@/pages/scheduled-calendar/calendar-styles.css';
 import { useToast } from '@/components/ui/toast';
+import { loadAppShellPersonalProjects } from '@/lib/app-shell-projects';
 import { clearAccessToken, getAccessToken } from '@/lib/auth';
 import {
   normalizeAuthMeProfile,
@@ -50,7 +51,6 @@ import {
   resolveProjectFilteredTasks,
   type ProjectTaskFilterState,
 } from '@/lib/project-task-filter-state';
-import { normalizeProjectRows } from '@/lib/project-page-state';
 import { shouldKeepProjectFilterForPickedTask } from '@/lib/task-selection-url-state';
 import { trpc } from '@/lib/trpc';
 import {
@@ -220,8 +220,7 @@ export function AppShell(): JSX.Element {
     const requestId = projectRefreshRequestRef.current + 1;
     projectRefreshRequestRef.current = requestId;
     try {
-      const list = await trpc.projects.list.query();
-      const nextProjects = normalizeProjectRows(list);
+      const nextProjects = await loadAppShellPersonalProjects(trpc.projects.list.query);
       if (mountedRef.current && projectRefreshRequestRef.current === requestId) {
         setProjects(nextProjects);
       }
