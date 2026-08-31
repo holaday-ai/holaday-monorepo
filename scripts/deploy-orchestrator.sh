@@ -146,12 +146,15 @@ stage_runtime_helper() {
 
 restart_orchestrator_as_runtime_user() {
   local label="$1"
-  local force_worker_disabled="${2:-0}"
+  local force_safety_disabled="${2:-0}"
   run_with_retry "$label" \
     "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
       cd /opt/holaday-monorepo && \
       set -a && . apps/orchestrator/.env && set +a && \
-      if [[ '$force_worker_disabled' == '1' ]]; then export ACCOUNT_CLOSURE_WORKER_ENABLED=false; fi && \
+      if [[ '$force_safety_disabled' == '1' ]]; then \
+        export ACCOUNT_CLOSURE_WORKER_ENABLED=false; \
+        export TEAM_TASK_LIFECYCLE_ENABLED=false; \
+      fi && \
       ORCHESTRATOR_RUN_USER='$ORCHESTRATOR_RUN_USER' \
       ORCHESTRATOR_RUN_GROUP='$ORCHESTRATOR_RUN_GROUP' \
       ORCHESTRATOR_START_SCRIPT='$REMOTE_START_HELPER' \
@@ -310,6 +313,7 @@ if ! run_with_retry "Vultr database migration gate" \
     set -a && . apps/orchestrator/.env && set +a && \
     test -f apps/orchestrator/drizzle/0051_account_closures.sql && \
     test -f apps/orchestrator/drizzle/0052_feedback_cases.sql && \
+    test -f apps/orchestrator/drizzle/0056_team_work_item_lifecycle.sql && \
     pnpm --filter @holaday/orchestrator db:migrate:numbered && \
     pnpm --filter @holaday/orchestrator db:verify"; then
   abort_with_rollback "database migration/schema verification failed"

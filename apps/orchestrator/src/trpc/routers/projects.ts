@@ -213,6 +213,7 @@ export const projectsRouter = router({
       );
       return members.map((member) => ({
         projectMemberId: member.projectMemberId,
+        organizationMemberId: member.organizationMemberId,
         userId: member.userId,
         displayName: member.displayName,
         avatarUrl: member.avatarUrl,

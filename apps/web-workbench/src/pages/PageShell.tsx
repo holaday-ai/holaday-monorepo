@@ -1,5 +1,5 @@
-import * as React from 'react';
 import { cn } from '@/lib/utils';
+import type * as React from 'react';
 
 /**
  * Page-level building blocks for secondary product pages. Sub-pages
@@ -23,6 +23,8 @@ const WIDTH_CLASS = {
   list: 'max-w-[960px]',
   /** Wide content (billing, plan comparison). */
   wide: 'max-w-5xl',
+  /** Dense collaborative workspaces with a table, rail, and detail panel. */
+  workspace: 'max-w-[1240px]',
   /** Reading column for legal text. */
   prose: 'max-w-3xl',
 } as const;
@@ -73,21 +75,13 @@ interface PageHeaderProps {
  * the page's body sections render with their own card / list
  * affordances.
  */
-export function PageHeader({
-  title,
-  description,
-  action,
-}: PageHeaderProps): JSX.Element {
+export function PageHeader({ title, description, action }: PageHeaderProps): JSX.Element {
   return (
     <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0">
-        <h1 className="text-xl font-semibold leading-tight text-foreground">
-          {title}
-        </h1>
+        <h1 className="text-xl font-semibold leading-tight text-foreground">{title}</h1>
         {description && (
-          <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-            {description}
-          </p>
+          <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{description}</p>
         )}
       </div>
       {action && (
@@ -167,9 +161,7 @@ export function Section({
               {title}
             </h2>
           )}
-          {description && (
-            <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-          )}
+          {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
         </header>
       )}
       {children}
@@ -194,9 +186,7 @@ export function Row({
     <div className="flex flex-col gap-2 border-b border-[#EFEFEF] py-4 last:border-b-0 md:flex-row md:items-center md:justify-between md:gap-6">
       <div className="min-w-0">
         <div className="text-sm font-medium">{label}</div>
-        {description && (
-          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-        )}
+        {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
       </div>
       <div className="min-w-0 md:text-right">{children}</div>
     </div>

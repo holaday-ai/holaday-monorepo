@@ -586,7 +586,12 @@ export class TeamTaskReviewService {
     const expectedVersion = versionField(input.expectedVersion);
     const idempotencyKey = idempotencyField(input.idempotencyKey);
     const decision = input.decision;
-    if (decision !== 'accepted' && decision !== 'request_revision') return fail('INVALID_INPUT');
+    if (
+      decision !== 'accepted' &&
+      decision !== 'request_revision' &&
+      decision !== 'escalate_arbitration'
+    )
+      return fail('INVALID_INPUT');
     const rationale =
       input.rationale === undefined || input.rationale === null
         ? null
@@ -728,6 +733,11 @@ export class TeamTaskReviewService {
         nextState = translateTransition(
           transitionTeamTask({ state: started.state, appealOpen: false }, { type: 'accept' }),
         ).state;
+      } else if (decision === 'escalate_arbitration') {
+        if (workItem.revisionRound < Math.min(contract.maxRevisionRounds, 2)) {
+          return fail('CONFLICT');
+        }
+        nextState = 'revision_requested';
       } else {
         const requiredRevision = revision;
         if (!requiredRevision) return fail('INVALID_INPUT');
@@ -771,7 +781,7 @@ export class TeamTaskReviewService {
         reviewerUserId: access.actorUserId,
         reviewDelegationId: effectiveDelegation?.id ?? null,
         reviewAttempt,
-        decision,
+        decision: decision === 'accepted' ? 'accepted' : 'request_revision',
         failedCriterionIds: normalizedRevision?.failedCriterionIds ?? null,
         evidenceReferences: normalizedRevision?.evidenceReferences ?? null,
         revisionInstructions: normalizedRevision?.revisionInstructions ?? null,

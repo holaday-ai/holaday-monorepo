@@ -21,6 +21,7 @@ function services(): TeamTasksRouterServices {
   return {
     query: {
       list: vi.fn().mockResolvedValue([{ id: workItemId, projectId, state: 'draft' }]),
+      planningOptions: vi.fn().mockResolvedValue({ milestones: [] }),
       get: vi.fn().mockResolvedValue({ id: workItemId, projectId, state: 'draft' }),
       archive: vi.fn().mockResolvedValue({ ...receipt, command: 'archive', state: 'archived' }),
     },
@@ -33,6 +34,8 @@ function services(): TeamTasksRouterServices {
       selectClaim: vi.fn().mockResolvedValue({ ...receipt, command: 'select_claim' }),
     },
     planning: {
+      assignMilestone: vi.fn().mockResolvedValue({ ...receipt, command: 'assign_milestone' }),
+      addDependency: vi.fn().mockResolvedValue({ ...receipt, command: 'add_dependency' }),
       start: vi.fn().mockResolvedValue({ ...receipt, command: 'start' }),
       block: vi.fn().mockResolvedValue({ ...receipt, command: 'block' }),
       unblock: vi.fn().mockResolvedValue({ ...receipt, command: 'unblock' }),
@@ -97,8 +100,10 @@ describe('teamTasksRouter createCaller', () => {
       { id: workItemId, projectId, state: 'draft' },
     ]);
     await subject.get({ projectId, workItemId });
+    await expect(subject.planningOptions({ projectId })).resolves.toEqual({ milestones: [] });
     expect(injected.query.list).toHaveBeenCalledWith({ actorId, projectId });
     expect(injected.query.get).toHaveBeenCalledWith({ actorId, projectId, workItemId });
+    expect(injected.query.planningOptions).toHaveBeenCalledWith({ actorId, projectId });
   });
 
   it('requires project lineage/version/strong idempotency and forwards archive', async () => {
@@ -186,6 +191,8 @@ describe('teamTasksRouter createCaller', () => {
     const memberId = newExternalId('organizationMember');
     const assignmentId = newExternalId('teamWorkItemAssignment');
     const contractVersionId = newExternalId('acceptanceContractVersion');
+    const milestoneId = newExternalId('teamMilestone');
+    const dependsOnWorkItemId = newExternalId('teamWorkItem');
     const submissionId = newExternalId('teamSubmission');
     const reviewId = newExternalId('teamReview');
     const appealId = newExternalId('teamAppeal');
@@ -217,6 +224,8 @@ describe('teamTasksRouter createCaller', () => {
       affectsDueDate: false,
     });
     await subject.unblock(base);
+    await subject.assignMilestone({ ...base, milestoneId });
+    await subject.addDependency({ ...base, dependsOnWorkItemId });
     await subject.createContractVersion({
       ...base,
       contract,
@@ -274,7 +283,7 @@ describe('teamTasksRouter createCaller', () => {
       idempotencyKey,
     });
 
-    expect(injected.query.get).toHaveBeenCalledTimes(17);
+    expect(injected.query.get).toHaveBeenCalledTimes(19);
     const actorWorkItem = { actorExternalId: actorId, workItemExternalId: workItemId };
     expect(injected.task.publish).toHaveBeenCalledWith({
       ...actorWorkItem,
@@ -319,6 +328,18 @@ describe('teamTasksRouter createCaller', () => {
     });
     expect(injected.planning.unblock).toHaveBeenCalledWith({
       ...actorWorkItem,
+      expectedVersion: 3,
+      idempotencyKey,
+    });
+    expect(injected.planning.assignMilestone).toHaveBeenCalledWith({
+      ...actorWorkItem,
+      milestoneExternalId: milestoneId,
+      expectedVersion: 3,
+      idempotencyKey,
+    });
+    expect(injected.planning.addDependency).toHaveBeenCalledWith({
+      ...actorWorkItem,
+      dependsOnWorkItemExternalId: dependsOnWorkItemId,
       expectedVersion: 3,
       idempotencyKey,
     });

@@ -1,13 +1,20 @@
 import { useAppShellContext } from '@/components/AppShell';
+import { TeamTaskWorkbench } from '@/components/projects/TeamTaskWorkbench';
+import type {
+  CreateTeamTaskInput,
+  ReviewTeamTaskInput,
+  TeamTaskExecutionInput,
+} from '@/components/projects/TeamTaskWorkbench';
 import { classifyHiddenWorkspaceError } from '@/components/projects/team-workspace-error';
 import { Button } from '@/components/ui/button';
 import { normalizeProjectRows } from '@/lib/project-page-state';
+import { type TeamTaskWorkbenchRow, applyTaskLoadResult } from '@/lib/team-task-workbench-state';
 import { type AppRouter, trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
 import type { UiProject } from '@/types/task';
 import type { inferRouterClient } from '@trpc/client';
-import { FolderKanban, RefreshCw, Users } from 'lucide-react';
+import { FolderKanban, RefreshCw } from 'lucide-react';
 import * as React from 'react';
 import { useParams } from 'react-router-dom';
 
@@ -15,6 +22,7 @@ type ProjectMemberRole = 'lead' | 'member' | 'viewer';
 
 interface UiProjectMember {
   readonly projectMemberId: string;
+  readonly organizationMemberId: string;
   readonly userId: string;
   readonly displayName: string;
   readonly avatarUrl: string | null;
@@ -36,16 +44,39 @@ interface ProjectMembersState {
   readonly error: string | null;
 }
 
+interface ProjectTasksState {
+  readonly requestId: number;
+  readonly rows: readonly TeamTaskWorkbenchRow[];
+  readonly loading: boolean;
+  readonly error: string | null;
+  readonly stale: boolean;
+}
+
+interface PendingTaskCreation {
+  readonly inputKey: string;
+  readonly draftKey: string;
+  readonly publishKey: string;
+  readonly milestoneKey: string | null;
+  readonly dependencyKeys: readonly string[];
+  readonly assignmentKeys: readonly string[];
+  workItemId: string | null;
+  version: number;
+  published: boolean;
+  milestoneDone: boolean;
+  dependencyIndex: number;
+  assignmentIndex: number;
+}
+
 const PROJECT_ROLE_LABEL: Record<ProjectMemberRole, string> = {
   lead: '项目负责人',
   member: '项目成员',
   viewer: '仅查看',
 };
 
-type Task12ProjectDetailClient = Pick<inferRouterClient<AppRouter>, 'projects'>;
+type Task13ProjectDetailClient = Pick<inferRouterClient<AppRouter>, 'projects' | 'teamTasks'>;
 
 // Detail procedures stay coupled to AppRouter while local normalization rebuilds UI rows.
-const task12ProjectDetailClient: Task12ProjectDetailClient = trpc;
+const task13ProjectDetailClient: Task13ProjectDetailClient = trpc;
 
 /**
  * Team project detail consumes only locally normalized API rows. Both detail
@@ -57,14 +88,22 @@ export function TeamProjectPage(): JSX.Element {
   const { me } = useAppShellContext();
   const projectId = typeof routeProjectId === 'string' ? routeProjectId.trim() : '';
   const teamProjectsEnabled = me?.teamProjectsEnabled === true;
+  const teamTaskLifecycleEnabled = me?.teamTaskLifecycleEnabled === true;
   const requestRef = React.useRef(0);
   const mountedRef = React.useRef(false);
+  const pendingTaskCreationRef = React.useRef<PendingTaskCreation | null>(null);
   const [detail, setDetail] = React.useState<ProjectDetailState>(() =>
     initialProjectDetailState(projectId, teamProjectsEnabled),
   );
   const [members, setMembers] = React.useState<ProjectMembersState>(() =>
     initialProjectMembersState(projectId, teamProjectsEnabled),
   );
+  const [tasks, setTasks] = React.useState<ProjectTasksState>(() =>
+    initialProjectTasksState(projectId, teamProjectsEnabled && teamTaskLifecycleEnabled),
+  );
+  const [milestoneOptions, setMilestoneOptions] = React.useState<
+    Array<{ id: string; title: string }>
+  >([]);
 
   const refresh = React.useCallback(() => {
     if (!teamProjectsEnabled || !projectId) {
@@ -76,6 +115,14 @@ export function TeamProjectPage(): JSX.Element {
         notFound: true,
       });
       setMembers({ projectId, rows: [], loading: false, error: null });
+      setTasks({
+        requestId: requestRef.current,
+        rows: [],
+        loading: false,
+        error: null,
+        stale: false,
+      });
+      setMilestoneOptions([]);
       return;
     }
 
@@ -94,9 +141,22 @@ export function TeamProjectPage(): JSX.Element {
       loading: true,
       error: null,
     }));
+    setTasks((current) => ({
+      requestId,
+      rows: current.rows,
+      loading: teamTaskLifecycleEnabled,
+      error: null,
+      stale: false,
+    }));
 
-    const projectRequest = task12ProjectDetailClient.projects.get.query({ projectId });
-    const memberRequest = task12ProjectDetailClient.projects.members.query({ projectId });
+    const projectRequest = task13ProjectDetailClient.projects.get.query({ projectId });
+    const memberRequest = task13ProjectDetailClient.projects.members.query({ projectId });
+    const taskRequest = teamTaskLifecycleEnabled
+      ? task13ProjectDetailClient.teamTasks.list.query({ projectId })
+      : null;
+    const planningOptionsRequest = teamTaskLifecycleEnabled
+      ? task13ProjectDetailClient.teamTasks.planningOptions.query({ projectId })
+      : null;
     const invalidateHiddenDetail = (): void => {
       if (!mountedRef.current || requestRef.current !== requestId) return;
       requestRef.current = requestId + 1;
@@ -108,6 +168,8 @@ export function TeamProjectPage(): JSX.Element {
         notFound: true,
       });
       setMembers({ projectId, rows: [], loading: false, error: null });
+      setTasks({ requestId: requestId + 1, rows: [], loading: false, error: null, stale: false });
+      setMilestoneOptions([]);
     };
 
     void projectRequest.then(
@@ -167,7 +229,298 @@ export function TeamProjectPage(): JSX.Element {
         });
       },
     );
-  }, [projectId, teamProjectsEnabled]);
+    if (taskRequest) {
+      void taskRequest.then(
+        (response) => {
+          if (!mountedRef.current || requestRef.current !== requestId) return;
+          setTasks((current) => ({
+            ...applyTaskLoadResult(current, {
+              requestId,
+              rows: normalizeTeamTaskRows(response, projectId),
+            }),
+            stale: false,
+          }));
+        },
+        (error: unknown) => {
+          if (!mountedRef.current || requestRef.current !== requestId) return;
+          setTasks((current) => ({
+            requestId,
+            rows: current.rows,
+            loading: false,
+            error: classifyHiddenWorkspaceError(error)
+              ? '团队任务对当前成员不可见'
+              : '团队任务暂时无法加载',
+            stale: current.rows.length > 0,
+          }));
+        },
+      );
+    }
+    if (planningOptionsRequest) {
+      void planningOptionsRequest.then(
+        (response) => {
+          if (!mountedRef.current || requestRef.current !== requestId) return;
+          setMilestoneOptions(normalizeMilestoneOptions(response));
+        },
+        () => {
+          if (!mountedRef.current || requestRef.current !== requestId) return;
+          setMilestoneOptions([]);
+        },
+      );
+    }
+  }, [projectId, teamProjectsEnabled, teamTaskLifecycleEnabled]);
+
+  const loadTaskDetail = React.useCallback(
+    async (workItemId: string): Promise<TeamTaskWorkbenchRow> => {
+      const response = await task13ProjectDetailClient.teamTasks.get.query({
+        projectId,
+        workItemId,
+      });
+      const detail = normalizeTeamTaskRows([response], projectId)[0];
+      if (!detail) throw new Error('任务详情返回了无效数据');
+      return detail;
+    },
+    [projectId],
+  );
+
+  const createTask = React.useCallback(
+    async (input: CreateTeamTaskInput): Promise<void> => {
+      const inputKey = JSON.stringify(input);
+      const assignments = [
+        ...(input.responsibleOrganizationMemberId
+          ? [{ id: input.responsibleOrganizationMemberId, role: 'responsible' as const }]
+          : []),
+        ...input.collaboratorOrganizationMemberIds.map((id) => ({
+          id,
+          role: 'collaborator' as const,
+        })),
+      ];
+      let pending = pendingTaskCreationRef.current;
+      if (!pending || pending.inputKey !== inputKey) {
+        pending = {
+          inputKey,
+          draftKey: newIdempotencyKey(),
+          publishKey: newIdempotencyKey(),
+          milestoneKey: input.milestoneId ? newIdempotencyKey() : null,
+          dependencyKeys: input.dependencyIds.map(() => newIdempotencyKey()),
+          assignmentKeys: assignments.map(() => newIdempotencyKey()),
+          workItemId: null,
+          version: 0,
+          published: false,
+          milestoneDone: false,
+          dependencyIndex: 0,
+          assignmentIndex: 0,
+        };
+        pendingTaskCreationRef.current = pending;
+      }
+      try {
+        if (!pending.workItemId) {
+          const draft = mutationReceipt(
+            await task13ProjectDetailClient.teamTasks.createDraft.mutate({
+              projectId,
+              title: input.title,
+              description: input.objective,
+              assignmentMode: input.assignmentMode,
+              expectedVersion: 0,
+              idempotencyKey: pending.draftKey,
+            }),
+          );
+          pending.workItemId = draft.workItemId;
+          pending.version = draft.version;
+        }
+        const workItemId = pending.workItemId;
+        if (!pending.published) {
+          const published = mutationReceipt(
+            await task13ProjectDetailClient.teamTasks.publish.mutate({
+              projectId,
+              workItemId,
+              expectedVersion: pending.version,
+              idempotencyKey: pending.publishKey,
+              contract: {
+                objective: input.objective,
+                deliverables: [input.deliverable],
+                criteria: [{ id: 'criterion-1', description: input.criterion }],
+                requiredEvidenceTypes: [
+                  { type: 'task_evidence', description: input.evidenceDescription },
+                ],
+                approverId: input.approverId,
+                arbitratorId: input.arbitratorId,
+                dueAt: input.dueAt,
+                maxRevisionRounds: 2,
+              },
+            }),
+          );
+          pending.version = published.version;
+          pending.published = true;
+        }
+        if (input.milestoneId && !pending.milestoneDone && pending.milestoneKey) {
+          pending.version = mutationReceipt(
+            await task13ProjectDetailClient.teamTasks.assignMilestone.mutate({
+              projectId,
+              workItemId,
+              milestoneId: input.milestoneId,
+              expectedVersion: pending.version,
+              idempotencyKey: pending.milestoneKey,
+            }),
+          ).version;
+          pending.milestoneDone = true;
+        }
+        while (pending.dependencyIndex < input.dependencyIds.length) {
+          const index = pending.dependencyIndex;
+          pending.version = mutationReceipt(
+            await task13ProjectDetailClient.teamTasks.addDependency.mutate({
+              projectId,
+              workItemId,
+              dependsOnWorkItemId: input.dependencyIds[index] as string,
+              expectedVersion: pending.version,
+              idempotencyKey: pending.dependencyKeys[index] as string,
+            }),
+          ).version;
+          pending.dependencyIndex += 1;
+        }
+        while (pending.assignmentIndex < assignments.length) {
+          const index = pending.assignmentIndex;
+          const assignment = assignments[index];
+          if (!assignment) break;
+          pending.version = mutationReceipt(
+            await task13ProjectDetailClient.teamTasks.assign.mutate({
+              projectId,
+              workItemId,
+              targetMemberId: assignment.id,
+              role: assignment.role,
+              expectedVersion: pending.version,
+              idempotencyKey: pending.assignmentKeys[index] as string,
+            }),
+          ).version;
+          pending.assignmentIndex += 1;
+        }
+        pendingTaskCreationRef.current = null;
+        refresh();
+      } catch (error) {
+        const message = presentTaskMutationError(error).message;
+        refresh();
+        throw new Error(
+          `创建尚未完成；系统已保留本次续跑状态。请点击“继续完成配置”，不要重复新建。${message}`,
+        );
+      }
+    },
+    [projectId, refresh],
+  );
+
+  const reviewTask = React.useCallback(
+    async (input: ReviewTeamTaskInput): Promise<void> => {
+      const submissionId = input.task.latestSubmissionId;
+      if (!submissionId) throw new Error('提交记录尚未同步，请刷新后重试');
+      try {
+        await task13ProjectDetailClient.teamTasks.review.mutate({
+          projectId,
+          workItemId: input.task.id,
+          submissionId,
+          expectedVersion: input.task.version,
+          idempotencyKey: newIdempotencyKey(),
+          decision: input.decision,
+          ...(input.decision === 'request_revision'
+            ? {
+                failedCriterionIds: [...input.failedCriterionIds],
+                evidenceReferences: [
+                  { kind: 'missing_evidence' as const, reference: input.evidenceReference },
+                ],
+                revisionInstructions: [input.revisionInstructions],
+                newDeadline: new Date(input.newDeadline).toISOString(),
+              }
+            : {
+                rationale:
+                  input.decision === 'escalate_arbitration'
+                    ? '普通返工已达上限，验收人将争议移交独立仲裁。'
+                    : '验收人已确认全部标准与证据。',
+              }),
+        });
+        refresh();
+      } catch (error) {
+        throw presentTaskMutationError(error);
+      }
+    },
+    [projectId, refresh],
+  );
+
+  const executeTaskAction = React.useCallback(
+    async (input: TeamTaskExecutionInput): Promise<void> => {
+      const base = {
+        projectId,
+        workItemId: input.task.id,
+        expectedVersion: input.task.version,
+        idempotencyKey: newIdempotencyKey(),
+      };
+      try {
+        switch (input.type) {
+          case 'claim':
+            await task13ProjectDetailClient.teamTasks.claim.mutate({
+              ...base,
+              memberId: input.memberId,
+            });
+            break;
+          case 'accept_assignment':
+            await task13ProjectDetailClient.teamTasks.acceptAssignment.mutate({
+              ...base,
+              assignmentId: input.assignmentId,
+            });
+            break;
+          case 'select_claim':
+            await task13ProjectDetailClient.teamTasks.selectClaim.mutate({
+              ...base,
+              assignmentId: input.assignmentId,
+            });
+            break;
+          case 'start':
+            await task13ProjectDetailClient.teamTasks.start.mutate(base);
+            break;
+          case 'block':
+            await task13ProjectDetailClient.teamTasks.block.mutate({
+              ...base,
+              responsibleParty: input.responsibleParty,
+              nextAction: input.nextAction,
+              reviewAt: input.reviewAt,
+              affectsDueDate: input.affectsDueDate,
+            });
+            break;
+          case 'unblock':
+            await task13ProjectDetailClient.teamTasks.unblock.mutate(base);
+            break;
+          case 'submit':
+            await task13ProjectDetailClient.teamTasks.submit.mutate({
+              ...base,
+              summary: input.summary,
+              deliverables: [input.deliverable],
+            });
+            break;
+          case 'appeal': {
+            const submissionId = input.task.latestSubmissionId;
+            const reviewId = input.task.latestReviewId;
+            if (!submissionId || !reviewId) {
+              throw new Error('评审记录尚未同步，请刷新任务详情后重试');
+            }
+            await task13ProjectDetailClient.teamTasks.appeal.mutate({
+              ...base,
+              submissionId,
+              reviewId,
+              disputeType: 'criterion_application',
+              grounds: input.grounds,
+            });
+            break;
+          }
+          case 'close':
+            await task13ProjectDetailClient.teamTasks.close.mutate(base);
+            break;
+          case 'archive':
+            await task13ProjectDetailClient.teamTasks.archive.mutate(base);
+            break;
+        }
+        refresh();
+      } catch (error) {
+        throw presentTaskMutationError(error);
+      }
+    },
+    [projectId, refresh],
+  );
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -200,10 +553,10 @@ export function TeamProjectPage(): JSX.Element {
   const membersLoading = members.projectId === projectId && members.loading;
 
   return (
-    <PageContainer width="wide">
+    <PageContainer width="workspace">
       <PageHeader
         title={detail.project.name}
-        description="团队项目概览"
+        description={detail.project.description || '这个团队项目还没有添加说明。'}
         action={
           <Button
             type="button"
@@ -225,8 +578,27 @@ export function TeamProjectPage(): JSX.Element {
       <div className="space-y-4">
         {detail.error ? <StaleNotice message={detail.error} /> : null}
         <ProjectOverview project={detail.project} />
-        <FutureExecutionCopy />
-        <ProjectMembersPanel rows={projectMembers} loading={membersLoading} error={memberError} />
+        {teamTaskLifecycleEnabled ? (
+          <TeamTaskWorkbench
+            currentUserId={me?.userId ?? ''}
+            role={detail.project.memberRole ?? 'viewer'}
+            rows={tasks.rows}
+            members={projectMembers}
+            milestoneOptions={milestoneOptions}
+            membersLoading={membersLoading}
+            memberError={memberError}
+            loading={tasks.loading}
+            error={tasks.error}
+            stale={tasks.stale}
+            onRetry={refresh}
+            onLoadDetail={loadTaskDetail}
+            onCreateTask={createTask}
+            onReviewTask={reviewTask}
+            onTaskAction={executeTaskAction}
+          />
+        ) : (
+          <TaskLifecycleGate />
+        )}
       </div>
     </PageContainer>
   );
@@ -237,20 +609,20 @@ function ProjectOverview({ project }: { readonly project: UiProject }): JSX.Elem
   return (
     <section
       aria-label="项目概览"
-      className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)] sm:p-6"
+      className="flex flex-col gap-4 border-y border-[#ECEEF2] bg-white px-1 py-4 sm:flex-row sm:items-center"
     >
-      <div className="flex items-start gap-3">
+      <div className="flex min-w-0 items-center gap-3 sm:mr-auto">
         <div className="rounded-[8px] bg-[#FFF0F4] p-2.5 text-[#EA1F59]">
           <FolderKanban className="h-5 w-5" aria-hidden />
         </div>
-        <div className="min-w-0 flex-1">
-          <h2 className="text-base font-semibold text-foreground">项目概览</h2>
-          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-            {project.description || '这个团队项目还没有添加说明。'}
+        <div className="min-w-0">
+          <h2 className="text-[13px] font-semibold text-foreground">项目工作区</h2>
+          <p className="mt-0.5 text-[12px] text-muted-foreground">
+            任务、责任与验收记录保持在同一条时间线上
           </p>
         </div>
       </div>
-      <dl className="mt-5 grid gap-3 border-t border-[#EFEFEF] pt-5 sm:grid-cols-3">
+      <dl className="grid grid-cols-3 gap-5 sm:min-w-[430px]">
         <OverviewField label="团队" value={project.organizationName || '未命名团队'} />
         <OverviewField label="任务" value={`${project.taskCount} 项`} />
         <OverviewField label="你的权限" value={`当前角色：${role}`} />
@@ -264,114 +636,21 @@ function OverviewField({
   value,
 }: { readonly label: string; readonly value: string }): JSX.Element {
   return (
-    <div className="rounded-[8px] bg-[#FAFAFA] px-3.5 py-3">
+    <div className="min-w-0 border-l border-[#ECEEF2] pl-4">
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="mt-1 text-sm font-medium text-foreground">{value}</dd>
     </div>
   );
 }
 
-function FutureExecutionCopy(): JSX.Element {
+function TaskLifecycleGate(): JSX.Element {
   return (
-    <div className="rounded-[8px] border border-[#E7E7E7] bg-[#FAFAFA] px-4 py-3">
-      <p className="text-sm leading-relaxed text-muted-foreground">
-        团队任务执行将在后续阶段开放。当前可先查看项目概览与成员。
+    <div className="rounded-[8px] border border-[#E7E7E7] bg-[#FAFAFA] px-4 py-5">
+      <p className="text-sm font-medium text-foreground">团队任务工作台尚未为当前账号开放</p>
+      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+        项目概览与成员信息仍可继续使用。
       </p>
     </div>
-  );
-}
-
-function ProjectMembersPanel({
-  rows,
-  loading,
-  error,
-}: {
-  readonly rows: readonly UiProjectMember[];
-  readonly loading: boolean;
-  readonly error: string | null;
-}): JSX.Element {
-  return (
-    <section
-      aria-label="项目成员"
-      className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)] sm:p-6"
-    >
-      <div className="flex items-center gap-2">
-        <Users className="h-4 w-4 text-[#EA1F59]" aria-hidden />
-        <h2 className="text-base font-semibold text-foreground">项目成员</h2>
-        {!loading && !error ? (
-          <span className="text-xs text-muted-foreground">{rows.length} 人</span>
-        ) : null}
-      </div>
-
-      {error ? <CollectionNotice message={error} stale={rows.length > 0} /> : null}
-      {loading && rows.length === 0 ? (
-        <div aria-label="项目成员加载中" className="mt-4 space-y-2" aria-live="polite">
-          <div className="hola-skel h-12 rounded-[8px] bg-[#EFEFEF]/85" />
-          <div className="hola-skel h-12 rounded-[8px] bg-[#EFEFEF]/85" />
-        </div>
-      ) : null}
-      {!loading && !error && rows.length === 0 ? (
-        <p className="mt-4 rounded-[8px] bg-[#FAFAFA] px-4 py-5 text-center text-sm text-muted-foreground">
-          项目还没有成员
-        </p>
-      ) : null}
-      {rows.length > 0 ? (
-        <ul className="mt-4 divide-y divide-[#EFEFEF]">
-          {rows.map((member) => (
-            <li
-              key={member.projectMemberId}
-              className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"
-            >
-              <MemberAvatar member={member} />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-foreground">{member.displayName}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {PROJECT_ROLE_LABEL[member.role]}
-                </p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </section>
-  );
-}
-
-function MemberAvatar({ member }: { readonly member: UiProjectMember }): JSX.Element {
-  if (member.avatarUrl) {
-    return (
-      <img
-        src={member.avatarUrl}
-        alt=""
-        className="h-9 w-9 shrink-0 rounded-full border border-[#E7E7E7] object-cover"
-      />
-    );
-  }
-  return (
-    <div
-      aria-hidden
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#FFF0F4] text-xs font-semibold text-[#C31749]"
-    >
-      {member.displayName.slice(0, 1).toLocaleUpperCase() || '成'}
-    </div>
-  );
-}
-
-function CollectionNotice({
-  message,
-  stale,
-}: { readonly message: string; readonly stale: boolean }): JSX.Element {
-  return (
-    <output
-      className={cn(
-        'mt-4 block rounded-[8px] border px-3 py-2 text-xs',
-        stale
-          ? 'border-[#F1D7A8] bg-[#FFF9ED] text-[#815F1B]'
-          : 'border-[#F2CBD6] bg-[#FFF5F7] text-[#9B2143]',
-      )}
-    >
-      {message}
-    </output>
   );
 }
 
@@ -427,6 +706,16 @@ function initialProjectMembersState(projectId: string, enabled: boolean): Projec
   };
 }
 
+function initialProjectTasksState(projectId: string, enabled: boolean): ProjectTasksState {
+  return {
+    requestId: 0,
+    rows: [],
+    loading: enabled && Boolean(projectId),
+    error: null,
+    stale: false,
+  };
+}
+
 function normalizeTeamProject(value: unknown, projectId: string): UiProject | null {
   const project = normalizeProjectRows([value]).find(
     (candidate) => candidate.projectId === projectId && candidate.scope === 'organization',
@@ -443,10 +732,12 @@ function normalizeProjectMemberRows(value: unknown, projectId: string): UiProjec
     const tenantHint = ownValue(entry, 'projectId');
     if (tenantHint !== undefined && safeText(tenantHint) !== projectId) return [];
     const projectMemberId = ownText(entry, 'projectMemberId');
+    const organizationMemberId = ownText(entry, 'organizationMemberId');
     const userId = ownText(entry, 'userId');
     const role = ownValue(entry, 'role');
     if (
       !projectMemberId ||
+      !organizationMemberId ||
       !userId ||
       seenMemberIds.has(projectMemberId) ||
       seenUserIds.has(userId) ||
@@ -459,6 +750,7 @@ function normalizeProjectMemberRows(value: unknown, projectId: string): UiProjec
     return [
       {
         projectMemberId,
+        organizationMemberId,
         userId,
         displayName: ownText(entry, 'displayName') || '未命名成员',
         avatarUrl: ownNullableText(entry, 'avatarUrl'),
@@ -466,6 +758,133 @@ function normalizeProjectMemberRows(value: unknown, projectId: string): UiProjec
       },
     ];
   });
+}
+
+function normalizeTeamTaskRows(value: unknown, projectId: string): TeamTaskWorkbenchRow[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const id = ownText(entry, 'id');
+    const rowProjectId = ownText(entry, 'projectId');
+    const title = ownText(entry, 'title');
+    const state = ownValue(entry, 'state');
+    const assignmentMode = ownValue(entry, 'assignmentMode');
+    const version = ownValue(entry, 'version');
+    const revisionRound = ownValue(entry, 'revisionRound');
+    if (
+      !id ||
+      seen.has(id) ||
+      rowProjectId !== projectId ||
+      !title ||
+      !isTeamTaskState(state) ||
+      !isAssignmentMode(assignmentMode) ||
+      !Number.isSafeInteger(version) ||
+      (version as number) < 1 ||
+      !Number.isSafeInteger(revisionRound) ||
+      (revisionRound as number) < 0
+    ) {
+      return [];
+    }
+    seen.add(id);
+    const collaboratorUserIds = Array.isArray(entry.collaboratorUserIds)
+      ? entry.collaboratorUserIds.map(safeText).filter(Boolean)
+      : [];
+    return [
+      {
+        ...entry,
+        id,
+        projectId,
+        title,
+        description: ownNullableText(entry, 'description'),
+        assignmentMode,
+        state,
+        version: version as number,
+        dueAt: ownNullableText(entry, 'dueAt'),
+        revisionRound: revisionRound as number,
+        responsibleUserId: ownNullableText(entry, 'responsibleUserId'),
+        responsibleDisplayName: ownNullableText(entry, 'responsibleDisplayName'),
+        responsibleAssignmentId: ownNullableText(entry, 'responsibleAssignmentId'),
+        responsibleAssignmentStatus: normalizeAssignmentStatus(entry.responsibleAssignmentStatus),
+        myPendingAssignmentId: ownNullableText(entry, 'myPendingAssignmentId'),
+        myPendingAssignmentRole:
+          entry.myPendingAssignmentRole === 'responsible' ||
+          entry.myPendingAssignmentRole === 'collaborator'
+            ? entry.myPendingAssignmentRole
+            : null,
+        myPendingAssignmentStatus:
+          entry.myPendingAssignmentStatus === 'offered' ||
+          entry.myPendingAssignmentStatus === 'applied'
+            ? entry.myPendingAssignmentStatus
+            : null,
+        canSelectClaim: entry.canSelectClaim === true,
+        claimApplicants: normalizeClaimApplicants(entry.claimApplicants),
+        collaboratorUserIds,
+        milestoneId: ownNullableText(entry, 'milestoneId'),
+        milestone: ownNullableText(entry, 'milestone'),
+        submittedOnTime:
+          entry.submittedOnTime === true ? true : entry.submittedOnTime === false ? false : null,
+        accepted:
+          state === 'accepted' || state === 'completed'
+            ? true
+            : state === 'revision_requested' || state === 'rejected_final'
+              ? false
+              : null,
+        latestSubmissionId: ownNullableText(entry, 'latestSubmissionId'),
+        latestReviewId: ownNullableText(entry, 'latestReviewId'),
+        contract: normalizeTaskContract(entry.contract),
+        timeline: normalizeTaskTimeline(entry.timeline),
+        updatedAt: ownText(entry, 'updatedAt'),
+      } as TeamTaskWorkbenchRow,
+    ];
+  });
+}
+
+function normalizeMilestoneOptions(value: unknown): Array<{ id: string; title: string }> {
+  if (!isRecord(value) || !Array.isArray(value.milestones)) return [];
+  const seen = new Set<string>();
+  return value.milestones.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const id = ownText(entry, 'id');
+    const title = ownText(entry, 'title');
+    if (!id || !title || seen.has(id)) return [];
+    seen.add(id);
+    return [{ id, title }];
+  });
+}
+
+function isAssignmentMode(value: unknown): value is TeamTaskWorkbenchRow['assignmentMode'] {
+  return value === 'direct' || value === 'first_come' || value === 'leader_select';
+}
+
+function normalizeAssignmentStatus(
+  value: unknown,
+): TeamTaskWorkbenchRow['responsibleAssignmentStatus'] {
+  return value === 'offered' || value === 'applied' || value === 'accepted' ? value : null;
+}
+
+function isTeamTaskState(value: unknown): value is TeamTaskWorkbenchRow['state'] {
+  return (
+    typeof value === 'string' &&
+    [
+      'draft',
+      'ready',
+      'assigned',
+      'claimable',
+      'accepted_by_member',
+      'in_progress',
+      'blocked',
+      'submitted',
+      'in_review',
+      'revision_requested',
+      'resubmitted',
+      'accepted',
+      'completed',
+      'cancelled',
+      'rejected_final',
+      'archived',
+    ].includes(value)
+  );
 }
 
 function isProjectMemberRole(value: unknown): value is ProjectMemberRole {
@@ -490,4 +909,84 @@ function ownText(value: Record<string, unknown>, key: string): string {
 
 function ownNullableText(value: Record<string, unknown>, key: string): string | null {
   return ownText(value, key) || null;
+}
+
+function normalizeTaskContract(value: unknown): TeamTaskWorkbenchRow['contract'] {
+  if (!isRecord(value)) return null;
+  const version = ownValue(value, 'version');
+  const objective = ownText(value, 'objective');
+  const approverUserId = ownText(value, 'approverUserId');
+  const arbitratorUserId = ownText(value, 'arbitratorUserId');
+  const criteriaValue = ownValue(value, 'criteria');
+  if (
+    !Number.isSafeInteger(version) ||
+    !objective ||
+    !approverUserId ||
+    !arbitratorUserId ||
+    !Array.isArray(criteriaValue)
+  )
+    return null;
+  const criteria = criteriaValue.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const id = ownText(entry, 'id');
+    const description = ownText(entry, 'description');
+    return id && description ? [{ id, description }] : [];
+  });
+  return { version: version as number, objective, criteria, approverUserId, arbitratorUserId };
+}
+
+function normalizeClaimApplicants(
+  value: unknown,
+): NonNullable<TeamTaskWorkbenchRow['claimApplicants']> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const assignmentId = ownText(entry, 'assignmentId');
+    const userId = ownText(entry, 'userId');
+    if (!assignmentId || !userId) return [];
+    return [{ assignmentId, userId, displayName: ownNullableText(entry, 'displayName') }];
+  });
+}
+
+function normalizeTaskTimeline(value: unknown): TeamTaskWorkbenchRow['timeline'] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const kind = ownValue(entry, 'kind');
+    const label = ownText(entry, 'label');
+    const at = ownText(entry, 'at');
+    if (!isTimelineKind(kind) || !label || !at) return [];
+    return [{ kind, label, at }];
+  });
+}
+
+function isTimelineKind(
+  value: unknown,
+): value is NonNullable<TeamTaskWorkbenchRow['timeline']>[number]['kind'] {
+  return (
+    typeof value === 'string' &&
+    ['contract', 'assignment', 'block', 'submission', 'review', 'appeal', 'ai'].includes(value)
+  );
+}
+
+function mutationReceipt(value: unknown): { workItemId: string; version: number } {
+  if (!isRecord(value)) throw new Error('任务操作返回了无效结果');
+  const workItemId = ownText(value, 'workItemId');
+  const version = ownValue(value, 'version');
+  if (!workItemId || !Number.isSafeInteger(version) || (version as number) < 1) {
+    throw new Error('任务操作返回了无效结果');
+  }
+  return { workItemId, version: version as number };
+}
+
+function newIdempotencyKey(): string {
+  return crypto.randomUUID();
+}
+
+function presentTaskMutationError(error: unknown): Error {
+  if (isRecord(error) && isRecord(error.data) && error.data.code === 'CONFLICT') {
+    return new Error('任务已在其他位置更新，请刷新后重试');
+  }
+  if (error instanceof Error) return error;
+  return new Error('任务操作失败，请稍后重试');
 }

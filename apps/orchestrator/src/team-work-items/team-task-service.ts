@@ -545,6 +545,18 @@ async function confirmInitialContract(
   }
 }
 
+function requireIndependentAssignee(
+  contract: TeamTaskCurrentContractSnapshot,
+  responsibleUserId: number,
+): void {
+  if (
+    responsibleUserId === contract.approverUserId ||
+    responsibleUserId === contract.arbitratorUserId
+  ) {
+    fail('CONFLICT');
+  }
+}
+
 const assignmentResponseStates = new Set<TeamTaskState>([
   'ready',
   'assigned',
@@ -893,6 +905,7 @@ export class TeamTaskService {
           access.organizationId,
           access.projectId,
         );
+        requireIndependentAssignee(await lockInitialContract(tx, workItem), member.userId);
         const assignments = await tx.listAssignments(workItem.id);
         if (
           assignments.some(
@@ -1104,6 +1117,7 @@ export class TeamTaskService {
           access.projectId,
         );
         if (member.userId !== access.actorUserId) return fail('FORBIDDEN');
+        requireIndependentAssignee(currentContract, member.userId);
         const assignments = await tx.listAssignments(workItem.id);
         if (
           assignments.some(
