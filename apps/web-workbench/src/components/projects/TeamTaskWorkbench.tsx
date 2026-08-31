@@ -388,6 +388,7 @@ function Toolbar({
         <button
           type="button"
           aria-label="列表视图"
+          title="列表视图"
           aria-pressed={view === 'list'}
           onClick={() => onViewChange('list')}
           className={cn(
@@ -400,6 +401,7 @@ function Toolbar({
         <button
           type="button"
           aria-label="看板视图"
+          title="看板视图"
           aria-pressed={view === 'board'}
           onClick={() => onViewChange('board')}
           className={cn(
@@ -436,6 +438,7 @@ function TaskTable({
             <button
               type="button"
               aria-label={`移动端查看 ${row.title}`}
+              title={`查看 ${row.title}`}
               onClick={() => onSelect(row.id)}
               className="flex min-h-11 w-full items-start gap-3 px-4 py-3 text-left hover:bg-[#FFF9FA]"
             >
@@ -512,6 +515,7 @@ function TaskTable({
                   <button
                     type="button"
                     aria-label={`查看 ${row.title}`}
+                    title={`查看 ${row.title}`}
                     onClick={() => onSelect(row.id)}
                     className="flex h-11 w-11 items-center justify-center rounded-[8px] text-[#858892] hover:bg-[#F4F4F6] hover:text-[#EA1F59]"
                   >
@@ -716,6 +720,7 @@ function TaskDetailPanel({
           <button
             type="button"
             aria-label="关闭任务详情"
+            title="关闭任务详情"
             onClick={onClose}
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] text-[#747680] hover:bg-[#F4F4F6]"
           >
@@ -1323,6 +1328,7 @@ function TaskEditor({
           <button
             type="button"
             aria-label="关闭新建任务"
+            title="关闭新建任务"
             onClick={onClose}
             className="flex h-11 w-11 items-center justify-center rounded-[8px] hover:bg-[#F4F4F6]"
           >
