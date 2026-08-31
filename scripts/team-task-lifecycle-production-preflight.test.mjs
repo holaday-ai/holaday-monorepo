@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import {
+  buildSchemaVerificationEnvironment,
   collectTeamTaskLifecycleSnapshot,
   countTeamTaskRelevantErrors,
   evaluateTeamTaskLifecyclePreflight,
@@ -16,6 +17,34 @@ import {
   summarizeTeamTaskQaReceipt,
   summarizeTeamTaskRuntime,
 } from './team-task-lifecycle-production-preflight.mjs';
+
+test('schema verification preserves operator PATH and HOME while taking only the runtime database URL', () => {
+  const localEnvironment = {
+    PATH: '/trusted/pnpm/bin:/usr/bin',
+    HOME: '/trusted/operator-home',
+    NODE_OPTIONS: '--enable-source-maps',
+    LOCAL_ONLY: 'kept',
+    DATABASE_URL: 'mysql://local-database',
+  };
+  const runtimeEnvironment = {
+    PATH: '/polluted/runtime/bin',
+    HOME: '/polluted/runtime-home',
+    NODE_OPTIONS: '--require=/untrusted/runtime-hook.js',
+    DATABASE_URL: 'mysql://production-database',
+    PRIVATE_RUNTIME_SECRET: 'never-forwarded',
+    TEAM_TASK_LIFECYCLE_ALLOWLIST: 'usr_private',
+  };
+
+  const environment = buildSchemaVerificationEnvironment(localEnvironment, runtimeEnvironment);
+
+  assert.deepEqual(environment, {
+    PATH: '/trusted/pnpm/bin:/usr/bin',
+    HOME: '/trusted/operator-home',
+    DATABASE_URL: 'mysql://production-database',
+  });
+  assert.equal(JSON.stringify(environment).includes('never-forwarded'), false);
+  assert.equal(JSON.stringify(environment).includes('usr_private'), false);
+});
 
 function readySnapshot() {
   return {
