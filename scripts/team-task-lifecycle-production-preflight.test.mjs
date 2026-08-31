@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { generateKeyPairSync, sign } from 'node:crypto';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,10 +8,12 @@ import test from 'node:test';
 import {
   buildSchemaVerificationEnvironment,
   collectTeamTaskLifecycleSnapshot,
+  computeTeamTaskLifecycleBoundaryDigest,
   countTeamTaskRelevantErrors,
   evaluateTeamTaskLifecyclePreflight,
   formatTeamTaskLifecyclePreflight,
   inspectTeamTaskLifecycleDatabase,
+  loadTeamTaskLifecycleCanaryManifestSummary,
   loadTeamTaskQaReceipt,
   summarizeTeamTaskLifecycleEnvironment,
   summarizeTeamTaskObservationLogs,
@@ -67,31 +70,50 @@ function readySnapshot() {
       configurationMatchesFile: true,
       observationWindowSeconds: 86_400,
       teamProjectsEnabled: true,
+      teamProjectsAllowAll: false,
+      teamProjectsAllowlistCount: 4,
       lifecycleEnabled: false,
       lifecycleAllowAll: false,
-      lifecycleAllowlistCount: 2,
+      lifecycleAllowlistCount: 4,
+      allowlistsMatch: true,
     },
     canary: {
       qaReceiptValid: true,
-      syntheticUsersConfirmed: true,
-      syntheticOrganizationsConfirmed: true,
-      activeSyntheticUserCount: 2,
-      effectiveCanaryUserCount: 2,
+      receiptKind: 'prepare',
+      syntheticBoundaryConfirmed: true,
+      activeSyntheticUserCount: 4,
+      effectiveCanaryUserCount: 4,
       enabledSyntheticOrganizationCount: 2,
       effectiveCanaryOrganizationCount: 2,
       nonSyntheticEnabledOrganizationCount: 0,
       scenarioChecksPassed: 0,
       scenarioChecksExpected: 13,
     },
-    smoke: { personalProjects: true, teamProjects: true },
+    smoke: {
+      disabledPersonalProjects: true,
+      disabledTeamProjects: true,
+      disabledFilePath: true,
+      enabledPersonalProjects: false,
+      enabledTeamProjects: false,
+      enabledFilePath: false,
+    },
   };
+}
+
+function markRunning(snapshot) {
+  snapshot.orchestrator.lifecycleEnabled = true;
+  snapshot.canary.receiptKind = 'run';
+  snapshot.canary.scenarioChecksPassed = 13;
+  snapshot.smoke.enabledPersonalProjects = true;
+  snapshot.smoke.enabledTeamProjects = true;
+  snapshot.smoke.enabledFilePath = true;
+  return snapshot;
 }
 
 test('dormant requires healthy deployed schema and keeps lifecycle disabled', () => {
   const snapshot = readySnapshot();
   snapshot.orchestrator.lifecycleAllowlistCount = 0;
-  snapshot.canary.syntheticUsersConfirmed = false;
-  snapshot.canary.syntheticOrganizationsConfirmed = false;
+  snapshot.canary.syntheticBoundaryConfirmed = false;
   snapshot.canary.activeSyntheticUserCount = 0;
   snapshot.canary.enabledSyntheticOrganizationCount = 0;
   snapshot.canary.effectiveCanaryOrganizationCount = 0;
@@ -102,15 +124,28 @@ test('dormant requires healthy deployed schema and keeps lifecycle disabled', ()
   assert.deepEqual(result.failedChecks, []);
 });
 
-test('canary-ready requires exactly two confirmed synthetic users and organizations while off', () => {
+test('canary-ready accepts exactly four confirmed synthetic users and two organizations while off', () => {
   const result = evaluateTeamTaskLifecyclePreflight('canary-ready', readySnapshot());
 
   assert.equal(result.ready, true);
   assert.deepEqual(result.failedChecks, []);
 });
 
+test('canary-ready rejects the former two-user boundary as insufficient', () => {
+  const snapshot = readySnapshot();
+  snapshot.orchestrator.lifecycleAllowlistCount = 2;
+  snapshot.canary.activeSyntheticUserCount = 2;
+  snapshot.canary.effectiveCanaryUserCount = 2;
+
+  const result = evaluateTeamTaskLifecyclePreflight('canary-ready', snapshot);
+
+  assert.equal(result.ready, false);
+  assert.deepEqual(result.failedChecks, ['bounded-user-allowlist']);
+});
+
 test('canary-ready rejects allow-all, non-synthetic reachability, and pre-enabled lifecycle', () => {
   const snapshot = readySnapshot();
+  snapshot.orchestrator.teamProjectsAllowAll = true;
   snapshot.orchestrator.lifecycleAllowAll = true;
   snapshot.orchestrator.lifecycleEnabled = true;
   snapshot.canary.effectiveCanaryUserCount = 1;
@@ -126,7 +161,18 @@ test('canary-ready rejects allow-all, non-synthetic reachability, and pre-enable
   ]);
 });
 
-test('canary-ready requires both allowlisted synthetic users to reach the bounded organizations', () => {
+test('canary-ready requires the phase-one and lifecycle allowlists to be the same four users', () => {
+  const snapshot = readySnapshot();
+  snapshot.orchestrator.teamProjectsAllowlistCount = 5;
+  snapshot.orchestrator.allowlistsMatch = false;
+
+  const result = evaluateTeamTaskLifecyclePreflight('canary-ready', snapshot);
+
+  assert.equal(result.ready, false);
+  assert.deepEqual(result.failedChecks, ['bounded-user-allowlist']);
+});
+
+test('canary-ready requires all four allowlisted synthetic users to reach the bounded organizations', () => {
   const snapshot = readySnapshot();
   snapshot.canary.effectiveCanaryUserCount = 1;
 
@@ -138,8 +184,7 @@ test('canary-ready requires both allowlisted synthetic users to reach the bounde
 
 test('canary-running requires the complete bounded scenario matrix with the lifecycle on', () => {
   const snapshot = readySnapshot();
-  snapshot.orchestrator.lifecycleEnabled = true;
-  snapshot.canary.scenarioChecksPassed = 13;
+  markRunning(snapshot);
 
   const result = evaluateTeamTaskLifecyclePreflight('canary-running', snapshot);
 
@@ -149,9 +194,8 @@ test('canary-running requires the complete bounded scenario matrix with the life
 
 test('canary-running rejects a hand-filled count without a current restricted QA receipt', () => {
   const snapshot = readySnapshot();
-  snapshot.orchestrator.lifecycleEnabled = true;
+  markRunning(snapshot);
   snapshot.canary.qaReceiptValid = false;
-  snapshot.canary.scenarioChecksPassed = 13;
 
   const result = evaluateTeamTaskLifecyclePreflight('canary-running', snapshot);
 
@@ -159,10 +203,9 @@ test('canary-running rejects a hand-filled count without a current restricted QA
   assert.deepEqual(result.failedChecks, ['phase-one-smoke', 'canary-scenario-matrix']);
 });
 
-test('observe keeps the same two-by-two boundary without replaying destructive scenarios', () => {
+test('observe keeps the same four-by-two boundary without replaying destructive scenarios', () => {
   const snapshot = readySnapshot();
-  snapshot.orchestrator.lifecycleEnabled = true;
-  snapshot.canary.scenarioChecksPassed = 13;
+  markRunning(snapshot);
   snapshot.database.lifecycleRowCount = 9;
 
   const result = evaluateTeamTaskLifecyclePreflight('observe', snapshot);
@@ -173,12 +216,11 @@ test('observe keeps the same two-by-two boundary without replaying destructive s
 
 test('observe fails closed before 24 hours or without complete stdout and stderr coverage', () => {
   const snapshot = readySnapshot();
-  snapshot.orchestrator.lifecycleEnabled = true;
+  markRunning(snapshot);
   snapshot.orchestrator.observationWindowSeconds = 86_399;
   snapshot.database.logCoverageComplete = false;
   snapshot.database.latencySampleCount = 0;
   snapshot.database.latencyP95Ms = -1;
-  snapshot.canary.scenarioChecksPassed = 13;
 
   const result = evaluateTeamTaskLifecyclePreflight('observe', snapshot);
 
@@ -193,7 +235,7 @@ test('migration, phase-one smoke, runtime identity, revision, and aggregate erro
   snapshot.database.relevantErrorCount = 1;
   snapshot.orchestrator.uid = 0;
   snapshot.deployment.revisionMatchesExpected = false;
-  snapshot.smoke.personalProjects = false;
+  snapshot.smoke.disabledPersonalProjects = false;
 
   const result = evaluateTeamTaskLifecyclePreflight('canary-ready', snapshot);
 
@@ -211,6 +253,7 @@ test('environment and runtime summaries retain only booleans and counts', () => 
   const privateSecret = 'private-database-secret';
   const environment = summarizeTeamTaskLifecycleEnvironment({
     TEAM_PROJECTS_ENABLED: 'true',
+    TEAM_PROJECTS_ALLOWLIST: `${privateUserId},usr_second_private_user`,
     TEAM_TASK_LIFECYCLE_ENABLED: 'false',
     TEAM_TASK_LIFECYCLE_ALLOWLIST: `${privateUserId},usr_second_private_user`,
     DATABASE_URL: privateSecret,
@@ -228,9 +271,12 @@ test('environment and runtime summaries retain only booleans and counts', () => 
 
   assert.deepEqual(environment, {
     teamProjectsEnabled: true,
+    teamProjectsAllowAll: false,
+    teamProjectsAllowlistCount: 2,
     lifecycleEnabled: false,
     lifecycleAllowAll: false,
     lifecycleAllowlistCount: 2,
+    allowlistsMatch: true,
   });
   assert.deepEqual(runtime, { processCount: 1, uid: 998, observationWindowSeconds: -1 });
   assert.equal(JSON.stringify({ environment, runtime }).includes(privateUserId), false);
@@ -239,6 +285,7 @@ test('environment and runtime summaries retain only booleans and counts', () => 
 
 test('QA receipt summary requires the fixed 13 checks, current revision, recent time, and restricted file', () => {
   const revision = 'a'.repeat(40);
+  const boundaryDigest = 'd'.repeat(64);
   const nowMs = Date.parse('2026-08-31T02:00:00.000Z');
   const checks = Object.fromEntries(
     [
@@ -260,9 +307,14 @@ test('QA receipt summary requires the fixed 13 checks, current revision, recent 
   const receipt = {
     schemaVersion: 1,
     source: 'holaday-team-task-lifecycle-qa-v1',
+    receiptKind: 'run',
     revision,
+    boundaryDigest,
     completedAt: '2026-08-31T01:00:00.000Z',
-    phaseOne: { personalProjects: true, teamProjects: true },
+    phaseOne: {
+      disabled: { personalProjects: true, teamProjects: true, filePath: true },
+      enabled: { personalProjects: true, teamProjects: true, filePath: true },
+    },
     checks,
     privateIdentity: 'usr_private-never-output',
   };
@@ -271,12 +323,18 @@ test('QA receipt summary requires the fixed 13 checks, current revision, recent 
     expectedRevision: revision,
     nowMs,
     fileSecure: true,
+    expectedBoundaryDigest: boundaryDigest,
   });
 
   assert.deepEqual(summary, {
     qaReceiptValid: true,
-    personalProjects: true,
-    teamProjects: true,
+    receiptKind: 'run',
+    disabledPersonalProjects: true,
+    disabledTeamProjects: true,
+    disabledFilePath: true,
+    enabledPersonalProjects: true,
+    enabledTeamProjects: true,
+    enabledFilePath: true,
     scenarioChecksPassed: 13,
     scenarioChecksExpected: 13,
   });
@@ -286,6 +344,7 @@ test('QA receipt summary requires the fixed 13 checks, current revision, recent 
       expectedRevision: 'b'.repeat(40),
       nowMs,
       fileSecure: true,
+      expectedBoundaryDigest: boundaryDigest,
     }).qaReceiptValid,
     false,
   );
@@ -294,6 +353,16 @@ test('QA receipt summary requires the fixed 13 checks, current revision, recent 
       expectedRevision: revision,
       nowMs,
       fileSecure: false,
+      expectedBoundaryDigest: boundaryDigest,
+    }).qaReceiptValid,
+    false,
+  );
+  assert.equal(
+    summarizeTeamTaskQaReceipt(receipt, {
+      expectedRevision: revision,
+      nowMs,
+      fileSecure: true,
+      expectedBoundaryDigest: 'e'.repeat(64),
     }).qaReceiptValid,
     false,
   );
@@ -303,6 +372,7 @@ test('QA receipt loader rejects group-readable files and returns only a safe sum
   const directory = mkdtempSync(join(tmpdir(), 'holaday-team-task-receipt-'));
   const receiptPath = join(directory, 'receipt.json');
   const revision = 'c'.repeat(40);
+  const boundaryDigest = 'f'.repeat(64);
   const completedAt = '2026-08-31T01:00:00.000Z';
   const nowMs = Date.parse('2026-08-31T02:00:00.000Z');
   const checks = Object.fromEntries(
@@ -327,9 +397,14 @@ test('QA receipt loader rejects group-readable files and returns only a safe sum
     JSON.stringify({
       schemaVersion: 1,
       source: 'holaday-team-task-lifecycle-qa-v1',
+      receiptKind: 'run',
       revision,
+      boundaryDigest,
       completedAt,
-      phaseOne: { personalProjects: true, teamProjects: true },
+      phaseOne: {
+        disabled: { personalProjects: true, teamProjects: true, filePath: true },
+        enabled: { personalProjects: true, teamProjects: true, filePath: true },
+      },
       checks,
       privateIdentity: 'usr_private-never-output',
     }),
@@ -337,12 +412,144 @@ test('QA receipt loader rejects group-readable files and returns only a safe sum
   );
 
   try {
-    const summary = loadTeamTaskQaReceipt(receiptPath, revision, nowMs);
+    const summary = loadTeamTaskQaReceipt(receiptPath, revision, nowMs, boundaryDigest);
     assert.equal(summary.qaReceiptValid, true);
     assert.equal(JSON.stringify(summary).includes('private'), false);
 
     chmodSync(receiptPath, 0o640);
-    assert.equal(loadTeamTaskQaReceipt(receiptPath, revision, nowMs).qaReceiptValid, false);
+    assert.equal(
+      loadTeamTaskQaReceipt(receiptPath, revision, nowMs, boundaryDigest).qaReceiptValid,
+      false,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('manifest summary requires two trusted Ed25519 principals over the full role-keyed 4 x 2 boundary', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'holaday-team-task-manifest-'));
+  const manifestPath = join(directory, 'manifest.json');
+  const trustedSignersPath = join(directory, 'trusted-signers.json');
+  const externalId = (prefix, fill) => `${prefix}_${fill.repeat(21).slice(0, 21)}`;
+  const users = {
+    creatorApprover: externalId('usr', 'A'),
+    claimantA: externalId('usr', 'B'),
+    claimantB: externalId('usr', 'C'),
+    arbitrator: externalId('usr', 'D'),
+  };
+  const scope = (suffix) => ({
+    organizationId: externalId('org', suffix),
+    projectId: externalId('prj', suffix),
+    actors: Object.fromEntries(
+      Object.entries(users).map(([role, userId], index) => [
+        role,
+        {
+          userId,
+          organizationMemberId: externalId('omem', `${suffix}${index}`),
+          projectMemberId: externalId('pmem', `${suffix}${index}`),
+        },
+      ]),
+    ),
+  });
+  const scopes = [scope('E'), scope('F')];
+  const boundaryDigest = computeTeamTaskLifecycleBoundaryDigest(scopes);
+  const primaryKeys = generateKeyPairSync('ed25519');
+  const secondaryKeys = generateKeyPairSync('ed25519');
+  const attestation = (operatorSlot, operatorPrincipal, confirmedAt, privateKey) => {
+    const unsigned = {
+      schemaVersion: 1,
+      source: 'holaday-team-task-lifecycle-operator-attestation-v1',
+      operatorSlot,
+      operatorPrincipal,
+      boundaryDigest,
+      confirmedAt,
+      confirmedSyntheticBoundary: true,
+    };
+    return {
+      ...unsigned,
+      signature: sign(null, Buffer.from(JSON.stringify(unsigned), 'utf8'), privateKey).toString(
+        'base64',
+      ),
+    };
+  };
+  const manifest = {
+    schemaVersion: 1,
+    source: 'holaday-team-task-lifecycle-canary-manifest-v1',
+    confirmation: {
+      source: 'holaday-team-task-lifecycle-dual-operator-confirmation-v1',
+      boundaryDigest,
+      primaryAttestation: attestation(
+        'primary',
+        'ops:primary-human',
+        '2026-08-31T05:00:00.000Z',
+        primaryKeys.privateKey,
+      ),
+      secondaryAttestation: attestation(
+        'secondary',
+        'ops:secondary-human',
+        '2026-08-31T05:05:00.000Z',
+        secondaryKeys.privateKey,
+      ),
+      distinctHumanOperatorsConfirmed: true,
+    },
+    scopes,
+  };
+  const trustedSigners = {
+    schemaVersion: 1,
+    source: 'holaday-team-task-lifecycle-trusted-signers-v1',
+    signers: [
+      {
+        operatorSlot: 'primary',
+        operatorPrincipal: 'ops:primary-human',
+        publicKeyPem: primaryKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+      },
+      {
+        operatorSlot: 'secondary',
+        operatorPrincipal: 'ops:secondary-human',
+        publicKeyPem: secondaryKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+      },
+    ],
+  };
+
+  try {
+    writeFileSync(manifestPath, JSON.stringify(manifest), { mode: 0o600 });
+    writeFileSync(trustedSignersPath, JSON.stringify(trustedSigners), { mode: 0o600 });
+    if (process.geteuid() !== 0) {
+      assert.deepEqual(
+        loadTeamTaskLifecycleCanaryManifestSummary(manifestPath, trustedSignersPath, {
+          userExternalIds: Object.values(users),
+          organizationExternalIds: scopes.map((entry) => entry.organizationId),
+        }),
+        { manifestValid: false, boundaryDigest: '' },
+      );
+    }
+    assert.deepEqual(
+      loadTeamTaskLifecycleCanaryManifestSummary(
+        manifestPath,
+        trustedSignersPath,
+        {
+          userExternalIds: Object.values(users),
+          organizationExternalIds: scopes.map((entry) => entry.organizationId),
+        },
+        process.geteuid(),
+      ),
+      { manifestValid: true, boundaryDigest },
+    );
+
+    manifest.scopes[0].actors.claimantA.projectMemberId = externalId('pmem', 'Z');
+    writeFileSync(manifestPath, JSON.stringify(manifest), { mode: 0o600 });
+    assert.deepEqual(
+      loadTeamTaskLifecycleCanaryManifestSummary(
+        manifestPath,
+        trustedSignersPath,
+        {
+          userExternalIds: Object.values(users),
+          organizationExternalIds: scopes.map((entry) => entry.organizationId),
+        },
+        process.geteuid(),
+      ),
+      { manifestValid: false, boundaryDigest: '' },
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -357,18 +564,19 @@ test('collector uses private allowlists internally but returns only aggregate in
   const snapshot = await collectTeamTaskLifecycleSnapshot({
     runtimeEnvironment: {
       TEAM_PROJECTS_ENABLED: 'true',
+      TEAM_PROJECTS_ALLOWLIST: privateUserIds.join(','),
       TEAM_TASK_LIFECYCLE_ENABLED: 'false',
       TEAM_TASK_LIFECYCLE_ALLOWLIST: privateUserIds.join(','),
       DATABASE_URL: secret,
     },
     configuredEnvironment: {
       TEAM_PROJECTS_ENABLED: 'true',
+      TEAM_PROJECTS_ALLOWLIST: privateUserIds.join(','),
       TEAM_TASK_LIFECYCLE_ENABLED: 'false',
       TEAM_TASK_LIFECYCLE_ALLOWLIST: privateUserIds.join(','),
     },
     syntheticOrganizationAllowlist: privateOrganizationIds.join(','),
-    syntheticUsersConfirmed: true,
-    syntheticOrganizationsConfirmed: true,
+    syntheticBoundaryConfirmed: true,
     pm2Rows: [
       {
         name: 'holaday-orchestrator',
@@ -410,8 +618,13 @@ test('collector uses private allowlists internally but returns only aggregate in
     ].join('\n'),
     qaReceiptSummary: {
       qaReceiptValid: true,
-      personalProjects: true,
-      teamProjects: true,
+      receiptKind: 'prepare',
+      disabledPersonalProjects: true,
+      disabledTeamProjects: true,
+      disabledFilePath: true,
+      enabledPersonalProjects: false,
+      enabledTeamProjects: false,
+      enabledFilePath: false,
       scenarioChecksPassed: 0,
       scenarioChecksExpected: 13,
     },
@@ -645,7 +858,7 @@ test('formatted output is a fixed boolean and count-only summary', () => {
 
   assert.match(
     output,
-    /^TEAM_TASK_LIFECYCLE_PREFLIGHT mode=canary-ready status=ready checks=\d+\/\d+ failed=none healthHoladay=true healthOrangebench=true revisionMatch=true processCount=1 uid=998 migration0056Contract=true lifecycleTables=14 lifecycleEnabled=false allowAll=false allowlistCount=2 syntheticUsers=2 effectiveUsers=2 syntheticOrganizations=2 effectiveOrganizations=2 nonSyntheticOrganizations=0 lifecycleRows=0 relevantErrors=0 observationSeconds=86400 logCoverage=true conflicts=0 latencySamples=2 latencyP95Ms=40 qaReceipt=true personalSmoke=true teamSmoke=true scenarioChecks=0\/13$/,
+    /^TEAM_TASK_LIFECYCLE_PREFLIGHT mode=canary-ready status=ready checks=\d+\/\d+ failed=none healthHoladay=true healthOrangebench=true revisionMatch=true processCount=1 uid=998 migration0056Contract=true lifecycleTables=14 lifecycleEnabled=false teamAllowAll=false teamAllowlistCount=4 allowlistsMatch=true allowAll=false allowlistCount=4 syntheticUsers=4 effectiveUsers=4 syntheticOrganizations=2 effectiveOrganizations=2 nonSyntheticOrganizations=0 lifecycleRows=0 relevantErrors=0 observationSeconds=86400 logCoverage=true conflicts=0 latencySamples=2 latencyP95Ms=40 qaReceipt=true disabledPersonalSmoke=true disabledTeamSmoke=true disabledFileSmoke=true enabledPersonalSmoke=false enabledTeamSmoke=false enabledFileSmoke=false scenarioChecks=0\/13$/,
   );
   assert.equal(output.includes(secret), false);
   assert.equal(output.includes(identity), false);

@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { createHash, createPublicKey, verify as verifySignature } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,10 +8,15 @@ import { loadMysqlFromCwd, parseEnvironmentFile } from './account-closure-rollou
 
 const MODES = new Set(['dormant', 'canary-ready', 'canary-running', 'observe']);
 const LIFECYCLE_TABLE_COUNT = 14;
-const CANARY_USER_COUNT = 2;
+const CANARY_USER_COUNT = 4;
 const CANARY_ORGANIZATION_COUNT = 2;
 const QA_RECEIPT_SOURCE = 'holaday-team-task-lifecycle-qa-v1';
 const QA_RECEIPT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const CANARY_ROLE_NAMES = ['creatorApprover', 'claimantA', 'claimantB', 'arbitrator'];
+const CANARY_MANIFEST_SOURCE = 'holaday-team-task-lifecycle-canary-manifest-v1';
+const CANARY_CONFIRMATION_SOURCE = 'holaday-team-task-lifecycle-dual-operator-confirmation-v1';
+const CANARY_ATTESTATION_SOURCE = 'holaday-team-task-lifecycle-operator-attestation-v1';
+const CANARY_TRUSTED_SIGNERS_SOURCE = 'holaday-team-task-lifecycle-trusted-signers-v1';
 const QA_SCENARIO_NAMES = [
   'directLifecycle',
   'firstComeRace',
@@ -44,8 +50,12 @@ const LIFECYCLE_TABLES = [
 ];
 const CONFIGURATION_KEYS = [
   'TEAM_PROJECTS_ENABLED',
+  'TEAM_PROJECTS_ALLOWLIST',
   'TEAM_TASK_LIFECYCLE_ENABLED',
   'TEAM_TASK_LIFECYCLE_ALLOWLIST',
+  'TEAM_TASK_LIFECYCLE_CANARY_MANIFEST_FILE',
+  'TEAM_TASK_LIFECYCLE_QA_RECEIPT_FILE',
+  'TEAM_TASK_LIFECYCLE_TRUSTED_SIGNERS_FILE',
 ];
 
 function enabled(value) {
@@ -53,11 +63,18 @@ function enabled(value) {
 }
 
 function parseBoundedCsv(value) {
-  if (value === '') return { count: 0, allowAll: true };
-  if (typeof value !== 'string') return { count: 0, allowAll: false };
+  if (value === '') return { count: 0, allowAll: true, values: new Set() };
+  if (typeof value !== 'string') return { count: 0, allowAll: false, values: new Set() };
   const entries = value.split(',').map((entry) => entry.trim());
-  if (entries.some((entry) => entry === '')) return { count: 0, allowAll: false };
-  return { count: new Set(entries).size, allowAll: false };
+  if (entries.some((entry) => entry === '')) {
+    return { count: 0, allowAll: false, values: new Set() };
+  }
+  const values = new Set(entries);
+  return { count: values.size, allowAll: false, values };
+}
+
+function equalSets(left, right) {
+  return left.size === right.size && [...left].every((value) => right.has(value));
 }
 
 function parseExternalIdCsv(value, prefix) {
@@ -77,6 +94,280 @@ function parseExternalIdCsv(value, prefix) {
   return [...new Set(entries)];
 }
 
+function exactKeys(value, expected) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value).sort();
+  const expectedKeys = [...expected].sort();
+  return (
+    keys.length === expectedKeys.length && keys.every((key, index) => key === expectedKeys[index])
+  );
+}
+
+function validExternalId(value, prefix) {
+  return (
+    typeof value === 'string' &&
+    value.length === prefix.length + 22 &&
+    value.startsWith(`${prefix}_`) &&
+    /^[A-Za-z0-9_]+$/.test(value)
+  );
+}
+
+export function computeTeamTaskLifecycleBoundaryDigest(scopes) {
+  if (!Array.isArray(scopes) || scopes.length !== 2) return '';
+  const boundary = scopes.map((scope) => ({
+    organizationId: scope.organizationId,
+    projectId: scope.projectId,
+    actors: Object.fromEntries(
+      CANARY_ROLE_NAMES.map((role) => [
+        role,
+        {
+          userId: scope.actors[role].userId,
+          organizationMemberId: scope.actors[role].organizationMemberId,
+          projectMemberId: scope.actors[role].projectMemberId,
+        },
+      ]),
+    ),
+  }));
+  return createHash('sha256')
+    .update(JSON.stringify({ version: 1, scopes: boundary }), 'utf8')
+    .digest('hex');
+}
+
+function invalidCanaryManifestSummary() {
+  return { manifestValid: false, boundaryDigest: '' };
+}
+
+function parseCanaryAttestation(value) {
+  if (
+    !exactKeys(value, [
+      'boundaryDigest',
+      'confirmedAt',
+      'confirmedSyntheticBoundary',
+      'operatorPrincipal',
+      'operatorSlot',
+      'schemaVersion',
+      'signature',
+      'source',
+    ]) ||
+    value.schemaVersion !== 1 ||
+    value.source !== CANARY_ATTESTATION_SOURCE ||
+    !['primary', 'secondary'].includes(value.operatorSlot) ||
+    typeof value.operatorPrincipal !== 'string' ||
+    !/^[A-Za-z0-9._:@-]{3,128}$/.test(value.operatorPrincipal) ||
+    !/^[0-9a-f]{64}$/.test(value.boundaryDigest) ||
+    value.confirmedSyntheticBoundary !== true ||
+    typeof value.signature !== 'string'
+  ) {
+    return null;
+  }
+  const confirmedAtMs = Date.parse(value.confirmedAt);
+  const signature = Buffer.from(value.signature, 'base64');
+  if (
+    !Number.isFinite(confirmedAtMs) ||
+    new Date(confirmedAtMs).toISOString() !== value.confirmedAt ||
+    signature.length !== 64 ||
+    signature.toString('base64') !== value.signature
+  ) {
+    return null;
+  }
+  return value;
+}
+
+function attestationSigningPayload(attestation) {
+  return Buffer.from(
+    JSON.stringify({
+      schemaVersion: attestation.schemaVersion,
+      source: attestation.source,
+      operatorSlot: attestation.operatorSlot,
+      operatorPrincipal: attestation.operatorPrincipal,
+      boundaryDigest: attestation.boundaryDigest,
+      confirmedAt: attestation.confirmedAt,
+      confirmedSyntheticBoundary: attestation.confirmedSyntheticBoundary,
+    }),
+    'utf8',
+  );
+}
+
+function parseTrustedSigners(value) {
+  if (
+    !exactKeys(value, ['schemaVersion', 'signers', 'source']) ||
+    value.schemaVersion !== 1 ||
+    value.source !== CANARY_TRUSTED_SIGNERS_SOURCE ||
+    !Array.isArray(value.signers) ||
+    value.signers.length !== 2
+  ) {
+    return null;
+  }
+  const signers = [];
+  try {
+    for (const signer of value.signers) {
+      if (
+        !exactKeys(signer, ['operatorPrincipal', 'operatorSlot', 'publicKeyPem']) ||
+        !['primary', 'secondary'].includes(signer.operatorSlot) ||
+        typeof signer.operatorPrincipal !== 'string' ||
+        !/^[A-Za-z0-9._:@-]{3,128}$/.test(signer.operatorPrincipal) ||
+        typeof signer.publicKeyPem !== 'string' ||
+        signer.publicKeyPem.length > 8 * 1024
+      ) {
+        return null;
+      }
+      const publicKey = createPublicKey(signer.publicKeyPem);
+      if (publicKey.type !== 'public' || publicKey.asymmetricKeyType !== 'ed25519') return null;
+      signers.push({ ...signer, publicKey });
+    }
+  } catch {
+    return null;
+  }
+  if (
+    new Set(signers.map((signer) => signer.operatorSlot)).size !== 2 ||
+    new Set(signers.map((signer) => signer.operatorPrincipal)).size !== 2
+  ) {
+    return null;
+  }
+  return signers;
+}
+
+function validCanaryScopes(scopes, expectedBoundary) {
+  if (!Array.isArray(scopes) || scopes.length !== 2) return false;
+  const userIds = new Set();
+  const organizationIds = new Set();
+  const projectIds = new Set();
+  const organizationMemberIds = new Set();
+  const projectMemberIds = new Set();
+  for (const [scopeIndex, scope] of scopes.entries()) {
+    if (
+      !exactKeys(scope, ['actors', 'organizationId', 'projectId']) ||
+      !validExternalId(scope.organizationId, 'org') ||
+      !validExternalId(scope.projectId, 'prj') ||
+      !exactKeys(scope.actors, CANARY_ROLE_NAMES)
+    ) {
+      return false;
+    }
+    organizationIds.add(scope.organizationId);
+    projectIds.add(scope.projectId);
+    for (const role of CANARY_ROLE_NAMES) {
+      const actor = scope.actors[role];
+      if (
+        !exactKeys(actor, ['organizationMemberId', 'projectMemberId', 'userId']) ||
+        !validExternalId(actor.userId, 'usr') ||
+        !validExternalId(actor.organizationMemberId, 'omem') ||
+        !validExternalId(actor.projectMemberId, 'pmem') ||
+        (scopeIndex === 1 && actor.userId !== scopes[0].actors[role].userId)
+      ) {
+        return false;
+      }
+      userIds.add(actor.userId);
+      organizationMemberIds.add(actor.organizationMemberId);
+      projectMemberIds.add(actor.projectMemberId);
+    }
+  }
+  return (
+    userIds.size === CANARY_USER_COUNT &&
+    organizationIds.size === CANARY_ORGANIZATION_COUNT &&
+    projectIds.size === CANARY_ORGANIZATION_COUNT &&
+    organizationMemberIds.size === CANARY_USER_COUNT * CANARY_ORGANIZATION_COUNT &&
+    projectMemberIds.size === CANARY_USER_COUNT * CANARY_ORGANIZATION_COUNT &&
+    equalSets(userIds, new Set(expectedBoundary.userExternalIds)) &&
+    equalSets(organizationIds, new Set(expectedBoundary.organizationExternalIds))
+  );
+}
+
+function summarizeCanaryManifest(manifest, trustedSigners, expectedBoundary) {
+  if (
+    !exactKeys(manifest, ['confirmation', 'schemaVersion', 'scopes', 'source']) ||
+    manifest.schemaVersion !== 1 ||
+    manifest.source !== CANARY_MANIFEST_SOURCE ||
+    !validCanaryScopes(manifest.scopes, expectedBoundary) ||
+    !exactKeys(manifest.confirmation, [
+      'boundaryDigest',
+      'distinctHumanOperatorsConfirmed',
+      'primaryAttestation',
+      'secondaryAttestation',
+      'source',
+    ]) ||
+    manifest.confirmation.source !== CANARY_CONFIRMATION_SOURCE ||
+    manifest.confirmation.distinctHumanOperatorsConfirmed !== true
+  ) {
+    return invalidCanaryManifestSummary();
+  }
+  const boundaryDigest = computeTeamTaskLifecycleBoundaryDigest(manifest.scopes);
+  const primary = parseCanaryAttestation(manifest.confirmation.primaryAttestation);
+  const secondary = parseCanaryAttestation(manifest.confirmation.secondaryAttestation);
+  if (
+    !primary ||
+    !secondary ||
+    primary.operatorSlot !== 'primary' ||
+    secondary.operatorSlot !== 'secondary' ||
+    primary.operatorPrincipal === secondary.operatorPrincipal ||
+    primary.boundaryDigest !== boundaryDigest ||
+    secondary.boundaryDigest !== boundaryDigest ||
+    manifest.confirmation.boundaryDigest !== boundaryDigest ||
+    Date.parse(secondary.confirmedAt) < Date.parse(primary.confirmedAt)
+  ) {
+    return invalidCanaryManifestSummary();
+  }
+  for (const attestation of [primary, secondary]) {
+    const signer = trustedSigners.find(
+      (candidate) =>
+        candidate.operatorSlot === attestation.operatorSlot &&
+        candidate.operatorPrincipal === attestation.operatorPrincipal,
+    );
+    if (
+      !signer ||
+      !verifySignature(
+        null,
+        attestationSigningPayload(attestation),
+        signer.publicKey,
+        Buffer.from(attestation.signature, 'base64'),
+      )
+    ) {
+      return invalidCanaryManifestSummary();
+    }
+  }
+  return { manifestValid: true, boundaryDigest };
+}
+
+function safeJsonFile(path, policy, trustedSignerOwnerUid = 0) {
+  if (typeof path !== 'string' || path === '') return null;
+  const stat = lstatSync(path);
+  const currentUid = typeof process.geteuid === 'function' ? process.geteuid() : -1;
+  const ownerAllowed =
+    policy === 'trusted-signers'
+      ? stat.uid === trustedSignerOwnerUid
+      : stat.uid === currentUid || stat.uid === 0 || stat.uid === 998;
+  const modeAllowed =
+    policy === 'trusted-signers' ? (stat.mode & 0o022) === 0 : (stat.mode & 0o077) === 0;
+  if (
+    !stat.isFile() ||
+    stat.isSymbolicLink() ||
+    stat.size < 2 ||
+    stat.size > 32 * 1024 ||
+    !ownerAllowed ||
+    !modeAllowed
+  ) {
+    return null;
+  }
+  return JSON.parse(readFileSync(path, 'utf8'));
+}
+
+export function loadTeamTaskLifecycleCanaryManifestSummary(
+  manifestPath,
+  trustedSignersPath,
+  expectedBoundary,
+  trustedSignerOwnerUid = 0,
+) {
+  try {
+    const manifest = safeJsonFile(manifestPath, 'manifest');
+    const trustedSigners = parseTrustedSigners(
+      safeJsonFile(trustedSignersPath, 'trusted-signers', trustedSignerOwnerUid),
+    );
+    if (!manifest || !trustedSigners) return invalidCanaryManifestSummary();
+    return summarizeCanaryManifest(manifest, trustedSigners, expectedBoundary);
+  } catch {
+    return invalidCanaryManifestSummary();
+  }
+}
+
 function safeCount(value) {
   return Number.isSafeInteger(value) && value >= 0 ? value : -1;
 }
@@ -88,8 +379,13 @@ function addCheck(checks, name, ok) {
 function invalidQaReceipt() {
   return {
     qaReceiptValid: false,
-    personalProjects: false,
-    teamProjects: false,
+    receiptKind: 'invalid',
+    disabledPersonalProjects: false,
+    disabledTeamProjects: false,
+    disabledFilePath: false,
+    enabledPersonalProjects: false,
+    enabledTeamProjects: false,
+    enabledFilePath: false,
     scenarioChecksPassed: 0,
     scenarioChecksExpected: QA_SCENARIO_NAMES.length,
   };
@@ -100,6 +396,7 @@ export function summarizeTeamTaskQaReceipt(receipt, options = {}) {
   const expectedRevision = String(options.expectedRevision ?? '');
   const completedAtMs = Date.parse(String(receipt.completedAt ?? ''));
   const nowMs = Number(options.nowMs);
+  const expectedBoundaryDigest = String(options.expectedBoundaryDigest ?? '');
   const checkNames =
     receipt.checks && typeof receipt.checks === 'object' ? Object.keys(receipt.checks).sort() : [];
   const expectedNames = [...QA_SCENARIO_NAMES].sort();
@@ -107,30 +404,55 @@ export function summarizeTeamTaskQaReceipt(receipt, options = {}) {
     checkNames.length === expectedNames.length &&
     checkNames.every((name, index) => name === expectedNames[index]) &&
     expectedNames.every((name) => typeof receipt.checks[name] === 'boolean');
+  const disabledSmoke = receipt.phaseOne?.disabled;
+  const enabledSmoke = receipt.phaseOne?.enabled;
+  const validSmoke = (value) =>
+    exactKeys(value, ['filePath', 'personalProjects', 'teamProjects']) &&
+    typeof value.personalProjects === 'boolean' &&
+    typeof value.teamProjects === 'boolean' &&
+    typeof value.filePath === 'boolean';
+  const receiptKindValid =
+    (receipt.receiptKind === 'prepare' &&
+      enabledSmoke === null &&
+      expectedNames.every((name) => receipt.checks[name] === false)) ||
+    (receipt.receiptKind === 'run' && validSmoke(enabledSmoke));
   const qaReceiptValid =
     options.fileSecure === true &&
     receipt.schemaVersion === 1 &&
     receipt.source === QA_RECEIPT_SOURCE &&
     /^[0-9a-f]{40}$/.test(expectedRevision) &&
     receipt.revision === expectedRevision &&
+    /^[0-9a-f]{64}$/.test(expectedBoundaryDigest) &&
+    receipt.boundaryDigest === expectedBoundaryDigest &&
     Number.isFinite(completedAtMs) &&
     Number.isFinite(nowMs) &&
     completedAtMs <= nowMs &&
     completedAtMs >= nowMs - QA_RECEIPT_MAX_AGE_MS &&
-    typeof receipt.phaseOne?.personalProjects === 'boolean' &&
-    typeof receipt.phaseOne?.teamProjects === 'boolean' &&
+    exactKeys(receipt.phaseOne, ['disabled', 'enabled']) &&
+    validSmoke(disabledSmoke) &&
+    receiptKindValid &&
     fixedChecks;
   if (!qaReceiptValid) return invalidQaReceipt();
   return {
     qaReceiptValid: true,
-    personalProjects: receipt.phaseOne.personalProjects,
-    teamProjects: receipt.phaseOne.teamProjects,
+    receiptKind: receipt.receiptKind,
+    disabledPersonalProjects: disabledSmoke.personalProjects,
+    disabledTeamProjects: disabledSmoke.teamProjects,
+    disabledFilePath: disabledSmoke.filePath,
+    enabledPersonalProjects: enabledSmoke?.personalProjects === true,
+    enabledTeamProjects: enabledSmoke?.teamProjects === true,
+    enabledFilePath: enabledSmoke?.filePath === true,
     scenarioChecksPassed: QA_SCENARIO_NAMES.filter((name) => receipt.checks[name] === true).length,
     scenarioChecksExpected: QA_SCENARIO_NAMES.length,
   };
 }
 
-export function loadTeamTaskQaReceipt(receiptPath, expectedRevision, nowMs) {
+export function loadTeamTaskQaReceipt(
+  receiptPath,
+  expectedRevision,
+  nowMs,
+  expectedBoundaryDigest,
+) {
   try {
     if (typeof receiptPath !== 'string' || receiptPath === '') return invalidQaReceipt();
     const stat = lstatSync(receiptPath);
@@ -144,7 +466,12 @@ export function loadTeamTaskQaReceipt(receiptPath, expectedRevision, nowMs) {
       (stat.mode & 0o077) === 0;
     if (!fileSecure) return invalidQaReceipt();
     const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'));
-    return summarizeTeamTaskQaReceipt(receipt, { expectedRevision, nowMs, fileSecure });
+    return summarizeTeamTaskQaReceipt(receipt, {
+      expectedRevision,
+      nowMs,
+      fileSecure,
+      expectedBoundaryDigest,
+    });
   } catch {
     return invalidQaReceipt();
   }
@@ -152,12 +479,19 @@ export function loadTeamTaskQaReceipt(receiptPath, expectedRevision, nowMs) {
 
 /** Reduce runtime configuration to booleans and counts without retaining IDs or secrets. */
 export function summarizeTeamTaskLifecycleEnvironment(environment) {
+  const teamProjectsAllowlist = parseBoundedCsv(environment?.TEAM_PROJECTS_ALLOWLIST);
   const lifecycleAllowlist = parseBoundedCsv(environment?.TEAM_TASK_LIFECYCLE_ALLOWLIST);
   return {
     teamProjectsEnabled: enabled(environment?.TEAM_PROJECTS_ENABLED),
+    teamProjectsAllowAll: teamProjectsAllowlist.allowAll,
+    teamProjectsAllowlistCount: teamProjectsAllowlist.count,
     lifecycleEnabled: enabled(environment?.TEAM_TASK_LIFECYCLE_ENABLED),
     lifecycleAllowAll: lifecycleAllowlist.allowAll,
     lifecycleAllowlistCount: lifecycleAllowlist.count,
+    allowlistsMatch:
+      !teamProjectsAllowlist.allowAll &&
+      !lifecycleAllowlist.allowAll &&
+      equalSets(teamProjectsAllowlist.values, lifecycleAllowlist.values),
   };
 }
 
@@ -441,8 +775,8 @@ export async function collectTeamTaskLifecycleSnapshot(input) {
     },
     canary: {
       qaReceiptValid: qaReceipt.qaReceiptValid === true,
-      syntheticUsersConfirmed: input.syntheticUsersConfirmed === true,
-      syntheticOrganizationsConfirmed: input.syntheticOrganizationsConfirmed === true,
+      receiptKind: qaReceipt.receiptKind,
+      syntheticBoundaryConfirmed: input.syntheticBoundaryConfirmed === true,
       activeSyntheticUserCount: safeCount(database?.activeSyntheticUserCount),
       effectiveCanaryUserCount: safeCount(database?.effectiveCanaryUserCount),
       enabledSyntheticOrganizationCount: safeCount(database?.enabledSyntheticOrganizationCount),
@@ -454,8 +788,12 @@ export async function collectTeamTaskLifecycleSnapshot(input) {
       scenarioChecksExpected: safeCount(qaReceipt.scenarioChecksExpected),
     },
     smoke: {
-      personalProjects: qaReceipt.personalProjects === true,
-      teamProjects: qaReceipt.teamProjects === true,
+      disabledPersonalProjects: qaReceipt.disabledPersonalProjects === true,
+      disabledTeamProjects: qaReceipt.disabledTeamProjects === true,
+      disabledFilePath: qaReceipt.disabledFilePath === true,
+      enabledPersonalProjects: qaReceipt.enabledPersonalProjects === true,
+      enabledTeamProjects: qaReceipt.enabledTeamProjects === true,
+      enabledFilePath: qaReceipt.enabledFilePath === true,
     },
   };
 }
@@ -502,8 +840,11 @@ export function evaluateTeamTaskLifecyclePreflight(mode, snapshot) {
     checks,
     'phase-one-smoke',
     canary.qaReceiptValid === true &&
-      smoke.personalProjects === true &&
-      smoke.teamProjects === true,
+      canary.receiptKind ===
+        (mode === 'canary-running' || mode === 'observe' ? 'run' : 'prepare') &&
+      smoke.disabledPersonalProjects === true &&
+      smoke.disabledTeamProjects === true &&
+      smoke.disabledFilePath === true,
   );
 
   if (mode === 'dormant') {
@@ -515,22 +856,32 @@ export function evaluateTeamTaskLifecyclePreflight(mode, snapshot) {
     addCheck(
       checks,
       'bounded-user-allowlist',
-      orchestrator.lifecycleAllowAll === false &&
+      orchestrator.teamProjectsAllowAll === false &&
+        orchestrator.teamProjectsAllowlistCount === CANARY_USER_COUNT &&
+        orchestrator.lifecycleAllowAll === false &&
         orchestrator.lifecycleAllowlistCount === CANARY_USER_COUNT &&
-        canary.syntheticUsersConfirmed === true &&
+        orchestrator.allowlistsMatch === true &&
+        canary.syntheticBoundaryConfirmed === true &&
         canary.activeSyntheticUserCount === CANARY_USER_COUNT &&
         canary.effectiveCanaryUserCount === CANARY_USER_COUNT,
     );
     addCheck(
       checks,
       'synthetic-organization-boundary',
-      canary.syntheticOrganizationsConfirmed === true &&
+      canary.syntheticBoundaryConfirmed === true &&
         canary.enabledSyntheticOrganizationCount === CANARY_ORGANIZATION_COUNT &&
         canary.effectiveCanaryOrganizationCount === CANARY_ORGANIZATION_COUNT &&
         canary.nonSyntheticEnabledOrganizationCount === 0,
     );
     if (mode !== 'canary-ready') {
       addCheck(checks, 'lifecycle-enabled', orchestrator.lifecycleEnabled === true);
+      addCheck(
+        checks,
+        'phase-one-enabled-smoke',
+        smoke.enabledPersonalProjects === true &&
+          smoke.enabledTeamProjects === true &&
+          smoke.enabledFilePath === true,
+      );
       addCheck(
         checks,
         'canary-scenario-matrix',
@@ -567,6 +918,9 @@ export function evaluateTeamTaskLifecyclePreflight(mode, snapshot) {
       migration0056Contract: database.migration0056ContractVerified === true,
       lifecycleTables: safeCount(database.lifecycleTableCount),
       lifecycleEnabled: orchestrator.lifecycleEnabled === true,
+      teamAllowAll: orchestrator.teamProjectsAllowAll === true,
+      teamAllowlistCount: safeCount(orchestrator.teamProjectsAllowlistCount),
+      allowlistsMatch: orchestrator.allowlistsMatch === true,
       allowAll: orchestrator.lifecycleAllowAll === true,
       allowlistCount: safeCount(orchestrator.lifecycleAllowlistCount),
       syntheticUsers: safeCount(canary.activeSyntheticUserCount),
@@ -582,8 +936,12 @@ export function evaluateTeamTaskLifecyclePreflight(mode, snapshot) {
       latencySamples: safeCount(database.latencySampleCount),
       latencyP95Ms: safeCount(database.latencyP95Ms),
       qaReceipt: canary.qaReceiptValid === true,
-      personalSmoke: smoke.personalProjects === true,
-      teamSmoke: smoke.teamProjects === true,
+      disabledPersonalSmoke: smoke.disabledPersonalProjects === true,
+      disabledTeamSmoke: smoke.disabledTeamProjects === true,
+      disabledFileSmoke: smoke.disabledFilePath === true,
+      enabledPersonalSmoke: smoke.enabledPersonalProjects === true,
+      enabledTeamSmoke: smoke.enabledTeamProjects === true,
+      enabledFileSmoke: smoke.enabledFilePath === true,
       scenarioChecksPassed: safeCount(canary.scenarioChecksPassed),
       scenarioChecksExpected: safeCount(canary.scenarioChecksExpected),
     },
@@ -606,6 +964,9 @@ export function formatTeamTaskLifecyclePreflight(result) {
     `migration0056Contract=${summary.migration0056Contract}`,
     `lifecycleTables=${summary.lifecycleTables}`,
     `lifecycleEnabled=${summary.lifecycleEnabled}`,
+    `teamAllowAll=${summary.teamAllowAll}`,
+    `teamAllowlistCount=${summary.teamAllowlistCount}`,
+    `allowlistsMatch=${summary.allowlistsMatch}`,
     `allowAll=${summary.allowAll}`,
     `allowlistCount=${summary.allowlistCount}`,
     `syntheticUsers=${summary.syntheticUsers}`,
@@ -621,8 +982,12 @@ export function formatTeamTaskLifecyclePreflight(result) {
     `latencySamples=${summary.latencySamples}`,
     `latencyP95Ms=${summary.latencyP95Ms}`,
     `qaReceipt=${summary.qaReceipt}`,
-    `personalSmoke=${summary.personalSmoke}`,
-    `teamSmoke=${summary.teamSmoke}`,
+    `disabledPersonalSmoke=${summary.disabledPersonalSmoke}`,
+    `disabledTeamSmoke=${summary.disabledTeamSmoke}`,
+    `disabledFileSmoke=${summary.disabledFileSmoke}`,
+    `enabledPersonalSmoke=${summary.enabledPersonalSmoke}`,
+    `enabledTeamSmoke=${summary.enabledTeamSmoke}`,
+    `enabledFileSmoke=${summary.enabledFileSmoke}`,
     `scenarioChecks=${summary.scenarioChecksPassed}/${summary.scenarioChecksExpected}`,
   ].join(' ');
 }
@@ -768,20 +1133,31 @@ async function collectProductionSnapshot(environmentFile) {
     { cwd: process.cwd(), encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 },
   );
   const nowMs = Date.now();
+  const userExternalIds = parseExternalIdCsv(
+    runtimeEnvironment.TEAM_TASK_LIFECYCLE_ALLOWLIST,
+    'usr',
+  );
+  const organizationExternalIds = parseExternalIdCsv(
+    process.env.TEAM_TASK_LIFECYCLE_SYNTHETIC_ORGANIZATION_ALLOWLIST,
+    'org',
+  );
+  const canaryManifestSummary = loadTeamTaskLifecycleCanaryManifestSummary(
+    runtimeEnvironment.TEAM_TASK_LIFECYCLE_CANARY_MANIFEST_FILE,
+    runtimeEnvironment.TEAM_TASK_LIFECYCLE_TRUSTED_SIGNERS_FILE,
+    { userExternalIds, organizationExternalIds },
+  );
   const qaReceiptSummary = loadTeamTaskQaReceipt(
-    process.env.TEAM_TASK_LIFECYCLE_QA_RECEIPT_FILE,
+    runtimeEnvironment.TEAM_TASK_LIFECYCLE_QA_RECEIPT_FILE,
     revision,
     nowMs,
+    canaryManifestSummary.boundaryDigest,
   );
   return collectTeamTaskLifecycleSnapshot({
     runtimeEnvironment,
     configuredEnvironment,
     syntheticOrganizationAllowlist:
       process.env.TEAM_TASK_LIFECYCLE_SYNTHETIC_ORGANIZATION_ALLOWLIST ?? '',
-    syntheticUsersConfirmed: enabled(process.env.TEAM_TASK_LIFECYCLE_SYNTHETIC_USERS_CONFIRMED),
-    syntheticOrganizationsConfirmed: enabled(
-      process.env.TEAM_TASK_LIFECYCLE_SYNTHETIC_ORGANIZATIONS_CONFIRMED,
-    ),
+    syntheticBoundaryConfirmed: canaryManifestSummary.manifestValid,
     pm2Rows,
     inspectProcess: inspectLinuxProcess,
     health: {
@@ -811,6 +1187,9 @@ function isDirectExecution() {
 
 if (isDirectExecution()) {
   try {
+    if (typeof process.geteuid !== 'function' || process.geteuid() !== 0) {
+      throw new Error('production preflight requires root');
+    }
     const command = process.argv[2] ?? '';
     if (command === 'collect') {
       const environmentFile = process.argv[3] ?? 'apps/orchestrator/.env';
