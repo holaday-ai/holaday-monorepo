@@ -684,6 +684,26 @@ function commandSucceeded(command, args, options = {}) {
   );
 }
 
+/**
+ * The verifier needs the production database URL, but it must keep the
+ * operator process PATH/HOME so the local pnpm binary and package cache remain
+ * resolvable. Never forward the PM2 process environment wholesale.
+ */
+export function buildSchemaVerificationEnvironment(localEnvironment, runtimeEnvironment) {
+  const environment = {};
+  for (const key of ['PATH', 'HOME']) {
+    if (typeof localEnvironment?.[key] === 'string' && localEnvironment[key].length > 0) {
+      environment[key] = localEnvironment[key];
+    }
+  }
+  environment.DATABASE_URL =
+    typeof runtimeEnvironment?.DATABASE_URL === 'string' &&
+    runtimeEnvironment.DATABASE_URL.length > 0
+      ? runtimeEnvironment.DATABASE_URL
+      : 'invalid://missing-runtime-database-url';
+  return environment;
+}
+
 async function collectProductionSnapshot(environmentFile) {
   const configuredEnvironment = parseEnvironmentFile(readFileSync(environmentFile, 'utf8'));
   const pm2Rows = readPm2Rows();
@@ -705,7 +725,7 @@ async function collectProductionSnapshot(environmentFile) {
   const schemaVerified = commandSucceeded(
     'pnpm',
     ['--filter', '@holaday/orchestrator', 'db:verify'],
-    { env: { ...process.env, ...runtimeEnvironment } },
+    { env: buildSchemaVerificationEnvironment(process.env, runtimeEnvironment) },
   );
   const mysql = loadMysqlFromCwd(process.cwd());
   let connection;
