@@ -7,6 +7,7 @@ CURRENT_SCRIPT="$SCRIPT_DIR/deploy-current.sh"
 AKSHARE_SCRIPT="$SCRIPT_DIR/deploy-akshare-mcp.sh"
 ORCHESTRATOR_SCRIPT="$SCRIPT_DIR/deploy-orchestrator.sh"
 AUTO_SMOKE_SUMMARY_SCRIPT="$SCRIPT_DIR/auto-smoke-summary.sh"
+DEPLOY_SAFETY_HELPER="$SCRIPT_DIR/team-task-lifecycle-deploy-safety.mjs"
 CN_PAYMENT_SCRIPT="$SCRIPT_DIR/deploy-cn-payment.sh"
 export DEPLOY_REMOTE_RETRY_SLEEP="${DEPLOY_REMOTE_RETRY_SLEEP:-0}"
 
@@ -408,6 +409,7 @@ test_orchestrator_retries_transient_payment_preflights() {
   write_common_deploy_stubs "$harness_dir"
   cp "$ORCHESTRATOR_SCRIPT" "$harness_dir/repo/scripts/deploy-orchestrator.sh"
   cp "$AUTO_SMOKE_SUMMARY_SCRIPT" "$harness_dir/repo/scripts/auto-smoke-summary.sh"
+  cp "$DEPLOY_SAFETY_HELPER" "$harness_dir/repo/scripts/team-task-lifecycle-deploy-safety.mjs"
   : > "$harness_dir/repo/scripts/orchestrator-runtime.sh"
   : > "$harness_dir/repo/scripts/start-orchestrator-production.sh"
   : > "$harness_dir/repo/scripts/start-account-closure-worker-production.sh"
@@ -457,6 +459,7 @@ write_orchestrator_gate_retry_harness() {
   write_common_deploy_stubs "$harness_dir"
   cp "$ORCHESTRATOR_SCRIPT" "$harness_dir/repo/scripts/deploy-orchestrator.sh"
   cp "$AUTO_SMOKE_SUMMARY_SCRIPT" "$harness_dir/repo/scripts/auto-smoke-summary.sh"
+  cp "$DEPLOY_SAFETY_HELPER" "$harness_dir/repo/scripts/team-task-lifecycle-deploy-safety.mjs"
   : > "$harness_dir/repo/scripts/orchestrator-runtime.sh"
   : > "$harness_dir/repo/scripts/start-orchestrator-production.sh"
   : > "$harness_dir/repo/scripts/start-account-closure-worker-production.sh"
@@ -497,10 +500,18 @@ elif [[ "$command_text" == *"git fetch origin"* ]]; then
 elif [[ "$command_text" == *"git cat-file -e"* ]]; then
   echo "rollback-validate" >> "$TEST_EVENT_LOG"
   exit 0
+elif [[ "$command_text" == *"team-task-lifecycle-deploy-safety.mjs' persist"* ]]; then
+  [[ "$command_text" == *"flock --exclusive --timeout 60"* ]] || exit 92
+  echo "lifecycle-safety-off" >> "$TEST_EVENT_LOG"
+  exit 0
 elif [[ "$command_text" == *"orchestrator-runtime.sh' restart"* ]]; then
+  [[ "$command_text" == *"team-task-lifecycle-deploy-safety.mjs' verify-process holaday-orchestrator"* ]] \
+    || exit 91
   echo "runtime-restart" >> "$TEST_EVENT_LOG"
   exit 0
 elif [[ "$command_text" == *"install -d"* ]]; then
+  [[ "$command_text" == *"-m 700 '/var/lib/holaday-deploy/locks'"* ]] || exit 93
+  [[ "$command_text" == *"command -v flock"* ]] || exit 94
   echo "runtime-directory" >> "$TEST_EVENT_LOG"
   exit 0
 elif [[ "$command_text" == *"chown root:root"* ]]; then
@@ -540,7 +551,7 @@ test_orchestrator_retries_transient_ancestor_gate() {
   (( rc == 1 )) || fail "orchestrator should pass a recovered ancestor gate and reach rollback-safe deploy handling"
   assert_event_count "$event_log" gate-check 2
   assert_event_count "$event_log" reset-new 2
-  assert_event_order "$event_log" runtime-directory runtime-upload runtime-permissions rollback-validate gate-fetch gate-check reset-new rollback-build runtime-restart
+  assert_event_order "$event_log" runtime-directory runtime-upload runtime-permissions rollback-validate gate-fetch gate-check reset-new lifecycle-safety-off rollback-build runtime-restart
   ! grep -Fq "unit-secret" "$output" \
     || fail "ancestor-gate retries must not print credentials"
   rm -rf "$harness_dir"
@@ -586,6 +597,7 @@ write_orchestrator_release_smoke_harness() {
   write_common_deploy_stubs "$harness_dir"
   cp "$ORCHESTRATOR_SCRIPT" "$harness_dir/repo/scripts/deploy-orchestrator.sh"
   cp "$AUTO_SMOKE_SUMMARY_SCRIPT" "$harness_dir/repo/scripts/auto-smoke-summary.sh"
+  cp "$DEPLOY_SAFETY_HELPER" "$harness_dir/repo/scripts/team-task-lifecycle-deploy-safety.mjs"
   : > "$harness_dir/repo/scripts/orchestrator-runtime.sh"
   : > "$harness_dir/repo/scripts/start-orchestrator-production.sh"
   : > "$harness_dir/repo/scripts/start-account-closure-worker-production.sh"
@@ -622,6 +634,8 @@ elif [[ "$command_text" == *"eval:smoke"* ]]; then
 elif [[ "$command_text" == *"git reset --hard '1111111111111111111111111111111111111111'"* ]]; then
   echo "rollback-build" >> "$TEST_EVENT_LOG"
 elif [[ "$command_text" == *"install -d"* ]]; then
+  [[ "$command_text" == *"-m 700 '/var/lib/holaday-deploy/locks'"* ]] || exit 93
+  [[ "$command_text" == *"command -v flock"* ]] || exit 94
   echo "runtime-directory" >> "$TEST_EVENT_LOG"
 elif [[ "$command_text" == *"chown root:root"* ]]; then
   echo "runtime-permissions" >> "$TEST_EVENT_LOG"
@@ -641,7 +655,12 @@ elif [[ "$command_text" == *"pnpm install"* ]]; then
   exit 0
 elif [[ "$command_text" == *"db:migrate:numbered"* ]]; then
   exit 0
+elif [[ "$command_text" == *"team-task-lifecycle-deploy-safety.mjs' persist"* ]]; then
+  [[ "$command_text" == *"flock --exclusive --timeout 60"* ]] || exit 92
+  echo "lifecycle-safety-off" >> "$TEST_EVENT_LOG"
 elif [[ "$command_text" == *"orchestrator-runtime.sh' restart"* ]]; then
+  [[ "$command_text" == *"team-task-lifecycle-deploy-safety.mjs' verify-process holaday-orchestrator"* ]] \
+    || exit 91
   if grep -Fxq "rollback-build" "$TEST_EVENT_LOG"; then
     echo "rollback-restart" >> "$TEST_EVENT_LOG"
   else
