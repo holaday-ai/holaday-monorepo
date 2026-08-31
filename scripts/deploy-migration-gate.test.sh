@@ -88,6 +88,10 @@ elif [[ "$command_text" == *"db:migrate:numbered"* ]]; then
     echo "migration-0052-gate-missing" >> "$TEST_EVENT_LOG"
     exit 48
   fi
+  if [[ "$command_text" != *"test -f apps/orchestrator/drizzle/0056_team_work_item_lifecycle.sql"* ]]; then
+    echo "migration-0056-gate-missing" >> "$TEST_EVENT_LOG"
+    exit 50
+  fi
   echo "migration" >> "$TEST_EVENT_LOG"
   [[ "$TEST_FAIL_PHASE" != "migration" ]] || exit 43
 elif [[ "$command_text" == *"git reset --hard '$TEST_LIVE_HEAD'"* ]]; then
@@ -96,6 +100,7 @@ elif [[ "$command_text" == *"git reset --hard '$TEST_LIVE_HEAD'"* ]]; then
 elif [[ "$command_text" == *"orchestrator-runtime.sh' restart"* ]]; then
   if grep -Fxq "rollback-checkout" "$TEST_EVENT_LOG"; then
     [[ "$command_text" == *"ACCOUNT_CLOSURE_WORKER_ENABLED=false"* ]] || exit 47
+    [[ "$command_text" == *"TEAM_TASK_LIFECYCLE_ENABLED=false"* ]] || exit 49
     echo "rollback-restart" >> "$TEST_EVENT_LOG"
     exit "${TEST_ROLLBACK_RESTART_RC:-0}"
   fi
