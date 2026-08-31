@@ -2,7 +2,7 @@ import type { PlanId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { ffprobeDurationMs, ffprobeVideoMetadata } from '../../agent/video/ffmpeg-exec.js';
+import { ffprobeVideoMetadata } from '../../agent/video/ffmpeg-exec.js';
 import { env } from '../../config/env.js';
 import { taskFiles } from '../../db/schema/task-files.js';
 import { users } from '../../db/schema/users.js';
@@ -669,16 +669,16 @@ const productionDependencies: VideoEditingRouterDependencies = {
     const sourceDependencies = createVideoSourceImportDependencies({
       db: ctx.db,
       fileService,
-      probeDurationMs: async (source) => {
+      probeVideoMetadata: async (source) => {
         const preview = await fileService.getScopedPreviewForUser(
           source.fileId,
           source.userId,
           300,
         );
         if (!preview || preview.delivery !== 'signed') {
-          throw new Error('duration probe requires a short-lived signed source URL');
+          throw new Error('video metadata probe requires a short-lived signed source URL');
         }
-        return ffprobeDurationMs(preview.url, { timeoutMs: 30_000 });
+        return ffprobeVideoMetadata(preview.url, { timeoutMs: 30_000 });
       },
     });
     const renderFiles = createVideoEditRenderFilePort(fileService);
