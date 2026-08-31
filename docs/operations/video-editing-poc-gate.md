@@ -9,11 +9,12 @@
 
 ## 2026-08-31 进展记录
 
-- 已通过 IMG.LY 官方 Contact Sales 表单提交 Holaday 的 30 天试用许可证与正式报价申请；供应商确认页表示将通过邮件跟进，报价目标为一个工作日内。当前尚未收到许可证或书面报价，因此所有商务/授权项目仍保持未完成。
+- 操作记录（2026-08-31，由当前任务执行记录提供）：已通过 IMG.LY 官方 Contact Sales 表单提交 Holaday 的 30 天试用许可证与正式报价申请；供应商确认页表示将通过邮件跟进，报价目标为一个工作日内，但未返回可公开的 request ID。当前尚未收到许可证或书面报价，因此所有商务/授权项目仍保持未完成。
 - 申请已明确要求书面覆盖：Web 白标编辑器、中文界面、浏览器端导出、可选 Node Renderer、计价口径、staging/beta/production 标识、自托管/中国区可用性、浏览器和编解码器矩阵。
-- POC 代码已由 PR [#168](https://github.com/holaday-ai/holaday-monorepo/pull/168) 合并到 `claude/musing-keller-ae1d05`；该目标不是仓库当前默认分支，因此本记录不把它表述为生产发布。
-- 本地验证证据：Web 全量测试 228 个文件、1642 个测试通过；视频剪辑服务端定向测试 9 个文件、87 个测试通过；Web 与 Orchestrator 类型检查通过。
-- `pnpm test:video-editing-preflight` 的 5 个门禁测试通过，并返回 `production_disabled_pending_commercial_license`。生产功能继续关闭，未配置或输出许可证值。
+- GitHub 记录：POC 代码已由 PR [#168](https://github.com/holaday-ai/holaday-monorepo/pull/168) 合并到 `claude/musing-keller-ae1d05`；该目标不是仓库当前默认分支，因此本记录不把它表述为生产发布。
+- 此前本地验证（2026-08-31，合入最新目标分支前，`bf2cba3c`）：Web 全量测试 228 个文件、1642 个测试通过；视频剪辑服务端定向测试 9 个文件、87 个测试通过；Web 与 Orchestrator 类型检查通过。
+- 同步后基线验证（2026-08-31，`48f75193`）：Web 定向测试 6 个文件、33 个测试通过；Orchestrator 定向测试 10 个文件、91 个测试通过；数据库发布契约 32 个测试通过；Web 与 Orchestrator 类型检查通过。
+- 同步后在 `48f75193` 运行 `pnpm test:video-editing-preflight`，5 个门禁测试通过，并返回 `production_disabled_pending_commercial_license`。生产功能继续关闭，未配置或输出许可证值。
 
 ## 官方能力与条款基线（2026-08-28 核对）
 

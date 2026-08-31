@@ -63,7 +63,11 @@ export interface VideoSourceImportDependencies {
     userId: number,
     ttlSeconds: number,
   ): Promise<ScopedVideoPreview | null>;
-  probeDurationMs(source: OwnedVideoSource): Promise<number>;
+  probeVideoMetadata(source: OwnedVideoSource): Promise<{
+    durationMs: number;
+    width: number;
+    height: number;
+  }>;
   isOwnedReadableFile?(fileId: string, userId: number): Promise<boolean>;
 }
 
@@ -109,13 +113,17 @@ export async function loadOwnedVideoSource(
 export function createVideoSourceImportDependencies(input: {
   db: DB;
   fileService: Pick<FileService, 'getScopedPreviewForUser' | 'isReadableForUser'>;
-  probeDurationMs(source: OwnedVideoSource): Promise<number>;
+  probeVideoMetadata(source: OwnedVideoSource): Promise<{
+    durationMs: number;
+    width: number;
+    height: number;
+  }>;
 }): VideoSourceImportDependencies {
   return {
     loadOwnedSource: (query) => loadOwnedVideoSource(input.db, query),
     getScopedPreview: (sourceFileId, userId, ttlSeconds) =>
       input.fileService.getScopedPreviewForUser(sourceFileId, userId, ttlSeconds),
-    probeDurationMs: input.probeDurationMs,
+    probeVideoMetadata: input.probeVideoMetadata,
     isOwnedReadableFile: (fileId, userId) => input.fileService.isReadableForUser(fileId, userId),
   };
 }
@@ -155,7 +163,7 @@ const sceneSourceSchema = z
     sourceStartMs: z.number().int().min(0),
     sourceEndMs: z.number().int().positive(),
     caption: z.string().max(500).optional(),
-    audioGain: z.number().min(0).max(4).optional(),
+    audioGain: z.number().min(0).max(1).optional(),
     generationContext: generationContextSchema.nullable().optional(),
   })
   .strict()
@@ -255,28 +263,49 @@ function documentFromStructuredSource(input: {
   return { aspectRatio: input.parsed.aspectRatio, scenes };
 }
 
+function closestSupportedAspectRatio(width: number, height: number): VideoEditAspectRatio {
+  const sourceRatio = width / height;
+  const candidates: Array<{ id: VideoEditAspectRatio; ratio: number }> = [
+    { id: '16:9', ratio: 16 / 9 },
+    { id: '9:16', ratio: 9 / 16 },
+    { id: '1:1', ratio: 1 },
+  ];
+  return candidates.reduce((closest, candidate) =>
+    Math.abs(Math.log(sourceRatio / candidate.ratio)) <
+    Math.abs(Math.log(sourceRatio / closest.ratio))
+      ? candidate
+      : closest,
+  ).id;
+}
+
 async function finalOnlyDocument(input: {
   source: OwnedVideoSource;
-  aspectRatio: VideoEditAspectRatio;
-  probeDurationMs: VideoSourceImportDependencies['probeDurationMs'];
+  probeVideoMetadata: VideoSourceImportDependencies['probeVideoMetadata'];
 }): Promise<VideoEditDocument> {
-  let durationMs: number;
+  let metadata: { durationMs: number; width: number; height: number };
   try {
-    durationMs = await input.probeDurationMs(input.source);
+    metadata = await input.probeVideoMetadata(input.source);
   } catch {
-    return unavailable('duration_unavailable', '无法读取视频时长，请重新上传');
+    return unavailable('duration_unavailable', '无法读取视频信息，请重新上传');
   }
-  if (!Number.isSafeInteger(durationMs) || durationMs <= 0) {
-    return unavailable('duration_unavailable', '无法读取视频时长，请重新上传');
+  if (
+    !Number.isSafeInteger(metadata.durationMs) ||
+    metadata.durationMs <= 0 ||
+    !Number.isSafeInteger(metadata.width) ||
+    metadata.width <= 0 ||
+    !Number.isSafeInteger(metadata.height) ||
+    metadata.height <= 0
+  ) {
+    return unavailable('duration_unavailable', '无法读取视频信息，请重新上传');
   }
   return {
-    aspectRatio: input.aspectRatio,
+    aspectRatio: closestSupportedAspectRatio(metadata.width, metadata.height),
     scenes: [
       {
         id: `${input.source.fileId}:scene:1`,
         sourceFileId: input.source.fileId,
         sourceStartMs: 0,
-        sourceEndMs: durationMs,
+        sourceEndMs: metadata.durationMs,
         order: 0,
         caption: '',
         audioGain: 1,
@@ -342,8 +371,7 @@ export async function importVideoSource(
     }
     document = await finalOnlyDocument({
       source,
-      aspectRatio: '16:9',
-      probeDurationMs: dependencies.probeDurationMs,
+      probeVideoMetadata: dependencies.probeVideoMetadata,
     });
   }
   await assertRelatedFilesOwned({

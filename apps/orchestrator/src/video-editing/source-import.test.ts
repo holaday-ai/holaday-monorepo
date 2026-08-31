@@ -35,7 +35,7 @@ function dependencies(
       url: '/api/files/file_owned_video/download',
       expiresAt: new Date('2026-08-28T01:15:00Z'),
     }),
-    probeDurationMs: async () => 8_000,
+    probeVideoMetadata: async () => ({ durationMs: 8_000, width: 1920, height: 1080 }),
     ...overrides,
   };
 }
@@ -201,6 +201,36 @@ describe('video source import', () => {
     expect(JSON.stringify(imported.document)).not.toContain('/api/files/');
   });
 
+  it('rejects a structured audio gain that the editor cannot export faithfully', async () => {
+    await expect(
+      importOwned(
+        source({
+          taskId: 42,
+          taskExternalId: 'tsk_owned',
+          taskStatus: 'completed',
+          taskResult: {
+            metadata: {
+              lane: 'video_creation',
+              videoType: 'normal',
+              videoEditingSource: {
+                aspectRatio: '16:9',
+                scenes: [
+                  {
+                    id: 'scene_1',
+                    sourceFileId: 'file_owned_video',
+                    sourceStartMs: 0,
+                    sourceEndMs: 8_000,
+                    audioGain: 2,
+                  },
+                ],
+              },
+            },
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'SOURCE_UNAVAILABLE', reason: 'invalid_metadata' });
+  });
+
   it('rejects regeneration provenance that points at another task', async () => {
     await expect(
       importOwned(
@@ -232,7 +262,9 @@ describe('video source import', () => {
   });
 
   it('imports a final-only MP4 as one non-regenerable scene', async () => {
-    const imported = await importOwned(source(), { probeDurationMs: async () => 12_500 });
+    const imported = await importOwned(source(), {
+      probeVideoMetadata: async () => ({ durationMs: 12_500, width: 1920, height: 1080 }),
+    });
 
     expect(imported).toMatchObject({
       sourceKind: 'upload',
@@ -250,6 +282,26 @@ describe('video source import', () => {
       },
       capabilities: { sceneRegeneration: false },
     });
+  });
+
+  it('preserves a portrait final-only video as a 9:16 edit document', async () => {
+    const imported = await importOwned(
+      source(),
+      {
+        probeVideoMetadata: async () => ({ durationMs: 12_500, width: 1080, height: 1920 }),
+      },
+    );
+
+    expect(imported.document.aspectRatio).toBe('9:16');
+    expect(imported.document.scenes[0]?.sourceEndMs).toBe(12_500);
+  });
+
+  it('maps a near-square final-only video to the closest supported 1:1 canvas', async () => {
+    const imported = await importOwned(source(), {
+      probeVideoMetadata: async () => ({ durationMs: 12_500, width: 1250, height: 1000 }),
+    });
+
+    expect(imported.document.aspectRatio).toBe('1:1');
   });
 
   it('fails closed when the backing object can no longer produce a preview', async () => {
