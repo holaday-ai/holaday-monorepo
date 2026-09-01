@@ -206,8 +206,11 @@ const CONTENT_PROMISE_NEGATION =
 const CONTENT_PROMISE_DOUBLE_NEGATION =
   /(?:不得|不能|不会|不可|不是|并非|绝非|没有|不应|无需|不要|不一定|未必)不$/;
 const CONTENT_PROMISE_POST_NEGATION = /^(?:不了|不到|不住|不能(?!(?:低于|少于)))/;
-const CONTENT_PROMISE_REVIEW_CONTEXT =
-  /^(?:(?:请|帮我|替我|给我|麻烦)(?:先|再)?){0,2}(?:分析|检查|审查|复盘|研究|评估)(?=.{0,72}(?:合同|条款|协议)).{0,48}(?:(?:包含|涉及|写有|写着|约定|提到|列明).{0,12}(?:保证|承诺|确保|保底)|(?:保证|承诺|确保|保底).{0,28}(?:合同|条款|协议))/;
+const CONTENT_PROMISE_REVIEW_START =
+  /^(?:(?:请|帮我|替我|给我|麻烦)(?:先|再)?){0,2}(?:分析|检查|审查|复盘|研究|评估)/;
+const CONTENT_PROMISE_CONTRACT_TERM = /(?:合同|条款|协议|约定)/;
+const CONTENT_PROMISE_REFERENCE_PREFIX =
+  /(?:包含|涉及|写有|写着|约定|提到|列明)(?:了|的)?$/;
 
 const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
   'image-prompt-reverse': [
@@ -656,21 +659,28 @@ function contentExecutionConflict(normalizedIntent: string): boolean {
   );
 }
 
-function hasUnnegatedContentPromise(normalizedIntent: string): boolean {
+function findUnnegatedContentPromises(
+  normalizedIntent: string,
+): Array<{ readonly index: number; readonly length: number }> {
+  const matches: Array<{ readonly index: number; readonly length: number }> = [];
   for (const match of normalizedIntent.matchAll(CONTENT_PROMISE_VERB)) {
     const prefix = normalizedIntent.slice(Math.max(0, match.index - 16), match.index);
-    const clause = normalizedIntent
+    const outcomeClause = normalizedIntent
       .slice(match.index + match[0].length, match.index + match[0].length + 18)
       .split(/(?:但是|但|然而|然后|同时|并且|再|保证|承诺|确保)/, 1)[0];
     if (
-      CONTENT_OUTCOME.test(clause) &&
+      CONTENT_OUTCOME.test(outcomeClause) &&
       !hasNegatedContentPromisePrefix(prefix) &&
-      !CONTENT_PROMISE_POST_NEGATION.test(clause)
+      !CONTENT_PROMISE_POST_NEGATION.test(outcomeClause)
     ) {
-      return true;
+      matches.push({ index: match.index, length: match[0].length });
     }
   }
-  return false;
+  return matches;
+}
+
+function hasUnnegatedContentPromise(normalizedIntent: string): boolean {
+  return findUnnegatedContentPromises(normalizedIntent).length > 0;
 }
 
 function hasUnexemptedContentPromise(normalizedIntent: string): boolean {
@@ -678,8 +688,26 @@ function hasUnexemptedContentPromise(normalizedIntent: string): boolean {
   const clauses = splitBoundaryClauses(normalizedIntent);
   return clauses.some(
     (clause) =>
-      hasUnnegatedContentPromise(clause) && !CONTENT_PROMISE_REVIEW_CONTEXT.test(clause),
+      findUnnegatedContentPromises(clause).some(
+        (promise) => !isReviewedContractPromise(clause, promise),
+      ),
   );
+}
+
+function isReviewedContractPromise(
+  clause: string,
+  promise: { readonly index: number; readonly length: number },
+): boolean {
+  if (
+    !CONTENT_PROMISE_REVIEW_START.test(clause) ||
+    !CONTENT_PROMISE_CONTRACT_TERM.test(clause)
+  ) {
+    return false;
+  }
+  const prefix = clause.slice(0, promise.index);
+  if (CONTENT_PROMISE_REFERENCE_PREFIX.test(prefix)) return true;
+  const suffix = clause.slice(promise.index + promise.length, promise.index + promise.length + 32);
+  return CONTENT_OUTCOME.test(suffix) && CONTENT_PROMISE_CONTRACT_TERM.test(suffix);
 }
 
 function hasNegatedContentPromisePrefix(prefix: string): boolean {
