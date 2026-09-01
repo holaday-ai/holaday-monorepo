@@ -328,6 +328,26 @@ describe('skills page state helpers', () => {
     },
   );
 
+  it.each([
+    ['推荐一只股票', 'a-share-market-briefing'],
+    ['录用候选人', 'resume-search-screening'],
+  ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
+    const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
+
+    expect(result.matches[0]?.skill.id).toBe(skillId);
+    expect(result.confidence).toBe('low');
+  });
+
+  it.each([
+    ['分析这只股票最近的异动', 'a-share-market-briefing'],
+    ['根据 JD 筛选候选人', 'resume-search-screening'],
+  ])('keeps a supported %s request strongly matched', (intent, skillId) => {
+    const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
+
+    expect(result.confidence).toBe('strong');
+    expect(result.matches[0]?.skill.id).toBe(skillId);
+  });
+
   it('falls back to available capabilities when preferred showcase entries are missing', () => {
     expect(
       pickCapabilityShowcase([{ id: 'first' }, { id: 'second' }]).map((skill) => skill.id),

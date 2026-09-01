@@ -68,6 +68,19 @@ const NON_SPECIFIC_INTENT_TERMS = new Set([
   '产品',
 ]);
 
+const INTENT_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
+  'a-share-market-briefing': [
+    /荐股/,
+    /(?:推荐|荐)(?:一只|几只|一些)?(?:股票|个股)/,
+    /(?:买入|卖出|下单).{0,6}(?:股票|个股|a股)/,
+    /(?:股票|个股|a股).{0,6}(?:买哪|买入|卖出|下单|值得买)/,
+  ],
+  'resume-search-screening': [
+    /(?:录用|淘汰|拒绝).{0,6}(?:候选人|人才)/,
+    /(?:候选人|人才).{0,6}(?:录用|淘汰|拒绝)/,
+  ],
+};
+
 const CONNECTOR_LABELS: Readonly<Record<string, string>> = {
   browser: '浏览器',
   douyin: '抖音',
@@ -279,11 +292,23 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
     .map(({ skill, score }) => ({ skill, score }));
   const topScore = matches[0]?.score ?? 0;
   const secondScore = matches[1]?.score ?? 0;
+  const boundaryConflict = matches[0]
+    ? intentViolatesSkillBoundary(matches[0].skill.id, normalizedIntent)
+    : false;
   const confidence =
-    normalizedIntent.length >= 2 && topScore >= 9 && topScore - secondScore >= 4
+    !boundaryConflict &&
+    normalizedIntent.length >= 2 &&
+    topScore >= 9 &&
+    topScore - secondScore >= 4
       ? 'strong'
       : 'low';
   return { confidence, matches };
+}
+
+function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string): boolean {
+  return (INTENT_BOUNDARY_CONFLICTS[skillId] ?? []).some((pattern) =>
+    pattern.test(normalizedIntent),
+  );
 }
 
 function scoreSkillIntent(
