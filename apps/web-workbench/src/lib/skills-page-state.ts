@@ -122,7 +122,10 @@ const STOCK_DECISION_CONFLICTS: readonly RegExp[] = [
   /(?:买入|卖出|投资)(?:建议|意见|结论)/,
 ];
 
-const HIRING_DECISION_EXPLANATION = /(?:分析|解释|说明|复盘|研究).{0,10}(?:为什么|为何|原因|依据|逻辑)/;
+const HIRING_DECISION_EXPLANATIONS: readonly RegExp[] = [
+  /(?:分析|解释|说明|复盘|研究).{0,10}(?:为什么|为何|原因|依据|逻辑)/,
+  /^(?:分析|解释|说明|复盘|研究).{0,10}(?:为什么|为何).{0,24}(?:决定|决策)?.{0,6}(?:录用|淘汰|拒绝).{0,10}(?:简历|候选人|人才)/,
+];
 const HIRING_DISCRIMINATION_AUDIT =
   /^(?:分析|解释|说明|复盘|研究|检查|审查|评估|识别).{0,40}(?:为什么|为何|原因|是否|有无|存在|做法|要求|规则|政策).{0,20}(?:歧视|合规|风险|问题|不招|只招|筛选|筛掉|过滤|过滤掉)/;
 const HIRING_DISCRIMINATION_ACTION_RISK_AUDIT =
@@ -139,7 +142,7 @@ const SPECIFIC_NATIONALITY_TERM =
 const SPECIFIC_HEALTH_STATUS_TERM =
   '(?:乙肝|乙型肝炎|甲肝|丙肝|艾滋病?|hiv(?:阳性)?|传染病|精神疾病|抑郁症|癌症|糖尿病|高血压)';
 const SENSITIVE_IDENTITY_TERM =
-  `(?:性别|性取向|同性恋|异性恋|双性恋|无性恋|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|\\d{2}后|民族|${SPECIFIC_ETHNICITY_TERM}|种族|${SPECIFIC_RACIAL_IDENTITY_TERM}|宗教|${SPECIFIC_RELIGIOUS_IDENTITY_TERM}|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|籍贯|出生地|国籍|外籍|${SPECIFIC_NATIONALITY_TERM}|政治面貌|中共党员|预备党员|党员|共青团员|团员|群众(?!演员)|民主党派|无党派人士|无党派|健康状况|疾病|${SPECIFIC_HEALTH_STATUS_TERM}|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚)`;
+  `(?:性别|性取向|同性恋|异性恋|双性恋|无性恋|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|\\d{2}后|民族|${SPECIFIC_ETHNICITY_TERM}|种族|${SPECIFIC_RACIAL_IDENTITY_TERM}|宗教|${SPECIFIC_RELIGIOUS_IDENTITY_TERM}|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|户口|籍贯|出生地|国籍|外籍|${SPECIFIC_NATIONALITY_TERM}|政治面貌|中共党员|预备党员|党员|共青团员|团员|群众(?!演员)|民主党派|无党派人士|无党派|健康状况|疾病|${SPECIFIC_HEALTH_STATUS_TERM}|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚)`;
 
 const HIRING_ANTI_DISCRIMINATION = new RegExp(
   `^(?:请)?(?:不要|禁止|不得|避免|防止)(?:再)?(?:基于|按照|根据|按|依据|以).{0,4}${SENSITIVE_IDENTITY_TERM}.{0,8}(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用)(?:候选人|人才|简历)?(?:并)?(?:检查|分析|说明|识别|评估)?(?:合规|歧视|风险|问题)?$`,
@@ -254,6 +257,7 @@ const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
     /(?:未经授权|自动|替我|代我).{0,10}(?:把|将)?.{0,14}(?:项目|任务|排期|里程碑|负责人).{0,8}(?:指派|分配|修改|调整|删除|移除|改成|改为)/,
     /(?:替|代替).{0,8}(?:团队|负责人|项目组).{0,8}(?:承诺|确认|决定).{0,12}(?:最终)?(?:排期|截止时间|交付时间)/,
     /(?:替我|代我|为我).{0,8}(?:向客户|对客户)?.{0,6}承诺.{0,12}(?:项目)?.{0,6}(?:最终)?(?:排期|截止时间|交付时间)/,
+    /(?:替我|代我|为我).{0,8}(?:向客户|对客户)?.{0,6}承诺.{0,12}(?:项目)?.{0,8}(?:今天|明天|后天|本周|下周|本月|下月|下个月|\\d{1,2}月\\d{1,2}[日号]?|\\d{1,3}(?:天|周|个月)(?:内)?)(?:前|内)?交付/,
     /^(?:把|将).{0,14}(?:项目|任务|排期|里程碑|负责人).{0,8}自动(?:指派|分配|修改|调整|删除|移除|改成|改为)/,
     /(?:项目|任务|排期|里程碑|负责人).{0,8}自动(?:指派|分配|修改|调整|删除|移除|改成|改为)/,
   ],
@@ -610,19 +614,32 @@ function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string):
     ) {
       return true;
     }
-    if (HIRING_DECISION_EXPLANATION.test(normalizedIntent)) return false;
-    return HIRING_DECISION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent));
+    return hasUnexemptedPatternConflict(
+      HIRING_DECISION_CONFLICTS,
+      HIRING_DECISION_EXPLANATIONS,
+      normalizedIntent,
+    );
   }
   return hasUnexemptedBoundaryConflict(skillId, normalizedIntent);
 }
 
 function hasUnexemptedBoundaryConflict(skillId: string, normalizedIntent: string): boolean {
-  const conflicts = SKILL_BOUNDARY_CONFLICTS[skillId] ?? [];
+  return hasUnexemptedPatternConflict(
+    SKILL_BOUNDARY_CONFLICTS[skillId] ?? [],
+    SKILL_BOUNDARY_SAFE_MENTIONS[skillId] ?? [],
+    normalizedIntent,
+  );
+}
+
+function hasUnexemptedPatternConflict(
+  conflicts: readonly RegExp[],
+  safeMentions: readonly RegExp[],
+  normalizedIntent: string,
+): boolean {
   const conflictRanges = conflicts.flatMap((pattern) =>
     findPatternOccurrences(pattern, normalizedIntent),
   );
   if (conflictRanges.length === 0) return false;
-  const safeMentions = SKILL_BOUNDARY_SAFE_MENTIONS[skillId] ?? [];
   const safeRanges = safeMentions.flatMap((pattern) =>
     findPatternOccurrences(pattern, normalizedIntent),
   );
