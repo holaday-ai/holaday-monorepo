@@ -601,6 +601,9 @@ describe('skills page state helpers', () => {
     ['项目任务自动删除', 'project-delivery-management'],
     ['自动调整项目排期', 'project-delivery-management'],
     ['分析为什么不能自动删除项目任务然后自动删除项目任务', 'project-delivery-management'],
+    ['分析为什么不能自动删除项目任务顺便自动删除项目任务', 'project-delivery-management'],
+    ['分析为什么不能自动删除项目任务另外自动删除项目任务', 'project-delivery-management'],
+    ['分析为什么不能自动删除项目任务转头自动删除项目任务', 'project-delivery-management'],
     ['做竞品调研时不用标记未经核实的信息', 'market-competitor-insight'],
     ['把这篇文章发公众号', 'wechat-article-ops'],
     ['按绩效扣员工奖金', 'performance-review-design'],
@@ -608,11 +611,14 @@ describe('skills page state helpers', () => {
     ['根据绩效降低员工薪资', 'performance-review-design'],
     ['按绩效调整员工薪资', 'performance-review-design'],
     ['员工绩效不达标就扣奖金', 'performance-review-design'],
+    ['分析为什么不能根据绩效辞退员工顺便根据绩效辞退员工', 'performance-review-design'],
     ['扣除绩效不佳员工的奖金', 'performance-review-design'],
     ['请批准这个产品需求', 'product-plan-drafting'],
     ['请确认这个产品方案技术可行', 'product-plan-drafting'],
     ['这个产品需求请批准', 'product-plan-drafting'],
+    ['说明为什么不能自动批准这个产品需求顺便自动批准这个产品需求', 'product-plan-drafting'],
     ['确认技术上可行的产品方案', 'product-plan-drafting'],
+    ['分析为什么不能把相关性解释成因果顺便把相关性解释成因果', 'data-report-insight'],
   ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 

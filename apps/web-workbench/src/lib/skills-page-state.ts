@@ -618,17 +618,38 @@ function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string):
 
 function hasUnexemptedBoundaryConflict(skillId: string, normalizedIntent: string): boolean {
   const conflicts = SKILL_BOUNDARY_CONFLICTS[skillId] ?? [];
-  if (!conflicts.some((pattern) => pattern.test(normalizedIntent))) return false;
-  const safeMentions = SKILL_BOUNDARY_SAFE_MENTIONS[skillId] ?? [];
-  if (!safeMentions.some((pattern) => pattern.test(normalizedIntent))) return true;
-
-  const clauses = splitBoundaryClauses(normalizedIntent);
-  if (clauses.length <= 1) return false;
-  return clauses.some(
-    (clause) =>
-      conflicts.some((pattern) => pattern.test(clause)) &&
-      !safeMentions.some((pattern) => pattern.test(clause)),
+  const conflictRanges = conflicts.flatMap((pattern) =>
+    findPatternOccurrences(pattern, normalizedIntent),
   );
+  if (conflictRanges.length === 0) return false;
+  const safeMentions = SKILL_BOUNDARY_SAFE_MENTIONS[skillId] ?? [];
+  const safeRanges = safeMentions.flatMap((pattern) =>
+    findPatternOccurrences(pattern, normalizedIntent),
+  );
+  if (safeRanges.length === 0) return true;
+
+  return conflictRanges.some(
+    (conflict) =>
+      !safeRanges.some(
+        (safe) => safe.start < conflict.end && conflict.start < safe.end,
+      ),
+  );
+}
+
+function findPatternOccurrences(
+  pattern: RegExp,
+  value: string,
+): Array<{ readonly start: number; readonly end: number }> {
+  const unanchoredSource = pattern.source.startsWith('^')
+    ? pattern.source.slice(1)
+    : pattern.source;
+  const source = unanchoredSource.replace(/\.\{(\d+),(\d+)\}(?!\?)/g, '.{$1,$2}?');
+  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
+  const matcher = new RegExp(source, flags);
+  return [...value.matchAll(matcher)].map((match) => ({
+    start: match.index,
+    end: match.index + match[0].length,
+  }));
 }
 
 function hasUnexemptedHiringDiscrimination(normalizedIntent: string): boolean {
