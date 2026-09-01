@@ -142,7 +142,7 @@ export function CapabilityCenterContent({
                     key={prompt}
                     type="button"
                     onClick={() => onStart(activeSkill, prompt)}
-                    className="group inline-flex min-h-10 items-center gap-2 rounded-full border border-[#E7D5DD] bg-white/85 px-3.5 py-2 text-left text-[12px] font-medium text-[#51454A] shadow-[0_4px_14px_rgba(79,52,64,0.05)] transition hover:-translate-y-0.5 hover:border-[#EA1F59]/30 hover:text-[#D41B51] hover:shadow-[0_8px_20px_rgba(234,31,89,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 motion-reduce:transform-none"
+                    className="group inline-flex min-h-11 items-center gap-2 rounded-full border border-[#E7D5DD] bg-white/85 px-3.5 py-2 text-left text-[12px] font-medium text-[#51454A] shadow-[0_4px_14px_rgba(79,52,64,0.05)] transition hover:-translate-y-0.5 hover:border-[#EA1F59]/30 hover:text-[#D41B51] hover:shadow-[0_8px_20px_rgba(234,31,89,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 motion-reduce:transform-none"
                   >
                     {prompt}
                     <ArrowRight
@@ -194,8 +194,11 @@ export function CapabilityCenterContent({
                 <span className="block text-[15px] font-semibold text-foreground">
                   {skill.name}
                 </span>
-                <span className="mt-1.5 line-clamp-2 block text-[12px] leading-5 text-muted-foreground">
-                  {skill.description}
+                <span className="mt-1.5 block text-[10px] font-semibold tracking-[0.04em] text-[#A36B7B]">
+                  示例结果
+                </span>
+                <span className="mt-1 line-clamp-2 block text-[12px] leading-5 text-muted-foreground">
+                  {skill.experience.exampleSummary}
                 </span>
                 <span className="mt-3 inline-flex items-center gap-1 text-[12px] font-medium text-[#8269A7]">
                   看示例与使用方式
@@ -299,6 +302,7 @@ export function CapabilityCenterContent({
                           type="button"
                           aria-label={`查看${skill.name}`}
                           title={`查看${skill.name}`}
+                          aria-pressed={skill.id === activeSkill.id}
                           onClick={() => onSelectSkill(skill.id)}
                           className="flex min-w-0 flex-1 items-center gap-3 rounded-[8px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/15"
                         >

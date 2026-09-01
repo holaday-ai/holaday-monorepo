@@ -92,7 +92,7 @@ describe('CapabilityCenterContent', () => {
     render(<CapabilityCenterContent {...baseProps} />);
 
     expect(screen.getByRole('heading', { level: 1, name: '能力中心' })).toBeTruthy();
-    expect(screen.getByText('示例结果')).toBeTruthy();
+    expect(screen.getAllByText('示例结果')).toHaveLength(3);
     expect(screen.getByText('销售额环比增长 18.7%，但复购率连续两周回落。')).toBeTruthy();
     expect(screen.getByText('你需要提供')).toBeTruthy();
     expect(screen.getByText('会交付什么')).toBeTruthy();
@@ -100,6 +100,10 @@ describe('CapabilityCenterContent', () => {
     expect(screen.getByText('边界说明')).toBeTruthy();
     expect(screen.getByText('表格')).toBeTruthy();
     expect(screen.getByText('数据库')).toBeTruthy();
+    expect(screen.getByText('围绕新品卖点安排 7 天内容节奏，并标出互动重点。')).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: '查看数据报表解读' }).getAttribute('aria-pressed'),
+    ).toBe('true');
   });
 
   it('starts from an explicit sample and lets the user switch the showcase capability', async () => {
