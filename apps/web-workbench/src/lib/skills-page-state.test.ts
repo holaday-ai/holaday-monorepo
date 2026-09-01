@@ -563,6 +563,11 @@ describe('skills page state helpers', () => {
     ['审查合同条款涉及的风险处理后保证小红书流量', 'contract-risk-review'],
     ['审查合同条款涉及风险还要保证小红书流量', 'contract-risk-review'],
     ['审查合同条款提到风险以后保证小红书流量', 'contract-risk-review'],
+    ['审查合同条款后保证小红书流量并签合同', 'contract-risk-review'],
+    ['审查合同条款以后保证小红书流量并签合同', 'contract-risk-review'],
+    ['审查合同条款最终保证小红书流量并签订合同', 'contract-risk-review'],
+    ['审查合同条款还要保证小红书流量并签协议', 'contract-risk-review'],
+    ['审查合同条款接下来保证小红书流量并签合同', 'contract-risk-review'],
   ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 

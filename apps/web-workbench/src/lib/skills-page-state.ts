@@ -707,7 +707,10 @@ function isReviewedContractPromise(
   const prefix = clause.slice(0, promise.index);
   if (CONTENT_PROMISE_REFERENCE_PREFIX.test(prefix)) return true;
   const suffix = clause.slice(promise.index + promise.length, promise.index + promise.length + 32);
-  return CONTENT_OUTCOME.test(suffix) && CONTENT_PROMISE_CONTRACT_TERM.test(suffix);
+  const referencedTermIndex = suffix.search(/的(?:合同|条款|协议|约定)/);
+  return (
+    referencedTermIndex >= 0 && CONTENT_OUTCOME.test(suffix.slice(0, referencedTermIndex))
+  );
 }
 
 function hasNegatedContentPromisePrefix(prefix: string): boolean {
