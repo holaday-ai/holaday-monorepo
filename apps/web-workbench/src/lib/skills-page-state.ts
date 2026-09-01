@@ -34,6 +34,31 @@ export interface SkillTaskDraft {
   readonly prompt: string;
 }
 
+export type SkillStartDecision = 'start' | 'enable-and-start' | 'blocked';
+
+const SHOWCASE_SKILL_IDS = [
+  'data-report-insight',
+  'social-media-strategy',
+  'contract-risk-review',
+] as const;
+
+const CONNECTOR_LABELS: Readonly<Record<string, string>> = {
+  browser: '浏览器',
+  douyin: '抖音',
+  xiaohongshu: '小红书',
+  'wechat-official-account': '微信公众号',
+  'image-understanding': '图片理解',
+  'image-generation': '图片生成',
+  'a-share-market-data': 'A 股行情数据',
+  'document-parser': '文档解析',
+  'web-search': '网页搜索',
+  spreadsheet: '表格',
+  database: '数据库',
+  'recruiting-sites': '招聘网站',
+};
+
+const DEFAULT_SKILL_BOUNDARY = '执行前请确认输入材料、授权范围和最终用途。';
+
 const PLAN_LABELS: Record<string, string> = {
   free: '体验版',
   basic: '基础版',
@@ -160,15 +185,48 @@ export function skillCardUsageHint(options: {
 
 export function skillTaskDraft(
   skill: Pick<UiSkill, 'id' | 'name' | 'description'>,
+  starterPrompt?: string,
 ): SkillTaskDraft {
   const id = safeSkillText(skill.id);
   const name = safeSkillText(skill.name) || '技能';
+  const prompt = safeSkillText(starterPrompt);
   return {
     skillId: id,
     skillName: name,
     skillSource: 'manual',
-    prompt: `@${name} `,
+    prompt: prompt ? `@${name} ${prompt}` : `@${name} `,
   };
+}
+
+export function skillStartDecision(options: {
+  readonly enabled: boolean;
+  readonly enabledCount: number;
+  readonly cap: number;
+}): SkillStartDecision {
+  if (options.enabled) return 'start';
+  if (options.cap <= 0 || options.enabledCount >= options.cap) return 'blocked';
+  return 'enable-and-start';
+}
+
+export function pickCapabilityShowcase<TSkill extends { readonly id: string }>(
+  skills: readonly TSkill[],
+): readonly TSkill[] {
+  const byId = new Map(skills.map((skill) => [skill.id, skill]));
+  const selected: TSkill[] = [];
+  for (const id of SHOWCASE_SKILL_IDS) {
+    const skill = byId.get(id);
+    if (skill) selected.push(skill);
+  }
+  for (const skill of skills) {
+    if (selected.length >= SHOWCASE_SKILL_IDS.length) break;
+    if (!selected.some((item) => item.id === skill.id)) selected.push(skill);
+  }
+  return selected;
+}
+
+export function skillConnectorLabel(connectorId: string): string {
+  const id = safeSkillText(connectorId);
+  return CONNECTOR_LABELS[id] ?? id;
 }
 
 export function normalizeSkillRows(value: unknown): UiSkill[] {
@@ -207,7 +265,19 @@ function normalizeSkillRow(value: unknown): UiSkill | null {
     aliases: normalizeTextArray(value.aliases),
     maturity: normalizeSkillMaturity(value.maturity),
     connectors: normalizeTextArray(value.connectors),
+    experience: normalizeSkillExperience(value.experience),
     enabled: value.enabled === true,
+  };
+}
+
+function normalizeSkillExperience(value: unknown): UiSkill['experience'] {
+  const experience = isRecord(value) ? value : {};
+  return {
+    starterPrompts: normalizeTextArray(experience.starterPrompts).slice(0, 3),
+    requiredInputs: normalizeTextArray(experience.requiredInputs),
+    deliverables: normalizeTextArray(experience.deliverables),
+    boundary: safeSkillText(experience.boundary) || DEFAULT_SKILL_BOUNDARY,
+    exampleSummary: safeSkillText(experience.exampleSummary) || '暂无示例说明',
   };
 }
 

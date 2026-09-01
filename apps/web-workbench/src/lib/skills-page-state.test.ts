@@ -3,9 +3,12 @@ import {
   groupSkillsByCategory,
   normalizeSkillRows,
   normalizeSkillToggleResponse,
+  pickCapabilityShowcase,
   skillCardBadge,
   skillCardUsageHint,
+  skillConnectorLabel,
   skillTaskDraft,
+  skillStartDecision,
   skillLimitBannerCopy,
   skillLimitMessage,
   skillLoadErrorCopy,
@@ -193,6 +196,63 @@ describe('skills page state helpers', () => {
       skillSource: 'manual',
       prompt: '@技能 ',
     });
+    expect(
+      skillTaskDraft(
+        {
+          id: 'data-report-insight',
+          name: '数据报表解读',
+          description: '表格分析',
+        },
+        ' 分析这份周报并找出异常 ',
+      ),
+    ).toEqual({
+      skillId: 'data-report-insight',
+      skillName: '数据报表解读',
+      skillSource: 'manual',
+      prompt: '@数据报表解读 分析这份周报并找出异常',
+    });
+  });
+
+  it('decides whether a capability can start immediately, must enable first, or is blocked', () => {
+    expect(skillStartDecision({ enabled: true, enabledCount: 5, cap: 5 })).toBe('start');
+    expect(skillStartDecision({ enabled: false, enabledCount: 4, cap: 5 })).toBe(
+      'enable-and-start',
+    );
+    expect(skillStartDecision({ enabled: false, enabledCount: 5, cap: 5 })).toBe(
+      'blocked',
+    );
+    expect(skillStartDecision({ enabled: false, enabledCount: 0, cap: 0 })).toBe(
+      'blocked',
+    );
+  });
+
+  it('selects the preferred showcase capabilities without depending on server ordering', () => {
+    const showcase = pickCapabilityShowcase([
+      { id: 'contract-risk-review' },
+      { id: 'douyin-live-ops' },
+      { id: 'data-report-insight' },
+      { id: 'social-media-strategy' },
+    ]);
+
+    expect(showcase.map((skill) => skill.id)).toEqual([
+      'data-report-insight',
+      'social-media-strategy',
+      'contract-risk-review',
+    ]);
+  });
+
+  it('falls back to available capabilities when preferred showcase entries are missing', () => {
+    expect(
+      pickCapabilityShowcase([{ id: 'first' }, { id: 'second' }]).map(
+        (skill) => skill.id,
+      ),
+    ).toEqual(['first', 'second']);
+  });
+
+  it('uses honest connector labels without implying account connection state', () => {
+    expect(skillConnectorLabel('browser')).toBe('浏览器');
+    expect(skillConnectorLabel('spreadsheet')).toBe('表格');
+    expect(skillConnectorLabel('new-connector')).toBe('new-connector');
   });
 
   it('normalizes skill list payloads before rendering', () => {
@@ -207,6 +267,13 @@ describe('skills page state helpers', () => {
           aliases: [' 社媒 ', ''],
           maturity: 'workflow',
           connectors: [' browser ', ''],
+          experience: {
+            starterPrompts: [' 示例一 ', '示例二', '示例三', '超出上限'],
+            requiredInputs: [' 文件 ', ''],
+            deliverables: [' 报告 ', ''],
+            boundary: ' 需要人工确认 ',
+            exampleSummary: ' 示例摘要 ',
+          },
           enabled: true,
         },
         {
@@ -231,9 +298,16 @@ describe('skills page state helpers', () => {
         category: '内容运营',
         description: '写作',
         aliases: ['社媒'],
-        maturity: 'workflow',
-        connectors: ['browser'],
-        enabled: true,
+          maturity: 'workflow',
+          connectors: ['browser'],
+          experience: {
+            starterPrompts: ['示例一', '示例二', '示例三'],
+            requiredInputs: ['文件'],
+            deliverables: ['报告'],
+            boundary: '需要人工确认',
+            exampleSummary: '示例摘要',
+          },
+          enabled: true,
       },
       {
         id: 'loose',
@@ -242,9 +316,16 @@ describe('skills page state helpers', () => {
         category: '内容运营',
         description: '暂无技能说明',
         aliases: [],
-        maturity: 'template',
-        connectors: [],
-        enabled: false,
+          maturity: 'template',
+          connectors: [],
+          experience: {
+            starterPrompts: [],
+            requiredInputs: [],
+            deliverables: [],
+            boundary: '执行前请确认输入材料、授权范围和最终用途。',
+            exampleSummary: '暂无示例说明',
+          },
+          enabled: false,
       },
     ]);
   });

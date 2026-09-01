@@ -247,6 +247,13 @@ export interface UiSkill {
   aliases: readonly string[];
   maturity: 'template' | 'workflow' | 'connected';
   connectors: readonly string[];
+  experience: {
+    starterPrompts: readonly string[];
+    requiredInputs: readonly string[];
+    deliverables: readonly string[];
+    boundary: string;
+    exampleSummary: string;
+  };
   enabled: boolean;
 }
 

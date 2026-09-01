@@ -87,6 +87,22 @@ describe('skills router plan limits', () => {
     });
     expect(first.aliases).toContain('抖音');
     expect(first.connectors).toContain('douyin');
+    expect(first.experience).toEqual({
+      starterPrompts: [
+        '复盘这场直播，找出流失点和下一场优化动作',
+        '为这个产品写一份 60 秒直播讲解脚本',
+        '规划未来 7 天的直播与短视频选题',
+      ],
+      requiredInputs: ['直播回放或数据截图', '产品与目标受众信息'],
+      deliverables: ['复盘结论与问题清单', '下一轮脚本或运营计划'],
+      boundary: '不会代替平台发布、投流或承诺销量；关键数据缺失时会标注待确认。',
+      exampleSummary: '从直播数据和内容中提炼流失原因、有效话术与下一场行动。',
+    });
+    expect(
+      buildSkillListRows([]).every(
+        (skill) => skill.experience.starterPrompts.length === 3,
+      ),
+    ).toBe(true);
     expect('icon' in first).toBe(false);
   });
 
