@@ -113,7 +113,7 @@ const HIRING_DISCRIMINATION_CONFLICTS: readonly RegExp[] = [
   new RegExp(
     `(?:筛掉|过滤掉|排除|拒绝|淘汰|不招|不录用|不要)(?:招聘|录用|选择|筛选|要)?${SENSITIVE_IDENTITY_TERM}`,
   ),
-  new RegExp(`优先(?:考虑|招聘|录用|选择|筛选|推荐)?${SENSITIVE_IDENTITY_TERM}`),
+  new RegExp(`优先(?:考虑|面试|邀约|招聘|录用|选择|筛选|推荐)?${SENSITIVE_IDENTITY_TERM}`),
   new RegExp(
     `${SENSITIVE_IDENTITY_TERM}(?:候选人|人才|简历)?.{0,4}(?:优先(?:招聘|录用|选择|筛选)?|不要|排除|拒绝|淘汰|不招|不录用)`,
   ),
@@ -131,7 +131,7 @@ const CONTENT_EXECUTION_SKILL_IDS = new Set([
 ]);
 
 const CONTENT_UNAMBIGUOUS_EXECUTION_CONFLICTS: readonly RegExp[] = [
-  /(?:并|然后|再|之后)(?:直接|自动|马上|立即)?(?:发布|发表|上线|上传|推送|发到|发至|发出去)/,
+  /(?:并|然后|再|之后|后)(?:仍然|仍|还|继续|一键|直接|自动|马上|立即)?(?:发布|发表|上线|上传|推送|发到|发至|发出去)/,
   /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我|自动)(?:直接|自动|马上|立即|去)?(?:发布|发表|上线|上传|发到|发至)/,
   /(?:帮我|替我|给我|请|代我|为我)(?:把|将)?.{0,24}(?:发布出去|发出去|发到|发至|发表|上线|上传到?|推送)/,
   /^(?:把|将).{0,24}(?:发布出去|发出去|发到|发至|发表|上线|上传到?|推送)/,
@@ -162,6 +162,7 @@ const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
   'contract-risk-review': [
     /(?:出具|提供|给出).{0,6}(?:正式)?法律意见/,
     /(?:代替|替代).{0,6}(?:律师|法律顾问).{0,6}(?:判断|决定|意见|签字|审核)/,
+    /(?:当成|视为|作为|等同于).{0,8}(?:律师)?(?:正式)?(?:法律)?意见/,
   ],
   'market-competitor-insight': [
     /(?:无法核实|未核实|没有核实|未经核实).{0,16}(?:直接)?(?:写成|当成|视为|作为).{0,4}(?:事实|结论)/,
@@ -177,6 +178,7 @@ const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
     /(?:替|代替).{0,8}(?:研发|技术团队).{0,8}(?:确认|评估|决定).{0,12}(?:技术)?可行/,
     /(?:产品|需求|方案).{0,12}(?:后|然后|再).{0,8}(?:替我|代我|直接)?(?:拍板|批准|通过)/,
     /(?:直接|自动)(?:认定|确认|决定).{0,12}(?:产品|需求|方案).{0,8}(?:技术)?可行/,
+    /(?:产品|功能|这个)?.{0,8}(?:需求|方案).{0,8}(?:盖章|拍板)(?:通过|放行)/,
   ],
   'project-delivery-management': [
     /(?:未经授权|自动|替我|代我).{0,10}(?:指派|分配|修改).{0,14}(?:项目|任务|负责人)/,
@@ -189,15 +191,18 @@ const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
     /(?:根据|按照).{0,6}(?:绩效|考核).{0,10}(?:直接|自动)(?:决定|执行).{0,8}(?:涨薪|降薪|辞退|解雇|晋升|降职|奖金|薪酬)/,
     /(?:绩效|考核).{0,12}(?:后|然后|再).{0,6}(?:直接)?(?:决定|执行).{0,8}(?:涨薪|降薪|辞退|解雇|晋升|降职|奖金|薪酬)/,
     /(?:根据|按照).{0,6}(?:绩效|考核).{0,10}(?:给|让).{0,4}(?:员工|人员)?.{0,4}(?:涨薪|降薪|辞退|解雇|晋升|降职|奖金|薪酬)/,
+    /(?:绩效|考核).{0,12}(?:后|然后|再).{0,8}(?:把|将)?.{0,4}(?:员工|人员).{0,4}(?:开了|辞退|解雇)/,
   ],
 };
 
 const SKILL_BOUNDARY_SAFE_MENTIONS: Readonly<Record<string, readonly RegExp[]>> = {
   'image-prompt-reverse': [
     /^(?:分析|说明|解释|检查|审查|评估)?(?:为什么)?(?:不|不能|无法|难以|不应|不要|无需|不可能).{0,20}(?:保证|承诺|确保).{0,24}(?:复现|还原|一模一样|一致)/,
+    /^(?:分析|检查|审查|评估).{0,30}(?:保证|承诺|确保).{0,24}(?:复现|还原|一模一样|一致).{0,12}(?:风险|问题|后果|是否可行)/,
   ],
   'contract-risk-review': [
     /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:不能|无法|不构成|不应).{0,8}(?:替代|代替|作为).{0,8}(?:律师|法律意见)/,
+    /^(?:分析|检查|审查|评估).{0,24}(?:出具|提供|给出).{0,8}(?:正式)?法律意见.{0,16}(?:是否超出|风险|合规|边界|范围|问题)/,
   ],
   'market-competitor-insight': [
     /^(?:分析|说明|解释|检查|审查|评估).{0,36}(?:是否|有没有|有无).{0,12}(?:写成|当成|标注|核实|验证)/,
@@ -207,12 +212,14 @@ const SKILL_BOUNDARY_SAFE_MENTIONS: Readonly<Record<string, readonly RegExp[]>> 
   ],
   'product-plan-drafting': [
     /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:为什么)?(?:不能|无法|不应|不要).{0,8}(?:自动|替我|代我|直接)?(?:批准|通过|确认|认定|拍板)/,
+    /^(?:分析|检查|审查|评估).{0,24}(?:自动|替我|代我|直接)?(?:批准|通过|确认|认定|拍板).{0,18}(?:为什么|风险|合规|边界|问题|后果)/,
   ],
   'project-delivery-management': [
     /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:为什么)?(?:不能|无法|不应|不要).{0,10}(?:替|代替|自动|未经授权).{0,20}(?:承诺|指派|分配|修改)/,
   ],
   'performance-review-design': [
     /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:为什么)?(?:不能|无法|不应|不要).{0,14}(?:根据|按照)?.{0,8}(?:绩效|考核).{0,12}(?:决定|执行|涨薪|降薪|辞退|晋升)/,
+    /^(?:分析|检查|审查|评估).{0,24}(?:根据|按照)?.{0,8}(?:绩效|考核).{0,12}(?:直接)?(?:决定|执行|涨薪|降薪|辞退|晋升).{0,16}(?:风险|合规|边界|问题|后果)/,
   ],
 };
 
@@ -443,9 +450,8 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
     .map(({ skill, score }) => ({ skill, score }));
   const topScore = matches[0]?.score ?? 0;
   const secondScore = matches[1]?.score ?? 0;
-  const boundaryConflict = matches.some(
-    (match) =>
-      match.score >= 9 && intentViolatesSkillBoundary(match.skill.id, normalizedIntent),
+  const boundaryConflict = matches.some((match) =>
+    intentViolatesSkillBoundary(match.skill.id, normalizedIntent),
   );
   const confidence =
     !boundaryConflict &&
@@ -489,10 +495,23 @@ function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string):
     if (HIRING_DECISION_EXPLANATION.test(normalizedIntent)) return false;
     return HIRING_DECISION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent));
   }
+  return hasUnexemptedBoundaryConflict(skillId, normalizedIntent);
+}
+
+function hasUnexemptedBoundaryConflict(skillId: string, normalizedIntent: string): boolean {
   const conflicts = SKILL_BOUNDARY_CONFLICTS[skillId] ?? [];
   if (!conflicts.some((pattern) => pattern.test(normalizedIntent))) return false;
-  return !(SKILL_BOUNDARY_SAFE_MENTIONS[skillId] ?? []).some((pattern) =>
-    pattern.test(normalizedIntent),
+  const safeMentions = SKILL_BOUNDARY_SAFE_MENTIONS[skillId] ?? [];
+  if (!safeMentions.some((pattern) => pattern.test(normalizedIntent))) return true;
+
+  const clauses = normalizedIntent
+    .split(/(?:然后|之后|随后|同时|并且|但是|但|再|并|后)/)
+    .filter(Boolean);
+  if (clauses.length <= 1) return false;
+  return clauses.some(
+    (clause) =>
+      conflicts.some((pattern) => pattern.test(clause)) &&
+      !safeMentions.some((pattern) => pattern.test(clause)),
   );
 }
 

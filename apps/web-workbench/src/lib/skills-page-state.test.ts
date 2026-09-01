@@ -428,6 +428,19 @@ describe('skills page state helpers', () => {
     ['检查招聘规则后筛选女性候选人', 'resume-search-screening'],
     ['看完绩效后决定给员工涨薪', 'performance-review-design'],
     ['按照绩效给员工涨薪', 'performance-review-design'],
+    ['说明不能保证图片完全复现，然后保证生成图和原图一模一样', 'image-prompt-reverse'],
+    ['分析这份合同为什么不能替代律师，然后出具正式法律意见', 'contract-risk-review'],
+    ['检查未经核实的竞品信息是否写成事实，然后不要标注待确认', 'market-competitor-insight'],
+    ['说明相关性不能证明因果，然后根据报表相关性断定因果', 'data-report-insight'],
+    ['说明不能自动批准需求，然后自动批准这个产品需求', 'product-plan-drafting'],
+    ['说明不能替团队承诺排期，然后替团队承诺最终排期', 'project-delivery-management'],
+    ['分析不能根据绩效决定涨薪，然后按照绩效给员工涨薪', 'performance-review-design'],
+    ['规划发布节奏后再一键推送公众号文章', 'wechat-article-ops'],
+    ['分析效果后仍然发布这篇小红书笔记', 'xiaohongshu-seeding-ops'],
+    ['检查歧视风险后优先面试男性候选人', 'resume-search-screening'],
+    ['把合同审查结果当成律师正式意见', 'contract-risk-review'],
+    ['给这个产品需求盖章放行', 'product-plan-drafting'],
+    ['看绩效后把员工开了', 'performance-review-design'],
   ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
@@ -478,6 +491,10 @@ describe('skills page state helpers', () => {
     ['说明为什么不能自动批准这个产品需求', 'product-plan-drafting'],
     ['说明为什么不能替团队承诺项目最终排期', 'project-delivery-management'],
     ['分析为什么不能根据绩效直接决定员工涨薪', 'performance-review-design'],
+    ['分析保证完全还原图片会有什么风险', 'image-prompt-reverse'],
+    ['评估出具正式法律意见是否超出合同审查范围', 'contract-risk-review'],
+    ['分析自动批准产品需求为什么有风险', 'product-plan-drafting'],
+    ['评估根据绩效直接决定涨薪的合规风险', 'performance-review-design'],
   ])('keeps a supported %s request strongly matched', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
@@ -494,6 +511,15 @@ describe('skills page state helpers', () => {
     expect(result.matches[0]?.skill.id).toBe('a-share-market-briefing');
     expect(result.matches.find((match) => match.skill.id === 'contract-risk-review')?.score).toBeGreaterThanOrEqual(9);
     expect(result.confidence).toBe('low');
+  });
+
+  it.each([
+    '设计绩效评估表和评分规则然后出具正式法律意见',
+    '设计绩效评估表和评分规则，然后把未经核实的竞品数据直接当成事实',
+  ])('checks boundary conflicts even when their candidate score is low: %s', (intent) => {
+    expect(matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent).confidence).toBe(
+      'low',
+    );
   });
 
   it('falls back to available capabilities when preferred showcase entries are missing', () => {
