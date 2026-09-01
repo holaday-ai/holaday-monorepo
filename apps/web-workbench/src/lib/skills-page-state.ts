@@ -86,6 +86,17 @@ const STOCK_DECISION_CONFLICTS: readonly RegExp[] = [
 
 const HIRING_DECISION_EXPLANATION = /(?:分析|解释|说明|复盘|研究).{0,10}(?:为什么|为何|原因|依据|逻辑)/;
 
+const SENSITIVE_IDENTITY_TERM =
+  '(?:性别|年龄|民族|种族|宗教|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|籍贯|国籍|政治面貌|健康状况|疾病|男性|女性|男士|女士|孕妇|已婚|未婚)';
+
+const HIRING_DISCRIMINATION_CONFLICTS: readonly RegExp[] = [
+  new RegExp(
+    `(?:基于|按照|根据|按|依据|以).{0,4}${SENSITIVE_IDENTITY_TERM}.{0,8}(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用)`,
+  ),
+  new RegExp(`(?:只招|只要|仅限|只选|优先|排除|不要|拒绝).{0,6}${SENSITIVE_IDENTITY_TERM}`),
+  new RegExp(`${SENSITIVE_IDENTITY_TERM}.{0,6}(?:优先|排除|不要|拒绝|淘汰|录用)`),
+];
+
 const HIRING_DIRECT_DECISION_CONFLICTS: readonly RegExp[] = [
   /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我)(?:直接|最终|马上|立即|决定|选择)?(?:录用|淘汰|拒绝)/,
   /(?:帮我|替我|给我|请|直接|代我|为我)(?:直接|最终)?(?:选择|选|挑)(?:一位|一个|几位|一些)?(?:候选人|人才).{0,4}(?:录用|淘汰|拒绝)/,
@@ -327,6 +338,9 @@ function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string):
     return STOCK_DECISION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent));
   }
   if (skillId === 'resume-search-screening') {
+    if (HIRING_DISCRIMINATION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent))) {
+      return true;
+    }
     if (HIRING_DIRECT_DECISION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent))) {
       return true;
     }

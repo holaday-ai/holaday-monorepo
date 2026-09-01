@@ -344,8 +344,11 @@ describe('skills page state helpers', () => {
     ['给我决定录用哪个候选人', 'resume-search-screening'],
     ['帮我选一位候选人录用', 'resume-search-screening'],
     ['解释原因后直接录用这个候选人', 'resume-search-screening'],
+    ['分析为什么候选人被拒绝，然后直接录用他', 'resume-search-screening'],
     ['分析为什么应该录用这个候选人并替我直接录用他', 'resume-search-screening'],
     ['录用候选人并解释原因', 'resume-search-screening'],
+    ['基于性别筛选候选人', 'resume-search-screening'],
+    ['只招男性候选人', 'resume-search-screening'],
   ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
@@ -358,9 +361,11 @@ describe('skills page state helpers', () => {
     ['分析为什么机构买入这只股票', 'a-share-market-briefing'],
     ['解释这只股票出现买入信号的原因', 'a-share-market-briefing'],
     ['分析买入后这只股票的走势', 'a-share-market-briefing'],
+    ['分析股票买入卖出成交数据', 'a-share-market-briefing'],
     ['根据 JD 筛选候选人', 'resume-search-screening'],
     ['分析为什么这个候选人被拒绝', 'resume-search-screening'],
     ['解释候选人被拒绝后的改进方向', 'resume-search-screening'],
+    ['检查招聘要求是否存在性别歧视', 'resume-search-screening'],
   ])('keeps a supported %s request strongly matched', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
