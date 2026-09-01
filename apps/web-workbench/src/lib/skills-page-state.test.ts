@@ -556,6 +556,10 @@ describe('skills page state helpers', () => {
     ['绝非不保证小红书流量', 'xiaohongshu-seeding-ops'],
     ['没有不保证抖音视频流量', 'douyin-live-ops'],
     ['审查合同条款然后保证小红书流量', 'contract-risk-review'],
+    ['审查合同条款最终保证小红书流量', 'contract-risk-review'],
+    ['审查合同条款以后保证小红书流量', 'contract-risk-review'],
+    ['审查合同条款还要保证小红书流量', 'contract-risk-review'],
+    ['审查合同条款接下来保证小红书流量', 'contract-risk-review'],
   ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
@@ -609,6 +613,7 @@ describe('skills page state helpers', () => {
     ['审查合同并标出风险', 'contract-risk-review'],
     ['审查保证销量条款的合同', 'contract-risk-review'],
     ['审查一份包含保证小红书流量的合同条款', 'contract-risk-review'],
+    ['审查保证小红书流量的合同条款', 'contract-risk-review'],
     ['根据公开信息做竞品分析并标记待确认', 'market-competitor-insight'],
     ['分析报表的相关性并说明不能证明因果', 'data-report-insight'],
     ['整理产品需求并生成 PRD 初稿', 'product-plan-drafting'],
