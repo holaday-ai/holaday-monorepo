@@ -64,6 +64,7 @@ const NON_SPECIFIC_INTENT_TERMS = new Set([
   '市场',
   '数据',
   '内容',
+  '异常',
   '项目',
   '产品',
 ]);
@@ -79,7 +80,8 @@ const STOCK_DECISION_CONFLICTS: readonly RegExp[] = [
   /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我)(?:直接|立即|马上|执行|决定|去)?交易(?:这只|那只|该只|某只)?(?:股票|个股|a股)/,
   /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我)(?:直接|立即|马上|执行|决定|去|做|进行)?交易(?!的?(?:量|数据|记录|明细|统计|分析|信号|复盘|历史|原因|逻辑|影响|风险|趋势|回测|研究))/,
   /(?:执行|进行)(?:股票|个股|a股)?交易(?!的?(?:量|数据|记录|明细|统计|分析|信号|复盘|历史|原因|逻辑|影响|风险|趋势|回测|研究))/,
-  /把.{0,8}(?:股票|个股|a股).{0,4}(?:买入|卖出|买下|购买|购入|卖掉|抛掉|抛售|下单|清仓|建仓|加仓|减仓)/,
+  /把.{0,8}(?:股票|个股|a股).{0,4}(?:买入|卖出|买下|购买|购入|卖掉|抛掉|抛售|出掉|下单|清仓|建仓|加仓|减仓)/,
+  /(?:帮我|替我|给我|代我|为我).{0,6}(?:炒|炒作).{0,4}(?:股票|个股|a股)/,
   /^(?:买入|卖出|买|卖|下单)(?:这只|那只|该只|某只|一只|几只|一些)?(?:股票|个股|a股)/,
   /^(?:清仓|加仓|减仓|建仓|卖掉|抛掉|抛售|购买|购入|买进|交易)(?:这只|那只|该只|某只|一只|几只|一些)?(?:股票|个股|a股)/,
   /^下单(?:买入|卖出|买|卖)?(?:这只|那只|该只|某只|一只|几只|一些)?(?:股票|个股|a股)/,
@@ -117,6 +119,10 @@ const HIRING_DISCRIMINATION_CONFLICTS: readonly RegExp[] = [
   ),
 ];
 
+const HIRING_MIXED_DISCRIMINATION_ACTION = new RegExp(
+  `(?:然后|之后|再|完成后|检查后|分析后|规则后).{0,10}(?:只招|只要|仅限|只选|只筛选|仅筛选|只录用|筛选|过滤|挑选|选择|录用|招聘|优先考虑).{0,6}${SENSITIVE_IDENTITY_TERM}`,
+);
+
 const CONTENT_EXECUTION_SKILL_IDS = new Set([
   'douyin-live-ops',
   'xiaohongshu-seeding-ops',
@@ -130,6 +136,7 @@ const CONTENT_UNAMBIGUOUS_EXECUTION_CONFLICTS: readonly RegExp[] = [
   /(?:帮我|替我|给我|请|代我|为我)(?:把|将)?.{0,24}(?:发布出去|发出去|发到|发至|发表|上线|上传到?|推送)/,
   /^(?:把|将).{0,24}(?:发布出去|发出去|发到|发至|发表|上线|上传到?|推送)/,
   /^(?:发一下|推送)(?:这篇|这条|该篇|该条|内容|文章|笔记|视频)/,
+  /^(?:一键|直接|立即|马上|自动)?推送(?:这篇|这条|该篇|该条|内容|文章|笔记|视频)/,
   /(?:在|到).{0,10}(?:上|平台)(?:发布|发表|上线|上传)/,
   /(?:写好|改好|准备好|完成)(?:之后|后|然后)(?:直接|自动)?(?:发布|发表|上线|上传|发到|发至)/,
   /^(?:投流|投放广告|投广告|买量|投放)(?:这篇|这条|该篇|该条|内容|文章|笔记|视频|抖音|小红书)/,
@@ -140,40 +147,72 @@ const CONTENT_UNAMBIGUOUS_EXECUTION_CONFLICTS: readonly RegExp[] = [
 
 const CONTENT_LEADING_EXECUTION =
   /^(?:一键|直接|立即|马上|自动)?(?:发布|发表|上线|上传)(?:全平台)?(?:这篇|这条|该篇|该条|内容|文章|笔记|视频)/;
-const CONTENT_PLANNING_OR_ANALYSIS =
-  /(?:怎么|如何).{0,6}(?:规划|计划|安排)|(?:规划|计划|策略|节奏|方案|建议|分析|复盘|数据|效果|预算|检查清单|注意事项)/;
-const CONTENT_PROMISE_VERB = /(?:保证|承诺|确保)/g;
+const CONTENT_LEADING_PLANNING =
+  /^(?:发布内容|发布).{0,8}(?:怎么|如何)(?:规划|计划|安排)|^发布节奏.{0,8}(?:规划|计划|安排)/;
+const CONTENT_PROMISE_VERB = /(?:保证|承诺|确保|保底)/g;
 const CONTENT_OUTCOME = /(?:销量|流量|涨粉|转化|播放量|爆款|热门|热搜)/;
 const CONTENT_PROMISE_NEGATION =
   /(?:无法|不能|难以|不应|不要|无需|不可能)(?:百分百|百分之百|100|完全|绝对|真正|一定|有效)?$/;
 
 const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
   'image-prompt-reverse': [
-    /(?:保证|承诺|确保).{0,16}(?:完全|一模一样|百分百|100).{0,8}(?:复现|还原|一致)/,
-    /(?:未授权|没有授权|未经授权|无授权).{0,12}(?:直接)?(?:商用|商业使用|用于商业)/,
+    /(?:保证|承诺|确保).{0,24}(?:完全复现|完全还原|一模一样|百分百一致|100一致)/,
+    /(?:未授权|没有授权|未经授权|未经许可|没有许可|无授权).{0,16}(?:直接|拿去)?(?:商用|商业使用|用于商业)/,
   ],
   'contract-risk-review': [
-    /(?:替我|代我|给我|请).{0,10}(?:出具|提供|给出).{0,6}(?:正式)?法律意见/,
+    /(?:出具|提供|给出).{0,6}(?:正式)?法律意见/,
     /(?:代替|替代).{0,6}(?:律师|法律顾问).{0,6}(?:判断|决定|意见|签字|审核)/,
   ],
   'market-competitor-insight': [
     /(?:无法核实|未核实|没有核实|未经核实).{0,16}(?:直接)?(?:写成|当成|视为|作为).{0,4}(?:事实|结论)/,
+    /(?:无法核实|没法验证|无法验证|未核实|未经核实).{0,18}(?:不要|无需|不用|不必).{0,6}(?:标注|注明|说明).{0,4}(?:待确认|推断|未核实)/,
   ],
   'data-report-insight': [
     /(?:相关性|相关关系).{0,16}(?:直接)?(?:写成|当成|视为|认定为).{0,4}(?:因果|因果关系|因果结论)/,
     /(?:相关性|相关关系).{0,12}直接(?:证明|得出).{0,4}(?:因果|因果关系|因果结论)/,
+    /(?:相关性|相关关系).{0,12}(?:断定|认定|确定).{0,4}(?:因果|因果关系|因果结论)/,
   ],
   'product-plan-drafting': [
     /(?:自动|替我|代我|直接).{0,8}(?:批准|通过).{0,10}(?:需求|方案)/,
     /(?:替|代替).{0,8}(?:研发|技术团队).{0,8}(?:确认|评估|决定).{0,12}(?:技术)?可行/,
+    /(?:产品|需求|方案).{0,12}(?:后|然后|再).{0,8}(?:替我|代我|直接)?(?:拍板|批准|通过)/,
+    /(?:直接|自动)(?:认定|确认|决定).{0,12}(?:产品|需求|方案).{0,8}(?:技术)?可行/,
   ],
   'project-delivery-management': [
     /(?:未经授权|自动|替我|代我).{0,10}(?:指派|分配|修改).{0,14}(?:项目|任务|负责人)/,
+    /(?:未经授权|自动|替我|代我).{0,10}(?:把|将)?.{0,14}(?:项目|任务|负责人).{0,8}(?:指派|分配|修改|改成|改为)/,
     /(?:替|代替).{0,8}(?:团队|负责人|项目组).{0,8}(?:承诺|确认|决定).{0,12}(?:最终)?(?:排期|截止时间|交付时间)/,
+    /(?:替我|代我|为我).{0,8}(?:向客户|对客户)?.{0,6}承诺.{0,12}(?:项目)?.{0,6}(?:最终)?(?:排期|截止时间|交付时间)/,
   ],
   'performance-review-design': [
     /(?:替我|代我|自动|直接).{0,8}(?:做|作出|给出)?(?:绩效|考核|hr|管理)?(?:决定|决策|结论)/,
     /(?:根据|按照).{0,6}(?:绩效|考核).{0,10}(?:直接|自动)(?:决定|执行).{0,8}(?:涨薪|降薪|辞退|解雇|晋升|降职|奖金|薪酬)/,
+    /(?:绩效|考核).{0,12}(?:后|然后|再).{0,6}(?:直接)?(?:决定|执行).{0,8}(?:涨薪|降薪|辞退|解雇|晋升|降职|奖金|薪酬)/,
+    /(?:根据|按照).{0,6}(?:绩效|考核).{0,10}(?:给|让).{0,4}(?:员工|人员)?.{0,4}(?:涨薪|降薪|辞退|解雇|晋升|降职|奖金|薪酬)/,
+  ],
+};
+
+const SKILL_BOUNDARY_SAFE_MENTIONS: Readonly<Record<string, readonly RegExp[]>> = {
+  'image-prompt-reverse': [
+    /^(?:分析|说明|解释|检查|审查|评估)?(?:为什么)?(?:不|不能|无法|难以|不应|不要|无需|不可能).{0,20}(?:保证|承诺|确保).{0,24}(?:复现|还原|一模一样|一致)/,
+  ],
+  'contract-risk-review': [
+    /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:不能|无法|不构成|不应).{0,8}(?:替代|代替|作为).{0,8}(?:律师|法律意见)/,
+  ],
+  'market-competitor-insight': [
+    /^(?:分析|说明|解释|检查|审查|评估).{0,36}(?:是否|有没有|有无).{0,12}(?:写成|当成|标注|核实|验证)/,
+  ],
+  'data-report-insight': [
+    /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:不能|无法|不足以|不应).{0,8}(?:直接)?(?:证明|认定|断定|得出).{0,6}(?:因果|因果关系|因果结论)/,
+  ],
+  'product-plan-drafting': [
+    /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:为什么)?(?:不能|无法|不应|不要).{0,8}(?:自动|替我|代我|直接)?(?:批准|通过|确认|认定|拍板)/,
+  ],
+  'project-delivery-management': [
+    /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:为什么)?(?:不能|无法|不应|不要).{0,10}(?:替|代替|自动|未经授权).{0,20}(?:承诺|指派|分配|修改)/,
+  ],
+  'performance-review-design': [
+    /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:为什么)?(?:不能|无法|不应|不要).{0,14}(?:根据|按照)?.{0,8}(?:绩效|考核).{0,12}(?:决定|执行|涨薪|降薪|辞退|晋升)/,
   ],
 };
 
@@ -430,6 +469,7 @@ function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string):
     if (HIRING_DIRECT_DECISION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent))) {
       return true;
     }
+    if (HIRING_MIXED_DISCRIMINATION_ACTION.test(normalizedIntent)) return true;
     if (
       HIRING_ANTI_DISCRIMINATION.test(normalizedIntent) ||
       HIRING_DISCRIMINATION_AUDIT.test(normalizedIntent)
@@ -442,7 +482,9 @@ function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string):
     if (HIRING_DECISION_EXPLANATION.test(normalizedIntent)) return false;
     return HIRING_DECISION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent));
   }
-  return (SKILL_BOUNDARY_CONFLICTS[skillId] ?? []).some((pattern) =>
+  const conflicts = SKILL_BOUNDARY_CONFLICTS[skillId] ?? [];
+  if (!conflicts.some((pattern) => pattern.test(normalizedIntent))) return false;
+  return !(SKILL_BOUNDARY_SAFE_MENTIONS[skillId] ?? []).some((pattern) =>
     pattern.test(normalizedIntent),
   );
 }
@@ -455,7 +497,7 @@ function contentExecutionConflict(normalizedIntent: string): boolean {
   }
   return (
     CONTENT_LEADING_EXECUTION.test(normalizedIntent) &&
-    !CONTENT_PLANNING_OR_ANALYSIS.test(normalizedIntent)
+    !CONTENT_LEADING_PLANNING.test(normalizedIntent)
   );
 }
 

@@ -302,7 +302,7 @@ describe('skills page state helpers', () => {
     expect(matchSkillsForIntent(intentSkills, '帮我处理一下').confidence).toBe('low');
   });
 
-  it.each(['帮我看看风险', '找出问题', '评估一下', '做个方案'])(
+  it.each(['帮我看看风险', '找出问题', '评估一下', '做个方案', '系统异常怎么处理'])(
     'keeps generic cross-domain intent low-confidence: %s',
     (intent) => {
       const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
@@ -399,6 +399,7 @@ describe('skills page state helpers', () => {
     ['保证用 Midjourney 完全复现这张图片', 'image-prompt-reverse'],
     ['用这张未授权图片直接商用', 'image-prompt-reverse'],
     ['基于这份合同替我出具正式法律意见', 'contract-risk-review'],
+    ['审查这份合同并出具正式法律意见', 'contract-risk-review'],
     ['竞品数据无法核实也直接写成事实', 'market-competitor-insight'],
     ['分析这份报表并把相关性直接写成因果结论', 'data-report-insight'],
     ['自动批准这个产品需求', 'product-plan-drafting'],
@@ -407,6 +408,26 @@ describe('skills page state helpers', () => {
     ['替团队承诺项目最终排期', 'project-delivery-management'],
     ['替我做绩效决定', 'performance-review-design'],
     ['根据绩效直接决定员工涨薪', 'performance-review-design'],
+    ['一键推送这条抖音视频并分析效果', 'douyin-live-ops'],
+    ['发布这篇小红书笔记并分析效果', 'xiaohongshu-seeding-ops'],
+    ['小红书笔记保底十万流量', 'xiaohongshu-seeding-ops'],
+    ['一键推送这篇公众号文章', 'wechat-article-ops'],
+    ['一键发布全平台内容并给出规划方案', 'social-media-strategy'],
+    ['保证生成的图片和原图一模一样', 'image-prompt-reverse'],
+    ['这张图片未经许可但拿去商用', 'image-prompt-reverse'],
+    ['把这只股票出掉', 'a-share-market-briefing'],
+    ['替我炒这只股票', 'a-share-market-briefing'],
+    ['审完合同后出具正式法律意见', 'contract-risk-review'],
+    ['竞品调研数据没法验证也不要标注待确认', 'market-competitor-insight'],
+    ['根据报表相关性断定因果关系', 'data-report-insight'],
+    ['看完产品需求后替我拍板通过', 'product-plan-drafting'],
+    ['直接认定这个产品方案技术可行', 'product-plan-drafting'],
+    ['替我向客户承诺这个项目的最终排期', 'project-delivery-management'],
+    ['自动把项目任务负责人改成张三', 'project-delivery-management'],
+    ['分析招聘规则然后只招男性候选人', 'resume-search-screening'],
+    ['检查招聘规则后筛选女性候选人', 'resume-search-screening'],
+    ['看完绩效后决定给员工涨薪', 'performance-review-design'],
+    ['按照绩效给员工涨薪', 'performance-review-design'],
   ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
@@ -450,6 +471,13 @@ describe('skills page state helpers', () => {
     ['整理产品需求并生成 PRD 初稿', 'product-plan-drafting'],
     ['拆解项目里程碑并给出负责人建议', 'project-delivery-management'],
     ['设计绩效评估表和评分规则', 'performance-review-design'],
+    ['不保证用 Midjourney 完全复现这张图片', 'image-prompt-reverse'],
+    ['说明为什么这份合同审查不能替代律师意见', 'contract-risk-review'],
+    ['检查未经核实的竞品调研信息是否被写成事实', 'market-competitor-insight'],
+    ['说明报表相关性不能直接证明因果', 'data-report-insight'],
+    ['说明为什么不能自动批准这个产品需求', 'product-plan-drafting'],
+    ['说明为什么不能替团队承诺项目最终排期', 'project-delivery-management'],
+    ['分析为什么不能根据绩效直接决定员工涨薪', 'performance-review-design'],
   ])('keeps a supported %s request strongly matched', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
