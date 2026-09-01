@@ -337,6 +337,8 @@ describe('skills page state helpers', () => {
     ['买哪只股票', 'a-share-market-briefing'],
     ['帮我把这只股票清仓', 'a-share-market-briefing'],
     ['替我交易这只股票', 'a-share-market-briefing'],
+    ['先分析这只股票的风险并为我执行交易', 'a-share-market-briefing'],
+    ['先看一下这只股票再为我交易', 'a-share-market-briefing'],
     ['分析完后买入这只股票', 'a-share-market-briefing'],
     ['录用候选人', 'resume-search-screening'],
     ['淘汰这份简历', 'resume-search-screening'],
@@ -347,6 +349,10 @@ describe('skills page state helpers', () => {
     ['分析为什么候选人被拒绝，然后直接录用他', 'resume-search-screening'],
     ['分析为什么应该录用这个候选人并替我直接录用他', 'resume-search-screening'],
     ['录用候选人并解释原因', 'resume-search-screening'],
+    ['先分析候选人的经历，再决定是否录用', 'resume-search-screening'],
+    ['分析候选人后帮我做录用决定', 'resume-search-screening'],
+    ['比较候选人然后选出最终录用人选', 'resume-search-screening'],
+    ['替我做招聘决定', 'resume-search-screening'],
     ['基于性别筛选候选人', 'resume-search-screening'],
     ['只招男性候选人', 'resume-search-screening'],
   ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
@@ -362,9 +368,11 @@ describe('skills page state helpers', () => {
     ['解释这只股票出现买入信号的原因', 'a-share-market-briefing'],
     ['分析买入后这只股票的走势', 'a-share-market-briefing'],
     ['分析股票买入卖出成交数据', 'a-share-market-briefing'],
+    ['分析股票交易量数据', 'a-share-market-briefing'],
     ['根据 JD 筛选候选人', 'resume-search-screening'],
     ['分析为什么这个候选人被拒绝', 'resume-search-screening'],
     ['解释候选人被拒绝后的改进方向', 'resume-search-screening'],
+    ['解释为什么公司决定录用这个候选人', 'resume-search-screening'],
     ['检查招聘要求是否存在性别歧视', 'resume-search-screening'],
   ])('keeps a supported %s request strongly matched', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
