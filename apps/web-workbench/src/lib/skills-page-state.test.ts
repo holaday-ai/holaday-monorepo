@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type SkillCategory,
   groupSkillsByCategory,
   normalizeSkillRows,
   normalizeSkillToggleResponse,
@@ -7,14 +8,13 @@ import {
   skillCardBadge,
   skillCardUsageHint,
   skillConnectorLabel,
-  skillTaskDraft,
-  skillStartDecision,
   skillLimitBannerCopy,
   skillLimitMessage,
   skillLoadErrorCopy,
   skillPageSummary,
   skillPlanLabel,
-  type SkillCategory,
+  skillStartDecision,
+  skillTaskDraft,
 } from './skills-page-state';
 
 interface SkillFixture {
@@ -53,7 +53,7 @@ describe('skills page state helpers', () => {
         cap: 0,
         planId: 'free',
       }),
-    ).toBe('技能加载中…');
+    ).toBe('任务选项加载中…');
     expect(
       skillPageSummary({
         loading: false,
@@ -63,7 +63,7 @@ describe('skills page state helpers', () => {
         cap: 0,
         planId: 'free',
       }),
-    ).toBe('技能暂时无法加载');
+    ).toBe('任务选项暂时无法加载');
     expect(
       skillPageSummary({
         loading: false,
@@ -73,7 +73,7 @@ describe('skills page state helpers', () => {
         cap: 0,
         planId: 'free',
       }),
-    ).toBe('暂无可用技能');
+    ).toBe('暂无可开始的任务');
     expect(
       skillPageSummary({
         loading: false,
@@ -83,7 +83,7 @@ describe('skills page state helpers', () => {
         cap: 5,
         planId: 'basic',
       }),
-    ).toBe('已启用 2 / 5 · 基础版');
+    ).toBe('常用能力 2 / 5 · 基础版');
     expect(
       skillPageSummary({
         loading: false,
@@ -93,7 +93,7 @@ describe('skills page state helpers', () => {
         cap: 5,
         planId: 'basic',
       }),
-    ).toBe('已启用 11 个 · 基础版上限 5');
+    ).toBe('已保留 11 项常用能力 · 基础版上限 5');
     expect(
       skillPageSummary({
         loading: false,
@@ -103,75 +103,65 @@ describe('skills page state helpers', () => {
         cap: 0,
         planId: 'free',
       }),
-    ).toBe('体验版暂不支持启用技能');
+    ).toBe('体验版可查看任务示例');
   });
 
   it('builds plan-aware limit messages', () => {
-    expect(skillLimitMessage({ cap: 0, planId: 'free' })).toBe(
-      '体验版暂不支持启用技能',
-    );
-    expect(skillLimitMessage({ cap: 33, planId: 'pro' })).toBe('已达到 33 个技能上限');
+    expect(skillLimitMessage({ cap: 0, planId: 'free' })).toBe('当前套餐暂不支持开始此任务');
+    expect(skillLimitMessage({ cap: 33, planId: 'pro' })).toBe('当前套餐的常用能力已满（33 项）');
     expect(skillLimitMessage({ cap: 5, planId: 'basic' })).toBe(
-      '已达到当前套餐的技能上限（5 个）· 升级到专业版可使用全部 13 个技能',
+      '常用能力已满（5 项）· 可先移除一项或升级套餐',
     );
   });
 
   it('explains over-limit skill states without implying a broken counter', () => {
     expect(skillLimitBannerCopy({ cap: 0, enabledCount: 0, planId: 'free' })).toEqual({
-      title: '体验版暂不支持启用技能',
-      body: '升级到基础版可自选技能；升级到专业版可使用全部 13 个技能。',
+      title: '当前套餐可查看任务示例',
+      body: '升级到基础版后即可选择并开始任务；专业版可使用全部 13 类任务。',
     });
     expect(skillLimitBannerCopy({ cap: 5, enabledCount: 11, planId: 'basic' })).toEqual({
-      title: '当前已启用 11 个技能',
-      body: '基础版上限为 5 个。已启用的技能会继续可用；如果停用后想启用新技能，需要先保持在上限内。',
+      title: '当前已保留 11 项常用能力',
+      body: '基础版最多保留 5 项。现有任务仍可使用；移除后才能添加新的常用能力。',
     });
     expect(skillLimitBannerCopy({ cap: 5, enabledCount: 5, planId: 'basic' })).toEqual({
-      title: '已达到 5 个技能上限',
-      body: '升级到专业版可使用全部 13 个技能。',
+      title: '常用能力已满（5 项）',
+      body: '开始其他任务前，可先移除一项常用能力，或升级套餐。',
     });
   });
 
   it('formats skill load errors for user-facing surfaces', () => {
     expect(skillLoadErrorCopy('  offline  ')).toEqual({
-      title: '技能暂时无法加载',
+      title: '任务选项暂时无法加载',
       body: 'offline',
     });
     expect(skillLoadErrorCopy('')).toEqual({
-      title: '技能暂时无法加载',
-      body: '请稍后重试，或刷新页面后再打开技能。',
+      title: '任务选项暂时无法加载',
+      body: '请稍后重试，或刷新页面后再打开能力中心。',
     });
   });
 
   it('describes the card badge while saving', () => {
-    expect(skillCardBadge({ enabled: false, pending: false })).toBe('启用');
-    expect(skillCardBadge({ enabled: true, pending: false })).toBe('已启用');
+    expect(skillCardBadge({ enabled: false, pending: false })).toBe('加入常用');
+    expect(skillCardBadge({ enabled: true, pending: false })).toBe('常用');
     expect(skillCardBadge({ enabled: true, pending: true })).toBe('保存中…');
     expect(skillCardBadge({ enabled: false, pending: false, limitBlocked: true, cap: 0 })).toBe(
-      '不可启用',
+      '暂不可用',
     );
-    expect(skillCardBadge({ enabled: false, pending: false, limitBlocked: true })).toBe(
-      '已达上限',
-    );
+    expect(skillCardBadge({ enabled: false, pending: false, limitBlocked: true })).toBe('已达上限');
   });
 
   it('explains how enabled skill cards affect new tasks', () => {
-    expect(skillCardUsageHint({ enabled: true, pending: false })).toBe(
-      '会自动匹配；可在输入框 @ 调用',
-    );
-    expect(skillCardUsageHint({ enabled: false, pending: false })).toBe(
-      '启用后可参与自动匹配',
-    );
-    expect(skillCardUsageHint({ enabled: false, pending: true })).toBe(
-      '正在保存选择',
-    );
+    expect(skillCardUsageHint({ enabled: true, pending: false })).toBe('已加入常用');
+    expect(skillCardUsageHint({ enabled: false, pending: false })).toBe('可加入常用');
+    expect(skillCardUsageHint({ enabled: false, pending: true })).toBe('正在保存');
     expect(skillCardUsageHint({ enabled: true, pending: false, cap: 0 })).toBe(
-      '当前套餐不可使用，可停用',
+      '当前套餐暂不可使用',
     );
-    expect(
-      skillCardUsageHint({ enabled: false, pending: false, limitBlocked: true, cap: 0 }),
-    ).toBe('当前套餐不可启用');
+    expect(skillCardUsageHint({ enabled: false, pending: false, limitBlocked: true, cap: 0 })).toBe(
+      '当前套餐暂不可使用',
+    );
     expect(skillCardUsageHint({ enabled: false, pending: false, limitBlocked: true })).toBe(
-      '先停用一个技能后可启用',
+      '先移除一项常用能力',
     );
   });
 
@@ -188,9 +178,7 @@ describe('skills page state helpers', () => {
       skillSource: 'manual',
       prompt: '@抖音直播与运营 ',
     });
-    expect(
-      skillTaskDraft({ id: '', name: '', description: '' }),
-    ).toEqual({
+    expect(skillTaskDraft({ id: '', name: '', description: '' })).toEqual({
       skillId: '',
       skillName: '技能',
       skillSource: 'manual',
@@ -218,12 +206,8 @@ describe('skills page state helpers', () => {
     expect(skillStartDecision({ enabled: false, enabledCount: 4, cap: 5 })).toBe(
       'enable-and-start',
     );
-    expect(skillStartDecision({ enabled: false, enabledCount: 5, cap: 5 })).toBe(
-      'blocked',
-    );
-    expect(skillStartDecision({ enabled: false, enabledCount: 0, cap: 0 })).toBe(
-      'blocked',
-    );
+    expect(skillStartDecision({ enabled: false, enabledCount: 5, cap: 5 })).toBe('blocked');
+    expect(skillStartDecision({ enabled: false, enabledCount: 0, cap: 0 })).toBe('blocked');
   });
 
   it('selects the preferred showcase capabilities without depending on server ordering', () => {
@@ -243,9 +227,7 @@ describe('skills page state helpers', () => {
 
   it('falls back to available capabilities when preferred showcase entries are missing', () => {
     expect(
-      pickCapabilityShowcase([{ id: 'first' }, { id: 'second' }]).map(
-        (skill) => skill.id,
-      ),
+      pickCapabilityShowcase([{ id: 'first' }, { id: 'second' }]).map((skill) => skill.id),
     ).toEqual(['first', 'second']);
   });
 
@@ -298,34 +280,34 @@ describe('skills page state helpers', () => {
         category: '内容运营',
         description: '写作',
         aliases: ['社媒'],
-          maturity: 'workflow',
-          connectors: ['browser'],
-          experience: {
-            starterPrompts: ['示例一', '示例二', '示例三'],
-            requiredInputs: ['文件'],
-            deliverables: ['报告'],
-            boundary: '需要人工确认',
-            exampleSummary: '示例摘要',
-          },
-          enabled: true,
+        maturity: 'workflow',
+        connectors: ['browser'],
+        experience: {
+          starterPrompts: ['示例一', '示例二', '示例三'],
+          requiredInputs: ['文件'],
+          deliverables: ['报告'],
+          boundary: '需要人工确认',
+          exampleSummary: '示例摘要',
+        },
+        enabled: true,
       },
       {
         id: 'loose',
         name: 'loose',
         logoId: 'loose',
         category: '内容运营',
-        description: '暂无技能说明',
+        description: '暂未提供说明',
         aliases: [],
-          maturity: 'template',
-          connectors: [],
-          experience: {
-            starterPrompts: [],
-            requiredInputs: [],
-            deliverables: [],
-            boundary: '执行前请确认输入材料、授权范围和最终用途。',
-            exampleSummary: '暂无示例说明',
-          },
-          enabled: false,
+        maturity: 'template',
+        connectors: [],
+        experience: {
+          starterPrompts: [],
+          requiredInputs: [],
+          deliverables: [],
+          boundary: '执行前请确认输入材料、授权范围和最终用途。',
+          exampleSummary: '暂无示例说明',
+        },
+        enabled: false,
       },
     ]);
   });

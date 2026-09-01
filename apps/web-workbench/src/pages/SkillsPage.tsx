@@ -9,7 +9,6 @@ import {
   skillLimitBannerCopy,
   skillLimitMessage,
   skillLoadErrorCopy,
-  skillPageSummary,
   skillStartDecision,
   skillTaskDraft,
 } from '@/lib/skills-page-state';
@@ -69,7 +68,7 @@ export function SkillsPage(): JSX.Element {
       } catch (error) {
         if (!mountedRef.current || requestId !== requestIdRef.current) return;
         setLoadError(pageErrorMessage(error));
-        if (!options.silent) toast.show('能力暂时无法加载', 'error');
+        if (!options.silent) toast.show('任务选项暂时无法加载', 'error');
       } finally {
         if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
       }
@@ -86,14 +85,6 @@ export function SkillsPage(): JSX.Element {
     };
   }, [refresh]);
 
-  const summary = skillPageSummary({
-    loading,
-    error: loadError,
-    totalCount: skills.length,
-    enabledCount,
-    cap,
-    planId,
-  });
   const loadErrorCopy = skillLoadErrorCopy(loadError);
   const limitBanner = atLimit ? skillLimitBannerCopy({ cap, enabledCount, planId }) : null;
 
@@ -119,13 +110,15 @@ export function SkillsPage(): JSX.Element {
           item.id === skill.id ? { ...item, enabled: response.enabled } : item,
         ),
       );
-      toast.show(response.enabled ? `已启用「${skill.name}」` : `已停用「${skill.name}」`);
+      toast.show(
+        response.enabled ? `已加入常用「${skill.name}」` : `已从常用中移除「${skill.name}」`,
+      );
       return response.enabled === desired;
     } catch (error) {
       setSkills((current) =>
         current.map((item) => (item.id === skill.id ? { ...item, enabled: skill.enabled } : item)),
       );
-      toast.show(pageActionError('切换失败', error), 'error');
+      toast.show(pageActionError('保存失败', error), 'error');
       return false;
     } finally {
       if (mountedRef.current) setPendingId(null);
@@ -182,12 +175,18 @@ export function SkillsPage(): JSX.Element {
     <PageContainer width="wide" className="max-w-[1180px]">
       {loading ? (
         <>
-          <PageHeader title="能力中心" description="先看结果，再决定让 Holaday 帮你做什么" />
-          <PageLoadingPanel label="能力加载中" description="正在同步能力目录与使用示例" />
+          <PageHeader
+            title="能力中心"
+            description="选择想完成的事，Holaday 会匹配所需能力并带你开始"
+          />
+          <PageLoadingPanel label="任务选项加载中" description="正在准备可完成的任务与示例" />
         </>
       ) : loadError ? (
         <>
-          <PageHeader title="能力中心" description="先看结果，再决定让 Holaday 帮你做什么" />
+          <PageHeader
+            title="能力中心"
+            description="选择想完成的事，Holaday 会匹配所需能力并带你开始"
+          />
           <div className="flex flex-col items-center gap-3 rounded-[12px] border border-[#DCDDDD] bg-white px-6 py-12 text-center">
             <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
             <div className="text-sm font-medium text-foreground/80">{loadErrorCopy.title}</div>
@@ -201,8 +200,8 @@ export function SkillsPage(): JSX.Element {
               <Button asChild variant="outline" size="sm">
                 <a
                   href={supportMailtoHref({
-                    subject: '能力列表加载失败',
-                    body: '能力列表加载失败，请协助排查。\n\n注册邮箱：\n出现时间：',
+                    subject: '任务选项加载失败',
+                    body: '能力中心的任务选项加载失败，请协助排查。\n\n注册邮箱：\n出现时间：',
                   })}
                 >
                   联系支持
@@ -213,18 +212,21 @@ export function SkillsPage(): JSX.Element {
         </>
       ) : skills.length === 0 ? (
         <>
-          <PageHeader title="能力中心" description="先看结果，再决定让 Holaday 帮你做什么" />
+          <PageHeader
+            title="能力中心"
+            description="选择想完成的事，Holaday 会匹配所需能力并带你开始"
+          />
           <div className="flex flex-col items-center gap-3 rounded-[12px] border border-dashed border-[#DCDDDD] bg-white px-6 py-12 text-center">
             <Sparkles className="h-8 w-8 text-muted-foreground/40" aria-hidden />
-            <div className="text-sm font-medium text-foreground/80">暂无可用能力</div>
+            <div className="text-sm font-medium text-foreground/80">暂时没有可开始的任务</div>
             <div className="max-w-md text-xs leading-5 text-muted-foreground">
-              当前能力目录为空。你可以联系支持，让我们确认套餐和能力配置。
+              你可以稍后重试，或联系支持确认套餐和可用任务。
             </div>
             <Button asChild variant="outline" size="sm" className="mt-1">
               <a
                 href={supportMailtoHref({
-                  subject: '能力目录为空',
-                  body: '能力目录为空，请协助确认。\n\n注册邮箱：',
+                  subject: '可用任务为空',
+                  body: '能力中心没有显示可用任务，请协助确认。\n\n注册邮箱：',
                 })}
               >
                 联系支持
@@ -240,7 +242,6 @@ export function SkillsPage(): JSX.Element {
           pendingId={pendingId}
           cap={cap}
           enabledCount={enabledCount}
-          summary={summary}
           notice={notice}
           onQueryChange={setQuery}
           onSelectSkill={setActiveSkillId}

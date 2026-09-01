@@ -88,48 +88,102 @@ const baseProps = {
 };
 
 describe('CapabilityCenterContent', () => {
-  it('explains what the selected capability can do before asking the user to start', () => {
+  it('shows what Holaday can complete without exposing internal capability mechanics', () => {
     render(<CapabilityCenterContent {...baseProps} />);
 
     const header = screen.getByTestId('capability-header');
     expect(header.className).toContain('lg:pr-[200px]');
     expect(header.className).toContain('xl:flex-row');
     expect(screen.getByRole('heading', { level: 1, name: '能力中心' })).toBeTruthy();
-    expect(screen.getAllByText('示例结果')).toHaveLength(3);
+    expect(screen.getByText('选择你想完成的事，Holaday 会匹配需要的能力并带你开始。')).toBeTruthy();
+    expect(screen.getByRole('searchbox', { name: '搜索想完成的任务' })).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 3, name: '完成后你会得到' })).toBeTruthy();
     expect(screen.getByText('销售额环比增长 18.7%，但复购率连续两周回落。')).toBeTruthy();
-    expect(screen.getByText('你需要提供')).toBeTruthy();
-    expect(screen.getByText('会交付什么')).toBeTruthy();
-    expect(screen.getByText('执行时可能调用')).toBeTruthy();
-    expect(screen.getByText('边界说明')).toBeTruthy();
-    expect(screen.getByText('表格')).toBeTruthy();
-    expect(screen.getByText('数据库')).toBeTruthy();
+    expect(screen.getByText('选择一个任务')).toBeTruthy();
+    expect(screen.getByText('全部可完成的任务')).toBeTruthy();
     expect(screen.getByText('围绕新品卖点安排 7 天内容节奏，并标出互动重点。')).toBeTruthy();
+    expect(screen.queryByText('能力准备轨道')).toBeNull();
+    expect(screen.queryByText('执行时可能调用')).toBeNull();
+    expect(screen.queryByText('会自动匹配；可在输入框 @ 调用')).toBeNull();
+    expect(screen.queryByText('交付内容')).toBeNull();
     expect(
       screen.getByRole('button', { name: '查看数据报表解读' }).getAttribute('aria-pressed'),
     ).toBe('true');
   });
 
-  it('presents the selected capability as a truthful AI workbench', () => {
+  it('keeps the selected task focused on starting and its expected outcome', () => {
     render(<CapabilityCenterContent {...baseProps} />);
 
     const studio = screen.getByTestId('capability-studio');
-    const status = within(studio).getByRole('status', { name: '能力运行状态' });
-
-    expect(within(status).getByText('AI 能力已就绪')).toBeTruthy();
-    expect(within(status).getByText('结果为可编辑草稿')).toBeTruthy();
-    expect(within(status).getByText('不会自动提交')).toBeTruthy();
-    expect(within(studio).getByRole('heading', { level: 3, name: '结果预览' })).toBeTruthy();
+    expect(within(studio).getByText('推荐从这里开始')).toBeTruthy();
+    expect(within(studio).getByText('点击后可补充材料和要求')).toBeTruthy();
+    expect(within(studio).getByRole('heading', { level: 3, name: '完成后你会得到' })).toBeTruthy();
     expect(within(studio).getByText('关键指标摘要')).toBeTruthy();
     expect(within(studio).getByText('异常与趋势说明')).toBeTruthy();
-    expect(screen.getByTestId('capability-readiness-rail')).toBeTruthy();
+    expect(within(studio).queryByText('AI 能力已就绪')).toBeNull();
+    expect(within(studio).queryByText('结果为可编辑草稿')).toBeNull();
+    expect(within(studio).queryByText('不会自动提交')).toBeNull();
   });
 
-  it('does not claim a disabled capability is ready to run', () => {
+  it('presents a disabled capability as a task choice without configuration copy', () => {
     render(<CapabilityCenterContent {...baseProps} activeSkillId="social-media-strategy" />);
 
-    const status = screen.getByRole('status', { name: '能力运行状态' });
-    expect(within(status).getByText('能力可预览，启用后使用')).toBeTruthy();
-    expect(within(status).queryByText('AI 能力已就绪')).toBeNull();
+    expect(screen.getAllByText('从目标到选题，生成一周内容计划。')).toHaveLength(2);
+    expect(screen.queryByText('能力可预览，启用后使用')).toBeNull();
+    expect(screen.getByRole('button', { name: '开始任务：为新品规划一周社媒内容' })).toBeTruthy();
+  });
+
+  it('does not promise a task can start when the common-capability limit is full', () => {
+    render(
+      <CapabilityCenterContent
+        {...baseProps}
+        activeSkillId="social-media-strategy"
+        cap={1}
+        enabledCount={1}
+      />,
+    );
+
+    const starter = screen.getByRole('button', { name: '已达上限：为新品规划一周社媒内容' });
+    expect(starter.hasAttribute('disabled')).toBe(true);
+    expect(within(starter).getByText('已达上限')).toBeTruthy();
+    expect(starter.getAttribute('title')).toBe('请先从常用能力中移除一项');
+  });
+
+  it('disables task starters and exposes progress while the selected capability is preparing', () => {
+    render(<CapabilityCenterContent {...baseProps} pendingId="data-report-insight" />);
+
+    const starters = screen.getAllByRole('button', { name: /准备中：/ });
+    expect(starters).toHaveLength(3);
+    for (const starter of starters) {
+      expect(starter.hasAttribute('disabled')).toBe(true);
+      expect(within(starter).getByText('准备中…')).toBeTruthy();
+    }
+  });
+
+  it('explains that another selection is saving instead of promising an immediate start', () => {
+    render(<CapabilityCenterContent {...baseProps} pendingId="social-media-strategy" />);
+
+    const starter = screen.getByRole('button', { name: '请稍候：分析这份周报并找出异常' });
+    expect(starter.hasAttribute('disabled')).toBe(true);
+    expect(within(starter).getByText('请稍候')).toBeTruthy();
+  });
+
+  it('announces when the current plan cannot start a disabled capability', () => {
+    render(
+      <CapabilityCenterContent
+        {...baseProps}
+        activeSkillId="social-media-strategy"
+        cap={0}
+        enabledCount={0}
+      />,
+    );
+
+    const starter = screen.getByRole('button', {
+      name: '暂不可用：为新品规划一周社媒内容',
+    });
+    expect(starter.hasAttribute('disabled')).toBe(true);
+    expect(within(starter).getByText('暂不可用')).toBeTruthy();
+    expect(starter.getAttribute('title')).toBe('当前套餐暂不支持开始此任务');
   });
 
   it('starts from an explicit sample and lets the user switch the showcase capability', async () => {
@@ -140,7 +194,7 @@ describe('CapabilityCenterContent', () => {
       <CapabilityCenterContent {...baseProps} onStart={onStart} onSelectSkill={onSelectSkill} />,
     );
 
-    await user.click(screen.getByRole('button', { name: '分析这份周报并找出异常' }));
+    await user.click(screen.getByRole('button', { name: '开始任务：分析这份周报并找出异常' }));
     expect(onStart).toHaveBeenCalledWith(skills[0], '分析这份周报并找出异常');
 
     await user.click(screen.getByRole('button', { name: '预览社交媒体策略' }));
@@ -156,7 +210,7 @@ describe('CapabilityCenterContent', () => {
     }
 
     render(<Harness />);
-    await user.type(screen.getByRole('searchbox', { name: '搜索全部能力' }), '合同');
+    await user.type(screen.getByRole('searchbox', { name: '搜索想完成的任务' }), '合同');
 
     expect(screen.getByText('销售额环比增长 18.7%，但复购率连续两周回落。')).toBeTruthy();
     const catalogue = screen.getByTestId('capability-catalogue');
@@ -165,15 +219,38 @@ describe('CapabilityCenterContent', () => {
     expect(within(catalogue).queryByText('社交媒体策略')).toBeNull();
   });
 
+  it('finds capabilities from the task and outcome language shown to users', async () => {
+    const user = userEvent.setup();
+
+    function Harness(): JSX.Element {
+      const [query, setQuery] = React.useState('');
+      return <CapabilityCenterContent {...baseProps} query={query} onQueryChange={setQuery} />;
+    }
+
+    render(<Harness />);
+    const search = screen.getByRole('searchbox', { name: '搜索想完成的任务' });
+    const catalogue = screen.getByTestId('capability-catalogue');
+
+    await user.type(search, '周报');
+    expect(within(catalogue).getByText('数据报表解读')).toBeTruthy();
+    expect(within(catalogue).queryByText('社交媒体策略')).toBeNull();
+
+    await user.clear(search);
+    await user.type(search, '复购率');
+    expect(within(catalogue).getByText('数据报表解读')).toBeTruthy();
+  });
+
   it('exposes one clear toggle action for each catalogue capability', async () => {
     const user = userEvent.setup();
     const onToggle = vi.fn();
     render(<CapabilityCenterContent {...baseProps} onToggle={onToggle} />);
 
-    await user.click(screen.getByRole('button', { name: '启用社交媒体策略' }));
+    await user.click(screen.getByRole('button', { name: '加入常用：社交媒体策略' }));
     expect(onToggle).toHaveBeenCalledWith(skills[1]);
     expect(
-      screen.getByRole('button', { name: '停用数据报表解读' }).getAttribute('aria-pressed'),
+      screen
+        .getByRole('button', { name: '从常用中移除：数据报表解读' })
+        .getAttribute('aria-pressed'),
     ).toBe('true');
   });
 });
