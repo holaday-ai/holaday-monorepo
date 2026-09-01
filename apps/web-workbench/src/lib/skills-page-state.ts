@@ -82,7 +82,8 @@ const CAPABILITY_TASK_EVIDENCE: Readonly<Record<string, RegExp>> = {
     /(?:图片|图像|照片|画面|参考图|提示词|prompt|反推|风格|构图|光线|材质|负面词|主体特征|肖像)/,
   'a-share-market-briefing':
     /(?:股票|个股|a股|行情|股市|大盘|涨跌|异动|行业|风险|走势|成交|买入|卖出)/,
-  'contract-risk-review': /(?:合同|条款|协议|签约|谈判|甲方|乙方|法务|审查)/,
+  'contract-risk-review':
+    /(?:合同|条款|协议|签约|谈判|甲方|乙方|法务|审查|法律意见|律师)/,
   'market-competitor-insight':
     /(?:竞品|市场|洞察|调研|swot|机会点|定位|规模|趋势|差异化)/,
   'data-report-insight':
@@ -103,6 +104,7 @@ const STOCK_DECISION_CONFLICTS: readonly RegExp[] = [
   /(?:股票|个股|a股).{0,4}值得买/,
   /(?:股票|个股|a股).{0,6}(?:是否|值不值得|值得|适不适合|适合|可不可以|能不能).{0,4}投资/,
   /(?:是否|值不值得|值得|适不适合|可不可以|能不能).{0,4}投资.{0,8}(?:股票|个股|a股)/,
+  /(?:这只|那只|该只|某只)?(?:股票|个股|a股).{0,6}(?:应该|应不应该|是否|该不该|要不要).{0,6}(?:继续)?持有/,
   /^(?:建议|推荐)(?:我)?(?:投资|买入|持有).{0,12}(?:股票|个股|a股)/,
   /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我)(?:直接|立即|马上|执行|决定|去)?(?:买入|卖出|买|卖|下单|清仓|建仓|加仓|减仓)/,
   /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我)(?:直接|立即|马上|执行|决定|去)?交易(?:这只|那只|该只|某只)?(?:股票|个股|a股)/,
@@ -111,7 +113,7 @@ const STOCK_DECISION_CONFLICTS: readonly RegExp[] = [
   /把.{0,8}(?:股票|个股|a股).{0,4}(?:买入|卖出|买下|购买|购入|卖掉|抛掉|抛售|出掉|下单|清仓|建仓|加仓|减仓)/,
   /(?:帮我|替我|给我|代我|为我).{0,6}(?:炒|炒作).{0,4}(?:股票|个股|a股)/,
   /^(?:买入|卖出|买|卖|下单)(?:这只|那只|该只|某只|一只|几只|一些)?(?:股票|个股|a股)/,
-  /^(?:买入|买进|购入|购买|卖出|卖掉|抛掉|抛售|买|卖|下单).{1,12}(?:股票|个股|a股)(?!的?(?:历史|交易记录|收益|走势|表现|数据|复盘|分析))/,
+  /^(?:买入|买进|购入|购买|卖出|卖掉|抛掉|抛售|清仓|建仓|加仓|减仓|买|卖|下单).{1,12}(?:股票|个股|a股)(?!的?(?:历史|交易记录|收益|走势|表现|数据|复盘|分析|后(?:的)?(?:历史|最大回撤|机会成本|收益|表现|走势|数据|交易记录|复盘|分析)))/,
   /^(?:清仓|加仓|减仓|建仓|卖掉|抛掉|抛售|购买|购入|买进|交易)(?:这只|那只|该只|某只|一只|几只|一些)?(?:股票|个股|a股)/,
   /^下单(?:买入|卖出|买|卖)?(?:这只|那只|该只|某只|一只|几只|一些)?(?:股票|个股|a股)/,
   /(?:分析完后|解释完后|研究完后|看完后|然后|之后|再|最后)(?:直接|立即|马上)?(?:买入|卖出|买|卖|下单|清仓|建仓|加仓|减仓)(?:这只|那只|该只|某只|一只|几只|一些)?(?:股票|个股|a股)/,
@@ -134,7 +136,7 @@ const SPECIFIC_RELIGIOUS_IDENTITY_TERM =
 const SPECIFIC_NATIONALITY_TERM =
   '(?:(?:[一-龥]{1,5}国|日本|俄罗斯|加拿大|澳大利亚|新加坡|印度|巴西|墨西哥|阿根廷|意大利|西班牙|葡萄牙|荷兰|比利时|瑞士|瑞典|挪威|丹麦|芬兰|波兰|乌克兰|希腊|埃及)(?:籍|人)|(?:日|俄|美|英|法|德|韩)籍)';
 const SENSITIVE_IDENTITY_TERM =
-  `(?:性别|性取向|同性恋|异性恋|双性恋|无性恋|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|民族|${SPECIFIC_ETHNICITY_TERM}|种族|${SPECIFIC_RACIAL_IDENTITY_TERM}|宗教|${SPECIFIC_RELIGIOUS_IDENTITY_TERM}|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|籍贯|出生地|国籍|${SPECIFIC_NATIONALITY_TERM}|政治面貌|健康状况|疾病|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚)`;
+  `(?:性别|性取向|同性恋|异性恋|双性恋|无性恋|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|民族|${SPECIFIC_ETHNICITY_TERM}|种族|${SPECIFIC_RACIAL_IDENTITY_TERM}|宗教|${SPECIFIC_RELIGIOUS_IDENTITY_TERM}|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|籍贯|出生地|国籍|外籍|${SPECIFIC_NATIONALITY_TERM}|政治面貌|健康状况|疾病|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚)`;
 
 const HIRING_ANTI_DISCRIMINATION = new RegExp(
   `^(?:请)?(?:不要|禁止|不得|避免|防止)(?:再)?(?:基于|按照|根据|按|依据|以).{0,4}${SENSITIVE_IDENTITY_TERM}.{0,8}(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用)(?:候选人|人才|简历)?(?:并)?(?:检查|分析|说明|识别|评估)?(?:合规|歧视|风险|问题)?$`,
@@ -162,7 +164,7 @@ const HIRING_DISCRIMINATION_CONFLICTS: readonly RegExp[] = [
 ];
 
 const HIRING_MIXED_DISCRIMINATION_ACTION = new RegExp(
-  `(?:然后|之后|再|完成后|检查后|分析后|规则后).{0,10}(?:只招|只要|仅限|只选|只筛选|仅筛选|只录用|筛选|过滤|挑选|选择|录用|招聘|优先考虑).{0,6}${SENSITIVE_IDENTITY_TERM}`,
+  `(?:然后|之后|随后|接着|继而|再|完成后|检查后|分析后|规则后).{0,10}(?:只招|只要|仅限|只选|只筛选|仅筛选|只录用|筛选|过滤|挑选|选择|录用|招聘|优先考虑).{0,6}${SENSITIVE_IDENTITY_TERM}`,
 );
 
 const CONTENT_EXECUTION_SKILL_IDS = new Set([
@@ -179,7 +181,6 @@ const CONTENT_UNAMBIGUOUS_EXECUTION_CONFLICTS: readonly RegExp[] = [
   /^(?:把|将).{0,24}(?:发布出去|发出去|发到|发至|发表|上线|上传到?|推送)/,
   /^(?:发一下|推送)(?:这篇|这条|该篇|该条|内容|文章|笔记|视频)/,
   /^(?:一键|直接|立即|马上|自动)?推送(?:这篇|这条|该篇|该条|内容|文章|笔记|视频)/,
-  /(?:在|到).{0,10}(?:上|平台)(?:发布|发表|上线|上传)/,
   /(?:写好|改好|准备好|完成)(?:之后|后|然后)(?:直接|自动)?(?:发布|发表|上线|上传|发到|发至)/,
   /^(?:投流|投放广告|投广告|买量|投放)(?:这篇|这条|该篇|该条|内容|文章|笔记|视频|抖音|小红书)/,
   /^(?:把|将).{0,20}(?:投流|投放.{0,6}广告|投广告|买量|投薯条)/,
@@ -188,16 +189,22 @@ const CONTENT_UNAMBIGUOUS_EXECUTION_CONFLICTS: readonly RegExp[] = [
   /帮(?:这篇|这条|该篇|该条|内容|文章|笔记|视频|账号|品牌).{0,8}(?:投流|投放.{0,6}广告|投广告|买量|投薯条)/,
 ];
 
+const CONTENT_PLATFORM_PUBLICATION_CONFLICT =
+  /(?:在|到).{0,10}(?:上|平台)(?:发布|发表|上线|上传)/;
+const CONTENT_PLATFORM_PUBLICATION_ANALYSIS =
+  /^(?:分析|复盘|研究|总结|解释|评估|检查|审查).{0,28}(?:发布|发表|上线|上传).{0,18}(?:效果|数据|表现|结果|原因|问题|风险|影响|趋势|复盘)/;
+
 const CONTENT_LEADING_EXECUTION =
   /^(?:一键|直接|立即|马上|自动)?(?:发布|发表|上线|上传)(?:全平台)?(?:这篇|这条|该篇|该条|内容|文章|笔记|视频)/;
 const CONTENT_LEADING_PLANNING =
   /^(?:发布内容|发布).{0,8}(?:怎么|如何)(?:规划|计划|安排)|^发布节奏.{0,8}(?:规划|计划|安排)/;
 const CONTENT_PROMISE_VERB = /(?:保证|承诺|确保|保底)/g;
-const CONTENT_OUTCOME = /(?:销量|流量|涨粉|转化|播放量|爆款|热门|热搜)/;
+const CONTENT_OUTCOME =
+  /(?:销量|流量|涨粉|转化|播放量|阅读量|点赞(?:量)?|收藏(?:量)?|评论(?:量)?|曝光(?:量)?|打开率|点击率|完播率|互动率|转化率|成交额|订单量|gmv|爆款|热门|热搜)/;
 const CONTENT_PROMISE_NEGATION =
-  /(?:(?:无法|不能|难以|不应|不要|无需|不可能|不再)(?:百分百|百分之百|100|完全|绝对|真正|一定|有效)?|不)$/;
+  /(?:(?:无法|不能|不会|难以|不应|不要|无需|不可能|不再)(?:百分百|百分之百|100|完全|绝对|真正|一定|有效)?|不)$/;
 const CONTENT_PROMISE_DOUBLE_NEGATION =
-  /(?:不得|不能|不会|不可|不是|并非|不应|无需|不要|不一定|未必)不$/;
+  /(?:不得|不能|不会|不可|不是|并非|绝非|没有|不应|无需|不要|不一定|未必)不$/;
 const CONTENT_PROMISE_POST_NEGATION = /^(?:不了|不到|不住|不能(?!(?:低于|少于)))/;
 
 const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
@@ -216,8 +223,7 @@ const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
     /(?:无法核实|没法验证|无法验证|未核实|未经核实).{0,18}(?:不要|无需|不用|不必).{0,6}(?:标注|注明|说明).{0,4}(?:待确认|推断|未核实)/,
   ],
   'data-report-insight': [
-    /(?:相关性|相关关系).{0,16}(?:直接)?(?:写成|当成|视为|认定为|解释(?:为|成)|表述(?:为|成)|描述(?:为|成)|说成|归结(?:为|成)|归因(?:为|成)).{0,4}(?:因果|因果关系|因果结论)/,
-    /(?:相关性|相关关系).{0,12}直接(?:证明|得出).{0,4}(?:因果|因果关系|因果结论)/,
+    /(?:相关性|相关关系).{0,16}(?:直接)?(?:写成|当成|视为|认定为|解释(?:为|成)|表述(?:为|成)|描述(?:为|成)|说成|归结(?:为|成)|归因(?:为|成)|证明|推导出|推导|推出|推断出|推断|得出).{0,4}(?:因果|因果关系|因果结论)/,
     /(?:相关性|相关关系).{0,12}(?:断定|认定|确定).{0,4}(?:因果|因果关系|因果结论)/,
   ],
   'product-plan-drafting': [
@@ -256,7 +262,7 @@ const SKILL_BOUNDARY_SAFE_MENTIONS: Readonly<Record<string, readonly RegExp[]>> 
     /^(?:分析|说明|解释|检查|审查|评估).{0,36}(?:是否|有没有|有无).{0,12}(?:写成|当成|标注|核实|验证)/,
   ],
   'data-report-insight': [
-    /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:不能|无法|不足以|不应).{0,8}(?:直接)?(?:证明|认定|断定|得出|解释(?:为|成)|表述(?:为|成)|描述(?:为|成)|说成|归结(?:为|成)|归因(?:为|成)).{0,6}(?:因果|因果关系|因果结论)/,
+    /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:不能|无法|不足以|不应).{0,8}(?:直接)?(?:证明|认定|断定|得出|推导出|推导|推出|推断出|推断|解释(?:为|成)|表述(?:为|成)|描述(?:为|成)|说成|归结(?:为|成)|归因(?:为|成)).{0,6}(?:因果|因果关系|因果结论)/,
   ],
   'product-plan-drafting': [
     /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:为什么)?(?:不能|无法|不应|不要).{0,8}(?:自动|替我|代我|直接)?(?:批准|通过|确认|认定|拍板)/,
@@ -278,6 +284,7 @@ const HIRING_DIRECT_DECISION_CONFLICTS: readonly RegExp[] = [
   /^(?:决定|决策).{0,4}(?:是否|要不要|该不该|能否)?(?:录用|淘汰|拒绝)/,
   /(?:再|然后|之后|最后)(?:决定|决策).{0,4}(?:是否|要不要|该不该|能否)?(?:录用|淘汰|拒绝)/,
   /(?:选出|选择|挑出).{0,3}(?:最终录用|录用|最终)(?:人选|候选人|人才)/,
+  /(?:从|在).{0,8}(?:简历|候选人|人才).{0,6}(?:里|中)?(?:挑|选|选择)(?:出)?(?:一个|一位)?(?:入职|录用)/,
   /^(?:录用|淘汰|拒绝)(?:这份|该份|一份|这些|这位|该位|这个|该|哪个|哪些)?(?:简历|候选人|人才)/,
   /(?:并|然后|之后|再|最后)(?:直接|最终|马上|立即)?(?:录用|淘汰|拒绝)/,
 ];
@@ -506,9 +513,16 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
           : 0),
       0,
     );
+    const safeBoundaryScore =
+      skill.id === 'data-report-insight' &&
+      (SKILL_BOUNDARY_SAFE_MENTIONS[skill.id] ?? []).some((pattern) =>
+        pattern.test(boundaryIntent),
+      )
+        ? 4
+        : 0;
     return {
       skill,
-      score: evidence.pairScore + specificExactScore,
+      score: evidence.pairScore + specificExactScore + safeBoundaryScore,
       index,
     };
   });
@@ -518,6 +532,7 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
   const topScore = matches[0]?.score ?? 0;
   const secondScore = matches[1]?.score ?? 0;
   const boundaryConflict = matches.some((match) =>
+    hasRequiredCapabilityTaskEvidence(match.skill.id, normalizedIntent) &&
     intentViolatesSkillBoundary(match.skill.id, boundaryIntent),
   );
   const capabilityEvidence = hasRequiredCapabilityTaskEvidence(
@@ -615,7 +630,7 @@ function hasUnexemptedHiringDiscrimination(normalizedIntent: string): boolean {
 function splitBoundaryClauses(normalizedIntent: string): string[] {
   return normalizedIntent
     .split(
-      /(?:然后|之后|随后|同时|并且|但是|但|再|并(?=(?:把|将|为我|帮我|替我|直接|自动|未经|没有|未|出具|提供|给出|代替|替代|相关性|相关关系|保证|承诺|确保|保底|批准|通过|认定|确认|决定|指派|分配|修改|涨薪|加薪|晋升|降级|辞退|解雇|淘汰|拒绝|录用|只招|只要|仅限|只选|只筛选|仅筛选|筛选|筛掉|过滤|排除|不招|不录用|优先考虑|发布|发表|上线|上传|推送|投流|投放|买量|交易|买入|卖出))|(?:完成|检查|分析|规则|看完|审完|写好|改好|准备好|评估)后)|[，,；;。.!！？?]+/,
+      /(?:然后|之后|随后|接着|继而|同时|并且|但是|但|再|并(?=(?:把|将|为我|帮我|替我|直接|自动|未经|没有|未|出具|提供|给出|代替|替代|相关性|相关关系|保证|承诺|确保|保底|批准|通过|认定|确认|决定|指派|分配|修改|涨薪|加薪|晋升|降级|辞退|解雇|淘汰|拒绝|录用|只招|只要|仅限|只选|只筛选|仅筛选|筛选|筛掉|过滤|排除|不招|不录用|优先考虑|发布|发表|上线|上传|推送|投流|投放|买量|交易|买入|卖出))|(?:完成|检查|分析|规则|看完|审完|写好|改好|准备好|评估)后)|[，,；;。.!！？?]+/,
     )
     .filter(Boolean);
 }
@@ -623,6 +638,12 @@ function splitBoundaryClauses(normalizedIntent: string): string[] {
 function contentExecutionConflict(normalizedIntent: string): boolean {
   if (
     CONTENT_UNAMBIGUOUS_EXECUTION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent))
+  ) {
+    return true;
+  }
+  if (
+    CONTENT_PLATFORM_PUBLICATION_CONFLICT.test(normalizedIntent) &&
+    !CONTENT_PLATFORM_PUBLICATION_ANALYSIS.test(normalizedIntent)
   ) {
     return true;
   }
