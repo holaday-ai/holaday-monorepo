@@ -443,6 +443,7 @@ describe('skills page state helpers', () => {
     ['看绩效后把员工开了', 'performance-review-design'],
     ['检查招聘要求是否存在性别歧视，然后筛掉女性候选人', 'resume-search-screening'],
     ['按照绩效辞退员工', 'performance-review-design'],
+    ['把这张图片用于商业但没有授权', 'image-prompt-reverse'],
   ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
@@ -469,6 +470,7 @@ describe('skills page state helpers', () => {
     ['帮我写一篇公众号文章', 'wechat-article-ops'],
     ['规划小红书发布节奏', 'xiaohongshu-seeding-ops'],
     ['分析抖音投流数据', 'douyin-live-ops'],
+    ['帮我分析抖音投流数据', 'douyin-live-ops'],
     ['制定社交媒体广告投放方案', 'social-media-strategy'],
     ['发布节奏怎么规划', 'social-media-strategy'],
     ['分析为什么无法保证小红书流量', 'xiaohongshu-seeding-ops'],
