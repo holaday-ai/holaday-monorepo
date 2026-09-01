@@ -134,7 +134,7 @@ const HIRING_ANTI_DISCRIMINATION = new RegExp(
   `^(?:请)?(?:不要|禁止|不得|避免|防止)(?:再)?(?:基于|按照|根据|按|依据|以).{0,4}${SENSITIVE_IDENTITY_TERM}.{0,8}(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用)(?:候选人|人才|简历)?(?:并)?(?:检查|分析|说明|识别|评估)?(?:合规|歧视|风险|问题)?$`,
 );
 const HIRING_DIRECT_ANTI_DISCRIMINATION = new RegExp(
-  `^(?:请)?(?:不要|禁止|不得|避免|防止)(?:再)?(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用).{0,6}${SENSITIVE_IDENTITY_TERM}(?:候选人|人才|简历)?(?:并)?(?:检查|分析|说明|识别|评估)?(?:合规|歧视|风险|问题)?$`,
+  `^(?:请)?(?:不要|禁止|不得|避免|防止)(?:再)?(?:筛选|过滤).{0,6}${SENSITIVE_IDENTITY_TERM}(?:候选人|人才|简历)?(?:并)?(?:检查|分析|说明|识别|评估)?(?:合规|歧视|风险|问题)?$`,
 );
 
 const HIRING_DISCRIMINATION_CONFLICTS: readonly RegExp[] = [
@@ -189,7 +189,7 @@ const CONTENT_LEADING_PLANNING =
 const CONTENT_PROMISE_VERB = /(?:保证|承诺|确保|保底)/g;
 const CONTENT_OUTCOME = /(?:销量|流量|涨粉|转化|播放量|爆款|热门|热搜)/;
 const CONTENT_PROMISE_NEGATION =
-  /(?:无法|不能|难以|不应|不要|无需|不可能|不)(?:百分百|百分之百|100|完全|绝对|真正|一定|有效)?$/;
+  /(?:(?:无法|不能|难以|不应|不要|无需|不可能)(?:百分百|百分之百|100|完全|绝对|真正|一定|有效)?|(?<![得能会可应须要])不)$/;
 const CONTENT_PROMISE_POST_NEGATION = /^(?:不了|不到|不住|不能(?!(?:低于|少于)))/;
 
 const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
