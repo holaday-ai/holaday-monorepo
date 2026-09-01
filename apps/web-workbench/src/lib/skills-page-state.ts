@@ -191,6 +191,7 @@ const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
     /(?:根据|按照).{0,6}(?:绩效|考核).{0,10}(?:直接|自动)(?:决定|执行).{0,8}(?:涨薪|降薪|辞退|解雇|晋升|降职|奖金|薪酬)/,
     /(?:绩效|考核).{0,12}(?:后|然后|再).{0,6}(?:直接)?(?:决定|执行).{0,8}(?:涨薪|降薪|辞退|解雇|晋升|降职|奖金|薪酬)/,
     /(?:根据|按照).{0,6}(?:绩效|考核).{0,10}(?:给|让).{0,4}(?:员工|人员)?.{0,4}(?:涨薪|降薪|辞退|解雇|晋升|降职|奖金|薪酬)/,
+    /(?:根据|按照).{0,6}(?:绩效|考核).{0,10}(?:辞退|解雇|晋升|降职|涨薪|降薪|发放奖金).{0,4}(?:员工|人员)?/,
     /(?:绩效|考核).{0,12}(?:后|然后|再).{0,8}(?:把|将)?.{0,4}(?:员工|人员).{0,4}(?:开了|辞退|解雇)/,
   ],
 };
@@ -482,14 +483,10 @@ function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string):
     if (HIRING_DIRECT_DECISION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent))) {
       return true;
     }
-    if (HIRING_MIXED_DISCRIMINATION_ACTION.test(normalizedIntent)) return true;
     if (
-      HIRING_ANTI_DISCRIMINATION.test(normalizedIntent) ||
-      HIRING_DISCRIMINATION_AUDIT.test(normalizedIntent)
+      HIRING_MIXED_DISCRIMINATION_ACTION.test(normalizedIntent) ||
+      hasUnexemptedHiringDiscrimination(normalizedIntent)
     ) {
-      return false;
-    }
-    if (HIRING_DISCRIMINATION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent))) {
       return true;
     }
     if (HIRING_DECISION_EXPLANATION.test(normalizedIntent)) return false;
@@ -504,15 +501,38 @@ function hasUnexemptedBoundaryConflict(skillId: string, normalizedIntent: string
   const safeMentions = SKILL_BOUNDARY_SAFE_MENTIONS[skillId] ?? [];
   if (!safeMentions.some((pattern) => pattern.test(normalizedIntent))) return true;
 
-  const clauses = normalizedIntent
-    .split(/(?:然后|之后|随后|同时|并且|但是|但|再|并|后)/)
-    .filter(Boolean);
+  const clauses = splitBoundaryClauses(normalizedIntent);
   if (clauses.length <= 1) return false;
   return clauses.some(
     (clause) =>
       conflicts.some((pattern) => pattern.test(clause)) &&
       !safeMentions.some((pattern) => pattern.test(clause)),
   );
+}
+
+function hasUnexemptedHiringDiscrimination(normalizedIntent: string): boolean {
+  if (!HIRING_DISCRIMINATION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent))) {
+    return false;
+  }
+  const safeMention =
+    HIRING_ANTI_DISCRIMINATION.test(normalizedIntent) ||
+    HIRING_DISCRIMINATION_AUDIT.test(normalizedIntent);
+  if (!safeMention) return true;
+
+  const clauses = splitBoundaryClauses(normalizedIntent);
+  if (clauses.length <= 1) return false;
+  return clauses.some(
+    (clause) =>
+      HIRING_DISCRIMINATION_CONFLICTS.some((pattern) => pattern.test(clause)) &&
+      !HIRING_ANTI_DISCRIMINATION.test(clause) &&
+      !HIRING_DISCRIMINATION_AUDIT.test(clause),
+  );
+}
+
+function splitBoundaryClauses(normalizedIntent: string): string[] {
+  return normalizedIntent
+    .split(/(?:然后|之后|随后|同时|并且|但是|但|再|并|后)/)
+    .filter(Boolean);
 }
 
 function contentExecutionConflict(normalizedIntent: string): boolean {

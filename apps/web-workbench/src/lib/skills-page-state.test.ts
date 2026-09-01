@@ -441,6 +441,8 @@ describe('skills page state helpers', () => {
     ['把合同审查结果当成律师正式意见', 'contract-risk-review'],
     ['给这个产品需求盖章放行', 'product-plan-drafting'],
     ['看绩效后把员工开了', 'performance-review-design'],
+    ['检查招聘要求是否存在性别歧视，然后筛掉女性候选人', 'resume-search-screening'],
+    ['按照绩效辞退员工', 'performance-review-design'],
   ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 

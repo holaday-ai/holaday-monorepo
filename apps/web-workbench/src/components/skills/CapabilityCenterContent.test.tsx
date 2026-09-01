@@ -213,7 +213,7 @@ describe('CapabilityCenterContent', () => {
     await user.type(screen.getByRole('searchbox', { name: '搜索想完成的任务' }), '合同');
 
     expect(screen.getByText('发现 3 项高风险条款，并给出逐条修改方向。')).toBeTruthy();
-    expect(screen.getByText('最适合：合同风险审查')).toBeTruthy();
+    expect(screen.getByText('相关能力：合同风险审查')).toBeTruthy();
     const catalogue = screen.getByTestId('capability-catalogue');
     expect(within(catalogue).getByText('合同风险审查')).toBeTruthy();
     expect(within(catalogue).queryByText('数据报表解读')).toBeNull();
@@ -242,7 +242,7 @@ describe('CapabilityCenterContent', () => {
     expect(within(catalogue).getByText('数据报表解读')).toBeTruthy();
   });
 
-  it('starts the user own request with the strongest matched capability', async () => {
+  it('prepares the user own request with a related capability for review in the composer', async () => {
     const user = userEvent.setup();
     const onStart = vi.fn();
 
@@ -264,9 +264,11 @@ describe('CapabilityCenterContent', () => {
     await user.type(search, intent);
 
     expect(screen.getByText('为你匹配')).toBeTruthy();
-    expect(screen.getByText('最适合：数据报表解读')).toBeTruthy();
+    expect(screen.getByText('相关能力：数据报表解读')).toBeTruthy();
+    expect(screen.getByText('能力范围：结论基于你提供的数据，不替代专业审计。')).toBeTruthy();
+    expect(screen.getByText('会先带入任务输入框，由你确认后发送。')).toBeTruthy();
     const start = screen.getByRole('button', {
-      name: `用数据报表解读开始：${intent}`,
+      name: `用数据报表解读准备任务：${intent}`,
     });
     await user.click(start);
 
@@ -326,11 +328,11 @@ describe('CapabilityCenterContent', () => {
     }
 
     render(<Harness />);
-    expect(screen.getByText('最适合：社交媒体策略')).toBeTruthy();
+    expect(screen.getByText('相关能力：社交媒体策略')).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: '预览数据报表解读' }));
 
-    expect(screen.getByText('已选择：数据报表解读')).toBeTruthy();
+    expect(screen.getByText('已选择能力：数据报表解读')).toBeTruthy();
     expect(screen.getByText('销售额环比增长 18.7%，但复购率连续两周回落。')).toBeTruthy();
   });
 

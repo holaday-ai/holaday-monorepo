@@ -204,25 +204,28 @@ export function CapabilityCenterContent({
             {matchedSkill && (
               <div className="mt-6 rounded-[14px] border border-[#F0CDD8] bg-white/82 p-3.5 shadow-[0_8px_22px_rgba(180,50,88,0.06)] backdrop-blur-sm">
                 <p className="text-[12px] font-semibold text-[#4A4147]">
-                  {selectedIntentSkill ? '已选择' : '最适合'}：{activeSkill.name}
+                  {selectedIntentSkill ? '已选择能力' : '相关能力'}：{activeSkill.name}
                 </p>
                 <p className="mt-1 line-clamp-2 text-[11px] leading-5 text-muted-foreground">
                   {trimmedQuery}
+                </p>
+                <p className="mt-2 text-[11px] leading-5 text-[#756A72]">
+                  能力范围：{activeSkill.experience.boundary}
                 </p>
                 <button
                   type="button"
                   aria-label={
                     startUnavailable
                       ? `${startActionAriaPrefix}：${trimmedQuery}`
-                      : `用${activeSkill.name}开始：${trimmedQuery}`
+                      : `用${activeSkill.name}准备任务：${trimmedQuery}`
                   }
-                  title={startButtonTitle ?? `用${activeSkill.name}开始`}
+                  title={startButtonTitle ?? '带入任务输入框'}
                   aria-busy={activeSkillPending}
                   disabled={startUnavailable}
                   onClick={() => onStart(activeSkill, trimmedQuery)}
                   className="mt-3 inline-flex min-h-10 items-center justify-center gap-2 rounded-full bg-[#E91E57] px-4 text-[12px] font-semibold text-white shadow-[0_8px_20px_rgba(233,30,87,0.18)] transition hover:-translate-y-0.5 hover:bg-[#D91B51] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:translate-y-0 motion-reduce:transform-none"
                 >
-                  {startActionLabel === '开始' ? '用这个能力开始' : startActionLabel}
+                  {startActionLabel === '开始' ? '带入任务输入框' : startActionLabel}
                   {activeSkillPending || anotherSkillPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                   ) : activeSkillBlocked ? (
@@ -231,6 +234,9 @@ export function CapabilityCenterContent({
                     <ArrowRight className="h-4 w-4" aria-hidden />
                   )}
                 </button>
+                <p className="mt-2 text-[10px] leading-4 text-[#90868D]">
+                  会先带入任务输入框，由你确认后发送。
+                </p>
               </div>
             )}
 
