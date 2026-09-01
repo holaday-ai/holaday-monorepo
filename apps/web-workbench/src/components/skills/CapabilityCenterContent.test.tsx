@@ -272,7 +272,7 @@ describe('CapabilityCenterContent', () => {
     });
     await user.click(start);
 
-    expect(onStart).toHaveBeenCalledWith(skills[0], intent);
+    expect(onStart).toHaveBeenCalledWith(skills[0], intent, 'suggested');
   });
 
   it('keeps every capability available when the request is too vague to match honestly', async () => {

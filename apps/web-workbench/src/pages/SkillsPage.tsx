@@ -129,25 +129,31 @@ export function SkillsPage(): JSX.Element {
     await setSkillEnabled(skill, !skill.enabled);
   }
 
-  async function onStart(skill: UiSkill, prompt: string): Promise<void> {
+  async function onStart(
+    skill: UiSkill,
+    prompt: string,
+    skillSource: 'manual' | 'suggested' = 'manual',
+  ): Promise<void> {
     if (pendingId) return;
-    const decision = skillStartDecision({
-      enabled: skill.enabled,
-      enabledCount,
-      cap,
-    });
-    if (decision === 'blocked') {
-      toast.show(skillLimitMessage({ cap, planId }), 'error');
-      return;
-    }
-    if (decision === 'enable-and-start') {
-      const enabled = await setSkillEnabled(skill, true);
-      if (!enabled) return;
+    if (skillSource === 'manual') {
+      const decision = skillStartDecision({
+        enabled: skill.enabled,
+        enabledCount,
+        cap,
+      });
+      if (decision === 'blocked') {
+        toast.show(skillLimitMessage({ cap, planId }), 'error');
+        return;
+      }
+      if (decision === 'enable-and-start') {
+        const enabled = await setSkillEnabled(skill, true);
+        if (!enabled) return;
+      }
     }
     navigate('/', {
       state: {
         newTask: true,
-        skillTaskDraft: skillTaskDraft(skill, prompt),
+        skillTaskDraft: skillTaskDraft(skill, prompt, skillSource),
       },
     });
   }

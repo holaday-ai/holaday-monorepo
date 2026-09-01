@@ -13,6 +13,7 @@ import {
   skillLimitBannerCopy,
   skillLimitMessage,
   skillLoadErrorCopy,
+  skillSelectionFromTaskDraft,
   skillPageSummary,
   skillPlanLabel,
   skillStartDecision,
@@ -200,6 +201,53 @@ describe('skills page state helpers', () => {
       skillName: '数据报表解读',
       skillSource: 'manual',
       prompt: '@数据报表解读 分析这份周报并找出异常',
+    });
+    expect(
+      skillTaskDraft(
+        {
+          id: 'data-report-insight',
+          name: '数据报表解读',
+          description: '表格分析',
+        },
+        ' 帮我分析销售数据 ',
+        'suggested',
+      ),
+    ).toEqual({
+      skillId: 'data-report-insight',
+      skillName: '数据报表解读',
+      skillSource: 'suggested',
+      prompt: '帮我分析销售数据',
+    });
+  });
+
+  it('keeps suggested matches non-authoritative when the composer hydrates a draft', () => {
+    expect(
+      skillSelectionFromTaskDraft({
+        skillId: 'data-report-insight',
+        skillName: '数据报表解读',
+        skillSource: 'suggested',
+      }),
+    ).toBeNull();
+    expect(
+      skillSelectionFromTaskDraft({
+        skillId: 'data-report-insight',
+        skillName: '数据报表解读',
+        skillSource: 'manual',
+      }),
+    ).toEqual({
+      skillId: 'data-report-insight',
+      skillName: '数据报表解读',
+      skillSource: 'manual',
+    });
+    expect(
+      skillSelectionFromTaskDraft({
+        skillId: 'legacy-skill',
+        skillName: '历史能力',
+      }),
+    ).toEqual({
+      skillId: 'legacy-skill',
+      skillName: '历史能力',
+      skillSource: 'manual',
     });
   });
 
@@ -496,9 +544,11 @@ describe('skills page state helpers', () => {
     ['说明为什么不能替团队承诺项目最终排期', 'project-delivery-management'],
     ['分析为什么不能根据绩效直接决定员工涨薪', 'performance-review-design'],
     ['分析保证完全还原图片会有什么风险', 'image-prompt-reverse'],
+    ['分析保证完全还原图片会有什么后果', 'image-prompt-reverse'],
     ['评估出具正式法律意见是否超出合同审查范围', 'contract-risk-review'],
     ['分析自动批准产品需求为什么有风险', 'product-plan-drafting'],
     ['评估根据绩效直接决定涨薪的合规风险', 'performance-review-design'],
+    ['筛选女装设计师候选人', 'resume-search-screening'],
   ])('keeps a supported %s request strongly matched', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 

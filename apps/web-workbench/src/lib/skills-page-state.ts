@@ -1,4 +1,4 @@
-import type { UiSkill } from '@/types/task';
+import type { UiSkill, UiSkillSelection } from '@/types/task';
 
 export type SkillCategory = UiSkill['category'];
 
@@ -26,7 +26,7 @@ export interface SkillLimitBannerCopy {
 export interface SkillTaskDraft {
   readonly skillId: string;
   readonly skillName: string;
-  readonly skillSource: 'manual';
+  readonly skillSource: 'manual' | 'suggested';
   readonly prompt: string;
 }
 
@@ -95,7 +95,7 @@ const HIRING_DISCRIMINATION_AUDIT =
   /^(?:分析|解释|说明|复盘|研究|检查|审查|评估|识别).{0,40}(?:为什么|为何|原因|是否|有无|存在|做法|要求|规则|政策).{0,20}(?:歧视|合规|风险|问题|不招|只招|筛选|过滤)/;
 
 const SENSITIVE_IDENTITY_TERM =
-  '(?:性别|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|民族|种族|宗教|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|籍贯|出生地|国籍|政治面貌|健康状况|疾病|男性|女性|男士|女士|男|女|孕妇|已婚|未婚)';
+  '(?:性别|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|民族|种族|宗教|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|籍贯|出生地|国籍|政治面貌|健康状况|疾病|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚)';
 
 const HIRING_ANTI_DISCRIMINATION = new RegExp(
   `^(?:请)?(?:不要|禁止|不得|避免|防止)(?:再)?(?:基于|按照|根据|按|依据|以).{0,4}${SENSITIVE_IDENTITY_TERM}.{0,8}(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用)(?:候选人|人才|简历)?(?:并)?(?:检查|分析|说明|识别|评估)?(?:合规|歧视|风险|问题)?$`,
@@ -386,6 +386,7 @@ export function skillCardUsageHint(options: {
 export function skillTaskDraft(
   skill: Pick<UiSkill, 'id' | 'name' | 'description'>,
   starterPrompt?: string,
+  skillSource: SkillTaskDraft['skillSource'] = 'manual',
 ): SkillTaskDraft {
   const id = safeSkillText(skill.id);
   const name = safeSkillText(skill.name) || '技能';
@@ -393,9 +394,26 @@ export function skillTaskDraft(
   return {
     skillId: id,
     skillName: name,
-    skillSource: 'manual',
-    prompt: prompt ? `@${name} ${prompt}` : `@${name} `,
+    skillSource,
+    prompt:
+      skillSource === 'suggested'
+        ? prompt
+        : prompt
+          ? `@${name} ${prompt}`
+          : `@${name} `,
   };
+}
+
+export function skillSelectionFromTaskDraft(draft: {
+  readonly skillId?: unknown;
+  readonly skillName?: unknown;
+  readonly skillSource?: unknown;
+} | null): UiSkillSelection | null {
+  if (!draft || (draft.skillSource !== undefined && draft.skillSource !== 'manual')) return null;
+  const skillId = typeof draft.skillId === 'string' ? draft.skillId.trim() : '';
+  const skillName = typeof draft.skillName === 'string' ? draft.skillName.trim() : '';
+  if (!skillId || !skillName) return null;
+  return { skillId, skillName, skillSource: 'manual' };
 }
 
 export function skillStartDecision(options: {
@@ -533,7 +551,9 @@ function hasUnexemptedHiringDiscrimination(normalizedIntent: string): boolean {
 
 function splitBoundaryClauses(normalizedIntent: string): string[] {
   return normalizedIntent
-    .split(/(?:然后|之后|随后|同时|并且|但是|但|再|并|后)/)
+    .split(
+      /(?:然后|之后|随后|同时|并且|但是|但|再|并|(?:完成|检查|分析|规则|看完|审完|写好|改好|准备好|评估)后)|[，,；;。.!！？?]+/,
+    )
     .filter(Boolean);
 }
 

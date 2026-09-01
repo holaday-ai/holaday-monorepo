@@ -29,7 +29,7 @@ interface CapabilityCenterContentProps {
   notice?: React.ReactNode;
   onQueryChange(query: string): void;
   onSelectSkill(skillId: string): void;
-  onStart(skill: UiSkill, prompt: string): void;
+  onStart(skill: UiSkill, prompt: string, skillSource?: 'manual' | 'suggested'): void;
   onToggle(skill: UiSkill): void;
 }
 
@@ -90,6 +90,7 @@ export function CapabilityCenterContent({
   const anotherSkillPending = pendingId !== null && !activeSkillPending;
   const activeSkillBlocked = !activeSkill.enabled && enabledCount >= cap;
   const startUnavailable = activeSkillPending || anotherSkillPending || activeSkillBlocked;
+  const suggestionUnavailable = activeSkillPending || anotherSkillPending;
   const startActionLabel = activeSkillPending
     ? '准备中…'
     : anotherSkillPending
@@ -215,21 +216,19 @@ export function CapabilityCenterContent({
                 <button
                   type="button"
                   aria-label={
-                    startUnavailable
-                      ? `${startActionAriaPrefix}：${trimmedQuery}`
+                    suggestionUnavailable
+                      ? `请稍候：${trimmedQuery}`
                       : `用${activeSkill.name}准备任务：${trimmedQuery}`
                   }
-                  title={startButtonTitle ?? '带入任务输入框'}
-                  aria-busy={activeSkillPending}
-                  disabled={startUnavailable}
-                  onClick={() => onStart(activeSkill, trimmedQuery)}
+                  title={suggestionUnavailable ? '请稍候，正在保存常用能力' : '带入任务输入框'}
+                  aria-busy={suggestionUnavailable}
+                  disabled={suggestionUnavailable}
+                  onClick={() => onStart(activeSkill, trimmedQuery, 'suggested')}
                   className="mt-3 inline-flex min-h-10 items-center justify-center gap-2 rounded-full bg-[#E91E57] px-4 text-[12px] font-semibold text-white shadow-[0_8px_20px_rgba(233,30,87,0.18)] transition hover:-translate-y-0.5 hover:bg-[#D91B51] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:translate-y-0 motion-reduce:transform-none"
                 >
-                  {startActionLabel === '开始' ? '带入任务输入框' : startActionLabel}
-                  {activeSkillPending || anotherSkillPending ? (
+                  {suggestionUnavailable ? '请稍候' : '带入任务输入框'}
+                  {suggestionUnavailable ? (
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                  ) : activeSkillBlocked ? (
-                    <LockKeyhole className="h-4 w-4" aria-hidden />
                   ) : (
                     <ArrowRight className="h-4 w-4" aria-hidden />
                   )}
