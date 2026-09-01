@@ -36,7 +36,7 @@ import {
 } from '@/components/composer-submit';
 import { awaitingUserCopy, type AwaitingKind } from '@/lib/awaiting-user-copy';
 import { quotaExhaustedCopy } from '@/lib/quota-exhausted-copy';
-import { normalizeSkillRows } from '@/lib/skills-page-state';
+import { normalizeSkillRows, skillSelectionFromTaskDraft } from '@/lib/skills-page-state';
 import {
   detectSkillMentionTrigger,
   filterMentionSkills,
@@ -346,16 +346,7 @@ export function InputArea({
     if (!prompt) return;
     setValue(prompt);
     const skillId = typeof draft?.skillId === 'string' ? draft.skillId.trim() : '';
-    const skillName = typeof draft?.skillName === 'string' ? draft.skillName.trim() : '';
-    if (skillId && skillName) {
-      setSelectedSkill({
-        skillId,
-        skillName,
-        skillSource: 'manual',
-      });
-    } else {
-      setSelectedSkill(null);
-    }
+    setSelectedSkill(skillSelectionFromTaskDraft(draft ?? null));
     if (
       draft?.expertMode === 'expert' ||
       draft?.expertMode === 'normal' ||

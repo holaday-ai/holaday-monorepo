@@ -1,5 +1,9 @@
 import { SkillLogo } from '@/components/SkillLogo';
-import { groupSkillsByCategory, pickCapabilityShowcase } from '@/lib/skills-page-state';
+import {
+  groupSkillsByCategory,
+  matchSkillsForIntent,
+  pickCapabilityShowcase,
+} from '@/lib/skills-page-state';
 import { cn } from '@/lib/utils';
 import type { UiSkill } from '@/types/task';
 import {
@@ -25,7 +29,7 @@ interface CapabilityCenterContentProps {
   notice?: React.ReactNode;
   onQueryChange(query: string): void;
   onSelectSkill(skillId: string): void;
-  onStart(skill: UiSkill, prompt: string): void;
+  onStart(skill: UiSkill, prompt: string, skillSource?: 'manual' | 'suggested'): void;
   onToggle(skill: UiSkill): void;
 }
 
@@ -42,25 +46,42 @@ export function CapabilityCenterContent({
   onStart,
   onToggle,
 }: CapabilityCenterContentProps): JSX.Element {
+  const [intentSelection, setIntentSelection] = React.useState<{
+    readonly query: string;
+    readonly skillId: string;
+  } | null>(null);
   const showcase = React.useMemo(() => pickCapabilityShowcase(skills), [skills]);
+  const trimmedQuery = query.trim();
+  const intentMatch = React.useMemo(
+    () => matchSkillsForIntent(skills, trimmedQuery),
+    [skills, trimmedQuery],
+  );
+  const matchedSkill =
+    intentMatch.confidence === 'strong' ? intentMatch.matches[0]?.skill : undefined;
+  const selectedIntentSkill =
+    intentSelection?.query === trimmedQuery
+      ? skills.find((skill) => skill.id === intentSelection.skillId)
+      : undefined;
   const activeSkill =
-    skills.find((skill) => skill.id === activeSkillId) ?? showcase[0] ?? skills[0];
-  const secondaryShowcase = showcase.filter((skill) => skill.id !== activeSkill?.id).slice(0, 2);
+    selectedIntentSkill ??
+    matchedSkill ??
+    skills.find((skill) => skill.id === activeSkillId) ??
+    showcase[0] ??
+    skills[0];
+  const secondaryShowcase = (
+    matchedSkill
+      ? intentMatch.matches
+          .filter((match) => match.score > 0 && match.skill.id !== activeSkill?.id)
+          .map((match) => match.skill)
+      : showcase.filter((skill) => skill.id !== activeSkill?.id)
+  ).slice(0, 2);
   const filteredSkills = React.useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return skills;
-    return skills.filter((skill) =>
-      [
-        skill.name,
-        skill.id,
-        skill.description,
-        ...skill.aliases,
-        ...skill.experience.starterPrompts,
-        ...skill.experience.deliverables,
-        skill.experience.exampleSummary,
-      ].some((value) => value.toLowerCase().includes(normalizedQuery)),
-    );
-  }, [query, skills]);
+    if (!trimmedQuery) return skills;
+    if (intentMatch.confidence === 'strong') {
+      return intentMatch.matches.filter((match) => match.score > 0).map((match) => match.skill);
+    }
+    return skills;
+  }, [intentMatch, skills, trimmedQuery]);
   const grouped = React.useMemo(() => groupSkillsByCategory(filteredSkills), [filteredSkills]);
 
   if (!activeSkill) return <></>;
@@ -69,6 +90,7 @@ export function CapabilityCenterContent({
   const anotherSkillPending = pendingId !== null && !activeSkillPending;
   const activeSkillBlocked = !activeSkill.enabled && enabledCount >= cap;
   const startUnavailable = activeSkillPending || anotherSkillPending || activeSkillBlocked;
+  const suggestionUnavailable = activeSkillPending || anotherSkillPending;
   const startActionLabel = activeSkillPending
     ? '准备中…'
     : anotherSkillPending
@@ -135,6 +157,16 @@ export function CapabilityCenterContent({
 
       {notice}
 
+      {trimmedQuery && intentMatch.confidence === 'low' && (
+        <div
+          role="status"
+          className="rounded-[14px] border border-[#E5DFE8] bg-white px-4 py-3 text-[12px] leading-5 text-[#625A61] shadow-[0_8px_22px_rgba(56,47,52,0.04)]"
+        >
+          <span className="font-semibold text-foreground">还不能确定最适合的能力</span>
+          <span className="ml-2 text-muted-foreground">可以补充具体目标，或从下方任务中选择。</span>
+        </div>
+      )}
+
       <section
         data-testid="capability-studio"
         aria-labelledby="active-capability-title"
@@ -156,7 +188,7 @@ export function CapabilityCenterContent({
               <div>
                 <div className="inline-flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.1em] text-[#D22455]">
                   <Sparkles className="h-3.5 w-3.5" aria-hidden />
-                  推荐从这里开始
+                  {selectedIntentSkill ? '已切换能力' : matchedSkill ? '为你匹配' : '推荐从这里开始'}
                 </div>
                 <h2
                   id="active-capability-title"
@@ -170,9 +202,52 @@ export function CapabilityCenterContent({
               {activeSkill.description}
             </p>
 
+            {matchedSkill && (
+              <div className="mt-6 rounded-[14px] border border-[#F0CDD8] bg-white/82 p-3.5 shadow-[0_8px_22px_rgba(180,50,88,0.06)] backdrop-blur-sm">
+                <p className="text-[12px] font-semibold text-[#4A4147]">
+                  {selectedIntentSkill ? '已选择能力' : '相关能力'}：{activeSkill.name}
+                </p>
+                <p className="mt-1 line-clamp-2 text-[11px] leading-5 text-muted-foreground">
+                  {trimmedQuery}
+                </p>
+                <p className="mt-2 text-[11px] leading-5 text-[#756A72]">
+                  能力范围：{activeSkill.experience.boundary}
+                </p>
+                <button
+                  type="button"
+                  aria-label={
+                    suggestionUnavailable
+                      ? `请稍候：${trimmedQuery}`
+                      : `用${activeSkill.name}准备任务：${trimmedQuery}`
+                  }
+                  title={suggestionUnavailable ? '请稍候，正在保存常用能力' : '带入任务输入框'}
+                  aria-busy={suggestionUnavailable}
+                  disabled={suggestionUnavailable}
+                  onClick={() =>
+                    onStart(
+                      activeSkill,
+                      trimmedQuery,
+                      selectedIntentSkill ? 'manual' : 'suggested',
+                    )
+                  }
+                  className="mt-3 inline-flex min-h-10 items-center justify-center gap-2 rounded-full bg-[#E91E57] px-4 text-[12px] font-semibold text-white shadow-[0_8px_20px_rgba(233,30,87,0.18)] transition hover:-translate-y-0.5 hover:bg-[#D91B51] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:translate-y-0 motion-reduce:transform-none"
+                >
+                  {suggestionUnavailable ? '请稍候' : '带入任务输入框'}
+                  {suggestionUnavailable ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  ) : (
+                    <ArrowRight className="h-4 w-4" aria-hidden />
+                  )}
+                </button>
+                <p className="mt-2 text-[10px] leading-4 text-[#90868D]">
+                  会先带入任务输入框，由你确认后发送。
+                </p>
+              </div>
+            )}
+
             <div className="mt-7">
               <div className="mb-2.5 flex items-center justify-between gap-3 text-[11px] font-semibold text-[#756A72]">
-                <span>选择一个任务</span>
+                <span>{matchedSkill ? '也可以从示例开始' : '选择一个任务'}</span>
                 <span className="font-normal text-[#A49BA1]">点击后可补充材料和要求</span>
               </div>
               <div className="space-y-2">
@@ -269,7 +344,12 @@ export function CapabilityCenterContent({
               type="button"
               aria-label={`预览${skill.name}`}
               title={`预览${skill.name}`}
-              onClick={() => onSelectSkill(skill.id)}
+              onClick={() => {
+                if (matchedSkill) {
+                  setIntentSelection({ query: trimmedQuery, skillId: skill.id });
+                }
+                onSelectSkill(skill.id);
+              }}
               className="group relative flex min-h-[128px] items-start gap-4 overflow-hidden rounded-[17px] border border-[#E9E4EA] bg-white p-5 text-left shadow-[0_10px_28px_rgba(56,47,52,0.045)] transition hover:-translate-y-0.5 hover:border-[#DDCED7] hover:shadow-[0_16px_34px_rgba(56,47,52,0.075)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/15 motion-reduce:transform-none"
             >
               <span
@@ -344,7 +424,12 @@ export function CapabilityCenterContent({
                           aria-label={`查看${skill.name}`}
                           title={`查看${skill.name}`}
                           aria-pressed={skill.id === activeSkill.id}
-                          onClick={() => onSelectSkill(skill.id)}
+                          onClick={() => {
+                            if (matchedSkill) {
+                              setIntentSelection({ query: trimmedQuery, skillId: skill.id });
+                            }
+                            onSelectSkill(skill.id);
+                          }}
                           className="flex min-w-0 flex-1 items-center gap-3 rounded-[8px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/15"
                         >
                           <SkillLogo logoId={skill.logoId} label={skill.name} size="md" />
