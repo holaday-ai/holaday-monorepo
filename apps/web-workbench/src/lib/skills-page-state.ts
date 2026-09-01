@@ -165,7 +165,7 @@ const CONTENT_PROMISE_VERB = /(?:保证|承诺|确保|保底)/g;
 const CONTENT_OUTCOME = /(?:销量|流量|涨粉|转化|播放量|爆款|热门|热搜)/;
 const CONTENT_PROMISE_NEGATION =
   /(?:无法|不能|难以|不应|不要|无需|不可能)(?:百分百|百分之百|100|完全|绝对|真正|一定|有效)?$/;
-const CONTENT_PROMISE_POST_NEGATION = /^(?:不(?:了|到|住|成|能|会|可以)?|无法|没法|难以)/;
+const CONTENT_PROMISE_POST_NEGATION = /^不了/;
 
 const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
   'image-prompt-reverse': [
@@ -459,6 +459,7 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
   intent: string,
 ): SkillIntentMatchResult<TSkill> {
   const normalizedIntent = normalizeMatchText(intent);
+  const boundaryIntent = normalizeBoundaryText(intent);
   const intentPairs = characterPairs(normalizedIntent);
   const skillDocuments = skills.map((skill) => normalizeSkillIntentDocument(skill));
   const scoredSkills = skills.map((skill, index) => {
@@ -484,7 +485,7 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
   const topScore = matches[0]?.score ?? 0;
   const secondScore = matches[1]?.score ?? 0;
   const boundaryConflict = matches.some((match) =>
-    intentViolatesSkillBoundary(match.skill.id, normalizedIntent),
+    intentViolatesSkillBoundary(match.skill.id, boundaryIntent),
   );
   const platformEvidence = hasRequiredPlatformTaskEvidence(
     matches[0]?.skill.id,
@@ -501,7 +502,7 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
   const selectableMatches =
     confidence === 'strong'
       ? matches.filter(
-          (match) => !intentViolatesSkillBoundary(match.skill.id, normalizedIntent),
+          (match) => !intentViolatesSkillBoundary(match.skill.id, boundaryIntent),
         )
       : matches;
   return { confidence, matches: selectableMatches };
@@ -667,6 +668,10 @@ function normalizeSkillIntentDocument(skill: UiSkill): string {
 
 function normalizeMatchText(value: string): string {
   return value.trim().toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+}
+
+function normalizeBoundaryText(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/gu, '');
 }
 
 function characterPairs(value: string): Set<string> {
