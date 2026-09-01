@@ -89,6 +89,8 @@ const STOCK_DECISION_CONFLICTS: readonly RegExp[] = [
 ];
 
 const HIRING_DECISION_EXPLANATION = /(?:分析|解释|说明|复盘|研究).{0,10}(?:为什么|为何|原因|依据|逻辑)/;
+const HIRING_DISCRIMINATION_AUDIT =
+  /^(?:分析|解释|说明|复盘|研究|检查|审查|评估|识别).{0,40}(?:为什么|为何|原因|是否|有无|存在|做法|要求|规则|政策).{0,20}(?:歧视|合规|风险|问题|不招|只招|筛选|过滤)/;
 
 const SENSITIVE_IDENTITY_TERM =
   '(?:性别|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|民族|种族|宗教|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|籍贯|出生地|国籍|政治面貌|健康状况|疾病|男性|女性|男士|女士|男|女|孕妇|已婚|未婚)';
@@ -102,12 +104,16 @@ const HIRING_DISCRIMINATION_CONFLICTS: readonly RegExp[] = [
     `(?:基于|按照|根据|按|依据|以).{0,4}${SENSITIVE_IDENTITY_TERM}.{0,8}(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用)`,
   ),
   new RegExp(`(?:只招|只要|仅限|只选|只筛选|仅筛选).{0,6}${SENSITIVE_IDENTITY_TERM}`),
+  new RegExp(`(?:只录用|仅录用).{0,6}${SENSITIVE_IDENTITY_TERM}`),
+  new RegExp(
+    `(?:筛选|过滤|挑选|选择|录用|招聘|招|找).{0,4}${SENSITIVE_IDENTITY_TERM}`,
+  ),
   new RegExp(
     `(?:筛掉|过滤掉|排除|拒绝|淘汰|不招|不录用|不要)(?:招聘|录用|选择|筛选|要)?${SENSITIVE_IDENTITY_TERM}`,
   ),
-  new RegExp(`优先(?:招聘|录用|选择|筛选|推荐)${SENSITIVE_IDENTITY_TERM}`),
+  new RegExp(`优先(?:考虑|招聘|录用|选择|筛选|推荐)?${SENSITIVE_IDENTITY_TERM}`),
   new RegExp(
-    `${SENSITIVE_IDENTITY_TERM}.{0,6}(?:优先(?:招聘|录用|选择|筛选)|排除|拒绝|淘汰|不招|不录用)`,
+    `${SENSITIVE_IDENTITY_TERM}(?:候选人|人才|简历)?.{0,4}(?:优先(?:招聘|录用|选择|筛选)?|不要|排除|拒绝|淘汰|不招|不录用)`,
   ),
 ];
 
@@ -118,20 +124,58 @@ const CONTENT_EXECUTION_SKILL_IDS = new Set([
   'social-media-strategy',
 ]);
 
-const CONTENT_EXECUTION_CONFLICTS: readonly RegExp[] = [
-  /^(?:一键|直接|立即|马上|自动)?(?:发布|发表|上线|上传)(?:全平台)?(?:这篇|这条|该篇|该条|内容|文章|笔记|视频)/,
+const CONTENT_UNAMBIGUOUS_EXECUTION_CONFLICTS: readonly RegExp[] = [
+  /(?:并|然后|再|之后)(?:直接|自动|马上|立即)?(?:发布|发表|上线|上传|推送|发到|发至|发出去)/,
   /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我|自动)(?:直接|自动|马上|立即|去)?(?:发布|发表|上线|上传|发到|发至)/,
-  /(?:帮我|替我|给我|请|代我|为我)(?:把|将).{0,20}(?:发布出去|发出去|发表|上线|上传到?)/,
-  /^(?:把|将).{0,20}(?:发布出去|发出去|发表|上线|上传到?)/,
+  /(?:帮我|替我|给我|请|代我|为我)(?:把|将)?.{0,24}(?:发布出去|发出去|发到|发至|发表|上线|上传到?|推送)/,
+  /^(?:把|将).{0,24}(?:发布出去|发出去|发到|发至|发表|上线|上传到?|推送)/,
+  /^(?:发一下|推送)(?:这篇|这条|该篇|该条|内容|文章|笔记|视频)/,
   /(?:在|到).{0,10}(?:上|平台)(?:发布|发表|上线|上传)/,
   /(?:写好|改好|准备好|完成)(?:之后|后|然后)(?:直接|自动)?(?:发布|发表|上线|上传|发到|发至)/,
-  /^(?:投流|投放广告|投广告|买量)/,
+  /^(?:投流|投放广告|投广告|买量|投放)(?:这篇|这条|该篇|该条|内容|文章|笔记|视频|抖音|小红书)/,
+  /^(?:把|将).{0,20}(?:投流|投放.{0,6}广告|投广告|买量|投薯条)/,
   /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我|自动)(?:直接|自动|马上|立即|去)?(?:投流|投放.{0,6}广告|投广告|买量)/,
-  /(?:给|帮|替).{0,16}(?:投流|投放.{0,6}广告|投广告|买量)/,
+  /(?:给|帮|替).{0,16}(?:投流|投放.{0,6}广告|投广告|买量|投薯条)/,
 ];
 
-const CONTENT_OUTCOME_PROMISE = /(?:保证|承诺|确保).{0,12}(?:销量|流量|涨粉|转化|播放量|爆款|热门|热搜)/;
-const CONTENT_OUTCOME_PROMISE_NEGATION = /(?:无法|不能|难以|不应|不要|无需|不可能).{0,2}(?:保证|承诺|确保)/;
+const CONTENT_LEADING_EXECUTION =
+  /^(?:一键|直接|立即|马上|自动)?(?:发布|发表|上线|上传)(?:全平台)?(?:这篇|这条|该篇|该条|内容|文章|笔记|视频)/;
+const CONTENT_PLANNING_OR_ANALYSIS =
+  /(?:怎么|如何).{0,6}(?:规划|计划|安排)|(?:规划|计划|策略|节奏|方案|建议|分析|复盘|数据|效果|预算|检查清单|注意事项)/;
+const CONTENT_PROMISE_VERB = /(?:保证|承诺|确保)/g;
+const CONTENT_OUTCOME = /(?:销量|流量|涨粉|转化|播放量|爆款|热门|热搜)/;
+const CONTENT_PROMISE_NEGATION =
+  /(?:无法|不能|难以|不应|不要|无需|不可能)(?:百分百|百分之百|100|完全|绝对|真正|一定|有效)?$/;
+
+const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
+  'image-prompt-reverse': [
+    /(?:保证|承诺|确保).{0,16}(?:完全|一模一样|百分百|100).{0,8}(?:复现|还原|一致)/,
+    /(?:未授权|没有授权|未经授权|无授权).{0,12}(?:直接)?(?:商用|商业使用|用于商业)/,
+  ],
+  'contract-risk-review': [
+    /(?:替我|代我|给我|请).{0,10}(?:出具|提供|给出).{0,6}(?:正式)?法律意见/,
+    /(?:代替|替代).{0,6}(?:律师|法律顾问).{0,6}(?:判断|决定|意见|签字|审核)/,
+  ],
+  'market-competitor-insight': [
+    /(?:无法核实|未核实|没有核实|未经核实).{0,16}(?:直接)?(?:写成|当成|视为|作为).{0,4}(?:事实|结论)/,
+  ],
+  'data-report-insight': [
+    /(?:相关性|相关关系).{0,16}(?:直接)?(?:写成|当成|视为|认定为).{0,4}(?:因果|因果关系|因果结论)/,
+    /(?:相关性|相关关系).{0,12}直接(?:证明|得出).{0,4}(?:因果|因果关系|因果结论)/,
+  ],
+  'product-plan-drafting': [
+    /(?:自动|替我|代我|直接).{0,8}(?:批准|通过).{0,10}(?:需求|方案)/,
+    /(?:替|代替).{0,8}(?:研发|技术团队).{0,8}(?:确认|评估|决定).{0,12}(?:技术)?可行/,
+  ],
+  'project-delivery-management': [
+    /(?:未经授权|自动|替我|代我).{0,10}(?:指派|分配|修改).{0,14}(?:项目|任务|负责人)/,
+    /(?:替|代替).{0,8}(?:团队|负责人|项目组).{0,8}(?:承诺|确认|决定).{0,12}(?:最终)?(?:排期|截止时间|交付时间)/,
+  ],
+  'performance-review-design': [
+    /(?:替我|代我|自动|直接).{0,8}(?:做|作出|给出)?(?:绩效|考核|hr|管理)?(?:决定|决策|结论)/,
+    /(?:根据|按照).{0,6}(?:绩效|考核).{0,10}(?:直接|自动)(?:决定|执行).{0,8}(?:涨薪|降薪|辞退|解雇|晋升|降职|奖金|薪酬)/,
+  ],
+};
 
 const HIRING_DIRECT_DECISION_CONFLICTS: readonly RegExp[] = [
   /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我)(?:直接|最终|马上|立即|决定|选择)?(?:录用|淘汰|拒绝)/,
@@ -375,27 +419,53 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
 
 function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string): boolean {
   if (CONTENT_EXECUTION_SKILL_IDS.has(skillId)) {
-    const executionConflict = CONTENT_EXECUTION_CONFLICTS.some((pattern) =>
-      pattern.test(normalizedIntent),
+    return (
+      contentExecutionConflict(normalizedIntent) || hasUnnegatedContentPromise(normalizedIntent)
     );
-    const outcomePromise =
-      CONTENT_OUTCOME_PROMISE.test(normalizedIntent) &&
-      !CONTENT_OUTCOME_PROMISE_NEGATION.test(normalizedIntent);
-    return executionConflict || outcomePromise;
   }
   if (skillId === 'a-share-market-briefing') {
     return STOCK_DECISION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent));
   }
   if (skillId === 'resume-search-screening') {
-    if (HIRING_ANTI_DISCRIMINATION.test(normalizedIntent)) return false;
-    if (HIRING_DISCRIMINATION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent))) {
+    if (HIRING_DIRECT_DECISION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent))) {
       return true;
     }
-    if (HIRING_DIRECT_DECISION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent))) {
+    if (
+      HIRING_ANTI_DISCRIMINATION.test(normalizedIntent) ||
+      HIRING_DISCRIMINATION_AUDIT.test(normalizedIntent)
+    ) {
+      return false;
+    }
+    if (HIRING_DISCRIMINATION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent))) {
       return true;
     }
     if (HIRING_DECISION_EXPLANATION.test(normalizedIntent)) return false;
     return HIRING_DECISION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent));
+  }
+  return (SKILL_BOUNDARY_CONFLICTS[skillId] ?? []).some((pattern) =>
+    pattern.test(normalizedIntent),
+  );
+}
+
+function contentExecutionConflict(normalizedIntent: string): boolean {
+  if (
+    CONTENT_UNAMBIGUOUS_EXECUTION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent))
+  ) {
+    return true;
+  }
+  return (
+    CONTENT_LEADING_EXECUTION.test(normalizedIntent) &&
+    !CONTENT_PLANNING_OR_ANALYSIS.test(normalizedIntent)
+  );
+}
+
+function hasUnnegatedContentPromise(normalizedIntent: string): boolean {
+  for (const match of normalizedIntent.matchAll(CONTENT_PROMISE_VERB)) {
+    const prefix = normalizedIntent.slice(Math.max(0, match.index - 16), match.index);
+    const clause = normalizedIntent
+      .slice(match.index + match[0].length, match.index + match[0].length + 18)
+      .split(/(?:但是|但|然而|然后|同时|并且|再|保证|承诺|确保)/, 1)[0];
+    if (CONTENT_OUTCOME.test(clause) && !CONTENT_PROMISE_NEGATION.test(prefix)) return true;
   }
   return false;
 }
