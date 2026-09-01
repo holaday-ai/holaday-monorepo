@@ -330,7 +330,13 @@ describe('skills page state helpers', () => {
 
   it.each([
     ['推荐一只股票', 'a-share-market-briefing'],
+    ['这只股票能不能买', 'a-share-market-briefing'],
+    ['帮我选一只股票', 'a-share-market-briefing'],
+    ['帮我挑几只个股', 'a-share-market-briefing'],
+    ['把这只股票卖掉', 'a-share-market-briefing'],
     ['录用候选人', 'resume-search-screening'],
+    ['淘汰这份简历', 'resume-search-screening'],
+    ['拒绝这份简历', 'resume-search-screening'],
   ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
@@ -340,7 +346,10 @@ describe('skills page state helpers', () => {
 
   it.each([
     ['分析这只股票最近的异动', 'a-share-market-briefing'],
+    ['分析为什么机构买入这只股票', 'a-share-market-briefing'],
+    ['解释这只股票出现买入信号的原因', 'a-share-market-briefing'],
     ['根据 JD 筛选候选人', 'resume-search-screening'],
+    ['分析为什么这个候选人被拒绝', 'resume-search-screening'],
   ])('keeps a supported %s request strongly matched', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 

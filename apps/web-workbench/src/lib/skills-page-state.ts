@@ -68,18 +68,25 @@ const NON_SPECIFIC_INTENT_TERMS = new Set([
   '产品',
 ]);
 
-const INTENT_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
-  'a-share-market-briefing': [
-    /荐股/,
-    /(?:推荐|荐)(?:一只|几只|一些)?(?:股票|个股)/,
-    /(?:买入|卖出|下单).{0,6}(?:股票|个股|a股)/,
-    /(?:股票|个股|a股).{0,6}(?:买哪|买入|卖出|下单|值得买)/,
-  ],
-  'resume-search-screening': [
-    /(?:录用|淘汰|拒绝).{0,6}(?:候选人|人才)/,
-    /(?:候选人|人才).{0,6}(?:录用|淘汰|拒绝)/,
-  ],
-};
+const STOCK_DECISION_CONFLICTS: readonly RegExp[] = [
+  /荐股/,
+  /(?:帮我|替我|给我|请|直接)?(?:推荐|选|挑)(?:出|一下)?(?:一只|几只|一些)?(?:股票|个股|a股)/,
+  /(?:股票|个股|a股).{0,5}(?:能不能|可不可以|要不要|该不该|是否|值不值得).{0,3}(?:买|卖|买入|卖出)/,
+  /(?:能不能|可不可以|要不要|该不该|是否|值不值得).{0,3}(?:买|卖|买入|卖出).{0,5}(?:股票|个股|a股)/,
+  /(?:股票|个股|a股).{0,4}值得买/,
+  /(?:帮我|替我|给我|请|直接|立即|马上).{0,4}(?:买入|卖出|买|卖|下单)/,
+  /把.{0,8}(?:股票|个股|a股).{0,4}(?:买入|卖出|买下|卖掉|下单)/,
+  /^(?:买入|卖出|买|卖|下单)(?:这只|那只|该只|某只|一只|几只|一些)?(?:股票|个股|a股)/,
+  /(?:买入|卖出|投资)(?:建议|意见|结论)/,
+];
+
+const HIRING_DECISION_EXPLANATION = /(?:分析|解释|说明|复盘|研究).{0,10}(?:为什么|为何|原因|依据|逻辑)/;
+
+const HIRING_DECISION_CONFLICTS: readonly RegExp[] = [
+  /(?:帮我|替我|请|直接|最终决定).{0,4}(?:录用|淘汰|拒绝)/,
+  /(?:录用|淘汰|拒绝)(?:这份|该份|一份|这些|这位|该位|这个|该)?(?:简历|候选人|人才)/,
+  /(?:简历|候选人|人才)(?:是否|要不要|该不该|应不应该|能否)(?:录用|淘汰|拒绝)/,
+];
 
 const CONNECTOR_LABELS: Readonly<Record<string, string>> = {
   browser: '浏览器',
@@ -306,9 +313,14 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
 }
 
 function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string): boolean {
-  return (INTENT_BOUNDARY_CONFLICTS[skillId] ?? []).some((pattern) =>
-    pattern.test(normalizedIntent),
-  );
+  if (skillId === 'a-share-market-briefing') {
+    return STOCK_DECISION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent));
+  }
+  if (skillId === 'resume-search-screening') {
+    if (HIRING_DECISION_EXPLANATION.test(normalizedIntent)) return false;
+    return HIRING_DECISION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent));
+  }
+  return false;
 }
 
 function scoreSkillIntent(
