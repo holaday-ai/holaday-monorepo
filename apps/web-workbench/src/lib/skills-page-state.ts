@@ -77,10 +77,12 @@ const STOCK_DECISION_CONFLICTS: readonly RegExp[] = [
   /(?:股票|个股|a股).{0,4}值得买/,
   /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我)(?:直接|立即|马上|执行|决定|去)?(?:买入|卖出|买|卖|下单|清仓|建仓|加仓|减仓)/,
   /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我)(?:直接|立即|马上|执行|决定|去)?交易(?:这只|那只|该只|某只)?(?:股票|个股|a股)/,
-  /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我)(?:直接|立即|马上|执行|决定|去|做|进行)?交易(?!量|数据|记录|明细|统计|分析|信号)/,
-  /(?:执行|进行)(?:股票|个股|a股)?交易(?!量|数据|记录|明细|统计|分析|信号)/,
+  /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我)(?:直接|立即|马上|执行|决定|去|做|进行)?交易(?!的?(?:量|数据|记录|明细|统计|分析|信号|复盘|历史|原因|逻辑|影响|风险|趋势|回测|研究))/,
+  /(?:执行|进行)(?:股票|个股|a股)?交易(?!的?(?:量|数据|记录|明细|统计|分析|信号|复盘|历史|原因|逻辑|影响|风险|趋势|回测|研究))/,
   /把.{0,8}(?:股票|个股|a股).{0,4}(?:买入|卖出|买下|卖掉|下单|清仓|建仓|加仓|减仓)/,
   /^(?:买入|卖出|买|卖|下单)(?:这只|那只|该只|某只|一只|几只|一些)?(?:股票|个股|a股)/,
+  /^(?:清仓|加仓|减仓|建仓|卖掉|购买|交易)(?:这只|那只|该只|某只|一只|几只|一些)?(?:股票|个股|a股)/,
+  /^下单(?:买入|卖出|买|卖)?(?:这只|那只|该只|某只|一只|几只|一些)?(?:股票|个股|a股)/,
   /(?:分析完后|解释完后|研究完后|看完后|然后|之后|再|最后)(?:直接|立即|马上)?(?:买入|卖出|买|卖|下单|清仓|建仓|加仓|减仓)(?:这只|那只|该只|某只|一只|几只|一些)?(?:股票|个股|a股)/,
   /(?:股票|个股|a股).{0,4}(?:买入|卖出|买下|卖掉|下单|清仓|建仓|加仓|减仓)$/,
   /(?:买入|卖出|投资)(?:建议|意见|结论)/,
@@ -89,14 +91,36 @@ const STOCK_DECISION_CONFLICTS: readonly RegExp[] = [
 const HIRING_DECISION_EXPLANATION = /(?:分析|解释|说明|复盘|研究).{0,10}(?:为什么|为何|原因|依据|逻辑)/;
 
 const SENSITIVE_IDENTITY_TERM =
-  '(?:性别|年龄|民族|种族|宗教|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|籍贯|国籍|政治面貌|健康状况|疾病|男性|女性|男士|女士|孕妇|已婚|未婚)';
+  '(?:性别|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|民族|种族|宗教|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|籍贯|出生地|国籍|政治面貌|健康状况|疾病|男性|女性|男士|女士|男|女|孕妇|已婚|未婚)';
+
+const HIRING_ANTI_DISCRIMINATION = new RegExp(
+  `^(?:请)?(?:不要|禁止|不得|避免|防止)(?:再)?(?:基于|按照|根据|按|依据|以).{0,4}${SENSITIVE_IDENTITY_TERM}.{0,8}(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用)(?:候选人|人才|简历)?(?:并)?(?:检查|分析|说明|识别|评估)?(?:合规|歧视|风险|问题)?$`,
+);
 
 const HIRING_DISCRIMINATION_CONFLICTS: readonly RegExp[] = [
   new RegExp(
     `(?:基于|按照|根据|按|依据|以).{0,4}${SENSITIVE_IDENTITY_TERM}.{0,8}(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用)`,
   ),
-  new RegExp(`(?:只招|只要|仅限|只选|优先|排除|不要|拒绝).{0,6}${SENSITIVE_IDENTITY_TERM}`),
+  new RegExp(
+    `(?:只招|只要|仅限|只选|只筛选|仅筛选|优先|筛掉|过滤掉|排除|不要|拒绝|淘汰).{0,6}${SENSITIVE_IDENTITY_TERM}`,
+  ),
   new RegExp(`${SENSITIVE_IDENTITY_TERM}.{0,6}(?:优先|排除|不要|拒绝|淘汰|录用)`),
+];
+
+const CONTENT_EXECUTION_SKILL_IDS = new Set([
+  'douyin-live-ops',
+  'xiaohongshu-seeding-ops',
+  'wechat-article-ops',
+  'social-media-strategy',
+]);
+
+const CONTENT_EXECUTION_CONFLICTS: readonly RegExp[] = [
+  /^(?:发布|发表|上线|上传|发到|发至)(?:这篇|这条|该篇|该条)?/,
+  /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我|自动)(?:直接|自动|马上|立即|去)?(?:发布|发表|上线|上传|发到|发至)/,
+  /(?:写好|改好|准备好|完成)(?:之后|后|然后)(?:直接|自动)?(?:发布|发表|上线|上传|发到|发至)/,
+  /^(?:投流|投放广告|投广告|买量)/,
+  /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我|自动)(?:直接|自动|马上|立即|去)?(?:投流|投放.{0,6}广告|投广告|买量)/,
+  /(?:保证|承诺|确保).{0,4}(?:销量|流量|涨粉|转化|播放量)/,
 ];
 
 const HIRING_DIRECT_DECISION_CONFLICTS: readonly RegExp[] = [
@@ -340,10 +364,14 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
 }
 
 function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string): boolean {
+  if (CONTENT_EXECUTION_SKILL_IDS.has(skillId)) {
+    return CONTENT_EXECUTION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent));
+  }
   if (skillId === 'a-share-market-briefing') {
     return STOCK_DECISION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent));
   }
   if (skillId === 'resume-search-screening') {
+    if (HIRING_ANTI_DISCRIMINATION.test(normalizedIntent)) return false;
     if (HIRING_DISCRIMINATION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent))) {
       return true;
     }
