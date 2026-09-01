@@ -223,7 +223,13 @@ export function CapabilityCenterContent({
                   title={suggestionUnavailable ? '请稍候，正在保存常用能力' : '带入任务输入框'}
                   aria-busy={suggestionUnavailable}
                   disabled={suggestionUnavailable}
-                  onClick={() => onStart(activeSkill, trimmedQuery, 'suggested')}
+                  onClick={() =>
+                    onStart(
+                      activeSkill,
+                      trimmedQuery,
+                      selectedIntentSkill ? 'manual' : 'suggested',
+                    )
+                  }
                   className="mt-3 inline-flex min-h-10 items-center justify-center gap-2 rounded-full bg-[#E91E57] px-4 text-[12px] font-semibold text-white shadow-[0_8px_20px_rgba(233,30,87,0.18)] transition hover:-translate-y-0.5 hover:bg-[#D91B51] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:translate-y-0 motion-reduce:transform-none"
                 >
                   {suggestionUnavailable ? '请稍候' : '带入任务输入框'}

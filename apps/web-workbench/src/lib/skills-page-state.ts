@@ -140,10 +140,12 @@ const SPECIFIC_RELIGIOUS_IDENTITY_TERM =
   '(?:基督徒|穆斯林|佛教徒|道教徒|天主教徒|东正教徒|新教徒|圣公会教徒|摩门教徒|耶和华见证人|伊斯兰教徒|犹太教徒|印度教徒|锡克教徒|巴哈伊教徒|神道教徒|耆那教徒|萨满教徒|无神论者)';
 const SPECIFIC_NATIONALITY_TERM =
   '(?:(?:[一-龥]{1,5}国|日本|俄罗斯|加拿大|澳大利亚|新加坡|印度|巴西|墨西哥|阿根廷|意大利|西班牙|葡萄牙|荷兰|比利时|瑞士|瑞典|挪威|丹麦|芬兰|波兰|乌克兰|希腊|埃及)(?:籍|人)|(?:日|俄|美|英|法|德|韩)籍)';
+const SPECIFIC_REGIONAL_ORIGIN_TERM =
+  '(?:(?:北京|上海|天津|重庆|河北|河南|山东|山西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|湖北|湖南|广东|海南|四川|贵州|云南|陕西|甘肃|青海|内蒙古|广西|西藏|宁夏|新疆|香港|澳门|台湾|东北|华北|华东|华中|华南|西北|西南|江浙沪|长三角|珠三角)(?:人|籍))';
 const SPECIFIC_HEALTH_STATUS_TERM =
   '(?:乙肝|乙型肝炎|甲肝|丙肝|艾滋病?|hiv(?:阳性)?|传染病|精神疾病|抑郁症|癌症|糖尿病|高血压)';
 const SENSITIVE_IDENTITY_TERM =
-  `(?:性别|性取向|同性恋|异性恋|双性恋|无性恋|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|\\d{2}后|民族|${SPECIFIC_ETHNICITY_TERM}|种族|${SPECIFIC_RACIAL_IDENTITY_TERM}|宗教|${SPECIFIC_RELIGIOUS_IDENTITY_TERM}|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|户口|籍贯|出生地|国籍|外籍|${SPECIFIC_NATIONALITY_TERM}|政治面貌|中共党员|预备党员|党员|共青团员|团员|群众(?!演员)|民主党派|无党派人士|无党派|健康状况|疾病|${SPECIFIC_HEALTH_STATUS_TERM}|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚|未结婚|没结婚|单身|离异|离婚|丧偶|未育|没有孩子|无子女|无孩)`;
+  `(?:性别|性取向|同性恋|异性恋|双性恋|无性恋|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|\\d{2}后|民族|${SPECIFIC_ETHNICITY_TERM}|种族|${SPECIFIC_RACIAL_IDENTITY_TERM}|宗教|${SPECIFIC_RELIGIOUS_IDENTITY_TERM}|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|户口|籍贯|出生地|国籍|外籍|${SPECIFIC_NATIONALITY_TERM}|${SPECIFIC_REGIONAL_ORIGIN_TERM}|政治面貌|中共党员|预备党员|党员|共青团员|团员|群众(?!演员)|民主党派|无党派人士|无党派|健康状况|疾病|${SPECIFIC_HEALTH_STATUS_TERM}|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚|未结婚|没结婚|单身|离异|离婚|丧偶|未育|未生育|没有孩子|无子女|无孩|丁克|不打算生孩子)`;
 
 const HIRING_ANTI_DISCRIMINATION = new RegExp(
   `^(?:请)?(?:不要|禁止|不得|避免|防止)(?:再)?(?:基于|按照|根据|按|依据|以).{0,4}${SENSITIVE_IDENTITY_TERM}.{0,8}(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用)(?:候选人|人才|简历)?(?:并)?(?:检查|分析|说明|识别|评估)?(?:合规|歧视|风险|问题)?$`,
@@ -205,6 +207,8 @@ const CONTENT_PLATFORM_PUBLICATION_CONFLICT =
   /(?:(?:在|到).{0,10}(?:上|平台)|(?:公众号|小红书|抖音|微博|微信|朋友圈|视频号|百家号|知乎)(?:上|平台)?)(?:发布|发表|上线|上传)/;
 const CONTENT_PLATFORM_PUBLICATION_ANALYSIS =
   /^(?:(?:请|帮我|替我|给我|麻烦)(?:先|再)?){0,2}(?:分析|复盘|研究|总结|解释|评估|检查|审查).{0,28}(?:发布|发表|上线|上传).{0,18}(?:效果|数据|表现|结果|原因|问题|风险|影响|趋势|复盘)/;
+const CONTENT_PUBLICATION_NEGATION =
+  /^(?:(?:请|帮我|替我|给我|麻烦)(?:先|再)?){0,2}(?:不要|不用|无需|不必|禁止|避免).{0,12}(?:(?:(?:在|到).{0,10}(?:上|平台)|(?:公众号|小红书|抖音|微博|微信|朋友圈|视频号|百家号|知乎)(?:上|平台)?).{0,4})?(?:发布|发表|上线|上传|推送|发到|发至)/;
 const CONTENT_EXECUTION_ANALYSIS =
   /^(?:(?:请|帮我|替我|给我|麻烦)(?:先|再)?){0,2}(?:分析|复盘|研究|总结|解释|评估|检查|审查).{0,40}(?:发布|发表|上线|上传|推送|发(?:了|掉|出去|到|至|往|给|公众号|小红书|抖音|微博|微信|朋友圈|视频号|百家号|知乎)|投流|投放|买量).{0,24}(?:效果|数据|表现|结果|原因|问题|风险|影响|趋势|复盘|合规|边界)/;
 
@@ -212,9 +216,11 @@ const CONTENT_LEADING_EXECUTION =
   /^(?:一键|直接|立即|马上|自动)?(?:发布|发表|上线|上传)(?:全平台)?(?:这篇|这条|该篇|该条|内容|文章|笔记|视频)/;
 const CONTENT_LEADING_PLANNING =
   /^(?:(?:发布内容|发布).{0,8}(?:怎么|如何)(?:规划|计划|安排)|发布节奏.{0,8}(?:规划|计划|安排)|(?:规划|计划|安排|制定).{0,18}(?:发布|发表|上线|上传).{0,8}(?:节奏|计划|排期|日历|安排))/;
-const CONTENT_PROMISE_VERB = /(?:保证|承诺|确保|保底|包你|保你|包(?!含|括))/g;
+const CONTENT_PROMISE_VERB = /(?:保证|承诺|确保|保底|包你|保你)/g;
 const CONTENT_OUTCOME =
   /(?:销量|流量|涨粉|转化|播放量|阅读量|点赞(?:量)?|收藏(?:量)?|评论(?:量)?|曝光(?:量)?|打开率|点击率|完播率|互动率|转化率|成交额|订单量|gmv|爆款|热门|热搜)/;
+const CONTENT_COLLOQUIAL_PROMISE_VERB =
+  /包(?=(?:(?:小红书|公众号|抖音|微博|微信|朋友圈|视频号|百家号|知乎)(?:文章|笔记|视频|账号)?|这篇|这条|该篇|该条)?(?:的)?(?:销量|流量|涨粉|转化|播放量|阅读量|点赞(?:量)?|收藏(?:量)?|评论(?:量)?|曝光(?:量)?|打开率|点击率|完播率|互动率|转化率|成交额|订单量|gmv|爆款|热门|热搜))/g;
 const CONTENT_PROMISE_NEGATION =
   /(?:(?:无法|不能|不会|难以|不应|不要|无需|不可能|不再)(?:百分百|百分之百|100|完全|绝对|真正|一定|有效)?|不)$/;
 const CONTENT_PROMISE_DOUBLE_NEGATION =
@@ -226,19 +232,23 @@ const CONTENT_PROMISE_CONTRACT_TERM = /(?:合同|条款|协议|约定)/;
 const CONTENT_PROMISE_REFERENCE_PREFIX =
   /(?:包含|涉及|写有|写着|约定|提到|列明)(?:了|的)?$/;
 const CONTENT_PROMISE_ANALYSIS =
-  /^(?:分析|说明|解释|检查|审查|评估|复盘|研究).{0,32}(?:保证|承诺|确保|保底|包你|保你|包(?!含|括)).{0,24}(?:风险|问题|后果|原因|边界|可行性|合规)$/;
+  /^(?:分析|说明|解释|检查|审查|评估|复盘|研究).{0,32}(?:保证|承诺|确保|保底|包你|保你).{0,24}(?:风险|问题|后果|原因|边界|可行性|合规)$/;
+const CONTENT_COLLOQUIAL_PROMISE_ANALYSIS =
+  /^(?:分析|说明|解释|检查|审查|评估|复盘|研究).{0,32}包(?:(?:小红书|公众号|抖音|微博|微信|朋友圈|视频号|百家号|知乎)(?:文章|笔记|视频|账号)?)?.{0,16}(?:销量|流量|涨粉|转化|播放量|阅读量|点赞|收藏|评论|曝光|打开率|点击率|完播率|互动率|转化率|成交额|订单量|gmv|爆款|热门|热搜).{0,16}(?:风险|问题|后果|原因|边界|可行性|合规)$/;
 const CONTRACT_REVIEW_INTENT =
   /^(?:(?:请|帮我|替我|给我|麻烦)(?:先|再)?){0,2}(?:分析|说明|解释|检查|审查|评估|复盘|研究).{0,16}(?:合同|条款|协议)/;
 const PROJECT_DELIVERY_RISK_REVIEW =
   /^(?:分析|说明|解释|检查|审查|评估|复盘|研究).{0,20}(?:通知|告诉|告知|回复|答复)客户.{0,24}(?:今天|明天|后天|本周|下周|本月|下月|下个月|\d{1,2}月\d{1,2}[日号]?|\d{1,3}(?:天|周|个月)(?:内)?)(?:前|内)?.{0,8}(?:肯定|一定|保证|会|能)?交付.{0,12}(?:风险|问题|后果|边界|合规)/;
 const REFERENTIAL_EXECUTION_PHRASE =
   /(?:然后|之后|随后|接着|继而|同时|并且|而且|顺便|另外|转头|最后|再|后).{0,4}(?:照做|照此执行|按此执行|就这么做|执行上述(?:操作|修改|调整|删除)|按上述(?:方案|方式|操作)执行)/;
+const THIRD_PARTY_REFERENTIAL_ANALYSIS =
+  /^(?:分析|复盘|研究|评估).{0,16}(?:用户|受众|员工|客户|候选人).{0,64}(?:后|之后).{0,4}(?:照做|照此执行|按此执行).{0,10}(?:的)?(?:转化|数据|效果|结果|表现|影响|反馈)$/;
 const PRODUCT_REFERENTIAL_APPROVAL_CONFLICT =
   /(?:然后|之后|随后|接着|继而|同时|并且|而且|顺便|另外|转头|最后|再).{0,4}(?:予以|直接|自动|替我|代我)?(?:批准|通过)(?:它|该(?:产品)?(?:需求|方案)|(?:产品)?(?:需求|方案))?/;
 
 const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
   'image-prompt-reverse': [
-    /(?:保证|承诺|确保).{0,24}(?:(?:完全|百分百|百分之百|100%?)?(?:复现|还原|复刻)|一模一样|(?:百分百|百分之百|100%?)一致)/,
+    /(?:保证|承诺|确保).{0,24}(?:(?:完全|百分百|百分之百|100%?)?(?:复现|还原|复刻|复制|照搬)|一模一样|(?:百分百|百分之百|100%?)一致)/,
     /(?:未授权|没有授权|未经授权|未经许可|没有许可|无授权).{0,16}(?:直接|拿去)?(?:商用|商业使用|用于商业)/,
     /(?:商用|商业使用|用于商业).{0,16}(?:但|却|而|同时)?(?:未授权|没有授权|未经授权|未经许可|没有许可|无授权)/,
   ],
@@ -248,8 +258,8 @@ const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
     /(?:当成|视为|作为|等同于).{0,8}(?:律师)?(?:正式)?(?:法律)?意见/,
   ],
   'market-competitor-insight': [
-    /(?:无法核实|未核实|没有核实|未经核实).{0,16}(?:直接)?(?:写成|当成|视为|作为).{0,4}(?:事实|结论)/,
-    /(?:无法核实|没法验证|无法验证|未核实|未经核实).{0,18}(?:不要|无需|不用|不必).{0,6}(?:标注|注明|说明).{0,4}(?:待确认|推断|未核实)/,
+    /(?:无法核实|未核实|没有核实|未经核实|无法证实|未证实|没有证实|未经证实).{0,16}(?:直接)?(?:写成|当成|视为|作为).{0,4}(?:事实|结论)/,
+    /(?:无法核实|没法验证|无法验证|未核实|未经核实|无法证实|未证实|没有证实|未经证实).{0,18}(?:不要|无需|不用|不必).{0,6}(?:标注|注明|说明).{0,4}(?:待确认|推断|未核实)/,
     /(?:竞品|市场).{0,12}(?:不用|不要|无需|不必).{0,6}(?:标记|标注|注明|说明)/,
   ],
   'data-report-insight': [
@@ -293,16 +303,17 @@ const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
     /(?:员工|人员)?.{0,4}(?:绩效|考核).{0,8}(?:不达标|不合格|不佳|较差|很差|差).{0,4}(?:就|则|直接)?(?:扣(?:除)?|降低|调整).{0,6}(?:奖金|工资|薪资|薪酬)/,
     /(?:员工|人员)?.{0,4}(?:绩效|考核).{0,8}(?:不达标|不合格|不佳|较差|很差|差).{0,4}(?:就|则|直接)?(?:取消|停发|不发|拒发|扣发|停止发放|暂缓发放).{0,6}(?:奖金|工资|薪资|薪酬)/,
     /(?:扣(?:除)?|降低|调整).{0,6}(?:绩效|考核).{0,8}(?:不达标|不合格|不佳|较差|很差|差).{0,6}(?:员工|人员)?.{0,3}的?(?:奖金|工资|薪资|薪酬)/,
-    /(?:取消|停发|不发|拒发|扣发|停止发放|暂缓发放).{0,6}(?:绩效|考核).{0,8}(?:不达标|不合格|不佳|较差|很差|差).{0,6}(?:员工|人员)?.{0,3}的?(?:奖金|工资|薪资|薪酬)/,
+    /(?:取消|撤销|停发|不发|拒发|扣发|停止发放|暂缓发放).{0,6}(?:绩效|考核).{0,8}(?:不达标|不合格|不佳|较差|很差|差).{0,6}(?:员工|人员)?.{0,3}的?(?:奖金|工资|薪资|薪酬)/,
   ],
 };
 
 const SKILL_BOUNDARY_SAFE_MENTIONS: Readonly<Record<string, readonly RegExp[]>> = {
   'image-prompt-reverse': [
-    /^(?:分析|说明|解释|检查|审查|评估)?(?:为什么)?(?:不|不能|无法|难以|不应|不要|无需|不可能).{0,20}(?:保证|承诺|确保).{0,24}(?:复现|还原|复刻|一模一样|一致)/,
-    /^(?:分析|检查|审查|评估).{0,30}(?:保证|承诺|确保).{0,24}(?:复现|还原|复刻|一模一样|一致).{0,12}(?:风险|问题|后果|是否可行)/,
+    /^(?:分析|说明|解释|检查|审查|评估)?(?:为什么)?(?:不|不能|无法|难以|不应|不要|无需|不可能).{0,20}(?:保证|承诺|确保).{0,24}(?:复现|还原|复刻|复制|照搬|一模一样|一致)/,
+    /^(?:分析|检查|审查|评估).{0,30}(?:保证|承诺|确保).{0,24}(?:复现|还原|复刻|复制|照搬|一模一样|一致).{0,12}(?:风险|问题|后果|是否可行)/,
   ],
   'contract-risk-review': [
+    /^(?:请)?(?:不要|不用|无需|不必|禁止|避免).{0,6}(?:出具|提供|给出|撰写|生成|起草|拟定|编写).{0,6}(?:正式)?法律意见/,
     /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:不能|无法|不构成|不应).{0,8}(?:替代|代替|作为).{0,8}(?:律师|法律意见)/,
     /^(?:分析|检查|审查|评估).{0,24}(?:出具|提供|给出|撰写|生成|起草|拟定|编写).{0,8}(?:正式)?法律意见.{0,16}(?:是否超出|风险|合规|边界|范围|问题)/,
   ],
@@ -327,7 +338,7 @@ const SKILL_BOUNDARY_SAFE_MENTIONS: Readonly<Record<string, readonly RegExp[]>> 
   'performance-review-design': [
     /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:为什么)?(?:不能|无法|不应|不要).{0,14}(?:根据|按照)?.{0,8}(?:绩效|考核).{0,12}(?:决定|执行|加薪|提薪|涨薪|降薪|辞退|晋升|上调|下调|调高|调低|取消|停发|不发|拒发|扣发)/,
     /^(?:分析|检查|审查|评估).{0,24}(?:根据|按照|按|依据)?.{0,8}(?:绩效|考核).{0,12}(?:(?:直接)?(?:决定|执行|加薪|提薪|涨薪|降薪|辞退|晋升|取消|停发|不发|拒发|扣发|停止发放|暂缓发放)|(?:上调|下调|调高|调低|提高|增加|减少)(?:员工|人员)?.{0,4}(?:工资|薪资|薪酬|奖金)).{0,16}(?:风险|合规|边界|问题|后果)/,
-    /^(?:分析|检查|审查|评估).{0,24}(?:取消|停发|不发|拒发|扣发|停止发放|暂缓发放).{0,16}(?:绩效|考核).{0,16}(?:风险|合规|边界|问题|后果)/,
+    /^(?:分析|检查|审查|评估).{0,24}(?:取消|撤销|停发|不发|拒发|扣发|停止发放|暂缓发放).{0,16}(?:绩效|考核).{0,16}(?:风险|合规|边界|问题|后果)/,
   ],
 };
 
@@ -342,7 +353,7 @@ const HIRING_DIRECT_DECISION_CONFLICTS: readonly RegExp[] = [
   /^(?:建议|推荐).{0,6}(?:录用|录取|淘汰|拒绝)(?:哪位|哪个|哪些|谁).{0,8}(?:候选人|人才)?/,
   /^(?:建议|推荐).{0,8}(?:哪位|哪个|哪些|谁).{0,8}(?:候选人|人才)?.{0,6}(?:入职|录用|录取|淘汰|拒绝)/,
   /(?:哪个|哪位|哪些)(?:候选人|人才).{0,6}(?:应该|应当|适合|最适合)?(?:入职|录用|录取|淘汰|拒绝)/,
-  /(?:这个|该|这位|该位)?(?:候选人|人才).{0,6}(?:适合|值得|应该|应当|可以|能否|能|可).{0,4}(?:录用|录取|入职)(?:吗|么)?/,
+  /(?:这个|该|这位|该位)?(?:候选人|人才).{0,6}(?:适合|值得|应该|应当|该不该|该|可以|能否|能|可).{0,4}(?:录用|录取|入职)(?:吗|么)?/,
   /(?:这|那)?(?:几个|些)(?:候选人|人才).{0,8}(?:谁|哪位|哪个).{0,6}(?:最适合|适合|应该|应当)?(?:录用|淘汰|拒绝)/,
   /^(?:录用|录取|淘汰|拒绝)(?:这份|该份|一份|这些|这位|该位|这个|该|哪个|哪些)?(?:简历|候选人|人才)/,
   /(?:并|然后|之后|再|最后)(?:直接|最终|马上|立即)?(?:录用|录取|淘汰|拒绝)/,
@@ -632,6 +643,7 @@ function hasRequiredCapabilityTaskEvidence(
 }
 
 function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string): boolean {
+  if (THIRD_PARTY_REFERENTIAL_ANALYSIS.test(normalizedIntent)) return false;
   if (hasRiskyReferentialExecution(normalizedIntent)) return true;
   if (
     skillId === 'product-plan-drafting' &&
@@ -668,6 +680,7 @@ function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string):
 }
 
 function hasRiskyReferentialExecution(normalizedIntent: string): boolean {
+  if (THIRD_PARTY_REFERENTIAL_ANALYSIS.test(normalizedIntent)) return false;
   const referentialRanges = findPatternOccurrences(
     REFERENTIAL_EXECUTION_PHRASE,
     normalizedIntent,
@@ -767,7 +780,11 @@ function contentExecutionConflict(normalizedIntent: string): boolean {
   if (
     hasUnexemptedPatternConflict(
       CONTENT_UNAMBIGUOUS_EXECUTION_CONFLICTS,
-      [CONTENT_PLATFORM_PUBLICATION_ANALYSIS, CONTENT_EXECUTION_ANALYSIS],
+      [
+        CONTENT_PLATFORM_PUBLICATION_ANALYSIS,
+        CONTENT_EXECUTION_ANALYSIS,
+        CONTENT_PUBLICATION_NEGATION,
+      ],
       normalizedIntent,
     )
   ) {
@@ -776,7 +793,11 @@ function contentExecutionConflict(normalizedIntent: string): boolean {
   if (
     hasUnexemptedPatternConflict(
       [CONTENT_PLATFORM_PUBLICATION_CONFLICT],
-      [CONTENT_PLATFORM_PUBLICATION_ANALYSIS, CONTENT_LEADING_PLANNING],
+      [
+        CONTENT_PLATFORM_PUBLICATION_ANALYSIS,
+        CONTENT_PUBLICATION_NEGATION,
+        CONTENT_LEADING_PLANNING,
+      ],
       normalizedIntent,
     )
   ) {
@@ -792,7 +813,11 @@ function findUnnegatedContentPromises(
   normalizedIntent: string,
 ): Array<{ readonly index: number; readonly length: number }> {
   const matches: Array<{ readonly index: number; readonly length: number }> = [];
-  for (const match of normalizedIntent.matchAll(CONTENT_PROMISE_VERB)) {
+  const promiseMatches = [
+    ...normalizedIntent.matchAll(CONTENT_PROMISE_VERB),
+    ...normalizedIntent.matchAll(CONTENT_COLLOQUIAL_PROMISE_VERB),
+  ].sort((left, right) => left.index - right.index);
+  for (const match of promiseMatches) {
     const prefix = normalizedIntent.slice(Math.max(0, match.index - 16), match.index);
     const outcomeClause = normalizedIntent
       .slice(match.index + match[0].length, match.index + match[0].length + 18)
@@ -823,6 +848,7 @@ function hasUnexemptedContentPromise(normalizedIntent: string): boolean {
       findUnnegatedContentPromises(clause).some(
         (promise) =>
           !CONTENT_PROMISE_ANALYSIS.test(clause) &&
+          !CONTENT_COLLOQUIAL_PROMISE_ANALYSIS.test(clause) &&
           !isReviewedContractPromise(clause, promise),
       ),
   );

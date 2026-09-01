@@ -314,6 +314,7 @@ describe('CapabilityCenterContent', () => {
 
   it('lets users switch from the strongest match to a recommended candidate', async () => {
     const user = userEvent.setup();
+    const onStart = vi.fn();
 
     function Harness(): JSX.Element {
       const [activeSkillId, setActiveSkillId] = React.useState('data-report-insight');
@@ -323,6 +324,7 @@ describe('CapabilityCenterContent', () => {
           activeSkillId={activeSkillId}
           query="分析数据并规划社媒内容"
           onSelectSkill={setActiveSkillId}
+          onStart={onStart}
         />
       );
     }
@@ -334,6 +336,17 @@ describe('CapabilityCenterContent', () => {
 
     expect(screen.getByText('已选择能力：数据报表解读')).toBeTruthy();
     expect(screen.getByText('销售额环比增长 18.7%，但复购率连续两周回落。')).toBeTruthy();
+
+    await user.click(
+      screen.getByRole('button', {
+        name: '用数据报表解读准备任务：分析数据并规划社媒内容',
+      }),
+    );
+    expect(onStart).toHaveBeenCalledWith(
+      skills[0],
+      '分析数据并规划社媒内容',
+      'manual',
+    );
   });
 
   it('exposes one clear toggle action for each catalogue capability', async () => {
