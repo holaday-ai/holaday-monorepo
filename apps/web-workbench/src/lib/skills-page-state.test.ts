@@ -508,6 +508,11 @@ describe('skills page state helpers', () => {
     ['只招同性恋候选人', 'resume-search-screening'],
     ['只招黑人候选人', 'resume-search-screening'],
     ['只招白人候选人', 'resume-search-screening'],
+    ['只招基督徒候选人', 'resume-search-screening'],
+    ['只招穆斯林候选人', 'resume-search-screening'],
+    ['只招佛教徒候选人', 'resume-search-screening'],
+    ['买入贵州茅台股票', 'a-share-market-briefing'],
+    ['卖出宁德时代股票', 'a-share-market-briefing'],
   ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
@@ -577,6 +582,7 @@ describe('skills page state helpers', () => {
     ['分析把女性候选人筛掉会有什么风险', 'resume-search-screening'],
     ['评估把女性候选人筛掉的歧视风险', 'resume-search-screening'],
     ['分析只招白人候选人的歧视风险', 'resume-search-screening'],
+    ['分析为什么公司只招基督徒候选人', 'resume-search-screening'],
     ['筛选女装设计师候选人', 'resume-search-screening'],
   ])('keeps a supported %s request strongly matched', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
