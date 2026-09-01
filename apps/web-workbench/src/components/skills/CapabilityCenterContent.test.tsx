@@ -91,6 +91,9 @@ describe('CapabilityCenterContent', () => {
   it('explains what the selected capability can do before asking the user to start', () => {
     render(<CapabilityCenterContent {...baseProps} />);
 
+    const header = screen.getByTestId('capability-header');
+    expect(header.className).toContain('lg:pr-[200px]');
+    expect(header.className).toContain('xl:flex-row');
     expect(screen.getByRole('heading', { level: 1, name: '能力中心' })).toBeTruthy();
     expect(screen.getAllByText('示例结果')).toHaveLength(3);
     expect(screen.getByText('销售额环比增长 18.7%，但复购率连续两周回落。')).toBeTruthy();
