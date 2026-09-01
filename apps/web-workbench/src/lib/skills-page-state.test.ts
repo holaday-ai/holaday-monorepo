@@ -347,6 +347,8 @@ describe('skills page state helpers', () => {
     ['卖掉这只股票', 'a-share-market-briefing'],
     ['交易这只股票', 'a-share-market-briefing'],
     ['购买这只股票', 'a-share-market-briefing'],
+    ['购入这只股票', 'a-share-market-briefing'],
+    ['把这只股票抛掉', 'a-share-market-briefing'],
     ['下单买这只股票', 'a-share-market-briefing'],
     ['录用候选人', 'resume-search-screening'],
     ['淘汰这份简历', 'resume-search-screening'],
@@ -373,6 +375,13 @@ describe('skills page state helpers', () => {
     ['替我投放抖音广告', 'douyin-live-ops'],
     ['自动发布全平台内容', 'social-media-strategy'],
     ['保证小红书流量', 'xiaohongshu-seeding-ops'],
+    ['帮我把这篇公众号文章发出去', 'wechat-article-ops'],
+    ['把这篇小红书笔记发布出去', 'xiaohongshu-seeding-ops'],
+    ['在公众号上发布这篇文章', 'wechat-article-ops'],
+    ['将这条视频上传到抖音', 'douyin-live-ops'],
+    ['一键发布全平台内容', 'social-media-strategy'],
+    ['给这条抖音视频投流', 'douyin-live-ops'],
+    ['保证这篇笔记成为爆款', 'xiaohongshu-seeding-ops'],
   ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
@@ -400,6 +409,11 @@ describe('skills page state helpers', () => {
     ['规划小红书发布节奏', 'xiaohongshu-seeding-ops'],
     ['分析抖音投流数据', 'douyin-live-ops'],
     ['制定社交媒体广告投放方案', 'social-media-strategy'],
+    ['发布节奏怎么规划', 'social-media-strategy'],
+    ['分析为什么无法保证小红书流量', 'xiaohongshu-seeding-ops'],
+    ['不能保证小红书流量的说明', 'xiaohongshu-seeding-ops'],
+    ['不要遗漏女性候选人', 'resume-search-screening'],
+    ['优先分析女性候选人的经历', 'resume-search-screening'],
   ])('keeps a supported %s request strongly matched', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
