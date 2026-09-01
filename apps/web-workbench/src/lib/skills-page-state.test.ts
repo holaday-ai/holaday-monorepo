@@ -302,7 +302,7 @@ describe('skills page state helpers', () => {
     expect(matchSkillsForIntent(intentSkills, '帮我处理一下').confidence).toBe('low');
   });
 
-  it.each(['帮我看看风险', '找出问题'])(
+  it.each(['帮我看看风险', '找出问题', '评估一下', '做个方案'])(
     'keeps generic cross-domain intent low-confidence: %s',
     (intent) => {
       const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);

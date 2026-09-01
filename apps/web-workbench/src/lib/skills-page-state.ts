@@ -48,6 +48,26 @@ const SHOWCASE_SKILL_IDS = [
   'contract-risk-review',
 ] as const;
 
+const NON_SPECIFIC_INTENT_TERMS = new Set([
+  '分析',
+  '评估',
+  '判断',
+  '处理',
+  '查看',
+  '比较',
+  '对比',
+  '总结',
+  '建议',
+  '方案',
+  '计划',
+  '风险',
+  '市场',
+  '数据',
+  '内容',
+  '项目',
+  '产品',
+]);
+
 const CONNECTOR_LABELS: Readonly<Record<string, string>> = {
   browser: '浏览器',
   douyin: '抖音',
@@ -241,7 +261,11 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
     const evidence = scoreSkillIntent(skill, normalizedIntent, intentPairs);
     const specificExactScore = [...evidence.exactBonuses].reduce(
       (sum, [term, value]) =>
-        sum + (skillDocuments.filter((document) => document.includes(term)).length === 1 ? value : 0),
+        sum +
+        (!NON_SPECIFIC_INTENT_TERMS.has(term) &&
+        skillDocuments.filter((document) => document.includes(term)).length === 1
+          ? value
+          : 0),
       0,
     );
     return {
