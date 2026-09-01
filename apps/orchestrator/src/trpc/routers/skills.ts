@@ -48,6 +48,13 @@ function buildSkillListRows(enabledIds: Iterable<string>) {
     aliases: [...skill.aliases],
     maturity: skill.maturity,
     connectors: [...skill.connectors],
+    experience: {
+      starterPrompts: [...skill.experience.starterPrompts],
+      requiredInputs: [...skill.experience.requiredInputs],
+      deliverables: [...skill.experience.deliverables],
+      boundary: skill.experience.boundary,
+      exampleSummary: skill.experience.exampleSummary,
+    },
     enabled: enabled.has(skill.id),
   }));
 }
