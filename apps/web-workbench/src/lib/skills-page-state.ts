@@ -139,7 +139,7 @@ const SPECIFIC_NATIONALITY_TERM =
 const SPECIFIC_HEALTH_STATUS_TERM =
   '(?:乙肝|乙型肝炎|甲肝|丙肝|艾滋病?|hiv(?:阳性)?|传染病|精神疾病|抑郁症|癌症|糖尿病|高血压)';
 const SENSITIVE_IDENTITY_TERM =
-  `(?:性别|性取向|同性恋|异性恋|双性恋|无性恋|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|民族|${SPECIFIC_ETHNICITY_TERM}|种族|${SPECIFIC_RACIAL_IDENTITY_TERM}|宗教|${SPECIFIC_RELIGIOUS_IDENTITY_TERM}|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|籍贯|出生地|国籍|外籍|${SPECIFIC_NATIONALITY_TERM}|政治面貌|中共党员|预备党员|党员|共青团员|团员|群众|民主党派|无党派人士|无党派|健康状况|疾病|${SPECIFIC_HEALTH_STATUS_TERM}|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚)`;
+  `(?:性别|性取向|同性恋|异性恋|双性恋|无性恋|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|\\d{2}后|民族|${SPECIFIC_ETHNICITY_TERM}|种族|${SPECIFIC_RACIAL_IDENTITY_TERM}|宗教|${SPECIFIC_RELIGIOUS_IDENTITY_TERM}|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|籍贯|出生地|国籍|外籍|${SPECIFIC_NATIONALITY_TERM}|政治面貌|中共党员|预备党员|党员|共青团员|团员|群众(?!演员)|民主党派|无党派人士|无党派|健康状况|疾病|${SPECIFIC_HEALTH_STATUS_TERM}|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚)`;
 
 const HIRING_ANTI_DISCRIMINATION = new RegExp(
   `^(?:请)?(?:不要|禁止|不得|避免|防止)(?:再)?(?:基于|按照|根据|按|依据|以).{0,4}${SENSITIVE_IDENTITY_TERM}.{0,8}(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用)(?:候选人|人才|简历)?(?:并)?(?:检查|分析|说明|识别|评估)?(?:合规|歧视|风险|问题)?$`,
