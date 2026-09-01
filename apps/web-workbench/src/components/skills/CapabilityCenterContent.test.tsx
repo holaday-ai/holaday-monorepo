@@ -201,7 +201,7 @@ describe('CapabilityCenterContent', () => {
     expect(onSelectSkill).toHaveBeenCalledWith('social-media-strategy');
   });
 
-  it('filters the complete catalogue without changing the selected showcase', async () => {
+  it('filters the complete catalogue and focuses a strong matched capability', async () => {
     const user = userEvent.setup();
 
     function Harness(): JSX.Element {
@@ -212,7 +212,8 @@ describe('CapabilityCenterContent', () => {
     render(<Harness />);
     await user.type(screen.getByRole('searchbox', { name: '搜索想完成的任务' }), '合同');
 
-    expect(screen.getByText('销售额环比增长 18.7%，但复购率连续两周回落。')).toBeTruthy();
+    expect(screen.getByText('发现 3 项高风险条款，并给出逐条修改方向。')).toBeTruthy();
+    expect(screen.getByText('最适合：合同风险审查')).toBeTruthy();
     const catalogue = screen.getByTestId('capability-catalogue');
     expect(within(catalogue).getByText('合同风险审查')).toBeTruthy();
     expect(within(catalogue).queryByText('数据报表解读')).toBeNull();
@@ -238,6 +239,56 @@ describe('CapabilityCenterContent', () => {
     await user.clear(search);
     await user.type(search, '复购率');
     expect(within(catalogue).getByText('数据报表解读')).toBeTruthy();
+  });
+
+  it('starts the user own request with the strongest matched capability', async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn();
+
+    function Harness(): JSX.Element {
+      const [query, setQuery] = React.useState('');
+      return (
+        <CapabilityCenterContent
+          {...baseProps}
+          query={query}
+          onQueryChange={setQuery}
+          onStart={onStart}
+        />
+      );
+    }
+
+    render(<Harness />);
+    const search = screen.getByRole('searchbox', { name: '搜索想完成的任务' });
+    const intent = '帮我分析销售数据，找出复购率下降原因';
+    await user.type(search, intent);
+
+    expect(screen.getByText('为你匹配')).toBeTruthy();
+    expect(screen.getByText('最适合：数据报表解读')).toBeTruthy();
+    const start = screen.getByRole('button', {
+      name: `用数据报表解读开始：${intent}`,
+    });
+    await user.click(start);
+
+    expect(onStart).toHaveBeenCalledWith(skills[0], intent);
+  });
+
+  it('keeps every capability available when the request is too vague to match honestly', async () => {
+    const user = userEvent.setup();
+
+    function Harness(): JSX.Element {
+      const [query, setQuery] = React.useState('');
+      return <CapabilityCenterContent {...baseProps} query={query} onQueryChange={setQuery} />;
+    }
+
+    render(<Harness />);
+    await user.type(screen.getByRole('searchbox', { name: '搜索想完成的任务' }), '帮我处理一下');
+
+    expect(screen.getByText('还不能确定最适合的能力')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /用.+开始：帮我处理一下/ })).toBeNull();
+    const catalogue = screen.getByTestId('capability-catalogue');
+    expect(within(catalogue).getByText('数据报表解读')).toBeTruthy();
+    expect(within(catalogue).getByText('社交媒体策略')).toBeTruthy();
+    expect(within(catalogue).getByText('合同风险审查')).toBeTruthy();
   });
 
   it('exposes one clear toggle action for each catalogue capability', async () => {

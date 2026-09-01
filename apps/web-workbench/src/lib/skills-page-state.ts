@@ -32,6 +32,16 @@ export interface SkillTaskDraft {
 
 export type SkillStartDecision = 'start' | 'enable-and-start' | 'blocked';
 
+export interface SkillIntentMatch<TSkill extends UiSkill = UiSkill> {
+  readonly skill: TSkill;
+  readonly score: number;
+}
+
+export interface SkillIntentMatchResult<TSkill extends UiSkill = UiSkill> {
+  readonly confidence: 'strong' | 'low';
+  readonly matches: readonly SkillIntentMatch<TSkill>[];
+}
+
 const SHOWCASE_SKILL_IDS = [
   'data-report-insight',
   'social-media-strategy',
@@ -218,6 +228,76 @@ export function pickCapabilityShowcase<TSkill extends { readonly id: string }>(
     if (!selected.some((item) => item.id === skill.id)) selected.push(skill);
   }
   return selected;
+}
+
+export function matchSkillsForIntent<TSkill extends UiSkill>(
+  skills: readonly TSkill[],
+  intent: string,
+): SkillIntentMatchResult<TSkill> {
+  const normalizedIntent = normalizeMatchText(intent);
+  const intentPairs = characterPairs(normalizedIntent);
+  const matches = skills
+    .map((skill, index) => ({
+      skill,
+      score: scoreSkillIntent(skill, normalizedIntent, intentPairs),
+      index,
+    }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map(({ skill, score }) => ({ skill, score }));
+  const topScore = matches[0]?.score ?? 0;
+  const secondScore = matches[1]?.score ?? 0;
+  const confidence =
+    normalizedIntent.length >= 2 && topScore >= 12 && (topScore - secondScore >= 2 || topScore >= 24)
+      ? 'strong'
+      : 'low';
+  return { confidence, matches };
+}
+
+function scoreSkillIntent(
+  skill: UiSkill,
+  normalizedIntent: string,
+  intentPairs: ReadonlySet<string>,
+): number {
+  if (!normalizedIntent) return 0;
+  const weightedFields: ReadonlyArray<readonly [string, number]> = [
+    [skill.name, 12],
+    ...skill.aliases.map((value) => [value, 10] as const),
+    [skill.description, 4],
+    ...skill.experience.starterPrompts.map((value) => [value, 5] as const),
+    ...skill.experience.requiredInputs.map((value) => [value, 2] as const),
+    ...skill.experience.deliverables.map((value) => [value, 4] as const),
+    [skill.experience.exampleSummary, 4],
+  ];
+  let score = 0;
+  for (const [value, weight] of weightedFields) {
+    const normalizedValue = normalizeMatchText(value);
+    if (normalizedValue.length < 2) continue;
+    if (normalizedIntent.includes(normalizedValue)) {
+      score += weight + Math.min(normalizedValue.length, 8);
+    } else if (normalizedValue.includes(normalizedIntent)) {
+      score += weight;
+    } else {
+      const valuePairs = characterPairs(normalizedValue);
+      let overlap = 0;
+      for (const pair of valuePairs) {
+        if (intentPairs.has(pair)) overlap += 1;
+      }
+      score += overlap * Math.min(weight, 4);
+    }
+  }
+  return score;
+}
+
+function normalizeMatchText(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+}
+
+function characterPairs(value: string): Set<string> {
+  const pairs = new Set<string>();
+  for (let index = 0; index < value.length - 1; index += 1) {
+    pairs.add(value.slice(index, index + 2));
+  }
+  return pairs;
 }
 
 export function skillConnectorLabel(connectorId: string): string {

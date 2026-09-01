@@ -1,5 +1,9 @@
 import { SkillLogo } from '@/components/SkillLogo';
-import { groupSkillsByCategory, pickCapabilityShowcase } from '@/lib/skills-page-state';
+import {
+  groupSkillsByCategory,
+  matchSkillsForIntent,
+  pickCapabilityShowcase,
+} from '@/lib/skills-page-state';
 import { cn } from '@/lib/utils';
 import type { UiSkill } from '@/types/task';
 import {
@@ -43,13 +47,26 @@ export function CapabilityCenterContent({
   onToggle,
 }: CapabilityCenterContentProps): JSX.Element {
   const showcase = React.useMemo(() => pickCapabilityShowcase(skills), [skills]);
+  const trimmedQuery = query.trim();
+  const intentMatch = React.useMemo(
+    () => matchSkillsForIntent(skills, trimmedQuery),
+    [skills, trimmedQuery],
+  );
+  const matchedSkill =
+    intentMatch.confidence === 'strong' ? intentMatch.matches[0]?.skill : undefined;
   const activeSkill =
-    skills.find((skill) => skill.id === activeSkillId) ?? showcase[0] ?? skills[0];
-  const secondaryShowcase = showcase.filter((skill) => skill.id !== activeSkill?.id).slice(0, 2);
+    matchedSkill ?? skills.find((skill) => skill.id === activeSkillId) ?? showcase[0] ?? skills[0];
+  const secondaryShowcase = (
+    matchedSkill
+      ? intentMatch.matches
+          .filter((match) => match.score > 0 && match.skill.id !== matchedSkill.id)
+          .map((match) => match.skill)
+      : showcase.filter((skill) => skill.id !== activeSkill?.id)
+  ).slice(0, 2);
   const filteredSkills = React.useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
+    const normalizedQuery = trimmedQuery.toLowerCase();
     if (!normalizedQuery) return skills;
-    return skills.filter((skill) =>
+    const literalMatches = skills.filter((skill) =>
       [
         skill.name,
         skill.id,
@@ -60,7 +77,11 @@ export function CapabilityCenterContent({
         skill.experience.exampleSummary,
       ].some((value) => value.toLowerCase().includes(normalizedQuery)),
     );
-  }, [query, skills]);
+    if (intentMatch.confidence === 'strong') {
+      return intentMatch.matches.filter((match) => match.score > 0).map((match) => match.skill);
+    }
+    return literalMatches.length > 0 ? literalMatches : skills;
+  }, [intentMatch, skills, trimmedQuery]);
   const grouped = React.useMemo(() => groupSkillsByCategory(filteredSkills), [filteredSkills]);
 
   if (!activeSkill) return <></>;
@@ -135,6 +156,16 @@ export function CapabilityCenterContent({
 
       {notice}
 
+      {trimmedQuery && intentMatch.confidence === 'low' && (
+        <div
+          role="status"
+          className="rounded-[14px] border border-[#E5DFE8] bg-white px-4 py-3 text-[12px] leading-5 text-[#625A61] shadow-[0_8px_22px_rgba(56,47,52,0.04)]"
+        >
+          <span className="font-semibold text-foreground">还不能确定最适合的能力</span>
+          <span className="ml-2 text-muted-foreground">可以补充具体目标，或从下方任务中选择。</span>
+        </div>
+      )}
+
       <section
         data-testid="capability-studio"
         aria-labelledby="active-capability-title"
@@ -156,7 +187,7 @@ export function CapabilityCenterContent({
               <div>
                 <div className="inline-flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.1em] text-[#D22455]">
                   <Sparkles className="h-3.5 w-3.5" aria-hidden />
-                  推荐从这里开始
+                  {matchedSkill ? '为你匹配' : '推荐从这里开始'}
                 </div>
                 <h2
                   id="active-capability-title"
@@ -170,9 +201,42 @@ export function CapabilityCenterContent({
               {activeSkill.description}
             </p>
 
+            {matchedSkill && (
+              <div className="mt-6 rounded-[14px] border border-[#F0CDD8] bg-white/82 p-3.5 shadow-[0_8px_22px_rgba(180,50,88,0.06)] backdrop-blur-sm">
+                <p className="text-[12px] font-semibold text-[#4A4147]">
+                  最适合：{activeSkill.name}
+                </p>
+                <p className="mt-1 line-clamp-2 text-[11px] leading-5 text-muted-foreground">
+                  {trimmedQuery}
+                </p>
+                <button
+                  type="button"
+                  aria-label={
+                    startUnavailable
+                      ? `${startActionAriaPrefix}：${trimmedQuery}`
+                      : `用${activeSkill.name}开始：${trimmedQuery}`
+                  }
+                  title={startButtonTitle ?? `用${activeSkill.name}开始`}
+                  aria-busy={activeSkillPending}
+                  disabled={startUnavailable}
+                  onClick={() => onStart(activeSkill, trimmedQuery)}
+                  className="mt-3 inline-flex min-h-10 items-center justify-center gap-2 rounded-full bg-[#E91E57] px-4 text-[12px] font-semibold text-white shadow-[0_8px_20px_rgba(233,30,87,0.18)] transition hover:-translate-y-0.5 hover:bg-[#D91B51] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:translate-y-0 motion-reduce:transform-none"
+                >
+                  {startActionLabel === '开始' ? '用这个能力开始' : startActionLabel}
+                  {activeSkillPending || anotherSkillPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  ) : activeSkillBlocked ? (
+                    <LockKeyhole className="h-4 w-4" aria-hidden />
+                  ) : (
+                    <ArrowRight className="h-4 w-4" aria-hidden />
+                  )}
+                </button>
+              </div>
+            )}
+
             <div className="mt-7">
               <div className="mb-2.5 flex items-center justify-between gap-3 text-[11px] font-semibold text-[#756A72]">
-                <span>选择一个任务</span>
+                <span>{matchedSkill ? '也可以从示例开始' : '选择一个任务'}</span>
                 <span className="font-normal text-[#A49BA1]">点击后可补充材料和要求</span>
               </div>
               <div className="space-y-2">

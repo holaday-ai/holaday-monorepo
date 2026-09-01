@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type SkillCategory,
   groupSkillsByCategory,
+  matchSkillsForIntent,
   normalizeSkillRows,
   normalizeSkillToggleResponse,
   pickCapabilityShowcase,
@@ -223,6 +224,81 @@ describe('skills page state helpers', () => {
       'social-media-strategy',
       'contract-risk-review',
     ]);
+  });
+
+  it('ranks a natural-language task by the capability users actually need', () => {
+    const intentSkills = normalizeSkillRows([
+      {
+        id: 'data-report-insight',
+        name: '数据报表解读',
+        category: '分析决策',
+        description: '表格分析、指标归因、异常发现',
+        aliases: ['数据', '报表', '复购率'],
+        experience: {
+          starterPrompts: ['分析这份周报，找出异常和最值得关注的变化'],
+          requiredInputs: ['销售数据'],
+          deliverables: ['关键发现与异常清单'],
+          exampleSummary: '找出复购率下降原因',
+        },
+      },
+      {
+        id: 'contract-risk-review',
+        name: '合同风险审查',
+        category: '分析决策',
+        description: '条款风险与修改建议',
+        aliases: ['合同', '条款'],
+        experience: {
+          starterPrompts: ['审查这份合同'],
+          requiredInputs: ['合同文件'],
+          deliverables: ['风险清单'],
+          exampleSummary: '标出高风险条款',
+        },
+      },
+      {
+        id: 'social-media-strategy',
+        name: '社交媒体策略',
+        category: '内容运营',
+        description: '内容矩阵与发布节奏',
+        aliases: ['社媒', '内容规划'],
+        experience: {
+          starterPrompts: ['规划新品发布内容'],
+          requiredInputs: ['品牌目标'],
+          deliverables: ['发布计划'],
+          exampleSummary: '生成一周内容节奏',
+        },
+      },
+    ]);
+    const result = matchSkillsForIntent(
+      intentSkills,
+      '帮我分析这份销售数据，找出复购率下降的原因',
+    );
+
+    expect(result.confidence).toBe('strong');
+    expect(result.matches.map((match) => match.skill.id)).toEqual([
+      'data-report-insight',
+      'contract-risk-review',
+      'social-media-strategy',
+    ]);
+  });
+
+  it('does not pretend a vague request has a reliable capability match', () => {
+    const intentSkills = normalizeSkillRows([
+      {
+        id: 'data-report-insight',
+        name: '数据报表解读',
+        category: '分析决策',
+        description: '表格分析',
+        aliases: ['数据', '报表'],
+      },
+      {
+        id: 'contract-risk-review',
+        name: '合同风险审查',
+        category: '分析决策',
+        description: '条款风险',
+        aliases: ['合同', '条款'],
+      },
+    ]);
+    expect(matchSkillsForIntent(intentSkills, '帮我处理一下').confidence).toBe('low');
   });
 
   it('falls back to available capabilities when preferred showcase entries are missing', () => {
