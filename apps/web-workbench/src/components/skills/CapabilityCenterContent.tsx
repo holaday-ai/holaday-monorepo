@@ -71,7 +71,7 @@ export function CapabilityCenterContent({
   if (!activeSkill) return <></>;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-7 pb-10">
       <header
         data-testid="capability-header"
         className="flex flex-col gap-5 lg:pr-[200px] xl:flex-row xl:items-end xl:justify-between"
@@ -114,42 +114,91 @@ export function CapabilityCenterContent({
       {notice}
 
       <section
+        data-testid="capability-studio"
         aria-labelledby="active-capability-title"
-        className="overflow-hidden rounded-[18px] border border-[#F0DDE4] bg-[linear-gradient(135deg,#FFF8FA_0%,#FFFDF9_48%,#F4FBFF_100%)] shadow-[0_18px_50px_rgba(74,45,62,0.08)]"
+        className="relative overflow-hidden rounded-[24px] border border-[#E9E3EA] bg-[linear-gradient(132deg,#FFFDFD_0%,#FFFAFC_42%,#F7FAFF_73%,#F4FCFA_100%)] shadow-[0_22px_64px_rgba(73,55,75,0.09)]"
       >
-        <div className="grid lg:grid-cols-[minmax(0,0.95fr)_minmax(360px,1.05fr)]">
-          <div className="p-6 sm:p-8 lg:p-10">
+        <div
+          className="pointer-events-none absolute -right-28 -top-32 h-80 w-80 rounded-full bg-[#DDEBFF]/70 blur-3xl"
+          aria-hidden
+        />
+        <div
+          className="pointer-events-none absolute -bottom-36 left-[18%] h-72 w-72 rounded-full bg-[#FFE6EE]/70 blur-3xl"
+          aria-hidden
+        />
+
+        <div
+          role="status"
+          aria-label="能力运行状态"
+          className="relative z-10 flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-white/80 bg-white/55 px-5 py-3 text-[11px] text-[#6D6570] backdrop-blur-md sm:px-7"
+        >
+          <span
+            className={cn(
+              'inline-flex items-center gap-2 font-semibold',
+              activeSkill.enabled ? 'text-[#2D715F]' : 'text-[#826A32]',
+            )}
+          >
+            <span className="relative flex h-2 w-2" aria-hidden>
+              {activeSkill.enabled && (
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#4CC39A]/45 motion-reduce:animate-none" />
+              )}
+              <span
+                className={cn(
+                  'relative inline-flex h-2 w-2 rounded-full',
+                  activeSkill.enabled ? 'bg-[#35A980]' : 'bg-[#D6A64B]',
+                )}
+              />
+            </span>
+            {activeSkill.enabled ? 'AI 能力已就绪' : '能力可预览，启用后使用'}
+          </span>
+          <span className="h-3 w-px bg-[#DDD8DE]" aria-hidden />
+          <span>结果为可编辑草稿</span>
+          <span className="h-3 w-px bg-[#DDD8DE]" aria-hidden />
+          <span>不会自动提交</span>
+        </div>
+
+        <div className="relative z-10 grid lg:grid-cols-[minmax(300px,0.72fr)_minmax(460px,1.28fr)]">
+          <div className="p-6 sm:p-8 lg:p-9">
             <div className="flex items-center gap-3">
               <SkillLogo logoId={activeSkill.logoId} label={activeSkill.name} size="lg" />
               <div>
-                <div className="text-[11px] font-medium tracking-[0.08em] text-[#A45C72]">
-                  推荐能力
+                <div className="inline-flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.1em] text-[#D22455]">
+                  <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                  主推荐能力
                 </div>
                 <h2
                   id="active-capability-title"
-                  className="mt-1 text-2xl font-semibold tracking-[-0.02em] text-foreground"
+                  className="mt-1 text-[25px] font-semibold tracking-[-0.035em] text-foreground"
                 >
                   {activeSkill.name}
                 </h2>
               </div>
             </div>
-            <p className="mt-5 max-w-lg text-[15px] leading-7 text-[#595757]">
+            <p className="mt-5 max-w-md text-[14px] leading-7 text-[#5F5961]">
               {activeSkill.description}
             </p>
 
-            <div className="mt-6">
-              <div className="mb-2 text-[12px] font-semibold text-[#7D6670]">从一个示例开始</div>
-              <div className="flex flex-wrap gap-2">
-                {activeSkill.experience.starterPrompts.map((prompt) => (
+            <div className="mt-7">
+              <div className="mb-2.5 flex items-center justify-between gap-3 text-[11px] font-semibold text-[#756A72]">
+                <span>示例（可直接使用）</span>
+                <span className="font-normal text-[#A49BA1]">选择后先进入草稿</span>
+              </div>
+              <div className="space-y-2">
+                {activeSkill.experience.starterPrompts.map((prompt, index) => (
                   <button
                     key={prompt}
                     type="button"
+                    aria-label={prompt}
+                    title={prompt}
                     onClick={() => onStart(activeSkill, prompt)}
-                    className="group inline-flex min-h-11 items-center gap-2 rounded-full border border-[#E7D5DD] bg-white/85 px-3.5 py-2 text-left text-[12px] font-medium text-[#51454A] shadow-[0_4px_14px_rgba(79,52,64,0.05)] transition hover:-translate-y-0.5 hover:border-[#EA1F59]/30 hover:text-[#D41B51] hover:shadow-[0_8px_20px_rgba(234,31,89,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 motion-reduce:transform-none"
+                    className="group flex min-h-12 w-full items-center gap-3 rounded-[13px] border border-white/90 bg-white/78 px-3.5 py-2.5 text-left text-[12px] font-medium text-[#443D43] shadow-[0_5px_18px_rgba(66,52,63,0.045)] backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-[#EDC8D3] hover:bg-white hover:shadow-[0_10px_24px_rgba(198,56,96,0.09)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 motion-reduce:transform-none"
                   >
-                    {prompt}
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] bg-[#FFF0F4] text-[10px] font-semibold text-[#D92859]">
+                      {String(index + 1).padStart(2, '0')}
+                    </span>
+                    <span className="min-w-0 flex-1">{prompt}</span>
                     <ArrowRight
-                      className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5 motion-reduce:transform-none"
+                      className="h-4 w-4 shrink-0 text-[#9F9098] transition-transform group-hover:translate-x-0.5 group-hover:text-[#D92859] motion-reduce:transform-none"
                       aria-hidden
                     />
                   </button>
@@ -158,25 +207,61 @@ export function CapabilityCenterContent({
             </div>
           </div>
 
-          <div className="border-t border-[#EFE2E7] bg-white/66 p-5 sm:p-7 lg:border-l lg:border-t-0">
-            <div className="rounded-[14px] border border-white bg-white/90 p-5 shadow-[0_12px_34px_rgba(56,47,52,0.08)]">
-              <div className="flex items-center justify-between gap-3">
-                <div className="inline-flex items-center gap-2 text-[12px] font-semibold text-[#CF174B]">
-                  <Sparkles className="h-4 w-4" aria-hidden />
-                  示例结果
+          <div className="border-t border-white/85 bg-white/34 p-4 sm:p-6 lg:border-l lg:border-t-0">
+            <article className="h-full min-h-[390px] overflow-hidden rounded-[18px] border border-white bg-white/92 shadow-[0_18px_44px_rgba(57,49,60,0.09)] backdrop-blur-lg">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#EEE9EE] px-5 py-3.5">
+                <div>
+                  <div className="text-[10px] font-semibold tracking-[0.08em] text-[#8E78B8]">
+                    示例结果
+                  </div>
+                  <h3 className="mt-0.5 text-[14px] font-semibold text-[#2F2930]">结果预览</h3>
                 </div>
-                <span className="rounded-full bg-[#F2F8FF] px-2.5 py-1 text-[10px] font-medium text-[#4676A8]">
-                  预览
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F1FBF7] px-2.5 py-1 text-[10px] font-semibold text-[#288367]">
+                  <Check className="h-3.5 w-3.5" aria-hidden />
+                  可继续编辑
                 </span>
               </div>
-              <p className="mt-4 text-[15px] font-medium leading-7 text-[#343036]">
-                {activeSkill.experience.exampleSummary}
-              </p>
-              <div className="mt-5 h-px bg-[#EFEFEF]" />
-              <p className="mt-4 text-[11px] leading-5 text-muted-foreground">
-                实际结果会根据你的材料、目标和任务上下文生成。
-              </p>
-            </div>
+
+              <div className="p-5 sm:p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] font-semibold tracking-[0.08em] text-[#A49AA1]">
+                      {activeSkill.name} · 示例摘要
+                    </p>
+                    <p className="mt-2 max-w-2xl text-[17px] font-semibold leading-7 tracking-[-0.015em] text-[#302B30]">
+                      {activeSkill.experience.exampleSummary}
+                    </p>
+                  </div>
+                  <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-[#D94B75]" aria-hidden />
+                </div>
+
+                <div className="mt-6 grid gap-2.5 sm:grid-cols-2">
+                  {activeSkill.experience.deliverables.map((deliverable, index) => (
+                    <div
+                      key={deliverable}
+                      className={cn(
+                        'rounded-[13px] border px-3.5 py-3.5',
+                        index % 2 === 0
+                          ? 'border-[#E3EBFF] bg-[#F7FAFF]'
+                          : 'border-[#E9E2FA] bg-[#FAF8FF]',
+                      )}
+                    >
+                      <div className="text-[10px] font-semibold text-[#8F8290]">交付内容</div>
+                      <div className="mt-1.5 text-[12px] font-semibold text-[#403940]">
+                        {deliverable}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-6 flex items-start gap-3 border-t border-[#EEE9EE] pt-4">
+                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#6C8FA9]" aria-hidden />
+                  <p className="text-[11px] leading-5 text-[#7D747A]">
+                    实际结果会根据你的材料、目标和任务上下文生成；开始前仍可补充要求。
+                  </p>
+                </div>
+              </div>
+            </article>
           </div>
         </div>
       </section>
@@ -190,8 +275,12 @@ export function CapabilityCenterContent({
               aria-label={`预览${skill.name}`}
               title={`预览${skill.name}`}
               onClick={() => onSelectSkill(skill.id)}
-              className="group flex min-h-[132px] items-start gap-4 rounded-[14px] border border-[#E7E2E5] bg-white p-5 text-left shadow-[0_8px_24px_rgba(56,47,52,0.045)] transition hover:-translate-y-0.5 hover:border-[#DCCAD2] hover:shadow-[0_14px_30px_rgba(56,47,52,0.07)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/15 motion-reduce:transform-none"
+              className="group relative flex min-h-[128px] items-start gap-4 overflow-hidden rounded-[17px] border border-[#E9E4EA] bg-white p-5 text-left shadow-[0_10px_28px_rgba(56,47,52,0.045)] transition hover:-translate-y-0.5 hover:border-[#DDCED7] hover:shadow-[0_16px_34px_rgba(56,47,52,0.075)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/15 motion-reduce:transform-none"
             >
+              <span
+                className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-[linear-gradient(90deg,#FFB8CA_0%,#C9C4FF_52%,#A9E8DF_100%)] opacity-75"
+                aria-hidden
+              />
               <SkillLogo logoId={skill.logoId} label={skill.name} size="md" />
               <span className="min-w-0 flex-1">
                 <span className="block text-[15px] font-semibold text-foreground">
@@ -203,8 +292,8 @@ export function CapabilityCenterContent({
                 <span className="mt-1 line-clamp-2 block text-[12px] leading-5 text-muted-foreground">
                   {skill.experience.exampleSummary}
                 </span>
-                <span className="mt-3 inline-flex items-center gap-1 text-[12px] font-medium text-[#8269A7]">
-                  看示例与使用方式
+                <span className="mt-3 inline-flex items-center gap-1 text-[12px] font-semibold text-[#8269A7]">
+                  切换到这个能力
                   <ChevronRight
                     className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5 motion-reduce:transform-none"
                     aria-hidden
@@ -216,18 +305,25 @@ export function CapabilityCenterContent({
         </section>
       )}
 
-      <section aria-labelledby="capability-details-title">
-        <div className="mb-3 flex items-end justify-between gap-4">
+      <section
+        aria-labelledby="capability-details-title"
+        data-testid="capability-readiness-rail"
+        className="overflow-hidden rounded-[18px] border border-[#E8E4E8] bg-white shadow-[0_10px_30px_rgba(56,47,52,0.035)]"
+      >
+        <div className="flex flex-col gap-1 border-b border-[#EEE9ED] bg-[linear-gradient(90deg,#FFF9FB_0%,#FBFBFF_48%,#F7FCFB_100%)] px-5 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-6">
           <div>
-            <h2 id="capability-details-title" className="text-lg font-semibold text-foreground">
-              使用前先看清楚
+            <h2 id="capability-details-title" className="text-[15px] font-semibold text-foreground">
+              能力准备轨道
             </h2>
-            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+            <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
               输入、交付和边界都写明白，开始后更容易得到可用结果。
             </p>
           </div>
+          <span className="text-[10px] font-semibold tracking-[0.08em] text-[#A28E98]">
+            START WITH CLARITY
+          </span>
         </div>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid divide-y divide-[#EEE9ED] md:grid-cols-2 md:divide-x md:divide-y-0 xl:grid-cols-4">
           <CapabilityDetailCard
             icon={FileInput}
             title="你需要提供"
@@ -367,10 +463,10 @@ export function CapabilityCenterContent({
 type DetailTone = 'rose' | 'blue' | 'mint' | 'violet';
 
 const DETAIL_TONE: Record<DetailTone, string> = {
-  rose: 'bg-[#FFF7F9] text-[#C93A62]',
-  blue: 'bg-[#F4FAFF] text-[#437DB1]',
-  mint: 'bg-[#F3FCF8] text-[#278269]',
-  violet: 'bg-[#F8F6FF] text-[#705BA5]',
+  rose: 'bg-[#FFF1F5] text-[#C93A62]',
+  blue: 'bg-[#F1F7FF] text-[#437DB1]',
+  mint: 'bg-[#EFFAF5] text-[#278269]',
+  violet: 'bg-[#F5F2FF] text-[#705BA5]',
 };
 
 function CapabilityDetailCard({
@@ -385,11 +481,11 @@ function CapabilityDetailCard({
   tone: DetailTone;
 }): JSX.Element {
   return (
-    <div className="rounded-[14px] border border-[#E8E4E6] bg-white p-4 shadow-[0_6px_20px_rgba(56,47,52,0.035)]">
+    <div className="min-h-[154px] bg-white p-4 sm:p-5">
       <div className="flex items-center gap-2.5">
         <span
           className={cn(
-            'flex h-8 w-8 items-center justify-center rounded-[10px]',
+            'flex h-8 w-8 items-center justify-center rounded-[10px] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.72)]',
             DETAIL_TONE[tone],
           )}
         >

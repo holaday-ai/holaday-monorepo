@@ -109,6 +109,29 @@ describe('CapabilityCenterContent', () => {
     ).toBe('true');
   });
 
+  it('presents the selected capability as a truthful AI workbench', () => {
+    render(<CapabilityCenterContent {...baseProps} />);
+
+    const studio = screen.getByTestId('capability-studio');
+    const status = within(studio).getByRole('status', { name: '能力运行状态' });
+
+    expect(within(status).getByText('AI 能力已就绪')).toBeTruthy();
+    expect(within(status).getByText('结果为可编辑草稿')).toBeTruthy();
+    expect(within(status).getByText('不会自动提交')).toBeTruthy();
+    expect(within(studio).getByRole('heading', { level: 3, name: '结果预览' })).toBeTruthy();
+    expect(within(studio).getByText('关键指标摘要')).toBeTruthy();
+    expect(within(studio).getByText('异常与趋势说明')).toBeTruthy();
+    expect(screen.getByTestId('capability-readiness-rail')).toBeTruthy();
+  });
+
+  it('does not claim a disabled capability is ready to run', () => {
+    render(<CapabilityCenterContent {...baseProps} activeSkillId="social-media-strategy" />);
+
+    const status = screen.getByRole('status', { name: '能力运行状态' });
+    expect(within(status).getByText('能力可预览，启用后使用')).toBeTruthy();
+    expect(within(status).queryByText('AI 能力已就绪')).toBeNull();
+  });
+
   it('starts from an explicit sample and lets the user switch the showcase capability', async () => {
     const user = userEvent.setup();
     const onStart = vi.fn();
