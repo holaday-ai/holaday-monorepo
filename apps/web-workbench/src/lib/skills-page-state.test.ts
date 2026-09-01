@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { HOLADAY_SKILLS } from '@holaday/shared-types';
 import {
   type SkillCategory,
   groupSkillsByCategory,
@@ -299,6 +300,22 @@ describe('skills page state helpers', () => {
       },
     ]);
     expect(matchSkillsForIntent(intentSkills, '帮我处理一下').confidence).toBe('low');
+  });
+
+  it.each(['帮我看看风险', '找出问题'])(
+    'keeps generic cross-domain intent low-confidence: %s',
+    (intent) => {
+      const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
+
+      expect(result.confidence).toBe('low');
+    },
+  );
+
+  it('still identifies an explicit domain request in the real capability catalogue', () => {
+    const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), '帮我审查这份合同');
+
+    expect(result.confidence).toBe('strong');
+    expect(result.matches[0]?.skill.id).toBe('contract-risk-review');
   });
 
   it('falls back to available capabilities when preferred showcase entries are missing', () => {

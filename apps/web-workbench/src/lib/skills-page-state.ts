@@ -236,18 +236,27 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
 ): SkillIntentMatchResult<TSkill> {
   const normalizedIntent = normalizeMatchText(intent);
   const intentPairs = characterPairs(normalizedIntent);
-  const matches = skills
-    .map((skill, index) => ({
+  const skillDocuments = skills.map((skill) => normalizeSkillIntentDocument(skill));
+  const scoredSkills = skills.map((skill, index) => {
+    const evidence = scoreSkillIntent(skill, normalizedIntent, intentPairs);
+    const specificExactScore = [...evidence.exactBonuses].reduce(
+      (sum, [term, value]) =>
+        sum + (skillDocuments.filter((document) => document.includes(term)).length === 1 ? value : 0),
+      0,
+    );
+    return {
       skill,
-      score: scoreSkillIntent(skill, normalizedIntent, intentPairs),
+      score: evidence.pairScore + specificExactScore,
       index,
-    }))
+    };
+  });
+  const matches = scoredSkills
     .sort((left, right) => right.score - left.score || left.index - right.index)
     .map(({ skill, score }) => ({ skill, score }));
   const topScore = matches[0]?.score ?? 0;
   const secondScore = matches[1]?.score ?? 0;
   const confidence =
-    normalizedIntent.length >= 2 && topScore >= 12 && (topScore - secondScore >= 2 || topScore >= 24)
+    normalizedIntent.length >= 2 && topScore >= 10 && topScore - secondScore >= 5
       ? 'strong'
       : 'low';
   return { confidence, matches };
@@ -257,35 +266,54 @@ function scoreSkillIntent(
   skill: UiSkill,
   normalizedIntent: string,
   intentPairs: ReadonlySet<string>,
-): number {
-  if (!normalizedIntent) return 0;
-  const weightedFields: ReadonlyArray<readonly [string, number]> = [
-    [skill.name, 12],
-    ...skill.aliases.map((value) => [value, 10] as const),
-    [skill.description, 4],
-    ...skill.experience.starterPrompts.map((value) => [value, 5] as const),
-    ...skill.experience.requiredInputs.map((value) => [value, 2] as const),
-    ...skill.experience.deliverables.map((value) => [value, 4] as const),
-    [skill.experience.exampleSummary, 4],
+): {
+  readonly pairScore: number;
+  readonly exactBonuses: ReadonlyMap<string, number>;
+} {
+  if (!normalizedIntent) return { pairScore: 0, exactBonuses: new Map() };
+  const weightedFields: ReadonlyArray<readonly [string, number, number]> = [
+    [skill.name, 18, 6],
+    ...skill.aliases.map((value) => [value, 14, 5] as const),
+    [skill.description, 0, 3],
+    ...skill.experience.starterPrompts.map((value) => [value, 0, 2] as const),
+    ...skill.experience.requiredInputs.map((value) => [value, 0, 2] as const),
+    ...skill.experience.deliverables.map((value) => [value, 0, 2] as const),
+    [skill.experience.exampleSummary, 0, 2],
   ];
-  let score = 0;
-  for (const [value, weight] of weightedFields) {
+  const exactBonuses = new Map<string, number>();
+  const pairWeights = new Map<string, number>();
+  for (const [value, exactWeight, pairWeight] of weightedFields) {
     const normalizedValue = normalizeMatchText(value);
     if (normalizedValue.length < 2) continue;
-    if (normalizedIntent.includes(normalizedValue)) {
-      score += weight + Math.min(normalizedValue.length, 8);
-    } else if (normalizedValue.includes(normalizedIntent)) {
-      score += weight;
-    } else {
-      const valuePairs = characterPairs(normalizedValue);
-      let overlap = 0;
-      for (const pair of valuePairs) {
-        if (intentPairs.has(pair)) overlap += 1;
-      }
-      score += overlap * Math.min(weight, 4);
+    if (exactWeight > 0 && normalizedIntent.includes(normalizedValue)) {
+      exactBonuses.set(
+        normalizedValue,
+        Math.max(exactBonuses.get(normalizedValue) ?? 0, exactWeight),
+      );
+    }
+    for (const pair of characterPairs(normalizedValue)) {
+      if (!intentPairs.has(pair)) continue;
+      pairWeights.set(pair, Math.max(pairWeights.get(pair) ?? 0, pairWeight));
     }
   }
-  return score;
+  return {
+    pairScore: [...pairWeights.values()].reduce((sum, value) => sum + value, 0),
+    exactBonuses,
+  };
+}
+
+function normalizeSkillIntentDocument(skill: UiSkill): string {
+  return [
+    skill.name,
+    ...skill.aliases,
+    skill.description,
+    ...skill.experience.starterPrompts,
+    ...skill.experience.requiredInputs,
+    ...skill.experience.deliverables,
+    skill.experience.exampleSummary,
+  ]
+    .map(normalizeMatchText)
+    .join('\n');
 }
 
 function normalizeMatchText(value: string): string {

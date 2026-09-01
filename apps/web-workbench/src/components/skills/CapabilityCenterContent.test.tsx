@@ -234,7 +234,8 @@ describe('CapabilityCenterContent', () => {
 
     await user.type(search, '周报');
     expect(within(catalogue).getByText('数据报表解读')).toBeTruthy();
-    expect(within(catalogue).queryByText('社交媒体策略')).toBeNull();
+    expect(within(catalogue).getByText('社交媒体策略')).toBeTruthy();
+    expect(within(catalogue).getByText('合同风险审查')).toBeTruthy();
 
     await user.clear(search);
     await user.type(search, '复购率');
@@ -289,6 +290,48 @@ describe('CapabilityCenterContent', () => {
     expect(within(catalogue).getByText('数据报表解读')).toBeTruthy();
     expect(within(catalogue).getByText('社交媒体策略')).toBeTruthy();
     expect(within(catalogue).getByText('合同风险审查')).toBeTruthy();
+  });
+
+  it('keeps the full catalogue when a low-confidence request happens to match visible copy', async () => {
+    const user = userEvent.setup();
+
+    function Harness(): JSX.Element {
+      const [query, setQuery] = React.useState('');
+      return <CapabilityCenterContent {...baseProps} query={query} onQueryChange={setQuery} />;
+    }
+
+    render(<Harness />);
+    await user.type(screen.getByRole('searchbox', { name: '搜索想完成的任务' }), '周报');
+
+    expect(screen.getByText('还不能确定最适合的能力')).toBeTruthy();
+    const catalogue = screen.getByTestId('capability-catalogue');
+    expect(within(catalogue).getByText('数据报表解读')).toBeTruthy();
+    expect(within(catalogue).getByText('社交媒体策略')).toBeTruthy();
+    expect(within(catalogue).getByText('合同风险审查')).toBeTruthy();
+  });
+
+  it('lets users switch from the strongest match to a recommended candidate', async () => {
+    const user = userEvent.setup();
+
+    function Harness(): JSX.Element {
+      const [activeSkillId, setActiveSkillId] = React.useState('data-report-insight');
+      return (
+        <CapabilityCenterContent
+          {...baseProps}
+          activeSkillId={activeSkillId}
+          query="分析数据并规划社媒内容"
+          onSelectSkill={setActiveSkillId}
+        />
+      );
+    }
+
+    render(<Harness />);
+    expect(screen.getByText('最适合：社交媒体策略')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '预览数据报表解读' }));
+
+    expect(screen.getByText('已选择：数据报表解读')).toBeTruthy();
+    expect(screen.getByText('销售额环比增长 18.7%，但复购率连续两周回落。')).toBeTruthy();
   });
 
   it('exposes one clear toggle action for each catalogue capability', async () => {
