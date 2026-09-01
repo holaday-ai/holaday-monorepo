@@ -7,11 +7,7 @@ export interface SkillGroup<TSkill extends Pick<UiSkill, 'category'>> {
   readonly items: readonly TSkill[];
 }
 
-export const SKILL_CATEGORY_ORDER: readonly SkillCategory[] = [
-  '内容运营',
-  '分析决策',
-  '管理协作',
-];
+export const SKILL_CATEGORY_ORDER: readonly SkillCategory[] = ['内容运营', '分析决策', '管理协作'];
 
 export interface SkillToggleSnapshot {
   readonly enabled: boolean;
@@ -93,28 +89,28 @@ export function skillPageSummary(options: {
   readonly cap: number;
   readonly planId: string;
 }): string {
-  if (options.loading) return '技能加载中…';
-  if (options.error) return '技能暂时无法加载';
-  if (options.totalCount === 0) return '暂无可用技能';
+  if (options.loading) return '任务选项加载中…';
+  if (options.error) return '任务选项暂时无法加载';
+  if (options.totalCount === 0) return '暂无可开始的任务';
   if (options.cap <= 0) {
-    return `${skillPlanLabel(options.planId)}暂不支持启用技能`;
+    return `${skillPlanLabel(options.planId)}可查看任务示例`;
   }
   if (options.cap > 0) {
     if (options.enabledCount > options.cap) {
-      return `已启用 ${options.enabledCount} 个 · ${skillPlanLabel(options.planId)}上限 ${options.cap}`;
+      return `已保留 ${options.enabledCount} 项常用能力 · ${skillPlanLabel(options.planId)}上限 ${options.cap}`;
     }
-    return `已启用 ${options.enabledCount} / ${options.cap} · ${skillPlanLabel(options.planId)}`;
+    return `常用能力 ${options.enabledCount} / ${options.cap} · ${skillPlanLabel(options.planId)}`;
   }
-  return `已加载 ${options.totalCount} 个技能 · ${skillPlanLabel(options.planId)}`;
+  return `已加载 ${options.totalCount} 项任务 · ${skillPlanLabel(options.planId)}`;
 }
 
 export function skillLoadErrorCopy(message: string | null | undefined): SkillLoadErrorCopy {
   const body =
     typeof message === 'string' && message.trim()
       ? message.trim()
-      : '请稍后重试，或刷新页面后再打开技能。';
+      : '请稍后重试，或刷新页面后再打开能力中心。';
   return {
-    title: '技能暂时无法加载',
+    title: '任务选项暂时无法加载',
     body,
   };
 }
@@ -123,9 +119,9 @@ export function skillLimitMessage(options: {
   readonly cap: number;
   readonly planId: string;
 }): string {
-  if (options.cap <= 0) return `${skillPlanLabel(options.planId)}暂不支持启用技能`;
-  if (options.planId === 'pro') return `已达到 ${options.cap} 个技能上限`;
-  return `已达到当前套餐的技能上限（${options.cap} 个）· 升级到专业版可使用全部 13 个技能`;
+  if (options.cap <= 0) return '当前套餐暂不支持开始此任务';
+  if (options.planId === 'pro') return `当前套餐的常用能力已满（${options.cap} 项）`;
+  return `常用能力已满（${options.cap} 项）· 可先移除一项或升级套餐`;
 }
 
 export function skillLimitBannerCopy(options: {
@@ -135,22 +131,22 @@ export function skillLimitBannerCopy(options: {
 }): SkillLimitBannerCopy {
   if (options.cap <= 0) {
     return {
-      title: `${skillPlanLabel(options.planId)}暂不支持启用技能`,
-      body: '升级到基础版可自选技能；升级到专业版可使用全部 13 个技能。',
+      title: '当前套餐可查看任务示例',
+      body: '升级到基础版后即可选择并开始任务；专业版可使用全部 13 类任务。',
     };
   }
   if (options.enabledCount > options.cap) {
     return {
-      title: `当前已启用 ${options.enabledCount} 个技能`,
-      body: `${skillPlanLabel(options.planId)}上限为 ${options.cap} 个。已启用的技能会继续可用；如果停用后想启用新技能，需要先保持在上限内。`,
+      title: `当前已保留 ${options.enabledCount} 项常用能力`,
+      body: `${skillPlanLabel(options.planId)}最多保留 ${options.cap} 项。现有任务仍可使用；移除后才能添加新的常用能力。`,
     };
   }
   return {
-    title: `已达到 ${options.cap} 个技能上限`,
-      body:
-        options.planId === 'pro'
-          ? '你已启用当前套餐支持的全部技能。'
-        : '升级到专业版可使用全部 13 个技能。',
+    title: `常用能力已满（${options.cap} 项）`,
+    body:
+      options.planId === 'pro'
+        ? '当前套餐支持的能力已全部加入常用。'
+        : '开始其他任务前，可先移除一项常用能力，或升级套餐。',
   };
 }
 
@@ -161,9 +157,9 @@ export function skillCardBadge(options: {
   readonly cap?: number;
 }): string {
   if (options.pending) return '保存中…';
-  if (!options.enabled && options.limitBlocked && (options.cap ?? 1) <= 0) return '不可启用';
+  if (!options.enabled && options.limitBlocked && (options.cap ?? 1) <= 0) return '暂不可用';
   if (!options.enabled && options.limitBlocked) return '已达上限';
-  return options.enabled ? '已启用' : '启用';
+  return options.enabled ? '常用' : '加入常用';
 }
 
 export function skillCardUsageHint(options: {
@@ -172,15 +168,15 @@ export function skillCardUsageHint(options: {
   readonly limitBlocked?: boolean;
   readonly cap?: number;
 }): string {
-  if (options.pending) return '正在保存选择';
+  if (options.pending) return '正在保存';
   if (options.enabled && (options.cap ?? 1) <= 0) {
-    return '当前套餐不可使用，可停用';
+    return '当前套餐暂不可使用';
   }
   if (!options.enabled && options.limitBlocked && (options.cap ?? 1) <= 0) {
-    return '当前套餐不可启用';
+    return '当前套餐暂不可使用';
   }
-  if (!options.enabled && options.limitBlocked) return '先停用一个技能后可启用';
-  return options.enabled ? '会自动匹配；可在输入框 @ 调用' : '启用后可参与自动匹配';
+  if (!options.enabled && options.limitBlocked) return '先移除一项常用能力';
+  return options.enabled ? '已加入常用' : '可加入常用';
 }
 
 export function skillTaskDraft(
@@ -246,8 +242,7 @@ export function normalizeSkillToggleResponse(
 ): SkillToggleSnapshot {
   if (!isRecord(value)) return { enabled: fallbackEnabled };
   return {
-    enabled:
-      typeof value.enabled === 'boolean' ? value.enabled : fallbackEnabled,
+    enabled: typeof value.enabled === 'boolean' ? value.enabled : fallbackEnabled,
   };
 }
 
@@ -261,7 +256,7 @@ function normalizeSkillRow(value: unknown): UiSkill | null {
     name,
     logoId: safeSkillText(value.logoId) || id,
     category: normalizeSkillCategory(value.category),
-    description: safeSkillText(value.description) || '暂无技能说明',
+    description: safeSkillText(value.description) || '暂未提供说明',
     aliases: normalizeTextArray(value.aliases),
     maturity: normalizeSkillMaturity(value.maturity),
     connectors: normalizeTextArray(value.connectors),
@@ -282,17 +277,11 @@ function normalizeSkillExperience(value: unknown): UiSkill['experience'] {
 }
 
 function normalizeSkillCategory(value: unknown): SkillCategory {
-  return value === '内容运营' ||
-    value === '分析决策' ||
-    value === '管理协作'
-    ? value
-    : '内容运营';
+  return value === '内容运营' || value === '分析决策' || value === '管理协作' ? value : '内容运营';
 }
 
 function normalizeSkillMaturity(value: unknown): UiSkill['maturity'] {
-  return value === 'workflow' || value === 'connected' || value === 'template'
-    ? value
-    : 'template';
+  return value === 'workflow' || value === 'connected' || value === 'template' ? value : 'template';
 }
 
 function normalizeTextArray(value: unknown): string[] {
