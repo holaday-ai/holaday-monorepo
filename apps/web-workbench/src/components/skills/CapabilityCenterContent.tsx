@@ -185,6 +185,7 @@ export function CapabilityCenterContent({
               key={skill.id}
               type="button"
               aria-label={`预览${skill.name}`}
+              title={`预览${skill.name}`}
               onClick={() => onSelectSkill(skill.id)}
               className="group flex min-h-[132px] items-start gap-4 rounded-[14px] border border-[#E7E2E5] bg-white p-5 text-left shadow-[0_8px_24px_rgba(56,47,52,0.045)] transition hover:-translate-y-0.5 hover:border-[#DCCAD2] hover:shadow-[0_14px_30px_rgba(56,47,52,0.07)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/15 motion-reduce:transform-none"
             >
@@ -297,6 +298,7 @@ export function CapabilityCenterContent({
                         <button
                           type="button"
                           aria-label={`查看${skill.name}`}
+                          title={`查看${skill.name}`}
                           onClick={() => onSelectSkill(skill.id)}
                           className="flex min-w-0 flex-1 items-center gap-3 rounded-[8px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/15"
                         >
@@ -318,6 +320,7 @@ export function CapabilityCenterContent({
                         <button
                           type="button"
                           aria-label={`${skill.enabled ? '停用' : '启用'}${skill.name}`}
+                          title={`${skill.enabled ? '停用' : '启用'}${skill.name}`}
                           aria-pressed={skill.enabled}
                           aria-busy={pending}
                           disabled={pending || anotherPending || limitBlocked}
