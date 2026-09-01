@@ -426,6 +426,8 @@ describe('skills page state helpers', () => {
     ['保证不低于十万小红书流量', 'xiaohongshu-seeding-ops'],
     ['保证不少于十万小红书流量', 'xiaohongshu-seeding-ops'],
     ['保证不会低于十万小红书流量', 'xiaohongshu-seeding-ops'],
+    ['保证不能低于十万小红书流量', 'xiaohongshu-seeding-ops'],
+    ['保证不能少于十万小红书流量', 'xiaohongshu-seeding-ops'],
     ['帮我把这篇公众号文章发出去', 'wechat-article-ops'],
     ['把这篇小红书笔记发布出去', 'xiaohongshu-seeding-ops'],
     ['在公众号上发布这篇文章', 'wechat-article-ops'],
@@ -494,12 +496,18 @@ describe('skills page state helpers', () => {
     ['看绩效后把员工开了', 'performance-review-design'],
     ['检查招聘要求是否存在性别歧视，然后筛掉女性候选人', 'resume-search-screening'],
     ['检查招聘要求是否存在性别歧视并筛掉女性候选人', 'resume-search-screening'],
+    ['检查招聘要求是否存在性别歧视并把女性候选人筛掉', 'resume-search-screening'],
+    ['检查招聘要求是否存在性别歧视并将女性候选人过滤掉', 'resume-search-screening'],
     ['按照绩效辞退员工', 'performance-review-design'],
+    ['按绩效辞退员工', 'performance-review-design'],
+    ['依据考核给员工涨薪', 'performance-review-design'],
     ['把这张图片用于商业但没有授权', 'image-prompt-reverse'],
     ['只招汉族候选人', 'resume-search-screening'],
     ['只招回族候选人', 'resume-search-screening'],
     ['检查招聘要求是否存在性别歧视。筛掉女性候选人', 'resume-search-screening'],
     ['只招同性恋候选人', 'resume-search-screening'],
+    ['只招黑人候选人', 'resume-search-screening'],
+    ['只招白人候选人', 'resume-search-screening'],
   ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
@@ -539,6 +547,7 @@ describe('skills page state helpers', () => {
     ['无法百分百保证小红书流量', 'xiaohongshu-seeding-ops'],
     ['分析为什么保证不了小红书流量', 'xiaohongshu-seeding-ops'],
     ['分析为什么保证不到小红书流量', 'xiaohongshu-seeding-ops'],
+    ['分析为什么保证不能达到十万小红书流量', 'xiaohongshu-seeding-ops'],
     ['分析为什么公司不招女性候选人', 'resume-search-screening'],
     ['检查只招男性候选人的要求是否歧视', 'resume-search-screening'],
     ['分析这张图片的风格并给出提示词', 'image-prompt-reverse'],
@@ -561,6 +570,7 @@ describe('skills page state helpers', () => {
     ['评估出具正式法律意见是否超出合同审查范围', 'contract-risk-review'],
     ['分析自动批准产品需求为什么有风险', 'product-plan-drafting'],
     ['评估根据绩效直接决定涨薪的合规风险', 'performance-review-design'],
+    ['评估按绩效辞退员工的合规风险', 'performance-review-design'],
     ['筛选女装设计师候选人', 'resume-search-screening'],
   ])('keeps a supported %s request strongly matched', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
