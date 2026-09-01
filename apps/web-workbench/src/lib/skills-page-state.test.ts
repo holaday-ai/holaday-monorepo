@@ -555,6 +555,7 @@ describe('skills page state helpers', () => {
     ['根据这份报表相关性推导出因果关系', 'data-report-insight'],
     ['绝非不保证小红书流量', 'xiaohongshu-seeding-ops'],
     ['没有不保证抖音视频流量', 'douyin-live-ops'],
+    ['审查合同条款然后保证小红书流量', 'contract-risk-review'],
   ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
@@ -607,6 +608,7 @@ describe('skills page state helpers', () => {
     ['分析这张图片的风格并给出提示词', 'image-prompt-reverse'],
     ['审查合同并标出风险', 'contract-risk-review'],
     ['审查保证销量条款的合同', 'contract-risk-review'],
+    ['审查一份包含保证小红书流量的合同条款', 'contract-risk-review'],
     ['根据公开信息做竞品分析并标记待确认', 'market-competitor-insight'],
     ['分析报表的相关性并说明不能证明因果', 'data-report-insight'],
     ['整理产品需求并生成 PRD 初稿', 'product-plan-drafting'],
@@ -641,6 +643,8 @@ describe('skills page state helpers', () => {
     ['分析为什么不能根据相关性推导因果', 'data-report-insight'],
     ['分析在公众号上发布文章的效果', 'wechat-article-ops'],
     ['复盘在抖音上发布视频的数据', 'douyin-live-ops'],
+    ['帮我分析在公众号上发布文章的效果', 'wechat-article-ops'],
+    ['请复盘在抖音上发布视频的数据', 'douyin-live-ops'],
     ['筛选女装设计师候选人', 'resume-search-screening'],
   ])('keeps a supported %s request strongly matched', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
@@ -654,7 +658,6 @@ describe('skills page state helpers', () => {
       normalizeSkillRows(HOLADAY_SKILLS),
       '分析 A 股股票行情异动，另外审查合同并出具正式法律意见',
     );
-
     expect(result.matches[0]?.skill.id).toBe('a-share-market-briefing');
     expect(result.matches.find((match) => match.skill.id === 'contract-risk-review')?.score).toBeGreaterThanOrEqual(9);
     expect(result.confidence).toBe('low');

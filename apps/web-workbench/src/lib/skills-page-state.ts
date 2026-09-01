@@ -192,7 +192,7 @@ const CONTENT_UNAMBIGUOUS_EXECUTION_CONFLICTS: readonly RegExp[] = [
 const CONTENT_PLATFORM_PUBLICATION_CONFLICT =
   /(?:在|到).{0,10}(?:上|平台)(?:发布|发表|上线|上传)/;
 const CONTENT_PLATFORM_PUBLICATION_ANALYSIS =
-  /^(?:分析|复盘|研究|总结|解释|评估|检查|审查).{0,28}(?:发布|发表|上线|上传).{0,18}(?:效果|数据|表现|结果|原因|问题|风险|影响|趋势|复盘)/;
+  /^(?:(?:请|帮我|替我|给我|麻烦)(?:先|再)?){0,2}(?:分析|复盘|研究|总结|解释|评估|检查|审查).{0,28}(?:发布|发表|上线|上传).{0,18}(?:效果|数据|表现|结果|原因|问题|风险|影响|趋势|复盘)/;
 
 const CONTENT_LEADING_EXECUTION =
   /^(?:一键|直接|立即|马上|自动)?(?:发布|发表|上线|上传)(?:全平台)?(?:这篇|这条|该篇|该条|内容|文章|笔记|视频)/;
@@ -206,6 +206,8 @@ const CONTENT_PROMISE_NEGATION =
 const CONTENT_PROMISE_DOUBLE_NEGATION =
   /(?:不得|不能|不会|不可|不是|并非|绝非|没有|不应|无需|不要|不一定|未必)不$/;
 const CONTENT_PROMISE_POST_NEGATION = /^(?:不了|不到|不住|不能(?!(?:低于|少于)))/;
+const CONTENT_PROMISE_REVIEW_CONTEXT =
+  /^(?:(?:请|帮我|替我|给我|麻烦)(?:先|再)?){0,2}(?:分析|检查|审查|复盘|研究|评估).{0,48}(?:合同|条款|协议)/;
 
 const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
   'image-prompt-reverse': [
@@ -567,7 +569,8 @@ function hasRequiredCapabilityTaskEvidence(
 function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string): boolean {
   if (CONTENT_EXECUTION_SKILL_IDS.has(skillId)) {
     return (
-      contentExecutionConflict(normalizedIntent) || hasUnnegatedContentPromise(normalizedIntent)
+      contentExecutionConflict(normalizedIntent) ||
+      hasUnexemptedContentPromise(normalizedIntent)
     );
   }
   if (skillId === 'a-share-market-briefing') {
@@ -668,6 +671,15 @@ function hasUnnegatedContentPromise(normalizedIntent: string): boolean {
     }
   }
   return false;
+}
+
+function hasUnexemptedContentPromise(normalizedIntent: string): boolean {
+  if (!hasUnnegatedContentPromise(normalizedIntent)) return false;
+  const clauses = splitBoundaryClauses(normalizedIntent);
+  return clauses.some(
+    (clause) =>
+      hasUnnegatedContentPromise(clause) && !CONTENT_PROMISE_REVIEW_CONTEXT.test(clause),
+  );
 }
 
 function hasNegatedContentPromisePrefix(prefix: string): boolean {
