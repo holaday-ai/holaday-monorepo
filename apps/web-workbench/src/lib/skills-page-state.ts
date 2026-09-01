@@ -661,7 +661,7 @@ function hasRequiredCapabilityTaskEvidence(
 function hasPostContractReviewBoundaryConflict(normalizedIntent: string): boolean {
   const clauses = normalizedIntent
     .split(
-      /(?:[，,；;。.!！？?]+|顺便|另外|然后|接着|随后|继而|同时|并且|而且|转头|最后)/,
+      /(?:[，,；;。.!！？?]+|顺便|另外|然后|接着|随后|继而|同时|并且|而且|转头|最后|并)/,
     )
     .filter(Boolean);
   return clauses.slice(1).some((clause) => {
