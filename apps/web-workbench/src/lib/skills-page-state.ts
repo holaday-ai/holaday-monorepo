@@ -71,13 +71,26 @@ const NON_SPECIFIC_INTENT_TERMS = new Set([
 
 const CAPABILITY_TASK_EVIDENCE: Readonly<Record<string, RegExp>> = {
   'douyin-live-ops':
-    /(?:直播|视频|内容|脚本|投流|流量|广告|涨粉|播放|运营|复盘|数据|发布|剪辑|账号)/,
+    /(?:直播|视频|内容|脚本|投流|流量|广告|涨粉|播放|运营|复盘|数据|发布|剪辑)/,
   'xiaohongshu-seeding-ops':
     /(?:笔记|种草|内容|选题|发布|投薯条|投流|流量|运营|标题|封面|互动|数据)/,
   'wechat-article-ops':
-    /(?:公众号|订阅号|服务号|文章|推文|长文|选题|排版|标题|阅读量|内容|运营|发布|撰写|改写|摘要)/,
+    /(?:文章|推文|长文|选题|排版|标题|阅读量|内容|运营|发布|撰写|改写|摘要)/,
+  'social-media-strategy':
+    /(?:社媒|社交媒体|全平台|内容|矩阵|定位|发布|节奏|运营|复盘|数据|受众|品牌|策略)/,
   'image-prompt-reverse':
     /(?:图片|图像|照片|画面|参考图|提示词|prompt|反推|风格|构图|光线|材质|负面词|主体特征|肖像)/,
+  'a-share-market-briefing':
+    /(?:股票|个股|a股|行情|股市|大盘|涨跌|异动|行业|风险|走势|成交|买入|卖出)/,
+  'contract-risk-review': /(?:合同|条款|协议|签约|谈判|甲方|乙方|法务|审查)/,
+  'market-competitor-insight':
+    /(?:竞品|市场|洞察|调研|swot|机会点|定位|规模|趋势|差异化)/,
+  'data-report-insight': /(?:数据|报表|表格|kpi|归因|指标|图表|周报|复购率)/,
+  'product-plan-drafting': /(?:产品|需求|prd|方案|原型|功能|用户|验收|mvp)/,
+  'project-delivery-management': /(?:项目|推进|里程碑|排期|任务|进度|延期|负责人|依赖)/,
+  'resume-search-screening':
+    /(?:简历|招聘|候选人|人才|面试|jd|岗位|职位|筛选|过滤|录用)/,
+  'performance-review-design': /(?:绩效|考核|kpi|okr|评估|制度|评分|指标|权重)/,
 };
 
 const STOCK_DECISION_CONFLICTS: readonly RegExp[] = [
@@ -103,7 +116,9 @@ const STOCK_DECISION_CONFLICTS: readonly RegExp[] = [
 
 const HIRING_DECISION_EXPLANATION = /(?:分析|解释|说明|复盘|研究).{0,10}(?:为什么|为何|原因|依据|逻辑)/;
 const HIRING_DISCRIMINATION_AUDIT =
-  /^(?:分析|解释|说明|复盘|研究|检查|审查|评估|识别).{0,40}(?:为什么|为何|原因|是否|有无|存在|做法|要求|规则|政策).{0,20}(?:歧视|合规|风险|问题|不招|只招|筛选|过滤)/;
+  /^(?:分析|解释|说明|复盘|研究|检查|审查|评估|识别).{0,40}(?:为什么|为何|原因|是否|有无|存在|做法|要求|规则|政策).{0,20}(?:歧视|合规|风险|问题|不招|只招|筛选|筛掉|过滤|过滤掉)/;
+const HIRING_DISCRIMINATION_ACTION_RISK_AUDIT =
+  /^(?:分析|解释|说明|复盘|研究|检查|审查|评估|识别).{0,40}(?:只招|只录用|筛掉|过滤掉|排除|淘汰|拒绝).{0,24}(?:歧视|合规|风险|问题|后果)/;
 
 const SPECIFIC_ETHNICITY_TERM =
   '(?:(?:汉|回|蒙古|藏|维吾尔|苗|彝|壮|布依|朝鲜|满|侗|瑶|白|土家|哈尼|哈萨克|傣|黎|傈僳|佤|畲|高山|拉祜|水|东乡|纳西|景颇|柯尔克孜|土|达斡尔|仫佬|羌|布朗|撒拉|毛南|仡佬|锡伯|阿昌|普米|塔吉克|怒|乌孜别克|俄罗斯|鄂温克|德昂|保安|裕固|京|塔塔尔|独龙|鄂伦春|赫哲|门巴|珞巴|基诺)族)';
@@ -114,6 +129,9 @@ const SENSITIVE_IDENTITY_TERM =
 
 const HIRING_ANTI_DISCRIMINATION = new RegExp(
   `^(?:请)?(?:不要|禁止|不得|避免|防止)(?:再)?(?:基于|按照|根据|按|依据|以).{0,4}${SENSITIVE_IDENTITY_TERM}.{0,8}(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用)(?:候选人|人才|简历)?(?:并)?(?:检查|分析|说明|识别|评估)?(?:合规|歧视|风险|问题)?$`,
+);
+const HIRING_DIRECT_ANTI_DISCRIMINATION = new RegExp(
+  `^(?:请)?(?:不要|禁止|不得|避免|防止)(?:再)?(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用).{0,6}${SENSITIVE_IDENTITY_TERM}(?:候选人|人才|简历)?(?:并)?(?:检查|分析|说明|识别|评估)?(?:合规|歧视|风险|问题)?$`,
 );
 
 const HIRING_DISCRIMINATION_CONFLICTS: readonly RegExp[] = [
@@ -168,7 +186,7 @@ const CONTENT_LEADING_PLANNING =
 const CONTENT_PROMISE_VERB = /(?:保证|承诺|确保|保底)/g;
 const CONTENT_OUTCOME = /(?:销量|流量|涨粉|转化|播放量|爆款|热门|热搜)/;
 const CONTENT_PROMISE_NEGATION =
-  /(?:无法|不能|难以|不应|不要|无需|不可能)(?:百分百|百分之百|100|完全|绝对|真正|一定|有效)?$/;
+  /(?:无法|不能|难以|不应|不要|无需|不可能|不)(?:百分百|百分之百|100|完全|绝对|真正|一定|有效)?$/;
 const CONTENT_PROMISE_POST_NEGATION = /^(?:不了|不到|不住|不能(?!(?:低于|少于)))/;
 
 const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
@@ -517,7 +535,7 @@ function hasRequiredCapabilityTaskEvidence(
   normalizedIntent: string,
 ): boolean {
   if (!skillId) return false;
-  return CAPABILITY_TASK_EVIDENCE[skillId]?.test(normalizedIntent) ?? true;
+  return CAPABILITY_TASK_EVIDENCE[skillId]?.test(normalizedIntent) ?? false;
 }
 
 function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string): boolean {
@@ -566,7 +584,9 @@ function hasUnexemptedHiringDiscrimination(normalizedIntent: string): boolean {
   }
   const safeMention =
     HIRING_ANTI_DISCRIMINATION.test(normalizedIntent) ||
-    HIRING_DISCRIMINATION_AUDIT.test(normalizedIntent);
+    HIRING_DIRECT_ANTI_DISCRIMINATION.test(normalizedIntent) ||
+    HIRING_DISCRIMINATION_AUDIT.test(normalizedIntent) ||
+    HIRING_DISCRIMINATION_ACTION_RISK_AUDIT.test(normalizedIntent);
   if (!safeMention) return true;
 
   const clauses = splitBoundaryClauses(normalizedIntent);
@@ -575,7 +595,9 @@ function hasUnexemptedHiringDiscrimination(normalizedIntent: string): boolean {
     (clause) =>
       HIRING_DISCRIMINATION_CONFLICTS.some((pattern) => pattern.test(clause)) &&
       !HIRING_ANTI_DISCRIMINATION.test(clause) &&
-      !HIRING_DISCRIMINATION_AUDIT.test(clause),
+      !HIRING_DIRECT_ANTI_DISCRIMINATION.test(clause) &&
+      !HIRING_DISCRIMINATION_AUDIT.test(clause) &&
+      !HIRING_DISCRIMINATION_ACTION_RISK_AUDIT.test(clause),
   );
 }
 

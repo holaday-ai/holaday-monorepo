@@ -531,6 +531,7 @@ describe('skills page state helpers', () => {
     ['检查招聘要求是否存在性别歧视', 'resume-search-screening'],
     ['不要基于性别筛选候选人', 'resume-search-screening'],
     ['不要基于性别筛选候选人。', 'resume-search-screening'],
+    ['不要筛选女性候选人', 'resume-search-screening'],
     ['禁止按照年龄过滤简历', 'resume-search-screening'],
     ['禁止按照年龄过滤简历！', 'resume-search-screening'],
     ['帮我写一篇公众号文章', 'wechat-article-ops'],
@@ -548,6 +549,7 @@ describe('skills page state helpers', () => {
     ['分析为什么保证不了小红书流量', 'xiaohongshu-seeding-ops'],
     ['分析为什么保证不到小红书流量', 'xiaohongshu-seeding-ops'],
     ['分析为什么保证不能达到十万小红书流量', 'xiaohongshu-seeding-ops'],
+    ['不保证小红书流量', 'xiaohongshu-seeding-ops'],
     ['分析为什么公司不招女性候选人', 'resume-search-screening'],
     ['检查只招男性候选人的要求是否歧视', 'resume-search-screening'],
     ['分析这张图片的风格并给出提示词', 'image-prompt-reverse'],
@@ -571,6 +573,10 @@ describe('skills page state helpers', () => {
     ['分析自动批准产品需求为什么有风险', 'product-plan-drafting'],
     ['评估根据绩效直接决定涨薪的合规风险', 'performance-review-design'],
     ['评估按绩效辞退员工的合规风险', 'performance-review-design'],
+    ['分析为什么不能把女性候选人筛掉', 'resume-search-screening'],
+    ['分析把女性候选人筛掉会有什么风险', 'resume-search-screening'],
+    ['评估把女性候选人筛掉的歧视风险', 'resume-search-screening'],
+    ['分析只招白人候选人的歧视风险', 'resume-search-screening'],
     ['筛选女装设计师候选人', 'resume-search-screening'],
   ])('keeps a supported %s request strongly matched', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
@@ -594,6 +600,7 @@ describe('skills page state helpers', () => {
     ['微信登录异常怎么处理', 'wechat-article-ops'],
     ['Sora登录异常怎么处理', 'image-prompt-reverse'],
     ['Midjourney账号登不上', 'image-prompt-reverse'],
+    ['Boss直聘登录异常怎么处理', 'resume-search-screening'],
   ])('does not promote a broad platform or tool name without task evidence: %s', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
