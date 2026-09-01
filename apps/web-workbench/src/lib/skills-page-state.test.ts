@@ -485,6 +485,17 @@ describe('skills page state helpers', () => {
     expect(result.matches[0]?.skill.id).toBe(skillId);
   });
 
+  it('does not offer switchable matches when any relevant candidate conflicts with its boundary', () => {
+    const result = matchSkillsForIntent(
+      normalizeSkillRows(HOLADAY_SKILLS),
+      '分析 A 股股票行情异动，另外审查合同并出具正式法律意见',
+    );
+
+    expect(result.matches[0]?.skill.id).toBe('a-share-market-briefing');
+    expect(result.matches.find((match) => match.skill.id === 'contract-risk-review')?.score).toBeGreaterThanOrEqual(9);
+    expect(result.confidence).toBe('low');
+  });
+
   it('falls back to available capabilities when preferred showcase entries are missing', () => {
     expect(
       pickCapabilityShowcase([{ id: 'first' }, { id: 'second' }]).map((skill) => skill.id),

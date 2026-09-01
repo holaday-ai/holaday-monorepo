@@ -443,9 +443,10 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
     .map(({ skill, score }) => ({ skill, score }));
   const topScore = matches[0]?.score ?? 0;
   const secondScore = matches[1]?.score ?? 0;
-  const boundaryConflict = matches[0]
-    ? intentViolatesSkillBoundary(matches[0].skill.id, normalizedIntent)
-    : false;
+  const boundaryConflict = matches.some(
+    (match) =>
+      match.score >= 9 && intentViolatesSkillBoundary(match.skill.id, normalizedIntent),
+  );
   const confidence =
     !boundaryConflict &&
     normalizedIntent.length >= 2 &&
@@ -453,7 +454,13 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
     topScore - secondScore >= 4
       ? 'strong'
       : 'low';
-  return { confidence, matches };
+  const selectableMatches =
+    confidence === 'strong'
+      ? matches.filter(
+          (match) => !intentViolatesSkillBoundary(match.skill.id, normalizedIntent),
+        )
+      : matches;
+  return { confidence, matches: selectableMatches };
 }
 
 function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string): boolean {
