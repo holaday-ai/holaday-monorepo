@@ -165,6 +165,7 @@ const CONTENT_PROMISE_VERB = /(?:保证|承诺|确保|保底)/g;
 const CONTENT_OUTCOME = /(?:销量|流量|涨粉|转化|播放量|爆款|热门|热搜)/;
 const CONTENT_PROMISE_NEGATION =
   /(?:无法|不能|难以|不应|不要|无需|不可能)(?:百分百|百分之百|100|完全|绝对|真正|一定|有效)?$/;
+const CONTENT_PROMISE_POST_NEGATION = /^(?:不(?:了|到|住|成|能|会|可以)?|无法|没法|难以)/;
 
 const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
   'image-prompt-reverse': [
@@ -599,7 +600,13 @@ function hasUnnegatedContentPromise(normalizedIntent: string): boolean {
     const clause = normalizedIntent
       .slice(match.index + match[0].length, match.index + match[0].length + 18)
       .split(/(?:但是|但|然而|然后|同时|并且|再|保证|承诺|确保)/, 1)[0];
-    if (CONTENT_OUTCOME.test(clause) && !CONTENT_PROMISE_NEGATION.test(prefix)) return true;
+    if (
+      CONTENT_OUTCOME.test(clause) &&
+      !CONTENT_PROMISE_NEGATION.test(prefix) &&
+      !CONTENT_PROMISE_POST_NEGATION.test(clause)
+    ) {
+      return true;
+    }
   }
   return false;
 }

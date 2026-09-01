@@ -529,6 +529,7 @@ describe('skills page state helpers', () => {
     ['优先分析女性候选人的经历', 'resume-search-screening'],
     ['发布内容怎么规划', 'social-media-strategy'],
     ['无法百分百保证小红书流量', 'xiaohongshu-seeding-ops'],
+    ['分析为什么保证不了小红书流量', 'xiaohongshu-seeding-ops'],
     ['分析为什么公司不招女性候选人', 'resume-search-screening'],
     ['检查只招男性候选人的要求是否歧视', 'resume-search-screening'],
     ['分析这张图片的风格并给出提示词', 'image-prompt-reverse'],
