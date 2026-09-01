@@ -689,6 +689,7 @@ describe('skills page state helpers', () => {
     ['审查合同后自动批准产品需求条款', 'contract-risk-review'],
     ['审查合同规定产品需求自动批准顺手自动批准产品需求', 'contract-risk-review'],
     ['审查合同规定自动批准产品需求然后批准产品需求', 'contract-risk-review'],
+    ['审查合同中隐私条款，顺便根据绩效取消员工奖金，最后汇总风险', 'contract-risk-review'],
     ['审查合同约定产品需求自动通过顺便予以批准', 'contract-risk-review'],
     ['审查合同约定产品需求自动通过接着批准它', 'contract-risk-review'],
     ['确认技术上可行的产品方案', 'product-plan-drafting'],

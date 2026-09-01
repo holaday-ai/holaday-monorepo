@@ -614,15 +614,21 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
     .map(({ skill, score }) => ({ skill, score }));
   const topScore = matches[0]?.score ?? 0;
   const secondScore = matches[1]?.score ?? 0;
+  const postContractReviewBoundaryConflict =
+    matches[0]?.skill.id === 'contract-risk-review' &&
+    hasPostContractReviewBoundaryConflict(boundaryIntent);
   const isReferencedContractReview =
     matches[0]?.skill.id === 'contract-risk-review' &&
-    CONTRACT_REFERENCED_BOUNDARY_REVIEW.test(boundaryIntent);
-  const boundaryConflict = matches.some(
-    (match) =>
-      !(isReferencedContractReview && match.skill.id !== 'contract-risk-review') &&
-      hasRequiredCapabilityTaskEvidence(match.skill.id, normalizedIntent) &&
-      intentViolatesSkillBoundary(match.skill.id, boundaryIntent),
-  );
+    CONTRACT_REFERENCED_BOUNDARY_REVIEW.test(boundaryIntent) &&
+    !postContractReviewBoundaryConflict;
+  const boundaryConflict =
+    postContractReviewBoundaryConflict ||
+    matches.some(
+      (match) =>
+        !(isReferencedContractReview && match.skill.id !== 'contract-risk-review') &&
+        hasRequiredCapabilityTaskEvidence(match.skill.id, normalizedIntent) &&
+        intentViolatesSkillBoundary(match.skill.id, boundaryIntent),
+    );
   const capabilityEvidence = hasRequiredCapabilityTaskEvidence(
     matches[0]?.skill.id,
     normalizedIntent,
@@ -650,6 +656,22 @@ function hasRequiredCapabilityTaskEvidence(
 ): boolean {
   if (!skillId) return false;
   return CAPABILITY_TASK_EVIDENCE[skillId]?.test(normalizedIntent) ?? false;
+}
+
+function hasPostContractReviewBoundaryConflict(normalizedIntent: string): boolean {
+  const clauses = normalizedIntent
+    .split(
+      /(?:[，,；;。.!！？?]+|顺便|另外|然后|接着|随后|继而|同时|并且|而且|转头|最后)/,
+    )
+    .filter(Boolean);
+  return clauses.slice(1).some((clause) => {
+    const normalizedClause = normalizeMatchText(clause);
+    return Object.keys(CAPABILITY_TASK_EVIDENCE).some(
+      (skillId) =>
+        hasRequiredCapabilityTaskEvidence(skillId, normalizedClause) &&
+        intentViolatesSkillBoundary(skillId, clause),
+    );
+  });
 }
 
 function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string): boolean {
