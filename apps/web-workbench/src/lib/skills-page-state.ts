@@ -671,7 +671,11 @@ function normalizeMatchText(value: string): string {
 }
 
 function normalizeBoundaryText(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/gu, '');
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/gu, '')
+    .replace(/[\p{P}\p{S}]+$/gu, '');
 }
 
 function characterPairs(value: string): Set<string> {
