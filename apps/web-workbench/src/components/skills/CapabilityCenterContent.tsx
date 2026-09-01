@@ -72,7 +72,10 @@ export function CapabilityCenterContent({
 
   return (
     <div className="space-y-8">
-      <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+      <header
+        data-testid="capability-header"
+        className="flex flex-col gap-5 lg:pr-[200px] xl:flex-row xl:items-end xl:justify-between"
+      >
         <div className="min-w-0">
           <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-[#FFF2F6] px-2.5 py-1 text-[11px] font-semibold tracking-[0.08em] text-[#CF174B]">
             <Sparkles className="h-3.5 w-3.5" aria-hidden />
