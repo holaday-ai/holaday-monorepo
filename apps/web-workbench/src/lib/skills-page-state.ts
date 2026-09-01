@@ -143,7 +143,7 @@ const SPECIFIC_NATIONALITY_TERM =
 const SPECIFIC_HEALTH_STATUS_TERM =
   '(?:乙肝|乙型肝炎|甲肝|丙肝|艾滋病?|hiv(?:阳性)?|传染病|精神疾病|抑郁症|癌症|糖尿病|高血压)';
 const SENSITIVE_IDENTITY_TERM =
-  `(?:性别|性取向|同性恋|异性恋|双性恋|无性恋|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|\\d{2}后|民族|${SPECIFIC_ETHNICITY_TERM}|种族|${SPECIFIC_RACIAL_IDENTITY_TERM}|宗教|${SPECIFIC_RELIGIOUS_IDENTITY_TERM}|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|户口|籍贯|出生地|国籍|外籍|${SPECIFIC_NATIONALITY_TERM}|政治面貌|中共党员|预备党员|党员|共青团员|团员|群众(?!演员)|民主党派|无党派人士|无党派|健康状况|疾病|${SPECIFIC_HEALTH_STATUS_TERM}|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚|未结婚|没结婚|单身|离异|离婚|丧偶)`;
+  `(?:性别|性取向|同性恋|异性恋|双性恋|无性恋|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|\\d{2}后|民族|${SPECIFIC_ETHNICITY_TERM}|种族|${SPECIFIC_RACIAL_IDENTITY_TERM}|宗教|${SPECIFIC_RELIGIOUS_IDENTITY_TERM}|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|户口|籍贯|出生地|国籍|外籍|${SPECIFIC_NATIONALITY_TERM}|政治面貌|中共党员|预备党员|党员|共青团员|团员|群众(?!演员)|民主党派|无党派人士|无党派|健康状况|疾病|${SPECIFIC_HEALTH_STATUS_TERM}|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚|未结婚|没结婚|单身|离异|离婚|丧偶|未育|没有孩子|无子女|无孩)`;
 
 const HIRING_ANTI_DISCRIMINATION = new RegExp(
   `^(?:请)?(?:不要|禁止|不得|避免|防止)(?:再)?(?:基于|按照|根据|按|依据|以).{0,4}${SENSITIVE_IDENTITY_TERM}.{0,8}(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用)(?:候选人|人才|简历)?(?:并)?(?:检查|分析|说明|识别|评估)?(?:合规|歧视|风险|问题)?$`,
@@ -212,7 +212,7 @@ const CONTENT_LEADING_EXECUTION =
   /^(?:一键|直接|立即|马上|自动)?(?:发布|发表|上线|上传)(?:全平台)?(?:这篇|这条|该篇|该条|内容|文章|笔记|视频)/;
 const CONTENT_LEADING_PLANNING =
   /^(?:(?:发布内容|发布).{0,8}(?:怎么|如何)(?:规划|计划|安排)|发布节奏.{0,8}(?:规划|计划|安排)|(?:规划|计划|安排|制定).{0,18}(?:发布|发表|上线|上传).{0,8}(?:节奏|计划|排期|日历|安排))/;
-const CONTENT_PROMISE_VERB = /(?:保证|承诺|确保|保底|包你)/g;
+const CONTENT_PROMISE_VERB = /(?:保证|承诺|确保|保底|包你|保你|包(?!含|括))/g;
 const CONTENT_OUTCOME =
   /(?:销量|流量|涨粉|转化|播放量|阅读量|点赞(?:量)?|收藏(?:量)?|评论(?:量)?|曝光(?:量)?|打开率|点击率|完播率|互动率|转化率|成交额|订单量|gmv|爆款|热门|热搜)/;
 const CONTENT_PROMISE_NEGATION =
@@ -226,17 +226,19 @@ const CONTENT_PROMISE_CONTRACT_TERM = /(?:合同|条款|协议|约定)/;
 const CONTENT_PROMISE_REFERENCE_PREFIX =
   /(?:包含|涉及|写有|写着|约定|提到|列明)(?:了|的)?$/;
 const CONTENT_PROMISE_ANALYSIS =
-  /^(?:分析|说明|解释|检查|审查|评估|复盘|研究).{0,32}(?:保证|承诺|确保|保底|包你).{0,24}(?:风险|问题|后果|原因|边界|可行性|合规)$/;
+  /^(?:分析|说明|解释|检查|审查|评估|复盘|研究).{0,32}(?:保证|承诺|确保|保底|包你|保你|包(?!含|括)).{0,24}(?:风险|问题|后果|原因|边界|可行性|合规)$/;
 const CONTRACT_REVIEW_INTENT =
   /^(?:(?:请|帮我|替我|给我|麻烦)(?:先|再)?){0,2}(?:分析|说明|解释|检查|审查|评估|复盘|研究).{0,16}(?:合同|条款|协议)/;
 const PROJECT_DELIVERY_RISK_REVIEW =
   /^(?:分析|说明|解释|检查|审查|评估|复盘|研究).{0,20}(?:通知|告诉|告知|回复|答复)客户.{0,24}(?:今天|明天|后天|本周|下周|本月|下月|下个月|\d{1,2}月\d{1,2}[日号]?|\d{1,3}(?:天|周|个月)(?:内)?)(?:前|内)?.{0,8}(?:肯定|一定|保证|会|能)?交付.{0,12}(?:风险|问题|后果|边界|合规)/;
-const REFERENTIAL_EXECUTION_CONFLICT =
+const REFERENTIAL_EXECUTION_PHRASE =
   /(?:然后|之后|随后|接着|继而|同时|并且|而且|顺便|另外|转头|最后|再|后).{0,4}(?:照做|照此执行|按此执行|就这么做|执行上述(?:操作|修改|调整|删除)|按上述(?:方案|方式|操作)执行)/;
+const PRODUCT_REFERENTIAL_APPROVAL_CONFLICT =
+  /(?:然后|之后|随后|接着|继而|同时|并且|而且|顺便|另外|转头|最后|再).{0,4}(?:予以|直接|自动|替我|代我)?(?:批准|通过)(?:它|该(?:产品)?(?:需求|方案)|(?:产品)?(?:需求|方案))?/;
 
 const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
   'image-prompt-reverse': [
-    /(?:保证|承诺|确保).{0,24}(?:(?:完全|百分百|百分之百|100%?)?(?:复现|还原)|一模一样|(?:百分百|百分之百|100%?)一致)/,
+    /(?:保证|承诺|确保).{0,24}(?:(?:完全|百分百|百分之百|100%?)?(?:复现|还原|复刻)|一模一样|(?:百分百|百分之百|100%?)一致)/,
     /(?:未授权|没有授权|未经授权|未经许可|没有许可|无授权).{0,16}(?:直接|拿去)?(?:商用|商业使用|用于商业)/,
     /(?:商用|商业使用|用于商业).{0,16}(?:但|却|而|同时)?(?:未授权|没有授权|未经授权|未经许可|没有许可|无授权)/,
   ],
@@ -291,13 +293,14 @@ const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
     /(?:员工|人员)?.{0,4}(?:绩效|考核).{0,8}(?:不达标|不合格|不佳|较差|很差|差).{0,4}(?:就|则|直接)?(?:扣(?:除)?|降低|调整).{0,6}(?:奖金|工资|薪资|薪酬)/,
     /(?:员工|人员)?.{0,4}(?:绩效|考核).{0,8}(?:不达标|不合格|不佳|较差|很差|差).{0,4}(?:就|则|直接)?(?:取消|停发|不发|拒发|扣发|停止发放|暂缓发放).{0,6}(?:奖金|工资|薪资|薪酬)/,
     /(?:扣(?:除)?|降低|调整).{0,6}(?:绩效|考核).{0,8}(?:不达标|不合格|不佳|较差|很差|差).{0,6}(?:员工|人员)?.{0,3}的?(?:奖金|工资|薪资|薪酬)/,
+    /(?:取消|停发|不发|拒发|扣发|停止发放|暂缓发放).{0,6}(?:绩效|考核).{0,8}(?:不达标|不合格|不佳|较差|很差|差).{0,6}(?:员工|人员)?.{0,3}的?(?:奖金|工资|薪资|薪酬)/,
   ],
 };
 
 const SKILL_BOUNDARY_SAFE_MENTIONS: Readonly<Record<string, readonly RegExp[]>> = {
   'image-prompt-reverse': [
-    /^(?:分析|说明|解释|检查|审查|评估)?(?:为什么)?(?:不|不能|无法|难以|不应|不要|无需|不可能).{0,20}(?:保证|承诺|确保).{0,24}(?:复现|还原|一模一样|一致)/,
-    /^(?:分析|检查|审查|评估).{0,30}(?:保证|承诺|确保).{0,24}(?:复现|还原|一模一样|一致).{0,12}(?:风险|问题|后果|是否可行)/,
+    /^(?:分析|说明|解释|检查|审查|评估)?(?:为什么)?(?:不|不能|无法|难以|不应|不要|无需|不可能).{0,20}(?:保证|承诺|确保).{0,24}(?:复现|还原|复刻|一模一样|一致)/,
+    /^(?:分析|检查|审查|评估).{0,30}(?:保证|承诺|确保).{0,24}(?:复现|还原|复刻|一模一样|一致).{0,12}(?:风险|问题|后果|是否可行)/,
   ],
   'contract-risk-review': [
     /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:不能|无法|不构成|不应).{0,8}(?:替代|代替|作为).{0,8}(?:律师|法律意见)/,
@@ -324,6 +327,7 @@ const SKILL_BOUNDARY_SAFE_MENTIONS: Readonly<Record<string, readonly RegExp[]>> 
   'performance-review-design': [
     /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:为什么)?(?:不能|无法|不应|不要).{0,14}(?:根据|按照)?.{0,8}(?:绩效|考核).{0,12}(?:决定|执行|加薪|提薪|涨薪|降薪|辞退|晋升|上调|下调|调高|调低|取消|停发|不发|拒发|扣发)/,
     /^(?:分析|检查|审查|评估).{0,24}(?:根据|按照|按|依据)?.{0,8}(?:绩效|考核).{0,12}(?:(?:直接)?(?:决定|执行|加薪|提薪|涨薪|降薪|辞退|晋升|取消|停发|不发|拒发|扣发|停止发放|暂缓发放)|(?:上调|下调|调高|调低|提高|增加|减少)(?:员工|人员)?.{0,4}(?:工资|薪资|薪酬|奖金)).{0,16}(?:风险|合规|边界|问题|后果)/,
+    /^(?:分析|检查|审查|评估).{0,24}(?:取消|停发|不发|拒发|扣发|停止发放|暂缓发放).{0,16}(?:绩效|考核).{0,16}(?:风险|合规|边界|问题|后果)/,
   ],
 };
 
@@ -628,7 +632,13 @@ function hasRequiredCapabilityTaskEvidence(
 }
 
 function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string): boolean {
-  if (REFERENTIAL_EXECUTION_CONFLICT.test(normalizedIntent)) return true;
+  if (hasRiskyReferentialExecution(normalizedIntent)) return true;
+  if (
+    skillId === 'product-plan-drafting' &&
+    PRODUCT_REFERENTIAL_APPROVAL_CONFLICT.test(normalizedIntent)
+  ) {
+    return true;
+  }
   if (CONTENT_EXECUTION_SKILL_IDS.has(skillId)) {
     return (
       contentExecutionConflict(normalizedIntent) ||
@@ -655,6 +665,33 @@ function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string):
     );
   }
   return hasUnexemptedBoundaryConflict(skillId, normalizedIntent);
+}
+
+function hasRiskyReferentialExecution(normalizedIntent: string): boolean {
+  const referentialRanges = findPatternOccurrences(
+    REFERENTIAL_EXECUTION_PHRASE,
+    normalizedIntent,
+  );
+  if (referentialRanges.length === 0) return false;
+
+  const rawBoundaryPatterns = [
+    ...STOCK_DECISION_CONFLICTS,
+    ...CONTENT_UNAMBIGUOUS_EXECUTION_CONFLICTS,
+    CONTENT_PLATFORM_PUBLICATION_CONFLICT,
+    ...HIRING_DIRECT_DECISION_CONFLICTS,
+    ...HIRING_DISCRIMINATION_CONFLICTS,
+    ...Object.values(SKILL_BOUNDARY_CONFLICTS).flat(),
+  ];
+
+  return referentialRanges.some(({ start }) => {
+    const prefix = normalizedIntent.slice(Math.max(0, start - 96), start);
+    return (
+      hasUnnegatedContentPromise(prefix) ||
+      rawBoundaryPatterns.some(
+        (pattern) => findPatternOccurrences(pattern, prefix).length > 0,
+      )
+    );
+  });
 }
 
 function hasUnexemptedBoundaryConflict(skillId: string, normalizedIntent: string): boolean {
@@ -721,7 +758,7 @@ function hasUnexemptedHiringDiscrimination(normalizedIntent: string): boolean {
 function splitBoundaryClauses(normalizedIntent: string): string[] {
   return normalizedIntent
     .split(
-      /(?:然后|之后|随后|接着|继而|同时|并且|但是|但|再|(?:并|以及)(?=(?:把|将|为我|帮我|替我|直接|自动|未经|没有|未|出具|提供|给出|代替|替代|相关性|相关关系|保证|承诺|确保|保底|包你|批准|通过|认定|确认|决定|指派|分配|修改|涨薪|加薪|晋升|降级|辞退|解雇|淘汰|拒绝|录用|录取|只招|只要|仅限|只选|只筛选|仅筛选|筛选|筛掉|过滤|排除|不招|不录用|优先考虑|发布|发表|上线|上传|推送|投流|投放|买量|交易|买入|卖出))|(?:完成|检查|分析|规则|看完|审完|写好|改好|准备好|评估)后)|[，,；;。.!！？?]+/,
+      /(?:然后|之后|随后|接着|继而|同时|并且|但是|但|再|(?:并|以及)(?=(?:把|将|为我|帮我|替我|直接|自动|未经|没有|未|出具|提供|给出|代替|替代|相关性|相关关系|保证|承诺|确保|保底|包你|保你|包(?!含|括)|批准|通过|认定|确认|决定|指派|分配|修改|涨薪|加薪|晋升|降级|辞退|解雇|淘汰|拒绝|录用|录取|只招|只要|仅限|只选|只筛选|仅筛选|筛选|筛掉|过滤|排除|不招|不录用|优先考虑|发布|发表|上线|上传|推送|投流|投放|买量|交易|买入|卖出))|(?:完成|检查|分析|规则|看完|审完|写好|改好|准备好|评估)后)|[，,；;。.!！？?]+/,
     )
     .filter(Boolean);
 }
@@ -759,7 +796,10 @@ function findUnnegatedContentPromises(
     const prefix = normalizedIntent.slice(Math.max(0, match.index - 16), match.index);
     const outcomeClause = normalizedIntent
       .slice(match.index + match[0].length, match.index + match[0].length + 18)
-      .split(/(?:但是|但|然而|然后|同时|并且|再|保证|承诺|确保|包你)/, 1)[0];
+      .split(
+        /(?:但是|但|然而|然后|同时|并且|再|保证|承诺|确保|包你|保你|包(?!含|括))/,
+        1,
+      )[0];
     if (
       CONTENT_OUTCOME.test(outcomeClause) &&
       !hasNegatedContentPromisePrefix(prefix) &&
