@@ -111,7 +111,7 @@ const STOCK_DECISION_CONFLICTS: readonly RegExp[] = [
   /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我)(?:直接|立即|马上|执行|决定|去)?交易(?:这只|那只|该只|某只)?(?:股票|个股|a股)/,
   /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我)(?:直接|立即|马上|执行|决定|去|做|进行)?交易(?!的?(?:量|数据|记录|明细|统计|分析|信号|复盘|历史|原因|逻辑|影响|风险|趋势|回测|研究))/,
   /(?:执行|进行)(?:股票|个股|a股)?交易(?!的?(?:量|数据|记录|明细|统计|分析|信号|复盘|历史|原因|逻辑|影响|风险|趋势|回测|研究))/,
-  /把.{0,8}(?:股票|个股|a股).{0,4}(?:买入|卖出|买下|买了|卖了|购买|购入|卖掉|抛掉|抛售|出掉|下单|清仓|建仓|加仓|减仓)/,
+  /(?:把|将).{0,8}(?:股票|个股|a股).{0,4}(?:买入|卖出|买下|买了|卖了|购买|购入|卖掉|抛掉|抛售|出掉|下单|清仓|建仓|加仓|减仓)/,
   /(?:帮我|替我|给我|代我|为我).{0,6}(?:炒|炒作).{0,4}(?:股票|个股|a股)/,
   /^(?:买入|卖出|买|卖|下单)(?:这只|那只|该只|某只|一只|几只|一些)?(?:股票|个股|a股)/,
   /^(?:买入|买进|购进|购入|购买|卖出|卖掉|抛掉|抛售|清仓|建仓|加仓|减仓|买|卖|下单).{1,12}(?:股票|个股|a股)(?!的?(?:历史|交易记录|收益|走势|表现|数据|复盘|分析|后(?:的)?(?:历史|最大回撤|机会成本|收益|表现|走势|数据|交易记录|复盘|分析)))/,
@@ -142,7 +142,7 @@ const SPECIFIC_NATIONALITY_TERM =
 const SPECIFIC_HEALTH_STATUS_TERM =
   '(?:乙肝|乙型肝炎|甲肝|丙肝|艾滋病?|hiv(?:阳性)?|传染病|精神疾病|抑郁症|癌症|糖尿病|高血压)';
 const SENSITIVE_IDENTITY_TERM =
-  `(?:性别|性取向|同性恋|异性恋|双性恋|无性恋|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|\\d{2}后|民族|${SPECIFIC_ETHNICITY_TERM}|种族|${SPECIFIC_RACIAL_IDENTITY_TERM}|宗教|${SPECIFIC_RELIGIOUS_IDENTITY_TERM}|残障|残疾|婚姻|婚育|孕育|怀孕|户籍(?!管理|专员|登记)|户口(?!管理|专员|登记)|籍贯|出生地|国籍|外籍|${SPECIFIC_NATIONALITY_TERM}|政治面貌|中共党员|预备党员|党员|共青团员|团员|群众(?!演员)|民主党派|无党派人士|无党派|健康状况|疾病|${SPECIFIC_HEALTH_STATUS_TERM}|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚)`;
+  `(?:性别|性取向|同性恋|异性恋|双性恋|无性恋|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|\\d{2}后|民族|${SPECIFIC_ETHNICITY_TERM}|种族|${SPECIFIC_RACIAL_IDENTITY_TERM}|宗教|${SPECIFIC_RELIGIOUS_IDENTITY_TERM}|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|户口|籍贯|出生地|国籍|外籍|${SPECIFIC_NATIONALITY_TERM}|政治面貌|中共党员|预备党员|党员|共青团员|团员|群众(?!演员)|民主党派|无党派人士|无党派|健康状况|疾病|${SPECIFIC_HEALTH_STATUS_TERM}|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚)`;
 
 const HIRING_ANTI_DISCRIMINATION = new RegExp(
   `^(?:请)?(?:不要|禁止|不得|避免|防止)(?:再)?(?:基于|按照|根据|按|依据|以).{0,4}${SENSITIVE_IDENTITY_TERM}.{0,8}(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用)(?:候选人|人才|简历)?(?:并)?(?:检查|分析|说明|识别|评估)?(?:合规|歧视|风险|问题)?$`,
@@ -150,6 +150,8 @@ const HIRING_ANTI_DISCRIMINATION = new RegExp(
 const HIRING_DIRECT_ANTI_DISCRIMINATION = new RegExp(
   `^(?:请)?(?:不要|禁止|不得|避免|防止)(?:再)?(?:筛选|过滤(?:掉)?)${SENSITIVE_IDENTITY_TERM}(?:候选人|人才|简历)?(?:并)?(?:检查|分析|说明|识别|评估)?(?:合规|歧视|风险|问题)?$`,
 );
+const HIRING_HUKOU_JOB_TITLE =
+  /(?:招聘|招|找|筛选|选择|挑选).{0,4}(?:户籍|户口)(?!候选人|人才|简历|要求|限制|优先)(?:(?!男性|女性|男士|女士|已婚|未婚|怀孕|孕妇).){0,6}(?:员|师|警|官|工|顾问|主管|经理|主任|助理|客服|前台)(?:候选人|人才|简历)/;
 
 const HIRING_DISCRIMINATION_CONFLICTS: readonly RegExp[] = [
   new RegExp(
@@ -184,7 +186,7 @@ const CONTENT_UNAMBIGUOUS_EXECUTION_CONFLICTS: readonly RegExp[] = [
   /(?:并|然后|再|之后|后)(?:仍然|仍|还|继续|一键|直接|自动|马上|立即)?(?:发布|发表|上线|上传|推送|发到|发至|发出去)/,
   /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我|自动)(?:直接|自动|马上|立即|去)?(?:发布|发表|上线|上传|发到|发至)/,
   /(?:帮我|替我|给我|请|代我|为我)(?:把|将)?.{0,24}(?:发布出去|发出去|发到|发至|发表|上线|上传到?|推送)/,
-  /^(?:把|将).{0,24}(?:发布出去|发出去|发到|发至|发表|上线|上传到?|推送)/,
+  /^(?:把|将).{0,24}(?:发布(?:掉|出去)?|发出去|发到|发至|发表|上线|上传到?|推送)/,
   /^(?:把|将).{0,24}发(?:到|至)?(?:公众号|小红书|抖音|微博|微信|朋友圈|视频号|百家号|知乎)/,
   /^(?:发一下|推送)(?:这篇|这条|该篇|该条|内容|文章|笔记|视频)/,
   /^(?:一键|直接|立即|马上|自动)?推送(?:这篇|这条|该篇|该条|内容|文章|笔记|视频)/,
@@ -197,14 +199,14 @@ const CONTENT_UNAMBIGUOUS_EXECUTION_CONFLICTS: readonly RegExp[] = [
 ];
 
 const CONTENT_PLATFORM_PUBLICATION_CONFLICT =
-  /(?:在|到).{0,10}(?:上|平台)(?:发布|发表|上线|上传)/;
+  /(?:(?:在|到).{0,10}(?:上|平台)|(?:公众号|小红书|抖音|微博|微信|朋友圈|视频号|百家号|知乎)(?:上|平台)?)(?:发布|发表|上线|上传)/;
 const CONTENT_PLATFORM_PUBLICATION_ANALYSIS =
   /^(?:(?:请|帮我|替我|给我|麻烦)(?:先|再)?){0,2}(?:分析|复盘|研究|总结|解释|评估|检查|审查).{0,28}(?:发布|发表|上线|上传).{0,18}(?:效果|数据|表现|结果|原因|问题|风险|影响|趋势|复盘)/;
 
 const CONTENT_LEADING_EXECUTION =
   /^(?:一键|直接|立即|马上|自动)?(?:发布|发表|上线|上传)(?:全平台)?(?:这篇|这条|该篇|该条|内容|文章|笔记|视频)/;
 const CONTENT_LEADING_PLANNING =
-  /^(?:发布内容|发布).{0,8}(?:怎么|如何)(?:规划|计划|安排)|^发布节奏.{0,8}(?:规划|计划|安排)/;
+  /^(?:(?:发布内容|发布).{0,8}(?:怎么|如何)(?:规划|计划|安排)|发布节奏.{0,8}(?:规划|计划|安排)|(?:规划|计划|安排|制定).{0,18}(?:发布|发表|上线|上传).{0,8}(?:节奏|计划|排期|日历|安排))/;
 const CONTENT_PROMISE_VERB = /(?:保证|承诺|确保|保底)/g;
 const CONTENT_OUTCOME =
   /(?:销量|流量|涨粉|转化|播放量|阅读量|点赞(?:量)?|收藏(?:量)?|评论(?:量)?|曝光(?:量)?|打开率|点击率|完播率|互动率|转化率|成交额|订单量|gmv|爆款|热门|热搜)/;
@@ -258,7 +260,7 @@ const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
     /(?:替|代替).{0,8}(?:团队|负责人|项目组).{0,8}(?:承诺|确认|决定).{0,12}(?:最终)?(?:排期|截止时间|交付时间)/,
     /(?:替我|代我|为我).{0,8}(?:向客户|对客户)?.{0,6}承诺.{0,12}(?:项目)?.{0,6}(?:最终)?(?:排期|截止时间|交付时间)/,
     /(?:替我|代我|为我).{0,8}(?:向客户|对客户)?.{0,6}承诺.{0,12}(?:项目)?.{0,8}(?:今天|明天|后天|本周|下周|本月|下月|下个月|\\d{1,2}月\\d{1,2}[日号]?|\\d{1,3}(?:天|周|个月)(?:内)?)(?:前|内)?交付/,
-    /(?:(?:帮我|替我|代我|为我)?.{0,4}(?:向客户|对客户).{0,4}(?:承诺|保证)|(?:承诺|保证)客户).{0,16}(?:项目)?.{0,8}(?:在|于)?(?:今天|明天|后天|本周|下周|本月|下月|下个月|\d{1,2}月\d{1,2}[日号]?|\d{1,3}(?:天|周|个月)(?:内)?)(?:前|内)?交付/,
+    /(?:(?:帮我|替我|代我|为我)?.{0,4}(?:向客户|对客户).{0,4}(?:承诺|保证|答应|确认)|(?:承诺|保证|答应)客户).{0,16}(?:项目)?.{0,8}(?:在|于)?(?:今天|明天|后天|本周|下周|本月|下月|下个月|\d{1,2}月\d{1,2}[日号]?|\d{1,3}(?:天|周|个月)(?:内)?)(?:前|内)?交付/,
     /^(?:把|将).{0,14}(?:项目|任务|排期|里程碑|负责人).{0,8}自动(?:指派|分配|修改|调整|删除|移除|改成|改为)/,
     /(?:项目|任务|排期|里程碑|负责人).{0,8}自动(?:指派|分配|修改|调整|删除|移除|改成|改为)/,
   ],
@@ -295,6 +297,7 @@ const SKILL_BOUNDARY_SAFE_MENTIONS: Readonly<Record<string, readonly RegExp[]>> 
   'product-plan-drafting': [
     /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:为什么)?(?:不能|无法|不应|不要).{0,8}(?:自动|替我|代我|直接)?(?:批准|通过|确认|认定|拍板)/,
     /^(?:分析|检查|审查|评估).{0,24}(?:自动|替我|代我|直接)?(?:批准|通过|确认|认定|拍板).{0,18}(?:为什么|风险|合规|边界|问题|后果)/,
+    /^(?:分析|检查|审查|评估).{0,12}(?:合同|条款|协议).{0,24}(?:自动|替我|代我|直接)?(?:批准|通过|确认|认定|拍板).{0,12}(?:产品)?(?:需求|方案).{0,12}(?:条款|约定|风险|合规|边界|问题)/,
   ],
   'project-delivery-management': [
     /^(?:分析|说明|解释|检查|审查|评估).{0,30}(?:为什么)?(?:不能|无法|不应|不要).{0,10}(?:替|代替|自动|未经授权).{0,20}(?:承诺|指派|分配|修改|调整|删除|移除)/,
@@ -672,25 +675,16 @@ function findPatternOccurrences(
 }
 
 function hasUnexemptedHiringDiscrimination(normalizedIntent: string): boolean {
-  if (!HIRING_DISCRIMINATION_CONFLICTS.some((pattern) => pattern.test(normalizedIntent))) {
-    return false;
-  }
-  const safeMention =
-    HIRING_ANTI_DISCRIMINATION.test(normalizedIntent) ||
-    HIRING_DIRECT_ANTI_DISCRIMINATION.test(normalizedIntent) ||
-    HIRING_DISCRIMINATION_AUDIT.test(normalizedIntent) ||
-    HIRING_DISCRIMINATION_ACTION_RISK_AUDIT.test(normalizedIntent);
-  if (!safeMention) return true;
-
-  const clauses = splitBoundaryClauses(normalizedIntent);
-  if (clauses.length <= 1) return false;
-  return clauses.some(
-    (clause) =>
-      HIRING_DISCRIMINATION_CONFLICTS.some((pattern) => pattern.test(clause)) &&
-      !HIRING_ANTI_DISCRIMINATION.test(clause) &&
-      !HIRING_DIRECT_ANTI_DISCRIMINATION.test(clause) &&
-      !HIRING_DISCRIMINATION_AUDIT.test(clause) &&
-      !HIRING_DISCRIMINATION_ACTION_RISK_AUDIT.test(clause),
+  return hasUnexemptedPatternConflict(
+    HIRING_DISCRIMINATION_CONFLICTS,
+    [
+      HIRING_ANTI_DISCRIMINATION,
+      HIRING_DIRECT_ANTI_DISCRIMINATION,
+      HIRING_DISCRIMINATION_AUDIT,
+      HIRING_DISCRIMINATION_ACTION_RISK_AUDIT,
+      HIRING_HUKOU_JOB_TITLE,
+    ],
+    normalizedIntent,
   );
 }
 
@@ -711,7 +705,7 @@ function contentExecutionConflict(normalizedIntent: string): boolean {
   if (
     hasUnexemptedPatternConflict(
       [CONTENT_PLATFORM_PUBLICATION_CONFLICT],
-      [CONTENT_PLATFORM_PUBLICATION_ANALYSIS],
+      [CONTENT_PLATFORM_PUBLICATION_ANALYSIS, CONTENT_LEADING_PLANNING],
       normalizedIntent,
     )
   ) {
