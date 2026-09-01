@@ -167,7 +167,7 @@ const CONTENT_PROMISE_VERB = /(?:保证|承诺|确保|保底)/g;
 const CONTENT_OUTCOME = /(?:销量|流量|涨粉|转化|播放量|爆款|热门|热搜)/;
 const CONTENT_PROMISE_NEGATION =
   /(?:无法|不能|难以|不应|不要|无需|不可能)(?:百分百|百分之百|100|完全|绝对|真正|一定|有效)?$/;
-const CONTENT_PROMISE_POST_NEGATION = /^不了/;
+const CONTENT_PROMISE_POST_NEGATION = /^(?:不了|不到|不住|不能)/;
 
 const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
   'image-prompt-reverse': [
@@ -580,7 +580,7 @@ function hasUnexemptedHiringDiscrimination(normalizedIntent: string): boolean {
 function splitBoundaryClauses(normalizedIntent: string): string[] {
   return normalizedIntent
     .split(
-      /(?:然后|之后|随后|同时|并且|但是|但|再|并|(?:完成|检查|分析|规则|看完|审完|写好|改好|准备好|评估)后)|[，,；;。.!！？?]+/,
+      /(?:然后|之后|随后|同时|并且|但是|但|再|并(?=(?:把|将|为我|帮我|替我|直接|自动|未经|没有|未|出具|提供|给出|代替|替代|相关性|相关关系|保证|承诺|确保|保底|批准|通过|认定|确认|决定|指派|分配|修改|涨薪|加薪|晋升|降级|辞退|解雇|淘汰|拒绝|录用|只招|只要|仅限|只选|只筛选|仅筛选|筛选|筛掉|过滤|排除|不招|不录用|优先考虑|发布|发表|上线|上传|推送|投流|投放|买量|交易|买入|卖出))|(?:完成|检查|分析|规则|看完|审完|写好|改好|准备好|评估)后)|[，,；;。.!！？?]+/,
     )
     .filter(Boolean);
 }
