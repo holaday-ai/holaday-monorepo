@@ -284,7 +284,7 @@ const SKILL_BOUNDARY_CONFLICTS: Readonly<Record<string, readonly RegExp[]>> = {
     /(?:未经授权|自动|替我|代我).{0,10}(?:把|将)?.{0,14}(?:项目|任务|排期|里程碑|负责人).{0,8}(?:指派|分配|修改|调整|删除|移除|改成|改为)/,
     /(?:替|代替).{0,8}(?:团队|负责人|项目组).{0,8}(?:承诺|确认|决定).{0,12}(?:最终)?(?:排期|截止时间|交付时间)/,
     /(?:替我|代我|为我).{0,8}(?:向客户|对客户)?.{0,6}承诺.{0,12}(?:项目)?.{0,6}(?:最终)?(?:排期|截止时间|交付时间)/,
-    /(?:替我|代我|为我).{0,8}(?:向客户|对客户)?.{0,6}承诺.{0,12}(?:项目)?.{0,8}(?:今天|明天|后天|本周|下周|本月|下月|下个月|\\d{1,2}月\\d{1,2}[日号]?|\\d{1,3}(?:天|周|个月)(?:内)?)(?:前|内)?交付/,
+    /(?:替我|代我|为我).{0,8}(?:向客户|对客户)?.{0,6}承诺.{0,12}(?:项目)?.{0,8}(?:今天|明天|后天|本周|下周|本月|下月|下个月|\d{1,2}月\d{1,2}[日号]?|\d{1,3}(?:天|周|个月)(?:内)?)(?:前|内)?交付/,
     /(?:(?:帮我|替我|代我|为我)?(?:向客户|对客户).{0,4}(?:承诺|保证|答应|确认)|(?:承诺|保证|答应)客户).{0,16}(?:项目)?.{0,8}(?:在|于)?(?:今天|明天|后天|本周|下周|本月|下月|下个月|\d{1,2}月\d{1,2}[日号]?|\d{1,3}(?:天|周|个月)(?:内)?)(?:前|内)?交付/,
     /(?:承诺|保证|答应|确认).{0,16}(?:今天|明天|后天|本周|下周|本月|下月|下个月|\d{1,2}月\d{1,2}[日号]?|\d{1,3}(?:天|周|个月)(?:内)?)(?:前|内)?.{0,8}(?:向|对)客户.{0,6}交付/,
     /(?:通知|告诉|告知|回复|答复)客户.{0,16}(?:今天|明天|后天|本周|下周|本月|下月|下个月|\d{1,2}月\d{1,2}[日号]?|\d{1,3}(?:天|周|个月)(?:内)?)(?:前|内)?.{0,6}(?:肯定|一定|保证|会|能)交付/,
@@ -343,6 +343,9 @@ const SKILL_BOUNDARY_SAFE_MENTIONS: Readonly<Record<string, readonly RegExp[]>> 
     /^(?:分析|检查|审查|评估).{0,24}(?:取消|撤销|停发|不发|拒发|扣发|停止发放|暂缓发放).{0,16}(?:绩效|考核).{0,16}(?:风险|合规|边界|问题|后果)/,
   ],
 };
+
+const CONTRACT_REFERENCED_BOUNDARY_REVIEW =
+  /^(?:(?:请|帮我|替我|给我|麻烦)(?:先|再)?){0,2}(?:分析|检查|审查|评估).{0,12}(?:合同|协议)(?:条款)?(?:中|内|里的?|所含|包含|涉及|关于).{1,48}(?:的)?(?:条款|约定|规定|风险|合规|边界|问题)$/;
 
 const HIRING_DIRECT_DECISION_CONFLICTS: readonly RegExp[] = [
   /(?:帮我|替我|给我|请|直接|立即|马上|代我|为我)(?:直接|最终|马上|立即|决定|选择)?(?:录用|录取|淘汰|拒绝)/,
@@ -611,9 +614,14 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
     .map(({ skill, score }) => ({ skill, score }));
   const topScore = matches[0]?.score ?? 0;
   const secondScore = matches[1]?.score ?? 0;
-  const boundaryConflict = matches.some((match) =>
-    hasRequiredCapabilityTaskEvidence(match.skill.id, normalizedIntent) &&
-    intentViolatesSkillBoundary(match.skill.id, boundaryIntent),
+  const isReferencedContractReview =
+    matches[0]?.skill.id === 'contract-risk-review' &&
+    CONTRACT_REFERENCED_BOUNDARY_REVIEW.test(boundaryIntent);
+  const boundaryConflict = matches.some(
+    (match) =>
+      !(isReferencedContractReview && match.skill.id !== 'contract-risk-review') &&
+      hasRequiredCapabilityTaskEvidence(match.skill.id, normalizedIntent) &&
+      intentViolatesSkillBoundary(match.skill.id, boundaryIntent),
   );
   const capabilityEvidence = hasRequiredCapabilityTaskEvidence(
     matches[0]?.skill.id,
