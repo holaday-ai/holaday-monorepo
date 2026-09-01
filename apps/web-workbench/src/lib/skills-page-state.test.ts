@@ -492,6 +492,8 @@ describe('skills page state helpers', () => {
     ['检查招聘要求是否存在性别歧视，然后筛掉女性候选人', 'resume-search-screening'],
     ['按照绩效辞退员工', 'performance-review-design'],
     ['把这张图片用于商业但没有授权', 'image-prompt-reverse'],
+    ['只招汉族候选人', 'resume-search-screening'],
+    ['只招回族候选人', 'resume-search-screening'],
   ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
     const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
@@ -564,6 +566,16 @@ describe('skills page state helpers', () => {
 
     expect(result.matches[0]?.skill.id).toBe('a-share-market-briefing');
     expect(result.matches.find((match) => match.skill.id === 'contract-risk-review')?.score).toBeGreaterThanOrEqual(9);
+    expect(result.confidence).toBe('low');
+  });
+
+  it('does not promote a broad platform name without capability-specific task evidence', () => {
+    const result = matchSkillsForIntent(
+      normalizeSkillRows(HOLADAY_SKILLS),
+      '微信登录异常怎么处理',
+    );
+
+    expect(result.matches[0]?.skill.id).toBe('wechat-article-ops');
     expect(result.confidence).toBe('low');
   });
 

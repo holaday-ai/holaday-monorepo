@@ -69,6 +69,15 @@ const NON_SPECIFIC_INTENT_TERMS = new Set([
   '产品',
 ]);
 
+const PLATFORM_TASK_EVIDENCE: Readonly<Record<string, RegExp>> = {
+  'douyin-live-ops':
+    /(?:直播|视频|内容|脚本|投流|流量|广告|涨粉|播放|运营|复盘|数据|发布|剪辑|账号)/,
+  'xiaohongshu-seeding-ops':
+    /(?:笔记|种草|内容|选题|发布|投薯条|投流|流量|运营|标题|封面|互动|数据)/,
+  'wechat-article-ops':
+    /(?:公众号|订阅号|服务号|文章|推文|长文|选题|排版|标题|阅读量|内容|运营|发布|撰写|改写|摘要)/,
+};
+
 const STOCK_DECISION_CONFLICTS: readonly RegExp[] = [
   /荐股/,
   /(?:帮我|替我|给我|请|直接)?(?:推荐|选|挑)(?:出|一下)?(?:一只|几只|一些)?(?:股票|个股|a股)/,
@@ -94,8 +103,10 @@ const HIRING_DECISION_EXPLANATION = /(?:分析|解释|说明|复盘|研究).{0,1
 const HIRING_DISCRIMINATION_AUDIT =
   /^(?:分析|解释|说明|复盘|研究|检查|审查|评估|识别).{0,40}(?:为什么|为何|原因|是否|有无|存在|做法|要求|规则|政策).{0,20}(?:歧视|合规|风险|问题|不招|只招|筛选|过滤)/;
 
+const SPECIFIC_ETHNICITY_TERM =
+  '(?:(?:汉|回|蒙古|藏|维吾尔|苗|彝|壮|布依|朝鲜|满|侗|瑶|白|土家|哈尼|哈萨克|傣|黎|傈僳|佤|畲|高山|拉祜|水|东乡|纳西|景颇|柯尔克孜|土|达斡尔|仫佬|羌|布朗|撒拉|毛南|仡佬|锡伯|阿昌|普米|塔吉克|怒|乌孜别克|俄罗斯|鄂温克|德昂|保安|裕固|京|塔塔尔|独龙|鄂伦春|赫哲|门巴|珞巴|基诺)族)';
 const SENSITIVE_IDENTITY_TERM =
-  '(?:性别|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|民族|种族|宗教|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|籍贯|出生地|国籍|政治面貌|健康状况|疾病|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚)';
+  `(?:性别|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|民族|${SPECIFIC_ETHNICITY_TERM}|种族|宗教|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|籍贯|出生地|国籍|政治面貌|健康状况|疾病|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚)`;
 
 const HIRING_ANTI_DISCRIMINATION = new RegExp(
   `^(?:请)?(?:不要|禁止|不得|避免|防止)(?:再)?(?:基于|按照|根据|按|依据|以).{0,4}${SENSITIVE_IDENTITY_TERM}.{0,8}(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用)(?:候选人|人才|简历)?(?:并)?(?:检查|分析|说明|识别|评估)?(?:合规|歧视|风险|问题)?$`,
@@ -474,8 +485,13 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
   const boundaryConflict = matches.some((match) =>
     intentViolatesSkillBoundary(match.skill.id, normalizedIntent),
   );
+  const platformEvidence = hasRequiredPlatformTaskEvidence(
+    matches[0]?.skill.id,
+    normalizedIntent,
+  );
   const confidence =
     !boundaryConflict &&
+    platformEvidence &&
     normalizedIntent.length >= 2 &&
     topScore >= 9 &&
     topScore - secondScore >= 4
@@ -488,6 +504,14 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
         )
       : matches;
   return { confidence, matches: selectableMatches };
+}
+
+function hasRequiredPlatformTaskEvidence(
+  skillId: string | undefined,
+  normalizedIntent: string,
+): boolean {
+  if (!skillId) return false;
+  return PLATFORM_TASK_EVIDENCE[skillId]?.test(normalizedIntent) ?? true;
 }
 
 function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string): boolean {

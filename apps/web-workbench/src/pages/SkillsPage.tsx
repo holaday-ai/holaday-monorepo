@@ -251,7 +251,7 @@ export function SkillsPage(): JSX.Element {
           notice={notice}
           onQueryChange={setQuery}
           onSelectSkill={setActiveSkillId}
-          onStart={(skill, prompt) => void onStart(skill, prompt)}
+          onStart={onStart}
           onToggle={(skill) => void onToggle(skill)}
         />
       )}
