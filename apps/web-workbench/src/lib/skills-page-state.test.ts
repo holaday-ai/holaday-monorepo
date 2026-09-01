@@ -318,6 +318,16 @@ describe('skills page state helpers', () => {
     expect(result.matches[0]?.skill.id).toBe('contract-risk-review');
   });
 
+  it.each(['帮我做竞品分析', '对比竞品定位'])(
+    'recognizes a concise but explicit competitor-research request: %s',
+    (intent) => {
+      const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
+
+      expect(result.confidence).toBe('strong');
+      expect(result.matches[0]?.skill.id).toBe('market-competitor-insight');
+    },
+  );
+
   it('falls back to available capabilities when preferred showcase entries are missing', () => {
     expect(
       pickCapabilityShowcase([{ id: 'first' }, { id: 'second' }]).map((skill) => skill.id),

@@ -256,7 +256,7 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
   const topScore = matches[0]?.score ?? 0;
   const secondScore = matches[1]?.score ?? 0;
   const confidence =
-    normalizedIntent.length >= 2 && topScore >= 10 && topScore - secondScore >= 5
+    normalizedIntent.length >= 2 && topScore >= 9 && topScore - secondScore >= 4
       ? 'strong'
       : 'low';
   return { confidence, matches };
