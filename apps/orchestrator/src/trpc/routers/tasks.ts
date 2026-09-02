@@ -636,13 +636,12 @@ const createInput = z.object({
 
 const ASHARE_SKILL_IDS = new Set(['a-share-market-briefing', 'a-share-analyst']);
 
-function assertManualSkillSelectionEnabled(
+function assertManualSkillSelectionAvailable(
   input: {
     skillId?: string | null;
     roleId?: string | null;
     skillSource?: 'manual' | undefined;
   },
-  selectedSkillIds: unknown,
 ): string | null {
   if (input.skillSource !== 'manual') return null;
   const skillId = (input.skillId ?? input.roleId ?? '').trim();
@@ -651,13 +650,6 @@ function assertManualSkillSelectionEnabled(
     throw new TRPCError({
       code: 'BAD_REQUEST',
       message: '该技能不存在或已更新，请刷新技能页后重试',
-    });
-  }
-  const enabled = new Set(normalizeSkillIds(selectedSkillIds));
-  if (!enabled.has(skill.id)) {
-    throw new TRPCError({
-      code: 'PRECONDITION_FAILED',
-      message: '请先启用该技能，再在输入框中 @ 调用',
     });
   }
   return skill.id;
@@ -678,10 +670,10 @@ function resolveTaskSkillContext(
     roleId?: string | null;
     skillSource?: 'manual' | undefined;
   },
-  selectedSkillIds: unknown,
+  _selectedSkillIds: unknown,
 ): string | undefined {
   return (
-    assertManualSkillSelectionEnabled(input, selectedSkillIds) ?? normalizeTaskSkillInputId(input)
+    assertManualSkillSelectionAvailable(input) ?? normalizeTaskSkillInputId(input)
   );
 }
 
@@ -10608,7 +10600,7 @@ function buildPersonalProjectLookupQuery(
 
 export const __tasksInternals = {
   assertVideoImageChoiceAllowed,
-  assertManualSkillSelectionEnabled,
+  assertManualSkillSelectionAvailable,
   buildVideoExecutionMetadata,
   buildPlannerIntent,
   buildPlannerSkillCatalogue,

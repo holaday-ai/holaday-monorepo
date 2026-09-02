@@ -11,7 +11,7 @@
  * one-shot `scripts/split-skills.ts` partitions existing rows.
  */
 
-import { PLAN_CATALOGUE, normalizeSkillIds, type PlanId } from '@holaday/shared-types';
+import { normalizeSkillIds } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -19,22 +19,19 @@ import { SKILL_META, skillMetaById } from '../../agent/skills/skill-meta.js';
 import { users } from '../../db/schema/users.js';
 import { protectedProcedure, router } from '../trpc.js';
 
-const PLAN_IDS = new Set<string>(Object.keys(PLAN_CATALOGUE));
-function skillCapForPlan(plan: string | null | undefined): number {
-  if (plan && PLAN_IDS.has(plan)) {
-    return PLAN_CATALOGUE[plan as PlanId].rolesAllowed;
-  }
-  return PLAN_CATALOGUE.free.rolesAllowed;
-}
-
-function skillLimitErrorMessage(plan: string | null | undefined, cap: number): string {
-  if (cap <= 0) return '当前套餐暂不支持启用技能';
-  const label = plan === 'pro' ? '专业版' : plan === 'basic' ? '基础版' : '当前套餐';
-  return `${label}最多可启用 ${cap} 个技能，请先停用一个技能后再启用新的技能`;
-}
-
 function normalizeSelectedSkillIds(value: unknown): string[] {
   return normalizeSkillIds(value);
+}
+
+function toggleSelectedSkillIds(
+  value: unknown,
+  skillId: string,
+): { next: string[]; enabled: boolean } {
+  const current = new Set(normalizeSelectedSkillIds(value));
+  const wasEnabled = current.has(skillId);
+  if (wasEnabled) current.delete(skillId);
+  else current.add(skillId);
+  return { next: Array.from(current), enabled: !wasEnabled };
 }
 
 function buildSkillListRows(enabledIds: Iterable<string>) {
@@ -102,37 +99,28 @@ export const skillsRouter = router({
           message: `unknown skill: ${input.skillId}`,
         });
       }
-      const [row] = await ctx.db
-        .select({ id: users.id, plan: users.plan, selectedSkills: users.selectedSkills })
-        .from(users)
-        .where(eq(users.externalId, ctx.userId))
-        .limit(1);
-      if (!row) {
-        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
-      }
-      const current = new Set(normalizeSelectedSkillIds(row.selectedSkills));
-      const wasEnabled = current.has(skill.id);
-      const cap = skillCapForPlan(row.plan);
-      if (!wasEnabled && current.size >= cap) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: skillLimitErrorMessage(row.plan, cap),
-        });
-      }
-      if (wasEnabled) current.delete(skill.id);
-      else current.add(skill.id);
-      const next = Array.from(current);
-      await ctx.db
-        .update(users)
-        .set({ selectedSkills: next.length === 0 ? null : next })
-        .where(eq(users.id, row.id));
-      return { skillId: skill.id, enabled: !wasEnabled };
+      return ctx.db.transaction(async (tx) => {
+        const [row] = await tx
+          .select({ id: users.id, selectedSkills: users.selectedSkills })
+          .from(users)
+          .where(eq(users.externalId, ctx.userId))
+          .limit(1)
+          .for('update');
+        if (!row) {
+          throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+        }
+        const toggled = toggleSelectedSkillIds(row.selectedSkills, skill.id);
+        await tx
+          .update(users)
+          .set({ selectedSkills: toggled.next.length === 0 ? null : toggled.next })
+          .where(eq(users.id, row.id));
+        return { skillId: skill.id, enabled: toggled.enabled };
+      });
     }),
 });
 
 export const __skillsInternals = {
   buildSkillListRows,
   normalizeSelectedSkillIds,
-  skillCapForPlan,
-  skillLimitErrorMessage,
+  toggleSelectedSkillIds,
 };

@@ -18,11 +18,6 @@ export interface SkillLoadErrorCopy {
   readonly body: string;
 }
 
-export interface SkillLimitBannerCopy {
-  readonly title: string;
-  readonly body: string;
-}
-
 export interface SkillTaskDraft {
   readonly skillId: string;
   readonly skillName: string;
@@ -30,7 +25,12 @@ export interface SkillTaskDraft {
   readonly prompt: string;
 }
 
-export type SkillStartDecision = 'start' | 'enable-and-start' | 'blocked';
+export interface SkillTaskAttachmentHandoff {
+  readonly fileId: string;
+  readonly filename: string;
+  readonly mimetype: string;
+  readonly sizeBytes: number;
+}
 
 export interface SkillIntentMatch<TSkill extends UiSkill = UiSkill> {
   readonly skill: TSkill;
@@ -416,23 +416,11 @@ export function skillPageSummary(options: {
   readonly loading: boolean;
   readonly error: string | null;
   readonly totalCount: number;
-  readonly enabledCount: number;
-  readonly cap: number;
-  readonly planId: string;
 }): string {
   if (options.loading) return '任务选项加载中…';
   if (options.error) return '任务选项暂时无法加载';
   if (options.totalCount === 0) return '暂无可开始的任务';
-  if (options.cap <= 0) {
-    return `${skillPlanLabel(options.planId)}可查看任务示例`;
-  }
-  if (options.cap > 0) {
-    if (options.enabledCount > options.cap) {
-      return `已保留 ${options.enabledCount} 项常用技能 · ${skillPlanLabel(options.planId)}上限 ${options.cap}`;
-    }
-    return `常用技能 ${options.enabledCount} / ${options.cap} · ${skillPlanLabel(options.planId)}`;
-  }
-  return `已加载 ${options.totalCount} 项任务 · ${skillPlanLabel(options.planId)}`;
+  return `${options.totalCount} 项技能均可使用`;
 }
 
 export function skillLoadErrorCopy(message: string | null | undefined): SkillLoadErrorCopy {
@@ -446,68 +434,105 @@ export function skillLoadErrorCopy(message: string | null | undefined): SkillLoa
   };
 }
 
-export function skillLimitMessage(options: {
-  readonly cap: number;
-  readonly planId: string;
-}): string {
-  if (options.cap <= 0) return '当前套餐暂不支持开始此任务';
-  if (options.planId === 'pro') return `当前套餐的常用技能已满（${options.cap} 项）`;
-  return `常用技能已满（${options.cap} 项）· 可先移除一项或升级套餐`;
-}
-
-export function skillLimitBannerCopy(options: {
-  readonly cap: number;
-  readonly enabledCount: number;
-  readonly planId: string;
-}): SkillLimitBannerCopy {
-  if (options.cap <= 0) {
-    return {
-      title: '当前套餐可查看任务示例',
-      body: '升级到基础版后即可选择并开始任务；专业版可使用全部 13 类任务。',
-    };
-  }
-  if (options.enabledCount > options.cap) {
-    return {
-      title: `当前已保留 ${options.enabledCount} 项常用技能`,
-      body: `${skillPlanLabel(options.planId)}最多保留 ${options.cap} 项。现有任务仍可使用；移除后才能添加新的常用技能。`,
-    };
-  }
-  return {
-    title: `常用技能已满（${options.cap} 项）`,
-    body:
-      options.planId === 'pro'
-        ? '当前套餐支持的技能已全部加入常用。'
-        : '开始其他任务前，可先移除一项常用技能，或升级套餐。',
-  };
-}
-
 export function skillCardBadge(options: {
   readonly enabled: boolean;
   readonly pending: boolean;
-  readonly limitBlocked?: boolean;
-  readonly cap?: number;
 }): string {
   if (options.pending) return '保存中…';
-  if (!options.enabled && options.limitBlocked && (options.cap ?? 1) <= 0) return '暂不可用';
-  if (!options.enabled && options.limitBlocked) return '已达上限';
   return options.enabled ? '常用' : '加入常用';
 }
 
 export function skillCardUsageHint(options: {
   readonly enabled: boolean;
   readonly pending: boolean;
-  readonly limitBlocked?: boolean;
-  readonly cap?: number;
 }): string {
   if (options.pending) return '正在保存';
-  if (options.enabled && (options.cap ?? 1) <= 0) {
-    return '当前套餐暂不可使用';
-  }
-  if (!options.enabled && options.limitBlocked && (options.cap ?? 1) <= 0) {
-    return '当前套餐暂不可使用';
-  }
-  if (!options.enabled && options.limitBlocked) return '先移除一项常用技能';
   return options.enabled ? '已加入常用' : '可加入常用';
+}
+
+export function composeSkillTaskPrompt(
+  selectedTask: string | null | undefined,
+  extraRequirements: string,
+): string {
+  const task = safeSkillText(selectedTask);
+  const extra = safeSkillText(extraRequirements);
+  if (!task) return extra;
+  return extra ? `${task}\n补充要求：${extra}` : task;
+}
+
+export function readySkillTaskAttachments(
+  attachments: readonly {
+    readonly fileId: string;
+    readonly filename: string;
+    readonly mimetype: string;
+    readonly size: number;
+    readonly status: 'uploading' | 'ready' | 'error';
+  }[],
+): SkillTaskAttachmentHandoff[] {
+  return attachments
+    .filter((attachment) => attachment.status === 'ready' && attachment.fileId.trim())
+    .map((attachment) => ({
+      fileId: attachment.fileId,
+      filename: attachment.filename,
+      mimetype: attachment.mimetype,
+      sizeBytes: attachment.size,
+    }));
+}
+
+export function reserveSkillTaskAttachmentSlots(
+  currentCount: number,
+  incomingCount: number,
+  maxAttachments: number,
+): number | null {
+  if (
+    !Number.isInteger(currentCount) ||
+    !Number.isInteger(incomingCount) ||
+    !Number.isInteger(maxAttachments) ||
+    currentCount < 0 ||
+    incomingCount <= 0 ||
+    maxAttachments < 0 ||
+    currentCount + incomingCount > maxAttachments
+  ) {
+    return null;
+  }
+  return currentCount + incomingCount;
+}
+
+function normalizeSkillTaskAttachment(value: unknown): SkillTaskAttachmentHandoff | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Partial<SkillTaskAttachmentHandoff>;
+  if (
+    typeof candidate.fileId !== 'string' ||
+    !candidate.fileId.trim() ||
+    typeof candidate.filename !== 'string' ||
+    typeof candidate.mimetype !== 'string' ||
+    typeof candidate.sizeBytes !== 'number' ||
+    !Number.isFinite(candidate.sizeBytes) ||
+    candidate.sizeBytes < 0
+  ) {
+    return null;
+  }
+  return {
+    fileId: candidate.fileId,
+    filename: candidate.filename,
+    mimetype: candidate.mimetype,
+    sizeBytes: candidate.sizeBytes,
+  };
+}
+
+export function skillTaskAttachmentHandoffs(state: unknown): SkillTaskAttachmentHandoff[] {
+  if (!state || typeof state !== 'object') return [];
+  const candidate = state as { attachFile?: unknown; attachFiles?: unknown };
+  const raw = [
+    ...(candidate.attachFile ? [candidate.attachFile] : []),
+    ...(Array.isArray(candidate.attachFiles) ? candidate.attachFiles : []),
+  ];
+  const handoffs = new Map<string, SkillTaskAttachmentHandoff>();
+  for (const value of raw) {
+    const handoff = normalizeSkillTaskAttachment(value);
+    if (handoff && !handoffs.has(handoff.fileId)) handoffs.set(handoff.fileId, handoff);
+  }
+  return Array.from(handoffs.values());
 }
 
 export function skillTaskDraft(
@@ -541,16 +566,6 @@ export function skillSelectionFromTaskDraft(draft: {
   const skillName = typeof draft.skillName === 'string' ? draft.skillName.trim() : '';
   if (!skillId || !skillName) return null;
   return { skillId, skillName, skillSource: 'manual' };
-}
-
-export function skillStartDecision(options: {
-  readonly enabled: boolean;
-  readonly enabledCount: number;
-  readonly cap: number;
-}): SkillStartDecision {
-  if (options.enabled) return 'start';
-  if (options.cap <= 0 || options.enabledCount >= options.cap) return 'blocked';
-  return 'enable-and-start';
 }
 
 export function pickCapabilityShowcase<TSkill extends { readonly id: string }>(

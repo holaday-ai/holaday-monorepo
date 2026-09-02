@@ -73,8 +73,8 @@ export const PLAN_CATALOGUE: Readonly<Record<PlanId, PlanDefinition>> = {
     concurrency: 1,
     historyDays: 7,
     rolesAllowed: 0,
-    featuresZh: ['Sonnet 模型', '搜索 + 基础浏览器', '7 天任务历史', '1 并发'],
-    featuresEn: ['Sonnet model', 'Search + basic browser', '7-day history', '1 concurrent'],
+    featuresZh: ['Sonnet 模型', '全部技能', '搜索 + 基础浏览器', '7 天任务历史', '1 并发'],
+    featuresEn: ['Sonnet model', 'All skills', 'Search + basic browser', '7-day history', '1 concurrent'],
   },
   basic: {
     id: 'basic',
@@ -88,6 +88,7 @@ export const PLAN_CATALOGUE: Readonly<Record<PlanId, PlanDefinition>> = {
     rolesAllowed: 5,
     featuresZh: [
       'Sonnet 模型',
+      '全部技能',
       '完整浏览器（智能反检测）',
       '30 天任务历史',
       '3 并发',
@@ -95,6 +96,7 @@ export const PLAN_CATALOGUE: Readonly<Record<PlanId, PlanDefinition>> = {
     ],
     featuresEn: [
       'Sonnet model',
+      'All skills',
       'Full browser (Brave anti-detection)',
       '30-day history',
       '3 concurrent',
@@ -113,6 +115,7 @@ export const PLAN_CATALOGUE: Readonly<Record<PlanId, PlanDefinition>> = {
     rolesAllowed: 33,
     featuresZh: [
       'Sonnet + Opus 智能路由',
+      '全部技能',
       '完整浏览器',
       '90 天任务历史',
       '5 并发',
@@ -121,6 +124,7 @@ export const PLAN_CATALOGUE: Readonly<Record<PlanId, PlanDefinition>> = {
     ],
     featuresEn: [
       'Smart Sonnet + Opus routing',
+      'All skills',
       'Full browser',
       '90-day history',
       '5 concurrent',
