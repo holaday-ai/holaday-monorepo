@@ -49,6 +49,70 @@ final result: passed
 
 ---
 
+# 技能中心任务优先工作台 Design QA（2026-09-02）
+
+## 对照目标与状态
+
+- Source visual truth: `/Users/yaleiqi/.codex/generated_images/019fea2f-b33b-7560-9d5a-5a381b4cfd37/exec-e65f4ba5-a3eb-4aa7-afc5-890291620c84.png`。
+- Browser-rendered implementation: `http://127.0.0.1:5187/qa-skills.html`，使用生产 `CapabilityCenterContent` 和真实交互状态，仅外层认证壳由 QA fixture 提供。
+- Desktop implementation evidence: `/Users/yaleiqi/holaday-monorepo/.worktrees/ability-center-intent-match/qa-skills-implementation.png`。
+- Same-input comparison: `/Users/yaleiqi/holaday-monorepo/.worktrees/ability-center-intent-match/qa-skills-comparison.png`。
+- Responsive evidence: `/Users/yaleiqi/holaday-monorepo/.worktrees/ability-center-intent-match/qa-skills-responsive.png`，390 × 844 px 内嵌视口。
+- State: 输入零售行业竞品分析任务，Holaday 识别行业研究、竞品分析和数据分析，执行预览开启，四个跨领域任务入口与完整技能目录可见。
+
+## Viewport and normalization
+
+- Source: 1487 × 1058 px；implementation full page: 1280 × 1311 screenshot pixels。
+- 两张图以相同内容状态放入一个 1280 × 720 对照输入，各占一半并保持原始纵横比，以 `object-fit: contain` 展示完整页面，没有裁切内容。
+- 响应式检查在 390 × 844 px 的真实 iframe viewport 中加载同一 QA 页面，Tailwind 移动断点实际生效；首屏控件、匹配技能、预览开关和开始按钮无水平溢出或相互遮挡。
+- 侧栏存在的 815 px 窄工作区中，主内容实际仅 459 px；任务入口与技能目录现在按自身可用宽度自动降列，四个任务入口均为 459 px 单列，不再被窗口断点强制压成两列 205.5 px。1440 px 回归仍为任务入口两列、技能目录三列。
+
+## 视觉与内容一致性
+
+- 层级：标题 → 任务输入 → `Holaday 已理解` → 四个任务入口 → 常用技能 → 三组技能目录，和选定方向一致。
+- 表面：主内容不使用分割线、描边卡片或表格边框；仅任务输入保留一块低对比暖灰承载面，其他区域依靠留白和字号建立层级。
+- 图标：使用项目现有 `SkillLogo` 与 Lucide 图标；未使用五角星、右箭头、emoji、CSS 图画或手写 SVG。
+- 状态：常用技能使用具名微型开关；任务入口以状态点和 hover 位移反馈代替箭头；品牌红 `#EA1F59` 只用于主操作、选中和运行状态。
+- 文案：去掉后台配置、能力轨道、连接器等内部术语，只保留用户可理解的任务、交付边界和开始方式；目录展示为 `研究与分析`、`内容与表达`、`工作自动化`。
+- 内容丰富度：强匹配只改变当前建议，不会把 12 项完整技能目录过滤成搜索结果；四个入口来自不同技能，避免重复展示同一技能的三个示例。
+
+## 交互、无障碍与浏览器 QA
+
+- `执行预览` 是语义化 switch；关闭后预览摘要与交付项隐藏，再次打开可恢复。
+- `设为常用` 是语义化 switch；浏览器中切换竞品分析后，状态由 `设为常用` 变为 `取消常用`。
+- 点击 `预览数据分析` 后，技能目录中的数据分析项获得 `aria-pressed=true`，不会意外直接创建任务。
+- 禁用、保存中、套餐不支持和常用技能上限由现有测试覆盖；开始任务保留显式按钮与可访问名称。
+- 全新浏览器标签页的 warning/error 日志为 0；QA HMR root 在 dispose 时卸载，避免重复 `createRoot` 警告。
+
+## Comparison history
+
+### Pass 1
+
+- P1: 执行预览使用大块圆角灰底，形成额外卡片并把四个任务入口及技能目录推到首屏下方。
+- P1: 四个任务入口中三个来自同一技能，无法让新用户快速理解 Holaday 能做什么。
+- P2: 技能目录额外显示 `全部技能` 标题、说明和数量，和目标版的紧凑三列目录相比过长。
+- Fix: 将预览改为无框行内摘要；用最多四个去重技能组成任务入口；保留语义化但视觉隐藏的目录标题；将三类名称转为用户语言并调整显示顺序。
+
+### Final pass
+
+- 同屏对照确认主网格、任务输入、自动理解、预览开关、四个入口、常用技能和三列目录均保持选定方向。
+- 按用户明确反馈，目标图中的五角星和线性方向标记被更克制的状态点与开关替代，这是有意改进，不是遗漏。
+- 修复工作区收窄但浏览器仍处于桌面断点时的错列问题；改用内容宽度驱动的 intrinsic grid，并增加回归测试防止恢复为窗口断点布局。
+- 没有待处理的 P0、P1 或 P2 视觉、内容、交互、可访问性或响应式问题。
+
+## Automated gates
+
+- 技能中心响应式与控制提示定向测试：2 个文件、18 个测试通过。
+- Web 完整测试：241 个文件、2365 个测试通过。
+- Web 完整 ESLint 通过。
+- Web TypeScript 类型检查通过。
+- Web production build 通过；仅保留仓库既有的大 chunk 提示，无构建错误。
+- 浏览器核心交互、同屏视觉对照和 390 × 844 响应式检查通过。
+
+final result: passed
+
+---
+
 # 视频创作场景工作室 Design QA（2026-08-29）
 
 ## 对照目标与状态
