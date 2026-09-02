@@ -110,7 +110,7 @@ describe('skills router preferences', () => {
     expect(rows.find((skill) => skill.id === 'xiaohongshu-seeding-ops')?.enabled).toBe(true);
   });
 
-  it('serializes preference toggles with a row lock inside a transaction', async () => {
+  it('requests a user-row update lock before writing a preference toggle', async () => {
     const events: string[] = [];
     let storedSkills: string[] | null = [];
     const tx = {

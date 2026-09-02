@@ -73,8 +73,8 @@ export function CapabilityCenterContent({
   onRemoveAttachment,
 }: CapabilityCenterContentProps): JSX.Element {
   const [selectedTask, setSelectedTask] = React.useState<{
+    readonly id: string;
     readonly prompt: string;
-    readonly skillId: string;
   } | null>(null);
   const [manualSkillId, setManualSkillId] = React.useState<string | null>(null);
   const [skillPickerQuery, setSkillPickerQuery] = React.useState('');
@@ -93,15 +93,11 @@ export function CapabilityCenterContent({
   );
   const matchedSkill =
     intentMatch.confidence === 'strong' ? intentMatch.matches[0]?.skill : undefined;
-  const selectedTaskSkill = selectedTask
-    ? skills.find((skill) => skill.id === selectedTask.skillId)
-    : undefined;
   const manuallySelectedSkill = manualSkillId
     ? skills.find((skill) => skill.id === manualSkillId)
     : undefined;
   const activeSkill =
     manuallySelectedSkill ??
-    selectedTaskSkill ??
     matchedSkill ??
     skills.find((skill) => skill.id === activeSkillId) ??
     showcase[0] ??
@@ -179,12 +175,12 @@ export function CapabilityCenterContent({
 
   function useAutomaticSkillMatching(): void {
     setManualSkillId(null);
-    const automaticSkill = selectedTaskSkill ?? matchedSkill ?? showcase[0] ?? skills[0];
+    const automaticSkill = matchedSkill ?? showcase[0] ?? skills[0];
     if (automaticSkill) onSelectSkill(automaticSkill.id);
   }
 
   function selectTaskExample(skill: UiSkill, prompt: string): void {
-    setSelectedTask({ prompt, skillId: skill.id });
+    setSelectedTask({ id: `example:${skill.id}`, prompt });
     setManualSkillId(skill.id);
     onSelectSkill(skill.id);
   }
@@ -311,7 +307,7 @@ export function CapabilityCenterContent({
               suggestionUnavailable || attachmentUploading
                   ? startButtonTitle
                   : taskLabel
-                    ? selectedTask || manuallySelectedSkill
+                    ? manuallySelectedSkill
                       ? '用已选技能开始任务'
                       : matchedSkill
                         ? '用匹配的技能开始任务'
@@ -323,7 +319,7 @@ export function CapabilityCenterContent({
               onStart(
                 activeSkill,
                 taskPrompt,
-                selectedTask || manuallySelectedSkill ? 'manual' : 'suggested',
+                manuallySelectedSkill ? 'manual' : 'suggested',
               )
             }
             className="inline-flex h-11 shrink-0 items-center justify-center gap-2 self-end rounded-[11px] bg-[#EA1F59] px-4 text-[12px] font-semibold text-white shadow-[0_8px_18px_rgba(234,31,89,0.18)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#D91A52] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/30 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-[#D8D3D5] disabled:shadow-none disabled:hover:translate-y-0 motion-reduce:transform-none"
@@ -594,8 +590,7 @@ export function CapabilityCenterContent({
         >
           {suggestedTaskItems.map((item, index) => {
             const Icon = TASK_ICONS[index % TASK_ICONS.length];
-            const itemIsActive =
-              item.skill.id === selectedTask?.skillId && item.prompt === selectedTask.prompt;
+            const itemIsActive = item.id === selectedTask?.id;
             return (
               <button
                 key={item.id}

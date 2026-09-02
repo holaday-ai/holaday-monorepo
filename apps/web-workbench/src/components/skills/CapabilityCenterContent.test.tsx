@@ -464,6 +464,44 @@ describe('CapabilityCenterContent', () => {
     expect(onStart).toHaveBeenCalledWith(skills[0], '分析这份销售报表', 'suggested');
   });
 
+  it('releases a starter task skill lock when returning to automatic matching', async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn();
+
+    function Harness(): JSX.Element {
+      const [activeSkillId, setActiveSkillId] = React.useState('data-report-insight');
+      const [query, setQuery] = React.useState('');
+      return (
+        <CapabilityCenterContent
+          {...baseProps}
+          activeSkillId={activeSkillId}
+          query={query}
+          onQueryChange={setQuery}
+          onSelectSkill={setActiveSkillId}
+          onStart={onStart}
+        />
+      );
+    }
+
+    render(<Harness />);
+    await user.click(
+      screen.getByRole('button', { name: '选择任务示例：为新品规划一周社媒内容' }),
+    );
+    await user.click(screen.getByRole('button', { name: '选择技能：社交媒体策略' }));
+    await user.click(screen.getByRole('menuitem', { name: '自动匹配' }));
+
+    expect(screen.getByRole('button', { name: '选择技能：自动匹配' })).toBeTruthy();
+    await user.click(
+      screen.getByRole('button', { name: '开始任务：为新品规划一周社媒内容' }),
+    );
+
+    expect(onStart).toHaveBeenCalledWith(
+      skills[1],
+      '为新品规划一周社媒内容',
+      'suggested',
+    );
+  });
+
   it('closes the skill picker with Escape while search is focused', async () => {
     const user = userEvent.setup();
     render(<CapabilityCenterContent {...baseProps} />);
