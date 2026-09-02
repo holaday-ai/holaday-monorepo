@@ -428,9 +428,9 @@ export function skillPageSummary(options: {
   }
   if (options.cap > 0) {
     if (options.enabledCount > options.cap) {
-      return `已保留 ${options.enabledCount} 项常用能力 · ${skillPlanLabel(options.planId)}上限 ${options.cap}`;
+      return `已保留 ${options.enabledCount} 项常用技能 · ${skillPlanLabel(options.planId)}上限 ${options.cap}`;
     }
-    return `常用能力 ${options.enabledCount} / ${options.cap} · ${skillPlanLabel(options.planId)}`;
+    return `常用技能 ${options.enabledCount} / ${options.cap} · ${skillPlanLabel(options.planId)}`;
   }
   return `已加载 ${options.totalCount} 项任务 · ${skillPlanLabel(options.planId)}`;
 }
@@ -439,7 +439,7 @@ export function skillLoadErrorCopy(message: string | null | undefined): SkillLoa
   const body =
     typeof message === 'string' && message.trim()
       ? message.trim()
-      : '请稍后重试，或刷新页面后再打开能力中心。';
+      : '请稍后重试，或刷新页面后再打开技能中心。';
   return {
     title: '任务选项暂时无法加载',
     body,
@@ -451,8 +451,8 @@ export function skillLimitMessage(options: {
   readonly planId: string;
 }): string {
   if (options.cap <= 0) return '当前套餐暂不支持开始此任务';
-  if (options.planId === 'pro') return `当前套餐的常用能力已满（${options.cap} 项）`;
-  return `常用能力已满（${options.cap} 项）· 可先移除一项或升级套餐`;
+  if (options.planId === 'pro') return `当前套餐的常用技能已满（${options.cap} 项）`;
+  return `常用技能已满（${options.cap} 项）· 可先移除一项或升级套餐`;
 }
 
 export function skillLimitBannerCopy(options: {
@@ -468,16 +468,16 @@ export function skillLimitBannerCopy(options: {
   }
   if (options.enabledCount > options.cap) {
     return {
-      title: `当前已保留 ${options.enabledCount} 项常用能力`,
-      body: `${skillPlanLabel(options.planId)}最多保留 ${options.cap} 项。现有任务仍可使用；移除后才能添加新的常用能力。`,
+      title: `当前已保留 ${options.enabledCount} 项常用技能`,
+      body: `${skillPlanLabel(options.planId)}最多保留 ${options.cap} 项。现有任务仍可使用；移除后才能添加新的常用技能。`,
     };
   }
   return {
-    title: `常用能力已满（${options.cap} 项）`,
+    title: `常用技能已满（${options.cap} 项）`,
     body:
       options.planId === 'pro'
-        ? '当前套餐支持的能力已全部加入常用。'
-        : '开始其他任务前，可先移除一项常用能力，或升级套餐。',
+        ? '当前套餐支持的技能已全部加入常用。'
+        : '开始其他任务前，可先移除一项常用技能，或升级套餐。',
   };
 }
 
@@ -506,7 +506,7 @@ export function skillCardUsageHint(options: {
   if (!options.enabled && options.limitBlocked && (options.cap ?? 1) <= 0) {
     return '当前套餐暂不可使用';
   }
-  if (!options.enabled && options.limitBlocked) return '先移除一项常用能力';
+  if (!options.enabled && options.limitBlocked) return '先移除一项常用技能';
   return options.enabled ? '已加入常用' : '可加入常用';
 }
 

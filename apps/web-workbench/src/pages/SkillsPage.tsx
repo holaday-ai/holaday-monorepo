@@ -111,7 +111,9 @@ export function SkillsPage(): JSX.Element {
         ),
       );
       toast.show(
-        response.enabled ? `已加入常用「${skill.name}」` : `已从常用中移除「${skill.name}」`,
+        response.enabled
+          ? `已加入常用技能「${skill.name}」`
+          : `已从常用技能中移除「${skill.name}」`,
       );
       return response.enabled === desired;
     } catch (error) {
@@ -160,7 +162,7 @@ export function SkillsPage(): JSX.Element {
 
   const notice =
     limitBanner && planId !== 'pro' ? (
-      <div className="flex flex-col gap-3 rounded-[12px] border border-[#F0E2B9] bg-[#FFFBEE] px-4 py-3 text-[12px] text-foreground sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 rounded-[12px] bg-[#FFF8E4] px-4 py-3 text-[12px] text-foreground sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="font-semibold">{limitBanner.title}</div>
           <div className="mt-0.5 leading-5 text-muted-foreground">{limitBanner.body}</div>
@@ -182,16 +184,16 @@ export function SkillsPage(): JSX.Element {
       {loading ? (
         <>
           <PageHeader
-            title="能力中心"
-            description="选择想完成的事，Holaday 会匹配所需能力并带你开始"
+            title="技能中心"
+            description="说出你想完成的事，Holaday 会匹配所需技能并带你开始"
           />
           <PageLoadingPanel label="任务选项加载中" description="正在准备可完成的任务与示例" />
         </>
       ) : loadError ? (
         <>
           <PageHeader
-            title="能力中心"
-            description="选择想完成的事，Holaday 会匹配所需能力并带你开始"
+            title="技能中心"
+            description="说出你想完成的事，Holaday 会匹配所需技能并带你开始"
           />
           <div className="flex flex-col items-center gap-3 rounded-[12px] border border-[#DCDDDD] bg-white px-6 py-12 text-center">
             <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
@@ -207,7 +209,7 @@ export function SkillsPage(): JSX.Element {
                 <a
                   href={supportMailtoHref({
                     subject: '任务选项加载失败',
-                    body: '能力中心的任务选项加载失败，请协助排查。\n\n注册邮箱：\n出现时间：',
+                    body: '技能中心的任务选项加载失败，请协助排查。\n\n注册邮箱：\n出现时间：',
                   })}
                 >
                   联系支持
@@ -219,8 +221,8 @@ export function SkillsPage(): JSX.Element {
       ) : skills.length === 0 ? (
         <>
           <PageHeader
-            title="能力中心"
-            description="选择想完成的事，Holaday 会匹配所需能力并带你开始"
+            title="技能中心"
+            description="说出你想完成的事，Holaday 会匹配所需技能并带你开始"
           />
           <div className="flex flex-col items-center gap-3 rounded-[12px] border border-dashed border-[#DCDDDD] bg-white px-6 py-12 text-center">
             <Sparkles className="h-8 w-8 text-muted-foreground/40" aria-hidden />
@@ -232,7 +234,7 @@ export function SkillsPage(): JSX.Element {
               <a
                 href={supportMailtoHref({
                   subject: '可用任务为空',
-                  body: '能力中心没有显示可用任务，请协助确认。\n\n注册邮箱：',
+                  body: '技能中心没有显示可用任务，请协助确认。\n\n注册邮箱：',
                 })}
               >
                 联系支持

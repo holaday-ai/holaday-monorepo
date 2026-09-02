@@ -86,7 +86,7 @@ describe('skills page state helpers', () => {
         cap: 5,
         planId: 'basic',
       }),
-    ).toBe('常用能力 2 / 5 · 基础版');
+    ).toBe('常用技能 2 / 5 · 基础版');
     expect(
       skillPageSummary({
         loading: false,
@@ -96,7 +96,7 @@ describe('skills page state helpers', () => {
         cap: 5,
         planId: 'basic',
       }),
-    ).toBe('已保留 11 项常用能力 · 基础版上限 5');
+    ).toBe('已保留 11 项常用技能 · 基础版上限 5');
     expect(
       skillPageSummary({
         loading: false,
@@ -111,9 +111,9 @@ describe('skills page state helpers', () => {
 
   it('builds plan-aware limit messages', () => {
     expect(skillLimitMessage({ cap: 0, planId: 'free' })).toBe('当前套餐暂不支持开始此任务');
-    expect(skillLimitMessage({ cap: 33, planId: 'pro' })).toBe('当前套餐的常用能力已满（33 项）');
+    expect(skillLimitMessage({ cap: 33, planId: 'pro' })).toBe('当前套餐的常用技能已满（33 项）');
     expect(skillLimitMessage({ cap: 5, planId: 'basic' })).toBe(
-      '常用能力已满（5 项）· 可先移除一项或升级套餐',
+      '常用技能已满（5 项）· 可先移除一项或升级套餐',
     );
   });
 
@@ -123,12 +123,12 @@ describe('skills page state helpers', () => {
       body: '升级到基础版后即可选择并开始任务；专业版可使用全部 13 类任务。',
     });
     expect(skillLimitBannerCopy({ cap: 5, enabledCount: 11, planId: 'basic' })).toEqual({
-      title: '当前已保留 11 项常用能力',
-      body: '基础版最多保留 5 项。现有任务仍可使用；移除后才能添加新的常用能力。',
+      title: '当前已保留 11 项常用技能',
+      body: '基础版最多保留 5 项。现有任务仍可使用；移除后才能添加新的常用技能。',
     });
     expect(skillLimitBannerCopy({ cap: 5, enabledCount: 5, planId: 'basic' })).toEqual({
-      title: '常用能力已满（5 项）',
-      body: '开始其他任务前，可先移除一项常用能力，或升级套餐。',
+      title: '常用技能已满（5 项）',
+      body: '开始其他任务前，可先移除一项常用技能，或升级套餐。',
     });
   });
 
@@ -139,7 +139,7 @@ describe('skills page state helpers', () => {
     });
     expect(skillLoadErrorCopy('')).toEqual({
       title: '任务选项暂时无法加载',
-      body: '请稍后重试，或刷新页面后再打开能力中心。',
+      body: '请稍后重试，或刷新页面后再打开技能中心。',
     });
   });
 
@@ -164,7 +164,7 @@ describe('skills page state helpers', () => {
       '当前套餐暂不可使用',
     );
     expect(skillCardUsageHint({ enabled: false, pending: false, limitBlocked: true })).toBe(
-      '先移除一项常用能力',
+      '先移除一项常用技能',
     );
   });
 
