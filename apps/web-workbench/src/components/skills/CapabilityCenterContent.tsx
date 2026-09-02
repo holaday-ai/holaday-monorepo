@@ -13,8 +13,6 @@ import {
   Grid3X3,
   Loader2,
   LockKeyhole,
-  MessageSquareText,
-  Paperclip,
   Plus,
   Search,
   Send,
@@ -114,24 +112,6 @@ export function CapabilityCenterContent({
   const suggestionUnavailable = activeSkillPending || anotherSkillPending;
   const primaryActionUnavailable = suggestionUnavailable || manualPrimaryBlocked;
   const manualBlockLabel = cap <= 0 ? '暂不可用' : '已达上限';
-  const startActionLabel = activeSkillPending
-    ? '准备中…'
-    : anotherSkillPending
-      ? '请稍候'
-      : activeSkillBlocked
-        ? cap <= 0
-          ? '暂不可用'
-          : '已达上限'
-        : '开始';
-  const startActionAriaPrefix = activeSkillPending
-    ? '准备中'
-    : anotherSkillPending
-      ? '请稍候'
-      : activeSkillBlocked
-        ? cap <= 0
-          ? '暂不可用'
-          : '已达上限'
-        : '开始任务';
   const startButtonTitle = activeSkillPending
     ? '正在准备这个任务'
     : anotherSkillPending
@@ -156,9 +136,8 @@ export function CapabilityCenterContent({
       ]),
     ).values(),
   ).slice(0, 4);
-  const suggestedTaskItems = taskShowcase.map((skill, index) => ({
-    id: `${index === 0 ? 'start' : 'preview'}:${skill.id}`,
-    kind: index === 0 ? ('start' as const) : ('preview' as const),
+  const suggestedTaskItems = taskShowcase.map((skill) => ({
+    id: `example:${skill.id}`,
     prompt: skill.experience.starterPrompts[0] ?? skill.name,
     skill,
   }));
@@ -170,11 +149,17 @@ export function CapabilityCenterContent({
     onSelectSkill(skill.id);
   }
 
+  function selectTaskExample(skill: UiSkill, prompt: string): void {
+    setIntentSelection({ query: prompt, skillId: skill.id });
+    onSelectSkill(skill.id);
+    onQueryChange(prompt);
+  }
+
   return (
     <div className="pb-12 text-[#252326]">
       <header
         data-testid="capability-header"
-        className="flex flex-col gap-5 pb-6 sm:flex-row sm:items-start sm:justify-between"
+        className="flex items-start justify-between gap-4 pb-6"
       >
         <div className="min-w-0">
           <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.045em] text-[#242225]">
@@ -203,35 +188,45 @@ export function CapabilityCenterContent({
         <label htmlFor="skill-intent" className="block text-[12px] font-medium text-[#6F696E]">
           现在想完成什么？
         </label>
-        <div className="mt-2 flex items-end gap-4">
+        <div
+          data-testid="intent-composer-row"
+          className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4"
+        >
           <textarea
             id="skill-intent"
             aria-label="描述想完成的任务"
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             placeholder="例如：把零售行业资料整理成一份明天可以直接讲的方案"
-            rows={2}
+            rows={3}
             className="min-h-[68px] flex-1 resize-none bg-transparent text-[17px] font-medium leading-7 tracking-[-0.012em] text-[#292629] outline-none placeholder:text-[#A09A9E] focus-visible:placeholder:text-[#B2ACAF]"
           />
           <button
             type="button"
             aria-label={
-              manualPrimaryBlocked
+              suggestionUnavailable
+                ? activeSkillPending
+                  ? `正在准备任务：${trimmedQuery}`
+                  : `正在保存常用技能，请稍候：${trimmedQuery}`
+                : manualPrimaryBlocked
                 ? `${manualBlockLabel}：${trimmedQuery}`
                 : trimmedQuery
-                  ? `提交并查看匹配：${trimmedQuery}`
-                  : '提交任务描述'
+                  ? `开始任务：${trimmedQuery}`
+                  : '开始任务：请先描述任务'
             }
+            aria-busy={suggestionUnavailable}
             title={
               manualPrimaryBlocked
                 ? startButtonTitle
-                : matchedSkill
-                ? '用匹配的技能开始任务'
-                : trimmedQuery
-                  ? '请再补充一些具体目标'
-                  : '先描述你想完成的任务'
+                : suggestionUnavailable
+                  ? startButtonTitle
+                  : trimmedQuery
+                    ? matchedSkill
+                      ? '用匹配的技能开始任务'
+                      : '进入任务后继续确认所需技能'
+                    : '先描述你想完成的任务'
             }
-            disabled={!matchedSkill || primaryActionUnavailable}
+            disabled={!trimmedQuery || primaryActionUnavailable}
             onClick={() =>
               onStart(
                 activeSkill,
@@ -239,31 +234,23 @@ export function CapabilityCenterContent({
                 selectedIntentSkill ? 'manual' : 'suggested',
               )
             }
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[11px] bg-[#EA1F59] text-white shadow-[0_8px_18px_rgba(234,31,89,0.18)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#D91A52] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/30 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-[#D8D3D5] disabled:shadow-none disabled:hover:translate-y-0 motion-reduce:transform-none"
+            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 self-end rounded-[11px] bg-[#EA1F59] px-4 text-[12px] font-semibold text-white shadow-[0_8px_18px_rgba(234,31,89,0.18)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#D91A52] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/30 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-[#D8D3D5] disabled:shadow-none disabled:hover:translate-y-0 motion-reduce:transform-none"
           >
             {suggestionUnavailable ? (
               <Loader2 className="h-[18px] w-[18px] animate-spin" aria-hidden />
             ) : manualPrimaryBlocked ? (
               <LockKeyhole className="h-[18px] w-[18px]" aria-hidden />
             ) : (
-              <Send className="h-[18px] w-[18px]" aria-hidden />
+              <>
+                <span>开始任务</span>
+                <Send className="h-4 w-4" aria-hidden />
+              </>
             )}
           </button>
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] text-[#817B7F]">
-          <span className="inline-flex items-center gap-1.5">
-            <Paperclip className="h-4 w-4" aria-hidden />
-            开始后可添加附件
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <FileText className="h-4 w-4" aria-hidden />
-            可使用已有文件
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <MessageSquareText className="h-4 w-4" aria-hidden />
-            可继续补充要求
-          </span>
-        </div>
+        <p className="mt-4 text-[11px] leading-5 text-[#817B7F]">
+          进入任务后，可以继续添加资料和补充要求。
+        </p>
       </section>
 
       {trimmedQuery && intentMatch.confidence === 'low' && (
@@ -271,7 +258,9 @@ export function CapabilityCenterContent({
           <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#D3CFD1]" aria-hidden />
           <div>
             <span className="font-semibold text-[#3E3A3D]">还不能确定最适合的能力</span>
-            <span className="ml-2 text-[#817B7F]">可以补充具体目标，或从下方任务中选择。</span>
+            <span className="ml-2 text-[#817B7F]">
+              可以直接开始，我会在任务中继续确认；也可以从下方选择示例。
+            </span>
           </div>
         </div>
       )}
@@ -344,49 +333,17 @@ export function CapabilityCenterContent({
                 执行预览
                 <span
                   aria-hidden
-                  className={cn(
-                    'relative h-[22px] w-10 rounded-full transition-colors duration-200',
-                    previewExpanded ? 'bg-[#EA1F59]' : 'bg-[#D2CDD0]',
-                  )}
+                  className="relative h-[22px] w-10 rounded-full bg-[#D2CDD0] transition duration-200"
                 >
                   <span
                     className={cn(
-                      'absolute top-[3px] h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200',
-                      previewExpanded ? 'translate-x-[21px]' : 'translate-x-[3px]',
+                      'absolute top-[3px] h-4 w-4 rounded-full shadow-sm transition duration-200',
+                      previewExpanded
+                        ? 'translate-x-[21px] bg-[#EA1F59]'
+                        : 'translate-x-[3px] bg-white',
                     )}
                   />
                 </span>
-              </button>
-              <button
-                type="button"
-                aria-label={
-                  manualPrimaryBlocked
-                    ? `${manualBlockLabel}并无法开始：${trimmedQuery}`
-                    : `开始任务：${trimmedQuery}`
-                }
-                title={
-                  manualPrimaryBlocked
-                    ? startButtonTitle
-                    : suggestionUnavailable
-                      ? '请稍候，正在保存常用技能'
-                      : '开始任务'
-                }
-                aria-busy={suggestionUnavailable}
-                disabled={primaryActionUnavailable}
-                onClick={() =>
-                  onStart(
-                    activeSkill,
-                    trimmedQuery,
-                    selectedIntentSkill ? 'manual' : 'suggested',
-                  )
-                }
-                className="inline-flex min-h-10 items-center justify-center rounded-[10px] bg-[#EA1F59] px-5 text-[12px] font-semibold text-white shadow-[0_7px_16px_rgba(234,31,89,0.16)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#D91A52] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:translate-y-0 motion-reduce:transform-none"
-              >
-                {suggestionUnavailable
-                  ? '请稍候'
-                  : manualPrimaryBlocked
-                    ? manualBlockLabel
-                    : '开始任务'}
               </button>
             </div>
           </div>
@@ -420,35 +377,20 @@ export function CapabilityCenterContent({
         >
           {suggestedTaskItems.map((item, index) => {
             const Icon = TASK_ICONS[index % TASK_ICONS.length];
-            const itemIsActive = item.skill.id === activeSkill.id;
-            const itemPending = pendingId === item.skill.id;
-            const itemBlocked = item.kind === 'start' && !item.skill.enabled && enabledCount >= cap;
-            const itemDisabled =
-              item.kind === 'start' && (itemPending || anotherSkillPending || itemBlocked);
+            const itemIsActive =
+              item.skill.id === activeSkill.id && item.prompt === trimmedQuery;
             return (
               <button
                 key={item.id}
                 type="button"
-                aria-label={
-                  item.kind === 'preview'
-                    ? `预览${item.skill.name}`
-                    : `${startActionAriaPrefix}：${item.prompt}`
-                }
-                title={
-                  item.kind === 'preview'
-                    ? `预览${item.skill.name}`
-                    : startButtonTitle ?? item.prompt
-                }
-                aria-busy={item.kind === 'start' ? itemPending : undefined}
-                disabled={itemDisabled}
-                onClick={() => {
-                  if (item.kind === 'preview') {
-                    selectSkill(item.skill);
-                    return;
-                  }
-                  onStart(item.skill, item.prompt);
-                }}
-                className="group flex min-h-[70px] w-full items-center gap-3 rounded-[14px] px-2 py-2 text-left transition-colors hover:bg-[#F7F5F3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/18 disabled:cursor-not-allowed disabled:opacity-55"
+                aria-label={`选择任务示例：${item.prompt}`}
+                title="填入这个任务示例"
+                aria-pressed={itemIsActive}
+                onClick={() => selectTaskExample(item.skill, item.prompt)}
+                className={cn(
+                  'group flex min-h-[70px] w-full items-center gap-3 rounded-[14px] px-2 py-2 text-left transition-colors hover:bg-[#F7F5F3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/18',
+                  itemIsActive && 'bg-[#F7F5F3]',
+                )}
               >
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-[#F0EEEB] text-[#393538] transition-colors group-hover:bg-white">
                   <Icon className="h-[18px] w-[18px]" aria-hidden />
@@ -461,24 +403,11 @@ export function CapabilityCenterContent({
                     {item.skill.description}
                   </span>
                 </span>
-                <span className="flex min-w-12 shrink-0 items-center justify-end gap-2 text-[10px] font-medium text-[#8E888C]">
-                  {item.kind === 'start' && <span>{startActionLabel}</span>}
-                  {itemPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                  ) : itemBlocked ? (
-                    <LockKeyhole className="h-4 w-4 text-[#A98A37]" aria-hidden />
-                  ) : (
-                    <span
-                      className={cn(
-                        'h-2.5 w-2.5 rounded-full transition-all duration-200 group-hover:scale-125',
-                        item.kind === 'preview' || !itemIsActive
-                          ? 'bg-[#D2CED0] group-hover:bg-[#EA1F59]'
-                          : 'bg-[#EA1F59]',
-                      )}
-                      aria-hidden
-                    />
-                  )}
-                </span>
+                {itemIsActive && (
+                  <span className="shrink-0 rounded-full bg-[#FCE8EE] px-2 py-1 text-[10px] font-medium text-[#B91D4A]">
+                    已选择
+                  </span>
+                )}
               </button>
             );
           })}
@@ -588,29 +517,26 @@ export function CapabilityCenterContent({
                           aria-busy={pending}
                           disabled={pending || anotherPending || limitBlocked}
                           onClick={() => onToggle(skill)}
-                          className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-[10px] px-1.5 text-[10px] font-medium text-[#817B7F] transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/18 disabled:cursor-not-allowed disabled:opacity-55"
+                          className="inline-flex min-h-10 shrink-0 items-center rounded-[10px] px-2 transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/18 disabled:cursor-not-allowed disabled:opacity-55"
                         >
-                          <span>常用</span>
                           <span
                             aria-hidden
                             className={cn(
-                              'relative h-[18px] w-8 rounded-full transition-colors duration-200',
-                              skill.enabled
-                                ? 'bg-[#EA1F59]'
-                                : limitBlocked
-                                  ? 'bg-[#E8D9A7]'
-                                  : 'bg-[#D2CDD0]',
+                              'relative h-[18px] w-8 rounded-full bg-[#D2CDD0] transition duration-200',
+                              limitBlocked && 'bg-[#EEE8D7]',
                             )}
                           >
                             {pending ? (
-                              <Loader2 className="absolute left-2 top-1 h-2.5 w-2.5 animate-spin text-white" />
+                              <Loader2 className="absolute left-2 top-1 h-2.5 w-2.5 animate-spin text-[#8B8589]" />
                             ) : limitBlocked ? (
                               <LockKeyhole className="absolute left-2 top-1 h-2.5 w-2.5 text-[#8E6A11]" />
                             ) : (
                               <span
                                 className={cn(
-                                  'absolute top-[3px] h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200',
-                                  skill.enabled ? 'translate-x-[17px]' : 'translate-x-[3px]',
+                                  'absolute top-[3px] h-3 w-3 rounded-full shadow-sm transition duration-200',
+                                  skill.enabled
+                                    ? 'translate-x-[17px] bg-[#EA1F59]'
+                                    : 'translate-x-[3px] bg-white',
                                 )}
                               />
                             )}
