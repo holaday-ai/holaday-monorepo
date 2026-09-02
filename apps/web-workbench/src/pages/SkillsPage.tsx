@@ -1,3 +1,4 @@
+import type { DraftAttachment } from '@/components/AttachmentChip';
 import { CapabilityCenterContent } from '@/components/skills/CapabilityCenterContent';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
@@ -6,26 +7,25 @@ import {
   normalizeSkillRows,
   normalizeSkillToggleResponse,
   pickCapabilityShowcase,
-  skillLimitBannerCopy,
-  skillLimitMessage,
+  readySkillTaskAttachments,
+  reserveSkillTaskAttachmentSlots,
   skillLoadErrorCopy,
-  skillStartDecision,
   skillTaskDraft,
 } from '@/lib/skills-page-state';
 import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
+import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
 import type { UiSkill } from '@/types/task';
 import { AlertCircle, Sparkles } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 
-/** Per-plan skill caps. Mirrors PLAN_CATALOGUE.rolesAllowed in shared-types. */
-const SKILL_CAPS: Record<string, number> = {
-  free: 0,
-  basic: 5,
-  pro: 33,
+const ATTACHMENT_BYTE_CAPS: Readonly<Record<string, number>> = {
+  basic: 5 * 1024 * 1024,
+  pro: 10 * 1024 * 1024,
 };
+const MAX_ATTACHMENTS = 5;
 
 /**
  * Capability discovery and task-start page. It keeps the server-backed skill
@@ -38,19 +38,18 @@ export function SkillsPage(): JSX.Element {
   const mountedRef = React.useRef(false);
   const requestIdRef = React.useRef(0);
   const outletCtx = useOutletContext<{ me?: { plan?: string } | null } | null>();
-  const planId = (outletCtx?.me?.plan ?? 'free') as keyof typeof SKILL_CAPS;
-  const cap = SKILL_CAPS[planId] ?? 0;
+  const planId = outletCtx?.me?.plan ?? 'free';
+  const attachmentsAllowed = planId !== 'free';
+  const attachmentByteCap =
+    ATTACHMENT_BYTE_CAPS[planId] ?? ATTACHMENT_BYTE_CAPS.basic ?? 5 * 1024 * 1024;
   const [skills, setSkills] = React.useState<UiSkill[]>([]);
   const [activeSkillId, setActiveSkillId] = React.useState('');
   const [query, setQuery] = React.useState('');
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [pendingId, setPendingId] = React.useState<string | null>(null);
-  const enabledCount = React.useMemo(
-    () => skills.reduce((count, skill) => count + (skill.enabled ? 1 : 0), 0),
-    [skills],
-  );
-  const atLimit = enabledCount >= cap;
+  const [attachments, setAttachments] = React.useState<DraftAttachment[]>([]);
+  const attachmentCountRef = React.useRef(0);
 
   const refresh = React.useCallback(
     async (options: { silent?: boolean } = {}) => {
@@ -86,15 +85,10 @@ export function SkillsPage(): JSX.Element {
   }, [refresh]);
 
   const loadErrorCopy = skillLoadErrorCopy(loadError);
-  const limitBanner = atLimit ? skillLimitBannerCopy({ cap, enabledCount, planId }) : null;
 
   async function setSkillEnabled(skill: UiSkill, desired: boolean): Promise<boolean> {
     if (pendingId) return false;
     if (skill.enabled === desired) return true;
-    if (desired && enabledCount >= cap) {
-      toast.show(skillLimitMessage({ cap, planId }), 'error');
-      return false;
-    }
 
     setPendingId(skill.id);
     setSkills((current) =>
@@ -137,47 +131,105 @@ export function SkillsPage(): JSX.Element {
     skillSource: 'manual' | 'suggested' = 'manual',
   ): Promise<void> {
     if (pendingId) return;
-    if (skillSource === 'manual') {
-      const decision = skillStartDecision({
-        enabled: skill.enabled,
-        enabledCount,
-        cap,
-      });
-      if (decision === 'blocked') {
-        toast.show(skillLimitMessage({ cap, planId }), 'error');
-        return;
-      }
-      if (decision === 'enable-and-start') {
-        const enabled = await setSkillEnabled(skill, true);
-        if (!enabled) return;
-      }
+    if (attachments.some((attachment) => attachment.status === 'uploading')) {
+      toast.show('文件上传中，请稍候');
+      return;
     }
     navigate('/', {
       state: {
         newTask: true,
         skillTaskDraft: skillTaskDraft(skill, prompt, skillSource),
+        attachFiles: readySkillTaskAttachments(attachments),
       },
     });
   }
 
-  const notice =
-    limitBanner && planId !== 'pro' ? (
-      <div className="flex flex-col gap-3 rounded-[12px] bg-[#FFF8E4] px-4 py-3 text-[12px] text-foreground sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <div className="font-semibold">{limitBanner.title}</div>
-          <div className="mt-0.5 leading-5 text-muted-foreground">{limitBanner.body}</div>
-        </div>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="shrink-0 bg-white"
-          onClick={() => navigate('/plan')}
-        >
-          查看套餐
-        </Button>
-      </div>
-    ) : undefined;
+  async function addAttachments(files: FileList): Promise<void> {
+    if (!attachmentsAllowed) {
+      toast.show('免费版暂不支持文件上传，升级基础版后即可使用');
+      return;
+    }
+    const incoming = Array.from(files);
+    if (incoming.length === 0) return;
+    const acceptedFiles: File[] = [];
+    for (const file of incoming) {
+      if (file.size > attachmentByteCap) {
+        toast.show(
+          `文件「${file.name}」超过 ${(attachmentByteCap / (1024 * 1024)).toFixed(0)}MB 上限`,
+          'error',
+        );
+        continue;
+      }
+      acceptedFiles.push(file);
+    }
+    if (acceptedFiles.length === 0) return;
+
+    const reservedCount = reserveSkillTaskAttachmentSlots(
+      attachmentCountRef.current,
+      acceptedFiles.length,
+      MAX_ATTACHMENTS,
+    );
+    if (reservedCount === null) {
+      toast.show(`最多附 ${MAX_ATTACHMENTS} 个文件`);
+      return;
+    }
+    attachmentCountRef.current = reservedCount;
+    const drafts = acceptedFiles.map((file) => {
+      const clientId =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      return {
+        file,
+        draft: {
+          clientId,
+          fileId: '',
+          filename: file.name,
+          mimetype: file.type || 'application/octet-stream',
+          size: file.size,
+          status: 'uploading' as const,
+        },
+      };
+    });
+    setAttachments((current) => [...current, ...drafts.map(({ draft }) => draft)]);
+
+    for (const { file, draft } of drafts) {
+      try {
+        const uploaded = await uploadFile(file);
+        if (!mountedRef.current) return;
+        setAttachments((current) =>
+          current.map((attachment) =>
+            attachment.clientId === draft.clientId
+              ? {
+                  ...attachment,
+                  fileId: uploaded.fileId,
+                  filename: uploaded.filename,
+                  mimetype: uploaded.mimetype,
+                  size: uploaded.size,
+                  status: 'ready',
+                }
+              : attachment,
+          ),
+        );
+      } catch (error) {
+        if (!mountedRef.current) return;
+        const message = uploadFailureMessage(error);
+        setAttachments((current) =>
+          current.map((attachment) =>
+            attachment.clientId === draft.clientId
+              ? { ...attachment, status: 'error', errorMessage: message }
+              : attachment,
+          ),
+        );
+        toast.show(message, 'error');
+      }
+    }
+  }
+
+  function removeAttachment(index: number): void {
+    attachmentCountRef.current = Math.max(0, attachmentCountRef.current - 1);
+    setAttachments((current) => current.filter((_, currentIndex) => currentIndex !== index));
+  }
 
   return (
     <PageContainer width="wide" className="max-w-[1180px]">
@@ -228,7 +280,7 @@ export function SkillsPage(): JSX.Element {
             <Sparkles className="h-8 w-8 text-muted-foreground/40" aria-hidden />
             <div className="text-sm font-medium text-foreground/80">暂时没有可开始的任务</div>
             <div className="max-w-md text-xs leading-5 text-muted-foreground">
-              你可以稍后重试，或联系支持确认套餐和可用任务。
+              你可以稍后重试，或联系支持确认技能目录状态。
             </div>
             <Button asChild variant="outline" size="sm" className="mt-1">
               <a
@@ -248,13 +300,14 @@ export function SkillsPage(): JSX.Element {
           activeSkillId={activeSkillId}
           query={query}
           pendingId={pendingId}
-          cap={cap}
-          enabledCount={enabledCount}
-          notice={notice}
+          attachments={attachments}
+          attachmentsAllowed={attachmentsAllowed}
           onQueryChange={setQuery}
           onSelectSkill={setActiveSkillId}
           onStart={onStart}
           onToggle={(skill) => void onToggle(skill)}
+          onAddAttachments={(files) => void addAttachments(files)}
+          onRemoveAttachment={removeAttachment}
         />
       )}
     </PageContainer>

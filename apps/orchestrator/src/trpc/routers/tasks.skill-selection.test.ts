@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { __tasksInternals } from './tasks.js';
 
 const {
-  assertManualSkillSelectionEnabled,
+  assertManualSkillSelectionAvailable,
   buildPlannerIntent,
   buildPlannerSkillCatalogue,
   resolveTaskDispatchSkillId,
@@ -21,62 +21,47 @@ const {
 describe('tasks router manual skill selection', () => {
   it('accepts enabled catalogue skills selected from the composer', () => {
     expect(
-      assertManualSkillSelectionEnabled(
-        { skillId: 'douyin-live-ops', skillSource: 'manual' },
-        ['douyin-live-ops'],
-      ),
+      assertManualSkillSelectionAvailable({ skillId: 'douyin-live-ops', skillSource: 'manual' }),
     ).toBe('douyin-live-ops');
   });
 
   it('accepts legacy enabled skill ids and returns the canonical catalogue id', () => {
     expect(
-      assertManualSkillSelectionEnabled(
-        { skillId: 'a-share-analyst', skillSource: 'manual' },
-        ['a-share-analyst'],
-      ),
+      assertManualSkillSelectionAvailable({ skillId: 'a-share-analyst', skillSource: 'manual' }),
     ).toBe('a-share-market-briefing');
 
     expect(
-      assertManualSkillSelectionEnabled(
-        { skillId: 'douyin', skillSource: 'manual' },
-        ['douyin'],
-      ),
+      assertManualSkillSelectionAvailable({ skillId: 'douyin', skillSource: 'manual' }),
     ).toBe('douyin-live-ops');
   });
 
   it('accepts canonical composer ids when the stored enabled id is legacy', () => {
     expect(
-      assertManualSkillSelectionEnabled(
-        { skillId: 'xiaohongshu-seeding-ops', skillSource: 'manual' },
-        ['xiaohongshu'],
-      ),
+      assertManualSkillSelectionAvailable({
+        skillId: 'xiaohongshu-seeding-ops',
+        skillSource: 'manual',
+      }),
     ).toBe('xiaohongshu-seeding-ops');
   });
 
-  it('rejects manual composer skills that are not enabled', () => {
-    expect(() =>
-      assertManualSkillSelectionEnabled(
-        { skillId: 'douyin-live-ops', skillSource: 'manual' },
-        ['xiaohongshu-seeding-ops'],
-      ),
-    ).toThrow(TRPCError);
+  it('accepts manual composer skills even when they are not in common skills', () => {
+    expect(
+      assertManualSkillSelectionAvailable({
+        skillId: 'douyin-live-ops',
+        skillSource: 'manual',
+      }),
+    ).toBe('douyin-live-ops');
   });
 
   it('rejects stale manual skill ids', () => {
     expect(() =>
-      assertManualSkillSelectionEnabled(
-        { skillId: 'missing-skill', skillSource: 'manual' },
-        ['missing-skill'],
-      ),
+      assertManualSkillSelectionAvailable({ skillId: 'missing-skill', skillSource: 'manual' }),
     ).toThrow(TRPCError);
   });
 
   it('keeps legacy unmarked skill ids compatible', () => {
     expect(
-      assertManualSkillSelectionEnabled(
-        { skillId: 'legacy-role-id', skillSource: undefined },
-        [],
-      ),
+      assertManualSkillSelectionAvailable({ skillId: 'legacy-role-id', skillSource: undefined }),
     ).toBeNull();
   });
 

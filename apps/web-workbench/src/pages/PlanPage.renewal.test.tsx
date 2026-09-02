@@ -114,4 +114,19 @@ describe('PlanPage renewal disclosure', () => {
     expect(trustNavigation.querySelector('a[href="/terms"]')).toBeTruthy();
     expect(trustNavigation.querySelector('a[href="/privacy"]')).toBeTruthy();
   });
+
+  it('states that every plan includes the full skill catalogue without changing role limits', async () => {
+    render(
+      <MemoryRouter initialEntries={['/plan']}>
+        <PlanPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('每次付款仅购买所选周期，到期前手动续费，不会自动扣款。');
+    expect(screen.getAllByText('全部技能')).toHaveLength(3);
+    expect(screen.getByText('1 并发 · 无角色')).toBeTruthy();
+    expect(screen.getByText('3 并发 · 自选 5 个角色')).toBeTruthy();
+    expect(screen.getByText('5 并发 · 全部 33 个角色')).toBeTruthy();
+  });
+
 });

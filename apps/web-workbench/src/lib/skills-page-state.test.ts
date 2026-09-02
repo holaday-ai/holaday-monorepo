@@ -7,16 +7,17 @@ import {
   normalizeSkillRows,
   normalizeSkillToggleResponse,
   pickCapabilityShowcase,
+  skillTaskAttachmentHandoffs,
+  composeSkillTaskPrompt,
+  readySkillTaskAttachments,
+  reserveSkillTaskAttachmentSlots,
   skillCardBadge,
   skillCardUsageHint,
   skillConnectorLabel,
-  skillLimitBannerCopy,
-  skillLimitMessage,
   skillLoadErrorCopy,
   skillSelectionFromTaskDraft,
   skillPageSummary,
   skillPlanLabel,
-  skillStartDecision,
   skillTaskDraft,
 } from './skills-page-state';
 
@@ -46,15 +47,12 @@ describe('skills page state helpers', () => {
     expect(skillPlanLabel('enterprise')).toBe('当前套餐');
   });
 
-  it('summarizes loading, failed, empty, capped, and uncapped states', () => {
+  it('summarizes loading, failed, empty, and universally available states', () => {
     expect(
       skillPageSummary({
         loading: true,
         error: null,
         totalCount: 0,
-        enabledCount: 0,
-        cap: 0,
-        planId: 'free',
       }),
     ).toBe('任务选项加载中…');
     expect(
@@ -62,9 +60,6 @@ describe('skills page state helpers', () => {
         loading: false,
         error: 'offline',
         totalCount: 0,
-        enabledCount: 0,
-        cap: 0,
-        planId: 'free',
       }),
     ).toBe('任务选项暂时无法加载');
     expect(
@@ -72,9 +67,6 @@ describe('skills page state helpers', () => {
         loading: false,
         error: null,
         totalCount: 0,
-        enabledCount: 0,
-        cap: 0,
-        planId: 'free',
       }),
     ).toBe('暂无可开始的任务');
     expect(
@@ -82,54 +74,8 @@ describe('skills page state helpers', () => {
         loading: false,
         error: null,
         totalCount: 33,
-        enabledCount: 2,
-        cap: 5,
-        planId: 'basic',
       }),
-    ).toBe('常用技能 2 / 5 · 基础版');
-    expect(
-      skillPageSummary({
-        loading: false,
-        error: null,
-        totalCount: 33,
-        enabledCount: 11,
-        cap: 5,
-        planId: 'basic',
-      }),
-    ).toBe('已保留 11 项常用技能 · 基础版上限 5');
-    expect(
-      skillPageSummary({
-        loading: false,
-        error: null,
-        totalCount: 33,
-        enabledCount: 0,
-        cap: 0,
-        planId: 'free',
-      }),
-    ).toBe('体验版可查看任务示例');
-  });
-
-  it('builds plan-aware limit messages', () => {
-    expect(skillLimitMessage({ cap: 0, planId: 'free' })).toBe('当前套餐暂不支持开始此任务');
-    expect(skillLimitMessage({ cap: 33, planId: 'pro' })).toBe('当前套餐的常用技能已满（33 项）');
-    expect(skillLimitMessage({ cap: 5, planId: 'basic' })).toBe(
-      '常用技能已满（5 项）· 可先移除一项或升级套餐',
-    );
-  });
-
-  it('explains over-limit skill states without implying a broken counter', () => {
-    expect(skillLimitBannerCopy({ cap: 0, enabledCount: 0, planId: 'free' })).toEqual({
-      title: '当前套餐可查看任务示例',
-      body: '升级到基础版后即可选择并开始任务；专业版可使用全部 13 类任务。',
-    });
-    expect(skillLimitBannerCopy({ cap: 5, enabledCount: 11, planId: 'basic' })).toEqual({
-      title: '当前已保留 11 项常用技能',
-      body: '基础版最多保留 5 项。现有任务仍可使用；移除后才能添加新的常用技能。',
-    });
-    expect(skillLimitBannerCopy({ cap: 5, enabledCount: 5, planId: 'basic' })).toEqual({
-      title: '常用技能已满（5 项）',
-      body: '开始其他任务前，可先移除一项常用技能，或升级套餐。',
-    });
+    ).toBe('33 项技能均可使用');
   });
 
   it('formats skill load errors for user-facing surfaces', () => {
@@ -147,25 +93,109 @@ describe('skills page state helpers', () => {
     expect(skillCardBadge({ enabled: false, pending: false })).toBe('加入常用');
     expect(skillCardBadge({ enabled: true, pending: false })).toBe('常用');
     expect(skillCardBadge({ enabled: true, pending: true })).toBe('保存中…');
-    expect(skillCardBadge({ enabled: false, pending: false, limitBlocked: true, cap: 0 })).toBe(
-      '暂不可用',
-    );
-    expect(skillCardBadge({ enabled: false, pending: false, limitBlocked: true })).toBe('已达上限');
   });
 
   it('explains how enabled skill cards affect new tasks', () => {
     expect(skillCardUsageHint({ enabled: true, pending: false })).toBe('已加入常用');
     expect(skillCardUsageHint({ enabled: false, pending: false })).toBe('可加入常用');
     expect(skillCardUsageHint({ enabled: false, pending: true })).toBe('正在保存');
-    expect(skillCardUsageHint({ enabled: true, pending: false, cap: 0 })).toBe(
-      '当前套餐暂不可使用',
+  });
+
+  it('keeps a selected task separate from optional extra requirements until submission', () => {
+    expect(composeSkillTaskPrompt('分析这份周报并找出异常', '')).toBe(
+      '分析这份周报并找出异常',
     );
-    expect(skillCardUsageHint({ enabled: false, pending: false, limitBlocked: true, cap: 0 })).toBe(
-      '当前套餐暂不可使用',
+    expect(composeSkillTaskPrompt('分析这份周报并找出异常', '  重点关注复购率  ')).toBe(
+      '分析这份周报并找出异常\n补充要求：重点关注复购率',
     );
-    expect(skillCardUsageHint({ enabled: false, pending: false, limitBlocked: true })).toBe(
-      '先移除一项常用技能',
-    );
+    expect(composeSkillTaskPrompt(null, '  帮我分析销售数据  ')).toBe('帮我分析销售数据');
+  });
+
+  it('hands only successfully uploaded attachments to the new-task composer', () => {
+    expect(
+      readySkillTaskAttachments([
+        {
+          fileId: 'file-ready',
+          filename: '销售数据.xlsx',
+          mimetype: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          size: 2048,
+          status: 'ready',
+        },
+        {
+          fileId: '',
+          filename: '上传中.pdf',
+          mimetype: 'application/pdf',
+          size: 1024,
+          status: 'uploading',
+        },
+        {
+          fileId: '',
+          filename: '失败.pdf',
+          mimetype: 'application/pdf',
+          size: 1024,
+          status: 'error',
+        },
+      ]),
+    ).toEqual([
+      {
+        fileId: 'file-ready',
+        filename: '销售数据.xlsx',
+        mimetype: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        sizeBytes: 2048,
+      },
+    ]);
+  });
+
+  it('reserves attachment slots synchronously across overlapping file selections', () => {
+    let reservedCount = 4;
+    const firstReservation = reserveSkillTaskAttachmentSlots(reservedCount, 1, 5);
+    expect(firstReservation).toBe(5);
+    reservedCount = firstReservation ?? reservedCount;
+
+    expect(reserveSkillTaskAttachmentSlots(reservedCount, 1, 5)).toBeNull();
+    expect(reserveSkillTaskAttachmentSlots(2, 3, 5)).toBe(5);
+    expect(reserveSkillTaskAttachmentSlots(2, 4, 5)).toBeNull();
+  });
+
+  it('accepts plural and legacy singular attachment handoffs without duplicates', () => {
+    expect(
+      skillTaskAttachmentHandoffs({
+        attachFile: {
+          fileId: 'legacy',
+          filename: '旧文件.pdf',
+          mimetype: 'application/pdf',
+          sizeBytes: 100,
+        },
+        attachFiles: [
+          {
+            fileId: 'legacy',
+            filename: '旧文件.pdf',
+            mimetype: 'application/pdf',
+            sizeBytes: 100,
+          },
+          {
+            fileId: 'new',
+            filename: '新文件.xlsx',
+            mimetype: 'application/vnd.ms-excel',
+            sizeBytes: 200,
+          },
+          { fileId: '', filename: '无效', mimetype: '', sizeBytes: -1 },
+        ],
+      }),
+    ).toEqual([
+      {
+        fileId: 'legacy',
+        filename: '旧文件.pdf',
+        mimetype: 'application/pdf',
+        sizeBytes: 100,
+      },
+      {
+        fileId: 'new',
+        filename: '新文件.xlsx',
+        mimetype: 'application/vnd.ms-excel',
+        sizeBytes: 200,
+      },
+    ]);
   });
 
   it('builds an editable skill task draft from a skill card', () => {
@@ -249,15 +279,6 @@ describe('skills page state helpers', () => {
       skillName: '历史能力',
       skillSource: 'manual',
     });
-  });
-
-  it('decides whether a capability can start immediately, must enable first, or is blocked', () => {
-    expect(skillStartDecision({ enabled: true, enabledCount: 5, cap: 5 })).toBe('start');
-    expect(skillStartDecision({ enabled: false, enabledCount: 4, cap: 5 })).toBe(
-      'enable-and-start',
-    );
-    expect(skillStartDecision({ enabled: false, enabledCount: 5, cap: 5 })).toBe('blocked');
-    expect(skillStartDecision({ enabled: false, enabledCount: 0, cap: 0 })).toBe('blocked');
   });
 
   it('selects the preferred showcase capabilities without depending on server ordering', () => {

@@ -79,12 +79,14 @@ const baseProps = {
   activeSkillId: 'data-report-insight',
   query: '',
   pendingId: null,
-  cap: 5,
-  enabledCount: 1,
+  attachments: [],
+  attachmentsAllowed: true,
   onQueryChange: vi.fn(),
   onSelectSkill: vi.fn(),
   onStart: vi.fn(),
   onToggle: vi.fn(),
+  onAddAttachments: vi.fn(),
+  onRemoveAttachment: vi.fn(),
 };
 
 describe('CapabilityCenterContent', () => {
@@ -103,7 +105,10 @@ describe('CapabilityCenterContent', () => {
     expect(screen.getByRole('heading', { level: 2, name: '常用技能' })).toBeTruthy();
     expect(screen.getByRole('heading', { level: 2, name: '全部技能' })).toBeTruthy();
     expect(screen.getByText('为新品规划一周社媒内容')).toBeTruthy();
-    expect(screen.getByText('可继续补充要求')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '添加附件' })).toBeTruthy();
+    expect(screen.getByText('附件会随任务一起分析')).toBeTruthy();
+    expect(screen.queryByText('开始后可添加附件')).toBeNull();
+    expect(screen.queryByText('可使用已有文件')).toBeNull();
     expect(screen.queryByText('支持语音补充')).toBeNull();
     expect(screen.queryByText('如何工作')).toBeNull();
     expect(screen.queryByText('能力准备轨道')).toBeNull();
@@ -113,6 +118,12 @@ describe('CapabilityCenterContent', () => {
     expect(
       screen.getByRole('button', { name: '查看数据报表解读' }).getAttribute('aria-pressed'),
     ).toBe('true');
+    const header = screen.getByTestId('capability-header');
+    expect(header.className).toContain('justify-between');
+    expect(header.className).not.toContain('flex-col');
+    const composerRow = screen.getByTestId('intent-composer-row');
+    expect(composerRow.className).toContain('flex-col');
+    expect(composerRow.className).toContain('sm:flex-row');
   });
 
   it('sizes multi-column sections from their own available width instead of the window breakpoint', () => {
@@ -144,6 +155,11 @@ describe('CapabilityCenterContent', () => {
     expect(within(understood).getByText('Holaday 已理解')).toBeTruthy();
     const preview = within(understood).getByRole('switch', { name: '执行预览' });
     expect(preview.getAttribute('aria-checked')).toBe('true');
+    const previewTrack = preview.querySelector('span[aria-hidden]');
+    expect(previewTrack?.className).toContain('bg-[#E9A6B9]');
+    expect(previewTrack?.querySelector('span')?.className).toContain('left-[3px]');
+    expect(previewTrack?.querySelector('span')?.className).toContain('translate-x-[18px]');
+    expect(previewTrack?.querySelector('span')?.className).toContain('bg-white');
     expect(within(understood).getByText('关键指标摘要')).toBeTruthy();
     expect(within(understood).getByText('异常与趋势说明')).toBeTruthy();
 
@@ -153,83 +169,349 @@ describe('CapabilityCenterContent', () => {
     expect(within(understood).queryByText('异常与趋势说明')).toBeNull();
   });
 
-  it('presents a disabled capability as a task choice without configuration copy', () => {
+  it('presents every starter as a consistent task example instead of mixing preview and start', () => {
     render(<CapabilityCenterContent {...baseProps} activeSkillId="social-media-strategy" />);
 
     expect(screen.getAllByText('从目标到选题，生成一周内容计划。').length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText('能力可预览，启用后使用')).toBeNull();
-    expect(screen.getByRole('button', { name: '开始任务：为新品规划一周社媒内容' })).toBeTruthy();
-  });
-
-  it('does not promise a task can start when the common-capability limit is full', () => {
-    render(
-      <CapabilityCenterContent
-        {...baseProps}
-        activeSkillId="social-media-strategy"
-        cap={1}
-        enabledCount={1}
-      />,
-    );
-
-    const starter = screen.getByRole('button', { name: '已达上限：为新品规划一周社媒内容' });
-    expect(starter.hasAttribute('disabled')).toBe(true);
-    expect(within(starter).getByText('已达上限')).toBeTruthy();
-    expect(starter.getAttribute('title')).toBe('请先从常用技能中移除一项');
-  });
-
-  it('disables task starters and exposes progress while the selected capability is preparing', () => {
-    render(<CapabilityCenterContent {...baseProps} pendingId="data-report-insight" />);
-
-    const starters = screen.getAllByRole('button', { name: /准备中：/ });
-    expect(starters).toHaveLength(1);
-    for (const starter of starters) {
-      expect(starter.hasAttribute('disabled')).toBe(true);
-      expect(within(starter).getByText('准备中…')).toBeTruthy();
-    }
     expect(
-      screen.getByRole('button', { name: '预览社交媒体策略' }).hasAttribute('disabled'),
-    ).toBe(false);
+      screen.getByRole('button', { name: '选择任务示例：为新品规划一周社媒内容' }),
+    ).toBeTruthy();
+    expect(screen.queryByText('开始')).toBeNull();
   });
 
-  it('explains that another selection is saving instead of promising an immediate start', () => {
-    render(<CapabilityCenterContent {...baseProps} pendingId="social-media-strategy" />);
-
-    const starter = screen.getByRole('button', { name: '请稍候：分析这份周报并找出异常' });
-    expect(starter.hasAttribute('disabled')).toBe(true);
-    expect(within(starter).getByText('请稍候')).toBeTruthy();
-  });
-
-  it('announces when the current plan cannot start a disabled capability', () => {
+  it('keeps task examples usable while a common-skill change is saving', () => {
     render(
       <CapabilityCenterContent
         {...baseProps}
-        activeSkillId="social-media-strategy"
-        cap={0}
-        enabledCount={0}
+        query="分析本月销售数据"
+        pendingId="data-report-insight"
       />,
     );
 
-    const starter = screen.getByRole('button', {
-      name: '暂不可用：为新品规划一周社媒内容',
-    });
-    expect(starter.hasAttribute('disabled')).toBe(true);
-    expect(within(starter).getByText('暂不可用')).toBeTruthy();
-    expect(starter.getAttribute('title')).toBe('当前套餐暂不支持开始此任务');
+    const starters = screen.getAllByRole('button', { name: /选择任务示例：/ });
+    expect(starters).toHaveLength(3);
+    expect(starters.every((starter) => !starter.hasAttribute('disabled'))).toBe(true);
+    const start = screen.getByRole('button', { name: '正在准备任务：分析本月销售数据' });
+    expect(start.hasAttribute('disabled')).toBe(true);
+    expect(start.getAttribute('aria-busy')).toBe('true');
   });
 
-  it('starts from an explicit sample and lets the user switch the showcase capability', async () => {
+  it('keeps a selected example as a task label and leaves the prompt for extra requirements', async () => {
     const user = userEvent.setup();
     const onStart = vi.fn();
     const onSelectSkill = vi.fn();
-    render(
-      <CapabilityCenterContent {...baseProps} onStart={onStart} onSelectSkill={onSelectSkill} />,
+    function Harness(): JSX.Element {
+      const [query, setQuery] = React.useState('');
+      return (
+        <CapabilityCenterContent
+          {...baseProps}
+          query={query}
+          onQueryChange={setQuery}
+          onStart={onStart}
+          onSelectSkill={onSelectSkill}
+        />
+      );
+    }
+    render(<Harness />);
+
+    await user.click(
+      screen.getByRole('button', { name: '选择任务示例：为新品规划一周社媒内容' }),
+    );
+    expect(
+      (screen.getByRole('textbox', { name: '描述想完成的任务' }) as HTMLTextAreaElement).value,
+    ).toBe('');
+    expect(screen.getByText('已选任务')).toBeTruthy();
+    expect(screen.getByText('将调用')).toBeTruthy();
+    expect(screen.getAllByText('社交媒体策略').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: '移除已选任务' })).toBeTruthy();
+    expect(screen.queryByText('还不能确定最适合的能力')).toBeNull();
+    expect(onStart).not.toHaveBeenCalled();
+    expect(onSelectSkill).toHaveBeenCalledWith('social-media-strategy');
+  });
+
+  it('starts a selected example without requiring duplicate prompt text', async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn();
+    function Harness(): JSX.Element {
+      const [query, setQuery] = React.useState('');
+      return (
+        <CapabilityCenterContent
+          {...baseProps}
+          query={query}
+          onQueryChange={setQuery}
+          onStart={onStart}
+        />
+      );
+    }
+    render(<Harness />);
+
+    await user.click(
+      screen.getByRole('button', { name: '选择任务示例：为新品规划一周社媒内容' }),
+    );
+    const start = screen.getByRole('button', {
+      name: '开始任务：为新品规划一周社媒内容',
+    });
+    expect(start.hasAttribute('disabled')).toBe(false);
+    await user.click(start);
+
+    expect(onStart).toHaveBeenCalledWith(
+      skills[1],
+      '为新品规划一周社媒内容',
+      'manual',
+    );
+  });
+
+  it('keeps the selected task while letting the user change which skill will run it', async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn();
+    function Harness(): JSX.Element {
+      const [query, setQuery] = React.useState('');
+      const [activeSkillId, setActiveSkillId] = React.useState('data-report-insight');
+      return (
+        <CapabilityCenterContent
+          {...baseProps}
+          activeSkillId={activeSkillId}
+          query={query}
+          onQueryChange={setQuery}
+          onSelectSkill={setActiveSkillId}
+          onStart={onStart}
+        />
+      );
+    }
+    render(<Harness />);
+
+    await user.click(
+      screen.getByRole('button', { name: '选择任务示例：为新品规划一周社媒内容' }),
+    );
+    await user.click(screen.getByRole('button', { name: '查看合同风险审查' }));
+    await user.click(
+      screen.getByRole('button', { name: '开始任务：为新品规划一周社媒内容' }),
     );
 
-    await user.click(screen.getByRole('button', { name: '开始任务：分析这份周报并找出异常' }));
-    expect(onStart).toHaveBeenCalledWith(skills[0], '分析这份周报并找出异常');
+    expect(onStart).toHaveBeenCalledWith(
+      skills[2],
+      '为新品规划一周社媒内容',
+      'manual',
+    );
+  });
 
-    await user.click(screen.getByRole('button', { name: '预览社交媒体策略' }));
-    expect(onSelectSkill).toHaveBeenCalledWith('social-media-strategy');
+  it('combines selected task and optional extra requirements only when starting', async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn();
+    function Harness(): JSX.Element {
+      const [query, setQuery] = React.useState('');
+      return (
+        <CapabilityCenterContent
+          {...baseProps}
+          query={query}
+          onQueryChange={setQuery}
+          onStart={onStart}
+        />
+      );
+    }
+    render(<Harness />);
+
+    await user.click(
+      screen.getByRole('button', { name: '选择任务示例：检查这份合同的主要风险' }),
+    );
+    await user.type(
+      screen.getByRole('textbox', { name: '描述想完成的任务' }),
+      '重点看自动续费和违约责任',
+    );
+    await user.click(
+      screen.getByRole('button', { name: '开始任务：检查这份合同的主要风险' }),
+    );
+
+    expect(onStart).toHaveBeenCalledWith(
+      skills[2],
+      '检查这份合同的主要风险\n补充要求：重点看自动续费和违约责任',
+      'manual',
+    );
+  });
+
+  it('removes a selected task without mutating the extra-requirements prompt', async () => {
+    const user = userEvent.setup();
+    function Harness(): JSX.Element {
+      const [query, setQuery] = React.useState('');
+      return (
+        <CapabilityCenterContent {...baseProps} query={query} onQueryChange={setQuery} />
+      );
+    }
+    render(<Harness />);
+
+    await user.click(
+      screen.getByRole('button', { name: '选择任务示例：分析这份周报并找出异常' }),
+    );
+    await user.click(screen.getByRole('button', { name: '移除已选任务' }));
+
+    expect(screen.queryByText('已选任务')).toBeNull();
+    expect(screen.getByRole('button', { name: '开始任务：请先描述任务' }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('hands chosen files to the real attachment callback before starting', async () => {
+    const user = userEvent.setup();
+    const onAddAttachments = vi.fn();
+    render(
+      <CapabilityCenterContent {...baseProps} onAddAttachments={onAddAttachments} />,
+    );
+
+    const input = screen.getByLabelText('选择任务附件') as HTMLInputElement;
+    const file = new File(['sales'], '销售数据.csv', { type: 'text/csv' });
+    await user.upload(input, file);
+
+    expect(onAddAttachments).toHaveBeenCalledTimes(1);
+    expect(Array.from(onAddAttachments.mock.calls[0]?.[0] ?? [])).toEqual([file]);
+  });
+
+  it('lets users search and choose any skill beside the attachment control', async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn();
+
+    function Harness(): JSX.Element {
+      const [activeSkillId, setActiveSkillId] = React.useState('data-report-insight');
+      const [query, setQuery] = React.useState('帮我核对合同');
+      return (
+        <CapabilityCenterContent
+          {...baseProps}
+          activeSkillId={activeSkillId}
+          query={query}
+          onQueryChange={setQuery}
+          onSelectSkill={setActiveSkillId}
+          onStart={onStart}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const attachmentControl = screen.getByRole('button', { name: '添加附件' });
+    const skillControl = screen.getByRole('button', { name: '选择技能：自动匹配' });
+    expect(attachmentControl.parentElement).toBe(skillControl.parentElement);
+
+    await user.click(skillControl);
+    expect(screen.getByRole('menuitem', { name: '自动匹配' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /数据报表解读/ })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /社交媒体策略/ })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /合同风险审查/ })).toBeTruthy();
+
+    await user.type(screen.getByRole('searchbox', { name: '搜索技能' }), '合同');
+    expect(screen.queryByRole('menuitem', { name: /数据报表解读/ })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: /合同风险审查/ })).toBeTruthy();
+
+    await user.click(screen.getByRole('menuitem', { name: /合同风险审查/ }));
+    const composer = screen.getByTestId('capability-studio');
+    expect(within(composer).getByText('将调用')).toBeTruthy();
+    expect(within(composer).getAllByText('合同风险审查').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole('button', { name: '选择技能：合同风险审查' })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '开始任务：帮我核对合同' }));
+    expect(onStart).toHaveBeenCalledWith(skills[2], '帮我核对合同', 'manual');
+  });
+
+  it('keeps skill picker labels readable when a light menu row receives focus', async () => {
+    const user = userEvent.setup();
+    render(<CapabilityCenterContent {...baseProps} />);
+
+    await user.click(screen.getByRole('button', { name: '选择技能：自动匹配' }));
+
+    const automaticItem = screen.getByRole('menuitem', { name: '自动匹配' });
+    const reportItem = screen.getByRole('menuitem', { name: /数据报表解读/ });
+
+    for (const item of [automaticItem, reportItem]) {
+      expect(item.className).toContain('focus:text-[#302C2F]');
+      expect(item.className).not.toContain('focus:text-accent-foreground');
+    }
+
+    expect(
+      within(automaticItem).getByText('根据任务和附件选择最合适的技能').className,
+    ).toContain('text-[#746E72]');
+    expect(
+      within(reportItem).getByText('把零散数据变成清晰结论。').className,
+    ).toContain('text-[#746E72]');
+  });
+
+  it('returns an explicit skill choice to automatic matching', async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn();
+
+    function Harness(): JSX.Element {
+      const [activeSkillId, setActiveSkillId] = React.useState('data-report-insight');
+      const [query, setQuery] = React.useState('分析这份销售报表');
+      return (
+        <CapabilityCenterContent
+          {...baseProps}
+          activeSkillId={activeSkillId}
+          query={query}
+          onQueryChange={setQuery}
+          onSelectSkill={setActiveSkillId}
+          onStart={onStart}
+        />
+      );
+    }
+
+    render(<Harness />);
+    await user.click(screen.getByRole('button', { name: '选择技能：自动匹配' }));
+    await user.click(screen.getByRole('menuitem', { name: /合同风险审查/ }));
+    expect(screen.getByRole('button', { name: '选择技能：合同风险审查' })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '选择技能：合同风险审查' }));
+    await user.click(screen.getByRole('menuitem', { name: '自动匹配' }));
+
+    expect(screen.getByRole('button', { name: '选择技能：自动匹配' })).toBeTruthy();
+    expect(within(screen.getByTestId('capability-studio')).queryByText('将调用')).toBeNull();
+    await user.click(screen.getByRole('button', { name: '开始任务：分析这份销售报表' }));
+    expect(onStart).toHaveBeenCalledWith(skills[0], '分析这份销售报表', 'suggested');
+  });
+
+  it('releases a starter task skill lock when returning to automatic matching', async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn();
+
+    function Harness(): JSX.Element {
+      const [activeSkillId, setActiveSkillId] = React.useState('data-report-insight');
+      const [query, setQuery] = React.useState('');
+      return (
+        <CapabilityCenterContent
+          {...baseProps}
+          activeSkillId={activeSkillId}
+          query={query}
+          onQueryChange={setQuery}
+          onSelectSkill={setActiveSkillId}
+          onStart={onStart}
+        />
+      );
+    }
+
+    render(<Harness />);
+    await user.click(
+      screen.getByRole('button', { name: '选择任务示例：为新品规划一周社媒内容' }),
+    );
+    await user.click(screen.getByRole('button', { name: '选择技能：社交媒体策略' }));
+    await user.click(screen.getByRole('menuitem', { name: '自动匹配' }));
+
+    expect(screen.getByRole('button', { name: '选择技能：自动匹配' })).toBeTruthy();
+    await user.click(
+      screen.getByRole('button', { name: '开始任务：为新品规划一周社媒内容' }),
+    );
+
+    expect(onStart).toHaveBeenCalledWith(
+      skills[1],
+      '为新品规划一周社媒内容',
+      'suggested',
+    );
+  });
+
+  it('closes the skill picker with Escape while search is focused', async () => {
+    const user = userEvent.setup();
+    render(<CapabilityCenterContent {...baseProps} />);
+
+    await user.click(screen.getByRole('button', { name: '选择技能：自动匹配' }));
+    const searchbox = screen.getByRole('searchbox', { name: '搜索技能' });
+    await user.click(searchbox);
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('searchbox', { name: '搜索技能' })).toBeNull();
   });
 
   it('keeps the full catalogue available while focusing a strong matched capability', async () => {
@@ -308,7 +590,7 @@ describe('CapabilityCenterContent', () => {
     expect(onStart).toHaveBeenCalledWith(skills[0], intent, 'suggested');
   });
 
-  it('disables both primary actions when a manual matched choice would exceed the common limit', async () => {
+  it('keeps explicitly selected skills available even when they are not common', async () => {
     const user = userEvent.setup();
 
     function Harness(): JSX.Element {
@@ -317,9 +599,8 @@ describe('CapabilityCenterContent', () => {
         <CapabilityCenterContent
           {...baseProps}
           query={query}
-          cap={1}
-          enabledCount={1}
           onQueryChange={setQuery}
+          onStart={vi.fn()}
         />
       );
     }
@@ -331,26 +612,65 @@ describe('CapabilityCenterContent', () => {
       }),
     );
 
-    const composerAction = screen.getByRole('button', { name: '已达上限：合同和数据' });
-    const startAction = screen.getByRole('button', { name: '已达上限并无法开始：合同和数据' });
-    expect(composerAction.hasAttribute('disabled')).toBe(true);
-    expect(startAction.hasAttribute('disabled')).toBe(true);
-    expect(startAction.getAttribute('title')).toBe('请先从常用技能中移除一项');
+    const startAction = screen.getByRole('button', { name: '开始任务：合同和数据' });
+    expect(startAction.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('shows a directly selected catalogue skill above the prompt and submits that skill', async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn();
+    function Harness(): JSX.Element {
+      const [activeSkillId, setActiveSkillId] = React.useState('data-report-insight');
+      const [query, setQuery] = React.useState('');
+      return (
+        <CapabilityCenterContent
+          {...baseProps}
+          activeSkillId={activeSkillId}
+          query={query}
+          onQueryChange={setQuery}
+          onSelectSkill={setActiveSkillId}
+          onStart={onStart}
+        />
+      );
+    }
+    render(<Harness />);
+
+    await user.click(screen.getByRole('button', { name: '查看合同风险审查' }));
+    await user.type(screen.getByRole('textbox', { name: '描述想完成的任务' }), '分析销售数据');
+
+    const composer = screen.getByTestId('capability-studio');
+    expect(within(composer).getByText('将调用')).toBeTruthy();
+    expect(within(composer).getAllByText('合同风险审查').length).toBeGreaterThanOrEqual(1);
+    const start = screen.getByRole('button', { name: '开始任务：分析销售数据' });
+    expect(start.getAttribute('title')).toBe('用已选技能开始任务');
+    await user.click(start);
+    expect(onStart).toHaveBeenCalledWith(skills[2], '分析销售数据', 'manual');
   });
 
   it('keeps every capability available when the request is too vague to match honestly', async () => {
     const user = userEvent.setup();
+    const onStart = vi.fn();
 
     function Harness(): JSX.Element {
       const [query, setQuery] = React.useState('');
-      return <CapabilityCenterContent {...baseProps} query={query} onQueryChange={setQuery} />;
+      return (
+        <CapabilityCenterContent
+          {...baseProps}
+          query={query}
+          onQueryChange={setQuery}
+          onStart={onStart}
+        />
+      );
     }
 
     render(<Harness />);
     await user.type(screen.getByRole('textbox', { name: '描述想完成的任务' }), '帮我处理一下');
 
     expect(screen.getByText('还不能确定最适合的能力')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /用.+开始：帮我处理一下/ })).toBeNull();
+    const start = screen.getByRole('button', { name: '开始任务：帮我处理一下' });
+    expect(start.hasAttribute('disabled')).toBe(false);
+    await user.click(start);
+    expect(onStart).toHaveBeenCalledWith(skills[0], '帮我处理一下', 'suggested');
     const catalogue = screen.getByTestId('capability-catalogue');
     expect(within(catalogue).getByText('数据报表解读')).toBeTruthy();
     expect(within(catalogue).getByText('社交媒体策略')).toBeTruthy();
@@ -381,11 +701,13 @@ describe('CapabilityCenterContent', () => {
 
     function Harness(): JSX.Element {
       const [activeSkillId, setActiveSkillId] = React.useState('data-report-insight');
+      const [query, setQuery] = React.useState('分析数据并规划社媒内容');
       return (
         <CapabilityCenterContent
           {...baseProps}
           activeSkillId={activeSkillId}
-          query="分析数据并规划社媒内容"
+          query={query}
+          onQueryChange={setQuery}
           onSelectSkill={setActiveSkillId}
           onStart={onStart}
         />
@@ -395,21 +717,15 @@ describe('CapabilityCenterContent', () => {
     render(<Harness />);
     expect(screen.getByTestId('intent-understanding')).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: '预览数据报表解读' }));
+    await user.click(
+      screen.getByRole('button', { name: '选择任务示例：分析这份周报并找出异常' }),
+    );
 
     expect(screen.getAllByText('数据报表解读').length).toBeGreaterThan(0);
-    expect(screen.getByText('销售额环比增长 18.7%，但复购率连续两周回落。')).toBeTruthy();
+    expect(screen.getByText('已选任务')).toBeTruthy();
+    expect(screen.getAllByText('分析这份周报并找出异常').length).toBeGreaterThan(0);
 
-    await user.click(
-      screen.getByRole('button', {
-        name: '开始任务：分析数据并规划社媒内容',
-      }),
-    );
-    expect(onStart).toHaveBeenCalledWith(
-      skills[0],
-      '分析数据并规划社媒内容',
-      'manual',
-    );
+    expect(onStart).not.toHaveBeenCalled();
   });
 
   it('exposes one clear toggle action for each catalogue capability', async () => {
@@ -424,5 +740,19 @@ describe('CapabilityCenterContent', () => {
         .getByRole('switch', { name: '取消常用：数据报表解读' })
         .getAttribute('aria-checked'),
     ).toBe('true');
+    const enabledSwitch = screen.getByRole('switch', { name: '取消常用：数据报表解读' });
+    expect(within(enabledSwitch).queryByText('常用')).toBeNull();
+    const enabledTrack = enabledSwitch.querySelector('span[aria-hidden]');
+    expect(enabledTrack?.className).toContain('bg-[#E9A6B9]');
+    expect(enabledTrack?.className).toContain('h-[18px] w-8');
+    expect(enabledTrack?.querySelector('span')?.className).toContain('left-[3px]');
+    expect(enabledTrack?.querySelector('span')?.className).toContain('translate-x-[14px]');
+    expect(enabledTrack?.querySelector('span')?.className).toContain('bg-white');
+    const disabledTrack = screen
+      .getByRole('switch', { name: '设为常用：社交媒体策略' })
+      .querySelector('span[aria-hidden]');
+    expect(disabledTrack?.className).toContain('bg-[#D2CDD0]');
+    expect(disabledTrack?.querySelector('span')?.className).toContain('translate-x-0');
+    expect(screen.queryByRole('link', { name: '浏览全部技能' })).toBeNull();
   });
 });

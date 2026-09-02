@@ -367,17 +367,23 @@ export function AppShell(): JSX.Element {
   // effect doesn't re-run — so the old selectedTask would linger.
   // Catch it here on every location change, drop the selection, and
   // clear the state so a refresh doesn't re-fire. Preserve composer
-  // handoffs (attachFile / skillTaskDraft) since sub-pages use the
+  // handoffs (attachFile / attachFiles / skillTaskDraft) since sub-pages use the
   // same location.state pathway to seed the new-task composer.
   React.useEffect(() => {
     if (!bootstrapped) return;
     const state = location.state as
-      | { newTask?: boolean; attachFile?: unknown; skillTaskDraft?: unknown }
+      | {
+          newTask?: boolean;
+          attachFile?: unknown;
+          attachFiles?: unknown;
+          skillTaskDraft?: unknown;
+        }
       | null;
     if (!state?.newTask) return;
     enterNewTaskMode();
-    const nextState: { attachFile?: unknown; skillTaskDraft?: unknown } = {};
+    const nextState: { attachFile?: unknown; attachFiles?: unknown; skillTaskDraft?: unknown } = {};
     if (state.attachFile) nextState.attachFile = state.attachFile;
+    if (state.attachFiles) nextState.attachFiles = state.attachFiles;
     if (state.skillTaskDraft) nextState.skillTaskDraft = state.skillTaskDraft;
     navigate(location.pathname + location.search, {
       replace: true,

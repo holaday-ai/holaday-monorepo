@@ -1,15 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { SKILL_META, skillMetaById } from '../../agent/skills/skill-meta.js';
-import { __skillsInternals } from './skills.js';
+import { __skillsInternals, skillsRouter } from './skills.js';
 
 const {
   buildSkillListRows,
   normalizeSelectedSkillIds,
-  skillCapForPlan,
-  skillLimitErrorMessage,
+  toggleSelectedSkillIds,
 } = __skillsInternals;
 
-describe('skills router plan limits', () => {
+describe('skills router preferences', () => {
   it('exposes the v1 skills catalogue instead of legacy expert cards', () => {
     expect(SKILL_META).toHaveLength(13);
     expect(SKILL_META.map((skill) => skill.id)).toEqual([
@@ -32,31 +31,29 @@ describe('skills router plan limits', () => {
     expect(skillMetaById('a-share-market-briefing')?.connectors).toContain('a-share-market-data');
   });
 
-  it('uses the shared plan role limits for expert skills', () => {
-    expect(skillCapForPlan('free')).toBe(0);
-    expect(skillCapForPlan('basic')).toBe(5);
-    expect(skillCapForPlan('pro')).toBe(33);
-    expect(skillCapForPlan('unknown')).toBe(0);
+  it('allows every catalogue skill to be added to common skills without a plan cap', () => {
+    let selected: string[] = [];
+    for (const skill of SKILL_META) {
+      const result = toggleSelectedSkillIds(selected, skill.id);
+      expect(result.enabled).toBe(true);
+      selected = result.next;
+    }
+    expect(selected).toHaveLength(13);
+
+    const removed = toggleSelectedSkillIds(selected, 'douyin-live-ops');
+    expect(removed.enabled).toBe(false);
+    expect(removed.next).toHaveLength(12);
+    expect(removed.next).not.toContain('douyin-live-ops');
   });
 
-  it('keeps server-side limit errors actionable', () => {
-    expect(skillLimitErrorMessage('free', 0)).toBe('当前套餐暂不支持启用技能');
-    expect(skillLimitErrorMessage('basic', 5)).toBe(
-      '基础版最多可启用 5 个技能，请先停用一个技能后再启用新的技能',
-    );
-    expect(skillLimitErrorMessage('pro', 33)).toBe(
-      '专业版最多可启用 33 个技能，请先停用一个技能后再启用新的技能',
-    );
-  });
-
-  it('drops stale selected skill ids before counting plan limits', () => {
+  it('drops stale selected skill ids before updating common skills', () => {
     expect(
       normalizeSelectedSkillIds(['douyin-live-ops', 'missing-skill', 'douyin-live-ops']),
     ).toEqual(['douyin-live-ops']);
     expect(normalizeSelectedSkillIds(null)).toEqual([]);
   });
 
-  it('canonicalizes legacy selected skill ids before counting plan limits', () => {
+  it('canonicalizes legacy selected skill ids before updating common skills', () => {
     expect(
       normalizeSelectedSkillIds([
         'a-share-analyst',
@@ -111,5 +108,46 @@ describe('skills router plan limits', () => {
     expect(rows.find((skill) => skill.id === 'a-share-market-briefing')?.enabled).toBe(true);
     expect(rows.find((skill) => skill.id === 'douyin-live-ops')?.enabled).toBe(true);
     expect(rows.find((skill) => skill.id === 'xiaohongshu-seeding-ops')?.enabled).toBe(true);
+  });
+
+  it('requests a user-row update lock before writing a preference toggle', async () => {
+    const events: string[] = [];
+    let storedSkills: string[] | null = [];
+    const tx = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: () => ({
+              for: async (mode: string) => {
+                events.push(`lock:${mode}`);
+                return [{ id: 7, selectedSkills: storedSkills }];
+              },
+            }),
+          }),
+        }),
+      }),
+      update: () => ({
+        set: (value: { selectedSkills: string[] | null }) => ({
+          where: async () => {
+            storedSkills = value.selectedSkills;
+            events.push('update');
+          },
+        }),
+      }),
+    };
+    const db = {
+      transaction: async <T>(operation: (transaction: typeof tx) => Promise<T>): Promise<T> => {
+        events.push('transaction');
+        return operation(tx);
+      },
+    };
+
+    const result = await skillsRouter
+      .createCaller({ db, userId: 'usr_skills', logger: {} } as never)
+      .toggle({ skillId: 'douyin-live-ops' });
+
+    expect(events).toEqual(['transaction', 'lock:update', 'update']);
+    expect(storedSkills).toEqual(['douyin-live-ops']);
+    expect(result).toEqual({ skillId: 'douyin-live-ops', enabled: true });
   });
 });

@@ -36,7 +36,11 @@ import {
 } from '@/components/composer-submit';
 import { awaitingUserCopy, type AwaitingKind } from '@/lib/awaiting-user-copy';
 import { quotaExhaustedCopy } from '@/lib/quota-exhausted-copy';
-import { normalizeSkillRows, skillSelectionFromTaskDraft } from '@/lib/skills-page-state';
+import {
+  normalizeSkillRows,
+  skillSelectionFromTaskDraft,
+  skillTaskAttachmentHandoffs,
+} from '@/lib/skills-page-state';
 import {
   detectSkillMentionTrigger,
   filterMentionSkills,
@@ -265,38 +269,6 @@ export function InputArea({
     onPrefillConsumed?.();
   }, [prefillIntent, onPrefillConsumed]);
 
-  // FilesPage → 用于新任务 hands off via location.state. WorkbenchApp's
-  // bootstrap effect handles `newTask: true` (calls enterNewTaskMode);
-  // here we only consume `attachFile` to pre-stage a DraftAttachment.
-  // Single-shot: replaceState clears the state after pre-stage so a
-  // refresh on `/` doesn't re-attach.
-  React.useEffect(() => {
-    const state = location.state as
-      | {
-          attachFile?: { fileId: string; filename: string; mimetype: string; sizeBytes: number };
-          skillTaskDraft?: unknown;
-        }
-      | null;
-    const handoff = state?.attachFile;
-    if (!handoff) return;
-    setAttachments((prev) => {
-      if (prev.some((a) => a.fileId === handoff.fileId)) return prev;
-      return [
-        ...prev,
-        {
-          fileId: handoff.fileId,
-          filename: handoff.filename,
-          mimetype: handoff.mimetype,
-          size: handoff.sizeBytes,
-          status: 'ready' as const,
-        },
-      ];
-    });
-    navigate(location.pathname + location.search, {
-      replace: true,
-      state: state.skillTaskDraft ? { skillTaskDraft: state.skillTaskDraft } : null,
-    });
-  }, [location, navigate]);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   // Product polish #6 — + button menu state. Radix DropdownMenu
   // owns the outside-click / escape close, focus management, and
@@ -325,13 +297,14 @@ export function InputArea({
   // on tasks.create as `expertMode`; the backend honours it when
   // not null.
   const [expertMode, setExpertMode] = React.useState<'normal' | 'expert' | 'auto'>('auto');
-  // Skill handoff. This is an editable draft, not an
-  // auto-submit: it lands in the composer, selects the skill, then
-  // lets the user complete the task request.
+  // New-task handoffs are consumed together so a task selected in the
+  // Skill Center can arrive with several pre-uploaded attachments without
+  // two effects racing to re-introduce each other's location state.
   React.useEffect(() => {
     const state = location.state as
       | {
           attachFile?: unknown;
+          attachFiles?: unknown;
           skillTaskDraft?: {
             prompt?: unknown;
             skillId?: unknown;
@@ -341,37 +314,57 @@ export function InputArea({
           };
         }
       | null;
+    const handoffs = skillTaskAttachmentHandoffs(state);
     const draft = state?.skillTaskDraft;
     const prompt = typeof draft?.prompt === 'string' ? draft.prompt.trimEnd() : '';
-    if (!prompt) return;
-    setValue(prompt);
-    const skillId = typeof draft?.skillId === 'string' ? draft.skillId.trim() : '';
-    setSelectedSkill(skillSelectionFromTaskDraft(draft ?? null));
-    if (
-      draft?.expertMode === 'expert' ||
-      draft?.expertMode === 'normal' ||
-      draft?.expertMode === 'auto'
-    ) {
-      setExpertMode(draft.expertMode);
-    } else if (skillId) {
-      setExpertMode('auto');
-    } else {
-      setExpertMode('expert');
+    if (handoffs.length === 0 && !prompt) return;
+    if (handoffs.length > 0) {
+      setAttachments((current) => {
+        const known = new Set(current.map((attachment) => attachment.fileId));
+        return [
+          ...current,
+          ...handoffs
+            .filter((handoff) => !known.has(handoff.fileId))
+            .map((handoff) => ({
+              fileId: handoff.fileId,
+              filename: handoff.filename,
+              mimetype: handoff.mimetype,
+              size: handoff.sizeBytes,
+              status: 'ready' as const,
+            })),
+        ];
+      });
     }
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.focus();
-      const len = el.value.length;
-      try {
-        el.setSelectionRange(len, len);
-      } catch {
-        /* setSelectionRange not supported on every input type */
+    if (prompt) {
+      setValue(prompt);
+      const skillId = typeof draft?.skillId === 'string' ? draft.skillId.trim() : '';
+      setSelectedSkill(skillSelectionFromTaskDraft(draft ?? null));
+      if (
+        draft?.expertMode === 'expert' ||
+        draft?.expertMode === 'normal' ||
+        draft?.expertMode === 'auto'
+      ) {
+        setExpertMode(draft.expertMode);
+      } else if (skillId) {
+        setExpertMode('auto');
+      } else {
+        setExpertMode('expert');
       }
-    });
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        const len = el.value.length;
+        try {
+          el.setSelectionRange(len, len);
+        } catch {
+          /* setSelectionRange not supported on every input type */
+        }
+      });
+    }
     navigate(location.pathname + location.search, {
       replace: true,
-      state: state?.attachFile ? { attachFile: state.attachFile } : null,
+      state: null,
     });
   }, [location, navigate]);
   // One-shot cleanup of the legacy persisted preference key. Older
