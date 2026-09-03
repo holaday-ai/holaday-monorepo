@@ -58,6 +58,7 @@ describe('createAnthropicCompatibleMessagesAdapter', () => {
     const response = await adapter.create(
       {
         maxTokens: 512,
+        thinking: { type: 'disabled' },
         system: [{ type: 'text', text: 'You are a planner.', cacheControl: 'ephemeral' }],
         messages: [
           {
@@ -108,6 +109,7 @@ describe('createAnthropicCompatibleMessagesAdapter', () => {
       {
         model: 'claude-opus-4-7',
         max_tokens: 512,
+        thinking: { type: 'disabled' },
         system: [
           {
             type: 'text',
