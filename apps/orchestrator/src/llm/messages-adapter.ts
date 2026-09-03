@@ -391,7 +391,9 @@ function normalizeStopReason(
   stopReason: unknown,
   content: ReadonlyArray<NeutralOutputContentBlock>,
 ): NeutralMessagesResponse['stopReason'] {
-  if (content.some((block) => block.type === 'tool_use')) return 'tool_use';
+  if (stopReason === 'end_turn' && content.some((block) => block.type === 'tool_use')) {
+    return 'tool_use';
+  }
   if (
     stopReason === 'end_turn' ||
     stopReason === 'tool_use' ||
