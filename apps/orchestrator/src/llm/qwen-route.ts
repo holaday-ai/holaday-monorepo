@@ -1,4 +1,6 @@
-export type ModelDataRegion = 'cn' | 'intl';
+import type { ModelDataRegion } from './model-data-region.js';
+
+export type { ModelDataRegion } from './model-data-region.js';
 export type QwenPurpose = 'reasoning' | 'standard' | 'fast' | 'coding' | 'verify';
 export type QwenEndpointKind = 'public' | 'workspace_dedicated';
 export type QwenDeploymentScope = 'china_mainland' | 'international';

@@ -15,7 +15,7 @@ import {
   ACCOUNT_CLOSURE_USER_STATUSES,
   type AccountClosureUserStatus,
 } from '../../account-closure/types.js';
-import type { ModelDataRegion } from '../../llm/qwen-route.js';
+import type { ModelDataRegion } from '../../llm/model-data-region.js';
 
 /**
  * `users` — account.

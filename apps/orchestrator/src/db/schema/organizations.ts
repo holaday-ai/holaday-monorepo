@@ -9,7 +9,7 @@ import {
   uniqueIndex,
   varchar,
 } from 'drizzle-orm/mysql-core';
-import type { ModelDataRegion } from '../../llm/qwen-route.js';
+import type { ModelDataRegion } from '../../llm/model-data-region.js';
 import { users } from './users.js';
 
 export const organizations = mysqlTable(
