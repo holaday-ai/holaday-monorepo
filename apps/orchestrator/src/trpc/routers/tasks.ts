@@ -42,6 +42,10 @@ import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { runScrapeTask } from '../../agent/scrape-runner.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { generateSuggestions } from '../../agent/suggestions-generator.js';
+import {
+  SUGGESTIONS_ANTHROPIC_MODEL,
+  resolveSuggestionsProviderRoute,
+} from '../../agent/suggestions-provider.js';
 import { matchExpertWorkflow } from '../../agent/supercar/expert-workflows.js';
 import {
   type SupercarActionCaptureEvent,
@@ -55,6 +59,12 @@ import {
   supercarReply,
 } from '../../agent/supercar/index.js';
 import { MemoryService } from '../../agent/supercar/memory-service.js';
+import {
+  MessagesAdapterError,
+  type MessagesAdapter,
+  createAnthropicMessagesAdapter,
+  createQwenMessagesAdapter,
+} from '../../llm/messages-adapter.js';
 import {
   parseOtaAllowlist,
   resolveOtaCanaryLane,
@@ -1140,6 +1150,7 @@ export const tasksRouter = router({
         plan: users.plan,
         selectedRoles: users.selectedRoles,
         selectedSkills: users.selectedSkills,
+        modelDataRegion: users.modelDataRegion,
         // Phase 2 第三期 — IP 人物生成门控(三件齐 + 授权才放行)。
         qwenVoiceId: users.qwenVoiceId,
         baseVideoFileId: users.baseVideoFileId,
@@ -6240,53 +6251,98 @@ export const tasksRouter = router({
                 ctx.logger.warn({ err, taskId }, 'supercar: broadcast terminal failed');
               }
             }
-            // Phase 13 Dim 5 — memory extraction. Run only on
-            // completed tasks to avoid storing tips from the
-            // partial / failed state of the agent. Best-effort:
-            // rejections log + continue (the user's task is done
-            // regardless of memory outcome).
-              if (
-                terminalPersisted &&
-                outcome.status === 'completed' &&
-                outcome.summary &&
-                appEnv.ANTHROPIC_API_KEY
-              ) {
-              void memoryService
-                .extractAndStore({
-                  apiKey: appEnv.ANTHROPIC_API_KEY,
-                  userIdInternal: userRow.id,
+            // Phase 13 Dim 5 — memory extraction. Run only on completed tasks
+            // to avoid storing tips from partial / failed state. This remains
+            // on Anthropic until its own migration gate is designed.
+            if (terminalPersisted && outcome.status === 'completed' && outcome.summary) {
+              if (appEnv.ANTHROPIC_API_KEY) {
+                void memoryService
+                  .extractAndStore({
+                    apiKey: appEnv.ANTHROPIC_API_KEY,
+                    userIdInternal: userRow.id,
+                    intent: input.intent,
+                    summary: outcome.summary,
+                    taskId,
+                  })
+                  .catch((err) => ctx.logger.warn({ err, taskId }, 'memory: extract crashed'));
+              }
+
+              // First provider-neutral real-call canary. This only controls
+              // post-task suggestions: no tools, no mutation, and no effect on
+              // the completed task. Qwen requires both flags, an exact
+              // synthetic-user allowlist match, and persisted region ownership.
+              const suggestionsRoute = resolveSuggestionsProviderRoute({
+                environment: appEnv,
+                userExternalId: ctx.userId,
+                userModelDataRegion: userRow.modelDataRegion,
+              });
+              let messagesAdapter: MessagesAdapter | null = null;
+              try {
+                if (suggestionsRoute.provider === 'qwen') {
+                  messagesAdapter = createQwenMessagesAdapter({
+                    environment: appEnv,
+                    region: suggestionsRoute.region,
+                    purpose: 'fast',
+                  });
+                } else if (suggestionsRoute.provider === 'anthropic') {
+                  messagesAdapter = createAnthropicMessagesAdapter({
+                    apiKey: appEnv.ANTHROPIC_API_KEY,
+                    model: SUGGESTIONS_ANTHROPIC_MODEL,
+                  });
+                } else {
+                  ctx.logger.warn(
+                    { taskId, reason: suggestionsRoute.reason },
+                    'suggestions: provider unavailable',
+                  );
+                }
+              } catch (error) {
+                ctx.logger.warn(
+                  {
+                    taskId,
+                    reason:
+                      error instanceof MessagesAdapterError
+                        ? error.code
+                        : 'PROVIDER_CONFIGURATION_ERROR',
+                  },
+                  'suggestions: provider unavailable',
+                );
+              }
+
+              if (messagesAdapter) {
+                if (messagesAdapter.metadata.provider === 'alibaba-model-studio') {
+                  ctx.logger.info(
+                    {
+                      taskId,
+                      provider: messagesAdapter.metadata.provider,
+                      model: messagesAdapter.metadata.model,
+                      region: messagesAdapter.metadata.region,
+                      deploymentScope: messagesAdapter.metadata.deploymentScope,
+                      endpointKind: messagesAdapter.metadata.endpointKind,
+                    },
+                    'suggestions: Qwen canary selected',
+                  );
+                }
+                void generateSuggestions({
+                  messagesAdapter,
                   intent: input.intent,
                   summary: outcome.summary,
-                  taskId,
                 })
-                  .catch((err) => ctx.logger.warn({ err, taskId }, 'memory: extract crashed'));
-
-              // O5 — backend-generated suggestions. The agent's
-              // in-summary `suggestions` block is unreliable
-              // (model omits it under some prompts); a dedicated
-              // Sonnet call is more consistent. Fire-and-forget so
-              // the user gets the terminal frame immediately and
-              // suggestions trickle in a second later.
-              void generateSuggestions({
-                apiKey: appEnv.ANTHROPIC_API_KEY,
-                intent: input.intent,
-                summary: outcome.summary,
-              })
-                .then((suggestions) => {
-                  if (suggestions.length === 0) return;
-                  try {
-                    broadcastToUser(userId, {
-                      type: 'server.supercar.suggestions',
-                      taskId,
-                      suggestions,
-                    });
-                  } catch (err) {
+                  .then((suggestions) => {
+                    if (suggestions.length === 0) return;
+                    try {
+                      broadcastToUser(userId, {
+                        type: 'server.supercar.suggestions',
+                        taskId,
+                        suggestions,
+                      });
+                    } catch (err) {
                       ctx.logger.warn({ err, taskId }, 'suggestions: broadcast failed');
-                  }
-                })
-                .catch((err) =>
-                  ctx.logger.warn({ err, taskId }, 'suggestions: generate crashed'),
-                );
+                    }
+                  })
+                  .catch((err) =>
+                    ctx.logger.warn({ err, taskId }, 'suggestions: generate crashed'),
+                  );
+              }
             }
           })
           .catch(async (err) => {

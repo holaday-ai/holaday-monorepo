@@ -220,6 +220,16 @@ const baseEnvSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
+  /**
+   * First real-call canary: post-task suggestions only. Both Qwen flags and
+   * an exact synthetic-user allowlist match are required. An empty allowlist
+   * means zero users, never all users.
+   */
+  QWEN_SUGGESTIONS_CANARY_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  QWEN_SUGGESTIONS_SYNTHETIC_ALLOWLIST: z.string().default(''),
   FAL_KEY: z.string().optional().default(''),
   FAL_BASE_URL: z.string().url().default('https://queue.fal.run'),
   /**

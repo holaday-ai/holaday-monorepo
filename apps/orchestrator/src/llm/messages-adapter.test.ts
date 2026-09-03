@@ -3,6 +3,7 @@ import {
   type AnthropicCompatibleClient,
   MessagesAdapterError,
   createAnthropicCompatibleMessagesAdapter,
+  createAnthropicMessagesAdapter,
   createQwenMessagesAdapter,
 } from './messages-adapter.js';
 import type { QwenRuntimeEnvironment } from './qwen-route.js';
@@ -333,6 +334,33 @@ describe('createAnthropicCompatibleMessagesAdapter', () => {
       }),
     ).rejects.toMatchObject({ code: 'INVALID_REQUEST', message: 'Message request is invalid' });
     expect(client.messages.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('createAnthropicMessagesAdapter', () => {
+  it('constructs an Anthropic adapter without exposing its credential in metadata', async () => {
+    const client = buildClient({
+      id: 'msg_anthropic',
+      model: 'claude-sonnet-4-6',
+      content: [{ type: 'text', text: 'done' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 3, output_tokens: 1 },
+    });
+    const clientFactory = vi.fn(() => client);
+
+    const adapter = createAnthropicMessagesAdapter({
+      apiKey: 'anthropic-secret',
+      model: 'claude-sonnet-4-6',
+      clientFactory,
+    });
+    const result = await adapter.create({
+      maxTokens: 32,
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+
+    expect(clientFactory).toHaveBeenCalledWith({ apiKey: 'anthropic-secret' });
+    expect(result.metadata).toEqual({ provider: 'anthropic', model: 'claude-sonnet-4-6' });
+    expect(JSON.stringify(result)).not.toContain('anthropic-secret');
   });
 });
 
