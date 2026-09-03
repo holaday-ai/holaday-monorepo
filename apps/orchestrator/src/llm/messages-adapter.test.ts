@@ -213,6 +213,35 @@ describe('createAnthropicCompatibleMessagesAdapter', () => {
     });
   });
 
+  it.each(['max_tokens', 'stop_sequence'] as const)(
+    'preserves an explicit %s stop reason when the response also contains a tool block',
+    async (stopReason) => {
+      const adapter = createAnthropicCompatibleMessagesAdapter({
+        client: buildClient({
+          id: `msg_${stopReason}`,
+          model: 'qwen3.8-max',
+          content: [
+            { type: 'text', text: 'I started a tool call.' },
+            { type: 'tool_use', id: 'tool_partial', name: 'emit_plan', input: { steps: [] } },
+          ],
+          stop_reason: stopReason,
+          usage: { input_tokens: 10, output_tokens: 7 },
+        }),
+        metadata: {
+          provider: 'alibaba-model-studio',
+          model: 'qwen3.8-max',
+          region: 'intl',
+          deploymentScope: 'international',
+          endpointKind: 'public',
+        },
+      });
+
+      await expect(
+        adapter.create({ maxTokens: 100, messages: [{ role: 'user', content: 'plan' }] }),
+      ).resolves.toMatchObject({ stopReason });
+    },
+  );
+
   it('maps an explicit neutral tool disable to the compatible none choice', async () => {
     const client = buildClient({
       id: 'msg_2',
