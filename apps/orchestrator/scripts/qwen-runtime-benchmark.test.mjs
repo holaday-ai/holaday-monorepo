@@ -253,6 +253,34 @@ describe('Qwen international runtime benchmark', () => {
     assert.doesNotMatch(JSON.stringify(report), /private tail|test-only-placeholder/);
   });
 
+  it('does not confirm cancellation when the first text delta arrives with a terminal event', async () => {
+    let cancelCalls = 0;
+    let observedSignal;
+    const report = await runQwenRuntimeBenchmark({
+      runtimeEnv: RUNTIME_ENV,
+      cases: ['streaming_cancel'],
+      now: () => 100,
+      fetchImpl: async (_url, request) => {
+        observedSignal = request.signal;
+        return incrementalResponse(
+          [
+            {
+              text: STREAM_FIXTURE,
+            },
+          ],
+          () => {
+            cancelCalls += 1;
+          },
+        );
+      },
+    });
+
+    assert.equal(observedSignal.aborted, false);
+    assert.equal(cancelCalls, 0);
+    assert.equal(report.cases[0].status, 'failed');
+    assert.equal(report.cases[0].reason, 'cancellation_not_confirmed');
+  });
+
   it('classifies response-body aborts as timeouts for streaming and JSON requests', async () => {
     const streaming = await runQwenRuntimeBenchmark({
       runtimeEnv: RUNTIME_ENV,
@@ -279,6 +307,10 @@ describe('Qwen international runtime benchmark', () => {
 
     assert.equal(streaming.cases[0].reason, 'timeout');
     assert.equal(json.cases[0].reason, 'timeout');
+    assert.equal(streaming.cases[0].inputTokens, null);
+    assert.equal(streaming.cases[0].outputTokens, null);
+    assert.equal(streaming.tokenUsageComplete, false);
+    assert.equal(json.tokenUsageComplete, false);
   });
 
   it('validates the documented SSE event sequence without returning streamed text', async () => {
