@@ -158,7 +158,7 @@ export interface AnthropicCompatibleClient {
 
 export interface AnthropicCompatibleClientOptions {
   apiKey: string;
-  baseURL: string;
+  baseURL?: string;
   defaultHeaders?: Record<string, string>;
 }
 
@@ -188,6 +188,21 @@ export function createAnthropicCompatibleMessagesAdapter(input: {
       return normalizeAnthropicCompatibleResponse(rawResponse, metadata);
     },
   };
+}
+
+export function createAnthropicMessagesAdapter(input: {
+  apiKey: string;
+  model: string;
+  clientFactory?: AnthropicCompatibleClientFactory;
+}): MessagesAdapter {
+  if (!isNonEmptyString(input.apiKey) || !isNonEmptyString(input.model)) {
+    throw new MessagesAdapterError('INVALID_REQUEST', 'Message provider configuration is invalid');
+  }
+  const clientFactory = input.clientFactory ?? defaultAnthropicCompatibleClientFactory;
+  return createAnthropicCompatibleMessagesAdapter({
+    client: clientFactory({ apiKey: input.apiKey }),
+    metadata: { provider: 'anthropic', model: input.model },
+  });
 }
 
 export interface QwenMessagesEnvironment extends QwenRuntimeEnvironment {
