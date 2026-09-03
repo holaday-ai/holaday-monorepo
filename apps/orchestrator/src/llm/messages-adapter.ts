@@ -454,6 +454,7 @@ function normalizeProviderError(
   const status = isRecord(error) ? error.status : undefined;
   const code = isRecord(error) ? error.code : undefined;
   if (
+    error instanceof Anthropic.APIConnectionTimeoutError ||
     name === 'APIConnectionTimeoutError' ||
     code === 'ETIMEDOUT' ||
     status === 408 ||
