@@ -27,6 +27,7 @@ describe('team project workspace schema', () => {
       'ownerUserId',
       'status',
       'teamProjectsEnabled',
+      'modelDataRegion',
       'createdAt',
       'updatedAt',
     ]);

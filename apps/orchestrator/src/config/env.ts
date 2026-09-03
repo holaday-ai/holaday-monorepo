@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 import { z } from 'zod';
+import { type ModelDataRegion, normalizeQwenAnthropicBaseUrl } from '../llm/qwen-route.js';
 
 // Load order (later overrides earlier — we explicitly do NOT override
 // already-set process.env values so CI / docker-compose env vars win):
@@ -179,6 +180,37 @@ const baseEnvSchema = z.object({
    * 2026-06-13 real-call verification confirmed).
    */
   DASHSCOPE_WORKSPACE_ID: z.string().optional().default(''),
+  /**
+   * Text-model migration foundation. Beijing and Singapore use distinct
+   * credentials and Anthropic-compatible endpoints. These fields are not
+   * wired to production call sites yet; they establish a fail-closed regional
+   * contract for the later shadow-evaluation and canary phases.
+   *
+   * `DASHSCOPE_API_KEY` remains the compatibility fallback for `intl` only.
+   * The China route never reads the legacy or international credentials.
+   */
+  DASHSCOPE_INTL_API_KEY: z.string().optional().default(''),
+  DASHSCOPE_INTL_ANTHROPIC_BASE_URL: z
+    .string()
+    .url()
+    .default('https://dashscope-intl.aliyuncs.com/apps/anthropic'),
+  DASHSCOPE_INTL_WORKSPACE_ID: z.string().optional().default(''),
+  DASHSCOPE_CN_API_KEY: z.string().optional().default(''),
+  DASHSCOPE_CN_ANTHROPIC_BASE_URL: z
+    .string()
+    .url()
+    .default('https://dashscope.aliyuncs.com/apps/anthropic'),
+  DASHSCOPE_CN_WORKSPACE_ID: z.string().optional().default(''),
+  QWEN_REASONING_MODEL: z.string().min(1).default('qwen3.8-max'),
+  QWEN_STANDARD_MODEL: z.string().min(1).default('qwen3.7-plus'),
+  QWEN_FAST_MODEL: z.string().min(1).default('qwen3.8-flash'),
+  QWEN_CODING_MODEL: z.string().min(1).default('qwen3-coder-plus'),
+  QWEN_VERIFIER_MODEL: z.string().min(1).default('qwen3.8-flash'),
+  /** Synthetic benchmark lane only. It is not wired to production task execution. */
+  QWEN_SHADOW_EVAL_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   FAL_KEY: z.string().optional().default(''),
   FAL_BASE_URL: z.string().url().default('https://queue.fal.run'),
   /**
@@ -556,6 +588,23 @@ export const envSchema = baseEnvSchema
         message: error instanceof Error ? error.message : 'invalid HOLADAY_PUBLIC_BASE_URL',
       });
     }
+
+    for (const [field, region] of [
+      ['DASHSCOPE_INTL_ANTHROPIC_BASE_URL', 'intl'],
+      ['DASHSCOPE_CN_ANTHROPIC_BASE_URL', 'cn'],
+    ] as const satisfies ReadonlyArray<
+      ['DASHSCOPE_INTL_ANTHROPIC_BASE_URL' | 'DASHSCOPE_CN_ANTHROPIC_BASE_URL', ModelDataRegion]
+    >) {
+      try {
+        normalizeQwenAnthropicBaseUrl(region, environment[field]);
+      } catch (error) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [field],
+          message: error instanceof Error ? error.message : `invalid ${field}`,
+        });
+      }
+    }
   })
   .transform((environment) => ({
     ...environment,
@@ -563,6 +612,14 @@ export const envSchema = baseEnvSchema
       environment.HOLADAY_PUBLIC_BASE_URL,
       environment.NODE_ENV,
     ),
+    DASHSCOPE_INTL_ANTHROPIC_BASE_URL: normalizeQwenAnthropicBaseUrl(
+      'intl',
+      environment.DASHSCOPE_INTL_ANTHROPIC_BASE_URL,
+    ).baseURL,
+    DASHSCOPE_CN_ANTHROPIC_BASE_URL: normalizeQwenAnthropicBaseUrl(
+      'cn',
+      environment.DASHSCOPE_CN_ANTHROPIC_BASE_URL,
+    ).baseURL,
   }));
 
 export type Env = z.infer<typeof envSchema>;
