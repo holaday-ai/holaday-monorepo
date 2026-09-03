@@ -28,7 +28,7 @@
 <!-- 2026-07-09 Codex 补充：状态机 pre-execution guard：start(existing) 不再把 pending/queued 直接派发成 executing；pause 只允许 executing source；repository control transition 同步拒绝非 executing→paused 与非 paused→executing，防 queued/pending 绕过队列恢复。 -->
 <!-- 2026-07-09 Codex 补充：状态机 planning bootstrap 收口：新任务 seed 显式走 state:null + taskId + plan；start(existing planning) 改为 noop，避免历史/重连 planning 被误派发；tasks.create/smoke 与集成 fixture 已统一。 -->
 <!-- 2026-07-09 Codex 补充：技能 planner 闭环：planner catalogue 现在合并 DB SKILL.md rows + shared 13 用户可见技能；手动 @ 技能会注入 planner hint，避免前端选择了技能但通用 planner 不知道。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@aca86bdb`（2026-09-03 JST）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@e4f6e648`（2026-09-03 JST）
 
 账户关闭的唯一合成账号 canary 已完成提交、即时冻结、短信强验证撤回、恢复登录与临时凭据失效验证。首轮撤回暴露一个生产阻断缺陷：请求和用户已恢复，但 13 条未开始步骤仍为 `pending`，导致活动队列无法归零。PR #164 已将撤回事务收紧为“恰好 13 条 pending 步骤原子转为 skipped”，数量不符则请求、用户和步骤整体回滚；回归同时覆盖清理旧 lease/调度字段和 12 条不完整集合的失败回滚。修复已部署到 `9c595f20`，预修复唯一残留请求经单独授权的精确事务修复为 13 skipped / 0 active，未删除任何数据；随后临时邮箱与密码凭据已失效、现有会话被 `authVersion` 轮换拒绝，验证手机号保持不变。最终生产只读预检为 `canary-running` 18/18 ready：专用 HMAC 仅确认存在且长度 64，allowlistCount=1、workerCount=1、worker uid=998、RSS 178 MiB、queueTotal=0，双公网健康检查、短信模板、运行环境一致性和隐私边界均通过。当前仍只开放唯一合成身份；员工扩围和全量开放没有启动，必须先满足独立完成路径证据与完整七天观察窗口，不能用本次小样本提前放行。
 
