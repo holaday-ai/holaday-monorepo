@@ -306,6 +306,9 @@ async function consumeAnthropicSse({
     if (firstTokenLatencyMs === null && hasTextDelta(raw)) {
       firstTokenLatencyMs = Math.max(0, now() - startedAt);
       if (cancelAfterFirstText) {
+        if (hasTerminalEvent(raw)) {
+          return { status: 'completed', raw: '', firstTokenLatencyMs };
+        }
         controller.abort();
         try {
           await reader.cancel();
@@ -338,6 +341,22 @@ function hasTextDelta(raw) {
       ) {
         return true;
       }
+    } catch {
+      // A JSON event may be split across transport chunks; wait for the next chunk.
+    }
+  }
+  return false;
+}
+
+function hasTerminalEvent(raw) {
+  for (const line of raw.split(/\r?\n/)) {
+    if (/^event:\s*(?:message_delta|message_stop)\s*$/.test(line)) return true;
+    if (!line.startsWith('data:')) continue;
+    const data = line.slice('data:'.length).trim();
+    if (!data || data === '[DONE]') continue;
+    try {
+      const event = JSON.parse(data);
+      if (event?.type === 'message_delta' || event?.type === 'message_stop') return true;
     } catch {
       // A JSON event may be split across transport chunks; wait for the next chunk.
     }
@@ -620,15 +639,21 @@ function passedCase(benchmarkCase, latencyMs, usage, calls = 1, details = {}) {
   };
 }
 
-function failedCase(benchmarkCase, latencyMs, reason, usage = {}, calls = 1) {
+function failedCase(
+  benchmarkCase,
+  latencyMs,
+  reason,
+  usage = { inputTokens: null, outputTokens: null },
+  calls = 1,
+) {
   return {
     caseId: benchmarkCase.caseId,
     model: benchmarkCase.model,
     status: 'failed',
     reason,
     latencyMs,
-    inputTokens: usage.inputTokens ?? 0,
-    outputTokens: usage.outputTokens ?? 0,
+    inputTokens: usage.inputTokens ?? null,
+    outputTokens: usage.outputTokens ?? null,
     calls,
   };
 }
