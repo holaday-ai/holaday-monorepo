@@ -45,4 +45,41 @@ describe('planned task responsive layout', () => {
     expect(declarations.get('.planned-inspector__footer')?.get('position')).toBe('sticky');
     expect(declarations.get('.planned-inspector__footer')?.get('bottom')).toBe('0');
   });
+
+  it('keeps the mobile editor below nested scope and confirmation dialogs', () => {
+    const css = readFileSync(new URL('./planned-tasks.css', import.meta.url), 'utf8');
+    const root = postcss.parse(css);
+    let inspectorZIndex: number | null = null;
+    let scopeOverlayZIndex: number | null = null;
+    let scopePanelZIndex: number | null = null;
+
+    root.walkAtRules('media', (media) => {
+      if (media.params !== '(max-width: 820px)') return;
+      media.walkRules('.planned-inspector', (rule) => {
+        rule.walkDecls('z-index', (declaration) => {
+          inspectorZIndex = Number(declaration.value);
+        });
+      });
+    });
+    root.walkRules('.planned-scope-dialog', (rule) => {
+      rule.walkDecls('z-index', (declaration) => {
+        scopeOverlayZIndex = Number(declaration.value);
+      });
+    });
+    root.walkRules('.planned-scope-dialog__panel', (rule) => {
+      rule.walkDecls('z-index', (declaration) => {
+        scopePanelZIndex = Number(declaration.value);
+      });
+    });
+
+    expect(inspectorZIndex).not.toBeNull();
+    expect(scopeOverlayZIndex).not.toBeNull();
+    expect(scopePanelZIndex).not.toBeNull();
+    expect(inspectorZIndex ?? Number.POSITIVE_INFINITY).toBeLessThan(
+      scopeOverlayZIndex ?? Number.NEGATIVE_INFINITY,
+    );
+    expect(inspectorZIndex ?? Number.POSITIVE_INFINITY).toBeLessThan(
+      scopePanelZIndex ?? Number.NEGATIVE_INFINITY,
+    );
+  });
 });

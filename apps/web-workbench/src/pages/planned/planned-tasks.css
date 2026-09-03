@@ -674,10 +674,16 @@
   .planned-inspector {
     position: fixed;
     inset: 0;
-    z-index: 80;
+    z-index: 60;
     width: 100%;
     height: 100dvh;
     border: 0;
+    background: #fff;
+  }
+  .planned-inspector-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 59;
     background: #fff;
   }
   .planned-inspector__body {
