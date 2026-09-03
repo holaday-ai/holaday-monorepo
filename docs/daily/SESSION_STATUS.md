@@ -28,7 +28,9 @@
 <!-- 2026-07-09 Codex 补充：状态机 pre-execution guard：start(existing) 不再把 pending/queued 直接派发成 executing；pause 只允许 executing source；repository control transition 同步拒绝非 executing→paused 与非 paused→executing，防 queued/pending 绕过队列恢复。 -->
 <!-- 2026-07-09 Codex 补充：状态机 planning bootstrap 收口：新任务 seed 显式走 state:null + taskId + plan；start(existing planning) 改为 noop，避免历史/重连 planning 被误派发；tasks.create/smoke 与集成 fixture 已统一。 -->
 <!-- 2026-07-09 Codex 补充：技能 planner 闭环：planner catalogue 现在合并 DB SKILL.md rows + shared 13 用户可见技能；手动 @ 技能会注入 planner hint，避免前端选择了技能但通用 planner 不知道。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@e4f6e648`（2026-09-03 JST）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@940f4b99`（2026-09-03 JST）
+
+千问国际区 SSE 运行时门禁已通过 PR #199、#200 收口上线：基准脚本改为增量消费响应流，分别记录首个文本增量与完整响应耗时，并新增在首个文本增量后同时触发请求 abort 与 reader cancel 的固定合成用例。审查补强后，若首 token 所在传输块已经包含 `message_delta` / `message_stop`，或标准 SSE 终止事件的 JSON 恰好跨块截断，均不会误报取消成功；超时、HTTP、网络及畸形响应的未知 token 用量保持 `null`，聚合完整性会失败关闭。最终非沙箱 Orchestrator 完整回归 374 个文件 / 5,882 项、运行时脚本 15/15、typecheck、Biome 与差异检查通过。application 从 `d5020948` 安全快进部署到 `940f4b998a0ec346f2f9b4baac7bc104f2414bd0`，快速 P0 4/4、113 项运维发布门禁、Web lint/typecheck/build、Aliyun/Vultr 原子发布及双公网 healthz 均通过；Orchestrator online、单实例、uid 998、restart count 0，数据库 schema 已验证。部署后国际区固定合成门禁 4/4：基础流首 token 586ms / 完整 598ms，主动取消触发 580ms / 完整 583ms，工具两轮 1,802ms，2,048 行长上下文 2,856ms。取消后服务端 token 结算不可由客户端证明，因此该行用量明确为未知、总量标记不完整。QWEN_SHADOW_EVAL_ENABLED 仍为 false，未接入用户任务或切换生产流量；大陆凭据仍未配置，未触碰用户数据、AkShare、CN Payment、DivineAPI Translator 或 OpenAI Key。
 
 账户关闭的唯一合成账号 canary 已完成提交、即时冻结、短信强验证撤回、恢复登录与临时凭据失效验证。首轮撤回暴露一个生产阻断缺陷：请求和用户已恢复，但 13 条未开始步骤仍为 `pending`，导致活动队列无法归零。PR #164 已将撤回事务收紧为“恰好 13 条 pending 步骤原子转为 skipped”，数量不符则请求、用户和步骤整体回滚；回归同时覆盖清理旧 lease/调度字段和 12 条不完整集合的失败回滚。修复已部署到 `9c595f20`，预修复唯一残留请求经单独授权的精确事务修复为 13 skipped / 0 active，未删除任何数据；随后临时邮箱与密码凭据已失效、现有会话被 `authVersion` 轮换拒绝，验证手机号保持不变。最终生产只读预检为 `canary-running` 18/18 ready：专用 HMAC 仅确认存在且长度 64，allowlistCount=1、workerCount=1、worker uid=998、RSS 178 MiB、queueTotal=0，双公网健康检查、短信模板、运行环境一致性和隐私边界均通过。当前仍只开放唯一合成身份；员工扩围和全量开放没有启动，必须先满足独立完成路径证据与完整七天观察窗口，不能用本次小样本提前放行。
 

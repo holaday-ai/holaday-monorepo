@@ -1,7 +1,7 @@
 # HOLA DAY 千问迁移能力矩阵
 
 日期：2026-09-03
-状态：国际区第三阶段合成运行时门禁通过；尚未接入生产调用链
+状态：国际区 SSE 首 token 与客户端主动取消门禁已通过；尚未接入生产调用链
 
 ## 核心结论
 
@@ -16,7 +16,7 @@
 | a11y 浏览器循环 | Anthropic Messages + custom tools | Qwen Max + custom tools | 两轮合成工具回传已通过；真实浏览器循环仍需 adapter 和场景门禁 | 连续 tool-use/tool-result、终止、恢复、延迟 |
 | 视觉浏览器循环与 selector heal | 图片 + custom tool | Qwen3.8 Max | 文档支持图片与 function calling，组合能力需实测 | 截图理解、坐标/selector 精度、工具 schema |
 | Supercar 主循环 | Anthropic beta Messages +内建 computer/web_search/code execution | Qwen + HOLA DAY 自有 custom tools | **不能直接换模型名**；千问兼容文档没有证明支持这些 Anthropic beta 内建工具 | 先把供应商内建工具隔离为自有协议，再逐项评测 |
-| 普通流式生成、抓取总结 | Anthropic Messages streaming | Qwen Messages streaming | 基础 SSE 事件链和 token 统计已通过；首 token、主动取消仍未验证 | 首 token、完整正文、取消、超时、token 统计 |
+| 普通流式生成、抓取总结 | Anthropic Messages streaming | Qwen Messages streaming | SSE 事件链、首 token、完整正文、客户端主动取消、超时和 token 统计已通过固定合成门禁 | 接入 adapter 后仍需在真实任务链验证背压、恢复和用户取消语义 |
 | 图片结果核验 | Anthropic/Gemini 视觉理解 | Qwen3.8 Max/VL | 可作为候选，需合成图片集对照 | 成功/部分/失败四分类准确率 |
 | 图片生成 | Gemini Image | Qwen-Image / 万相 | 独立媒体迁移，不属于文字模型替换 | 中文提示、主体一致性、编辑、成本、审核 |
 | 视频生成与核验 | Veo、万相、第三方媒体模型 | 万相与必要的国际供应商 | 按能力拆分，不由 Qwen 文本模型统一承接 | 画质、时长、音画同步、人物一致性、成本 |
@@ -35,12 +35,15 @@
 
 2026-09-03 使用现有国际区凭据在目标主机内存中执行最终门禁，全部输入均由脚本确定性生成；未读取数据库、任务、附件、日志或用户自由文本，报告未包含响应正文、工具 ID 或合成记录。
 
-| 门禁 | 模型 | 结果 | 完整耗时 | 输入 / 输出 token | 请求数 |
-|---|---|---:|---:|---:|---:|
-| SSE 基础事件链 | qwen3.8-flash | 通过 | 561 ms | 13 / 2 | 1 |
-| 两轮 `tool_use/tool_result` | qwen3.8-max | 通过 | 2,241 ms | 427 / 46 | 2 |
-| 2,048 行合成长上下文提取 | qwen3.7-plus | 通过 | 7,171 ms | 49,209 / 40 | 1 |
-| 合计 | — | 3 / 3 | — | 49,649 / 88 | 4 |
+| 门禁 | 模型 | 结果 | 首 token / 取消触发 | 完整耗时 | 输入 / 输出 token | 请求数 |
+|---|---|---:|---:|---:|---:|---:|
+| SSE 基础事件链 | qwen3.8-flash | 通过 | 586 ms | 598 ms | 13 / 2 | 1 |
+| 首 token 后客户端主动取消 | qwen3.8-flash | 通过 | 580 ms | 583 ms | 未知 / 未知 | 1 |
+| 两轮 `tool_use/tool_result` | qwen3.8-max | 通过 | — | 1,802 ms | 427 / 46 | 2 |
+| 2,048 行合成长上下文提取 | qwen3.7-plus | 通过 | — | 2,856 ms | 49,209 / 40 | 1 |
+| 合计 | — | 4 / 4 | — | — | 已知 49,649 / 88；取消行未知 | 5 |
+
+主动取消的“通过”只证明客户端在首个文本增量之后、任何已观察到的终止事件之前同时触发 `AbortSignal` 与流 reader cancellation；它不声称供应商已停止计费。取消后的 token 结算无法从被中断的 SSE 得到，因此报告使用 `null` 并明确标记聚合 token 用量不完整。若首 token 与 `message_delta` / `message_stop` 同块到达，或标准 SSE 终止事件的 JSON 跨传输块截断，门禁会失败关闭，不能把已经完成的流误报为主动取消。
 
 兼容差异：国际千问在返回有效 `tool_use` 内容块时，实测 `stop_reason` 为 `end_turn`。因此未来 provider adapter 必须以结构化工具块作为继续信号，并把 `tool_use` 与 `end_turn` 两种终止值规范化；不能只按 Anthropic 原生终止值分支。
 
@@ -56,6 +59,6 @@
 
 - 已满足：国际凭据与端点、区域路由、基础文本质量、代码、证据核验。
 - 已满足：强制自定义工具调用与严格 JSON Schema 的国际真实协议门禁。
-- 已满足：基础 SSE 事件链、两轮合成工具回传、2,048 行合成长上下文提取。
-- 尚未验证：真实浏览器工具循环及恢复、SSE 首 token/主动取消、视觉、多媒体生成、北京区域。
+- 已满足：SSE 事件链、首 token、客户端主动取消、两轮合成工具回传、2,048 行合成长上下文提取。
+- 尚未验证：真实浏览器工具循环及恢复、真实任务流背压/恢复/用户取消语义、视觉、多媒体生成、北京区域。
 - 因此当前只允许继续离线评测，不允许生产切流或宣称已可替代全部现有模型。
