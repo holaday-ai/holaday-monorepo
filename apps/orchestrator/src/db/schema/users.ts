@@ -15,6 +15,7 @@ import {
   ACCOUNT_CLOSURE_USER_STATUSES,
   type AccountClosureUserStatus,
 } from '../../account-closure/types.js';
+import type { ModelDataRegion } from '../../llm/qwen-route.js';
 
 /**
  * `users` — account.
@@ -48,6 +49,8 @@ export const users = mysqlTable(
      * an ALTER TABLE.
      */
     role: varchar('role', { length: 16 }).notNull().default('user'),
+    /** Explicit processing-region ownership; null until the user chooses. */
+    modelDataRegion: varchar('model_data_region', { length: 8 }).$type<ModelDataRegion>(),
     planExpiresAt: datetime('plan_expires_at', { mode: 'date', fsp: 3 }),
     /** Account admission state; only `active` may receive normal credentials. */
     status: varchar('status', { length: 20 })
@@ -136,6 +139,10 @@ export const users = mysqlTable(
     index('ix_users_plan').on(t.plan),
     index('ix_users_plan_expires_at').on(t.planExpiresAt),
     index('ix_users_role').on(t.role),
+    check(
+      'ck_users_model_data_region',
+      sql`${t.modelDataRegion} IS NULL OR ${t.modelDataRegion} IN ('cn', 'intl')`,
+    ),
     check(
       'ck_users_status_allowed',
       sql`${t.status} IN (${sql.join(

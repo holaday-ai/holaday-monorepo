@@ -170,6 +170,7 @@ function fakeUser(overrides: Partial<User> = {}): User {
     passwordHash: '',
     plan: 'pro',
     role: 'user',
+    modelDataRegion: null,
     planExpiresAt: null,
     status: 'active',
     authVersion: 0,
