@@ -131,10 +131,7 @@ describe('planned task presentation state', () => {
         plannedCount: 0,
         legacyCount: 2,
       }),
-    ).toEqual({
-      title: '这个月还没有规划任务',
-      description: '日历中的灰色项目是旧任务，可前往旧任务记录管理。',
-    });
+    ).toBeNull();
     expect(
       plannedCalendarEmptyState({
         loading: true,

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { PlannedTasksPage } from './PlannedTasksPage';
@@ -104,5 +104,31 @@ describe('PlannedTasksPage plan deep link', () => {
     await screen.findByText('1 个已启用');
     expect(api.detail).not.toHaveBeenCalled();
     expect(screen.queryByLabelText('编辑规划')).toBeNull();
+  });
+});
+
+describe('PlannedTasksPage choice semantics', () => {
+  it('announces the selected task mode and repeat cadence', async () => {
+    renderPage('/planned');
+
+    fireEvent.click(await screen.findByRole('button', { name: '新建规划' }));
+
+    const single = screen.getByRole('button', { name: '单个任务' });
+    const multiple = screen.getByRole('button', { name: '多个任务' });
+    const once = screen.getByRole('button', { name: '不重复' });
+    const daily = screen.getByRole('button', { name: '每天' });
+
+    expect(single.getAttribute('aria-pressed')).toBe('true');
+    expect(multiple.getAttribute('aria-pressed')).toBe('false');
+    expect(once.getAttribute('aria-pressed')).toBe('true');
+    expect(daily.getAttribute('aria-pressed')).toBe('false');
+
+    fireEvent.click(multiple);
+    fireEvent.click(daily);
+
+    expect(single.getAttribute('aria-pressed')).toBe('false');
+    expect(multiple.getAttribute('aria-pressed')).toBe('true');
+    expect(once.getAttribute('aria-pressed')).toBe('false');
+    expect(daily.getAttribute('aria-pressed')).toBe('true');
   });
 });

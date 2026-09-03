@@ -788,6 +788,7 @@ export function PlannedTasksPage(): JSX.Element {
               <button
                 type="button"
                 className={view === 'dayGridMonth' ? 'is-active' : ''}
+                aria-pressed={view === 'dayGridMonth'}
                 onClick={() => changeView('dayGridMonth')}
               >
                 月历
@@ -795,6 +796,7 @@ export function PlannedTasksPage(): JSX.Element {
               <button
                 type="button"
                 className={view === 'listMonth' ? 'is-active' : ''}
+                aria-pressed={view === 'listMonth'}
                 onClick={() => changeView('listMonth')}
               >
                 日程
@@ -896,6 +898,7 @@ export function PlannedTasksPage(): JSX.Element {
                 <button
                   type="button"
                   className={!editor.multiple ? 'is-active' : ''}
+                  aria-pressed={!editor.multiple}
                   onClick={() => {
                     setEditor({ ...editor, multiple: false });
                     clearEditorError('items');
@@ -906,6 +909,7 @@ export function PlannedTasksPage(): JSX.Element {
                 <button
                   type="button"
                   className={editor.multiple ? 'is-active' : ''}
+                  aria-pressed={editor.multiple}
                   onClick={() => {
                     setEditor({ ...editor, multiple: true });
                     clearEditorError('instruction');
@@ -1061,6 +1065,7 @@ export function PlannedTasksPage(): JSX.Element {
                       type="button"
                       key={repeatType}
                       className={editor.repeatType === repeatType ? 'is-active' : ''}
+                      aria-pressed={editor.repeatType === repeatType}
                       onClick={() => {
                         setEditor({
                           ...editor,
@@ -1092,6 +1097,7 @@ export function PlannedTasksPage(): JSX.Element {
                         type="button"
                         key={value}
                         className={editor.customDays.includes(value) ? 'is-active' : ''}
+                        aria-pressed={editor.customDays.includes(value)}
                         onClick={() => {
                           setEditor({
                             ...editor,
@@ -1124,6 +1130,7 @@ export function PlannedTasksPage(): JSX.Element {
                     <button
                       type="button"
                       className={editor.endsOn === null ? 'is-active' : ''}
+                      aria-pressed={editor.endsOn === null}
                       onClick={() => setEditor({ ...editor, endsOn: null })}
                     >
                       永不结束
@@ -1131,6 +1138,7 @@ export function PlannedTasksPage(): JSX.Element {
                     <button
                       type="button"
                       className={editor.endsOn !== null ? 'is-active' : ''}
+                      aria-pressed={editor.endsOn !== null}
                       onClick={() => setEditor({ ...editor, endsOn: editor.endsOn ?? editor.date })}
                     >
                       结束日期
