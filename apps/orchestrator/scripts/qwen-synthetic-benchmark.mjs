@@ -370,7 +370,12 @@ function scoreChineseSummary(text) {
       value.summary.includes('18.7') &&
       value.summary.includes('5.2') &&
       Array.isArray(value.risks) &&
-      value.risks.some((risk) => typeof risk === 'string' && risk.includes('5.2')) &&
+      value.risks.some(
+        (risk) =>
+          typeof risk === 'string' &&
+          risk.includes('退款') &&
+          (risk.includes('上升') || risk.includes('增加') || risk.includes('升高')),
+      ) &&
       typeof value.nextAction === 'string' &&
       value.nextAction.trim(),
   );

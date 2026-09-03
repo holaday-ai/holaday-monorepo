@@ -202,6 +202,23 @@ describe('Qwen international synthetic benchmark', () => {
     );
   });
 
+  it('accepts a faithful risk summary without requiring the same figure twice', async () => {
+    const report = await runQwenBenchmark({
+      runtimeEnv: RUNTIME_ENV,
+      cases: [BENCHMARK_CASES[1]],
+      fetchImpl: async () =>
+        responseFor(
+          JSON.stringify({
+            summary: 'GMV 同比增长 18.7%，退款率较上期上升 5.2 个百分点。',
+            risks: ['退款率上升，原因尚未查明'],
+            nextAction: '核查退款原因',
+          }),
+        ),
+    });
+
+    assert.equal(report.cases[0].status, 'passed');
+  });
+
   it('validates forced tool use and strict JSON schema requests as a separate protocol gate', async () => {
     const responses = [
       {
