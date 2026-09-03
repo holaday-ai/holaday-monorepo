@@ -1,17 +1,19 @@
 # HOLA DAY 千问迁移能力矩阵
 
 日期：2026-09-03
-状态：国际区 SSE 首 token 与客户端主动取消门禁已通过；尚未接入生产调用链
+状态：provider-neutral adapter 与首个低风险调用点已暗发布；千问生产流量仍为零
 
 ## 核心结论
 
 “改用千问”不是替换一个模型名称。HOLA DAY 当前模型调用至少包含普通文本、流式文本、强制自定义工具、浏览器视觉决策、Anthropic beta computer/web search、严格 JSON、图片理解、图片生成、视频生成和语音能力。必须逐类迁移、评测和灰度。
 
+截至 2026-09-04，统一 Messages 适配器和任务完成后“下一步建议”调用点已经部署，但三项千问开关均为关闭、精确合成白名单数量为 0。代码可到达不等于生产已切流：当前真实用户仍沿用原供应商，千问只具备后续固定合成 canary 的受控入口。
+
 ## 当前调用形态
 
 | 场景 | 当前协议 | 千问目标 | 直接替换判断 | 发布前门禁 |
 |---|---|---|---|---|
-| 分类、摘要、报告、核验 | Anthropic Messages / OpenAI Responses | Qwen Flash / Plus | 需要统一 adapter，模型能力基础门禁已通过 | 结构化输出、中文约束、超时与错误映射 |
+| 分类、摘要、报告、核验 | Anthropic Messages / OpenAI Responses | Qwen Flash / Plus | 统一 Messages adapter 已部署；任务后续建议已接入但默认关闭 | 结构化输出、中文约束、真实超时与逐调用点灰度 |
 | Commander 任务规划 | Anthropic Messages + forced custom tool | Qwen Max + forced custom tool | 协议文档支持，必须真实验证工具块和 schema | `tool_use` 名称、参数 schema、拒绝危险步骤 |
 | a11y 浏览器循环 | Anthropic Messages + custom tools | Qwen Max + custom tools | 两轮合成工具回传已通过；真实浏览器循环仍需 adapter 和场景门禁 | 连续 tool-use/tool-result、终止、恢复、延迟 |
 | 视觉浏览器循环与 selector heal | 图片 + custom tool | Qwen3.8 Max | 文档支持图片与 function calling，组合能力需实测 | 截图理解、坐标/selector 精度、工具 schema |
@@ -49,7 +51,8 @@
 
 ## 不能跳过的工程改造
 
-- 建立 provider-neutral 的 Messages/Tools adapter，不让业务层依赖 Anthropic 特有类型。
+- provider-neutral Messages/Tools adapter 已建立；继续迁移时不得让新业务层重新依赖 Anthropic 特有类型。
+- 每个调用点必须声明模型能力：短建议对已验证的 Qwen 3 max/plus/flash 系列下发 `thinking: disabled`，对 coder 与未知覆盖省略该参数，避免可选结果被推理预算吞掉或因不支持参数失败。
 - 把 Supercar 的供应商内建 computer/web search/code execution 与 HOLA DAY 自有浏览器动作分开；前者不能假设千问兼容。
 - 每个用途有独立 feature flag、区域白名单、超时、错误率与 kill switch。
 - 国际和中国大陆分别评测，绝不因模型名称相同而复用结论。
@@ -60,5 +63,7 @@
 - 已满足：国际凭据与端点、区域路由、基础文本质量、代码、证据核验。
 - 已满足：强制自定义工具调用与严格 JSON Schema 的国际真实协议门禁。
 - 已满足：SSE 事件链、首 token、客户端主动取消、两轮合成工具回传、2,048 行合成长上下文提取。
+- 已满足：provider-neutral Messages adapter、停止原因兼容、错误脱敏，以及首个无工具、无 mutation、失败可吸收的“下一步建议”调用点暗发布。
+- 生产现状：总开关、shadow、建议 canary 均为 false，合成白名单为 0；没有生产用户千问流量，也没有跨区域回退。
 - 尚未验证：真实浏览器工具循环及恢复、真实任务流背压/恢复/用户取消语义、视觉、多媒体生成、北京区域。
-- 因此当前只允许继续离线评测，不允许生产切流或宣称已可替代全部现有模型。
+- 因此当前只允许继续固定合成评测与明确隔离的 synthetic canary；不允许生产用户切流、扩大白名单或宣称已可替代全部现有模型。
