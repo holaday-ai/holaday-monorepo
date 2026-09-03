@@ -1,3 +1,4 @@
+import Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it, vi } from 'vitest';
 import {
   type AnthropicCompatibleClient,
@@ -318,6 +319,25 @@ describe('createAnthropicCompatibleMessagesAdapter', () => {
     await expect(
       adapter.create({ maxTokens: 32, messages: [{ role: 'user', content: 'test' }] }),
     ).rejects.toMatchObject({ code, message });
+  });
+
+  it('normalizes the real SDK timeout error even when its inherited name is generic', async () => {
+    const client: AnthropicCompatibleClient = {
+      messages: {
+        create: vi.fn().mockRejectedValue(new Anthropic.APIConnectionTimeoutError()),
+      },
+    };
+    const adapter = createAnthropicCompatibleMessagesAdapter({
+      client,
+      metadata: { provider: 'anthropic', model: 'claude-haiku-4-5' },
+    });
+
+    await expect(
+      adapter.create({ maxTokens: 32, messages: [{ role: 'user', content: 'test' }] }),
+    ).rejects.toMatchObject({
+      code: 'REQUEST_TIMEOUT',
+      message: 'Message provider request timed out',
+    });
   });
 
   it('rejects a forced tool that is absent from the tool catalogue before provider I/O', async () => {
