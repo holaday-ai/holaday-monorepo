@@ -16,7 +16,7 @@
 | a11y 浏览器循环 | Anthropic Messages + custom tools | Qwen Max + custom tools | 两轮合成工具回传已通过；真实浏览器循环仍需 adapter 和场景门禁 | 连续 tool-use/tool-result、终止、恢复、延迟 |
 | 视觉浏览器循环与 selector heal | 图片 + custom tool | Qwen3.8 Max | 文档支持图片与 function calling，组合能力需实测 | 截图理解、坐标/selector 精度、工具 schema |
 | Supercar 主循环 | Anthropic beta Messages +内建 computer/web_search/code execution | Qwen + HOLA DAY 自有 custom tools | **不能直接换模型名**；千问兼容文档没有证明支持这些 Anthropic beta 内建工具 | 先把供应商内建工具隔离为自有协议，再逐项评测 |
-| 普通流式生成、抓取总结 | Anthropic Messages streaming | Qwen Messages streaming | SSE 事件链、首 token、完整正文、客户端主动取消、超时和 token 统计已通过固定合成门禁 | 接入 adapter 后仍需在真实任务链验证背压、恢复和用户取消语义 |
+| 普通流式生成、抓取总结 | Anthropic Messages streaming | Qwen Messages streaming | SSE 事件链、首 token、完整正文、客户端主动取消和 token 统计已通过固定合成运行门禁；超时仅完成注入 `AbortError` 的单元测试，真实供应商超时仍待验证 | 接入 adapter 后仍需在真实任务链验证背压、恢复、用户取消和真实超时语义 |
 | 图片结果核验 | Anthropic/Gemini 视觉理解 | Qwen3.8 Max/VL | 可作为候选，需合成图片集对照 | 成功/部分/失败四分类准确率 |
 | 图片生成 | Gemini Image | Qwen-Image / 万相 | 独立媒体迁移，不属于文字模型替换 | 中文提示、主体一致性、编辑、成本、审核 |
 | 视频生成与核验 | Veo、万相、第三方媒体模型 | 万相与必要的国际供应商 | 按能力拆分，不由 Qwen 文本模型统一承接 | 画质、时长、音画同步、人物一致性、成本 |
@@ -35,7 +35,7 @@
 
 2026-09-03 使用现有国际区凭据在目标主机内存中执行最终门禁，全部输入均由脚本确定性生成；未读取数据库、任务、附件、日志或用户自由文本，报告未包含响应正文、工具 ID 或合成记录。
 
-| 门禁 | 模型 | 结果 | 首 token / 取消触发 | 完整耗时 | 输入 / 输出 token | 请求数 |
+| 门禁 | 模型 | 结果 | 首 token / 取消触发 | 完整响应 / 客户端取消耗时 | 输入 / 输出 token | 请求数 |
 |---|---|---:|---:|---:|---:|---:|
 | SSE 基础事件链 | qwen3.8-flash | 通过 | 586 ms | 598 ms | 13 / 2 | 1 |
 | 首 token 后客户端主动取消 | qwen3.8-flash | 通过 | 580 ms | 583 ms | 未知 / 未知 | 1 |
