@@ -28,6 +28,31 @@ const STREAM_FIXTURE = [
   '',
 ].join('\n');
 
+function incrementalResponse(chunks, onCancel = () => {}) {
+  const encoder = new TextEncoder();
+  let index = 0;
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      getReader() {
+        return {
+          async read() {
+            const chunk = chunks[index];
+            index += 1;
+            if (!chunk) return { done: true, value: undefined };
+            chunk.beforeRead?.();
+            return { done: false, value: encoder.encode(chunk.text) };
+          },
+          async cancel() {
+            onCancel();
+          },
+        };
+      },
+    },
+  };
+}
+
 describe('Qwen international runtime benchmark', () => {
   it('fails closed before network access without credentials', async () => {
     const fetchImpl = mock.fn();
@@ -115,6 +140,119 @@ describe('Qwen international runtime benchmark', () => {
     assert.equal(report.cases[0].latencyMs, 75);
   });
 
+  it('measures first-token latency from the first text delta instead of the completed body', async () => {
+    let currentTime = 100;
+    const report = await runQwenRuntimeBenchmark({
+      runtimeEnv: RUNTIME_ENV,
+      cases: ['streaming_text'],
+      now: () => currentTime,
+      fetchImpl: async () =>
+        incrementalResponse([
+          {
+            beforeRead: () => {
+              currentTime = 120;
+            },
+            text: [
+              'data: {"type":"message_start","message":{"usage":{"input_tokens":23,"output_tokens":0}}}',
+              '',
+              'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+              '',
+            ].join('\n'),
+          },
+          {
+            beforeRead: () => {
+              currentTime = 140;
+            },
+            text: [
+              'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"STREAM_"}}',
+              '',
+            ].join('\n'),
+          },
+          {
+            beforeRead: () => {
+              currentTime = 200;
+            },
+            text: [
+              'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"OK"}}',
+              '',
+              'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}',
+              '',
+              'data: {"type":"message_stop"}',
+              '',
+            ].join('\n'),
+          },
+        ]),
+    });
+
+    assert.equal(report.cases[0].status, 'passed');
+    assert.equal(report.cases[0].firstTokenLatencyMs, 40);
+    assert.equal(report.cases[0].latencyMs, 100);
+    assert.doesNotMatch(JSON.stringify(report), /STREAM_OK|test-only-placeholder/);
+  });
+
+  it('actively aborts and cancels a synthetic stream immediately after its first text delta', async () => {
+    let currentTime = 100;
+    let cancelCalls = 0;
+    let observedSignal;
+    const report = await runQwenRuntimeBenchmark({
+      runtimeEnv: RUNTIME_ENV,
+      cases: ['streaming_cancel'],
+      now: () => currentTime,
+      fetchImpl: async (_url, request) => {
+        observedSignal = request.signal;
+        return incrementalResponse(
+          [
+            {
+              beforeRead: () => {
+                currentTime = 130;
+              },
+              text: [
+                'data: {"type":"message_start","message":{"usage":{"input_tokens":19,"output_tokens":0}}}',
+                '',
+              ].join('\n'),
+            },
+            {
+              beforeRead: () => {
+                currentTime = 160;
+              },
+              text: [
+                'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+                '',
+                'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"1"}}',
+                '',
+              ].join('\n'),
+            },
+            {
+              beforeRead: () => {
+                currentTime = 500;
+              },
+              text: 'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"private tail"}}\n\n',
+            },
+          ],
+          () => {
+            cancelCalls += 1;
+          },
+        );
+      },
+    });
+
+    assert.equal(observedSignal.aborted, true);
+    assert.equal(cancelCalls, 1);
+    assert.equal(report.tokenUsageComplete, false);
+    assert.deepEqual(report.cases[0], {
+      caseId: 'streaming_cancel',
+      model: 'qwen3.8-flash',
+      status: 'passed',
+      latencyMs: 60,
+      firstTokenLatencyMs: 60,
+      cancellation: 'confirmed',
+      inputTokens: null,
+      outputTokens: null,
+      calls: 1,
+    });
+    assert.doesNotMatch(JSON.stringify(report), /private tail|test-only-placeholder/);
+  });
+
   it('classifies response-body aborts as timeouts for streaming and JSON requests', async () => {
     const streaming = await runQwenRuntimeBenchmark({
       runtimeEnv: RUNTIME_ENV,
@@ -179,13 +317,15 @@ describe('Qwen international runtime benchmark', () => {
       passRate: 1,
       inputTokens: 23,
       outputTokens: 4,
+      tokenUsageComplete: true,
       calls: 1,
       cases: [
         {
           caseId: 'streaming_text',
           model: 'qwen3.8-flash',
           status: 'passed',
-          latencyMs: 25,
+          latencyMs: 50,
+          firstTokenLatencyMs: 25,
           inputTokens: 23,
           outputTokens: 4,
           calls: 1,
