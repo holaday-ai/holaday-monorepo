@@ -75,7 +75,7 @@ const CAPABILITY_TASK_EVIDENCE: Readonly<Record<string, RegExp>> = {
   'xiaohongshu-seeding-ops':
     /(?:小红书|笔记|种草|内容|选题|发布|投薯条|投流|流量|运营|标题|封面|互动|数据)/,
   'wechat-article-ops':
-    /(?:文章|推文|长文|选题|排版|标题|阅读量|内容|运营|发布|撰写|改写|摘要)/,
+    /(?:公众号|文章|推文|长文|选题|排版|标题|阅读量|内容|运营|发布|撰写|改写|摘要)/,
   'social-media-strategy':
     /(?:社媒|社交媒体|全平台|内容|矩阵|定位|发布|节奏|运营|复盘|数据|受众|品牌|策略)/,
   'image-prompt-reverse':
@@ -621,12 +621,12 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
     return {
       skill,
       score: evidence.pairScore + specificExactScore + safeBoundaryScore + intentContextScore,
+      explicitEvidenceScore: specificExactScore + safeBoundaryScore + intentContextScore,
       index,
     };
   });
   const matches = scoredSkills
-    .sort((left, right) => right.score - left.score || left.index - right.index)
-    .map(({ skill, score }) => ({ skill, score }));
+    .sort((left, right) => right.score - left.score || left.index - right.index);
   const topScore = matches[0]?.score ?? 0;
   const secondScore = matches[1]?.score ?? 0;
   const postContractReviewBoundaryConflict =
@@ -659,10 +659,17 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
   const selectableMatches =
     confidence === 'strong'
       ? matches.filter(
-          (match) => !intentViolatesSkillBoundary(match.skill.id, boundaryIntent),
+          (match, index) =>
+            match.score > 0 &&
+            (index === 0 || match.explicitEvidenceScore > 0) &&
+            hasRequiredCapabilityTaskEvidence(match.skill.id, normalizedIntent) &&
+            !intentViolatesSkillBoundary(match.skill.id, boundaryIntent),
         )
       : matches;
-  return { confidence, matches: selectableMatches };
+  return {
+    confidence,
+    matches: selectableMatches.map(({ skill, score }) => ({ skill, score })),
+  };
 }
 
 function hasRequiredCapabilityTaskEvidence(
