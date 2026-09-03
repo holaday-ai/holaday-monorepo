@@ -20,7 +20,7 @@
 | a11y 浏览器循环 | Anthropic Messages + custom tools | Qwen Max + custom tools | 两轮合成工具回传已通过；真实浏览器循环仍需 adapter 和场景门禁 | 连续 tool-use/tool-result、终止、恢复、延迟 |
 | 视觉浏览器循环与 selector heal | 图片 + custom tool | Qwen3.8 Max | 文档支持图片与 function calling，组合能力需实测 | 截图理解、坐标/selector 精度、工具 schema |
 | Supercar 主循环 | Anthropic beta Messages +内建 computer/web_search/code execution | Qwen + HOLA DAY 自有 custom tools | **不能直接换模型名**；千问兼容文档没有证明支持这些 Anthropic beta 内建工具 | 先把供应商内建工具隔离为自有协议，再逐项评测 |
-| 普通流式生成、抓取总结 | Anthropic Messages streaming | Qwen Messages streaming | SSE 事件链、首 token、完整正文、客户端主动取消和 token 统计已通过固定合成运行门禁；超时仅完成注入 `AbortError` 的单元测试，真实供应商超时仍待验证 | 接入 adapter 后仍需在真实任务链验证背压、恢复、用户取消和真实超时语义 |
+| 普通流式生成、抓取总结 | Anthropic Messages streaming | Qwen Messages streaming | SSE 事件链、首 token、完整正文、客户端主动取消和 token 统计已通过固定合成运行门禁；真实国际端点的 adapter 客户端超时归一已通过，真实任务链仍待验证 | 接入 adapter 后仍需在真实任务链验证背压、恢复和用户取消语义 |
 | 图片结果核验 | Anthropic/Gemini 视觉理解 | Qwen3.8 Max/VL | 可作为候选，需合成图片集对照 | 成功/部分/失败四分类准确率 |
 | 图片生成 | Gemini Image | Qwen-Image / 万相 | 独立媒体迁移，不属于文字模型替换 | 中文提示、主体一致性、编辑、成本、审核 |
 | 视频生成与核验 | Veo、万相、第三方媒体模型 | 万相与必要的国际供应商 | 按能力拆分，不由 Qwen 文本模型统一承接 | 画质、时长、音画同步、人物一致性、成本 |
@@ -51,6 +51,12 @@
 
 兼容差异：国际千问在返回有效 `tool_use` 内容块时，实测 `stop_reason` 为 `end_turn`。因此未来 provider adapter 必须以结构化工具块作为继续信号，并把 `tool_use` 与 `end_turn` 两种终止值规范化；不能只按 Anthropic 原生终止值分支。
 
+## 真实国际端点客户端超时证据
+
+2026-09-04 使用已部署 adapter 对国际区 `qwen3.8-flash` 执行三次固定合成超时探针，`timeoutMs=1`、`maxRetries=0`，无工具、无 mutation；只记录错误分类与聚合时延，不读取或保留响应正文、请求 ID、凭据或用户数据。
+
+首轮 3/3 被误归类为 `PROVIDER_ERROR`。诊断确认固定版本 SDK 的真实 `APIConnectionTimeoutError` 实例虽然 `constructor.name=APIConnectionTimeoutError`，但继承的 `error.name=Error`；adapter 原有单元测试用手工覆写 `error.name`，未覆盖真实对象形态。PR #210 改用真实 SDK 错误对象做回归测试并按实际错误类型归一。部署后复验 3/3 返回 `REQUEST_TIMEOUT`，单次耗时范围 2–76ms、平均 27ms。该结论只证明“客户端在真实国际端点请求上触发超时后，adapter 能稳定归一错误”；不声称供应商服务端主动返回 408/504，也不证明中断后的计费结算。
+
 ## 不能跳过的工程改造
 
 - provider-neutral Messages/Tools adapter 已建立；继续迁移时不得让新业务层重新依赖 Anthropic 特有类型。
@@ -67,6 +73,7 @@
 - 已满足：SSE 事件链、首 token、客户端主动取消、两轮合成工具回传、2,048 行合成长上下文提取。
 - 已满足：provider-neutral Messages adapter、停止原因兼容、错误脱敏，以及首个无工具、无 mutation、失败可吸收的“下一步建议”调用点暗发布。
 - 已满足：首个调用点通过目标主机固定合成端到端探针；结果只记录计数、时延、停止原因和 token 聚合，不保留模型正文。
+- 已满足：真实国际端点的客户端超时经已部署 adapter 3/3 稳定归一为 `REQUEST_TIMEOUT`；服务端主动 408/504 仍只属于静态兼容分支，不混写为已实测。
 - 生产现状：总开关、shadow、建议 canary 均为 false，合成白名单为 0；没有生产用户千问流量，也没有跨区域回退。
 - 尚未验证：真实浏览器工具循环及恢复、真实任务流背压/恢复/用户取消语义、视觉、多媒体生成、北京区域。
 - 因此当前只允许继续固定合成评测与明确隔离的 synthetic canary；不允许生产用户切流、扩大白名单或宣称已可替代全部现有模型。
