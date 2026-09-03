@@ -1511,6 +1511,7 @@ async function runSupercarTaskInternal(
   const systemPrompt = buildSupercarSystemPrompt({
     domain: opts.domain ?? null,
     intent: opts.intent,
+    roleId,
     layered: tier1,
     expertMode: opts.expertMode,
     // Plan-aware file-format guidance: honest degrade when the account

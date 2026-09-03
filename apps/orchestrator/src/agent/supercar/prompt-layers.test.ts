@@ -72,6 +72,24 @@ describe('buildLayeredSystemPrompt', () => {
     expect(styleIdx).toBeGreaterThan(roleIdx);
   });
 
+  it.each([
+    ['douyin-live-ops', '抖音策略师视角'],
+    ['xiaohongshu-seeding-ops', '小红书运营专家视角'],
+    ['wechat-article-ops', '微信公众号运营视角'],
+    ['social-media-strategy', '社交媒体策略师视角'],
+    ['image-prompt-reverse', 'AI图像提示词工程师视角'],
+    ['a-share-market-briefing', 'A股行情研究辅助视角'],
+    ['contract-risk-review', '合同审查专家视角'],
+    ['market-competitor-insight', '趋势研究员视角'],
+    ['data-report-insight', '数据分析师视角'],
+    ['product-plan-drafting', '产品经理视角'],
+    ['project-delivery-management', '高级项目经理视角'],
+    ['resume-search-screening', '招聘专家视角'],
+    ['performance-review-design', '绩效管理专家视角'],
+  ])('applies specialist guidance for canonical skill %s', (skillId, marker) => {
+    expect(buildLayeredSystemPrompt(skillId)).toContain(marker);
+  });
+
   it('requires unsourced benchmark numbers to be labelled as assumptions', () => {
     const out = buildLayeredSystemPrompt('growth-hacker');
     expect(out).toContain('没有来源支撑的行业 benchmark');
@@ -145,6 +163,17 @@ describe('selectModelAndEffort', () => {
       effort: 'xhigh',
     });
     expect(selectModelAndEffort('合同审查', 'contract-reviewer')).toEqual({
+      model: 'claude-sonnet-4-6',
+      effort: 'xhigh',
+    });
+  });
+
+  it('canonical skill ids inherit the matching specialist reasoning tier', () => {
+    expect(selectModelAndEffort('整理销售数据', 'data-report-insight')).toEqual({
+      model: 'claude-sonnet-4-6',
+      effort: 'xhigh',
+    });
+    expect(selectModelAndEffort('快速检查附件', 'contract-risk-review')).toEqual({
       model: 'claude-sonnet-4-6',
       effort: 'xhigh',
     });

@@ -8,16 +8,17 @@
  * on the final block — see shared/prompt-caching.md).
  */
 
-import { buildDomainPrompt } from '../vision-loop/domain/enricher.js';
 import type { DomainName } from '../vision-loop/domain/classifier.js';
-import { matchRole } from './role-matcher.js';
-import type { AgentRole } from './roles/index.js';
+import { buildDomainPrompt } from '../vision-loop/domain/enricher.js';
 import {
-  buildLayeredSystemPrompt,
-  classifyRole,
   EXPERT_MODE_PROMPT,
   type ExpertMode,
+  buildLayeredSystemPrompt,
+  classifyRole,
+  getRolePrompt,
 } from './prompt-layers.js';
+import { matchRole } from './role-matcher.js';
+import type { AgentRole } from './roles/index.js';
 
 /**
  * The immutable part of the supercar prompt. Do not interpolate
@@ -198,33 +199,37 @@ navigate({ url: "https://m.jd.com/search?keyword=airpods" })
  * bypass matching (useful for tests + future "user picks a role"
  * UI). Omitting both means generic prompt — still valid.
  */
-export function buildSupercarSystemPrompt(opts: {
-  domain?: DomainName | null;
-  /** User intent — if present, matchRole() runs to pick a specialisation. */
-  intent?: string;
-  /** Explicit role override — bypasses matcher when set. */
-  role?: AgentRole | null;
-  /**
-   * Phase 10 Tier 1 — when true, return the lean three-layer
-   * Base+Role+Style prompt instead of the monolithic legacy one.
-   * Caller (agent-loop) gates on env.PHASE10_TIER1 so flipping that
-   * flag swaps the prompt architecture without touching this signature.
-   * The legacy prompt is preserved as the false branch for instant
-   * rollback.
-   */
-  layered?: boolean;
-  expertMode?: ExpertMode;
-  /**
-   * Plan-aware file-format guidance (writers.buildFileFormatGuidance).
-   * Appended verbatim so the model degrades honestly when the account
-   * can't produce a requested format. Empty/undefined → no-op.
-   */
-  fileFormatGuidance?: string;
-} = {}): string {
+export function buildSupercarSystemPrompt(
+  opts: {
+    domain?: DomainName | null;
+    /** User intent — if present, matchRole() runs to pick a specialisation. */
+    intent?: string;
+    /** Explicit role override — bypasses matcher when set. */
+    role?: AgentRole | null;
+    /** Explicit role or canonical skill id used by browser-mode task dispatch. */
+    roleId?: string;
+    /**
+     * Phase 10 Tier 1 — when true, return the lean three-layer
+     * Base+Role+Style prompt instead of the monolithic legacy one.
+     * Caller (agent-loop) gates on env.PHASE10_TIER1 so flipping that
+     * flag swaps the prompt architecture without touching this signature.
+     * The legacy prompt is preserved as the false branch for instant
+     * rollback.
+     */
+    layered?: boolean;
+    expertMode?: ExpertMode;
+    /**
+     * Plan-aware file-format guidance (writers.buildFileFormatGuidance).
+     * Appended verbatim so the model degrades honestly when the account
+     * can't produce a requested format. Empty/undefined → no-op.
+     */
+    fileFormatGuidance?: string;
+  } = {},
+): string {
   const guidance = opts.fileFormatGuidance?.trim();
   if (opts.layered) {
     const intent = opts.intent ?? '';
-    const roleId = classifyRole(intent);
+    const roleId = opts.roleId ?? classifyRole(intent);
     const layered = buildLayeredSystemPrompt(roleId, opts.expertMode);
     return guidance ? `${layered}\n\n${guidance}` : layered;
   }
@@ -232,11 +237,20 @@ export function buildSupercarSystemPrompt(opts: {
   const domain = opts.domain ?? 'general';
   const domainFragment = buildDomainPrompt(domain);
 
-  const role = opts.role !== undefined ? opts.role : opts.intent ? matchRole(opts.intent) : null;
+  const explicitRolePrompt = opts.roleId === undefined ? undefined : getRolePrompt(opts.roleId);
+  const role =
+    opts.roleId !== undefined
+      ? null
+      : opts.role !== undefined
+        ? opts.role
+        : opts.intent
+          ? matchRole(opts.intent)
+          : null;
 
   const parts = [SUPERCAR_CORE_PROMPT];
   if (domainFragment) parts.push(domainFragment);
-  if (role) parts.push(role.systemAddon);
+  if (explicitRolePrompt) parts.push(explicitRolePrompt);
+  else if (role) parts.push(role.systemAddon);
   if (opts.expertMode === 'expert') parts.push(EXPERT_MODE_PROMPT);
   if (guidance) parts.push(guidance);
   return parts.join('\n\n');
