@@ -350,6 +350,7 @@ function hasTextDelta(raw) {
 
 function hasTerminalEvent(raw) {
   for (const line of raw.split(/\r?\n/)) {
+    if (/^event:\s*(?:message_delta|message_stop)\s*$/.test(line)) return true;
     if (!line.startsWith('data:')) continue;
     const data = line.slice('data:'.length).trim();
     if (!data || data === '[DONE]') continue;

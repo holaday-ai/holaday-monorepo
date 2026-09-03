@@ -281,6 +281,46 @@ describe('Qwen international runtime benchmark', () => {
     assert.equal(report.cases[0].reason, 'cancellation_not_confirmed');
   });
 
+  it('does not confirm cancellation when a terminal SSE event has a fragmented data payload', async () => {
+    let cancelCalls = 0;
+    let observedSignal;
+    const report = await runQwenRuntimeBenchmark({
+      runtimeEnv: RUNTIME_ENV,
+      cases: ['streaming_cancel'],
+      now: () => 100,
+      fetchImpl: async (_url, request) => {
+        observedSignal = request.signal;
+        return incrementalResponse(
+          [
+            {
+              text: [
+                'event: message_start',
+                'data: {"type":"message_start","message":{"usage":{"input_tokens":19,"output_tokens":0}}}',
+                '',
+                'event: content_block_delta',
+                'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"1"}}',
+                '',
+                'event: message_stop',
+                'data: {"type":"mess',
+              ].join('\n'),
+            },
+            {
+              text: 'age_stop"}\n\n',
+            },
+          ],
+          () => {
+            cancelCalls += 1;
+          },
+        );
+      },
+    });
+
+    assert.equal(observedSignal.aborted, false);
+    assert.equal(cancelCalls, 0);
+    assert.equal(report.cases[0].status, 'failed');
+    assert.equal(report.cases[0].reason, 'cancellation_not_confirmed');
+  });
+
   it('classifies response-body aborts as timeouts for streaming and JSON requests', async () => {
     const streaming = await runQwenRuntimeBenchmark({
       runtimeEnv: RUNTIME_ENV,
