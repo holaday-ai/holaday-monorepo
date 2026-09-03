@@ -31,6 +31,7 @@
  * Opus 4.7 at `effort: xhigh` with 200K. Defaults sit in the middle.
  */
 
+import type { SkillId } from '@holaday/shared-types';
 import { classifyAsSimpleSearch } from './execution-router.js';
 
 // ---------------------------------------------------------------------------
@@ -208,6 +209,8 @@ export const ROLE_PROMPTS: Record<string, string> = {
     '你同时具备品牌守护者视角。你关注品牌一致性（视觉语言/语气调性/价值观传达）、品牌定位、竞品品牌差异化分析。你能判断内容是否偏离品牌调性并给出修正建议。',
   'image-prompt-engineer':
     '你同时具备AI图像提示词工程师视角。你擅长Midjourney/DALL-E/Stable Diffusion提示词结构（主体→风格→光线→构图→参数）、负向提示词优化、风格迁移描述、多轮迭代出图策略。',
+  'a-share-market-briefing':
+    '你同时具备A股行情研究辅助视角。你会优先核对交易日期、数据时效与来源，把行情事实、原因推断、反证和风险提示分开呈现；当数据延迟、休市或降级时明确标注，不把相关性写成因果，不荐股、不承诺收益，也不代替用户下单。',
   'visual-storyteller':
     '你同时具备视觉叙事师视角。你擅长数据可视化设计、信息图表叙事结构、演示文稿视觉节奏、图文排版美学。你能将复杂数据转化为易懂的视觉故事。',
 
@@ -269,6 +272,26 @@ export const ROLE_PROMPTS: Record<string, string> = {
   'executive-briefing':
     '你同时具备高管简报视角。你擅长战略级信息提炼与呈现：市场格局→竞争态势→内部现状→建议行动→预期ROI，使用金字塔原理，结论先行。',
 };
+
+const CANONICAL_SKILL_ROLE_IDS = {
+  'douyin-live-ops': 'douyin-strategist',
+  'xiaohongshu-seeding-ops': 'xiaohongshu-operator',
+  'wechat-article-ops': 'wechat-operator',
+  'social-media-strategy': 'social-media-strategist',
+  'image-prompt-reverse': 'image-prompt-engineer',
+  'a-share-market-briefing': 'a-share-market-briefing',
+  'contract-risk-review': 'contract-reviewer',
+  'market-competitor-insight': 'trend-researcher',
+  'data-report-insight': 'data-analyst',
+  'product-plan-drafting': 'product-manager',
+  'project-delivery-management': 'senior-pm',
+  'resume-search-screening': 'recruiter',
+  'performance-review-design': 'performance-mgmt',
+} as const satisfies Readonly<Record<SkillId, string>>;
+
+function resolvePromptRoleId(roleId: string): string {
+  return CANONICAL_SKILL_ROLE_IDS[roleId as SkillId] ?? roleId;
+}
 
 /**
  * Role id → keyword bag for keyword classification. Order matters:
@@ -355,11 +378,8 @@ export function classifyRole(intent: string): string {
  * what the SPA users intuitively check against, since the product
  * is China-facing.
  */
-export function buildLayeredSystemPrompt(
-  roleId: string,
-  expertMode: ExpertMode = 'auto',
-): string {
-  const role = ROLE_PROMPTS[roleId];
+export function buildLayeredSystemPrompt(roleId: string, expertMode: ExpertMode = 'auto'): string {
+  const role = ROLE_PROMPTS[resolvePromptRoleId(roleId)];
   const parts = [buildDatePrompt(), BASE_PROMPT];
   if (role && role.length > 0) parts.push(role);
   if (expertMode === 'expert') parts.push(EXPERT_MODE_PROMPT);
@@ -472,7 +492,7 @@ export function selectModelAndEffort(intent: string, roleId: string): ModelChoic
   // Complex wins first — preserves "specialist role + simple-keyword
   // prompt" routing to xhigh (a financial-forecaster asking for a
   // quick calc still benefits from the higher reasoning budget).
-  if (COMPLEX_ROLES.has(roleId) || hasAny(intent, COMPLEX_KEYWORDS)) {
+  if (COMPLEX_ROLES.has(resolvePromptRoleId(roleId)) || hasAny(intent, COMPLEX_KEYWORDS)) {
     return { model: 'claude-sonnet-4-6', effort: 'xhigh' };
   }
   // Simple — Haiku is enough for translation / glossary / SOP /
