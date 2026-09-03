@@ -236,6 +236,42 @@ describe('Qwen international synthetic benchmark', () => {
     assert.equal(report.cases[0].status, 'passed');
   });
 
+  it('accepts common upward refund-rate synonyms', async () => {
+    for (const upwardTerm of ['提高', '提升', '上涨', '走高', '攀升']) {
+      const report = await runQwenBenchmark({
+        runtimeEnv: RUNTIME_ENV,
+        cases: [BENCHMARK_CASES[1]],
+        fetchImpl: async () =>
+          responseFor(
+            JSON.stringify({
+              summary: 'GMV 同比增长 18.7%，退款率较上期上升 5.2 个百分点。',
+              risks: [`退款率较上期${upwardTerm} 5.2 个百分点`],
+              nextAction: '核查退款原因',
+            }),
+          ),
+      });
+
+      assert.equal(report.cases[0].status, 'passed', upwardTerm);
+    }
+  });
+
+  it('rejects negated upward refund-rate wording', async () => {
+    const report = await runQwenBenchmark({
+      runtimeEnv: RUNTIME_ENV,
+      cases: [BENCHMARK_CASES[1]],
+      fetchImpl: async () =>
+        responseFor(
+          JSON.stringify({
+            summary: 'GMV 同比增长 18.7%，退款率较上期上升 5.2 个百分点。',
+            risks: ['退款率较上期没有明显上升'],
+            nextAction: '核查退款原因',
+          }),
+        ),
+    });
+
+    assert.equal(report.cases[0].status, 'failed');
+  });
+
   it('rejects a refund risk that preserves the figure but reverses the direction', async () => {
     const report = await runQwenBenchmark({
       runtimeEnv: RUNTIME_ENV,

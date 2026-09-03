@@ -362,6 +362,22 @@ function scorePlanning(text) {
   );
 }
 
+const UPWARD_RISK_TERMS = ['上升', '增加', '增长', '升高', '提高', '提升', '上涨', '走高', '攀升'];
+const DOWNWARD_RISK_TERMS = ['下降', '降低', '减少', '下滑', '回落', '收窄', '改善', '缓解'];
+const NEGATED_UPWARD_RISK = new RegExp(
+  `(?:未见|未|没有|无|不再|并未)(?:出现|发生|呈现|明显|显著|持续|进一步|继续|见){0,3}(?:${UPWARD_RISK_TERMS.join('|')})`,
+);
+
+function hasUpwardRefundRisk(risk) {
+  return (
+    typeof risk === 'string' &&
+    risk.includes('退款') &&
+    UPWARD_RISK_TERMS.some((term) => risk.includes(term)) &&
+    !DOWNWARD_RISK_TERMS.some((term) => risk.includes(term)) &&
+    !NEGATED_UPWARD_RISK.test(risk)
+  );
+}
+
 function scoreChineseSummary(text) {
   const value = parseJson(text);
   return Boolean(
@@ -370,15 +386,7 @@ function scoreChineseSummary(text) {
       value.summary.includes('18.7') &&
       value.summary.includes('5.2') &&
       Array.isArray(value.risks) &&
-      value.risks.some(
-        (risk) =>
-          typeof risk === 'string' &&
-          risk.includes('退款') &&
-          (risk.includes('上升') ||
-            risk.includes('增加') ||
-            risk.includes('增长') ||
-            risk.includes('升高')),
-      ) &&
+      value.risks.some(hasUpwardRefundRisk) &&
       typeof value.nextAction === 'string' &&
       value.nextAction.trim(),
   );
