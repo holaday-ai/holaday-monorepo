@@ -293,6 +293,10 @@ function resolvePromptRoleId(roleId: string): string {
   return CANONICAL_SKILL_ROLE_IDS[roleId as SkillId] ?? roleId;
 }
 
+export function getRolePrompt(roleId: string): string | undefined {
+  return ROLE_PROMPTS[resolvePromptRoleId(roleId)];
+}
+
 /**
  * Role id → keyword bag for keyword classification. Order matters:
  * the first id whose keyword matches the intent wins. Specialised
@@ -379,7 +383,7 @@ export function classifyRole(intent: string): string {
  * is China-facing.
  */
 export function buildLayeredSystemPrompt(roleId: string, expertMode: ExpertMode = 'auto'): string {
-  const role = ROLE_PROMPTS[resolvePromptRoleId(roleId)];
+  const role = getRolePrompt(roleId);
   const parts = [buildDatePrompt(), BASE_PROMPT];
   if (role && role.length > 0) parts.push(role);
   if (expertMode === 'expert') parts.push(EXPERT_MODE_PROMPT);

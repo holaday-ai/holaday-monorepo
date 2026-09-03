@@ -49,4 +49,17 @@ describe('supercar system prompt safety boundaries', () => {
     expect(prompt).toContain('专家模式质量合同');
     expect(prompt).toContain('[模型假设]');
   });
+
+  it.each([true, false])(
+    'honours an explicit canonical skill in browser prompts (layered=%s)',
+    (layered) => {
+      const prompt = buildSupercarSystemPrompt({
+        intent: '在 Boss 直聘找三位符合附件要求的人',
+        roleId: 'resume-search-screening',
+        layered,
+      });
+
+      expect(prompt).toContain('招聘专家视角');
+    },
+  );
 });
