@@ -344,10 +344,39 @@ describe('skills page state helpers', () => {
     );
 
     expect(result.confidence).toBe('strong');
+    expect(result.matches.map((match) => match.skill.id)).toEqual(['data-report-insight']);
+  });
+
+  it('does not present incidental text overlap as an additional skill match', () => {
+    const result = matchSkillsForIntent(
+      normalizeSkillRows(HOLADAY_SKILLS),
+      '分析这份周报，找出异常和最值得关注的变化',
+    );
+
+    expect(result.confidence).toBe('strong');
+    expect(result.matches.map((match) => match.skill.id)).toEqual(['data-report-insight']);
+  });
+
+  it('does not treat generic sales-data wording as evidence for content skills', () => {
+    const result = matchSkillsForIntent(
+      normalizeSkillRows(HOLADAY_SKILLS),
+      '帮我分析这份销售数据，找出复购率下降的原因',
+    );
+
+    expect(result.confidence).toBe('strong');
+    expect(result.matches.map((match) => match.skill.id)).toEqual(['data-report-insight']);
+  });
+
+  it('keeps a secondary capability when the user explicitly requests it', () => {
+    const result = matchSkillsForIntent(
+      normalizeSkillRows(HOLADAY_SKILLS),
+      '分析这份周报，找出异常和最值得关注的变化，并规划公众号',
+    );
+
+    expect(result.confidence).toBe('strong');
     expect(result.matches.map((match) => match.skill.id)).toEqual([
       'data-report-insight',
-      'contract-risk-review',
-      'social-media-strategy',
+      'wechat-article-ops',
     ]);
   });
 
