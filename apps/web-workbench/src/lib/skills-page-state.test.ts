@@ -250,14 +250,18 @@ describe('skills page state helpers', () => {
     });
   });
 
-  it('keeps suggested matches non-authoritative when the composer hydrates a draft', () => {
+  it('preserves an automatically matched skill when the composer hydrates a draft', () => {
     expect(
       skillSelectionFromTaskDraft({
         skillId: 'data-report-insight',
         skillName: '数据报表解读',
         skillSource: 'suggested',
       }),
-    ).toBeNull();
+    ).toEqual({
+      skillId: 'data-report-insight',
+      skillName: '数据报表解读',
+      skillSource: 'suggested',
+    });
     expect(
       skillSelectionFromTaskDraft({
         skillId: 'data-report-insight',

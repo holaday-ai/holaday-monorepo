@@ -576,16 +576,17 @@ const createInput = z.object({
    */
   expertMode: z.enum(['normal', 'expert', 'auto']).optional(),
   /**
-   * Phase 21a — explicit skill/role id chosen for this task. When
-   * present, the looksLikeCodeIntent guard is skipped: the user has
-   * picked a domain expert, so "帮我写个网站翻译脚本" under 技术翻译
-   * is intended, not a stray app-building request. The resolved
+   * Phase 21a — skill/role id chosen by the user or matched by the
+   * Skill Centre for this task. When present, the looksLikeCodeIntent
+   * guard is skipped: the task has an explicit specialist context, so
+   * "帮我写个网站翻译脚本" under 技术翻译 is intended, not a stray
+   * app-building request. The resolved
    * AgentRole isn't used here in the gate — the supercar layer
    * picks roles via classifyRole on its own — but having the id on
    * the wire lets us short-circuit the guard cleanly.
    */
   skillId: z.string().min(1).max(64).optional(),
-  skillSource: z.enum(['manual']).optional(),
+  skillSource: z.enum(['manual', 'suggested']).optional(),
   /**
    * Phase 1 #2 ④ — alias for skillId. 历史上 skill/role 字段在本仓库混用，
    * API 调用方（含对抗实测）常传 `roleId`。接受为 skillId 的别名，避免选了
@@ -636,14 +637,14 @@ const createInput = z.object({
 
 const ASHARE_SKILL_IDS = new Set(['a-share-market-briefing', 'a-share-analyst']);
 
-function assertManualSkillSelectionAvailable(
+function assertTaskSkillSelectionAvailable(
   input: {
     skillId?: string | null;
     roleId?: string | null;
-    skillSource?: 'manual' | undefined;
+    skillSource?: 'manual' | 'suggested' | undefined;
   },
 ): string | null {
-  if (input.skillSource !== 'manual') return null;
+  if (input.skillSource !== 'manual' && input.skillSource !== 'suggested') return null;
   const skillId = (input.skillId ?? input.roleId ?? '').trim();
   const skill = skillById(skillId);
   if (!skill) {
@@ -668,12 +669,12 @@ function resolveTaskSkillContext(
   input: {
     skillId?: string | null;
     roleId?: string | null;
-    skillSource?: 'manual' | undefined;
+    skillSource?: 'manual' | 'suggested' | undefined;
   },
   _selectedSkillIds: unknown,
 ): string | undefined {
   return (
-    assertManualSkillSelectionAvailable(input) ?? normalizeTaskSkillInputId(input)
+    assertTaskSkillSelectionAvailable(input) ?? normalizeTaskSkillInputId(input)
   );
 }
 
@@ -10600,7 +10601,7 @@ function buildPersonalProjectLookupQuery(
 
 export const __tasksInternals = {
   assertVideoImageChoiceAllowed,
-  assertManualSkillSelectionAvailable,
+  assertTaskSkillSelectionAvailable,
   buildVideoExecutionMetadata,
   buildPlannerIntent,
   buildPlannerSkillCatalogue,

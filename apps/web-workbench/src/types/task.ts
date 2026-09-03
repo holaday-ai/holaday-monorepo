@@ -260,7 +260,7 @@ export interface UiSkill {
 export interface UiSkillSelection {
   skillId: string;
   skillName: string;
-  skillSource: 'manual';
+  skillSource: 'manual' | 'suggested';
 }
 
 /**

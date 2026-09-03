@@ -561,11 +561,22 @@ export function skillSelectionFromTaskDraft(draft: {
   readonly skillName?: unknown;
   readonly skillSource?: unknown;
 } | null): UiSkillSelection | null {
-  if (!draft || (draft.skillSource !== undefined && draft.skillSource !== 'manual')) return null;
+  if (
+    !draft ||
+    (draft.skillSource !== undefined &&
+      draft.skillSource !== 'manual' &&
+      draft.skillSource !== 'suggested')
+  ) {
+    return null;
+  }
   const skillId = typeof draft.skillId === 'string' ? draft.skillId.trim() : '';
   const skillName = typeof draft.skillName === 'string' ? draft.skillName.trim() : '';
   if (!skillId || !skillName) return null;
-  return { skillId, skillName, skillSource: 'manual' };
+  return {
+    skillId,
+    skillName,
+    skillSource: draft.skillSource === 'suggested' ? 'suggested' : 'manual',
+  };
 }
 
 export function pickCapabilityShowcase<TSkill extends { readonly id: string }>(
