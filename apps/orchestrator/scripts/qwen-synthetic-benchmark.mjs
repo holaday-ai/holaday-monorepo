@@ -374,7 +374,11 @@ function scoreChineseSummary(text) {
         (risk) =>
           typeof risk === 'string' &&
           risk.includes('退款') &&
-          (risk.includes('上升') || risk.includes('增加') || risk.includes('升高')),
+          (risk.includes('5.2') ||
+            risk.includes('上升') ||
+            risk.includes('增加') ||
+            risk.includes('增长') ||
+            risk.includes('升高')),
       ) &&
       typeof value.nextAction === 'string' &&
       value.nextAction.trim(),
