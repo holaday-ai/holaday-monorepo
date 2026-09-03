@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 const DEFAULT_ENDPOINT = 'https://dashscope-intl.aliyuncs.com/apps/anthropic';
 const RUNTIME_CASE_IDS = Object.freeze([
   'streaming_text',
+  'streaming_cancel',
   'tool_roundtrip',
   'long_context_retrieval',
 ]);
@@ -34,6 +35,17 @@ export async function runQwenRuntimeBenchmark({
       results.push(
         await runStreamingCase({ apiKey, workspaceId, endpoint, fetchImpl, now, timeoutMs }),
       );
+    } else if (caseId === 'streaming_cancel') {
+      results.push(
+        await runStreamingCancellationCase({
+          apiKey,
+          workspaceId,
+          endpoint,
+          fetchImpl,
+          now,
+          timeoutMs,
+        }),
+      );
     } else if (caseId === 'tool_roundtrip') {
       results.push(
         await runToolRoundtripCase({ apiKey, workspaceId, endpoint, fetchImpl, now, timeoutMs }),
@@ -46,8 +58,17 @@ export async function runQwenRuntimeBenchmark({
   }
 
   const passed = results.filter((result) => result.status === 'passed').length;
-  const inputTokens = results.reduce((total, result) => total + result.inputTokens, 0);
-  const outputTokens = results.reduce((total, result) => total + result.outputTokens, 0);
+  const inputTokens = results.reduce(
+    (total, result) => total + (Number.isFinite(result.inputTokens) ? result.inputTokens : 0),
+    0,
+  );
+  const outputTokens = results.reduce(
+    (total, result) => total + (Number.isFinite(result.outputTokens) ? result.outputTokens : 0),
+    0,
+  );
+  const tokenUsageComplete = results.every(
+    (result) => Number.isFinite(result.inputTokens) && Number.isFinite(result.outputTokens),
+  );
   const calls = results.reduce((total, result) => total + result.calls, 0);
 
   return {
@@ -64,6 +85,7 @@ export async function runQwenRuntimeBenchmark({
     passRate: results.length === 0 ? 0 : passed / results.length,
     inputTokens,
     outputTokens,
+    tokenUsageComplete,
     calls,
     cases: results,
   };
@@ -141,9 +163,9 @@ async function runStreamingCase({ apiKey, workspaceId, endpoint, fetchImpl, now,
       return failedCase(benchmarkCase, Math.max(0, now() - startedAt), `http_${response.status}`);
     }
 
-    let raw;
+    let streamed;
     try {
-      raw = await response.text();
+      streamed = await consumeAnthropicSse({ response, controller, now, startedAt });
     } catch (error) {
       return failedCase(
         benchmarkCase,
@@ -152,7 +174,7 @@ async function runStreamingCase({ apiKey, workspaceId, endpoint, fetchImpl, now,
       );
     }
     const latencyMs = Math.max(0, now() - startedAt);
-    const parsed = parseAnthropicSse(raw);
+    const parsed = parseAnthropicSse(streamed.raw);
     if (!parsed) return failedCase(benchmarkCase, latencyMs, 'invalid_stream');
 
     const requiredTypes = [
@@ -180,13 +202,147 @@ async function runStreamingCase({ apiKey, workspaceId, endpoint, fetchImpl, now,
       return failedCase(benchmarkCase, latencyMs, 'stream_contract_failed', parsed.usage);
     }
 
-    return passedCase(benchmarkCase, latencyMs, parsed.usage);
+    return passedCase(benchmarkCase, latencyMs, parsed.usage, 1, {
+      firstTokenLatencyMs: streamed.firstTokenLatencyMs,
+    });
   } catch (error) {
     const reason = error?.name === 'AbortError' ? 'timeout' : 'network_error';
     return failedCase(benchmarkCase, Math.max(0, now() - startedAt), reason);
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function runStreamingCancellationCase({
+  apiKey,
+  workspaceId,
+  endpoint,
+  fetchImpl,
+  now,
+  timeoutMs,
+}) {
+  const benchmarkCase = { caseId: 'streaming_cancel', model: 'qwen3.8-flash' };
+  const startedAt = now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(`${endpoint}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'anthropic-version': '2023-06-01',
+        'x-api-key': apiKey,
+        ...(workspaceId ? { 'x-dashscope-workspace': workspaceId } : {}),
+      },
+      body: JSON.stringify({
+        model: benchmarkCase.model,
+        max_tokens: 2_048,
+        thinking: { type: 'disabled' },
+        stream: true,
+        messages: [
+          {
+            role: 'user',
+            content:
+              'Synthetic cancellation test. Output the integers from 1 through 1000 in ascending order, separated by commas. Start immediately and do not summarize.',
+          },
+        ],
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return failedCase(benchmarkCase, Math.max(0, now() - startedAt), `http_${response.status}`);
+    }
+    if (!response.body || typeof response.body.getReader !== 'function') {
+      return failedCase(benchmarkCase, Math.max(0, now() - startedAt), 'stream_unavailable');
+    }
+
+    const streamed = await consumeAnthropicSse({
+      response,
+      controller,
+      now,
+      startedAt,
+      cancelAfterFirstText: true,
+    });
+    const latencyMs = Math.max(0, now() - startedAt);
+    if (streamed.status !== 'cancelled' || streamed.firstTokenLatencyMs === null) {
+      return failedCase(benchmarkCase, latencyMs, 'cancellation_not_confirmed');
+    }
+    return passedCase(benchmarkCase, latencyMs, { inputTokens: null, outputTokens: null }, 1, {
+      firstTokenLatencyMs: streamed.firstTokenLatencyMs,
+      cancellation: 'confirmed',
+    });
+  } catch (error) {
+    const reason = error?.name === 'AbortError' ? 'timeout' : 'network_error';
+    return failedCase(benchmarkCase, Math.max(0, now() - startedAt), reason);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function consumeAnthropicSse({
+  response,
+  controller,
+  now,
+  startedAt,
+  cancelAfterFirstText = false,
+}) {
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    const raw = await response.text();
+    return {
+      status: 'completed',
+      raw,
+      firstTokenLatencyMs: hasTextDelta(raw) ? Math.max(0, now() - startedAt) : null,
+    };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let raw = '';
+  let firstTokenLatencyMs = null;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    raw += decoder.decode(value, { stream: true });
+    if (firstTokenLatencyMs === null && hasTextDelta(raw)) {
+      firstTokenLatencyMs = Math.max(0, now() - startedAt);
+      if (cancelAfterFirstText) {
+        controller.abort();
+        try {
+          await reader.cancel();
+        } catch (error) {
+          if (error?.name !== 'AbortError') throw error;
+        }
+        return { status: 'cancelled', raw: '', firstTokenLatencyMs };
+      }
+    }
+  }
+  raw += decoder.decode();
+  if (firstTokenLatencyMs === null && hasTextDelta(raw)) {
+    firstTokenLatencyMs = Math.max(0, now() - startedAt);
+  }
+  return { status: 'completed', raw, firstTokenLatencyMs };
+}
+
+function hasTextDelta(raw) {
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue;
+    const data = line.slice('data:'.length).trim();
+    if (!data || data === '[DONE]') continue;
+    try {
+      const event = JSON.parse(data);
+      if (
+        event?.type === 'content_block_delta' &&
+        event?.delta?.type === 'text_delta' &&
+        typeof event.delta.text === 'string' &&
+        event.delta.text.length > 0
+      ) {
+        return true;
+      }
+    } catch {
+      // A JSON event may be split across transport chunks; wait for the next chunk.
+    }
+  }
+  return false;
 }
 
 const LOOKUP_TOOL = Object.freeze({
@@ -451,12 +607,13 @@ function parseJson(text) {
   }
 }
 
-function passedCase(benchmarkCase, latencyMs, usage, calls = 1) {
+function passedCase(benchmarkCase, latencyMs, usage, calls = 1, details = {}) {
   return {
     caseId: benchmarkCase.caseId,
     model: benchmarkCase.model,
     status: 'passed',
     latencyMs,
+    ...details,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     calls,
