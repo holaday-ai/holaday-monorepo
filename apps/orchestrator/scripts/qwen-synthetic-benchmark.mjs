@@ -65,10 +65,82 @@ export const BENCHMARK_CASES = Object.freeze([
   },
 ]);
 
+const PLAN_TOOL = Object.freeze({
+  name: 'emit_plan',
+  description: 'Return the ordered synthetic browser plan.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      steps: {
+        type: 'array',
+        minItems: 2,
+        maxItems: 2,
+        items: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string', enum: ['goto', 'extract'] },
+            target: { type: 'string' },
+            risk: { type: 'string', enum: ['low', 'medium', 'high'] },
+          },
+          required: ['kind', 'target', 'risk'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['steps'],
+    additionalProperties: false,
+  },
+});
+
+const STRUCTURED_REVIEW_SCHEMA = Object.freeze({
+  type: 'object',
+  properties: {
+    status: { type: 'string', enum: ['ready', 'review'] },
+    priority: { type: 'integer', minimum: 1, maximum: 3 },
+  },
+  required: ['status', 'priority'],
+  additionalProperties: false,
+});
+
+export const PROTOCOL_CASES = Object.freeze([
+  {
+    caseId: 'forced_tool_plan',
+    purpose: 'reasoning',
+    model: 'qwen3.8-max',
+    maxTokens: 300,
+    prompt:
+      'Synthetic browser planning test. First navigate to https://example.com/report, then extract the page title. Do not perform the actions. Call emit_plan with exactly two low-risk steps.',
+    requestExtensions: {
+      tools: [PLAN_TOOL],
+      tool_choice: { type: 'tool', name: 'emit_plan' },
+    },
+    scorePayload: (payload) => forcedToolPlanFailure(payload) === null,
+    failureReason: forcedToolPlanFailure,
+  },
+  {
+    caseId: 'strict_json_schema',
+    purpose: 'standard',
+    model: 'qwen3.7-plus',
+    maxTokens: 120,
+    prompt:
+      'Synthetic JSON classification. A supplied report has a material unresolved refund-rate increase, so it requires review with priority 2. Return the JSON result only.',
+    requestExtensions: {
+      output_config: {
+        format: {
+          type: 'json_schema',
+          schema: STRUCTURED_REVIEW_SCHEMA,
+        },
+      },
+    },
+    score: scoreStructuredReview,
+  },
+]);
+
 export async function runQwenBenchmark({
   runtimeEnv,
   fetchImpl = fetch,
-  cases = BENCHMARK_CASES,
+  cases,
+  suite = 'baseline',
   now = Date.now,
   timeoutMs = 60_000,
 }) {
@@ -82,8 +154,9 @@ export async function runQwenBenchmark({
   );
   if (!endpoint) return blocked('invalid_endpoint');
 
+  const selectedCases = cases ?? (suite === 'protocol' ? PROTOCOL_CASES : BENCHMARK_CASES);
   const results = [];
-  for (const benchmarkCase of cases) {
+  for (const benchmarkCase of selectedCases) {
     results.push(await runCase({ benchmarkCase, apiKey, endpoint, fetchImpl, now, timeoutMs }));
   }
 
@@ -98,7 +171,10 @@ export async function runQwenBenchmark({
   return {
     status: 'completed',
     region: 'intl',
-    gate: classifyQwenBenchmark(scoringInput),
+    gate:
+      suite === 'protocol'
+        ? classifyQwenProtocolBenchmark(scoringInput)
+        : classifyQwenBenchmark(scoringInput),
     passed,
     total: results.length,
     passRate: results.length === 0 ? 0 : passed / results.length,
@@ -106,6 +182,14 @@ export async function runQwenBenchmark({
     outputTokens,
     cases: results,
   };
+}
+
+export function classifyQwenProtocolBenchmark(results) {
+  if (results.length !== PROTOCOL_CASES.length) return 'conditional';
+  const passed = results.filter((item) => item.passed).length;
+  if (passed === PROTOCOL_CASES.length) return 'pass';
+  if (passed > 0) return 'conditional';
+  return 'fail';
 }
 
 export function classifyQwenBenchmark(results) {
@@ -136,6 +220,7 @@ async function runCase({ benchmarkCase, apiKey, endpoint, fetchImpl, now, timeou
         max_tokens: benchmarkCase.maxTokens,
         ...(benchmarkCase.model === 'qwen3-coder-plus' ? {} : { thinking: { type: 'disabled' } }),
         messages: [{ role: 'user', content: benchmarkCase.prompt }],
+        ...(benchmarkCase.requestExtensions ?? {}),
       }),
       signal: controller.signal,
     });
@@ -161,16 +246,18 @@ async function runCase({ benchmarkCase, apiKey, endpoint, fetchImpl, now, timeou
       inputTokens: finiteNonNegative(payload?.usage?.input_tokens),
       outputTokens: finiteNonNegative(payload?.usage?.output_tokens),
     };
-    if (!responseText) {
+    if (!benchmarkCase.scorePayload && !responseText) {
       return failedCase(benchmarkCase, latencyMs, 'empty_response', usage);
     }
-    const passed = benchmarkCase.score(responseText);
+    const passed = benchmarkCase.scorePayload
+      ? benchmarkCase.scorePayload(payload)
+      : benchmarkCase.score(responseText);
     return {
       caseId: benchmarkCase.caseId,
       purpose: benchmarkCase.purpose,
       model: benchmarkCase.model,
       status: passed ? 'passed' : 'failed',
-      ...(passed ? {} : { reason: 'criteria_not_met' }),
+      ...(passed ? {} : { reason: benchmarkCase.failureReason?.(payload) ?? 'criteria_not_met' }),
       latencyMs,
       ...usage,
     };
@@ -296,6 +383,29 @@ function scoreTools(text) {
   );
 }
 
+function forcedToolPlanFailure(payload) {
+  const toolUse = Array.isArray(payload?.content)
+    ? payload.content.find((block) => block?.type === 'tool_use' && block.name === 'emit_plan')
+    : null;
+  if (!toolUse) return 'missing_emit_plan';
+  const steps = toolUse?.input?.steps;
+  if (!Array.isArray(steps) || steps.length !== 2) return 'invalid_step_count';
+  if (steps[0]?.kind !== 'goto' || steps[1]?.kind !== 'extract') return 'invalid_step_order';
+  if (steps[0]?.target !== 'https://example.com/report') return 'invalid_navigation_target';
+  if (typeof steps[1]?.target !== 'string' || !/title/i.test(steps[1].target)) {
+    return 'invalid_extract_target';
+  }
+  if (steps[0]?.risk !== 'low' || steps[1]?.risk !== 'low') return 'invalid_risk';
+  return null;
+}
+
+function scoreStructuredReview(text) {
+  const value = parseJson(text);
+  return Boolean(
+    value && value.status === 'review' && value.priority === 2 && Object.keys(value).length === 2,
+  );
+}
+
 function finiteNonNegative(value) {
   return Number.isFinite(value) && value >= 0 ? Number(value) : 0;
 }
@@ -321,8 +431,9 @@ if (process.argv.includes('--run')) {
   const pm2Index = process.argv.indexOf('--pm2-process');
   const processName = pm2Index >= 0 ? process.argv[pm2Index + 1] : null;
   const runtimeEnv = processName ? readPm2Environment(processName) : process.env;
-  const cases = process.argv.includes('--smoke') ? [BENCHMARK_CASES[0]] : BENCHMARK_CASES;
-  runQwenBenchmark({ runtimeEnv, cases })
+  const suite = process.argv.includes('--protocol') ? 'protocol' : 'baseline';
+  const cases = process.argv.includes('--smoke') ? [BENCHMARK_CASES[0]] : undefined;
+  runQwenBenchmark({ runtimeEnv, cases, suite })
     .then((report) => {
       process.stdout.write(`${JSON.stringify(report)}\n`);
       if (report.status !== 'completed' || report.gate === 'fail') process.exitCode = 1;

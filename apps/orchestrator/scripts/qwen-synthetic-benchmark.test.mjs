@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
 import {
   BENCHMARK_CASES,
+  PROTOCOL_CASES,
   classifyQwenBenchmark,
   runQwenBenchmark,
 } from './qwen-synthetic-benchmark.mjs';
@@ -143,6 +144,83 @@ describe('Qwen international synthetic benchmark', () => {
       report.cases.every((item) => item.status === 'passed'),
       true,
     );
+  });
+
+  it('validates forced tool use and strict JSON schema requests as a separate protocol gate', async () => {
+    const responses = [
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          content: [
+            {
+              type: 'tool_use',
+              id: 'synthetic-tool-id',
+              name: 'emit_plan',
+              input: {
+                steps: [
+                  { kind: 'goto', target: 'https://example.com/report', risk: 'low' },
+                  { kind: 'extract', target: 'page_title', risk: 'low' },
+                ],
+              },
+            },
+          ],
+          usage: { input_tokens: 20, output_tokens: 10 },
+        }),
+      },
+      responseFor(JSON.stringify({ status: 'review', priority: 2 })),
+    ];
+    const fetchImpl = mock.fn(async () => responses.shift());
+
+    const report = await runQwenBenchmark({
+      runtimeEnv: RUNTIME_ENV,
+      fetchImpl,
+      suite: 'protocol',
+    });
+
+    assert.equal(fetchImpl.mock.callCount(), 2);
+    assert.equal(report.gate, 'pass');
+    assert.equal(report.passed, 2);
+    assert.equal(report.total, PROTOCOL_CASES.length);
+    const toolRequest = JSON.parse(fetchImpl.mock.calls[0].arguments[1].body);
+    assert.deepEqual(toolRequest.tool_choice, { type: 'tool', name: 'emit_plan' });
+    assert.equal(toolRequest.tools[0].name, 'emit_plan');
+    assert.deepEqual(toolRequest.thinking, { type: 'disabled' });
+    const structuredRequest = JSON.parse(fetchImpl.mock.calls[1].arguments[1].body);
+    assert.equal(structuredRequest.output_config.format.type, 'json_schema');
+    assert.equal(structuredRequest.output_config.format.schema.additionalProperties, false);
+    assert.doesNotMatch(
+      JSON.stringify(report),
+      /synthetic-tool-id|example\.com\/report|"status":"review"/,
+    );
+  });
+
+  it('reports a safe structural tool failure without returning tool input', async () => {
+    const report = await runQwenBenchmark({
+      runtimeEnv: RUNTIME_ENV,
+      suite: 'protocol',
+      cases: [PROTOCOL_CASES[0]],
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          content: [
+            {
+              type: 'tool_use',
+              id: 'private-synthetic-id',
+              name: 'emit_plan',
+              input: {
+                steps: [{ kind: 'goto', target: 'https://example.com/private', risk: 'low' }],
+              },
+            },
+          ],
+          usage: { input_tokens: 10, output_tokens: 5 },
+        }),
+      }),
+    });
+
+    assert.equal(report.cases[0].reason, 'invalid_step_count');
+    assert.doesNotMatch(JSON.stringify(report), /private-synthetic-id|example\.com\/private/);
   });
 
   it('sanitizes HTTP failures without reading or returning the provider body', async () => {
