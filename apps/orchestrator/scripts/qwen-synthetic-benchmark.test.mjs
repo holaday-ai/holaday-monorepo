@@ -67,6 +67,62 @@ describe('Qwen international synthetic benchmark', () => {
     assert.equal(fetchImpl.mock.callCount(), 0);
   });
 
+  it('forwards the configured international workspace on every request', async () => {
+    const fetchImpl = mock.fn(async () => responseFor(PASSING_OUTPUTS[0]));
+    await runQwenBenchmark({
+      runtimeEnv: {
+        ...RUNTIME_ENV,
+        DASHSCOPE_INTL_WORKSPACE_ID: 'workspace-test',
+      },
+      fetchImpl,
+      cases: [BENCHMARK_CASES[0]],
+    });
+
+    assert.equal(fetchImpl.mock.callCount(), 1);
+    assert.equal(
+      fetchImpl.mock.calls[0].arguments[1].headers['x-dashscope-workspace'],
+      'workspace-test',
+    );
+  });
+
+  it('measures successful latency after the response body is consumed', async () => {
+    let currentTime = 100;
+    const report = await runQwenBenchmark({
+      runtimeEnv: RUNTIME_ENV,
+      cases: [BENCHMARK_CASES[0]],
+      now: () => currentTime,
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => {
+          currentTime = 175;
+          return {
+            content: [{ type: 'text', text: PASSING_OUTPUTS[0] }],
+            usage: { input_tokens: 10, output_tokens: 5 },
+          };
+        },
+      }),
+    });
+
+    assert.equal(report.cases[0].latencyMs, 75);
+  });
+
+  it('classifies an abort while reading a response body as a timeout', async () => {
+    const report = await runQwenBenchmark({
+      runtimeEnv: RUNTIME_ENV,
+      cases: [BENCHMARK_CASES[0]],
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw new DOMException('aborted', 'AbortError');
+        },
+      }),
+    });
+
+    assert.equal(report.cases[0].reason, 'timeout');
+  });
+
   it('calls the Singapore Messages endpoint and returns no credentials or model output', async () => {
     const fetchImpl = mock.fn(async () => responseFor(PASSING_OUTPUTS[0]));
     const report = await runQwenBenchmark({

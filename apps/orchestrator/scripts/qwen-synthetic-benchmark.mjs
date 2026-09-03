@@ -153,11 +153,24 @@ export async function runQwenBenchmark({
     runtimeEnv.DASHSCOPE_INTL_ANTHROPIC_BASE_URL || DEFAULT_ENDPOINT,
   );
   if (!endpoint) return blocked('invalid_endpoint');
+  const workspaceId = String(
+    runtimeEnv.DASHSCOPE_INTL_WORKSPACE_ID || runtimeEnv.DASHSCOPE_WORKSPACE_ID || '',
+  ).trim();
 
   const selectedCases = cases ?? (suite === 'protocol' ? PROTOCOL_CASES : BENCHMARK_CASES);
   const results = [];
   for (const benchmarkCase of selectedCases) {
-    results.push(await runCase({ benchmarkCase, apiKey, endpoint, fetchImpl, now, timeoutMs }));
+    results.push(
+      await runCase({
+        benchmarkCase,
+        apiKey,
+        workspaceId,
+        endpoint,
+        fetchImpl,
+        now,
+        timeoutMs,
+      }),
+    );
   }
 
   const scoringInput = results.map((result) => ({
@@ -203,7 +216,15 @@ export function classifyQwenBenchmark(results) {
   return 'fail';
 }
 
-async function runCase({ benchmarkCase, apiKey, endpoint, fetchImpl, now, timeoutMs }) {
+async function runCase({
+  benchmarkCase,
+  apiKey,
+  workspaceId,
+  endpoint,
+  fetchImpl,
+  now,
+  timeoutMs,
+}) {
   const startedAt = now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -214,6 +235,7 @@ async function runCase({ benchmarkCase, apiKey, endpoint, fetchImpl, now, timeou
         'content-type': 'application/json',
         'anthropic-version': '2023-06-01',
         'x-api-key': apiKey,
+        ...(workspaceId ? { 'x-dashscope-workspace': workspaceId } : {}),
       },
       body: JSON.stringify({
         model: benchmarkCase.model,
@@ -224,17 +246,21 @@ async function runCase({ benchmarkCase, apiKey, endpoint, fetchImpl, now, timeou
       }),
       signal: controller.signal,
     });
-    const latencyMs = Math.max(0, now() - startedAt);
     if (!response.ok) {
-      return failedCase(benchmarkCase, latencyMs, `http_${response.status}`);
+      return failedCase(benchmarkCase, Math.max(0, now() - startedAt), `http_${response.status}`);
     }
 
     let payload;
     try {
       payload = await response.json();
-    } catch {
-      return failedCase(benchmarkCase, latencyMs, 'invalid_json');
+    } catch (error) {
+      return failedCase(
+        benchmarkCase,
+        Math.max(0, now() - startedAt),
+        error?.name === 'AbortError' ? 'timeout' : 'invalid_json',
+      );
     }
+    const latencyMs = Math.max(0, now() - startedAt);
     const responseText = Array.isArray(payload?.content)
       ? payload.content
           .filter((block) => block?.type === 'text' && typeof block.text === 'string')
