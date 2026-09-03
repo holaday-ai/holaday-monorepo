@@ -206,6 +206,11 @@ const baseEnvSchema = z.object({
   QWEN_FAST_MODEL: z.string().min(1).default('qwen3.8-flash'),
   QWEN_CODING_MODEL: z.string().min(1).default('qwen3-coder-plus'),
   QWEN_VERIFIER_MODEL: z.string().min(1).default('qwen3.8-flash'),
+  /** Synthetic benchmark lane only. It is not wired to production task execution. */
+  QWEN_SHADOW_EVAL_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   FAL_KEY: z.string().optional().default(''),
   FAL_BASE_URL: z.string().url().default('https://queue.fal.run'),
   /**

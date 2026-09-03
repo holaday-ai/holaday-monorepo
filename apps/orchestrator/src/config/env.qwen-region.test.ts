@@ -23,6 +23,7 @@ describe('Qwen dual-region environment contract', () => {
       QWEN_FAST_MODEL: 'qwen3.8-flash',
       QWEN_CODING_MODEL: 'qwen3-coder-plus',
       QWEN_VERIFIER_MODEL: 'qwen3.8-flash',
+      QWEN_SHADOW_EVAL_ENABLED: false,
     });
   });
 
