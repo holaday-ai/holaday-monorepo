@@ -232,10 +232,28 @@ export function createQwenMessagesAdapter(input: {
       : {}),
   });
 
-  return createAnthropicCompatibleMessagesAdapter({
+  const adapter = createAnthropicCompatibleMessagesAdapter({
     client,
     metadata: toSafeQwenRouteMetadata(route),
   });
+  if (supportsQwenThinkingControl(route.model)) return adapter;
+
+  return {
+    metadata: adapter.metadata,
+    create(request, options) {
+      const { thinking: _unsupportedThinking, ...supportedRequest } = request;
+      return adapter.create(supportedRequest, options);
+    },
+  };
+}
+
+/**
+ * Qwen model overrides are intentionally open-ended. Only forward the optional
+ * thinking control to model families we have validated; unknown and dedicated
+ * non-thinking families fail safe by omitting the unsupported parameter.
+ */
+function supportsQwenThinkingControl(model: string): boolean {
+  return /^qwen3(?:\.\d+)?-(?:max|plus|flash)(?:$|-)/i.test(model.trim());
 }
 
 function defaultAnthropicCompatibleClientFactory(

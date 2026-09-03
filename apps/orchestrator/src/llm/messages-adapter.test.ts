@@ -399,6 +399,7 @@ describe('createQwenMessagesAdapter', () => {
     });
     const result = await adapter.create({
       maxTokens: 64,
+      thinking: { type: 'disabled' },
       messages: [{ role: 'user', content: 'synthetic input' }],
     });
 
@@ -417,7 +418,42 @@ describe('createQwenMessagesAdapter', () => {
     expect(JSON.stringify(result)).not.toContain('intl-key');
     expect(JSON.stringify(result)).not.toContain('dashscope-intl.aliyuncs.com');
     expect(JSON.stringify(result)).not.toContain('intl-workspace');
+    expect(vi.mocked(client.messages.create).mock.calls[0]?.[0]).toMatchObject({
+      model: 'qwen3.8-max',
+      thinking: { type: 'disabled' },
+    });
   });
+
+  it.each(['qwen3-coder-plus', 'custom-qwen-no-thinking'])(
+    'omits unsupported thinking controls for the Qwen model override %s',
+    async (model) => {
+      const client = buildClient({
+        id: 'msg_qwen_coder',
+        model,
+        content: [{ type: 'text', text: 'synthetic output' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 3, output_tokens: 2 },
+      });
+      const adapter = createQwenMessagesAdapter({
+        environment: {
+          ...QWEN_ENVIRONMENT,
+          QWEN_MESSAGES_ADAPTER_ENABLED: true,
+          QWEN_FAST_MODEL: model,
+        },
+        region: 'intl',
+        purpose: 'fast',
+        clientFactory: () => client,
+      });
+
+      await adapter.create({
+        maxTokens: 64,
+        thinking: { type: 'disabled' },
+        messages: [{ role: 'user', content: 'synthetic input' }],
+      });
+
+      expect(vi.mocked(client.messages.create).mock.calls[0]?.[0]).not.toHaveProperty('thinking');
+    },
+  );
 
   it('fails closed without constructing a client when regional credentials are missing', () => {
     const clientFactory = vi.fn();
