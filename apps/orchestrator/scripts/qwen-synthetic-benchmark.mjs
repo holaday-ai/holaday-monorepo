@@ -364,17 +364,39 @@ function scorePlanning(text) {
 
 const UPWARD_RISK_TERMS = ['上升', '增加', '增长', '升高', '提高', '提升', '上涨', '走高', '攀升'];
 const DOWNWARD_RISK_TERMS = ['下降', '降低', '减少', '下滑', '回落', '收窄', '改善', '缓解'];
-const NEGATED_UPWARD_RISK = new RegExp(
-  `(?:未见|未|没有|无|不再|并未)(?:出现|发生|呈现|明显|显著|持续|进一步|继续|见){0,3}(?:${UPWARD_RISK_TERMS.join('|')})`,
-);
+const DIRECTION_NEGATIONS = ['未见', '不再', '并未', '尚未', '没有', '未', '无'];
+const DIRECTION_MODIFIERS = [
+  '出现',
+  '发生',
+  '呈现',
+  '明显',
+  '显著',
+  '持续',
+  '进一步',
+  '继续',
+  '见',
+  '任何',
+  '得到',
+  '有所',
+  '的',
+];
+
+function hasUnnegatedDirectionTerm(text, terms) {
+  return terms.some((term) => {
+    if (!text.includes(term)) return false;
+    const negatedTerm = new RegExp(
+      `(?:${DIRECTION_NEGATIONS.join('|')})(?:${DIRECTION_MODIFIERS.join('|')}){0,4}${term}`,
+    );
+    return !negatedTerm.test(text);
+  });
+}
 
 function hasUpwardRefundRisk(risk) {
   return (
     typeof risk === 'string' &&
     risk.includes('退款') &&
-    UPWARD_RISK_TERMS.some((term) => risk.includes(term)) &&
-    !DOWNWARD_RISK_TERMS.some((term) => risk.includes(term)) &&
-    !NEGATED_UPWARD_RISK.test(risk)
+    hasUnnegatedDirectionTerm(risk, UPWARD_RISK_TERMS) &&
+    !hasUnnegatedDirectionTerm(risk, DOWNWARD_RISK_TERMS)
   );
 }
 
