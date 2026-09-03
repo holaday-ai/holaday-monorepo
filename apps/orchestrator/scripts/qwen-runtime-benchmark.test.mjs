@@ -59,6 +59,90 @@ describe('Qwen international runtime benchmark', () => {
     assert.equal(fetchImpl.mock.callCount(), 0);
   });
 
+  it('forwards the configured international workspace on streaming and JSON requests', async () => {
+    const fetchImpl = mock.fn(async (_url, request) => {
+      const body = JSON.parse(request.body);
+      if (body.stream) {
+        return { ok: true, status: 200, text: async () => STREAM_FIXTURE };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          content: [
+            {
+              type: 'text',
+              text: '{"record":"SYNTHETIC-1777","status":"amber","value":314159}',
+            },
+          ],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 18_400, output_tokens: 22 },
+        }),
+      };
+    });
+
+    await runQwenRuntimeBenchmark({
+      runtimeEnv: {
+        ...RUNTIME_ENV,
+        DASHSCOPE_INTL_WORKSPACE_ID: 'workspace-test',
+      },
+      fetchImpl,
+      cases: ['streaming_text', 'long_context_retrieval'],
+    });
+
+    assert.equal(fetchImpl.mock.callCount(), 2);
+    for (const call of fetchImpl.mock.calls) {
+      assert.equal(call.arguments[1].headers['x-dashscope-workspace'], 'workspace-test');
+    }
+  });
+
+  it('measures streaming latency after the response body is consumed', async () => {
+    let currentTime = 100;
+    const report = await runQwenRuntimeBenchmark({
+      runtimeEnv: RUNTIME_ENV,
+      cases: ['streaming_text'],
+      now: () => currentTime,
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        text: async () => {
+          currentTime = 175;
+          return STREAM_FIXTURE;
+        },
+      }),
+    });
+
+    assert.equal(report.cases[0].latencyMs, 75);
+  });
+
+  it('classifies response-body aborts as timeouts for streaming and JSON requests', async () => {
+    const streaming = await runQwenRuntimeBenchmark({
+      runtimeEnv: RUNTIME_ENV,
+      cases: ['streaming_text'],
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        text: async () => {
+          throw new DOMException('aborted', 'AbortError');
+        },
+      }),
+    });
+    const json = await runQwenRuntimeBenchmark({
+      runtimeEnv: RUNTIME_ENV,
+      cases: ['long_context_retrieval'],
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw new DOMException('aborted', 'AbortError');
+        },
+      }),
+    });
+
+    assert.equal(streaming.cases[0].reason, 'timeout');
+    assert.equal(json.cases[0].reason, 'timeout');
+  });
+
   it('validates the documented SSE event sequence without returning streamed text', async () => {
     const fetchImpl = mock.fn(async () => ({
       ok: true,

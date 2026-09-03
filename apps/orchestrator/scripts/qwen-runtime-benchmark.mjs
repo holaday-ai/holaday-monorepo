@@ -24,15 +24,24 @@ export async function runQwenRuntimeBenchmark({
     runtimeEnv.DASHSCOPE_INTL_ANTHROPIC_BASE_URL || DEFAULT_ENDPOINT,
   );
   if (!endpoint) return blocked('invalid_endpoint');
+  const workspaceId = String(
+    runtimeEnv.DASHSCOPE_INTL_WORKSPACE_ID || runtimeEnv.DASHSCOPE_WORKSPACE_ID || '',
+  ).trim();
 
   const results = [];
   for (const caseId of cases) {
     if (caseId === 'streaming_text') {
-      results.push(await runStreamingCase({ apiKey, endpoint, fetchImpl, now, timeoutMs }));
+      results.push(
+        await runStreamingCase({ apiKey, workspaceId, endpoint, fetchImpl, now, timeoutMs }),
+      );
     } else if (caseId === 'tool_roundtrip') {
-      results.push(await runToolRoundtripCase({ apiKey, endpoint, fetchImpl, now, timeoutMs }));
+      results.push(
+        await runToolRoundtripCase({ apiKey, workspaceId, endpoint, fetchImpl, now, timeoutMs }),
+      );
     } else if (caseId === 'long_context_retrieval') {
-      results.push(await runLongContextCase({ apiKey, endpoint, fetchImpl, now, timeoutMs }));
+      results.push(
+        await runLongContextCase({ apiKey, workspaceId, endpoint, fetchImpl, now, timeoutMs }),
+      );
     }
   }
 
@@ -100,7 +109,7 @@ export function parseAnthropicSse(raw) {
   };
 }
 
-async function runStreamingCase({ apiKey, endpoint, fetchImpl, now, timeoutMs }) {
+async function runStreamingCase({ apiKey, workspaceId, endpoint, fetchImpl, now, timeoutMs }) {
   const benchmarkCase = { caseId: 'streaming_text', model: 'qwen3.8-flash' };
   const startedAt = now();
   const controller = new AbortController();
@@ -112,6 +121,7 @@ async function runStreamingCase({ apiKey, endpoint, fetchImpl, now, timeoutMs })
         'content-type': 'application/json',
         'anthropic-version': '2023-06-01',
         'x-api-key': apiKey,
+        ...(workspaceId ? { 'x-dashscope-workspace': workspaceId } : {}),
       },
       body: JSON.stringify({
         model: benchmarkCase.model,
@@ -127,15 +137,22 @@ async function runStreamingCase({ apiKey, endpoint, fetchImpl, now, timeoutMs })
       }),
       signal: controller.signal,
     });
-    const latencyMs = Math.max(0, now() - startedAt);
-    if (!response.ok) return failedCase(benchmarkCase, latencyMs, `http_${response.status}`);
-
-    let parsed;
-    try {
-      parsed = parseAnthropicSse(await response.text());
-    } catch {
-      return failedCase(benchmarkCase, latencyMs, 'invalid_stream');
+    if (!response.ok) {
+      return failedCase(benchmarkCase, Math.max(0, now() - startedAt), `http_${response.status}`);
     }
+
+    let raw;
+    try {
+      raw = await response.text();
+    } catch (error) {
+      return failedCase(
+        benchmarkCase,
+        Math.max(0, now() - startedAt),
+        error?.name === 'AbortError' ? 'timeout' : 'invalid_stream',
+      );
+    }
+    const latencyMs = Math.max(0, now() - startedAt);
+    const parsed = parseAnthropicSse(raw);
     if (!parsed) return failedCase(benchmarkCase, latencyMs, 'invalid_stream');
 
     const requiredTypes = [
@@ -189,11 +206,12 @@ const TOOL_PROMPT =
   'Synthetic tool round-trip. Read record REC-7 using lookup_record, then return its tool result as JSON only.';
 const TOOL_RESULT = '{"recordId":"REC-7","status":"READY","score":91}';
 
-async function runToolRoundtripCase({ apiKey, endpoint, fetchImpl, now, timeoutMs }) {
+async function runToolRoundtripCase({ apiKey, workspaceId, endpoint, fetchImpl, now, timeoutMs }) {
   const benchmarkCase = { caseId: 'tool_roundtrip', model: 'qwen3.8-max' };
   const startedAt = now();
   const first = await postJson({
     apiKey,
+    workspaceId,
     endpoint,
     fetchImpl,
     timeoutMs,
@@ -227,6 +245,7 @@ async function runToolRoundtripCase({ apiKey, endpoint, fetchImpl, now, timeoutM
 
   const second = await postJson({
     apiKey,
+    workspaceId,
     endpoint,
     fetchImpl,
     timeoutMs,
@@ -301,7 +320,7 @@ function toolRequestFailure(payload, toolBlocks, toolUse, usage) {
   return null;
 }
 
-async function postJson({ apiKey, endpoint, fetchImpl, timeoutMs, body }) {
+async function postJson({ apiKey, workspaceId, endpoint, fetchImpl, timeoutMs, body }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -311,6 +330,7 @@ async function postJson({ apiKey, endpoint, fetchImpl, timeoutMs, body }) {
         'content-type': 'application/json',
         'anthropic-version': '2023-06-01',
         'x-api-key': apiKey,
+        ...(workspaceId ? { 'x-dashscope-workspace': workspaceId } : {}),
       },
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -318,8 +338,11 @@ async function postJson({ apiKey, endpoint, fetchImpl, timeoutMs, body }) {
     if (!response.ok) return { status: 'failed', reason: `http_${response.status}` };
     try {
       return { status: 'ok', payload: await response.json() };
-    } catch {
-      return { status: 'failed', reason: 'invalid_json' };
+    } catch (error) {
+      return {
+        status: 'failed',
+        reason: error?.name === 'AbortError' ? 'timeout' : 'invalid_json',
+      };
     }
   } catch (error) {
     return {
@@ -361,11 +384,12 @@ function buildLongContextPrompt() {
   ].join('\n');
 }
 
-async function runLongContextCase({ apiKey, endpoint, fetchImpl, now, timeoutMs }) {
+async function runLongContextCase({ apiKey, workspaceId, endpoint, fetchImpl, now, timeoutMs }) {
   const benchmarkCase = { caseId: 'long_context_retrieval', model: 'qwen3.7-plus' };
   const startedAt = now();
   const response = await postJson({
     apiKey,
+    workspaceId,
     endpoint,
     fetchImpl,
     timeoutMs,
