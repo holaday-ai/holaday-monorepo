@@ -24,6 +24,7 @@ describe('Qwen dual-region environment contract', () => {
       QWEN_CODING_MODEL: 'qwen3-coder-plus',
       QWEN_VERIFIER_MODEL: 'qwen3.8-flash',
       QWEN_SHADOW_EVAL_ENABLED: false,
+      QWEN_MESSAGES_ADAPTER_ENABLED: false,
     });
   });
 
@@ -42,6 +43,12 @@ describe('Qwen dual-region environment contract', () => {
     expect(parsed.DASHSCOPE_CN_ANTHROPIC_BASE_URL).toBe(
       'https://workspace-2.cn-beijing.maas.aliyuncs.com/apps/anthropic',
     );
+  });
+
+  it('enables the adapter only through an explicit true value', () => {
+    const parsed = envSchema.parse({ ...BASE_ENV, QWEN_MESSAGES_ADAPTER_ENABLED: 'true' });
+
+    expect(parsed.QWEN_MESSAGES_ADAPTER_ENABLED).toBe(true);
   });
 
   it.each([

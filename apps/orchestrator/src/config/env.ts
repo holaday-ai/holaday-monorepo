@@ -211,6 +211,15 @@ const baseEnvSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
+  /**
+   * Provider-neutral Messages/Tools adapter construction gate. The adapter is
+   * intentionally not wired to production task callsites yet; default false
+   * prevents any Qwen client construction until a later scoped canary.
+   */
+  QWEN_MESSAGES_ADAPTER_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   FAL_KEY: z.string().optional().default(''),
   FAL_BASE_URL: z.string().url().default('https://queue.fal.run'),
   /**
