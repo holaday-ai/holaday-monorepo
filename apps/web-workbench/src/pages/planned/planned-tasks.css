@@ -672,11 +672,30 @@
     flex-direction: column;
   }
   .planned-inspector {
-    border-top: 1px solid var(--planned-border);
-    border-left: 0;
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    width: 100%;
+    height: 100dvh;
+    border: 0;
+    background: #fff;
+  }
+  .planned-inspector-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 59;
+    background: #fff;
   }
   .planned-inspector__body {
-    overflow: visible;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .planned-inspector__footer {
+    position: sticky;
+    bottom: 0;
+    padding-bottom: max(15px, env(safe-area-inset-bottom));
+    background: #fff;
+    box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.05);
   }
   .planned-calendar-panel .fc-daygrid-day-frame {
     min-height: 82px;

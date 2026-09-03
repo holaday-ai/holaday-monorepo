@@ -253,13 +253,7 @@ export function plannedCalendarEmptyState(input: {
   plannedCount: number;
   legacyCount: number;
 }): { title: string; description: string } | null {
-  if (input.loading || input.plannedCount > 0) return null;
-  if (input.legacyCount > 0) {
-    return {
-      title: '这个月还没有规划任务',
-      description: '日历中的灰色项目是旧任务，可前往旧任务记录管理。',
-    };
-  }
+  if (input.loading || input.plannedCount > 0 || input.legacyCount > 0) return null;
   return {
     title: '这个月还没有规划',
     description: '点击日期或新建规划，安排未来要做的任务。',

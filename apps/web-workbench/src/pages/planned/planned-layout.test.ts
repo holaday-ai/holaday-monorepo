@@ -20,4 +20,66 @@ describe('planned task responsive layout', () => {
 
     expect(mobilePagePadding).toEqual([]);
   });
+
+  it('turns the editor into a focused full-screen sheet on narrow screens', () => {
+    const css = readFileSync(new URL('./planned-tasks.css', import.meta.url), 'utf8');
+    const root = postcss.parse(css);
+    const declarations = new Map<string, Map<string, string>>();
+
+    root.walkAtRules('media', (media) => {
+      const maxWidth = Number(media.params.match(/max-width:\s*(\d+)px/)?.[1] ?? NaN);
+      if (!Number.isFinite(maxWidth) || maxWidth > 820) return;
+      media.walkRules((rule) => {
+        const values = declarations.get(rule.selector) ?? new Map<string, string>();
+        rule.walkDecls((declaration) => {
+          values.set(declaration.prop, declaration.value);
+        });
+        declarations.set(rule.selector, values);
+      });
+    });
+
+    expect(declarations.get('.planned-inspector')?.get('position')).toBe('fixed');
+    expect(declarations.get('.planned-inspector')?.get('inset')).toBe('0');
+    expect(declarations.get('.planned-inspector')?.get('height')).toBe('100dvh');
+    expect(declarations.get('.planned-inspector__body')?.get('overflow-y')).toBe('auto');
+    expect(declarations.get('.planned-inspector__footer')?.get('position')).toBe('sticky');
+    expect(declarations.get('.planned-inspector__footer')?.get('bottom')).toBe('0');
+  });
+
+  it('keeps the mobile editor below nested scope and confirmation dialogs', () => {
+    const css = readFileSync(new URL('./planned-tasks.css', import.meta.url), 'utf8');
+    const root = postcss.parse(css);
+    let inspectorZIndex: number | null = null;
+    let scopeOverlayZIndex: number | null = null;
+    let scopePanelZIndex: number | null = null;
+
+    root.walkAtRules('media', (media) => {
+      if (media.params !== '(max-width: 820px)') return;
+      media.walkRules('.planned-inspector', (rule) => {
+        rule.walkDecls('z-index', (declaration) => {
+          inspectorZIndex = Number(declaration.value);
+        });
+      });
+    });
+    root.walkRules('.planned-scope-dialog', (rule) => {
+      rule.walkDecls('z-index', (declaration) => {
+        scopeOverlayZIndex = Number(declaration.value);
+      });
+    });
+    root.walkRules('.planned-scope-dialog__panel', (rule) => {
+      rule.walkDecls('z-index', (declaration) => {
+        scopePanelZIndex = Number(declaration.value);
+      });
+    });
+
+    expect(inspectorZIndex).not.toBeNull();
+    expect(scopeOverlayZIndex).not.toBeNull();
+    expect(scopePanelZIndex).not.toBeNull();
+    expect(inspectorZIndex ?? Number.POSITIVE_INFINITY).toBeLessThan(
+      scopeOverlayZIndex ?? Number.NEGATIVE_INFINITY,
+    );
+    expect(inspectorZIndex ?? Number.POSITIVE_INFINITY).toBeLessThan(
+      scopePanelZIndex ?? Number.NEGATIVE_INFINITY,
+    );
+  });
 });

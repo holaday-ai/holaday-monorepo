@@ -1,4 +1,3 @@
-import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -24,6 +23,7 @@ import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin, { type DateClickArg } from '@fullcalendar/interaction';
 import listPlugin from '@fullcalendar/list';
 import FullCalendar from '@fullcalendar/react';
+import * as Dialog from '@radix-ui/react-dialog';
 import {
   CalendarClock,
   ChevronLeft,
@@ -75,6 +75,7 @@ import {
 import './planned-tasks.css';
 
 const MOBILE_QUERY = '(max-width: 720px)';
+const MOBILE_INSPECTOR_QUERY = '(max-width: 820px)';
 const VIEW_STORAGE_KEY = 'holaday:planned-tasks:view';
 const DEFAULT_TIMEZONE = 'Asia/Shanghai';
 const WEEKDAYS = [
@@ -193,6 +194,8 @@ export function PlannedTasksPage(): JSX.Element {
   const scheduledAtRef = React.useRef<HTMLInputElement | null>(null);
   const customDaysRef = React.useRef<HTMLDivElement | null>(null);
   const scopeReturnFocusRef = React.useRef<HTMLElement | null>(null);
+  const editorReturnFocusRef = React.useRef<HTMLElement | null>(null);
+  const discardReturnFocusRef = React.useRef<HTMLElement | null>(null);
   const calendarRequestRef = React.useRef(0);
   const firstPlansRecordedRef = React.useRef(false);
   const firstCalendarRecordedRef = React.useRef(false);
@@ -204,6 +207,7 @@ export function PlannedTasksPage(): JSX.Element {
   const [view, setView] = React.useState<PlannedCalendarView>(() =>
     defaultPlannedCalendarView(matchMobile(), readSavedView()),
   );
+  const [mobileInspector, setMobileInspector] = React.useState(matchMobileInspector);
   const [title, setTitle] = React.useState('');
   const [range, setRange] = React.useState<{ start: Date; end: Date } | null>(null);
   const [occurrences, setOccurrences] = React.useState<PlannedCalendarOccurrence[]>([]);
@@ -238,6 +242,15 @@ export function PlannedTasksPage(): JSX.Element {
     };
     // changeView is intentionally read from the current render only for viewport changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  React.useEffect(() => {
+    const query = window.matchMedia?.(MOBILE_INSPECTOR_QUERY);
+    if (!query) return;
+    const listener = (event: MediaQueryListEvent): void => setMobileInspector(event.matches);
+    query.addEventListener('change', listener);
+    setMobileInspector(query.matches);
+    return () => query.removeEventListener('change', listener);
   }, []);
 
   React.useEffect(() => {
@@ -423,10 +436,28 @@ export function PlannedTasksPage(): JSX.Element {
 
   function requestEditorTransition(apply: () => void): void {
     if (editorDirty) {
+      discardReturnFocusRef.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
       setPendingEditorTransition({ apply });
       return;
     }
     apply();
+  }
+
+  function rememberEditorReturnFocus(): void {
+    if (editor) return;
+    editorReturnFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+
+  function closeEditor(): void {
+    requestEditorTransition(() => {
+      applyEditor(null);
+      window.requestAnimationFrame(() => {
+        if (editorReturnFocusRef.current?.isConnected) editorReturnFocusRef.current.focus();
+        editorReturnFocusRef.current = null;
+      });
+    });
   }
 
   function clearEditorError(key: PlannedEditorErrorKey): void {
@@ -459,6 +490,7 @@ export function PlannedTasksPage(): JSX.Element {
   function openCreate(date = nextWholeHour()): void {
     const next = emptyEditor(date);
     requestEditorTransition(() => {
+      rememberEditorReturnFocus();
       applyEditor(next);
       setRuns([]);
     });
@@ -468,7 +500,10 @@ export function PlannedTasksPage(): JSX.Element {
     plannedTaskId: string,
     occurrence: PlannedCalendarOccurrence | null,
   ): void {
-    requestEditorTransition(() => void loadPlan(plannedTaskId, occurrence));
+    requestEditorTransition(() => {
+      rememberEditorReturnFocus();
+      void loadPlan(plannedTaskId, occurrence);
+    });
   }
 
   async function loadPlan(
@@ -788,6 +823,7 @@ export function PlannedTasksPage(): JSX.Element {
               <button
                 type="button"
                 className={view === 'dayGridMonth' ? 'is-active' : ''}
+                aria-pressed={view === 'dayGridMonth'}
                 onClick={() => changeView('dayGridMonth')}
               >
                 月历
@@ -795,6 +831,7 @@ export function PlannedTasksPage(): JSX.Element {
               <button
                 type="button"
                 className={view === 'listMonth' ? 'is-active' : ''}
+                aria-pressed={view === 'listMonth'}
                 onClick={() => changeView('listMonth')}
               >
                 日程
@@ -859,9 +896,12 @@ export function PlannedTasksPage(): JSX.Element {
         </section>
 
         {editor && (
-          <aside
-            className="planned-inspector"
-            aria-label={editor.plannedTaskId ? '编辑规划' : '新建规划'}
+          <PlannedInspectorSurface
+            modal={mobileInspector}
+            label={editor.plannedTaskId ? '编辑规划' : '新建规划'}
+            initialFocusRef={editor.multiple ? firstItemRef : instructionRef}
+            returnFocusRef={editorReturnFocusRef}
+            onRequestClose={closeEditor}
           >
             <div className="planned-inspector__header">
               <div>
@@ -875,7 +915,7 @@ export function PlannedTasksPage(): JSX.Element {
                 size="icon"
                 title="关闭"
                 aria-label="关闭"
-                onClick={() => requestEditorTransition(() => applyEditor(null))}
+                onClick={closeEditor}
               >
                 <X aria-hidden />
               </Button>
@@ -896,6 +936,7 @@ export function PlannedTasksPage(): JSX.Element {
                 <button
                   type="button"
                   className={!editor.multiple ? 'is-active' : ''}
+                  aria-pressed={!editor.multiple}
                   onClick={() => {
                     setEditor({ ...editor, multiple: false });
                     clearEditorError('items');
@@ -906,6 +947,7 @@ export function PlannedTasksPage(): JSX.Element {
                 <button
                   type="button"
                   className={editor.multiple ? 'is-active' : ''}
+                  aria-pressed={editor.multiple}
                   onClick={() => {
                     setEditor({ ...editor, multiple: true });
                     clearEditorError('instruction');
@@ -1061,6 +1103,7 @@ export function PlannedTasksPage(): JSX.Element {
                       type="button"
                       key={repeatType}
                       className={editor.repeatType === repeatType ? 'is-active' : ''}
+                      aria-pressed={editor.repeatType === repeatType}
                       onClick={() => {
                         setEditor({
                           ...editor,
@@ -1092,6 +1135,7 @@ export function PlannedTasksPage(): JSX.Element {
                         type="button"
                         key={value}
                         className={editor.customDays.includes(value) ? 'is-active' : ''}
+                        aria-pressed={editor.customDays.includes(value)}
                         onClick={() => {
                           setEditor({
                             ...editor,
@@ -1124,6 +1168,7 @@ export function PlannedTasksPage(): JSX.Element {
                     <button
                       type="button"
                       className={editor.endsOn === null ? 'is-active' : ''}
+                      aria-pressed={editor.endsOn === null}
                       onClick={() => setEditor({ ...editor, endsOn: null })}
                     >
                       永不结束
@@ -1131,6 +1176,7 @@ export function PlannedTasksPage(): JSX.Element {
                     <button
                       type="button"
                       className={editor.endsOn !== null ? 'is-active' : ''}
+                      aria-pressed={editor.endsOn !== null}
                       onClick={() => setEditor({ ...editor, endsOn: editor.endsOn ?? editor.date })}
                     >
                       结束日期
@@ -1271,7 +1317,7 @@ export function PlannedTasksPage(): JSX.Element {
             <div className="planned-inspector__footer">
               <Button
                 variant="outline"
-                onClick={() => requestEditorTransition(() => applyEditor(null))}
+                onClick={closeEditor}
               >
                 取消
               </Button>
@@ -1280,24 +1326,19 @@ export function PlannedTasksPage(): JSX.Element {
                 {editor.plannedTaskId ? '保存规划' : '创建规划'}
               </Button>
             </div>
-          </aside>
+            <PlannedDiscardDialog
+              open={pendingEditorTransition !== null}
+              returnFocusRef={discardReturnFocusRef}
+              onClose={() => setPendingEditorTransition(null)}
+              onConfirm={() => {
+                const transition = pendingEditorTransition;
+                setPendingEditorTransition(null);
+                transition?.apply();
+              }}
+            />
+          </PlannedInspectorSurface>
         )}
       </div>
-
-      <ConfirmDialog
-        open={pendingEditorTransition !== null}
-        title="放弃未保存的更改？"
-        description="当前修改尚未保存，关闭后将无法恢复。"
-        confirmLabel="放弃更改"
-        cancelLabel="继续编辑"
-        destructive
-        onClose={() => setPendingEditorTransition(null)}
-        onConfirm={() => {
-          const transition = pendingEditorTransition;
-          setPendingEditorTransition(null);
-          transition?.apply();
-        }}
-      />
 
       <PlannedScopeDialog
         open={pendingScope !== null}
@@ -1329,6 +1370,124 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <legend>{label}</legend>
       {children}
     </fieldset>
+  );
+}
+
+interface PlannedInspectorSurfaceProps {
+  modal: boolean;
+  label: string;
+  initialFocusRef: React.RefObject<HTMLElement>;
+  returnFocusRef: React.RefObject<HTMLElement>;
+  onRequestClose(): void;
+  children: React.ReactNode;
+}
+
+interface PlannedDiscardDialogProps {
+  open: boolean;
+  returnFocusRef: React.RefObject<HTMLElement>;
+  onConfirm(): void;
+  onClose(): void;
+}
+
+function PlannedDiscardDialog({
+  open,
+  returnFocusRef,
+  onConfirm,
+  onClose,
+}: PlannedDiscardDialogProps): JSX.Element {
+  const cancelRef = React.useRef<HTMLButtonElement>(null);
+
+  return (
+    <Dialog.Root open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-[80] bg-black/35 px-4 backdrop-blur-sm data-[state=open]:animate-fade-in" />
+        <Dialog.Content
+          className="fixed left-1/2 top-1/2 z-[81] w-[calc(100vw-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-lg border border-[#DCDDDD] bg-white p-5 text-card-foreground shadow-[0_16px_48px_rgba(17,24,39,0.16)] outline-none dark:border-white/10 dark:bg-card"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            cancelRef.current?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus();
+          }}
+        >
+          <Dialog.Title className="text-base font-semibold tracking-tight text-[#2F2F2F] dark:text-foreground">
+            放弃未保存的更改？
+          </Dialog.Title>
+          <Dialog.Description className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[#595757] dark:text-muted-foreground">
+            当前修改尚未保存，关闭后将无法恢复。
+          </Dialog.Description>
+          <div className="mt-5 flex items-center justify-end gap-2">
+            <Dialog.Close asChild>
+              <Button
+                ref={cancelRef}
+                variant="ghost"
+                size="sm"
+                className="hover:bg-[#EFEFEF]/70 dark:hover:bg-white/10"
+              >
+                继续编辑
+              </Button>
+            </Dialog.Close>
+            <Button
+              size="sm"
+              className="bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.16)] hover:bg-[#EA1F59]/90 focus-visible:ring-[#EA1F59]/25"
+              onClick={onConfirm}
+            >
+              放弃更改
+            </Button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+function PlannedInspectorSurface({
+  modal,
+  label,
+  initialFocusRef,
+  returnFocusRef,
+  onRequestClose,
+  children,
+}: PlannedInspectorSurfaceProps): JSX.Element {
+  if (!modal) {
+    return (
+      <aside className="planned-inspector" aria-label={label}>
+        {children}
+      </aside>
+    );
+  }
+
+  return (
+    <Dialog.Root open onOpenChange={(open) => !open && onRequestClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="planned-inspector-overlay" />
+        <Dialog.Content
+          className="planned-inspector"
+          aria-label={label}
+          aria-modal="true"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            initialFocusRef.current?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus();
+          }}
+          onEscapeKeyDown={(event) => {
+            event.preventDefault();
+            onRequestClose();
+          }}
+        >
+          <Dialog.Title className="sr-only">{label}</Dialog.Title>
+          <Dialog.Description className="sr-only">
+            设置任务内容、执行时间和重复方式。
+          </Dialog.Description>
+          {children}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -1399,6 +1558,13 @@ function readSavedView(): string | null {
 
 function matchMobile(): boolean {
   return typeof window !== 'undefined' && Boolean(window.matchMedia?.(MOBILE_QUERY).matches);
+}
+
+function matchMobileInspector(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    Boolean(window.matchMedia?.(MOBILE_INSPECTOR_QUERY).matches)
+  );
 }
 
 function errorMessage(error: unknown, fallback: string): string {
