@@ -94,6 +94,8 @@ export type NeutralToolChoice =
 
 export interface NeutralMessagesRequest {
   maxTokens: number;
+  /** Explicitly disable provider reasoning for short, deterministic output lanes. */
+  thinking?: { type: 'disabled' };
   system?: string | ReadonlyArray<NeutralSystemBlock>;
   messages: ReadonlyArray<NeutralMessage>;
   tools?: ReadonlyArray<NeutralToolDefinition>;
@@ -133,6 +135,7 @@ export interface MessagesAdapter {
 interface AnthropicCompatibleRequest {
   model: string;
   max_tokens: number;
+  thinking?: { type: 'disabled' };
   system?: unknown;
   messages: unknown[];
   tools?: unknown[];
@@ -249,6 +252,7 @@ function toAnthropicCompatibleRequest(
   return {
     model,
     max_tokens: request.maxTokens,
+    ...(request.thinking !== undefined ? { thinking: { type: request.thinking.type } } : {}),
     ...(request.system !== undefined ? { system: mapSystem(request.system) } : {}),
     messages: request.messages.map((message) => ({
       role: message.role,

@@ -35,6 +35,7 @@ describe('generateSuggestions', () => {
 
     expect(adapter.create).toHaveBeenCalledWith({
       maxTokens: 200,
+      thinking: { type: 'disabled' },
       system: expect.stringContaining('给出 2-3 个用户可能想继续做的相关任务'),
       messages: [{ role: 'user', content: '任务：研究零售行业并输出方案\n结果摘要：已完成研究。' }],
     });

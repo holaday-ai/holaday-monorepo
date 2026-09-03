@@ -57,6 +57,7 @@ export async function generateSuggestions(opts: GenerateSuggestionsOptions): Pro
   try {
     const resp = await opts.messagesAdapter.create({
       maxTokens: MAX_TOKENS,
+      thinking: { type: 'disabled' },
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMsg }],
     });
