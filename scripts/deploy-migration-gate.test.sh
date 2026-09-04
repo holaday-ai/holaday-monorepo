@@ -75,6 +75,8 @@ if [[ "$command_text" == *"git reset --hard origin/"* ]]; then
 elif [[ "$command_text" == *"git rev-parse --short HEAD"* ]]; then
   echo "2222222"
 elif [[ "$command_text" == *"pnpm install"* ]]; then
+  [[ "$command_text" == *"pnpm --filter @holaday/orchestrator clean"*"pnpm --filter @holaday/orchestrator build"* ]] \
+    || exit 52
   echo "build-new" >> "$TEST_EVENT_LOG"
   [[ "$TEST_FAIL_PHASE" != "build" ]] || exit 42
 elif [[ "$command_text" == *"db:migrate:numbered"* ]]; then
@@ -102,6 +104,8 @@ elif [[ "$command_text" == *"team-task-lifecycle-deploy-safety.mjs' persist"* ]]
   echo "lifecycle-safety-off" >> "$TEST_EVENT_LOG"
   exit "${TEST_PERSIST_RC:-0}"
 elif [[ "$command_text" == *"git reset --hard '$TEST_LIVE_HEAD'"* ]]; then
+  [[ "$command_text" == *"pnpm --filter @holaday/orchestrator clean"*"pnpm --filter @holaday/orchestrator build"* ]] \
+    || exit 53
   echo "rollback-checkout" >> "$TEST_EVENT_LOG"
   [[ "${TEST_ROLLBACK_BUILD_RC:-0}" == "0" ]] || exit "$TEST_ROLLBACK_BUILD_RC"
 elif [[ "$command_text" == *"orchestrator-runtime.sh' restart"* ]]; then
