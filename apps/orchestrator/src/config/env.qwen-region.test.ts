@@ -14,15 +14,21 @@ describe('Qwen dual-region environment contract', () => {
     expect(parsed).toMatchObject({
       DASHSCOPE_INTL_API_KEY: '',
       DASHSCOPE_INTL_ANTHROPIC_BASE_URL: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
+      DASHSCOPE_INTL_RESPONSES_BASE_URL:
+        'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
       DASHSCOPE_INTL_WORKSPACE_ID: '',
       DASHSCOPE_CN_API_KEY: '',
       DASHSCOPE_CN_ANTHROPIC_BASE_URL: 'https://dashscope.aliyuncs.com/apps/anthropic',
+      DASHSCOPE_CN_RESPONSES_BASE_URL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
       DASHSCOPE_CN_WORKSPACE_ID: '',
       QWEN_REASONING_MODEL: 'qwen3.8-max',
       QWEN_STANDARD_MODEL: 'qwen3.7-plus',
       QWEN_FAST_MODEL: 'qwen3.8-flash',
       QWEN_CODING_MODEL: 'qwen3-coder-plus',
       QWEN_VERIFIER_MODEL: 'qwen3.8-flash',
+      QWEN_VERIFY_FAST_MODEL: 'qwen3.8-flash',
+      QWEN_VERIFY_STRICT_MODEL: 'qwen3.8-max',
+      QWEN_VISION_MODEL: 'qwen3.8-max',
       MODEL_RUNTIME_POLICY: 'qwen_only',
       QWEN_CORE_ROLLOUT_MODE: 'off',
       QWEN_CORE_ENABLED_LANES: '',
@@ -44,6 +50,10 @@ describe('Qwen dual-region environment contract', () => {
         'https://workspace-1.ap-southeast-1.maas.aliyuncs.com/apps/anthropic/',
       DASHSCOPE_CN_ANTHROPIC_BASE_URL:
         'https://workspace-2.cn-beijing.maas.aliyuncs.com/apps/anthropic/',
+      DASHSCOPE_INTL_RESPONSES_BASE_URL:
+        'https://workspace-1.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/',
+      DASHSCOPE_CN_RESPONSES_BASE_URL:
+        'https://workspace-2.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/',
     });
 
     expect(parsed.DASHSCOPE_INTL_ANTHROPIC_BASE_URL).toBe(
@@ -51,6 +61,12 @@ describe('Qwen dual-region environment contract', () => {
     );
     expect(parsed.DASHSCOPE_CN_ANTHROPIC_BASE_URL).toBe(
       'https://workspace-2.cn-beijing.maas.aliyuncs.com/apps/anthropic',
+    );
+    expect(parsed.DASHSCOPE_INTL_RESPONSES_BASE_URL).toBe(
+      'https://workspace-1.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1',
+    );
+    expect(parsed.DASHSCOPE_CN_RESPONSES_BASE_URL).toBe(
+      'https://workspace-2.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
     );
   });
 
@@ -97,6 +113,14 @@ describe('Qwen dual-region environment contract', () => {
   it.each([
     ['DASHSCOPE_INTL_ANTHROPIC_BASE_URL', 'https://dashscope.aliyuncs.com/apps/anthropic'],
     ['DASHSCOPE_CN_ANTHROPIC_BASE_URL', 'https://dashscope-intl.aliyuncs.com/apps/anthropic'],
+    [
+      'DASHSCOPE_INTL_RESPONSES_BASE_URL',
+      'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    ],
+    [
+      'DASHSCOPE_CN_RESPONSES_BASE_URL',
+      'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+    ],
   ])('rejects a wrong-region URL in %s', (field, value) => {
     expect(() => envSchema.parse({ ...BASE_ENV, [field]: value })).toThrow(field);
   });

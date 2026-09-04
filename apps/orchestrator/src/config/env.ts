@@ -5,7 +5,11 @@ import {
   assertProductionModelRuntimePolicy,
   parseCoreModelLaneCsv,
 } from '../llm/model-runtime-policy.js';
-import { type ModelDataRegion, normalizeQwenAnthropicBaseUrl } from '../llm/qwen-route.js';
+import {
+  type ModelDataRegion,
+  type QwenProtocol,
+  normalizeQwenBaseUrl,
+} from '../llm/qwen-route.js';
 
 // Load order (later overrides earlier — we explicitly do NOT override
 // already-set process.env values so CI / docker-compose env vars win):
@@ -198,18 +202,29 @@ const baseEnvSchema = z.object({
     .string()
     .url()
     .default('https://dashscope-intl.aliyuncs.com/apps/anthropic'),
+  DASHSCOPE_INTL_RESPONSES_BASE_URL: z
+    .string()
+    .url()
+    .default('https://dashscope-intl.aliyuncs.com/compatible-mode/v1'),
   DASHSCOPE_INTL_WORKSPACE_ID: z.string().optional().default(''),
   DASHSCOPE_CN_API_KEY: z.string().optional().default(''),
   DASHSCOPE_CN_ANTHROPIC_BASE_URL: z
     .string()
     .url()
     .default('https://dashscope.aliyuncs.com/apps/anthropic'),
+  DASHSCOPE_CN_RESPONSES_BASE_URL: z
+    .string()
+    .url()
+    .default('https://dashscope.aliyuncs.com/compatible-mode/v1'),
   DASHSCOPE_CN_WORKSPACE_ID: z.string().optional().default(''),
   QWEN_REASONING_MODEL: z.string().min(1).default('qwen3.8-max'),
   QWEN_STANDARD_MODEL: z.string().min(1).default('qwen3.7-plus'),
   QWEN_FAST_MODEL: z.string().min(1).default('qwen3.8-flash'),
   QWEN_CODING_MODEL: z.string().min(1).default('qwen3-coder-plus'),
   QWEN_VERIFIER_MODEL: z.string().min(1).default('qwen3.8-flash'),
+  QWEN_VERIFY_FAST_MODEL: z.string().min(1).default('qwen3.8-flash'),
+  QWEN_VERIFY_STRICT_MODEL: z.string().min(1).default('qwen3.8-max'),
+  QWEN_VISION_MODEL: z.string().min(1).default('qwen3.8-max'),
   MODEL_RUNTIME_POLICY: z.enum(['qwen_only', 'legacy_fixture']).default('qwen_only'),
   QWEN_CORE_ROLLOUT_MODE: z.enum(['off', 'synthetic', 'internal', 'all']).default('off'),
   QWEN_CORE_ENABLED_LANES: z.string().default(''),
@@ -652,14 +667,23 @@ export const envSchema = baseEnvSchema
       });
     }
 
-    for (const [field, region] of [
-      ['DASHSCOPE_INTL_ANTHROPIC_BASE_URL', 'intl'],
-      ['DASHSCOPE_CN_ANTHROPIC_BASE_URL', 'cn'],
+    for (const [field, region, protocol] of [
+      ['DASHSCOPE_INTL_ANTHROPIC_BASE_URL', 'intl', 'messages'],
+      ['DASHSCOPE_CN_ANTHROPIC_BASE_URL', 'cn', 'messages'],
+      ['DASHSCOPE_INTL_RESPONSES_BASE_URL', 'intl', 'responses'],
+      ['DASHSCOPE_CN_RESPONSES_BASE_URL', 'cn', 'responses'],
     ] as const satisfies ReadonlyArray<
-      ['DASHSCOPE_INTL_ANTHROPIC_BASE_URL' | 'DASHSCOPE_CN_ANTHROPIC_BASE_URL', ModelDataRegion]
+      [
+        | 'DASHSCOPE_INTL_ANTHROPIC_BASE_URL'
+        | 'DASHSCOPE_CN_ANTHROPIC_BASE_URL'
+        | 'DASHSCOPE_INTL_RESPONSES_BASE_URL'
+        | 'DASHSCOPE_CN_RESPONSES_BASE_URL',
+        ModelDataRegion,
+        QwenProtocol,
+      ]
     >) {
       try {
-        normalizeQwenAnthropicBaseUrl(region, environment[field]);
+        normalizeQwenBaseUrl(region, protocol, environment[field]);
       } catch (error) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -675,13 +699,25 @@ export const envSchema = baseEnvSchema
       environment.HOLADAY_PUBLIC_BASE_URL,
       environment.NODE_ENV,
     ),
-    DASHSCOPE_INTL_ANTHROPIC_BASE_URL: normalizeQwenAnthropicBaseUrl(
+    DASHSCOPE_INTL_ANTHROPIC_BASE_URL: normalizeQwenBaseUrl(
       'intl',
+      'messages',
       environment.DASHSCOPE_INTL_ANTHROPIC_BASE_URL,
     ).baseURL,
-    DASHSCOPE_CN_ANTHROPIC_BASE_URL: normalizeQwenAnthropicBaseUrl(
+    DASHSCOPE_CN_ANTHROPIC_BASE_URL: normalizeQwenBaseUrl(
       'cn',
+      'messages',
       environment.DASHSCOPE_CN_ANTHROPIC_BASE_URL,
+    ).baseURL,
+    DASHSCOPE_INTL_RESPONSES_BASE_URL: normalizeQwenBaseUrl(
+      'intl',
+      'responses',
+      environment.DASHSCOPE_INTL_RESPONSES_BASE_URL,
+    ).baseURL,
+    DASHSCOPE_CN_RESPONSES_BASE_URL: normalizeQwenBaseUrl(
+      'cn',
+      'responses',
+      environment.DASHSCOPE_CN_RESPONSES_BASE_URL,
     ).baseURL,
   }));
 

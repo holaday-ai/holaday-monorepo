@@ -16,15 +16,21 @@ const QWEN_ENVIRONMENT: QwenRuntimeEnvironment & {
   DASHSCOPE_WORKSPACE_ID: 'legacy-workspace',
   DASHSCOPE_INTL_API_KEY: 'intl-key',
   DASHSCOPE_INTL_ANTHROPIC_BASE_URL: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
+  DASHSCOPE_INTL_RESPONSES_BASE_URL:
+    'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
   DASHSCOPE_INTL_WORKSPACE_ID: 'intl-workspace',
   DASHSCOPE_CN_API_KEY: 'cn-key',
   DASHSCOPE_CN_ANTHROPIC_BASE_URL: 'https://dashscope.aliyuncs.com/apps/anthropic',
+  DASHSCOPE_CN_RESPONSES_BASE_URL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   DASHSCOPE_CN_WORKSPACE_ID: 'cn-workspace',
   QWEN_REASONING_MODEL: 'qwen3.8-max',
   QWEN_STANDARD_MODEL: 'qwen3.7-plus',
   QWEN_FAST_MODEL: 'qwen3.8-flash',
   QWEN_CODING_MODEL: 'qwen3-coder-plus',
   QWEN_VERIFIER_MODEL: 'qwen3.8-flash',
+  QWEN_VERIFY_FAST_MODEL: 'qwen3.8-flash',
+  QWEN_VERIFY_STRICT_MODEL: 'qwen3.8-max',
+  QWEN_VISION_MODEL: 'qwen3.8-max',
   QWEN_MESSAGES_ADAPTER_ENABLED: false,
 };
 
@@ -434,6 +440,7 @@ describe('createQwenMessagesAdapter', () => {
       deploymentScope: 'international',
       model: 'qwen3.8-max',
       endpointKind: 'public',
+      protocol: 'messages',
     });
     expect(JSON.stringify(result)).not.toContain('intl-key');
     expect(JSON.stringify(result)).not.toContain('dashscope-intl.aliyuncs.com');
