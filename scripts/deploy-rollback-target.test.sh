@@ -1093,6 +1093,8 @@ grep -Fq 'ALLOW_INITIAL_QWEN_CUTOVER' "$ORCHESTRATOR_SCRIPT" \
   || fail "initial Qwen-only cutover must stay explicit, dark-gated, and legacy-provider-safe"
 grep -Fq 'MODEL_RUNTIME_POLICY QWEN_CORE_ROLLOUT_MODE QWEN_CORE_ENABLED_LANES DASHSCOPE_INTL_API_KEY DASHSCOPE_INTL_ANTHROPIC_BASE_URL DASHSCOPE_INTL_RESPONSES_BASE_URL' "$ORCHESTRATOR_SCRIPT" \
   || fail "orchestrator deploy must require the Qwen-only international process contract"
+grep -Fq "sed 's/^QWEN_CORE_ROLLOUT_MODE=/__QWEN_ROLLOUT_MODE__=/'" "$ORCHESTRATOR_SCRIPT" \
+  || fail "orchestrator deploy must extract only the Qwen rollout-mode value"
 ! grep -Fq 'GEMINI_API_KEY ANTHROPIC_API_KEY DASHSCOPE_API_KEY' "$ORCHESTRATOR_SCRIPT" \
   || fail "orchestrator deploy must not require retired core provider credentials"
 grep -Fq 'REMOTE_START_HELPER' "$ORCHESTRATOR_SCRIPT" \

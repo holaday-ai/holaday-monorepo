@@ -457,7 +457,7 @@ if ! PROC_KEYS=$(run_with_retry "Vultr key-check" "${VULTR_AUTH_PREFIX[@]}" ssh 
     "PID=\$(pm2 pid holaday-orchestrator | head -1); \
      ENV_LINES=\$(tr '\\0' '\\n' < /proc/\$PID/environ 2>/dev/null); \
      echo \"\$ENV_LINES\" | grep -qx 'MODEL_RUNTIME_POLICY=qwen_only' && \
-     echo \"\$ENV_LINES\" | grep '^QWEN_CORE_ROLLOUT_MODE=' | sed 's/^/__QWEN_ROLLOUT_MODE__=/' && \
+     echo \"\$ENV_LINES\" | grep '^QWEN_CORE_ROLLOUT_MODE=' | sed 's/^QWEN_CORE_ROLLOUT_MODE=/__QWEN_ROLLOUT_MODE__=/' && \
      echo \"\$ENV_LINES\" | grep -oE '^[A-Z_]+=.' | grep -oE '^[A-Z_]+'" | tr -d '\r'); then
   abort_with_rollback "process key verification failed"
 fi
