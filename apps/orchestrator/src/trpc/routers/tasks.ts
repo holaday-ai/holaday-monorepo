@@ -39,7 +39,7 @@ import { DrizzleLlmCallRecorder } from '../../agent/llm-call-recorder.js';
 // agent's terminal decision.
 import { detectNavFailure } from '../../agent/nav-failure-detector.js';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
-import { runScrapeTask } from '../../agent/scrape-runner.js';
+import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { generateSuggestions } from '../../agent/suggestions-generator.js';
 import { resolveSuggestionsProviderRoute } from '../../agent/suggestions-provider.js';
@@ -487,6 +487,15 @@ function resolveGenerateRuntimeForUser(actorExternalId: string, modelDataRegion:
     environment: appEnv,
     actorExternalId,
     lane: 'generate',
+    ownership: { scope: 'personal', userRegion: modelDataRegion },
+  });
+}
+
+function resolveScrapeRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
+  return resolveCoreModelRuntime({
+    environment: appEnv,
+    actorExternalId,
+    lane: 'scrape',
     ownership: { scope: 'personal', userRegion: modelDataRegion },
   });
 }
@@ -3545,15 +3554,18 @@ export const tasksRouter = router({
     // ===== scrape-mode fork (Phase 24 RC follow-up) =====
     // Tasks classified as 'scrape' want page content but NOT live
     // browser interaction. Firecrawl pulls markdown in 2-3s, then
-    // Claude synthesises an answer from those bytes. Cost is roughly
+    // the regional Qwen Responses runtime synthesises an answer from those bytes.
     // 5-10× cheaper than the browser path; latency 5-10× faster.
     //
     // If FIRECRAWL_API_KEY is missing at boot, ctx.firecrawl is null
     // and the scrape branch persists a clear failure (rather than
     // silently degrading to the browser path which is what the
     // classifier explicitly avoided routing to).
-    if (executionMode === 'scrape' && appEnv.ANTHROPIC_API_KEY && anthropicForResolver) {
+    if (executionMode === 'scrape') {
       const taskId = newExternalId('task');
+      const scrapeRuntime = resolveScrapeRuntimeForUser(ctx.userId, userRow.modelDataRegion);
+      const scrapeResponsesAdapter =
+        scrapeRuntime.kind === 'ready' ? scrapeRuntime.responses('standard') : null;
       const fallbackGenerateRuntime = resolveGenerateRuntimeForUser(
         ctx.userId,
         userRow.modelDataRegion,
@@ -3635,7 +3647,6 @@ export const tasksRouter = router({
       broadcastSubStatus(ctx.userId, taskId, 'planning');
 
       const firecrawl = ctx.firecrawl;
-      const anthropicClient = anthropicForResolver;
       const scrapeStartedAt = Date.now();
       void (async () => {
         // Fallback chain (A4) — every lane the dispatcher actually
@@ -3644,13 +3655,14 @@ export const tasksRouter = router({
         // which path produced the final outcome.
         const fallbackChain: string[] = ['scrape'];
         let finalExecutionMode: 'scrape' | 'generate' = 'scrape';
-        let scrapeOutcome;
+        let scrapeOutcome: ScrapeOutcome;
         try {
           // Codex Pack B1 — extracting chip: firecrawl about to fetch.
           broadcastSubStatus(ctx.userId, taskId, 'extracting');
-          scrapeOutcome = await runScrapeTask({
-            taskId,
-            userId: ctx.userId,
+          scrapeOutcome = scrapeResponsesAdapter
+            ? await runScrapeTask({
+                taskId,
+                userId: ctx.userId,
             // Use effectiveIntent (with parent context block when in
             // a follow-up + workflow preambles) whenever EITHER the
             // legacy or typed matcher fires. Earlier this only checked
@@ -3668,44 +3680,56 @@ export const tasksRouter = router({
             // Otherwise pass the bare user input.
                 intent:
                   expertWorkflow || typedWorkflow || isFollowUp ? effectiveIntent : input.intent,
-            skillId: dispatchSkillId,
-            expertMode: expertModeOverride,
-            client: anthropicClient,
-            firecrawl,
-            logger: ctx.logger,
+                skillId: dispatchSkillId,
+                expertMode: expertModeOverride,
+                responsesAdapter: scrapeResponsesAdapter,
+                firecrawl,
+                logger: ctx.logger,
             // Phase 24 RC follow-up — stream LLM deltas + push
             // coarse Firecrawl-phase progress to the SPA. Same
             // contract as generate-runner; broadcast errors are
             // swallowed.
-            onStreamDelta: (delta) => {
-              try {
-                broadcastToUser(ctx.userId, {
-                  type: 'server.task.stream',
-                  taskId,
-                  delta,
-                });
-              } catch (err) {
-                ctx.logger.warn({ err, taskId }, 'scrape: broadcast stream delta failed');
-              }
-            },
-            onProgress: (message) => {
-              try {
-                broadcastToUser(ctx.userId, {
-                  type: 'server.task.progress',
-                  taskId,
-                  message,
-                });
-              } catch (err) {
-                ctx.logger.warn({ err, taskId }, 'scrape: broadcast progress failed');
-              }
-            },
-          });
-        } catch (err) {
-          ctx.logger.error({ err, taskId }, 'scrape: runner threw');
+                onStreamDelta: (delta) => {
+                  try {
+                    broadcastToUser(ctx.userId, {
+                      type: 'server.task.stream',
+                      taskId,
+                      delta,
+                    });
+                  } catch (err) {
+                    ctx.logger.warn({ err, taskId }, 'scrape: broadcast stream delta failed');
+                  }
+                },
+                onProgress: (message) => {
+                  try {
+                    broadcastToUser(ctx.userId, {
+                      type: 'server.task.progress',
+                      taskId,
+                      message,
+                    });
+                  } catch (err) {
+                    ctx.logger.warn({ err, taskId }, 'scrape: broadcast progress failed');
+                  }
+                },
+              })
+            : {
+                status: 'failed' as const,
+                summary: '',
+                reason: generateRuntimeUnavailableReason(
+                  scrapeRuntime.kind === 'unavailable' ? scrapeRuntime.reason : 'LANE_DISABLED',
+                ),
+                inputTokens: 0,
+                outputTokens: 0,
+                durationMs: 0,
+                source: 'scrape' as const,
+                sources: [],
+              };
+        } catch {
+          ctx.logger.error({ taskId, code: 'SCRAPE_RUNNER_THROWN' }, 'scrape: runner threw');
           scrapeOutcome = {
             status: 'failed' as const,
             summary: '',
-            reason: err instanceof Error ? err.message : 'scrape: unknown error',
+            reason: '内容整理服务暂时不可用，请稍后重试。',
             inputTokens: 0,
             outputTokens: 0,
             durationMs: 0,
@@ -3866,7 +3890,6 @@ export const tasksRouter = router({
           const verified: VerifyOutput = await verifyAndFinalize({
             taskId,
             answerText: outcome.summary,
-            client: anthropicClient,
             logger: ctx.logger,
           });
           if (verified.finalText !== outcome.summary) {
@@ -3896,16 +3919,26 @@ export const tasksRouter = router({
         // B3 — structured task:completed log. Single record per task
         // termination with all fields the eval pipeline needs.
         const elapsedMs = Date.now() - scrapeStartedAt;
+        const finalResponsesAdapter =
+          finalExecutionMode === 'scrape'
+            ? scrapeResponsesAdapter
+            : fallbackGenerateResponsesAdapter;
         const metadata = {
           executionMode: 'scrape' as const,
           finalExecutionMode,
           expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
           expertMode: expertModeOverride,
           selectedRole: dispatchRoleId,
-          model: 'claude-sonnet-4-6',
+          ...(finalResponsesAdapter
+            ? {
+                provider: finalResponsesAdapter.metadata.provider,
+                model: finalResponsesAdapter.metadata.model,
+                region: finalResponsesAdapter.metadata.region,
+                deploymentScope: finalResponsesAdapter.metadata.deploymentScope,
+              }
+            : {}),
           fallbackChain,
           elapsedMs,
-          modelFinalText: outcome.status === 'completed' ? outcome.summary.slice(0, 200) : null,
         };
         ctx.logger.info(
           {
