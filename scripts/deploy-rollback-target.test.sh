@@ -8,6 +8,7 @@ AKSHARE_SCRIPT="$SCRIPT_DIR/deploy-akshare-mcp.sh"
 ORCHESTRATOR_SCRIPT="$SCRIPT_DIR/deploy-orchestrator.sh"
 AUTO_SMOKE_SUMMARY_SCRIPT="$SCRIPT_DIR/auto-smoke-summary.sh"
 DEPLOY_SAFETY_HELPER="$SCRIPT_DIR/team-task-lifecycle-deploy-safety.mjs"
+QWEN_INITIAL_CUTOVER_POLICY_HELPER="$SCRIPT_DIR/qwen-initial-cutover-policy.mjs"
 CN_PAYMENT_SCRIPT="$SCRIPT_DIR/deploy-cn-payment.sh"
 export DEPLOY_REMOTE_RETRY_SLEEP="${DEPLOY_REMOTE_RETRY_SLEEP:-0}"
 
@@ -44,6 +45,8 @@ write_common_deploy_stubs() {
   local harness_dir="$1"
 
   mkdir -p "$harness_dir/repo/scripts" "$harness_dir/bin"
+  cp "$QWEN_INITIAL_CUTOVER_POLICY_HELPER" \
+    "$harness_dir/repo/scripts/qwen-initial-cutover-policy.mjs"
   cat > "$harness_dir/repo/scripts/load-deploy-env.sh" <<'STUB'
 #!/usr/bin/env bash
 : "${VULTR_PASSWORD:=unit-secret}"
@@ -499,6 +502,13 @@ elif [[ "$command_text" == *"git fetch origin"* ]]; then
   exit 0
 elif [[ "$command_text" == *"git cat-file -e"* ]]; then
   echo "rollback-validate" >> "$TEST_EVENT_LOG"
+  echo "${TEST_ROLLBACK_QWEN_ONLY:-1}"
+  exit 0
+elif [[ "$command_text" == *"origin/codex/release-candidate:apps/orchestrator/src/config/env.ts"* ]]; then
+  echo "${TEST_CANDIDATE_QWEN_ONLY:-1}"
+  exit 0
+elif [[ "$command_text" == *"QWEN_CORE_ROLLOUT_MODE"* ]]; then
+  echo "${TEST_QWEN_ROLLOUT_MODE:-synthetic}"
   exit 0
 elif [[ "$command_text" == *"team-task-lifecycle-deploy-safety.mjs' persist"* ]]; then
   [[ "$command_text" == *"flock --exclusive --timeout 60"* ]] || exit 92
@@ -551,7 +561,7 @@ test_orchestrator_retries_transient_ancestor_gate() {
   (( rc == 1 )) || fail "orchestrator should pass a recovered ancestor gate and reach rollback-safe deploy handling"
   assert_event_count "$event_log" gate-check 2
   assert_event_count "$event_log" reset-new 2
-  assert_event_order "$event_log" runtime-directory runtime-upload runtime-permissions rollback-validate gate-fetch gate-check reset-new lifecycle-safety-off rollback-build runtime-restart
+  assert_event_order "$event_log" runtime-directory runtime-upload runtime-permissions gate-fetch rollback-validate gate-check reset-new lifecycle-safety-off rollback-build runtime-restart
   ! grep -Fq "unit-secret" "$output" \
     || fail "ancestor-gate retries must not print credentials"
   rm -rf "$harness_dir"
@@ -631,6 +641,16 @@ elif [[ "$command_text" == *"eval:smoke"* ]]; then
     failures) echo "[eval] 10/11 passed (180.0s)"; exit 1 ;;
     unparseable) echo "full smoke crashed" ;;
   esac
+elif [[ "$command_text" == *"qwen-only-release-contract.mjs"* ]]; then
+  echo "qwen-dark-gate" >> "$TEST_EVENT_LOG"
+  if [[ "${TEST_QWEN_DARK_GATE_STATE:-healthy}" == "failures" ]]; then
+    echo '{"status":"fail","check":"qwen-only-release-contract"}'
+    exit 1
+  fi
+  printf '%s\n' \
+    '{"status":"pass","check":"qwen-only-release-contract"}' \
+    '{"status":"pass","region":"international","protocol":"messages"}' \
+    '{"status":"pass","region":"international","protocol":"responses"}'
 elif [[ "$command_text" == *"git reset --hard '1111111111111111111111111111111111111111'"* ]]; then
   echo "rollback-build" >> "$TEST_EVENT_LOG"
 elif [[ "$command_text" == *"install -d"* ]]; then
@@ -640,7 +660,12 @@ elif [[ "$command_text" == *"install -d"* ]]; then
 elif [[ "$command_text" == *"chown root:root"* ]]; then
   echo "runtime-permissions" >> "$TEST_EVENT_LOG"
 elif [[ "$command_text" == *"git cat-file -e '1111111111111111111111111111111111111111"* ]]; then
+  echo "${TEST_ROLLBACK_QWEN_ONLY:-1}"
   exit 0
+elif [[ "$command_text" == *"origin/codex/release-candidate:apps/orchestrator/src/config/env.ts"* ]]; then
+  echo "${TEST_CANDIDATE_QWEN_ONLY:-1}"
+elif [[ "$command_text" == *"QWEN_CORE_ROLLOUT_MODE"* && "$command_text" != *"/proc/"* ]]; then
+  echo "${TEST_QWEN_ROLLOUT_MODE:-synthetic}"
 elif [[ "$command_text" == *"deploy-preflight.sh"* ]]; then
   exit 0
 elif [[ "$command_text" == *"git fetch origin"* && "$command_text" != *"git reset --hard"* ]]; then
@@ -662,6 +687,12 @@ elif [[ "$command_text" == *"orchestrator-runtime.sh' restart"* ]]; then
   [[ "$command_text" == *"team-task-lifecycle-deploy-safety.mjs' verify-process holaday-orchestrator"* ]] \
     || exit 91
   if grep -Fxq "rollback-build" "$TEST_EVENT_LOG"; then
+    if [[ "${TEST_EXPECT_LEGACY_KEYS_DISABLED:-0}" == "1" ]]; then
+      [[ "$command_text" == *"ANTHROPIC_API_KEY=''"* ]] || exit 95
+      [[ "$command_text" == *"OPENAI_API_KEY=''"* ]] || exit 96
+      [[ "$command_text" == *"GEMINI_API_KEY=''"* ]] || exit 97
+      [[ "$command_text" == *"GOOGLE_API_KEY=''"* ]] || exit 98
+    fi
     echo "rollback-restart" >> "$TEST_EVENT_LOG"
   else
     echo "runtime-restart" >> "$TEST_EVENT_LOG"
@@ -671,7 +702,11 @@ elif [[ "$command_text" == *"curl -sf"* ]]; then
 elif [[ "$command_text" == *"restart_time"* ]]; then
   echo "0"
 elif [[ "$command_text" == *"/proc/"* && "$command_text" == *"environ"* ]]; then
-  printf '%s\n' MODEL_RUNTIME_POLICY QWEN_CORE_ROLLOUT_MODE QWEN_CORE_ENABLED_LANES DASHSCOPE_INTL_API_KEY DASHSCOPE_INTL_ANTHROPIC_BASE_URL DASHSCOPE_INTL_RESPONSES_BASE_URL
+  printf '%s\n' \
+    "__QWEN_ROLLOUT_MODE__=${TEST_QWEN_ROLLOUT_MODE:-synthetic}" \
+    MODEL_RUNTIME_POLICY QWEN_CORE_ROLLOUT_MODE QWEN_CORE_ENABLED_LANES \
+    DASHSCOPE_INTL_API_KEY DASHSCOPE_INTL_ANTHROPIC_BASE_URL \
+    DASHSCOPE_INTL_RESPONSES_BASE_URL
 else
   echo "unexpected:$command_text" >> "$TEST_EVENT_LOG"
   exit 90
@@ -775,6 +810,106 @@ test_orchestrator_full_smoke_is_opt_in_and_informational() {
     || fail "optional full smoke failure must not roll back a healthy fast gate"
   grep -Fq "Full P0 smoke 10/11 had failures" "$output" \
     || fail "optional full smoke must report failures without hiding them"
+  rm -rf "$harness_dir"
+}
+
+test_orchestrator_rejects_unapproved_initial_qwen_cutover() {
+  local harness_dir event_log output rc
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_orchestrator_release_smoke_harness "$harness_dir"
+
+  set +e
+  PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    TEST_ROLLBACK_QWEN_ONLY=0 \
+    TEST_QWEN_ROLLOUT_MODE=off \
+    DEPLOY_REMOTE_RETRIES=1 \
+    DEPLOY_REMOTE_RETRY_SLEEP=0 \
+    CN_PAYMENT_PREFLIGHT_VERIFIED=1 \
+    PAYPAL_PREFLIGHT_VERIFIED=1 \
+    ORCHESTRATOR_ROLLBACK_HEAD="1111111111111111111111111111111111111111" \
+    VULTR_PASSWORD="unit-secret" \
+    "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
+      "codex/release-candidate" > "$output" 2>&1
+  rc=$?
+  set -e
+
+  (( rc == 1 )) || fail "an initial Qwen-only cutover must require explicit authorization"
+  grep -Fq 'qwen_only_rollback_missing' "$output" \
+    || fail "initial-cutover refusal must identify the missing Qwen-only rollback"
+  assert_event_count "$event_log" qwen-dark-gate 0
+  assert_event_count "$event_log" runtime-restart 0
+  rm -rf "$harness_dir"
+}
+
+test_orchestrator_initial_qwen_cutover_runs_dark_gate() {
+  local harness_dir event_log output
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_orchestrator_release_smoke_harness "$harness_dir"
+
+  if ! PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    TEST_ROLLBACK_QWEN_ONLY=0 \
+    TEST_QWEN_ROLLOUT_MODE=off \
+    ALLOW_INITIAL_QWEN_CUTOVER=1 \
+    DEPLOY_REMOTE_RETRIES=1 \
+    DEPLOY_REMOTE_RETRY_SLEEP=0 \
+    CN_PAYMENT_PREFLIGHT_VERIFIED=1 \
+    PAYPAL_PREFLIGHT_VERIFIED=1 \
+    ORCHESTRATOR_ROLLBACK_HEAD="1111111111111111111111111111111111111111" \
+    SKIP_AUTO_SMOKE=1 \
+    VULTR_PASSWORD="unit-secret" \
+    "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
+      "codex/release-candidate" > "$output" 2>&1; then
+    cat "$output" >&2
+    fail "an explicitly authorized dark Qwen-only cutover should pass"
+  fi
+
+  assert_event_count "$event_log" qwen-dark-gate 1
+  assert_event_count "$event_log" release-gate 0
+  grep -Fq 'Qwen-only dark-release gate passed' "$output" \
+    || fail "initial cutover must report its blocking dark gate"
+  rm -rf "$harness_dir"
+}
+
+test_orchestrator_initial_qwen_cutover_rolls_back_without_legacy_models() {
+  local harness_dir event_log output rc
+  harness_dir="$(mktemp -d)"
+  event_log="$harness_dir/events"
+  output="$harness_dir/output"
+  : > "$event_log"
+  write_orchestrator_release_smoke_harness "$harness_dir"
+
+  set +e
+  PATH="$harness_dir/bin:$PATH" \
+    TEST_EVENT_LOG="$event_log" \
+    TEST_ROLLBACK_QWEN_ONLY=0 \
+    TEST_QWEN_ROLLOUT_MODE=off \
+    TEST_QWEN_DARK_GATE_STATE=failures \
+    TEST_EXPECT_LEGACY_KEYS_DISABLED=1 \
+    ALLOW_INITIAL_QWEN_CUTOVER=1 \
+    DEPLOY_REMOTE_RETRIES=1 \
+    DEPLOY_REMOTE_RETRY_SLEEP=0 \
+    CN_PAYMENT_PREFLIGHT_VERIFIED=1 \
+    PAYPAL_PREFLIGHT_VERIFIED=1 \
+    ORCHESTRATOR_ROLLBACK_HEAD="1111111111111111111111111111111111111111" \
+    SKIP_AUTO_SMOKE=1 \
+    VULTR_PASSWORD="unit-secret" \
+    "$harness_dir/repo/scripts/deploy-orchestrator.sh" \
+      "codex/release-candidate" > "$output" 2>&1
+  rc=$?
+  set -e
+
+  (( rc == 1 )) || fail "a failed dark gate must fail the initial cutover"
+  assert_event_order "$event_log" qwen-dark-gate rollback-build rollback-restart
+  grep -Fq 'disable legacy provider credentials' "$output" \
+    || fail "initial-cutover rollback must disclose its legacy-provider safety boundary"
   rm -rf "$harness_dir"
 }
 
@@ -932,6 +1067,9 @@ test_orchestrator_classifies_exhausted_gate_fetch
 test_orchestrator_fast_release_gate_rolls_back_on_failure
 test_orchestrator_fast_release_gate_runs_without_full_smoke
 test_orchestrator_full_smoke_is_opt_in_and_informational
+test_orchestrator_rejects_unapproved_initial_qwen_cutover
+test_orchestrator_initial_qwen_cutover_runs_dark_gate
+test_orchestrator_initial_qwen_cutover_rolls_back_without_legacy_models
 test_akshare_rollback_only_restores_without_deploying
 test_akshare_failure_restores_live_head install
 test_akshare_failure_restores_live_head smoke
@@ -949,6 +1087,10 @@ grep -Fq 'git cat-file -e' "$ORCHESTRATOR_SCRIPT" \
   || fail "orchestrator deploy must validate an explicit rollback commit"
 grep -Fq 'MODEL_RUNTIME_POLICY must be qwen_only in production' "$ORCHESTRATOR_SCRIPT" \
   || fail "orchestrator deploy and rollback must require a Qwen-only revision"
+grep -Fq 'ALLOW_INITIAL_QWEN_CUTOVER' "$ORCHESTRATOR_SCRIPT" \
+  && grep -Fq 'Qwen-only dark-release gate' "$ORCHESTRATOR_SCRIPT" \
+  && grep -Fq "export ANTHROPIC_API_KEY=''" "$ORCHESTRATOR_SCRIPT" \
+  || fail "initial Qwen-only cutover must stay explicit, dark-gated, and legacy-provider-safe"
 grep -Fq 'MODEL_RUNTIME_POLICY QWEN_CORE_ROLLOUT_MODE QWEN_CORE_ENABLED_LANES DASHSCOPE_INTL_API_KEY DASHSCOPE_INTL_ANTHROPIC_BASE_URL DASHSCOPE_INTL_RESPONSES_BASE_URL' "$ORCHESTRATOR_SCRIPT" \
   || fail "orchestrator deploy must require the Qwen-only international process contract"
 ! grep -Fq 'GEMINI_API_KEY ANTHROPIC_API_KEY DASHSCOPE_API_KEY' "$ORCHESTRATOR_SCRIPT" \
