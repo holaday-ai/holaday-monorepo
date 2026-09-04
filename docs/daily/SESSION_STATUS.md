@@ -28,7 +28,9 @@
 <!-- 2026-07-09 Codex 补充：状态机 pre-execution guard：start(existing) 不再把 pending/queued 直接派发成 executing；pause 只允许 executing source；repository control transition 同步拒绝非 executing→paused 与非 paused→executing，防 queued/pending 绕过队列恢复。 -->
 <!-- 2026-07-09 Codex 补充：状态机 planning bootstrap 收口：新任务 seed 显式走 state:null + taskId + plan；start(existing planning) 改为 noop，避免历史/重连 planning 被误派发；tasks.create/smoke 与集成 fixture 已统一。 -->
 <!-- 2026-07-09 Codex 补充：技能 planner 闭环：planner catalogue 现在合并 DB SKILL.md rows + shared 13 用户可见技能；手动 @ 技能会注入 planner hint，避免前端选择了技能但通用 planner 不知道。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@d24afe98`（2026-09-04 JST）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05@8002437a`（2026-09-04 JST）
+
+浏览器目标 URL 的模型裁决已通过 PR #218 安全退出并上线。用户明确给出的 URL 先经过 HTTP(S)、嵌入凭据、DNS 与私网安全校验；站点名称只有在现有可信 Playbook 唯一命中时才注入规范域名，未知或歧义名称只附加“先搜索并核验官网”的指令，不再由 Claude 或千问猜测地址。解析日志只保留结果分类与拒绝原因，不记录站点 token、URL、模型回复或供应商错误。发布前聚焦测试 69/69、Orchestrator 全量 1,355 个套件 / 5,909 项、发布契约 70/70、typecheck、build 与差异检查通过；application 安全快进部署到 `8002437aeb3cc2612767adff042f16bf22b31995`，编号迁移、schema 与快速 P0 4/4 通过，Orchestrator 单实例、uid 998、restart 0，双公网 healthz 均为 200 / `status=ok`。目标主机固定合成探针 6/6 通过，覆盖可信映射、未知/歧义站点、危险协议、嵌入凭据及普通文本误判；探针使用合成 DNS，不执行浏览器动作、不调用模型、不访问数据库，安全日志中无 URL/token。四项 Qwen 开关均为 false、建议与 plan 白名单均为 0，没有生产用户千问流量；未改凭据、用户数据、支付、提现、账户关闭、DivineAPI Translator 或 OpenAI Key。
 
 任务首屏规划器的千问暗发布已通过 PR #216 上线。规划器现统一走 provider-neutral Messages adapter：模型只返回结构化 JSON，服务端确定性渲染现有计划 UI，并在展示前强制校验 2–6 步、工具标签、预计耗时与危险最终动作；任何无效输出、区域/凭据缺失或供应商失败都只回退为“无计划”，不阻塞任务创建，也不跨区域或跨 provider 回退。Qwen 路由需要总开关、独立 plan canary、精确合成白名单及用户持久化数据区域同时满足，全部缺省关闭。发布前 Orchestrator 1,355 个套件 / 5,897 项、70 项发布/数据库/Qwen 契约测试、typecheck、clean build、目标 Biome 与差异检查通过；application 安全快进部署到 `d24afe98484c25a5f8f6c05d9abcce00750e74e0`，迁移、schema、P0 4/4、单实例 uid 998、restart 0 与双公网 healthz 通过。目标主机固定合成国际区探针使用 `qwen3.7-plus`，2,792ms 生成 3 步合规计划，确定性渲染契约成立、危险动作计数 0、`stopReason=end_turn`、token 用量完整（307 / 103）；探针不调用工具、不写数据库、不保留模型正文。探针前后 `QWEN_MESSAGES_ADAPTER_ENABLED=false`、`QWEN_PLAN_CANARY_ENABLED=false`、plan 白名单数量 0，既有 shadow/建议开关也仍为 false，因此没有生产用户千问流量；大陆凭据仍未配置，未触碰用户数据、支付、提现、账户关闭、DivineAPI Translator 或 OpenAI Key。
 
