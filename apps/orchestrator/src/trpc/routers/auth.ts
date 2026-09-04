@@ -6,6 +6,10 @@ import { EmailCodeError, createEmailCodeService } from '../../auth/email-code.js
 import { MfaError, MfaService } from '../../auth/mfa-service.js';
 import { AuthError, AuthService } from '../../auth/service.js';
 import { users } from '../../db/schema/users.js';
+import {
+  ModelDataRegionAssignmentError,
+  assignPersonalModelDataRegion,
+} from '../../llm/model-data-region-assignment.js';
 import { isTeamProjectsEnabledFor } from '../../organizations/team-project-access.js';
 import { isTeamTaskLifecycleEnabledForUser } from '../../team-work-items/team-task-access.js';
 import { protectedProcedure, publicProcedure, router } from '../trpc.js';
@@ -395,6 +399,29 @@ export const authRouter = router({
       }
     }),
 
+  assignModelDataRegion: protectedProcedure
+    .input(z.object({ region: z.enum(['cn', 'intl']) }).strict())
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await assignPersonalModelDataRegion({
+          db: ctx.db,
+          actorExternalId: ctx.userId,
+          region: input.region,
+        });
+      } catch (error) {
+        if (error instanceof ModelDataRegionAssignmentError) {
+          if (error.code === 'REGION_ALREADY_ASSIGNED') {
+            throw new TRPCError({
+              code: 'CONFLICT',
+              message: 'model data region already assigned',
+            });
+          }
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'user not found' });
+        }
+        throw error;
+      }
+    }),
+
   me: protectedProcedure.query(async ({ ctx }) => {
     const [row] = await ctx.db
       .select({
@@ -407,6 +434,7 @@ export const authRouter = router({
         planExpiresAt: users.planExpiresAt,
         selectedRoles: users.selectedRoles,
         role: users.role,
+        modelDataRegion: users.modelDataRegion,
       })
       .from(users)
       .where(eq(users.externalId, ctx.userId))
@@ -436,6 +464,7 @@ export const authRouter = router({
       // Phase 27 — admin gate. SPA reads this to decide whether to
       // render the "管理后台" sidebar entry + the /admin guard.
       role: row.role as 'user' | 'admin',
+      modelDataRegion: row.modelDataRegion,
       // Phase 1 #4 — video-creation gradual-rollout gate. The SPA reads
       // this to show/hide the「视频任务」sidebar entry + guard /video.
       // Single source with the tasks.ts fork (agent/video/video-access.ts).

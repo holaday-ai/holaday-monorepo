@@ -5,6 +5,10 @@ import { env as appEnv } from '../../config/env.js';
 import type { DB } from '../../db/client.js';
 import { organizations } from '../../db/schema/organizations.js';
 import {
+  ModelDataRegionAssignmentError,
+  assignOrganizationModelDataRegion,
+} from '../../llm/model-data-region-assignment.js';
+import {
   InvitationServiceError,
   acceptInvitation,
   createInvitation,
@@ -79,6 +83,15 @@ function invitationUrl(token: string): string {
 }
 
 function mapDomainError(error: unknown): never {
+  if (error instanceof ModelDataRegionAssignmentError) {
+    if (error.code === 'REGION_ALREADY_ASSIGNED') {
+      throw new TRPCError({ code: 'CONFLICT', message: 'model data region already assigned' });
+    }
+    if (error.code === 'PERMISSION_DENIED') {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'organization permission denied' });
+    }
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'organization not found' });
+  }
   if (error instanceof OrganizationServiceError || error instanceof InvitationServiceError) {
     if (error instanceof OrganizationServiceError && error.code === 'SOLE_PROJECT_LEAD') {
       throw new TRPCError({
@@ -115,8 +128,30 @@ export const organizationsRouter = router({
         role: organization.callerRole,
         managerDisplayName: organization.managerDisplayName,
         activeMemberCount: organization.activeMemberCount,
+        modelDataRegion: organization.modelDataRegion,
       }));
   }),
+
+  assignModelDataRegion: teamProjectsProcedure
+    .input(
+      z
+        .object({
+          organizationId: organizationIdSchema,
+          region: z.enum(['cn', 'intl']),
+        })
+        .strict(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireEnabledOrganization(ctx.db, input.organizationId);
+      return callDomain(() =>
+        assignOrganizationModelDataRegion({
+          db: ctx.db,
+          actorExternalId: ctx.userId,
+          organizationExternalId: input.organizationId,
+          region: input.region,
+        }),
+      );
+    }),
 
   create: teamProjectsProcedure
     .input(z.object({ name: z.string().trim().min(1).max(100) }))
