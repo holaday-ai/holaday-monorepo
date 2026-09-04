@@ -37,7 +37,7 @@ import {
   reloadFeatureFlagsForTest,
   setFeatureFlagsForTest,
 } from './feature-flags.js';
-import type { AnthropicLikeClient } from './llm-verifier.js';
+import type { MessagesAdapter } from '../llm/messages-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -65,13 +65,36 @@ function flagsAllOn(): void {
   });
 }
 
-function makeStubClient(textOut: string): AnthropicLikeClient {
+function makeStubClient(textOut: string): MessagesAdapter {
   return {
-    messages: {
-      create: vi.fn().mockResolvedValue({
-        content: [{ type: 'text', text: textOut }],
-      }),
+    metadata: {
+      provider: 'alibaba-model-studio',
+      model: 'qwen3.8-flash',
+      region: 'intl',
+      deploymentScope: 'international',
+      endpointKind: 'public',
+      protocol: 'messages',
     },
+    create: vi.fn().mockResolvedValue({
+      id: 'msg_test',
+      metadata: {
+        provider: 'alibaba-model-studio',
+        model: 'qwen3.8-flash',
+        region: 'intl',
+        deploymentScope: 'international',
+        endpointKind: 'public',
+        protocol: 'messages',
+      },
+      content: [{ type: 'text', text: textOut }],
+      stopReason: 'end_turn',
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadInputTokens: null,
+        cacheCreationInputTokens: null,
+        complete: true,
+      },
+    }),
   };
 }
 
@@ -412,6 +435,38 @@ describe('final persistence boundary', () => {
     expect(out.finalText).toContain('同一来源页');
   });
 
+  it('preserves explicit semantic unavailability after the final deterministic recheck', async () => {
+    const taskId = 'tsk_final_boundary_semantic_unavailable';
+    initExecution({
+      taskId,
+      intent: '分析股票研究材料',
+      executionMode: 'generate',
+      expertMode: 'expert',
+    });
+    recordEvidence(taskId, {
+      fact: '用户提供了合成研究材料',
+      sourceType: 'user_input',
+      sourceDetail: 'fixture',
+      confidence: 'observed',
+    });
+    const answerText = '股票研究结果仅供核对，需结合公开材料。'.repeat(30);
+
+    const out = await finalizeAnswerForPersistence({
+      taskId,
+      answerText,
+      priorVerification: {
+        taskId,
+        passed: true,
+        tier: 'deterministic',
+        semanticStatus: 'unavailable',
+        checks: [],
+      },
+    });
+
+    expect(out.verification?.passed).toBe(true);
+    expect(out.verification?.semanticStatus).toBe('unavailable');
+  });
+
   it('does not erase a stricter earlier verifier failure when final structure passes', async () => {
     const taskId = 'tsk_final_boundary_preserves_llm_failure';
     const sourceUrl = 'https://openai.com/news/';
@@ -638,10 +693,10 @@ describe('fixable demotion when autoFix produces no ops', () => {
 // Case 6 — full tier triggers LLM verifier
 // ---------------------------------------------------------------------------
 
-describe('full tier triggers LLM verifier', () => {
+describe('full tier triggers Qwen semantic verifier', () => {
   beforeEach(() => flagsAllOn());
 
-  it('registered typed workflow keeps deterministic verdict without an LLM call', async () => {
+  it('registered typed workflow receives semantic review after deterministic pass', async () => {
     initExecution({
       taskId: 'tsk_typed_full',
       intent: '复盘抖音直播',
@@ -658,7 +713,7 @@ describe('full tier triggers LLM verifier', () => {
       sourceDetail: 'msg',
       confidence: 'observed',
     });
-    const client = makeStubClient('{"passed":true,"issues":[]}');
+    const semanticAdapter = makeStubClient('{"status":"pass","issues":[]}');
     const answerText = [
       '## 数据校验',
       '已通过。',
@@ -675,12 +730,12 @@ describe('full tier triggers LLM verifier', () => {
     const out = await verifyAndFinalize({
       taskId: 'tsk_typed_full',
       answerText,
-      client,
+      semanticAdapter,
     });
 
-    expect(out.verification!.tier).toBe('deterministic');
+    expect(out.verification!.tier).toBe('llm');
     expect(out.verification!.passed).toBe(true);
-    expect(client.messages.create).not.toHaveBeenCalled();
+    expect(semanticAdapter.create).toHaveBeenCalledTimes(1);
   });
 
   it('deterministic passes → LLM tier called → final passed=true', async () => {
@@ -700,17 +755,17 @@ describe('full tier triggers LLM verifier', () => {
       sourceDetail: 'msg',
       confidence: 'observed',
     });
-    const client = makeStubClient('{"passed":true,"issues":[]}');
+    const semanticAdapter = makeStubClient('{"status":"pass","issues":[]}');
     const answerText =
       '本场 GMV ¥100000，客单价 ¥80。' + 'x'.repeat(220);
     const out = await verifyAndFinalize({
       taskId: 'tsk_full1',
       answerText,
-      client,
+      semanticAdapter,
     });
     expect(out.verification!.tier).toBe('llm');
     expect(out.verification!.passed).toBe(true);
-    expect(client.messages.create).toHaveBeenCalledTimes(1);
+    expect(semanticAdapter.create).toHaveBeenCalledTimes(1);
   });
 
   it('deterministic passes → LLM finds an issue → returns LLM verdict', async () => {
@@ -727,17 +782,45 @@ describe('full tier triggers LLM verifier', () => {
       sourceDetail: 'msg',
       confidence: 'observed',
     });
-    const client = makeStubClient(
-      '{"passed":false,"issues":[{"criterion_id":"q","problem":"内容深度不够","fixable":false}]}',
+    const semanticAdapter = makeStubClient(
+      '{"status":"reject","issues":[{"code":"UNSUPPORTED_CONCLUSION","summary":"PRIVATE_MODEL_TEXT","fixable":false}]}',
     );
     const out = await verifyAndFinalize({
       taskId: 'tsk_full2',
       answerText: '本场 GMV ¥100000 表现不错。' + 'x'.repeat(220),
-      client,
+      semanticAdapter,
     });
     expect(out.verification!.tier).toBe('llm');
     expect(out.verification!.passed).toBe(false);
     expect(out.verification!.failureLevel).toBe('needs_clarification');
+    expect(JSON.stringify(out.verification)).not.toContain('PRIVATE_MODEL_TEXT');
+  });
+
+  it('keeps a deterministic pass and shows a warning when strict review is unavailable', async () => {
+    initExecution({
+      taskId: 'tsk_stock_unavailable',
+      intent: '分析这只股票的投资风险',
+      executionMode: 'generate',
+      expertMode: 'expert',
+    });
+    recordEvidence('tsk_stock_unavailable', {
+      fact: '用户提供了股票代码和研究材料',
+      sourceType: 'user_input',
+      sourceDetail: 'msg',
+      confidence: 'observed',
+    });
+
+    const answerText = '股票风险分析：请核对财务数据与公告来源。'.repeat(20);
+    const out = await verifyAndFinalize({
+      taskId: 'tsk_stock_unavailable',
+      answerText,
+      semanticAdapter: null,
+    });
+
+    expect(out.verification!.passed).toBe(true);
+    expect(out.verification!.semanticStatus).toBe('unavailable');
+    expect(out.finalText).toContain('语义复核暂不可用');
+    expect(out.finalText).toContain(answerText);
   });
 });
 
@@ -962,7 +1045,7 @@ describe('disposeExecution + resilience', () => {
     disposeExecution('tsk_dx');
   });
 
-  it('catches a throwing LLM client and falls through to deterministic verdict', async () => {
+  it('marks a throwing semantic adapter unavailable without leaking the error', async () => {
     initExecution({
       taskId: 'tsk_thr',
       intent: '复盘',
@@ -976,25 +1059,19 @@ describe('disposeExecution + resilience', () => {
       sourceDetail: 'msg',
       confidence: 'observed',
     });
-    // Client whose .create throws synchronously — verifyWithLlm
-    // already catches it and returns a non-blocking pass; the
-    // pipeline falls through cleanly either way.
-    const client: AnthropicLikeClient = {
-      messages: {
-        create: vi.fn().mockRejectedValue(new Error('upstream 503')),
-      },
+    const semanticAdapter: MessagesAdapter = {
+      ...makeStubClient('{"status":"pass","issues":[]}'),
+      create: vi.fn().mockRejectedValue(new Error('PRIVATE_PROVIDER_BODY')),
     };
     const out = await verifyAndFinalize({
       taskId: 'tsk_thr',
       answerText: '本场 GMV ¥100000 ' + 'x'.repeat(220),
-      client,
+      semanticAdapter,
     });
-    // The LLM tier returned the non-blocking pass, so verification
-    // is `passed: true` from the LLM fallback path.
     expect(out.verification!.passed).toBe(true);
-    expect(out.verification!.tier).toBe('llm');
-    const fb = out.verification!.checks.find((c) => c.criterionId === 'llm.fallback');
-    expect(fb).toBeDefined();
+    expect(out.verification!.tier).toBe('deterministic');
+    expect(out.verification!.semanticStatus).toBe('unavailable');
+    expect(JSON.stringify(out.verification)).not.toContain('PRIVATE_PROVIDER_BODY');
   });
 });
 

@@ -6071,7 +6071,6 @@ export const tasksRouter = router({
                 taskId,
                 answerText: answerSummary,
                 ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
-                client: anthropicForResolver,
                 logger: ctx.logger,
                 // File-artifact guard (C): a download claim with no
                 // fence AND no matching DOCUMENT output → fixable. The

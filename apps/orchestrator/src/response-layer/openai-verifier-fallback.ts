@@ -1,5 +1,5 @@
 /**
- * Optimization #2b — OpenAI VerifierFallback.
+ * Dormant historical OpenAI VerifierFallback.
  *
  * Second opinion on the existing verifier verdict via gpt-4o-mini.
  * Runs AFTER the deterministic + (optional) Haiku verifier and
@@ -41,10 +41,9 @@
  *
  * # Feature flag (independent from response-layer formatter)
  *
- *   `OPENAI_VERIFIER_FALLBACK_ENABLED=false` (default). Flipping it
- *   on additionally requires `OPENAI_API_KEY`. The deployment story
- *   is the same as the response-layer formatter so the two ship
- *   together when ops is comfortable.
+ *   This module has no production caller and its gate is permanently false.
+ *   The implementation remains only as migration history until the dormant
+ *   legacy inventory can be deleted in a later subproject.
  */
 
 import OpenAI from 'openai';
@@ -141,10 +140,8 @@ export interface VerifierFallbackDeps {
  * even loading the module.
  */
 export function isVerifierFallbackEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const flag = (env.OPENAI_VERIFIER_FALLBACK_ENABLED ?? 'false').toLowerCase();
-  if (flag !== 'true' && flag !== '1') return false;
-  if (!env.OPENAI_API_KEY) return false;
-  return true;
+  void env;
+  return false;
 }
 
 /**

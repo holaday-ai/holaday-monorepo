@@ -29,7 +29,7 @@ export interface ReviewGenerateOutcomeInput {
   taskId: string;
   intent: string;
   outcome: ReviewableGenerateOutcome;
-  client?: VerifyInputs['client'];
+  semanticAdapter?: VerifyInputs['semanticAdapter'];
   logger?: Logger;
   evidenceSourceDetail?: string;
   onVerifying?: () => void;
@@ -90,7 +90,7 @@ export async function reviewGenerateOutcome(
     const verified = await verifyAndFinalize({
       taskId: input.taskId,
       answerText: outcome.summary,
-      client: input.client,
+      semanticAdapter: input.semanticAdapter,
       logger: input.logger,
     });
     if (verified.finalText !== outcome.summary) {

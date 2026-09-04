@@ -34,12 +34,12 @@
  * `verifyDeterministic` / `verifyWithLlm`. This module bridges
  * the spec language to the actual symbol names.
  */
-import type Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from 'pino';
 import { and, eq, inArray } from 'drizzle-orm';
 import { tasks as tasksTable } from '../db/schema/tasks.js';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
+import type { MessagesAdapter } from '../llm/messages-adapter.js';
 
 import type { CheckResult, ParsedItem, VerificationResult } from './answer-verifier.js';
 import { extractStructuredItems, verifyDeterministic } from './answer-verifier.js';
@@ -63,9 +63,9 @@ import {
 } from './evidence-ledger.js';
 import { getFeatureFlags } from './feature-flags.js';
 import {
+  mergeDeterministicAndSemantic,
   shouldRunLlmVerifier,
   verifyWithLlm,
-  type AnthropicLikeClient,
 } from './llm-verifier.js';
 import { getExpertWorkflowById } from './expert-workflow-registry.js';
 
@@ -170,12 +170,8 @@ export interface VerifyInputs {
   answerText: string;
   /** Browser-mode tasks pass the last URL the agent reached. */
   finalUrl?: string;
-  /**
-   * Anthropic client for the LLM tier. When null, the LLM tier
-   * is skipped entirely (still passes if deterministic passes).
-   * Most runners already have a client — pass it through.
-   */
-  client?: AnthropicLikeClient | Anthropic | null;
+  /** Region-bound Qwen Messages adapter for the semantic tier. */
+  semanticAdapter?: MessagesAdapter | null;
   /** Optional logger for non-blocking warnings. */
   logger?: Logger;
   /**
@@ -530,64 +526,30 @@ export async function verifyAndFinalize(
     ...(inputs.outputFiles ? { outputFiles: inputs.outputFiles } : {}),
   });
 
-  if (!det.passed) {
-    // Optimization #2b (Codex P2) — VerifierFallback second-opinion
-    // BEFORE we commit to runFixLoop. OpenAI may upgrade the
-    // severity from 'fixable' to 'needs_clarification' if it sees
-    // a concrete fabrication risk the autoFix path can't handle.
-    // shouldTrigger gates internally; if no trigger / flag off /
-    // OpenAI unreachable, the original det verdict is preserved.
-    const augmented = await maybeApplyVerifierFallback(
-      det,
-      inputs,
-      contract.goal,
-    );
-    return runFixLoop(contract, ledger, augmented, inputs, workflowContract);
-  }
+  if (!det.passed) return runFixLoop(contract, ledger, det, inputs, workflowContract);
 
-  // Layer 2 — LLM (only when tier=full and deterministic passed). Registered
-  // typed workflows already have a section-aware deterministic contract; the
-  // current semantic verifier is non-blocking and therefore adds latency
-  // without changing their effective verdict. Unregistered legacy full-tier
-  // tasks keep the second opinion.
-  if (
-    inputs.client &&
-    shouldRunLlmVerifier(det, contract, workflowContract !== null)
-  ) {
-    try {
-      const llm = await verifyWithLlm({
-        contract,
-        ledger,
-        answerText: inputs.answerText,
-        ...(inputs.finalUrl ? { finalUrl: inputs.finalUrl } : {}),
-        client: inputs.client as AnthropicLikeClient,
-      });
-      if (!llm.passed) {
-        return runFixLoop(contract, ledger, llm, inputs, workflowContract);
-      }
-      // Optimization #2b (Codex P2) — VerifierFallback second-opinion
-      // on Haiku's "passed but with reservations" verdict. If
-      // OpenAI disagrees, it downgrades to passed=false +
-      // needs_clarification → runFixLoop. Otherwise the LLM verdict
-      // ships unchanged.
-      const augmented = await maybeApplyVerifierFallback(
-        llm,
-        inputs,
-        contract.goal,
-      );
-      if (!augmented.passed) {
-        return runFixLoop(contract, ledger, augmented, inputs, workflowContract);
-      }
-      return { verification: augmented, finalText: inputs.answerText };
-    } catch (err) {
-      // Belt-and-suspenders — verifyWithLlm is supposed to never
-      // throw, but if it does we still don't block the user.
-      inputs.logger?.warn(
-        { err: err instanceof Error ? err.message : String(err), taskId: inputs.taskId },
-        'execution-pipeline: llm verifier threw — falling through to deterministic verdict',
-      );
-      return { verification: det, finalText: inputs.answerText };
+  // Layer 2 — semantic. It is always attempted for a deterministic full-tier
+  // pass. A missing regional runtime is explicit `unavailable`, never an
+  // implied model pass.
+  if (shouldRunLlmVerifier(det, contract)) {
+    const semantic = await verifyWithLlm({
+      contract,
+      ledger,
+      answerText: inputs.answerText,
+      ...(inputs.finalUrl ? { finalUrl: inputs.finalUrl } : {}),
+      adapter: inputs.semanticAdapter ?? null,
+    });
+    const merged = mergeDeterministicAndSemantic(det, semantic);
+    if (!merged.passed) {
+      return runFixLoop(contract, ledger, merged, inputs, workflowContract);
     }
+    return {
+      verification: merged,
+      finalText:
+        semantic.status === 'unavailable' && isHighTrustContract(contract)
+          ? appendSemanticUnavailableWarning(inputs.answerText)
+          : inputs.answerText,
+    };
   }
 
   return { verification: det, finalText: inputs.answerText };
@@ -599,9 +561,9 @@ export async function verifyAndFinalize(
  * observed source references after their primary verifier pass. Those are
  * still text mutations, so the persistence boundary must re-run the verifier
  * and auto-fix loop against the final string instead of trusting an earlier
- * verdict. Omitting `client` keeps this second pass deterministic and cheap.
+ * verdict. Omitting `semanticAdapter` keeps this second pass deterministic and cheap.
  */
-export type FinalizeAnswerForPersistenceInputs = Omit<VerifyInputs, 'client'> & {
+export type FinalizeAnswerForPersistenceInputs = Omit<VerifyInputs, 'semanticAdapter'> & {
   /** Preserve unrelated semantic/LLM failures from the primary verifier. */
   priorVerification?: VerificationResult | null;
 };
@@ -633,9 +595,15 @@ export async function finalizeAnswerForPersistence(
   ) ?? [];
 
   if (deterministic.passed) {
-    return priorVerification && unresolvedLlmFailures.length > 0
-      ? { verification: priorVerification, finalText: verifyInputs.answerText }
-      : { verification: deterministic, finalText: verifyInputs.answerText };
+    if (priorVerification && unresolvedLlmFailures.length > 0) {
+      return { verification: priorVerification, finalText: verifyInputs.answerText };
+    }
+    return {
+      verification: priorVerification?.semanticStatus
+        ? { ...deterministic, semanticStatus: priorVerification.semanticStatus }
+        : deterministic,
+      finalText: verifyInputs.answerText,
+    };
   }
 
   const finalOutput = runFixLoop(
@@ -664,65 +632,23 @@ export async function finalizeAnswerForPersistence(
   };
 }
 
-/**
- * Optimization #2b — second-opinion via VerifierFallback. Inline
- * flag gate avoids loading the module + its `openai` dep on every
- * verification when the feature is off (production default).
- * Never throws: any infra failure returns the original verdict.
- */
-async function maybeApplyVerifierFallback(
-  verification: VerificationResult,
-  inputs: VerifyInputs,
-  contractGoal: string,
-): Promise<VerificationResult> {
-  const flag = (process.env.OPENAI_VERIFIER_FALLBACK_ENABLED ?? 'false').toLowerCase();
-  if (flag !== 'true' && flag !== '1') return verification;
-  if (!process.env.OPENAI_API_KEY) return verification;
-  try {
-    const { verifyFallback } = await import(
-      '../response-layer/openai-verifier-fallback.js'
-    );
-    const fb = await verifyFallback(
-      {
-        original: verification,
-        answerText: inputs.answerText,
-        contractGoal,
-        ...(inputs.finalUrl ? { finalUrl: inputs.finalUrl } : {}),
-      },
-      { logger: inputs.logger ?? makeNoopLogger() },
-    );
-    return fb.verification;
-  } catch (err) {
-    inputs.logger?.warn(
-      {
-        err: err instanceof Error ? err.message : String(err),
-        taskId: inputs.taskId,
-      },
-      'execution-pipeline: verifier-fallback threw — keeping original verdict',
-    );
-    return verification;
-  }
+const HIGH_TRUST_INTENT_RE =
+  /股票|股价|证券|基金|投资|金融|财务|法律|合同|合规|医疗|诊断|处方|权限|账户|支付|提现/i;
+
+export function isHighTrustContract(contract: ExecutionContract): boolean {
+  return (
+    contract.intentKind === 'stock_quote' ||
+    contract.outputRequirement?.kind === 'stock' ||
+    HIGH_TRUST_INTENT_RE.test(contract.goal)
+  );
 }
 
-/**
- * Cheap stub for callers that didn't pass a logger. Keeps the
- * fallback module's `deps.logger.warn(...)` happy without forcing
- * every verify caller to thread pino through.
- */
-function makeNoopLogger(): Logger {
-  const noop = () => undefined;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return {
-    info: noop,
-    warn: noop,
-    error: noop,
-    debug: noop,
-    trace: noop,
-    fatal: noop,
-    level: 'silent',
-    silent: noop,
-    child: () => makeNoopLogger(),
-  } as any;
+function appendSemanticUnavailableWarning(answerText: string): string {
+  return [
+    '> 提醒：语义复核暂不可用。以下结果已通过确定性校验，关键事实与来源仍请人工核对。',
+    '',
+    answerText,
+  ].join('\n');
 }
 
 /**
