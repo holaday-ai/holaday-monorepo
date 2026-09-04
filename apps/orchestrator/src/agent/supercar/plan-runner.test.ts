@@ -10,8 +10,7 @@ const BASE_ENVIRONMENT: PlanRuntimeEnvironment = {
   DASHSCOPE_WORKSPACE_ID: '',
   DASHSCOPE_INTL_API_KEY: 'intl-key',
   DASHSCOPE_INTL_ANTHROPIC_BASE_URL: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
-  DASHSCOPE_INTL_RESPONSES_BASE_URL:
-    'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+  DASHSCOPE_INTL_RESPONSES_BASE_URL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
   DASHSCOPE_INTL_WORKSPACE_ID: '',
   DASHSCOPE_CN_API_KEY: 'cn-key',
   DASHSCOPE_CN_ANTHROPIC_BASE_URL: 'https://dashscope.aliyuncs.com/apps/anthropic',
@@ -40,6 +39,7 @@ function buildAdapter(provider: 'anthropic' | 'qwen', step: string): MessagesAda
           region: 'intl',
           deploymentScope: 'international',
           endpointKind: 'public',
+          protocol: 'messages',
         } as const);
   return {
     metadata,

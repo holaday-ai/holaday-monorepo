@@ -11,6 +11,7 @@ function buildAdapter(output: string): MessagesAdapter {
       region: 'intl',
       deploymentScope: 'international',
       endpointKind: 'public',
+      protocol: 'messages',
     },
     create: vi.fn().mockResolvedValue({
       id: 'msg_synthetic_plan',
@@ -20,6 +21,7 @@ function buildAdapter(output: string): MessagesAdapter {
         region: 'intl',
         deploymentScope: 'international',
         endpointKind: 'public',
+        protocol: 'messages',
       },
       content: [{ type: 'text', text: output }],
       stopReason: 'end_turn',
