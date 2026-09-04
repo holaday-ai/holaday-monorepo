@@ -1,62 +1,56 @@
-import type { ModelDataRegion } from '../llm/model-data-region.js';
-import { ModelDataRegionError, resolveModelDataRegionOwnership } from '../llm/model-data-region.js';
+import {
+  type CoreModelRuntimeEnvironment,
+  type CoreModelRuntimeInput,
+  type CoreModelRuntimeUnavailableReason,
+  resolveCoreModelRuntime,
+} from '../llm/core-model-runtime.js';
+import type { MessagesAdapter } from '../llm/messages-adapter.js';
 
-export const SUGGESTIONS_ANTHROPIC_MODEL = 'claude-sonnet-4-6';
+type QwenMessagesAdapter = Omit<MessagesAdapter, 'metadata'> & {
+  readonly metadata: Extract<MessagesAdapter['metadata'], { provider: 'alibaba-model-studio' }>;
+};
 
-export interface SuggestionsProviderEnvironment {
-  ANTHROPIC_API_KEY: string;
-  QWEN_MESSAGES_ADAPTER_ENABLED: boolean;
-  QWEN_SUGGESTIONS_CANARY_ENABLED: boolean;
-  QWEN_SUGGESTIONS_SYNTHETIC_ALLOWLIST: string;
-}
+export type SuggestionsProviderEnvironment = CoreModelRuntimeEnvironment;
 
 export type SuggestionsProviderRoute =
-  | { provider: 'anthropic' }
   | {
       provider: 'qwen';
-      region: ModelDataRegion;
-      deploymentScope: 'china_mainland' | 'international';
+      region: 'cn' | 'intl';
+      messagesAdapter: QwenMessagesAdapter;
     }
   | {
       provider: 'unavailable';
-      reason: 'ANTHROPIC_UNAVAILABLE' | 'MODEL_DATA_REGION_UNAVAILABLE';
+      reason: CoreModelRuntimeUnavailableReason;
     };
 
 export function resolveSuggestionsProviderRoute(input: {
   environment: SuggestionsProviderEnvironment;
   userExternalId: string;
   userModelDataRegion: unknown;
+  createMessages?: CoreModelRuntimeInput['createMessages'];
 }): SuggestionsProviderRoute {
-  const allowlist = new Set(
-    input.environment.QWEN_SUGGESTIONS_SYNTHETIC_ALLOWLIST.split(',')
-      .map((value) => value.trim())
-      .filter(Boolean),
-  );
-  const qwenCanaryActive =
-    input.environment.QWEN_MESSAGES_ADAPTER_ENABLED &&
-    input.environment.QWEN_SUGGESTIONS_CANARY_ENABLED &&
-    allowlist.has(input.userExternalId);
+  const runtime = resolveCoreModelRuntime({
+    environment: input.environment,
+    actorExternalId: input.userExternalId,
+    lane: 'suggestions',
+    ownership: {
+      scope: 'personal',
+      userRegion: input.userModelDataRegion,
+    },
+    createMessages: input.createMessages,
+  });
 
-  if (qwenCanaryActive) {
-    try {
-      const ownership = resolveModelDataRegionOwnership({
-        scope: 'personal',
-        userRegion: input.userModelDataRegion,
-      });
-      return {
-        provider: 'qwen',
-        region: ownership.region,
-        deploymentScope: ownership.region === 'cn' ? 'china_mainland' : 'international',
-      };
-    } catch (error) {
-      if (error instanceof ModelDataRegionError) {
-        return { provider: 'unavailable', reason: 'MODEL_DATA_REGION_UNAVAILABLE' };
-      }
-      throw error;
-    }
+  if (runtime.kind === 'unavailable') {
+    return { provider: 'unavailable', reason: runtime.reason };
   }
 
-  return input.environment.ANTHROPIC_API_KEY.trim()
-    ? { provider: 'anthropic' }
-    : { provider: 'unavailable', reason: 'ANTHROPIC_UNAVAILABLE' };
+  const messagesAdapter = runtime.messages('fast');
+  if (messagesAdapter.metadata.provider !== 'alibaba-model-studio') {
+    throw new Error('Qwen suggestions runtime returned a non-Qwen adapter');
+  }
+  return {
+    provider: 'qwen',
+    region: runtime.region,
+    messagesAdapter: messagesAdapter as QwenMessagesAdapter,
+  };
 }

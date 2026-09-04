@@ -42,10 +42,7 @@ import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { runScrapeTask } from '../../agent/scrape-runner.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { generateSuggestions } from '../../agent/suggestions-generator.js';
-import {
-  SUGGESTIONS_ANTHROPIC_MODEL,
-  resolveSuggestionsProviderRoute,
-} from '../../agent/suggestions-provider.js';
+import { resolveSuggestionsProviderRoute } from '../../agent/suggestions-provider.js';
 import { matchExpertWorkflow } from '../../agent/supercar/expert-workflows.js';
 import {
   type SupercarActionCaptureEvent,
@@ -60,12 +57,6 @@ import {
 } from '../../agent/supercar/index.js';
 import { MemoryService } from '../../agent/supercar/memory-service.js';
 import { generatePlanForUser } from '../../agent/supercar/plan-runner.js';
-import {
-  MessagesAdapterError,
-  type MessagesAdapter,
-  createAnthropicMessagesAdapter,
-  createQwenMessagesAdapter,
-} from '../../llm/messages-adapter.js';
 import {
   parseOtaAllowlist,
   resolveOtaCanaryLane,
@@ -6219,29 +6210,17 @@ export const tasksRouter = router({
                   .catch((err) => ctx.logger.warn({ err, taskId }, 'memory: extract crashed'));
               }
 
-              // First provider-neutral real-call canary. This only controls
-              // post-task suggestions: no tools, no mutation, and no effect on
-              // the completed task. Qwen requires both flags, an exact
-              // synthetic-user allowlist match, and persisted region ownership.
-              const suggestionsRoute = resolveSuggestionsProviderRoute({
-                environment: appEnv,
-                userExternalId: ctx.userId,
-                userModelDataRegion: userRow.modelDataRegion,
-              });
-              let messagesAdapter: MessagesAdapter | null = null;
+              // Post-task suggestions are Qwen-only. The shared runtime enforces
+              // rollout, lane, persisted region and region-local credentials
+              // before constructing a transport. There is no legacy fallback.
+              let suggestionsRoute: ReturnType<typeof resolveSuggestionsProviderRoute> | null = null;
               try {
-                if (suggestionsRoute.provider === 'qwen') {
-                  messagesAdapter = createQwenMessagesAdapter({
-                    environment: appEnv,
-                    region: suggestionsRoute.region,
-                    purpose: 'fast',
-                  });
-                } else if (suggestionsRoute.provider === 'anthropic') {
-                  messagesAdapter = createAnthropicMessagesAdapter({
-                    apiKey: appEnv.ANTHROPIC_API_KEY,
-                    model: SUGGESTIONS_ANTHROPIC_MODEL,
-                  });
-                } else {
+                suggestionsRoute = resolveSuggestionsProviderRoute({
+                  environment: appEnv,
+                  userExternalId: ctx.userId,
+                  userModelDataRegion: userRow.modelDataRegion,
+                });
+                if (suggestionsRoute.provider === 'unavailable') {
                   ctx.logger.warn(
                     { taskId, reason: suggestionsRoute.reason },
                     'suggestions: provider unavailable',
@@ -6249,31 +6228,24 @@ export const tasksRouter = router({
                 }
               } catch (error) {
                 ctx.logger.warn(
-                  {
-                    taskId,
-                    reason:
-                      error instanceof MessagesAdapterError
-                        ? error.code
-                        : 'PROVIDER_CONFIGURATION_ERROR',
-                  },
+                  { taskId, reason: 'PROVIDER_CONFIGURATION_ERROR' },
                   'suggestions: provider unavailable',
                 );
               }
 
-              if (messagesAdapter) {
-                if (messagesAdapter.metadata.provider === 'alibaba-model-studio') {
-                  ctx.logger.info(
-                    {
-                      taskId,
-                      provider: messagesAdapter.metadata.provider,
-                      model: messagesAdapter.metadata.model,
-                      region: messagesAdapter.metadata.region,
-                      deploymentScope: messagesAdapter.metadata.deploymentScope,
-                      endpointKind: messagesAdapter.metadata.endpointKind,
-                    },
-                    'suggestions: Qwen canary selected',
-                  );
-                }
+              if (suggestionsRoute?.provider === 'qwen') {
+                const messagesAdapter = suggestionsRoute.messagesAdapter;
+                ctx.logger.info(
+                  {
+                    taskId,
+                    provider: messagesAdapter.metadata.provider,
+                    model: messagesAdapter.metadata.model,
+                    region: messagesAdapter.metadata.region,
+                    deploymentScope: messagesAdapter.metadata.deploymentScope,
+                    endpointKind: messagesAdapter.metadata.endpointKind,
+                  },
+                  'suggestions: Qwen selected',
+                );
                 void generateSuggestions({
                   messagesAdapter,
                   intent: input.intent,

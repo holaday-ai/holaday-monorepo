@@ -3,11 +3,19 @@ import type { MessagesAdapter } from '../llm/messages-adapter.js';
 import { generateSuggestions } from './suggestions-generator.js';
 
 function buildAdapter(output: string): MessagesAdapter {
+  const metadata = {
+    provider: 'alibaba-model-studio' as const,
+    model: 'qwen3.8-flash',
+    region: 'intl' as const,
+    deploymentScope: 'international' as const,
+    endpointKind: 'public' as const,
+    protocol: 'messages' as const,
+  };
   return {
-    metadata: { provider: 'anthropic', model: 'test-model' },
+    metadata,
     create: vi.fn().mockResolvedValue({
       id: 'msg_test',
-      metadata: { provider: 'anthropic', model: 'test-model' },
+      metadata,
       content: [{ type: 'text', text: output }],
       stopReason: 'end_turn',
       usage: {
