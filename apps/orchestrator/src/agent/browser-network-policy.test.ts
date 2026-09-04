@@ -57,6 +57,17 @@ describe('BrowserNetworkPolicy', () => {
     expect(resolve).not.toHaveBeenCalled();
   });
 
+  it('rejects URLs containing embedded credentials before resolving DNS', async () => {
+    const resolve = vi.fn(async () => [{ address: '93.184.216.34', family: 4 as const }]);
+    const policy = new BrowserNetworkPolicy({ resolve });
+
+    await expect(policy.check('https://user:password@example.com/private')).resolves.toMatchObject({
+      allowed: false,
+      reason: 'embedded_credentials',
+    });
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
   it('rejects public-looking hostnames when DNS returns any private address', async () => {
     const policy = new BrowserNetworkPolicy({
       resolve: async () => [

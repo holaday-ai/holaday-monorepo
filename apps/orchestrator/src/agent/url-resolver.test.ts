@@ -1,37 +1,35 @@
-import type Anthropic from '@anthropic-ai/sdk';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { BrowserNetworkPolicy } from './browser-network-policy.js';
 import {
   extractSiteToken,
   injectResolvedUrl,
   resolveIntentUrl,
+  toSafeUrlResolutionLog,
 } from './url-resolver.js';
 
+const resolverLogs = vi.hoisted(() => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+}));
+
+vi.mock('../config/logger.js', () => ({
+  logger: resolverLogs,
+}));
+
 /**
- * Tests for the url-resolver's surface: token extraction, passthrough
- * when a full URL is present, model-call happy path, and safe-null on
- * failure. No real Anthropic client — we hand-roll a fake `messages`.
+ * Tests for deterministic URL resolution: trusted registry matches,
+ * search-first handling for unknown names, network rejection, and
+ * privacy-safe operational metadata.
  */
 
-function fakeClient(textReply: string): Anthropic {
-  return {
-    messages: {
-      create: async () => ({
-        content: [{ type: 'text', text: textReply }],
-        stop_reason: 'end_turn',
-      }),
-    },
-  } as unknown as Anthropic;
-}
+const allowPublicNetworkPolicy = new BrowserNetworkPolicy({
+  resolve: async () => [{ address: '93.184.216.34', family: 4 }],
+});
 
-function throwingClient(): Anthropic {
-  return {
-    messages: {
-      create: async () => {
-        throw new Error('anthropic 500');
-      },
-    },
-  } as unknown as Anthropic;
-}
+beforeEach(() => {
+  resolverLogs.info.mockClear();
+  resolverLogs.warn.mockClear();
+});
 
 describe('extractSiteToken', () => {
   it('strips CN nav verbs and returns the next word', () => {
@@ -63,47 +61,116 @@ describe('extractSiteToken', () => {
 describe('resolveIntentUrl — passthrough', () => {
   it('returns the embedded URL unchanged when the intent already has one', async () => {
     const r = await resolveIntentUrl('打开 https://example.com/path 看看', {
-      client: fakeClient('should not be called'),
+      networkPolicy: allowPublicNetworkPolicy,
     });
-    expect(r?.source).toBe('passthrough');
-    expect(r?.url).toBe('https://example.com/path');
+    expect(r).toEqual({ source: 'passthrough', url: 'https://example.com/path' });
   });
 
   it('returns null when no nav verb and no URL (nothing to resolve)', async () => {
     const r = await resolveIntentUrl('帮我查一下今天的天气', {
-      client: fakeClient('https://weather.com'),
+      networkPolicy: allowPublicNetworkPolicy,
     });
     expect(r).toBeNull();
   });
 
-  it('returns null when client is null (no API key in env)', async () => {
-    const r = await resolveIntentUrl('打开 openclaw', { client: null });
-    expect(r).toBeNull();
+  it.each(['分析上海市场走势', '总结上市公司财报', 'review this open source report'])(
+    'does not treat text containing a navigation word fragment as a navigation request: %s',
+    async (intent) => {
+      const r = await resolveIntentUrl(intent, {
+        networkPolicy: allowPublicNetworkPolicy,
+      });
+
+      expect(r).toBeNull();
+    },
+  );
+
+  it('does not require a model credential to classify an unknown site safely', async () => {
+    const r = await resolveIntentUrl('打开 openclaw', {
+      networkPolicy: allowPublicNetworkPolicy,
+    });
+    expect(r).toEqual({ source: 'search_required' });
+  });
+
+  it.each(['file:///etc/passwd', 'javascript:alert(document.cookie)'])(
+    'rejects an explicitly supplied non-web URI: %s',
+    async (uri) => {
+      const r = await resolveIntentUrl(`打开 ${uri}`, {
+        networkPolicy: allowPublicNetworkPolicy,
+      });
+
+      expect(r).toEqual({ source: 'rejected', reason: 'bad_scheme' });
+    },
+  );
+
+  it('rejects a web URL containing embedded credentials', async () => {
+    const r = await resolveIntentUrl('打开 https://user:password@example.com/private', {
+      networkPolicy: allowPublicNetworkPolicy,
+    });
+
+    expect(r).toEqual({ source: 'rejected', reason: 'embedded_credentials' });
   });
 });
 
-describe('resolveIntentUrl — model-call path', () => {
-  it('returns the URL the model picked when intent needs resolution', async () => {
-    const r = await resolveIntentUrl('打开 openclaw 看新版本', {
-      client: fakeClient('https://openclaw.org'),
+describe('resolveIntentUrl — trusted resolution path', () => {
+  it('uses the curated site registry without consulting a model', async () => {
+    const r = await resolveIntentUrl('打开 BOSS直聘 看岗位', {
+      networkPolicy: allowPublicNetworkPolicy,
     });
-    expect(r?.source).toBe('model');
-    expect(r?.url).toBe('https://openclaw.org');
-    expect(r?.token).toBe('openclaw');
+
+    expect(r).toEqual({ source: 'registry', url: 'https://zhipin.com/' });
   });
 
-  it('returns null when the model declines (empty reply)', async () => {
+  it('rejects a curated destination when its current DNS answer is not public', async () => {
+    const privateNetworkPolicy = new BrowserNetworkPolicy({
+      resolve: async () => [{ address: '10.0.0.8', family: 4 }],
+    });
+
+    const r = await resolveIntentUrl('打开 BOSS直聘 看岗位', {
+      networkPolicy: privateNetworkPolicy,
+    });
+
+    expect(r).toEqual({ source: 'rejected', reason: 'private_network' });
+  });
+
+  it('requires search confirmation for an unknown site instead of accepting a model guess', async () => {
     const r = await resolveIntentUrl('打开 somenewsite', {
-      client: fakeClient(''),
+      networkPolicy: allowPublicNetworkPolicy,
     });
-    expect(r).toBeNull();
+
+    expect(r).toEqual({ source: 'search_required' });
   });
 
-  it('returns null (never throws) when the model errors', async () => {
-    const r = await resolveIntentUrl('打开 openclaw', {
-      client: throwingClient(),
+  it('requires search confirmation when more than one trusted site is named', async () => {
+    const r = await resolveIntentUrl('打开京东和淘宝比较价格', {
+      networkPolicy: allowPublicNetworkPolicy,
     });
-    expect(r).toBeNull();
+
+    expect(r).toEqual({ source: 'search_required' });
+  });
+
+  it('does not log the site token, candidate URL, model reply, or provider error', async () => {
+    await resolveIntentUrl('打开 secret-company-portal', {
+      networkPolicy: allowPublicNetworkPolicy,
+    });
+
+    const logs = JSON.stringify([resolverLogs.info.mock.calls, resolverLogs.warn.mock.calls]);
+    expect(logs).not.toContain('secret-company-portal');
+    expect(logs).not.toContain('anthropic 500');
+  });
+
+  it('exposes only aggregate outcome and rejection reason for operational logs', () => {
+    expect(
+      toSafeUrlResolutionLog({
+        source: 'registry',
+        url: 'https://secret.example/',
+      }),
+    ).toEqual({ outcome: 'registry' });
+    expect(
+      toSafeUrlResolutionLog({
+        source: 'rejected',
+        reason: 'private_network',
+      }),
+    ).toEqual({ outcome: 'rejected', reason: 'private_network' });
   });
 });
 
@@ -113,27 +180,43 @@ describe('injectResolvedUrl', () => {
     expect(
       injectResolvedUrl(intent, {
         url: 'https://example.com',
-        token: 'https://example.com',
         source: 'passthrough',
       }),
     ).toBe(intent);
   });
 
-  it('appends a system-confirmed URL annotation for model resolutions', () => {
-    const out = injectResolvedUrl('打开 openclaw', {
-      url: 'https://openclaw.org',
-      token: 'openclaw',
-      source: 'model',
+  it('appends a trusted-registry annotation for curated site resolutions', () => {
+    const out = injectResolvedUrl('打开 BOSS直聘', {
+      url: 'https://zhipin.com/',
+      source: 'registry',
     });
-    expect(out).toMatch(/打开 openclaw（系统确认 URL: https:\/\/openclaw\.org）/);
+    expect(out).toBe('打开 BOSS直聘（系统可信站点映射：https://zhipin.com/）');
+  });
+
+  it('tells the browser to search and verify an unknown site without inventing a URL', () => {
+    const out = injectResolvedUrl('打开 openclaw', {
+      source: 'search_required',
+    });
+
+    expect(out).toContain('先通过搜索结果核对官方网站域名');
+    expect(out).toContain('不要根据名称猜测域名');
+    expect(out).not.toMatch(/https?:\/\//);
+  });
+
+  it('tells the browser not to navigate when an explicit URL is rejected', () => {
+    const out = injectResolvedUrl('打开 http://127.0.0.1/private', {
+      source: 'rejected',
+      reason: 'private_network',
+    });
+
+    expect(out).toContain('目标网址未通过安全校验，不要导航');
   });
 
   it('is idempotent — does not append twice if the URL is already present', () => {
-    const intent = '打开 openclaw（系统确认 URL: https://openclaw.org）';
+    const intent = '打开 BOSS直聘（系统可信站点映射：https://zhipin.com/）';
     const out = injectResolvedUrl(intent, {
-      url: 'https://openclaw.org',
-      token: 'openclaw',
-      source: 'model',
+      url: 'https://zhipin.com/',
+      source: 'registry',
     });
     expect(out).toBe(intent);
   });
