@@ -140,6 +140,69 @@ describe('createQwenResponsesAdapter', () => {
     });
   });
 
+  it('maps neutral text and base64 image blocks to Responses input content', async () => {
+    const body =
+      sseEvent({ type: 'response.output_text.delta', delta: 'ok' }) + sseEvent(completedEvent());
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      streamResponse([new TextEncoder().encode(body)]),
+    );
+    const adapter = createQwenResponsesAdapter({ route: INTL_RESPONSES_ROUTE, fetchImpl });
+
+    await adapter.stream({
+      input: [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: '附件内容' },
+            {
+              type: 'input_image',
+              source: { mediaType: 'image/png', data: 'cG5n' },
+            },
+          ],
+        },
+      ],
+      tools: [],
+    });
+
+    const init = fetchImpl.mock.calls[0]?.[1];
+    expect(JSON.parse(String(init?.body)).input).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'input_text', text: '附件内容' },
+          { type: 'input_image', image_url: 'data:image/png;base64,cG5n' },
+        ],
+      },
+    ]);
+  });
+
+  it('returns an incomplete result when max_output_tokens ends the response early', async () => {
+    const body =
+      sseEvent({ type: 'response.output_text.delta', delta: 'partial' }) +
+      sseEvent({
+        type: 'response.incomplete',
+        response: {
+          id: 'resp_partial',
+          status: 'incomplete',
+          incomplete_details: { reason: 'max_output_tokens' },
+          output: [],
+          usage: { input_tokens: 4, output_tokens: 8 },
+        },
+      });
+    const adapter = createQwenResponsesAdapter({
+      route: INTL_RESPONSES_ROUTE,
+      fetchImpl: vi.fn(async () => streamResponse([new TextEncoder().encode(body)])),
+    });
+
+    await expect(adapter.stream({ input: 'continue', maxOutputTokens: 16 })).resolves.toMatchObject(
+      {
+        text: 'partial',
+        status: 'incomplete',
+        incompleteReason: 'max_output_tokens',
+      },
+    );
+  });
+
   it('accepts multiple events in one chunk and removes duplicate HTTP sources', async () => {
     const body =
       sseEvent({ type: 'response.output_text.delta', delta: 'A' }) +

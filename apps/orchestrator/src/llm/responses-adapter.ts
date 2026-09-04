@@ -8,8 +8,18 @@ export type NeutralBuiltinTool =
 
 export interface NeutralResponseInputMessage {
   role: 'user' | 'assistant';
-  content: string;
+  content: string | ReadonlyArray<NeutralResponseInputContent>;
 }
+
+export type NeutralResponseInputContent =
+  | { type: 'input_text'; text: string }
+  | {
+      type: 'input_image';
+      source: {
+        mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+        data: string;
+      };
+    };
 
 export interface NeutralResponsesRequest {
   instructions?: string;
@@ -34,7 +44,8 @@ export interface NeutralResponsesResult {
     inputTokens: number;
     outputTokens: number;
   };
-  status: 'completed';
+  status: 'completed' | 'incomplete';
+  incompleteReason?: 'max_output_tokens';
 }
 
 export interface ResponsesAdapter {
@@ -191,9 +202,22 @@ function toProviderRequest(
 
 function mapInput(
   value: NeutralResponsesRequest['input'],
-): string | Array<NeutralResponseInputMessage> {
+): string | Array<{ role: 'user' | 'assistant'; content: unknown }> {
   if (typeof value === 'string') return value;
-  return value.map((message) => ({ role: message.role, content: message.content }));
+  return value.map((message) => ({
+    role: message.role,
+    content:
+      typeof message.content === 'string'
+        ? message.content
+        : message.content.map((block) =>
+            block.type === 'input_text'
+              ? { type: 'input_text', text: block.text }
+              : {
+                  type: 'input_image',
+                  image_url: `data:${block.source.mediaType};base64,${block.source.data}`,
+                },
+          ),
+  }));
 }
 
 async function consumeResponsesStream(input: {
@@ -239,7 +263,7 @@ async function consumeResponsesStream(input: {
       return;
     }
 
-    if (event.type === 'response.completed') {
+    if (event.type === 'response.completed' || event.type === 'response.incomplete') {
       if (completion !== undefined) throw new ResponsesAdapterError('INVALID_RESPONSE');
       completion = event.response;
     }
@@ -307,7 +331,7 @@ function normalizeCompletion(
   if (
     !isRecord(rawCompletion) ||
     !isNonEmptyString(rawCompletion.id) ||
-    rawCompletion.status !== 'completed' ||
+    (rawCompletion.status !== 'completed' && rawCompletion.status !== 'incomplete') ||
     !Array.isArray(rawCompletion.output) ||
     !isRecord(rawCompletion.usage)
   ) {
@@ -320,14 +344,28 @@ function normalizeCompletion(
     throw new ResponsesAdapterError('INVALID_RESPONSE');
   }
 
+  const status = rawCompletion.status;
+  const incompleteReason = readIncompleteReason(rawCompletion);
+  if (status === 'incomplete' && incompleteReason === null) {
+    throw new ResponsesAdapterError('INVALID_RESPONSE');
+  }
+
   return {
     id: rawCompletion.id,
     metadata,
     text,
     sources: extractToolSources(rawCompletion.output),
     usage: { inputTokens, outputTokens },
-    status: 'completed',
+    status,
+    ...(incompleteReason ? { incompleteReason } : {}),
   };
+}
+
+function readIncompleteReason(rawCompletion: Record<string, unknown>): 'max_output_tokens' | null {
+  if (rawCompletion.status === 'completed') return null;
+  const details = rawCompletion.incomplete_details;
+  if (!isRecord(details) || details.reason !== 'max_output_tokens') return null;
+  return 'max_output_tokens';
 }
 
 function extractToolSources(output: unknown[]): NeutralResponseSource[] {
