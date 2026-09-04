@@ -27,6 +27,8 @@ describe('Qwen dual-region environment contract', () => {
       QWEN_MESSAGES_ADAPTER_ENABLED: false,
       QWEN_SUGGESTIONS_CANARY_ENABLED: false,
       QWEN_SUGGESTIONS_SYNTHETIC_ALLOWLIST: '',
+      QWEN_PLAN_CANARY_ENABLED: false,
+      QWEN_PLAN_SYNTHETIC_ALLOWLIST: '',
     });
   });
 
@@ -57,6 +59,12 @@ describe('Qwen dual-region environment contract', () => {
     const parsed = envSchema.parse({ ...BASE_ENV, QWEN_SUGGESTIONS_CANARY_ENABLED: 'true' });
 
     expect(parsed.QWEN_SUGGESTIONS_CANARY_ENABLED).toBe(true);
+  });
+
+  it('enables the plan canary only through an explicit true value', () => {
+    const parsed = envSchema.parse({ ...BASE_ENV, QWEN_PLAN_CANARY_ENABLED: 'true' });
+
+    expect(parsed.QWEN_PLAN_CANARY_ENABLED).toBe(true);
   });
 
   it.each([

@@ -59,6 +59,7 @@ import {
   supercarReply,
 } from '../../agent/supercar/index.js';
 import { MemoryService } from '../../agent/supercar/memory-service.js';
+import { generatePlanForUser } from '../../agent/supercar/plan-runner.js';
 import {
   MessagesAdapterError,
   type MessagesAdapter,
@@ -70,7 +71,7 @@ import {
   resolveOtaCanaryLane,
 } from '../../agent/supercar/ota-user-browser-policy.js';
 import { runOtaUserBrowserReadonly } from '../../agent/supercar/ota-user-browser-runner.js';
-import { generatePlan, shouldSkipPlan } from '../../agent/supercar/plan-service.js';
+import { shouldSkipPlan } from '../../agent/supercar/plan-service.js';
 import {
   formatForPrompt as formatPlaybooksForPrompt,
   matchPlaybooks,
@@ -4243,20 +4244,21 @@ export const tasksRouter = router({
     ) {
       const taskId = newExternalId('task');
 
-      // Phase 13 Dim 1 — first-frame plan. Skipped for simple-search
-      // (the model's web_search tool handles those in one shot),
-      // trivial intents, and any intent shorter than 8 chars. Plan
-      // failures are non-fatal — generatePlan returns { planText:
-      // null, planStatus: null } and the loop continues without one.
-      // Run in parallel with memory retrieval below to keep the
-      // tasks.create RTT close to its pre-Phase-13 footprint.
+      // Phase 13 Dim 1 — first-frame plan. Skipped for simple-search and
+      // trivial intents. The Qwen route requires the shared adapter flag, a
+      // dedicated plan canary, an exact synthetic allowlist match, and the
+      // user's persisted model-data region. All invalid/configuration/provider
+      // failures become no-plan, so task execution remains available. Run in
+      // parallel with memory retrieval to avoid adding serial create latency.
       const skipPlan = isSimpleSearchIntent || shouldSkipPlan(input.intent);
       const memoryService = new MemoryService(ctx.db, ctx.logger);
       const [planResult, relevantMemories] = await Promise.all([
         skipPlan
           ? Promise.resolve({ planText: null, planStatus: null })
-          : generatePlan({
-              apiKey: appEnv.ANTHROPIC_API_KEY,
+          : generatePlanForUser({
+              environment: appEnv,
+              userExternalId: ctx.userId,
+              userModelDataRegion: userRow.modelDataRegion,
               intent: input.intent,
               logger: ctx.logger,
               taskId,

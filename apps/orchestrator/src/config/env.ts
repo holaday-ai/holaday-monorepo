@@ -212,16 +212,15 @@ const baseEnvSchema = z.object({
     .default('false')
     .transform((value) => value === 'true'),
   /**
-   * Provider-neutral Messages/Tools adapter construction gate. The adapter is
-   * intentionally not wired to production task callsites yet; default false
-   * prevents any Qwen client construction until a later scoped canary.
+   * Provider-neutral Messages/Tools adapter construction gate. Each production
+   * callsite also requires its own disabled-by-default canary and allowlist.
    */
   QWEN_MESSAGES_ADAPTER_ENABLED: z
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
   /**
-   * First real-call canary: post-task suggestions only. Both Qwen flags and
+   * Post-task suggestions canary. Both Qwen flags and
    * an exact synthetic-user allowlist match are required. An empty allowlist
    * means zero users, never all users.
    */
@@ -230,6 +229,15 @@ const baseEnvSchema = z.object({
     .default('false')
     .transform((value) => value === 'true'),
   QWEN_SUGGESTIONS_SYNTHETIC_ALLOWLIST: z.string().default(''),
+  /**
+   * Task-plan canary. Requires the shared adapter gate and an exact synthetic
+   * user allowlist match; an empty allowlist means zero Qwen plan traffic.
+   */
+  QWEN_PLAN_CANARY_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  QWEN_PLAN_SYNTHETIC_ALLOWLIST: z.string().default(''),
   FAL_KEY: z.string().optional().default(''),
   FAL_BASE_URL: z.string().url().default('https://queue.fal.run'),
   /**
