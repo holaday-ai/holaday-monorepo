@@ -3,11 +3,8 @@ const _proxy = process.env.HTTPS_PROXY;
 if (_proxy) setGlobalDispatcher(new ProxyAgent(_proxy));
 import { bootstrap } from 'global-agent';
 bootstrap();
-import Anthropic from '@anthropic-ai/sdk';
 import { DEFAULT_TASK_ORIGIN } from '@holaday/shared-types';
 import { isBriefingIntent } from './agent/a-share/briefing-dispatch.js';
-import { DrizzleLlmCallRecorder } from './agent/llm-call-recorder.js';
-import { AnthropicPlanner } from './agent/planners/anthropic.js';
 import { StubPlanner } from './agent/planners/stub.js';
 import {
   recoverStuckRunningScheduledTasks,
@@ -20,10 +17,6 @@ import {
   createExecutionRouter,
   createZapierAdapter,
 } from './agent/supercar/index.js';
-import {
-  AnthropicVisionLoopCommander,
-  shouldUseLegacyPlanner,
-} from './agent/vision-loop/commander.js';
 import { PlaywrightExecutor } from './agent/vision-loop/playwright-executor.js';
 import { defaultBrowserNetworkPolicy } from './agent/browser-network-policy.js';
 import { BrowserPool, reapOrphans } from './browser-pool/index.js';
@@ -52,32 +45,13 @@ import { createScreencastProxy } from './streaming/screencast-proxy.js';
 import { createWsServer, loadRehydratedTasks } from './ws/server.js';
 
 async function main() {
-  const recorder = new DrizzleLlmCallRecorder(db, {
-    onError: (err, call) => {
-      logger.warn(
-        { err, userExternalId: call.userExternalId, purpose: call.purpose },
-        'llm_calls INSERT failed (non-fatal)',
-      );
-    },
-  });
-  const planner = env.ANTHROPIC_API_KEY ? new AnthropicPlanner({ recorder }) : new StubPlanner();
-  if (!env.ANTHROPIC_API_KEY) {
-    logger.warn('ANTHROPIC_API_KEY missing — commander is using StubPlanner');
-  }
-
-  // Vision-loop commander (new control plane). Only wired up when the
-  // API key is present — without it the vision loop can't call
-  // Anthropic anyway. Legacy planner still drives tasks when
-  // HOLADAY_USE_LEGACY_PLANNER=1.
-  const visionCommander =
-    env.ANTHROPIC_API_KEY && !shouldUseLegacyPlanner()
-      ? new AnthropicVisionLoopCommander({ client: new Anthropic(), recorder })
-      : undefined;
-  if (visionCommander) {
-    logger.info('vision-loop commander enabled (new control plane)');
-  } else if (shouldUseLegacyPlanner()) {
-    logger.info('HOLADAY_USE_LEGACY_PLANNER=1 — using legacy plan-once planner');
-  }
+  // Qwen-only production boot must never construct a legacy provider client.
+  // Browser execution remains explicitly unavailable until its commander lane
+  // is migrated; StubPlanner only satisfies legacy context shapes for routes
+  // that now terminate before browser dispatch.
+  const planner = new StubPlanner();
+  const visionCommander = undefined;
+  logger.info('Qwen-only runtime active; browser model lane is migration-unavailable');
 
   // Phase D Step 3: try to connect PlaywrightExecutor to the user's
   // Chrome if EXECUTOR_MODE allows it. On success, VisionLoopRunner
@@ -952,7 +926,7 @@ async function main() {
     browserPool,
   });
   logger.info(
-    { port: env.WS_PORT, selfHeal: env.ANTHROPIC_API_KEY ? 'anthropic' : 'stub-noop' },
+    { port: env.WS_PORT, selfHeal: 'stub-noop' },
     'WS server listening',
   );
 

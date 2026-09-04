@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "description": "Frozen legacy model references outside Qwen core Subproject A. Any count increase fails release.",
+  "entries": [
+    {
+      "path": "src/agent/image/gemini-image-client.ts",
+      "status": "disabled_by_qwen_top_boundary",
+      "patterns": { "google_model_endpoint": 3 }
+    },
+    {
+      "path": "src/agent/planners/anthropic.ts",
+      "status": "disabled_by_qwen_top_boundary",
+      "patterns": { "new_anthropic": 1 }
+    },
+    {
+      "path": "src/agent/supercar/agent-loop.ts",
+      "status": "disabled_by_qwen_top_boundary",
+      "patterns": { "new_anthropic": 1 }
+    },
+    {
+      "path": "src/agent/supercar/memory-service.ts",
+      "status": "disabled_by_qwen_top_boundary",
+      "patterns": { "new_anthropic": 1 }
+    },
+    {
+      "path": "src/agent/video/gemini-tts-client.ts",
+      "status": "disabled_by_qwen_top_boundary",
+      "patterns": { "google_model_endpoint": 1 }
+    },
+    {
+      "path": "src/agent/video/veo-client.ts",
+      "status": "disabled_by_qwen_top_boundary",
+      "patterns": { "google_model_endpoint": 1 }
+    },
+    {
+      "path": "src/agent/video/video-av-sync-verifier.ts",
+      "status": "disabled_by_qwen_top_boundary",
+      "patterns": { "google_model_endpoint": 1 }
+    },
+    {
+      "path": "src/llm/dormant/anthropic-messages-adapter.ts",
+      "status": "dormant",
+      "patterns": { "new_anthropic": 1 }
+    },
+    {
+      "path": "src/response-layer/openai-verifier-fallback.ts",
+      "status": "disabled_by_qwen_top_boundary",
+      "patterns": { "new_openai": 1 }
+    }
+  ]
+}

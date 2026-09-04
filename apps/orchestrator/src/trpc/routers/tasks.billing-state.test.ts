@@ -1,5 +1,6 @@
 import type { TRPCError } from '@trpc/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { TaskRepository } from '../../agent/task-repository.js';
 import { VIDEO_CREATION_ALLOWLIST } from '../../agent/video/video-access.js';
 import { env as appEnv } from '../../config/env.js';
 import { FileService } from '../../files/file-service.js';
@@ -82,6 +83,13 @@ function makeCreateContext() {
       }
       throw new Error(`unexpected select projection: ${Object.keys(projection).join(',')}`);
     },
+    transaction: async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        update: () => ({
+          set: () => ({ where: async () => [{ affectedRows: 1 }] }),
+        }),
+        insert: () => ({ values: async () => undefined }),
+      }),
   };
   return {
     db,
@@ -134,6 +142,7 @@ function makeConfirmContext(metadata: Record<string, unknown>) {
             where: () => ({
               limit: async () => [
                 {
+                  id: 72,
                   status: 'awaiting_user',
                   awaitingKind: 'video_quote',
                   intent: '生成测试视频',
@@ -146,6 +155,13 @@ function makeConfirmContext(metadata: Record<string, unknown>) {
       }
       throw new Error(`unexpected select projection: ${Object.keys(projection).join(',')}`);
     },
+    transaction: async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        update: () => ({
+          set: () => ({ where: async () => [{ affectedRows: 1 }] }),
+        }),
+        insert: () => ({ values: async () => undefined }),
+      }),
   };
   return {
     db,
@@ -210,42 +226,52 @@ describe('tasks.create billing order', () => {
     expect(consume).not.toHaveBeenCalled();
   });
 
-  it('hard-rejects an explicit video task before quota when the rollout is disabled', async () => {
+  it('persists an explicit video task as migration-unavailable before quota', async () => {
     appEnv.VIDEO_CREATION_ENABLED = false;
     const consume = vi
       .spyOn(QuotaService.prototype, 'tryConsume')
       .mockRejectedValue(new Error('quota should not be reached'));
     vi.spyOn(QuotaService.prototype, 'getActiveTaskCount').mockResolvedValue(0);
+    vi.spyOn(TaskRepository.prototype, 'insertTask').mockResolvedValue();
+    vi.spyOn(TaskRepository.prototype, 'persistVisionOutcome').mockResolvedValue({
+      persisted: true,
+    });
 
     await expect(
       tasksRouter.createCaller(makeCreateContext()).create({
         intent: '生成一条产品介绍视频',
         videoOptions: { tab: 'normal' },
       }),
-    ).rejects.toMatchObject({
-      code: 'PRECONDITION_FAILED',
+    ).resolves.toMatchObject({
+      status: 'failed',
+      executionMode: 'video_creation',
     });
     expect(consume).not.toHaveBeenCalled();
   });
 
-  it('hard-rejects a classified video-creation intent before quota when rollout is disabled', async () => {
+  it('persists a classified video task as migration-unavailable before quota', async () => {
     appEnv.VIDEO_CREATION_ENABLED = false;
     const consume = vi
       .spyOn(QuotaService.prototype, 'tryConsume')
       .mockRejectedValue(new Error('quota should not be reached'));
     vi.spyOn(QuotaService.prototype, 'getActiveTaskCount').mockResolvedValue(0);
+    vi.spyOn(TaskRepository.prototype, 'insertTask').mockResolvedValue();
+    vi.spyOn(TaskRepository.prototype, 'persistVisionOutcome').mockResolvedValue({
+      persisted: true,
+    });
 
     await expect(
       tasksRouter.createCaller(makeCreateContext()).create({
         intent: '生成一条产品介绍视频',
       }),
-    ).rejects.toMatchObject({
-      code: 'PRECONDITION_FAILED',
+    ).resolves.toMatchObject({
+      status: 'failed',
+      executionMode: 'video_creation',
     });
     expect(consume).not.toHaveBeenCalled();
   });
 
-  it('hard-rejects an explicit video task before quota for a user outside the allowlist', async () => {
+  it('keeps a video task migration-unavailable outside the legacy allowlist', async () => {
     appEnv.VIDEO_CREATION_ENABLED = true;
     mutableVideoAllowlist.clear();
     mutableVideoAllowlist.add('usr_someone_else');
@@ -253,14 +279,19 @@ describe('tasks.create billing order', () => {
       .spyOn(QuotaService.prototype, 'tryConsume')
       .mockRejectedValue(new Error('quota should not be reached'));
     vi.spyOn(QuotaService.prototype, 'getActiveTaskCount').mockResolvedValue(0);
+    vi.spyOn(TaskRepository.prototype, 'insertTask').mockResolvedValue();
+    vi.spyOn(TaskRepository.prototype, 'persistVisionOutcome').mockResolvedValue({
+      persisted: true,
+    });
 
     await expect(
       tasksRouter.createCaller(makeCreateContext()).create({
         intent: '生成一条产品介绍视频',
         videoOptions: { tab: 'normal' },
       }),
-    ).rejects.toMatchObject({
-      code: 'PRECONDITION_FAILED',
+    ).resolves.toMatchObject({
+      status: 'failed',
+      executionMode: 'video_creation',
     });
     expect(consume).not.toHaveBeenCalled();
   });
@@ -401,21 +432,24 @@ describe('video quote billing and execution state', () => {
         videoOptions: { tab: 'ip_person' },
       },
     },
-  ])('hard-rejects $label confirm_image in the route before quota', async ({ metadata }) => {
-    const consume = vi
-      .spyOn(QuotaService.prototype, 'tryConsume')
-      .mockRejectedValue(new Error('quota should not be reached'));
+  ])(
+    'settles a legacy $label quote as migration-unavailable before quota',
+    async ({ metadata }) => {
+      const consume = vi
+        .spyOn(QuotaService.prototype, 'tryConsume')
+        .mockRejectedValue(new Error('quota should not be reached'));
 
-    await expect(
-      tasksRouter.createCaller(makeConfirmContext(metadata)).confirmVideo({
-        taskId: 'tsk_video_quote',
-        choice: 'confirm_image',
-      }),
-    ).rejects.toMatchObject({
-      code: 'BAD_REQUEST',
-    });
-    expect(consume).not.toHaveBeenCalled();
-  });
+      await expect(
+        tasksRouter.createCaller(makeConfirmContext(metadata)).confirmVideo({
+          taskId: 'tsk_video_quote',
+          choice: 'confirm_image',
+        }),
+      ).resolves.toMatchObject({
+        status: 'failed',
+      });
+      expect(consume).not.toHaveBeenCalled();
+    },
+  );
 
   it('builds refresh-safe videoType metadata before execution finishes', () => {
     expect(typeof internals.buildVideoExecutionMetadata).toBe('function');

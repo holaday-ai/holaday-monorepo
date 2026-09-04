@@ -5,6 +5,7 @@ import {
   QwenRouteError,
   type QwenRuntimeEnvironment,
   normalizeQwenAnthropicBaseUrl,
+  normalizeQwenBaseUrl,
   resolveQwenRoute,
   toSafeQwenRouteMetadata,
 } from './qwen-route.js';
@@ -14,15 +15,21 @@ const ENVIRONMENT: QwenRuntimeEnvironment = {
   DASHSCOPE_WORKSPACE_ID: 'legacy-workspace',
   DASHSCOPE_INTL_API_KEY: 'intl-explicit',
   DASHSCOPE_INTL_ANTHROPIC_BASE_URL: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
+  DASHSCOPE_INTL_RESPONSES_BASE_URL:
+    'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
   DASHSCOPE_INTL_WORKSPACE_ID: 'intl-workspace',
   DASHSCOPE_CN_API_KEY: 'cn-explicit',
   DASHSCOPE_CN_ANTHROPIC_BASE_URL: 'https://dashscope.aliyuncs.com/apps/anthropic',
+  DASHSCOPE_CN_RESPONSES_BASE_URL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   DASHSCOPE_CN_WORKSPACE_ID: 'cn-workspace',
   QWEN_REASONING_MODEL: 'qwen3.8-max',
   QWEN_STANDARD_MODEL: 'qwen3.7-plus',
   QWEN_FAST_MODEL: 'qwen3.8-flash',
   QWEN_CODING_MODEL: 'qwen3-coder-plus',
   QWEN_VERIFIER_MODEL: 'qwen3.8-flash',
+  QWEN_VERIFY_FAST_MODEL: 'qwen3.8-flash',
+  QWEN_VERIFY_STRICT_MODEL: 'qwen3.8-max',
+  QWEN_VISION_MODEL: 'qwen3.8-max',
 };
 
 function expectRouteError(run: () => unknown, code: QwenRouteError['code']): void {
@@ -46,6 +53,7 @@ describe('resolveQwenRoute', () => {
       baseURL: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
       workspaceId: 'intl-workspace',
       endpointKind: 'public',
+      protocol: 'messages',
     });
   });
 
@@ -82,7 +90,7 @@ describe('resolveQwenRoute', () => {
   });
 
   it('routes China only through the Beijing endpoint and credential', () => {
-    expect(resolveQwenRoute(ENVIRONMENT, 'cn', 'verify')).toMatchObject({
+    expect(resolveQwenRoute(ENVIRONMENT, 'cn', 'verify_fast', 'messages')).toMatchObject({
       provider: 'alibaba-model-studio',
       region: 'cn',
       deploymentScope: 'china_mainland',
@@ -91,6 +99,21 @@ describe('resolveQwenRoute', () => {
       baseURL: 'https://dashscope.aliyuncs.com/apps/anthropic',
       workspaceId: 'cn-workspace',
       endpointKind: 'public',
+      protocol: 'messages',
+    });
+  });
+
+  it('builds a Singapore Responses route without exposing credentials', () => {
+    const route = resolveQwenRoute(ENVIRONMENT, 'intl', 'reasoning', 'responses');
+
+    expect(route.baseURL).toBe('https://dashscope-intl.aliyuncs.com/compatible-mode/v1');
+    expect(toSafeQwenRouteMetadata(route)).toEqual({
+      provider: 'alibaba-model-studio',
+      region: 'intl',
+      deploymentScope: 'international',
+      model: 'qwen3.8-max',
+      endpointKind: 'public',
+      protocol: 'responses',
     });
   });
 
@@ -99,7 +122,9 @@ describe('resolveQwenRoute', () => {
     ['standard', 'qwen3.7-plus'],
     ['fast', 'qwen3.8-flash'],
     ['coding', 'qwen3-coder-plus'],
-    ['verify', 'qwen3.8-flash'],
+    ['verify_fast', 'qwen3.8-flash'],
+    ['verify_strict', 'qwen3.8-max'],
+    ['vision', 'qwen3.8-max'],
   ] satisfies Array<[QwenPurpose, string]>)('maps %s to %s', (purpose, expectedModel) => {
     expect(resolveQwenRoute(ENVIRONMENT, 'intl', purpose).model).toBe(expectedModel);
   });
@@ -125,9 +150,62 @@ describe('resolveQwenRoute', () => {
       deploymentScope: 'international',
       model: 'qwen3.7-plus',
       endpointKind: 'public',
+      protocol: 'messages',
     });
     expect(serialized).not.toContain('intl-explicit');
     expect(serialized).not.toContain('intl-workspace');
+  });
+});
+
+describe('normalizeQwenBaseUrl', () => {
+  it('accepts a Singapore public Responses endpoint', () => {
+    expect(
+      normalizeQwenBaseUrl(
+        'intl',
+        'responses',
+        'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/',
+      ),
+    ).toEqual({
+      baseURL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+      endpointKind: 'public',
+    });
+  });
+
+  it('accepts a Beijing dedicated Responses endpoint', () => {
+    expect(
+      normalizeQwenBaseUrl(
+        'cn',
+        'responses',
+        'https://workspace-2.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+      ),
+    ).toEqual({
+      baseURL: 'https://workspace-2.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+      endpointKind: 'workspace_dedicated',
+    });
+  });
+
+  it('rejects a Beijing URL in the international Responses field', () => {
+    expectRouteError(
+      () =>
+        normalizeQwenBaseUrl(
+          'intl',
+          'responses',
+          'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        ),
+      'INVALID_REGION_ENDPOINT',
+    );
+  });
+
+  it('rejects a Messages path for the Responses protocol', () => {
+    expectRouteError(
+      () =>
+        normalizeQwenBaseUrl(
+          'intl',
+          'responses',
+          'https://dashscope-intl.aliyuncs.com/apps/anthropic',
+        ),
+      'INVALID_REGION_ENDPOINT',
+    );
   });
 });
 

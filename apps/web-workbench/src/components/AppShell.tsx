@@ -79,6 +79,7 @@ type MeProfile = NormalizedAuthMeProfile;
 
 interface OutletContext {
   me: MeProfile | null;
+  refreshMe(): Promise<MeProfile | null>;
   refreshProjects(): Promise<ProjectRefreshResult>;
   projects: readonly UiProject[];
   browserWorkbenchOpen: boolean;
@@ -253,6 +254,19 @@ export function AppShell(): JSX.Element {
       toast.show(authSessionExpiredMessage(), 'error');
     }
   }, [reset, toast]);
+
+  const refreshMe = React.useCallback(async (): Promise<MeProfile | null> => {
+    try {
+      const nextMe = normalizeAuthMeProfile(await trpc.auth.me.query());
+      if (mountedRef.current) setMe(nextMe);
+      return nextMe;
+    } catch (err) {
+      if (mountedRef.current && isAuthSessionError(err)) {
+        invalidateAuthSession();
+      }
+      return null;
+    }
+  }, [invalidateAuthSession]);
 
   const handleAuthenticated = React.useCallback(() => {
     authInvalidatedRef.current = false;
@@ -711,6 +725,7 @@ export function AppShell(): JSX.Element {
   const displayName = preferredAuthDisplayName(me);
   const ctx: OutletContext = {
     me,
+    refreshMe,
     refreshProjects,
     projects,
     browserWorkbenchOpen,

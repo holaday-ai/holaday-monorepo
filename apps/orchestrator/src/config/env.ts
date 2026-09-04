@@ -1,7 +1,15 @@
 import { resolve } from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 import { z } from 'zod';
-import { type ModelDataRegion, normalizeQwenAnthropicBaseUrl } from '../llm/qwen-route.js';
+import {
+  assertProductionModelRuntimePolicy,
+  parseCoreModelLaneCsv,
+} from '../llm/model-runtime-policy.js';
+import {
+  type ModelDataRegion,
+  type QwenProtocol,
+  normalizeQwenBaseUrl,
+} from '../llm/qwen-route.js';
 
 // Load order (later overrides earlier — we explicitly do NOT override
 // already-set process.env values so CI / docker-compose env vars win):
@@ -140,15 +148,14 @@ const baseEnvSchema = z.object({
   /**
    * Sprint #5 — Gemini image generation ("nano banana"). When set, the
    * 'image' execution lane can call Google's generateContent image API
-   * to satisfy 文生图 / 图生图 tasks. Empty string = the image lane
-   * fails with a clear "GEMINI_API_KEY not configured" reason instead
-   * of silently degrading. The orchestrator runs on Vultr (Singapore
-   * egress) so it reaches generativelanguage.googleapis.com directly;
-   * GEMINI_BASE_URL is overridable for a future gateway/proxy. Set on
-   * Vultr .env; keep in sync with the secret.
+   * to satisfy 文生图 / 图生图 tasks. The Qwen-only production graph
+   * never imports the legacy client. The orchestrator runs on Vultr
+   * (Singapore egress). A deliberately non-routable default prevents
+   * accidental use; future reactivation requires an explicit, reviewed
+   * endpoint.
    */
   GEMINI_API_KEY: z.string().optional().default(''),
-  GEMINI_BASE_URL: z.string().url().default('https://generativelanguage.googleapis.com'),
+  GEMINI_BASE_URL: z.string().url().default('https://disabled.invalid'),
   /**
    * Image model ids. Defaults from the BOSS sprint plan (2026-06):
    * NB2 = gemini-3.1-flash-image (fast default), NB Pro =
@@ -194,18 +201,37 @@ const baseEnvSchema = z.object({
     .string()
     .url()
     .default('https://dashscope-intl.aliyuncs.com/apps/anthropic'),
+  DASHSCOPE_INTL_RESPONSES_BASE_URL: z
+    .string()
+    .url()
+    .default('https://dashscope-intl.aliyuncs.com/compatible-mode/v1'),
   DASHSCOPE_INTL_WORKSPACE_ID: z.string().optional().default(''),
   DASHSCOPE_CN_API_KEY: z.string().optional().default(''),
   DASHSCOPE_CN_ANTHROPIC_BASE_URL: z
     .string()
     .url()
     .default('https://dashscope.aliyuncs.com/apps/anthropic'),
+  DASHSCOPE_CN_RESPONSES_BASE_URL: z
+    .string()
+    .url()
+    .default('https://dashscope.aliyuncs.com/compatible-mode/v1'),
   DASHSCOPE_CN_WORKSPACE_ID: z.string().optional().default(''),
   QWEN_REASONING_MODEL: z.string().min(1).default('qwen3.8-max'),
   QWEN_STANDARD_MODEL: z.string().min(1).default('qwen3.7-plus'),
   QWEN_FAST_MODEL: z.string().min(1).default('qwen3.8-flash'),
   QWEN_CODING_MODEL: z.string().min(1).default('qwen3-coder-plus'),
   QWEN_VERIFIER_MODEL: z.string().min(1).default('qwen3.8-flash'),
+  QWEN_VERIFY_FAST_MODEL: z.string().min(1).default('qwen3.8-flash'),
+  QWEN_VERIFY_STRICT_MODEL: z.string().min(1).default('qwen3.8-max'),
+  QWEN_VISION_MODEL: z.string().min(1).default('qwen3.8-max'),
+  MODEL_RUNTIME_POLICY: z.enum(['qwen_only', 'legacy_fixture']).default('qwen_only'),
+  QWEN_CORE_ROLLOUT_MODE: z.enum(['off', 'synthetic', 'internal', 'all']).default('off'),
+  QWEN_CORE_ENABLED_LANES: z.string().default(''),
+  QWEN_CORE_ALLOWLIST: z.string().default(''),
+  QWEN_RESPONSES_ADAPTER_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   /** Synthetic benchmark lane only. It is not wired to production task execution. */
   QWEN_SHADOW_EVAL_ENABLED: z
     .enum(['true', 'false'])
@@ -584,6 +610,32 @@ const baseEnvSchema = z.object({
 
 export const envSchema = baseEnvSchema
   .superRefine((environment, ctx) => {
+    try {
+      assertProductionModelRuntimePolicy(environment.NODE_ENV, environment.MODEL_RUNTIME_POLICY);
+    } catch (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['MODEL_RUNTIME_POLICY'],
+        message:
+          error instanceof Error
+            ? error.message
+            : 'MODEL_RUNTIME_POLICY must be qwen_only in production',
+      });
+    }
+
+    try {
+      parseCoreModelLaneCsv(environment.QWEN_CORE_ENABLED_LANES);
+    } catch (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['QWEN_CORE_ENABLED_LANES'],
+        message:
+          error instanceof Error
+            ? error.message
+            : 'QWEN_CORE_ENABLED_LANES contains an unknown lane',
+      });
+    }
+
     const closureEnabled =
       environment.ACCOUNT_CLOSURE_ENABLED || environment.ACCOUNT_CLOSURE_WORKER_ENABLED;
     if (closureEnabled && environment.ACCOUNT_CLOSURE_HMAC_SECRET.trim().length < 32) {
@@ -616,14 +668,25 @@ export const envSchema = baseEnvSchema
       });
     }
 
-    for (const [field, region] of [
-      ['DASHSCOPE_INTL_ANTHROPIC_BASE_URL', 'intl'],
-      ['DASHSCOPE_CN_ANTHROPIC_BASE_URL', 'cn'],
+    for (const [field, region, protocol] of [
+      ['DASHSCOPE_INTL_ANTHROPIC_BASE_URL', 'intl', 'messages'],
+      ['DASHSCOPE_CN_ANTHROPIC_BASE_URL', 'cn', 'messages'],
+      ['DASHSCOPE_INTL_RESPONSES_BASE_URL', 'intl', 'responses'],
+      ['DASHSCOPE_CN_RESPONSES_BASE_URL', 'cn', 'responses'],
     ] as const satisfies ReadonlyArray<
-      ['DASHSCOPE_INTL_ANTHROPIC_BASE_URL' | 'DASHSCOPE_CN_ANTHROPIC_BASE_URL', ModelDataRegion]
+      [
+        (
+          | 'DASHSCOPE_INTL_ANTHROPIC_BASE_URL'
+          | 'DASHSCOPE_CN_ANTHROPIC_BASE_URL'
+          | 'DASHSCOPE_INTL_RESPONSES_BASE_URL'
+          | 'DASHSCOPE_CN_RESPONSES_BASE_URL'
+        ),
+        ModelDataRegion,
+        QwenProtocol,
+      ]
     >) {
       try {
-        normalizeQwenAnthropicBaseUrl(region, environment[field]);
+        normalizeQwenBaseUrl(region, protocol, environment[field]);
       } catch (error) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -639,13 +702,25 @@ export const envSchema = baseEnvSchema
       environment.HOLADAY_PUBLIC_BASE_URL,
       environment.NODE_ENV,
     ),
-    DASHSCOPE_INTL_ANTHROPIC_BASE_URL: normalizeQwenAnthropicBaseUrl(
+    DASHSCOPE_INTL_ANTHROPIC_BASE_URL: normalizeQwenBaseUrl(
       'intl',
+      'messages',
       environment.DASHSCOPE_INTL_ANTHROPIC_BASE_URL,
     ).baseURL,
-    DASHSCOPE_CN_ANTHROPIC_BASE_URL: normalizeQwenAnthropicBaseUrl(
+    DASHSCOPE_CN_ANTHROPIC_BASE_URL: normalizeQwenBaseUrl(
       'cn',
+      'messages',
       environment.DASHSCOPE_CN_ANTHROPIC_BASE_URL,
+    ).baseURL,
+    DASHSCOPE_INTL_RESPONSES_BASE_URL: normalizeQwenBaseUrl(
+      'intl',
+      'responses',
+      environment.DASHSCOPE_INTL_RESPONSES_BASE_URL,
+    ).baseURL,
+    DASHSCOPE_CN_RESPONSES_BASE_URL: normalizeQwenBaseUrl(
+      'cn',
+      'responses',
+      environment.DASHSCOPE_CN_RESPONSES_BASE_URL,
     ).baseURL,
   }));
 

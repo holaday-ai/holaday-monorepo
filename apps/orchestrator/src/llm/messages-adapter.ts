@@ -1,5 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
 import type { ModelDataRegion } from './model-data-region.js';
+import { QwenTransportError, createQwenMessagesTransport } from './qwen-messages-transport.js';
 import {
   type QwenPurpose,
   type QwenRuntimeEnvironment,
@@ -33,6 +33,7 @@ export type MessagesProviderMetadata =
       region: ModelDataRegion;
       deploymentScope: 'china_mainland' | 'international';
       endpointKind: 'public' | 'workspace_dedicated';
+      protocol: 'messages';
     };
 
 export interface NeutralTextBlock {
@@ -132,7 +133,7 @@ export interface MessagesAdapter {
   ): Promise<NeutralMessagesResponse>;
 }
 
-interface AnthropicCompatibleRequest {
+export interface AnthropicCompatibleRequest {
   model: string;
   max_tokens: number;
   thinking?: { type: 'disabled' };
@@ -144,7 +145,7 @@ interface AnthropicCompatibleRequest {
   stop_sequences?: string[];
 }
 
-interface AnthropicCompatibleRequestOptions {
+export interface AnthropicCompatibleRequestOptions {
   signal?: AbortSignal;
   timeout?: number;
   maxRetries?: number;
@@ -193,21 +194,6 @@ export function createAnthropicCompatibleMessagesAdapter(input: {
   };
 }
 
-export function createAnthropicMessagesAdapter(input: {
-  apiKey: string;
-  model: string;
-  clientFactory?: AnthropicCompatibleClientFactory;
-}): MessagesAdapter {
-  if (!isNonEmptyString(input.apiKey) || !isNonEmptyString(input.model)) {
-    throw new MessagesAdapterError('INVALID_REQUEST', 'Message provider configuration is invalid');
-  }
-  const clientFactory = input.clientFactory ?? defaultAnthropicCompatibleClientFactory;
-  return createAnthropicCompatibleMessagesAdapter({
-    client: clientFactory({ apiKey: input.apiKey }),
-    metadata: { provider: 'anthropic', model: input.model },
-  });
-}
-
 export interface QwenMessagesEnvironment extends QwenRuntimeEnvironment {
   QWEN_MESSAGES_ADAPTER_ENABLED: boolean;
 }
@@ -217,24 +203,37 @@ export function createQwenMessagesAdapter(input: {
   region: ModelDataRegion;
   purpose: QwenPurpose;
   clientFactory?: AnthropicCompatibleClientFactory;
+  fetchImpl?: typeof fetch;
+  retryBaseDelayMs?: number;
 }): MessagesAdapter {
   if (!input.environment.QWEN_MESSAGES_ADAPTER_ENABLED) {
     throw new MessagesAdapterError('ADAPTER_DISABLED', 'Qwen messages adapter is disabled');
   }
 
-  const route = resolveQwenRoute(input.environment, input.region, input.purpose);
-  const clientFactory = input.clientFactory ?? defaultAnthropicCompatibleClientFactory;
-  const client = clientFactory({
-    apiKey: route.apiKey,
-    baseURL: route.baseURL,
-    ...(route.workspaceId
-      ? { defaultHeaders: { 'X-DashScope-WorkSpace': route.workspaceId } }
-      : {}),
-  });
+  const route = resolveQwenRoute(input.environment, input.region, input.purpose, 'messages');
+  const client = input.clientFactory
+    ? input.clientFactory({
+        apiKey: route.apiKey,
+        baseURL: route.baseURL,
+        ...(route.workspaceId
+          ? { defaultHeaders: { 'X-DashScope-WorkSpace': route.workspaceId } }
+          : {}),
+      })
+    : createQwenMessagesTransport({
+        route,
+        ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+        ...(input.retryBaseDelayMs !== undefined
+          ? { retryBaseDelayMs: input.retryBaseDelayMs }
+          : {}),
+      });
 
+  const metadata: MessagesProviderMetadata = {
+    ...toSafeQwenRouteMetadata(route),
+    protocol: 'messages',
+  };
   const adapter = createAnthropicCompatibleMessagesAdapter({
     client,
-    metadata: toSafeQwenRouteMetadata(route),
+    metadata,
   });
   if (supportsQwenThinkingControl(route.model)) return adapter;
 
@@ -254,12 +253,6 @@ export function createQwenMessagesAdapter(input: {
  */
 function supportsQwenThinkingControl(model: string): boolean {
   return /^qwen3(?:\.\d+)?-(?:max|plus|flash)(?:$|-)/i.test(model.trim());
-}
-
-function defaultAnthropicCompatibleClientFactory(
-  options: AnthropicCompatibleClientOptions,
-): AnthropicCompatibleClient {
-  return new Anthropic(options) as unknown as AnthropicCompatibleClient;
 }
 
 function toAnthropicCompatibleRequest(
@@ -447,6 +440,19 @@ function normalizeProviderError(
   options: NeutralMessagesRequestOptions | undefined,
 ): MessagesAdapterError {
   const name = error instanceof Error ? error.name : isRecord(error) ? error.name : undefined;
+  if (error instanceof QwenTransportError) {
+    switch (error.code) {
+      case 'REQUEST_ABORTED':
+        return new MessagesAdapterError('REQUEST_ABORTED', 'Message provider request was aborted');
+      case 'REQUEST_TIMEOUT':
+        return new MessagesAdapterError('REQUEST_TIMEOUT', 'Message provider request timed out');
+      case 'INVALID_RESPONSE':
+        return new MessagesAdapterError('INVALID_RESPONSE', 'Message provider response is invalid');
+      case 'INVALID_ROUTE':
+      case 'PROVIDER_ERROR':
+        return new MessagesAdapterError('PROVIDER_ERROR', 'Message provider request failed');
+    }
+  }
   if (options?.signal?.aborted || name === 'AbortError' || name === 'APIUserAbortError') {
     return new MessagesAdapterError('REQUEST_ABORTED', 'Message provider request was aborted');
   }
@@ -454,8 +460,8 @@ function normalizeProviderError(
   const status = isRecord(error) ? error.status : undefined;
   const code = isRecord(error) ? error.code : undefined;
   if (
-    error instanceof Anthropic.APIConnectionTimeoutError ||
     name === 'APIConnectionTimeoutError' ||
+    (error instanceof Error && error.constructor.name === 'APIConnectionTimeoutError') ||
     code === 'ETIMEDOUT' ||
     status === 408 ||
     status === 504

@@ -5,14 +5,16 @@ export {
   supercarHandoffToGenerate,
   supercarHandleOriginalIntent,
   hasParkedSupercarHandle,
-  type SupercarOutcome,
-  type SupercarStatus,
-  type SupercarTickEvent,
-  type SupercarScreencastEvent,
-  type SupercarActionCaptureEvent,
-  type SupercarWebSearchEvent,
-  type SupercarAwaitingUserEvent,
-  type RunSupercarOptions,
+} from './qwen-only-agent-loop.js';
+export type {
+  SupercarOutcome,
+  SupercarStatus,
+  SupercarTickEvent,
+  SupercarScreencastEvent,
+  SupercarActionCaptureEvent,
+  SupercarWebSearchEvent,
+  SupercarAwaitingUserEvent,
+  RunSupercarOptions,
 } from './agent-loop.js';
 export { buildSupercarSystemPrompt, SUPERCAR_CORE_PROMPT } from './system-prompt.js';
 export { matchRole, matchRoleWithDebug } from './role-matcher.js';

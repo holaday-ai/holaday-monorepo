@@ -2,6 +2,8 @@ import { ApiKeysSection } from '@/components/ApiKeysSection';
 import { NotificationsSection } from '@/components/notifications/NotificationsSection';
 import { AccountClosureSection } from '@/components/settings/AccountClosureSection';
 import { MemorySection } from '@/components/settings/MemorySection';
+import { ModelDataRegionSection } from '@/components/settings/ModelDataRegionSection';
+import { useAppShellContext } from '@/components/AppShell';
 import {
   SETTINGS_SECTIONS,
   type SettingsSectionId,
@@ -9,6 +11,7 @@ import {
   settingsSectionHref,
 } from '@/lib/settings-sections';
 import { cn } from '@/lib/utils';
+import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
 import { type ThemeMode, useTheme } from '@/stores/theme-store';
 import { ChevronRight, Monitor, Moon, Sun } from 'lucide-react';
@@ -28,6 +31,7 @@ import { Link, useLocation } from 'react-router-dom';
  */
 export function SettingsPage(): JSX.Element {
   const { mode, setMode } = useTheme();
+  const appShell = useAppShellContext();
   const location = useLocation();
   const activeSection = normaliseSettingsHash(location.hash) ?? 'appearance';
 
@@ -57,7 +61,7 @@ export function SettingsPage(): JSX.Element {
   // curation; users don't need it on every visit.
   return (
     <PageContainer width="form">
-      <PageHeader title="设置" description="外观、角色、开发者、记忆与账号" />
+      <PageHeader title="设置" description="外观、角色、数据区域、开发者、记忆与账号" />
       <SettingsSectionNav active={activeSection} />
       <div className="space-y-6">
         <Section id="appearance" title="外观">
@@ -80,6 +84,18 @@ export function SettingsPage(): JSX.Element {
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
           </Link>
         </Section>
+
+        <ModelDataRegionSection
+          region={appShell?.me?.modelDataRegion ?? null}
+          onAssign={async (region) => {
+            if (!appShell) throw new Error('app shell unavailable');
+            await trpc.auth.assignModelDataRegion.mutate({ region });
+            const refreshed = await appShell.refreshMe();
+            if (refreshed?.modelDataRegion !== region) {
+              throw new Error('model data region refresh failed');
+            }
+          }}
+        />
 
         <div id="api-keys" className="scroll-mt-24">
           <ApiKeysSection />
@@ -146,7 +162,7 @@ function SettingsSectionNav({ active }: { active: SettingsSectionId }): JSX.Elem
       aria-label="设置分区"
       className="sticky top-3 z-10 mb-5 rounded-lg border border-border bg-background/90 p-1 shadow-sm backdrop-blur"
     >
-      <div className="grid grid-cols-3 gap-1 sm:grid-cols-6">
+      <div className="grid grid-cols-3 gap-1 sm:grid-cols-7">
         {SETTINGS_SECTIONS.map((section) => (
           <Link
             key={section.id}

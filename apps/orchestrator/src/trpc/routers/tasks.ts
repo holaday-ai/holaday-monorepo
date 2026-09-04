@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import {
   BASIC_ROLE_PICK_LIMIT,
   HOLADAY_SKILLS,
@@ -22,12 +22,12 @@ import {
   runDirectOpen,
   verifyDirectOpenUrlSafety,
 } from '../../agent/direct-open.js';
-import { runGenerateTask } from '../../agent/generate-runner.js';
+import { type GenerateOutcome, runGenerateTask } from '../../agent/generate-runner.js';
 import {
   type ImageAttachment,
   type RunImageTaskResult,
   runImageTask,
-} from '../../agent/image/image-runner.js';
+} from '../../agent/image/qwen-only-image-runner.js';
 import { orderImageAttachmentIds } from '../../agent/image/image-input-order.js';
 import { createAnthropicSubjectConsistencyVerifier } from '../../agent/image/image-subject-verifier.js';
 import { classifyExecutionMode } from '../../agent/intent-classifier.js';
@@ -39,13 +39,10 @@ import { DrizzleLlmCallRecorder } from '../../agent/llm-call-recorder.js';
 // agent's terminal decision.
 import { detectNavFailure } from '../../agent/nav-failure-detector.js';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
-import { runScrapeTask } from '../../agent/scrape-runner.js';
+import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { generateSuggestions } from '../../agent/suggestions-generator.js';
-import {
-  SUGGESTIONS_ANTHROPIC_MODEL,
-  resolveSuggestionsProviderRoute,
-} from '../../agent/suggestions-provider.js';
+import { resolveSuggestionsProviderRoute } from '../../agent/suggestions-provider.js';
 import { matchExpertWorkflow } from '../../agent/supercar/expert-workflows.js';
 import {
   type SupercarActionCaptureEvent,
@@ -58,14 +55,8 @@ import {
   supercarHandoffToGenerate,
   supercarReply,
 } from '../../agent/supercar/index.js';
-import { MemoryService } from '../../agent/supercar/memory-service.js';
+import { MemoryService } from '../../agent/supercar/qwen-only-memory-service.js';
 import { generatePlanForUser } from '../../agent/supercar/plan-runner.js';
-import {
-  MessagesAdapterError,
-  type MessagesAdapter,
-  createAnthropicMessagesAdapter,
-  createQwenMessagesAdapter,
-} from '../../llm/messages-adapter.js';
 import {
   parseOtaAllowlist,
   resolveOtaCanaryLane,
@@ -91,7 +82,10 @@ import {
 } from '../../agent/supercar/task-state-machine.js';
 import type { PlannedStep, TaskState } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
-import { friendlyTaskFailureReason } from '../../agent/task-failure-copy.js';
+import {
+  friendlyTaskFailureReason,
+  modelTaskFailureReason,
+} from '../../agent/task-failure-copy.js';
 import { startTaskHeartbeat } from '../../agent/task-heartbeat.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import {
@@ -148,7 +142,7 @@ import type { WanAnimateMixMode } from '../../agent/video/wan-animate-mix-client
 import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
 import type { PageLike, PlaywrightExecutor } from '../../agent/vision-loop/playwright-executor.js';
-import { startVisionLoopTask } from '../../agent/vision-loop/task-runner.js';
+import { startVisionLoopTask } from '../../agent/vision-loop/qwen-only-task-runner.js';
 import {
   BrowserSessionRestoreFlights,
   restorableBrowserTarget,
@@ -218,6 +212,10 @@ import { FileService, taskInternalIdFor } from '../../files/file-service.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
 import { getSharedStorageProvider } from '../../files/storage-provider.js';
 import { allowedFormatsForPlan, isCreateFileFormat, renderFile } from '../../files/writers.js';
+import {
+  type ModelTaskUnavailableReason,
+  createProductionModelRuntimeWiring,
+} from '../../llm/model-runtime-wiring.js';
 import { TaskActionCaptureRepository } from '../../playbook/task-action-capture-repository.js';
 import { isQuotaBypassUser } from '../../quota/quota-mode.js';
 import {
@@ -486,9 +484,57 @@ function buildIpVideoCfg(): IpVideoConfig {
   };
 }
 
-// Module-scope Anthropic client for url-resolver. Cheap to construct
-// but no reason to pay per request — cache once at import time.
-const anthropicForResolver: Anthropic | null = appEnv.ANTHROPIC_API_KEY ? new Anthropic() : null;
+// Kept only as an erased type boundary for migration-unavailable media code.
+// Qwen-only task routing terminates those lanes before this value is observed.
+function dormantLegacyModelClient(): Anthropic | null {
+  return null;
+}
+const legacyMediaModelClient = dormantLegacyModelClient();
+
+const modelRuntimeWiring = createProductionModelRuntimeWiring(appEnv);
+
+function resolveGenerateRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
+  return modelRuntimeWiring.resolveCore({
+    actorExternalId,
+    lane: 'generate',
+    ownership: { scope: 'personal', userRegion: modelDataRegion },
+  });
+}
+
+function resolveScrapeRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
+  return modelRuntimeWiring.resolveCore({
+    actorExternalId,
+    lane: 'scrape',
+    ownership: { scope: 'personal', userRegion: modelDataRegion },
+  });
+}
+
+function resolveVerifierRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
+  return modelRuntimeWiring.resolveCore({
+    actorExternalId,
+    lane: 'verifier',
+    ownership: { scope: 'personal', userRegion: modelDataRegion },
+  });
+}
+
+function generateRuntimeUnavailableReason(reason: ModelTaskUnavailableReason): string {
+  return modelTaskFailureReason(reason);
+}
+
+function unmigratedLaneForExecutionMode(
+  executionMode: string,
+): 'browser' | 'image' | 'video_generation' | null {
+  if (executionMode === 'browser') return 'browser';
+  if (executionMode === 'image') return 'image';
+  if (executionMode === 'video_creation') return 'video_generation';
+  return null;
+}
+
+function coreLaneForExecutionMode(executionMode: string): 'generate' | 'scrape' | null {
+  if (executionMode === 'generate' || executionMode === 'template_fill') return 'generate';
+  if (executionMode === 'scrape') return 'scrape';
+  return null;
+}
 
 const taskIdInput = z.object({ taskId: z.string().min(1) });
 
@@ -1585,6 +1631,114 @@ export const tasksRouter = router({
           ? 'video_creation'
           : null,
     });
+
+    // Qwen-only rollout boundary: browser/media lanes still depend on
+    // legacy model controllers. Persist an honest terminal task before
+    // quota consumption instead of throwing a transient precondition or
+    // leaving an accepted task in `executing` forever.
+    const unmigratedLane = unmigratedLaneForExecutionMode(executionMode);
+    if (unmigratedLane) {
+      const unavailable = modelRuntimeWiring.resolveUnmigrated(unmigratedLane);
+      const reason = modelTaskFailureReason(unavailable.reasonCode);
+      const taskId = newExternalId('task');
+      await repo.insertTask(
+        {
+          taskId,
+          status: 'executing',
+          plan: [],
+          cursor: 0,
+          pendingConfirm: null,
+        },
+        {
+          userId: userRow.id,
+          intent: input.intent,
+          roleId: dispatchRoleId,
+          opusUsed: false,
+        },
+      );
+      const terminal = await repo.persistVisionOutcome(taskId, {
+        status: 'failed',
+        reason,
+        tickCount: 0,
+        errorCode: unavailable.reasonCode,
+        metadata: {
+          executionMode,
+          finalExecutionMode: executionMode,
+          reasonCode: unavailable.reasonCode,
+        },
+      });
+      if (terminal.persisted) {
+        broadcastToUser(ctx.userId, {
+          type: 'server.task.terminal',
+          taskId,
+          status: 'failed',
+          reason,
+        });
+      }
+      return {
+        taskId,
+        status: 'failed' as const,
+        steps: [],
+        executionMode,
+      };
+    }
+
+    // Resolve region, credentials and rollout eligibility before quota
+    // consumption. An unavailable core lane is a deployment/rollout state,
+    // not a billable task attempt.
+    const coreLane = coreLaneForExecutionMode(executionMode);
+    if (coreLane) {
+      const preflight = modelRuntimeWiring.resolveCore({
+        actorExternalId: ctx.userId,
+        lane: coreLane,
+        ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
+      });
+      if (preflight.kind === 'unavailable') {
+        const reason = modelTaskFailureReason(preflight.reasonCode);
+        const taskId = newExternalId('task');
+        await repo.insertTask(
+          {
+            taskId,
+            status: 'executing',
+            plan: [],
+            cursor: 0,
+            pendingConfirm: null,
+          },
+          {
+            userId: userRow.id,
+            intent: input.intent,
+            roleId: dispatchRoleId,
+            opusUsed: false,
+            ...(stockTaskSourceContext ? { sourceContext: stockTaskSourceContext } : {}),
+          },
+        );
+        const terminal = await repo.persistVisionOutcome(taskId, {
+          status: 'failed',
+          reason,
+          tickCount: 0,
+          errorCode: preflight.reasonCode,
+          metadata: {
+            executionMode,
+            finalExecutionMode: executionMode,
+            reasonCode: preflight.reasonCode,
+          },
+        });
+        if (terminal.persisted) {
+          broadcastToUser(ctx.userId, {
+            type: 'server.task.terminal',
+            taskId,
+            status: 'failed',
+            reason,
+          });
+        }
+        return {
+          taskId,
+          status: 'failed' as const,
+          steps: [],
+          executionMode,
+        };
+      }
+    }
     const videoIntent =
       executionMode === 'video_creation' ||
       input.roleId === 'video-creator' ||
@@ -1613,7 +1767,7 @@ export const tasksRouter = router({
         if (
           executionMode === 'image' &&
           input.imageOptions?.mode === 'lock_subject' &&
-          !anthropicForResolver
+          !legacyMediaModelClient
         ) {
           throw new TRPCError({
             code: 'PRECONDITION_FAILED',
@@ -1626,7 +1780,7 @@ export const tasksRouter = router({
         message: '视频生成功能尚未向当前账号开放，未创建任务或扣除额度。',
       });
     }
-    if (videoIntent && !anthropicForResolver) {
+    if (videoIntent && !legacyMediaModelClient) {
       throw new TRPCError({
         code: 'PRECONDITION_FAILED',
         message: '视频生成服务尚未就绪，未创建任务或扣除额度。',
@@ -1635,7 +1789,7 @@ export const tasksRouter = router({
     const willCreateVideoQuote =
       appEnv.VIDEO_CREATION_ENABLED &&
       videoAllowed &&
-      Boolean(anthropicForResolver) &&
+      Boolean(legacyMediaModelClient) &&
       videoIntent;
     if (appEnv.NODE_ENV === 'production' && executionMode === 'browser' && !ctx.browserPool) {
       // Server-side browser tasks must use the per-task pool because that
@@ -2018,10 +2172,10 @@ export const tasksRouter = router({
               : {}),
             save,
             logger: ctx.logger,
-                  ...(input.imageOptions?.mode === 'lock_subject' && anthropicForResolver
+                  ...(input.imageOptions?.mode === 'lock_subject' && legacyMediaModelClient
                     ? {
                         verifySubject:
-                          createAnthropicSubjectConsistencyVerifier(anthropicForResolver),
+                          createAnthropicSubjectConsistencyVerifier(legacyMediaModelClient),
                       }
                     : {}),
           });
@@ -2155,8 +2309,8 @@ export const tasksRouter = router({
       // 界面显式带了 videoOptions.tab(普通/宠物/IP)。后者是关键——宠物动作 prompt / IP 口播文案
       // 本身不含「视频」关键词,分类器会判 generate;只有 videoOptions.tab 这个显式信号能可靠把
       // 三类 tab 提交都送进视频 fork(只有视频界面会设它,其它 createTask 路径绝不带)。
-      if (willCreateVideoQuote && anthropicForResolver) {
-        const anthropicClient = anthropicForResolver;
+      if (willCreateVideoQuote && legacyMediaModelClient) {
+        const anthropicClient = legacyMediaModelClient;
             const { buildFallbackVideoScript, optimizeUserScript, segmentCapForText } =
               await import('../../agent/video/video-script.js');
         // Phase 2 第一期 — SPA「普通视频」面板把模型档/风格/画幅/画质/时长带上来。
@@ -2469,9 +2623,11 @@ export const tasksRouter = router({
       shouldAllowSpecializedLaneOverride(typedRoutingWorkflow) &&
       (appEnv.ASHARE_QA_ENABLED || validatedStockContext !== null) &&
       ashareQaHandlesMode(executionMode) &&
-      anthropicForResolver &&
       ashareQaAllowed
     ) {
+      const stockRuntime = resolveGenerateRuntimeForUser(ctx.userId, userRow.modelDataRegion);
+      const stockMessagesAdapter =
+        stockRuntime.kind === 'ready' ? stockRuntime.messages('standard') : null;
       const { resolveAshareQa, resolveAshareInContext } = await import(
         '../../agent/a-share/ashare-qa-matcher.js'
       );
@@ -2556,8 +2712,43 @@ export const tasksRouter = router({
         );
         broadcastSubStatus(ctx.userId, taskId, 'generating');
 
-        const anthropicClient = anthropicForResolver;
-        const qaModel = appEnv.ASHARE_QA_MODEL;
+        if (!stockMessagesAdapter) {
+          const reasonCode =
+            stockRuntime.kind === 'unavailable'
+              ? stockRuntime.reasonCode
+              : 'MODEL_MIGRATION_IN_PROGRESS';
+          const reason = modelTaskFailureReason(reasonCode);
+          const terminal = await repo.persistVisionOutcome(taskId, {
+            status: 'failed',
+            reason,
+            tickCount: 0,
+            errorCode: reasonCode,
+            metadata: {
+              executionMode: 'generate',
+              finalExecutionMode: 'generate',
+              lane: 'ashare_qa',
+              reasonCode,
+              ...(publicValidatedStockContext
+                ? { stockContext: publicValidatedStockContext }
+                : {}),
+            },
+          });
+          if (terminal.persisted) {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'failed',
+              reason,
+            });
+          }
+          return {
+            taskId,
+            status: 'failed' as const,
+            steps: [],
+            executionMode: 'generate' as const,
+          };
+        }
+
         void (async () => {
           const { runAshareQa, runAsharePanorama } = await import(
             '../../agent/a-share/ashare-qa-runner.js'
@@ -2590,29 +2781,33 @@ export const tasksRouter = router({
                 client: aksClient,
                 skillMarkdown: skillMarkdown ?? FALLBACK_PERSONA,
                 interpret: async ({ system, user }) => {
-                  const resp = await anthropicClient.messages.create({
-                    model: qaModel,
-                    max_tokens: 700,
+                  const resp = await stockMessagesAdapter.create({
+                    maxTokens: 700,
                     // 低温：③/⑦ 更忠实照抄数字（降低 ungrounded 误降级），措辞仍自然。
                     temperature: 0.3,
                     system,
                     messages: [{ role: 'user', content: user }],
+                    thinking: { type: 'disabled' },
                   });
-                  const block = resp.content[0];
-                  return block && block.type === 'text' ? block.text : '';
+                  return resp.content
+                    .filter((block) => block.type === 'text')
+                    .map((block) => block.text)
+                    .join('\n');
                 },
                 // Phase2 ⑦ 意图判官（第二层，flag 控制）：温度0 求确定性（同股同文同判，治"时好时降级"）。
                 judge: appEnv.ASHARE_INTENT_JUDGE_ENABLED
                   ? async ({ system, user }) => {
-                      const resp = await anthropicClient.messages.create({
-                        model: qaModel,
-                        max_tokens: 160,
+                      const resp = await stockMessagesAdapter.create({
+                        maxTokens: 160,
                         temperature: 0,
                         system,
                         messages: [{ role: 'user', content: user }],
+                        thinking: { type: 'disabled' },
                       });
-                      const block = resp.content[0];
-                      return block && block.type === 'text' ? block.text : '';
+                      return resp.content
+                        .filter((block) => block.type === 'text')
+                        .map((block) => block.text)
+                        .join('\n');
                     }
                   : undefined,
                 // Phase 2「看懂层」P1：腿A 逐指标注解开关（默认 OFF，零新增 LLM）。
@@ -2868,12 +3063,14 @@ export const tasksRouter = router({
     // through to the generate lane below, where the model honestly says
     // it cannot fill the user's file — so shipping before the feature is
     // vetted is a no-op for users instead of a broken lane.
-        if (
-          executionMode === 'template_fill' &&
-          appEnv.TEMPLATE_FILL_ENABLED &&
-          anthropicForResolver
-        ) {
+    if (executionMode === 'template_fill' && appEnv.TEMPLATE_FILL_ENABLED) {
       const taskId = newExternalId('task');
+      const templateRuntime = resolveGenerateRuntimeForUser(
+        ctx.userId,
+        userRow.modelDataRegion,
+      );
+      const templateResponsesAdapter =
+        templateRuntime.kind === 'ready' ? templateRuntime.responses('standard') : null;
 
       await repo.insertTask(
         {
@@ -2897,10 +3094,42 @@ export const tasksRouter = router({
       );
       broadcastSubStatus(ctx.userId, taskId, 'generating');
 
-      const anthropicClient = anthropicForResolver;
-      const templateModel = appEnv.TEMPLATE_FILL_MODEL;
       const templateStartedAt = Date.now();
       const fileIds = input.fileIds ?? [];
+
+      if (!templateResponsesAdapter) {
+        const reasonCode =
+          templateRuntime.kind === 'unavailable'
+            ? templateRuntime.reasonCode
+            : 'MODEL_MIGRATION_IN_PROGRESS';
+        const reason = modelTaskFailureReason(reasonCode);
+        const terminal = await repo.persistVisionOutcome(taskId, {
+          status: 'failed',
+          reason,
+          tickCount: 0,
+          errorCode: reasonCode,
+          metadata: {
+            executionMode: 'template_fill',
+            finalExecutionMode: 'template_fill',
+            reasonCode,
+          },
+        });
+        if (terminal.persisted) {
+          broadcastToUser(ctx.userId, {
+            type: 'server.task.terminal',
+            taskId,
+            status: 'failed',
+            reason,
+          });
+        }
+        return {
+          taskId,
+          status: 'failed' as const,
+          steps: [],
+          executionMode: 'template_fill' as const,
+        };
+      }
+
       void (async () => {
         const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
         let result: RunTemplateFillResult;
@@ -2985,17 +3214,17 @@ export const tasksRouter = router({
             system: string;
             user: string;
           }): Promise<string> => {
-            const resp = await anthropicClient.messages.create({
-              model: templateModel,
-              max_tokens: 8192,
-              system: req.system,
-              messages: [{ role: 'user', content: req.user }],
-            });
-            let text = '';
-            for (const block of resp.content) {
-              if (block.type === 'text') text += (text ? '\n' : '') + block.text;
-            }
-            return text;
+            const response = await templateResponsesAdapter.stream(
+              {
+                instructions: req.system,
+                input: req.user,
+                tools: [],
+                temperature: 0,
+                maxOutputTokens: 8192,
+              },
+              { timeoutMs: 60_000 },
+            );
+            return response.text;
           };
 
           result = await runTemplateFillTask({
@@ -3113,17 +3342,24 @@ export const tasksRouter = router({
 
     // ===== Phase 21b — generate-mode fork =====
     // Pure-generation tasks (write a PRD, translate this, summarize that)
-    // skip the supercar agent loop entirely. One Anthropic call with
-    // web_search available, persists outcome, broadcasts terminal frame,
+    // skip the supercar agent loop entirely. One region-bound Qwen
+    // Responses run persists the outcome and broadcasts the terminal frame,
     // returns immediately. No pool slot, no Playwright, no plan-step
     // state machine. Falls through to the existing supercar branch
     // below for executionMode === 'browser'.
-    if (
-          (executionMode === 'generate' || executionMode === 'template_fill') &&
-      appEnv.ANTHROPIC_API_KEY &&
-      anthropicForResolver
-    ) {
+    if (executionMode === 'generate' || executionMode === 'template_fill') {
       const taskId = newExternalId('task');
+      const generateRuntime = resolveGenerateRuntimeForUser(
+        ctx.userId,
+        userRow.modelDataRegion,
+      );
+      const generateResponsesAdapter =
+        generateRuntime.kind === 'ready' ? generateRuntime.responses('standard') : null;
+      const verifierRuntime = resolveVerifierRuntimeForUser(ctx.userId, userRow.modelDataRegion);
+      const semanticVerifierAdapter =
+        verifierRuntime.kind === 'ready' ? verifierRuntime.messages('verify_strict') : null;
+      const generateUnavailableReasonCode =
+        generateRuntime.kind === 'unavailable' ? generateRuntime.reasonCode : null;
 
       await repo.insertTask(
         {
@@ -3165,8 +3401,7 @@ export const tasksRouter = router({
 
       // Fire-and-forget — generate doesn't share Brave instances so
       // there's no per-user FIFO queue to enqueue into. Concurrent
-      // generate tasks parallelize on the Anthropic API.
-      const anthropicClient = anthropicForResolver;
+      // generate tasks parallelize on the selected regional Qwen endpoint.
       const generateStartedAt = Date.now();
       void (async () => {
         // A2 deferred — generate→browser fallback would re-enter the
@@ -3176,66 +3411,79 @@ export const tasksRouter = router({
         // surface the failure as-is rather than risk the cross-runner
         // re-dispatch.
         const fallbackChain: string[] = ['generate'];
-        let outcome;
+        let outcome: GenerateOutcome;
         try {
           // Codex Pack B1 — generating chip: about to invoke the LLM
           // stream. runGenerateTask emits its own progress markers
           // inside; this prefix marker covers the brief setup gap.
           broadcastSubStatus(ctx.userId, taskId, 'generating');
-          outcome = await runGenerateTask({
-            taskId,
-            userId: ctx.userId,
-            // Use effectiveIntent (with parent context block when in
-            // a follow-up + workflow preambles) whenever EITHER the
-            // legacy or typed matcher fires. Earlier this only checked
-            // legacy; P2_CT_008 surfaced the gap — typed-only matches
-            // (content-topic / ecom-daily) lost their parent context
-            // on follow-up tasks.create with replyToTaskId.
-            // Phase 3 R1 (Codex #2): use effectiveIntent (parent
-            // context block + workflow preamble prepended) whenever
-            // any of:
-            //   - legacy matcher fires
-            //   - typed matcher fires (or recovered from parent)
-            //   - this is a follow-up (replyToTaskId set) — the
-            //     parent's outcome is load-bearing context for the
-            //     model regardless of whether a workflow matched
-            // Otherwise pass the bare user input.
+          outcome = generateResponsesAdapter
+            ? await runGenerateTask({
+                taskId,
+                userId: ctx.userId,
+                // Use effectiveIntent (with parent context block when in
+                // a follow-up + workflow preambles) whenever EITHER the
+                // legacy or typed matcher fires. Earlier this only checked
+                // legacy; P2_CT_008 surfaced the gap — typed-only matches
+                // (content-topic / ecom-daily) lost their parent context
+                // on follow-up tasks.create with replyToTaskId.
+                // Phase 3 R1 (Codex #2): use effectiveIntent (parent
+                // context block + workflow preamble prepended) whenever
+                // any of:
+                //   - legacy matcher fires
+                //   - typed matcher fires (or recovered from parent)
+                //   - this is a follow-up (replyToTaskId set) — the
+                //     parent's outcome is load-bearing context for the
+                //     model regardless of whether a workflow matched
+                // Otherwise pass the bare user input.
                 intent:
                   expertWorkflow || typedWorkflow || isFollowUp ? effectiveIntent : input.intent,
-            // Phase 2b — pass the resolved typed workflow so the
-            // runner skips its inline matcher (which would re-match
-            // against the parent-context-prefixed intent and could
-            // pick a different workflow — P2_ED_008 surfaced this
-            // when the parent ecom-daily report's summary text
-            // happened to contain douyin-review keywords like 诊断).
-            workflowOverride: typedWorkflow,
-            skillId: dispatchSkillId,
-            expertMode: expertModeOverride,
-            client: anthropicClient,
-            logger: ctx.logger,
-            ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
-            // Phase 24 RC follow-up — stream LLM deltas to the SPA
-            // so users see incremental output instead of a blank
-            // panel for 30-90s. broadcast errors are swallowed by
-            // the runner; we never let WS issues stall the loop.
-            onStreamDelta: (delta) => {
-              try {
-                broadcastToUser(ctx.userId, {
-                  type: 'server.task.stream',
-                  taskId,
-                  delta,
-                });
-              } catch (err) {
-                ctx.logger.warn({ err, taskId }, 'generate: broadcast stream delta failed');
-              }
-            },
-          });
-        } catch (err) {
-          ctx.logger.error({ err, taskId }, 'generate: runner threw');
+                // Phase 2b — pass the resolved typed workflow so the
+                // runner skips its inline matcher (which would re-match
+                // against the parent-context-prefixed intent and could
+                // pick a different workflow — P2_ED_008 surfaced this
+                // when the parent ecom-daily report's summary text
+                // happened to contain douyin-review keywords like 诊断).
+                workflowOverride: typedWorkflow,
+                skillId: dispatchSkillId,
+                expertMode: expertModeOverride,
+                responsesAdapter: generateResponsesAdapter,
+                logger: ctx.logger,
+                ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
+                // Phase 24 RC follow-up — stream LLM deltas to the SPA
+                // so users see incremental output instead of a blank
+                // panel for 30-90s. broadcast errors are swallowed by
+                // the runner; we never let WS issues stall the loop.
+                onStreamDelta: (delta) => {
+                  try {
+                    broadcastToUser(ctx.userId, {
+                      type: 'server.task.stream',
+                      taskId,
+                      delta,
+                    });
+                  } catch (err) {
+                    ctx.logger.warn({ err, taskId }, 'generate: broadcast stream delta failed');
+                  }
+                },
+              })
+            : {
+                status: 'failed' as const,
+                summary: '',
+                reason: generateRuntimeUnavailableReason(
+                  generateRuntime.kind === 'unavailable'
+                    ? generateRuntime.reasonCode
+                    : 'MODEL_MIGRATION_IN_PROGRESS',
+                ),
+                inputTokens: 0,
+                outputTokens: 0,
+                durationMs: 0,
+              };
+        } catch {
+          ctx.logger.error({ taskId, code: 'GENERATE_RUNNER_THROWN' }, 'generate: runner threw');
           outcome = {
             status: 'failed' as const,
             summary: '',
-            reason: err instanceof Error ? err.message : 'generate: unknown error',
+            reason: '生成服务暂时不可用，请稍后重试。',
             inputTokens: 0,
             outputTokens: 0,
             durationMs: 0,
@@ -3246,7 +3494,7 @@ export const tasksRouter = router({
           taskId,
           intent: input.intent,
           outcome,
-          client: anthropicClient,
+          semanticAdapter: semanticVerifierAdapter,
           logger: ctx.logger,
           onVerifying: () => broadcastSubStatus(ctx.userId, taskId, 'verifying'),
         });
@@ -3266,10 +3514,19 @@ export const tasksRouter = router({
           // to render the "本次使用了技能" footer chip.
           expertMode: expertModeOverride,
           selectedRole: dispatchRoleId,
-          model: 'claude-sonnet-4-6',
+          ...(generateResponsesAdapter
+            ? {
+                provider: generateResponsesAdapter.metadata.provider,
+                model: generateResponsesAdapter.metadata.model,
+                region: generateResponsesAdapter.metadata.region,
+                deploymentScope: generateResponsesAdapter.metadata.deploymentScope,
+              }
+            : {}),
           fallbackChain,
+          ...(generateUnavailableReasonCode
+            ? { reasonCode: generateUnavailableReasonCode }
+            : {}),
           elapsedMs,
-          modelFinalText: outcome.status === 'completed' ? outcome.summary.slice(0, 200) : null,
         };
         ctx.logger.info(
           {
@@ -3372,6 +3629,9 @@ export const tasksRouter = router({
               status: 'failed',
               reason,
               tickCount: 1,
+              ...(generateUnavailableReasonCode
+                ? { errorCode: generateUnavailableReasonCode }
+                : {}),
               metadata,
               failedChecks: generateFailedChecks,
             });
@@ -3506,15 +3766,35 @@ export const tasksRouter = router({
     // ===== scrape-mode fork (Phase 24 RC follow-up) =====
     // Tasks classified as 'scrape' want page content but NOT live
     // browser interaction. Firecrawl pulls markdown in 2-3s, then
-    // Claude synthesises an answer from those bytes. Cost is roughly
+    // the regional Qwen Responses runtime synthesises an answer from those bytes.
     // 5-10× cheaper than the browser path; latency 5-10× faster.
     //
     // If FIRECRAWL_API_KEY is missing at boot, ctx.firecrawl is null
     // and the scrape branch persists a clear failure (rather than
     // silently degrading to the browser path which is what the
     // classifier explicitly avoided routing to).
-    if (executionMode === 'scrape' && appEnv.ANTHROPIC_API_KEY && anthropicForResolver) {
+    if (executionMode === 'scrape') {
       const taskId = newExternalId('task');
+      const scrapeRuntime = resolveScrapeRuntimeForUser(ctx.userId, userRow.modelDataRegion);
+      const scrapeResponsesAdapter =
+        scrapeRuntime.kind === 'ready' ? scrapeRuntime.responses('standard') : null;
+      const fallbackGenerateRuntime = resolveGenerateRuntimeForUser(
+        ctx.userId,
+        userRow.modelDataRegion,
+      );
+      const fallbackGenerateResponsesAdapter =
+        fallbackGenerateRuntime.kind === 'ready'
+          ? fallbackGenerateRuntime.responses('standard')
+          : null;
+      const verifierRuntime = resolveVerifierRuntimeForUser(ctx.userId, userRow.modelDataRegion);
+      const semanticVerifierAdapter =
+        verifierRuntime.kind === 'ready' ? verifierRuntime.messages('verify_strict') : null;
+      const scrapeUnavailableReasonCode =
+        scrapeRuntime.kind === 'unavailable' ? scrapeRuntime.reasonCode : null;
+      const fallbackGenerateUnavailableReasonCode =
+        fallbackGenerateRuntime.kind === 'unavailable'
+          ? fallbackGenerateRuntime.reasonCode
+          : null;
 
       await repo.insertTask(
         {
@@ -3588,7 +3868,6 @@ export const tasksRouter = router({
       broadcastSubStatus(ctx.userId, taskId, 'planning');
 
       const firecrawl = ctx.firecrawl;
-      const anthropicClient = anthropicForResolver;
       const scrapeStartedAt = Date.now();
       void (async () => {
         // Fallback chain (A4) — every lane the dispatcher actually
@@ -3597,13 +3876,14 @@ export const tasksRouter = router({
         // which path produced the final outcome.
         const fallbackChain: string[] = ['scrape'];
         let finalExecutionMode: 'scrape' | 'generate' = 'scrape';
-        let scrapeOutcome;
+        let scrapeOutcome: ScrapeOutcome;
         try {
           // Codex Pack B1 — extracting chip: firecrawl about to fetch.
           broadcastSubStatus(ctx.userId, taskId, 'extracting');
-          scrapeOutcome = await runScrapeTask({
-            taskId,
-            userId: ctx.userId,
+          scrapeOutcome = scrapeResponsesAdapter
+            ? await runScrapeTask({
+                taskId,
+                userId: ctx.userId,
             // Use effectiveIntent (with parent context block when in
             // a follow-up + workflow preambles) whenever EITHER the
             // legacy or typed matcher fires. Earlier this only checked
@@ -3621,44 +3901,58 @@ export const tasksRouter = router({
             // Otherwise pass the bare user input.
                 intent:
                   expertWorkflow || typedWorkflow || isFollowUp ? effectiveIntent : input.intent,
-            skillId: dispatchSkillId,
-            expertMode: expertModeOverride,
-            client: anthropicClient,
-            firecrawl,
-            logger: ctx.logger,
+                skillId: dispatchSkillId,
+                expertMode: expertModeOverride,
+                responsesAdapter: scrapeResponsesAdapter,
+                firecrawl,
+                logger: ctx.logger,
             // Phase 24 RC follow-up — stream LLM deltas + push
             // coarse Firecrawl-phase progress to the SPA. Same
             // contract as generate-runner; broadcast errors are
             // swallowed.
-            onStreamDelta: (delta) => {
-              try {
-                broadcastToUser(ctx.userId, {
-                  type: 'server.task.stream',
-                  taskId,
-                  delta,
-                });
-              } catch (err) {
-                ctx.logger.warn({ err, taskId }, 'scrape: broadcast stream delta failed');
-              }
-            },
-            onProgress: (message) => {
-              try {
-                broadcastToUser(ctx.userId, {
-                  type: 'server.task.progress',
-                  taskId,
-                  message,
-                });
-              } catch (err) {
-                ctx.logger.warn({ err, taskId }, 'scrape: broadcast progress failed');
-              }
-            },
-          });
-        } catch (err) {
-          ctx.logger.error({ err, taskId }, 'scrape: runner threw');
+                onStreamDelta: (delta) => {
+                  try {
+                    broadcastToUser(ctx.userId, {
+                      type: 'server.task.stream',
+                      taskId,
+                      delta,
+                    });
+                  } catch (err) {
+                    ctx.logger.warn({ err, taskId }, 'scrape: broadcast stream delta failed');
+                  }
+                },
+                onProgress: (message) => {
+                  try {
+                    broadcastToUser(ctx.userId, {
+                      type: 'server.task.progress',
+                      taskId,
+                      message,
+                    });
+                  } catch (err) {
+                    ctx.logger.warn({ err, taskId }, 'scrape: broadcast progress failed');
+                  }
+                },
+              })
+            : {
+                status: 'failed' as const,
+                summary: '',
+                reason: generateRuntimeUnavailableReason(
+                  scrapeRuntime.kind === 'unavailable'
+                    ? scrapeRuntime.reasonCode
+                    : 'MODEL_MIGRATION_IN_PROGRESS',
+                ),
+                inputTokens: 0,
+                outputTokens: 0,
+                durationMs: 0,
+                source: 'scrape' as const,
+                sources: [],
+              };
+        } catch {
+          ctx.logger.error({ taskId, code: 'SCRAPE_RUNNER_THROWN' }, 'scrape: runner threw');
           scrapeOutcome = {
             status: 'failed' as const,
             summary: '',
-            reason: err instanceof Error ? err.message : 'scrape: unknown error',
+            reason: '内容整理服务暂时不可用，请稍后重试。',
             inputTokens: 0,
             outputTokens: 0,
             durationMs: 0,
@@ -3701,49 +3995,67 @@ export const tasksRouter = router({
           );
           fallbackChain.push('generate');
           finalExecutionMode = 'generate';
-          let generateOutcome;
+          let generateOutcome: GenerateOutcome;
           try {
-            generateOutcome = await runGenerateTask({
-              taskId,
-              userId: ctx.userId,
-              // Phase 3 R1 (Codex #2): use effectiveIntent (parent
-            // context block + workflow preamble prepended) whenever
-            // any of:
-            //   - legacy matcher fires
-            //   - typed matcher fires (or recovered from parent)
-            //   - this is a follow-up (replyToTaskId set) — the
-            //     parent's outcome is load-bearing context for the
-            //     model regardless of whether a workflow matched
-            // Otherwise pass the bare user input.
-            intent:
-                expertWorkflow || typedWorkflow || isFollowUp ? effectiveIntent : input.intent,
-              workflowOverride: typedWorkflow,
-              skillId: dispatchSkillId,
-              expertMode: expertModeOverride,
-              client: anthropicClient,
-              logger: ctx.logger,
-              ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
-              onStreamDelta: (delta) => {
-                try {
-                  broadcastToUser(ctx.userId, {
-                    type: 'server.task.stream',
-                    taskId,
-                    delta,
-                  });
-                } catch (err) {
-                  ctx.logger.warn(
-                    { err, taskId },
-                    'fallback-generate: broadcast stream delta failed',
-                  );
-                }
-              },
-            });
-          } catch (err) {
-            ctx.logger.error({ err, taskId }, 'fallback-generate: runner threw');
+            generateOutcome = fallbackGenerateResponsesAdapter
+              ? await runGenerateTask({
+                  taskId,
+                  userId: ctx.userId,
+                  // Phase 3 R1 (Codex #2): use effectiveIntent (parent
+                  // context block + workflow preamble prepended) whenever
+                  // any of:
+                  //   - legacy matcher fires
+                  //   - typed matcher fires (or recovered from parent)
+                  //   - this is a follow-up (replyToTaskId set) — the
+                  //     parent's outcome is load-bearing context for the
+                  //     model regardless of whether a workflow matched
+                  // Otherwise pass the bare user input.
+                  intent:
+                    expertWorkflow || typedWorkflow || isFollowUp
+                      ? effectiveIntent
+                      : input.intent,
+                  workflowOverride: typedWorkflow,
+                  skillId: dispatchSkillId,
+                  expertMode: expertModeOverride,
+                  responsesAdapter: fallbackGenerateResponsesAdapter,
+                  logger: ctx.logger,
+                  ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
+                  onStreamDelta: (delta) => {
+                    try {
+                      broadcastToUser(ctx.userId, {
+                        type: 'server.task.stream',
+                        taskId,
+                        delta,
+                      });
+                    } catch (err) {
+                      ctx.logger.warn(
+                        { err, taskId },
+                        'fallback-generate: broadcast stream delta failed',
+                      );
+                    }
+                  },
+                })
+              : {
+                  status: 'failed' as const,
+                  summary: '',
+                  reason: generateRuntimeUnavailableReason(
+                    fallbackGenerateRuntime.kind === 'unavailable'
+                      ? fallbackGenerateRuntime.reasonCode
+                      : 'MODEL_MIGRATION_IN_PROGRESS',
+                  ),
+                  inputTokens: 0,
+                  outputTokens: 0,
+                  durationMs: 0,
+                };
+          } catch {
+            ctx.logger.error(
+              { taskId, code: 'FALLBACK_GENERATE_RUNNER_THROWN' },
+              'fallback-generate: runner threw',
+            );
             generateOutcome = {
               status: 'failed' as const,
               summary: '',
-              reason: err instanceof Error ? err.message : 'fallback-generate: unknown error',
+              reason: '生成服务暂时不可用，请稍后重试。',
               inputTokens: 0,
               outputTokens: 0,
               durationMs: 0,
@@ -3801,7 +4113,7 @@ export const tasksRouter = router({
           const verified: VerifyOutput = await verifyAndFinalize({
             taskId,
             answerText: outcome.summary,
-            client: anthropicClient,
+            semanticAdapter: semanticVerifierAdapter,
             logger: ctx.logger,
           });
           if (verified.finalText !== outcome.summary) {
@@ -3831,16 +4143,34 @@ export const tasksRouter = router({
         // B3 — structured task:completed log. Single record per task
         // termination with all fields the eval pipeline needs.
         const elapsedMs = Date.now() - scrapeStartedAt;
+        const finalResponsesAdapter =
+          finalExecutionMode === 'scrape'
+            ? scrapeResponsesAdapter
+            : fallbackGenerateResponsesAdapter;
         const metadata = {
           executionMode: 'scrape' as const,
           finalExecutionMode,
           expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
           expertMode: expertModeOverride,
           selectedRole: dispatchRoleId,
-          model: 'claude-sonnet-4-6',
+          ...(finalResponsesAdapter
+            ? {
+                provider: finalResponsesAdapter.metadata.provider,
+                model: finalResponsesAdapter.metadata.model,
+                region: finalResponsesAdapter.metadata.region,
+                deploymentScope: finalResponsesAdapter.metadata.deploymentScope,
+              }
+            : {}),
           fallbackChain,
+          ...(!finalResponsesAdapter
+            ? {
+                reasonCode:
+                  fallbackGenerateUnavailableReasonCode ??
+                  scrapeUnavailableReasonCode ??
+                  'MODEL_MIGRATION_IN_PROGRESS',
+              }
+            : {}),
           elapsedMs,
-          modelFinalText: outcome.status === 'completed' ? outcome.summary.slice(0, 200) : null,
         };
         ctx.logger.info(
           {
@@ -3933,6 +4263,14 @@ export const tasksRouter = router({
               status: 'failed',
               reason,
               tickCount: 1,
+              ...(!finalResponsesAdapter
+                ? {
+                    errorCode:
+                      fallbackGenerateUnavailableReasonCode ??
+                      scrapeUnavailableReasonCode ??
+                      'MODEL_MIGRATION_IN_PROGRESS',
+                  }
+                : {}),
               metadata,
               failedChecks: scrapeFailedChecks,
             });
@@ -5377,7 +5715,7 @@ export const tasksRouter = router({
       // default) ⇒ nobody is canaried ⇒ server Brave for everyone.
       const otaExtensionOnline = hasConnectedExtension(ctx.userId);
       const otaMasterEnabled =
-        getExecutionFeatureFlags().OTA_USER_BROWSER && Boolean(anthropicForResolver);
+        getExecutionFeatureFlags().OTA_USER_BROWSER && Boolean(legacyMediaModelClient);
             const otaAllowedDomains = parseOtaAllowlist(
               process.env.OTA_USER_BROWSER_ALLOWED_DOMAINS,
             );
@@ -5415,7 +5753,7 @@ export const tasksRouter = router({
           taskId,
           intent: effectiveIntent,
           deps: {
-            client: anthropicForResolver!,
+            client: legacyMediaModelClient!,
             dispatchNavigate: async (url: string) => {
               const r = await sendExtensionToolCall(ctx.userId, {
                 taskId,
@@ -5484,40 +5822,63 @@ export const tasksRouter = router({
                 'supercar: handoff to generate runner',
               );
               const handoffStartedAt = Date.now();
-              let generateOutcome;
+              const handoffGenerateRuntime = resolveGenerateRuntimeForUser(
+                ctx.userId,
+                userRow.modelDataRegion,
+              );
+              const handoffGenerateResponsesAdapter =
+                handoffGenerateRuntime.kind === 'ready'
+                  ? handoffGenerateRuntime.responses('standard')
+                  : null;
+              let generateOutcome: GenerateOutcome;
               try {
-                generateOutcome = await runGenerateTask({
-                  taskId,
-                  userId: ctx.userId,
-                  intent: combinedIntent,
-                  workflowOverride: typedWorkflow,
-                  skillId: dispatchSkillId,
-                  expertMode: expertModeOverride,
-                  client: anthropicForResolver!,
-                  logger: ctx.logger,
-                    ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
-                  onStreamDelta: (delta) => {
-                    try {
-                      broadcastToUser(userId, {
-                        type: 'server.task.stream',
-                        taskId,
-                        delta,
-                      });
-                    } catch (err) {
-                      ctx.logger.warn(
-                        { err, taskId },
-                        'handoff-generate: broadcast stream delta failed',
-                      );
-                    }
-                  },
-                });
-              } catch (err) {
-                  ctx.logger.error({ err, taskId }, 'handoff-generate: runner threw');
+                generateOutcome = handoffGenerateResponsesAdapter
+                  ? await runGenerateTask({
+                      taskId,
+                      userId: ctx.userId,
+                      intent: combinedIntent,
+                      workflowOverride: typedWorkflow,
+                      skillId: dispatchSkillId,
+                      expertMode: expertModeOverride,
+                      responsesAdapter: handoffGenerateResponsesAdapter,
+                      logger: ctx.logger,
+                      ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
+                      onStreamDelta: (delta) => {
+                        try {
+                          broadcastToUser(userId, {
+                            type: 'server.task.stream',
+                            taskId,
+                            delta,
+                          });
+                        } catch (err) {
+                          ctx.logger.warn(
+                            { err, taskId },
+                            'handoff-generate: broadcast stream delta failed',
+                          );
+                        }
+                      },
+                    })
+                  : {
+                      status: 'failed' as const,
+                      summary: '',
+                      reason: generateRuntimeUnavailableReason(
+                        handoffGenerateRuntime.kind === 'unavailable'
+                          ? handoffGenerateRuntime.reasonCode
+                          : 'MODEL_MIGRATION_IN_PROGRESS',
+                      ),
+                      inputTokens: 0,
+                      outputTokens: 0,
+                      durationMs: 0,
+                    };
+              } catch {
+                ctx.logger.error(
+                  { taskId, code: 'HANDOFF_GENERATE_RUNNER_THROWN' },
+                  'handoff-generate: runner threw',
+                );
                 generateOutcome = {
                   status: 'failed' as const,
                   summary: '',
-                        reason:
-                          err instanceof Error ? err.message : 'handoff-generate: unknown error',
+                  reason: '生成服务暂时不可用，请稍后重试。',
                   inputTokens: 0,
                   outputTokens: 0,
                   durationMs: 0,
@@ -5530,13 +5891,17 @@ export const tasksRouter = router({
                 expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
                 expertMode: expertModeOverride,
                 selectedRole: dispatchRoleId,
-                model: 'claude-sonnet-4-6',
+                ...(handoffGenerateResponsesAdapter
+                  ? {
+                      provider: handoffGenerateResponsesAdapter.metadata.provider,
+                      model: handoffGenerateResponsesAdapter.metadata.model,
+                      region: handoffGenerateResponsesAdapter.metadata.region,
+                      deploymentScope:
+                        handoffGenerateResponsesAdapter.metadata.deploymentScope,
+                    }
+                  : {}),
                 fallbackChain: ['browser', 'generate'],
                 elapsedMs,
-                modelFinalText:
-                  generateOutcome.status === 'completed'
-                    ? (generateOutcome.summary ?? '').slice(0, 200)
-                    : null,
               };
               ctx.logger.info(
                 {
@@ -5946,7 +6311,6 @@ export const tasksRouter = router({
                 taskId,
                 answerText: answerSummary,
                 ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
-                client: anthropicForResolver,
                 logger: ctx.logger,
                 // File-artifact guard (C): a download claim with no
                 // fence AND no matching DOCUMENT output → fixable. The
@@ -6203,45 +6567,21 @@ export const tasksRouter = router({
                 ctx.logger.warn({ err, taskId }, 'supercar: broadcast terminal failed');
               }
             }
-            // Phase 13 Dim 5 — memory extraction. Run only on completed tasks
-            // to avoid storing tips from partial / failed state. This remains
-            // on Anthropic until its own migration gate is designed.
+            // Cross-task memory extraction is paused until it has a dedicated
+            // Qwen implementation. Existing memories stay readable; production
+            // must not fall back to the dormant Anthropic extractor.
             if (terminalPersisted && outcome.status === 'completed' && outcome.summary) {
-              if (appEnv.ANTHROPIC_API_KEY) {
-                void memoryService
-                  .extractAndStore({
-                    apiKey: appEnv.ANTHROPIC_API_KEY,
-                    userIdInternal: userRow.id,
-                    intent: input.intent,
-                    summary: outcome.summary,
-                    taskId,
-                  })
-                  .catch((err) => ctx.logger.warn({ err, taskId }, 'memory: extract crashed'));
-              }
-
-              // First provider-neutral real-call canary. This only controls
-              // post-task suggestions: no tools, no mutation, and no effect on
-              // the completed task. Qwen requires both flags, an exact
-              // synthetic-user allowlist match, and persisted region ownership.
-              const suggestionsRoute = resolveSuggestionsProviderRoute({
-                environment: appEnv,
-                userExternalId: ctx.userId,
-                userModelDataRegion: userRow.modelDataRegion,
-              });
-              let messagesAdapter: MessagesAdapter | null = null;
+              // Post-task suggestions are Qwen-only. The shared runtime enforces
+              // rollout, lane, persisted region and region-local credentials
+              // before constructing a transport. There is no legacy fallback.
+              let suggestionsRoute: ReturnType<typeof resolveSuggestionsProviderRoute> | null = null;
               try {
-                if (suggestionsRoute.provider === 'qwen') {
-                  messagesAdapter = createQwenMessagesAdapter({
-                    environment: appEnv,
-                    region: suggestionsRoute.region,
-                    purpose: 'fast',
-                  });
-                } else if (suggestionsRoute.provider === 'anthropic') {
-                  messagesAdapter = createAnthropicMessagesAdapter({
-                    apiKey: appEnv.ANTHROPIC_API_KEY,
-                    model: SUGGESTIONS_ANTHROPIC_MODEL,
-                  });
-                } else {
+                suggestionsRoute = resolveSuggestionsProviderRoute({
+                  environment: appEnv,
+                  userExternalId: ctx.userId,
+                  userModelDataRegion: userRow.modelDataRegion,
+                });
+                if (suggestionsRoute.provider === 'unavailable') {
                   ctx.logger.warn(
                     { taskId, reason: suggestionsRoute.reason },
                     'suggestions: provider unavailable',
@@ -6249,31 +6589,24 @@ export const tasksRouter = router({
                 }
               } catch (error) {
                 ctx.logger.warn(
-                  {
-                    taskId,
-                    reason:
-                      error instanceof MessagesAdapterError
-                        ? error.code
-                        : 'PROVIDER_CONFIGURATION_ERROR',
-                  },
+                  { taskId, reason: 'PROVIDER_CONFIGURATION_ERROR' },
                   'suggestions: provider unavailable',
                 );
               }
 
-              if (messagesAdapter) {
-                if (messagesAdapter.metadata.provider === 'alibaba-model-studio') {
-                  ctx.logger.info(
-                    {
-                      taskId,
-                      provider: messagesAdapter.metadata.provider,
-                      model: messagesAdapter.metadata.model,
-                      region: messagesAdapter.metadata.region,
-                      deploymentScope: messagesAdapter.metadata.deploymentScope,
-                      endpointKind: messagesAdapter.metadata.endpointKind,
-                    },
-                    'suggestions: Qwen canary selected',
-                  );
-                }
+              if (suggestionsRoute?.provider === 'qwen') {
+                const messagesAdapter = suggestionsRoute.messagesAdapter;
+                ctx.logger.info(
+                  {
+                    taskId,
+                    provider: messagesAdapter.metadata.provider,
+                    model: messagesAdapter.metadata.model,
+                    region: messagesAdapter.metadata.region,
+                    deploymentScope: messagesAdapter.metadata.deploymentScope,
+                    endpointKind: messagesAdapter.metadata.endpointKind,
+                  },
+                  'suggestions: Qwen selected',
+                );
                 void generateSuggestions({
                   messagesAdapter,
                   intent: input.intent,
@@ -7208,6 +7541,7 @@ export const tasksRouter = router({
       const repo = new TaskRepository(ctx.db);
       const [row] = await ctx.db
         .select({
+          id: tasksTable.id,
           status: tasksTable.status,
           awaitingKind: tasksTable.awaitingKind,
           intent: tasksTable.intent,
@@ -7259,6 +7593,74 @@ export const tasksRouter = router({
           awaitingKind: 'video_quote',
         });
         return { taskId: input.taskId, status: 'awaiting_user' as const };
+      }
+
+      // The quote may predate the Qwen-only cutover. A positive answer must
+      // not debit quota or create a generation child while the media lane is
+      // migration-unavailable. Settle the quote itself as an explicit failed
+      // terminal so repeated confirmation cannot spin or charge twice.
+      if (appEnv.MODEL_RUNTIME_POLICY === 'qwen_only') {
+        const unavailable = modelRuntimeWiring.resolveUnmigrated('video_generation');
+        const unavailableReason = modelTaskFailureReason(unavailable.reasonCode);
+        const previousResult =
+          row.result && typeof row.result === 'object'
+            ? (row.result as Record<string, unknown>)
+            : {};
+        const previousMetadata =
+          previousResult.metadata && typeof previousResult.metadata === 'object'
+            ? (previousResult.metadata as Record<string, unknown>)
+            : {};
+        const failed = await ctx.db.transaction(async (tx) => {
+        const updateResult = await tx
+          .update(tasksTable)
+          .set({
+            status: 'failed',
+            awaitingKind: null,
+            awaitingQuestion: null,
+            errorCode: unavailable.reasonCode,
+            errorMessage: unavailableReason,
+            completedAt: new Date(),
+            result: {
+              ...previousResult,
+              reason: unavailableReason,
+              metadata: {
+                ...previousMetadata,
+                reasonCode: unavailable.reasonCode,
+              },
+            },
+          })
+          .where(
+            and(
+              eq(tasksTable.id, row.id),
+              eq(tasksTable.status, 'awaiting_user'),
+              eq(tasksTable.awaitingKind, 'video_quote'),
+            ),
+          );
+        if (readAffectedRows(updateResult) !== 1) return false;
+        await tx.insert(taskEvents).values({
+          externalId: newExternalId('taskEvent'),
+          taskId: row.id,
+          type: 'task.failed',
+          actor: 'system',
+          payload: {
+            source: 'video_quote',
+            from: 'awaiting_user',
+            to: 'failed',
+            errorCode: unavailable.reasonCode,
+          },
+        });
+        return true;
+        });
+        if (!failed) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '找不到待确认的视频报价' });
+        }
+        broadcastToUser(ctx.userId, {
+          type: 'server.task.terminal',
+          taskId: input.taskId,
+          status: 'failed',
+          reason: unavailableReason,
+        });
+        return { taskId: input.taskId, status: 'failed' as const };
       }
 
       // Validate the quote payload before the atomic consume. A malformed
@@ -7374,7 +7776,7 @@ export const tasksRouter = router({
         });
       }
       const preflight = await claimVideoConfirmAfterVerifierPreflight(
-        { choice, hasVerifier: Boolean(anthropicForResolver) },
+        { choice, hasVerifier: Boolean(legacyMediaModelClient) },
         async () => true,
       );
       if (preflight.issue) {
@@ -7457,7 +7859,7 @@ export const tasksRouter = router({
       // generate_video | generate_image — 外部供应商调用只在事务提交后启动。
       broadcastSubStatus(ctx.userId, newTaskId, 'generating');
 
-      const anthropicClient = anthropicForResolver;
+      const anthropicClient = legacyMediaModelClient;
       const userExternalId = ctx.userId;
       const userInternalId = userRow.id;
       const ipVoiceId = userRow.qwenVoiceId; // Phase 2 第三期 IP lane
@@ -7478,13 +7880,15 @@ export const tasksRouter = router({
           },
         });
         try {
-        const { runSimpleVideoCreation } = await import('../../agent/video/video-lane-simple.js');
+        const { runSimpleVideoCreation } = await import(
+          '../../agent/video/qwen-only-video-runtime.js'
+        );
         const { runFfmpeg } = await import('../../agent/video/ffmpeg-exec.js');
         const { createAnthropicVideoQualityAnalyzer, verifyFinalVideoQuality } = await import(
           '../../agent/video/video-quality-verifier.js'
         );
         const { verifyAudioVisualSync } = await import(
-          '../../agent/video/video-av-sync-verifier.js'
+          '../../agent/video/qwen-only-video-runtime.js'
         );
         const { verifyCloneVideoCompatibility } = await import(
           '../../agent/video/video-clone-compatibility.js'
@@ -7626,7 +8030,9 @@ export const tasksRouter = router({
             let audioCoverage: VideoAudioVerificationCoverage = videoAudioVerificationCoverage();
           let audiovisualSyncReview: VideoAudioVisualSyncAudit | undefined;
           if (isClone) {
-            const { runCloneVideoCreation } = await import('../../agent/video/video-clone.js');
+            const { runCloneVideoCreation } = await import(
+              '../../agent/video/qwen-only-video-runtime.js'
+            );
             const petImageFileId = meta.petImageFileId;
             const referenceVideoFileId = meta.referenceVideoFileId;
             if (!petImageFileId || !referenceVideoFileId) {
@@ -7696,7 +8102,9 @@ export const tasksRouter = router({
             summary = '复刻视频已生成。';
           } else if (isPet) {
             // 宠物 i2v: fileId → presigned GET → i2v 单图 → pad+水印+静默 → store.
-            const { runPetVideoCreation } = await import('../../agent/video/video-pet-i2v.js');
+            const { runPetVideoCreation } = await import(
+              '../../agent/video/qwen-only-video-runtime.js'
+            );
             const petImageFileId = meta.petImageFileId;
             if (!petImageFileId) {
               throw new Error('宠物视频缺少宠物照片');
@@ -7718,7 +8126,9 @@ export const tasksRouter = router({
             summary = '宠物视频已生成。';
           } else if (isIp) {
             // IP 人物 B 架构: 克隆音(全文案)→ 1 次 fal 换口型(loop_mode 补够)→ 字幕+水印 → store.
-            const { runIpVideoCreation } = await import('../../agent/video/video-ip-lipsync.js');
+            const { runIpVideoCreation } = await import(
+              '../../agent/video/qwen-only-video-runtime.js'
+            );
             // 合规硬闸:确认时复核三件齐 + 本人授权(报价后、生成前可能已撤销/清除素材)。
             if (!ipVoiceId || !ipBaseFileId || !ipAuthorized) {
               throw new Error('IP 素材或授权缺失(可能已被清除),请重新完成 onboarding');
@@ -8417,7 +8827,7 @@ export const tasksRouter = router({
         handoffTaskId?: string;
       }> => {
       const [userRow] = await ctx.db
-        .select({ id: users.id })
+        .select({ id: users.id, modelDataRegion: users.modelDataRegion })
         .from(users)
         .where(eq(users.externalId, ctx.userId))
         .limit(1);
@@ -8813,14 +9223,14 @@ export const tasksRouter = router({
       // runner with the combined intent. The preamble carries the
       // expert-workflow context (now with `missingInputs.length === 0`
       // → no intake-guard, so the model will produce a real report).
-      const anthropicClient = anthropicForResolver;
-      if (!anthropicClient) {
-        ctx.logger.error(
-          { taskId: input.taskId },
-          'reply: anthropic client not configured — cannot resume',
-        );
-        return { ok: false };
-      }
+      const resumeGenerateRuntime = resolveGenerateRuntimeForUser(
+        ctx.userId,
+        userRow.modelDataRegion,
+      );
+      const resumeGenerateResponsesAdapter =
+        resumeGenerateRuntime.kind === 'ready'
+          ? resumeGenerateRuntime.responses('standard')
+          : null;
       const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
       const newWorkflowPreamble = newWorkflow?.promptPreamble ?? '';
       const effectiveCombined =
@@ -8845,42 +9255,60 @@ export const tasksRouter = router({
       void (async () => {
         let executionVerification: VerificationResult | null = null;
         try {
-          let outcome;
+          let outcome: GenerateOutcome;
           try {
-            outcome = await runGenerateTask({
-              taskId: input.taskId,
-              userId: ctx.userId,
-              intent: effectiveCombined,
-              ...(parkRow!.roleId ? { skillId: parkRow!.roleId } : {}),
-              expertMode: parkedExpertMode,
-              client: anthropicClient,
-              logger: ctx.logger,
-              // F2 — pass user-uploaded attachments through to the
-              // generate runner so a parked-from-generate task that
-              // resumes with a file (e.g. Excel of metrics) sees the
-              // attachment alongside the original intent.
-              ...(replyAttachmentBlocks.length > 0 ? { attachments: replyAttachmentBlocks } : {}),
-              onStreamDelta: (delta) => {
-                try {
-                  broadcastToUser(ctx.userId, {
-                    type: 'server.task.stream',
-                    taskId: input.taskId,
-                    delta,
-                  });
-                } catch (err) {
-                  ctx.logger.warn(
-                    { err, taskId: input.taskId },
-                    'reply: broadcast stream delta failed',
-                  );
-                }
-              },
-            });
-          } catch (err) {
-            ctx.logger.error({ err, taskId: input.taskId }, 'reply: runner threw');
+            outcome = resumeGenerateResponsesAdapter
+              ? await runGenerateTask({
+                  taskId: input.taskId,
+                  userId: ctx.userId,
+                  intent: effectiveCombined,
+                  ...(parkRow!.roleId ? { skillId: parkRow!.roleId } : {}),
+                  expertMode: parkedExpertMode,
+                  responsesAdapter: resumeGenerateResponsesAdapter,
+                  logger: ctx.logger,
+                  // F2 — pass user-uploaded attachments through to the
+                  // generate runner so a parked-from-generate task that
+                  // resumes with a file (e.g. Excel of metrics) sees the
+                  // attachment alongside the original intent.
+                  ...(replyAttachmentBlocks.length > 0
+                    ? { attachments: replyAttachmentBlocks }
+                    : {}),
+                  onStreamDelta: (delta) => {
+                    try {
+                      broadcastToUser(ctx.userId, {
+                        type: 'server.task.stream',
+                        taskId: input.taskId,
+                        delta,
+                      });
+                    } catch (err) {
+                      ctx.logger.warn(
+                        { err, taskId: input.taskId },
+                        'reply: broadcast stream delta failed',
+                      );
+                    }
+                  },
+                })
+              : {
+                  status: 'failed' as const,
+                  summary: '',
+                  reason: generateRuntimeUnavailableReason(
+                    resumeGenerateRuntime.kind === 'unavailable'
+                      ? resumeGenerateRuntime.reasonCode
+                      : 'MODEL_MIGRATION_IN_PROGRESS',
+                  ),
+                  inputTokens: 0,
+                  outputTokens: 0,
+                  durationMs: 0,
+                };
+          } catch {
+            ctx.logger.error(
+              { taskId: input.taskId, code: 'GENERATE_RESUME_RUNNER_THROWN' },
+              'reply: runner threw',
+            );
             outcome = {
               status: 'failed' as const,
               summary: '',
-              reason: err instanceof Error ? err.message : 'reply: unknown error',
+              reason: '生成服务暂时不可用，请稍后重试。',
               inputTokens: 0,
               outputTokens: 0,
               durationMs: 0,
@@ -8891,7 +9319,6 @@ export const tasksRouter = router({
             taskId: input.taskId,
             intent: combinedIntent,
             outcome,
-            client: anthropicClient,
             logger: ctx.logger,
             evidenceSourceDetail: 'llm_generate_resume_response',
             onVerifying: () => broadcastSubStatus(ctx.userId, input.taskId, 'verifying'),
@@ -8904,10 +9331,16 @@ export const tasksRouter = router({
             expertWorkflowId: newWorkflow?.id ?? null,
             expertMode: parkedExpertMode,
             selectedRole: parkRow!.roleId ?? null,
-            model: 'claude-sonnet-4-6',
+            ...(resumeGenerateResponsesAdapter
+              ? {
+                  provider: resumeGenerateResponsesAdapter.metadata.provider,
+                  model: resumeGenerateResponsesAdapter.metadata.model,
+                  region: resumeGenerateResponsesAdapter.metadata.region,
+                  deploymentScope: resumeGenerateResponsesAdapter.metadata.deploymentScope,
+                }
+              : {}),
             fallbackChain: ['generate-resume'],
             elapsedMs: Date.now() - resumeStartedAt,
-            modelFinalText: outcome.status === 'completed' ? outcome.summary.slice(0, 200) : null,
           };
 
           if (reviewed.terminalStatus === 'completed' && outcome.status === 'completed') {

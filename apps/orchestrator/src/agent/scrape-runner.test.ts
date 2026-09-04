@@ -1,22 +1,18 @@
-/**
- * Phase 24 RC follow-up — scrape-runner unit tests.
- *
- * The scrape runner is the executor for the new 'scrape' execution
- * mode: it asks Firecrawl for the relevant pages, then asks the LLM
- * to synthesise an answer from the returned markdown. Two pure
- * helpers — extractTargetUrl and extractSearchQuery — get most of
- * the test coverage; the runner itself is mostly orchestration over
- * mocked deps (Firecrawl + Anthropic).
- */
-
-import { describe, expect, it, vi } from 'vitest';
 import type { Logger } from 'pino';
-import {
-  extractTargetUrl,
-  extractSearchQuery,
-  runScrapeTask,
-} from './scrape-runner.js';
+import { describe, expect, it, vi } from 'vitest';
 import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
+import type { NeutralResponsesRequest, ResponsesAdapter } from '../llm/responses-adapter.js';
+import { ResponsesAdapterError } from '../llm/responses-adapter.js';
+import { extractSearchQuery, extractTargetUrl, runScrapeTask } from './scrape-runner.js';
+
+const METADATA = {
+  provider: 'alibaba-model-studio' as const,
+  region: 'cn' as const,
+  deploymentScope: 'china_mainland' as const,
+  model: 'qwen3.8-plus',
+  endpointKind: 'public' as const,
+  protocol: 'responses' as const,
+};
 
 function fakeLogger(): Logger {
   const noop = vi.fn();
@@ -31,221 +27,239 @@ function fakeLogger(): Logger {
   } as unknown as Logger;
 }
 
+function makeAdapter(
+  input: {
+    text?: string;
+    sources?: Array<{ title: string; url: string; provenance: 'web_search' }>;
+    error?: Error;
+    hang?: boolean;
+    status?: 'completed' | 'incomplete';
+  } = {},
+): ResponsesAdapter {
+  const stream = vi.fn(
+    async (
+      _request: NeutralResponsesRequest,
+      options?: { signal?: AbortSignal; onTextDelta?: (delta: string) => void },
+    ) => {
+      if (input.hang) {
+        return new Promise<never>((_resolve, reject) => {
+          const abort = () => reject(new ResponsesAdapterError('REQUEST_ABORTED'));
+          if (options?.signal?.aborted) abort();
+          else options?.signal?.addEventListener('abort', abort, { once: true });
+        });
+      }
+      if (input.error) throw input.error;
+      const text = input.text ?? '整理后的结果';
+      if (text) options?.onTextDelta?.(text);
+      return {
+        id: 'resp_scrape',
+        metadata: METADATA,
+        text,
+        sources: input.sources ?? [],
+        usage: { inputTokens: 100, outputTokens: 200 },
+        status: input.status ?? ('completed' as const),
+        ...(input.status === 'incomplete'
+          ? { incompleteReason: 'max_output_tokens' as const }
+          : {}),
+      };
+    },
+  );
+  return { metadata: METADATA, stream };
+}
+
+function scrapeLane(override: Partial<FirecrawlLane> = {}): FirecrawlLane {
+  return {
+    scrape: vi.fn(async (url: string) => ({
+      ok: true as const,
+      markdown: '# Article\n\nObserved content.',
+      url,
+      title: 'Article',
+    })),
+    search: vi.fn(async () => ({
+      ok: true as const,
+      results: [
+        {
+          url: 'https://news.example.com/a',
+          markdown: '# News A',
+          title: 'News A',
+        },
+      ],
+    })),
+    ...override,
+  };
+}
+
+function run(input: {
+  intent?: string;
+  adapter?: ResponsesAdapter;
+  firecrawl?: FirecrawlLane;
+  timeoutMs?: number;
+  expertMode?: 'normal' | 'expert' | 'auto';
+  onStreamDelta?: (delta: string) => void;
+  onProgress?: (message: string) => void;
+}) {
+  return runScrapeTask({
+    taskId: 'tsk_scrape',
+    userId: 'usr_test',
+    intent: input.intent ?? '总结 https://example.com/article',
+    responsesAdapter: input.adapter ?? makeAdapter(),
+    firecrawl: input.firecrawl ?? scrapeLane(),
+    logger: fakeLogger(),
+    ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+    ...(input.expertMode ? { expertMode: input.expertMode } : {}),
+    ...(input.onStreamDelta ? { onStreamDelta: input.onStreamDelta } : {}),
+    ...(input.onProgress ? { onProgress: input.onProgress } : {}),
+  });
+}
+
 describe('extractTargetUrl', () => {
-  it('extracts https URL', () => {
+  it('extracts http(s) and promotes www', () => {
     expect(extractTargetUrl('总结 https://example.com/article 这篇文章')).toBe(
       'https://example.com/article',
     );
-  });
-
-  it('extracts http URL', () => {
-    expect(extractTargetUrl('抓 http://blog.example.org')).toBe(
-      'http://blog.example.org',
-    );
-  });
-
-  it('promotes www-prefixed bare host to https', () => {
+    expect(extractTargetUrl('抓 http://blog.example.org')).toBe('http://blog.example.org');
     expect(extractTargetUrl('看一下 www.zhihu.com')).toBe('https://www.zhihu.com');
   });
 
-  it('returns null when no URL', () => {
+  it('strips punctuation and returns null without a URL', () => {
+    expect(extractTargetUrl('看 https://example.com/x，然后')).toBe('https://example.com/x');
     expect(extractTargetUrl('帮我翻译这段话')).toBeNull();
-  });
-
-  it('strips trailing punctuation from a URL', () => {
-    expect(extractTargetUrl('看 https://example.com/x.')).toBe('https://example.com/x');
-    expect(extractTargetUrl('打开 https://example.com/x，然后')).toBe('https://example.com/x');
   });
 });
 
 describe('extractSearchQuery', () => {
-  it('strips leading 搜索/查询/查找 verbs', () => {
-    expect(extractSearchQuery('搜索小红书上露营装备热门笔记')).toBe(
-      '小红书上露营装备热门笔记',
-    );
-    expect(extractSearchQuery('查询苹果最新财报')).toBe('苹果最新财报');
+  it('strips Chinese and English search verbs', () => {
+    expect(extractSearchQuery('搜索小红书上露营装备热门笔记')).toBe('小红书上露营装备热门笔记');
+    expect(extractSearchQuery('look up github trending')).toBe('github trending');
   });
 
-  it('strips English search verbs', () => {
-    expect(extractSearchQuery('search for iPhone 16 prices')).toMatch(/iphone 16 prices/i);
-    expect(extractSearchQuery('look up github trending')).toMatch(/github trending/i);
-  });
-
-  it('keeps the intent intact when no verb matches', () => {
+  it('keeps plain intent, caps length and handles empty input', () => {
     expect(extractSearchQuery('AI Agent 在国内的应用')).toBe('AI Agent 在国内的应用');
-  });
-
-  it('truncates at 200 chars', () => {
-    const long = 'a'.repeat(500);
-    expect(extractSearchQuery(long).length).toBeLessThanOrEqual(200);
-  });
-
-  it('returns empty string for empty input', () => {
+    expect(extractSearchQuery('a'.repeat(500))).toHaveLength(200);
     expect(extractSearchQuery('   ')).toBe('');
   });
 });
 
-describe('runScrapeTask — happy paths', () => {
-  // Phase 24 RC follow-up — runner switched messages.create →
-  // messages.stream. Mock returns an EventEmitter-like stream with
-  // .on('text', cb) for delta subscription and .finalMessage() for
-  // the canonical response.
-  function makeAnthropic(textOut: string): {
-    client: { messages: { stream: ReturnType<typeof vi.fn> } };
-    stream: ReturnType<typeof vi.fn>;
-  } {
-    const stream = vi.fn(() => {
-      const listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
-      const finalPromise = Promise.resolve().then(() => {
-        const subs = listeners['text'] ?? [];
-        for (const fn of subs) fn(textOut, textOut);
-        return {
-          content: [{ type: 'text', text: textOut }],
-          stop_reason: 'end_turn',
-          usage: { input_tokens: 100, output_tokens: 200 },
-        };
-      });
-      return {
-        on(event: string, fn: (...args: unknown[]) => void) {
-          (listeners[event] ??= []).push(fn);
-          return this;
-        },
-        finalMessage() {
-          return finalPromise;
-        },
-      };
-    });
-    return { client: { messages: { stream } }, stream };
-  }
-
-  it('routes a URL intent through firecrawl.scrape', async () => {
-    const firecrawl: FirecrawlLane = {
-      scrape: vi.fn(async () => ({
-        ok: true as const,
-        markdown: '# Article\n\nKey insight.',
-        url: 'https://example.com/article',
-        title: 'Article',
-      })),
-      search: vi.fn(),
-    };
-    const { client } = makeAnthropic('## Summary\n\nThe article says X.');
-    const out = await runScrapeTask({
-      taskId: 'tsk_a',
-      userId: 'u',
-      intent: '总结 https://example.com/article 这篇文章',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      client: client as any,
+describe('runScrapeTask — Qwen synthesis', () => {
+  it('routes a URL through Firecrawl scrape and streams the result', async () => {
+    const firecrawl = scrapeLane();
+    const deltas: string[] = [];
+    const progress: string[] = [];
+    const outcome = await run({
       firecrawl,
-      logger: fakeLogger(),
+      onStreamDelta: (delta) => deltas.push(delta),
+      onProgress: (message) => progress.push(message),
     });
 
-    expect(out.status).toBe('completed');
-    if (out.status === 'completed') expect(out.summary).toMatch(/article says X/i);
     expect(firecrawl.scrape).toHaveBeenCalledWith('https://example.com/article');
     expect(firecrawl.search).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({
+      status: 'completed',
+      summary: '整理后的结果',
+      sources: ['https://example.com/article'],
+      inputTokens: 100,
+      outputTokens: 200,
+    });
+    expect(deltas).toEqual(['整理后的结果']);
+    expect(progress).toEqual(['正在抓取网页数据…', '正在分析整理…']);
   });
 
-  it('routes a non-URL intent through firecrawl.search', async () => {
-    const firecrawl: FirecrawlLane = {
-      scrape: vi.fn(),
-      search: vi.fn(async () => ({
-        ok: true as const,
-        results: [
-          {
-            url: 'https://news.example.com/a',
-            markdown: '# News A',
-            title: 'News A',
-          },
-        ],
-      })),
-    };
-    const { client } = makeAnthropic('## Found 1 result.');
-    const out = await runScrapeTask({
-      taskId: 'tsk_b',
-      userId: 'u',
+  it('routes a non-URL intent through Firecrawl search', async () => {
+    const firecrawl = scrapeLane();
+    const outcome = await run({
       intent: '搜索小红书上露营装备热门笔记',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      client: client as any,
       firecrawl,
-      logger: fakeLogger(),
     });
-
-    expect(out.status).toBe('completed');
     expect(firecrawl.scrape).not.toHaveBeenCalled();
-    expect(firecrawl.search).toHaveBeenCalled();
-    const searchCall = (firecrawl.search as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
-    // Query should NOT contain the leading verb 搜索
-    expect(String(searchCall[0])).not.toMatch(/^搜索/);
+    expect(firecrawl.search).toHaveBeenCalledWith('小红书上露营装备热门笔记', {
+      limit: 5,
+    });
+    expect(outcome.sources).toEqual(['https://news.example.com/a']);
   });
 
-  it('keeps forced expert quality instructions in the scrape synthesis prompt', async () => {
-    const firecrawl: FirecrawlLane = {
-      scrape: vi.fn(),
-      search: vi.fn(async () => ({
-        ok: true as const,
-        results: [{ url: 'https://example.com/a', markdown: '# Source' }],
-      })),
-    };
-    const { client, stream } = makeAnthropic('研究结果');
-    await runScrapeTask({
-      taskId: 'tsk_expert_scrape',
-      userId: 'u',
-      intent: '研究 SaaS landing page 转化趋势',
-      expertMode: 'expert',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      client: client as any,
-      firecrawl,
-      logger: fakeLogger(),
+  it('disables provider tools and keeps provider prose URLs out of evidence', async () => {
+    const adapter = makeAdapter({
+      text: '摘要里出现 https://invented.test，但它不是证据。',
+      sources: [
+        {
+          title: 'Provider source',
+          url: 'https://provider.example/untracked',
+          provenance: 'web_search',
+        },
+      ],
     });
+    const outcome = await run({ adapter });
+    expect(vi.mocked(adapter.stream).mock.calls[0]?.[0]).toMatchObject({ tools: [] });
+    expect(outcome.sources).toEqual(['https://example.com/article']);
+    expect(outcome.sources).not.toContain('https://provider.example/untracked');
+    expect(outcome.sources).not.toContain('https://invented.test');
+  });
 
-    const req = stream.mock.calls[0]?.[0] as { system?: Array<{ text: string }> } | undefined;
-    expect(req?.system?.[0]?.text).toContain('专家模式质量合同');
+  it('passes bounded Firecrawl context and the expert quality contract', async () => {
+    const adapter = makeAdapter();
+    await run({ adapter, expertMode: 'expert' });
+    const request = vi.mocked(adapter.stream).mock.calls[0]?.[0];
+    expect(request?.instructions).toContain('专家模式质量合同');
+    expect(JSON.stringify(request?.input)).toContain('Observed content');
+    expect(request?.maxOutputTokens).toBe(8192);
+  });
+
+  it('adds a visible notice to an incomplete response', async () => {
+    const outcome = await run({ adapter: makeAdapter({ text: '部分结果', status: 'incomplete' }) });
+    expect(outcome.status).toBe('completed');
+    expect(outcome.summary).toContain('内容因长度限制被截断');
+  });
+
+  it('returns a fixed error for empty Qwen output', async () => {
+    const outcome = await run({ adapter: makeAdapter({ text: '' }) });
+    expect(outcome).toMatchObject({ status: 'failed', reason: 'AI 没有生成内容，请重试。' });
+    expect(outcome.sources).toEqual(['https://example.com/article']);
+  });
+
+  it('sanitizes provider failures', async () => {
+    const outcome = await run({ adapter: makeAdapter({ error: new Error('secret endpoint') }) });
+    expect(outcome.reason).toBe('内容整理服务暂时不可用，请稍后重试。');
+    expect(outcome.reason).not.toContain('secret endpoint');
+  });
+
+  it('aborts a hanging synthesis at the task timeout', async () => {
+    const outcome = await run({ adapter: makeAdapter({ hang: true }), timeoutMs: 10 });
+    expect(outcome.status).toBe('failed');
+    expect(outcome.reason).toContain('生成超时');
   });
 });
 
-describe('runScrapeTask — failure surfacing', () => {
-  it('surfaces firecrawl error as failed outcome', async () => {
-    const firecrawl: FirecrawlLane = {
-      scrape: vi.fn(async () => ({
-        ok: false as const,
-        error: 'firecrawl: api key not configured (FIRECRAWL_API_KEY empty)',
-      })),
-      search: vi.fn(),
-    };
-    const stream = vi.fn();
-    const out = await runScrapeTask({
-      taskId: 'tsk_x',
-      userId: 'u',
-      intent: '总结 https://example.com 这篇',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      client: { messages: { stream } } as any,
-      firecrawl,
-      logger: fakeLogger(),
+describe('runScrapeTask — Firecrawl failures', () => {
+  it('sanitizes a scrape error and never calls Qwen', async () => {
+    const adapter = makeAdapter();
+    const firecrawl = scrapeLane({
+      scrape: vi.fn(async () => ({ ok: false as const, error: 'secret key missing' })),
     });
-
-    expect(out.status).toBe('failed');
-    if (out.status === 'failed') expect(out.reason).toMatch(/firecrawl|api key/i);
-    expect(stream).not.toHaveBeenCalled();
+    const outcome = await run({ adapter, firecrawl });
+    expect(outcome).toMatchObject({ status: 'failed', reason: '网页抓取失败，请稍后重试。' });
+    expect(adapter.stream).not.toHaveBeenCalled();
   });
 
-  it('failed when firecrawl.search returns no results', async () => {
-    const firecrawl: FirecrawlLane = {
-      scrape: vi.fn(),
+  it('returns a clear result when search has no matches', async () => {
+    const adapter = makeAdapter();
+    const firecrawl = scrapeLane({
       search: vi.fn(async () => ({ ok: true as const, results: [] })),
-    };
-    const stream = vi.fn();
-    const out = await runScrapeTask({
-      taskId: 'tsk_y',
-      userId: 'u',
-      intent: '查找绝对没有结果的偏门关键词',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      client: { messages: { stream } } as any,
-      firecrawl,
-      logger: fakeLogger(),
     });
+    const outcome = await run({
+      intent: '查找绝对没有结果的偏门关键词',
+      adapter,
+      firecrawl,
+    });
+    expect(outcome).toMatchObject({ status: 'failed', reason: '搜索没有结果，换个关键词试试。' });
+    expect(adapter.stream).not.toHaveBeenCalled();
+  });
 
-    expect(out.status).toBe('failed');
-    if (out.status === 'failed') expect(out.reason).toMatch(/没有结果|no results/i);
-    expect(stream).not.toHaveBeenCalled();
+  it('rejects an empty search query before calling dependencies', async () => {
+    const adapter = makeAdapter();
+    const firecrawl = scrapeLane();
+    const outcome = await run({ intent: '搜索', adapter, firecrawl });
+    expect(outcome).toMatchObject({ status: 'failed', reason: '请输入要搜索的内容。' });
+    expect(firecrawl.search).not.toHaveBeenCalled();
+    expect(adapter.stream).not.toHaveBeenCalled();
   });
 });

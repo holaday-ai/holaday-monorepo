@@ -4,15 +4,20 @@ import { useAppShellContext } from '@/components/AppShell';
 import { BrowserPanel } from '@/components/BrowserPanel';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { MainPanel } from '@/components/MainPanel';
+import { ModelDataRegionDialog } from '@/components/ModelDataRegionDialog';
 import { ResizeHandle } from '@/components/ResizeHandle';
 import {
   clearComposerOnSubmitSuccess,
   keepComposerOnSubmitFailure,
+  type ComposerSubmitResult,
 } from '@/components/composer-submit';
 import { useToast } from '@/components/ui/toast';
 import { useSidebar } from '@/components/ui/sidebar';
 import { hdDebug } from '@/lib/hd-debug';
 import { taskActionError } from '@/lib/error-copy';
+import { useRegionGatedTaskSubmit } from '@/hooks/useRegionGatedTaskSubmit';
+import type { ModelDataRegion } from '@/lib/model-data-region-state';
+import { trpc } from '@/lib/trpc';
 import {
   clampInlineBrowserPanelWidth,
   estimateInlineBrowserPanelWidth,
@@ -54,6 +59,14 @@ import type { UiSkillSelection, UiTask } from '@/types/task';
 
 type UiTaskAwaitingKind = NonNullable<UiTask['awaitingKind']> | undefined;
 
+interface FreshTaskSubmitPayload {
+  readonly intent: string;
+  readonly fileIds: string[];
+  readonly mode?: 'auto' | 'plan';
+  readonly expertMode?: 'normal' | 'expert' | 'auto';
+  readonly skillSelection?: UiSkillSelection;
+}
+
 /**
  * Inner workbench content. Mounted as the `/` outlet of AppShell so
  * it inherits the unified Sidebar + shared modals + bootstrap +
@@ -75,6 +88,7 @@ export function WorkbenchApp(): JSX.Element {
   const toast = useToast();
   const {
     me,
+    refreshMe,
     browserWorkbenchOpen,
     openBrowserWorkbench,
     closeBrowserWorkbench,
@@ -361,6 +375,52 @@ export function WorkbenchApp(): JSX.Element {
     },
     [createTaskRaw, pickCurrentViewportProfile],
   );
+
+  const submitFreshTask = React.useCallback(
+    async ({
+      intent,
+      fileIds,
+      mode,
+      expertMode,
+      skillSelection,
+    }: FreshTaskSubmitPayload): Promise<ComposerSubmitResult> => {
+      const res = await createTask(
+        intent,
+        fileIds,
+        undefined,
+        mode,
+        expertMode,
+        undefined,
+        undefined,
+        skillSelection,
+      );
+      if ('error' in res) {
+        const codeRejected =
+          res.error.includes('HOLA DAY 专注浏览器任务') ||
+          res.error.includes('代码开发请用') ||
+          res.error.includes('Claude Code 或 Cursor');
+        if (codeRejected) {
+          toast.show(
+            'HOLA DAY 专注浏览器任务执行（搜索、填表、数据采集等）。代码开发建议使用 Claude Code 或 Cursor。',
+          );
+        } else {
+          toast.show(taskActionError('发送失败', res.error), 'error');
+        }
+        return keepComposerOnSubmitFailure;
+      }
+      return clearComposerOnSubmitSuccess;
+    },
+    [createTask, toast],
+  );
+  const assignModelDataRegion = React.useCallback(async (region: ModelDataRegion) => {
+    await trpc.auth.assignModelDataRegion.mutate({ region });
+  }, []);
+  const regionGatedSubmit = useRegionGatedTaskSubmit({
+    region: me?.modelDataRegion ?? null,
+    assignRegion: assignModelDataRegion,
+    refreshMe,
+    submit: submitFreshTask,
+  });
   const replyToTask = useTaskStore((s) => s.replyToTask);
   const awaitingUserByTask = useTaskStore((s) => s.awaitingUserByTask);
   const userRepliesByTask = useTaskStore((s) => s.userRepliesByTask);
@@ -705,31 +765,16 @@ export function WorkbenchApp(): JSX.Element {
               );
               return clearComposerOnSubmitSuccess;
             }
-            const res = await createTask(
+            const decision = await regionGatedSubmit.requestSubmit({
               intent,
               fileIds,
-              undefined,
               mode,
               expertMode,
-              undefined,
-              undefined,
               skillSelection,
-            );
-            if ('error' in res) {
-              const codeRejected =
-                res.error.includes('HOLA DAY 专注浏览器任务') ||
-                res.error.includes('代码开发请用') ||
-                res.error.includes('Claude Code 或 Cursor');
-              if (codeRejected) {
-                toast.show(
-                  'HOLA DAY 专注浏览器任务执行（搜索、填表、数据采集等）。代码开发建议使用 Claude Code 或 Cursor。',
-                );
-              } else {
-                toast.show(taskActionError('发送失败', res.error), 'error');
-              }
-              return keepComposerOnSubmitFailure;
-            }
-            return clearComposerOnSubmitSuccess;
+            });
+            return decision.kind === 'submitted'
+              ? decision.result
+              : keepComposerOnSubmitFailure;
           }}
           onOpenSidebar={() => setOpenMobile(true)}
           sidePanelMode={toolbarSidePanelMode}
@@ -872,6 +917,16 @@ export function WorkbenchApp(): JSX.Element {
         />
         </div>
       )}
+
+      <ModelDataRegionDialog
+        open={regionGatedSubmit.dialogOpen}
+        assigning={regionGatedSubmit.assigning}
+        error={regionGatedSubmit.error}
+        onClose={regionGatedSubmit.closeDialog}
+        onConfirm={async (region) => {
+          await regionGatedSubmit.confirmRegion(region);
+        }}
+      />
 
       <ConfirmDialog
         open={confirmRebuildTask !== null}

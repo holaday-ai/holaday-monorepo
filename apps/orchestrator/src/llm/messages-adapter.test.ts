@@ -1,10 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it, vi } from 'vitest';
+import { createAnthropicMessagesAdapter } from './dormant/anthropic-messages-adapter.js';
 import {
   type AnthropicCompatibleClient,
   MessagesAdapterError,
   createAnthropicCompatibleMessagesAdapter,
-  createAnthropicMessagesAdapter,
   createQwenMessagesAdapter,
 } from './messages-adapter.js';
 import type { QwenRuntimeEnvironment } from './qwen-route.js';
@@ -16,15 +16,20 @@ const QWEN_ENVIRONMENT: QwenRuntimeEnvironment & {
   DASHSCOPE_WORKSPACE_ID: 'legacy-workspace',
   DASHSCOPE_INTL_API_KEY: 'intl-key',
   DASHSCOPE_INTL_ANTHROPIC_BASE_URL: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
+  DASHSCOPE_INTL_RESPONSES_BASE_URL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
   DASHSCOPE_INTL_WORKSPACE_ID: 'intl-workspace',
   DASHSCOPE_CN_API_KEY: 'cn-key',
   DASHSCOPE_CN_ANTHROPIC_BASE_URL: 'https://dashscope.aliyuncs.com/apps/anthropic',
+  DASHSCOPE_CN_RESPONSES_BASE_URL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   DASHSCOPE_CN_WORKSPACE_ID: 'cn-workspace',
   QWEN_REASONING_MODEL: 'qwen3.8-max',
   QWEN_STANDARD_MODEL: 'qwen3.7-plus',
   QWEN_FAST_MODEL: 'qwen3.8-flash',
   QWEN_CODING_MODEL: 'qwen3-coder-plus',
   QWEN_VERIFIER_MODEL: 'qwen3.8-flash',
+  QWEN_VERIFY_FAST_MODEL: 'qwen3.8-flash',
+  QWEN_VERIFY_STRICT_MODEL: 'qwen3.8-max',
+  QWEN_VISION_MODEL: 'qwen3.8-max',
   QWEN_MESSAGES_ADAPTER_ENABLED: false,
 };
 
@@ -196,6 +201,7 @@ describe('createAnthropicCompatibleMessagesAdapter', () => {
         region: 'intl',
         deploymentScope: 'international',
         endpointKind: 'public',
+        protocol: 'messages',
       },
     });
 
@@ -237,6 +243,7 @@ describe('createAnthropicCompatibleMessagesAdapter', () => {
           region: 'intl',
           deploymentScope: 'international',
           endpointKind: 'public',
+          protocol: 'messages',
         },
       });
 
@@ -434,6 +441,7 @@ describe('createQwenMessagesAdapter', () => {
       deploymentScope: 'international',
       model: 'qwen3.8-max',
       endpointKind: 'public',
+      protocol: 'messages',
     });
     expect(JSON.stringify(result)).not.toContain('intl-key');
     expect(JSON.stringify(result)).not.toContain('dashscope-intl.aliyuncs.com');
@@ -442,6 +450,39 @@ describe('createQwenMessagesAdapter', () => {
       model: 'qwen3.8-max',
       thinking: { type: 'disabled' },
     });
+  });
+
+  it('uses the fetch-based Qwen transport when no test client factory is supplied', async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: 'msg_qwen_fetch',
+            model: 'qwen3.8-flash',
+            content: [{ type: 'text', text: 'native transport' }],
+            stop_reason: 'end_turn',
+            usage: { input_tokens: 2, output_tokens: 2 },
+          }),
+          { status: 200 },
+        ),
+    );
+    const adapter = createQwenMessagesAdapter({
+      environment: { ...QWEN_ENVIRONMENT, QWEN_MESSAGES_ADAPTER_ENABLED: true },
+      region: 'intl',
+      purpose: 'fast',
+      fetchImpl,
+    });
+
+    await expect(
+      adapter.create({
+        maxTokens: 32,
+        messages: [{ role: 'user', content: 'synthetic input' }],
+      }),
+    ).resolves.toMatchObject({
+      id: 'msg_qwen_fetch',
+      content: [{ type: 'text', text: 'native transport' }],
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it.each(['qwen3-coder-plus', 'custom-qwen-no-thinking'])(

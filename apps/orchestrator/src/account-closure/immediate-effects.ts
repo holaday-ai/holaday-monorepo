@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull } from 'drizzle-orm';
-import { supercarAbort } from '../agent/supercar/agent-loop.js';
+import { supercarAbort } from '../agent/supercar/qwen-only-agent-loop.js';
 import { cancelUserTasksForAccountClosure } from '../agent/task-repository.js';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';

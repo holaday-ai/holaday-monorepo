@@ -78,6 +78,7 @@ const AUTH_ME = {
   videoEnabled: false,
   teamProjectsEnabled: true,
   teamTaskLifecycleEnabled: false,
+  modelDataRegion: null,
 } satisfies RouterOutputs['auth']['me'];
 
 const PERSONAL_PROJECT = {
@@ -95,6 +96,7 @@ const ORGANIZATION = {
   role: 'owner',
   managerDisplayName: null,
   activeMemberCount: 1,
+  modelDataRegion: null,
 } satisfies RouterOutputs['organizations']['list'][number];
 
 const TEAM_PROJECT = {

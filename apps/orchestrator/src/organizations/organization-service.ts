@@ -441,6 +441,7 @@ function buildOrganizationListQuery(db: Pick<DB, 'select'>, actorUserId: number)
       organizationExternalId: organizations.externalId,
       organizationName: organizations.name,
       teamProjectsEnabled: organizations.teamProjectsEnabled,
+      modelDataRegion: organizations.modelDataRegion,
       role: organizationMembers.role,
       managerDisplayName: managerUsers.displayName,
     })
@@ -498,6 +499,7 @@ export async function listOrganizationsForUser(input: OrganizationListInput) {
     managerDisplayName: membership.managerDisplayName,
     activeMemberCount: countsByOrganizationId.get(membership.organizationId) ?? 0,
     teamProjectsEnabled: membership.teamProjectsEnabled,
+    modelDataRegion: membership.modelDataRegion,
   }));
 }
 

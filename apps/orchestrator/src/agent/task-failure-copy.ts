@@ -1,4 +1,12 @@
 import { friendlyBrowserFailureReason } from './browser-failure-copy.js';
+import {
+  MODEL_TASK_FAILURE_COPY,
+  type ModelTaskUnavailableReason,
+} from '../llm/model-runtime-wiring.js';
+
+export function modelTaskFailureReason(reason: ModelTaskUnavailableReason): string {
+  return MODEL_TASK_FAILURE_COPY[reason];
+}
 
 export function friendlyTaskFailureReason(
   status: string,

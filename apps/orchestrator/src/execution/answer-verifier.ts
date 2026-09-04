@@ -62,6 +62,8 @@ export interface VerificationResult {
   taskId: string;
   passed: boolean;
   tier: 'deterministic' | 'llm';
+  /** Explicit outcome of the optional semantic layer; never implies a pass. */
+  semanticStatus?: 'pass' | 'warn' | 'reject' | 'unavailable';
   checks: CheckResult[];
   failureLevel?: FailureLevel;
   suggestedFix?: string;

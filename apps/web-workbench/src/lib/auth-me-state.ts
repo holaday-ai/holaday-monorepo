@@ -12,6 +12,7 @@ export interface NormalizedAuthMeProfile {
   readonly videoEnabled: boolean;
   readonly teamProjectsEnabled: boolean;
   readonly teamTaskLifecycleEnabled: boolean;
+  readonly modelDataRegion: 'cn' | 'intl' | null;
 }
 
 export function normalizeAuthMeProfile(value: unknown): NormalizedAuthMeProfile {
@@ -28,6 +29,10 @@ export function normalizeAuthMeProfile(value: unknown): NormalizedAuthMeProfile 
     videoEnabled: Boolean(raw.videoEnabled),
     teamProjectsEnabled: raw.teamProjectsEnabled === true,
     teamTaskLifecycleEnabled: raw.teamTaskLifecycleEnabled === true,
+    modelDataRegion:
+      raw.modelDataRegion === 'cn' || raw.modelDataRegion === 'intl'
+        ? raw.modelDataRegion
+        : null,
   };
 }
 

@@ -205,6 +205,7 @@ rollback() {
   rollback_output=$(run_with_retry "Vultr rollback build" \
     "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
       cd /opt/holaday-monorepo && \
+      git show '$target:apps/orchestrator/src/config/env.ts' | grep -Fq 'MODEL_RUNTIME_POLICY must be qwen_only in production' && \
       git reset --hard '$target' && \
       pnpm --filter @holaday/orchestrator clean && \
       pnpm --filter @holaday/orchestrator build" 2>&1)
@@ -256,7 +257,9 @@ if ! [[ "$PREV_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
 fi
 run_with_retry "Vultr rollback-head validation" \
   "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "cd /opt/holaday-monorepo && git cat-file -e '$PREV_HEAD^{commit}'"
+  "cd /opt/holaday-monorepo && \
+   git cat-file -e '$PREV_HEAD^{commit}' && \
+   git show '$PREV_HEAD:apps/orchestrator/src/config/env.ts' | grep -Fq 'MODEL_RUNTIME_POLICY must be qwen_only in production'"
 echo "   prev HEAD (LIVE): ${PREV_HEAD:-unknown}"
 
 # ── Pre-reset safety gate — SESSION_STATUS hard rule 7 (2026-06-13) ──────
@@ -381,12 +384,15 @@ echo "✅ Orchestrator deployed — restart count: $RESTART"
 # (not just the .env file). A plain `pm2 restart` reuses pm2's cached env
 # and silently drops a newly-added key — hence the --update-env above +
 # this guard. We only print key NAMES that have a non-empty value (never
-# the secret). Failure rolls back rather than leaving the image lane
-# keyless (image intents would silently degrade to generate).
-REQUIRED_PROCESS_KEYS="${DEPLOY_REQUIRED_PROCESS_KEYS:-GEMINI_API_KEY ANTHROPIC_API_KEY DASHSCOPE_API_KEY}"
+# the secret). Failure rolls back rather than leaving a Qwen core lane
+# without its required policy, rollout, endpoint, or credential contract.
+REQUIRED_PROCESS_KEYS="${DEPLOY_REQUIRED_PROCESS_KEYS:-MODEL_RUNTIME_POLICY QWEN_CORE_ROLLOUT_MODE QWEN_CORE_ENABLED_LANES DASHSCOPE_INTL_API_KEY DASHSCOPE_INTL_ANTHROPIC_BASE_URL DASHSCOPE_INTL_RESPONSES_BASE_URL}"
 echo "→ Verifying keys loaded in process: $REQUIRED_PROCESS_KEYS"
 if ! PROC_KEYS=$(run_with_retry "Vultr key-check" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-    "PID=\$(pm2 pid holaday-orchestrator | head -1); tr '\\0' '\\n' < /proc/\$PID/environ 2>/dev/null | grep -oE '^[A-Z_]+=.' | grep -oE '^[A-Z_]+'" | tr -d '\r'); then
+    "PID=\$(pm2 pid holaday-orchestrator | head -1); \
+     ENV_LINES=\$(tr '\\0' '\\n' < /proc/\$PID/environ 2>/dev/null); \
+     echo \"\$ENV_LINES\" | grep -qx 'MODEL_RUNTIME_POLICY=qwen_only' && \
+     echo \"\$ENV_LINES\" | grep -oE '^[A-Z_]+=.' | grep -oE '^[A-Z_]+'" | tr -d '\r'); then
   abort_with_rollback "process key verification failed"
 fi
 KEY_MISS=""

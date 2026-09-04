@@ -458,6 +458,7 @@ describe('organization service', () => {
           organizationExternalId: 'org_design',
           organizationName: 'Design team',
           teamProjectsEnabled: true,
+          modelDataRegion: 'intl',
           role: 'manager',
           managerDisplayName: 'Ada',
         },
@@ -475,6 +476,7 @@ describe('organization service', () => {
         managerDisplayName: 'Ada',
         activeMemberCount: 3,
         teamProjectsEnabled: true,
+        modelDataRegion: 'intl',
       },
     ]);
   });

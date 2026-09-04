@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { type VideoEditPlannerClient, planVideoEditInstruction } from './instruction-planner.js';
+import type { MessagesAdapter } from '../llm/messages-adapter.js';
+import {
+  type VideoEditPlannerClient,
+  createQwenVideoEditPlannerClient,
+  planVideoEditInstruction,
+} from './instruction-planner.js';
 import type { VideoEditDocument } from './types.js';
 
 const DOCUMENT: VideoEditDocument = {
@@ -52,6 +57,59 @@ function planWith(instruction: string, plannerClient: VideoEditPlannerClient) {
 }
 
 describe('video edit instruction planner', () => {
+  it('uses a forced JSON-only Qwen request and validates the result server-side', async () => {
+    const create = vi.fn(async () => ({
+      id: 'msg_plan',
+      metadata: {
+        provider: 'alibaba-model-studio' as const,
+        region: 'cn' as const,
+        deploymentScope: 'china_mainland' as const,
+        model: 'qwen3.8-flash',
+        endpointKind: 'public' as const,
+        protocol: 'messages' as const,
+      },
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify({
+            summary: '裁掉第二段开头一秒',
+            operations: [{ kind: 'trim', sceneId: 'scene_2', startMs: 1_000, endMs: 4_000 }],
+          }),
+        },
+      ],
+      stopReason: 'end_turn' as const,
+      usage: {
+        inputTokens: 10,
+        outputTokens: 10,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        complete: true,
+      },
+    }));
+    const messagesAdapter = {
+      metadata: (await create()).metadata,
+      create,
+    } satisfies MessagesAdapter;
+    create.mockClear();
+    const plannerClient = createQwenVideoEditPlannerClient({ messagesAdapter });
+
+    await expect(
+      planVideoEditInstruction({
+        instruction: '裁掉第二段开头一秒',
+        document: DOCUMENT,
+        sourceKind: 'generated',
+        client: plannerClient,
+      }),
+    ).resolves.toMatchObject({ status: 'ready' });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        temperature: 0,
+        thinking: { type: 'disabled' },
+      }),
+      expect.objectContaining({ timeoutMs: 12_000, maxRetries: 1 }),
+    );
+  });
+
   it('plans a bounded trim against the named scene', async () => {
     const plannerClient = client({
       summary: '删掉第 2 段开头 1 秒',

@@ -5,6 +5,13 @@ import { runTaskCreateIdempotently, stockTaskContextInput } from './tasks.js';
 const response = { taskId: 'tsk_once', status: 'executing' };
 
 describe('runTaskCreateIdempotently', () => {
+  it('keeps the production task router free of legacy model construction', () => {
+    const source = readFileSync(new URL('./tasks.ts', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/new\s+Anthropic\s*\(/);
+    expect(source).not.toMatch(/new\s+OpenAI\s*\(/);
+    expect(source).not.toContain('anthropicForResolver');
+  });
+
   it('runs once and finalizes the claimed response', async () => {
     const run = vi.fn(async () => response);
     const finalize = vi.fn(async () => true);

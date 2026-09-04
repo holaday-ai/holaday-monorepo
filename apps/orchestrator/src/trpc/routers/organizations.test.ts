@@ -13,6 +13,7 @@ const {
   createInvitationMock,
   acceptInvitationMock,
   revokeInvitationMock,
+  assignOrganizationRegionMock,
 } = vi.hoisted(() => ({
   enabledForUser: vi.fn<(userId: string) => boolean>(),
   createOrganizationMock: vi.fn(),
@@ -24,7 +25,16 @@ const {
   createInvitationMock: vi.fn(),
   acceptInvitationMock: vi.fn(),
   revokeInvitationMock: vi.fn(),
+  assignOrganizationRegionMock: vi.fn(),
 }));
+
+vi.mock('../../llm/model-data-region-assignment.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../llm/model-data-region-assignment.js')>();
+  return {
+    ...actual,
+    assignOrganizationModelDataRegion: assignOrganizationRegionMock,
+  };
+});
 
 vi.mock('../../organizations/team-project-access.js', () => ({
   isTeamProjectsEnabledFor: enabledForUser,
@@ -115,6 +125,7 @@ function allDomainCalls() {
     createInvitationMock,
     acceptInvitationMock,
     revokeInvitationMock,
+    assignOrganizationRegionMock,
   ];
 }
 
@@ -147,6 +158,7 @@ describe('organizationsRouter', () => {
     });
     acceptInvitationMock.mockResolvedValue({ membershipId: 'omem_new', status: 'joined' });
     revokeInvitationMock.mockResolvedValue({ ok: true });
+    assignOrganizationRegionMock.mockResolvedValue({ region: 'intl', changed: true });
   });
 
   it('registers the organization list procedure on the root router', async () => {
@@ -175,6 +187,7 @@ describe('organizationsRouter', () => {
         role: 'admin',
       }),
       caller.deactivateMember({ organizationId: 'org_design', memberId: 'omem_member' }),
+      caller.assignModelDataRegion({ organizationId: 'org_design', region: 'intl' }),
     ];
 
     await Promise.all(actions.map(expectNotFound));
@@ -208,6 +221,9 @@ describe('organizationsRouter', () => {
     await expectNotFound(
       caller.deactivateMember({ organizationId: 'org_rolled_back', memberId: 'omem_member' }),
     );
+    await expectNotFound(
+      caller.assignModelDataRegion({ organizationId: 'org_rolled_back', region: 'intl' }),
+    );
 
     expect(listMembersMock).not.toHaveBeenCalled();
     expect(createInvitationMock).not.toHaveBeenCalled();
@@ -215,6 +231,7 @@ describe('organizationsRouter', () => {
     expect(updateReportingLineMock).not.toHaveBeenCalled();
     expect(updateMemberRoleMock).not.toHaveBeenCalled();
     expect(deactivateMemberMock).not.toHaveBeenCalled();
+    expect(assignOrganizationRegionMock).not.toHaveBeenCalled();
   });
 
   it('compiles the authoritative enabled-organization gate with exact predicates', () => {
@@ -265,6 +282,7 @@ describe('organizationsRouter', () => {
         managerDisplayName: 'Ada',
         activeMemberCount: 3,
         teamProjectsEnabled: true,
+        modelDataRegion: 'intl',
         ownerEmail: 'owner@example.test',
         internalOrganizationId: 9,
       },
@@ -303,6 +321,7 @@ describe('organizationsRouter', () => {
         role: 'admin',
         managerDisplayName: 'Ada',
         activeMemberCount: 3,
+        modelDataRegion: 'intl',
       },
     ]);
     await expect(caller.members({ organizationId: 'org_design' })).resolves.toEqual([
@@ -361,6 +380,35 @@ describe('organizationsRouter', () => {
     await expect(
       caller.deactivateMember({ organizationId: 'org_design', memberId: 'omem_member' }),
     ).resolves.toEqual({ ok: true });
+    await expect(
+      caller.assignModelDataRegion({ organizationId: 'org_design', region: 'intl' }),
+    ).resolves.toEqual({ region: 'intl', changed: true });
+    expect(assignOrganizationRegionMock).toHaveBeenCalledWith({
+      db: expect.anything(),
+      actorExternalId: 'usr_caller',
+      organizationExternalId: 'org_design',
+      region: 'intl',
+    });
+  });
+
+  it('maps organization region reassignment to conflict and permission denial to forbidden', async () => {
+    const { ModelDataRegionAssignmentError } = await import(
+      '../../llm/model-data-region-assignment.js'
+    );
+    const caller = makeCaller();
+    assignOrganizationRegionMock.mockRejectedValueOnce(
+      new ModelDataRegionAssignmentError('REGION_ALREADY_ASSIGNED'),
+    );
+    await expect(
+      caller.assignModelDataRegion({ organizationId: 'org_design', region: 'cn' }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+
+    assignOrganizationRegionMock.mockRejectedValueOnce(
+      new ModelDataRegionAssignmentError('PERMISSION_DENIED'),
+    );
+    await expect(
+      caller.assignModelDataRegion({ organizationId: 'org_design', region: 'cn' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
   it('maps established permission denial to forbidden and hidden service errors to not found', async () => {

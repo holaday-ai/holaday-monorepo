@@ -1,99 +1,96 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { resolvePlanProviderRoute } from './plan-provider.js';
 
 const BASE_ENVIRONMENT = {
-  ANTHROPIC_API_KEY: 'anthropic-key',
-  QWEN_MESSAGES_ADAPTER_ENABLED: false,
-  QWEN_PLAN_CANARY_ENABLED: false,
-  QWEN_PLAN_SYNTHETIC_ALLOWLIST: '',
+  NODE_ENV: 'test' as const,
+  MODEL_RUNTIME_POLICY: 'qwen_only' as const,
+  QWEN_CORE_ROLLOUT_MODE: 'synthetic' as const,
+  QWEN_CORE_ENABLED_LANES: 'plan',
+  QWEN_CORE_ALLOWLIST: 'usr_canary',
+  QWEN_MESSAGES_ADAPTER_ENABLED: true,
+  QWEN_RESPONSES_ADAPTER_ENABLED: true,
+  DASHSCOPE_API_KEY: '',
+  DASHSCOPE_WORKSPACE_ID: '',
+  DASHSCOPE_INTL_API_KEY: 'intl-key',
+  DASHSCOPE_INTL_ANTHROPIC_BASE_URL: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
+  DASHSCOPE_INTL_RESPONSES_BASE_URL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+  DASHSCOPE_INTL_WORKSPACE_ID: '',
+  DASHSCOPE_CN_API_KEY: 'cn-key',
+  DASHSCOPE_CN_ANTHROPIC_BASE_URL: 'https://dashscope.aliyuncs.com/apps/anthropic',
+  DASHSCOPE_CN_RESPONSES_BASE_URL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  DASHSCOPE_CN_WORKSPACE_ID: '',
+  QWEN_REASONING_MODEL: 'qwen3.8-max',
+  QWEN_STANDARD_MODEL: 'qwen3.7-plus',
+  QWEN_FAST_MODEL: 'qwen3.8-flash',
+  QWEN_CODING_MODEL: 'qwen3-coder-plus',
+  QWEN_VERIFIER_MODEL: 'qwen3.8-flash',
+  QWEN_VERIFY_FAST_MODEL: 'qwen3.8-flash',
+  QWEN_VERIFY_STRICT_MODEL: 'qwen3.8-max',
+  QWEN_VISION_MODEL: 'qwen3.8-max',
 };
 
+function buildAdapter(region: 'cn' | 'intl'): MessagesAdapter {
+  const metadata = {
+    provider: 'alibaba-model-studio' as const,
+    model: 'qwen3.7-plus',
+    region,
+    deploymentScope: region === 'cn' ? ('china_mainland' as const) : ('international' as const),
+    endpointKind: 'public' as const,
+    protocol: 'messages' as const,
+  };
+  return { metadata, create: vi.fn() };
+}
+
 describe('resolvePlanProviderRoute', () => {
-  it('preserves the Anthropic planner while the plan canary is disabled', () => {
+  it('never returns Anthropic when the Qwen rollout excludes the actor', () => {
+    const environment = { ...BASE_ENVIRONMENT, ANTHROPIC_API_KEY: 'legacy-key-must-be-ignored' };
     expect(
       resolvePlanProviderRoute({
-        environment: BASE_ENVIRONMENT,
-        userExternalId: 'usr_existing',
+        environment,
+        userExternalId: 'usr_excluded',
         userModelDataRegion: 'intl',
       }),
-    ).toEqual({ provider: 'anthropic', model: 'claude-sonnet-4-6' });
+    ).toEqual({ provider: 'unavailable', reason: 'ROLLOUT_NOT_ALLOWED' });
   });
 
-  it.each([
-    ['intl', 'international'],
-    ['cn', 'china_mainland'],
-  ] as const)(
-    'routes only an exact synthetic canary user to the persisted %s region',
-    (region, deploymentScope) => {
-      expect(
-        resolvePlanProviderRoute({
-          environment: {
-            ...BASE_ENVIRONMENT,
-            QWEN_MESSAGES_ADAPTER_ENABLED: true,
-            QWEN_PLAN_CANARY_ENABLED: true,
-            QWEN_PLAN_SYNTHETIC_ALLOWLIST: 'usr_other, usr_canary',
-          },
-          userExternalId: 'usr_canary',
-          userModelDataRegion: region,
-        }),
-      ).toEqual({ provider: 'qwen', region, deploymentScope, purpose: 'standard' });
-    },
-  );
+  it.each(['intl', 'cn'] as const)('uses standard Qwen Messages in the persisted %s region', (region) => {
+    const createMessages = vi.fn(() => buildAdapter(region));
+    const route = resolvePlanProviderRoute({
+      environment: BASE_ENVIRONMENT,
+      userExternalId: 'usr_canary',
+      userModelDataRegion: region,
+      createMessages,
+    });
 
-  it('treats an empty allowlist as zero Qwen plan users', () => {
-    expect(
-      resolvePlanProviderRoute({
-        environment: {
-          ...BASE_ENVIRONMENT,
-          QWEN_MESSAGES_ADAPTER_ENABLED: true,
-          QWEN_PLAN_CANARY_ENABLED: true,
-        },
-        userExternalId: 'usr_anyone',
-        userModelDataRegion: 'intl',
-      }),
-    ).toEqual({ provider: 'anthropic', model: 'claude-sonnet-4-6' });
+    expect(route).toMatchObject({ provider: 'qwen', region });
+    expect(createMessages).toHaveBeenCalledWith({
+      environment: BASE_ENVIRONMENT,
+      region,
+      purpose: 'standard',
+    });
   });
 
-  it('does not accept a partial allowlist match', () => {
+  it('returns the shared runtime reason when the plan lane is disabled', () => {
     expect(
       resolvePlanProviderRoute({
-        environment: {
-          ...BASE_ENVIRONMENT,
-          QWEN_MESSAGES_ADAPTER_ENABLED: true,
-          QWEN_PLAN_CANARY_ENABLED: true,
-          QWEN_PLAN_SYNTHETIC_ALLOWLIST: 'usr_canary_2',
-        },
+        environment: { ...BASE_ENVIRONMENT, QWEN_CORE_ENABLED_LANES: 'suggestions' },
         userExternalId: 'usr_canary',
         userModelDataRegion: 'intl',
       }),
-    ).toEqual({ provider: 'anthropic', model: 'claude-sonnet-4-6' });
+    ).toEqual({ provider: 'unavailable', reason: 'LANE_DISABLED' });
   });
 
   it.each([null, undefined, 'eu'])(
-    'fails closed for an active plan canary without a valid persisted region',
+    'fails closed without a valid persisted region: %s',
     (region) => {
       expect(
         resolvePlanProviderRoute({
-          environment: {
-            ...BASE_ENVIRONMENT,
-            QWEN_MESSAGES_ADAPTER_ENABLED: true,
-            QWEN_PLAN_CANARY_ENABLED: true,
-            QWEN_PLAN_SYNTHETIC_ALLOWLIST: 'usr_canary',
-          },
+          environment: BASE_ENVIRONMENT,
           userExternalId: 'usr_canary',
           userModelDataRegion: region,
         }),
-      ).toEqual({ provider: 'unavailable', reason: 'MODEL_DATA_REGION_UNAVAILABLE' });
+      ).toEqual({ provider: 'unavailable', reason: 'MODEL_DATA_REGION_UNASSIGNED' });
     },
   );
-
-  it('is unavailable when neither an eligible canary nor Anthropic is configured', () => {
-    expect(
-      resolvePlanProviderRoute({
-        environment: { ...BASE_ENVIRONMENT, ANTHROPIC_API_KEY: '' },
-        userExternalId: 'usr_existing',
-        userModelDataRegion: 'intl',
-      }),
-    ).toEqual({ provider: 'unavailable', reason: 'ANTHROPIC_UNAVAILABLE' });
-  });
 });
