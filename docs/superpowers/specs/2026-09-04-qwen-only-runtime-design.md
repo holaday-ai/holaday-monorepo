@@ -208,7 +208,7 @@ Supercar 不直接模拟 Anthropic beta 协议。迁移步骤为：
 - 支付、订单、额度、提现、账户关闭和 Partner Ledger。
 - 浏览器执行器、网络策略、确认门禁、EvidenceLedger 与确定性 verifier。
 
-发布契约扫描生产入口，禁止在 dormant 目录外新增旧供应商 SDK 实例或模型 API 请求。运行指标按 provider、region、purpose 和 outcome 聚合，不记录提示词、回复、附件、URL、用户 ID 或供应商原始错误。
+发布契约扫描生产入口，禁止在 dormant 目录外新增旧供应商 SDK 实例或模型 API 请求。新增的运行监控指标按 provider、region、purpose 和 outcome 聚合，不记录提示词、回复、附件、URL、用户 ID 或供应商原始错误。现有 `llm_calls` 计费归属表保持原有内部 user/task 外键，不在本项目修改其支付或额度语义；Qwen 写入只允许结构化 token、耗时、状态和经过白名单筛选的安全元数据，不得写入提示词、模型回复或供应商原始错误。
 
 ## 9. 工程拆分与顺序
 
