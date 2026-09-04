@@ -206,6 +206,7 @@ rollback() {
     "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
       cd /opt/holaday-monorepo && \
       git reset --hard '$target' && \
+      pnpm --filter @holaday/orchestrator clean && \
       pnpm --filter @holaday/orchestrator build" 2>&1)
   rollback_rc=$?
   set -e
@@ -327,6 +328,7 @@ echo "→ Installing + building"
 if ! run_with_retry "Vultr install/build" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
     cd /opt/holaday-monorepo && \
     pnpm install && \
+    pnpm --filter @holaday/orchestrator clean && \
     pnpm --filter @holaday/orchestrator build" 2>&1 | tail -5; then
   abort_with_rollback "install/build failed"
 fi
