@@ -58,8 +58,7 @@ export const DEFAULT_VERIFIER_FALLBACK_MODEL = 'gpt-4o-mini';
 export const DEFAULT_VERIFIER_FALLBACK_TIMEOUT_MS = 8_000;
 
 /**
- * Dedicated undici dispatcher — see `openai-response-layer.ts` for
- * the rationale. The orchestrator's long-running process shares
+ * Dedicated undici dispatcher. The orchestrator's long-running process shares
  * undici state with the Anthropic SDK + long-lived browser fetches;
  * we hit a reproducible "in-process OpenAI call times out at 30s
  * while a standalone Node + same env succeeds in ~1s" symptom that
@@ -139,9 +138,7 @@ export interface VerifierFallbackDeps {
 
 /**
  * Standalone flag check — callers gate integration on this before
- * even loading the module. Same shape as
- * `openai-response-layer.isResponseLayerEnabled` to keep ops mental
- * model uniform.
+ * even loading the module.
  */
 export function isVerifierFallbackEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const flag = (env.OPENAI_VERIFIER_FALLBACK_ENABLED ?? 'false').toLowerCase();
@@ -210,8 +207,7 @@ export async function verifyFallback(
       metadata: { model, latencyMs: 0, triggered: false, fallbackReason: 'no_trigger' },
     };
   }
-  // Codex P2 — same pattern as `openai-response-layer.ts`:
-  // dedicated dispatcher + maxRetries=0 so the 8s timeout from the
+  // Dedicated dispatcher + maxRetries=0 so the 8s timeout from the
   // spec actually bounds latency. Without these, the SDK's default
   // maxRetries=2 turned every fallback failure into a 24s wait,
   // contradicting the "non-blocking second opinion" design.

@@ -1,5 +1,4 @@
 import type { ServerMessage } from '@holaday/shared-types';
-import { isTaskTerminalStatus, type TaskTerminalStatus } from '../../task-status.js';
 
 export type SupercarTaskOutcomeStatus =
   | 'completed'
@@ -27,9 +26,7 @@ export function classifySupercarTaskStateTransition(input: {
     kind: 'waiting_user',
     awaitingKind: 'clarification',
     question:
-      normalizedText(input.question) ??
-      normalizedText(input.summary) ??
-      '请补充必要信息后继续。',
+      normalizedText(input.question) ?? normalizedText(input.summary) ?? '请补充必要信息后继续。',
   };
 }
 
@@ -40,16 +37,8 @@ export function shouldRunSupercarTerminalSideEffects(input: {
   return input.persisted && input.transition.kind === 'terminal';
 }
 
-export function shouldPersistSupercarTerminalOutcome(
-  status: SupercarTaskOutcomeStatus,
-): boolean {
+export function shouldPersistSupercarTerminalOutcome(status: SupercarTaskOutcomeStatus): boolean {
   return status !== 'awaiting_user';
-}
-
-export function supercarResponseLayerTerminalStatus(
-  status: string | null | undefined,
-): TaskTerminalStatus | null {
-  return isTaskTerminalStatus(status) ? status : null;
 }
 
 export function buildSupercarWaitingUserMessage(input: {

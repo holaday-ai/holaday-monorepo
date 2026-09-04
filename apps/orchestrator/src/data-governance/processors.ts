@@ -65,8 +65,8 @@ export const processors: readonly ProcessorDefinition[] = [
       evidence: [
         {
           kind: 'source_file',
-          path: 'apps/orchestrator/src/response-layer/openai-response-layer.ts',
-          fact: 'OpenAI 响应层由配置密钥启用。',
+          path: 'apps/orchestrator/src/response-layer/openai-verifier-fallback.ts',
+          fact: 'OpenAI 仅保留在独立开关控制的验证回退等专用调用点；自动响应润色层已下线。',
         },
       ],
     },
