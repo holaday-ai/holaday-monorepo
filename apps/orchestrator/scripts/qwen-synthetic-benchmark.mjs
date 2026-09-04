@@ -1,7 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
-const DEFAULT_ENDPOINT = 'https://dashscope-intl.aliyuncs.com/apps/anthropic';
+const DEFAULT_ENDPOINTS = Object.freeze({
+  intl: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
+  cn: 'https://dashscope.aliyuncs.com/apps/anthropic',
+});
 const CRITICAL_CASES = new Set([
   'planning_dependencies',
   'coding_boundary',
@@ -138,24 +141,18 @@ export const PROTOCOL_CASES = Object.freeze([
 
 export async function runQwenBenchmark({
   runtimeEnv,
+  region = 'intl',
   fetchImpl = fetch,
   cases,
   suite = 'baseline',
   now = Date.now,
   timeoutMs = 60_000,
 }) {
-  const apiKey = String(
-    runtimeEnv.DASHSCOPE_INTL_API_KEY || runtimeEnv.DASHSCOPE_API_KEY || '',
-  ).trim();
-  if (!apiKey) return blocked('missing_credentials');
-
-  const endpoint = normalizeSingaporeEndpoint(
-    runtimeEnv.DASHSCOPE_INTL_ANTHROPIC_BASE_URL || DEFAULT_ENDPOINT,
-  );
-  if (!endpoint) return blocked('invalid_endpoint');
-  const workspaceId = String(
-    runtimeEnv.DASHSCOPE_INTL_WORKSPACE_ID || runtimeEnv.DASHSCOPE_WORKSPACE_ID || '',
-  ).trim();
+  if (region !== 'intl' && region !== 'cn') return blocked(region, 'invalid_region');
+  const connection = resolveRegionConnection(runtimeEnv, region);
+  if (!connection.apiKey) return blocked(region, 'missing_credentials');
+  if (!connection.endpoint) return blocked(region, 'invalid_endpoint');
+  const { apiKey, endpoint, workspaceId } = connection;
 
   const selectedCases = cases ?? (suite === 'protocol' ? PROTOCOL_CASES : BENCHMARK_CASES);
   const results = [];
@@ -183,7 +180,7 @@ export async function runQwenBenchmark({
 
   return {
     status: 'completed',
-    region: 'intl',
+    region,
     gate:
       suite === 'protocol'
         ? classifyQwenProtocolBenchmark(scoringInput)
@@ -308,18 +305,45 @@ function failedCase(benchmarkCase, latencyMs, reason, usage = {}) {
   };
 }
 
-function blocked(reason) {
-  return { status: 'blocked', region: 'intl', reason };
+function blocked(region, reason) {
+  return { status: 'blocked', region, reason };
 }
 
-function normalizeSingaporeEndpoint(value) {
+function resolveRegionConnection(runtimeEnv, region) {
+  if (region === 'cn') {
+    return {
+      apiKey: String(runtimeEnv.DASHSCOPE_CN_API_KEY || '').trim(),
+      endpoint: normalizeRegionalEndpoint(
+        runtimeEnv.DASHSCOPE_CN_ANTHROPIC_BASE_URL || DEFAULT_ENDPOINTS.cn,
+        region,
+      ),
+      workspaceId: String(runtimeEnv.DASHSCOPE_CN_WORKSPACE_ID || '').trim(),
+    };
+  }
+  return {
+    apiKey: String(runtimeEnv.DASHSCOPE_INTL_API_KEY || runtimeEnv.DASHSCOPE_API_KEY || '').trim(),
+    endpoint: normalizeRegionalEndpoint(
+      runtimeEnv.DASHSCOPE_INTL_ANTHROPIC_BASE_URL || DEFAULT_ENDPOINTS.intl,
+      region,
+    ),
+    workspaceId: String(
+      runtimeEnv.DASHSCOPE_INTL_WORKSPACE_ID || runtimeEnv.DASHSCOPE_WORKSPACE_ID || '',
+    ).trim(),
+  };
+}
+
+function normalizeRegionalEndpoint(value, region) {
   try {
     const url = new URL(value);
     const path = url.pathname.replace(/\/$/, '');
-    const publicHost = url.hostname === 'dashscope-intl.aliyuncs.com';
+    const publicHost =
+      region === 'cn'
+        ? url.hostname === 'dashscope.aliyuncs.com'
+        : url.hostname === 'dashscope-intl.aliyuncs.com';
+    const dedicatedSuffix =
+      region === 'cn' ? '.cn-beijing.maas.aliyuncs.com' : '.ap-southeast-1.maas.aliyuncs.com';
     const dedicatedHost =
-      url.hostname.endsWith('.ap-southeast-1.maas.aliyuncs.com') &&
-      url.hostname.length > '.ap-southeast-1.maas.aliyuncs.com'.length;
+      url.hostname.endsWith(dedicatedSuffix) && url.hostname.length > dedicatedSuffix.length;
     if (
       url.protocol !== 'https:' ||
       url.username ||
@@ -497,14 +521,16 @@ if (process.argv.includes('--run')) {
   const runtimeEnv = processName ? readPm2Environment(processName) : process.env;
   const suite = process.argv.includes('--protocol') ? 'protocol' : 'baseline';
   const cases = process.argv.includes('--smoke') ? [BENCHMARK_CASES[0]] : undefined;
-  runQwenBenchmark({ runtimeEnv, cases, suite })
+  const regionIndex = process.argv.indexOf('--region');
+  const region = regionIndex >= 0 ? process.argv[regionIndex + 1] : 'intl';
+  runQwenBenchmark({ runtimeEnv, cases, suite, region })
     .then((report) => {
       process.stdout.write(`${JSON.stringify(report)}\n`);
       if (report.status !== 'completed' || report.gate === 'fail') process.exitCode = 1;
     })
     .catch(() => {
       process.stdout.write(
-        `${JSON.stringify({ status: 'blocked', region: 'intl', reason: 'runner_error' })}\n`,
+        `${JSON.stringify({ status: 'blocked', region, reason: 'runner_error' })}\n`,
       );
       process.exitCode = 1;
     });

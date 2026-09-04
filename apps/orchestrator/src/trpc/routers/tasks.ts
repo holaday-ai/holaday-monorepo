@@ -27,7 +27,7 @@ import {
   type ImageAttachment,
   type RunImageTaskResult,
   runImageTask,
-} from '../../agent/image/image-runner.js';
+} from '../../agent/image/qwen-only-image-runner.js';
 import { orderImageAttachmentIds } from '../../agent/image/image-input-order.js';
 import { createAnthropicSubjectConsistencyVerifier } from '../../agent/image/image-subject-verifier.js';
 import { classifyExecutionMode } from '../../agent/intent-classifier.js';
@@ -55,7 +55,7 @@ import {
   supercarHandoffToGenerate,
   supercarReply,
 } from '../../agent/supercar/index.js';
-import { MemoryService } from '../../agent/supercar/memory-service.js';
+import { MemoryService } from '../../agent/supercar/qwen-only-memory-service.js';
 import { generatePlanForUser } from '../../agent/supercar/plan-runner.js';
 import {
   parseOtaAllowlist,
@@ -142,7 +142,7 @@ import type { WanAnimateMixMode } from '../../agent/video/wan-animate-mix-client
 import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
 import type { PageLike, PlaywrightExecutor } from '../../agent/vision-loop/playwright-executor.js';
-import { startVisionLoopTask } from '../../agent/vision-loop/task-runner.js';
+import { startVisionLoopTask } from '../../agent/vision-loop/qwen-only-task-runner.js';
 import {
   BrowserSessionRestoreFlights,
   restorableBrowserTarget,
@@ -6567,22 +6567,10 @@ export const tasksRouter = router({
                 ctx.logger.warn({ err, taskId }, 'supercar: broadcast terminal failed');
               }
             }
-            // Phase 13 Dim 5 — memory extraction. Run only on completed tasks
-            // to avoid storing tips from partial / failed state. This remains
-            // on Anthropic until its own migration gate is designed.
+            // Cross-task memory extraction is paused until it has a dedicated
+            // Qwen implementation. Existing memories stay readable; production
+            // must not fall back to the dormant Anthropic extractor.
             if (terminalPersisted && outcome.status === 'completed' && outcome.summary) {
-              if (appEnv.ANTHROPIC_API_KEY) {
-                void memoryService
-                  .extractAndStore({
-                    apiKey: appEnv.ANTHROPIC_API_KEY,
-                    userIdInternal: userRow.id,
-                    intent: input.intent,
-                    summary: outcome.summary,
-                    taskId,
-                  })
-                  .catch((err) => ctx.logger.warn({ err, taskId }, 'memory: extract crashed'));
-              }
-
               // Post-task suggestions are Qwen-only. The shared runtime enforces
               // rollout, lane, persisted region and region-local credentials
               // before constructing a transport. There is no legacy fallback.
@@ -7892,13 +7880,15 @@ export const tasksRouter = router({
           },
         });
         try {
-        const { runSimpleVideoCreation } = await import('../../agent/video/video-lane-simple.js');
+        const { runSimpleVideoCreation } = await import(
+          '../../agent/video/qwen-only-video-runtime.js'
+        );
         const { runFfmpeg } = await import('../../agent/video/ffmpeg-exec.js');
         const { createAnthropicVideoQualityAnalyzer, verifyFinalVideoQuality } = await import(
           '../../agent/video/video-quality-verifier.js'
         );
         const { verifyAudioVisualSync } = await import(
-          '../../agent/video/video-av-sync-verifier.js'
+          '../../agent/video/qwen-only-video-runtime.js'
         );
         const { verifyCloneVideoCompatibility } = await import(
           '../../agent/video/video-clone-compatibility.js'
@@ -8040,7 +8030,9 @@ export const tasksRouter = router({
             let audioCoverage: VideoAudioVerificationCoverage = videoAudioVerificationCoverage();
           let audiovisualSyncReview: VideoAudioVisualSyncAudit | undefined;
           if (isClone) {
-            const { runCloneVideoCreation } = await import('../../agent/video/video-clone.js');
+            const { runCloneVideoCreation } = await import(
+              '../../agent/video/qwen-only-video-runtime.js'
+            );
             const petImageFileId = meta.petImageFileId;
             const referenceVideoFileId = meta.referenceVideoFileId;
             if (!petImageFileId || !referenceVideoFileId) {
@@ -8110,7 +8102,9 @@ export const tasksRouter = router({
             summary = '复刻视频已生成。';
           } else if (isPet) {
             // 宠物 i2v: fileId → presigned GET → i2v 单图 → pad+水印+静默 → store.
-            const { runPetVideoCreation } = await import('../../agent/video/video-pet-i2v.js');
+            const { runPetVideoCreation } = await import(
+              '../../agent/video/qwen-only-video-runtime.js'
+            );
             const petImageFileId = meta.petImageFileId;
             if (!petImageFileId) {
               throw new Error('宠物视频缺少宠物照片');
@@ -8132,7 +8126,9 @@ export const tasksRouter = router({
             summary = '宠物视频已生成。';
           } else if (isIp) {
             // IP 人物 B 架构: 克隆音(全文案)→ 1 次 fal 换口型(loop_mode 补够)→ 字幕+水印 → store.
-            const { runIpVideoCreation } = await import('../../agent/video/video-ip-lipsync.js');
+            const { runIpVideoCreation } = await import(
+              '../../agent/video/qwen-only-video-runtime.js'
+            );
             // 合规硬闸:确认时复核三件齐 + 本人授权(报价后、生成前可能已撤销/清除素材)。
             if (!ipVoiceId || !ipBaseFileId || !ipAuthorized) {
               throw new Error('IP 素材或授权缺失(可能已被清除),请重新完成 onboarding');

@@ -148,15 +148,14 @@ const baseEnvSchema = z.object({
   /**
    * Sprint #5 — Gemini image generation ("nano banana"). When set, the
    * 'image' execution lane can call Google's generateContent image API
-   * to satisfy 文生图 / 图生图 tasks. Empty string = the image lane
-   * fails with a clear "GEMINI_API_KEY not configured" reason instead
-   * of silently degrading. The orchestrator runs on Vultr (Singapore
-   * egress) so it reaches generativelanguage.googleapis.com directly;
-   * GEMINI_BASE_URL is overridable for a future gateway/proxy. Set on
-   * Vultr .env; keep in sync with the secret.
+   * to satisfy 文生图 / 图生图 tasks. The Qwen-only production graph
+   * never imports the legacy client. The orchestrator runs on Vultr
+   * (Singapore egress). A deliberately non-routable default prevents
+   * accidental use; future reactivation requires an explicit, reviewed
+   * endpoint.
    */
   GEMINI_API_KEY: z.string().optional().default(''),
-  GEMINI_BASE_URL: z.string().url().default('https://generativelanguage.googleapis.com'),
+  GEMINI_BASE_URL: z.string().url().default('https://disabled.invalid'),
   /**
    * Image model ids. Defaults from the BOSS sprint plan (2026-06):
    * NB2 = gemini-3.1-flash-image (fast default), NB Pro =
@@ -631,7 +630,9 @@ export const envSchema = baseEnvSchema
         code: z.ZodIssueCode.custom,
         path: ['QWEN_CORE_ENABLED_LANES'],
         message:
-          error instanceof Error ? error.message : 'QWEN_CORE_ENABLED_LANES contains an unknown lane',
+          error instanceof Error
+            ? error.message
+            : 'QWEN_CORE_ENABLED_LANES contains an unknown lane',
       });
     }
 
@@ -674,10 +675,12 @@ export const envSchema = baseEnvSchema
       ['DASHSCOPE_CN_RESPONSES_BASE_URL', 'cn', 'responses'],
     ] as const satisfies ReadonlyArray<
       [
-        | 'DASHSCOPE_INTL_ANTHROPIC_BASE_URL'
-        | 'DASHSCOPE_CN_ANTHROPIC_BASE_URL'
-        | 'DASHSCOPE_INTL_RESPONSES_BASE_URL'
-        | 'DASHSCOPE_CN_RESPONSES_BASE_URL',
+        (
+          | 'DASHSCOPE_INTL_ANTHROPIC_BASE_URL'
+          | 'DASHSCOPE_CN_ANTHROPIC_BASE_URL'
+          | 'DASHSCOPE_INTL_RESPONSES_BASE_URL'
+          | 'DASHSCOPE_CN_RESPONSES_BASE_URL'
+        ),
         ModelDataRegion,
         QwenProtocol,
       ]

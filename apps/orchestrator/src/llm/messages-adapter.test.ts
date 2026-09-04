@@ -1,10 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it, vi } from 'vitest';
+import { createAnthropicMessagesAdapter } from './dormant/anthropic-messages-adapter.js';
 import {
   type AnthropicCompatibleClient,
   MessagesAdapterError,
   createAnthropicCompatibleMessagesAdapter,
-  createAnthropicMessagesAdapter,
   createQwenMessagesAdapter,
 } from './messages-adapter.js';
 import type { QwenRuntimeEnvironment } from './qwen-route.js';

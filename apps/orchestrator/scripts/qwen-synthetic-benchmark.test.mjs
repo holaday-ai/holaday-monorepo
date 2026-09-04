@@ -67,6 +67,28 @@ describe('Qwen international synthetic benchmark', () => {
     assert.equal(fetchImpl.mock.callCount(), 0);
   });
 
+  it('uses only mainland credentials and endpoint for a mainland probe', async () => {
+    const fetchImpl = mock.fn(async () => responseFor(PASSING_OUTPUTS[0]));
+    const report = await runQwenBenchmark({
+      region: 'cn',
+      runtimeEnv: {
+        DASHSCOPE_CN_API_KEY: 'cn-test-only-placeholder',
+        DASHSCOPE_CN_ANTHROPIC_BASE_URL: 'https://dashscope.aliyuncs.com/apps/anthropic',
+        DASHSCOPE_CN_WORKSPACE_ID: 'cn-workspace-test',
+        DASHSCOPE_INTL_API_KEY: 'must-not-be-used',
+      },
+      fetchImpl,
+      cases: [BENCHMARK_CASES[0]],
+    });
+
+    assert.equal(report.region, 'cn');
+    const [url, request] = fetchImpl.mock.calls[0].arguments;
+    assert.equal(url, 'https://dashscope.aliyuncs.com/apps/anthropic/v1/messages');
+    assert.equal(request.headers['x-api-key'], 'cn-test-only-placeholder');
+    assert.equal(request.headers['x-dashscope-workspace'], 'cn-workspace-test');
+    assert.doesNotMatch(JSON.stringify(report), /cn-test-only-placeholder|must-not-be-used/);
+  });
+
   it('forwards the configured international workspace on every request', async () => {
     const fetchImpl = mock.fn(async () => responseFor(PASSING_OUTPUTS[0]));
     await runQwenBenchmark({

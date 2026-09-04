@@ -671,7 +671,7 @@ elif [[ "$command_text" == *"curl -sf"* ]]; then
 elif [[ "$command_text" == *"restart_time"* ]]; then
   echo "0"
 elif [[ "$command_text" == *"/proc/"* && "$command_text" == *"environ"* ]]; then
-  printf '%s\n' GEMINI_API_KEY ANTHROPIC_API_KEY DASHSCOPE_API_KEY
+  printf '%s\n' MODEL_RUNTIME_POLICY QWEN_CORE_ROLLOUT_MODE QWEN_CORE_ENABLED_LANES DASHSCOPE_INTL_API_KEY DASHSCOPE_INTL_ANTHROPIC_BASE_URL DASHSCOPE_INTL_RESPONSES_BASE_URL
 else
   echo "unexpected:$command_text" >> "$TEST_EVENT_LOG"
   exit 90
@@ -947,6 +947,12 @@ grep -Fq 'ORCHESTRATOR_ROLLBACK_HEAD:-' "$ORCHESTRATOR_SCRIPT" \
 grep -Fq 'git cat-file -e' "$ORCHESTRATOR_SCRIPT" \
   && grep -Fq 'PREV_HEAD^{commit}' "$ORCHESTRATOR_SCRIPT" \
   || fail "orchestrator deploy must validate an explicit rollback commit"
+grep -Fq 'MODEL_RUNTIME_POLICY must be qwen_only in production' "$ORCHESTRATOR_SCRIPT" \
+  || fail "orchestrator deploy and rollback must require a Qwen-only revision"
+grep -Fq 'MODEL_RUNTIME_POLICY QWEN_CORE_ROLLOUT_MODE QWEN_CORE_ENABLED_LANES DASHSCOPE_INTL_API_KEY DASHSCOPE_INTL_ANTHROPIC_BASE_URL DASHSCOPE_INTL_RESPONSES_BASE_URL' "$ORCHESTRATOR_SCRIPT" \
+  || fail "orchestrator deploy must require the Qwen-only international process contract"
+! grep -Fq 'GEMINI_API_KEY ANTHROPIC_API_KEY DASHSCOPE_API_KEY' "$ORCHESTRATOR_SCRIPT" \
+  || fail "orchestrator deploy must not require retired core provider credentials"
 grep -Fq 'REMOTE_START_HELPER' "$ORCHESTRATOR_SCRIPT" \
   || fail "deploy must stage the direct Node entrypoint outside the checkout"
 grep -Fq 'ORCHESTRATOR_START_SCRIPT=' "$ORCHESTRATOR_SCRIPT" \

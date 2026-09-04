@@ -194,8 +194,6 @@ export function createAnthropicCompatibleMessagesAdapter(input: {
   };
 }
 
-export { createAnthropicMessagesAdapter } from './dormant/anthropic-messages-adapter.js';
-
 export interface QwenMessagesEnvironment extends QwenRuntimeEnvironment {
   QWEN_MESSAGES_ADAPTER_ENABLED: boolean;
 }
