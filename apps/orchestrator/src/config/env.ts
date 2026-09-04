@@ -1,6 +1,10 @@
 import { resolve } from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 import { z } from 'zod';
+import {
+  assertProductionModelRuntimePolicy,
+  parseCoreModelLaneCsv,
+} from '../llm/model-runtime-policy.js';
 import { type ModelDataRegion, normalizeQwenAnthropicBaseUrl } from '../llm/qwen-route.js';
 
 // Load order (later overrides earlier — we explicitly do NOT override
@@ -206,6 +210,14 @@ const baseEnvSchema = z.object({
   QWEN_FAST_MODEL: z.string().min(1).default('qwen3.8-flash'),
   QWEN_CODING_MODEL: z.string().min(1).default('qwen3-coder-plus'),
   QWEN_VERIFIER_MODEL: z.string().min(1).default('qwen3.8-flash'),
+  MODEL_RUNTIME_POLICY: z.enum(['qwen_only', 'legacy_fixture']).default('qwen_only'),
+  QWEN_CORE_ROLLOUT_MODE: z.enum(['off', 'synthetic', 'internal', 'all']).default('off'),
+  QWEN_CORE_ENABLED_LANES: z.string().default(''),
+  QWEN_CORE_ALLOWLIST: z.string().default(''),
+  QWEN_RESPONSES_ADAPTER_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   /** Synthetic benchmark lane only. It is not wired to production task execution. */
   QWEN_SHADOW_EVAL_ENABLED: z
     .enum(['true', 'false'])
@@ -584,6 +596,30 @@ const baseEnvSchema = z.object({
 
 export const envSchema = baseEnvSchema
   .superRefine((environment, ctx) => {
+    try {
+      assertProductionModelRuntimePolicy(environment.NODE_ENV, environment.MODEL_RUNTIME_POLICY);
+    } catch (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['MODEL_RUNTIME_POLICY'],
+        message:
+          error instanceof Error
+            ? error.message
+            : 'MODEL_RUNTIME_POLICY must be qwen_only in production',
+      });
+    }
+
+    try {
+      parseCoreModelLaneCsv(environment.QWEN_CORE_ENABLED_LANES);
+    } catch (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['QWEN_CORE_ENABLED_LANES'],
+        message:
+          error instanceof Error ? error.message : 'QWEN_CORE_ENABLED_LANES contains an unknown lane',
+      });
+    }
+
     const closureEnabled =
       environment.ACCOUNT_CLOSURE_ENABLED || environment.ACCOUNT_CLOSURE_WORKER_ENABLED;
     if (closureEnabled && environment.ACCOUNT_CLOSURE_HMAC_SECRET.trim().length < 32) {

@@ -23,6 +23,11 @@ describe('Qwen dual-region environment contract', () => {
       QWEN_FAST_MODEL: 'qwen3.8-flash',
       QWEN_CODING_MODEL: 'qwen3-coder-plus',
       QWEN_VERIFIER_MODEL: 'qwen3.8-flash',
+      MODEL_RUNTIME_POLICY: 'qwen_only',
+      QWEN_CORE_ROLLOUT_MODE: 'off',
+      QWEN_CORE_ENABLED_LANES: '',
+      QWEN_CORE_ALLOWLIST: '',
+      QWEN_RESPONSES_ADAPTER_ENABLED: false,
       QWEN_SHADOW_EVAL_ENABLED: false,
       QWEN_MESSAGES_ADAPTER_ENABLED: false,
       QWEN_SUGGESTIONS_CANARY_ENABLED: false,
@@ -53,6 +58,28 @@ describe('Qwen dual-region environment contract', () => {
     const parsed = envSchema.parse({ ...BASE_ENV, QWEN_MESSAGES_ADAPTER_ENABLED: 'true' });
 
     expect(parsed.QWEN_MESSAGES_ADAPTER_ENABLED).toBe(true);
+  });
+
+  it('enables the Responses adapter only through an explicit true value', () => {
+    const parsed = envSchema.parse({ ...BASE_ENV, QWEN_RESPONSES_ADAPTER_ENABLED: 'true' });
+
+    expect(parsed.QWEN_RESPONSES_ADAPTER_ENABLED).toBe(true);
+  });
+
+  it('rejects legacy_fixture as a production runtime policy', () => {
+    expect(() =>
+      envSchema.parse({
+        ...BASE_ENV,
+        NODE_ENV: 'production',
+        MODEL_RUNTIME_POLICY: 'legacy_fixture',
+      }),
+    ).toThrow('MODEL_RUNTIME_POLICY must be qwen_only in production');
+  });
+
+  it('rejects unknown core lane tokens', () => {
+    expect(() =>
+      envSchema.parse({ ...BASE_ENV, QWEN_CORE_ENABLED_LANES: 'generate,unknown_lane' }),
+    ).toThrow('Unknown QWEN_CORE_ENABLED_LANES value: unknown_lane');
   });
 
   it('enables the suggestions canary only through an explicit true value', () => {
