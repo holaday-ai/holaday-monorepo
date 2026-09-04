@@ -49,6 +49,7 @@ RUNTIME_HELPER="$SCRIPT_DIR/orchestrator-runtime.sh"
 START_HELPER="$SCRIPT_DIR/start-orchestrator-production.sh"
 WORKER_START_HELPER="$SCRIPT_DIR/start-account-closure-worker-production.sh"
 DEPLOY_SAFETY_HELPER="$SCRIPT_DIR/team-task-lifecycle-deploy-safety.mjs"
+QWEN_INITIAL_CUTOVER_POLICY_HELPER="$SCRIPT_DIR/qwen-initial-cutover-policy.mjs"
 REMOTE_RUNTIME_DIR="/var/lib/holaday-deploy"
 REMOTE_RUNTIME_HELPER="$REMOTE_RUNTIME_DIR/orchestrator-runtime.sh"
 REMOTE_START_HELPER="$REMOTE_RUNTIME_DIR/start-orchestrator-production.sh"
@@ -77,6 +78,10 @@ if [[ ! -f "$WORKER_START_HELPER" ]]; then
 fi
 if [[ ! -f "$DEPLOY_SAFETY_HELPER" ]]; then
   echo "❌ Team task lifecycle deploy safety helper missing: $DEPLOY_SAFETY_HELPER" >&2
+  exit 1
+fi
+if [[ ! -f "$QWEN_INITIAL_CUTOVER_POLICY_HELPER" ]]; then
+  echo "❌ Qwen initial cutover policy helper missing: $QWEN_INITIAL_CUTOVER_POLICY_HELPER" >&2
   exit 1
 fi
 if ! [[ "$ORCHESTRATOR_RUN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
@@ -158,6 +163,7 @@ stage_runtime_helper() {
 restart_orchestrator_as_runtime_user() {
   local label="$1"
   local force_safety_disabled="${2:-0}"
+  local force_legacy_models_disabled="${3:-0}"
   run_with_retry "$label" \
     "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
       cd /opt/holaday-monorepo && \
@@ -165,6 +171,12 @@ restart_orchestrator_as_runtime_user() {
       if [[ '$force_safety_disabled' == '1' ]]; then \
         export ACCOUNT_CLOSURE_WORKER_ENABLED=false; \
         export TEAM_TASK_LIFECYCLE_ENABLED=false; \
+      fi; \
+      if [[ '$force_legacy_models_disabled' == '1' ]]; then \
+        export ANTHROPIC_API_KEY=''; \
+        export OPENAI_API_KEY=''; \
+        export GEMINI_API_KEY=''; \
+        export GOOGLE_API_KEY=''; \
       fi && \
       ORCHESTRATOR_RUN_USER='$ORCHESTRATOR_RUN_USER' \
       ORCHESTRATOR_RUN_GROUP='$ORCHESTRATOR_RUN_GROUP' \
@@ -188,7 +200,7 @@ persist_team_task_lifecycle_off() {
 # we never silently leave a broken / keyless binary serving traffic.
 rollback() {
   local target="$1"
-  local rollback_output rollback_rc
+  local rollback_output rollback_rc rollback_model_gate force_legacy_models_disabled
 
   echo "⚠️  Database changes are forward-only; code rollback does not revert applied migrations." >&2
   if ! persist_team_task_lifecycle_off; then
@@ -201,11 +213,19 @@ rollback() {
   fi
   echo "→ Rolling back to $target" >&2
 
+  rollback_model_gate="git show '$target:apps/orchestrator/src/config/env.ts' | grep -Fq 'MODEL_RUNTIME_POLICY must be qwen_only in production'"
+  force_legacy_models_disabled=0
+  if [[ "${INITIAL_QWEN_CUTOVER_ACTIVE:-0}" == "1" && "$target" == "$PREV_HEAD" ]]; then
+    rollback_model_gate="true"
+    force_legacy_models_disabled=1
+    echo "⚠️  Initial-cutover recovery will disable legacy provider credentials in the restored process" >&2
+  fi
+
   set +e
   rollback_output=$(run_with_retry "Vultr rollback build" \
     "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
       cd /opt/holaday-monorepo && \
-      git show '$target:apps/orchestrator/src/config/env.ts' | grep -Fq 'MODEL_RUNTIME_POLICY must be qwen_only in production' && \
+      $rollback_model_gate && \
       git reset --hard '$target' && \
       pnpm --filter @holaday/orchestrator clean && \
       pnpm --filter @holaday/orchestrator build" 2>&1)
@@ -218,7 +238,8 @@ rollback() {
   fi
 
   set +e
-  rollback_output=$(restart_orchestrator_as_runtime_user "Vultr rollback restart" 1 2>&1)
+  rollback_output=$(restart_orchestrator_as_runtime_user \
+    "Vultr rollback restart" 1 "$force_legacy_models_disabled" 2>&1)
   rollback_rc=$?
   set -e
   echo "$rollback_output" | tail -5 >&2
@@ -255,11 +276,51 @@ if ! [[ "$PREV_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
   echo "❌ Invalid rollback HEAD — refusing deploy" >&2
   exit 1
 fi
-run_with_retry "Vultr rollback-head validation" \
+echo "→ Evaluating Qwen-only rollback and initial-cutover policy"
+set +e
+run_with_retry "Vultr Qwen candidate fetch" \
+  "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  "cd /opt/holaday-monorepo && git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' >/dev/null 2>&1"
+FETCH_RC=$?
+set -e
+if (( FETCH_RC != 0 )); then
+  echo "❌ Cannot fetch origin/$BRANCH after retries — refusing to reset blind" >&2
+  exit 4
+fi
+QWEN_CANDIDATE_FETCHED=1
+ROLLBACK_QWEN_ONLY=$(run_with_retry "Vultr rollback-head validation" \
   "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
   "cd /opt/holaday-monorepo && \
    git cat-file -e '$PREV_HEAD^{commit}' && \
-   git show '$PREV_HEAD:apps/orchestrator/src/config/env.ts' | grep -Fq 'MODEL_RUNTIME_POLICY must be qwen_only in production'"
+   if git show '$PREV_HEAD:apps/orchestrator/src/config/env.ts' | grep -Fq 'MODEL_RUNTIME_POLICY must be qwen_only in production'; then echo 1; else echo 0; fi" \
+  | tail -1 | tr -d '[:space:]')
+CANDIDATE_QWEN_ONLY=$(run_with_retry "Vultr Qwen candidate validation" \
+  "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  "cd /opt/holaday-monorepo && \
+   if git show 'origin/$BRANCH:apps/orchestrator/src/config/env.ts' | grep -Fq 'MODEL_RUNTIME_POLICY must be qwen_only in production'; then echo 1; else echo 0; fi" \
+  | tail -1 | tr -d '[:space:]')
+REMOTE_QWEN_ROLLOUT_MODE=$(run_with_retry "Vultr Qwen rollout-mode validation" \
+  "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  "cd /opt/holaday-monorepo && set -a && . apps/orchestrator/.env && set +a && printf '%s\n' \"\${QWEN_CORE_ROLLOUT_MODE:-missing}\"" \
+  | tail -1 | tr -d '[:space:]')
+set +e
+INITIAL_CUTOVER_POLICY_OUT=$(node "$QWEN_INITIAL_CUTOVER_POLICY_HELPER" \
+  --allow-initial "${ALLOW_INITIAL_QWEN_CUTOVER:-0}" \
+  --rollback-qwen "$ROLLBACK_QWEN_ONLY" \
+  --candidate-qwen "$CANDIDATE_QWEN_ONLY" \
+  --rollout-mode "$REMOTE_QWEN_ROLLOUT_MODE")
+INITIAL_CUTOVER_POLICY_RC=$?
+set -e
+echo "$INITIAL_CUTOVER_POLICY_OUT"
+if (( INITIAL_CUTOVER_POLICY_RC != 0 )); then
+  echo "❌ Qwen initial-cutover policy rejected this deployment" >&2
+  exit 1
+fi
+INITIAL_QWEN_CUTOVER_ACTIVE=0
+if echo "$INITIAL_CUTOVER_POLICY_OUT" | grep -Fq '"mode":"initial"'; then
+  INITIAL_QWEN_CUTOVER_ACTIVE=1
+  echo "⚠️  Explicit initial Qwen-only cutover active; rollout remains off until regional probes pass"
+fi
 echo "   prev HEAD (LIVE): ${PREV_HEAD:-unknown}"
 
 # ── Pre-reset safety gate — SESSION_STATUS hard rule 7 (2026-06-13) ──────
@@ -272,9 +333,13 @@ echo "   prev HEAD (LIVE): ${PREV_HEAD:-unknown}"
 # deploy branch doesn't carry it yet). Override with ALLOW_DIVERGENT_DEPLOY=1.
 echo "→ Pre-reset gate (hard rule 7): deploy-preflight.sh on the live server"
 set +e
-run_with_retry "Vultr gate-fetch" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "cd /opt/holaday-monorepo && git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' >/dev/null 2>&1"
-FETCH_RC=$?
+if [[ "${QWEN_CANDIDATE_FETCHED:-0}" == "1" ]]; then
+  FETCH_RC=0
+else
+  run_with_retry "Vultr gate-fetch" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "cd /opt/holaday-monorepo && git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' >/dev/null 2>&1"
+  FETCH_RC=$?
+fi
 if (( FETCH_RC == 0 )); then
   run_with_retry "Vultr ancestor gate" \
     "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
@@ -392,8 +457,15 @@ if ! PROC_KEYS=$(run_with_retry "Vultr key-check" "${VULTR_AUTH_PREFIX[@]}" ssh 
     "PID=\$(pm2 pid holaday-orchestrator | head -1); \
      ENV_LINES=\$(tr '\\0' '\\n' < /proc/\$PID/environ 2>/dev/null); \
      echo \"\$ENV_LINES\" | grep -qx 'MODEL_RUNTIME_POLICY=qwen_only' && \
+     echo \"\$ENV_LINES\" | grep '^QWEN_CORE_ROLLOUT_MODE=' | sed 's/^/__QWEN_ROLLOUT_MODE__=/' && \
      echo \"\$ENV_LINES\" | grep -oE '^[A-Z_]+=.' | grep -oE '^[A-Z_]+'" | tr -d '\r'); then
   abort_with_rollback "process key verification failed"
+fi
+PROC_ROLLOUT_MODE=$(echo "$PROC_KEYS" | sed -n 's/^__QWEN_ROLLOUT_MODE__=//p' | tail -1)
+PROC_KEYS=$(echo "$PROC_KEYS" | grep -v '^__QWEN_ROLLOUT_MODE__=' || true)
+if [[ "$PROC_ROLLOUT_MODE" != "off" && "$PROC_ROLLOUT_MODE" != "synthetic" && \
+      "$PROC_ROLLOUT_MODE" != "internal" && "$PROC_ROLLOUT_MODE" != "all" ]]; then
+  abort_with_rollback "invalid Qwen rollout mode in process"
 fi
 KEY_MISS=""
 for k in $REQUIRED_PROCESS_KEYS; do
@@ -405,7 +477,25 @@ if [[ -n "$KEY_MISS" ]]; then
 fi
 echo "✅ Keys present in process"
 
-# Run a bounded, non-browser release gate after every deploy. It covers text
+# A dark Qwen-only cutover has no user lane enabled, so task-level release
+# cases must not be misreported as regressions. Instead, gate the production
+# import graph plus both international protocol surfaces. Once any rollout is
+# enabled, run the normal user-task release gate below.
+if [[ "$PROC_ROLLOUT_MODE" == "off" ]]; then
+  echo "→ Running Qwen-only dark-release gate (blocking)"
+  if ! QWEN_DARK_GATE_OUT=$(run_with_retry "Vultr Qwen-only dark-release gate" \
+    "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "set -e; cd /opt/holaday-monorepo; \
+     node apps/orchestrator/scripts/qwen-only-release-contract.mjs --run; \
+     node apps/orchestrator/scripts/qwen-synthetic-benchmark.mjs --run --protocol --pm2-process holaday-orchestrator; \
+     node apps/orchestrator/scripts/qwen-runtime-benchmark.mjs --run --pm2-process holaday-orchestrator"); then
+    echo "$QWEN_DARK_GATE_OUT" | tail -12
+    abort_with_rollback "Qwen-only dark-release gate failed"
+  fi
+  echo "$QWEN_DARK_GATE_OUT" | tail -12
+  echo "✅ Qwen-only dark-release gate passed"
+else
+# Run a bounded, non-browser release gate after every enabled deploy. It covers text
 # generation, clarification parking, detail rehydration, and ungrounded-URL
 # removal without paying the 3+ minute cost of the full browser/search suite.
 # A missing or failed summary is release-blocking and restores the previous
@@ -429,6 +519,7 @@ else
     abort_with_rollback "fast release gate failed"
   fi
   echo "✅ Fast release gate $AUTO_SMOKE_PASSED/$AUTO_SMOKE_TOTAL — release healthy"
+fi
 fi
 
 # The full browser/search P0 suite remains available for major releases and

@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_SCRIPT="$SCRIPT_DIR/deploy-orchestrator.sh"
 SAFETY_HELPER="$SCRIPT_DIR/team-task-lifecycle-deploy-safety.mjs"
+QWEN_INITIAL_CUTOVER_POLICY_HELPER="$SCRIPT_DIR/qwen-initial-cutover-policy.mjs"
 LIVE_HEAD="1111111111111111111111111111111111111111"
 
 fail() {
@@ -31,6 +32,8 @@ write_orchestrator_harness() {
   mkdir -p "$harness_dir/repo/scripts" "$harness_dir/bin"
   cp "$DEPLOY_SCRIPT" "$harness_dir/repo/scripts/deploy-orchestrator.sh"
   cp "$SAFETY_HELPER" "$harness_dir/repo/scripts/team-task-lifecycle-deploy-safety.mjs"
+  cp "$QWEN_INITIAL_CUTOVER_POLICY_HELPER" \
+    "$harness_dir/repo/scripts/qwen-initial-cutover-policy.mjs"
   cp "$SCRIPT_DIR/auto-smoke-summary.sh" "$harness_dir/repo/scripts/auto-smoke-summary.sh"
   chmod +x "$harness_dir/repo/scripts/deploy-orchestrator.sh"
 
@@ -121,6 +124,13 @@ elif [[ "$command_text" == *"orchestrator-runtime.sh' restart"* ]]; then
   [[ "$TEST_FAIL_PHASE" != "restart" ]] || exit 45
   [[ "$TEST_FAIL_PHASE" != "process-verify" ]] || exit 57
 elif [[ "$command_text" == *"git cat-file -e"* ]]; then
+  echo "1"
+  exit 0
+elif [[ "$command_text" == *"origin/codex/release-candidate:apps/orchestrator/src/config/env.ts"* ]]; then
+  echo "1"
+  exit 0
+elif [[ "$command_text" == *"QWEN_CORE_ROLLOUT_MODE"* ]]; then
+  echo "synthetic"
   exit 0
 elif [[ "$command_text" == *"git fetch origin"* ]]; then
   exit 0
