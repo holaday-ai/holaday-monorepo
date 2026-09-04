@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { friendlyTaskFailureReason } from './task-failure-copy.js';
+import {
+  friendlyTaskFailureReason,
+  modelTaskFailureReason,
+} from './task-failure-copy.js';
 
 describe('friendlyTaskFailureReason', () => {
+  it('uses stable Qwen migration reason codes without provider details', () => {
+    expect(modelTaskFailureReason('MODEL_DATA_REGION_UNASSIGNED')).toBe(
+      '请先选择模型数据区域，再开始任务。',
+    );
+    expect(modelTaskFailureReason('MODEL_MIGRATION_IN_PROGRESS')).toBe(
+      '这项能力正在迁移到千问，暂时不可用。',
+    );
+  });
   it('keeps known browser failures specific', () => {
     expect(
       friendlyTaskFailureReason(

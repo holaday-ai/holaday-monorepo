@@ -2,6 +2,23 @@ import type { UiTaskStatus } from '@/types/task';
 import { awaitingUserCopy, type AwaitingKind } from './awaiting-user-copy';
 import { deriveTaskProductState } from './task-product-state';
 
+type ModelTaskUnavailableReason =
+  | 'MODEL_DATA_REGION_UNASSIGNED'
+  | 'REGION_SERVICE_NOT_CONFIGURED'
+  | 'MODEL_MIGRATION_IN_PROGRESS'
+  | 'MODEL_ROLLOUT_NOT_ALLOWED';
+
+const MODEL_TASK_FAILURE_COPY: Readonly<Record<ModelTaskUnavailableReason, string>> = {
+  MODEL_DATA_REGION_UNASSIGNED: '请先选择模型数据区域，再开始任务。',
+  REGION_SERVICE_NOT_CONFIGURED: '该区域的模型服务尚未配置，请稍后再试。',
+  MODEL_MIGRATION_IN_PROGRESS: '这项能力正在迁移到千问，暂时不可用。',
+  MODEL_ROLLOUT_NOT_ALLOWED: '这项能力正在小范围验证，暂未对当前账号开放。',
+};
+
+export function modelTaskFailureCopy(reason: ModelTaskUnavailableReason): string {
+  return MODEL_TASK_FAILURE_COPY[reason];
+}
+
 export function taskStatusLabel(
   status: UiTaskStatus | string,
   awaitingKind?: AwaitingKind | null,

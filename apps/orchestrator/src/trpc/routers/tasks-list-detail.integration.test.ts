@@ -234,6 +234,57 @@ describe('tRPC tasks.list + tasks.detail', () => {
     }
   });
 
+  it('tasks.create persists browser work as an explicit migration-unavailable terminal', async () => {
+    const user = await seedUser();
+    const { port, signAccessToken, close } = await bootTrpcServer();
+    try {
+      const token = await signAccessToken({ sub: user.external, plan: 'free' });
+      const response = await fetch(`http://127.0.0.1:${port}/trpc/tasks.create`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ intent: '打开网页并登录' }),
+      });
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        result: { data: { taskId: string; status: string; executionMode: string } };
+      };
+      expect(body.result.data).toMatchObject({
+        status: 'failed',
+        executionMode: 'browser',
+      });
+
+      const { db } = await import('../../db/client.js');
+      const { eq } = await import('drizzle-orm');
+      const { tasks } = await import('../../db/schema/tasks.js');
+      const [created] = await db
+        .select({
+          status: tasks.status,
+          errorCode: tasks.errorCode,
+          errorMessage: tasks.errorMessage,
+          result: tasks.result,
+        })
+        .from(tasks)
+        .where(eq(tasks.externalId, body.result.data.taskId))
+        .limit(1);
+      expect(created).toMatchObject({
+        status: 'failed',
+        errorCode: 'MODEL_MIGRATION_IN_PROGRESS',
+        errorMessage: '这项能力正在迁移到千问，暂时不可用。',
+        result: {
+          metadata: {
+            executionMode: 'browser',
+            reasonCode: 'MODEL_MIGRATION_IN_PROGRESS',
+          },
+        },
+      });
+    } finally {
+      await close();
+    }
+  });
+
   it('tasks.list status filter includes partial_success in failure review sets', async () => {
     const user = await seedUser();
     const failed = await seedTask(user.internalId, 'hard fail row', ['goto'], 'failed');

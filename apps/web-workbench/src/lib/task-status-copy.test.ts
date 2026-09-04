@@ -1,12 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
   historyEmptyCopy,
+  modelTaskFailureCopy,
   pausedTaskNoticeCopy,
   taskSearchEmptyCopy,
   taskStatusLabel,
 } from './task-status-copy';
 
 describe('taskStatusLabel', () => {
+  it('maps stable model reason codes without exposing a provider name', () => {
+    expect(modelTaskFailureCopy('REGION_SERVICE_NOT_CONFIGURED')).toBe(
+      '该区域的模型服务尚未配置，请稍后再试。',
+    );
+    expect(modelTaskFailureCopy('MODEL_ROLLOUT_NOT_ALLOWED')).toBe(
+      '这项能力正在小范围验证，暂未对当前账号开放。',
+    );
+  });
   it('covers terminal and active task statuses', () => {
     expect(taskStatusLabel('completed')).toBe('已完成');
     expect(taskStatusLabel('partial_success')).toBe('需复核');

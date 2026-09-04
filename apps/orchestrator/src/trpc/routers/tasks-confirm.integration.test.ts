@@ -357,14 +357,14 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
     expect(taskRow.completedAt).toBeNull();
   });
 
-  it('confirmVideo does not consume malformed normal quotes before validation passes', async () => {
+  it('confirmVideo settles legacy quotes as migration unavailable before any debit', async () => {
     const { userExternalId, taskId } = await makeUserWithVideoQuoteTask();
     const { status } = await callTrpc(
       'confirmVideo',
       { taskId, choice: 'confirm_video' },
       userExternalId,
     );
-    expect(status).toBe(500);
+    expect(status).toBe(200);
 
     const { db } = await import('../../db/client.js');
     const { eq } = await import('drizzle-orm');
@@ -373,15 +373,19 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
       (await db.select().from(tasks).where(eq(tasks.externalId, taskId)))[0],
       'taskRow',
     );
-    expect(taskRow.status).toBe('awaiting_user');
-    expect(taskRow.awaitingKind).toBe('video_quote');
-    expect(taskRow.completedAt).toBeNull();
+    expect(taskRow.status).toBe('failed');
+    expect(taskRow.awaitingKind).toBeNull();
+    expect(taskRow.errorCode).toBe('MODEL_MIGRATION_IN_PROGRESS');
+    expect(taskRow.completedAt).not.toBeNull();
     expect(taskRow.result).toMatchObject({
-      metadata: { lane: 'video_creation_confirm' },
+      metadata: {
+        lane: 'video_creation_confirm',
+        reasonCode: 'MODEL_MIGRATION_IN_PROGRESS',
+      },
     });
   });
 
-  it('confirmVideo rejects stale Veo 1080p + 6s quotes before consuming them', async () => {
+  it('confirmVideo closes stale Veo quotes at the Qwen-only migration boundary', async () => {
     const { userExternalId, taskId } = await makeUserWithVideoQuoteTask();
     const { db } = await import('../../db/client.js');
     const { eq } = await import('drizzle-orm');
@@ -410,18 +414,19 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
       { taskId, choice: 'confirm_video' },
       userExternalId,
     );
-    expect(status).toBe(400);
+    expect(status).toBe(200);
 
     const taskRow = must(
       (await db.select().from(tasks).where(eq(tasks.externalId, taskId)))[0],
       'taskRow',
     );
-    expect(taskRow.status).toBe('awaiting_user');
-    expect(taskRow.awaitingKind).toBe('video_quote');
-    expect(taskRow.completedAt).toBeNull();
+    expect(taskRow.status).toBe('failed');
+    expect(taskRow.awaitingKind).toBeNull();
+    expect(taskRow.errorCode).toBe('MODEL_MIGRATION_IN_PROGRESS');
+    expect(taskRow.completedAt).not.toBeNull();
   });
 
-  it('confirmVideo keeps an IP quote unconsumed when its base video is unavailable', async () => {
+  it('confirmVideo does not create a child for a migration-unavailable IP quote', async () => {
     const { newExternalId } = await import('@holaday/shared-types');
     const { db } = await import('../../db/client.js');
     const { and, eq } = await import('drizzle-orm');
@@ -484,14 +489,15 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
       userExternalId,
     );
 
-    expect(status).toBe(412);
+    expect(status).toBe(200);
     const quote = must(
       (await db.select().from(tasks).where(eq(tasks.externalId, taskId)))[0],
       'quote',
     );
-    expect(quote.status).toBe('awaiting_user');
-    expect(quote.awaitingKind).toBe('video_quote');
-    expect(quote.completedAt).toBeNull();
+    expect(quote.status).toBe('failed');
+    expect(quote.awaitingKind).toBeNull();
+    expect(quote.errorCode).toBe('MODEL_MIGRATION_IN_PROGRESS');
+    expect(quote.completedAt).not.toBeNull();
     const after = await db
       .select({ id: tasks.id })
       .from(tasks)

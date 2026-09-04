@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import {
   BASIC_ROLE_PICK_LIMIT,
   HOLADAY_SKILLS,
@@ -82,7 +82,10 @@ import {
 } from '../../agent/supercar/task-state-machine.js';
 import type { PlannedStep, TaskState } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
-import { friendlyTaskFailureReason } from '../../agent/task-failure-copy.js';
+import {
+  friendlyTaskFailureReason,
+  modelTaskFailureReason,
+} from '../../agent/task-failure-copy.js';
 import { startTaskHeartbeat } from '../../agent/task-heartbeat.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import {
@@ -209,7 +212,10 @@ import { FileService, taskInternalIdFor } from '../../files/file-service.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
 import { getSharedStorageProvider } from '../../files/storage-provider.js';
 import { allowedFormatsForPlan, isCreateFileFormat, renderFile } from '../../files/writers.js';
-import { resolveCoreModelRuntime } from '../../llm/core-model-runtime.js';
+import {
+  type ModelTaskUnavailableReason,
+  createProductionModelRuntimeWiring,
+} from '../../llm/model-runtime-wiring.js';
 import { TaskActionCaptureRepository } from '../../playbook/task-action-capture-repository.js';
 import { isQuotaBypassUser } from '../../quota/quota-mode.js';
 import {
@@ -478,13 +484,17 @@ function buildIpVideoCfg(): IpVideoConfig {
   };
 }
 
-// Module-scope Anthropic client for url-resolver. Cheap to construct
-// but no reason to pay per request — cache once at import time.
-const anthropicForResolver: Anthropic | null = appEnv.ANTHROPIC_API_KEY ? new Anthropic() : null;
+// Kept only as an erased type boundary for migration-unavailable media code.
+// Qwen-only task routing terminates those lanes before this value is observed.
+function dormantLegacyModelClient(): Anthropic | null {
+  return null;
+}
+const legacyMediaModelClient = dormantLegacyModelClient();
+
+const modelRuntimeWiring = createProductionModelRuntimeWiring(appEnv);
 
 function resolveGenerateRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
-  return resolveCoreModelRuntime({
-    environment: appEnv,
+  return modelRuntimeWiring.resolveCore({
     actorExternalId,
     lane: 'generate',
     ownership: { scope: 'personal', userRegion: modelDataRegion },
@@ -492,31 +502,38 @@ function resolveGenerateRuntimeForUser(actorExternalId: string, modelDataRegion:
 }
 
 function resolveScrapeRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
-  return resolveCoreModelRuntime({
-    environment: appEnv,
+  return modelRuntimeWiring.resolveCore({
     actorExternalId,
     lane: 'scrape',
     ownership: { scope: 'personal', userRegion: modelDataRegion },
   });
 }
 
-function generateRuntimeUnavailableReason(
-  reason:
-    | 'LANE_DISABLED'
-    | 'ROLLOUT_NOT_ALLOWED'
-    | 'MODEL_DATA_REGION_UNASSIGNED'
-    | 'REGION_SERVICE_NOT_CONFIGURED',
-): string {
-  switch (reason) {
-    case 'MODEL_DATA_REGION_UNASSIGNED':
-      return '请先选择模型数据区域，再开始任务。';
-    case 'REGION_SERVICE_NOT_CONFIGURED':
-      return '该区域的模型服务尚未配置，请稍后再试。';
-    case 'ROLLOUT_NOT_ALLOWED':
-      return '这项能力正在小范围验证，暂未对当前账号开放。';
-    case 'LANE_DISABLED':
-      return '这项能力正在迁移到千问，暂时不可用。';
-  }
+function resolveVerifierRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
+  return modelRuntimeWiring.resolveCore({
+    actorExternalId,
+    lane: 'verifier',
+    ownership: { scope: 'personal', userRegion: modelDataRegion },
+  });
+}
+
+function generateRuntimeUnavailableReason(reason: ModelTaskUnavailableReason): string {
+  return modelTaskFailureReason(reason);
+}
+
+function unmigratedLaneForExecutionMode(
+  executionMode: string,
+): 'browser' | 'image' | 'video_generation' | null {
+  if (executionMode === 'browser') return 'browser';
+  if (executionMode === 'image') return 'image';
+  if (executionMode === 'video_creation') return 'video_generation';
+  return null;
+}
+
+function coreLaneForExecutionMode(executionMode: string): 'generate' | 'scrape' | null {
+  if (executionMode === 'generate' || executionMode === 'template_fill') return 'generate';
+  if (executionMode === 'scrape') return 'scrape';
+  return null;
 }
 
 const taskIdInput = z.object({ taskId: z.string().min(1) });
@@ -1614,6 +1631,114 @@ export const tasksRouter = router({
           ? 'video_creation'
           : null,
     });
+
+    // Qwen-only rollout boundary: browser/media lanes still depend on
+    // legacy model controllers. Persist an honest terminal task before
+    // quota consumption instead of throwing a transient precondition or
+    // leaving an accepted task in `executing` forever.
+    const unmigratedLane = unmigratedLaneForExecutionMode(executionMode);
+    if (unmigratedLane) {
+      const unavailable = modelRuntimeWiring.resolveUnmigrated(unmigratedLane);
+      const reason = modelTaskFailureReason(unavailable.reasonCode);
+      const taskId = newExternalId('task');
+      await repo.insertTask(
+        {
+          taskId,
+          status: 'executing',
+          plan: [],
+          cursor: 0,
+          pendingConfirm: null,
+        },
+        {
+          userId: userRow.id,
+          intent: input.intent,
+          roleId: dispatchRoleId,
+          opusUsed: false,
+        },
+      );
+      const terminal = await repo.persistVisionOutcome(taskId, {
+        status: 'failed',
+        reason,
+        tickCount: 0,
+        errorCode: unavailable.reasonCode,
+        metadata: {
+          executionMode,
+          finalExecutionMode: executionMode,
+          reasonCode: unavailable.reasonCode,
+        },
+      });
+      if (terminal.persisted) {
+        broadcastToUser(ctx.userId, {
+          type: 'server.task.terminal',
+          taskId,
+          status: 'failed',
+          reason,
+        });
+      }
+      return {
+        taskId,
+        status: 'failed' as const,
+        steps: [],
+        executionMode,
+      };
+    }
+
+    // Resolve region, credentials and rollout eligibility before quota
+    // consumption. An unavailable core lane is a deployment/rollout state,
+    // not a billable task attempt.
+    const coreLane = coreLaneForExecutionMode(executionMode);
+    if (coreLane) {
+      const preflight = modelRuntimeWiring.resolveCore({
+        actorExternalId: ctx.userId,
+        lane: coreLane,
+        ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
+      });
+      if (preflight.kind === 'unavailable') {
+        const reason = modelTaskFailureReason(preflight.reasonCode);
+        const taskId = newExternalId('task');
+        await repo.insertTask(
+          {
+            taskId,
+            status: 'executing',
+            plan: [],
+            cursor: 0,
+            pendingConfirm: null,
+          },
+          {
+            userId: userRow.id,
+            intent: input.intent,
+            roleId: dispatchRoleId,
+            opusUsed: false,
+            ...(stockTaskSourceContext ? { sourceContext: stockTaskSourceContext } : {}),
+          },
+        );
+        const terminal = await repo.persistVisionOutcome(taskId, {
+          status: 'failed',
+          reason,
+          tickCount: 0,
+          errorCode: preflight.reasonCode,
+          metadata: {
+            executionMode,
+            finalExecutionMode: executionMode,
+            reasonCode: preflight.reasonCode,
+          },
+        });
+        if (terminal.persisted) {
+          broadcastToUser(ctx.userId, {
+            type: 'server.task.terminal',
+            taskId,
+            status: 'failed',
+            reason,
+          });
+        }
+        return {
+          taskId,
+          status: 'failed' as const,
+          steps: [],
+          executionMode,
+        };
+      }
+    }
     const videoIntent =
       executionMode === 'video_creation' ||
       input.roleId === 'video-creator' ||
@@ -1642,7 +1767,7 @@ export const tasksRouter = router({
         if (
           executionMode === 'image' &&
           input.imageOptions?.mode === 'lock_subject' &&
-          !anthropicForResolver
+          !legacyMediaModelClient
         ) {
           throw new TRPCError({
             code: 'PRECONDITION_FAILED',
@@ -1655,7 +1780,7 @@ export const tasksRouter = router({
         message: '视频生成功能尚未向当前账号开放，未创建任务或扣除额度。',
       });
     }
-    if (videoIntent && !anthropicForResolver) {
+    if (videoIntent && !legacyMediaModelClient) {
       throw new TRPCError({
         code: 'PRECONDITION_FAILED',
         message: '视频生成服务尚未就绪，未创建任务或扣除额度。',
@@ -1664,7 +1789,7 @@ export const tasksRouter = router({
     const willCreateVideoQuote =
       appEnv.VIDEO_CREATION_ENABLED &&
       videoAllowed &&
-      Boolean(anthropicForResolver) &&
+      Boolean(legacyMediaModelClient) &&
       videoIntent;
     if (appEnv.NODE_ENV === 'production' && executionMode === 'browser' && !ctx.browserPool) {
       // Server-side browser tasks must use the per-task pool because that
@@ -2047,10 +2172,10 @@ export const tasksRouter = router({
               : {}),
             save,
             logger: ctx.logger,
-                  ...(input.imageOptions?.mode === 'lock_subject' && anthropicForResolver
+                  ...(input.imageOptions?.mode === 'lock_subject' && legacyMediaModelClient
                     ? {
                         verifySubject:
-                          createAnthropicSubjectConsistencyVerifier(anthropicForResolver),
+                          createAnthropicSubjectConsistencyVerifier(legacyMediaModelClient),
                       }
                     : {}),
           });
@@ -2184,8 +2309,8 @@ export const tasksRouter = router({
       // 界面显式带了 videoOptions.tab(普通/宠物/IP)。后者是关键——宠物动作 prompt / IP 口播文案
       // 本身不含「视频」关键词,分类器会判 generate;只有 videoOptions.tab 这个显式信号能可靠把
       // 三类 tab 提交都送进视频 fork(只有视频界面会设它,其它 createTask 路径绝不带)。
-      if (willCreateVideoQuote && anthropicForResolver) {
-        const anthropicClient = anthropicForResolver;
+      if (willCreateVideoQuote && legacyMediaModelClient) {
+        const anthropicClient = legacyMediaModelClient;
             const { buildFallbackVideoScript, optimizeUserScript, segmentCapForText } =
               await import('../../agent/video/video-script.js');
         // Phase 2 第一期 — SPA「普通视频」面板把模型档/风格/画幅/画质/时长带上来。
@@ -2498,9 +2623,11 @@ export const tasksRouter = router({
       shouldAllowSpecializedLaneOverride(typedRoutingWorkflow) &&
       (appEnv.ASHARE_QA_ENABLED || validatedStockContext !== null) &&
       ashareQaHandlesMode(executionMode) &&
-      anthropicForResolver &&
       ashareQaAllowed
     ) {
+      const stockRuntime = resolveGenerateRuntimeForUser(ctx.userId, userRow.modelDataRegion);
+      const stockMessagesAdapter =
+        stockRuntime.kind === 'ready' ? stockRuntime.messages('standard') : null;
       const { resolveAshareQa, resolveAshareInContext } = await import(
         '../../agent/a-share/ashare-qa-matcher.js'
       );
@@ -2585,8 +2712,43 @@ export const tasksRouter = router({
         );
         broadcastSubStatus(ctx.userId, taskId, 'generating');
 
-        const anthropicClient = anthropicForResolver;
-        const qaModel = appEnv.ASHARE_QA_MODEL;
+        if (!stockMessagesAdapter) {
+          const reasonCode =
+            stockRuntime.kind === 'unavailable'
+              ? stockRuntime.reasonCode
+              : 'MODEL_MIGRATION_IN_PROGRESS';
+          const reason = modelTaskFailureReason(reasonCode);
+          const terminal = await repo.persistVisionOutcome(taskId, {
+            status: 'failed',
+            reason,
+            tickCount: 0,
+            errorCode: reasonCode,
+            metadata: {
+              executionMode: 'generate',
+              finalExecutionMode: 'generate',
+              lane: 'ashare_qa',
+              reasonCode,
+              ...(publicValidatedStockContext
+                ? { stockContext: publicValidatedStockContext }
+                : {}),
+            },
+          });
+          if (terminal.persisted) {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'failed',
+              reason,
+            });
+          }
+          return {
+            taskId,
+            status: 'failed' as const,
+            steps: [],
+            executionMode: 'generate' as const,
+          };
+        }
+
         void (async () => {
           const { runAshareQa, runAsharePanorama } = await import(
             '../../agent/a-share/ashare-qa-runner.js'
@@ -2619,29 +2781,33 @@ export const tasksRouter = router({
                 client: aksClient,
                 skillMarkdown: skillMarkdown ?? FALLBACK_PERSONA,
                 interpret: async ({ system, user }) => {
-                  const resp = await anthropicClient.messages.create({
-                    model: qaModel,
-                    max_tokens: 700,
+                  const resp = await stockMessagesAdapter.create({
+                    maxTokens: 700,
                     // 低温：③/⑦ 更忠实照抄数字（降低 ungrounded 误降级），措辞仍自然。
                     temperature: 0.3,
                     system,
                     messages: [{ role: 'user', content: user }],
+                    thinking: { type: 'disabled' },
                   });
-                  const block = resp.content[0];
-                  return block && block.type === 'text' ? block.text : '';
+                  return resp.content
+                    .filter((block) => block.type === 'text')
+                    .map((block) => block.text)
+                    .join('\n');
                 },
                 // Phase2 ⑦ 意图判官（第二层，flag 控制）：温度0 求确定性（同股同文同判，治"时好时降级"）。
                 judge: appEnv.ASHARE_INTENT_JUDGE_ENABLED
                   ? async ({ system, user }) => {
-                      const resp = await anthropicClient.messages.create({
-                        model: qaModel,
-                        max_tokens: 160,
+                      const resp = await stockMessagesAdapter.create({
+                        maxTokens: 160,
                         temperature: 0,
                         system,
                         messages: [{ role: 'user', content: user }],
+                        thinking: { type: 'disabled' },
                       });
-                      const block = resp.content[0];
-                      return block && block.type === 'text' ? block.text : '';
+                      return resp.content
+                        .filter((block) => block.type === 'text')
+                        .map((block) => block.text)
+                        .join('\n');
                     }
                   : undefined,
                 // Phase 2「看懂层」P1：腿A 逐指标注解开关（默认 OFF，零新增 LLM）。
@@ -2897,12 +3063,14 @@ export const tasksRouter = router({
     // through to the generate lane below, where the model honestly says
     // it cannot fill the user's file — so shipping before the feature is
     // vetted is a no-op for users instead of a broken lane.
-        if (
-          executionMode === 'template_fill' &&
-          appEnv.TEMPLATE_FILL_ENABLED &&
-          anthropicForResolver
-        ) {
+    if (executionMode === 'template_fill' && appEnv.TEMPLATE_FILL_ENABLED) {
       const taskId = newExternalId('task');
+      const templateRuntime = resolveGenerateRuntimeForUser(
+        ctx.userId,
+        userRow.modelDataRegion,
+      );
+      const templateResponsesAdapter =
+        templateRuntime.kind === 'ready' ? templateRuntime.responses('standard') : null;
 
       await repo.insertTask(
         {
@@ -2926,10 +3094,42 @@ export const tasksRouter = router({
       );
       broadcastSubStatus(ctx.userId, taskId, 'generating');
 
-      const anthropicClient = anthropicForResolver;
-      const templateModel = appEnv.TEMPLATE_FILL_MODEL;
       const templateStartedAt = Date.now();
       const fileIds = input.fileIds ?? [];
+
+      if (!templateResponsesAdapter) {
+        const reasonCode =
+          templateRuntime.kind === 'unavailable'
+            ? templateRuntime.reasonCode
+            : 'MODEL_MIGRATION_IN_PROGRESS';
+        const reason = modelTaskFailureReason(reasonCode);
+        const terminal = await repo.persistVisionOutcome(taskId, {
+          status: 'failed',
+          reason,
+          tickCount: 0,
+          errorCode: reasonCode,
+          metadata: {
+            executionMode: 'template_fill',
+            finalExecutionMode: 'template_fill',
+            reasonCode,
+          },
+        });
+        if (terminal.persisted) {
+          broadcastToUser(ctx.userId, {
+            type: 'server.task.terminal',
+            taskId,
+            status: 'failed',
+            reason,
+          });
+        }
+        return {
+          taskId,
+          status: 'failed' as const,
+          steps: [],
+          executionMode: 'template_fill' as const,
+        };
+      }
+
       void (async () => {
         const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
         let result: RunTemplateFillResult;
@@ -3014,17 +3214,17 @@ export const tasksRouter = router({
             system: string;
             user: string;
           }): Promise<string> => {
-            const resp = await anthropicClient.messages.create({
-              model: templateModel,
-              max_tokens: 8192,
-              system: req.system,
-              messages: [{ role: 'user', content: req.user }],
-            });
-            let text = '';
-            for (const block of resp.content) {
-              if (block.type === 'text') text += (text ? '\n' : '') + block.text;
-            }
-            return text;
+            const response = await templateResponsesAdapter.stream(
+              {
+                instructions: req.system,
+                input: req.user,
+                tools: [],
+                temperature: 0,
+                maxOutputTokens: 8192,
+              },
+              { timeoutMs: 60_000 },
+            );
+            return response.text;
           };
 
           result = await runTemplateFillTask({
@@ -3155,6 +3355,11 @@ export const tasksRouter = router({
       );
       const generateResponsesAdapter =
         generateRuntime.kind === 'ready' ? generateRuntime.responses('standard') : null;
+      const verifierRuntime = resolveVerifierRuntimeForUser(ctx.userId, userRow.modelDataRegion);
+      const semanticVerifierAdapter =
+        verifierRuntime.kind === 'ready' ? verifierRuntime.messages('verify_strict') : null;
+      const generateUnavailableReasonCode =
+        generateRuntime.kind === 'unavailable' ? generateRuntime.reasonCode : null;
 
       await repo.insertTask(
         {
@@ -3266,8 +3471,8 @@ export const tasksRouter = router({
                 summary: '',
                 reason: generateRuntimeUnavailableReason(
                   generateRuntime.kind === 'unavailable'
-                    ? generateRuntime.reason
-                    : 'LANE_DISABLED',
+                    ? generateRuntime.reasonCode
+                    : 'MODEL_MIGRATION_IN_PROGRESS',
                 ),
                 inputTokens: 0,
                 outputTokens: 0,
@@ -3289,6 +3494,7 @@ export const tasksRouter = router({
           taskId,
           intent: input.intent,
           outcome,
+          semanticAdapter: semanticVerifierAdapter,
           logger: ctx.logger,
           onVerifying: () => broadcastSubStatus(ctx.userId, taskId, 'verifying'),
         });
@@ -3317,6 +3523,9 @@ export const tasksRouter = router({
               }
             : {}),
           fallbackChain,
+          ...(generateUnavailableReasonCode
+            ? { reasonCode: generateUnavailableReasonCode }
+            : {}),
           elapsedMs,
         };
         ctx.logger.info(
@@ -3420,6 +3629,9 @@ export const tasksRouter = router({
               status: 'failed',
               reason,
               tickCount: 1,
+              ...(generateUnavailableReasonCode
+                ? { errorCode: generateUnavailableReasonCode }
+                : {}),
               metadata,
               failedChecks: generateFailedChecks,
             });
@@ -3574,6 +3786,15 @@ export const tasksRouter = router({
         fallbackGenerateRuntime.kind === 'ready'
           ? fallbackGenerateRuntime.responses('standard')
           : null;
+      const verifierRuntime = resolveVerifierRuntimeForUser(ctx.userId, userRow.modelDataRegion);
+      const semanticVerifierAdapter =
+        verifierRuntime.kind === 'ready' ? verifierRuntime.messages('verify_strict') : null;
+      const scrapeUnavailableReasonCode =
+        scrapeRuntime.kind === 'unavailable' ? scrapeRuntime.reasonCode : null;
+      const fallbackGenerateUnavailableReasonCode =
+        fallbackGenerateRuntime.kind === 'unavailable'
+          ? fallbackGenerateRuntime.reasonCode
+          : null;
 
       await repo.insertTask(
         {
@@ -3716,7 +3937,9 @@ export const tasksRouter = router({
                 status: 'failed' as const,
                 summary: '',
                 reason: generateRuntimeUnavailableReason(
-                  scrapeRuntime.kind === 'unavailable' ? scrapeRuntime.reason : 'LANE_DISABLED',
+                  scrapeRuntime.kind === 'unavailable'
+                    ? scrapeRuntime.reasonCode
+                    : 'MODEL_MIGRATION_IN_PROGRESS',
                 ),
                 inputTokens: 0,
                 outputTokens: 0,
@@ -3817,8 +4040,8 @@ export const tasksRouter = router({
                   summary: '',
                   reason: generateRuntimeUnavailableReason(
                     fallbackGenerateRuntime.kind === 'unavailable'
-                      ? fallbackGenerateRuntime.reason
-                      : 'LANE_DISABLED',
+                      ? fallbackGenerateRuntime.reasonCode
+                      : 'MODEL_MIGRATION_IN_PROGRESS',
                   ),
                   inputTokens: 0,
                   outputTokens: 0,
@@ -3890,6 +4113,7 @@ export const tasksRouter = router({
           const verified: VerifyOutput = await verifyAndFinalize({
             taskId,
             answerText: outcome.summary,
+            semanticAdapter: semanticVerifierAdapter,
             logger: ctx.logger,
           });
           if (verified.finalText !== outcome.summary) {
@@ -3938,6 +4162,14 @@ export const tasksRouter = router({
               }
             : {}),
           fallbackChain,
+          ...(!finalResponsesAdapter
+            ? {
+                reasonCode:
+                  fallbackGenerateUnavailableReasonCode ??
+                  scrapeUnavailableReasonCode ??
+                  'MODEL_MIGRATION_IN_PROGRESS',
+              }
+            : {}),
           elapsedMs,
         };
         ctx.logger.info(
@@ -4031,6 +4263,14 @@ export const tasksRouter = router({
               status: 'failed',
               reason,
               tickCount: 1,
+              ...(!finalResponsesAdapter
+                ? {
+                    errorCode:
+                      fallbackGenerateUnavailableReasonCode ??
+                      scrapeUnavailableReasonCode ??
+                      'MODEL_MIGRATION_IN_PROGRESS',
+                  }
+                : {}),
               metadata,
               failedChecks: scrapeFailedChecks,
             });
@@ -5475,7 +5715,7 @@ export const tasksRouter = router({
       // default) ⇒ nobody is canaried ⇒ server Brave for everyone.
       const otaExtensionOnline = hasConnectedExtension(ctx.userId);
       const otaMasterEnabled =
-        getExecutionFeatureFlags().OTA_USER_BROWSER && Boolean(anthropicForResolver);
+        getExecutionFeatureFlags().OTA_USER_BROWSER && Boolean(legacyMediaModelClient);
             const otaAllowedDomains = parseOtaAllowlist(
               process.env.OTA_USER_BROWSER_ALLOWED_DOMAINS,
             );
@@ -5513,7 +5753,7 @@ export const tasksRouter = router({
           taskId,
           intent: effectiveIntent,
           deps: {
-            client: anthropicForResolver!,
+            client: legacyMediaModelClient!,
             dispatchNavigate: async (url: string) => {
               const r = await sendExtensionToolCall(ctx.userId, {
                 taskId,
@@ -5623,8 +5863,8 @@ export const tasksRouter = router({
                       summary: '',
                       reason: generateRuntimeUnavailableReason(
                         handoffGenerateRuntime.kind === 'unavailable'
-                          ? handoffGenerateRuntime.reason
-                          : 'LANE_DISABLED',
+                          ? handoffGenerateRuntime.reasonCode
+                          : 'MODEL_MIGRATION_IN_PROGRESS',
                       ),
                       inputTokens: 0,
                       outputTokens: 0,
@@ -7313,6 +7553,7 @@ export const tasksRouter = router({
       const repo = new TaskRepository(ctx.db);
       const [row] = await ctx.db
         .select({
+          id: tasksTable.id,
           status: tasksTable.status,
           awaitingKind: tasksTable.awaitingKind,
           intent: tasksTable.intent,
@@ -7364,6 +7605,74 @@ export const tasksRouter = router({
           awaitingKind: 'video_quote',
         });
         return { taskId: input.taskId, status: 'awaiting_user' as const };
+      }
+
+      // The quote may predate the Qwen-only cutover. A positive answer must
+      // not debit quota or create a generation child while the media lane is
+      // migration-unavailable. Settle the quote itself as an explicit failed
+      // terminal so repeated confirmation cannot spin or charge twice.
+      if (appEnv.MODEL_RUNTIME_POLICY === 'qwen_only') {
+        const unavailable = modelRuntimeWiring.resolveUnmigrated('video_generation');
+        const unavailableReason = modelTaskFailureReason(unavailable.reasonCode);
+        const previousResult =
+          row.result && typeof row.result === 'object'
+            ? (row.result as Record<string, unknown>)
+            : {};
+        const previousMetadata =
+          previousResult.metadata && typeof previousResult.metadata === 'object'
+            ? (previousResult.metadata as Record<string, unknown>)
+            : {};
+        const failed = await ctx.db.transaction(async (tx) => {
+        const updateResult = await tx
+          .update(tasksTable)
+          .set({
+            status: 'failed',
+            awaitingKind: null,
+            awaitingQuestion: null,
+            errorCode: unavailable.reasonCode,
+            errorMessage: unavailableReason,
+            completedAt: new Date(),
+            result: {
+              ...previousResult,
+              reason: unavailableReason,
+              metadata: {
+                ...previousMetadata,
+                reasonCode: unavailable.reasonCode,
+              },
+            },
+          })
+          .where(
+            and(
+              eq(tasksTable.id, row.id),
+              eq(tasksTable.status, 'awaiting_user'),
+              eq(tasksTable.awaitingKind, 'video_quote'),
+            ),
+          );
+        if (readAffectedRows(updateResult) !== 1) return false;
+        await tx.insert(taskEvents).values({
+          externalId: newExternalId('taskEvent'),
+          taskId: row.id,
+          type: 'task.failed',
+          actor: 'system',
+          payload: {
+            source: 'video_quote',
+            from: 'awaiting_user',
+            to: 'failed',
+            errorCode: unavailable.reasonCode,
+          },
+        });
+        return true;
+        });
+        if (!failed) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '找不到待确认的视频报价' });
+        }
+        broadcastToUser(ctx.userId, {
+          type: 'server.task.terminal',
+          taskId: input.taskId,
+          status: 'failed',
+          reason: unavailableReason,
+        });
+        return { taskId: input.taskId, status: 'failed' as const };
       }
 
       // Validate the quote payload before the atomic consume. A malformed
@@ -7479,7 +7788,7 @@ export const tasksRouter = router({
         });
       }
       const preflight = await claimVideoConfirmAfterVerifierPreflight(
-        { choice, hasVerifier: Boolean(anthropicForResolver) },
+        { choice, hasVerifier: Boolean(legacyMediaModelClient) },
         async () => true,
       );
       if (preflight.issue) {
@@ -7562,7 +7871,7 @@ export const tasksRouter = router({
       // generate_video | generate_image — 外部供应商调用只在事务提交后启动。
       broadcastSubStatus(ctx.userId, newTaskId, 'generating');
 
-      const anthropicClient = anthropicForResolver;
+      const anthropicClient = legacyMediaModelClient;
       const userExternalId = ctx.userId;
       const userInternalId = userRow.id;
       const ipVoiceId = userRow.qwenVoiceId; // Phase 2 第三期 IP lane
@@ -8988,8 +9297,8 @@ export const tasksRouter = router({
                   summary: '',
                   reason: generateRuntimeUnavailableReason(
                     resumeGenerateRuntime.kind === 'unavailable'
-                      ? resumeGenerateRuntime.reason
-                      : 'LANE_DISABLED',
+                      ? resumeGenerateRuntime.reasonCode
+                      : 'MODEL_MIGRATION_IN_PROGRESS',
                   ),
                   inputTokens: 0,
                   outputTokens: 0,
