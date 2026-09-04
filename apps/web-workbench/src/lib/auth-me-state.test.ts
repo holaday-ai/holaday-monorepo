@@ -16,6 +16,7 @@ describe('auth.me state helpers', () => {
         videoEnabled: true,
         teamProjectsEnabled: true,
         teamTaskLifecycleEnabled: true,
+        modelDataRegion: 'intl',
       }),
     ).toEqual({
       userId: 'u1',
@@ -29,6 +30,7 @@ describe('auth.me state helpers', () => {
       videoEnabled: true,
       teamProjectsEnabled: true,
       teamTaskLifecycleEnabled: true,
+      modelDataRegion: 'intl',
     });
   });
 
@@ -45,6 +47,7 @@ describe('auth.me state helpers', () => {
       videoEnabled: false,
       teamProjectsEnabled: false,
       teamTaskLifecycleEnabled: false,
+      modelDataRegion: null,
     });
     expect(
       normalizeAuthMeProfile({
@@ -89,6 +92,16 @@ describe('auth.me state helpers', () => {
     expect(
       normalizeAuthMeProfile({ teamTaskLifecycleEnabled: true }).teamTaskLifecycleEnabled,
     ).toBe(true);
+  });
+
+  it.each([
+    ['cn', 'cn'],
+    ['intl', 'intl'],
+    [' CN ', null],
+    ['unknown', null],
+    [null, null],
+  ])('normalizes model data region %s to %s', (value, expected) => {
+    expect(normalizeAuthMeProfile({ modelDataRegion: value }).modelDataRegion).toBe(expected);
   });
 
   it('chooses stable display names without rendering objects', () => {

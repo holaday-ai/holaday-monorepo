@@ -112,6 +112,7 @@ const ORGANIZATION_FIXTURES = {
     role: 'owner',
     managerDisplayName: null,
     activeMemberCount: 3,
+    modelDataRegion: null,
   },
   admin: {
     organizationId: 'org_design',
@@ -119,6 +120,7 @@ const ORGANIZATION_FIXTURES = {
     role: 'admin',
     managerDisplayName: 'Owner',
     activeMemberCount: 3,
+    modelDataRegion: null,
   },
   manager: {
     organizationId: 'org_design',
@@ -126,6 +128,7 @@ const ORGANIZATION_FIXTURES = {
     role: 'manager',
     managerDisplayName: 'Owner',
     activeMemberCount: 3,
+    modelDataRegion: null,
   },
   member: {
     organizationId: 'org_design',
@@ -133,6 +136,7 @@ const ORGANIZATION_FIXTURES = {
     role: 'member',
     managerDisplayName: 'Manager',
     activeMemberCount: 3,
+    modelDataRegion: null,
   },
 } as const satisfies Record<string, OrganizationListOutput[number]>;
 
@@ -188,6 +192,7 @@ const OPERATIONS_ORGANIZATION = {
   role: 'member',
   managerDisplayName: 'Ops Manager',
   activeMemberCount: 2,
+  modelDataRegion: null,
 } as const satisfies OrganizationListOutput[number];
 
 const OPERATIONS_PROJECT = {
@@ -655,6 +660,7 @@ describe('ProjectsPage organization workspace', () => {
         role: 'manager',
         managerDisplayName: 'Owner',
         activeMemberCount: 2,
+        modelDataRegion: null,
       },
     ]);
     renderPage();
@@ -836,6 +842,7 @@ describe('ProjectsPage organization workspace', () => {
         role: 'owner',
         managerDisplayName: null,
         activeMemberCount: 1,
+        modelDataRegion: null,
       },
     ]);
 
@@ -873,6 +880,7 @@ describe('ProjectsPage invitation plaintext lifecycle', () => {
         role: 'manager',
         managerDisplayName: 'Owner',
         activeMemberCount: 2,
+        modelDataRegion: null,
       },
     ]);
     api.organizationMembers.mockResolvedValue(ORGANIZATION_MEMBERS);
@@ -1468,6 +1476,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
       role: 'admin',
       managerDisplayName: 'Ops Owner',
       activeMemberCount: 3,
+      modelDataRegion: null,
     } as const;
     const operationsProject = {
       ...TEAM_PROJECT_RESPONSE,
@@ -1591,6 +1600,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
       role: 'member',
       managerDisplayName: 'Ops Manager',
       activeMemberCount: 2,
+      modelDataRegion: null,
     } as const;
     const memberOrganization = {
       ...ORGANIZATION_FIXTURES.member,
@@ -1906,6 +1916,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
       role: 'member',
       managerDisplayName: 'Ops Manager',
       activeMemberCount: 2,
+      modelDataRegion: null,
     } as const;
     const operationsProject = {
       ...TEAM_PROJECT_RESPONSE,
@@ -2078,6 +2089,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
       role: 'owner',
       managerDisplayName: null,
       activeMemberCount: 1,
+      modelDataRegion: null,
     } as const;
     shell.teamProjectsEnabled = true;
     api.organizationsList

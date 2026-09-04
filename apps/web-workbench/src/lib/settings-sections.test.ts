@@ -10,6 +10,7 @@ describe('settings sections', () => {
     expect(SETTINGS_SECTIONS.map((section) => section.id)).toEqual([
       'appearance',
       'roles',
+      'model-region',
       'api-keys',
       'memory',
       'notifications',

@@ -1,6 +1,7 @@
 export const SETTINGS_SECTIONS = [
   { id: 'appearance', label: '外观' },
   { id: 'roles', label: 'AI 视角' },
+  { id: 'model-region', label: '数据区域' },
   { id: 'api-keys', label: 'API Key' },
   { id: 'memory', label: 'AI 记忆' },
   { id: 'notifications', label: '通知' },
