@@ -107,7 +107,11 @@ import {
   sanitizeFinalText,
   stripStopReasonMarkers,
 } from '../../agent/text-sanitizer.js';
-import { injectResolvedUrl, resolveIntentUrl } from '../../agent/url-resolver.js';
+import {
+  injectResolvedUrl,
+  resolveIntentUrl,
+  toSafeUrlResolutionLog,
+} from '../../agent/url-resolver.js';
 import type { VideoScript } from '../../agent/video/types.js';
 import { VIDEO_CREATION_ALLOWLIST } from '../../agent/video/video-access.js';
 import { probeCloneReferenceQuoteFacts } from '../../agent/video/video-clone-reference.js';
@@ -6572,20 +6576,18 @@ export const tasksRouter = router({
       // queueing intentional follow-ups) FIFO onto a single
       // Playwright Page — no racing clicks. Different users don't
       // block each other.
-      // Bug 1 — URL resolver. Turn colloquial references ("openclaw")
-      // into authoritative URLs before the commander starts guessing.
-      // One Claude call per task create; null on vague intents (safe
-      // fall-through to the commander's search-first prompt).
-      const resolved = await resolveIntentUrl(input.intent, {
-        client: anthropicForResolver,
-      });
-          const enrichedIntent = resolved
-            ? injectResolvedUrl(input.intent, resolved)
-            : input.intent;
-      if (resolved && resolved.source === 'model') {
+      // URL resolution is deterministic: explicit user URLs are network-
+      // checked, known sites come from the curated playbook registry, and
+      // unknown/ambiguous names receive a search-and-verify instruction. A
+      // model never selects the navigation target.
+      const resolved = await resolveIntentUrl(input.intent);
+      const enrichedIntent = resolved
+        ? injectResolvedUrl(input.intent, resolved)
+        : input.intent;
+      if (resolved) {
         ctx.logger.info(
-          { taskId, token: resolved.token, url: resolved.url },
-          'urlResolve: injected resolved URL into intent',
+          toSafeUrlResolutionLog(resolved),
+          'urlResolve: resolution classified',
         );
       }
 

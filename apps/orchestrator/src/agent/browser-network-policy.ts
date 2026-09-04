@@ -14,7 +14,12 @@ export type BrowserNetworkDecision =
     }
   | {
       allowed: false;
-      reason: 'invalid_url' | 'bad_scheme' | 'private_network' | 'dns_unverified';
+      reason:
+        | 'invalid_url'
+        | 'bad_scheme'
+        | 'embedded_credentials'
+        | 'private_network'
+        | 'dns_unverified';
       message: string;
     };
 
@@ -183,6 +188,14 @@ function checkStaticBrowserUrl(rawUrl: string):
       allowed: false,
       reason: 'bad_scheme',
       message: '只能访问 http 或 https 网页。',
+    };
+  }
+
+  if (url.username || url.password) {
+    return {
+      allowed: false,
+      reason: 'embedded_credentials',
+      message: '目标网址不能包含用户名或密码。',
     };
   }
 
