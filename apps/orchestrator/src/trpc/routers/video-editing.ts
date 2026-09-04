@@ -7,6 +7,7 @@ import { env } from '../../config/env.js';
 import { taskFiles } from '../../db/schema/task-files.js';
 import { users } from '../../db/schema/users.js';
 import { FileService } from '../../files/file-service.js';
+import { resolveCoreModelRuntime } from '../../llm/core-model-runtime.js';
 import {
   type VideoEditingFeatureConfig,
   canAccessVideoEditing,
@@ -15,7 +16,7 @@ import {
 } from '../../video-editing/feature-access.js';
 import {
   type VideoEditPlanningResult,
-  createOpenAIVideoEditPlannerClient,
+  createQwenVideoEditPlannerClient,
   planVideoEditInstruction,
 } from '../../video-editing/instruction-planner.js';
 import {
@@ -62,6 +63,7 @@ export interface VideoEditingUser {
   id: number;
   externalId: string;
   plan: PlanId;
+  modelDataRegion?: unknown;
 }
 
 type OwnedProjectResult = {
@@ -649,6 +651,7 @@ const productionDependencies: VideoEditingRouterDependencies = {
         externalId: users.externalId,
         plan: users.plan,
         status: users.status,
+        modelDataRegion: users.modelDataRegion,
       })
       .from(users)
       .where(eq(users.externalId, ctx.userId))
@@ -657,15 +660,26 @@ const productionDependencies: VideoEditingRouterDependencies = {
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
     }
     const plan: PlanId = row.plan === 'basic' || row.plan === 'pro' ? row.plan : 'free';
-    return { id: row.id, externalId: row.externalId, plan };
+    return {
+      id: row.id,
+      externalId: row.externalId,
+      plan,
+      modelDataRegion: row.modelDataRegion,
+    };
   },
-  createRuntime(ctx) {
+  createRuntime(ctx, user) {
     const repository = VideoEditProjectRepository.fromDb(ctx.db);
     const fileService = new FileService(ctx.db, ctx.logger);
-    const plannerClient = createOpenAIVideoEditPlannerClient({
-      enabled: env.VIDEO_EDITING_ENABLED,
-      apiKey: process.env.OPENAI_API_KEY ?? '',
+    const plannerRuntime = resolveCoreModelRuntime({
+      environment: env,
+      actorExternalId: user.externalId,
+      lane: 'video_edit_planner',
+      ownership: { scope: 'personal', userRegion: user.modelDataRegion },
     });
+    const plannerClient =
+      plannerRuntime.kind === 'ready'
+        ? createQwenVideoEditPlannerClient({ messagesAdapter: plannerRuntime.messages('fast') })
+        : null;
     const sourceDependencies = createVideoSourceImportDependencies({
       db: ctx.db,
       fileService,

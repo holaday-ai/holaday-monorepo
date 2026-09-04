@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import type { MessagesAdapter } from '../llm/messages-adapter.js';
 import {
   type VideoEditPlan,
   VideoEditPlanValidationError,
@@ -100,38 +100,37 @@ function plannerDocument(document: VideoEditDocument) {
   };
 }
 
-export function createOpenAIVideoEditPlannerClient(input: {
-  enabled: boolean;
-  apiKey: string;
-  model?: string;
+export function createQwenVideoEditPlannerClient(input: {
+  messagesAdapter: MessagesAdapter;
   timeoutMs?: number;
-}): VideoEditPlannerClient | null {
-  if (!input.enabled || !input.apiKey.trim()) return null;
-  const client = new OpenAI({
-    apiKey: input.apiKey,
-    timeout: input.timeoutMs ?? 12_000,
-    maxRetries: 1,
-  });
+}): VideoEditPlannerClient {
   return {
     async plan(request) {
-      const completion = await client.chat.completions.create({
-        model: input.model ?? 'gpt-4o-mini',
-        temperature: 0,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: PLANNER_SYSTEM_PROMPT },
-          {
-            role: 'user',
-            content: JSON.stringify({
-              instruction: request.instruction,
-              selectedSceneId: request.selectedSceneId ?? null,
-              sourceKind: request.sourceKind,
-              document: plannerDocument(request.document),
-            }),
-          },
-        ],
-      });
-      const content = completion.choices[0]?.message.content;
+      const response = await input.messagesAdapter.create(
+        {
+          maxTokens: 2_000,
+          thinking: { type: 'disabled' },
+          system: PLANNER_SYSTEM_PROMPT,
+          messages: [
+            {
+              role: 'user',
+              content: JSON.stringify({
+                instruction: request.instruction,
+                selectedSceneId: request.selectedSceneId ?? null,
+                sourceKind: request.sourceKind,
+                document: plannerDocument(request.document),
+              }),
+            },
+          ],
+          temperature: 0,
+        },
+        { timeoutMs: input.timeoutMs ?? 12_000, maxRetries: 1 },
+      );
+      const content = response.content
+        .filter((block) => block.type === 'text')
+        .map((block) => block.text)
+        .join('')
+        .trim();
       if (!content) throw new Error('video edit planner returned no content');
       return JSON.parse(content) as unknown;
     },
