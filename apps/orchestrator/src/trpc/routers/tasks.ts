@@ -87,7 +87,6 @@ import {
   classifySupercarTaskStateTransition,
   shouldPersistSupercarTerminalOutcome,
   shouldRunSupercarTerminalSideEffects,
-  supercarResponseLayerTerminalStatus,
 } from '../../agent/supercar/task-state-machine.js';
 import type { PlannedStep, TaskState } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
@@ -3279,14 +3278,9 @@ export const tasksRouter = router({
           'task:completed',
         );
 
-        // Optimization #2 (Codex follow-up) — response-layer formatter
-        // runs AFTER the verifier (already done above) + BEFORE
-        // persist so the row's `result.summary` carries the polished
-        // text. `runResponseLayerForLane` is a no-op when the flag
-        // is off; on flag-on it dynamic-imports the formatter +
-        // OpenAI SDK. We stamp the metadata columns AFTER persist
-        // (see `stampResponseLayerColumns` call below) so we don't
-        // UPDATE a row that doesn't exist yet on failure path.
+        // Compatibility boundary for the retired second-model polisher.
+        // It always returns the primary answer byte-for-byte and never
+        // emits metadata, regardless of legacy environment variables.
         const generateRl = await runResponseLayerForLane({
           taskId,
           status: outcome.status,
@@ -3855,9 +3849,8 @@ export const tasksRouter = router({
           'task:completed',
         );
 
-        // Optimization #2 (Codex follow-up) — same wire-up pattern
-        // as the generate lane: format after verifier, before
-        // persist; stamp metadata columns after persist.
+        // Retired polishing compatibility boundary; always preserves
+        // the primary scrape answer byte-for-byte.
         const scrapeRl = await runResponseLayerForLane({
           taskId,
           status: outcome.status,
@@ -5550,12 +5543,8 @@ export const tasksRouter = router({
                 },
                 'task:completed',
               );
-              // Optimization #2 (Codex follow-up) — format the
-              // handoff-generate output. Unlike the standalone
-              // generate/scrape lanes this path has no upstream
-              // verifier, but the formatter's deterministic
-              // post-check (no new URLs / numbers, no marker drops)
-              // still applies. Flag-off → no-op.
+              // Retired polishing compatibility boundary; old flags cannot
+              // re-enable a second model call for handoff-generated output.
               const handoffRl = await runResponseLayerForLane({
                 taskId,
                 status: generateOutcome.status,
@@ -5976,68 +5965,25 @@ export const tasksRouter = router({
               executionVerification,
               preFormatResearchSourceTrust,
             );
-            // Optimization #2 — OpenAI response formatter / style
-            // layer. Runs AFTER the verifier (so we polish facts that
-            // have already been grounded) and BEFORE persistence. The
-            // shouldFormat guard short-circuits on short response
-            // (unless expert workflow); the deterministic post-check
-            // refuses any rewrite that introduces new URLs / numbers
-            // or drops a marker. On fallback the formatted text equals
-            // the original — caller sees no visible change, the
-            // metadata records the reason.
-            //
-            // Codex P2 follow-up — the flag check is hoisted to the
-            // CALLER so flag-off → zero DB writes (original_summary /
-            // formatted_summary / response_layer_metadata stay NULL).
-            // Without this gate, the always-flow wrote an audit row
-            // for every terminal task even when no user had opted in.
-            let responseLayerOriginal: string | undefined;
-            let responseLayerMetadata: unknown = undefined;
-            // Inline flag gate — kept in sync with
-            // openai-response-layer.ts `isResponseLayerEnabled`. Inline
-            // (vs. import + call) so the common flag-off path avoids
-            // loading the response-layer module + its `openai` dep at
-            // every terminal.
-            const responseLayerFlag = (
-              process.env.OPENAI_RESPONSE_LAYER_ENABLED ?? 'false'
-            ).toLowerCase();
-            const responseLayerActive =
-              (responseLayerFlag === 'true' || responseLayerFlag === '1') &&
-              !!process.env.OPENAI_API_KEY;
-            const responseLayerTerminalStatus =
-              supercarResponseLayerTerminalStatus(preFormatTerminalStatus);
-            if (responseLayerTerminalStatus && outcome.summary && responseLayerActive) {
-              try {
-                const { format: formatResponse } = await import(
-                  '../../response-layer/openai-response-layer.js'
-                );
-                const fmt = await formatResponse(
-                  {
-                    original: outcome.summary,
-                    terminalStatus: responseLayerTerminalStatus,
-                    expertWorkflowId:
-                      typeof metadata?.expertWorkflowId === 'string'
-                        ? metadata.expertWorkflowId
-                        : undefined,
-                  },
-                  { logger: ctx.logger },
-                );
-                if (fmt.formatted !== outcome.summary) {
-                  responseLayerOriginal = outcome.summary;
-                  outcome = { ...outcome, summary: fmt.formatted };
-                }
-                responseLayerMetadata = fmt.metadata;
-              } catch (err) {
-                // Belt-and-braces — format() already catches its own
-                // errors; a throw here would be a programming bug.
-                ctx.logger.warn(
-                  { err: err instanceof Error ? err.message : String(err), taskId },
-                  'openai-response-layer: unexpected throw — keeping original',
-                );
-              }
+            // The legacy second-model polishing layer is retired. Route the
+            // supercar lane through the same compatibility boundary as the
+            // other lanes so old environment variables cannot re-enable it.
+            const supercarRl = await runResponseLayerForLane({
+              taskId,
+              status: preFormatTerminalStatus,
+              summary: outcome.summary ?? '',
+              expertWorkflowId:
+                typeof metadata?.expertWorkflowId === 'string'
+                  ? metadata.expertWorkflowId
+                  : undefined,
+              logger: ctx.logger,
+            });
+            const responseLayerOriginal = supercarRl.responseLayerOriginal;
+            const responseLayerMetadata = supercarRl.responseLayerMetadata;
+            if (outcome.summary && supercarRl.summary !== outcome.summary) {
+              outcome = { ...outcome, summary: supercarRl.summary };
             }
-            // The optional response layer may rewrite prose, so enforce the
-            // observed-source boundary once more immediately before persistence.
+            // Enforce the observed-source boundary immediately before persistence.
             if (outcome.status === 'completed' && outcome.summary) {
               const persistenceSummary = appendSearchSourceReferences(
                 outcome.summary,
