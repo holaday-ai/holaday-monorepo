@@ -7,8 +7,10 @@ import { type ExecutionMemory, executionMemory } from '../../db/schema/execution
 export class MemoryService {
   constructor(
     private readonly db: DB,
-    private readonly _logger: Logger,
-  ) {}
+    _logger: Logger,
+  ) {
+    void _logger;
+  }
 
   async listForUser(userIdInternal: number): Promise<ExecutionMemory[]> {
     return this.db
