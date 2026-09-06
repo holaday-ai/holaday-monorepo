@@ -72,7 +72,11 @@ MODEL_RUNTIME_POLICY=qwen_only
 QWEN_CORE_ROLLOUT_MODE=synthetic
 QWEN_CORE_ENABLED_LANES=suggestions,plan,generate,scrape,video_edit_planner,verifier
 QWEN_CORE_ALLOWLIST=<唯一合成测试账号标识>
+QWEN_MESSAGES_ADAPTER_ENABLED=true
+QWEN_RESPONSES_ADAPTER_ENABLED=true
 ```
+
+两个协议适配器开关也必须明确开启；仅设置 rollout 和白名单不会开启核心任务。开启前保存上述配置的原始状态，重启后确认生效，账号权限仍由精确白名单与区域边界约束。发生失败时恢复原始状态；若原先未设置适配器开关，重启 PM2 时也必须显式传入 `false`，避免保留 PM2 缓存中的 `true`。
 
 只用该账号依次验证：短文本生成、计划、带来源的资料综合、核验拒绝、模型服务不可用。非白名单账号必须收到小范围验证提示，浏览器/图片/视频能力必须收到迁移提示。检查任务均进入 completed、failed 或 awaiting_user，不得长期停留 executing。
 

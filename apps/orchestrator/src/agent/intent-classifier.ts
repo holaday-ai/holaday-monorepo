@@ -527,6 +527,24 @@ function hasAny(haystack: string, needles: readonly string[]): string | null {
   return null;
 }
 
+const ROUTING_ACTION_CN =
+  '(?:操作|打开|访问|搜索|登录|登陆|填写|提交|点击|进入|前往|跳转|下载|上传|保存|输入|注册|发送|发布|下单|付款|支付|购买|预订|预定|预约|截图)';
+// Double negatives express an affirmative action, including spaced input.
+const DOUBLE_NEGATED_ROUTING_ACTION_CN = new RegExp(
+  `(?:不[得能会]|无法|并非|不是|没有)\\s*不(?=\\s*${ROUTING_ACTION_CN})`,
+  'g',
+);
+// Split only action-bearing continuations; a name such as “但丁” must stay
+// inside the negated target. Each resulting clause is evaluated separately,
+// so “但也不登录” remains negative while “但打开” remains affirmative.
+const ROUTING_CONTRAST_CN = new RegExp(
+  `(?:但是?|而是|改为|只)(?=\\s*(?:也\\s*)?(?:不(?:要|需要|必)?\\s*)?(?:${ROUTING_ACTION_CN}|在|用|通过|把|将))`,
+  'g',
+);
+const BARE_NEGATED_ROUTING_CLAUSE_CN = new RegExp(
+  `不(?=\\s*${ROUTING_ACTION_CN})\\s*[^，。；、,;！？!?\\n]*(?:[，。；、,;！？!?\\n]|$)`,
+  'gi',
+);
 const NEGATED_ROUTING_CLAUSE_CN =
   /(?:不要|别|无需|无须|不用|不需要|不必|禁止|请勿|勿)\s*[^，。；、,;！？!?\n]*(?:[，。；、,;！？!?\n]|$)/gi;
 const NEGATED_ROUTING_CLAUSE_EN =
@@ -534,8 +552,16 @@ const NEGATED_ROUTING_CLAUSE_EN =
 
 function stripNegatedRoutingClauses(intent: string): string {
   return intent
+    .replace(DOUBLE_NEGATED_ROUTING_ACTION_CN, '')
+    // Preserve the established scope of explicit negatives before handling
+    // newly supported bare “不 + action” clauses and their continuations.
     .replace(NEGATED_ROUTING_CLAUSE_CN, ' ')
     .replace(NEGATED_ROUTING_CLAUSE_EN, ' ')
+    .replace(BARE_NEGATED_ROUTING_CLAUSE_CN, (clause) =>
+      clause
+        .replace(ROUTING_CONTRAST_CN, '，$&')
+        .replace(new RegExp(BARE_NEGATED_ROUTING_CLAUSE_CN.source, 'gi'), ' '),
+    )
     .trim();
 }
 
