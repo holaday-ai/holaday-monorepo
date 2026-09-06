@@ -637,6 +637,17 @@ export class TaskRepository {
     return row?.status === 'executing';
   }
 
+  async isCurrentCompletedOutcome(taskExternalId: string, summary: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ status: tasks.status, result: tasks.result })
+      .from(tasks)
+      .where(eq(tasks.externalId, taskExternalId))
+      .limit(1);
+    const result = normalizeJson(row?.result);
+    return row?.status === 'completed' && result !== null && typeof result === 'object' &&
+      'summary' in result && result.summary === summary;
+  }
+
   async markQueuedTaskExecuting(taskExternalId: string): Promise<{ persisted: boolean }> {
     const [taskRow] = await this.db
       .select({ id: tasks.id })

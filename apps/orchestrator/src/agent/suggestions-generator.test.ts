@@ -41,12 +41,17 @@ describe('generateSuggestions', () => {
       }),
     ).resolves.toEqual(['比较同类方案', '整理执行清单', '保存研究结论']);
 
-    expect(adapter.create).toHaveBeenCalledWith({
-      maxTokens: 200,
-      thinking: { type: 'disabled' },
-      system: expect.stringContaining('给出 2-3 个用户可能想继续做的相关任务'),
-      messages: [{ role: 'user', content: '任务：研究零售行业并输出方案\n结果摘要：已完成研究。' }],
-    });
+    expect(adapter.create).toHaveBeenCalledWith(
+      {
+        maxTokens: 200,
+        thinking: { type: 'disabled' },
+        system: expect.stringContaining('给出 2-3 个用户可能想继续做的相关任务'),
+        messages: [
+          { role: 'user', content: '任务：研究零售行业并输出方案\n结果摘要：已完成研究。' },
+        ],
+      },
+      { timeoutMs: 4000, maxRetries: 0 },
+    );
   });
 
   it('absorbs provider errors so suggestions cannot fail a completed task', async () => {
