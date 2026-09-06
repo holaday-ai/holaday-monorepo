@@ -91,6 +91,49 @@ describe('classifyExecutionMode — default is generate', () => {
     });
     expect(out).toBe('browser');
   });
+
+  it.each([
+    '这是合成质量验证任务，不包含个人数据。请写一份虚构社区读书活动的简短通知，必须包含时间：周六14:00；地点：社区阅览室；携带物品：一本喜欢的书。用三条清晰的要点呈现，不需要联网，不操作外部网站。',
+    '写一份活动通知，不访问 https://example.com。',
+    '只整理我提供的资料，不打开网页。',
+    '请总结这段材料，不搜索网络。',
+    '只写通知，不要打开网页但也不登录后台。',
+    '只写通知，不要打开网页但也不填写报名表。',
+    '只总结我提供的材料，不要访问但丁的个人网站 https://example.com。',
+    '只写通知，不要访问只在公司内网开放的网站 https://intranet.example.com。',
+    '请总结这段文字，不要打开只用于登录的网站 https://example.com。',
+  ])('bare negative web actions do not request browser execution: %s', async (intent) => {
+    expect(await classifyExecutionMode({ intent, logger: fakeLogger() })).toBe('generate');
+  });
+
+  it.each([
+    '先写一份活动通知，再操作外部网站。',
+    '不操作后台，但打开 https://example.com 并截图。',
+    '为了核验资料，不得不访问 https://example.com。',
+    '为了核验资料，不能不打开 https://example.com。',
+    '不操作后台但打开 https://example.com 并截图。',
+    '不访问旧网站而是打开 https://example.com 并填写报名表。',
+    '不打开新页面而是在当前页面填写报名表。',
+    '不能 不打开 https://example.com。',
+    '不打开新页面只在当前页面填写报名表。',
+    '不操作后台改为打开 https://example.com 并截图。',
+  ])('affirmative web actions still request browser execution: %s', async (intent) => {
+    expect(await classifyExecutionMode({ intent, logger: fakeLogger() })).toBe('browser');
+  });
+
+  it('keeps two negated actions on either side of a contrast marker offline', async () => {
+    expect(await classifyExecutionMode({
+      intent: '写一份通知，不操作后台但也不访问 https://example.com。',
+      logger: fakeLogger(),
+    })).toBe('generate');
+  });
+
+  it.each([
+    '请生成一张只在店内展示的品牌海报。',
+    '生成一张只用于活动宣传的海报。',
+  ])('leaves affirmative image descriptions unchanged: %s', async (intent) => {
+    expect(await classifyExecutionMode({ intent, logger: fakeLogger() })).toBe('image');
+  });
 });
 
 describe('classifyExecutionMode — pre-Firecrawl regression suite (site/URL without interaction now scrape)', () => {
