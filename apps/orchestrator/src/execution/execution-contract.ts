@@ -351,8 +351,9 @@ function parseChineseSmallNumber(raw: string): number {
 }
 
 /**
- * Codex Pack C3 — JSON schema suffix appended to the runner's system
- * prompt when the intent matches a known kind. Tells the model what
+ * Output guidance appended to the runner's system prompt. Specialized
+ * data tasks retain their JSON schema; ordinary research remains readable.
+ * The specialized schemas tell the model what
  * structure to produce + how to flag missing fields (null), without
  * forcing a JSON-only response (it can still wrap the JSON block in
  * a prose explanation — the verifier just looks for the block).
@@ -363,6 +364,15 @@ function parseChineseSmallNumber(raw: string): number {
  */
 export function buildPromptSchemaSuffix(intent: string): string {
   const { kind } = classifyIntentForOutputRequirement(intent);
+  if (kind === 'general_with_links') {
+    return [
+      '',
+      '直接呈现给用户可阅读的答案，按需要使用段落、列表或表格。',
+      '将有依据的来源写成可点击的 Markdown 链接：[来源名称](完整来源 URL)，放在对应结论附近。',
+      '除非用户明确要求 JSON 或代码格式，否则不要把整份答案包装在 JSON 对象或代码块中。',
+      '用户明确要求的输出格式优先，但来源必须保持真实可追溯；没有依据时明确说明，不得编造来源或事实。',
+    ].join('\n');
+  }
   const schema = INTENT_OUTPUT_SCHEMAS[kind];
   if (!schema) return '';
   return [
@@ -416,14 +426,6 @@ const INTENT_OUTPUT_SCHEMAS: Partial<Record<IntentKind, string>> = {
       ],
       recommendation: 'string',
       rationale: 'string',
-      sources: ['string (URL)'],
-    },
-    null,
-    2,
-  ),
-  general_with_links: JSON.stringify(
-    {
-      answer: 'string',
       sources: ['string (URL)'],
     },
     null,

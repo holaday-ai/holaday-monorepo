@@ -1,6 +1,33 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildContract, classifyIntentForOutputRequirement } from './execution-contract.js';
+import { buildContract, buildPromptSchemaSuffix, classifyIntentForOutputRequirement } from './execution-contract.js';
+
+describe('buildPromptSchemaSuffix — readable research answers', () => {
+  it.each([
+    '请读取 https://www.iana.org/help/example-domains ，用中文总结该页三项要点，包括用途、获取限制和生产环境适用性，每项附来源链接。',
+    '研究这份公开资料，写一段结论并附来源链接。',
+  ])('does not force ordinary sourced answers into a JSON code block', (intent) => {
+    const suffix = buildPromptSchemaSuffix(intent);
+    expect(suffix).toContain('直接呈现');
+    expect(suffix).toContain('[来源名称](完整来源 URL)');
+    expect(suffix).not.toContain('```json');
+    expect(suffix).not.toContain('"answer": "string"');
+    expect(suffix).toContain('用户明确要求');
+    expect(suffix).toContain('不得编造');
+  });
+
+  it('keeps structured contracts for specialized data tasks', () => {
+    const suffix = buildPromptSchemaSuffix('请查 AAPL 最新股价并附来源');
+    expect(suffix).toContain('```json');
+    expect(suffix).toContain('source_url');
+  });
+
+  it('still requires a source URL for ordinary research without requiring JSON rows', () => {
+    const contract = buildContract({ taskId: 'synthetic_readable_sources', intent: '总结这份公开资料并附来源链接', executionMode: 'scrape' });
+    expect(contract.successCriteria.some(c => c.type === 'url_count' && c.data?.min === 1)).toBe(true);
+    expect(contract.successCriteria.some(c => c.type === 'result_count')).toBe(false);
+  });
+});
 
 describe('buildContract — tier selection', () => {
   it('expertWorkflowId set → full tier (overrides executionMode)', () => {
