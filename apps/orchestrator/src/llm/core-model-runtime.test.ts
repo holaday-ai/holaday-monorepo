@@ -4,6 +4,7 @@ import type { MessagesAdapter } from './messages-adapter.js';
 import { MessagesAdapterError } from './messages-adapter.js';
 import type { ResponsesAdapter } from './responses-adapter.js';
 import { ResponsesAdapterError } from './responses-adapter.js';
+import * as observationSink from './core-model-observation.js';
 
 const ENVIRONMENT = {
   NODE_ENV: 'test' as const,
@@ -98,6 +99,30 @@ function baseInput(overrides: Record<string, unknown> = {}) {
 }
 
 describe('resolveCoreModelRuntime', () => {
+  it('observes actual calls by default even when production wiring supplies no callback', async () => {
+    const observe = vi.spyOn(observationSink, 'recordCoreModelObservation').mockImplementation(() => {});
+    try {
+      const runtime = resolveCoreModelRuntime(baseInput());
+      if (runtime.kind !== 'ready') throw new Error('expected ready runtime');
+      await runtime.responses('standard').stream({ input: 'private request' });
+      expect(observe).toHaveBeenCalledTimes(1);
+      expect(observe).toHaveBeenCalledWith(expect.objectContaining({
+        lane: 'generate', protocol: 'responses', region: 'intl', outcome: 'success',
+      }));
+      expect(JSON.stringify(observe.mock.calls)).not.toContain('private request');
+    } finally { observe.mockRestore(); }
+  });
+
+  it('does not report a token-limited response as a successful complete response', async () => {
+    const adapter = buildResponsesAdapter();
+    const complete = await adapter.stream({ input: 'fixture' });
+    adapter.stream = async () => ({ ...complete, status: 'incomplete', incompleteReason: 'max_output_tokens' });
+    const observe = vi.fn();
+    const runtime = resolveCoreModelRuntime(baseInput({ createResponses: () => adapter, observe }));
+    if (runtime.kind !== 'ready') throw new Error('expected ready runtime');
+    await runtime.responses('standard').stream({ input: 'private request' });
+    expect(observe).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'incomplete' }));
+  });
   it('does not construct a transport before policy, lane and region all pass', () => {
     const createMessages = vi.fn(() => buildMessagesAdapter());
     const createResponses = vi.fn(() => buildResponsesAdapter());
@@ -210,6 +235,7 @@ describe('resolveCoreModelRuntime', () => {
     expect(observe).toHaveBeenCalledTimes(1);
     const observation = observe.mock.calls[0]?.[0];
     expect(observation).toEqual({
+      lane: 'generate', protocol: 'messages',
       provider: 'alibaba-model-studio',
       region: 'intl',
       deploymentScope: 'international',
@@ -231,6 +257,7 @@ describe('resolveCoreModelRuntime', () => {
         'inputTokens',
         'outputTokens',
         'latencyMs',
+        'lane', 'protocol',
       ].sort(),
     );
   });
@@ -260,6 +287,7 @@ describe('resolveCoreModelRuntime', () => {
         .create({ maxTokens: 32, messages: [{ role: 'user', content: 'private' }] }),
     ).rejects.toMatchObject({ code: 'REQUEST_TIMEOUT' });
     expect(observe).toHaveBeenCalledWith({
+      lane: 'generate', protocol: 'messages',
       provider: 'alibaba-model-studio',
       region: 'intl',
       deploymentScope: 'international',
@@ -282,6 +310,7 @@ describe('resolveCoreModelRuntime', () => {
     await result.responses('reasoning').stream({ input: 'private', tools: [] });
 
     expect(observe).toHaveBeenCalledWith({
+      lane: 'generate', protocol: 'responses',
       provider: 'alibaba-model-studio',
       region: 'intl',
       deploymentScope: 'international',

@@ -76,13 +76,16 @@ export async function generatePlan(opts: {
   intent: string;
   logger: Logger;
   taskId?: string;
+  allowedTools?: readonly (typeof TOOL_LABELS)[number][];
 }): Promise<PlanGenerateResult> {
   try {
     const response = await opts.messagesAdapter.create(
       {
         maxTokens: 512,
         thinking: { type: 'disabled' },
-        system: PLAN_SYSTEM,
+        system: PLAN_SYSTEM + (opts.allowedTools
+          ? `\n本次只能使用这些工具标签：${opts.allowedTools.join('、')}。不能规划其他工具的操作。`
+          : ''),
         messages: [{ role: 'user', content: `任务：${opts.intent}` }],
       },
       { timeoutMs: 6_000, maxRetries: 0 },
@@ -109,7 +112,8 @@ export async function generatePlan(opts: {
       return noPlan();
     }
 
-    if (payload.steps.some((step) => isUnsafePlanAction(step.text))) {
+    if (payload.steps.some((step) => isUnsafePlanAction(step.text) ||
+      (opts.allowedTools && !opts.allowedTools.includes(step.tool)))) {
       opts.logger.warn(
         {
           taskId: opts.taskId,
