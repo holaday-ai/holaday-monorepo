@@ -625,6 +625,18 @@ export class TaskRepository {
     return { persisted: extractMysqlAffectedRows(result) > 0 };
   }
 
+  async persistActiveCorePlan(taskExternalId: string, planText: string): Promise<{ persisted: boolean }> {
+    const result = await this.db.update(tasks).set({ planText, planStatus: [] })
+      .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'executing')));
+    return { persisted: extractMysqlAffectedRows(result) > 0 };
+  }
+
+  async isTaskExecuting(taskExternalId: string): Promise<boolean> {
+    const [row] = await this.db.select({ status: tasks.status }).from(tasks)
+      .where(eq(tasks.externalId, taskExternalId)).limit(1);
+    return row?.status === 'executing';
+  }
+
   async markQueuedTaskExecuting(taskExternalId: string): Promise<{ persisted: boolean }> {
     const [taskRow] = await this.db
       .select({ id: tasks.id })

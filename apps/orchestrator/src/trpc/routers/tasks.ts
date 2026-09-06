@@ -40,6 +40,7 @@ import { DrizzleLlmCallRecorder } from '../../agent/llm-call-recorder.js';
 import { detectNavFailure } from '../../agent/nav-failure-detector.js';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js';
+import { prepareCoreTaskPlan } from '../../agent/core-task-plan.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { generateSuggestions } from '../../agent/suggestions-generator.js';
 import { resolveSuggestionsProviderRoute } from '../../agent/suggestions-provider.js';
@@ -3413,6 +3414,22 @@ export const tasksRouter = router({
         const fallbackChain: string[] = ['generate'];
         let outcome: GenerateOutcome;
         try {
+          const executionPlan = generateResponsesAdapter
+            ? await prepareCoreTaskPlan({
+                wiring: modelRuntimeWiring, actorExternalId: ctx.userId,
+                modelDataRegion: userRow.modelDataRegion, intent: input.intent, logger: ctx.logger,
+                persist: async planText => (await repo.persistActiveCorePlan(taskId, planText)).persisted,
+                publish: planText => broadcastToUser(ctx.userId, {
+                  type: 'server.task.plan', taskId, planText, planStatus: [],
+                }),
+              })
+            : null;
+          // Planning may finish after cancellation, including when it yields no plan.
+          // Recheck before launching a new paid request or sending progress frames.
+          if (generateResponsesAdapter && !(await repo.isTaskExecuting(taskId))) {
+            disposeExecution(taskId);
+            return;
+          }
           // Codex Pack B1 — generating chip: about to invoke the LLM
           // stream. runGenerateTask emits its own progress markers
           // inside; this prefix marker covers the brief setup gap.
@@ -3448,6 +3465,7 @@ export const tasksRouter = router({
                 skillId: dispatchSkillId,
                 expertMode: expertModeOverride,
                 responsesAdapter: generateResponsesAdapter,
+                ...(executionPlan ? { executionPlan } : {}),
                 logger: ctx.logger,
                 ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
                 // Phase 24 RC follow-up — stream LLM deltas to the SPA
@@ -3878,6 +3896,20 @@ export const tasksRouter = router({
         let finalExecutionMode: 'scrape' | 'generate' = 'scrape';
         let scrapeOutcome: ScrapeOutcome;
         try {
+          const executionPlan = scrapeResponsesAdapter
+            ? await prepareCoreTaskPlan({
+                wiring: modelRuntimeWiring, actorExternalId: ctx.userId,
+                modelDataRegion: userRow.modelDataRegion, intent: input.intent, logger: ctx.logger,
+                persist: async planText => (await repo.persistActiveCorePlan(taskId, planText)).persisted,
+                publish: planText => broadcastToUser(ctx.userId, {
+                  type: 'server.task.plan', taskId, planText, planStatus: [],
+                }),
+              })
+            : null;
+          if (scrapeResponsesAdapter && !(await repo.isTaskExecuting(taskId))) {
+            disposeExecution(taskId);
+            return;
+          }
           // Codex Pack B1 — extracting chip: firecrawl about to fetch.
           broadcastSubStatus(ctx.userId, taskId, 'extracting');
           scrapeOutcome = scrapeResponsesAdapter
@@ -3904,6 +3936,7 @@ export const tasksRouter = router({
                 skillId: dispatchSkillId,
                 expertMode: expertModeOverride,
                 responsesAdapter: scrapeResponsesAdapter,
+                ...(executionPlan ? { executionPlan } : {}),
                 firecrawl,
                 logger: ctx.logger,
             // Phase 24 RC follow-up — stream LLM deltas + push

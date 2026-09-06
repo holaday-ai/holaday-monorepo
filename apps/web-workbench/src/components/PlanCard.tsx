@@ -39,8 +39,8 @@ interface Props {
  * planner emits a numbered list; we render via ReactMarkdown for
  * consistency with TerminalSummary). Step-level state icons sit
  * inline next to each numbered bullet — `planStatus` array is
- * matched by 1-based step index (the planner emits "1. ..." / "2.
- * ..." prefixes).
+ * matched by the server's zero-based step index. Empty status arrays
+ * explicitly represent advisory text plans without measured step progress.
  *
  * Style choice: muted neutral card with a faint left border. We
  * deliberately avoid blue/red primary accents here so the card
@@ -80,6 +80,7 @@ export function PlanCard({
     () => planProgressSummary(planStatus ?? null),
     [planStatus],
   );
+  const advisory = (planStatus?.length ?? 0) === 0;
 
   return (
     <div className="rounded-[8px] border border-[#DCDDDD] bg-white px-5 py-4 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85">
@@ -94,9 +95,9 @@ export function PlanCard({
             <ListChecks className="h-3.5 w-3.5" />
           </span>
           <span className="min-w-0">
-            <span className="block text-sm font-medium text-foreground">执行计划</span>
+            <span className="block text-sm font-medium text-foreground">{advisory ? '处理思路' : '执行计划'}</span>
             <span className="mt-0.5 block text-[11px] text-muted-foreground">
-              {progress.label}
+              {advisory ? '拟采用的处理方式，不代表已完成' : progress.label}
             </span>
           </span>
         </span>
@@ -123,6 +124,7 @@ export function PlanCard({
             remarkPlugins={[remarkGfm]}
             components={{
               ol: ({ children }) => {
+                if (advisory) return <ol>{children}</ol>;
                 return <PlanList statusByIdx={statusByIdx}>{children}</PlanList>;
               },
               a: ({ href, children, ...rest }) => {
@@ -188,8 +190,8 @@ function PlanList({
     <ol className="list-none pl-0">
       {React.Children.map(children, (child) => {
         if (!React.isValidElement(child)) return child;
-        itemIndex += 1;
         const status = statusByIdx.get(itemIndex);
+        itemIndex += 1;
         return (
           <li key={itemIndex} className="flex items-start gap-2 py-0.5">
             <StatusPill state={status?.status ?? 'pending'} />

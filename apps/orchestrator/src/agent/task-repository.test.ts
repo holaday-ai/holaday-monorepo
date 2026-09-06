@@ -96,6 +96,29 @@ function collectDrizzleParamValues(input: unknown, out: unknown[] = []): unknown
   return out;
 }
 
+describe('persistActiveCorePlan', () => {
+  it.each([0, 1])('only writes advisory plans to a still-executing task (%i affected)', async affected => {
+    const { db, captured } = fakeDbWithAffectedRows(affected);
+    const result = await new TaskRepository(db).persistActiveCorePlan('tsk_plan', 'Validated plan');
+    expect(result).toEqual({ persisted: affected === 1 });
+    expect(captured.taskUpdate).toEqual({ planText: 'Validated plan', planStatus: [] });
+    expect(collectDrizzleParamValues(captured.whereClauses)).toEqual(['tsk_plan', 'executing']);
+    expect(captured.eventInserts).toBe(0);
+  });
+});
+
+describe('isTaskExecuting', () => {
+  it.each(['executing', 'cancelled', 'completed', 'failed', 'awaiting_user', undefined])('fails closed for non-executing or missing rows: %s', async status => {
+    let condition: unknown;
+    const db = { select: () => ({ from: () => ({ where: (where: unknown) => {
+      condition = where;
+      return { limit: async () => status ? [{ status }] : [] };
+    } }) }) } as unknown as DB;
+    expect(await new TaskRepository(db).isTaskExecuting('tsk_active_guard')).toBe(status === 'executing');
+    expect(collectDrizzleParamValues(condition)).toEqual(['tsk_active_guard']);
+  });
+});
+
 function fakeDbForStateTransitions(affectedRows = 1) {
   const captured = {
     updatePayloads: [] as Record<string, unknown>[],

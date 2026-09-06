@@ -17,6 +17,7 @@ import {
 } from './model-runtime-policy.js';
 import { type QwenPurpose, QwenRouteError, resolveQwenRoute } from './qwen-route.js';
 import { type ResponsesAdapter, createQwenResponsesAdapter } from './responses-adapter.js';
+import { recordCoreModelObservation } from './core-model-observation.js';
 
 export interface CoreModelRuntimeEnvironment extends QwenMessagesEnvironment {
   NODE_ENV: 'development' | 'test' | 'production';
@@ -28,12 +29,14 @@ export interface CoreModelRuntimeEnvironment extends QwenMessagesEnvironment {
 }
 
 export interface CoreModelObservation {
+  lane: CoreModelLane;
+  protocol: 'messages' | 'responses';
   provider: 'alibaba-model-studio';
   region: 'cn' | 'intl';
   deploymentScope: 'china_mainland' | 'international';
   purpose: QwenPurpose;
   model: string;
-  outcome: 'success' | 'error';
+  outcome: 'success' | 'incomplete' | 'error';
   inputTokens: number | null;
   outputTokens: number | null;
   latencyMs: number;
@@ -128,7 +131,7 @@ function createReadyRuntime(
 ): Extract<CoreModelRuntimeResolution, { kind: 'ready' }> {
   const createMessages = input.createMessages ?? createQwenMessagesAdapter;
   const createResponses = input.createResponses ?? createQwenResponsesAdapter;
-  const observe = input.observe ?? (() => undefined);
+  const observe = input.observe ?? recordCoreModelObservation;
   const now = input.now ?? Date.now;
 
   return {
@@ -137,19 +140,20 @@ function createReadyRuntime(
     messages(purpose) {
       const adapter = createMessages({ environment: input.environment, region, purpose });
       assertQwenAdapterMetadata(adapter.metadata, region, 'messages');
-      return observeMessagesAdapter(adapter, purpose, observe, now);
+      return observeMessagesAdapter(adapter, input.lane, purpose, observe, now);
     },
     responses(purpose) {
       const route = resolveQwenRoute(input.environment, region, purpose, 'responses');
       const adapter = createResponses({ route });
       assertQwenAdapterMetadata(adapter.metadata, region, 'responses');
-      return observeResponsesAdapter(adapter, purpose, observe, now);
+      return observeResponsesAdapter(adapter, input.lane, purpose, observe, now);
     },
   };
 }
 
 function observeMessagesAdapter(
   adapter: MessagesAdapter,
+  lane: CoreModelLane,
   purpose: QwenPurpose,
   observe: (observation: CoreModelObservation) => void,
   now: () => number,
@@ -161,7 +165,7 @@ function observeMessagesAdapter(
       try {
         const result = await adapter.create(request, options);
         emitObservation(observe, {
-          ...observationIdentity(adapter, purpose),
+          ...observationIdentity(adapter, purpose), lane, protocol: 'messages',
           outcome: 'success',
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
@@ -170,7 +174,7 @@ function observeMessagesAdapter(
         return result;
       } catch (error) {
         emitObservation(observe, {
-          ...observationIdentity(adapter, purpose),
+          ...observationIdentity(adapter, purpose), lane, protocol: 'messages',
           outcome: 'error',
           inputTokens: null,
           outputTokens: null,
@@ -184,6 +188,7 @@ function observeMessagesAdapter(
 
 function observeResponsesAdapter(
   adapter: ResponsesAdapter,
+  lane: CoreModelLane,
   purpose: QwenPurpose,
   observe: (observation: CoreModelObservation) => void,
   now: () => number,
@@ -195,8 +200,8 @@ function observeResponsesAdapter(
       try {
         const result = await adapter.stream(request, options);
         emitObservation(observe, {
-          ...observationIdentity(adapter, purpose),
-          outcome: 'success',
+          ...observationIdentity(adapter, purpose), lane, protocol: 'responses',
+          outcome: result.status === 'incomplete' ? 'incomplete' : 'success',
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
           latencyMs: elapsedMs(startedAt, now()),
@@ -204,7 +209,7 @@ function observeResponsesAdapter(
         return result;
       } catch (error) {
         emitObservation(observe, {
-          ...observationIdentity(adapter, purpose),
+          ...observationIdentity(adapter, purpose), lane, protocol: 'responses',
           outcome: 'error',
           inputTokens: null,
           outputTokens: null,
