@@ -9434,6 +9434,7 @@ export const tasksRouter = router({
                   userId: ctx.userId,
                   intent: effectiveCombined,
                   planOnly,
+                  planExecutionApproved: Boolean(savedContext && !planOnly),
                   ...(savedPlan ? { executionPlan: savedPlan } : {}),
                   // The typed parser takes the first match per field. Give only
                   // that parser newest explicit user turns first, then derived
@@ -9526,6 +9527,10 @@ export const tasksRouter = router({
               : {}),
             fallbackChain: ['generate-resume'],
             elapsedMs: Date.now() - resumeStartedAt,
+            ...(savedContext ? {
+              approvedPlanText: savedPlan,
+              planReplyHistory,
+            } : {}),
           };
 
           if (reviewed.terminalStatus === 'completed' && outcome.status === 'completed') {

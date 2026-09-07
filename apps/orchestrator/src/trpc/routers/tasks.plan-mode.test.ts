@@ -280,6 +280,12 @@ describe('generate plan mode durable approval boundary', () => {
     await f.reply('执行');
     await vi.waitFor(() => expect(f.complete).toHaveBeenCalledTimes(1));
     expect(f.complete.mock.calls[0]?.[1]).toMatchObject({ status: 'completed', summary: texts[2] });
+    expect(f.complete.mock.calls[0]?.[1].metadata).toMatchObject({
+      planReplyHistory: ['不要增加截止时间，修改方案第二步', '执行'],
+      approvedPlanText: expect.stringContaining('不增加截止时间'),
+    });
+    expect(f.run.mock.calls[2]?.[0].planExecutionApproved).toBe(true);
+    expect(f.run.mock.calls[1]?.[0].planExecutionApproved).not.toBe(true);
     expect(stream.mock.calls[0]?.[0].tools).toEqual([]);
     expect(stream.mock.calls[1]?.[0].tools).toEqual([]);
     expect(JSON.stringify(stream.mock.calls[2]?.[0].input)).toContain('不要增加截止时间');
