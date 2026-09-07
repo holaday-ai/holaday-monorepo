@@ -23,3 +23,25 @@ export const PLAN_ONLY_INSTRUCTIONS = [
 export function finishPlanDraft(text: string): string {
   return `${text.trim()}\n\n确认按这个方案继续吗？回复“执行”继续，或告诉我需要修改的地方。`;
 }
+
+export const APPROVED_PLAN_EXECUTION_INSTRUCTIONS = [
+  '系统已核验：用户已批准当前方案，本轮应完成原始任务要求的最终交付，而不是再次拟定待批准方案。',
+  '先前“先出方案”“先别执行”和方案中的确认提示属于历史阶段，不是本轮的等待状态；保留其中的事实限制与后续修改。',
+  '直接交付结果，不要再以“确认后输出/执行”为结尾；未知地点、负责人等继续标为待确认，建议仍标为建议，不得编造已落实的事实。',
+  '这只确认现有任务方案，不新增工具权限，也不代替付款、发送消息或其他外部操作所需的授权。',
+].join('\n');
+
+/** Narrow delivery contradiction check, not a general factual-quality verifier. */
+export function defersApprovedPlanDelivery(text: string): boolean {
+  // Match the observed redundant approval footer, not arbitrary commitments
+  // inside delivered drafts, quoted text, or real-world owner dependencies.
+  const footer =
+    text
+      .trim()
+      .split(/\n\s*\n/)
+      .at(-1) ?? '';
+  if (/[“”"「」『』`]/u.test(footer) || /^\s*>/m.test(footer)) return false;
+  return /请确认(?:以上|上述|当前|这个|这份)方案[^\n。！？]{0,60}[。！]?\s*确认后我(?:们)?(?:将|会|再|才|就){0,3}(?:为你|为您)?(?:输出|生成|交付|提供)(?:最终|完整|简洁|的|\s)*(?:执行清单|清单|结果|报告)[。.!！]?$/u.test(
+    footer,
+  );
+}

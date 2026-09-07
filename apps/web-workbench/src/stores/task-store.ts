@@ -587,6 +587,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   // portable than threading AbortControllers through tRPC.
   let hydrateToken = 0;
   let sessionGeneration = 0;
+  const pendingReplies = new Map<string, number>();
+  const failedLocalReplies = new Map<string, Array<{ at: number; text: string }>>();
 
   function abortInFlightHydrate(): void {
     hydrateToken += 1;
@@ -601,6 +603,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   }
 
   async function hydrateDetail(taskId: string): Promise<void> {
+    if ((pendingReplies.get(taskId) ?? 0) > 0) return;
     const myToken = ++hydrateToken;
     const generation = captureSessionGeneration();
     const suggestionsAtRequestStart = get().suggestionsByTask[taskId];
@@ -625,7 +628,6 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const resultText =
           displayResultTextForStatus(detailStatus, rawResultText, rawErrorText) ??
           undefined;
-        const planText = safeTaskListText(detail.planText) || undefined;
         const planStatus = normalizeTaskPlanStatus(detail.planStatus);
         const resultObj = isTaskListRecord(detail.result) ? detail.result : {};
         const savedSuggestions = Array.isArray(resultObj.followUpSuggestions)
@@ -634,6 +636,29 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             ).map(value => value.trim()))].slice(0, 3)
           : [];
         const metadata = isTaskListRecord(resultObj.metadata) ? resultObj.metadata : {};
+        const planText = safeTaskListText(resultObj.planText)
+          || safeTaskListText(metadata.approvedPlanText)
+          || safeTaskListText(detail.planText) || undefined;
+        // Executing rows can still carry the previous plan's JSON. Restore
+        // history only once the next draft/final result has been persisted.
+        const rawPlanReplies = detailStatus === 'executing'
+          ? undefined : resultObj.planReplyHistory ?? metadata.planReplyHistory;
+        const savedPlanReplies = Array.isArray(rawPlanReplies)
+          && rawPlanReplies.length <= 32
+          && rawPlanReplies.every((value): value is string => typeof value === 'string' && value.length <= 4_000)
+            ? rawPlanReplies : null;
+        const localReplies = prev.userRepliesByTask[taskId] ?? [];
+        // Preserve a just-submitted local suffix until persistence catches up.
+        const localHasSavedPrefix = savedPlanReplies !== null
+          && localReplies.length >= savedPlanReplies.length
+          && savedPlanReplies.every((text, index) => localReplies[index]?.text === text);
+        const replyBaseTime = new Date(safeTaskListDate(detail.createdAt) ?? 0).getTime();
+        const hydratedReplies = savedPlanReplies === null || localHasSavedPrefix
+          ? localReplies
+          : [
+              ...savedPlanReplies.map((text, index) => ({ at: replyBaseTime + index + 1, text })),
+              ...(failedLocalReplies.get(taskId) ?? []),
+            ];
         const imageTaskMeta = parseImageTaskMeta(metadata);
         const finalScreenshot =
           safeTaskListText(resultObj.finalScreenshot).length > 0
@@ -793,6 +818,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const hydratedTask = nextTasks.find((task) => task.taskId === taskId);
         return {
           stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
+          ...(savedPlanReplies !== null ? {
+            userRepliesByTask: { ...prev.userRepliesByTask, [taskId]: hydratedReplies },
+          } : {}),
           suggestionsByTask: detailStatus === 'completed'
             ? {
                 ...prev.suggestionsByTask,
@@ -1176,6 +1204,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
   async replyToTask(taskId, message, fileIds) {
     const generation = captureSessionGeneration();
+    // A read started before this write cannot tell whether its snapshot includes
+    // the new reply (texts may legitimately repeat). Discard it and read again
+    // after all writes settle instead of merging by text or guessing an overlap.
+    if (get().selectedTaskId === taskId) abortInFlightHydrate();
+    pendingReplies.set(taskId, (pendingReplies.get(taskId) ?? 0) + 1);
+    let replySucceeded = false;
     // Pin the user's text into the conversation stream before the
     // round-trip returns — the old behaviour wiped the composer and
     // left no trace of what the user said, which read like the reply
@@ -1196,6 +1230,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
       });
       if (!isCurrentSession(generation)) return { ok: res.ok };
+      replySucceeded = res.ok;
       // Fix 2 — backend tags reply outcome as `state: 'resumed' | 'stillAwaiting'`.
       // Only `resumed` means the supercar accepted the message and
       // started executing again; `stillAwaiting` is the user saying
@@ -1253,6 +1288,18 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       if (!isCurrentSession(generation)) return { error: msg };
       set({ error: msg });
       return { error: msg };
+    } finally {
+      if (isCurrentSession(generation)) {
+        if (!replySucceeded) {
+          failedLocalReplies.set(taskId, [...(failedLocalReplies.get(taskId) ?? []), entry]);
+        }
+        const remaining = (pendingReplies.get(taskId) ?? 1) - 1;
+        if (remaining > 0) pendingReplies.set(taskId, remaining);
+        else {
+          pendingReplies.delete(taskId);
+          if (get().selectedTaskId === taskId) void hydrateDetail(taskId);
+        }
+      }
     }
   },
 
@@ -2228,6 +2275,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
   reset() {
     sessionGeneration += 1;
+    pendingReplies.clear();
+    failedLocalReplies.clear();
     abortInFlightHydrate();
     set({
       tasks: [],

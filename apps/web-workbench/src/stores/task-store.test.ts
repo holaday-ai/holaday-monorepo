@@ -1259,6 +1259,64 @@ describe('selectTask detail hydration', () => {
     });
   });
 
+  it.each(['completed', 'awaiting_user'] as const)('restores saved plan replies on a fresh detail load: %s', async (status) => {
+    const history = ['预算改为600元，先别执行', '确认'];
+    detailQuery.mockResolvedValueOnce({
+      intent: '合成交流会', status, steps: [], createdAt: '2026-09-07T10:00:00Z',
+      planText: '最初的处理思路',
+      result: status === 'completed'
+        ? { summary: '最终清单', metadata: { planReplyHistory: history, approvedPlanText: '修订方案600元' } }
+        : { planReplyHistory: history, planText: '修订方案600元' },
+    } as never);
+    useTaskStore.getState().selectTask('tsk_plan_history', 'ui');
+    await flushPromises();
+    const state = useTaskStore.getState();
+    expect(state.userRepliesByTask.tsk_plan_history?.map(r => r.text)).toEqual(history);
+    expect(new Set(state.userRepliesByTask.tsk_plan_history?.map(r => r.at)).size).toBe(2);
+    expect(state.tasks.find(t => t.taskId === 'tsk_plan_history')?.planText).toBe('修订方案600元');
+  });
+
+  it('does not erase a newer local reply when reading an older saved history', async () => {
+    useTaskStore.setState({ userRepliesByTask: { tsk_plan_history: [{ at: 1, text: '预算600元' }, { at: 2, text: '确认' }] } });
+    detailQuery.mockResolvedValueOnce({ status: 'awaiting_user', steps: [], result: { planReplyHistory: ['预算600元'] } } as never);
+    useTaskStore.getState().selectTask('tsk_plan_history', 'ui');
+    await flushPromises();
+    expect(useTaskStore.getState().userRepliesByTask.tsk_plan_history).toEqual([{ at: 1, text: '预算600元' }, { at: 2, text: '确认' }]);
+  });
+
+  it.each([false, true])('refreshes history after a concurrent reply, including when the old response contains it: %s', async (oldResponseIncludesReply) => {
+    let resolveDetail!: (value: never) => void;
+    detailQuery.mockImplementationOnce(() => new Promise(resolve => { resolveDetail = resolve; }));
+    detailQuery.mockResolvedValueOnce({ status: 'awaiting_user', steps: [], result: { planReplyHistory: ['确认', '预算600元', '确认'] } } as never);
+    replyMutate.mockResolvedValue({ ok: true, state: 'stillAwaiting' } as never);
+    useTaskStore.getState().selectTask('tsk_plan_history', 'ui');
+    await useTaskStore.getState().replyToTask('tsk_plan_history', '确认');
+    resolveDetail({ status: 'awaiting_user', steps: [], result: { planReplyHistory: oldResponseIncludesReply ? ['确认', '预算600元', '确认'] : ['确认', '预算600元'] } } as never);
+    await flushPromises();
+    expect(useTaskStore.getState().userRepliesByTask.tsk_plan_history?.map(r => r.text)).toEqual(['确认', '预算600元', '确认']);
+    expect(replyMutate).toHaveBeenCalledWith({ taskId: 'tsk_plan_history', message: '确认' });
+  });
+
+  it.each([false, true])('restores history and keeps a failed local reply after pending writes settle: %s', async (firstWriteSucceeds) => {
+    let resolveDetail!: (value: never) => void;
+    let rejectReply!: (error: Error) => void;
+    detailQuery.mockImplementationOnce(() => new Promise(resolve => { resolveDetail = resolve; }));
+    const saved = firstWriteSucceeds ? ['预算600元', '确认'] : ['预算600元'];
+    detailQuery.mockResolvedValueOnce({ status: 'awaiting_user', steps: [], result: { planReplyHistory: saved } } as never);
+    if (firstWriteSucceeds) replyMutate.mockResolvedValueOnce({ ok: true, state: 'stillAwaiting' } as never);
+    replyMutate.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectReply = reject; }));
+    useTaskStore.getState().selectTask('tsk_plan_history', 'ui');
+    const first = firstWriteSucceeds ? useTaskStore.getState().replyToTask('tsk_plan_history', '确认') : null;
+    const failed = useTaskStore.getState().replyToTask('tsk_plan_history', '稍后补充地点');
+    await first;
+    rejectReply(new Error('fixture transport failure'));
+    await failed;
+    resolveDetail({ status: 'awaiting_user', steps: [], result: { planReplyHistory: ['预算600元'] } } as never);
+    await flushPromises();
+    expect(useTaskStore.getState().userRepliesByTask.tsk_plan_history?.map(r => r.text)).toEqual([...saved, '稍后补充地点']);
+    expect(detailQuery).toHaveBeenCalledTimes(2);
+  });
+
   it('survives malformed detail rows and synthesizes a safe selected task', async () => {
     detailQuery.mockResolvedValueOnce({
       intent: { unsafe: true },

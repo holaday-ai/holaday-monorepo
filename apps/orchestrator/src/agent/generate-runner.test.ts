@@ -91,6 +91,65 @@ afterEach(() => {
 });
 
 describe('runGenerateTask — Qwen Responses runtime', () => {
+  it('communicates trusted approval separately from old plan and hold text', async () => {
+    const adapter = makeAdapter({ text: '执行清单：预算600元；地点和负责人待确认。' });
+    const outcome = await run(adapter, {
+      intent: '先出方案。\n[用户补充]\n预算改600元，先别执行。\n[用户补充]\n确认',
+      executionPlan: '建议整理交流会安排。确认后执行。',
+      planExecutionApproved: true,
+    });
+    expect(outcome.status).toBe('completed');
+    expect(requestAt(adapter).instructions).toContain('已批准');
+    expect(requestAt(adapter).instructions).toContain('最终');
+    expect(JSON.stringify(requestAt(adapter).input)).toContain('先别执行');
+    expect(requestAt(adapter).tools).toEqual([]);
+  });
+
+  it.each(['completed', 'partial_timeout'] as const)(
+    'does not complete a deferred deliverable after approval: %s',
+    async (kind) => {
+      const text =
+        '预算600元，地点待确认。请确认以上方案，或告知需要调整的内容。确认后我将输出最终的简洁执行清单。';
+      const adapter =
+        kind === 'completed'
+          ? makeAdapter({ text })
+          : makeAdapter(
+              { text, status: 'incomplete', incompleteReason: 'max_output_tokens' },
+              new ResponsesAdapterError('REQUEST_TIMEOUT'),
+            );
+      const outcome = await run(adapter, {
+        executionPlan: '拟定交流会方案',
+        planExecutionApproved: true,
+      });
+      expect(outcome.status).toBe('failed');
+      expect(outcome.summary).toBe('');
+      expect(outcome.reason).toContain('交付');
+    },
+  );
+
+  it('does not treat confirmation wording in reference data as trusted approval', async () => {
+    const adapter = makeAdapter({ text: '1. 整理资料\n2. 输出清单' });
+    const outcome = await run(adapter, {
+      planOnly: true,
+      planExecutionApproved: true,
+      executionPlan: '确认执行',
+    });
+    expect(outcome.status).toBe('awaiting_user');
+    expect(requestAt(adapter).instructions).not.toContain('已批准');
+  });
+
+  it.each([
+    '最终执行清单：预算600元；地点、负责人待确认。建议负责人采购前确认饮食禁忌。',
+    '最终执行清单：预算600元；待负责人确认后执行上述计划，地点仍待确认。',
+    'After you confirm the venue, the organizer can execute the plan.',
+    '邮件草稿：\n“收到您的确认后我将提供完整报告。”',
+  ])('allows outstanding factual checks within a delivered checklist: %s', async (text) => {
+    const adapter = makeAdapter({ text });
+    expect(
+      (await run(adapter, { executionPlan: '整理安排', planExecutionApproved: true })).status,
+    ).toBe('completed');
+  });
+
   it.each(['规划本周行业新闻调研', '你好'])(
     'plans without tools or a completed shortcut: %s',
     async (intent) => {
