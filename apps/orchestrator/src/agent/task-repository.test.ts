@@ -10,6 +10,8 @@
  * the fake to drive both branches.
  */
 import { describe, expect, it, vi } from 'vitest';
+import { type SQL } from 'drizzle-orm';
+import { MySqlDialect } from 'drizzle-orm/mysql-core';
 
 import type { DB } from '../db/client.js';
 import type { TaskState } from './task-controller.js';
@@ -25,6 +27,28 @@ interface Captured {
   whereClauses: unknown[];
   transactionRan: boolean;
 }
+
+describe('persistCurrentCompletedSuggestions', () => {
+  it.each([0, 1])('uses an atomic JSON patch and reports affected rows=%i', async (affectedRows) => {
+    const {db,captured}=fakeDbWithAffectedRows(affectedRows);
+    const saved=await new TaskRepository(db).persistCurrentCompletedSuggestions('tsk_fixture','original summary',['完善执行方案']);
+    expect(saved).toBe(affectedRows===1);
+    expect(Object.keys(captured.taskUpdate!)).toEqual(['result']);
+    const dialect=new MySqlDialect();
+    const patch=dialect.sqlToQuery(captured.taskUpdate!.result as SQL);
+    expect(patch.sql).toBe("JSON_SET(`tasks`.`result`, '$.followUpSuggestions', CAST(? AS JSON))");
+    expect(patch.params).toEqual(['["完善执行方案"]']);
+    const guard=dialect.sqlToQuery(captured.whereClauses[0] as SQL);
+    expect(guard.sql).toBe("(`tasks`.`external_id` = ? and `tasks`.`status` = ? and JSON_UNQUOTE(JSON_EXTRACT(`tasks`.`result`, '$.summary')) = ?)");
+    expect(guard.params).toEqual(['tsk_fixture','completed','original summary']);
+    expect(captured.eventInserts).toBe(0);
+  });
+  it.each([[],['x'],['x'.repeat(41)],['合成建议','合成建议','合成建议','合成建议']].map(items=>({items})))('rejects invalid suggestion payloads without writing ($items)',async({items})=>{
+    const {db,captured}=fakeDbWithAffectedRows(1);
+    expect(await new TaskRepository(db).persistCurrentCompletedSuggestions('tsk_fixture','summary',items)).toBe(false);
+    expect(captured.txUpdates).toBe(0);
+  });
+});
 
 /**
  * Build a fake `DB` whose `update().set().where()` returns a result

@@ -3764,6 +3764,7 @@ export const tasksRouter = router({
             intent: effectiveIntent,
             summary,
             isCurrent: () => repo.isCurrentCompletedOutcome(taskId, summary),
+            persist: (suggestions) => repo.persistCurrentCompletedSuggestions(taskId, summary, suggestions),
             publish: (suggestions) =>
               broadcastToUser(ctx.userId, {
                 type: 'server.supercar.suggestions', taskId, suggestions,
@@ -4399,6 +4400,7 @@ export const tasksRouter = router({
             intent: effectiveIntent,
             summary,
             isCurrent: () => repo.isCurrentCompletedOutcome(taskId, summary),
+            persist: (suggestions) => repo.persistCurrentCompletedSuggestions(taskId, summary, suggestions),
             publish: (suggestions) =>
               broadcastToUser(ctx.userId, {
                 type: 'server.supercar.suggestions', taskId, suggestions,
@@ -9451,6 +9453,7 @@ export const tasksRouter = router({
                 intent: combinedIntent,
                 summary,
                 isCurrent: () => repo.isCurrentCompletedOutcome(input.taskId, summary),
+                persist: (suggestions) => repo.persistCurrentCompletedSuggestions(input.taskId, summary, suggestions),
                 publish: (suggestions) => broadcastToUser(ctx.userId, {
                   type: 'server.supercar.suggestions',
                   taskId: input.taskId,

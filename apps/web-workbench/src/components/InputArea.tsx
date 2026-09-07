@@ -818,13 +818,12 @@ export function InputArea({
             management, escape-to-close, arrow-key navigation,
             and proper portal layering for free. */}
         <div className={cn('absolute', fullBleed ? (compact ? 'bottom-7 left-7' : 'bottom-7 left-8') : 'bottom-2.5 left-2.5')}>
-          {attachmentsAllowed ? (
             <DropdownMenu open={plusMenuOpen} onOpenChange={setPlusMenuOpen}>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  aria-label="添加附件"
-                  title="添加附件"
+                  aria-label="附件与任务选项"
+                  title="附件与任务选项"
                   className={cn(
                     ATTACHMENT_TRIGGER_CLASS,
                     fullBleed && 'h-9 w-9 rounded-[10px] text-[#57479C] hover:bg-white/65',
@@ -844,11 +843,15 @@ export function InputArea({
                   className={ATTACHMENT_MENU_ITEM_CLASS}
                   onSelect={() => {
                     setPlusMenuOpen(false);
+                    if (!attachmentsAllowed) {
+                      toast.show('免费版不支持附件，升级基础版可上传文件 / 图片');
+                      return;
+                    }
                     fileInputRef.current?.click();
                   }}
                 >
                   <Paperclip className="h-4 w-4 text-[#595757]" />
-                  <span className="font-medium text-foreground">添加照片和文件</span>
+                  <span className="font-medium text-foreground">添加照片和文件{!attachmentsAllowed && ' · 需升级'}</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator className="my-1 bg-[#DCDDDD]/80 dark:bg-white/10" />
                 <DropdownMenuItem
@@ -929,22 +932,6 @@ export function InputArea({
                 </DropdownMenuSub>
               </DropdownMenuContent>
             </DropdownMenu>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                toast.show('免费版不支持附件，升级基础版可上传文件 / 图片');
-              }}
-              aria-label="升级基础版可添加附件"
-              title="升级基础版可添加附件"
-              className={cn(
-                'inline-flex cursor-not-allowed items-center justify-center border border-transparent bg-transparent text-[#ADADAD] dark:text-foreground/40',
-                fullBleed ? 'h-9 w-9 rounded-[10px]' : 'h-8 w-8 rounded-[8px]',
-              )}
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-          )}
         </div>
         <input
           ref={fileInputRef}
