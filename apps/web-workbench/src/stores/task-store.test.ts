@@ -1317,6 +1317,20 @@ describe('selectTask detail hydration', () => {
     expect(detailQuery).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps a failed amendment before the later successful confirmation after hydration', async () => {
+    detailQuery.mockResolvedValue({ status: 'awaiting_user', steps: [], result: { planReplyHistory: ['预算600元'] } } as never);
+    useTaskStore.getState().selectTask('tsk_plan_history', 'ui');
+    await flushPromises();
+    replyMutate.mockRejectedValueOnce(new Error('fixture transport failure'));
+    await useTaskStore.getState().replyToTask('tsk_plan_history', '地点改为线上');
+    await flushPromises();
+    detailQuery.mockResolvedValueOnce({ status: 'awaiting_user', steps: [], result: { planReplyHistory: ['预算600元', '确认'] } } as never);
+    replyMutate.mockResolvedValueOnce({ ok: true, state: 'stillAwaiting' } as never);
+    await useTaskStore.getState().replyToTask('tsk_plan_history', '确认');
+    await flushPromises();
+    expect(useTaskStore.getState().userRepliesByTask.tsk_plan_history?.map(r => r.text)).toEqual(['预算600元', '地点改为线上', '确认']);
+  });
+
   it('survives malformed detail rows and synthesizes a safe selected task', async () => {
     detailQuery.mockResolvedValueOnce({
       intent: { unsafe: true },

@@ -653,12 +653,29 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           && localReplies.length >= savedPlanReplies.length
           && savedPlanReplies.every((text, index) => localReplies[index]?.text === text);
         const replyBaseTime = new Date(safeTaskListDate(detail.createdAt) ?? 0).getTime();
+        const restoredReplies = (savedPlanReplies ?? []).map((text, index) => ({ at: replyBaseTime + index + 1, text }));
+        const failedEntries = new Set(failedLocalReplies.get(taskId) ?? []);
+        // Anchor failed attempts to their original local neighbours, not to the
+        // end of the fetched history. Otherwise a failed edit can move after a
+        // later approval and change the meaning of a rebuilt conversation.
+        let savedIndex = restoredReplies.length - 1;
+        for (let localIndex = localReplies.length - 1; localIndex >= 0; localIndex -= 1) {
+          const reply = localReplies[localIndex];
+          if (!reply) continue;
+          if (failedEntries.has(reply)) {
+            restoredReplies.splice(savedIndex + 1, 0, reply);
+          } else {
+            let matchIndex = savedIndex;
+            while (matchIndex >= 0 && savedPlanReplies?.[matchIndex] !== reply.text) matchIndex -= 1;
+            if (matchIndex >= 0) {
+              restoredReplies[matchIndex] = reply;
+              savedIndex = matchIndex - 1;
+            }
+          }
+        }
         const hydratedReplies = savedPlanReplies === null || localHasSavedPrefix
           ? localReplies
-          : [
-              ...savedPlanReplies.map((text, index) => ({ at: replyBaseTime + index + 1, text })),
-              ...(failedLocalReplies.get(taskId) ?? []),
-            ];
+          : restoredReplies;
         const imageTaskMeta = parseImageTaskMeta(metadata);
         const finalScreenshot =
           safeTaskListText(resultObj.finalScreenshot).length > 0

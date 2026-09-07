@@ -433,7 +433,7 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
       }
 
       const combined = accumulatedSummary + text;
-      if (approvedExecution && defersApprovedPlanDelivery(combined)) {
+      if (approvedExecution && defersApprovedPlanDelivery(combined, opts.intent)) {
         return failedOutcome({
           start,
           reason: '生成结果仍在等待重复批准，未完成最终交付。请重试，不必再次批准相同方案。',

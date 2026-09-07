@@ -30,7 +30,7 @@ PR231 的单账号 API 探针验证了状态、区域和持久化字段，但其
 
 - [x] 针对性红绿回归、类型检查、独立审查、真实组件刷新验收。
 - [x] 完整串行回归、发布合同及构建。
-- [ ] PR 创建及最终审查。
+- [x] PR #232 创建；两条远端 P2 已在本地修复，独立复审通过（待提交最终复验结果并回复远端线程）。
 - [ ] 新版本精确发布/灰度工具、独立备份与回滚验证。
 - [ ] 单账号真实模型重新交付、持久化回读与浏览器刷新；结束恢复 dark。
 
@@ -48,3 +48,14 @@ PR231 的单账号 API 探针验证了状态、区域和持久化字段，但其
 - 前端完整回归249文件2426项通过；两端类型检查、后端build、前端全量eslint与build通过。前端build保留已有大于700kB的chunk提示。
 - QA数据库安全/报告/发布合同和Qwen合同共78项通过，Qwen静态发布合同通过。没有执行数据库迁移、Docker集成测试或真实供应商调用。
 - 前端及合同日志：`/private/tmp/holaday-approved-plan-frontend.log`、`holaday-approved-plan-frontend-lint.log`、`holaday-approved-plan-frontend-build.log`、`holaday-approved-plan-contracts.log`、`holaday-approved-plan-qwen-contract.log`。单次检查的通过仅对应本轮冻结的代码，不替代待完成的发布/模型门禁。
+
+## PR232 审查修正
+
+- 失败回复不再附加到全部服务器历史末尾，而是按原本本地相邻回复反向定位，已匹配回复保留原时间。新增真实 store 用例先复现错误顺序再通过；真实 TaskStream 合成传输中依次点击失败修改和后续确认，显示顺序为失败修改在前、后续确认在后。预览已关闭，不涉及生产请求。
+- 文案交付检查接收原始任务上下文，明确请求的无引号确认提示可以交付；仅识别开头直接肯定的文案请求或明确要求的原文，不把输出格式、禁止发送邮件、禁止撰写提示当作豁免。
+- 新增2个中英文文案正例先 RED/GREEN；再增加3个格式/禁止动作负例和2个直接否定撰写负例，分别复现3失败和2失败后修正。最终针对性后端3文件88项通过。独立审查两次指出过宽边界，收紧后最终只读复审未发现阻断。
+- 该窄检查不保证所有语义变体、事实质量或实际任务交付；可信执行阶段提示仍是主要修复，真实模型生产验收尚待完成。
+- 此次最终后端完整回归使用单 worker、2GB堆，日志 `/private/tmp/holaday-pr232-final-backend.log`。早于最终否定边界修正的一轮主动中止（exit130），不计通过。
+- 最终冻结版本后端完整回归395文件6160项通过（单次exit0，258.74秒），未重现OOM；最高实测worker约1.9GiB，系统memory_pressure free85%。该读数不是全桌面应用硬上限保证。
+- 最终前端完整回归249文件2427项、QA/Qwen合同78项及Qwen静态合同通过；两端类型检查（含前端node配置）、后端build、前端全量eslint/build均exit0。前端保留已有700kB chunk警告。全部串行，结束无测试/构建/预览后台进程。
+- 最终日志：`/private/tmp/holaday-pr232-final-frontend.log`、`holaday-pr232-final-lint.log`、`holaday-pr232-final-build.log`、`holaday-pr232-final-contracts.log`、`holaday-pr232-final-qwen-contract.log`。生产尚未部署此补丁；后续先处理附件/技能联动遗留问题，不能扩大灰度。

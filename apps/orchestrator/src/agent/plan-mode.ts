@@ -32,7 +32,7 @@ export const APPROVED_PLAN_EXECUTION_INSTRUCTIONS = [
 ].join('\n');
 
 /** Narrow delivery contradiction check, not a general factual-quality verifier. */
-export function defersApprovedPlanDelivery(text: string): boolean {
+export function defersApprovedPlanDelivery(text: string, intent: string): boolean {
   // Match the observed redundant approval footer, not arbitrary commitments
   // inside delivered drafts, quoted text, or real-world owner dependencies.
   const footer =
@@ -40,6 +40,19 @@ export function defersApprovedPlanDelivery(text: string): boolean {
       .trim()
       .split(/\n\s*\n/)
       .at(-1) ?? '';
+  // Requested copy is the deliverable, including plain text without quotes.
+  // This is only a narrow quality check; task intent never grants execution.
+  // Recognize only a direct copy-writing request, not a later mention or ban.
+  if (
+    intent.includes(footer) ||
+    /^\s*(?:请帮我|帮我|请)?(?:写|起草|生成|润色|改写|翻译)(?:一[条段则封份]|这[条段则封份]|简短的?|纯文本|中文|英文|用于确认的|\s)*(?:文案|提示语|确认提示|确认消息|邮件|短信|话术)/u.test(
+      intent,
+    ) ||
+    /^\s*(?:please\s+)?(?:draft|write|compose|translate|rewrite|polish)\s+(?:(?:a|an|the|short|brief|plain[- ]text|confirmation|Chinese|English)\s+)*(?:copy|prompt|message|email|wording)\b/i.test(
+      intent,
+    )
+  )
+    return false;
   if (/[“”"「」『』`]/u.test(footer) || /^\s*>/m.test(footer)) return false;
   return /请确认(?:以上|上述|当前|这个|这份)方案[^\n。！？]{0,60}[。！]?\s*确认后我(?:们)?(?:将|会|再|才|就){0,3}(?:为你|为您)?(?:输出|生成|交付|提供)(?:最终|完整|简洁|的|\s)*(?:执行清单|清单|结果|报告)[。.!！]?$/u.test(
     footer,

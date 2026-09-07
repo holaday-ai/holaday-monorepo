@@ -139,6 +139,33 @@ describe('runGenerateTask — Qwen Responses runtime', () => {
   });
 
   it.each([
+    '请写一条纯文本确认提示，不要加引号，结尾说明确认后提供报告。',
+    'Draft a plain-text confirmation prompt for a report delivery.',
+  ])(
+    'delivers requested confirmation copy without mistaking it for assistant deferral: %s',
+    async (intent) => {
+      const adapter = makeAdapter({ text: '请确认以上方案，确认后我将提供完整报告。' });
+      expect(
+        (await run(adapter, { intent, executionPlan: '起草确认提示', planExecutionApproved: true }))
+          .status,
+      ).toBe('completed');
+    },
+  );
+
+  it.each([
+    '写一份会议执行清单，以纯文本输出。',
+    '生成会议执行清单，不要发送邮件。',
+    'Write an execution checklist, do not send an email.',
+    '生成会议执行清单，不要写邮件或确认提示。',
+    'Write an execution checklist; do not compose a confirmation message.',
+  ])('does not exempt delivery merely mentioning format or a prohibited action: %s', async (intent) => {
+    const adapter = makeAdapter({ text: '请确认以上方案，确认后我将提供完整报告。' });
+    expect(
+      (await run(adapter, { intent, executionPlan: '拟定会议安排', planExecutionApproved: true })).status,
+    ).toBe('failed');
+  });
+
+  it.each([
     '最终执行清单：预算600元；地点、负责人待确认。建议负责人采购前确认饮食禁忌。',
     '最终执行清单：预算600元；待负责人确认后执行上述计划，地点仍待确认。',
     'After you confirm the venue, the organizer can execute the plan.',
