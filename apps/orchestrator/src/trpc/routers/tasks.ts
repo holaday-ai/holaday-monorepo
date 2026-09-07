@@ -3682,6 +3682,7 @@ export const tasksRouter = router({
                       planReplyHistory: [],
                       planFileIds: orderedFileIds,
                       planWorkflowId: typedWorkflow?.workflowId ?? null,
+                      planLegacyWorkflowId: expertWorkflow?.id ?? null,
                     }
                   : {}),
               },
@@ -9137,6 +9138,7 @@ export const tasksRouter = router({
             planReplyHistory: z.array(z.string().max(4_000)).max(31).default([]),
             planFileIds: z.array(z.string().min(1)).max(5).default([]),
             planWorkflowId: z.string().min(1).nullable().optional(),
+            planLegacyWorkflowId: z.string().min(1).nullable().optional(),
             planIntakeContext: z.array(z.string()).max(128).default([]),
           }).safeParse(prevResult)
         : null;
@@ -9251,15 +9253,21 @@ export const tasksRouter = router({
       // user actually wants the browser path. Avoids edge cases where
       // a paste happens to contain platform keywords ("罗盘 GMV 156k
       // UV 28k") and would otherwise trip the browser-handoff branch.
-      // Only legacy records may re-route from accumulated text. A saved plan
-      // choice governs routing, prompts, intake and verification together.
-      const newWorkflow = savedContext?.planWorkflowId !== undefined
-        ? null
-        : matchExpertWorkflow(combinedIntent, {
+      // A saved legacy choice may refresh its missing inputs, but later text
+      // must not introduce a legacy workflow that was never selected.
+      const newWorkflow = savedContext?.planWorkflowId === undefined || savedContext.planLegacyWorkflowId
+        ? matchExpertWorkflow(combinedIntent, {
             hasAttachments: generateAttachmentBlocks.length > 0,
-          });
+          })
+        : null;
+      if (savedContext?.planLegacyWorkflowId && newWorkflow?.id !== savedContext.planLegacyWorkflowId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '原方案使用的工作流暂不可用，任务仍在等待；请新建任务重新选择技能。',
+        });
+      }
       const resumeWorkflowId = savedContext?.planWorkflowId !== undefined
-        ? savedContext.planWorkflowId
+        ? savedContext.planWorkflowId ?? newWorkflow?.id ?? null
         : newWorkflow?.id ?? null;
       const wantsBrowser =
           !planOnly && replyKind !== 'manual_data' && newWorkflow?.routeOverride === 'browser';
@@ -9628,6 +9636,9 @@ export const tasksRouter = router({
                   planFileIds,
                   ...(savedContext.planWorkflowId !== undefined
                     ? { planWorkflowId: savedContext.planWorkflowId }
+                    : {}),
+                  ...(savedContext.planLegacyWorkflowId !== undefined
+                    ? { planLegacyWorkflowId: savedContext.planLegacyWorkflowId }
                     : {}),
                   planIntakeContext,
                 } : {}),

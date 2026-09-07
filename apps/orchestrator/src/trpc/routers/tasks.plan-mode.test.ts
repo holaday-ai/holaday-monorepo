@@ -247,6 +247,51 @@ describe('generate plan mode durable approval boundary', () => {
     expect(f.run).not.toHaveBeenCalled();
   });
 
+  it('retains a legacy-only selection without rematching a typed report on approval', async () => {
+    const f = fixture({ expertMode: 'auto' });
+    setFeatureFlagsForTest({ EXPERT_WORKFLOW: true });
+    f.state.intent = '电商罗盘 GMV 复盘';
+    await f.create();
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+    await f.reply('修改方案，补充所需指标说明');
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
+    await f.reply('执行');
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(3));
+    expect(f.run.mock.calls[2]?.[0].intent).toContain('【专家技能工作流：抖音直播复盘】');
+    expect(f.run.mock.calls[2]?.[0].workflowOverride).toBeNull();
+    expect(f.state.result.planLegacyWorkflowId).toBe('douyin-livestream-review');
+    expect(f.state.result.expertWorkflowId).toBe('douyin-livestream-review');
+  });
+
+  it('selects the saved legacy handoff but does not dispatch when its CAS is refused', async () => {
+    const f = fixture({ expertMode: 'auto' });
+    setFeatureFlagsForTest({ EXPERT_WORKFLOW: true });
+    f.state.intent = '电商罗盘 GMV 复盘';
+    const handoff = vi
+      .spyOn(TaskRepository.prototype, 'markAwaitingReplyCompleted')
+      .mockResolvedValue({ persisted: false });
+    await f.create();
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+    await f.reply('修改方案，场次为昨天');
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
+    expect(handoff).not.toHaveBeenCalled();
+    expect(await f.reply('执行')).toMatchObject({ ok: false, state: 'persistFailed' });
+    expect(handoff).toHaveBeenCalledWith(
+      'tsk_plan_fixture',
+      expect.objectContaining({ handoffSuggestion: 'browser' }),
+    );
+    expect(f.run).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects an unknown saved legacy selection before any state transition', async () => {
+    const f = fixture();
+    f.state.result.planWorkflowId = null;
+    f.state.result.planLegacyWorkflowId = 'removed-legacy-workflow';
+    await expect(f.reply('执行')).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.resume).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
   it('uses the latest explicit field edit for typed intake, not the original value', async () => {
     const f = fixture({ expertMode: 'auto' });
     setFeatureFlagsForTest({ EXPERT_WORKFLOW: true });
