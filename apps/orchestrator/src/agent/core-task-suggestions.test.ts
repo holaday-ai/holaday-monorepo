@@ -64,6 +64,7 @@ function fixture(options: { allowed?: boolean; output?: string; failed?: boolean
       wiring,
       actorExternalId: 'usr_suggestions_fixture',
       modelDataRegion: 'cn',
+      rawIntent: '整理提供的材料，归纳关键事实并输出一份简洁提纲。',
       intent: '整理提供的材料，归纳关键事实并输出一份简洁提纲。',
       summary: '合成材料的主要事实及待确认事项。',
       isCurrent: vi.fn(async () => true),
@@ -96,7 +97,7 @@ describe('core follow-up suggestions boundary', () => {
       { modelDataRegion: null },
       { intent: ' ' },
       { summary: ' ' },
-      { intent: '你好' },
+      { intent: '你好', rawIntent: '你好' },
     ]) {
       const f = fixture({ allowed: Object.keys(input).length > 0 });
       await publishCoreTaskSuggestions({ ...f.input, ...input });

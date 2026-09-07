@@ -7,12 +7,19 @@ export async function publishCoreTaskSuggestions(input: {
   wiring: ProductionModelRuntimeWiring;
   actorExternalId: string;
   modelDataRegion: unknown;
+  /** Original request, before plan/parent preambles; eligibility only. */
+  rawIntent: string;
   intent: string;
   summary: string;
   isCurrent: () => Promise<boolean>;
   publish: (suggestions: string[]) => void;
 }): Promise<void> {
-  if (!input.intent.trim() || !input.summary.trim() || classifyLightweightTask(input.intent))
+  if (
+    !input.rawIntent.trim() ||
+    !input.intent.trim() ||
+    !input.summary.trim() ||
+    classifyLightweightTask(input.rawIntent)
+  )
     return;
   try {
     const runtime = input.wiring.resolveCore({

@@ -143,27 +143,50 @@ function fixture(lane: 'generate' | 'scrape' | 'resume', persisted = true, follo
     frames,
     suggest,
     summary,
-    start: async () =>
+    start: async (input: { intent?: string; mode?: 'plan'; message?: string } = {}) =>
       lane === 'resume'
         ? {
             ...(await tasksRouter.createCaller(ctx).reply({
               taskId: 'tsk_suggestions_resume',
-              message: '请按背景、结论、待确认事项组织提纲。',
+              message: input.message ?? '请按背景、结论、待确认事项组织提纲。',
             })),
             taskId: 'tsk_suggestions_resume',
           }
         : tasksRouter.createCaller(ctx).create({
             intent:
-              lane === 'generate'
+              input.intent ??
+              (lane === 'generate'
                 ? '整理提供的材料，归纳关键事实并输出一份简洁提纲。'
-                : '总结 https://public.example.test/article 这篇文章的主要内容。',
+                : '总结 https://public.example.test/article 这篇文章的主要内容。'),
             expertMode: 'normal',
+            ...(input.mode ? { mode: input.mode } : {}),
             ...(followUp ? { replyToTaskId: 'tsk_suggestions_parent' } : {}),
           }),
   };
 }
 
 describe('core task post-completion suggestions', () => {
+  it.each([
+    {
+      lane: 'generate' as const,
+      followUp: false,
+      input: { intent: '你好', mode: 'plan' as const },
+    },
+    { lane: 'generate' as const, followUp: true, input: { intent: '你好' } },
+    { lane: 'resume' as const, followUp: false, input: { message: '谢谢' } },
+  ])(
+    'skips optional suggestions for an undecorated lightweight request: $lane / $followUp',
+    async ({ lane, followUp, input }) => {
+      const f = fixture(lane, true, followUp);
+      await f.start(input);
+      await vi.waitFor(() =>
+        expect(f.frames.some((frame) => frame.type === 'server.task.terminal')).toBe(true),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      expect(f.suggest).not.toHaveBeenCalled();
+      expect(f.frames.some((frame) => frame.type === 'server.supercar.suggestions')).toBe(false);
+    },
+  );
   it.each(['generate', 'scrape'] as const)(
     '%s retains parent restrictions for follow-up tasks',
     async (lane) => {
