@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import {type SQL} from 'drizzle-orm';
+import {MySqlDialect} from 'drizzle-orm/mysql-core';
 import * as planning from '../../agent/core-task-plan.js';
 import * as generation from '../../agent/generate-runner.js';
 import * as scraping from '../../agent/scrape-runner.js';
@@ -27,7 +29,7 @@ function fixture(lane: 'generate' | 'scrape' | 'resume', persisted = true, follo
     QWEN_MESSAGES_ADAPTER_ENABLED: true,
     DASHSCOPE_CN_API_KEY: 'synthetic-cn',
   });
-  const state = { status: 'executing', result: { summary: '' } };
+  const state: {status:string;result:{summary:string;followUpSuggestions?:string[]}} = { status: 'executing', result: { summary: '' } };
   const logger = {
     child: () => logger,
     info: vi.fn(),
@@ -36,6 +38,16 @@ function fixture(lane: 'generate' | 'scrape' | 'resume', persisted = true, follo
     debug: vi.fn(),
   };
   const db = {
+    update() {
+      return {set: (patch: {result:SQL})=>({where:async(condition:SQL)=>{
+        const dialect=new MySqlDialect();
+        const guard=dialect.sqlToQuery(condition);
+        if(state.status!=='completed' || guard.params[2]!==state.result.summary) return [{affectedRows:0}];
+        const query=dialect.sqlToQuery(patch.result);
+        state.result={...state.result,followUpSuggestions:JSON.parse(String(query.params[0]))};
+        return [{affectedRows:1}];
+      }})};
+    },
     select(projection: Record<string, unknown>) {
       if ('intent' in projection)
         return {
@@ -226,6 +238,7 @@ describe('core task post-completion suggestions', () => {
           suggestions: ['整理后续执行清单'],
         }),
       );
+      expect(f.state.result.followUpSuggestions).toEqual(['整理后续执行清单']);
       expect(f.suggest.mock.calls[0]?.[0].messagesAdapter.metadata).toMatchObject({
         provider: 'alibaba-model-studio',
         region: 'cn',

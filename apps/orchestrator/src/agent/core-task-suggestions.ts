@@ -12,6 +12,7 @@ export async function publishCoreTaskSuggestions(input: {
   intent: string;
   summary: string;
   isCurrent: () => Promise<boolean>;
+  persist: (suggestions: string[]) => Promise<boolean>;
   publish: (suggestions: string[]) => void;
 }): Promise<void> {
   if (
@@ -33,7 +34,9 @@ export async function publishCoreTaskSuggestions(input: {
       intent: input.intent,
       summary: input.summary,
     });
-    if (suggestions.length > 0 && (await input.isCurrent())) input.publish(suggestions);
+    if (suggestions.length > 0 && (await input.persist(suggestions)) && (await input.isCurrent())) {
+      input.publish(suggestions);
+    }
   } catch {
     // Model calls already emit sanitized runtime observations. Never log raw
     // database/broadcast errors or let optional work reject the terminal path.

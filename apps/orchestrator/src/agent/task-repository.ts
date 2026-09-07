@@ -637,6 +637,29 @@ export class TaskRepository {
     return row?.status === 'executing';
   }
 
+  async persistCurrentCompletedSuggestions(
+    taskExternalId: string,
+    summary: string,
+    suggestions: string[],
+  ): Promise<boolean> {
+    if (
+      !suggestions.length || suggestions.length > 3 ||
+      suggestions.some((item) =>
+        typeof item !== 'string' || item.trim().length < 4 || item.length > 40)
+    ) return false;
+    const result = await this.db
+      .update(tasks)
+      .set({
+        result: sql`JSON_SET(${tasks.result}, '$.followUpSuggestions', CAST(${JSON.stringify(suggestions)} AS JSON))`,
+      })
+      .where(and(
+        eq(tasks.externalId, taskExternalId),
+        eq(tasks.status, 'completed'),
+        sql`JSON_UNQUOTE(JSON_EXTRACT(${tasks.result}, '$.summary')) = ${summary}`,
+      ));
+    return extractMysqlAffectedRows(result) > 0;
+  }
+
   async isCurrentCompletedOutcome(taskExternalId: string, summary: string): Promise<boolean> {
     const [row] = await this.db
       .select({ status: tasks.status, result: tasks.result })

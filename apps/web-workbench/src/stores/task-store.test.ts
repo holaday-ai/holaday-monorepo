@@ -52,6 +52,51 @@ beforeEach(() => {
   useTaskStore.getState().reset();
 });
 
+describe('persisted follow-up suggestions', () => {
+  it('restores suggestions after reset and detail hydration without a new task call', async () => {
+    detailQuery.mockResolvedValueOnce({status:'completed',intent:'fixture',result:{summary:'done',followUpSuggestions:['完善方案']},steps:[]} as never);
+    useTaskStore.getState().reset();
+    useTaskStore.getState().selectTask('tsk_restored','ui');
+    await flushPromises();
+    expect(useTaskStore.getState().suggestionsByTask.tsk_restored).toEqual(['完善方案']);
+    expect(createMutate).not.toHaveBeenCalled();
+  });
+  it('normalizes malformed and duplicate persisted values', async () => {
+    detailQuery.mockResolvedValueOnce({status:'completed',result:{summary:'done',followUpSuggestions:[null,{},' ',' 完善方案 ','完善方案',17,'比较方案']},steps:[]} as never);
+    useTaskStore.getState().selectTask('tsk_normalized','ui');
+    await flushPromises();
+    expect(useTaskStore.getState().suggestionsByTask.tsk_normalized).toEqual(['完善方案','比较方案']);
+  });
+  it('does not restore suggestions for a noncompleted task', async () => {
+    detailQuery.mockResolvedValueOnce({status:'awaiting_user',result:{followUpSuggestions:['过期建议']},steps:[]} as never);
+    useTaskStore.getState().selectTask('tsk_waiting','ui');
+    await flushPromises();
+    expect(useTaskStore.getState().suggestionsByTask.tsk_waiting).toBeUndefined();
+  });
+  it('does not replace a live suggestion frame with an older detail response',async()=>{
+    let resolve!:(value:never)=>void;
+    detailQuery.mockImplementationOnce(()=>new Promise(done=>{resolve=done;}));
+    useTaskStore.getState().selectTask('tsk_live','ui');
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.supercar.suggestions',
+      taskId: 'tsk_live',
+      suggestions: ['最新后续建议'],
+    });
+    resolve({status:'completed',result:{summary:'done',followUpSuggestions:['旧的后续建议']},steps:[]} as never);
+    await flushPromises();
+    expect(useTaskStore.getState().suggestionsByTask.tsk_live).toEqual(['最新后续建议']);
+  });
+  it.each([{first:[]},{first:['旧的后续建议']}])('refreshes a preexisting cached suggestion list from a newer detail ($first)',async({first})=>{
+    detailQuery.mockResolvedValueOnce({status:'completed',result:{summary:'done',followUpSuggestions:first},steps:[]} as never);
+    useTaskStore.getState().selectTask('tsk_updated','ui');
+    await flushPromises();
+    detailQuery.mockResolvedValueOnce({status:'completed',result:{summary:'done',followUpSuggestions:['后台保存的建议']},steps:[]} as never);
+    useTaskStore.getState().selectTask('tsk_updated','ui');
+    await flushPromises();
+    expect(useTaskStore.getState().suggestionsByTask.tsk_updated).toEqual(['后台保存的建议']);
+  });
+});
+
 describe('normaliseDetailStepStatus', () => {
   it('maps DB completed steps to done instead of failed', () => {
     expect(normaliseDetailStepStatus('completed')).toBe('done');

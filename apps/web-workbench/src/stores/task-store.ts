@@ -603,6 +603,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   async function hydrateDetail(taskId: string): Promise<void> {
     const myToken = ++hydrateToken;
     const generation = captureSessionGeneration();
+    const suggestionsAtRequestStart = get().suggestionsByTask[taskId];
     try {
       const rawDetail = await trpc.tasks.detail.query({ taskId });
       if (myToken !== hydrateToken || !isCurrentSession(generation)) return;
@@ -627,6 +628,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const planText = safeTaskListText(detail.planText) || undefined;
         const planStatus = normalizeTaskPlanStatus(detail.planStatus);
         const resultObj = isTaskListRecord(detail.result) ? detail.result : {};
+        const savedSuggestions = Array.isArray(resultObj.followUpSuggestions)
+          ? [...new Set(resultObj.followUpSuggestions.filter((value): value is string =>
+              typeof value === 'string' && value.trim().length >= 4 && value.length <= 40,
+            ).map(value => value.trim()))].slice(0, 3)
+          : [];
         const metadata = isTaskListRecord(resultObj.metadata) ? resultObj.metadata : {};
         const imageTaskMeta = parseImageTaskMeta(metadata);
         const finalScreenshot =
@@ -787,6 +793,16 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const hydratedTask = nextTasks.find((task) => task.taskId === taskId);
         return {
           stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
+          suggestionsByTask: detailStatus === 'completed'
+            ? {
+                ...prev.suggestionsByTask,
+                // Only a frame received during this request is newer than
+                // its snapshot. Preexisting detail caches must be refreshed.
+                [taskId]: prev.suggestionsByTask[taskId] !== suggestionsAtRequestStart
+                  ? prev.suggestionsByTask[taskId] ?? savedSuggestions
+                  : savedSuggestions,
+              }
+            : omitRuntimeKey(prev.suggestionsByTask, taskId),
           ...(hydratedWebSearch
             ? {
                 webSearchByTask: {
