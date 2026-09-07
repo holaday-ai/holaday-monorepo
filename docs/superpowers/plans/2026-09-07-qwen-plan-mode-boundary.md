@@ -68,7 +68,7 @@ expect(persistAwaitingUser).toHaveBeenCalledWith(expect.objectContaining({
 - [x] 完整后端/前端测试、类型、两端构建、Qwen合同、ops、QA数据库安全门禁和 diff 检查，记录已知非阻塞警告。
 - [x] 独立代码审查；每个重要反馈先写失败测试再修复并复审。
 - [ ] 本地真实 UI 验证模式选择、待确认展示、刷新恢复、修改计划和批准输入；若浏览器控制/截图失败，准确记录未验证项，不能用构建通过替代。
-- [ ] 提交、推送和创建 PR，保留准确范围。生产发布不能复用 PR230 固定版本、7工具目录或11文件白名单，不能在缺少当前精确发布授权时放宽守卫。
+- [x] 提交、推送和创建 PR，保留准确范围。生产发布不能复用 PR230 固定版本、7工具目录或11文件白名单，不能在缺少当前精确发布授权时放宽守卫。
 
 ## 验证记录
 
@@ -93,3 +93,4 @@ expect(persistAwaitingUser).toHaveBeenCalledWith(expect.objectContaining({
 - 保留已有Node localstorage警告及Vite大chunk警告。首轮27项失败来自沙箱本地端口EPERM，允许本地端口后的完整重跑0失败。
 - 日志：`/private/tmp/qwen-plan-backend-verified.log`、`qwen-plan-frontend-verified.log`、`qwen-plan-backend-build.log`、`qwen-plan-frontend-build.log`、`qwen-plan-contract.log`、`qwen-plan-ops.log`、`qwen-plan-qa-contract.log`。
 - 待完成：真实UI/模型生产闭环；本PR自己的精确发布/灰度控制授权及最终发布验收。旧PR230工具没有改动，不能直接拿来部署本分支。
+- 已创建草稿PR：<https://github.com/holaday-ai/holaday-monorepo/pull/231>。代码提交`2b422e8cab1a936f59e5f54af479bd354a9f574f`，目标`claude/musing-keller-ae1d05`；本记录后续提交仅更新交付状态。未合并、未部署，不声称远程CI或完整千问迁移通过。
