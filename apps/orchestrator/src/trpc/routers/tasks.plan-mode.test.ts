@@ -3,6 +3,7 @@ import * as planning from '../../agent/core-task-plan.js';
 import * as generation from '../../agent/generate-runner.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { env } from '../../config/env.js';
+import * as executionPipeline from '../../execution/execution-pipeline.js';
 import {
   reloadFeatureFlagsForTest,
   setFeatureFlagsForTest,
@@ -19,6 +20,7 @@ const realRunGenerateTask = generation.runGenerateTask;
 afterEach(() => {
   Object.assign(env, original);
   reloadFeatureFlagsForTest();
+  executionPipeline._resetExecutionPipelineForTest();
   vi.restoreAllMocks();
 });
 
@@ -167,6 +169,129 @@ function fixture({
 }
 
 describe('generate plan mode durable approval boundary', () => {
+  it('keeps the explicit general-purpose decision after later workflow keywords', async () => {
+    const f = fixture();
+    setFeatureFlagsForTest({ EXPERT_WORKFLOW: true });
+    const metadata = {
+      provider: 'alibaba-model-studio',
+      region: 'cn',
+      deploymentScope: 'china_mainland',
+      model: 'qwen3.7-plus',
+      endpointKind: 'public',
+      protocol: 'responses',
+    } as const;
+    const stream = vi.fn<ResponsesAdapter['stream']>(async () => ({
+      id: 'synthetic_response',
+      text: '汇报提纲：整理材料，列出两项讨论重点。',
+      status: 'completed',
+      sources: [],
+      usage: { inputTokens: 10, outputTokens: 10 },
+      metadata,
+    }));
+    f.run.mockImplementation((opts) =>
+      realRunGenerateTask({ ...opts, responsesAdapter: { metadata, stream } }),
+    );
+    await f.create();
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+    await f.reply('修改方案，加入小红书内容选题的讨论方向');
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
+    await f.reply('执行');
+    await vi.waitFor(() => expect(f.complete).toHaveBeenCalledTimes(1));
+    expect(f.run.mock.calls[2]?.[0].workflowOverride).toBeNull();
+  });
+
+  it('retains the original workflow through edits, approval and later clarification', async () => {
+    const f = fixture({ expertMode: 'auto' });
+    const init = vi.spyOn(executionPipeline, 'initExecution');
+    setFeatureFlagsForTest({ EXPERT_WORKFLOW: true, EXECUTION_CONTRACT: true });
+    f.state.intent = '帮我做小红书内容选题';
+    await f.create();
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+    await f.reply('修改方案，补充抖音直播复盘作为背景');
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
+    await f.reply('执行');
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(3));
+    await f.reply('美妆护肤');
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(4));
+    expect(f.run.mock.calls.map(([opts]) => opts.workflowOverride?.workflowId)).toEqual([
+      'content-topic',
+      'content-topic',
+      'content-topic',
+      'content-topic',
+    ]);
+    expect(f.state.result.planWorkflowId).toBe('content-topic');
+    expect(f.state.result.expertWorkflowId).toBe('content-topic');
+    expect(init.mock.calls.at(-1)?.[0].expertWorkflowId).toBe('content-topic');
+    expect(init.mock.results.at(-1)?.value.contract.expertWorkflowId).toBe('content-topic');
+  });
+
+  it.each([null, 'content-topic'])(
+    'does not override saved choice %s with a legacy browser handoff',
+    async (planWorkflowId) => {
+      const f = fixture();
+      f.state.result.planWorkflowId = planWorkflowId;
+      await f.reply('背景：昨天抖音直播复盘，电商罗盘，修改方案第二步');
+      await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+      expect(await f.reply('执行')).toMatchObject({ ok: true, state: 'resumed' });
+      await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
+      expect(f.run.mock.calls[1]?.[0].intent).toMatch(/^整理提供的材料/);
+      expect(f.state.result.expertWorkflowId).toBe(planWorkflowId);
+    },
+  );
+
+  it('rejects an unavailable persisted workflow before releasing the waiting task', async () => {
+    const f = fixture();
+    f.state.result.planWorkflowId = 'removed-workflow';
+    await expect(f.reply('执行')).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.resume).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it('retains a legacy-only selection without rematching a typed report on approval', async () => {
+    const f = fixture({ expertMode: 'auto' });
+    setFeatureFlagsForTest({ EXPERT_WORKFLOW: true });
+    f.state.intent = '电商罗盘 GMV 复盘';
+    await f.create();
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+    await f.reply('修改方案，补充所需指标说明');
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
+    await f.reply('执行');
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(3));
+    expect(f.run.mock.calls[2]?.[0].intent).toContain('【专家技能工作流：抖音直播复盘】');
+    expect(f.run.mock.calls[2]?.[0].workflowOverride).toBeNull();
+    expect(f.state.result.planLegacyWorkflowId).toBe('douyin-livestream-review');
+    expect(f.state.result.expertWorkflowId).toBe('douyin-livestream-review');
+  });
+
+  it('selects the saved legacy handoff but does not dispatch when its CAS is refused', async () => {
+    const f = fixture({ expertMode: 'auto' });
+    setFeatureFlagsForTest({ EXPERT_WORKFLOW: true });
+    f.state.intent = '电商罗盘 GMV 复盘';
+    const handoff = vi
+      .spyOn(TaskRepository.prototype, 'markAwaitingReplyCompleted')
+      .mockResolvedValue({ persisted: false });
+    await f.create();
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+    await f.reply('修改方案，场次为昨天');
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
+    expect(handoff).not.toHaveBeenCalled();
+    expect(await f.reply('执行')).toMatchObject({ ok: false, state: 'persistFailed' });
+    expect(handoff).toHaveBeenCalledWith(
+      'tsk_plan_fixture',
+      expect.objectContaining({ handoffSuggestion: 'browser' }),
+    );
+    expect(f.run).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects an unknown saved legacy selection before any state transition', async () => {
+    const f = fixture();
+    f.state.result.planWorkflowId = null;
+    f.state.result.planLegacyWorkflowId = 'removed-legacy-workflow';
+    await expect(f.reply('执行')).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.resume).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
   it('uses the latest explicit field edit for typed intake, not the original value', async () => {
     const f = fixture({ expertMode: 'auto' });
     setFeatureFlagsForTest({ EXPERT_WORKFLOW: true });
@@ -331,29 +456,34 @@ describe('generate plan mode durable approval boundary', () => {
     expect(f.run.mock.calls[2]?.[0].planOnly).toBe(false);
   });
 
-  it('reloads original and later attachments with ownership checks on every continuation', async () => {
-    const f = fixture();
-    const load = vi.spyOn(FileService.prototype, 'loadMany').mockImplementation(
-      async (ids) =>
-        ids.map((id) => ({
-          buffer: Buffer.from(`synthetic attachment ${id}`),
-          row: { externalId: id, filename: `${id}.txt`, mimetype: 'text/plain' },
-        })) as Awaited<ReturnType<FileService['loadMany']>>,
-    );
-    await f.create(['fil_original']);
-    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
-    await f.reply('根据新增材料修改第二步', ['fil_revision']);
-    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
-    await f.reply('执行');
-    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(3));
-    expect(load).toHaveBeenLastCalledWith(['fil_original', 'fil_revision'], 42);
-    expect(JSON.stringify(f.run.mock.calls[2]?.[0].attachments)).toContain(
-      'synthetic attachment fil_original',
-    );
-    expect(JSON.stringify(f.run.mock.calls[2]?.[0].attachments)).toContain(
-      'synthetic attachment fil_revision',
-    );
-  });
+  it.each(['根据新增材料修改第二步', '先别执行'])(
+    'reloads original and later attachments after %s',
+    async (reply) => {
+      const f = fixture();
+      const load = vi.spyOn(FileService.prototype, 'loadMany').mockImplementation(
+        async (ids) =>
+          ids.map((id) => ({
+            buffer: Buffer.from(`synthetic attachment ${id}`),
+            row: { externalId: id, filename: `${id}.txt`, mimetype: 'text/plain' },
+          })) as Awaited<ReturnType<FileService['loadMany']>>,
+      );
+      await f.create(['fil_original']);
+      await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+      await f.reply(reply, ['fil_revision']);
+      await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
+      expect(f.state.result.planFileIds).toEqual(['fil_original', 'fil_revision']);
+      expect(f.run.mock.calls[1]?.[0].planOnly).toBe(true);
+      await f.reply('执行');
+      await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(3));
+      expect(load).toHaveBeenLastCalledWith(['fil_original', 'fil_revision'], 42);
+      expect(JSON.stringify(f.run.mock.calls[2]?.[0].attachments)).toContain(
+        'synthetic attachment fil_original',
+      );
+      expect(JSON.stringify(f.run.mock.calls[2]?.[0].attachments)).toContain(
+        'synthetic attachment fil_revision',
+      );
+    },
+  );
 
   it('refuses approval before the state transition if an original file is no longer accessible', async () => {
     const f = fixture();
@@ -362,6 +492,27 @@ describe('generate plan mode durable approval boundary', () => {
     await expect(f.reply('执行')).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     expect(f.resume).not.toHaveBeenCalled();
     expect(f.run).not.toHaveBeenCalled();
+  });
+  it('refuses approval when the attachment added during a pure hold has expired', async () => {
+    const f = fixture();
+    const load = vi.spyOn(FileService.prototype, 'loadMany').mockImplementation(
+      async (ids) =>
+        ids.map((id) => ({
+          buffer: Buffer.from('synthetic notes'),
+          row: { externalId: id, filename: `${id}.txt`, mimetype: 'text/plain' },
+        })) as Awaited<ReturnType<FileService['loadMany']>>,
+    );
+    await f.create(['fil_original']);
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+    await f.reply('先别执行', ['fil_later']);
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
+    load.mockResolvedValue([]);
+    f.resume.mockClear();
+    f.run.mockClear();
+    await expect(f.reply('执行')).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.resume).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.state.status).toBe('awaiting_user');
   });
   it.each([true, false])(
     'create forwards plan mode and only publishes a committed wait: %s',

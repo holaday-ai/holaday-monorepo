@@ -3681,6 +3681,8 @@ export const tasksRouter = router({
                       planInitialIntent: parentContextBlock + input.intent,
                       planReplyHistory: [],
                       planFileIds: orderedFileIds,
+                      planWorkflowId: typedWorkflow?.workflowId ?? null,
+                      planLegacyWorkflowId: expertWorkflow?.id ?? null,
                     }
                   : {}),
               },
@@ -9009,7 +9011,8 @@ export const tasksRouter = router({
             .limit(1);
           const heldResult = normalizeOutput(row?.result) as Record<string, unknown> | null;
           reviseHeldPlan = row?.status === 'awaiting_user' &&
-            heldResult?.planMode === 'awaiting_approval' && !isPurePlanHold(input.message);
+            heldResult?.planMode === 'awaiting_approval' &&
+            (!isPurePlanHold(input.message) || (input.fileIds?.length ?? 0) > 0);
           if (!reviseHeldPlan && row?.status === 'awaiting_user' && row.awaitingQuestion) {
             broadcastToUser(ctx.userId, {
               type: 'server.supercar.awaiting_user',
@@ -9122,10 +9125,6 @@ export const tasksRouter = router({
       // the field's label as an anchor so the regex can pick it up
       // on the next parse round. Uses the EXECUTION registry match
       // (the typed-workflow lane), not the supercar matcher.
-      const parkingTypedWorkflow = matchTypedExpertWorkflow({
-        intent: parkRow!.intent,
-        roleId: parkRow!.roleId ?? null,
-      });
       const userReply = input.message.trim();
       const awaitingPlanApproval = prevResult?.planMode === 'awaiting_approval';
       // Only this reply can approve; plan text, attachments and earlier replies
@@ -9138,6 +9137,8 @@ export const tasksRouter = router({
             planInitialIntent: z.string().optional(),
             planReplyHistory: z.array(z.string().max(4_000)).max(31).default([]),
             planFileIds: z.array(z.string().min(1)).max(5).default([]),
+            planWorkflowId: z.string().min(1).nullable().optional(),
+            planLegacyWorkflowId: z.string().min(1).nullable().optional(),
             planIntakeContext: z.array(z.string()).max(128).default([]),
           }).safeParse(prevResult)
         : null;
@@ -9148,6 +9149,22 @@ export const tasksRouter = router({
         });
       }
       const savedContext = planContext?.success ? planContext.data : null;
+      // null is an explicit general-purpose choice; absent means an older task.
+      const savedWorkflow = savedContext?.planWorkflowId
+        ? getExpertWorkflowById(savedContext.planWorkflowId)
+        : null;
+      if (savedContext?.planWorkflowId && !savedWorkflow) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '原方案使用的技能暂不可用，任务仍在等待；请新建任务重新选择技能。',
+        });
+      }
+      const parkingTypedWorkflow = savedContext?.planWorkflowId !== undefined
+        ? savedWorkflow
+        : matchTypedExpertWorkflow({
+            intent: parkRow!.intent,
+            roleId: parkRow!.roleId ?? null,
+          });
       const savedPlan = savedContext?.planText;
       const planReplyHistory = savedContext ? [...savedContext.planReplyHistory, userReply] : [];
       const planIntakeContext = [...(savedContext?.planIntakeContext ?? [])];
@@ -9236,9 +9253,22 @@ export const tasksRouter = router({
       // user actually wants the browser path. Avoids edge cases where
       // a paste happens to contain platform keywords ("罗盘 GMV 156k
       // UV 28k") and would otherwise trip the browser-handoff branch.
-      const newWorkflow = matchExpertWorkflow(combinedIntent, {
-        hasAttachments: generateAttachmentBlocks.length > 0,
-      });
+      // A saved legacy choice may refresh its missing inputs, but later text
+      // must not introduce a legacy workflow that was never selected.
+      const newWorkflow = savedContext?.planWorkflowId === undefined || savedContext.planLegacyWorkflowId
+        ? matchExpertWorkflow(combinedIntent, {
+            hasAttachments: generateAttachmentBlocks.length > 0,
+          })
+        : null;
+      if (savedContext?.planLegacyWorkflowId && newWorkflow?.id !== savedContext.planLegacyWorkflowId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '原方案使用的工作流暂不可用，任务仍在等待；请新建任务重新选择技能。',
+        });
+      }
+      const resumeWorkflowId = savedContext?.planWorkflowId !== undefined
+        ? savedContext.planWorkflowId ?? newWorkflow?.id ?? null
+        : newWorkflow?.id ?? null;
       const wantsBrowser =
           !planOnly && replyKind !== 'manual_data' && newWorkflow?.routeOverride === 'browser';
 
@@ -9418,7 +9448,7 @@ export const tasksRouter = router({
         taskId: input.taskId,
         intent: combinedIntent,
         executionMode: 'generate',
-        expertWorkflowId: newWorkflow?.id ?? null,
+        expertWorkflowId: resumeWorkflowId,
         expertMode: parkedExpertMode,
         hasAttachments: generateAttachmentBlocks.length > 0,
       });
@@ -9435,6 +9465,9 @@ export const tasksRouter = router({
                   intent: effectiveCombined,
                   planOnly,
                   planExecutionApproved: Boolean(savedContext && !planOnly),
+                  ...(savedContext?.planWorkflowId !== undefined
+                    ? { workflowOverride: savedWorkflow }
+                    : {}),
                   ...(savedPlan ? { executionPlan: savedPlan } : {}),
                   // The typed parser takes the first match per field. Give only
                   // that parser newest explicit user turns first, then derived
@@ -9514,7 +9547,7 @@ export const tasksRouter = router({
           const metadata = {
             executionMode: 'generate' as const,
             finalExecutionMode: 'generate' as const,
-            expertWorkflowId: newWorkflow?.id ?? null,
+            expertWorkflowId: resumeWorkflowId,
             expertMode: parkedExpertMode,
             selectedRole: parkRow!.roleId ?? null,
             ...(resumeGenerateResponsesAdapter
@@ -9601,6 +9634,12 @@ export const tasksRouter = router({
                   planInitialIntent: savedContext.planInitialIntent ?? parkRow!.intent,
                   planReplyHistory,
                   planFileIds,
+                  ...(savedContext.planWorkflowId !== undefined
+                    ? { planWorkflowId: savedContext.planWorkflowId }
+                    : {}),
+                  ...(savedContext.planLegacyWorkflowId !== undefined
+                    ? { planLegacyWorkflowId: savedContext.planLegacyWorkflowId }
+                    : {}),
                   planIntakeContext,
                 } : {}),
               },
