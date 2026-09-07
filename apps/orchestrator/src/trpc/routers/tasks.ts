@@ -9307,6 +9307,14 @@ export const tasksRouter = router({
         resumeGenerateRuntime.kind === 'ready'
           ? resumeGenerateRuntime.responses('standard')
           : null;
+      const resumeVerifierRuntime = resolveVerifierRuntimeForUser(
+        ctx.userId,
+        userRow.modelDataRegion,
+      );
+      const resumeSemanticVerifierAdapter =
+        resumeVerifierRuntime.kind === 'ready'
+          ? resumeVerifierRuntime.messages('verify_strict')
+          : null;
       const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
       const newWorkflowPreamble = newWorkflow?.promptPreamble ?? '';
       const effectiveCombined =
@@ -9395,6 +9403,7 @@ export const tasksRouter = router({
             taskId: input.taskId,
             intent: combinedIntent,
             outcome,
+            semanticAdapter: resumeSemanticVerifierAdapter,
             logger: ctx.logger,
             evidenceSourceDetail: 'llm_generate_resume_response',
             onVerifying: () => broadcastSubStatus(ctx.userId, input.taskId, 'verifying'),
