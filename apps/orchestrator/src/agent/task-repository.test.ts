@@ -119,6 +119,29 @@ describe('isTaskExecuting', () => {
   });
 });
 
+describe('isCurrentCompletedOutcome', () => {
+  it.each([
+    [{ status: 'completed', result: { summary: 'Saved answer' } }, true],
+    [{ status: 'completed', result: '{"summary":"Saved answer"}' }, true],
+    [{ status: 'completed', result: 'not json' }, false],
+    [{ status: 'completed', result: [] }, false],
+    [{ status: 'completed', result: { summary: 'Replaced answer' } }, false],
+    [{ status: 'completed', result: null }, false],
+    [{ status: 'cancelled', result: { summary: 'Saved answer' } }, false],
+    [{ status: 'executing', result: { summary: 'Saved answer' } }, false],
+    [{ status: 'partial_success', result: { summary: 'Saved answer' } }, false],
+    [null, false],
+  ] as const)('accepts only the still-current successful result: %j', async (row, expected) => {
+    let condition: unknown;
+    const db = { select: () => ({ from: () => ({ where: (where: unknown) => {
+      condition = where;
+      return { limit: async () => row ? [row] : [] };
+    } }) }) } as unknown as DB;
+    expect(await new TaskRepository(db).isCurrentCompletedOutcome('tsk_outcome_guard', 'Saved answer')).toBe(expected);
+    expect(collectDrizzleParamValues(condition)).toEqual(['tsk_outcome_guard']);
+  });
+});
+
 function fakeDbForStateTransitions(affectedRows = 1) {
   const captured = {
     updatePayloads: [] as Record<string, unknown>[],

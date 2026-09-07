@@ -55,12 +55,15 @@ export async function generateSuggestions(opts: GenerateSuggestionsOptions): Pro
   const userMsg = `任务：${opts.intent}\n结果摘要：${opts.summary.slice(0, 500)}`;
   let raw = '';
   try {
-    const resp = await opts.messagesAdapter.create({
-      maxTokens: MAX_TOKENS,
-      thinking: { type: 'disabled' },
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userMsg }],
-    });
+    const resp = await opts.messagesAdapter.create(
+      {
+        maxTokens: MAX_TOKENS,
+        thinking: { type: 'disabled' },
+        system: SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: userMsg }],
+      },
+      { timeoutMs: 4000, maxRetries: 0 },
+    );
     for (const b of resp.content) {
       if (b.type === 'text') raw += b.text;
     }

@@ -41,6 +41,7 @@ import { detectNavFailure } from '../../agent/nav-failure-detector.js';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js';
 import { prepareCoreTaskPlan } from '../../agent/core-task-plan.js';
+import { publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { generateSuggestions } from '../../agent/suggestions-generator.js';
 import { resolveSuggestionsProviderRoute } from '../../agent/suggestions-provider.js';
@@ -3749,6 +3750,27 @@ export const tasksRouter = router({
           ctx.logger.warn({ err, taskId }, 'generate: broadcast terminal failed');
         }
 
+        if (
+          generateTerminalPersisted &&
+          generateTerminalStatus === 'completed' &&
+          outcome.status === 'completed'
+        ) {
+          const summary = outcome.summary;
+          void publishCoreTaskSuggestions({
+            wiring: modelRuntimeWiring,
+            actorExternalId: ctx.userId,
+            modelDataRegion: userRow.modelDataRegion,
+            rawIntent: input.intent,
+            intent: effectiveIntent,
+            summary,
+            isCurrent: () => repo.isCurrentCompletedOutcome(taskId, summary),
+            publish: (suggestions) =>
+              broadcastToUser(ctx.userId, {
+                type: 'server.supercar.suggestions', taskId, suggestions,
+              }),
+          });
+        }
+
         // Phase 1 Day 5 — fire-and-forget execution-pipeline persist
         // + always cleanup the in-memory contract / ledger registries
         // even when persist is a no-op (flags off) so the maps don't
@@ -4361,6 +4383,27 @@ export const tasksRouter = router({
           }
         } catch (err) {
           ctx.logger.warn({ err, taskId }, 'scrape: broadcast terminal failed');
+        }
+
+        if (
+          scrapeTerminalPersisted &&
+          scrapeTerminalStatus === 'completed' &&
+          outcome.status === 'completed'
+        ) {
+          const summary = outcome.summary;
+          void publishCoreTaskSuggestions({
+            wiring: modelRuntimeWiring,
+            actorExternalId: ctx.userId,
+            modelDataRegion: userRow.modelDataRegion,
+            rawIntent: input.intent,
+            intent: effectiveIntent,
+            summary,
+            isCurrent: () => repo.isCurrentCompletedOutcome(taskId, summary),
+            publish: (suggestions) =>
+              broadcastToUser(ctx.userId, {
+                type: 'server.supercar.suggestions', taskId, suggestions,
+              }),
+          });
         }
 
         // Phase 1 Day 5 — fire-and-forget execution-pipeline persist
@@ -9389,6 +9432,21 @@ export const tasksRouter = router({
                 taskId: input.taskId,
                 status: 'completed',
                 ...(outcome.summary ? { summary: outcome.summary } : {}),
+              });
+              const summary = outcome.summary;
+              void publishCoreTaskSuggestions({
+                wiring: modelRuntimeWiring,
+                actorExternalId: ctx.userId,
+                modelDataRegion: userRow.modelDataRegion,
+                rawIntent: input.message,
+                intent: combinedIntent,
+                summary,
+                isCurrent: () => repo.isCurrentCompletedOutcome(input.taskId, summary),
+                publish: (suggestions) => broadcastToUser(ctx.userId, {
+                  type: 'server.supercar.suggestions',
+                  taskId: input.taskId,
+                  suggestions,
+                }),
               });
             }
           } else if (
