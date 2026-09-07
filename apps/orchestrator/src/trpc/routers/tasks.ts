@@ -23,6 +23,7 @@ import {
   verifyDirectOpenUrlSafety,
 } from '../../agent/direct-open.js';
 import { type GenerateOutcome, runGenerateTask } from '../../agent/generate-runner.js';
+import { isExplicitPlanApproval, isPurePlanHold } from '../../agent/plan-mode.js';
 import {
   type ImageAttachment,
   type RunImageTaskResult,
@@ -3456,6 +3457,7 @@ export const tasksRouter = router({
                 // Otherwise pass the bare user input.
                 intent:
                   expertWorkflow || typedWorkflow || isFollowUp ? effectiveIntent : input.intent,
+                planOnly: input.mode === 'plan',
                 // Phase 2b — pass the resolved typed workflow so the
                 // runner skips its inline matcher (which would re-match
                 // against the parent-context-prefixed intent and could
@@ -3669,7 +3671,19 @@ export const tasksRouter = router({
               taskExternalId: taskId,
               question: outcome.summary,
               awaitingKind: 'clarification',
-              result: { ...metadata, executionMode: 'generate' as const },
+              result: {
+                ...metadata,
+                executionMode: 'generate' as const,
+                ...(input.mode === 'plan'
+                  ? {
+                      planMode: 'awaiting_approval',
+                      planText: outcome.summary,
+                      planInitialIntent: parentContextBlock + input.intent,
+                      planReplyHistory: [],
+                      planFileIds: orderedFileIds,
+                    }
+                  : {}),
+              },
             });
             generateAwaitingPersisted = awaitingPersist.persisted;
             if (!awaitingPersist.persisted) {
@@ -8972,6 +8986,7 @@ export const tasksRouter = router({
       // Task stays in awaiting_user; SPA's replyToTask gates on
       // `state` and preserves the BrowserPanel takeover UI.
       if (replyKind === 'still_awaiting') {
+        let reviseHeldPlan = false;
         // Best-effort re-broadcast so any SPA tab that lost its
         // awaitingUserByTask entry (e.g. after a long idle) gets it
         // back without needing tasks.detail re-fetch.
@@ -8981,6 +8996,7 @@ export const tasksRouter = router({
               status: tasksTable.status,
               awaitingQuestion: tasksTable.awaitingQuestion,
               awaitingKind: tasksTable.awaitingKind,
+              result: tasksTable.result,
             })
             .from(tasksTable)
             .where(
@@ -8991,7 +9007,10 @@ export const tasksRouter = router({
               ),
             )
             .limit(1);
-          if (row?.status === 'awaiting_user' && row.awaitingQuestion) {
+          const heldResult = normalizeOutput(row?.result) as Record<string, unknown> | null;
+          reviseHeldPlan = row?.status === 'awaiting_user' &&
+            heldResult?.planMode === 'awaiting_approval' && !isPurePlanHold(input.message);
+          if (!reviseHeldPlan && row?.status === 'awaiting_user' && row.awaitingQuestion) {
             broadcastToUser(ctx.userId, {
               type: 'server.supercar.awaiting_user',
               taskId: input.taskId,
@@ -9005,7 +9024,7 @@ export const tasksRouter = router({
             'reply: still_awaiting rebroadcast failed (non-fatal)',
           );
         }
-        return { ok: true, state: 'stillAwaiting' as const };
+        if (!reviseHeldPlan) return { ok: true, state: 'stillAwaiting' as const };
       }
 
       // Phase 3 R1 — state-machine invariant requires the row to be
@@ -9075,7 +9094,7 @@ export const tasksRouter = router({
         .from(tasksTable)
         .where(eq(tasksTable.externalId, input.taskId))
         .limit(1);
-      const prevResult = (parkRow?.result ?? null) as Record<string, unknown> | null;
+      const prevResult = normalizeOutput(parkRow?.result ?? null) as Record<string, unknown> | null;
       const parkedExpertMode =
         prevResult?.expertMode === 'normal' ||
         prevResult?.expertMode === 'expert' ||
@@ -9108,9 +9127,69 @@ export const tasksRouter = router({
         roleId: parkRow!.roleId ?? null,
       });
       const userReply = input.message.trim();
+      const awaitingPlanApproval = prevResult?.planMode === 'awaiting_approval';
+      // Only this reply can approve; plan text, attachments and earlier replies
+      // remain untrusted reference material, never a source of authorization.
+      const planOnly = awaitingPlanApproval && !isExplicitPlanApproval(userReply);
+      const hasPlanContext = awaitingPlanApproval || prevResult?.planText !== undefined;
+      const planContext = hasPlanContext
+        ? z.object({
+            planText: z.string().min(1),
+            planInitialIntent: z.string().optional(),
+            planReplyHistory: z.array(z.string().max(4_000)).max(31).default([]),
+            planFileIds: z.array(z.string().min(1)).max(5).default([]),
+            planIntakeContext: z.array(z.string()).max(128).default([]),
+          }).safeParse(prevResult)
+        : null;
+      if (planContext && !planContext.success) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '方案上下文无法恢复或修改轮次过多，请新建任务并带上需要保留的要求。',
+        });
+      }
+      const savedContext = planContext?.success ? planContext.data : null;
+      const savedPlan = savedContext?.planText;
+      const planReplyHistory = savedContext ? [...savedContext.planReplyHistory, userReply] : [];
+      const planIntakeContext = [...(savedContext?.planIntakeContext ?? [])];
+      const planFileIds = savedContext
+        ? [...new Set([...savedContext.planFileIds, ...(input.fileIds ?? [])])]
+        : [];
+      if (planFileIds.length > 5) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '同一方案最多保留5个附件，请合并材料后新建任务。',
+        });
+      }
+      // Never substitute a model's summary for the underlying files. Reload
+      // with ownership/expiry checks before releasing the awaiting-state CAS.
+      const generateAttachmentBlocks = savedContext ? [] : replyAttachmentBlocks;
+      if (savedContext && planFileIds.length > 0) {
+        try {
+          const files = await new FileService(ctx.db, ctx.logger).loadMany(planFileIds, userRow.id);
+          if (planFileIds.some(id => !files.some(file => file.row.externalId === id))) {
+            throw new Error('MISSING_PLAN_FILE');
+          }
+          for (const file of files) {
+            const parsed = await parseFileForPrompt(
+              file.buffer, file.row.filename, file.row.mimetype,
+            );
+            if (!parsed.blocks.length) throw new Error('EMPTY_PLAN_FILE');
+            generateAttachmentBlocks.push(...parsed.blocks);
+          }
+        } catch {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: '方案附件已失效或无法读取，任务仍在等待；请重新整理附件后新建任务。',
+          });
+        }
+      }
       let anchoredReply = userReply;
-      if (parkingTypedWorkflow && userReply.length > 0) {
-        const priorParse = parseInputs(parkRow!.intent, parkingTypedWorkflow);
+      if (!awaitingPlanApproval && parkingTypedWorkflow && userReply.length > 0) {
+        const priorIntakeIntent = savedContext
+          ? [savedContext.planInitialIntent ?? parkRow!.intent,
+              ...savedContext.planReplyHistory, ...planIntakeContext].join('\n')
+          : parkRow!.intent;
+        const priorParse = parseInputs(priorIntakeIntent, parkingTypedWorkflow);
         const additions: string[] = [];
         for (const field of priorParse.missingRequired) {
           if (!field.extractPattern) continue;
@@ -9120,12 +9199,18 @@ export const tasksRouter = router({
         }
         if (additions.length > 0) {
           anchoredReply = [...additions, userReply].join('\n');
+          if (savedContext) planIntakeContext.push(...additions);
         }
       }
 
-        const combinedIntent = [parkRow!.intent, `\n\n[用户补充]\n${anchoredReply}`]
-          .join('')
-          .trim();
+      const combinedIntent = [
+        savedContext?.planInitialIntent ?? parkRow!.intent,
+        ...(savedContext ? planReplyHistory : [anchoredReply])
+          .map(reply => `\n\n[用户补充]\n${reply}`),
+        ...(planIntakeContext.length > 0
+          ? [`\n\n[系统根据待答问题映射的字段，仅辅助解析；非用户原话]\n${planIntakeContext.join('\n')}`]
+          : []),
+      ].join('').trim();
 
       // Re-evaluate the workflow on the COMBINED intent. Two outcomes
       // matter here:
@@ -9152,10 +9237,10 @@ export const tasksRouter = router({
       // a paste happens to contain platform keywords ("罗盘 GMV 156k
       // UV 28k") and would otherwise trip the browser-handoff branch.
       const newWorkflow = matchExpertWorkflow(combinedIntent, {
-        hasAttachments: false,
+        hasAttachments: generateAttachmentBlocks.length > 0,
       });
       const wantsBrowser =
-          replyKind !== 'manual_data' && newWorkflow?.routeOverride === 'browser';
+          !planOnly && replyKind !== 'manual_data' && newWorkflow?.routeOverride === 'browser';
 
       if (wantsBrowser) {
         ctx.logger.info(
@@ -9335,7 +9420,7 @@ export const tasksRouter = router({
         executionMode: 'generate',
         expertWorkflowId: newWorkflow?.id ?? null,
         expertMode: parkedExpertMode,
-        hasAttachments: replyAttachmentBlocks.length > 0,
+        hasAttachments: generateAttachmentBlocks.length > 0,
       });
       const resumeStartedAt = Date.now();
       void (async () => {
@@ -9348,6 +9433,19 @@ export const tasksRouter = router({
                   taskId: input.taskId,
                   userId: ctx.userId,
                   intent: effectiveCombined,
+                  planOnly,
+                  ...(savedPlan ? { executionPlan: savedPlan } : {}),
+                  // The typed parser takes the first match per field. Give only
+                  // that parser newest explicit user turns first, then derived
+                  // missing-field mappings, then the initial request. The model,
+                  // verifier and suggestions still receive chronological history.
+                  ...(savedContext ? {
+                    intakeIntent: [
+                      ...[...planReplyHistory].reverse(),
+                      ...[...planIntakeContext].reverse(),
+                      savedContext.planInitialIntent ?? parkRow!.intent,
+                    ].join('\n'),
+                  } : {}),
                   ...(parkRow!.roleId ? { skillId: parkRow!.roleId } : {}),
                   expertMode: parkedExpertMode,
                   responsesAdapter: resumeGenerateResponsesAdapter,
@@ -9356,8 +9454,8 @@ export const tasksRouter = router({
                   // generate runner so a parked-from-generate task that
                   // resumes with a file (e.g. Excel of metrics) sees the
                   // attachment alongside the original intent.
-                  ...(replyAttachmentBlocks.length > 0
-                    ? { attachments: replyAttachmentBlocks }
+                  ...(generateAttachmentBlocks.length > 0
+                    ? { attachments: generateAttachmentBlocks }
                     : {}),
                   onStreamDelta: (delta) => {
                     try {
@@ -9489,7 +9587,18 @@ export const tasksRouter = router({
               taskExternalId: input.taskId,
               question: outcome.summary,
               awaitingKind: 'clarification',
-              result: { ...metadata, executionMode: 'generate' as const },
+              result: {
+                ...metadata,
+                executionMode: 'generate' as const,
+                ...(savedContext ? {
+                  ...(planOnly ? { planMode: 'awaiting_approval' } : {}),
+                  planText: planOnly ? outcome.summary : savedContext.planText,
+                  planInitialIntent: savedContext.planInitialIntent ?? parkRow!.intent,
+                  planReplyHistory,
+                  planFileIds,
+                  planIntakeContext,
+                } : {}),
+              },
             });
             if (persisted.persisted) {
               broadcastToUser(ctx.userId, {
