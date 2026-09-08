@@ -115,6 +115,7 @@ function fixture({
   vi.spyOn(planning, 'prepareCoreTaskPlan').mockResolvedValue(null);
   const run = vi.spyOn(generation, 'runGenerateTask').mockResolvedValue({
     status: 'awaiting_user',
+    generation: { completeness: 'complete', stopReason: 'awaiting_user' },
     summary: plan,
     inputTokens: 10,
     outputTokens: 10,
@@ -642,6 +643,7 @@ describe('generate plan mode durable approval boundary', () => {
       const revised = '1. 只整理已提供的材料\n2. 不要添加截止时间';
       f.run.mockResolvedValueOnce({
         status: 'awaiting_user',
+        generation: { completeness: 'complete', stopReason: 'awaiting_user' },
         summary: revised,
         inputTokens: 1,
         outputTokens: 1,

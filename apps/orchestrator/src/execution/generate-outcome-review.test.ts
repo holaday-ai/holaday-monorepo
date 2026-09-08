@@ -1,7 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { pino } from 'pino';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { runGenerateTask } from '../agent/generate-runner.js';
+import type { ResponsesAdapter } from '../llm/responses-adapter.js';
 
 import { _resetLedgerRegistryForTest, getLedger } from './evidence-ledger.js';
-import { _resetExecutionPipelineForTest, initExecution } from './execution-pipeline.js';
+import {
+  _resetExecutionPipelineForTest,
+  initExecution,
+  recordEvidence,
+} from './execution-pipeline.js';
 import { reloadFeatureFlagsForTest, setFeatureFlagsForTest } from './feature-flags.js';
 import { reviewGenerateOutcome } from './generate-outcome-review.js';
 
@@ -26,6 +33,108 @@ describe('reviewGenerateOutcome', () => {
   });
 
   afterEach(() => reloadFeatureFlagsForTest());
+
+  it('caps an explicit partial generation even without a visible truncation notice', async () => {
+    const reviewed = await reviewGenerateOutcome({
+      taskId: 'tsk_generation_partial',
+      intent: '解释这个概念',
+      outcome: {
+        ...completedOutcome('合成解释。'.repeat(40)),
+        generation: { completeness: 'partial', stopReason: 'timeout' },
+      },
+    });
+    expect(reviewed.terminalStatus).toBe('partial_success');
+    expect(reviewed.failedChecks).toContainEqual({
+      type: 'GENERATION_INCOMPLETE',
+      detail: '生成未完整结束，当前内容为部分草稿。',
+    });
+    expect(reviewed.outcome.generation).toEqual({ completeness: 'partial', stopReason: 'timeout' });
+  });
+
+  it('does not infer partial generation from words in a complete answer', async () => {
+    const reviewed = await reviewGenerateOutcome({
+      taskId: 'tsk_generation_complete',
+      intent: '解释截断的意思',
+      outcome: {
+        ...completedOutcome('截断是指内容未完整显示。'),
+        generation: { completeness: 'complete', stopReason: 'end_turn' },
+      },
+    });
+    expect(reviewed.terminalStatus).toBe('completed');
+  });
+
+  it('does not weaken a deterministic hard failure because generation was partial', async () => {
+    setFeatureFlagsForTest({
+      EVIDENCE_LEDGER: true,
+      EXECUTION_CONTRACT: true,
+      EXECUTION_VERIFIER: true,
+    });
+    const taskId = 'tsk_partial_hard_failure';
+    initExecution({
+      taskId,
+      intent: '解释概念',
+      executionMode: 'generate',
+      constraints: ['no_form_submit'],
+    });
+    recordEvidence(taskId, {
+      fact: 'submitted form on /synthetic',
+      sourceType: 'tool_result',
+      sourceDetail: 'synthetic',
+      confidence: 'observed',
+    });
+    const reviewed = await reviewGenerateOutcome({
+      taskId,
+      intent: '解释概念',
+      outcome: {
+        ...completedOutcome('合成解释。'.repeat(40)),
+        generation: { completeness: 'partial', stopReason: 'continuation_failed' },
+      },
+    });
+    expect(reviewed.verification?.failureLevel).toBe('hard_fail');
+    expect(reviewed.terminalStatus).toBe('failed');
+  });
+
+  it('carries a real runner continuation-limit result through the real review', async () => {
+    const metadata = {
+      provider: 'alibaba-model-studio' as const,
+      region: 'cn' as const,
+      deploymentScope: 'china_mainland' as const,
+      model: 'qwen3.8-plus',
+      endpointKind: 'public' as const,
+      protocol: 'responses' as const,
+    };
+    const adapter: ResponsesAdapter = {
+      metadata,
+      stream: vi.fn(async () => ({
+        id: 'synthetic',
+        metadata,
+        text: '合成草稿。',
+        sources: [],
+        usage: { inputTokens: 1, outputTokens: 2 },
+        status: 'incomplete' as const,
+        incompleteReason: 'max_output_tokens' as const,
+      })),
+    };
+    const outcome = await runGenerateTask({
+      taskId: 'tsk_real_partial',
+      userId: 'synthetic',
+      intent: '写一份合成策划报告',
+      responsesAdapter: adapter,
+      logger: pino({ level: 'silent' }),
+    });
+    const reviewed = await reviewGenerateOutcome({
+      taskId: 'tsk_real_partial',
+      intent: '写一份合成策划报告',
+      outcome,
+    });
+    expect(reviewed.outcome.summary).toContain('合成草稿。合成草稿。合成草稿。');
+    expect(reviewed.outcome.generation).toEqual({
+      completeness: 'partial',
+      stopReason: 'continuation_limit',
+    });
+    expect(reviewed.terminalStatus).toBe('partial_success');
+    expect(adapter.stream).toHaveBeenCalledTimes(3);
+  });
 
   it.each([false, true])(
     'still rejects incomplete real product rows when verifier=%s',

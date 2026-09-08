@@ -102,6 +102,7 @@ describe('tasks.create Qwen core planning reachability', () => {
       );
       const generate = vi.spyOn(generation, 'runGenerateTask').mockResolvedValue({
         status: 'completed',
+        generation: { completeness: 'complete', stopReason: 'end_turn' },
         summary: '这是一份基于所给材料完成的合成测试结果。',
         inputTokens: 10,
         outputTokens: 10,

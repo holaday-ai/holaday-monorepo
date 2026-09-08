@@ -15,6 +15,10 @@ import {
 } from '../execution/expert-workflow-prompt.js';
 import { matchExpertWorkflow } from '../execution/expert-workflow-registry.js';
 import { getFeatureFlags } from '../execution/feature-flags.js';
+import type {
+  GenerationCompletion,
+  PartialGenerationStopReason,
+} from '../execution/generation-completion.js';
 import { classifyLightweightTask } from '../execution/lightweight-task.js';
 import {
   type NeutralResponseInputContent,
@@ -49,6 +53,8 @@ type AttachmentBlock =
 
 export interface GenerateOutcome {
   status: 'completed' | 'failed' | 'awaiting_user';
+  /** Optional only for legacy callers or a router failure before this runner starts. */
+  generation?: GenerationCompletion;
   summary: string;
   reason?: string;
   sourceUrls?: ReadonlyArray<string>;
@@ -56,6 +62,8 @@ export interface GenerateOutcome {
   outputTokens: number;
   durationMs: number;
 }
+
+type TaggedGenerateOutcome = GenerateOutcome & { generation: GenerationCompletion };
 
 export interface RunGenerateOpts {
   taskId: string;
@@ -195,9 +203,11 @@ function failedOutcome(input: {
   reason: string;
   inputTokens: number;
   outputTokens: number;
-}): GenerateOutcome {
+  stopReason?: PartialGenerationStopReason;
+}): TaggedGenerateOutcome {
   return {
     status: 'failed',
+    generation: { completeness: 'partial', stopReason: input.stopReason ?? 'provider_error' },
     summary: '',
     reason: input.reason,
     inputTokens: input.inputTokens,
@@ -207,7 +217,7 @@ function failedOutcome(input: {
 }
 
 /** Run one generate task without owning persistence or WebSocket state. */
-export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOutcome> {
+export async function runGenerateTask(opts: RunGenerateOpts): Promise<TaggedGenerateOutcome> {
   const start = Date.now();
   const log = opts.logger.child({ taskId: opts.taskId, runner: 'generate' });
   const explicitRole = opts.skillId && opts.skillId !== 'none' ? opts.skillId : null;
@@ -234,6 +244,7 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
       if (intake.kind === 'missing' || intake.kind === 'contradiction') {
         return {
           status: 'awaiting_user',
+          generation: { completeness: 'complete', stopReason: 'awaiting_user' },
           summary: intake.question,
           inputTokens: 0,
           outputTokens: 0,
@@ -265,6 +276,7 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
       }
       return {
         status: 'completed',
+        generation: { completeness: 'complete', stopReason: 'deterministic' },
         summary: deterministic,
         inputTokens: 0,
         outputTokens: 0,
@@ -331,6 +343,9 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
   const outerController = new AbortController();
   const outerTimer = setTimeout(() => outerController.abort(), timeoutMs);
   let accumulatedSummary = '';
+  // Only the current, not-yet-committed stream. Cleared when its full result is accepted.
+  let pendingStreamText = '';
+  let pendingFailure: PartialGenerationStopReason | undefined;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let truncatedAtCap = false;
@@ -353,6 +368,7 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
       let lastFailureWasHeartbeat = false;
 
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        pendingStreamText = '';
         const streamController = new AbortController();
         const abortFromOuter = () => streamController.abort();
         if (outerController.signal.aborted) streamController.abort();
@@ -382,7 +398,8 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
                 lastProgressAt = Date.now();
               },
               onTextDelta(delta) {
-                if (!delta) return;
+                if (!delta || streamController.signal.aborted) return;
+                pendingStreamText += delta;
                 lastProgressAt = Date.now();
                 try {
                   opts.onStreamDelta?.(delta);
@@ -392,7 +409,13 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
               },
             },
           );
+          if (streamController.signal.aborted) throw new ResponsesAdapterError('REQUEST_TIMEOUT');
           text = result.text.trim();
+          if (!text && pendingStreamText.trim()) {
+            pendingFailure = 'invalid_response';
+            throw new ResponsesAdapterError('INVALID_RESPONSE');
+          }
+          pendingStreamText = '';
           status = result.status;
           incompleteReason = result.incompleteReason;
           totalInputTokens += result.usage.inputTokens;
@@ -413,6 +436,8 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
               { attempt, continuation, code: 'HEARTBEAT_TIMEOUT' },
               'generate: heartbeat timeout',
             );
+            // Retrying after visible text would append a second copy of the same segment.
+            if (pendingStreamText.trim()) throw new ResponsesAdapterError('REQUEST_TIMEOUT');
             if (attempt < MAX_ATTEMPTS) continue;
           } else {
             throw error;
@@ -424,12 +449,15 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
       }
 
       if (!text) {
+        pendingFailure = lastFailureWasHeartbeat ? 'timeout' : 'empty_response';
+        if (accumulatedSummary) throw new ResponsesAdapterError('INVALID_RESPONSE');
         const reason = lastFailureWasHeartbeat
           ? 'AI 长时间没有响应，请简化任务后重试。'
           : 'AI 连续两次返回空内容，请重试或简化任务。';
         return failedOutcome({
           start,
           reason,
+          stopReason: pendingFailure,
           inputTokens: totalInputTokens,
           outputTokens: totalOutputTokens,
         });
@@ -440,13 +468,15 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
         return failedOutcome({
           start,
           reason: '生成结果仍在等待重复批准，未完成最终交付。请重试，不必再次批准相同方案。',
+          stopReason: 'quality_rejected',
           inputTokens: totalInputTokens,
           outputTokens: totalOutputTokens,
         });
       }
-      if (!opts.planOnly && AWAITING_USER_MARKER_RE.test(combined)) {
+      if (!opts.planOnly && status === 'completed' && AWAITING_USER_MARKER_RE.test(combined)) {
         return {
           status: 'awaiting_user',
+          generation: { completeness: 'complete', stopReason: 'awaiting_user' },
           summary: stripAwaitingUserMarker(combined),
           inputTokens: totalInputTokens,
           outputTokens: totalOutputTokens,
@@ -472,12 +502,14 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
         return failedOutcome({
           start,
           reason: '方案未完整生成，请简化需求后重试。',
+          stopReason: truncatedAtCap ? 'continuation_limit' : 'empty_response',
           inputTokens: totalInputTokens,
           outputTokens: totalOutputTokens,
         });
       }
       return {
         status: 'awaiting_user',
+        generation: { completeness: 'complete', stopReason: 'awaiting_user' },
         summary: finishPlanDraft(plan),
         inputTokens: totalInputTokens,
         outputTokens: totalOutputTokens,
@@ -488,6 +520,7 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
       return failedOutcome({
         start,
         reason: FRESH_SOURCE_ERROR,
+        stopReason: 'quality_rejected',
         inputTokens: totalInputTokens,
         outputTokens: totalOutputTokens,
       });
@@ -497,6 +530,9 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
     const summary = workflow ? withSources + buildFollowUpFooter(workflow) : withSources;
     return {
       status: 'completed',
+      generation: truncatedAtCap
+        ? { completeness: 'partial', stopReason: 'continuation_limit' }
+        : { completeness: 'complete', stopReason: 'end_turn' },
       summary,
       ...(sources.length > 0 ? { sourceUrls: sources.map((source) => source.url) } : {}),
       inputTokens: totalInputTokens,
@@ -515,10 +551,30 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
     );
 
     const sources = dedupeSources(observedSources);
-    if (!opts.planOnly && accumulatedSummary && (!forceFreshResearch || sources.length > 0)) {
-      const partial = appendSources(accumulatedSummary + PARTIAL_NOTICE, sources);
+    const retainedDraft = accumulatedSummary + pendingStreamText.trim();
+    const stopReason =
+      pendingFailure ??
+      (timeout
+        ? 'timeout'
+        : accumulatedSummary
+          ? 'continuation_failed'
+          : code === 'INVALID_RESPONSE'
+            ? 'invalid_response'
+            : 'provider_error');
+    if (approvedExecution && defersApprovedPlanDelivery(retainedDraft, opts.intent)) {
+      return failedOutcome({
+        start,
+        reason: '生成结果仍在等待重复批准，未完成最终交付。请重试，不必再次批准相同方案。',
+        stopReason: 'quality_rejected',
+        inputTokens: totalInputTokens,
+        outputTokens: totalOutputTokens,
+      });
+    }
+    if (!opts.planOnly && retainedDraft && (!forceFreshResearch || sources.length > 0)) {
+      const partial = appendSources(retainedDraft + PARTIAL_NOTICE, sources);
       return {
         status: 'completed',
+        generation: { completeness: 'partial', stopReason },
         summary: workflow ? partial + buildFollowUpFooter(workflow) : partial,
         ...(sources.length > 0 ? { sourceUrls: sources.map((source) => source.url) } : {}),
         inputTokens: totalInputTokens,
@@ -529,6 +585,7 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
 
     return failedOutcome({
       start,
+      stopReason,
       reason:
         forceFreshResearch && sources.length === 0
           ? FRESH_SOURCE_ERROR

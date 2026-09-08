@@ -13,9 +13,12 @@ import {
   summariseVerificationFailure,
   verifyAndFinalize,
 } from './execution-pipeline.js';
+import type { GenerationCompletion } from './generation-completion.js';
 
 export interface ReviewableGenerateOutcome {
   status: 'completed' | 'failed' | 'awaiting_user';
+  /** Absent only on legacy paths; core runner always supplies explicit completeness. */
+  generation?: GenerationCompletion;
   summary: string;
   reason?: string;
   /** Provider-observed web-search URLs, never model-authored prose URLs. */
@@ -103,7 +106,10 @@ export async function reviewGenerateOutcome(
     intent: input.intent,
     resultText: outcome.status === 'completed' ? outcome.summary : '',
   });
-  const terminalStatus = deriveFinalStatus(outcome.status, verification, sourceTrust);
+  const qualityStatus = deriveFinalStatus(outcome.status, verification, sourceTrust);
+  const generationPartial = outcome.generation?.completeness === 'partial';
+  const terminalStatus =
+    qualityStatus === 'completed' && generationPartial ? 'partial_success' : qualityStatus;
   const failureSummary =
     terminalStatus === 'failed'
       ? verification
@@ -113,6 +119,14 @@ export async function reviewGenerateOutcome(
   const failedChecks = [
     ...(verification && !verification.passed ? extractFailedChecks(verification) : []),
     ...(verification && !verification.passed ? [] : sourceTrust.failedChecks),
+    ...(generationPartial && outcome.status === 'completed'
+      ? [
+          {
+            type: 'GENERATION_INCOMPLETE',
+            detail: '生成未完整结束，当前内容为部分草稿。',
+          },
+        ]
+      : []),
   ];
 
   return {

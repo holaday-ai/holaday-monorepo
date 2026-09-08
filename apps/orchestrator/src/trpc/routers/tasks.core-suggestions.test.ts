@@ -112,6 +112,7 @@ function fixture(lane: 'generate' | 'scrape' | 'resume', persisted = true, follo
   const summary = '这是一份根据提供的材料完成的合成结果，列出了关键事实与待确认事项。';
   vi.spyOn(generation, 'runGenerateTask').mockResolvedValue({
     status: 'completed',
+    generation: { completeness: 'complete', stopReason: 'end_turn' },
     summary,
     inputTokens: 10,
     outputTokens: 10,

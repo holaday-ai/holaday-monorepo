@@ -132,6 +132,9 @@ function fixture(
     .mockResolvedValue({ persisted: true });
   const runner = vi.spyOn(generation, 'runGenerateTask').mockResolvedValue({
     status: options.runnerStatus ?? 'completed',
+    generation: options.runnerStatus === 'failed'
+      ? { completeness: 'partial', stopReason: 'provider_error' }
+      : { completeness: 'complete', stopReason: options.runnerStatus === 'awaiting_user' ? 'awaiting_user' : 'end_turn' },
     summary: options.answer ?? summary,
     reason: '合成服务不可用',
     inputTokens: 10,
