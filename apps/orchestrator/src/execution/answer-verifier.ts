@@ -61,6 +61,9 @@ export interface CheckResult {
 
 export interface VerificationResult {
   taskId: string;
+  /** Bound by core execution entry points; absent only for legacy results. */
+  executionId?: string;
+  executionRevision?: number;
   passed: boolean;
   tier: 'deterministic' | 'llm';
   /** Explicit outcome of the optional semantic layer; never implies a pass. */

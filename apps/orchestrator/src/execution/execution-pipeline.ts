@@ -70,6 +70,7 @@ import {
 } from './llm-verifier.js';
 import { getExpertWorkflowById } from './expert-workflow-registry.js';
 import type { TaskVerificationContext } from './task-verification-context.js';
+import { type CoreExecutionHandle, type CoreExecutionRegistry, type CoreExecutionState, coreExecutionRegistry } from './core-execution-registry.js';
 
 const EXECUTION_PERSIST_SOURCE_STATUSES = [
   'completed',
@@ -512,6 +513,94 @@ export function summariseVerificationFailure(
   return '质量校验未通过';
 }
 
+export type CoreVerifyInputs = Omit<VerifyInputs, 'taskId' | 'verificationContext'> & {
+  handle: CoreExecutionHandle;
+  registry?: CoreExecutionRegistry;
+};
+
+export async function verifyCoreAndFinalize(inputs: CoreVerifyInputs): Promise<VerifyOutput> {
+  const registry = inputs.registry ?? coreExecutionRegistry;
+  const state = registry.read(inputs.handle);
+  if (!state || !coreVerificationEnabled()) return unavailableCoreOutput(inputs.handle);
+  const output = await verifyResolvedExecution(
+    { ...inputs, taskId: state.handle.taskId, verificationContext: state.context },
+    state,
+  );
+  if (registry.read(inputs.handle) !== state || !coreVerificationEnabled())
+    return unavailableCoreOutput(inputs.handle);
+  return bindCoreVerification(output, state.handle);
+}
+
+export type CoreFinalizeInputs = Omit<
+  FinalizeAnswerForPersistenceInputs,
+  'taskId' | 'verificationContext'
+> & {
+  handle: CoreExecutionHandle;
+  registry?: CoreExecutionRegistry;
+};
+
+export async function finalizeCoreAnswerForPersistence(
+  inputs: CoreFinalizeInputs,
+): Promise<VerifyOutput> {
+  const registry = inputs.registry ?? coreExecutionRegistry;
+  const state = registry.read(inputs.handle);
+  if (
+    !state ||
+    !coreVerificationEnabled() ||
+    !inputs.priorVerification ||
+    inputs.priorVerification.taskId !== state.handle.taskId ||
+    inputs.priorVerification.executionId !== state.handle.executionId ||
+    inputs.priorVerification.executionRevision !== state.handle.executionRevision
+  ) {
+    return unavailableCoreOutput(inputs.handle);
+  }
+  const output = finalizeResolvedExecution(
+    { ...inputs, taskId: state.handle.taskId, verificationContext: state.context },
+    state,
+  );
+  return bindCoreVerification(output, state.handle);
+}
+
+function coreVerificationEnabled(): boolean {
+  const flags = getFeatureFlags();
+  return flags.EVIDENCE_LEDGER && flags.EXECUTION_CONTRACT && flags.EXECUTION_VERIFIER;
+}
+
+function unavailableCoreOutput(handle: CoreExecutionHandle): VerifyOutput {
+  return {
+    finalText: '',
+    verification: {
+      taskId: handle?.taskId ?? '',
+      passed: false,
+      tier: 'deterministic',
+      failureLevel: 'hard_fail',
+      inputCoverage: { complete: false, codes: ['VERIFICATION_CONTEXT_INVALID'] },
+      checks: [
+        {
+          criterionId: 'verification.core_execution_unavailable',
+          criterionType: 'VERIFICATION_CONTEXT_INVALID',
+          checker: 'deterministic',
+          passed: false,
+          severity: 'hard_fail',
+          detail: '本轮核验上下文已失效，不能交付该结果。',
+        },
+      ],
+    },
+  };
+}
+
+function bindCoreVerification(output: VerifyOutput, handle: CoreExecutionHandle): VerifyOutput {
+  if (!output.verification) return unavailableCoreOutput(handle);
+  return {
+    ...output,
+    verification: {
+      ...output.verification,
+      executionId: handle.executionId,
+      executionRevision: handle.executionRevision,
+    },
+  };
+}
+
 export async function verifyAndFinalize(inputs: VerifyInputs): Promise<VerifyOutput> {
   const flags = getFeatureFlags();
   if (!flags.EXECUTION_VERIFIER) return NULL_OUTPUT(inputs.answerText);
@@ -520,6 +609,13 @@ export async function verifyAndFinalize(inputs: VerifyInputs): Promise<VerifyOut
   const ledger = getLedger(inputs.taskId);
   if (!contract || !ledger) return NULL_OUTPUT(inputs.answerText);
 
+  return verifyResolvedExecution(inputs, { contract, ledger });
+}
+
+async function verifyResolvedExecution(
+  inputs: VerifyInputs,
+  { contract, ledger }: Pick<CoreExecutionState, 'contract' | 'ledger'>,
+): Promise<VerifyOutput> {
   // Phase 2 Day 4 — resolve typed expert workflow contract for the
   // verifier's section_presence + source_annotation checks. Only
   // hits the registry when the contract was built from a workflow;
@@ -619,13 +715,21 @@ export type FinalizeAnswerForPersistenceInputs = Omit<VerifyInputs, 'semanticAda
 export async function finalizeAnswerForPersistence(
   inputs: FinalizeAnswerForPersistenceInputs,
 ): Promise<VerifyOutput> {
-  const { priorVerification, semanticMetadata, ...verifyInputs } = inputs;
   const flags = getFeatureFlags();
-  if (!flags.EXECUTION_VERIFIER) return NULL_OUTPUT(verifyInputs.answerText);
+  if (!flags.EXECUTION_VERIFIER) return NULL_OUTPUT(inputs.answerText);
 
-  const contract = getContract(verifyInputs.taskId);
-  const ledger = getLedger(verifyInputs.taskId);
-  if (!contract || !ledger) return NULL_OUTPUT(verifyInputs.answerText);
+  const contract = getContract(inputs.taskId);
+  const ledger = getLedger(inputs.taskId);
+  if (!contract || !ledger) return NULL_OUTPUT(inputs.answerText);
+
+  return finalizeResolvedExecution(inputs, { contract, ledger });
+}
+
+function finalizeResolvedExecution(
+  inputs: FinalizeAnswerForPersistenceInputs,
+  { contract, ledger }: Pick<CoreExecutionState, 'contract' | 'ledger'>,
+): VerifyOutput {
+  const { priorVerification, semanticMetadata, ...verifyInputs } = inputs;
 
   const workflowContract = contract.expertWorkflowId
     ? getExpertWorkflowById(contract.expertWorkflowId)

@@ -42,15 +42,21 @@ type GenerationCompletion =
 - [x] **RED/GREEN：交付上限。** review测试partial元信息即使无提示也不能completed；complete正文中出现“截断”不凭字面误判；硬失败不能被partial抬升；缺省元信息仅沿用legacy。补一条真实runner→真实review组合，mock的只有外部模型传输。
 - [x] **验证与提交。** runner/review/pipeline及plan-mode/resume-verifier/core-plan/core-suggestions相关单worker测试；tsc、构建、精确Biome/diff、独立审查。分项本地提交 `fix: preserve explicit generation completeness`（编号见本地进度）。完整性元信息未原子落库/尚未核心强制，不能称整体完成。
 
-## Task B：独立执行句柄与轮次隔离
+## Task B：独立执行句柄与轮次隔离（完成）
 
-**Files:** 新建 `execution/core-execution-registry.ts` / `.test.ts`；修改pipeline/evidence-ledger的内部复用接口和针对性测试，避免对legacy taskId registry作隐式语义变化。
+证据：71条ledger/pipeline基线通过；旧实现的合成交错实际复现了共享ledger及旧清理删除新上下文。registry、核心pipeline及非法容量边界分别观察到行为RED后GREEN。最终15文件300测试通过（2026-09-08 23:07 JST启动，28.86秒），tsc --noEmit及后端构建通过；3个新文件Biome通过，两个旧实现文件20条lint均定位于0f23e950中未改变的代码。独立只读复核无Critical/Important或必须修复的Minor。不是全仓lint、真实模型、持久化事务或生产验证。
 
-**Interfaces:** `CoreExecutionHandle`包含readonly taskId/executionId/revision；registry持有对应contract、独立EvidenceLedger与TaskVerificationContext。服务器接纳后初始化；同一task的新revision替换active引用，旧handle仅可释放其自有资源，不暴露新轮可变对象。每次访问验证taskId/ID/revision及句柄归属。
+进程内registry只保存当前活跃轮次，释放即移除本registry持有的正文和材料引用；默认最多256个活跃任务，满时固定码拒绝新任务、不中断已有任务。同task替换不占新槽位。活跃期内拒绝低revision、同revision不同ID及重用当前executionId；跨释放/跨进程的单调性必须由后续接纳事务提供，不能把此Map当成数据库权威。只接受已事务接纳的服务端上下文，绝不直接接受客户端DTO。
 
-- [ ] **RED：旧finally交错。** A初始化→B更高revision初始化→A清理→B仍可读且核验未跳过；A读写不得进入B ledger；重复清理无副作用；同revision不同ID拒绝；低revision初始化拒绝；未注册/伪造/丢失handle不能走NULL_OUTPUT成功。
-- [ ] **GREEN：独立且有界。** 使用新核心registry，创建独立ledger，不调用getOrCreateLedger(taskId)复用旧实例。当前轮缺必需数据返回固定VERIFICATION_CONTEXT_INVALID及不完全成功；不输出上下文。旧轮不得查询当前轮后再执行写入；异步核验前后都检查归属，数据库最终CAS仍由Task C/事务层保障。
-- [ ] **验证与提交。** 单测交错、pipeline现有回归、类型/构建、独立审查。legacy API仍可被非核心路径使用，不因本分项声称全入口隔离已完成。
+接口细化：CoreExecutionRegistry实例提供begin/read/record/release，句柄为冻结对象并以对象身份校验，复制/伪造/其他实例句柄不能使用。核心verify/finalize为单独入口，禁止缺句柄回落legacy；共享现有实际核验实现以免规则漂移，等待语义后再次检查本轮归属。失效或开关缺失返回固定上下文错误、hard_fail及空正文，不允许迟到草稿冒充当前输出。Task C仍须数据库执行ID/revision CAS。
+
+**Files:** 新建 `execution/core-execution-registry.ts` / `.test.ts`、`core-execution-pipeline.test.ts`；修改 `execution-pipeline.ts` 共享核验实现，`answer-verifier.ts` 仅扩展执行身份元信息。直接实例化现有EvidenceLedger，不修改legacy ledger或taskId registry语义。
+
+**Interfaces:** `CoreExecutionHandle`包含readonly taskId/executionId/executionRevision；registry持有对应contract、独立EvidenceLedger与TaskVerificationContext。服务器接纳后初始化；同一task的新revision替换active引用，旧handle不得读写或释放新轮资源。每次访问验证冻结句柄的对象身份及归属。核心末端检查还要求priorVerification与本轮taskId/ID/revision相同。
+
+- [x] **RED：旧finally交错。** A初始化→B更高revision初始化→A清理→B仍可读且核验未跳过；A读写不得进入B ledger；重复清理无副作用；同revision不同ID拒绝；低revision初始化拒绝；未注册/伪造/丢失handle不能走NULL_OUTPUT成功。
+- [x] **GREEN：独立且有界。** 使用新核心registry，创建独立ledger，不调用getOrCreateLedger(taskId)复用旧实例。当前轮缺必需数据返回固定VERIFICATION_CONTEXT_INVALID及hard_fail/空正文；不输出上下文。旧轮不得查询当前轮后再执行写入；异步核验前后都检查归属，数据库最终CAS仍由Task C/事务层保障。
+- [x] **验证与提交。** 25条新增所有权/核心pipeline测试，以及现有上下文、语义、生成、路由、ledger共300条回归；类型/构建、精确Biome/diff及独立审查完成。分项本地提交 `fix: isolate core execution ownership`（编号见本地进度）。legacy API仍可被非核心路径使用，不因本分项声称全入口隔离已完成。
 
 ## Task C：与事务接纳和共享上下文组合
 
