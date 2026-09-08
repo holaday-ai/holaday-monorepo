@@ -98,10 +98,11 @@ const INTENT_CONSTRAINT_RULES: ReadonlyArray<{
     prohibition: /(不要|不|别|禁止|勿)(发送|发出|寄出|send)/i,
     banned: /(发送|发出|寄出|send\s+(?:the\s+)?(?:email|message|邮件))/i,
   },
-  // 不要购买 / 不购买 / 别购买 / 不要下单 / 别下单 / 不要付款 ...
+  // Purchase aliases apply on both sides: 不采购 must also exclude 购买,
+  // and 不要购买 must exclude 采购, including after plan approval.
   {
-    prohibition: /(不要|不|别|禁止|勿)(购买|下单|付款|支付|结账|结算|buy|order|pay|checkout)/i,
-    banned: /(购买|下单|付款|支付|结账|结算|buy|place\s+order|checkout)/i,
+    prohibition: /(不要|不|别|禁止|勿)(采购|购买|下单|付款|支付|结账|结算|buy|order|pay|checkout)/i,
+    banned: /(采购|购买|下单|付款|支付|结账|结算|buy|place\s+order|checkout)/i,
   },
   // 不要点击 (general click prohibitions — narrower banned to avoid
   // killing every "查看…" suggestion that contains 点)

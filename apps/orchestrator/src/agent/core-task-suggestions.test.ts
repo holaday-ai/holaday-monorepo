@@ -139,6 +139,18 @@ describe('core follow-up suggestions boundary', () => {
     expect(f.calls).toHaveLength(1);
     expect(f.frames).toEqual([]);
   });
+  it('filters the prohibited procurement observed after plan approval before persistence and broadcast', async () => {
+    const f = fixture({ output: '["采购茶歇饮品与轻食","整理活动执行清单"]' });
+    await publishCoreTaskSuggestions({
+      ...f.input,
+      rawIntent: '确认方案，输出最终清单',
+      intent: '为8人的读书交流会拟定组织方案，不采购、不发送消息。\n预算上限改为600元，仍为45分钟，其余限制不变。\n确认方案，输出最终清单',
+    });
+    expect(f.input.persist).toHaveBeenCalledTimes(1);
+    expect(f.input.persist).toHaveBeenCalledWith(['整理活动执行清单']);
+    expect(f.frames).toEqual([['整理活动执行清单']]);
+  });
+
   it('inherits tail restrictions without trimming the original intent', async () => {
     const f = fixture({ output: '["发送总结邮件","整理后续执行清单"]' });
     const intent = `${'合成材料。'.repeat(150)}不要发送邮件`;
