@@ -71,6 +71,7 @@ import {
 import { getExpertWorkflowById } from './expert-workflow-registry.js';
 import { type TaskVerificationContext, createTaskVerificationContext } from './task-verification-context.js';
 import { type CoreExecutionHandle, type CoreExecutionRegistry, type CoreExecutionState, coreExecutionRegistry } from './core-execution-registry.js';
+import { verifyCoreIntermediate } from './core-intermediate-verification.js';
 
 const EXECUTION_PERSIST_SOURCE_STATUSES = [
   'completed',
@@ -518,6 +519,8 @@ export type CoreVerifyInputs = Omit<VerifyInputs, 'taskId' | 'verificationContex
   registry?: CoreExecutionRegistry;
   /** Observed provider URLs carry no source body and cannot certify factual coverage. */
   observedSourceUrls?: readonly string[];
+  /** Trusted runner state, not a client-selected way around final verification. */
+  runnerStatus?: 'completed' | 'awaiting_user' | 'failed';
 };
 
 export async function verifyCoreAndFinalize(inputs: CoreVerifyInputs): Promise<VerifyOutput> {
@@ -534,12 +537,31 @@ export async function verifyCoreAndFinalize(inputs: CoreVerifyInputs): Promise<V
         ],
       }
     : state.context;
-  const output = await verifyResolvedExecution(
+  let output = inputs.runnerStatus === 'awaiting_user' || inputs.runnerStatus === 'failed'
+    ? await verifyCoreIntermediate({ state, verificationContext,
+        runnerStatus: inputs.runnerStatus, answerText: inputs.answerText,
+        semanticAdapter: inputs.semanticAdapter })
+    : await verifyResolvedExecution(
     { ...inputs, taskId: state.handle.taskId, verificationContext },
     state,
   );
   if (registry.read(inputs.handle) !== state || !coreVerificationEnabled())
     return unavailableCoreOutput(inputs.handle);
+  if (output.verification && !output.verification.inputCoverage) {
+    // Deterministic early exits still need atomic, same-round metadata. Build
+    // coverage without making a semantic call or reclassifying the failure.
+    const { inputCoverage } = prepareLlmVerificationInput({
+      contract: state.contract, ledger: state.ledger, verificationContext,
+      answerText: output.finalText, adapter: inputs.semanticAdapter ?? null,
+    });
+    output = {
+      ...output,
+      verification: mergeDeterministicAndSemantic(output.verification, {
+        status: output.verification.semanticStatus ?? 'unavailable',
+        issues: [], inputCoverage,
+      }),
+    };
+  }
   if (inputs.observedSourceUrls?.length && output.verification) {
     // This is an observed property of the delivery, not an inference from a
     // successfully serialized request. Preserve it even if context admission
@@ -599,8 +621,11 @@ function unavailableCoreOutput(handle: CoreExecutionHandle): VerifyOutput {
     finalText: '',
     verification: {
       taskId: handle?.taskId ?? '',
+      executionId: handle?.executionId,
+      executionRevision: handle?.executionRevision,
       passed: false,
       tier: 'deterministic',
+      semanticStatus: 'unavailable',
       failureLevel: 'hard_fail',
       inputCoverage: { complete: false, codes: ['VERIFICATION_CONTEXT_INVALID'] },
       checks: [
@@ -623,6 +648,7 @@ function bindCoreVerification(output: VerifyOutput, handle: CoreExecutionHandle)
     ...output,
     verification: {
       ...output.verification,
+      semanticStatus: output.verification.semanticStatus ?? 'unavailable',
       executionId: handle.executionId,
       executionRevision: handle.executionRevision,
     },

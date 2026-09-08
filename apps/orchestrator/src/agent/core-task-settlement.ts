@@ -214,6 +214,12 @@ export function prepareCoreSettlement(
     throw new CoreSettlementError('CORE_SETTLEMENT_INVALID');
 
   const failedChecks = verification.checks.filter((check) => !check.passed);
+  const isGenerationFailureCheck = (check: (typeof failedChecks)[number]) =>
+    generation.completeness === 'partial' &&
+    check.criterionId === 'generation.incomplete' &&
+    check.criterionType === 'GENERATION_INCOMPLETE' &&
+    check.checker === 'deterministic' &&
+    check.severity === 'fixable';
   const hardFailure =
     (sourceTrust?.requiresReview === true && sourceTrust.blocking) ||
     verification.failureLevel === 'hard_fail' ||
@@ -246,8 +252,19 @@ export function prepareCoreSettlement(
   let awaitingQuestion: string | null = null;
   if (payload.data.status === 'failed') {
     // Never retain a raw provider/model reason or a rejected candidate in a failure.
-    result.reason =
-      !verification.passed || hardFailure || qualityStatus === 'failed'
+    const generationOnlyFailure =
+      generation.completeness === 'partial' &&
+      generation.stopReason !== 'quality_rejected' &&
+      verification.semanticStatus === 'unavailable' &&
+      verification.inputCoverage.complete &&
+      !sourceTrust?.requiresReview &&
+      !hardFailure &&
+      !clarificationFailure &&
+      failedChecks.length > 0 &&
+      failedChecks.every(isGenerationFailureCheck);
+    result.reason = generationOnlyFailure
+      ? '生成未完成，请稍后重试'
+      : !verification.passed || hardFailure || qualityStatus === 'failed'
         ? '质量校验未通过'
         : '生成未完成，请稍后重试';
   } else if (payload.data.status === 'awaiting_user') {
@@ -272,12 +289,14 @@ export function prepareCoreSettlement(
       : undefined;
     const knownCoverage = coverageCode.safeParse(check.criterionType);
     issueCodes.add(
-      knownSemantic ??
-        (knownCoverage.success
-          ? knownCoverage.data
-          : check.checker === 'deterministic'
-            ? 'DETERMINISTIC_CHECK_FAILED'
-            : 'SEMANTIC_CHECK_FAILED'),
+      isGenerationFailureCheck(check)
+        ? 'GENERATION_INCOMPLETE'
+        : (knownSemantic ??
+            (knownCoverage.success
+              ? knownCoverage.data
+              : check.checker === 'deterministic'
+                ? 'DETERMINISTIC_CHECK_FAILED'
+                : 'SEMANTIC_CHECK_FAILED')),
     );
   }
   const failureLevel = hardFailure

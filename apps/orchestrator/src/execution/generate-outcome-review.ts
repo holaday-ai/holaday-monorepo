@@ -74,20 +74,33 @@ export async function reviewGenerateOutcome(
     throw new VerificationContextError('VERIFICATION_CONTEXT_INVALID');
   if (core && core.handle?.taskId !== input.taskId)
     throw new VerificationContextError('VERIFICATION_CONTEXT_INVALID');
+  if (
+    core &&
+    input.outcome.status === 'awaiting_user' &&
+    (input.outcome.generation?.completeness !== 'complete' ||
+      input.outcome.generation.stopReason !== 'awaiting_user' ||
+      Object.keys(input.outcome.generation).some(
+        (key) => key !== 'completeness' && key !== 'stopReason',
+      ))
+  )
+    throw new VerificationContextError('VERIFICATION_CONTEXT_INVALID');
   const state = core ? registry.read(core.handle) : null;
   const intent = core ? (state ? renderVerificationUserIntent(state.context) : '') : input.intent;
   const record = (entry: Omit<EvidenceEntry, 'id' | 'timestamp' | 'taskId'>) =>
     core ? registry.record(core.handle, entry) : recordEvidence(input.taskId, entry);
   let outcome = input.outcome;
-  if (outcome.status === 'completed' && outcome.summary) {
+  if (
+    (outcome.status === 'completed' || (core && outcome.status === 'awaiting_user')) &&
+    outcome.summary
+  ) {
     const summary = sanitizeFinalText(outcome.summary);
     if (summary !== outcome.summary) outcome = { ...outcome, summary };
   }
 
   let verification: VerificationResult | null = null;
-  if (outcome.status === 'completed') {
+  if (outcome.status === 'completed' || core) {
     const observedUrls = new Set<string>();
-    for (const rawUrl of outcome.sourceUrls ?? []) {
+    for (const rawUrl of outcome.status === 'failed' ? [] : (outcome.sourceUrls ?? [])) {
       let url: URL;
       try {
         url = new URL(rawUrl);
@@ -123,6 +136,7 @@ export async function reviewGenerateOutcome(
           ...verificationInputs,
           handle: core.handle,
           registry,
+          runnerStatus: outcome.status,
           observedSourceUrls: [...observedUrls],
         })
       : await verifyAndFinalize({ ...verificationInputs, taskId: input.taskId });
@@ -132,11 +146,17 @@ export async function reviewGenerateOutcome(
     verification = verified.verification;
   }
 
-  const sourceTrust = assessResultTrust({
-    intent,
-    resultText: outcome.status === 'completed' ? outcome.summary : '',
-  });
-  const qualityStatus = deriveFinalStatus(outcome.status, verification, sourceTrust);
+  const sourceTrust =
+    core && outcome.status !== 'completed'
+      ? { requiresReview: false, blocking: false, failedChecks: [] }
+      : assessResultTrust({
+          intent,
+          resultText: outcome.status === 'completed' ? outcome.summary : '',
+        });
+  const qualityStatus =
+    core && outcome.status === 'awaiting_user' && !verification?.passed
+      ? 'failed'
+      : deriveFinalStatus(outcome.status, verification, sourceTrust);
   const generationPartial = outcome.generation?.completeness === 'partial';
   const terminalStatus =
     qualityStatus === 'completed' && generationPartial ? 'partial_success' : qualityStatus;

@@ -527,6 +527,9 @@ export async function runGenerateTask(input: RunGenerateOpts): Promise<TaggedGen
           status: 'awaiting_user',
           generation: { completeness: 'complete', stopReason: 'awaiting_user' },
           summary: stripAwaitingUserMarker(combined),
+          ...(opts.verificationContext
+            ? { sourceUrls: dedupeSources(observedSources).map((source) => source.url) }
+            : {}),
           inputTokens: totalInputTokens,
           outputTokens: totalOutputTokens,
           durationMs: Date.now() - start,
@@ -560,6 +563,7 @@ export async function runGenerateTask(input: RunGenerateOpts): Promise<TaggedGen
         status: 'awaiting_user',
         generation: { completeness: 'complete', stopReason: 'awaiting_user' },
         summary: finishPlanDraft(plan),
+        ...(opts.verificationContext ? { sourceUrls: sources.map((source) => source.url) } : {}),
         inputTokens: totalInputTokens,
         outputTokens: totalOutputTokens,
         durationMs: Date.now() - start,
