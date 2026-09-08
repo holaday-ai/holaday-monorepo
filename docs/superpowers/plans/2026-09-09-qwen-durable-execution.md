@@ -137,13 +137,17 @@ expect(capturedUpdate).toMatchObject({ status: 'partial_success', verificationPa
 - [x] **GREEN：同一次UPDATE+事件。** WHERE scope/executing/currentID/revision/coreRecordVersion全匹配。一次UPDATE写result、状态、awaiting/完成字段、verificationJson及verificationPassed/failureLevel、recordVersion+1；verificationJson只包含schemaVersion、executionId/revision、commitId、generation、inputCoverage、semanticStatus、固定问题码及受控failureLevel，不存模型自造detail。用JSON_SET保留coreRequirements；failed分支不得写summary。事件只有身份/固定状态，不重复保存候选正文。awaiting的question/plan依旧按现有允许规则保存，不把计划当授权。
 - [x] **验证与提交。** 上述反例、旧轮结果晚到及同操作二次CAS拒绝；真实SQL参数、类型/构建、受影响回归与独立审查。本地提交 `feat: atomically settle verified core results`（编号见本地进度），仍不接生产入口或发布。
 
-## P3：提交状态不确定的有界对账
+## P3：提交状态不确定的有界对账（本地分项完成，真实入口及数据库门禁未执行）
+
+最终证据：新增43条恢复测试。最小实现27条行为RED/1条既有行为pass后28 GREEN；请求排队跨deadline与同commitId异常状态2 RED后35 GREEN；再以真实Drizzle/repository加有状态传输fixture补4条组合回归（未宣称这4条观察过RED）。异步适配器按时resolve、协调器微任务恢复时已超时的四条路径均先RED再GREEN，总43条。最终20文件542测试通过（2026-09-09 02:45:40 JST启动，29.91秒），tsc --noEmit、后端构建、2文件Biome/diff通过。只读独立审查无剩余Critical/Important。实际MySQL及真实router/前端接线未执行，不是整体发布通过。
 
 **Files:** 新建 `core-task-recovery.ts` / `.test.ts`；repository最小read接口由P1/P2提供。
 
 **Interfaces:** `recoverCoreAdmission(repo, operation, options?) -> {kind:'committed'|'not_committed'|'stale'|'unknown'; dispatchAllowed:false}`仅用于异常/CAS拒绝后的恢复，正常admit成功才允许router首次调度。`persistCoreSettlement(repo, operation, options?) -> {kind:'committed'|'not_committed'|'stale'|'unknown'}`包装一次正常写及有界恢复。options只注入单调now与可取消wait以测试deadline，不提供runner/扣减回调。
 
-- [ ] **RED：commit成功后抛错。** 有状态DB传输fixture先提交行/事件后抛连接异常；对账看到相同admission身份或settlement commitId，只报告已提交，模型/扣减调用数不变。read报错不是not_committed；cancelled/更高revision是stale；两次读取失败是unknown。两个不同操作相同最终状态不能互认成功。
+P3控制器细化：同一不可变operation通过WeakMap共享进行中的Promise及完成结论，重复/并发调用不重置预算或重启写入；不新增强引用正文队列。终态从第一次保存起计15秒，接纳恢复从调用恢复器起计；真实接纳入口尚须在TaskC接线时给初始admit的悬挂请求设置边界。每次只读对账后仅在精确未提交前态才等待并重试终态CAS。最后一次写仍响应未知且没有剩余读取次数时返回unknown，不能沿用重试前的旧快照冒充not_committed。最新权威读明确未提交但剩余时间不足以容纳下一次退避时，可直接返回not_committed且不再写。取消/暂停/更新轮次或已被其他提交替代为stale；同revision不同ID、版本倒退或不合法读取为unknown。任何committed只返回保存结论，不直接触发广播、模型或额度操作。
+
+- [x] **RED：commit成功后抛错。** 有状态DB传输fixture先提交行/事件后抛连接异常；对账看到相同admission身份或settlement commitId，只报告已提交，模型/扣减调用数不变。read报错不是not_committed；cancelled/更高revision是stale；两次读取失败是unknown。两个不同操作相同最终状态不能互认成功。协调器初始故障用例观察过RED；真实repository组合的4条在其后追加，属于GREEN回归，不混称先失败证据。
 
 ```ts
 const outcome = await recoverCoreAdmission(repo, op, clock);
@@ -154,10 +158,10 @@ expect(await persistCoreSettlement(unreadableRepo, settlement, clock)).toEqual({
 expect(clock.elapsed()).toBeLessThanOrEqual(15_000);
 ```
 
-- [ ] **GREEN：恢复预算共用。** 初次写异常/CAS拒绝后至多两次只读对账1s/3s；只有当前头严格等于原操作未提交前态才允许终态重试，至多两次1s/3s，沿用同一不可变candidate和commitId。对账与重试共享15s deadline；每次await前后检查，晚到成功不直接广播，进入受控未知/再权威对账边界。接纳绝不自动重发，确认已接纳也不自动启动模型；由原回收兜底。
+- [x] **GREEN：恢复预算共用。** 初次写异常/CAS拒绝后至多两次只读对账1s/3s；只有当前头严格等于原操作未提交前态才允许终态重试，至多两次1s/3s，沿用同一不可变candidate和commitId。对账与重试共享15s deadline；每次await前后检查，晚到成功不直接广播，进入受控未知/再权威对账边界。接纳绝不自动重发，确认已接纳也不自动启动模型；由原回收兜底。
 
 恢复计时实现还须让悬挂的DB Promise与剩余deadline竞速：到期返回unknown，不只在await结束后检查时间。已经超时但未结束的写不能并发启动重试，迟到回调不得直接触发广播或模型；保存操作可能随后提交，必须保留“未确认”边界。为永不resolve的读/写与迟到commit分别补故障测试。
-- [ ] **验证与提交。** fake timer/真实SQL传输组合覆盖deadline、取消、未知、commit前/后错、只读错与重试耗尽；独立审查。本地提交 `fix: reconcile uncertain core persistence`。
+- [x] **验证与提交。** fake timer/真实SQL传输组合覆盖deadline、取消、未知、commit前/后错、只读错与重试耗尽；独立审查。本地提交 `fix: reconcile uncertain core persistence`（编号见本地进度）。初始类型检查的Attempt联合缩窄错误已修正；测试helper更名避免被Biome当作Mocha before hook。最终类型/构建/相关测试/精确lint全部重新通过，未推送或发布。
 
 ## 组合交接门禁（本计划不等于上线）
 
