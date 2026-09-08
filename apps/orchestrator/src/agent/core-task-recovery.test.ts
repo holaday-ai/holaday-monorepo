@@ -7,7 +7,11 @@ import {
   type CoreTaskHead,
   prepareCoreAdmission,
 } from './core-task-admission.js';
-import { persistCoreSettlement, recoverCoreAdmission } from './core-task-recovery.js';
+import {
+  admitCoreTask,
+  persistCoreSettlement,
+  recoverCoreAdmission,
+} from './core-task-recovery.js';
 import { CoreTaskRepository } from './core-task-repository.js';
 import { type CoreSettlement, prepareCoreSettlement } from './core-task-settlement.js';
 
@@ -402,6 +406,228 @@ function transactionalTransport(
   const db = drizzle(client as unknown as Connection) as unknown as DB;
   return { repo: new CoreTaskRepository(db), events, queries, state: () => structuredClone(row) };
 }
+
+describe('bounded initial admission and one dispatch permit', () => {
+  it('gives only the original caller permission after a real committed transaction', async () => {
+    const op = admission();
+    const db = transactionalTransport(['ok']);
+    const first = admitCoreTask(db.repo, op);
+    const duplicate = admitCoreTask(db.repo, op);
+    const observer = recoverCoreAdmission(db.repo, op);
+    expect(await finish(first)).toEqual({ kind: 'committed', dispatchAllowed: true });
+    expect(await duplicate).toEqual({ kind: 'committed', dispatchAllowed: false });
+    expect(await observer).toEqual({ kind: 'committed', dispatchAllowed: false });
+    expect(await admitCoreTask(db.repo, op)).toEqual({ kind: 'committed', dispatchAllowed: false });
+    expect(db.state().result.coreRequirements).toEqual(op.requirements);
+    expect(db.events).toHaveLength(1);
+    expect(db.queries.filter((sql) => sql.startsWith('update'))).toHaveLength(1);
+    expect(
+      db.queries.filter((sql) => sql.startsWith('select') && !sql.startsWith('select `id`')),
+    ).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('does not write after readonly recovery already owns this operation', async () => {
+    const op = admission();
+    const db = transactionalTransport([]);
+    const observer = recoverCoreAdmission(db.repo, op);
+    const attempted = admitCoreTask(db.repo, op);
+    expect(await finish(observer)).toEqual({ kind: 'not_committed', dispatchAllowed: false });
+    expect(await attempted).toEqual({ kind: 'not_committed', dispatchAllowed: false });
+    expect(db.state().status).toBe('awaiting_user');
+    expect(db.queries.filter((sql) => sql.startsWith('update'))).toHaveLength(0);
+  });
+
+  it('reconciles commit response loss without granting any dispatch permit', async () => {
+    const op = admission();
+    const db = transactionalTransport(['after']);
+    expect(await finish(admitCoreTask(db.repo, op))).toEqual({
+      kind: 'committed',
+      dispatchAllowed: false,
+    });
+    expect(await admitCoreTask(db.repo, op)).toEqual({ kind: 'committed', dispatchAllowed: false });
+    expect(db.state().result.coreRequirements).toEqual(op.requirements);
+    expect(db.events).toHaveLength(1);
+    expect(db.queries.filter((sql) => sql.startsWith('update'))).toHaveLength(1);
+  });
+
+  it('reports a rolled back admission without resubmission or dispatch', async () => {
+    const op = admission();
+    const db = transactionalTransport(['before']);
+    expect(await finish(admitCoreTask(db.repo, op))).toEqual({
+      kind: 'not_committed',
+      dispatchAllowed: false,
+    });
+    expect(db.state().status).toBe('awaiting_user');
+    expect(db.events).toHaveLength(0);
+    expect(db.queries.filter((sql) => sql.startsWith('update'))).toHaveLength(1);
+  });
+
+  it('does not grant permission after a refused CAS even if the same admission is already stored', async () => {
+    const op = admission();
+    const db = transactionalTransport(['ok', 'ok']);
+    await db.repo.admit(op);
+    expect(await finish(admitCoreTask(db.repo, op))).toEqual({
+      kind: 'committed',
+      dispatchAllowed: false,
+    });
+    expect(db.events).toHaveLength(1);
+  });
+
+  it('bounds a stalled real commit and never grants a late permit', async () => {
+    const op = admission();
+    const gate = deferred<void>();
+    const db = transactionalTransport([() => gate.promise]);
+    const pending = admitCoreTask(db.repo, op);
+    const observer = recoverCoreAdmission(db.repo, op);
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(db.queries).toContain('commit');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await pending).toEqual({ kind: 'unknown', dispatchAllowed: false });
+    expect(await observer).toEqual({ kind: 'unknown', dispatchAllowed: false });
+    expect(db.events).toHaveLength(0);
+    gate.resolve();
+    await vi.runAllTimersAsync();
+    expect(db.events).toHaveLength(1);
+    expect(await admitCoreTask(db.repo, op)).toEqual({ kind: 'unknown', dispatchAllowed: false });
+    expect(db.queries.filter((sql) => sql.startsWith('update'))).toHaveLength(1);
+    expect(
+      db.queries.filter((sql) => sql.startsWith('select') && !sql.startsWith('select `id`')),
+    ).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('does not reset the 15 second deadline after a slow initial write fails', async () => {
+    const op = admission();
+    const trace: Array<[string, number]> = [];
+    const gate = deferred<CoreTaskHead | null>();
+    const repo = {
+      admit: () => {
+        trace.push(['write', Date.now()]);
+        return new Promise<Write>((_resolve, reject) =>
+          setTimeout(() => reject(new Error('SYNTHETIC_PRIVATE_DRIVER_DETAIL')), 12_000),
+        );
+      },
+      readHead: () => {
+        trace.push(['read', Date.now()]);
+        return gate.promise;
+      },
+    };
+    const pending = admitCoreTask(repo, op);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(await pending).toEqual({ kind: 'unknown', dispatchAllowed: false });
+    expect(trace).toEqual([
+      ['write', 0],
+      ['read', 13_000],
+    ]);
+    gate.resolve(legacy);
+    await vi.runAllTimersAsync();
+    expect(await recoverCoreAdmission(repo, op)).toEqual({
+      kind: 'unknown',
+      dispatchAllowed: false,
+    });
+    expect(trace).toHaveLength(2);
+  });
+
+  it('does not restart the write or read budget after exhausted recovery', async () => {
+    const op = admission();
+    const trace: Array<[string, number]> = [];
+    const repo = {
+      admit: async () => {
+        trace.push(['write', Date.now()]);
+        return fault();
+      },
+      readHead: async () => {
+        trace.push(['read', Date.now()]);
+        return fault();
+      },
+    };
+    expect(await finish(admitCoreTask(repo, op))).toEqual({
+      kind: 'unknown',
+      dispatchAllowed: false,
+    });
+    expect(await admitCoreTask(repo, op)).toEqual({ kind: 'unknown', dispatchAllowed: false });
+    expect(await finish(recoverCoreAdmission(repo, op))).toEqual({
+      kind: 'unknown',
+      dispatchAllowed: false,
+    });
+    expect(trace).toEqual([
+      ['write', 0],
+      ['read', 1000],
+      ['read', 4000],
+    ]);
+  });
+
+  it.each(['cancelled', 'paused'])(
+    'does not admit again after a %s CAS refusal',
+    async (status) => {
+      const op = admission();
+      let writes = 0;
+      const repo = {
+        admit: async () => {
+          writes++;
+          return { persisted: false };
+        },
+        readHead: async () => ({ ...legacy, status }),
+      };
+      expect(await finish(admitCoreTask(repo, op))).toEqual({
+        kind: 'stale',
+        dispatchAllowed: false,
+      });
+      expect(writes).toBe(1);
+    },
+  );
+
+  it('rejects cloned operations without database work', async () => {
+    const db = transactionalTransport(['ok']);
+    await expect(admitCoreTask(db.repo, { ...admission() })).rejects.toThrow(
+      'CORE_ADMISSION_INVALID',
+    );
+    expect(db.queries).toEqual([]);
+  });
+
+  it('does not enter a queued admission after the deadline', async () => {
+    let now = 0;
+    let writes = 0;
+    const pending = admitCoreTask(
+      {
+        admit: async () => {
+          writes++;
+          return { persisted: true };
+        },
+        readHead: async () => legacy,
+      },
+      admission(),
+      { now: () => now },
+    );
+    now = 15_001;
+    expect(await finish(pending)).toEqual({ kind: 'unknown', dispatchAllowed: false });
+    expect(writes).toBe(0);
+  });
+
+  it('does not grant a permit when caller resumption happens after the deadline', async () => {
+    let now = 0;
+    let writes = 0;
+    const pending = admitCoreTask(
+      {
+        admit: () => {
+          writes++;
+          queueMicrotask(() =>
+            queueMicrotask(() => {
+              now = 15_001;
+            }),
+          );
+          return Promise.resolve({ persisted: true });
+        },
+        readHead: async () => legacy,
+      },
+      admission(),
+      { now: () => now },
+    );
+    expect(await finish(pending)).toEqual({ kind: 'unknown', dispatchAllowed: false });
+    expect(writes).toBe(1);
+  });
+});
 
 describe('recovery through the real repository transaction', () => {
   it('recognizes a genuinely committed admission after the transport loses its commit response', async () => {

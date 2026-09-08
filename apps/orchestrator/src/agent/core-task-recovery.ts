@@ -10,6 +10,7 @@ import { type CoreSettlement, assertPreparedCoreSettlement } from './core-task-s
 type RecoveryKind = 'committed' | 'not_committed' | 'stale' | 'unknown';
 type RecoveryResult = Readonly<{ kind: RecoveryKind }>;
 type AdmissionRecoveryResult = Readonly<{ kind: RecoveryKind; dispatchAllowed: false }>;
+type AdmissionStartResult = Readonly<{ kind: RecoveryKind; dispatchAllowed: boolean }>;
 type AdmissionReader = Pick<CoreTaskRepository, 'readHead'>;
 type SettlementRepository = Pick<CoreTaskRepository, 'settle' | 'readSettlement'>;
 type Attempt<T> = { kind: 'ok'; value: T } | { kind: 'error' | 'timeout' };
@@ -26,6 +27,43 @@ const settlementStates = new Set(['completed', 'partial_success', 'failed', 'awa
 // create a permanent candidate queue and cannot be reconstructed after restart.
 const admissions = new WeakMap<CoreAdmission, Promise<AdmissionRecoveryResult>>();
 const settlements = new WeakMap<CoreSettlement, Promise<RecoveryResult>>();
+
+/** A permit belongs only to this first caller and only to a directly confirmed
+ * transaction. Recovery and duplicate callers observe state, never a permit.
+ * The server must use the permit immediately, not store it or send it to clients.
+ */
+export async function admitCoreTask(
+  repo: Pick<CoreTaskRepository, 'admit' | 'readHead'>,
+  op: CoreAdmission,
+  clock: CoreRecoveryClock = {},
+): Promise<AdmissionStartResult> {
+  assertPreparedCoreAdmission(op);
+  const previous = admissions.get(op);
+  if (previous) return previous;
+  const budget = new RecoveryBudget(clock);
+  let completeObserver!: (value: AdmissionRecoveryResult) => void;
+  admissions.set(
+    op,
+    new Promise((resolve) => {
+      completeObserver = resolve;
+    }),
+  );
+  const finish = (kind: RecoveryKind, dispatchAllowed: boolean): AdmissionStartResult => {
+    completeObserver(Object.freeze({ kind, dispatchAllowed: false }));
+    return Object.freeze({ kind, dispatchAllowed });
+  };
+  try {
+    const write = await budget.run(() => repo.admit(op));
+    if (write.kind === 'timeout' || !budget.canWait(0)) return finish('unknown', false);
+    if (confirmed(write)) return finish('committed', true);
+    const observed = await readAdmissionWithinBudget(repo, op, budget);
+    return finish(budget.canWait(0) ? observed.kind : 'unknown', false);
+  } catch {
+    return finish('unknown', false);
+  } finally {
+    budget.close();
+  }
+}
 
 /** Only for uncertain/refused admission. It NEVER grants permission to dispatch. */
 export async function recoverCoreAdmission(
@@ -62,18 +100,29 @@ async function recoverAdmission(
 ): Promise<AdmissionRecoveryResult> {
   const budget = new RecoveryBudget(clock);
   try {
-    for (const delay of delays) {
-      if (!(await budget.pause(delay)) || !budget.canWait(0)) break;
-      const read = await budget.run(() => repo.readHead(op.scope));
-      if (read.kind === 'timeout' || !budget.canWait(0)) break;
-      if (read.kind !== 'ok') continue;
-      const kind = classifyAdmission(read.value, op);
-      if (kind !== 'unknown') return Object.freeze({ kind, dispatchAllowed: false });
-    }
-    return Object.freeze({ kind: 'unknown', dispatchAllowed: false });
+    const observed = await readAdmissionWithinBudget(repo, op, budget);
+    return budget.canWait(0)
+      ? observed
+      : Object.freeze({ kind: 'unknown', dispatchAllowed: false });
   } finally {
     budget.close();
   }
+}
+
+async function readAdmissionWithinBudget(
+  repo: AdmissionReader,
+  op: CoreAdmission,
+  budget: RecoveryBudget,
+): Promise<AdmissionRecoveryResult> {
+  for (const delay of delays) {
+    if (!(await budget.pause(delay)) || !budget.canWait(0)) break;
+    const read = await budget.run(() => repo.readHead(op.scope));
+    if (read.kind === 'timeout' || !budget.canWait(0)) break;
+    if (read.kind !== 'ok') continue;
+    const kind = classifyAdmission(read.value, op);
+    if (kind !== 'unknown') return Object.freeze({ kind, dispatchAllowed: false });
+  }
+  return Object.freeze({ kind: 'unknown', dispatchAllowed: false });
 }
 
 async function persistSettlement(
