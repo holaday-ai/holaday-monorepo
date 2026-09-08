@@ -378,6 +378,9 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
             {
               signal: streamController.signal,
               timeoutMs,
+              onProgress() {
+                lastProgressAt = Date.now();
+              },
               onTextDelta(delta) {
                 if (!delta) return;
                 lastProgressAt = Date.now();

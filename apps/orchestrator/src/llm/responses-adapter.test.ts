@@ -63,6 +63,66 @@ function encodeInSmallChunks(value: string): Uint8Array[] {
 }
 
 describe('createQwenResponsesAdapter', () => {
+  it.each(['text', 'progress', 'malformed', 'duplicate'])(
+    'stops at first terminal independently of chunking before trailing %s',
+    async (tail) => {
+      const prefix =
+        sseEvent({ type: 'response.output_text.delta', delta: 'A' }) + sseEvent(completedEvent());
+      const suffix =
+        tail === 'malformed'
+          ? 'data: invalid-json\n\n'
+          : sseEvent(
+              tail === 'text'
+                ? { type: 'response.output_text.delta', delta: 'B' }
+                : tail === 'progress'
+                  ? { type: 'response.reasoning_text.delta', delta: 'private' }
+                  : completedEvent(),
+            );
+      for (const chunks of [
+        [new TextEncoder().encode(prefix + suffix)],
+        [new TextEncoder().encode(prefix), new TextEncoder().encode(suffix)],
+        encodeInSmallChunks(prefix + suffix),
+      ]) {
+        const onTextDelta = vi.fn();
+        const onProgress = vi.fn();
+        const adapter = createQwenResponsesAdapter({
+          route: INTL_RESPONSES_ROUTE,
+          fetchImpl: vi.fn(async () => streamResponse(chunks)),
+        });
+        const result = await adapter.stream({ input: 'synthetic' }, { onTextDelta, onProgress });
+        expect(result.text).toBe('A');
+        expect(onTextDelta.mock.calls).toEqual([['A']]);
+        expect(onProgress).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it.each(['text', 'progress'])(
+    'honors cancellation from a %s observer even with buffered completion',
+    async (kind) => {
+      const controller = new AbortController();
+      const body =
+        sseEvent({
+          type: kind === 'text' ? 'response.output_text.delta' : 'response.reasoning_text.delta',
+          delta: 'synthetic',
+        }) + sseEvent(completedEvent());
+      const adapter = createQwenResponsesAdapter({
+        route: INTL_RESPONSES_ROUTE,
+        fetchImpl: vi.fn(async () => streamResponse([new TextEncoder().encode(body)])),
+      });
+      const cancel = () => controller.abort();
+      await expect(
+        adapter.stream(
+          { input: 'synthetic' },
+          {
+            signal: controller.signal,
+            ...(kind === 'text' ? { onTextDelta: cancel } : { onProgress: cancel }),
+          },
+        ),
+      ).rejects.toMatchObject({ code: 'REQUEST_ABORTED' });
+    },
+  );
+
   it('joins fragmented UTF-8 deltas and extracts only structured tool sources', async () => {
     const payload =
       sseEvent({ type: 'response.output_text.delta', delta: '市场' }) +

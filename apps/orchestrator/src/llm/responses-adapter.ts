@@ -56,6 +56,8 @@ export interface ResponsesAdapter {
       signal?: AbortSignal;
       timeoutMs?: number;
       onTextDelta?: (delta: string) => void;
+      /** Liveness only: never exposes reasoning content to consumers. */
+      onProgress?: () => void;
     },
   ): Promise<NeutralResponsesResult>;
 }
@@ -158,6 +160,7 @@ export function createQwenResponsesAdapter(input: {
             metadata,
             signal: controller.signal,
             onTextDelta: options?.onTextDelta,
+            onProgress: options?.onProgress,
           });
         } catch (error) {
           if (error instanceof ResponsesAdapterError) throw error;
@@ -225,14 +228,17 @@ async function consumeResponsesStream(input: {
   metadata: SafeQwenRouteMetadata;
   signal: AbortSignal;
   onTextDelta?: (delta: string) => void;
+  onProgress?: () => void;
 }): Promise<NeutralResponsesResult> {
   const reader = input.body.getReader();
   const decoder = new TextDecoder();
   let pending = '';
   let text = '';
   let completion: unknown;
+  let terminalReceived = false;
 
   const consumeEvent = (eventBlock: string) => {
+    if (input.signal.aborted) throw new DOMException('Aborted', 'AbortError');
     const data = eventBlock
       .split(/\r?\n/)
       .filter((line) => line.startsWith('data:'))
@@ -247,6 +253,18 @@ async function consumeResponsesStream(input: {
       throw new ResponsesAdapterError('INVALID_RESPONSE');
     }
     if (!isRecord(event)) return;
+
+    if (event.type === 'response.reasoning_text.delta') {
+      if (typeof event.delta !== 'string') throw new ResponsesAdapterError('INVALID_RESPONSE');
+      if (event.delta) {
+        try {
+          input.onProgress?.();
+        } catch {
+          // Progress observers cannot change the canonical result or expose reasoning.
+        }
+      }
+      return;
+    }
 
     if (event.type === 'response.output_text.delta') {
       if (typeof event.delta !== 'string') {
@@ -264,8 +282,10 @@ async function consumeResponsesStream(input: {
     }
 
     if (event.type === 'response.completed' || event.type === 'response.incomplete') {
-      if (completion !== undefined) throw new ResponsesAdapterError('INVALID_RESPONSE');
+      if (terminalReceived) throw new ResponsesAdapterError('INVALID_RESPONSE');
       completion = event.response;
+      terminalReceived = true;
+      return true;
     }
   };
 
@@ -278,22 +298,31 @@ async function consumeResponsesStream(input: {
         throw new ResponsesAdapterError('INVALID_RESPONSE');
       }
       pending = drainSseEvents(pending, consumeEvent);
+      if (terminalReceived) break;
     }
     pending += decoder.decode();
-    if (pending.trim()) consumeEvent(pending);
+    if (!terminalReceived && pending.trim()) consumeEvent(pending);
   } finally {
+    // A terminal event ends the response even when HTTP keep-alive has no EOF.
+    // Do not await a transport cancel hook that may itself never settle.
+    void reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
 
+  if (input.signal.aborted) throw new DOMException('Aborted', 'AbortError');
   return normalizeCompletion(completion, text, input.metadata);
 }
 
-function drainSseEvents(pending: string, consume: (eventBlock: string) => void): string {
+function drainSseEvents(
+  pending: string,
+  consume: (eventBlock: string) => boolean | undefined,
+): string {
   let remainder = pending;
   while (true) {
     const match = /\r?\n\r?\n/.exec(remainder);
     if (!match || match.index === undefined) return remainder;
-    consume(remainder.slice(0, match.index));
+    // The first terminal is authoritative, regardless of transport chunking.
+    if (consume(remainder.slice(0, match.index))) return '';
     remainder = remainder.slice(match.index + match[0].length);
   }
 }
