@@ -27,6 +27,34 @@ describe('reviewGenerateOutcome', () => {
 
   afterEach(() => reloadFeatureFlagsForTest());
 
+  it.each([false, true])(
+    'still rejects incomplete real product rows when verifier=%s',
+    async (enabled) => {
+      setFeatureFlagsForTest({
+        EVIDENCE_LEDGER: enabled,
+        EXECUTION_CONTRACT: enabled,
+        EXECUTION_VERIFIER: enabled,
+      });
+      const taskId = 'synthetic_product_review';
+      const intent = '不采购，只整理3款京东商品的名称、价格和链接';
+      initExecution({
+        taskId,
+        intent,
+        executionMode: 'generate',
+        expertWorkflowId: 'content-topic',
+      });
+      const reviewed = await reviewGenerateOutcome({
+        taskId,
+        intent,
+        outcome: completedOutcome('三款商品分别是便签、笔筒和文件夹，没有提供价格和商品链接。'),
+      });
+      expect(reviewed.terminalStatus).not.toBe('completed');
+      expect(reviewed.failedChecks).toEqual(
+        expect.arrayContaining([expect.objectContaining({ type: 'ecommerce_rows' })]),
+      );
+    },
+  );
+
   it('applies the always-on source gate after a generate task resumes', async () => {
     const reviewed = await reviewGenerateOutcome({
       taskId: 'tsk_resume_source',
