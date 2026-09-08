@@ -111,13 +111,19 @@ WHERE在repository内部直接构造，不是公开新权限接口。事件INSER
 
 - [x] **验证与提交。** 本项测试+legacy task-repository及上下文/registry和核心生成/核验/路由回归，tsc、构建、精确Biome/diff、只读独立审查。本地提交 `feat: atomically admit core task executions`（编号见本地进度）。SQL/传输替身验证不是实际MySQL；真实迁移及事务门禁未通过时明确保留为组合发布阻塞，不因本分项完成而试发。
 
-## P2：结果与核验原子保存
+## P2：结果与核验原子保存（本地分项完成，真实数据库门禁未执行）
+
+最终证据：新增59条测试（factory38、repository新增21）；相关19文件499测试通过（2026-09-09 01:45 JST启动，29.14秒）。tsc --noEmit、tsc -p tsconfig.build.json、4文件Biome/diff通过；独立审查发现的关键结构失败上限及来源阻断交叉问题均补RED/GREEN，复审无剩余Critical/Important。SQL/CAS/BEGIN/COMMIT/ROLLBACK使用真实Drizzle代码、仅数据库传输替身；实际MySQL事务并发和持久化门禁仍未执行，不能视作上线通过。
 
 **Files:** 新建 `core-task-settlement.ts` / `.test.ts`；扩展repository及测试。`TaskVerificationContext`/`GenerationCompletion`/`VerificationResult`使用现有类型，绝不另定义宽松副本。
 
-**Interfaces:** `prepareCoreSettlement({admission, status, result, generation, verification}) -> CoreSettlement`；status只允许completed/partial_success/failed/awaiting_user。operation持有scope、executionId/revision、预期admission.recordVersion、唯一commitId及安全正文/核验投影。`CoreTaskRepository.settle(operation):Promise<{persisted:boolean}>`，`readSettlement(scope):Promise<CoreTaskHead & {commitId:string|null}|null>`只读最小受控字段。
+**Interfaces:** `prepareCoreSettlement({admission, status, result, generation, verification, sourceTrust?}) -> CoreSettlement`；status只允许completed/partial_success/failed/awaiting_user。operation持有scope、executionId/revision、预期admission.recordVersion、唯一commitId及安全正文/核验投影。`CoreTaskRepository.settle(operation):Promise<{persisted:boolean}>`，`readSettlement(scope):Promise<CoreTaskHead & {commitId:string|null}|null>`只读最小受控字段。
 
-- [ ] **RED：不可拆开写。** 正文、status、verificationJson和终态event同事务；故意让verification/event失败，整个结果不得成功；相同状态但不同executionId/revision/version拒绝。FAILED fixture不持有summary；partial generation或inputCoverage不完全拒绝completed；verification缺轮次/与本轮不同拒绝。
+实现细化（不改变批准的质量/隐私边界）：复用现有deriveFinalStatus，受控sourceTrust来自同一服务端结果审查，保留URL来源不足的既有非阻断例外；明确blocking来源和任一hard_fail独立约束状态，避免legacy提前返回partial时降低质量。sourceTrust不保存自由detail，仅映射固定SOURCE_TRUST_FAILED。failed只保存固定reason和tickCount；新result从白名单payload构造，仅从旧JSON保留coreRequirements，不能残留旧summary/错误详情。awaiting只保存question/可选planText；这两处既有MySQL TEXT列各限制65535 UTF-8字节且合计仍不超过96KiB，超限拒绝不截断，JSON summary仍允许96KiB。没有新增宽泛metadata接口或放宽核验类型。
+
+对账读取：SQL仅投影head及四个receipt字段（schemaVersion/executionId/revision/commitId），校验同轮身份和UUID。新终态缺失/畸形receipt固定报不可读；legacy或executing/cancelled不借用上轮receipt。不读取summary、intent或完整verification_json。
+
+- [x] **RED：不可拆开写。** 正文、status、verificationJson和终态event同事务；故意让verification/event失败，整个结果不得成功；相同状态但不同executionId/revision/version拒绝。FAILED fixture不持有summary；partial generation或inputCoverage不完全拒绝completed；verification缺轮次/与本轮不同拒绝。
 
 ```ts
 const rejected = prepareCoreSettlement({ admission, status:'failed',
@@ -128,8 +134,8 @@ expect(transactionCommitted).toBe(false);
 expect(capturedUpdate).toMatchObject({ status: 'partial_success', verificationPassed: false });
 ```
 
-- [ ] **GREEN：同一次UPDATE+事件。** WHERE scope/executing/currentID/revision/coreRecordVersion全匹配。一次UPDATE写result、状态、awaiting/完成字段、verificationJson及verificationPassed/failureLevel、recordVersion+1；verificationJson只包含schemaVersion、executionId/revision、commitId、generation、inputCoverage、semanticStatus、固定问题码及受控failureLevel，不存模型自造detail。用JSON_SET保留coreRequirements；failed分支不得写summary。事件只有身份/固定状态，不重复保存候选正文。awaiting的question/plan依旧按现有允许规则保存，不把计划当授权。
-- [ ] **验证与提交。** 上述反例、旧轮结果晚到及同操作二次CAS拒绝；真实SQL参数、类型/构建、受影响回归与独立审查。本地提交 `feat: atomically settle verified core results`，仍不接生产入口或发布。
+- [x] **GREEN：同一次UPDATE+事件。** WHERE scope/executing/currentID/revision/coreRecordVersion全匹配。一次UPDATE写result、状态、awaiting/完成字段、verificationJson及verificationPassed/failureLevel、recordVersion+1；verificationJson只包含schemaVersion、executionId/revision、commitId、generation、inputCoverage、semanticStatus、固定问题码及受控failureLevel，不存模型自造detail。用JSON_SET保留coreRequirements；failed分支不得写summary。事件只有身份/固定状态，不重复保存候选正文。awaiting的question/plan依旧按现有允许规则保存，不把计划当授权。
+- [x] **验证与提交。** 上述反例、旧轮结果晚到及同操作二次CAS拒绝；真实SQL参数、类型/构建、受影响回归与独立审查。本地提交 `feat: atomically settle verified core results`（编号见本地进度），仍不接生产入口或发布。
 
 ## P3：提交状态不确定的有界对账
 
