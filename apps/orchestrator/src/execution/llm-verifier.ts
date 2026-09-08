@@ -1,7 +1,22 @@
-import type { MessagesAdapter } from '../llm/messages-adapter.js';
+import {
+  type MessagesAdapter,
+  type MessagesProviderMetadata,
+  type NeutralMessagesRequest,
+  serializeMessagesRequest,
+} from '../llm/messages-adapter.js';
 import type { CheckResult, FailureLevel, VerificationResult } from './answer-verifier.js';
 import type { EvidenceLedger } from './evidence-ledger.js';
 import type { ExecutionContract } from './execution-contract.js';
+import {
+  type TaskVerificationContext,
+  VerificationContextError,
+  assessVerificationMaterials,
+  createTaskVerificationContext,
+} from './task-verification-context.js';
+import {
+  type VerificationInputCoverage,
+  checkVerificationCandidate,
+} from './verification-input-budget.js';
 
 export const DEFAULT_LLM_VERIFIER_TIMEOUT_MS = 15_000;
 export const DEFAULT_LLM_VERIFIER_MAX_TOKENS = 768;
@@ -33,6 +48,7 @@ export interface SafeVerifierIssue {
 export interface SemanticVerification {
   status: 'pass' | 'warn' | 'reject' | 'unavailable';
   issues: SafeVerifierIssue[];
+  inputCoverage?: VerificationInputCoverage;
 }
 
 export interface LlmVerifierInputs {
@@ -42,7 +58,11 @@ export interface LlmVerifierInputs {
   finalUrl?: string;
   /** Region-bound Qwen Messages adapter. Null means the lane is unavailable. */
   adapter: MessagesAdapter | null;
+  /** Safe protocol/model fields for a final budget check without a model call. */
+  semanticMetadata?: MessagesProviderMetadata;
   timeoutMs?: number;
+  /** Required by the new core delivery path; absent only on legacy paths. */
+  verificationContext?: TaskVerificationContext;
 }
 
 const SAFE_SUMMARIES: Record<SafeVerifierIssueCode, string> = {
@@ -67,35 +87,71 @@ export function shouldRunLlmVerifier(
  * Run one bounded, region-bound Qwen semantic review. Infrastructure and
  * schema failures are explicit unavailability, never an implied pass.
  */
+export function prepareLlmVerificationInput(inputs: LlmVerifierInputs): {
+  request: NeutralMessagesRequest | null;
+  inputCoverage?: VerificationInputCoverage;
+} {
+  let context: TaskVerificationContext | undefined;
+  let inputCoverage: VerificationInputCoverage | undefined;
+  if (inputs.verificationContext !== undefined) {
+    try {
+      context = createTaskVerificationContext(inputs.verificationContext);
+    } catch (error) {
+      return {
+        request: null,
+        inputCoverage: {
+          complete: false,
+          codes: [
+            error instanceof VerificationContextError ? error.code : 'VERIFICATION_CONTEXT_INVALID',
+          ],
+        },
+      };
+    }
+    inputCoverage = assessVerificationMaterials(context);
+  }
+  const request: NeutralMessagesRequest = {
+    maxTokens: DEFAULT_LLM_VERIFIER_MAX_TOKENS,
+    thinking: { type: 'disabled' },
+    temperature: 0,
+    system: SYSTEM_PROMPT,
+    messages: [
+      { role: 'user', content: buildUserPayload({ ...inputs, verificationContext: context }) },
+    ],
+  };
+  if (context) {
+    const budget = checkVerificationCandidate(
+      inputs.answerText,
+      serializeMessagesRequest(request, inputs.adapter?.metadata ?? inputs.semanticMetadata),
+    );
+    if (!budget.ok) inputCoverage = { complete: false, codes: [budget.code] };
+  }
+  return { request, ...(inputCoverage ? { inputCoverage } : {}) };
+}
+
 export async function verifyWithLlm(inputs: LlmVerifierInputs): Promise<SemanticVerification> {
-  if (!inputs.adapter) return unavailable();
+  const { request, inputCoverage } = prepareLlmVerificationInput(inputs);
+  const annotate = (result: SemanticVerification): SemanticVerification =>
+    inputCoverage ? { ...result, inputCoverage } : result;
+  if (!request || inputCoverage?.complete === false || !inputs.adapter)
+    return annotate(unavailable());
 
   const timeoutMs = inputs.timeoutMs ?? DEFAULT_LLM_VERIFIER_TIMEOUT_MS;
   const controller = new AbortController();
   try {
     const response = await withVerifierTimeout(
-      inputs.adapter.create(
-        {
-          maxTokens: DEFAULT_LLM_VERIFIER_MAX_TOKENS,
-          thinking: { type: 'disabled' },
-          temperature: 0,
-          system: SYSTEM_PROMPT,
-          messages: [{ role: 'user', content: buildUserPayload(inputs) }],
-        },
-        {
-          signal: controller.signal,
-          timeoutMs,
-          maxRetries: 0,
-        },
-      ),
+      inputs.adapter.create(request, {
+        signal: controller.signal,
+        timeoutMs,
+        maxRetries: 0,
+      }),
       timeoutMs,
       controller,
     );
     const text = response.content.find((block) => block.type === 'text')?.text;
-    if (!text) return unavailable();
-    return parseSemanticVerification(text) ?? unavailable();
+    if (!text) return annotate(unavailable());
+    return annotate(parseSemanticVerification(text) ?? unavailable());
   } catch {
-    return unavailable();
+    return annotate(unavailable());
   }
 }
 
@@ -104,11 +160,38 @@ export async function verifyWithLlm(inputs: LlmVerifierInputs): Promise<Semantic
  * pass, but it can never alter a deterministic failure into a pass or warning.
  */
 export function mergeDeterministicAndSemantic(
-  deterministic: VerificationResult,
+  deterministicResult: VerificationResult,
   semantic: SemanticVerification,
 ): VerificationResult {
+  const deterministic = semantic.inputCoverage
+    ? { ...deterministicResult, inputCoverage: semantic.inputCoverage }
+    : deterministicResult;
   if (!deterministic.passed) {
     return { ...deterministic, semanticStatus: semantic.status };
+  }
+  if (semantic.inputCoverage?.complete === false) {
+    return {
+      ...deterministic,
+      passed: false,
+      semanticStatus: semantic.status,
+      failureLevel: 'fixable',
+      checks: [
+        ...deterministic.checks,
+        ...semantic.inputCoverage.codes.map(
+          (code): CheckResult => ({
+            criterionId: `verification.${code.toLowerCase()}`,
+            criterionType: code,
+            passed: false,
+            checker: 'deterministic',
+            severity: 'fixable',
+            detail:
+              code === 'VERIFICATION_INPUT_LIMIT'
+                ? '核验输入超出范围，请缩小材料或拆分任务。'
+                : '核验材料或上下文不完整，结果尚未完整核验。',
+          }),
+        ),
+      ],
+    };
   }
   if (semantic.status === 'unavailable') {
     return { ...deterministic, semanticStatus: 'unavailable' };
@@ -153,13 +236,17 @@ export function mergeDeterministicAndSemantic(
 }
 
 export function buildUserPayload(
-  inputs: Pick<LlmVerifierInputs, 'contract' | 'ledger' | 'answerText' | 'finalUrl'>,
+  inputs: Pick<
+    LlmVerifierInputs,
+    'contract' | 'ledger' | 'answerText' | 'finalUrl' | 'verificationContext'
+  >,
 ): string {
   const answerDraft =
-    inputs.answerText.length > ANSWER_TRUNCATE_CHARS
+    !inputs.verificationContext && inputs.answerText.length > ANSWER_TRUNCATE_CHARS
       ? `${inputs.answerText.slice(0, ANSWER_TRUNCATE_CHARS)}\n[...truncated]`
       : inputs.answerText;
   return JSON.stringify({
+    ...(inputs.verificationContext ? { context: inputs.verificationContext } : {}),
     contract: {
       tier: inputs.contract.tier,
       goal: inputs.contract.goal,

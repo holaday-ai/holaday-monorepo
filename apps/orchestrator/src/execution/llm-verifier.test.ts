@@ -16,6 +16,7 @@ import {
   shouldRunLlmVerifier,
   verifyWithLlm,
 } from './llm-verifier.js';
+import { createTaskVerificationContext } from './task-verification-context.js';
 
 const QWEN_METADATA = {
   provider: 'alibaba-model-studio' as const,
@@ -114,6 +115,150 @@ const DETERMINISTIC_FAIL: VerificationResult = {
   ],
   failureLevel: 'hard_fail',
 };
+
+function fullContext() {
+  return createTaskVerificationContext({
+    schemaVersion: 1,
+    executionId: 'exec_semantic',
+    executionRevision: 2,
+    initialRequest: '原始完整要求'.repeat(120),
+    userTurns: ['改为三个建议，不要删除风险说明', '确认执行'],
+    phase: 'approved_execution',
+    workflow: null,
+    referencePlan: '参考方案',
+    materials: [
+      { kind: 'text', key: 'file:0:0', source: 'file', text: '合成原始材料：金额为42元。' },
+    ],
+  });
+}
+
+describe('complete delivery semantic input', () => {
+  it('sends distinct complete tails and original requirements/materials to the actual adapter boundary', async () => {
+    const { adapter, create } = makeAdapter();
+    const context = fullContext();
+    const head = '相同正文'.repeat(600);
+    const inputs = { ...verifierFixture(), adapter, verificationContext: context };
+    await verifyWithLlm({ ...inputs, answerText: `${head}尾部甲` });
+    await verifyWithLlm({ ...inputs, answerText: `${head}尾部乙` });
+    const [first, second] = create.mock.calls.map(([request]) => {
+      const text = request.messages[0]?.content;
+      if (typeof text !== 'string') throw new Error('missing semantic text request');
+      return JSON.parse(text) as { answerDraft: string; context: unknown };
+    });
+    expect(first?.answerDraft).toBe(`${head}尾部甲`);
+    expect(second?.answerDraft).toBe(`${head}尾部乙`);
+    expect(first?.context).toEqual(context);
+  });
+
+  it('classifies oversize input before provider unavailability without sending a clipped request', async () => {
+    const { adapter, create } = makeAdapter();
+    for (const runtime of [adapter, null]) {
+      const inputs = {
+        ...verifierFixture(),
+        adapter: runtime,
+        verificationContext: fullContext(),
+        answerText: '界'.repeat(32_769),
+      };
+      const result = await verifyWithLlm(inputs);
+      expect(result.inputCoverage).toEqual({
+        complete: false,
+        codes: ['VERIFICATION_INPUT_LIMIT'],
+      });
+      expect(mergeDeterministicAndSemantic(DETERMINISTIC_PASS, result).passed).toBe(false);
+    }
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('accounts for JSON escaping of material content in the entire wire request', async () => {
+    const { adapter, create } = makeAdapter();
+    const context = createTaskVerificationContext({
+      ...fullContext(),
+      materials: [{ kind: 'text', key: 'file:0:0', source: 'file', text: '\u0000'.repeat(50_000) }],
+    });
+    const result = await verifyWithLlm({
+      ...verifierFixture(),
+      adapter,
+      verificationContext: context,
+    });
+    expect(result.inputCoverage).toEqual({ complete: false, codes: ['VERIFICATION_INPUT_LIMIT'] });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('does not call semantic review without required readable material', async () => {
+    const { adapter, create } = makeAdapter();
+    const context = createTaskVerificationContext({
+      ...fullContext(),
+      materials: [
+        {
+          kind: 'unavailable',
+          key: 'provider:0',
+          source: 'provider',
+          reason: 'source_body_unavailable',
+        },
+      ],
+    });
+    const result = await verifyWithLlm({
+      ...verifierFixture(),
+      adapter,
+      verificationContext: context,
+    });
+    expect(result.inputCoverage).toEqual({
+      complete: false,
+      codes: ['VERIFICATION_MATERIALS_INCOMPLETE'],
+    });
+    const merged = mergeDeterministicAndSemantic(DETERMINISTIC_PASS, result);
+    expect(merged.passed).toBe(false);
+    expect(merged.failureLevel).toBe('fixable');
+    expect(merged.checks).toContainEqual(
+      expect.objectContaining({
+        criterionType: 'VERIFICATION_MATERIALS_INCOMPLETE',
+        passed: false,
+      }),
+    );
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed supplied context rather than falling back to the legacy summary', async () => {
+    const { adapter, create } = makeAdapter();
+    const context = { ...fullContext(), schemaVersion: 2 };
+    const result = await verifyWithLlm({
+      ...verifierFixture(),
+      adapter,
+      verificationContext: context as unknown as ReturnType<typeof fullContext>,
+    });
+    expect(result.inputCoverage).toEqual({
+      complete: false,
+      codes: ['VERIFICATION_CONTEXT_INVALID'],
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('keeps input coverage separate from a genuine model timeout or rejection', async () => {
+    const adapter = makeAdapter({ rejectWith: new Error('PRIVATE_PROVIDER_BODY') }).adapter;
+    const result = await verifyWithLlm({
+      ...verifierFixture(),
+      adapter,
+      verificationContext: fullContext(),
+    });
+    expect(result).toEqual({
+      status: 'unavailable',
+      issues: [],
+      inputCoverage: { complete: true, codes: [] },
+    });
+    expect(mergeDeterministicAndSemantic(DETERMINISTIC_PASS, result)).toMatchObject({
+      passed: true,
+      semanticStatus: 'unavailable',
+      inputCoverage: { complete: true, codes: [] },
+    });
+    expect(
+      mergeDeterministicAndSemantic(DETERMINISTIC_FAIL, {
+        status: 'unavailable',
+        issues: [],
+        inputCoverage: { complete: false, codes: ['VERIFICATION_INPUT_LIMIT'] },
+      }),
+    ).toMatchObject({ passed: false, failureLevel: 'hard_fail' });
+  });
+});
 
 describe('shouldRunLlmVerifier', () => {
   it('runs only for a deterministic pass on a full contract', () => {

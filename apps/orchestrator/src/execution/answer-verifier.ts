@@ -37,6 +37,7 @@ import {
 import { evaluateSourceDomain } from './source-domain-consistency.js';
 import { evaluateTemplateFill } from './template-fill-consistency.js';
 import { classifyLightweightTask } from './lightweight-task.js';
+import type { VerificationInputCoverage } from './verification-input-budget.js';
 
 export type FailureLevel = 'fixable' | 'needs_clarification' | 'hard_fail';
 
@@ -64,6 +65,8 @@ export interface VerificationResult {
   tier: 'deterministic' | 'llm';
   /** Explicit outcome of the optional semantic layer; never implies a pass. */
   semanticStatus?: 'pass' | 'warn' | 'reject' | 'unavailable';
+  /** Input completeness is independent of semantic service availability. */
+  inputCoverage?: VerificationInputCoverage;
   checks: CheckResult[];
   failureLevel?: FailureLevel;
   suggestedFix?: string;

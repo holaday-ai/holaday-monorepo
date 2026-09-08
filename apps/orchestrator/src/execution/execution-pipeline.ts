@@ -39,7 +39,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { tasks as tasksTable } from '../db/schema/tasks.js';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
-import type { MessagesAdapter } from '../llm/messages-adapter.js';
+import type { MessagesAdapter, MessagesProviderMetadata } from '../llm/messages-adapter.js';
 
 import type { CheckResult, ParsedItem, VerificationResult } from './answer-verifier.js';
 import { extractStructuredItems, verifyDeterministic } from './answer-verifier.js';
@@ -64,10 +64,12 @@ import {
 import { getFeatureFlags } from './feature-flags.js';
 import {
   mergeDeterministicAndSemantic,
+  prepareLlmVerificationInput,
   shouldRunLlmVerifier,
   verifyWithLlm,
 } from './llm-verifier.js';
 import { getExpertWorkflowById } from './expert-workflow-registry.js';
+import type { TaskVerificationContext } from './task-verification-context.js';
 
 const EXECUTION_PERSIST_SOURCE_STATUSES = [
   'completed',
@@ -166,6 +168,7 @@ export function recordEvidence(
 
 export interface VerifyInputs {
   taskId: string;
+  verificationContext?: TaskVerificationContext;
   /** The runner's final answer text. */
   answerText: string;
   /** Browser-mode tasks pass the last URL the agent reached. */
@@ -478,6 +481,17 @@ export function extractFailedChecks(
       if (c.criterionId.startsWith('generic.')) {
         return { type: c.criterionId, detail: c.detail };
       }
+      const semanticCode = c.criterionId.slice('semantic.'.length).toUpperCase();
+      if (
+        c.criterionId.startsWith('semantic.') &&
+        [
+          'UNSUPPORTED_CONCLUSION',
+          'MISSING_REQUIRED_SECTION',
+          'IRRELEVANT_OUTPUT',
+          'AMBIGUOUS_EVIDENCE',
+        ].includes(semanticCode)
+      )
+        return { type: semanticCode, detail: c.detail };
       return { type: 'unknown', detail: c.detail };
     });
 }
@@ -498,9 +512,7 @@ export function summariseVerificationFailure(
   return '质量校验未通过';
 }
 
-export async function verifyAndFinalize(
-  inputs: VerifyInputs,
-): Promise<VerifyOutput> {
+export async function verifyAndFinalize(inputs: VerifyInputs): Promise<VerifyOutput> {
   const flags = getFeatureFlags();
   if (!flags.EXECUTION_VERIFIER) return NULL_OUTPUT(inputs.answerText);
 
@@ -517,7 +529,7 @@ export async function verifyAndFinalize(
     : null;
 
   // Layer 1 — deterministic.
-  const det = verifyDeterministic({
+  let det = verifyDeterministic({
     contract,
     ledger,
     answerText: inputs.answerText,
@@ -526,33 +538,67 @@ export async function verifyAndFinalize(
     ...(inputs.outputFiles ? { outputFiles: inputs.outputFiles } : {}),
   });
 
-  if (!det.passed) return runFixLoop(contract, ledger, det, inputs, workflowContract);
+  let finalText = inputs.answerText;
+  if (!det.passed) {
+    const repaired = runFixLoop(contract, ledger, det, inputs, workflowContract);
+    if (inputs.verificationContext === undefined || !repaired.verification?.passed) return repaired;
+    // New core deliveries still need semantic review after deterministic repair.
+    det = repaired.verification;
+    finalText = repaired.finalText;
+  }
+
+  const semanticInputs = {
+    contract,
+    ledger,
+    answerText: finalText,
+    ...(inputs.finalUrl ? { finalUrl: inputs.finalUrl } : {}),
+    adapter: inputs.semanticAdapter ?? null,
+    verificationContext: inputs.verificationContext,
+  };
 
   // Layer 2 — semantic. It is always attempted for a deterministic full-tier
   // pass. A missing regional runtime is explicit `unavailable`, never an
   // implied model pass.
   if (shouldRunLlmVerifier(det, contract)) {
-    const semantic = await verifyWithLlm({
-      contract,
-      ledger,
-      answerText: inputs.answerText,
-      ...(inputs.finalUrl ? { finalUrl: inputs.finalUrl } : {}),
-      adapter: inputs.semanticAdapter ?? null,
-    });
+    const semantic = await verifyWithLlm(semanticInputs);
     const merged = mergeDeterministicAndSemantic(det, semantic);
+    // Missing evidence/over-budget payload cannot be repaired by editing the answer.
+    if (merged.inputCoverage?.complete === false) {
+      return { verification: merged, finalText };
+    }
     if (!merged.passed) {
-      return runFixLoop(contract, ledger, merged, inputs, workflowContract);
+      return runFixLoop(
+        contract,
+        ledger,
+        merged,
+        { ...inputs, answerText: finalText },
+        workflowContract,
+      );
     }
     return {
       verification: merged,
       finalText:
         semantic.status === 'unavailable' && isHighTrustContract(contract)
-          ? appendSemanticUnavailableWarning(inputs.answerText)
-          : inputs.answerText,
+          ? appendSemanticUnavailableWarning(finalText)
+          : finalText,
     };
   }
 
-  return { verification: det, finalText: inputs.answerText };
+  if (inputs.verificationContext !== undefined) {
+    const { inputCoverage } = prepareLlmVerificationInput(semanticInputs);
+    if (inputCoverage?.complete === false) {
+      return {
+        verification: mergeDeterministicAndSemantic(det, {
+          status: 'unavailable',
+          issues: [],
+          inputCoverage,
+        }),
+        finalText,
+      };
+    }
+    return { verification: { ...det, inputCoverage }, finalText };
+  }
+  return { verification: det, finalText };
 }
 
 /**
@@ -564,6 +610,8 @@ export async function verifyAndFinalize(
  * verdict. Omitting `semanticAdapter` keeps this second pass deterministic and cheap.
  */
 export type FinalizeAnswerForPersistenceInputs = Omit<VerifyInputs, 'semanticAdapter'> & {
+  /** Same safe model metadata as the primary review; never credentials or a new model call. */
+  semanticMetadata?: MessagesProviderMetadata;
   /** Preserve unrelated semantic/LLM failures from the primary verifier. */
   priorVerification?: VerificationResult | null;
 };
@@ -571,7 +619,7 @@ export type FinalizeAnswerForPersistenceInputs = Omit<VerifyInputs, 'semanticAda
 export async function finalizeAnswerForPersistence(
   inputs: FinalizeAnswerForPersistenceInputs,
 ): Promise<VerifyOutput> {
-  const { priorVerification, ...verifyInputs } = inputs;
+  const { priorVerification, semanticMetadata, ...verifyInputs } = inputs;
   const flags = getFeatureFlags();
   if (!flags.EXECUTION_VERIFIER) return NULL_OUTPUT(verifyInputs.answerText);
 
@@ -590,46 +638,96 @@ export async function finalizeAnswerForPersistence(
     ...(workflowContract ? { workflowContract } : {}),
     ...(verifyInputs.outputFiles ? { outputFiles: verifyInputs.outputFiles } : {}),
   });
-  const unresolvedLlmFailures = priorVerification?.checks.filter(
-    (check) => !check.passed && check.checker === 'llm',
-  ) ?? [];
+  const unresolvedQualityFailures =
+    priorVerification?.checks.filter(
+      (check) =>
+        !check.passed && (check.checker === 'llm' || check.criterionId.startsWith('verification.')),
+    ) ?? [];
+
+  const withFinalCoverage = (output: VerifyOutput): VerifyOutput => {
+    if (
+      !output.verification ||
+      (verifyInputs.verificationContext === undefined && !priorVerification?.inputCoverage)
+    )
+      return output;
+    let inputCoverage =
+      verifyInputs.verificationContext !== undefined
+        ? prepareLlmVerificationInput({
+            contract,
+            ledger,
+            answerText: output.finalText,
+            finalUrl: verifyInputs.finalUrl,
+            adapter: null,
+            semanticMetadata,
+            verificationContext: verifyInputs.verificationContext,
+          }).inputCoverage
+        : priorVerification?.inputCoverage?.complete === false
+          ? priorVerification.inputCoverage
+          : { complete: false, codes: ['VERIFICATION_CONTEXT_INVALID' as const] };
+    // The model field and provider-specific options are part of the wire budget.
+    // A lost route cannot certify complete coverage using an empty model placeholder.
+    if (inputCoverage?.complete && !semanticMetadata?.model) {
+      inputCoverage = { complete: false, codes: ['VERIFICATION_CONTEXT_INVALID'] };
+    }
+    if (inputCoverage?.complete === false) {
+      return {
+        ...output,
+        verification: mergeDeterministicAndSemantic(output.verification, {
+          status: output.verification.semanticStatus ?? 'unavailable',
+          issues: [],
+          inputCoverage,
+        }),
+      };
+    }
+    return { ...output, verification: { ...output.verification, inputCoverage } };
+  };
 
   if (deterministic.passed) {
-    if (priorVerification && unresolvedLlmFailures.length > 0) {
-      return { verification: priorVerification, finalText: verifyInputs.answerText };
+    if (priorVerification && unresolvedQualityFailures.length > 0) {
+      return withFinalCoverage({
+        verification: priorVerification,
+        finalText: verifyInputs.answerText,
+      });
     }
-    return {
-      verification: priorVerification?.semanticStatus
-        ? { ...deterministic, semanticStatus: priorVerification.semanticStatus }
-        : deterministic,
+    return withFinalCoverage({
+      verification: {
+        ...deterministic,
+        ...(priorVerification?.semanticStatus
+          ? { semanticStatus: priorVerification.semanticStatus }
+          : {}),
+        ...(priorVerification?.inputCoverage
+          ? { inputCoverage: priorVerification.inputCoverage }
+          : {}),
+      },
       finalText: verifyInputs.answerText,
-    };
+    });
   }
 
-  const finalOutput = runFixLoop(
-    contract,
-    ledger,
-    deterministic,
-    verifyInputs,
-    workflowContract,
-  );
-  if (!priorVerification || priorVerification.passed) return finalOutput;
-  if (unresolvedLlmFailures.length === 0) return finalOutput;
+  const finalOutput = runFixLoop(contract, ledger, deterministic, verifyInputs, workflowContract);
+  if (!priorVerification || priorVerification.passed) return withFinalCoverage(finalOutput);
+  if (unresolvedQualityFailures.length === 0) return withFinalCoverage(finalOutput);
 
   const finalChecks = finalOutput.verification?.checks ?? [];
-  return {
+  return withFinalCoverage({
     finalText: finalOutput.finalText,
     verification: {
       ...priorVerification,
       passed: false,
+      ...(finalOutput.verification?.failureLevel === 'hard_fail'
+        ? { failureLevel: 'hard_fail' as const }
+        : finalOutput.verification?.failureLevel === 'needs_clarification' &&
+            priorVerification.failureLevel !== 'hard_fail'
+          ? { failureLevel: 'needs_clarification' as const }
+          : {}),
       checks: [
         ...priorVerification.checks,
         ...finalChecks.filter(
-          (check) => !priorVerification.checks.some((prior) => prior.criterionId === check.criterionId),
+          (check) =>
+            !priorVerification.checks.some((prior) => prior.criterionId === check.criterionId),
         ),
       ],
     },
-  };
+  });
 }
 
 const HIGH_TRUST_INTENT_RE =

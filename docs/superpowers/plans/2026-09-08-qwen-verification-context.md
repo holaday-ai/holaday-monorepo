@@ -93,13 +93,15 @@ const bytes = (text: string) => Buffer.byteLength(text, 'utf8');
 
 - [x] **验证与提交。** 同命令GREEN，再运行 `NODE_OPTIONS=--max-old-space-size=2048 pnpm exec tsc --noEmit`（串行）；精确四文件Biome及diff检查；独立审查。只提交这四文件和计划/规格状态，提交信息 `feat: add bounded immutable verification context`。
 
-## Task 2: 语义请求不再截断且覆盖失败不放行
+## Task 2: 语义请求不再截断且覆盖失败不放行（完成）
+
+证据：完整正文/上下文、预算/材料不足、修复后候选、末端覆盖保持、失败级别单调性、非法上下文和真实 wire 模型字段均先行为 RED 再 GREEN。最终七文件139测试通过（21.61秒）；Orchestrator tsc --noEmit通过。五个精确文件Biome通过，三个既有大文件57条lint诊断全部位于基线已有且本次未改动的代码行（18/2/37），不宣称全仓lint通过。最终只读复审无Critical/Important；实际入口接线仍属Task3，非发布结论。
 
 **Files:** 修改 `execution/llm-verifier.ts`、`llm-verifier.test.ts`、`execution-pipeline.ts`、`execution-pipeline.test.ts`、`answer-verifier.ts`；必要的精确Messages协议序列化边界位于 `llm/messages-adapter.ts` / `llm/qwen-messages-transport.ts`，不改变路由/凭据。
 
-**Interfaces:** `LlmVerifierInputs.verificationContext?: TaskVerificationContext`；语义结果新增可选 `inputCoverage: { complete: boolean; codes: VerificationInputIssue[] }`，`VerificationResult`保留相同coverage字段。旧非核心调用可保持legacy输入，核心有context时必须用完整上下文，不走摘要fallback。
+**Interfaces:** `LlmVerifierInputs.verificationContext?: TaskVerificationContext`；语义结果新增可选 `inputCoverage: { complete: boolean; codes: VerificationInputIssue[] }`，`VerificationResult`保留相同coverage字段。旧非核心调用可保持legacy输入，核心有context时必须用完整上下文，不走摘要fallback。末端`FinalizeAnswerForPersistenceInputs`接收同一`verificationContext`及安全`semanticMetadata`，重新检查最终正文和真实模型wire预算；缺失模型字段不得认证完整覆盖，不读取凭据、不重复调用模型。
 
-- [ ] **RED：实际请求尾部反例。** 在现有makeAdapter fixture中捕获真实Messages request：
+- [x] **RED：实际请求尾部反例。** 在现有makeAdapter fixture中捕获真实Messages request：
 
 ```ts
 const head = '相同正文'.repeat(600);
@@ -113,8 +115,8 @@ expect(first).toContain(context.initialRequest);
 expect(first).toContain('合成材料全文');
 ```
 
-- [ ] **RED：边界及降级。** 超限或coverage不足时provider未调用，结果具有固定inputCoverage原因；merge到确定性pass不得completed；确定性hard_fail保持failed；adapter缺失但输入超限仍归为覆盖失败；15s/0retry/768保持原测试；fixed semantic code不再变unknown。
-- [ ] **GREEN：构造请求一次后检验完整预算。** `buildUserPayload`有context时序列化完整快照+原candidate，无slice；将system与Messages wire envelope（含model/max_tokens等真实字段）一起计入预算。复用实际适配器请求转换函数而非估算常数，不读取key。预算检查在provider调用和其catch之前，避免失败被吞为unavailable。coverage issue merge使用固定deterministic check、failureLevel fixable；deterministic已有失败不能被覆盖。
+- [x] **RED：边界及降级。** 超限或coverage不足时provider未调用，结果具有固定inputCoverage原因；merge到确定性pass不得completed；确定性hard_fail保持failed；adapter缺失但输入超限仍归为覆盖失败；15s/0retry/768保持原测试；fixed semantic code不再变unknown。
+- [x] **GREEN：构造请求一次后检验完整预算。** `buildUserPayload`有context时序列化完整快照+原candidate，无slice；将system与Messages wire envelope（含model/max_tokens等真实字段）一起计入预算。复用实际适配器请求转换函数而非估算常数，不读取key。预算检查在provider调用和其catch之前，避免失败被吞为unavailable。coverage issue merge使用固定deterministic check、failureLevel fixable；deterministic已有失败不能被覆盖。
 
 ```ts
 if (!coverage.complete) {
@@ -130,7 +132,7 @@ if (!coverage.complete) {
 }
 ```
 
-- [ ] **验证与提交。** 单worker运行上述四个测试及messages-adapter/qwen-messages-transport测试，类型检查、精确lint/diff检查和审查；提交 `fix: verify complete bounded delivery payloads`。不在此阶段发布。
+- [x] **验证。** 单worker运行上下文/预算/llm-verifier/pipeline/generate-outcome-review/messages-adapter/qwen-messages-transport七文件139测试，类型检查、精确lint/diff检查和审查，记录既有lint限制；本分项本地提交 `fix: verify complete bounded delivery payloads`，提交编号见本地进度。不在此阶段发布。
 
 ## Task 3: 生成与核验接入同一授权快照
 

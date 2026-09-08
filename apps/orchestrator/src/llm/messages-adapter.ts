@@ -179,7 +179,7 @@ export function createAnthropicCompatibleMessagesAdapter(input: {
   return {
     metadata,
     async create(request, options) {
-      const providerRequest = toAnthropicCompatibleRequest(request, metadata.model);
+      const providerRequest = buildMessagesProviderRequest(request, metadata);
       let rawResponse: unknown;
       try {
         rawResponse = await input.client.messages.create(
@@ -253,6 +253,30 @@ export function createQwenMessagesAdapter(input: {
  */
 function supportsQwenThinkingControl(model: string): boolean {
   return /^qwen3(?:\.\d+)?-(?:max|plus|flash)(?:$|-)/i.test(model.trim());
+}
+
+/** Pure wire-body sizing for bounded semantic requests. Never includes credentials. */
+export function serializeMessagesRequest(
+  request: NeutralMessagesRequest,
+  metadata?: MessagesProviderMetadata,
+): string {
+  return JSON.stringify(buildMessagesProviderRequest(request, metadata));
+}
+
+function buildMessagesProviderRequest(
+  request: NeutralMessagesRequest,
+  metadata?: MessagesProviderMetadata,
+): AnthropicCompatibleRequest {
+  let supportedRequest = request;
+  if (
+    metadata?.provider === 'alibaba-model-studio' &&
+    !supportsQwenThinkingControl(metadata.model)
+  ) {
+    const { thinking: _unsupportedThinking, ...rest } = request;
+    supportedRequest = rest;
+  }
+  // Without an adapter only known input can be sized; no request will be sent.
+  return toAnthropicCompatibleRequest(supportedRequest, metadata?.model ?? '');
 }
 
 function toAnthropicCompatibleRequest(

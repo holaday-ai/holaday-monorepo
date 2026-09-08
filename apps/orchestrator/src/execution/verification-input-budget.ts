@@ -7,6 +7,11 @@ export type VerificationBudgetResult =
   | { ok: true }
   | { ok: false; code: 'VERIFICATION_INPUT_LIMIT' };
 
+export interface VerificationInputCoverage {
+  complete: boolean;
+  codes: readonly VerificationInputIssue[];
+}
+
 export const VERIFICATION_INPUT_LIMITS = Object.freeze({
   contextBytes: 64 * 1024,
   materialsBytes: 64 * 1024,
