@@ -250,7 +250,8 @@ export function classifyIntentForOutputRequirement(intent: string): {
   requirement: OutputRequirement | null;
 } {
   const text = intent;
-  const explicitLinkRequest = /链接|来源|引用|参考链接|参考资料|出处|reference|source\s+url|cite|引用链接/i.test(text);
+  const explicitLinkRequest =
+    /链接|来源|引用|参考链接|参考资料|出处|reference|source\s+url|cite|引用链接/i.test(text);
   const researchOrRetrievalIntent = isResearchOrRetrievalIntent(text);
 
   // Stock — explicit market-data phrasing. "价格" alone is too broad
@@ -259,27 +260,10 @@ export function classifyIntentForOutputRequirement(intent: string): {
     return { kind: 'stock_quote', requirement: { kind: 'stock' } };
   }
 
-  // E-commerce listing — at least one product-list cue AND either a
-  // count signal or a price/sort signal.
-  const ecomCue = /商品|榜单|排行|淘宝|天猫|京东|拼多多|电商|amazon|亚马逊|sku|商城|网购/i.test(
-    text,
-  );
-  const minItems = inferRequestedItemCount(text);
-  const sortAsc = /价格\s*(升序|从低到高|低到高|排序|排列)|按价格(排序|排列|升序)|便宜.*前|最便宜/i.test(
-    text,
-  );
-  const sortDesc = /价格\s*(降序|从高到低|高到低)|按价格降序|最贵/i.test(text);
-  const priceCue = /价格|价钱|报价|售价|price/i.test(text);
-  if (ecomCue && (Number.isFinite(minItems) || sortAsc || sortDesc || priceCue)) {
-    return {
-      kind: 'ecommerce_listing',
-      requirement: {
-        kind: 'ecommerce',
-        minItems: Number.isFinite(minItems) && minItems >= 1 ? minItems : 5,
-        sortOrder: sortAsc ? 'asc' : sortDesc ? 'desc' : null,
-      },
-    };
-  }
+  // A domain mention is not an output request. In particular, counts of
+  // topics in an earlier turn must not become counts of product rows.
+  const ecommerce = inferEcommerceRequirement(text);
+  if (ecommerce) return { kind: 'ecommerce_listing', requirement: ecommerce };
 
   // Comparison — explicit comparison cue. "vs" / "对比" / "哪个好".
   if (/对比|比较|对照|\bvs\.?\b|哪个(更)?(好|强|划算)|二选一|怎么选/i.test(text)) {
@@ -315,6 +299,68 @@ export function isResearchOrRetrievalIntent(intent: string): boolean {
   return isSharedResearchOrRetrievalIntent(intent);
 }
 
+function inferEcommerceRequirement(text: string): OutputRequirement | null {
+  const ecomCue =
+    /商品|货品|榜单|排行|淘宝|天猫|京东|拼多多|电商|amazon|亚马逊|\bsku\b|商城|网购/i.test(text);
+  if (!ecomCue) return null;
+  const productQuantityPattern =
+    /(\d+|[一二两三四五六七八九十])\s*(?:款|个|种)\s*(?:(?:淘宝|天猫|京东|拼多多|亚马逊)\s*)?(?:商品|货品)/i;
+
+  // Only derive output evidence here; the original intent/history remains
+  // untouched. A content-writing clause is not a request for its subject's
+  // prices. Other clauses can still request real product rows in the same task.
+  const outputText = text
+    .split(
+      /[，,。！？!?；;\n]+|(?:并且|同时|然后|另外|并|再|和)(?=列|整理|给|写|为|生成|查询|对比|推荐)/,
+    )
+    .filter((clause) => {
+      // An explicit quantity of 商品/货品 is product evidence, even if its
+      // fields include 标题 or continue after a comma. The verifier requires
+      // prices/links itself; users need not explicitly name every field.
+      const productQuantity = productQuantityPattern.test(clause);
+      const productFields =
+        /商品|货品|\bproducts?\b/i.test(clause) &&
+        /价格|报价|售价|prices?\b/i.test(clause) &&
+        /链接|\b(?:links?|urls?)\b/i.test(clause);
+      if (productQuantity || productFields) return true;
+      const writing =
+        /(?:写|生成|设计|策划|围绕|\b(?:write|create|design)\b).{0,40}(?:选题|标题|文案|图标|海报|广告|话题|栏目|创意|\b(?:topics?|headlines?|copywriting)\b)/i.exec(
+          clause,
+        );
+      const listing = /列出|列举|整理|推荐|查询|对比|\b(?:list|find|search|compare)\b/i.exec(
+        clause,
+      );
+      return !writing || (listing !== null && listing.index < writing.index);
+    })
+    .join('，');
+  // Unlike the generic comparison count, these units name product rows,
+  // marketplace candidates or ranked search results, never arbitrary 个/条.
+  const productCount = outputText.match(productQuantityPattern);
+  const resultCount = outputText.match(
+    /(?:前\s*|\btop\s+)(\d+|[一二两三四五六七八九十])|(\d+|[一二两三四五六七八九十])\s*(?:款|(?:个|条|种)\s*(?:商品|货品)|(?:个|家)?\s*平台|(?:个|条)?\s*结果|products?\b|items?\b)/i,
+  );
+  // Preserve textual request order across both kinds of output count.
+  // A later candidate-pool size must not replace an earlier explicit top N.
+  const count =
+    productCount && (!resultCount || (productCount.index ?? 0) <= (resultCount.index ?? 0))
+      ? productCount
+      : resultCount;
+  const price = /价格|价钱|报价|售价|prices?\b/i.test(outputText);
+  const sortAsc =
+    /价格\s*(升序|从低到高|低到高|排序|排列)|按价格(排序|排列|升序)|便宜.*前|最便宜/i.test(
+      outputText,
+    );
+  const sortDesc = /价格\s*(降序|从高到低|高到低)|按价格降序|最贵/i.test(outputText);
+  if (!count && !price && !sortAsc && !sortDesc) return null;
+  const raw = count?.[1] ?? count?.[2];
+  const minItems = raw ? Number(raw) || parseChineseSmallNumber(raw) : 5;
+  return {
+    kind: 'ecommerce',
+    minItems: Number.isFinite(minItems) && minItems > 0 ? minItems : 5,
+    sortOrder: sortAsc ? 'asc' : sortDesc ? 'desc' : null,
+  };
+}
+
 function inferRequestedItemCount(text: string): number {
   const numeric = text.match(
     /前\s*(\d+)|top\s*(\d+)|(\d+)\s*(?:个平台|个方案|个|款|条|家|项|种|平台|方案)/i,
@@ -330,7 +376,7 @@ function inferRequestedItemCount(text: string): number {
     const value = parseChineseSmallNumber(chinese[1]);
     if (value > 0) return value;
   }
-  return NaN;
+  return Number.NaN;
 }
 
 function parseChineseSmallNumber(raw: string): number {
@@ -347,7 +393,7 @@ function parseChineseSmallNumber(raw: string): number {
     九: 9,
     十: 10,
   };
-  return map[raw] ?? NaN;
+  return map[raw] ?? Number.NaN;
 }
 
 /**
@@ -643,11 +689,7 @@ function buildLightTier(inputs: ContractInputs): ExecutionContract {
     successCriteria,
     // Default safety guardrails for unattended browser execution.
     // Caller can override / extend via inputs.constraints.
-    constraints: [
-      ...(inputs.constraints ?? []),
-      'no_form_submit',
-      'no_payment',
-    ],
+    constraints: [...(inputs.constraints ?? []), 'no_form_submit', 'no_payment'],
   };
 }
 

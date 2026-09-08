@@ -169,6 +169,69 @@ function fixture({
 }
 
 describe('generate plan mode durable approval boundary', () => {
+  it.each([false, true])(
+    'persists a typed topic report after ecommerce background edits, verifier=%s',
+    async (enabled) => {
+      const f = fixture({ expertMode: 'auto' });
+      setFeatureFlagsForTest({
+        EXPERT_WORKFLOW: true,
+        EVIDENCE_LEDGER: enabled,
+        EXECUTION_CONTRACT: enabled,
+        EXECUTION_VERIFIER: enabled,
+      });
+      f.state.intent =
+        '【Holaday PR235 合成验收】请做小红书内容选题策划。品类：办公文具。目标平台：小红书。目标人群：职场新人。内容形式：图文。生成3个选题方向。所有材料为虚构，只输出对话文字，不访问网站、不发布内容、不发消息、不采购、不生成文件。先给2至5步方案，等我确认后才交付完整的内容选题报告。没有依据的判断标为模型假设。';
+      const edit =
+        '修改方案：把桌面整理作为主要选题角度，仍然是办公文具、小红书、职场新人。抖音直播复盘与电商罗盘只作为背景词，不切换技能，不做浏览器操作。发布策略仅作建议，不实际发布。其余限制不变，先别执行。';
+      const report = [
+        '## 数据校验\n[用户提供] 办公文具、小红书、职场新人、图文。所有材料为虚构，无外部数据。',
+        '## 选题方向\n[模型假设] 桌面归位、通勤收纳、便签整理三个方向可供选择，尚未经用户调研验证。',
+        '## 标题候选\n[模型假设] 新人桌面归位指南；通勤文具怎样收纳；让便签更好找。',
+        '## 内容大纲\n[模型假设] 每篇图文先描述一个整理情景，再展示归位过程，最后列出需要读者自行判断的使用限制。',
+        '## 发布策略\n[模型假设] 只提供图文表达建议，发布时间需由用户判断，不实际发布，不承诺阅读量或商业效果。',
+        '## 执行 Checklist\n核对素材授权，确认办公文具适用范围，检查图文可读性。所有内容仍需用户审核，本次没有访问网站或执行采购。',
+      ].join('\n\n');
+      const texts = ['1. 整理选题需求\n2. 等待确认', '1. 聚焦桌面整理\n2. 等待确认', report];
+      const metadata = {
+        provider: 'alibaba-model-studio',
+        region: 'cn',
+        deploymentScope: 'china_mainland',
+        model: 'qwen3.7-plus',
+        endpointKind: 'public',
+        protocol: 'responses',
+      } as const;
+      let next = 0;
+      const stream = vi.fn<ResponsesAdapter['stream']>(async () => ({
+        id: 'synthetic_response',
+        text: texts[next++] ?? '',
+        status: 'completed',
+        sources: [],
+        usage: { inputTokens: 10, outputTokens: 10 },
+        metadata,
+      }));
+      f.run.mockImplementation((opts) =>
+        realRunGenerateTask({ ...opts, responsesAdapter: { metadata, stream } }),
+      );
+      await f.create();
+      await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+      await f.reply(edit);
+      await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
+      expect(f.complete).not.toHaveBeenCalled();
+      await f.reply('确认');
+      await vi.waitFor(() => expect(f.complete).toHaveBeenCalledTimes(1));
+      expect(f.complete.mock.calls[0]?.[1]).toMatchObject({
+        status: 'completed',
+        summary: expect.stringContaining(report),
+        metadata: { planReplyHistory: [edit, '确认'], expertWorkflowId: 'content-topic' },
+      });
+      const persistedOutcome = f.complete.mock.calls[0]?.[1];
+      if (persistedOutcome?.status !== 'completed') throw new Error('Expected completed report');
+      expect(persistedOutcome.failedChecks ?? []).toEqual([]);
+      expect(f.run.mock.calls[2]?.[0].intent).toContain(edit);
+      expect(stream).toHaveBeenCalledTimes(3);
+    },
+  );
+
   it('keeps the explicit general-purpose decision after later workflow keywords', async () => {
     const f = fixture();
     setFeatureFlagsForTest({ EXPERT_WORKFLOW: true });
