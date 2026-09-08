@@ -39,6 +39,14 @@ export const tasks = mysqlTable(
       onDelete: 'set null',
     }),
     status: varchar('status', { length: 24 }).notNull().default('pending'),
+    /** Core text execution identity. Legacy rows remain null/0/0 until admitted. */
+    executionId: varchar('execution_id', { length: 64 }),
+    executionRevision: bigint('execution_revision', { mode: 'number', unsigned: true })
+      .notNull()
+      .default(0),
+    coreRecordVersion: bigint('core_record_version', { mode: 'number', unsigned: true })
+      .notNull()
+      .default(0),
     /**
      * Phase 1 指令 #3 — isolation boundary (Playbook + Evidence Ledger §5.6).
      * One of `user` | `playbook_canary` | `playbook_exploration` | `eval`
