@@ -66,7 +66,7 @@ export interface AutoFixInputs {
   ledger: EvidenceLedger;
   verification: VerificationResult;
   answerText: string;
-  workflowContract?: ExpertWorkflowContract;
+  workflowContract?: Pick<ExpertWorkflowContract, 'workflowId' | 'reportSections'>;
 }
 
 export interface AutoFixOutput {
@@ -155,7 +155,7 @@ export function autoFix(inputs: AutoFixInputs): AutoFixOutput {
 
 function addWorkflowSourceNotes(
   text: string,
-  workflow: ExpertWorkflowContract,
+  workflow: Pick<ExpertWorkflowContract, 'workflowId' | 'reportSections'>,
 ): { text: string; ops: AutoFixOp[] } {
   const lines = text.split('\n');
   const ops: AutoFixOp[] = [];

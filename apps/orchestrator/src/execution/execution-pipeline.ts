@@ -69,7 +69,7 @@ import {
   verifyWithLlm,
 } from './llm-verifier.js';
 import { getExpertWorkflowById } from './expert-workflow-registry.js';
-import type { TaskVerificationContext } from './task-verification-context.js';
+import { type TaskVerificationContext, createTaskVerificationContext } from './task-verification-context.js';
 import { type CoreExecutionHandle, type CoreExecutionRegistry, type CoreExecutionState, coreExecutionRegistry } from './core-execution-registry.js';
 
 const EXECUTION_PERSIST_SOURCE_STATUSES = [
@@ -516,18 +516,46 @@ export function summariseVerificationFailure(
 export type CoreVerifyInputs = Omit<VerifyInputs, 'taskId' | 'verificationContext'> & {
   handle: CoreExecutionHandle;
   registry?: CoreExecutionRegistry;
+  /** Observed provider URLs carry no source body and cannot certify factual coverage. */
+  observedSourceUrls?: readonly string[];
 };
 
 export async function verifyCoreAndFinalize(inputs: CoreVerifyInputs): Promise<VerifyOutput> {
   const registry = inputs.registry ?? coreExecutionRegistry;
   const state = registry.read(inputs.handle);
   if (!state || !coreVerificationEnabled()) return unavailableCoreOutput(inputs.handle);
+  const verificationContext = inputs.observedSourceUrls?.length
+    ? {
+        ...state.context,
+        materials: [
+          ...state.context.materials,
+          { kind: 'unavailable' as const, source: 'provider' as const,
+            key: 'provider:observed-url-only', reason: 'source_body_unavailable' as const },
+        ],
+      }
+    : state.context;
   const output = await verifyResolvedExecution(
-    { ...inputs, taskId: state.handle.taskId, verificationContext: state.context },
+    { ...inputs, taskId: state.handle.taskId, verificationContext },
     state,
   );
   if (registry.read(inputs.handle) !== state || !coreVerificationEnabled())
     return unavailableCoreOutput(inputs.handle);
+  if (inputs.observedSourceUrls?.length && output.verification) {
+    // This is an observed property of the delivery, not an inference from a
+    // successfully serialized request. Preserve it even if context admission
+    // or deterministic validation exited before material assessment.
+    return bindCoreVerification({
+      ...output,
+      verification: mergeDeterministicAndSemantic(output.verification, {
+        status: output.verification.semanticStatus ?? 'unavailable',
+        issues: [],
+        inputCoverage: {
+          complete: false,
+          codes: [...new Set([...(output.verification.inputCoverage?.codes ?? []), 'VERIFICATION_MATERIALS_INCOMPLETE' as const])],
+        },
+      }),
+    }, state.handle);
+  }
   return bindCoreVerification(output, state.handle);
 }
 
@@ -612,6 +640,22 @@ export async function verifyAndFinalize(inputs: VerifyInputs): Promise<VerifyOut
   return verifyResolvedExecution(inputs, { contract, ledger });
 }
 
+function verificationWorkflow(contract: ExecutionContract, context?: TaskVerificationContext) {
+  if (context !== undefined) {
+    try {
+      const snapshot = createTaskVerificationContext(context);
+      return snapshot.workflow
+        ? { workflowId: snapshot.workflow.id, reportSections: snapshot.workflow.sections }
+        : null;
+    } catch {
+      // Coverage validation retains the explicit invalid input and fails closed.
+      // Never read a mutable workflow or throw raw malformed input errors here.
+      return null;
+    }
+  }
+  return contract.expertWorkflowId ? getExpertWorkflowById(contract.expertWorkflowId) : null;
+}
+
 async function verifyResolvedExecution(
   inputs: VerifyInputs,
   { contract, ledger }: Pick<CoreExecutionState, 'contract' | 'ledger'>,
@@ -620,14 +664,13 @@ async function verifyResolvedExecution(
   // verifier's section_presence + source_annotation checks. Only
   // hits the registry when the contract was built from a workflow;
   // null on every other tier so the new checks no-op for them.
-  const workflowContract = contract.expertWorkflowId
-    ? getExpertWorkflowById(contract.expertWorkflowId)
-    : null;
+  const workflowContract = verificationWorkflow(contract, inputs.verificationContext);
 
   // Layer 1 — deterministic.
   let det = verifyDeterministic({
     contract,
     ledger,
+    verificationContext: inputs.verificationContext,
     answerText: inputs.answerText,
     ...(inputs.finalUrl ? { finalUrl: inputs.finalUrl } : {}),
     ...(workflowContract ? { workflowContract } : {}),
@@ -731,12 +774,11 @@ function finalizeResolvedExecution(
 ): VerifyOutput {
   const { priorVerification, semanticMetadata, ...verifyInputs } = inputs;
 
-  const workflowContract = contract.expertWorkflowId
-    ? getExpertWorkflowById(contract.expertWorkflowId)
-    : null;
+  const workflowContract = verificationWorkflow(contract, inputs.verificationContext);
   const deterministic = verifyDeterministic({
     contract,
     ledger,
+    verificationContext: inputs.verificationContext,
     answerText: verifyInputs.answerText,
     ...(verifyInputs.finalUrl ? { finalUrl: verifyInputs.finalUrl } : {}),
     ...(workflowContract ? { workflowContract } : {}),
@@ -772,6 +814,12 @@ function finalizeResolvedExecution(
     // A lost route cannot certify complete coverage using an empty model placeholder.
     if (inputCoverage?.complete && !semanticMetadata?.model) {
       inputCoverage = { complete: false, codes: ['VERIFICATION_CONTEXT_INVALID'] };
+    }
+    if (priorVerification?.inputCoverage?.codes.includes('VERIFICATION_MATERIALS_INCOMPLETE')) {
+      inputCoverage = {
+        complete: false,
+        codes: [...new Set([...(inputCoverage?.codes ?? []), 'VERIFICATION_MATERIALS_INCOMPLETE' as const])],
+      };
     }
     if (inputCoverage?.complete === false) {
       return {
@@ -864,7 +912,7 @@ function runFixLoop(
   ledger: EvidenceLedger,
   initialVerification: VerificationResult,
   inputs: VerifyInputs,
-  workflowContract: import('./expert-workflow-contract.js').ExpertWorkflowContract | null,
+  workflowContract: Pick<import('./expert-workflow-contract.js').ExpertWorkflowContract, 'workflowId' | 'reportSections'> | null,
 ): VerifyOutput {
   if (initialVerification.failureLevel !== 'fixable') {
     return {
@@ -898,6 +946,7 @@ function runFixLoop(
   const recheck = verifyDeterministic({
     contract,
     ledger,
+    verificationContext: inputs.verificationContext,
     answerText: fix.fixed,
     ...(inputs.finalUrl ? { finalUrl: inputs.finalUrl } : {}),
     ...(workflowContract ? { workflowContract } : {}),

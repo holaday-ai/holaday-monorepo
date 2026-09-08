@@ -3,6 +3,12 @@ import type { Logger } from 'pino';
 import { sanitizeFinalText } from '../agent/text-sanitizer.js';
 import type { VerificationResult } from './answer-verifier.js';
 import {
+  type CoreExecutionHandle,
+  type CoreExecutionRegistry,
+  coreExecutionRegistry,
+} from './core-execution-registry.js';
+import type { EvidenceEntry } from './evidence-ledger.js';
+import {
   type FinalTerminalStatus,
   type ResearchSourceTrustReview,
   type VerifyInputs,
@@ -12,8 +18,13 @@ import {
   recordEvidence,
   summariseVerificationFailure,
   verifyAndFinalize,
+  verifyCoreAndFinalize,
 } from './execution-pipeline.js';
 import type { GenerationCompletion } from './generation-completion.js';
+import {
+  VerificationContextError,
+  renderVerificationUserIntent,
+} from './task-verification-context.js';
 
 export interface ReviewableGenerateOutcome {
   status: 'completed' | 'failed' | 'awaiting_user';
@@ -36,6 +47,8 @@ export interface ReviewGenerateOutcomeInput {
   logger?: Logger;
   evidenceSourceDetail?: string;
   onVerifying?: () => void;
+  /** Core executions never consult or write the legacy taskId registry. */
+  coreExecution?: { handle: CoreExecutionHandle; registry?: CoreExecutionRegistry };
 }
 
 export interface ReviewedGenerateOutcome {
@@ -55,6 +68,16 @@ export interface ReviewedGenerateOutcome {
 export async function reviewGenerateOutcome(
   input: ReviewGenerateOutcomeInput,
 ): Promise<ReviewedGenerateOutcome> {
+  const core = input.coreExecution;
+  const registry = core?.registry ?? coreExecutionRegistry;
+  if (core && !input.outcome.generation)
+    throw new VerificationContextError('VERIFICATION_CONTEXT_INVALID');
+  if (core && core.handle?.taskId !== input.taskId)
+    throw new VerificationContextError('VERIFICATION_CONTEXT_INVALID');
+  const state = core ? registry.read(core.handle) : null;
+  const intent = core ? (state ? renderVerificationUserIntent(state.context) : '') : input.intent;
+  const record = (entry: Omit<EvidenceEntry, 'id' | 'timestamp' | 'taskId'>) =>
+    core ? registry.record(core.handle, entry) : recordEvidence(input.taskId, entry);
   let outcome = input.outcome;
   if (outcome.status === 'completed' && outcome.summary) {
     const summary = sanitizeFinalText(outcome.summary);
@@ -76,26 +99,33 @@ export async function reviewGenerateOutcome(
       if (observedUrls.size >= 10) break;
     }
     for (const url of observedUrls) {
-      recordEvidence(input.taskId, {
+      record({
         fact: `web_search_url=${url}`,
         sourceType: 'tool_result',
         sourceDetail: 'generate web_search provider result',
         confidence: 'observed',
       });
     }
-    recordEvidence(input.taskId, {
+    record({
       fact: `response_length=${outcome.summary.length}`,
       sourceType: 'tool_result',
       sourceDetail: input.evidenceSourceDetail ?? 'llm_generate_response',
       confidence: 'observed',
     });
     input.onVerifying?.();
-    const verified = await verifyAndFinalize({
-      taskId: input.taskId,
+    const verificationInputs = {
       answerText: outcome.summary,
       semanticAdapter: input.semanticAdapter,
       logger: input.logger,
-    });
+    };
+    const verified = core
+      ? await verifyCoreAndFinalize({
+          ...verificationInputs,
+          handle: core.handle,
+          registry,
+          observedSourceUrls: [...observedUrls],
+        })
+      : await verifyAndFinalize({ ...verificationInputs, taskId: input.taskId });
     if (verified.finalText !== outcome.summary) {
       outcome = { ...outcome, summary: verified.finalText };
     }
@@ -103,7 +133,7 @@ export async function reviewGenerateOutcome(
   }
 
   const sourceTrust = assessResultTrust({
-    intent: input.intent,
+    intent,
     resultText: outcome.status === 'completed' ? outcome.summary : '',
   });
   const qualityStatus = deriveFinalStatus(outcome.status, verification, sourceTrust);

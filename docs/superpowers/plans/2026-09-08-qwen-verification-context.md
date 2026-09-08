@@ -136,6 +136,17 @@ if (!coverage.complete) {
 
 ## Task 3: 生成与核验接入同一授权快照
 
+### C2 本地检查点（2026-09-09，Task3/C 整体仍未完成）
+
+- 已把真实 `runGenerateTask` 接入可选的服务端 `verificationContext`：完整时序、材料、phase、referencePlan 和固定 workflow 从严格不可变快照读取，拒绝另附 raw attachments；仅旧非核心入口沿用旧参数。文本材料不再有第二个未预算通道，不可读材料仅发送不可读描述，不透传图片 base64。core 有材料或固定规范时不走忽略材料的简单问答捷径。
+- `reviewGenerateOutcome` 的 `coreExecution` 明确携带本轮 handle/registry；已完成候选的证据、真实确定性/语义核验均走独立 registry，不写同 taskId 的 legacy ledger；缺少 generation 或 taskId/handle 不符固定拒绝。实际 router 必须显式接入此参数，不能因它是兼容 optional 就省略。
+- 确定性、修复后重核及末端检查使用快照中的章节，不再重新采用运行时技能库的章节；数值检查读取完整原始要求、最新明确字段赋值及完整材料，审计 ledger 的500字上限不变。最新明确赋值优先，订单/订单数统一；没有将这一有限字段解析宣称为任意自然语言修改理解。
+- 已观测 URL-only 的缺正文事实独立于后续预算是否通过；主审查所有出口保留材料原因，末端复核不能凭缩短正文或恢复到原始 context 消除这一事实。材料与预算原因可同时保留。没有新增网页抓取、跨区回退或减弱确定性阈值。
+- core 不在候选正文附加 legacy workflow-action UI footer，避免带编码数字的控件链接被当作专家事实而硬拒绝；后续 router 保持既有独立 suggestions 通道，不因此取消用户后续操作。
+- 新增 `execution/core-generation-review.test.ts` 19例，真实 runner→review→deterministic/semantic→finalizer，仅替换外部模型传输；18例观察到行为RED后GREEN，1例解析专用字段不进入模型用户历史是直接GREEN回归。覆盖完整历史/材料、阶段伪批准、固定技能、越过审计长度的数值更正、材料矛盾、同task旧ledger、旧handle、缺完整性、URL-only、候选与context两种预算早退后的末端覆盖。
+- 最终20+3文件共668测试通过（04:51:38 JST起，30.53s+1.45s）；tsc --noEmit、后端构建、4文件Biome/diff通过。3个旧文件22条lint诊断全部位于基线已有且本次未改变的行；不宣称全仓lint/格式通过。只读复审无剩余Critical/Important/必修Minor。两个既有大正文用例6.69/14.79秒，真实性能门禁仍待解决。
+- **仍待完成：** 首次/计划/修改/批准的真实router接纳与finally接线、awaiting/failed同轮元信息及P2可持久化结果形状、所有权/事件/响应共同身份、前端排序、真实MySQL事务与V10–V12。此检查点没有实际数据库、模型或生产调用，没有PR/推送/部署，不勾选下方整链任务。
+
 **Files:** 修改 `agent/generate-runner.ts`、`generate-runner.test.ts`、`execution/generate-outcome-review.ts`、对应测试、`trpc/routers/tasks.ts`、`tasks.plan-mode.test.ts`、`tasks.resume-verifier.test.ts`；新增 `trpc/routers/tasks.delivery-contract.test.ts`。
 
 **Interfaces:** `RunGenerateOpts.verificationContext?`、`ReviewGenerateOutcomeInput.verificationContext?`、`VerifyInputs.verificationContext?` 均使用Task1同一类型；router在已验证附件之后、额度调用之前检查输入。context的服务器ID/revision由后续可靠接纳模块提供，不允许在每层重新随机生成。

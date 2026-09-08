@@ -38,6 +38,7 @@ import { evaluateSourceDomain } from './source-domain-consistency.js';
 import { evaluateTemplateFill } from './template-fill-consistency.js';
 import { classifyLightweightTask } from './lightweight-task.js';
 import type { VerificationInputCoverage } from './verification-input-budget.js';
+import { type TaskVerificationContext, createTaskVerificationContext } from './task-verification-context.js';
 
 export type FailureLevel = 'fixable' | 'needs_clarification' | 'hard_fail';
 
@@ -78,6 +79,8 @@ export interface VerificationResult {
 export interface VerifyInputs {
   contract: ExecutionContract;
   ledger: EvidenceLedger;
+  /** Core numeric checks use complete user turns/materials, not the audit summary. */
+  verificationContext?: TaskVerificationContext;
   /** The agent's final answer text. */
   answerText: string;
   /** When the task is browser-mode, the last URL the agent reached. */
@@ -90,7 +93,7 @@ export interface VerifyInputs {
    * Absent for non-workflow tasks → those checks are skipped
    * entirely (no false positives on translation / browser tasks).
    */
-  workflowContract?: ExpertWorkflowContract;
+  workflowContract?: Pick<ExpertWorkflowContract, 'reportSections'>;
   /**
    * Output files created during this task (task_files, kind='output',
    * non-expired). Feeds the file-artifact consistency check, which
@@ -178,7 +181,7 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   const constraintCheck = checkConstraints(contract.constraints, ledger);
   if (constraintCheck) checks.push(constraintCheck);
 
-  const numberCheck = checkNumberCrossValidation(ledger);
+  const numberCheck = checkNumberCrossValidation(ledger, inputs.verificationContext);
   if (numberCheck) checks.push(numberCheck);
 
   // 3. Workflow-specific checks (only when an expert workflow drove
@@ -1420,8 +1423,8 @@ function checkConstraints(
  * verify GMV ≈ 订单数 × 客单价 within tolerance. Same for
  * GMV ≈ UV × 转化率 × 客单价.
  */
-function checkNumberCrossValidation(ledger: EvidenceLedger): CheckResult | null {
-  const numericFacts = collectNumericFacts(ledger);
+function checkNumberCrossValidation(ledger: EvidenceLedger, context?: TaskVerificationContext): CheckResult | null {
+  const numericFacts = collectNumericFacts(ledger, context);
   if (numericFacts.size === 0) return null;
   const checks: { ok: boolean; note: string }[] = [];
 
@@ -1467,10 +1470,26 @@ function checkNumberCrossValidation(ledger: EvidenceLedger): CheckResult | null 
   };
 }
 
-function collectNumericFacts(ledger: EvidenceLedger): Map<string, number> {
+function collectNumericFacts(ledger: EvidenceLedger, context?: TaskVerificationContext): Map<string, number> {
   const out = new Map<string, number>();
-  for (const e of ledger.entries) {
-    if (e.sourceType !== 'user_input' && e.sourceType !== 'file_parse') continue;
+  let facts: readonly string[];
+  if (context !== undefined) {
+    try {
+      const snapshot = createTaskVerificationContext(context);
+      // Explicit later user assignments supersede earlier ones. Materials
+      // supply only fields not specified by the user; none go into the ledger.
+      facts = [
+        ...[...snapshot.userTurns].reverse(), snapshot.initialRequest,
+        ...snapshot.materials.flatMap(material => material.kind === 'text' ? [material.text] : []),
+      ];
+    } catch {
+      // The separate coverage gate rejects invalid contexts, never legacy-fallback.
+      return out;
+    }
+  } else {
+    facts = ledger.entries.filter(entry => entry.sourceType === 'user_input' || entry.sourceType === 'file_parse').map(entry => entry.fact);
+  }
+  for (const fact of facts) {
     for (const key of KNOWN_NUMERIC_KEYS) {
       // Match `<key> <separator> <number>` where separator is
       // `=`, `:`, whitespace, or `¥`. Number may use comma
@@ -1478,7 +1497,7 @@ function collectNumericFacts(ledger: EvidenceLedger): Map<string, number> {
       const re = new RegExp(
         `${escapeRegex(key)}\\s*[=:：]?\\s*[¥¥$]?\\s*([0-9]+(?:[.,][0-9]+)?)\\s*(万|亿|千|百)?\\s*[%％]?`,
       );
-      const m = e.fact.match(re);
+      const m = fact.match(re);
       if (!m) continue;
       const raw = m[1]!.replace(/,/g, '');
       const unitMultiplier =
@@ -1493,9 +1512,11 @@ function collectNumericFacts(ledger: EvidenceLedger): Map<string, number> {
                 : 1;
       const n = Number(raw) * unitMultiplier;
       if (!Number.isFinite(n)) continue;
-      // Don't clobber if we already saw a more interesting value.
-      if (!out.has(key) || (n >= MIN_CROSSCHECK_VALUE && (out.get(key) ?? 0) < MIN_CROSSCHECK_VALUE)) {
-        out.set(key, n);
+      const canonicalKey = context !== undefined && key === '订单' ? '订单数' : key;
+      // Core uses newest explicit assignments even when a correction is smaller.
+      // Legacy keeps its historical first/interesting-value behaviour.
+      if (!out.has(canonicalKey) || (context === undefined && n >= MIN_CROSSCHECK_VALUE && (out.get(canonicalKey) ?? 0) < MIN_CROSSCHECK_VALUE)) {
+        out.set(canonicalKey, n);
       }
     }
   }
@@ -1634,7 +1655,7 @@ function normaliseSectionHeadingLine(value: string): string {
  * but keeps the function pure.
  */
 function checkWorkflowSectionPresence(
-  workflow: ExpertWorkflowContract,
+  workflow: Pick<ExpertWorkflowContract, 'reportSections'>,
   answerText: string,
 ): CheckResult | null {
   const required = workflow.reportSections.filter((s) => s.required);
@@ -1667,7 +1688,7 @@ function checkWorkflowSectionPresence(
  * when no section requires annotation (some workflows might not).
  */
 function checkWorkflowSourceAnnotation(
-  workflow: ExpertWorkflowContract,
+  workflow: Pick<ExpertWorkflowContract, 'reportSections'>,
   answerText: string,
 ): CheckResult | null {
   const annotated = workflow.reportSections.filter((s) => s.sourceAnnotation);

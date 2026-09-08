@@ -123,7 +123,11 @@ export function prepareLlmVerificationInput(inputs: LlmVerifierInputs): {
       inputs.answerText,
       serializeMessagesRequest(request, inputs.adapter?.metadata ?? inputs.semanticMetadata),
     );
-    if (!budget.ok) inputCoverage = { complete: false, codes: [budget.code] };
+    if (!budget.ok)
+      inputCoverage = {
+        complete: false,
+        codes: [...new Set([...(inputCoverage?.codes ?? []), budget.code])],
+      };
   }
   return { request, ...(inputCoverage ? { inputCoverage } : {}) };
 }
