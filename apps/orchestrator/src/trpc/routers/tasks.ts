@@ -42,6 +42,7 @@ import { detectNavFailure } from '../../agent/nav-failure-detector.js';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js';
 import { prepareCoreTaskPlan } from '../../agent/core-task-plan.js';
+import { assertCoreTaskInput } from '../../agent/core-task-input.js';
 import { publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { generateSuggestions } from '../../agent/suggestions-generator.js';
@@ -1293,16 +1294,20 @@ export const tasksRouter = router({
         message: err instanceof Error ? err.message : '主角图选择无效，请重新选择',
       });
     }
-    if (orderedFileIds.length > 0) {
+    // Routing only needs file presence. Defer parsing until the lane is fixed
+    // so core text can preserve the full source while other lanes keep their
+    // existing parser behavior. This still precedes every quota operation.
+    const parseCreateAttachments = async (completeText: boolean) => {
+      if (orderedFileIds.length === 0) return;
       const loaded = await fileService.loadMany(orderedFileIds, userRow.id);
-          const requestedFileIds = [...new Set(orderedFileIds)];
-          const loadedFileIds = new Set(loaded.map((file) => file.row.externalId));
-          if (requestedFileIds.some((fileId) => !loadedFileIds.has(fileId))) {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message: '有附件已失效或无法读取，请重新上传后再提交',
-            });
-          }
+      const requestedFileIds = [...new Set(orderedFileIds)];
+      const loadedFileIds = new Set(loaded.map((file) => file.row.externalId));
+      if (requestedFileIds.some((fileId) => !loadedFileIds.has(fileId))) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '有附件已失效或无法读取，请重新上传后再提交',
+        });
+      }
       if (input.imageOptions?.mode === 'lock_subject' && input.imageOptions.subjectFileId) {
         const subject = loaded.find(
           (file) => file.row.externalId === input.imageOptions?.subjectFileId,
@@ -1319,12 +1324,20 @@ export const tasksRouter = router({
           input.imageOptions?.mode === 'lock_subject' &&
           f.row.externalId === input.imageOptions.subjectFileId;
         try {
-          const parsed = await parseFileForPrompt(f.buffer, f.row.filename, f.row.mimetype);
+          const parsed = await parseFileForPrompt(
+            f.buffer, f.row.filename, f.row.mimetype, { completeText },
+          );
           if (isLockedSubject && !parsed.blocks.some((block) => block.type === 'image')) {
             throw new Error('主角图未解析为图像');
           }
           attachmentBlocks.push(...parsed.blocks);
         } catch (err) {
+          if (completeText) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: '附件超出完整核验范围或无法读取，请缩小材料或重新上传后再提交。',
+            });
+          }
           ctx.logger.warn(
             { err: err instanceof Error ? err.message : String(err), fileId: f.row.externalId },
             isLockedSubject
@@ -1337,13 +1350,13 @@ export const tasksRouter = router({
               message: '主角图读取失败，请重新上传一张清晰图片',
             });
           }
-              throw new TRPCError({
-                code: 'BAD_REQUEST',
-                message: '附件读取失败，请重新上传后再提交',
-              });
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: '附件读取失败，请重新上传后再提交',
+          });
         }
       }
-    }
+    };
 
     // Phase 14 audit follow-up — multi-turn 追问. When `replyToTaskId`
     // is set, the new task piggybacks on a previously completed/failed
@@ -1634,6 +1647,21 @@ export const tasksRouter = router({
           ? 'video_creation'
           : null,
     });
+
+    await parseCreateAttachments(executionMode === 'generate');
+    if (executionMode === 'generate') {
+      assertCoreTaskInput({
+        initialRequest: parentContextBlock + input.intent,
+        userTurns: [],
+        phase: input.mode === 'plan' ? 'draft' : 'direct',
+        workflow: workflowIdentities.contractWorkflowId
+          ? { id: workflowIdentities.contractWorkflowId, sections: typedWorkflow?.reportSections ?? [] }
+          : null,
+        referencePlan: null,
+        fileIds: orderedFileIds,
+        blocks: attachmentBlocks,
+      });
+    }
 
     // Qwen-only rollout boundary: browser/media lanes still depend on
     // legacy model controllers. Persist an honest terminal task before
@@ -8929,7 +8957,7 @@ export const tasksRouter = router({
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
       }
       const [taskRow] = await ctx.db
-        .select({ id: tasksTable.id })
+        .select({ id: tasksTable.id, status: tasksTable.status, result: tasksTable.result })
         .from(tasksTable)
           .where(
             and(
@@ -8942,20 +8970,26 @@ export const tasksRouter = router({
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
       }
-      // F2 — resolve + parse attachments before classification so the
-      // resulting blocks are ready for whichever delivery path fires.
-      // Same pattern as tasks.create: any individual file that fails
-      // to load / parse is skipped with a warn; the reply still
-      // delivers with whatever did parse.
+      const replyResult = normalizeOutput(taskRow.result) as Record<string, unknown> | null;
+      const coreTextReply = taskRow.status === 'awaiting_user' &&
+        replyResult?.executionMode === 'generate' && !hasParkedSupercarHandle(input.taskId);
+      // Core replies require every referenced file and complete text before
+      // releasing the wait. Other lanes retain their existing parsing policy.
         const replyAttachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
       if (input.fileIds && input.fileIds.length > 0) {
         const fileService = new FileService(ctx.db, ctx.logger);
         const loaded = await fileService.loadMany(input.fileIds, userRow.id);
+        if (coreTextReply && input.fileIds.some(id => !loaded.some(file => file.row.externalId === id))) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: '有附件已失效或无法读取，请重新上传后再提交。' });
+        }
         for (const f of loaded) {
           try {
-              const parsed = await parseFileForPrompt(f.buffer, f.row.filename, f.row.mimetype);
+              const parsed = await parseFileForPrompt(f.buffer, f.row.filename, f.row.mimetype, { completeText: coreTextReply });
             replyAttachmentBlocks.push(...parsed.blocks);
           } catch (err) {
+            if (coreTextReply) {
+              throw new TRPCError({ code: 'BAD_REQUEST', message: '附件超出完整核验范围或无法读取，请缩小材料或重新上传后再提交。' });
+            }
             ctx.logger.warn(
               {
                 err: err instanceof Error ? err.message : String(err),
@@ -9108,7 +9142,7 @@ export const tasksRouter = router({
         Boolean(parkRow) &&
         parkRow!.status === 'awaiting_user' &&
         prevResult?.executionMode === 'generate';
-      if (!wasGenerateParked) {
+      if (!parkRow || !wasGenerateParked) {
         return { ok: false };
       }
 
@@ -9179,16 +9213,20 @@ export const tasksRouter = router({
       }
       // Never substitute a model's summary for the underlying files. Reload
       // with ownership/expiry checks before releasing the awaiting-state CAS.
-      const generateAttachmentBlocks = savedContext ? [] : replyAttachmentBlocks;
-      if (savedContext && planFileIds.length > 0) {
+      // The earlier owner read can precede a transition into this core wait.
+      // Do not reuse blocks that may have been parsed under another lane's
+      // policy. Re-authorize and parse the complete current file set here.
+      const generateFileIds = savedContext ? planFileIds : [...new Set(input.fileIds ?? [])];
+      const generateAttachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
+      if (generateFileIds.length > 0) {
         try {
-          const files = await new FileService(ctx.db, ctx.logger).loadMany(planFileIds, userRow.id);
-          if (planFileIds.some(id => !files.some(file => file.row.externalId === id))) {
+          const files = await new FileService(ctx.db, ctx.logger).loadMany(generateFileIds, userRow.id);
+          if (generateFileIds.some(id => !files.some(file => file.row.externalId === id))) {
             throw new Error('MISSING_PLAN_FILE');
           }
           for (const file of files) {
             const parsed = await parseFileForPrompt(
-              file.buffer, file.row.filename, file.row.mimetype,
+              file.buffer, file.row.filename, file.row.mimetype, { completeText: true },
             );
             if (!parsed.blocks.length) throw new Error('EMPTY_PLAN_FILE');
             generateAttachmentBlocks.push(...parsed.blocks);
@@ -9436,6 +9474,17 @@ export const tasksRouter = router({
       const newWorkflowPreamble = newWorkflow?.promptPreamble ?? '';
       const effectiveCombined =
         (newWorkflowPreamble ? `${newWorkflowPreamble}\n` : '') + combinedIntent;
+      assertCoreTaskInput({
+        initialRequest: savedContext?.planInitialIntent ?? parkRow.intent,
+        userTurns: savedContext ? planReplyHistory : [userReply],
+        phase: planOnly ? 'revise' : savedContext ? 'approved_execution' : 'direct',
+        workflow: parkingTypedWorkflow
+          ? { id: parkingTypedWorkflow.workflowId, sections: parkingTypedWorkflow.reportSections }
+          : resumeWorkflowId ? { id: resumeWorkflowId, sections: [] } : null,
+        referencePlan: savedPlan ?? null,
+        fileIds: generateFileIds,
+        blocks: generateAttachmentBlocks,
+      });
       const resumePersisted = await repo.markAwaitingReplyResumed(input.taskId);
       if (!resumePersisted.persisted) {
         ctx.logger.warn(

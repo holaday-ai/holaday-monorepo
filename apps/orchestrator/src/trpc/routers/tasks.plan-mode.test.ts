@@ -30,6 +30,7 @@ function fixture({
   jsonResult = false,
   parentIntent = '',
   expertMode = 'normal' as 'normal' | 'auto',
+  ownerSnapshotStatus = undefined as string | undefined,
 } = {}) {
   let creating = false;
   Object.assign(env, {
@@ -83,15 +84,17 @@ function fixture({
         ];
       else if ('count' in projection)
         return { from: () => ({ where: async () => [{ count: 0 }] }) };
-      else if ('status' in projection) rows = [state];
+      else if ('status' in projection) rows = [
+        ownerSnapshotStatus && 'result' in projection ? { ...state, status: ownerSnapshotStatus } : state,
+      ];
       else if ('id' in projection) rows = [{ id: 42, modelDataRegion: 'cn' }];
       else throw new Error('Unexpected synthetic database read');
       return { from: () => ({ where: () => ({ limit: async () => rows }) }) };
     },
   };
-  vi.spyOn(QuotaService.prototype, 'tryConsume').mockResolvedValue({ ok: true });
+  const charge = vi.spyOn(QuotaService.prototype, 'tryConsume').mockResolvedValue({ ok: true });
   vi.spyOn(QuotaService.prototype, 'getActiveTaskCount').mockResolvedValue(0);
-  vi.spyOn(TaskRepository.prototype, 'insertTask').mockImplementation(async () => {
+  const insert = vi.spyOn(TaskRepository.prototype, 'insertTask').mockImplementation(async () => {
     state.status = 'executing';
   });
   const resume = vi
@@ -142,6 +145,8 @@ function fixture({
     res: {},
   } as unknown as Context;
   return {
+    charge,
+    insert,
     state,
     run,
     save,
@@ -170,6 +175,146 @@ function fixture({
 }
 
 describe('generate plan mode durable approval boundary', () => {
+  // These tests exercise the real router's pre-dispatch boundary. Existing
+  // execution/persistence doubles drain the legacy background path on RED;
+  // they are not evidence for the later V10 real-runner/DB integration gate.
+  function attachFiles(bodies: Readonly<Record<string, string | undefined>>) {
+    return vi.spyOn(FileService.prototype, 'loadMany').mockImplementation(async (ids) =>
+      ids.flatMap(id => {
+        const body = bodies[id];
+        return body === undefined ? [] : [{
+          buffer: Buffer.from(body),
+          row: { externalId: id, filename: `${id}.txt`, mimetype: 'text/plain' },
+        }];
+      }) as Awaited<ReturnType<FileService['loadMany']>>,
+    );
+  }
+
+  async function rejectionOrDrain(f: ReturnType<typeof fixture>, request: Promise<unknown>) {
+    const error = await request.then(() => null, (reason: unknown) => reason);
+    if (error === null) await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+    return error;
+  }
+
+  it('revalidates new file presence after the task changes into a core wait', async () => {
+    const f = fixture({ legacy: true, ownerSnapshotStatus: 'executing' });
+    attachFiles({});
+    const error = await rejectionOrDrain(f, f.reply('补充材料', ['fil_missing']));
+    expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.resume).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it('does not reuse a legacy-truncated attachment after the task changes into a core wait', async () => {
+    const f = fixture({ legacy: true, ownerSnapshotStatus: 'executing' });
+    attachFiles({ fil_one: `${'a'.repeat(55_000)}RACE_TAIL` });
+    await f.reply('补充材料', ['fil_one']);
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+    expect(JSON.stringify(f.run.mock.calls[0]?.[0].attachments).includes('RACE_TAIL')).toBe(true);
+  });
+
+  it.each([
+    { fil_one: 'a'.repeat(70_000) },
+    { fil_one: '字'.repeat(22_000) },
+    { fil_one: 'a'.repeat(34_000), fil_two: 'b'.repeat(34_000) },
+    { fil_one: ' \n\t' },
+  ])('rejects incomplete or oversized create materials before charge or insert %#', async (bodies) => {
+    const f = fixture();
+    attachFiles(bodies);
+    const error = await rejectionOrDrain(f, f.create(Object.keys(bodies)));
+    expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.charge).not.toHaveBeenCalled();
+    expect(f.insert).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it('does not truncate an accepted create attachment at the old 50K character ceiling', async () => {
+    const f = fixture();
+    const body = `${'a'.repeat(55_000)}CORE_FILE_TAIL`;
+    attachFiles({ fil_one: body });
+    await f.create(['fil_one']);
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+    expect(JSON.stringify(f.run.mock.calls[0]?.[0].attachments).includes('CORE_FILE_TAIL')).toBe(true);
+    expect(f.charge).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects file references that the atomic admission schema cannot preserve before charging', async () => {
+    const f = fixture();
+    const id = 'f'.repeat(33);
+    attachFiles({ [id]: 'synthetic readable notes' });
+    const error = await rejectionOrDrain(f, f.create([id]));
+    expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.charge).not.toHaveBeenCalled();
+    expect(f.insert).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it.each([65_514, 65_515])('counts the 22-byte file heading at the materials boundary: %s', async length => {
+    const f = fixture();
+    attachFiles({ fil_one: 'a'.repeat(length) });
+    const error = await rejectionOrDrain(f, f.create(['fil_one']));
+    if (length === 65_514) {
+      expect(error).toBeNull();
+      expect(f.charge).toHaveBeenCalledTimes(1);
+      const block = f.run.mock.calls[0]?.[0].attachments?.[0];
+      expect(block && 'text' in block && Buffer.byteLength(block.text, 'utf8')).toBe(65_536);
+    } else {
+      expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+      expect(f.charge).not.toHaveBeenCalled();
+      expect(f.insert).not.toHaveBeenCalled();
+    }
+  });
+
+  it('includes authenticated parent context in the create input budget', async () => {
+    const f = fixture({ parentIntent: '上下文'.repeat(24_000) });
+    const error = await rejectionOrDrain(f, f.create());
+    expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.insert).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('rejects a missing newly attached file before resume, legacy=%s', async legacy => {
+    const f = fixture({ legacy });
+    attachFiles({});
+    const error = await rejectionOrDrain(f, f.reply('补充合成材料', ['fil_missing']));
+    expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.resume).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.state.status).toBe('awaiting_user');
+  });
+
+  it.each(['a'.repeat(70_000), '字'.repeat(22_000), ' \n\t'])(
+    'rejects oversized or empty retained files before approval %#', async body => {
+      const f = fixture();
+      f.state.result.planFileIds = ['fil_original'];
+      attachFiles({ fil_original: body });
+      const error = await rejectionOrDrain(f, f.reply('执行'));
+      expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+      expect(f.resume).not.toHaveBeenCalled();
+      expect(f.run).not.toHaveBeenCalled();
+      expect(f.state.status).toBe('awaiting_user');
+    },
+  );
+
+  it('checks all persisted user turns before accepting another revision', async () => {
+    const f = fixture();
+    f.state.result.planReplyHistory = Array.from({ length: 25 }, () => 'a'.repeat(3_000));
+    const error = await rejectionOrDrain(f, f.reply('改成简洁的提纲'));
+    expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.resume).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.state.status).toBe('awaiting_user');
+  });
+
+  it('retains the complete tail when an in-budget original attachment is reloaded', async () => {
+    const f = fixture();
+    f.state.result.planFileIds = ['fil_original'];
+    attachFiles({ fil_original: `${'a'.repeat(55_000)}RELOADED_TAIL` });
+    await f.reply('执行');
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+    expect(JSON.stringify(f.run.mock.calls[0]?.[0].attachments).includes('RELOADED_TAIL')).toBe(true);
+  });
+
   it.each([false, true])(
     'persists a typed topic report after ecommerce background edits, verifier=%s',
     async (enabled) => {
