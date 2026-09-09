@@ -18,7 +18,12 @@ function input() {
 
 describe('core admission preparation', () => {
   it('freezes the bounded legacy snapshot and does not permit it on a new core round', () => {
-    const legacySnapshot = { resultJson: '{"planText":"synthetic"}', roleId: null, origin: 'user' };
+    const legacySnapshot = {
+      resultJson: '{"planText":"synthetic"}',
+      roleId: null,
+      origin: 'user',
+      awaitingQuestion: null,
+    };
     const op = prepareCoreAdmission({ ...input(), legacySnapshot });
     legacySnapshot.resultJson = '{}';
     expect(op.legacySnapshot?.resultJson).toBe('{"planText":"synthetic"}');
@@ -42,7 +47,7 @@ describe('core admission preparation', () => {
       expect(() =>
         prepareCoreAdmission({
           ...input(),
-          legacySnapshot: { resultJson, roleId: null, origin: 'user' },
+          legacySnapshot: { resultJson, roleId: null, origin: 'user', awaitingQuestion: null },
         }),
       ).toThrow('CORE_ADMISSION_INVALID');
     },

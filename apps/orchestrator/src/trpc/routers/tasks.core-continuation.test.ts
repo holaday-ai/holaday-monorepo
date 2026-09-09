@@ -10,6 +10,8 @@ import type { CoreSettlement } from '../../agent/core-task-settlement.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import * as createClaims from '../../api-keys/webhook-idempotency-service.js';
 import { env } from '../../config/env.js';
+import { runIntake } from '../../execution/expert-workflow-intake.js';
+import { getExpertWorkflowById } from '../../execution/expert-workflow-registry.js';
 import {
   reloadFeatureFlagsForTest,
   setFeatureFlagsForTest,
@@ -29,7 +31,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-function fixture(options: { suggestions?: boolean; plan?: boolean } = {}) {
+function fixture(options: { suggestions?: boolean; plan?: boolean; generatedText?: string } = {}) {
   let taskId = 'tsk_core_resume';
   Object.assign(env, {
     MODEL_RUNTIME_POLICY: 'qwen_only',
@@ -171,7 +173,7 @@ function fixture(options: { suggestions?: boolean; plan?: boolean } = {}) {
       requests.push({ url: String(url), body });
       if (String(url).includes('/responses'))
         return new Response(
-          `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: TEXT })}\n\ndata: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_synthetic', status: 'completed', output: [], usage: { input_tokens: 10, output_tokens: 20 } } })}\n\n`,
+          `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: options.generatedText ?? TEXT })}\n\ndata: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_synthetic', status: 'completed', output: [], usage: { input_tokens: 10, output_tokens: 20 } } })}\n\n`,
           { status: 200, headers: { 'content-type': 'text/event-stream' } },
         );
       return new Response(
@@ -277,6 +279,42 @@ function fixture(options: { suggestions?: boolean; plan?: boolean } = {}) {
 }
 
 describe('real reply core routing and execution', () => {
+  it('migrates a proven old approval and preserves the bare answer through another core clarification', async () => {
+    const f = fixture({ generatedText: `${TEXT}\n请补充报告的读者。\n[AWAITING_USER_INPUT]` });
+    const workflow = getExpertWorkflowById('content-topic');
+    if (!workflow) throw new Error('SYNTHETIC_WORKFLOW_NOT_FOUND');
+    const intake = runIntake(workflow, '帮我做小红书内容选题');
+    if (intake.kind !== 'missing') throw new Error('EXPECTED_SYNTHETIC_INTAKE');
+    f.legacyPlan({
+      planMode: undefined,
+      approvedPlanText: TEXT,
+      fallbackChain: ['generate-resume'],
+      planInitialIntent: '帮我做小红书内容选题',
+      planReplyHistory: ['确认'],
+      planWorkflowId: 'content-topic',
+    });
+    f.row.awaitingQuestion = intake.question;
+    expect(await f.reply('  美妆护肤  ')).toMatchObject({ state: 'resumed', executionRevision: 1 });
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(1));
+    expect(f.settlements[0]?.status).toBe('awaiting_user');
+    expect(f.row.awaitingQuestion).toContain('报告的读者');
+    expect(f.admissions[0]?.legacySnapshot?.awaitingQuestion).toBe(intake.question);
+    await f.reply('仅供内部团队');
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(2));
+    expect(f.admissions.map((op) => op.executionRevision)).toEqual([1, 2]);
+    expect(f.admissions[1]?.requirements.userTurns).toEqual([
+      '确认',
+      '  美妆护肤  ',
+      '仅供内部团队',
+    ]);
+    expect(f.admissions[1]?.requirements.resume?.intakeBindings).toEqual([
+      { turn: 1, field: 'category' },
+    ]);
+    expect(f.admissions[1]?.legacySnapshot).toBeUndefined();
+    expect(f.requests).toHaveLength(4);
+    for (const request of f.requests) expect(JSON.stringify(request.body)).toContain('美妆护肤');
+    expect(f.charge).not.toHaveBeenCalled();
+  });
   it('migrates a complete legacy plan on reply with full history and new identity', async () => {
     const f = fixture();
     vi.spyOn(TaskRepository.prototype, 'markAwaitingReplyResumed').mockResolvedValue({
@@ -328,6 +366,7 @@ describe('real reply core routing and execution', () => {
       resultJson: before,
       roleId: null,
       origin: 'workbench',
+      awaitingQuestion: '确认这个方案吗？',
     });
     expect(f.row.result.planReplyHistory).toEqual(['另一条并发修改']);
     expect(f.row.executionId).toBeNull();

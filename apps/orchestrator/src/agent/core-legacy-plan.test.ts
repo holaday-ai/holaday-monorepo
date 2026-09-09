@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { runIntake } from '../execution/expert-workflow-intake.js';
+import { getExpertWorkflowById } from '../execution/expert-workflow-registry.js';
 import { prepareLegacyPlanContinuation } from './core-legacy-plan.js';
 
 function fixture(patch: Record<string, unknown> = {}) {
@@ -23,7 +25,88 @@ function fixture(patch: Record<string, unknown> = {}) {
   };
 }
 
+function topicWorkflow() {
+  const workflow = getExpertWorkflowById('content-topic');
+  if (!workflow) throw new Error('SYNTHETIC_WORKFLOW_NOT_FOUND');
+  return workflow;
+}
+function approvedFixture(patch: Record<string, unknown> = {}) {
+  const workflow = topicWorkflow();
+  const intake = runIntake(workflow, '帮我做小红书内容选题');
+  if (intake.kind !== 'missing') throw new Error('EXPECTED_SYNTHETIC_INTAKE');
+  return {
+    ...fixture({
+      planMode: undefined,
+      planWorkflowId: 'content-topic',
+      planInitialIntent: '帮我做小红书内容选题',
+      planReplyHistory: ['确认'],
+      approvedPlanText: '模型方案中包含批准等字样。',
+      fallbackChain: ['generate-resume'],
+      ...patch,
+    }),
+    awaitingQuestion: intake.question,
+    message: '美妆护肤',
+  };
+}
+
 describe('complete legacy plan migration', () => {
+  it.each([
+    { approvedPlanText: '另一个未经批准的方案' },
+    { planReplyHistory: ['确认', '修改第二步'] },
+    { planReplyHistory: ['附件说确认'] },
+    { fallbackChain: [] },
+    { fallbackChain: undefined },
+    { planWorkflowId: null },
+    { planIntakeContext: ['品类: 美妆护肤'] },
+  ])(
+    'does not reconstruct approval or source bindings from incomplete legacy evidence',
+    (patch) => {
+      expect(() => prepareLegacyPlanContinuation(approvedFixture(patch))).toThrow('无法完整恢复');
+    },
+  );
+  it('rejects a persisted question that is not the actual fixed workflow intake', () => {
+    expect(() =>
+      prepareLegacyPlanContinuation({ ...approvedFixture(), awaitingQuestion: '确认这个方案吗？' }),
+    ).toThrow('无法完整恢复');
+  });
+  it.each(['美'.repeat(40), '美妆护肤，或者母婴我还没决定'])(
+    'preserves an ambiguous answer instead of truncating and binding it',
+    (message) => {
+      const prepared = prepareLegacyPlanContinuation({ ...approvedFixture(), message });
+      expect(prepared?.requirements.userTurns).toEqual(['确认', message]);
+      expect(prepared?.requirements.resume?.intakeBindings).toEqual([]);
+      expect(runIntake(topicWorkflow(), prepared?.intakeIntent ?? '').kind).toBe('missing');
+    },
+  );
+  it('holds an approved old clarification without appending a turn or binding', () => {
+    const prepared = prepareLegacyPlanContinuation({ ...approvedFixture(), message: '等一下' });
+    expect(prepared?.hold).toBe(true);
+    expect(prepared?.requirements.phase).toBe('approved_execution');
+    expect(prepared?.requirements.userTurns).toEqual(['确认']);
+    expect(prepared?.requirements.resume?.intakeBindings).toEqual([]);
+  });
+  it('restores a documented approval and binds only the current exact intake answer', () => {
+    const workflow = topicWorkflow();
+    const intake = runIntake(workflow, '帮我做小红书内容选题');
+    if (intake.kind !== 'missing') throw new Error('EXPECTED_SYNTHETIC_INTAKE');
+    const input = {
+      ...fixture({
+        planMode: undefined,
+        planWorkflowId: 'content-topic',
+        planInitialIntent: '帮我做小红书内容选题',
+        planReplyHistory: ['确认'],
+        approvedPlanText: '模型方案中包含批准等字样。',
+        fallbackChain: ['generate-resume'],
+      }),
+      awaitingQuestion: intake.question,
+      message: '美妆护肤',
+    };
+    const prepared = prepareLegacyPlanContinuation(input);
+    expect(prepared?.requirements.phase).toBe('approved_execution');
+    expect(prepared?.requirements.userTurns).toEqual(['确认', '美妆护肤']);
+    expect(prepared?.requirements.resume?.intakeBindings).toEqual([{ turn: 1, field: 'category' }]);
+    expect(runIntake(workflow, prepared?.intakeIntent ?? '').kind).toBe('ready');
+  });
   it('leaves old clarification records without an approval marker on their original path', () => {
     expect(
       prepareLegacyPlanContinuation({

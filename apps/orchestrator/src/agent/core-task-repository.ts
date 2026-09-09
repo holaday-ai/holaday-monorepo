@@ -272,6 +272,9 @@ export class CoreTaskRepository {
                       ? isNull(tasks.roleId)
                       : eq(tasks.roleId, op.legacySnapshot.roleId),
                     eq(tasks.origin, op.legacySnapshot.origin),
+                    op.legacySnapshot.awaitingQuestion === null
+                      ? isNull(tasks.awaitingQuestion)
+                      : eq(tasks.awaitingQuestion, op.legacySnapshot.awaitingQuestion),
                   ]
                 : []),
               or(isNull(tasks.result), sql`JSON_TYPE(${tasks.result}) = 'OBJECT'`),

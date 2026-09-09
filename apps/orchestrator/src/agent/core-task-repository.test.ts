@@ -30,13 +30,20 @@ it('guards legacy migration by the observed JSON, role and origin in the admissi
     scope,
     before: legacy,
     requirements,
-    legacySnapshot: { resultJson, roleId: 'synthetic-role', origin: 'user' },
+    legacySnapshot: {
+      resultJson,
+      roleId: 'synthetic-role',
+      origin: 'user',
+      awaitingQuestion: '合成待答问题',
+    },
   });
   expect(await f.repo.admit(op)).toEqual({ persisted: true });
   const update = f.queries.find((query) => query.sql.startsWith('update'));
   expect(update?.sql).toContain('`tasks`.`result` = CAST(? AS JSON)');
   expect(update?.sql).toContain('`tasks`.`role_id` = ?');
   expect(update?.sql).toContain('`tasks`.`origin` = ?');
+  expect(update?.sql).toContain('`tasks`.`awaiting_question` = ?');
+  expect(update?.params).toContain('合成待答问题');
   expect(update?.params).toContain(resultJson);
 });
 

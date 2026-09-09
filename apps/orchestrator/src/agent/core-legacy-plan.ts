@@ -1,7 +1,9 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { runIntake } from '../execution/expert-workflow-intake.js';
 import { getExpertWorkflowById } from '../execution/expert-workflow-registry.js';
 import type { CoreAdmission, CoreTaskHead } from './core-task-admission.js';
+import { bindCoreIntakeReply, renderCoreIntake } from './core-task-intake.js';
 import { parseCoreRequirements } from './core-task-requirements.js';
 import { isExplicitPlanApproval, isPurePlanHold } from './plan-mode.js';
 
@@ -9,7 +11,9 @@ const savedPlanSchema = z.object({
   executionMode: z.literal('generate'),
   expertMode: z.enum(['normal', 'expert', 'auto']),
   selectedRole: z.string().min(1).max(100).nullable(),
-  planMode: z.literal('awaiting_approval'),
+  planMode: z.literal('awaiting_approval').optional(),
+  approvedPlanText: z.string().optional(),
+  fallbackChain: z.array(z.string()).optional(),
   planText: z.string().min(1),
   planInitialIntent: z.string().min(1),
   planReplyHistory: z.array(z.string()),
@@ -27,6 +31,7 @@ export function prepareLegacyPlanContinuation(input: {
   roleId: string | null | undefined;
   origin: string;
   message: string;
+  awaitingQuestion?: string | null;
   fileIds?: string[];
 }) {
   const raw = input.result as Record<string, unknown> | null;
@@ -34,7 +39,10 @@ export function prepareLegacyPlanContinuation(input: {
     !raw ||
     raw.executionMode !== 'generate' ||
     raw.planLegacyWorkflowId !== null ||
-    raw.planMode !== 'awaiting_approval'
+    !(
+      raw.planMode === 'awaiting_approval' ||
+      (raw.planMode === undefined && raw.approvedPlanText !== undefined)
+    )
   )
     return null;
   try {
@@ -51,15 +59,21 @@ export function prepareLegacyPlanContinuation(input: {
     const workflow = saved.planWorkflowId ? getExpertWorkflowById(saved.planWorkflowId) : null;
     if (saved.planWorkflowId && !workflow) throw new Error('UNAVAILABLE_LEGACY_WORKFLOW');
     const hold = isPurePlanHold(input.message) && !input.fileIds?.length;
-    const requirements = parseCoreRequirements(
+    const approved = saved.planMode === undefined;
+    if (
+      approved &&
+      (saved.approvedPlanText !== saved.planText ||
+        saved.fallbackChain?.length !== 1 ||
+        saved.fallbackChain[0] !== 'generate-resume' ||
+        !isExplicitPlanApproval(saved.planReplyHistory.at(-1) ?? '') ||
+        !workflow)
+    )
+      throw new Error('INVALID_LEGACY_APPROVAL');
+    const previous = parseCoreRequirements(
       {
         initialRequest: saved.planInitialIntent,
-        userTurns: hold ? saved.planReplyHistory : [...saved.planReplyHistory, input.message],
-        phase: hold
-          ? 'draft'
-          : isExplicitPlanApproval(input.message)
-            ? 'approved_execution'
-            : 'revise',
+        userTurns: saved.planReplyHistory,
+        phase: approved ? 'approved_execution' : 'draft',
         workflow: workflow ? { id: workflow.workflowId, sections: workflow.reportSections } : null,
         referencePlan: saved.planText,
         fileIds: [...new Set([...saved.planFileIds, ...(input.fileIds ?? [])])],
@@ -73,6 +87,31 @@ export function prepareLegacyPlanContinuation(input: {
       },
       { executionId: 'legacy-input-validation', executionRevision: 1 },
     );
+    if (approved && workflow) {
+      const intake = runIntake(workflow, renderCoreIntake(previous, workflow));
+      if (intake.kind !== 'missing' || intake.question.trim() !== input.awaitingQuestion?.trim())
+        throw new Error('INVALID_LEGACY_QUESTION');
+    }
+    const requirements = hold
+      ? previous
+      : parseCoreRequirements(
+          {
+            ...previous,
+            userTurns: [...previous.userTurns, input.message],
+            phase:
+              approved || isExplicitPlanApproval(input.message) ? 'approved_execution' : 'revise',
+            resume: {
+              ...previous.resume,
+              intakeBindings: bindCoreIntakeReply(
+                previous,
+                workflow,
+                input.awaitingQuestion ?? null,
+                input.message,
+              ),
+            },
+          },
+          { executionId: 'legacy-input-validation', executionRevision: 1 },
+        );
     const resultJson = JSON.stringify(raw);
     if (Buffer.byteLength(resultJson, 'utf8') > 128 * 1024)
       throw new Error('LEGACY_SNAPSHOT_LIMIT');
@@ -80,15 +119,13 @@ export function prepareLegacyPlanContinuation(input: {
       resultJson,
       roleId: saved.selectedRole,
       origin: input.origin,
+      awaitingQuestion: input.awaitingQuestion ?? null,
     };
     return {
       requirements,
       hold,
       legacySnapshot,
-      intakeIntent: [...requirements.userTurns]
-        .reverse()
-        .concat(requirements.initialRequest)
-        .join('\n'),
+      intakeIntent: renderCoreIntake(requirements, workflow),
     };
   } catch {
     throw new TRPCError({

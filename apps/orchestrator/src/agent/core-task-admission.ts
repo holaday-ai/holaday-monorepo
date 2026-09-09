@@ -25,7 +25,12 @@ export interface CoreAdmission {
   readonly executionRevision: number;
   readonly recordVersion: number;
   readonly requirements: CoreAcceptedRequirements;
-  readonly legacySnapshot?: Readonly<{ resultJson: string; roleId: string | null; origin: string }>;
+  readonly legacySnapshot?: Readonly<{
+    resultJson: string;
+    roleId: string | null;
+    origin: string;
+    awaitingQuestion: string | null;
+  }>;
 }
 
 export class CoreAdmissionError extends Error {
@@ -75,6 +80,10 @@ const inputSchema = z
         }),
         roleId: z.string().min(1).max(100).nullable(),
         origin: z.string().min(1).max(32),
+        awaitingQuestion: z
+          .string()
+          .refine((value) => Buffer.byteLength(value, 'utf8') <= 64 * 1024)
+          .nullable(),
       })
       .strict()
       .optional(),

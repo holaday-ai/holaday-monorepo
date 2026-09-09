@@ -46,6 +46,19 @@
 
 ## 资源与验证
 
+### Task 3B-2b：旧方案批准后首次确定性澄清
+
+这是旧兼容的一段纵向接线，不放宽总体发布门禁。旧代码在批准后park时保存 `approvedPlanText`、`fallbackChain=['generate-resume']`、完整历史及原planText，但不保存planMode。仅同时具备这些显式服务端证据、最后一条原始回复是独立批准、固定typed工作流当前确定性intake问题与row.awaitingQuestion一致、无历史派生planIntakeContext时恢复approved_execution。不能仅凭缺planMode、模型正文或历史中任意一处“确认”恢复批准；证据不完整拒绝，不猜。无approvedPlanText的非目标仍保留旧路径。
+
+- [x] 将现有 `core-task-continuation.ts` 的确定性裸值绑定/辅助视图提取为 `core-task-intake.ts`：`renderCoreIntake(requirements,workflow)` 与 `bindCoreIntakeReply(requirements,workflow,awaitingQuestion,message)`；保持唯一缺项、问题精确匹配、全文正则匹配、原文不变、仅turn/field索引，现有9条续接行为无变化。
+- [x] `core-legacy-plan.ts` 接收可选awaitingQuestion并识别上述旧批准凭据；纯schema与预算校验不伪造core记录/许可。只读hold不写；当前裸值经同一绑定函数恢复到新metadata。snapshot仍由同一已授权row产生，追加awaitingQuestion并在C1做NULL/值CAS，避免只改问题时绑定到错误旧提问。
+- [x] 先用真实prepareLegacyPlanContinuation测试观察原本null的RED；正例为content-topic、初始“小红书内容选题”、最后原话“确认”、匹配确定性品类问题、当前“美妆护肤”。断言原话保持、phase approved_execution、intake ready和新绑定索引。拒绝批准文不匹配/最后回复非批准/问题不匹配/缺明确来源/非空派生历史；长或歧义答案不能截断绑定。
+- [x] 真实tasks.reply旧批准澄清→新ID与保存→下一次core恢复，观察双通道保留历史/文件与resume索引且不再缺失品类。新增SQL问题CAS与拒绝测试。串行回归、前后端types/build、精确lint、独立只读审查后本地提交。非空legacy提示规范、带不可恢复派生历史/多次旧澄清、无历史记录仍未完成，不改生产。
+
+本地验证（2026-09-09 23:28 JST）：基线e3bb7d29；纯旧恢复正例先因返回null行为RED，新增问题快照先因严格接纳schema不支持字段RED，再实现并GREEN。旧批准凭据缺失/不一致、历史中批准后有修改、问题不匹配、不可恢复派生历史、长/歧义裸值、hold均有回归；真实reply证明两轮原话和绑定持久化、四次生成/核验传输且无重复扣额，两轮是澄清而非最终交付。
+
+最终三批32文件 **707 tests**（373+298+36）通过；后端tsc --noEmit/build、前端完整typecheck退出0，10个改动/新增TS完整Biome及diff检查通过。测试非空断言lint问题改为fixture显式检查，未修改生产规则。独立只读审查无Critical/Important/必修Minor，仅准本地检查点。SQL只验证Drizzle传输条件，模型和仓储为合成边界，不是真实MySQL/千问或生产证据。不安装/启动Docker或新浏览器、不读凭据、不改敏感业务；Node堆2GB、单worker、重任务和审查串行，收尾内存空闲74%、磁盘145GiB。整体旧规范/浏览器转交、其余不可恢复历史、前端与真实组合门禁未完成，禁止部分推送/PR/部署。
+
 ### Task 3B-2a：完整旧方案的首次同轮接续
 
 沿用已批准的兼容范围，先处理旧generate方案中显式 `planLegacyWorkflowId=null` 且 `planMode=awaiting_approval` 的typed/null工作流；非空legacy的提示规范与浏览器转交另做，不丢弃其规范强行迁入。缺失planMode（包括旧批准后再澄清）保持原路径，后续恢复其明确阶段与裸值绑定，不以字段缺省推断已批准。本步骤不等于3B-2全部完成，不改变发布门禁。

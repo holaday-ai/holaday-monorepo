@@ -1,8 +1,6 @@
 import { TRPCError } from '@trpc/server';
-import type { ExpertWorkflowContract } from '../execution/expert-workflow-contract.js';
-import { runIntake } from '../execution/expert-workflow-intake.js';
-import { parseInputs } from '../execution/expert-workflow-parser.js';
 import { getExpertWorkflowById } from '../execution/expert-workflow-registry.js';
+import { bindCoreIntakeReply, renderCoreIntake } from './core-task-intake.js';
 import type { CoreRecordRead } from './core-task-record.js';
 import { type CoreAcceptedRequirements, parseCoreRequirements } from './core-task-requirements.js';
 import { isExplicitPlanApproval, isPurePlanHold } from './plan-mode.js';
@@ -23,47 +21,14 @@ export function prepareCoreContinuation(input: {
   if (previous.resume.legacyWorkflowId !== null) throw unavailable();
   const workflow = previous.workflow ? getExpertWorkflowById(previous.workflow.id) : null;
   if (previous.workflow && !workflow) throw unavailable();
-  const priorIntake = renderIntake(previous, workflow);
+  const priorIntake = renderCoreIntake(previous, workflow);
   if (isPurePlanHold(message) && !input.fileIds?.length)
     return { requirements: previous, intakeIntent: priorIntake, hold: true };
   const plan = previous.phase === 'draft' || previous.phase === 'revise';
   if (plan && (typeof input.result.planText !== 'string' || !input.result.planText.trim()))
     throw unavailable();
   const userTurns = [...previous.userTurns, message];
-  const bindings = [...previous.resume.intakeBindings];
-  if (
-    !plan &&
-    workflow &&
-    message.trim() &&
-    !isExplicitPlanApproval(message) &&
-    !isPurePlanHold(message)
-  ) {
-    const intake = runIntake(workflow, priorIntake);
-    if (
-      intake.kind === 'missing' &&
-      intake.question.trim() === input.awaitingQuestion?.trim() &&
-      intake.parseResult.missingRequired.length === 1 &&
-      intake.parseResult.malformed.length === 0
-    ) {
-      const field = intake.parseResult.missingRequired[0];
-      const explicitlyNamesField = [...workflow.requiredInputs, ...workflow.optionalInputs].some(
-        (candidate) =>
-          candidate.extractPattern && new RegExp(candidate.extractPattern).test(message),
-      );
-      if (field?.extractPattern && !explicitlyNamesField) {
-        const anchored = `${anchor(field.label, field.name)}: ${message.trim()}`;
-        const match = new RegExp(field.extractPattern).exec(anchored);
-        // A prefix is not an unambiguous answer: never silently bind a truncated
-        // value or discard the rest of a qualification supplied by the user.
-        if (
-          match?.index === 0 &&
-          match[0] === anchored &&
-          parseInputs(anchored, workflow).extracted[field.name] !== undefined
-        )
-          bindings.push({ turn: userTurns.length - 1, field: field.name });
-      }
-    }
-  }
+  const bindings = bindCoreIntakeReply(previous, workflow, input.awaitingQuestion, message);
   try {
     const requirements = parseCoreRequirements(
       {
@@ -80,31 +45,12 @@ export function prepareCoreContinuation(input: {
       },
       { executionId: record.head.executionId, executionRevision: record.head.executionRevision },
     );
-    return { requirements, intakeIntent: renderIntake(requirements, workflow), hold: false };
+    return { requirements, intakeIntent: renderCoreIntake(requirements, workflow), hold: false };
   } catch {
     throw unavailable();
   }
 }
 
-function renderIntake(
-  requirements: CoreAcceptedRequirements,
-  workflow: ExpertWorkflowContract | null,
-): string {
-  const bindings = requirements.resume?.intakeBindings ?? [];
-  const anchored = bindings.map((binding) => {
-    const field = workflow?.requiredInputs.find((field) => field.name === binding.field);
-    if (!field?.extractPattern || binding.turn >= requirements.userTurns.length)
-      throw unavailable();
-    return `${anchor(field.label, field.name)}: ${requirements.userTurns[binding.turn]}`;
-  });
-  return [...requirements.userTurns]
-    .reverse()
-    .concat(anchored.reverse(), requirements.initialRequest)
-    .join('\n');
-}
-function anchor(label: string | undefined, name: string): string {
-  return (label ?? name).split(/[\s/]/)[0] ?? name;
-}
 function unavailable(): TRPCError {
   return new TRPCError({
     code: 'BAD_REQUEST',

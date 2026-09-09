@@ -61,6 +61,7 @@ export async function handleCoreTaskReply(args: {
           head,
           result: row.result,
           roleId: row.roleId,
+          awaitingQuestion: row.awaitingQuestion,
           origin: ctx.taskOrigin,
           message: input.message,
           fileIds: input.fileIds,
