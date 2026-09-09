@@ -64,7 +64,7 @@ export class CoreExecutionRegistry {
         ...structuredClone(contractOptions),
         intent: renderVerificationUserIntent(context),
         executionMode: 'generate',
-        expertWorkflowId: context.workflow?.id ?? null,
+        expertWorkflowId: context.workflow?.id ?? context.legacyWorkflow?.id ?? null,
       }),
     );
     const handle = Object.freeze({

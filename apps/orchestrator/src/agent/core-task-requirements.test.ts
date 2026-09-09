@@ -15,6 +15,42 @@ function requirements() {
 }
 
 describe('readable core requirements', () => {
+  it('persists complete legacy rules only with matching resume lineage', () => {
+    const source = {
+      ...requirements(),
+      legacyWorkflow: {
+        id: 'douyin-livestream-review',
+        promptPreamble: '合成固定规范，不伪造后台来源。',
+        missingInputs: [],
+        routeOverride: 'generate',
+      },
+      resume: {
+        schemaVersion: 1,
+        expertMode: 'expert',
+        skillId: null,
+        legacyWorkflowId: 'douyin-livestream-review',
+        intakeBindings: [],
+      },
+    };
+    const parsed = parseCoreRequirements(source, identity);
+    source.legacyWorkflow.promptPreamble = '后来变化';
+    expect(parsed.legacyWorkflow?.promptPreamble).toBe('合成固定规范，不伪造后台来源。');
+    expect(Object.isFrozen(parsed.legacyWorkflow)).toBe(true);
+    expect(() => parseCoreRequirements({ ...source, resume: undefined }, identity)).toThrow(
+      'CORE_REQUIREMENTS_INVALID',
+    );
+    expect(() =>
+      parseCoreRequirements(
+        { ...source, resume: { ...source.resume, legacyWorkflowId: null } },
+        identity,
+      ),
+    ).toThrow('CORE_REQUIREMENTS_INVALID');
+    // Historical records remain readable, but they cannot execute without their rules.
+    const { legacyWorkflow: _rules, ...historical } = source;
+    expect(parseCoreRequirements(historical, identity).resume?.legacyWorkflowId).toBe(
+      'douyin-livestream-review',
+    );
+  });
   it.each([
     { intakeBindings: [{ turn: 99, field: 'category' }] },
     {

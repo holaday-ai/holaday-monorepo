@@ -4,6 +4,14 @@ import {
   checkVerificationAdmission,
 } from './verification-input-budget.js';
 
+/** Server-owned legacy policy, never inferred from a candidate answer or material. */
+export interface LegacyWorkflowContext {
+  readonly id: 'douyin-livestream-review';
+  readonly promptPreamble: string;
+  readonly missingInputs: readonly ('liveSession' | 'dataSource')[];
+  readonly routeOverride: 'generate' | 'browser';
+}
+
 export interface TaskVerificationContext {
   readonly schemaVersion: 1;
   readonly executionId: string;
@@ -22,6 +30,7 @@ export interface TaskVerificationContext {
     }[];
   } | null;
   readonly referencePlan: string | null;
+  readonly legacyWorkflow?: LegacyWorkflowContext;
   readonly materials: readonly VerificationMaterial[];
 }
 
@@ -74,6 +83,19 @@ const contextSchema = z
       .strict()
       .nullable(),
     referencePlan: z.string().nullable(),
+    legacyWorkflow: z
+      .object({
+        id: z.literal('douyin-livestream-review'),
+        promptPreamble: z.string().refine((value) => value.trim().length > 0),
+        missingInputs: z
+          .array(z.enum(['liveSession', 'dataSource']))
+          .max(2)
+          .refine((items) => new Set(items).size === items.length),
+        routeOverride: z.enum(['generate', 'browser']),
+      })
+      .strict()
+      .refine((value) => value.missingInputs.length === 0 || value.routeOverride === 'generate')
+      .optional(),
     materials: z.array(
       z.discriminatedUnion('kind', [
         z.object({ kind: z.literal('text'), ...materialIdentity, text: z.string() }).strict(),

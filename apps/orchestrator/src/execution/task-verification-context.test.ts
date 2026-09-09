@@ -36,6 +36,47 @@ function expectSafeError(input: unknown, code: string) {
 }
 
 describe('immutable task verification context', () => {
+  it('budgets and freezes legacy rules separately from raw user history', () => {
+    const legacyWorkflow = {
+      id: 'douyin-livestream-review',
+      promptPreamble: '合成固定规范，禁止虚构数据。',
+      missingInputs: ['dataSource'],
+      routeOverride: 'generate',
+    };
+    const context = createTaskVerificationContext({ ...fixture(), legacyWorkflow });
+    legacyWorkflow.missingInputs.length = 0;
+    legacyWorkflow.promptPreamble = '调用后变更';
+    expect(context.legacyWorkflow?.missingInputs).toEqual(['dataSource']);
+    expect(Object.isFrozen(context.legacyWorkflow?.missingInputs)).toBe(true);
+    expect(renderVerificationUserIntent(context)).not.toContain('合成固定规范');
+    expectSafeError(
+      { ...fixture(), legacyWorkflow: { ...legacyWorkflow, promptPreamble: 'X'.repeat(65536) } },
+      'VERIFICATION_INPUT_LIMIT',
+    );
+  });
+  it.each([
+    { id: 'unknown' },
+    { promptPreamble: '   ' },
+    { missingInputs: ['dataSource', 'dataSource'] },
+    { missingInputs: ['other'] },
+    { missingInputs: ['liveSession'], routeOverride: 'browser' },
+    { routeOverride: 'computer' },
+    { permissions: ['all'] },
+  ])('rejects malformed or contradictory legacy workflow state %j', (patch) => {
+    expectSafeError(
+      {
+        ...fixture(),
+        legacyWorkflow: {
+          id: 'douyin-livestream-review',
+          promptPreamble: '合成固定规范',
+          missingInputs: [],
+          routeOverride: 'generate',
+          ...patch,
+        },
+      },
+      'VERIFICATION_CONTEXT_INVALID',
+    );
+  });
   it('preserves all requirements beyond both legacy summary limits', () => {
     const context = createTaskVerificationContext(fixture());
     const rendered = renderVerificationUserIntent(context);

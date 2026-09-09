@@ -46,6 +46,23 @@
 
 ## 资源与验证
 
+### Task 3B-2c：旧执行规范的同源快照与生成守卫
+
+本步骤只补齐 coordinator/runner 可独立核验的旧规范承载能力；不移除 router 的 legacy 排除条件，不改旧浏览器转交状态，不宣称已完成旧入口迁移。沿用已批准的单线程执行，不增加依赖。
+
+`execution/core-execution-registry.ts` 的 contract 选择也必须读取固定 legacy ID：旧专家工作流在 normal/auto 模式下仍是 full tier，不能仅在 expert 模式才进入语义核验。实际 coordinator 的三种模式双通道测试覆盖此约束。
+
+**文件与接口：** `execution/task-verification-context.ts` 增加可选 `legacyWorkflow`，只含固定 id `douyin-livestream-review`、非空 `promptPreamble`、唯一缺项 `liveSession|dataSource` 数组和 `routeOverride: generate|browser`；缺项只能配 generate。`agent/core-task-requirements.ts` 负责完整保存、预算和 resume lineage 一致性；`agent/core-task-execution.ts` 在接纳前拒绝有旧 ID 却无规范的执行，并在首次 await 前冻结全文。`agent/generate-runner.ts` 使用该快照，不把规范拼入用户原话；`execution/llm-verifier.ts` 保留同一快照并明确规范与不可信材料边界。测试集中在 context、requirements、真实 coordinator 和 runner，外部模型/仓储仍为合成边界。
+
+- [x] RED：实际旧 matcher 的七段报告全文经 `legacyWorkflow` 进入真实 coordinator，验证 generation.instructions 与 semantic.context 同源，原话不变，admit 期间源对象变化不污染快照。现有严格 schema 应拒绝新增字段，先观察失败。
+- [x] RED：`runGenerateTask({ verificationContext: {...context, legacyWorkflow} })` 在缺场次/来源时返回固定 awaiting_user 且零适配器调用；browser 且非计划阶段返回 `CORE_LEGACY_BROWSER_HANDOFF_REQUIRED`，不生成假结果；draft/revise 仍仅出方案。旧 generate 规范排除 lightweight 和自动新鲜度工具，防止上传分析被误转为联网研究。
+- [x] GREEN：严格解析及完整预算，`parseCoreRequirements` 保存深冻结副本，新增快照必须与 resume.legacyWorkflowId 相同；旧记录缺快照可读取但 coordinator 接纳前拒绝，不据此改变历史读取兼容性。生成系统段与核验 payload 使用同一完整规则；缺项问题为“请补充需要复盘的直播场次或时间范围。”及“请上传复盘数据，或说明数据所在的后台来源。”，不增加权限。
+- [x] 验证重复缺项、未知字段、缺项/browser 冲突、长规则预算、ID 不一致、历史缺规则零接纳、无规则旧路径兼容、正反生成守卫。新测试 GREEN 后相关回归、后端类型/构建、前端类型、精确 lint/diff 和独立只读审查串行执行；仅本地检查点提交，QA 记录真实证据及余项。
+
+本地验证（2026-09-09 23:46 JST）：基线022031c1。新增字段初轮严格schema RED后，runner/上下文投影的12项实际行为失败（规则丢失、缺项与browser误执行、联网工具和轻量回答绕过）修复为GREEN；另有normal/auto两项真实RED揭示旧专家ID未进入contract选择，registry修复后同样通过。新增25项测试，真实coordinator证明规范在admit等待前冻结、三种模式都传入两通道、缺项保存awaiting_user而browser守卫保存failed且零生成调用；不将其解释为已完成浏览器转交。
+
+最终三批35文件 **773 tests**（388+308+77）通过，后端tsc --noEmit/build、前端完整typecheck退出0，10个TS完整Biome与diff检查通过。唯一复用只读reviewer未发现Critical/Important/必修Minor，允许本地检查点，不允许发布。所有模型/仓储仍为外部边界合成替身；七段报告真实质量、MySQL、千问、浏览器及生产未验证。旧入口和continuation的legacy排除条件没有移除；后续须完成固定旧lineage的server规范投影、缺项重算/裸值历史以及不确定浏览器handoff的安全接线，再做前端同轮排序、真实组合与性能/新发布包门禁。Node堆2GB、单worker、重任务与审查串行；未安装或启动Docker/新浏览器，不读密钥或生产私人数据，不改敏感业务或自动化，不推送/PR/合并/部署。
+
 ### Task 3B-2b：旧方案批准后首次确定性澄清
 
 这是旧兼容的一段纵向接线，不放宽总体发布门禁。旧代码在批准后park时保存 `approvedPlanText`、`fallbackChain=['generate-resume']`、完整历史及原planText，但不保存planMode。仅同时具备这些显式服务端证据、最后一条原始回复是独立批准、固定typed工作流当前确定性intake问题与row.awaitingQuestion一致、无历史派生planIntakeContext时恢复approved_execution。不能仅凭缺planMode、模型正文或历史中任意一处“确认”恢复批准；证据不完整拒绝，不猜。无approvedPlanText的非目标仍保留旧路径。

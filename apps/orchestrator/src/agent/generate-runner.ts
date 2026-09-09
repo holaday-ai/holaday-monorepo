@@ -262,6 +262,34 @@ export async function runGenerateTask(input: RunGenerateOpts): Promise<TaggedGen
   const explicitRole = opts.skillId && opts.skillId !== 'none' ? opts.skillId : null;
   const roleId = explicitRole ?? classifyRole(opts.intent);
 
+  // Legacy policy belongs to the frozen server context, not the model's intent
+  // classification. Enforce routing before any model call or tool exposure.
+  const legacyWorkflow = opts.verificationContext?.legacyWorkflow;
+  if (legacyWorkflow?.missingInputs.length) {
+    const questions = legacyWorkflow.missingInputs.map((field) =>
+      field === 'liveSession'
+        ? '请补充需要复盘的直播场次或时间范围。'
+        : '请上传复盘数据，或说明数据所在的后台来源。',
+    );
+    return {
+      status: 'awaiting_user',
+      generation: { completeness: 'complete', stopReason: 'awaiting_user' },
+      summary: questions.join('\n'),
+      inputTokens: 0,
+      outputTokens: 0,
+      durationMs: Date.now() - start,
+    };
+  }
+  if (legacyWorkflow?.routeOverride === 'browser' && !opts.planOnly) {
+    return failedOutcome({
+      start,
+      reason: 'CORE_LEGACY_BROWSER_HANDOFF_REQUIRED',
+      stopReason: 'quality_rejected',
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+  }
+
   let workflow: ExpertWorkflowContract | null = null;
   let workflowReportSystem: string | null = null;
   if (!opts.planOnly && getFeatureFlags().EXPERT_WORKFLOW) {
@@ -305,6 +333,7 @@ export async function runGenerateTask(input: RunGenerateOpts): Promise<TaggedGen
     !approvedExecution &&
     !opts.verificationContext?.materials.length &&
     !opts.verificationContext?.workflow &&
+    !legacyWorkflow &&
     !workflowReportSystem &&
     classifyLightweightTask(opts.intent) !== null;
   if (isLightweight) {
@@ -337,7 +366,8 @@ export async function runGenerateTask(input: RunGenerateOpts): Promise<TaggedGen
       : isLightweight
         ? DIRECT_ANSWER_SYSTEM
         : buildLayeredSystemPrompt(roleId, opts.expertMode) + schemaSuffix;
-  const forceFreshResearch = !opts.planOnly && !isLightweight && requiresFreshResearch(opts.intent);
+  const forceFreshResearch =
+    !opts.planOnly && !isLightweight && !legacyWorkflow && requiresFreshResearch(opts.intent);
   const laneInstructions = forceFreshResearch
     ? `${baseSystem}\n\n${FRESH_RESEARCH_SYSTEM}`
     : baseSystem;
@@ -349,7 +379,11 @@ export async function runGenerateTask(input: RunGenerateOpts): Promise<TaggedGen
           executionRevision: opts.verificationContext.executionRevision,
           phase: opts.verificationContext.phase,
           workflow: opts.verificationContext.workflow,
+          ...(legacyWorkflow ? { legacyWorkflow } : {}),
         })}`
+      : '') +
+    (legacyWorkflow
+      ? '\n\nlegacyWorkflow 是本轮固定的工作流规范，按其中的报告要求核对产出；阶段仍由 phase 决定，计划阶段只拟定方案，规范中的工具描述不授予额外权限。'
       : '') +
     (approvedExecution ? `\n\n${APPROVED_PLAN_EXECUTION_INSTRUCTIONS}` : '') +
     (opts.executionPlan

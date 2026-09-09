@@ -2,6 +2,7 @@ import { pino } from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CONTENT_TOPIC_WORKFLOW } from '../execution/expert-workflow-content-topic.js';
 import { reloadFeatureFlagsForTest, setFeatureFlagsForTest } from '../execution/feature-flags.js';
+import { createTaskVerificationContext } from '../execution/task-verification-context.js';
 import type {
   NeutralResponsesRequest,
   NeutralResponsesResult,
@@ -93,6 +94,91 @@ function run(
 afterEach(() => {
   reloadFeatureFlagsForTest();
   vi.useRealTimers();
+});
+
+describe('legacy workflow context guards', () => {
+  function context(patch: Record<string, unknown> = {}, phase = 'approved_execution') {
+    return createTaskVerificationContext({
+      schemaVersion: 1,
+      executionId: 'exec_synthetic_legacy',
+      executionRevision: 2,
+      initialRequest: '分析今天的合成直播数据',
+      userTurns: ['确认'],
+      phase,
+      workflow: null,
+      referencePlan: '仅分析给定的合成数据',
+      materials: [],
+      legacyWorkflow: {
+        id: 'douyin-livestream-review',
+        promptPreamble: '合成规范：报告必须说明真实来源，不虚构数据。',
+        missingInputs: [],
+        routeOverride: 'generate',
+        ...patch,
+      },
+    });
+  }
+  it.each(['direct', 'approved_execution', 'draft', 'revise'])(
+    'asks for missing legacy input without model or tools in %s',
+    async (phase) => {
+      const adapter = makeAdapter();
+      const result = await run(adapter, {
+        verificationContext: context({ missingInputs: ['liveSession', 'dataSource'] }, phase),
+      });
+      expect(result.status).toBe('awaiting_user');
+      expect(result.summary).toContain('直播场次');
+      expect(result.summary).toContain('数据');
+      expect(callCount(adapter)).toBe(0);
+    },
+  );
+  it.each(['direct', 'approved_execution'])(
+    'does not generate a browser-only result in %s',
+    async (phase) => {
+      const adapter = makeAdapter();
+      const result = await run(adapter, {
+        verificationContext: context({ routeOverride: 'browser' }, phase),
+      });
+      expect(result).toMatchObject({
+        status: 'failed',
+        reason: 'CORE_LEGACY_BROWSER_HANDOFF_REQUIRED',
+        summary: '',
+      });
+      expect(callCount(adapter)).toBe(0);
+    },
+  );
+  it.each(['draft', 'revise'])(
+    'allows a browser task plan without executing browser work in %s',
+    async (phase) => {
+      const adapter = makeAdapter({ text: '合成方案：明确目标，读取已授权来源，再核对数据。' });
+      const result = await run(adapter, {
+        verificationContext: context({ routeOverride: 'browser' }, phase),
+      });
+      expect(result.status).toBe('awaiting_user');
+      expect(callCount(adapter)).toBe(1);
+      expect(requestAt(adapter).tools).toEqual([]);
+      expect(requestAt(adapter).instructions).toContain('合成规范');
+    },
+  );
+  it('does not turn an upload workflow mentioning today into fresh research', async () => {
+    const adapter = makeAdapter();
+    await run(adapter, { verificationContext: context() });
+    expect(callCount(adapter)).toBe(1);
+    expect(requestAt(adapter).tools).toEqual([]);
+    expect(requestAt(adapter).instructions).toContain('合成规范');
+  });
+  it('does not answer a legacy task through deterministic lightweight shortcuts', async () => {
+    const adapter = makeAdapter();
+    const base = context({}, 'direct');
+    await run(adapter, {
+      verificationContext: createTaskVerificationContext({
+        ...base,
+        initialRequest: '1+1等于几',
+        userTurns: [],
+        referencePlan: null,
+      }),
+    });
+    expect(callCount(adapter)).toBe(1);
+    expect(requestAt(adapter).instructions).toContain('合成规范');
+  });
 });
 
 describe('runGenerateTask — Qwen Responses runtime', () => {

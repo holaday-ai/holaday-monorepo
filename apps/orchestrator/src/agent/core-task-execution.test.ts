@@ -11,6 +11,7 @@ import {
   startCoreTaskExecution,
 } from './core-task-execution.js';
 import type { CoreSettlement } from './core-task-settlement.js';
+import { matchExpertWorkflow } from './supercar/expert-workflows.js';
 
 const ANSWER = `合成流程说明。${'整理输入并逐项核对结果，记录尚未确认的事项。'.repeat(25)}`;
 const metadata = {
@@ -167,6 +168,117 @@ afterEach(() => {
 });
 
 describe('transactional core execution with real runner and review', () => {
+  it.each(['normal', 'auto', 'expert'] as const)(
+    'freezes full legacy rules and enforces semantic review in %s mode',
+    async (expertMode) => {
+      const f = fixture();
+      const matched = matchExpertWorkflow('分析昨天抖音直播上传数据', { hasAttachments: true });
+      if (!matched || matched.routeOverride !== 'generate')
+        throw new Error('invalid synthetic workflow');
+      const legacyWorkflow = {
+        id: matched.id,
+        promptPreamble: matched.promptPreamble,
+        missingInputs: [...matched.missingInputs],
+        routeOverride: matched.routeOverride,
+      };
+      f.input.requirements = {
+        ...f.input.requirements,
+        legacyWorkflow,
+        resume: {
+          schemaVersion: 1,
+          expertMode,
+          skillId: null,
+          legacyWorkflowId: matched.id,
+          intakeBindings: [],
+        },
+      };
+      const admit = f.repo.admit;
+      f.repo.admit = async (op) => {
+        legacyWorkflow.promptPreamble = '迟到污染';
+        return admit(op);
+      };
+      const started = await startCoreTaskExecution(f.input);
+      expect(await started.completion).toBe('committed');
+      expect(f.generation).toHaveLength(1);
+      expect(f.semantic).toHaveLength(1);
+      expect(f.generation[0]?.instructions).toContain(JSON.stringify(matched.promptPreamble));
+      const reviewPayload = JSON.parse(String(f.semantic[0]?.messages[0]?.content));
+      expect(reviewPayload.context.legacyWorkflow.promptPreamble).toBe(matched.promptPreamble);
+      expect(reviewPayload.context.initialRequest).toBe('解释合成流程资料，整理成清晰的交接说明。');
+      expect(reviewPayload.context.userTurns).toEqual(['不要添加未经确认的结论。', '确认']);
+      expect(JSON.stringify(f.generation)).not.toContain('迟到污染');
+      expect(f.admissions[0]?.requirements.legacyWorkflow?.promptPreamble).toBe(
+        matched.promptPreamble,
+      );
+    },
+  );
+  it('rejects historical legacy lineage without its rules before admission or generation', async () => {
+    const f = fixture();
+    f.input.requirements = {
+      ...f.input.requirements,
+      resume: {
+        schemaVersion: 1,
+        expertMode: 'expert',
+        skillId: null,
+        legacyWorkflowId: 'douyin-livestream-review',
+        intakeBindings: [],
+      },
+    };
+    await expect(startCoreTaskExecution(f.input)).rejects.toThrow(
+      'CORE_LEGACY_WORKFLOW_CONTEXT_REQUIRED',
+    );
+    expect(f.admissions).toHaveLength(0);
+    expect(f.generation).toHaveLength(0);
+    expect(f.semantic).toHaveLength(0);
+  });
+  it.each([
+    {
+      missingInputs: ['dataSource'] as const,
+      routeOverride: 'generate' as const,
+      status: 'awaiting_user',
+      semanticCalls: 1,
+    },
+    {
+      missingInputs: [] as const,
+      routeOverride: 'browser' as const,
+      status: 'failed',
+      semanticCalls: 0,
+    },
+  ])(
+    'settles legacy $routeOverride guard as $status rather than a completed answer',
+    async (guard) => {
+      const f = fixture();
+      f.input.blocks = [];
+      f.input.requirements = {
+        ...f.input.requirements,
+        fileIds: [],
+        legacyWorkflow: {
+          id: 'douyin-livestream-review',
+          promptPreamble: '合成复盘规范，缺少来源时先询问来源。',
+          missingInputs: guard.missingInputs,
+          routeOverride: guard.routeOverride,
+        },
+        resume: {
+          schemaVersion: 1,
+          expertMode: 'auto',
+          skillId: null,
+          legacyWorkflowId: 'douyin-livestream-review',
+          intakeBindings: [],
+        },
+      };
+      const started = await startCoreTaskExecution(f.input);
+      expect(await started.completion).toBe('committed');
+      expect(f.writes).toHaveLength(1);
+      expect(f.writes[0]?.status).toBe(guard.status);
+      expect(f.generation).toHaveLength(0);
+      expect(f.semantic).toHaveLength(guard.semanticCalls);
+      if (guard.semanticCalls) {
+        const payload = JSON.parse(String(f.semantic[0]?.messages[0]?.content));
+        expect(payload.deliveryStage).toBe('clarification');
+        expect(payload.context.legacyWorkflow.missingInputs).toEqual(['dataSource']);
+      }
+    },
+  );
   it('rechecks the advisory deadline after the callback promise resolves', async () => {
     const f = fixture();
     let now = 0;

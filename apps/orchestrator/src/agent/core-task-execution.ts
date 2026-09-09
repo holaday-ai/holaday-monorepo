@@ -97,6 +97,8 @@ export async function startCoreTaskExecution(
     },
   };
   assertCoreTaskInput({ ...requirements, blocks: input.blocks });
+  if (requirements.resume.legacyWorkflowId && !requirements.legacyWorkflow)
+    throw new Error('CORE_LEGACY_WORKFLOW_CONTEXT_REQUIRED');
   const admission = prepareCoreAdmission({
     scope: input.scope,
     before: input.before,
@@ -116,6 +118,9 @@ export async function startCoreTaskExecution(
     phase: admission.requirements.phase,
     workflow: admission.requirements.workflow,
     referencePlan: admission.requirements.referencePlan,
+    ...(admission.requirements.legacyWorkflow
+      ? { legacyWorkflow: admission.requirements.legacyWorkflow }
+      : {}),
     materials: input.blocks.map((block, index) =>
       block.type === 'text'
         ? { kind: 'text', key: `file-block-${index}`, source: 'file', text: block.text }

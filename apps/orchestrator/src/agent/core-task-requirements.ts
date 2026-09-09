@@ -8,7 +8,7 @@ import { VERIFICATION_INPUT_LIMITS } from '../execution/verification-input-budge
 
 export type CoreAcceptedRequirements = Pick<
   TaskVerificationContext,
-  'initialRequest' | 'userTurns' | 'phase' | 'workflow' | 'referencePlan'
+  'initialRequest' | 'userTurns' | 'phase' | 'workflow' | 'referencePlan' | 'legacyWorkflow'
 > & { readonly fileIds: readonly string[]; readonly resume?: CoreResumeMetadata };
 
 const resumeSchema = z
@@ -49,6 +49,7 @@ const requirementsSchema = z
     phase: z.enum(['direct', 'draft', 'revise', 'approved_execution']),
     workflow: z.unknown(),
     referencePlan: z.string().nullable(),
+    legacyWorkflow: z.unknown().optional(),
     fileIds: z
       .array(z.string().min(1).max(32))
       .max(5)
@@ -73,6 +74,8 @@ export function parseCoreRequirements(
       executionRevision: identity.executionRevision,
       materials: [],
     });
+    if (context.legacyWorkflow && context.legacyWorkflow.id !== resume?.legacyWorkflowId)
+      throw new CoreRequirementsError();
     if (
       resume &&
       (resume.intakeBindings.some((binding) => binding.turn >= context.userTurns.length) ||
@@ -87,6 +90,7 @@ export function parseCoreRequirements(
       phase: context.phase,
       workflow: context.workflow,
       referencePlan: context.referencePlan,
+      ...(context.legacyWorkflow ? { legacyWorkflow: context.legacyWorkflow } : {}),
       fileIds: Object.freeze(fileIds),
       ...(resume
         ? {
