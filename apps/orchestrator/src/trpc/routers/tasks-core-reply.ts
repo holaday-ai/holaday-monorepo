@@ -105,7 +105,7 @@ export async function handleCoreTaskReply(args: {
     repo,
     responsesAdapter: generation.kind === 'ready' ? generation.responses('standard') : null,
     semanticAdapter: semantic.kind === 'ready' ? semantic.messages('verify_strict') : undefined,
-    publish: (event) => publishEvent(ctx.userId, event),
+    publish: (event) => publishCoreExecutionEvent(ctx.userId, event),
     afterSettlement: async (op) => {
       const isCurrent = async () => {
         const head = await repo.readHead(op.scope);
@@ -146,7 +146,7 @@ export async function handleCoreTaskReply(args: {
   };
 }
 
-function publishEvent(userId: string, event: CoreExecutionEvent): void {
+export function publishCoreExecutionEvent(userId: string, event: CoreExecutionEvent): void {
   const identity = {
     taskId: event.taskId,
     executionId: event.executionId,

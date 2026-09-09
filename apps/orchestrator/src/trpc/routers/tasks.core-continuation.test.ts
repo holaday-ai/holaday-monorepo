@@ -6,12 +6,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CoreAdmission } from '../../agent/core-task-admission.js';
 import { CoreTaskRepository } from '../../agent/core-task-repository.js';
 import type { CoreSettlement } from '../../agent/core-task-settlement.js';
+import { TaskRepository } from '../../agent/task-repository.js';
+import * as createClaims from '../../api-keys/webhook-idempotency-service.js';
 import { env } from '../../config/env.js';
 import {
   reloadFeatureFlagsForTest,
   setFeatureFlagsForTest,
 } from '../../execution/feature-flags.js';
 import { FileService } from '../../files/file-service.js';
+import { QuotaService } from '../../quota/quota-service.js';
 import * as websocket from '../../ws/server.js';
 import type { Context } from '../context.js';
 import { tasksRouter } from './tasks.js';
@@ -19,12 +22,14 @@ import { tasksRouter } from './tasks.js';
 const original = { ...env };
 const TEXT = '合成说明：按已提供的材料整理执行顺序，保留尚未确认的事项，不增加事实。'.repeat(20);
 afterEach(() => {
+  vi.useRealTimers();
   Object.assign(env, original);
   reloadFeatureFlagsForTest();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 function fixture(options: { suggestions?: boolean } = {}) {
+  let taskId = 'tsk_core_resume';
   Object.assign(env, {
     MODEL_RUNTIME_POLICY: 'qwen_only',
     QWEN_CORE_ROLLOUT_MODE: 'synthetic',
@@ -71,13 +76,24 @@ function fixture(options: { suggestions?: boolean } = {}) {
   const reads: { sql: string; params: unknown[] }[] = [];
   const db = {
     select(projection: Record<string, unknown>) {
+      if ('count' in projection) return { from: () => ({ where: async () => [{ count: 0 }] }) };
       return {
         from: () => ({
           where: (query: SQL) => {
             reads.push(new MySqlDialect().sqlToQuery(query));
             return {
               limit: async () =>
-                'status' in projection ? [{ ...row }] : [{ id: 7, modelDataRegion: 'cn' }],
+                'status' in projection
+                  ? [{ ...row }]
+                  : [
+                      {
+                        id: 7,
+                        plan: 'free',
+                        selectedRoles: [],
+                        selectedSkills: [],
+                        modelDataRegion: 'cn',
+                      },
+                    ],
             };
           },
         }),
@@ -85,6 +101,21 @@ function fixture(options: { suggestions?: boolean } = {}) {
     },
   };
   const admissions: CoreAdmission[] = [];
+  const charge = vi.spyOn(QuotaService.prototype, 'tryConsume').mockResolvedValue({ ok: true });
+  vi.spyOn(QuotaService.prototype, 'getActiveTaskCount').mockResolvedValue(0);
+  const insert = vi
+    .spyOn(TaskRepository.prototype, 'insertTask')
+    .mockImplementation(async (state) => {
+      taskId = state.taskId;
+      Object.assign(row, {
+        status: 'executing',
+        executionId: null,
+        executionRevision: 0,
+        coreRecordVersion: 0,
+        awaitingQuestion: null,
+        result: null,
+      });
+    });
   const settlements: CoreSettlement[] = [];
   const suggestionWrites = vi
     .spyOn(CoreTaskRepository.prototype, 'persistSuggestions')
@@ -156,6 +187,25 @@ function fixture(options: { suggestions?: boolean } = {}) {
     userId: 'usr_core_resume',
     taskOrigin: 'workbench',
   } as unknown as Context;
+  let cached: ({ taskId: string } & Record<string, unknown>) | undefined;
+  let claimed = false;
+  vi.spyOn(createClaims, 'recordClaim').mockImplementation(async () => {
+    if (cached)
+      return { kind: 'replay', conflictsWith: false, taskId: cached.taskId, response: cached };
+    if (claimed) return { kind: 'in_flight', claimedAt: new Date() };
+    claimed = true;
+    return { kind: 'claimed' };
+  });
+  vi.spyOn(createClaims, 'finalizeClaim').mockImplementation(
+    async (_deps, _user, _key, id, response) => {
+      cached = { ...(response as Record<string, unknown>), taskId: id };
+      return true;
+    },
+  );
+  const releaseClaim = vi.spyOn(createClaims, 'releaseClaim').mockImplementation(async () => {
+    claimed = false;
+    return true;
+  });
   return {
     row,
     reads,
@@ -164,13 +214,182 @@ function fixture(options: { suggestions?: boolean } = {}) {
     frames,
     requests,
     files,
+    charge,
+    insert,
     suggestionWrites,
+    releaseClaim,
+    create: (
+      intent = '整理合成资料为会议说明，不要发送邮件。',
+      fileIds?: string[],
+      clientRequestId?: string,
+    ) =>
+      tasksRouter
+        .createCaller(ctx)
+        .create({ intent, mode: 'plan', expertMode: 'expert', fileIds, clientRequestId }),
     reply: (message = '确认', fileIds?: string[]) =>
-      tasksRouter.createCaller(ctx).reply({ taskId: 'tsk_core_resume', message, fileIds }),
+      tasksRouter.createCaller(ctx).reply({ taskId, message, fileIds }),
   };
 }
 
 describe('real reply core routing and execution', () => {
+  it('rejects a shell success past the monotonic deadline before the timeout callback runs', async () => {
+    const f = fixture();
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    f.insert.mockImplementationOnce(async () => {
+      now = 15_001;
+    });
+    const response = await f.create(undefined, undefined, 'synthetic_shell_clock');
+    expect(response).toMatchObject({
+      admissionState: 'creationUnconfirmed',
+      executionId: null,
+      executionRevision: 0,
+    });
+    expect(f.admissions).toHaveLength(0);
+    expect(f.requests).toHaveLength(0);
+    expect(f.releaseClaim).not.toHaveBeenCalled();
+  });
+  it('does not impose core-plan gates on the existing specialized stock lane', async () => {
+    const f = fixture();
+    env.ASHARE_QA_ENABLED = true;
+    setFeatureFlagsForTest({ EXECUTION_VERIFIER: false });
+    const stock = await import('../../agent/a-share/briefing-service.js');
+    const watchlist = vi
+      .spyOn(stock, 'listWatchlistForUser')
+      .mockRejectedValue(new Error('SYNTHETIC_STOCK_BOUNDARY'));
+    await expect(f.create()).rejects.toThrow('SYNTHETIC_STOCK_BOUNDARY');
+    expect(watchlist).toHaveBeenCalledTimes(1);
+    expect(f.admissions).toHaveLength(0);
+  });
+  it('preserves the creation claim when shell insertion commits but its response is lost', async () => {
+    const f = fixture();
+    const insert = f.insert.getMockImplementation();
+    if (!insert) throw new Error('Missing synthetic insert implementation');
+    f.insert.mockImplementationOnce(async (...args) => {
+      await insert(...args);
+      throw new Error('SYNTHETIC_SHELL_RESPONSE_LOST');
+    });
+    const response = await f.create(undefined, undefined, 'synthetic_shell_create');
+    expect(response).toMatchObject({
+      admissionState: 'creationUnconfirmed',
+      executionId: null,
+      executionRevision: 0,
+    });
+    expect(await f.create(undefined, undefined, 'synthetic_shell_create')).toEqual(response);
+    expect(f.releaseClaim).not.toHaveBeenCalled();
+    expect(f.charge).toHaveBeenCalledTimes(1);
+    expect(f.insert).toHaveBeenCalledTimes(1);
+    expect(f.admissions).toHaveLength(0);
+    expect(f.requests).toHaveLength(0);
+  });
+  it.each(['resolve', 'reject'] as const)(
+    'bounds shell insertion and ignores its late %s',
+    async (late) => {
+      vi.useFakeTimers();
+      const f = fixture();
+      let finish!: () => void;
+      f.insert.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            finish = () =>
+              late === 'resolve' ? resolve() : reject(new Error('SYNTHETIC_LATE_WRITE'));
+          }),
+      );
+      let response: unknown;
+      const pending = f.create(undefined, undefined, 'synthetic_shell_timeout').then((value) => {
+        response = value;
+      });
+      await vi.advanceTimersByTimeAsync(15_001);
+      expect(response).toMatchObject({
+        admissionState: 'creationUnconfirmed',
+        executionId: null,
+        executionRevision: 0,
+      });
+      await pending;
+      finish();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await f.create(undefined, undefined, 'synthetic_shell_timeout')).toEqual(response);
+      expect(f.releaseClaim).not.toHaveBeenCalled();
+      expect(f.insert).toHaveBeenCalledTimes(1);
+      expect(f.charge).toHaveBeenCalledTimes(1);
+      expect(f.admissions).toHaveLength(0);
+      expect(f.requests).toHaveLength(0);
+    },
+  );
+  it('reports a reconciled initial admission without dispatching a model a second time', async () => {
+    const f = fixture();
+    vi.spyOn(CoreTaskRepository.prototype, 'admit').mockImplementationOnce(async (op) => {
+      Object.assign(f.row, {
+        status: 'executing',
+        executionId: op.executionId,
+        executionRevision: op.executionRevision,
+        coreRecordVersion: op.recordVersion,
+        result: { coreRequirements: op.requirements },
+      });
+      throw new Error('SYNTHETIC_COMMIT_RESPONSE_LOST');
+    });
+    const result = await f.create();
+    expect(result).toMatchObject({
+      admissionState: 'acceptedUnconfirmed',
+      executionId: f.row.executionId,
+      executionRevision: 1,
+    });
+    expect(f.requests).toHaveLength(0);
+    expect(f.settlements).toHaveLength(0);
+    expect(f.frames).toHaveLength(0);
+    expect(f.charge).toHaveBeenCalledTimes(1);
+    expect(f.insert).toHaveBeenCalledTimes(1);
+  });
+  it('refuses new core plans before charge or insert when mandatory verification is disabled', async () => {
+    const f = fixture();
+    setFeatureFlagsForTest({ EXECUTION_VERIFIER: false });
+    await expect(f.create()).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    expect(f.charge).not.toHaveBeenCalled();
+    expect(f.insert).not.toHaveBeenCalled();
+    expect(f.requests).toHaveLength(0);
+  });
+  it('creates, revises and approves one persisted core plan with three distinct execution identities', async () => {
+    const f = fixture();
+    f.files.mockImplementation(
+      async (ids) =>
+        ids.map((id) => ({
+          row: { externalId: id, filename: `${id}.txt`, mimetype: 'text/plain' },
+          buffer: Buffer.from('合成材料原文：保留跨轮次附件证据。'),
+        })) as Awaited<ReturnType<FileService['loadMany']>>,
+    );
+    const initial = await f.create(undefined, ['fil_original']);
+    expect(initial).toMatchObject({
+      executionRevision: 1,
+      executionMode: 'generate',
+      admissionState: 'resumed',
+    });
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(1));
+    expect(f.settlements[0]?.status).toBe('awaiting_user');
+    const revised = await f.reply('修改第二步：不得新增截止日期');
+    expect(revised).toMatchObject({ executionRevision: 2, state: 'resumed' });
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(2));
+    expect(f.settlements[1]?.status).toBe('awaiting_user');
+    await f.reply('确认');
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(3));
+    expect(f.settlements[2]?.status).toBe('completed');
+    expect(f.admissions.map((op) => op.executionRevision)).toEqual([1, 2, 3]);
+    expect(new Set(f.admissions.map((op) => op.executionId)).size).toBe(3);
+    expect(f.admissions[2]?.requirements.userTurns).toEqual([
+      '修改第二步：不得新增截止日期',
+      '确认',
+    ]);
+    expect(f.admissions[2]?.requirements.referencePlan).toBe(f.settlements[1]?.result.planText);
+    expect(f.requests).toHaveLength(6);
+    for (const request of f.requests)
+      expect(JSON.stringify(request.body)).toContain('保留跨轮次附件证据');
+    for (const request of f.requests.slice(-2)) {
+      expect(JSON.stringify(request.body)).toContain('不得新增截止日期');
+      expect(JSON.stringify(request.body)).toContain('不要发送邮件');
+    }
+    expect(f.frames.filter((frame) => frame.type === 'server.task.terminal')).toHaveLength(1);
+    expect(f.charge).toHaveBeenCalledTimes(1);
+    expect(f.insert).toHaveBeenCalledTimes(1);
+  });
   it('does not call optional suggestions for a current greeting after a substantive parent task', async () => {
     const f = fixture({ suggestions: true });
     f.row.result.coreRequirements = {

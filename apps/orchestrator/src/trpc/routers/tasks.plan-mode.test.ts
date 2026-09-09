@@ -4,6 +4,7 @@ import { MySqlDialect } from 'drizzle-orm/mysql-core';
 import * as planning from '../../agent/core-task-plan.js';
 import * as generation from '../../agent/generate-runner.js';
 import { TaskRepository } from '../../agent/task-repository.js';
+import { CoreTaskRepository } from '../../agent/core-task-repository.js';
 import * as supercar from '../../agent/supercar/index.js';
 import { env } from '../../config/env.js';
 import * as executionPipeline from '../../execution/execution-pipeline.js';
@@ -37,6 +38,7 @@ function fixture({
   ownerSnapshotLegacy = false,
 } = {}) {
   let creating = false;
+  setFeatureFlagsForTest({ EVIDENCE_LEDGER: true, EXECUTION_CONTRACT: true, EXECUTION_VERIFIER: true });
   Object.assign(env, {
     ANTHROPIC_API_KEY: '',
     QWEN_CORE_ROLLOUT_MODE: 'synthetic',
@@ -45,12 +47,13 @@ function fixture({
     QWEN_RESPONSES_ADAPTER_ENABLED: true,
     DASHSCOPE_CN_API_KEY: 'synthetic-cn',
   });
-  const plan = '1. 整理材料\n2. 形成提纲\n确认后执行。';
+  const plan = '1. 整理已经提供的合成材料，保留缺失事项\n2. 形成可供用户复核的汇报提纲\n确认后执行。';
   const state = {
     status: 'awaiting_user',
     executionId: null as string | null,
     executionRevision: 0,
     coreRecordVersion: 0,
+    awaitingQuestion: '确认这个方案吗？',
     intent: '整理提供的材料，形成一份简洁的汇报提纲。不要发送邮件。',
     result: {
       executionMode: 'generate',
@@ -117,18 +120,38 @@ function fixture({
       if (persisted) state.status = 'executing';
       return { persisted };
     });
-  const save = vi
-    .spyOn(TaskRepository.prototype, 'persistAwaitingUser')
-    .mockImplementation(async ({ result }) => {
+  // Observe the persisted wait boundary for legacy and new core formats;
+  // this does not call a legacy writer from the core path.
+  const save = vi.fn<TaskRepository['persistAwaitingUser']>(async ({ result, question }) => {
       if (persisted) {
         state.status = 'awaiting_user';
         state.result = result ?? {};
+        state.awaitingQuestion = question;
       }
       return { persisted };
     });
-  const complete = vi
-    .spyOn(TaskRepository.prototype, 'persistVisionOutcome')
-    .mockResolvedValue({ persisted });
+  vi.spyOn(TaskRepository.prototype, 'persistAwaitingUser').mockImplementation(save);
+  const complete = vi.fn<TaskRepository['persistVisionOutcome']>().mockResolvedValue({ persisted });
+  vi.spyOn(TaskRepository.prototype, 'persistVisionOutcome').mockImplementation(complete);
+  vi.spyOn(CoreTaskRepository.prototype, 'admit').mockImplementation(async op => {
+    Object.assign(state, { status: 'executing', executionId: op.executionId, executionRevision: op.executionRevision, coreRecordVersion: op.recordVersion, result: { coreRequirements: op.requirements } });
+    return { persisted: true };
+  });
+  const coreSettle = vi.spyOn(CoreTaskRepository.prototype, 'settle').mockImplementation(async op => {
+    const coreRequirements = state.result.coreRequirements;
+    if (persisted) state.coreRecordVersion = op.recordVersion;
+    if (op.status === 'awaiting_user') return save({ taskExternalId: op.scope.taskId, question: op.awaitingQuestion ?? '', awaitingKind: 'clarification', result: { ...op.result, coreRequirements } });
+    if (persisted) { state.status = op.status; state.result = { ...op.result, coreRequirements }; }
+    if (op.status === 'failed') {
+      if (typeof op.result.reason !== 'string') throw new Error('Missing core failure reason');
+      return complete(op.scope.taskId, { status: 'failed', reason: op.result.reason, tickCount: 1 });
+    }
+    if (typeof op.result.summary !== 'string') throw new Error('Missing core result summary');
+    return complete(op.scope.taskId, { status: op.status, summary: op.result.summary, tickCount: 1 });
+  });
+  // A refused settlement is treated as cancelled, not a retryable write, in
+  // these boundary fixtures. Recovery/retry mechanics have dedicated tests.
+  vi.spyOn(CoreTaskRepository.prototype, 'readSettlement').mockImplementation(async () => ({ status: 'cancelled', executionId: state.executionId, executionRevision: state.executionRevision, recordVersion: state.coreRecordVersion, commitId: null }));
   vi.spyOn(planning, 'prepareCoreTaskPlan').mockResolvedValue(null);
   const run = vi.spyOn(generation, 'runGenerateTask').mockResolvedValue({
     status: 'awaiting_user',
@@ -166,6 +189,7 @@ function fixture({
     run,
     save,
     complete,
+    coreSettle,
     resume,
     frames,
     plan,
@@ -308,7 +332,7 @@ describe('generate plan mode durable approval boundary', () => {
     attachFiles({ fil_one: body });
     await f.create(['fil_one']);
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
-    expect(JSON.stringify(f.run.mock.calls[0]?.[0].attachments).includes('CORE_FILE_TAIL')).toBe(true);
+    expect(JSON.stringify(f.run.mock.calls[0]?.[0].verificationContext?.materials).includes('CORE_FILE_TAIL')).toBe(true);
     expect(f.charge).toHaveBeenCalledTimes(1);
   });
 
@@ -330,7 +354,7 @@ describe('generate plan mode durable approval boundary', () => {
     if (length === 65_514) {
       expect(error).toBeNull();
       expect(f.charge).toHaveBeenCalledTimes(1);
-      const block = f.run.mock.calls[0]?.[0].attachments?.[0];
+      const block = f.run.mock.calls[0]?.[0].verificationContext?.materials[0];
       expect(block && 'text' in block && Buffer.byteLength(block.text, 'utf8')).toBe(65_536);
     } else {
       expect(error).toMatchObject({ code: 'BAD_REQUEST' });
@@ -432,6 +456,12 @@ describe('generate plan mode durable approval boundary', () => {
       f.run.mockImplementation((opts) =>
         realRunGenerateTask({ ...opts, responsesAdapter: { metadata, stream } }),
       );
+      if (!enabled) {
+        await expect(f.create()).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+        expect(f.charge).not.toHaveBeenCalled();
+        expect(f.insert).not.toHaveBeenCalled();
+        return;
+      }
       await f.create();
       await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
       await f.reply(edit);
@@ -440,13 +470,11 @@ describe('generate plan mode durable approval boundary', () => {
       await f.reply('确认');
       await vi.waitFor(() => expect(f.complete).toHaveBeenCalledTimes(1));
       expect(f.complete.mock.calls[0]?.[1]).toMatchObject({
-        status: 'completed',
+        status: 'partial_success',
         summary: expect.stringContaining(report),
-        metadata: { planReplyHistory: [edit, '确认'], expertWorkflowId: 'content-topic' },
       });
-      const persistedOutcome = f.complete.mock.calls[0]?.[1];
-      if (persistedOutcome?.status !== 'completed') throw new Error('Expected completed report');
-      expect(persistedOutcome.failedChecks ?? []).toEqual([]);
+      expect(f.state.result.coreRequirements).toMatchObject({ userTurns: [edit, '确认'], workflow: { id: 'content-topic' } });
+      expect(f.coreSettle.mock.calls.at(-1)?.[0].verification.semanticStatus).toBe('unavailable');
       expect(f.run.mock.calls[2]?.[0].intent).toContain(edit);
       expect(stream).toHaveBeenCalledTimes(3);
     },
@@ -480,7 +508,7 @@ describe('generate plan mode durable approval boundary', () => {
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
     await f.reply('执行');
     await vi.waitFor(() => expect(f.complete).toHaveBeenCalledTimes(1));
-    expect(f.run.mock.calls[2]?.[0].workflowOverride).toBeNull();
+    expect(f.run.mock.calls[2]?.[0].verificationContext?.workflow).toBeNull();
   });
 
   it('retains the original workflow through edits, approval and later clarification', async () => {
@@ -496,16 +524,14 @@ describe('generate plan mode durable approval boundary', () => {
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(3));
     await f.reply('美妆护肤');
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(4));
-    expect(f.run.mock.calls.map(([opts]) => opts.workflowOverride?.workflowId)).toEqual([
+    expect(f.run.mock.calls.map(([opts]) => opts.verificationContext?.workflow?.id)).toEqual([
       'content-topic',
       'content-topic',
       'content-topic',
       'content-topic',
     ]);
-    expect(f.state.result.planWorkflowId).toBe('content-topic');
-    expect(f.state.result.expertWorkflowId).toBe('content-topic');
-    expect(init.mock.calls.at(-1)?.[0].expertWorkflowId).toBe('content-topic');
-    expect(init.mock.results.at(-1)?.value.contract.expertWorkflowId).toBe('content-topic');
+    expect(f.state.result.coreRequirements).toMatchObject({ workflow: { id: 'content-topic' } });
+    expect(init).not.toHaveBeenCalled();
   });
 
   it.each([null, 'content-topic'])(
@@ -607,7 +633,7 @@ describe('generate plan mode durable approval boundary', () => {
     await vi.waitFor(() => expect(f.complete).toHaveBeenCalledTimes(1));
     expect(stream.mock.calls[2]?.[0].instructions).toContain('母婴');
     expect(stream.mock.calls[2]?.[0].instructions).not.toContain('美妆护肤');
-    expect(f.state.result.planReplyHistory).toEqual(['修改方案，品类：母婴。']);
+    expect(f.state.result.coreRequirements).toMatchObject({ userTurns: ['修改方案，品类：母婴。', '执行'] });
   });
   it('retains typed clarification mappings separately from raw replies after approval', async () => {
     const f = fixture({ expertMode: 'auto' });
@@ -647,8 +673,7 @@ describe('generate plan mode durable approval boundary', () => {
     await f.reply('美妆护肤');
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(3));
     expect(stream).toHaveBeenCalledTimes(2);
-    expect(f.state.result.planReplyHistory).toEqual(['执行', '美妆护肤']);
-    expect(f.state.result.planIntakeContext).toEqual(['品类: 美妆护肤']);
+    expect(f.state.result.coreRequirements).toMatchObject({ userTurns: ['执行', '美妆护肤'], resume: { intakeBindings: [{ turn: 1, field: 'category' }] } });
     await f.reply('没有其他补充');
     await vi.waitFor(() => expect(f.complete).toHaveBeenCalledTimes(1));
     expect(stream).toHaveBeenCalledTimes(3);
@@ -688,13 +713,13 @@ describe('generate plan mode durable approval boundary', () => {
     expect(f.complete).not.toHaveBeenCalled();
     await f.reply('执行');
     await vi.waitFor(() => expect(f.complete).toHaveBeenCalledTimes(1));
-    expect(f.complete.mock.calls[0]?.[1]).toMatchObject({ status: 'completed', summary: texts[2] });
-    expect(f.complete.mock.calls[0]?.[1].metadata).toMatchObject({
-      planReplyHistory: ['不要增加截止时间，修改方案第二步', '执行'],
-      approvedPlanText: expect.stringContaining('不增加截止时间'),
+    expect(f.complete.mock.calls[0]?.[1]).toMatchObject({ status: 'partial_success', summary: texts[2] });
+    expect(f.state.result.coreRequirements).toMatchObject({
+      userTurns: ['不要增加截止时间，修改方案第二步', '执行'],
+      referencePlan: expect.stringContaining('不增加截止时间'),
     });
-    expect(f.run.mock.calls[2]?.[0].planExecutionApproved).toBe(true);
-    expect(f.run.mock.calls[1]?.[0].planExecutionApproved).not.toBe(true);
+    expect(f.run.mock.calls[2]?.[0].verificationContext?.phase).toBe('approved_execution');
+    expect(f.run.mock.calls[1]?.[0].verificationContext?.phase).toBe('revise');
     expect(stream.mock.calls[0]?.[0].tools).toEqual([]);
     expect(stream.mock.calls[1]?.[0].tools).toEqual([]);
     expect(JSON.stringify(stream.mock.calls[2]?.[0].input)).toContain('不要增加截止时间');
@@ -755,15 +780,15 @@ describe('generate plan mode durable approval boundary', () => {
       await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
       await f.reply(reply, ['fil_revision']);
       await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
-      expect(f.state.result.planFileIds).toEqual(['fil_original', 'fil_revision']);
-      expect(f.run.mock.calls[1]?.[0].planOnly).toBe(true);
+      expect(f.state.result.coreRequirements).toMatchObject({ fileIds: ['fil_original', 'fil_revision'] });
+      expect(f.run.mock.calls[1]?.[0].verificationContext?.phase).toBe('revise');
       await f.reply('执行');
       await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(3));
       expect(load).toHaveBeenLastCalledWith(['fil_original', 'fil_revision'], 42);
-      expect(JSON.stringify(f.run.mock.calls[2]?.[0].attachments)).toContain(
+      expect(JSON.stringify(f.run.mock.calls[2]?.[0].verificationContext?.materials)).toContain(
         'synthetic attachment fil_original',
       );
-      expect(JSON.stringify(f.run.mock.calls[2]?.[0].attachments)).toContain(
+      expect(JSON.stringify(f.run.mock.calls[2]?.[0].verificationContext?.materials)).toContain(
         'synthetic attachment fil_revision',
       );
     },
@@ -804,11 +829,11 @@ describe('generate plan mode durable approval boundary', () => {
       const f = fixture({ persisted });
       expect((await f.create()).executionMode).toBe('generate');
       await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
-      expect(f.run).toHaveBeenCalledWith(expect.objectContaining({ planOnly: true }));
+      expect(f.run.mock.calls[0]?.[0].verificationContext?.phase).toBe('draft');
       expect(f.save).toHaveBeenCalledWith(
         expect.objectContaining({
           question: f.plan,
-          result: expect.objectContaining({ planMode: 'awaiting_approval', planText: f.plan }),
+          result: expect.objectContaining({ coreRequirements: expect.objectContaining({ phase: 'draft' }), planText: f.plan }),
         }),
       );
       expect(f.frames.some((frame) => frame.type === 'server.supercar.awaiting_user')).toBe(

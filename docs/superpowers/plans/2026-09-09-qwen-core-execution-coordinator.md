@@ -28,6 +28,18 @@
 
 ## Task 3：首次创建、客户端及组合门禁
 
+### Task 3A：先接新建方案的完整纵向链路
+
+本地实施检查点，不是发布范围缩减。先迁移 `executionMode=generate && mode=plan && legacyWorkflowId=null` 且不具备股票专用分支候选资格的路径；草案本身由主生成器产出且经核验/P2 保存，不再为该模式另生成一份未经同轮保存的首屏辅助方案。股票候选分支及其通用回退本轮保留旧路径、不得误施新入口的核验 flags；direct、非空旧模板 lineage 和旧计划记录仍待 Task 3B 迁移；不得因此放行部分发布。
+
+审查补充：首次壳 INSERT 也属于不确定写入边界，15 秒内未直接确认或抛错时，返回 `admissionState=creationUnconfirmed`、保留 taskId，executionId=null/revision=0（尚未接纳，不伪造轮次）。正常返回供既有创建幂等 claim 保存/维持，不释放可能已写入的请求；迟到结果只吸收，不重调度模型。前端必须在后续 Task3 中识别此状态，保留输入并提示创建未确认，不能显示已开始或鼓励重发；既有24h去重窗口不延长，不在此增加自动重试或退款规则。
+
+- [x] 在 `tasks.core-continuation.test.ts` 扩展真实 caller fixture，验证 create→revise→approve 三轮身份、完整原话/附件双通道、只扣一次及只在最后发 terminal；预算在扣减/插入前拒绝。先观察旧入口缺身份/新保存链的 RED。
+- [x] 新建 `tasks-core-create.ts`，仅调用既有 insertTask 插入壳记录，再走 startCoreTaskExecution 一次接纳；ACK 携带真实 id/revision 和接纳状态，接纳未知不调度。调用者在原扣减位置前校验含 resume 的完整要求，不改变扣减算法。
+- [x] 复用 reply 的 `publishCoreExecutionEvent` 公共事件投影，不把内部 settlement 发给客户端。新建入口只生成待批准方案、不运行后续建议；批准后的建议仍由 reply 同轮 CAS 处理，避免为两处简单 runtime 选择引入通用调度层。
+- [x] 在 tasks.ts 新增精确的 plan-only 路由；旧 template_fill/browser/direct/legacy 代码不删除。更新受影响 create 测试的仓储边界和新格式断言，旧 legacy reply 独立兼容测试保持真实。
+- [x] 串行运行上述新测试及 core/reply/预算/生成/核验回归、后端类型/构建、前端类型、精确 lint/diff，独立只读审查后保存本地检查点。没有真实 DB/模型/前端排序证据，明确保留后续门禁。
+
 - 迁移首次 core generate（不改 template_fill / browser）；旧计划迁移和首次计划写入必须保持身份/CAS。
 - 前端 ACK/WS/detail 同轮次排序、真实隔离 MySQL、V10/V11/V12 双通道及性能验证、独立审查。
 - 全部三子项目完成前禁止 push/部分 PR/部署；自动试发仍暂停，不重用旧包。
@@ -57,3 +69,12 @@ Node heap 2048 MiB，Vitest 单 worker / 无文件并行；每批最多 20 文�
 - 新真实 router 测试为 7 条，恢复模块为 9 条；模型只替换外部 fetch，实际 router/runtime/runner/review/registry/coordinator 保持真实，但新 router 仓储以边界替身隔离，仓储 SQL 另测。**这不是 MySQL 集成、真实千问性能或浏览器/生产证据。** 老大输入预算测试耗时仍存在，未声称性能门禁解决。
 - 本轮不安装、不启 Docker/浏览器、不触碰生产、密钥、支付/额度/账号注销/DivineAPI。主线程重任务串行，Node 堆 2GB，Vitest 单 worker；复用单个只读 reviewer，不并行运行重任务。自动化保持 PAUSED，所有子项目与组合门禁完成前不推送/PR/合并/部署。
 - 下一项：Task 3 首次 core generate 接纳与计划同轮写入、旧 typed/legacy lineage 恢复及客户端 ACK/WS/detail 排序；再完成真实隔离 MySQL、V10/V11/V12 和新冻结发布包。不能将当前核心回复路径视为完整新建到交付的可发布链路。
+
+## Task 3A 验证记录（2026-09-09）
+
+- 通用首次方案实际 create→revise→approve 接入同一编排链，3 个执行 ID/revision、完整原话和原附件均进入生成与语义两通道（实际6次外部传输替身请求），只扣一次、仅最终发 terminal。新建草案不再另调辅助规划；typed/null 工作流固定，旧专用股票候选及其回退、direct、legacy 仍未迁移，不声称全入口已完成。
+- 行为 RED 包括旧创建缺身份/未走新保存链、必需核验关闭仍扣额接纳，以及股票候选被新 flags 误拦；修复前后均观察实际 router 结果。旧 plan-mode 测试更换为 core 仓储边界观察者，断言真实新 result 格式；原短合成方案不满足确定性核验，补足合成内容，未弱化核验。只有生成、缺语义适配器的测试正确断言 partial_success，不再误认 completed。测试 observer 的类型错误已修复，未伪造持久化必需字段。
+- 独立审查两轮 Important 都有实际 RED：壳 INSERT 提交后抛错/悬挂、以及时间超过15秒但 timer 未执行仍调度。现使用单调 deadline + timer，派发前、写入后、await 后及 C1 前复检；未知返回 creationUnconfirmed/nullID/rev0，保留 taskId 和既有24h去重 claim，不重复扣额/插入/模型调用，迟到成功或错误不恢复调度。新 router 测试15条；独立审查最终无 Critical/Important/必修 Minor，仅准本地检查点，不准发布。
+- 相关回归两批14+11文件，334+270=**604 tests**通过（第一批18:12 JST；受本轮末次修正影响的第二批18:42 JST复跑29.34秒）。后端 `tsc --noEmit`、`tsc -p tsconfig.build.json` 与前端完整 `typecheck` 末次复跑均退出0。3个小文件完整Biome通过；plan-mode测试lint无诊断；tasks.ts 33条lint均位于HEAD未改原行，无新行诊断，不声称全仓lint通过。
+- 模型仅替换外部传输、仓储仍是方法边界替身；没有真实 MySQL/千问/浏览器/生产证据。大正文预算测试仍耗时约6.6/13.6秒，真实性能门禁未完成。Node堆2GB、Vitest单worker，重任务与审查串行；最后内存空闲63%，磁盘149GiB。没有安装/启动Docker或新浏览器，没有生产或密钥/敏感业务变更；自动化PAUSED，无推送/PR/合并/部署。
+- 下一项 Task3B：完成 direct 首次接纳、旧 typed/legacy lineage 和旧计划记录完整迁移，明确保留专用分支边界；随后客户端 ACK/WS/detail 的同轮排序及 creationUnconfirmed 展示/输入保留、真实隔离MySQL、V10/V11/V12/实际千问质量性能与新冻结发布包。所有门禁通过前禁止部分发布，不能复用旧包或旧生产回执。

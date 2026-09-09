@@ -45,6 +45,8 @@ import { prepareCoreTaskPlan } from '../../agent/core-task-plan.js';
 import { assertCoreTaskInput } from '../../agent/core-task-input.js';
 import { assertLegacyReplyRecord } from './tasks-reply-record.js';
 import { handleCoreTaskReply } from './tasks-core-reply.js';
+import { createCorePlanTask } from './tasks-core-create.js';
+import type { CoreAcceptedRequirements } from '../../agent/core-task-requirements.js';
 import { publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { generateSuggestions } from '../../agent/suggestions-generator.js';
@@ -1651,8 +1653,47 @@ export const tasksRouter = router({
     });
 
     await parseCreateAttachments(executionMode === 'generate');
+    // Preserve the existing specialized stock candidate path (including its
+    // generic fallback) until the remaining first-create migration is done.
+    const specializedStockLaneEligible =
+      shouldAllowSpecializedLaneOverride(typedRoutingWorkflow) &&
+      (appEnv.ASHARE_QA_ENABLED || validatedStockContext !== null) &&
+      ashareQaHandlesMode(executionMode) &&
+      (ASHARE_QA_ALLOWLIST.size === 0 || ASHARE_QA_ALLOWLIST.has(ctx.userId));
+    const corePlanRequirements: CoreAcceptedRequirements | null =
+      executionMode === 'generate' &&
+      input.mode === 'plan' &&
+      !expertWorkflow &&
+      !specializedStockLaneEligible
+        ? {
+            initialRequest: parentContextBlock + input.intent,
+            userTurns: [],
+            phase: 'draft',
+            workflow: typedWorkflow
+              ? { id: typedWorkflow.workflowId, sections: typedWorkflow.reportSections }
+              : null,
+            referencePlan: null,
+            fileIds: orderedFileIds,
+            resume: {
+              schemaVersion: 1,
+              expertMode: expertModeOverride,
+              skillId: dispatchSkillId ?? null,
+              legacyWorkflowId: null,
+              intakeBindings: [],
+            },
+          }
+        : null;
+    if (corePlanRequirements) {
+      const flags = getExecutionFeatureFlags();
+      if (!flags.EVIDENCE_LEDGER || !flags.EXECUTION_CONTRACT || !flags.EXECUTION_VERIFIER)
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '任务方案核验尚未就绪，未创建任务或扣除额度。',
+        });
+    }
     if (executionMode === 'generate') {
       assertCoreTaskInput({
+        ...(corePlanRequirements ?? {
         initialRequest: parentContextBlock + input.intent,
         userTurns: [],
         phase: input.mode === 'plan' ? 'draft' : 'direct',
@@ -1661,6 +1702,7 @@ export const tasksRouter = router({
           : null,
         referencePlan: null,
         fileIds: orderedFileIds,
+        }),
         blocks: attachmentBlocks,
       });
     }
@@ -2650,14 +2692,7 @@ export const tasksRouter = router({
     // the matcher hijacks it (bug: "按这个周报模板填充…" → answered as stock 600415).
     // widen（BOSS 批准，④ 验收关闭）：ASHARE_QA_ALLOWLIST 为空 = 全量用户可用（flag on）；
     // 非空 = 仅名单内（灰度）。
-    const ashareQaAllowed =
-          ASHARE_QA_ALLOWLIST.size === 0 || ASHARE_QA_ALLOWLIST.has(ctx.userId);
-    if (
-      shouldAllowSpecializedLaneOverride(typedRoutingWorkflow) &&
-      (appEnv.ASHARE_QA_ENABLED || validatedStockContext !== null) &&
-      ashareQaHandlesMode(executionMode) &&
-      ashareQaAllowed
-    ) {
+    if (specializedStockLaneEligible) {
       const stockRuntime = resolveGenerateRuntimeForUser(ctx.userId, userRow.modelDataRegion);
       const stockMessagesAdapter =
         stockRuntime.kind === 'ready' ? stockRuntime.messages('standard') : null;
@@ -3372,6 +3407,21 @@ export const tasksRouter = router({
       };
     }
     // ===== end template-fill fork =====
+
+    if (corePlanRequirements) {
+      return createCorePlanTask({
+        ctx,
+        userId: userRow.id,
+        modelDataRegion: userRow.modelDataRegion,
+        wiring: modelRuntimeWiring,
+        taskRepo: repo,
+        requirements: corePlanRequirements,
+        blocks: attachmentBlocks,
+        intent: input.intent,
+        roleId: dispatchRoleId,
+        opusUsed: opusActuallyConsumed,
+      });
+    }
 
     // ===== Phase 21b — generate-mode fork =====
     // Pure-generation tasks (write a PRD, translate this, summarize that)
