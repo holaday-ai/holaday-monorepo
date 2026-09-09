@@ -4,6 +4,7 @@ import { MySqlDialect } from 'drizzle-orm/mysql-core';
 import { pino } from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CoreAdmission } from '../../agent/core-task-admission.js';
+import * as planning from '../../agent/core-task-plan.js';
 import { CoreTaskRepository } from '../../agent/core-task-repository.js';
 import type { CoreSettlement } from '../../agent/core-task-settlement.js';
 import { TaskRepository } from '../../agent/task-repository.js';
@@ -28,15 +29,18 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-function fixture(options: { suggestions?: boolean } = {}) {
+function fixture(options: { suggestions?: boolean; plan?: boolean } = {}) {
   let taskId = 'tsk_core_resume';
   Object.assign(env, {
     MODEL_RUNTIME_POLICY: 'qwen_only',
     QWEN_CORE_ROLLOUT_MODE: 'synthetic',
     QWEN_CORE_ALLOWLIST: 'usr_core_resume',
-    QWEN_CORE_ENABLED_LANES: options.suggestions
-      ? 'generate,verifier,suggestions'
-      : 'generate,verifier',
+    QWEN_CORE_ENABLED_LANES: [
+      'generate',
+      'verifier',
+      ...(options.suggestions ? ['suggestions'] : []),
+      ...(options.plan ? ['plan'] : []),
+    ].join(','),
     QWEN_RESPONSES_ADAPTER_ENABLED: true,
     QWEN_MESSAGES_ADAPTER_ENABLED: true,
     DASHSCOPE_CN_API_KEY: 'synthetic-test-only',
@@ -49,6 +53,7 @@ function fixture(options: { suggestions?: boolean } = {}) {
   });
   const row = {
     id: 19,
+    intent: '整理合成资料，不要发送邮件。',
     status: 'awaiting_user',
     executionId: 'synthetic_old',
     executionRevision: 2,
@@ -117,6 +122,15 @@ function fixture(options: { suggestions?: boolean } = {}) {
       });
     });
   const settlements: CoreSettlement[] = [];
+  const planWrites = vi
+    .spyOn(CoreTaskRepository.prototype, 'persistAdvisoryPlan')
+    .mockImplementation(
+      async (op) =>
+        row.status === 'executing' &&
+        row.executionId === op.executionId &&
+        row.executionRevision === op.executionRevision &&
+        row.coreRecordVersion === op.recordVersion,
+    );
   const suggestionWrites = vi
     .spyOn(CoreTaskRepository.prototype, 'persistSuggestions')
     .mockResolvedValue(true);
@@ -168,9 +182,11 @@ function fixture(options: { suggestions?: boolean } = {}) {
             {
               type: 'text',
               text:
-                body.max_tokens === 200
-                  ? '["发送邮件给所有人","整理后续会议清单"]'
-                  : '{"status":"pass","issues":[]}',
+                body.max_tokens === 512
+                  ? '{"steps":[{"text":"整理材料","tool":"文件处理"},{"text":"归纳结果","tool":"生成内容"}],"estimatedSeconds":6}'
+                  : body.max_tokens === 200
+                    ? '["发送邮件给所有人","整理后续会议清单"]'
+                    : '{"status":"pass","issues":[]}',
             },
           ],
           stop_reason: 'end_turn',
@@ -217,7 +233,16 @@ function fixture(options: { suggestions?: boolean } = {}) {
     charge,
     insert,
     suggestionWrites,
+    planWrites,
     releaseClaim,
+    createDirect: (
+      intent = '整理合成资料为会议说明，不要发送邮件。',
+      fileIds?: string[],
+      replyToTaskId?: string,
+    ) =>
+      tasksRouter
+        .createCaller(ctx)
+        .create({ intent, mode: 'auto', expertMode: 'expert', fileIds, replyToTaskId }),
     create: (
       intent = '整理合成资料为会议说明，不要发送邮件。',
       fileIds?: string[],
@@ -232,6 +257,153 @@ function fixture(options: { suggestions?: boolean } = {}) {
 }
 
 describe('real reply core routing and execution', () => {
+  it('does not add advisory planning to a lightweight follow-up of a long parent task', async () => {
+    const f = fixture({ plan: true });
+    f.row.status = 'completed';
+    f.row.result = { summary: TEXT };
+    await f.createDirect('谢谢', undefined, 'tsk_parent_synthetic');
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(1));
+    expect(f.admissions[0]?.requirements.initialRequest).toContain('不要发送邮件');
+    expect(f.planWrites).not.toHaveBeenCalled();
+    expect(
+      f.requests.some((request) => (request.body as { max_tokens?: number }).max_tokens === 512),
+    ).toBe(false);
+  });
+  it('routes direct creation through the same verified execution and identity-scoped optional channels', async () => {
+    const f = fixture({ plan: true, suggestions: true });
+    const ack = await f.createDirect();
+    expect(ack).toMatchObject({
+      admissionState: 'resumed',
+      executionRevision: 1,
+      executionId: expect.any(String),
+    });
+    if (!('executionId' in ack)) throw new Error('Missing core execution identity');
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(1));
+    await vi.waitFor(() => expect(f.suggestionWrites).toHaveBeenCalledTimes(1));
+    expect(f.settlements[0]).toMatchObject({
+      status: 'completed',
+      verification: { semanticStatus: 'pass' },
+    });
+    expect(f.admissions[0]?.requirements.phase).toBe('direct');
+    expect(f.requests).toHaveLength(4);
+    const plan = f.frames.find((frame) => frame.type === 'server.task.plan');
+    expect(plan).toMatchObject({
+      executionId: ack.executionId,
+      executionRevision: 1,
+      planText: expect.stringContaining('整理材料'),
+    });
+    expect(serverMessageSchema.parse(plan)).toMatchObject({
+      executionId: ack.executionId,
+      executionRevision: 1,
+    });
+    expect(f.planWrites.mock.calls[0]?.[0].executionId).toBe(ack.executionId);
+    expect(f.frames.filter((frame) => frame.type === 'server.task.terminal')).toHaveLength(1);
+  });
+  it('does not generate after cancellation while the advisory plan is pending', async () => {
+    const f = fixture();
+    let finish!: () => void;
+    vi.spyOn(planning, 'prepareCoreTaskPlan').mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve(null);
+        }),
+    );
+    const ack = await f.createDirect();
+    expect(ack).toMatchObject({ admissionState: 'resumed' });
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    f.row.status = 'cancelled';
+    finish();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(f.requests).toHaveLength(0);
+    expect(f.settlements).toHaveLength(0);
+    expect(f.frames.some((frame) => frame.type === 'server.task.terminal')).toBe(false);
+  });
+  it('does not publish a saved advisory plan after its database owner has changed', async () => {
+    const f = fixture({ plan: true });
+    f.planWrites.mockImplementationOnce(async () => {
+      f.row.executionRevision += 1;
+      f.row.coreRecordVersion += 1;
+      return true;
+    });
+    await f.createDirect();
+    await vi.waitFor(() => expect(f.planWrites).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(f.frames.some((frame) => frame.type === 'server.task.plan')).toBe(false);
+    expect(f.requests).toHaveLength(1);
+    expect(f.settlements).toHaveLength(0);
+  });
+  it('continues verified generation when the optional plan write is refused', async () => {
+    const f = fixture({ plan: true });
+    f.planWrites.mockResolvedValueOnce(false);
+    await f.createDirect();
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(1));
+    expect(f.settlements[0]?.status).toBe('completed');
+    expect(f.frames.some((frame) => frame.type === 'server.task.plan')).toBe(false);
+    expect(f.requests).toHaveLength(3);
+  });
+  it('rejects a late advisory plan before the deadline timer has run', async () => {
+    const f = fixture();
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    vi.spyOn(planning, 'prepareCoreTaskPlan').mockImplementationOnce(async (input) => {
+      now = 15_001;
+      if (await input.persist('迟到的合成计划')) input.publish('迟到的合成计划');
+      return '迟到的合成计划';
+    });
+    await f.createDirect();
+    await vi.waitFor(() =>
+      expect(f.frames.some((frame) => frame.type === 'server.task.progress')).toBe(true),
+    );
+    expect(f.planWrites).not.toHaveBeenCalled();
+    expect(f.requests).toHaveLength(0);
+    expect(f.settlements).toHaveLength(0);
+    expect(f.frames.some((frame) => frame.type === 'server.task.plan')).toBe(false);
+  });
+  it.each(['plan', 'head'] as const)(
+    'bounds a stalled advisory %s and ignores its late success',
+    async (boundary) => {
+      vi.useFakeTimers();
+      const f = fixture();
+      let finish!: () => void;
+      if (boundary === 'plan') {
+        vi.spyOn(planning, 'prepareCoreTaskPlan').mockImplementationOnce(
+          (input) =>
+            new Promise((resolve) => {
+              finish = () => {
+                void input.persist('迟到的计划').then((saved) => {
+                  if (saved) input.publish('迟到的计划');
+                  resolve('迟到的计划');
+                });
+              };
+            }),
+        );
+      } else {
+        vi.spyOn(CoreTaskRepository.prototype, 'readHead').mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finish = () =>
+                resolve({
+                  status: f.row.status,
+                  executionId: f.row.executionId,
+                  executionRevision: f.row.executionRevision,
+                  recordVersion: f.row.coreRecordVersion,
+                });
+            }),
+        );
+      }
+      const ack = await f.createDirect();
+      expect(ack).toMatchObject({ admissionState: 'resumed' });
+      await vi.advanceTimersByTimeAsync(15_001);
+      expect(f.frames.some((frame) => frame.type === 'server.task.progress')).toBe(true);
+      expect(finish).toBeTypeOf('function');
+      finish();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(f.planWrites).not.toHaveBeenCalled();
+      expect(f.requests).toHaveLength(0);
+      expect(f.settlements).toHaveLength(0);
+      expect(f.frames.some((frame) => frame.type === 'server.task.plan')).toBe(false);
+    },
+  );
   it('rejects a shell success past the monotonic deadline before the timeout callback runs', async () => {
     const f = fixture();
     let now = 0;

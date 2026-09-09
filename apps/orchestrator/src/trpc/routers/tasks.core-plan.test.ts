@@ -1,15 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as planning from '../../agent/core-task-plan.js';
+import { CoreTaskRepository } from '../../agent/core-task-repository.js';
 import * as generation from '../../agent/generate-runner.js';
 import * as scraping from '../../agent/scrape-runner.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { env } from '../../config/env.js';
+import {
+  reloadFeatureFlagsForTest,
+  setFeatureFlagsForTest,
+} from '../../execution/feature-flags.js';
 import { QuotaService } from '../../quota/quota-service.js';
 import type { Context } from '../context.js';
 import { tasksRouter } from './tasks.js';
 
 const original = { ...env };
 afterEach(() => {
+  reloadFeatureFlagsForTest();
   Object.assign(env, original);
   vi.restoreAllMocks();
 });
@@ -78,6 +84,11 @@ describe('tasks.create Qwen core planning reachability', () => {
   ] as const)(
     'handles %s planning without legacy dependencies, cancelled=%s',
     async (lane, cancelled) => {
+      setFeatureFlagsForTest({
+        EVIDENCE_LEDGER: true,
+        EXECUTION_CONTRACT: true,
+        EXECUTION_VERIFIER: true,
+      });
       Object.assign(env, {
         ANTHROPIC_API_KEY: '',
         QWEN_CORE_ROLLOUT_MODE: 'synthetic',
@@ -119,6 +130,24 @@ describe('tasks.create Qwen core planning reachability', () => {
       });
       const run = lane === 'generate' ? generate : scrape;
       const state = { active: true };
+      let admitted: import('../../agent/core-task-admission.js').CoreAdmission | undefined;
+      vi.spyOn(CoreTaskRepository.prototype, 'admit').mockImplementation(async (op) => {
+        admitted = op;
+        return { persisted: true };
+      });
+      vi.spyOn(CoreTaskRepository.prototype, 'readHead').mockImplementation(async () =>
+        admitted
+          ? {
+              status: state.active ? 'executing' : 'cancelled',
+              executionId: admitted.executionId,
+              executionRevision: admitted.executionRevision,
+              recordVersion: admitted.recordVersion,
+            }
+          : null,
+      );
+      const coreSave = vi
+        .spyOn(CoreTaskRepository.prototype, 'settle')
+        .mockResolvedValue({ persisted: true });
       const result = await tasksRouter.createCaller(context(state)).create({
         intent:
           lane === 'generate'
@@ -136,6 +165,7 @@ describe('tasks.create Qwen core planning reachability', () => {
         expect(generate).not.toHaveBeenCalled();
         expect(scrape).not.toHaveBeenCalled();
         expect(TaskRepository.prototype.persistVisionOutcome).not.toHaveBeenCalled();
+        expect(coreSave).not.toHaveBeenCalled();
         return;
       }
       await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
@@ -143,9 +173,16 @@ describe('tasks.create Qwen core planning reachability', () => {
       expect(plan).toHaveBeenCalledWith(
         expect.objectContaining({ modelDataRegion: 'cn', actorExternalId: 'usr_core_plan_test' }),
       );
-      expect(run).toHaveBeenCalledWith(
-        expect.objectContaining({ executionPlan: '1. 整理材料\n2. 归纳结论' }),
-      );
+      if (lane === 'scrape')
+        expect(run).toHaveBeenCalledWith(
+          expect.objectContaining({ executionPlan: '1. 整理材料\n2. 归纳结论' }),
+        );
+      else
+        expect(generate.mock.calls[0]?.[0].verificationContext).toMatchObject({
+          phase: 'direct',
+          executionRevision: 1,
+          referencePlan: null,
+        });
     },
   );
 });

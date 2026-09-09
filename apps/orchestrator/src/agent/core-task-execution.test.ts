@@ -167,6 +167,22 @@ afterEach(() => {
 });
 
 describe('transactional core execution with real runner and review', () => {
+  it('rechecks the advisory deadline after the callback promise resolves', async () => {
+    const f = fixture();
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    f.input.beforeGeneration = () =>
+      new Promise((resolve) => {
+        resolve('ready');
+        queueMicrotask(() => {
+          now = 15_001;
+        });
+      });
+    const started = await startCoreTaskExecution(f.input);
+    expect(await started.completion).toBe('unconfirmed');
+    expect(f.generation).toHaveLength(0);
+    expect(f.writes).toHaveLength(0);
+  });
   it('delivers the complete same-round request and materials to both channels then atomically settles', async () => {
     const f = fixture();
     const started = await startCoreTaskExecution(f.input);

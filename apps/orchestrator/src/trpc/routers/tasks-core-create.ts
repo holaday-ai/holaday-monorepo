@@ -1,19 +1,22 @@
 import { newExternalId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
-import type { CoreAcceptedRequirements } from '../../agent/core-task-admission.js';
+import type { CoreAcceptedRequirements, CoreAdmission } from '../../agent/core-task-admission.js';
 import { startCoreTaskExecution } from '../../agent/core-task-execution.js';
 import { assertCoreTaskInput } from '../../agent/core-task-input.js';
 import { CoreTaskRepository } from '../../agent/core-task-repository.js';
+import type { CoreSettlement } from '../../agent/core-task-settlement.js';
 import type { TaskRepository } from '../../agent/task-repository.js';
 import type { parseFileForPrompt } from '../../files/parsers.js';
 import type { ProductionModelRuntimeWiring } from '../../llm/model-runtime-wiring.js';
 import type { Context } from '../context.js';
+import { prepareCoreAdvisoryPlan } from './tasks-core-advisory-plan.js';
 import { publishCoreExecutionEvent } from './tasks-core-reply.js';
+import { publishCoreSettledSuggestions } from './tasks-core-suggestions.js';
 
-/** Initial plan only. The caller has already authorized files and checked the
+/** Initial draft or direct execution. The caller has authorized files and checked the
  * identical input budget before the existing quota decision. No quota logic here.
  */
-export async function createCorePlanTask(args: {
+export async function createCoreGenerateTask(args: {
   ctx: Context & { userId: string };
   userId: number;
   modelDataRegion: unknown;
@@ -27,7 +30,7 @@ export async function createCorePlanTask(args: {
 }) {
   const { ctx, requirements, blocks } = args;
   if (
-    requirements.phase !== 'draft' ||
+    (requirements.phase !== 'draft' && requirements.phase !== 'direct') ||
     !requirements.resume ||
     requirements.resume.legacyWorkflowId !== null
   )
@@ -78,6 +81,7 @@ export async function createCorePlanTask(args: {
   const generation = resolve('generate');
   const semantic = resolve('verifier');
   if (!withinDeadline()) return unconfirmed;
+  const repo = new CoreTaskRepository(ctx.db);
   const execution = await startCoreTaskExecution({
     scope: { taskId, userId: args.userId },
     before: { status: 'executing', executionId: null, executionRevision: 0, recordVersion: 0 },
@@ -85,10 +89,36 @@ export async function createCorePlanTask(args: {
     blocks,
     actorExternalId: ctx.userId,
     logger: ctx.logger,
-    repo: new CoreTaskRepository(ctx.db),
+    repo,
     responsesAdapter: generation.kind === 'ready' ? generation.responses('standard') : null,
     semanticAdapter: semantic.kind === 'ready' ? semantic.messages('verify_strict') : undefined,
     publish: (event) => publishCoreExecutionEvent(ctx.userId, event),
+    ...(requirements.phase === 'direct'
+      ? {
+          beforeGeneration: (op: CoreAdmission, isCurrent: () => boolean, deadline: number) =>
+            prepareCoreAdvisoryPlan({
+              op,
+              deadline,
+              rawIntent: args.intent,
+              isCurrent,
+              repo,
+              wiring: args.wiring,
+              actorExternalId: ctx.userId,
+              modelDataRegion: args.modelDataRegion,
+              logger: ctx.logger,
+            }),
+          afterSettlement: (op: CoreSettlement) =>
+            publishCoreSettledSuggestions({
+              op,
+              requirements,
+              repo,
+              wiring: args.wiring,
+              actorExternalId: ctx.userId,
+              modelDataRegion: args.modelDataRegion,
+              rawIntent: args.intent,
+            }),
+        }
+      : {}),
   });
   void execution.completion.catch(() => {});
   return {

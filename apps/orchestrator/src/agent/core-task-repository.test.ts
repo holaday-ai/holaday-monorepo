@@ -67,6 +67,32 @@ function fixture(
 }
 
 describe('core admission database boundary', () => {
+  it('saves advisory plans only for the admitted owner and active revision without changing core version', async () => {
+    const op = operation();
+    const { repo, queries } = fixture();
+    expect(await repo.persistAdvisoryPlan(op, '1. 整理材料\n2. 核对结果')).toBe(true);
+    const patch = queries.find((query) => query.sql.startsWith('update'));
+    expect(patch?.params.slice(-6)).toEqual([
+      scope.taskId,
+      7,
+      'executing',
+      op.executionId,
+      op.executionRevision,
+      op.recordVersion,
+    ]);
+    expect(patch?.sql.split(' where ')[0]).not.toContain('`core_record_version` =');
+    expect(patch?.sql.split(' where ')[0]).not.toContain('`result` =');
+  });
+  it('does not publish refused, failed or oversized advisory writes', async () => {
+    const op = operation();
+    expect(await fixture({ affected: 0 }).repo.persistAdvisoryPlan(op, '合成计划')).toBe(false);
+    expect(await fixture({ updateError: true }).repo.persistAdvisoryPlan(op, '合成计划')).toBe(
+      false,
+    );
+    const { repo, queries } = fixture();
+    expect(await repo.persistAdvisoryPlan(op, '长'.repeat(12_000))).toBe(false);
+    expect(queries).toHaveLength(0);
+  });
   it('patches suggestions only for the same owner, completed execution and record version', async () => {
     const admission = operation();
     const op = prepareCoreSettlement({

@@ -62,6 +62,12 @@ export interface CoreExecutionInput {
   skillId?: string;
   expertMode?: 'normal' | 'expert' | 'auto';
   publish: (event: CoreExecutionEvent) => void | Promise<void>;
+  /** Optional display-only planning after admission. Never changes the frozen requirements. */
+  beforeGeneration?: (
+    admission: CoreAdmission,
+    isCurrent: () => boolean,
+    deadline: number,
+  ) => Promise<'ready' | 'stale' | 'unconfirmed'>;
   /** Optional follow-up channel; consumer must use settlement identity in its CAS. */
   afterSettlement?: (settlement: CoreSettlement) => Promise<void>;
   recoveryClock?: CoreRecoveryClock;
@@ -160,6 +166,24 @@ export async function startCoreTaskExecution(
   const intent = renderVerificationUserIntent(owned.context);
   const completion = (async (): CoreExecutionStart['completion'] => {
     try {
+      if (input.beforeGeneration && input.responsesAdapter) {
+        const deadline = performance.now() + 15_000;
+        let readiness: 'ready' | 'stale' | 'unconfirmed';
+        try {
+          readiness = await input.beforeGeneration(
+            admission,
+            () => Boolean(registry.read(handle)),
+            deadline,
+          );
+        } catch {
+          readiness = 'unconfirmed';
+        }
+        if (!registry.read(handle) || readiness === 'stale') return 'stale';
+        if (readiness !== 'ready' || performance.now() >= deadline) {
+          safelyPublish(input, { ...identity, type: 'unconfirmed' });
+          return 'unconfirmed';
+        }
+      }
       let outcome: ReviewableGenerateOutcome;
       try {
         outcome = input.responsesAdapter

@@ -45,7 +45,7 @@ import { prepareCoreTaskPlan } from '../../agent/core-task-plan.js';
 import { assertCoreTaskInput } from '../../agent/core-task-input.js';
 import { assertLegacyReplyRecord } from './tasks-reply-record.js';
 import { handleCoreTaskReply } from './tasks-core-reply.js';
-import { createCorePlanTask } from './tasks-core-create.js';
+import { createCoreGenerateTask } from './tasks-core-create.js';
 import type { CoreAcceptedRequirements } from '../../agent/core-task-requirements.js';
 import { publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
@@ -1660,15 +1660,14 @@ export const tasksRouter = router({
       (appEnv.ASHARE_QA_ENABLED || validatedStockContext !== null) &&
       ashareQaHandlesMode(executionMode) &&
       (ASHARE_QA_ALLOWLIST.size === 0 || ASHARE_QA_ALLOWLIST.has(ctx.userId));
-    const corePlanRequirements: CoreAcceptedRequirements | null =
+    const coreCreateRequirements: CoreAcceptedRequirements | null =
       executionMode === 'generate' &&
-      input.mode === 'plan' &&
       !expertWorkflow &&
       !specializedStockLaneEligible
         ? {
             initialRequest: parentContextBlock + input.intent,
             userTurns: [],
-            phase: 'draft',
+            phase: input.mode === 'plan' ? 'draft' : 'direct',
             workflow: typedWorkflow
               ? { id: typedWorkflow.workflowId, sections: typedWorkflow.reportSections }
               : null,
@@ -1683,7 +1682,7 @@ export const tasksRouter = router({
             },
           }
         : null;
-    if (corePlanRequirements) {
+    if (coreCreateRequirements) {
       const flags = getExecutionFeatureFlags();
       if (!flags.EVIDENCE_LEDGER || !flags.EXECUTION_CONTRACT || !flags.EXECUTION_VERIFIER)
         throw new TRPCError({
@@ -1693,7 +1692,7 @@ export const tasksRouter = router({
     }
     if (executionMode === 'generate') {
       assertCoreTaskInput({
-        ...(corePlanRequirements ?? {
+        ...(coreCreateRequirements ?? {
         initialRequest: parentContextBlock + input.intent,
         userTurns: [],
         phase: input.mode === 'plan' ? 'draft' : 'direct',
@@ -3408,14 +3407,14 @@ export const tasksRouter = router({
     }
     // ===== end template-fill fork =====
 
-    if (corePlanRequirements) {
-      return createCorePlanTask({
+    if (coreCreateRequirements) {
+      return createCoreGenerateTask({
         ctx,
         userId: userRow.id,
         modelDataRegion: userRow.modelDataRegion,
         wiring: modelRuntimeWiring,
         taskRepo: repo,
-        requirements: corePlanRequirements,
+        requirements: coreCreateRequirements,
         blocks: attachmentBlocks,
         intent: input.intent,
         roleId: dispatchRoleId,

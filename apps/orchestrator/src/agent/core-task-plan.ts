@@ -9,17 +9,20 @@ export async function prepareCoreTaskPlan(input: {
   actorExternalId: string;
   modelDataRegion: unknown;
   intent: string;
+  /** Current undecorated turn controls eligibility, never the model's full input. */
+  eligibilityIntent?: string;
   logger: Logger;
   persist: (planText: string) => Promise<boolean>;
   publish: (planText: string) => void;
 }): Promise<string | null> {
+  const eligibilityIntent = input.eligibilityIntent ?? input.intent;
   const shortRewrite =
-    input.intent.length <= 200 &&
-    /翻译|润色|改写|\btranslate\b|\brephrase\b/i.test(input.intent) &&
-    !/https?:\/\/|附件|文件|报告|研究|调研|检索|对比|搜索/.test(input.intent);
+    eligibilityIntent.length <= 200 &&
+    /翻译|润色|改写|\btranslate\b|\brephrase\b/i.test(eligibilityIntent) &&
+    !/https?:\/\/|附件|文件|报告|研究|调研|检索|对比|搜索/.test(eligibilityIntent);
   if (
-    shouldSkipPlan(input.intent) ||
-    classifyLightweightTask(input.intent) !== null ||
+    shouldSkipPlan(eligibilityIntent) ||
+    classifyLightweightTask(eligibilityIntent) !== null ||
     shortRewrite
   )
     return null;

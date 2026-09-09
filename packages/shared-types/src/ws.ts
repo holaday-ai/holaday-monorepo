@@ -608,6 +608,8 @@ export const serverTaskQueuedSchema = z.object({
 export const serverTaskPlanSchema = z.object({
   type: z.literal('server.task.plan'),
   taskId: z.string(),
+  executionId: z.string().optional(),
+  executionRevision: z.number().int().positive().optional(),
   planText: z.string(),
   planStatus: z.array(
     z.object({

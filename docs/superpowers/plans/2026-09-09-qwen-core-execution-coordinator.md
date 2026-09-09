@@ -46,6 +46,17 @@
 
 ## 资源与验证
 
+### Task 3B-1：通用 direct 首次执行与同轮辅助通道
+
+本检查点范围为3A原条件去掉mode=plan限制，仍排除legacy和股票专用候选。历史记录迁移在3B-2，不把本步称为全部3B完成。保留首屏辅助计划和后续建议；辅助计划只用于展示，不作为用户要求或授权，不混入不可变核验上下文，也不写回coreRequirements。
+
+- [x] 在真实router测试加 `createDirect()`：要求直接模式生成/核验完整同源、带真实轮次、保存最终结果；同轮辅助计划先持久化再广播，取消/换轮后不生成正文，计划失败但权威状态仍有效时继续；后续建议只在已保存completed同轮写入。
+- [x] `CoreTaskRepository.persistAdvisoryPlan(op: CoreAdmission, planText: string)` 用既有planText/planStatus列，限制32KiB和owner/status/executionId/revision/recordVersion；不改核心版本或result，避免与P2竞争版本。真实SQL边界先RED。
+- [x] 编排器增加可选 `beforeGeneration(admission, isCurrent, deadline): Promise<'ready' | 'stale' | 'unconfirmed'>`，接纳许可之后、runGenerateTask之前执行；stale静默终止，未知或抛错报告unconfirmed/不生成，不移除其他轮句柄。回调结束后重查本句柄和同一期限。create的回调调用现有prepareCoreTaskPlan，计划先CAS保存，结束后查DB同轮executing再发布；辅助计划只展示、不作为授权或第二模型输入。此DB读取和可选计划回调共用coordinator创建的15秒单调期限；超时不因迟到结果继续。资格只使用本次rawIntent，实际规划保留完整要求。
+- [x] 将reply现有建议回调提取为共享 `publishCoreSettledSuggestions`（tasks-core-suggestions.ts）；create/direct和reply复用，任务初始草案不调用。保留rawIntent本次输入资格、完整原话约束、completed保存后CAS。
+- [x] `createCorePlanTask` 泛化为 `createCoreGenerateTask`，只允许draft/direct，不变更壳INSERT未知处理。server.task.plan增加可选ID/revision，与旧客户端兼容；新版前端消费排序仍是后续门禁。
+- [x] 新测试RED→GREEN、受影响回归≤20文件/批、前后端类型/后端构建/精确lint、独立审查通过；准备本地检查点提交，不改生产/模型配置/扣减算法，不推送/部署。
+
 Node heap 2048 MiB，Vitest 单 worker / 无文件并行；每批最多 20 文件。内存空闲低于 40% 或磁盘小于 10 GiB 不启重任务。测试、类型检查、构建、审查串行；不安装、不启动 Docker/新浏览器、不访问生产或密钥，不触碰支付/积分/账号注销/DivineAPI。
 
 验证顺序：新行为 RED → GREEN → 相关核心回归 → 后端 tsc --noEmit → build → 精确 Biome / diff → 只读独立审查及必要复验。
@@ -78,3 +89,12 @@ Node heap 2048 MiB，Vitest 单 worker / 无文件并行；每批最多 20 文�
 - 相关回归两批14+11文件，334+270=**604 tests**通过（第一批18:12 JST；受本轮末次修正影响的第二批18:42 JST复跑29.34秒）。后端 `tsc --noEmit`、`tsc -p tsconfig.build.json` 与前端完整 `typecheck` 末次复跑均退出0。3个小文件完整Biome通过；plan-mode测试lint无诊断；tasks.ts 33条lint均位于HEAD未改原行，无新行诊断，不声称全仓lint通过。
 - 模型仅替换外部传输、仓储仍是方法边界替身；没有真实 MySQL/千问/浏览器/生产证据。大正文预算测试仍耗时约6.6/13.6秒，真实性能门禁未完成。Node堆2GB、Vitest单worker，重任务与审查串行；最后内存空闲63%，磁盘149GiB。没有安装/启动Docker或新浏览器，没有生产或密钥/敏感业务变更；自动化PAUSED，无推送/PR/合并/部署。
 - 下一项 Task3B：完成 direct 首次接纳、旧 typed/legacy lineage 和旧计划记录完整迁移，明确保留专用分支边界；随后客户端 ACK/WS/detail 的同轮排序及 creationUnconfirmed 展示/输入保留、真实隔离MySQL、V10/V11/V12/实际千问质量性能与新冻结发布包。所有门禁通过前禁止部分发布，不能复用旧包或旧生产回执。
+
+## Task 3B-1 验证记录（2026-09-09）
+
+- 基线 b2c2279a，同一隔离分支。通用 direct 首次创建接入共享生成/核验/P2/P3，与 draft/revise/approved_execution 共用身份和冻结上下文；非空旧模板 lineage、股票专用候选及其 generic fallback 不在此检查点迁移。方案和建议独立同轮 CAS，初始 draft 不额外生成辅助方案。
+- RED→GREEN：直接创建缺少接纳身份、辅助计划仓储方法缺失；计划保存后数据库换轮仍发旧帧；独立审查发现长父任务后的轻量原话错误触发计划，以及回调 promise 返回与正文派发之间跨15秒仍生成。分别补持久化/接纳、保存后权威读回、资格rawIntent与实际完整要求分离、coordinator共享deadline并await后复查。timer悬挂/迟到成功、单调时钟越限、取消、计划写入拒绝的回归也通过；未把这些原本已安全的分支冒充新增RED。
+- 旧测试更新的是边界替身：必需flags按generate作用域启用，补真实semantic传输格式和模型元数据，仓储观察者直接记录真实op状态，降级通过runner的partial/provider_error驱动；没有伪造核验通过、把awaiting_user改称完成或降低生产门槛。辅助plan是展示信息，不作为用户授权或第二条生成输入。
+- 最终三批 **31文件 / 665 tests**（337+292+36）通过，Vitest单worker无文件并行；router真实续接文件23条、coordinator25条、repository41条。后端tsc --noEmit、build及前端完整typecheck退出0；12个小文件Biome check、ws.ts lint、git diff --check通过。tasks.ts仍有33条既有lint诊断，逐条落在HEAD原有行，无新增行诊断；没有全仓lint或全仓测试声明。
+- 独立只读复审关闭两项Important，无剩余Critical/Important/必修Minor，只同意本地检查点，不是release ready。没有安装、启动Docker/浏览器、访问生产或读取密钥/身份数据；不改支付/额度/账号注销/DivineAPI，未推送/PR/合并/部署。末次资源空闲61%、磁盘148GiB，Node堆2GB，审查与重任务串行。
+- 外部模型传输和仓储方法仍为合成替身，SQL测试只验证Drizzle生成与条件，不是真实MySQL或真实千问证据。**下一项Task3B-2：旧typed/legacy lineage及旧plan记录完整恢复**，保持原话/附件/固定工作流及一次接纳；随后前端轮次排序、creationUnconfirmed与真实数据库/模型/性能/发布组合门禁。全部通过前禁止部分推送或部署。

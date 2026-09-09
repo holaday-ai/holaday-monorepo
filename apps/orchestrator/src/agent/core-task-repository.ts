@@ -31,6 +31,34 @@ const receiptSchema = z
 /** Core text persistence only. No scheduling, model, quota, or automatic retries. */
 export class CoreTaskRepository {
   constructor(private readonly db: DB) {}
+  /** Display-only plan. It does not alter accepted requirements or the P2 version. */
+  async persistAdvisoryPlan(op: CoreAdmission, planText: string): Promise<boolean> {
+    assertPreparedCoreAdmission(op);
+    if (!planText.trim() || Buffer.byteLength(planText, 'utf8') > 32 * 1024) return false;
+    try {
+      const updated = await this.db
+        .update(tasks)
+        .set({ planText, planStatus: [] })
+        .where(
+          and(
+            scopeGuard(op.scope),
+            eq(tasks.status, 'executing'),
+            eq(tasks.executionId, op.executionId),
+            eq(tasks.executionRevision, op.executionRevision),
+            eq(tasks.coreRecordVersion, op.recordVersion),
+          ),
+        );
+      const header = Array.isArray(updated) ? updated[0] : updated;
+      return (
+        !!header &&
+        typeof header === 'object' &&
+        'affectedRows' in header &&
+        header.affectedRows === 1
+      );
+    } catch {
+      return false;
+    }
+  }
   async persistSuggestions(op: CoreSettlement, suggestions: string[]): Promise<boolean> {
     assertPreparedCoreSettlement(op);
     if (

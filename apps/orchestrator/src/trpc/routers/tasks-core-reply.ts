@@ -6,12 +6,12 @@ import {
 } from '../../agent/core-task-execution.js';
 import { readCoreTaskRecord } from '../../agent/core-task-record.js';
 import { CoreTaskRepository } from '../../agent/core-task-repository.js';
-import { publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
 import { FileService } from '../../files/file-service.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
 import type { ProductionModelRuntimeWiring } from '../../llm/model-runtime-wiring.js';
 import { broadcastToUser } from '../../ws/server.js';
 import type { Context } from '../context.js';
+import { publishCoreSettledSuggestions } from './tasks-core-suggestions.js';
 
 /** Receives exactly the already owner/origin-authorized row read by tasks.reply. */
 export async function handleCoreTaskReply(args: {
@@ -106,36 +106,16 @@ export async function handleCoreTaskReply(args: {
     responsesAdapter: generation.kind === 'ready' ? generation.responses('standard') : null,
     semanticAdapter: semantic.kind === 'ready' ? semantic.messages('verify_strict') : undefined,
     publish: (event) => publishCoreExecutionEvent(ctx.userId, event),
-    afterSettlement: async (op) => {
-      const isCurrent = async () => {
-        const head = await repo.readHead(op.scope);
-        return (
-          head?.status === 'completed' &&
-          head.executionId === op.executionId &&
-          head.executionRevision === op.executionRevision &&
-          head.recordVersion === op.recordVersion
-        );
-      };
-      await publishCoreTaskSuggestions({
+    afterSettlement: (op) =>
+      publishCoreSettledSuggestions({
+        op,
+        requirements,
+        repo,
         wiring: args.wiring,
         actorExternalId: ctx.userId,
         modelDataRegion: args.modelDataRegion,
         rawIntent: input.message,
-        intent: [requirements.initialRequest, ...requirements.userTurns].join('\n\n'),
-        summary: op.result.summary ?? '',
-        isCurrent,
-        persist: (suggestions) => repo.persistSuggestions(op, suggestions),
-        publish: (suggestions) => {
-          broadcastToUser(ctx.userId, {
-            type: 'server.supercar.suggestions',
-            taskId: input.taskId,
-            executionId: op.executionId,
-            executionRevision: op.executionRevision,
-            suggestions,
-          });
-        },
-      });
-    },
+      }),
   });
   void execution.completion.catch(() => {});
   return {
