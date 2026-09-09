@@ -9016,6 +9016,7 @@ export const tasksRouter = router({
           executionRevision: tasksTable.executionRevision,
           coreRecordVersion: tasksTable.coreRecordVersion,
           awaitingQuestion: tasksTable.awaitingQuestion,
+          roleId: tasksTable.roleId,
         })
         .from(tasksTable)
           .where(

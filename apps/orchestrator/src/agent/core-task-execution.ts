@@ -50,6 +50,7 @@ export interface CoreExecutionInput {
   scope: CoreTaskScope;
   before: CoreTaskHead;
   requirements: CoreAcceptedRequirements;
+  legacySnapshot?: CoreAdmission['legacySnapshot'];
   /** Already authorized and completely parsed; never client-supplied model context. */
   blocks: readonly Anthropic.Beta.BetaContentBlockParam[];
   actorExternalId: string;
@@ -100,6 +101,7 @@ export async function startCoreTaskExecution(
     scope: input.scope,
     before: input.before,
     requirements,
+    ...(input.legacySnapshot ? { legacySnapshot: input.legacySnapshot } : {}),
   });
   const resume = admission.requirements.resume;
   if (!resume) throw new Error('CORE_RESUME_METADATA_REQUIRED');

@@ -1,4 +1,5 @@
 import { TRPCError } from '@trpc/server';
+import { prepareLegacyPlanContinuation } from '../../agent/core-legacy-plan.js';
 import { prepareCoreContinuation } from '../../agent/core-task-continuation.js';
 import {
   type CoreExecutionEvent,
@@ -6,6 +7,7 @@ import {
 } from '../../agent/core-task-execution.js';
 import { readCoreTaskRecord } from '../../agent/core-task-record.js';
 import { CoreTaskRepository } from '../../agent/core-task-repository.js';
+import { getFeatureFlags } from '../../execution/feature-flags.js';
 import { FileService } from '../../files/file-service.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
 import type { ProductionModelRuntimeWiring } from '../../llm/model-runtime-wiring.js';
@@ -27,6 +29,7 @@ export async function handleCoreTaskReply(args: {
     coreRecordVersion: number;
     awaitingQuestion: string | null;
     result: unknown;
+    roleId?: string | null;
   };
 }) {
   const { ctx, row, input } = args;
@@ -39,21 +42,41 @@ export async function handleCoreTaskReply(args: {
     },
     result: row.result,
   });
-  if (record.kind === 'legacy') return null;
   if (record.kind === 'invalid')
     throw new TRPCError({ code: 'BAD_REQUEST', message: '任务执行记录无法恢复，请刷新后重试。' });
-  if (!record.requirements.resume)
+  if (record.kind === 'core' && !record.requirements.resume)
     throw new TRPCError({
       code: 'CONFLICT',
       message: '任务缺少可恢复的执行配置，请保留要求后重新创建任务。',
     });
-  const prepared = prepareCoreContinuation({
-    record,
-    result: row.result as Record<string, unknown>,
-    awaitingQuestion: row.awaitingQuestion,
-    message: input.message,
-    fileIds: input.fileIds,
-  });
+  const head = {
+    status: row.status,
+    executionId: row.executionId,
+    executionRevision: row.executionRevision,
+    recordVersion: row.coreRecordVersion,
+  };
+  const legacy =
+    record.kind === 'legacy'
+      ? prepareLegacyPlanContinuation({
+          head,
+          result: row.result,
+          roleId: row.roleId,
+          origin: ctx.taskOrigin,
+          message: input.message,
+          fileIds: input.fileIds,
+        })
+      : null;
+  const prepared =
+    record.kind === 'legacy'
+      ? legacy
+      : prepareCoreContinuation({
+          record,
+          result: row.result as Record<string, unknown>,
+          awaitingQuestion: row.awaitingQuestion,
+          message: input.message,
+          fileIds: input.fileIds,
+        });
+  if (!prepared) return null;
   if (prepared.hold)
     return {
       ok: true,
@@ -62,6 +85,14 @@ export async function handleCoreTaskReply(args: {
       executionRevision: row.executionRevision,
     };
   const { requirements } = prepared;
+  if (legacy) {
+    const flags = getFeatureFlags();
+    if (!flags.EVIDENCE_LEDGER || !flags.EXECUTION_CONTRACT || !flags.EXECUTION_VERIFIER)
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: '任务核验尚未就绪，旧方案保持等待状态。',
+      });
+  }
   const blocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
   try {
     if (requirements.fileIds.length) {
@@ -96,7 +127,8 @@ export async function handleCoreTaskReply(args: {
   const repo = new CoreTaskRepository(ctx.db);
   const execution = await startCoreTaskExecution({
     scope: { taskId: input.taskId, userId: args.userId },
-    before: record.head,
+    before: head,
+    ...(legacy ? { legacySnapshot: legacy.legacySnapshot } : {}),
     requirements,
     blocks,
     intakeIntent: prepared.intakeIntent,

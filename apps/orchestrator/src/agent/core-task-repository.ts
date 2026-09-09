@@ -265,6 +265,15 @@ export class CoreTaskRepository {
                 : eq(tasks.executionId, op.before.executionId),
               eq(tasks.executionRevision, op.before.executionRevision),
               eq(tasks.coreRecordVersion, op.before.recordVersion),
+              ...(op.legacySnapshot
+                ? [
+                    sql`${tasks.result} = CAST(${op.legacySnapshot.resultJson} AS JSON)`,
+                    op.legacySnapshot.roleId === null
+                      ? isNull(tasks.roleId)
+                      : eq(tasks.roleId, op.legacySnapshot.roleId),
+                    eq(tasks.origin, op.legacySnapshot.origin),
+                  ]
+                : []),
               or(isNull(tasks.result), sql`JSON_TYPE(${tasks.result}) = 'OBJECT'`),
             ),
           );

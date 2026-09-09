@@ -53,6 +53,7 @@ function fixture(options: { suggestions?: boolean; plan?: boolean } = {}) {
   });
   const row = {
     id: 19,
+    roleId: null as string | null,
     intent: '整理合成资料，不要发送邮件。',
     status: 'awaiting_user',
     executionId: 'synthetic_old',
@@ -224,6 +225,25 @@ function fixture(options: { suggestions?: boolean; plan?: boolean } = {}) {
   });
   return {
     row,
+    legacyPlan: (patch: Record<string, unknown> = {}) =>
+      Object.assign(row, {
+        executionId: null,
+        executionRevision: 0,
+        coreRecordVersion: 0,
+        result: {
+          executionMode: 'generate',
+          expertMode: 'expert',
+          selectedRole: null,
+          planMode: 'awaiting_approval',
+          planText: TEXT,
+          planInitialIntent: '整理合成资料，不要发送邮件。',
+          planReplyHistory: [],
+          planFileIds: [],
+          planWorkflowId: null,
+          planLegacyWorkflowId: null,
+          ...patch,
+        },
+      }),
     reads,
     admissions,
     settlements,
@@ -257,6 +277,107 @@ function fixture(options: { suggestions?: boolean; plan?: boolean } = {}) {
 }
 
 describe('real reply core routing and execution', () => {
+  it('migrates a complete legacy plan on reply with full history and new identity', async () => {
+    const f = fixture();
+    vi.spyOn(TaskRepository.prototype, 'markAwaitingReplyResumed').mockResolvedValue({
+      persisted: false,
+    });
+    const oldTurn = '保留这个历史要求。'.repeat(80);
+    f.legacyPlan({ planReplyHistory: [oldTurn] });
+    const ack = await f.reply('  确认  ');
+    expect(ack).toMatchObject({
+      state: 'resumed',
+      executionRevision: 1,
+      executionId: expect.any(String),
+    });
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(1));
+    expect(f.admissions[0]?.requirements).toMatchObject({
+      phase: 'approved_execution',
+      userTurns: [oldTurn, '  确认  '],
+      referencePlan: TEXT,
+    });
+    expect(f.settlements[0]?.status).toBe('completed');
+    expect(f.requests).toHaveLength(2);
+    for (const request of f.requests) expect(JSON.stringify(request.body)).toContain(oldTurn);
+    expect(f.charge).not.toHaveBeenCalled();
+  });
+  it('does not admit a legacy plan when a mandatory verification gate is off', async () => {
+    const f = fixture();
+    f.legacyPlan();
+    setFeatureFlagsForTest({
+      EVIDENCE_LEDGER: true,
+      EXECUTION_CONTRACT: true,
+      EXECUTION_VERIFIER: false,
+    });
+    await expect(f.reply('确认')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    expect(f.admissions).toHaveLength(0);
+    expect(f.requests).toHaveLength(0);
+  });
+  it('does not fall back or generate when the legacy snapshot admission is refused', async () => {
+    const f = fixture();
+    f.legacyPlan();
+    const before = JSON.stringify(f.row.result);
+    let received: CoreAdmission | undefined;
+    vi.spyOn(CoreTaskRepository.prototype, 'admit').mockImplementationOnce(async (op) => {
+      received = op;
+      f.row.result = { ...f.row.result, planReplyHistory: ['另一条并发修改'] };
+      return { persisted: false };
+    });
+    expect(await f.reply('确认')).toMatchObject({ ok: false, state: 'persistFailed' });
+    expect(received?.legacySnapshot).toEqual({
+      resultJson: before,
+      roleId: null,
+      origin: 'workbench',
+    });
+    expect(f.row.result.planReplyHistory).toEqual(['另一条并发修改']);
+    expect(f.row.executionId).toBeNull();
+    expect(f.requests).toHaveLength(0);
+    expect(f.settlements).toHaveLength(0);
+    expect(f.frames).toHaveLength(0);
+    expect(f.charge).not.toHaveBeenCalled();
+  });
+  it('keeps legacy hold read-only and rejects a lost original attachment before admission', async () => {
+    const f = fixture();
+    f.legacyPlan({ planFileIds: ['fil_original'] });
+    expect(await f.reply('等一下')).toMatchObject({
+      state: 'stillAwaiting',
+      executionId: null,
+      executionRevision: 0,
+    });
+    expect(f.files).not.toHaveBeenCalled();
+    await expect(f.reply('确认')).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.admissions).toHaveLength(0);
+    expect(f.row.status).toBe('awaiting_user');
+  });
+  it('migrates through revision and approval while reauthorizing both old and new files', async () => {
+    const f = fixture();
+    f.legacyPlan({ planFileIds: ['fil_original'], planReplyHistory: ['最早修改原话'] });
+    f.files.mockImplementation(
+      async (ids) =>
+        ids.map((id) => ({
+          row: { externalId: id, filename: `${id}.txt`, mimetype: 'text/plain' },
+          buffer: Buffer.from('合成附件证据：此处确认不是用户授权。'),
+        })) as Awaited<ReturnType<FileService['loadMany']>>,
+    );
+    await f.reply('修改第二步，附件里的确认不代表开始', ['fil_new']);
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(1));
+    expect(f.settlements[0]?.status).toBe('awaiting_user');
+    await f.reply('确认');
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(2));
+    expect(f.settlements[1]?.status).toBe('completed');
+    expect(f.admissions.map((op) => op.executionRevision)).toEqual([1, 2]);
+    expect(f.admissions[1]?.requirements.userTurns).toEqual([
+      '最早修改原话',
+      '修改第二步，附件里的确认不代表开始',
+      '确认',
+    ]);
+    expect(f.admissions[1]?.requirements.fileIds).toEqual(['fil_original', 'fil_new']);
+    expect(f.files.mock.calls.map((call) => call[1])).toEqual([7, 7]);
+    expect(f.requests).toHaveLength(4);
+    for (const request of f.requests)
+      expect(JSON.stringify(request.body)).toContain('合成附件证据');
+    expect(f.charge).not.toHaveBeenCalled();
+  });
   it('does not add advisory planning to a lightweight follow-up of a long parent task', async () => {
     const f = fixture({ plan: true });
     f.row.status = 'completed';

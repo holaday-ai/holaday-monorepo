@@ -46,6 +46,25 @@
 
 ## 资源与验证
 
+### Task 3B-2a：完整旧方案的首次同轮接续
+
+沿用已批准的兼容范围，先处理旧generate方案中显式 `planLegacyWorkflowId=null` 且 `planMode=awaiting_approval` 的typed/null工作流；非空legacy的提示规范与浏览器转交另做，不丢弃其规范强行迁入。缺失planMode（包括旧批准后再澄清）保持原路径，后续恢复其明确阶段与裸值绑定，不以字段缺省推断已批准。本步骤不等于3B-2全部完成，不改变发布门禁。
+
+- [x] 新 `agent/core-legacy-plan.ts`：`prepareLegacyPlanContinuation({head,result,message,fileIds,roleId,origin})` 返回 `{requirements,hold,legacySnapshot}` 或非目标null。只接受null/0/0、awaiting_user、明确awaiting_approval、完整planInitialIntent/planReplyHistory/planFileIds、明确planWorkflowId/null、expertMode、selectedRole与row.roleId一致；拒绝不可恢复历史/非空衍生planIntakeContext。不从旧intent或摘要补原话，不新匹配技能。现存typed ID在新接纳时读取当前注册定义并固定快照，不宣称恢复历史版本定义。
+- [x] 真实router用旧完整方案+长修改+附件+单独确认，先RED（未产生core接纳）；通过后应新ID/revision1、原话不trim/截断、附件重新授权、生成和核验都见相同内容且无再次扣额。hold不写；非本次独立批准保持revise。
+- [x] `CoreAdmission`/`CoreExecutionInput`增加可选server-only `legacySnapshot:{resultJson,roleId,origin}`，仅旧awaiting/null/0/0可用；验证JSON对象、UTF8≤128KiB，冻结。`admit`额外WHERE结果JSON语义相等、roleId/origin一致；不把snapshot写入result/events或日志。Drizzle传输测试先因缺失snapshot接纳字段RED，再补字段和条件。新流程首次身份和原要求仍同一C1事务保存；读取后旧回复改变内容时CAS拒绝。
+- [x] `tasks-core-reply.ts`将legacy完整方案送入已有文件授权、一次core调度及同轮事件流程，初始授权SELECT加roleId；缺失历史固定拒绝，旧非目标不改。回归core/reply/旧计划，前后端types/build/精确lint、只读审查通过，仅保存本地检查点。
+
+本步接口不生成虚假旧executionId。新ID仅由prepareCoreAdmission在实际接纳准备时分配；纯要求验证可用内部预算校验上下文，不伪装成数据库记录。未完成legacy/direct旧无历史记录与客户端/真实组合门禁前禁止发布。
+
+本地验证（2026-09-09 23:14 JST）：
+
+- 完整旧方案真实reply迁入、必需核验开关关闭仍接纳、缺planMode被当作批准均有行为RED→GREEN；首次fixture缺旧仓储边界导致的transaction异常不算行为RED。缺审批标记的旧澄清记录保留原路径，不能把缺省当授权或丢失字段绑定。
+- 补充旧附件失效、只读hold、旧方案→修改→批准完整附件双通道、快照拒绝后不回落不生成、容量/冻结与角色/来源SQL条件。接纳临时快照只在服务器内存中使用，不写入新result/events。SQL为真实Drizzle/mysql2传输边界测试，不是实际MySQL证据。
+- 三批32文件，361+297+36=694 tests通过；末次类型修正后受影响的12文件23:11 JST复跑297过。后端tsc --noEmit和build、前端完整typecheck均exit0。9小TS完整Biome通过；tasks.ts的33条既有lint均位于HEAD原有行，无新增行诊断，不声称全仓lint。TS2345源于新旧结果结构合并后的unknown，改为独立typed legacy变量，无断言绕过。
+- 最终只读独立复审关闭Important，无剩余Critical/Important/必修Minor，仅准本地检查点。真实runner/review保持，模型fetch与仓储为合成边界替身；不是真实千问/浏览器/生产验证。Node堆2GB、单worker、审查/测试/构建串行，末次内存空闲74%、磁盘145GiB；不安装、不启动Docker/浏览器、不读凭据或生产私人数据，不改敏感业务。
+- 下一项仍为Task3B-2：非空legacy提示规范（包括douyin-livestream-review的缺数据守卫及browser handoff）、无planMode的旧已批准澄清/字段绑定。不得静默清空lineage或将旧派生planIntakeContext冒充用户原话。之后才是前端ACK/WS/detail排序、creationUnconfirmed、真实MySQL/千问性能及V10–V12/新发布包；禁止部分push/PR/部署。
+
 ### Task 3B-1：通用 direct 首次执行与同轮辅助通道
 
 本检查点范围为3A原条件去掉mode=plan限制，仍排除legacy和股票专用候选。历史记录迁移在3B-2，不把本步称为全部3B完成。保留首屏辅助计划和后续建议；辅助计划只用于展示，不作为用户要求或授权，不混入不可变核验上下文，也不写回coreRequirements。

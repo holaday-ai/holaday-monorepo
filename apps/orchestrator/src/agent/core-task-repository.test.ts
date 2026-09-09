@@ -23,6 +23,23 @@ const legacy = {
 };
 const operation = (before = legacy) => prepareCoreAdmission({ scope, before, requirements });
 
+it('guards legacy migration by the observed JSON, role and origin in the admission transaction', async () => {
+  const f = fixture();
+  const resultJson = JSON.stringify({ planText: '合成旧方案', planReplyHistory: ['保留要求'] });
+  const op = prepareCoreAdmission({
+    scope,
+    before: legacy,
+    requirements,
+    legacySnapshot: { resultJson, roleId: 'synthetic-role', origin: 'user' },
+  });
+  expect(await f.repo.admit(op)).toEqual({ persisted: true });
+  const update = f.queries.find((query) => query.sql.startsWith('update'));
+  expect(update?.sql).toContain('`tasks`.`result` = CAST(? AS JSON)');
+  expect(update?.sql).toContain('`tasks`.`role_id` = ?');
+  expect(update?.sql).toContain('`tasks`.`origin` = ?');
+  expect(update?.params).toContain(resultJson);
+});
+
 // Only replace mysql2 transport. The actual Drizzle queries and transaction
 // implementation run, including BEGIN/COMMIT/ROLLBACK and row decoding.
 function fixture(

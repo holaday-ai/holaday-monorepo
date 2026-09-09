@@ -25,6 +25,7 @@ export interface CoreAdmission {
   readonly executionRevision: number;
   readonly recordVersion: number;
   readonly requirements: CoreAcceptedRequirements;
+  readonly legacySnapshot?: Readonly<{ resultJson: string; roleId: string | null; origin: string }>;
 }
 
 export class CoreAdmissionError extends Error {
@@ -61,6 +62,22 @@ const inputSchema = z
     scope: scopeSchema,
     before: headSchema,
     requirements: z.unknown(),
+    legacySnapshot: z
+      .object({
+        resultJson: z.string().refine((value) => {
+          if (Buffer.byteLength(value, 'utf8') > 128 * 1024) return false;
+          try {
+            const parsed = JSON.parse(value);
+            return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
+          } catch {
+            return false;
+          }
+        }),
+        roleId: z.string().min(1).max(100).nullable(),
+        origin: z.string().min(1).max(32),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 const prepared = new WeakSet<object>();
@@ -85,10 +102,16 @@ export function prepareCoreAdmission(input: {
   scope: CoreTaskScope;
   before: CoreTaskHead;
   requirements: CoreAcceptedRequirements;
+  legacySnapshot?: CoreAdmission['legacySnapshot'];
 }): CoreAdmission {
   const parsed = inputSchema.safeParse(input);
   if (!parsed.success) throw new CoreAdmissionError('CORE_ADMISSION_INVALID');
-  const { scope, before, requirements: supplied } = parsed.data;
+  const { scope, before, requirements: supplied, legacySnapshot } = parsed.data;
+  if (
+    legacySnapshot &&
+    (before.status !== 'awaiting_user' || before.executionId !== null || before.recordVersion !== 0)
+  )
+    throw new CoreAdmissionError('CORE_ADMISSION_INVALID');
   if (
     (before.status !== 'awaiting_user' &&
       !(before.status === 'executing' && before.executionId === null)) ||
@@ -110,6 +133,7 @@ export function prepareCoreAdmission(input: {
     scope: Object.freeze(scope),
     before: Object.freeze(before),
     requirements,
+    ...(legacySnapshot ? { legacySnapshot: Object.freeze(legacySnapshot) } : {}),
     executionId,
     executionRevision,
     recordVersion: before.recordVersion + 1,

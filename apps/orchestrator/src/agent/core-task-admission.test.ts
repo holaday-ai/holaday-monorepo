@@ -17,6 +17,36 @@ function input() {
 }
 
 describe('core admission preparation', () => {
+  it('freezes the bounded legacy snapshot and does not permit it on a new core round', () => {
+    const legacySnapshot = { resultJson: '{"planText":"synthetic"}', roleId: null, origin: 'user' };
+    const op = prepareCoreAdmission({ ...input(), legacySnapshot });
+    legacySnapshot.resultJson = '{}';
+    expect(op.legacySnapshot?.resultJson).toBe('{"planText":"synthetic"}');
+    expect(Object.isFrozen(op.legacySnapshot)).toBe(true);
+    expect(() =>
+      prepareCoreAdmission({
+        ...input(),
+        legacySnapshot,
+        before: {
+          status: 'awaiting_user',
+          executionId: 'core_existing',
+          executionRevision: 1,
+          recordVersion: 1,
+        },
+      }),
+    ).toThrow('CORE_ADMISSION_INVALID');
+  });
+  it.each(['[]', 'null', 'invalid-json', JSON.stringify({ text: '长'.repeat(65536) })])(
+    'rejects invalid legacy snapshot JSON',
+    (resultJson) => {
+      expect(() =>
+        prepareCoreAdmission({
+          ...input(),
+          legacySnapshot: { resultJson, roleId: null, origin: 'user' },
+        }),
+      ).toThrow('CORE_ADMISSION_INVALID');
+    },
+  );
   it('allocates a distinct server execution and increments the observed database versions', () => {
     const first = prepareCoreAdmission(input());
     const second = prepareCoreAdmission(input());
