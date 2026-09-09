@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-08-qwen-delivery-contract-design.md` 第3/4/6/7/9/10/11节。关联 `2026-09-09-qwen-durable-execution.md`、`2026-09-08-qwen-verification-context.md` Task3、`2026-09-08-qwen-generation-ownership.md` TaskC。
 
-**Status:** 仅实施计划，尚未写实现或执行新测试。起点 d168bac6；不能把本计划或历史415条回归视作兼容读取已经完成。
+**Status:** Task 1 只读组件已实现并完成本地验证（2026-09-09 09:27 JST），基线069ae9d5。真实任务入口接线与组合发布门禁仍未完成；不推送部分PR或部署。
 
 ## Global Constraints
 
@@ -65,7 +65,7 @@ export function readCoreTaskRecord(input: {
 }): CoreRecordRead;
 ```
 
-- [ ] **RED：要求完整、不产生执行许可。** 使用现有上下文严格校验，测试中文/转义64KiB预算、全部时序、显式null workflow、固定sections、文件ID唯一/≤5/每个≤32、未知字段拒绝及深复制冻结。最小导出实现后确认行为失败，不以模块不存在计RED。
+- [x] **RED：要求完整、不产生执行许可。** 使用现有上下文严格校验，测试中文/转义64KiB预算、全部时序、显式null workflow、固定sections、文件ID唯一/≤5/每个≤32、未知字段拒绝及深复制冻结。最小导出实现后确认行为失败，不以模块不存在计RED。
 
 ```ts
 const identity = { executionId: 'synthetic-execution', executionRevision: 2 };
@@ -82,7 +82,7 @@ expect(() => parseCoreRequirements({ ...source, parsedBody: '不应保存' }, id
   .toThrow('CORE_REQUIREMENTS_INVALID');
 ```
 
-- [ ] **GREEN：抽取同一个验证器。** 将现有 admission 的 requirements schema/上下文冻结和accepted JSON预算移入新文件，形状错误只用 `CORE_REQUIREMENTS_INVALID`，上下文仍保留现有 `VERIFICATION_CONTEXT_INVALID` / `VERIFICATION_INPUT_LIMIT`，不附 cause/输入。上下文仍 `materials: []`，不把持久化引用伪装成已加载正文。admission re-export 原类型以保护调用方；prepare 分配一次UUID后调用该解析器，普通形状错误在 admission 边界仍映射 `CORE_ADMISSION_INVALID`，保留已有外部错误契约。WeakSet与接纳事务不变。
+- [x] **GREEN：抽取同一个验证器。** 将现有 admission 的 requirements schema/上下文冻结和accepted JSON预算移入新文件，形状错误只用 `CORE_REQUIREMENTS_INVALID`，上下文仍保留现有 `VERIFICATION_CONTEXT_INVALID` / `VERIFICATION_INPUT_LIMIT`，不附 cause/输入。上下文仍 `materials: []`，不把持久化引用伪装成已加载正文。admission re-export 原类型以保护调用方；prepare 分配一次UUID后调用该解析器，普通形状错误在 admission 边界仍映射 `CORE_ADMISSION_INVALID`，保留已有外部错误契约。WeakSet与接纳事务不变。
 
 ```ts
 const { fileIds, ...fields } = requirementsSchema.parse(input);
@@ -98,7 +98,7 @@ return requirements;
 
 该代码块位于固定错误包装内部；Zod issue不得成为公开错误。不要用 `prepareCoreAdmission` 校验读取对象，否则会凭空分配新ID/许可。首次预检的占位预算逻辑保持不变。
 
-- [ ] **RED：新记录损坏不能降级成旧记录。** `head` 必须经过现有 `parseCoreTaskHead`；新身份还要求recordVersion≥1。只有null/0/0且不含自有 `coreRequirements` 字段才能返回legacy（包括旧result为null/数组/字符串，但不尝试解释其正文）。存在marker但值null/数组/超限/非法字段，或新身份却缺marker，全部invalid，不再读旧plan字段兜底。valid core允许executing/awaiting/终态读取，但本函数不授予任何状态迁移。
+- [x] **RED：新记录损坏不能降级成旧记录。** `head` 必须经过现有 `parseCoreTaskHead`；新身份还要求recordVersion≥1。只有null/0/0且不含自有 `coreRequirements` 字段才能返回legacy（包括旧result为null/数组/字符串，但不尝试解释其正文）。存在marker但值null/数组/超限/非法字段，或新身份却缺marker，全部invalid，不再读旧plan字段兜底。valid core允许executing/awaiting/终态读取，但本函数不授予任何状态迁移。
 
 ```ts
 const legacyHead = { status: 'awaiting_user', executionId: null,
@@ -115,8 +115,8 @@ expect(readCoreTaskRecord({ head, result: { coreRequirements: source } }))
   .toMatchObject({ kind: 'core', requirements: { workflow: null } });
 ```
 
-- [ ] **GREEN：纯投影，不回显错误。** 先验证head，再用 `Object.prototype.hasOwnProperty.call(result, 'coreRequirements')` 区分字段不存在与字段损坏；只有非数组对象可带新marker。新格式用其真实identity解析；捕获所有解析错误只返回固定invalid。不返回原始result/plan/summary，不修改传入对象，不调用数据库、模型、logger、matcher或registry。
-- [ ] **验证。** 先运行新增两个测试，再运行 admission/repository/recovery/settlement/context/budget及plan-mode相关测试；每批单worker且确认退出后再下一项。
+- [x] **GREEN：纯投影，不回显错误。** 先验证head，再用 `Object.prototype.hasOwnProperty.call(result, 'coreRequirements')` 区分字段不存在与字段损坏；只有非数组对象可带新marker。新格式用其真实identity解析；捕获所有解析错误只返回固定invalid。不返回原始result/plan/summary，不修改传入对象，不调用数据库、模型、logger、matcher或registry。
+- [x] **验证。** 先运行新增两个测试，再运行 admission/repository/recovery/settlement/context/budget及plan-mode相关测试；每批单worker且确认退出后再下一项。
 
 ```bash
 NODE_OPTIONS=--max-old-space-size=2048 pnpm exec vitest run --maxWorkers=1 --no-file-parallelism src/agent/core-task-requirements.test.ts src/agent/core-task-record.test.ts src/agent/core-task-admission.test.ts src/agent/core-task-repository.test.ts src/agent/core-task-recovery.test.ts src/agent/core-task-settlement.test.ts src/execution/task-verification-context.test.ts src/execution/verification-input-budget.test.ts src/trpc/routers/tasks.plan-mode.test.ts
@@ -125,7 +125,7 @@ NODE_OPTIONS=--max-old-space-size=2048 pnpm exec tsc -p tsconfig.build.json
 ```
 
 工作目录为 `apps/orchestrator`；每行独立运行并读取退出码。精确新/改文件Biome、git diff --check，独立只读审查。任何新增错误必须修复重跑；不以旧lint噪声豁免新增诊断。
-- [ ] **本地提交。** 精确4个新文件、admission及对应测试、此计划提交为 `feat: decode durable core task records`，QA不提交，不推送。记录RED/GREEN、类型/构建、审查、实际改动文件与下一入口接线指令。
+- [x] **本地提交范围。** 精确4个新文件、admission及此计划，共6文件，提交为 `feat: decode durable core task records`；原admission测试未改且27条仍通过。QA不提交，不推送；实际提交号记入本地QA台账。
 
 ## 本分项结束后的真实入口接线门槛
 
@@ -141,4 +141,15 @@ NODE_OPTIONS=--max-old-space-size=2048 pnpm exec tsc -p tsconfig.build.json
 
 - 覆盖规格3/4/6/7的只读形状、完整要求和身份边界；其余生成/原子保存/前端/生产条款显式留在组合任务，未以decoder替代。
 - 类型沿用现有CoreTaskHead/TaskVerificationContext，公开导出名称在本计划内唯一；没有新增存储列、业务开关或外部依赖。
-- 实施仍需实际RED/GREEN与审查；此文档仅确定下一个独立可审查前置单元，不计作软件完成。
+- 本地只读组件完成不等于实际router、真实数据库、模型质量或生产交付完成。
+
+## 完成证据（2026-09-09）
+
+- 新增46条：最小可加载实现先41条行为失败、5条legacy原行为通过；完整实现后46通过。要求解析17条、记录读取29条；没有将模块不存在或直接绿色回归计为RED。
+- 原admission基线27条通过；最终19文件457条通过，09:26:07 JST启动、9.19秒、exit 0。包含持久化/恢复/核验/生成/计划/附件预算相关回归，均为本地合成数据。
+- `tsc --noEmit`、`tsc -p tsconfig.build.json`、5个代码文件Biome、`git diff --check`通过。首次类型检查仅新测试的数组索引触发TS2532，改为for-of修改合成section后重新通过；未掩盖诊断。
+- 复用一名只读独立审查者，无Critical/Important/必修Minor；审查未运行重任务，不把审查结论代替实际验证。仅允许本地组件收口。
+- 固定identity显式投影，避免接纳对象多余字段进入严格context；完整用户历史/固定workflow/双重字节预算/深复制冻结保留。解码不创建执行许可，不调用matcher，不从损坏core记录降级读取旧plan。
+- Qwen日志来自假传输；未调用实际模型、真实数据库或生产，没有配置/密钥/身份/额度变更。既有localstorage-file警告不算新故障；真实预算性能门槛仍未验证。
+- 全程串行、Node堆2GB、Vitest单worker。最终重任务前空闲61%、磁盘150GiB；没有安装/Docker/额外浏览器。丢失的进程输出不计通过，确认无残留重任务后重跑构建/最终测试并读取exit 0。
+- 当前用户“继续”恢复本轮工作；夜间automation仍PAUSED，不自动重启。下一步按上文真实入口接线门槛继续，同一授权快照、legacy兼容与完整历史、一次许可、共享生成/核验、原子终态及轮次事件；前端/真实DB/整链路门禁全部完成前不得部分发布。

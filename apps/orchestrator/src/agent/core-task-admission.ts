@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
-  type TaskVerificationContext,
-  VerificationContextError,
-  createTaskVerificationContext,
-} from '../execution/task-verification-context.js';
-import { VERIFICATION_INPUT_LIMITS } from '../execution/verification-input-budget.js';
+  type CoreAcceptedRequirements,
+  CoreRequirementsError,
+  parseCoreRequirements,
+} from './core-task-requirements.js';
+
+export type { CoreAcceptedRequirements } from './core-task-requirements.js';
 
 export interface CoreTaskScope {
   readonly taskId: string;
@@ -17,10 +18,6 @@ export interface CoreTaskHead {
   readonly executionRevision: number;
   readonly recordVersion: number;
 }
-export type CoreAcceptedRequirements = Pick<
-  TaskVerificationContext,
-  'initialRequest' | 'userTurns' | 'phase' | 'workflow' | 'referencePlan'
-> & { readonly fileIds: readonly string[] };
 export interface CoreAdmission {
   readonly scope: CoreTaskScope;
   readonly before: CoreTaskHead;
@@ -63,19 +60,7 @@ const inputSchema = z
   .object({
     scope: scopeSchema,
     before: headSchema,
-    requirements: z
-      .object({
-        initialRequest: z.string().min(1),
-        userTurns: z.array(z.string()),
-        phase: z.enum(['direct', 'draft', 'revise', 'approved_execution']),
-        workflow: z.unknown(),
-        referencePlan: z.string().nullable(),
-        fileIds: z
-          .array(z.string().min(1).max(32))
-          .max(5)
-          .refine((ids) => new Set(ids).size === ids.length),
-      })
-      .strict(),
+    requirements: z.unknown(),
   })
   .strict();
 const prepared = new WeakSet<object>();
@@ -113,26 +98,14 @@ export function prepareCoreAdmission(input: {
     throw new CoreAdmissionError('CORE_ADMISSION_INVALID');
   const executionId = randomUUID();
   const executionRevision = before.executionRevision + 1;
-  const { fileIds, ...contextFields } = supplied;
-  const context = createTaskVerificationContext({
-    ...contextFields,
-    schemaVersion: 1,
-    executionId,
-    executionRevision,
-    materials: [],
-  });
-  const requirements = Object.freeze({
-    initialRequest: context.initialRequest,
-    userTurns: context.userTurns,
-    phase: context.phase,
-    workflow: context.workflow,
-    referencePlan: context.referencePlan,
-    fileIds: Object.freeze(fileIds),
-  });
-  if (
-    Buffer.byteLength(JSON.stringify(requirements), 'utf8') > VERIFICATION_INPUT_LIMITS.contextBytes
-  )
-    throw new VerificationContextError('VERIFICATION_INPUT_LIMIT');
+  let requirements: CoreAcceptedRequirements;
+  try {
+    requirements = parseCoreRequirements(supplied, { executionId, executionRevision });
+  } catch (error) {
+    if (error instanceof CoreRequirementsError)
+      throw new CoreAdmissionError('CORE_ADMISSION_INVALID');
+    throw error;
+  }
   const operation = Object.freeze({
     scope: Object.freeze(scope),
     before: Object.freeze(before),
