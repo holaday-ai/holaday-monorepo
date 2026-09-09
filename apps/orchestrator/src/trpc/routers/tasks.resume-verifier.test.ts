@@ -98,11 +98,14 @@ function fixture(
   const db = {
     select(projection: Record<string, unknown>) {
       const rows =
-        'intent' in projection
+        'intent' in projection || 'status' in projection
           ? [
               {
                 intent: '整理这些合同材料的文字提纲，仅重组已有内容，不作专业判断。',
                 status: 'awaiting_user',
+                executionId: null,
+                executionRevision: 0,
+                coreRecordVersion: 0,
                 result: { executionMode: 'generate', expertMode: 'expert' },
                 opusUsed: false,
                 roleId: null,

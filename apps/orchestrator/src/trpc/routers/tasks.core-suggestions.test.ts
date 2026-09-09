@@ -57,6 +57,9 @@ function fixture(lane: 'generate' | 'scrape' | 'resume', persisted = true, follo
                 {
                   intent: '整理提供的材料，归纳关键事实。不要发送邮件。',
                   status: followUp ? 'completed' : 'awaiting_user',
+                  executionId: null,
+                  executionRevision: 0,
+                  coreRecordVersion: 0,
                   result: { executionMode: 'generate', expertMode: 'normal' },
                   opusUsed: false,
                   roleId: null,
@@ -83,7 +86,9 @@ function fixture(lane: 'generate' | 'scrape' | 'resume', persisted = true, follo
         };
       if ('count' in projection) return { from: () => ({ where: async () => [{ count: 0 }] }) };
       if ('status' in projection)
-        return { from: () => ({ where: () => ({ limit: async () => [state] }) }) };
+        return { from: () => ({ where: () => ({ limit: async () => [{ ...state,
+          executionId: null, executionRevision: 0, coreRecordVersion: 0,
+        }] }) }) };
       if ('id' in projection)
         return {
           from: () => ({

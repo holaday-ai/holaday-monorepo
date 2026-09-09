@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { SQL } from 'drizzle-orm';
+import { MySqlDialect } from 'drizzle-orm/mysql-core';
 import * as planning from '../../agent/core-task-plan.js';
 import * as generation from '../../agent/generate-runner.js';
 import { TaskRepository } from '../../agent/task-repository.js';
+import * as supercar from '../../agent/supercar/index.js';
 import { env } from '../../config/env.js';
 import * as executionPipeline from '../../execution/execution-pipeline.js';
 import {
@@ -31,6 +34,7 @@ function fixture({
   parentIntent = '',
   expertMode = 'normal' as 'normal' | 'auto',
   ownerSnapshotStatus = undefined as string | undefined,
+  ownerSnapshotLegacy = false,
 } = {}) {
   let creating = false;
   Object.assign(env, {
@@ -44,6 +48,9 @@ function fixture({
   const plan = '1. 整理材料\n2. 形成提纲\n确认后执行。';
   const state = {
     status: 'awaiting_user',
+    executionId: null as string | null,
+    executionRevision: 0,
+    coreRecordVersion: 0,
     intent: '整理提供的材料，形成一份简洁的汇报提纲。不要发送邮件。',
     result: {
       executionMode: 'generate',
@@ -51,6 +58,7 @@ function fixture({
       ...(!legacy ? { planMode: 'awaiting_approval', planText: plan } : {}),
     } as Record<string, unknown>,
   };
+  const reads: Array<{ projection: Record<string, unknown>; query: { sql: string; params: unknown[] } }> = [];
   const logger = {
     child: () => logger,
     info: vi.fn(),
@@ -85,11 +93,17 @@ function fixture({
       else if ('count' in projection)
         return { from: () => ({ where: async () => [{ count: 0 }] }) };
       else if ('status' in projection) rows = [
-        ownerSnapshotStatus && 'result' in projection ? { ...state, status: ownerSnapshotStatus } : state,
+        'id' in projection && ownerSnapshotLegacy
+          ? { ...state, executionId: null, executionRevision: 0, coreRecordVersion: 0,
+              result: { executionMode: 'generate', planMode: 'awaiting_approval', planText: plan } }
+          : ownerSnapshotStatus && 'result' in projection ? { ...state, status: ownerSnapshotStatus } : state,
       ];
       else if ('id' in projection) rows = [{ id: 42, modelDataRegion: 'cn' }];
       else throw new Error('Unexpected synthetic database read');
-      return { from: () => ({ where: () => ({ limit: async () => rows }) }) };
+      return { from: () => ({ where: (condition: SQL) => {
+        reads.push({ projection, query: new MySqlDialect().sqlToQuery(condition) });
+        return { limit: async () => rows };
+      } }) };
     },
   };
   const charge = vi.spyOn(QuotaService.prototype, 'tryConsume').mockResolvedValue({ ok: true });
@@ -133,6 +147,7 @@ function fixture({
     db,
     logger,
     userId: 'usr_plan_fixture',
+    taskOrigin: 'user',
     planner: {},
     playwrightExecutor: null,
     executionRouter: null,
@@ -154,6 +169,7 @@ function fixture({
     resume,
     frames,
     plan,
+    reads,
     // Recreate the caller on every request to exercise persisted rather than per-call state.
     create: async (fileIds?: string[]) => {
       creating = true;
@@ -175,6 +191,64 @@ function fixture({
 }
 
 describe('generate plan mode durable approval boundary', () => {
+  it.each(['登录好了', '数据如下 GMV 1000'])('does not wake a parked browser handle if a core execution took ownership (%s)', async message => {
+    const f = fixture();
+    vi.spyOn(supercar, 'hasParkedSupercarHandle').mockReturnValue(true);
+    const wake = vi.spyOn(supercar, 'supercarReply').mockReturnValue(true);
+    const handoff = vi.spyOn(supercar, 'supercarHandoffToGenerate').mockReturnValue(true);
+    // A new core execution wins while attachments/other work yielded. The real
+    // scoped SQL boundary is tested separately; the transport only refuses the
+    // guarded call, making omission of the owner observable as a wrongly resumed task.
+    f.resume.mockImplementation(async (_id, legacyUserId) => ({ persisted: legacyUserId === undefined }));
+    await expect(f.reply(message)).resolves.toEqual({ ok: false, state: 'persistFailed' });
+    expect(f.resume).toHaveBeenCalledWith('tsk_plan_fixture', 42);
+    expect(wake).not.toHaveBeenCalled();
+    expect(handoff).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
+  it.each([null, [], { initialRequest: 'incomplete' }, undefined])(
+    'rejects a new execution with missing or malformed requirements before legacy effects (%j)',
+    async (requirements) => {
+      const f = fixture();
+      Object.assign(f.state, { executionId: 'synthetic-execution', executionRevision: 2, coreRecordVersion: 4 });
+      if (requirements !== undefined) f.state.result.coreRequirements = requirements;
+      const files = vi.spyOn(FileService.prototype, 'loadMany').mockResolvedValue([]);
+      await expect(f.reply('确认', ['file_synthetic'])).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      expect(files).not.toHaveBeenCalled();
+      expect(f.resume).not.toHaveBeenCalled();
+      expect(f.run).not.toHaveBeenCalled();
+    },
+  );
+  it('does not interpret valid core requirements and leftover plan fields as a legacy dispatch permit', async () => {
+    const f = fixture();
+    Object.assign(f.state, { executionId: 'synthetic-execution', executionRevision: 2, coreRecordVersion: 4 });
+    f.state.result.coreRequirements = {
+      initialRequest: '合成要求', userTurns: [], phase: 'draft', workflow: null,
+      referencePlan: null, fileIds: [],
+    };
+    await expect(f.reply('确认')).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(f.resume).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.frames).toEqual([]);
+  });
+  it.each(['确认', '等一下'])('revalidates the later snapshot instead of trusting the initial legacy read (%s)', async message => {
+    const f = fixture({ ownerSnapshotLegacy: true });
+    Object.assign(f.state, { executionId: 'synthetic-newer', executionRevision: 2, coreRecordVersion: 4 });
+    await expect(f.reply(message)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.resume).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.frames).toEqual([]);
+  });
+  it('keeps the owner and origin on the actual parked-row read and scoped legacy write', async () => {
+    const f = fixture();
+    await f.reply('确认');
+    const parkRead = f.reads.find(read => 'intent' in read.projection);
+    expect(parkRead?.query.sql).toContain('`tasks`.`user_id` = ?');
+    expect(parkRead?.query.sql).toContain('`tasks`.`origin` = ?');
+    expect(parkRead?.query.params).toEqual(['tsk_plan_fixture', 42, 'user']);
+    expect(f.resume).toHaveBeenCalledWith('tsk_plan_fixture', 42);
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalled());
+  });
   // These tests exercise the real router's pre-dispatch boundary. Existing
   // execution/persistence doubles drain the legacy background path on RED;
   // they are not evidence for the later V10 real-runner/DB integration gate.
@@ -488,6 +562,7 @@ describe('generate plan mode durable approval boundary', () => {
     expect(handoff).toHaveBeenCalledWith(
       'tsk_plan_fixture',
       expect.objectContaining({ handoffSuggestion: 'browser' }),
+      42,
     );
     expect(f.run).toHaveBeenCalledTimes(2);
   });

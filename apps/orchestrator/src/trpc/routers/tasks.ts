@@ -43,6 +43,7 @@ import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js';
 import { prepareCoreTaskPlan } from '../../agent/core-task-plan.js';
 import { assertCoreTaskInput } from '../../agent/core-task-input.js';
+import { assertLegacyReplyRecord } from './tasks-reply-record.js';
 import { publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { generateSuggestions } from '../../agent/suggestions-generator.js';
@@ -8957,7 +8958,12 @@ export const tasksRouter = router({
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
       }
       const [taskRow] = await ctx.db
-        .select({ id: tasksTable.id, status: tasksTable.status, result: tasksTable.result })
+        .select({
+          id: tasksTable.id, status: tasksTable.status, result: tasksTable.result,
+          executionId: tasksTable.executionId,
+          executionRevision: tasksTable.executionRevision,
+          coreRecordVersion: tasksTable.coreRecordVersion,
+        })
         .from(tasksTable)
           .where(
             and(
@@ -8971,6 +8977,7 @@ export const tasksRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
       }
       const replyResult = normalizeOutput(taskRow.result) as Record<string, unknown> | null;
+      assertLegacyReplyRecord({ ...taskRow, result: replyResult });
       const coreTextReply = taskRow.status === 'awaiting_user' &&
         replyResult?.executionMode === 'generate' && !hasParkedSupercarHandle(input.taskId);
       // Core replies require every referenced file and complete text before
@@ -9033,6 +9040,9 @@ export const tasksRouter = router({
               awaitingQuestion: tasksTable.awaitingQuestion,
               awaitingKind: tasksTable.awaitingKind,
               result: tasksTable.result,
+              executionId: tasksTable.executionId,
+              executionRevision: tasksTable.executionRevision,
+              coreRecordVersion: tasksTable.coreRecordVersion,
             })
             .from(tasksTable)
             .where(
@@ -9044,6 +9054,7 @@ export const tasksRouter = router({
             )
             .limit(1);
           const heldResult = normalizeOutput(row?.result) as Record<string, unknown> | null;
+          if (row) assertLegacyReplyRecord({ ...row, result: heldResult });
           reviseHeldPlan = row?.status === 'awaiting_user' &&
             heldResult?.planMode === 'awaiting_approval' &&
             (!isPurePlanHold(input.message) || (input.fileIds?.length ?? 0) > 0);
@@ -9056,6 +9067,7 @@ export const tasksRouter = router({
             });
           }
         } catch (err) {
+          if (err instanceof TRPCError) throw err;
           ctx.logger.warn(
             { err, taskId: input.taskId },
             'reply: still_awaiting rebroadcast failed (non-fatal)',
@@ -9085,7 +9097,7 @@ export const tasksRouter = router({
       if (supercarHasHandle) {
         try {
           const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
-          const persisted = await repo.markAwaitingReplyResumed(input.taskId);
+          const persisted = await repo.markAwaitingReplyResumed(input.taskId, userRow.id);
           if (!persisted.persisted) {
             ctx.logger.warn(
               { taskId: input.taskId },
@@ -9127,11 +9139,19 @@ export const tasksRouter = router({
           result: tasksTable.result,
           opusUsed: tasksTable.opusUsed,
           roleId: tasksTable.roleId,
+          executionId: tasksTable.executionId,
+          executionRevision: tasksTable.executionRevision,
+          coreRecordVersion: tasksTable.coreRecordVersion,
         })
         .from(tasksTable)
-        .where(eq(tasksTable.externalId, input.taskId))
+        .where(and(
+          eq(tasksTable.externalId, input.taskId),
+          eq(tasksTable.userId, userRow.id),
+          eq(tasksTable.origin, ctx.taskOrigin),
+        ))
         .limit(1);
       const prevResult = normalizeOutput(parkRow?.result ?? null) as Record<string, unknown> | null;
+      if (parkRow) assertLegacyReplyRecord({ ...parkRow, result: prevResult });
       const parkedExpertMode =
         prevResult?.expertMode === 'normal' ||
         prevResult?.expertMode === 'expert' ||
@@ -9356,7 +9376,7 @@ export const tasksRouter = router({
             combinedIntent,
             summary: handoffNotice,
           };
-          const persisted = await repo.markAwaitingReplyCompleted(input.taskId, parentResult);
+          const persisted = await repo.markAwaitingReplyCompleted(input.taskId, parentResult, userRow.id);
           if (!persisted.persisted) {
             ctx.logger.warn(
               { taskId: input.taskId },
@@ -9485,7 +9505,7 @@ export const tasksRouter = router({
         fileIds: generateFileIds,
         blocks: generateAttachmentBlocks,
       });
-      const resumePersisted = await repo.markAwaitingReplyResumed(input.taskId);
+      const resumePersisted = await repo.markAwaitingReplyResumed(input.taskId, userRow.id);
       if (!resumePersisted.persisted) {
         ctx.logger.warn(
           { taskId: input.taskId },
