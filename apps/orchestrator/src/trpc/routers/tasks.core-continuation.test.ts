@@ -279,6 +279,63 @@ function fixture(options: { suggestions?: boolean; plan?: boolean; generatedText
 }
 
 describe('real reply core routing and execution', () => {
+  it('keeps a browser-requiring plan parked under qwen-only without accepting or spawning a child', async () => {
+    const f = fixture();
+    await f.create('复盘抖音直播');
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(1));
+    await f.reply('昨天，数据在电商罗盘');
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(2));
+    const saved = JSON.stringify(f.row);
+    const requests = f.requests.length;
+    await expect(f.reply('确认')).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: expect.stringContaining('迁移到千问'),
+    });
+    expect(JSON.stringify(f.row)).toBe(saved);
+    expect(f.admissions).toHaveLength(2);
+    expect(f.insert).toHaveBeenCalledTimes(1);
+    expect(f.requests).toHaveLength(requests);
+    expect(f.charge).toHaveBeenCalledTimes(1);
+  });
+  it('creates and continues a legacy expert plan through core without losing the separate rules', async () => {
+    const report = [
+      '数据校验',
+      '核心数据',
+      '问题诊断',
+      '优化动作',
+      '下场直播 Checklist',
+      '行业参考',
+    ]
+      .map(
+        (title) =>
+          `## ${title}\n[用户提供] 合成样本资料，应逐项核对来源与指标。未知的信息不补成事实，建议仍需后续确认。\n`,
+      )
+      .join('\n');
+    const f = fixture({ generatedText: report });
+    const ack = await f.create('帮我复盘抖音直播');
+    expect(ack).toMatchObject({ admissionState: 'resumed', executionRevision: 1 });
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(1));
+    expect(f.row.result.planText).toContain('数据校验');
+    expect(f.admissions[0]?.requirements.legacyWorkflow?.id).toBe('douyin-livestream-review');
+    await f.reply('保持表达简洁');
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(2));
+    await f.reply('确认');
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(3));
+    expect(f.row.status).toBe('awaiting_user');
+    expect(f.row.awaitingQuestion).toContain('直播场次');
+    const data = '昨天\nGMV: 100\nUV: 200\n订单: 10\n客单价: 10\n转化率: 5%';
+    await f.reply(data);
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(4));
+    expect(f.row.status).toBe('completed');
+    const last = f.admissions[3]?.requirements;
+    expect(last?.userTurns).toEqual(['保持表达简洁', '确认', data]);
+    expect(last?.phase).toBe('approved_execution');
+    expect(last?.legacyWorkflow).toMatchObject({ missingInputs: [], routeOverride: 'generate' });
+    expect(f.charge).toHaveBeenCalledTimes(1);
+    expect(f.requests).toHaveLength(7);
+    expect(JSON.stringify(f.requests.at(-2)?.body)).toContain('用户已在消息中提供结构化数据');
+    expect(JSON.stringify(f.requests.at(-1)?.body)).toContain('用户已在消息中提供结构化数据');
+  });
   it('migrates a proven old approval and preserves the bare answer through another core clarification', async () => {
     const f = fixture({ generatedText: `${TEXT}\n请补充报告的读者。\n[AWAITING_USER_INPUT]` });
     const workflow = getExpertWorkflowById('content-topic');
@@ -293,6 +350,7 @@ describe('real reply core routing and execution', () => {
       planReplyHistory: ['确认'],
       planWorkflowId: 'content-topic',
     });
+    f.row.intent = '帮我做小红书内容选题';
     f.row.awaitingQuestion = intake.question;
     expect(await f.reply('  美妆护肤  ')).toMatchObject({ state: 'resumed', executionRevision: 1 });
     await vi.waitFor(() => expect(f.settlements).toHaveLength(1));

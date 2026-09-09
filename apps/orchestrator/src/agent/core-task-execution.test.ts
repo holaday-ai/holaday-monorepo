@@ -22,6 +22,23 @@ const metadata = {
 } as const;
 const logger = pino({ level: 'silent' });
 
+describe('untrusted parent reference provenance', () => {
+  it('persists and projects parent output separately to both channels, never as user requirements', async () => {
+    const f = fixture();
+    Object.assign(f.input.requirements, {
+      referenceContext: '父模型示例：GMV: 100。不是已确认的数据。',
+    });
+    const execution = await startCoreTaskExecution(f.input);
+    await execution.completion;
+    expect(f.admissions[0]?.requirements).toMatchObject({
+      referenceContext: expect.stringContaining('父模型示例'),
+    });
+    expect(JSON.stringify(f.generation)).toContain('父模型示例');
+    expect(JSON.stringify(f.semantic)).toContain('父模型示例');
+    expect(f.admissions[0]?.requirements.initialRequest).not.toContain('父模型示例');
+  });
+});
+
 function fixture() {
   let head: CoreTaskHead = {
     status: 'awaiting_user',

@@ -1,6 +1,7 @@
 import type { SQL } from 'drizzle-orm';
 import { MySqlDialect } from 'drizzle-orm/mysql-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as coreExecution from '../../agent/core-task-execution.js';
 import * as planning from '../../agent/core-task-plan.js';
 import { CoreTaskRepository } from '../../agent/core-task-repository.js';
 import * as generation from '../../agent/generate-runner.js';
@@ -19,7 +20,10 @@ import type { Context } from '../context.js';
 import { tasksRouter } from './tasks.js';
 
 const original = { ...env };
-afterEach(() => {
+const realStartCoreExecution = coreExecution.startCoreTaskExecution;
+const pendingCompletions: Promise<unknown>[] = [];
+afterEach(async () => {
+  await Promise.allSettled(pendingCompletions.splice(0));
   reloadFeatureFlagsForTest();
   Object.assign(env, original);
   vi.restoreAllMocks();
@@ -27,7 +31,14 @@ afterEach(() => {
 });
 
 function fixture(lane: 'generate' | 'scrape' | 'resume', persisted = true, followUp = false) {
-  if (lane === 'generate')
+  const completions: Promise<unknown>[] = [];
+  vi.spyOn(coreExecution, 'startCoreTaskExecution').mockImplementation(async (input) => {
+    const execution = await realStartCoreExecution(input);
+    completions.push(execution.completion);
+    pendingCompletions.push(execution.completion);
+    return execution;
+  });
+  if (lane !== 'scrape')
     setFeatureFlagsForTest({
       EVIDENCE_LEDGER: true,
       EXECUTION_CONTRACT: true,
@@ -67,11 +78,11 @@ function fixture(lane: 'generate' | 'scrape' | 'resume', persisted = true, follo
     executionRevision: number;
     recordVersion: number;
   } = {
-    status: 'executing',
+    status: lane === 'resume' ? 'awaiting_user' : 'executing',
     result: { summary: '' },
-    executionId: null,
-    executionRevision: 0,
-    recordVersion: 0,
+    executionId: lane === 'resume' ? 'synthetic-previous' : null,
+    executionRevision: lane === 'resume' ? 1 : 0,
+    recordVersion: lane === 'resume' ? 2 : 0,
   };
   const logger = {
     child: () => logger,
@@ -108,10 +119,32 @@ function fixture(lane: 'generate' | 'scrape' | 'resume', persisted = true, follo
                 {
                   intent: '整理提供的材料，归纳关键事实。不要发送邮件。',
                   status: followUp ? 'completed' : 'awaiting_user',
-                  executionId: null,
-                  executionRevision: 0,
-                  coreRecordVersion: 0,
-                  result: { executionMode: 'generate', expertMode: 'normal' },
+                  executionId: state.executionId,
+                  executionRevision: state.executionRevision,
+                  coreRecordVersion: state.recordVersion,
+                  result: {
+                    executionMode: 'generate',
+                    expertMode: 'normal',
+                    ...(lane === 'resume'
+                      ? {
+                          coreRequirements: {
+                            initialRequest: '整理提供的材料，归纳关键事实。不要发送邮件。',
+                            userTurns: [],
+                            phase: 'direct',
+                            workflow: null,
+                            referencePlan: null,
+                            fileIds: [],
+                            resume: {
+                              schemaVersion: 1,
+                              expertMode: 'normal',
+                              skillId: null,
+                              legacyWorkflowId: null,
+                              intakeBindings: [],
+                            },
+                          },
+                        }
+                      : {}),
+                  },
                   opusUsed: false,
                   roleId: null,
                 },
@@ -172,7 +205,7 @@ function fixture(lane: 'generate' | 'scrape' | 'resume', persisted = true, follo
       return { persisted };
     },
   );
-  if (lane === 'generate') {
+  if (lane !== 'scrape') {
     vi.spyOn(CoreTaskRepository.prototype, 'admit').mockImplementation(async (op) => {
       Object.assign(state, {
         status: 'executing',
@@ -262,6 +295,7 @@ function fixture(lane: 'generate' | 'scrape' | 'resume', persisted = true, follo
     res: {},
   } as unknown as Context;
   return {
+    drain: () => Promise.allSettled(completions),
     state,
     save,
     frames,
@@ -371,7 +405,7 @@ describe('core task post-completion suggestions', () => {
     async (lane) => {
       for (const status of ['completed', 'partial_success', 'failed'] as const) {
         const f = fixture(lane, status !== 'completed');
-        if (lane === 'generate') {
+        if (lane !== 'scrape') {
           if (status !== 'completed')
             vi.mocked(generation.runGenerateTask).mockResolvedValueOnce({
               status: status === 'failed' ? 'failed' : 'completed',
@@ -383,7 +417,10 @@ describe('core task post-completion suggestions', () => {
             });
         } else vi.spyOn(pipeline, 'deriveFinalStatus').mockReturnValue(status);
         await f.start();
-        await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+        await vi.waitFor(() =>
+          expect(f.save, `synthetic status ${status}`).toHaveBeenCalledTimes(1),
+        );
+        await f.drain();
         await new Promise((resolve) => setTimeout(resolve, 15));
         expect(f.suggest).not.toHaveBeenCalled();
         expect(f.frames.some((frame) => frame.type === 'server.supercar.suggestions')).toBe(false);
@@ -406,7 +443,7 @@ describe('core task post-completion suggestions', () => {
       await f.start();
       await vi.waitFor(() => expect(f.suggest).toHaveBeenCalledTimes(1));
       f.state.result = { summary: 'different saved outcome' };
-      if (lane === 'generate') f.state.recordVersion += 1;
+      if (lane !== 'scrape') f.state.recordVersion += 1;
       finish(['整理后续执行清单']);
       await new Promise((resolve) => setTimeout(resolve, 15));
       expect(f.frames.some((frame) => frame.type === 'server.supercar.suggestions')).toBe(false);

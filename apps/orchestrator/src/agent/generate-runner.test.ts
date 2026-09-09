@@ -97,6 +97,16 @@ afterEach(() => {
 });
 
 describe('legacy workflow context guards', () => {
+  it('draft with missing inputs produces a proposal instead of storing an intake question as the plan', async () => {
+    const proposal = '合成方案：先确认直播场次和数据来源，再核对指标，最后形成报告；尚未执行。';
+    const adapter = makeAdapter({ text: proposal });
+    const result = await run(adapter, {
+      verificationContext: context({ missingInputs: ['liveSession', 'dataSource'] }, 'draft'),
+    });
+    expect(result.summary).toContain(proposal);
+    expect(callCount(adapter)).toBe(1);
+    expect(requestAt(adapter).tools).toEqual([]);
+  });
   function context(patch: Record<string, unknown> = {}, phase = 'approved_execution') {
     return createTaskVerificationContext({
       schemaVersion: 1,
@@ -117,7 +127,7 @@ describe('legacy workflow context guards', () => {
       },
     });
   }
-  it.each(['direct', 'approved_execution', 'draft', 'revise'])(
+  it.each(['direct', 'approved_execution'])(
     'asks for missing legacy input without model or tools in %s',
     async (phase) => {
       const adapter = makeAdapter();

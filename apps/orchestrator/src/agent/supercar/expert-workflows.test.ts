@@ -1,7 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { matchExpertWorkflow } from './expert-workflows.js';
+import { matchExpertWorkflow, resolveFixedExpertWorkflow } from './expert-workflows.js';
 
 describe('expert workflow matching', () => {
+  it('uses actual pasted metrics on first creation even when their source mentions a platform', () => {
+    const match = matchExpertWorkflow('复盘昨天的抖音直播，数据来自电商罗盘\nGMV: 100\nUV: 200');
+    expect(match?.missingInputs).toEqual([]);
+    expect(match?.routeOverride).toBe('generate');
+    expect(match?.promptPreamble).toContain('用户已在消息中提供结构化数据');
+  });
+  it.each(['稍后上传 GMV 和 UV', 'GMV: 100\nGMV: 200'])(
+    'does not infer a data source from a promise or duplicate metric: %s',
+    (text) => {
+      const match = matchExpertWorkflow(`复盘昨天的抖音直播\n${text}`);
+      expect(match?.missingInputs).toEqual(['dataSource']);
+    },
+  );
+  it('resolves an already-selected lineage without rematching later topic words', () => {
+    const match = resolveFixedExpertWorkflow(
+      'douyin-livestream-review',
+      '昨天，附件里是这场数据。也参考小红书观点。',
+      { hasAttachments: true },
+    );
+    expect(match?.id).toBe('douyin-livestream-review');
+    expect(match?.missingInputs).toEqual([]);
+    expect(match?.routeOverride).toBe('generate');
+    expect(resolveFixedExpertWorkflow('unknown', '抖音直播复盘')).toBeNull();
+  });
   it('matches douyin livestream review and asks for missing intake inputs', () => {
     const match = matchExpertWorkflow('帮我复盘一场抖音直播数据，做总结和优化策略');
 

@@ -46,6 +46,7 @@ import { assertCoreTaskInput } from '../../agent/core-task-input.js';
 import { assertLegacyReplyRecord } from './tasks-reply-record.js';
 import { handleCoreTaskReply } from './tasks-core-reply.js';
 import { createCoreGenerateTask } from './tasks-core-create.js';
+import { restoreCoreLegacyWorkflow } from '../../agent/core-legacy-workflow.js';
 import type { CoreAcceptedRequirements } from '../../agent/core-task-requirements.js';
 import { publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
@@ -1368,6 +1369,8 @@ export const tasksRouter = router({
     // intent + result so the model has full context for "为什么失败" /
     // "再试一次" style follow-ups.
     let parentContextBlock = '';
+    let parentUserContext = '';
+    let parentModelReference = '';
     let isFollowUp = false;
     /**
      * Phase 3 R1 (Codex follow-up #2) — recovered parent workflow id.
@@ -1452,6 +1455,8 @@ export const tasksRouter = router({
           : reason
             ? `${reasonLabel}：${reason}`
             : `状态：${parent.status}（无详细输出）`;
+      parentUserContext = `【前次用户要求】\n${parent.intent}\n\n【本次用户要求】\n`;
+      parentModelReference = outcomeLine;
       parentContextBlock = [
         '---',
         '【追问上下文】',
@@ -1662,10 +1667,10 @@ export const tasksRouter = router({
       (ASHARE_QA_ALLOWLIST.size === 0 || ASHARE_QA_ALLOWLIST.has(ctx.userId));
     const coreCreateRequirements: CoreAcceptedRequirements | null =
       executionMode === 'generate' &&
-      !expertWorkflow &&
       !specializedStockLaneEligible
         ? {
-            initialRequest: parentContextBlock + input.intent,
+            initialRequest: parentUserContext + input.intent,
+            ...(parentModelReference ? { referenceContext: parentModelReference } : {}),
             userTurns: [],
             phase: input.mode === 'plan' ? 'draft' : 'direct',
             workflow: typedWorkflow
@@ -1673,11 +1678,16 @@ export const tasksRouter = router({
               : null,
             referencePlan: null,
             fileIds: orderedFileIds,
+            ...(expertWorkflow ? { legacyWorkflow: restoreCoreLegacyWorkflow(expertWorkflow.id, {
+              initialRequest: parentUserContext + input.intent,
+              userTurns: [],
+              fileIds: orderedFileIds,
+            }) } : {}),
             resume: {
               schemaVersion: 1,
               expertMode: expertModeOverride,
               skillId: dispatchSkillId ?? null,
-              legacyWorkflowId: null,
+              legacyWorkflowId: expertWorkflow?.id ?? null,
               intakeBindings: [],
             },
           }
@@ -8681,6 +8691,8 @@ export const tasksRouter = router({
           intent: tasksTable.intent,
           title: tasksTable.title,
           status: tasksTable.status,
+          executionId: tasksTable.executionId,
+          executionRevision: tasksTable.executionRevision,
           awaitingKind: tasksTable.awaitingKind,
           awaitingQuestion: tasksTable.awaitingQuestion,
           pauseReason: tasksTable.pauseReason,
@@ -8786,6 +8798,8 @@ export const tasksRouter = router({
           intent: r.intent,
           title: r.title,
           status: r.status,
+          executionId: r.executionId,
+          executionRevision: r.executionRevision,
           awaitingKind: r.awaitingKind,
           awaitingQuestion: r.awaitingQuestion,
           pauseReason: r.pauseReason,
@@ -8909,6 +8923,8 @@ export const tasksRouter = router({
         title: taskRow.title,
         status: taskRow.status,
         pauseReason: taskRow.pauseReason,
+        executionId: taskRow.executionId,
+        executionRevision: taskRow.executionRevision,
         // F11 follow-up — only meaningful while status='awaiting_user'.
         // SPA gates on status, so leaving the column populated for
         // historical rows is harmless. Returned alongside status so
@@ -9011,7 +9027,7 @@ export const tasksRouter = router({
       }
       const [taskRow] = await ctx.db
         .select({
-          id: tasksTable.id, status: tasksTable.status, result: tasksTable.result,
+          id: tasksTable.id, status: tasksTable.status, result: tasksTable.result, intent: tasksTable.intent,
           executionId: tasksTable.executionId,
           executionRevision: tasksTable.executionRevision,
           coreRecordVersion: tasksTable.coreRecordVersion,
@@ -9038,6 +9054,11 @@ export const tasksRouter = router({
       assertLegacyReplyRecord({ ...taskRow, result: replyResult });
       const coreTextReply = taskRow.status === 'awaiting_user' &&
         replyResult?.executionMode === 'generate' && !hasParkedSupercarHandle(input.taskId);
+      if (coreTextReply) {
+        if (isPurePlanHold(input.message) && !input.fileIds?.length)
+          return { ok: true, state: 'stillAwaiting' as const };
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '旧任务缺少完整执行历史，请保留原有要求和附件后重新创建任务。' });
+      }
       // Core replies require every referenced file and complete text before
       // releasing the wait. Other lanes retain their existing parsing policy.
         const replyAttachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
@@ -9210,6 +9231,8 @@ export const tasksRouter = router({
         .limit(1);
       const prevResult = normalizeOutput(parkRow?.result ?? null) as Record<string, unknown> | null;
       if (parkRow) assertLegacyReplyRecord({ ...parkRow, result: prevResult });
+      if (parkRow?.status === 'awaiting_user' && prevResult?.executionMode === 'generate')
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '旧任务缺少完整执行历史，请保留原有要求和附件后重新创建任务。' });
       const parkedExpertMode =
         prevResult?.expertMode === 'normal' ||
         prevResult?.expertMode === 'expert' ||

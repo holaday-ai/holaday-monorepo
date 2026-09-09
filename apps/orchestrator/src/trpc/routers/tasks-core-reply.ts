@@ -10,7 +10,10 @@ import { CoreTaskRepository } from '../../agent/core-task-repository.js';
 import { getFeatureFlags } from '../../execution/feature-flags.js';
 import { FileService } from '../../files/file-service.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
-import type { ProductionModelRuntimeWiring } from '../../llm/model-runtime-wiring.js';
+import {
+  MODEL_TASK_FAILURE_COPY,
+  type ProductionModelRuntimeWiring,
+} from '../../llm/model-runtime-wiring.js';
 import { broadcastToUser } from '../../ws/server.js';
 import type { Context } from '../context.js';
 import { publishCoreSettledSuggestions } from './tasks-core-suggestions.js';
@@ -23,6 +26,7 @@ export async function handleCoreTaskReply(args: {
   wiring: ProductionModelRuntimeWiring;
   input: { taskId: string; message: string; fileIds?: string[] };
   row: {
+    intent: string;
     status: string;
     executionId: string | null;
     executionRevision: number;
@@ -61,6 +65,7 @@ export async function handleCoreTaskReply(args: {
           head,
           result: row.result,
           roleId: row.roleId,
+          originalIntent: row.intent,
           awaitingQuestion: row.awaitingQuestion,
           origin: ctx.taskOrigin,
           message: input.message,
@@ -86,6 +91,17 @@ export async function handleCoreTaskReply(args: {
       executionRevision: row.executionRevision,
     };
   const { requirements } = prepared;
+  if (
+    requirements.phase !== 'draft' &&
+    requirements.phase !== 'revise' &&
+    requirements.legacyWorkflow?.routeOverride === 'browser'
+  ) {
+    const unavailable = args.wiring.resolveUnmigrated('browser');
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: `${MODEL_TASK_FAILURE_COPY[unavailable.reasonCode]}请改用附件或粘贴数据继续分析，当前方案和要求未改变。`,
+    });
+  }
   if (legacy) {
     const flags = getFeatureFlags();
     if (!flags.EVIDENCE_LEDGER || !flags.EXECUTION_CONTRACT || !flags.EXECUTION_VERIFIER)

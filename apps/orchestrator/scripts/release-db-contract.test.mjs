@@ -345,6 +345,17 @@ describe('team work item lifecycle schema contract', () => {
 });
 
 describe('release database table and column contract', () => {
+  it('blocks application rollout when any durable core identity column is missing', () => {
+    const verifier = readFileSync(new URL('./verify-db-schema.ts', import.meta.url), 'utf8');
+    const tasksColumns = verifier.match(/\n  tasks: \[([^\]]+)\]/)?.[1] ?? '';
+    for (const column of ['execution_id', 'execution_revision', 'core_record_version']) {
+      assert.ok(tasksColumns.includes(`'${column}'`), `missing core rollout guard: ${column}`);
+    }
+    const migration = readFileSync(new URL('../drizzle/0059_core_execution_identity.sql', import.meta.url), 'utf8');
+    const statements = splitMigrationStatements(migration);
+    assert.equal(statements.length, 3);
+    assert.deepEqual(findNonAdditiveMigrationStatements(statements), []);
+  });
   it('requires the privacy-bounded stock preference schema', () => {
     assert.deepEqual(STOCK_PREFERENCE_REQUIRED_TABLES, [
       'stock_preference_profiles',

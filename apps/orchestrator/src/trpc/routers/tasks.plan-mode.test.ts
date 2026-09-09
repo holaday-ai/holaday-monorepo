@@ -33,6 +33,7 @@ function fixture({
   legacy = false,
   jsonResult = false,
   parentIntent = '',
+  parentSummary = '合成父任务提纲',
   expertMode = 'normal' as 'normal' | 'auto',
   ownerSnapshotStatus = undefined as string | undefined,
   ownerSnapshotLegacy = false,
@@ -50,6 +51,7 @@ function fixture({
   const plan = '1. 整理已经提供的合成材料，保留缺失事项\n2. 形成可供用户复核的汇报提纲\n确认后执行。';
   const state = {
     status: 'awaiting_user',
+    roleId: null,
     executionId: null as string | null,
     executionRevision: 0,
     coreRecordVersion: 0,
@@ -58,7 +60,11 @@ function fixture({
     result: {
       executionMode: 'generate',
       expertMode: 'normal',
-      ...(!legacy ? { planMode: 'awaiting_approval', planText: plan } : {}),
+      ...(!legacy ? {
+        planMode: 'awaiting_approval', planText: plan,
+        selectedRole: null, planInitialIntent: '整理提供的材料，形成一份简洁的汇报提纲。不要发送邮件。',
+        planReplyHistory: [], planFileIds: [], planWorkflowId: null, planLegacyWorkflowId: null,
+      } : {}),
     } as Record<string, unknown>,
   };
   const reads: Array<{ projection: Record<string, unknown>; query: { sql: string; params: unknown[] } }> = [];
@@ -72,13 +78,17 @@ function fixture({
   const db = {
     select(projection: Record<string, unknown>) {
       let rows: unknown[];
-      if ('intent' in projection)
+      if ('id' in projection && 'status' in projection)
+        rows = [ownerSnapshotLegacy
+          ? { ...state, executionId: null, executionRevision: 0, coreRecordVersion: 0, result: { executionMode: 'browser' } }
+          : { ...state, ...(ownerSnapshotStatus ? { status: ownerSnapshotStatus } : {}), result: jsonResult ? JSON.stringify(state.result) : state.result }];
+      else if ('intent' in projection)
         rows = [
           creating && parentIntent
             ? {
                 intent: parentIntent,
                 status: 'completed',
-                result: { summary: '合成父任务提纲' },
+                result: { summary: parentSummary },
                 opusUsed: false,
                 roleId: null,
               }
@@ -98,7 +108,7 @@ function fixture({
       else if ('status' in projection) rows = [
         'id' in projection && ownerSnapshotLegacy
           ? { ...state, executionId: null, executionRevision: 0, coreRecordVersion: 0,
-              result: { executionMode: 'generate', planMode: 'awaiting_approval', planText: plan } }
+              result: { executionMode: 'browser' } }
           : ownerSnapshotStatus && 'result' in projection ? { ...state, status: ownerSnapshotStatus } : state,
       ];
       else if ('id' in projection) rows = [{ id: 42, modelDataRegion: 'cn' }];
@@ -133,6 +143,10 @@ function fixture({
   vi.spyOn(TaskRepository.prototype, 'persistAwaitingUser').mockImplementation(save);
   const complete = vi.fn<TaskRepository['persistVisionOutcome']>().mockResolvedValue({ persisted });
   vi.spyOn(TaskRepository.prototype, 'persistVisionOutcome').mockImplementation(complete);
+  vi.spyOn(CoreTaskRepository.prototype, 'readHead').mockImplementation(async () => ({
+    status: state.status, executionId: state.executionId, executionRevision: state.executionRevision,
+    recordVersion: state.coreRecordVersion,
+  }));
   vi.spyOn(CoreTaskRepository.prototype, 'admit').mockImplementation(async op => {
     Object.assign(state, { status: 'executing', executionId: op.executionId, executionRevision: op.executionRevision, coreRecordVersion: op.recordVersion, result: { coreRequirements: op.requirements } });
     return { persisted: true };
@@ -215,8 +229,17 @@ function fixture({
 }
 
 describe('generate plan mode durable approval boundary', () => {
+  it('does not promote a parent model example into user-supplied legacy data', async () => {
+    const f = fixture({ expertMode: 'auto', parentIntent: '展示指标示例', parentSummary: '仅为模型示例\nGMV: 100\nUV: 200' });
+    f.state.intent = '复盘昨天抖音直播';
+    await f.create();
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+    expect(f.run.mock.calls[0]?.[0].verificationContext?.legacyWorkflow?.missingInputs).toContain('dataSource');
+    expect(f.run.mock.calls[0]?.[0].verificationContext?.initialRequest).not.toContain('GMV: 100');
+    expect(f.run.mock.calls[0]?.[0].verificationContext).toMatchObject({ referenceContext: expect.stringContaining('GMV: 100') });
+  });
   it.each(['登录好了', '数据如下 GMV 1000'])('does not wake a parked browser handle if a core execution took ownership (%s)', async message => {
-    const f = fixture();
+    const f = fixture({ legacy: true });
     vi.spyOn(supercar, 'hasParkedSupercarHandle').mockReturnValue(true);
     const wake = vi.spyOn(supercar, 'supercarReply').mockReturnValue(true);
     const handoff = vi.spyOn(supercar, 'supercarHandoffToGenerate').mockReturnValue(true);
@@ -259,19 +282,32 @@ describe('generate plan mode durable approval boundary', () => {
     const f = fixture({ ownerSnapshotLegacy: true });
     Object.assign(f.state, { executionId: 'synthetic-newer', executionRevision: 2, coreRecordVersion: 4 });
     await expect(f.reply(message)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.reads.some(read => 'status' in read.projection && 'id' in read.projection)).toBe(true);
+    expect(f.reads.some(read => message === '等一下'
+      ? 'awaitingKind' in read.projection && !('id' in read.projection)
+      : 'intent' in read.projection)).toBe(true);
     expect(f.resume).not.toHaveBeenCalled();
     expect(f.run).not.toHaveBeenCalled();
     expect(f.frames).toEqual([]);
   });
-  it('keeps the owner and origin on the actual parked-row read and scoped legacy write', async () => {
-    const f = fixture();
+  it('refuses a plain legacy generate wait without full history before any write or generation', async () => {
+    const f = fixture({ legacy: true });
+    await expect(f.reply('补充原始数据')).rejects.toThrow('旧任务缺少完整执行历史');
+    expect(f.state.status).toBe('awaiting_user');
+    expect(f.run).not.toHaveBeenCalled();
+  });
+  it('keeps the owner and origin on the authorized read and scoped non-core handle write', async () => {
+    const f = fixture({ legacy: true });
+    f.state.result.executionMode = 'browser';
+    vi.spyOn(supercar, 'hasParkedSupercarHandle').mockReturnValue(true);
+    vi.spyOn(supercar, 'supercarReply').mockReturnValue(true);
     await f.reply('确认');
     const parkRead = f.reads.find(read => 'intent' in read.projection);
     expect(parkRead?.query.sql).toContain('`tasks`.`user_id` = ?');
     expect(parkRead?.query.sql).toContain('`tasks`.`origin` = ?');
     expect(parkRead?.query.params).toEqual(['tsk_plan_fixture', 42, 'user']);
     expect(f.resume).toHaveBeenCalledWith('tsk_plan_fixture', 42);
-    await vi.waitFor(() => expect(f.save).toHaveBeenCalled());
+    expect(f.run).not.toHaveBeenCalled();
   });
   // These tests exercise the real router's pre-dispatch boundary. Existing
   // execution/persistence doubles drain the legacy background path on RED;
@@ -306,9 +342,9 @@ describe('generate plan mode durable approval boundary', () => {
   it('does not reuse a legacy-truncated attachment after the task changes into a core wait', async () => {
     const f = fixture({ legacy: true, ownerSnapshotStatus: 'executing' });
     attachFiles({ fil_one: `${'a'.repeat(55_000)}RACE_TAIL` });
-    await f.reply('补充材料', ['fil_one']);
-    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
-    expect(JSON.stringify(f.run.mock.calls[0]?.[0].attachments).includes('RACE_TAIL')).toBe(true);
+    await expect(f.reply('补充材料', ['fil_one'])).rejects.toThrow('旧任务缺少完整执行历史');
+    expect(f.resume).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -410,7 +446,7 @@ describe('generate plan mode durable approval boundary', () => {
     attachFiles({ fil_original: `${'a'.repeat(55_000)}RELOADED_TAIL` });
     await f.reply('执行');
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
-    expect(JSON.stringify(f.run.mock.calls[0]?.[0].attachments).includes('RELOADED_TAIL')).toBe(true);
+    expect(JSON.stringify(f.run.mock.calls[0]?.[0].verificationContext?.materials)).toContain('RELOADED_TAIL');
   });
 
   it.each([false, true])(
@@ -544,7 +580,10 @@ describe('generate plan mode durable approval boundary', () => {
       expect(await f.reply('执行')).toMatchObject({ ok: true, state: 'resumed' });
       await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
       expect(f.run.mock.calls[1]?.[0].intent).toMatch(/^整理提供的材料/);
-      expect(f.state.result.expertWorkflowId).toBe(planWorkflowId);
+      expect(f.state.result.coreRequirements).toMatchObject({
+        workflow: planWorkflowId ? { id: planWorkflowId } : null,
+        resume: { legacyWorkflowId: null },
+      });
     },
   );
 
@@ -566,13 +605,12 @@ describe('generate plan mode durable approval boundary', () => {
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
     await f.reply('执行');
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(3));
-    expect(f.run.mock.calls[2]?.[0].intent).toContain('【专家技能工作流：抖音直播复盘】');
-    expect(f.run.mock.calls[2]?.[0].workflowOverride).toBeNull();
-    expect(f.state.result.planLegacyWorkflowId).toBe('douyin-livestream-review');
-    expect(f.state.result.expertWorkflowId).toBe('douyin-livestream-review');
+    expect(f.run.mock.calls[2]?.[0].verificationContext?.legacyWorkflow?.promptPreamble).toContain('【专家技能工作流：抖音直播复盘】');
+    expect(f.run.mock.calls[2]?.[0].verificationContext?.workflow).toBeNull();
+    expect(f.state.result.coreRequirements).toMatchObject({ resume: { legacyWorkflowId: 'douyin-livestream-review' } });
   });
 
-  it('selects the saved legacy handoff but does not dispatch when its CAS is refused', async () => {
+  it('refuses the unavailable legacy browser handoff before admission under qwen-only', async () => {
     const f = fixture({ expertMode: 'auto' });
     setFeatureFlagsForTest({ EXPERT_WORKFLOW: true });
     f.state.intent = '电商罗盘 GMV 复盘';
@@ -584,12 +622,10 @@ describe('generate plan mode durable approval boundary', () => {
     await f.reply('修改方案，场次为昨天');
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
     expect(handoff).not.toHaveBeenCalled();
-    expect(await f.reply('执行')).toMatchObject({ ok: false, state: 'persistFailed' });
-    expect(handoff).toHaveBeenCalledWith(
-      'tsk_plan_fixture',
-      expect.objectContaining({ handoffSuggestion: 'browser' }),
-      42,
-    );
+    const admit = vi.spyOn(CoreTaskRepository.prototype, 'admit').mockClear();
+    await expect(f.reply('执行')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    expect(admit).not.toHaveBeenCalled();
+    expect(handoff).not.toHaveBeenCalled();
     expect(f.run).toHaveBeenCalledTimes(2);
   });
 
@@ -728,7 +764,7 @@ describe('generate plan mode durable approval boundary', () => {
 
   it.each([
     { planText: '' },
-    { planReplyHistory: Array.from({ length: 32 }, () => '修改提纲') },
+    { planReplyHistory: Array.from({ length: 32 }, () => '修改提纲'.repeat(200)) },
     { planFileIds: Array.from({ length: 6 }, (_, i) => `fil_${i}`) },
   ])(
     'refuses incomplete or oversized plan context without truncating constraints: %j',
@@ -761,8 +797,8 @@ describe('generate plan mode durable approval boundary', () => {
     await f.reply('补充数据在表格中');
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(3));
     expect(f.run.mock.calls[2]?.[0].intent).toContain('不要添加截止时间');
-    expect(f.run.mock.calls[2]?.[0].executionPlan).toBe(f.plan);
-    expect(f.run.mock.calls[2]?.[0].planOnly).toBe(false);
+    expect(f.run.mock.calls[2]?.[0].verificationContext?.referencePlan).toBe(f.plan);
+    expect(f.run.mock.calls[2]?.[0].verificationContext?.phase).toBe('approved_execution');
   });
 
   it.each(['根据新增材料修改第二步', '先别执行'])(
@@ -853,9 +889,9 @@ describe('generate plan mode durable approval boundary', () => {
     expect(await f.reply(reply)).toMatchObject({ ok: true, state: 'resumed' });
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
     expect(f.run).toHaveBeenCalledWith(
-      expect.objectContaining({ planOnly: true, executionPlan: f.plan }),
+      expect.objectContaining({ verificationContext: expect.objectContaining({ phase: 'revise', referencePlan: f.plan }) }),
     );
-    expect(f.state.result.planMode).toBe('awaiting_approval');
+    expect(f.state.result.coreRequirements).toMatchObject({ phase: 'revise' });
   });
 
   it.each(['不要执行', '先别执行'])(
@@ -872,12 +908,13 @@ describe('generate plan mode durable approval boundary', () => {
   it('does not auto-handoff a plan edit with platform keywords to a browser', async () => {
     const f = fixture();
     f.state.intent = '分析抖音昨天直播表现';
+    f.state.result.planInitialIntent = f.state.intent;
     expect(await f.reply('数据来自电商罗盘，修改方案第二步')).toMatchObject({
       ok: true,
       state: 'resumed',
     });
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
-    expect(f.run).toHaveBeenCalledWith(expect.objectContaining({ planOnly: true }));
+    expect(f.run).toHaveBeenCalledWith(expect.objectContaining({ verificationContext: expect.objectContaining({ phase: 'revise' }) }));
     expect(f.frames.some((frame) => frame.type === 'server.task.terminal')).toBe(false);
   });
 
@@ -899,24 +936,25 @@ describe('generate plan mode durable approval boundary', () => {
       expect(f.state.result.planText).toBe(revised);
       await f.reply('执行');
       await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
-      expect(f.run.mock.calls[1]?.[0]).toMatchObject({ planOnly: false, executionPlan: revised });
+      expect(f.run.mock.calls[1]?.[0].verificationContext).toMatchObject({ phase: 'approved_execution', referencePlan: revised });
       expect(f.run.mock.calls[1]?.[0].intent).toContain('不要发送邮件');
       // Further execution clarification is not another plan-approval cycle.
       expect(f.state.result).not.toHaveProperty('planMode');
     },
   );
 
-  it('leaves ordinary generate clarification unchanged', async () => {
+  it('keeps unreadable ordinary generate history read-only and allows a pure hold', async () => {
     const f = fixture({ legacy: true });
-    await f.reply('补充材料如下');
-    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
-    expect(f.run.mock.calls[0]?.[0].planOnly).toBeFalsy();
-    expect(f.run.mock.calls[0]?.[0].executionPlan).toBeUndefined();
+    await expect(f.reply('稍等')).resolves.toMatchObject({ ok: true, state: 'stillAwaiting' });
+    await expect(f.reply('补充材料如下')).rejects.toThrow('旧任务缺少完整执行历史');
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.resume).not.toHaveBeenCalled();
     expect(f.state.result).not.toHaveProperty('planMode');
   });
 
   it('does not dispatch or publish if resume persistence is refused', async () => {
     const f = fixture({ persisted: false });
+    vi.spyOn(CoreTaskRepository.prototype, 'admit').mockResolvedValueOnce({ persisted: false });
     expect(await f.reply('执行')).toMatchObject({ ok: false, state: 'persistFailed' });
     expect(f.run).not.toHaveBeenCalled();
     expect(f.frames).toEqual([]);

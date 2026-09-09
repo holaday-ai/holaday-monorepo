@@ -46,6 +46,24 @@
 
 ## 资源与验证
 
+### 持续推进：旧入口与续接、前端、发布前组合门禁
+
+2026-09-10 用户要求连续做到部署前，不再按内部检查点停顿。串行执行及只读审查保留，检查点通过后直接做下一项。禁止部分发布，不自动执行本次终点之后的部署。
+
+- [x] 旧规范固定解析：`supercar/expert-workflows.ts` 提供 `resolveFixedExpertWorkflow(id,intent,opts)`，仅已知旧ID可解析，不因后续出现别的领域词换工作流；原matcher先匹配再复用此函数。`agent/core-legacy-workflow.ts` 提供 `restoreCoreLegacyWorkflow(id,{initialRequest,userTurns,fileIds})`，从完整原話和真实附件集合重算缺项，提取唯一server规范快照，不加入用户原话。结构化粘贴指标可作文本来源，但“稍后上传”不作已上传。
+- [x] 核心续接恢复固定legacy：`prepareCoreContinuation` 在明确旧ID且快照匹配时重算本轮缺项，保留原始历史/phase/文件，不静默落回旧调度；NULL旧ID仍不重新匹配。旧完整待批方案同样恢复已存ID；没有完整历史的旧记录明确拒绝并允许用户重新创建，不能把不能恢复的数据列为可自动迁移。
+- [x] 首次generate选择legacy规则进入core，预算必须仍在扣额前。direct缺项只澄清；draft/revise只产出方案（不将确定性缺项问题冒充可批准方案），批准后才检查执行缺项。真实router测试覆盖创建→修改→批准→补数据→保存，观察两通道和版本、不增加扣减。
+- [x] 浏览器边界按当前千问策略拒绝，不实现新转交：2026-09-10核对实际`ProductionModelRuntimeWiring.resolveUnmigrated('browser')`恒返回迁移中，`tasks.create`在扣额前已走相同不可用分支；后部supercar仍依赖Anthropic，不能因旧handoff代码存在就启用。原草案的自动父子转交超出本轮核心文本范围，撤回该实现步骤，旧引擎保持关闭。新core reply在非计划阶段且固定legacy路由需要browser时，在C1/文件/模型/子创建前抛受控PRECONDITION，保留父方案与用户输入，提示改用附件或粘贴数据。以后浏览器千问迁移单独设计“未调度子任务→同事务父子关联→dispatch”、取消保护和未知对账，不用假核验通过替代回执。
+- [x] 接通前端执行轮次合并及creationUnconfirmed，测试ACK/WS/detail乱序、相同revision不同ID、终态后stream、保存未知与输入保留，不改布局。
+- [x] 审查发现的来源修复：跨原始用户轮次汇总不同指标键；父用户要求保留在初始上下文，父模型结果另存可选`referenceContext`，纳入64KiB预算并完整传给两通道，明确为不可信参考，不能供legacy intake确认数据来源或批准。不能把模型示例当用户数据。
+- [x] 本地组合门禁：串行组合回归、前后端类型/构建及独立审查通过；既有MySQL服务中仅新建随机隔离合成库测试，不启动Docker/新浏览器，不读取输出生产密钥。真实模型性能及V12明确留在新部署阶段，不用mock替代真实证据。
+
+2026-09-10 最终本地证据：后端415文件6764测试、前端250文件2458测试、Node发布/安全/基准脚本79测试通过；实际MySQL8.4.8执行0059后9项事务用例通过且仅删除本次新建随机测试库。后端types/build、前端完整lint/types/build、shared-types、15小TS完整Biome及diff检查通过；不宣称全仓Biome。前端bundle体积警告仍在，真实千问15秒/768-token预算与质量尚未验证。
+
+最终审查追加的3Important均有行为RED→GREEN：list/detail先接管新轮清掉旧运行态；无ACK传输失败保守阻止会话内重复写入；未知create ACK不覆盖先到结果。8新用例中7实际失败后修复，142相关测试和完整前端复跑通过。两条旧fixture改为明确应用拒绝，继续覆盖合法纠错及历史顺序；不把网络失败误当未写入。无身份的传输未知不靠文本相等或后续任意新问题解锁，当前会话保护不承诺跨刷新/跨进程恢复。独立只读复审无剩余Critical/Important/必修Minor，准入PR/合并/本地候选封存，不是生产验收。
+
+新只读核对实际生产为PR231 `107857fe70503e30691073f267d87275596edb20`、唯一Orchestrator uid998、两站healthz 200/ok；代码目标基线PR236 `8774feaf772f596dbfff94f41cccc3b1c2521c4b` 与生产不同。发布说明见 `docs/runbooks/qwen-core-delivery-release.md`。用户要求停在生产迁移/切换/重启/灰度之前；不复用旧包、旧授权回执、旧actor pin。封存源码/产物不是新生产工具或租约已验证。
+
 ### Task 3B-2c：旧执行规范的同源快照与生成守卫
 
 本步骤只补齐 coordinator/runner 可独立核验的旧规范承载能力；不移除 router 的 legacy 排除条件，不改旧浏览器转交状态，不宣称已完成旧入口迁移。沿用已批准的单线程执行，不增加依赖。

@@ -497,6 +497,9 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
   tasks: [
     'external_id',
     'user_id',
+    'execution_id',
+    'execution_revision',
+    'core_record_version',
     'session_id',
     'skill_id',
     'status',

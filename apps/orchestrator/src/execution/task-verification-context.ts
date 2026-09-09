@@ -30,6 +30,8 @@ export interface TaskVerificationContext {
     }[];
   } | null;
   readonly referencePlan: string | null;
+  /** Prior model output, preserved as untrusted reference, never as user-supplied data. */
+  readonly referenceContext?: string;
   readonly legacyWorkflow?: LegacyWorkflowContext;
   readonly materials: readonly VerificationMaterial[];
 }
@@ -83,6 +85,7 @@ const contextSchema = z
       .strict()
       .nullable(),
     referencePlan: z.string().nullable(),
+    referenceContext: z.string().optional(),
     legacyWorkflow: z
       .object({
         id: z.literal('douyin-livestream-review'),
@@ -132,7 +135,9 @@ export function createTaskVerificationContext(input: unknown): TaskVerificationC
   return freezeSnapshot(context);
 }
 
-export function renderVerificationUserIntent(context: TaskVerificationContext): string {
+export function renderVerificationUserIntent(
+  context: Pick<TaskVerificationContext, 'initialRequest' | 'userTurns'>,
+): string {
   return (
     context.initialRequest + context.userTurns.map((turn) => `\n\n[用户补充]\n${turn}`).join('')
   );

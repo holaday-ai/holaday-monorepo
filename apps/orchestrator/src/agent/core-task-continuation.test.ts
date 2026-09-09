@@ -3,6 +3,7 @@ import { runIntake } from '../execution/expert-workflow-intake.js';
 import { getExpertWorkflowById } from '../execution/expert-workflow-registry.js';
 import { prepareCoreContinuation } from './core-task-continuation.js';
 import { readCoreTaskRecord } from './core-task-record.js';
+import { resolveFixedExpertWorkflow } from './supercar/expert-workflows.js';
 
 function fixture(patch: Record<string, unknown> = {}) {
   const result = {
@@ -44,6 +45,129 @@ function fixture(patch: Record<string, unknown> = {}) {
 }
 
 describe('core continuation restores server-owned history and stage', () => {
+  function legacyInput() {
+    const initialRequest = '帮我复盘抖音直播';
+    const match = resolveFixedExpertWorkflow('douyin-livestream-review', initialRequest);
+    if (!match || match.routeOverride !== 'generate') throw new Error('SYNTHETIC_MATCH_MISSING');
+    const input = fixture({
+      initialRequest,
+      userTurns: [],
+      phase: 'direct',
+      fileIds: [],
+      legacyWorkflow: {
+        id: match.id,
+        promptPreamble: match.promptPreamble,
+        missingInputs: match.missingInputs,
+        routeOverride: match.routeOverride,
+      },
+      resume: {
+        schemaVersion: 1,
+        expertMode: 'auto',
+        skillId: null,
+        legacyWorkflowId: match.id,
+        intakeBindings: [],
+      },
+    });
+    input.fileIds = [];
+    return input;
+  }
+  it('refreshes fixed legacy intake from complete raw history without replacing lineage', () => {
+    const input = legacyInput();
+    input.message = '  昨天，数据在电商罗盘后台；也参考小红书观点。  ';
+    const prepared = prepareCoreContinuation(input);
+    expect(prepared.requirements.userTurns).toEqual([input.message]);
+    expect(prepared.requirements.legacyWorkflow).toMatchObject({
+      id: 'douyin-livestream-review',
+      missingInputs: [],
+      routeOverride: 'browser',
+    });
+    expect(prepared.requirements.workflow).toBeNull();
+    expect(prepared.requirements.phase).toBe('direct');
+  });
+  it('combines distinct actual metrics supplied across separate raw replies', () => {
+    const input = legacyInput();
+    input.message = '昨天\nGMV: 100';
+    const first = prepareCoreContinuation(input);
+    const result = { coreRequirements: first.requirements };
+    const record = readCoreTaskRecord({ head: input.record.head, result });
+    if (record.kind !== 'core') throw new Error('SYNTHETIC_RECORD_REJECTED');
+    const prepared = prepareCoreContinuation({
+      record,
+      result,
+      awaitingQuestion: null,
+      message: 'UV: 200\n来源：电商罗盘导出',
+    });
+    expect(prepared.requirements.legacyWorkflow).toMatchObject({
+      missingInputs: [],
+      routeOverride: 'generate',
+    });
+    expect(prepared.requirements.userTurns).toEqual([input.message, 'UV: 200\n来源：电商罗盘导出']);
+  });
+  it.each(['promptPreamble', 'routeOverride', 'missingInputs'] as const)(
+    'refuses a changed saved legacy policy field: %s',
+    (field) => {
+      const input = legacyInput();
+      const result = {
+        coreRequirements: {
+          ...input.record.requirements,
+          legacyWorkflow: {
+            ...input.record.requirements.legacyWorkflow,
+            ...(field === 'routeOverride' ? { missingInputs: [] } : {}),
+            [field]:
+              field === 'promptPreamble'
+                ? 'changed policy'
+                : field === 'routeOverride'
+                  ? 'browser'
+                  : [],
+          },
+        },
+      };
+      const record = readCoreTaskRecord({ head: input.record.head, result });
+      if (record.kind !== 'core') throw new Error('SYNTHETIC_RECORD_REJECTED');
+      expect(() => prepareCoreContinuation({ ...input, record, result })).toThrow('无法完整恢复');
+    },
+  );
+  it('uses newly attached data while an intent to upload stays missing', () => {
+    const input = legacyInput();
+    input.message = '昨天，我稍后上传数据';
+    expect(prepareCoreContinuation(input).requirements.legacyWorkflow?.missingInputs).toEqual([
+      'dataSource',
+    ]);
+    input.fileIds = ['fil_new'];
+    expect(prepareCoreContinuation(input).requirements.legacyWorkflow).toMatchObject({
+      missingInputs: [],
+      routeOverride: 'generate',
+    });
+  });
+  it('keeps a bare session answer across a second real saved continuation', () => {
+    const input = legacyInput();
+    input.message = '昨天';
+    const first = prepareCoreContinuation(input);
+    const next = fixture(JSON.parse(JSON.stringify(first.requirements)));
+    next.message = '数据在罗盘';
+    next.fileIds = [];
+    const second = prepareCoreContinuation(next);
+    expect(second.requirements.userTurns).toEqual(['昨天', '数据在罗盘']);
+    expect(second.requirements.legacyWorkflow).toMatchObject({
+      missingInputs: [],
+      routeOverride: 'browser',
+    });
+  });
+  it('uses explicit pasted metrics as data, not as a request to open the named platform', () => {
+    const input = legacyInput();
+    input.message = '昨天\nGMV: 100\nUV: 200\n订单: 10\n来源：罗盘导出';
+    expect(prepareCoreContinuation(input).requirements.legacyWorkflow).toMatchObject({
+      missingInputs: [],
+      routeOverride: 'generate',
+    });
+  });
+  it('does not treat a future upload or repeated single metric as complete pasted data', () => {
+    const input = legacyInput();
+    input.message = '昨天，我稍后上传数据如下\nGMV: 100\nGMV: 200';
+    expect(prepareCoreContinuation(input).requirements.legacyWorkflow?.missingInputs).toEqual([
+      'dataSource',
+    ]);
+  });
   it.each(['美'.repeat(40), '美妆护肤，或者母婴我还没决定'])(
     'does not bind a partially parsed bare answer: %s',
     (message) => {

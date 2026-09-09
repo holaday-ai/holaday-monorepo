@@ -118,6 +118,9 @@ export async function startCoreTaskExecution(
     phase: admission.requirements.phase,
     workflow: admission.requirements.workflow,
     referencePlan: admission.requirements.referencePlan,
+    ...(admission.requirements.referenceContext !== undefined
+      ? { referenceContext: admission.requirements.referenceContext }
+      : {}),
     ...(admission.requirements.legacyWorkflow
       ? { legacyWorkflow: admission.requirements.legacyWorkflow }
       : {}),

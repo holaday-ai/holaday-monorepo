@@ -32,7 +32,8 @@ export async function createCoreGenerateTask(args: {
   if (
     (requirements.phase !== 'draft' && requirements.phase !== 'direct') ||
     !requirements.resume ||
-    requirements.resume.legacyWorkflowId !== null
+    (requirements.resume.legacyWorkflowId !== null &&
+      requirements.legacyWorkflow?.id !== requirements.resume.legacyWorkflowId)
   )
     throw new TRPCError({ code: 'BAD_REQUEST', message: '任务方案上下文无法完整恢复。' });
   assertCoreTaskInput({ ...requirements, blocks });

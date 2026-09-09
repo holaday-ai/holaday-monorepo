@@ -2,6 +2,7 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { runIntake } from '../execution/expert-workflow-intake.js';
 import { getExpertWorkflowById } from '../execution/expert-workflow-registry.js';
+import { restoreCoreLegacyWorkflow } from './core-legacy-workflow.js';
 import type { CoreAdmission, CoreTaskHead } from './core-task-admission.js';
 import { bindCoreIntakeReply, renderCoreIntake } from './core-task-intake.js';
 import { parseCoreRequirements } from './core-task-requirements.js';
@@ -19,7 +20,7 @@ const savedPlanSchema = z.object({
   planReplyHistory: z.array(z.string()),
   planFileIds: z.array(z.string().min(1).max(32)).max(5),
   planWorkflowId: z.string().min(1).nullable(),
-  planLegacyWorkflowId: z.null(),
+  planLegacyWorkflowId: z.literal('douyin-livestream-review').nullable(),
   // These old derived strings do not retain their source turn/field identity.
   planIntakeContext: z.array(z.string()).max(0).optional(),
 });
@@ -29,6 +30,7 @@ export function prepareLegacyPlanContinuation(input: {
   head: CoreTaskHead;
   result: unknown;
   roleId: string | null | undefined;
+  originalIntent: string;
   origin: string;
   message: string;
   awaitingQuestion?: string | null;
@@ -38,7 +40,6 @@ export function prepareLegacyPlanContinuation(input: {
   if (
     !raw ||
     raw.executionMode !== 'generate' ||
-    raw.planLegacyWorkflowId !== null ||
     !(
       raw.planMode === 'awaiting_approval' ||
       (raw.planMode === undefined && raw.approvedPlanText !== undefined)
@@ -54,6 +55,11 @@ export function prepareLegacyPlanContinuation(input: {
     )
       throw new Error('INVALID_LEGACY_HEAD');
     const saved = savedPlanSchema.parse(raw);
+    // The old follow-up producer prepended model output to planInitialIntent.
+    // Only equality with the separately stored raw request proves this field
+    // was not decorated. Do not strip text and invent historical provenance.
+    if (saved.planInitialIntent !== input.originalIntent)
+      throw new Error('UNPROVEN_LEGACY_INPUT_SOURCE');
     if (!saved.planText.trim() || saved.selectedRole !== input.roleId)
       throw new Error('INVALID_LEGACY_ROLE');
     const workflow = saved.planWorkflowId ? getExpertWorkflowById(saved.planWorkflowId) : null;
@@ -69,19 +75,25 @@ export function prepareLegacyPlanContinuation(input: {
         !workflow)
     )
       throw new Error('INVALID_LEGACY_APPROVAL');
+    const originalInput = {
+      initialRequest: saved.planInitialIntent,
+      userTurns: saved.planReplyHistory,
+      fileIds: [...new Set([...saved.planFileIds, ...(input.fileIds ?? [])])],
+    };
     const previous = parseCoreRequirements(
       {
-        initialRequest: saved.planInitialIntent,
-        userTurns: saved.planReplyHistory,
+        ...originalInput,
         phase: approved ? 'approved_execution' : 'draft',
         workflow: workflow ? { id: workflow.workflowId, sections: workflow.reportSections } : null,
         referencePlan: saved.planText,
-        fileIds: [...new Set([...saved.planFileIds, ...(input.fileIds ?? [])])],
+        ...(saved.planLegacyWorkflowId
+          ? { legacyWorkflow: restoreCoreLegacyWorkflow(saved.planLegacyWorkflowId, originalInput) }
+          : {}),
         resume: {
           schemaVersion: 1,
           expertMode: saved.expertMode,
           skillId: saved.selectedRole,
-          legacyWorkflowId: null,
+          legacyWorkflowId: saved.planLegacyWorkflowId,
           intakeBindings: [],
         },
       },
@@ -98,6 +110,14 @@ export function prepareLegacyPlanContinuation(input: {
           {
             ...previous,
             userTurns: [...previous.userTurns, input.message],
+            ...(saved.planLegacyWorkflowId
+              ? {
+                  legacyWorkflow: restoreCoreLegacyWorkflow(saved.planLegacyWorkflowId, {
+                    ...previous,
+                    userTurns: [...previous.userTurns, input.message],
+                  }),
+                }
+              : {}),
             phase:
               approved || isExplicitPlanApproval(input.message) ? 'approved_execution' : 'revise',
             resume: {

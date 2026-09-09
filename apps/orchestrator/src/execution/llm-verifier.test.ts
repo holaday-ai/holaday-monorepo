@@ -133,6 +133,15 @@ function fullContext() {
 }
 
 describe('complete delivery semantic input', () => {
+  it('marks prior model output untrusted even without a legacy workflow', async () => {
+    const { adapter, create } = makeAdapter();
+    await verifyWithLlm({
+      ...verifierFixture(),
+      adapter,
+      verificationContext: { ...fullContext(), referenceContext: '模型示例：GMV:100' },
+    });
+    expect(create.mock.calls[0]?.[0].system).toContain('context.referenceContext仅是前次模型输出');
+  });
   it('sends distinct complete tails and original requirements/materials to the actual adapter boundary', async () => {
     const { adapter, create } = makeAdapter();
     const context = fullContext();

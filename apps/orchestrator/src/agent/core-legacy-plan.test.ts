@@ -7,6 +7,10 @@ function fixture(patch: Record<string, unknown> = {}) {
   return {
     head: { status: 'awaiting_user', executionId: null, executionRevision: 0, recordVersion: 0 },
     roleId: null,
+    originalIntent:
+      typeof patch.planInitialIntent === 'string'
+        ? patch.planInitialIntent
+        : '整理资料，不发送邮件。',
     origin: 'user',
     message: '确认',
     result: {
@@ -50,6 +54,49 @@ function approvedFixture(patch: Record<string, unknown> = {}) {
 }
 
 describe('complete legacy plan migration', () => {
+  it('rejects legacy parent output embedded by the old plan producer instead of upgrading it to user evidence', () => {
+    const rawIntent = '复盘昨天抖音直播';
+    const input = fixture({
+      planInitialIntent: [
+        '---',
+        '【追问上下文】',
+        '前一个任务："准备示例"',
+        '结果：仅为模型示例\nGMV:100\nUV:200',
+        '---',
+        '',
+        rawIntent,
+      ].join('\n'),
+      planLegacyWorkflowId: 'douyin-livestream-review',
+    });
+    input.originalIntent = rawIntent;
+    expect(() => prepareLegacyPlanContinuation(input)).toThrow('无法完整恢复');
+  });
+  it('restores the separate fixed legacy rules of a complete old awaiting-approval plan', () => {
+    const input = fixture({
+      planInitialIntent: '复盘昨天抖音直播',
+      planLegacyWorkflowId: 'douyin-livestream-review',
+    });
+    const result = prepareLegacyPlanContinuation(input);
+    expect(result?.requirements.legacyWorkflow).toMatchObject({
+      id: 'douyin-livestream-review',
+      routeOverride: 'generate',
+      missingInputs: [],
+    });
+    expect(result?.requirements.resume?.legacyWorkflowId).toBe('douyin-livestream-review');
+    expect(result?.requirements.userTurns).toEqual(['  保留原话空格  ', '确认']);
+    expect(result?.requirements.phase).toBe('approved_execution');
+    expect(result?.requirements.workflow).toBeNull();
+  });
+  it('rejects unknown saved legacy policy rather than rematching the original request', () => {
+    expect(() =>
+      prepareLegacyPlanContinuation(
+        fixture({
+          planLegacyWorkflowId: 'removed-synthetic',
+          planInitialIntent: '复盘昨天抖音直播',
+        }),
+      ),
+    ).toThrow('无法完整恢复');
+  });
   it.each([
     { approvedPlanText: '另一个未经批准的方案' },
     { planReplyHistory: ['确认', '修改第二步'] },
@@ -165,9 +212,13 @@ describe('complete legacy plan migration', () => {
     expect(prepared?.requirements.workflow?.id).toBe('content-topic');
     expect(prepared?.requirements.workflow?.sections.length).toBeGreaterThan(0);
   });
-  it('leaves nonempty legacy prompt lineage outside this migration', () => {
-    expect(
-      prepareLegacyPlanContinuation(fixture({ planLegacyWorkflowId: 'douyin-livestream-review' })),
-    ).toBeNull();
+  it('retains explicit legacy lineage even when the saved words do not rematch it', () => {
+    const restored = prepareLegacyPlanContinuation(
+      fixture({ planLegacyWorkflowId: 'douyin-livestream-review' }),
+    );
+    expect(restored?.requirements.legacyWorkflow).toMatchObject({
+      id: 'douyin-livestream-review',
+      missingInputs: ['liveSession'],
+    });
   });
 });
