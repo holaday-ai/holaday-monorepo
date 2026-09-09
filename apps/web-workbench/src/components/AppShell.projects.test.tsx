@@ -115,6 +115,8 @@ const TEAM_PROJECT = {
 const TASKS = {
   tasks: [
     {
+      executionId: null,
+      executionRevision: 0,
       taskId: 'tsk_personal',
       intent: '整理个人研究',
       title: '个人项目任务',

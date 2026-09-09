@@ -4,7 +4,7 @@ import {
   type TaskOrigin,
   newExternalId,
 } from '@holaday/shared-types';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { type ConsumeReason, QuotaService } from '../quota/quota-service.js';
 
@@ -33,6 +33,22 @@ import {
   taskRunnerOutcomeSourceStatuses,
 } from '../task-status.js';
 import type { PendingConfirm, PlannedStep, TaskState } from './task-controller.js';
+
+// Compatibility writes must not mutate a core execution admitted after the
+// router's read. Keep the same owner/origin/legacy predicate on read and CAS.
+function legacyReplyGuard(taskId: string, userId: number | undefined, origin: TaskOrigin) {
+  if (userId === undefined) return undefined;
+  if (!Number.isSafeInteger(userId) || userId <= 0) throw new Error('LEGACY_REPLY_SCOPE_INVALID');
+  return and(
+    eq(tasks.externalId, taskId),
+    eq(tasks.status, 'awaiting_user'),
+    eq(tasks.userId, userId),
+    eq(tasks.origin, origin),
+    isNull(tasks.executionId),
+    eq(tasks.executionRevision, 0),
+    eq(tasks.coreRecordVersion, 0),
+  );
+}
 
 /**
  * Persists TaskController state to MySQL. Phase 0 scope:
@@ -390,13 +406,17 @@ export class TaskRepository {
     return { persisted: true };
   }
 
-  async markAwaitingReplyResumed(taskExternalId: string): Promise<{ persisted: boolean }> {
+  async markAwaitingReplyResumed(taskExternalId: string, legacyUserId?: number): Promise<{ persisted: boolean }> {
+    const guard = legacyReplyGuard(taskExternalId, legacyUserId, this.taskOrigin);
     const [taskRow] = await this.db
       .select({ id: tasks.id })
       .from(tasks)
-      .where(eq(tasks.externalId, taskExternalId))
+      .where(guard ?? eq(tasks.externalId, taskExternalId))
       .limit(1);
-    if (!taskRow) throw new Error(`task ${taskExternalId} not found in DB`);
+    if (!taskRow) {
+      if (guard) return { persisted: false };
+      throw new Error(`task ${taskExternalId} not found in DB`);
+    }
 
     let persisted = true;
     await this.db.transaction(async (tx) => {
@@ -410,7 +430,7 @@ export class TaskRepository {
           errorCode: null,
           errorMessage: null,
         })
-        .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')));
+        .where(guard ?? and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')));
       if (extractMysqlAffectedRows(result) === 0) {
         persisted = false;
         return;
@@ -429,13 +449,18 @@ export class TaskRepository {
   async markAwaitingReplyCompleted(
     taskExternalId: string,
     resultPayload: Record<string, unknown>,
+    legacyUserId?: number,
   ): Promise<{ persisted: boolean }> {
+    const guard = legacyReplyGuard(taskExternalId, legacyUserId, this.taskOrigin);
     const [taskRow] = await this.db
       .select({ id: tasks.id })
       .from(tasks)
-      .where(eq(tasks.externalId, taskExternalId))
+      .where(guard ?? eq(tasks.externalId, taskExternalId))
       .limit(1);
-    if (!taskRow) throw new Error(`task ${taskExternalId} not found in DB`);
+    if (!taskRow) {
+      if (guard) return { persisted: false };
+      throw new Error(`task ${taskExternalId} not found in DB`);
+    }
 
     let persisted = true;
     await this.db.transaction(async (tx) => {
@@ -451,7 +476,7 @@ export class TaskRepository {
           result: resultPayload,
           completedAt: new Date(),
         })
-        .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')));
+        .where(guard ?? and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')));
       if (extractMysqlAffectedRows(result) === 0) {
         persisted = false;
         return;

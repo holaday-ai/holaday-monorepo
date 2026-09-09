@@ -24,6 +24,7 @@ import type {
 import { isTerminalStatus } from '@/types/task';
 import type { ImageCreationOptions } from '@/types/image';
 import type { VideoCreationOptions } from '@/types/video';
+import { type ExecutionIdentity, readExecutionIdentity, TaskExecutionOrder } from './task-execution-order';
 
 /**
  * The surface where a task began. This is routing context, not user-authored
@@ -312,6 +313,33 @@ type AwaitingRuntimeStatePatch = Pick<
   | 'subStatusByTask'
 >;
 
+function clearCoreRoundRuntime(prev: TaskStore, ids: ReadonlySet<string>): Partial<TaskStore> {
+  if (ids.size === 0) return {};
+  return {
+    streamingByTask: omitRuntimeKeys(prev.streamingByTask, ids),
+    progressByTask: omitRuntimeKeys(prev.progressByTask, ids),
+    thinkingByTask: omitRuntimeKeys(prev.thinkingByTask, ids),
+    awaitingUserByTask: omitRuntimeKeys(prev.awaitingUserByTask, ids),
+    suggestionsByTask: omitRuntimeKeys(prev.suggestionsByTask, ids),
+    captchaWaitByTask: omitRuntimeKeys(prev.captchaWaitByTask, ids),
+    executorFallbackByTask: omitRuntimeKeys(prev.executorFallbackByTask, ids),
+    degradeByTask: omitRuntimeKeys(prev.degradeByTask, ids),
+    subStatusByTask: omitRuntimeKeys(prev.subStatusByTask, ids),
+    stepsByTask: omitRuntimeKeys(prev.stepsByTask, ids),
+    webSearchByTask: omitRuntimeKeys(prev.webSearchByTask, ids),
+    screencastByTask: omitRuntimeKeys(prev.screencastByTask, ids),
+    terminalTaskIds: new Set([...prev.terminalTaskIds].filter(id => !ids.has(id))),
+    animatedTaskIds: new Set([...prev.animatedTaskIds].filter(id => !ids.has(id))),
+  };
+}
+
+// Only explicit application rejections are known not to have accepted this
+// operation. A missing response or INTERNAL_SERVER_ERROR is not proof of failure.
+function isDefiniteWriteRejection(error: unknown): boolean {
+  if (!isTaskListRecord(error) || !isTaskListRecord(error.data)) return false;
+  return ['BAD_REQUEST', 'UNAUTHORIZED', 'FORBIDDEN', 'NOT_FOUND', 'PRECONDITION_FAILED', 'TOO_MANY_REQUESTS'].includes(String(error.data.code));
+}
+
 export function pruneRuntimeStateForTerminalTasks(
   prev: Pick<TaskStore, RuntimeStateKey | 'terminalTaskIds'>,
   tasks: readonly UiTask[],
@@ -520,6 +548,10 @@ function preserveFinalTaskRows(
 }
 
 function preserveClientTaskContext(current: UiTask, incoming: UiTask): UiTask {
+  // List rows from an older server/snapshot cannot erase a known core round.
+  if (current.executionRevision && (!incoming.executionRevision ||
+    incoming.executionRevision < current.executionRevision ||
+    (incoming.executionRevision === current.executionRevision && incoming.executionId !== current.executionId))) return current;
   const replyToTaskId = incoming.replyToTaskId ?? current.replyToTaskId;
   const executionMode = incoming.executionMode ?? current.executionMode;
   const awaitingKind =
@@ -544,6 +576,7 @@ function preserveClientTaskContext(current: UiTask, incoming: UiTask): UiTask {
 }
 
 function shouldPreserveFinalTaskRow(current: UiTask, incoming: UiTask): boolean {
+  if (incoming.executionRevision && incoming.executionRevision > (current.executionRevision ?? 0)) return false;
   return isTerminalStatus(current.status) && !isTerminalStatus(incoming.status);
 }
 
@@ -589,6 +622,53 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   let sessionGeneration = 0;
   const pendingReplies = new Map<string, number>();
   const failedLocalReplies = new Map<string, Array<{ at: number; text: string }>>();
+  const executionOrder = new TaskExecutionOrder();
+  const uncertainReplies = new Map<string, ExecutionIdentity | 'invalid'>();
+  const observedExecutions = new Map<string, ExecutionIdentity>();
+  const uncertainCreations = new Map<string, string>();
+  const uncertainWriteMessage = '任务接收或创建状态未确认，请保留输入并刷新核对，不要重复提交。';
+  function seedExecutionOrder(taskId: string): void {
+    const task = get().tasks.find(t => t.taskId === taskId);
+    if (task) executionOrder.seed(taskId, task, isTerminalStatus(task.status));
+  }
+  function coversPending(observed: ExecutionIdentity | undefined, pending: ExecutionIdentity | 'invalid'): boolean {
+    return !!observed && pending !== 'invalid' && (observed.executionRevision > pending.executionRevision ||
+      (observed.executionRevision === pending.executionRevision && observed.executionId === pending.executionId));
+  }
+  function confirmObservedExecution(taskId: string, identity: ExecutionIdentity): void {
+    observedExecutions.set(taskId, identity);
+    const pending = uncertainReplies.get(taskId);
+    if (pending && coversPending(identity, pending)) uncertainReplies.delete(taskId);
+    for (const [key, id] of uncertainCreations) if (id === taskId) uncertainCreations.delete(key);
+  }
+  function captureListVersions(): Map<string, number> {
+    return new Map(get().tasks.map(task => {
+      seedExecutionOrder(task.taskId);
+      return [task.taskId, executionOrder.version(task.taskId)];
+    }));
+  }
+  function preserveObservedListRows(rows: UiTask[], versions: Map<string, number>): UiTask[] {
+    const current = new Map(get().tasks.map(task => [task.taskId, task]));
+    return rows.map(row => {
+      const live = current.get(row.taskId);
+      return live?.executionId && row.executionId === live.executionId &&
+        row.executionRevision === live.executionRevision && executionOrder.version(row.taskId) !== (versions.get(row.taskId) ?? 0)
+        ? live : row;
+    });
+  }
+  function adoptListRounds(prev: TaskStore, rows: UiTask[]): Partial<TaskStore> {
+    const previous = new Map(prev.tasks.map(task => [task.taskId, task]));
+    const changed = new Set<string>();
+    for (const row of rows) {
+      const identity = readExecutionIdentity(row);
+      const old = previous.get(row.taskId);
+      if (identity && identity !== 'invalid' && (!old?.executionId || identity.executionRevision > (old.executionRevision ?? 0))) {
+        changed.add(row.taskId);
+        executionOrder.seed(row.taskId, identity, isTerminalStatus(row.status));
+      }
+    }
+    return clearCoreRoundRuntime(prev, changed);
+  }
 
   function abortInFlightHydrate(): void {
     hydrateToken += 1;
@@ -604,25 +684,34 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
   async function hydrateDetail(taskId: string): Promise<void> {
     if ((pendingReplies.get(taskId) ?? 0) > 0) return;
+    seedExecutionOrder(taskId);
     const myToken = ++hydrateToken;
     const generation = captureSessionGeneration();
     const suggestionsAtRequestStart = get().suggestionsByTask[taskId];
+    const versionAtRequestStart = executionOrder.version(taskId);
     try {
       const rawDetail = await trpc.tasks.detail.query({ taskId });
       if (myToken !== hydrateToken || !isCurrentSession(generation)) return;
       const detail: Record<string, unknown> = isTaskListRecord(rawDetail)
         ? rawDetail
         : {};
+      const detailIdentity = readExecutionIdentity(detail);
+      const detailOrder = executionOrder.accept(taskId, detail, { source: 'detail', since: versionAtRequestStart,
+        terminal: isTerminalStatus(normaliseStatus(safeTaskListText(detail.status))) });
+      if (detailOrder === 'ignore' || detailOrder === 'reconcile') return;
       const steps = normalizeTaskDetailSteps(detail.steps);
       set((prev) => {
+        const roundPatch = detailOrder === 'new' ? clearCoreRoundRuntime(prev, new Set([taskId])) : {};
+        prev = { ...prev, ...roundPatch };
         const existingTask = prev.tasks.find((t) => t.taskId === taskId);
         const rawDetailStatus = safeTaskListText(detail.status);
         const detailStatus = rawDetailStatus
           ? normaliseStatus(rawDetailStatus)
           : existingTask?.status ?? 'unknown';
-        if (hasFinalTaskRow(prev, taskId) && !isTerminalStatus(detailStatus)) {
+        if (detailOrder !== 'new' && hasFinalTaskRow(prev, taskId) && !isTerminalStatus(detailStatus)) {
           return prev;
         }
+        if (detailIdentity && detailIdentity !== 'invalid' && (detailStatus === 'awaiting_user' || isTerminalStatus(detailStatus))) confirmObservedExecution(taskId, detailIdentity);
         const rawResultText = extractSummary(detail.result);
         const rawErrorText = safeTaskListText(detail.errorMessage);
         const resultText =
@@ -641,11 +730,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           || safeTaskListText(detail.planText) || undefined;
         // Executing rows can still carry the previous plan's JSON. Restore
         // history only once the next draft/final result has been persisted.
-        const rawPlanReplies = detailStatus === 'executing'
-          ? undefined : resultObj.planReplyHistory ?? metadata.planReplyHistory;
+        const coreHistory = isTaskListRecord(resultObj.coreRequirements) ? resultObj.coreRequirements.userTurns : undefined;
+        const rawPlanReplies = coreHistory ?? (detailStatus === 'executing'
+          ? undefined : resultObj.planReplyHistory ?? metadata.planReplyHistory);
         const savedPlanReplies = Array.isArray(rawPlanReplies)
-          && rawPlanReplies.length <= 32
-          && rawPlanReplies.every((value): value is string => typeof value === 'string' && value.length <= 4_000)
+          && (coreHistory !== undefined
+            ? new TextEncoder().encode(JSON.stringify(rawPlanReplies)).byteLength <= 64 * 1024
+            : rawPlanReplies.length <= 32)
+          && rawPlanReplies.every((value): value is string => typeof value === 'string' && (coreHistory !== undefined || value.length <= 4_000))
             ? rawPlanReplies : null;
         const localReplies = prev.userRepliesByTask[taskId] ?? [];
         // Preserve a just-submitted local suffix until persistence catches up.
@@ -778,6 +870,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               t.taskId === taskId
                 ? {
                     ...t,
+                    ...(detailOrder === 'new' ? { resultText: undefined, planText: undefined, planStatus: undefined, awaitingKind: undefined } : {}),
+                    ...(detailIdentity && detailIdentity !== 'invalid' ? detailIdentity : {}),
                     status: detailStatus,
                     tickCount: Math.max(t.tickCount, steps.length),
                     ...(resultText ? { resultText } : {}),
@@ -804,6 +898,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           // synthesise UiTask from detail, prepend.
           const synth: UiTask = {
             taskId,
+            ...(detailIdentity && detailIdentity !== 'invalid' ? detailIdentity : {}),
             intent: safeTaskListText(detail.intent) || '未命名任务',
             title: safeNullableTaskListText(detail.title),
             status: detailStatus,
@@ -834,6 +929,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         })();
         const hydratedTask = nextTasks.find((task) => task.taskId === taskId);
         return {
+          ...roundPatch,
           stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
           ...(savedPlanReplies !== null ? {
             userRepliesByTask: { ...prev.userRepliesByTask, [taskId]: hydratedReplies },
@@ -858,6 +954,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             : {}),
           awaitingUserByTask: nextAwaitingUserByTask,
           tasks: nextTasks,
+          ...(detailOrder === 'new' && !isTerminalStatus(detailStatus)
+            ? { terminalTaskIds: omitTaskIdFromSet(prev.terminalTaskIds, taskId) } : {}),
           ...(hydratedTask
             ? pruneRuntimeStateForAwaitingUserTasks(prev, [hydratedTask])
             : {}),
@@ -986,13 +1084,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
   async refreshTaskList() {
     const generation = captureSessionGeneration();
+    const versions = captureListVersions();
     set({ loading: true, error: null });
     try {
       const res = await trpc.tasks.list.query({ limit: 50 });
       if (!isCurrentSession(generation)) return;
       const freshList = preserveFinalTaskRows(
         get().tasks,
-        normalizeTaskListRows(res?.tasks),
+        preserveObservedListRows(normalizeTaskListRows(res?.tasks), versions),
       );
       // P1-C: preserve the active selection's UiTask object across
       // a list refresh. Deep-linked oldies (not in the first 50) get
@@ -1015,14 +1114,19 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       // bootstrap, a sidebar / search / history click, or a
       // successful createTask. This call just delivers fresh task
       // data and re-hydrates the active selection if there is one.
-      set((prev) => ({
-        tasks,
-        loading: false,
-        tasksCursor: normalizeTaskListCursor(res?.nextCursor),
-        tasksHasMore: normalizeTaskListCursor(res?.nextCursor) != null,
-        ...pruneRuntimeStateForAwaitingUserTasks(prev, tasks),
-        ...pruneRuntimeStateForTerminalTasks(prev, tasks),
-      }));
+      set((prev) => {
+        const roundPatch = adoptListRounds(prev, tasks);
+        const current = { ...prev, ...roundPatch };
+        return {
+          ...roundPatch,
+          tasks,
+          loading: false,
+          tasksCursor: normalizeTaskListCursor(res?.nextCursor),
+          tasksHasMore: normalizeTaskListCursor(res?.nextCursor) != null,
+          ...pruneRuntimeStateForAwaitingUserTasks(current, tasks),
+          ...pruneRuntimeStateForTerminalTasks(current, tasks),
+        };
+      });
       if (prevSelected) {
         // Selection unchanged but the underlying detail might have
         // moved on (task completed, awaiting_user prompt added,
@@ -1044,6 +1148,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
   async loadMoreTasks() {
     const generation = captureSessionGeneration();
+    const versions = captureListVersions();
     const { tasksCursor, tasksHasMore, loadingMore } = get();
     if (loadingMore) return;
     if (!tasksHasMore || tasksCursor == null) return;
@@ -1051,20 +1156,23 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     try {
       const res = await trpc.tasks.list.query({ limit: 50, cursor: tasksCursor });
       if (!isCurrentSession(generation)) return;
-      const moreTasks = normalizeTaskListRows(res?.tasks);
+      const moreTasks = preserveObservedListRows(normalizeTaskListRows(res?.tasks), versions);
       set((prev) => {
         // De-dupe defensively in case a row landed on both pages
         // (e.g. a task whose id equals the cursor boundary). The
         // freshly-fetched row replaces the stale copy in place so
         // status/result updates land without the sidebar jumping.
         const merged = mergeTaskPagesReplacingDuplicates(prev.tasks, moreTasks);
+        const roundPatch = adoptListRounds(prev, merged);
+        const current = { ...prev, ...roundPatch };
         return {
+          ...roundPatch,
           tasks: merged,
           loadingMore: false,
           tasksCursor: normalizeTaskListCursor(res?.nextCursor),
           tasksHasMore: normalizeTaskListCursor(res?.nextCursor) != null,
-          ...pruneRuntimeStateForAwaitingUserTasks(prev, moreTasks),
-          ...pruneRuntimeStateForTerminalTasks(prev, moreTasks),
+          ...pruneRuntimeStateForAwaitingUserTasks(current, merged),
+          ...pruneRuntimeStateForTerminalTasks(current, merged),
         };
       });
     } catch (err) {
@@ -1220,7 +1328,10 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   },
 
   async replyToTask(taskId, message, fileIds) {
+    if (uncertainReplies.has(taskId)) return { error: uncertainWriteMessage };
+    seedExecutionOrder(taskId);
     const generation = captureSessionGeneration();
+    const versionAtSubmit = executionOrder.version(taskId);
     // A read started before this write cannot tell whether its snapshot includes
     // the new reply (texts may legitimately repeat). Discard it and read again
     // after all writes settle instead of merging by text or guessing an overlap.
@@ -1232,8 +1343,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     // left no trace of what the user said, which read like the reply
     // had vanished. If the mutation fails the message stays visible
     // (the toast explains) so the user can retry without retyping.
-    const trimmed = message.trim();
-    const entry = { at: Date.now(), text: trimmed };
+    const entry = { at: Date.now(), text: message };
     set((prev) => ({
       userRepliesByTask: {
         ...prev.userRepliesByTask,
@@ -1247,6 +1357,16 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
       });
       if (!isCurrentSession(generation)) return { ok: res.ok };
+      if (res.state === 'acceptedUnconfirmed') {
+        const pendingIdentity = readExecutionIdentity(res) ?? 'invalid';
+        if (coversPending(observedExecutions.get(taskId), pendingIdentity)) {
+          replySucceeded = true;
+          return { ok: true as const };
+        }
+        uncertainReplies.set(taskId, pendingIdentity);
+        set(prev => ({ error: uncertainWriteMessage, progressByTask: { ...prev.progressByTask, [taskId]: uncertainWriteMessage } }));
+        return { error: uncertainWriteMessage };
+      }
       replySucceeded = res.ok;
       // Fix 2 — backend tags reply outcome as `state: 'resumed' | 'stillAwaiting'`.
       // Only `resumed` means the supercar accepted the message and
@@ -1258,6 +1378,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         (res as { state?: 'resumed' | 'stillAwaiting' }).state ??
         (res.ok ? 'resumed' : null);
       if (state === 'resumed') {
+        seedExecutionOrder(taskId);
+        const order = executionOrder.accept(taskId, res, { source: 'ack', since: versionAtSubmit });
+        if (order === 'reconcile') void hydrateDetail(taskId);
+        if (order === 'ignore' || order === 'reconcile') return { ok: res.ok };
+        const identity = readExecutionIdentity(res);
         // Optimistically clear the awaiting-user state so the composer
         // flips back to the default mode. Also clear the mirrored
         // task-row awaitingKind/status immediately; otherwise the
@@ -1293,6 +1418,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               const { awaitingKind: _awaitingKind, resultText: _resultText, ...rest } = t;
               return {
                 ...rest,
+                ...(identity && identity !== 'invalid' ? identity : {}),
                 status: t.status === 'awaiting_user' ? 'executing' : t.status,
               };
             }),
@@ -1301,8 +1427,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       }
       return { ok: res.ok };
     } catch (err) {
-      const msg = taskStoreError(err);
+      const unknownWrite = !isDefiniteWriteRejection(err);
+      const msg = unknownWrite ? uncertainWriteMessage : taskStoreError(err);
       if (!isCurrentSession(generation)) return { error: msg };
+      // No returned identity means a later row cannot prove which request it
+      // belongs to. Keep this session locked; never infer acceptance from text.
+      if (unknownWrite) uncertainReplies.set(taskId, 'invalid');
       set({ error: msg });
       return { error: msg };
     } finally {
@@ -1390,6 +1520,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       return { error: msg };
     }
     const generation = captureSessionGeneration();
+    const creationKey = JSON.stringify([intent, fileIds ?? [], replyToTaskId, mode, expertMode, videoOptions, skillSelection, imageOptions, taskSource, stockContext]);
+    if (uncertainCreations.has(creationKey)) return { error: uncertainWriteMessage };
     const pickedViewportProfile =
       viewportProfile ??
       get().defaultViewportProfile ??
@@ -1434,6 +1566,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         viewportProfile: pickedViewportProfile,
       });
       if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
+      const createState = (res as { admissionState?: string }).admissionState;
+      const createIdentity = readExecutionIdentity(res as { executionId?: unknown; executionRevision?: unknown });
+      const observedCreation = observedExecutions.get(res.taskId);
+      const creationObserved = createIdentity === null ? Boolean(observedCreation)
+        : coversPending(observedCreation, createIdentity);
+      const creationUnconfirmed = (createState === 'creationUnconfirmed' || createState === 'acceptedUnconfirmed') && !creationObserved;
+      const createOrder = creationUnconfirmed ? 'ignore' : executionOrder.accept(res.taskId, res as { executionId?: unknown; executionRevision?: unknown }, { source: 'ack', since: 0 });
+      if (creationUnconfirmed) uncertainCreations.set(creationKey, res.taskId);
       // Optimistic insert at the top so the UI feels instant; the next
       // refreshTasks() will pick up the canonical server row.
       //
@@ -1453,7 +1593,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         taskId: res.taskId,
         intent,
         title: null,
-        status: (res.status as UiTaskStatus) ?? 'executing',
+        status: creationUnconfirmed ? 'unknown' : (res.status as UiTaskStatus) ?? 'executing',
+        ...(creationUnconfirmed ? { resultText: uncertainWriteMessage } : {}),
+        ...(createIdentity && createIdentity !== 'invalid' ? createIdentity : {}),
         tickCount: 0,
         createdAt,
         executionMode: serverExecutionMode ?? inferExecutionModeFromIntent(intent),
@@ -1468,7 +1610,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       // unless it explicitly needs user action.
       set((prev) => ({
         tasks: [
-          optimistic,
+          createOrder === 'ignore' && !creationUnconfirmed && prev.tasks.some(t => t.taskId === res.taskId)
+            ? { ...prev.tasks.find(t => t.taskId === res.taskId)!, intent, title: null, createdAt }
+            : optimistic,
           ...prev.tasks.filter(
             (t) => t.taskId !== res.taskId && t.taskId !== localTaskId,
           ),
@@ -1476,6 +1620,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         selectedTaskId: res.taskId,
         composerMode: 'task' as const,
         browserInteractive: false,
+        ...(creationUnconfirmed ? { error: uncertainWriteMessage } : {}),
       }));
       // Pin URL to the new task — same direct-navigate path as
       // selectTask. The deleted outbound effect used to do this off
@@ -1483,13 +1628,20 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       storeNavigate?.(res.taskId);
       // Fire-and-forget refresh so the row's server-authored fields
       // (createdAt, status) replace the optimistic stub once available.
+      if (creationUnconfirmed) return { error: uncertainWriteMessage };
+      if (createOrder === 'reconcile') void hydrateDetail(res.taskId);
       void get().refreshTasks();
       return { taskId: res.taskId };
     } catch (err) {
-      const msg = taskStoreError(err);
       if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
+      const unknownWrite = !isDefiniteWriteRejection(err);
+      const msg = unknownWrite ? uncertainWriteMessage : taskStoreError(err);
+      if (unknownWrite) uncertainCreations.set(creationKey, localTaskId);
       set((prev) => ({
-        tasks: prev.tasks.filter((t) => t.taskId !== localTaskId),
+        ...(unknownWrite ? { error: msg } : {}),
+        tasks: unknownWrite
+          ? prev.tasks.map(t => t.taskId === localTaskId ? { ...t, status: 'unknown' as const, resultText: msg } : t)
+          : prev.tasks.filter((t) => t.taskId !== localTaskId),
       }));
       return { error: msg };
     }
@@ -1512,6 +1664,29 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   },
 
   applyServerMessage(msg) {
+    if ('taskId' in msg && [
+      'server.task.stream', 'server.task.progress', 'server.task.terminal',
+      'server.supercar.awaiting_user', 'server.task.plan', 'server.supercar.suggestions',
+    ].includes(msg.type)) {
+      seedExecutionOrder(msg.taskId);
+      const identity = readExecutionIdentity(msg as { executionId?: unknown; executionRevision?: unknown });
+      const order = executionOrder.accept(msg.taskId, msg as { executionId?: unknown; executionRevision?: unknown }, {
+        source: 'event', terminal: msg.type === 'server.task.terminal',
+        afterTerminal: msg.type === 'server.supercar.suggestions',
+      });
+      if (order === 'reconcile') void hydrateDetail(msg.taskId);
+      if (order === 'ignore' || order === 'reconcile') return;
+      if (identity && identity !== 'invalid' && (msg.type === 'server.task.stream' || msg.type === 'server.task.terminal' || msg.type === 'server.supercar.awaiting_user')) confirmObservedExecution(msg.taskId, identity);
+      if (order === 'new' && identity && identity !== 'invalid') {
+        set(prev => ({
+          ...clearCoreRoundRuntime(prev, new Set([msg.taskId])),
+          tasks: (prev.tasks.some(t => t.taskId === msg.taskId) ? prev.tasks : [{ taskId: msg.taskId, intent: '任务', title: null, status: 'executing' as const, tickCount: 0, createdAt: new Date() }, ...prev.tasks]).map(t => t.taskId === msg.taskId ? {
+            ...t, ...identity, status: 'executing', resultText: undefined, awaitingKind: undefined,
+            planText: undefined, planStatus: undefined, verificationPassed: null, failedChecks: undefined,
+          } : t),
+        }));
+      }
+    }
     if (msg.type === 'server.error') {
       set({
         error: msg.message.trim() || `服务器连接错误：${msg.code}`,
@@ -2292,6 +2467,10 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
   reset() {
     sessionGeneration += 1;
+    executionOrder.clear();
+    uncertainReplies.clear();
+    observedExecutions.clear();
+    uncertainCreations.clear();
     pendingReplies.clear();
     failedLocalReplies.clear();
     abortInFlightHydrate();
@@ -2666,6 +2845,7 @@ function normalizeStepAntiBot(value: unknown): UiStep['antiBot'] | undefined {
 }
 
 export function toUiTask(row: ListRow): UiTask {
+  const identity = readExecutionIdentity(row);
   const opusUsed = (row as { opusUsed?: unknown }).opusUsed === true;
   const r = row as { starred?: unknown; starredAt?: unknown; projectId?: unknown };
   const status = normaliseStatus(safeTaskListText((row as { status?: unknown }).status) || 'unknown');
@@ -2746,6 +2926,7 @@ export function toUiTask(row: ListRow): UiTask {
       : undefined;
   return {
     taskId: safeTaskListText((row as { taskId?: unknown }).taskId),
+    ...(identity && identity !== 'invalid' ? identity : {}),
     intent: safeTaskListText((row as { intent?: unknown }).intent) || '未命名任务',
     title: safeNullableTaskListText((row as { title?: unknown }).title),
     status,

@@ -42,6 +42,12 @@ import { detectNavFailure } from '../../agent/nav-failure-detector.js';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js';
 import { prepareCoreTaskPlan } from '../../agent/core-task-plan.js';
+import { assertCoreTaskInput } from '../../agent/core-task-input.js';
+import { assertLegacyReplyRecord } from './tasks-reply-record.js';
+import { handleCoreTaskReply } from './tasks-core-reply.js';
+import { createCoreGenerateTask } from './tasks-core-create.js';
+import { restoreCoreLegacyWorkflow } from '../../agent/core-legacy-workflow.js';
+import type { CoreAcceptedRequirements } from '../../agent/core-task-requirements.js';
 import { publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { generateSuggestions } from '../../agent/suggestions-generator.js';
@@ -1293,16 +1299,20 @@ export const tasksRouter = router({
         message: err instanceof Error ? err.message : '主角图选择无效，请重新选择',
       });
     }
-    if (orderedFileIds.length > 0) {
+    // Routing only needs file presence. Defer parsing until the lane is fixed
+    // so core text can preserve the full source while other lanes keep their
+    // existing parser behavior. This still precedes every quota operation.
+    const parseCreateAttachments = async (completeText: boolean) => {
+      if (orderedFileIds.length === 0) return;
       const loaded = await fileService.loadMany(orderedFileIds, userRow.id);
-          const requestedFileIds = [...new Set(orderedFileIds)];
-          const loadedFileIds = new Set(loaded.map((file) => file.row.externalId));
-          if (requestedFileIds.some((fileId) => !loadedFileIds.has(fileId))) {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message: '有附件已失效或无法读取，请重新上传后再提交',
-            });
-          }
+      const requestedFileIds = [...new Set(orderedFileIds)];
+      const loadedFileIds = new Set(loaded.map((file) => file.row.externalId));
+      if (requestedFileIds.some((fileId) => !loadedFileIds.has(fileId))) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '有附件已失效或无法读取，请重新上传后再提交',
+        });
+      }
       if (input.imageOptions?.mode === 'lock_subject' && input.imageOptions.subjectFileId) {
         const subject = loaded.find(
           (file) => file.row.externalId === input.imageOptions?.subjectFileId,
@@ -1319,12 +1329,20 @@ export const tasksRouter = router({
           input.imageOptions?.mode === 'lock_subject' &&
           f.row.externalId === input.imageOptions.subjectFileId;
         try {
-          const parsed = await parseFileForPrompt(f.buffer, f.row.filename, f.row.mimetype);
+          const parsed = await parseFileForPrompt(
+            f.buffer, f.row.filename, f.row.mimetype, { completeText },
+          );
           if (isLockedSubject && !parsed.blocks.some((block) => block.type === 'image')) {
             throw new Error('主角图未解析为图像');
           }
           attachmentBlocks.push(...parsed.blocks);
         } catch (err) {
+          if (completeText) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: '附件超出完整核验范围或无法读取，请缩小材料或重新上传后再提交。',
+            });
+          }
           ctx.logger.warn(
             { err: err instanceof Error ? err.message : String(err), fileId: f.row.externalId },
             isLockedSubject
@@ -1337,13 +1355,13 @@ export const tasksRouter = router({
               message: '主角图读取失败，请重新上传一张清晰图片',
             });
           }
-              throw new TRPCError({
-                code: 'BAD_REQUEST',
-                message: '附件读取失败，请重新上传后再提交',
-              });
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: '附件读取失败，请重新上传后再提交',
+          });
         }
       }
-    }
+    };
 
     // Phase 14 audit follow-up — multi-turn 追问. When `replyToTaskId`
     // is set, the new task piggybacks on a previously completed/failed
@@ -1351,6 +1369,8 @@ export const tasksRouter = router({
     // intent + result so the model has full context for "为什么失败" /
     // "再试一次" style follow-ups.
     let parentContextBlock = '';
+    let parentUserContext = '';
+    let parentModelReference = '';
     let isFollowUp = false;
     /**
      * Phase 3 R1 (Codex follow-up #2) — recovered parent workflow id.
@@ -1435,6 +1455,8 @@ export const tasksRouter = router({
           : reason
             ? `${reasonLabel}：${reason}`
             : `状态：${parent.status}（无详细输出）`;
+      parentUserContext = `【前次用户要求】\n${parent.intent}\n\n【本次用户要求】\n`;
+      parentModelReference = outcomeLine;
       parentContextBlock = [
         '---',
         '【追问上下文】',
@@ -1634,6 +1656,65 @@ export const tasksRouter = router({
           ? 'video_creation'
           : null,
     });
+
+    await parseCreateAttachments(executionMode === 'generate');
+    // Preserve the existing specialized stock candidate path (including its
+    // generic fallback) until the remaining first-create migration is done.
+    const specializedStockLaneEligible =
+      shouldAllowSpecializedLaneOverride(typedRoutingWorkflow) &&
+      (appEnv.ASHARE_QA_ENABLED || validatedStockContext !== null) &&
+      ashareQaHandlesMode(executionMode) &&
+      (ASHARE_QA_ALLOWLIST.size === 0 || ASHARE_QA_ALLOWLIST.has(ctx.userId));
+    const coreCreateRequirements: CoreAcceptedRequirements | null =
+      executionMode === 'generate' &&
+      !specializedStockLaneEligible
+        ? {
+            initialRequest: parentUserContext + input.intent,
+            ...(parentModelReference ? { referenceContext: parentModelReference } : {}),
+            userTurns: [],
+            phase: input.mode === 'plan' ? 'draft' : 'direct',
+            workflow: typedWorkflow
+              ? { id: typedWorkflow.workflowId, sections: typedWorkflow.reportSections }
+              : null,
+            referencePlan: null,
+            fileIds: orderedFileIds,
+            ...(expertWorkflow ? { legacyWorkflow: restoreCoreLegacyWorkflow(expertWorkflow.id, {
+              initialRequest: parentUserContext + input.intent,
+              userTurns: [],
+              fileIds: orderedFileIds,
+            }) } : {}),
+            resume: {
+              schemaVersion: 1,
+              expertMode: expertModeOverride,
+              skillId: dispatchSkillId ?? null,
+              legacyWorkflowId: expertWorkflow?.id ?? null,
+              intakeBindings: [],
+            },
+          }
+        : null;
+    if (coreCreateRequirements) {
+      const flags = getExecutionFeatureFlags();
+      if (!flags.EVIDENCE_LEDGER || !flags.EXECUTION_CONTRACT || !flags.EXECUTION_VERIFIER)
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '任务方案核验尚未就绪，未创建任务或扣除额度。',
+        });
+    }
+    if (executionMode === 'generate') {
+      assertCoreTaskInput({
+        ...(coreCreateRequirements ?? {
+        initialRequest: parentContextBlock + input.intent,
+        userTurns: [],
+        phase: input.mode === 'plan' ? 'draft' : 'direct',
+        workflow: workflowIdentities.contractWorkflowId
+          ? { id: workflowIdentities.contractWorkflowId, sections: typedWorkflow?.reportSections ?? [] }
+          : null,
+        referencePlan: null,
+        fileIds: orderedFileIds,
+        }),
+        blocks: attachmentBlocks,
+      });
+    }
 
     // Qwen-only rollout boundary: browser/media lanes still depend on
     // legacy model controllers. Persist an honest terminal task before
@@ -2620,14 +2701,7 @@ export const tasksRouter = router({
     // the matcher hijacks it (bug: "按这个周报模板填充…" → answered as stock 600415).
     // widen（BOSS 批准，④ 验收关闭）：ASHARE_QA_ALLOWLIST 为空 = 全量用户可用（flag on）；
     // 非空 = 仅名单内（灰度）。
-    const ashareQaAllowed =
-          ASHARE_QA_ALLOWLIST.size === 0 || ASHARE_QA_ALLOWLIST.has(ctx.userId);
-    if (
-      shouldAllowSpecializedLaneOverride(typedRoutingWorkflow) &&
-      (appEnv.ASHARE_QA_ENABLED || validatedStockContext !== null) &&
-      ashareQaHandlesMode(executionMode) &&
-      ashareQaAllowed
-    ) {
+    if (specializedStockLaneEligible) {
       const stockRuntime = resolveGenerateRuntimeForUser(ctx.userId, userRow.modelDataRegion);
       const stockMessagesAdapter =
         stockRuntime.kind === 'ready' ? stockRuntime.messages('standard') : null;
@@ -3342,6 +3416,21 @@ export const tasksRouter = router({
       };
     }
     // ===== end template-fill fork =====
+
+    if (coreCreateRequirements) {
+      return createCoreGenerateTask({
+        ctx,
+        userId: userRow.id,
+        modelDataRegion: userRow.modelDataRegion,
+        wiring: modelRuntimeWiring,
+        taskRepo: repo,
+        requirements: coreCreateRequirements,
+        blocks: attachmentBlocks,
+        intent: input.intent,
+        roleId: dispatchRoleId,
+        opusUsed: opusActuallyConsumed,
+      });
+    }
 
     // ===== Phase 21b — generate-mode fork =====
     // Pure-generation tasks (write a PRD, translate this, summarize that)
@@ -8602,6 +8691,8 @@ export const tasksRouter = router({
           intent: tasksTable.intent,
           title: tasksTable.title,
           status: tasksTable.status,
+          executionId: tasksTable.executionId,
+          executionRevision: tasksTable.executionRevision,
           awaitingKind: tasksTable.awaitingKind,
           awaitingQuestion: tasksTable.awaitingQuestion,
           pauseReason: tasksTable.pauseReason,
@@ -8707,6 +8798,8 @@ export const tasksRouter = router({
           intent: r.intent,
           title: r.title,
           status: r.status,
+          executionId: r.executionId,
+          executionRevision: r.executionRevision,
           awaitingKind: r.awaitingKind,
           awaitingQuestion: r.awaitingQuestion,
           pauseReason: r.pauseReason,
@@ -8830,6 +8923,8 @@ export const tasksRouter = router({
         title: taskRow.title,
         status: taskRow.status,
         pauseReason: taskRow.pauseReason,
+        executionId: taskRow.executionId,
+        executionRevision: taskRow.executionRevision,
         // F11 follow-up — only meaningful while status='awaiting_user'.
         // SPA gates on status, so leaving the column populated for
         // historical rows is harmless. Returned alongside status so
@@ -8916,7 +9011,9 @@ export const tasksRouter = router({
         input,
       }): Promise<{
         ok: boolean;
-        state?: 'resumed' | 'stillAwaiting' | 'persistFailed';
+        state?: 'resumed' | 'stillAwaiting' | 'persistFailed' | 'acceptedUnconfirmed';
+        executionId?: string | null;
+        executionRevision?: number;
         handoff?: 'browser';
         handoffTaskId?: string;
       }> => {
@@ -8929,7 +9026,14 @@ export const tasksRouter = router({
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
       }
       const [taskRow] = await ctx.db
-        .select({ id: tasksTable.id })
+        .select({
+          id: tasksTable.id, status: tasksTable.status, result: tasksTable.result, intent: tasksTable.intent,
+          executionId: tasksTable.executionId,
+          executionRevision: tasksTable.executionRevision,
+          coreRecordVersion: tasksTable.coreRecordVersion,
+          awaitingQuestion: tasksTable.awaitingQuestion,
+          roleId: tasksTable.roleId,
+        })
         .from(tasksTable)
           .where(
             and(
@@ -8942,20 +9046,36 @@ export const tasksRouter = router({
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
       }
-      // F2 — resolve + parse attachments before classification so the
-      // resulting blocks are ready for whichever delivery path fires.
-      // Same pattern as tasks.create: any individual file that fails
-      // to load / parse is skipped with a warn; the reply still
-      // delivers with whatever did parse.
+      const replyResult = normalizeOutput(taskRow.result) as Record<string, unknown> | null;
+      const coreReply = await handleCoreTaskReply({ ctx, input, userId: userRow.id,
+        modelDataRegion: userRow.modelDataRegion, wiring: modelRuntimeWiring,
+        row: { ...taskRow, result: replyResult } });
+      if (coreReply) return coreReply;
+      assertLegacyReplyRecord({ ...taskRow, result: replyResult });
+      const coreTextReply = taskRow.status === 'awaiting_user' &&
+        replyResult?.executionMode === 'generate' && !hasParkedSupercarHandle(input.taskId);
+      if (coreTextReply) {
+        if (isPurePlanHold(input.message) && !input.fileIds?.length)
+          return { ok: true, state: 'stillAwaiting' as const };
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '旧任务缺少完整执行历史，请保留原有要求和附件后重新创建任务。' });
+      }
+      // Core replies require every referenced file and complete text before
+      // releasing the wait. Other lanes retain their existing parsing policy.
         const replyAttachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
       if (input.fileIds && input.fileIds.length > 0) {
         const fileService = new FileService(ctx.db, ctx.logger);
         const loaded = await fileService.loadMany(input.fileIds, userRow.id);
+        if (coreTextReply && input.fileIds.some(id => !loaded.some(file => file.row.externalId === id))) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: '有附件已失效或无法读取，请重新上传后再提交。' });
+        }
         for (const f of loaded) {
           try {
-              const parsed = await parseFileForPrompt(f.buffer, f.row.filename, f.row.mimetype);
+              const parsed = await parseFileForPrompt(f.buffer, f.row.filename, f.row.mimetype, { completeText: coreTextReply });
             replyAttachmentBlocks.push(...parsed.blocks);
           } catch (err) {
+            if (coreTextReply) {
+              throw new TRPCError({ code: 'BAD_REQUEST', message: '附件超出完整核验范围或无法读取，请缩小材料或重新上传后再提交。' });
+            }
             ctx.logger.warn(
               {
                 err: err instanceof Error ? err.message : String(err),
@@ -8999,6 +9119,9 @@ export const tasksRouter = router({
               awaitingQuestion: tasksTable.awaitingQuestion,
               awaitingKind: tasksTable.awaitingKind,
               result: tasksTable.result,
+              executionId: tasksTable.executionId,
+              executionRevision: tasksTable.executionRevision,
+              coreRecordVersion: tasksTable.coreRecordVersion,
             })
             .from(tasksTable)
             .where(
@@ -9010,6 +9133,7 @@ export const tasksRouter = router({
             )
             .limit(1);
           const heldResult = normalizeOutput(row?.result) as Record<string, unknown> | null;
+          if (row) assertLegacyReplyRecord({ ...row, result: heldResult });
           reviseHeldPlan = row?.status === 'awaiting_user' &&
             heldResult?.planMode === 'awaiting_approval' &&
             (!isPurePlanHold(input.message) || (input.fileIds?.length ?? 0) > 0);
@@ -9022,6 +9146,7 @@ export const tasksRouter = router({
             });
           }
         } catch (err) {
+          if (err instanceof TRPCError) throw err;
           ctx.logger.warn(
             { err, taskId: input.taskId },
             'reply: still_awaiting rebroadcast failed (non-fatal)',
@@ -9051,7 +9176,7 @@ export const tasksRouter = router({
       if (supercarHasHandle) {
         try {
           const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
-          const persisted = await repo.markAwaitingReplyResumed(input.taskId);
+          const persisted = await repo.markAwaitingReplyResumed(input.taskId, userRow.id);
           if (!persisted.persisted) {
             ctx.logger.warn(
               { taskId: input.taskId },
@@ -9093,11 +9218,21 @@ export const tasksRouter = router({
           result: tasksTable.result,
           opusUsed: tasksTable.opusUsed,
           roleId: tasksTable.roleId,
+          executionId: tasksTable.executionId,
+          executionRevision: tasksTable.executionRevision,
+          coreRecordVersion: tasksTable.coreRecordVersion,
         })
         .from(tasksTable)
-        .where(eq(tasksTable.externalId, input.taskId))
+        .where(and(
+          eq(tasksTable.externalId, input.taskId),
+          eq(tasksTable.userId, userRow.id),
+          eq(tasksTable.origin, ctx.taskOrigin),
+        ))
         .limit(1);
       const prevResult = normalizeOutput(parkRow?.result ?? null) as Record<string, unknown> | null;
+      if (parkRow) assertLegacyReplyRecord({ ...parkRow, result: prevResult });
+      if (parkRow?.status === 'awaiting_user' && prevResult?.executionMode === 'generate')
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '旧任务缺少完整执行历史，请保留原有要求和附件后重新创建任务。' });
       const parkedExpertMode =
         prevResult?.expertMode === 'normal' ||
         prevResult?.expertMode === 'expert' ||
@@ -9108,7 +9243,7 @@ export const tasksRouter = router({
         Boolean(parkRow) &&
         parkRow!.status === 'awaiting_user' &&
         prevResult?.executionMode === 'generate';
-      if (!wasGenerateParked) {
+      if (!parkRow || !wasGenerateParked) {
         return { ok: false };
       }
 
@@ -9179,16 +9314,20 @@ export const tasksRouter = router({
       }
       // Never substitute a model's summary for the underlying files. Reload
       // with ownership/expiry checks before releasing the awaiting-state CAS.
-      const generateAttachmentBlocks = savedContext ? [] : replyAttachmentBlocks;
-      if (savedContext && planFileIds.length > 0) {
+      // The earlier owner read can precede a transition into this core wait.
+      // Do not reuse blocks that may have been parsed under another lane's
+      // policy. Re-authorize and parse the complete current file set here.
+      const generateFileIds = savedContext ? planFileIds : [...new Set(input.fileIds ?? [])];
+      const generateAttachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
+      if (generateFileIds.length > 0) {
         try {
-          const files = await new FileService(ctx.db, ctx.logger).loadMany(planFileIds, userRow.id);
-          if (planFileIds.some(id => !files.some(file => file.row.externalId === id))) {
+          const files = await new FileService(ctx.db, ctx.logger).loadMany(generateFileIds, userRow.id);
+          if (generateFileIds.some(id => !files.some(file => file.row.externalId === id))) {
             throw new Error('MISSING_PLAN_FILE');
           }
           for (const file of files) {
             const parsed = await parseFileForPrompt(
-              file.buffer, file.row.filename, file.row.mimetype,
+              file.buffer, file.row.filename, file.row.mimetype, { completeText: true },
             );
             if (!parsed.blocks.length) throw new Error('EMPTY_PLAN_FILE');
             generateAttachmentBlocks.push(...parsed.blocks);
@@ -9318,7 +9457,7 @@ export const tasksRouter = router({
             combinedIntent,
             summary: handoffNotice,
           };
-          const persisted = await repo.markAwaitingReplyCompleted(input.taskId, parentResult);
+          const persisted = await repo.markAwaitingReplyCompleted(input.taskId, parentResult, userRow.id);
           if (!persisted.persisted) {
             ctx.logger.warn(
               { taskId: input.taskId },
@@ -9436,7 +9575,18 @@ export const tasksRouter = router({
       const newWorkflowPreamble = newWorkflow?.promptPreamble ?? '';
       const effectiveCombined =
         (newWorkflowPreamble ? `${newWorkflowPreamble}\n` : '') + combinedIntent;
-      const resumePersisted = await repo.markAwaitingReplyResumed(input.taskId);
+      assertCoreTaskInput({
+        initialRequest: savedContext?.planInitialIntent ?? parkRow.intent,
+        userTurns: savedContext ? planReplyHistory : [userReply],
+        phase: planOnly ? 'revise' : savedContext ? 'approved_execution' : 'direct',
+        workflow: parkingTypedWorkflow
+          ? { id: parkingTypedWorkflow.workflowId, sections: parkingTypedWorkflow.reportSections }
+          : resumeWorkflowId ? { id: resumeWorkflowId, sections: [] } : null,
+        referencePlan: savedPlan ?? null,
+        fileIds: generateFileIds,
+        blocks: generateAttachmentBlocks,
+      });
+      const resumePersisted = await repo.markAwaitingReplyResumed(input.taskId, userRow.id);
       if (!resumePersisted.persisted) {
         ctx.logger.warn(
           { taskId: input.taskId },

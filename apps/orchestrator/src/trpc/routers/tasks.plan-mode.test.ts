@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { SQL } from 'drizzle-orm';
+import { MySqlDialect } from 'drizzle-orm/mysql-core';
 import * as planning from '../../agent/core-task-plan.js';
 import * as generation from '../../agent/generate-runner.js';
 import { TaskRepository } from '../../agent/task-repository.js';
+import { CoreTaskRepository } from '../../agent/core-task-repository.js';
+import * as supercar from '../../agent/supercar/index.js';
 import { env } from '../../config/env.js';
 import * as executionPipeline from '../../execution/execution-pipeline.js';
 import {
@@ -29,9 +33,13 @@ function fixture({
   legacy = false,
   jsonResult = false,
   parentIntent = '',
+  parentSummary = '合成父任务提纲',
   expertMode = 'normal' as 'normal' | 'auto',
+  ownerSnapshotStatus = undefined as string | undefined,
+  ownerSnapshotLegacy = false,
 } = {}) {
   let creating = false;
+  setFeatureFlagsForTest({ EVIDENCE_LEDGER: true, EXECUTION_CONTRACT: true, EXECUTION_VERIFIER: true });
   Object.assign(env, {
     ANTHROPIC_API_KEY: '',
     QWEN_CORE_ROLLOUT_MODE: 'synthetic',
@@ -40,16 +48,26 @@ function fixture({
     QWEN_RESPONSES_ADAPTER_ENABLED: true,
     DASHSCOPE_CN_API_KEY: 'synthetic-cn',
   });
-  const plan = '1. 整理材料\n2. 形成提纲\n确认后执行。';
+  const plan = '1. 整理已经提供的合成材料，保留缺失事项\n2. 形成可供用户复核的汇报提纲\n确认后执行。';
   const state = {
     status: 'awaiting_user',
+    roleId: null,
+    executionId: null as string | null,
+    executionRevision: 0,
+    coreRecordVersion: 0,
+    awaitingQuestion: '确认这个方案吗？',
     intent: '整理提供的材料，形成一份简洁的汇报提纲。不要发送邮件。',
     result: {
       executionMode: 'generate',
       expertMode: 'normal',
-      ...(!legacy ? { planMode: 'awaiting_approval', planText: plan } : {}),
+      ...(!legacy ? {
+        planMode: 'awaiting_approval', planText: plan,
+        selectedRole: null, planInitialIntent: '整理提供的材料，形成一份简洁的汇报提纲。不要发送邮件。',
+        planReplyHistory: [], planFileIds: [], planWorkflowId: null, planLegacyWorkflowId: null,
+      } : {}),
     } as Record<string, unknown>,
   };
+  const reads: Array<{ projection: Record<string, unknown>; query: { sql: string; params: unknown[] } }> = [];
   const logger = {
     child: () => logger,
     info: vi.fn(),
@@ -60,13 +78,17 @@ function fixture({
   const db = {
     select(projection: Record<string, unknown>) {
       let rows: unknown[];
-      if ('intent' in projection)
+      if ('id' in projection && 'status' in projection)
+        rows = [ownerSnapshotLegacy
+          ? { ...state, executionId: null, executionRevision: 0, coreRecordVersion: 0, result: { executionMode: 'browser' } }
+          : { ...state, ...(ownerSnapshotStatus ? { status: ownerSnapshotStatus } : {}), result: jsonResult ? JSON.stringify(state.result) : state.result }];
+      else if ('intent' in projection)
         rows = [
           creating && parentIntent
             ? {
                 intent: parentIntent,
                 status: 'completed',
-                result: { summary: '合成父任务提纲' },
+                result: { summary: parentSummary },
                 opusUsed: false,
                 roleId: null,
               }
@@ -83,15 +105,23 @@ function fixture({
         ];
       else if ('count' in projection)
         return { from: () => ({ where: async () => [{ count: 0 }] }) };
-      else if ('status' in projection) rows = [state];
+      else if ('status' in projection) rows = [
+        'id' in projection && ownerSnapshotLegacy
+          ? { ...state, executionId: null, executionRevision: 0, coreRecordVersion: 0,
+              result: { executionMode: 'browser' } }
+          : ownerSnapshotStatus && 'result' in projection ? { ...state, status: ownerSnapshotStatus } : state,
+      ];
       else if ('id' in projection) rows = [{ id: 42, modelDataRegion: 'cn' }];
       else throw new Error('Unexpected synthetic database read');
-      return { from: () => ({ where: () => ({ limit: async () => rows }) }) };
+      return { from: () => ({ where: (condition: SQL) => {
+        reads.push({ projection, query: new MySqlDialect().sqlToQuery(condition) });
+        return { limit: async () => rows };
+      } }) };
     },
   };
-  vi.spyOn(QuotaService.prototype, 'tryConsume').mockResolvedValue({ ok: true });
+  const charge = vi.spyOn(QuotaService.prototype, 'tryConsume').mockResolvedValue({ ok: true });
   vi.spyOn(QuotaService.prototype, 'getActiveTaskCount').mockResolvedValue(0);
-  vi.spyOn(TaskRepository.prototype, 'insertTask').mockImplementation(async () => {
+  const insert = vi.spyOn(TaskRepository.prototype, 'insertTask').mockImplementation(async () => {
     state.status = 'executing';
   });
   const resume = vi
@@ -100,21 +130,46 @@ function fixture({
       if (persisted) state.status = 'executing';
       return { persisted };
     });
-  const save = vi
-    .spyOn(TaskRepository.prototype, 'persistAwaitingUser')
-    .mockImplementation(async ({ result }) => {
+  // Observe the persisted wait boundary for legacy and new core formats;
+  // this does not call a legacy writer from the core path.
+  const save = vi.fn<TaskRepository['persistAwaitingUser']>(async ({ result, question }) => {
       if (persisted) {
         state.status = 'awaiting_user';
         state.result = result ?? {};
+        state.awaitingQuestion = question;
       }
       return { persisted };
     });
-  const complete = vi
-    .spyOn(TaskRepository.prototype, 'persistVisionOutcome')
-    .mockResolvedValue({ persisted });
+  vi.spyOn(TaskRepository.prototype, 'persistAwaitingUser').mockImplementation(save);
+  const complete = vi.fn<TaskRepository['persistVisionOutcome']>().mockResolvedValue({ persisted });
+  vi.spyOn(TaskRepository.prototype, 'persistVisionOutcome').mockImplementation(complete);
+  vi.spyOn(CoreTaskRepository.prototype, 'readHead').mockImplementation(async () => ({
+    status: state.status, executionId: state.executionId, executionRevision: state.executionRevision,
+    recordVersion: state.coreRecordVersion,
+  }));
+  vi.spyOn(CoreTaskRepository.prototype, 'admit').mockImplementation(async op => {
+    Object.assign(state, { status: 'executing', executionId: op.executionId, executionRevision: op.executionRevision, coreRecordVersion: op.recordVersion, result: { coreRequirements: op.requirements } });
+    return { persisted: true };
+  });
+  const coreSettle = vi.spyOn(CoreTaskRepository.prototype, 'settle').mockImplementation(async op => {
+    const coreRequirements = state.result.coreRequirements;
+    if (persisted) state.coreRecordVersion = op.recordVersion;
+    if (op.status === 'awaiting_user') return save({ taskExternalId: op.scope.taskId, question: op.awaitingQuestion ?? '', awaitingKind: 'clarification', result: { ...op.result, coreRequirements } });
+    if (persisted) { state.status = op.status; state.result = { ...op.result, coreRequirements }; }
+    if (op.status === 'failed') {
+      if (typeof op.result.reason !== 'string') throw new Error('Missing core failure reason');
+      return complete(op.scope.taskId, { status: 'failed', reason: op.result.reason, tickCount: 1 });
+    }
+    if (typeof op.result.summary !== 'string') throw new Error('Missing core result summary');
+    return complete(op.scope.taskId, { status: op.status, summary: op.result.summary, tickCount: 1 });
+  });
+  // A refused settlement is treated as cancelled, not a retryable write, in
+  // these boundary fixtures. Recovery/retry mechanics have dedicated tests.
+  vi.spyOn(CoreTaskRepository.prototype, 'readSettlement').mockImplementation(async () => ({ status: 'cancelled', executionId: state.executionId, executionRevision: state.executionRevision, recordVersion: state.coreRecordVersion, commitId: null }));
   vi.spyOn(planning, 'prepareCoreTaskPlan').mockResolvedValue(null);
   const run = vi.spyOn(generation, 'runGenerateTask').mockResolvedValue({
     status: 'awaiting_user',
+    generation: { completeness: 'complete', stopReason: 'awaiting_user' },
     summary: plan,
     inputTokens: 10,
     outputTokens: 10,
@@ -129,6 +184,7 @@ function fixture({
     db,
     logger,
     userId: 'usr_plan_fixture',
+    taskOrigin: 'user',
     planner: {},
     playwrightExecutor: null,
     executionRouter: null,
@@ -141,13 +197,17 @@ function fixture({
     res: {},
   } as unknown as Context;
   return {
+    charge,
+    insert,
     state,
     run,
     save,
     complete,
+    coreSettle,
     resume,
     frames,
     plan,
+    reads,
     // Recreate the caller on every request to exercise persisted rather than per-call state.
     create: async (fileIds?: string[]) => {
       creating = true;
@@ -169,6 +229,226 @@ function fixture({
 }
 
 describe('generate plan mode durable approval boundary', () => {
+  it('does not promote a parent model example into user-supplied legacy data', async () => {
+    const f = fixture({ expertMode: 'auto', parentIntent: '展示指标示例', parentSummary: '仅为模型示例\nGMV: 100\nUV: 200' });
+    f.state.intent = '复盘昨天抖音直播';
+    await f.create();
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+    expect(f.run.mock.calls[0]?.[0].verificationContext?.legacyWorkflow?.missingInputs).toContain('dataSource');
+    expect(f.run.mock.calls[0]?.[0].verificationContext?.initialRequest).not.toContain('GMV: 100');
+    expect(f.run.mock.calls[0]?.[0].verificationContext).toMatchObject({ referenceContext: expect.stringContaining('GMV: 100') });
+  });
+  it.each(['登录好了', '数据如下 GMV 1000'])('does not wake a parked browser handle if a core execution took ownership (%s)', async message => {
+    const f = fixture({ legacy: true });
+    vi.spyOn(supercar, 'hasParkedSupercarHandle').mockReturnValue(true);
+    const wake = vi.spyOn(supercar, 'supercarReply').mockReturnValue(true);
+    const handoff = vi.spyOn(supercar, 'supercarHandoffToGenerate').mockReturnValue(true);
+    // A new core execution wins while attachments/other work yielded. The real
+    // scoped SQL boundary is tested separately; the transport only refuses the
+    // guarded call, making omission of the owner observable as a wrongly resumed task.
+    f.resume.mockImplementation(async (_id, legacyUserId) => ({ persisted: legacyUserId === undefined }));
+    await expect(f.reply(message)).resolves.toEqual({ ok: false, state: 'persistFailed' });
+    expect(f.resume).toHaveBeenCalledWith('tsk_plan_fixture', 42);
+    expect(wake).not.toHaveBeenCalled();
+    expect(handoff).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
+  it.each([null, [], { initialRequest: 'incomplete' }, undefined])(
+    'rejects a new execution with missing or malformed requirements before legacy effects (%j)',
+    async (requirements) => {
+      const f = fixture();
+      Object.assign(f.state, { executionId: 'synthetic-execution', executionRevision: 2, coreRecordVersion: 4 });
+      if (requirements !== undefined) f.state.result.coreRequirements = requirements;
+      const files = vi.spyOn(FileService.prototype, 'loadMany').mockResolvedValue([]);
+      await expect(f.reply('确认', ['file_synthetic'])).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      expect(files).not.toHaveBeenCalled();
+      expect(f.resume).not.toHaveBeenCalled();
+      expect(f.run).not.toHaveBeenCalled();
+    },
+  );
+  it('does not interpret valid core requirements and leftover plan fields as a legacy dispatch permit', async () => {
+    const f = fixture();
+    Object.assign(f.state, { executionId: 'synthetic-execution', executionRevision: 2, coreRecordVersion: 4 });
+    f.state.result.coreRequirements = {
+      initialRequest: '合成要求', userTurns: [], phase: 'draft', workflow: null,
+      referencePlan: null, fileIds: [],
+    };
+    await expect(f.reply('确认')).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(f.resume).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.frames).toEqual([]);
+  });
+  it.each(['确认', '等一下'])('revalidates the later snapshot instead of trusting the initial legacy read (%s)', async message => {
+    const f = fixture({ ownerSnapshotLegacy: true });
+    Object.assign(f.state, { executionId: 'synthetic-newer', executionRevision: 2, coreRecordVersion: 4 });
+    await expect(f.reply(message)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.reads.some(read => 'status' in read.projection && 'id' in read.projection)).toBe(true);
+    expect(f.reads.some(read => message === '等一下'
+      ? 'awaitingKind' in read.projection && !('id' in read.projection)
+      : 'intent' in read.projection)).toBe(true);
+    expect(f.resume).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.frames).toEqual([]);
+  });
+  it('refuses a plain legacy generate wait without full history before any write or generation', async () => {
+    const f = fixture({ legacy: true });
+    await expect(f.reply('补充原始数据')).rejects.toThrow('旧任务缺少完整执行历史');
+    expect(f.state.status).toBe('awaiting_user');
+    expect(f.run).not.toHaveBeenCalled();
+  });
+  it('keeps the owner and origin on the authorized read and scoped non-core handle write', async () => {
+    const f = fixture({ legacy: true });
+    f.state.result.executionMode = 'browser';
+    vi.spyOn(supercar, 'hasParkedSupercarHandle').mockReturnValue(true);
+    vi.spyOn(supercar, 'supercarReply').mockReturnValue(true);
+    await f.reply('确认');
+    const parkRead = f.reads.find(read => 'intent' in read.projection);
+    expect(parkRead?.query.sql).toContain('`tasks`.`user_id` = ?');
+    expect(parkRead?.query.sql).toContain('`tasks`.`origin` = ?');
+    expect(parkRead?.query.params).toEqual(['tsk_plan_fixture', 42, 'user']);
+    expect(f.resume).toHaveBeenCalledWith('tsk_plan_fixture', 42);
+    expect(f.run).not.toHaveBeenCalled();
+  });
+  // These tests exercise the real router's pre-dispatch boundary. Existing
+  // execution/persistence doubles drain the legacy background path on RED;
+  // they are not evidence for the later V10 real-runner/DB integration gate.
+  function attachFiles(bodies: Readonly<Record<string, string | undefined>>) {
+    return vi.spyOn(FileService.prototype, 'loadMany').mockImplementation(async (ids) =>
+      ids.flatMap(id => {
+        const body = bodies[id];
+        return body === undefined ? [] : [{
+          buffer: Buffer.from(body),
+          row: { externalId: id, filename: `${id}.txt`, mimetype: 'text/plain' },
+        }];
+      }) as Awaited<ReturnType<FileService['loadMany']>>,
+    );
+  }
+
+  async function rejectionOrDrain(f: ReturnType<typeof fixture>, request: Promise<unknown>) {
+    const error = await request.then(() => null, (reason: unknown) => reason);
+    if (error === null) await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+    return error;
+  }
+
+  it('revalidates new file presence after the task changes into a core wait', async () => {
+    const f = fixture({ legacy: true, ownerSnapshotStatus: 'executing' });
+    attachFiles({});
+    const error = await rejectionOrDrain(f, f.reply('补充材料', ['fil_missing']));
+    expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.resume).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it('does not reuse a legacy-truncated attachment after the task changes into a core wait', async () => {
+    const f = fixture({ legacy: true, ownerSnapshotStatus: 'executing' });
+    attachFiles({ fil_one: `${'a'.repeat(55_000)}RACE_TAIL` });
+    await expect(f.reply('补充材料', ['fil_one'])).rejects.toThrow('旧任务缺少完整执行历史');
+    expect(f.resume).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { fil_one: 'a'.repeat(70_000) },
+    { fil_one: '字'.repeat(22_000) },
+    { fil_one: 'a'.repeat(34_000), fil_two: 'b'.repeat(34_000) },
+    { fil_one: ' \n\t' },
+  ])('rejects incomplete or oversized create materials before charge or insert %#', async (bodies) => {
+    const f = fixture();
+    attachFiles(bodies);
+    const error = await rejectionOrDrain(f, f.create(Object.keys(bodies)));
+    expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.charge).not.toHaveBeenCalled();
+    expect(f.insert).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it('does not truncate an accepted create attachment at the old 50K character ceiling', async () => {
+    const f = fixture();
+    const body = `${'a'.repeat(55_000)}CORE_FILE_TAIL`;
+    attachFiles({ fil_one: body });
+    await f.create(['fil_one']);
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+    expect(JSON.stringify(f.run.mock.calls[0]?.[0].verificationContext?.materials).includes('CORE_FILE_TAIL')).toBe(true);
+    expect(f.charge).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects file references that the atomic admission schema cannot preserve before charging', async () => {
+    const f = fixture();
+    const id = 'f'.repeat(33);
+    attachFiles({ [id]: 'synthetic readable notes' });
+    const error = await rejectionOrDrain(f, f.create([id]));
+    expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.charge).not.toHaveBeenCalled();
+    expect(f.insert).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it.each([65_514, 65_515])('counts the 22-byte file heading at the materials boundary: %s', async length => {
+    const f = fixture();
+    attachFiles({ fil_one: 'a'.repeat(length) });
+    const error = await rejectionOrDrain(f, f.create(['fil_one']));
+    if (length === 65_514) {
+      expect(error).toBeNull();
+      expect(f.charge).toHaveBeenCalledTimes(1);
+      const block = f.run.mock.calls[0]?.[0].verificationContext?.materials[0];
+      expect(block && 'text' in block && Buffer.byteLength(block.text, 'utf8')).toBe(65_536);
+    } else {
+      expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+      expect(f.charge).not.toHaveBeenCalled();
+      expect(f.insert).not.toHaveBeenCalled();
+    }
+  });
+
+  it('includes authenticated parent context in the create input budget', async () => {
+    const f = fixture({ parentIntent: '上下文'.repeat(24_000) });
+    const error = await rejectionOrDrain(f, f.create());
+    expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.insert).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('rejects a missing newly attached file before resume, legacy=%s', async legacy => {
+    const f = fixture({ legacy });
+    attachFiles({});
+    const error = await rejectionOrDrain(f, f.reply('补充合成材料', ['fil_missing']));
+    expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.resume).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.state.status).toBe('awaiting_user');
+  });
+
+  it.each(['a'.repeat(70_000), '字'.repeat(22_000), ' \n\t'])(
+    'rejects oversized or empty retained files before approval %#', async body => {
+      const f = fixture();
+      f.state.result.planFileIds = ['fil_original'];
+      attachFiles({ fil_original: body });
+      const error = await rejectionOrDrain(f, f.reply('执行'));
+      expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+      expect(f.resume).not.toHaveBeenCalled();
+      expect(f.run).not.toHaveBeenCalled();
+      expect(f.state.status).toBe('awaiting_user');
+    },
+  );
+
+  it('checks all persisted user turns before accepting another revision', async () => {
+    const f = fixture();
+    f.state.result.planReplyHistory = Array.from({ length: 25 }, () => 'a'.repeat(3_000));
+    const error = await rejectionOrDrain(f, f.reply('改成简洁的提纲'));
+    expect(error).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.resume).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.state.status).toBe('awaiting_user');
+  });
+
+  it('retains the complete tail when an in-budget original attachment is reloaded', async () => {
+    const f = fixture();
+    f.state.result.planFileIds = ['fil_original'];
+    attachFiles({ fil_original: `${'a'.repeat(55_000)}RELOADED_TAIL` });
+    await f.reply('执行');
+    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
+    expect(JSON.stringify(f.run.mock.calls[0]?.[0].verificationContext?.materials)).toContain('RELOADED_TAIL');
+  });
+
   it.each([false, true])(
     'persists a typed topic report after ecommerce background edits, verifier=%s',
     async (enabled) => {
@@ -212,6 +492,12 @@ describe('generate plan mode durable approval boundary', () => {
       f.run.mockImplementation((opts) =>
         realRunGenerateTask({ ...opts, responsesAdapter: { metadata, stream } }),
       );
+      if (!enabled) {
+        await expect(f.create()).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+        expect(f.charge).not.toHaveBeenCalled();
+        expect(f.insert).not.toHaveBeenCalled();
+        return;
+      }
       await f.create();
       await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
       await f.reply(edit);
@@ -220,13 +506,11 @@ describe('generate plan mode durable approval boundary', () => {
       await f.reply('确认');
       await vi.waitFor(() => expect(f.complete).toHaveBeenCalledTimes(1));
       expect(f.complete.mock.calls[0]?.[1]).toMatchObject({
-        status: 'completed',
+        status: 'partial_success',
         summary: expect.stringContaining(report),
-        metadata: { planReplyHistory: [edit, '确认'], expertWorkflowId: 'content-topic' },
       });
-      const persistedOutcome = f.complete.mock.calls[0]?.[1];
-      if (persistedOutcome?.status !== 'completed') throw new Error('Expected completed report');
-      expect(persistedOutcome.failedChecks ?? []).toEqual([]);
+      expect(f.state.result.coreRequirements).toMatchObject({ userTurns: [edit, '确认'], workflow: { id: 'content-topic' } });
+      expect(f.coreSettle.mock.calls.at(-1)?.[0].verification.semanticStatus).toBe('unavailable');
       expect(f.run.mock.calls[2]?.[0].intent).toContain(edit);
       expect(stream).toHaveBeenCalledTimes(3);
     },
@@ -260,7 +544,7 @@ describe('generate plan mode durable approval boundary', () => {
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
     await f.reply('执行');
     await vi.waitFor(() => expect(f.complete).toHaveBeenCalledTimes(1));
-    expect(f.run.mock.calls[2]?.[0].workflowOverride).toBeNull();
+    expect(f.run.mock.calls[2]?.[0].verificationContext?.workflow).toBeNull();
   });
 
   it('retains the original workflow through edits, approval and later clarification', async () => {
@@ -276,16 +560,14 @@ describe('generate plan mode durable approval boundary', () => {
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(3));
     await f.reply('美妆护肤');
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(4));
-    expect(f.run.mock.calls.map(([opts]) => opts.workflowOverride?.workflowId)).toEqual([
+    expect(f.run.mock.calls.map(([opts]) => opts.verificationContext?.workflow?.id)).toEqual([
       'content-topic',
       'content-topic',
       'content-topic',
       'content-topic',
     ]);
-    expect(f.state.result.planWorkflowId).toBe('content-topic');
-    expect(f.state.result.expertWorkflowId).toBe('content-topic');
-    expect(init.mock.calls.at(-1)?.[0].expertWorkflowId).toBe('content-topic');
-    expect(init.mock.results.at(-1)?.value.contract.expertWorkflowId).toBe('content-topic');
+    expect(f.state.result.coreRequirements).toMatchObject({ workflow: { id: 'content-topic' } });
+    expect(init).not.toHaveBeenCalled();
   });
 
   it.each([null, 'content-topic'])(
@@ -298,7 +580,10 @@ describe('generate plan mode durable approval boundary', () => {
       expect(await f.reply('执行')).toMatchObject({ ok: true, state: 'resumed' });
       await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
       expect(f.run.mock.calls[1]?.[0].intent).toMatch(/^整理提供的材料/);
-      expect(f.state.result.expertWorkflowId).toBe(planWorkflowId);
+      expect(f.state.result.coreRequirements).toMatchObject({
+        workflow: planWorkflowId ? { id: planWorkflowId } : null,
+        resume: { legacyWorkflowId: null },
+      });
     },
   );
 
@@ -320,13 +605,12 @@ describe('generate plan mode durable approval boundary', () => {
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
     await f.reply('执行');
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(3));
-    expect(f.run.mock.calls[2]?.[0].intent).toContain('【专家技能工作流：抖音直播复盘】');
-    expect(f.run.mock.calls[2]?.[0].workflowOverride).toBeNull();
-    expect(f.state.result.planLegacyWorkflowId).toBe('douyin-livestream-review');
-    expect(f.state.result.expertWorkflowId).toBe('douyin-livestream-review');
+    expect(f.run.mock.calls[2]?.[0].verificationContext?.legacyWorkflow?.promptPreamble).toContain('【专家技能工作流：抖音直播复盘】');
+    expect(f.run.mock.calls[2]?.[0].verificationContext?.workflow).toBeNull();
+    expect(f.state.result.coreRequirements).toMatchObject({ resume: { legacyWorkflowId: 'douyin-livestream-review' } });
   });
 
-  it('selects the saved legacy handoff but does not dispatch when its CAS is refused', async () => {
+  it('refuses the unavailable legacy browser handoff before admission under qwen-only', async () => {
     const f = fixture({ expertMode: 'auto' });
     setFeatureFlagsForTest({ EXPERT_WORKFLOW: true });
     f.state.intent = '电商罗盘 GMV 复盘';
@@ -338,11 +622,10 @@ describe('generate plan mode durable approval boundary', () => {
     await f.reply('修改方案，场次为昨天');
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
     expect(handoff).not.toHaveBeenCalled();
-    expect(await f.reply('执行')).toMatchObject({ ok: false, state: 'persistFailed' });
-    expect(handoff).toHaveBeenCalledWith(
-      'tsk_plan_fixture',
-      expect.objectContaining({ handoffSuggestion: 'browser' }),
-    );
+    const admit = vi.spyOn(CoreTaskRepository.prototype, 'admit').mockClear();
+    await expect(f.reply('执行')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    expect(admit).not.toHaveBeenCalled();
+    expect(handoff).not.toHaveBeenCalled();
     expect(f.run).toHaveBeenCalledTimes(2);
   });
 
@@ -386,7 +669,7 @@ describe('generate plan mode durable approval boundary', () => {
     await vi.waitFor(() => expect(f.complete).toHaveBeenCalledTimes(1));
     expect(stream.mock.calls[2]?.[0].instructions).toContain('母婴');
     expect(stream.mock.calls[2]?.[0].instructions).not.toContain('美妆护肤');
-    expect(f.state.result.planReplyHistory).toEqual(['修改方案，品类：母婴。']);
+    expect(f.state.result.coreRequirements).toMatchObject({ userTurns: ['修改方案，品类：母婴。', '执行'] });
   });
   it('retains typed clarification mappings separately from raw replies after approval', async () => {
     const f = fixture({ expertMode: 'auto' });
@@ -426,8 +709,7 @@ describe('generate plan mode durable approval boundary', () => {
     await f.reply('美妆护肤');
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(3));
     expect(stream).toHaveBeenCalledTimes(2);
-    expect(f.state.result.planReplyHistory).toEqual(['执行', '美妆护肤']);
-    expect(f.state.result.planIntakeContext).toEqual(['品类: 美妆护肤']);
+    expect(f.state.result.coreRequirements).toMatchObject({ userTurns: ['执行', '美妆护肤'], resume: { intakeBindings: [{ turn: 1, field: 'category' }] } });
     await f.reply('没有其他补充');
     await vi.waitFor(() => expect(f.complete).toHaveBeenCalledTimes(1));
     expect(stream).toHaveBeenCalledTimes(3);
@@ -467,13 +749,13 @@ describe('generate plan mode durable approval boundary', () => {
     expect(f.complete).not.toHaveBeenCalled();
     await f.reply('执行');
     await vi.waitFor(() => expect(f.complete).toHaveBeenCalledTimes(1));
-    expect(f.complete.mock.calls[0]?.[1]).toMatchObject({ status: 'completed', summary: texts[2] });
-    expect(f.complete.mock.calls[0]?.[1].metadata).toMatchObject({
-      planReplyHistory: ['不要增加截止时间，修改方案第二步', '执行'],
-      approvedPlanText: expect.stringContaining('不增加截止时间'),
+    expect(f.complete.mock.calls[0]?.[1]).toMatchObject({ status: 'partial_success', summary: texts[2] });
+    expect(f.state.result.coreRequirements).toMatchObject({
+      userTurns: ['不要增加截止时间，修改方案第二步', '执行'],
+      referencePlan: expect.stringContaining('不增加截止时间'),
     });
-    expect(f.run.mock.calls[2]?.[0].planExecutionApproved).toBe(true);
-    expect(f.run.mock.calls[1]?.[0].planExecutionApproved).not.toBe(true);
+    expect(f.run.mock.calls[2]?.[0].verificationContext?.phase).toBe('approved_execution');
+    expect(f.run.mock.calls[1]?.[0].verificationContext?.phase).toBe('revise');
     expect(stream.mock.calls[0]?.[0].tools).toEqual([]);
     expect(stream.mock.calls[1]?.[0].tools).toEqual([]);
     expect(JSON.stringify(stream.mock.calls[2]?.[0].input)).toContain('不要增加截止时间');
@@ -482,7 +764,7 @@ describe('generate plan mode durable approval boundary', () => {
 
   it.each([
     { planText: '' },
-    { planReplyHistory: Array.from({ length: 32 }, () => '修改提纲') },
+    { planReplyHistory: Array.from({ length: 32 }, () => '修改提纲'.repeat(200)) },
     { planFileIds: Array.from({ length: 6 }, (_, i) => `fil_${i}`) },
   ])(
     'refuses incomplete or oversized plan context without truncating constraints: %j',
@@ -515,8 +797,8 @@ describe('generate plan mode durable approval boundary', () => {
     await f.reply('补充数据在表格中');
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(3));
     expect(f.run.mock.calls[2]?.[0].intent).toContain('不要添加截止时间');
-    expect(f.run.mock.calls[2]?.[0].executionPlan).toBe(f.plan);
-    expect(f.run.mock.calls[2]?.[0].planOnly).toBe(false);
+    expect(f.run.mock.calls[2]?.[0].verificationContext?.referencePlan).toBe(f.plan);
+    expect(f.run.mock.calls[2]?.[0].verificationContext?.phase).toBe('approved_execution');
   });
 
   it.each(['根据新增材料修改第二步', '先别执行'])(
@@ -534,15 +816,15 @@ describe('generate plan mode durable approval boundary', () => {
       await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
       await f.reply(reply, ['fil_revision']);
       await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
-      expect(f.state.result.planFileIds).toEqual(['fil_original', 'fil_revision']);
-      expect(f.run.mock.calls[1]?.[0].planOnly).toBe(true);
+      expect(f.state.result.coreRequirements).toMatchObject({ fileIds: ['fil_original', 'fil_revision'] });
+      expect(f.run.mock.calls[1]?.[0].verificationContext?.phase).toBe('revise');
       await f.reply('执行');
       await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(3));
       expect(load).toHaveBeenLastCalledWith(['fil_original', 'fil_revision'], 42);
-      expect(JSON.stringify(f.run.mock.calls[2]?.[0].attachments)).toContain(
+      expect(JSON.stringify(f.run.mock.calls[2]?.[0].verificationContext?.materials)).toContain(
         'synthetic attachment fil_original',
       );
-      expect(JSON.stringify(f.run.mock.calls[2]?.[0].attachments)).toContain(
+      expect(JSON.stringify(f.run.mock.calls[2]?.[0].verificationContext?.materials)).toContain(
         'synthetic attachment fil_revision',
       );
     },
@@ -583,11 +865,11 @@ describe('generate plan mode durable approval boundary', () => {
       const f = fixture({ persisted });
       expect((await f.create()).executionMode).toBe('generate');
       await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
-      expect(f.run).toHaveBeenCalledWith(expect.objectContaining({ planOnly: true }));
+      expect(f.run.mock.calls[0]?.[0].verificationContext?.phase).toBe('draft');
       expect(f.save).toHaveBeenCalledWith(
         expect.objectContaining({
           question: f.plan,
-          result: expect.objectContaining({ planMode: 'awaiting_approval', planText: f.plan }),
+          result: expect.objectContaining({ coreRequirements: expect.objectContaining({ phase: 'draft' }), planText: f.plan }),
         }),
       );
       expect(f.frames.some((frame) => frame.type === 'server.supercar.awaiting_user')).toBe(
@@ -607,9 +889,9 @@ describe('generate plan mode durable approval boundary', () => {
     expect(await f.reply(reply)).toMatchObject({ ok: true, state: 'resumed' });
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
     expect(f.run).toHaveBeenCalledWith(
-      expect.objectContaining({ planOnly: true, executionPlan: f.plan }),
+      expect.objectContaining({ verificationContext: expect.objectContaining({ phase: 'revise', referencePlan: f.plan }) }),
     );
-    expect(f.state.result.planMode).toBe('awaiting_approval');
+    expect(f.state.result.coreRequirements).toMatchObject({ phase: 'revise' });
   });
 
   it.each(['不要执行', '先别执行'])(
@@ -626,12 +908,13 @@ describe('generate plan mode durable approval boundary', () => {
   it('does not auto-handoff a plan edit with platform keywords to a browser', async () => {
     const f = fixture();
     f.state.intent = '分析抖音昨天直播表现';
+    f.state.result.planInitialIntent = f.state.intent;
     expect(await f.reply('数据来自电商罗盘，修改方案第二步')).toMatchObject({
       ok: true,
       state: 'resumed',
     });
     await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
-    expect(f.run).toHaveBeenCalledWith(expect.objectContaining({ planOnly: true }));
+    expect(f.run).toHaveBeenCalledWith(expect.objectContaining({ verificationContext: expect.objectContaining({ phase: 'revise' }) }));
     expect(f.frames.some((frame) => frame.type === 'server.task.terminal')).toBe(false);
   });
 
@@ -642,6 +925,7 @@ describe('generate plan mode durable approval boundary', () => {
       const revised = '1. 只整理已提供的材料\n2. 不要添加截止时间';
       f.run.mockResolvedValueOnce({
         status: 'awaiting_user',
+        generation: { completeness: 'complete', stopReason: 'awaiting_user' },
         summary: revised,
         inputTokens: 1,
         outputTokens: 1,
@@ -652,24 +936,25 @@ describe('generate plan mode durable approval boundary', () => {
       expect(f.state.result.planText).toBe(revised);
       await f.reply('执行');
       await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(2));
-      expect(f.run.mock.calls[1]?.[0]).toMatchObject({ planOnly: false, executionPlan: revised });
+      expect(f.run.mock.calls[1]?.[0].verificationContext).toMatchObject({ phase: 'approved_execution', referencePlan: revised });
       expect(f.run.mock.calls[1]?.[0].intent).toContain('不要发送邮件');
       // Further execution clarification is not another plan-approval cycle.
       expect(f.state.result).not.toHaveProperty('planMode');
     },
   );
 
-  it('leaves ordinary generate clarification unchanged', async () => {
+  it('keeps unreadable ordinary generate history read-only and allows a pure hold', async () => {
     const f = fixture({ legacy: true });
-    await f.reply('补充材料如下');
-    await vi.waitFor(() => expect(f.save).toHaveBeenCalledTimes(1));
-    expect(f.run.mock.calls[0]?.[0].planOnly).toBeFalsy();
-    expect(f.run.mock.calls[0]?.[0].executionPlan).toBeUndefined();
+    await expect(f.reply('稍等')).resolves.toMatchObject({ ok: true, state: 'stillAwaiting' });
+    await expect(f.reply('补充材料如下')).rejects.toThrow('旧任务缺少完整执行历史');
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.resume).not.toHaveBeenCalled();
     expect(f.state.result).not.toHaveProperty('planMode');
   });
 
   it('does not dispatch or publish if resume persistence is refused', async () => {
     const f = fixture({ persisted: false });
+    vi.spyOn(CoreTaskRepository.prototype, 'admit').mockResolvedValueOnce({ persisted: false });
     expect(await f.reply('执行')).toMatchObject({ ok: false, state: 'persistFailed' });
     expect(f.run).not.toHaveBeenCalled();
     expect(f.frames).toEqual([]);

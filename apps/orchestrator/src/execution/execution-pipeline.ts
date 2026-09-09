@@ -39,7 +39,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { tasks as tasksTable } from '../db/schema/tasks.js';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
-import type { MessagesAdapter } from '../llm/messages-adapter.js';
+import type { MessagesAdapter, MessagesProviderMetadata } from '../llm/messages-adapter.js';
 
 import type { CheckResult, ParsedItem, VerificationResult } from './answer-verifier.js';
 import { extractStructuredItems, verifyDeterministic } from './answer-verifier.js';
@@ -64,10 +64,14 @@ import {
 import { getFeatureFlags } from './feature-flags.js';
 import {
   mergeDeterministicAndSemantic,
+  prepareLlmVerificationInput,
   shouldRunLlmVerifier,
   verifyWithLlm,
 } from './llm-verifier.js';
 import { getExpertWorkflowById } from './expert-workflow-registry.js';
+import { type TaskVerificationContext, createTaskVerificationContext } from './task-verification-context.js';
+import { type CoreExecutionHandle, type CoreExecutionRegistry, type CoreExecutionState, coreExecutionRegistry } from './core-execution-registry.js';
+import { verifyCoreIntermediate } from './core-intermediate-verification.js';
 
 const EXECUTION_PERSIST_SOURCE_STATUSES = [
   'completed',
@@ -166,6 +170,7 @@ export function recordEvidence(
 
 export interface VerifyInputs {
   taskId: string;
+  verificationContext?: TaskVerificationContext;
   /** The runner's final answer text. */
   answerText: string;
   /** Browser-mode tasks pass the last URL the agent reached. */
@@ -478,6 +483,17 @@ export function extractFailedChecks(
       if (c.criterionId.startsWith('generic.')) {
         return { type: c.criterionId, detail: c.detail };
       }
+      const semanticCode = c.criterionId.slice('semantic.'.length).toUpperCase();
+      if (
+        c.criterionId.startsWith('semantic.') &&
+        [
+          'UNSUPPORTED_CONCLUSION',
+          'MISSING_REQUIRED_SECTION',
+          'IRRELEVANT_OUTPUT',
+          'AMBIGUOUS_EVIDENCE',
+        ].includes(semanticCode)
+      )
+        return { type: semanticCode, detail: c.detail };
       return { type: 'unknown', detail: c.detail };
     });
 }
@@ -498,9 +514,148 @@ export function summariseVerificationFailure(
   return '质量校验未通过';
 }
 
-export async function verifyAndFinalize(
-  inputs: VerifyInputs,
+export type CoreVerifyInputs = Omit<VerifyInputs, 'taskId' | 'verificationContext'> & {
+  handle: CoreExecutionHandle;
+  registry?: CoreExecutionRegistry;
+  /** Observed provider URLs carry no source body and cannot certify factual coverage. */
+  observedSourceUrls?: readonly string[];
+  /** Trusted runner state, not a client-selected way around final verification. */
+  runnerStatus?: 'completed' | 'awaiting_user' | 'failed';
+};
+
+export async function verifyCoreAndFinalize(inputs: CoreVerifyInputs): Promise<VerifyOutput> {
+  const registry = inputs.registry ?? coreExecutionRegistry;
+  const state = registry.read(inputs.handle);
+  if (!state || !coreVerificationEnabled()) return unavailableCoreOutput(inputs.handle);
+  const verificationContext = inputs.observedSourceUrls?.length
+    ? {
+        ...state.context,
+        materials: [
+          ...state.context.materials,
+          { kind: 'unavailable' as const, source: 'provider' as const,
+            key: 'provider:observed-url-only', reason: 'source_body_unavailable' as const },
+        ],
+      }
+    : state.context;
+  let output = inputs.runnerStatus === 'awaiting_user' || inputs.runnerStatus === 'failed'
+    ? await verifyCoreIntermediate({ state, verificationContext,
+        runnerStatus: inputs.runnerStatus, answerText: inputs.answerText,
+        semanticAdapter: inputs.semanticAdapter })
+    : await verifyResolvedExecution(
+    { ...inputs, taskId: state.handle.taskId, verificationContext },
+    state,
+  );
+  if (registry.read(inputs.handle) !== state || !coreVerificationEnabled())
+    return unavailableCoreOutput(inputs.handle);
+  if (output.verification && !output.verification.inputCoverage) {
+    // Deterministic early exits still need atomic, same-round metadata. Build
+    // coverage without making a semantic call or reclassifying the failure.
+    const { inputCoverage } = prepareLlmVerificationInput({
+      contract: state.contract, ledger: state.ledger, verificationContext,
+      answerText: output.finalText, adapter: inputs.semanticAdapter ?? null,
+    });
+    output = {
+      ...output,
+      verification: mergeDeterministicAndSemantic(output.verification, {
+        status: output.verification.semanticStatus ?? 'unavailable',
+        issues: [], inputCoverage,
+      }),
+    };
+  }
+  if (inputs.observedSourceUrls?.length && output.verification) {
+    // This is an observed property of the delivery, not an inference from a
+    // successfully serialized request. Preserve it even if context admission
+    // or deterministic validation exited before material assessment.
+    return bindCoreVerification({
+      ...output,
+      verification: mergeDeterministicAndSemantic(output.verification, {
+        status: output.verification.semanticStatus ?? 'unavailable',
+        issues: [],
+        inputCoverage: {
+          complete: false,
+          codes: [...new Set([...(output.verification.inputCoverage?.codes ?? []), 'VERIFICATION_MATERIALS_INCOMPLETE' as const])],
+        },
+      }),
+    }, state.handle);
+  }
+  return bindCoreVerification(output, state.handle);
+}
+
+export type CoreFinalizeInputs = Omit<
+  FinalizeAnswerForPersistenceInputs,
+  'taskId' | 'verificationContext'
+> & {
+  handle: CoreExecutionHandle;
+  registry?: CoreExecutionRegistry;
+};
+
+export async function finalizeCoreAnswerForPersistence(
+  inputs: CoreFinalizeInputs,
 ): Promise<VerifyOutput> {
+  const registry = inputs.registry ?? coreExecutionRegistry;
+  const state = registry.read(inputs.handle);
+  if (
+    !state ||
+    !coreVerificationEnabled() ||
+    !inputs.priorVerification ||
+    inputs.priorVerification.taskId !== state.handle.taskId ||
+    inputs.priorVerification.executionId !== state.handle.executionId ||
+    inputs.priorVerification.executionRevision !== state.handle.executionRevision
+  ) {
+    return unavailableCoreOutput(inputs.handle);
+  }
+  const output = finalizeResolvedExecution(
+    { ...inputs, taskId: state.handle.taskId, verificationContext: state.context },
+    state,
+  );
+  return bindCoreVerification(output, state.handle);
+}
+
+function coreVerificationEnabled(): boolean {
+  const flags = getFeatureFlags();
+  return flags.EVIDENCE_LEDGER && flags.EXECUTION_CONTRACT && flags.EXECUTION_VERIFIER;
+}
+
+function unavailableCoreOutput(handle: CoreExecutionHandle): VerifyOutput {
+  return {
+    finalText: '',
+    verification: {
+      taskId: handle?.taskId ?? '',
+      executionId: handle?.executionId,
+      executionRevision: handle?.executionRevision,
+      passed: false,
+      tier: 'deterministic',
+      semanticStatus: 'unavailable',
+      failureLevel: 'hard_fail',
+      inputCoverage: { complete: false, codes: ['VERIFICATION_CONTEXT_INVALID'] },
+      checks: [
+        {
+          criterionId: 'verification.core_execution_unavailable',
+          criterionType: 'VERIFICATION_CONTEXT_INVALID',
+          checker: 'deterministic',
+          passed: false,
+          severity: 'hard_fail',
+          detail: '本轮核验上下文已失效，不能交付该结果。',
+        },
+      ],
+    },
+  };
+}
+
+function bindCoreVerification(output: VerifyOutput, handle: CoreExecutionHandle): VerifyOutput {
+  if (!output.verification) return unavailableCoreOutput(handle);
+  return {
+    ...output,
+    verification: {
+      ...output.verification,
+      semanticStatus: output.verification.semanticStatus ?? 'unavailable',
+      executionId: handle.executionId,
+      executionRevision: handle.executionRevision,
+    },
+  };
+}
+
+export async function verifyAndFinalize(inputs: VerifyInputs): Promise<VerifyOutput> {
   const flags = getFeatureFlags();
   if (!flags.EXECUTION_VERIFIER) return NULL_OUTPUT(inputs.answerText);
 
@@ -508,51 +663,107 @@ export async function verifyAndFinalize(
   const ledger = getLedger(inputs.taskId);
   if (!contract || !ledger) return NULL_OUTPUT(inputs.answerText);
 
+  return verifyResolvedExecution(inputs, { contract, ledger });
+}
+
+function verificationWorkflow(contract: ExecutionContract, context?: TaskVerificationContext) {
+  if (context !== undefined) {
+    try {
+      const snapshot = createTaskVerificationContext(context);
+      return snapshot.workflow
+        ? { workflowId: snapshot.workflow.id, reportSections: snapshot.workflow.sections }
+        : null;
+    } catch {
+      // Coverage validation retains the explicit invalid input and fails closed.
+      // Never read a mutable workflow or throw raw malformed input errors here.
+      return null;
+    }
+  }
+  return contract.expertWorkflowId ? getExpertWorkflowById(contract.expertWorkflowId) : null;
+}
+
+async function verifyResolvedExecution(
+  inputs: VerifyInputs,
+  { contract, ledger }: Pick<CoreExecutionState, 'contract' | 'ledger'>,
+): Promise<VerifyOutput> {
   // Phase 2 Day 4 — resolve typed expert workflow contract for the
   // verifier's section_presence + source_annotation checks. Only
   // hits the registry when the contract was built from a workflow;
   // null on every other tier so the new checks no-op for them.
-  const workflowContract = contract.expertWorkflowId
-    ? getExpertWorkflowById(contract.expertWorkflowId)
-    : null;
+  const workflowContract = verificationWorkflow(contract, inputs.verificationContext);
 
   // Layer 1 — deterministic.
-  const det = verifyDeterministic({
+  let det = verifyDeterministic({
     contract,
     ledger,
+    verificationContext: inputs.verificationContext,
     answerText: inputs.answerText,
     ...(inputs.finalUrl ? { finalUrl: inputs.finalUrl } : {}),
     ...(workflowContract ? { workflowContract } : {}),
     ...(inputs.outputFiles ? { outputFiles: inputs.outputFiles } : {}),
   });
 
-  if (!det.passed) return runFixLoop(contract, ledger, det, inputs, workflowContract);
+  let finalText = inputs.answerText;
+  if (!det.passed) {
+    const repaired = runFixLoop(contract, ledger, det, inputs, workflowContract);
+    if (inputs.verificationContext === undefined || !repaired.verification?.passed) return repaired;
+    // New core deliveries still need semantic review after deterministic repair.
+    det = repaired.verification;
+    finalText = repaired.finalText;
+  }
+
+  const semanticInputs = {
+    contract,
+    ledger,
+    answerText: finalText,
+    ...(inputs.finalUrl ? { finalUrl: inputs.finalUrl } : {}),
+    adapter: inputs.semanticAdapter ?? null,
+    verificationContext: inputs.verificationContext,
+  };
 
   // Layer 2 — semantic. It is always attempted for a deterministic full-tier
   // pass. A missing regional runtime is explicit `unavailable`, never an
   // implied model pass.
   if (shouldRunLlmVerifier(det, contract)) {
-    const semantic = await verifyWithLlm({
-      contract,
-      ledger,
-      answerText: inputs.answerText,
-      ...(inputs.finalUrl ? { finalUrl: inputs.finalUrl } : {}),
-      adapter: inputs.semanticAdapter ?? null,
-    });
+    const semantic = await verifyWithLlm(semanticInputs);
     const merged = mergeDeterministicAndSemantic(det, semantic);
+    // Missing evidence/over-budget payload cannot be repaired by editing the answer.
+    if (merged.inputCoverage?.complete === false) {
+      return { verification: merged, finalText };
+    }
     if (!merged.passed) {
-      return runFixLoop(contract, ledger, merged, inputs, workflowContract);
+      return runFixLoop(
+        contract,
+        ledger,
+        merged,
+        { ...inputs, answerText: finalText },
+        workflowContract,
+      );
     }
     return {
       verification: merged,
       finalText:
         semantic.status === 'unavailable' && isHighTrustContract(contract)
-          ? appendSemanticUnavailableWarning(inputs.answerText)
-          : inputs.answerText,
+          ? appendSemanticUnavailableWarning(finalText)
+          : finalText,
     };
   }
 
-  return { verification: det, finalText: inputs.answerText };
+  if (inputs.verificationContext !== undefined) {
+    const { inputCoverage } = prepareLlmVerificationInput(semanticInputs);
+    if (inputCoverage?.complete === false) {
+      return {
+        verification: mergeDeterministicAndSemantic(det, {
+          status: 'unavailable',
+          issues: [],
+          inputCoverage,
+        }),
+        finalText,
+      };
+    }
+    return { verification: { ...det, inputCoverage }, finalText };
+  }
+  return { verification: det, finalText };
 }
 
 /**
@@ -564,6 +775,8 @@ export async function verifyAndFinalize(
  * verdict. Omitting `semanticAdapter` keeps this second pass deterministic and cheap.
  */
 export type FinalizeAnswerForPersistenceInputs = Omit<VerifyInputs, 'semanticAdapter'> & {
+  /** Same safe model metadata as the primary review; never credentials or a new model call. */
+  semanticMetadata?: MessagesProviderMetadata;
   /** Preserve unrelated semantic/LLM failures from the primary verifier. */
   priorVerification?: VerificationResult | null;
 };
@@ -571,65 +784,128 @@ export type FinalizeAnswerForPersistenceInputs = Omit<VerifyInputs, 'semanticAda
 export async function finalizeAnswerForPersistence(
   inputs: FinalizeAnswerForPersistenceInputs,
 ): Promise<VerifyOutput> {
-  const { priorVerification, ...verifyInputs } = inputs;
   const flags = getFeatureFlags();
-  if (!flags.EXECUTION_VERIFIER) return NULL_OUTPUT(verifyInputs.answerText);
+  if (!flags.EXECUTION_VERIFIER) return NULL_OUTPUT(inputs.answerText);
 
-  const contract = getContract(verifyInputs.taskId);
-  const ledger = getLedger(verifyInputs.taskId);
-  if (!contract || !ledger) return NULL_OUTPUT(verifyInputs.answerText);
+  const contract = getContract(inputs.taskId);
+  const ledger = getLedger(inputs.taskId);
+  if (!contract || !ledger) return NULL_OUTPUT(inputs.answerText);
 
-  const workflowContract = contract.expertWorkflowId
-    ? getExpertWorkflowById(contract.expertWorkflowId)
-    : null;
+  return finalizeResolvedExecution(inputs, { contract, ledger });
+}
+
+function finalizeResolvedExecution(
+  inputs: FinalizeAnswerForPersistenceInputs,
+  { contract, ledger }: Pick<CoreExecutionState, 'contract' | 'ledger'>,
+): VerifyOutput {
+  const { priorVerification, semanticMetadata, ...verifyInputs } = inputs;
+
+  const workflowContract = verificationWorkflow(contract, inputs.verificationContext);
   const deterministic = verifyDeterministic({
     contract,
     ledger,
+    verificationContext: inputs.verificationContext,
     answerText: verifyInputs.answerText,
     ...(verifyInputs.finalUrl ? { finalUrl: verifyInputs.finalUrl } : {}),
     ...(workflowContract ? { workflowContract } : {}),
     ...(verifyInputs.outputFiles ? { outputFiles: verifyInputs.outputFiles } : {}),
   });
-  const unresolvedLlmFailures = priorVerification?.checks.filter(
-    (check) => !check.passed && check.checker === 'llm',
-  ) ?? [];
+  const unresolvedQualityFailures =
+    priorVerification?.checks.filter(
+      (check) =>
+        !check.passed && (check.checker === 'llm' || check.criterionId.startsWith('verification.')),
+    ) ?? [];
+
+  const withFinalCoverage = (output: VerifyOutput): VerifyOutput => {
+    if (
+      !output.verification ||
+      (verifyInputs.verificationContext === undefined && !priorVerification?.inputCoverage)
+    )
+      return output;
+    let inputCoverage =
+      verifyInputs.verificationContext !== undefined
+        ? prepareLlmVerificationInput({
+            contract,
+            ledger,
+            answerText: output.finalText,
+            finalUrl: verifyInputs.finalUrl,
+            adapter: null,
+            semanticMetadata,
+            verificationContext: verifyInputs.verificationContext,
+          }).inputCoverage
+        : priorVerification?.inputCoverage?.complete === false
+          ? priorVerification.inputCoverage
+          : { complete: false, codes: ['VERIFICATION_CONTEXT_INVALID' as const] };
+    // The model field and provider-specific options are part of the wire budget.
+    // A lost route cannot certify complete coverage using an empty model placeholder.
+    if (inputCoverage?.complete && !semanticMetadata?.model) {
+      inputCoverage = { complete: false, codes: ['VERIFICATION_CONTEXT_INVALID'] };
+    }
+    if (priorVerification?.inputCoverage?.codes.includes('VERIFICATION_MATERIALS_INCOMPLETE')) {
+      inputCoverage = {
+        complete: false,
+        codes: [...new Set([...(inputCoverage?.codes ?? []), 'VERIFICATION_MATERIALS_INCOMPLETE' as const])],
+      };
+    }
+    if (inputCoverage?.complete === false) {
+      return {
+        ...output,
+        verification: mergeDeterministicAndSemantic(output.verification, {
+          status: output.verification.semanticStatus ?? 'unavailable',
+          issues: [],
+          inputCoverage,
+        }),
+      };
+    }
+    return { ...output, verification: { ...output.verification, inputCoverage } };
+  };
 
   if (deterministic.passed) {
-    if (priorVerification && unresolvedLlmFailures.length > 0) {
-      return { verification: priorVerification, finalText: verifyInputs.answerText };
+    if (priorVerification && unresolvedQualityFailures.length > 0) {
+      return withFinalCoverage({
+        verification: priorVerification,
+        finalText: verifyInputs.answerText,
+      });
     }
-    return {
-      verification: priorVerification?.semanticStatus
-        ? { ...deterministic, semanticStatus: priorVerification.semanticStatus }
-        : deterministic,
+    return withFinalCoverage({
+      verification: {
+        ...deterministic,
+        ...(priorVerification?.semanticStatus
+          ? { semanticStatus: priorVerification.semanticStatus }
+          : {}),
+        ...(priorVerification?.inputCoverage
+          ? { inputCoverage: priorVerification.inputCoverage }
+          : {}),
+      },
       finalText: verifyInputs.answerText,
-    };
+    });
   }
 
-  const finalOutput = runFixLoop(
-    contract,
-    ledger,
-    deterministic,
-    verifyInputs,
-    workflowContract,
-  );
-  if (!priorVerification || priorVerification.passed) return finalOutput;
-  if (unresolvedLlmFailures.length === 0) return finalOutput;
+  const finalOutput = runFixLoop(contract, ledger, deterministic, verifyInputs, workflowContract);
+  if (!priorVerification || priorVerification.passed) return withFinalCoverage(finalOutput);
+  if (unresolvedQualityFailures.length === 0) return withFinalCoverage(finalOutput);
 
   const finalChecks = finalOutput.verification?.checks ?? [];
-  return {
+  return withFinalCoverage({
     finalText: finalOutput.finalText,
     verification: {
       ...priorVerification,
       passed: false,
+      ...(finalOutput.verification?.failureLevel === 'hard_fail'
+        ? { failureLevel: 'hard_fail' as const }
+        : finalOutput.verification?.failureLevel === 'needs_clarification' &&
+            priorVerification.failureLevel !== 'hard_fail'
+          ? { failureLevel: 'needs_clarification' as const }
+          : {}),
       checks: [
         ...priorVerification.checks,
         ...finalChecks.filter(
-          (check) => !priorVerification.checks.some((prior) => prior.criterionId === check.criterionId),
+          (check) =>
+            !priorVerification.checks.some((prior) => prior.criterionId === check.criterionId),
         ),
       ],
     },
-  };
+  });
 }
 
 const HIGH_TRUST_INTENT_RE =
@@ -662,7 +938,7 @@ function runFixLoop(
   ledger: EvidenceLedger,
   initialVerification: VerificationResult,
   inputs: VerifyInputs,
-  workflowContract: import('./expert-workflow-contract.js').ExpertWorkflowContract | null,
+  workflowContract: Pick<import('./expert-workflow-contract.js').ExpertWorkflowContract, 'workflowId' | 'reportSections'> | null,
 ): VerifyOutput {
   if (initialVerification.failureLevel !== 'fixable') {
     return {
@@ -696,6 +972,7 @@ function runFixLoop(
   const recheck = verifyDeterministic({
     contract,
     ledger,
+    verificationContext: inputs.verificationContext,
     answerText: fix.fixed,
     ...(inputs.finalUrl ? { finalUrl: inputs.finalUrl } : {}),
     ...(workflowContract ? { workflowContract } : {}),

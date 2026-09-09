@@ -38,6 +38,9 @@ import {
   setFeatureFlagsForTest,
 } from './feature-flags.js';
 import type { MessagesAdapter } from '../llm/messages-adapter.js';
+import { createTaskVerificationContext } from './task-verification-context.js';
+import { prepareLlmVerificationInput } from './llm-verifier.js';
+import { serializeMessagesRequest } from '../llm/messages-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -97,6 +100,390 @@ function makeStubClient(textOut: string): MessagesAdapter {
     }),
   };
 }
+
+describe('complete delivery coverage', () => {
+  function directContext() {
+    return createTaskVerificationContext({
+      schemaVersion: 1,
+      executionId: 'exec_final',
+      executionRevision: 1,
+      initialRequest: '解释概念',
+      userTurns: [],
+      phase: 'direct',
+      workflow: null,
+      referencePlan: null,
+      materials: [],
+    });
+  }
+
+  it('keeps over-budget output partial without attempting to auto-fix it into completion or failure', async () => {
+    flagsAllOn();
+    const taskId = 'tsk_delivery_coverage';
+    initExecution({
+      taskId,
+      intent: '解释这份材料',
+      executionMode: 'generate',
+      expertMode: 'expert',
+    });
+    const context = createTaskVerificationContext({
+      schemaVersion: 1,
+      executionId: 'exec_coverage',
+      executionRevision: 1,
+      initialRequest: '解释这份材料',
+      userTurns: [],
+      phase: 'direct',
+      workflow: null,
+      referencePlan: null,
+      materials: [],
+    });
+    const answer = '这是一段合成解释。'.repeat(5_000);
+    const semanticAdapter = makeStubClient('{"status":"pass","issues":[]}');
+    const result = await verifyAndFinalize({
+      taskId,
+      answerText: answer,
+      semanticAdapter,
+      verificationContext: context,
+    });
+    expect(result.verification?.inputCoverage).toEqual({
+      complete: false,
+      codes: ['VERIFICATION_INPUT_LIMIT'],
+    });
+    expect(deriveFinalStatus('completed', result.verification)).toBe('partial_success');
+    expect(result.finalText).toBe(answer);
+    expect(semanticAdapter.create).not.toHaveBeenCalled();
+  });
+
+  it('preserves the fixed semantic failure code at the user-facing boundary', () => {
+    expect(
+      extractFailedChecks({
+        taskId: 'tsk_fixed_code',
+        tier: 'llm',
+        passed: false,
+        checks: [
+          {
+            criterionId: 'semantic.missing_required_section',
+            checker: 'llm',
+            passed: false,
+            detail: '结果缺少必要内容。',
+          },
+        ],
+      }),
+    ).toEqual([{ type: 'MISSING_REQUIRED_SECTION', detail: '结果缺少必要内容。' }]);
+  });
+
+  it('enforces material coverage on checklist tasks even when semantic review is not scheduled', async () => {
+    flagsAllOn();
+    const taskId = 'tsk_checklist_coverage';
+    initExecution({ taskId, intent: '写一段产品介绍', executionMode: 'generate' });
+    expect(getContract(taskId)?.tier).toBe('checklist');
+    const context = createTaskVerificationContext({
+      schemaVersion: 1,
+      executionId: 'exec_checklist',
+      executionRevision: 1,
+      initialRequest: '写一段产品介绍',
+      userTurns: [],
+      phase: 'direct',
+      workflow: null,
+      referencePlan: null,
+      materials: [{ kind: 'unavailable', key: 'file:0', source: 'file', reason: 'non_text' }],
+    });
+    const semanticAdapter = makeStubClient('{"status":"pass","issues":[]}');
+    const output = await verifyAndFinalize({
+      taskId,
+      answerText: '这是一段合成介绍。'.repeat(30),
+      semanticAdapter,
+      verificationContext: context,
+    });
+    expect(deriveFinalStatus('completed', output.verification)).toBe('partial_success');
+    expect(output.verification?.inputCoverage?.complete).toBe(false);
+    expect(semanticAdapter.create).not.toHaveBeenCalled();
+  });
+
+  it('does not erase input coverage failures at the final deterministic persistence check', async () => {
+    flagsAllOn();
+    const taskId = 'tsk_persistence_coverage';
+    initExecution({ taskId, intent: '解释概念', executionMode: 'generate' });
+    const prior = {
+      taskId,
+      tier: 'deterministic' as const,
+      passed: false,
+      failureLevel: 'fixable' as const,
+      inputCoverage: { complete: false, codes: ['VERIFICATION_INPUT_LIMIT' as const] },
+      checks: [
+        {
+          criterionId: 'verification.verification_input_limit',
+          criterionType: 'VERIFICATION_INPUT_LIMIT',
+          checker: 'deterministic' as const,
+          passed: false,
+          detail: '核验输入超出范围。',
+        },
+      ],
+    };
+    const output = await finalizeAnswerForPersistence({
+      taskId,
+      answerText: '这是一段合成解释。'.repeat(30),
+      priorVerification: prior,
+    });
+    expect(output.verification?.inputCoverage).toEqual(prior.inputCoverage);
+    expect(deriveFinalStatus('completed', output.verification)).toBe('partial_success');
+  });
+
+  it('reviews the exact repaired candidate instead of skipping semantic review after auto-fix', async () => {
+    flagsAllOn();
+    const taskId = 'tsk_repaired_candidate';
+    initExecution({
+      taskId,
+      intent: 'find the help page',
+      executionMode: 'generate',
+      expertMode: 'expert',
+    });
+    recordEvidence(taskId, {
+      fact: 'visited https://example.com/help/index',
+      sourceType: 'tool_result',
+      sourceDetail: 'synthetic',
+      confidence: 'observed',
+    });
+    const context = createTaskVerificationContext({
+      schemaVersion: 1,
+      executionId: 'exec_repaired',
+      executionRevision: 1,
+      initialRequest: 'find the help page',
+      userTurns: [],
+      phase: 'direct',
+      workflow: null,
+      referencePlan: null,
+      materials: [],
+    });
+    const semanticAdapter = makeStubClient('{"status":"pass","issues":[]}');
+    const result = await verifyAndFinalize({
+      taskId,
+      answerText: `See https://example.com/help/wrong-page ${'合成正文'.repeat(80)}`,
+      semanticAdapter,
+      verificationContext: context,
+    });
+    expect(result.finalText).toContain('https://example.com/help/index');
+    expect(result.verification?.semanticStatus).toBe('pass');
+    expect(semanticAdapter.create).toHaveBeenCalledTimes(1);
+    const request = vi.mocked(semanticAdapter.create).mock.calls[0]?.[0];
+    const content = request?.messages[0]?.content;
+    if (typeof content !== 'string') throw new Error('missing semantic request');
+    expect(JSON.parse(content).answerDraft).toBe(result.finalText);
+  });
+
+  it('retains complete coverage metadata after a final deterministic pass', async () => {
+    flagsAllOn();
+    const taskId = 'tsk_coverage_metadata';
+    initExecution({ taskId, intent: '解释概念', executionMode: 'generate' });
+    const output = await finalizeAnswerForPersistence({
+      taskId,
+      answerText: '这是一段合成解释。'.repeat(30),
+      verificationContext: directContext(),
+      semanticMetadata: makeStubClient('{"status":"pass","issues":[]}').metadata,
+      priorVerification: {
+        taskId,
+        tier: 'deterministic',
+        passed: true,
+        checks: [],
+        inputCoverage: { complete: true, codes: [] },
+      },
+    });
+    expect(output.verification?.inputCoverage).toEqual({ complete: true, codes: [] });
+  });
+
+  it('does not let a previous coverage warning weaken a new deterministic hard failure', async () => {
+    flagsAllOn();
+    const taskId = 'tsk_coverage_hard_failure';
+    initExecution({
+      taskId,
+      intent: '解释概念',
+      executionMode: 'generate',
+      constraints: ['no_form_submit'],
+    });
+    recordEvidence(taskId, {
+      fact: 'submitted form on /synthetic',
+      sourceType: 'tool_result',
+      sourceDetail: 'synthetic',
+      confidence: 'observed',
+    });
+    const output = await finalizeAnswerForPersistence({
+      taskId,
+      answerText: '这是一段合成解释。'.repeat(30),
+      priorVerification: {
+        taskId,
+        tier: 'deterministic',
+        passed: false,
+        failureLevel: 'fixable',
+        inputCoverage: { complete: false, codes: ['VERIFICATION_INPUT_LIMIT'] },
+        checks: [
+          {
+            criterionId: 'verification.verification_input_limit',
+            checker: 'deterministic',
+            passed: false,
+            detail: '核验输入超限。',
+          },
+        ],
+      },
+    });
+    expect(output.verification?.failureLevel).toBe('hard_fail');
+    expect(deriveFinalStatus('completed', output.verification)).toBe('failed');
+  });
+
+  it('rechecks final candidate bytes instead of inheriting coverage from a shorter answer', async () => {
+    flagsAllOn();
+    const taskId = 'tsk_final_oversize';
+    initExecution({ taskId, intent: '解释概念', executionMode: 'generate' });
+    const output = await finalizeAnswerForPersistence({
+      taskId,
+      answerText: '界'.repeat(32_769),
+      verificationContext: directContext(),
+      priorVerification: {
+        taskId,
+        tier: 'deterministic',
+        passed: true,
+        checks: [],
+        inputCoverage: { complete: true, codes: [] },
+      },
+    });
+    expect(output.verification?.inputCoverage).toEqual({
+      complete: false,
+      codes: ['VERIFICATION_INPUT_LIMIT'],
+    });
+    expect(deriveFinalStatus('completed', output.verification)).toBe('partial_success');
+  });
+
+  it('cannot reconfirm complete input coverage if the final context was lost', async () => {
+    flagsAllOn();
+    const taskId = 'tsk_final_missing_context';
+    initExecution({ taskId, intent: '解释概念', executionMode: 'generate' });
+    const output = await finalizeAnswerForPersistence({
+      taskId,
+      answerText: '这是一段合成解释。'.repeat(30),
+      priorVerification: {
+        taskId,
+        tier: 'deterministic',
+        passed: true,
+        checks: [],
+        inputCoverage: { complete: true, codes: [] },
+      },
+    });
+    expect(output.verification?.inputCoverage?.complete).toBe(false);
+    expect(deriveFinalStatus('completed', output.verification)).toBe('partial_success');
+  });
+
+  it('preserves new numeric conflicts over a prior fixable coverage failure', async () => {
+    flagsAllOn();
+    const taskId = 'tsk_final_numeric_conflict';
+    initExecution({ taskId, intent: '解释概念', executionMode: 'generate' });
+    recordEvidence(taskId, {
+      fact: 'GMV=100、订单数=2、客单价=10',
+      sourceType: 'user_input',
+      sourceDetail: 'synthetic',
+      confidence: 'observed',
+    });
+    const output = await finalizeAnswerForPersistence({
+      taskId,
+      answerText: '这是一段合成解释。'.repeat(30),
+      priorVerification: {
+        taskId,
+        tier: 'deterministic',
+        passed: false,
+        failureLevel: 'fixable',
+        inputCoverage: { complete: false, codes: ['VERIFICATION_INPUT_LIMIT'] },
+        checks: [
+          {
+            criterionId: 'verification.verification_input_limit',
+            checker: 'deterministic',
+            passed: false,
+            detail: '核验输入超限。',
+          },
+        ],
+      },
+    });
+    expect(output.verification?.failureLevel).toBe('needs_clarification');
+    expect(deriveFinalStatus('completed', output.verification)).toBe('failed');
+  });
+
+  it.each([null, false])(
+    'does not treat explicit invalid context %s as legacy',
+    async (invalid) => {
+      flagsAllOn();
+      const taskId = 'tsk_invalid_context';
+      initExecution({ taskId, intent: '解释概念', executionMode: 'generate' });
+      const output = await verifyAndFinalize({
+        taskId,
+        answerText: '这是一段合成解释。'.repeat(30),
+        verificationContext: invalid as unknown as ReturnType<typeof directContext>,
+      });
+      expect(output.verification?.inputCoverage).toEqual({
+        complete: false,
+        codes: ['VERIFICATION_CONTEXT_INVALID'],
+      });
+      expect(deriveFinalStatus('completed', output.verification)).toBe('partial_success');
+    },
+  );
+
+  it('counts the actual model field at the final wire budget boundary', async () => {
+    flagsAllOn();
+    const taskId = 'tsk_final_wire_budget';
+    initExecution({ taskId, intent: '解释概念', executionMode: 'generate' });
+    const context = createTaskVerificationContext({
+      ...directContext(),
+      materials: [{ kind: 'text', key: 'file:0', source: 'file', text: '\u0000'.repeat(24_000) }],
+    });
+    const contract = getContract(taskId);
+    const ledger = getLedger(taskId);
+    if (!contract || !ledger) throw new Error('missing test execution');
+    const prepared = prepareLlmVerificationInput({
+      contract,
+      ledger,
+      adapter: null,
+      answerText: '',
+      verificationContext: context,
+    });
+    if (!prepared.request) throw new Error('missing test request');
+    const noModelBytes = Buffer.byteLength(serializeMessagesRequest(prepared.request), 'utf8');
+    const answer = 'x'.repeat(262_144 - noModelBytes);
+    expect(Buffer.byteLength(answer)).toBeLessThan(98_304);
+    const output = await finalizeAnswerForPersistence({
+      taskId,
+      answerText: answer,
+      verificationContext: context,
+      semanticMetadata: makeStubClient('{"status":"pass","issues":[]}').metadata,
+      priorVerification: {
+        taskId,
+        tier: 'deterministic',
+        passed: true,
+        checks: [],
+        inputCoverage: { complete: true, codes: [] },
+      },
+    });
+    expect(output.verification?.inputCoverage).toEqual({
+      complete: false,
+      codes: ['VERIFICATION_INPUT_LIMIT'],
+    });
+    expect(deriveFinalStatus('completed', output.verification)).toBe('partial_success');
+  });
+
+  it('does not certify a full wire budget after losing the safe model metadata', async () => {
+    flagsAllOn();
+    const taskId = 'tsk_final_missing_model';
+    initExecution({ taskId, intent: '解释概念', executionMode: 'generate' });
+    const output = await finalizeAnswerForPersistence({
+      taskId,
+      answerText: '这是一段合成解释。'.repeat(30),
+      verificationContext: directContext(),
+      priorVerification: {
+        taskId,
+        tier: 'deterministic',
+        passed: true,
+        checks: [],
+        inputCoverage: { complete: true, codes: [] },
+      },
+    });
+    expect(output.verification?.inputCoverage?.complete).toBe(false);
+    expect(deriveFinalStatus('completed', output.verification)).toBe('partial_success');
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Case 1 — flags all off, no-op everywhere

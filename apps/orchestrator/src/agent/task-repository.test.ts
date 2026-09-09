@@ -25,6 +25,7 @@ interface Captured {
   taskUpdate: Record<string, unknown> | null;
   eventPayload: Record<string, unknown> | null;
   whereClauses: unknown[];
+  readWhereClauses: unknown[];
   transactionRan: boolean;
 }
 
@@ -61,14 +62,16 @@ function fakeDbWithAffectedRows(affectedRows: number) {
     taskUpdate: null,
     eventPayload: null,
     whereClauses: [],
+    readWhereClauses: [],
     transactionRan: false,
   };
 
   const select = () => ({
     from: () => ({
-      where: () => ({
-        limit: async () => [{ id: 1 }],
-      }),
+      where: (condition: unknown) => {
+        captured.readWhereClauses.push(condition);
+        return { limit: async () => [{ id: 1 }] };
+      },
     }),
   });
 
@@ -119,6 +122,37 @@ function collectDrizzleParamValues(input: unknown, out: unknown[] = []): unknown
   }
   return out;
 }
+
+describe('scoped legacy reply writes', () => {
+  it.each(['resume', 'handoff'] as const)('guards both owner read and %s update against new core executions', async kind => {
+    const { db, captured } = fakeDbWithAffectedRows(0);
+    const repo = new TaskRepository(db, 'eval');
+    const result = kind === 'resume'
+      ? await repo.markAwaitingReplyResumed('tsk_scope', 42)
+      : await repo.markAwaitingReplyCompleted('tsk_scope', { summary: 'synthetic handoff' }, 42);
+    expect(result).toEqual({ persisted: false });
+    expect(captured.eventInserts).toBe(0);
+    for (const condition of [...captured.readWhereClauses, ...captured.whereClauses]) {
+      const guard = new MySqlDialect().sqlToQuery(condition as SQL);
+      expect(guard.sql).toContain('`tasks`.`user_id` = ?');
+      expect(guard.sql).toContain('`tasks`.`origin` = ?');
+      expect(guard.sql).toContain('`tasks`.`execution_id` is null');
+      expect(guard.sql).toContain('`tasks`.`execution_revision` = ?');
+      expect(guard.sql).toContain('`tasks`.`core_record_version` = ?');
+      expect(guard.params).toEqual(['tsk_scope', 'awaiting_user', 42, 'eval', 0, 0]);
+    }
+    expect(captured.readWhereClauses).toHaveLength(1);
+    expect(captured.whereClauses).toHaveLength(1);
+  });
+  it.each([0, -1, Number.NaN, 1.5])('rejects invalid owner %s before any database operation', async owner => {
+    const { db, captured } = fakeDbWithAffectedRows(1);
+    const repo = new TaskRepository(db);
+    await expect(repo.markAwaitingReplyResumed('tsk_scope', owner)).rejects.toThrow('LEGACY_REPLY_SCOPE_INVALID');
+    await expect(repo.markAwaitingReplyCompleted('tsk_scope', {}, owner)).rejects.toThrow('LEGACY_REPLY_SCOPE_INVALID');
+    expect(captured.readWhereClauses).toEqual([]);
+    expect(captured.txUpdates).toBe(0);
+  });
+});
 
 describe('persistActiveCorePlan', () => {
   it.each([0, 1])('only writes advisory plans to a still-executing task (%i affected)', async affected => {

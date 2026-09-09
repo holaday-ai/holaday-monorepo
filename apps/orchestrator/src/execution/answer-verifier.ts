@@ -37,6 +37,8 @@ import {
 import { evaluateSourceDomain } from './source-domain-consistency.js';
 import { evaluateTemplateFill } from './template-fill-consistency.js';
 import { classifyLightweightTask } from './lightweight-task.js';
+import type { VerificationInputCoverage } from './verification-input-budget.js';
+import { type TaskVerificationContext, createTaskVerificationContext } from './task-verification-context.js';
 
 export type FailureLevel = 'fixable' | 'needs_clarification' | 'hard_fail';
 
@@ -60,10 +62,15 @@ export interface CheckResult {
 
 export interface VerificationResult {
   taskId: string;
+  /** Bound by core execution entry points; absent only for legacy results. */
+  executionId?: string;
+  executionRevision?: number;
   passed: boolean;
   tier: 'deterministic' | 'llm';
   /** Explicit outcome of the optional semantic layer; never implies a pass. */
   semanticStatus?: 'pass' | 'warn' | 'reject' | 'unavailable';
+  /** Input completeness is independent of semantic service availability. */
+  inputCoverage?: VerificationInputCoverage;
   checks: CheckResult[];
   failureLevel?: FailureLevel;
   suggestedFix?: string;
@@ -72,6 +79,10 @@ export interface VerificationResult {
 export interface VerifyInputs {
   contract: ExecutionContract;
   ledger: EvidenceLedger;
+  /** Core numeric checks use complete user turns/materials, not the audit summary. */
+  verificationContext?: TaskVerificationContext;
+  /** Server-selected intermediate artifact; never a final-delivery exemption. */
+  deliveryStage?: 'plan' | 'clarification';
   /** The agent's final answer text. */
   answerText: string;
   /** When the task is browser-mode, the last URL the agent reached. */
@@ -84,7 +95,7 @@ export interface VerifyInputs {
    * Absent for non-workflow tasks → those checks are skipped
    * entirely (no false positives on translation / browser tasks).
    */
-  workflowContract?: ExpertWorkflowContract;
+  workflowContract?: Pick<ExpertWorkflowContract, 'reportSections'>;
   /**
    * Output files created during this task (task_files, kind='output',
    * non-expired). Feeds the file-artifact consistency check, which
@@ -155,11 +166,12 @@ const CHINESE_CONSTRAINT_ALIASES: Record<string, string> = {
  */
 export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   const { contract, ledger, answerText, finalUrl, workflowContract } = inputs;
+  const deliveryStage = inputs.verificationContext ? inputs.deliveryStage : undefined;
   const checks: CheckResult[] = [];
 
   // 1. Per-criterion checks.
   for (const criterion of contract.successCriteria) {
-    checks.push(checkCriterion(criterion, ledger, answerText, finalUrl, contract));
+    checks.push(checkCriterion(criterion, ledger, answerText, finalUrl, contract, inputs));
   }
 
   // 2. Generic checks (always run, regardless of explicit criteria).
@@ -172,7 +184,10 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   const constraintCheck = checkConstraints(contract.constraints, ledger);
   if (constraintCheck) checks.push(constraintCheck);
 
-  const numberCheck = checkNumberCrossValidation(ledger);
+  // This check compares INPUT values, not assertions in the candidate. A plan
+  // or clarification may legitimately ask the user to resolve that conflict.
+  // Candidate claims still pass provenance/URL/artifact and semantic checks.
+  const numberCheck = deliveryStage ? null : checkNumberCrossValidation(ledger, inputs.verificationContext);
   if (numberCheck) checks.push(numberCheck);
 
   // 3. Workflow-specific checks (only when an expert workflow drove
@@ -197,7 +212,7 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   //    eventual autoFix step (or the user retrying via 重试) gets
   //    surfaced cleanly instead of presenting a near-blank card
   //    as a "success".
-  const emptyCheck = checkEmptyResult(answerText, contract);
+  const emptyCheck = checkEmptyResult(answerText, contract, deliveryStage);
   if (emptyCheck) checks.push(emptyCheck);
 
   // 5. File-artifact consistency. The answer must not offer the user a
@@ -222,7 +237,7 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   //    the user explicitly allowed other sources.
   // contract.goal is the one-line summarised intent (≤120 chars) — site
   // names sit at the head of these prompts, so it's a faithful proxy.
-  const sourceDomainCheck = checkSourceDomainConsistency(
+  const sourceDomainCheck = deliveryStage ? null : checkSourceDomainConsistency(
     contract.goal,
     answerText,
     finalUrl,
@@ -265,6 +280,7 @@ function checkCriterion(
   answerText: string,
   finalUrl: string | undefined,
   contract: ExecutionContract,
+  contextInput?: Pick<VerifyInputs, 'verificationContext' | 'deliveryStage'>,
 ): CheckResult {
   switch (criterion.type) {
     case 'url_match':
@@ -286,7 +302,7 @@ function checkCriterion(
     case 'ecommerce_rows':
       return checkEcommerceRows(criterion, answerText);
     case 'custom':
-      return checkCustom(criterion, ledger, answerText, contract);
+      return checkCustom(criterion, ledger, answerText, contract, contextInput);
     default: {
       // TS exhaustiveness — should be unreachable.
       const _exhaust: never = criterion.type;
@@ -1060,6 +1076,7 @@ function checkCustom(
   ledger: EvidenceLedger,
   answerText: string,
   contract: ExecutionContract,
+  contextInput?: Pick<VerifyInputs, 'verificationContext' | 'deliveryStage'>,
 ): CheckResult {
   switch (criterion.rule) {
     case 'no_ungrounded_urls': {
@@ -1104,7 +1121,7 @@ function checkCustom(
       };
     }
     case 'expert_claim_provenance':
-      return checkExpertClaimProvenance(answerText);
+      return checkExpertClaimProvenance(answerText, contextInput);
     default:
       return {
         criterionId: criterion.id,
@@ -1126,7 +1143,17 @@ const EXPERT_PROVENANCE_MARKERS = [
   '需要实测确认',
 ] as const;
 
-function checkExpertClaimProvenance(answerText: string): CheckResult {
+function checkExpertClaimProvenance(
+  answerText: string,
+  contextInput?: Pick<VerifyInputs, 'verificationContext' | 'deliveryStage'>,
+): CheckResult {
+  if (isGroundedInputQuestion(answerText, contextInput)) {
+    return {
+      criterionId: 'generic.expert_claim_provenance',
+      criterionType: 'expert_claim_provenance', passed: true, checker: 'deterministic',
+      detail: '本轮仅询问用户已提供的同一指标与数值，不认证该数值正确。',
+    };
+  }
   const claimSegments = answerText
     .split(/[。！？!?\n]+/u)
     .map((segment) => segment.trim())
@@ -1152,6 +1179,30 @@ function checkExpertClaimProvenance(answerText: string): CheckResult {
       : `以下专家结论缺少来源或假设标记：${unsupported.slice(0, 3).join('；')}`,
     severity: passed ? undefined : 'hard_fail',
   };
+}
+
+/** Narrow source-bound echo, not a general question-mark exemption. The entire
+ * candidate must be one explicit input-confirmation question and its metric +
+ * value must occur together in actual user/material text. Mixed statements,
+ * new values, different metrics and model plans do not qualify.
+ */
+function isGroundedInputQuestion(
+  text: string,
+  input?: Pick<VerifyInputs, 'verificationContext' | 'deliveryStage'>,
+): boolean {
+  if (input?.deliveryStage !== 'clarification' || !input.verificationContext) return false;
+  const claim = text.trim().match(/^请确认(?:您|你)?提供的([^。！？?;；\n]{1,160})(?:是否准确|是否正确|对吗)[？?]$/u)?.[1];
+  if (!claim) return false;
+  try {
+    const context = createTaskVerificationContext(input.verificationContext);
+    const normalize = (value: string) => value.replace(/[\s=：:]/g, '').replace(/％/g, '%');
+    const expected = normalize(claim);
+    return [context.initialRequest, ...context.userTurns,
+      ...context.materials.flatMap(material => material.kind === 'text' ? [material.text] : [])]
+      .some(source => normalize(source).includes(expected));
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1183,6 +1234,7 @@ function checkExpertClaimProvenance(answerText: string): CheckResult {
 function checkEmptyResult(
   answerText: string,
   contract: ExecutionContract,
+  deliveryStage?: 'plan' | 'clarification',
 ): CheckResult | null {
   // BUG-A2 fix (2026-05-20): bypass the empty-result check when the
   // original (un-sanitized) answer is substantial (>200 non-whitespace
@@ -1212,6 +1264,7 @@ function checkEmptyResult(
   // call the task completed.
   const hasContentChars =
     /[A-Za-z0-9一-鿿぀-ゟ゠-ヿ]/.test(meaningful);
+  if (deliveryStage === 'clarification' && meaningful.length >= 1 && hasContentChars) return null;
   // Plain Q&A — arithmetic / greeting / short knowledge — has a
   // legitimately tiny answer ("2" / "你好！"). Pass on any non-empty
   // content character. classifyLightweightTask returns null for any
@@ -1414,8 +1467,8 @@ function checkConstraints(
  * verify GMV ≈ 订单数 × 客单价 within tolerance. Same for
  * GMV ≈ UV × 转化率 × 客单价.
  */
-function checkNumberCrossValidation(ledger: EvidenceLedger): CheckResult | null {
-  const numericFacts = collectNumericFacts(ledger);
+function checkNumberCrossValidation(ledger: EvidenceLedger, context?: TaskVerificationContext): CheckResult | null {
+  const numericFacts = collectNumericFacts(ledger, context);
   if (numericFacts.size === 0) return null;
   const checks: { ok: boolean; note: string }[] = [];
 
@@ -1461,10 +1514,26 @@ function checkNumberCrossValidation(ledger: EvidenceLedger): CheckResult | null 
   };
 }
 
-function collectNumericFacts(ledger: EvidenceLedger): Map<string, number> {
+function collectNumericFacts(ledger: EvidenceLedger, context?: TaskVerificationContext): Map<string, number> {
   const out = new Map<string, number>();
-  for (const e of ledger.entries) {
-    if (e.sourceType !== 'user_input' && e.sourceType !== 'file_parse') continue;
+  let facts: readonly string[];
+  if (context !== undefined) {
+    try {
+      const snapshot = createTaskVerificationContext(context);
+      // Explicit later user assignments supersede earlier ones. Materials
+      // supply only fields not specified by the user; none go into the ledger.
+      facts = [
+        ...[...snapshot.userTurns].reverse(), snapshot.initialRequest,
+        ...snapshot.materials.flatMap(material => material.kind === 'text' ? [material.text] : []),
+      ];
+    } catch {
+      // The separate coverage gate rejects invalid contexts, never legacy-fallback.
+      return out;
+    }
+  } else {
+    facts = ledger.entries.filter(entry => entry.sourceType === 'user_input' || entry.sourceType === 'file_parse').map(entry => entry.fact);
+  }
+  for (const fact of facts) {
     for (const key of KNOWN_NUMERIC_KEYS) {
       // Match `<key> <separator> <number>` where separator is
       // `=`, `:`, whitespace, or `¥`. Number may use comma
@@ -1472,7 +1541,7 @@ function collectNumericFacts(ledger: EvidenceLedger): Map<string, number> {
       const re = new RegExp(
         `${escapeRegex(key)}\\s*[=:：]?\\s*[¥¥$]?\\s*([0-9]+(?:[.,][0-9]+)?)\\s*(万|亿|千|百)?\\s*[%％]?`,
       );
-      const m = e.fact.match(re);
+      const m = fact.match(re);
       if (!m) continue;
       const raw = m[1]!.replace(/,/g, '');
       const unitMultiplier =
@@ -1487,9 +1556,11 @@ function collectNumericFacts(ledger: EvidenceLedger): Map<string, number> {
                 : 1;
       const n = Number(raw) * unitMultiplier;
       if (!Number.isFinite(n)) continue;
-      // Don't clobber if we already saw a more interesting value.
-      if (!out.has(key) || (n >= MIN_CROSSCHECK_VALUE && (out.get(key) ?? 0) < MIN_CROSSCHECK_VALUE)) {
-        out.set(key, n);
+      const canonicalKey = context !== undefined && key === '订单' ? '订单数' : key;
+      // Core uses newest explicit assignments even when a correction is smaller.
+      // Legacy keeps its historical first/interesting-value behaviour.
+      if (!out.has(canonicalKey) || (context === undefined && n >= MIN_CROSSCHECK_VALUE && (out.get(canonicalKey) ?? 0) < MIN_CROSSCHECK_VALUE)) {
+        out.set(canonicalKey, n);
       }
     }
   }
@@ -1628,7 +1699,7 @@ function normaliseSectionHeadingLine(value: string): string {
  * but keeps the function pure.
  */
 function checkWorkflowSectionPresence(
-  workflow: ExpertWorkflowContract,
+  workflow: Pick<ExpertWorkflowContract, 'reportSections'>,
   answerText: string,
 ): CheckResult | null {
   const required = workflow.reportSections.filter((s) => s.required);
@@ -1661,7 +1732,7 @@ function checkWorkflowSectionPresence(
  * when no section requires annotation (some workflows might not).
  */
 function checkWorkflowSourceAnnotation(
-  workflow: ExpertWorkflowContract,
+  workflow: Pick<ExpertWorkflowContract, 'reportSections'>,
   answerText: string,
 ): CheckResult | null {
   const annotated = workflow.reportSections.filter((s) => s.sourceAnnotation);

@@ -6,6 +6,7 @@ import {
   MessagesAdapterError,
   createAnthropicCompatibleMessagesAdapter,
   createQwenMessagesAdapter,
+  serializeMessagesRequest,
 } from './messages-adapter.js';
 import type { QwenRuntimeEnvironment } from './qwen-route.js';
 
@@ -40,6 +41,77 @@ function buildClient(response: unknown): AnthropicCompatibleClient {
     },
   };
 }
+
+describe('semantic wire budget serialization', () => {
+  it('uses the same serialization as the compatible adapter for Qwen metadata', async () => {
+    const client = buildClient({
+      id: 'msg_budget',
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    const adapter = createAnthropicCompatibleMessagesAdapter({
+      client,
+      metadata: {
+        provider: 'alibaba-model-studio',
+        model: 'qwen3-coder-plus',
+        region: 'intl',
+        deploymentScope: 'international',
+        endpointKind: 'public',
+        protocol: 'messages',
+      },
+    });
+    const request = {
+      maxTokens: 768,
+      thinking: { type: 'disabled' as const },
+      messages: [{ role: 'user' as const, content: '合成输入' }],
+    };
+    const serialized = serializeMessagesRequest(request, adapter.metadata);
+    await adapter.create(request);
+    expect(serialized).toBe(JSON.stringify(vi.mocked(client.messages.create).mock.calls[0]?.[0]));
+  });
+
+  it.each(['qwen3.8-flash', 'qwen3-coder-plus'])(
+    'measures the exact sent body for %s without network or credentials',
+    async (model) => {
+      let sentBody: string | undefined;
+      const adapter = createQwenMessagesAdapter({
+        environment: {
+          ...QWEN_ENVIRONMENT,
+          QWEN_MESSAGES_ADAPTER_ENABLED: true,
+          QWEN_VERIFY_FAST_MODEL: model,
+        },
+        region: 'intl',
+        purpose: 'verify_fast',
+        fetchImpl: async (_url, options) => {
+          sentBody = String(options?.body);
+          return new Response(
+            JSON.stringify({
+              id: 'msg_budget',
+              content: [{ type: 'text', text: 'ok' }],
+              stop_reason: 'end_turn',
+              usage: { input_tokens: 1, output_tokens: 1 },
+            }),
+          );
+        },
+      });
+      const request = {
+        maxTokens: 768,
+        thinking: { type: 'disabled' as const },
+        temperature: 0,
+        system: '合成系统',
+        messages: [{ role: 'user' as const, content: '含转义\u0000和中文' }],
+      };
+      const serialized = serializeMessagesRequest(request, adapter.metadata);
+      await adapter.create(request);
+      expect(serialized).toBe(sentBody);
+      const wire = JSON.parse(serialized);
+      expect(wire).toMatchObject({ model, max_tokens: 768, system: '合成系统' });
+      expect(wire.messages[0].content).toBe('含转义\u0000和中文');
+      expect(serialized).not.toContain('intl-key');
+    },
+  );
+});
 
 describe('createAnthropicCompatibleMessagesAdapter', () => {
   it('maps provider-neutral messages, tools, cache hints, and request options', async () => {

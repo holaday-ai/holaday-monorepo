@@ -15,6 +15,8 @@ type MissingInput = 'liveSession' | 'dataSource';
 
 interface MatchOpts {
   hasAttachments?: boolean;
+  /** Explicit structured metrics in the actual user text, not a promise to upload. */
+  hasManualData?: boolean;
 }
 
 const DOUYIN_TERMS = ['抖音', 'douyin', 'tiktok', '千川', '巨量百应', '电商罗盘'];
@@ -51,6 +53,31 @@ export function matchExpertWorkflow(
   opts: MatchOpts = {},
 ): ExpertWorkflowMatch | null {
   if (!matchesDouyinLivestreamReview(intent)) return null;
+  return resolveFixedExpertWorkflow('douyin-livestream-review', intent, {
+    ...opts,
+    hasManualData: opts.hasManualData ?? hasStructuredLivestreamData(intent),
+  });
+}
+
+/** Require distinct metric keys with actual values, not promises or field names. */
+export function hasStructuredLivestreamData(text: string): boolean {
+  const fields = new Set(
+    [
+      ...text.matchAll(
+        /^\s*(GMV|GPM|UV|ROI|订单|成交金额|投流金额|观看人数)\s*[:：=]\s*\d+(?:\.\d+)?\s*(?:元|人|单|万|%)?\s*$/gimu,
+      ),
+    ].map((match) => match[1]?.toUpperCase()),
+  );
+  return fields.size >= 2;
+}
+
+/** Re-evaluate intake for a server-selected lineage, never choose a new workflow. */
+export function resolveFixedExpertWorkflow(
+  id: string,
+  intent: string,
+  opts: MatchOpts = {},
+): ExpertWorkflowMatch | null {
+  if (id !== 'douyin-livestream-review') return null;
 
   const hasAttachments = Boolean(opts.hasAttachments);
   const hasLiveSession = SESSION_PATTERNS.some((pattern) => pattern.test(intent));
@@ -66,7 +93,8 @@ export function matchExpertWorkflow(
   // UPLOAD_SOURCE_PATTERNS retained as documentation; not load-
   // bearing for routing.
   const hasUploadedDataSource = hasAttachments;
-  const hasDataSource = hasPlatformDataSource || hasUploadedDataSource;
+  const hasManualData = opts.hasManualData === true;
+  const hasDataSource = hasPlatformDataSource || hasUploadedDataSource || hasManualData;
 
   const missingInputs: MissingInput[] = [];
   if (!hasLiveSession) missingInputs.push('liveSession');
@@ -85,9 +113,9 @@ export function matchExpertWorkflow(
   const routeOverride: ExecutionMode | null =
     missingInputs.length > 0
       ? 'generate'
-      : hasPlatformDataSource && !hasUploadedDataSource
+      : hasPlatformDataSource && !hasUploadedDataSource && !hasManualData
         ? 'browser'
-        : hasUploadedDataSource
+        : hasUploadedDataSource || hasManualData
           ? 'generate'
           : null;
 
@@ -101,6 +129,7 @@ export function matchExpertWorkflow(
       missingInputs,
       hasPlatformDataSource,
       hasUploadedDataSource,
+      hasManualData,
     }),
   };
 }
@@ -117,13 +146,16 @@ function buildDouyinLivestreamPreamble(opts: {
   missingInputs: readonly MissingInput[];
   hasPlatformDataSource: boolean;
   hasUploadedDataSource: boolean;
+  hasManualData: boolean;
 }): string {
   const missingLabels = opts.missingInputs.map(labelForMissingInput);
   const sourceHint = opts.hasUploadedDataSource
     ? '用户倾向使用上传的数据/截图/表格。优先分析附件内容；不要为了补全可由附件回答的信息而浏览网页。'
-    : opts.hasPlatformDataSource
-      ? '用户倾向使用抖音/巨量/第三方后台数据。需要通过已登录浏览器读取；遇到登录页先请用户登录后继续。'
-      : '用户尚未说明数据在哪里。';
+    : opts.hasManualData
+      ? '用户已在消息中提供结构化数据。优先分析这些原始数据，不把其中的平台名称当成要求打开后台，也不虚构额外数据。'
+      : opts.hasPlatformDataSource
+        ? '用户倾向使用抖音/巨量/第三方后台数据。需要通过已登录浏览器读取；遇到登录页先请用户登录后继续。'
+        : '用户尚未说明数据在哪里。';
 
   const intakeGuard =
     opts.missingInputs.length > 0

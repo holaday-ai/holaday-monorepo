@@ -33,6 +33,8 @@ export interface UiStockTaskContext {
 
 export interface UiTask {
   taskId: string;
+  executionId?: string;
+  executionRevision?: number;
   intent: string;
   /** User-renamed display title. Falls back to summariseIntent(intent) when null. */
   title: string | null;

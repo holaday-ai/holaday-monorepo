@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CoreTaskRepository } from '../../agent/core-task-repository.js';
 import * as generation from '../../agent/generate-runner.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { env } from '../../config/env.js';
@@ -95,15 +96,41 @@ function fixture(
     error: vi.fn(),
     debug: vi.fn(),
   };
+  const state = {
+    status: 'awaiting_user',
+    executionId: 'synthetic-previous',
+    executionRevision: 1,
+    recordVersion: 2,
+  };
   const db = {
     select(projection: Record<string, unknown>) {
       const rows =
-        'intent' in projection
+        'intent' in projection || 'status' in projection
           ? [
               {
                 intent: '整理这些合同材料的文字提纲，仅重组已有内容，不作专业判断。',
-                status: 'awaiting_user',
-                result: { executionMode: 'generate', expertMode: 'expert' },
+                ...state,
+                coreRecordVersion: state.recordVersion,
+                awaitingQuestion: '请补充格式要求',
+                result: {
+                  executionMode: 'generate',
+                  expertMode: 'expert',
+                  coreRequirements: {
+                    initialRequest: '整理这些合同材料的文字提纲，仅重组已有内容，不作专业判断。',
+                    userTurns: [],
+                    phase: 'direct',
+                    workflow: null,
+                    referencePlan: null,
+                    fileIds: [],
+                    resume: {
+                      schemaVersion: 1,
+                      expertMode: 'expert',
+                      skillId: null,
+                      legacyWorkflowId: null,
+                      intakeBindings: [],
+                    },
+                  },
+                },
                 opusUsed: false,
                 roleId: null,
               },
@@ -120,28 +147,52 @@ function fixture(
   vi.spyOn(TaskRepository.prototype, 'markAwaitingReplyResumed').mockResolvedValue({
     persisted: options.resumed !== false,
   });
-  const saved: Array<Parameters<TaskRepository['persistVisionOutcome']>[1]> = [];
+  const saved: Array<{ status: string; summary?: string; reason?: string }> = [];
   vi.spyOn(TaskRepository.prototype, 'persistVisionOutcome').mockImplementation(
     async (_id, outcome) => {
       saved.push(outcome);
       return { persisted: options.persisted !== false };
     },
   );
-  const awaiting = vi
-    .spyOn(TaskRepository.prototype, 'persistAwaitingUser')
-    .mockResolvedValue({ persisted: true });
+  const awaiting = vi.fn();
   const runner = vi.spyOn(generation, 'runGenerateTask').mockResolvedValue({
     status: options.runnerStatus ?? 'completed',
+    generation:
+      options.runnerStatus === 'failed'
+        ? { completeness: 'partial', stopReason: 'provider_error' }
+        : {
+            completeness: 'complete',
+            stopReason: options.runnerStatus === 'awaiting_user' ? 'awaiting_user' : 'end_turn',
+          },
     summary: options.answer ?? summary,
     reason: '合成服务不可用',
     inputTokens: 10,
     outputTokens: 50,
     durationMs: 1,
   });
-  const persistedVerification: Array<pipeline.VerifyOutput['verification']> = [];
-  vi.spyOn(pipeline, 'persistExecution').mockImplementation(async (input) => {
-    persistedVerification.push(input.verification);
-    return false;
+  const persistedVerification: Array<{ passed: boolean; semanticStatus?: string }> = [];
+  vi.spyOn(CoreTaskRepository.prototype, 'admit').mockImplementation(async (op) => {
+    if (options.resumed === false) return { persisted: false };
+    Object.assign(state, {
+      status: 'executing',
+      executionId: op.executionId,
+      executionRevision: op.executionRevision,
+      recordVersion: op.recordVersion,
+    });
+    return { persisted: true };
+  });
+  vi.spyOn(CoreTaskRepository.prototype, 'readHead').mockImplementation(async () => ({ ...state }));
+  vi.spyOn(CoreTaskRepository.prototype, 'readSettlement').mockImplementation(async () => ({
+    ...state,
+    commitId: null,
+  }));
+  vi.spyOn(CoreTaskRepository.prototype, 'settle').mockImplementation(async (op) => {
+    persistedVerification.push({ ...op.verification, passed: op.verificationPassed });
+    saved.push({ status: op.status, ...op.result });
+    if (op.status === 'awaiting_user') awaiting();
+    if (options.persisted !== false)
+      Object.assign(state, { status: op.status, recordVersion: op.recordVersion });
+    return { persisted: options.persisted !== false };
   });
   const ctx = {
     db,
@@ -225,13 +276,20 @@ describe('clarification resume semantic verification', () => {
       await f.start();
       await vi.waitFor(() => expect(f.persistedVerification).toHaveLength(1));
       expect(f.persistedVerification[0]).toMatchObject({
-        passed: true,
+        passed: !('lanes' in options),
         semanticStatus: 'unavailable',
       });
-      expect(f.saved[0]).toMatchObject({
-        status: 'completed',
-        summary: expect.stringContaining('语义复核暂不可用'),
-      });
+      if ('lanes' in options) {
+        // With no regional verifier model, wire coverage cannot be certified.
+        expect(f.persistedVerification[0]).toMatchObject({
+          inputCoverage: { complete: false, codes: ['VERIFICATION_CONTEXT_INVALID'] },
+        });
+        expect(f.saved[0]?.status).not.toBe('completed');
+      } else
+        expect(f.saved[0]).toMatchObject({
+          status: 'completed',
+          summary: expect.stringContaining('语义复核暂不可用'),
+        });
       expect(f.calls).toHaveLength('lanes' in options ? 0 : 1);
       expect(
         JSON.stringify({ saved: f.saved, frames: f.frames, logs: f.logger.error.mock.calls }),
@@ -274,7 +332,7 @@ describe('clarification resume semantic verification', () => {
     expect(f.frames).toContainEqual(
       expect.objectContaining({ type: 'server.task.terminal', status: 'failed' }),
     );
-    expect(f.persistedVerification).toEqual([null]);
+    expect(f.persistedVerification[0]).toMatchObject({ passed: false });
   });
 
   it('never asks semantic review to turn a deterministic failure into a pass', async () => {
@@ -287,15 +345,20 @@ describe('clarification resume semantic verification', () => {
   });
 
   it.each(['failed', 'awaiting_user'] as const)(
-    'does not review a %s runner result',
+    'records the matching verification stage for a %s runner result',
     async (runnerStatus) => {
       const f = fixture({ runnerStatus });
       await f.start();
       await vi.waitFor(() => expect(f.persistedVerification).toHaveLength(1));
-      expect(f.calls).toEqual([]);
-      expect(f.persistedVerification).toEqual([null]);
-      if (runnerStatus === 'awaiting_user') expect(f.awaiting).toHaveBeenCalledTimes(1);
-      else expect(f.saved[0]).toMatchObject({ status: 'failed' });
+      if (runnerStatus === 'awaiting_user') {
+        expect(f.calls).toHaveLength(1);
+        expect(f.persistedVerification[0]).toMatchObject({ semanticStatus: 'pass' });
+        expect(f.awaiting).toHaveBeenCalledTimes(1);
+      } else {
+        expect(f.calls).toEqual([]);
+        expect(f.persistedVerification[0]).toMatchObject({ passed: false });
+        expect(f.saved[0]).toMatchObject({ status: 'failed' });
+      }
     },
   );
 
@@ -309,7 +372,7 @@ describe('clarification resume semantic verification', () => {
 
   it('does not start paid work when the resume state transition is refused', async () => {
     const f = fixture({ resumed: false });
-    expect(await f.start()).toEqual({ ok: false, state: 'persistFailed' });
+    expect(await f.start()).toMatchObject({ ok: false, state: 'persistFailed' });
     expect(f.calls).toEqual([]);
     expect(f.runner).not.toHaveBeenCalled();
     expect(f.saved).toEqual([]);

@@ -2,6 +2,7 @@ import { pino } from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CONTENT_TOPIC_WORKFLOW } from '../execution/expert-workflow-content-topic.js';
 import { reloadFeatureFlagsForTest, setFeatureFlagsForTest } from '../execution/feature-flags.js';
+import { createTaskVerificationContext } from '../execution/task-verification-context.js';
 import type {
   NeutralResponsesRequest,
   NeutralResponsesResult,
@@ -10,7 +11,11 @@ import type {
 import { ResponsesAdapterError } from '../llm/responses-adapter.js';
 import { runGenerateTask } from './generate-runner.js';
 
-type ScriptedResponse = Partial<Omit<NeutralResponsesResult, 'metadata'>> | Error | 'hang';
+type ScriptedResponse =
+  | Partial<Omit<NeutralResponsesResult, 'metadata'>>
+  | Error
+  | 'hang'
+  | 'partial-hang';
 
 const METADATA = {
   provider: 'alibaba-model-studio' as const,
@@ -37,7 +42,8 @@ function makeAdapter(...script: ScriptedResponse[]): ResponsesAdapter {
       },
     ): Promise<NeutralResponsesResult> => {
       const next = script[Math.min(index++, script.length - 1)] ?? {};
-      if (next === 'hang') {
+      if (next === 'hang' || next === 'partial-hang') {
+        if (next === 'partial-hang') options?.onTextDelta?.('流式半段');
         return new Promise((_resolve, reject) => {
           const abort = () => reject(new ResponsesAdapterError('REQUEST_ABORTED'));
           if (options?.signal?.aborted) abort();
@@ -88,6 +94,101 @@ function run(
 afterEach(() => {
   reloadFeatureFlagsForTest();
   vi.useRealTimers();
+});
+
+describe('legacy workflow context guards', () => {
+  it('draft with missing inputs produces a proposal instead of storing an intake question as the plan', async () => {
+    const proposal = '合成方案：先确认直播场次和数据来源，再核对指标，最后形成报告；尚未执行。';
+    const adapter = makeAdapter({ text: proposal });
+    const result = await run(adapter, {
+      verificationContext: context({ missingInputs: ['liveSession', 'dataSource'] }, 'draft'),
+    });
+    expect(result.summary).toContain(proposal);
+    expect(callCount(adapter)).toBe(1);
+    expect(requestAt(adapter).tools).toEqual([]);
+  });
+  function context(patch: Record<string, unknown> = {}, phase = 'approved_execution') {
+    return createTaskVerificationContext({
+      schemaVersion: 1,
+      executionId: 'exec_synthetic_legacy',
+      executionRevision: 2,
+      initialRequest: '分析今天的合成直播数据',
+      userTurns: ['确认'],
+      phase,
+      workflow: null,
+      referencePlan: '仅分析给定的合成数据',
+      materials: [],
+      legacyWorkflow: {
+        id: 'douyin-livestream-review',
+        promptPreamble: '合成规范：报告必须说明真实来源，不虚构数据。',
+        missingInputs: [],
+        routeOverride: 'generate',
+        ...patch,
+      },
+    });
+  }
+  it.each(['direct', 'approved_execution'])(
+    'asks for missing legacy input without model or tools in %s',
+    async (phase) => {
+      const adapter = makeAdapter();
+      const result = await run(adapter, {
+        verificationContext: context({ missingInputs: ['liveSession', 'dataSource'] }, phase),
+      });
+      expect(result.status).toBe('awaiting_user');
+      expect(result.summary).toContain('直播场次');
+      expect(result.summary).toContain('数据');
+      expect(callCount(adapter)).toBe(0);
+    },
+  );
+  it.each(['direct', 'approved_execution'])(
+    'does not generate a browser-only result in %s',
+    async (phase) => {
+      const adapter = makeAdapter();
+      const result = await run(adapter, {
+        verificationContext: context({ routeOverride: 'browser' }, phase),
+      });
+      expect(result).toMatchObject({
+        status: 'failed',
+        reason: 'CORE_LEGACY_BROWSER_HANDOFF_REQUIRED',
+        summary: '',
+      });
+      expect(callCount(adapter)).toBe(0);
+    },
+  );
+  it.each(['draft', 'revise'])(
+    'allows a browser task plan without executing browser work in %s',
+    async (phase) => {
+      const adapter = makeAdapter({ text: '合成方案：明确目标，读取已授权来源，再核对数据。' });
+      const result = await run(adapter, {
+        verificationContext: context({ routeOverride: 'browser' }, phase),
+      });
+      expect(result.status).toBe('awaiting_user');
+      expect(callCount(adapter)).toBe(1);
+      expect(requestAt(adapter).tools).toEqual([]);
+      expect(requestAt(adapter).instructions).toContain('合成规范');
+    },
+  );
+  it('does not turn an upload workflow mentioning today into fresh research', async () => {
+    const adapter = makeAdapter();
+    await run(adapter, { verificationContext: context() });
+    expect(callCount(adapter)).toBe(1);
+    expect(requestAt(adapter).tools).toEqual([]);
+    expect(requestAt(adapter).instructions).toContain('合成规范');
+  });
+  it('does not answer a legacy task through deterministic lightweight shortcuts', async () => {
+    const adapter = makeAdapter();
+    const base = context({}, 'direct');
+    await run(adapter, {
+      verificationContext: createTaskVerificationContext({
+        ...base,
+        initialRequest: '1+1等于几',
+        userTurns: [],
+        referencePlan: null,
+      }),
+    });
+    expect(callCount(adapter)).toBe(1);
+    expect(requestAt(adapter).instructions).toContain('合成规范');
+  });
 });
 
 describe('runGenerateTask — Qwen Responses runtime', () => {
@@ -158,12 +259,16 @@ describe('runGenerateTask — Qwen Responses runtime', () => {
     'Write an execution checklist, do not send an email.',
     '生成会议执行清单，不要写邮件或确认提示。',
     'Write an execution checklist; do not compose a confirmation message.',
-  ])('does not exempt delivery merely mentioning format or a prohibited action: %s', async (intent) => {
-    const adapter = makeAdapter({ text: '请确认以上方案，确认后我将提供完整报告。' });
-    expect(
-      (await run(adapter, { intent, executionPlan: '拟定会议安排', planExecutionApproved: true })).status,
-    ).toBe('failed');
-  });
+  ])(
+    'does not exempt delivery merely mentioning format or a prohibited action: %s',
+    async (intent) => {
+      const adapter = makeAdapter({ text: '请确认以上方案，确认后我将提供完整报告。' });
+      expect(
+        (await run(adapter, { intent, executionPlan: '拟定会议安排', planExecutionApproved: true }))
+          .status,
+      ).toBe('failed');
+    },
+  );
 
   it.each([
     '最终执行清单：预算600元；地点、负责人待确认。建议负责人采购前确认饮食禁忌。',
@@ -381,6 +486,7 @@ describe('runGenerateTask — Qwen Responses runtime', () => {
     expect(outcome).toMatchObject({
       status: 'completed',
       summary: '第一段第二段',
+      generation: { completeness: 'complete', stopReason: 'end_turn' },
       inputTokens: 40,
       outputTokens: 60,
     });
@@ -402,6 +508,10 @@ describe('runGenerateTask — Qwen Responses runtime', () => {
     const outcome = await run(adapter);
     expect(callCount(adapter)).toBe(3);
     expect(outcome.summary).toContain('内容因长度限制被截断');
+    expect(outcome.generation).toEqual({
+      completeness: 'partial',
+      stopReason: 'continuation_limit',
+    });
   });
 
   it('retries an empty response once and then returns a fixed safe error', async () => {
@@ -452,6 +562,105 @@ describe('runGenerateTask — Qwen Responses runtime', () => {
     expect(outcome.status).toBe('completed');
     expect(outcome.summary).toContain('已生成部分');
     expect(outcome.summary).toContain('内容因网络或超时被截断');
+    expect(outcome.generation).toEqual({
+      completeness: 'partial',
+      stopReason: 'continuation_failed',
+    });
+  });
+
+  it('retains the earlier draft when continuation returns two empty responses', async () => {
+    const adapter = makeAdapter(
+      { text: '之前正文', status: 'incomplete', incompleteReason: 'max_output_tokens' },
+      { text: '' },
+      { text: '' },
+    );
+    const outcome = await run(adapter);
+    expect(outcome.summary).toContain('之前正文');
+    expect(outcome.generation).toEqual({ completeness: 'partial', stopReason: 'empty_response' });
+    expect(callCount(adapter)).toBe(3);
+  });
+
+  it('retains stream deltas once when the first response times out', async () => {
+    const adapter = makeAdapter('partial-hang');
+    const outcome = await run(adapter, { timeoutMs: 10 });
+    expect(outcome.summary.split('流式半段')).toHaveLength(2);
+    expect(outcome.generation).toEqual({ completeness: 'partial', stopReason: 'timeout' });
+    expect(callCount(adapter)).toBe(1);
+  });
+
+  it('retains both the preceding response and uncommitted continuation deltas on timeout', async () => {
+    const adapter = makeAdapter(
+      { text: '之前正文', status: 'incomplete', incompleteReason: 'max_output_tokens' },
+      'partial-hang',
+    );
+    const outcome = await run(adapter, { timeoutMs: 10 });
+    expect(outcome.summary).toContain('之前正文流式半段');
+    expect(outcome.summary.split('之前正文')).toHaveLength(2);
+    expect(outcome.generation).toEqual({ completeness: 'partial', stopReason: 'timeout' });
+  });
+
+  it('does not accept a late completed response after the stream deadline', async () => {
+    const adapter = makeAdapter();
+    vi.mocked(adapter.stream).mockImplementation(
+      (_request, options) =>
+        new Promise((resolve) => {
+          options?.onTextDelta?.('已显示草稿');
+          options?.signal?.addEventListener(
+            'abort',
+            () =>
+              resolve({
+                id: 'late_response',
+                metadata: METADATA,
+                text: '迟到完整回复',
+                sources: [],
+                status: 'completed',
+                usage: { inputTokens: 1, outputTokens: 2 },
+              }),
+            { once: true },
+          );
+        }),
+    );
+    const outcome = await run(adapter, { timeoutMs: 10 });
+    expect(outcome.generation).toEqual({ completeness: 'partial', stopReason: 'timeout' });
+    expect(outcome.summary).toContain('已显示草稿');
+    expect(outcome.summary).not.toContain('迟到完整回复');
+    expect(callCount(adapter)).toBe(1);
+  });
+
+  it('rejects a repeated approval footer from a timed-out stream without retaining it', async () => {
+    const adapter = makeAdapter();
+    vi.mocked(adapter.stream).mockImplementation(async (_request, options) => {
+      options?.onTextDelta?.('请确认以上方案，确认后我将提供完整报告。');
+      throw new ResponsesAdapterError('REQUEST_TIMEOUT');
+    });
+    const outcome = await run(adapter, {
+      planExecutionApproved: true,
+      executionPlan: '已确认的合成方案',
+    });
+    expect(outcome.status).toBe('failed');
+    expect(outcome.summary).toBe('');
+    expect(outcome.generation).toEqual({ completeness: 'partial', stopReason: 'quality_rejected' });
+    expect(callCount(adapter)).toBe(1);
+  });
+
+  it('does not retry an idle partial stream and duplicate already displayed content', async () => {
+    vi.useFakeTimers();
+    const adapter = makeAdapter('partial-hang');
+    const pending = run(adapter, { timeoutMs: 180_000 });
+    await vi.advanceTimersByTimeAsync(100_000);
+    const outcome = await pending;
+    expect(callCount(adapter)).toBe(1);
+    expect(outcome.summary.split('流式半段')).toHaveLength(2);
+    expect(outcome.generation).toEqual({ completeness: 'partial', stopReason: 'timeout' });
+  });
+
+  it('does not retain incomplete plan or unsupported fresh-source drafts', async () => {
+    for (const overrides of [{ planOnly: true }, { intent: '今天的最新消息' }]) {
+      const outcome = await run(makeAdapter('partial-hang'), { ...overrides, timeoutMs: 10 });
+      expect(outcome.status).toBe('failed');
+      expect(outcome.summary).toBe('');
+      expect(outcome.generation?.completeness).toBe('partial');
+    }
   });
 });
 
@@ -461,6 +670,7 @@ describe('runGenerateTask — lightweight and expert workflows', () => {
     const outcome = await run(adapter, { intent: '1 加 1 等于几？' });
     expect(outcome.status).toBe('completed');
     expect(outcome.summary).toContain('2');
+    expect(outcome.generation).toEqual({ completeness: 'complete', stopReason: 'deterministic' });
     expect(callCount(adapter)).toBe(0);
   });
 
