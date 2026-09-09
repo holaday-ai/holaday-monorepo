@@ -1,6 +1,13 @@
 import { z } from 'zod';
 import { resilientSelectorSchema } from './selector.js';
 
+// Legacy lanes omit these fields. Core text publishers always send both;
+// consumers must reconcile conflicting IDs/revisions before applying frames.
+const executionIdentityFields = {
+  executionId: z.string().min(1).max(64).optional(),
+  executionRevision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+};
+
 const httpUrlSchema = z
   .string()
   .url()
@@ -384,6 +391,7 @@ export const serverVisionActSchema = z.object({
  * affordances and only use their stale-frame guards.
  */
 export const serverTaskTerminalSchema = z.object({
+  ...executionIdentityFields,
   type: z.literal('server.task.terminal'),
   taskId: z.string(),
   // Codex Pack A3 — `partial_success` is a new terminal status fired
@@ -700,6 +708,7 @@ export const serverSupercarWebSearchSchema = z.object({
 });
 
 export const serverSupercarAwaitingUserSchema = z.object({
+  ...executionIdentityFields,
   type: z.literal('server.supercar.awaiting_user'),
   taskId: z.string(),
   question: z.string(),
@@ -723,6 +732,7 @@ export const serverSupercarAwaitingUserSchema = z.object({
  * `→ <text>` rows beneath the terminal summary.
  */
 export const serverSupercarSuggestionsSchema = z.object({
+  ...executionIdentityFields,
   type: z.literal('server.supercar.suggestions'),
   taskId: z.string(),
   suggestions: z.array(z.string()).max(5),
@@ -746,6 +756,7 @@ export const serverSupercarThinkingSchema = z.object({
  * synthesis phase of scrape-runner emit these.
  */
 export const serverTaskStreamSchema = z.object({
+  ...executionIdentityFields,
   type: z.literal('server.task.stream'),
   taskId: z.string(),
   delta: z.string(),
@@ -759,6 +770,7 @@ export const serverTaskStreamSchema = z.object({
  * this as a small caption above the streaming output.
  */
 export const serverTaskProgressSchema = z.object({
+  ...executionIdentityFields,
   type: z.literal('server.task.progress'),
   taskId: z.string(),
   message: z.string(),

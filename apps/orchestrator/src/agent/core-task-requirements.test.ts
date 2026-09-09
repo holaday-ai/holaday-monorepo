@@ -15,6 +15,52 @@ function requirements() {
 }
 
 describe('readable core requirements', () => {
+  it.each([
+    { intakeBindings: [{ turn: 99, field: 'category' }] },
+    {
+      intakeBindings: [
+        { turn: 0, field: 'category' },
+        { turn: 0, field: 'platform' },
+      ],
+    },
+    { intakeBindings: [{ turn: 0, field: 'category', text: 'DO_NOT_STORE' }] },
+    { schemaVersion: 2 },
+    { expertMode: 'force-pass' },
+  ])('rejects malformed resume metadata before any admission', (patch) => {
+    expect(() =>
+      parseCoreRequirements(
+        {
+          ...requirements(),
+          resume: {
+            schemaVersion: 1,
+            expertMode: 'expert',
+            skillId: null,
+            legacyWorkflowId: null,
+            intakeBindings: [],
+            ...patch,
+          },
+        },
+        identity,
+      ),
+    ).toThrow('CORE_REQUIREMENTS_INVALID');
+  });
+  it('round-trips bounded resume configuration and raw-turn bindings without storing derived text', () => {
+    const resume = {
+      schemaVersion: 1,
+      expertMode: 'expert',
+      skillId: 'content-creator',
+      legacyWorkflowId: null,
+      intakeBindings: [{ turn: 0, field: 'category' }],
+    };
+    const source = {
+      ...requirements(),
+      workflow: { id: 'xiaohongshu-planner', sections: [] },
+      resume,
+    };
+    const parsed = parseCoreRequirements(source, identity);
+    expect(parsed).toMatchObject({ resume });
+    expect(Object.isFrozen((parsed as typeof source).resume.intakeBindings[0])).toBe(true);
+  });
   it('copies complete user history without granting an admission capability', () => {
     const source = requirements();
     const parsed = parseCoreRequirements(source, identity);

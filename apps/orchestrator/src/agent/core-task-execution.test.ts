@@ -184,6 +184,13 @@ describe('transactional core execution with real runner and review', () => {
       expect(wire).toContain('先整理材料，再逐项说明');
     }
     expect(f.writes).toHaveLength(1);
+    expect(f.admissions[0]?.requirements.resume).toMatchObject({
+      schemaVersion: 1,
+      expertMode: 'expert',
+      skillId: null,
+      legacyWorkflowId: null,
+      intakeBindings: [],
+    });
     expect(f.writes[0]).toMatchObject({
       status: 'completed',
       executionId: started.ack.executionId,
@@ -345,6 +352,27 @@ describe('transactional core execution with real runner and review', () => {
     expect(f.admissions[0]?.requirements.initialRequest).toBe(
       '解释合成流程资料，整理成清晰的交接说明。',
     );
+  });
+
+  it('uses frozen accepted routing metadata rather than mutable caller options after admission', async () => {
+    const f = fixture();
+    const resume = {
+      schemaVersion: 1 as const,
+      expertMode: 'expert' as 'expert' | 'normal',
+      skillId: null,
+      legacyWorkflowId: null,
+      intakeBindings: [],
+    };
+    f.input.requirements = { ...f.input.requirements, resume };
+    const admit = f.repo.admit;
+    f.repo.admit = async (op) => {
+      resume.expertMode = 'normal';
+      return admit(op);
+    };
+    const started = await startCoreTaskExecution(f.input);
+    expect(await started.completion).toBe('committed');
+    expect(f.admissions[0]?.requirements.resume?.expertMode).toBe('expert');
+    expect(f.semantic).toHaveLength(1);
   });
 
   it('drops an old runner result and late deltas without releasing the replacement handle', async () => {

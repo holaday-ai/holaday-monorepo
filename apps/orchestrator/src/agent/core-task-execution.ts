@@ -79,12 +79,24 @@ export interface CoreExecutionStart {
 export async function startCoreTaskExecution(
   input: CoreExecutionInput,
 ): Promise<CoreExecutionStart> {
-  assertCoreTaskInput({ ...input.requirements, blocks: input.blocks });
+  const requirements = {
+    ...input.requirements,
+    resume: input.requirements.resume ?? {
+      schemaVersion: 1 as const,
+      expertMode: input.expertMode ?? 'auto',
+      skillId: input.skillId ?? null,
+      legacyWorkflowId: null,
+      intakeBindings: [],
+    },
+  };
+  assertCoreTaskInput({ ...requirements, blocks: input.blocks });
   const admission = prepareCoreAdmission({
     scope: input.scope,
     before: input.before,
-    requirements: input.requirements,
+    requirements,
   });
+  const resume = admission.requirements.resume;
+  if (!resume) throw new Error('CORE_RESUME_METADATA_REQUIRED');
   // Snapshot materials before the first await: callers cannot mutate the model
   // request while the database transaction is pending. No attachment second channel.
   const context = createTaskVerificationContext({
@@ -126,7 +138,7 @@ export async function startCoreTaskExecution(
     handle = registry.begin({
       taskId: identity.taskId,
       verificationContext: context,
-      expertMode: input.expertMode,
+      expertMode: resume.expertMode,
       hasAttachments: context.materials.length > 0,
     });
   } catch {
@@ -157,8 +169,8 @@ export async function startCoreTaskExecution(
               intent,
               verificationContext: owned.context,
               intakeIntent: input.intakeIntent,
-              skillId: input.skillId,
-              expertMode: input.expertMode,
+              skillId: resume.skillId ?? undefined,
+              expertMode: resume.expertMode,
               responsesAdapter: input.responsesAdapter,
               logger: input.logger,
               onStreamDelta: (delta) => {

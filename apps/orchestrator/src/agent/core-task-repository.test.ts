@@ -67,6 +67,38 @@ function fixture(
 }
 
 describe('core admission database boundary', () => {
+  it('patches suggestions only for the same owner, completed execution and record version', async () => {
+    const admission = operation();
+    const op = prepareCoreSettlement({
+      admission,
+      status: 'completed',
+      result: { summary: '合成正文' },
+      generation: { completeness: 'complete', stopReason: 'end_turn' },
+      verification: {
+        taskId: scope.taskId,
+        executionId: admission.executionId,
+        executionRevision: admission.executionRevision,
+        passed: true,
+        tier: 'llm',
+        semanticStatus: 'pass',
+        inputCoverage: { complete: true, codes: [] },
+        checks: [],
+      },
+    });
+    const { repo, queries } = fixture();
+    expect(await repo.persistSuggestions(op, ['整理后续执行清单'])).toBe(true);
+    const patch = queries.find((query) => query.sql.startsWith('update'));
+    expect(patch?.sql).toContain('`execution_revision` = ?');
+    expect(patch?.sql).toContain('`core_record_version` = ?');
+    expect(patch?.params.slice(-6)).toEqual([
+      scope.taskId,
+      7,
+      'completed',
+      op.executionId,
+      op.executionRevision,
+      op.recordVersion,
+    ]);
+  });
   it('restricts the actual CAS to SQL NULL or object result roots so requirements cannot silently vanish', async () => {
     const { repo, queries } = fixture();
     await repo.admit(operation());

@@ -15,7 +15,7 @@ import type { CoreAcceptedRequirements } from './core-task-admission.js';
 export function assertCoreTaskInput(
   input: CoreAcceptedRequirements & { blocks: readonly Anthropic.Beta.BetaContentBlockParam[] },
 ): void {
-  const { blocks, fileIds, ...requirements } = input;
+  const { blocks, fileIds, resume, ...requirements } = input;
   try {
     z.array(z.string().min(1).max(32))
       .max(5)
@@ -32,7 +32,12 @@ export function assertCoreTaskInput(
           : { kind: 'unavailable', key: `file-block-${index}`, source: 'file', reason: 'non_text' },
       ),
     });
-    if (!checkVerificationAdmission(JSON.stringify({ ...requirements, fileIds }), []).ok)
+    if (
+      !checkVerificationAdmission(
+        JSON.stringify({ ...requirements, fileIds, ...(resume ? { resume } : {}) }),
+        [],
+      ).ok
+    )
       throw new VerificationContextError('VERIFICATION_INPUT_LIMIT');
   } catch {
     throw new TRPCError({

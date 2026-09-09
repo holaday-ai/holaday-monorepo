@@ -44,6 +44,7 @@ import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js'
 import { prepareCoreTaskPlan } from '../../agent/core-task-plan.js';
 import { assertCoreTaskInput } from '../../agent/core-task-input.js';
 import { assertLegacyReplyRecord } from './tasks-reply-record.js';
+import { handleCoreTaskReply } from './tasks-core-reply.js';
 import { publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { generateSuggestions } from '../../agent/suggestions-generator.js';
@@ -8945,7 +8946,9 @@ export const tasksRouter = router({
         input,
       }): Promise<{
         ok: boolean;
-        state?: 'resumed' | 'stillAwaiting' | 'persistFailed';
+        state?: 'resumed' | 'stillAwaiting' | 'persistFailed' | 'acceptedUnconfirmed';
+        executionId?: string | null;
+        executionRevision?: number;
         handoff?: 'browser';
         handoffTaskId?: string;
       }> => {
@@ -8963,6 +8966,7 @@ export const tasksRouter = router({
           executionId: tasksTable.executionId,
           executionRevision: tasksTable.executionRevision,
           coreRecordVersion: tasksTable.coreRecordVersion,
+          awaitingQuestion: tasksTable.awaitingQuestion,
         })
         .from(tasksTable)
           .where(
@@ -8977,6 +8981,10 @@ export const tasksRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
       }
       const replyResult = normalizeOutput(taskRow.result) as Record<string, unknown> | null;
+      const coreReply = await handleCoreTaskReply({ ctx, input, userId: userRow.id,
+        modelDataRegion: userRow.modelDataRegion, wiring: modelRuntimeWiring,
+        row: { ...taskRow, result: replyResult } });
+      if (coreReply) return coreReply;
       assertLegacyReplyRecord({ ...taskRow, result: replyResult });
       const coreTextReply = taskRow.status === 'awaiting_user' &&
         replyResult?.executionMode === 'generate' && !hasParkedSupercarHandle(input.taskId);

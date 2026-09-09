@@ -9,7 +9,31 @@ import { VERIFICATION_INPUT_LIMITS } from '../execution/verification-input-budge
 export type CoreAcceptedRequirements = Pick<
   TaskVerificationContext,
   'initialRequest' | 'userTurns' | 'phase' | 'workflow' | 'referencePlan'
-> & { readonly fileIds: readonly string[] };
+> & { readonly fileIds: readonly string[]; readonly resume?: CoreResumeMetadata };
+
+const resumeSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    expertMode: z.enum(['normal', 'expert', 'auto']),
+    skillId: z.string().min(1).max(100).nullable(),
+    legacyWorkflowId: z.string().min(1).max(100).nullable(),
+    intakeBindings: z
+      .array(
+        z
+          .object({
+            turn: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+            field: z.string().regex(/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/),
+          })
+          .strict(),
+      )
+      .max(128),
+  })
+  .strict();
+export type CoreResumeMetadata = Readonly<
+  Omit<z.infer<typeof resumeSchema>, 'intakeBindings'> & {
+    intakeBindings: readonly Readonly<{ turn: number; field: string }>[];
+  }
+>;
 
 export class CoreRequirementsError extends Error {
   constructor() {
@@ -29,6 +53,7 @@ const requirementsSchema = z
       .array(z.string().min(1).max(32))
       .max(5)
       .refine((ids) => new Set(ids).size === ids.length),
+    resume: resumeSchema.optional(),
   })
   .strict();
 
@@ -40,7 +65,7 @@ export function parseCoreRequirements(
   try {
     const parsed = requirementsSchema.safeParse(input);
     if (!parsed.success) throw new CoreRequirementsError();
-    const { fileIds, ...fields } = parsed.data;
+    const { fileIds, resume, ...fields } = parsed.data;
     const context = createTaskVerificationContext({
       ...fields,
       schemaVersion: 1,
@@ -48,6 +73,14 @@ export function parseCoreRequirements(
       executionRevision: identity.executionRevision,
       materials: [],
     });
+    if (
+      resume &&
+      (resume.intakeBindings.some((binding) => binding.turn >= context.userTurns.length) ||
+        new Set(resume.intakeBindings.map((binding) => binding.turn)).size !==
+          resume.intakeBindings.length ||
+        (resume.intakeBindings.length > 0 && !context.workflow))
+    )
+      throw new CoreRequirementsError();
     const requirements = Object.freeze({
       initialRequest: context.initialRequest,
       userTurns: context.userTurns,
@@ -55,6 +88,16 @@ export function parseCoreRequirements(
       workflow: context.workflow,
       referencePlan: context.referencePlan,
       fileIds: Object.freeze(fileIds),
+      ...(resume
+        ? {
+            resume: Object.freeze({
+              ...resume,
+              intakeBindings: Object.freeze(
+                resume.intakeBindings.map((binding) => Object.freeze(binding)),
+              ),
+            }),
+          }
+        : {}),
     });
     if (
       Buffer.byteLength(JSON.stringify(requirements), 'utf8') >
