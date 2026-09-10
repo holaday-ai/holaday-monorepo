@@ -12,27 +12,38 @@ export interface OwnedOperation<T> {
   uncertainty(): DrainUncertainty | null;
 }
 
+/** Server-only ownership inherited from an already admitted operation. */
+export type OperationLifetime = Readonly<{ drain: ExecutionDrain; owner: DrainOwner }>;
+
 /** Reserve synchronously; only the original action owns its release. */
 export function startOwnedOperation<T>(
   drain: ExecutionDrain,
   kind: DrainWorkKind,
-  action: () => Promise<T>,
-  options: { parent?: DrainOwner; errorOutcome: 'known' | 'unknown' },
+  action: (owner: DrainOwner) => Promise<T>,
+  options: {
+    parent?: DrainOwner;
+    errorOutcome: 'known' | 'unknown';
+    dispatch?: 'immediate' | 'deferred';
+  },
 ): OwnedOperation<T> {
   const { parent, errorOutcome } = options;
   if (errorOutcome !== 'known' && errorOutcome !== 'unknown')
     throw new Error('EXECUTION_DRAIN_OUTCOME');
   if (typeof action !== 'function') throw new Error('EXECUTION_DRAIN_ACTION');
+  const dispatch = options.dispatch ?? 'deferred';
+  if (dispatch !== 'immediate' && dispatch !== 'deferred')
+    throw new Error('EXECUTION_DRAIN_DISPATCH');
   const owner = parent === undefined ? drain.admit(kind) : drain.fork(parent, kind);
   const release = drain.pin(owner);
   let ticket: DrainUncertainty | null = null;
   let dispatched = false;
-  const result = Promise.resolve()
-    .then(() => {
-      drain.assertDispatch(owner);
-      dispatched = true;
-      return action();
-    })
+  const invoke = async () => {
+    drain.assertDispatch(owner);
+    dispatched = true;
+    return action(owner);
+  };
+  const pending = dispatch === 'immediate' ? invoke() : Promise.resolve().then(invoke);
+  const result = pending
     .catch((error: unknown) => {
       if (dispatched && errorOutcome === 'unknown') ticket = drain.markUnknown(owner);
       throw error;

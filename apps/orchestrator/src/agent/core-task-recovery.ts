@@ -1,3 +1,4 @@
+import { type OperationLifetime, startOwnedOperation } from '../execution/owned-operation.js';
 import {
   type CoreAdmission,
   type CoreTaskHead,
@@ -25,8 +26,57 @@ const delays = [1000, 3000] as const;
 const settlementStates = new Set(['completed', 'partial_success', 'failed', 'awaiting_user']);
 // Operation-lifetime budgets, not invocation-lifetime budgets. Weak keys do not
 // create a permanent candidate queue and cannot be reconstructed after restart.
-const admissions = new WeakMap<CoreAdmission, Promise<AdmissionRecoveryResult>>();
-const settlements = new WeakMap<CoreSettlement, Promise<RecoveryResult>>();
+type RecoveryEntry<T> = { lifetime?: OperationLifetime; result: Promise<T> };
+const admissions = new WeakMap<CoreAdmission, RecoveryEntry<AdmissionRecoveryResult>>();
+const settlements = new WeakMap<CoreSettlement, RecoveryEntry<RecoveryResult>>();
+
+function reuse<T>(entry: RecoveryEntry<T>, lifetime?: OperationLifetime): Promise<T> {
+  if (entry.lifetime?.drain !== lifetime?.drain || entry.lifetime?.owner !== lifetime?.owner) {
+    // Never pretend an untracked or foreign physical operation belongs to this gate.
+    lifetime?.drain.block();
+    throw new Error('CORE_RECOVERY_LIFETIME_MISMATCH');
+  }
+  return entry.result;
+}
+
+function trackRecovery<T extends RecoveryResult>(
+  lifetime: OperationLifetime | undefined,
+  clock: CoreRecoveryClock,
+  action: (budget: RecoveryBudget) => Promise<T>,
+): Promise<T> {
+  const invoke = async (owned?: OperationLifetime): Promise<T> => {
+    const budget = new RecoveryBudget(clock, owned);
+    try {
+      const value = await action(budget);
+      // Cleanup may itself run callbacks. Reuse the original deadline after it,
+      // rather than giving the new ownership continuation another 15 seconds.
+      budget.close();
+      const final = budget.canReturn()
+        ? value
+        : {
+            ...value,
+            kind: 'unknown' as const,
+            ...('dispatchAllowed' in value ? { dispatchAllowed: false } : {}),
+          };
+      if (final.kind === 'unknown' && owned) owned.drain.markUnknown(owned.owner);
+      return final;
+    } finally {
+      budget.close();
+    }
+  };
+  if (!lifetime) return invoke();
+  const { drain, owner: parent } = lifetime;
+  return startOwnedOperation(
+    drain,
+    'database',
+    (owner) => invoke(Object.freeze({ drain, owner })),
+    { parent, errorOutcome: 'unknown', dispatch: 'immediate' },
+  ).result;
+}
+
+function entry<T>(result: Promise<T>, lifetime?: OperationLifetime): RecoveryEntry<T> {
+  return { result, lifetime: lifetime && Object.freeze({ ...lifetime }) };
+}
 
 /** A permit belongs only to this first caller and only to a directly confirmed
  * transaction. Recovery and duplicate callers observe state, never a permit.
@@ -36,24 +86,30 @@ export async function admitCoreTask(
   repo: Pick<CoreTaskRepository, 'admit' | 'readHead'>,
   op: CoreAdmission,
   clock: CoreRecoveryClock = {},
+  lifetime?: OperationLifetime,
 ): Promise<AdmissionStartResult> {
   assertPreparedCoreAdmission(op);
   const previous = admissions.get(op);
-  if (previous) return previous;
-  const budget = new RecoveryBudget(clock);
-  let completeObserver!: (value: AdmissionRecoveryResult) => void;
-  admissions.set(
-    op,
-    new Promise((resolve) => {
-      completeObserver = resolve;
-    }),
+  if (previous) return reuse(previous, lifetime);
+  const pending = trackRecovery(lifetime, clock, (budget) => admitWithinBudget(repo, op, budget));
+  // Cache observers never inherit the first caller's dispatch permit, even on rejection.
+  const observed = pending.then(
+    (value): AdmissionRecoveryResult => Object.freeze({ kind: value.kind, dispatchAllowed: false }),
+    (): AdmissionRecoveryResult => Object.freeze({ kind: 'unknown', dispatchAllowed: false }),
   );
-  const finish = (kind: RecoveryKind, dispatchAllowed: boolean): AdmissionStartResult => {
-    completeObserver(Object.freeze({ kind, dispatchAllowed: false }));
-    return Object.freeze({ kind, dispatchAllowed });
-  };
+  admissions.set(op, entry(observed, lifetime));
+  return pending;
+}
+
+async function admitWithinBudget(
+  repo: Pick<CoreTaskRepository, 'admit' | 'readHead'>,
+  op: CoreAdmission,
+  budget: RecoveryBudget,
+): Promise<AdmissionStartResult> {
+  const finish = (kind: RecoveryKind, dispatchAllowed: boolean): AdmissionStartResult =>
+    Object.freeze({ kind, dispatchAllowed });
   try {
-    const write = await budget.run(() => repo.admit(op));
+    const write = await budget.run(() => repo.admit(op), true);
     if (write.kind === 'timeout' || !budget.canWait(0)) return finish('unknown', false);
     if (confirmed(write)) return finish('committed', true);
     const observed = await readAdmissionWithinBudget(repo, op, budget);
@@ -70,12 +126,13 @@ export async function recoverCoreAdmission(
   repo: AdmissionReader,
   op: CoreAdmission,
   clock: CoreRecoveryClock = {},
+  lifetime?: OperationLifetime,
 ): Promise<AdmissionRecoveryResult> {
   assertPreparedCoreAdmission(op);
   const previous = admissions.get(op);
-  if (previous) return previous;
-  const pending = recoverAdmission(repo, op, clock);
-  admissions.set(op, pending);
+  if (previous) return reuse(previous, lifetime);
+  const pending = trackRecovery(lifetime, clock, (budget) => recoverAdmission(repo, op, budget));
+  admissions.set(op, entry(pending, lifetime));
   return pending;
 }
 
@@ -84,21 +141,21 @@ export async function persistCoreSettlement(
   repo: SettlementRepository,
   op: CoreSettlement,
   clock: CoreRecoveryClock = {},
+  lifetime?: OperationLifetime,
 ): Promise<RecoveryResult> {
   assertPreparedCoreSettlement(op);
   const previous = settlements.get(op);
-  if (previous) return previous;
-  const pending = persistSettlement(repo, op, clock);
-  settlements.set(op, pending);
+  if (previous) return reuse(previous, lifetime);
+  const pending = trackRecovery(lifetime, clock, (budget) => persistSettlement(repo, op, budget));
+  settlements.set(op, entry(pending, lifetime));
   return pending;
 }
 
 async function recoverAdmission(
   repo: AdmissionReader,
   op: CoreAdmission,
-  clock: CoreRecoveryClock,
+  budget: RecoveryBudget,
 ): Promise<AdmissionRecoveryResult> {
-  const budget = new RecoveryBudget(clock);
   try {
     const observed = await readAdmissionWithinBudget(repo, op, budget);
     return budget.canWait(0)
@@ -116,7 +173,7 @@ async function readAdmissionWithinBudget(
 ): Promise<AdmissionRecoveryResult> {
   for (const delay of delays) {
     if (!(await budget.pause(delay)) || !budget.canWait(0)) break;
-    const read = await budget.run(() => repo.readHead(op.scope));
+    const read = await budget.run(() => repo.readHead(op.scope), true);
     if (read.kind === 'timeout' || !budget.canWait(0)) break;
     if (read.kind !== 'ok') continue;
     const kind = classifyAdmission(read.value, op);
@@ -128,17 +185,16 @@ async function readAdmissionWithinBudget(
 async function persistSettlement(
   repo: SettlementRepository,
   op: CoreSettlement,
-  clock: CoreRecoveryClock,
+  budget: RecoveryBudget,
 ): Promise<RecoveryResult> {
-  const budget = new RecoveryBudget(clock);
   try {
-    const initial = await budget.run(() => repo.settle(op));
+    const initial = await budget.run(() => repo.settle(op), true);
     if (initial.kind === 'timeout' || !budget.canWait(0)) return result('unknown');
     if (confirmed(initial)) return result('committed');
     let retries = 0;
     for (const delay of delays) {
       if (!(await budget.pause(delay)) || !budget.canWait(0)) return result('unknown');
-      const read = await budget.run(() => repo.readSettlement(op.scope));
+      const read = await budget.run(() => repo.readSettlement(op.scope), true);
       if (read.kind === 'timeout' || !budget.canWait(0)) return result('unknown');
       if (read.kind !== 'ok') continue;
       const kind = classifySettlement(read.value, op);
@@ -150,7 +206,7 @@ async function persistSettlement(
       if (retryDelay === undefined || !budget.canWait(retryDelay)) return result('not_committed');
       if (!(await budget.pause(retryDelay)) || !budget.canWait(0)) return result('unknown');
       retries++;
-      const write = await budget.run(() => repo.settle(op));
+      const write = await budget.run(() => repo.settle(op), true);
       if (write.kind === 'timeout' || !budget.canWait(0)) return result('unknown');
       if (confirmed(write)) return result('committed');
     }
@@ -244,7 +300,10 @@ class RecoveryBudget {
   private readonly endsAt: number;
   private lastNow: number;
 
-  constructor(clock: CoreRecoveryClock) {
+  constructor(
+    clock: CoreRecoveryClock,
+    private readonly lifetime?: OperationLifetime,
+  ) {
     this.now = clock.now ?? (() => performance.now());
     this.wait = clock.wait ?? cancellableWait;
     this.lastNow = this.readNow();
@@ -257,10 +316,10 @@ class RecoveryBudget {
       return Number.NaN;
     }
   }
-  private remaining(): number {
+  private remaining(afterCleanup = false): number {
     const now = this.readNow();
     if (
-      this.controller.signal.aborted ||
+      (!afterCleanup && this.controller.signal.aborted) ||
       !Number.isFinite(this.endsAt) ||
       !Number.isFinite(now) ||
       now < this.lastNow
@@ -272,11 +331,14 @@ class RecoveryBudget {
   canWait(ms: number): boolean {
     return this.remaining() > ms;
   }
+  canReturn(): boolean {
+    return this.remaining(true) > 0;
+  }
   async pause(ms: number): Promise<boolean> {
     if (!this.canWait(ms)) return false;
     return (await this.run(() => this.wait(ms, this.controller.signal))).kind === 'ok';
   }
-  async run<T>(action: () => Promise<T>): Promise<Attempt<T>> {
+  async run<T>(action: () => Promise<T>, database = false): Promise<Attempt<T>> {
     const remaining = this.remaining();
     if (remaining <= 0) return { kind: 'timeout' };
     return new Promise((resolve) => {
@@ -296,7 +358,16 @@ class RecoveryBudget {
             finish({ kind: 'timeout' });
             return;
           }
-          const value = await action();
+          // This owner follows the original DB promise, not this budget's race.
+          // The logical recovery result separately retains unresolved commit ambiguity.
+          const value =
+            database && this.lifetime
+              ? await startOwnedOperation(this.lifetime.drain, 'database', action, {
+                  parent: this.lifetime.owner,
+                  errorOutcome: 'known',
+                  dispatch: 'immediate',
+                }).result
+              : await action();
           finish({ kind: 'ok', value });
         })
         .catch(() => finish({ kind: 'error' }));

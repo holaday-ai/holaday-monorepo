@@ -2,6 +2,56 @@ import { expect, it } from 'vitest';
 import { ExecutionDrain } from './execution-drain.js';
 import { startOwnedOperation } from './owned-operation.js';
 
+it('enters immediate callbacks synchronously with a pinned owner', async () => {
+  const drain = new ExecutionDrain();
+  drain.open();
+  const parent = drain.admit('request');
+  drain.close();
+  let entered = false;
+  const operation = startOwnedOperation(
+    drain,
+    'suggestions',
+    async (owner) => {
+      entered = true;
+      expect(drain.finish(owner)).toBe(false);
+      return 42;
+    },
+    { parent, errorOutcome: 'known', dispatch: 'immediate' },
+  );
+  expect(entered).toBe(true);
+  drain.finish(parent);
+  expect(await operation.result).toBe(42);
+  expect(drain.snapshot().idle).toBe(true);
+});
+
+it('rejects unsupported dispatch modes before creating an owner', () => {
+  const drain = new ExecutionDrain();
+  drain.open();
+  expect(() =>
+    startOwnedOperation(drain, 'request', async () => 1, {
+      errorOutcome: 'known',
+      dispatch: 'invalid' as 'immediate',
+    }),
+  ).toThrow('EXECUTION_DRAIN_DISPATCH');
+  expect(drain.snapshot().active).toBe(0);
+});
+
+it('retains ambiguity from an immediate synchronous callback failure', async () => {
+  const drain = new ExecutionDrain();
+  drain.open();
+  const operation = startOwnedOperation(
+    drain,
+    'suggestions',
+    () => {
+      throw new Error('synthetic callback failure');
+    },
+    { errorOutcome: 'unknown', dispatch: 'immediate' },
+  );
+  drain.close();
+  await expect(operation.result).rejects.toThrow('synthetic callback failure');
+  expect(drain.snapshot()).toMatchObject({ active: 0, unknown: 1, idle: false });
+});
+
 it('retains the raw operation when a caller stops waiting', async () => {
   const drain = new ExecutionDrain();
   drain.open();

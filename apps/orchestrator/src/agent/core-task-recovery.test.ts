@@ -2,6 +2,7 @@ import { drizzle } from 'drizzle-orm/mysql2';
 import type { Connection } from 'mysql2/promise';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DB } from '../db/client.js';
+import { ExecutionDrain } from '../execution/execution-drain.js';
 import {
   type CoreAdmission,
   type CoreTaskHead,
@@ -120,6 +121,159 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+describe('recovery lifetime provenance', () => {
+  function lifetime() {
+    const drain = new ExecutionDrain();
+    drain.open();
+    return { drain, owner: drain.admit('request') };
+  }
+  it('does not return a dispatch permit when cleanup crosses the original deadline', async () => {
+    const scope = lifetime();
+    let now = 0;
+    let writes = 0;
+    const abort = AbortController.prototype.abort;
+    vi.spyOn(AbortController.prototype, 'abort').mockImplementation(function (
+      this: AbortController,
+      reason,
+    ) {
+      abort.call(this, reason);
+      now = 15_001;
+    });
+    expect(
+      await admitCoreTask(
+        {
+          admit: async () => {
+            writes++;
+            return { persisted: true };
+          },
+          readHead: async () => legacy,
+        },
+        admission(),
+        { now: () => now },
+        scope,
+      ),
+    ).toEqual({ kind: 'unknown', dispatchAllowed: false });
+    scope.drain.finish(scope.owner);
+    scope.drain.close();
+    expect(scope.drain.snapshot()).toMatchObject({ active: 0, unknown: 1, idle: false });
+    expect(writes).toBe(1);
+  });
+  it('rechecks the same deadline after internal recovery cleanup before returning a tracked result', async () => {
+    const scope = lifetime();
+    const op = admission();
+    let now = 0;
+    const pending = recoverCoreAdmission(
+      {
+        readHead: async () => ({
+          status: 'executing',
+          executionId: op.executionId,
+          executionRevision: op.executionRevision,
+          recordVersion: op.recordVersion,
+        }),
+      },
+      op,
+      {
+        now: () => now,
+        wait: async (_ms, signal) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              now = 15_001;
+            },
+            { once: true },
+          );
+        },
+      },
+      scope,
+    );
+    expect(await pending).toEqual({ kind: 'unknown', dispatchAllowed: false });
+    scope.drain.finish(scope.owner);
+    scope.drain.close();
+    expect(scope.drain.snapshot()).toMatchObject({ active: 0, unknown: 1, idle: false });
+  });
+  it.each(['admission', 'recovery', 'settlement'] as const)(
+    'rejects an untracked cached %s operation instead of claiming its late write',
+    async (kind) => {
+      const op = admission();
+      const saved = settlement(op);
+      const held = deferred<Write>();
+      let writes = 0;
+      const repo = {
+        admit: () => {
+          writes++;
+          return held.promise;
+        },
+        readHead: async () => legacy,
+        settle: () => {
+          writes++;
+          return held.promise;
+        },
+        readSettlement: async () => null,
+      };
+      const first =
+        kind === 'settlement' ? persistCoreSettlement(repo, saved) : admitCoreTask(repo, op);
+      await vi.advanceTimersByTimeAsync(0);
+      const scope = lifetime();
+      const next =
+        kind === 'settlement'
+          ? persistCoreSettlement(repo, saved, {}, scope)
+          : kind === 'admission'
+            ? admitCoreTask(repo, op, {}, scope)
+            : recoverCoreAdmission(repo, op, {}, scope);
+      const observed = next.catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(15000);
+      expect(await observed).toMatchObject({ message: 'CORE_RECOVERY_LIFETIME_MISMATCH' });
+      await first;
+      scope.drain.finish(scope.owner);
+      scope.drain.close();
+      expect(scope.drain.snapshot()).toMatchObject({ mode: 'blocked', idle: false });
+      expect(writes).toBe(1);
+      held.resolve({ persisted: true });
+      await vi.advanceTimersByTimeAsync(0);
+    },
+  );
+  it.each(['other-drain', 'other-owner'] as const)('rejects cached work from %s', async (kind) => {
+    const firstScope = lifetime();
+    const nextScope =
+      kind === 'other-drain'
+        ? lifetime()
+        : { drain: firstScope.drain, owner: firstScope.drain.admit('request') };
+    const op = settlement();
+    const held = deferred<Write>();
+    const { repo, trace } = script([], [() => held.promise]);
+    const first = persistCoreSettlement(repo, op, {}, firstScope);
+    await vi.advanceTimersByTimeAsync(0);
+    const observed = persistCoreSettlement(repo, op, {}, nextScope).catch(
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(await observed).toMatchObject({ message: 'CORE_RECOVERY_LIFETIME_MISMATCH' });
+    await first;
+    nextScope.drain.finish(nextScope.owner);
+    nextScope.drain.close();
+    expect(nextScope.drain.snapshot().idle).toBe(false);
+    expect(trace.filter((item) => item.action === 'write')).toHaveLength(1);
+    held.resolve({ persisted: true });
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  it('owns recovery before the caller can release its parent', async () => {
+    const scope = lifetime();
+    const op = settlement();
+    const held = deferred<Write>();
+    const { repo, trace } = script([], [() => held.promise]);
+    const pending = persistCoreSettlement(repo, op, {}, scope);
+    scope.drain.finish(scope.owner);
+    scope.drain.close();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(trace.filter((item) => item.action === 'write')).toHaveLength(1);
+    expect(scope.drain.snapshot().idle).toBe(false);
+    held.resolve({ persisted: true });
+    expect(await pending).toEqual({ kind: 'committed' });
+    expect(scope.drain.snapshot().idle).toBe(true);
+  });
 });
 
 describe('bounded admission recovery', () => {

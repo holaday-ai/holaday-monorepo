@@ -1,6 +1,7 @@
 import { pino } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CoreExecutionRegistry } from '../execution/core-execution-registry.js';
+import { ExecutionDrain } from '../execution/execution-drain.js';
 import { reloadFeatureFlagsForTest, setFeatureFlagsForTest } from '../execution/feature-flags.js';
 import type { MessagesAdapter, NeutralMessagesRequest } from '../llm/messages-adapter.js';
 import type { NeutralResponsesRequest, ResponsesAdapter } from '../llm/responses-adapter.js';
@@ -21,6 +22,165 @@ const metadata = {
   endpointKind: 'public',
 } as const;
 const logger = pino({ level: 'silent' });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+describe('core drain lifetime', () => {
+  function trackedFixture() {
+    const f = fixture();
+    const drain = new ExecutionDrain();
+    drain.open();
+    const owner = drain.admit('request');
+    f.input.lifetime = { drain, owner };
+    return { ...f, drain, owner };
+  }
+
+  it('keeps the main execution alive after ACK and request release', async () => {
+    const f = trackedFixture();
+    const held = deferred<void>();
+    const stream = f.responses.stream.bind(f.responses);
+    f.responses.stream = async (request) => {
+      await held.promise;
+      return stream(request);
+    };
+    const started = await startCoreTaskExecution(f.input);
+    f.drain.finish(f.owner);
+    f.drain.close();
+    expect(f.drain.snapshot()).toMatchObject({ idle: false, byKind: { execution: 1 } });
+    held.resolve();
+    expect(await started.completion).toBe('committed');
+    await vi.waitFor(() => expect(f.drain.snapshot().idle).toBe(true));
+  });
+
+  it('reserves suggestions before registry release without delaying delivery', async () => {
+    const f = trackedFixture();
+    const held = deferred<void>();
+    let currentAtEntry = false;
+    const registry = f.input.registry;
+    if (!registry) throw new Error('Expected fixture registry');
+    const released = vi.spyOn(registry, 'release');
+    f.input.afterSettlement = () => {
+      currentAtEntry = released.mock.calls.length === 0;
+      return held.promise;
+    };
+    const started = await startCoreTaskExecution(f.input);
+    f.drain.finish(f.owner);
+    f.drain.close();
+    expect(await started.completion).toBe('committed');
+    expect(currentAtEntry).toBe(true);
+    expect(f.drain.snapshot()).toMatchObject({ idle: false, byKind: { suggestions: 1 } });
+    held.resolve();
+    await vi.waitFor(() => expect(f.drain.snapshot().idle).toBe(true));
+  });
+
+  it('retains asynchronous delivery notification independently of completion', async () => {
+    const f = trackedFixture();
+    const held = deferred<void>();
+    f.input.publish = (event) => (event.type === 'settled' ? held.promise : undefined);
+    const started = await startCoreTaskExecution(f.input);
+    f.drain.finish(f.owner);
+    f.drain.close();
+    expect(await started.completion).toBe('committed');
+    expect(f.drain.snapshot().idle).toBe(false);
+    held.resolve();
+    await vi.waitFor(() => expect(f.drain.snapshot().idle).toBe(true));
+  });
+
+  it('rejects a released parent before any database admission', async () => {
+    const f = trackedFixture();
+    f.drain.finish(f.owner);
+    await expect(startCoreTaskExecution(f.input)).rejects.toThrow();
+    expect(f.admissions).toHaveLength(0);
+  });
+
+  it('rejects oversized input without inventing unknown side effects', async () => {
+    const f = trackedFixture();
+    f.input.requirements = { ...f.input.requirements, initialRequest: 'x'.repeat(200_000) };
+    await expect(startCoreTaskExecution(f.input)).rejects.toThrow();
+    f.drain.finish(f.owner);
+    f.drain.close();
+    expect(f.drain.snapshot()).toMatchObject({ active: 0, unknown: 0, idle: true });
+    expect(f.admissions).toHaveLength(0);
+  });
+
+  it('retains a timed-out original admission and never clears its unknown on late success', async () => {
+    vi.useFakeTimers();
+    const f = trackedFixture();
+    const held = deferred<{ persisted: boolean }>();
+    f.repo.admit = () => held.promise;
+    const pending = startCoreTaskExecution(f.input);
+    await vi.advanceTimersByTimeAsync(15000);
+    const started = await pending;
+    expect(started.ack.state).toBe('acceptedUnconfirmed');
+    f.drain.finish(f.owner);
+    f.drain.close();
+    expect(f.drain.snapshot()).toMatchObject({ idle: false, unknown: 1, byKind: { database: 1 } });
+    held.resolve({ persisted: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.drain.snapshot()).toMatchObject({ active: 0, unknown: 1, idle: false });
+    expect(f.generation).toHaveLength(0);
+    vi.useRealTimers();
+  });
+
+  it('retains a settlement write after the delivery wait expires without resending', async () => {
+    vi.useFakeTimers();
+    const f = trackedFixture();
+    const held = deferred<{ persisted: boolean }>();
+    let writes = 0;
+    f.repo.settle = () => {
+      writes++;
+      return held.promise;
+    };
+    const started = await startCoreTaskExecution(f.input);
+    f.drain.finish(f.owner);
+    f.drain.close();
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(await started.completion).toBe('unconfirmed');
+    expect(f.drain.snapshot()).toMatchObject({ unknown: 1, byKind: { database: 1 }, idle: false });
+    held.resolve({ persisted: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.drain.snapshot()).toMatchObject({ active: 0, unknown: 1, idle: false });
+    expect(writes).toBe(1);
+    expect(f.events.some((event) => event.type === 'settled')).toBe(false);
+  });
+
+  it('does not invent uncertainty after authoritative admission recovery confirms commit', async () => {
+    const f = trackedFixture();
+    const admit = f.repo.admit.bind(f.repo);
+    f.repo.admit = async (op) => {
+      await admit(op);
+      throw new Error('synthetic lost response');
+    };
+    const started = await startCoreTaskExecution(f.input);
+    expect(started.ack.state).toBe('acceptedUnconfirmed');
+    expect(await started.completion).toBe('notDispatched');
+    f.drain.finish(f.owner);
+    f.drain.close();
+    await vi.waitFor(() => expect(f.drain.snapshot()).toMatchObject({ idle: true, unknown: 0 }));
+    expect(f.generation).toHaveLength(0);
+  });
+
+  it('preserves committed delivery but blocks idle for an uncertain detached callback', async () => {
+    const f = trackedFixture();
+    f.input.afterSettlement = () => {
+      throw new Error('synthetic optional failure');
+    };
+    const started = await startCoreTaskExecution(f.input);
+    f.drain.finish(f.owner);
+    f.drain.close();
+    expect(await started.completion).toBe('committed');
+    await vi.waitFor(() =>
+      expect(f.drain.snapshot()).toMatchObject({ active: 0, unknown: 1, idle: false }),
+    );
+    expect(f.writes).toHaveLength(1);
+  });
+});
 
 describe('untrusted parent reference provenance', () => {
   it('persists and projects parent output separately to both channels, never as user requirements', async () => {
@@ -180,6 +340,7 @@ beforeEach(() =>
   }),
 );
 afterEach(() => {
+  vi.useRealTimers();
   reloadFeatureFlagsForTest();
   vi.restoreAllMocks();
 });
