@@ -171,10 +171,8 @@ it.each(['connect', 'managed'] as const)(
     f.hold.release();
     await first.finished;
     await second.finished;
-    if (mode === 'managed') {
-      expect(drain.snapshot().idle).toBe(false);
-      await f.executor.disconnect();
-    }
+    expect(drain.snapshot().idle).toBe(false);
+    await f.executor.disconnect();
     expect(drain.snapshot().idle).toBe(true);
   },
 );
@@ -228,6 +226,8 @@ it.each(['async', 'sync', 'getter'] as const)(
     f.hold.release();
     await first.finished;
     expect(first.state.error).toBeInstanceOf(Error);
+    expect(drain.snapshot().active).toBeGreaterThan(0);
+    await f.executor.disconnect().catch(() => {});
     expect(drain.snapshot().active).toBe(0);
     expect(drain.snapshot().unknown).toBeGreaterThan(0);
     const second = observe(f.executor.disposeCleanContext());
@@ -273,6 +273,8 @@ it.each(['blocked', 'unknown', 'sealed', 'expired'] as const)(
     f.hold.release();
     await cleanup?.finished;
     expect(cleanup?.state.error).toBeUndefined();
+    expect(drain.snapshot().active).toBeGreaterThan(0);
+    await f.executor.disconnect();
     expect(drain.snapshot().active).toBe(0);
   },
 );
@@ -288,6 +290,8 @@ it('seals acquisition dispatch scope after ready while only disposal remains all
   expect(f.getEscape()?.state.error).toBeInstanceOf(Error);
   f.hold.release();
   await f.executor.disposeCleanContext();
+  expect(drain.snapshot().idle).toBe(false);
+  await f.executor.disconnect();
   expect(drain.snapshot().idle).toBe(true);
 });
 
@@ -342,6 +346,7 @@ it('does not certify a context from a cookies result arriving after disposal', a
   f.hold.release();
   await run.done.finished;
   expect(run.done.state.error).toBeInstanceOf(Error);
+  await f.executor.disconnect();
   expect(run.drain.snapshot().active).toBe(0);
 });
 
@@ -360,6 +365,7 @@ it('tracks raw cookies failure and still permits bound cleanup after unknown', a
   expect(f.state.close).toBe(1);
   f.closeHold.release();
   await dispose.finished;
+  await f.executor.disconnect();
   expect(run.drain.snapshot().active).toBe(0);
 });
 
@@ -425,6 +431,7 @@ it('a stale dirty-cookie result cannot close a replacement context', async () =>
   });
   const browser = {
     contexts: () => [],
+    close: async () => {},
     newContext: async () => {
       acquisitions++;
       return context();
@@ -653,7 +660,11 @@ it.each(['route', 'stealth', 'banner'] as const)(
         };
       },
     });
-    const browser = { contexts: () => [context], newContext: async () => context };
+    const browser = {
+      contexts: () => [context],
+      newContext: async () => context,
+      close: async () => {},
+    };
     const executor = new PlaywrightExecutor({
       chromium: { connectOverCDP: async () => browser as never },
       ...(stage === 'route'

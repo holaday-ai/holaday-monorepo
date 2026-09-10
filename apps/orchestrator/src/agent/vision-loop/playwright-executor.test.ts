@@ -267,7 +267,7 @@ describe('PlaywrightExecutor.launchManaged', () => {
 });
 
 describe('PlaywrightExecutor.disconnect', () => {
-  it('releases an attached CDP handle without closing the external browser', async () => {
+  it('awaits the SDK close of an attached CDP transport handle', async () => {
     let closeCalls = 0;
     const exec = new PlaywrightExecutor({
       chromium: {
@@ -284,7 +284,7 @@ describe('PlaywrightExecutor.disconnect', () => {
     await exec.connect('http://127.0.0.1:9222');
     await exec.disconnect();
 
-    expect(closeCalls).toBe(0);
+    expect(closeCalls).toBe(1);
   });
 });
 

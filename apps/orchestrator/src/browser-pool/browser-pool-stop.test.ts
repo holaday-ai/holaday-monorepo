@@ -9,7 +9,7 @@ import { BrowserEgressProxy } from './egress-proxy.js';
 
 const transport = vi.hoisted(() => ({
   ready: async () => 'synthetic',
-  connect: async () => ({ contexts: () => [] }),
+  connect: async () => ({ contexts: () => [], close: async () => {} }),
   remove: (_path: unknown) => {},
   die: () => {},
 }));
@@ -122,7 +122,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.stubEnv('STEALTH_ENABLED', 'false');
   transport.ready = async () => 'synthetic';
-  transport.connect = async () => ({ contexts: () => [] });
+  transport.connect = async () => ({ contexts: () => [], close: async () => {} });
   transport.remove = () => {};
   vi.spyOn(process, 'kill').mockImplementation(() => true);
 });
@@ -155,7 +155,7 @@ it.each(['ready', 'connect'] as const)(
     else
       transport.connect = async () => {
         await gate.promise;
-        return { contexts: () => [] };
+        return { contexts: () => [], close: async () => {} };
       };
     const f = fixture();
     const allocation = observe(f.pool.allocate('task', 'synthetic'));

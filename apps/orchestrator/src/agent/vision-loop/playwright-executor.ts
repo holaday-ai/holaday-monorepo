@@ -41,6 +41,7 @@ import {
 } from '../../execution/owned-operation.js';
 import { type OwnedCleanContext, createOwnedCleanContext } from './owned-clean-context.js';
 import { type OwnedManagedBrowser, createOwnedManagedBrowser } from './owned-managed-browser.js';
+import { type OwnedCdpConnection, createOwnedCdpConnection } from './owned-cdp-connection.js';
 import { humanClick, humanScroll, humanTypeText, isHumanizeEnabled } from './humanize.js';
 import { STEALTH_INIT_SCRIPT, isStealthEnabled } from './stealth-scripts.js';
 
@@ -237,6 +238,7 @@ export class PlaywrightExecutor {
   private cleanContext: BrowserContext | null = null;
   private cleanContextLease: OwnedCleanContext | null = null;
   private managedBrowserLease: OwnedManagedBrowser | null = null;
+  private cdpConnectionLease: OwnedCdpConnection | null = null;
   private cleanContextGeneration = 0;
   private connectionSetup: Promise<ConnectResult> | null = null;
   private disconnection: Promise<void> | null = null;
@@ -292,66 +294,92 @@ export class PlaywrightExecutor {
     cdpEndpoint: string,
     opts: { cleanContext?: boolean; storageState?: string } = {},
   ): Promise<ConnectResult> {
-    return this.runConnectionSetup(async (generation) => {
-      let browser: Browser | null = null;
-      let lease: OwnedCleanContext | null = null;
-      try {
-        browser = await runBrowserOperation(() => this.chromium.connectOverCDP(cdpEndpoint));
+    return this.runConnectionSetup((generation) =>
+      this.initializeCdpConnection(generation, cdpEndpoint, opts),
+    );
+  }
+
+  private async initializeCdpConnection(
+    generation: number,
+    cdpEndpoint: string,
+    opts: { cleanContext?: boolean; storageState?: string },
+    requireContext = false,
+  ): Promise<ConnectResult> {
+    let browser: Browser | null = null;
+    let lease: OwnedCleanContext | null = null;
+    let connection: OwnedCdpConnection | null = null;
+    try {
+      connection = createOwnedCdpConnection(
+        this.chromium,
+        cdpEndpoint,
+        () => generation === this.cleanContextGeneration,
+      );
+      this.cdpConnectionLease = connection;
+      browser = await connection.ready;
+      this.assertContextGeneration(generation);
+      this.browser = browser;
+      this.cdpEndpoint = cdpEndpoint;
+      this.cleanMode = Boolean(opts.cleanContext);
+      // Phase 1 Playbook ④ — gated CLEAN-CONTEXT mode (explorer only). Create a
+      // FRESH isolated context and route getPage() to it. Off by default →
+      // contexts()[0] as before. A2 login-self-learning: when opts.storageState is
+      // given (a test-account session file path), seed the SAME isolated context with
+      // it → a LOGIN context that is STILL separate from contexts()[0] (user tasks)
+      // AND from a no-storageState clean context. No storageState → empty cookie jar
+      // (the 免登录 lane, unchanged).
+      if (opts.cleanContext) {
+        this.cleanMode = true;
+        lease = createOwnedCleanContext(
+          browser,
+          opts.storageState ? { storageState: opts.storageState } : {},
+        );
+        this.cleanContextLease = lease;
+        const context = await lease.ready;
         this.assertContextGeneration(generation);
-        this.browser = browser;
-        this.cdpEndpoint = cdpEndpoint;
-        // Phase 1 Playbook ④ — gated CLEAN-CONTEXT mode (explorer only). Create a
-        // FRESH isolated context and route getPage() to it. Off by default →
-        // contexts()[0] as before. A2 login-self-learning: when opts.storageState is
-        // given (a test-account session file path), seed the SAME isolated context with
-        // it → a LOGIN context that is STILL separate from contexts()[0] (user tasks)
-        // AND from a no-storageState clean context. No storageState → empty cookie jar
-        // (the 免登录 lane, unchanged).
-        if (opts.cleanContext) {
-          this.cleanMode = true;
-          lease = createOwnedCleanContext(
-            browser,
-            opts.storageState ? { storageState: opts.storageState } : {},
-          );
-          this.cleanContextLease = lease;
-          const context = await lease.ready;
-          this.assertContextGeneration(generation);
-          this.cleanContext = context;
-          // ④ explorer per-op hard bound (CLEAN-CONTEXT ONLY → user tasks' shared context is
-          // untouched): every Playwright ACTION (goto/click/waitFor/…) in the clean context gets
-          // a default timeout so a single op can't block indefinitely on a hostile/anti-bot site.
-          // NOTE: page.evaluate has NO built-in timeout → the per-browse hard wall in the runner
-          // (withHardDeadline) is the catch-all.
-          const rawOpMs = Number.parseInt(process.env.EXPLORER_OP_TIMEOUT_MS ?? '45000', 10);
-          const opMs = Number.isInteger(rawOpMs) && rawOpMs > 0 ? rawOpMs : 45_000;
-          this.cleanContext.setDefaultTimeout(opMs);
-          this.assertContextGeneration(generation);
-          this.cleanContext.setDefaultNavigationTimeout(opMs);
-        }
-        const isActive = () => generation === this.cleanContextGeneration;
-        await this.applyNetworkPolicyToContexts(browser, isActive);
-        if (isStealthEnabled()) {
-          await this.applyStealthToContexts(browser, isActive);
-        }
-        // Best-effort: dismiss Brave's persistent chrome-side banners
-        // (privacy report invite and first-run notices) that otherwise take up vertical space in
-        // every screenshot. Runs once per connect, on every existing
-        // context — the policy file suppresses most of these at the
-        // browser level but a fresh profile still gets the first-run
-        // invites.
-        await this.dismissBraveBanners(browser, isActive);
+        this.cleanContext = context;
+        // ④ explorer per-op hard bound (CLEAN-CONTEXT ONLY → user tasks' shared context is
+        // untouched): every Playwright ACTION (goto/click/waitFor/…) in the clean context gets
+        // a default timeout so a single op can't block indefinitely on a hostile/anti-bot site.
+        // NOTE: page.evaluate has NO built-in timeout → the per-browse hard wall in the runner
+        // (withHardDeadline) is the catch-all.
+        const rawOpMs = Number.parseInt(process.env.EXPLORER_OP_TIMEOUT_MS ?? '45000', 10);
+        const opMs = Number.isInteger(rawOpMs) && rawOpMs > 0 ? rawOpMs : 45_000;
+        this.cleanContext.setDefaultTimeout(opMs);
         this.assertContextGeneration(generation);
-        return { ok: true };
-      } catch (err) {
-        if (this.browser === browser) this.browser = null;
-        if (this.cleanContextLease === lease) this.cleanContext = null;
-        await lease?.dispose().catch(() => {});
-        return {
-          ok: false,
-          error: `connectOverCDP(${cdpEndpoint}) failed: ${errMsg(err)}`,
-        };
+        this.cleanContext.setDefaultNavigationTimeout(opMs);
       }
-    });
+      const isActive = () => generation === this.cleanContextGeneration;
+      await this.applyNetworkPolicyToContexts(browser, isActive);
+      if (isStealthEnabled()) {
+        await this.applyStealthToContexts(browser, isActive);
+      }
+      // Best-effort: dismiss Brave's persistent chrome-side banners
+      // (privacy report invite and first-run notices) that otherwise take up vertical space in
+      // every screenshot. Runs once per connect, on every existing
+      // context — the policy file suppresses most of these at the
+      // browser level but a fresh profile still gets the first-run
+      // invites.
+      await this.dismissBraveBanners(browser, isActive);
+      this.assertContextGeneration(generation);
+      if (requireContext && browser.contexts().length === 0)
+        throw new Error('CDP reconnect has no browser context');
+      this.assertContextGeneration(generation);
+      const lifetime = currentOperationLifetime();
+      if (lifetime) {
+        lifetime.drain.assertDispatch(lifetime.owner);
+        if (lifetime.drain.snapshot().unknown > 0) throw new Error('BROWSER_OPERATION_UNKNOWN');
+      }
+      return { ok: true };
+    } catch (err) {
+      if (this.browser === browser) this.browser = null;
+      if (this.cleanContextLease === lease) this.cleanContext = null;
+      await lease?.dispose().catch(() => {});
+      await connection?.dispose().catch(() => {});
+      return {
+        ok: false,
+        error: `connectOverCDP(${cdpEndpoint}) failed: ${errMsg(err)}`,
+      };
+    }
   }
 
   /**
@@ -432,9 +460,14 @@ export class PlaywrightExecutor {
           try {
             const contextCleanup = await Promise.allSettled([this.cleanContextLease?.dispose()]);
             const browserCleanup = await Promise.allSettled([this.managedBrowserLease?.dispose()]);
+            const connectionCleanup = await Promise.allSettled([
+              this.cdpConnectionLease?.dispose(),
+            ]);
             for (const outcome of contextCleanup)
               if (outcome.status === 'rejected') throw outcome.reason;
             for (const outcome of browserCleanup)
+              if (outcome.status === 'rejected') throw outcome.reason;
+            for (const outcome of connectionCleanup)
               if (outcome.status === 'rejected') throw outcome.reason;
             this.assertContextGeneration(generation);
             const lifetime = currentOperationLifetime();
@@ -710,6 +743,7 @@ export class PlaywrightExecutor {
     this.cleanContextGeneration++;
     this.sealConnectionSetup?.();
     const browserLease = this.managedBrowserLease;
+    const connectionLease = this.cdpConnectionLease;
     this.browser = null;
     this.activePage = null;
     this.cdpEndpoint = null;
@@ -717,8 +751,11 @@ export class PlaywrightExecutor {
     const operation = Promise.resolve().then(async () => {
       const outcomes = await Promise.allSettled([this.disposeCleanContext(), setup]);
       const browserOutcome = await Promise.allSettled([browserLease?.dispose()]);
+      const connectionOutcome = await Promise.allSettled([connectionLease?.dispose()]);
       for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason;
       for (const outcome of browserOutcome) if (outcome.status === 'rejected') throw outcome.reason;
+      for (const outcome of connectionOutcome)
+        if (outcome.status === 'rejected') throw outcome.reason;
     });
     this.disconnection = operation;
     void operation.then(
@@ -750,33 +787,20 @@ export class PlaywrightExecutor {
    */
   private async reconnectIfStale(): Promise<boolean> {
     const endpoint = this.cdpEndpoint;
-    if (!endpoint) return false;
-    // Drop whatever we were holding — next connectOverCDP gives us a
-    // fresh Browser. We can't `close()` the old handle because that
-    // can block on the dead WebSocket.
+    if (!endpoint || this.cleanMode || this.connectionSetup || this.disconnection) return false;
+    // Stop publishing the old handle, but retain its lease and await actual cleanup.
+    // The setup lock also owns validation and bound cleanup of a failed redial.
     this.browser = null;
     this.activePage = null;
-    try {
-      const browser = await runBrowserOperation(() => this.chromium.connectOverCDP(endpoint));
-      this.browser = browser;
-      if (browser.contexts().length === 0) {
-        logger.warn({ endpoint }, 'reconnectIfStale: reconnected but still 0 contexts — giving up');
-        return false;
-      }
-      if (isStealthEnabled()) {
-        await this.applyStealthToContexts(browser);
-      }
-      await this.applyNetworkPolicyToContexts(browser);
-      await this.dismissBraveBanners(browser);
+    const result = await this.runConnectionSetup((generation) =>
+      this.initializeCdpConnection(generation, endpoint, {}, true),
+    );
+    if (result.ok) {
       logger.info({ endpoint }, 'reconnectIfStale: reconnected CDP after stale');
-      return true;
-    } catch (err) {
-      logger.warn(
-        { endpoint, err: err instanceof Error ? err.message : String(err) },
-        'reconnectIfStale: connectOverCDP failed',
-      );
-      return false;
+    } else {
+      logger.warn({ endpoint, err: result.error }, 'reconnectIfStale: connectOverCDP failed');
     }
+    return result.ok;
   }
 
   /**

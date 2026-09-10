@@ -254,4 +254,14 @@ executor保留每轮managed lease，context清理与Browser清理各自有真实
 
 真实executor/drain与合成SDK验证失败、竞态、清理顺序、权限及无scope兼容。此增量证明的是受管Browser的SDK资源回执，不证明底层OS进程组/后代退出；外部CDP WebSocket与reconnect资源、pool hook/banner timer、未来route callback、其他动作/入口/统一boot/stop和全局恢复/维护/平台/生产门禁仍未覆盖，继续阻断整机制发布。停止编排仍须先请求资源关闭再等待idle。
 
+## 3D-3b-3c-6 本地增量：外部CDP连接资源和重连（2026-09-11）
+
+专用OwnedCdpConnection将原始connectOverCDP getter/调用至绑定Browser.close实际settle作为资源生命周期。ready后封闭获取scope，资源pin不因父ACK/超时提前释放；关闭失败保留unknown与共享失败回执，之后关闸/unknown不阻止已经拥有的连接清理。显式创建的context先清理，之后再关闭SDK连接；不调用默认context/page close。
+
+本机Playwright/playwright-core 1.59.1只读源码确认CDP方式的Browser.close最终等待WebSocketTransport.closeAndWait及自有artifactsDir清理，与managed浏览器退出不同；官方 https://playwright.dev/docs/api/class-browser#browser-close 区分连接方式和启动方式。未对用户浏览器试验，发布前还需验证实际依赖及自有合成平台行为。
+
+connect与reconnect复用initializeCdpConnection，setup锁覆盖获取、初始化、重连contexts检查和捕获lease清理；重连先等旧lease终态，失败不丢弃或重拨。lost cleanMode直接拒绝自动重连；只有新显式connect可重新选择模式，修复managed关闭后显式外部连接仍误用旧cleanMode。contexts验证重入/并发disconnect不能复活或关闭替换连接，无全局disconnect自等待。
+
+合成SDK与真实executor/drain覆盖上述边界；没有真实连接/进程试验，不证明OS组/后代退出。旧无scope创建的资源不能反向成为新drain的全进程证明；全局boot接线与平台维护门禁仍需完成。pool ready hook/banner timer、future route callback、其余动作/Brave/batch/调度hook/其他入口/文件SDK、统一closed boot/stop、全局对账及生产门禁仍阻断发布。
+
 审查补强：setup拥有独立派发scope，dispose/dirty/disconnect同步seal；已经派发的raw操作继续收尾，旧setup不能续发下一个SDK。无scope路径也在逐context/page循环与SDK getter之后检查generation；两类timeout setter之间亦检查。getter同步触发主动dispose但没有真正调用SDK时返回私有取消sentinel，在raw wrapper之外转为固定取消错误，避免把明确控制拒绝当成unknown；真正getter/SDK错误仍保留unknown。deferred setup在await后重验实时owner与unknown，不能趁调度间隙开启managed launch。未来route handler正文没有改动或纳入本单元证明。

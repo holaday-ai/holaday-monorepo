@@ -12,6 +12,7 @@ vi.mock('../../config/logger.js', () => ({
   logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
 }));
 const releases: Array<() => void> = [];
+const executors: PlaywrightExecutor[] = [];
 beforeEach(() => {
   vi.useFakeTimers();
   vi.stubEnv('STEALTH_ENABLED', 'false');
@@ -19,6 +20,7 @@ beforeEach(() => {
 afterEach(async () => {
   for (const release of releases.splice(0)) release();
   await flush();
+  for (const executor of executors.splice(0)) await executor.disconnect().catch(() => {});
   vi.clearAllTimers();
   vi.useRealTimers();
   vi.unstubAllEnvs();
@@ -84,11 +86,11 @@ async function fixture(stage: Stage, failure: Failure = 'success') {
   };
   method(context, 'addInitScript', 'stealth', () => undefined);
   method(context, 'route', 'route', () => undefined);
-  const browser = { contexts: () => [context] };
+  const browser = { contexts: () => [context], close: async () => {} };
   method(browser, 'newContext', 'newContext', () => context);
   const chromium = {};
   method(chromium, 'connectOverCDP', stage === 'reconnect' ? 'reconnect' : 'connect', () =>
-    stage === 'reconnect' && !armed ? { contexts: () => [] } : browser,
+    stage === 'reconnect' && !armed ? { contexts: () => [], close: async () => {} } : browser,
   );
   const executor = new PlaywrightExecutor({
     chromium: chromium as never,
@@ -100,6 +102,7 @@ async function fixture(stage: Stage, failure: Failure = 'success') {
     expect((await executor.connect('http://synthetic.invalid')).ok).toBe(true);
     armed = true;
   }
+  executors.push(executor);
   if (stage === 'stealth') vi.stubEnv('STEALTH_ENABLED', 'true');
   const run = () =>
     stage === 'reconnect'
@@ -147,6 +150,7 @@ it.each(stages.flatMap((stage) => [false, true].map((fail) => ({ stage, fail }))
       expect(drain.snapshot().idle).toBe(false);
       await f.executor.disposeCleanContext();
     }
+    await f.executor.disconnect().catch(() => {});
     expect(drain.snapshot().active).toBe(0);
     expect(drain.snapshot().unknown > 0).toBe(fail);
     expect(drain.snapshot().idle).toBe(!fail);
@@ -158,6 +162,7 @@ it.each(
   const f = await fixture(stage, failure);
   const { drain, root } = start(f.run);
   await root.result;
+  await f.executor.disconnect().catch(() => {});
   expect(drain.snapshot().active).toBe(0);
   expect(drain.snapshot().unknown).toBeGreaterThan(0);
   expect(drain.snapshot().idle).toBe(false);
@@ -179,6 +184,7 @@ it.each(stages)('a returned parent cannot release pending %s', async (stage) => 
     expect(drain.snapshot().idle).toBe(false);
     await f.executor.disposeCleanContext();
   }
+  await f.executor.disconnect().catch(() => {});
   expect(drain.snapshot().active).toBe(0);
 });
 it.each(['unknown', 'sealed', 'expired'] as const)(
@@ -226,5 +232,7 @@ it('preserves optional route absence without inventing an uncertainty', async ()
   const { drain, root } = start(f.run);
   expect(await root.result).toEqual({ ok: true });
   expect(f.seen.some((x) => x.name === 'route')).toBe(false);
+  expect(drain.snapshot().idle).toBe(false);
+  await f.executor.disconnect();
   expect(drain.snapshot().idle).toBe(true);
 });

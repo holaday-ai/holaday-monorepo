@@ -315,7 +315,7 @@ it('failed initialization keeps browser close failure observable on later discon
   expect(drain.snapshot().unknown).toBeGreaterThan(0);
 });
 
-it('managed cleanup then external CDP disconnect never closes the external browser', async () => {
+it('managed cleanup then external CDP disconnect closes each SDK handle only once', async () => {
   const f = fixture();
   expect(await f.executor.launchManaged()).toEqual({ ok: true });
   await f.executor.disconnect();
@@ -323,12 +323,14 @@ it('managed cleanup then external CDP disconnect never closes the external brows
   expect(await f.executor.connect('http://synthetic.invalid')).toEqual({ ok: true });
   await f.executor.disconnect();
   expect(f.state.closes).toBe(1);
-  expect(f.state.externalCloses).toBe(0);
+  expect(f.state.externalCloses).toBe(1);
 });
 
 it('missing launch is a known refusal and does not poison later external connection', async () => {
   const executor = new PlaywrightExecutor({
-    chromium: { connectOverCDP: async () => ({ contexts: () => [] }) as never },
+    chromium: {
+      connectOverCDP: async () => ({ contexts: () => [], close: async () => {} }) as never,
+    },
   });
   executors.push(executor);
   const { drain, done } = start(() => executor.launchManaged());
