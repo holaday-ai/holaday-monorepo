@@ -171,6 +171,10 @@ it.each(['connect', 'managed'] as const)(
     f.hold.release();
     await first.finished;
     await second.finished;
+    if (mode === 'managed') {
+      expect(drain.snapshot().idle).toBe(false);
+      await f.executor.disconnect();
+    }
     expect(drain.snapshot().idle).toBe(true);
   },
 );

@@ -40,6 +40,7 @@ import {
   withOperationDispatchScope,
 } from '../../execution/owned-operation.js';
 import { type OwnedCleanContext, createOwnedCleanContext } from './owned-clean-context.js';
+import { type OwnedManagedBrowser, createOwnedManagedBrowser } from './owned-managed-browser.js';
 import { humanClick, humanScroll, humanTypeText, isHumanizeEnabled } from './humanize.js';
 import { STEALTH_INIT_SCRIPT, isStealthEnabled } from './stealth-scripts.js';
 
@@ -224,7 +225,6 @@ export class PlaywrightExecutor {
    * empty. We detect that in getPage() and redial using this value.
    */
   private cdpEndpoint: string | null = null;
-  private ownsBrowserProcess = false;
   /**
    * Phase 1 Playbook ④ — gated CLEAN-CONTEXT mode (default OFF). When connect()
    * is called with { cleanContext: true } (explorer only), the executor uses a
@@ -236,6 +236,7 @@ export class PlaywrightExecutor {
   private cleanMode = false;
   private cleanContext: BrowserContext | null = null;
   private cleanContextLease: OwnedCleanContext | null = null;
+  private managedBrowserLease: OwnedManagedBrowser | null = null;
   private cleanContextGeneration = 0;
   private connectionSetup: Promise<ConnectResult> | null = null;
   private disconnection: Promise<void> | null = null;
@@ -298,7 +299,6 @@ export class PlaywrightExecutor {
         browser = await runBrowserOperation(() => this.chromium.connectOverCDP(cdpEndpoint));
         this.assertContextGeneration(generation);
         this.browser = browser;
-        this.ownsBrowserProcess = false;
         this.cdpEndpoint = cdpEndpoint;
         // Phase 1 Playbook ④ — gated CLEAN-CONTEXT mode (explorer only). Create a
         // FRESH isolated context and route getPage() to it. Off by default →
@@ -363,15 +363,17 @@ export class PlaywrightExecutor {
     options: { channel?: string; headless?: boolean } = { headless: true },
   ): Promise<ConnectResult> {
     return this.runConnectionSetup(async (generation) => {
-      if (!this.chromium.launch) {
-        return { ok: false, error: 'playwright launch is unavailable' };
-      }
-
       let launchedBrowser: Browser | null = null;
-      let browserPublished = false;
+      let browserLease: OwnedManagedBrowser | null = null;
       let lease: OwnedCleanContext | null = null;
       try {
-        const browser = await this.chromium.launch(options);
+        browserLease = createOwnedManagedBrowser(
+          this.chromium,
+          options,
+          () => generation === this.cleanContextGeneration,
+        );
+        this.managedBrowserLease = browserLease;
+        const browser = await browserLease.ready;
         launchedBrowser = browser;
         this.assertContextGeneration(generation);
         lease = createOwnedCleanContext(browser);
@@ -379,8 +381,6 @@ export class PlaywrightExecutor {
         const context = await lease.ready;
         this.assertContextGeneration(generation);
         this.browser = browser;
-        browserPublished = true;
-        this.ownsBrowserProcess = true;
         this.cleanMode = true;
         this.cleanContext = context;
         context.setDefaultTimeout(45_000);
@@ -392,20 +392,15 @@ export class PlaywrightExecutor {
         this.assertContextGeneration(generation);
         return { ok: true };
       } catch (err) {
-        // A concurrent disconnect takes ownership of a published browser.
-        const closeHere = !browserPublished || this.browser === launchedBrowser;
         if (this.browser === launchedBrowser) {
           this.browser = null;
-          this.ownsBrowserProcess = false;
         }
         if (this.cleanContextLease === lease) {
           this.cleanMode = false;
           this.cleanContext = null;
         }
         await lease?.dispose().catch(() => {});
-        if (launchedBrowser && closeHere) {
-          await launchedBrowser.close().catch(() => {});
-        }
+        await browserLease?.dispose().catch(() => {});
         return {
           ok: false,
           error: `playwright launch failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -435,7 +430,12 @@ export class PlaywrightExecutor {
         withOperationDispatchScope(async (seal) => {
           this.sealConnectionSetup = seal;
           try {
-            await this.cleanContextLease?.dispose();
+            const contextCleanup = await Promise.allSettled([this.cleanContextLease?.dispose()]);
+            const browserCleanup = await Promise.allSettled([this.managedBrowserLease?.dispose()]);
+            for (const outcome of contextCleanup)
+              if (outcome.status === 'rejected') throw outcome.reason;
+            for (const outcome of browserCleanup)
+              if (outcome.status === 'rejected') throw outcome.reason;
             this.assertContextGeneration(generation);
             const lifetime = currentOperationLifetime();
             if (lifetime) {
@@ -709,23 +709,16 @@ export class PlaywrightExecutor {
     if (this.disconnection) return this.disconnection;
     this.cleanContextGeneration++;
     this.sealConnectionSetup?.();
-    const b = this.browser;
-    const ownsBrowserProcess = this.ownsBrowserProcess;
+    const browserLease = this.managedBrowserLease;
     this.browser = null;
-    this.ownsBrowserProcess = false;
     this.activePage = null;
     this.cdpEndpoint = null;
     const setup = this.connectionSetup;
     const operation = Promise.resolve().then(async () => {
       const outcomes = await Promise.allSettled([this.disposeCleanContext(), setup]);
-      if (ownsBrowserProcess && b) {
-        try {
-          await b.close();
-        } catch {
-          /* browser-process cleanup remains best-effort */
-        }
-      }
+      const browserOutcome = await Promise.allSettled([browserLease?.dispose()]);
       for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason;
+      for (const outcome of browserOutcome) if (outcome.status === 'rejected') throw outcome.reason;
     });
     this.disconnection = operation;
     void operation.then(

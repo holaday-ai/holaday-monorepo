@@ -246,4 +246,12 @@ connect/launchManaged首await前占位，拒绝并发半就绪返回；generatio
 
 本增量测试运行真实executor/drain、合成SDK与受控Promise，不启动实际浏览器/网络/数据库、不读取真实cookie。managed launch/browser.close、外部CDP WebSocket及重连资源所有权、pool hook/timer/OS后代仍未完整登记；其他入口、统一boot/stop、全局对账、维护/平台/生产门禁均仍阻断发布，不能单独发布本单元。
 
+## 3D-3b-3c-5 本地增量：受管Browser资源与原始关闭（2026-09-11）
+
+launchManaged新建专用OwnedManagedBrowser，仅绑定由本executor启动的Browser。原始launch getter/调用前预留execution子句柄；ready后创建scope封闭，私有资源pin继续保持至Browser.close实际settle。真实getter/同步/异步失败保留unknown，getter后的取消/blocked/已有unknown为未派发已知拒绝。迟到的launch结果不可再创建context/发布，必须关闭自己已取得的Browser。
+
+executor保留每轮managed lease，context清理与Browser清理各自有真实回执。setup catch只清本轮context再清本轮Browser，不等待全局disconnect；disconnect先等待setup/context全部结束（包括拒绝），随后等待Browser清理，原失败及unknown不清除。重复cleanup不重试SDK，失败禁止替换；已拥有资源的关闭不因之后关闸/unknown跳过。旧ownsBrowserProcess读标记由专用lease取代，external CDP connect/disconnect不新增Browser.close。
+
+真实executor/drain与合成SDK验证失败、竞态、清理顺序、权限及无scope兼容。此增量证明的是受管Browser的SDK资源回执，不证明底层OS进程组/后代退出；外部CDP WebSocket与reconnect资源、pool hook/banner timer、未来route callback、其他动作/入口/统一boot/stop和全局恢复/维护/平台/生产门禁仍未覆盖，继续阻断整机制发布。停止编排仍须先请求资源关闭再等待idle。
+
 审查补强：setup拥有独立派发scope，dispose/dirty/disconnect同步seal；已经派发的raw操作继续收尾，旧setup不能续发下一个SDK。无scope路径也在逐context/page循环与SDK getter之后检查generation；两类timeout setter之间亦检查。getter同步触发主动dispose但没有真正调用SDK时返回私有取消sentinel，在raw wrapper之外转为固定取消错误，避免把明确控制拒绝当成unknown；真正getter/SDK错误仍保留unknown。deferred setup在await后重验实时owner与unknown，不能趁调度间隙开启managed launch。未来route handler正文没有改动或纳入本单元证明。
