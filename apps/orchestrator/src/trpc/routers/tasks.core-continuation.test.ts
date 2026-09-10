@@ -20,6 +20,10 @@ import {
   reloadFeatureFlagsForTest,
   setFeatureFlagsForTest,
 } from '../../execution/feature-flags.js';
+import {
+  type OperationLifetime,
+  currentOperationLifetime,
+} from '../../execution/owned-operation.js';
 import { FileService } from '../../files/file-service.js';
 import * as coreRuntime from '../../llm/core-model-runtime.js';
 import { QuotaService } from '../../quota/quota-service.js';
@@ -951,6 +955,168 @@ describe('real task route durable ownership', () => {
       rmSync(directory, { recursive: true });
     }
   }
+
+  it('retains a deadline rejection observed after the raw advisory scope has finished', async () => {
+    const f = fixture({ plan: true });
+    await withController(async (controller, close) => {
+      f.ctx.executionDrain = controller;
+      let physical: OperationLifetime | undefined;
+      const plan = planning.prepareCoreTaskPlan;
+      vi.spyOn(planning, 'prepareCoreTaskPlan').mockImplementation((input) => {
+        physical = currentOperationLifetime();
+        return plan(input);
+      });
+      vi.spyOn(performance, 'now').mockImplementation(() => {
+        if (physical) {
+          try {
+            physical.drain.assertDispatch(physical.owner);
+          } catch {
+            return 15001;
+          }
+        }
+        return 0;
+      });
+      await f.createDirect();
+      close();
+      await vi.waitFor(() => expect(controller.drain.snapshot().active).toBe(0));
+      expect(controller.drain.snapshot().unknown).toBeGreaterThan(0);
+      expect(f.requests).toHaveLength(1);
+      expect(f.settlements).toHaveLength(0);
+    });
+  });
+
+  it('keeps a late advisory save uncertain when its completion beats the timeout callback', async () => {
+    const f = fixture({ plan: true });
+    await withController(async (controller, close) => {
+      f.ctx.executionDrain = controller;
+      let now = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => now);
+      f.planWrites.mockImplementation(async () => {
+        now = 15001;
+        return true;
+      });
+      await f.createDirect();
+      close();
+      await vi.waitFor(() => expect(controller.drain.snapshot().active).toBe(0));
+      expect(controller.drain.snapshot().unknown).toBeGreaterThan(0);
+      expect(f.requests).toHaveLength(1);
+      expect(f.settlements).toHaveLength(0);
+    });
+  });
+
+  it.each(['plan', 'suggestions'] as const)(
+    'retains the raw optional %s fetch after its model budget',
+    async (lane) => {
+      const f = fixture({ plan: lane === 'plan', suggestions: lane === 'suggestions' });
+      await withController(async (controller, close) => {
+        f.ctx.executionDrain = controller;
+        vi.useFakeTimers();
+        const originalFetch = globalThis.fetch;
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        vi.stubGlobal('fetch', async (...args: Parameters<typeof fetch>) => {
+          const response = await originalFetch(...args);
+          const body = JSON.parse(String(args[1]?.body));
+          if (body.max_tokens === (lane === 'plan' ? 512 : 200)) await held;
+          return response;
+        });
+        await (lane === 'plan' ? f.createDirect() : f.reply());
+        await vi.advanceTimersByTimeAsync(0);
+        close();
+        await vi.advanceTimersByTimeAsync(lane === 'plan' ? 15001 : 4001);
+        const pending = controller.drain.snapshot();
+        const terminalCount = f.frames.filter(
+          (frame) => frame.type === 'server.task.terminal',
+        ).length;
+        release();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(terminalCount).toBe(lane === 'plan' ? 0 : 1);
+        expect(pending.byKind.model).toBe(1);
+        expect(pending.unknown).toBeGreaterThan(0);
+        expect(controller.drain.snapshot()).toMatchObject({ active: 0, idle: false });
+        expect(f.planWrites).not.toHaveBeenCalled();
+        expect(f.suggestionWrites).not.toHaveBeenCalled();
+      });
+    },
+  );
+
+  it.each(['save', 'head'] as const)(
+    'keeps the original advisory %s active after its outer timeout',
+    async (boundary) => {
+      const f = fixture({ plan: true });
+      await withController(async (controller, close) => {
+        f.ctx.executionDrain = controller;
+        vi.useFakeTimers();
+        let finish!: () => void;
+        const held = new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        if (boundary === 'save')
+          f.planWrites.mockImplementation(async () => {
+            await held;
+            return true;
+          });
+        else
+          vi.spyOn(CoreTaskRepository.prototype, 'readHead').mockImplementation(async () => {
+            await held;
+            return {
+              status: f.row.status,
+              executionId: f.row.executionId,
+              executionRevision: f.row.executionRevision,
+              recordVersion: f.row.coreRecordVersion,
+            };
+          });
+        expect(await f.createDirect()).toMatchObject({ admissionState: 'resumed' });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(f.planWrites).toHaveBeenCalledTimes(1);
+        close();
+        await vi.advanceTimersByTimeAsync(15001);
+        const pending = controller.drain.snapshot();
+        finish();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(pending.byKind.database).toBe(1);
+        expect(pending.active).toBeGreaterThan(0);
+        expect(pending.unknown).toBeGreaterThan(0);
+        expect(controller.drain.snapshot()).toMatchObject({ active: 0, idle: false });
+        expect(f.requests).toHaveLength(1);
+        expect(f.settlements).toHaveLength(0);
+        expect(f.frames.some((frame) => frame.type === 'server.task.plan')).toBe(false);
+      });
+    },
+  );
+
+  it.each(['save', 'head'] as const)(
+    'tracks suggestion %s without delaying the terminal and retains swallowed failures',
+    async (boundary) => {
+      const f = fixture({ suggestions: true });
+      await withController(async (controller, close) => {
+        f.ctx.executionDrain = controller;
+        vi.useFakeTimers();
+        let fail!: () => void;
+        const held = new Promise<never>((_resolve, reject) => {
+          fail = () => reject(new Error('synthetic database failure'));
+        });
+        if (boundary === 'save') f.suggestionWrites.mockImplementation(() => held);
+        else vi.spyOn(CoreTaskRepository.prototype, 'readHead').mockImplementation(() => held);
+        await f.reply();
+        await vi.advanceTimersByTimeAsync(0);
+        close();
+        const pending = controller.drain.snapshot();
+        const terminalCount = f.frames.filter(
+          (frame) => frame.type === 'server.task.terminal',
+        ).length;
+        fail();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(terminalCount).toBe(1);
+        expect(f.settlements).toHaveLength(1);
+        expect(pending.byKind.database).toBe(1);
+        expect(controller.drain.snapshot()).toMatchObject({ active: 0, unknown: 1, idle: false });
+        expect(f.frames.some((frame) => frame.type === 'server.supercar.suggestions')).toBe(false);
+      });
+    },
+  );
 
   it('retains uncertainty when runtime resolution crosses the confirmed shell deadline', async () => {
     const f = fixture();

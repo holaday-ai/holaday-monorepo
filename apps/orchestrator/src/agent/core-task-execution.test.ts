@@ -459,6 +459,10 @@ describe('transactional core execution with real runner and review', () => {
   );
   it('rechecks the advisory deadline after the callback promise resolves', async () => {
     const f = fixture();
+    const drain = new ExecutionDrain();
+    drain.open();
+    const owner = drain.admit('request');
+    f.input.lifetime = { drain, owner };
     let now = 0;
     vi.spyOn(performance, 'now').mockImplementation(() => now);
     f.input.beforeGeneration = () =>
@@ -472,6 +476,10 @@ describe('transactional core execution with real runner and review', () => {
     expect(await started.completion).toBe('unconfirmed');
     expect(f.generation).toHaveLength(0);
     expect(f.writes).toHaveLength(0);
+    drain.finish(owner);
+    drain.close();
+    await vi.waitFor(() => expect(drain.snapshot().active).toBe(0));
+    expect(drain.snapshot()).toMatchObject({ unknown: 1, idle: false });
   });
   it('delivers the complete same-round request and materials to both channels then atomically settles', async () => {
     const f = fixture();

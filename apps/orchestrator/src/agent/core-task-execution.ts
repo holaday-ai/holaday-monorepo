@@ -229,6 +229,7 @@ async function executeCoreTask(
         }
         if (!registry.read(handle) || readiness === 'stale') return 'stale';
         if (readiness !== 'ready' || performance.now() >= deadline) {
+          if (input.lifetime) input.lifetime.drain.markUnknown(input.lifetime.owner);
           safelyPublish(input, { ...identity, type: 'unconfirmed' });
           return 'unconfirmed';
         }

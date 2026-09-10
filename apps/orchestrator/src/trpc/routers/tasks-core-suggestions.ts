@@ -2,6 +2,7 @@ import type { CoreAcceptedRequirements } from '../../agent/core-task-admission.j
 import type { CoreTaskRepository } from '../../agent/core-task-repository.js';
 import type { CoreSettlement } from '../../agent/core-task-settlement.js';
 import { publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
+import { runAuxiliaryDatabase } from '../../execution/auxiliary-database.js';
 import type { ProductionModelRuntimeWiring } from '../../llm/model-runtime-wiring.js';
 import { broadcastToUser } from '../../ws/server.js';
 
@@ -23,7 +24,7 @@ export async function publishCoreSettledSuggestions(args: {
     intent: [args.requirements.initialRequest, ...args.requirements.userTurns].join('\n\n'),
     summary: op.result.summary ?? '',
     isCurrent: async () => {
-      const head = await repo.readHead(op.scope);
+      const head = await runAuxiliaryDatabase(() => repo.readHead(op.scope));
       return (
         head?.status === 'completed' &&
         head.executionId === op.executionId &&
@@ -31,7 +32,7 @@ export async function publishCoreSettledSuggestions(args: {
         head.recordVersion === op.recordVersion
       );
     },
-    persist: (suggestions) => repo.persistSuggestions(op, suggestions),
+    persist: (suggestions) => runAuxiliaryDatabase(() => repo.persistSuggestions(op, suggestions)),
     publish: (suggestions) => {
       broadcastToUser(args.actorExternalId, {
         type: 'server.supercar.suggestions',

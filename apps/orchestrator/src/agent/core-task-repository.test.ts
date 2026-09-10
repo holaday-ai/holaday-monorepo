@@ -2,6 +2,8 @@ import { drizzle } from 'drizzle-orm/mysql2';
 import type { Connection } from 'mysql2/promise';
 import { describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
+import { ExecutionDrain } from '../execution/execution-drain.js';
+import { startOwnedOperation } from '../execution/owned-operation.js';
 import { prepareCoreAdmission } from './core-task-admission.js';
 import { CoreTaskRepository } from './core-task-repository.js';
 import { prepareCoreSettlement } from './core-task-settlement.js';
@@ -91,6 +93,71 @@ function fixture(
 }
 
 describe('core admission database boundary', () => {
+  it.each(['plan', 'suggestions'] as const)(
+    'retains malformed %s update receipts as unknown',
+    async (kind) => {
+      for (const affected of [undefined, null, '1', -1, 2]) {
+        const drain = new ExecutionDrain();
+        drain.open();
+        const { repo } = fixture({ affected });
+        const owned = startOwnedOperation(
+          drain,
+          'database',
+          () =>
+            kind === 'plan'
+              ? repo.persistAdvisoryPlan(operation(), '合成计划')
+              : repo.persistSuggestions(settlementOperation('completed'), ['整理后续执行清单']),
+          { errorOutcome: 'known', dispatch: 'immediate' },
+        );
+        expect(await owned.result).toBe(false);
+        drain.close();
+        expect(drain.snapshot()).toMatchObject({ active: 0, unknown: 1, idle: false });
+      }
+    },
+  );
+
+  it.each(['plan', 'suggestions'] as const)(
+    'does not call a confirmed %s CAS refusal unknown',
+    async (kind) => {
+      const drain = new ExecutionDrain();
+      drain.open();
+      const { repo } = fixture({ affected: 0 });
+      const owned = startOwnedOperation(
+        drain,
+        'database',
+        () =>
+          kind === 'plan'
+            ? repo.persistAdvisoryPlan(operation(), '合成计划')
+            : repo.persistSuggestions(settlementOperation('completed'), ['整理后续执行清单']),
+        { errorOutcome: 'known', dispatch: 'immediate' },
+      );
+      expect(await owned.result).toBe(false);
+      drain.close();
+      expect(drain.snapshot()).toMatchObject({ active: 0, unknown: 0, idle: true });
+    },
+  );
+
+  it.each(['plan', 'suggestions'] as const)(
+    'retains a swallowed %s driver failure as unknown',
+    async (kind) => {
+      const drain = new ExecutionDrain();
+      drain.open();
+      const { repo } = fixture({ updateError: true });
+      const owned = startOwnedOperation(
+        drain,
+        'database',
+        () =>
+          kind === 'plan'
+            ? repo.persistAdvisoryPlan(operation(), '合成计划')
+            : repo.persistSuggestions(settlementOperation('completed'), ['整理后续执行清单']),
+        { errorOutcome: 'known', dispatch: 'immediate' },
+      );
+      expect(await owned.result).toBe(false);
+      drain.close();
+      expect(drain.snapshot()).toMatchObject({ active: 0, unknown: 1, idle: false });
+    },
+  );
+
   it('saves advisory plans only for the admitted owner and active revision without changing core version', async () => {
     const op = operation();
     const { repo, queries } = fixture();
