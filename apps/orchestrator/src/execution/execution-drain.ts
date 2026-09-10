@@ -46,7 +46,10 @@ export class ExecutionDrain {
     { owner: DrainOwner; operation: Operation }
   >();
 
-  constructor(private readonly capacity = 1024) {
+  constructor(
+    private readonly capacity = 1024,
+    private readonly beforeDispatch?: () => void,
+  ) {
     if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 65_536)
       throw new Error('EXECUTION_DRAIN_CAPACITY');
   }
@@ -82,6 +85,14 @@ export class ExecutionDrain {
 
   /** Re-check at actual dispatch, not only when the adapter was prepared. */
   assertDispatch(owner: DrainOwner): void {
+    this.assertNotBlocked();
+    this.requireActive(owner);
+    try {
+      this.beforeDispatch?.();
+    } catch {
+      this.block();
+      throw new Error('EXECUTION_DRAIN_GUARD');
+    }
     this.assertNotBlocked();
     this.requireActive(owner);
   }

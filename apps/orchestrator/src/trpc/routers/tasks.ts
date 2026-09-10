@@ -254,6 +254,7 @@ import {
   updateTaskStateForUser,
 } from '../../ws/server.js';
 import { protectedProcedure, router } from '../trpc.js';
+import { taskDrainMiddleware } from '../task-drain.js';
 import {
   followUpParentHasBrowserContext,
   followUpParentReasonLabel,
@@ -1181,7 +1182,7 @@ function isTaskCreateReplay(value: unknown): value is TaskCreateReplay {
 }
 
 export const tasksRouter = router({
-  create: protectedProcedure.input(createInput).mutation(async ({ ctx, input }) => {
+  create: protectedProcedure.input(createInput).use(taskDrainMiddleware).mutation(async ({ ctx, input }) => {
     // O15 — code-task refusal lands BEFORE user lookup so even an
     // unauthenticated-token-in-fail-path doesn't get scaffolding.
     //
@@ -1248,6 +1249,7 @@ export const tasksRouter = router({
           taskCreateIdempotencyKey!,
         ),
       onFinalizeFailure: () => {
+        ctx.executionLifetime?.drain.markUnknown(ctx.executionLifetime.owner);
         ctx.logger.error(
           { userId: ctx.userId, clientRequestId: input.clientRequestId },
           'tasks.create: task created but idempotency claim did not finalize',
@@ -9000,6 +9002,7 @@ export const tasksRouter = router({
         fileIds: z.array(z.string()).max(5).optional(),
       }),
     )
+    .use(taskDrainMiddleware)
     // Explicit return-type annotation breaks the circular type
     // inference: this handler calls `tasksRouter.createCaller` (F4
     // backend handoff), which references the very router this

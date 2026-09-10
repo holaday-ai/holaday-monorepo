@@ -3,6 +3,11 @@ import { type DrainCommand, decodeDrainCommand } from './drain-control-protocol.
 import type { DrainStateIdentity, DrainStateRecord } from './drain-state-record.js';
 import { DrainStateStore } from './drain-state-store.js';
 import { type DrainSnapshot, ExecutionDrain } from './execution-drain.js';
+import {
+  type OperationLifetime,
+  type OwnedOperation,
+  startOwnedOperation,
+} from './owned-operation.js';
 
 type ControlCode =
   | 'INVALID_COMMAND'
@@ -37,7 +42,7 @@ export type DrainOpenVerifier = (command: Readonly<DrainCommand>) => Promise<voi
 /** Local mechanism only. The maintenance integration must supply the real verifier.
  * No network request can assert bootstrap proof or create another opening permit. */
 export class DrainController {
-  readonly drain = new ExecutionDrain();
+  readonly drain = new ExecutionDrain(1024, () => this.verifyDispatch());
   readonly state: DrainStateStore;
   private session: object | null = null;
   private commandOwner: object | null = null;
@@ -81,6 +86,63 @@ export class DrainController {
 
   owns(session: object): boolean {
     return this.session === session && !this.stopped;
+  }
+
+  /** Synchronous write-ahead root admission. No watchdog or caller-supplied proof. */
+  runRoot<T>(action: (lifetime: OperationLifetime) => Promise<T>): OwnedOperation<T> {
+    if (typeof action !== 'function') throw new Error('CONTROL_ACTION_INVALID');
+    this.tick();
+    this.assertAdmission();
+    try {
+      this.state.markDirty();
+    } catch {
+      this.storageFailed = true;
+      this.stopped = true;
+      this.invalidateSession();
+      this.state.abandon();
+      throw new Error('CONTROL_STATE_UNAVAILABLE');
+    }
+    // No await between the last persistence check and root reservation.
+    this.checkTime();
+    this.assertAdmission();
+    return startOwnedOperation(
+      this.drain,
+      'request',
+      async (owner) => {
+        // The shared dispatch guard reads disk again. If that read crossed the
+        // lease boundary this root has not entered application code and must stop.
+        this.assertAdmission();
+        return action(Object.freeze({ drain: this.drain, owner }));
+      },
+      { errorOutcome: 'unknown', dispatch: 'immediate' },
+    );
+  }
+
+  private assertAdmission(): void {
+    if (
+      this.stopped ||
+      this.storageFailed ||
+      !this.session ||
+      !this.deadline ||
+      this.drain.snapshot().mode !== 'open'
+    )
+      throw new Error('CONTROL_ADMISSION_CLOSED');
+  }
+
+  private verifyDispatch(): void {
+    try {
+      if (!this.state.read().dirty) throw new Error('CONTROL_DIRTY_REQUIRED');
+    } catch {
+      this.storageFailed = true;
+      this.stopped = true;
+      this.invalidateSession();
+      this.state.abandon();
+      throw new Error('CONTROL_STATE_UNAVAILABLE');
+    }
+    this.checkTime();
+    // A normal close/expiry does not cancel already admitted children. State
+    // failure, however, cannot be ignored merely because an owner exists.
+    if (this.storageFailed) throw new Error('CONTROL_STATE_UNAVAILABLE');
   }
 
   async execute(session: object, bytes: Buffer): Promise<DrainReply> {

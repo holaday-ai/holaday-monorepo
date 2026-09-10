@@ -7,6 +7,8 @@ import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executo
 import type { BrowserPool } from '../browser-pool/index.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
+import type { DrainController } from '../execution/drain-controller.js';
+import type { OperationLifetime } from '../execution/owned-operation.js';
 import type { DownloadManager } from '../files/download-manager.js';
 import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
 import type { PayPalAdapter } from '../payment/index.js';
@@ -25,6 +27,8 @@ import type { TaskQueue } from '../queue/task-queue.js';
  * round-trip.
  */
 export interface AppContextDeps {
+  /** Explicit boot injection only; absence preserves the pre-drain deployment. */
+  executionDrain?: DrainController;
   planner: Planner;
   visionCommander?: VisionLoopCommander;
   playwrightExecutor?: PlaywrightExecutor | null;
@@ -76,6 +80,7 @@ export interface AppContextDeps {
 export function makeCreateContext(deps: AppContextDeps) {
   return async function createContext({ req, res }: { req: Request; res: Response }) {
     return {
+      ...(deps.executionDrain ? { executionDrain: deps.executionDrain } : {}),
       db,
       logger,
       req,
@@ -95,4 +100,7 @@ export function makeCreateContext(deps: AppContextDeps) {
   };
 }
 
-export type Context = Awaited<ReturnType<ReturnType<typeof makeCreateContext>>>;
+export type Context = Awaited<ReturnType<ReturnType<typeof makeCreateContext>>> & {
+  /** Internal nested-call ownership, never parsed from request data. */
+  executionLifetime?: OperationLifetime;
+};

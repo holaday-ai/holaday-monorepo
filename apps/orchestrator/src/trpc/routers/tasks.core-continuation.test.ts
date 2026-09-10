@@ -1,3 +1,6 @@
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { serverMessageSchema } from '@holaday/shared-types';
 import type { SQL } from 'drizzle-orm';
 import { MySqlDialect } from 'drizzle-orm/mysql-core';
@@ -10,6 +13,7 @@ import type { CoreSettlement } from '../../agent/core-task-settlement.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import * as createClaims from '../../api-keys/webhook-idempotency-service.js';
 import { env } from '../../config/env.js';
+import { DrainController } from '../../execution/drain-controller.js';
 import { runIntake } from '../../execution/expert-workflow-intake.js';
 import { getExpertWorkflowById } from '../../execution/expert-workflow-registry.js';
 import {
@@ -17,6 +21,7 @@ import {
   setFeatureFlagsForTest,
 } from '../../execution/feature-flags.js';
 import { FileService } from '../../files/file-service.js';
+import * as coreRuntime from '../../llm/core-model-runtime.js';
 import { QuotaService } from '../../quota/quota-service.js';
 import * as websocket from '../../ws/server.js';
 import type { Context } from '../context.js';
@@ -226,6 +231,7 @@ function fixture(options: { suggestions?: boolean; plan?: boolean; generatedText
     return true;
   });
   return {
+    ctx,
     row,
     legacyPlan: (patch: Record<string, unknown> = {}) =>
       Object.assign(row, {
@@ -896,4 +902,173 @@ describe('real reply core routing and execution', () => {
     expect(f.requests).toHaveLength(2);
     for (const request of f.requests) expect(JSON.stringify(request.body)).toContain('合成附件');
   });
+});
+
+describe('real task route durable ownership', () => {
+  async function withController(
+    run: (controller: DrainController, close: () => void) => Promise<void>,
+  ) {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), 'hd-core-root-')));
+    const identity = { epoch: 'a'.repeat(16), candidate: 'b'.repeat(40), bootId: 'c'.repeat(32) };
+    writeFileSync(
+      join(directory, 'state.json'),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        ...identity,
+        bootId: 'd'.repeat(32),
+        sequence: 1,
+        mode: 'closed',
+        dirty: false,
+      })}\n`,
+      { mode: 0o600 },
+    );
+    const controller = new DrainController(directory, identity, async () => {}, {
+      wall: () => 100000,
+      mono: () => 1000,
+    });
+    try {
+      const session = controller.connect();
+      expect(
+        (
+          await controller.execute(
+            session,
+            Buffer.from(
+              `${JSON.stringify({
+                protocol: 1,
+                op: 'open',
+                ...identity,
+                version: 2,
+                serial: 1,
+                expiresAt: 110000,
+              })}\n`,
+            ),
+          )
+        ).ok,
+      ).toBe(true);
+      await run(controller, () => controller.disconnect(session));
+    } finally {
+      controller.state.abandon();
+      rmSync(directory, { recursive: true });
+    }
+  }
+
+  it('retains uncertainty when runtime resolution crosses the confirmed shell deadline', async () => {
+    const f = fixture();
+    await withController(async (controller, close) => {
+      f.ctx.executionDrain = controller;
+      let now = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => now);
+      const resolveRuntime = coreRuntime.resolveCoreModelRuntime;
+      vi.spyOn(coreRuntime, 'resolveCoreModelRuntime').mockImplementation((input) => {
+        const result = resolveRuntime(input);
+        if (f.insert.mock.calls.length > 0) now = 15001;
+        return result;
+      });
+      expect(await f.create()).toMatchObject({ admissionState: 'creationUnconfirmed' });
+      close();
+      expect(f.insert).toHaveBeenCalledTimes(1);
+      expect(f.admissions).toHaveLength(0);
+      expect(f.requests).toHaveLength(0);
+      expect(controller.drain.snapshot()).toMatchObject({ active: 0, unknown: 1, idle: false });
+    });
+  });
+
+  it('retains uncertainty when idempotency finalization fails after a successful ACK', async () => {
+    const f = fixture();
+    await withController(async (controller, close) => {
+      f.ctx.executionDrain = controller;
+      const finalize = vi.spyOn(createClaims, 'finalizeClaim').mockResolvedValue(false);
+      expect(await f.create(undefined, undefined, 'synthetic_finalize_unknown')).toMatchObject({
+        admissionState: 'resumed',
+      });
+      close();
+      await vi.waitFor(() => expect(controller.drain.snapshot().active).toBe(0));
+      expect(f.settlements).toHaveLength(1);
+      expect(finalize).toHaveBeenCalledTimes(3);
+      expect(f.releaseClaim).not.toHaveBeenCalled();
+      expect(controller.drain.snapshot()).toMatchObject({ unknown: 1, idle: false });
+    });
+  });
+
+  it.each([
+    ['shell', false],
+    ['shell', true],
+    ['create-admission', false],
+    ['create-admission', true],
+    ['reply-admission', false],
+    ['reply-admission', true],
+  ] as const)(
+    'retains the original %s operation after an unconfirmed ACK (late rejection=%s)',
+    async (kind, rejects) => {
+      const f = fixture();
+      await withController(async (controller, close) => {
+        f.ctx.executionDrain = controller;
+        vi.useFakeTimers();
+        let finish!: () => void;
+        const held = new Promise<void>((resolve, reject) => {
+          finish = rejects ? () => reject(new Error('synthetic late write failure')) : resolve;
+        });
+        const write =
+          kind === 'shell'
+            ? f.insert.mockImplementation(() => held)
+            : vi.spyOn(CoreTaskRepository.prototype, 'admit').mockImplementation(async () => {
+                await held;
+                return { persisted: true };
+              });
+        const pending = kind === 'reply-admission' ? f.reply() : f.create();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(write).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(15000);
+        const ack = await pending;
+        expect(ack).toMatchObject(
+          kind === 'reply-admission'
+            ? { state: 'acceptedUnconfirmed' }
+            : { admissionState: kind === 'shell' ? 'creationUnconfirmed' : 'acceptedUnconfirmed' },
+        );
+        close();
+        expect(controller.drain.snapshot()).toMatchObject({
+          idle: false,
+          unknown: 1,
+          byKind: { database: 1 },
+        });
+        finish();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(controller.drain.snapshot()).toMatchObject({ active: 0, unknown: 1, idle: false });
+        expect(write).toHaveBeenCalledTimes(1);
+        expect(f.requests).toHaveLength(0);
+      });
+    },
+  );
+
+  it.each(['create', 'reply'] as const)(
+    'allows the admitted %s chain to finish after its ACK and close',
+    async (kind) => {
+      const f = fixture();
+      await withController(async (controller, close) => {
+        f.ctx.executionDrain = controller;
+        let finish!: () => void;
+        const held = new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        const originalSettle = CoreTaskRepository.prototype.settle;
+        vi.spyOn(CoreTaskRepository.prototype, 'settle').mockImplementation(async (...args) => {
+          await held;
+          return originalSettle(...args);
+        });
+        await (kind === 'create' ? f.create() : f.reply());
+        close();
+        expect(controller.drain.snapshot().idle).toBe(false);
+        finish();
+        await vi.waitFor(() =>
+          expect(controller.drain.snapshot()).toMatchObject({
+            active: 0,
+            unknown: 0,
+            idle: true,
+          }),
+        );
+        expect(f.settlements).toHaveLength(1);
+        expect(f.requests).toHaveLength(2);
+      });
+    },
+  );
 });

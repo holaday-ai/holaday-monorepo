@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { DrainController } from './drain-controller.js';
 import type { DrainOpenVerifier } from './drain-controller.js';
+import { startOwnedOperation } from './owned-operation.js';
 
 const roots: string[] = [];
 const controllers: DrainController[] = [];
@@ -34,6 +35,147 @@ afterEach(() => {
   vi.restoreAllMocks();
   for (const controller of controllers.splice(0)) controller.state.abandon();
   for (const directory of roots.splice(0)) rmSync(directory, { recursive: true });
+});
+
+it('persists dirty before a synchronous pinned root enters application code', async () => {
+  const { controller, directory } = fixture(async () => {});
+  const session = controller.connect();
+  expect((await controller.execute(session, command('open'))).ok).toBe(true);
+  expect(controller.runRoot).toBeTypeOf('function');
+  const operation = controller.runRoot(async ({ drain, owner }) => {
+    expect(JSON.parse(readFileSync(join(directory, 'state.json'), 'utf8')).dirty).toBe(true);
+    expect(drain.finish(owner)).toBe(false);
+    return 42;
+  });
+  controller.disconnect(session);
+  expect(await operation.result).toBe(42);
+  expect(controller.drain.snapshot().idle).toBe(true);
+});
+
+it('refuses a closed root without starting work or marking a clean state dirty', () => {
+  const { controller } = fixture();
+  expect(controller.runRoot).toBeTypeOf('function');
+  let entered = false;
+  expect(() =>
+    controller.runRoot(async () => {
+      entered = true;
+    }),
+  ).toThrow();
+  expect(entered).toBe(false);
+  expect(controller.state.read().dirty).toBe(false);
+});
+
+it.each(['already-expired', 'dirty-write-crossed', 'dispatch-read-crossed'])(
+  'does not dispatch a new root when the lease is %s',
+  async (reason) => {
+    const { controller, now } = fixture(async () => {});
+    const session = controller.connect();
+    await controller.execute(session, command('open'));
+    expect(controller.runRoot).toBeTypeOf('function');
+    if (reason === 'already-expired') now.wall = 110001;
+    if (reason === 'dirty-write-crossed') {
+      const sync = fs.fsyncSync;
+      vi.spyOn(fs, 'fsyncSync').mockImplementation((fd) => {
+        sync(fd);
+        now.wall = 110001;
+      });
+    }
+    if (reason === 'dispatch-read-crossed') {
+      const read = fs.readSync;
+      vi.spyOn(fs, 'readSync').mockImplementation(((...args: Parameters<typeof fs.readSync>) => {
+        const count = read(...args);
+        if (controller.drain.snapshot().active > 0) now.wall = 110001;
+        return count;
+      }) as typeof fs.readSync);
+    }
+    let entered = false;
+    try {
+      await controller.runRoot(async () => {
+        entered = true;
+      }).result;
+    } catch {}
+    expect(entered).toBe(false);
+    expect(controller.drain.snapshot().mode).not.toBe('open');
+  },
+);
+
+it('blocks root dispatch if persisting dirty fails', async () => {
+  const { controller } = fixture(async () => {});
+  await controller.execute(controller.connect(), command('open'));
+  expect(controller.runRoot).toBeTypeOf('function');
+  vi.spyOn(fs, 'fsyncSync').mockImplementation(() => {
+    throw new Error('synthetic IO failure');
+  });
+  let entered = false;
+  expect(() =>
+    controller.runRoot(async () => {
+      entered = true;
+    }),
+  ).toThrow();
+  expect(entered).toBe(false);
+  expect(controller.drain.snapshot().mode).toBe('blocked');
+});
+
+it('lets already admitted child work finish after control disconnect', async () => {
+  const { controller } = fixture(async () => {});
+  const session = controller.connect();
+  await controller.execute(session, command('open'));
+  expect(controller.runRoot).toBeTypeOf('function');
+  let resume!: () => void;
+  const held = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  let childDone = false;
+  const root = controller.runRoot(async ({ drain, owner }) => {
+    await held;
+    await startOwnedOperation(
+      drain,
+      'database',
+      async () => {
+        childDone = true;
+      },
+      {
+        parent: owner,
+        errorOutcome: 'unknown',
+      },
+    ).result;
+  });
+  controller.disconnect(session);
+  expect(controller.drain.snapshot().idle).toBe(false);
+  resume();
+  await root.result;
+  expect(childDone).toBe(true);
+  expect(controller.drain.snapshot().idle).toBe(true);
+});
+
+it('checks durable state at child dispatch rather than only during root admission', async () => {
+  const { controller, directory } = fixture(async () => {});
+  await controller.execute(controller.connect(), command('open'));
+  expect(controller.runRoot).toBeTypeOf('function');
+  let resume!: () => void;
+  const held = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  let dispatched = false;
+  const root = controller.runRoot(async ({ drain, owner }) => {
+    await held;
+    await startOwnedOperation(
+      drain,
+      'model',
+      async () => {
+        dispatched = true;
+      },
+      {
+        parent: owner,
+        errorOutcome: 'unknown',
+      },
+    ).result;
+  });
+  writeFileSync(join(directory, 'state.json'), 'corrupt');
+  resume();
+  await expect(root.result).rejects.toThrow();
+  expect(dispatched).toBe(false);
+  expect(controller.drain.snapshot().mode).toBe('blocked');
 });
 
 it('cannot open if persisting the opening intent itself crosses the lease deadline', async () => {

@@ -1,6 +1,25 @@
 import { expect, it } from 'vitest';
 import { ExecutionDrain } from './execution-drain.js';
 
+it('blocks dispatch if the synchronous durable guard fails', () => {
+  const drain = new ExecutionDrain(4, () => {
+    throw new Error('synthetic state failure');
+  });
+  drain.open();
+  const owner = drain.admit('request');
+  expect(() => drain.assertDispatch(owner)).toThrow();
+  expect(drain.snapshot().mode).toBe('blocked');
+});
+
+it('rechecks the owner after the dispatch guard returns', () => {
+  const drain = new ExecutionDrain(4, () => {
+    drain.finish(owner);
+  });
+  drain.open();
+  const owner = drain.admit('request');
+  expect(() => drain.assertDispatch(owner)).toThrow('EXECUTION_DRAIN_OWNER');
+});
+
 it('closes new admission while retaining already accepted child work', () => {
   const drain = new ExecutionDrain();
   expect(() => drain.admit('request')).toThrow('EXECUTION_DRAIN_CLOSED');

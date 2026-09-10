@@ -6,6 +6,7 @@ import { assertCoreTaskInput } from '../../agent/core-task-input.js';
 import { CoreTaskRepository } from '../../agent/core-task-repository.js';
 import type { CoreSettlement } from '../../agent/core-task-settlement.js';
 import type { TaskRepository } from '../../agent/task-repository.js';
+import { startOwnedOperation } from '../../execution/owned-operation.js';
 import type { parseFileForPrompt } from '../../files/parsers.js';
 import type { ProductionModelRuntimeWiring } from '../../llm/model-runtime-wiring.js';
 import type { Context } from '../context.js';
@@ -58,21 +59,34 @@ export async function createCoreGenerateTask(args: {
     void Promise.resolve()
       .then(async () => {
         if (!withinDeadline()) return false;
-        await args.taskRepo.insertTask(
-          { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
-          {
-            userId: args.userId,
-            intent: args.intent,
-            roleId: args.roleId,
-            opusUsed: args.opusUsed,
-          },
-        );
+        const insert = () =>
+          args.taskRepo.insertTask(
+            { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
+            {
+              userId: args.userId,
+              intent: args.intent,
+              roleId: args.roleId,
+              opusUsed: args.opusUsed,
+            },
+          );
+        if (ctx.executionLifetime) {
+          await startOwnedOperation(ctx.executionLifetime.drain, 'database', insert, {
+            parent: ctx.executionLifetime.owner,
+            // The logical INSERT wait below records ambiguity once; a late
+            // physical rejection must not create a second ticket for the same write.
+            errorOutcome: 'known',
+            dispatch: 'immediate',
+          }).result;
+        } else await insert();
         return withinDeadline();
       })
       .then(resolve, () => resolve(false));
   });
   clearTimeout(timer);
-  if (!inserted || !withinDeadline()) return unconfirmed;
+  if (!inserted || !withinDeadline()) {
+    ctx.executionLifetime?.drain.markUnknown(ctx.executionLifetime.owner);
+    return unconfirmed;
+  }
   const resolve = (lane: 'generate' | 'verifier') =>
     args.wiring.resolveCore({
       actorExternalId: ctx.userId,
@@ -81,9 +95,13 @@ export async function createCoreGenerateTask(args: {
     });
   const generation = resolve('generate');
   const semantic = resolve('verifier');
-  if (!withinDeadline()) return unconfirmed;
+  if (!withinDeadline()) {
+    ctx.executionLifetime?.drain.markUnknown(ctx.executionLifetime.owner);
+    return unconfirmed;
+  }
   const repo = new CoreTaskRepository(ctx.db);
   const execution = await startCoreTaskExecution({
+    lifetime: ctx.executionLifetime,
     scope: { taskId, userId: args.userId },
     before: { status: 'executing', executionId: null, executionRevision: 0, recordVersion: 0 },
     requirements,

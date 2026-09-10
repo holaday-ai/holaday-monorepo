@@ -143,6 +143,7 @@ export async function handleCoreTaskReply(args: {
   const semantic = resolve('verifier');
   const repo = new CoreTaskRepository(ctx.db);
   const execution = await startCoreTaskExecution({
+    lifetime: ctx.executionLifetime,
     scope: { taskId: input.taskId, userId: args.userId },
     before: head,
     ...(legacy ? { legacySnapshot: legacy.legacySnapshot } : {}),
