@@ -203,3 +203,15 @@ persistVisionOutcome复用同一仓储已有runQueueDatabase/runQueueWrite原始
 测试以真实TaskRepository、Drizzle、ExecutionDrain及合成mysql2传输核对六个协议阶段、迟到失败、回执、unknown/sealed/expired和旧业务行为。额外从TypeScript AST编译真实未改的完整dispatchDirectOpen函数，配真实repo/runDirectOpen和合成页面接口，验证事务commit之前不广播、原始错误后catch不再补发失败写。此为caller区段集成验证，未绕过完整router的Qwen browser门禁，不是实际HTTP/浏览器/模型/数据库或生产E2E。
 
 仍不具备全链发布资格：BrowserPool生命周期/OS后代/保留timer/连接/路由回调、其余任务分支与后台producer、其他入口、统一boot/停止、全局恢复与业务对账、首次维护与生产平台门禁尚未完成。未修改tasks.ts、业务SQL/状态规则、禁止领域或配置；下一单元继续pool和连接生命周期，不能以本次结果保存成功替代那些证明。
+
+## 3D-3b-3c-1 本地增量：BrowserPool分配与释放停止屏障（2026-09-11）
+
+allocate在执行spawn/同步logger/ready hook之前登记Promise，维持旧同步派发时序；停止不再越过尚未注册实例的分配。release在执行任何释放回调前登记Promise，重复调用仍返回false，但必须等原释放结果；异常记录不删除，防止后续shutdown把draining视为已经成功释放。
+
+shutdown永久关闭新分配、续租/touch、adopt及GC重启，清未来retention timer；并发调用共享一次停止流程。先等已开始allocation收尾，再快照实际实例并释放，所有release收尾后才传播首个错误，成功后才关闭proxy。一处释放失败不提前结束对其他释放的等待；已失败释放不自动重试或假报完成。正常业务容量、租期长度、实例归属及原teardown内部best-effort规则未改。
+
+本单元只证明**协调层Promise等待**。spawn的killAll和tearDownInstance仍只是信号+宽限，不能证明OS组/后代退出；后者内部catch尚未接unknown。ready hook/三秒banner timer、GC自身日志异常、CDP/egress原始网络与route callback仍未完整持有，index启动关闭顺序也未接。长寿命保留资源与任务活动的归属要在下一单元单独设计，不能把shutdown返回直接接到全进程idle或生产放行。
+
+独立审查反例补充：同一taskId在原release挂起/失败或旧实例非ready时拒绝替换，adoptRetained也拒绝转移到仍有release记录或pending allocation的目标key，避免旧释放删除/遮蔽新实例或迟到分配覆盖转入实例；shutdown独立收集releasePromises，不依赖instances是否还保留key。实例从Map删除后的尾部失败仍阻止成功关闭，不能以缺失key抹去异常回执。
+
+测试使用真实pool/slot/spawn编排/executor连接与独立临时profile目录；外部spawner返回合成进程，CDP/readiness和proxy启动关闭为合成传输，部分disconnect边界用挂起Promise。没有启动浏览器/子进程、访问网络或读取真实profile，不证明实际Linux/PM2/进程终止/生产就绪。

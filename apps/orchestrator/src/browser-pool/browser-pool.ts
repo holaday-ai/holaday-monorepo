@@ -93,6 +93,8 @@ export class BrowserPool {
     { userId: string; promise: Promise<BrowserInstance> }
   >();
   private readonly retentionTimers = new Map<string, NodeJS.Timeout>();
+  private readonly releasePromises = new Map<string, Promise<boolean>>();
+  private shutdownPromise: Promise<void> | null = null;
   private readonly allocator: SlotAllocator;
   private gcTimer: NodeJS.Timeout | null = null;
   private shuttingDown = false;
@@ -129,6 +131,9 @@ export class BrowserPool {
     if (this.shuttingDown) {
       throw new Error('BrowserPool: shutting down, cannot allocate');
     }
+    if (this.releasePromises.has(taskId)) {
+      throw new Error('BrowserPool: task browser release is not complete');
+    }
     if (this.instances.has(taskId)) {
       // taskId is supposed to be unique per task; if we land here it
       // means tasks.ts retried admit on the same id. Return the
@@ -141,6 +146,7 @@ export class BrowserPool {
         inst.lastActiveAt = Date.now();
         return inst;
       }
+      throw new Error('BrowserPool: task browser is not ready for reuse');
     }
     const pending = this.allocationPromises.get(taskId);
     if (pending) {
@@ -150,13 +156,20 @@ export class BrowserPool {
       return pending.promise;
     }
 
-    const promise = (async (): Promise<BrowserInstance> => {
+    let resolve!: (instance: BrowserInstance) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<BrowserInstance>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    // Register before spawn or any injected logger/hook can reenter shutdown.
+    this.allocationPromises.set(taskId, { userId, promise });
+    void (async (): Promise<BrowserInstance> => {
       if (this.allocator.isFull()) {
         await this.releaseOldestRetained('capacity-reclaim');
       }
       return this.spawnInstance(taskId, userId, viewportProfile);
-    })();
-    this.allocationPromises.set(taskId, { userId, promise });
+    })().then(resolve, reject);
     try {
       return await promise;
     } finally {
@@ -173,6 +186,7 @@ export class BrowserPool {
    * the GC doesn't reap an actively-running task.
    */
   touch(taskId: string): void {
+    if (this.shuttingDown) return;
     const inst = this.instances.get(taskId);
     if (!inst) return;
     const now = Date.now();
@@ -189,13 +203,9 @@ export class BrowserPool {
    * reclaims the oldest retained browser before returning PoolCapacityError.
    */
   retain(taskId: string, ttlMs: number, reason = 'terminal-review'): boolean {
+    if (this.shuttingDown) return false;
     const inst = this.instances.get(taskId);
-    if (
-      !inst ||
-      inst.status !== 'ready' ||
-      !Number.isFinite(ttlMs) ||
-      ttlMs <= 0
-    ) {
+    if (!inst || inst.status !== 'ready' || !Number.isFinite(ttlMs) || ttlMs <= 0) {
       return false;
     }
 
@@ -223,15 +233,13 @@ export class BrowserPool {
     destinationTaskId: string,
     userId: string,
   ): BrowserInstance | null {
+    if (this.shuttingDown) return null;
     if (sourceTaskId === destinationTaskId) return null;
+    if (this.releasePromises.has(destinationTaskId)) return null;
+    if (this.allocationPromises.has(destinationTaskId)) return null;
     if (this.instances.has(destinationTaskId)) return null;
     const inst = this.instances.get(sourceTaskId);
-    if (
-      !inst ||
-      inst.status !== 'ready' ||
-      inst.userId !== userId ||
-      inst.retainedUntil == null
-    ) {
+    if (!inst || inst.status !== 'ready' || inst.userId !== userId || inst.retainedUntil == null) {
       return null;
     }
 
@@ -292,6 +300,11 @@ export class BrowserPool {
    * (no-op). Returns true if something was released.
    */
   async release(taskId: string, reason = 'manual'): Promise<boolean> {
+    const pending = this.releasePromises.get(taskId);
+    if (pending) {
+      await pending;
+      return false;
+    }
     const inst = this.instances.get(taskId);
     if (!inst) return false;
     if (inst.status === 'draining') return false;
@@ -299,6 +312,23 @@ export class BrowserPool {
     if (retentionTimer) clearTimeout(retentionTimer);
     this.retentionTimers.delete(taskId);
     inst.status = 'draining';
+    let resolve!: (released: boolean) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<boolean>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    this.releasePromises.set(taskId, promise);
+    void this.releaseInstance(inst, reason).then(resolve, reject);
+    // Keep rejected coordination receipts: shutdown must not mistake a failed
+    // draining instance for an already completed release on its next attempt.
+    const released = await promise;
+    this.releasePromises.delete(taskId);
+    return released;
+  }
+
+  private async releaseInstance(inst: BrowserInstance, reason: string): Promise<boolean> {
+    const taskId = inst.taskId;
     this.logger.info(
       { taskId, userId: inst.userId, reason, cdpPort: inst.cdpPort },
       'pool: release',
@@ -421,7 +451,7 @@ export class BrowserPool {
 
   /** Start the idle-timeout GC loop. Safe to call multiple times. */
   startGc(): void {
-    if (this.gcTimer) return;
+    if (this.gcTimer || this.shuttingDown) return;
     this.gcTimer = setInterval(() => {
       void this.runGcSweep();
     }, GC_INTERVAL_MS);
@@ -441,11 +471,25 @@ export class BrowserPool {
    * mis-behaving.
    */
   async shutdown(): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise;
     this.shuttingDown = true;
     this.stopGc();
-    const taskIds = Array.from(this.instances.keys());
-    await Promise.all(taskIds.map((id) => this.release(id, 'shutdown')));
-    await this.egressProxy.close();
+    for (const timer of this.retentionTimers.values()) clearTimeout(timer);
+    this.retentionTimers.clear();
+    this.shutdownPromise = Promise.resolve().then(async () => {
+      await Promise.allSettled(
+        Array.from(this.allocationPromises.values(), (entry) => entry.promise),
+      );
+      const taskIds = Array.from(this.instances.keys());
+      // Release receipts outlive the instance key when cleanup fails late.
+      const pendingReleases = new Set(this.releasePromises.values());
+      for (const id of taskIds) pendingReleases.add(this.release(id, 'shutdown'));
+      const released = await Promise.allSettled(pendingReleases);
+      const failed = released.find((result) => result.status === 'rejected');
+      if (failed?.status === 'rejected') throw failed.reason;
+      await this.egressProxy.close();
+    });
+    return this.shutdownPromise;
   }
 
   private async runGcSweep(): Promise<void> {
