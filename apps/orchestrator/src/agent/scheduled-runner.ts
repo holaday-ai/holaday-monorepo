@@ -35,10 +35,19 @@ import { accountClosureAllowsExecution } from '../account-closure/repository.js'
 import { logger } from '../config/logger.js';
 import { scheduledTasks } from '../db/schema/scheduled-tasks.js';
 import { users } from '../db/schema/users.js';
+import type { DrainController } from '../execution/drain-controller.js';
+import type { OperationLifetime } from '../execution/owned-operation.js';
+import {
+  callScheduledHook,
+  retainScheduledUncertainty,
+  runScheduledOperation,
+} from './scheduled-lifetime.js';
 
 const DEFAULT_POLL_MS = 60_000;
 
 export interface ScheduledRunnerDeps {
+  /** Optional until closed boot and every producer are wired together. */
+  executionDrain?: DrainController;
   /** Drizzle db handle. */
   db: typeof import('../db/client.js').db;
   /**
@@ -48,11 +57,14 @@ export interface ScheduledRunnerDeps {
    * Errors should be caught inside the callback — the runner just
    * checks the resolved value.
    */
-  dispatch: (row: {
-    scheduledTaskId: number;
-    userInternalId: number;
-    intent: string;
-  }) => Promise<number | null | { skipped: true; note: string }>;
+  dispatch: (
+    row: {
+      scheduledTaskId: number;
+      userInternalId: number;
+      intent: string;
+    },
+    lifetime?: OperationLifetime,
+  ) => Promise<number | null | { skipped: true; note: string }>;
   /**
    * Phase 26B — optional notification hook. Called after every
    * terminal dispatch (success OR failure) so the user's inbox +
@@ -61,14 +73,17 @@ export interface ScheduledRunnerDeps {
    * When omitted, the runner skips notifications entirely (back-
    * compat with existing tests that don't care).
    */
-  notify?: (input: {
-    userInternalId: number;
-    scheduledTaskInternalId: number;
-    intent: string;
-    ok: boolean;
-    error: string | null;
-    skipped?: boolean;
-  }) => Promise<void>;
+  notify?: (
+    input: {
+      userInternalId: number;
+      scheduledTaskInternalId: number;
+      intent: string;
+      ok: boolean;
+      error: string | null;
+      skipped?: boolean;
+    },
+    lifetime?: OperationLifetime,
+  ) => Promise<void>;
   /**
    * Phase 26B follow-up — reminder hook. Fires when a row's
    * `next_run_at - reminder_minutes` window opens AND we haven't
@@ -76,13 +91,16 @@ export interface ScheduledRunnerDeps {
    * `notify` because the shape + type ('task_reminder') is distinct.
    * Omit to skip reminder scanning entirely.
    */
-  notifyReminder?: (input: {
-    userInternalId: number;
-    scheduledTaskInternalId: number;
-    intent: string;
-    nextRunAt: Date;
-    reminderMinutes: number;
-  }) => Promise<void>;
+  notifyReminder?: (
+    input: {
+      userInternalId: number;
+      scheduledTaskInternalId: number;
+      intent: string;
+      nextRunAt: Date;
+      reminderMinutes: number;
+    },
+    lifetime?: OperationLifetime,
+  ) => Promise<void>;
   /** Override poll interval (ms). Default 60_000. Tests pass smaller. */
   pollIntervalMs?: number;
 }
@@ -186,9 +204,21 @@ export function startScheduledRunner(deps: ScheduledRunnerDeps): NodeJS.Timeout 
     const pending = Promise.resolve()
       .then(async () => {
         if (generation !== runnerGeneration) return;
+        // A new recovery sweep could replay a previous ambiguous dispatch.
+        // Retain the schedule and wait for reconciliation, never retry to clear it.
+        if (deps.executionDrain?.drain.snapshot().unknown) return;
         try {
-          if (recover) await recoverStuckRunningScheduledTasks(deps.db);
-          await tick(deps);
+          const pass = async () => {
+            if (recover) await recoverStuckRunningScheduledTasks(deps.db);
+            if (deps.executionDrain?.drain.snapshot().unknown) return;
+            await tick(deps);
+          };
+          if (deps.executionDrain) {
+            await deps.executionDrain.runRoot(() => runScheduledOperation('scheduler', pass))
+              .result;
+          } else {
+            await pass();
+          }
         } catch (err) {
           logger.warn({ err: errMsg(err) }, 'scheduled-runner: tick failed closed');
         }
@@ -227,7 +257,20 @@ export function stopScheduledRunner(): Promise<void> {
  * `[ResultSetHeader, ...]`; some shape variants surface the count
  * directly on the top-level object. Probe both.
  */
-function extractMysqlAffectedRows(result: unknown): number {
+function extractMysqlAffectedRows(result: unknown, maxRows = Number.MAX_SAFE_INTEGER): number {
+  const observed = Array.isArray(result)
+    ? (result[0] as { affectedRows?: unknown } | null)?.affectedRows
+    : (result as { affectedRows?: unknown } | null)?.affectedRows;
+  if (
+    typeof observed !== 'number' ||
+    !Number.isSafeInteger(observed) ||
+    observed < 0 ||
+    observed > maxRows
+  ) {
+    // Unknown is not a winning CAS. Preserve legacy extraction only outside
+    // an owned pass; scoped callers must not dispatch from an untrusted ACK.
+    if (retainScheduledUncertainty() && maxRows === 1) return 0;
+  }
   if (Array.isArray(result)) {
     const head = result[0] as { affectedRows?: number } | undefined;
     if (typeof head?.affectedRows === 'number') return head.affectedRows;
@@ -251,15 +294,17 @@ export async function recoverStuckRunningScheduledTasks(
   db: ScheduledRunnerDeps['db'],
 ): Promise<number> {
   try {
-    const result = await db
-      .update(scheduledTasks)
-      .set({ status: 'active' })
-      .where(
-        and(
-          eq(scheduledTasks.status, 'running'),
-          sql`EXISTS (SELECT 1 FROM ${users} WHERE ${users.id} = ${scheduledTasks.userId} AND ${users.status} = 'active')`,
+    const result = await runScheduledOperation('database', async () =>
+      db
+        .update(scheduledTasks)
+        .set({ status: 'active' })
+        .where(
+          and(
+            eq(scheduledTasks.status, 'running'),
+            sql`EXISTS (SELECT 1 FROM ${users} WHERE ${users.id} = ${scheduledTasks.userId} AND ${users.status} = 'active')`,
+          ),
         ),
-      );
+    );
     const affected = extractMysqlAffectedRows(result);
     if (affected > 0) {
       logger.info(
@@ -303,17 +348,19 @@ async function reminderScan(deps: ScheduledRunnerDeps, now: Date): Promise<void>
     reminderMinutes: number;
   }>;
   try {
-    const rows = await deps.db
-      .select({
-        id: scheduledTasks.id,
-        userId: scheduledTasks.userId,
-        intent: scheduledTasks.intent,
-        nextRunAt: scheduledTasks.nextRunAt,
-        reminderMinutes: scheduledTasks.reminderMinutes,
-        lastReminderRun: scheduledTasks.lastReminderRun,
-      })
-      .from(scheduledTasks)
-      .where(eq(scheduledTasks.status, 'active'));
+    const rows = await runScheduledOperation('database', async () =>
+      deps.db
+        .select({
+          id: scheduledTasks.id,
+          userId: scheduledTasks.userId,
+          intent: scheduledTasks.intent,
+          nextRunAt: scheduledTasks.nextRunAt,
+          reminderMinutes: scheduledTasks.reminderMinutes,
+          lastReminderRun: scheduledTasks.lastReminderRun,
+        })
+        .from(scheduledTasks)
+        .where(eq(scheduledTasks.status, 'active')),
+    );
     candidates = [];
     for (const r of rows) {
       const rm = r.reminderMinutes;
@@ -345,24 +392,26 @@ async function reminderScan(deps: ScheduledRunnerDeps, now: Date): Promise<void>
     // notification.
     let claimed = 0;
     try {
-      const result = await deps.db
-        .update(scheduledTasks)
-        .set({ lastReminderRun: c.nextRunAt })
-        .where(
-          and(
-            eq(scheduledTasks.id, c.id),
-            eq(scheduledTasks.status, 'active'),
-            eq(scheduledTasks.nextRunAt, c.nextRunAt),
-            // Re-check the not-fired predicate in the UPDATE itself.
-            // Without this, two overlapping ticks can both select the
-            // same cycle and both deliver the reminder.
-            or(
-              isNull(scheduledTasks.lastReminderRun),
-              lt(scheduledTasks.lastReminderRun, c.nextRunAt),
+      const result = await runScheduledOperation('database', async () =>
+        deps.db
+          .update(scheduledTasks)
+          .set({ lastReminderRun: c.nextRunAt })
+          .where(
+            and(
+              eq(scheduledTasks.id, c.id),
+              eq(scheduledTasks.status, 'active'),
+              eq(scheduledTasks.nextRunAt, c.nextRunAt),
+              // Re-check the not-fired predicate in the UPDATE itself.
+              // Without this, two overlapping ticks can both select the
+              // same cycle and both deliver the reminder.
+              or(
+                isNull(scheduledTasks.lastReminderRun),
+                lt(scheduledTasks.lastReminderRun, c.nextRunAt),
+              ),
             ),
           ),
-        );
-      claimed = extractMysqlAffectedRows(result);
+      );
+      claimed = extractMysqlAffectedRows(result, 1);
     } catch (err) {
       logger.warn(
         { err: errMsg(err), scheduledTaskId: c.id },
@@ -373,7 +422,7 @@ async function reminderScan(deps: ScheduledRunnerDeps, now: Date): Promise<void>
     if (claimed === 0) continue;
     if (!(await scheduledOwnerAllowsExecution(deps, c.userId, c.id, 'reminder'))) continue;
     try {
-      await deps.notifyReminder({
+      await callScheduledHook(deps.notifyReminder, {
         userInternalId: c.userId,
         scheduledTaskInternalId: c.id,
         intent: c.intent,
@@ -421,18 +470,20 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
     rrule: string | null;
   }>;
   try {
-    candidates = await deps.db
-      .select({
-        id: scheduledTasks.id,
-        userId: scheduledTasks.userId,
-        intent: scheduledTasks.intent,
-        repeatType: scheduledTasks.repeatType,
-        // Phase 26A — when rrule is set, computeNextRunFromInputs uses
-        // it instead of repeatType.
-        rrule: scheduledTasks.rrule,
-      })
-      .from(scheduledTasks)
-      .where(and(eq(scheduledTasks.status, 'active'), lte(scheduledTasks.nextRunAt, now)));
+    candidates = await runScheduledOperation('database', async () =>
+      deps.db
+        .select({
+          id: scheduledTasks.id,
+          userId: scheduledTasks.userId,
+          intent: scheduledTasks.intent,
+          repeatType: scheduledTasks.repeatType,
+          // Phase 26A — when rrule is set, computeNextRunFromInputs uses
+          // it instead of repeatType.
+          rrule: scheduledTasks.rrule,
+        })
+        .from(scheduledTasks)
+        .where(and(eq(scheduledTasks.status, 'active'), lte(scheduledTasks.nextRunAt, now))),
+    );
   } catch (err) {
     logger.warn({ err: errMsg(err) }, 'scheduled-runner: scan failed');
     return;
@@ -443,17 +494,19 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
     // Phase 2 atomic claim.
     let claimAffected = 0;
     try {
-      const claim = await deps.db
-        .update(scheduledTasks)
-        .set({ status: 'running' })
-        .where(
-          and(
-            eq(scheduledTasks.id, row.id),
-            eq(scheduledTasks.status, 'active'),
-            lte(scheduledTasks.nextRunAt, now),
+      const claim = await runScheduledOperation('database', async () =>
+        deps.db
+          .update(scheduledTasks)
+          .set({ status: 'running' })
+          .where(
+            and(
+              eq(scheduledTasks.id, row.id),
+              eq(scheduledTasks.status, 'active'),
+              lte(scheduledTasks.nextRunAt, now),
+            ),
           ),
-        );
-      claimAffected = extractMysqlAffectedRows(claim);
+      );
+      claimAffected = extractMysqlAffectedRows(claim, 1);
     } catch (err) {
       logger.warn(
         { err: errMsg(err), scheduledTaskId: row.id },
@@ -486,11 +539,22 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
     let dispatchError: string | null = null;
     let skipNote: string | null = null; // 「跳过」语义（如非交易日）→ last_run_status='skipped'
     try {
-      const result = await deps.dispatch({
+      const result = await callScheduledHook(deps.dispatch, {
         scheduledTaskId: row.id,
         userInternalId: row.userId,
         intent: row.intent,
       });
+      if (
+        !(typeof result === 'number' && Number.isSafeInteger(result) && result > 0) &&
+        !(
+          typeof result === 'object' &&
+          result !== null &&
+          result.skipped === true &&
+          typeof result.note === 'string'
+        )
+      ) {
+        retainScheduledUncertainty();
+      }
       if (typeof result === 'object' && result !== null) {
         skipNote = result.note;
       } else {
@@ -517,41 +581,53 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
     const truncatedError = dispatchError !== null ? dispatchError.slice(0, 2000) : null;
     let finalizeWon = false;
     try {
-      finalizeWon = await deps.db.transaction(async (tx) => {
-        // Linearize freeze vs terminal finalization on the owner row. The
-        // lock is released before any notification/webhook side effect.
-        const [owner] = await tx
-          .select({ status: users.status })
-          .from(users)
-          .where(eq(users.id, row.userId))
-          .limit(1)
-          .for('update');
-        if (owner?.status !== 'active') return false;
-        const finalize =
-          nextRun === null
-            ? await tx
-                .update(scheduledTasks)
-                .set({
-                  status: dispatchOk ? 'completed' : 'failed',
-                  lastRunAt: now,
-                  lastRunStatus: skipped ? 'skipped' : dispatchOk ? 'success' : 'failed',
-                  lastError: skipped ? skipNote : truncatedError,
-                  ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
-                })
-                .where(and(eq(scheduledTasks.id, row.id), eq(scheduledTasks.status, 'running')))
-            : await tx
-                .update(scheduledTasks)
-                .set({
-                  status: 'active',
-                  nextRunAt: nextRun,
-                  lastRunAt: now,
-                  lastRunStatus: skipped ? 'skipped' : dispatchOk ? 'success' : 'failed',
-                  lastError: skipped ? skipNote : truncatedError,
-                  ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
-                })
-                .where(and(eq(scheduledTasks.id, row.id), eq(scheduledTasks.status, 'running')));
-        return extractMysqlAffectedRows(finalize) === 1;
-      });
+      finalizeWon = await runScheduledOperation('database', async () =>
+        deps.db.transaction(async (tx) => {
+          // Linearize freeze vs terminal finalization on the owner row. The
+          // lock is released before any notification/webhook side effect.
+          const [owner] = await runScheduledOperation('database', async () =>
+            tx
+              .select({ status: users.status })
+              .from(users)
+              .where(eq(users.id, row.userId))
+              .limit(1)
+              .for('update'),
+          );
+          if (owner?.status !== 'active') return false;
+          const finalize =
+            nextRun === null
+              ? await runScheduledOperation('database', async () =>
+                  tx
+                    .update(scheduledTasks)
+                    .set({
+                      status: dispatchOk ? 'completed' : 'failed',
+                      lastRunAt: now,
+                      lastRunStatus: skipped ? 'skipped' : dispatchOk ? 'success' : 'failed',
+                      lastError: skipped ? skipNote : truncatedError,
+                      ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
+                    })
+                    .where(
+                      and(eq(scheduledTasks.id, row.id), eq(scheduledTasks.status, 'running')),
+                    ),
+                )
+              : await runScheduledOperation('database', async () =>
+                  tx
+                    .update(scheduledTasks)
+                    .set({
+                      status: 'active',
+                      nextRunAt: nextRun,
+                      lastRunAt: now,
+                      lastRunStatus: skipped ? 'skipped' : dispatchOk ? 'success' : 'failed',
+                      lastError: skipped ? skipNote : truncatedError,
+                      ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
+                    })
+                    .where(
+                      and(eq(scheduledTasks.id, row.id), eq(scheduledTasks.status, 'running')),
+                    ),
+                );
+          return extractMysqlAffectedRows(finalize, 1) === 1;
+        }),
+      );
     } catch (err) {
       // Worst-case path — the row stays in 'running' until the boot
       // sweep recovers it. Log so we know it happened.
@@ -572,7 +648,7 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
       (await scheduledOwnerAllowsExecution(deps, row.userId, row.id, 'notification'))
     ) {
       try {
-        await deps.notify({
+        await callScheduledHook(deps.notify, {
           userInternalId: row.userId,
           scheduledTaskInternalId: row.id,
           intent: row.intent,
@@ -597,7 +673,9 @@ async function scheduledOwnerAllowsExecution(
   boundary: 'reminder' | 'dispatch' | 'notification',
 ): Promise<boolean> {
   try {
-    return await accountClosureAllowsExecution(deps.db, userId);
+    return await runScheduledOperation('database', async () =>
+      accountClosureAllowsExecution(deps.db, userId),
+    );
   } catch (err) {
     logger.warn(
       { err: errMsg(err), scheduledTaskId, boundary },

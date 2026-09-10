@@ -123,3 +123,11 @@ tasks 的另外18个mutation路径：smokeTest、pause、resume、confirm、conf
 随后依次补：这些producer的真实root/子链与未知跟踪；内部createCaller传播；queue/legacy派发；HTTP/auth/WS及其他query/mutation；后台刷新/附件/SDK清理；统一closed boot和停止顺序；业务对账。每个未接入口必须继续阻断发布，而不是用默认false开关或局部snapshot0豁免。
 
 首次PR231维护、旧boot对账、准确parked记录、新候选与独立备份、真实Linux/PM2/千问、有效新生产窗口仍是独立门禁。源代码静态清单无法替代实际部署拓扑、进程清单、条件开关、反向代理和独立worker证明；禁止领域及独立worker未核实前保持阻断。本轮不访问生产也不修改那些领域。
+
+## 3D-2a 本地增量：scheduled 调用边界（2026-09-10）
+
+以上表格保留2a4e253e静态基线。后续83077cfb先补两个poller的stop Promise/generation；本单元再为scheduled增加可选controller接纳、scheduler子链和每个DB/hook原始调用包装。真实Drizzle事务外层持有commit/rollback，内部select/update另有子owner；hook第二参数仅传进程内lifetime，可在ACK前reserve后续子工作，不能由任务ID或已释放父句柄重建。
+
+内部DB/hook抛错以及无法确认的UPDATE/dispatch回执保留未知；有scope的单行ACK仅0/1可信，不可信回执不派发任务/提醒。未知存在时暂停新的poll pass，周期recovery新增未知后不继续该pass的tick，不以恢复扫描重放未确认工作。既有无scope业务提取/调用契约保留。
+
+状态仅为**局部已接**：index尚未注入控制器，也未把hook lifetime传给其手工Context；真实notify的allSettled吞错、briefing/通用任务内部catch及ACK后子任务，尚不能由外层Promise证明收口。planned、队列、其他入口、boot及业务对账仍未接，不是scheduled全链或全进程发布证明。本地测试的mysql2/业务hook是合成外部边界，未验证实际MySQL、通知供应商、千问或生产。
