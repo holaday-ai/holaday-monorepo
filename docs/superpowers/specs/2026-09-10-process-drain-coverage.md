@@ -169,3 +169,15 @@ TaskRepository.markQueuedTaskExecuting/Failed在已有server-only scope中为sel
 有scope时单行UPDATE只接受0/1，0保持确定CAS拒绝且无事件；事件INSERT要求准确1行。不可信回执抛错并保留未知，不视为0行或成功，不继续提交。无scope继续原有回执处理；仅局部helper校验，不改共享extractMysqlAffectedRows、SQL状态条件、事件内容或禁止领域代码。
 
 这是两个实际repository方法的局部接线，而非新增未被调用的模拟仓储。测试以真实Drizzle/ExecutionDrain调用两个方法，仅mysql2传输使用合成回执，覆盖延迟提交/回滚和晚失败；未连接真实MySQL。实际任务enqueue/lifetime/安全拒绝分类、回调内部浏览器与detached、boot注入仍未接，不得据此部署或声称全局排空。
+
+## 3D-3b-2 本地增量：实际入队安全分类与回调 Context（2026-09-11）
+
+queue在容量检查前验证scope/控制器/unknown/有效owner；无继承root还刷新持久状态和租约。真正reserve之前再校验，不用临时预留再释放来伪造容量拒绝。明确容量拒绝为capacity，维护/未知/失效/封闭/控制器缺失为unavailable；拒绝分类缺失也不可视为容量证明。
+
+tasks.ts两处真实enqueue改用server-only enqueueTaskExecution，传当前lifetime。onStart/onTimeout/runFn以队列各自实际回调owner生成Context；跨控制器、缺失、旧父owner或非当前ALS回调不能进入业务。两处dispatch函数改接收该Context，非队列路径显式传原ctx并继续列为未跟踪。安全拒绝在旧QUEUE_REJECTED失败写入之前抛SERVICE_UNAVAILABLE，仅明确容量拒绝保留原有失败处理。SQL/状态/额度规则不变。
+
+审查补强：helper仅是已有request的caller adapter，受控入口要求parent与当前ALS一致，再允许调用queue。不得通过无parent调用把工作送入legacy/异controller队列并提前ACK；根接纳仍由middleware/controller负责，不能由helper隐式补造权限。
+
+测试边界：真实TaskQueue/DrainController/状态文件验证父ACK后回调和挂起工作；缺失/外来回调能力使用合成queue协议反例。当前完整router的browser入口仍被Qwen unmigrated gate挡住，未移除/绕过该产品门禁。为检验真实caller，从TypeScript AST定位并编译执行tasks.ts原有两处入队块和原完整dispatch函数，外部持久化/分配使用合成边界。这是实际源代码区段的可执行接线验证，不是完整router或真实浏览器/模型/生产验证，也不是仅grep源码。完整后端类型检查覆盖调用签名。
+
+仍未覆盖direct-open/Brave内部原始浏览器、catch吞错与detached、所有其他producer、统一closed boot/stop、全局互斥恢复与生产维护工具。index仍未注入controller。该单元不能解除全进程发布阻断；下一步从较小direct-open原始IO/清理链开始，再逐段接Brave。

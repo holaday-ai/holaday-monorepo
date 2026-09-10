@@ -33,6 +33,7 @@ import type { DrainController } from '../execution/drain-controller.js';
 import type { OperationLifetime } from '../execution/owned-operation.js';
 import {
   type QueueReservation,
+  assertQueueAdmission,
   assertQueueDispatch,
   callQueueCallback,
   reserveQueueLifetime,
@@ -61,7 +62,7 @@ export interface QueuedTaskInput {
 export type EnqueueResult =
   | { kind: 'dispatched'; position: number }
   | { kind: 'queued'; position: number }
-  | { kind: 'rejected'; reason: string };
+  | { kind: 'rejected'; reason: string; reasonCode?: 'capacity' | 'unavailable' };
 
 export interface TaskQueueConfig {
   executionDrain?: DrainController;
@@ -252,7 +253,12 @@ export function createTaskQueue(cfg: TaskQueueConfig): TaskQueue {
   return {
     enqueue(input: QueuedTaskInput): EnqueueResult {
       if (stopped) {
-        return { kind: 'rejected', reason: '系统重启中，请稍后再试' };
+        return { kind: 'rejected', reason: '系统重启中，请稍后再试', reasonCode: 'unavailable' };
+      }
+      try {
+        assertQueueAdmission(controller, input.executionLifetime);
+      } catch {
+        return { kind: 'rejected', reason: '系统重启中，请稍后再试', reasonCode: 'unavailable' };
       }
       if (queue.length >= cfg.maxDepth) {
         log('warn', 'task-queue: rejected (queue full)', {
@@ -260,7 +266,11 @@ export function createTaskQueue(cfg: TaskQueueConfig): TaskQueue {
           userId: input.userId,
           depth: queue.length,
         });
-        return { kind: 'rejected', reason: '系统繁忙：任务队列已满，请稍后再试' };
+        return {
+          kind: 'rejected',
+          reason: '系统繁忙：任务队列已满，请稍后再试',
+          reasonCode: 'capacity',
+        };
       }
       // Prepare all fallible input/clock/capacity reads before owning or accepting work.
       let entry: QueuedEntry;
@@ -269,14 +279,15 @@ export function createTaskQueue(cfg: TaskQueueConfig): TaskQueue {
         entry = { ...input, enqueuedAt: now() };
         willDispatch = queue.length === 0 && cfg.canDispatch() && inFlight < cfg.capacity;
       } catch {
-        return { kind: 'rejected', reason: '系统重启中，请稍后再试' };
+        return { kind: 'rejected', reason: '系统重启中，请稍后再试', reasonCode: 'unavailable' };
       }
-      if (stopped) return { kind: 'rejected', reason: '系统重启中，请稍后再试' };
+      if (stopped)
+        return { kind: 'rejected', reason: '系统重启中，请稍后再试', reasonCode: 'unavailable' };
       let reservation: QueueReservation | undefined;
       try {
         reservation = reserveQueueLifetime(controller, entry.executionLifetime);
       } catch {
-        return { kind: 'rejected', reason: '系统重启中，请稍后再试' };
+        return { kind: 'rejected', reason: '系统重启中，请稍后再试', reasonCode: 'unavailable' };
       }
       if (reservation) reservations.set(entry, reservation);
       queue.push(entry);

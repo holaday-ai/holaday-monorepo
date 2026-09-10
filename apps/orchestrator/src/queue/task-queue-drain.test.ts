@@ -21,6 +21,47 @@ const controllers: DrainController[] = [];
 const queues: TaskQueue[] = [];
 const releases: Array<() => void> = [];
 const identity = { epoch: 'a'.repeat(16), candidate: 'b'.repeat(40), bootId: 'c'.repeat(32) };
+
+it.each(['closed', 'unknown', 'expired', 'sealed', 'missing-controller'] as const)(
+  'prioritizes %s safety over a full queue',
+  async (mode) => {
+    const { controller, close } = await control();
+    const queue = makeQueue(mode === 'missing-controller' ? undefined : controller, () => false, {
+      maxDepth: 0,
+    });
+    let result: unknown;
+    if (mode === 'closed') {
+      close();
+      result = queue.enqueue(input());
+    } else if (mode === 'expired') {
+      let saved: OperationLifetime | undefined;
+      await controller.runRoot(async (life) => {
+        saved = life;
+      }).result;
+      result = queue.enqueue(input({ executionLifetime: saved }));
+    } else
+      await controller.runRoot(async (life) => {
+        if (mode === 'unknown') life.drain.markUnknown(life.owner);
+        if (mode === 'sealed')
+          withOperationDispatchScope((seal) => {
+            seal();
+            result = queue.enqueue(input({ executionLifetime: life }));
+          });
+        else result = queue.enqueue(input({ executionLifetime: life }));
+      }).result;
+    expect(result).toMatchObject({ kind: 'rejected', reasonCode: 'unavailable' });
+    expect(queue.size()).toBe(0);
+  },
+);
+it('classifies a proven full queue as capacity without reserving another owner', async () => {
+  const { controller } = await control();
+  const queue = makeQueue(controller, () => false, { maxDepth: 0 });
+  expect(await enqueue(controller, queue)).toMatchObject({
+    kind: 'rejected',
+    reasonCode: 'capacity',
+  });
+  expect(controller.drain.snapshot().active).toBe(0);
+});
 async function control(open = true) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'hd-task-queue-')));
   directories.push(directory);

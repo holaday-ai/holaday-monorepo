@@ -11,14 +11,14 @@ export interface QueueReservation {
   finish(): Promise<void>;
 }
 
-export function reserveQueueLifetime(
+export function assertQueueAdmission(
   controller: DrainController | undefined,
   inherited: OperationLifetime | undefined,
-): QueueReservation | undefined {
+): void {
   const ambient = currentOperationLifetime();
   if (!controller) {
     if (ambient || inherited) throw new Error('QUEUE_DRAIN_CONTROLLER_REQUIRED');
-    return undefined;
+    return;
   }
   if (
     (inherited && inherited.drain !== controller.drain) ||
@@ -28,6 +28,20 @@ export function reserveQueueLifetime(
     throw new Error('QUEUE_DRAIN_CONTEXT_MISMATCH');
   }
   if (controller.drain.snapshot().unknown > 0) throw new Error('QUEUE_DRAIN_UNKNOWN');
+  if (inherited) controller.drain.assertDispatch(inherited.owner);
+  else {
+    controller.tick();
+    if (controller.drain.snapshot().mode !== 'open')
+      throw new Error('QUEUE_DRAIN_ADMISSION_REJECTED');
+  }
+}
+
+export function reserveQueueLifetime(
+  controller: DrainController | undefined,
+  inherited: OperationLifetime | undefined,
+): QueueReservation | undefined {
+  assertQueueAdmission(controller, inherited);
+  if (!controller) return undefined;
   let release!: () => void;
   const pending = new Promise<void>((resolve) => {
     release = resolve;

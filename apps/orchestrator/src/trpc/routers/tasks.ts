@@ -264,6 +264,7 @@ import {
   resolveWorkflowIdentities,
 } from './task-followup-copy.js';
 import { markQueuedTaskExecutingOrThrow } from './task-queue-start.js';
+import { enqueueTaskExecution } from './task-queue-execution.js';
 import { annotateTaskResultAttachmentAvailability } from './task-result-attachment-availability.js';
 import {
   type CapturedBrowserFinalState as CapturedFinalState,
@@ -1256,6 +1257,7 @@ export const tasksRouter = router({
         );
       },
       run: async () => {
+    type TaskExecutionContext = typeof ctx;
     // The authenticated request carries a server-signed origin. One repository
     // instance is shared by every execution lane so no early-return branch can
     // accidentally fall back to the database's `user` default.
@@ -4568,7 +4570,7 @@ export const tasksRouter = router({
         },
       );
 
-      const dispatchDirectOpen = async (): Promise<void> => {
+      const dispatchDirectOpen = async (ctx: TaskExecutionContext): Promise<void> => {
         let executor = directOpenFallbackExecutor;
         let allocatedPool = false;
         let adoptedBrowserSession = false;
@@ -4667,14 +4669,14 @@ export const tasksRouter = router({
       };
 
       if (willQueueDirectOpen && ctx.taskQueue) {
-        const enqueueResult = ctx.taskQueue.enqueue({
+        const enqueueResult = enqueueTaskExecution(ctx, {
           taskId,
           userId: ctx.userId,
           runFn: dispatchDirectOpen,
-          onStart: async (): Promise<void> => {
+          onStart: async (ctx): Promise<void> => {
             await markQueuedTaskExecutingOrThrow({ repo, taskId, logger: ctx.logger });
           },
-          onTimeout: async (): Promise<void> => {
+          onTimeout: async (ctx): Promise<void> => {
             const reason = '排队等待时间过长，任务已自动停止。请稍后重新执行。';
             try {
                   const failed = await repo.markQueuedTaskFailed(
@@ -4728,7 +4730,7 @@ export const tasksRouter = router({
         };
       }
 
-      void dispatchDirectOpen().catch((err) => {
+      void dispatchDirectOpen(ctx).catch((err) => {
         ctx.logger.error({ err, taskId }, 'direct-open: detached dispatch rejected');
       });
 
@@ -4932,7 +4934,7 @@ export const tasksRouter = router({
       // can hold it past the 10-slot pool cap. Body unchanged from
       // the pre-queue flow; only outer scheduling differs (taskQueue
       // .enqueue vs `void runFn()`).
-      const dispatchToBrave = async (): Promise<void> => {
+      const dispatchToBrave = async (ctx: TaskExecutionContext): Promise<void> => {
       let perUserExec = null;
       let adoptedBrowserSession = false;
             if (
@@ -6957,11 +6959,11 @@ export const tasksRouter = router({
       // holds overflow in 'queued' status until pool capacity frees,
       // then dispatches FIFO.
       if (willQueueDispatch && ctx.taskQueue) {
-        const enqueueResult = ctx.taskQueue.enqueue({
+        const enqueueResult = enqueueTaskExecution(ctx, {
           taskId,
           userId: ctx.userId,
           runFn: dispatchToBrave,
-          onStart: async (): Promise<void> => {
+          onStart: async (ctx): Promise<void> => {
             await markQueuedTaskExecutingOrThrow({ repo, taskId, logger: ctx.logger });
             // No queued→executing WS frame — supercar's own
             // `server.task.plan` / step events fire next from the
@@ -6970,7 +6972,7 @@ export const tasksRouter = router({
             // new message type for a transition that's already
             // observable via the next event.
           },
-          onTimeout: async (): Promise<void> => {
+          onTimeout: async (ctx): Promise<void> => {
             ctx.logger.warn(
               { taskId, userId: ctx.userId },
               'task-queue: queue timeout — marking failed',
@@ -7046,7 +7048,7 @@ export const tasksRouter = router({
       }
 
       // Legacy / non-pool path — fire directly without queue gating.
-      void dispatchToBrave();
+      void dispatchToBrave(ctx);
 
       return {
         taskId,
