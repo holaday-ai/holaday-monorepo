@@ -151,3 +151,13 @@ tasks 的另外18个mutation路径：smokeTest、pause、resume、confirm、conf
 审查补强：queue尚未真正调用前的准入拒绝不进入旧业务失败UPDATE，保留已有claim和未知供对账；只有实际调用queue后抛错才保留原失败处理。控制器活动检查是pass起点快照，不是跨所有入口的排他锁；未接入口、其他producer后续接纳及真实hook内部边界仍必须在整体接线中验证，不能宣称全局互斥恢复已实现。
 
 该增量仅证明可选注入的poller链；index的boot recovery仍无controller，真实hook手工Context还未传lifetime，special/batch内部detached及scheduled对应真实hooks也仍未接。全局活动屏障仅涵盖已经登记的操作，不能证明未接入口无工作，也不作为全进程排空证明。真实MySQL、通知/千问、Linux/PM2和生产没有验证，发布阻断不解除。下一步继续task-queue/批量与真实hook内部的ACK后链，然后统一boot及剩余入口。
+
+## 3D-3a 本地增量：任务队列待派发与回调生命周期（2026-09-10）
+
+可选controller下，enqueue在返回ACK前同步预留排队owner，父请求结束后仍计活动。内部释放能力只存在私有WeakMap，不放入回调可见的receiver或snapshot。输入/时间/容量读取在预留前完成，准备异常不入队、不泄漏owner。无controller且无scope保留原FIFO、容量、超时阈值、回调receiver和零参数时序。
+
+onStart/runFn/onTimeout各自在排队owner下建立执行子链，传入实时server-only lifetime，实际原始Promise结束前保持pin。同步失败立即留未知，异步拒绝在业务catch前留未知；未知或blocked时不移除待派发条目、不触发后续callback。实际派发前再次检查持久状态/owner。普通关闸后已预留链仍可收口，普通finish与signalSlotFreed不能释放原始工作。
+
+stop同步停止timer和未来接纳，等待当前回调屏障；屏障在诊断日志/回调之前登记，日志异常不能破坏该屏障。尚未派发的队列原样保留且仍占用，不能把stop返回视为全局idle；回调在ACK前预留的子工作也独立持续占用。停止不取消业务任务、不提前触发超时清场。
+
+状态仍为**局部已接**：index创建queue尚未传controller，tasks.ts两处enqueue尚未传lifetime，也未以callback子lifetime重新构造Context。真实onTimeout内部吞错、markQueuedTaskExecuting/Failed的DB及回执、浏览器runFn内部detached和清理仍需跟踪。现有rejected统一写QUEUE_REJECTED业务失败；后续接线必须区分容量拒绝与安全准入拒绝，不能把未真正派发的安全拒绝误写为业务失败。此次测试使用真实queue/controller/状态文件和合成回调，不含实际浏览器/模型/DB/生产；全进程发布阻断不解除。

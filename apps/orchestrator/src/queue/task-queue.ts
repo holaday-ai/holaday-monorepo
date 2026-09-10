@@ -29,22 +29,33 @@
  *   - per-task queue timeout: 10 min (worker fires onTimeout, drops it)
  */
 
+import type { DrainController } from '../execution/drain-controller.js';
+import type { OperationLifetime } from '../execution/owned-operation.js';
+import {
+  type QueueReservation,
+  assertQueueDispatch,
+  callQueueCallback,
+  reserveQueueLifetime,
+} from './task-queue-lifetime.js';
+
 export interface QueuedTaskInput {
+  /** Server-only live capability, never reconstructed from task/user IDs. */
+  executionLifetime?: OperationLifetime;
   taskId: string;
   userId: string;
   /** The actual work — fired AFTER onStart resolves. */
-  runFn: () => Promise<void>;
+  runFn: (lifetime?: OperationLifetime) => Promise<void>;
   /**
    * Called when this task transitions queued → executing. Caller
    * uses this to update the DB row's status + broadcast WS frames.
    */
-  onStart: () => Promise<void> | void;
+  onStart: (lifetime?: OperationLifetime) => Promise<void> | void;
   /**
    * Called when the task ages past `queueTimeoutMs` without being
    * dispatched. Caller uses this to mark the DB row failed with a
    * `queue timeout` reason and broadcast a terminal frame.
    */
-  onTimeout?: () => Promise<void> | void;
+  onTimeout?: (lifetime?: OperationLifetime) => Promise<void> | void;
 }
 
 export type EnqueueResult =
@@ -53,6 +64,7 @@ export type EnqueueResult =
   | { kind: 'rejected'; reason: string };
 
 export interface TaskQueueConfig {
+  executionDrain?: DrainController;
   /** Returns true when a slot is available right now. Usually wraps `pool.canAllocate()`. */
   canDispatch: () => boolean;
   /**
@@ -81,7 +93,8 @@ export interface TaskQueue {
   signalSlotFreed(): void;
   size(): number;
   snapshot(): Array<{ taskId: string; userId: string; enqueuedAt: number }>;
-  stop(): void;
+  /** Stops future dispatch, waits current callbacks; queued entries still prevent drain idle. */
+  stop(): Promise<void>;
 }
 
 interface QueuedEntry extends QueuedTaskInput {
@@ -90,6 +103,9 @@ interface QueuedEntry extends QueuedTaskInput {
 
 export function createTaskQueue(cfg: TaskQueueConfig): TaskQueue {
   const queue: QueuedEntry[] = [];
+  const reservations = new WeakMap<QueuedEntry, QueueReservation>();
+  const controller = cfg.executionDrain;
+  const callbacks = new Set<Promise<void>>();
   let stopped = false;
   // Tasks dispatched by THIS queue that haven't yet had
   // `signalSlotFreed` called for them. Decremented to 0-floor on
@@ -100,28 +116,88 @@ export function createTaskQueue(cfg: TaskQueueConfig): TaskQueue {
   // the entire queue into a single capacity slot).
   let inFlight = 0;
   const now = (): number => cfg.now?.() ?? Date.now();
-  const log = cfg.logger ?? ((): void => {});
+  const log = (level: 'info' | 'warn', message: string, context: Record<string, unknown>): void => {
+    try {
+      cfg.logger?.(level, message, context);
+    } catch {
+      /* Diagnostics cannot change queue admission or completion. */
+    }
+  };
+
+  function canProceed(t?: QueuedEntry): boolean {
+    if (stopped) return false;
+    const snapshot = controller?.drain.snapshot();
+    if (snapshot && (snapshot.mode === 'blocked' || snapshot.unknown > 0)) return false;
+    try {
+      const reservation = t ? reservations.get(t) : undefined;
+      if (reservation) assertQueueDispatch(reservation);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function call(t: QueuedEntry, phase: 'onStart' | 'runFn' | 'onTimeout'): Promise<void> | void {
+    const callback = t[phase];
+    if (!callback) return;
+    const reservation = reservations.get(t);
+    // Preserve the unscoped zero-argument receiver and dispatch timing.
+    return reservation
+      ? callQueueCallback(reservation, (life) => callback.call(t, life))
+      : callback.call(t);
+  }
+
+  function track(t: QueuedEntry, action: () => Promise<void>): void {
+    const reservation = reservations.get(t);
+    let done!: () => void;
+    const barrier = new Promise<void>((resolve) => {
+      done = resolve;
+    });
+    // Register before invoking user code: a callback may synchronously call stop().
+    callbacks.add(barrier);
+    void (async () => {
+      try {
+        await action();
+      } catch {
+        // Includes unexpected callback/logging failures, without dropping the physical owner.
+        if (reservation) {
+          const { drain, owner } = reservation.lifetime;
+          drain.markUnknown(owner);
+        }
+      } finally {
+        try {
+          await reservation?.finish();
+        } finally {
+          reservations.delete(t);
+          callbacks.delete(barrier);
+          done();
+        }
+      }
+    })();
+  }
 
   function reapTimedOut(): void {
     const cutoff = now() - cfg.queueTimeoutMs;
     let i = 0;
     while (i < queue.length) {
       const t = queue[i];
+      if (!canProceed(t)) return;
       if (t && t.enqueuedAt < cutoff) {
         queue.splice(i, 1);
-        log('warn', 'task-queue: queue timeout, dropping', {
-          taskId: t.taskId,
-          userId: t.userId,
-          ageMs: now() - t.enqueuedAt,
-        });
-        try {
-          void t.onTimeout?.();
-        } catch (err) {
-          log('warn', 'task-queue: onTimeout threw', {
+        track(t, async () => {
+          log('warn', 'task-queue: queue timeout, dropping', {
             taskId: t.taskId,
-            err: String(err),
+            userId: t.userId,
+            ageMs: now() - t.enqueuedAt,
           });
-        }
+          try {
+            await call(t, 'onTimeout');
+          } catch (err) {
+            const reservation = reservations.get(t);
+            if (reservation) reservation.lifetime.drain.markUnknown(reservation.lifetime.owner);
+            log('warn', 'task-queue: onTimeout threw', { taskId: t.taskId, err: String(err) });
+          }
+        });
       } else {
         i++;
       }
@@ -129,28 +205,31 @@ export function createTaskQueue(cfg: TaskQueueConfig): TaskQueue {
   }
 
   function tryDispatch(): void {
-    if (stopped) return;
+    if (!canProceed()) return;
     reapTimedOut();
     if (queue.length === 0) return;
     if (!cfg.canDispatch()) return;
     if (inFlight >= cfg.capacity) return;
+    if (!canProceed(queue[0])) return;
     const t = queue.shift();
     if (!t) return;
     inFlight += 1;
-    log('info', 'task-queue: dispatching', {
-      taskId: t.taskId,
-      userId: t.userId,
-      waitedMs: now() - t.enqueuedAt,
-      remainingDepth: queue.length,
-      inFlight,
-    });
-    void (async (): Promise<void> => {
+    track(t, async (): Promise<void> => {
+      log('info', 'task-queue: dispatching', {
+        taskId: t.taskId,
+        userId: t.userId,
+        waitedMs: now() - t.enqueuedAt,
+        remainingDepth: queue.length,
+        inFlight,
+      });
       let started = false;
       try {
-        await t.onStart();
+        await call(t, 'onStart');
         started = true;
-        await t.runFn();
+        await call(t, 'runFn');
       } catch (err) {
+        const reservation = reservations.get(t);
+        if (reservation) reservation.lifetime.drain.markUnknown(reservation.lifetime.owner);
         log('warn', 'task-queue: dispatch threw', {
           taskId: t.taskId,
           err: err instanceof Error ? err.message : String(err),
@@ -164,7 +243,7 @@ export function createTaskQueue(cfg: TaskQueueConfig): TaskQueue {
           queueMicrotask(tryDispatch);
         }
       }
-    })();
+    });
   }
 
   const tickTimer = setInterval(tryDispatch, cfg.tickMs);
@@ -183,10 +262,23 @@ export function createTaskQueue(cfg: TaskQueueConfig): TaskQueue {
         });
         return { kind: 'rejected', reason: '系统繁忙：任务队列已满，请稍后再试' };
       }
-      const entry: QueuedEntry = {
-        ...input,
-        enqueuedAt: now(),
-      };
+      // Prepare all fallible input/clock/capacity reads before owning or accepting work.
+      let entry: QueuedEntry;
+      let willDispatch: boolean;
+      try {
+        entry = { ...input, enqueuedAt: now() };
+        willDispatch = queue.length === 0 && cfg.canDispatch() && inFlight < cfg.capacity;
+      } catch {
+        return { kind: 'rejected', reason: '系统重启中，请稍后再试' };
+      }
+      if (stopped) return { kind: 'rejected', reason: '系统重启中，请稍后再试' };
+      let reservation: QueueReservation | undefined;
+      try {
+        reservation = reserveQueueLifetime(controller, entry.executionLifetime);
+      } catch {
+        return { kind: 'rejected', reason: '系统重启中，请稍后再试' };
+      }
+      if (reservation) reservations.set(entry, reservation);
       queue.push(entry);
       const position = queue.length;
       // 'dispatched' = the head item we just pushed AND a slot is free
@@ -194,8 +286,6 @@ export function createTaskQueue(cfg: TaskQueueConfig): TaskQueue {
       // Anything queued behind earlier items is reported as 'queued'
       // even if a slot is technically free, because those earlier
       // items get the slot first.
-      const willDispatch =
-        position === 1 && cfg.canDispatch() && inFlight < cfg.capacity;
       // Schedule the actual dispatch on the next microtask so the
       // caller can return to its handler before runFn fires.
       queueMicrotask(tryDispatch);
@@ -203,8 +293,8 @@ export function createTaskQueue(cfg: TaskQueueConfig): TaskQueue {
         return { kind: 'dispatched', position };
       }
       log('info', 'task-queue: queued', {
-        taskId: input.taskId,
-        userId: input.userId,
+        taskId: entry.taskId,
+        userId: entry.userId,
         position,
       });
       return { kind: 'queued', position };
@@ -227,9 +317,10 @@ export function createTaskQueue(cfg: TaskQueueConfig): TaskQueue {
         enqueuedAt: t.enqueuedAt,
       }));
     },
-    stop(): void {
+    stop(): Promise<void> {
       stopped = true;
       clearInterval(tickTimer);
+      return Promise.allSettled([...callbacks]).then(() => {});
     },
   };
 }
