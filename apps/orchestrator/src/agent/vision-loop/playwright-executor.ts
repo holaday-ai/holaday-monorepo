@@ -280,7 +280,7 @@ export class PlaywrightExecutor {
   ): Promise<ConnectResult> {
     if (this.browser) return { ok: true };
     try {
-      this.browser = await this.chromium.connectOverCDP(cdpEndpoint);
+      this.browser = await runBrowserOperation(() => this.chromium.connectOverCDP(cdpEndpoint));
       this.ownsBrowserProcess = false;
       this.cdpEndpoint = cdpEndpoint;
       // Phase 1 Playbook ④ — gated CLEAN-CONTEXT mode (explorer only). Create a
@@ -292,8 +292,9 @@ export class PlaywrightExecutor {
       // (the 免登录 lane, unchanged).
       if (opts.cleanContext) {
         this.cleanMode = true;
-        this.cleanContext = await this.browser.newContext(
-          opts.storageState ? { storageState: opts.storageState } : {},
+        const browser = this.browser;
+        this.cleanContext = await runBrowserOperation(() =>
+          browser.newContext(opts.storageState ? { storageState: opts.storageState } : {}),
         );
         // ④ explorer per-op hard bound (CLEAN-CONTEXT ONLY → user tasks' shared context is
         // untouched): every Playwright ACTION (goto/click/waitFor/…) in the clean context gets
@@ -478,23 +479,25 @@ export class PlaywrightExecutor {
           // path indefinitely. The banner dismissal is best-effort
           // anyway — losing one cycle doesn't break the loop.
           await withTimeout(
-            page.evaluate(() => {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const doc = (globalThis as any).document;
-              if (!doc) return;
-              const labels = new Set(['Got it', 'Disable', 'Dismiss']);
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              doc.querySelectorAll('button').forEach((b: any) => {
-                const txt = (b.textContent ?? '').trim();
-                if (labels.has(txt)) b.click();
-              });
-              doc
-                .querySelectorAll('[aria-label="Close"]')
+            runBrowserOperation(() =>
+              page.evaluate(() => {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                .forEach((el: any) => {
-                  if (typeof el.click === 'function') el.click();
+                const doc = (globalThis as any).document;
+                if (!doc) return;
+                const labels = new Set(['Got it', 'Disable', 'Dismiss']);
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                doc.querySelectorAll('button').forEach((b: any) => {
+                  const txt = (b.textContent ?? '').trim();
+                  if (labels.has(txt)) b.click();
                 });
-            }),
+                doc
+                  .querySelectorAll('[aria-label="Close"]')
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  .forEach((el: any) => {
+                    if (typeof el.click === 'function') el.click();
+                  });
+              }),
+            ),
             2_000,
             'dismissBraveBanners.evaluate',
           );
@@ -522,7 +525,9 @@ export class PlaywrightExecutor {
     const contexts = browser.contexts();
     for (const ctx of contexts) {
       try {
-        await (ctx as BrowserContext).addInitScript({ content: STEALTH_INIT_SCRIPT });
+        await runBrowserOperation(() =>
+          (ctx as BrowserContext).addInitScript({ content: STEALTH_INIT_SCRIPT }),
+        );
       } catch {
         // non-fatal — see docstring
       }
@@ -534,33 +539,36 @@ export class PlaywrightExecutor {
     const contexts = browser.contexts();
     for (const context of contexts) {
       if (this.guardedContexts.has(context)) continue;
-      const route = (context as BrowserContext).route;
-      if (typeof route !== 'function') continue;
-      await route.call(context, '**/*', async (routeHandle, request) => {
-        const rawUrl = request.url();
-        if (!/^https?:\/\//i.test(rawUrl)) {
-          await routeHandle.continue();
-          return;
-        }
-        try {
-          const decision = await this.networkPolicy!.check(rawUrl);
-          if (decision.allowed) {
+      const installed = await runBrowserOperation(async () => {
+        const route = (context as BrowserContext).route;
+        if (typeof route !== 'function') return false;
+        await route.call(context, '**/*', async (routeHandle, request) => {
+          const rawUrl = request.url();
+          if (!/^https?:\/\//i.test(rawUrl)) {
             await routeHandle.continue();
             return;
           }
-          logger.warn(
-            { target: rawUrl, reason: decision.reason },
-            'browser request blocked by network policy',
-          );
-        } catch (error) {
-          logger.warn(
-            { target: rawUrl, error: errMsg(error) },
-            'browser request policy failed closed',
-          );
-        }
-        await routeHandle.abort('blockedbyclient');
+          try {
+            const decision = await this.networkPolicy!.check(rawUrl);
+            if (decision.allowed) {
+              await routeHandle.continue();
+              return;
+            }
+            logger.warn(
+              { target: rawUrl, reason: decision.reason },
+              'browser request blocked by network policy',
+            );
+          } catch (error) {
+            logger.warn(
+              { target: rawUrl, error: errMsg(error) },
+              'browser request policy failed closed',
+            );
+          }
+          await routeHandle.abort('blockedbyclient');
+        });
+        return true;
       });
-      this.guardedContexts.add(context);
+      if (installed) this.guardedContexts.add(context);
     }
   }
 
@@ -614,13 +622,10 @@ export class PlaywrightExecutor {
     this.browser = null;
     this.activePage = null;
     try {
-      const browser = await this.chromium.connectOverCDP(endpoint);
+      const browser = await runBrowserOperation(() => this.chromium.connectOverCDP(endpoint));
       this.browser = browser;
       if (browser.contexts().length === 0) {
-        logger.warn(
-          { endpoint },
-          'reconnectIfStale: reconnected but still 0 contexts — giving up',
-        );
+        logger.warn({ endpoint }, 'reconnectIfStale: reconnected but still 0 contexts — giving up');
         return false;
       }
       if (isStealthEnabled()) {

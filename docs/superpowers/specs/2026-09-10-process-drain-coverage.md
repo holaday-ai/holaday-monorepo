@@ -215,3 +215,13 @@ shutdown永久关闭新分配、续租/touch、adopt及GC重启，清未来reten
 独立审查反例补充：同一taskId在原release挂起/失败或旧实例非ready时拒绝替换，adoptRetained也拒绝转移到仍有release记录或pending allocation的目标key，避免旧释放删除/遮蔽新实例或迟到分配覆盖转入实例；shutdown独立收集releasePromises，不依赖instances是否还保留key。实例从Map删除后的尾部失败仍阻止成功关闭，不能以缺失key抹去异常回执。
 
 测试使用真实pool/slot/spawn编排/executor连接与独立临时profile目录；外部spawner返回合成进程，CDP/readiness和proxy启动关闭为合成传输，部分disconnect边界用挂起Promise。没有启动浏览器/子进程、访问网络或读取真实profile，不证明实际Linux/PM2/进程终止/生产就绪。
+
+## 3D-3b-3c-2 本地增量：CDP连接与初始化原始操作（2026-09-11）
+
+PlaywrightExecutor.connect/reconnectIfStale实际connectOverCDP、cleanContext的newContext、route安装、context addInitScript和banner evaluate复用runBrowserOperation，每次调用从实时scope建立原始SDK子owner。getter和receiver调用在owned action内；同步/异步错误在既有catch之前保留unknown，不因返回ok:false/false或best-effort而丢失记录。banner两秒仅结束外层等待，未完成evaluate仍活动，迟到失败仍未知。
+
+没有新增根、持久缓存owner或按taskId恢复权限。普通关闸允许已接纳子链继续；unknown/sealed/失效父scope在后续SDK派发前拒绝。无scope兼容原有连接与重连契约。route安装Promise的登记不代表异步route handler已覆盖；handler正文不变，不把未来网络事件归属于已经结束的安装owner。
+
+测试使用真实executor/drain、constructor注入合成SDK；验证六阶段挂起/错误/getter、父ACK后raw仍活动、私有pin、失效scope与旧无scope路径。没有启动浏览器、连接CDP或读任何真实页面/cookies。
+
+仍未覆盖launchManaged、disconnect/disposeCleanContext、assertCleanContext、readiness fetch/body/timer、pool ready hook/banner timer、route handler原始操作及资源存续期、OS组/后代终止。SDK Promise结束也不证明长寿命浏览器资源已清理；统一boot、所有入口和平台/生产门禁保持未完成。本单元不能解除发布阻断，下一步继续这些原始清理及资源/后台链。
