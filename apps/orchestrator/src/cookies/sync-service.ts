@@ -17,14 +17,75 @@
  * thin on purpose.
  */
 
-import type { BrowserContext } from 'playwright';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { eq, sql } from 'drizzle-orm';
+import type { BrowserContext } from 'playwright';
 import { z } from 'zod';
+import { runBrowserOperation } from '../agent/vision-loop/browser-operation.js';
 import { logger } from '../config/logger.js';
 import type { db as DbHandle } from '../db/client.js';
 import { pendingCookies } from '../db/schema/pending-cookies.js';
 import { users } from '../db/schema/users.js';
+import { currentOperationLifetime, startOwnedOperation } from '../execution/owned-operation.js';
 import { decryptCookieJson, encryptCookieJson } from './cookie-crypto.js';
+
+function assertCookieDispatch() {
+  const lifetime = currentOperationLifetime();
+  if (lifetime) {
+    lifetime.drain.assertDispatch(lifetime.owner);
+    if (lifetime.drain.snapshot().unknown > 0) throw new Error('COOKIE_OPERATION_UNKNOWN');
+  }
+  return lifetime;
+}
+
+/** Private raw boundary; a caller timeout cannot release this database operation. */
+async function runCookieDatabase<T>(action: () => PromiseLike<T>, deletion = false): Promise<T> {
+  const lifetime = assertCookieDispatch();
+  if (!lifetime) return action();
+  return startOwnedOperation(
+    lifetime.drain,
+    'database',
+    async () => {
+      const result = await action();
+      if (deletion) {
+        const head: unknown = Array.isArray(result) ? result[0] : result;
+        const affectedRows =
+          head && typeof head === 'object' && 'affectedRows' in head
+            ? head.affectedRows
+            : undefined;
+        if (affectedRows !== 0 && affectedRows !== 1) throw new Error('COOKIE_DELETE_ACK_UNKNOWN');
+      }
+      return result;
+    },
+    { parent: lifetime.owner, dispatch: 'immediate', errorOutcome: 'unknown' },
+  ).result;
+}
+
+async function deletePendingCookie(db: typeof DbHandle, id: number): Promise<void> {
+  await runCookieDatabase(() => db.delete(pendingCookies).where(eq(pendingCookies.id, id)), true);
+}
+
+async function addCookieBatch(
+  context: BrowserContext,
+  cookies: Parameters<BrowserContext['addCookies']>[0],
+): Promise<void> {
+  // Validate the original caller's scope too: the raw child has its own ALS scope.
+  const assertCaller = AsyncLocalStorage.bind(assertCookieDispatch);
+  assertCaller();
+  let denied: { error: unknown } | undefined;
+  await runBrowserOperation(() => {
+    const add = context.addCookies;
+    try {
+      assertCaller();
+    } catch (error) {
+      denied = { error };
+      return;
+    }
+    return add.call(context, cookies);
+  });
+  // No SDK was dispatched: propagate control refusal outside unknown classification.
+  if (denied) throw denied.error;
+}
 
 /**
  * Domains the extension is allowed to sync cookies for. Mirrors the
@@ -156,24 +217,28 @@ export async function injectPendingCookies(opts: {
   context: BrowserContext;
   userExternalId: string;
 }): Promise<number> {
-  const [userRow] = await opts.db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.externalId, opts.userExternalId))
-    .limit(1);
+  const [userRow] = await runCookieDatabase(() =>
+    opts.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.externalId, opts.userExternalId))
+      .limit(1),
+  );
   if (!userRow) return 0;
-  const [row] = await opts.db
-    .select({
-      id: pendingCookies.id,
-      cookiesJson: pendingCookies.cookiesJson,
-      encryptedBlob: pendingCookies.encryptedBlob,
-      encryptionIv: pendingCookies.encryptionIv,
-      encryptionTag: pendingCookies.encryptionTag,
-      encryptedKey: pendingCookies.encryptedKey,
-    })
-    .from(pendingCookies)
-    .where(eq(pendingCookies.userId, userRow.id))
-    .limit(1);
+  const [row] = await runCookieDatabase(() =>
+    opts.db
+      .select({
+        id: pendingCookies.id,
+        cookiesJson: pendingCookies.cookiesJson,
+        encryptedBlob: pendingCookies.encryptedBlob,
+        encryptionIv: pendingCookies.encryptionIv,
+        encryptionTag: pendingCookies.encryptionTag,
+        encryptedKey: pendingCookies.encryptedKey,
+      })
+      .from(pendingCookies)
+      .where(eq(pendingCookies.userId, userRow.id))
+      .limit(1),
+  );
   if (!row) return 0;
 
   // Spec B — prefer the encrypted columns when present, fall back to
@@ -181,12 +246,7 @@ export async function injectPendingCookies(opts: {
   // corrupted blob) drops the row + logs rather than returning stale
   // data; the user's next sync repopulates.
   let payloadJson: string | null = null;
-  if (
-    row.encryptedBlob &&
-    row.encryptionIv &&
-    row.encryptionTag &&
-    row.encryptedKey
-  ) {
+  if (row.encryptedBlob && row.encryptionIv && row.encryptionTag && row.encryptedKey) {
     try {
       payloadJson = decryptCookieJson({
         encryptedBlob: row.encryptedBlob,
@@ -199,14 +259,14 @@ export async function injectPendingCookies(opts: {
         { err: errMsg(err), userExternalId: opts.userExternalId },
         'cookie-sync: encrypted payload failed to decrypt; dropping row',
       );
-      await opts.db.delete(pendingCookies).where(eq(pendingCookies.id, row.id));
+      await deletePendingCookie(opts.db, row.id);
       return 0;
     }
   } else if (row.cookiesJson) {
     payloadJson = row.cookiesJson;
   } else {
     // Empty row (no plaintext, no ciphertext) — drop and skip.
-    await opts.db.delete(pendingCookies).where(eq(pendingCookies.id, row.id));
+    await deletePendingCookie(opts.db, row.id);
     return 0;
   }
 
@@ -218,11 +278,11 @@ export async function injectPendingCookies(opts: {
       { err: errMsg(err), userExternalId: opts.userExternalId },
       'cookie-sync: pending row had invalid JSON; dropping',
     );
-    await opts.db.delete(pendingCookies).where(eq(pendingCookies.id, row.id));
+    await deletePendingCookie(opts.db, row.id);
     return 0;
   }
   if (!Array.isArray(parsed) || parsed.length === 0) {
-    await opts.db.delete(pendingCookies).where(eq(pendingCookies.id, row.id));
+    await deletePendingCookie(opts.db, row.id);
     return 0;
   }
 
@@ -231,7 +291,7 @@ export async function injectPendingCookies(opts: {
 
   // Clear AFTER injection so a mid-loop throw leaves the row for the
   // next allocate to retry.
-  await opts.db.delete(pendingCookies).where(eq(pendingCookies.id, row.id));
+  await deletePendingCookie(opts.db, row.id);
   logger.info(
     { userExternalId: opts.userExternalId, count: cookies.length },
     'cookie-sync: injected pending cookies on allocate',
@@ -255,8 +315,10 @@ export async function injectCookies(
     .filter((c): c is NonNullable<typeof c> => c !== null);
   if (playwrightCookies.length === 0) return;
   try {
-    await context.addCookies(playwrightCookies);
+    await addCookieBatch(context, playwrightCookies);
   } catch (err) {
+    // An owned ambiguous submission must be reconciled, not retried or deleted.
+    assertCookieDispatch();
     // Single shot fails on the first invalid cookie — fall back to
     // per-cookie loop so one bad entry doesn't poison the batch.
     logger.warn(
@@ -265,8 +327,9 @@ export async function injectCookies(
     );
     for (const cookie of playwrightCookies) {
       try {
-        await context.addCookies([cookie]);
+        await addCookieBatch(context, [cookie]);
       } catch (perErr) {
+        assertCookieDispatch();
         logger.debug(
           { err: errMsg(perErr), domain: cookie.domain, name: cookie.name },
           'cookie-sync: per-cookie inject failed',

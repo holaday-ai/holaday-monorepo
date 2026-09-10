@@ -264,4 +264,12 @@ connect与reconnect复用initializeCdpConnection，setup锁覆盖获取、初始
 
 合成SDK与真实executor/drain覆盖上述边界；没有真实连接/进程试验，不证明OS组/后代退出。旧无scope创建的资源不能反向成为新drain的全进程证明；全局boot接线与平台维护门禁仍需完成。pool ready hook/banner timer、future route callback、其余动作/Brave/batch/调度hook/其他入口/文件SDK、统一closed boot/stop、全局对账及生产门禁仍阻断发布。
 
+## 3D-3b-3c-7a 本地增量：Cookie初始化的原始数据库与SDK（2026-09-11）
+
+injectPendingCookies的用户/待处理行读取、解密或JSON失败/空行/空数组与成功后的五处删除，均在实际惰性DB链派发前以当前owner登记database子操作。原始thenable结束及严格删除ACK校验完成后才释放；owned模式删除affectedRows仅接受数值0/1，缺失/畸形/超范围回执保留unknown。无scope保持原结果兼容，不无条件创建root。
+
+bulk与逐cookie addCookies经真实browser-operation登记；getter后用绑定原caller ALS的检查再验owner/封闭状态/unknown/blocked。明确未派发控制拒绝在raw wrapper外传播，不误记成SDK提交未知；真实getter/同步/异步SDK错误仍保留unknown。owned模式未知后不继续逐cookie重试或删除pending行，只有已派发操作收尾。正常关闸允许有效已准入子链继续；无scope原bulk失败逐条best-effort和清理行为不变。
+
+不改Cookie白名单、schema、映射、upsert与crypto实现，测试仅使用合成值、真实service/ExecutionDrain和受控DB/SDK Promise。不证明HTTP或pool父生命周期已接线；3D-3b-3c-7b仍需保存/取消3秒timer、预留ready hook、收集getPage/banner内部timeout后原始SDK回执并协调release/stop。pool/index未改、Qwen browser/boot注入仍关闭。其余OS/入口/全局对账/维护/平台/生产门禁继续阻断发布。
+
 审查补强：setup拥有独立派发scope，dispose/dirty/disconnect同步seal；已经派发的raw操作继续收尾，旧setup不能续发下一个SDK。无scope路径也在逐context/page循环与SDK getter之后检查generation；两类timeout setter之间亦检查。getter同步触发主动dispose但没有真正调用SDK时返回私有取消sentinel，在raw wrapper之外转为固定取消错误，避免把明确控制拒绝当成unknown；真正getter/SDK错误仍保留unknown。deferred setup在await后重验实时owner与unknown，不能趁调度间隙开启managed launch。未来route handler正文没有改动或纳入本单元证明。
