@@ -1,4 +1,5 @@
 import type { AnthropicCompatibleClient } from './messages-adapter.js';
+import { runModelOperation } from './model-operation.js';
 import type { QwenRoute } from './qwen-route.js';
 
 export type QwenTransportErrorCode =
@@ -43,74 +44,109 @@ export function createQwenMessagesTransport(input: {
   return {
     messages: {
       async create(request, options) {
-        const maxRetries = normalizeMaxRetries(options?.maxRetries);
-        const controller = new AbortController();
-        let callerAborted = options?.signal?.aborted ?? false;
-        let timedOut = false;
+        return runModelOperation(async (operation) => {
+          const maxRetries = normalizeMaxRetries(options?.maxRetries);
+          const controller = new AbortController();
+          let callerAborted = options?.signal?.aborted ?? false;
+          let timedOut = false;
 
-        const abortFromCaller = () => {
-          callerAborted = true;
-          controller.abort();
-        };
-        options?.signal?.addEventListener('abort', abortFromCaller, { once: true });
+          const abortFromCaller = () => {
+            callerAborted = true;
+            operation.markUnknown();
+            controller.abort();
+          };
+          options?.signal?.addEventListener('abort', abortFromCaller, { once: true });
 
-        const timeoutId =
-          options?.timeout !== undefined && options.timeout > 0
-            ? setTimeout(() => {
-                timedOut = true;
-                controller.abort();
-              }, options.timeout)
-            : undefined;
+          const timeoutId =
+            options?.timeout !== undefined && options.timeout > 0
+              ? setTimeout(() => {
+                  timedOut = true;
+                  operation.markUnknown();
+                  controller.abort();
+                }, options.timeout)
+              : undefined;
 
-        try {
-          if (callerAborted) throw new QwenTransportError('REQUEST_ABORTED');
-
-          for (let attempt = 0; ; attempt += 1) {
-            let response: Response;
+          try {
+            if (callerAborted) throw new QwenTransportError('REQUEST_ABORTED');
+            let body: string;
             try {
-              response = await fetchImpl(`${input.route.baseURL}/v1/messages`, {
-                method: 'POST',
-                headers: {
-                  'content-type': 'application/json',
-                  'anthropic-version': '2023-06-01',
-                  'x-api-key': input.route.apiKey,
-                  ...(input.route.workspaceId
-                    ? { 'x-dashscope-workspace': input.route.workspaceId }
-                    : {}),
-                },
-                body: JSON.stringify(request),
-                signal: controller.signal,
-              });
+              body = JSON.stringify(request);
             } catch {
-              if (controller.signal.aborted) {
-                throw new QwenTransportError(
-                  timedOut && !callerAborted ? 'REQUEST_TIMEOUT' : 'REQUEST_ABORTED',
-                );
-              }
               throw new QwenTransportError('PROVIDER_ERROR');
             }
 
-            if (response.ok) {
+            for (let attempt = 0; ; attempt += 1) {
+              if (controller.signal.aborted) throwAbortError({ callerAborted, timedOut });
+              let response: Response;
               try {
-                return await response.json();
+                response = await operation.run(() =>
+                  fetchImpl(`${input.route.baseURL}/v1/messages`, {
+                    method: 'POST',
+                    headers: {
+                      'content-type': 'application/json',
+                      'anthropic-version': '2023-06-01',
+                      'x-api-key': input.route.apiKey,
+                      ...(input.route.workspaceId
+                        ? { 'x-dashscope-workspace': input.route.workspaceId }
+                        : {}),
+                    },
+                    body,
+                    signal: controller.signal,
+                  }),
+                );
               } catch {
-                throw new QwenTransportError('INVALID_RESPONSE', response.status);
+                if (controller.signal.aborted) {
+                  throw new QwenTransportError(
+                    timedOut && !callerAborted ? 'REQUEST_TIMEOUT' : 'REQUEST_ABORTED',
+                  );
+                }
+                throw new QwenTransportError('PROVIDER_ERROR');
               }
-            }
 
-            if (!RETRYABLE_STATUS_CODES.has(response.status) || attempt >= maxRetries) {
-              throw new QwenTransportError('PROVIDER_ERROR', response.status);
-            }
+              if (controller.signal.aborted) {
+                operation.cleanup(() => response.body?.cancel() ?? Promise.resolve());
+                throwAbortError({ callerAborted, timedOut });
+              }
+              if (response.ok) {
+                try {
+                  const value = await operation.run(() => response.json());
+                  if (controller.signal.aborted) throwAbortError({ callerAborted, timedOut });
+                  return value;
+                } catch {
+                  if (!response.body?.locked)
+                    operation.cleanup(() => response.body?.cancel() ?? Promise.resolve());
+                  if (controller.signal.aborted) throwAbortError({ callerAborted, timedOut });
+                  throw new QwenTransportError('INVALID_RESPONSE', response.status);
+                }
+              }
 
-            await waitForRetry(retryBaseDelayMs * 2 ** attempt, controller.signal, () => ({
-              callerAborted,
-              timedOut,
-            }));
+              // Dispose the previous HTTP body before starting a retry. The final
+              // error remains independent of disposal so callers are not delayed.
+              let disposed!: Promise<unknown>;
+              operation.cleanup(() => {
+                disposed = Promise.resolve().then(() => response.body?.cancel());
+                return disposed;
+              });
+
+              if (!RETRYABLE_STATUS_CODES.has(response.status) || attempt >= maxRetries) {
+                throw new QwenTransportError('PROVIDER_ERROR', response.status);
+              }
+              try {
+                await disposed;
+              } catch {
+                throw new QwenTransportError('PROVIDER_ERROR', response.status);
+              }
+
+              await waitForRetry(retryBaseDelayMs * 2 ** attempt, controller.signal, () => ({
+                callerAborted,
+                timedOut,
+              }));
+            }
+          } finally {
+            if (timeoutId !== undefined) clearTimeout(timeoutId);
+            options?.signal?.removeEventListener('abort', abortFromCaller);
           }
-        } finally {
-          if (timeoutId !== undefined) clearTimeout(timeoutId);
-          options?.signal?.removeEventListener('abort', abortFromCaller);
-        }
+        });
       },
     },
   };

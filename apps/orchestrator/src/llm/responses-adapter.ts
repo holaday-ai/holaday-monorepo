@@ -1,3 +1,4 @@
+import { type ModelOperation, runModelOperation } from './model-operation.js';
 import type { QwenRoute, SafeQwenRouteMetadata } from './qwen-route.js';
 import { toSafeQwenRouteMetadata } from './qwen-route.js';
 
@@ -106,73 +107,88 @@ export function createQwenResponsesAdapter(input: {
   return {
     metadata,
     async stream(request, options) {
-      const controller = new AbortController();
-      let callerAborted = options?.signal?.aborted ?? false;
-      let timedOut = false;
-      const abortFromCaller = () => {
-        callerAborted = true;
-        controller.abort();
-      };
-      options?.signal?.addEventListener('abort', abortFromCaller, { once: true });
-      const timeoutId =
-        options?.timeoutMs !== undefined && options.timeoutMs > 0
-          ? setTimeout(() => {
-              timedOut = true;
-              controller.abort();
-            }, options.timeoutMs)
-          : undefined;
-
-      try {
-        if (callerAborted) throw new ResponsesAdapterError('REQUEST_ABORTED');
-
-        let response: Response;
-        try {
-          response = await fetchImpl(`${input.route.baseURL}/responses`, {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              accept: 'text/event-stream',
-              authorization: `Bearer ${input.route.apiKey}`,
-              ...(input.route.workspaceId
-                ? { 'x-dashscope-workspace': input.route.workspaceId }
-                : {}),
-            },
-            body: JSON.stringify(toProviderRequest(request, input.route.model)),
-            signal: controller.signal,
-          });
-        } catch {
-          if (controller.signal.aborted) {
-            throw abortError({ callerAborted, timedOut });
-          }
-          throw new ResponsesAdapterError('PROVIDER_ERROR');
-        }
-
-        if (!response.ok) {
-          throw new ResponsesAdapterError('PROVIDER_ERROR', response.status);
-        }
-        if (!response.body) {
-          throw new ResponsesAdapterError('INVALID_RESPONSE', response.status);
-        }
+      return runModelOperation(async (operation) => {
+        const controller = new AbortController();
+        let callerAborted = options?.signal?.aborted ?? false;
+        let timedOut = false;
+        const abortFromCaller = () => {
+          callerAborted = true;
+          operation.markUnknown();
+          controller.abort();
+        };
+        options?.signal?.addEventListener('abort', abortFromCaller, { once: true });
+        const timeoutId =
+          options?.timeoutMs !== undefined && options.timeoutMs > 0
+            ? setTimeout(() => {
+                timedOut = true;
+                operation.markUnknown();
+                controller.abort();
+              }, options.timeoutMs)
+            : undefined;
 
         try {
-          return await consumeResponsesStream({
-            body: response.body,
-            metadata,
-            signal: controller.signal,
-            onTextDelta: options?.onTextDelta,
-            onProgress: options?.onProgress,
-          });
-        } catch (error) {
-          if (error instanceof ResponsesAdapterError) throw error;
-          if (controller.signal.aborted) {
-            throw abortError({ callerAborted, timedOut });
+          if (callerAborted) throw new ResponsesAdapterError('REQUEST_ABORTED');
+          let body: string;
+          try {
+            body = JSON.stringify(toProviderRequest(request, input.route.model));
+          } catch {
+            throw new ResponsesAdapterError('PROVIDER_ERROR');
           }
-          throw new ResponsesAdapterError('INVALID_RESPONSE', response.status);
+
+          let response: Response;
+          try {
+            response = await operation.run(() =>
+              fetchImpl(`${input.route.baseURL}/responses`, {
+                method: 'POST',
+                headers: {
+                  'content-type': 'application/json',
+                  accept: 'text/event-stream',
+                  authorization: `Bearer ${input.route.apiKey}`,
+                  ...(input.route.workspaceId
+                    ? { 'x-dashscope-workspace': input.route.workspaceId }
+                    : {}),
+                },
+                body,
+                signal: controller.signal,
+              }),
+            );
+          } catch {
+            if (controller.signal.aborted) {
+              throw abortError({ callerAborted, timedOut });
+            }
+            throw new ResponsesAdapterError('PROVIDER_ERROR');
+          }
+
+          if (controller.signal.aborted || !response.ok) {
+            operation.cleanup(() => response.body?.cancel() ?? Promise.resolve());
+            if (controller.signal.aborted) throw abortError({ callerAborted, timedOut });
+            throw new ResponsesAdapterError('PROVIDER_ERROR', response.status);
+          }
+          if (!response.body) {
+            throw new ResponsesAdapterError('INVALID_RESPONSE', response.status);
+          }
+
+          try {
+            return await consumeResponsesStream({
+              body: response.body,
+              operation,
+              metadata,
+              signal: controller.signal,
+              onTextDelta: options?.onTextDelta,
+              onProgress: options?.onProgress,
+            });
+          } catch (error) {
+            if (error instanceof ResponsesAdapterError) throw error;
+            if (controller.signal.aborted) {
+              throw abortError({ callerAborted, timedOut });
+            }
+            throw new ResponsesAdapterError('INVALID_RESPONSE', response.status);
+          }
+        } finally {
+          if (timeoutId !== undefined) clearTimeout(timeoutId);
+          options?.signal?.removeEventListener('abort', abortFromCaller);
         }
-      } finally {
-        if (timeoutId !== undefined) clearTimeout(timeoutId);
-        options?.signal?.removeEventListener('abort', abortFromCaller);
-      }
+      });
     },
   };
 }
@@ -224,6 +240,7 @@ function mapInput(
 }
 
 async function consumeResponsesStream(input: {
+  operation: ModelOperation;
   body: ReadableStream<Uint8Array>;
   metadata: SafeQwenRouteMetadata;
   signal: AbortSignal;
@@ -236,6 +253,12 @@ async function consumeResponsesStream(input: {
   let text = '';
   let completion: unknown;
   let terminalReceived = false;
+  let cancelling = false;
+  const cancel = () => {
+    if (cancelling) return;
+    cancelling = true;
+    input.operation.cleanup(() => reader.cancel());
+  };
 
   const consumeEvent = (eventBlock: string) => {
     if (input.signal.aborted) throw new DOMException('Aborted', 'AbortError');
@@ -291,7 +314,7 @@ async function consumeResponsesStream(input: {
 
   try {
     while (true) {
-      const chunk = await readChunk(reader, input.signal);
+      const chunk = await readChunk(reader, input.signal, input.operation, cancel);
       if (chunk.done) break;
       pending += decoder.decode(chunk.value, { stream: true });
       if (pending.length > MAX_PENDING_SSE_BYTES) {
@@ -305,7 +328,7 @@ async function consumeResponsesStream(input: {
   } finally {
     // A terminal event ends the response even when HTTP keep-alive has no EOF.
     // Do not await a transport cancel hook that may itself never settle.
-    void reader.cancel().catch(() => undefined);
+    cancel();
     reader.releaseLock();
   }
 
@@ -330,25 +353,29 @@ function drainSseEvents(
 async function readChunk(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   signal: AbortSignal,
+  operation: ModelOperation,
+  cancel: () => void,
 ): Promise<Awaited<ReturnType<ReadableStreamDefaultReader<Uint8Array>['read']>>> {
   if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
   return await new Promise((resolve, reject) => {
     const abortRead = () => {
       reject(new DOMException('Aborted', 'AbortError'));
-      void reader.cancel().catch(() => undefined);
+      cancel();
     };
     signal.addEventListener('abort', abortRead, { once: true });
-    reader.read().then(
-      (result) => {
-        signal.removeEventListener('abort', abortRead);
-        resolve(result);
-      },
-      (error: unknown) => {
-        signal.removeEventListener('abort', abortRead);
-        reject(error);
-      },
-    );
+    operation
+      .run(() => reader.read())
+      .then(
+        (result) => {
+          signal.removeEventListener('abort', abortRead);
+          resolve(result);
+        },
+        (error: unknown) => {
+          signal.removeEventListener('abort', abortRead);
+          reject(error);
+        },
+      );
   });
 }
 

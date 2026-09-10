@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
   DrainOwner,
   DrainUncertainty,
@@ -15,6 +16,27 @@ export interface OwnedOperation<T> {
 /** Server-only ownership inherited from an already admitted operation. */
 export type OperationLifetime = Readonly<{ drain: ExecutionDrain; owner: DrainOwner }>;
 
+const lifetimeContext = new AsyncLocalStorage<{ lifetime: OperationLifetime; sealed: boolean }>();
+
+/** Read at dispatch, never capture on a cached adapter or parse from client data. */
+export function currentOperationLifetime(): OperationLifetime | undefined {
+  const context = lifetimeContext.getStore();
+  if (context?.sealed) throw new Error('EXECUTION_DRAIN_SCOPE_CLOSED');
+  return context?.lifetime;
+}
+
+/** Separate logical dispatch permission from a still-pinned physical cleanup. */
+export function withOperationDispatchScope<T>(action: (seal: () => void) => T): T {
+  const lifetime = currentOperationLifetime();
+  if (!lifetime) return action(() => {});
+  const context = { lifetime, sealed: false };
+  return lifetimeContext.run(context, () =>
+    action(() => {
+      context.sealed = true;
+    }),
+  );
+}
+
 /** Reserve synchronously; only the original action owns its release. */
 export function startOwnedOperation<T>(
   drain: ExecutionDrain,
@@ -27,6 +49,9 @@ export function startOwnedOperation<T>(
   },
 ): OwnedOperation<T> {
   const { parent, errorOutcome } = options;
+  const inherited = lifetimeContext.getStore();
+  if (inherited?.sealed && parent === inherited.lifetime.owner)
+    throw new Error('EXECUTION_DRAIN_SCOPE_CLOSED');
   if (errorOutcome !== 'known' && errorOutcome !== 'unknown')
     throw new Error('EXECUTION_DRAIN_OUTCOME');
   if (typeof action !== 'function') throw new Error('EXECUTION_DRAIN_ACTION');
@@ -40,7 +65,9 @@ export function startOwnedOperation<T>(
   const invoke = async () => {
     drain.assertDispatch(owner);
     dispatched = true;
-    return action(owner);
+    return lifetimeContext.run({ lifetime: Object.freeze({ drain, owner }), sealed: false }, () =>
+      action(owner),
+    );
   };
   const pending = dispatch === 'immediate' ? invoke() : Promise.resolve().then(invoke);
   const result = pending
