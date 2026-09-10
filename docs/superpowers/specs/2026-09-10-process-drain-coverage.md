@@ -161,3 +161,11 @@ onStart/runFn/onTimeout各自在排队owner下建立执行子链，传入实时s
 stop同步停止timer和未来接纳，等待当前回调屏障；屏障在诊断日志/回调之前登记，日志异常不能破坏该屏障。尚未派发的队列原样保留且仍占用，不能把stop返回视为全局idle；回调在ACK前预留的子工作也独立持续占用。停止不取消业务任务、不提前触发超时清场。
 
 状态仍为**局部已接**：index创建queue尚未传controller，tasks.ts两处enqueue尚未传lifetime，也未以callback子lifetime重新构造Context。真实onTimeout内部吞错、markQueuedTaskExecuting/Failed的DB及回执、浏览器runFn内部detached和清理仍需跟踪。现有rejected统一写QUEUE_REJECTED业务失败；后续接线必须区分容量拒绝与安全准入拒绝，不能把未真正派发的安全拒绝误写为业务失败。此次测试使用真实queue/controller/状态文件和合成回调，不含实际浏览器/模型/DB/生产；全进程发布阻断不解除。
+
+## 3D-3b-1 本地增量：队列状态实际数据库边界（2026-09-10）
+
+TaskRepository.markQueuedTaskExecuting/Failed在已有server-only scope中为select、事务外层、UPDATE、事件INSERT同步建立database子owner。事务外层持有真实Drizzle发出的BEGIN/COMMIT/ROLLBACK直至其Promise结束；查询/写原始错误在调用方catch前留unknown。后续新DB调用先检查当前scope/unknown；已经进入的事务通过原有Drizzle回滚收尾，不能因未知而丢掉回滚Promise。
+
+有scope时单行UPDATE只接受0/1，0保持确定CAS拒绝且无事件；事件INSERT要求准确1行。不可信回执抛错并保留未知，不视为0行或成功，不继续提交。无scope继续原有回执处理；仅局部helper校验，不改共享extractMysqlAffectedRows、SQL状态条件、事件内容或禁止领域代码。
+
+这是两个实际repository方法的局部接线，而非新增未被调用的模拟仓储。测试以真实Drizzle/ExecutionDrain调用两个方法，仅mysql2传输使用合成回执，覆盖延迟提交/回滚和晚失败；未连接真实MySQL。实际任务enqueue/lifetime/安全拒绝分类、回调内部浏览器与detached、boot注入仍未接，不得据此部署或声称全局排空。
