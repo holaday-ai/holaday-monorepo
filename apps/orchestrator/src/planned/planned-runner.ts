@@ -595,7 +595,8 @@ export interface PlannedRunnerDeps {
 }
 
 let interval: NodeJS.Timeout | null = null;
-let tickRunning = false;
+let pendingTick: Promise<void> | null = null;
+let tickGeneration = Symbol();
 
 export async function recoverStuckRunningPlannedTasks(db: DB): Promise<number> {
   const result = await db
@@ -612,24 +613,32 @@ export async function recoverStuckRunningPlannedTasks(db: DB): Promise<number> {
 
 export function startPlannedRunner(deps: PlannedRunnerDeps): NodeJS.Timeout {
   if (interval) return interval;
+  const generation = Symbol();
+  tickGeneration = generation;
   const pollMs = deps.pollIntervalMs ?? 60_000;
-  const run = async () => {
-    if (tickRunning) return;
-    tickRunning = true;
-    try {
-      await recoverStuckRunningPlannedTasks(deps.db);
-      await normalizePendingOccurrenceOverrides(deps.db);
-      await plannedReminderScan(deps, new Date());
-      await plannedTick(deps);
-      await syncPlannedRuns(deps.db);
-    } catch (error) {
-      logger.warn(
-        { error: error instanceof Error ? error.message : String(error) },
-        'planned-runner: tick failed closed',
-      );
-    } finally {
-      tickRunning = false;
-    }
+  const run = (): Promise<void> => {
+    if (generation !== tickGeneration || pendingTick) return Promise.resolve();
+    const pending = Promise.resolve()
+      .then(async () => {
+        if (generation !== tickGeneration) return;
+        try {
+          await recoverStuckRunningPlannedTasks(deps.db);
+          await normalizePendingOccurrenceOverrides(deps.db);
+          await plannedReminderScan(deps, new Date());
+          await plannedTick(deps);
+          await syncPlannedRuns(deps.db);
+        } catch (error) {
+          logger.warn(
+            { error: error instanceof Error ? error.message : String(error) },
+            'planned-runner: tick failed closed',
+          );
+        }
+      })
+      .finally(() => {
+        if (pendingTick === pending) pendingTick = null;
+      });
+    pendingTick = pending;
+    return pending;
   };
   void run().catch((error) => {
     logger.error({ error }, 'planned-runner: unexpected tick rejection');
@@ -642,10 +651,12 @@ export function startPlannedRunner(deps: PlannedRunnerDeps): NodeJS.Timeout {
   return interval;
 }
 
-export function stopPlannedRunner(): void {
+/** Stop future ticks immediately; detached run dispatches need their own lifecycle. */
+export function stopPlannedRunner(): Promise<void> {
+  tickGeneration = Symbol();
   if (interval) clearInterval(interval);
   interval = null;
-  tickRunning = false;
+  return pendingTick ?? Promise.resolve();
 }
 
 async function normalizePendingOccurrenceOverrides(db: DB): Promise<void> {

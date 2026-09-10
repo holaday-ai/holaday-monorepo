@@ -163,7 +163,8 @@ export function computeNextRunFromInputs(opts: {
 }
 
 let runnerInterval: NodeJS.Timeout | null = null;
-let runnerTickRunning = false;
+let runnerPending: Promise<void> | null = null;
+let runnerGeneration = Symbol();
 
 /**
  * Start the polling loop. Idempotent: calling twice without an
@@ -173,21 +174,30 @@ let runnerTickRunning = false;
  */
 export function startScheduledRunner(deps: ScheduledRunnerDeps): NodeJS.Timeout {
   if (runnerInterval) return runnerInterval;
+  const generation = Symbol();
+  runnerGeneration = generation;
   const pollMs = deps.pollIntervalMs ?? DEFAULT_POLL_MS;
   logger.info({ pollMs }, 'scheduled-runner: starting');
   // Fire once immediately on boot so a row that was due during a
   // restart doesn't sit waiting for the first interval tick.
-  const run = async (recover: boolean) => {
-    if (runnerTickRunning) return;
-    runnerTickRunning = true;
-    try {
-      if (recover) await recoverStuckRunningScheduledTasks(deps.db);
-      await tick(deps);
-    } catch (err) {
-      logger.warn({ err: errMsg(err) }, 'scheduled-runner: tick failed closed');
-    } finally {
-      runnerTickRunning = false;
-    }
+  const run = (recover: boolean): Promise<void> => {
+    if (generation !== runnerGeneration || runnerPending) return Promise.resolve();
+    // Reserve before invoking any dependency; stop may run before dispatch.
+    const pending = Promise.resolve()
+      .then(async () => {
+        if (generation !== runnerGeneration) return;
+        try {
+          if (recover) await recoverStuckRunningScheduledTasks(deps.db);
+          await tick(deps);
+        } catch (err) {
+          logger.warn({ err: errMsg(err) }, 'scheduled-runner: tick failed closed');
+        }
+      })
+      .finally(() => {
+        if (runnerPending === pending) runnerPending = null;
+      });
+    runnerPending = pending;
+    return pending;
   };
   void run(false).catch((err) => {
     logger.error({ err: errMsg(err) }, 'scheduled-runner: unexpected tick rejection');
@@ -200,13 +210,15 @@ export function startScheduledRunner(deps: ScheduledRunnerDeps): NodeJS.Timeout 
   return runnerInterval;
 }
 
-export function stopScheduledRunner(): void {
+/** Stop future ticks immediately; wait for this poll pass, not its detached task children. */
+export function stopScheduledRunner(): Promise<void> {
+  runnerGeneration = Symbol();
   if (runnerInterval) {
     clearInterval(runnerInterval);
     runnerInterval = null;
-    runnerTickRunning = false;
     logger.info('scheduled-runner: stopped');
   }
+  return runnerPending ?? Promise.resolve();
 }
 
 /**
