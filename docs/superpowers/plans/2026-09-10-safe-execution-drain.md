@@ -41,7 +41,7 @@ expect(drain.snapshot().idle).toBe(true);
 - [x] 运行并确认 RED：`NODE_OPTIONS=--max-old-space-size=2048 pnpm exec vitest run src/execution/execution-drain.test.ts --maxWorkers=1 --minWorkers=1`（cwd 为 apps/orchestrator）。第一轮无模块时明确断言导出未存在；已有模块上的缺陷使用实际行为断言验证。
 - [x] 实现同步有界 Map 所有权，无定时器、网络或全局单例；执行原语不接业务入口。使用对象身份验证，关闭后 fork 仅接受尚未释放的现有句柄，finish 重复调用不能误减计数。
 - [x] 增补 RED→GREEN：复制/跨实例/失效句柄，开放中不报告idle，容量拒绝，未知票据独立阻断、复制票据不解除，永久block、非法工作类型，真实Promise派发前登记与原始调用结束才释放。
-- [ ] 运行内核测试和现有 registry 测试，检查改动文件格式与后端 typecheck；独立审查后提交仅本单元和规格。提交不等于发布。
+- [x] 运行内核测试和现有 registry 测试，检查改动文件格式与后端 typecheck；独立审查后提交仅本单元和规格。提交不等于发布。
 
 ### 原始 Promise 边界（同一内核单元）
 
@@ -78,3 +78,4 @@ expect(drain.snapshot().idle).toBe(true);
 
 - 基线：2026-09-10 10:12 JST，现有 core-execution-registry 14/14通过。新分支已创建，PR237冻结包不改。此前177项为历史工具回归，不能视为新代码验证。
 - 10:21 JST：内核18项、原始Promise13项、原registry14项，共45项通过；4文件Biome和后端全量typecheck通过。独立审查发现early-finish可伪造空闲，已补4项反例RED→GREEN并引入私有pin释放能力，复审无本单元剩余必修项。后续阶段仍未实施，不开启过期生产窗口。
+- 10:23 JST：第一阶段本地提交 `c9652662576a724984f6a87658de4943f2679419`，没有推送/PR/合并/部署。原PR237分支和manifest不变。下一阶段从持久关闸与本机控制的具体协议及完整测试计划开始，不重做本单元；方向已批准，无需再次请求相同架构确认。
