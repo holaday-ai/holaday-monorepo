@@ -77,6 +77,7 @@ async function fixture(stage: Stage, failure: Failure = 'success') {
   method(page, 'evaluate', 'banner', () => 1);
   const context = {
     pages: () => (stage === 'banner' ? [page] : []),
+    close: async () => {},
     newPage: async () => page,
     setDefaultTimeout: () => {},
     setDefaultNavigationTimeout: () => {},
@@ -142,6 +143,10 @@ it.each(stages.flatMap((stage) => [false, true].map((fail) => ({ stage, fail }))
     f.hold.release();
     await root.result;
     await flush();
+    if (stage === 'newContext' && !fail) {
+      expect(drain.snapshot().idle).toBe(false);
+      await f.executor.disposeCleanContext();
+    }
     expect(drain.snapshot().active).toBe(0);
     expect(drain.snapshot().unknown > 0).toBe(fail);
     expect(drain.snapshot().idle).toBe(!fail);
@@ -170,6 +175,10 @@ it.each(stages)('a returned parent cannot release pending %s', async (stage) => 
   f.hold.release();
   await pending;
   await flush();
+  if (stage === 'newContext') {
+    expect(drain.snapshot().idle).toBe(false);
+    await f.executor.disposeCleanContext();
+  }
   expect(drain.snapshot().active).toBe(0);
 });
 it.each(['unknown', 'sealed', 'expired'] as const)(

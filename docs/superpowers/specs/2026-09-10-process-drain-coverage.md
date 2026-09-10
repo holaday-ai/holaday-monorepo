@@ -235,3 +235,15 @@ waitForCdpReady从spawn末端提取到cdp-readiness模块，原调用导出保�
 测试从spawn真实导出调用，使用真实ExecutionDrain/Response/ReadableStream及合成fetch，不访问网络。验证fetch/json/cancel在父ACK和Abort后继续活动，JSON仍有独立pin，取消保留原响应pin；blocked/unknown后仍清已有响应但不发新请求，原始取消失败独立阻断，timer无遗留。
 
 该单元不是浏览器资源/OS或全进程排空证明；浏览器spawn/launch/disconnect/clean-context、pool hook/timer、route事件、OS后代和其他入口/boot/生产门禁仍未完成。生产与Qwen browser门禁未触碰，不能据此发布局部组件。
+
+## 3D-3b-3c-4 本地增量：隔离context资源与绑定关闭（2026-09-11）
+
+clean-context的newContext现在在返回lease后才派发，当前已准入scope同步预留execution子owner及私有pin；ready不释放资源owner，实际context.close结束才释放。创建派发scope在ready时seal，长期资源owner不能供后来SDK借用。dispose仅绑定该context，或等待同一未完成newContext后立即关闭；未知/blocked/父结束后仍清理已获得的资源，不新建根、按taskId恢复权限或暴露通用cleanup入口。
+
+acquire与close的同步/getter/异步失败在资源owner释放前保留unknown。重复dispose共享实际回执，失败记录不清除、不自动重试；主动取消尚未交付的context若最终关闭成功则为成功收尾，ready仍拒绝。原始cookies经runBrowserOperation登记，检查绑定捕获的context/lease/generation；迟到结果不能认证当前context，更不能用旧dirty结果关闭替换资源。
+
+connect/launchManaged首await前占位，拒绝并发半就绪返回；generation覆盖pending transport/newContext和初始化结果写回。初始化失败先dispose本轮lease。disconnect即使browser引用已空也等待已发起setup和context清理，并发调用共享失败/成功回执；managed setup与disconnect只交接一次原有browser关闭职责，不据此证明browser.close/OS完成。全局停止必须先请求dispose，再等待资源计数，不能倒序等待资源pin自动归零。
+
+本增量测试运行真实executor/drain、合成SDK与受控Promise，不启动实际浏览器/网络/数据库、不读取真实cookie。managed launch/browser.close、外部CDP WebSocket及重连资源所有权、pool hook/timer/OS后代仍未完整登记；其他入口、统一boot/stop、全局对账、维护/平台/生产门禁均仍阻断发布，不能单独发布本单元。
+
+审查补强：setup拥有独立派发scope，dispose/dirty/disconnect同步seal；已经派发的raw操作继续收尾，旧setup不能续发下一个SDK。无scope路径也在逐context/page循环与SDK getter之后检查generation；两类timeout setter之间亦检查。getter同步触发主动dispose但没有真正调用SDK时返回私有取消sentinel，在raw wrapper之外转为固定取消错误，避免把明确控制拒绝当成unknown；真正getter/SDK错误仍保留unknown。deferred setup在await后重验实时owner与unknown，不能趁调度间隙开启managed launch。未来route handler正文没有改动或纳入本单元证明。

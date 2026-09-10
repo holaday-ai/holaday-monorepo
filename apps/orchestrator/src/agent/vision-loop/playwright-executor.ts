@@ -34,8 +34,16 @@ import type { BrowserNetworkPolicy } from '../browser-network-policy.js';
 import { browserUrlForLog } from '../../browser-pool/log-url.js';
 import { logger } from '../../config/logger.js';
 import { runBrowserOperation } from './browser-operation.js';
+import {
+  currentOperationLifetime,
+  startOwnedOperation,
+  withOperationDispatchScope,
+} from '../../execution/owned-operation.js';
+import { type OwnedCleanContext, createOwnedCleanContext } from './owned-clean-context.js';
 import { humanClick, humanScroll, humanTypeText, isHumanizeEnabled } from './humanize.js';
 import { STEALTH_INIT_SCRIPT, isStealthEnabled } from './stealth-scripts.js';
+
+const INITIALIZATION_CANCELLED = Symbol('initialization-cancelled-before-sdk');
 
 export interface ConnectResult {
   ok: boolean;
@@ -227,6 +235,11 @@ export class PlaywrightExecutor {
    */
   private cleanMode = false;
   private cleanContext: BrowserContext | null = null;
+  private cleanContextLease: OwnedCleanContext | null = null;
+  private cleanContextGeneration = 0;
+  private connectionSetup: Promise<ConnectResult> | null = null;
+  private disconnection: Promise<void> | null = null;
+  private sealConnectionSetup: (() => void) | null = null;
   /** Dependency-injection seam for tests that want to bypass connect(). */
   private readonly chromium: {
     connectOverCDP: (endpoint: string) => Promise<Browser>;
@@ -278,53 +291,67 @@ export class PlaywrightExecutor {
     cdpEndpoint: string,
     opts: { cleanContext?: boolean; storageState?: string } = {},
   ): Promise<ConnectResult> {
-    if (this.browser) return { ok: true };
-    try {
-      this.browser = await runBrowserOperation(() => this.chromium.connectOverCDP(cdpEndpoint));
-      this.ownsBrowserProcess = false;
-      this.cdpEndpoint = cdpEndpoint;
-      // Phase 1 Playbook ④ — gated CLEAN-CONTEXT mode (explorer only). Create a
-      // FRESH isolated context and route getPage() to it. Off by default →
-      // contexts()[0] as before. A2 login-self-learning: when opts.storageState is
-      // given (a test-account session file path), seed the SAME isolated context with
-      // it → a LOGIN context that is STILL separate from contexts()[0] (user tasks)
-      // AND from a no-storageState clean context. No storageState → empty cookie jar
-      // (the 免登录 lane, unchanged).
-      if (opts.cleanContext) {
-        this.cleanMode = true;
-        const browser = this.browser;
-        this.cleanContext = await runBrowserOperation(() =>
-          browser.newContext(opts.storageState ? { storageState: opts.storageState } : {}),
-        );
-        // ④ explorer per-op hard bound (CLEAN-CONTEXT ONLY → user tasks' shared context is
-        // untouched): every Playwright ACTION (goto/click/waitFor/…) in the clean context gets
-        // a default timeout so a single op can't block indefinitely on a hostile/anti-bot site.
-        // NOTE: page.evaluate has NO built-in timeout → the per-browse hard wall in the runner
-        // (withHardDeadline) is the catch-all.
-        const rawOpMs = Number.parseInt(process.env.EXPLORER_OP_TIMEOUT_MS ?? '45000', 10);
-        const opMs = Number.isInteger(rawOpMs) && rawOpMs > 0 ? rawOpMs : 45_000;
-        this.cleanContext.setDefaultTimeout(opMs);
-        this.cleanContext.setDefaultNavigationTimeout(opMs);
+    return this.runConnectionSetup(async (generation) => {
+      let browser: Browser | null = null;
+      let lease: OwnedCleanContext | null = null;
+      try {
+        browser = await runBrowserOperation(() => this.chromium.connectOverCDP(cdpEndpoint));
+        this.assertContextGeneration(generation);
+        this.browser = browser;
+        this.ownsBrowserProcess = false;
+        this.cdpEndpoint = cdpEndpoint;
+        // Phase 1 Playbook ④ — gated CLEAN-CONTEXT mode (explorer only). Create a
+        // FRESH isolated context and route getPage() to it. Off by default →
+        // contexts()[0] as before. A2 login-self-learning: when opts.storageState is
+        // given (a test-account session file path), seed the SAME isolated context with
+        // it → a LOGIN context that is STILL separate from contexts()[0] (user tasks)
+        // AND from a no-storageState clean context. No storageState → empty cookie jar
+        // (the 免登录 lane, unchanged).
+        if (opts.cleanContext) {
+          this.cleanMode = true;
+          lease = createOwnedCleanContext(
+            browser,
+            opts.storageState ? { storageState: opts.storageState } : {},
+          );
+          this.cleanContextLease = lease;
+          const context = await lease.ready;
+          this.assertContextGeneration(generation);
+          this.cleanContext = context;
+          // ④ explorer per-op hard bound (CLEAN-CONTEXT ONLY → user tasks' shared context is
+          // untouched): every Playwright ACTION (goto/click/waitFor/…) in the clean context gets
+          // a default timeout so a single op can't block indefinitely on a hostile/anti-bot site.
+          // NOTE: page.evaluate has NO built-in timeout → the per-browse hard wall in the runner
+          // (withHardDeadline) is the catch-all.
+          const rawOpMs = Number.parseInt(process.env.EXPLORER_OP_TIMEOUT_MS ?? '45000', 10);
+          const opMs = Number.isInteger(rawOpMs) && rawOpMs > 0 ? rawOpMs : 45_000;
+          this.cleanContext.setDefaultTimeout(opMs);
+          this.assertContextGeneration(generation);
+          this.cleanContext.setDefaultNavigationTimeout(opMs);
+        }
+        const isActive = () => generation === this.cleanContextGeneration;
+        await this.applyNetworkPolicyToContexts(browser, isActive);
+        if (isStealthEnabled()) {
+          await this.applyStealthToContexts(browser, isActive);
+        }
+        // Best-effort: dismiss Brave's persistent chrome-side banners
+        // (privacy report invite and first-run notices) that otherwise take up vertical space in
+        // every screenshot. Runs once per connect, on every existing
+        // context — the policy file suppresses most of these at the
+        // browser level but a fresh profile still gets the first-run
+        // invites.
+        await this.dismissBraveBanners(browser, isActive);
+        this.assertContextGeneration(generation);
+        return { ok: true };
+      } catch (err) {
+        if (this.browser === browser) this.browser = null;
+        if (this.cleanContextLease === lease) this.cleanContext = null;
+        await lease?.dispose().catch(() => {});
+        return {
+          ok: false,
+          error: `connectOverCDP(${cdpEndpoint}) failed: ${errMsg(err)}`,
+        };
       }
-      await this.applyNetworkPolicyToContexts(this.browser);
-      if (isStealthEnabled()) {
-        await this.applyStealthToContexts(this.browser);
-      }
-      // Best-effort: dismiss Brave's persistent chrome-side banners
-      // (privacy report invite and first-run notices) that otherwise take up vertical space in
-      // every screenshot. Runs once per connect, on every existing
-      // context — the policy file suppresses most of these at the
-      // browser level but a fresh profile still gets the first-run
-      // invites.
-      await this.dismissBraveBanners(this.browser);
-      return { ok: true };
-    } catch (err) {
-      this.browser = null;
-      return {
-        ok: false,
-        error: `connectOverCDP(${cdpEndpoint}) failed: ${errMsg(err)}`,
-      };
-    }
+    });
   }
 
   /**
@@ -335,38 +362,115 @@ export class PlaywrightExecutor {
   async launchManaged(
     options: { channel?: string; headless?: boolean } = { headless: true },
   ): Promise<ConnectResult> {
-    if (this.browser) return { ok: true };
-    if (!this.chromium.launch) {
-      return { ok: false, error: 'playwright launch is unavailable' };
-    }
-
-    let launchedBrowser: Browser | null = null;
-    try {
-      const browser = await this.chromium.launch(options);
-      launchedBrowser = browser;
-      const context = await browser.newContext();
-      this.browser = browser;
-      this.ownsBrowserProcess = true;
-      this.cleanMode = true;
-      this.cleanContext = context;
-      context.setDefaultTimeout(45_000);
-      context.setDefaultNavigationTimeout(45_000);
-      await this.applyNetworkPolicyToContexts(browser);
-      await this.applyStealthToContexts(browser);
-      return { ok: true };
-    } catch (err) {
-      this.browser = null;
-      this.ownsBrowserProcess = false;
-      this.cleanMode = false;
-      this.cleanContext = null;
-      if (launchedBrowser) {
-        await launchedBrowser.close().catch(() => {});
+    return this.runConnectionSetup(async (generation) => {
+      if (!this.chromium.launch) {
+        return { ok: false, error: 'playwright launch is unavailable' };
       }
-      return {
-        ok: false,
-        error: `playwright launch failed: ${err instanceof Error ? err.message : String(err)}`,
-      };
+
+      let launchedBrowser: Browser | null = null;
+      let browserPublished = false;
+      let lease: OwnedCleanContext | null = null;
+      try {
+        const browser = await this.chromium.launch(options);
+        launchedBrowser = browser;
+        this.assertContextGeneration(generation);
+        lease = createOwnedCleanContext(browser);
+        this.cleanContextLease = lease;
+        const context = await lease.ready;
+        this.assertContextGeneration(generation);
+        this.browser = browser;
+        browserPublished = true;
+        this.ownsBrowserProcess = true;
+        this.cleanMode = true;
+        this.cleanContext = context;
+        context.setDefaultTimeout(45_000);
+        this.assertContextGeneration(generation);
+        context.setDefaultNavigationTimeout(45_000);
+        const isActive = () => generation === this.cleanContextGeneration;
+        await this.applyNetworkPolicyToContexts(browser, isActive);
+        await this.applyStealthToContexts(browser, isActive);
+        this.assertContextGeneration(generation);
+        return { ok: true };
+      } catch (err) {
+        // A concurrent disconnect takes ownership of a published browser.
+        const closeHere = !browserPublished || this.browser === launchedBrowser;
+        if (this.browser === launchedBrowser) {
+          this.browser = null;
+          this.ownsBrowserProcess = false;
+        }
+        if (this.cleanContextLease === lease) {
+          this.cleanMode = false;
+          this.cleanContext = null;
+        }
+        await lease?.dispose().catch(() => {});
+        if (launchedBrowser && closeHere) {
+          await launchedBrowser.close().catch(() => {});
+        }
+        return {
+          ok: false,
+          error: `playwright launch failed: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    });
+  }
+
+  /** Reserve before the first await; reject overlapping setup instead of publishing half-ready state. */
+  private runConnectionSetup(
+    action: (generation: number) => Promise<ConnectResult>,
+  ): Promise<ConnectResult> {
+    if (this.connectionSetup || this.disconnection)
+      return Promise.resolve({ ok: false, error: 'browser setup or cleanup is pending or failed' });
+    if (this.browser)
+      return Promise.resolve(
+        this.cleanMode && !this.cleanContext
+          ? { ok: false, error: 'clean context has been disposed' }
+          : { ok: true },
+      );
+    const generation = this.cleanContextGeneration;
+    try {
+      const parent = currentOperationLifetime();
+      if (parent && parent.drain.snapshot().unknown > 0)
+        throw new Error('BROWSER_OPERATION_UNKNOWN');
+      const work = async () =>
+        withOperationDispatchScope(async (seal) => {
+          this.sealConnectionSetup = seal;
+          try {
+            await this.cleanContextLease?.dispose();
+            this.assertContextGeneration(generation);
+            const lifetime = currentOperationLifetime();
+            if (lifetime) {
+              lifetime.drain.assertDispatch(lifetime.owner);
+              if (lifetime.drain.snapshot().unknown > 0)
+                throw new Error('BROWSER_OPERATION_UNKNOWN');
+            }
+            return await action(generation);
+          } finally {
+            seal();
+            if (this.sealConnectionSetup === seal) this.sealConnectionSetup = null;
+          }
+        });
+      const operation = parent
+        ? startOwnedOperation(parent.drain, 'execution', work, {
+            parent: parent.owner,
+            dispatch: 'deferred',
+            errorOutcome: 'known',
+          }).result
+        : Promise.resolve().then(work);
+      const result = operation.catch(
+        (error): ConnectResult => ({ ok: false, error: errMsg(error) }),
+      );
+      this.connectionSetup = result;
+      void result.then(() => {
+        if (this.connectionSetup === result) this.connectionSetup = null;
+      });
+      return result;
+    } catch (error) {
+      return Promise.resolve({ ok: false, error: errMsg(error) });
     }
+  }
+
+  private assertContextGeneration(generation: number): void {
+    if (generation !== this.cleanContextGeneration) throw new Error('CLEAN_CONTEXT_DISPOSED');
   }
 
   /**
@@ -380,10 +484,20 @@ export class PlaywrightExecutor {
     if (!this.cleanMode || !this.cleanContext) {
       throw new Error('assertCleanContext: called outside clean-context mode');
     }
-    const cookies = await this.cleanContext.cookies(); // global — all origins, no URL filter
+    const context = this.cleanContext;
+    const lease = this.cleanContextLease;
+    const generation = this.cleanContextGeneration;
+    const cookies = await runBrowserOperation(() => context.cookies()); // global — all origins, no URL filter
+    this.assertContextGeneration(generation);
+    if (this.cleanContext !== context || this.cleanContextLease !== lease)
+      throw new Error('CLEAN_CONTEXT_REPLACED');
     if (cookies.length > 0) {
       const domains = [...new Set(cookies.map((c) => c.domain))].slice(0, 5).join(',');
-      await this.disposeCleanContext();
+      this.cleanContextGeneration++;
+      this.sealConnectionSetup?.();
+      this.cleanContext = null;
+      this.activePage = null;
+      await lease?.dispose();
       throw new Error(
         `clean context is NOT clean: ${cookies.length} cookie(s) present (${domains}) — refusing to browse`,
       );
@@ -392,16 +506,11 @@ export class PlaywrightExecutor {
 
   /** Close + drop the clean context (call when the browse finishes). No-op when off. */
   async disposeCleanContext(): Promise<void> {
-    const ctx = this.cleanContext;
+    this.cleanContextGeneration++;
+    this.sealConnectionSetup?.();
     this.cleanContext = null;
     this.activePage = null;
-    if (ctx) {
-      try {
-        await ctx.close();
-      } catch {
-        /* best-effort dispose */
-      }
-    }
+    await this.cleanContextLease?.dispose();
   }
 
   /**
@@ -462,10 +571,13 @@ export class PlaywrightExecutor {
     await this.dismissBraveBanners(this.browser);
   }
 
-  private async dismissBraveBanners(browser: Browser): Promise<void> {
+  private async dismissBraveBanners(browser: Browser, isActive?: () => boolean): Promise<void> {
+    if (isActive?.() === false) throw new Error('CLEAN_CONTEXT_DISPOSED');
     const contexts = browser.contexts();
     for (const ctx of contexts) {
+      if (isActive?.() === false) throw new Error('CLEAN_CONTEXT_DISPOSED');
       for (const page of ctx.pages()) {
+        if (isActive?.() === false) throw new Error('CLEAN_CONTEXT_DISPOSED');
         try {
           // The orchestrator is a Node build (no DOM lib), so `document`
           // and HTMLElement aren't typed here. The callback body runs
@@ -478,9 +590,11 @@ export class PlaywrightExecutor {
           // CDP debugger paused) used to block the entire connect
           // path indefinitely. The banner dismissal is best-effort
           // anyway — losing one cycle doesn't break the loop.
-          await withTimeout(
-            runBrowserOperation(() =>
-              page.evaluate(() => {
+          const result = await withTimeout(
+            runBrowserOperation(() => {
+              const evaluate = page.evaluate;
+              if (isActive?.() === false) return INITIALIZATION_CANCELLED;
+              return evaluate.call(page, () => {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const doc = (globalThis as any).document;
                 if (!doc) return;
@@ -496,11 +610,12 @@ export class PlaywrightExecutor {
                   .forEach((el: any) => {
                     if (typeof el.click === 'function') el.click();
                   });
-              }),
-            ),
+              });
+            }),
             2_000,
             'dismissBraveBanners.evaluate',
           );
+          if (result === INITIALIZATION_CANCELLED) throw new Error('CLEAN_CONTEXT_DISPOSED');
         } catch {
           // Page might be about:blank, chrome://, mid-navigation, or
           // hung past 2 s. evaluate rejects in all those cases.
@@ -521,26 +636,37 @@ export class PlaywrightExecutor {
    * wrapped in try/catch, so a locked-down browser with strict CSP
    * just falls back to un-stealthed behaviour.
    */
-  private async applyStealthToContexts(browser: Browser): Promise<void> {
+  private async applyStealthToContexts(browser: Browser, isActive?: () => boolean): Promise<void> {
+    if (isActive?.() === false) throw new Error('CLEAN_CONTEXT_DISPOSED');
     const contexts = browser.contexts();
     for (const ctx of contexts) {
+      if (isActive?.() === false) throw new Error('CLEAN_CONTEXT_DISPOSED');
       try {
-        await runBrowserOperation(() =>
-          (ctx as BrowserContext).addInitScript({ content: STEALTH_INIT_SCRIPT }),
-        );
+        const result = await runBrowserOperation(async () => {
+          const addInitScript = ctx.addInitScript;
+          if (isActive?.() === false) return INITIALIZATION_CANCELLED;
+          return addInitScript.call(ctx, { content: STEALTH_INIT_SCRIPT });
+        });
+        if (result === INITIALIZATION_CANCELLED) throw new Error('CLEAN_CONTEXT_DISPOSED');
       } catch {
         // non-fatal — see docstring
       }
     }
   }
 
-  private async applyNetworkPolicyToContexts(browser: Browser): Promise<void> {
+  private async applyNetworkPolicyToContexts(
+    browser: Browser,
+    isActive?: () => boolean,
+  ): Promise<void> {
+    if (isActive?.() === false) throw new Error('CLEAN_CONTEXT_DISPOSED');
     if (!this.networkPolicy || !this.guardRequests) return;
     const contexts = browser.contexts();
     for (const context of contexts) {
+      if (isActive?.() === false) throw new Error('CLEAN_CONTEXT_DISPOSED');
       if (this.guardedContexts.has(context)) continue;
       const installed = await runBrowserOperation(async () => {
         const route = (context as BrowserContext).route;
+        if (isActive?.() === false) return INITIALIZATION_CANCELLED;
         if (typeof route !== 'function') return false;
         await route.call(context, '**/*', async (routeHandle, request) => {
           const rawUrl = request.url();
@@ -568,6 +694,7 @@ export class PlaywrightExecutor {
         });
         return true;
       });
+      if (installed === INITIALIZATION_CANCELLED) throw new Error('CLEAN_CONTEXT_DISPOSED');
       if (installed) this.guardedContexts.add(context);
     }
   }
@@ -579,20 +706,35 @@ export class PlaywrightExecutor {
    * this executor and is closed here.
    */
   async disconnect(): Promise<void> {
-    if (!this.browser) return;
+    if (this.disconnection) return this.disconnection;
+    this.cleanContextGeneration++;
+    this.sealConnectionSetup?.();
     const b = this.browser;
     const ownsBrowserProcess = this.ownsBrowserProcess;
     this.browser = null;
     this.ownsBrowserProcess = false;
     this.activePage = null;
     this.cdpEndpoint = null;
-    await this.disposeCleanContext();
-    if (!ownsBrowserProcess) return;
-    try {
-      await b.close();
-    } catch {
-      // best-effort — the browser may already be gone
-    }
+    const setup = this.connectionSetup;
+    const operation = Promise.resolve().then(async () => {
+      const outcomes = await Promise.allSettled([this.disposeCleanContext(), setup]);
+      if (ownsBrowserProcess && b) {
+        try {
+          await b.close();
+        } catch {
+          /* browser-process cleanup remains best-effort */
+        }
+      }
+      for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason;
+    });
+    this.disconnection = operation;
+    void operation.then(
+      () => {
+        if (this.disconnection === operation) this.disconnection = null;
+      },
+      () => {},
+    );
+    return operation;
   }
 
   /**
