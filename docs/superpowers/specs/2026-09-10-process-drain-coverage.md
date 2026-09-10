@@ -181,3 +181,15 @@ tasks.ts两处真实enqueue改用server-only enqueueTaskExecution，传当前lif
 测试边界：真实TaskQueue/DrainController/状态文件验证父ACK后回调和挂起工作；缺失/外来回调能力使用合成queue协议反例。当前完整router的browser入口仍被Qwen unmigrated gate挡住，未移除/绕过该产品门禁。为检验真实caller，从TypeScript AST定位并编译执行tasks.ts原有两处入队块和原完整dispatch函数，外部持久化/分配使用合成边界。这是实际源代码区段的可执行接线验证，不是完整router或真实浏览器/模型/生产验证，也不是仅grep源码。完整后端类型检查覆盖调用签名。
 
 仍未覆盖direct-open/Brave内部原始浏览器、catch吞错与detached、所有其他producer、统一closed boot/stop、全局互斥恢复与生产维护工具。index仍未注入controller。该单元不能解除全进程发布阻断；下一步从较小direct-open原始IO/清理链开始，再逐段接Brave。
+
+## 3D-3b-3a 本地增量：Playwright页面SDK与超时后清理（2026-09-11）
+
+PlaywrightExecutor的getPage/resetPageForTask/reopenActivePage页面创建/关闭、页面存活探测、既有脚本初始化/异步evaluate、setViewportSize、navigate的goto/title/策略检查，以及screenshot/原生metadata调用在实际派发点使用runBrowserOperation。实时读取scope，同步取得私有pin的execution子owner，原始Promise结束后才释放；guard或unknown阻止后续原始调用。同步抛出当场留unknown，异步失败在外层best-effort catch前登记。
+
+旧标签close的1500ms等待上限、探测超时和脚本/替换标签的detached行为保留；它们结束用户等待或外层函数不再释放原始child。close/evaluate使用其原对象receiver。页面恢复相关SDK也受未知屏障约束：失败结果不确定时不继续新的SDK恢复动作；已派发的原始Promise照常收尾，不能借此重试/取消业务任务或伪造idle。无scope维持旧best-effort行为。
+
+审查补强：可选SDK方法的读取、类型判断和带receiver的调用均放入owned action。getter同步抛错也先留unknown，再进入原有catch；首个旧页close getter失败后不派发第二个close。两个detached close对整个包装Promise捕获，避免getter错误逃到未处理的IIFE rejection。
+
+测试直接运行真实PlaywrightExecutor与ExecutionDrain，constructor只注入合成CDP/page传输，时间上限使用fake timers推进而不是实际启动浏览器。native sharp.metadata一项在原生异步边界替换回执以观察挂起；旧executor回归另外运行真实sharp。页面操作计数不证明浏览器整个OS进程、网页子资源/网络事件或所有动作已结束。
+
+仍未覆盖BrowserPool分配/保留timer/子进程终止/文件清理，CDP connect/reconnect/网络路由回调和其他动作；persistVisionOutcome原始SQL及direct-open catch处的失败回执仍后续。上述页面方法可能经过未接的重连辅助链，不因此获得完整覆盖资格。保持Qwen browser未迁移门禁，index不启用，单元不可独立发布。下一步优先实际结果保存与pool/连接生命周期，之后Brave/batch及其余入口。

@@ -33,6 +33,7 @@ import sharp from 'sharp';
 import type { BrowserNetworkPolicy } from '../browser-network-policy.js';
 import { browserUrlForLog } from '../../browser-pool/log-url.js';
 import { logger } from '../../config/logger.js';
+import { runBrowserOperation } from './browser-operation.js';
 import { humanClick, humanScroll, humanTypeText, isHumanizeEnabled } from './humanize.js';
 import { STEALTH_INIT_SCRIPT, isStealthEnabled } from './stealth-scripts.js';
 
@@ -661,9 +662,7 @@ export class PlaywrightExecutor {
       // gets us a live context back.
       const recovered = await this.reconnectIfStale();
       if (!recovered || !this.browser) {
-        throw new Error(
-          'PlaywrightExecutor: no browser context (is Chrome actually running?)',
-        );
+        throw new Error('PlaywrightExecutor: no browser context (is Chrome actually running?)');
       }
       browser = this.browser;
       // Phase 1 Playbook ④ — in clean-context mode, NEVER fall back to the shared
@@ -675,9 +674,7 @@ export class PlaywrightExecutor {
       }
       ctx = browser.contexts()[0];
       if (!ctx) {
-        throw new Error(
-          'PlaywrightExecutor: no browser context after reconnect',
-        );
+        throw new Error('PlaywrightExecutor: no browser context after reconnect');
       }
     }
     // Prefer the pinned activePage. It was either set by resetPageForTask
@@ -707,7 +704,7 @@ export class PlaywrightExecutor {
     page = pages[0];
     // No pages at all: open one.
     if (!page) {
-      page = await ctx.newPage();
+      page = await runBrowserOperation(() => ctx.newPage());
       this.activePage = page;
       await this.applyTargetViewportToPage(page as unknown as PageLike);
       await this.applyStealthToPageIfNeeded(page as unknown as PageLike);
@@ -731,33 +728,38 @@ export class PlaywrightExecutor {
       return page;
     }
     try {
-      await (page as unknown as PageLike).goto('about:blank', {
-        timeout: antiBotSoftResetTimeoutMs(),
-      });
+      await runBrowserOperation(() =>
+        (page as unknown as PageLike).goto('about:blank', {
+          timeout: antiBotSoftResetTimeoutMs(),
+        }),
+      );
       this.activePage = page;
       await this.applyStealthToPageIfNeeded(page as unknown as PageLike);
       return page;
     } catch {
       // soft reset failed — fall through to hard reset
     }
-    const fresh = await ctx.newPage();
+    const fresh = await runBrowserOperation(() => ctx.newPage());
     const stuck = page;
     this.activePage = fresh;
     await this.applyTargetViewportToPage(fresh as unknown as PageLike);
     // Fire-and-forget close so we don't re-hang on the stuck page.
-    void (async () => {
+    void runBrowserOperation(() => {
       const closer = (stuck as unknown as PageLike).close;
-      if (typeof closer === 'function') await closer().catch(() => {});
-    })();
+      if (typeof closer === 'function') return closer.call(stuck);
+    }).catch(() => {});
     await this.applyStealthToPageIfNeeded(fresh as unknown as PageLike);
     return fresh;
   }
 
   private async applyTargetViewportToPage(page: PageLike): Promise<void> {
     const size = this.targetViewportSize;
-    if (!size || typeof page.setViewportSize !== 'function') return;
+    if (!size) return;
     try {
-      await page.setViewportSize(size);
+      await runBrowserOperation(() => {
+        const setViewportSize = page.setViewportSize;
+        if (typeof setViewportSize === 'function') return setViewportSize.call(page, size);
+      });
     } catch (err) {
       logger.warn(
         { err: err instanceof Error ? err.message : String(err), size },
@@ -792,9 +794,11 @@ export class PlaywrightExecutor {
       evaluate?: (expr: string) => Promise<unknown>;
     };
     try {
-      if (anyPage.addInitScript) {
-        await anyPage.addInitScript({ content: STEALTH_INIT_SCRIPT });
-      }
+      await runBrowserOperation(() => {
+        const addInitScript = anyPage.addInitScript;
+        if (typeof addInitScript === 'function')
+          return addInitScript.call(anyPage, { content: STEALTH_INIT_SCRIPT });
+      });
     } catch {
       // non-fatal — best-effort
     }
@@ -803,9 +807,10 @@ export class PlaywrightExecutor {
     // wedge the task start. addInitScript (above) has already armed
     // the NEXT navigation, which is what matters for captcha tests
     // that fingerprint via `new Navigator()` on load.
-    if (anyPage.evaluate) {
-      void anyPage.evaluate(STEALTH_INIT_SCRIPT).catch(() => {});
-    }
+    void runBrowserOperation(() => {
+      const evaluate = anyPage.evaluate;
+      if (typeof evaluate === 'function') return evaluate.call(anyPage, STEALTH_INIT_SCRIPT);
+    }).catch(() => {});
   }
 
   /**
@@ -819,12 +824,6 @@ export class PlaywrightExecutor {
    * want that.
    */
   async isPageResponsive(page: PageLike, timeoutMs = 3_000): Promise<boolean> {
-    if (typeof page.evaluate !== 'function') {
-      // Test stubs without an evaluate method default to "responsive"
-      // so they don't accidentally trip the recovery path.
-      return true;
-    }
-    const evaluator = page.evaluate;
     return new Promise<boolean>((resolve) => {
       let settled = false;
       const finish = (ok: boolean) => {
@@ -834,7 +833,11 @@ export class PlaywrightExecutor {
         resolve(ok);
       };
       const timer = setTimeout(() => finish(false), timeoutMs);
-      evaluator('1').then(
+      runBrowserOperation(() => {
+        const evaluator = page.evaluate;
+        // Test stubs without evaluate keep the existing responsive default.
+        if (typeof evaluator === 'function') return evaluator.call(page, '1');
+      }).then(
         () => finish(true),
         () => finish(false),
       );
@@ -858,7 +861,9 @@ export class PlaywrightExecutor {
   async screenshot(page: PageLike, opts: { timeoutMs?: number } = {}): Promise<ScreenshotResult> {
     const timeout = opts.timeoutMs ?? SCREENSHOT_TIMEOUT_MS;
     try {
-      const buf = await page.screenshot({ type: 'jpeg', quality: 80, fullPage: false, timeout });
+      const buf = await runBrowserOperation(() =>
+        page.screenshot({ type: 'jpeg', quality: 80, fullPage: false, timeout }),
+      );
       // `page.viewportSize()` returns null when Playwright is attached
       // via `connectOverCDP` to an externally-launched Chrome (the
       // whole point of Phase D) — Playwright didn't configure the
@@ -874,7 +879,7 @@ export class PlaywrightExecutor {
           viewportHeight: vp.height,
         };
       }
-      const meta = await sharp(buf).metadata();
+      const meta = await runBrowserOperation(() => sharp(buf).metadata());
       if (typeof meta.width === 'number' && typeof meta.height === 'number') {
         return {
           base64: buf.toString('base64'),
@@ -1278,7 +1283,8 @@ export class PlaywrightExecutor {
     const t0 = Date.now();
     try {
       if (this.networkPolicy) {
-        const decision = await this.networkPolicy.check(url);
+        const policy = this.networkPolicy;
+        const decision = await runBrowserOperation(() => policy.check(url));
         if (!decision.allowed) {
           logger.warn(
             { action: 'navigate', target: browserUrlForLog(url), reason: decision.reason },
@@ -1287,16 +1293,18 @@ export class PlaywrightExecutor {
           return { ok: false, message: `navigate blocked: ${decision.message}` };
         }
       }
-      const resp = (await page.goto(url, {
-        waitUntil: 'domcontentloaded',
-        timeout: NAVIGATE_TIMEOUT_MS,
-      })) as { status?: () => number } | null;
+      const resp = (await runBrowserOperation(() =>
+        page.goto(url, {
+          waitUntil: 'domcontentloaded',
+          timeout: NAVIGATE_TIMEOUT_MS,
+        }),
+      )) as { status?: () => number } | null;
       const urlAfter = page.url();
       const status = typeof resp?.status === 'function' ? resp.status() : null;
       const elapsedMs = Date.now() - t0;
       let title = '';
       try {
-        title = await page.title();
+        title = await runBrowserOperation(() => page.title());
       } catch {
         /* best-effort */
       }
@@ -1314,7 +1322,8 @@ export class PlaywrightExecutor {
       );
 
       if (this.networkPolicy && urlAfter !== url && !isBlankUrl(urlAfter)) {
-        const redirectDecision = await this.networkPolicy.check(urlAfter);
+        const policy = this.networkPolicy;
+        const redirectDecision = await runBrowserOperation(() => policy.check(urlAfter));
         if (!redirectDecision.allowed) {
           logger.warn(
             {
@@ -1352,10 +1361,12 @@ export class PlaywrightExecutor {
             message: `navigate stuck: goto returned but url=${browserUrlForLog(urlAfter)}; no context to reopen`,
           };
         }
-        const resp2 = (await fresh.goto(url, {
-          waitUntil: 'domcontentloaded',
-          timeout: NAVIGATE_TIMEOUT_MS,
-        })) as { status?: () => number } | null;
+        const resp2 = (await runBrowserOperation(() =>
+          fresh.goto(url, {
+            waitUntil: 'domcontentloaded',
+            timeout: NAVIGATE_TIMEOUT_MS,
+          }),
+        )) as { status?: () => number } | null;
         const urlAfter2 = fresh.url();
         const status2 = typeof resp2?.status === 'function' ? resp2.status() : null;
         logger.info(
@@ -1373,7 +1384,8 @@ export class PlaywrightExecutor {
           };
         }
         if (this.networkPolicy && urlAfter2 !== url) {
-          const redirectDecision = await this.networkPolicy.check(urlAfter2);
+          const policy = this.networkPolicy;
+          const redirectDecision = await runBrowserOperation(() => policy.check(urlAfter2));
           if (!redirectDecision.allowed) {
             logger.warn(
               {
@@ -1417,15 +1429,15 @@ export class PlaywrightExecutor {
     // Phase 1 Playbook ④ — clean mode reopens in the fresh context, NOT contexts()[0].
     const ctx = this.browseContext(browser);
     if (!ctx) return null;
-    const fresh = await ctx.newPage();
+    const fresh = await runBrowserOperation(() => ctx.newPage());
     this.activePage = fresh;
     await this.applyTargetViewportToPage(fresh as unknown as PageLike);
     await this.applyStealthToPageIfNeeded(fresh as unknown as PageLike);
     if (stuck) {
-      void (async () => {
+      void runBrowserOperation(() => {
         const closer = stuck.close;
-        if (typeof closer === 'function') await closer().catch(() => {});
-      })();
+        if (typeof closer === 'function') return closer.call(stuck);
+      }).catch(() => {});
     }
     return fresh;
   }
@@ -1468,7 +1480,8 @@ export class PlaywrightExecutor {
       // caller's first navigation; on remote CDP that race can close the new
       // target and produce "Target page, context or browser has been closed".
       const stalePages = ctx.pages();
-      const fresh = await ctx.newPage();
+      const readyContext = ctx;
+      const fresh = await runBrowserOperation(() => readyContext.newPage());
       const prior = this.activePage;
       this.activePage = fresh;
       await this.applyTargetViewportToPage(fresh as unknown as PageLike);
@@ -1478,10 +1491,11 @@ export class PlaywrightExecutor {
       // test or an already-dead target is ignored.
       await Promise.allSettled(
         stalePages.map(async (page) => {
-          const close = page.close;
-          if (typeof close !== 'function') return;
           await Promise.race([
-            close.call(page).catch(() => {}),
+            runBrowserOperation(() => {
+              const close = page.close;
+              if (typeof close === 'function') return close.call(page);
+            }).catch(() => {}),
             new Promise<void>((resolve) => setTimeout(resolve, 1_500)),
           ]);
         }),
