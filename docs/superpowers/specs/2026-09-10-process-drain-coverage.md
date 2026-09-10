@@ -141,3 +141,13 @@ tasks 的另外18个mutation路径：smokeTest、pause、resume、confirm、conf
 边界仍是**局部已接**：planned poller、reminder、sync及index boot尚未注入/接纳；特殊执行器内部和batch executor的detached工作仍须各自预留owner。这里仅证明这些caller的Context/调用Promise和本runner的原始数据库，不证明其所有内部副作用。合成mysql2测试执行真实Drizzle事务；实际tasks/batch router只到合成用户查询失败边界，不调用模型、不证明真实用户任务完成。未做真实MySQL、Linux/PM2、千问或生产验证；不得把本单元合并部署。
 
 下一单元：planned poller root、hook lifetime、所有poller原始IO、sync/stop和未知屏障；之后继续queue/真实caller内部链及剩余入口，发布阻断不解除。
+
+## 3D-2b-2 本地增量：planned poller 原始生命周期（2026-09-10）
+
+可选controller在真实pass首个recover SQL前持久接纳并建立scheduler子链。recover/normalize/reminder/tick/sync新增25个原始查询、写入及事务包装；单项/批量sync和commit/rollback均随原始Promise结束。stop的既有pending/generation不变，仍等待末端sync，而不是只等待queue ACK。无scope保留回调receiver和单参数契约；有scope的queue/notify在自己的execution子链中接收第二参数lifetime。
+
+受控模式下，恢复扫描在控制器存在任何活动或未知时暂不接纳，包括已返回queue ACK但仍有detached子操作的情况；这是一项保守的接纳节流，可能延后轮询，不取消或改写业务任务清场。阶段/候选循环之间存在未知时不再开始后续派发；hook调用前再次检查未知。真实原始错误在业务catch前留未知，不可信UPDATE回执阻断，确定0行与合法多行recover兼容。受控直接plannedTick必须在同一drain有效scope中，不能借导出函数跳过准入。
+
+审查补强：queue尚未真正调用前的准入拒绝不进入旧业务失败UPDATE，保留已有claim和未知供对账；只有实际调用queue后抛错才保留原失败处理。控制器活动检查是pass起点快照，不是跨所有入口的排他锁；未接入口、其他producer后续接纳及真实hook内部边界仍必须在整体接线中验证，不能宣称全局互斥恢复已实现。
+
+该增量仅证明可选注入的poller链；index的boot recovery仍无controller，真实hook手工Context还未传lifetime，special/batch内部detached及scheduled对应真实hooks也仍未接。全局活动屏障仅涵盖已经登记的操作，不能证明未接入口无工作，也不作为全进程排空证明。真实MySQL、通知/千问、Linux/PM2和生产没有验证，发布阻断不解除。下一步继续task-queue/批量与真实hook内部的ACK后链，然后统一boot及剩余入口。

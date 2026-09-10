@@ -1,4 +1,8 @@
-import { currentOperationLifetime, startOwnedOperation } from '../execution/owned-operation.js';
+import {
+  type OperationLifetime,
+  currentOperationLifetime,
+  startOwnedOperation,
+} from '../execution/owned-operation.js';
 import type { Context } from '../trpc/context.js';
 
 /** Synchronous reservation is essential: a detached child must exist before its parent's ACK. */
@@ -38,13 +42,36 @@ export function withPlannedContext<C extends Context, T>(
 
 /** Own the raw Promise, including a transaction's commit/rollback, before business catches. */
 export async function runPlannedDatabase<T>(action: () => PromiseLike<T>): Promise<T> {
+  return runPlannedOperation('database', action);
+}
+
+export async function runPlannedOperation<T>(
+  kind: 'database' | 'scheduler' | 'execution',
+  action: () => PromiseLike<T>,
+): Promise<T> {
   const lifetime = currentOperationLifetime();
   if (!lifetime) return action();
-  return startOwnedOperation(lifetime.drain, 'database', async () => action(), {
+  return startOwnedOperation(lifetime.drain, kind, async () => action(), {
     parent: lifetime.owner,
     errorOutcome: 'unknown',
     dispatch: 'immediate',
   }).result;
+}
+
+export function plannedOutcomeUnknown(): boolean {
+  return (currentOperationLifetime()?.drain.snapshot().unknown ?? 0) > 0;
+}
+
+/** The caller must forward this exact server-only capability before its own ACK. */
+export function callPlannedHook<T, R>(
+  hook: (input: T, lifetime?: OperationLifetime) => Promise<R>,
+  input: T,
+): Promise<R> {
+  if (plannedOutcomeUnknown()) throw new Error('PLANNED_DRAIN_UNKNOWN');
+  return runPlannedOperation('execution', async () => {
+    const lifetime = currentOperationLifetime();
+    return lifetime ? hook(input, lifetime) : hook(input);
+  });
 }
 
 export function retainPlannedUncertainty(): boolean {
