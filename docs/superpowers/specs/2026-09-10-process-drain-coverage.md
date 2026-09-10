@@ -131,3 +131,13 @@ tasks 的另外18个mutation路径：smokeTest、pause、resume、confirm、conf
 内部DB/hook抛错以及无法确认的UPDATE/dispatch回执保留未知；有scope的单行ACK仅0/1可信，不可信回执不派发任务/提醒。未知存在时暂停新的poll pass，周期recovery新增未知后不继续该pass的tick，不以恢复扫描重放未确认工作。既有无scope业务提取/调用契约保留。
 
 状态仅为**局部已接**：index尚未注入控制器，也未把hook lifetime传给其手工Context；真实notify的allSettled吞错、briefing/通用任务内部catch及ACK后子任务，尚不能由外层Promise证明收口。planned、队列、其他入口、boot及业务对账仍未接，不是scheduled全链或全进程发布证明。本地测试的mysql2/业务hook是合成外部边界，未验证实际MySQL、通知供应商、千问或生产。
+
+## 3D-2b-1 本地增量：planned queue → dispatch 交接（2026-09-10）
+
+在可选controller上下文下，queue/dispatch接纳绑定真实server-only owner；queue事务提交后或scheduled已有pending分支均同步预留dispatch子owner再返回starting。原始DB、事务commit/rollback、所有调用到的计划持久化以及账号门禁读取均有database子链。保留业务SQL和原有owner gate，不新增账号规则。内部special/tasks/batch caller以自己的子owner传Context；非法、跨控制器、缺失或已结束权限在IO前拒绝，不从runId恢复权限。
+
+不可信单行UPDATE回执拒绝继续派发；INSERT运行要求正安全整数ID和单行ACK，事项INSERT要求准确行数。原始IO错误和被业务catch吞掉的派发错误留未知；special结构异常不能回落generic，失败或缺持久化证明的special回执保留未知（既有明确inactive-owner停止契约仍保留）。已有未知阻止新的queue/dispatch，但原有数据库收尾仍可完成。无controller且无继承scope的旧路径保持兼容。
+
+边界仍是**局部已接**：planned poller、reminder、sync及index boot尚未注入/接纳；特殊执行器内部和batch executor的detached工作仍须各自预留owner。这里仅证明这些caller的Context/调用Promise和本runner的原始数据库，不证明其所有内部副作用。合成mysql2测试执行真实Drizzle事务；实际tasks/batch router只到合成用户查询失败边界，不调用模型、不证明真实用户任务完成。未做真实MySQL、Linux/PM2、千问或生产验证；不得把本单元合并部署。
+
+下一单元：planned poller root、hook lifetime、所有poller原始IO、sync/stop和未知屏障；之后继续queue/真实caller内部链及剩余入口，发布阻断不解除。

@@ -25,6 +25,12 @@ import {
   parseOccurrenceContent,
   resolvePlannedRunTitle,
 } from './planned-executor.js';
+import {
+  retainPlannedUncertainty,
+  runPlannedDatabase,
+  runPlannedWrite,
+  withPlannedContext,
+} from './planned-lifetime.js';
 import type { PlannedRepeatType, PlannedTaskStatus } from './planned-task-rules.js';
 import {
   plannedReminderIsDue,
@@ -82,30 +88,39 @@ export async function queuePlannedRun(
   ctx: AuthenticatedContext,
   input: QueuePlannedRunInput,
 ): Promise<{ runId: string; status: 'starting' }> {
-  const [plan] = await ctx.db
-    .select({
-      id: plannedTasks.id,
-      externalId: plannedTasks.externalId,
-      title: plannedTasks.title,
-      instruction: plannedTasks.instruction,
-      scope: plannedTasks.scope,
-      repeatType: plannedTasks.repeatType,
-      rrule: plannedTasks.rrule,
-      endsAt: plannedTasks.endsAt,
-      status: plannedTasks.status,
-      userId: plannedTasks.userId,
-      userStatus: users.status,
-    })
-    .from(plannedTasks)
-    .innerJoin(users, eq(users.id, plannedTasks.userId))
-    .where(
-      and(
-        eq(plannedTasks.externalId, input.plannedTaskId),
-        eq(users.externalId, ctx.userId),
-        eq(users.status, 'active'),
-      ),
-    )
-    .limit(1);
+  return withPlannedContext(ctx, (bound) => queuePlannedRunOwned(bound, input));
+}
+
+async function queuePlannedRunOwned(
+  ctx: AuthenticatedContext,
+  input: QueuePlannedRunInput,
+): Promise<{ runId: string; status: 'starting' }> {
+  const [plan] = await runPlannedDatabase(async () =>
+    ctx.db
+      .select({
+        id: plannedTasks.id,
+        externalId: plannedTasks.externalId,
+        title: plannedTasks.title,
+        instruction: plannedTasks.instruction,
+        scope: plannedTasks.scope,
+        repeatType: plannedTasks.repeatType,
+        rrule: plannedTasks.rrule,
+        endsAt: plannedTasks.endsAt,
+        status: plannedTasks.status,
+        userId: plannedTasks.userId,
+        userStatus: users.status,
+      })
+      .from(plannedTasks)
+      .innerJoin(users, eq(users.id, plannedTasks.userId))
+      .where(
+        and(
+          eq(plannedTasks.externalId, input.plannedTaskId),
+          eq(users.externalId, ctx.userId),
+          eq(users.status, 'active'),
+        ),
+      )
+      .limit(1),
+  );
   if (!plan) throw new TRPCError({ code: 'NOT_FOUND', message: '规划任务不存在' });
   const allowed = input.claimed
     ? plan.status === 'running'
@@ -114,17 +129,19 @@ export async function queuePlannedRun(
 
   if (input.trigger === 'scheduled') {
     const seriesScheduledFor = input.seriesScheduledFor ?? input.scheduledFor;
-    const [existing] = await ctx.db
-      .select({ externalId: plannedTaskRuns.externalId, status: plannedTaskRuns.status })
-      .from(plannedTaskRuns)
-      .where(
-        and(
-          eq(plannedTaskRuns.plannedTaskId, plan.id),
-          eq(plannedTaskRuns.seriesScheduledFor, seriesScheduledFor),
-          eq(plannedTaskRuns.trigger, 'scheduled'),
-        ),
-      )
-      .limit(1);
+    const [existing] = await runPlannedDatabase(async () =>
+      ctx.db
+        .select({ externalId: plannedTaskRuns.externalId, status: plannedTaskRuns.status })
+        .from(plannedTaskRuns)
+        .where(
+          and(
+            eq(plannedTaskRuns.plannedTaskId, plan.id),
+            eq(plannedTaskRuns.seriesScheduledFor, seriesScheduledFor),
+            eq(plannedTaskRuns.trigger, 'scheduled'),
+          ),
+        )
+        .limit(1),
+    );
     if (existing) {
       if (existing.status === 'pending') startRunDispatch(ctx, existing.externalId);
       if (existing.status === 'cancelled') {
@@ -150,30 +167,34 @@ export async function queuePlannedRun(
 
   const contentOverride =
     input.trigger === 'scheduled'
-      ? await ctx.db
-          .select({ instruction: plannedTaskOccurrenceOverrides.instruction })
-          .from(plannedTaskOccurrenceOverrides)
-          .where(
-            and(
-              eq(plannedTaskOccurrenceOverrides.plannedTaskId, plan.id),
-              eq(
-                plannedTaskOccurrenceOverrides.originalScheduledFor,
-                input.seriesScheduledFor ?? input.scheduledFor,
+      ? await runPlannedDatabase(async () =>
+          ctx.db
+            .select({ instruction: plannedTaskOccurrenceOverrides.instruction })
+            .from(plannedTaskOccurrenceOverrides)
+            .where(
+              and(
+                eq(plannedTaskOccurrenceOverrides.plannedTaskId, plan.id),
+                eq(
+                  plannedTaskOccurrenceOverrides.originalScheduledFor,
+                  input.seriesScheduledFor ?? input.scheduledFor,
+                ),
               ),
-            ),
-          )
-          .limit(1)
-          .then(([override]) => parseOccurrenceContent(override?.instruction ?? null))
+            )
+            .limit(1)
+            .then(([override]) => parseOccurrenceContent(override?.instruction ?? null)),
+        )
       : null;
-  const storedItems = await ctx.db
-    .select({
-      id: plannedTaskItems.id,
-      seq: plannedTaskItems.seq,
-      instruction: plannedTaskItems.instruction,
-    })
-    .from(plannedTaskItems)
-    .where(and(eq(plannedTaskItems.plannedTaskId, plan.id), eq(plannedTaskItems.enabled, true)))
-    .orderBy(plannedTaskItems.seq);
+  const storedItems = await runPlannedDatabase(async () =>
+    ctx.db
+      .select({
+        id: plannedTaskItems.id,
+        seq: plannedTaskItems.seq,
+        instruction: plannedTaskItems.instruction,
+      })
+      .from(plannedTaskItems)
+      .where(and(eq(plannedTaskItems.plannedTaskId, plan.id), eq(plannedTaskItems.enabled, true)))
+      .orderBy(plannedTaskItems.seq),
+  );
   const items = contentOverride
     ? contentOverride.items.map((instruction, seq) => ({ id: null, seq, instruction }))
     : storedItems;
@@ -182,63 +203,80 @@ export async function queuePlannedRun(
   }
 
   const runExternalId = newExternalId('plannedTaskRun');
-  await ctx.db.transaction(async (tx) => {
-    const [lockedOwner] = await tx
-      .select({ status: users.status })
-      .from(users)
-      .where(eq(users.id, plan.userId))
-      .limit(1)
-      .for('update');
-    if (lockedOwner?.status !== 'active') {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: '当前状态不能执行' });
-    }
-    const [lockedPlan] = await tx
-      .select({ status: plannedTasks.status })
-      .from(plannedTasks)
-      .where(eq(plannedTasks.id, plan.id))
-      .limit(1)
-      .for('update');
-    if (!lockedPlan) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: '规划任务不存在' });
-    }
-    const stillAllowed = input.claimed
-      ? lockedPlan.status === 'running'
-      : plannedTaskCanRunNow(lockedPlan.status as PlannedTaskStatus);
-    if (!stillAllowed) {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: '当前状态不能执行' });
-    }
-    const result = await tx.insert(plannedTaskRuns).values({
-      externalId: runExternalId,
-      plannedTaskId: plan.id,
-      title: resolvePlannedRunTitle(plan.title, contentOverride),
-      scheduledFor: input.scheduledFor,
-      seriesScheduledFor: input.seriesScheduledFor ?? input.scheduledFor,
-      trigger: input.trigger,
-      status: 'pending',
-      itemsTotal: items.length,
-    });
-    const runId = readInsertId(result);
-    await tx.insert(plannedTaskRunItems).values(
-      items.map((item) => ({
-        externalId: newExternalId('plannedTaskRunItem'),
-        plannedTaskRunId: runId,
-        plannedTaskItemId: item.id,
-        seq: item.seq,
-        instruction: composePlannedItemInstruction({
-          itemInstruction: item.instruction,
-          sharedInstruction: contentOverride?.instruction ?? plan.instruction,
-          multiple: contentOverride ? contentOverride.items.length > 1 : plan.scope === 'multiple',
-        }),
-        status: 'pending',
-      })),
-    );
-  });
+  await runPlannedDatabase(async () =>
+    ctx.db.transaction(async (tx) => {
+      const [lockedOwner] = await runPlannedDatabase(async () =>
+        tx
+          .select({ status: users.status })
+          .from(users)
+          .where(eq(users.id, plan.userId))
+          .limit(1)
+          .for('update'),
+      );
+      if (lockedOwner?.status !== 'active') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '当前状态不能执行' });
+      }
+      const [lockedPlan] = await runPlannedDatabase(async () =>
+        tx
+          .select({ status: plannedTasks.status })
+          .from(plannedTasks)
+          .where(eq(plannedTasks.id, plan.id))
+          .limit(1)
+          .for('update'),
+      );
+      if (!lockedPlan) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '规划任务不存在' });
+      }
+      const stillAllowed = input.claimed
+        ? lockedPlan.status === 'running'
+        : plannedTaskCanRunNow(lockedPlan.status as PlannedTaskStatus);
+      if (!stillAllowed) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '当前状态不能执行' });
+      }
+      const result = await runPlannedWrite(
+        async () =>
+          tx.insert(plannedTaskRuns).values({
+            externalId: runExternalId,
+            plannedTaskId: plan.id,
+            title: resolvePlannedRunTitle(plan.title, contentOverride),
+            scheduledFor: input.scheduledFor,
+            seriesScheduledFor: input.seriesScheduledFor ?? input.scheduledFor,
+            trigger: input.trigger,
+            status: 'pending',
+            itemsTotal: items.length,
+          }),
+        { exactRows: 1, insertId: true },
+      );
+      const runId = readInsertId(result);
+      await runPlannedWrite(
+        async () =>
+          tx.insert(plannedTaskRunItems).values(
+            items.map((item) => ({
+              externalId: newExternalId('plannedTaskRunItem'),
+              plannedTaskRunId: runId,
+              plannedTaskItemId: item.id,
+              seq: item.seq,
+              instruction: composePlannedItemInstruction({
+                itemInstruction: item.instruction,
+                sharedInstruction: contentOverride?.instruction ?? plan.instruction,
+                multiple: contentOverride
+                  ? contentOverride.items.length > 1
+                  : plan.scope === 'multiple',
+              }),
+              status: 'pending',
+            })),
+          ),
+        { exactRows: items.length },
+      );
+    }),
+  );
   startRunDispatch(ctx, runExternalId);
   return { runId: runExternalId, status: 'starting' };
 }
 
 function startRunDispatch(ctx: AuthenticatedContext, runExternalId: string): void {
-  void dispatchPlannedRun(ctx, runExternalId).catch((error) => {
+  const pending = withPlannedContext(ctx, (bound) => dispatchPlannedRunOwned(bound, runExternalId));
+  void pending.catch((error) => {
     ctx.logger.error(
       { error: error instanceof Error ? error.message : String(error), runExternalId },
       'planned-runner: dispatch crashed',
@@ -250,40 +288,55 @@ export async function dispatchPlannedRun(
   ctx: AuthenticatedContext,
   runExternalId: string,
 ): Promise<void> {
-  const [run] = await ctx.db
-    .select({
-      id: plannedTaskRuns.id,
-      status: plannedTaskRuns.status,
-      scheduledFor: plannedTaskRuns.scheduledFor,
-      seriesScheduledFor: plannedTaskRuns.seriesScheduledFor,
-      trigger: plannedTaskRuns.trigger,
-      planId: plannedTasks.id,
-      planExternalId: plannedTasks.externalId,
-      planTitle: plannedTasks.title,
-      repeatType: plannedTasks.repeatType,
-      rrule: plannedTasks.rrule,
-      endsAt: plannedTasks.endsAt,
-      userId: plannedTasks.userId,
-    })
-    .from(plannedTaskRuns)
-    .innerJoin(plannedTasks, eq(plannedTasks.id, plannedTaskRuns.plannedTaskId))
-    .where(eq(plannedTaskRuns.externalId, runExternalId))
-    .limit(1);
+  return withPlannedContext(ctx, (bound) => dispatchPlannedRunOwned(bound, runExternalId));
+}
+
+async function dispatchPlannedRunOwned(
+  ctx: AuthenticatedContext,
+  runExternalId: string,
+): Promise<void> {
+  const [run] = await runPlannedDatabase(async () =>
+    ctx.db
+      .select({
+        id: plannedTaskRuns.id,
+        status: plannedTaskRuns.status,
+        scheduledFor: plannedTaskRuns.scheduledFor,
+        seriesScheduledFor: plannedTaskRuns.seriesScheduledFor,
+        trigger: plannedTaskRuns.trigger,
+        planId: plannedTasks.id,
+        planExternalId: plannedTasks.externalId,
+        planTitle: plannedTasks.title,
+        repeatType: plannedTasks.repeatType,
+        rrule: plannedTasks.rrule,
+        endsAt: plannedTasks.endsAt,
+        userId: plannedTasks.userId,
+      })
+      .from(plannedTaskRuns)
+      .innerJoin(plannedTasks, eq(plannedTasks.id, plannedTaskRuns.plannedTaskId))
+      .where(eq(plannedTaskRuns.externalId, runExternalId))
+      .limit(1),
+  );
   if (!run || run.status !== 'pending') return;
-  const runItems = await ctx.db
-    .select({
-      id: plannedTaskRunItems.id,
-      seq: plannedTaskRunItems.seq,
-      instruction: plannedTaskRunItems.instruction,
-    })
-    .from(plannedTaskRunItems)
-    .where(eq(plannedTaskRunItems.plannedTaskRunId, run.id))
-    .orderBy(plannedTaskRunItems.seq);
+  const runItems = await runPlannedDatabase(async () =>
+    ctx.db
+      .select({
+        id: plannedTaskRunItems.id,
+        seq: plannedTaskRunItems.seq,
+        instruction: plannedTaskRunItems.instruction,
+      })
+      .from(plannedTaskRunItems)
+      .where(eq(plannedTaskRunItems.plannedTaskRunId, run.id))
+      .orderBy(plannedTaskRunItems.seq),
+  );
   const startedAt = new Date();
-  const claim = await ctx.db
-    .update(plannedTaskRuns)
-    .set({ status: 'dispatching', startedAt })
-    .where(and(eq(plannedTaskRuns.id, run.id), eq(plannedTaskRuns.status, 'pending')));
+  const claim = await runPlannedWrite(
+    async () =>
+      ctx.db
+        .update(plannedTaskRuns)
+        .set({ status: 'dispatching', startedAt })
+        .where(and(eq(plannedTaskRuns.id, run.id), eq(plannedTaskRuns.status, 'pending'))),
+    { maxRows: 1 },
+  );
   if (readAffectedRows(claim) === 0) return;
 
   try {
@@ -296,81 +349,137 @@ export async function dispatchPlannedRun(
     const dispatchResult = await dispatchSpecialOrGeneric({
       special: specialDispatcher
         ? () =>
-            specialDispatcher({
-              ctx,
-              runExternalId,
-              plannedTaskInternalId: run.planId,
-              trigger: run.trigger as 'scheduled' | 'manual',
+            withPlannedContext(ctx, async (bound) => {
+              const result = await specialDispatcher({
+                ctx: bound,
+                runExternalId,
+                plannedTaskInternalId: run.planId,
+                trigger: run.trigger as 'scheduled' | 'manual',
+              });
+              if (bound.executionLifetime) {
+                if (
+                  !result ||
+                  typeof result.handled !== 'boolean' ||
+                  (result.handled && typeof result.ok !== 'boolean')
+                ) {
+                  throw new Error('PLANNED_DRAIN_UNPROVEN_SPECIAL_ACK');
+                }
+                const stopped =
+                  result.handled &&
+                  result.stoppedForInactiveOwner === true &&
+                  result.ownerUserId === run.userId;
+                if (result.handled && !stopped && (!result.ok || result.persisted !== true)) {
+                  retainPlannedUncertainty();
+                }
+              }
+              return result;
             })
         : null,
       generic: async () => {
         if (runItems.length === 1) {
           const item = runItems[0];
           if (!item) throw new Error(`规划运行 ${runExternalId} 缺少任务项`);
-          const result = await tasksRouter.createCaller(ctx).create({
-            intent: item.instruction,
-            clientRequestId: `planned:${runExternalId}:${item.seq}`,
-          });
-          const [task] = await ctx.db
-            .select({ id: tasks.id })
-            .from(tasks)
-            .where(eq(tasks.externalId, result.taskId))
-            .limit(1);
+          const result = await withPlannedContext(ctx, (bound) =>
+            tasksRouter.createCaller(bound).create({
+              intent: item.instruction,
+              clientRequestId: `planned:${runExternalId}:${item.seq}`,
+            }),
+          );
+          const [task] = await runPlannedDatabase(async () =>
+            ctx.db
+              .select({ id: tasks.id })
+              .from(tasks)
+              .where(eq(tasks.externalId, result.taskId))
+              .limit(1),
+          );
           if (!task) throw new Error(`创建任务 ${result.taskId} 后未找到记录`);
           if (!(await plannedOwnerAllowsExecution(ctx.db, run.userId, 'task-persist'))) {
             await cancelUndispatchedPlannedRun(ctx.db, run.id);
             return;
           }
-          await ctx.db.transaction(async (tx) => {
-            const transition = await tx
-              .update(plannedTaskRuns)
-              .set({ status: 'running', taskId: task.id })
-              .where(
-                and(eq(plannedTaskRuns.id, run.id), eq(plannedTaskRuns.status, 'dispatching')),
+          await runPlannedDatabase(async () =>
+            ctx.db.transaction(async (tx) => {
+              const transition = await runPlannedWrite(
+                async () =>
+                  tx
+                    .update(plannedTaskRuns)
+                    .set({ status: 'running', taskId: task.id })
+                    .where(
+                      and(
+                        eq(plannedTaskRuns.id, run.id),
+                        eq(plannedTaskRuns.status, 'dispatching'),
+                      ),
+                    ),
+                { maxRows: 1 },
               );
-            if (readAffectedRows(transition) === 0) return;
-            await tx
-              .update(plannedTaskRunItems)
-              .set({ status: 'running', taskId: task.id })
-              .where(
-                and(eq(plannedTaskRunItems.id, item.id), eq(plannedTaskRunItems.status, 'pending')),
+              if (readAffectedRows(transition) === 0) return;
+              await runPlannedWrite(
+                async () =>
+                  tx
+                    .update(plannedTaskRunItems)
+                    .set({ status: 'running', taskId: task.id })
+                    .where(
+                      and(
+                        eq(plannedTaskRunItems.id, item.id),
+                        eq(plannedTaskRunItems.status, 'pending'),
+                      ),
+                    ),
+                { maxRows: 1 },
               );
-            genericPersisted = true;
-          });
+              genericPersisted = true;
+            }),
+          );
         } else {
-          const result = await batchTasksRouter.createCaller(ctx).create({
-            name: run.planTitle,
-            prompts: runItems.map((item) => item.instruction),
-          });
-          const [batch] = await ctx.db
-            .select({ id: batchTasks.id })
-            .from(batchTasks)
-            .where(eq(batchTasks.externalId, result.batchId))
-            .limit(1);
+          const result = await withPlannedContext(ctx, (bound) =>
+            batchTasksRouter.createCaller(bound).create({
+              name: run.planTitle,
+              prompts: runItems.map((item) => item.instruction),
+            }),
+          );
+          const [batch] = await runPlannedDatabase(async () =>
+            ctx.db
+              .select({ id: batchTasks.id })
+              .from(batchTasks)
+              .where(eq(batchTasks.externalId, result.batchId))
+              .limit(1),
+          );
           if (!batch) throw new Error(`创建批量任务 ${result.batchId} 后未找到记录`);
           if (!(await plannedOwnerAllowsExecution(ctx.db, run.userId, 'batch-persist'))) {
             await cancelUndispatchedPlannedRun(ctx.db, run.id);
             return;
           }
-          await ctx.db.transaction(async (tx) => {
-            const transition = await tx
-              .update(plannedTaskRuns)
-              .set({ status: 'running', batchTaskId: batch.id })
-              .where(
-                and(eq(plannedTaskRuns.id, run.id), eq(plannedTaskRuns.status, 'dispatching')),
+          await runPlannedDatabase(async () =>
+            ctx.db.transaction(async (tx) => {
+              const transition = await runPlannedWrite(
+                async () =>
+                  tx
+                    .update(plannedTaskRuns)
+                    .set({ status: 'running', batchTaskId: batch.id })
+                    .where(
+                      and(
+                        eq(plannedTaskRuns.id, run.id),
+                        eq(plannedTaskRuns.status, 'dispatching'),
+                      ),
+                    ),
+                { maxRows: 1 },
               );
-            if (readAffectedRows(transition) === 0) return;
-            await tx
-              .update(plannedTaskRunItems)
-              .set({ status: 'running' })
-              .where(
-                and(
-                  eq(plannedTaskRunItems.plannedTaskRunId, run.id),
-                  eq(plannedTaskRunItems.status, 'pending'),
-                ),
+              if (readAffectedRows(transition) === 0) return;
+              await runPlannedWrite(
+                async () =>
+                  tx
+                    .update(plannedTaskRunItems)
+                    .set({ status: 'running' })
+                    .where(
+                      and(
+                        eq(plannedTaskRunItems.plannedTaskRunId, run.id),
+                        eq(plannedTaskRunItems.status, 'pending'),
+                      ),
+                    ),
+                {},
               );
-            genericPersisted = true;
-          });
+              genericPersisted = true;
+            }),
+          );
         }
       },
     });
@@ -390,29 +499,42 @@ export async function dispatchPlannedRun(
       dispatchResult.handled && dispatchResult.ok ? 'completed' : undefined,
     );
   } catch (error) {
+    retainPlannedUncertainty();
     const message = (error instanceof Error ? error.message : String(error)).slice(0, 2000);
-    const failed = await ctx.db.transaction(async (tx) => {
-      const transition = await tx
-        .update(plannedTaskRuns)
-        .set({
-          status: 'failed',
-          itemsFailed: runItems.length,
-          errorMessage: message,
-          completedAt: new Date(),
-        })
-        .where(and(eq(plannedTaskRuns.id, run.id), eq(plannedTaskRuns.status, 'dispatching')));
-      if (readAffectedRows(transition) === 0) return false;
-      await tx
-        .update(plannedTaskRunItems)
-        .set({ status: 'failed', errorMessage: message, completedAt: new Date() })
-        .where(
-          and(
-            eq(plannedTaskRunItems.plannedTaskRunId, run.id),
-            eq(plannedTaskRunItems.status, 'pending'),
-          ),
+    const failed = await runPlannedDatabase(async () =>
+      ctx.db.transaction(async (tx) => {
+        const transition = await runPlannedWrite(
+          async () =>
+            tx
+              .update(plannedTaskRuns)
+              .set({
+                status: 'failed',
+                itemsFailed: runItems.length,
+                errorMessage: message,
+                completedAt: new Date(),
+              })
+              .where(
+                and(eq(plannedTaskRuns.id, run.id), eq(plannedTaskRuns.status, 'dispatching')),
+              ),
+          { maxRows: 1 },
         );
-      return true;
-    });
+        if (readAffectedRows(transition) === 0) return false;
+        await runPlannedWrite(
+          async () =>
+            tx
+              .update(plannedTaskRunItems)
+              .set({ status: 'failed', errorMessage: message, completedAt: new Date() })
+              .where(
+                and(
+                  eq(plannedTaskRunItems.plannedTaskRunId, run.id),
+                  eq(plannedTaskRunItems.status, 'pending'),
+                ),
+              ),
+          {},
+        );
+        return true;
+      }),
+    );
     if (failed) {
       await updatePlanAfterDispatch(ctx.db, { ...run, userId: run.userId }, false, message);
     }
@@ -441,7 +563,10 @@ async function updatePlanAfterDispatch(
     lastError: error,
   };
   if (run.trigger !== 'scheduled') {
-    await db.update(plannedTasks).set(base).where(eq(plannedTasks.id, run.planId));
+    await runPlannedWrite(
+      async () => db.update(plannedTasks).set(base).where(eq(plannedTasks.id, run.planId)),
+      { maxRows: 1 },
+    );
     return;
   }
   if (!(await plannedOwnerAllowsExecution(db, run.userId, 'schedule-advance'))) return;
@@ -456,10 +581,14 @@ async function updatePlanAfterDispatch(
       ? schedule.nextRunAt
       : null;
   const status = nextRunAt ? 'active' : schedule.status;
-  await db
-    .update(plannedTasks)
-    .set({ ...base, status, nextRunAt, lastReminderRun: null })
-    .where(and(eq(plannedTasks.id, run.planId), eq(plannedTasks.status, 'running')));
+  await runPlannedWrite(
+    async () =>
+      db
+        .update(plannedTasks)
+        .set({ ...base, status, nextRunAt, lastReminderRun: null })
+        .where(and(eq(plannedTasks.id, run.planId), eq(plannedTasks.status, 'running'))),
+    { maxRows: 1 },
+  );
 }
 
 export async function syncPlannedRuns(db: DB): Promise<number> {
@@ -907,23 +1036,33 @@ export async function plannedTick(deps: PlannedRunnerDeps): Promise<void> {
 
 async function cancelUndispatchedPlannedRun(db: DB, runId: number): Promise<boolean> {
   const completedAt = new Date();
-  return db.transaction(async (tx) => {
-    const transition = await tx
-      .update(plannedTaskRuns)
-      .set({ status: 'cancelled', completedAt })
-      .where(and(eq(plannedTaskRuns.id, runId), eq(plannedTaskRuns.status, 'dispatching')));
-    if (readAffectedRows(transition) === 0) return false;
-    await tx
-      .update(plannedTaskRunItems)
-      .set({ status: 'cancelled', completedAt })
-      .where(
-        and(
-          eq(plannedTaskRunItems.plannedTaskRunId, runId),
-          eq(plannedTaskRunItems.status, 'pending'),
-        ),
+  return runPlannedDatabase(async () =>
+    db.transaction(async (tx) => {
+      const transition = await runPlannedWrite(
+        async () =>
+          tx
+            .update(plannedTaskRuns)
+            .set({ status: 'cancelled', completedAt })
+            .where(and(eq(plannedTaskRuns.id, runId), eq(plannedTaskRuns.status, 'dispatching'))),
+        { maxRows: 1 },
       );
-    return true;
-  });
+      if (readAffectedRows(transition) === 0) return false;
+      await runPlannedWrite(
+        async () =>
+          tx
+            .update(plannedTaskRunItems)
+            .set({ status: 'cancelled', completedAt })
+            .where(
+              and(
+                eq(plannedTaskRunItems.plannedTaskRunId, runId),
+                eq(plannedTaskRunItems.status, 'pending'),
+              ),
+            ),
+        {},
+      );
+      return true;
+    }),
+  );
 }
 
 async function plannedOwnerAllowsExecution(
@@ -938,7 +1077,7 @@ async function plannedOwnerAllowsExecution(
     | 'queue',
 ): Promise<boolean> {
   try {
-    return await accountClosureAllowsExecution(db, userId);
+    return await runPlannedDatabase(async () => accountClosureAllowsExecution(db, userId));
   } catch (error) {
     logger.warn(
       { error: error instanceof Error ? error.message : String(error), userId, boundary },
