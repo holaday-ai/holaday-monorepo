@@ -311,43 +311,4 @@ export function spawnWebsockify(
   return wrap(child, logger, label);
 }
 
-/**
- * Poll the CDP /json/version endpoint until Brave is accepting
- * connections, or the timeout elapses. Brave typically takes
- * 500-1500ms cold-start; headful Brave with a fresh profile is on the
- * slower end, so the default is 10s.
- *
- * Returns the version string on success; throws otherwise. Uses the
- * plain global fetch (Node 20+) and an AbortController for the
- * per-request timeout.
- */
-export async function waitForCdpReady(
-  cdpPort: number,
-  timeoutMs = 10_000,
-): Promise<string> {
-  const deadline = Date.now() + timeoutMs;
-  let lastErr: unknown = null;
-  while (Date.now() < deadline) {
-    try {
-      const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), 2_000);
-      const res = await fetch(`http://127.0.0.1:${cdpPort}/json/version`, {
-        signal: controller.signal,
-      });
-      clearTimeout(t);
-      if (res.ok) {
-        const body = (await res.json()) as { Browser?: string };
-        return body.Browser ?? 'unknown';
-      }
-      lastErr = new Error(`HTTP ${res.status}`);
-    } catch (err) {
-      lastErr = err;
-    }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  throw new Error(
-    `waitForCdpReady(${cdpPort}): timed out after ${timeoutMs}ms (last err: ${
-      lastErr instanceof Error ? lastErr.message : String(lastErr)
-    })`,
-  );
-}
+export { waitForCdpReady } from './cdp-readiness.js';

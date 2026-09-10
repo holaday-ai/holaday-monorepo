@@ -225,3 +225,13 @@ PlaywrightExecutor.connect/reconnectIfStale实际connectOverCDP、cleanContext�
 测试使用真实executor/drain、constructor注入合成SDK；验证六阶段挂起/错误/getter、父ACK后raw仍活动、私有pin、失效scope与旧无scope路径。没有启动浏览器、连接CDP或读任何真实页面/cookies。
 
 仍未覆盖launchManaged、disconnect/disposeCleanContext、assertCleanContext、readiness fetch/body/timer、pool ready hook/banner timer、route handler原始操作及资源存续期、OS组/后代终止。SDK Promise结束也不证明长寿命浏览器资源已清理；统一boot、所有入口和平台/生产门禁保持未完成。本单元不能解除发布阻断，下一步继续这些原始清理及资源/后台链。
+
+## 3D-3b-3c-3 本地增量：CDP就绪探测响应生命周期（2026-09-11）
+
+waitForCdpReady从spawn末端提取到cdp-readiness模块，原调用导出保持。整轮poll、每次响应及JSON读取/重试等待都在已有scope下同步预留子owner。响应pin从fetch派发前持续至body读取和finally取消结束；取消是当前响应的已接纳收尾，不新建根或依赖新准入，因此后续unknown/blocked不会跳过这份已取得响应的清理。
+
+两秒Abort覆盖响应体而非只覆盖headers，并受绝对总deadline约束；派发前、headers/JSON/cleanup后同时核对时钟和abort，整轮返回前再验总deadline，迟到成功不能认证ready，单次过期先物理清理再按剩余预算重试。fetch拒绝或JSON/取消结束均清timer。非2xx或未读取的body在重试/返回前明确cancel并等待。在任何child或URL构造前严格验证端口是number整数1..65535、timeout为有限正数，不强转对象/字符串；保证固定loopback /json/version首跳，redirect:error不跟随重定向。该只读探测的连接拒绝/HTTP/JSON错误按known重试；取消失败保留unknown且不再开始新请求。这个分类不适用于任意GET、模型调用或业务提交。
+
+测试从spawn真实导出调用，使用真实ExecutionDrain/Response/ReadableStream及合成fetch，不访问网络。验证fetch/json/cancel在父ACK和Abort后继续活动，JSON仍有独立pin，取消保留原响应pin；blocked/unknown后仍清已有响应但不发新请求，原始取消失败独立阻断，timer无遗留。
+
+该单元不是浏览器资源/OS或全进程排空证明；浏览器spawn/launch/disconnect/clean-context、pool hook/timer、route事件、OS后代和其他入口/boot/生产门禁仍未完成。生产与Qwen browser门禁未触碰，不能据此发布局部组件。
