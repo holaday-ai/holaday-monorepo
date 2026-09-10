@@ -193,3 +193,13 @@ PlaywrightExecutor的getPage/resetPageForTask/reopenActivePage页面创建/关�
 测试直接运行真实PlaywrightExecutor与ExecutionDrain，constructor只注入合成CDP/page传输，时间上限使用fake timers推进而不是实际启动浏览器。native sharp.metadata一项在原生异步边界替换回执以观察挂起；旧executor回归另外运行真实sharp。页面操作计数不证明浏览器整个OS进程、网页子资源/网络事件或所有动作已结束。
 
 仍未覆盖BrowserPool分配/保留timer/子进程终止/文件清理，CDP connect/reconnect/网络路由回调和其他动作；persistVisionOutcome原始SQL及direct-open catch处的失败回执仍后续。上述页面方法可能经过未接的重连辅助链，不因此获得完整覆盖资格。保持Qwen browser未迁移门禁，index不启用，单元不可独立发布。下一步优先实际结果保存与pool/连接生命周期，之后Brave/batch及其余入口。
+
+## 3D-3b-3b 本地增量：Vision结果真实事务与不确定回执（2026-09-11）
+
+persistVisionOutcome复用同一仓储已有runQueueDatabase/runQueueWrite原始边界包装（名称沿用最初队列接线，并非仅队列可用的权限来源），逐一登记select、transaction、UPDATE与事件INSERT。真实Drizzle事务Promise包含BEGIN/COMMIT/ROLLBACK；后者在已进入事务的收尾路径继续等待，不能因错误被caller捕获就虚假idle。失败或不可信写入ACK保留unknown，阻止之后新的保存调用。
+
+受控scope下UPDATE只接受0/1，0仍为明确状态CAS拒绝且不记录事件；事件INSERT必须1行。正常五类outcome的允许源状态、结果字段/事件内容和旧无scope回执行为保持不变。父ACK前启动的原始read仍持有，但父结束后不能以旧权限再开启transaction；调用者完整异步保存链仍必须在自己的owner内await或预留。
+
+测试以真实TaskRepository、Drizzle、ExecutionDrain及合成mysql2传输核对六个协议阶段、迟到失败、回执、unknown/sealed/expired和旧业务行为。额外从TypeScript AST编译真实未改的完整dispatchDirectOpen函数，配真实repo/runDirectOpen和合成页面接口，验证事务commit之前不广播、原始错误后catch不再补发失败写。此为caller区段集成验证，未绕过完整router的Qwen browser门禁，不是实际HTTP/浏览器/模型/数据库或生产E2E。
+
+仍不具备全链发布资格：BrowserPool生命周期/OS后代/保留timer/连接/路由回调、其余任务分支与后台producer、其他入口、统一boot/停止、全局恢复与业务对账、首次维护与生产平台门禁尚未完成。未修改tasks.ts、业务SQL/状态规则、禁止领域或配置；下一单元继续pool和连接生命周期，不能以本次结果保存成功替代那些证明。

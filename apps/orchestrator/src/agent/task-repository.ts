@@ -898,11 +898,13 @@ export class TaskRepository {
           metadata?: Record<string, unknown>;
         },
   ): Promise<{ persisted: boolean }> {
-    const [taskRow] = await this.db
-      .select({ id: tasks.id })
-      .from(tasks)
-      .where(eq(tasks.externalId, taskExternalId))
-      .limit(1);
+    const [taskRow] = await runQueueDatabase(() =>
+      this.db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(eq(tasks.externalId, taskExternalId))
+        .limit(1),
+    );
     if (!taskRow) throw new Error(`task ${taskExternalId} not found in DB`);
     const taskRowId = taskRow.id;
 
@@ -988,37 +990,45 @@ export class TaskRepository {
     // the WS, which clobbers the in-progress awaiting_user state in
     // the SPA's task store.
     let persisted = true;
-    await this.db.transaction(async (tx) => {
-      const updateResult = await tx
-        .update(tasks)
-        .set(update)
-        .where(
-          and(
-            eq(tasks.id, taskRowId),
-            inArray(tasks.status, [...taskRunnerOutcomeSourceStatuses(outcome.status)]),
-          ),
+    await runQueueDatabase(() =>
+      this.db.transaction(async (tx) => {
+        const updateResult = await runQueueWrite(() =>
+          tx
+            .update(tasks)
+            .set(update)
+            .where(
+              and(
+                eq(tasks.id, taskRowId),
+                inArray(tasks.status, [...taskRunnerOutcomeSourceStatuses(outcome.status)]),
+              ),
+            ),
         );
-      const affected = extractMysqlAffectedRows(updateResult);
-      if (affected === 0) {
-        // Row is parked or terminal; UPDATE was a no-op. Skip the
-        // event insert too — recording a `vision.completed` event
-        // when the row is still waiting, paused, or already terminal
-        // would be wrong / misleading.
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[task-repository] refusing illegal runner outcome → ${outcome.status} for ${taskExternalId} (state guard)`,
+        const affected = extractMysqlAffectedRows(updateResult);
+        if (affected === 0) {
+          // Row is parked or terminal; UPDATE was a no-op. Skip the
+          // event insert too — recording a `vision.completed` event
+          // when the row is still waiting, paused, or already terminal
+          // would be wrong / misleading.
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[task-repository] refusing illegal runner outcome → ${outcome.status} for ${taskExternalId} (state guard)`,
+          );
+          persisted = false;
+          return;
+        }
+        await runQueueWrite(
+          () =>
+            tx.insert(taskEvents).values({
+              externalId: newExternalId('taskEvent'),
+              taskId: taskRowId,
+              type: `vision.${outcome.status}`,
+              actor: 'system',
+              payload: eventPayload,
+            }),
+          1,
         );
-        persisted = false;
-        return;
-      }
-      await tx.insert(taskEvents).values({
-        externalId: newExternalId('taskEvent'),
-        taskId: taskRowId,
-        type: `vision.${outcome.status}`,
-        actor: 'system',
-        payload: eventPayload,
-      });
-    });
+      }),
+    );
     return { persisted };
   }
 
