@@ -35,8 +35,9 @@ class InstallationTests(unittest.TestCase):
                                          st_nlink=1 if kind == stat.S_IFREG else 2, attrs=[])
         package = "/usr/local/lib/holaday-pool-broker/releases/" + "a" * 40
         add(package)
-        for name in ("installation.py", "process_pin.py", "protocol.py", "launch_registration.py", "application_guard.py", "root_launch.py"):
+        for name in ("installation.py", "process_pin.py", "protocol.py", "launch_registration.py", "application_guard.py", "root_launch.py", "bootstrap.py", "bootstrap_input.py", "application_env_keys.json", "native-build-manifest.json"):
             add(package + "/" + name, mode=0o644, kind=stat.S_IFREG)
+        add(package + '/native-entry', mode=0o755, kind=stat.S_IFREG)
         for path in ("/etc/holaday-pool-broker", "/var/lib/holaday-pool-broker", "/run/holaday-pool-broker"):
             add(path, mode=0o700)
         add("/var/lib/holaday-pool-workers", uid=997, gid=997, mode=0o700)
@@ -79,6 +80,7 @@ class InstallationTests(unittest.TestCase):
         with self.system() as s:
             result = installation.inspect_installation("a" * 40)
             self.assertEqual((result.app_gid, result.browser_uid, result.browser_gid), (998, 997, 997))
+            self.assertEqual((result.app_name, result.app_home), ('holaday', '/var/lib/holaday'))
             self.assertEqual(set(path for path, _, _ in s.calls), set(s.paths))
             self.assertEqual(s.opened, {})
             self.assertNotIn("997", repr(result))
@@ -207,6 +209,19 @@ class InstallationTests(unittest.TestCase):
                     s.paths[path].st_uid = 998
                 self.reject(self.inspect)
                 self.assertEqual(s.opened, {})
+
+    def test_first_exec_package_members_are_required_and_not_app_writable(self):
+        for name in ('bootstrap.py', 'bootstrap_input.py', 'application_env_keys.json',
+                     'native-build-manifest.json', 'native-entry'):
+            for missing in (True, False):
+                with self.subTest(name=name, missing=missing), self.system() as s:
+                    path = s.package + '/' + name
+                    if missing:
+                        del s.paths[path]
+                    else:
+                        s.paths[path].st_uid = 998
+                    self.reject(self.inspect)
+                    self.assertEqual(s.opened, {})
 
     def test_open_stat_and_acl_errors_clean_all_acquired_fds(self):
         for name in ("open", "fstat", "listxattr"):

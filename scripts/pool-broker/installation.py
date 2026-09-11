@@ -14,6 +14,8 @@ class InstallationIdentity:
     app_gid: int = field(repr=False)
     browser_uid: int = field(repr=False)
     browser_gid: int = field(repr=False)
+    app_name: str = field(repr=False)
+    app_home: str = field(repr=False)
 
 
 class InstallationError(ValueError):
@@ -109,7 +111,7 @@ def _identities():
             or set(browser_groups) != {browser.pw_gid}):
         raise ValueError()
     _unique_snapshot(app, browser, app_group, browser_group)
-    return InstallationIdentity(app.pw_gid, browser.pw_uid, browser.pw_gid)
+    return InstallationIdentity(app.pw_gid, browser.pw_uid, browser.pw_gid, app.pw_name, app.pw_dir)
 
 
 def _object(fd, *, uid=0, gid=0, mode=None, regular=False):
@@ -173,8 +175,9 @@ def inspect_installation(candidate):
         identity = _identities()
         package = "/usr/local/lib/holaday-pool-broker/releases/" + candidate
         _walk(package, mode=0o755)
-        for name in ("installation.py", "process_pin.py", "protocol.py", "launch_registration.py", "application_guard.py", "root_launch.py"):
+        for name in ("installation.py", "process_pin.py", "protocol.py", "launch_registration.py", "application_guard.py", "root_launch.py", "bootstrap.py", "bootstrap_input.py", "application_env_keys.json", "native-build-manifest.json"):
             _walk(package + "/" + name, mode=0o644, regular=True)
+        _walk(package + '/native-entry', mode=0o755, regular=True)
         for path in ("/etc/holaday-pool-broker", "/var/lib/holaday-pool-broker", "/run/holaday-pool-broker"):
             _walk(path)
         _walk("/var/lib/holaday-pool-workers", uid=identity.browser_uid,

@@ -68,6 +68,32 @@ assert 'NODE_CHANNEL_FD' not in observed_node_env
 - [ ] 在受限维护范围核对配置清单完整性，只输出计数和一致性布尔；验证原脚本与新链的PATH、运行身份、空值和三文件优先级等效。不能加载/改变真实配置仅为方便本地测试。
 - [ ] 再完成root listener、一次性新启动事务、运行命令通道、持久资源和浏览器隔离的既定计划；所有GROUP_EXIT_UNPROVEN、首次旧版维护、回滚及单合成账号发布门禁保持。任一不明都不发布。
 
-## 本轮状态
+## 本地实现结果（2026-09-11，9d-2i）
 
-仅完成上述源码/官方语义核对与设计，不声称Task1–3实现或通过。140项是abe593a1上一轮本地验证记录，不是本轮原生证明。下一轮直接从Task1的键清单和闭环RED开始，按Task2接完生产者/消费者，避免重做9d-2g。
+Task1及Task2的本地源码/合成边界单元已完成；上面的原始验收清单中涉及实机的要求仍归Task3，不以本地通过替代。整个9d机制及发布未完成。
+
+- 已新增237项版本化继承键，覆盖本轮应用schema/直接读取/动态实参审计及独立审查发现的global-agent、Playwright和默认参数env别名。清单只含键与源码用途，未读取配置值，不意味着整个依赖树或生产继承环境已完成等效验证。
+- `GLOBAL_AGENT_ENVIRONMENT_VARIABLE_NAMESPACE`仅支持缺失或`GLOBAL_AGENT_`；空/其他前缀拒绝，不开放通配键。两个旧启动路径支持缺失、空值或固定路径，保留`${...:-default}`语义；其他非空路径拒绝。Playwright仅增加核实的精确别名，不开放`npm_*`。
+- HOME/USER/LOGNAME/XDG_RUNTIME_DIR由已验证NSS身份生成；PATH沿用旧脚本前置`/opt/node22/bin:`。空业务值继续保留；不读取/合并dotenv。DivineAPI及旧模型相关名字仅保留既有配置，不启用或更改相应功能。
+- 原生C核心完成HPR1预算、stdio元数据、memfd/短写/封印、FD清理和固定exec；`native_linux.c`与`native_entry_start.S`明确区分x86_64、aarch64 Linux ABI。Apple Clang已编译两种Linux目标的可重定位对象，不存在已验证的Linux链接产物，不选择或猜测生产架构。
+- 正式`bootstrap.main()`无字典/策略/命令参数。最早设置FD3 CLOEXEC；自包含地读取root-owned不可写路径、严格manifest、固定模块与工具摘要，再加载已校验代码bytes。清单仅从已校验bytes一次初始化私有frozenset，不二次读路径；普通未初始化decoder调用固定拒绝。读取原始封印输入后close3，新随机boot及固定登记socket再交真实root_launch；原始环境不传降权守卫。
+- 安装清单同步要求原生入口、bootstrap、decoder和两个JSON文件；启动包只能root:root拥有，程序不得使用setuid或文件capability。默认`native-build-manifest.json`明确`unverified`，空candidate/architecture/files/tools，实际启动必拒绝。不能把该模板手工填成“通过”来绕过Task3。
+
+### 本轮验证证据
+
+- TDD：decoder缺失及24项错误放行反例→修复；原生核心缺失→真实核心合成syscall GREEN；Linux ABI源码缺失4项→两架构对象编译GREEN；main缺失8项→真实登记/封印/guard链GREEN；包验证缺失2项→真实读取/加载单元GREEN；安装字段/清单10失败1异常→修复。
+- 独立审查两项Important：验证后清单重新读取、空启动路径误拒绝。各有真实RED→GREEN；另FD3在包校验前CLOEXEC反例RED→GREEN。最终唯一reviewer只读复核无剩余Critical/Important/必修Minor，未替主线程运行测试。
+- 当前完整本地测试187项通过，包含编译并执行真实C核心＋合成syscall，输出经真实decoder→main→真实root_launch/登记编码/封印→guard消费。该链的内核、socket和最终exec仍是模型；包信任另用合成文件系统验证，不能合称Linux实机端到端。
+- 所有测试串行；无安装、Docker、浏览器或生产访问。主草稿与冻结PR237候选保持。
+
+### 下一步与仍未证明的门禁
+
+Task3需在有效授权的Linux隔离目标完成真实架构/工具链、ELF无PT_INTERP/动态依赖、首次加载注入、同PID、memfd/FD、setpriv身份/组/caps/NNP、PM2日志/退出/重启和实际配置等效证据。摘要验证不能追溯证明解释器或首入口执行前未被替换；固定安装链及系统库可信性仍需平台验证。
+
+本机没有可用Linux执行/链接证据，禁止自行安装或启动Docker补洞。可继续既定root listener、单次新启动事务、运行通道及持久资源的本地工作，但不得激活本入口或重做已完成单元冒充进展。旧08:30 JST生产窗口已过；GROUP_EXIT_UNPROVEN、首次维护/回滚及整个发布门禁保持。
+
+### ABI依据（源码参考，不是目标平台验收）
+
+- [Linux v5.15 x86_64 syscall表](https://github.com/torvalds/linux/blob/v5.15/arch/x86/entry/syscalls/syscall_64.tbl)
+- [Linux v5.15 generic syscall表](https://github.com/torvalds/linux/blob/v5.15/include/uapi/asm-generic/unistd.h)
+- [Linux v5.15 statx固定结构](https://github.com/torvalds/linux/blob/v5.15/include/uapi/linux/stat.h)

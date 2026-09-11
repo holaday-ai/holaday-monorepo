@@ -1,0 +1,716 @@
+{
+  "version": 1,
+  "scope": "Versioned inherited overrides only; not dotenv defaults or permission grants. Production coverage remains a separate gate.",
+  "keys": {
+    "DIVINE_API_KEY": ["apps/orchestrator/src/astrology/service.ts:894 (existing env alias; no configuration change)"],
+    "DIVINE_ACCESS_TOKEN": ["apps/orchestrator/src/astrology/service.ts:894 (existing env alias; no configuration change)"],
+    "DIVINE_API_BASE_URL": ["apps/orchestrator/src/astrology/service.ts:894 (existing env alias; no configuration change)"],
+    "DIVINE_API_TRANSLATOR_BASE_URL": ["apps/orchestrator/src/astrology/service.ts:894 (existing env alias; no configuration change)"],
+    "DIVINE_API_REQUEST_TIMEOUT_MS": ["apps/orchestrator/src/astrology/service.ts:894 (existing env alias; no configuration change)"],
+    "DIVINE_API_PROVIDER_TIMEOUT_MS": ["apps/orchestrator/src/astrology/service.ts:894 (existing env alias; no configuration change)"],
+    "DIVINE_API_STALE_IF_ERROR_MS": ["apps/orchestrator/src/astrology/service.ts:894 (existing env alias; no configuration change)"],
+    "DIVINE_API_CAPABILITY_REFRESH_TTL_MS": ["apps/orchestrator/src/astrology/service.ts:894 (existing env alias; no configuration change)"],
+    "DIVINE_API_CACHE_TTL_MS": ["apps/orchestrator/src/astrology/service.ts:894 (existing env alias; no configuration change)"],
+    "DIVINE_API_CAPABILITIES": ["apps/orchestrator/src/astrology/service.ts:894 (existing env alias; no configuration change)"],
+    "DIVINE_API_CAPABILITIES_CHECKED_AT": ["apps/orchestrator/src/astrology/service.ts:894 (existing env alias; no configuration change)"],
+    "GLOBAL_AGENT_HTTP_PROXY": ["global-agent@4.1.3/dist/factories/createGlobalProxyAgent.js:29-52 (fixed default namespace only)"],
+    "GLOBAL_AGENT_HTTPS_PROXY": ["global-agent@4.1.3/dist/factories/createGlobalProxyAgent.js:29-52 (fixed default namespace only)"],
+    "GLOBAL_AGENT_NO_PROXY": ["global-agent@4.1.3/dist/factories/createGlobalProxyAgent.js:29-52 (fixed default namespace only)"],
+    "GLOBAL_AGENT_FORCE_GLOBAL_AGENT": ["global-agent@4.1.3/dist/factories/createGlobalProxyAgent.js:29-52 (fixed default namespace only)"],
+    "GLOBAL_AGENT_SOCKET_CONNECTION_TIMEOUT": ["global-agent@4.1.3/dist/factories/createGlobalProxyAgent.js:29-52 (fixed default namespace only)"],
+    "GLOBAL_AGENT_ENVIRONMENT_VARIABLE_NAMESPACE": ["global-agent@4.1.3/dist/factories/createGlobalProxyAgent.js:29-52 (fixed default namespace only)"],
+    "XDG_CACHE_HOME": ["playwright-core@1.59.1/lib/server/registry/index.js:474-496; utils/env.js:29 (exact dependency aliases)"],
+    "PLAYWRIGHT_BROWSERS_PATH": ["playwright-core@1.59.1/lib/server/registry/index.js:474-496; utils/env.js:29 (exact dependency aliases)"],
+    "INIT_CWD": ["playwright-core@1.59.1/lib/server/registry/index.js:474-496; utils/env.js:29 (exact dependency aliases)"],
+    "npm_config_playwright_browsers_path": ["playwright-core@1.59.1/lib/server/registry/index.js:474-496; utils/env.js:29 (exact dependency aliases)"],
+    "npm_package_config_playwright_browsers_path": ["playwright-core@1.59.1/lib/server/registry/index.js:474-496; utils/env.js:29 (exact dependency aliases)"],
+    "npm_config_init_cwd": ["playwright-core@1.59.1/lib/server/registry/index.js:474-496; utils/env.js:29 (exact dependency aliases)"],
+    "npm_package_config_init_cwd": ["playwright-core@1.59.1/lib/server/registry/index.js:474-496; utils/env.js:29 (exact dependency aliases)"],
+    "TMPDIR": ["Node Linux os.tmpdir() precedence; application video and Playwright temporary files"],
+    "TMP": ["Node Linux os.tmpdir() precedence; application video and Playwright temporary files"],
+    "TEMP": ["Node Linux os.tmpdir() precedence; application video and Playwright temporary files"],
+    "ORCHESTRATOR_NODE_BIN": ["scripts/start-orchestrator-production.sh:10-15 (fixed path compatibility check)"],
+    "ORCHESTRATOR_REPO_ROOT": ["scripts/start-orchestrator-production.sh:10-15 (fixed path compatibility check)"],
+    "ACCOUNT_CLOSURE_ALLOWLIST": [
+      "apps/orchestrator/src/config/env.ts:107 (schema)"
+    ],
+    "ACCOUNT_CLOSURE_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:99 (schema)"
+    ],
+    "ACCOUNT_CLOSURE_HMAC_SECRET": [
+      "apps/orchestrator/src/config/env.ts:122 (schema)"
+    ],
+    "ACCOUNT_CLOSURE_LEGACY_ANALYTICS_LOGS_SANITIZED": [
+      "apps/orchestrator/src/account-closure/handlers/analytics-logs.ts:104 (direct)",
+      "apps/orchestrator/src/config/env.ts:118 (schema)"
+    ],
+    "ACCOUNT_CLOSURE_LEGACY_FEEDBACK_SANITIZED": [
+      "apps/orchestrator/src/account-closure/handlers/feedback-support.ts:23 (direct)",
+      "apps/orchestrator/src/config/env.ts:114 (schema)"
+    ],
+    "ACCOUNT_CLOSURE_WORKER_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:103 (schema)"
+    ],
+    "ACTION_CAPTURE_ENABLED": [
+      "apps/orchestrator/src/execution/feature-flags.ts:107 (direct)"
+    ],
+    "ACTION_TIMEOUT_MS": [
+      "apps/orchestrator/src/agent/vision-loop/playwright-executor.ts:1691 (dynamic helper)"
+    ],
+    "AGENT_MODE": [
+      "apps/orchestrator/src/config/env.ts:449 (schema)"
+    ],
+    "AKSHARE_HTTP_URL": [
+      "apps/orchestrator/src/index.ts:410 (direct)",
+      "apps/orchestrator/src/index.ts:578 (direct)",
+      "apps/orchestrator/src/index.ts:608 (direct)",
+      "apps/orchestrator/src/trpc/routers/stocks-risk-monitor.ts:59 (direct)",
+      "apps/orchestrator/src/trpc/routers/stocks.ts:1334 (direct)",
+      "apps/orchestrator/src/trpc/routers/stocks.ts:1397 (direct)",
+      "apps/orchestrator/src/trpc/routers/stocks.ts:1592 (direct)",
+      "apps/orchestrator/src/trpc/routers/stocks.ts:1964 (direct)",
+      "apps/orchestrator/src/trpc/routers/stocks.ts:1997 (direct)",
+      "apps/orchestrator/src/trpc/routers/stocks.ts:2013 (direct)",
+      "apps/orchestrator/src/trpc/routers/stocks.ts:2026 (direct)",
+      "apps/orchestrator/src/trpc/routers/tasks.ts:2728 (direct)"
+    ],
+    "ALIYUN_SMS_URL": [
+      "apps/orchestrator/src/account-closure/worker-entry.ts:16 (direct)",
+      "apps/orchestrator/src/trpc/routers/account-closure.ts:145 (direct)",
+      "apps/orchestrator/src/trpc/routers/auth.ts:79 (direct)",
+      "apps/orchestrator/src/trpc/routers/auth.ts:154 (direct)",
+      "apps/orchestrator/src/trpc/routers/auth.ts:200 (direct)"
+    ],
+    "ANTHROPIC_API_KEY": [
+      "apps/orchestrator/src/agent/supercar/agent-loop.ts:1210 (direct)",
+      "apps/orchestrator/src/config/env.ts:130 (schema)"
+    ],
+    "ANTI_BOT_STRIKES_BEFORE_FALLBACK": [
+      "apps/orchestrator/src/agent/vision-loop/task-runner.ts:242 (dynamic helper)"
+    ],
+    "APIFY_API_TOKEN": [
+      "apps/orchestrator/src/index.ts:145 (direct)"
+    ],
+    "ASHARE_INTENT_JUDGE_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:376 (schema)"
+    ],
+    "ASHARE_PERF_TREND_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:403 (schema)"
+    ],
+    "ASHARE_QA_ALLOWLIST": [
+      "apps/orchestrator/src/config/env.ts:368 (schema)"
+    ],
+    "ASHARE_QA_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:363 (schema)"
+    ],
+    "ASHARE_QA_MODEL": [
+      "apps/orchestrator/src/config/env.ts:370 (schema)"
+    ],
+    "ASHARE_RISK_RADAR_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:394 (schema)"
+    ],
+    "ASHARE_SEETHROUGH_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:385 (schema)"
+    ],
+    "ASTROLOGY_ENABLED": [
+      "apps/orchestrator/src/execution/feature-flags.ts:110 (direct)"
+    ],
+    "B3_FIXTURE_ENABLED": [
+      "apps/orchestrator/src/http.ts:134 (direct)"
+    ],
+    "B4_SCREENSHOT_ANCHOR_ENABLED": [
+      "apps/orchestrator/src/execution/feature-flags.ts:108 (direct)"
+    ],
+    "BOOT_SWEEP_AWAITING_USER_MIN": [
+      "apps/orchestrator/src/index.ts:757 (direct)"
+    ],
+    "BROWSER_CDP_PORT_START": [
+      "apps/orchestrator/src/config/env.ts:557 (schema)"
+    ],
+    "BROWSER_DISPLAY_START": [
+      "apps/orchestrator/src/config/env.ts:560 (schema)"
+    ],
+    "BROWSER_IDLE_TIMEOUT_MS": [
+      "apps/orchestrator/src/config/env.ts:543 (schema)"
+    ],
+    "BROWSER_POOL_DIR": [
+      "apps/orchestrator/src/config/env.ts:526 (schema)"
+    ],
+    "BROWSER_SCREEN_SIZE": [
+      "apps/orchestrator/src/config/env.ts:584 (schema)"
+    ],
+    "BROWSER_TERMINAL_RETENTION_MS": [
+      "apps/orchestrator/src/config/env.ts:549 (schema)"
+    ],
+    "BROWSER_VNC_PORT_START": [
+      "apps/orchestrator/src/config/env.ts:558 (schema)"
+    ],
+    "BROWSER_VNC_WS_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:566 (schema)"
+    ],
+    "BROWSER_WS_PORT_START": [
+      "apps/orchestrator/src/config/env.ts:559 (schema)"
+    ],
+    "CAPTCHA_POLL_INTERVAL_MS": [
+      "apps/orchestrator/src/agent/vision-loop/task-runner.ts:242 (dynamic helper)"
+    ],
+    "CAPTCHA_WAIT_TIMEOUT_MS": [
+      "apps/orchestrator/src/agent/vision-loop/task-runner.ts:242 (dynamic helper)"
+    ],
+    "CDP_ENDPOINT": [
+      "apps/orchestrator/src/config/env.ts:430 (schema)"
+    ],
+    "CESDK_LICENSE": [
+      "apps/orchestrator/src/config/env.ts:338 (schema)"
+    ],
+    "CESDK_LICENSED_HOSTNAMES": [
+      "apps/orchestrator/src/config/env.ts:340 (schema)"
+    ],
+    "CN_PAYMENT_URL": [
+      "apps/orchestrator/src/trpc/routers/partner.ts:207 (direct)",
+      "apps/orchestrator/src/trpc/routers/payment.ts:686 (direct)",
+      "apps/orchestrator/src/trpc/routers/payment.ts:728 (direct)"
+    ],
+    "COMMANDER_MODEL": [
+      "apps/orchestrator/src/agent/planners/anthropic.ts:67 (direct)",
+      "apps/orchestrator/src/agent/vision-loop/commander.ts:298 (direct)"
+    ],
+    "COMMANDER_SCREENSHOT_WINDOW": [
+      "apps/orchestrator/src/agent/vision-loop/commander.ts:281 (direct)"
+    ],
+    "COOKIE_MASTER_KEY": [
+      "apps/orchestrator/src/cookies/cookie-crypto.ts:53 (direct)"
+    ],
+    "DASHSCOPE_API_KEY": [
+      "apps/orchestrator/src/config/env.ts:180 (schema)"
+    ],
+    "DASHSCOPE_BASE_URL": [
+      "apps/orchestrator/src/config/env.ts:182 (schema)"
+    ],
+    "DASHSCOPE_CN_ANTHROPIC_BASE_URL": [
+      "apps/orchestrator/src/config/env.ts:210 (schema)"
+    ],
+    "DASHSCOPE_CN_API_KEY": [
+      "apps/orchestrator/src/config/env.ts:209 (schema)"
+    ],
+    "DASHSCOPE_CN_RESPONSES_BASE_URL": [
+      "apps/orchestrator/src/config/env.ts:214 (schema)"
+    ],
+    "DASHSCOPE_CN_WORKSPACE_ID": [
+      "apps/orchestrator/src/config/env.ts:218 (schema)"
+    ],
+    "DASHSCOPE_INTL_ANTHROPIC_BASE_URL": [
+      "apps/orchestrator/src/config/env.ts:200 (schema)"
+    ],
+    "DASHSCOPE_INTL_API_KEY": [
+      "apps/orchestrator/src/config/env.ts:199 (schema)"
+    ],
+    "DASHSCOPE_INTL_RESPONSES_BASE_URL": [
+      "apps/orchestrator/src/config/env.ts:204 (schema)"
+    ],
+    "DASHSCOPE_INTL_WORKSPACE_ID": [
+      "apps/orchestrator/src/config/env.ts:208 (schema)"
+    ],
+    "DASHSCOPE_WORKSPACE_ID": [
+      "apps/orchestrator/src/config/env.ts:189 (schema)"
+    ],
+    "DATABASE_URL": [
+      "apps/orchestrator/src/config/env.ts:68 (schema)",
+      "apps/orchestrator/src/eval/eval-summary.ts:151 (direct)",
+      "apps/orchestrator/src/files/cleanup-cron.ts:39 (direct)"
+    ],
+    "DBUS_SESSION_BUS_ADDRESS": [
+      "apps/orchestrator/src/browser-pool/spawn.ts:48 (child environment)"
+    ],
+    "ENERGY_ANALYTICS_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:79 (schema)"
+    ],
+    "ENERGY_ANALYTICS_HMAC_SECRET": [
+      "apps/orchestrator/src/config/env.ts:83 (schema)"
+    ],
+    "ENERGY_ANALYTICS_METRIC_RETENTION_DAYS": [
+      "apps/orchestrator/src/config/env.ts:91 (schema)"
+    ],
+    "ENERGY_ANALYTICS_RECEIPT_RETENTION_HOURS": [
+      "apps/orchestrator/src/config/env.ts:92 (schema)"
+    ],
+    "ENERGY_ANALYTICS_VISITOR_RETENTION_DAYS": [
+      "apps/orchestrator/src/config/env.ts:90 (schema)"
+    ],
+    "EVAL_BASE_URL": [
+      "apps/orchestrator/src/eval/eval-runner.ts:54 (direct)"
+    ],
+    "EVAL_USER_EXTERNAL_ID": [
+      "apps/orchestrator/src/eval/eval-runner.ts:55 (direct)"
+    ],
+    "EVIDENCE_LEDGER_ENABLED": [
+      "apps/orchestrator/src/execution/feature-flags.ts:103 (direct)"
+    ],
+    "EXECUTION_CONTRACT_ENABLED": [
+      "apps/orchestrator/src/execution/feature-flags.ts:101 (direct)"
+    ],
+    "EXECUTION_VERIFIER_ENABLED": [
+      "apps/orchestrator/src/execution/feature-flags.ts:102 (direct)"
+    ],
+    "EXECUTOR_MODE": [
+      "apps/orchestrator/src/config/env.ts:423 (schema)"
+    ],
+    "EXPERT_WORKFLOW_ENABLED": [
+      "apps/orchestrator/src/execution/feature-flags.ts:104 (direct)"
+    ],
+    "EXPLORER_BREAKER_BATCH_FACTOR": [
+      "apps/orchestrator/src/playbook/explorer/explorer-budget.ts:65 (direct)"
+    ],
+    "EXPLORER_BREAKER_PER_DAY_USD": [
+      "apps/orchestrator/src/playbook/explorer/explorer-budget.ts:68 (direct)"
+    ],
+    "EXPLORER_BREAKER_PER_MONTH_USD": [
+      "apps/orchestrator/src/playbook/explorer/explorer-budget.ts:70 (direct)"
+    ],
+    "EXPLORER_BREAKER_PER_SITE_SEED_USD": [
+      "apps/orchestrator/src/playbook/explorer/explorer-budget.ts:57 (direct)"
+    ],
+    "EXPLORER_BREAKER_PER_SITE_STRANGER_USD": [
+      "apps/orchestrator/src/playbook/explorer/explorer-budget.ts:61 (direct)"
+    ],
+    "EXPLORER_ENABLED": [
+      "apps/orchestrator/src/playbook/explorer/explorer.ts:26 (direct)"
+    ],
+    "EXPLORER_FIRECRAWL_COST_USD": [
+      "apps/orchestrator/src/playbook/explorer/explorer-budget.ts:119 (direct)"
+    ],
+    "EXPLORER_OP_TIMEOUT_MS": [
+      "apps/orchestrator/src/agent/vision-loop/playwright-executor.ts:345 (direct)"
+    ],
+    "EXPLORER_VETO_FIXTURE_ENABLED": [
+      "apps/orchestrator/src/http.ts:155 (direct)"
+    ],
+    "FAL_BASE_URL": [
+      "apps/orchestrator/src/config/env.ts:268 (schema)"
+    ],
+    "FAL_CLONE_LIPSYNC_MODEL": [
+      "apps/orchestrator/src/config/env.ts:290 (schema)"
+    ],
+    "FAL_KEY": [
+      "apps/orchestrator/src/config/env.ts:267 (schema)"
+    ],
+    "FAL_LIPSYNC_MODEL": [
+      "apps/orchestrator/src/config/env.ts:285 (schema)"
+    ],
+    "FEEDBACK_TO_EMAIL": [
+      "apps/orchestrator/src/trpc/routers/feedback.ts:20 (direct)"
+    ],
+    "FIRECRAWL_API_KEY": [
+      "apps/orchestrator/src/config/env.ts:144 (schema)"
+    ],
+    "FIRECRAWL_BASE_URL": [
+      "apps/orchestrator/src/config/env.ts:146 (schema)"
+    ],
+    "GEMINI_API_KEY": [
+      "apps/orchestrator/src/config/env.ts:157 (schema)"
+    ],
+    "GEMINI_BASE_URL": [
+      "apps/orchestrator/src/config/env.ts:158 (schema)"
+    ],
+    "GEMINI_IMAGE_MODEL": [
+      "apps/orchestrator/src/config/env.ts:165 (schema)"
+    ],
+    "GEMINI_IMAGE_MODEL_PRO": [
+      "apps/orchestrator/src/config/env.ts:166 (schema)"
+    ],
+    "GEMINI_VIDEO_REVIEW_MODEL": [
+      "apps/orchestrator/src/config/env.ts:168 (schema)"
+    ],
+    "GOOGLE_CLIENT_ID": [
+      "apps/orchestrator/src/http.ts:203 (direct)",
+      "apps/orchestrator/src/http.ts:238 (direct)",
+      "apps/orchestrator/src/trpc/routers/auth.ts:72 (direct)"
+    ],
+    "GOOGLE_CLIENT_SECRET": [
+      "apps/orchestrator/src/http.ts:204 (direct)",
+      "apps/orchestrator/src/http.ts:239 (direct)",
+      "apps/orchestrator/src/trpc/routers/auth.ts:72 (direct)"
+    ],
+    "GOOGLE_SEARCH_API_KEY": [
+      "apps/orchestrator/src/agent/vision-loop/degradation-chain.ts:211 (direct)"
+    ],
+    "HAPPYHORSE_I2V_MODEL": [
+      "apps/orchestrator/src/config/env.ts:284 (schema)"
+    ],
+    "HAPPYHORSE_T2V_MODEL": [
+      "apps/orchestrator/src/config/env.ts:276 (schema)"
+    ],
+    "HEADED_CDP_ENDPOINT": [
+      "apps/orchestrator/src/index.ts:122 (direct)"
+    ],
+    "HOLADAY_FILES_ROOT": [
+      "apps/orchestrator/src/files/file-service.ts:34 (direct)",
+      "apps/orchestrator/src/files/storage-provider.ts:552 (direct)"
+    ],
+    "HOLADAY_PUBLIC_BASE_URL": [
+      "apps/orchestrator/src/config/env.ts:482 (schema)"
+    ],
+    "HOLADAY_USE_LEGACY_PLANNER": [
+      "apps/orchestrator/src/agent/vision-loop/commander.ts:1170 (direct)"
+    ],
+    "HOME": [
+      "scripts/orchestrator-runtime.sh:184 (runtime identity)"
+    ],
+    "HTTP_PORT": [
+      "apps/orchestrator/src/config/env.ts:65 (schema)"
+    ],
+    "HTTPS_PROXY": [
+      "apps/orchestrator/src/index.ts:2 (direct)"
+    ],
+    "HUMANIZE_ENABLED": [
+      "apps/orchestrator/src/agent/vision-loop/humanize.ts:174 (direct)"
+    ],
+    "INTERNAL_SHARED_SECRET": [
+      "apps/orchestrator/src/account-closure/worker-entry.ts:17 (direct)",
+      "apps/orchestrator/src/http.ts:1160 (direct)",
+      "apps/orchestrator/src/http.ts:1221 (direct)",
+      "apps/orchestrator/src/http.ts:1234 (direct)",
+      "apps/orchestrator/src/http.ts:1543 (direct)",
+      "apps/orchestrator/src/trpc/routers/account-closure.ts:146 (direct)",
+      "apps/orchestrator/src/trpc/routers/partner.ts:208 (direct)",
+      "apps/orchestrator/src/trpc/routers/payment.ts:687 (direct)",
+      "apps/orchestrator/src/trpc/routers/payment.ts:729 (direct)"
+    ],
+    "JWT_SECRET": [
+      "apps/orchestrator/src/config/env.ts:70 (schema)"
+    ],
+    "LANG": [
+      "apps/orchestrator/src/browser-pool/spawn.ts:48 (child environment)"
+    ],
+    "LC_ALL": [
+      "apps/orchestrator/src/browser-pool/spawn.ts:48 (child environment)"
+    ],
+    "LC_CTYPE": [
+      "apps/orchestrator/src/browser-pool/spawn.ts:48 (child environment)"
+    ],
+    "LEDGER_DB_WRITE_ENABLED": [
+      "apps/orchestrator/src/execution/feature-flags.ts:106 (direct)"
+    ],
+    "LEDGER_RETENTION_DAYS": [
+      "apps/orchestrator/src/evidence/ledger-write-service.ts:57 (direct)"
+    ],
+    "LOG_LEVEL": [
+      "apps/orchestrator/src/config/env.ts:64 (schema)"
+    ],
+    "LOGNAME": [
+      "scripts/orchestrator-runtime.sh:184 (runtime identity)"
+    ],
+    "MAX_BROWSER_INSTANCES": [
+      "apps/orchestrator/src/config/env.ts:524 (schema)"
+    ],
+    "MFA_MASTER_KEY": [
+      "apps/orchestrator/src/auth/mfa.ts:18 (direct)",
+      "apps/orchestrator/src/config/env.ts:71 (schema)"
+    ],
+    "MODEL_RUNTIME_POLICY": [
+      "apps/orchestrator/src/config/env.ts:227 (schema)"
+    ],
+    "MULTI_USER": [
+      "apps/orchestrator/src/config/env.ts:497 (schema)"
+    ],
+    "MULTI_USER_USERS": [
+      "apps/orchestrator/src/config/env.ts:515 (schema)"
+    ],
+    "NODE_ENV": [
+      "apps/orchestrator/src/config/env.ts:63 (schema)",
+      "apps/orchestrator/src/http.ts:410 (direct)",
+      "apps/orchestrator/src/partner/partner-config.ts:29 (direct)",
+      "apps/orchestrator/src/trpc/routers/auth.ts:73 (direct)"
+    ],
+    "OTA_USER_BROWSER_ALLOWED_DOMAINS": [
+      "apps/orchestrator/src/trpc/routers/tasks.ts:5907 (direct)"
+    ],
+    "OTA_USER_BROWSER_ALLOWED_USER_IDS": [
+      "apps/orchestrator/src/trpc/routers/tasks.ts:5914 (direct)"
+    ],
+    "OTA_USER_BROWSER_ENABLED": [
+      "apps/orchestrator/src/execution/feature-flags.ts:105 (direct)"
+    ],
+    "OUTPUT_FILE_TTL_DAYS": [
+      "apps/orchestrator/src/files/file-service.ts:53 (direct)"
+    ],
+    "PARTNER_DAILY_ALLOCATION_BUDGET_CREDIT_CENTS": [
+      "apps/orchestrator/src/partner/schedulers.ts:247 (CLI env alias)"
+    ],
+    "PARTNER_DAILY_DAY": [
+      "apps/orchestrator/src/partner/schedulers.ts:247 (CLI env alias)"
+    ],
+    "PARTNER_FX_BPS": [
+      "apps/orchestrator/src/partner/partner-config.ts:19 (existing dynamic consumer; no mutation)"
+    ],
+    "PARTNER_KYC_MOCK_AUTO_PASS": [
+      "apps/orchestrator/src/partner/partner-config.ts:29 (direct)"
+    ],
+    "PARTNER_LEDGER_ENABLED": [
+      "apps/orchestrator/src/partner/partner-config.ts:18 (direct)",
+      "apps/orchestrator/src/trpc/routers/admin-partner.ts:36 (direct)",
+      "apps/orchestrator/src/trpc/routers/partner.ts:94 (direct)"
+    ],
+    "PARTNER_MONTHLY_RELEASE_BUDGET_CREDIT_CENTS": [
+      "apps/orchestrator/src/partner/schedulers.ts:247 (CLI env alias)"
+    ],
+    "PARTNER_PLATFORM_POOL_CAP_CNY_CENTS": [
+      "apps/orchestrator/src/partner/partner-config.ts:19 (existing dynamic consumer; no mutation)"
+    ],
+    "PARTNER_RECHARGE_MAX_ANNUAL_CNY_CENTS": [
+      "apps/orchestrator/src/partner/partner-config.ts:19 (existing dynamic consumer; no mutation)"
+    ],
+    "PARTNER_RECHARGE_MAX_MONTHLY_CNY_CENTS": [
+      "apps/orchestrator/src/partner/partner-config.ts:19 (existing dynamic consumer; no mutation)"
+    ],
+    "PARTNER_RECHARGE_MAX_SINGLE_CNY_CENTS": [
+      "apps/orchestrator/src/partner/partner-config.ts:19 (existing dynamic consumer; no mutation)"
+    ],
+    "PARTNER_RECHARGE_MIN_CNY_CENTS": [
+      "apps/orchestrator/src/partner/partner-config.ts:19 (existing dynamic consumer; no mutation)"
+    ],
+    "PARTNER_RELEASE_MONTH": [
+      "apps/orchestrator/src/partner/schedulers.ts:247 (CLI env alias)"
+    ],
+    "PARTNER_WITHDRAWAL_BANK_CARD_COOLDOWN_DAYS": [
+      "apps/orchestrator/src/partner/partner-config.ts:19 (existing dynamic consumer; no mutation)"
+    ],
+    "PARTNER_WITHDRAWAL_DAILY_PLATFORM_CAP_CREDIT_CENTS": [
+      "apps/orchestrator/src/partner/partner-config.ts:19 (existing dynamic consumer; no mutation)"
+    ],
+    "PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS": [
+      "apps/orchestrator/src/partner/partner-config.ts:19 (existing dynamic consumer; no mutation)"
+    ],
+    "PARTNER_WITHDRAWAL_MONTHLY_USER_CAP_CREDIT_CENTS": [
+      "apps/orchestrator/src/partner/partner-config.ts:19 (existing dynamic consumer; no mutation)"
+    ],
+    "PATH": [
+      "apps/orchestrator/src/browser-pool/spawn.ts:48 (child environment)"
+    ],
+    "PAYPAL_CLIENT_ID": [
+      "apps/orchestrator/src/index.ts:273 (direct)",
+      "apps/orchestrator/src/trpc/routers/payment.ts:354 (direct)"
+    ],
+    "PAYPAL_CLIENT_SECRET": [
+      "apps/orchestrator/src/index.ts:274 (direct)"
+    ],
+    "PAYPAL_ENABLED": [
+      "apps/orchestrator/src/index.ts:270 (direct)"
+    ],
+    "PAYPAL_ENV": [
+      "apps/orchestrator/src/index.ts:275 (direct)"
+    ],
+    "PAYPAL_WEBHOOK_ID": [
+      "apps/orchestrator/src/http.ts:394 (direct)"
+    ],
+    "PHASE10_TIER1": [
+      "apps/orchestrator/src/config/env.ts:605 (schema)"
+    ],
+    "PROXY_LIST": [
+      "apps/orchestrator/src/agent/vision-loop/degradation-chain.ts:128 (direct)",
+      "apps/orchestrator/src/agent/vision-loop/degradation-chain.ts:132 (direct)"
+    ],
+    "QWEN_CODING_MODEL": [
+      "apps/orchestrator/src/config/env.ts:222 (schema)"
+    ],
+    "QWEN_CORE_ALLOWLIST": [
+      "apps/orchestrator/src/config/env.ts:230 (schema)"
+    ],
+    "QWEN_CORE_ENABLED_LANES": [
+      "apps/orchestrator/src/config/env.ts:229 (schema)"
+    ],
+    "QWEN_CORE_ROLLOUT_MODE": [
+      "apps/orchestrator/src/config/env.ts:228 (schema)"
+    ],
+    "QWEN_FAST_MODEL": [
+      "apps/orchestrator/src/config/env.ts:221 (schema)"
+    ],
+    "QWEN_MESSAGES_ADAPTER_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:244 (schema)"
+    ],
+    "QWEN_PLAN_CANARY_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:262 (schema)"
+    ],
+    "QWEN_PLAN_SYNTHETIC_ALLOWLIST": [
+      "apps/orchestrator/src/config/env.ts:266 (schema)"
+    ],
+    "QWEN_REASONING_MODEL": [
+      "apps/orchestrator/src/config/env.ts:219 (schema)"
+    ],
+    "QWEN_RESPONSES_ADAPTER_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:231 (schema)"
+    ],
+    "QWEN_SHADOW_EVAL_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:236 (schema)"
+    ],
+    "QWEN_STANDARD_MODEL": [
+      "apps/orchestrator/src/config/env.ts:220 (schema)"
+    ],
+    "QWEN_SUGGESTIONS_CANARY_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:253 (schema)"
+    ],
+    "QWEN_SUGGESTIONS_SYNTHETIC_ALLOWLIST": [
+      "apps/orchestrator/src/config/env.ts:257 (schema)"
+    ],
+    "QWEN_TTS_VC_MODEL": [
+      "apps/orchestrator/src/config/env.ts:293 (schema)"
+    ],
+    "QWEN_VERIFIER_MODEL": [
+      "apps/orchestrator/src/config/env.ts:223 (schema)"
+    ],
+    "QWEN_VERIFY_FAST_MODEL": [
+      "apps/orchestrator/src/config/env.ts:224 (schema)"
+    ],
+    "QWEN_VERIFY_STRICT_MODEL": [
+      "apps/orchestrator/src/config/env.ts:225 (schema)"
+    ],
+    "QWEN_VISION_MODEL": [
+      "apps/orchestrator/src/config/env.ts:226 (schema)"
+    ],
+    "R2_ACCESS_KEY_ID": [
+      "apps/orchestrator/src/files/storage-provider.ts:528 (direct)"
+    ],
+    "R2_BUCKET": [
+      "apps/orchestrator/src/evidence/ledger-write-service.ts:172 (direct)",
+      "apps/orchestrator/src/files/storage-provider.ts:530 (direct)",
+      "apps/orchestrator/src/trpc/routers/tasks.ts:5362 (direct)"
+    ],
+    "R2_ENDPOINT": [
+      "apps/orchestrator/src/files/storage-provider.ts:527 (direct)"
+    ],
+    "R2_REGION": [
+      "apps/orchestrator/src/files/storage-provider.ts:542 (direct)",
+      "apps/orchestrator/src/files/storage-provider.ts:542 (direct)"
+    ],
+    "R2_SECRET_ACCESS_KEY": [
+      "apps/orchestrator/src/files/storage-provider.ts:529 (direct)"
+    ],
+    "REDIS_URL": [
+      "apps/orchestrator/src/config/env.ts:69 (schema)"
+    ],
+    "RESEND_API_KEY": [
+      "apps/orchestrator/src/auth/email-code.ts:85 (direct)",
+      "apps/orchestrator/src/auth/email-code.ts:120 (direct)",
+      "apps/orchestrator/src/auth/email-code.ts:124 (direct)",
+      "apps/orchestrator/src/trpc/routers/auth.ts:73 (direct)"
+    ],
+    "RESEND_FROM_EMAIL": [
+      "apps/orchestrator/src/auth/email-code.ts:97 (direct)",
+      "apps/orchestrator/src/auth/email-code.ts:136 (direct)"
+    ],
+    "RETENTION_REAPER_ENABLED": [
+      "apps/orchestrator/src/index.ts:860 (direct)"
+    ],
+    "S3_ACCESS_KEY": [
+      "apps/orchestrator/src/config/env.ts:485 (schema)"
+    ],
+    "S3_BUCKET": [
+      "apps/orchestrator/src/config/env.ts:487 (schema)"
+    ],
+    "S3_ENDPOINT": [
+      "apps/orchestrator/src/config/env.ts:484 (schema)"
+    ],
+    "S3_SECRET_KEY": [
+      "apps/orchestrator/src/config/env.ts:486 (schema)"
+    ],
+    "SERPAPI_KEY": [
+      "apps/orchestrator/src/agent/vision-loop/degradation-chain.ts:211 (direct)",
+      "apps/orchestrator/src/agent/vision-loop/degradation-chain.ts:215 (direct)"
+    ],
+    "STEALTH_ENABLED": [
+      "apps/orchestrator/src/agent/vision-loop/stealth-scripts.ts:150 (direct)"
+    ],
+    "STORAGE_PROVIDER": [
+      "apps/orchestrator/src/files/storage-provider.ts:525 (direct)"
+    ],
+    "SUPERCAR_MAX_ITERATIONS": [
+      "apps/orchestrator/src/agent/supercar/agent-loop.ts:1379 (direct)",
+      "apps/orchestrator/src/config/env.ts:465 (schema)"
+    ],
+    "SUPERCAR_MODEL": [
+      "apps/orchestrator/src/agent/supercar/agent-loop.ts:1346 (direct)",
+      "apps/orchestrator/src/config/env.ts:457 (schema)"
+    ],
+    "SUPERCAR_TIMEOUT_MS": [
+      "apps/orchestrator/src/agent/supercar/agent-loop.ts:1381 (direct)",
+      "apps/orchestrator/src/config/env.ts:471 (schema)",
+      "apps/orchestrator/src/trpc/routers/tasks.ts:5819 (direct)"
+    ],
+    "TASK_TIMEOUT_MS": [
+      "apps/orchestrator/src/agent/vision-loop/runner.ts:61 (direct)"
+    ],
+    "TEAM_PROJECTS_ALLOWLIST": [
+      "apps/orchestrator/src/config/env.ts:313 (schema)"
+    ],
+    "TEAM_PROJECTS_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:308 (schema)"
+    ],
+    "TEAM_TASK_LIFECYCLE_ALLOWLIST": [
+      "apps/orchestrator/src/config/env.ts:321 (schema)"
+    ],
+    "TEAM_TASK_LIFECYCLE_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:316 (schema)"
+    ],
+    "TEMPLATE_FILL_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:352 (schema)"
+    ],
+    "TEMPLATE_FILL_MODEL": [
+      "apps/orchestrator/src/config/env.ts:357 (schema)"
+    ],
+    "TZ": [
+      "apps/orchestrator/src/browser-pool/spawn.ts:48 (child environment)"
+    ],
+    "USER": [
+      "scripts/orchestrator-runtime.sh:184 (runtime identity)"
+    ],
+    "USER_TASK_CRYSTALLIZE_ENABLED": [
+      "apps/orchestrator/src/execution/feature-flags.ts:109 (direct)",
+      "apps/orchestrator/src/index.ts:887 (direct)"
+    ],
+    "VIDEO_CREATION_ALLOWLIST": [
+      "apps/orchestrator/src/config/env.ts:305 (schema)"
+    ],
+    "VIDEO_CREATION_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:300 (schema)"
+    ],
+    "VIDEO_EDITING_ALLOWLIST": [
+      "apps/orchestrator/src/config/env.ts:334 (schema)"
+    ],
+    "VIDEO_EDITING_ENABLED": [
+      "apps/orchestrator/src/config/env.ts:329 (schema)"
+    ],
+    "VIDEO_EDITING_PROVIDER": [
+      "apps/orchestrator/src/config/env.ts:336 (schema)"
+    ],
+    "VIDEO_EDITING_STAGING_HOSTNAME": [
+      "apps/orchestrator/src/config/env.ts:342 (schema)"
+    ],
+    "VISION_MODE": [
+      "apps/orchestrator/src/config/env.ts:438 (schema)"
+    ],
+    "VISUAL_VERIFIER_ENABLED": [
+      "apps/orchestrator/src/agent/visual-verifier.ts:94 (direct)"
+    ],
+    "WANXIANG_I2V_MODEL": [
+      "apps/orchestrator/src/config/env.ts:283 (schema)"
+    ],
+    "WANXIANG_T2I_MODEL": [
+      "apps/orchestrator/src/config/env.ts:273 (schema)"
+    ],
+    "WANXIANG_T2V_MODEL": [
+      "apps/orchestrator/src/config/env.ts:274 (schema)"
+    ],
+    "WS_PORT": [
+      "apps/orchestrator/src/config/env.ts:66 (schema)"
+    ],
+    "XDG_RUNTIME_DIR": [
+      "apps/orchestrator/src/browser-pool/spawn.ts:48 (child environment)"
+    ],
+    "ZAPIER_API_KEY": [
+      "apps/orchestrator/src/index.ts:144 (direct)"
+    ],
+    "ZAPIER_WEBHOOK_PATH": [
+      "apps/orchestrator/src/trpc/routers/tasks.ts:5421 (direct)"
+    ]
+  }
+}
