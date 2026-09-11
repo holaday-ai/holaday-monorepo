@@ -200,6 +200,16 @@ class RequestBoundaryTests(unittest.TestCase):
         self.reject(self.encode(self.create(command="synthetic")))
         self.assertEqual(self.decode(self.encode(self.resource("close"))).action, "close")
 
+    def test_rejection_does_not_retain_callers_active_exception(self):
+        try:
+            raise RuntimeError("synthetic-private-outer-marker")
+        except RuntimeError:
+            with self.assertRaises(ValueError) as caught:
+                self.decode(b"{")
+            self.assertEqual(str(caught.exception), "POOL_BROKER_REQUEST_INVALID")
+            self.assertIsNone(caught.exception.__context__)
+            self.assertIsNone(caught.exception.__cause__)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -80,6 +80,9 @@ def decode_request(payload: bytes) -> CreateRequest | ResourceRequest:
         return _decode(payload)
     except (ValueError, TypeError, KeyError, RecursionError, OverflowError):
         pass
-    # Raise outside the handler: even __context__ must not retain a parser
-    # exception with its original JSON document or byte sequence.
-    raise BrokerRequestError("POOL_BROKER_REQUEST_INVALID") from None
+    # Also remove an active caller exception: `from None` only hides its display.
+    try:
+        raise BrokerRequestError("POOL_BROKER_REQUEST_INVALID") from None
+    except BrokerRequestError as error:
+        error.__context__ = None
+        raise
