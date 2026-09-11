@@ -42,6 +42,7 @@ import {
 import { type OwnedCleanContext, createOwnedCleanContext } from './owned-clean-context.js';
 import { type OwnedManagedBrowser, createOwnedManagedBrowser } from './owned-managed-browser.js';
 import { type OwnedCdpConnection, createOwnedCdpConnection } from './owned-cdp-connection.js';
+import type { BrowserRequestControl } from './browser-request-guard.js';
 import { humanClick, humanScroll, humanTypeText, isHumanizeEnabled } from './humanize.js';
 import { STEALTH_INIT_SCRIPT, isStealthEnabled } from './stealth-scripts.js';
 
@@ -250,7 +251,6 @@ export class PlaywrightExecutor {
   };
   private readonly networkPolicy: Pick<BrowserNetworkPolicy, 'check'> | null;
   private readonly guardRequests: boolean;
-  private readonly guardedContexts = new WeakSet<object>();
   /**
    * Pages we've already stealth-ified this session. Playwright's
    * `addInitScript` only fires on the NEXT navigation, so we also
@@ -349,7 +349,7 @@ export class PlaywrightExecutor {
         this.cleanContext.setDefaultNavigationTimeout(opMs);
       }
       const isActive = () => generation === this.cleanContextGeneration;
-      await this.applyNetworkPolicyToContexts(browser, isActive);
+      await this.applyNetworkPolicyToContexts(browser, isActive, connection);
       if (isStealthEnabled()) {
         await this.applyStealthToContexts(browser, isActive);
       }
@@ -373,6 +373,7 @@ export class PlaywrightExecutor {
     } catch (err) {
       if (this.browser === browser) this.browser = null;
       if (this.cleanContextLease === lease) this.cleanContext = null;
+      await connection?.stopRequests();
       await lease?.dispose().catch(() => {});
       await connection?.dispose().catch(() => {});
       return {
@@ -415,7 +416,7 @@ export class PlaywrightExecutor {
         this.assertContextGeneration(generation);
         context.setDefaultNavigationTimeout(45_000);
         const isActive = () => generation === this.cleanContextGeneration;
-        await this.applyNetworkPolicyToContexts(browser, isActive);
+        await this.applyNetworkPolicyToContexts(browser, isActive, browserLease);
         await this.applyStealthToContexts(browser, isActive);
         this.assertContextGeneration(generation);
         return { ok: true };
@@ -427,6 +428,7 @@ export class PlaywrightExecutor {
           this.cleanMode = false;
           this.cleanContext = null;
         }
+        await browserLease?.stopRequests();
         await lease?.dispose().catch(() => {});
         await browserLease?.dispose().catch(() => {});
         return {
@@ -441,6 +443,8 @@ export class PlaywrightExecutor {
   private runConnectionSetup(
     action: (generation: number) => Promise<ConnectResult>,
   ): Promise<ConnectResult> {
+    if (this.managedBrowserLease?.isInRequest() || this.cdpConnectionLease?.isInRequest())
+      return Promise.resolve({ ok: false, error: 'BROWSER_REQUEST_REENTRY' });
     if (this.connectionSetup || this.disconnection)
       return Promise.resolve({ ok: false, error: 'browser setup or cleanup is pending or failed' });
     if (this.browser)
@@ -458,6 +462,7 @@ export class PlaywrightExecutor {
         withOperationDispatchScope(async (seal) => {
           this.sealConnectionSetup = seal;
           try {
+            await this.stopBrowserRequests();
             const contextCleanup = await Promise.allSettled([this.cleanContextLease?.dispose()]);
             const browserCleanup = await Promise.allSettled([this.managedBrowserLease?.dispose()]);
             const connectionCleanup = await Promise.allSettled([
@@ -514,6 +519,7 @@ export class PlaywrightExecutor {
    * `newContext()` is empty. Call before the first live action.
    */
   async assertCleanContext(): Promise<void> {
+    this.assertOutsideRequest();
     if (!this.cleanMode || !this.cleanContext) {
       throw new Error('assertCleanContext: called outside clean-context mode');
     }
@@ -530,6 +536,7 @@ export class PlaywrightExecutor {
       this.sealConnectionSetup?.();
       this.cleanContext = null;
       this.activePage = null;
+      await this.stopBrowserRequests();
       await lease?.dispose();
       throw new Error(
         `clean context is NOT clean: ${cookies.length} cookie(s) present (${domains}) — refusing to browse`,
@@ -539,11 +546,27 @@ export class PlaywrightExecutor {
 
   /** Close + drop the clean context (call when the browse finishes). No-op when off. */
   async disposeCleanContext(): Promise<void> {
+    this.assertOutsideRequest();
+    const stopped = this.stopBrowserRequests();
     this.cleanContextGeneration++;
     this.sealConnectionSetup?.();
     this.cleanContext = null;
     this.activePage = null;
+    await stopped;
     await this.cleanContextLease?.dispose();
+  }
+
+  private assertOutsideRequest(): void {
+    if (this.managedBrowserLease?.isInRequest() || this.cdpConnectionLease?.isInRequest())
+      throw new Error('BROWSER_REQUEST_REENTRY');
+  }
+
+  private async stopBrowserRequests(): Promise<void> {
+    this.assertOutsideRequest();
+    await Promise.all([
+      this.managedBrowserLease?.stopRequests(),
+      this.cdpConnectionLease?.stopRequests(),
+    ]);
   }
 
   /**
@@ -690,45 +713,16 @@ export class PlaywrightExecutor {
   private async applyNetworkPolicyToContexts(
     browser: Browser,
     isActive?: () => boolean,
+    lease?: BrowserRequestControl,
   ): Promise<void> {
     if (isActive?.() === false) throw new Error('CLEAN_CONTEXT_DISPOSED');
     if (!this.networkPolicy || !this.guardRequests) return;
     const contexts = browser.contexts();
     for (const context of contexts) {
       if (isActive?.() === false) throw new Error('CLEAN_CONTEXT_DISPOSED');
-      if (this.guardedContexts.has(context)) continue;
-      const installed = await runBrowserOperation(async () => {
-        const route = (context as BrowserContext).route;
-        if (isActive?.() === false) return INITIALIZATION_CANCELLED;
-        if (typeof route !== 'function') return false;
-        await route.call(context, '**/*', async (routeHandle, request) => {
-          const rawUrl = request.url();
-          if (!/^https?:\/\//i.test(rawUrl)) {
-            await routeHandle.continue();
-            return;
-          }
-          try {
-            const decision = await this.networkPolicy!.check(rawUrl);
-            if (decision.allowed) {
-              await routeHandle.continue();
-              return;
-            }
-            logger.warn(
-              { target: rawUrl, reason: decision.reason },
-              'browser request blocked by network policy',
-            );
-          } catch (error) {
-            logger.warn(
-              { target: rawUrl, error: errMsg(error) },
-              'browser request policy failed closed',
-            );
-          }
-          await routeHandle.abort('blockedbyclient');
-        });
-        return true;
-      });
-      if (installed === INITIALIZATION_CANCELLED) throw new Error('CLEAN_CONTEXT_DISPOSED');
-      if (installed) this.guardedContexts.add(context);
+      if (!lease) throw new Error('BROWSER_REQUEST_RESOURCE_MISSING');
+      await lease.guardContext(context, this.networkPolicy);
+      if (isActive?.() === false) throw new Error('CLEAN_CONTEXT_DISPOSED');
     }
   }
 
@@ -739,7 +733,9 @@ export class PlaywrightExecutor {
    * this executor and is closed here.
    */
   async disconnect(): Promise<void> {
+    this.assertOutsideRequest();
     if (this.disconnection) return this.disconnection;
+    const stopped = this.stopBrowserRequests();
     this.cleanContextGeneration++;
     this.sealConnectionSetup?.();
     const browserLease = this.managedBrowserLease;
@@ -749,6 +745,7 @@ export class PlaywrightExecutor {
     this.cdpEndpoint = null;
     const setup = this.connectionSetup;
     const operation = Promise.resolve().then(async () => {
+      await stopped;
       const outcomes = await Promise.allSettled([this.disposeCleanContext(), setup]);
       const browserOutcome = await Promise.allSettled([browserLease?.dispose()]);
       const connectionOutcome = await Promise.allSettled([connectionLease?.dispose()]);

@@ -4,8 +4,9 @@ import {
   startOwnedOperation,
   withOperationDispatchScope,
 } from '../../execution/owned-operation.js';
+import { type BrowserRequestControl, createBrowserRequestGuard } from './browser-request-guard.js';
 
-export interface OwnedCdpConnection {
+export interface OwnedCdpConnection extends BrowserRequestControl {
   readonly ready: Promise<Browser>;
   /** Bound SDK close receipt, not proof that OS descendants have exited. */
   dispose(): Promise<void>;
@@ -20,6 +21,7 @@ export function createOwnedCdpConnection(
   const parent = currentOperationLifetime();
   if (parent && parent.drain.snapshot().unknown > 0) throw new Error('BROWSER_OPERATION_UNKNOWN');
   let disposeRequested = false;
+  let requests: ReturnType<typeof createBrowserRequestGuard> | undefined;
   let requestDispose!: () => void;
   const disposeSignal = new Promise<void>((resolve) => {
     requestDispose = resolve;
@@ -51,7 +53,8 @@ export function createOwnedCdpConnection(
       };
       const closeBrowser = async (bound: Browser) => {
         try {
-          await bound.close();
+          if (requests) await requests.close();
+          else await bound.close();
         } catch (error) {
           markUnknown();
           throw error;
@@ -75,6 +78,7 @@ export function createOwnedCdpConnection(
         }
         try {
           browser = await connect.call(chromium, endpoint);
+          requests = createBrowserRequestGuard(browser);
         } catch (error) {
           markUnknown();
           throw error;
@@ -98,9 +102,17 @@ export function createOwnedCdpConnection(
       }).result
     : Promise.resolve().then(work);
   void result.catch(rejectReady);
-  return Object.freeze({
+  return Object.freeze<OwnedCdpConnection>({
     ready,
+    guardContext: (context, policy) =>
+      requests
+        ? requests.guardContext(context, policy)
+        : Promise.reject(new Error('CDP_CONNECTION_NOT_READY')),
+    stopRequests: () => requests?.stopRequests() ?? Promise.resolve(),
+    isInRequest: () => requests?.isInRequest() ?? false,
     dispose: () => {
+      if (requests?.isInRequest()) return Promise.reject(new Error('BROWSER_REQUEST_REENTRY'));
+      void requests?.stopRequests();
       disposeRequested = true;
       requestDispose();
       return result;

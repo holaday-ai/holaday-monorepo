@@ -9,6 +9,12 @@ import {
 import { runBrowserOperation } from './browser-operation.js';
 import { PlaywrightExecutor } from './playwright-executor.js';
 
+// These tests isolate raw resource ordering with synthetic SDK contexts.
+// Actual SDK event containment is exercised without this mock in browser-route-events.test.ts.
+vi.mock('./browser-route-events.js', () => ({
+  createRouteEventBoundary: () => ({ seal() {}, settled: async () => {} }),
+}));
+
 vi.mock('../../config/logger.js', () => ({
   logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
 }));
@@ -564,10 +570,14 @@ it.each(
     const run = scoped ? start(action) : { done: observe(action()), drain: undefined };
     await flush();
     expect(calls.firstRoute).toBe(1);
-    await executor.disposeCleanContext();
-    expect(calls.close).toBe(1);
+    const disposing = observe(executor.disposeCleanContext());
+    await flush();
+    expect(disposing.state.done).toBe(false);
+    expect(calls.close).toBe(0);
     if (run.drain) expect(run.drain.snapshot().idle).toBe(false);
     routeHold.release();
+    await disposing.finished;
+    expect(calls.close).toBe(1);
     await run.done.finished;
     expect(run.done.state.value).toMatchObject({ ok: false });
     expect(calls.laterRoute).toBe(0);

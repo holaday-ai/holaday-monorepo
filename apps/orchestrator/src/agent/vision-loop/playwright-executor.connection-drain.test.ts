@@ -8,6 +8,12 @@ import {
 } from '../../execution/owned-operation.js';
 import { PlaywrightExecutor } from './playwright-executor.js';
 
+// These tests isolate raw resource ordering with synthetic SDK contexts.
+// Actual SDK event containment is exercised without this mock in browser-route-events.test.ts.
+vi.mock('./browser-route-events.js', () => ({
+  createRouteEventBoundary: () => ({ seal() {}, settled: async () => {} }),
+}));
+
 vi.mock('../../config/logger.js', () => ({
   logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
 }));
