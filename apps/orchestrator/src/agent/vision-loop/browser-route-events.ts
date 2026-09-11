@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import type { Browser, BrowserContext } from 'playwright';
+import type { Browser, BrowserContext, Request, Route } from 'playwright';
 
 type Listener = (...args: unknown[]) => unknown;
 interface Channel {
@@ -22,6 +22,18 @@ interface FixedContext extends BrowserContext {
 interface FixedBrowser extends Browser {
   _connection: object;
 }
+interface FixedRequest extends Request {
+  _parent: object;
+  _connection: object;
+}
+interface FixedRoute extends Route {
+  _parent: object;
+  _connection: object;
+  _channel: { _object: unknown };
+  _raceWithTargetClose(promise: Promise<unknown>): Promise<unknown>;
+  _handleRoute: Listener;
+  _innerContinue: Listener;
+}
 
 /** Pinned SDK adapter: contains errors only on this context's complete route event chain. */
 export function createRouteEventBoundary(
@@ -33,6 +45,8 @@ export function createRouteEventBoundary(
   const invalid = () => new Error('BROWSER_ROUTE_EVENT_BOUNDARY_UNSUPPORTED');
   let Context: new (...args: never[]) => FixedContext;
   let BoundBrowser: new (...args: never[]) => FixedBrowser;
+  let SdkRoute: new (...args: never[]) => FixedRoute;
+  let SdkRequest: new (...args: never[]) => FixedRequest;
   try {
     const packagePath = require.resolve('playwright/package.json');
     const sdkRequire = createRequire(packagePath);
@@ -43,6 +57,9 @@ export function createRouteEventBoundary(
       path.join(path.dirname(corePath), 'lib/client/browserContext.js'),
     ).BrowserContext;
     BoundBrowser = sdkRequire(path.join(path.dirname(corePath), 'lib/client/browser.js')).Browser;
+    const network = sdkRequire(path.join(path.dirname(corePath), 'lib/client/network.js'));
+    SdkRoute = network.Route;
+    SdkRequest = network.Request;
   } catch {
     throw invalid();
   }
@@ -88,7 +105,9 @@ export function createRouteEventBoundary(
   let sealed = false;
   let failed = false;
   const pending = new Set<Promise<void>>();
+  const seenRoutes = new WeakSet<object>();
   const report = () => {
+    if (failed) return;
     failed = true;
     // Failure reporting must never create another rejected EventEmitter listener.
     try {
@@ -112,6 +131,121 @@ export function createRouteEventBoundary(
       return false;
     }
   };
+  const observeRoute = async (args: unknown[]) => {
+    const route = (args[0] as { route?: { _object?: unknown } })?.route?._object;
+    if (
+      !(route instanceof SdkRoute) ||
+      Object.getPrototypeOf(route) !== SdkRoute.prototype ||
+      route._connection !== (context as FixedContext)._connection ||
+      route._channel?._object !== route ||
+      seenRoutes.has(route)
+    )
+      throw invalid();
+    for (const key of [
+      'request',
+      'abort',
+      'continue',
+      '_handleRoute',
+      '_innerContinue',
+      '_raceWithTargetClose',
+    ] as const) {
+      if (route[key] !== SdkRoute.prototype[key]) throw invalid();
+    }
+    const request = route.request();
+    if (
+      !(request instanceof SdkRequest) ||
+      Object.getPrototypeOf(request) !== SdkRequest.prototype ||
+      route._parent !== request
+    )
+      throw invalid();
+    const routeChannel = route._channel;
+    const routeBelongs = () => {
+      if (
+        !belongs() ||
+        Object.getPrototypeOf(route) !== SdkRoute.prototype ||
+        Object.getPrototypeOf(request) !== SdkRequest.prototype ||
+        route._connection !== (context as FixedContext)._connection ||
+        route._channel !== routeChannel ||
+        routeChannel._object !== route ||
+        route._parent !== request ||
+        SdkRoute.prototype.request.call(route) !== request
+      )
+        return false;
+      const ancestors = new Set<object>();
+      let parent: object | undefined = request;
+      for (let depth = 0; depth < 32 && parent !== context; depth++) {
+        if (
+          !parent ||
+          ancestors.has(parent) ||
+          (parent as FixedRequest)._connection !== (context as FixedContext)._connection
+        )
+          return false;
+        ancestors.add(parent);
+        parent = (parent as FixedRequest)._parent;
+      }
+      return parent === context;
+    };
+    if (!routeBelongs()) throw invalid();
+    seenRoutes.add(route);
+    const raw = new Set<Promise<void>>();
+    const originalRace = route._raceWithTargetClose;
+    const originalAbort = route.abort;
+    const originalContinue = route.continue;
+    let active = true;
+    let used = false;
+    const race = (promise: Promise<unknown>) => {
+      // Observation only: the channel operation has already been invoked. Never discard it.
+      const receipt = Promise.resolve(promise).then(() => {}, report);
+      raw.add(receipt);
+      void receipt.then(() => raw.delete(receipt));
+      return originalRace.call(route, promise);
+    };
+    const methodsIntact = () =>
+      routeBelongs() &&
+      route.abort === abort &&
+      route.continue === continueRoute &&
+      route._raceWithTargetClose === race &&
+      route.request === SdkRoute.prototype.request &&
+      route._handleRoute === SdkRoute.prototype._handleRoute &&
+      route._innerContinue === SdkRoute.prototype._innerContinue;
+    const claim = () => {
+      // Known control refusal must not touch an owner whose resource already settled.
+      if (!active || used) throw new Error('BROWSER_ROUTE_ACTION_UNAVAILABLE');
+      if (!methodsIntact()) {
+        report();
+        throw invalid();
+      }
+      used = true;
+    };
+    const abort: Route['abort'] = async (...parameters) => {
+      claim();
+      await originalAbort.apply(route, parameters);
+    };
+    const continueRoute: Route['continue'] = async (...parameters) => {
+      claim();
+      await originalContinue.apply(route, parameters);
+    };
+    try {
+      route._raceWithTargetClose = race;
+      route.abort = abort;
+      route.continue = continueRoute;
+      await Reflect.apply(original, channel, args);
+    } catch {
+      report();
+    } finally {
+      try {
+        while (raw.size) await Promise.allSettled([...raw]);
+      } finally {
+        // Seal even if installation or the terminal integrity getter itself failed.
+        active = false;
+        try {
+          if (!methodsIntact()) report();
+        } catch {
+          report();
+        }
+      }
+    }
+  };
   const wrapper: Listener = (...args) => {
     if (sealed) return;
     if (!intact() || pending.size >= 1024) {
@@ -125,7 +259,7 @@ export function createRouteEventBoundary(
           report();
           return;
         }
-        return enter(() => Reflect.apply(original, channel, args));
+        return enter(() => observeRoute(args));
       })
       .then(() => {}, report);
     pending.add(operation);

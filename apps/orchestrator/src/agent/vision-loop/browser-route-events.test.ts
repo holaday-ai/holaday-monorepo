@@ -20,6 +20,7 @@ const { Connection } = require(path.join(core, 'lib/client/connection.js'));
 const { Browser: SdkBrowser } = require(path.join(core, 'lib/client/browser.js'));
 const { BrowserContext } = require(path.join(core, 'lib/client/browserContext.js'));
 const { Request, Route } = require(path.join(core, 'lib/client/network.js'));
+const { Worker } = require(path.join(core, 'lib/client/worker.js'));
 const { nodePlatform } = require(path.join(core, 'lib/server/utils/nodePlatform.js'));
 async function flush() {
   for (let i = 0; i < 150; i++) await Promise.resolve();
@@ -36,7 +37,7 @@ function fixture(fail = false, hold?: { method: string; promise: Promise<void> }
     calls.push(message.method);
     const respond = () =>
       connection.dispatch(
-        fail && message.method === 'abort'
+        fail && message.method === (hold?.method ?? 'abort')
           ? {
               id: message.id,
               error: {
@@ -66,17 +67,22 @@ function fixture(fail = false, hold?: { method: string; promise: Promise<void> }
   };
   const context = addContext();
   let count = 0;
-  const emit = (target = context) => {
+  const emit = (target = context, withWorker = false) => {
     const id = ++count;
+    const worker = withWorker
+      ? new Worker(target, 'Worker', `worker-${id}`, { url: 'https://synthetic.example/worker' })
+      : undefined;
     const request = new Request(target, 'Request', `request-${id}`, {
       url: 'https://synthetic.example/',
       resourceType: 'document',
       method: 'GET',
       headers: [],
       isNavigationRequest: false,
+      serviceWorker: worker?._channel,
     });
-    const route = new Route(target, 'Route', `route-${id}`, { request: request._channel });
+    const route = new Route(request, 'Route', `route-${id}`, { request: request._channel });
     target._channel.emit('route', { route: route._channel });
+    return { route, request, worker };
   };
   return { connection, browser, context, calls, emit, addContext };
 }
@@ -104,6 +110,319 @@ it('contains real RouteHandler and EventEmitter rejection without global handler
   expect(f.calls).toEqual(['setNetworkInterceptionPatterns', 'abort']);
   expect(f.context._channel._pendingHandlers.get('route')?.size ?? 0).toBe(0);
   expect(f.context._routes[0]._activeInvocations.size).toBe(0);
+});
+
+for (const mode of ['cdp', 'managed'] as const) {
+  for (const method of ['abort', 'continue'] as const) {
+    for (const outcome of ['success', 'error', 'disconnect'] as const) {
+      it(`${mode} ${method}: retains raw driver receipt after real target-close race (${outcome})`, async () => {
+        let release!: () => void;
+        const promise = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const f = fixture(outcome === 'error', { method, promise });
+        const o = await ownedFixture(f, mode, {
+          check: async () =>
+            method === 'continue'
+              ? { allowed: true, url: 'https://synthetic.example/', addresses: ['8.8.8.8'] }
+              : { allowed: false, reason: 'private_network', message: 'synthetic' },
+        });
+        const event = f.emit(f.context, true);
+        await flush();
+        event.worker._channel.emit('close');
+        await flush();
+        expect(f.connection._callbacks.size).toBe(1);
+        let done = false;
+        let failure: unknown;
+        const closing = o.lease.dispose().then(
+          () => {
+            done = true;
+          },
+          (error: unknown) => {
+            failure = error;
+            done = true;
+          },
+        );
+        try {
+          await flush();
+          expect(o.closed()).toBe(1);
+          expect(done).toBe(false);
+          expect(o.drain.snapshot().idle).toBe(false);
+          if (outcome === 'disconnect') f.connection.close('synthetic disconnect');
+        } finally {
+          release();
+          await closing;
+          await flush();
+        }
+        expect(f.calls).toEqual(['setNetworkInterceptionPatterns', method]);
+        expect(f.connection._callbacks.size).toBe(0);
+        if (outcome === 'success') {
+          expect(failure).toBeUndefined();
+          expect(o.drain.snapshot().idle).toBe(true);
+        } else {
+          expect(String(failure)).toContain('BROWSER_ROUTE_EVENT_FAILED');
+          expect(o.drain.snapshot().unknown).toBe(1);
+          expect(o.drain.snapshot().idle).toBe(false);
+        }
+      });
+    }
+  }
+}
+
+it.each(['foreign-parent', 'cycle', 'unknown-race'] as const)(
+  'rejects %s before original SDK request dispatch',
+  async (kind) => {
+    const f = fixture();
+    const o = await ownedFixture(f);
+    const event = f.emit();
+    if (kind === 'foreign-parent') event.request._parent = fixture().context;
+    if (kind === 'cycle') event.request._parent = event.request;
+    if (kind === 'unknown-race') event.route._raceWithTargetClose = async () => {};
+    await flush();
+    await o.lease.dispose().catch(() => {});
+    expect(f.calls).toEqual(['setNetworkInterceptionPatterns']);
+    expect(o.drain.snapshot().unknown).toBe(1);
+  },
+);
+
+it('raw driver work retains event capacity even after every target has closed', async () => {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const f = fixture(false, { method: 'abort', promise });
+  const o = await ownedFixture(f);
+  const events = Array.from({ length: 1024 }, () => f.emit(f.context, true));
+  let closing: Promise<unknown> | undefined;
+  try {
+    await flush();
+    for (const event of events) event.worker._channel.emit('close');
+    await flush();
+    expect(f.connection._callbacks.size).toBe(1024);
+    const overflow = f.emit(f.context, true);
+    await flush();
+    overflow.worker._channel.emit('close');
+    expect(f.calls.filter((method) => method === 'abort')).toHaveLength(1024);
+    expect(o.drain.snapshot().unknown).toBe(1);
+  } finally {
+    closing = o.lease.dispose().catch(() => {});
+    release();
+    await closing;
+  }
+  expect(f.connection._callbacks.size).toBe(0);
+  expect(o.drain.snapshot().idle).toBe(false);
+});
+
+it('pending raw abort cannot submit a second public route action', async () => {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const f = fixture(false, { method: 'abort', promise });
+  const o = await ownedFixture(f);
+  const event = f.emit();
+  await flush();
+  try {
+    await expect(event.route.continue()).rejects.toThrow();
+    expect(f.calls).toEqual(['setNetworkInterceptionPatterns', 'abort']);
+  } finally {
+    release();
+    await o.lease.dispose().catch(() => {});
+  }
+});
+
+it.each([false, true])(
+  'settled route rejects a late public action without another driver call (first failure=%s)',
+  async (fail) => {
+    const f = fixture(fail);
+    const o = await ownedFixture(f);
+    const event = f.emit();
+    await flush();
+    await o.lease.dispose().catch(() => {});
+    await expect(event.route.continue()).rejects.toThrow();
+    expect(f.calls).toEqual(['setNetworkInterceptionPatterns', 'abort']);
+    expect(o.drain.snapshot().unknown).toBe(fail ? 1 : 0);
+    expect(o.drain.snapshot().idle).toBe(!fail);
+  },
+);
+
+it.each(['channel', 'parent', 'race'] as const)(
+  'rechecks route %s before a delayed public dispatch',
+  async (kind) => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const f = fixture();
+    const o = await ownedFixture(f, 'cdp', {
+      check: async () => {
+        await held;
+        return { allowed: true, url: 'https://synthetic.example/', addresses: ['8.8.8.8'] };
+      },
+    });
+    const event = f.emit();
+    await flush();
+    if (kind === 'channel') event.route._channel = new Proxy(event.route._channel, {});
+    if (kind === 'parent') event.request._parent = fixture().context;
+    if (kind === 'race') event.route._raceWithTargetClose = async () => {};
+    release();
+    await flush();
+    await o.lease.dispose().catch(() => {});
+    expect(f.calls).toEqual(['setNetworkInterceptionPatterns']);
+    expect(o.drain.snapshot().unknown).toBe(1);
+  },
+);
+
+it('duplicate route event cannot start a second SDK dispatch while its first receipt is pending', async () => {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const f = fixture(false, { method: 'abort', promise });
+  const o = await ownedFixture(f);
+  const event = f.emit();
+  f.context._channel.emit('route', { route: event.route._channel });
+  try {
+    await flush();
+    expect(f.calls).toEqual(['setNetworkInterceptionPatterns', 'abort']);
+    expect(o.drain.snapshot().unknown).toBe(1);
+  } finally {
+    release();
+    await o.lease.dispose().catch(() => {});
+  }
+  expect(f.connection._callbacks.size).toBe(0);
+});
+
+it('throwing terminal validation cannot leave a public delegate active after disposal', async () => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const f = fixture();
+  const o = await ownedFixture(f, 'cdp', {
+    check: async () => {
+      await held;
+      return { allowed: true, url: 'https://synthetic.example/', addresses: ['8.8.8.8'] };
+    },
+  });
+  const event = f.emit();
+  await flush();
+  Object.defineProperty(event.route, '_innerContinue', {
+    configurable: true,
+    get: () => {
+      throw new Error('synthetic getter failure');
+    },
+  });
+  release();
+  await flush();
+  await o.lease.dispose().catch(() => {});
+  Object.defineProperty(event.route, '_innerContinue', {
+    configurable: true,
+    writable: true,
+    value: Route.prototype._innerContinue,
+  });
+  await expect(event.route.abort()).rejects.toThrow('BROWSER_ROUTE_ACTION_UNAVAILABLE');
+  expect(f.calls).toEqual(['setNetworkInterceptionPatterns']);
+  expect(o.drain.snapshot().unknown).toBe(1);
+});
+
+it('listener failure is reported immediately while its raw receipt is still held', async () => {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const f = fixture(false, { method: 'abort', promise });
+  let errors = 0;
+  const boundary = createRouteEventBoundary(
+    f.context,
+    f.browser,
+    (action) => action(),
+    () => {
+      errors++;
+    },
+  );
+  await f.context.route('**/*', (route: { abort(): Promise<void> }) => {
+    void route.abort().catch(() => {});
+    throw new Error('synthetic listener failure');
+  });
+  f.emit();
+  await flush();
+  boundary.seal();
+  let done = false;
+  const settling = boundary.settled().then(
+    () => {
+      done = true;
+    },
+    () => {
+      done = true;
+    },
+  );
+  try {
+    await flush();
+    expect(errors).toBe(1);
+    expect(f.connection._callbacks.size).toBe(1);
+    expect(done).toBe(false);
+  } finally {
+    release();
+    await settling;
+  }
+  expect(errors).toBe(1);
+  expect(f.connection._callbacks.size).toBe(0);
+});
+
+it('one failed event marks unknown immediately without releasing another pending event', async () => {
+  const f = fixture();
+  let respond!: () => void;
+  f.connection.onmessage = (message: { id: number; method: string }) => {
+    f.calls.push(message.method);
+    if (message.method === 'continue')
+      respond = () => f.connection.dispatch({ id: message.id, result: {} });
+    else
+      queueMicrotask(() =>
+        f.connection.dispatch(
+          message.method === 'abort'
+            ? {
+                id: message.id,
+                error: {
+                  error: { name: 'Error', message: 'synthetic failure', stack: 'synthetic' },
+                },
+              }
+            : { id: message.id, result: {} },
+        ),
+      );
+  };
+  let checks = 0;
+  const o = await ownedFixture(f, 'cdp', {
+    check: async () =>
+      ++checks === 1
+        ? { allowed: true, url: 'https://synthetic.example/', addresses: ['8.8.8.8'] }
+        : { allowed: false, reason: 'private_network', message: 'synthetic' },
+  });
+  const pending = f.emit(f.context, true);
+  await flush();
+  pending.worker._channel.emit('close');
+  await flush();
+  f.emit();
+  await flush();
+  let done = false;
+  const closing = o.lease
+    .dispose()
+    .catch(() => {})
+    .then(() => {
+      done = true;
+    });
+  try {
+    await flush();
+    expect(o.drain.snapshot().unknown).toBe(1);
+    expect(done).toBe(false);
+    expect(f.connection._callbacks.size).toBe(1);
+  } finally {
+    respond();
+    await closing;
+  }
+  expect(f.calls).toEqual(['setNetworkInterceptionPatterns', 'continue', 'abort']);
+  expect(o.drain.snapshot().idle).toBe(false);
+  expect(f.connection._callbacks.size).toBe(0);
 });
 
 async function ownedFixture(

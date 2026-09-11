@@ -293,3 +293,13 @@ BrowserRequestGuard在获取Browser时捕获已有资源owner，未来固定rout
 网络允许范围保持原策略；正常允许请求continue，阻止/检查失败请求abort。日志只保留固定blocked/policy_failed类型，不携带URL、原始错误或自由文本。四个executor测试文件在明确标注的合成SDK边界隔离事件适配；真实事件套件不mock适配，使用实际Connection/Browser/BrowserContext/Request/Route/RouteHandler/EventEmitter、真实CDP与managed资源lease/ExecutionDrain；Browser.close调用及driver响应仍为合成边界，不启动浏览器或网络。SDK接入核对实际playwright和core版本、真实Context/Browser实例、prototype原方法与固定listener签名，context.browser()必须等于绑定Browser且连接对象相同；后续事件和终态继续核对归属。只保证受信进程内固定SDK兼容，不宣称可抵御恶意同源码closure伪造。
 
 当前验证和独立审查结果以对应计划及PROGRESS最新节点为准。这一边界不覆盖Playwright-client/driver内部RPC及safeRace隐藏原始提交，不证明driver进程、OS组/后代退出或其他事件/任意回调自动排空。其他动作/Brave/batch/调度hook/所有入口、统一closed boot/stop、全局恢复对账、首次PR231维护、平台/真实千问及新生产门禁继续阻断发布；Qwen browser unmigrated gate与boot注入保持关闭。后续优先界定driver内部原始RPC及终止权限，不能把本地SDK事件测试充当全进程安全证明。
+
+## 3D-3b-3c-9a 本地增量：固定请求的内部channel回执（2026-09-11）
+
+固定Playwright/core 1.59.1的Route._raceWithTargetClose在创建_channel.abort/continue的Promise后调用safeRace，目标关闭会先于driver响应结束公开调用。因此保留SDK原safeRace行为，在原context listener前安装此Route实例的观察器，所有已收到的channel Promise都纳入原事件槽和Browser资源pin；只有原listener与全部已派发回执settle才释放。成功回执允许完成，迟到错误/Connection.close拒绝保留unknown，不能把Connection回执表清空当远端完成。
+
+同一Route公开abort/continue共享派发前单次标记，固定原receiver，首次调用失败也不能切换方法重试；重复或终态调用在channel前固定拒绝，不碰已结束owner。三个实例包装不恢复，初始、实际调用前及终态核对原方法、channel身份、真实Route/Request和有界context祖先链；未知方法、循环/外来归属、重复事件零新增派发且失败关闭。原listener失败即时报告，再等待已派发回执；失败报告幂等，不用成功noop吞SDK handling。事件1024容量直到原始回执settle才释放，不因safeRace返回提前腾空。
+
+测试保留真实Connection/Browser/Context/Request/Route/RouteHandler/EventEmitter，并用实际Worker.close事件触发真实safeRace；CDP/managed、abort/continue、成功/失败/断连覆盖。driver协议响应、Browser.close仍合成，没有实际driver、网络、浏览器或OS进程试验。直接人为绕过公开方法调用私有SDK不在此固定回调契约保护内，本观察点不能事后阻止已经派发的任意Promise。
+
+这只补齐3c-8的固定请求raw回执，不代表所有driver RPC/transport或OS组后代排空。其他SDK动作/事件、共享Connection与Browser.close实际传输/进程终止证明、OS kill/reaper、Brave/batch/调度hook/所有入口、统一closed boot/stop、恢复对账、维护/平台/真实千问及全部新发布门禁仍阻断发布。Qwen browser及boot注入保持关闭，不发布局部机制；下一步界定其余driver/transport与OS生命周期边界。
