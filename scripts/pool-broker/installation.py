@@ -178,6 +178,8 @@ def inspect_installation(candidate):
         for name in ("installation.py", "process_pin.py", "protocol.py", "launch_registration.py", "application_guard.py", "root_launch.py", "bootstrap.py", "bootstrap_input.py", "application_env_keys.json", "native-build-manifest.json"):
             _walk(package + "/" + name, mode=0o644, regular=True)
         _walk(package + '/native-entry', mode=0o755, regular=True)
+        for name in ('launch_authorization.py', 'launch_listener.py'):
+            _walk(package + '/' + name, mode=0o644, regular=True)
         for path in ("/etc/holaday-pool-broker", "/var/lib/holaday-pool-broker", "/run/holaday-pool-broker"):
             _walk(path)
         _walk("/var/lib/holaday-pool-workers", uid=identity.browser_uid,

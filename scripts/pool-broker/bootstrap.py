@@ -11,8 +11,8 @@ import sys
 import types
 
 
-_MODULES = ('installation', 'process_pin', 'protocol', 'launch_registration',
-            'application_guard', 'root_launch', 'bootstrap_input')
+_MODULES = ('installation', 'process_pin', 'protocol', 'launch_authorization', 'launch_registration',
+            'application_guard', 'root_launch', 'launch_listener', 'bootstrap_input')
 _FILES = {name + '.py' for name in _MODULES} | {'bootstrap.py', 'application_env_keys.json', 'native-entry'}
 _TOOLS = ('/usr/bin/python3', '/usr/bin/setpriv', '/opt/node22/bin/node')
 

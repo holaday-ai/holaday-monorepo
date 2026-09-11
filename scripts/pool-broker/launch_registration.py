@@ -10,6 +10,7 @@ import threading
 import time
 
 from process_pin import PinnedApplication
+from launch_authorization import LaunchWindow
 
 
 class BrokerRegistrationError(ValueError):
@@ -183,8 +184,9 @@ class LaunchRegistration:
         self._attempted = False
         self._revoked = False
         self._lock = threading.RLock()
+        self._window = None
 
-    def receive(self, channel):
+    def receive(self, channel, *, window=None):
         with self._lock:
             fds = []
             deadline = None
@@ -196,7 +198,15 @@ class LaunchRegistration:
                 self._attempted = True
                 started = True
                 deadline = time.monotonic() + 5.0
+                if window is not None:
+                    if type(window) is not LaunchWindow:
+                        raise ValueError()
+                    self._window = window
+                    remaining = window.remaining()
+                    deadline = min(deadline, time.monotonic() + remaining)
+                self._require_pending()
                 peer = _prepare(channel, deadline)
+                self._require_pending()
                 payload = _receive(channel, peer, deadline, fds, 1)
                 self._require_pending()
                 magic, candidate, boot, gid = struct.unpack("!8s20s16sI", payload)
@@ -220,6 +230,11 @@ class LaunchRegistration:
                 failed = _close_fds(fds) or failed
                 failed = _close_channel(channel) or failed
                 failed = _expired(deadline) or failed
+                if started and self._window is not None:
+                    try:
+                        self._window.remaining()
+                    except Exception:
+                        failed = True
                 failed = self._revoked or failed
                 if failed and started:
                     self._revoked = True
@@ -229,6 +244,11 @@ class LaunchRegistration:
 
     def _require_pending(self):
         if self._revoked:
+            raise ValueError()
+        window = self._window
+        if window is not None:
+            window.remaining()
+        if self._revoked or self._window is not window:
             raise ValueError()
 
     def _discard(self):

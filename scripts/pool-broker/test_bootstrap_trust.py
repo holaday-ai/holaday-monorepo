@@ -20,8 +20,8 @@ class BootstrapTrustTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.fs = self.stack.enter_context(test_installation.InstallationTests().system())
         self.base = self.fs.package
-        names = ('installation.py', 'process_pin.py', 'protocol.py', 'launch_registration.py',
-                 'application_guard.py', 'root_launch.py', 'bootstrap_input.py', 'bootstrap.py',
+        names = ('installation.py', 'process_pin.py', 'protocol.py', 'launch_authorization.py', 'launch_registration.py',
+                 'application_guard.py', 'root_launch.py', 'launch_listener.py', 'bootstrap_input.py', 'bootstrap.py',
                  'application_env_keys.json')
         self.sources = {name: (Path(__file__).parent / name).read_bytes() for name in names}
         self.sources['native-entry'] = b'synthetic artifact - not a real Linux ELF'
@@ -124,6 +124,9 @@ class BootstrapTrustTests(unittest.TestCase):
             self.assertEqual(modules['bootstrap_input'].decode_bootstrap_input(raw, 'a' * 40), {'NODE_ENV': 'production'})
             reread.assert_not_called()
             self.assertEqual(modules['root_launch'].__file__, self.base + '/root_launch.py')
+            self.assertIs(modules['launch_registration'].LaunchWindow, modules['launch_authorization'].LaunchWindow)
+            self.assertIs(modules['launch_listener'].LaunchRegistration, modules['launch_registration'].LaunchRegistration)
+            self.assertIs(modules['launch_listener'].launch_authorization, modules['launch_authorization'])
             self.assertEqual(sys.path, old_path)
         finally:
             for name in names:

@@ -2,6 +2,7 @@
 
 import array
 import contextlib
+import inspect
 import socket
 import struct
 import sys
@@ -9,6 +10,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import process_pin
+import test_launch_authorization as auth_tests
 
 try:
     import launch_registration
@@ -104,6 +106,64 @@ class LaunchRegistrationTests(unittest.TestCase):
 
     def receiver(self):
         return launch_registration.LaunchRegistration("a" * 40, 998)
+
+    @contextlib.contextmanager
+    def launch_window(self):
+        self.assertIn('window', inspect.signature(launch_registration.LaunchRegistration.receive).parameters,
+                      'registration does not consume the real launch window')
+        with auth_tests.AuthorizationTests().system() as fs:
+            window = auth_tests.launch_authorization.consume_launch_authorization('a' * 40)
+            clock = fs.clock
+        with self.kernel() as kernel, patch.object(launch_registration.time, 'time', side_effect=lambda: clock[0]), \
+                patch.object(launch_registration.time, 'monotonic', side_effect=lambda: clock[1]):
+            yield window, clock, kernel
+
+    def test_receiver_uses_actual_consumed_window_and_original_pin(self):
+        with self.launch_window() as (window, clock, kernel):
+            channel = self.channel(server=True)
+            registration = self.receiver()
+            registration.receive(channel, window=window)
+            self.assertEqual(channel.sendmsg.call_args.args[0], [self.packet(ack=True)])
+            self.assertIsInstance(registration._pin, process_pin.PinnedApplication)
+            registration.close()
+            self.assertEqual([call.args for call in kernel['close'].call_args_list].count((42,)), 1)
+
+    def test_wall_clock_expiry_during_pin_prevents_ack(self):
+        with self.launch_window() as (window, clock, kernel):
+            channel = self.channel(server=True)
+            def expired(*args):
+                clock[0] = 130.0
+                return b'Pid:\t123\nNSpid:\t123\n'
+            kernel['read'].side_effect = expired
+            self.reject(lambda: self.receiver().receive(channel, window=window))
+            channel.sendmsg.assert_not_called()
+            self.assertEqual([call.args for call in kernel['close'].call_args_list].count((42,)), 1)
+
+    def test_wall_clock_expiry_during_fd_close_prevents_ack(self):
+        with self.launch_window() as (window, clock, kernel):
+            channel = self.channel(server=True)
+            def expired(fd):
+                if fd == 9:
+                    clock[0] = 130.0
+            kernel['close'].side_effect = expired
+            self.reject(lambda: self.receiver().receive(channel, window=window))
+            channel.sendmsg.assert_not_called()
+
+    def test_wall_clock_expiry_in_final_socket_cleanup_revokes_registration(self):
+        with self.launch_window() as (window, clock, kernel):
+            channel = self.channel(server=True)
+            channel.close.side_effect = lambda: clock.__setitem__(0, 130.0)
+            self.reject(lambda: self.receiver().receive(channel, window=window))
+            self.assertEqual([call.args for call in kernel['close'].call_args_list].count((42,)), 1)
+
+    def test_window_can_shorten_but_not_extend_default_registration_deadline(self):
+        with self.launch_window() as (window, clock, kernel):
+            clock[0] = 129.5
+            channel = self.channel(server=True)
+            registration = self.receiver()
+            registration.receive(channel, window=window)
+            self.assertTrue(all(0 < call.args[0] <= 0.5 for call in channel.settimeout.call_args_list))
+            registration.close()
 
     def test_sender_rejects_invalid_trusted_parameters_before_opening_pidfd(self):
         with self.kernel() as k:
