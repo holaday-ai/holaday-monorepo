@@ -8,6 +8,7 @@ import sys
 import unittest
 from contextlib import ExitStack
 from unittest.mock import patch
+from test_environment_handoff import CapsuleKernel
 
 try:
     guard = importlib.import_module('application_guard')
@@ -47,8 +48,7 @@ class GuardTests(unittest.TestCase):
         self.replace('os.getresuid', return_value=(998, 998, 998), create=True)
         self.replace('os.getresgid', return_value=(998, 998, 998), create=True)
         self.replace('os.getgroups', return_value=[])
-        self.replace('os.environ', {'NODE_ENV': 'production', 'SYNTHETIC_SETTING': 'kept',
-                                   'EMPTY_SETTING': '', 'PM2_HOME': '/synthetic/private'})
+        self.replace('os.environ', {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'})
         self.replace('os.chdir', side_effect=lambda p: self.events.append(('cwd', p)))
         self.replace('os.umask', side_effect=lambda m: self.events.append(('umask', m)))
         self.replace('os.execve', side_effect=self.exec_seen)
@@ -58,6 +58,8 @@ class GuardTests(unittest.TestCase):
         self.libc = type('Libc', (), {})()
         self.libc.close_range = lambda a, b, c: self.events.append(('close', a, b, c)) or 0
         self.replace('ctypes.CDLL', return_value=self.libc)
+        self.kernel = CapsuleKernel(self.stack)
+        self.kernel.load()
 
     def replace(self, name, *args, **kwargs):
         return self.stack.enter_context(patch('application_guard.' + name, *args, **kwargs))
@@ -68,6 +70,7 @@ class GuardTests(unittest.TestCase):
         return io.BytesIO(self.status)
 
     def exec_seen(self, path, argv, env):
+        self.assertEqual(self.kernel.fds, set(), 'private environment FD must not reach Node')
         self.executed = (path, argv)
         self.environment = env
         self.events.append(('exec',))
@@ -75,7 +78,7 @@ class GuardTests(unittest.TestCase):
 
     def test_fixed_exec_preserves_business_env_after_descriptor_cleanup(self):
         with self.assertRaises(ExecObserved):
-            guard.exec_application(998)
+            guard.exec_application(998, 'a' * 40, 'b' * 32)
         self.assertEqual(self.executed, ('/opt/node22/bin/node', [
             '/opt/node22/bin/node', '--import', 'tsx',
             '/opt/holaday-monorepo/apps/orchestrator/src/index.ts']))
@@ -89,8 +92,9 @@ class GuardTests(unittest.TestCase):
 
     def denied(self, gid=998):
         self.executed = None
+        self.kernel.load()
         try:
-            guard.exec_application(gid)
+            guard.exec_application(gid, 'a' * 40, 'b' * 32)
         except ExecObserved:
             self.fail('unsafe application executed')
         except ValueError as error:
@@ -189,7 +193,7 @@ class GuardTests(unittest.TestCase):
         with patch.object(guard.signal, 'pthread_sigmask') as mask, \
                 patch.object(guard.signal, 'signal') as disposition:
             with self.assertRaises(ExecObserved):
-                guard.exec_application(998)
+                guard.exec_application(998, 'a' * 40, 'b' * 32)
             mask.assert_called_once_with(guard.signal.SIG_SETMASK, [])
             reset = {int(call.args[0]) for call in disposition.call_args_list}
             self.assertEqual(reset, {int(s) for s in guard.signal.valid_signals()
@@ -197,20 +201,50 @@ class GuardTests(unittest.TestCase):
             self.assertTrue(all(call.args[1] == guard.signal.SIG_DFL
                                 for call in disposition.call_args_list))
 
-    def test_cli_accepts_only_one_canonical_gid_and_execs_the_real_guard(self):
+    def test_cli_accepts_only_canonical_gid_and_bound_candidate_boot(self):
         self.assertTrue(callable(getattr(guard, 'main', None)), 'guard CLI missing')
-        for args in ([], ['0'], ['0998'], ['+998'], ['998', 'extra'], ['--help'], ['1' * 100]):
+        for args in ([], ['998'], ['0', 'a' * 40, 'b' * 32], ['0998', 'a' * 40, 'b' * 32],
+                     ['998', 'A' * 40, 'b' * 32], ['998', 'a' * 40, '0' * 32],
+                     ['+998', 'a' * 40, 'b' * 32], ['4294967295', 'a' * 40, 'b' * 32],
+                     ['1' * 100, 'a' * 40, 'b' * 32], ['998', 'extra'], ['--help']):
             with self.subTest(args=args):
                 self.assertEqual(guard.main(args), 1)
                 self.assertIsNone(self.executed)
         with self.assertRaises(ExecObserved):
-            guard.main(['998'])
+            guard.main(['998', 'a' * 40, 'b' * 32])
         self.assertEqual(self.executed[0], '/opt/node22/bin/node')
 
     def test_cli_privilege_failure_returns_fixed_failure_without_traceback(self):
         self.assertTrue(callable(getattr(guard, 'main', None)), 'guard CLI missing')
         self.status = SAFE.replace(b'NoNewPrivs:\t1', b'NoNewPrivs:\t0')
-        self.assertEqual(guard.main(['998']), 1)
+        self.assertEqual(guard.main(['998', 'a' * 40, 'b' * 32]), 1)
+        self.assertIsNone(self.executed)
+
+    def test_actual_root_producer_to_dropped_guard_preserves_values(self):
+        self.kernel.fds = set()
+        self.kernel.data = b''
+        self.kernel.seals = 0
+        with patch.object(guard.os, 'getresuid', return_value=(0, 0, 0)), \
+                patch.object(guard.os, 'getresgid', return_value=(0, 0, 0)):
+            guard.seal_application_environment('a' * 40, 'b' * 32, {
+                'NODE_ENV': 'production', 'SYNTHETIC': '中文\nvalue', 'EMPTY': '',
+                'PM2_HOME': '/synthetic/private'})
+        self.kernel.inherit()
+        with self.assertRaises(ExecObserved):
+            guard.exec_application(998, 'a' * 40, 'b' * 32)
+        self.assertEqual(self.environment, {'NODE_ENV': 'production',
+                         'SYNTHETIC': '中文\nvalue', 'EMPTY': ''})
+        self.assertEqual(dict(guard.os.environ), {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'})
+
+    def test_unproven_identity_never_reads_private_capsule(self):
+        self.status = SAFE.replace(b'NoNewPrivs:\t1', b'NoNewPrivs:\t0')
+        self.denied()
+        self.assertNotIn('read', self.kernel.events)
+
+    def test_missing_capsule_does_not_use_any_inherited_business_config(self):
+        self.kernel.fds = set()
+        with self.assertRaises(guard.ApplicationGuardError):
+            guard.exec_application(998, 'a' * 40, 'b' * 32)
         self.assertIsNone(self.executed)
 
 
@@ -218,7 +252,7 @@ class GuardTests(unittest.TestCase):
 class NativeRejectionTests(unittest.TestCase):
     def test_isolated_cli_on_non_linux_exits_without_output(self):
         result = subprocess.run([
-            sys.executable, '-I', '-S', str(pathlib.Path(__file__).with_name('application_guard.py')), '998'
+            sys.executable, '-I', '-S', str(pathlib.Path(__file__).with_name('application_guard.py')), '998', 'a' * 40, 'b' * 32
         ], env={}, capture_output=True, timeout=5, check=False)
         self.assertEqual(result.returncode, 1)
         self.assertEqual((result.stdout, result.stderr), (b'', b''))

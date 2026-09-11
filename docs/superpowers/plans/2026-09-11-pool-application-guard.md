@@ -1,5 +1,7 @@
 # 降权后同 PID 应用启动守卫（9d-2e）
 
+后继契约：9d-2f环境私有交接已将CLI扩为GID/candidate/boot，业务配置只从已封印FD3恢复；本文单参数与继承业务env描述为574d8eeb历史状态，不得作为当前启动指令。当前实现依据2026-09-11-pool-environment-handoff.md。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:executing-plans。主线程实现，原唯一 reviewer 只读审查，不新增智能体，不安装或运行重任务。
 
 **Goal:** 实现实际 exec Node 前的非 root 守卫，权限或清理证据不成立时不启动应用。
