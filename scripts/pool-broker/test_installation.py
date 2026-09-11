@@ -35,7 +35,7 @@ class InstallationTests(unittest.TestCase):
                                          st_nlink=1 if kind == stat.S_IFREG else 2, attrs=[])
         package = "/usr/local/lib/holaday-pool-broker/releases/" + "a" * 40
         add(package)
-        for name in ("installation.py", "process_pin.py", "protocol.py", "launch_registration.py", "application_guard.py"):
+        for name in ("installation.py", "process_pin.py", "protocol.py", "launch_registration.py", "application_guard.py", "root_launch.py"):
             add(package + "/" + name, mode=0o644, kind=stat.S_IFREG)
         for path in ("/etc/holaday-pool-broker", "/var/lib/holaday-pool-broker", "/run/holaday-pool-broker"):
             add(path, mode=0o700)
@@ -190,6 +190,17 @@ class InstallationTests(unittest.TestCase):
         for missing in (True, False):
             with self.subTest(missing=missing), self.system() as s:
                 path = s.package + '/application_guard.py'
+                if missing:
+                    del s.paths[path]
+                else:
+                    s.paths[path].st_uid = 998
+                self.reject(self.inspect)
+                self.assertEqual(s.opened, {})
+
+    def test_root_launcher_must_be_present_and_root_owned(self):
+        for missing in (True, False):
+            with self.subTest(missing=missing), self.system() as s:
+                path = s.package + '/root_launch.py'
                 if missing:
                     del s.paths[path]
                 else:
