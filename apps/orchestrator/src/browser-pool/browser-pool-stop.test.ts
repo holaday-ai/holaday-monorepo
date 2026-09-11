@@ -294,7 +294,10 @@ it('does not issue new leases from a late allocation during shutdown', async () 
   const stop = observe(f.pool.shutdown());
   gate.resolve();
   await allocation.finished;
-  expect(retained).toBe(false);
+  // Shutdown now suppresses the late hook altogether; the public lease gate
+  // must still reject even when called outside that suppressed callback.
+  expect(retained).toBeUndefined();
+  expect(f.pool.retain('task', 60_000)).toBe(false);
   await vi.advanceTimersByTimeAsync(3_000);
   await stop.finished;
 });

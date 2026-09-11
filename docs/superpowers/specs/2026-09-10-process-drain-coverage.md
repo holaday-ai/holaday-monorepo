@@ -272,4 +272,14 @@ bulk与逐cookie addCookies经真实browser-operation登记；getter后用绑定
 
 不改Cookie白名单、schema、映射、upsert与crypto实现，测试仅使用合成值、真实service/ExecutionDrain和受控DB/SDK Promise。不证明HTTP或pool父生命周期已接线；3D-3b-3c-7b仍需保存/取消3秒timer、预留ready hook、收集getPage/banner内部timeout后原始SDK回执并协调release/stop。pool/index未改、Qwen browser/boot注入仍关闭。其余OS/入口/全局对账/维护/平台/生产门禁继续阻断发布。
 
+## 3D-3b-3c-7b 本地增量：浏览器池后台协调和SDK实际收尾（2026-09-11）
+
+browser-operation新增只读ALS settlement observer，真实raw result登记到所有祖先scope。scope结束/stop先seal拒绝新SDK，再等待已经派发的原始Promise；外层timeout或catch不提前结束等待。observer不创建root、不恢复owner、不提供pin释放或对账能力。嵌套scope不登记自己的返回Promise，封闭祖先不能通过新scope绕过。Cookie派发校验同步读取同一否决，使无drain scope的停止也不被legacy catch吞掉后继续删除。
+
+PoolBackgroundWork只绑定BrowserInstance对象，在allocate返回前从有效父owner同步预留整体execution生命周期，延迟运行确保pool先登记回执；独立hook/banner观察scope结束后不能逃逸续发。3秒timer取消/唤醒与两条后台链allSettled纳入stop，原始SDK必须真正结束后tearDownInstance才disconnect。stop不取消已经派发的Promise或伪造资源释放；真实hook/SDK错误保留原有unknown，正常业务hook仍best-effort、不延迟allocate返回。
+
+pool使用WeakMap按实例身份保存，retained adoption无需转移权限或漏掉回执。release及shutdown先检查当前后台上下文，拒绝自身及同池后台关闭重入，检查早于已有Promise快返；shutdown在等未完成allocation之前先同步停止已有后台派发。晚到allocation不再启动hook/banner。后台预留容量耗尽时清理已获得executor、只删本轮匹配registry/slot；已有release在途时等待原回执、不双释放。
+
+这些测试仍是合成进程/代理/CDP与真实pool/executor/drain的组合，不证明OS进程组/后代退出；observer只覆盖已登记的SDK，现有cookie hook的DB由7a逐项登记且等待，不是任意DB/第三方callback的自动跟踪。future route事件、其他浏览器动作/Brave/batch/调度hook/所有入口与文件SDK、全局closed boot/stop/恢复对账、首次维护/平台/真实模型和生产发布门禁仍独立阻断。未开启Qwen browser或index全局注入，未发布局部组件。
+
 审查补强：setup拥有独立派发scope，dispose/dirty/disconnect同步seal；已经派发的raw操作继续收尾，旧setup不能续发下一个SDK。无scope路径也在逐context/page循环与SDK getter之后检查generation；两类timeout setter之间亦检查。getter同步触发主动dispose但没有真正调用SDK时返回私有取消sentinel，在raw wrapper之外转为固定取消错误，避免把明确控制拒绝当成unknown；真正getter/SDK错误仍保留unknown。deferred setup在await后重验实时owner与unknown，不能趁调度间隙开启managed launch。未来route handler正文没有改动或纳入本单元证明。

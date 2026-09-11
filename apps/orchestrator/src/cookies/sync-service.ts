@@ -21,7 +21,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { eq, sql } from 'drizzle-orm';
 import type { BrowserContext } from 'playwright';
 import { z } from 'zod';
-import { runBrowserOperation } from '../agent/vision-loop/browser-operation.js';
+import {
+  assertBrowserSettlementOpen,
+  runBrowserOperation,
+} from '../agent/vision-loop/browser-operation.js';
 import { logger } from '../config/logger.js';
 import type { db as DbHandle } from '../db/client.js';
 import { pendingCookies } from '../db/schema/pending-cookies.js';
@@ -30,6 +33,7 @@ import { currentOperationLifetime, startOwnedOperation } from '../execution/owne
 import { decryptCookieJson, encryptCookieJson } from './cookie-crypto.js';
 
 function assertCookieDispatch() {
+  assertBrowserSettlementOpen();
   const lifetime = currentOperationLifetime();
   if (lifetime) {
     lifetime.drain.assertDispatch(lifetime.owner);

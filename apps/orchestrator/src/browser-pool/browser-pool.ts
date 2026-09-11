@@ -57,6 +57,7 @@ import { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js'
 import { defaultBrowserNetworkPolicy } from '../agent/browser-network-policy.js';
 import { SlotAllocator } from './port-allocator.js';
 import { BrowserEgressProxy } from './egress-proxy.js';
+import { type PoolBackgroundWork, startPoolBackgroundWork } from './background-work.js';
 import {
   spawnBrave,
   spawnNativeChromium,
@@ -94,6 +95,7 @@ export class BrowserPool {
   >();
   private readonly retentionTimers = new Map<string, NodeJS.Timeout>();
   private readonly releasePromises = new Map<string, Promise<boolean>>();
+  private readonly backgroundWork = new WeakMap<BrowserInstance, PoolBackgroundWork>();
   private shutdownPromise: Promise<void> | null = null;
   private readonly allocator: SlotAllocator;
   private gcTimer: NodeJS.Timeout | null = null;
@@ -300,6 +302,7 @@ export class BrowserPool {
    * (no-op). Returns true if something was released.
    */
   async release(taskId: string, reason = 'manual'): Promise<boolean> {
+    this.assertOutsideBackground();
     const pending = this.releasePromises.get(taskId);
     if (pending) {
       await pending;
@@ -319,6 +322,7 @@ export class BrowserPool {
       reject = no;
     });
     this.releasePromises.set(taskId, promise);
+    void this.backgroundWork.get(inst)?.stop();
     void this.releaseInstance(inst, reason).then(resolve, reject);
     // Keep rejected coordination receipts: shutdown must not mistake a failed
     // draining instance for an already completed release on its next attempt.
@@ -471,8 +475,10 @@ export class BrowserPool {
    * mis-behaving.
    */
   async shutdown(): Promise<void> {
+    this.assertOutsideBackground();
     if (this.shutdownPromise) return this.shutdownPromise;
     this.shuttingDown = true;
+    for (const instance of this.instances.values()) void this.backgroundWork.get(instance)?.stop();
     this.stopGc();
     for (const timer of this.retentionTimers.values()) clearTimeout(timer);
     this.retentionTimers.clear();
@@ -574,6 +580,8 @@ export class BrowserPool {
     }
 
     const processes: SpawnedProcess[] = [];
+    let executor: PlaywrightExecutor | undefined;
+    let instance: BrowserInstance | undefined;
     const killAll = (): void => {
       for (const p of processes) {
         try {
@@ -623,10 +631,7 @@ export class BrowserPool {
       }
 
       const version = await waitForCdpReady(slot.cdpPort, 15_000);
-      this.logger.info(
-        { taskId, userId, cdpPort: slot.cdpPort, version },
-        'pool: Brave CDP ready',
-      );
+      this.logger.info({ taskId, userId, cdpPort: slot.cdpPort, version }, 'pool: Brave CDP ready');
 
       if (process.platform !== 'darwin' && this.config.vncEnabled === true) {
         x11vnc = spawnX11vnc(slot.display, slot.vncPort, this.logger);
@@ -636,7 +641,7 @@ export class BrowserPool {
         processes.push(websockify);
       }
 
-      const executor = new PlaywrightExecutor({
+      executor = new PlaywrightExecutor({
         networkPolicy: defaultBrowserNetworkPolicy,
         // BrowserPool Chromium is already pinned to the egress proxy below.
         // Avoid Playwright routing here because routing disables HTTP cache.
@@ -645,24 +650,12 @@ export class BrowserPool {
       if (viewportProfile) {
         executor.setViewportSize(dimensionsForProfile(viewportProfile));
       }
-      const connectResult = await executor.connect(
-        `http://127.0.0.1:${slot.cdpPort}`,
-      );
+      const connectResult = await executor.connect(`http://127.0.0.1:${slot.cdpPort}`);
       if (!connectResult.ok) {
-        throw new Error(
-          `PlaywrightExecutor.connect failed: ${connectResult.error}`,
-        );
+        throw new Error(`PlaywrightExecutor.connect failed: ${connectResult.error}`);
       }
-      // Brave's first-run privacy ribbon + "managed by your
-      // organisation" toast show up 1-3s AFTER the initial connect.
-      // Schedule a second sweep 3s out so the VNC stream doesn't
-      // lose a ribbon's worth of vertical space for early iterations.
-      setTimeout(() => {
-        void executor.dismissChromeBanners().catch(() => {});
-      }, 3_000);
-
       const now = Date.now();
-      const instance: BrowserInstance = {
+      instance = {
         ...slot,
         taskId,
         userId,
@@ -677,6 +670,19 @@ export class BrowserPool {
         status: 'ready',
         ...(viewportProfile ? { viewportProfile } : {}),
       };
+      const boundInstance = instance;
+      this.backgroundWork.set(
+        instance,
+        startPoolBackgroundWork(
+          instance,
+          this.config,
+          this.logger,
+          () =>
+            !this.shuttingDown &&
+            boundInstance.status === 'ready' &&
+            this.instances.get(boundInstance.taskId) === boundInstance,
+        ),
+      );
       this.instances.set(taskId, instance);
 
       // Phase 22a — auto-detect and reap dead instances. Brave / x11vnc
@@ -688,28 +694,28 @@ export class BrowserPool {
       // The status check makes this a no-op when release() is already
       // the one killing the children (release sets 'draining' first).
       const onChildDeath = (label: string) => () =>
-        this.handleUnexpectedChildDeath(instance, label);
+        this.handleUnexpectedChildDeath(boundInstance, label);
       browserProcess.child.on('exit', onChildDeath('browser'));
       x11vnc?.child.on('exit', onChildDeath('x11vnc'));
       websockify?.child.on('exit', onChildDeath('websockify'));
       xvfb?.child.on('exit', onChildDeath('xvfb'));
 
-      // Cookie-sync drain. Fires per task spawn (was per user spawn
-      // before phase 24). The hook signature still takes userId since
-      // cookies are stored per-user, but the call point is now
-      // per-task — every new Brave gets a fresh injection.
-      if (this.config.onInstanceReady) {
-        void Promise.resolve(this.config.onInstanceReady(userId, executor)).catch(
-          (err) => {
-            this.logger.warn(
-              { taskId, userId, err: err instanceof Error ? err.message : String(err) },
-              'pool: onInstanceReady hook threw',
-            );
-          },
-        );
-      }
       return instance;
     } catch (err) {
+      const releasing = instance && this.releasePromises.get(instance.taskId);
+      if (releasing) {
+        await releasing.catch(() => {});
+        throw err;
+      }
+      if (instance)
+        await this.backgroundWork
+          .get(instance)
+          ?.stop()
+          .catch(() => {});
+      await executor?.disconnect().catch(() => {});
+      if (instance && this.instances.get(instance.taskId) === instance) {
+        this.instances.delete(instance.taskId);
+      }
       // Unwind any half-started processes so we don't leak PIDs.
       killAll();
       this.allocator.release(slot);
@@ -718,17 +724,15 @@ export class BrowserPool {
   }
 
   private async tearDownInstance(inst: BrowserInstance): Promise<void> {
+    const background = await Promise.allSettled([this.backgroundWork.get(inst)?.stop()]);
     try {
       await inst.executor.disconnect();
     } catch {
       /* best-effort */
     }
-    const pids = [
-      inst.bravePid,
-      inst.websockifyPid,
-      inst.x11vncPid,
-      inst.xvfbPid,
-    ].filter((pid) => pid > 0);
+    const pids = [inst.bravePid, inst.websockifyPid, inst.x11vncPid, inst.xvfbPid].filter(
+      (pid) => pid > 0,
+    );
     for (const pid of pids) {
       try {
         process.kill(-pid, 'SIGTERM');
@@ -742,6 +746,16 @@ export class BrowserPool {
         process.kill(-pid, 'SIGKILL');
       } catch {
         /* noop */
+      }
+    }
+    const failed = background.find((result) => result.status === 'rejected');
+    if (failed?.status === 'rejected') throw failed.reason;
+  }
+
+  private assertOutsideBackground(): void {
+    for (const instance of this.instances.values()) {
+      if (this.backgroundWork.get(instance)?.isCurrent()) {
+        throw new Error('BROWSER_POOL_BACKGROUND_REENTRY');
       }
     }
   }

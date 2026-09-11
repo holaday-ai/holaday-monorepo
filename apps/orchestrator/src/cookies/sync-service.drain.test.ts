@@ -1,5 +1,6 @@
 import type { BrowserContext } from 'playwright';
 import { afterEach, expect, it, vi } from 'vitest';
+import { withBrowserOperationSettlement } from '../agent/vision-loop/browser-operation.js';
 import { ExecutionDrain } from '../execution/execution-drain.js';
 import {
   currentOperationLifetime,
@@ -20,6 +21,50 @@ afterEach(async () => {
   vi.unstubAllEnvs();
   _resetMasterKeyCacheForTests();
 });
+
+it.each([false, true])(
+  'settlement stop blocks deletion after a denied SDK getter (owned=%s)',
+  async (tracked) => {
+    const f = fixture();
+    let sdk = 0;
+    const action = () =>
+      withBrowserOperationSettlement(async (seal) => {
+        Object.defineProperty(f.context, 'addCookies', {
+          get() {
+            seal();
+            return async () => {
+              sdk++;
+            };
+          },
+        });
+        return f.run();
+      });
+    const done = tracked ? owned(action).done : observe(action());
+    await done.finished;
+    expect(sdk).toBe(0);
+    expect(f.counts.delete).toBe(0);
+    expect(done.state.error).toBeDefined();
+  },
+);
+it.each([false, true])(
+  'settlement stop after raw user lookup blocks subsequent DB work (owned=%s)',
+  async (tracked) => {
+    const f = fixture({ held: 'user' });
+    let seal!: () => void;
+    const action = () =>
+      withBrowserOperationSettlement(async (s) => {
+        seal = s;
+        return f.run();
+      });
+    const done = tracked ? owned(action).done : observe(action());
+    await f.entered.wait;
+    seal();
+    f.hold.release();
+    await done.finished;
+    expect(f.counts).toEqual({ user: 1, row: 0, delete: 0, add: 0 });
+    expect(done.state.error).toBeDefined();
+  },
+);
 function gate() {
   let release!: () => void;
   const wait = new Promise<void>((resolve) => {
