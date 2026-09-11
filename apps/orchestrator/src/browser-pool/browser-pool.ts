@@ -55,6 +55,7 @@ import {
 } from '@holaday/shared-types';
 import { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 import { defaultBrowserNetworkPolicy } from '../agent/browser-network-policy.js';
+import { currentOperationLifetime } from '../execution/owned-operation.js';
 import { SlotAllocator } from './port-allocator.js';
 import { BrowserEgressProxy } from './egress-proxy.js';
 import { type PoolBackgroundWork, startPoolBackgroundWork } from './background-work.js';
@@ -86,6 +87,17 @@ export class PoolCapacityError extends Error {
 const GC_INTERVAL_MS = 15_000;
 const KILL_GRACE_MS = 3_000;
 
+interface PoolProcessRecord {
+  readonly taskId: string;
+  readonly slot: BrowserSlot;
+  readonly userDataDir: string;
+  readonly strict: boolean;
+  readonly processes: SpawnedProcess[];
+  instance?: BrowserInstance;
+  stopping?: Promise<void>;
+  failure?: Error;
+}
+
 export class BrowserPool {
   /** Keyed by taskId — one entry per allocated browser. */
   private readonly instances = new Map<string, BrowserInstance>();
@@ -96,6 +108,8 @@ export class BrowserPool {
   private readonly retentionTimers = new Map<string, NodeJS.Timeout>();
   private readonly releasePromises = new Map<string, Promise<boolean>>();
   private readonly backgroundWork = new WeakMap<BrowserInstance, PoolBackgroundWork>();
+  private readonly processRecords = new Set<PoolProcessRecord>();
+  private readonly instanceProcesses = new WeakMap<BrowserInstance, PoolProcessRecord>();
   private shutdownPromise: Promise<void> | null = null;
   private readonly allocator: SlotAllocator;
   private gcTimer: NodeJS.Timeout | null = null;
@@ -141,6 +155,7 @@ export class BrowserPool {
       // means tasks.ts retried admit on the same id. Return the
       // existing instance rather than spawning a duplicate.
       const inst = this.instances.get(taskId);
+      if (inst && !this.processesRunning(inst)) throw new Error('POOL_PROCESS_CLEANUP_PENDING');
       if (inst && inst.status === 'ready') {
         if (inst.userId !== userId) {
           throw new Error('BrowserPool: task browser owner mismatch');
@@ -156,6 +171,9 @@ export class BrowserPool {
         throw new Error('BrowserPool: task browser allocation owner mismatch');
       }
       return pending.promise;
+    }
+    if (Array.from(this.processRecords).some((record) => record.taskId === taskId)) {
+      throw new Error('POOL_PROCESS_CLEANUP_PENDING');
     }
 
     let resolve!: (instance: BrowserInstance) => void;
@@ -207,6 +225,7 @@ export class BrowserPool {
   retain(taskId: string, ttlMs: number, reason = 'terminal-review'): boolean {
     if (this.shuttingDown) return false;
     const inst = this.instances.get(taskId);
+    if (inst && !this.processesRunning(inst)) return false;
     if (!inst || inst.status !== 'ready' || !Number.isFinite(ttlMs) || ttlMs <= 0) {
       return false;
     }
@@ -236,6 +255,14 @@ export class BrowserPool {
     userId: string,
   ): BrowserInstance | null {
     if (this.shuttingDown) return null;
+    const source = this.instances.get(sourceTaskId);
+    if (source && !this.processesRunning(source)) return null;
+    if (
+      Array.from(this.processRecords).some(
+        (record) => record.taskId === destinationTaskId && !record.instance,
+      )
+    )
+      return null;
     if (sourceTaskId === destinationTaskId) return null;
     if (this.releasePromises.has(destinationTaskId)) return null;
     if (this.allocationPromises.has(destinationTaskId)) return null;
@@ -333,16 +360,24 @@ export class BrowserPool {
 
   private async releaseInstance(inst: BrowserInstance, reason: string): Promise<boolean> {
     const taskId = inst.taskId;
-    this.logger.info(
-      { taskId, userId: inst.userId, reason, cdpPort: inst.cdpPort },
-      'pool: release',
-    );
-    await this.tearDownInstance(inst).catch((err) => {
-      this.logger.warn(
-        { taskId, err: err instanceof Error ? err.message : String(err) },
-        'pool: teardown error (continuing)',
+    try {
+      this.logger.info(
+        { taskId, userId: inst.userId, reason, cdpPort: inst.cdpPort },
+        'pool: release',
       );
-    });
+    } catch (error) {
+      if (!this.instanceProcesses.get(inst)?.strict) throw error;
+      // Diagnostics cannot interrupt cleanup of an already acquired strict resource.
+    }
+    const teardown = this.tearDownInstance(inst);
+    if (this.instanceProcesses.get(inst)?.strict) await teardown;
+    else
+      await teardown.catch((err) => {
+        this.logger.warn(
+          { taskId, err: err instanceof Error ? err.message : String(err) },
+          'pool: teardown error (continuing)',
+        );
+      });
     this.allocator.release({
       index: inst.index,
       display: inst.display,
@@ -351,6 +386,8 @@ export class BrowserPool {
       wsPort: inst.wsPort,
     });
     this.instances.delete(taskId);
+    const record = this.instanceProcesses.get(inst);
+    if (record) this.processRecords.delete(record);
     // Best-effort dir cleanup. Per-task fresh dir means no other task
     // will reuse it; leaving it on disk just wastes inodes.
     try {
@@ -491,7 +528,16 @@ export class BrowserPool {
       const pendingReleases = new Set(this.releasePromises.values());
       for (const id of taskIds) pendingReleases.add(this.release(id, 'shutdown'));
       const released = await Promise.allSettled(pendingReleases);
-      const failed = released.find((result) => result.status === 'rejected');
+      const startup = await Promise.allSettled(
+        Array.from(this.processRecords)
+          .filter(
+            (record) =>
+              record.strict &&
+              (!record.instance || this.instances.get(record.instance.taskId) !== record.instance),
+          )
+          .map((record) => this.stopProcesses(record)),
+      );
+      const failed = [...released, ...startup].find((result) => result.status === 'rejected');
       if (failed?.status === 'rejected') throw failed.reason;
       await this.egressProxy.close();
     });
@@ -541,65 +587,81 @@ export class BrowserPool {
     userId: string,
     viewportProfile?: BrowserViewportProfile,
   ): Promise<BrowserInstance> {
+    const lifetime = currentOperationLifetime();
     if (this.allocator.isFull()) {
       throw new PoolCapacityError(this.config.maxInstances);
     }
     const slot: BrowserSlot = this.allocator.claim();
     const userDataDir = pathJoin(this.config.baseDir, taskIdToDirName(taskId));
-    // Optimization #3 R1 — resolve per-task viewport geometry from
-    // the profile. Falls back to the legacy config.screenSize +
-    // Brave default when no profile is set (back-compat).
-    const xvfbScreen = viewportProfile
-      ? xvfbScreenForProfile(viewportProfile)
-      : this.config.screenSize;
-    const braveWindowSize = viewportProfile
-      ? braveWindowSizeForProfile(viewportProfile)
-      : undefined;
-
-    this.logger.info(
-      {
-        taskId,
-        userId,
-        ...slot,
-        userDataDir,
-        viewportProfile: viewportProfile ?? null,
-        xvfbScreen,
-      },
-      'pool: spawning quartet',
-    );
-
-    // Per-task dirs are fresh, but rm any leftover from a re-run with
-    // the same taskId (shouldn't happen but defensive). Brave's
-    // SingletonLock files are part of any profile, so this also
-    // cleans those without us having to enumerate them.
-    try {
-      rmSync(userDataDir, { recursive: true, force: true });
-      mkdirSync(userDataDir, { recursive: true });
-    } catch {
-      /* mkdirSync race / perm — will fail below with a clearer error */
-    }
-
-    const processes: SpawnedProcess[] = [];
+    const record: PoolProcessRecord = {
+      taskId,
+      slot,
+      userDataDir,
+      strict: !!lifetime,
+      processes: [],
+    };
+    this.processRecords.add(record);
+    const processes = record.processes;
     let executor: PlaywrightExecutor | undefined;
     let instance: BrowserInstance | undefined;
-    const killAll = (): void => {
-      for (const p of processes) {
-        try {
-          p.kill('SIGTERM');
-        } catch {
-          /* best-effort */
-        }
-      }
+    const assertActive = () => {
+      if (!lifetime) return;
+      lifetime.drain.assertDispatch(lifetime.owner);
+      if (this.shuttingDown || lifetime.drain.snapshot().unknown)
+        throw new Error('POOL_PROCESS_STOPPING');
+      if (processes.some((p) => !p.lifecycle?.isRunning()))
+        throw new Error('POOL_PROCESS_NOT_RUNNING');
     };
-
+    const track = async (p: SpawnedProcess): Promise<void> => {
+      processes.push(p);
+      if (!lifetime) return;
+      if (!p.lifecycle) throw new Error('POOL_PROCESS_RECEIPT_REQUIRED');
+      await p.lifecycle.ready;
+      assertActive();
+    };
     try {
+      // Optimization #3 R1 — resolve per-task viewport geometry from
+      // the profile. Falls back to the legacy config.screenSize +
+      // Brave default when no profile is set (back-compat).
+      const xvfbScreen = viewportProfile
+        ? xvfbScreenForProfile(viewportProfile)
+        : this.config.screenSize;
+      const braveWindowSize = viewportProfile
+        ? braveWindowSizeForProfile(viewportProfile)
+        : undefined;
+
+      this.logger.info(
+        {
+          taskId,
+          userId,
+          ...slot,
+          userDataDir,
+          viewportProfile: viewportProfile ?? null,
+          xvfbScreen,
+        },
+        'pool: spawning quartet',
+      );
+
+      // Per-task dirs are fresh, but rm any leftover from a re-run with
+      // the same taskId (shouldn't happen but defensive). Brave's
+      // SingletonLock files are part of any profile, so this also
+      // cleans those without us having to enumerate them.
+      try {
+        rmSync(userDataDir, { recursive: true, force: true });
+        mkdirSync(userDataDir, { recursive: true });
+      } catch {
+        /* mkdirSync race / perm — will fail below with a clearer error */
+      }
+
       const proxyServer = await this.egressProxy.start();
+      assertActive();
       let xvfb: SpawnedProcess | null = null;
       let x11vnc: SpawnedProcess | null = null;
       let websockify: SpawnedProcess | null = null;
       let browserProcess: SpawnedProcess;
 
       if (process.platform === 'darwin') {
+        assertActive();
         browserProcess = spawnNativeChromium(
           {
             display: slot.display,
@@ -610,12 +672,14 @@ export class BrowserPool {
           },
           this.logger,
         );
-        processes.push(browserProcess);
+        await track(browserProcess);
       } else {
+        assertActive();
         xvfb = spawnXvfb(slot.display, xvfbScreen, this.logger);
-        processes.push(xvfb);
+        await track(xvfb);
         // Give Xvfb ~250ms to bind its Unix socket before Brave connects.
         await new Promise((r) => setTimeout(r, 250));
+        assertActive();
 
         browserProcess = spawnBrave(
           {
@@ -627,20 +691,25 @@ export class BrowserPool {
           },
           this.logger,
         );
-        processes.push(browserProcess);
+        await track(browserProcess);
       }
 
+      assertActive();
       const version = await waitForCdpReady(slot.cdpPort, 15_000);
+      assertActive();
       this.logger.info({ taskId, userId, cdpPort: slot.cdpPort, version }, 'pool: Brave CDP ready');
 
       if (process.platform !== 'darwin' && this.config.vncEnabled === true) {
+        assertActive();
         x11vnc = spawnX11vnc(slot.display, slot.vncPort, this.logger);
-        processes.push(x11vnc);
+        await track(x11vnc);
 
+        assertActive();
         websockify = spawnWebsockify(slot.wsPort, slot.vncPort, this.logger);
-        processes.push(websockify);
+        await track(websockify);
       }
 
+      assertActive();
       executor = new PlaywrightExecutor({
         networkPolicy: defaultBrowserNetworkPolicy,
         // BrowserPool Chromium is already pinned to the egress proxy below.
@@ -650,7 +719,9 @@ export class BrowserPool {
       if (viewportProfile) {
         executor.setViewportSize(dimensionsForProfile(viewportProfile));
       }
+      assertActive();
       const connectResult = await executor.connect(`http://127.0.0.1:${slot.cdpPort}`);
+      assertActive();
       if (!connectResult.ok) {
         throw new Error(`PlaywrightExecutor.connect failed: ${connectResult.error}`);
       }
@@ -671,6 +742,7 @@ export class BrowserPool {
         ...(viewportProfile ? { viewportProfile } : {}),
       };
       const boundInstance = instance;
+      this.instanceProcesses.set(instance, record);
       this.backgroundWork.set(
         instance,
         startPoolBackgroundWork(
@@ -684,6 +756,7 @@ export class BrowserPool {
         ),
       );
       this.instances.set(taskId, instance);
+      record.instance = instance;
 
       // Phase 22a — auto-detect and reap dead instances. Brave / x11vnc
       // / websockify can crash mid-task (sandbox SIGSEGV, OOM, X
@@ -712,19 +785,44 @@ export class BrowserPool {
           .get(instance)
           ?.stop()
           .catch(() => {});
-      await executor?.disconnect().catch(() => {});
+      const disconnected = await Promise.allSettled([
+        Promise.resolve().then(() => executor?.disconnect()),
+      ]);
+      if (record.strict && disconnected.some((r) => r.status === 'rejected'))
+        record.failure = new Error('POOL_PROCESS_CLEANUP_FAILED');
       if (instance && this.instances.get(instance.taskId) === instance) {
         this.instances.delete(instance.taskId);
       }
       // Unwind any half-started processes so we don't leak PIDs.
-      killAll();
+      if (record.strict) await this.stopProcesses(record);
+      else
+        for (const p of processes) {
+          try {
+            p.kill('SIGTERM');
+          } catch {
+            /* legacy best effort */
+          }
+        }
       this.allocator.release(slot);
+      this.processRecords.delete(record);
       throw err;
     }
   }
 
   private async tearDownInstance(inst: BrowserInstance): Promise<void> {
     const background = await Promise.allSettled([this.backgroundWork.get(inst)?.stop()]);
+    const record = this.instanceProcesses.get(inst);
+    if (record?.strict) {
+      const disconnected = await Promise.allSettled([
+        Promise.resolve().then(() => inst.executor.disconnect()),
+      ]);
+      const stopped = await Promise.allSettled([this.stopProcesses(record)]);
+      const failure = [...background, ...disconnected, ...stopped].find(
+        (r) => r.status === 'rejected',
+      );
+      if (failure?.status === 'rejected') throw failure.reason;
+      return;
+    }
     try {
       await inst.executor.disconnect();
     } catch {
@@ -758,6 +856,32 @@ export class BrowserPool {
         throw new Error('BROWSER_POOL_BACKGROUND_REENTRY');
       }
     }
+  }
+
+  private processesRunning(instance: BrowserInstance): boolean {
+    const record = this.instanceProcesses.get(instance);
+    return (
+      !record?.strict ||
+      (!record.stopping && record.processes.every((p) => p.lifecycle?.isRunning()))
+    );
+  }
+
+  private stopProcesses(record: PoolProcessRecord): Promise<void> {
+    if (record.stopping) return record.stopping;
+    record.stopping = Promise.resolve().then(async () => {
+      const results = await Promise.allSettled(
+        record.processes.map((p) =>
+          Promise.resolve().then(() => {
+            if (!p.lifecycle) throw new Error('POOL_PROCESS_RECEIPT_REQUIRED');
+            return p.lifecycle.terminate();
+          }),
+        ),
+      );
+      const failed = results.find((r) => r.status === 'rejected');
+      if (failed?.status === 'rejected') throw failed.reason;
+      if (record.failure) throw record.failure;
+    });
+    return record.stopping;
   }
 }
 

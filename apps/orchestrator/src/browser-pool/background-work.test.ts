@@ -26,7 +26,29 @@ vi.mock('playwright', () => ({
 vi.mock('./spawn.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('./spawn.js')>();
   let pid = 910000;
-  const spawn = () => ({ pid: ++pid, child: new EventEmitter(), kill: () => true });
+  // Synthetic process receipts isolate existing background ordering; the dedicated
+  // pool-process suites exercise native ChildProcess events and real owned receipts.
+  const spawn = () => {
+    const child = new EventEmitter();
+    const currentPid = ++pid;
+    let running = true;
+    const stopped = Promise.resolve();
+    return {
+      pid: currentPid,
+      child,
+      kill: () => true,
+      lifecycle: {
+        pid: currentPid,
+        child,
+        ready: Promise.resolve(),
+        isRunning: () => running,
+        terminate: () => {
+          running = false;
+          return stopped;
+        },
+      },
+    };
+  };
   return {
     ...original,
     spawnNativeChromium: spawn,
