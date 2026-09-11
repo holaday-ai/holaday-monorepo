@@ -11,6 +11,11 @@ import { BrowserPool } from './browser-pool.js';
 import { BrowserEgressProxy } from './egress-proxy.js';
 import type { PoolConfig } from './types.js';
 
+// Pool ordering uses a synthetic Browser; native close receipts have their own SDK suite.
+vi.mock('../agent/vision-loop/browser-close-receipt.js', () => ({
+  bindBrowserCloseReceipt: (browser: { close(): Promise<void> }) => () => browser.close(),
+}));
+
 const transport = vi.hoisted(() => ({
   ready: async () => 'synthetic',
   connect: async (): Promise<unknown> => ({}),

@@ -1,5 +1,10 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { ExecutionDrain } from '../../execution/execution-drain.js';
+
+// This suite's Browser.close is synthetic; real close receipts are tested separately.
+vi.mock('./browser-close-receipt.js', () => ({
+  bindBrowserCloseReceipt: (browser: { close(): Promise<void> }) => () => browser.close(),
+}));
 import { currentOperationLifetime, startOwnedOperation } from '../../execution/owned-operation.js';
 import { runBrowserOperation } from './browser-operation.js';
 import { PlaywrightExecutor } from './playwright-executor.js';

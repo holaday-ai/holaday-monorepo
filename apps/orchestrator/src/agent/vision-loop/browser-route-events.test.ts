@@ -10,6 +10,11 @@ import { createOwnedCdpConnection } from './owned-cdp-connection.js';
 import { createOwnedManagedBrowser } from './owned-managed-browser.js';
 
 const warnings = vi.hoisted(() => vi.fn());
+
+// This suite's Browser.close is synthetic; real close receipts are tested separately.
+vi.mock('./browser-close-receipt.js', () => ({
+  bindBrowserCloseReceipt: (browser: { close(): Promise<void> }) => () => browser.close(),
+}));
 vi.mock('../../config/logger.js', () => ({ logger: { warn: warnings } }));
 
 // Actual pinned client SDK events; driver responses and owned Browser.close are synthetic.

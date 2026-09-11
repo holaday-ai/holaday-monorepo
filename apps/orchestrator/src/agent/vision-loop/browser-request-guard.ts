@@ -30,7 +30,10 @@ function reportPolicy(outcome: 'blocked' | 'policy_failed') {
 }
 
 /** Fixed callbacks owned by the enclosing Browser lease, never a reusable dispatch scope. */
-export function createBrowserRequestGuard(browser: Browser): BrowserRequestGuard {
+export function createBrowserRequestGuard(
+  browser: Browser,
+  closeBrowser: () => Promise<void> = () => browser.close(),
+): BrowserRequestGuard {
   const lifetime = currentOperationLifetime();
   const identity = {};
   let phase: 'normal' | 'abort-only' | 'closed' | 'failed-sealed' = 'normal';
@@ -197,7 +200,7 @@ export function createBrowserRequestGuard(browser: Browser): BrowserRequestGuard
       closing = Promise.resolve().then(async () => {
         await stopped;
         try {
-          await requestContext.run(identity, () => browser.close());
+          await requestContext.run(identity, closeBrowser);
           phase = 'closed';
         } catch (error) {
           phase = 'failed-sealed';

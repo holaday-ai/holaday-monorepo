@@ -303,3 +303,13 @@ BrowserRequestGuard在获取Browser时捕获已有资源owner，未来固定rout
 测试保留真实Connection/Browser/Context/Request/Route/RouteHandler/EventEmitter，并用实际Worker.close事件触发真实safeRace；CDP/managed、abort/continue、成功/失败/断连覆盖。driver协议响应、Browser.close仍合成，没有实际driver、网络、浏览器或OS进程试验。直接人为绕过公开方法调用私有SDK不在此固定回调契约保护内，本观察点不能事后阻止已经派发的任意Promise。
 
 这只补齐3c-8的固定请求raw回执，不代表所有driver RPC/transport或OS组后代排空。其他SDK动作/事件、共享Connection与Browser.close实际传输/进程终止证明、OS kill/reaper、Brave/batch/调度hook/所有入口、统一closed boot/stop、恢复对账、维护/平台/真实千问及全部新发布门禁仍阻断发布。Qwen browser及boot注入保持关闭，不发布局部机制；下一步界定其余driver/transport与OS生命周期边界。
+
+## 3D-3b-3c-9b 本地增量：绑定Browser关闭的真实client回执（2026-09-11）
+
+公开SDK Browser.close吞TargetClosedError，可能将Connection清理pending回执造成的拒绝当成功。严格owned路径在取得Browser、创建请求guard及发布ready之前绑定固定SDK关闭能力，捕获channel/Connection/关闭通知与兼容形态；按获取时lifetime选择，不因cleanup已sealed/blocked而降级。guard及其初始化失败fallback共用同一缓存关闭回执；严格绑定失败不退回公开close，也不尝试关闭共享Connection。
+
+首次close调用先缓存Promise，再deferred核对并发送原channel.close({})；保持原CDP/managed的Browser权限，未调用默认context/page或进程kill。必须先等待已派发RPC，ACK后还需原Browser关闭通知。Connection断开只能使结果未知，不能作为关闭成功；通知先到不提前结束ACK等待，ACK先到不提前宣称关闭。派发前/终态核对固定SDK自有data descriptor，拒绝accessor而不执行getter，避免末端getter或_closeReason setter重定向连接；真实newListener hook重入共享单次回执。监听器清理在固定错误处理内，removeListener hook运行后再次核对断连和形态。绑定异常归一UNSUPPORTED，执行异常归一RECEIPT_FAILED；保留unknown、不重发。无scope沿用旧公开SDK行为，其结果不是全进程证明；不宣称防御任意恶意同进程Proxy/原型篡改。
+
+专门SDK测试使用真实Connection/Browser、真实CDP/managed lease/drain；组合测试还包含真实Context/Route及请求事件适配，验证close成功或失败后仍等待在途abort。只有guard初始化失败反例对构造处做条件故障注入。其他7份既有资源测试仍有明确标注的synthetic Browser.close，仅隔离新的固定SDK边界，不称这些测试证明真实关闭。driver响应/通知仍合成，未启动浏览器/网络/driver或OS进程。
+
+该单元不证明server驱动内部所有工作、WebSocket/真实进程终止、OS组/后代或全平台排空。其余driver动作/事件、pool OS生命周期/失败清理、Brave/batch/调度hook/入口/文件SDK、统一closed boot/stop/全局恢复对账、首次维护与新发布工具/平台/千问/生产门禁仍阻断。下一步优先界定pool自有进程组的获取、绑定终止和退出证明；不能以信号成功、PID消失或新boot计数零冒充完整排空。

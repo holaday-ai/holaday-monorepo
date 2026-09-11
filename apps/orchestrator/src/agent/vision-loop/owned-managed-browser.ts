@@ -4,6 +4,7 @@ import {
   startOwnedOperation,
   withOperationDispatchScope,
 } from '../../execution/owned-operation.js';
+import { bindBrowserCloseReceipt } from './browser-close-receipt.js';
 import { type BrowserRequestControl, createBrowserRequestGuard } from './browser-request-guard.js';
 
 export interface OwnedManagedBrowser extends BrowserRequestControl {
@@ -37,6 +38,7 @@ export function createOwnedManagedBrowser(
     withOperationDispatchScope(async (seal) => {
       const lifetime = currentOperationLifetime();
       let browser: Browser | undefined;
+      let closeReceipt: (() => Promise<void>) | undefined;
       const markUnknown = () => {
         if (lifetime) lifetime.drain.markUnknown(lifetime.owner);
       };
@@ -54,7 +56,9 @@ export function createOwnedManagedBrowser(
       const closeBrowser = async (bound: Browser) => {
         try {
           if (requests) await requests.close();
-          else await bound.close();
+          else if (closeReceipt) await closeReceipt();
+          else if (!lifetime) await bound.close();
+          else throw new Error('BROWSER_CLOSE_BOUNDARY_UNSUPPORTED');
         } catch (error) {
           markUnknown();
           throw error;
@@ -78,7 +82,9 @@ export function createOwnedManagedBrowser(
         }
         try {
           browser = await launch.call(chromium, options);
-          requests = createBrowserRequestGuard(browser);
+          const bound = browser;
+          closeReceipt = lifetime ? bindBrowserCloseReceipt(bound) : () => bound.close();
+          requests = createBrowserRequestGuard(browser, closeReceipt);
         } catch (error) {
           markUnknown();
           throw error;
