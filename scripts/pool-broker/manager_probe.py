@@ -175,8 +175,12 @@ class SystemManagerProbe:
 
     def _remaining(self):
         now = time.monotonic()
+        outer_remaining = None
         if self._scope_guard is not None:
-            self._scope_guard()
+            outer_remaining = self._scope_guard()
+            if outer_remaining is not None and (type(outer_remaining) not in (int,float)
+                    or not math.isfinite(outer_remaining) or outer_remaining <= 0):
+                raise ValueError()
         # Last, non-IO veto after the clock/native checks. Closing a registration
         # or its original pin does not necessarily close this manager object.
         if hasattr(self, '_pin') and (self._registration._revoked or not self._registration._received
@@ -187,7 +191,8 @@ class SystemManagerProbe:
                 or now < self._last or not 0 < self._deadline - now <= 5):
             raise ValueError()
         self._last = now
-        return self._deadline - now
+        remaining = self._deadline - now
+        return remaining if outer_remaining is None else min(remaining, outer_remaining)
 
     def _live_budget(self):
         self._registration._require_registered()

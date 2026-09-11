@@ -38,7 +38,7 @@ class InstallationTests(unittest.TestCase):
         for name in ("installation.py", "process_pin.py", "protocol.py", "launch_registration.py", "application_guard.py", "root_launch.py", "bootstrap.py", "bootstrap_input.py", "application_env_keys.json", "native-build-manifest.json"):
             add(package + "/" + name, mode=0o644, kind=stat.S_IFREG)
         add(package + '/native-entry', mode=0o755, kind=stat.S_IFREG)
-        for name in ('launch_authorization.py', 'launch_listener.py', 'runtime_channel.py', 'resource_journal.py', 'manager_probe.py', 'xvfb_launch.py'):
+        for name in ('launch_authorization.py', 'launch_listener.py', 'runtime_channel.py', 'resource_journal.py', 'manager_probe.py', 'xvfb_launch.py', 'resource_recovery.py'):
             add(package + '/' + name, mode=0o644, kind=stat.S_IFREG)
         for path in ("/etc/holaday-pool-broker", "/var/lib/holaday-pool-broker", "/run/holaday-pool-broker"):
             add(path, mode=0o700)
@@ -108,6 +108,15 @@ class InstallationTests(unittest.TestCase):
                 else: s.paths[path].st_uid=998
                 with self.assertRaises(ValueError): installation.inspect_installation('a'*40)
             self.assertEqual(s.opened, {})
+
+    def test_recovery_module_must_be_present_and_root_protected(self):
+        for missing in (True,False):
+            with self.system() as s:
+                path=s.package+'/resource_recovery.py'
+                if missing: del s.paths[path]
+                else: s.paths[path].st_mode |= 0o020
+                with self.assertRaises(ValueError): installation.inspect_installation('a'*40)
+                self.assertEqual(s.opened,{})
 
     def reject(self, call):
         with self.assertRaises(ValueError) as caught:
