@@ -12,9 +12,9 @@ import types
 
 
 _MODULES = ('installation', 'process_pin', 'protocol', 'launch_authorization', 'launch_registration',
-            'application_guard', 'root_launch', 'resource_journal', 'manager_probe', 'runtime_channel', 'launch_listener', 'bootstrap_input')
+            'application_guard', 'root_launch', 'resource_journal', 'manager_probe', 'xvfb_launch', 'runtime_channel', 'launch_listener', 'bootstrap_input')
 _FILES = {name + '.py' for name in _MODULES} | {'bootstrap.py', 'application_env_keys.json', 'native-entry'}
-_TOOLS = ('/usr/bin/python3', '/usr/bin/setpriv', '/opt/node22/bin/node', '/usr/bin/busctl')
+_TOOLS = ('/usr/bin/python3', '/usr/bin/setpriv', '/opt/node22/bin/node', '/usr/bin/busctl', '/usr/bin/Xvfb')
 
 
 def _consume_input(candidate, decoder):

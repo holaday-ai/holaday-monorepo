@@ -1,9 +1,10 @@
-"""Durable pre-dispatch evidence only. No platform execution or exit claims."""
+"""Durable dispatch/observation evidence. No readiness or exit claims."""
 
 import fcntl
 import hmac
 import json
 import os
+import re
 import stat
 
 import launch_authorization
@@ -51,9 +52,33 @@ def _replay(raw):
             slots.add(slot)
             capabilities.add(row['capability'])
         elif row.get('action') == 'dispatch':
-            if set(row) != common or resource not in resources or resources[resource]['state'] != 'prepared':
+            binding = {'unit', 'managerGuid', 'managerOwner'}
+            if (set(row) not in (common, common | binding) or resource not in resources
+                    or resources[resource]['state'] != 'prepared'):
                 raise ValueError()
+            if set(row) == common | binding:
+                if (resources[resource]['component'] != 'xvfb'
+                        or row['unit'] != 'holaday-pool-xvfb-' + resource + '.service'
+                        or type(row['managerOwner']) is not str or len(row['managerOwner']) > 64
+                        or re.fullmatch(r':[0-9]+\.[0-9]+', row['managerOwner']) is None):
+                    raise ValueError()
+                _identifier(row['managerGuid'], 32)
+                resources[resource].update({key:row[key] for key in binding})
             resources[resource]['state'] = 'dispatching'
+        elif row.get('action') == 'accepted':
+            if (set(row) != common | {'job'} or resource not in resources
+                    or resources[resource]['state'] != 'dispatching' or 'unit' not in resources[resource]
+                    or type(row['job']) is not str
+                    or re.fullmatch(r'/org/freedesktop/systemd1/job/[1-9][0-9]{0,9}', row['job']) is None
+                    or int(row['job'].rsplit('/',1)[1]) > 4294967295):
+                raise ValueError()
+            resources[resource].update(state='accepted', job=row['job'])
+        elif row.get('action') == 'observe':
+            if (set(row) != common | {'invocation'} or resource not in resources
+                    or resources[resource]['state'] != 'accepted'):
+                raise ValueError()
+            _identifier(row['invocation'], 32)
+            resources[resource].update(state='observed', invocation=row['invocation'])
         else:
             raise ValueError()
     return resources, requests, len(lines)

@@ -26,7 +26,7 @@ NATIVE = SimpleNamespace(**vars(os))
 
 class ProbeTests(unittest.TestCase):
     @contextlib.contextmanager
-    def system(self):
+    def system(self, setup=None):
         self.assertIsNotNone(manager_probe, 'authenticated manager producer missing')
         with tempfile.TemporaryDirectory(prefix='holaday-manager-') as directory:
             root = Path(directory)
@@ -42,6 +42,8 @@ class ProbeTests(unittest.TestCase):
             (package/'native-build-manifest.json').write_text(json.dumps(manifest))
             (package/'native-build-manifest.json').chmod(0o644)
             (root/'run/dbus').mkdir(parents=True)
+            if setup is not None:
+                setup(root, package, manifest)
             with test_launch_listener.ListenerTests().system() as base, contextlib.ExitStack() as stack:
                 listener = launch_listener.RootLaunchListener.open('a'*40)
                 listener.accept_once()

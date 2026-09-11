@@ -31,10 +31,10 @@ def _deny():
 
 
 def _capture(argv, tool_fd, deadline, scope_guard):
-    """Private external-program boundary, called only with fixed read-only argv.
+    """Private external-program boundary, called only with fixed trusted argv.
 
     Killing this owned CLI does not cancel a manager operation or prove exit of
-    any resource. No manager writes are exposed by this module.
+    any resource. Resource writes are restricted to xvfb_launch's transaction.
     """
     def budget():
         remaining = deadline - time.monotonic()
@@ -108,6 +108,7 @@ class SystemManagerProbe:
         probe._fds, probe._entries = [], []
         probe._channel, probe._owner = None, None
         probe._busy, probe._retired = True, False
+        probe._scope_guard = None
         probe._last = time.monotonic()
         probe._deadline = probe._last + 5
         failed = True
@@ -174,11 +175,23 @@ class SystemManagerProbe:
 
     def _remaining(self):
         now = time.monotonic()
+        if self._scope_guard is not None:
+            self._scope_guard()
+        # Last, non-IO veto after the clock/native checks. Closing a registration
+        # or its original pin does not necessarily close this manager object.
+        if hasattr(self, '_pin') and (self._registration._revoked or not self._registration._received
+                or self._registration._pin is not self._pin or self._pin._fd is None
+                or self._registration._candidate.hex() != self._candidate):
+            raise ValueError()
         if (self._retired or type(now) not in (int, float) or not math.isfinite(now)
                 or now < self._last or not 0 < self._deadline - now <= 5):
             raise ValueError()
         self._last = now
         return self._deadline - now
+
+    def _live_budget(self):
+        self._registration._require_registered()
+        return self._remaining()
 
     def _io(self, call, *args, **kwargs):
         self._remaining()
@@ -271,7 +284,7 @@ class SystemManagerProbe:
         argv = ('/proc/self/fd/' + str(self._tool), '--address=unix:path=' + _PATH + ',guid=' + self._guid,
             '--json=short', '--no-pager', '--auto-start=no', '--allow-interactive-authorization=no',
             '--timeout=2s', 'call', _BUS, _OBJECT, _BUS, method, 's', value)
-        raw = self._io(_capture, argv, self._tool, self._deadline, self._remaining)
+        raw = self._io(_capture, argv, self._tool, self._deadline, self._live_budget)
         if type(raw) is not bytes or not 1 <= len(raw) <= 16384:
             raise ValueError()
         message = json.loads(raw.decode('utf-8'), object_pairs_hook=_unique_object, parse_constant=_reject_constant)
@@ -299,27 +312,34 @@ class SystemManagerProbe:
         self._guard()
         return {'reachable': True, 'managerBound': True, 'groupExitProven': False}
 
-    def probe(self):
+    def _run(self, operation, scope_guard=None):
         if self._busy or self._retired:
             self.close()
             _deny()
         self._busy, failed = True, True
+        self._scope_guard = scope_guard
         try:
             now = time.monotonic()
             if not math.isfinite(now) or now < self._last:
                 raise ValueError()
             self._last, self._deadline = now, now + 5
-            result = self._probe()
+            self._remaining()
+            result = operation()
+            self._remaining()
             failed = False
         except Exception:
             self._retired = True
         finally:
             self._busy = False
+            self._scope_guard = None
             if self._retired:
                 self._release()
         if failed:
             _deny()
         return result
+
+    def probe(self):
+        return self._run(self._probe)
 
     def _release(self):
         failed = False
