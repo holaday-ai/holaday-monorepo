@@ -21,7 +21,7 @@ class BootstrapTrustTests(unittest.TestCase):
         self.fs = self.stack.enter_context(test_installation.InstallationTests().system())
         self.base = self.fs.package
         names = ('installation.py', 'process_pin.py', 'protocol.py', 'launch_authorization.py', 'launch_registration.py',
-                 'application_guard.py', 'root_launch.py', 'runtime_channel.py', 'launch_listener.py', 'bootstrap_input.py', 'bootstrap.py',
+                 'application_guard.py', 'root_launch.py', 'runtime_channel.py', 'resource_journal.py', 'launch_listener.py', 'bootstrap_input.py', 'bootstrap.py',
                  'application_env_keys.json')
         self.sources = {name: (Path(__file__).parent / name).read_bytes() for name in names}
         self.sources['native-entry'] = b'synthetic artifact - not a real Linux ELF'
@@ -126,6 +126,7 @@ class BootstrapTrustTests(unittest.TestCase):
             self.assertEqual(modules['root_launch'].__file__, self.base + '/root_launch.py')
             self.assertIs(modules['launch_registration'].LaunchWindow, modules['launch_authorization'].LaunchWindow)
             self.assertIs(modules['launch_listener'].LaunchRegistration, modules['launch_registration'].LaunchRegistration)
+            self.assertIs(modules['resource_journal'].LaunchRegistration, modules['launch_registration'].LaunchRegistration)
             self.assertIs(modules['launch_listener'].launch_authorization, modules['launch_authorization'])
             self.assertIs(modules['launch_listener'].runtime_channel, modules['runtime_channel'])
             self.assertEqual(sys.path, old_path)
