@@ -185,6 +185,7 @@ class LaunchRegistration:
         self._revoked = False
         self._lock = threading.RLock()
         self._window = None
+        self._received = False
 
     def receive(self, channel, *, window=None):
         with self._lock:
@@ -241,6 +242,25 @@ class LaunchRegistration:
                     self._discard()
             if failed:
                 _deny()
+            self._received = True
+
+    def _require_registered(self):
+        pin = self._pin
+        if not self._received or self._revoked or pin is None:
+            raise ValueError()
+        pin._require_live()
+        if self._revoked or not self._received or self._pin is not pin:
+            raise ValueError()
+
+    def check_runtime_sender(self, credentials, boot=None):
+        """Internal kernel credentials only; success never grants resource authority."""
+        with self._lock:
+            self._require_registered()
+            pin = self._pin
+            pin.check_sender(credentials, pin._boot if boot is None else boot)
+            self._require_registered()
+            if self._pin is not pin:
+                raise ValueError()
 
     def _require_pending(self):
         if self._revoked:

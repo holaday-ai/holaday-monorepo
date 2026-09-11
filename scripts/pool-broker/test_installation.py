@@ -38,7 +38,7 @@ class InstallationTests(unittest.TestCase):
         for name in ("installation.py", "process_pin.py", "protocol.py", "launch_registration.py", "application_guard.py", "root_launch.py", "bootstrap.py", "bootstrap_input.py", "application_env_keys.json", "native-build-manifest.json"):
             add(package + "/" + name, mode=0o644, kind=stat.S_IFREG)
         add(package + '/native-entry', mode=0o755, kind=stat.S_IFREG)
-        for name in ('launch_authorization.py', 'launch_listener.py'):
+        for name in ('launch_authorization.py', 'launch_listener.py', 'runtime_channel.py'):
             add(package + '/' + name, mode=0o644, kind=stat.S_IFREG)
         for path in ("/etc/holaday-pool-broker", "/var/lib/holaday-pool-broker", "/run/holaday-pool-broker"):
             add(path, mode=0o700)
@@ -214,7 +214,7 @@ class InstallationTests(unittest.TestCase):
 
     def test_first_exec_package_members_are_required_and_not_app_writable(self):
         for name in ('bootstrap.py', 'bootstrap_input.py', 'application_env_keys.json',
-                     'native-build-manifest.json', 'native-entry', 'launch_authorization.py', 'launch_listener.py'):
+                     'native-build-manifest.json', 'native-entry', 'launch_authorization.py', 'launch_listener.py', 'runtime_channel.py'):
             for missing in (True, False):
                 with self.subTest(name=name, missing=missing), self.system() as s:
                     path = s.package + '/' + name

@@ -9,6 +9,7 @@ from socket import socket as Socket
 import installation
 import launch_authorization
 from launch_registration import LaunchRegistration
+import runtime_channel
 
 
 def _deny():
@@ -30,6 +31,7 @@ class RootLaunchListener:
         obj._socket, obj._registration, obj._window, obj._path_id = None, None, None, None
         obj._directories = []
         obj._attempted = obj._revoked = False
+        obj._registered = obj._serving = False
         obj._path_mode = 0o700
         try:
             launch_authorization._context()
@@ -136,6 +138,7 @@ class RootLaunchListener:
                 if self._close_transport():
                     raise ValueError()
                 self._check()
+                self._registered = True
                 return None
             except Exception:
                 if channel is not None:
@@ -150,3 +153,19 @@ class RootLaunchListener:
         with self._lock:
             if self._abort():
                 _deny()
+
+    def serve_runtime_once(self):
+        with self._lock:
+            try:
+                if self._revoked or not self._registered or self._serving:
+                    raise ValueError()
+                self._serving = True
+                receiver = self._registration
+                runtime_channel.serve_closed(receiver)
+                if self._revoked or self._registration is not receiver:
+                    raise ValueError()
+            except Exception:
+                self._abort()
+                _deny()
+            finally:
+                self._serving = False
