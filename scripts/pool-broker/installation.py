@@ -173,7 +173,7 @@ def inspect_installation(candidate):
         identity = _identities()
         package = "/usr/local/lib/holaday-pool-broker/releases/" + candidate
         _walk(package, mode=0o755)
-        for name in ("installation.py", "process_pin.py", "protocol.py", "launch_registration.py"):
+        for name in ("installation.py", "process_pin.py", "protocol.py", "launch_registration.py", "application_guard.py"):
             _walk(package + "/" + name, mode=0o644, regular=True)
         for path in ("/etc/holaday-pool-broker", "/var/lib/holaday-pool-broker", "/run/holaday-pool-broker"):
             _walk(path)
