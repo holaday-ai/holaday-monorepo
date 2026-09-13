@@ -136,6 +136,6 @@ def launch_xvfb(journal, manager, request):
                 guard()
                 return {'state':'observed','groupExitProven':False}
             return journal._run(dispatch)
-        return manager._run(operation, journal._alive)
+        return manager._run(operation, journal._alive, terminal_veto=journal._owner_veto)
     except Exception:
         _deny()

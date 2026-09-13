@@ -15,6 +15,31 @@ import test_installation
 
 
 class BootstrapTrustTests(unittest.TestCase):
+    def test_release_without_root_service_binary_is_rejected(self):
+        self.manifest['files'].pop('root-native-entry', None)
+        self.sync_manifest()
+        with self.assertRaises(ValueError): self.verify()
+
+    def test_modified_root_service_binary_is_rejected(self):
+        self.verify()
+        self.payloads[self.base + '/root-native-entry'] += b'changed'
+        with self.assertRaises(ValueError): self.verify()
+
+    def test_root_protocol_modules_are_pinned_in_the_release(self):
+        for name in ('quartet_probe_clock', 'quartet_probe_channel', 'quartet_create_offer', 'quartet_runtime', 'quartet_create_control', 'quartet_listener'):
+            self.assertIn(name, bootstrap._MODULES)
+            self.assertIn(name + '.py', bootstrap._FILES)
+
+    def test_fixed_egress_native_binary_is_in_the_exact_release_digest_set(self):
+        self.assertIn('egress-listener.node', bootstrap._FILES)
+        self.payloads[self.base + '/egress-listener.node'] += b'changed'
+        with self.assertRaises(ValueError): self.verify()
+
+    def test_fixed_control_native_binary_is_in_the_exact_release_digest_set(self):
+        self.assertIn('control-connector.node', bootstrap._FILES)
+        self.payloads[self.base + '/control-connector.node'] += b'changed'
+        with self.assertRaises(ValueError): self.verify()
+
     def setUp(self):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
@@ -22,9 +47,14 @@ class BootstrapTrustTests(unittest.TestCase):
         self.base = self.fs.package
         names = ('installation.py', 'process_pin.py', 'protocol.py', 'launch_authorization.py', 'launch_registration.py',
                  'application_guard.py', 'root_launch.py', 'runtime_channel.py', 'resource_journal.py', 'manager_probe.py', 'launch_listener.py', 'bootstrap_input.py', 'bootstrap.py',
-                 'application_env_keys.json', 'xvfb_launch.py', 'resource_recovery.py')
+                 'application_env_keys.json', 'xvfb_launch.py', 'resource_recovery.py',
+                 'slot_identity.py', 'slot-identity-policy.json', 'quartet_protocol.py', 'quartet_records.py', 'quartet_journal.py',
+                 'quartet_worker_guard.py', 'quartet_worker_pin.py', 'quartet_root_view.py', 'rootfs-policy.json', 'quartet_material.py', 'quartet_worker_view.py', 'quartet_worker_channel.py', 'quartet_launch.py', 'quartet_endpoints.py', 'quartet_bridge_channel.py', 'quartet_egress.py', 'quartet_probe_clock.py', 'quartet_probe_channel.py', 'quartet_create_offer.py', 'quartet_runtime.py', 'quartet_create_control.py', 'quartet_listener.py')
         self.sources = {name: (Path(__file__).parent / name).read_bytes() for name in names}
         self.sources['native-entry'] = b'synthetic artifact - not a real Linux ELF'
+        self.sources['root-native-entry'] = b'synthetic root service - not a real Linux ELF'
+        self.sources['egress-listener.node'] = b'synthetic N-API artifact - not a real Linux shared object'
+        self.sources['control-connector.node'] = b'synthetic control artifact - not a real Linux shared object'
         self.payloads = {self.base + '/' + name: data for name, data in self.sources.items()}
         tools = ('/usr/bin/python3', '/usr/bin/setpriv', '/opt/node22/bin/node', '/usr/bin/busctl', '/usr/bin/Xvfb')
         self.payloads.update({tool: ('synthetic tool ' + tool).encode() for tool in tools})
@@ -38,7 +68,7 @@ class BootstrapTrustTests(unittest.TestCase):
             if path != '/' and str(Path(path).parent) not in self.fs.paths:
                 add(str(Path(path).parent))
             self.fs.paths[path] = SimpleNamespace(st_uid=0, st_gid=0,
-                st_mode=(stat.S_IFREG | (0o755 if path in tools or path.endswith('/native-entry') else 0o644))
+                st_mode=(stat.S_IFREG | (0o755 if path in tools or path.endswith(('/native-entry', '/root-native-entry')) else 0o644))
                     if regular else stat.S_IFDIR | 0o755,
                 st_nlink=1 if regular else 2, st_size=len(self.payloads.get(path, b'')), attrs=[])
         for path in self.payloads:
@@ -77,8 +107,24 @@ class BootstrapTrustTests(unittest.TestCase):
                 self.manifest = old
         self.sync_manifest()
 
+    def test_root_policy_is_bounded_separately_from_executable_sources(self):
+        path = self.base + '/rootfs-policy.json'
+        for size in (262145, 1048576, 1048577):
+            data = b' ' * size
+            self.payloads[path] = data
+            self.fs.paths[path].st_size = size
+            self.manifest['files']['rootfs-policy.json'] = hashlib.sha256(data).hexdigest()
+            self.sync_manifest()
+            if size <= 1048576:
+                self.assertEqual(self.verify()['rootfs-policy.json'], data)
+            else:
+                with self.assertRaises(ValueError):
+                    self.verify()
+
     def test_digest_mismatch_and_missing_module_fail_before_loading(self):
-        for name in ('bootstrap.py', 'bootstrap_input.py', 'application_env_keys.json', 'native-entry'):
+        for name in ('bootstrap.py', 'bootstrap_input.py', 'application_env_keys.json', 'native-entry',
+                     'slot_identity.py', 'slot-identity-policy.json', 'quartet_protocol.py', 'quartet_records.py', 'quartet_journal.py',
+                     'quartet_worker_guard.py', 'quartet_worker_pin.py', 'quartet_root_view.py', 'rootfs-policy.json', 'quartet_material.py', 'quartet_worker_view.py', 'quartet_worker_channel.py', 'quartet_launch.py', 'quartet_endpoints.py', 'quartet_bridge_channel.py', 'quartet_egress.py', 'quartet_probe_clock.py', 'quartet_probe_channel.py', 'quartet_create_offer.py', 'quartet_runtime.py', 'quartet_create_control.py', 'quartet_listener.py'):
             with self.subTest(name=name):
                 old = self.payloads[self.base + '/' + name]
                 self.payloads[self.base + '/' + name] = b'x' + old[1:]
@@ -132,6 +178,49 @@ class BootstrapTrustTests(unittest.TestCase):
             self.assertIs(modules['xvfb_launch'].manager_probe, modules['manager_probe'])
             self.assertIs(modules['resource_recovery'].ResourceJournal, modules['resource_journal'].ResourceJournal)
             self.assertIs(modules['resource_recovery'].manager_probe, modules['manager_probe'])
+            self.assertIs(modules['slot_identity']._POLICY, sources['slot-identity-policy.json'])
+            self.assertIs(modules['quartet_root_view']._POLICY, sources['rootfs-policy.json'])
+            self.assertIs(modules['quartet_root_view'].ResourceJournal, modules['resource_journal'].ResourceJournal)
+            self.assertIs(modules['quartet_material'].ResourceJournal, modules['resource_journal'].ResourceJournal)
+            self.assertIs(modules['quartet_material'].PreparedQuartet, modules['quartet_journal'].PreparedQuartet)
+            self.assertIs(modules['quartet_material'].quartet_root_view, modules['quartet_root_view'])
+            self.assertIs(modules['quartet_material'].quartet_worker_guard, modules['quartet_worker_guard'])
+            self.assertIs(modules['quartet_worker_view']._GroupMaterial, modules['quartet_material']._GroupMaterial)
+            self.assertIs(modules['quartet_worker_view']._WorkerPin, modules['quartet_worker_pin']._WorkerPin)
+            self.assertIs(modules['quartet_worker_channel']._GroupMaterial, modules['quartet_material']._GroupMaterial)
+            self.assertIs(modules['quartet_worker_channel']._WorkerPin, modules['quartet_worker_pin']._WorkerPin)
+            self.assertIs(modules['quartet_worker_channel']._WorkerView, modules['quartet_worker_view']._WorkerView)
+            self.assertIs(modules['quartet_launch']._GroupMaterial, modules['quartet_material']._GroupMaterial)
+            self.assertIs(modules['quartet_launch']._WorkerChannel, modules['quartet_worker_channel']._WorkerChannel)
+            self.assertIs(modules['quartet_launch'].manager_probe, modules['manager_probe'])
+            self.assertIs(modules['quartet_endpoints']._GroupMaterial, modules['quartet_material']._GroupMaterial)
+            self.assertIs(modules['quartet_egress']._GroupMaterial, modules['quartet_material']._GroupMaterial)
+            self.assertIs(modules['quartet_bridge_channel']._GroupEndpoints, modules['quartet_endpoints']._GroupEndpoints)
+            self.assertIs(modules['quartet_bridge_channel']._WorkerChannel, modules['quartet_worker_channel']._WorkerChannel)
+            self.assertIs(modules['quartet_probe_clock']._WorkerPin, modules['quartet_worker_pin']._WorkerPin)
+            self.assertIs(modules['quartet_probe_channel']._ProtocolClock, modules['quartet_probe_clock']._ProtocolClock)
+            self.assertIs(modules['quartet_probe_channel']._GroupMaterial, modules['quartet_material']._GroupMaterial)
+            self.assertIs(modules['quartet_runtime']._GroupMaterial, modules['quartet_material']._GroupMaterial)
+            self.assertIs(modules['quartet_runtime']._CreateOffer, modules['quartet_create_offer']._CreateOffer)
+            self.assertIs(modules['quartet_create_control']._CreateOffer, modules['quartet_create_offer']._CreateOffer)
+            self.assertIs(modules['quartet_create_control'].ResourceJournal, modules['resource_journal'].ResourceJournal)
+            self.assertIs(modules['quartet_listener']._CreateControl, modules['quartet_create_control']._CreateControl)
+            self.assertIs(modules['quartet_listener']._RunningQuartet, modules['quartet_runtime']._RunningQuartet)
+            self.assertIs(modules['quartet_listener'].SystemManagerProbe, modules['manager_probe'].SystemManagerProbe)
+            with self.assertRaises(ValueError):
+                modules['quartet_root_view']._policy('a' * 40)
+            self.assertIs(modules['quartet_journal'].ResourceJournal, modules['resource_journal'].ResourceJournal)
+            self.assertIs(modules['quartet_worker_pin'].ResourceJournal, modules['resource_journal'].ResourceJournal)
+            self.assertIs(modules['quartet_worker_pin'].manager_probe, modules['manager_probe'])
+            self.assertTrue(callable(modules['quartet_worker_guard'].main))
+            self.assertIs(modules['resource_journal'].quartet_records, modules['quartet_records'])
+            # The bundled unverified policy must not authorize any slot.
+            with self.assertRaisesRegex(ValueError, '^POOL_BROKER_SLOT_IDENTITY_UNPROVEN$'):
+                modules['slot_identity'].inspect_slot_identities('a' * 40)
+            request = modules['quartet_protocol'].decode_quartet_request(json.dumps({
+                'version': 2, 'action': 'create', 'requestId': '1' * 32,
+                'boot': '2' * 32, 'slot': 0}).encode())
+            self.assertEqual(request.slot, 0)
             self.assertIs(modules['launch_listener'].launch_authorization, modules['launch_authorization'])
             self.assertIs(modules['launch_listener'].runtime_channel, modules['runtime_channel'])
             self.assertEqual(sys.path, old_path)

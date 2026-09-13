@@ -92,6 +92,16 @@ def recover_resources(journal, manager):
             raise ValueError()
         last = start
 
+        def terminal_veto():
+            journal._owner_veto()
+            if (manager._retired or registration._revoked or not registration._received
+                    or registration._pin is not pin or pin._fd is None
+                    or journal._pin is not pin or manager._pin is not pin
+                    or manager._registration is not registration or journal._registration is not registration
+                    or registration._candidate.hex() != journal._candidate
+                    or manager._candidate != journal._candidate or pin._boot != journal._boot):
+                raise ValueError()
+
         def scope():
             nonlocal last
             now = _clock()
@@ -114,7 +124,7 @@ def recover_resources(journal, manager):
 
         def scan():
             registered()
-            manager._run(manager._probe, scope)
+            manager._run(manager._probe, scope, terminal_veto=terminal_veto)
             result = {'total': len(journal._resources), 'prepared': 0, 'matched': 0, 'unknown': 0,
                 'observedStates': dict.fromkeys(_STATES, 0), 'unknownReasons': dict.fromkeys(_REASONS, 0),
                 'groupExitProven': False, 'admissionAllowed': False}
@@ -138,14 +148,14 @@ def recover_resources(journal, manager):
                         observed = _inspect(row, journal, manager)
                         manager._probe()
                         return observed
-                    state, reason = manager._run(inspect, scope)
+                    state, reason = manager._run(inspect, scope, terminal_veto=terminal_veto)
                     if reason is None:
                         result['matched'] += 1
                         result['observedStates'][state] += 1
                 if reason is not None:
                     result['unknown'] += 1
                     result['unknownReasons'][reason] += 1
-            manager._run(manager._probe, scope)
+            manager._run(manager._probe, scope, terminal_veto=terminal_veto)
             registered()
             return result
 

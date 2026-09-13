@@ -177,6 +177,10 @@ def exec_application(expected_gid, candidate, boot):
         if dict(os.environ) != bootstrap_environment():
             raise ValueError()
         env = _consume_environment(candidate, boot)
+        # Routing metadata only, not a registration receipt. Never inherit an
+        # input override or preserve a prior boot. Native peer proof is separate.
+        env['HOLADAY_POOL_CANDIDATE'] = candidate
+        env['HOLADAY_POOL_BOOT'] = boot
         close_range = ctypes.CDLL(None, use_errno=True).close_range
         close_range.argtypes = (ctypes.c_uint, ctypes.c_uint, ctypes.c_int)
         close_range.restype = ctypes.c_int

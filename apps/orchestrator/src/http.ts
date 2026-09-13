@@ -36,6 +36,7 @@ import {
 import { db } from './db/client.js';
 import { payments } from './db/schema/payments.js';
 import { users } from './db/schema/users.js';
+import { createHttpDrain } from './execution/http-drain.js';
 import {
   ACCEPTED_EXTENSIONS,
   ACCEPTED_MIMES,
@@ -64,6 +65,8 @@ import { completePaymentInTransaction, lockSettlementContext } from './trpc/rout
 import { tasksRouter } from './trpc/routers/tasks.js';
 
 export interface HttpAppDeps {
+  /** Original boot controller only; absence preserves the pre-drain deployment. */
+  executionDrain?: import('./execution/drain-controller.js').DrainController;
   planner: Planner;
   visionCommander?: VisionLoopCommander;
   playwrightExecutor?: PlaywrightExecutor | null;
@@ -88,12 +91,21 @@ function parsePayPalAmountCents(value: unknown): number | null {
 }
 
 export function createHttpApp(deps: HttpAppDeps) {
+  const executionDrain = deps.executionDrain;
   const app = express();
+  const lifetime = createHttpDrain(executionDrain);
+  const get = (path: string, handler: express.RequestHandler) =>
+    app.get(path, lifetime.handler(handler));
+  const post = (path: string, ...handlers: express.RequestHandler[]) =>
+    app.post(
+      path,
+      ...handlers.map((handler, i) =>
+        i === handlers.length - 1 ? lifetime.handler(handler) : lifetime.middleware(handler),
+      ),
+    );
 
-  app.use(pinoHttp({ logger }));
-  app.use(express.json({ limit: '1mb' }));
-  app.use(bearerAuth);
-
+  // Exact pure health endpoint precedes body parsing and bearer/session lookup.
+  // No other GET is assumed read-only (some queries refresh caches or write).
   app.get('/healthz', (_req, res) => {
     res.json({
       status: 'ok',
@@ -103,7 +115,12 @@ export function createHttpApp(deps: HttpAppDeps) {
     });
   });
 
-  app.get('/stock-news/source-cover', async (req, res) => {
+  app.use(lifetime.admit);
+  app.use(lifetime.middleware(pinoHttp({ logger })));
+  app.use(lifetime.middleware(express.json({ limit: '1mb' })));
+  app.use(lifetime.handler(bearerAuth));
+
+  get('/stock-news/source-cover', async (req, res) => {
     const result = await fetchSourceCover(req.query.url);
     if (!result.ok) {
       res.status(result.status).json({ error: result.error });
@@ -132,7 +149,7 @@ export function createHttpApp(deps: HttpAppDeps) {
   // box, http://localhost:4001/test/iframe-fixture. No auth (like /healthz),
   // pure static HTML, no user input. REMOVE after B3 cross-origin verification.
   if (process.env.B3_FIXTURE_ENABLED === 'true') {
-    app.get('/test/iframe-fixture', (_req, res) => {
+    get('/test/iframe-fixture', (_req, res) => {
       res.type('html').send(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex"><title>B3 iframe fixture</title>
 <style>body{font:14px sans-serif;margin:24px}h1{font-size:18px}iframe{width:800px;height:600px;border:0;display:block;margin-top:16px}</style>
@@ -153,7 +170,7 @@ export function createHttpApp(deps: HttpAppDeps) {
   // vector is VETOED (executor.click / page.goto inner never called, site
   // halted_sensitive) and the safe link is allowed. REMOVE after veto acceptance.
   if (process.env.EXPLORER_VETO_FIXTURE_ENABLED === 'true') {
-    app.get('/test/explorer-veto-fixture', (_req, res) => {
+    get('/test/explorer-veto-fixture', (_req, res) => {
       res.type('html').send(`<!doctype html>
 <html lang="zh"><head><meta charset="utf-8"><meta name="robots" content="noindex"><title>④ veto fixture</title>
 <style>body{font:14px sans-serif;margin:24px}button,a{display:block;margin:10px 0}</style>
@@ -199,7 +216,7 @@ export function createHttpApp(deps: HttpAppDeps) {
   // hand to Google (and the <a href> in the SPA) is the browser-
   // facing `/api/auth/google[/callback]` — nginx maps that to the
   // backend route below.
-  app.get('/auth/google', (req, res) => {
+  get('/auth/google', (req, res) => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
     if (!clientId || !clientSecret) {
@@ -234,7 +251,7 @@ export function createHttpApp(deps: HttpAppDeps) {
     res.redirect(302, `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
   });
 
-  app.get('/auth/google/callback', async (req, res) => {
+  get('/auth/google/callback', async (req, res) => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
     if (!clientId || !clientSecret) {
@@ -383,7 +400,7 @@ export function createHttpApp(deps: HttpAppDeps) {
   //      reference_id matches a payments row we created — the rest
   //      get a 200 (acknowledged) so PayPal stops retrying.
   // ---------------------------------------------------------------------
-  app.post('/payment/paypal/webhook', async (req, res) => {
+  post('/payment/paypal/webhook', async (req, res) => {
     if (!deps.paypalAdapter) {
       // Adapter not wired this deploy — return 200 so PayPal doesn't
       // retry forever, but log loudly so ops notices the misroute.
@@ -629,7 +646,7 @@ export function createHttpApp(deps: HttpAppDeps) {
   // — caller proves identity with the long-lived token; the
   // returned stream token is scoped to the streaming audience
   // and can't be replayed against tRPC.
-  app.post('/stream-token', async (req, res) => {
+  post('/stream-token', async (req, res) => {
     const authenticatedRequest = req as express.Request & {
       userId?: string;
       userAuthVersion?: number;
@@ -652,7 +669,7 @@ export function createHttpApp(deps: HttpAppDeps) {
     }
   });
 
-  app.post('/files/upload', upload.single('file'), async (req, res) => {
+  post('/files/upload', upload.single('file'), async (req, res) => {
     const userExternalId = (req as express.Request & { userId?: string }).userId;
     if (!userExternalId) {
       res.status(401).json({ error: 'unauthorized' });
@@ -761,7 +778,7 @@ export function createHttpApp(deps: HttpAppDeps) {
   // origin. On local dev the provider can't presign → 501 and the SPA
   // falls back to the multipart /files/upload path.
   // ---------------------------------------------------------------------
-  app.post('/files/upload-url', async (req, res) => {
+  post('/files/upload-url', async (req, res) => {
     const userExternalId = (req as express.Request & { userId?: string }).userId;
     if (!userExternalId) {
       res.status(401).json({ error: 'unauthorized' });
@@ -850,7 +867,7 @@ export function createHttpApp(deps: HttpAppDeps) {
     }
   });
 
-  app.post('/files/upload-confirm', async (req, res) => {
+  post('/files/upload-confirm', async (req, res) => {
     const userExternalId = (req as express.Request & { userId?: string }).userId;
     if (!userExternalId) {
       res.status(401).json({ error: 'unauthorized' });
@@ -903,7 +920,7 @@ export function createHttpApp(deps: HttpAppDeps) {
     }
   });
 
-  app.get('/files/:id/download', async (req, res) => {
+  get('/files/:id/download', async (req, res) => {
     const userExternalId = (req as express.Request & { userId?: string }).userId;
     if (!userExternalId) {
       res.status(401).json({ error: 'unauthorized' });
@@ -956,7 +973,7 @@ export function createHttpApp(deps: HttpAppDeps) {
   // legitimately ship a few hundred KB of cookies across the
   // curated domain list, comfortably above the global 1MB cap.
   // ---------------------------------------------------------------------
-  app.post('/cookies/sync', express.json({ limit: '5mb' }), async (req, res) => {
+  post('/cookies/sync', express.json({ limit: '5mb' }), async (req, res) => {
     const userExternalId = (req as express.Request & { userId?: string }).userId;
     if (!userExternalId) {
       res.status(401).json({ error: 'unauthorized' });
@@ -1086,7 +1103,7 @@ export function createHttpApp(deps: HttpAppDeps) {
   // of KB but we let the headroom accommodate users with very wide
   // browsing footprints.
   // ---------------------------------------------------------------------
-  app.post('/extension/browsing-history', express.json({ limit: '1mb' }), async (req, res) => {
+  post('/extension/browsing-history', express.json({ limit: '1mb' }), async (req, res) => {
     const userExternalId = (req as express.Request & { userId?: string }).userId;
     if (!userExternalId) {
       res.status(401).json({ error: 'unauthorized' });
@@ -1155,7 +1172,7 @@ export function createHttpApp(deps: HttpAppDeps) {
   // — the trailing slash on the upstream URL is what strips it).
   // External callers still hit https://holaday.ai/api/internal/...,
   // and the gateway's `VULTR_INTERNAL_URL` keeps that public form.
-  app.post('/internal/partner-payment/confirm', async (req, res) => {
+  post('/internal/partner-payment/confirm', async (req, res) => {
     const validation = validatePartnerPaymentConfirmHttpRequest({
       expectedSecret: process.env.INTERNAL_SHARED_SECRET,
       providedSecret: req.headers['x-internal-secret'],
@@ -1217,7 +1234,7 @@ export function createHttpApp(deps: HttpAppDeps) {
     }
   });
 
-  app.get('/internal/payment/health', (req, res) => {
+  get('/internal/payment/health', (req, res) => {
     const expectedSecret = process.env.INTERNAL_SHARED_SECRET;
     if (!expectedSecret) {
       res.status(503).json({ error: 'internal_secret_not_configured' });
@@ -1230,7 +1247,7 @@ export function createHttpApp(deps: HttpAppDeps) {
     res.status(200).json({ status: 'ok', paymentBridge: 'ready' });
   });
 
-  app.post('/internal/payment/confirm', async (req, res) => {
+  post('/internal/payment/confirm', async (req, res) => {
     const expectedSecret = process.env.INTERNAL_SHARED_SECRET;
     if (!expectedSecret) {
       logger.error('internal-confirm: INTERNAL_SHARED_SECRET unset — refusing all calls');
@@ -1539,7 +1556,7 @@ export function createHttpApp(deps: HttpAppDeps) {
   // to the SPA. Same shared-secret guard as the payment-confirm path.
   // ---------------------------------------------------------------------
   // Same nginx-strip note as /internal/payment/confirm above.
-  app.post('/internal/auth/sms-login', async (req, res) => {
+  post('/internal/auth/sms-login', async (req, res) => {
     const expectedSecret = process.env.INTERNAL_SHARED_SECRET;
     if (!expectedSecret) {
       logger.error('sms-login: INTERNAL_SHARED_SECRET unset — refusing all calls');
@@ -1588,6 +1605,7 @@ export function createHttpApp(deps: HttpAppDeps) {
   // key, not JWT) — the upstream bearerAuth silently no-ops on
   // `hd_live_…` tokens because they don't verify as JWTs.
   const buildContextForUser = (userExternalId: string): import('./trpc/context.js').Context => ({
+    ...(executionDrain ? { executionDrain } : {}),
     db,
     logger,
     // Express req/res stubs — tasks.create doesn't read them; the
@@ -1609,21 +1627,21 @@ export function createHttpApp(deps: HttpAppDeps) {
   const webhookHandler = createWebhookTasksHandler({
     db,
     logger,
+    ...(executionDrain ? { executionDrain } : {}),
     buildContextForUser,
     dispatch: async (ctx, input) => {
       const result = await tasksRouter.createCaller(ctx).create({ intent: input.intent });
       return { taskId: result.taskId, status: result.status };
     },
   });
-  app.post('/webhooks/tasks', (req, res) => {
-    void webhookHandler(req, res);
-  });
+  post('/webhooks/tasks', webhookHandler);
 
   app.use(
     '/trpc',
     createExpressMiddleware({
       router: appRouter,
       createContext: makeCreateContext({
+        ...(executionDrain ? { executionDrain } : {}),
         planner: deps.planner,
         ...(deps.visionCommander ? { visionCommander: deps.visionCommander } : {}),
         ...(deps.playwrightExecutor ? { playwrightExecutor: deps.playwrightExecutor } : {}),

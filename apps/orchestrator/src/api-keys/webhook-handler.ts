@@ -31,24 +31,28 @@
  * doesn't need an explicit `next` — errors are caught + responded.
  */
 
-import type { Request, Response } from 'express';
-import { and, eq, gt, isNull, or } from 'drizzle-orm';
-import type { Logger } from 'pino';
 import { TRPCError } from '@trpc/server';
-import {
-  extractBearer,
-  hashApiKey,
-  isValidApiKeyShape,
-} from './api-key-service.js';
-import {
-  finalizeClaim as idempotencyFinalize,
-  recordClaim as idempotencyClaim,
-  releaseClaim as idempotencyRelease,
-} from './webhook-idempotency-service.js';
+import { and, eq, gt, isNull, or } from 'drizzle-orm';
+import type { Request, Response } from 'express';
+import type { Logger } from 'pino';
+import type { DB } from '../db/client.js';
 import { apiKeys } from '../db/schema/api-keys.js';
 import { users } from '../db/schema/users.js';
-import type { DB } from '../db/client.js';
+import type { DrainController } from '../execution/drain-controller.js';
+import { currentOperationLifetime } from '../execution/owned-operation.js';
 import type { Context } from '../trpc/context.js';
+import { extractBearer, hashApiKey, isValidApiKeyShape } from './api-key-service.js';
+import {
+  runWebhookRequest,
+  webhookDatabase,
+  webhookIsUncertain,
+  webhookWrite,
+} from './webhook-drain.js';
+import {
+  recordClaim as idempotencyClaim,
+  finalizeClaim as idempotencyFinalize,
+  releaseClaim as idempotencyRelease,
+} from './webhook-idempotency-service.js';
 
 const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
 const MAX_IDEMPOTENCY_KEY_LENGTH = 128;
@@ -58,6 +62,7 @@ const IDEMPOTENCY_FINALIZE_ATTEMPTS = 3;
 export interface WebhookDeps {
   db: DB;
   logger: Logger;
+  executionDrain?: DrainController;
   /**
    * Build a Context object scoped to the resolved user. The webhook
    * needs every adapter handle that tasks.create reads through the
@@ -70,7 +75,10 @@ export interface WebhookDeps {
    * to `tasksRouter.createCaller(ctx).create({intent})` so the same
    * quota / planning / supercar path the SPA uses runs here.
    */
-  dispatch: (ctx: Context, input: { intent: string }) => Promise<{
+  dispatch: (
+    ctx: Context,
+    input: { intent: string },
+  ) => Promise<{
     taskId: string;
     status: string;
   }>;
@@ -99,27 +107,31 @@ export async function resolveApiKey(
   if (!bearer) return { ok: false, code: 'missing' };
   if (!isValidApiKeyShape(bearer)) return { ok: false, code: 'malformed' };
   const hash = hashApiKey(bearer);
-  const [row] = await db
-    .select({
-      id: apiKeys.id,
-      userId: apiKeys.userId,
-      revokedAt: apiKeys.revokedAt,
-      expiresAt: apiKeys.expiresAt,
-    })
-    .from(apiKeys)
-    .where(eq(apiKeys.keyHash, hash))
-    .limit(1);
+  const [row] = await webhookDatabase(() =>
+    db
+      .select({
+        id: apiKeys.id,
+        userId: apiKeys.userId,
+        revokedAt: apiKeys.revokedAt,
+        expiresAt: apiKeys.expiresAt,
+      })
+      .from(apiKeys)
+      .where(eq(apiKeys.keyHash, hash))
+      .limit(1),
+  );
   if (!row) return { ok: false, code: 'unknown' };
   if (row.revokedAt !== null) return { ok: false, code: 'revoked' };
   if (row.expiresAt !== null && row.expiresAt.getTime() <= Date.now()) {
     return { ok: false, code: 'expired' };
   }
   // Resolve owner's external id for the tRPC context.
-  const [user] = await db
-    .select({ id: users.id, externalId: users.externalId, status: users.status })
-    .from(users)
-    .where(eq(users.id, row.userId))
-    .limit(1);
+  const [user] = await webhookDatabase(() =>
+    db
+      .select({ id: users.id, externalId: users.externalId, status: users.status })
+      .from(users)
+      .where(eq(users.id, row.userId))
+      .limit(1),
+  );
   if (!user) return { ok: false, code: 'unknown' }; // user deleted mid-flight
   if (user.status !== 'active') return { ok: false, code: 'inactive_owner' };
   return {
@@ -135,7 +147,8 @@ export async function resolveApiKey(
  * test suite drive the handler without mounting Express.
  */
 export function createWebhookTasksHandler(deps: WebhookDeps) {
-  return async function handle(req: Request, res: Response): Promise<void> {
+  const controller = deps.executionDrain;
+  async function handle(req: Request, res: Response): Promise<void> {
     const bearer = extractBearer(req.header('authorization'));
     let resolution: Awaited<ReturnType<typeof resolveApiKey>>;
     try {
@@ -194,8 +207,7 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
     //                   will see replay on the second try)
     //   - missing key → no idempotency guarantee; normal flow
     const rawKey = req.header(IDEMPOTENCY_KEY_HEADER);
-    const idempotencyKey =
-      typeof rawKey === 'string' ? rawKey.trim() : '';
+    const idempotencyKey = typeof rawKey === 'string' ? rawKey.trim() : '';
     if (idempotencyKey && !IDEMPOTENCY_KEY_RE.test(idempotencyKey)) {
       res.status(400).json({ error: 'invalid_idempotency_key' });
       return;
@@ -213,6 +225,7 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
           idempotencyKey,
           body,
         );
+        if (webhookIsUncertain()) throw new Error('WEBHOOK_DRAIN_UNCERTAIN');
         if (claim.kind === 'replay') {
           if (claim.conflictsWith) {
             deps.logger.info(
@@ -224,8 +237,7 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
             );
             res.status(409).json({
               error: 'idempotency_conflict',
-              message:
-                'Idempotency-Key was reused with a different request body',
+              message: 'Idempotency-Key was reused with a different request body',
               originalTaskId: claim.taskId,
             });
             return;
@@ -255,14 +267,11 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
             },
             'webhook: idempotency in_flight — another claim is dispatching',
           );
-          res
-            .status(425)
-            .setHeader('Retry-After', '2')
-            .json({
-              error: 'idempotency_in_flight',
-              message:
-                'Another request with this Idempotency-Key is being processed. Retry in a moment.',
-            });
+          res.status(425).setHeader('Retry-After', '2').json({
+            error: 'idempotency_in_flight',
+            message:
+              'Another request with this Idempotency-Key is being processed. Retry in a moment.',
+          });
           return;
         }
         // claim.kind === 'claimed' → we own the slot; must dispatch
@@ -290,35 +299,39 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
           },
           'webhook: idempotency claim failed → 503 fail-closed (Codex P2)',
         );
-        res
-          .status(503)
-          .setHeader('Retry-After', '2')
-          .json({
-            error: 'idempotency_unavailable',
-            message:
-              'Idempotency cache unavailable; retry shortly with the same Idempotency-Key.',
-          });
+        res.status(503).setHeader('Retry-After', '2').json({
+          error: 'idempotency_unavailable',
+          message: 'Idempotency cache unavailable; retry shortly with the same Idempotency-Key.',
+        });
         return;
       }
     }
 
     // Stamp last_used_at BEFORE dispatching the task so a long-running
     // task doesn't make the timestamp look stale to the SPA. Best-
-    // effort: a failed update doesn't block the task creation.
-    deps.db
-      .update(apiKeys)
-      .set({ lastUsedAt: new Date() })
-      .where(eq(apiKeys.id, resolution.apiKeyInternalId))
-      .catch((err) => {
-        deps.logger.warn(
-          { err: err instanceof Error ? err.message : String(err) },
-          'webhook: lastUsedAt update failed (non-fatal)',
-        );
-      });
+    // effort in legacy mode. Under drain ownership the original write remains
+    // tracked after ACK, and an uncertain outcome cannot be declared clean.
+    void webhookWrite(() =>
+      deps.db
+        .update(apiKeys)
+        .set({ lastUsedAt: new Date() })
+        .where(eq(apiKeys.id, resolution.apiKeyInternalId)),
+    ).catch((err) => {
+      deps.logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'webhook: lastUsedAt update failed (non-fatal)',
+      );
+    });
 
     let ctx: Context;
     try {
       ctx = deps.buildContextForUser(resolution.userExternalId);
+      const lifetime = currentOperationLifetime();
+      if (lifetime) {
+        if (ctx.executionDrain && ctx.executionDrain !== controller)
+          throw new Error('WEBHOOK_DRAIN_AUTHORITY');
+        ctx = { ...ctx, executionDrain: controller, executionLifetime: lifetime };
+      }
     } catch (err) {
       deps.logger.error(
         { err: err instanceof Error ? err.message : String(err) },
@@ -336,6 +349,7 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
     }
 
     try {
+      if (webhookIsUncertain()) throw new Error('WEBHOOK_DRAIN_UNCERTAIN');
       const result = await deps.dispatch(ctx, { intent: prompt });
       const response = { taskId: result.taskId, status: result.status };
       // Finalize the idempotency claim BEFORE acknowledging success.
@@ -358,27 +372,23 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
             },
             'webhook: idempotency finalize exhausted retries; refusing unsafe success response',
           );
-          res
-            .status(503)
-            .setHeader('Retry-After', '2')
-            .json({
-              error: 'idempotency_unavailable',
-              message:
-                'Task was created, but its idempotency result could not be persisted. Contact support before retrying with a new key.',
-              taskId: result.taskId,
-            });
+          res.status(503).setHeader('Retry-After', '2').json({
+            error: 'idempotency_unavailable',
+            message:
+              'Task was created, but its idempotency result could not be persisted. Contact support before retrying with a new key.',
+            taskId: result.taskId,
+          });
           return;
         }
       }
       res.status(200).json(response);
     } catch (err) {
-      // Codex P1 — release the claim so retries aren't blocked by
-      // the placeholder row. Without this, a quota-failure retry
-      // would remain 425 in-flight for the full 24-hour idempotency
-      // window. releaseClaim is a no-op on already-finalized
-      // rows so it's safe to fire unconditionally before the
-      // error-shaping block.
-      if (claimedKey) {
+      // A dispatch error is not proof that no partial task side effect happened.
+      const lifetime = currentOperationLifetime();
+      if (lifetime) lifetime.drain.markUnknown(lifetime.owner);
+      // Preserve legacy claim release, but never erase a strict-mode claim
+      // after an ambiguous dispatch: a retry could duplicate partial effects.
+      if (claimedKey && !webhookIsUncertain()) {
         await idempotencyRelease(
           { db: deps.db, logger: deps.logger },
           resolution.userInternalId,
@@ -410,6 +420,13 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
       deps.logger.warn({ err: msg }, 'webhook: dispatch failed');
       res.status(500).json({ error: 'internal_error' });
     }
+  }
+  return async (req: Request, res: Response): Promise<void> => {
+    try {
+      await runWebhookRequest(controller, () => handle(req, res));
+    } catch {
+      res.status(503).json({ error: 'service_unavailable' });
+    }
   };
 }
 
@@ -421,6 +438,7 @@ async function finalizeIdempotencyClaimWithRetry(
   response: unknown,
 ): Promise<boolean> {
   for (let attempt = 1; attempt <= IDEMPOTENCY_FINALIZE_ATTEMPTS; attempt += 1) {
+    if (webhookIsUncertain()) return false;
     const finalized = await idempotencyFinalize(
       { db: deps.db, logger: deps.logger },
       userInternalId,
@@ -429,6 +447,7 @@ async function finalizeIdempotencyClaimWithRetry(
       response,
     );
     if (finalized) return true;
+    if (webhookIsUncertain()) return false;
     if (attempt < IDEMPOTENCY_FINALIZE_ATTEMPTS) {
       await new Promise<void>((resolve) => setTimeout(resolve, attempt * 25));
     }

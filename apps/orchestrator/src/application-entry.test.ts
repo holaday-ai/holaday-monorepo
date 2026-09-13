@@ -1,0 +1,73 @@
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+
+const seam = vi.hoisted(() => ({
+  boot: vi.fn(),
+  main: vi.fn(),
+  loads: 0,
+}));
+vi.mock('./execution/application-boot.js', () => ({ startApplicationBoot: seam.boot }));
+vi.mock('./application-main.js', () => {
+  seam.loads++;
+  return { startApplication: seam.main };
+});
+beforeEach(() => {
+  vi.resetModules();
+  vi.stubEnv('HOLADAY_POOL_CANDIDATE', undefined);
+  vi.stubEnv('HOLADAY_POOL_BOOT', undefined);
+  seam.loads = 0;
+  seam.boot.mockReset();
+  seam.main.mockReset();
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+async function load() {
+  const name = './application-entry.js';
+  const module = await import(name).catch(() => undefined);
+  expect(module, 'application entry must isolate imports behind boot').toBeDefined();
+  if (!module) throw new Error('missing entry');
+  return module as typeof import('./application-entry.js');
+}
+it('legacy entry keeps its existing application path without constructing a controlled boot', async () => {
+  const { launchApplication } = await load();
+  await launchApplication();
+  expect(seam.boot).not.toHaveBeenCalled();
+  expect(seam.main).toHaveBeenCalledWith(undefined);
+});
+it('controlled entry must finish closed boot before importing application modules', async () => {
+  vi.stubEnv('HOLADAY_POOL_BOOT', 'b'.repeat(32));
+  vi.stubEnv('HOLADAY_POOL_CANDIDATE', 'a'.repeat(40));
+  let release!: (value: unknown) => void;
+  const ready = new Promise((resolve) => {
+    release = resolve;
+  });
+  const context = { close: vi.fn(async () => {}) };
+  seam.boot.mockReturnValue(ready);
+  const { launchApplication } = await load();
+  const pending = launchApplication();
+  await Promise.resolve();
+  expect(seam.loads).toBe(0);
+  expect(seam.main).not.toHaveBeenCalled();
+  release(context);
+  await pending;
+  expect(seam.boot).toHaveBeenCalledWith('/var/lib/holaday/execution-drain');
+  expect(seam.main).toHaveBeenCalledWith(context);
+});
+it('partial controlled metadata cannot fall back to legacy or load application modules', async () => {
+  vi.stubEnv('HOLADAY_POOL_BOOT', 'b'.repeat(32));
+  seam.boot.mockRejectedValue(new Error('synthetic invalid capsule'));
+  const { launchApplication } = await load();
+  await expect(launchApplication()).rejects.toThrow();
+  expect(seam.loads).toBe(0);
+  expect(seam.main).not.toHaveBeenCalled();
+});
+it('application failure closes its original boot and never starts a fallback application', async () => {
+  vi.stubEnv('HOLADAY_POOL_BOOT', 'b'.repeat(32));
+  const context = { close: vi.fn(async () => {}) };
+  seam.boot.mockResolvedValue(context);
+  seam.main.mockRejectedValue(new Error('synthetic startup error'));
+  const { launchApplication } = await load();
+  await expect(launchApplication()).rejects.toThrow();
+  expect(context.close).toHaveBeenCalledOnce();
+  expect(seam.main).toHaveBeenCalledOnce();
+});

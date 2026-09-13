@@ -178,10 +178,17 @@ def inspect_installation(candidate):
         for name in ("installation.py", "process_pin.py", "protocol.py", "launch_registration.py", "application_guard.py", "root_launch.py", "bootstrap.py", "bootstrap_input.py", "application_env_keys.json", "native-build-manifest.json"):
             _walk(package + "/" + name, mode=0o644, regular=True)
         _walk(package + '/native-entry', mode=0o755, regular=True)
-        for name in ('launch_authorization.py', 'launch_listener.py', 'runtime_channel.py', 'resource_journal.py', 'manager_probe.py', 'xvfb_launch.py', 'resource_recovery.py'):
+        _walk(package + '/root-native-entry', mode=0o755, regular=True)
+        _walk(package + '/egress-listener.node', mode=0o644, regular=True)
+        _walk(package + '/control-connector.node', mode=0o644, regular=True)
+        for name in ('launch_authorization.py', 'launch_listener.py', 'runtime_channel.py', 'resource_journal.py', 'manager_probe.py', 'xvfb_launch.py', 'resource_recovery.py', 'slot_identity.py', 'slot-identity-policy.json', 'quartet_protocol.py', 'quartet_records.py', 'quartet_journal.py', 'quartet_worker_guard.py', 'quartet_worker_pin.py', 'quartet_root_view.py', 'rootfs-policy.json', 'quartet_material.py', 'quartet_worker_view.py', 'quartet_worker_channel.py', 'quartet_launch.py', 'quartet_endpoints.py', 'quartet_bridge_channel.py', 'quartet_egress.py', 'quartet_probe_clock.py', 'quartet_probe_channel.py', 'quartet_create_offer.py', 'quartet_runtime.py', 'quartet_create_control.py', 'quartet_listener.py'):
             _walk(package + '/' + name, mode=0o644, regular=True)
         for path in ("/etc/holaday-pool-broker", "/var/lib/holaday-pool-broker", "/run/holaday-pool-broker"):
             _walk(path)
+        _walk('/run/holaday-pool-egress', uid=998, gid=identity.app_gid)
+        _walk('/run/holaday-pool-egress-links')
+        for path in ('/run/holaday-pool-runtime', '/run/holaday-pool-data'):
+            _walk(path, gid=identity.app_gid, mode=0o750)
         _walk("/var/lib/holaday-pool-workers", uid=identity.browser_uid,
               gid=identity.browser_gid)
         return identity

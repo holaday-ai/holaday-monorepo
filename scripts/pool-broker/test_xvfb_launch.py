@@ -238,10 +238,13 @@ class LaunchTests(unittest.TestCase):
                 def capture(argv,fd,deadline,guard):
                     if 'StartTransientUnit' not in argv: return original(argv,fd,deadline,guard)
                     real=manager_probe.time.monotonic
+                    clocks=[]
                     def clock():
-                        closing.close()
+                        if __import__('sys')._getframe(1).f_code.co_name == 'budget':
+                            clocks.append(True)
+                            if len(clocks) == 2: closing.close()
                         return real()
-                    with patch.object(manager_probe.time,'monotonic',side_effect=clock), \
+                    with patch.object(manager_probe,'time',__import__('types').SimpleNamespace(monotonic=clock)), \
                             patch.object(manager_probe.subprocess,'Popen',
                                 side_effect=lambda *a,**kw:attempted.append(True)):
                         return test_manager_probe.REAL_CAPTURE(argv,fd,deadline,guard)

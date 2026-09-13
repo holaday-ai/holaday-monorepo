@@ -12,13 +12,24 @@ export interface OwnedCdpConnection extends BrowserRequestControl {
   /** Bound SDK close receipt, not proof that OS descendants have exited. */
   dispose(): Promise<void>;
 }
+export type CdpTransportOptions = { headers?: Readonly<Record<string, string>> };
 
 /** Owns this CDP transport handle, not the external browser process. */
 export function createOwnedCdpConnection(
-  chromium: { connectOverCDP: (endpoint: string) => Promise<Browser> },
+  chromium: {
+    connectOverCDP: (endpoint: string, options?: CdpTransportOptions) => Promise<Browser>;
+  },
   endpoint: string,
   isActive: () => boolean,
+  options?: CdpTransportOptions,
 ): OwnedCdpConnection {
+  let headers: Readonly<Record<string, string>> | undefined;
+  try {
+    const original = options?.headers;
+    headers = original ? Object.freeze({ ...original }) : undefined;
+  } catch {
+    throw new Error('CDP_AUTHENTICATED_CONNECTION_FAILED');
+  }
   const parent = currentOperationLifetime();
   if (parent && parent.drain.snapshot().unknown > 0) throw new Error('BROWSER_OPERATION_UNKNOWN');
   let disposeRequested = false;
@@ -81,7 +92,9 @@ export function createOwnedCdpConnection(
           return;
         }
         try {
-          browser = await connect.call(chromium, endpoint);
+          browser = headers
+            ? await connect.call(chromium, endpoint, { headers })
+            : await connect.call(chromium, endpoint);
           const bound = browser;
           closeReceipt = lifetime ? bindBrowserCloseReceipt(bound) : () => bound.close();
           requests = createBrowserRequestGuard(browser, closeReceipt);
@@ -100,13 +113,20 @@ export function createOwnedCdpConnection(
         if (browser) await closeBrowser(browser);
       }
     });
-  const result = parent
+  const operation = parent
     ? startOwnedOperation(parent.drain, 'execution', work, {
         parent: parent.owner,
         dispatch: 'deferred',
         errorOutcome: 'known',
       }).result
     : Promise.resolve().then(work);
+  // SDK errors can include handshake diagnostics. Neither ready nor dispose
+  // may expose private transport headers to callers or their logs.
+  const result = headers
+    ? operation.catch(() => {
+        throw new Error('CDP_AUTHENTICATED_CONNECTION_FAILED');
+      })
+    : operation;
   void result.catch(rejectReady);
   return Object.freeze<OwnedCdpConnection>({
     ready,

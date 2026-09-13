@@ -6,6 +6,7 @@ vi.mock('./browser-close-receipt.js', () => ({
   bindBrowserCloseReceipt: (browser: { close(): Promise<void> }) => () => browser.close(),
 }));
 import { currentOperationLifetime, startOwnedOperation } from '../../execution/owned-operation.js';
+import type { CdpTransportOptions } from './owned-cdp-connection.js';
 import { PlaywrightExecutor } from './playwright-executor.js';
 
 vi.mock('../../config/logger.js', () => ({
@@ -65,6 +66,8 @@ function fixture(
     holdContext?: boolean;
     closeFailure?: 'getter' | 'sync' | 'async';
     contextFailure?: boolean;
+    privateContextFailure?: boolean;
+    privateContextOpenFailure?: boolean;
     emptySecond?: boolean;
   } = {},
 ) {
@@ -73,6 +76,7 @@ function fixture(
   const contextGate = gate();
   const state = {
     connects: 0,
+    transportOptions: [] as Array<CdpTransportOptions | undefined>,
     closes: [0, 0],
     defaultCloses: 0,
     pageCloses: 0,
@@ -104,6 +108,7 @@ function fixture(
     close: async () => {
       state.cleanCloses++;
       if (opts.holdContext) await contextGate.wait;
+      if (opts.privateContextFailure) throw new Error('synthetic-private-cdp');
       if (opts.contextFailure) throw new Error('synthetic context close failure');
     },
   };
@@ -119,6 +124,7 @@ function fixture(
       },
       newContext: async () => {
         state.newContexts++;
+        if (opts.privateContextOpenFailure) throw new Error('synthetic-private-cdp');
         return cleanContext;
       },
     };
@@ -140,10 +146,15 @@ function fixture(
   }
   const browsers = [browser(0), browser(1)];
   const chromium = {
-    connectOverCDP: async function (this: unknown, endpoint: string) {
+    connectOverCDP: async function (
+      this: unknown,
+      endpoint: string,
+      options?: CdpTransportOptions,
+    ) {
       expect(this).toBe(chromium);
       expect(endpoint).toBe('http://synthetic.invalid');
       const index = state.connects++;
+      state.transportOptions.push(options);
       if (opts.holdConnect) await connectGate.wait;
       return browsers[index] as never;
     },
@@ -173,6 +184,72 @@ function fixture(
     run: (cleanContext = false) => executor.connect('http://synthetic.invalid', { cleanContext }),
   };
 }
+
+it('retains the original private header snapshot when a stale connection redials', async () => {
+  const f = fixture();
+  const headers = { 'x-holaday-cdp': 'synthetic-private-cdp' };
+  expect(await f.executor.connect('http://synthetic.invalid', { cdpHeaders: headers })).toEqual({
+    ok: true,
+  });
+  headers['x-holaday-cdp'] = 'changed';
+  f.state.stale = true;
+  expect(await f.executor.getPage()).toBeDefined();
+  expect(f.state.connects).toBe(2);
+  expect(f.state.transportOptions).toEqual([
+    { headers: { 'x-holaday-cdp': 'synthetic-private-cdp' } },
+    { headers: { 'x-holaday-cdp': 'synthetic-private-cdp' } },
+  ]);
+});
+
+it('does not carry private headers into a new unauthenticated connection after disconnect', async () => {
+  const f = fixture();
+  expect(
+    await f.executor.connect('http://synthetic.invalid', {
+      cdpHeaders: { 'x-holaday-cdp': 'synthetic-private-cdp' },
+    }),
+  ).toEqual({ ok: true });
+  await f.executor.disconnect();
+  expect(await f.run()).toEqual({ ok: true });
+  expect(f.state.transportOptions[1]).toBeUndefined();
+});
+
+it.each(['context', 'disconnect'] as const)(
+  'contains authenticated %s cleanup errors while retaining original cleanup',
+  async (kind) => {
+    const f = fixture({ privateContextFailure: true });
+    expect(
+      await f.executor.connect('http://synthetic.invalid', {
+        cleanContext: true,
+        cdpHeaders: { 'x-holaday-cdp': 'synthetic-private-cdp' },
+      }),
+    ).toEqual({ ok: true });
+    await expect(
+      kind === 'context' ? f.executor.disposeCleanContext() : f.executor.disconnect(),
+    ).rejects.toThrow('CDP_AUTHENTICATED_CONNECTION_FAILED');
+    await f.executor.disconnect().catch(() => {});
+    expect(f.state.cleanCloses).toBe(1);
+    expect(f.state.closes[0]).toBe(1);
+  },
+);
+
+it.each(['connect', 'managed'] as const)(
+  'contains old authenticated cleanup diagnostics before a new %s attempt',
+  async (kind) => {
+    const f = fixture({ privateContextOpenFailure: true });
+    expect(
+      await f.executor.connect('http://synthetic.invalid', {
+        cleanContext: true,
+        cdpHeaders: { 'x-holaday-cdp': 'synthetic-private-cdp' },
+      }),
+    ).toEqual({ ok: false, error: 'CDP_AUTHENTICATED_CONNECTION_FAILED' });
+    expect(await (kind === 'connect' ? f.run() : f.executor.launchManaged())).toEqual({
+      ok: false,
+      error: 'CDP_AUTHENTICATED_CONNECTION_FAILED',
+    });
+    expect(f.state.connects).toBe(1);
+    expect(f.state.closes[0]).toBe(1);
+  },
+);
 
 it.each([false, true])('CDP connection remains pinned after ready (clean=%s)', async (clean) => {
   const f = fixture({ holdClose: true });

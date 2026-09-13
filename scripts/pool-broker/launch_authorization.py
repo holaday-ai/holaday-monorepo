@@ -58,7 +58,7 @@ def _clocks():
 class LaunchWindow:
     """Private, non-serializable lifetime check; not readiness or resource authority."""
 
-    __slots__ = ('_expires', '_deadline', '_last_wall', '_last_mono', '_revoked')
+    __slots__ = ('_expires', '_deadline', '_last_wall', '_last_mono', '_revoked', '_candidate', '_epoch')
 
     def __init__(self):
         raise TypeError('created only by durable consumption')
@@ -113,6 +113,7 @@ def consume_launch_authorization(candidate):
         if not data['not_before_ms'] <= wall < data['expires_at_ms']:
             raise ValueError()
         window = object.__new__(LaunchWindow)
+        window._candidate, window._epoch = candidate, data['epoch']
         window._expires = data['expires_at_ms']
         window._deadline = monotonic + (data['expires_at_ms'] - wall) / 1000
         window._last_wall, window._last_mono, window._revoked = wall, monotonic, False

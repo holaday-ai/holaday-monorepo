@@ -25,6 +25,16 @@ export function currentOperationLifetime(): OperationLifetime | undefined {
   return context?.lifetime;
 }
 
+/** Capture the original dispatch scope, not the context of a later IO callback.
+ * This pure veto never grants ownership; consumers still check the raw owner. */
+export function captureOperationScopeVeto(): () => void {
+  const original = lifetimeContext.getStore();
+  if (!original || original.sealed) throw new Error('EXECUTION_DRAIN_SCOPE_CLOSED');
+  return () => {
+    if (original.sealed) throw new Error('EXECUTION_DRAIN_SCOPE_CLOSED');
+  };
+}
+
 /** Separate logical dispatch permission from a still-pinned physical cleanup. */
 export function withOperationDispatchScope<T>(action: (seal: () => void) => T): T {
   const lifetime = currentOperationLifetime();

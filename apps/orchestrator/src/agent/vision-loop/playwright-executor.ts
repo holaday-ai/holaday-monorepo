@@ -30,20 +30,24 @@
 
 import type { Browser, BrowserContext, ElementHandle, Page } from 'playwright';
 import sharp from 'sharp';
-import type { BrowserNetworkPolicy } from '../browser-network-policy.js';
 import { browserUrlForLog } from '../../browser-pool/log-url.js';
 import { logger } from '../../config/logger.js';
-import { runBrowserOperation } from './browser-operation.js';
 import {
   currentOperationLifetime,
   startOwnedOperation,
   withOperationDispatchScope,
 } from '../../execution/owned-operation.js';
-import { type OwnedCleanContext, createOwnedCleanContext } from './owned-clean-context.js';
-import { type OwnedManagedBrowser, createOwnedManagedBrowser } from './owned-managed-browser.js';
-import { type OwnedCdpConnection, createOwnedCdpConnection } from './owned-cdp-connection.js';
+import type { BrowserNetworkPolicy } from '../browser-network-policy.js';
+import { runBrowserOperation } from './browser-operation.js';
 import type { BrowserRequestControl } from './browser-request-guard.js';
 import { humanClick, humanScroll, humanTypeText, isHumanizeEnabled } from './humanize.js';
+import {
+  type CdpTransportOptions,
+  type OwnedCdpConnection,
+  createOwnedCdpConnection,
+} from './owned-cdp-connection.js';
+import { type OwnedCleanContext, createOwnedCleanContext } from './owned-clean-context.js';
+import { type OwnedManagedBrowser, createOwnedManagedBrowser } from './owned-managed-browser.js';
 import { STEALTH_INIT_SCRIPT, isStealthEnabled } from './stealth-scripts.js';
 
 const INITIALIZATION_CANCELLED = Symbol('initialization-cancelled-before-sdk');
@@ -227,6 +231,8 @@ export class PlaywrightExecutor {
    * empty. We detect that in getPage() and redial using this value.
    */
   private cdpEndpoint: string | null = null;
+  #cdpHeaders: Readonly<Record<string, string>> | undefined;
+  #authenticatedCdp = false;
   /**
    * Phase 1 Playbook ④ — gated CLEAN-CONTEXT mode (default OFF). When connect()
    * is called with { cleanContext: true } (explorer only), the executor uses a
@@ -246,7 +252,7 @@ export class PlaywrightExecutor {
   private sealConnectionSetup: (() => void) | null = null;
   /** Dependency-injection seam for tests that want to bypass connect(). */
   private readonly chromium: {
-    connectOverCDP: (endpoint: string) => Promise<Browser>;
+    connectOverCDP: (endpoint: string, options?: CdpTransportOptions) => Promise<Browser>;
     launch?: (options: { channel?: string; headless?: boolean }) => Promise<Browser>;
   };
   private readonly networkPolicy: Pick<BrowserNetworkPolicy, 'check'> | null;
@@ -264,7 +270,7 @@ export class PlaywrightExecutor {
   constructor(
     opts: {
       chromium?: {
-        connectOverCDP: (endpoint: string) => Promise<Browser>;
+        connectOverCDP: (endpoint: string, options?: CdpTransportOptions) => Promise<Browser>;
         launch?: (options: { channel?: string; headless?: boolean }) => Promise<Browser>;
       };
       networkPolicy?: Pick<BrowserNetworkPolicy, 'check'>;
@@ -292,33 +298,56 @@ export class PlaywrightExecutor {
    */
   async connect(
     cdpEndpoint: string,
-    opts: { cleanContext?: boolean; storageState?: string } = {},
+    opts: {
+      cleanContext?: boolean;
+      storageState?: string;
+      cdpHeaders?: Readonly<Record<string, string>>;
+    } = {},
   ): Promise<ConnectResult> {
-    return this.runConnectionSetup((generation) =>
-      this.initializeCdpConnection(generation, cdpEndpoint, opts),
+    let headers: Readonly<Record<string, string>> | undefined;
+    let captured: typeof opts;
+    try {
+      const { cdpHeaders, ...base } = opts;
+      headers = cdpHeaders ? Object.freeze({ ...cdpHeaders }) : undefined;
+      captured = { ...base, cdpHeaders: headers };
+    } catch {
+      return { ok: false, error: 'CDP_AUTHENTICATED_CONNECTION_FAILED' };
+    }
+    const result = await this.runConnectionSetup((generation) =>
+      this.initializeCdpConnection(generation, cdpEndpoint, captured),
     );
+    return headers && !result.ok
+      ? { ok: false, error: 'CDP_AUTHENTICATED_CONNECTION_FAILED' }
+      : result;
   }
 
   private async initializeCdpConnection(
     generation: number,
     cdpEndpoint: string,
-    opts: { cleanContext?: boolean; storageState?: string },
+    opts: {
+      cleanContext?: boolean;
+      storageState?: string;
+      cdpHeaders?: Readonly<Record<string, string>>;
+    },
     requireContext = false,
   ): Promise<ConnectResult> {
     let browser: Browser | null = null;
     let lease: OwnedCleanContext | null = null;
     let connection: OwnedCdpConnection | null = null;
+    this.#authenticatedCdp = Boolean(opts.cdpHeaders);
     try {
       connection = createOwnedCdpConnection(
         this.chromium,
         cdpEndpoint,
         () => generation === this.cleanContextGeneration,
+        opts.cdpHeaders ? { headers: opts.cdpHeaders } : undefined,
       );
       this.cdpConnectionLease = connection;
       browser = await connection.ready;
       this.assertContextGeneration(generation);
       this.browser = browser;
       this.cdpEndpoint = cdpEndpoint;
+      this.#cdpHeaders = opts.cdpHeaders;
       this.cleanMode = Boolean(opts.cleanContext);
       // Phase 1 Playbook ④ — gated CLEAN-CONTEXT mode (explorer only). Create a
       // FRESH isolated context and route getPage() to it. Off by default →
@@ -378,7 +407,9 @@ export class PlaywrightExecutor {
       await connection?.dispose().catch(() => {});
       return {
         ok: false,
-        error: `connectOverCDP(${cdpEndpoint}) failed: ${errMsg(err)}`,
+        error: opts.cdpHeaders
+          ? 'CDP_AUTHENTICATED_CONNECTION_FAILED'
+          : `connectOverCDP(${cdpEndpoint}) failed: ${errMsg(err)}`,
       };
     }
   }
@@ -392,6 +423,7 @@ export class PlaywrightExecutor {
     options: { channel?: string; headless?: boolean } = { headless: true },
   ): Promise<ConnectResult> {
     return this.runConnectionSetup(async (generation) => {
+      this.#authenticatedCdp = false;
       let launchedBrowser: Browser | null = null;
       let browserLease: OwnedManagedBrowser | null = null;
       let lease: OwnedCleanContext | null = null;
@@ -495,7 +527,10 @@ export class PlaywrightExecutor {
           }).result
         : Promise.resolve().then(work);
       const result = operation.catch(
-        (error): ConnectResult => ({ ok: false, error: errMsg(error) }),
+        (error): ConnectResult => ({
+          ok: false,
+          error: this.#authenticatedCdp ? 'CDP_AUTHENTICATED_CONNECTION_FAILED' : errMsg(error),
+        }),
       );
       this.connectionSetup = result;
       void result.then(() => {
@@ -503,7 +538,10 @@ export class PlaywrightExecutor {
       });
       return result;
     } catch (error) {
-      return Promise.resolve({ ok: false, error: errMsg(error) });
+      return Promise.resolve({
+        ok: false,
+        error: this.#authenticatedCdp ? 'CDP_AUTHENTICATED_CONNECTION_FAILED' : errMsg(error),
+      });
     }
   }
 
@@ -546,14 +584,20 @@ export class PlaywrightExecutor {
 
   /** Close + drop the clean context (call when the browse finishes). No-op when off. */
   async disposeCleanContext(): Promise<void> {
-    this.assertOutsideRequest();
-    const stopped = this.stopBrowserRequests();
-    this.cleanContextGeneration++;
-    this.sealConnectionSetup?.();
-    this.cleanContext = null;
-    this.activePage = null;
-    await stopped;
-    await this.cleanContextLease?.dispose();
+    const authenticated = this.#authenticatedCdp;
+    try {
+      this.assertOutsideRequest();
+      const stopped = this.stopBrowserRequests();
+      this.cleanContextGeneration++;
+      this.sealConnectionSetup?.();
+      this.cleanContext = null;
+      this.activePage = null;
+      await stopped;
+      await this.cleanContextLease?.dispose();
+    } catch (error) {
+      if (authenticated) throw new Error('CDP_AUTHENTICATED_CONNECTION_FAILED');
+      throw error;
+    }
   }
 
   private assertOutsideRequest(): void {
@@ -735,6 +779,7 @@ export class PlaywrightExecutor {
   async disconnect(): Promise<void> {
     this.assertOutsideRequest();
     if (this.disconnection) return this.disconnection;
+    const authenticated = this.#authenticatedCdp;
     const stopped = this.stopBrowserRequests();
     this.cleanContextGeneration++;
     this.sealConnectionSetup?.();
@@ -743,8 +788,9 @@ export class PlaywrightExecutor {
     this.browser = null;
     this.activePage = null;
     this.cdpEndpoint = null;
+    this.#cdpHeaders = undefined;
     const setup = this.connectionSetup;
-    const operation = Promise.resolve().then(async () => {
+    const cleanup = Promise.resolve().then(async () => {
       await stopped;
       const outcomes = await Promise.allSettled([this.disposeCleanContext(), setup]);
       const browserOutcome = await Promise.allSettled([browserLease?.dispose()]);
@@ -754,10 +800,18 @@ export class PlaywrightExecutor {
       for (const outcome of connectionOutcome)
         if (outcome.status === 'rejected') throw outcome.reason;
     });
+    const operation = authenticated
+      ? cleanup.catch(() => {
+          throw new Error('CDP_AUTHENTICATED_CONNECTION_FAILED');
+        })
+      : cleanup;
     this.disconnection = operation;
     void operation.then(
       () => {
-        if (this.disconnection === operation) this.disconnection = null;
+        if (this.disconnection === operation) {
+          this.disconnection = null;
+          this.#authenticatedCdp = false;
+        }
       },
       () => {},
     );
@@ -784,13 +838,14 @@ export class PlaywrightExecutor {
    */
   private async reconnectIfStale(): Promise<boolean> {
     const endpoint = this.cdpEndpoint;
+    const headers = this.#cdpHeaders;
     if (!endpoint || this.cleanMode || this.connectionSetup || this.disconnection) return false;
     // Stop publishing the old handle, but retain its lease and await actual cleanup.
     // The setup lock also owns validation and bound cleanup of a failed redial.
     this.browser = null;
     this.activePage = null;
     const result = await this.runConnectionSetup((generation) =>
-      this.initializeCdpConnection(generation, endpoint, {}, true),
+      this.initializeCdpConnection(generation, endpoint, { cdpHeaders: headers }, true),
     );
     if (result.ok) {
       logger.info({ endpoint }, 'reconnectIfStale: reconnected CDP after stale');
@@ -1211,7 +1266,11 @@ export class PlaywrightExecutor {
     // an iframe hit ('iframe' → route into the frame) and the IN-FRAME probe
     // signal a NESTED iframe ('nested' → B3 v1 does NOT recurse → coordinate
     // fallback). Coordinates interpolated as numeric / `null` literals. Pure read.
-    const buildProbe = (px: number | null, py: number | null, iframeMarker: string): string => `(function () {
+    const buildProbe = (
+      px: number | null,
+      py: number | null,
+      iframeMarker: string,
+    ): string => `(function () {
   var doc = document;
   if (!doc) return { __probe: 'no-doc', tagName: null };
   var cx = ${px};
@@ -1304,7 +1363,12 @@ export class PlaywrightExecutor {
                 }
                 if (!framed.visibleText) {
                   logger.warn(
-                    { ...ctx, inFrame: true, tagName: framed.tagName, hasSelector: !!framed.selector },
+                    {
+                      ...ctx,
+                      inFrame: true,
+                      tagName: framed.tagName,
+                      hasSelector: !!framed.selector,
+                    },
                     'capture: frame descriptor without visible_text',
                   );
                 }
@@ -1894,13 +1958,29 @@ export function annotateAriaSnapshot(yaml: string): {
  * passing their own chromium stub to the constructor.
  */
 function lazyPlaywrightChromium(): {
-  connectOverCDP: (endpoint: string) => Promise<Browser>;
+  connectOverCDP: (endpoint: string, options?: CdpTransportOptions) => Promise<Browser>;
   launch: (options: { channel?: string; headless?: boolean }) => Promise<Browser>;
 } {
   return {
-    async connectOverCDP(endpoint: string): Promise<Browser> {
+    async connectOverCDP(endpoint: string, options?: CdpTransportOptions): Promise<Browser> {
       const pw = await import('playwright');
-      return pw.chromium.connectOverCDP(endpoint);
+      if (options?.headers) {
+        // Inspect the installed SDK's actual diagnostic state, not just DEBUG:
+        // debug configuration is cached at import and can change independently.
+        // No global logger mutation and no authenticated fallback on API drift.
+        const platform = (
+          pw.chromium as unknown as {
+            _platform?: { isLogEnabled(name: string): boolean };
+          }
+        )._platform;
+        if (
+          !platform ||
+          typeof platform.isLogEnabled !== 'function' ||
+          ['channel', 'server:channel', 'protocol'].some((name) => platform.isLogEnabled(name))
+        )
+          throw new Error('CDP_AUTHENTICATED_CONNECTION_FAILED');
+      }
+      return pw.chromium.connectOverCDP(endpoint, options);
     },
     async launch(options): Promise<Browser> {
       const pw = await import('playwright');

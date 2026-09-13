@@ -10,6 +10,9 @@ import installation
 import launch_authorization
 from launch_registration import LaunchRegistration
 import runtime_channel
+from resource_journal import ResourceJournal
+from manager_probe import SystemManagerProbe
+from quartet_listener import _QuartetListener
 
 
 def _deny():
@@ -32,6 +35,9 @@ class RootLaunchListener:
         obj._directories = []
         obj._attempted = obj._revoked = False
         obj._registered = obj._serving = False
+        obj._boot_attempted = obj._boot_confirmed = False
+        obj._runtime_mode = None
+        obj._quartet = obj._journal = obj._manager = None
         obj._path_mode = 0o700
         try:
             launch_authorization._context()
@@ -106,8 +112,14 @@ class RootLaunchListener:
 
     def _abort(self):
         self._revoked = True
-        owned, self._registration = self._registration, None
         failed = False
+        for name in ('_quartet', '_manager', '_journal'):
+            owned = getattr(self, name)
+            setattr(self, name, None)
+            if owned is not None:
+                try: owned.close()
+                except Exception: failed = True
+        owned, self._registration = self._registration, None
         if owned is not None:
             try:
                 owned.close()
@@ -157,13 +169,91 @@ class RootLaunchListener:
     def serve_runtime_once(self):
         with self._lock:
             try:
-                if self._revoked or not self._registered or self._serving:
+                if self._revoked or not self._registered or self._serving or self._runtime_mode not in (None, 'v1'):
                     raise ValueError()
+                self._runtime_mode = 'v1'
                 self._serving = True
                 receiver = self._registration
                 runtime_channel.serve_closed(receiver)
                 if self._revoked or self._registration is not receiver:
                     raise ValueError()
+            except Exception:
+                self._abort()
+                _deny()
+            finally:
+                self._serving = False
+
+    def _runtime_check(self, receiver, pin):
+        journal, manager, runtime = self._journal, self._manager, self._quartet
+        launch_authorization._context()
+        receiver._require_registered()
+        if (self._revoked or not self._registered or self._registration is not receiver
+                or receiver._pin is not pin or pin._fd is None or self._runtime_mode != 'v2'
+                or self._journal is not journal or self._manager is not manager or self._quartet is not runtime):
+            raise ValueError()
+        # Every acquired source has an independent lifetime. Parent liveness
+        # cannot revive a retired child after the last native observation.
+        if journal is not None: journal._owner_veto()
+        if manager is not None: manager._veto()
+        if runtime is not None: runtime._veto()
+
+    def start_quartet_runtime(self):
+        """Only this accepted root instance acquires the fixed v2 source graph."""
+        with self._lock:
+            try:
+                if self._revoked or not self._registered or self._serving or self._runtime_mode is not None:
+                    raise ValueError()
+                self._serving, self._runtime_mode = True, 'v2'
+                receiver, pin = self._registration, self._registration._pin
+                self._runtime_check(receiver, pin)
+                self._journal = ResourceJournal.open(receiver)
+                self._runtime_check(receiver, pin)
+                self._manager = SystemManagerProbe.open(receiver)
+                self._runtime_check(receiver, pin)
+                self._quartet = _QuartetListener.open(self._journal)
+                self._runtime_check(receiver, pin)
+            except Exception:
+                self._abort()
+                _deny()
+            finally:
+                self._serving = False
+
+    def confirm_application_boot(self):
+        """Original lowered PID handshake only; no maintenance/open authority."""
+        with self._lock:
+            try:
+                if (self._revoked or self._serving or self._runtime_mode != 'v2'
+                        or self._quartet is None or self._boot_attempted): raise ValueError()
+                self._boot_attempted = self._serving = True
+                receiver, pin = self._registration, self._registration._pin
+                runtime, window = self._quartet, self._window
+                self._check()
+                self._runtime_check(receiver, pin)
+                runtime.confirm_boot(window)
+                self._check()
+                self._runtime_check(receiver, pin)
+                runtime._budget()
+                if self._quartet is not runtime or self._window is not window: raise ValueError()
+                self._boot_confirmed = True
+            except Exception:
+                self._abort()
+                _deny()
+            finally:
+                self._serving = False
+
+    def serve_quartet_once(self):
+        with self._lock:
+            try:
+                if (self._revoked or self._serving or self._runtime_mode != 'v2'
+                        or self._quartet is None or not self._boot_confirmed):
+                    raise ValueError()
+                self._serving = True
+                receiver, pin = self._registration, self._registration._pin
+                runtime, manager = self._quartet, self._manager
+                self._runtime_check(receiver, pin)
+                runtime.serve_create_once(manager)
+                self._runtime_check(receiver, pin)
+                if self._quartet is not runtime or self._manager is not manager: raise ValueError()
             except Exception:
                 self._abort()
                 _deny()

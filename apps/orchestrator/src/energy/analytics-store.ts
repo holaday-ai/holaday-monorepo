@@ -1,5 +1,6 @@
 import { and, eq, gte, lte, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/mysql-core';
+import { drainedCleanupDelete } from '../api-keys/webhook-drain.js';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import {
@@ -148,26 +149,38 @@ export function createEnergyAnalyticsStore(
     },
 
     async deleteExpiredReceipts(now, limit) {
-      const result = await database
-        .delete(energyEventReceipts)
-        .where(lte(energyEventReceipts.expiresAt, now))
-        .limit(limit);
+      const result = await drainedCleanupDelete(
+        () =>
+          database
+            .delete(energyEventReceipts)
+            .where(lte(energyEventReceipts.expiresAt, now))
+            .limit(limit),
+        limit,
+      );
       return readAffectedRows(result);
     },
 
     async deleteExpiredVisitors(now, limit) {
-      const result = await database
-        .delete(energyDailyVisitors)
-        .where(lte(energyDailyVisitors.expiresAt, now))
-        .limit(limit);
+      const result = await drainedCleanupDelete(
+        () =>
+          database
+            .delete(energyDailyVisitors)
+            .where(lte(energyDailyVisitors.expiresAt, now))
+            .limit(limit),
+        limit,
+      );
       return readAffectedRows(result);
     },
 
     async deleteExpiredMetrics(now, limit) {
-      const result = await database
-        .delete(energyDailyMetrics)
-        .where(lte(energyDailyMetrics.expiresAt, now))
-        .limit(limit);
+      const result = await drainedCleanupDelete(
+        () =>
+          database
+            .delete(energyDailyMetrics)
+            .where(lte(energyDailyMetrics.expiresAt, now))
+            .limit(limit),
+        limit,
+      );
       return readAffectedRows(result);
     },
   };

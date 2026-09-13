@@ -11,9 +11,9 @@ import sys
 import types
 
 
-_MODULES = ('installation', 'process_pin', 'protocol', 'launch_authorization', 'launch_registration',
-            'application_guard', 'root_launch', 'resource_journal', 'manager_probe', 'xvfb_launch', 'resource_recovery', 'runtime_channel', 'launch_listener', 'bootstrap_input')
-_FILES = {name + '.py' for name in _MODULES} | {'bootstrap.py', 'application_env_keys.json', 'native-entry'}
+_MODULES = ('installation', 'process_pin', 'protocol', 'slot_identity', 'quartet_protocol', 'launch_authorization', 'launch_registration',
+            'application_guard', 'quartet_worker_guard', 'root_launch', 'quartet_records', 'resource_journal', 'quartet_journal', 'quartet_root_view', 'manager_probe', 'xvfb_launch', 'quartet_worker_pin', 'quartet_material', 'quartet_worker_view', 'quartet_worker_channel', 'quartet_launch', 'quartet_endpoints', 'quartet_bridge_channel', 'quartet_egress', 'quartet_probe_clock', 'quartet_probe_channel', 'quartet_create_offer', 'quartet_runtime', 'quartet_create_control', 'quartet_listener', 'resource_recovery', 'runtime_channel', 'launch_listener', 'bootstrap_input')
+_FILES = {name + '.py' for name in _MODULES} | {'bootstrap.py', 'application_env_keys.json', 'slot-identity-policy.json', 'rootfs-policy.json', 'native-entry', 'root-native-entry', 'egress-listener.node', 'control-connector.node'}
 _TOOLS = ('/usr/bin/python3', '/usr/bin/setpriv', '/opt/node22/bin/node', '/usr/bin/busctl', '/usr/bin/Xvfb')
 
 
@@ -140,7 +140,8 @@ def _verify_release(candidate):
         expected = manifest['files'][name]
         if type(expected) is not str or re.fullmatch(r'[0-9a-f]{64}', expected) is None:
             raise ValueError()
-        source = _trusted_bytes(base + '/' + name, 262144, mode=0o755 if name == 'native-entry' else 0o644)
+        source = _trusted_bytes(base + '/' + name, 1048576 if name == 'rootfs-policy.json' else 262144,
+                                mode=0o755 if name in ('native-entry', 'root-native-entry') else 0o644)
         if hashlib.sha256(source).hexdigest() != expected:
             raise ValueError()
         sources[name] = source
@@ -191,6 +192,10 @@ def _load_modules(sources):
             module.__file__ = path
             if name == 'bootstrap_input':
                 module.__dict__['_KEYS'] = frozenset(policy['keys'])
+            if name == 'slot_identity':
+                module.__dict__['_POLICY'] = sources['slot-identity-policy.json']
+            if name == 'quartet_root_view':
+                module.__dict__['_POLICY'] = sources['rootfs-policy.json']
             loaded[name] = module
             sys.modules[name] = module
             exec(compile(sources[name + '.py'], path, 'exec', dont_inherit=True), module.__dict__)
@@ -213,18 +218,35 @@ def _connect_registration():
 
 
 def main():
-    input_owned, channel = True, None
+    # This literal mode is emitted by the separate fixed native service entry.
+    # It does not grant launch or task permission; the original durable root
+    # consumer still has to authorize the one registration below.
+    root_mode = sys.argv == [__file__, '--root-broker']
+    input_owned, channel = not root_mode, None
     try:
-        os.set_inheritable(3, False)
+        if input_owned:
+            os.set_inheritable(3, False)
         _context()
         match = re.fullmatch(r'/usr/local/lib/holaday-pool-broker/releases/([0-9a-f]{40})/bootstrap.py', __file__)
-        if match is None or match[1] == '0' * 40 or sys.argv != [__file__]:
+        if match is None or match[1] == '0' * 40 or (not root_mode and sys.argv != [__file__]):
             raise ValueError()
         candidate = match[1]
         sources = _verify_release(candidate)
         modules = _load_modules(sources)
         identity = modules['installation'].inspect_installation(candidate)
         _context()
+        if root_mode:
+            listener = modules['launch_listener'].RootLaunchListener.open(candidate)
+            try:
+                listener.accept_once()
+                listener.start_quartet_runtime()
+                listener.confirm_application_boot()
+                while True:
+                    listener.serve_quartet_once()
+            finally:
+                # This closes original local sources only. Persistent consumed
+                # authorization and unproven groups are never reset or rearmed.
+                listener.close()
         input_owned = False
         values = _consume_input(candidate, modules['bootstrap_input'])
         values = _runtime_environment(values, identity)

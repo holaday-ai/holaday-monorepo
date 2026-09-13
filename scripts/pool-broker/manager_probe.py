@@ -37,11 +37,22 @@ def _capture(argv, tool_fd, deadline, scope_guard):
     any resource. Resource writes are restricted to xvfb_launch's transaction.
     """
     def budget():
-        remaining = deadline - time.monotonic()
+        before = time.monotonic()
         # The original probe checks retired AFTER reading its current clock.
         # This is a veto, not a new scope or caller-supplied success proof.
         original = scope_guard()
-        if (not math.isfinite(remaining) or not math.isfinite(original)
+        after = time.monotonic()
+        # Fixed get-property batches can have a deadline shorter than their
+        # enclosing manager operation. Count time spent in original pin/proc
+        # checks too, then apply a pure owner veto after this final clock read.
+        owner = getattr(scope_guard, '__self__', None)
+        if type(owner) is SystemManagerProbe:
+            owner._capture_veto()
+        if (type(before) not in (int, float) or type(after) not in (int, float)
+                or not math.isfinite(before) or not math.isfinite(after) or after < before):
+            raise TimeoutError()
+        remaining = deadline - after
+        if (type(original) not in (int, float) or not math.isfinite(remaining) or not math.isfinite(original)
                 or remaining <= 0 or original <= 0):
             raise TimeoutError()
         return min(remaining, original)
@@ -109,6 +120,7 @@ class SystemManagerProbe:
         probe._channel, probe._owner = None, None
         probe._busy, probe._retired = True, False
         probe._scope_guard = None
+        probe._terminal_veto = None
         probe._last = time.monotonic()
         probe._deadline = probe._last + 5
         failed = True
@@ -183,16 +195,28 @@ class SystemManagerProbe:
                 raise ValueError()
         # Last, non-IO veto after the clock/native checks. Closing a registration
         # or its original pin does not necessarily close this manager object.
-        if hasattr(self, '_pin') and (self._registration._revoked or not self._registration._received
-                or self._registration._pin is not self._pin or self._pin._fd is None
-                or self._registration._candidate.hex() != self._candidate):
-            raise ValueError()
-        if (self._retired or type(now) not in (int, float) or not math.isfinite(now)
+        self._veto()
+        if (type(now) not in (int, float) or not math.isfinite(now)
                 or now < self._last or not 0 < self._deadline - now <= 5):
             raise ValueError()
         self._last = now
         remaining = self._deadline - now
         return remaining if outer_remaining is None else min(remaining, outer_remaining)
+
+    def _veto(self):
+        if self._retired: raise ValueError()
+        if hasattr(self, '_pin') and (self._registration._revoked or not self._registration._received
+                or self._registration._pin is not self._pin or self._pin._fd is None
+                or self._registration._candidate.hex() != self._candidate):
+            raise ValueError()
+
+    def _capture_veto(self):
+        # Composed trusted scopes expose a separate pure-state tail. Calling
+        # their IO-bearing budget again would recreate the timing window.
+        veto = self._terminal_veto
+        if veto is not None: veto()
+        if self._terminal_veto is not veto: raise ValueError()
+        self._veto()
 
     def _live_budget(self):
         self._registration._require_registered()
@@ -317,13 +341,15 @@ class SystemManagerProbe:
         self._guard()
         return {'reachable': True, 'managerBound': True, 'groupExitProven': False}
 
-    def _run(self, operation, scope_guard=None):
+    def _run(self, operation, scope_guard=None, *, terminal_veto=None):
         if self._busy or self._retired:
             self.close()
             _deny()
         self._busy, failed = True, True
         self._scope_guard = scope_guard
+        self._terminal_veto = terminal_veto
         try:
+            if terminal_veto is not None and not callable(terminal_veto): raise ValueError()
             now = time.monotonic()
             if not math.isfinite(now) or now < self._last:
                 raise ValueError()
@@ -331,12 +357,14 @@ class SystemManagerProbe:
             self._remaining()
             result = operation()
             self._remaining()
+            self._capture_veto()
             failed = False
         except Exception:
             self._retired = True
         finally:
             self._busy = False
             self._scope_guard = None
+            self._terminal_veto = None
             if self._retired:
                 self._release()
         if failed:

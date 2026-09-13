@@ -11,20 +11,27 @@ import {
 import { WebSocket, WebSocketServer } from 'ws';
 import type { Planner } from '../agent/planner.js';
 import { TaskController, type TaskState } from '../agent/task-controller.js';
-import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
-import type { BrowserPool } from '../browser-pool/browser-pool.js';
-import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js';
 import { failTaskWithEventIfStatus } from '../agent/task-maintenance.js';
+import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js';
+import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 import { authenticateAccessToken } from '../auth/middleware.js';
+import type { BrowserPool } from '../browser-pool/browser-pool.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
+import type { DrainController } from '../execution/drain-controller.js';
+import {
+  captureOperationScopeVeto,
+  currentOperationLifetime,
+} from '../execution/owned-operation.js';
 import {
   extensionNoClientMessage,
   extensionSocketClosedMessage,
   extensionToolTimeoutMessage,
 } from './extension-tool-copy.js';
+import { type WsWork, createWsWork } from './server-work.js';
 
 interface ClientState {
+  work: WsWork;
   id: string;
   userId: string | null;
   authToken: string | null;
@@ -92,6 +99,7 @@ let injectedExecutor: PlaywrightExecutor | null = null;
 let injectedBrowserPool: BrowserPool | null = null;
 
 export interface WsServerOpts {
+  executionDrain?: DrainController;
   planner?: Planner | null;
   /**
    * When wired, the WS handler can dispatch `client.vision.user_input`
@@ -117,6 +125,7 @@ export interface WsServerOpts {
 }
 
 export function createWsServer(port: number, opts: WsServerOpts = {}) {
+  const work = createWsWork(opts.executionDrain);
   injectedPlanner = opts.planner ?? null;
   injectedExecutor = opts.playwrightExecutor ?? null;
   injectedBrowserPool = opts.browserPool ?? null;
@@ -126,6 +135,10 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
     try {
       return await configuredAuthenticateToken(token);
     } catch (err) {
+      if (work.controller) {
+        const lifetime = currentOperationLifetime();
+        if (lifetime?.drain === work.controller.drain) lifetime.drain.markUnknown(lifetime.owner);
+      }
       logger.warn(
         { err: err instanceof Error ? err.message : String(err) },
         'websocket authentication failed closed',
@@ -135,10 +148,24 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
   };
 
   const wss = new WebSocketServer({ port, handleProtocols });
+  // ws forwards its owned HTTP listener's asynchronous bind events. Attach in
+  // this same turn, before Node can emit listening/error on the next tick.
+  const ready = new Promise<void>((resolve, reject) => {
+    wss.once('listening', resolve);
+    wss.on('error', () => {
+      work.controller?.drain.block();
+      reject(new Error('WS_LISTEN_UNPROVEN'));
+    });
+  });
+  void ready.catch(() => {});
   const clientStates = new WeakMap<WebSocket, ClientState>();
 
   wss.on('connection', (socket, req) => {
-    void handleConnection(socket, req, authenticateToken, clientStates);
+    const pending = work.run(() =>
+      handleConnection(socket, req, authenticateToken, clientStates, work),
+    );
+    if (!pending) socket.close(1013, 'service unavailable');
+    else void pending.catch(() => socket.close(1011, 'request failed'));
   });
 
   const heartbeat = setInterval(() => sweep(wss), HEARTBEAT_INTERVAL_MS);
@@ -149,12 +176,29 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
   );
   sessionRevalidation.unref();
 
+  let closing: Promise<void> | undefined;
   return {
     wss,
+    ready,
     close: () => {
+      const settled = work.stop();
+      if (closing) return closing;
       clearInterval(heartbeat);
       clearInterval(sessionRevalidation);
-      return new Promise<void>((resolve) => wss.close(() => resolve()));
+      const workResults = Promise.allSettled([settled]);
+      closing = (async () => {
+        // ws.close removes its underlying HTTP event forwarding; retain that
+        // original bind receipt first, including the asynchronous failure case.
+        await ready.catch(() => {});
+        const listener = new Promise<boolean>((resolve) => wss.close((error) => resolve(!error)));
+        const [workResult] = await workResults;
+        // Stop accepting immediately, but retain the existing result channels
+        // until their original work has settled. Idle clients need not leave first.
+        for (const socket of wss.clients) socket.close(1001, 'server stopping');
+        const listenerClosed = await listener;
+        if (workResult?.status === 'rejected' || !listenerClosed) throw new Error('WS_STOP_FAILED');
+      })();
+      return closing;
     },
   };
 }
@@ -259,6 +303,9 @@ async function applyRehydrationForUser(state: ClientState): Promise<void> {
     }
 
     if (entry.state.status === 'executing') {
+      // A durable old step is not the original physical operation's authority.
+      // Strict mode cannot recreate it under this new authentication root.
+      if (state.work.controller) continue;
       const step = entry.state.plan[entry.state.cursor];
       if (!step) {
         logger.warn(
@@ -319,7 +366,11 @@ async function applyRehydrationForUser(state: ClientState): Promise<void> {
       const reason = '服务重启导致任务中断，重新发送一次即可。';
       let failedPersisted = false;
       try {
-        const result = await failRehydratedTaskIfStatus(entry.state.taskId, entry.state.status, reason);
+        const result = await failRehydratedTaskIfStatus(
+          entry.state.taskId,
+          entry.state.status,
+          reason,
+        );
         failedPersisted = result.persisted;
       } catch (err) {
         logger.warn(
@@ -593,6 +644,15 @@ export async function sendExtensionToolCall(
     return { ok: false, error: { message: extensionNoClientMessage(), code: 'no_extension' } };
   }
 
+  const inherited = currentOperationLifetime();
+  if (target.work.controller || inherited) {
+    if (!inherited || !target.work.controller) return extensionUnavailable();
+    const pending = target.work.child(inherited, (originalVeto) =>
+      sendOwnedExtensionToolCall(target, userId, opts, originalVeto),
+    );
+    return pending ? pending : extensionUnavailable();
+  }
+
   return new Promise<ExtensionToolCallOutcome>((resolve) => {
     const excludedClientIds = new Set<string>();
     const trySend = (): void => {
@@ -647,6 +707,103 @@ export async function sendExtensionToolCall(
 
     trySend();
   });
+}
+
+function extensionUnavailable(): ExtensionToolCallOutcome {
+  return {
+    ok: false,
+    error: { code: 'service_unavailable', message: '服务正在维护，请稍后再试。' },
+  };
+}
+
+/** One original socket and child; no retry/failover after attempted submission.
+ * Receipt timeout/transport close is not proof of remote action completion. */
+async function sendOwnedExtensionToolCall(
+  target: ClientState,
+  userId: string,
+  opts: ExtensionToolCallOptions,
+  originalVeto: () => void,
+): Promise<ExtensionToolCallOutcome> {
+  const lifetime = currentOperationLifetime();
+  if (!lifetime || lifetime.drain !== target.work.controller?.drain)
+    throw new Error('WS_SCOPE_MISSING');
+  const veto = captureOperationScopeVeto();
+  const requestId = randomUUID();
+  const taskId = opts.taskId;
+  const timeoutMs = Math.max(1000, Math.min(60000, opts.timeoutMs ?? 30000));
+  let rawDone!: () => void;
+  const raw = new Promise<void>((resolve) => {
+    rawDone = resolve;
+  });
+  let complete!: (outcome: ExtensionToolCallOutcome) => void;
+  const outcome = new Promise<ExtensionToolCallOutcome>((resolve) => {
+    complete = resolve;
+  });
+  let settled = false;
+  // biome-ignore lint/style/useConst: Settlement must tolerate reentry before timer assignment.
+  let timer: NodeJS.Timeout | undefined;
+  const settle = (result: ExtensionToolCallOutcome) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    pendingExtensionCalls.delete(requestId);
+    rememberSettledExtensionCall(requestId, target.id, taskId);
+    if (!result.ok) lifetime.drain.markUnknown(lifetime.owner);
+    complete(result);
+  };
+  timer = setTimeout(
+    () =>
+      settle({
+        ok: false,
+        error: {
+          code: 'timeout',
+          message: extensionToolTimeoutMessage(timeoutMs),
+        },
+      }),
+    timeoutMs,
+  );
+  timer.unref();
+  pendingExtensionCalls.set(requestId, { clientId: target.id, taskId, resolve: settle, timer });
+  try {
+    const payload = JSON.stringify({
+      type: 'server.extension.tool_call',
+      requestId,
+      taskId,
+      kind: opts.kind,
+      ...(opts.args ? { args: opts.args } : {}),
+      timeoutMs,
+    });
+    if (
+      target.socket.readyState !== WebSocket.OPEN ||
+      !target.authed ||
+      target.userId !== userId ||
+      target.work.stopping
+    )
+      throw new Error('WS_CHANNEL_CHANGED');
+    lifetime.drain.assertDispatch(lifetime.owner);
+    veto();
+    originalVeto();
+    if (target.work.stopping) throw new Error('WS_STOPPING');
+    target.socket.send(payload, (error) => {
+      if (error) {
+        lifetime.drain.markUnknown(lifetime.owner);
+        settle({
+          ok: false,
+          error: { code: 'socket_closed', message: extensionSocketClosedMessage() },
+        });
+      }
+      rawDone();
+    });
+  } catch {
+    settle({
+      ok: false,
+      error: { code: 'socket_closed', message: extensionSocketClosedMessage() },
+    });
+    rawDone();
+  }
+  const result = await outcome;
+  await raw;
+  return result;
 }
 
 /**
@@ -719,8 +876,10 @@ async function handleConnection(
   req: IncomingMessage,
   authenticateToken: (token: string) => Promise<string | null>,
   clientStates: WeakMap<WebSocket, ClientState>,
+  work: WsWork,
 ) {
   const state: ClientState = {
+    work,
     id: randomUUID(),
     userId: null,
     authToken: null,
@@ -733,6 +892,22 @@ async function handleConnection(
     isExtension: false,
   };
   clientStates.set(socket, state);
+  // biome-ignore lint/style/useConst: The close callback is installed before authentication awaits and timer assignment.
+  let authTimer: NodeJS.Timeout | undefined;
+  // Install cleanup before authentication's first await, not after it.
+  socket.on('close', () => {
+    clearTimeout(authTimer);
+    state.authed = false;
+    state.authToken = null;
+    clientStates.delete(socket);
+    const settledExtensionCalls = settlePendingExtensionCallsForClient(state.id);
+    if (state.userId) removeClientForUser(state.userId, state);
+    logger.info(
+      { clientId: state.id, userId: state.userId, settledExtensionCalls },
+      'ws client closed',
+    );
+  });
+  socket.on('error', (err) => logger.warn({ clientId: state.id, err }, 'ws error'));
 
   const requestedProtos = (req.headers['sec-websocket-protocol'] ?? '')
     .toString()
@@ -744,6 +919,7 @@ async function handleConnection(
   if (jwtProto) {
     const token = jwtProto.slice('jwt.'.length);
     const userId = await authenticateToken(token);
+    if (socket.readyState !== WebSocket.OPEN || work.stopping) return;
     if (userId) {
       state.userId = userId;
       state.authToken = token;
@@ -758,7 +934,7 @@ async function handleConnection(
   }
 
   // Give the client 10s to prove auth via first-frame `client.hello` if header path failed.
-  const authTimer = setTimeout(() => {
+  authTimer = setTimeout(() => {
     if (!state.authed) {
       send(socket, { type: 'server.error', code: 'UNAUTHORIZED', message: 'auth timeout' });
       socket.close(4401, 'unauthorized');
@@ -776,39 +952,61 @@ async function handleConnection(
       });
       return;
     }
-    await handleClientMessage(state, result.data, authTimer, authenticateToken);
+    const action = () => handleClientMessage(state, result.data, authTimer, authenticateToken);
+    if (work.controller && result.data.type === 'client.step.result') {
+      // Strict execution never emits legacy server.task.dispatch (the broadcast
+      // gate suppresses it). A message id cannot recreate an original owner.
+      send(socket, {
+        type: 'server.error',
+        code: 'UNEXPECTED_RESULT',
+        message: '没有对应的执行回执。',
+      });
+      return;
+    }
+    if (isReceiptOrMemoryMessage(result.data)) {
+      // Matching a pre-existing resolver is not admission of a new operation.
+      await action();
+      return;
+    }
+    const pending = work.run(action);
+    if (!pending)
+      send(socket, {
+        type: 'server.error',
+        code: 'SERVICE_UNAVAILABLE',
+        message: '服务正在维护，请稍后再试。',
+      });
+    else
+      await pending.catch(() =>
+        send(socket, { type: 'server.error', code: 'REQUEST_FAILED', message: '请求未完成。' }),
+      );
   });
 
   socket.on('pong', () => {
     state.lastPongAt = Date.now();
   });
+}
 
-  socket.on('close', () => {
-    clearTimeout(authTimer);
-    state.authed = false;
-    state.authToken = null;
-    clientStates.delete(socket);
-    const settledExtensionCalls = settlePendingExtensionCallsForClient(state.id);
-    if (state.userId) removeClientForUser(state.userId, state);
-    logger.info(
-      { clientId: state.id, userId: state.userId, settledExtensionCalls },
-      'ws client closed',
-    );
-  });
-
-  socket.on('error', (err) => {
-    logger.warn({ clientId: state.id, err }, 'ws error');
-  });
+function isReceiptOrMemoryMessage(msg: ClientMessage): boolean {
+  return (
+    msg.type === 'client.pong' ||
+    msg.type === 'client.task.ack' ||
+    msg.type === 'client.screenshot' ||
+    msg.type === 'client.extension.login_states' ||
+    msg.type === 'client.extension.tool_result' ||
+    msg.type === 'client.vision.observation' ||
+    msg.type === 'client.vision.acted'
+  );
 }
 
 async function handleClientMessage(
   state: ClientState,
   msg: ClientMessage,
-  authTimer: NodeJS.Timeout,
+  authTimer: NodeJS.Timeout | undefined,
   authenticateToken: (token: string) => Promise<string | null>,
 ) {
   if (msg.type === 'client.hello') {
     const userId = await authenticateToken(msg.token);
+    if (state.socket.readyState !== WebSocket.OPEN || state.work.stopping) return;
     if (!userId) {
       send(state.socket, { type: 'server.error', code: 'UNAUTHORIZED', message: 'bad token' });
       state.socket.close(4401, 'unauthorized');
@@ -860,7 +1058,7 @@ async function handleClientMessage(
   }
 
   if (msg.type === 'client.step.result') {
-    void runStepResult(state, msg);
+    await runStepResult(state, msg);
     return;
   }
 
@@ -1483,15 +1681,11 @@ function revalidateSessions(
   for (const socket of wss.clients) {
     if (socket.readyState !== WebSocket.OPEN) continue;
     const state = clientStates.get(socket);
-    if (
-      !state?.authed ||
-      !state.userId ||
-      !state.authToken ||
-      state.sessionRevalidationInFlight
-    ) {
+    if (!state?.authed || !state.userId || !state.authToken || state.sessionRevalidationInFlight) {
       continue;
     }
-    void revalidateSession(state, authenticateToken);
+    const pending = state.work.run(() => revalidateSession(state, authenticateToken));
+    if (pending) void pending.catch(() => state.socket.close(1011, 'session check failed'));
   }
 }
 

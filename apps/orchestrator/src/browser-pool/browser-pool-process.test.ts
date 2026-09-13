@@ -141,6 +141,7 @@ afterEach(async () => {
 it('release retains slot/profile until child close and then rejects unproven group exit', async () => {
   const f = fixture();
   const instance = await f.allocation.result;
+  if (!instance.userDataDir) throw new Error('Expected original legacy profile path');
   const stopping = observe(f.pool.release('task'));
   await flush();
   for (const child of children) child.emit('exit', 0, null);

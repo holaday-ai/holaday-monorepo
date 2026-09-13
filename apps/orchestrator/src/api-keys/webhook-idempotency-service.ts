@@ -40,9 +40,12 @@
 import { createHash } from 'node:crypto';
 import { and, eq, lt } from 'drizzle-orm';
 import type { Logger } from 'pino';
-import { webhookIdempotency } from '../db/schema/webhook-idempotency.js';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
+import { webhookIdempotency } from '../db/schema/webhook-idempotency.js';
+import type { DrainController } from '../execution/drain-controller.js';
+import { createPeriodicWork } from '../execution/periodic-work.js';
+import { drainedCleanupDelete, webhookDatabase, webhookWrite } from './webhook-drain.js';
 
 export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1_000;
 
@@ -111,6 +114,7 @@ export interface IdempotencyServiceDeps {
   logger: Logger;
   /** Override-able for tests; defaults to Date.now(). */
   now?: () => Date;
+  executionDrain?: DrainController;
 }
 
 /**
@@ -128,22 +132,24 @@ export async function lookup(
   requestBody: unknown,
 ): Promise<LookupResult> {
   const nowFn = deps.now ?? (() => new Date());
-  const [row] = await deps.db
-    .select({
-      requestHash: webhookIdempotency.requestHash,
-      taskId: webhookIdempotency.taskId,
-      responseJson: webhookIdempotency.responseJson,
-      expiresAt: webhookIdempotency.expiresAt,
-      createdAt: webhookIdempotency.createdAt,
-    })
-    .from(webhookIdempotency)
-    .where(
-      and(
-        eq(webhookIdempotency.userId, userInternalId),
-        eq(webhookIdempotency.idempotencyKey, key),
-      ),
-    )
-    .limit(1);
+  const [row] = await webhookDatabase(() =>
+    deps.db
+      .select({
+        requestHash: webhookIdempotency.requestHash,
+        taskId: webhookIdempotency.taskId,
+        responseJson: webhookIdempotency.responseJson,
+        expiresAt: webhookIdempotency.expiresAt,
+        createdAt: webhookIdempotency.createdAt,
+      })
+      .from(webhookIdempotency)
+      .where(
+        and(
+          eq(webhookIdempotency.userId, userInternalId),
+          eq(webhookIdempotency.idempotencyKey, key),
+        ),
+      )
+      .limit(1),
+  );
   if (!row) return { kind: 'fresh' };
   // Treat expired rows as not-found. The cleanup cron will delete
   // them eventually; the lookup-time guard keeps semantics correct
@@ -190,42 +196,48 @@ export async function recordClaim(
   const nowFn = deps.now ?? (() => new Date());
   const hash = hashBody(requestBody);
   try {
-    await deps.db.insert(webhookIdempotency).values({
-      userId: userInternalId,
-      idempotencyKey: key,
-      requestHash: hash,
-      taskId: CLAIM_PLACEHOLDER_TASK_ID,
-      // Drizzle's json column accepts any JSON-serialisable; cast
-      // through `unknown` to satisfy the typed insert API.
-      responseJson: CLAIM_PLACEHOLDER_RESPONSE as Parameters<
-        typeof deps.db.insert
-      >[0] extends never
-        ? never
-        : object,
-      expiresAt: new Date(nowFn().getTime() + IDEMPOTENCY_TTL_MS),
-    });
+    await webhookWrite(
+      () =>
+        deps.db.insert(webhookIdempotency).values({
+          userId: userInternalId,
+          idempotencyKey: key,
+          requestHash: hash,
+          taskId: CLAIM_PLACEHOLDER_TASK_ID,
+          // Drizzle's json column accepts any JSON-serialisable; cast
+          // through `unknown` to satisfy the typed insert API.
+          responseJson: CLAIM_PLACEHOLDER_RESPONSE as Parameters<
+            typeof deps.db.insert
+          >[0] extends never
+            ? never
+            : object,
+          expiresAt: new Date(nowFn().getTime() + IDEMPOTENCY_TTL_MS),
+        }),
+      true,
+    );
     return { kind: 'claimed' };
   } catch (err) {
     const code = (err as { code?: string }).code;
     if (code !== 'ER_DUP_ENTRY') throw err;
     // Collision — re-read the existing row to decide replay,
     // in_flight, or expired-row replacement.
-    const [row] = await deps.db
-      .select({
-        requestHash: webhookIdempotency.requestHash,
-        taskId: webhookIdempotency.taskId,
-        responseJson: webhookIdempotency.responseJson,
-        expiresAt: webhookIdempotency.expiresAt,
-        createdAt: webhookIdempotency.createdAt,
-      })
-      .from(webhookIdempotency)
-      .where(
-        and(
-          eq(webhookIdempotency.userId, userInternalId),
-          eq(webhookIdempotency.idempotencyKey, key),
-        ),
-      )
-      .limit(1);
+    const [row] = await webhookDatabase(() =>
+      deps.db
+        .select({
+          requestHash: webhookIdempotency.requestHash,
+          taskId: webhookIdempotency.taskId,
+          responseJson: webhookIdempotency.responseJson,
+          expiresAt: webhookIdempotency.expiresAt,
+          createdAt: webhookIdempotency.createdAt,
+        })
+        .from(webhookIdempotency)
+        .where(
+          and(
+            eq(webhookIdempotency.userId, userInternalId),
+            eq(webhookIdempotency.idempotencyKey, key),
+          ),
+        )
+        .limit(1),
+    );
     if (!row) {
       // Race: DUP fired but the row was deleted (cleanup cron) before
       // our re-read. Surface as in_flight so caller retries.
@@ -242,6 +254,7 @@ export async function recordClaim(
         key,
         hash,
         nowFn,
+        row.expiresAt,
       );
       if (reclaimed) return { kind: 'claimed' };
       return { kind: 'in_flight', claimedAt: row.createdAt };
@@ -264,13 +277,10 @@ export async function recordClaim(
 
 /**
  * Atomically delete an expired claim and re-INSERT ours. Qualifying
- * the DELETE on `task_id = '' (placeholder)` is enough for race
- * safety: the unique index on `(user_id, idempotency_key)`
- * guarantees at most one row exists, and a concurrent finalize that
- * flipped `task_id` to a real value between our SELECT and this
- * DELETE will simply make the predicate match zero rows (the row
- * is no longer in placeholder state). On a zero-match DELETE we
- * fall back to the lookup path.
+ * the DELETE on the observed expiry AND continued expiry prevents a
+ * competing request from deleting a freshly replaced placeholder (ABA).
+ * The placeholder guard also refuses a concurrently finalized row.
+ * A zero-match DELETE loses the takeover without a second INSERT.
  */
 async function tryReplaceExpiredClaim(
   deps: IdempotencyServiceDeps,
@@ -278,17 +288,22 @@ async function tryReplaceExpiredClaim(
   key: string,
   hash: string,
   nowFn: () => Date,
+  observedExpiry: Date,
 ): Promise<boolean> {
   try {
-    const delResult = await deps.db
-      .delete(webhookIdempotency)
-      .where(
-        and(
-          eq(webhookIdempotency.userId, userInternalId),
-          eq(webhookIdempotency.idempotencyKey, key),
-          eq(webhookIdempotency.taskId, CLAIM_PLACEHOLDER_TASK_ID),
+    const delResult = await webhookWrite(() =>
+      deps.db
+        .delete(webhookIdempotency)
+        .where(
+          and(
+            eq(webhookIdempotency.userId, userInternalId),
+            eq(webhookIdempotency.idempotencyKey, key),
+            eq(webhookIdempotency.taskId, CLAIM_PLACEHOLDER_TASK_ID),
+            eq(webhookIdempotency.expiresAt, observedExpiry),
+            lt(webhookIdempotency.expiresAt, nowFn()),
+          ),
         ),
-      );
+    );
     const affected = readAffectedRows(delResult);
     if (affected === 0) return false;
     // DELETE succeeded; now INSERT our claim. On the off chance
@@ -296,18 +311,22 @@ async function tryReplaceExpiredClaim(
     // surface that as "lost the race" so caller's recordClaim
     // collision branch handles it via a fresh lookup.
     try {
-      await deps.db.insert(webhookIdempotency).values({
-        userId: userInternalId,
-        idempotencyKey: key,
-        requestHash: hash,
-        taskId: CLAIM_PLACEHOLDER_TASK_ID,
-        responseJson: CLAIM_PLACEHOLDER_RESPONSE as Parameters<
-          typeof deps.db.insert
-        >[0] extends never
-          ? never
-          : object,
-        expiresAt: new Date(nowFn().getTime() + IDEMPOTENCY_TTL_MS),
-      });
+      await webhookWrite(
+        () =>
+          deps.db.insert(webhookIdempotency).values({
+            userId: userInternalId,
+            idempotencyKey: key,
+            requestHash: hash,
+            taskId: CLAIM_PLACEHOLDER_TASK_ID,
+            responseJson: CLAIM_PLACEHOLDER_RESPONSE as Parameters<
+              typeof deps.db.insert
+            >[0] extends never
+              ? never
+              : object,
+            expiresAt: new Date(nowFn().getTime() + IDEMPOTENCY_TTL_MS),
+          }),
+        true,
+      );
       return true;
     } catch {
       return false;
@@ -335,23 +354,25 @@ export async function finalizeClaim(
   response: unknown,
 ): Promise<boolean> {
   try {
-    const result = await deps.db
-      .update(webhookIdempotency)
-      .set({
-        taskId,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        responseJson: response as any,
-      })
-      .where(
-        and(
-          eq(webhookIdempotency.userId, userInternalId),
-          eq(webhookIdempotency.idempotencyKey, key),
-          // Guard: only flip the placeholder. If another process
-          // already finalized, this UPDATE matches zero rows and
-          // we keep their finalized state.
-          eq(webhookIdempotency.taskId, CLAIM_PLACEHOLDER_TASK_ID),
+    const result = await webhookWrite(() =>
+      deps.db
+        .update(webhookIdempotency)
+        .set({
+          taskId,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          responseJson: response as any,
+        })
+        .where(
+          and(
+            eq(webhookIdempotency.userId, userInternalId),
+            eq(webhookIdempotency.idempotencyKey, key),
+            // Guard: only flip the placeholder. If another process
+            // already finalized, this UPDATE matches zero rows and
+            // we keep their finalized state.
+            eq(webhookIdempotency.taskId, CLAIM_PLACEHOLDER_TASK_ID),
+          ),
         ),
-      );
+    );
     const affected = readAffectedRows(result);
     return affected > 0;
   } catch (err) {
@@ -384,15 +405,17 @@ export async function releaseClaim(
   key: string,
 ): Promise<boolean> {
   try {
-    const result = await deps.db
-      .delete(webhookIdempotency)
-      .where(
-        and(
-          eq(webhookIdempotency.userId, userInternalId),
-          eq(webhookIdempotency.idempotencyKey, key),
-          eq(webhookIdempotency.taskId, CLAIM_PLACEHOLDER_TASK_ID),
+    const result = await webhookWrite(() =>
+      deps.db
+        .delete(webhookIdempotency)
+        .where(
+          and(
+            eq(webhookIdempotency.userId, userInternalId),
+            eq(webhookIdempotency.idempotencyKey, key),
+            eq(webhookIdempotency.taskId, CLAIM_PLACEHOLDER_TASK_ID),
+          ),
         ),
-      );
+    );
     const affected = readAffectedRows(result);
     return affected > 0;
   } catch (err) {
@@ -417,15 +440,12 @@ export async function releaseClaim(
 export async function cleanup(deps: IdempotencyServiceDeps): Promise<number> {
   const nowFn = deps.now ?? (() => new Date());
   try {
-    const result = await deps.db
-      .delete(webhookIdempotency)
-      .where(lt(webhookIdempotency.expiresAt, nowFn()));
+    const result = await drainedCleanupDelete(() =>
+      deps.db.delete(webhookIdempotency).where(lt(webhookIdempotency.expiresAt, nowFn())),
+    );
     const affected = readAffectedRows(result);
     if (affected > 0) {
-      deps.logger.info(
-        { deleted: affected },
-        'webhook-idempotency: cleanup swept expired rows',
-      );
+      deps.logger.info({ deleted: affected }, 'webhook-idempotency: cleanup swept expired rows');
     }
     return affected;
   } catch (err) {
@@ -443,22 +463,34 @@ export async function cleanup(deps: IdempotencyServiceDeps): Promise<number> {
  * across HMR; the existing handle is preserved.
  */
 let cleanupInterval: NodeJS.Timeout | null = null;
+let cleanupWork: ReturnType<typeof createPeriodicWork> | undefined;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1_000; // 1h
 
 export function startIdempotencyCleanup(deps: IdempotencyServiceDeps): NodeJS.Timeout {
   if (cleanupInterval) return cleanupInterval;
+  if (cleanupWork?.stopping && !cleanupWork.settled) throw new Error('CLEANUP_STOPPING');
+  const work = createPeriodicWork(deps.executionDrain);
+  cleanupWork = work;
+  const originalDeps = { db: deps.db, logger: deps.logger, now: deps.now };
+  const run = () => {
+    const original = work.run(async () => {
+      await cleanup(originalDeps);
+    });
+    void original?.catch(() => {});
+  };
   // Fire once on boot so a long-running stale row from a prior run
   // gets swept without waiting an hour.
-  void cleanup(deps);
-  cleanupInterval = setInterval(() => {
-    void cleanup(deps);
-  }, CLEANUP_INTERVAL_MS);
+  cleanupInterval = setInterval(run, CLEANUP_INTERVAL_MS);
+  cleanupInterval.unref?.();
+  run();
   return cleanupInterval;
 }
 
-export function stopIdempotencyCleanup(): void {
+export function stopIdempotencyCleanup(): Promise<void> {
+  const stopped = cleanupWork?.stop() ?? Promise.resolve();
   if (cleanupInterval) {
     clearInterval(cleanupInterval);
     cleanupInterval = null;
   }
+  return stopped;
 }

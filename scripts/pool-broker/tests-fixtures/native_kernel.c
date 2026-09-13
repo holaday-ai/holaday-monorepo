@@ -65,11 +65,18 @@ long hd_call(enum hd_op op, long a, long b, long c, long d, long e, long f) {
         assert(!strcmp((char *)a, "/usr/bin/python3"));
         assert(!strcmp(argv[0], "/usr/bin/python3") && !strcmp(argv[1], "-I") && !strcmp(argv[2], "-S"));
         assert(!strcmp(argv[3], "/usr/local/lib/holaday-pool-broker/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bootstrap.py"));
-        assert(argv[4] == NULL && env[2] == NULL);
+        assert(env[2] == NULL);
         assert(!strcmp(env[0], "PATH=/usr/bin:/bin") && !strcmp(env[1], "LANG=C.UTF-8"));
+#ifdef HD_TEST_ROOT_ENTRY
+        assert(!strcmp(argv[4], "--root-broker") && argv[5] == NULL);
+        assert(used == 0 && calls[HD_MEMFD] == 0 && calls[HD_WRITE] == 0);
+        for (int i = 0; i < 128; ++i) assert(fds[i] == (i < 3));
+#else
+        assert(argv[4] == NULL);
         assert(seals == 15 && inheritable);
         for (int i = 0; i < 128; ++i) assert(fds[i] == (i < 4));
         assert(fwrite(data, 1, used, stdout) == used);
+#endif
         exit(0);
     }
     case HD_EXIT: exit((int)a);

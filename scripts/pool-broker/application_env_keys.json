@@ -61,9 +61,9 @@
       "apps/orchestrator/src/config/env.ts:449 (schema)"
     ],
     "AKSHARE_HTTP_URL": [
-      "apps/orchestrator/src/index.ts:410 (direct)",
-      "apps/orchestrator/src/index.ts:578 (direct)",
-      "apps/orchestrator/src/index.ts:608 (direct)",
+      "apps/orchestrator/src/application-main.ts:459 (direct)",
+      "apps/orchestrator/src/application-main.ts:630 (direct)",
+      "apps/orchestrator/src/application-main.ts:663 (direct)",
       "apps/orchestrator/src/trpc/routers/stocks-risk-monitor.ts:59 (direct)",
       "apps/orchestrator/src/trpc/routers/stocks.ts:1334 (direct)",
       "apps/orchestrator/src/trpc/routers/stocks.ts:1397 (direct)",
@@ -89,7 +89,7 @@
       "apps/orchestrator/src/agent/vision-loop/task-runner.ts:242 (dynamic helper)"
     ],
     "APIFY_API_TOKEN": [
-      "apps/orchestrator/src/index.ts:145 (direct)"
+      "apps/orchestrator/src/application-main.ts:161 (direct)"
     ],
     "ASHARE_INTENT_JUDGE_ENABLED": [
       "apps/orchestrator/src/config/env.ts:376 (schema)"
@@ -122,7 +122,7 @@
       "apps/orchestrator/src/execution/feature-flags.ts:108 (direct)"
     ],
     "BOOT_SWEEP_AWAITING_USER_MIN": [
-      "apps/orchestrator/src/index.ts:757 (direct)"
+      "apps/orchestrator/src/application-main.ts:817 (direct)"
     ],
     "BROWSER_CDP_PORT_START": [
       "apps/orchestrator/src/config/env.ts:557 (schema)"
@@ -341,7 +341,7 @@
       "apps/orchestrator/src/config/env.ts:276 (schema)"
     ],
     "HEADED_CDP_ENDPOINT": [
-      "apps/orchestrator/src/index.ts:122 (direct)"
+      "apps/orchestrator/src/application-main.ts:138 (direct)"
     ],
     "HOLADAY_FILES_ROOT": [
       "apps/orchestrator/src/files/file-service.ts:34 (direct)",
@@ -360,7 +360,7 @@
       "apps/orchestrator/src/config/env.ts:65 (schema)"
     ],
     "HTTPS_PROXY": [
-      "apps/orchestrator/src/index.ts:2 (direct)"
+      "apps/orchestrator/src/application-main.ts:2 (direct)"
     ],
     "HUMANIZE_ENABLED": [
       "apps/orchestrator/src/agent/vision-loop/humanize.ts:174 (direct)"
@@ -488,17 +488,17 @@
       "apps/orchestrator/src/browser-pool/spawn.ts:48 (child environment)"
     ],
     "PAYPAL_CLIENT_ID": [
-      "apps/orchestrator/src/index.ts:273 (direct)",
+      "apps/orchestrator/src/application-main.ts:309 (direct)",
       "apps/orchestrator/src/trpc/routers/payment.ts:354 (direct)"
     ],
     "PAYPAL_CLIENT_SECRET": [
-      "apps/orchestrator/src/index.ts:274 (direct)"
+      "apps/orchestrator/src/application-main.ts:310 (direct)"
     ],
     "PAYPAL_ENABLED": [
-      "apps/orchestrator/src/index.ts:270 (direct)"
+      "apps/orchestrator/src/application-main.ts:306 (direct)"
     ],
     "PAYPAL_ENV": [
-      "apps/orchestrator/src/index.ts:275 (direct)"
+      "apps/orchestrator/src/application-main.ts:311 (direct)"
     ],
     "PAYPAL_WEBHOOK_ID": [
       "apps/orchestrator/src/http.ts:394 (direct)"
@@ -599,7 +599,8 @@
       "apps/orchestrator/src/auth/email-code.ts:136 (direct)"
     ],
     "RETENTION_REAPER_ENABLED": [
-      "apps/orchestrator/src/index.ts:860 (direct)"
+      "apps/orchestrator/src/application-main.ts:58 (direct)",
+      "apps/orchestrator/src/application-main.ts:926 (direct)"
     ],
     "S3_ACCESS_KEY": [
       "apps/orchestrator/src/config/env.ts:485 (schema)"
@@ -665,7 +666,8 @@
     ],
     "USER_TASK_CRYSTALLIZE_ENABLED": [
       "apps/orchestrator/src/execution/feature-flags.ts:109 (direct)",
-      "apps/orchestrator/src/index.ts:887 (direct)"
+      "apps/orchestrator/src/application-main.ts:59 (direct)",
+      "apps/orchestrator/src/application-main.ts:953 (direct)"
     ],
     "VIDEO_CREATION_ALLOWLIST": [
       "apps/orchestrator/src/config/env.ts:305 (schema)"
@@ -707,7 +709,7 @@
       "apps/orchestrator/src/browser-pool/spawn.ts:48 (child environment)"
     ],
     "ZAPIER_API_KEY": [
-      "apps/orchestrator/src/index.ts:144 (direct)"
+      "apps/orchestrator/src/application-main.ts:160 (direct)"
     ],
     "ZAPIER_WEBHOOK_PATH": [
       "apps/orchestrator/src/trpc/routers/tasks.ts:5421 (direct)"

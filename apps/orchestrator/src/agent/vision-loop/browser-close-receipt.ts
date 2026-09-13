@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { Browser } from 'playwright';
@@ -28,7 +29,9 @@ export function bindBrowserCloseReceipt(browser: Browser): () => Promise<void> {
   let SdkBrowser: new (...args: never[]) => FixedBrowser;
   let Connection: new (...args: never[]) => CloseConnection;
   try {
-    const packagePath = require.resolve('playwright/package.json');
+    // Resolve dependencies from the actual installed package, not a pnpm alias
+    // that some module loaders return from their resolver cache.
+    const packagePath = realpathSync(require.resolve('playwright/package.json'));
     const sdkRequire = createRequire(packagePath);
     const corePath = sdkRequire.resolve('playwright-core/package.json');
     if (require(packagePath).version !== '1.59.1' || sdkRequire(corePath).version !== '1.59.1')

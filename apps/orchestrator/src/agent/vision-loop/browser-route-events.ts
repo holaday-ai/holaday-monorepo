@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { Browser, BrowserContext, Request, Route } from 'playwright';
@@ -48,7 +49,7 @@ export function createRouteEventBoundary(
   let SdkRoute: new (...args: never[]) => FixedRoute;
   let SdkRequest: new (...args: never[]) => FixedRequest;
   try {
-    const packagePath = require.resolve('playwright/package.json');
+    const packagePath = realpathSync(require.resolve('playwright/package.json'));
     const sdkRequire = createRequire(packagePath);
     const corePath = sdkRequire.resolve('playwright-core/package.json');
     if (require(packagePath).version !== '1.59.1' || sdkRequire(corePath).version !== '1.59.1')

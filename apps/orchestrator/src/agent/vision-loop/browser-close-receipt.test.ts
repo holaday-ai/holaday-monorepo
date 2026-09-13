@@ -1,4 +1,5 @@
-import { createRequire } from 'node:module';
+import { realpathSync } from 'node:fs';
+import Module, { createRequire } from 'node:module';
 import path from 'node:path';
 import type { Browser } from 'playwright';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -22,6 +23,7 @@ vi.mock('./browser-request-guard.js', async (importOriginal) => {
 });
 afterEach(() => {
   faults.guard = false;
+  vi.restoreAllMocks();
 });
 
 // Real pinned client SDK and owned lifetimes. Driver responses/events are synthetic.
@@ -252,6 +254,28 @@ it('late shape drift cannot release an already dispatched raw close', async () =
   expect(String(closing.state.error)).toContain('BROWSER_CLOSE_RECEIPT_FAILED');
   expect(f.drain.snapshot().unknown).toBe(1);
   expect(f.messages).toHaveLength(1);
+});
+
+it('binds the same pinned SDK through a package symlink returned by the module resolver', async () => {
+  const f = fixture();
+  const alias = path.resolve(process.cwd(), 'node_modules/playwright/package.json');
+  expect(realpathSync(alias) === alias).toBe(false);
+  const resolver = Module as unknown as { _resolveFilename(...args: unknown[]): string };
+  const original = resolver._resolveFilename;
+  vi.spyOn(resolver, '_resolveFilename').mockImplementation(function (
+    this: typeof resolver,
+    ...args
+  ) {
+    if (args[0] === 'playwright/package.json') return alias;
+    return Reflect.apply(original, this, args);
+  });
+  const close = bindBrowserCloseReceipt(f.browser);
+  const receipt = close();
+  await flush();
+  expect(f.messages).toHaveLength(1);
+  f.respond();
+  f.notifyClosed();
+  await receipt;
 });
 
 it('native listener hook reentry shares the cached close receipt before the first RPC', async () => {

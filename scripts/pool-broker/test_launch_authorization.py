@@ -20,6 +20,17 @@ except ModuleNotFoundError as error:
 
 
 class AuthorizationTests(unittest.TestCase):
+    def test_original_window_retains_only_the_durably_consumed_epoch(self):
+        with self.system() as s:
+            window = launch_authorization.consume_launch_authorization('a' * 40)
+            s.values['epoch'] = 'd' * 32
+            s.data[s.authorization] = json.dumps(s.values).encode()
+            self.assertEqual(getattr(window, '_epoch', None), 'c' * 32)
+            self.assertEqual(getattr(window, '_candidate', None), 'a' * 40)
+            self.assertEqual(s.events.count('created'), 1)
+            with self.assertRaises(ValueError):
+                launch_authorization.consume_launch_authorization('a' * 40)
+
     @contextlib.contextmanager
     def system(self):
         self.assertIsNotNone(launch_authorization, 'durable launch authorization missing')
@@ -67,8 +78,10 @@ class AuthorizationTests(unittest.TestCase):
                              ('getresgid', lambda: (0, 0, 0)), ('listdir', lambda p: ['123'])]:
                 mocks[name] = stack.enter_context(patch.object(os, name, side_effect=fn, create=True))
             stack.enter_context(patch.object(os, 'environ', {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}))
-            stack.enter_context(patch.object(launch_authorization.time, 'time', side_effect=lambda: clock[0]))
-            stack.enter_context(patch.object(launch_authorization.time, 'monotonic', side_effect=lambda: clock[1]))
+            # Shared by complete launch fixtures: clock reads must not retain
+            # millions of Mock call records. Keep the same controllable clock.
+            stack.enter_context(patch.object(launch_authorization.time, 'time', lambda: clock[0]))
+            stack.enter_context(patch.object(launch_authorization.time, 'monotonic', lambda: clock[1]))
             yield SimpleNamespace(fs=fs, data=data, events=events, synced=synced, clock=clock, mocks=mocks,
                                   authorization=authorization, consumed=consumed, values=values, close=old_close)
 

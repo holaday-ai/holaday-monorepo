@@ -114,8 +114,8 @@ class LaunchRegistrationTests(unittest.TestCase):
         with auth_tests.AuthorizationTests().system() as fs:
             window = auth_tests.launch_authorization.consume_launch_authorization('a' * 40)
             clock = fs.clock
-        with self.kernel() as kernel, patch.object(launch_registration.time, 'time', side_effect=lambda: clock[0]), \
-                patch.object(launch_registration.time, 'monotonic', side_effect=lambda: clock[1]):
+        with self.kernel() as kernel, patch.object(launch_registration.time, 'time', lambda: clock[0]), \
+                patch.object(launch_registration.time, 'monotonic', lambda: clock[1]):
             yield window, clock, kernel
 
     def test_receiver_uses_actual_consumed_window_and_original_pin(self):

@@ -442,6 +442,7 @@ it('refuses adoption into a key with a failed release receipt', async () => {
   });
   const old = await f.pool.allocate('old', 'synthetic');
   const retained = await f.pool.allocate('retained', 'synthetic');
+  if (!retained.userDataDir) throw new Error('Expected original legacy profile path');
   transport.remove = (path) => {
     if (path === old.userDataDir) throw new Error('synthetic cleanup');
   };
@@ -465,6 +466,7 @@ it('refuses adoption into a key with a failed release receipt', async () => {
 it('refuses adoption into a key whose allocation is still pending', async () => {
   const f = fixture();
   const retained = await f.pool.allocate('retained', 'synthetic');
+  if (!retained.userDataDir) throw new Error('Expected original legacy profile path');
   expect(f.pool.retain('retained', 60_000)).toBe(true);
   const gate = deferred();
   transport.ready = async () => {
@@ -489,6 +491,7 @@ it('refuses adoption into a key whose allocation is still pending', async () => 
   const allocated = allocation.state.value;
   expect(allocated).toBeDefined();
   if (!allocated) throw new Error('Expected a completed synthetic allocation');
+  if (!allocated.userDataDir) throw new Error('Expected original legacy profile path');
   expect(existsSync(allocated.userDataDir)).toBe(false);
 });
 it('refuses new allocations after stopping starts', async () => {

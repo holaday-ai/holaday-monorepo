@@ -36,11 +36,13 @@ import type {
   ZtReviewRow,
 } from './briefing-types.js';
 import { CircuitBreaker, CircuitOpenError } from './circuit-breaker.js';
+import { runMarketRequest } from './market-request-lifetime.js';
 
 interface FetchResponseLike {
   ok: boolean;
   status: number;
   json(): Promise<unknown>;
+  body?: { cancel(): Promise<void> } | null;
 }
 type FetchLike = (url: string, init?: { signal?: AbortSignal }) => Promise<FetchResponseLike>;
 
@@ -157,36 +159,42 @@ export class HttpAkshareClient implements AkshareClient {
     const group = circuitGroupForPath(path);
     const breaker = circuitFor(this.baseUrl, group);
     try {
-      return await breaker.execute(async () => {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
-        try {
-          let res: FetchResponseLike;
+      return await breaker.execute(() =>
+        runMarketRequest(async (beforeDispatch) => {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), timeoutMs);
           try {
-            res = await this.fetchImpl(`${this.baseUrl}${path}`, { signal: controller.signal });
-          } catch (error) {
-            if (controller.signal.aborted) {
-              throw new AkshareUpstreamError('UPSTREAM_TIMEOUT', 'AkShare request timed out');
+            let res: FetchResponseLike;
+            try {
+              const transport = this.fetchImpl.bind(this);
+              const url = `${this.baseUrl}${path}`;
+              beforeDispatch();
+              res = await transport(url, { signal: controller.signal });
+            } catch (error) {
+              if (controller.signal.aborted) {
+                throw new AkshareUpstreamError('UPSTREAM_TIMEOUT', 'AkShare request timed out');
+              }
+              throw error;
             }
-            throw error;
+            if (!res.ok) {
+              await res.body?.cancel();
+              throw new AkshareUpstreamError('UPSTREAM_HTTP', `HTTP ${res.status}`, {
+                status: res.status,
+              });
+            }
+            const value = await res.json();
+            if (!isAkEnvelope<T>(value)) {
+              throw new AkshareUpstreamError('UPSTREAM_INVALID', 'invalid AkShare envelope');
+            }
+            if (value.error) {
+              throw new AkshareUpstreamError(value.error_code ?? 'UPSTREAM_ERROR', value.error);
+            }
+            return value;
+          } finally {
+            clearTimeout(timer);
           }
-          if (!res.ok) {
-            throw new AkshareUpstreamError('UPSTREAM_HTTP', `HTTP ${res.status}`, {
-              status: res.status,
-            });
-          }
-          const value = await res.json();
-          if (!isAkEnvelope<T>(value)) {
-            throw new AkshareUpstreamError('UPSTREAM_INVALID', 'invalid AkShare envelope');
-          }
-          if (value.error) {
-            throw new AkshareUpstreamError(value.error_code ?? 'UPSTREAM_ERROR', value.error);
-          }
-          return value;
-        } finally {
-          clearTimeout(timer);
-        }
-      });
+        }),
+      );
     } catch (e) {
       if (e instanceof CircuitOpenError) {
         this.logger?.warn({ path, group, errorCode: e.code }, 'akshare-http: circuit open');

@@ -17,6 +17,30 @@ except ModuleNotFoundError as error:
 
 
 class InstallationTests(unittest.TestCase):
+    def test_fixed_control_and_data_parents_are_required_before_guard_exec(self):
+        for path in ('/run/holaday-pool-runtime', '/run/holaday-pool-data'):
+            for kind in ('missing', 'writable', 'wrong-gid', 'untraversable'):
+                with self.subTest(path=path, kind=kind), self.system() as s:
+                    if kind == 'missing': del s.paths[path]
+                    elif kind == 'writable': s.paths[path].st_mode |= 0o020
+                    elif kind == 'wrong-gid': s.paths[path].st_gid = 997
+                    else: s.paths[path].st_mode = stat.S_IFDIR | 0o700
+                    with self.assertRaises(ValueError): self.inspect()
+                    self.assertEqual(s.opened, {})
+
+    def test_original_node_egress_artifact_and_fixed_parents_are_required(self):
+        for kind in ('missing', 'writable'):
+            for target in ('egress-listener.node', 'control-connector.node', 'app-parent', 'protected-links'):
+                with self.subTest(kind=kind, target=target), self.system() as s:
+                    path = {'egress-listener.node': s.package + '/egress-listener.node',
+                        'control-connector.node': s.package + '/control-connector.node',
+                        'app-parent': '/run/holaday-pool-egress',
+                        'protected-links': '/run/holaday-pool-egress-links'}[target]
+                    if kind == 'missing': del s.paths[path]
+                    else: s.paths[path].st_mode |= 0o020
+                    with self.assertRaises(ValueError): self.inspect()
+                    self.assertEqual(s.opened, {})
+
     @contextlib.contextmanager
     def system(self):
         self.assertIsNotNone(installation, "installation preflight missing")
@@ -38,10 +62,17 @@ class InstallationTests(unittest.TestCase):
         for name in ("installation.py", "process_pin.py", "protocol.py", "launch_registration.py", "application_guard.py", "root_launch.py", "bootstrap.py", "bootstrap_input.py", "application_env_keys.json", "native-build-manifest.json"):
             add(package + "/" + name, mode=0o644, kind=stat.S_IFREG)
         add(package + '/native-entry', mode=0o755, kind=stat.S_IFREG)
-        for name in ('launch_authorization.py', 'launch_listener.py', 'runtime_channel.py', 'resource_journal.py', 'manager_probe.py', 'xvfb_launch.py', 'resource_recovery.py'):
+        add(package + '/root-native-entry', mode=0o755, kind=stat.S_IFREG)
+        add(package + '/egress-listener.node', mode=0o644, kind=stat.S_IFREG)
+        add(package + '/control-connector.node', mode=0o644, kind=stat.S_IFREG)
+        for name in ('launch_authorization.py', 'launch_listener.py', 'runtime_channel.py', 'resource_journal.py', 'manager_probe.py', 'xvfb_launch.py', 'resource_recovery.py', 'slot_identity.py', 'slot-identity-policy.json', 'quartet_protocol.py', 'quartet_records.py', 'quartet_journal.py', 'quartet_worker_guard.py', 'quartet_worker_pin.py', 'quartet_root_view.py', 'rootfs-policy.json', 'quartet_material.py', 'quartet_worker_view.py', 'quartet_worker_channel.py', 'quartet_launch.py', 'quartet_endpoints.py', 'quartet_bridge_channel.py', 'quartet_egress.py', 'quartet_probe_clock.py', 'quartet_probe_channel.py', 'quartet_create_offer.py', 'quartet_runtime.py', 'quartet_create_control.py', 'quartet_listener.py'):
             add(package + '/' + name, mode=0o644, kind=stat.S_IFREG)
         for path in ("/etc/holaday-pool-broker", "/var/lib/holaday-pool-broker", "/run/holaday-pool-broker"):
             add(path, mode=0o700)
+        add('/run/holaday-pool-egress', uid=998, gid=998, mode=0o700)
+        add('/run/holaday-pool-egress-links', mode=0o700)
+        add('/run/holaday-pool-runtime', gid=998, mode=0o750)
+        add('/run/holaday-pool-data', gid=998, mode=0o750)
         add("/var/lib/holaday-pool-workers", uid=997, gid=997, mode=0o700)
         opened, closed, calls = {}, [], []
         serial = [100]
@@ -117,6 +148,19 @@ class InstallationTests(unittest.TestCase):
                 else: s.paths[path].st_mode |= 0o020
                 with self.assertRaises(ValueError): installation.inspect_installation('a'*40)
                 self.assertEqual(s.opened,{})
+
+    def test_b2_policy_and_decoder_must_be_present_and_root_protected(self):
+        for name in ('slot_identity.py', 'slot-identity-policy.json', 'quartet_protocol.py', 'quartet_records.py', 'quartet_journal.py', 'quartet_worker_guard.py', 'quartet_worker_pin.py', 'quartet_root_view.py', 'rootfs-policy.json', 'quartet_material.py', 'quartet_worker_view.py', 'quartet_worker_channel.py', 'quartet_launch.py', 'quartet_endpoints.py', 'quartet_bridge_channel.py', 'quartet_egress.py', 'quartet_probe_clock.py', 'quartet_probe_channel.py', 'quartet_create_offer.py', 'quartet_runtime.py', 'quartet_create_control.py', 'quartet_listener.py'):
+            for missing in (True, False):
+                with self.subTest(name=name, missing=missing), self.system() as s:
+                    path = s.package + '/' + name
+                    if missing:
+                        del s.paths[path]
+                    else:
+                        s.paths[path].st_mode |= 0o020
+                    with self.assertRaises(ValueError):
+                        installation.inspect_installation('a' * 40)
+                    self.assertEqual(s.opened, {})
 
     def reject(self, call):
         with self.assertRaises(ValueError) as caught:
@@ -244,7 +288,7 @@ class InstallationTests(unittest.TestCase):
 
     def test_first_exec_package_members_are_required_and_not_app_writable(self):
         for name in ('bootstrap.py', 'bootstrap_input.py', 'application_env_keys.json',
-                     'native-build-manifest.json', 'native-entry', 'launch_authorization.py', 'launch_listener.py', 'runtime_channel.py', 'manager_probe.py'):
+                     'native-build-manifest.json', 'native-entry', 'root-native-entry', 'launch_authorization.py', 'launch_listener.py', 'runtime_channel.py', 'manager_probe.py'):
             for missing in (True, False):
                 with self.subTest(name=name, missing=missing), self.system() as s:
                     path = s.package + '/' + name

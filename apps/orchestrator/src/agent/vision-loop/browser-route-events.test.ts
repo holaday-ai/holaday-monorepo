@@ -1,7 +1,8 @@
-import { createRequire } from 'node:module';
+import { realpathSync } from 'node:fs';
+import Module, { createRequire } from 'node:module';
 import path from 'node:path';
 import type { Browser } from 'playwright';
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { ExecutionDrain } from '../../execution/execution-drain.js';
 import { startOwnedOperation } from '../../execution/owned-operation.js';
 import type { BrowserNetworkPolicy } from '../browser-network-policy.js';
@@ -10,6 +11,7 @@ import { createOwnedCdpConnection } from './owned-cdp-connection.js';
 import { createOwnedManagedBrowser } from './owned-managed-browser.js';
 
 const warnings = vi.hoisted(() => vi.fn());
+afterEach(() => vi.restoreAllMocks());
 
 // This suite's Browser.close is synthetic; real close receipts are tested separately.
 vi.mock('./browser-close-receipt.js', () => ({
@@ -91,6 +93,39 @@ function fixture(fail = false, hold?: { method: string; promise: Promise<void> }
   };
   return { connection, browser, context, calls, emit, addContext };
 }
+
+it('retains original route events when the package resolver returns a pnpm symlink', async () => {
+  const f = fixture();
+  const alias = path.resolve(process.cwd(), 'node_modules/playwright/package.json');
+  expect(realpathSync(alias) === alias).toBe(false);
+  const resolver = Module as unknown as { _resolveFilename(...args: unknown[]): string };
+  const original = resolver._resolveFilename;
+  vi.spyOn(resolver, '_resolveFilename').mockImplementation(function (
+    this: typeof resolver,
+    ...args
+  ) {
+    if (args[0] === 'playwright/package.json') return alias;
+    return Reflect.apply(original, this, args);
+  });
+  let failures = 0;
+  const boundary = createRouteEventBoundary(
+    f.context,
+    f.browser,
+    (action) => action(),
+    () => {
+      failures++;
+    },
+  );
+  await f.context.route('**/*', (route: { abort(code: string): Promise<void> }) =>
+    route.abort('blockedbyclient'),
+  );
+  f.emit();
+  await flush();
+  boundary.seal();
+  await boundary.settled();
+  expect(failures).toBe(0);
+  expect(f.calls).toEqual(['setNetworkInterceptionPatterns', 'abort']);
+});
 
 it('contains real RouteHandler and EventEmitter rejection without global handlers', async () => {
   const f = fixture(true);

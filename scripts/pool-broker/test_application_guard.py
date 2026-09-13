@@ -83,12 +83,20 @@ class GuardTests(unittest.TestCase):
             '/opt/node22/bin/node', '--import', 'tsx',
             '/opt/holaday-monorepo/apps/orchestrator/src/index.ts']))
         self.assertEqual(self.environment, {'NODE_ENV': 'production',
-                         'SYNTHETIC_SETTING': 'kept', 'EMPTY_SETTING': ''})
+                         'SYNTHETIC_SETTING': 'kept', 'EMPTY_SETTING': '',
+                         'HOLADAY_POOL_CANDIDATE': 'a'*40, 'HOLADAY_POOL_BOOT': 'b'*32})
         self.assertIn(('cwd', '/opt/holaday-monorepo/apps/orchestrator'), self.events)
         self.assertIn(('umask', 0o077), self.events)
         close = self.events.index(('close', 3, 4294967295, 2))
         self.assertLess(close, self.events.index(('exec',)))
         self.assertIn(('status',), self.events[close + 1:])
+
+    def test_node_routing_metadata_is_overwritten_from_original_capsule_binding(self):
+        self.kernel.load({'NODE_ENV': 'production', 'HOLADAY_POOL_CANDIDATE': 'e'*40,
+                          'HOLADAY_POOL_BOOT': 'f'*32})
+        with self.assertRaises(ExecObserved): guard.exec_application(998, 'a'*40, 'b'*32)
+        self.assertEqual(self.environment['HOLADAY_POOL_CANDIDATE'], 'a'*40)
+        self.assertEqual(self.environment['HOLADAY_POOL_BOOT'], 'b'*32)
 
     def denied(self, gid=998):
         self.executed = None
@@ -233,7 +241,8 @@ class GuardTests(unittest.TestCase):
         with self.assertRaises(ExecObserved):
             guard.exec_application(998, 'a' * 40, 'b' * 32)
         self.assertEqual(self.environment, {'NODE_ENV': 'production',
-                         'SYNTHETIC': '中文\nvalue', 'EMPTY': ''})
+                         'SYNTHETIC': '中文\nvalue', 'EMPTY': '',
+                         'HOLADAY_POOL_CANDIDATE': 'a'*40, 'HOLADAY_POOL_BOOT': 'b'*32})
         self.assertEqual(dict(guard.os.environ), {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'})
 
     def test_unproven_identity_never_reads_private_capsule(self):

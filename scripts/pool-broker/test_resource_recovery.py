@@ -165,8 +165,13 @@ class RecoveryTests(unittest.TestCase):
                 def capture(argv,fd,deadline,guard):
                     if 'GetUnit' not in argv: return previous(argv,fd,deadline,guard)
                     real=manager_probe.time.monotonic
-                    def clock(): closing.close(); return real()
-                    with patch.object(manager_probe.time,'monotonic',side_effect=clock), \
+                    clocks=[]
+                    def clock():
+                        if __import__('sys')._getframe(1).f_code.co_name == 'budget':
+                            clocks.append(True)
+                            if len(clocks) == 2: closing.close()
+                        return real()
+                    with patch.object(manager_probe,'time',__import__('types').SimpleNamespace(monotonic=clock)), \
                             patch.object(manager_probe.subprocess,'Popen',side_effect=lambda *a,**kw:attempted.append(True)):
                         return test_xvfb_launch.test_manager_probe.REAL_CAPTURE(argv,fd,deadline,guard)
                 with patch.object(manager_probe,'_capture',side_effect=capture): self.denied(s)

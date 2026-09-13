@@ -263,11 +263,17 @@ export class DrainController {
   }
 
   /** Stop admission now; release the writer only after genuine quiescence. */
-  shutdown(): boolean {
+  /** Close admission without releasing the state owner before services stop. */
+  quiesce(): boolean {
     if (this.released) return true;
     this.stopped = true;
     this.invalidateSession();
-    if (!this.closeGate() || !this.drain.snapshot().idle) return false;
+    return this.closeGate();
+  }
+
+  shutdown(): boolean {
+    if (this.released) return true;
+    if (!this.quiesce() || !this.drain.snapshot().idle) return false;
     try {
       this.state.release();
       this.released = true;

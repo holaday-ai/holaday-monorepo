@@ -21,6 +21,7 @@
  */
 
 import type { IncomingMessage } from 'node:http';
+import type { Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
 import type { Logger } from 'pino';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -72,14 +73,65 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
   const log = opts.logger.child({ module: 'vnc-proxy' });
   const customAuthenticateToken = opts.authenticateToken;
 
-  function handleUpgrade(
-    req: IncomingMessage,
-    socket: Duplex,
-    head: Buffer,
-  ): void {
+  function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
     const url = req.url ?? '';
     const m = pathPattern.exec(url);
     if (!m) return; // not our path; leave for other upgrade handlers
+    // Strict ingress takes original raw IO before parsing or the first await.
+    // A strict failure must never enter the legacy bare-port path below.
+    if (
+      opts.pool.handleBrokerVncUpgrade?.({
+        request: req,
+        socket: socket as Socket,
+        head,
+        authorize: async (check) => {
+          check();
+          const target = decodeURIComponent(m[1] ?? '');
+          const bearer = extractBearerFromSubprotocol(req) ?? extractTokenFromQuery(url);
+          if (!bearer) throw new Error('POOL_VNC_AUTHENTICATION_INVALID');
+          const session = customAuthenticateToken
+            ? await customAuthenticateToken(bearer).then((userId) =>
+                userId ? { userId, authVersion: 0 } : null,
+              )
+            : await authenticateStreamOrAccessSession(db, bearer);
+          check();
+          if (!session) throw new Error('POOL_VNC_AUTHENTICATION_INVALID');
+          const caller = session.userId;
+          const veto = () => {
+            if (opts.allowedUserIds && !opts.allowedUserIds.has(caller))
+              throw new Error('POOL_VNC_AUTHENTICATION_INVALID');
+          };
+          veto();
+          const instance = target.startsWith('tsk_')
+            ? opts.pool.peek(target)
+            : target === caller
+              ? opts.pool.peekActiveForUser(caller)
+              : null;
+          if (!instance || instance.userId !== caller)
+            throw new Error('POOL_VNC_AUTHENTICATION_INVALID');
+          const bindingVeto = opts.pool.captureBrokerVncBindingVeto(
+            instance,
+            caller,
+            target.startsWith('tsk_') ? target : instance.taskId,
+          );
+          check();
+          return {
+            veto: () => {
+              bindingVeto();
+              veto();
+            },
+            revalidate: () =>
+              opts.revalidateSession
+                ? opts.revalidateSession(session)
+                : customAuthenticateToken
+                  ? customAuthenticateToken(bearer).then((userId) => userId === caller)
+                  : revalidateAuthenticatedSession(db, session),
+            open: (request) => opts.pool.openBrokerVnc(instance, caller, request),
+          };
+        },
+      })
+    )
+      return;
     const urlArg = decodeURIComponent(m[1] ?? '');
 
     // Token can arrive two ways: (1) `?token=JWT` query param —
@@ -106,84 +158,87 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
         }
       : (candidate: string) => authenticateStreamOrAccessSession(db, candidate);
 
-    authenticateConnection(token).then((session) => {
-      if (!session) {
-        log.warn({}, 'jwt verify returned null — invalid token');
-        return reject(socket, 401, 'invalid token');
-      }
-      const callerUserId = session.userId;
-
-      if (opts.allowedUserIds && !opts.allowedUserIds.has(callerUserId)) {
-        return reject(socket, 403, 'user not on canary allow-list');
-      }
-
-      // Mirror the screencast-proxy dispatch: tsk_… targets a
-      // specific in-flight task and verifies the caller owns it,
-      // anything else falls back to the user's most-recently-active
-      // instance. The previous code path treated the URL arg as a
-      // userId only, so VNC always landed on peekActiveForUser even
-      // when the SPA explicitly knew which task it wanted to watch
-      // — visible as "wrong browser" when the user had multiple
-      // concurrent tasks.
-      let instance: ReturnType<BrowserPool['peek']>;
-      if (urlArg.startsWith('tsk_')) {
-        instance = opts.pool.peek(urlArg);
-        if (!instance) {
-          log.info({ taskId: urlArg }, 'task not active — rejecting VNC');
-          return reject(socket, 409, 'task not active');
+    authenticateConnection(token).then(
+      (session) => {
+        if (!session) {
+          log.warn({}, 'jwt verify returned null — invalid token');
+          return reject(socket, 401, 'invalid token');
         }
-        if (instance.userId !== callerUserId) {
-          log.warn(
-            { callerUserId, taskId: urlArg, ownerUserId: instance.userId },
-            'subject mismatch — refusing cross-user VNC by taskId',
+        const callerUserId = session.userId;
+
+        if (opts.allowedUserIds && !opts.allowedUserIds.has(callerUserId)) {
+          return reject(socket, 403, 'user not on canary allow-list');
+        }
+
+        // Mirror the screencast-proxy dispatch: tsk_… targets a
+        // specific in-flight task and verifies the caller owns it,
+        // anything else falls back to the user's most-recently-active
+        // instance. The previous code path treated the URL arg as a
+        // userId only, so VNC always landed on peekActiveForUser even
+        // when the SPA explicitly knew which task it wanted to watch
+        // — visible as "wrong browser" when the user had multiple
+        // concurrent tasks.
+        let instance: ReturnType<BrowserPool['peek']>;
+        if (urlArg.startsWith('tsk_')) {
+          instance = opts.pool.peek(urlArg);
+          if (!instance) {
+            log.info({ taskId: urlArg }, 'task not active — rejecting VNC');
+            return reject(socket, 409, 'task not active');
+          }
+          if (instance.userId !== callerUserId) {
+            log.warn(
+              { callerUserId, taskId: urlArg, ownerUserId: instance.userId },
+              'subject mismatch — refusing cross-user VNC by taskId',
+            );
+            return reject(socket, 403, 'forbidden');
+          }
+        } else {
+          if (urlArg && urlArg !== callerUserId) {
+            log.warn(
+              { callerUserId, requestedUserId: urlArg },
+              'subject mismatch — refusing cross-user VNC',
+            );
+            return reject(socket, 403, 'forbidden');
+          }
+          instance = opts.pool.peekActiveForUser(callerUserId);
+        }
+        if (!instance || instance.status !== 'ready') {
+          log.info(
+            { callerUserId, status: instance?.status ?? 'absent' },
+            'no browser allocated yet — rejecting VNC until first task allocates',
           );
-          return reject(socket, 403, 'forbidden');
+          return reject(socket, 409, 'browser not allocated');
         }
-      } else {
-        if (urlArg && urlArg !== callerUserId) {
-          log.warn(
-            { callerUserId, requestedUserId: urlArg },
-            'subject mismatch — refusing cross-user VNC',
-          );
-          return reject(socket, 403, 'forbidden');
-        }
-        instance = opts.pool.peekActiveForUser(callerUserId);
-      }
-      if (!instance || instance.status !== 'ready') {
-        log.info(
-          { callerUserId, status: instance?.status ?? 'absent' },
-          'no browser allocated yet — rejecting VNC until first task allocates',
-        );
-        return reject(socket, 409, 'browser not allocated');
-      }
 
-      // Accept the upgrade; Playwright doesn't care about this path.
-      // We echo the "binary" subprotocol back so noVNC's client-side
-      // selectSubProtocol resolves to the same thing websockify will
-      // speak.
-      wss.handleUpgrade(req, socket, head, (client) => {
-        startWebSocketSessionRevalidation({
-          socket: client,
-          expectedUserId: callerUserId,
-          revalidateSession: () => {
-            if (opts.revalidateSession) return opts.revalidateSession(session);
-            if (customAuthenticateToken) {
-              return customAuthenticateToken(token).then((userId) => userId === session.userId);
-            }
-            return revalidateAuthenticatedSession(db, session);
-          },
-          logger: log,
-          intervalMs: opts.sessionRevalidationIntervalMs,
+        // Accept the upgrade; Playwright doesn't care about this path.
+        // We echo the "binary" subprotocol back so noVNC's client-side
+        // selectSubProtocol resolves to the same thing websockify will
+        // speak.
+        wss.handleUpgrade(req, socket, head, (client) => {
+          startWebSocketSessionRevalidation({
+            socket: client,
+            expectedUserId: callerUserId,
+            revalidateSession: () => {
+              if (opts.revalidateSession) return opts.revalidateSession(session);
+              if (customAuthenticateToken) {
+                return customAuthenticateToken(token).then((userId) => userId === session.userId);
+              }
+              return revalidateAuthenticatedSession(db, session);
+            },
+            logger: log,
+            intervalMs: opts.sessionRevalidationIntervalMs,
+          });
+          const upstreamUrl = `ws://127.0.0.1:${instance.wsPort}/`;
+          const upstream = new WebSocket(upstreamUrl, ['binary']);
+          pipe(client, upstream, instance.taskId, log, opts.pool);
+          opts.pool.touch(instance.taskId);
         });
-        const upstreamUrl = `ws://127.0.0.1:${instance.wsPort}/`;
-        const upstream = new WebSocket(upstreamUrl, ['binary']);
-        pipe(client, upstream, instance.taskId, log, opts.pool);
-        opts.pool.touch(instance.taskId);
-      });
-    }, (err: unknown) => {
-      log.warn({ err: (err as Error).message }, 'jwt verify threw');
-      return reject(socket, 401, 'invalid token');
-    });
+      },
+      (err: unknown) => {
+        log.warn({ err: (err as Error).message }, 'jwt verify threw');
+        return reject(socket, 401, 'invalid token');
+      },
+    );
   }
 
   return { handleUpgrade };

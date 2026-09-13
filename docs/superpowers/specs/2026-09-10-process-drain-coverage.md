@@ -1,5 +1,13 @@
 # Orchestrator 安全排空覆盖清单
 
+## 2026-09-13 接线增量（不重写下方历史基线）
+
+`index.ts`现为最小入口：原boot握手与持久closed检查完成后，才动态加载`application-main.ts`。同一controller已传入HTTP/WS、queue、scheduled/planned、市场预热及两cleanup；手工Context持有原lifetime。HTTP原body/auth/response与handler Promise、tRPC原next、webhook原数据库回执、WS认证/消息/扩展回执、市场fetch/JSON/body和cleanup原DELETE均已有本地专项证据。状态仍为**局部已接**，不是所有嵌套IO自动获得所有权。
+
+controlled启动不运行旧singleton/reaper、旧任务恢复或自动改终态；retention/crystallize若启用则拒绝启动；upgrade在closed时先拒绝。启动资源有原stop集合，监听器等待真实bind/close，boot关闭同步撤销身份；原控制state预置与真实maintenance verifier仍独立门禁，未提供authorizeOpen。
+
+本次第2整项的实现/验证范围见`../plans/2026-09-13-pool-quartet-local-verification.md`。剩余全进程/数据库/附件/文件流/其他driver及业务回调的原始IO证明、未知对账、精准拒绝分类、真正组退出/槽位复用是第3项；Linux、首次维护与真实开放、千问和发布分别保留后续门禁。不能用新boot的idle或测试factory接线推断旧生产进程已排空。下方239路径与18处timer计数仅为9月10日静态快照，未作当前数量承诺。
+
 静态核对基线：`2a4e253e6a395f462489601d4e20e6a94ed546cf`，2026-09-10。以下路径相对 `apps/orchestrator/src`。这是实施覆盖清单，不是运行时排空证据或发布许可。未检查生产、环境变量值或任何用户数据。
 
 ## 结论与覆盖口径

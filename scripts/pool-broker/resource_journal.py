@@ -3,11 +3,13 @@
 import fcntl
 import hmac
 import json
+import math
 import os
 import re
 import stat
 
 import launch_authorization
+import quartet_records
 from launch_registration import LaunchRegistration
 from protocol import CreateRequest, ResourceRequest, decode_request, _identifier, _unique_object, _reject_constant
 
@@ -31,9 +33,12 @@ def _replay(raw):
     lines = raw[len(_HEADER):].splitlines()
     for revision, line in enumerate(lines, 1):
         row = json.loads(line.decode('utf-8'), object_pairs_hook=_unique_object, parse_constant=_reject_constant)
-        if (type(row) is not dict or type(row.get('version')) is not int or row['version'] != 1
+        if (type(row) is not dict or type(row.get('version')) is not int or row['version'] not in (1, 2)
                 or type(row.get('revision')) is not int or row['revision'] != revision):
             raise ValueError()
+        if row['version'] == 2:
+            quartet_records.replay(row, resources, requests)
+            continue
         resource = _identifier(row.get('resource'), 32)
         common = {'version', 'action', 'revision', 'resource'}
         if row.get('action') == 'prepare':
@@ -43,6 +48,7 @@ def _replay(raw):
                 _identifier(row[name], length)
             request = decode_request(json.dumps({key: row[key] for key in
                 ('version', 'requestId', 'boot', 'component', 'slot')} | {'action': 'create'}).encode())
+            quartet_records.legacy_prepare_allowed(row, resources)
             key, slot = (request.boot, request.request_id), (request.component, request.slot)
             if (len(resources) >= 128 or resource in resources or key in requests
                     or slot in slots or row['capability'] in capabilities):
@@ -54,7 +60,7 @@ def _replay(raw):
         elif row.get('action') == 'dispatch':
             binding = {'unit', 'managerGuid', 'managerOwner'}
             if (set(row) not in (common, common | binding) or resource not in resources
-                    or resources[resource]['state'] != 'prepared'):
+                    or resources[resource]['version'] != 1 or resources[resource]['state'] != 'prepared'):
                 raise ValueError()
             if set(row) == common | binding:
                 if (resources[resource]['component'] != 'xvfb'
@@ -67,6 +73,7 @@ def _replay(raw):
             resources[resource]['state'] = 'dispatching'
         elif row.get('action') == 'accepted':
             if (set(row) != common | {'job'} or resource not in resources
+                    or resources[resource]['version'] != 1
                     or resources[resource]['state'] != 'dispatching' or 'unit' not in resources[resource]
                     or type(row['job']) is not str
                     or re.fullmatch(r'/org/freedesktop/systemd1/job/[1-9][0-9]{0,9}', row['job']) is None
@@ -75,6 +82,7 @@ def _replay(raw):
             resources[resource].update(state='accepted', job=row['job'])
         elif row.get('action') == 'observe':
             if (set(row) != common | {'invocation'} or resource not in resources
+                    or resources[resource]['version'] != 1
                     or resources[resource]['state'] != 'accepted'):
                 raise ValueError()
             _identifier(row['invocation'], 32)
@@ -106,6 +114,7 @@ class ResourceJournal:
         journal = object.__new__(cls)
         journal._fds, journal._handles = [], {}
         journal._busy, journal._retired = True, False
+        journal._scope_guard = None
         failed = True
         try:
             if type(registration) is not LaunchRegistration:
@@ -145,6 +154,20 @@ class ResourceJournal:
 
     def _alive(self):
         if self._retired:
+            raise ValueError()
+        scope = self._scope_guard
+        if scope is not None:
+            remaining = scope()
+            if (type(remaining) not in (int, float) or not math.isfinite(remaining) or remaining <= 0
+                    or self._retired or self._scope_guard is not scope):
+                raise ValueError()
+
+    def _owner_veto(self):
+        """Pure original-source tail for composed collector transactions."""
+        registration, pin = self._registration, self._pin
+        if (self._retired or self._fd not in self._fds or registration._revoked
+                or not registration._received or registration._pin is not pin or pin._fd is None
+                or registration._candidate.hex() != self._candidate or pin._boot != self._boot):
             raise ValueError()
 
     def _io(self, call, *args, **kwargs):
@@ -205,11 +228,12 @@ class ResourceJournal:
             raise ValueError()
         self._identity_guard()
 
-    def _run(self, operation):
+    def _run(self, operation, scope_guard=None, *, failure_cleanup=None):
         if self._busy or self._retired:
             self.close()
             _deny()
         self._busy, failed = True, True
+        self._scope_guard = scope_guard
         try:
             self._guard()
             result = operation()
@@ -218,7 +242,15 @@ class ResourceJournal:
         except Exception:
             self._retired = True
         finally:
+            # The original lock also covers the borrower's failure tail. This
+            # includes failure in the final guard, not just in operation().
+            if self._retired and failure_cleanup is not None:
+                try:
+                    failure_cleanup()
+                except Exception:
+                    failed = True
             self._busy = False
+            self._scope_guard = None
             if self._retired:
                 self._release()
         if failed:
@@ -234,7 +266,7 @@ class ResourceJournal:
             raise ValueError()
 
     def _append(self, row):
-        row = row | {'version': 1, 'revision': self._revision + 1}
+        row = {'version': 1} | row | {'revision': self._revision + 1}
         line = json.dumps(row, separators=(',', ':')).encode() + b'\n'
         expected = self._expected + line
         resources, requests, revision = _replay(expected)
@@ -293,7 +325,7 @@ class ResourceJournal:
                 'requestId': request.request_id, 'boot': request.boot, 'capability': request.capability}).encode())
             row = next((row for row in self._resources.values()
                         if hmac.compare_digest(row['capability'], request.capability)), None)
-            if row is None:
+            if row is None or row['version'] != 1:
                 raise ValueError()
             return {'state': row['state'], 'groupExitProven': False}
         return self._run(operation)

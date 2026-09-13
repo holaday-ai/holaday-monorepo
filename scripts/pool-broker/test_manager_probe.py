@@ -25,8 +25,25 @@ NATIVE = SimpleNamespace(**vars(os))
 
 
 class ProbeTests(unittest.TestCase):
+    def test_short_collector_deadline_expiring_inside_original_registration_check_never_spawns(self):
+        with self.system() as s:
+            probe = manager_probe.SystemManagerProbe.open(s.registration)
+            now = [manager_probe.time.monotonic()]
+            original = s.registration._require_registered
+            def slow_original():
+                original()
+                now[0] += 2.1
+            try:
+                with patch.object(manager_probe.time, 'monotonic', side_effect=lambda: now[0]), \
+                        patch.object(s.registration, '_require_registered', side_effect=slow_original), \
+                        patch.object(manager_probe.subprocess, 'Popen') as popen:
+                    try: REAL_CAPTURE(('/proc/self/fd/' + str(probe._tool),), probe._tool, now[0] + 2, probe._live_budget)
+                    except Exception: pass
+                    popen.assert_not_called()
+            finally: probe.close()
+
     @contextlib.contextmanager
-    def system(self, setup=None):
+    def system(self, setup=None, *, deferred_root=False):
         self.assertIsNotNone(manager_probe, 'authenticated manager producer missing')
         with tempfile.TemporaryDirectory(prefix='holaday-manager-') as directory:
             root = Path(directory)
@@ -45,8 +62,10 @@ class ProbeTests(unittest.TestCase):
             if setup is not None:
                 setup(root, package, manifest)
             with test_launch_listener.ListenerTests().system() as base, contextlib.ExitStack() as stack:
-                listener = launch_listener.RootLaunchListener.open('a'*40)
-                listener.accept_once()
+                listener = None
+                if not deferred_root:
+                    listener = launch_listener.RootLaunchListener.open('a'*40)
+                    listener.accept_once()
                 proxy=SimpleNamespace(**vars(NATIVE)); opened=set()
                 def open_file(name, flags, *args, **kwargs):
                     fd=NATIVE.open(str(root) if name=='/' else name,flags,*args,**kwargs)
@@ -87,9 +106,14 @@ class ProbeTests(unittest.TestCase):
                 stack.enter_context(patch.object(manager_probe,'os',proxy))
                 stack.enter_context(patch.object(manager_probe,'Socket',return_value=channel))
                 stack.enter_context(patch.object(manager_probe,'_capture',side_effect=capture))
-                yield SimpleNamespace(registration=listener._registration,channel=channel,calls=calls,
-                    state=state,proxy=proxy,endpoint=endpoint,tool=tool,root=root,opened=opened)
-                listener.close()
+                fixture = SimpleNamespace(listener=listener,
+                    registration=listener._registration if listener is not None else None,
+                    channel=channel,calls=calls, state=state,proxy=proxy,endpoint=endpoint,
+                    tool=tool,root=root,opened=opened, registration_base=base)
+                try:
+                    yield fixture
+                finally:
+                    if fixture.listener is not None: fixture.listener.close()
                 self.assertEqual(opened,set())
 
     def denied(self,call):
@@ -233,6 +257,29 @@ class ProbeTests(unittest.TestCase):
 
 
 class CaptureTests(unittest.TestCase):
+    def test_last_scope_after_actual_pipe_cleanup_cannot_return_past_short_deadline(self):
+        native_spawn = manager_probe.subprocess.Popen
+        now, closed = [100.0], []
+        class Stream:
+            def __init__(self, stream): self.stream = stream
+            def fileno(self): return self.stream.fileno()
+            def close(self):
+                self.stream.close()
+                closed.append(True)
+        def spawn(*args, **kwargs):
+            child = native_spawn(*args, **kwargs)
+            child.stdout, child.stderr = Stream(child.stdout), Stream(child.stderr)
+            return child
+        def scope():
+            if len(closed) == 2: now[0] += 2.1
+            return 4  # The encompassing manager budget still has time.
+        with open(sys.executable, 'rb') as tool, \
+                patch.object(manager_probe.time, 'monotonic', side_effect=lambda: now[0]), \
+                patch.object(manager_probe.subprocess, 'Popen', side_effect=spawn):
+            with self.assertRaises(Exception):
+                REAL_CAPTURE((sys.executable, '-c', 'print("ok")'), tool.fileno(), 102.0, scope)
+        self.assertEqual(len(closed), 2)
+
     def collect(self,argv,fd,seconds):
         deadline=manager_probe.time.monotonic()+seconds
         return manager_probe._capture(argv,fd,deadline,lambda:deadline-manager_probe.time.monotonic())

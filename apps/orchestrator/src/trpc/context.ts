@@ -8,6 +8,7 @@ import type { BrowserPool } from '../browser-pool/index.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
 import type { DrainController } from '../execution/drain-controller.js';
+import { originalHttpLifetime } from '../execution/http-drain.js';
 import type { OperationLifetime } from '../execution/owned-operation.js';
 import type { DownloadManager } from '../files/download-manager.js';
 import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
@@ -78,9 +79,17 @@ export interface AppContextDeps {
 }
 
 export function makeCreateContext(deps: AppContextDeps) {
+  const executionDrain = deps.executionDrain;
   return async function createContext({ req, res }: { req: Request; res: Response }) {
+    const executionLifetime = originalHttpLifetime(req);
+    if (executionLifetime) {
+      if (!executionDrain || executionLifetime.drain !== executionDrain.drain)
+        throw new Error('HTTP_DRAIN_CONTEXT_MISMATCH');
+      executionDrain.drain.assertDispatch(executionLifetime.owner);
+    }
     return {
-      ...(deps.executionDrain ? { executionDrain: deps.executionDrain } : {}),
+      ...(executionDrain ? { executionDrain } : {}),
+      ...(executionLifetime ? { executionLifetime } : {}),
       db,
       logger,
       req,
