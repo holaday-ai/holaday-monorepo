@@ -1348,6 +1348,772 @@
       }
     ]
   },
+  "maintenanceImplementation": {
+    "purpose": "Locally verified ordinary-maintenance changes only; no deployment approval",
+    "baseCommit": "5ec81b6a1997064524b30b3f9e1ba1552150390d",
+    "task5Commit": "bedaa44d41b473f801b6001fa2adf90bc1ec82a9",
+    "verifiedSourceCommit": "b86af4e9e72f3b260ef39b3b5864e35853546231",
+    "files": [
+      {
+        "path": "apps/orchestrator/scripts/browser-maintenance-readiness.test.ts",
+        "bytes": 4460,
+        "sha256": "f108514578ba9b88a6669fc0ab8a49b3915fa2617c0f89f8f68dd616fa53ad34"
+      },
+      {
+        "path": "apps/orchestrator/scripts/browser-maintenance-readiness.ts",
+        "bytes": 2249,
+        "sha256": "6e43a04fa43d9b3bdf6181afa765fe6378ba7165fedc312a2b28777a4372df29"
+      },
+      {
+        "path": "apps/orchestrator/scripts/ordinary-maintenance-qa-child.ts",
+        "bytes": 5255,
+        "sha256": "828c9d5aa16dd7323494ba292ce58e7ce74bfd7fd32d14489a0636dcf8c88ce0"
+      },
+      {
+        "path": "apps/orchestrator/src/account-closure/worker-entry-maintenance.test.ts",
+        "bytes": 2479,
+        "sha256": "36a9fd4d3e4fdb77e6121006badcaf087c73498801d08c144df05098228f5cb3"
+      },
+      {
+        "path": "apps/orchestrator/src/account-closure/worker-entry.ts",
+        "bytes": 2811,
+        "sha256": "3e5514a45cbe6ecc235465b85bf093c51fb3ccf9a6cc05a90138fef15463a81d"
+      },
+      {
+        "path": "apps/orchestrator/src/account-closure/worker-maintenance.test.ts",
+        "bytes": 3202,
+        "sha256": "c7369586941407b67da5a0534fdb83e7c21ad9810637c8f66cf0969897cc1777"
+      },
+      {
+        "path": "apps/orchestrator/src/account-closure/worker.ts",
+        "bytes": 19982,
+        "sha256": "0fe5a79507363a404c29ecd11cc9d21f5c10daf61018d57692b4f5d529c911d5"
+      },
+      {
+        "path": "apps/orchestrator/src/agent/a-share/prewarm-scheduler.ts",
+        "bytes": 6669,
+        "sha256": "a1155dad1be857c548ba9fd78f180fb99c5f1c5d226ce510d7fdc6b2440606b0"
+      },
+      {
+        "path": "apps/orchestrator/src/agent/scheduled-runner.ts",
+        "bytes": 26217,
+        "sha256": "8a0ef4d2ff87b337127293cc5ad0face0e16258c990efefbb72d8eb521d7e789"
+      },
+      {
+        "path": "apps/orchestrator/src/agent/task-heartbeat.test.ts",
+        "bytes": 4078,
+        "sha256": "4525ac342c9bbe7a1cfc6bd287cc126ebe77e92eb7ecbe864e442e1fc6aca9a7"
+      },
+      {
+        "path": "apps/orchestrator/src/agent/task-heartbeat.ts",
+        "bytes": 1881,
+        "sha256": "8713871756988404942ff76b3403362b7138b2fe4d42e13e57f8ae0b5fd775f6"
+      },
+      {
+        "path": "apps/orchestrator/src/api-keys/webhook-drain.ts",
+        "bytes": 4183,
+        "sha256": "19fce6d012d778e313168fb46b519fabf4a21cb41d2ca16814302d49270eda12"
+      },
+      {
+        "path": "apps/orchestrator/src/api-keys/webhook-handler-drain.test.ts",
+        "bytes": 26197,
+        "sha256": "fb66fcf1e84178945676530593ca4cf0bd74a85b0ce429f6915d757f48f24613"
+      },
+      {
+        "path": "apps/orchestrator/src/api-keys/webhook-handler.ts",
+        "bytes": 17536,
+        "sha256": "8f48ecc01845343514523f7a61e0f19e9250ec6844d82a5235711e3862757a0e"
+      },
+      {
+        "path": "apps/orchestrator/src/api-keys/webhook-idempotency-service.ts",
+        "bytes": 17343,
+        "sha256": "71333675ca9d7b9e22174845b1af6e65bcb58113a7ca944f3d7abfa7ef6736b4"
+      },
+      {
+        "path": "apps/orchestrator/src/application-entry.test.ts",
+        "bytes": 6234,
+        "sha256": "dd4856b76a3c0627e062531aca945efab8389428c40a76fdd8040e8cd071d6dd"
+      },
+      {
+        "path": "apps/orchestrator/src/application-entry.ts",
+        "bytes": 2687,
+        "sha256": "6d40803e6656e2ce01cbb51931c5e397656f1ceaea61bbe9bc9631b338397e8b"
+      },
+      {
+        "path": "apps/orchestrator/src/application-main.ts",
+        "bytes": 56078,
+        "sha256": "ec78fd454535913a8e373385a16ddb786ddfabd59165fd67398029e87de7d3a9"
+      },
+      {
+        "path": "apps/orchestrator/src/application-main.wiring.test.ts",
+        "bytes": 19094,
+        "sha256": "e21cf301a8138fd11390bdaa7529c6067006a04de3907a4fc728ec681ed855a2"
+      },
+      {
+        "path": "apps/orchestrator/src/browser-pool/browser-pool-stop.test.ts",
+        "bytes": 20117,
+        "sha256": "5f7cd42123af78fee89a1267ca59c110eac50e04c39ca87e982f76a8668c31df"
+      },
+      {
+        "path": "apps/orchestrator/src/browser-pool/browser-pool.ts",
+        "bytes": 53161,
+        "sha256": "3a8f076f4c67ea944b30f3d393c220390f05c51db3f5d6c6e4a7b9584de1dc41"
+      },
+      {
+        "path": "apps/orchestrator/src/energy/analytics-cleanup.ts",
+        "bytes": 4483,
+        "sha256": "4854332e460e63e5ca619f1a7eecafaa013111b5cccbed6ac3985b4db3f2f875"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/execution-admission.ts",
+        "bytes": 395,
+        "sha256": "a6f3b5be3cad8cb869bd26dfe573c4ba31232b5b292e43a99e00e374cdfb519f"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/http-drain.ts",
+        "bytes": 4903,
+        "sha256": "fc84e4358d7b1027d2a6f854fed86d5a78e8949ec032dcd9f7bde252079f774c"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-application.test.ts",
+        "bytes": 3087,
+        "sha256": "6d49edfc8feb757f5f0717721b3ef56fa54eca13e7b4c2508ece332cc95ed4cd"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-application.ts",
+        "bytes": 3123,
+        "sha256": "0ac5d2b2dc3fdf507e88f39d3aaeb2024eca6056d5e8c55cc5f18bd6085a53f5"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-maintenance-background.test.ts",
+        "bytes": 2378,
+        "sha256": "ba4664e76f9e069950266e85134ebd29837e02197f700a3b07996d037dabb6d8"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-maintenance-background.ts",
+        "bytes": 1752,
+        "sha256": "f22114c6cd29fc337bee804ab1e5e624376023ac169f5cce9eb098b57f723aef"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-maintenance-control.test.ts",
+        "bytes": 6418,
+        "sha256": "3efb8a0e9858b41045a6f97b490ec61c7eef77d8b1d24206846efff568759e2f"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-maintenance-control.ts",
+        "bytes": 7885,
+        "sha256": "eb4722be87bb8aedd408a8b8a958d4c9e3770a016e87ece2bb211264efcdc6b0"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-maintenance-entry.test.ts",
+        "bytes": 7286,
+        "sha256": "55d98a4f5242b97ccc8256d97723a0e133ddeadfdb4ec6cf69a31fbb34d2a079"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-maintenance-mode.test.ts",
+        "bytes": 2765,
+        "sha256": "aba627bb2cf7c626a053cae69cdc82d66fb714a1d024797a7ed7e97206596b7a"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-maintenance-mode.ts",
+        "bytes": 1092,
+        "sha256": "90658aa6aec417d351c8b5d0c13b04caf8f634e398a32c144d3be41bea7f9b2a"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-maintenance-readiness.mysql.integration.test.ts",
+        "bytes": 2322,
+        "sha256": "030ed1341a144c0ae39cfd90c90f2df58cad676e09c09f49a8d9fbef04b0c64d"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-maintenance-readiness.test.ts",
+        "bytes": 4078,
+        "sha256": "6413cda5434e88839a4c721a3477e2c0ef2ca984572b2bf7f52c02f550352bcc"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-maintenance-readiness.ts",
+        "bytes": 6556,
+        "sha256": "4e3dc93105f9c84a2380780e57305f2935fa62c4fd410041365887651e6abf76"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-maintenance-store.test.ts",
+        "bytes": 6781,
+        "sha256": "3508b3b000e454845d2de90ef35fa7358019ce735afa91a78219a49bec7efe8a"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-maintenance-store.ts",
+        "bytes": 8841,
+        "sha256": "c51b2c8114509bbc32e0c4d19860675252fad8f74393913360fbb53883cbf015"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-maintenance.integration.test.ts",
+        "bytes": 9933,
+        "sha256": "6d3e971e1dd3ccf4fdc17c8ccb58fc9f78b6e3e509200f79d89a0535e3109fb1"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-maintenance.test.ts",
+        "bytes": 11174,
+        "sha256": "ea998372ea29d8d1898629bea0d34cbad75327f77dc39045ca6a48992523089b"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/ordinary-maintenance.ts",
+        "bytes": 9737,
+        "sha256": "ee4e4cc283be91d8f1183ac9cf65ce39a1b088d6344daab701605468173089cd"
+      },
+      {
+        "path": "apps/orchestrator/src/execution/periodic-work.ts",
+        "bytes": 2361,
+        "sha256": "fe8143b64fccedaab33527e77465df5ef3ae250fe69e4d1e5786cf5a7210a8b2"
+      },
+      {
+        "path": "apps/orchestrator/src/http.execution-drain-wiring.test.ts",
+        "bytes": 5263,
+        "sha256": "fd93dfe2cd8a448f4fa9b74e493baedd52e7ad96d053affe346f6d8651b73da1"
+      },
+      {
+        "path": "apps/orchestrator/src/http.ts",
+        "bytes": 67136,
+        "sha256": "f416b01e5af3b320bef8621e23785248abc1de74f3b474487ffedec3eae4830c"
+      },
+      {
+        "path": "apps/orchestrator/src/planned/planned-runner.ts",
+        "bytes": 40927,
+        "sha256": "ae904a31196440271b110985534db6a1b0fcd34d5fbb122b76c94d449383c649"
+      },
+      {
+        "path": "apps/orchestrator/src/queue/task-queue-drain.test.ts",
+        "bytes": 20993,
+        "sha256": "50ae5787de339b35e0d53725ffc2946972c4707342fd9315f3d6591108ec5b2c"
+      },
+      {
+        "path": "apps/orchestrator/src/queue/task-queue-lifetime.ts",
+        "bytes": 3463,
+        "sha256": "0ce66d0fb5d2ff61f96fe1aa3ced0adfa7410b3b0059b2eabd57a39b51335dae"
+      },
+      {
+        "path": "apps/orchestrator/src/queue/task-queue.ts",
+        "bytes": 12520,
+        "sha256": "ac60221b1575ae12d49351acb4b993f8eea59d5a7db66336c22f53d94d02f5af"
+      },
+      {
+        "path": "apps/orchestrator/src/streaming/owned-screencast-input.ts",
+        "bytes": 2269,
+        "sha256": "b1df1cb9bc83afffb1a4e274e52b69415bb5f9764ab752f7df83d36da899bc6d"
+      },
+      {
+        "path": "apps/orchestrator/src/streaming/screencast-maintenance.test.ts",
+        "bytes": 4540,
+        "sha256": "9851be7cd2a8b807ddae160d98525df7f33784e102d1b0e2e135c2df027de8b3"
+      },
+      {
+        "path": "apps/orchestrator/src/streaming/screencast-proxy.ts",
+        "bytes": 15383,
+        "sha256": "76183250eb99f846930fbd16bf6d8391ef08963a2aa246d74f57ca21f05d480b"
+      },
+      {
+        "path": "apps/orchestrator/src/trpc/context.ts",
+        "bytes": 5690,
+        "sha256": "29011ad4b11f85099c68ed2886e0c0da3d0afc36b294ce7550eaeb8c265e2b37"
+      },
+      {
+        "path": "apps/orchestrator/src/trpc/input-gate.ts",
+        "bytes": 2501,
+        "sha256": "2a24ee180e9df35ffd2d7123d6852ce5b3e49a6419af9abe56f186f821f094b6"
+      },
+      {
+        "path": "apps/orchestrator/src/trpc/routers/batch-tasks.maintenance.test.ts",
+        "bytes": 2887,
+        "sha256": "96f0ec7274a090b60116a5df495dbc85dcf00354059bf00e7b863c8eba131828"
+      },
+      {
+        "path": "apps/orchestrator/src/trpc/routers/batch-tasks.ts",
+        "bytes": 13264,
+        "sha256": "a786781922f66c6d74e91f730c42a32ef83adc273cc5c4b06cbaa2dfbe961127"
+      },
+      {
+        "path": "apps/orchestrator/src/trpc/routers/task-background.test.ts",
+        "bytes": 2940,
+        "sha256": "df902aa7072a8d96c1886a0371a02c125bbf3999db1b1d012be09d2f1fde7d75"
+      },
+      {
+        "path": "apps/orchestrator/src/trpc/routers/task-background.ts",
+        "bytes": 1071,
+        "sha256": "7065baa3eeb2b93739896a12d0e24a500019c084b00ea3ee21d2817cc461d65f"
+      },
+      {
+        "path": "apps/orchestrator/src/trpc/routers/task-queue-execution.test.ts",
+        "bytes": 15777,
+        "sha256": "c0c52a2f0bbb7f528abfbc3fc61097c60ed15bd3dbb8cbdfbb274a0fc2361055"
+      },
+      {
+        "path": "apps/orchestrator/src/trpc/routers/tasks.browser-qwen.test.ts",
+        "bytes": 19753,
+        "sha256": "889ba0a79f9f03d262e6a1726825edb3c5ef1e21eefb6e180aa8c90fc62fc58d"
+      },
+      {
+        "path": "apps/orchestrator/src/trpc/routers/tasks.ts",
+        "bytes": 479891,
+        "sha256": "a80e1402f9078f5aa6a968fe2b46177571dafc843ff867f64e28c8ee938e5919"
+      },
+      {
+        "path": "apps/orchestrator/src/trpc/trpc.ts",
+        "bytes": 6012,
+        "sha256": "fdafee7d3bec7cef005c9862d088fe78105f9f0b5aea113890179ee52dfd4b91"
+      },
+      {
+        "path": "apps/orchestrator/src/ws/ordinary-maintenance-receipts.test.ts",
+        "bytes": 4692,
+        "sha256": "5ed9093bfb25a81ce85faa15de157040898e3d067f3659402bb4521cd090cc44"
+      },
+      {
+        "path": "apps/orchestrator/src/ws/server-work.ts",
+        "bytes": 3739,
+        "sha256": "b990613c422e7c67ab3242a6415947e4a0d96a600c13ce9bf8e3aeda32643867"
+      },
+      {
+        "path": "apps/orchestrator/src/ws/server.ts",
+        "bytes": 63299,
+        "sha256": "06b0198693dac7c0b7d2279fb1056962e5e40b725c85ea30fe03d4890905f221"
+      },
+      {
+        "path": "scripts/browser-maintenance-client.mjs",
+        "bytes": 3851,
+        "sha256": "6de5f5c00a0312d45b2be8d11ec92a3d9223de650002df6afc459eb43b72029b"
+      },
+      {
+        "path": "scripts/browser-maintenance-client.test.mjs",
+        "bytes": 4725,
+        "sha256": "2253f06782a4fe877889d2391531d17523eaad2f5e4ed1477e5e23e7644f0a1f"
+      },
+      {
+        "path": "scripts/browser-maintenance-control.mjs",
+        "bytes": 1737,
+        "sha256": "69d14210d16fe6cabc5733db1efce626833d90f7a8ad46c3b229514ebbdcb3c3"
+      },
+      {
+        "path": "scripts/browser-maintenance-control.test.mjs",
+        "bytes": 1797,
+        "sha256": "808bcd5d0ca9478e311ba773d5c6dc16f215d39b3a76588916fc6f090bd6b640"
+      },
+      {
+        "path": "scripts/browser-maintenance-host.mjs",
+        "bytes": 16482,
+        "sha256": "c8e4055e5d9f563dcd341633af2679a8245afb83fbece630f9d61b8a93e37c59"
+      },
+      {
+        "path": "scripts/browser-maintenance-host.test.mjs",
+        "bytes": 10832,
+        "sha256": "154f43fc6b1454d39350e329c6ff9d0598c8e180b3fd03d0f99ea2614c8401b7"
+      },
+      {
+        "path": "scripts/browser-maintenance-journal.mjs",
+        "bytes": 6441,
+        "sha256": "cd3947b1a8f1e64baf9c9746ed678f5042448971dfce11b84dda9684fd20b730"
+      },
+      {
+        "path": "scripts/browser-maintenance-journal.test.mjs",
+        "bytes": 5732,
+        "sha256": "5f037ea747ffa0417decd9e8e93d8492ff0a37542ebcfe62b8c3e526175f6f3a"
+      },
+      {
+        "path": "scripts/browser-maintenance-linux.mjs",
+        "bytes": 7653,
+        "sha256": "5fcac1749b0892f32bbd4d398a55412c0a55e2cbf2b502e7aff9bdfa631c9daa"
+      },
+      {
+        "path": "scripts/browser-maintenance-linux.test.mjs",
+        "bytes": 7727,
+        "sha256": "a93af6e683fcd8e2e0041174a4dd682ba42e5a24304b4ff729c784e072391d25"
+      },
+      {
+        "path": "scripts/browser-maintenance-manifest.mjs",
+        "bytes": 1626,
+        "sha256": "28eedac0e87367ee9b8dcf9a3408ec37b42ab1c520a5edbdb9840ff0acd2dd35"
+      },
+      {
+        "path": "scripts/browser-maintenance-manifest.test.mjs",
+        "bytes": 2321,
+        "sha256": "cd1f2be6f897808152f0a1e66a52a0d94e90c39b9a6424038b33ac14a1bcd413"
+      },
+      {
+        "path": "scripts/browser-maintenance-policy.mjs",
+        "bytes": 538,
+        "sha256": "bd05f8b7604cdad5f6b1d8bada862d1e4a550bd615d70d4523ddf863541c7743"
+      },
+      {
+        "path": "scripts/browser-maintenance-policy.test.mjs",
+        "bytes": 1693,
+        "sha256": "a84b6149aea0038ba247a6d7a448ba1b54cc955ebe745a5f09ca5eb20d41b4a7"
+      },
+      {
+        "path": "scripts/browser-maintenance-probe.sh",
+        "bytes": 858,
+        "sha256": "525487b9c1104577e67191b6a3a4e728f5d77bc167762019b9229026ff842986"
+      },
+      {
+        "path": "scripts/browser-maintenance-probe.test.mjs",
+        "bytes": 1325,
+        "sha256": "c057120072c2d4af6afcf4d5ebfbc99fc7e60095ecdd63de5a593ac9f9ff7bb1"
+      },
+      {
+        "path": "scripts/browser-maintenance-runtime-system.mjs",
+        "bytes": 2050,
+        "sha256": "93d3126a659b462dd385dd3bbc36670f9e0706c43cda3b29516b65737fd3b61b"
+      },
+      {
+        "path": "scripts/browser-maintenance-runtime-system.test.mjs",
+        "bytes": 2042,
+        "sha256": "5824d005aafafca4250b2ea1e18ff2f0834b6222abcc40b0f8f41a07bf0fd8db"
+      },
+      {
+        "path": "scripts/browser-maintenance-runtime.mjs",
+        "bytes": 2871,
+        "sha256": "4cab3ad1571918d6cf9323c33839aa71cda2c78b540f04882ed8aeb1bacf2729"
+      },
+      {
+        "path": "scripts/browser-maintenance-runtime.test.mjs",
+        "bytes": 4683,
+        "sha256": "78c454ae3109ba3bb31f546627c3255a857592388713e5c8a76c1015c35482bc"
+      },
+      {
+        "path": "scripts/browser-maintenance-shell.test.mjs",
+        "bytes": 4168,
+        "sha256": "20de6c7d3b0361fbeecde1514dd4c563bb4715940bac7386e3ff175f67155cc8"
+      },
+      {
+        "path": "scripts/browser-maintenance-signal.linux.test.py",
+        "bytes": 2614,
+        "sha256": "5a7b9884aa30d60941c0dc1717639fab3f5d7801e55b81361477e8a921a897f4"
+      },
+      {
+        "path": "scripts/browser-maintenance-signal.py",
+        "bytes": 3253,
+        "sha256": "b080bee9747c1b5a5c48e38059ea5e556729c45f4e801a62a3ec1c6ad99f2365"
+      },
+      {
+        "path": "scripts/browser-maintenance-signal.test.py",
+        "bytes": 2594,
+        "sha256": "8e5af4041021da16d3673d21f2d0ec1a32b06b16cdf0e4e0eb21103efdcd0205"
+      },
+      {
+        "path": "scripts/browser-maintenance-start.mjs",
+        "bytes": 3266,
+        "sha256": "55b7096765f5421bc6c4d050d550254da5b7961f78aedabb15e5942db3400721"
+      },
+      {
+        "path": "scripts/browser-maintenance-start.test.mjs",
+        "bytes": 3481,
+        "sha256": "4ddb40748611c51df506a592fdef02e19fe3e8d82bb6419e873ca70ae2403437"
+      },
+      {
+        "path": "scripts/browser-maintenance-transition.mjs",
+        "bytes": 3501,
+        "sha256": "570ebfecb7c1c26b4d9821cb298f54843e3c07ec81b5f80c0ec28a7b9983c30c"
+      },
+      {
+        "path": "scripts/browser-maintenance-transition.test.mjs",
+        "bytes": 6460,
+        "sha256": "6a7287c1f2a32b751a1f65ae6df16904035e18b3a91740c234fb894228659126"
+      },
+      {
+        "path": "scripts/deploy-browser-maintenance.test.mjs",
+        "bytes": 5026,
+        "sha256": "bbda8a4cd42daba67076f8bd7dbae73b69d53aaece19b0f69ea9893088d4c25c"
+      },
+      {
+        "path": "scripts/deploy-browser-maintenance.test.sh",
+        "bytes": 261,
+        "sha256": "33619528fe461e258982dad074cc05804aa938e9942092ea244638c06ca08e30"
+      },
+      {
+        "path": "scripts/deploy-migration-gate.test.sh",
+        "bytes": 413,
+        "sha256": "cb3dadebb4704079920b8ed66ab5aa3888f8b1cd3a77269539969a7707f30a3a"
+      },
+      {
+        "path": "scripts/deploy-orchestrator.sh",
+        "bytes": 3014,
+        "sha256": "f073e68bf77bc347739cae5d537c2a9c4f1ff563b3312920bedf8681499382ed"
+      },
+      {
+        "path": "scripts/deploy-rollback-target.test.sh",
+        "bytes": 20901,
+        "sha256": "fd252963c65a37eb54e5216f543efc484411f6762921f6993a3bebced68c1770"
+      },
+      {
+        "path": "scripts/orchestrator-runtime.sh",
+        "bytes": 10445,
+        "sha256": "db01cb1a5385a02d1a974002b555386440c2aee59e1f532ac9cb1e0e6848c3a1"
+      },
+      {
+        "path": "scripts/orchestrator-runtime.test.sh",
+        "bytes": 6867,
+        "sha256": "0eef14c26a869e2d1ab82657e27351cb7082ead243a6d5333110598b9c67378e"
+      },
+      {
+        "path": "scripts/start-account-closure-worker-production.sh",
+        "bytes": 1016,
+        "sha256": "bfcba6e6d7bbd92065464ad35f3ecde3c06f548ecfdd34a067c6ffa13dda3728"
+      },
+      {
+        "path": "scripts/start-orchestrator-production.sh",
+        "bytes": 1355,
+        "sha256": "fa3c0258852893910e14853687e0df478c8bfe75464d9dd688328bf135118d65"
+      }
+    ],
+    "unapprovedMigrationInventory": {
+      "manifest": {
+        "replaysNumberedSql": true,
+        "runnerSha256": "79f964b3492ba30f124e7ff647adc3707fb8f36b28bb52b2a95a9169d822ffaf",
+        "migrations": [
+          {
+            "name": "0000_initial.sql",
+            "sha256": "812c5593976bd2b0d501d049e1833ed4cb46013abe3d7863e0aa3461b34e15ec"
+          },
+          {
+            "name": "0001_pending_confirm_payload.sql",
+            "sha256": "09e73e80f744af1aa6fedbc31dccfd6bbf292d42223d8efd4f8e306bb7e30489"
+          },
+          {
+            "name": "0002_paused_state.sql",
+            "sha256": "25b7df9c412b5fccded0d9574d5a28c8e252bb3212993254e757cee92874675e"
+          },
+          {
+            "name": "0003_heal_metrics.sql",
+            "sha256": "db3ea9b255506324576e99f5fcfab1104389981e7176f67d4f486d94f1835752"
+          },
+          {
+            "name": "0004_task_events_simple_pk.sql",
+            "sha256": "803fbd6777fb77053a5430c3a1027519af3f67e28ea7fdc60b8a77bf2d1a653a"
+          },
+          {
+            "name": "0005_task_title.sql",
+            "sha256": "78436e1aa1962f1d88d716e4c5f5371418949a73382f368dae65bb5757aa2d06"
+          },
+          {
+            "name": "0006_phase9_login_payment.sql",
+            "sha256": "753b7c22019759c5a946167e15766d7e29be04bc7fda1af31a9c779e88fdd0cf"
+          },
+          {
+            "name": "0007_phase10_quotas_roles_addons.sql",
+            "sha256": "352e0d2e1e0553e490a833f95cbf90fdb135ab8aa90bfe81749b1e26f5ee7617"
+          },
+          {
+            "name": "0008_phase10_tier3_task_files.sql",
+            "sha256": "1b45cd3008619e743c6b18385c6c37f01496dc9efbebec81bad1603172048976"
+          },
+          {
+            "name": "0009_task_files_status.sql",
+            "sha256": "a074eb3cf7506e0798f62d85049350d1dac35fa89cb7fd29b991e21ce1d93105"
+          },
+          {
+            "name": "0010_users_phone.sql",
+            "sha256": "e80e21092d7959790735acf2474ca63f402fffaa9b9db8b6ce30d0fe6fd2dee0"
+          },
+          {
+            "name": "0011_agent_intelligence.sql",
+            "sha256": "c912c7df53142c333577e8864e325b1a56006a81faf618475da6584865a70493"
+          },
+          {
+            "name": "0012_phase16_stars_projects.sql",
+            "sha256": "36b6ee5a4386cb72e3dd7bef274caa5e3138f8cd5f5b91bc6b3592ce06acc746"
+          },
+          {
+            "name": "0013_phase16b_scheduled.sql",
+            "sha256": "9d7bbeb08eb510a7f956f4c9794e56c1fe1ce092e65bb33b20ca03f42dd95f1a"
+          },
+          {
+            "name": "0014_pending_cookies.sql",
+            "sha256": "eb714b3b29ee9982118d6d620920902b92e251221cda9bd30b5ab4ff2a54a8fe"
+          },
+          {
+            "name": "0015_payments_provider_capture_unique.sql",
+            "sha256": "f54c1d94bf4de95a2435306959cf998e178eeefcc500fce37a1de45b5f0ad784"
+          },
+          {
+            "name": "0016_tasks_awaiting_question.sql",
+            "sha256": "468f0e60ee19e61837dd7bda933973488a5960d7b471999d3286b44a0cb92b54"
+          },
+          {
+            "name": "0017_users_split_skills.sql",
+            "sha256": "fc9f25b246dc291b06d75a39933bb9fb0b5db3c8a1bf4a8b021c0d43004fe128"
+          },
+          {
+            "name": "0018_cookie_encryption.sql",
+            "sha256": "413d88b4246b86d9902a18f2026946b2e153a8755c3f35251779bb492186bca8"
+          },
+          {
+            "name": "0019_tasks_awaiting_kind.sql",
+            "sha256": "fdd01d9218ed26a03156814a0b0d7ef434812be9fe597741963f51ffcf6e8038"
+          },
+          {
+            "name": "0020_execution_columns.sql",
+            "sha256": "753e8cd6ca7bd0815dba60a9da3631387b2d8ddf2b5449f0661db76e999f780b"
+          },
+          {
+            "name": "0021_phase5b_batch_tasks.sql",
+            "sha256": "058808d476d6229ef93dc1d3311f605ef1643dd3b6bb89bc32a5063718b71d3d"
+          },
+          {
+            "name": "0022_phase5d_api_keys.sql",
+            "sha256": "ede60af5e8c647ebfec8cbd616e367bfa78b05ac71222a841cf3fab5765dc40c"
+          },
+          {
+            "name": "0023_phase5d_webhook_idempotency.sql",
+            "sha256": "83ee3ac25aede943c4443637f6673ce5a853586d662fff13936445b01d5a602f"
+          },
+          {
+            "name": "0024_phase5d_response_layer_columns.sql",
+            "sha256": "0efd25828aebb5e8a910968ebc25b0fcc5026d704a32f49720ba3139f5c09286"
+          },
+          {
+            "name": "0025_phase24_scheduled_run_status.sql",
+            "sha256": "db8540f5f5cafc2f88f73b04fd556e3bcc614c6d34965acef7e77a36e5c41c8d"
+          },
+          {
+            "name": "0026_phase25_user_site_stats.sql",
+            "sha256": "49377ac6687b8d65af764f087c8326d6e6cf070d4378b734478a7f2a5abf7937"
+          },
+          {
+            "name": "0027_phase26a_calendar_columns.sql",
+            "sha256": "94f3ed5f21d28eca7c96d630d7e68e563cee14c197c3024642cd0c295f57900a"
+          },
+          {
+            "name": "0028_phase26b_notifications.sql",
+            "sha256": "88379734ed61435ef9d6b4fcd24c2e32c90fe25cc9c5542bce07f3b13e71e773"
+          },
+          {
+            "name": "0029_phase26b_polish_description.sql",
+            "sha256": "d6b9dd9e14d7932376cb5d7bf4e8434cd7b1992881c342466c45c394759e0ad7"
+          },
+          {
+            "name": "0030_phase26b_reminders.sql",
+            "sha256": "f6e40f49a00f173aaa1523f97db438352c4f292d78684498cec71a4397926220"
+          },
+          {
+            "name": "0031_phase27_users_role.sql",
+            "sha256": "8dcbfcdfa29829d6eb4cde8793c455a8309dc30b53567f41ddfbde7b27a78e69"
+          },
+          {
+            "name": "0032_phase1_watchlists.sql",
+            "sha256": "ff8395acb1f001f30d12153f144bf4460b8a189a8bc9d150cda09dc098cb6039"
+          },
+          {
+            "name": "0033_phase1_playbook_ledger.sql",
+            "sha256": "a199927711ec99dda889442320990c4dc82b79a13acf2660c2501bfb20563635"
+          },
+          {
+            "name": "0034_phase1_video_onboarding.sql",
+            "sha256": "9a478410fcfe4b80a24e3cf89925aeae06fd8153b063f3a41a00c8433ffa7073"
+          },
+          {
+            "name": "0035_phase3_video_self_use_consent.sql",
+            "sha256": "fcee6beba2e9e37c9ba94c0e1041de4ccc221ff78526d903e775625c8dc588d1"
+          },
+          {
+            "name": "0036_phase1_task_action_captures.sql",
+            "sha256": "a87eca9d0e0d21f4a8674dbe90afc451c8590c1b9009fe91376fa44cfc3c41a8"
+          },
+          {
+            "name": "0037_phase1_crystallization_provenance.sql",
+            "sha256": "71e4dec1b1db962c512449d81d5088cddb5ac563d1de905a1f00d97e56c0567a"
+          },
+          {
+            "name": "0038_stock_dashboard_snapshots.sql",
+            "sha256": "a5c92cace70a85ac991749f3183db40f8bedd0910da16ca1c237aeeecfe6a77d"
+          },
+          {
+            "name": "0039_batch_items_review_count.sql",
+            "sha256": "705ea22731dccabe424c6387a778ab6303d59ee39f45c6a80eb3dec2fdd20b5b"
+          },
+          {
+            "name": "0040_partner_ledger.sql",
+            "sha256": "01eda4140d672780f469decd116a59426dba332f335bc7f17f7915c733f9566f"
+          },
+          {
+            "name": "0041_partner_activity_events.sql",
+            "sha256": "ef6371a7c94f360e044ac150ed8c6db5c2397b6a01eef8a1b247c069ea5d6664"
+          },
+          {
+            "name": "0042_payment_completed_at.sql",
+            "sha256": "3c406c510baa3c09fbafcab8aabb91b472b88109e06a590e0d12f9ee83ad2a52"
+          },
+          {
+            "name": "0043_users_auth_version.sql",
+            "sha256": "ca6131564b3142153bf3453a11179cffa6b2486f5debfd9534e0371ab4b6ee50"
+          },
+          {
+            "name": "0044_payments_provider_order_unique.sql",
+            "sha256": "cb018e8a82f9c2340e9854664e6a0f7155207c6b6dadf20c9fd9c47a39f5f422"
+          },
+          {
+            "name": "0045_planned_tasks.sql",
+            "sha256": "c5dbd846864e432939a99f3821be6ea675882e62a8e44fb45214c122a7d1d134"
+          },
+          {
+            "name": "0046_energy_analytics.sql",
+            "sha256": "662c64631ab12930387c6146419fc36770aa521d0635b2662072b2db4b12382e"
+          },
+          {
+            "name": "0047_tasks_source_context.sql",
+            "sha256": "a15464e114e0195f5b2f2128cc565bc5927b75122c4677b2a5c908ea13114816"
+          },
+          {
+            "name": "0048_stock_preference_profiles.sql",
+            "sha256": "bad34bf8af95b0e8be57d1b68377778123bb3b6454e2a2260d7d19f69533c387"
+          },
+          {
+            "name": "0049_stock_risk_monitors.sql",
+            "sha256": "9e3e94b79c495aef74c94a6c7afa67a694d148dbdf7d087844794ee9efa4df9f"
+          },
+          {
+            "name": "0050_user_mfa.sql",
+            "sha256": "0927797832bdd76e3d469395defc5c76e4d7e227b9c650ca74f4c03d58fcf90e"
+          },
+          {
+            "name": "0051_account_closures.sql",
+            "sha256": "c6d6689ae7a7f2bd53fd0f822ad02f2624c1d31b00bc2324476d4ee9d9d52699"
+          },
+          {
+            "name": "0052_feedback_cases.sql",
+            "sha256": "3791fbb23cd47458b128ef5365c632c02baa39e1a3d9c20bc1c38d5dd3f72941"
+          },
+          {
+            "name": "0053_video_editing_projects.sql",
+            "sha256": "d7daed5e7c7abcbbf05fd3db093ad01e529cbdb98e235cb05d11e690f7f4ed4e"
+          },
+          {
+            "name": "0054_video_edit_render_attempts.sql",
+            "sha256": "8c04acab06cae411d9c442f085a1bc9f78a1e4263dd709d037815a4bcbbbf489"
+          },
+          {
+            "name": "0055_team_project_foundation.sql",
+            "sha256": "95b3e3fa5cd9c884a45ddaa359c24e89071bdf0bfcd288ca15be07fe47ac11c6"
+          },
+          {
+            "name": "0056_team_work_item_lifecycle.sql",
+            "sha256": "9f2694ebbfffdd706d8bd7883b001ec8d3159904a0e6a52334349be6f2dccb24"
+          },
+          {
+            "name": "0057_team_work_item_review_attempts.sql",
+            "sha256": "894b49cf2a96b09a9ae06db32e079d90ffe8bece4bf588f65cb4152f1dff7eba"
+          },
+          {
+            "name": "0058_model_data_regions.sql",
+            "sha256": "34362cae20efb88d96d0f5112ed1dc1a96c3c184368ed1b8aaf72f66453953aa"
+          },
+          {
+            "name": "0059_core_execution_identity.sql",
+            "sha256": "92993e7459c0377d8d5c2360988fd429f2046063562e162a69e61bf12b62c257"
+          },
+          {
+            "name": "0060_llm_usage_accounting.sql",
+            "sha256": "1f2a29df6b51565bed85db85ae37d0c2b8a070222adb2f0c37b585b8125ab65f"
+          }
+        ]
+      },
+      "sha256": "4c738c86eb38e771327e42b38c85de2e9cc7149a8e46d5b530abb14f0eadb673"
+    }
+  },
   "boundaries": {
     "localCommitAllowed": true,
     "pushAllowed": false,
