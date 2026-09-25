@@ -1,0 +1,489 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
+import {
+  collectCutoverEvidence,
+  publishCutoverEvidence,
+  readCutoverDatabaseScope,
+  readCutoverHostSnapshot,
+  readCutoverRehearsalArtifacts,
+} from './browser-cutover-evidence.mjs';
+
+const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const merchant = '9'.repeat(64);
+function fixture() {
+  const inventory = {
+    hosts: ['vultr', 'aliyun'],
+    configurationDigests: ['a'.repeat(64), 'b'.repeat(64)],
+    merchants: [
+      {
+        provider: 'wechat',
+        environment: 'production',
+        merchantDigest: merchant,
+        codeDigest: '5'.repeat(64),
+      },
+    ],
+    targets: [{ host: 'aliyun', pid: 400, start: '1000', role: 'gateway', ports: [4010, 4011] }],
+    ingress: [{ host: 'aliyun', configDigest: 'c'.repeat(64) }],
+  };
+  const binding = {
+    attempt: '11111111-1111-4111-8111-111111111111',
+    candidate: 'a'.repeat(40),
+    configDigest: 'b'.repeat(64),
+    migrationDigest: 'c'.repeat(64),
+    inventoryDigest: hash(inventory),
+  };
+  const order = {
+    provider: 'wechat',
+    environment: 'production',
+    merchantDigest: merchant,
+    orderRef: '1'.repeat(64),
+    fieldsDigest: '2'.repeat(64),
+  };
+  const host = {
+    inventory,
+    observedAtMs: 99_000,
+    unknownWriters: [],
+    externalWork: [],
+    producersRunning: [],
+  };
+  const scope = { observedAtMs: 99_000, orders: [order], unsettled: [] };
+  const observations = [
+    { ...order, observedAtMs: 99_000, rawDigest: '3'.repeat(64), state: 'settled' },
+  ];
+  const rehearsal = {
+    observedAtMs: 1,
+    candidate: binding.candidate,
+    configDigest: binding.configDigest,
+    inventoryDigest: binding.inventoryDigest,
+    recovery: 'query-and-existing-settlement-proven',
+    recoveryUntilMs: 250_000,
+    artifacts: [
+      {
+        provider: 'wechat',
+        environment: 'production',
+        merchantDigest: merchant,
+        codeDigest: '5'.repeat(64),
+        transcriptDigest: '6'.repeat(64),
+        queryDigest: '7'.repeat(64),
+        settlementDigest: '8'.repeat(64),
+      },
+    ],
+  };
+  const fence = {
+    inventoryDigest: binding.inventoryDigest,
+    stage: 'orders',
+    observedAtMs: 99_000,
+    uncovered: [],
+    liveLegacy: [],
+    regeneratedLegacy: [],
+  };
+  const published = [];
+  return {
+    binding,
+    host,
+    scope,
+    observations,
+    rehearsal,
+    fence,
+    published,
+    input: {
+      binding,
+      stage: 'prepare',
+      window: { maintenanceEndsAtMs: 150_000, reconcileByMs: 200_000, operatorRef: 'operator' },
+    },
+    io: {
+      now: () => 100_000,
+      readHostInventory: async () => host,
+      readDatabaseScope: async () => scope,
+      queryOrders: async () => observations,
+      readRehearsalArtifacts: async () => rehearsal,
+      readFenceState: async () => fence,
+      assertJournalOwnership: async () => ({ ...binding }),
+      publishPrivate: async (value) => {
+        published.push(value);
+      },
+    },
+  };
+}
+test('collects twice, binds all sources, and only publishes redacted facts', async () => {
+  const f = fixture();
+  let reads = 0;
+  f.io.readDatabaseScope = async () => {
+    reads++;
+    return structuredClone(f.scope);
+  };
+  const result = await collectCutoverEvidence(f.input, f.io);
+  assert.equal(reads, 2);
+  assert.equal(result.payments.unresolved, 0);
+  assert.equal(result.sources.length, 4);
+  assert.equal(result.payments.scopeDigest, result.payments.queriedScopeDigest);
+  assert.equal(f.published.length, 1);
+  assert.equal(JSON.stringify(result).includes('vultr'), false);
+  assert.equal(JSON.stringify(result).includes('4011'), false);
+});
+test('scope changing during provider requests cannot publish a partial success', async () => {
+  const f = fixture();
+  f.io.queryOrders = async () => {
+    f.scope.orders[0].fieldsDigest = '0'.repeat(64);
+    return f.observations;
+  };
+  await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_PAYMENT_SCOPE_CHANGED/);
+  assert.deepEqual(f.published, []);
+});
+for (const kind of [
+  'missing',
+  'duplicate',
+  'different-merchant',
+  'unknown',
+  'paid-unsettled',
+  'old-query',
+  'future-query',
+]) {
+  test(`rejects ${kind} provider observation`, async () => {
+    const f = fixture();
+    if (kind === 'missing') f.observations.length = 0;
+    if (kind === 'duplicate') f.observations.push(f.observations[0]);
+    if (kind === 'different-merchant') f.observations[0].merchantDigest = '0'.repeat(64);
+    if (['unknown', 'paid-unsettled'].includes(kind)) f.observations[0].state = kind;
+    if (kind === 'old-query') f.observations[0].observedAtMs = 39_999;
+    if (kind === 'future-query') f.observations[0].observedAtMs = 100_001;
+    await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_/);
+    assert.deepEqual(f.published, []);
+  });
+}
+for (const kind of [
+  '4011',
+  'producer',
+  'external-work',
+  'db-work',
+  'old-host',
+  'rehearsal',
+  'window',
+  'fence',
+  'journal',
+  'inventory',
+]) {
+  test(`rejects ${kind} gaps without success publication`, async () => {
+    const f = fixture();
+    if (kind === '4011') f.host.unknownWriters.push({ port: 4011 });
+    if (kind === 'producer') f.host.producersRunning.push('worker');
+    if (kind === 'external-work') f.host.externalWork.push('unknown-browser-action');
+    if (kind === 'db-work') f.scope.unsettled.push('running');
+    if (kind === 'old-host') f.host.observedAtMs = 39_999;
+    if (kind === 'rehearsal') f.rehearsal.artifacts = [];
+    if (kind === 'window') f.input.window.reconcileByMs = 260_000;
+    if (kind === 'fence') f.fence.uncovered.push('internal-route');
+    if (kind === 'journal')
+      f.io.assertJournalOwnership = async () => ({ ...f.binding, attempt: 'different' });
+    if (kind === 'inventory') f.host.inventory.configurationDigests.push('0'.repeat(64));
+    await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_/);
+    assert.deepEqual(f.published, []);
+  });
+}
+test('preopen requires fenced stopped legacy identities and the new boot identity', async () => {
+  const f = fixture();
+  f.input.stage = 'preopen';
+  f.input.identity = { candidate: f.binding.candidate, bootId: 'a'.repeat(32) };
+  await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_/);
+  f.fence.stage = 'all-writers';
+  f.fence.liveLegacy.push('old');
+  await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_/);
+  f.fence.liveLegacy = [];
+  const result = await collectCutoverEvidence(f.input, f.io);
+  assert.equal(result.host.phase, 'fenced-stopped');
+  assert.deepEqual(result.identity, f.input.identity);
+});
+test('historical payment rehearsal for different gateway code cannot authorize new code', async () => {
+  const f = fixture();
+  f.rehearsal.artifacts[0].codeDigest = '0'.repeat(64);
+  await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_/);
+});
+test('read-only database reader covers both order tables and fails rather than truncates', async () => {
+  const calls = [];
+  const db = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (sql.startsWith('SELECT') && sql.includes('LIMIT'))
+        return [[{ id: 1, external_id: 'PRIVATE', provider: 'wechat', status: 'pending' }], []];
+      return [[], []];
+    },
+  };
+  await assert.rejects(
+    readCutoverDatabaseScope(db, { windowStartMs: 50_000, now: () => 100_000 }),
+    /MAINTENANCE_PAYMENT_SCOPE_UNPROVEN/,
+  );
+  assert.equal(calls[0].sql, 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+  assert.equal(calls[1].sql, 'START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY');
+  assert.equal(calls.at(-1).sql, 'ROLLBACK');
+  assert.equal(
+    calls.some((r) => /^(UPDATE|DELETE|INSERT|REPLACE)/.test(r.sql)),
+    false,
+  );
+});
+function databaseFixture(overrides = {}) {
+  const calls = [];
+  const rows = {
+    payments: [
+      {
+        id: 1,
+        external_id: 'PRIVATE',
+        provider: 'wechat',
+        provider_order_id: 'ORDER',
+        provider_capture_id: null,
+        amount_cents: 1234,
+        currency: 'CNY',
+        status: 'pending',
+        metadata: null,
+      },
+    ],
+    partner_recharge_orders: [],
+  };
+  const query = async (sql, params) => {
+    calls.push({ sql, params });
+    const table = Object.keys(rows).find((name) => sql.includes(`FROM ${name} `));
+    if (table && sql.includes('COUNT'))
+      return [[{ total: overrides.count ?? rows[table].length }], []];
+    if (table) return [overrides.page ?? rows[table], []];
+    return [[], []];
+  };
+  const options = {
+    now: () => 100_000,
+    windowStartMs: 50_000,
+    resolveMerchant: () => ({ environment: 'production', merchantDigest: merchant }),
+  };
+  return { db: { query }, calls, options, rows };
+}
+test('reads ordinary and partner orders with full counts in one read-only snapshot', async () => {
+  const f = databaseFixture();
+  const result = await readCutoverDatabaseScope(f.db, f.options);
+  assert.equal(result.orders.length, 1);
+  assert.equal(result.orders[0].provider_order_id, 'ORDER');
+  assert.equal(result.orders[0].orderRef, hash([merchant, 'ORDER']));
+  assert.equal(f.calls.filter((c) => c.sql.includes('COUNT')).length, 2);
+  assert.equal(f.calls.at(-1).sql, 'ROLLBACK');
+});
+for (const kind of ['missing-page', 'overflow', 'duplicate']) {
+  test(`database ${kind} cannot be silently accepted`, async () => {
+    const f = databaseFixture(
+      kind === 'missing-page' ? { page: [] } : kind === 'overflow' ? { count: 10_000 } : {},
+    );
+    if (kind === 'duplicate') f.rows.payments.push(f.rows.payments[0]);
+    await assert.rejects(
+      readCutoverDatabaseScope(f.db, f.options),
+      /MAINTENANCE_PAYMENT_SCOPE_UNPROVEN/,
+    );
+    assert.equal(f.calls.at(-1).sql, 'ROLLBACK');
+  });
+}
+function hostFixture() {
+  const calls = [];
+  const args = '/opt/node22/bin/node\0/opt/holaday-cn-payment/src/index.ts\0';
+  const files = new Map([
+    ['/proc/sys/kernel/random/boot_id', '11111111-1111-4111-8111-111111111111'],
+    ['/proc/401/cmdline', args],
+    ['/proc/401/status', 'Uid:\t998\t998\t998\t998\nPPid:\t10\n'],
+    ['/proc/401/stat', `401 (node worker) S ${Array(18).fill('1').join(' ')} 12345 0`],
+    ['/proc/401/cgroup', '0::/system.slice/holaday.service'],
+  ]);
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    now: () => 100_000,
+    readdir: async () => ['401', 'self'],
+    readFile: async (path) => {
+      if (!files.has(path)) throw new Error('unknown path');
+      return files.get(path);
+    },
+    readlink: async (path) =>
+      path.endsWith('/exe') ? '/opt/node22/bin/node' : '/opt/holaday-cn-payment',
+    exec: async (command, args) => {
+      calls.push([command, ...args]);
+      if (command === 'pm2')
+        return JSON.stringify([
+          {
+            pid: 401,
+            name: 'gateway',
+            pm_id: 2,
+            pm2_env: {
+              pm_cwd: '/opt/holaday-cn-payment',
+              autorestart: true,
+              status: 'online',
+              PRIVATE_KEY: 'secret',
+            },
+          },
+        ]);
+      if (command === 'ss')
+        return 'LISTEN 0 511 0.0.0.0:4011 0.0.0.0:* users:(("node",pid=401,fd=1))\n';
+      return 'observed configuration';
+    },
+  };
+  return { io, calls, files };
+}
+test('host facts include unmanaged 4011, full proc identity and startup sources', async () => {
+  const f = hostFixture();
+  const result = await readCutoverHostSnapshot(f.io);
+  assert.equal(result.processes[0].pid, 401);
+  assert.deepEqual(result.processes[0].uids, [998, 998, 998, 998]);
+  assert.equal(result.processes[0].start, '12345');
+  assert.equal(result.listeners.includes(':4011'), true);
+  assert.equal(result.managers[0].autorestart, true);
+  assert.equal(JSON.stringify(result).includes('secret'), false);
+  assert.equal(
+    f.calls.some((call) => call[0] === 'systemctl'),
+    true,
+  );
+  assert.equal(
+    f.calls.some((call) => call[0] === 'crontab'),
+    true,
+  );
+});
+test('host observation failure is not an empty inventory and never touches PM2 state', async () => {
+  const f = hostFixture();
+  f.io.readFile = async () => {
+    throw new Error('permission denied PRIVATE');
+  };
+  await assert.rejects(
+    readCutoverHostSnapshot(f.io),
+    /^Error: MAINTENANCE_HOST_OBSERVATION_UNPROVEN$/,
+  );
+  assert.equal(
+    f.calls.some((call) => call.some((x) => ['stop', 'restart', 'delete', 'save'].includes(x))),
+    false,
+  );
+});
+test('normal proc accounting changes do not masquerade as process identity changes', async () => {
+  const f = hostFixture();
+  const read = f.io.readFile;
+  let count = 0;
+  f.io.readFile = async (path) =>
+    `${await read(path)}${path.endsWith('/status') ? `voluntary_ctxt_switches:\t${count++}\n` : ''}`;
+  const result = await readCutoverHostSnapshot(f.io);
+  assert.equal(result.processes.length, 1);
+});
+async function publisherFixture(t) {
+  const directory = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'holaday-cutover-publish-')));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  await fs.mkdir(join(directory, 'evidence'), { mode: 0o750 });
+  await fs.mkdir(join(directory, 'evidence-private'), { mode: 0o700 });
+  const prefix = '/var/lib/holaday-deploy';
+  const mapped = (path) => (path.startsWith(prefix) ? directory + path.slice(prefix.length) : path);
+  const stat = (s) =>
+    new Proxy(s, {
+      get(target, key) {
+        if (key === 'uid') return 0;
+        const value = Reflect.get(target, key);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+  const events = [];
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    now: () => 100_000,
+    lstat: async (path) => stat(await fs.lstat(mapped(path))),
+    realpath: async (path) => (await fs.realpath(mapped(path))).replace(directory, prefix),
+    open: async (path, flags, mode) => {
+      const handle = await fs.open(mapped(path), flags, mode);
+      return {
+        stat: async () => stat(await handle.stat()),
+        writeFile: (bytes) => handle.writeFile(bytes),
+        readFile: () => handle.readFile(),
+        sync: async () => {
+          events.push(['sync', path]);
+          await handle.sync();
+        },
+        chown: async (uid, gid) => {
+          assert.equal(uid, 0);
+          assert.equal(gid, process.getgid());
+        },
+        chmod: (mode) => handle.chmod(mode),
+        close: () => handle.close(),
+      };
+    },
+    rename: async (from, to) => {
+      events.push(['rename', to]);
+      await fs.rename(mapped(from), mapped(to));
+    },
+  };
+  const f = fixture();
+  const report = await collectCutoverEvidence(f.input, f.io);
+  const evidence = f.published[0];
+  const options = {
+    applicationGid: process.getgid(),
+    assertJournalOwnership: async () => f.binding,
+  };
+  return { directory, io, events, report, evidence, options };
+}
+test('publishes protected raw evidence before a group-readable report and bound active index', async (t) => {
+  const f = await publisherFixture(t);
+  await publishCutoverEvidence(f.evidence, f.options, f.io);
+  const reportPath = join(f.directory, 'evidence', `${f.report.attempt}.json`);
+  const indexPath = join(f.directory, 'evidence', 'active.json');
+  const rawFiles = await fs.readdir(join(f.directory, 'evidence-private'));
+  assert.equal(rawFiles.length, 1);
+  assert.equal(
+    (await fs.stat(join(f.directory, 'evidence-private', rawFiles[0]))).mode & 0o777,
+    0o600,
+  );
+  assert.equal((await fs.stat(reportPath)).mode & 0o777, 0o640);
+  assert.equal((await fs.stat(indexPath)).mode & 0o777, 0o640);
+  const bytes = await fs.readFile(reportPath);
+  const index = JSON.parse(await fs.readFile(indexPath, 'utf8'));
+  assert.equal(index.reportDigest, createHash('sha256').update(bytes).digest('hex'));
+  assert.equal(
+    f.events.filter((e) => e[0] === 'rename').at(-1)[1],
+    '/var/lib/holaday-deploy/evidence/active.json',
+  );
+  assert.equal(f.events.at(-1)[0], 'sync');
+});
+test('replaced or writable publication directories cannot publish an index', async (t) => {
+  const f = await publisherFixture(t);
+  await fs.chmod(join(f.directory, 'evidence'), 0o770);
+  await assert.rejects(
+    publishCutoverEvidence(f.evidence, f.options, f.io),
+    /MAINTENANCE_EVIDENCE_PUBLICATION_UNPROVEN/,
+  );
+  assert.deepEqual(await fs.readdir(join(f.directory, 'evidence')), []);
+});
+test('journal loss during publication never replaces active.json', async (t) => {
+  const f = await publisherFixture(t);
+  let calls = 0;
+  f.options.assertJournalOwnership = async () => {
+    if (++calls > 1) throw new Error('lost journal');
+    return { ...fixture().binding };
+  };
+  await assert.rejects(
+    publishCutoverEvidence(f.evidence, f.options, f.io),
+    /MAINTENANCE_EVIDENCE_PUBLICATION_UNPROVEN/,
+  );
+  assert.equal((await fs.readdir(join(f.directory, 'evidence'))).includes('active.json'), false);
+});
+test('historical rehearsal must reference protected raw artifacts with matching code and content', async (t) => {
+  const f = await publisherFixture(t);
+  const base = fixture();
+  const rehearsal = structuredClone(base.rehearsal);
+  const content = Buffer.from(JSON.stringify({ source: 'test-only-fixture', events: [] }));
+  const rawDigest = createHash('sha256').update(content).digest('hex');
+  rehearsal.artifacts[0].transcriptDigest = rawDigest;
+  rehearsal.artifacts[0].queryDigest = rawDigest;
+  rehearsal.artifacts[0].settlementDigest = rawDigest;
+  const root = join(f.directory, 'evidence-private');
+  await fs.writeFile(join(root, `${rawDigest}.json`), content, { mode: 0o600 });
+  await fs.writeFile(
+    join(root, `rehearsal-${base.binding.configDigest}.json`),
+    JSON.stringify({ schemaVersion: 1, ...rehearsal }),
+    { mode: 0o600 },
+  );
+  const input = { binding: base.binding, merchants: base.host.inventory.merchants };
+  const result = await readCutoverRehearsalArtifacts(input, f.io);
+  assert.equal(result.artifacts[0].transcriptDigest, rawDigest);
+  await fs.writeFile(join(root, `${rawDigest}.json`), '{}');
+  await assert.rejects(
+    readCutoverRehearsalArtifacts(input, f.io),
+    /MAINTENANCE_REHEARSAL_UNPROVEN/,
+  );
+});
