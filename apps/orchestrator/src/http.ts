@@ -1645,19 +1645,8 @@ export function createHttpApp(deps: HttpAppDeps) {
     '/trpc',
     createExpressMiddleware({
       router: appRouter,
-      createContext: makeCreateContext({
-        ...(executionDrain ? { executionDrain } : {}),
-        ...(ordinaryMaintenance ? { ordinaryMaintenance } : {}),
-        planner: deps.planner,
-        ...(deps.visionCommander ? { visionCommander: deps.visionCommander } : {}),
-        ...(deps.playwrightExecutor ? { playwrightExecutor: deps.playwrightExecutor } : {}),
-        ...(deps.executionRouter ? { executionRouter: deps.executionRouter } : {}),
-        ...(deps.browserPool ? { browserPool: deps.browserPool } : {}),
-        ...(deps.taskQueue ? { taskQueue: deps.taskQueue } : {}),
-        ...(deps.firecrawl ? { firecrawl: deps.firecrawl } : {}),
-        ...(deps.paypalAdapter ? { paypalAdapter: deps.paypalAdapter } : {}),
-        ...(deps.downloadManager ? { downloadManager: deps.downloadManager } : {}),
-      }),
+      // Preserve lazy resource getters across a closed ordinary boot.
+      createContext: makeCreateContext(deps),
     }),
   );
 

@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { DrainController } from './drain-controller.js';
+import type { ExecutionAdmission } from './execution-admission.js';
 
 /** One original run at a time. Clearing a producer's timer is not its stop receipt. */
-export function createPeriodicWork(controller?: DrainController) {
+export function createPeriodicWork(controller?: ExecutionAdmission) {
   const inside = new AsyncLocalStorage<boolean>();
   let pending: Promise<void> | undefined;
   let stopping = false;

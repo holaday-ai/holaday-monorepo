@@ -15,7 +15,7 @@ import {
 } from '../db/schema/planned-tasks.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
-import type { DrainController } from '../execution/drain-controller.js';
+import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import { type OperationLifetime, currentOperationLifetime } from '../execution/owned-operation.js';
 import type { Context } from '../trpc/context.js';
 import { batchTasksRouter } from '../trpc/routers/batch-tasks.js';
@@ -751,7 +751,7 @@ export async function syncPlannedRuns(db: DB): Promise<number> {
 
 export interface PlannedRunnerDeps {
   /** Optional until closed boot and every real producer are wired together. */
-  executionDrain?: DrainController;
+  executionDrain?: ExecutionAdmission;
   db: DB;
   queue: (
     input: {

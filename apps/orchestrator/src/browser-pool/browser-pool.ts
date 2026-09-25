@@ -56,6 +56,7 @@ import type { Logger } from 'pino';
 import { defaultBrowserNetworkPolicy } from '../agent/browser-network-policy.js';
 import { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 import { ExecutionDrain } from '../execution/execution-drain.js';
+import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import {
   type OperationLifetime,
   captureOperationScopeVeto,
@@ -147,6 +148,10 @@ export class BrowserPool {
   private shutdownPromise: Promise<void> | null = null;
   private readonly allocator: SlotAllocator;
   private gcTimer: NodeJS.Timeout | null = null;
+  private readonly gcRuns = new Set<Promise<void>>();
+  private gcFailed = false;
+  private maintenancePaused = false;
+  private maintenancePause: Promise<void> | undefined;
   private shuttingDown = false;
   private readonly egressProxy: BrowserEgressProxy;
 
@@ -857,6 +862,7 @@ export class BrowserPool {
   private scheduleRetentionExpiry(taskId: string): void {
     const existingTimer = this.retentionTimers.get(taskId);
     if (existingTimer) clearTimeout(existingTimer);
+    if (this.maintenancePaused) { this.retentionTimers.delete(taskId); return; }
 
     const inst = this.instances.get(taskId);
     const bound = inst && this.#brokerBindings.get(inst);
@@ -952,10 +958,23 @@ export class BrowserPool {
   }
 
   /** Start the idle-timeout GC loop. Safe to call multiple times. */
-  startGc(): void {
+  startGc(admission?: ExecutionAdmission): void {
     if (this.gcTimer || this.shuttingDown) return;
+    if (this.maintenancePaused && (this.gcRuns.size || this.gcFailed))
+      throw new Error('MAINTENANCE_POOL_UNPROVEN');
+    this.maintenancePaused = false;
+    this.maintenancePause = undefined;
+    for (const id of this.instances.keys()) this.scheduleRetentionExpiry(id);
     this.gcTimer = setInterval(() => {
-      void this.runGcSweep().catch(() => {});
+      let original: Promise<void>;
+      try {
+        original = admission ? admission.runRoot(async () => this.runGcSweep()).result : this.runGcSweep();
+      } catch { return; /* Admission rejected before GC dispatched. */ }
+      this.gcRuns.add(original);
+      void original.then(() => { this.gcRuns.delete(original); }, () => {
+        this.gcFailed = true;
+        this.gcRuns.delete(original);
+      });
     }, GC_INTERVAL_MS);
     this.gcTimer.unref?.();
   }
@@ -965,6 +984,24 @@ export class BrowserPool {
       clearInterval(this.gcTimer);
       this.gcTimer = null;
     }
+  }
+
+  pauseMaintenanceProducers(): Promise<void> {
+    if (this.maintenancePause) return this.maintenancePause;
+    this.maintenancePaused = true;
+    this.stopGc();
+    for (const timer of this.retentionTimers.values()) clearTimeout(timer);
+    this.retentionTimers.clear();
+    this.maintenancePause = Promise.allSettled([...this.gcRuns]).then(() => {
+      if (this.gcFailed) throw new Error('MAINTENANCE_POOL_UNPROVEN');
+    });
+    return this.maintenancePause;
+  }
+  assertMaintenanceIdle(): void {
+    if (this.#strict || !this.maintenancePaused || this.gcTimer || this.gcRuns.size || this.gcFailed ||
+      this.instances.size || this.allocationPromises.size || this.releasePromises.size ||
+      this.processRecords.size || this.retentionTimers.size || this.allocator.usedCount())
+      throw new Error('MAINTENANCE_POOL_UNPROVEN');
   }
 
   /**

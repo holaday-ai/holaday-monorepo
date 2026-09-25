@@ -1,4 +1,4 @@
-import type { DrainController } from '../execution/drain-controller.js';
+import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import { createPeriodicWork } from '../execution/periodic-work.js';
 import type { EnergyAnalyticsCleanupStore } from './analytics-store.js';
 
@@ -22,7 +22,7 @@ interface StartCleanupOptions {
   store: EnergyAnalyticsCleanupStore;
   logger: CleanupLogger;
   now?: () => Date;
-  executionDrain?: DrainController;
+  executionDrain?: ExecutionAdmission;
 }
 
 interface CleanupResult {

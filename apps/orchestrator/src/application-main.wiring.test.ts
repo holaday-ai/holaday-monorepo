@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { OrdinaryMaintenance, type MaintenanceRecord } from './execution/ordinary-maintenance.js';
+import type { OrdinaryApplicationHooks } from './execution/ordinary-application.js';
 
 // Factory wiring only: service behavior has separate real drain/IO tests. No
 // database, browser, HTTP server, queue or production authority is supplied here.
@@ -9,6 +11,7 @@ const s = vi.hoisted(() => {
     logger,
     pool,
     legacyBrowser: vi.fn(),
+    browserConnect: vi.fn(async () => ({ ok: false, error: 'synthetic' })),
     legacyPool: vi.fn(),
     dormant: vi.fn(() => pool),
     reaper: vi.fn(async () => ({ scanned: 0, killed: 0, pids: [] })),
@@ -18,7 +21,7 @@ const s = vi.hoisted(() => {
     wsReady: vi.fn(async () => {}),
     closeHttp: vi.fn(async () => {}),
     closeWs: vi.fn(async () => {}),
-    queue: vi.fn(() => ({ stop: vi.fn() })),
+    queue: vi.fn(() => ({ stop: vi.fn(async () => {}), size: () => 0 })),
     energy: vi.fn(),
     idempotency: vi.fn(),
     scheduled: vi.fn(),
@@ -48,6 +51,7 @@ vi.mock('./config/env.js', () => ({
 }));
 vi.mock('./config/logger.js', () => ({ logger: s.logger }));
 vi.mock('./db/client.js', () => ({
+  pool: { end: vi.fn(async () => {}) },
   db: new Proxy(
     {},
     {
@@ -64,17 +68,29 @@ vi.mock('./agent/vision-loop/playwright-executor.js', () => ({
       s.legacyBrowser();
     }
     async connect() {
-      return { ok: false, error: 'synthetic' };
+      return s.browserConnect();
     }
+    async disconnect() {}
   },
 }));
 vi.mock('./browser-pool/index.js', () => ({
   BrowserPool: class {
+    private paused = false;
     constructor() {
       s.legacyPool();
     }
     static dormantStrict = s.dormant;
-    startGc() {}
+    startGc() {
+      this.paused = false;
+    }
+    stopGc() {}
+    async pauseMaintenanceProducers() {
+      this.paused = true;
+    }
+    assertMaintenanceIdle() {
+      if (!this.paused) throw new Error('MAINTENANCE_POOL_UNPROVEN');
+    }
+    async shutdown() {}
     canAllocate() {
       return false;
     }
@@ -172,6 +188,150 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+});
+
+async function ordinaryFixture() {
+  vi.stubEnv('RETENTION_REAPER_ENABLED', 'false');
+  vi.stubEnv('USER_TASK_CRYSTALLIZE_ENABLED', 'false');
+  vi.spyOn(globalThis, 'setInterval').mockReturnValue({ unref() {} } as never);
+  vi.spyOn(process, 'on').mockReturnValue(process);
+  const identity = { candidate: 'a'.repeat(40), bootId: 'b'.repeat(32) };
+  let record: MaintenanceRecord = { identity, mode: 'closed', needsReconciliation: false };
+  let hooks: OrdinaryApplicationHooks | undefined;
+  const coordinator = new OrdinaryMaintenance({
+    identity,
+    journal: {
+      read: () => record,
+      persist: (input) => {
+        record = { identity, ...input };
+      },
+    },
+    checks: {
+      async verifyReady() {
+        if (!hooks) throw new Error('not bound');
+      },
+      prepareServing: async () => {
+        await hooks!.prepareServing();
+      },
+      startProducers: () => hooks!.startProducers(),
+      stopProducers: async () => {
+        await hooks?.stopProducers();
+      },
+      verifyRetainedQueue: async () => {
+        await hooks!.verifyRetainedQueue();
+      },
+    },
+  });
+  const closeState = vi.fn();
+  const closeControl = vi.fn(async () => {
+    await coordinator.beginMaintenance();
+  });
+  const { startApplication } = await import('./application-main.js');
+  const application = await startApplication(undefined, {
+    coordinator,
+    bind(value) {
+      hooks = value;
+    },
+    closeState,
+    closeControl,
+  });
+  expect(hooks).toBeDefined();
+  return { application, coordinator, closeState, closeControl, readRecord: () => record };
+}
+it('ordinary maintenance boot is dormant until verified open and preserves receipt listeners while draining', async () => {
+  const { application, coordinator, closeState, closeControl, readRecord } =
+    await ordinaryFixture();
+  for (const factory of [
+    s.legacyBrowser,
+    s.legacyPool,
+    s.reaper,
+    s.queue,
+    s.energy,
+    s.idempotency,
+    s.scheduled,
+    s.planned,
+    s.prewarm,
+    s.recoverScheduled,
+    s.recoverPlanned,
+    s.stale,
+    s.rehydrate,
+  ])
+    expect.soft(factory).not.toHaveBeenCalled();
+  expect(s.http.mock.calls[0]?.[0]).toMatchObject({
+    executionDrain: coordinator,
+    ordinaryMaintenance: coordinator,
+  });
+  expect(s.ws.mock.calls[0]?.[0]).toMatchObject({
+    executionDrain: coordinator,
+    ordinaryMaintenance: coordinator,
+  });
+  await coordinator.resumeServing();
+  for (const factory of [s.queue, s.energy, s.idempotency, s.scheduled, s.planned, s.prewarm])
+    expect.soft(factory).toHaveBeenCalledOnce();
+  expect(s.reaper).not.toHaveBeenCalled();
+  expect(s.recoverScheduled).not.toHaveBeenCalled();
+  expect(s.recoverPlanned).not.toHaveBeenCalled();
+  expect(s.stale).not.toHaveBeenCalled();
+  expect(s.rehydrate).not.toHaveBeenCalled();
+  await coordinator.beginMaintenance();
+  expect(s.closeWs).not.toHaveBeenCalled();
+  expect(s.closeHttp).not.toHaveBeenCalled();
+  await application.shutdown('synthetic');
+  expect(s.closeWs).toHaveBeenCalledOnce();
+  expect(s.closeHttp).toHaveBeenCalledOnce();
+  expect(closeControl).toHaveBeenCalledOnce();
+  expect(closeState).toHaveBeenCalledOnce();
+  expect(readRecord()).toMatchObject({ mode: 'closed', needsReconciliation: false });
+});
+it('ordinary shutdown waits for the original producer stop before closing receipt listeners', async () => {
+  const f = await ordinaryFixture();
+  await f.coordinator.resumeServing();
+  let done!: () => void;
+  const held = new Promise<void>((resolve) => {
+    done = resolve;
+  });
+  s.stopEnergy.mockImplementationOnce(() => held);
+  const stopped = f.application.shutdown('synthetic');
+  await vi.waitFor(() => expect(s.stopEnergy).toHaveBeenCalledOnce());
+  expect(s.closeWs).not.toHaveBeenCalled();
+  expect(s.closeHttp).not.toHaveBeenCalled();
+  expect(f.closeState).not.toHaveBeenCalled();
+  done();
+  await stopped;
+  expect(s.closeWs).toHaveBeenCalledOnce();
+  expect(f.closeState).toHaveBeenCalledOnce();
+});
+it('ordinary producer failure preserves maintenance without closing receipts or forcing exit', async () => {
+  const f = await ordinaryFixture();
+  await f.coordinator.resumeServing();
+  const exit = vi.spyOn(process, 'exit').mockReturnValue(undefined as never);
+  s.stopEnergy.mockRejectedValueOnce(new Error('synthetic stop failure'));
+  await expect(f.application.shutdown('synthetic')).rejects.toThrow();
+  expect(f.coordinator.snapshot()).toMatchObject({ mode: 'blocked', needsReconciliation: true });
+  expect(s.closeWs).not.toHaveBeenCalled();
+  expect(f.closeState).not.toHaveBeenCalled();
+  expect(exit).not.toHaveBeenCalled();
+});
+it('close during lazy browser preparation also pauses a pool created after the close barrier', async () => {
+  const f = await ordinaryFixture();
+  let done!: () => void;
+  const held = new Promise<void>((resolve) => {
+    done = resolve;
+  });
+  s.browserConnect.mockImplementationOnce(async () => {
+    await held;
+    return { ok: false, error: 'synthetic' };
+  });
+  const opening = f.coordinator.resumeServing();
+  const observed = expect(opening).rejects.toThrow('MAINTENANCE_OPEN_SUPERSEDED');
+  await vi.waitFor(() => expect(s.browserConnect).toHaveBeenCalledOnce());
+  await f.coordinator.beginMaintenance();
+  done();
+  await observed;
+  expect(s.queue).not.toHaveBeenCalled();
+  expect(s.energy).not.toHaveBeenCalled();
+  await f.application.shutdown('synthetic');
+  expect(f.readRecord()).toMatchObject({ mode: 'closed', needsReconciliation: false });
 });
 it('controlled main passes one original controller everywhere and never starts legacy browser/recovery work', async () => {
   vi.stubEnv('HEADED_CDP_ENDPOINT', 'synthetic');
@@ -305,25 +465,28 @@ it.each(['http', 'ws'] as const)(
   },
 );
 
-it.each(['energy', 'ws'] as const)('ordinary shutdown failure at %s exits instead of leaving HTTP serving', async (stage) => {
-  vi.stubEnv('RETENTION_REAPER_ENABLED', 'false');
-  vi.stubEnv('USER_TASK_CRYSTALLIZE_ENABLED', 'false');
-  vi.spyOn(globalThis, 'setInterval').mockReturnValue({ unref() {} } as never);
-  const on = vi.spyOn(process, 'on').mockReturnValue(process);
-  const exit = vi.spyOn(process, 'exit').mockReturnValue(undefined as never);
-  const previousExitCode = process.exitCode;
-  try {
-    const { startApplication } = await import('./application-main.js');
-    await startApplication();
-    expect(s.httpReady).toHaveBeenCalledOnce();
-    expect(s.wsReady).toHaveBeenCalledOnce();
-    const fail = stage === 'energy' ? s.stopEnergy : s.closeWs;
-    fail.mockRejectedValueOnce(new Error('synthetic ordinary shutdown failure'));
-    const handler = on.mock.calls.find(([event]) => event === 'SIGTERM')?.[1];
-    expect(handler).toBeDefined();
-    handler!();
-    await vi.waitFor(() => expect(exit.mock.calls).toEqual([[1]]));
-  } finally {
-    process.exitCode = previousExitCode;
-  }
-});
+it.each(['energy', 'ws'] as const)(
+  'ordinary shutdown failure at %s exits instead of leaving HTTP serving',
+  async (stage) => {
+    vi.stubEnv('RETENTION_REAPER_ENABLED', 'false');
+    vi.stubEnv('USER_TASK_CRYSTALLIZE_ENABLED', 'false');
+    vi.spyOn(globalThis, 'setInterval').mockReturnValue({ unref() {} } as never);
+    const on = vi.spyOn(process, 'on').mockReturnValue(process);
+    const exit = vi.spyOn(process, 'exit').mockReturnValue(undefined as never);
+    const previousExitCode = process.exitCode;
+    try {
+      const { startApplication } = await import('./application-main.js');
+      await startApplication();
+      expect(s.httpReady).toHaveBeenCalledOnce();
+      expect(s.wsReady).toHaveBeenCalledOnce();
+      const fail = stage === 'energy' ? s.stopEnergy : s.closeWs;
+      fail.mockRejectedValueOnce(new Error('synthetic ordinary shutdown failure'));
+      const handler = on.mock.calls.find(([event]) => event === 'SIGTERM')?.[1];
+      expect(handler).toBeDefined();
+      handler!();
+      await vi.waitFor(() => expect(exit.mock.calls).toEqual([[1]]));
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+  },
+);

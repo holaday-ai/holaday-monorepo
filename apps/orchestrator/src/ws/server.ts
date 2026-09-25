@@ -98,8 +98,7 @@ export async function loadRehydratedTasks(): Promise<{ userCount: number; taskCo
  * through every function signature.
  */
 let injectedPlanner: Planner | null = null;
-let injectedExecutor: PlaywrightExecutor | null = null;
-let injectedBrowserPool: BrowserPool | null = null;
+let injectedBrowserSources: Pick<WsServerOpts, 'playwrightExecutor' | 'browserPool'> = {};
 
 export interface WsServerOpts {
   executionDrain?: ExecutionAdmission;
@@ -131,8 +130,7 @@ export interface WsServerOpts {
 export function createWsServer(port: number, opts: WsServerOpts = {}) {
   const work = createWsWork(opts.executionDrain, opts.ordinaryMaintenance);
   injectedPlanner = opts.planner ?? null;
-  injectedExecutor = opts.playwrightExecutor ?? null;
-  injectedBrowserPool = opts.browserPool ?? null;
+  injectedBrowserSources = opts;
   const configuredAuthenticateToken =
     opts.authenticateToken ?? ((token: string) => authenticateAccessToken(db, token));
   const authenticateToken = async (token: string): Promise<string | null> => {
@@ -1166,6 +1164,8 @@ async function handleClientMessage(
     //   3. injectedExecutor — last-resort singleton, only when no
     //      pool is wired (legacy boot / tests).
     let exec: PlaywrightExecutor | null = null;
+    const injectedBrowserPool = injectedBrowserSources.browserPool ?? null;
+    const injectedExecutor = injectedBrowserSources.playwrightExecutor ?? null;
     if (state.userId && injectedBrowserPool) {
       if (msg.taskId) {
         const inst = injectedBrowserPool.peek(msg.taskId);

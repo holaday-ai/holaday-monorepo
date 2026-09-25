@@ -25,6 +25,8 @@ export interface MaintenanceJournal {
 }
 export interface MaintenanceChecks {
   verifyReady(identity: MaintenanceIdentity): Promise<void>;
+  prepareServing?(): Promise<void>;
+  startProducers?(): void;
   stopProducers(): Promise<void>;
   verifyRetainedQueue(): Promise<void>;
 }
@@ -39,6 +41,35 @@ export class OrdinaryMaintenance implements ExecutionAdmission {
   private generation = 0;
   private opening = false;
   private stopping: Promise<void> | undefined;
+  private openingSettled: Promise<void> | undefined;
+  private retirement: Promise<void> | undefined;
+  private retiring = false;
+  private closingResources = false;
+
+  /** Final shutdown only. Resource cleanup is itself durable ambiguity until it settles. */
+  retire(closeResources: () => Promise<void>): Promise<void> {
+    if (this.retirement) return this.retirement;
+    this.retiring = true;
+    this.drain.close();
+    this.retirement = Promise.resolve().then(async () => {
+      await this.beginMaintenance();
+      await this.waitForIdle(600_000);
+      this.closingResources = true;
+      try {
+        this.persist('draining', true);
+        await closeResources();
+        this.tick();
+        if (!this.drain.snapshot().idle) throw new Error('MAINTENANCE_IDLE_UNPROVEN');
+        this.persist('closed', false);
+      } catch {
+        this.block(true);
+        throw new Error('MAINTENANCE_RESOURCES_UNPROVEN');
+      } finally {
+        this.closingResources = false;
+      }
+    });
+    return this.retirement;
+  }
 
   constructor(input: {
     identity: MaintenanceIdentity;
@@ -131,9 +162,11 @@ export class OrdinaryMaintenance implements ExecutionAdmission {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 600_000)
       throw new Error('MAINTENANCE_TIMEOUT_INVALID');
     this.tick();
-    if (this.opening || this.mode === 'serving') throw new Error('MAINTENANCE_NOT_CLOSED');
+    if ((this.opening && !this.stopping) || this.closingResources || this.mode === 'serving')
+      throw new Error('MAINTENANCE_NOT_CLOSED');
     const deadline = performance.now() + timeoutMs;
     try {
+      if (this.openingSettled) await this.withDeadline(this.openingSettled, deadline);
       await this.withDeadline(this.beginMaintenance(), deadline);
       while (true) {
         this.tick();
@@ -160,19 +193,49 @@ export class OrdinaryMaintenance implements ExecutionAdmission {
 
   async resumeServing(): Promise<void> {
     this.tick();
-    if (this.mode !== 'closed' || this.opening || this.stopping || !this.drain.snapshot().idle)
+    if (
+      this.retiring ||
+      this.mode !== 'closed' ||
+      this.opening ||
+      this.stopping ||
+      !this.drain.snapshot().idle
+    )
       throw new Error('MAINTENANCE_OPEN_DENIED');
     const generation = this.generation;
     this.opening = true;
+    let finishOpening!: () => void;
+    this.openingSettled = new Promise<void>((resolve) => {
+      finishOpening = resolve;
+    });
     try {
       await this.checks.verifyReady(this.identity);
       this.tick();
       if (generation !== this.generation || this.mode !== 'closed' || !this.drain.snapshot().idle)
         throw new Error('MAINTENANCE_OPEN_SUPERSEDED');
+      if (this.checks.prepareServing) {
+        this.persist('closed', true);
+        try {
+          await this.checks.prepareServing();
+        } catch {
+          this.block(true);
+          throw new Error('MAINTENANCE_PREPARATION_UNPROVEN');
+        }
+        this.tick();
+        if (generation !== this.generation || this.mode !== 'closed' || !this.drain.snapshot().idle)
+          throw new Error('MAINTENANCE_OPEN_SUPERSEDED');
+      }
       this.persist('serving', true);
       this.drain.open();
+      try {
+        this.checks.startProducers?.();
+      } catch {
+        this.block(true);
+        throw new Error('MAINTENANCE_PRODUCERS_UNPROVEN');
+      }
     } finally {
       this.opening = false;
+      finishOpening();
+      this.openingSettled = undefined;
     }
   }
 

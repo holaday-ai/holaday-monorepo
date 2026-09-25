@@ -43,7 +43,7 @@ import type { Logger } from 'pino';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import { webhookIdempotency } from '../db/schema/webhook-idempotency.js';
-import type { DrainController } from '../execution/drain-controller.js';
+import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import { createPeriodicWork } from '../execution/periodic-work.js';
 import { drainedCleanupDelete, webhookDatabase, webhookWrite } from './webhook-drain.js';
 
@@ -114,7 +114,7 @@ export interface IdempotencyServiceDeps {
   logger: Logger;
   /** Override-able for tests; defaults to Date.now(). */
   now?: () => Date;
-  executionDrain?: DrainController;
+  executionDrain?: ExecutionAdmission;
 }
 
 /**

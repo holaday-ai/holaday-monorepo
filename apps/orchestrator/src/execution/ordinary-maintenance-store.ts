@@ -13,6 +13,71 @@ export interface OrdinaryMaintenanceStore extends MaintenanceJournal {
 const unavailable = () => new Error('MAINTENANCE_STATE_UNAVAILABLE');
 const sameFile = (a: Stats, b: Stats) => a.dev === b.dev && a.ino === b.ino;
 
+/** Read-only worker/entry probe: never creates a writer lock or adopts a boot. */
+export function readOrdinaryMaintenanceRecord(directory: string): MaintenanceRecord {
+  try {
+    if (!process.getuid) throw unavailable();
+    const uid = process.getuid();
+    const root = checkDirectory(directory, uid);
+    const record = decode(privateBytes(directory, 'state.json', uid));
+    if (!sameFile(root, checkDirectory(directory, uid))) throw unavailable();
+    return record;
+  } catch {
+    throw unavailable();
+  }
+}
+
+function checkDirectory(directory: string, uid: number): Stats {
+  if (
+    directory === '/' ||
+    resolve(directory) !== directory ||
+    fs.realpathSync(directory) !== directory
+  )
+    throw unavailable();
+  const stat = fs.lstatSync(directory);
+  if (!stat.isDirectory() || stat.uid !== uid || (stat.mode & 0o7777) !== 0o700)
+    throw unavailable();
+  return stat;
+}
+function privateBytes(directory: string, name: 'state.json' | 'writer.lock', uid: number): string {
+  const fd = fs.openSync(
+    join(directory, name),
+    fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
+  );
+  try {
+    const stat = fs.fstatSync(fd);
+    if (
+      !stat.isFile() ||
+      stat.uid !== uid ||
+      (stat.mode & 0o7777) !== 0o600 ||
+      stat.nlink !== 1 ||
+      stat.size < 1 ||
+      stat.size > 2048
+    )
+      throw unavailable();
+    const buffer = Buffer.alloc(2049);
+    let size = 0;
+    for (;;) {
+      const count = fs.readSync(fd, buffer, size, buffer.length - size, size);
+      size += count;
+      if (count === 0 || size === buffer.length) break;
+    }
+    if (
+      size !== stat.size ||
+      size > 2048 ||
+      fs.fstatSync(fd).size !== size ||
+      !sameFile(stat, fs.lstatSync(join(directory, name)))
+    )
+      throw unavailable();
+    const bytes = buffer.subarray(0, size);
+    const text = bytes.toString('utf8');
+    if (!Buffer.from(text).equals(bytes)) throw unavailable();
+    return text;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function encode(record: MaintenanceRecord): string {
   if (
     !/^[a-f0-9]{40}$/.test(record.identity.candidate) ||
@@ -181,48 +246,10 @@ class Store implements OrdinaryMaintenanceStore {
     }
   }
   private checkRoot(): Stats {
-    if (
-      this.directory === '/' ||
-      resolve(this.directory) !== this.directory ||
-      fs.realpathSync(this.directory) !== this.directory
-    )
-      throw unavailable();
-    const stat = fs.lstatSync(this.directory);
-    if (!stat.isDirectory() || stat.uid !== this.uid || (stat.mode & 0o7777) !== 0o700)
-      throw unavailable();
-    return stat;
+    return checkDirectory(this.directory, this.uid);
   }
   private privateBytes(name: 'state.json' | 'writer.lock'): string {
-    const fd = fs.openSync(
-      join(this.directory, name),
-      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
-    );
-    try {
-      const stat = fs.fstatSync(fd);
-      if (
-        !stat.isFile() ||
-        stat.uid !== this.uid ||
-        (stat.mode & 0o7777) !== 0o600 ||
-        stat.nlink !== 1 ||
-        stat.size < 1 ||
-        stat.size > 2048
-      )
-        throw unavailable();
-      const buffer = Buffer.alloc(2049);
-      let size = 0;
-      for (;;) {
-        const count = fs.readSync(fd, buffer, size, buffer.length - size, size);
-        size += count;
-        if (count === 0 || size === buffer.length) break;
-      }
-      if (size !== stat.size || size > 2048 || fs.fstatSync(fd).size !== size) throw unavailable();
-      const bytes = buffer.subarray(0, size);
-      const text = bytes.toString('utf8');
-      if (!Buffer.from(text).equals(bytes)) throw unavailable();
-      return text;
-    } finally {
-      fs.closeSync(fd);
-    }
+    return privateBytes(this.directory, name, this.uid);
   }
   private syncRoot(): void {
     if (this.rootFd === null || !sameFile(this.checkRoot(), this.root)) throw unavailable();

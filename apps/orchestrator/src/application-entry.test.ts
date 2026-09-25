@@ -4,6 +4,15 @@ const seam = vi.hoisted(() => ({
   boot: vi.fn(),
   main: vi.fn(),
   loads: 0,
+  mode: vi.fn(() => false),
+  ordinary: vi.fn(),
+}));
+vi.mock('./execution/ordinary-maintenance-mode.js', () => ({
+  ORDINARY_MAINTENANCE_DIRECTORY: '/var/lib/holaday/ordinary-maintenance',
+  resolveOrdinaryMaintenanceMode: seam.mode,
+}));
+vi.mock('./execution/ordinary-application.js', () => ({
+  createOrdinaryApplication: seam.ordinary,
 }));
 vi.mock('./execution/application-boot.js', () => ({ startApplicationBoot: seam.boot }));
 vi.mock('./application-main.js', () => {
@@ -17,6 +26,8 @@ beforeEach(() => {
   seam.loads = 0;
   seam.boot.mockReset();
   seam.main.mockReset();
+  seam.mode.mockReset().mockReturnValue(false);
+  seam.ordinary.mockReset();
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -34,6 +45,35 @@ it('legacy entry keeps its existing application path without constructing a cont
   await launchApplication();
   expect(seam.boot).not.toHaveBeenCalled();
   expect(seam.main).toHaveBeenCalledWith(undefined);
+});
+it('validates the maintenance marker before importing the main application', async () => {
+  seam.mode.mockImplementation(() => {
+    throw new Error('MAINTENANCE_CONFIGURATION_REQUIRED');
+  });
+  const exit = vi.spyOn(process, 'exit').mockReturnValue(undefined as never);
+  const { launchApplication } = await load();
+  await expect(launchApplication()).rejects.toThrow();
+  expect(seam.loads).toBe(0);
+  expect(seam.main).not.toHaveBeenCalled();
+  expect(exit).not.toHaveBeenCalled();
+});
+it('passes ordinary lifecycle separately from native boot and starts control after application binding', async () => {
+  seam.mode.mockReturnValue(true);
+  const order: string[] = [];
+  const ordinary = {
+    startControl: vi.fn(async () => {
+      order.push('control');
+    }),
+  };
+  seam.ordinary.mockReturnValue(ordinary);
+  seam.main.mockImplementation(async () => {
+    order.push('main');
+  });
+  const { launchApplication } = await load();
+  await launchApplication();
+  expect(seam.boot).not.toHaveBeenCalled();
+  expect(seam.main).toHaveBeenCalledWith(undefined, ordinary);
+  expect(order).toEqual(['main', 'control']);
 });
 it('controlled entry must finish closed boot before importing application modules', async () => {
   vi.stubEnv('HOLADAY_POOL_BOOT', 'b'.repeat(32));
@@ -75,16 +115,19 @@ it('application failure closes its original boot and never starts a fallback app
   expect(exit).not.toHaveBeenCalled();
 });
 
-it.each([false, true])('ordinary startup failure requests immediate exit even if late metadata appears: %s', async (lateMetadata) => {
-  const exit = vi.spyOn(process, 'exit').mockReturnValue(undefined as never);
-  vi.spyOn(process.stderr, 'write').mockReturnValue(true);
-  const { launchApplication } = await load();
-  seam.main.mockImplementation(async () => {
-    // Imported application configuration must not change the entry's original mode.
-    if (lateMetadata) vi.stubEnv('HOLADAY_POOL_BOOT', 'late-dotenv-value');
-    throw new Error('synthetic startup failure after HTTP bind');
-  });
-  await expect(launchApplication()).rejects.toThrow('APPLICATION_START_UNPROVEN');
-  expect(exit.mock.calls).toEqual([[1]]);
-  expect(seam.boot).not.toHaveBeenCalled();
-});
+it.each([false, true])(
+  'ordinary startup failure requests immediate exit even if late metadata appears: %s',
+  async (lateMetadata) => {
+    const exit = vi.spyOn(process, 'exit').mockReturnValue(undefined as never);
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const { launchApplication } = await load();
+    seam.main.mockImplementation(async () => {
+      // Imported application configuration must not change the entry's original mode.
+      if (lateMetadata) vi.stubEnv('HOLADAY_POOL_BOOT', 'late-dotenv-value');
+      throw new Error('synthetic startup failure after HTTP bind');
+    });
+    await expect(launchApplication()).rejects.toThrow('APPLICATION_START_UNPROVEN');
+    expect(exit.mock.calls).toEqual([[1]]);
+    expect(seam.boot).not.toHaveBeenCalled();
+  },
+);

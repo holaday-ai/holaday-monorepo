@@ -35,7 +35,7 @@ import { accountClosureAllowsExecution } from '../account-closure/repository.js'
 import { logger } from '../config/logger.js';
 import { scheduledTasks } from '../db/schema/scheduled-tasks.js';
 import { users } from '../db/schema/users.js';
-import type { DrainController } from '../execution/drain-controller.js';
+import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import type { OperationLifetime } from '../execution/owned-operation.js';
 import {
   callScheduledHook,
@@ -47,7 +47,7 @@ const DEFAULT_POLL_MS = 60_000;
 
 export interface ScheduledRunnerDeps {
   /** Optional until closed boot and every producer are wired together. */
-  executionDrain?: DrainController;
+  executionDrain?: ExecutionAdmission;
   /** Drizzle db handle. */
   db: typeof import('../db/client.js').db;
   /**

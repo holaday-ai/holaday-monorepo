@@ -6,6 +6,8 @@ import type { Logger } from 'pino';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { BrowserPool } from './browser-pool.js';
 import { BrowserEgressProxy } from './egress-proxy.js';
+import { ExecutionDrain } from '../execution/execution-drain.js';
+import { startOwnedOperation } from '../execution/owned-operation.js';
 
 const transport = vi.hoisted(() => ({
   ready: async () => 'synthetic',
@@ -179,6 +181,46 @@ it.each(['ready', 'connect'] as const)(
     expect(f.closes()).toBe(1);
   },
 );
+it('maintenance waits for the original GC release without shutting down live tasks', async () => {
+  const f = fixture();
+  await f.pool.allocate('gc-task', 'synthetic');
+  const drain = new ExecutionDrain();
+  drain.open();
+  const held = deferred();
+  const release = vi.spyOn(f.pool, 'release').mockImplementationOnce(async () => { await held.promise; return true; });
+  f.pool.startGc({ drain, tick() {}, runRoot: (action) => startOwnedOperation(drain, 'request', async (owner) => action({ drain, owner }), { dispatch: 'immediate', errorOutcome: 'unknown' }) });
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(release).toHaveBeenCalledOnce();
+  const paused = observe(f.pool.pauseMaintenanceProducers());
+  await flush();
+  expect(paused.state.done).toBe(false);
+  expect(drain.snapshot().active).toBeGreaterThan(0);
+  held.resolve();
+  await paused.finished;
+  expect(paused.state.error).toBeUndefined();
+  expect(f.pool.peek('gc-task')).not.toBeNull();
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(release).toHaveBeenCalledOnce();
+});
+it('maintenance prevents retention timer dispatch and never claims a live retained pool is idle', async () => {
+  const f = fixture();
+  await f.pool.allocate('retained-task', 'synthetic');
+  const release = vi.spyOn(f.pool, 'release');
+  f.pool.retain('retained-task', 1000, 'terminal-review');
+  await f.pool.pauseMaintenanceProducers();
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(release).not.toHaveBeenCalled();
+  expect(() => f.pool.assertMaintenanceIdle()).toThrow('MAINTENANCE_POOL_UNPROVEN');
+  f.pool.retain('retained-task', 1000, 'terminal-review');
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(release).not.toHaveBeenCalled();
+});
+it('only an empty stopped pool passes the maintenance assertion', async () => {
+  const f = fixture();
+  expect(() => f.pool.assertMaintenanceIdle()).toThrow();
+  await f.pool.pauseMaintenanceProducers();
+  expect(() => f.pool.assertMaintenanceIdle()).not.toThrow();
+});
 it('waits for rejected allocation cleanup before closing proxy', async () => {
   const gate = deferred();
   transport.ready = async () => {

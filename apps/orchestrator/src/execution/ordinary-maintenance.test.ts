@@ -55,6 +55,99 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it('keeps admission closed and a durable dirty marker throughout resource preparation', async () => {
+  const entered = deferred();
+  const held = deferred();
+  const start = vi.fn();
+  const f = fixture({
+    prepareServing: async () => {
+      entered.resolve();
+      await held.promise;
+    },
+    startProducers: start,
+  });
+  const opening = f.m.resumeServing();
+  await Promise.race([entered.promise, opening]);
+  expect(f.journal.read()).toMatchObject({ mode: 'closed', needsReconciliation: true });
+  expect(() => f.m.runRoot(async () => {})).toThrow();
+  expect(start).not.toHaveBeenCalled();
+  held.resolve();
+  await opening;
+  expect(start).toHaveBeenCalledOnce();
+  expect(f.m.snapshot().mode).toBe('serving');
+});
+it('waits for preparation overtaken by close without starting producers afterwards', async () => {
+  const entered = deferred();
+  const held = deferred();
+  const start = vi.fn();
+  const f = fixture({
+    prepareServing: async () => {
+      entered.resolve();
+      await held.promise;
+    },
+    startProducers: start,
+  });
+  const opening = f.m.resumeServing();
+  const observed = opening.catch(() => {});
+  await Promise.race([entered.promise, observed]);
+  await f.m.beginMaintenance();
+  let idle = false;
+  const waiting = f.m.waitForIdle(1000).then(() => {
+    idle = true;
+  });
+  void waiting.catch(() => {});
+  await Promise.resolve();
+  expect(idle).toBe(false);
+  held.resolve();
+  await observed;
+  await waiting;
+  expect(start).not.toHaveBeenCalled();
+  expect(f.m.snapshot()).toMatchObject({ mode: 'closed', needsReconciliation: false });
+});
+it('latches failed preparation or partially started producers instead of permitting retry', async () => {
+  for (const stage of ['prepare', 'start']) {
+    const f = fixture({
+      async prepareServing() {
+        if (stage === 'prepare') throw new Error('synthetic');
+      },
+      startProducers() {
+        if (stage === 'start') throw new Error('synthetic');
+      },
+    });
+    await expect(f.m.resumeServing()).rejects.toThrow();
+    expect(f.m.snapshot()).toMatchObject({ mode: 'blocked', needsReconciliation: true });
+    await expect(f.m.resumeServing()).rejects.toThrow();
+  }
+});
+it('persists ambiguity while resources close and retires admission permanently', async () => {
+  const f = fixture();
+  await f.m.resumeServing();
+  const held = deferred();
+  const entered = deferred();
+  const closing = f.m.retire(async () => {
+    entered.resolve();
+    await held.promise;
+  });
+  const observed = closing.catch(() => {});
+  await Promise.race([entered.promise, observed]);
+  expect(f.journal.read().needsReconciliation).toBe(true);
+  await expect(f.m.resumeServing()).rejects.toThrow();
+  held.resolve();
+  await closing;
+  expect(f.m.snapshot()).toMatchObject({ mode: 'closed', needsReconciliation: false });
+  await expect(f.m.resumeServing()).rejects.toThrow();
+});
+it('never writes clean after resource shutdown failed', async () => {
+  const f = fixture();
+  await f.m.resumeServing();
+  await expect(
+    f.m.retire(async () => {
+      throw new Error('synthetic resource');
+    }),
+  ).rejects.toThrow();
+  expect(f.m.snapshot()).toMatchObject({ mode: 'blocked', needsReconciliation: true });
+});
+
 it('starts closed and rejects work before touching its action', () => {
   const { m } = fixture();
   let dispatched = false;

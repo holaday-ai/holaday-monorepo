@@ -13,7 +13,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { DrainController } from '../../execution/drain-controller.js';
+import type { ExecutionAdmission } from '../../execution/execution-admission.js';
 import {
   captureOperationScopeVeto,
   currentOperationLifetime,
@@ -40,7 +40,7 @@ interface PrewarmLogger {
 }
 
 export interface PrewarmSchedulerDeps {
-  executionDrain?: DrainController;
+  executionDrain?: ExecutionAdmission;
   /** 预热动作（命中时调）。 */
   warm: () => Promise<void>;
   logger: PrewarmLogger;

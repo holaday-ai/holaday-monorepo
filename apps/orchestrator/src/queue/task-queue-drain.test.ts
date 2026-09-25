@@ -123,7 +123,7 @@ function makeQueue(
   canDispatch = () => true,
   overrides: Partial<TaskQueueConfig> = {},
 ) {
-  const cfg: TaskQueueConfig & { executionDrain?: DrainController } = {
+  const cfg: TaskQueueConfig = {
     executionDrain: controller,
     canDispatch,
     capacity: 1,

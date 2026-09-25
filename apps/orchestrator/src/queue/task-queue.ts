@@ -29,7 +29,7 @@
  *   - per-task queue timeout: 10 min (worker fires onTimeout, drops it)
  */
 
-import type { DrainController } from '../execution/drain-controller.js';
+import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import type { OperationLifetime } from '../execution/owned-operation.js';
 import {
   type QueueReservation,
@@ -65,7 +65,7 @@ export type EnqueueResult =
   | { kind: 'rejected'; reason: string; reasonCode?: 'capacity' | 'unavailable' };
 
 export interface TaskQueueConfig {
-  executionDrain?: DrainController;
+  executionDrain?: ExecutionAdmission;
   /** Returns true when a slot is available right now. Usually wraps `pool.canAllocate()`. */
   canDispatch: () => boolean;
   /**
