@@ -1,5 +1,5 @@
-import { type ApplicationBoot, startApplicationBoot } from './execution/application-boot.js';
 import { randomBytes } from 'node:crypto';
+import { type ApplicationBoot, startApplicationBoot } from './execution/application-boot.js';
 import { createOrdinaryApplication } from './execution/ordinary-application.js';
 import {
   ORDINARY_MAINTENANCE_DIRECTORY,
@@ -33,7 +33,11 @@ export async function launchApplication(): Promise<void> {
           const { verifyProductionMaintenanceReadiness } = await import(
             './execution/ordinary-maintenance-readiness.js'
           );
-          await verifyProductionMaintenanceReadiness(identity, expectedIdentity);
+          const { readActiveServicesContext } = await import(
+            './execution/ordinary-maintenance-services.js'
+          );
+          const context = await readActiveServicesContext(identity, Date.now());
+          await verifyProductionMaintenanceReadiness(identity, expectedIdentity, context);
         },
       });
     }

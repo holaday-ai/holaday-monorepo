@@ -1,6 +1,11 @@
-import type { MaintenanceIdentity } from './ordinary-maintenance.js';
 import { readCoreTaskRecord } from '../agent/core-task-record.js';
 import { summarizeCost } from '../agent/llm-cost-summary.js';
+import {
+  type ServicesContext,
+  parseServicesContext,
+  readServicesEvidence,
+} from './ordinary-maintenance-services.js';
+import type { MaintenanceIdentity } from './ordinary-maintenance.js';
 export type MaintenanceReadinessInput = {
   identity: MaintenanceIdentity;
   expectedIdentity: MaintenanceIdentity;
@@ -128,15 +133,23 @@ export async function checkMaintenanceRecords(query: ReadinessQuery): Promise<vo
   if (Number(cost.unknown) > 0 && summary.totalCostUsd !== null)
     throw new Error('MAINTENANCE_ACCOUNTING_UNPROVEN');
 }
-export async function checkMaintenanceServices(): Promise<void> {
-  // Order-creation preflights do not prove retry delivery during 503 or the
-  // independent payment service's writes. No environment success flag is proof.
-  throw new Error('MAINTENANCE_PAYMENT_BOUNDARY_UNPROVEN');
+export async function checkMaintenanceServices(context?: ServicesContext): Promise<void> {
+  const parsed = parseServicesContext(context);
+  // Schema/record verification may take time: never reuse its starting clock.
+  await readServicesEvidence({ ...parsed, nowMs: Date.now() });
 }
 export async function verifyProductionMaintenanceReadiness(
   identity: MaintenanceIdentity,
   expectedIdentity: MaintenanceIdentity,
+  context?: ServicesContext,
 ): Promise<void> {
+  const services = parseServicesContext(context);
+  if (
+    services.stage !== 'preopen' ||
+    services.identity?.candidate !== identity.candidate ||
+    services.identity?.bootId !== identity.bootId
+  )
+    throw new Error('MAINTENANCE_IDENTITY_MISMATCH');
   let query: ReadinessQuery;
   await verifyMaintenanceReadiness({
     identity,
@@ -151,6 +164,6 @@ export async function verifyProductionMaintenanceReadiness(
       await checkMaintenanceSchema(query);
     },
     recordsCheck: () => checkMaintenanceRecords(query),
-    servicesCheck: checkMaintenanceServices,
+    servicesCheck: () => checkMaintenanceServices(services),
   });
 }

@@ -7,9 +7,13 @@ const seam = vi.hoisted(() => ({
   mode: vi.fn(() => false),
   ordinary: vi.fn(),
   readiness: vi.fn(),
+  context: vi.fn(),
 }));
 vi.mock('./execution/ordinary-maintenance-readiness.js', () => ({
   verifyProductionMaintenanceReadiness: seam.readiness,
+}));
+vi.mock('./execution/ordinary-maintenance-services.js', () => ({
+  readActiveServicesContext: seam.context,
 }));
 vi.mock('./execution/ordinary-maintenance-mode.js', () => ({
   ORDINARY_MAINTENANCE_DIRECTORY: '/var/lib/holaday/ordinary-maintenance',
@@ -33,6 +37,16 @@ beforeEach(() => {
   seam.mode.mockReset().mockReturnValue(false);
   seam.ordinary.mockReset();
   seam.readiness.mockReset();
+  seam.context.mockReset().mockImplementation(async (identity) => ({
+    attempt: '11111111-1111-4111-8111-111111111111',
+    candidate: identity.candidate,
+    configDigest: 'c'.repeat(64),
+    migrationDigest: 'd'.repeat(64),
+    inventoryDigest: 'e'.repeat(64),
+    stage: 'preopen',
+    nowMs: Date.now(),
+    identity,
+  }));
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -86,12 +100,34 @@ it('binds actual read-only readiness to the original process identity and propag
   seam.ordinary.mockReturnValue({ startControl: vi.fn(async () => {}) });
   const { launchApplication } = await load();
   await launchApplication();
-  const input = seam.ordinary.mock.calls[0]![0];
+  const input = seam.ordinary.mock.calls[0]?.[0];
+  if (!input) throw new Error('Missing ordinary application');
   seam.readiness.mockRejectedValue(new Error('MAINTENANCE_PAYMENT_BOUNDARY_UNPROVEN'));
   await expect(input.verifyReady(input.identity)).rejects.toThrow(
     'MAINTENANCE_PAYMENT_BOUNDARY_UNPROVEN',
   );
-  expect(seam.readiness).toHaveBeenCalledWith(input.identity, input.identity);
+  expect(seam.readiness).toHaveBeenCalledWith(
+    input.identity,
+    input.identity,
+    expect.objectContaining({ stage: 'preopen', identity: input.identity }),
+  );
+});
+it('cannot open when the protected active report is unavailable and re-reads on another attempt', async () => {
+  vi.stubEnv('HOLADAY_ORDINARY_CANDIDATE', 'a'.repeat(40));
+  seam.mode.mockReturnValue(true);
+  seam.ordinary.mockReturnValue({ startControl: vi.fn(async () => {}) });
+  const { launchApplication } = await load();
+  await launchApplication();
+  const input = seam.ordinary.mock.calls[0]?.[0];
+  if (!input) throw new Error('Missing ordinary application');
+  seam.context.mockRejectedValueOnce(new Error('MAINTENANCE_PAYMENT_BOUNDARY_UNPROVEN'));
+  await expect(input.verifyReady(input.identity)).rejects.toThrow(
+    'MAINTENANCE_PAYMENT_BOUNDARY_UNPROVEN',
+  );
+  expect(seam.readiness).not.toHaveBeenCalled();
+  await input.verifyReady(input.identity);
+  expect(seam.readiness).toHaveBeenCalledOnce();
+  expect(seam.context).toHaveBeenCalledTimes(2);
 });
 it('controlled entry must finish closed boot before importing application modules', async () => {
   vi.stubEnv('HOLADAY_POOL_BOOT', 'b'.repeat(32));

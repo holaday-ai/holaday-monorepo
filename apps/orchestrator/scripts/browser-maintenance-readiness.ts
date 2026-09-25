@@ -5,34 +5,55 @@ import {
   checkMaintenanceServices,
   verifyProductionMaintenanceReadiness,
 } from '../src/execution/ordinary-maintenance-readiness.js';
+import {
+  type ServicesContext,
+  parseServicesContext,
+} from '../src/execution/ordinary-maintenance-services.js';
 import { readOrdinaryMaintenanceRecord } from '../src/execution/ordinary-maintenance-store.js';
 export { verifyMaintenanceReadiness } from '../src/execution/ordinary-maintenance-readiness.js';
 
 export async function runMaintenanceReadinessCommand(
   args: string[],
   operations: {
-    services(): Promise<void>;
+    services(context: ServicesContext): Promise<void>;
     readIdentity(): { candidate: string; bootId: string };
     verify(
       identity: { candidate: string; bootId: string },
       expected: { candidate: string; bootId: string },
+      context: ServicesContext,
     ): Promise<void>;
     closeDatabase(): Promise<void>;
   },
 ): Promise<void> {
-  if (args.length === 1 && args[0] === 'services') return operations.services();
+  const [command, attempt, candidate, configDigest, migrationDigest, inventoryDigest, bootId] =
+    args;
   if (
-    args.length !== 2 ||
-    !/^[a-f0-9]{40}$/.test(args[0] ?? '') ||
-    !/^[a-f0-9]{32}$/.test(args[1] ?? '')
+    !((command === 'services' && args.length === 6) || (command === 'verify' && args.length === 7))
   )
     throw new Error('MAINTENANCE_READINESS_INPUT');
-  const expected = { candidate: args[0]!, bootId: args[1]! };
+  let context: ServicesContext;
+  try {
+    context = parseServicesContext({
+      attempt,
+      candidate,
+      configDigest,
+      migrationDigest,
+      inventoryDigest,
+      stage: command === 'services' ? 'prepare' : 'preopen',
+      nowMs: Date.now(),
+      ...(command === 'verify' ? { identity: { candidate, bootId } } : {}),
+    });
+  } catch {
+    throw new Error('MAINTENANCE_READINESS_INPUT');
+  }
+  if (command === 'services') return operations.services(context);
+  const expected = context.identity;
+  if (!expected) throw new Error('MAINTENANCE_READINESS_INPUT');
   const identity = operations.readIdentity();
   if (identity.candidate !== expected.candidate || identity.bootId !== expected.bootId)
     throw new Error('MAINTENANCE_IDENTITY_MISMATCH');
   try {
-    await operations.verify(identity, expected);
+    await operations.verify(identity, expected, context);
   } finally {
     await operations.closeDatabase();
   }
