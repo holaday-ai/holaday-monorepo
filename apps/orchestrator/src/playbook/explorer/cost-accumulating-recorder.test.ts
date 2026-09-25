@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { estimateCostUsd } from '../../agent/llm-call-recorder.js';
 import type { LlmCallRecord, LlmCallRecorder } from '../../agent/llm-call-recorder.js';
 import { CostAccumulatingRecorder } from './cost-accumulating-recorder.js';
+import { checkBreaker } from './explorer-budget.js';
 
 const call = (over: Partial<LlmCallRecord> = {}): LlmCallRecord => ({
   userExternalId: 'usr_x',
@@ -17,6 +18,13 @@ const call = (over: Partial<LlmCallRecord> = {}): LlmCallRecord => ({
 });
 
 describe('CostAccumulatingRecorder — fail-closed in-memory cost (breaker source)', () => {
+  it('unknown Qwen pricing trips the budget instead of using Opus prices', async () => {
+    const r = new CostAccumulatingRecorder();
+    await r.record(call({ provider: 'alibaba-model-studio', model: 'qwen-test' }));
+    expect(Number.isFinite(r.total)).toBe(false);
+    expect(checkBreaker(r.total, 5, 'browser').tripped).toBe(true);
+    expect(checkBreaker(Number.NaN, 5, 'browser').tripped).toBe(true);
+  });
   it('sums cost across turns (matches estimateCostUsd)', async () => {
     const r = new CostAccumulatingRecorder();
     await r.record(call());

@@ -1,5 +1,5 @@
 import { newExternalId } from '@holaday/shared-types';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { llmCalls } from '../db/schema/llm-calls.js';
 import { tasks } from '../db/schema/tasks.js';
@@ -48,10 +48,12 @@ export interface LlmCallRecord {
     | 'skill.body'
     | 'safety.filter'
     | 'supercar.turn';
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadInputTokens?: number;
-  cacheCreationInputTokens?: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadInputTokens?: number | null;
+  cacheCreationInputTokens?: number | null;
+  region?: string;
+  providerRequestId?: string;
   latencyMs: number;
   status: 'ok' | 'error';
   errorMessage?: string;
@@ -113,6 +115,73 @@ export function estimateCostUsd(
   return input + output + cacheRead + cacheWrite;
 }
 
+function tokenCount(value: number | null | undefined): number | null {
+  return typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= 2_147_483_647
+    ? value
+    : null;
+}
+
+/** Provider-aware persistence/budget contract. Never applies fallback Opus rates. */
+export function accountLlmCall(call: LlmCallRecord) {
+  const promptTokens = tokenCount(call.inputTokens);
+  const completionTokens = tokenCount(call.outputTokens);
+  // Legacy Anthropic callers omit unsupported cache counters; explicit null stays unknown.
+  const cacheReadTokens = tokenCount(
+    call.cacheReadInputTokens === undefined && call.provider === 'anthropic'
+      ? 0
+      : call.cacheReadInputTokens,
+  );
+  const cacheWriteTokens = tokenCount(
+    call.cacheCreationInputTokens === undefined && call.provider === 'anthropic'
+      ? 0
+      : call.cacheCreationInputTokens,
+  );
+  // Base prompt/completion coverage, matching NeutralMessagesResponse. Cache
+  // counters stay independently nullable; combined totals require all four.
+  const usageStatus =
+    promptTokens === null && completionTokens === null
+      ? 'missing'
+      : promptTokens === null || completionTokens === null
+        ? 'partial'
+        : 'complete';
+  const priced =
+    call.provider === 'anthropic' && Object.hasOwn(MODEL_PRICES, baseModelId(call.model));
+  const costStatus =
+    usageStatus !== 'complete'
+      ? 'usage_missing'
+      : !priced
+        ? 'unpriced'
+        : cacheReadTokens === null || cacheWriteTokens === null
+          ? 'usage_missing'
+          : 'estimated';
+  const costUsd =
+    costStatus === 'estimated' &&
+    promptTokens !== null &&
+    completionTokens !== null &&
+    cacheReadTokens !== null &&
+    cacheWriteTokens !== null
+      ? estimateCostUsd(
+          call.model,
+          promptTokens,
+          completionTokens,
+          cacheReadTokens,
+          cacheWriteTokens,
+        )
+      : null;
+  return {
+    promptTokens,
+    completionTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    usageStatus,
+    costStatus,
+    costUsd,
+  };
+}
+
 /**
  * DB-backed recorder. Resolves user (and optionally task / step) external
  * ids to internal bigints, estimates cost, and inserts one row. Errors
@@ -145,20 +214,12 @@ export class DrizzleLlmCallRecorder implements LlmCallRecorder {
         const [taskRow] = await this.db
           .select({ id: tasks.id })
           .from(tasks)
-          .where(eq(tasks.externalId, call.taskExternalId))
+          .where(and(eq(tasks.externalId, call.taskExternalId), eq(tasks.userId, userRow.id)))
           .limit(1);
         taskInternalId = taskRow?.id ?? null;
       }
 
-      const cacheRead = call.cacheReadInputTokens ?? 0;
-      const cacheWrite = call.cacheCreationInputTokens ?? 0;
-      const costUsd = estimateCostUsd(
-        call.model,
-        call.inputTokens,
-        call.outputTokens,
-        cacheRead,
-        cacheWrite,
-      );
+      const accounting = accountLlmCall(call);
 
       await this.db.insert(llmCalls).values({
         externalId: newExternalId('llmCall'),
@@ -167,16 +228,19 @@ export class DrizzleLlmCallRecorder implements LlmCallRecorder {
         provider: call.provider,
         model: call.model,
         purpose: call.purpose,
-        promptTokens: call.inputTokens,
-        completionTokens: call.outputTokens,
-        cacheReadTokens: cacheRead,
-        cacheWriteTokens: cacheWrite,
-        // drizzle MySQL decimal accepts a string; pass with 6-digit precision.
-        costUsd: costUsd.toFixed(6),
+        ...accounting,
+        costUsd: accounting.costUsd?.toFixed(6) ?? null,
+        region: call.region ?? null,
+        providerRequestId: call.providerRequestId?.slice(0, 128) ?? null,
         latencyMs: call.latencyMs,
         status: call.status,
         ...(call.errorMessage ? { errorMessage: call.errorMessage } : {}),
-        ...(call.requestMeta ? { requestMeta: call.requestMeta } : {}),
+        requestMeta: {
+          ...call.requestMeta,
+          accountingVersion: 1,
+          pricingSource:
+            accounting.costStatus === 'estimated' ? 'legacy-anthropic-table-2026-04-15' : null,
+        },
       });
     } catch (err) {
       this.opts.onError?.(err, call);

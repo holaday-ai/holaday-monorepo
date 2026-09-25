@@ -1,19 +1,65 @@
 import { defineManifest } from '@crxjs/vite-plugin';
+import { version } from './package.json';
 
 const includeDevWorkbenchHosts = process.env.VITE_EXTENSION_INCLUDE_DEV_HOSTS === '1';
-const workbenchMatches = [
-  'https://holaday.ai/*',
-  'https://*.holaday.ai/*',
-  'https://hd-app.orangebench.tech/*',
-  ...(includeDevWorkbenchHosts
-    ? [
-        'http://localhost/*',
-        'http://localhost:*/*',
-        'http://127.0.0.1/*',
-        'http://127.0.0.1:*/*',
-      ]
-    : []),
-];
+const localChromeQa = process.env.VITE_LOCAL_CHROME_QA === '1';
+const qaEndpointKeys = [
+  'VITE_WORKBENCH_URL',
+  'VITE_ORCHESTRATOR_HTTP',
+  'VITE_ORCHESTRATOR_WS',
+] as const;
+const qaEndpointValues = qaEndpointKeys.map((key) => process.env[key]);
+
+// Manifest imports run before Vite loads env files. Fail closed if those
+// files would make the runtime differ from the manifest's explicit QA config.
+export function assertLocalQaBuildEnv(env: Record<string, unknown>): void {
+  if (
+    (env.VITE_LOCAL_CHROME_QA === '1') !== localChromeQa ||
+    (localChromeQa && qaEndpointKeys.some((key, index) => env[key] !== qaEndpointValues[index]))
+  ) {
+    throw new Error('Local Chrome QA configuration must match explicit shell build variables');
+  }
+}
+
+function localQaMatch(value: string | undefined, protocol: string): string {
+  const url = new URL(value ?? '');
+  if (
+    url.protocol !== protocol ||
+    !['127.0.0.1', 'localhost'].includes(url.hostname) ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error('Local Chrome QA requires explicit loopback endpoints');
+  }
+  return `http://${url.hostname}/*`;
+}
+const qaWorkbenchMatch = localChromeQa ? localQaMatch(process.env.VITE_WORKBENCH_URL, 'http:') : '';
+const qaHostMatches = localChromeQa
+  ? [
+      ...new Set([
+        qaWorkbenchMatch,
+        localQaMatch(process.env.VITE_ORCHESTRATOR_HTTP, 'http:'),
+        localQaMatch(process.env.VITE_ORCHESTRATOR_WS, 'ws:'),
+      ]),
+    ]
+  : [];
+const workbenchMatches = localChromeQa
+  ? [qaWorkbenchMatch]
+  : [
+      'https://holaday.ai/*',
+      'https://*.holaday.ai/*',
+      'https://hd-app.orangebench.tech/*',
+      ...(includeDevWorkbenchHosts
+        ? [
+            'http://localhost/*',
+            'http://localhost:*/*',
+            'http://127.0.0.1/*',
+            'http://127.0.0.1:*/*',
+          ]
+        : []),
+    ];
 
 // MV3 manifest for the HOLA DAY extension:
 // - service worker = src/background/index.ts (TS, ESM)
@@ -25,8 +71,8 @@ const workbenchMatches = [
 
 export default defineManifest({
   manifest_version: 3,
-  name: 'HOLA DAY',
-  version: '0.0.1',
+  name: localChromeQa ? 'HOLA DAY · Local QA' : 'HOLA DAY',
+  version: localChromeQa ? '0.0.3' : version,
   description: 'Connect HOLA DAY to your browser so tasks can use the pages you choose.',
   minimum_chrome_version: '120',
 
@@ -52,7 +98,7 @@ export default defineManifest({
     'tabs',
     'scripting',
     'activeTab',
-    'cookies',
+    ...(localChromeQa ? [] : ['cookies' as const]),
     'webNavigation',
     'alarms',
     // Side Panel surface (Phase 14). Side Panel needs Chrome 114+;
@@ -72,10 +118,10 @@ export default defineManifest({
     // and POSTs the per-domain aggregate to
     // /extension/browsing-history. Lets the orchestrator's site-config
     // router prefer configs for domains the user actually visits.
-    'history',
+    ...(localChromeQa ? [] : ['history' as const]),
   ],
 
-  host_permissions: ['<all_urls>'],
+  host_permissions: localChromeQa ? qaHostMatches : ['<all_urls>'],
 
   side_panel: {
     default_path: 'src/sidepanel/index.html',

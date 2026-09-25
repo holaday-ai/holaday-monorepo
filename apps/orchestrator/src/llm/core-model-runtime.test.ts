@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+import * as observationSink from './core-model-observation.js';
 import { resolveCoreModelRuntime } from './core-model-runtime.js';
 import type { MessagesAdapter } from './messages-adapter.js';
 import { MessagesAdapterError } from './messages-adapter.js';
 import type { ResponsesAdapter } from './responses-adapter.js';
 import { ResponsesAdapterError } from './responses-adapter.js';
-import * as observationSink from './core-model-observation.js';
 
 const ENVIRONMENT = {
   NODE_ENV: 'test' as const,
@@ -33,6 +33,26 @@ const ENVIRONMENT = {
   QWEN_VERIFY_STRICT_MODEL: 'qwen3.8-max',
   QWEN_VISION_MODEL: 'qwen3.8-max',
 };
+
+it('resolves the browser vision lane using the persisted region without a Responses endpoint', () => {
+  const runtime = resolveCoreModelRuntime({
+    environment: {
+      ...ENVIRONMENT,
+      QWEN_CORE_ENABLED_LANES: 'browser',
+      DASHSCOPE_INTL_RESPONSES_BASE_URL: 'invalid-unused-endpoint',
+    },
+    actorExternalId: 'usr_allowed',
+    lane: 'browser',
+    ownership: { scope: 'personal', userRegion: 'intl' },
+  });
+  expect(runtime.kind).toBe('ready');
+  if (runtime.kind !== 'ready') throw new Error('Browser runtime unavailable');
+  expect(runtime.messages('vision').metadata).toMatchObject({
+    provider: 'alibaba-model-studio',
+    model: ENVIRONMENT.QWEN_VISION_MODEL,
+    region: 'intl',
+  });
+});
 
 function buildMessagesAdapter(model = 'qwen3.8-flash'): MessagesAdapter {
   const metadata = {
@@ -100,23 +120,36 @@ function baseInput(overrides: Record<string, unknown> = {}) {
 
 describe('resolveCoreModelRuntime', () => {
   it('observes actual calls by default even when production wiring supplies no callback', async () => {
-    const observe = vi.spyOn(observationSink, 'recordCoreModelObservation').mockImplementation(() => {});
+    const observe = vi
+      .spyOn(observationSink, 'recordCoreModelObservation')
+      .mockImplementation(() => {});
     try {
       const runtime = resolveCoreModelRuntime(baseInput());
       if (runtime.kind !== 'ready') throw new Error('expected ready runtime');
       await runtime.responses('standard').stream({ input: 'private request' });
       expect(observe).toHaveBeenCalledTimes(1);
-      expect(observe).toHaveBeenCalledWith(expect.objectContaining({
-        lane: 'generate', protocol: 'responses', region: 'intl', outcome: 'success',
-      }));
+      expect(observe).toHaveBeenCalledWith(
+        expect.objectContaining({
+          lane: 'generate',
+          protocol: 'responses',
+          region: 'intl',
+          outcome: 'success',
+        }),
+      );
       expect(JSON.stringify(observe.mock.calls)).not.toContain('private request');
-    } finally { observe.mockRestore(); }
+    } finally {
+      observe.mockRestore();
+    }
   });
 
   it('does not report a token-limited response as a successful complete response', async () => {
     const adapter = buildResponsesAdapter();
     const complete = await adapter.stream({ input: 'fixture' });
-    adapter.stream = async () => ({ ...complete, status: 'incomplete', incompleteReason: 'max_output_tokens' });
+    adapter.stream = async () => ({
+      ...complete,
+      status: 'incomplete',
+      incompleteReason: 'max_output_tokens',
+    });
     const observe = vi.fn();
     const runtime = resolveCoreModelRuntime(baseInput({ createResponses: () => adapter, observe }));
     if (runtime.kind !== 'ready') throw new Error('expected ready runtime');
@@ -235,7 +268,8 @@ describe('resolveCoreModelRuntime', () => {
     expect(observe).toHaveBeenCalledTimes(1);
     const observation = observe.mock.calls[0]?.[0];
     expect(observation).toEqual({
-      lane: 'generate', protocol: 'messages',
+      lane: 'generate',
+      protocol: 'messages',
       provider: 'alibaba-model-studio',
       region: 'intl',
       deploymentScope: 'international',
@@ -257,7 +291,8 @@ describe('resolveCoreModelRuntime', () => {
         'inputTokens',
         'outputTokens',
         'latencyMs',
-        'lane', 'protocol',
+        'lane',
+        'protocol',
       ].sort(),
     );
   });
@@ -287,7 +322,8 @@ describe('resolveCoreModelRuntime', () => {
         .create({ maxTokens: 32, messages: [{ role: 'user', content: 'private' }] }),
     ).rejects.toMatchObject({ code: 'REQUEST_TIMEOUT' });
     expect(observe).toHaveBeenCalledWith({
-      lane: 'generate', protocol: 'messages',
+      lane: 'generate',
+      protocol: 'messages',
       provider: 'alibaba-model-studio',
       region: 'intl',
       deploymentScope: 'international',
@@ -310,7 +346,8 @@ describe('resolveCoreModelRuntime', () => {
     await result.responses('reasoning').stream({ input: 'private', tools: [] });
 
     expect(observe).toHaveBeenCalledWith({
-      lane: 'generate', protocol: 'responses',
+      lane: 'generate',
+      protocol: 'responses',
       provider: 'alibaba-model-studio',
       region: 'intl',
       deploymentScope: 'international',

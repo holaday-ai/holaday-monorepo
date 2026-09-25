@@ -39,6 +39,7 @@
  *   /ws                     → WS handshake → 4002 (proxied)
  */
 const IS_PROD = import.meta.env.PROD;
+export const LOCAL_CHROME_QA = import.meta.env.VITE_LOCAL_CHROME_QA === '1';
 
 const PROD_HTTP = 'https://hd-app.orangebench.tech/api';
 const PROD_WS_ENDPOINTS = [
@@ -62,9 +63,12 @@ export const ORCHESTRATOR_WS_ENDPOINTS = import.meta.env.VITE_ORCHESTRATOR_WS
 const ORCHESTRATOR_WS_HEALTH_URL_OVERRIDE = import.meta.env.VITE_ORCHESTRATOR_WS_HEALTH_URL;
 
 export const ORCHESTRATOR_WS_HEALTH_URL =
-  ORCHESTRATOR_WS_HEALTH_URL_OVERRIDE ?? (IS_PROD ? wsEndpointToHealthUrl(ORCHESTRATOR_WS) : null);
+  getOrchestratorWsHealthUrl(ORCHESTRATOR_WS);
 
 export function getOrchestratorWsHealthUrl(endpoint: string): string | null {
+  // Local QA uses separate HTTP and raw WebSocket listeners, unlike the
+  // public reverse proxy. The WS port answers plain HTTP requests with 426.
+  if (LOCAL_CHROME_QA) return new URL('/healthz', ORCHESTRATOR_HTTP).href;
   return ORCHESTRATOR_WS_HEALTH_URL_OVERRIDE ?? (IS_PROD ? wsEndpointToHealthUrl(endpoint) : null);
 }
 
@@ -99,3 +103,16 @@ function wsEndpointToHealthUrl(endpoint: string): string | null {
  */
 export const WORKBENCH_URL =
   import.meta.env.VITE_WORKBENCH_URL ?? 'https://hd-app.orangebench.tech/app';
+
+/** QA must never copy authentication from production or another local app. */
+export function isLocalQaWorkbenchUrl(value: string): boolean {
+  try {
+    const expected = new URL(WORKBENCH_URL);
+    const actual = new URL(value);
+    return expected.protocol === 'http:' &&
+      ['127.0.0.1', 'localhost'].includes(expected.hostname) &&
+      actual.origin === expected.origin && !actual.username && !actual.password;
+  } catch {
+    return false;
+  }
+}

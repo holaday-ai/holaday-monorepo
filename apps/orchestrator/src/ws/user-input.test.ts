@@ -2,6 +2,15 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { clientVisionUserInputSchema } from '@holaday/shared-types';
 import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 import { dispatchUserInput } from './server.js';
+import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
+
+it('does not let the legacy input channel bypass a controlled browser runner', async () => {
+  const { executor, calls } = fakeExecutor();
+  const binding = browserControlSessions.start({ taskId: 'tsk_owned', userId: 'usr_owner', executor });
+  await dispatchUserInput({ type: 'client.vision.user_input', taskId: 'tsk_owned', kind: 'click', x: 1, y: 2 }, executor, 'usr_owner');
+  expect(calls).toEqual([]);
+  binding.finish();
+});
 
 beforeAll(() => {
   process.env.JWT_SECRET ??= 'test-secret-must-be-at-least-32-characters-long-yes';

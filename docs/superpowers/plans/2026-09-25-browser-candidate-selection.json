@@ -1,0 +1,1332 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Explicit local candidate patch selection, not deployment approval",
+  "sourceWorktree": "/Users/yaleiqi/holaday-monorepo/.worktrees/deploy-pr190-application",
+  "sourceBranch": "codex/qwen-safe-drain",
+  "baseCommit": "137cc94e5cc9577233968dab7712acc01ab68286",
+  "candidateBranch": "codex/browser-release-candidate-20260925",
+  "serverCheckout": "107857fe70503e30691073f267d87275596edb20",
+  "inheritedCommitsAfterServer": 82,
+  "inheritedChangedPaths": 411,
+  "included": [
+    {
+      "path": "apps/extension/manifest.config.ts",
+      "kind": "modified",
+      "group": "extension-driver",
+      "bytes": 5217,
+      "sha256": "6642d6749b5d96d5ffe916c747b89a566446b2a3defbf885197b7d664e9dc1fe"
+    },
+    {
+      "path": "apps/extension/package.json",
+      "kind": "modified",
+      "group": "extension-driver",
+      "bytes": 989,
+      "sha256": "db5dc9ed76d77e6d00cee35aeb18dc05e8f4260e1b177904f2944170eccd2ac7"
+    },
+    {
+      "path": "apps/extension/src/background/auth-bridge-trust.ts",
+      "kind": "modified",
+      "group": "extension-driver",
+      "bytes": 1621,
+      "sha256": "2cdb7199df6eb9c1fd8298a778b7617f8d63d4024e3141b3e8ab819f80312e2c"
+    },
+    {
+      "path": "apps/extension/src/background/browser-execution-ownership.test.ts",
+      "kind": "untracked",
+      "group": "extension-driver",
+      "bytes": 2100,
+      "sha256": "a11804117a22720dbac645460660064107a7a31bbfad653be741fb033125001a"
+    },
+    {
+      "path": "apps/extension/src/background/browser-execution-ownership.ts",
+      "kind": "untracked",
+      "group": "extension-driver",
+      "bytes": 1566,
+      "sha256": "6037cb525bd4dff97ef29de23a5f0528efb9574aa912a5624a694743298063dd"
+    },
+    {
+      "path": "apps/extension/src/background/cdp-actions.test.ts",
+      "kind": "modified",
+      "group": "extension-driver",
+      "bytes": 53304,
+      "sha256": "1c10fff0f2392fd94291c5fd9fa02e949a490906502cca1d25e6e132840c4c6f"
+    },
+    {
+      "path": "apps/extension/src/background/cdp-actions.ts",
+      "kind": "modified",
+      "group": "extension-driver",
+      "bytes": 41433,
+      "sha256": "8fd86c3def876500fa71836c3ef6f1ab0b0352728583db68bb5caf169d0e216b"
+    },
+    {
+      "path": "apps/extension/src/background/cookie-bridge.ts",
+      "kind": "modified",
+      "group": "extension-driver",
+      "bytes": 4830,
+      "sha256": "e516f706cc99a721813da0527cc9c5cbee3e4d05bf3e6a2d053d81ca31dffb24"
+    },
+    {
+      "path": "apps/extension/src/background/cookie-sync.ts",
+      "kind": "modified",
+      "group": "extension-driver",
+      "bytes": 6936,
+      "sha256": "e3e10497fa137d7aeb52b184e2eae0853b8c59253e9539bc48db1253e5a4aa8e"
+    },
+    {
+      "path": "apps/extension/src/background/extension-tools.selected-session.test.ts",
+      "kind": "untracked",
+      "group": "extension-driver",
+      "bytes": 4170,
+      "sha256": "47e5f5105c49cbd1d4d888b83bd28074b441fbceaa50c2fc275614527d5f1225"
+    },
+    {
+      "path": "apps/extension/src/background/extension-tools.selected-tab.test.ts",
+      "kind": "untracked",
+      "group": "extension-driver",
+      "bytes": 13655,
+      "sha256": "2ae56dd89bbacbf6e73ebf38ec0df3522e06d402ca401e9f6b395578fd4cb6a6"
+    },
+    {
+      "path": "apps/extension/src/background/extension-tools.ts",
+      "kind": "modified",
+      "group": "extension-driver",
+      "bytes": 34755,
+      "sha256": "9d502c6e5fca2ef504cee194f067c1d00596296085f13a185961fa361a0a5a3c"
+    },
+    {
+      "path": "apps/extension/src/background/history-sync.ts",
+      "kind": "modified",
+      "group": "extension-driver",
+      "bytes": 10858,
+      "sha256": "d769ab3b9c9b132f5b3ca95271c59f5c141a52141bfd0ab09df81656d4b65f57"
+    },
+    {
+      "path": "apps/extension/src/background/index.ts",
+      "kind": "modified",
+      "group": "extension-driver",
+      "bytes": 71058,
+      "sha256": "7fe00098488cad6921cf17d38e9d01a47a57d5f886b7a90683c7c9b7f0046342"
+    },
+    {
+      "path": "apps/extension/src/background/selected-chrome-bridge.test.ts",
+      "kind": "untracked",
+      "group": "extension-driver",
+      "bytes": 7068,
+      "sha256": "1a7ce5aaccc0dc2f430ef86d8c82cd5a95b61a0fea57a4fffa4acdbeb934c139"
+    },
+    {
+      "path": "apps/extension/src/background/selected-chrome-bridge.ts",
+      "kind": "untracked",
+      "group": "extension-driver",
+      "bytes": 1301,
+      "sha256": "81e2bcc0d12656db07c95493f5bd0824100c31b791749175995f33f75fba8855"
+    },
+    {
+      "path": "apps/extension/src/background/selected-chrome-session.test.ts",
+      "kind": "untracked",
+      "group": "extension-driver",
+      "bytes": 12871,
+      "sha256": "789450d20b61b974bd7861b0ade748e4b0d136c3acbe3e029db927b345206cbf"
+    },
+    {
+      "path": "apps/extension/src/background/selected-chrome-session.ts",
+      "kind": "untracked",
+      "group": "extension-driver",
+      "bytes": 9043,
+      "sha256": "b9f214c626e738ac10f3ecfbacfbd103498f73248a5f2a6e2f2dc9dfbeae65de"
+    },
+    {
+      "path": "apps/extension/src/background/selected-chrome-transport.test.ts",
+      "kind": "untracked",
+      "group": "extension-driver",
+      "bytes": 13377,
+      "sha256": "2a428d420d67b6d7ca451ebf12e117e14bffc8cad3e803c344d23da63b601983"
+    },
+    {
+      "path": "apps/extension/src/background/selected-chrome-transport.ts",
+      "kind": "untracked",
+      "group": "extension-driver",
+      "bytes": 8855,
+      "sha256": "cdbe9fcc8c4eca4df5d972b705191881b2792f6e3bc204e9a3535083d13af115"
+    },
+    {
+      "path": "apps/extension/src/background/selected-tab-read.ts",
+      "kind": "untracked",
+      "group": "extension-driver",
+      "bytes": 5134,
+      "sha256": "bbce0aec9206e4e559569b7e7399dfc1b3fa7c205dbfb273b0a0895f69349041"
+    },
+    {
+      "path": "apps/extension/src/content/auth-bridge.ts",
+      "kind": "modified",
+      "group": "extension-driver",
+      "bytes": 8266,
+      "sha256": "1eb0fd4f7bae477751b376fd288af1bea11b1c3696e61620a95fd58e060d7105"
+    },
+    {
+      "path": "apps/extension/src/shared/auto-login.ts",
+      "kind": "modified",
+      "group": "extension-driver",
+      "bytes": 7155,
+      "sha256": "13cdafe5ccf0d73d7642c8ed5c7b99af685aef9111c70b4aadf06c4f5a7438c9"
+    },
+    {
+      "path": "apps/extension/src/shared/config.ts",
+      "kind": "modified",
+      "group": "extension-driver",
+      "bytes": 4880,
+      "sha256": "6b1037c5abdd03b7cac5dd32efc9a0066d58c6671ff36c178df7a21049b6b929"
+    },
+    {
+      "path": "apps/extension/src/shared/local-chrome-qa.test.ts",
+      "kind": "untracked",
+      "group": "extension-driver",
+      "bytes": 11152,
+      "sha256": "e3f3e6f6b6b43f0d6265f8bb158df664d0b65821710b7f1d7880f2e20846473d"
+    },
+    {
+      "path": "apps/extension/src/shared/open-workbench.ts",
+      "kind": "modified",
+      "group": "extension-driver",
+      "bytes": 8307,
+      "sha256": "fccb44d15a6497a32bdb81793317c918cae61a5f6151eddfc3e01567e321a725"
+    },
+    {
+      "path": "apps/extension/vite.config.ts",
+      "kind": "modified",
+      "group": "extension-driver",
+      "bytes": 2163,
+      "sha256": "1ff6c5139f7ae1f5c056292b962020d6e33e8fc7e8fc3b177086c84b641f258e"
+    },
+    {
+      "path": "apps/orchestrator/drizzle/0060_llm_usage_accounting.sql",
+      "kind": "untracked",
+      "group": "accounting-quota",
+      "bytes": 913,
+      "sha256": "1f2a29df6b51565bed85db85ae37d0c2b8a070222adb2f0c37b585b8125ab65f"
+    },
+    {
+      "path": "apps/orchestrator/scripts/verify-db-schema.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 26432,
+      "sha256": "34834bd6f37b056dde13d54dc985e6d8eb417529a2933713f4617164f94725f7"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/llm-accounting.mysql.integration.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 7052,
+      "sha256": "e43a07e3666ff7a33baeafdc10d05242b46b0f73f577ce7aa949cc32d97d0cf7"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/llm-call-recorder.test.ts",
+      "kind": "modified",
+      "group": "accounting-quota",
+      "bytes": 4042,
+      "sha256": "35fa6d52b01036e44388b34bf62043d68a7081ccbf9c568ce44d23884a79129d"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/llm-call-recorder.ts",
+      "kind": "modified",
+      "group": "accounting-quota",
+      "bytes": 8979,
+      "sha256": "0410b66de6e3662d2203228bad871ffd163ca8428cc10dd5fb9f5db4f531ce74"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/llm-cost-summary.ts",
+      "kind": "untracked",
+      "group": "accounting-quota",
+      "bytes": 902,
+      "sha256": "812c6027d5ff07150ebfc35d14cdcb6e4c6191beee2d025a0301112c96842e8d"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/agent-loop.browser-control.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 30226,
+      "sha256": "fbf438946f3d567639c4f5c1557e3f624b0c58ae4f369d7c3c86a47b184aea6f"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/agent-loop.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 230401,
+      "sha256": "4207a644520e01c3c2cf3395f017f2c3032e8a021185beb7ed18e4fa95cd8912"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/browser-control-sessions.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 3842,
+      "sha256": "11822a18c1a7dedfd70cd42fc0fadd1505f42d6443e7b050120289c425d75289"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/browser-control-sessions.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 3971,
+      "sha256": "173deeb8b29277c58f31fc53cff18dfa1dbc187b06bb02d51978831179f5fdd2"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/browser-control.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 13554,
+      "sha256": "4aa92b58b9eb47acfa7c566266c8b1ad09d12d82fc8935230668aa80b3b2462f"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/browser-control.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 9597,
+      "sha256": "3a2af59a387a169e672c5a577a2f2f6f03c54358c04330a7b8c36b66816d651c"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/browser-coordinates.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 1907,
+      "sha256": "df7c98d7e30b29694c710feaab5fd87a631a5eb16831a0c256ac0930c0aa5980"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/browser-coordinates.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 1658,
+      "sha256": "ca1347f4c13a75296080a4dc427b79a36d85a6ec8fe06316dab60afe83857551"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/browser-messages.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 8022,
+      "sha256": "72af7370eace40ff3de32c79976d05546118b634df0c280db048042b286ec099"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/browser-messages.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 9254,
+      "sha256": "77e4cb7bb8ce529619fb500a19a3846ac4aabef1dc35fcaa42ef084fcabd870d"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/local-chrome-task-session.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 2276,
+      "sha256": "dc007341cbd6bfdb46bfa3ff53e5c2d9c8302811d7e8c562bf94e752cec5fd46"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/local-chrome-task-session.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 3670,
+      "sha256": "2e68564be5392600295eb18def740960ee0d353d1f88c90c5fc9bf7935cf1105"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/qwen-only-agent-loop.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 969,
+      "sha256": "6d972c59a56d59c4a8cbb0227fe0f6441e1ccc0a038988f43d13fa00fac78ceb"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/recorded-browser-adapter.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 3610,
+      "sha256": "279bec6918650ec39d20f55f8c643e60af5604bee37df9cf79eb4e21be102e76"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/recorded-browser-adapter.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 2140,
+      "sha256": "acc247598086b01ee62700e30ebe5caf6296c86b36a4de1891a73460929e9c84"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/selected-chrome-client.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 10004,
+      "sha256": "d2d9bdb7d9d37a98637daa7f9e44714191bd2971aa33c0f116e6744d90d2deb9"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/selected-chrome-client.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 9504,
+      "sha256": "356868d087c20ebe14aefc767a9f46c5c972f38e73e121ca2ec86bcffec8babc"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/selected-chrome-runner.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 53660,
+      "sha256": "83df7ebdd469f025cca063d571be7271a619579d7ce7507d0baebe608e45b109"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/selected-chrome-runner.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 41446,
+      "sha256": "4c2fdaeaf808552df0059e13ec54935b1f1ed3dfe223260677fd377961fcb796"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/system-prompt.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 17119,
+      "sha256": "cfc3c887c8e796496c9c650bae8015996ce75f0e4e83c1b8f0a3fd5ba99ea88b"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/task-failure-copy.test.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 4111,
+      "sha256": "d9db6c960204689703169e55aacf604b6b7cbc01a3affb70ccd46c539b7dab76"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/task-failure-copy.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 3580,
+      "sha256": "ccb7d97ac9acaa1522a44798d04f4e9b05520c88e0313238387915ac9f6e05be"
+    },
+    {
+      "path": "apps/orchestrator/src/api-keys/webhook-drain.ts",
+      "kind": "modified",
+      "group": "lifecycle-auth",
+      "bytes": 4174,
+      "sha256": "7683e84162c958b7150ce98fb58b207e3ffeac6ab1f894e6b71c3ec6569632fc"
+    },
+    {
+      "path": "apps/orchestrator/src/application-main.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 48085,
+      "sha256": "b7ffe447da7401656e50a382d820e139e7cfc2e08553b76f95c58bf596fd61da"
+    },
+    {
+      "path": "apps/orchestrator/src/auth/middleware-drain.test.ts",
+      "kind": "untracked",
+      "group": "lifecycle-auth",
+      "bytes": 7232,
+      "sha256": "3fcf9f0d9b5d8cba8b1ee882b491ffb3184836b0e7fa92dd96e62efbe8e5b39d"
+    },
+    {
+      "path": "apps/orchestrator/src/auth/middleware.ts",
+      "kind": "modified",
+      "group": "lifecycle-auth",
+      "bytes": 4304,
+      "sha256": "336d5eeeb4c0fa061ce572a7e0f9602c61b877a6b41be3c7143f1381a7c227dd"
+    },
+    {
+      "path": "apps/orchestrator/src/browser-pool/vnc-proxy.control.test.ts",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 1255,
+      "sha256": "03a787797a8193b174fb3b60b2e2f817ba5e13ba09e3b3885a13896291d17574"
+    },
+    {
+      "path": "apps/orchestrator/src/browser-pool/vnc-proxy.ts",
+      "kind": "modified",
+      "group": "pool-linux-runtime",
+      "bytes": 15348,
+      "sha256": "70b378f4c09cb835daa1195cfcd5867338d729481bf34d2b2d4f8d26c437e618"
+    },
+    {
+      "path": "apps/orchestrator/src/db/schema/llm-calls.ts",
+      "kind": "modified",
+      "group": "accounting-quota",
+      "bytes": 2182,
+      "sha256": "245dd4868781fd2b4e30f3e8909562b4f85af91c5a0337b185a02cca2fe3b6f2"
+    },
+    {
+      "path": "apps/orchestrator/src/execution/http-drain.test.ts",
+      "kind": "modified",
+      "group": "lifecycle-auth",
+      "bytes": 28155,
+      "sha256": "46adc94d2315df312fc5dc79f3f9e2c7344e5858fec5eebc3b9bd8af5c7b8065"
+    },
+    {
+      "path": "apps/orchestrator/src/execution/original-database-query.ts",
+      "kind": "untracked",
+      "group": "lifecycle-auth",
+      "bytes": 7395,
+      "sha256": "f124a5d85227879ebe9c0fc9e49c434c8bae6acbe6ef082407f38fb62d0d3650"
+    },
+    {
+      "path": "apps/orchestrator/src/llm/core-model-runtime.test.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 13810,
+      "sha256": "5b52d3f4f17d9d45612027c05fc4f4a649a8bfcaac478d6d6b0115d900f8578e"
+    },
+    {
+      "path": "apps/orchestrator/src/llm/core-model-runtime.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 8875,
+      "sha256": "2382fa92299a424346d08107f5db37e2d33e000211d6d9eb3a4297418c1d4cfb"
+    },
+    {
+      "path": "apps/orchestrator/src/llm/model-runtime-policy.test.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 3069,
+      "sha256": "dc8406d49dd23cc0f717bea141503e3b57695401b6264e96f580d904ded466f1"
+    },
+    {
+      "path": "apps/orchestrator/src/llm/model-runtime-policy.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 2365,
+      "sha256": "5b45ccd0a373ce063691a87a1796c2b8808234c377a4c57ea248261f06cc1694"
+    },
+    {
+      "path": "apps/orchestrator/src/llm/model-runtime-wiring.test.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 3446,
+      "sha256": "d61808314b77e9c6b13b83f27b81c3a040d4fef027c4056ca79f2899869095ad"
+    },
+    {
+      "path": "apps/orchestrator/src/partner/allocation-service.test.ts",
+      "kind": "modified",
+      "group": "accounting-quota",
+      "bytes": 31028,
+      "sha256": "f0fb13ded715b94d819fb91893a80fb91ddf8dfa4b684074ad2daeed881c4d0d"
+    },
+    {
+      "path": "apps/orchestrator/src/partner/allocation-service.ts",
+      "kind": "modified",
+      "group": "accounting-quota",
+      "bytes": 14933,
+      "sha256": "dafad4cc4eb75643c84e15359e5bed095f9095072abc621dbf69ff8e28d375c8"
+    },
+    {
+      "path": "apps/orchestrator/src/playbook/explorer/cost-accumulating-recorder.test.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 2769,
+      "sha256": "af8ffa97d356b9675e1ec70e5b9b53d65fde81c12fdad98ce99382fe1ed2e829"
+    },
+    {
+      "path": "apps/orchestrator/src/playbook/explorer/cost-accumulating-recorder.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 1869,
+      "sha256": "b01df1785dcd28db4d2b82158c87cf51486aeaf72779c032d7e9b5189d0bfe21"
+    },
+    {
+      "path": "apps/orchestrator/src/playbook/explorer/explorer-browse.test.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 13258,
+      "sha256": "b7a56ad9f204e5c20ab5c9d3f16477200ed8ef8e584d6d7416dcab9b1164a498"
+    },
+    {
+      "path": "apps/orchestrator/src/playbook/explorer/explorer-browse.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 14736,
+      "sha256": "4239cfe87f6697fe65e1e90fff45d099effa2b78e741073d1c7d1326b89c7832"
+    },
+    {
+      "path": "apps/orchestrator/src/playbook/explorer/explorer-budget.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 5568,
+      "sha256": "a7b49e1050ac8a0fb9b45751d65cab97ee9efdcc4cf3dad5e5451b4f2cbf7448"
+    },
+    {
+      "path": "apps/orchestrator/src/streaming/cdp-input.test.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 14367,
+      "sha256": "e9f2e4f70a4ba3c1c712aa30d1d8c39f39cc8c1267c20a1563ae2512ebab60c1"
+    },
+    {
+      "path": "apps/orchestrator/src/streaming/cdp-input.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 12008,
+      "sha256": "646ff0c2ed6ed7a94499757107718114b969dd9c7580092040f91975ccd45044"
+    },
+    {
+      "path": "apps/orchestrator/src/streaming/owned-screencast-input.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 2638,
+      "sha256": "fc5c0753aff1038b5912e55f122762b651cf723a42ef8655677d2b464c62a1bc"
+    },
+    {
+      "path": "apps/orchestrator/src/streaming/owned-screencast-input.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 1680,
+      "sha256": "4b6af79a5b20a9267a562b5ccae1cbcfc17ad5255d819233024886ffe61f3d8a"
+    },
+    {
+      "path": "apps/orchestrator/src/streaming/screencast-input-bridge.test.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 8297,
+      "sha256": "28ae4e722d972c47843a5f52634cc6fd0e3521b6abd28bf8945ed0afd6496340"
+    },
+    {
+      "path": "apps/orchestrator/src/streaming/screencast-input-bridge.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 3988,
+      "sha256": "a5cbece9ecd771fd79ce0a51655a41aacb7f6b574cdb9400a362061a67ca87a8"
+    },
+    {
+      "path": "apps/orchestrator/src/streaming/screencast-proxy.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 14562,
+      "sha256": "f58280a70ce2b725d122a8424547249ba5f86aa091740e9e9edf724214599fce"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/admin-finance.ts",
+      "kind": "modified",
+      "group": "accounting-quota",
+      "bytes": 22041,
+      "sha256": "cea410f9e5d847095bc85c921fdbf8b43efab59965a7bd8e5c439aa7a4ef1471"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/browser-control.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 8840,
+      "sha256": "ee19f4951dddd01a0c273cce0f4066c8fbda524c8e074fb95acf7859e3b58b31"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/browser-control.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 8262,
+      "sha256": "dd7f11e70ff9df5205b51545b3575156343d445a4db4a9755142791ec022f1f0"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/llm-calls.ts",
+      "kind": "modified",
+      "group": "accounting-quota",
+      "bytes": 6285,
+      "sha256": "25da40aea598dd3c9377d67e37c86a4ac0288dd8ab9a9ac2ddc74b2d5452b849"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/llm-cost-completeness.test.ts",
+      "kind": "untracked",
+      "group": "accounting-quota",
+      "bytes": 3942,
+      "sha256": "b45f897b506b1d6e1d7600a42dc74ae1c4b2631256289d06e27393718d96259a"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/local-chrome-selection.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 3004,
+      "sha256": "ac84f33fce0cecdf66b57bc2b86237868c6580481320dd9ab79573594d7b6ede",
+      "sourceSha256": "a77bdf07e76ce165d2a5f92107070d021ed666998dfa346bde98ec6b12a4015b",
+      "reviewFix": "Old extension discovery recovery guidance; timeout is not proof of incompatibility."
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/local-chrome-selection.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 3329,
+      "sha256": "26099df84ccc54cdae8754720dfc4de3cb47ab1d1f889908094883bf1420d3f7"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/task-tick-receipt.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 1559,
+      "sha256": "150b860487ff970d263e92ecf6c146195f7f0c95449a86f712aaa8e30940b09b"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/task-tick-receipt.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 595,
+      "sha256": "95b4d93e7ee8cef516aba20acfe81d720a3e6ed8d5ebebb9a9245e51bb0926ef"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/tasks-core-reply.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 7789,
+      "sha256": "d05e50a750a200f00c9054c6b298c585864508e0e09608c2578024130305a2d6"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/tasks.browser-qwen.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 18034,
+      "sha256": "070bcb108db0dbf6222ab8e4f068a043d9ec63ba9715a0527af64c793ffe8a18"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/tasks.core-continuation.test.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 51571,
+      "sha256": "8e89cfac9fce9ada6efe544411992e787d445760003af63afde14edb30f7d462"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/tasks.plan-mode.test.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 47408,
+      "sha256": "89cb31c665ef21ec69840f417f32da748738358f3657f9603a1c16345c2ff5e9"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/tasks.resume-verifier.test.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 14885,
+      "sha256": "8a2f59e20e6e9b49b276f0c551999bd6b2d235ac5ca08bb8e4aded470c5465b1"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/tasks.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 478246,
+      "sha256": "83b5feb10316e30097cfe43dbe8dc2b16584d5229bafa420984aae50172f48aa"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/trpc.ts",
+      "kind": "modified",
+      "group": "lifecycle-auth",
+      "bytes": 3918,
+      "sha256": "0ba7332ccab166eb9522cc408f8b16061a59701c6dcf2c0d85db5f41071f0e8f"
+    },
+    {
+      "path": "apps/orchestrator/src/ws/extension-hello-race.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 1802,
+      "sha256": "6dd21e6ca6157a6d570b36b3db4d716ed1a665a7e1a17e189b010345e5bfc7a6"
+    },
+    {
+      "path": "apps/orchestrator/src/ws/extension-tool-call.selected-tab.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 8581,
+      "sha256": "c0d067f69ced490502be69a2214fad848da6afd6cfed160ccebd732b8eebb0ce"
+    },
+    {
+      "path": "apps/orchestrator/src/ws/server.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 62977,
+      "sha256": "d2a6727dc1eb46213b7938dfe6c308f799a34c3f9f7eb37ba674ab3a6d16d987"
+    },
+    {
+      "path": "apps/orchestrator/src/ws/user-input.test.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 6629,
+      "sha256": "2385020fd87d3e2731d9a1c99e6b1a86c56e6d6cb05029b89a6bb200d165725c"
+    },
+    {
+      "path": "apps/web-workbench/src/WorkbenchApp.tsx",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 37665,
+      "sha256": "2f2712d57f7eb7d56c478508bd8b9506719cbad4fb6ff2bbb09afdb69636ef12"
+    },
+    {
+      "path": "apps/web-workbench/src/components/AppShell.tsx",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 42250,
+      "sha256": "f4ea4f741e36a78d9de270bbd656ccc71b9c69b67d5b22a7128f8e17252c9c8f"
+    },
+    {
+      "path": "apps/web-workbench/src/components/BrowserPanel.control.test.tsx",
+      "kind": "untracked",
+      "group": "workbench",
+      "bytes": 6279,
+      "sha256": "66b6541bdef4fd28c441818ac8dec30b8c2b3652698781823f445b4700b84302"
+    },
+    {
+      "path": "apps/web-workbench/src/components/BrowserPanel.tsx",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 132809,
+      "sha256": "2adfeba8f6a75db3a018400b1ac30e54fb94f3e9da4a768e31f85626424dec0c"
+    },
+    {
+      "path": "apps/web-workbench/src/components/CdpScreencastViewport.control.test.tsx",
+      "kind": "untracked",
+      "group": "workbench",
+      "bytes": 1423,
+      "sha256": "b7cbe0393b9a96a8a1ba41f714309786ccefb2f726361eaaf2a55eab63141175"
+    },
+    {
+      "path": "apps/web-workbench/src/components/CdpScreencastViewport.tsx",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 26596,
+      "sha256": "66afa0bdc8420e6898faad2185f7cea23bd49c40ed384b0df0e0c50f00683d46"
+    },
+    {
+      "path": "apps/web-workbench/src/components/InputArea.tsx",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 54140,
+      "sha256": "6b34f1d96239a06634a7ab0778090aa61bee011efe40f8d5c6afc7fe520662f4"
+    },
+    {
+      "path": "apps/web-workbench/src/components/LocalChromePicker.test.tsx",
+      "kind": "untracked",
+      "group": "workbench",
+      "bytes": 3186,
+      "sha256": "c04df587c9ba6ae6b23a5ed67f84eda7598b3e671695f6d69dec29745894b889",
+      "sourceSha256": "f772c2fb839730d735111cf57055ab7d9b67fa772f24993334a71328c528b4a4",
+      "reviewFix": "Old extension discovery recovery guidance; timeout is not proof of incompatibility."
+    },
+    {
+      "path": "apps/web-workbench/src/components/LocalChromePicker.tsx",
+      "kind": "untracked",
+      "group": "workbench",
+      "bytes": 3771,
+      "sha256": "1c66301a57ade45abff1fe81df44cc7de38188319de577e4e24142a37a771e9f",
+      "sourceSha256": "bae571e4191694a56ab8af5e6ee97645cd3b8b1d3f987e307ecf78994d6d2356",
+      "reviewFix": "Old extension discovery recovery guidance; timeout is not proof of incompatibility."
+    },
+    {
+      "path": "apps/web-workbench/src/components/LocalChromeTaskPanel.tsx",
+      "kind": "untracked",
+      "group": "workbench",
+      "bytes": 3171,
+      "sha256": "00b99a003bd0c7cbbf4c1ff33a1b1151c7dff8f7328d90e0830721917d7cfa23"
+    },
+    {
+      "path": "apps/web-workbench/src/components/Sidebar.tsx",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 44870,
+      "sha256": "06c09d3a7151cc4950dfeff429cef2fb56cb7d5faa959e477c07be0af10d92a4"
+    },
+    {
+      "path": "apps/web-workbench/src/components/StepCard.test.tsx",
+      "kind": "untracked",
+      "group": "workbench",
+      "bytes": 2530,
+      "sha256": "eae6b368aee6294039f6d794a38cf8aeabe4033d3df89182fe593461fad6bdfe"
+    },
+    {
+      "path": "apps/web-workbench/src/components/StepCard.tsx",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 9282,
+      "sha256": "c1f7ffe4c6c139b03363788c8478406885eea85c78aa8d046ffd66e3b5b64b08"
+    },
+    {
+      "path": "apps/web-workbench/src/components/TaskListItem.test.ts",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 6215,
+      "sha256": "d9f61c607b191eaea4d724f4965693c18bde85cfa6322fcfe3286b6b4325a955"
+    },
+    {
+      "path": "apps/web-workbench/src/components/TaskListItem.tsx",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 14378,
+      "sha256": "a993abd015ed060d2a5cc3d5115cdb9aee645095a07e05289e1bb37a70425cef"
+    },
+    {
+      "path": "apps/web-workbench/src/components/TaskStream.tsx",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 139533,
+      "sha256": "52087705509b5c81c8ccddbb8d98a8c28826b3c5d6735a811dcc8065732cc70e"
+    },
+    {
+      "path": "apps/web-workbench/src/hooks/useBrowserOwnership.test.tsx",
+      "kind": "untracked",
+      "group": "workbench",
+      "bytes": 4519,
+      "sha256": "65c20224f41a3f8d5b7f9df80f9f9c6ad03789bd6f278c4fa31f64391826606e"
+    },
+    {
+      "path": "apps/web-workbench/src/hooks/useBrowserOwnership.ts",
+      "kind": "untracked",
+      "group": "workbench",
+      "bytes": 3348,
+      "sha256": "e3e451392059254892b31cdf9b957e2fa773f0ee3dd861557da04ecf3dbfc560"
+    },
+    {
+      "path": "apps/web-workbench/src/lib/failure-copy.test.ts",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 10661,
+      "sha256": "7637f3e80069ae13ca827bee7492fb28df0716c13cc31ce571583e8954d2245a"
+    },
+    {
+      "path": "apps/web-workbench/src/lib/failure-copy.ts",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 10057,
+      "sha256": "463916edc28911e90587c5127399b83fb762e989d0d3b26ff448135591a12daa"
+    },
+    {
+      "path": "apps/web-workbench/src/lib/step-card-state.test.ts",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 13493,
+      "sha256": "de2a5ef2e713df16c5747d2ec62451b43de2856ab6bc43b8282670a65b9f5837"
+    },
+    {
+      "path": "apps/web-workbench/src/lib/step-card-state.ts",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 15065,
+      "sha256": "94c9bd84189f6737bcfbc6d1882057d65df3affe655f22f2e25d1029cd4800d8"
+    },
+    {
+      "path": "apps/web-workbench/src/lib/use-quota-status.test.ts",
+      "kind": "untracked",
+      "group": "workbench",
+      "bytes": 971,
+      "sha256": "db04cf58a528cf5ae34091750cddebe15bbd7748e638b9494d86b8b1b20dc84d"
+    },
+    {
+      "path": "apps/web-workbench/src/lib/use-quota-status.ts",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 1753,
+      "sha256": "978f1b4cc2afe92b5ee2e29a959d7d279a481a42fb62f8575e3e7b060ed9314e"
+    },
+    {
+      "path": "apps/web-workbench/src/pages/admin/AdminFinancePage.accounting.test.tsx",
+      "kind": "untracked",
+      "group": "workbench",
+      "bytes": 2413,
+      "sha256": "e92126523fae30ae6ab862e006dac94b0e186a15830860077bf493858ae05893"
+    },
+    {
+      "path": "apps/web-workbench/src/pages/admin/AdminFinancePage.tsx",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 31581,
+      "sha256": "bca139224ef5a6e1f2218e0e6a995a10b01e3caf1cb9e184e8092ae4e7231c5b"
+    },
+    {
+      "path": "apps/web-workbench/src/stores/task-store.test.ts",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 132334,
+      "sha256": "1164597cc42731598ad8e8d1131f1f954e1c147a120003a0cf24674a58a78dfc"
+    },
+    {
+      "path": "apps/web-workbench/src/stores/task-store.ts",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 133491,
+      "sha256": "46c1038dc17bcec1522e74da0bf6aaa4c68c247c058fa54ed0d404fa75789c23"
+    },
+    {
+      "path": "apps/web-workbench/src/types/task.ts",
+      "kind": "modified",
+      "group": "workbench",
+      "bytes": 15665,
+      "sha256": "0ed2aebe1a6a4f2e4404a367174fff8e85704e7fd75be13f686947747ecc83ad"
+    },
+    {
+      "path": "packages/browser-driver/src/crx-adapter.native-select.test.ts",
+      "kind": "untracked",
+      "group": "extension-driver",
+      "bytes": 5412,
+      "sha256": "371da184d7ed99ddc2d6f8334c651d7820a11453109fa5324f164c7b90933b68"
+    },
+    {
+      "path": "packages/browser-driver/src/crx-adapter.selected-tab.test.ts",
+      "kind": "untracked",
+      "group": "extension-driver",
+      "bytes": 16130,
+      "sha256": "5d303015e481cce3e64a12a9da0ec9781f0e2ab89a456705b5d5fe190fa6da86"
+    },
+    {
+      "path": "packages/browser-driver/src/crx-adapter.ts",
+      "kind": "modified",
+      "group": "extension-driver",
+      "bytes": 45326,
+      "sha256": "f2d0783457eb3a0231a4e95f71c8e4a56171acd08a5bb3b2f13a9d065f847823"
+    },
+    {
+      "path": "packages/shared-types/src/selected-chrome-session.test.ts",
+      "kind": "untracked",
+      "group": "orchestrator-protocol",
+      "bytes": 934,
+      "sha256": "7bce7efc9d31ec6b8f3a249df0b15662da7bef0c7dd3393aaf705468673f1eba"
+    },
+    {
+      "path": "packages/shared-types/src/ws.ts",
+      "kind": "modified",
+      "group": "orchestrator-protocol",
+      "bytes": 38282,
+      "sha256": "547f9c9f21259b42d7ce6613b73a743fbcefe7feae69c4b89ae6f6a216e2b791"
+    }
+  ],
+  "excluded": [
+    {
+      "path": "apps/orchestrator/src/browser-pool/broker-native-loader.test.ts",
+      "kind": "modified",
+      "group": "pool-linux-runtime",
+      "bytes": 13240,
+      "sha256": "beedc9691b71f42bc8c5168415b6170c3a5bfc9868660367a0433f37bdfe63aa",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "apps/orchestrator/src/browser-pool/broker-native-loader.ts",
+      "kind": "modified",
+      "group": "pool-linux-runtime",
+      "bytes": 10470,
+      "sha256": "283787181a911680225be58a4b884d56d660a37775e7585da06e017f7eaa4847",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "apps/orchestrator/src/quota/quota-mode.test.ts",
+      "kind": "modified",
+      "group": "accounting-quota",
+      "bytes": 1903,
+      "sha256": "72a3acbe8f82ae5c8e6e897af838f64c66db907382d10eb851116e846f97333d",
+      "reason": "Local synthetic QA bypass only; candidate preserves HEAD production quota policy."
+    },
+    {
+      "path": "apps/orchestrator/src/quota/quota-mode.ts",
+      "kind": "modified",
+      "group": "accounting-quota",
+      "bytes": 1305,
+      "sha256": "982422a621b1159b3f7fcd2c4dfbeb97f3bc8ef8ee95cca7b42eb5582cf8a7c8",
+      "reason": "Local synthetic QA bypass only; candidate preserves HEAD production quota policy."
+    },
+    {
+      "path": "scripts/pool-broker/bootstrap.py",
+      "kind": "modified",
+      "group": "pool-linux-runtime",
+      "bytes": 12850,
+      "sha256": "89dcca065dcd901167107f99ef2df1690def3830d0b13f166c6f726db5772d1c",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/installation.py",
+      "kind": "modified",
+      "group": "pool-linux-runtime",
+      "bytes": 9312,
+      "sha256": "cf6abb485a819d53c734be2b525bd1d09dd5c8ac30c4a7c7370e9e8754298344",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/journal_capacity.py",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 5327,
+      "sha256": "1a35415c141e20d381fb74cea87ccfde5a8be40c4865aeba6502ccb9f05cb07e",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/quartet_create_control.py",
+      "kind": "modified",
+      "group": "pool-linux-runtime",
+      "bytes": 17699,
+      "sha256": "24c89b6139f0e08e394f895f8873a2933786d101adfea0e676296f8817259b15",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/quartet_create_offer.py",
+      "kind": "modified",
+      "group": "pool-linux-runtime",
+      "bytes": 6665,
+      "sha256": "2b4fd9b246c504d21b534f278161977e09846443aa5fc28fa7bfb3f5b5319a7c",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/quartet_helper_channel.py",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 16578,
+      "sha256": "ced7efc16f98724f8fad007a1339a3e7a18dfa3023913c0c5e4b3f539813e68a",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/quartet_helper_protocol.py",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 5558,
+      "sha256": "2edb8980fafd369db7439a3be2d5e86ac36784aec57ecfa49fb334341e346aec",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/quartet_job_clock.c",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 733,
+      "sha256": "9bed58f9d9a20d8dc41a5dcd602815226c2e5c4da283e46fc7d1cdc222c6a1ac",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/quartet_job_event.c",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 2143,
+      "sha256": "5451440071042644728a47980cdf8fcf8eb8c7b8165df5de1a7dd266928b650c",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/quartet_job_event.h",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 793,
+      "sha256": "7403a2899f2f820bdf4aae16e446c3e185d6127bc86d82380f1f38846b326dd4",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/quartet_job_observer.c",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 45125,
+      "sha256": "daa3b09b5581584264add83791130c96dfd945571ee530d46da6a4981c55ef4c",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/quartet_job_observer.h",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 5009,
+      "sha256": "823f2afd4bf57a546261e3b203d5c80e10c4b4adbc4eefe628b06b8d7c7d6dc5",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/quartet_job_state.c",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 6458,
+      "sha256": "80816f15bad54feb42380c52c6076af55791597d178acbb7c0603ef85856c0cd",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/quartet_job_state.h",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 2536,
+      "sha256": "4832a181310162d2bbd1e4ac4ab42dc3b225a8ea30a3af9cf938d9b313c97ef2",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/quartet_journal.py",
+      "kind": "modified",
+      "group": "pool-linux-runtime",
+      "bytes": 4234,
+      "sha256": "f22561e2fe89a17deec2c62e0886f5d7a43e92e0c1daa526d60dc92a3a884df7",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/quartet_listener.py",
+      "kind": "modified",
+      "group": "pool-linux-runtime",
+      "bytes": 11932,
+      "sha256": "f8eefef51da875c6b2ce1e6a098be942b3e8e2b87fb19fc83228ae6171fbeb99",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/quartet_parent_guard.c",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 17094,
+      "sha256": "67d6f53c4d5742c39b069643982cd85fa0f4f51a950707e0aa42c56490ea24b5",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/quartet_parent_guard.h",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 2484,
+      "sha256": "a6e429c17d8fe549e23f2e6b89cc34e8bccc13eaba81c54c69a490bc0578c27e",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/quartet_records.py",
+      "kind": "modified",
+      "group": "pool-linux-runtime",
+      "bytes": 33522,
+      "sha256": "a382f4d11352c54a89e74bb2cb05bdc4f539529c11fbbd178e6752d3a3e77e39",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/resource_journal.py",
+      "kind": "modified",
+      "group": "pool-linux-runtime",
+      "bytes": 18753,
+      "sha256": "a351d5e336bd33aa0a358f14f1c70925c2a0dbba50bac5597ae39ab51a666b45",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/test_bootstrap_trust.py",
+      "kind": "modified",
+      "group": "pool-linux-runtime",
+      "bytes": 18382,
+      "sha256": "efe8b44d2fb750ed0e98261e03e97b09473e2ae2b7dbd2fad6f96b8660940f07",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/test_create_capacity_control.py",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 11293,
+      "sha256": "d742fa23ce3c1886494a9a9e1259ff21a5d35973b2660ea1a1aafddcf862dab4",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/test_installation.py",
+      "kind": "modified",
+      "group": "pool-linux-runtime",
+      "bytes": 21891,
+      "sha256": "d69247723717327cf5d3782ccb4644ff0a3c79567ce3491923c133c8831392bb",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/test_journal_capacity.py",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 10840,
+      "sha256": "73dbcdc96c3e4b3b679d4a2240298f448bbb4652bab6bd73965e126114ee458b",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_helper_channel.py",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 35759,
+      "sha256": "396e5d89804046761c908b793b36a4278fa7fab940eb562d36f8e84808283dbd",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_helper_protocol.py",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 15658,
+      "sha256": "922dc80354773c5a3beaa34fb0f856c2619062748cb8398ee12de1b74a6c75ff",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_job_event.py",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 1304,
+      "sha256": "42fa49831fb4b6199c8d4c36145c1fc990da7177a9a543df3fe679fb6a4e4b10",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_job_observer.py",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 4075,
+      "sha256": "06862261050f277188ea762c1a3df747fa9fdd44feb08f570b784968cdb7dcc2",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_job_state.py",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 1180,
+      "sha256": "0b4e7fb405e14227502ac51425a7a3a0a536cee0cac924b0e4f634f41fd27a67",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_parent_guard.py",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 2120,
+      "sha256": "2115a8639c236a381b530e57351e869ec14951a7403b67c2a87e458920b9f0bc",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_slice_records.py",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 27560,
+      "sha256": "fdb942c6dc8c86899ca9b85b8f17236be189a86cce78ef1c13cdeb7bf9038768",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_stop_records.py",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 13924,
+      "sha256": "ff46de23a6aec8d43460ce76808cf2ba49db075c5792f6f0a0e4c83b60e30ef0",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/tests-fixtures/quartet_job_event.c",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 7024,
+      "sha256": "9b65fdb73ae1bd653aae377e1eb7f53e9694cc15eb788f6698c12be5236653c7",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/tests-fixtures/quartet_job_observer.c",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 91602,
+      "sha256": "6872f13ba5cacd6c9aead35048484f8e3f87b315485907ec01e9bbf3565b8994",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/tests-fixtures/quartet_job_state.c",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 9682,
+      "sha256": "77a295f8901852d124fb09395f06c4a3ab8ac00e269d0a8565ba164bcebb2d16",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/tests-fixtures/quartet_parent_guard.c",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 17498,
+      "sha256": "8b96302455c68557a3669b096856cae0d7e13af86ce2f1ae7c0f59d933b6d169",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/tests-fixtures/quartet_parent_guard_seam.h",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 3491,
+      "sha256": "905a868ada52965c27839550a5f58df2223abe34570789fba82610ccc5dcff34",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/tests-fixtures/sd-bus-api/systemd/sd-bus.h",
+      "kind": "untracked",
+      "group": "pool-linux-runtime",
+      "bytes": 3338,
+      "sha256": "7d4ca773d8ddf4770e7d9727018e3ae21067d0c54a4f6848027b719e121fe8f8",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    },
+    {
+      "path": "scripts/pool-broker/xvfb_launch.py",
+      "kind": "modified",
+      "group": "pool-linux-runtime",
+      "bytes": 7825,
+      "sha256": "b6a8c504af8ef214d7b04fe85a58be6ebf43b9535648958d5f32409cbc0df4db",
+      "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
+    }
+  ],
+  "boundaries": {
+    "localCommitAllowed": true,
+    "pushAllowed": false,
+    "mergeAllowed": false,
+    "deployAllowed": false,
+    "extensionInstallAllowed": false
+  },
+  "validation": "See release-candidate.md; source hashes identify the selected patch, not runtime success rate."
+}

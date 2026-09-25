@@ -1,18 +1,20 @@
-import { friendlyBrowserFailureReason } from './browser-failure-copy.js';
 import {
   MODEL_TASK_FAILURE_COPY,
   type ModelTaskUnavailableReason,
 } from '../llm/model-runtime-wiring.js';
+import { friendlyBrowserFailureReason } from './browser-failure-copy.js';
 
 export function modelTaskFailureReason(reason: ModelTaskUnavailableReason): string {
   return MODEL_TASK_FAILURE_COPY[reason];
 }
 
-export function friendlyTaskFailureReason(
-  status: string,
-  raw: string | null | undefined,
-): string {
+export function friendlyTaskFailureReason(status: string, raw: string | null | undefined): string {
   const r = (raw ?? '').toLowerCase();
+  const unsupportedFile = /^FILE_FORMAT_UNSUPPORTED:([a-z0-9]+(?:,[a-z0-9]+)*)$/i.exec(raw ?? '');
+  if (unsupportedFile?.[1]) {
+    const formats = unsupportedFile[1].toUpperCase().split(',').join('、');
+    return `任务未完成：当前文件生成工具不支持 ${formats} 格式，升级套餐无法解决。请确认是否接受其他可用格式，或使用支持该格式的工具。`;
+  }
   const browserFailure = friendlyBrowserFailureReason(raw);
   if (browserFailure) return browserFailure;
   if (status === 'timeout' || /timeout|elapsed|time ?out|超时|时间过长|处理时间过长/.test(r)) {
@@ -61,7 +63,11 @@ export function friendlyTaskFailureReason(
 
 function looksLikeInternalError(text: string): boolean {
   if (text.length === 0) return false;
-  if (/(\n\s*at\s+|\bat\s+file:|stack trace|traceback|error:|exception|typeerror|referenceerror)/i.test(text)) {
+  if (
+    /(\n\s*at\s+|\bat\s+file:|stack trace|traceback|error:|exception|typeerror|referenceerror)/i.test(
+      text,
+    )
+  ) {
     return true;
   }
   let ascii = 0;

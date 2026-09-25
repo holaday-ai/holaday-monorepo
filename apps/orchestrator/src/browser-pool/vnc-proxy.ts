@@ -24,6 +24,7 @@ import type { IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
 import type { Logger } from 'pino';
+import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import { WebSocket, WebSocketServer } from 'ws';
 import {
   type AuthenticatedSession,
@@ -109,6 +110,7 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
               : null;
           if (!instance || instance.userId !== caller)
             throw new Error('POOL_VNC_AUTHENTICATION_INVALID');
+          browserControlSessions.claimLegacyVnc(instance);
           const bindingVeto = opts.pool.captureBrokerVncBindingVeto(
             instance,
             caller,
@@ -214,6 +216,11 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
         // We echo the "binary" subprotocol back so noVNC's client-side
         // selectSubProtocol resolves to the same thing websockify will
         // speak.
+        try {
+          browserControlSessions.claimLegacyVnc(instance);
+        } catch {
+          return reject(socket, 409, 'controlled browser requires CDP');
+        }
         wss.handleUpgrade(req, socket, head, (client) => {
           startWebSocketSessionRevalidation({
             socket: client,

@@ -52,7 +52,84 @@ beforeEach(() => {
   useTaskStore.getState().reset();
 });
 
+describe('rerun execution target', () => {
+  const original: UiTask = {
+    taskId: 'tsk_original', title: '原任务', intent: '读取选定页面', status: 'failed',
+    tickCount: 0, createdAt: new Date(),
+  };
+  const unrelatedSelection = {
+    extensionClientId: 'other-connection', tabId: 99,
+    expectedUrl: 'https://other.example', selectionId: 'fresh-other-selection', title: 'Other',
+  };
+
+  it.each([null, unrelatedSelection])('never silently reruns a local task on default or unrelated Chrome (%j)', async selection => {
+    useTaskStore.setState({
+      tasks: [{ ...original, browserSource: 'local-chrome' }],
+      selectedTaskId: original.taskId, composerMode: 'task', localChromeSelection: selection,
+    });
+    const result = await useTaskStore.getState().rerunTask(original.taskId);
+    expect(result).toEqual({ error: expect.stringMatching(/新任务.*重新选择.*Chrome/) });
+    expect(createMutate).not.toHaveBeenCalled();
+    expect(useTaskStore.getState().selectedTaskId).toBe(original.taskId);
+    expect(useTaskStore.getState().localChromeSelection).toEqual(selection);
+  });
+
+  it('refuses a missing source task instead of guessing its browser', async () => {
+    expect(await useTaskStore.getState().rerunTask('tsk_missing')).toEqual({ error: expect.any(String) });
+    expect(createMutate).not.toHaveBeenCalled();
+  });
+
+  it('does not redirect an ordinary rerun to a pending Chrome selection', async () => {
+    useTaskStore.setState({ tasks: [original], localChromeSelection: unrelatedSelection });
+    expect(await useTaskStore.getState().rerunTask(original.taskId)).toEqual({ error: expect.stringMatching(/Chrome/) });
+    expect(createMutate).not.toHaveBeenCalled();
+    expect(useTaskStore.getState().localChromeSelection).toEqual(unrelatedSelection);
+  });
+
+  it('creates an ordinary rerun from its original intent without a Chrome target', async () => {
+    useTaskStore.setState({ tasks: [original] });
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_retry', status: 'pending' } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValueOnce({ taskId: 'tsk_retry', status: 'pending', intent: original.intent, steps: [], result: null } as never);
+    expect(await useTaskStore.getState().rerunTask(original.taskId)).toEqual({ taskId: 'tsk_retry' });
+    expect(createMutate).toHaveBeenCalledTimes(1);
+    expect(createMutate.mock.calls[0]?.[0]).toMatchObject({ intent: '读取选定页面' });
+    expect(createMutate.mock.calls[0]?.[0]?.localChrome).toBeUndefined();
+  });
+
+  it('preserves the combined user context when rebuilding an ordinary interrupted task', async () => {
+    useTaskStore.setState({ tasks: [original] });
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_rebuilt', status: 'pending' } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValueOnce({ taskId: 'tsk_rebuilt', status: 'pending', steps: [], result: null } as never);
+    await useTaskStore.getState().rerunTask(original.taskId, '原描述\n[当前补充]\n新增要求');
+    expect(createMutate.mock.calls[0]?.[0]?.intent).toBe('原描述\n[当前补充]\n新增要求');
+  });
+
+  it('does not treat a completed local task follow-up as a fresh default-browser task', async () => {
+    useTaskStore.setState({ tasks: [{ ...original, status: 'completed', browserSource: 'local-chrome' }] });
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_wrong_browser', status: 'pending' } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValueOnce({ status: 'pending', steps: [], result: null } as never);
+    expect(await useTaskStore.getState().createTask('在原页面继续', [], original.taskId)).toEqual({ error: expect.stringMatching(/重新选择.*Chrome/) });
+    expect(createMutate).not.toHaveBeenCalled();
+  });
+});
+
 describe('persisted follow-up suggestions', () => {
+  it('sends the selected Chrome identity and preserves local task identity through hydration', async () => {
+    const selected = { extensionClientId: 'connection', tabId: 42, expectedUrl: 'https://work.example', selectionId: 'e2215e8d-7b6c-4711-ab15-460f51e558a4', title: 'Work' };
+    useTaskStore.setState({ localChromeSelection: selected });
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_local', status: 'executing', executionMode: 'browser', browserSource: 'local-chrome' } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValue({ taskId: 'tsk_local', status: 'executing', intent: '查看详情', browserSource: 'local-chrome', steps: [], result: null } as never);
+    await useTaskStore.getState().createTask('查看详情', []);
+    const { title: _title, ...target } = selected;
+    expect(createMutate).toHaveBeenCalledWith(expect.objectContaining({ localChrome: target }));
+    expect(useTaskStore.getState().localChromeSelection).toBeNull();
+    expect(useTaskStore.getState().tasks.find(task => task.taskId === 'tsk_local')?.browserSource).toBe('local-chrome');
+    expect(toUiTask({ taskId: 'tsk_local', status: 'executing', browserSource: 'local-chrome', result: null } as never).browserSource).toBe('local-chrome');
+  });
   it('restores suggestions after reset and detail hydration without a new task call', async () => {
     detailQuery.mockResolvedValueOnce({status:'completed',intent:'fixture',result:{summary:'done',followUpSuggestions:['完善方案']},steps:[]} as never);
     useTaskStore.getState().reset();

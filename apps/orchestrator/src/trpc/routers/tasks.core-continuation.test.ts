@@ -299,7 +299,7 @@ describe('real reply core routing and execution', () => {
     const requests = f.requests.length;
     await expect(f.reply('确认')).rejects.toMatchObject({
       code: 'PRECONDITION_FAILED',
-      message: expect.stringContaining('迁移到千问'),
+      message: expect.stringContaining('此旧方案尚不支持恢复浏览器执行'),
     });
     expect(JSON.stringify(f.row)).toBe(saved);
     expect(f.admissions).toHaveLength(2);

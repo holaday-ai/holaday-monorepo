@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, CircleSlash, Loader2, X } from 'lucide-react';
+import { AlertTriangle, Check, CircleDot, CircleSlash, Loader2, X } from 'lucide-react';
 import * as React from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -11,8 +11,10 @@ import {
   stepDurationLabel,
   stepDisplaySummary,
   stepDisplayTitle,
+  stepDoneIsCompletion,
   stepFailureMessage,
-  stepStatusLabel,
+  stepRecordStatusLabel,
+  stepRecordStatusText,
 } from '@/lib/step-card-state';
 import { cn } from '@/lib/utils';
 import type { UiStep } from '@/types/task';
@@ -32,7 +34,7 @@ interface Props {
 /**
  * One step card in the task stream. The left badge swaps on status:
  *   - running: blue-pulsed badge (no icon yet)
- *   - done:    cyan badge with a check
+ *   - done:    cyan check for completed work; neutral dot for informational records
  *   - failed:  red badge with an x
  *   - cancelled: muted badge with a slash
  *
@@ -42,6 +44,7 @@ interface Props {
  */
 export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
   const title = stepDisplayTitle(step);
+  const recordStatus = stepRecordStatusText(step);
   const summary = stepDisplaySummary(step);
   const durationLabel =
     step.status === 'running' && step.durationMs == null
@@ -90,6 +93,11 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
               <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[#EA1F59]" />
             )}
             <div className="truncate text-sm font-medium text-foreground">{title}</div>
+            {recordStatus && (
+              <span className="shrink-0 text-[10px] font-medium text-muted-foreground">
+                {recordStatus}
+              </span>
+            )}
           </div>
           {durationLabel && (
             <div className="shrink-0 rounded-full border border-[#DCDDDD] bg-white px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground dark:border-white/10 dark:bg-transparent">
@@ -191,21 +199,27 @@ function AntiBotNotice({ step }: { step: UiStep }): JSX.Element {
 }
 
 function StatusBadge({ step }: { step: UiStep }): JSX.Element {
-  const label = stepStatusLabel(step.status, step.tickIndex);
+  const label = stepRecordStatusLabel(step);
+  const neutralDone =
+    step.status === 'done' && !stepDoneIsCompletion(step.actionKind);
 
   return (
     <div
       className={cn(
         'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white shadow-[0_1px_2px_rgba(17,24,39,0.08)]',
         step.status === 'running' && 'animate-pulse-dot bg-[#EA1F59]',
-        step.status === 'done' && 'bg-[#42C0EF]',
+        step.status === 'done' && !neutralDone && 'bg-[#42C0EF]',
+        neutralDone &&
+          'bg-[#EFEFEF] text-[#595757] dark:bg-white/5 dark:text-foreground',
         step.status === 'failed' && 'bg-[#EA1F59]',
         step.status === 'cancelled' && 'border border-[#DCDDDD] bg-[#EFEFEF] text-[#595757]',
       )}
       aria-label={label}
       title={label}
     >
-      {step.status === 'done' ? (
+      {neutralDone ? (
+        <CircleDot className="h-3.5 w-3.5" strokeWidth={2.5} />
+      ) : step.status === 'done' ? (
         <Check className="h-3.5 w-3.5" strokeWidth={3} />
       ) : step.status === 'failed' ? (
         <X className="h-3.5 w-3.5" strokeWidth={3} />

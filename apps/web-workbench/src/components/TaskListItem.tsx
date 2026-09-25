@@ -290,10 +290,11 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
 }
 
 export function taskListItemSubtitle(
-  task: Pick<UiTask, 'awaitingKind' | 'queuePosition' | 'status' | 'tickCount'>,
+  task: Pick<UiTask, 'awaitingKind' | 'queuePosition' | 'status' | 'tickCount' | 'browserSource'>,
   liveSubStatus?: TaskLiveSubStatusEntry | null,
   now = Date.now(),
 ): string {
+  const recordCount = `${task.tickCount} ${task.browserSource === 'local-chrome' ? '条记录' : '步'}`;
   const productState = deriveTaskProductState({
     status: task.status,
     queuePosition: task.queuePosition ?? null,
@@ -314,7 +315,8 @@ export function taskListItemSubtitle(
           ? `${LIVE_SUB_STATUS_LABELS[subStatus]} · 已运行 ${elapsed}`
           : LIVE_SUB_STATUS_LABELS[subStatus];
       }
-      return task.tickCount === 0 ? '正在启动…' : `执行中 · 第 ${task.tickCount} 步`;
+      return task.tickCount === 0 ? '正在启动…' : task.browserSource === 'local-chrome'
+        ? `执行中 · ${recordCount}` : `执行中 · 第 ${task.tickCount} 步`;
     case 'waiting_user':
       // F3 — explicit awaiting-user copy. Previously this fell through
       // to the default branch and rendered `undefined` in the row's
@@ -327,19 +329,19 @@ export function taskListItemSubtitle(
           : productState.blocker,
       ).toolbarLabel;
     case 'paused':
-      return task.tickCount === 0 ? '已暂停' : `已暂停 · ${task.tickCount} 步`;
+      return task.tickCount === 0 ? '已暂停' : `已暂停 · ${recordCount}`;
     case 'terminal':
       switch (productState.outcome) {
         case 'completed':
-          return task.tickCount === 0 ? '已完成' : `已完成 · ${task.tickCount} 步`;
+          return task.tickCount === 0 ? '已完成' : `已完成 · ${recordCount}`;
         case 'partial_success':
           return task.tickCount === 0
             ? '需复核'
-            : `需复核 · ${task.tickCount} 步`;
+            : `需复核 · ${recordCount}`;
         case 'failed':
-          return task.tickCount === 0 ? '失败' : `失败 · ${task.tickCount} 步`;
+          return task.tickCount === 0 ? '失败' : `失败 · ${recordCount}`;
         case 'cancelled':
-          return task.tickCount === 0 ? '已取消' : `已取消 · ${task.tickCount} 步`;
+          return task.tickCount === 0 ? '已取消' : `已取消 · ${recordCount}`;
         default:
           return '';
       }

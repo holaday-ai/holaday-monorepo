@@ -37,7 +37,8 @@ import type { BrowserPool } from '../browser-pool/index.js';
 import { db } from '../db/client.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
 import { CdpInputHandler } from './cdp-input.js';
-import { DeferredScreencastInputBridge } from './screencast-input-bridge.js';
+import { createOwnedScreencastInputBridge } from './owned-screencast-input.js';
+import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import { CdpStreamer } from './cdp-streamer.js';
 
 /**
@@ -212,7 +213,10 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     let streamer: CdpStreamer | null = null;
     let inputHandler: CdpInputHandler | null = null;
     let stopped = false;
-    const inputBridge = new DeferredScreencastInputBridge({
+    const inputBridge = createOwnedScreencastInputBridge({
+      instance: args.instance,
+      peek: (taskId) => opts.pool.peek(taskId),
+      releasePressed: async (signal) => { await inputHandler?.releasePressed(signal); },
       onViewportApplied: (viewport) => {
         if (args.ws.readyState !== WebSocket.OPEN) return;
         try {
@@ -226,6 +230,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     async function teardown(reason: string): Promise<void> {
       if (stopped) return;
       stopped = true;
+      inputBridge.detach();
       userLog.info({ reason }, 'screencast: tearing down');
       try {
         await streamer?.stop();
@@ -301,6 +306,12 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         () => streamerRef.getSession(),
         userLog,
         () => streamerRef.requestFrameRefresh(),
+        () => {
+          void browserControlSessions.quarantine(args.instance,
+            () => opts.pool.release(args.instance.taskId, 'browser-input-unknown'))
+            .catch((err: unknown) => userLog.warn({ err: errMsg(err) }, 'screencast: browser stop unconfirmed'));
+          void teardown('input-outcome-unknown');
+        },
       );
       await inputBridge.attach(inputHandler);
 

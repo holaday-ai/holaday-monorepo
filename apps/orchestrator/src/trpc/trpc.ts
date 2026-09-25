@@ -1,15 +1,28 @@
 import { TRPCError, initTRPC } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import { users } from '../db/schema/users.js';
+import type { DrainOwner } from '../execution/execution-drain.js';
 import {
   httpProcedureParent,
   originalHttpLifetime,
   withHttpProcedure,
 } from '../execution/http-drain.js';
+import { runOwnedDatabaseQuery } from '../execution/original-database-query.js';
 import { currentOperationLifetime, startOwnedOperation } from '../execution/owned-operation.js';
 import type { Context } from './context.js';
 
 const t = initTRPC.context<Context>().create();
+
+// Only the two fixed gates below may produce a known rejection. Bind its
+// original object to this exact procedure owner, not to an error code or ID:
+// an outer resolver may catch a nested denial, do work, and rethrow that error.
+const gateRejections = new WeakMap<TRPCError, DrainOwner>();
+function gateRejection(code: 'UNAUTHORIZED' | 'FORBIDDEN', message?: string): TRPCError {
+  const error = new TRPCError({ code, message });
+  const lifetime = currentOperationLifetime();
+  if (lifetime) gateRejections.set(error, lifetime.owner);
+  return error;
+}
 
 export const router = t.router;
 export const middleware = t.middleware;
@@ -31,11 +44,11 @@ export const publicProcedure = t.procedure.use(async ({ ctx, next }) => {
         // Use the exact ALS object for trusted same-request nested callers.
         const executionLifetime = currentOperationLifetime();
         const result = await withHttpProcedure(() => next({ ctx: { executionLifetime } }));
-        // tRPC represents exceptions as fulfilled error results. Conservatively
-        // retain every such outcome until classified/reconciled; an error code
-        // is not proof that a resolver made no partial changes. This also retains
-        // pure validation/auth failures and is NOT precise business-phase coverage.
-        if (!result.ok) controller.drain.markUnknown(owner);
+        // tRPC represents exceptions as fulfilled error results. Only an original
+        // local gate rejection for this owner is known. Parser, resolver and
+        // middleware errors remain uncertain; this never clears child tickets.
+        if (!result.ok && gateRejections.get(result.error) !== owner)
+          controller.drain.markUnknown(owner);
         return result;
       },
       { parent: parent.owner, errorOutcome: 'unknown', dispatch: 'immediate' },
@@ -47,7 +60,7 @@ export const publicProcedure = t.procedure.use(async ({ ctx, next }) => {
 
 export const protectedProcedure = publicProcedure.use(async ({ ctx, next }) => {
   if (!ctx.userId) {
-    throw new TRPCError({ code: 'UNAUTHORIZED' });
+    throw gateRejection('UNAUTHORIZED');
   }
   return next({ ctx: { ...ctx, userId: ctx.userId } });
 });
@@ -64,13 +77,15 @@ export const protectedProcedure = publicProcedure.use(async ({ ctx, next }) => {
  * session.
  */
 export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
-  const [row] = await ctx.db
-    .select({ role: users.role, status: users.status })
-    .from(users)
-    .where(eq(users.externalId, ctx.userId))
-    .limit(1);
+  const [row] = await runOwnedDatabaseQuery(() =>
+    ctx.db
+      .select({ role: users.role, status: users.status })
+      .from(users)
+      .where(eq(users.externalId, ctx.userId))
+      .limit(1),
+  );
   if (!row || row.role !== 'admin' || row.status !== 'active') {
-    throw new TRPCError({ code: 'FORBIDDEN', message: 'admin access required' });
+    throw gateRejection('FORBIDDEN', 'admin access required');
   }
   return next({ ctx });
 });

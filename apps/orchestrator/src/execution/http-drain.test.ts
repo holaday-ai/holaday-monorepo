@@ -2,14 +2,18 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { type Server, createServer, request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { TRPCError } from '@trpc/server';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
+import { drizzle } from 'drizzle-orm/mysql2';
 import express from 'express';
+import type { Connection } from 'mysql2/promise';
 import { afterEach, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import type { DB } from '../db/client.js';
 import { createHttpApp } from '../http.js';
 import { makeCreateContext } from '../trpc/context.js';
 import type { Context } from '../trpc/context.js';
-import { publicProcedure, router } from '../trpc/trpc.js';
+import { adminProcedure, protectedProcedure, publicProcedure, router } from '../trpc/trpc.js';
 import { DrainController } from './drain-controller.js';
 import { createHttpDrain } from './http-drain.js';
 import { currentOperationLifetime, withOperationDispatchScope } from './owned-operation.js';
@@ -111,6 +115,149 @@ afterEach(async () => {
   for (const controller of controllers.splice(0)) controller.state.abandon();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true });
 });
+
+async function rpcStatus(port: number, path: string) {
+  return new Promise<number>((resolve, reject) => {
+    const client = request({ hostname: '127.0.0.1', port, path }, (res) => {
+      res.resume();
+      res.on('end', () => resolve(res.statusCode ?? 0));
+    });
+    client.on('error', reject);
+    client.end();
+  });
+}
+
+it('keeps the original protected gate rejection known without entering user code', async () => {
+  const f = await fixture();
+  let calls = 0;
+  const testRouter = router({
+    denied: protectedProcedure.query(() => {
+      calls++;
+      return 'unreachable';
+    }),
+  });
+  f.app.use(
+    createExpressMiddleware({
+      router: testRouter,
+      createContext: makeCreateContext({ planner: {} as never, executionDrain: f.controller }),
+    }),
+  );
+  expect(await rpcStatus(await listen(f.app), '/denied')).toBe(401);
+  f.close();
+  await vi.waitFor(() =>
+    expect(f.controller.drain.snapshot()).toMatchObject({ active: 0, unknown: 0, idle: true }),
+  );
+  expect(calls).toBe(0);
+});
+
+it.each(['UNAUTHORIZED', 'FORBIDDEN'] as const)(
+  'never treats a resolver-created %s error as proof of pure rejection',
+  async (code) => {
+    const f = await fixture();
+    let calls = 0;
+    const testRouter = router({
+      denied: publicProcedure.query(() => {
+        calls++;
+        throw new TRPCError({ code });
+      }),
+    });
+    f.app.use(
+      createExpressMiddleware({
+        router: testRouter,
+        createContext: makeCreateContext({ planner: {} as never, executionDrain: f.controller }),
+      }),
+    );
+    expect(await rpcStatus(await listen(f.app), '/denied')).toBe(
+      code === 'UNAUTHORIZED' ? 401 : 403,
+    );
+    f.close();
+    await vi.waitFor(() =>
+      expect(f.controller.drain.snapshot()).toMatchObject({ active: 0, unknown: 1, idle: false }),
+    );
+    expect(calls).toBe(1);
+  },
+);
+
+it('does not reuse a nested gate error as evidence about the outer procedure', async () => {
+  const f = await fixture();
+  let continued = false;
+  const inner = router({ denied: protectedProcedure.query(() => 'unreachable') });
+  const outer = router({
+    outside: publicProcedure.query(async ({ ctx }) => {
+      try {
+        await inner.createCaller(ctx).denied();
+      } catch (error) {
+        continued = true;
+        throw error;
+      }
+      return 'unreachable';
+    }),
+  });
+  f.app.use(
+    createExpressMiddleware({
+      router: outer,
+      createContext: makeCreateContext({ planner: {} as never, executionDrain: f.controller }),
+    }),
+  );
+  expect(await rpcStatus(await listen(f.app), '/outside')).toBe(401);
+  f.close();
+  await vi.waitFor(() =>
+    expect(f.controller.drain.snapshot()).toMatchObject({ active: 0, unknown: 1, idle: false }),
+  );
+  expect(continued).toBe(true);
+});
+
+it.each([false, true])(
+  'owns the administrator gate raw query and distinguishes acknowledged denial from failure (failure=%s)',
+  async (failure) => {
+    const f = await fixture();
+    const work = held();
+    let queries = 0;
+    let calls = 0;
+    const client = {
+      async query(query: { sql: string }) {
+        expect(this).toBe(client);
+        expect(query.sql).toContain('from `users`');
+        queries++;
+        await work.promise;
+        if (failure) throw new Error('synthetic role lookup failure');
+        return [[['user', 'active']], []];
+      },
+    };
+    const database = drizzle(client as unknown as Connection) as unknown as DB;
+    const testRouter = router({
+      denied: adminProcedure.query(() => {
+        calls++;
+        return 'unreachable';
+      }),
+    });
+    const make = makeCreateContext({ planner: {} as never, executionDrain: f.controller });
+    f.app.use(
+      createExpressMiddleware({
+        router: testRouter,
+        createContext: async (options) => ({
+          ...(await make(options)),
+          db: database,
+          userId: 'synthetic-admin-gate',
+        }),
+      }),
+    );
+    const response = rpcStatus(await listen(f.app), '/denied');
+    // Observe cleanup-time socket failure even if an earlier RED assertion fails;
+    // the test still awaits and asserts the original response below.
+    void response.catch(() => {});
+    await vi.waitFor(() => expect(queries).toBe(1));
+    f.close();
+    expect(f.controller.drain.snapshot().byKind.database).toBe(1);
+    expect(f.controller.drain.snapshot().idle).toBe(false);
+    work.release();
+    expect(await response).toBe(failure ? 500 : 403);
+    await vi.waitFor(() => expect(f.controller.drain.snapshot().active).toBe(0));
+    expect(f.controller.drain.snapshot().unknown).toBe(failure ? 2 : 0);
+    expect(f.controller.drain.snapshot().idle).toBe(!failure);
+    expect(calls).toBe(0);
+  },
+);
 
 it('rejects closed requests before body parsing or authentication starts', async () => {
   const f = await fixture(false);

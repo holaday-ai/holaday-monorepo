@@ -10,6 +10,7 @@
 
 import type { DomainName } from '../vision-loop/domain/classifier.js';
 import { buildDomainPrompt } from '../vision-loop/domain/enricher.js';
+import { NORMALIZED_COORDINATE_PROMPT, PIXEL_COORDINATE_PROMPT } from './browser-coordinates.js';
 import {
   EXPERT_MODE_PROMPT,
   type ExpertMode,
@@ -146,7 +147,7 @@ navigate({ url: "https://m.jd.com/search?keyword=airpods" })
 - 首次看到 about:blank 就知道该 navigate 了，不要在空白页上做 computer 动作。
 
 ## computer 工具使用规范
-- 坐标系以当前截图的像素为基准（左上 0,0）。
+- ${PIXEL_COORDINATE_PROMPT}
 - 点击前先看清目标元素所在位置，不要乱点。
 - 输入文字前如果输入框没聚焦，先点击它。
 - 需要回车 / 快捷键时用 \`key\` 动作，格式 "Return" 或 "ctrl+a"。
@@ -217,6 +218,7 @@ export function buildSupercarSystemPrompt(
      * rollback.
      */
     layered?: boolean;
+    normalizedCoordinates?: boolean;
     expertMode?: ExpertMode;
     /**
      * Plan-aware file-format guidance (writers.buildFileFormatGuidance).
@@ -247,7 +249,11 @@ export function buildSupercarSystemPrompt(
           ? matchRole(opts.intent)
           : null;
 
-  const parts = [SUPERCAR_CORE_PROMPT];
+  const parts = [
+    opts.normalizedCoordinates
+      ? SUPERCAR_CORE_PROMPT.replace(PIXEL_COORDINATE_PROMPT, NORMALIZED_COORDINATE_PROMPT)
+      : SUPERCAR_CORE_PROMPT,
+  ];
   if (domainFragment) parts.push(domainFragment);
   if (explicitRolePrompt) parts.push(explicitRolePrompt);
   else if (role) parts.push(role.systemAddon);

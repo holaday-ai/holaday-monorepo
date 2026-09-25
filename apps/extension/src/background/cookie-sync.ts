@@ -15,7 +15,7 @@
  */
 
 import { getAccessToken } from '../shared/storage.js';
-import { ORCHESTRATOR_HTTP } from '../shared/config.js';
+import { LOCAL_CHROME_QA, ORCHESTRATOR_HTTP } from '../shared/config.js';
 import { withDeadline } from '../shared/deadline.js';
 import {
   fetchWithDeadline,
@@ -117,6 +117,7 @@ function cookieIdentity(c: SyncableCookie): string {
  * whole sync.
  */
 export async function collectCookies(): Promise<SyncableCookie[]> {
+  if (LOCAL_CHROME_QA) return [];
   const byDomain = await Promise.all(SYNC_DOMAINS.map(readCookiesForDomain));
   const out = new Map<string, SyncableCookie>();
   for (const cookies of byDomain) {
@@ -159,6 +160,7 @@ interface SyncResponse {
 export async function syncCookiesToServer(
   cookies: readonly SyncableCookie[],
 ): Promise<SyncResponse | null> {
+  if (LOCAL_CHROME_QA) return null;
   if (cookies.length === 0) return { synced: 0, domains: [], deferred: false };
   const token = await getAccessToken();
   if (!token) return null;

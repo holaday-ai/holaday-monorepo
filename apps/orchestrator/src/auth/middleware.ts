@@ -4,6 +4,7 @@ import type { NextFunction, Request, Response } from 'express';
 import type { DB } from '../db/client.js';
 import { db } from '../db/client.js';
 import { users } from '../db/schema/users.js';
+import { runOwnedDatabaseQuery } from '../execution/original-database-query.js';
 import { verifyAccessToken, verifyStreamToken } from './jwt.js';
 
 const BEARER_PREFIX = 'Bearer ';
@@ -20,15 +21,17 @@ async function activeUserSession(
   authVersion: number,
   taskOrigin?: TaskOrigin,
 ): Promise<AuthenticatedSession | null> {
-  const [user] = await database
-    .select({
-      externalId: users.externalId,
-      status: users.status,
-      authVersion: users.authVersion,
-    })
-    .from(users)
-    .where(eq(users.externalId, userId))
-    .limit(1);
+  const [user] = await runOwnedDatabaseQuery(() =>
+    database
+      .select({
+        externalId: users.externalId,
+        status: users.status,
+        authVersion: users.authVersion,
+      })
+      .from(users)
+      .where(eq(users.externalId, userId))
+      .limit(1),
+  );
   if (!user || user.status !== 'active' || user.authVersion !== authVersion) {
     return null;
   }
@@ -63,10 +66,7 @@ export async function authenticateBearerHeader(
   return (await authenticateBearerSession(database, header))?.userId ?? null;
 }
 
-export async function authenticateAccessToken(
-  database: DB,
-  token: string,
-): Promise<string | null> {
+export async function authenticateAccessToken(database: DB, token: string): Promise<string | null> {
   return (await authenticateAccessTokenSession(database, token))?.userId ?? null;
 }
 

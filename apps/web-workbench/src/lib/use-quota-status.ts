@@ -52,6 +52,6 @@ export function useQuotaStatus(refreshKey?: number | string): State {
  * server-side rather than blocking).
  */
 export function isQuotaExhausted(snap: QuotaSnapshot | null): boolean {
-  if (!snap) return false;
+  if (!snap || snap.quotaMode === 'unmetered_test') return false;
   return snap.tasksRemaining <= 0;
 }

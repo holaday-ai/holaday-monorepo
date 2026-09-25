@@ -67,7 +67,7 @@ export async function startApplication(boot?: ApplicationBoot) {
     // that now terminate before browser dispatch.
     const planner = new StubPlanner();
     const visionCommander = undefined;
-    logger.info('Qwen-only runtime active; browser model lane is migration-unavailable');
+    logger.info('Qwen-only runtime active; browser execution requires regional vision runtime and browser rollout eligibility');
 
     // Phase D Step 3: try to connect PlaywrightExecutor to the user's
     // Chrome if EXECUTOR_MODE allows it. On success, VisionLoopRunner

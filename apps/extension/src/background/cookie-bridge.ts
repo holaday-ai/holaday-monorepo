@@ -15,6 +15,7 @@
  */
 
 import type { ClientMessage } from '@holaday/shared-types';
+import { LOCAL_CHROME_QA } from '../shared/config.js';
 import { withDeadline } from '../shared/deadline.js';
 
 /**
@@ -112,6 +113,7 @@ async function readLoginState(domain: string): Promise<boolean | null> {
  * caller can pass it straight into the WS message envelope.
  */
 export async function readLoginStates(): Promise<Record<string, boolean>> {
+  if (LOCAL_CHROME_QA) return {};
   const out: Record<string, boolean> = {};
   await Promise.all(
     TRACKED_DOMAINS.map(async (d) => {

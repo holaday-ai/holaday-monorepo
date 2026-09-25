@@ -77,6 +77,16 @@ describe('taskDisplayTitle', () => {
 });
 
 describe('taskListItemSubtitle', () => {
+  it.each([
+    ['completed', '已完成 · 6 条记录'],
+    ['executing', '执行中 · 6 条记录'],
+    ['paused', '已暂停 · 6 条记录'],
+    ['failed', '失败 · 6 条记录'],
+    ['cancelled', '已取消 · 6 条记录'],
+    ['partial_success', '需复核 · 6 条记录'],
+  ] as const)('does not label local Chrome record counts as completed actions: %s', (status, label) => {
+    expect(taskListItemSubtitle(task({ status, tickCount: 6, browserSource: 'local-chrome' }))).toBe(label);
+  });
   it('uses the live phase label for executing tasks before step ticks arrive', () => {
     expect(
       taskListItemSubtitle(

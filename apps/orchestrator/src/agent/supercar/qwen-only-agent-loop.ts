@@ -1,4 +1,5 @@
 import type { RunSupercarOptions, SupercarOutcome } from './agent-loop.js';
+import { runSupercarTask as runBrowserTask } from './agent-loop.js';
 
 export type {
   RunSupercarOptions,
@@ -11,32 +12,18 @@ export type {
   SupercarWebSearchEvent,
 } from './agent-loop.js';
 
-export function supercarReply(
-  _taskId: string,
-  _message: string,
-  _attachmentBlocks?: ReadonlyArray<{ type: string }>,
-): boolean {
-  return false;
-}
+export {
+  supercarReply,
+  hasParkedSupercarHandle,
+  supercarHandoffToGenerate,
+  supercarHandleOriginalIntent,
+  supercarAbort,
+} from './agent-loop.js';
 
-export function hasParkedSupercarHandle(_taskId: string): boolean {
-  return false;
-}
-
-export function supercarHandoffToGenerate(_taskId: string, _message: string): boolean {
-  return false;
-}
-
-export function supercarHandleOriginalIntent(_taskId: string): string | null {
-  return null;
-}
-
-export function supercarAbort(_taskId: string): boolean {
-  return false;
-}
-
-/** Production never imports or constructs the dormant Anthropic browser loop. */
-export async function runSupercarTask(_opts: RunSupercarOptions): Promise<SupercarOutcome> {
+/** Production may use the shared executor only with an admitted Qwen adapter. */
+export async function runSupercarTask(opts: RunSupercarOptions): Promise<SupercarOutcome> {
+  if (opts.messagesAdapter?.metadata.provider === 'alibaba-model-studio')
+    return runBrowserTask(opts);
   return {
     status: 'failed',
     reason: '浏览器能力正在迁移到千问，暂时不可用。',

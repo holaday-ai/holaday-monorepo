@@ -64,6 +64,7 @@ interface Props {
   streamToken: string | null;
   /** Block input forwarding when true (mirror VncViewport semantics). */
   viewOnly?: boolean;
+  controlLease?: string | null;
   onStatusChange?: (status: CdpScreencastStatus) => void;
   /** Fired after the first real frame is painted for the current viewport. */
   onFrameReady?: () => void;
@@ -114,6 +115,7 @@ export function CdpScreencastViewport({
   wsUrl,
   streamToken,
   viewOnly = true,
+  controlLease = null,
   onStatusChange,
   onFrameReady,
   reconnectSignal = 0,
@@ -168,6 +170,8 @@ export function CdpScreencastViewport({
   // Throttled "viewOnly" reference so the keyDown handler reads
   // the latest value without re-attaching listeners on every flip.
   const viewOnlyRef = React.useRef(viewOnly);
+  const controlLeaseRef = React.useRef(controlLease);
+  controlLeaseRef.current = controlLease;
   React.useEffect(() => {
     viewOnlyRef.current = viewOnly;
   }, [viewOnly]);
@@ -193,9 +197,9 @@ export function CdpScreencastViewport({
   const sendInput = React.useCallback((payload: InputPayload): boolean => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-    if (payload.type !== 'viewport' && viewOnlyRef.current) return false;
+    if (payload.type !== 'viewport' && (viewOnlyRef.current || !controlLeaseRef.current)) return false;
     try {
-      ws.send(JSON.stringify({ type: 'input', payload }));
+      ws.send(JSON.stringify({ type: 'input', payload, controlLease: controlLeaseRef.current }));
       return true;
     } catch {
       /* socket closing in this tick — drop */
@@ -205,6 +209,10 @@ export function CdpScreencastViewport({
 
   const lastViewportRef = React.useRef<BrowserViewportSize | null>(null);
   const [connectionEpoch, setConnectionEpoch] = React.useState(0);
+  React.useEffect(() => {
+    lastViewportRef.current = null;
+    setConnectionEpoch((epoch) => epoch + 1);
+  }, [controlLease]);
   React.useEffect(() => {
     const host = hostRef.current;
     // Publish the viewport as soon as the socket is opening/open. Waiting for

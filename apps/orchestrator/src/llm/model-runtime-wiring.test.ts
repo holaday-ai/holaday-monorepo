@@ -62,7 +62,7 @@ describe('createProductionModelRuntimeWiring', () => {
 
   it('keeps browser and media lanes explicitly unavailable', () => {
     const wiring = createProductionModelRuntimeWiring(ENVIRONMENT);
-    for (const lane of ['browser', 'image', 'video_generation', 'voice', 'memory'] as const) {
+    for (const lane of ['image', 'video_generation', 'voice', 'memory'] as const) {
       expect(wiring.resolveUnmigrated(lane)).toEqual({
         kind: 'unavailable',
         reasonCode: 'MODEL_MIGRATION_IN_PROGRESS',

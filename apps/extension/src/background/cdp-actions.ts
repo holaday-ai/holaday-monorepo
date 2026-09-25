@@ -58,10 +58,76 @@ const MOUSE_BUTTONS = new Set(['left', 'right', 'middle']);
 /** Tabs we've already attached the debugger to this SW lifetime. */
 const attachedTabs = new Set<number>();
 const pendingAttachByTab = new Map<number, Promise<void>>();
+const possiblyAttachedTabs = new Set<number>();
 
-function forgetAttachedTab(tabId: number): void {
+type DebuggerNativeOperationKind = 'attach' | 'command' | 'detach';
+
+interface DebuggerNativeOperation {
+  tabId: number;
+  kind: DebuggerNativeOperationKind;
+  promise: Promise<unknown>;
+  generation: number;
+}
+
+const pendingDebuggerNativeOperations = new Set<DebuggerNativeOperation>();
+let debuggerTrackingGeneration = 0;
+
+function hasPendingNativeAttach(tabId: number, except?: DebuggerNativeOperation): boolean {
+  for (const operation of pendingDebuggerNativeOperations) {
+    if (operation !== except && operation.tabId === tabId && operation.kind === 'attach') {
+      return true;
+    }
+  }
+  return false;
+}
+
+function trackDebuggerNativeOperation<T>(
+  tabId: number,
+  kind: DebuggerNativeOperationKind,
+  rawPromise: Promise<T>,
+): Promise<T> {
+  const promise = Promise.resolve(rawPromise);
+  const operation: DebuggerNativeOperation = {
+    tabId,
+    kind,
+    promise,
+    generation: debuggerTrackingGeneration,
+  };
+  pendingDebuggerNativeOperations.add(operation);
+  void promise.then(
+    () => {
+      pendingDebuggerNativeOperations.delete(operation);
+      if (operation.generation !== debuggerTrackingGeneration) return;
+      if (kind === 'attach') {
+        attachedTabs.add(tabId);
+        possiblyAttachedTabs.add(tabId);
+      } else if (kind === 'detach') {
+        forgetAttachedTab(tabId);
+      }
+    },
+    () => {
+      pendingDebuggerNativeOperations.delete(operation);
+      if (
+        operation.generation === debuggerTrackingGeneration &&
+        kind === 'attach' &&
+        !attachedTabs.has(tabId) &&
+        !hasPendingNativeAttach(tabId, operation)
+      ) {
+        possiblyAttachedTabs.delete(tabId);
+      }
+    },
+  );
+  return promise;
+}
+
+function forgetLegacyAttachmentState(tabId: number): void {
   attachedTabs.delete(tabId);
   pendingAttachByTab.delete(tabId);
+}
+
+function forgetAttachedTab(tabId: number): void {
+  forgetLegacyAttachmentState(tabId);
+  possiblyAttachedTabs.delete(tabId);
 }
 
 if (typeof chrome !== 'undefined') {
@@ -85,8 +151,9 @@ async function ensureAttached(tabId: number): Promise<void> {
     await pending;
     return;
   }
+  possiblyAttachedTabs.add(tabId);
   const attachPromise = withDeadline(
-    chrome.debugger.attach({ tabId }, CDP_VERSION),
+    trackDebuggerNativeOperation(tabId, 'attach', chrome.debugger.attach({ tabId }, CDP_VERSION)),
     CDP_ATTACH_TIMEOUT_MS,
     'debugger_attach_timeout',
   )
@@ -122,20 +189,49 @@ export async function detachFromTab(tabId: number): Promise<void> {
   if (!attachedTabs.has(tabId)) return;
   try {
     await withDeadline(
-      chrome.debugger.detach({ tabId }),
+      trackDebuggerNativeOperation(tabId, 'detach', chrome.debugger.detach({ tabId })),
       CDP_DETACH_TIMEOUT_MS,
       'debugger_detach_timeout',
     );
   } catch {
     // best-effort: tab may already be closed / debugger was released
   } finally {
-    forgetAttachedTab(tabId);
+    forgetLegacyAttachmentState(tabId);
   }
 }
 
 export async function detachAll(): Promise<void> {
   const ids = new Set([...attachedTabs, ...pendingAttachByTab.keys()]);
   await Promise.allSettled([...ids].map((id) => detachFromTab(id)));
+}
+
+async function waitForDebuggerNativeOperations(): Promise<void> {
+  while (pendingDebuggerNativeOperations.size > 0) {
+    await Promise.allSettled(
+      [...pendingDebuggerNativeOperations].map((operation) => operation.promise),
+    );
+  }
+}
+
+/**
+ * Strict cleanup boundary used only before selected-mode attachment.
+ * Unlike the legacy best-effort helpers, this waits for every raw
+ * chrome.debugger Promise and propagates a detach failure so ownership
+ * cannot transition while an older native operation may still be active.
+ */
+export async function prepareSelectedChromeCdp(): Promise<void> {
+  await waitForDebuggerNativeOperations();
+
+  const ids = new Set([...possiblyAttachedTabs, ...attachedTabs]);
+  for (const tabId of ids) {
+    if (!possiblyAttachedTabs.has(tabId) && !attachedTabs.has(tabId)) continue;
+    await trackDebuggerNativeOperation(tabId, 'detach', chrome.debugger.detach({ tabId }));
+  }
+
+  await waitForDebuggerNativeOperations();
+  if (possiblyAttachedTabs.size > 0 || attachedTabs.size > 0) {
+    throw new Error('debugger_cleanup_incomplete');
+  }
 }
 
 /**
@@ -596,15 +692,19 @@ async function sendCdpOnce(
   });
   try {
     return await Promise.race([
-      chrome.debugger.sendCommand({ tabId }, method, params) as Promise<unknown>,
+      trackDebuggerNativeOperation(
+        tabId,
+        'command',
+        chrome.debugger.sendCommand({ tabId }, method, params) as Promise<unknown>,
+      ),
       cap,
     ]);
   } catch (err) {
     if (shouldResetCdpSession(err)) {
-      forgetAttachedTab(tabId);
+      forgetLegacyAttachmentState(tabId);
       try {
         await withDeadline(
-          chrome.debugger.detach({ tabId }),
+          trackDebuggerNativeOperation(tabId, 'detach', chrome.debugger.detach({ tabId })),
           CDP_DETACH_TIMEOUT_MS,
           'debugger_detach_timeout',
         );
@@ -771,8 +871,11 @@ function resolveKey(name: string): KeyInfo {
  * each scenario starts with no attachments assumed.
  */
 export function _resetAttachedTabsForTests(): void {
+  debuggerTrackingGeneration += 1;
   attachedTabs.clear();
   pendingAttachByTab.clear();
+  possiblyAttachedTabs.clear();
+  pendingDebuggerNativeOperations.clear();
 }
 
 // ---------------------------------------------------------------------------

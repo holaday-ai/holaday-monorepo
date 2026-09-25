@@ -63,6 +63,7 @@ const PALETTE = ['#EA1F59', '#FFC910', '#42C0EF', '#57479C', '#ADADAD', '#595757
 
 /** Format CNY cents → ¥123.45 with thousands separator. */
 function formatYuan(cents: unknown): string {
+  if (cents === null || cents === undefined) return '待核算';
   const yuan = finiteNumber(cents, 0) / 100;
   return `¥${yuan.toLocaleString('zh-CN', {
     minimumFractionDigits: 2,
@@ -71,11 +72,13 @@ function formatYuan(cents: unknown): string {
 }
 
 function formatYuanCompact(cents: unknown): string {
+  if (cents === null || cents === undefined) return '待核算';
   const yuan = finiteNumber(cents, 0) / 100;
   return `¥${yuan.toLocaleString('zh-CN', { maximumFractionDigits: 0 })}`;
 }
 
 function formatTokens(tokens: unknown): string {
+  if (tokens === null || tokens === undefined) return '用量不完整';
   const value = nonNegativeNumber(tokens);
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
@@ -127,7 +130,7 @@ export function AdminFinancePage(): JSX.Element {
       <header className="mb-6">
         <h1 className="text-xl font-semibold">营收与成本</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          经营驾驶舱 · 本月数据 · USD→CNY 按 7.2 折算
+          经营驾驶舱 · 模型成本为估算 · USD→CNY 按 7.2 折算
         </p>
       </header>
 
@@ -163,6 +166,7 @@ function ProfitBar({ summary }: { summary: SummaryData | null }): JSX.Element {
     );
   }
   const profit = finiteNumber(summary.monthProfitCnyCents, 0);
+  const incomplete = summary.monthProfitCnyCents == null;
   const profitPositive = profit >= 0;
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -175,14 +179,14 @@ function ProfitBar({ summary }: { summary: SummaryData | null }): JSX.Element {
         label="本月成本"
         value={formatYuan(summary.monthCostCnyCents)}
         tint="rgba(255,201,16,0.18)"
-        sub={`模型 ${formatYuanCompact(summary.monthLlmCostCnyCents)} · 服务器 ${formatYuanCompact(summary.monthServerCostCnyCents)}`}
+        sub={incomplete ? `已知模型估算 ${formatYuan(summary.monthKnownLlmCostCnyCents)} · ${summary.unknownCostCalls} 次待核算` : `模型估算 ${formatYuanCompact(summary.monthLlmCostCnyCents)} · 服务器 ${formatYuanCompact(summary.monthServerCostCnyCents)}`}
       />
       <SummaryCard
-        label={profitPositive ? '本月利润' : '本月亏损'}
-        value={formatYuan(Math.abs(profit))}
+        label={incomplete ? '利润待核算' : profitPositive ? '本月利润（估算）' : '本月亏损（估算）'}
+        value={incomplete ? '—' : formatYuan(Math.abs(profit))}
         tint={profitPositive ? 'rgba(66,192,239,0.12)' : 'rgba(234,31,89,0.10)'}
         valueClass={profitPositive ? 'text-[#1688AA]' : 'text-[#EA1F59]'}
-        trend={profitPositive ? 'up' : 'down'}
+        trend={incomplete ? undefined : profitPositive ? 'up' : 'down'}
       />
     </div>
   );
@@ -499,16 +503,19 @@ function CostTab(): JSX.Element {
     const row = asRecord(item);
     return {
       model: safeText(row.model, '未知模型'),
-      costCnyCents: nonNegativeNumber(row.costCnyCents),
+      costCnyCents: row.costCnyCents == null ? null : nonNegativeNumber(row.costCnyCents),
+      knownCostCnyCents: nonNegativeNumber(row.knownCostCnyCents ?? row.costCnyCents),
+      unknownCostCalls: nonNegativeNumber(row.unknownCostCalls),
+      incompleteUsageCalls: nonNegativeNumber(row.incompleteUsageCalls),
       callCount: nonNegativeNumber(row.callCount),
-      totalTokens: nonNegativeNumber(row.totalTokens),
+      totalTokens: row.totalTokens == null ? null : nonNegativeNumber(row.totalTokens),
     };
   });
   const daySeries = safeArray(byDay.series).map((item) => {
     const row = asRecord(item);
     return {
       date: safeText(row.date, ''),
-      costCnyCents: nonNegativeNumber(row.costCnyCents),
+      costCnyCents: row.costCnyCents == null ? null : nonNegativeNumber(row.costCnyCents),
     };
   });
   const topCostlyTasks = safeArray(topCostly.tasks).map((item, index) => {
@@ -516,12 +523,14 @@ function CostTab(): JSX.Element {
     const user = asRecord(row.user);
     return {
       taskId: optionalText(row.taskId) ?? indexedFallback('未知任务', index),
+      knownCostCnyCents: nonNegativeNumber(row.knownCostCnyCents ?? row.costCnyCents),
+      unknownCostCalls: nonNegativeNumber(row.unknownCostCalls),
       title: optionalText(row.title),
       intent: optionalText(row.intent),
       model: optionalText(row.model),
       callCount: nonNegativeNumber(row.callCount),
-      totalTokens: nonNegativeNumber(row.totalTokens),
-      costCnyCents: nonNegativeNumber(row.costCnyCents),
+      totalTokens: row.totalTokens == null ? null : nonNegativeNumber(row.totalTokens),
+      costCnyCents: row.costCnyCents == null ? null : nonNegativeNumber(row.costCnyCents),
       user: {
         displayName: optionalText(user.displayName),
         email: optionalText(user.email),
@@ -529,28 +538,33 @@ function CostTab(): JSX.Element {
       },
     };
   });
-  const totalLlmCost = models.reduce((s, m) => s + m.costCnyCents, 0);
+  const totalLlmCost = models.reduce((s, m) => s + m.knownCostCnyCents, 0);
+  const unknownCostCalls = models.reduce((s, m) => s + m.unknownCostCalls, 0);
+  const incompleteUsage = models.some((m) => m.incompleteUsageCalls > 0 || m.totalTokens === null);
   const totalCalls = models.reduce((s, m) => s + m.callCount, 0);
-  const totalTokens = models.reduce((s, m) => s + m.totalTokens, 0);
+  const totalTokens = models.reduce((s, m) => s + (m.totalTokens ?? 0), 0);
 
   return (
     <div className="space-y-6">
+      {unknownCostCalls > 0 && <p role="status" className="text-sm text-muted-foreground">
+        {unknownCostCalls} 次调用费用待核算；已知估算小计 {formatYuan(totalLlmCost)}。不代表完整成本。
+      </p>}
       {/* Cost summary chips */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <ChipCard label="本月模型成本" value={formatYuan(totalLlmCost)} />
+        <ChipCard label="本月模型成本（估算）" value={unknownCostCalls > 0 ? '待核算' : formatYuan(totalLlmCost)} />
         <ChipCard label="本月模型调用" value={`${formatInteger(totalCalls)} 次`} />
-        <ChipCard label="本月模型用量" value={formatTokens(totalTokens)} />
+        <ChipCard label="本月模型用量" value={formatTokens(incompleteUsage ? null : totalTokens)} />
         <ChipCard
           label="单次调用均价"
           value={
-            totalCalls > 0 ? formatYuan(Math.round(totalLlmCost / totalCalls)) : '—'
+            unknownCostCalls > 0 ? '待核算' : totalCalls > 0 ? formatYuan(Math.round(totalLlmCost / totalCalls)) : '—'
           }
         />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Model breakdown */}
-        <Section title="按模型成本分布">
+        <Section title="按模型成本分布" hint="仅已知估算">
           {models.length === 0 ? (
             <div className="flex h-44 items-center justify-center text-[12px] text-muted-foreground">
             本月暂无模型调用
@@ -562,7 +576,7 @@ function CostTab(): JSX.Element {
                   <PieChart width={width} height={height}>
                     <Pie
                       data={models}
-                      dataKey="costCnyCents"
+                      dataKey="knownCostCnyCents"
                       nameKey="model"
                       cx="50%"
                       cy="50%"
@@ -587,7 +601,7 @@ function CostTab(): JSX.Element {
               </MeasuredChartFrame>
               <div className="min-w-0 flex-1 space-y-1.5 text-[12px]">
                 {models.slice(0, 8).map((m, i) => {
-                  const pct = totalLlmCost > 0 ? (m.costCnyCents / totalLlmCost) * 100 : 0;
+                  const pct = totalLlmCost > 0 ? (m.knownCostCnyCents / totalLlmCost) * 100 : 0;
                   return (
                     <div key={m.model} className="flex items-center gap-2">
                       <span
@@ -596,7 +610,9 @@ function CostTab(): JSX.Element {
                       />
                       <span className="min-w-0 flex-1 truncate text-foreground">{m.model}</span>
                       <span className="tabular-nums text-muted-foreground">
-                        {formatYuanCompact(m.costCnyCents)} · {pct.toFixed(1)}%
+                        {m.unknownCostCalls > 0
+                          ? `已知 ${formatYuan(m.knownCostCnyCents)} · ${m.unknownCostCalls} 次待核算`
+                          : `${formatYuanCompact(m.costCnyCents)} · ${pct.toFixed(1)}%`}
                       </span>
                     </div>
                   );
@@ -607,7 +623,7 @@ function CostTab(): JSX.Element {
         </Section>
 
         {/* Cost by day (30 days) */}
-        <Section title="按日成本趋势（近 30 天）">
+        <Section title="按日成本趋势（近 30 天）" hint="估算 · 待核算日期留空">
           <MeasuredChartFrame className="h-56 w-full">
             {({ width, height }) => (
               <LineChart
@@ -650,7 +666,7 @@ function CostTab(): JSX.Element {
       </div>
 
       {/* Top costly tasks */}
-      <Section title="高成本任务 TOP 10" hint="本月">
+      <Section title="高成本任务 TOP 10" hint="按已知估算排序 · 非完整排行">
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
@@ -694,6 +710,9 @@ function CostTab(): JSX.Element {
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums text-foreground">
                       {formatYuan(t.costCnyCents)}
+                      {t.unknownCostCalls > 0 && <div className="text-[11px] text-muted-foreground">
+                        已知 {formatYuan(t.knownCostCnyCents)} · {t.unknownCostCalls} 次待核算
+                      </div>}
                     </td>
                   </tr>
                 ))

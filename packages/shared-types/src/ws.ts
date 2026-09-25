@@ -17,6 +17,70 @@ const httpUrlSchema = z
     { message: 'expected http(s) URL' },
   );
 
+const selectedChromeTargetSchema = z.object({
+  tabId: z.number().int().nonnegative(),
+  expectedUrl: httpUrlSchema,
+  selectionId: z.string().uuid(),
+});
+
+const selectedChromeActionDeadline = z.number().int().min(1).max(30_000).optional();
+
+const selectedChromeActionSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('click'),
+      selector: resilientSelectorSchema,
+      deadlineMs: selectedChromeActionDeadline,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('type'),
+      selector: resilientSelectorSchema,
+      payload: z.object({ text: z.string().max(16_000) }).strict(),
+      deadlineMs: selectedChromeActionDeadline,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('key'),
+      selector: resilientSelectorSchema.optional(),
+      payload: z.object({ key: z.string().min(1).max(128) }).strict(),
+      deadlineMs: selectedChromeActionDeadline,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('goto'),
+      payload: z.object({ url: httpUrlSchema }).strict(),
+      deadlineMs: selectedChromeActionDeadline,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('wait'),
+      selector: resilientSelectorSchema.optional(),
+      payload: z.object({ ms: z.number().int().min(0).max(10_000) }).strict().optional(),
+      deadlineMs: selectedChromeActionDeadline,
+    })
+    .strict(),
+]);
+
+export const selectedChromeSessionCommandSchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('open'), target: selectedChromeTargetSchema }).strict(),
+  z.object({ op: z.literal('observe'), sessionId: z.string().uuid() }).strict(),
+  z
+    .object({
+      op: z.literal('act'),
+      sessionId: z.string().uuid(),
+      action: selectedChromeActionSchema,
+    })
+    .strict(),
+  z.object({ op: z.literal('close'), sessionId: z.string().uuid() }).strict(),
+]);
+
+export type SelectedChromeSessionCommand = z.infer<typeof selectedChromeSessionCommandSchema>;
+
 // ---------- Protocol constants ----------
 
 export const WS_PROTOCOL_VERSION = 1 as const;
@@ -852,24 +916,27 @@ export const serverBatchProgressSchema = z.object({
  * and posts a `client.extension.tool_result` back with the matching
  * requestId.
  *
- * Kinds supported in v0.1:
+ * Legacy active-tab tools:
  *   - 'navigate'    → navigate the active tab to `url`, return final url + title + body text
  *   - 'screenshot'  → capture visible viewport, return base64 PNG (capped)
  *
- * Future kinds (v0.2+): click, type, scroll. For v0.1 the orchestrator
- * only emits navigate (single-shot URL fetch) — proves the auth
- * inheritance + protocol roundtrip without committing to the full
- * vision-loop integration.
+ * Selected-tab reading: 'tabs' discovers web tabs; 'read' requires a target.
+ * The orchestrator also pins the authenticated extension connection (tab IDs
+ * are local to a Chrome profile). This does not add a new mutation/action path.
  */
 export const serverExtensionToolCallSchema = z.object({
   type: z.literal('server.extension.tool_call'),
   taskId: z.string().min(1).max(64),
   requestId: z.string().min(1).max(64),
-  kind: z.enum(['navigate', 'screenshot']),
-  /** Per-kind args. `url` populated for navigate; ignored for screenshot. */
+  kind: z.enum(['navigate', 'screenshot', 'tabs', 'read', 'session']),
+  /** `url` is for legacy navigate; `target` is required for read only. */
   args: z
     .object({
       url: httpUrlSchema.optional(),
+      /** Explicit local tab for read. Never infer it from the active tab. */
+      target: selectedChromeTargetSchema.optional(),
+      /** Selected-tab mutation/observation command. Required by the session handler. */
+      session: selectedChromeSessionCommandSchema.optional(),
       /**
        * Optional ms to wait after navigation before reading body text.
        * Default 1500 in the extension if omitted. Range guarded

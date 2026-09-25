@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import {
-  friendlyTaskFailureReason,
-  modelTaskFailureReason,
-} from './task-failure-copy.js';
+import { friendlyTaskFailureReason, modelTaskFailureReason } from './task-failure-copy.js';
 
 describe('friendlyTaskFailureReason', () => {
+  it('explains unsupported file formats without suggesting an ineffective retry or upgrade', () => {
+    const reason = friendlyTaskFailureReason('failed', 'FILE_FORMAT_UNSUPPORTED:zip,rar');
+    expect(reason).toContain('不支持 ZIP、RAR');
+    expect(reason).toContain('升级套餐无法解决');
+    expect(reason).not.toMatch(/简化|重试|请升级/);
+  });
   it('uses stable Qwen migration reason codes without provider details', () => {
     expect(modelTaskFailureReason('MODEL_DATA_REGION_UNASSIGNED')).toBe(
       '请先选择模型数据区域，再开始任务。',
@@ -41,9 +44,9 @@ describe('friendlyTaskFailureReason', () => {
   });
 
   it('turns supercar timeout sentinels into user-facing copy', () => {
-    expect(
-      friendlyTaskFailureReason('failed', 'VISION_GAVE_UP task timeout (600s) elapsed'),
-    ).toBe('任务超时。可能原因：目标网站响应缓慢或被反爬拦截。建议：重试，或把任务描述简化后再试。');
+    expect(friendlyTaskFailureReason('failed', 'VISION_GAVE_UP task timeout (600s) elapsed')).toBe(
+      '任务超时。可能原因：目标网站响应缓慢或被反爬拦截。建议：重试，或把任务描述简化后再试。',
+    );
   });
 
   it('does not leak unknown English technical failures', () => {

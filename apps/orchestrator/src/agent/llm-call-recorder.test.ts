@@ -1,5 +1,59 @@
 import { describe, expect, it } from 'vitest';
-import { NoopLlmCallRecorder, estimateCostUsd } from './llm-call-recorder.js';
+import type { DB } from '../db/client.js';
+import {
+  DrizzleLlmCallRecorder,
+  NoopLlmCallRecorder,
+  estimateCostUsd,
+} from './llm-call-recorder.js';
+import type { LlmCallRecord } from './llm-call-recorder.js';
+
+describe('persistent provider-aware accounting', () => {
+  it.each([
+    ['alibaba-model-studio', 'qwen-test', 10, 10, null, 'unpriced', 'complete'],
+    ['anthropic', 'claude-opus-4-7', 2000, 500, '0.022500', 'estimated', 'complete'],
+    ['anthropic', 'claude-unknown', 10, 10, null, 'unpriced', 'complete'],
+    ['alibaba-model-studio', 'qwen-test', 10, null, null, 'usage_missing', 'partial'],
+    ['alibaba-model-studio', 'qwen-test', null, null, null, 'usage_missing', 'missing'],
+    ['anthropic', 'claude-opus-4-7', 0, 0, '0.000000', 'estimated', 'complete'],
+    ['anthropic', 'claude-opus-4-7', -1, 10, null, 'usage_missing', 'partial'],
+  ] as const)(
+    '%s/%s usage %s/%s persists honestly',
+    async (provider, model, inputTokens, outputTokens, costUsd, costStatus, usageStatus) => {
+      const inserted: Record<string, unknown>[] = [];
+      const db = {
+        select: () => ({ from: () => ({ where: () => ({ limit: async () => [{ id: 7 }] }) }) }),
+        insert: () => ({
+          values: async (row: Record<string, unknown>) => {
+            inserted.push(row);
+          },
+        }),
+      } as unknown as DB;
+      await new DrizzleLlmCallRecorder(db).record({
+        userExternalId: 'usr_accounting',
+        taskExternalId: 'tsk_accounting',
+        provider,
+        model,
+        purpose: 'supercar.turn',
+        inputTokens,
+        outputTokens,
+        latencyMs: 5,
+        status: 'ok',
+      } as LlmCallRecord);
+      expect(inserted).toHaveLength(1);
+      expect(inserted[0]).toMatchObject({
+        userId: 7,
+        taskId: 7,
+        provider,
+        model,
+        costUsd,
+        costStatus,
+        usageStatus,
+        promptTokens: inputTokens === -1 ? null : inputTokens,
+        completionTokens: outputTokens,
+      });
+    },
+  );
+});
 
 describe('estimateCostUsd', () => {
   it('opus 4.7 with no cache: 2000 in / 500 out ≈ $0.0225', () => {

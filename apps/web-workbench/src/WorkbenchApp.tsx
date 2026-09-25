@@ -322,9 +322,9 @@ export function WorkbenchApp(): JSX.Element {
   const tasks = useTaskStore((s) => s.tasks);
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId);
   const composerMode = useTaskStore((s) => s.composerMode);
-  const enterNewTaskMode = useTaskStore((s) => s.enterNewTaskMode);
   const setDefaultViewportProfile = useTaskStore((s) => s.setDefaultViewportProfile);
   const createTaskRaw = useTaskStore((s) => s.createTask);
+  const rerunTask = useTaskStore((s) => s.rerunTask);
   const pickCurrentViewportProfile = React.useCallback(() => {
     const rowRect = contentRowRef.current?.getBoundingClientRect();
     const viewportWidth =
@@ -531,13 +531,11 @@ export function WorkbenchApp(): JSX.Element {
   const [browserReExecuting, setBrowserReExecuting] = React.useState(false);
   const handleBrowserReExecute = React.useCallback(async (): Promise<void> => {
     if (!selectedTask || browserReExecuting) return;
-    const intent = selectedTask.intent;
     setBrowserReExecuting(true);
     setSidePanelOverride('close');
     setBrowserSheetOpen(false);
-    enterNewTaskMode();
     try {
-      const res = await createTask(intent);
+      const res = await rerunTask(selectedTask.taskId);
       if (!mountedRef.current) return;
       if ('error' in res) {
         toast.show(taskActionError('重新执行失败', res.error), 'error');
@@ -547,7 +545,7 @@ export function WorkbenchApp(): JSX.Element {
         setBrowserReExecuting(false);
       }
     }
-  }, [browserReExecuting, createTask, enterNewTaskMode, selectedTask, toast]);
+  }, [browserReExecuting, rerunTask, selectedTask, toast]);
 
   // Follow-up context — active on a terminal task that isn't currently
   // in awaiting-user reply mode.
@@ -950,7 +948,7 @@ export function WorkbenchApp(): JSX.Element {
           ]
             .join('')
             .trim();
-          const res = await createTask(combined);
+          const res = await rerunTask(ctx.taskId, combined);
           if ('error' in res) toast.show(taskActionError('重建任务失败', res.error), 'error');
           else toast.show('已基于当前上下文重新创建任务');
         }}

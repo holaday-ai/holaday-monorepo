@@ -86,7 +86,7 @@ describe('Qwen-only model runtime policy', () => {
   });
 
   it('marks media and browser lanes outside subproject A as migration unavailable', () => {
-    expect(resolveUnmigratedModelLane('browser')).toEqual({
+    expect(resolveUnmigratedModelLane('image')).toEqual({
       kind: 'unavailable',
       reason: 'MIGRATION_IN_PROGRESS',
     });

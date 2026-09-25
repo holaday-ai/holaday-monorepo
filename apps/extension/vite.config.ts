@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { crx } from '@crxjs/vite-plugin';
 import react from '@vitejs/plugin-react';
 import { type PluginOption, defineConfig } from 'vite';
-import manifest from './manifest.config.js';
+import manifest, { assertLocalQaBuildEnv } from './manifest.config.js';
 
 // MV3 Service Workers forbid dynamic `import()` at runtime, so the
 // crx-adapter has to be statically imported and bundled into the SW.
@@ -24,7 +24,11 @@ const aliasCrxToStub: Record<string, string> =
 // vite6's PluginOption so tsc doesn't flag the union mismatch.
 // Runtime behaviour is unaffected; vite6 accepts the plugin fine.
 export default defineConfig({
-  plugins: [react(), crx({ manifest }) as unknown as PluginOption],
+  plugins: [
+    { name: 'holaday-local-qa-config', configResolved: (config) => assertLocalQaBuildEnv(config.env) },
+    react(),
+    crx({ manifest }) as unknown as PluginOption,
+  ],
   resolve: {
     alias: aliasCrxToStub,
   },

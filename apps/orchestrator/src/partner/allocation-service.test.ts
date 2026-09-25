@@ -21,7 +21,7 @@ import {
 
 type FakeLlmCall = {
   id: number;
-  costUsd: string | number;
+  costUsd: string | number | null;
   createdAt: Date;
 };
 
@@ -389,6 +389,15 @@ describe('partner allocation pure rules', () => {
 });
 
 describe('AllocationService buildDailyCostPool', () => {
+  it('does not write a cost pool when a call has unpriced or missing usage', async () => {
+    const fakeDb = new FakeAllocationDb({ llmCalls: [
+      { id: 1, costUsd: null, createdAt: new Date('2026-07-02T12:00:00.000Z') },
+    ] });
+    await expect(new AllocationService(fakeDb.asDB()).buildDailyCostPool({ day: '2026-07-02', fxBps: 72_000 }))
+      .rejects.toThrow('API cost pool incomplete');
+    expect(fakeDb.costPoolInsertAttempts).toHaveLength(0);
+    expect(fakeDb.costPoolRows).toHaveLength(0);
+  });
   it('sums daily llm cost, writes an idempotent event, and reruns return the existing row', async () => {
     const fakeDb = new FakeAllocationDb({
       llmCalls: [

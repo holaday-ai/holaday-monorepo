@@ -1,14 +1,15 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { VisionAction } from '@holaday/shared-types';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   _resetAttachedTabsForTests,
-  cdpActionErrorMessage,
   captureVisionObservation,
+  cdpActionErrorMessage,
   detachAll,
   detachFromTab,
   executeCdpAction,
   getActiveTabId,
   normalizeCdpNavigateUrl,
+  prepareSelectedChromeCdp,
   sanitizeVisionObservationCapture,
 } from './cdp-actions.js';
 
@@ -319,6 +320,145 @@ describe('executeCdpAction', () => {
     await expect(action).resolves.toMatchObject({ ok: true });
     await detached;
     expect(detach).toHaveBeenCalledWith({ tabId: 9 });
+  });
+
+  it('keeps selected preparation waiting for a timed-out raw CDP command', async () => {
+    vi.useFakeTimers();
+    let resolveCommand: (value: unknown) => void = () => {
+      throw new Error('send command promise was not created');
+    };
+    const sendCommand = vi.fn(
+      () =>
+        new Promise<unknown>((resolve) => {
+          resolveCommand = resolve;
+        }),
+    );
+    const detach = vi.fn(async () => undefined);
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        detach,
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    const action = executeCdpAction(12, { kind: 'type', text: 'pending' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(action).resolves.toMatchObject({ ok: false });
+
+    let prepared = false;
+    const preparation = prepareSelectedChromeCdp().then(() => {
+      prepared = true;
+    });
+    await Promise.resolve();
+    expect(prepared).toBe(false);
+
+    resolveCommand({});
+    await preparation;
+    expect(prepared).toBe(true);
+    expect(detach).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for a timed-out raw attach before strict selected cleanup detaches it', async () => {
+    vi.useFakeTimers();
+    let resolveAttach: () => void = () => {
+      throw new Error('attach promise was not created');
+    };
+    const attach = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveAttach = resolve;
+        }),
+    );
+    const detach = vi.fn(async () => undefined);
+    globalThis.chrome = {
+      debugger: {
+        attach,
+        detach,
+        sendCommand: vi.fn(async () => ({})),
+      },
+    } as unknown as typeof chrome;
+
+    const action = executeCdpAction(15, { kind: 'type', text: 'pending attach' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(action).resolves.toMatchObject({ ok: false });
+
+    let prepared = false;
+    const preparation = prepareSelectedChromeCdp().then(() => {
+      prepared = true;
+    });
+    await Promise.resolve();
+    expect(prepared).toBe(false);
+    expect(detach).not.toHaveBeenCalled();
+
+    resolveAttach();
+    await preparation;
+    expect(detach).toHaveBeenCalledWith({ tabId: 15 });
+    expect(prepared).toBe(true);
+  });
+
+  it('fails strict selected preparation on detach failure and permits an exact retry', async () => {
+    const detach = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('detach denied'))
+      .mockResolvedValueOnce(undefined);
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        detach,
+        sendCommand: vi.fn(async () => ({})),
+      },
+    } as unknown as typeof chrome;
+
+    await expect(executeCdpAction(13, { kind: 'type', text: 'attached' })).resolves.toMatchObject({
+      ok: true,
+    });
+
+    await expect(prepareSelectedChromeCdp()).rejects.toThrow('detach denied');
+    await expect(prepareSelectedChromeCdp()).resolves.toBeUndefined();
+    expect(detach).toHaveBeenCalledTimes(2);
+  });
+
+  it('waits for a legacy detach raw promise after its timeout before strict cleanup', async () => {
+    vi.useFakeTimers();
+    let rejectDetach: (error: Error) => void = () => {
+      throw new Error('detach promise was not created');
+    };
+    const detach = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectDetach = reject;
+          }),
+      )
+      .mockResolvedValueOnce(undefined);
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        detach,
+        sendCommand: vi.fn(async () => ({})),
+      },
+    } as unknown as typeof chrome;
+
+    await expect(executeCdpAction(14, { kind: 'type', text: 'attached' })).resolves.toMatchObject({
+      ok: true,
+    });
+    const legacyDetach = detachFromTab(14);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect(legacyDetach).resolves.toBeUndefined();
+
+    let prepared = false;
+    const preparation = prepareSelectedChromeCdp().then(() => {
+      prepared = true;
+    });
+    await Promise.resolve();
+    expect(prepared).toBe(false);
+
+    rejectDetach(new Error('late detach failure'));
+    await preparation;
+    expect(detach).toHaveBeenCalledTimes(2);
+    expect(prepared).toBe(true);
   });
 
   it('omits printable text for modifier key chords', async () => {

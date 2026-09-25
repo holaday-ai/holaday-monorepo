@@ -7,9 +7,11 @@ import {
   type ServerMessage,
   WS_SUBPROTOCOL,
   parseClientMessage,
+  selectedChromeSessionCommandSchema,
 } from '@holaday/shared-types';
-import { WebSocket, WebSocketServer } from 'ws';
+import { type RawData, WebSocket, WebSocketServer } from 'ws';
 import type { Planner } from '../agent/planner.js';
+import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import { TaskController, type TaskState } from '../agent/task-controller.js';
 import { failTaskWithEventIfStatus } from '../agent/task-maintenance.js';
 import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js';
@@ -537,14 +539,22 @@ export function hasConnectedExtension(userId: string): boolean {
   return pickExtensionClientForUser(userId) !== null;
 }
 
+export function getConnectedExtensionClientIds(userId: string): string[] {
+  return [...(clientsByUser.get(userId) ?? [])]
+    .filter(client => client.isExtension && client.socket.readyState === WebSocket.OPEN)
+    .map(client => client.id);
+}
+
 function pickExtensionClientForUser(
   userId: string,
   excludedClientIds: ReadonlySet<string> = new Set(),
+  extensionClientId?: string,
 ): ClientState | null {
   const set = clientsByUser.get(userId);
   if (!set) return null;
   let target: ClientState | null = null;
   for (const client of set) {
+    if (extensionClientId !== undefined && client.id !== extensionClientId) continue;
     if (excludedClientIds.has(client.id)) continue;
     if (!client.isExtension || client.socket.readyState !== WebSocket.OPEN) continue;
     if (!target || client.lastPongAt > target.lastPongAt) target = client;
@@ -608,8 +618,10 @@ function settlePendingExtensionCallsForClient(clientId: string): number {
 
 export interface ExtensionToolCallOptions {
   taskId: string;
-  kind: 'navigate' | 'screenshot';
-  args?: { url?: string; waitMs?: number };
+  kind: Extract<ServerMessage, { type: 'server.extension.tool_call' }>['kind'];
+  args?: Extract<ServerMessage, { type: 'server.extension.tool_call' }>['args'];
+  /** A tab ID is meaningful only inside this authenticated extension connection. */
+  extensionClientId?: string;
   /** Per-call deadline; clamped to [1s, 60s]. Default 30s. */
   timeoutMs?: number;
 }
@@ -617,6 +629,8 @@ export interface ExtensionToolCallOptions {
 export interface ExtensionToolCallOutcome {
   ok: boolean;
   result?: unknown;
+  /** Server-owned identity, never derived from extension/page result content. */
+  extensionClientId?: string;
   error?: { message: string; code?: string };
 }
 
@@ -629,8 +643,8 @@ export interface ExtensionToolCallOutcome {
  *   - Timeout                            (code: 'timeout')
  *   - Socket closed mid-flight           (code: 'socket_closed')
  * so callers don't need a try/catch — the result already carries the
- * failure path. Programmer errors (invalid args, etc.) DO throw via
- * the schema check downstream.
+ * failure path. Reads require an explicit connection and tab; discovery returns
+ * the connection identity for subsequent reads. Neither tool migrates login data.
  */
 export async function sendExtensionToolCall(
   userId: string,
@@ -639,10 +653,34 @@ export async function sendExtensionToolCall(
   const requestId = randomUUID();
   const timeoutMs = Math.max(1000, Math.min(60_000, opts.timeoutMs ?? 30_000));
 
-  const target = pickExtensionClientForUser(userId);
+  if (opts.kind === 'read' && (!opts.extensionClientId || !opts.args?.target)) {
+    return { ok: false, error: { code: 'target_required', message: '请先选择 Chrome 连接和标签页' } };
+  }
+  if (opts.kind === 'session') {
+    if (!opts.extensionClientId || !opts.args?.session)
+      return { ok: false, error: { code: 'target_required', message: '请先选择 Chrome 连接和会话' } };
+    if (!selectedChromeSessionCommandSchema.safeParse(opts.args.session).success)
+      return { ok: false, error: { code: 'invalid_session_command', message: '浏览器会话操作无效' } };
+  }
+  // An explicitly targeted operation must never fall through to the legacy
+  // active-tab tools, even if a caller accidentally chooses the wrong kind.
+  if (opts.args?.target && opts.kind !== 'read') {
+    return { ok: false, error: { code: 'target_unsupported', message: '此工具暂不支持指定标签页' } };
+  }
+  const target = pickExtensionClientForUser(userId, new Set(), opts.extensionClientId);
   if (!target) {
+    if (opts.extensionClientId !== undefined) {
+      return {
+        ok: false,
+        error: { code: 'target_extension_unavailable', message: '所选 Chrome 连接已断开，请重新选择' },
+      };
+    }
     return { ok: false, error: { message: extensionNoClientMessage(), code: 'no_extension' } };
   }
+  const withConnectionIdentity = (outcome: ExtensionToolCallOutcome, clientId: string) =>
+    outcome.ok && (opts.kind === 'tabs' || opts.kind === 'read' || opts.extensionClientId !== undefined)
+      ? { ...outcome, extensionClientId: clientId }
+      : outcome;
 
   const inherited = currentOperationLifetime();
   if (target.work.controller || inherited) {
@@ -650,13 +688,15 @@ export async function sendExtensionToolCall(
     const pending = target.work.child(inherited, (originalVeto) =>
       sendOwnedExtensionToolCall(target, userId, opts, originalVeto),
     );
-    return pending ? pending : extensionUnavailable();
+    return pending
+      ? pending.then((outcome) => withConnectionIdentity(outcome, target.id))
+      : extensionUnavailable();
   }
 
   return new Promise<ExtensionToolCallOutcome>((resolve) => {
     const excludedClientIds = new Set<string>();
     const trySend = (): void => {
-      const target = pickExtensionClientForUser(userId, excludedClientIds);
+      const target = pickExtensionClientForUser(userId, excludedClientIds, opts.extensionClientId);
       if (!target) {
         resolve({
           ok: false,
@@ -686,7 +726,7 @@ export async function sendExtensionToolCall(
       pendingExtensionCalls.set(requestId, {
         clientId: target.id,
         taskId: opts.taskId,
-        resolve,
+        resolve: (outcome) => resolve(withConnectionIdentity(outcome, target.id)),
         timer,
       });
       const sent = send(target.socket, {
@@ -897,6 +937,7 @@ async function handleConnection(
   // Install cleanup before authentication's first await, not after it.
   socket.on('close', () => {
     clearTimeout(authTimer);
+    socket.off('message', onMessage);
     state.authed = false;
     state.authToken = null;
     clientStates.delete(socket);
@@ -916,7 +957,10 @@ async function handleConnection(
     .filter(Boolean);
 
   const jwtProto = requestedProtos.find((p) => p.startsWith('jwt.'));
-  if (jwtProto) {
+  // Start header authentication without delaying listener registration. Chrome
+  // sends hello as soon as the socket opens, while database auth is still pending.
+  const headerAuthentication = (async () => {
+    if (!jwtProto) return;
     const token = jwtProto.slice('jwt.'.length);
     const userId = await authenticateToken(token);
     if (socket.readyState !== WebSocket.OPEN || work.stopping) return;
@@ -931,7 +975,7 @@ async function handleConnection(
         heartbeatMs: HEARTBEAT_INTERVAL_MS,
       });
     }
-  }
+  })();
 
   // Give the client 10s to prove auth via first-frame `client.hello` if header path failed.
   authTimer = setTimeout(() => {
@@ -942,7 +986,10 @@ async function handleConnection(
   }, 10_000);
   authTimer.unref();
 
-  socket.on('message', async (raw) => {
+  socket.on('message', onMessage);
+  async function onMessage(raw: RawData) {
+    await headerAuthentication;
+    if (socket.readyState !== WebSocket.OPEN || work.stopping) return;
     const result = parseClientMessage(raw.toString());
     if (!result.success) {
       send(socket, {
@@ -979,11 +1026,12 @@ async function handleConnection(
       await pending.catch(() =>
         send(socket, { type: 'server.error', code: 'REQUEST_FAILED', message: '请求未完成。' }),
       );
-  });
+  }
 
   socket.on('pong', () => {
     state.lastPongAt = Date.now();
   });
+  await headerAuthentication;
 }
 
 function isReceiptOrMemoryMessage(msg: ClientMessage): boolean {
@@ -1215,7 +1263,9 @@ export async function dispatchUserInput(
     );
     return;
   }
+  let releaseLegacyInput: (() => void) | undefined;
   try {
+    releaseLegacyInput = browserControlSessions.beginLegacyInput(executor);
     // PlaywrightExecutor's action methods take our internal PageLike.
     // `getPage()` returns a real `Page`, but the shapes diverge on
     // optional-arg signatures that TS rejects at the union level; the
@@ -1312,6 +1362,8 @@ export async function dispatchUserInput(
       },
       'handleUserInput failed',
     );
+  } finally {
+    releaseLegacyInput?.();
   }
 }
 

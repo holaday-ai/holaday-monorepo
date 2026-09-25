@@ -89,6 +89,9 @@ export interface BreakerVerdict {
  * threshold halts rather than runs.
  */
 export function checkBreaker(spentUsd: number, breakerUsd: number, label: string): BreakerVerdict {
+  if (!Number.isFinite(spentUsd) || spentUsd < 0) {
+    return { tripped: true, reason: `${label} spend unknown — fail-safe trip` };
+  }
   if (!(breakerUsd > 0)) {
     return { tripped: true, reason: `${label} breaker invalid (=${breakerUsd}) — fail-safe trip` };
   }
@@ -128,8 +131,13 @@ export function firecrawlScrapeCostUsd(): number {
 export async function sumLlmCostForTasks(db: DB, taskInternalIds: number[]): Promise<number> {
   if (taskInternalIds.length === 0) return 0;
   const [row] = await db
-    .select({ total: sql<string>`COALESCE(SUM(${llmCalls.costUsd}), 0)` })
+    .select({
+      total: sql<string>`COALESCE(SUM(${llmCalls.costUsd}), 0)`,
+      unknownCalls: sql<number>`COUNT(*) - COUNT(${llmCalls.costUsd})`,
+    })
     .from(llmCalls)
     .where(inArray(llmCalls.taskId, taskInternalIds));
-  return Number(row?.total ?? 0) || 0;
+  if (Number(row?.unknownCalls ?? 0) > 0) return Number.POSITIVE_INFINITY;
+  const total = Number(row?.total ?? 0);
+  return Number.isFinite(total) && total >= 0 ? total : Number.POSITIVE_INFINITY;
 }
