@@ -74,7 +74,7 @@ export interface MaintenanceSnapshot {
   needsReconciliation: boolean;
 }
 export interface MaintenanceJournal {
-  read(): { needsReconciliation: boolean };
+  read(): { identity: MaintenanceIdentity; mode: MaintenanceMode; needsReconciliation: boolean };
   persist(input: { mode: MaintenanceMode; needsReconciliation: boolean }): void;
 }
 export interface MaintenanceChecks {
@@ -95,9 +95,15 @@ export interface MaintenanceChecks {
 it('waits for an admitted child after its parent has returned', async () => {
   let finish!: () => void;
   const held = new Promise<void>(resolve => { finish = resolve; });
+  const identity = { candidate: 'a'.repeat(40), bootId: 'b'.repeat(32) };
+  let record: MaintenanceRecord = { identity, mode: 'closed', needsReconciliation: false };
+  const journal: MaintenanceJournal = {
+    read: () => structuredClone(record),
+    persist: input => { record = { identity, ...input }; },
+  };
   const m = new OrdinaryMaintenance({
-    identity: { candidate: 'a'.repeat(40), bootId: 'b'.repeat(32) },
-    journal: { read: () => ({ needsReconciliation: false }), persist() {} },
+    identity,
+    journal,
     checks: {
       verifyReady: async () => {}, stopProducers: async () => {},
       verifyRetainedQueue: async () => {},
@@ -117,6 +123,8 @@ it('waits for an admitted child after its parent has returned', async () => {
   expect(m.snapshot().mode).toBe('closed');
 });
 ```
+
+测试 journal 保存最新的 `{identity, mode, needsReconciliation}`，`persist` 更新相同实例的记录；每次 read 返回快照。已实现的具体 fixture 见 `src/execution/ordinary-maintenance.test.ts`。执行裁定：接口补入身份和模式，满足设计要求的跨进程归属核对，不能仅凭布尔值判断。
 
 - [ ] **Step 2 — RED。** 运行 `pnpm --filter @holaday/orchestrator exec vitest run src/execution/ordinary-maintenance.test.ts`，记录缺失接口/预期行为失败，不允许接入真实服务。
 - [ ] **Step 3 — 最小实现。** 所有新根在派发前写入未完成标记；关闭先同步 `drain.close()`，再等待停止生产者；只在生产者、执行、队列保留证明全部完成后写 clean closed。`verifyReady` 完成后再核对实例状态，持久写 serving+dirty 后才能 `drain.open()`；异常保持 closed/blocked。根用如下原始执行封装，不用 HTTP finish 代替执行结束：
