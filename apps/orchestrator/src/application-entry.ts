@@ -14,6 +14,12 @@ export async function launchApplication(): Promise<void> {
   } catch {
     // A failed close remains failed; never re-import or start a legacy fallback.
     if (boot) await boot.close();
+    if (!controlled) {
+      // Ordinary startup can already own listeners/timers. Preserve the legacy
+      // fatal-start exit; exitCode alone leaves a half-started service alive.
+      process.stderr.write('APPLICATION_START_UNPROVEN\n');
+      process.exit(1);
+    }
     throw new Error('APPLICATION_START_UNPROVEN');
   }
 }

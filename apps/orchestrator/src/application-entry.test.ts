@@ -19,6 +19,7 @@ beforeEach(() => {
   seam.main.mockReset();
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
 async function load() {
@@ -62,6 +63,7 @@ it('partial controlled metadata cannot fall back to legacy or load application m
   expect(seam.main).not.toHaveBeenCalled();
 });
 it('application failure closes its original boot and never starts a fallback application', async () => {
+  const exit = vi.spyOn(process, 'exit').mockReturnValue(undefined as never);
   vi.stubEnv('HOLADAY_POOL_BOOT', 'b'.repeat(32));
   const context = { close: vi.fn(async () => {}) };
   seam.boot.mockResolvedValue(context);
@@ -70,4 +72,19 @@ it('application failure closes its original boot and never starts a fallback app
   await expect(launchApplication()).rejects.toThrow();
   expect(context.close).toHaveBeenCalledOnce();
   expect(seam.main).toHaveBeenCalledOnce();
+  expect(exit).not.toHaveBeenCalled();
+});
+
+it.each([false, true])('ordinary startup failure requests immediate exit even if late metadata appears: %s', async (lateMetadata) => {
+  const exit = vi.spyOn(process, 'exit').mockReturnValue(undefined as never);
+  vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+  const { launchApplication } = await load();
+  seam.main.mockImplementation(async () => {
+    // Imported application configuration must not change the entry's original mode.
+    if (lateMetadata) vi.stubEnv('HOLADAY_POOL_BOOT', 'late-dotenv-value');
+    throw new Error('synthetic startup failure after HTTP bind');
+  });
+  await expect(launchApplication()).rejects.toThrow('APPLICATION_START_UNPROVEN');
+  expect(exit.mock.calls).toEqual([[1]]);
+  expect(seam.boot).not.toHaveBeenCalled();
 });

@@ -405,8 +405,9 @@
       "path": "apps/orchestrator/src/application-main.ts",
       "kind": "modified",
       "group": "orchestrator-protocol",
-      "bytes": 48085,
-      "sha256": "b7ffe447da7401656e50a382d820e139e7cfc2e08553b76f95c58bf596fd61da"
+      "bytes": 48285,
+      "sha256": "a5ff26ee11143935329c86fb3acf0d4143dc193f6769b3084018a7ea612c6ca0",
+      "sourceSha256": "b7ffe447da7401656e50a382d820e139e7cfc2e08553b76f95c58bf596fd61da"
     },
     {
       "path": "apps/orchestrator/src/auth/middleware-drain.test.ts",
@@ -1321,6 +1322,32 @@
       "reason": "Unfinished Linux pool expansion and its matching loader manifest; keep all at HEAD together."
     }
   ],
+  "postSelectionFixes": {
+    "purpose": "Ordinary startup/shutdown failure exit regression fix; controlled boot behavior unchanged",
+    "basedOnCandidateCommit": "5aa02924203ce60e904ec310358a5194a2f45c28",
+    "files": [
+      {
+        "path": "apps/orchestrator/src/application-entry.ts",
+        "bytes": 1139,
+        "sha256": "8047926e5c25dd868126ed5f21e7b739a9edbf3fca991be50a6ad5f6c1a3aa96"
+      },
+      {
+        "path": "apps/orchestrator/src/application-entry.test.ts",
+        "bytes": 3792,
+        "sha256": "f501a20633a676e271801d5efd1d610633def62c07aba37ca6b6b9c3de4321a0"
+      },
+      {
+        "path": "apps/orchestrator/src/application-main.ts",
+        "bytes": 48285,
+        "sha256": "a5ff26ee11143935329c86fb3acf0d4143dc193f6769b3084018a7ea612c6ca0"
+      },
+      {
+        "path": "apps/orchestrator/src/application-main.wiring.test.ts",
+        "bytes": 11619,
+        "sha256": "1bf1deb57ba07427e74489bbceb1cb854f76d0cea51357af15fdcc23167408ee"
+      }
+    ]
+  },
   "boundaries": {
     "localCommitAllowed": true,
     "pushAllowed": false,

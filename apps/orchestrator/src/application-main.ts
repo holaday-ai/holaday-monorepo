@@ -1038,6 +1038,9 @@ export async function startApplication(boot?: ApplicationBoot) {
     const onSignal = (signal: string) => {
       void shutdown(signal).catch(() => {
         logger.error('application resource shutdown remains unproven');
+        // Ordinary shutdown has no controlled ownership barrier. A rejected
+        // close must not leave its remaining HTTP listener serving indefinitely.
+        if (!resources) process.exit(1);
         process.exitCode = 1;
       });
     };

@@ -304,3 +304,26 @@ it.each(['http', 'ws'] as const)(
     expect(s.pool.shutdown).toHaveBeenCalledOnce();
   },
 );
+
+it.each(['energy', 'ws'] as const)('ordinary shutdown failure at %s exits instead of leaving HTTP serving', async (stage) => {
+  vi.stubEnv('RETENTION_REAPER_ENABLED', 'false');
+  vi.stubEnv('USER_TASK_CRYSTALLIZE_ENABLED', 'false');
+  vi.spyOn(globalThis, 'setInterval').mockReturnValue({ unref() {} } as never);
+  const on = vi.spyOn(process, 'on').mockReturnValue(process);
+  const exit = vi.spyOn(process, 'exit').mockReturnValue(undefined as never);
+  const previousExitCode = process.exitCode;
+  try {
+    const { startApplication } = await import('./application-main.js');
+    await startApplication();
+    expect(s.httpReady).toHaveBeenCalledOnce();
+    expect(s.wsReady).toHaveBeenCalledOnce();
+    const fail = stage === 'energy' ? s.stopEnergy : s.closeWs;
+    fail.mockRejectedValueOnce(new Error('synthetic ordinary shutdown failure'));
+    const handler = on.mock.calls.find(([event]) => event === 'SIGTERM')?.[1];
+    expect(handler).toBeDefined();
+    handler!();
+    await vi.waitFor(() => expect(exit.mock.calls).toEqual([[1]]));
+  } finally {
+    process.exitCode = previousExitCode;
+  }
+});
