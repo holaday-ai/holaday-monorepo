@@ -10,6 +10,8 @@
 
 **Spec:** [用户已批准设计](../specs/2026-09-25-browser-first-cutover-design.md)。执行者必须完整阅读本文与设计，不能只读其中一个任务。
 
+**2026-09-26 批准修订：** 首次 PM2 托管对象采用独立的定向停止适配器，接受已核对的管理器信号和超时强杀。须先隔离入口、核清未结工作，核对管理器/应用/完整进程树/版本/超时及重启来源，按唯一 pm_id 定向停止；不停止 daemon、不使用全局名称操作。未托管对象仍由 pidfd 固定身份后只发 SIGTERM，无数字 PID 回退。普通维护停止不变。此修订仅授权本地实施和隔离测试。
+
 ## Global Constraints
 
 - “普通升级仍走现有排空协议。首次引导必须显式选择，绝不在普通升级检查失败后自动降级进入。”
@@ -236,7 +238,7 @@ test('first-cutover never relaxes normal runtime proof', async () => {
 ```
 
 - [ ] **2. 跑 RED。** `node --test scripts/browser-first-cutover-runtime.test.mjs scripts/browser-first-cutover-fence.test.mjs scripts/browser-maintenance-journal.test.mjs`；`python3 scripts/browser-first-cutover-signal.test.py`。
-- [ ] **3. 实现精确进程适配。** 首次 helper 仅接受批准清单、固定旧根路径及已观测 exec/argv/UID/start；pidfd 打开后重新核对完整身份，只 SIGTERM，无数字 PID kill 回退。需要禁用的 PM2/其他重启来源逐一校验名称、配置和身份后操作；不接受任意命令模板。未知启动器拒绝，不自动停整个 PM2 daemon。4011 属独立网关适配的批准对象，不借用 main/worker 身份伪装。
+- [ ] **3. 实现精确进程适配。** 首次 helper 仅接受批准清单、固定旧根路径及已观测 exec/argv/UID/start；未托管对象 pidfd 打开后重新核对完整身份，只 SIGTERM，无数字 PID kill 回退。PM2 对象按上述 2026-09-26 修订实施独立定向停止；逐一核对名称、唯一 pm_id、配置、管理器和进程树身份后操作，验证 stopped 与无回生。未知启动器拒绝，不接受任意命令模板、不自动停整个 PM2 daemon。4011 属独立网关适配的批准对象，不借用 main/worker 身份伪装。
 - [ ] **4. 实现两阶段入口隔离。** 只对实采并批准的 nginx server/location 与服务目标生成临时配置；orders 阶段拒绝新任务/订单但允许既有回调；all-writers 阶段业务路由统一非成功，仅保留健康检查。修改前校验原摘要、备份原文件，`nginx -t` 通过才 reload；配置恢复也须匹配本次生成摘要，发现其他修改不覆盖。无效签名测试请求用于验证维护拒绝，不向生产发送有效支付通知。WS 旧连接、内部直连和生产者必须单独停止/隔离并证明，不将 HTTP 503 视为全局屏障。
 
 此模块在本地 fixture nginx 配置和隔离容器实现验证；真实站点路径/启动来源必须由采集结果固定进部署清单，不能在计划中猜测。未识别入口使 verify 返回拒绝，不能形成“默认全覆盖”。

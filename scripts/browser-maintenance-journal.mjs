@@ -1,6 +1,6 @@
-import * as fs from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { randomUUID, createHash } from 'node:crypto';
+import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
 
 const identityValid = (value) =>
@@ -24,18 +24,33 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
   const configDigest = metadata?.configDigest;
   const migrationDigest = metadata?.migrationDigest;
   let migrationManifest;
-  const oldIdentity = metadata?.oldIdentity;
+  let bootstrapSeed;
+  let currentIdentity;
+  const first = metadata?.kind === 'first-cutover';
+  const oldIdentity = metadata?.oldIdentity && { ...metadata.oldIdentity };
+  const firstFields = first
+    ? {
+        kind: 'first-cutover',
+        legacyDigest: metadata.legacyDigest,
+        inventoryDigest: metadata.inventoryDigest,
+      }
+    : {};
   if (
     !/^[a-f0-9]{40}$/.test(candidate ?? '') ||
     !/^[a-f0-9]{64}$/.test(configDigest ?? '') ||
     !/^[a-f0-9]{64}$/.test(migrationDigest ?? '') ||
-    !identityValid(oldIdentity)
+    (first
+      ? oldIdentity !== undefined ||
+        !/^[a-f0-9]{64}$/.test(firstFields.legacyDigest ?? '') ||
+        !/^[a-f0-9]{64}$/.test(firstFields.inventoryDigest ?? '')
+      : metadata?.kind !== undefined || !identityValid(oldIdentity))
   )
     throw unproven();
   const attempt = randomUUID();
   const lockPath = join(directory, 'release.lock');
   const path = join(directory, `${attempt}.json`);
-  const lockBytes = `${JSON.stringify({ attempt, candidate, configDigest, migrationDigest, oldIdentity })}\n`;
+  const binding = { attempt, candidate, configDigest, migrationDigest, ...firstFields };
+  const lockBytes = `${JSON.stringify({ ...binding, oldIdentity })}\n`;
   let lockStat;
   const privateFile = (stat) =>
     stat.isFile() &&
@@ -79,6 +94,8 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
             configDigest,
             migrationDigest,
             migrationManifest,
+            ...firstFields,
+            bootstrapSeed,
             oldIdentity,
             phase: next,
             identity,
@@ -147,6 +164,29 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
   }
   return {
     path,
+    assertOwnership: () =>
+      serial(async () => {
+        await assertOwnership();
+        return {
+          attempt,
+          candidate,
+          configDigest,
+          migrationDigest,
+          ...(first ? { inventoryDigest: firstFields.inventoryDigest } : {}),
+        };
+      }),
+    bindBootstrapSeed: (seed) =>
+      serial(async () => {
+        if (
+          !first ||
+          phase !== 'migration_started' ||
+          bootstrapSeed ||
+          !/^[a-f0-9]{32}$/.test(seed ?? '')
+        )
+          throw unproven();
+        bootstrapSeed = seed;
+        await write(phase);
+      }),
     bindManifest: (manifest) =>
       serial(async () => {
         const bytes = JSON.stringify(manifest);
@@ -163,6 +203,40 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
     persist: (next, detail) =>
       serial(async () => {
         if (!migrationManifest) throw new Error('MAINTENANCE_MIGRATIONS_UNPROVEN');
+        if (first) {
+          const phases = [
+            'preflight',
+            'prepared',
+            'orders_fenced',
+            'legacy_settled',
+            'all_fenced',
+            'stopped',
+            'backup_verified',
+            'migration_started',
+            'candidate_started',
+            'verified',
+            'opened',
+            'reconciled',
+          ];
+          const hasBoot = phases.indexOf(next) >= phases.indexOf('candidate_started');
+          const startIntent = next === 'candidate_started' && detail?.identity === undefined;
+          if (
+            phases.indexOf(next) !== phases.indexOf(phase) + 1 ||
+            detail?.candidate !== candidate ||
+            (hasBoot
+              ? !bootstrapSeed ||
+                (!startIntent &&
+                  (!identityValid(detail.identity) ||
+                    detail.identity.candidate !== candidate ||
+                    detail.identity.bootId === bootstrapSeed ||
+                    (currentIdentity && detail.identity.bootId !== currentIdentity.bootId)))
+              : detail.identity !== undefined)
+          )
+            throw unproven();
+          await write(next, detail.identity);
+          if (hasBoot && !startIntent) currentIdentity = { ...detail.identity };
+          return;
+        }
         if (
           ![
             'closed',
@@ -181,7 +255,8 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
       }),
     finish: () =>
       serial(async () => {
-        if (phase !== 'opened') throw new Error('MAINTENANCE_RELEASE_NOT_OPENED');
+        if (phase !== (first ? 'reconciled' : 'opened'))
+          throw new Error('MAINTENANCE_RELEASE_NOT_OPENED');
         try {
           await assertOwnership();
           await io.unlink(lockPath);
