@@ -7,6 +7,10 @@ import { taskFiles } from '../../db/schema/task-files.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
 import { ExecutionDrain } from '../../execution/execution-drain.js';
 import { reloadFeatureFlagsForTest } from '../../execution/feature-flags.js';
+import {
+  type MaintenanceRecord,
+  OrdinaryMaintenance,
+} from '../../execution/ordinary-maintenance.js';
 import { type OperationLifetime, startOwnedOperation } from '../../execution/owned-operation.js';
 import * as storageProvider from '../../files/storage-provider.js';
 import * as messages from '../../llm/messages-adapter.js';
@@ -32,6 +36,7 @@ it.each([
   'executor',
   'local',
   'local-file',
+  'ordinary',
 ] as const)('formal Qwen browser task admission and execution: %s', async (scenario) => {
   const isLocal = scenario === 'local' || scenario === 'local-file';
   Object.assign(env, {
@@ -53,8 +58,29 @@ it.each([
     .spyOn(TaskRepository.prototype, 'persistVisionOutcome')
     .mockResolvedValue({ persisted: true });
   const requests: messages.NeutralMessagesRequest[] = [];
-  const drain = new ExecutionDrain();
-  drain.open();
+  const identity = { candidate: 'a'.repeat(40), bootId: 'b'.repeat(32) };
+  let maintenanceRecord: MaintenanceRecord = {
+    identity,
+    mode: 'closed',
+    needsReconciliation: false,
+  };
+  const maintenance = new OrdinaryMaintenance({
+    identity,
+    journal: {
+      read: () => structuredClone(maintenanceRecord),
+      persist: (next) => {
+        maintenanceRecord = { identity, ...next };
+      },
+    },
+    checks: {
+      verifyReady: async () => {},
+      stopProducers: async () => {},
+      verifyRetainedQueue: async () => {},
+    },
+  });
+  const drain = scenario === 'ordinary' ? maintenance.drain : new ExecutionDrain();
+  if (scenario === 'ordinary') await maintenance.resumeServing();
+  else drain.open();
   let releaseModel!: () => void;
   const modelGate = new Promise<void>((resolve) => {
     releaseModel = resolve;
@@ -67,7 +93,7 @@ it.each([
   const persistenceStarted = new Promise<void>((resolve) => {
     markPersistenceStarted = resolve;
   });
-  if (isLocal) vi.stubEnv('EVIDENCE_LEDGER_ENABLED', 'true');
+  if (isLocal || scenario === 'ordinary') vi.stubEnv('EVIDENCE_LEDGER_ENABLED', 'true');
   reloadFeatureFlagsForTest();
   const effects: string[] = [];
   if (isLocal) {
@@ -123,7 +149,8 @@ it.each([
         metadata,
         async create(request) {
           requests.push(request);
-          if (scenario === 'local' && requests.length === 1) await modelGate;
+          if ((scenario === 'local' || scenario === 'ordinary') && requests.length === 1)
+            await modelGate;
           if (scenario === 'timeout' && requests.length === 2)
             throw new messages.MessagesAdapterError('REQUEST_TIMEOUT', 'Qwen request timeout');
           return {
@@ -269,7 +296,7 @@ it.each([
     update: () => ({
       set: (values: Record<string, unknown>) => ({
         where: async () => {
-          if (scenario === 'local' && 'evidenceJson' in values) {
+          if ((scenario === 'local' || scenario === 'ordinary') && 'evidenceJson' in values) {
             markPersistenceStarted();
             await persistenceGate;
           }
@@ -289,6 +316,9 @@ it.each([
     executionRouter: null,
     browserPool: null,
     taskQueue: null,
+    ...(scenario === 'ordinary'
+      ? { executionDrain: maintenance, ordinaryMaintenance: maintenance }
+      : {}),
     ...(isLocal
       ? {
           executionDrain: {
@@ -339,6 +369,14 @@ it.each([
     return;
   }
   expect(result.status).toBe('executing');
+  if (scenario === 'ordinary') {
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(drain.snapshot().roots).toBe(0);
+    expect(drain.snapshot().byKind.execution).toBeGreaterThan(0);
+    await maintenance.beginMaintenance();
+    expect(drain.snapshot().idle).toBe(false);
+    releaseModel();
+  }
   if (scenario === 'local-file') {
     await vi.waitFor(() => expect(terminal).toHaveBeenCalled());
     await vi.waitFor(() => expect(drain.snapshot()).toMatchObject({ active: 0, unknown: 0 }));
@@ -415,6 +453,17 @@ it.each([
     ).toEqual(scenario === 'local' ? ['local-click'] : ['153,57']),
   );
   await vi.waitFor(() => expect(terminal).toHaveBeenCalled());
+  if (scenario === 'ordinary') {
+    await persistenceStarted;
+    try {
+      expect(drain.snapshot().byKind.execution).toBeGreaterThan(0);
+    } finally {
+      releasePersistence();
+    }
+    await vi.waitFor(() => expect(drain.snapshot()).toMatchObject({ active: 0, unknown: 0 }));
+    await maintenance.waitForIdle(1000);
+    expect(maintenance.snapshot().mode).toBe('closed');
+  }
   if (scenario === 'local') {
     await persistenceStarted;
     try {

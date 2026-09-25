@@ -68,7 +68,11 @@ async function fixture(maxDepth = 10) {
     now: () => now,
   });
   cleanup.push(() => queue.stop());
-  const ctx = { executionDrain: controller, taskQueue: queue, userId: 'synthetic-user' } as Context;
+  const ctx = {
+    executionDrain: controller,
+    taskQueue: queue,
+    userId: 'synthetic-user',
+  } as unknown as Context;
   return {
     ctx,
     controller,

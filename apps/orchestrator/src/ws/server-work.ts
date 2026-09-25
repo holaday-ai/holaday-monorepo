@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { DrainController } from '../execution/drain-controller.js';
+import type { ExecutionAdmission } from '../execution/execution-admission.js';
+import type { OrdinaryMaintenance } from '../execution/ordinary-maintenance.js';
 import {
   type OperationLifetime,
   captureOperationScopeVeto,
@@ -9,7 +10,12 @@ import {
 
 /** Own actual server entry promises, independently from the listening socket.
  * This does not claim that a socket close terminates remote extension actions. */
-export function createWsWork(controller?: DrainController) {
+export function createWsWork(
+  controller?: ExecutionAdmission,
+  ordinaryMaintenance?: OrdinaryMaintenance,
+) {
+  if (ordinaryMaintenance && ordinaryMaintenance !== controller)
+    throw new Error('MAINTENANCE_CONTROLLER_MISMATCH');
   const pending = new Set<Promise<unknown>>();
   const inside = new AsyncLocalStorage<boolean>();
   let stopping = false;
@@ -40,6 +46,7 @@ export function createWsWork(controller?: DrainController) {
   }
   return {
     controller,
+    ordinaryMaintenance,
     get stopping() {
       return stopping;
     },

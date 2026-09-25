@@ -1,4 +1,4 @@
-import type { DrainController } from '../execution/drain-controller.js';
+import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import {
   type OperationLifetime,
   currentOperationLifetime,
@@ -12,7 +12,7 @@ export interface QueueReservation {
 }
 
 export function assertQueueAdmission(
-  controller: DrainController | undefined,
+  controller: ExecutionAdmission | undefined,
   inherited: OperationLifetime | undefined,
 ): void {
   const ambient = currentOperationLifetime();
@@ -37,7 +37,7 @@ export function assertQueueAdmission(
 }
 
 export function reserveQueueLifetime(
-  controller: DrainController | undefined,
+  controller: ExecutionAdmission | undefined,
   inherited: OperationLifetime | undefined,
 ): QueueReservation | undefined {
   assertQueueAdmission(controller, inherited);

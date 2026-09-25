@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
-import type { DrainController } from './drain-controller.js';
+import type { ExecutionAdmission } from './execution-admission.js';
 import {
   type OperationLifetime,
   currentOperationLifetime,
@@ -49,7 +49,7 @@ function unavailable(res: Response): void {
 /** An explicit per-app boundary, not a patch to Express or a global IO proxy.
  * Callback middleware must call next at actual completion. Async handlers must
  * return their original promise. Detached business work still needs its own owner. */
-export function createHttpDrain(controller?: DrainController) {
+export function createHttpDrain(controller?: ExecutionAdmission) {
   const admit: RequestHandler = (req, res, next) => {
     if (!controller) {
       if (currentOperationLifetime()) return unavailable(res);

@@ -66,7 +66,8 @@ import { tasksRouter } from './trpc/routers/tasks.js';
 
 export interface HttpAppDeps {
   /** Original boot controller only; absence preserves the pre-drain deployment. */
-  executionDrain?: import('./execution/drain-controller.js').DrainController;
+  executionDrain?: import('./execution/execution-admission.js').ExecutionAdmission;
+  ordinaryMaintenance?: import('./execution/ordinary-maintenance.js').OrdinaryMaintenance;
   planner: Planner;
   visionCommander?: VisionLoopCommander;
   playwrightExecutor?: PlaywrightExecutor | null;
@@ -92,6 +93,9 @@ function parsePayPalAmountCents(value: unknown): number | null {
 
 export function createHttpApp(deps: HttpAppDeps) {
   const executionDrain = deps.executionDrain;
+  const ordinaryMaintenance = deps.ordinaryMaintenance;
+  if (ordinaryMaintenance && ordinaryMaintenance !== executionDrain)
+    throw new Error('MAINTENANCE_CONTROLLER_MISMATCH');
   const app = express();
   const lifetime = createHttpDrain(executionDrain);
   const get = (path: string, handler: express.RequestHandler) =>
@@ -1606,6 +1610,7 @@ export function createHttpApp(deps: HttpAppDeps) {
   // `hd_live_…` tokens because they don't verify as JWTs.
   const buildContextForUser = (userExternalId: string): import('./trpc/context.js').Context => ({
     ...(executionDrain ? { executionDrain } : {}),
+    ...(ordinaryMaintenance ? { ordinaryMaintenance } : {}),
     db,
     logger,
     // Express req/res stubs — tasks.create doesn't read them; the
@@ -1642,6 +1647,7 @@ export function createHttpApp(deps: HttpAppDeps) {
       router: appRouter,
       createContext: makeCreateContext({
         ...(executionDrain ? { executionDrain } : {}),
+        ...(ordinaryMaintenance ? { ordinaryMaintenance } : {}),
         planner: deps.planner,
         ...(deps.visionCommander ? { visionCommander: deps.visionCommander } : {}),
         ...(deps.playwrightExecutor ? { playwrightExecutor: deps.playwrightExecutor } : {}),

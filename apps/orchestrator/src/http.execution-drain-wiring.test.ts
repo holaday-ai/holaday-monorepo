@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { Planner } from './agent/planner.js';
 import * as webhook from './api-keys/webhook-handler.js';
 import { DrainController } from './execution/drain-controller.js';
+import { type MaintenanceRecord, OrdinaryMaintenance } from './execution/ordinary-maintenance.js';
 import { createHttpApp } from './http.js';
 import * as context from './trpc/context.js';
 
@@ -89,4 +90,35 @@ it('keeps the legacy context absent and does not accept a controller from reques
     res: {} as Response,
   });
   expect(ctx.executionDrain).toBeUndefined();
+});
+
+it('ordinary mode passes its original discriminator to HTTP and webhook callers', async () => {
+  const identity = { candidate: 'a'.repeat(40), bootId: 'b'.repeat(32) };
+  let record: MaintenanceRecord = { identity, mode: 'closed', needsReconciliation: false };
+  const ordinary = new OrdinaryMaintenance({
+    identity,
+    journal: {
+      read: () => structuredClone(record),
+      persist: (next) => {
+        record = { identity, ...next };
+      },
+    },
+    checks: {
+      verifyReady: async () => {},
+      stopProducers: async () => {},
+      verifyRetainedQueue: async () => {},
+    },
+  });
+  const contexts = vi.spyOn(context, 'makeCreateContext');
+  const hooks = vi.spyOn(webhook, 'createWebhookTasksHandler');
+  const deps = { planner, executionDrain: ordinary, ordinaryMaintenance: ordinary };
+  createHttpApp(deps);
+  const factory = contexts.mock.results[0]?.value;
+  if (!factory) throw new Error('context factory missing');
+  expect((await factory({ req: {} as Request, res: {} as Response })).ordinaryMaintenance).toBe(
+    ordinary,
+  );
+  expect(
+    hooks.mock.calls[0]?.[0].buildContextForUser('synthetic-http-wiring').ordinaryMaintenance,
+  ).toBe(ordinary);
 });

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { localChromeTaskSessions } from '../../agent/supercar/local-chrome-task-session.js';
 import { runSelectedChromeTask } from '../../agent/supercar/selected-chrome-runner.js';
 import { startOwnedOperation } from '../../execution/owned-operation.js';
+import { runTaskBackground } from './task-background.js';
 import { assertLocalChromeSelection, localChromeSelectionSchema, localChromeTabsProcedure } from './local-chrome-selection.js';
 import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
 import { browserControlProcedure, browserControlStateProcedure, browserNavProcedure } from './browser-control.js';
@@ -260,7 +261,7 @@ import {
   sendExtensionToolCall,
   updateTaskStateForUser,
 } from '../../ws/server.js';
-import { protectedProcedure, router } from '../trpc.js';
+import { protectedProcedure, pureTaskInput, router } from '../trpc.js';
 import { taskDrainMiddleware } from '../task-drain.js';
 import {
   followUpParentHasBrowserContext,
@@ -1191,7 +1192,7 @@ function isTaskCreateReplay(value: unknown): value is TaskCreateReplay {
 }
 
 export const tasksRouter = router({
-  create: protectedProcedure.input(createInput).use(async ({ ctx, input, next }) => {
+  create: protectedProcedure.input(pureTaskInput(createInput)).use(async ({ ctx, input, next }) => {
     let localChromeReservation;
     try {
       localChromeReservation = input.localChrome ? localChromeTaskSessions.reserve(ctx.userId, input.localChrome) : undefined;
@@ -2189,7 +2190,7 @@ export const tasksRouter = router({
       }
 
       const imageStartedAt = Date.now();
-      void (async () => {
+      void runTaskBackground(ctx, async (ctx) => (async () => {
         const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
             const imageHeartbeat =
               taskInternalId == null
@@ -2410,7 +2411,7 @@ export const tasksRouter = router({
             'image: detached failure could not be persisted',
           );
         }
-      });
+      }));
 
       return {
         taskId,
@@ -2864,7 +2865,7 @@ export const tasksRouter = router({
           };
         }
 
-        void (async () => {
+        void runTaskBackground(ctx, async (ctx) => (async () => {
           const { runAshareQa, runAsharePanorama } = await import(
             '../../agent/a-share/ashare-qa-runner.js'
           );
@@ -2999,7 +3000,7 @@ export const tasksRouter = router({
           } catch (err) {
             ctx.logger.error({ err, taskId }, 'ashare-qa: persist/broadcast failed');
           }
-        })();
+        })());
 
         return {
           taskId,
@@ -3028,7 +3029,7 @@ export const tasksRouter = router({
           'task: executor lane selected',
         );
         broadcastSubStatus(ctx.userId, taskId, 'generating');
-        void (async () => {
+        void runTaskBackground(ctx, async (ctx) => (async () => {
           let answer: string;
           let terminalStatus: 'completed' | 'failed' = 'completed';
           try {
@@ -3090,7 +3091,7 @@ export const tasksRouter = router({
           } catch (err) {
             ctx.logger.error({ err, taskId }, 'ashare-index: persist/broadcast failed');
           }
-        })();
+        })());
         return {
           taskId,
           status: 'executing' as const,
@@ -3119,7 +3120,7 @@ export const tasksRouter = router({
           { taskId, userId: ctx.userId, executorLane: 'ashare_qa_guidance' },
           'task: executor lane selected',
         );
-        void (async () => {
+        void runTaskBackground(ctx, async (ctx) => (async () => {
           try {
             let guidancePersisted = false;
             const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
@@ -3149,7 +3150,7 @@ export const tasksRouter = router({
           } catch (err) {
             ctx.logger.error({ err, taskId }, 'ashare-qa-guidance: persist/broadcast failed');
           }
-        })();
+        })());
         return {
           taskId,
           status: 'executing' as const,
@@ -3245,7 +3246,7 @@ export const tasksRouter = router({
         };
       }
 
-      void (async () => {
+      void runTaskBackground(ctx, async (ctx) => (async () => {
         const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
         let result: RunTemplateFillResult;
         if (taskInternalId == null) {
@@ -3444,7 +3445,7 @@ export const tasksRouter = router({
         } catch (err) {
           ctx.logger.warn({ err, taskId }, 'template-fill: broadcast terminal failed');
         }
-      })();
+      })());
 
       return {
         taskId,
@@ -3533,7 +3534,7 @@ export const tasksRouter = router({
       // there's no per-user FIFO queue to enqueue into. Concurrent
       // generate tasks parallelize on the selected regional Qwen endpoint.
       const generateStartedAt = Date.now();
-      void (async () => {
+      void runTaskBackground(ctx, async (ctx) => (async () => {
         // A2 deferred — generate→browser fallback would re-enter the
         // supercar branch which needs pool slots, queueing, and a
         // distinct outcome shape. Tracked as fallbackChain=['generate']
@@ -3899,7 +3900,7 @@ export const tasksRouter = router({
           outcome.status === 'completed'
         ) {
           const summary = outcome.summary;
-          void publishCoreTaskSuggestions({
+          void runTaskBackground(ctx, async (ctx) => publishCoreTaskSuggestions({
             wiring: modelRuntimeWiring,
             actorExternalId: ctx.userId,
             modelDataRegion: userRow.modelDataRegion,
@@ -3912,14 +3913,14 @@ export const tasksRouter = router({
               broadcastToUser(ctx.userId, {
                 type: 'server.supercar.suggestions', taskId, suggestions,
               }),
-          });
+          }));
         }
 
         // Phase 1 Day 5 — fire-and-forget execution-pipeline persist
         // + always cleanup the in-memory contract / ledger registries
         // even when persist is a no-op (flags off) so the maps don't
         // leak across long-running PM2 lifetimes.
-        void persistExecution({
+        void runTaskBackground(ctx, async (ctx) => persistExecution({
           taskId,
           verification: executionVerification,
           db: ctx.db,
@@ -3935,8 +3936,8 @@ export const tasksRouter = router({
                 })
               : null,
           )
-          .finally(() => disposeExecution(taskId));
-      })();
+          .finally(() => disposeExecution(taskId)));
+      })());
 
       return {
         taskId,
@@ -4053,7 +4054,7 @@ export const tasksRouter = router({
 
       const firecrawl = ctx.firecrawl;
       const scrapeStartedAt = Date.now();
-      void (async () => {
+      void runTaskBackground(ctx, async (ctx) => (async () => {
         // Fallback chain (A4) — every lane the dispatcher actually
         // tried for this task. Logged + persisted under
         // result.metadata.fallbackChain so the eval pipeline can see
@@ -4535,7 +4536,7 @@ export const tasksRouter = router({
           outcome.status === 'completed'
         ) {
           const summary = outcome.summary;
-          void publishCoreTaskSuggestions({
+          void runTaskBackground(ctx, async (ctx) => publishCoreTaskSuggestions({
             wiring: modelRuntimeWiring,
             actorExternalId: ctx.userId,
             modelDataRegion: userRow.modelDataRegion,
@@ -4548,12 +4549,12 @@ export const tasksRouter = router({
               broadcastToUser(ctx.userId, {
                 type: 'server.supercar.suggestions', taskId, suggestions,
               }),
-          });
+          }));
         }
 
         // Phase 1 Day 5 — fire-and-forget execution-pipeline persist
         // + cleanup. Same pattern as the generate fork.
-        void persistExecution({
+        void runTaskBackground(ctx, async (ctx) => persistExecution({
           taskId,
           verification: executionVerification,
           db: ctx.db,
@@ -4569,8 +4570,8 @@ export const tasksRouter = router({
                 })
               : null,
           )
-          .finally(() => disposeExecution(taskId));
-      })();
+          .finally(() => disposeExecution(taskId)));
+      })());
 
       return {
         taskId,
@@ -4764,9 +4765,9 @@ export const tasksRouter = router({
         };
       }
 
-      void dispatchDirectOpen(ctx).catch((err) => {
+      void runTaskBackground(ctx, async (ctx) => dispatchDirectOpen(ctx).catch((err) => {
         ctx.logger.error({ err, taskId }, 'direct-open: detached dispatch rejected');
-      });
+      }));
 
       return {
         taskId,
@@ -5299,7 +5300,7 @@ export const tasksRouter = router({
           // effort: a DB blip or broadcast failure logs and continues
           // (the loop already has the up-to-date state in memory).
           onPlanStepUpdate: (steps) => {
-            void (async () => {
+            void runTaskBackground(ctx, async (ctx) => (async () => {
               const persisted = await repo.persistActivePlanStatus(taskId, steps);
               if (!persisted.persisted) {
                 ctx.logger.info({ taskId }, 'plan-step skipped stale update');
@@ -5314,10 +5315,10 @@ export const tasksRouter = router({
               } catch (err) {
                 ctx.logger.warn({ err, taskId }, 'plan-step broadcast failed');
               }
-            })().catch((err) => ctx.logger.warn({ err, taskId }, 'plan-step persist failed'));
+            })().catch((err) => ctx.logger.warn({ err, taskId }, 'plan-step persist failed')));
           },
           onStatsRecord: ({ laneUsed, targetSite, success, latencyMs, errorType }) => {
-            void statsService.record({
+            void runTaskBackground(ctx, async (ctx) => statsService.record({
               userIdInternal: userRow.id,
               taskExternalId: taskId,
               taskType: taskTypeForStats,
@@ -5326,7 +5327,7 @@ export const tasksRouter = router({
               success,
               latencyMs,
               errorType,
-            });
+            }));
           },
           onEvidence: (ev) => {
             try {
@@ -5351,7 +5352,7 @@ export const tasksRouter = router({
                   // Fire-and-forget (mirrors the onTick consumer): a DB
                   // failure only drops this capture row + logs; the browse
                   // action is never awaited on it.
-                  void (async () => {
+                  void runTaskBackground(ctx, async (ctx) => (async () => {
                     try {
                       const capture = await taskActionCaptureRepo.create({
                         taskId: taskDbId,
@@ -5428,7 +5429,7 @@ export const tasksRouter = router({
                         'supercar: persist action capture failed',
                       );
                     }
-                  })();
+                  })());
                 },
               }
             : {}),
@@ -5601,7 +5602,7 @@ export const tasksRouter = router({
             const webSearches = pendingWebSearches;
             pendingWebSearches = [];
             if (taskDbId) {
-              void (async () => {
+              void runTaskBackground(ctx, async (ctx) => (async () => {
                 try {
                   await ctx.db.insert(taskSteps).values({
                     externalId: newExternalId('taskStep'),
@@ -5626,7 +5627,7 @@ export const tasksRouter = router({
                     'supercar: persist step failed',
                   );
                 }
-              })();
+              })());
             }
           },
           onScreencast(ev) {
@@ -5715,7 +5716,7 @@ export const tasksRouter = router({
             // result.executionMode; without this, login parks fall
             // through to lane='unknown'.
             const parkUrl = ev.currentUrl;
-            void (async () => {
+            void runTaskBackground(ctx, async (ctx) => (async () => {
               try {
                 // Capture a screenshot off the per-task Brave. This
                 // shares the captureFinalState helper used at terminal
@@ -5770,7 +5771,7 @@ export const tasksRouter = router({
               } catch (err) {
                 ctx.logger.warn({ err, taskId }, 'supercar: persist park metadata failed');
               }
-            })();
+            })());
           },
           onThinking(summary) {
             try {
@@ -5879,7 +5880,7 @@ export const tasksRouter = router({
         // wedged, the DB row remained `executing` until the next
         // orchestrator restart boot-sweep. That looked like an
         // endless task to the user and kept quota/concurrency noisy.
-        void (async (): Promise<void> => {
+        void runTaskBackground(ctx, async (ctx) => (async (): Promise<void> => {
           const reason = '任务执行超时，已自动停止。建议：简化任务描述后重试。';
           try {
             const persisted = await repo.persistVisionOutcome(taskId, {
@@ -5905,17 +5906,18 @@ export const tasksRouter = router({
               'supercar: watchdog failed to persist terminal timeout',
             );
           }
-        })();
+        })());
         // Step 3: force-release the per-task Brave even if abort
         // didn't take. The pool's release method is idempotent: a
         // second call when the slot is already torn down no-ops.
         if (didAllocatePool && ctx.browserPool) {
-            void ctx.browserPool.release(taskId, 'watchdog-force-release').catch((relErr) => {
+            const releasingPool = ctx.browserPool;
+            void runTaskBackground(ctx, async (ctx) => releasingPool.release(taskId, 'watchdog-force-release').catch((relErr) => {
               ctx.logger.warn(
                 { err: relErr, taskId, userId: ctx.userId },
                 'pool: watchdog force-release failed',
               );
-            });
+            }));
         }
       }, SUPERCAR_TIMEOUT_MS + WATCHDOG_GRACE_MS);
       // Mark the timer as unref'd so it doesn't keep the Node process
@@ -6190,7 +6192,7 @@ export const tasksRouter = router({
                   // PlanCard catches up. Best-effort: a DB blip
                   // can't block terminal broadcast.
                   if (persisted.persisted) {
-                    void convergePlanStatusOnSuccess(ctx, taskId, userId);
+                    void runTaskBackground(ctx, async (ctx) => convergePlanStatusOnSuccess(ctx, taskId, userId));
                     broadcastToUser(userId, {
                       type: 'server.task.terminal',
                       taskId,
@@ -6846,10 +6848,11 @@ export const tasksRouter = router({
                   },
                   'suggestions: Qwen selected',
                 );
-                void generateSuggestions({
+                const completedSummary = outcome.summary;
+                void runTaskBackground(ctx, async (ctx) => generateSuggestions({
                   messagesAdapter,
                   intent: input.intent,
-                  summary: outcome.summary,
+                  summary: completedSummary,
                 })
                   .then((suggestions) => {
                     if (suggestions.length === 0) return;
@@ -6865,7 +6868,7 @@ export const tasksRouter = router({
                   })
                   .catch((err) =>
                     ctx.logger.warn({ err, taskId }, 'suggestions: generate crashed'),
-                  );
+                  ));
               }
             }
           })
@@ -6955,14 +6958,15 @@ export const tasksRouter = router({
                 'terminal-review',
               );
               if (!retained) {
-                      void ctx.browserPool
+                      const releasingPool = ctx.browserPool;
+                      void runTaskBackground(ctx, async (ctx) => releasingPool
                         .release(taskId, `task-${taskId}-done`)
                         .catch((relErr) => {
                     ctx.logger.warn(
                       { err: relErr, taskId, userId: ctx.userId },
                       'pool: post-task release failed',
                     );
-                  });
+                  }));
               }
             }
             // Phase 24 RC follow-up — wake the TaskQueue worker so
@@ -6992,7 +6996,7 @@ export const tasksRouter = router({
               : null,
           )
           .finally(() => disposeExecution(taskId));
-            if (input.localChrome) return finalPersistence;
+            if (input.localChrome || ctx.ordinaryMaintenance) return finalPersistence;
           });
 
       // Phase 24 — fire the runFn directly (pre-queue path). Per-task
@@ -7110,12 +7114,15 @@ export const tasksRouter = router({
           if (receipt && !receipt.ok && executionContext.executionLifetime) executionContext.executionLifetime.drain.markUnknown(executionContext.executionLifetime.owner);
         }
       };
-      if (input.localChrome && ctx.executionLifetime) {
+      if (ctx.ordinaryMaintenance) {
+        void runTaskBackground(ctx, async (ctx) => input.localChrome ? dispatchLocalChrome(ctx) : dispatchToBrave(ctx))
+          .catch(error => ctx.logger.error({ error, taskId }, 'browser execution failed'));
+      } else if (input.localChrome && ctx.executionLifetime) {
         const { drain, owner } = ctx.executionLifetime;
         const operation = startOwnedOperation(drain, 'execution', child => dispatchLocalChrome({ ...ctx, executionLifetime: { drain, owner: child } }), { parent: owner, errorOutcome: 'unknown', dispatch: 'immediate' });
         void operation.result.catch(error => ctx.logger.error({ error, taskId }, 'local Chrome execution failed'));
       } else {
-        void (input.localChrome ? dispatchLocalChrome(ctx) : dispatchToBrave(ctx));
+        void runTaskBackground(ctx, async (ctx) => (input.localChrome ? dispatchLocalChrome(ctx) : dispatchToBrave(ctx)));
       }
 
       return {
@@ -7244,7 +7251,7 @@ export const tasksRouter = router({
             // tasks. Fire-and-forget: DB failure logs but must not
             // stall the loop.
             if (taskDbId) {
-              void (async () => {
+              void runTaskBackground(ctx, async (ctx) => (async () => {
                 try {
                   await ctx.db.insert(taskSteps).values({
                       externalId: newExternalId('taskStep'),
@@ -7278,7 +7285,7 @@ export const tasksRouter = router({
                     'persist step row failed',
                   );
                 }
-              })();
+              })());
             }
             try {
               broadcastToUser(userId, {
@@ -7485,7 +7492,7 @@ export const tasksRouter = router({
       // Phase 24 — fire directly (no per-user FIFO queue). Per-task
       // isolation removes the need for serialisation; per-user
       // concurrency is gated upstream at admit time.
-      void runTaskFn();
+      void runTaskBackground(ctx, async (ctx) => runTaskFn());
       return {
         taskId,
         status: 'executing' as const,
@@ -8124,7 +8131,7 @@ export const tasksRouter = router({
       const logger = ctx.logger;
       const db = ctx.db;
       const intentText = row.intent;
-      void (async () => {
+      void runTaskBackground(ctx, async (ctx) => (async () => {
         const taskInternalId = await taskInternalIdFor(db, newTaskId);
         if (taskInternalId == null) return;
         const taskHeartbeat = startTaskHeartbeat(db, newTaskId, {
@@ -8599,7 +8606,7 @@ export const tasksRouter = router({
         } finally {
           taskHeartbeat.stop();
         }
-      })();
+      })());
       return { taskId: newTaskId, status: 'executing' as const };
     }),
 
@@ -9065,7 +9072,7 @@ export const tasksRouter = router({
    */
   reply: protectedProcedure
     .input(
-      z.object({
+      pureTaskInput(z.object({
         taskId: z.string().min(1),
         message: z.string().min(1).max(4_000),
         // F2 — attachments uploaded with the reply. Same shape as
@@ -9073,7 +9080,7 @@ export const tasksRouter = router({
         // content blocks, then plumbed through `supercarReply`'s
         // attachmentBlocks param. Cap mirrors create.
         fileIds: z.array(z.string()).max(5).optional(),
-      }),
+      })),
     )
     .use(taskDrainMiddleware)
     // Explicit return-type annotation breaks the circular type
@@ -9679,7 +9686,7 @@ export const tasksRouter = router({
         hasAttachments: generateAttachmentBlocks.length > 0,
       });
       const resumeStartedAt = Date.now();
-      void (async () => {
+      void runTaskBackground(ctx, async (ctx) => (async () => {
         let executionVerification: VerificationResult | null = null;
         try {
           let outcome: GenerateOutcome;
@@ -9807,7 +9814,7 @@ export const tasksRouter = router({
                 ...(outcome.summary ? { summary: outcome.summary } : {}),
               });
               const summary = outcome.summary;
-              void publishCoreTaskSuggestions({
+              void runTaskBackground(ctx, async (ctx) => publishCoreTaskSuggestions({
                 wiring: modelRuntimeWiring,
                 actorExternalId: ctx.userId,
                 modelDataRegion: userRow.modelDataRegion,
@@ -9821,7 +9828,7 @@ export const tasksRouter = router({
                   taskId: input.taskId,
                   suggestions,
                 }),
-              });
+              }));
             }
           } else if (
             reviewed.terminalStatus === 'partial_success' &&
@@ -9924,7 +9931,7 @@ export const tasksRouter = router({
             disposeExecution(input.taskId);
           }
         }
-      })();
+      })());
       return { ok: true, state: 'resumed' as const };
     },
   ),

@@ -20,7 +20,8 @@ import { authenticateAccessToken } from '../auth/middleware.js';
 import type { BrowserPool } from '../browser-pool/browser-pool.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
-import type { DrainController } from '../execution/drain-controller.js';
+import type { ExecutionAdmission } from '../execution/execution-admission.js';
+import type { OrdinaryMaintenance } from '../execution/ordinary-maintenance.js';
 import {
   captureOperationScopeVeto,
   currentOperationLifetime,
@@ -101,7 +102,8 @@ let injectedExecutor: PlaywrightExecutor | null = null;
 let injectedBrowserPool: BrowserPool | null = null;
 
 export interface WsServerOpts {
-  executionDrain?: DrainController;
+  executionDrain?: ExecutionAdmission;
+  ordinaryMaintenance?: OrdinaryMaintenance;
   planner?: Planner | null;
   /**
    * When wired, the WS handler can dispatch `client.vision.user_input`
@@ -127,7 +129,7 @@ export interface WsServerOpts {
 }
 
 export function createWsServer(port: number, opts: WsServerOpts = {}) {
-  const work = createWsWork(opts.executionDrain);
+  const work = createWsWork(opts.executionDrain, opts.ordinaryMaintenance);
   injectedPlanner = opts.planner ?? null;
   injectedExecutor = opts.playwrightExecutor ?? null;
   injectedBrowserPool = opts.browserPool ?? null;
@@ -1010,7 +1012,8 @@ async function handleConnection(
       });
       return;
     }
-    if (isReceiptOrMemoryMessage(result.data)) {
+    if (isReceiptOrMemoryMessage(result.data) &&
+      !(work.ordinaryMaintenance && result.data.type === 'client.extension.login_states')) {
       // Matching a pre-existing resolver is not admission of a new operation.
       await action();
       return;

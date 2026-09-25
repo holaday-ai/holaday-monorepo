@@ -1,4 +1,4 @@
-import type { DrainController } from '../execution/drain-controller.js';
+import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import {
   captureOperationScopeVeto,
   currentOperationLifetime,
@@ -9,7 +9,7 @@ import { type QueryExecution, executeOriginalQuery } from '../execution/original
 
 /** Original server-side authority only; request fields cannot supply a lifetime. */
 export async function runWebhookRequest(
-  controller: DrainController | undefined,
+  controller: ExecutionAdmission | undefined,
   action: () => Promise<void>,
 ): Promise<void> {
   const inherited = currentOperationLifetime();

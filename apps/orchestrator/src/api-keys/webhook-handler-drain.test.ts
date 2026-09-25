@@ -10,6 +10,8 @@ import { pino } from 'pino';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { DB } from '../db/client.js';
 import { DrainController } from '../execution/drain-controller.js';
+import type { ExecutionAdmission } from '../execution/execution-admission.js';
+import { type MaintenanceRecord, OrdinaryMaintenance } from '../execution/ordinary-maintenance.js';
 import { currentOperationLifetime } from '../execution/owned-operation.js';
 import type { Context } from '../trpc/context.js';
 import { createWebhookTasksHandler } from './webhook-handler.js';
@@ -64,7 +66,7 @@ async function control(open = true) {
   return { controller, close: () => controller.disconnect(session) };
 }
 function fixture(
-  controller: DrainController,
+  controller: ExecutionAdmission,
   holdAt = '',
   fail = false,
   options: {
@@ -167,7 +169,7 @@ function fixture(
     executionDrain: controller,
     buildContextForUser: () => {
       if (options.contextFails) throw new Error('synthetic context failure');
-      return { executionDrain: controller } as Context;
+      return { executionDrain: controller } as unknown as Context;
     },
     dispatch: async (ctx: Context) => {
       dispatches++;
@@ -694,6 +696,33 @@ it('refuses a closed webhook before the first API-key database call', async () =
   expect(f.calls).toEqual([]);
   expect(f.code()).toBe(503);
   expect(controller.state.read().dirty).toBe(false);
+});
+it('ordinary maintenance refuses webhook dispatch before API-key SQL or task creation', async () => {
+  const identity = { candidate: 'a'.repeat(40), bootId: 'b'.repeat(32) };
+  let record: MaintenanceRecord = { identity, mode: 'closed', needsReconciliation: false };
+  const controller = new OrdinaryMaintenance({
+    identity,
+    journal: {
+      read: () => structuredClone(record),
+      persist: (next) => {
+        record = { identity, ...next };
+      },
+    },
+    checks: {
+      verifyReady: async () => {},
+      stopProducers: async () => {},
+      verifyRetainedQueue: async () => {},
+    },
+  });
+  const f = fixture(controller);
+  await f.run();
+  expect(f.calls).toEqual([]);
+  expect(f.dispatches()).toBe(0);
+  expect(f.code()).toBe(503);
+  expect(controller.snapshot()).toMatchObject({
+    needsReconciliation: false,
+    counts: { unknown: 0 },
+  });
 });
 it('holds the original lookup after maintenance closes and retains late failure', async () => {
   const { controller, close } = await control();

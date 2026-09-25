@@ -38,7 +38,7 @@ import type { Logger } from 'pino';
 import type { DB } from '../db/client.js';
 import { apiKeys } from '../db/schema/api-keys.js';
 import { users } from '../db/schema/users.js';
-import type { DrainController } from '../execution/drain-controller.js';
+import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import { currentOperationLifetime } from '../execution/owned-operation.js';
 import type { Context } from '../trpc/context.js';
 import { extractBearer, hashApiKey, isValidApiKeyShape } from './api-key-service.js';
@@ -62,7 +62,7 @@ const IDEMPOTENCY_FINALIZE_ATTEMPTS = 3;
 export interface WebhookDeps {
   db: DB;
   logger: Logger;
-  executionDrain?: DrainController;
+  executionDrain?: ExecutionAdmission;
   /**
    * Build a Context object scoped to the resolved user. The webhook
    * needs every adapter handle that tasks.create reads through the
