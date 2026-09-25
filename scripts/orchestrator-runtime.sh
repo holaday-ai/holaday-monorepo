@@ -28,6 +28,13 @@ die() {
   exit 1
 }
 
+# Never let the legacy restart path delete/force-stop an ordinary-maintenance
+# instance. A dropped/zero flag is not permission to ignore its durable marker.
+if [[ -e /var/lib/holaday/ordinary-maintenance || -L /var/lib/holaday/ordinary-maintenance \
+  || -n "${HOLADAY_ORDINARY_MAINTENANCE+x}" || -n "${HOLADAY_ORDINARY_CANDIDATE+x}" ]]; then
+  die MAINTENANCE_EXPLICIT_TRANSITION_REQUIRED
+fi
+
 [[ "$ACTION" == "restart" ]] || die "unsupported action: $ACTION"
 [[ "${EUID:-$(id -u)}" == "0" ]] || die "must run as root to configure PM2 uid/gid"
 [[ "$RUN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "invalid runtime user"

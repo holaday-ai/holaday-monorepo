@@ -62,6 +62,16 @@ test('times out without retrying open or writing state', async (t) => {
   );
   assert.equal(f.connections(), 1);
 });
+test('reports closed but dirty preparation without treating it as a clean stop receipt', async (t) => {
+  const preparing = { ...snapshot, needsReconciliation: true };
+  const f = await fixture(t, (socket) =>
+    socket.on('data', () => socket.end(`${JSON.stringify({ ok: true, snapshot: preparing })}\n`)),
+  );
+  assert.deepEqual(
+    await requestMaintenance({ socketPath: f.socketPath, identity, op: 'status' }),
+    preparing,
+  );
+});
 for (const [name, reply] of [
   [
     'foreign identity',

@@ -21,19 +21,22 @@ export async function launchApplication(): Promise<void> {
     | Awaited<ReturnType<typeof import('./application-main.js').startApplication>>
     | undefined;
   try {
-    if (maintenanceEnabled)
+    if (maintenanceEnabled) {
+      const expectedIdentity = {
+        candidate: entryEnvironment.HOLADAY_ORDINARY_CANDIDATE!,
+        bootId: randomBytes(16).toString('hex'),
+      };
       ordinary = createOrdinaryApplication({
         directory: ORDINARY_MAINTENANCE_DIRECTORY,
-        identity: {
-          candidate: entryEnvironment.HOLADAY_ORDINARY_CANDIDATE!,
-          bootId: randomBytes(16).toString('hex'),
-        },
-        // Task 5 supplies the production schema/record/service probes. Never an
-        // empty success callback while that deployment integration is incomplete.
-        async verifyReady() {
-          throw new Error('MAINTENANCE_READINESS_UNPROVEN');
+        identity: expectedIdentity,
+        async verifyReady(identity) {
+          const { verifyProductionMaintenanceReadiness } = await import(
+            './execution/ordinary-maintenance-readiness.js'
+          );
+          await verifyProductionMaintenanceReadiness(identity, expectedIdentity);
         },
       });
+    }
     if (controlled) boot = await startApplicationBoot('/var/lib/holaday/execution-drain');
     const { startApplication } = await import('./application-main.js');
     application = ordinary

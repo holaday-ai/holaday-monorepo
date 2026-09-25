@@ -26,7 +26,7 @@ function checkedSnapshot(value, identity) {
     c.idle !== (c.mode === 'closed' && c.active === 0 && c.unknown === 0) ||
     (value.mode === 'serving' && (c.mode !== 'open' || !value.needsReconciliation)) ||
     (value.mode === 'blocked' && (c.mode !== 'blocked' || !value.needsReconciliation)) ||
-    (value.mode === 'closed' && (!c.idle || value.needsReconciliation)) ||
+    (value.mode === 'closed' && !c.idle) ||
     (value.mode === 'draining' && c.mode !== 'closed')
   )
     throw new Error();
