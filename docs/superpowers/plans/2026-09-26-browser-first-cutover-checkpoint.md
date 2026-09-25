@@ -9,10 +9,11 @@
 - 已实现首次/普通 journal 互斥、独立引导种子、身份核对与 PM2 定向停止边界、未托管进程 pidfd SIGTERM、两阶段 nginx 配置生成/校验/恢复、首次 closed 状态初始化。
 - 新鲜本地验收：全部浏览器脚本 160/160；Task 3 其中 runtime 22、fence 8、journal 11（含原有测试）；Python 首次 helper 5、普通 helper 4 均通过；六个触碰的 MJS 文件 Biome 与 diff-check 通过。`pnpm test:ops` 全命令退出 0（Node 分组 120、46、16、53，附属 shell 检查通过）。
 - 日志：`/tmp/holaday-first-cutover-task3-final.log`、`/tmp/holaday-first-cutover-task3-ops.log`。一次全量脚本运行出现 11 个既有 socket 测试 EPERM，批准本机临时 socket 权限后全部通过；未为此修改产品代码。
-- 隔离 Linux 组件实测尚未通过，正在构建 QA 镜像。Docker Hub 下载发生截断/TLS 超时，改用已有 Python Linux 镜像；容器下载 Node 超时后，主机已从官方站点续传 Node 22.20.0 arm64 包并通过官方 SHA256 校验。正在安装固定 PM2 6.0.14。完整记录与合成 QA 位于该计划 `.superpowers/sdd/.../qa/`，不是生产部署工具。
+- 隔离 Linux 组件实测已通过，日志 `/tmp/holaday-first-cutover-task3-linux.log`：真实 Node 22.20.0 / PM2 6.0.14 下，开启自动重启且忽略普通停止信号的批准目标被定向停止，无关应用保持存活；未托管 UID998 进程通过真实 pidfd SIGTERM 退出；首次状态目录/文件的 UID998、0700/0600 通过；真实 nginx 两阶段 503、无效签名回调探针、no-store 和原配置恢复通过。完整记录与合成 QA 位于该计划 `.superpowers/sdd/.../qa/`，不是生产部署工具。
+- QA 环境修正：容器需 SYS_PTRACE 才能读取另一 UID 的 `/proc` 身份，仍无宿主 PID、网络、生产凭据或端口映射；镜像 Python 位于 `/usr/local/bin`，仅在镜像补齐 `/usr/bin/python3` 路径。产品停止规则未改。容器已自动移除。
 - 组件的主机观察、root 文件操作与 journal 回调尚需 Task 4 连接真实适配器；Task 6 整流程与独立审查仍未完成。下述较早“Task 3 尚未写实现”为历史断点，不代表此更新后的代码状态。
 
-## 已完成与证据
+## 较早断点历史与证据（Task 2 时）
 
 - 工作树：`/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo`。
 - 分支：`codex/browser-release-candidate-20260925`；本次断点前代码 HEAD：`c37ddbd9bc5f96321dfb9f6a6bdbd72cda6a5943`。
