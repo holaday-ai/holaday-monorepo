@@ -32,6 +32,8 @@ const s = vi.hoisted(() => {
     recoverPlanned: vi.fn(async () => {}),
     stale: vi.fn(async () => 0),
     rehydrate: vi.fn(async () => ({ userCount: 0, taskCount: 0 })),
+    retention: vi.fn(async () => {}),
+    crystallize: vi.fn(async () => {}),
   };
 });
 vi.mock('undici', () => ({ ProxyAgent: class {}, setGlobalDispatcher() {} }));
@@ -180,7 +182,8 @@ vi.mock('./streaming/screencast-proxy.js', () => ({
   createScreencastProxy: () => ({ handleUpgrade() {} }),
 }));
 vi.mock('./browser-pool/vnc-proxy.js', () => ({ createVncProxy: () => ({ handleUpgrade() {} }) }));
-vi.mock('./evidence/retention-reaper.js', () => ({ runRetentionReaper: vi.fn() }));
+vi.mock('./evidence/retention-reaper.js', () => ({ runRetentionReaper: s.retention }));
+vi.mock('./playbook/crystallizer.js', () => ({ crystallizeTasks: s.crystallize }));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -190,9 +193,9 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-async function ordinaryFixture() {
-  vi.stubEnv('RETENTION_REAPER_ENABLED', 'false');
-  vi.stubEnv('USER_TASK_CRYSTALLIZE_ENABLED', 'false');
+async function ordinaryFixture(periodic = false) {
+  vi.stubEnv('RETENTION_REAPER_ENABLED', String(periodic));
+  vi.stubEnv('USER_TASK_CRYSTALLIZE_ENABLED', String(periodic));
   vi.spyOn(globalThis, 'setInterval').mockReturnValue({ unref() {} } as never);
   vi.spyOn(process, 'on').mockReturnValue(process);
   const identity = { candidate: 'a'.repeat(40), bootId: 'b'.repeat(32) };
@@ -238,6 +241,35 @@ async function ordinaryFixture() {
   expect(hooks).toBeDefined();
   return { application, coordinator, closeState, closeControl, readRecord: () => record };
 }
+it.each(['retention', 'crystallize'] as const)(
+  'enabled %s keeps shutdown pending until the original sweep settles',
+  async (kind) => {
+    let release!: () => void;
+    s[kind].mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const f = await ordinaryFixture(true);
+    expect(s[kind]).not.toHaveBeenCalled();
+    await f.coordinator.resumeServing();
+    const interval = kind === 'retention' ? 24 * 60 * 60 * 1000 : 6 * 60 * 60 * 1000;
+    const callback = vi.mocked(setInterval).mock.calls.find((call) => call[1] === interval)?.[0];
+    expect(callback).toBeTypeOf('function');
+    (callback as () => void)();
+    await vi.waitFor(() => expect(s[kind]).toHaveBeenCalledOnce());
+    const stopping = f.coordinator.beginMaintenance();
+    expect(f.coordinator.snapshot().counts.active).toBeGreaterThan(0);
+    (callback as () => void)();
+    expect(s[kind]).toHaveBeenCalledOnce();
+    release();
+    await stopping;
+    await f.coordinator.waitForIdle(1000);
+    await f.application.shutdown('synthetic');
+    expect(f.closeState).toHaveBeenCalledOnce();
+  },
+);
 it('ordinary maintenance boot is dormant until verified open and preserves receipt listeners while draining', async () => {
   const { application, coordinator, closeState, closeControl, readRecord } =
     await ordinaryFixture();

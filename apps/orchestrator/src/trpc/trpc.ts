@@ -10,6 +10,7 @@ import {
 import { runOwnedDatabaseQuery } from '../execution/original-database-query.js';
 import { currentOperationLifetime, startOwnedOperation } from '../execution/owned-operation.js';
 import type { Context } from './context.js';
+import { isBuiltinPureInput, withAuditedInputs } from './input-gate.js';
 
 const t = initTRPC.context<Context>().create();
 
@@ -51,7 +52,7 @@ export const middleware = t.middleware;
 // The Express adapter returns void and resolves its internal HTTP promise on
 // response finish. Own the actual procedure promise independently, including
 // async input parsing and protected/admin middleware. Not a global DB proxy.
-export const publicProcedure = t.procedure.use(async ({ ctx, next }) => {
+const admittedProcedure = t.procedure.use(async ({ ctx, next }) => {
   const original = originalHttpLifetime(ctx.req);
   if (!original && !ctx.ordinaryMaintenance) return next(); // Native callers retain existing gates.
   const controller = ctx.executionDrain;
@@ -101,13 +102,26 @@ export const publicProcedure = t.procedure.use(async ({ ctx, next }) => {
     throw new TRPCError({ code: 'SERVICE_UNAVAILABLE' });
   }
 });
+const auditInput = (parser: unknown) => {
+  if (!isBuiltinPureInput(parser)) return parser;
+  const audited = pureTaskInput(parser);
+  // Keep Zod's synchronous parser and schema introspection intact. tRPC uses
+  // parseAsync; only that execution path needs the owner-bound rejection proof.
+  return new Proxy(parser, {
+    get(target, key, receiver) {
+      return key === 'parseAsync' ? audited.parseAsync : Reflect.get(target, key, receiver);
+    },
+  });
+};
+export const publicProcedure = withAuditedInputs(admittedProcedure, auditInput);
 
-export const protectedProcedure = publicProcedure.use(async ({ ctx, next }) => {
+const authenticatedProcedure = admittedProcedure.use(async ({ ctx, next }) => {
   if (!ctx.userId) {
     throw gateRejection('UNAUTHORIZED');
   }
   return next({ ctx: { ...ctx, userId: ctx.userId } });
 });
+export const protectedProcedure = withAuditedInputs(authenticatedProcedure, auditInput);
 
 /**
  * Phase 27 — admin gate. Builds on protectedProcedure: requires a
@@ -120,16 +134,19 @@ export const protectedProcedure = publicProcedure.use(async ({ ctx, next }) => {
  * enough to run per request rather than caching the role in the
  * session.
  */
-export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
-  const [row] = await runOwnedDatabaseQuery(() =>
-    ctx.db
-      .select({ role: users.role, status: users.status })
-      .from(users)
-      .where(eq(users.externalId, ctx.userId))
-      .limit(1),
-  );
-  if (!row || row.role !== 'admin' || row.status !== 'active') {
-    throw gateRejection('FORBIDDEN', 'admin access required');
-  }
-  return next({ ctx });
-});
+export const adminProcedure = withAuditedInputs(
+  authenticatedProcedure.use(async ({ ctx, next }) => {
+    const [row] = await runOwnedDatabaseQuery(() =>
+      ctx.db
+        .select({ role: users.role, status: users.status })
+        .from(users)
+        .where(eq(users.externalId, ctx.userId))
+        .limit(1),
+    );
+    if (!row || row.role !== 'admin' || row.status !== 'active') {
+      throw gateRejection('FORBIDDEN', 'admin access required');
+    }
+    return next({ ctx });
+  }),
+  auditInput,
+);

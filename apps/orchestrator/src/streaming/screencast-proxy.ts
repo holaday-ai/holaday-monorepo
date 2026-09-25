@@ -40,6 +40,7 @@ import { CdpInputHandler } from './cdp-input.js';
 import { createOwnedScreencastInputBridge } from './owned-screencast-input.js';
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import { CdpStreamer } from './cdp-streamer.js';
+import type { ExecutionAdmission } from '../execution/execution-admission.js';
 
 /**
  * Phase 24 fix #2 — `/screencast-ws/{arg}` route dispatcher.
@@ -90,6 +91,7 @@ export function pickInstanceForRoute(args: {
 export interface ScreencastProxyOptions {
   pool: BrowserPool;
   logger: Logger;
+  executionDrain?: ExecutionAdmission;
   /** Override route. Default: `/screencast-ws/:userId`. */
   pathPattern?: RegExp;
   authenticateToken?: (token: string) => Promise<string | null>;
@@ -113,11 +115,16 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
   const wss = new WebSocketServer({ noServer: true });
   const log = opts.logger.child({ module: 'screencast-proxy' });
   const customAuthenticateToken = opts.authenticateToken;
+  const admissionOpen = () => {
+    opts.executionDrain?.tick();
+    return !opts.executionDrain || opts.executionDrain.drain.snapshot().mode === 'open';
+  };
 
   function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
     const url = req.url ?? '';
     const m = pathPattern.exec(url);
     if (!m) return; // not our path; leave for next handler
+    if (!admissionOpen()) return reject(socket, 503, 'maintenance');
 
     const urlArg = decodeURIComponent(m[1] ?? '');
     // Log every upgrade attempt at info so BOSS can correlate
@@ -146,8 +153,9 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         }
       : (candidate: string) => authenticateStreamOrAccessSession(db, candidate);
 
-    authenticateConnection(token).then(
-      (session) => {
+    const connect = () => authenticateConnection(token).then(
+      async (session) => {
+        if (!admissionOpen()) return reject(socket, 503, 'maintenance');
         if (!session) {
           log.warn({}, 'jwt verify returned null');
           return reject(socket, 401, 'invalid token');
@@ -180,7 +188,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         }
 
         const instance = picked.instance;
-        wss.handleUpgrade(req, socket, head, (ws) => {
+        await new Promise<void>((resolve, rejectSetup) => wss.handleUpgrade(req, socket, head, (ws) => {
           startWebSocketSessionRevalidation({
             socket: ws,
             expectedUserId: callerUserId,
@@ -194,14 +202,18 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             logger: log,
             intervalMs: opts.sessionRevalidationIntervalMs,
           });
-          void wireUpClient({ ws, callerUserId, instance });
-        });
+          void wireUpClient({ ws, callerUserId, instance }).then(resolve, rejectSetup);
+        }));
       },
       (err: unknown) => {
         log.warn({ err: (err as Error).message }, 'jwt verify threw');
         return reject(socket, 401, 'invalid token');
       },
     );
+    try {
+      const work = opts.executionDrain ? opts.executionDrain.runRoot(connect).result : connect();
+      void work.catch(() => { if (!socket.destroyed) reject(socket, 503, 'maintenance'); });
+    } catch { reject(socket, 503, 'maintenance'); }
   }
 
   async function wireUpClient(args: {
@@ -215,6 +227,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     let stopped = false;
     const inputBridge = createOwnedScreencastInputBridge({
       instance: args.instance,
+      executionDrain: opts.executionDrain,
       peek: (taskId) => opts.pool.peek(taskId),
       releasePressed: async (signal) => { await inputHandler?.releasePressed(signal); },
       onViewportApplied: (viewport) => {

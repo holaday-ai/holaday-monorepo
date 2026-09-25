@@ -39,7 +39,7 @@ export type ReadinessQuery = (
 ) => Promise<Record<string, unknown>[]>;
 export async function checkMaintenanceSchema(query: ReadinessQuery): Promise<void> {
   const rows = await query(
-    "SELECT table_name, column_name, data_type, column_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name IN ('tasks', 'llm_calls')",
+    "SELECT table_name AS table_name, column_name AS column_name, data_type AS data_type, column_type AS column_type, is_nullable AS is_nullable, column_default AS column_default FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name IN ('tasks', 'llm_calls')",
   );
   const column = (table: string, name: string) =>
     rows.find((row) => row.table_name === table && row.column_name === name);

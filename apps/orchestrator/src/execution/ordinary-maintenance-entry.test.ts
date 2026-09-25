@@ -1,4 +1,6 @@
 import { TRPCError } from '@trpc/server';
+import { z } from 'zod';
+import { batchTasksRouter } from '../trpc/routers/batch-tasks.js';
 import type { Request, Response } from 'express';
 import { pino } from 'pino';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -43,6 +45,53 @@ function fixture() {
   return { maintenance, ctx, select };
 }
 afterEach(() => vi.restoreAllMocks());
+
+it('ordinary batch input rejection leaves global serving available without database access', async () => {
+  const f = fixture();
+  await f.maintenance.resumeServing();
+  await expect(batchTasksRouter.createCaller(f.ctx).create({ prompts: [] })).rejects.toMatchObject({
+    code: 'BAD_REQUEST',
+  });
+  expect(f.select).not.toHaveBeenCalled();
+  expect(f.maintenance.snapshot()).toMatchObject({ mode: 'serving', counts: { unknown: 0 } });
+  await expect(f.maintenance.runRoot(async () => 'next').result).resolves.toBe('next');
+});
+it('pure built-in input validation stays known through builder chains, but custom effects do not', async () => {
+  for (const custom of [false, true]) {
+    const f = fixture();
+    await f.maintenance.resumeServing();
+    const schema = custom
+      ? z.string().transform(() => {
+          throw new Error('side effect unknown');
+        })
+      : z.string().min(2);
+    const routes = router({
+      read: publicProcedure
+        .input(schema)
+        .use(async ({ next }) => next())
+        .query(() => true),
+    });
+    await expect(routes.createCaller(f.ctx).read(custom ? 'ok' : '')).rejects.toThrow();
+    expect(f.maintenance.snapshot().counts.unknown > 0).toBe(custom);
+  }
+});
+it('does not exempt a parser error reached after custom middleware side effects', async () => {
+  const f = fixture();
+  await f.maintenance.resumeServing();
+  let writes = 0;
+  const routes = router({
+    mutate: publicProcedure
+      .use(async ({ next }) => {
+        writes++;
+        return next();
+      })
+      .input(z.string().min(2))
+      .mutation(() => true),
+  });
+  await expect(routes.createCaller(f.ctx).mutate('')).rejects.toThrow();
+  expect(writes).toBe(1);
+  expect(f.maintenance.snapshot().counts.unknown).toBeGreaterThan(0);
+});
 
 it.each(['create', 'reply'] as const)(
   'ordinary closed %s rejects before database, quota and browser',

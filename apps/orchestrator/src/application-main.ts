@@ -887,7 +887,8 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
         // CDP is always available. VNC is an explicit emergency-only
         // fallback because it exposes a full interactive desktop surface.
         // See streaming/screencast-proxy.ts for the protocol contract.
-        const screencastProxy = createScreencastProxy({ pool: browserPool, logger });
+        const screencastProxy = createScreencastProxy({ pool: browserPool, logger,
+          ...(ordinary ? { executionDrain: ordinary.coordinator } : {}) });
         httpServer.on('upgrade', (req, socket, head) => {
           // No auth/DB work from a streaming upgrade while controlled admission is closed.
           if (executionDrain && executionDrain.drain.snapshot().mode !== 'open') {

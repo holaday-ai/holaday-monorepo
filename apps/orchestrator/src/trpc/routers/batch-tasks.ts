@@ -35,6 +35,7 @@ import { users } from '../../db/schema/users.js';
 import { broadcastToUser } from '../../ws/server.js';
 import type { Context } from '../context.js';
 import { protectedProcedure, router } from '../trpc.js';
+import { runTaskBackground } from './task-background.js';
 
 const CONCURRENCY_BY_PLAN: Record<PlanId, number> = {
   free: 1,
@@ -47,7 +48,7 @@ const MAX_BATCH_ITEMS = 50; // hard ceiling; ~25 min × 50 = 20h worst-case
 type AuthenticatedContext = Context & { userId: string };
 
 function startBatchExecution(ctx: AuthenticatedContext, batchExternalId: string): void {
-  void (async () => {
+  void runTaskBackground(ctx, async (ctx) => {
     const { tasksRouter } = await import('./tasks.js');
     await executeBatch(batchExternalId, {
       db: ctx.db,
@@ -68,7 +69,7 @@ function startBatchExecution(ctx: AuthenticatedContext, batchExternalId: string)
         return { taskInternalId: task.id, taskExternalId: result.taskId };
       },
     });
-  })().catch((err) => {
+  }).catch((err) => {
     ctx.logger.error(
       { err: err instanceof Error ? err.message : String(err), batchExternalId },
       'batch-executor: top-level crash',
