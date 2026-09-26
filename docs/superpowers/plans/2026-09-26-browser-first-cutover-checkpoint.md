@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-26 首次入口隔离的持久阶段回执
+
+在首次 host 中新增 `createFirstCutoverFenceStore`，替换 nginx 演练原先的内存 receipt。固定 root0700目录下每attempt一个0600记录；先记录 installing/restoring 意图再由现有 fence 执行动作，阶段只能按 orders installing/active → all-writers installing/active → restoring/restored 前进。绑定真实 journal 的 attempt、candidate/config/migration/inventory，恢复必须对应本候选且 bootId 不变。文件范围与原文/备份摘要不变，只有进入 all-writers 时允许新的生成摘要。
+
+真实文件写入和目录同步、写后重读、所有权与截止时间复查均已实现；旧记录不续跑，文件缺失、替换、内容或权限变化、硬/软链接、失锁、窗口到期均拒绝。失败保留现场，不清锁、不自动恢复。锁仅排除协作式并发部署，不宣称操作系统级条件事务或抵抗其他root写入；回执本身也不证明隔离有效，仍由现有探针和独立写入事实核验。
+
+新增10项文件测试通过，原批准清单加本模块共22项通过，完整浏览器发布回归325/325通过。既有隔离 Linux Node22/nginx 演练已换用真实 `acquireReleaseJournal` + 默认root文件回执：两阶段/TLS/IPv4/IPv6/透传/静态页/恢复通过，原 UID501源与链接链保留。初次 Linux 接线暴露默认磁盘IO没有采用fs，修正后通过；不隐藏失败记录。该演练仍使用合成批准清单、应用后端及非HTTP工作事实，只证明本段实际组合，不是生产整流程。日志 `/tmp/holaday-fence-store-{red,host-green,linux-red,linux-final,browser-final,ops-final}.log`。三个MJS的Biome及diff-check通过，完整 `pnpm test:ops` 退出0（120/59/16/73及shell）。最终格式版本的Linux演练再次通过。全部测试会话已退出，一次性容器自动移除。
+
+**Task4依然部分完成。** 完整受保护 inventory/分类、双主机协调、DB/provider默认读者、首次host主体与shell仍未完成，Task5恢复/支付证据及Task6整流程审查仍待完成；普通入口继续明确拒绝未安装的生产证据适配。没有连接生产、停机、发布或改历史业务记录；未改支付结算/权益/额度、模型路由、UI或扩展。本轮应用全套未重跑。
+
 ### 2026-09-26 普通发布 evidence/readiness 接线
 
 普通 host 已改为取得真实 journal/attempt、绑定 inventory 摘要，完成候选构建及迁移清单绑定后，再执行真实 `collectCutoverEvidence` → 证据发布 → 候选源码的 readiness。prepare 和两次 preopen 都重新采集，不复用上一次报告；CLI 传入 command/attempt/candidate/config/migration/inventory，verify 再携带新 bootId。普通 shell 新增必需环境变量 `HOLADAY_HOST_INVENTORY_SHA256`；参数不完整在 SSH 前拒绝，legacy 拒绝与远端不重试保持。

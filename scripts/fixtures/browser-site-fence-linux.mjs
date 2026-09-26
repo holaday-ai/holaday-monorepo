@@ -14,7 +14,9 @@ import {
   describeCutoverSite,
   restoreCutoverIngress,
 } from '/source/browser-first-cutover-fence.mjs';
+import { createFirstCutoverFenceStore } from '/source/browser-first-cutover-host.mjs';
 import { createCutoverIngressFiles } from '/source/browser-first-cutover-ingress-files.mjs';
+import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 
 await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
@@ -179,20 +181,24 @@ function request(site, uri, { method = 'GET', body = '', host, ipv6 = false, hea
     req.end(body);
   });
 }
-let receipt;
 let expectedStage;
 const inventoryDigest = 'a'.repeat(64);
+const maintenanceEndsAtMs = Date.now() + 60000;
+await fs.mkdir('/var/lib/holaday-deploy/maintenance', { recursive: true, mode: 0o700 });
+const journal = await acquireReleaseJournal('/var/lib/holaday-deploy/maintenance', {
+  kind: 'first-cutover',
+  candidate: 'b'.repeat(40),
+  configDigest: 'c'.repeat(64),
+  migrationDigest: 'd'.repeat(64),
+  legacyDigest: 'e'.repeat(64),
+  inventoryDigest,
+  attempt: '11111111-1111-4111-8111-111111111111',
+});
+const binding = await journal.assertOwnership();
 const io = {
   now: Date.now,
-  assertJournalOwnership: async () => ({
-    inventoryDigest,
-    attempt: '11111111-1111-4111-8111-111111111111',
-  }),
+  assertJournalOwnership: journal.assertOwnership,
   readApprovedIngress: async () => ({ inventoryDigest, unknownIngress: [], files: sites }),
-  readFenceReceipt: async () => receipt,
-  persistFenceReceipt: async (r) => {
-    receipt = structuredClone(r);
-  },
   testNginx: async () => {
     await render();
     await exec('nginx', ['-t', '-c', `${root}/nginx.conf`]);
@@ -277,14 +283,17 @@ const io = {
   }),
   verifyOpenedIdentity: async (identity) => ({ identity, mode: 'serving' }),
 };
-await fs.mkdir('/var/lib/holaday-deploy/maintenance', { recursive: true, mode: 0o700 });
+Object.assign(
+  io,
+  await createFirstCutoverFenceStore({ binding, files: sites, maintenanceEndsAtMs }, io),
+);
 Object.assign(
   io,
   await createCutoverIngressFiles(
     {
-      binding: { inventoryDigest, attempt: '11111111-1111-4111-8111-111111111111' },
+      binding,
       files: sites,
-      maintenanceEndsAtMs: Date.now() + 60000,
+      maintenanceEndsAtMs,
     },
     io,
   ),
@@ -315,6 +324,15 @@ try {
   for (const stage of ['orders', 'all-writers']) {
     expectedStage = stage;
     await applyCutoverFence({ inventoryDigest, stage }, io);
+    const persisted = JSON.parse(
+      await fs.readFile(
+        `/var/lib/holaday-deploy/maintenance/${binding.attempt}.ingress.json`,
+        'utf8',
+      ),
+    );
+    assert.equal(persisted.stage, stage);
+    assert.equal(persisted.phase, 'active');
+    assert.equal(persisted.attempt, (await journal.assertOwnership()).attempt);
     for (const site of sites) {
       const stat = await fs.lstat(site.sourcePath);
       assert.equal(stat.ino, site.sourceStat.ino);
@@ -376,6 +394,7 @@ try {
     { inventoryDigest, identity: { candidate: 'b'.repeat(40), bootId: 'c'.repeat(32) } },
     io,
   );
+  assert.equal((await io.readFenceReceipt()).phase, 'restored');
   for (const site of sites) {
     assert.equal(await fs.readFile(site.path, 'utf8'), site.original);
     assert.equal(await fs.readlink(site.enabledPath), site.links[0].target);
@@ -389,6 +408,7 @@ try {
   console.error(await fs.readFile(`${root}/error.log`, 'utf8').catch(() => 'no nginx log'));
   throw error;
 } finally {
+  await journal.close(); // Keep journal/receipt evidence; container removal owns cleanup.
   await exec('nginx', ['-s', 'quit', '-c', `${root}/nginx.conf`]).catch(() => {});
   for (const server of backends) {
     server.closeAllConnections();
