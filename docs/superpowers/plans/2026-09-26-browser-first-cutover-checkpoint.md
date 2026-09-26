@@ -1,10 +1,24 @@
-# 首次切换实施断点：完整入口采集已验证，Task 4 整流程接线未完成
+# 首次切换实施断点：真实站点两阶段隔离已验证，Task 4 整流程接线未完成
 
 日期：2026-09-26（Asia/Tokyo）。本地实施中，未部署。
 
 最新授权：2026-09-26 用户表示“我要出去一下 你自行安排任务 允许期间的所有操作 包含PR 部署 验证”。当前浏览器上线大项允许自主实施、PR、必要合并、部署与验证；下方历史“仅本地/未授权部署”限制已被本次授权取代。授权不等于验收通过；必须完成剩余真实接线、恢复演练与发布门槛，不得修改历史业务记录来伪造通过。
 
 ## 最新恢复点（优先于下方历史段落）
+
+### 2026-09-26 三站点真实 nginx 隔离适配
+
+在原 `browser-first-cutover-fence.mjs` 的 apply/verify/restore 链内接入三份实采配置，不替换普通解析器。每份完整 SHA 固定；来源有漂移、路由/监听缺失、健康分类被扩大时，写入前拒绝。修改仅插入业务拒绝及精确例外，保留静态站点、重定向、双栈监听和 TLS 配置。
+
+已核实并处理支付链依赖：orders 阶段保留微信/支付宝通知、PayPal webhook、普通与 partner 内部结算确认接口；网关健康检查使用的主站支付桥接健康接口亦保留。all-writers 再关闭回调/结算入口。不给短信登录或健康前缀下任意路径放行。Vultr 原 `/api/` 的前缀剥离在新精确 location 中保持一致。
+
+真实 Linux nginx 两阶段和精确恢复已通过：IPv4/IPv6、阿里云→主站链式 TLS、原始请求体/查询参数/头透传、静态资源、默认 Host、WebSocket 新连接和精确回调边界。测试先发现 fixture 备份字段命名错误并修正；继而实测证明 reload ACK 不等于所有 worker 生效，旧 worker 的200被正确拒绝，fixture 改为观察旧 worker 退场后再验证。无生产连接/命令、停机或数据库/支付操作。
+
+复现入口 `scripts/fixtures/browser-site-fence-linux.mjs`；只读挂载源码、`--network none`、临时证书/最小 TLS include、本地模拟应用。非 HTTP 写入事实与开放身份为模拟值；不能称为已有连接清空、支付验签或整流程实机通过。已检查的三个无密钥站点源纳入 `scripts/fixtures/cutover-nginx/`，完整主机采集和无关站点仍私密忽略。生成器只支持已审查 SHA，未据此批准覆盖 UID501 的 Aliyun release 软链接目标。
+
+**下一步固定范围：** 实际 root 配置安装/恢复（含 Aliyun 软链接处理）、完整入口分类和 host/readiness/shell 接线；随后 Task5 新鲜加密备份/隔离恢复、迁移与外部支付证据，最后 Task6 整流程和一次全分支审查。Task4 尚未完成，不能部署；不重做前三项，不重开 UI/模型路由/结算规则修改。
+
+最终新鲜结果：浏览器发布回归294/294（`/tmp/holaday-site-fence-browser-final2.log`）；完整 `pnpm test:ops` 退出0（`/tmp/holaday-site-fence-ops-final.log`）；真实 Linux 最终版本两阶段/恢复再次通过（`/tmp/holaday-site-fence-linux-final2.log`）。三个 MJS 文件 Biome 检查和 diff-check 通过。应用全量测试未在本轮重跑。所有测试会话已退出，容器自动删除；没有后台 SSH 或测试工作遗留。原 `scripts/__pycache__/` 未动；本轮无 push/PR/merge/deploy。
 
 ### 2026-09-26 17:12–17:21 JST 现场恢复与采集器增补
 

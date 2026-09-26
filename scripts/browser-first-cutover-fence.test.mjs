@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import {
   applyCutoverFence,
+  describeCutoverSite,
   restoreCutoverIngress,
   verifyCutoverFence,
 } from './browser-first-cutover-fence.mjs';
@@ -15,8 +17,8 @@ const original = `server {
  location = /health { return 200; }
 }\n`;
 const digest = 'a'.repeat(64);
-function fixture() {
-  let bytes = original;
+function fixture(site) {
+  let bytes = site?.bytes ?? original;
   let receipt;
   let backup;
   const events = [];
@@ -45,6 +47,7 @@ function fixture() {
       },
     ],
   };
+  if (site) Object.assign(file, describeCutoverSite(site.bytes, site.profile));
   const io = {
     now: () => 1000,
     assertJournalOwnership: async () => ({
@@ -86,24 +89,14 @@ function fixture() {
     probeIngress: async () => ({
       observedAtMs: 1000,
       inventoryDigest: digest,
-      probes: [
-        {
+      probes: file.locations
+        .filter((r) => r.kind !== 'health')
+        .map((r) => ({
+          ...r,
           path: file.path,
-          selector: '/api/',
-          serverName: 'fixture.local',
-          listen: '127.0.0.1:8080',
-          status: 503,
+          status: r.kind === 'business' || receipt?.stage === 'all-writers' ? 503 : 400,
           noStore: true,
-        },
-        {
-          path: file.path,
-          selector: '= /payment/notify',
-          serverName: 'fixture.local',
-          listen: '127.0.0.1:8080',
-          status: receipt?.stage === 'all-writers' ? 503 : 400,
-          noStore: true,
-        },
-      ],
+        })),
       existingSockets: 0,
       internalWriters: 0,
       producersRunning: 0,
@@ -120,6 +113,76 @@ function fixture() {
       bytes = b;
     },
   };
+}
+
+const sites = [
+  ['vultr-20260926', 'holaday'],
+  ['aliyun-app-20260926', 'hd-app.orangebench.tech'],
+  ['aliyun-pay-20260926', 'hd-pay.orangebench.tech'],
+].map(([profile, name]) => ({
+  profile,
+  bytes: readFileSync(new URL(`./fixtures/cutover-nginx/${name}.conf`, import.meta.url), 'utf8'),
+}));
+
+for (const site of sites) {
+  test(`${site.profile}: real captured topology applies both stages and restores exact bytes`, async () => {
+    const f = fixture(site);
+    await applyCutoverFence(f.input, f.io);
+    const orders = f.bytes();
+    for (const route of f.file.locations) {
+      if (route.kind !== 'callback') continue;
+      const start = orders.indexOf(`location ${route.selector} {`);
+      assert(start >= 0);
+      const body = orders.slice(start, orders.indexOf('}', start));
+      assert(body.includes('proxy_pass '));
+      assert(!body.includes('return 503;'));
+    }
+    if (site.profile.startsWith('vultr')) {
+      assert(orders.includes('proxy_pass http://127.0.0.1:4001/internal/payment/confirm;'));
+      assert(orders.includes('proxy_pass http://127.0.0.1:4001/internal/partner-payment/confirm;'));
+      assert(orders.includes('proxy_pass http://127.0.0.1:4001/payment/paypal/webhook;'));
+    }
+    assert(!orders.includes('location = /api/internal/auth/sms-login'));
+    await applyCutoverFence({ ...f.input, stage: 'all-writers' }, f.io);
+    for (const route of f.file.locations.filter((r) => r.kind === 'callback')) {
+      const start = f.bytes().indexOf(`location ${route.selector} {`);
+      assert(f.bytes().slice(start, f.bytes().indexOf('}', start)).includes('return 503;'));
+    }
+    await restoreCutoverIngress(
+      { inventoryDigest: digest, identity: { candidate: 'c'.repeat(40), bootId: 'd'.repeat(32) } },
+      f.io,
+    );
+    assert.equal(f.bytes(), site.bytes);
+  });
+
+  test(`${site.profile}: caller cannot approve changed source, route kinds or incomplete listeners`, async () => {
+    assert.throws(
+      () => describeCutoverSite(`${site.bytes}# drift\n`, site.profile),
+      /CUTOVER_FENCE_/,
+    );
+    assert.throws(() => describeCutoverSite(site.bytes, 'unreviewed'), /CUTOVER_FENCE_/);
+    for (const mutate of [
+      (f) => {
+        f.file.locations.pop();
+      },
+      (f) => {
+        f.file.locations.find((r) => r.kind === 'business').kind = 'health';
+      },
+      (f) => {
+        const b = `${site.bytes}# drift\n`;
+        f.setBytes(b);
+        f.file.digest = hash(b);
+      },
+      (f) => {
+        f.file.profile = 'unreviewed';
+      },
+    ]) {
+      const f = fixture(site);
+      mutate(f);
+      await assert.rejects(applyCutoverFence(f.input, f.io), /CUTOVER_FENCE_/);
+      assert.deepEqual(f.events, []);
+    }
+  });
 }
 
 test('orders fencing backs up before replacement and preserves callbacks until all-writers', async () => {
