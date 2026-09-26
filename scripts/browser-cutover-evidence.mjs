@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { readFile, readdir, readlink } from 'node:fs/promises';
+import { posix } from 'node:path';
 import { promisify } from 'node:util';
 const publicationSystem = {
   ...fs,
@@ -268,6 +269,7 @@ export async function publishCutoverEvidence(evidence, options, io = publication
 
 const execFileAsync = promisify(execFile);
 const hostSystem = {
+  ...fs,
   platform: process.platform,
   uid: process.getuid?.(),
   now: Date.now,
@@ -281,9 +283,102 @@ const hostSystem = {
       maxBuffer: 8 * 1024 * 1024,
       env: { ...process.env, PM2_HOME: '/root/.pm2', LC_ALL: 'C' },
     });
-    return result.stdout + (command === 'nginx' ? result.stderr : '');
+    return result.stdout;
   },
+  nginxSnapshot: () => readCutoverNginxSnapshot(),
 };
+
+/** Disk configuration tested by nginx, NOT proof of the running workers' config.
+ * Preserve all included source bytes and resolved ownership for the host classifier.
+ * A linked release owned by another UID is observed, never treated as root-writable.
+ * Raw sources belong only in the existing private evidence archive, not public reports. */
+export async function readCutoverNginxSnapshot(io = hostSystem) {
+  try {
+    if (io.platform !== 'linux' || io.uid !== 0) throw new Error('host');
+    const observedAtMs = io.now();
+    const dump = await io.exec('nginx', ['-T']);
+    if (typeof dump !== 'string' || !dump.length || Buffer.byteLength(dump) > 8 * 1024 * 1024)
+      throw new Error('dump');
+    const statKeys = ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'];
+    const sameStat = (a, b) => statKeys.every((key) => a[key] === b[key]);
+    const readSource = async (path) => {
+      if (!path.startsWith('/') || posix.normalize(path) !== path || /[\r\n\0]/.test(path))
+        throw new Error('path');
+      const resolved = await io.realpath(path);
+      const handle = await io.open(
+        resolved,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      try {
+        const before = await handle.stat();
+        if (!before.isFile() || before.size > 1024 * 1024) throw new Error('source');
+        // Bound reads even if the file grows after fstat; readFile would be unbounded.
+        const buffer = Buffer.alloc(before.size + 1);
+        let count = 0;
+        while (count < buffer.length) {
+          const { bytesRead } = await handle.read(buffer, count, buffer.length - count, null);
+          if (!bytesRead) break;
+          count += bytesRead;
+        }
+        const bytes = buffer.subarray(0, count);
+        const after = await handle.stat();
+        const current = await io.lstat(resolved);
+        if (
+          count !== before.size ||
+          !sameStat(before, after) ||
+          !sameStat(after, current) ||
+          (await io.realpath(path)) !== resolved ||
+          !Buffer.from(bytes.toString('utf8')).equals(bytes)
+        )
+          throw new Error('drift');
+        return {
+          record: {
+            path,
+            resolved,
+            uid: after.uid,
+            gid: after.gid,
+            mode: after.mode & 0o7777,
+            digest: createHash('sha256').update(bytes).digest('hex'),
+            content: bytes.toString('utf8'),
+          },
+          stat: after,
+        };
+      } finally {
+        await handle.close();
+      }
+    };
+    const sources = [];
+    const seen = new Set();
+    let offset = 0;
+    // nginx emits each header followed by exact file bytes and one added newline.
+    // Consume the source length, not a regex split that could mistake a source comment
+    // containing '# configuration file' for another included file.
+    while (offset < dump.length) {
+      const header = /^# configuration file (\/[^\r\n\0]+):\n/.exec(dump.slice(offset));
+      if (!header || seen.has(header[1]) || sources.length >= 128) throw new Error('inventory');
+      seen.add(header[1]);
+      const source = await readSource(header[1]);
+      const segment = `${header[0]}${source.record.content}\n`;
+      if (!dump.startsWith(segment, offset)) throw new Error('mismatch');
+      sources.push(source);
+      offset += segment.length;
+    }
+    if ((await io.exec('nginx', ['-T'])) !== dump) throw new Error('dump changed');
+    for (const source of sources) {
+      const last = await readSource(source.record.path);
+      if (
+        last.record.resolved !== source.record.resolved ||
+        last.record.digest !== source.record.digest ||
+        !sameStat(source.stat, last.stat)
+      )
+        throw new Error('source changed');
+    }
+    if (!fresh(observedAtMs, io.now())) throw new Error('clock');
+    return { observedAtMs, dump, files: sources.map((source) => source.record) };
+  } catch {
+    fail('MAINTENANCE_NGINX_OBSERVATION_UNPROVEN');
+  }
+}
 
 /** Read facts only; callers must classify every process/startup/route before acceptance.
  * No environment-variable absence or missing PM2 row establishes non-writer status. */
@@ -370,7 +465,7 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
       cronRestart: row.pm2_env?.cron_restart,
     }));
     const listeners = await io.exec('ss', ['-H', '-ltnp']);
-    const nginx = await io.exec('nginx', ['-T']);
+    const nginx = await io.nginxSnapshot();
     const systemd = await io.exec('systemctl', [
       'list-units',
       '--type=service',
@@ -402,7 +497,8 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
       processes,
       managers,
       listeners,
-      nginx,
+      nginx: nginx.dump,
+      nginxFiles: nginx.files,
       systemd,
       unitFiles,
       timers,

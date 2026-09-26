@@ -1,5 +1,51 @@
 # 首次切换：真实主机只读核查与有限修正清单
 
+## 2026-09-26 17:12–17:21 JST 恢复核查（最新）
+
+本节优先于下方09:48历史快照。用户已授权当前大项的实施、PR、必要合并、部署和验证；不能据此跳过真实放行检查或自动清理历史业务记录。
+
+### 连接与完整入口资料
+
+- 本机到两台主机的22端口TCP探测成功，直连Vultr SSH在banner交换阶段超时；阿里云直接SSH成功。从阿里云读取Vultr的公开SSH banner立即成功，随后使用已有凭据、严格双主机指纹校验、禁止agent转发的SSH中转执行Vultr `true`成功。未修改VPN、防火墙、sshd或任何服务器配置。该结果证明替代读取路径可用，不确定直连故障的具体网络根因。
+- 中转第一次尝试、阿里云路径元数据第一次采样均因本机自动审批超时而未执行；各按工具允许重试一次后成功。不能把审批超时当服务器拒绝。
+- 取得两台主机完整 `nginx -T` 和原始站点文件。三个HOLADAY站点原文件摘要与本文件第2节一致；阿里云两个正确站点名均含 `.orangebench.tech`，缩写路径不存在，不应继续猜路径。
+- 新增只读 `readCutoverNginxSnapshot` 已接入现有主机采集器：读取两次nginx测试输出、逐文件规范路径/属主/权限/原始字节摘要，并复核源文件与软链接目标未变。不会把UID501发布文件当成root可覆写文件，也不允许人工上传报告替代采集。原文只用于私密证据。
+- 实际采集器在Vultr取得17个源文件（20,992字节），阿里云12个（19,337字节）；后者仍有一个UID501的hd-app发布文件。隔离Linux Node22.20/root下真实nginx采集也通过。`nginx -T`证明磁盘配置可解析，**不证明当前worker已加载该版本**；实际fence/reload/探针接线仍需完成。
+- 4010/4011仍由Node PID1098048/965055监听，仍未取得4011公网/内部旁路职责的完整证明；不自动停止。
+
+### 数据库只读事务事实
+
+采样08:15:16 UTC：
+
+| 范围 | 新鲜结果 | 不能据此推断 |
+| --- | --- | --- |
+| 未解决任务 | 1条 `running`，`origin=explorer`；创建/更新时间均为2026-06-24 16:29:22.664 UTC；无session/plan、无普通task_events/task_steps | 不是零工作，不能直接改为完成/失败或删除 |
+| Explorer关联轨迹 | 3次navigate、11次click；22次LLM调用；最后动作16:31:14.695、最后调用16:31:21.028 UTC | 无普通步骤不等于未发生浏览器执行；历史点击外部结果尚未核清 |
+| 待核对支付 | PayPal 1、微信3、支付宝9，均有provider_order_id；partner支付为空 | pending不是已付款或确定未付款；仍需支付方只读核对 |
+| 生产者计划 | 2条active scheduled_tasks，当前due=0；最早next_run=2026-09-27 01:07:07.626 UTC；planned_task_runs与batch_tasks为空 | 当前未到期不等于可以忽略未来派发 |
+| 注销请求 | 1条cancelled | 不代表注销worker的启动来源已停用 |
+
+首次步骤统计误用了不存在的 `task_steps.updated_at`，返回ER_BAD_FIELD_ERROR；检查既有schema后改为created_at/started_at/completed_at，再执行完整只读事务通过。没有修改schema或业务数据。后续沿真正Explorer路径补查 `task_action_captures` / `llm_calls`，保留错误和修正证据，不能把第一次部分查询成功说成全部通过。
+
+候选现有 `apps/orchestrator/scripts/explore-sites.ts` 会创建origin=explorer/running行，再best-effort更新终态；源码还记载了历史CLI异常退出遗留running的情况。这与现场形态相符，但尚未将确切旧版本、退出日志及外部结果关联到该行，故仅为调查方向，不是终态修复依据；本轮未改Explorer代码或历史记录。
+
+### 私密证据索引
+
+原文保存在本机0600文件，且已原样复制至本计划 `.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/host-audit-resume-20260926/` 私密归档目录（0700，五份文件均0600）。不提交到Git，不输出凭据、任务正文、用户ID或订单号：
+
+| 文件 | SHA256 |
+| --- | --- |
+| `/tmp/holaday-vultr-nginx-collector.json` | `a9675919f7b289ffac9003e0019316a3250a356e02cffa69644a061a72ad30c8` |
+| `/tmp/holaday-aliyun-nginx-collector.json` | `e905bc9d600f38924d91b055156202945d0abedeb19420108b652d9a5cf2c8be` |
+
+业务聚合原始证据：`/tmp/holaday-live-work-via-jump.json`（含最初字段错误）、`/tmp/holaday-live-work-via-jump-final.json`（修正）、`/tmp/holaday-live-work-explorer-followup.json`（真实轨迹补查）；私密归档保留同名副本。缺失时重新只读采集，不可仅从本文生成ready报告。部署前必须重新采集，不能复用本次时间戳。
+
+新鲜回归：采集器40/40；浏览器发布脚本288/288（包含正常部署shell的6项）；完整test:ops退出0（120/50/16/65及shell）；两个触碰MJS的Biome与diff-check通过。Linux Node22.20全套初次39/40，既有publisher fixture使用process.getgid()导致root组0被正确拒绝；改为以UID/GID998运行原测试后40/40，不修改产品条件或断言。真实root nginx采集另行实测通过。对应日志 `/tmp/holaday-nginx-observation-{targeted-final,browser-final,ops-final,linux,linux-suite,linux-suite-final}.log`；本轮未重跑orchestrator/cn-payment完整应用测试，不复用旧结果冒称新验证。
+
+本节收口的是连接恢复、完整配置采集和业务事实核查。Task4完整host/nginx隔离/多主机DB/provider/readiness/shell接线，Task5恢复演练与外部支付证据，Task6整流程/独立审查均未完成。未push/PR/merge/deploy，未停服务、修改线上配置/DB、支付结算/权益/额度、UI、模型路由或扩展。
+
+## 09:48–09:51 JST 历史快照
+
 核查：2026-09-26 09:48–09:51，Asia/Tokyo。用户在明确只读范围后回复“继续”。分支 `codex/browser-release-candidate-20260925`，HEAD `844c2ced779fa360b62e2bfbdd87d4909d13b8a0`，Task 4 本地改动尚未提交。
 
 结论：现场资料已补充，但现有首次切换适配器不能直接用于这两台主机。此前 243 项脚本与 Linux 组件通过证明的是已覆盖的行为，不证明实际部署形态已全部适配。下列四项是既有切换路径的适配差异，不新增浏览器、支付或 UI 功能。

@@ -9,6 +9,7 @@ import {
   publishCutoverEvidence,
   readCutoverDatabaseScope,
   readCutoverHostSnapshot,
+  readCutoverNginxSnapshot,
   readCutoverRehearsalArtifacts,
 } from './browser-cutover-evidence.mjs';
 
@@ -341,6 +342,21 @@ function hostFixture() {
     platform: 'linux',
     uid: 0,
     now: () => 100_000,
+    nginxSnapshot: async () => ({
+      observedAtMs: 100_000,
+      dump: 'observed configuration',
+      files: [
+        {
+          path: '/etc/nginx/nginx.conf',
+          resolved: '/etc/nginx/nginx.conf',
+          uid: 0,
+          gid: 0,
+          mode: 0o644,
+          digest: 'e'.repeat(64),
+          content: 'observed configuration',
+        },
+      ],
+    }),
     readdir: async () => ['401', 'self'],
     readFile: async (path) => {
       if (!files.has(path)) throw new Error('unknown path');
@@ -379,6 +395,7 @@ test('host facts include unmanaged 4011, full proc identity and startup sources'
   assert.equal(result.processes[0].start, '12345');
   assert.equal(result.listeners.includes(':4011'), true);
   assert.equal(result.managers[0].autorestart, true);
+  assert.equal(result.nginxFiles[0].path, '/etc/nginx/nginx.conf');
   assert.equal(JSON.stringify(result).includes('secret'), false);
   assert.equal(
     f.calls.some((call) => call[0] === 'systemctl'),
@@ -412,6 +429,124 @@ test('normal proc accounting changes do not masquerade as process identity chang
   const result = await readCutoverHostSnapshot(f.io);
   assert.equal(result.processes.length, 1);
 });
+async function nginxFixture(t) {
+  const directory = await fs.realpath(
+    await fs.mkdtemp(join(tmpdir(), 'holaday-nginx-observation-')),
+  );
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const main = join(directory, 'nginx.conf');
+  const enabled = join(directory, 'enabled.conf');
+  const release = join(directory, 'release.conf');
+  const mainBytes = `events {}\nhttp { include ${enabled}; }\n`;
+  const releaseBytes =
+    'server { listen 80; listen [::]:80; server_name fixture.local;\n' +
+    ' location / { try_files $uri /index.html; }\n}\n';
+  await fs.writeFile(main, mainBytes, { mode: 0o644 });
+  await fs.writeFile(release, releaseBytes, { mode: 0o644 });
+  await fs.symlink(release, enabled);
+  const dump =
+    `# configuration file ${main}:\n${mainBytes}\n` +
+    `# configuration file ${enabled}:\n${releaseBytes}\n`;
+  const calls = [];
+  const io = {
+    ...fs,
+    platform: 'linux',
+    uid: 0,
+    now: () => 100_000,
+    exec: async (command, args) => {
+      assert.equal(command, 'nginx');
+      assert.deepEqual(args, ['-T']);
+      calls.push(command);
+      return dump;
+    },
+  };
+  return { io, directory, main, enabled, release, mainBytes, releaseBytes, dump, calls };
+}
+
+test('nginx observation retains full original bytes, linked release ownership and source digests', async (t) => {
+  const f = await nginxFixture(t);
+  const result = await readCutoverNginxSnapshot(f.io);
+  assert.equal(result.dump, f.dump);
+  assert.equal(result.files.length, 2);
+  assert.equal(result.files[1].path, f.enabled);
+  assert.equal(result.files[1].resolved, f.release);
+  assert.equal(result.files[1].uid, process.getuid());
+  assert.equal(result.files[1].content, f.releaseBytes);
+  assert.equal(result.files[1].digest, createHash('sha256').update(f.releaseBytes).digest('hex'));
+  assert.equal(result.files[1].mode, 0o644);
+  assert.equal(result.observedAtMs, 100_000);
+  assert.equal(f.calls.length, 2);
+});
+
+test('nginx source bytes must agree with the tested dump, not only its path', async (t) => {
+  const f = await nginxFixture(t);
+  await fs.writeFile(f.release, f.releaseBytes.replace('80', '81'));
+  await assert.rejects(
+    readCutoverNginxSnapshot(f.io),
+    /^Error: MAINTENANCE_NGINX_OBSERVATION_UNPROVEN$/,
+  );
+});
+
+test('nginx config changes and symlink retargeting during observation reject', async (t) => {
+  for (const mode of ['dump', 'source', 'link']) {
+    const f = await nginxFixture(t);
+    const exec = f.io.exec;
+    f.io.exec = async (...args) => {
+      const dump = await exec(...args);
+      if (f.calls.length === 2) {
+        if (mode === 'dump') return `${dump}\n`;
+        if (mode === 'source') await fs.writeFile(f.release, f.releaseBytes.replace('80', '81'));
+        if (mode === 'link') {
+          const other = join(f.directory, 'other.conf');
+          await fs.writeFile(other, f.releaseBytes);
+          await fs.unlink(f.enabled);
+          await fs.symlink(other, f.enabled);
+        }
+      }
+      return dump;
+    };
+    await assert.rejects(
+      readCutoverNginxSnapshot(f.io),
+      /MAINTENANCE_NGINX_OBSERVATION_UNPROVEN/,
+      mode,
+    );
+  }
+});
+
+test('nginx malformed, duplicate, oversized and failed observations never become an empty inventory', async (t) => {
+  for (const mode of [
+    'empty',
+    'duplicate',
+    'relative',
+    'trailing',
+    'oversized',
+    'failed',
+    'non-root',
+    'clock',
+  ]) {
+    const f = await nginxFixture(t);
+    if (mode === 'empty') f.io.exec = async () => '';
+    if (mode === 'duplicate') f.io.exec = async () => f.dump + f.dump;
+    if (mode === 'relative') f.io.exec = async () => f.dump.replace(f.main, 'relative.conf');
+    if (mode === 'trailing') f.io.exec = async () => `${f.dump}unaccounted source`;
+    if (mode === 'oversized') f.io.exec = async () => 'x'.repeat(8 * 1024 * 1024 + 1);
+    if (mode === 'failed')
+      f.io.exec = async () => {
+        throw new Error('PRIVATE_CONFIG');
+      };
+    if (mode === 'non-root') f.io.uid = 501;
+    if (mode === 'clock') {
+      let n = 0;
+      f.io.now = () => (n++ ? 99_999 : 100_000);
+    }
+    await assert.rejects(
+      readCutoverNginxSnapshot(f.io),
+      /^Error: MAINTENANCE_NGINX_OBSERVATION_UNPROVEN$/,
+      mode,
+    );
+  }
+});
+
 async function publisherFixture(t) {
   const directory = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'holaday-cutover-publish-')));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
