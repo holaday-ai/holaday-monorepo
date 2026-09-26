@@ -1,4 +1,5 @@
 import { evaluateMaintenanceCutover, recoveryAction } from './browser-maintenance-policy.mjs';
+import { finishStoppedRelease } from './browser-maintenance-release-tail.mjs';
 const validIdentity = (i) =>
   typeof i?.candidate === 'string' &&
   typeof i?.bootId === 'string' &&
@@ -38,35 +39,17 @@ export async function performMaintenanceRelease({ candidate, adapter }) {
     if (!decision.allowed) throw new Error(decision.code);
     await mark('stopped');
     await adapter.stop(identity);
-    await mark('migration_started');
-    await adapter.migrate(candidate);
-    await mark('candidate_started');
-    const started = await adapter.start(candidate);
-    if (!validIdentity(started) || started.candidate !== candidate)
-      throw new Error('MAINTENANCE_IDENTITY_MISMATCH');
-    identity = started;
-    await adapter.verify(identity);
-    await mark('verified');
-    let opened;
-    try {
-      opened = await adapter.open(identity);
-    } catch {
-      opened = await adapter.status(identity);
-    }
-    if (
-      opened?.protocol !== 1 ||
-      !same(opened.identity, identity) ||
-      opened.mode !== 'serving' ||
-      opened.needsReconciliation !== true ||
-      opened.idle !== false
-    )
-      throw new Error('MAINTENANCE_OPEN_UNPROVEN');
-    // The standalone worker exits when the shared marker is closed. Start it
-    // only after same-instance open is proven, including a recovered lost ACK.
-    // A failed worker start is not a complete release; close new admission.
-    await adapter.resumeWorker(identity);
-    await mark('opened');
-    return { ok: true, phase, identity };
+    return finishStoppedRelease({
+      candidate,
+      previousBootId: identity.bootId,
+      adapter: {
+        ...adapter,
+        // Normal journals still require the real old identity until start returns
+        // the new one. First bootstrap uses its separate journal discriminator.
+        persist: (next, detail) =>
+          adapter.persist(next, { ...detail, identity: detail.identity ?? identity }),
+      },
+    });
   } catch (error) {
     const action = recoveryAction(phase);
     let closeAcknowledged = false;

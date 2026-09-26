@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 
 const identityValid = (value) =>
   /^[a-f0-9]{40}$/.test(value?.candidate ?? '') && /^[a-f0-9]{32}$/.test(value?.bootId ?? '');
@@ -23,10 +24,23 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
   const candidate = metadata?.candidate;
   const configDigest = metadata?.configDigest;
   const migrationDigest = metadata?.migrationDigest;
+  const inventoryDigest = metadata?.inventoryDigest;
+  const inventoryFields = inventoryDigest === undefined ? {} : { inventoryDigest };
   let migrationManifest;
   let bootstrapSeed;
   let currentIdentity;
+  const startupEvents = [];
+  const registrationEvents = [];
+  let registrationPhase;
+  const registrationDone = () =>
+    registrationEvents.length >= 2 &&
+    registrationEvents.length === 2 + registrationEvents[1].registrations.length * 2;
+  const startupChanges = () =>
+    (startupEvents[1]?.files ?? []).filter((f) => f.beforeDigest !== f.afterDigest).reverse();
+  const startupDone = () =>
+    startupEvents.length >= 2 && startupEvents.length === 2 + startupChanges().length * 2;
   const first = metadata?.kind === 'first-cutover';
+  const reservedAttempt = metadata?.attempt;
   const oldIdentity = metadata?.oldIdentity && { ...metadata.oldIdentity };
   const firstFields = first
     ? {
@@ -39,6 +53,12 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
     !/^[a-f0-9]{40}$/.test(candidate ?? '') ||
     !/^[a-f0-9]{64}$/.test(configDigest ?? '') ||
     !/^[a-f0-9]{64}$/.test(migrationDigest ?? '') ||
+    (inventoryDigest !== undefined && !/^[a-f0-9]{64}$/.test(inventoryDigest ?? '')) ||
+    (reservedAttempt !== undefined &&
+      (!first ||
+        !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(
+          reservedAttempt ?? '',
+        ))) ||
     (first
       ? oldIdentity !== undefined ||
         !/^[a-f0-9]{64}$/.test(firstFields.legacyDigest ?? '') ||
@@ -46,10 +66,19 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
       : metadata?.kind !== undefined || !identityValid(oldIdentity))
   )
     throw unproven();
-  const attempt = randomUUID();
+  // Only the first-cutover root host may supply a reservation from its protected
+  // approved manifest. It is a new operation, never permission to resume a lock.
+  const attempt = reservedAttempt ?? randomUUID();
   const lockPath = join(directory, 'release.lock');
   const path = join(directory, `${attempt}.json`);
-  const binding = { attempt, candidate, configDigest, migrationDigest, ...firstFields };
+  const binding = {
+    attempt,
+    candidate,
+    configDigest,
+    migrationDigest,
+    ...inventoryFields,
+    ...firstFields,
+  };
   const lockBytes = `${JSON.stringify({ ...binding, oldIdentity })}\n`;
   let lockStat;
   const privateFile = (stat) =>
@@ -94,8 +123,11 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
             configDigest,
             migrationDigest,
             migrationManifest,
+            ...inventoryFields,
             ...firstFields,
             bootstrapSeed,
+            ...(startupEvents.length ? { startupEvents } : {}),
+            ...(registrationEvents.length ? { registrationEvents } : {}),
             oldIdentity,
             phase: next,
             identity,
@@ -157,6 +189,20 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
     await lock.sync();
     await directoryHandle.sync();
     lockStat = await lock.stat();
+    // A reserved attempt must never replace historical evidence, including an
+    // interrupted operation whose lock was separately recovered by an operator.
+    const reservation = await io.open(
+      path,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
+    );
+    try {
+      latest = await reservation.stat();
+      await reservation.sync();
+    } finally {
+      await reservation.close();
+    }
+    await directoryHandle.sync();
     await write('preflight', oldIdentity);
   } catch (error) {
     await close();
@@ -172,7 +218,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
           candidate,
           configDigest,
           migrationDigest,
-          ...(first ? { inventoryDigest: firstFields.inventoryDigest } : {}),
+          ...inventoryFields,
         };
       }),
     bindBootstrapSeed: (seed) =>
@@ -187,6 +233,109 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
         bootstrapSeed = seed;
         await write(phase);
       }),
+    recordRegistrationEvent: (event) => {
+      const e = structuredClone(event);
+      return serial(async () => {
+        if (
+          !first ||
+          !['producers_stopped', 'all_fenced'].includes(phase) ||
+          !migrationManifest ||
+          e?.attempt !== attempt ||
+          e.inventoryDigest !== inventoryDigest ||
+          (registrationPhase !== undefined && registrationPhase !== phase)
+        )
+          throw unproven();
+        const base = { attempt, inventoryDigest };
+        if (!registrationEvents.length) {
+          if (!isDeepStrictEqual(e, { ...base, phase: 'registration-backup-intent' }))
+            throw unproven();
+          registrationPhase = phase;
+        } else if (registrationEvents.length === 1) {
+          if (
+            e.phase !== 'registration-backed-up' ||
+            Object.keys(e).length !== 5 ||
+            !/^[a-f0-9]{64}$/.test(e.backupDigest ?? '') ||
+            !Array.isArray(e.registrations) ||
+            !e.registrations.length ||
+            e.registrations.length > 4 ||
+            e.registrations.some(
+              (r) =>
+                !r ||
+                Object.keys(r).length !== 3 ||
+                !Number.isSafeInteger(r.pmId) ||
+                r.pmId < 0 ||
+                ![
+                  'holaday-orchestrator',
+                  'holaday-account-closure-worker',
+                  'holaday-files-cron',
+                  'holaday-cn-payment',
+                ].includes(r.name) ||
+                !/^[a-f0-9]{64}$/.test(r.configDigest ?? ''),
+            ) ||
+            new Set(e.registrations.map((r) => r.pmId)).size !== e.registrations.length ||
+            new Set(e.registrations.map((r) => r.name)).size !== e.registrations.length
+          )
+            throw unproven();
+        } else {
+          const registration =
+            registrationEvents[1].registrations[Math.floor((registrationEvents.length - 2) / 2)];
+          const next =
+            registrationEvents.length % 2 === 0
+              ? 'registration-delete-intent'
+              : 'registration-deleted';
+          if (!registration || !isDeepStrictEqual(e, { ...base, ...registration, phase: next }))
+            throw unproven();
+        }
+        registrationEvents.push(e);
+        await write(phase, currentIdentity);
+      });
+    },
+    recordStartupEvent: (event) => {
+      const e = structuredClone(event);
+      return serial(async () => {
+        if (
+          !first ||
+          phase !== 'producers_stopped' ||
+          !migrationManifest ||
+          e?.attempt !== attempt ||
+          e.inventoryDigest !== inventoryDigest
+        )
+          throw unproven();
+        const base = { attempt, inventoryDigest };
+        if (startupEvents.length === 0) {
+          if (!isDeepStrictEqual(e, { ...base, phase: 'startup-backup-intent' })) throw unproven();
+        } else if (startupEvents.length === 1) {
+          if (
+            e.phase !== 'startup-backed-up' ||
+            Object.keys(e).length !== 4 ||
+            !Array.isArray(e.files) ||
+            e.files.length !== 2 ||
+            e.files.some(
+              (f, i) =>
+                !f ||
+                Object.keys(f).length !== 3 ||
+                f.path !== `/root/.pm2/${i ? 'dump.pm2.bak' : 'dump.pm2'}` ||
+                !(
+                  (f.beforeDigest === null && f.afterDigest === null) ||
+                  (/^[a-f0-9]{64}$/.test(f.beforeDigest ?? '') &&
+                    /^[a-f0-9]{64}$/.test(f.afterDigest ?? ''))
+                ),
+            ) ||
+            !e.files.some((f) => f.beforeDigest !== f.afterDigest)
+          )
+            throw unproven();
+        } else {
+          const index = Math.floor((startupEvents.length - 2) / 2);
+          const change = startupChanges()[index];
+          const next =
+            startupEvents.length % 2 === 0 ? 'startup-file-intent' : 'startup-file-written';
+          if (!change || !isDeepStrictEqual(e, { ...base, phase: next, ...change }))
+            throw unproven();
+        }
+        startupEvents.push(e);
+        await write(phase, currentIdentity);
+      });
+    },
     bindManifest: (manifest) =>
       serial(async () => {
         const bytes = JSON.stringify(manifest);
@@ -204,11 +353,19 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
       serial(async () => {
         if (!migrationManifest) throw new Error('MAINTENANCE_MIGRATIONS_UNPROVEN');
         if (first) {
+          if (next === 'all_fenced' && startupEvents.length && !startupDone()) throw unproven();
+          if (
+            ['all_fenced', 'stopped'].includes(next) &&
+            registrationEvents.length &&
+            !registrationDone()
+          )
+            throw unproven();
           const phases = [
             'preflight',
             'prepared',
             'orders_fenced',
             'legacy_settled',
+            'producers_stopped',
             'all_fenced',
             'stopped',
             'backup_verified',

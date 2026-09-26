@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
 import { createHash } from 'node:crypto';
+import { test } from 'node:test';
 import { createHostReleaseAdapter } from './browser-maintenance-host.mjs';
 import { performMaintenanceRelease } from './browser-maintenance-transition.mjs';
 
@@ -288,4 +288,49 @@ test('lost open ACK results in one status check and no repeated open command', a
     f.events.filter((e) => e.includes(`control.mjs status ${next.candidate}`)).length >= 1,
     true,
   );
+});
+
+test('normal host refreshes runtime/readiness immediately before open and proves status after open', async () => {
+  const f = fixture();
+  const adapter = createHostReleaseAdapter(options, f.io);
+  const result = await performMaintenanceRelease({ candidate: next.candidate, adapter });
+  assert.equal(result.ok, true);
+  const open = f.events.findIndex((e) => e.includes('control.mjs open'));
+  const verifies = f.events
+    .map((e, i) => (e === 'verify-new-runtime' ? i : -1))
+    .filter((i) => i >= 0);
+  const ready = f.events
+    .map((e, i) => (e.includes('browser-maintenance-readiness.ts') ? i : -1))
+    .filter((i) => i >= 0);
+  assert.equal(ready.length, 3); // One prepare and two independent pre-open checks.
+  assert.ok(verifies[1] < ready[2] && ready[2] < open);
+  assert.ok(f.events[open + 1].includes(`control.mjs status ${next.candidate}`));
+});
+
+test('normal host refuses a foreign post-open status and closes the intended candidate', async () => {
+  const f = fixture();
+  const exec = f.io.exec;
+  let opened = false;
+  f.io.exec = async (command, args, settings) => {
+    const out = await exec(command, args, settings);
+    if (command === 'runuser' && args.includes('open')) opened = true;
+    if (opened && command === 'runuser' && args.includes('status'))
+      return JSON.stringify({
+        protocol: 1,
+        identity: old,
+        mode: 'serving',
+        needsReconciliation: true,
+        idle: false,
+      });
+    return out;
+  };
+  const result = await performMaintenanceRelease({
+    candidate: next.candidate,
+    adapter: createHostReleaseAdapter(options, f.io),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'MAINTENANCE_IDENTITY_MISMATCH');
+  assert.ok(f.events.at(-1).includes(`control.mjs close ${next.candidate}`));
+  assert.equal(result.closeAcknowledged, true);
+  assert.equal(f.events.includes('phase:opened'), false);
 });

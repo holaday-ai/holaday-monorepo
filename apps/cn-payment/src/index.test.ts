@@ -8,6 +8,8 @@ const {
   smsClosureReadySpy,
   smsSendCodeSpy,
   syncConfirmSpy,
+  syncPartnerSpy,
+  alipayParseSpy,
   wechatCreateSpy,
   wechatNotifySpy,
 } = vi.hoisted(() => {
@@ -35,6 +37,10 @@ const {
     syncConfirmSpy: vi.fn<() => Promise<{ ok: true } | { ok: false; reason: string }>>(
       async () => ({ ok: true }),
     ),
+    syncPartnerSpy: vi.fn<() => Promise<{ ok: true } | { ok: false; reason: string }>>(
+      async () => ({ ok: true }),
+    ),
+    alipayParseSpy: vi.fn(),
     wechatCreateSpy: vi.fn(async (input: { outTradeNo: string }) => ({
       outTradeNo: input.outTradeNo,
       codeUrl: 'weixin://wxpay/test',
@@ -97,7 +103,7 @@ vi.mock('./alipay.js', () => ({
     why: vi.fn(() => ''),
     createPagePayUrl: vi.fn(),
     verifyNotify: vi.fn(() => true),
-    parseNotifyBody: vi.fn(),
+    parseNotifyBody: alipayParseSpy,
   })),
 }));
 
@@ -115,7 +121,7 @@ vi.mock('./sms.js', () => ({
 vi.mock('./sync-to-vultr.js', () => ({
   VultrSync: vi.fn(() => ({
     confirm: syncConfirmSpy,
-    confirmPartner: vi.fn(async () => ({ ok: true })),
+    confirmPartner: syncPartnerSpy,
     smsLogin: vi.fn(),
   })),
 }));
@@ -148,6 +154,86 @@ await import('./index.js');
 await vi.waitFor(() => {
   expect(routes.has('POST /payment/create')).toBe(true);
   expect(routes.has('POST /payment/wechat/notify')).toBe(true);
+});
+
+describe('first-cutover settlement acknowledgement boundary', () => {
+  beforeEach(() => {
+    syncConfirmSpy.mockReset().mockResolvedValue({ ok: true });
+    syncPartnerSpy.mockReset().mockResolvedValue({ ok: true });
+    wechatNotifySpy.mockReset();
+    alipayParseSpy.mockReset();
+  });
+
+  const cases = [
+    ['wechat', 'subscription'],
+    ['wechat', 'partner_recharge'],
+    ['alipay', 'subscription'],
+    ['alipay', 'partner_recharge'],
+  ] as const;
+
+  for (const outcome of ['settled', 'rejected', 'unconfirmed'] as const) {
+    it.each(cases)(
+      `%s %s does not acknowledge before settlement, outcome=${outcome}`,
+      async (provider, kind) => {
+        const attach = JSON.stringify(
+          kind === 'subscription'
+            ? { kind, userId: 'usr_cn_test', planId: 'pro', cycle: 'monthly', isFirstMonth: true }
+            : { kind, userId: 'usr_cn_test', partnerOrderExternalId: 'pay_partner_cutover' },
+        );
+        wechatNotifySpy.mockResolvedValue({
+          outTradeNo: 'pay_cutover',
+          transactionId: 'wx_cutover',
+          amountCents: 4900,
+          tradeState: 'SUCCESS',
+          attach,
+        });
+        alipayParseSpy.mockReturnValue({
+          outTradeNo: 'pay_cutover',
+          transactionId: 'ali_cutover',
+          amountCents: 4900,
+          tradeStatus: 'TRADE_SUCCESS',
+          passback: attach,
+        });
+        let settle: ((value: { ok: true } | { ok: false; reason: string }) => void) | undefined;
+        let reject: ((reason: Error) => void) | undefined;
+        const pendingSettlement = new Promise<{ ok: true } | { ok: false; reason: string }>(
+          (resolve, fail) => {
+            settle = resolve;
+            reject = fail;
+          },
+        );
+        const bridge = kind === 'subscription' ? syncConfirmSpy : syncPartnerSpy;
+        bridge.mockReturnValueOnce(pendingSettlement);
+        const handler = routes.get(`POST /payment/${provider}/notify`);
+        if (!handler) throw new Error('notify route missing');
+        const { response, state } = makeResponse();
+        const pendingResponse = handler(
+          { headers: {}, body: provider === 'wechat' ? '{}' : {} },
+          response,
+        );
+        await vi.waitFor(() => expect(bridge).toHaveBeenCalledTimes(1));
+        expect(state.body).toBeUndefined();
+        if (!settle || !reject) throw new Error('settlement fixture missing');
+        if (outcome === 'rejected') reject(new Error('maintenance bridge unavailable'));
+        else
+          settle(
+            outcome === 'settled' ? { ok: true } : { ok: false, reason: 'maintenance_closed' },
+          );
+        await pendingResponse;
+        if (provider === 'wechat') {
+          expect(state.status).toBe(outcome === 'settled' ? 200 : 401);
+          expect(state.body).toEqual(
+            outcome === 'settled'
+              ? { code: 'SUCCESS' }
+              : { code: 'FAIL', message: 'verification failed' },
+          );
+        } else {
+          expect(state.body).toBe(outcome === 'settled' ? 'success' : 'fail');
+        }
+        expect(kind === 'subscription' ? syncPartnerSpy : syncConfirmSpy).not.toHaveBeenCalled();
+      },
+    );
+  }
 });
 
 describe('CN first-month qualification propagation', () => {

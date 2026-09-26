@@ -1,18 +1,18 @@
-import * as fs from 'node:fs/promises';
-import { constants, realpathSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { constants, realpathSync } from 'node:fs';
+import * as fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 import {
-  observeMaintenanceRuntime,
   createMaintenanceStopEffects,
   inspectMaintenanceSystem,
+  observeMaintenanceRuntime,
 } from './browser-maintenance-linux.mjs';
-import { retireMaintenanceRuntime } from './browser-maintenance-runtime.mjs';
 import { buildMaintenanceMigrationManifest } from './browser-maintenance-manifest.mjs';
-import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
+import { retireMaintenanceRuntime } from './browser-maintenance-runtime.mjs';
 import { performMaintenanceRelease } from './browser-maintenance-transition.mjs';
 
 const node = '/opt/node22/bin/node';
@@ -371,6 +371,15 @@ export function createHostReleaseAdapter(options, io = system) {
     verify: async (identity) => {
       await io.observe(identity);
       await readiness(identity);
+    },
+    beforeOpen: async (identity) => {
+      await io.observe(identity);
+      await readiness(identity);
+    },
+    afterOpen: async (identity) => {
+      const status = await control('status', identity);
+      if (status.mode !== 'serving' || status.needsReconciliation !== true || status.idle !== false)
+        throw new Error('MAINTENANCE_OPEN_UNPROVEN');
     },
     open: (identity) => control('open', identity),
     status: (identity) => control('status', identity),

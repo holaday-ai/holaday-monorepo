@@ -6,6 +6,51 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 
 const hash = (x) => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
+const producerReceipts = new WeakMap();
+function producerScope(captured) {
+  if (
+    !captured?.targets?.length ||
+    captured.targets.some((p) => !['main', 'worker'].includes(p.role))
+  )
+    fail();
+  for (const target of captured.targets) checkTarget(target);
+}
+function verifyProducerFence(fence, snapshot, captured, now) {
+  producerScope(captured);
+  checkSnapshot(snapshot, captured, now);
+  if (
+    fence?.inventoryDigest !== captured.inventoryDigest ||
+    fence.stage !== 'orders' ||
+    !Number.isSafeInteger(fence.observedAtMs) ||
+    fence.observedAtMs > now ||
+    now - fence.observedAtMs > 60000 ||
+    fence.unsettledWork !== 0 ||
+    fence.externalWork !== 0 ||
+    fence.activeRequests !== 0 ||
+    fence.unknownWriters !== 0 ||
+    !Array.isArray(fence.runningProducers) ||
+    fence.producersRunning !== fence.runningProducers.length ||
+    fence.runningProducers.length !== snapshot.processes.length ||
+    new Set(fence.runningProducers.map((p) => p.pid)).size !== fence.runningProducers.length ||
+    snapshot.processes.some((p) => !captured.targets.some((t) => sameProcess(p, t))) ||
+    snapshot.processes.some((p) => !fence.runningProducers.some((t) => sameProcess(p, t)))
+  )
+    fail();
+}
+export async function retireLegacyProducers(input, io) {
+  producerScope(input?.captured);
+  if (input.producerReceipt !== undefined) fail();
+  const receipt = await retireCapturedRuntime(input, io, true);
+  producerReceipts.set(receipt, {
+    receipt: structuredClone(receipt),
+    captured: structuredClone(input.captured),
+  });
+  return receipt;
+}
+export function createLegacyProducerEffects(observation, captured, system = {}) {
+  producerScope(captured);
+  return runtimeEffects(observation, system, structuredClone(captured));
+}
 const fail = () => {
   throw new Error('CUTOVER_RUNTIME_UNPROVEN');
 };
@@ -41,7 +86,23 @@ const managerKeys = [
   'memoryRestart',
 ];
 const sameManager = (a, b) => managerKeys.every((k) => isDeepStrictEqual(a?.[k], b?.[k]));
-function checkTarget(p) {
+function isRootGateway(p) {
+  if (p.role !== 'gateway' || !isDeepStrictEqual(p.uids, [0, 0, 0, 0])) return false;
+  const release =
+    /^(\/opt\/holaday-cn-payment\/releases\/[a-f0-9]{12}-[0-9]{14})\/apps\/cn-payment$/.exec(
+      p.cwd ?? '',
+    );
+  if (!release) return false;
+  if (p.exe === '/usr/bin/node') return true;
+  // Only the audited managed gateway wrappers, never arbitrary root executables.
+  return (
+    p.managerIdentity?.kind === 'pm2' &&
+    (p.exe === '/usr/bin/dash' ||
+      p.exe ===
+        `${release[1]}/node_modules/.pnpm/@esbuild+linux-x64@0.27.7/node_modules/@esbuild/linux-x64/bin/esbuild`)
+  );
+}
+function checkTarget(p, registration = false) {
   if (
     !p ||
     !/^[a-z0-9.-]{1,128}$/.test(p.host ?? '') ||
@@ -51,9 +112,12 @@ function checkTarget(p) {
     !Number.isSafeInteger(p.ppid) ||
     p.ppid < 1 ||
     !/^[0-9]+$/.test(p.start ?? '') ||
-    !isDeepStrictEqual(p.uids, [998, 998, 998, 998]) ||
-    p.exe !== '/opt/node22/bin/node' ||
     !hash(p.argvDigest)
+  )
+    fail();
+  if (
+    !(isDeepStrictEqual(p.uids, [998, 998, 998, 998]) && p.exe === '/opt/node22/bin/node') &&
+    !isRootGateway(p)
   )
     fail();
   if (['main', 'worker'].includes(p.role)) {
@@ -70,28 +134,54 @@ function checkTarget(p) {
   if (m?.kind === 'unmanaged') {
     if (Object.keys(m).length !== 1) fail();
   } else if (m?.kind === 'pm2') {
+    checkManager(m, registration);
     if (
-      !Number.isSafeInteger(m.pid) ||
-      m.pid <= 1 ||
-      !/^[0-9]+$/.test(m.start ?? '') ||
-      m.exe !== '/opt/node22/bin/node' ||
-      !hash(m.argvDigest) ||
-      m.pm2Home !== '/root/.pm2' ||
-      !/^\d+\.\d+\.\d+$/.test(m.version ?? '') ||
-      !Number.isSafeInteger(m.pmId) ||
-      m.pmId < 0 ||
-      !/^[a-zA-Z0-9_-]{1,80}$/.test(m.name ?? '') ||
-      !hash(m.configDigest) ||
-      !Number.isSafeInteger(m.killTimeoutMs) ||
-      m.killTimeoutMs < 1 ||
-      m.killTimeoutMs > 600000 ||
-      !['SIGINT', 'SIGTERM'].includes(m.killSignal) ||
-      m.watch !== false ||
-      m.cron !== false ||
-      m.memoryRestart !== 0
+      (isRootGateway(p) && m.name !== 'holaday-cn-payment') ||
+      (registration &&
+        m.name !==
+          {
+            main: 'holaday-orchestrator',
+            worker: 'holaday-account-closure-worker',
+            gateway: 'holaday-cn-payment',
+          }[p.role])
     )
       fail();
   } else fail();
+}
+function checkManager(m, registration = false) {
+  if (
+    m?.kind !== 'pm2' ||
+    !Number.isSafeInteger(m.pid) ||
+    m.pid <= 1 ||
+    !/^[0-9]+$/.test(m.start ?? '') ||
+    !['/opt/node22/bin/node', '/usr/bin/node'].includes(m.exe) ||
+    !hash(m.argvDigest) ||
+    m.pm2Home !== '/root/.pm2' ||
+    !/^\d+\.\d+\.\d+$/.test(m.version ?? '') ||
+    !Number.isSafeInteger(m.pmId) ||
+    m.pmId < 0 ||
+    !/^[a-zA-Z0-9_-]{1,80}$/.test(m.name ?? '') ||
+    !hash(m.configDigest) ||
+    !Number.isSafeInteger(m.killTimeoutMs) ||
+    m.killTimeoutMs < 1 ||
+    m.killTimeoutMs > 660000 ||
+    !['SIGINT', 'SIGTERM'].includes(m.killSignal) ||
+    m.watch !== false ||
+    (!registration && (m.cron !== false || m.memoryRestart !== 0)) ||
+    (registration &&
+      (m.version !== '6.0.14' ||
+        ![
+          'holaday-orchestrator',
+          'holaday-account-closure-worker',
+          'holaday-files-cron',
+          'holaday-cn-payment',
+        ].includes(m.name) ||
+        !Number.isSafeInteger(m.memoryRestart) ||
+        m.memoryRestart < 0 ||
+        m.memoryRestart > 1024 ** 4 ||
+        (m.cron !== false && !(m.name === 'holaday-files-cron' && m.cron === '0 * * * *'))))
+  )
+    fail();
 }
 function checkSnapshot(s, base, now) {
   if (
@@ -119,16 +209,26 @@ function checkSnapshot(s, base, now) {
 /** Inventory is a complete, classified host scope, not just PM2's selected pid.
  * Unknown launcher/process records must be retained by the live observer. */
 export async function captureLegacyRuntime({ inventory, approvedTargets }, io) {
+  return captureRuntime({ inventory, approvedTargets }, io, false);
+}
+export async function captureLegacyRegistrations(input, io) {
+  return captureRuntime(input, io, true);
+}
+async function captureRuntime(
+  { inventory, approvedTargets, approvedRegistrations },
+  io,
+  registration,
+) {
   checkSnapshot(inventory, inventory, io.now());
   if (
     !Array.isArray(approvedTargets) ||
-    !approvedTargets.length ||
+    (!registration && !approvedTargets.length) ||
     approvedTargets.length !== inventory.processes.length
   )
     fail();
   const targets = structuredClone(approvedTargets);
   for (const p of targets) {
-    checkTarget(p);
+    checkTarget(p, registration);
     if (
       p.host !== inventory.host ||
       p.bootId !== inventory.bootId ||
@@ -138,6 +238,32 @@ export async function captureLegacyRuntime({ inventory, approvedTargets }, io) {
   }
   if (new Set(targets.map((p) => p.pid)).size !== targets.length) fail();
   const groups = targets.filter((p) => p.managerIdentity.kind === 'pm2');
+  if (registration) {
+    if (
+      !Array.isArray(approvedRegistrations) ||
+      !approvedRegistrations.length ||
+      !isDeepStrictEqual(approvedRegistrations, inventory.managers) ||
+      new Set(inventory.managers.map((m) => m.pmId)).size !== inventory.managers.length ||
+      new Set(inventory.managers.map((m) => m.name)).size !== inventory.managers.length ||
+      targets.some((p) => p.managerIdentity.kind !== 'pm2')
+    )
+      fail();
+    for (const m of inventory.managers) {
+      checkManager(m, true);
+      if (m.name === 'holaday-files-cron') {
+        if (
+          m.status !== 'stopped' ||
+          m.rootPid !== 0 ||
+          groups.some((p) => sameManager(p.managerIdentity, m))
+        )
+          fail();
+      } else if (
+        m.status !== 'online' ||
+        !groups.some((p) => p.pid === m.rootPid && sameManager(p.managerIdentity, m))
+      )
+        fail();
+    }
+  }
   for (const p of groups) {
     const matches = inventory.managers.filter((m) => sameManager(m, p.managerIdentity));
     if (matches.length !== 1 || matches[0].status !== 'online') fail();
@@ -147,11 +273,24 @@ export async function captureLegacyRuntime({ inventory, approvedTargets }, io) {
       if (seen.has(ancestor.pid)) fail();
       seen.add(ancestor.pid);
       ancestor = targets.find((x) => x.pid === ancestor.ppid);
-      if (!ancestor || !sameManager(ancestor.managerIdentity, p.managerIdentity)) fail();
+      if (
+        !ancestor ||
+        !sameManager(ancestor.managerIdentity, p.managerIdentity) ||
+        (isRootGateway(p) && (!isRootGateway(ancestor) || ancestor.cwd !== p.cwd))
+      )
+        fail();
     }
     if (ancestor.ppid !== p.managerIdentity.pid) fail();
+    if (isRootGateway(p) !== isRootGateway(ancestor)) fail();
+    if (isRootGateway(p) && ancestor.exe !== '/usr/bin/node') fail();
   }
-  if (inventory.managers.some((m) => !groups.some((p) => sameManager(m, p.managerIdentity))))
+  if (
+    inventory.managers.some(
+      (m) =>
+        !(registration && m.name === 'holaday-files-cron' && m.rootPid === 0) &&
+        !groups.some((p) => sameManager(m, p.managerIdentity)),
+    )
+  )
     fail();
   if (
     inventory.listeners.some(
@@ -160,6 +299,7 @@ export async function captureLegacyRuntime({ inventory, approvedTargets }, io) {
   )
     fail();
   return structuredClone({
+    ...(registration ? { retirement: 'delete-registration' } : {}),
     inventoryDigest: inventory.inventoryDigest,
     host: inventory.host,
     bootId: inventory.bootId,
@@ -169,22 +309,38 @@ export async function captureLegacyRuntime({ inventory, approvedTargets }, io) {
   });
 }
 
-export async function retireLegacyRuntime({ captured, deadlineMs }, io) {
+export async function retireLegacyRuntime(input, io) {
+  return retireCapturedRuntime(input, io, false);
+}
+async function retireCapturedRuntime({ captured, deadlineMs, producerReceipt }, io, producers) {
   if (
+    captured?.retirement !== undefined ||
     !captured?.targets?.length ||
     !Number.isSafeInteger(deadlineMs) ||
     deadlineMs < 1 ||
-    deadlineMs > 660000
+    deadlineMs > 900000
   )
     fail();
   const start = io.now();
   const deadline = start + deadlineMs;
   const c = structuredClone(captured);
+  const prior = producerReceipt && producerReceipts.get(producerReceipt);
+  if (
+    producerReceipt !== undefined &&
+    (!prior ||
+      !isDeepStrictEqual(prior.receipt, producerReceipt) ||
+      !isDeepStrictEqual(prior.captured, c))
+  )
+    fail();
   async function guard() {
     const now = io.now();
     if (now < start || now >= deadline) throw new Error('CUTOVER_STOP_TIMEOUT');
     if ((await io.assertJournalOwnership()).inventoryDigest !== c.inventoryDigest) fail();
     const fence = await io.verifyFence();
+    if (producers) {
+      verifyProducerFence(fence, await io.readInventory(), c, io.now());
+      return;
+    }
     if (
       fence?.inventoryDigest !== c.inventoryDigest ||
       fence.stage !== 'all-writers' ||
@@ -209,9 +365,24 @@ export async function retireLegacyRuntime({ captured, deadlineMs }, io) {
   await guard();
   const before = await read();
   // Revalidate the entire captured tree immediately before the first effect.
-  await captureLegacyRuntime({ inventory: before, approvedTargets: c.targets }, io);
+  if (prior) {
+    if (
+      before.processes.length ||
+      before.listeners.length ||
+      before.managers.some((m) => m.status !== 'stopped' || m.rootPid !== 0)
+    )
+      fail();
+  } else await captureLegacyRuntime({ inventory: before, approvedTargets: c.targets }, io);
   const managedRoots = c.managers.map((m) => c.targets.find((p) => p.pid === m.rootPid));
   const unmanaged = c.targets.filter((p) => p.managerIdentity.kind === 'unmanaged');
+  // Reserve every manager's actual stop allowance and the two physical observations
+  // before making any stop. A too-short approved window must not cause partial stop.
+  if (
+    !prior &&
+    io.now() + managedRoots.reduce((total, p) => total + p.managerIdentity.killTimeoutMs, 100) >=
+      deadline
+  )
+    fail();
   // Children first for unmanaged trees. Cycles/orphans are rejected by the live inventory classifier.
   const depth = (p) => {
     let n = 0;
@@ -225,7 +396,9 @@ export async function retireLegacyRuntime({ captured, deadlineMs }, io) {
     }
     return n;
   };
-  for (const p of [...managedRoots, ...unmanaged.sort((a, b) => depth(b) - depth(a))]) {
+  for (const p of prior
+    ? []
+    : [...managedRoots, ...unmanaged.sort((a, b) => depth(b) - depth(a))]) {
     await guard();
     const s = await read();
     if (!s.processes.some((actual) => sameProcess(actual, p))) fail();
@@ -256,7 +429,7 @@ export async function retireLegacyRuntime({ captured, deadlineMs }, io) {
           host: c.host,
           bootId: c.bootId,
           observedAtMs: io.now(),
-          phase: 'stopped',
+          phase: producers ? 'producers-stopped' : 'stopped',
           targets: c.targets,
         };
     } else emptyObservations = 0;
@@ -415,6 +588,9 @@ const execFixed = (command, args, options) =>
     child.stdin.end(options.input ?? '');
   });
 export function createLegacyRuntimeEffects(observation, system = {}) {
+  return runtimeEffects(observation, system);
+}
+function runtimeEffects(observation, system, producerCapture) {
   const exec = system.exec ?? execFixed;
   async function recheck(p, tree, managed) {
     if ((system.platform ?? process.platform) !== 'linux' || (system.uid ?? process.getuid()) !== 0)
@@ -422,7 +598,15 @@ export function createLegacyRuntimeEffects(observation, system = {}) {
     checkTarget(p);
     const binding = await observation.assertJournalOwnership();
     const fence = await observation.verifyFence();
-    if (
+    const snapshot = await observation.readInventory();
+    if (producerCapture) {
+      if (
+        binding.inventoryDigest !== producerCapture.inventoryDigest ||
+        !producerCapture.targets.some((t) => sameProcess(t, p))
+      )
+        fail();
+      verifyProducerFence(fence, snapshot, producerCapture, observation.now());
+    } else if (
       !hash(binding.inventoryDigest) ||
       fence?.inventoryDigest !== binding.inventoryDigest ||
       fence.stage !== 'all-writers' ||
@@ -431,7 +615,6 @@ export function createLegacyRuntimeEffects(observation, system = {}) {
       fence.producersRunning !== 0
     )
       fail();
-    const snapshot = await observation.readInventory();
     checkSnapshot(
       snapshot,
       { inventoryDigest: binding.inventoryDigest, host: p.host, bootId: p.bootId },
@@ -450,6 +633,20 @@ export function createLegacyRuntimeEffects(observation, system = {}) {
         tree.some((t) => !observedTree.some((s) => sameProcess(s, t)))
       )
         fail();
+      for (const child of tree) {
+        checkTarget(child);
+        if (isRootGateway(p) && (!isRootGateway(child) || child.cwd !== p.cwd)) fail();
+        let ancestor = child;
+        const seen = new Set();
+        while (ancestor.pid !== p.pid) {
+          if (seen.has(ancestor.pid)) fail();
+          seen.add(ancestor.pid);
+          ancestor = tree.find((t) => t.pid === ancestor.ppid);
+          if (!ancestor) fail();
+        }
+      }
+      if (p.ppid !== p.managerIdentity.pid) fail();
+      if (isRootGateway(p) && p.exe !== '/usr/bin/node') fail();
     } else if (p.managerIdentity.kind !== 'unmanaged') fail();
   }
   return {

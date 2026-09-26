@@ -348,7 +348,7 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
           argvDigest: digest(cmdline),
           cgroup,
         });
-      } catch (error) {
+      } catch {
         // Process churn is not a stable, exhaustive observation; recollect once externally.
         throw new Error('MAINTENANCE_HOST_OBSERVATION_UNPROVEN');
       }
@@ -496,18 +496,41 @@ export async function collectCutoverEvidence(input, io) {
     if (
       !fresh(snapshot?.observedAtMs, now) ||
       digest(snapshot.inventory) !== binding.inventoryDigest ||
-      !['unknownWriters', 'externalWork', 'producersRunning'].every(
+      !['unknownWriters', 'externalWork'].every(
         (k) => Array.isArray(snapshot[k]) && snapshot[k].length === 0,
-      )
+      ) ||
+      !Array.isArray(snapshot.producersRunning) ||
+      (stage === 'preopen' && snapshot.producersRunning.length !== 0)
     )
       fail();
+    // Preparation is observation, not permission to stop. Every still-running
+    // producer must be an exact member of the approved inventory. Actual stop
+    // effects independently recheck ingress isolation and in-flight work.
+    const seen = new Set();
+    for (const producer of snapshot.producersRunning) {
+      const key = JSON.stringify([producer?.host, producer?.pid]);
+      if (
+        !producer ||
+        typeof producer.host !== 'string' ||
+        !producer.host ||
+        !Number.isSafeInteger(producer.pid) ||
+        producer.pid <= 0 ||
+        !/^[1-9][0-9]*$/.test(producer.start ?? '') ||
+        !['main', 'worker'].includes(producer.role) ||
+        seen.has(key) ||
+        !Array.isArray(snapshot.inventory.targets) ||
+        snapshot.inventory.targets.filter((target) => same(target, producer)).length !== 1
+      )
+        fail();
+      seen.add(key);
+    }
   }
   if (
     !fresh(before.observedAtMs, now) ||
     !fresh(after.observedAtMs, now) ||
     !fresh(fence?.observedAtMs, now) ||
     fence.inventoryDigest !== binding.inventoryDigest ||
-    fence.stage !== (stage === 'prepare' ? 'orders' : 'all-writers') ||
+    !(stage === 'prepare' ? ['observed', 'orders'] : ['all-writers']).includes(fence.stage) ||
     !Array.isArray(fence.uncovered) ||
     fence.uncovered.length ||
     (stage === 'preopen' &&

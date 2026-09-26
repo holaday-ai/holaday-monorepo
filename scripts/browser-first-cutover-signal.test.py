@@ -72,6 +72,32 @@ class Tests(unittest.TestCase):
             module.signal_legacy(TARGET, kernel)
         self.assertEqual(kernel.events, [('pin', 101), ('close', 9)])
 
+    def test_root_gateway_system_node_uses_exact_pidfd_identity(self):
+        p = {**TARGET, 'role': 'gateway', 'uids': [0]*4, 'exe': '/usr/bin/node',
+             'cwd': '/opt/holaday-cn-payment/releases/083a6232aca7-20260804125641/apps/cn-payment'}
+        kernel = Kernel()
+        kernel.actual = {k: p[k] for k in module.KEYS}
+        module.signal_legacy(p, kernel)
+        self.assertEqual(kernel.events, [('pin', 101), ('term-fd', 9), ('close', 9)])
+        for change in [dict(exe='/usr/bin/dash'), dict(role='main'),
+                       dict(cwd=p['cwd'].replace('/apps/cn-payment', '')),
+                       dict(uids=[0, 998, 0, 0]), dict(exe='/tmp/node')]:
+            with self.subTest(change=change):
+                kernel = Kernel()
+                with self.assertRaisesRegex(RuntimeError, 'CUTOVER_SIGNAL_INPUT'):
+                    module.signal_legacy({**p, **change}, kernel)
+                self.assertEqual(kernel.events, [])
+
+    def test_root_gateway_release_drift_after_pinning_never_signals(self):
+        p = {**TARGET, 'role': 'gateway', 'uids': [0]*4, 'exe': '/usr/bin/node',
+             'cwd': '/opt/holaday-cn-payment/releases/083a6232aca7-20260804125641/apps/cn-payment'}
+        kernel = Kernel()
+        kernel.actual = {k: p[k] for k in module.KEYS}
+        kernel.actual['cwd'] = p['cwd'].replace('083a6232aca7', 'aaaaaaaaaaaa')
+        with self.assertRaisesRegex(RuntimeError, 'CUTOVER_PROCESS_IDENTITY'):
+            module.signal_legacy(p, kernel)
+        self.assertEqual(kernel.events, [('pin', 101), ('close', 9)])
+
 
 if __name__ == '__main__':
     unittest.main()

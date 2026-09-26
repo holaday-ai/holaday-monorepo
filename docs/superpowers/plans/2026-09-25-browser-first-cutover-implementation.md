@@ -14,6 +14,10 @@
 
 ## Global Constraints
 
+2026-09-26 最新执行授权：用户离开期间允许自主安排当前大项的实施、PR、必要合并、部署与验证。下方原“仅本地/需另批部署”措辞为历史授权边界，已由本次授权取代；验收、真实证据和业务数据保护条件不变。仍不能把未完成实现或不可达主机判作放行，也不扩大到历史任务/订单自动清理。
+
+- 后续用户已批准生产者优先顺序：`orders_fenced → legacy_settled → producers_stopped → all_fenced → stopped`。新增窄范围 `stopProducers`，仅在入口隔离、在途及外部工作已核清后停止批准的生产者。生产者停止回执与全局 stopped 分离；全局停止只跳过经本次实测退出的生产者，不重复发送停止信号、不凭 JSON 宣称成功。普通发布规则不变；仅本地实现/隔离测试。
+
 - “普通升级仍走现有排空协议。首次引导必须显式选择，绝不在普通升级检查失败后自动降级进入。”
 - “不包含：支付账本重构、持久回调队列、新浏览器池、UI 优化、模型路由扩张、额度修改、自动清理历史任务/订单。”
 - “报告有效期最多 60 秒，过期、时钟倒退、目标变化均拒绝。”
@@ -247,9 +251,12 @@ test('first-cutover never relaxes normal runtime proof', async () => {
 
 ## Task 4：接上现有发布后半段，完成可执行但不自动部署的流程
 
+2026-09-26 已批准补充：首次路径先私密备份，再定向移除批准旧注册及主/备用PM2启动条目，禁止全局save/delete/kill，不影响无关服务。文件部分由 `removeSavedStartupEntries({binding,files,maintenanceEndsAtMs},io)` 实现；files固定为dump.pm2及dump.pm2.bak，各自有文件摘要和批准条目的原始对象字节摘要，缺失文件显式为null，不从另一份复制。主机适配器必须提供受保护批准清单、实际共享journal、已隔离/工作核清/并发配置写入排除；本函数不自行证明这些现场条件。journal在producers_stopped意图阶段记录独立startup子事件；现场注册备份、唯一id删除和回生验证仍须接入完整host，不得以文件处理成功代替进程退出。
+
 **Files**
 
 - Create/Test: `scripts/browser-maintenance-release-tail.mjs`、同名 `.test.mjs`
+- Create/Test: `scripts/browser-first-cutover-startup.mjs`、同名 `.test.mjs`；Modify/Test: `scripts/browser-maintenance-journal.mjs`、同名测试（首次startup子事件）
 - Modify/Test: `scripts/browser-maintenance-transition.mjs`、`browser-maintenance-host.mjs` 及同名测试
 - Create/Test: `scripts/browser-first-cutover-transition.mjs`、`browser-first-cutover-host.mjs` 及同名测试
 - Create/Test: `scripts/deploy-browser-first-cutover.sh`、`scripts/deploy-browser-first-cutover.test.mjs`
@@ -261,9 +268,10 @@ test('first-cutover never relaxes normal runtime proof', async () => {
 finishStoppedRelease({candidate, previousBootId, adapter});
 // 共用 adapter: persist, migrate, start, verify, open, status, close,
 // beforeOpen, afterOpen, resumeWorker；正常发布显式提供适当检查，不能默认为成功。
-performFirstCutover({candidate, adapter});
+performFirstCutover({candidate, adapter, window, clock});
+// window: maintenanceEndsAtMs, reconcileByMs, operatorRef；clock 默认 Date.now。
 // 首次前半 adapter: preflight, stage, fenceOrders, settleLegacy,
-// fenceAll, stopLegacy, backupAndRestoreCheck, initializeState, persist,
+// stopProducers, fenceAll, stopLegacy, backupAndRestoreCheck, initializeState, persist,
 // 其余复用 finishStoppedRelease；holdMaintenance({phase,identity,errorCode})
 // 保留现有隔离并尝试关闭已启动的精确实例，返回 {closeAcknowledged:boolean}。
 createFirstCutoverHostAdapter(options, io);
@@ -285,8 +293,8 @@ await mark('migration_started', () => adapter.migrate(candidate));
 - [ ] **2. 跑 RED。** `node --test scripts/browser-first-cutover-transition.test.mjs scripts/browser-first-cutover-host.test.mjs scripts/browser-maintenance-release-tail.test.mjs`。
 - [ ] **3. 抽取已有后半流程并保持普通路径语义。** 只抽 migrate→关闭 start→verify→beforeOpen→open/status→afterOpen→worker，不更改普通 capability/receipt/stop 校验。same-instance open 仍要求 serving、needsReconciliation=true、idle=false；丢 ACK 只查询，不盲重试。beforeOpen 重采证据，afterOpen 才恢复入口；失败 close 当前实例并记录不确定性。
 
-两条路径都先完成无副作用的身份/配置检查，再取得同一主机互斥、生成 attempt，之后采集并发布绑定报告、调用 prepare readiness。调整当前 host 中“readiness 在 acquire journal 之前”的顺序，避免报告依赖尚不存在的 attempt；任一步失败保留可核对阶段，不盗用他人锁或把上次报告改成当前报告。
-- [ ] **4. 组装首次 host。** 阶段固定 `prepared → orders_fenced → legacy_settled → all_fenced → stopped → backup_verified → migration_started → candidate_started → verified → opened → reconciled`。stage/build 在停机计时前完成；旧 checkout 只用作已核实来源，目标 detached SHA/分支可达性、配置与全迁移摘要必须一致；准备命令使用候选工具，不去调用旧源码不存在的 readiness。Task 3 初始化只在迁移后、candidate start 前执行。
+两条路径都先完成无副作用的身份/配置检查，再取得同一主机互斥、建立真实 attempt，之后采集并发布绑定报告、调用 prepare readiness。普通路径生成 UUID；首次路径允许受保护批准清单预留 UUID，锁和新记录必须使用该值，记录以排他创建保证不重用或覆盖历史 attempt。CLI 自报 UUID 不构成批准，不接管或清除旧锁。此修正解决“执行前须批准同一 attempt，但持锁后才生成未知 attempt”的接口冲突。调整当前 host 中“readiness 在 acquire journal 之前”的顺序；任一步失败保留可核对阶段，不盗用他人锁或把上次报告改成当前报告。
+- [ ] **4. 组装首次 host。** 阶段固定 `prepared → orders_fenced → legacy_settled → producers_stopped → all_fenced → stopped → backup_verified → migration_started → candidate_started → verified → opened → reconciled`。stage/build 在停机计时前完成；旧 checkout 只用作已核实来源，目标 detached SHA/分支可达性、配置与全迁移摘要必须一致；准备命令使用候选工具，不去调用旧源码不存在的 readiness。Task 3 初始化只在迁移后、candidate start 前执行。
 - [ ] **5. 提供显式首次 shell 入口。** 无参数只打印用法并退出非零；默认模式仅检查/准备，不停机。真正执行需要受保护部署清单、与其匹配的 attempt 和明确 `--execute`。使用既有 SSH 凭据加载、主机指纹校验和 `execFile`/固定 argv，远端报错不重试。准备包仅装本次批准的工具与候选摘要，不替换运行中旧 checkout。原 `deploy-orchestrator.sh` 仍对 legacy 返回拒绝，不调用首次脚本。
 - [ ] **6. 截止时间与恢复逻辑。** 每个新增不可逆阶段前核对绝对截止；构建/迁移执行中不因客户端超时强杀并重跑。超期保持维护，记录哪个动作可能已执行，输出核对责任；不得自动 `open`、清锁、恢复旧 DB。启动/开放后失败仍走现有准入关闭与真实工作归属，不制造 clean。
 - [ ] **7. GREEN、回归与本地提交。** 新四组测试、全部 `scripts/browser-maintenance-*.test.mjs`、正常发布 shell 假 SSH 回归、`bash -n scripts/deploy-browser-first-cutover.sh scripts/deploy-orchestrator.sh`。提交 `feat(browser): compose first cutover with existing release lifecycle`。

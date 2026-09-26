@@ -44,6 +44,8 @@ function harness(fail) {
         return next;
       },
       verify: async () => event('verify'),
+      beforeOpen: async () => event('before-open'),
+      afterOpen: async () => event('after-open'),
       open: async () => {
         await event('open');
         return {
@@ -109,7 +111,9 @@ test('success persists each next phase before its irreversible action', async ()
     'start',
     'verify',
     'phase:verified',
+    'before-open',
     'open',
+    'after-open',
     'resume-worker',
     'phase:opened',
   ]);
@@ -130,6 +134,8 @@ for (const failure of [
   'start',
   'verify',
   'phase:verified',
+  'before-open',
+  'after-open',
   'resume-worker',
   'phase:opened',
 ]) {
@@ -175,7 +181,13 @@ test('lost open ACK only reads same-instance status; never repeats open', async 
   const f = harness('open');
   const result = await performMaintenanceRelease({ candidate: next.candidate, adapter: f.adapter });
   assert.equal(result.ok, true);
-  assert.deepEqual(f.events.slice(-4), ['open', 'status', 'resume-worker', 'phase:opened']);
+  assert.deepEqual(f.events.slice(-5), [
+    'open',
+    'status',
+    'after-open',
+    'resume-worker',
+    'phase:opened',
+  ]);
   assert.equal(f.events.filter((e) => e === 'open').length, 1);
 });
 
@@ -185,7 +197,7 @@ test('worker startup failure after open closes the same new instance and never c
   assert.equal(result.ok, false);
   assert.equal(result.action, 'hold_maintenance');
   assert.equal(result.phase, 'verified');
-  assert.deepEqual(f.events.slice(-3), ['open', 'resume-worker', 'close-new']);
+  assert.deepEqual(f.events.slice(-3), ['after-open', 'resume-worker', 'close-new']);
   assert.equal(f.events.includes('phase:opened'), false);
 });
 test('lost open ACK plus closed/foreign/unavailable status holds maintenance', async () => {

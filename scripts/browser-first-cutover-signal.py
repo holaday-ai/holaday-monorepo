@@ -19,13 +19,16 @@ def signal_legacy(target, kernel):
     p = target
     legacy = p.get('cwd') == '/opt/holaday-monorepo/apps/orchestrator'
     gateway = bool(re.fullmatch(r'/opt/holaday-cn-payment/releases/[a-f0-9]{12}-[0-9]{14}(?:/apps/cn-payment)?', p.get('cwd', '')))
+    application_identity = p.get('uids') == [998]*4 and p.get('exe') == '/opt/node22/bin/node'
+    root_gateway = (p.get('role') == 'gateway' and p.get('uids') == [0]*4 and
+                    p.get('exe') == '/usr/bin/node' and
+                    bool(re.fullmatch(r'/opt/holaday-cn-payment/releases/[a-f0-9]{12}-[0-9]{14}/apps/cn-payment', p.get('cwd', ''))))
     if (type(p.get('pid')) is not int or p['pid'] <= 1 or
             type(p.get('ppid')) is not int or p['ppid'] < 1 or
             not re.fullmatch(r'[a-z0-9.-]{1,128}', p.get('host', '')) or
             not re.fullmatch(r'[a-f0-9]{32}', p.get('bootId', '')) or
             not re.fullmatch(r'[0-9]+', p.get('start', '')) or
-            p.get('uids') != [998, 998, 998, 998] or
-            p.get('exe') != '/opt/node22/bin/node' or
+            not (application_identity or root_gateway) or
             not re.fullmatch(r'[a-f0-9]{64}', p.get('argvDigest', '')) or
             not ((legacy and p.get('role') in ('main', 'worker')) or (gateway and p.get('role') == 'gateway')) or
             p.get('managerIdentity') != {'kind': 'unmanaged'}):

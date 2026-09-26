@@ -134,6 +134,54 @@ test('scope changing during provider requests cannot publish a partial success',
   await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_PAYMENT_SCOPE_CHANGED/);
   assert.deepEqual(f.published, []);
 });
+function preparingWithProducer() {
+  const f = fixture();
+  const producer = { host: 'vultr', pid: 501, start: '2000', role: 'main', ports: [4001, 4002] };
+  f.host.inventory.targets.push(producer);
+  f.binding.inventoryDigest = hash(f.host.inventory);
+  f.rehearsal.inventoryDigest = f.binding.inventoryDigest;
+  f.fence.inventoryDigest = f.binding.inventoryDigest;
+  f.host.producersRunning = [structuredClone(producer)];
+  f.fence.stage = 'observed';
+  return f;
+}
+test('prepare inventories approved running producers without pretending ingress is already closed', async () => {
+  const f = preparingWithProducer();
+  const result = await collectCutoverEvidence(f.input, f.io);
+  assert.equal(result.host.phase, 'prepared');
+  assert.equal(result.identity, undefined);
+  assert.equal(f.published[0].raw.fence.stage, 'observed');
+  assert.equal(f.published[0].raw.host.producersRunning.length, 1);
+});
+test('prepare rejects unclassified, changed, duplicate or malformed producers', async () => {
+  for (const kind of ['unapproved', 'start', 'role', 'duplicate', 'missing', 'zero-pid']) {
+    const f = preparingWithProducer();
+    if (kind === 'unapproved') f.host.producersRunning[0].host = 'other-host';
+    if (kind === 'start') f.host.producersRunning[0].start = '2001';
+    if (kind === 'role') f.host.producersRunning[0] = structuredClone(f.host.inventory.targets[0]);
+    if (kind === 'duplicate') f.host.producersRunning.push(f.host.producersRunning[0]);
+    if (kind === 'missing') f.host.producersRunning = undefined;
+    if (kind === 'zero-pid') {
+      f.host.producersRunning[0].pid = 0;
+      f.host.inventory.targets[1].pid = 0;
+      f.binding.inventoryDigest = hash(f.host.inventory);
+      f.rehearsal.inventoryDigest = f.binding.inventoryDigest;
+      f.fence.inventoryDigest = f.binding.inventoryDigest;
+    }
+    await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_/, kind);
+    assert.deepEqual(f.published, [], kind);
+  }
+});
+test('prepare observations never satisfy preopen while legacy producers remain', async () => {
+  const f = preparingWithProducer();
+  await collectCutoverEvidence(f.input, f.io);
+  f.published.length = 0;
+  f.input.stage = 'preopen';
+  f.input.identity = { candidate: f.binding.candidate, bootId: 'a'.repeat(32) };
+  f.fence.stage = 'all-writers';
+  await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_/);
+  assert.deepEqual(f.published, []);
+});
 for (const kind of [
   'missing',
   'duplicate',

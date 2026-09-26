@@ -32,6 +32,78 @@ const firstMetadata = {
   legacyDigest: '3'.repeat(64),
   inventoryDigest: '4'.repeat(64),
 };
+
+test('registration journal requires backup then exact delete intents and blocks advancing a partial removal', async (t) => {
+  const directory = await fixture(t);
+  const journal = await acquireReleaseJournal(directory, firstMetadata);
+  t.after(() => journal.close());
+  assert.equal(typeof journal.recordRegistrationEvent, 'function');
+  await journal.bindManifest(manifest);
+  for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
+    await journal.persist(phase, { candidate: metadata.candidate });
+  const b = { attempt: journal.attempt, inventoryDigest: firstMetadata.inventoryDigest };
+  // Use binding from the actual lock; no fabricated attempt.
+  b.attempt = (await journal.assertOwnership()).attempt;
+  const registration = { pmId: 5, name: 'holaday-files-cron', configDigest: 'a'.repeat(64) };
+  await journal.recordRegistrationEvent({ ...b, phase: 'registration-backup-intent' });
+  await assert.rejects(
+    journal.persist('all_fenced', { candidate: metadata.candidate }),
+    /UNPROVEN/,
+  );
+  await journal.recordRegistrationEvent({
+    ...b,
+    phase: 'registration-backed-up',
+    backupDigest: 'b'.repeat(64),
+    registrations: [registration],
+  });
+  await assert.rejects(
+    journal.recordRegistrationEvent({ ...b, ...registration, phase: 'registration-deleted' }),
+    /UNPROVEN/,
+  );
+  await journal.recordRegistrationEvent({
+    ...b,
+    ...registration,
+    phase: 'registration-delete-intent',
+  });
+  await assert.rejects(
+    journal.persist('all_fenced', { candidate: metadata.candidate }),
+    /UNPROVEN/,
+  );
+  await journal.recordRegistrationEvent({ ...b, ...registration, phase: 'registration-deleted' });
+  const record = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+  assert.equal(record.registrationEvents.length, 4);
+  await assert.rejects(
+    journal.recordRegistrationEvent({ ...b, phase: 'registration-backup-intent' }),
+    /UNPROVEN/,
+  );
+  await journal.persist('all_fenced', { candidate: metadata.candidate });
+});
+
+test('registration journal rejects normal releases, wrong phases, foreign ownership and secret payload', async (t) => {
+  for (const kind of ['normal', 'phase', 'owner', 'secret']) {
+    const directory = await fixture(t);
+    const journal = await acquireReleaseJournal(
+      directory,
+      kind === 'normal' ? metadata : firstMetadata,
+    );
+    t.after(() => journal.close());
+    assert.equal(typeof journal.recordRegistrationEvent, 'function');
+    await journal.bindManifest(manifest);
+    if (!['normal', 'phase'].includes(kind))
+      for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
+        await journal.persist(phase, { candidate: metadata.candidate });
+    const binding = await journal.assertOwnership();
+    const e = {
+      attempt: binding.attempt,
+      inventoryDigest: firstMetadata.inventoryDigest,
+      phase: 'registration-backup-intent',
+    };
+    if (kind === 'owner') e.attempt = '11111111-1111-4111-8111-111111111111';
+    if (kind === 'secret') e.config = 'secret';
+    await assert.rejects(journal.recordRegistrationEvent(e), /UNPROVEN/);
+    assert.equal(JSON.parse(await fs.readFile(journal.path, 'utf8')).registrationEvents, undefined);
+  }
+});
 async function fixture(t) {
   const directory = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'holaday-release-journal-')));
   await fs.chmod(directory, 0o700);
@@ -77,6 +149,30 @@ test('abandoning a release preserves lock and last phase for explicit recovery',
     message: 'MAINTENANCE_RELEASE_LOCKED',
   });
   assert.equal(JSON.parse(await fs.readFile(journal.path, 'utf8')).phase, 'migration_started');
+});
+test('normal journal binds inventory to its immutable lock and report ownership proof', async (t) => {
+  const directory = await fixture(t);
+  const input = { ...metadata, inventoryDigest: '7'.repeat(64) };
+  const journal = await acquireReleaseJournal(directory, input);
+  t.after(() => journal.close());
+  input.inventoryDigest = '8'.repeat(64);
+  await journal.bindManifest(manifest);
+  assert.equal((await journal.assertOwnership()).inventoryDigest, '7'.repeat(64));
+  assert.equal(JSON.parse(await fs.readFile(journal.path, 'utf8')).inventoryDigest, '7'.repeat(64));
+  assert.equal(
+    JSON.parse(await fs.readFile(join(directory, 'release.lock'), 'utf8')).inventoryDigest,
+    '7'.repeat(64),
+  );
+});
+test('invalid optional normal inventory binding is rejected before creating a lock', async (t) => {
+  const directory = await fixture(t);
+  for (const inventoryDigest of ['', 'wrong', null]) {
+    await assert.rejects(
+      acquireReleaseJournal(directory, { ...metadata, inventoryDigest }),
+      /JOURNAL_UNPROVEN/,
+    );
+    assert.deepEqual(await fs.readdir(directory), []);
+  }
 });
 
 test('unbound or different migration manifest cannot cross the closed phase', async (t) => {
@@ -179,6 +275,41 @@ test('normal mutex also blocks first cutover, and normal metadata still requires
     /MAINTENANCE_RELEASE_LOCKED/,
   );
 });
+test('a protected first-cutover reservation becomes the actual journal attempt without a fabricated old identity', async (t) => {
+  const directory = await fixture(t);
+  const attempt = '12345678-1234-4234-8234-123456789abc';
+  const journal = await acquireReleaseJournal(directory, { ...firstMetadata, attempt });
+  t.after(() => journal.close());
+  assert.equal((await journal.assertOwnership()).attempt, attempt);
+  assert.equal(journal.path, join(directory, `${attempt}.json`));
+  const record = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+  assert.equal(record.attempt, attempt);
+  assert.equal(record.oldIdentity, undefined);
+});
+test('first-cutover reservation cannot overwrite any earlier record even after explicit lock recovery', async (t) => {
+  const directory = await fixture(t);
+  const attempt = '12345678-1234-4234-8234-123456789abc';
+  const path = join(directory, `${attempt}.json`);
+  const previous = '{"phase":"migration_started","operator":"inspect-before-recovery"}\n';
+  await fs.writeFile(path, previous, { mode: 0o600 });
+  await assert.rejects(
+    acquireReleaseJournal(directory, { ...firstMetadata, attempt }),
+    /JOURNAL_UNPROVEN/,
+  );
+  assert.equal(await fs.readFile(path, 'utf8'), previous);
+});
+test('caller-selected attempts are forbidden for normal release and invalid first reservations', async (t) => {
+  const directory = await fixture(t);
+  for (const input of [
+    { ...metadata, attempt: '12345678-1234-4234-8234-123456789abc' },
+    { ...firstMetadata, attempt: '../other' },
+    { ...firstMetadata, attempt: '' },
+    { ...firstMetadata, attempt: null },
+  ]) {
+    await assert.rejects(acquireReleaseJournal(directory, input), /JOURNAL_UNPROVEN/);
+    assert.deepEqual(await fs.readdir(directory), []);
+  }
+});
 
 test('bootstrap seed is recorded separately and cannot serve as a real candidate boot', async (t) => {
   const directory = await fixture(t);
@@ -191,6 +322,7 @@ test('bootstrap seed is recorded separately and cannot serve as a real candidate
     'prepared',
     'orders_fenced',
     'legacy_settled',
+    'producers_stopped',
     'all_fenced',
     'stopped',
     'backup_verified',
@@ -228,6 +360,32 @@ test('journal ownership proof refuses a replaced lock', async (t) => {
   await assert.rejects(journal.assertOwnership(), /UNPROVEN/);
 });
 
+test('startup journal refuses normal release, wrong phase, foreign binding and arbitrary payload', async (t) => {
+  for (const fault of ['normal', 'phase', 'binding', 'payload', 'order']) {
+    const directory = await fixture(t);
+    const journal = await acquireReleaseJournal(
+      directory,
+      fault === 'normal' ? metadata : firstMetadata,
+    );
+    t.after(() => journal.close());
+    await journal.bindManifest(manifest);
+    if (!['normal', 'phase'].includes(fault))
+      for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
+        await journal.persist(phase, { candidate: metadata.candidate });
+    const b = await journal.assertOwnership();
+    const event = {
+      phase: 'startup-backup-intent',
+      attempt: b.attempt,
+      inventoryDigest: b.inventoryDigest,
+    };
+    if (fault === 'binding') event.inventoryDigest = '0'.repeat(64);
+    if (fault === 'payload') event.secret = 'must-not-be-recorded';
+    if (fault === 'order') event.phase = 'startup-file-written';
+    await assert.rejects(journal.recordStartupEvent(event), /JOURNAL_UNPROVEN/);
+    assert.equal(JSON.parse(await fs.readFile(journal.path, 'utf8')).startupEvents, undefined);
+  }
+});
+
 test('candidate-start intent precedes creation of its real boot identity', async (t) => {
   const directory = await fixture(t);
   const journal = await acquireReleaseJournal(directory, firstMetadata);
@@ -238,6 +396,7 @@ test('candidate-start intent precedes creation of its real boot identity', async
     'prepared',
     'orders_fenced',
     'legacy_settled',
+    'producers_stopped',
     'all_fenced',
     'stopped',
     'backup_verified',
