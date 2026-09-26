@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-27：4010/4011公网旁路定位，候选网关限制本机监听
+
+从`6b3030e0`继续。已实证从Mac能TCP连接阿里云公网4010和4011，主机nft/iptables规则空、UFW未启用；nginx没有4011路由不再是可据以放行的假设。4011来自旧083a发布，输出仍占用已删除的candidate-health日志、会话abandoned，入口源摘要与Git一致；推断是健康检查残留，但日志样本和有限启动来源搜索不证明完全无业务。详情见[现场核查](2026-09-26-browser-host-readonly-audit.md)最新节。没有停服务或改防火墙。
+
+最小候选修复：`apps/cn-payment/src/index.ts`固定监听127.0.0.1，日志增加host；现有同机nginx和健康检查使用该地址，无需更换支付协议、商户配置或端口。更新旧路由测试的listen替身参数签名。新增真实Express/HTTP Server测试，端口由系统随机分配，不带支付凭据、不发支付/桥接请求：修复前真实地址为`::`（RED），修复后IPv4 loopback且本机无副作用GET返回404（GREEN），最后关闭真实服务器。
+
+新鲜验证：国内支付完整8文件83项通过、cn-payment类型检查通过、三个触碰TS文件Biome及diff-check通过。首次测试因fixture缺少LOG_LEVEL初始化失败，补齐测试配置后重跑取得真实监听断言RED；不把初始化错误当回归证据。日志`/tmp/holaday-cn-loopback-{red,red2,suite,types}.log`。本轮未重跑工作台/后台整套或Linux双主机演练，不复用历史通过数字。
+
+PayPal默认隐藏的新checkout逻辑保持不变；没有订单/权益/额度/SQL/UI/扩展/模型路由更改或真实支付调用。线上4010/4011仍是旧通配监听，**本地修复不等于线上已隔离**。Task4继续处理旧实例入口隔离及完整host组装；历史业务核对、Task5恢复和Task6整体验收仍待完成。本批不是可部署结论，Task4 BASE仍为844c2ced。
+
 ### 2026-09-26至27日：用户确认PayPal新支付延后，候选默认隐藏入口
 
 从`f49c0a26`继续。用户明确要求“paypal支付可以先隐藏，上线后再优化”，并确认同时关闭新订单、保留历史订单处理。新增独立`PAYPAL_CHECKOUT_ENABLED`，只有显式true才允许新支付，缺失/false/空值/无效值关闭。`payment.options`关闭时返回paypal=false且不提供SDK配置，复用现有PlanPage条件渲染；`createOrder`/`createAddonOrder`在DB/provider副作用之前拒绝。`PAYPAL_ENABLED`、适配器创建、capture、历史查询、webhook实现和权益/额度算法未改。样例配置明确新开关false；没有读写真实凭据或生产配置。

@@ -22,7 +22,7 @@ const {
     post: vi.fn((path: string, handler: (req: unknown, res: unknown) => unknown) => {
       routes.set(`POST ${path}`, handler);
     }),
-    listen: vi.fn((_port: number, callback: () => void) => {
+    listen: vi.fn((_port: number, _host: string, callback: () => void) => {
       callback();
       return { close: vi.fn() };
     }),

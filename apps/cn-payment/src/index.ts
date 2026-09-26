@@ -479,9 +479,11 @@ async function main(): Promise<void> {
     res.status(200).json(bridge.result);
   });
 
-  app.listen(env.PORT, () => {
+  // Same-host nginx is the public ingress and maintenance boundary. A wildcard
+  // listener would let direct connections bypass its TLS and cutover fences.
+  app.listen(env.PORT, '127.0.0.1', () => {
     logger.info(
-      { port: env.PORT, publicOrigin: env.PUBLIC_ORIGIN },
+      { host: '127.0.0.1', port: env.PORT, publicOrigin: env.PUBLIC_ORIGIN },
       'cn-payment: HTTP server listening',
     );
   });

@@ -85,6 +85,19 @@ exec /opt/node22/bin/npx tsx src/index.ts
 
 ## Nginx
 
+The gateway binds **only to `127.0.0.1`**, including temporary candidate
+instances started on another `PORT`. Run nginx on the same host/network
+namespace and use the loopback upstream below. Public clients and provider
+callbacks must use the HTTPS domain, never a raw payment port. There is no
+wildcard bind override; a separate container/network topology needs its own
+review rather than reopening this bypass.
+
+This applies only to newly started code. Deploying this change does not
+isolate an old wildcard-bound process. The first cutover must independently
+fence its direct ingress, retire the approved old process tree, and verify
+both old-listener absence and the new loopback binding. In particular, nginx
+maintenance responses alone do not fence an old public `4010`/`4011` listener.
+
 Append to `/etc/nginx/sites-available/orangebench`:
 
 ```nginx
