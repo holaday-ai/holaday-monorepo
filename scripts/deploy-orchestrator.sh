@@ -12,7 +12,8 @@ CANDIDATE="$2"
   fail MAINTENANCE_TARGET_REQUIRED
 CONFIG_DIGEST="${HOLADAY_TARGET_CONFIG_SHA256:-}"
 MIGRATION_DIGEST="${HOLADAY_MIGRATION_MANIFEST_SHA256:-}"
-[[ "$CONFIG_DIGEST" =~ ^[a-f0-9]{64}$ && "$MIGRATION_DIGEST" =~ ^[a-f0-9]{64}$ ]] ||
+INVENTORY_DIGEST="${HOLADAY_HOST_INVENTORY_SHA256:-}"
+[[ "$CONFIG_DIGEST" =~ ^[a-f0-9]{64}$ && "$MIGRATION_DIGEST" =~ ^[a-f0-9]{64}$ && "$INVENTORY_DIGEST" =~ ^[a-f0-9]{64}$ ]] ||
   fail MAINTENANCE_MANIFEST_REQUIRED
 source "$SCRIPT_DIR/load-deploy-env.sh"
 source "$SCRIPT_DIR/ssh-password-auth.sh"
@@ -37,7 +38,7 @@ try {
 fi
 read -r OLD_SHA OLD_BOOT <<< "$OLD_IDENTITY"
 # Arguments are validated to a shell-safe alphabet. Use the installed driver.
-REMOTE_COMMAND="/opt/node22/bin/node '/opt/holaday-releases/$OLD_SHA/scripts/browser-maintenance-host.mjs' '$BRANCH' '$CANDIDATE' '$CONFIG_DIGEST' '$MIGRATION_DIGEST' '$OLD_SHA' '$OLD_BOOT'"
+REMOTE_COMMAND="/opt/node22/bin/node '/opt/holaday-releases/$OLD_SHA/scripts/browser-maintenance-host.mjs' '$BRANCH' '$CANDIDATE' '$CONFIG_DIGEST' '$MIGRATION_DIGEST' '$INVENTORY_DIGEST' '$OLD_SHA' '$OLD_BOOT'"
 if ! RESULT="$("${SSH_PASSWORD_PREFIX[@]}" ssh "${SSH_ARGS[@]}" "$REMOTE_COMMAND" 2>/dev/null)"; then
   fail MAINTENANCE_RELEASE_INCOMPLETE_INSPECT_PHASE
 fi

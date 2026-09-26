@@ -5,6 +5,7 @@ import * as fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { collectCutoverEvidence, publishCutoverEvidence } from './browser-cutover-evidence.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 import {
   createMaintenanceStopEffects,
@@ -35,6 +36,8 @@ const system = {
   platform: process.platform,
   uid: process.getuid?.(),
   now: () => performance.now(),
+  wallNow: Date.now,
+  publishEvidence: publishCutoverEvidence,
   sleep,
   exec: async (command, args, options = {}) => {
     try {
@@ -129,25 +132,30 @@ const system = {
 /** Effects for one exact, locked host release. No production commands run at
  * import time. First bootstrap of a legacy host is deliberately unsupported. */
 export function createHostReleaseAdapter(options, io = system) {
-  const { branch, candidate, configDigest, migrationDigest, oldIdentity } = options;
+  const { branch, candidate, configDigest, migrationDigest, inventoryDigest, oldIdentity } =
+    options;
   if (io.platform !== 'linux' || io.uid !== 0) throw new Error('MAINTENANCE_LINUX_ROOT_REQUIRED');
   if (
     !/^[a-zA-Z0-9][a-zA-Z0-9/_-]*$/.test(branch ?? '') ||
     !sha(candidate) ||
     !digest(configDigest) ||
     !digest(migrationDigest) ||
+    !digest(inventoryDigest) ||
     !same(oldIdentity, oldIdentity)
   )
     throw new Error('MAINTENANCE_TARGET_REQUIRED');
-  const oldRoot = rootFor(oldIdentity.candidate),
-    root = rootFor(candidate);
-  let journal,
-    captured,
-    receipt,
-    config,
-    parsed,
-    gid,
-    activeRoot = oldRoot;
+  const oldRoot = rootFor(oldIdentity.candidate);
+  const root = rootFor(candidate);
+  let journal;
+  let captured;
+  let receipt;
+  let config;
+  let parsed;
+  let gid;
+  let binding;
+  let evidenceWindow;
+  let lastWallTime = -1;
+  let activeRoot = oldRoot;
   const effects = io.stopEffects();
   const control = async (op, identity, discovery = false) => {
     const args = [
@@ -188,7 +196,64 @@ export function createHostReleaseAdapter(options, io = system) {
     ORCHESTRATOR_NODE_BIN: node,
   });
   const pm2 = (args) => io.exec('pm2', args, { cwd: root, env: maintenanceEnv() });
+  const assertEvidenceWindow = () => {
+    const now = io.wallNow();
+    if (
+      !Number.isSafeInteger(now) ||
+      now < 0 ||
+      now < lastWallTime ||
+      !Number.isSafeInteger(evidenceWindow?.maintenanceEndsAtMs) ||
+      !Number.isSafeInteger(evidenceWindow?.reconcileByMs) ||
+      evidenceWindow.reconcileByMs < evidenceWindow.maintenanceEndsAtMs ||
+      !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(evidenceWindow?.operatorRef ?? '') ||
+      now >= evidenceWindow.maintenanceEndsAtMs
+    )
+      throw new Error('MAINTENANCE_EVIDENCE_WINDOW_EXPIRED');
+    lastWallTime = now;
+  };
+  const assertEvidenceOwnership = async () => {
+    const current = await journal.assertOwnership();
+    if (
+      !current ||
+      current.candidate !== candidate ||
+      current.configDigest !== configDigest ||
+      current.migrationDigest !== migrationDigest ||
+      current.inventoryDigest !== inventoryDigest ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(
+        current.attempt ?? '',
+      ) ||
+      (binding && current.attempt !== binding.attempt)
+    )
+      throw new Error('MAINTENANCE_JOURNAL_UNPROVEN');
+    return { attempt: current.attempt, candidate, configDigest, migrationDigest, inventoryDigest };
+  };
   const readiness = async (identity, serviceOnly = false) => {
+    await assertEvidenceOwnership();
+    assertEvidenceWindow();
+    const context = {
+      binding: { ...binding },
+      stage: serviceOnly ? 'prepare' : 'preopen',
+      window: { ...evidenceWindow },
+      ...(serviceOnly ? {} : { identity: { ...identity } }),
+    };
+    // These readers must observe hosts/DB/providers, not accept operator success
+    // JSON. The site-specific default assembly is deliberately not installed yet.
+    await collectCutoverEvidence(context, {
+      now: io.wallNow,
+      assertJournalOwnership: assertEvidenceOwnership,
+      readHostInventory: () => io.evidence.readHostInventory(structuredClone(context)),
+      readDatabaseScope: () => io.evidence.readDatabaseScope(structuredClone(context)),
+      queryOrders: (scope) => io.evidence.queryOrders(scope, structuredClone(context)),
+      readRehearsalArtifacts: () => io.evidence.readRehearsalArtifacts(structuredClone(context)),
+      readFenceState: () => io.evidence.readFenceState(structuredClone(context)),
+      publishPrivate: (evidence) =>
+        io.publishEvidence(evidence, {
+          applicationGid: Number(gid),
+          assertJournalOwnership: assertEvidenceOwnership,
+        }),
+    });
+    await assertEvidenceOwnership();
+    assertEvidenceWindow();
     await io.exec(
       'runuser',
       [
@@ -198,11 +263,19 @@ export function createHostReleaseAdapter(options, io = system) {
         node,
         '--import',
         'tsx',
-        `${activeRoot}/apps/orchestrator/scripts/browser-maintenance-readiness.ts`,
-        ...(serviceOnly ? ['services'] : [identity.candidate, identity.bootId]),
+        `${root}/apps/orchestrator/scripts/browser-maintenance-readiness.ts`,
+        serviceOnly ? 'services' : 'verify',
+        binding.attempt,
+        candidate,
+        configDigest,
+        migrationDigest,
+        inventoryDigest,
+        ...(serviceOnly ? [] : [identity.bootId]),
       ],
-      { cwd: `${activeRoot}/apps/orchestrator`, ...(serviceOnly ? {} : { env: maintenanceEnv() }) },
+      { cwd: `${root}/apps/orchestrator`, env: maintenanceEnv() },
     );
+    await assertEvidenceOwnership();
+    assertEvidenceWindow();
   };
   const assertManifest = () => {
     const result = io.manifest(root);
@@ -218,6 +291,19 @@ export function createHostReleaseAdapter(options, io = system) {
     preflight: async (identity) => {
       if (!same(identity, oldIdentity) || candidate === oldIdentity.candidate)
         throw new Error('MAINTENANCE_IDENTITY_MISMATCH');
+      if (
+        ![
+          'readWindow',
+          'readHostInventory',
+          'readDatabaseScope',
+          'queryOrders',
+          'readRehearsalArtifacts',
+          'readFenceState',
+        ].every((key) => typeof io.evidence?.[key] === 'function') ||
+        typeof io.wallNow !== 'function' ||
+        typeof io.publishEvidence !== 'function'
+      )
+        throw new Error('MAINTENANCE_EVIDENCE_ADAPTER_REQUIRED');
       config = await io.readConfig();
       if (createHash('sha256').update(config).digest('hex') !== configDigest)
         throw new Error('MAINTENANCE_CONFIG_UNPROVEN');
@@ -246,16 +332,17 @@ export function createHostReleaseAdapter(options, io = system) {
         fileURLToPath(new URL('./browser-maintenance-signal.py', import.meta.url)),
         '--check',
       ]);
-      // This currently refuses: an order-creation preflight/flag is not proof
-      // of callback retry or independent-writer boundaries during downtime.
-      await readiness(identity, true);
       await io.targetAbsent(root);
       journal = await io.journal(storage, {
         candidate,
         configDigest,
         migrationDigest,
+        inventoryDigest,
         oldIdentity,
       });
+      binding = await assertEvidenceOwnership();
+      evidenceWindow = structuredClone(await io.evidence.readWindow({ ...binding }));
+      assertEvidenceWindow();
       await adapter.capability();
       captured = await io.observe(identity);
     },
@@ -292,6 +379,9 @@ export function createHostReleaseAdapter(options, io = system) {
         env: maintenanceEnv(),
       });
       await journal.bindManifest(assertManifest());
+      // Candidate tools exist only after staging/build. Prepare evidence and
+      // readiness still precede the transition's first service-closing intent.
+      await readiness(undefined, true);
     },
     persist: (phase, detail) => journal.persist(phase, detail),
     close: (identity) => control('close', identity),
@@ -448,14 +538,22 @@ export function createHostReleaseAdapter(options, io = system) {
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   let adapter;
   try {
-    const [branch, candidate, configDigest, migrationDigest, oldCandidate, bootId] =
-      process.argv.slice(2);
-    if (process.argv.length !== 8) throw new Error('MAINTENANCE_TARGET_REQUIRED');
+    const [
+      branch,
+      candidate,
+      configDigest,
+      migrationDigest,
+      inventoryDigest,
+      oldCandidate,
+      bootId,
+    ] = process.argv.slice(2);
+    if (process.argv.length !== 9) throw new Error('MAINTENANCE_TARGET_REQUIRED');
     adapter = createHostReleaseAdapter({
       branch,
       candidate,
       configDigest,
       migrationDigest,
+      inventoryDigest,
       oldIdentity: { candidate: oldCandidate, bootId },
     });
     const result = await performMaintenanceRelease({ candidate, adapter });

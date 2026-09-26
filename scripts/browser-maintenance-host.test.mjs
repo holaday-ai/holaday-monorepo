@@ -1,13 +1,23 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { createHostReleaseAdapter } from './browser-maintenance-host.mjs';
+import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 import { performMaintenanceRelease } from './browser-maintenance-transition.mjs';
 
 const old = { candidate: 'a'.repeat(40), bootId: 'b'.repeat(32) };
 const next = { candidate: 'c'.repeat(40), bootId: 'd'.repeat(32) };
 const root = `/opt/holaday-releases/${next.candidate}`;
 const oldRoot = `/opt/holaday-releases/${old.candidate}`;
+const attempt = '11111111-1111-4111-8111-111111111111';
+const inventory = {
+  configurationDigests: ['1'.repeat(64)],
+  merchants: [],
+  targets: [],
+};
 const config = Buffer.from(
   'MODEL_RUNTIME_POLICY=qwen_only\nQWEN_CORE_ROLLOUT_MODE=off\nTEAM_TASK_LIFECYCLE_ENABLED=false\nACCOUNT_CLOSURE_WORKER_ENABLED=false\n',
 );
@@ -16,10 +26,19 @@ const options = {
   candidate: next.candidate,
   configDigest: createHash('sha256').update(config).digest('hex'),
   migrationDigest: 'f'.repeat(64),
+  inventoryDigest: createHash('sha256').update(JSON.stringify(inventory)).digest('hex'),
   oldIdentity: old,
 };
 function fixture(fault) {
   const events = [];
+  const published = [];
+  const binding = {
+    attempt,
+    candidate: options.candidate,
+    configDigest: options.configDigest,
+    migrationDigest: options.migrationDigest,
+    inventoryDigest: options.inventoryDigest,
+  };
   let started = false;
   let mode = 'serving';
   let clock = 0;
@@ -46,6 +65,51 @@ function fixture(fault) {
   const io = {
     platform: 'linux',
     uid: 0,
+    wallNow: () => 100_000,
+    evidence: {
+      readWindow: async (current) => {
+        assert.deepEqual(current, binding);
+        events.push('evidence-window');
+        return { maintenanceEndsAtMs: 150_000, reconcileByMs: 200_000, operatorRef: 'qa' };
+      },
+      readHostInventory: async () => {
+        events.push('host-facts');
+        return {
+          inventory,
+          observedAtMs: 100_000,
+          unknownWriters: fault === 'unknown-writer' ? ['unknown'] : [],
+          externalWork: [],
+          producersRunning: [],
+        };
+      },
+      readDatabaseScope: async () => {
+        events.push('database-facts');
+        return { observedAtMs: 100_000, orders: [], unsettled: [] };
+      },
+      queryOrders: async () => [],
+      readRehearsalArtifacts: async () => ({
+        ...binding,
+        observedAtMs: 1,
+        recovery: 'retry-proven',
+        recoveryUntilMs: 250_000,
+        artifacts: [],
+      }),
+      readFenceState: async ({ stage }) => ({
+        inventoryDigest: options.inventoryDigest,
+        observedAtMs: 100_000,
+        stage: stage === 'prepare' ? 'observed' : 'all-writers',
+        uncovered: [],
+        liveLegacy: [],
+        regeneratedLegacy: [],
+      }),
+    },
+    publishEvidence: async (evidence, settings) => {
+      assert.equal(settings.applicationGid, 998);
+      assert.deepEqual(await settings.assertJournalOwnership(), binding);
+      events.push(`publish:${evidence.report.stage}`);
+      if (fault === 'publish') throw new Error('MAINTENANCE_EVIDENCE_UNPROVEN');
+      published.push(structuredClone(evidence));
+    },
     readConfig: async () => config,
     parseConfig: () => ({
       MODEL_RUNTIME_POLICY: 'qwen_only',
@@ -71,8 +135,13 @@ function fixture(fault) {
     }),
     journal: async (_directory, metadata) => {
       assert.equal(metadata.candidate, next.candidate);
+      assert.equal(metadata.inventoryDigest, options.inventoryDigest);
       events.push('lock');
       return {
+        assertOwnership: async () => {
+          events.push('ownership');
+          return { ...binding };
+        },
         bindManifest: async (manifest) => {
           assert.equal(manifest.replaysNumberedSql, true);
           events.push('manifest-bound');
@@ -139,7 +208,8 @@ function fixture(fault) {
         command === 'runuser' &&
         args.some((arg) => arg.endsWith('/browser-maintenance-readiness.ts'))
       ) {
-        const op = args.at(-1);
+        const at = args.findIndex((arg) => arg.endsWith('/browser-maintenance-readiness.ts'));
+        const op = args[at + 1];
         if (fault === 'services' || (fault === 'readiness' && op !== 'services'))
           throw new Error('MAINTENANCE_PAYMENT_BOUNDARY_UNPROVEN');
         return '';
@@ -183,8 +253,195 @@ function fixture(fault) {
       throw new Error(`UNEXPECTED_COMMAND ${line}`);
     },
   };
-  return { events, io };
+  return { events, io, published, binding };
 }
+test('candidate readiness consumes freshly collected evidence bound to the locked attempt', async () => {
+  const f = fixture();
+  const exec = f.io.exec;
+  const commands = [];
+  f.io.exec = async (command, args, settings) => {
+    if (args.some((a) => a.endsWith('/browser-maintenance-readiness.ts'))) {
+      commands.push(args);
+      assert.equal(settings.cwd, `${root}/apps/orchestrator`);
+      assert.equal(settings.env.HOLADAY_ORDINARY_CANDIDATE, next.candidate);
+      assert.equal(f.published.length, commands.length);
+    }
+    return exec(command, args, settings);
+  };
+  const adapter = createHostReleaseAdapter(options, f.io);
+  const result = await performMaintenanceRelease({ candidate: next.candidate, adapter });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  await adapter.finish(result);
+  const command = [
+    '-u',
+    'holaday',
+    '--',
+    '/opt/node22/bin/node',
+    '--import',
+    'tsx',
+    `${root}/apps/orchestrator/scripts/browser-maintenance-readiness.ts`,
+  ];
+  const bound = [
+    attempt,
+    next.candidate,
+    options.configDigest,
+    options.migrationDigest,
+    options.inventoryDigest,
+  ];
+  assert.deepEqual(commands, [
+    [...command, 'services', ...bound],
+    [...command, 'verify', ...bound, next.bootId],
+    [...command, 'verify', ...bound, next.bootId],
+  ]);
+  const at = (event) => f.events.findIndex((e) => e.includes(event));
+  assert.ok(at('lock') < at('evidence-window'));
+  assert.ok(at('manifest-bound') < at('host-facts'));
+  assert.ok(at('publish:prepare') < at('readiness.ts services'));
+  assert.ok(at('readiness.ts services') < at('control.mjs close'));
+  assert.equal(f.events.filter((e) => e === 'database-facts').length, 6);
+  assert.equal(f.events.filter((e) => e === 'evidence-window').length, 1);
+  assert.deepEqual(
+    f.published.map((p) => p.report.identity),
+    [undefined, next, next],
+  );
+});
+
+for (const fault of ['unknown-writer', 'publish']) {
+  test(`${fault} evidence prevents closing, migrating or unlocking the release`, async () => {
+    const f = fixture(fault);
+    const adapter = createHostReleaseAdapter(options, f.io);
+    const result = await performMaintenanceRelease({ candidate: next.candidate, adapter });
+    await adapter.finish(result);
+    assert.equal(result.ok, false);
+    assert.equal(
+      f.events.some((e) => /control.mjs close|db:migrate:numbered|unlock/.test(e)),
+      false,
+    );
+    assert.equal(
+      f.events.some((e) => e.includes('readiness.ts')),
+      false,
+    );
+    assert.equal(f.events.at(-1), 'journal-close');
+  });
+}
+
+test('missing real evidence readers refuses before staging or acquiring a release lock', async () => {
+  const f = fixture();
+  f.io.evidence = undefined;
+  const adapter = createHostReleaseAdapter(options, f.io);
+  const result = await performMaintenanceRelease({ candidate: next.candidate, adapter });
+  assert.equal(result.code, 'MAINTENANCE_EVIDENCE_ADAPTER_REQUIRED');
+  assert.equal(
+    f.events.some((e) => /git clone|lock|control.mjs close/.test(e)),
+    false,
+  );
+});
+
+test('an expired approval window refuses before cloning the candidate', async () => {
+  const f = fixture();
+  f.io.evidence.readWindow = async () => ({
+    maintenanceEndsAtMs: 99_999,
+    reconcileByMs: 200_000,
+    operatorRef: 'qa',
+  });
+  const adapter = createHostReleaseAdapter(options, f.io);
+  const result = await performMaintenanceRelease({ candidate: next.candidate, adapter });
+  await adapter.finish(result);
+  assert.equal(result.ok, false);
+  assert.equal(
+    f.events.some((e) => e.includes('git clone')),
+    false,
+  );
+  assert.equal(f.events.includes('unlock'), false);
+});
+
+test('readiness crossing the approved deadline cannot open the candidate', async () => {
+  const f = fixture();
+  let now = 100_000;
+  let verifies = 0;
+  f.io.wallNow = () => now;
+  const exec = f.io.exec;
+  f.io.exec = async (command, args, settings) => {
+    const result = await exec(command, args, settings);
+    if (args.includes('verify') && ++verifies === 2) now = 150_000;
+    return result;
+  };
+  const adapter = createHostReleaseAdapter(options, f.io);
+  const result = await performMaintenanceRelease({ candidate: next.candidate, adapter });
+  await adapter.finish(result);
+  assert.equal(result.ok, false);
+  assert.equal(
+    f.events.some((e) => e.includes('control.mjs open')),
+    false,
+  );
+  assert.equal(f.events.includes('unlock'), false);
+  assert.equal(result.closeAcknowledged, true);
+});
+
+test('real journal supplies the same generated attempt to every evidence report and readiness call', async (t) => {
+  const f = fixture();
+  const directory = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'holaday-host-journal-')));
+  await fs.chmod(directory, 0o700);
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const manifest = { replaysNumberedSql: true };
+  const migrationDigest = createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
+  const boundOptions = { ...options, migrationDigest };
+  f.io.manifest = () => ({ sha256: migrationDigest, manifest });
+  f.io.journal = (_unused, metadata) => acquireReleaseJournal(directory, metadata);
+  f.io.evidence.readWindow = async (binding) => {
+    Object.assign(f.binding, binding);
+    return { maintenanceEndsAtMs: 150_000, reconcileByMs: 200_000, operatorRef: 'qa' };
+  };
+  const adapter = createHostReleaseAdapter(boundOptions, f.io);
+  const result = await performMaintenanceRelease({ candidate: next.candidate, adapter });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const record = JSON.parse(
+    await fs.readFile(join(directory, `${f.binding.attempt}.json`), 'utf8'),
+  );
+  assert.equal(record.phase, 'opened');
+  assert.equal(record.inventoryDigest, options.inventoryDigest);
+  assert.equal(f.published.length, 3);
+  for (const evidence of f.published) {
+    assert.equal(evidence.report.attempt, record.attempt);
+    assert.equal(evidence.report.migrationDigest, migrationDigest);
+  }
+  for (const command of f.events.filter((e) => e.includes('readiness.ts'))) {
+    assert.ok(command.includes(record.attempt));
+    assert.ok(command.includes(migrationDigest));
+  }
+  await adapter.finish(result);
+  await assert.rejects(fs.stat(join(directory, 'release.lock')), { code: 'ENOENT' });
+});
+
+test('losing the journal after readiness holds maintenance instead of opening', async () => {
+  const f = fixture();
+  let changed = false;
+  const journal = f.io.journal;
+  f.io.journal = async (...args) => {
+    const result = await journal(...args);
+    const ownership = result.assertOwnership;
+    result.assertOwnership = async () => ({
+      ...(await ownership()),
+      ...(changed ? { attempt: '22222222-2222-4222-8222-222222222222' } : {}),
+    });
+    return result;
+  };
+  const exec = f.io.exec;
+  f.io.exec = async (command, args, settings) => {
+    const result = await exec(command, args, settings);
+    if (args.includes('verify')) changed = true;
+    return result;
+  };
+  const adapter = createHostReleaseAdapter(options, f.io);
+  const result = await performMaintenanceRelease({ candidate: next.candidate, adapter });
+  await adapter.finish(result);
+  assert.equal(result.code, 'MAINTENANCE_JOURNAL_UNPROVEN');
+  assert.equal(result.closeAcknowledged, true);
+  assert.equal(
+    f.events.some((e) => e.includes('control.mjs open')),
+    false,
+  );
+});
 test('real host adapter stages exact descendant separately, retires before SQL, starts non-root closed and never rolls back', async () => {
   const f = fixture();
   const adapter = createHostReleaseAdapter(options, f.io);
@@ -216,8 +473,8 @@ for (const key of [
   'DASHSCOPE_INTL_RESPONSES_BASE_URL',
 ]) {
   test(`missing Qwen process contract ${key} blocks before staging or closing`, async () => {
-    const f = fixture(),
-      original = f.io.parseConfig;
+    const f = fixture();
+    const original = f.io.parseConfig;
     f.io.parseConfig = () => {
       const env = original();
       delete env[key];

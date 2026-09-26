@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-26 普通发布 evidence/readiness 接线
+
+普通 host 已改为取得真实 journal/attempt、绑定 inventory 摘要，完成候选构建及迁移清单绑定后，再执行真实 `collectCutoverEvidence` → 证据发布 → 候选源码的 readiness。prepare 和两次 preopen 都重新采集，不复用上一次报告；CLI 传入 command/attempt/candidate/config/migration/inventory，verify 再携带新 bootId。普通 shell 新增必需环境变量 `HOLADAY_HOST_INVENTORY_SHA256`；参数不完整在 SSH 前拒绝，legacy 拒绝与远端不重试保持。
+
+主机事实接口固定为 `io.evidence.readWindow(binding)` 及 `readHostInventory(context)`、`readDatabaseScope(context)`、`queryOrders(scope,context)`、`readRehearsalArtifacts(context)`、`readFenceState(context)`；context 含本次绑定、stage、固定 window 及 preopen identity。发布默认使用真实 root `publishCutoverEvidence`，journal 所有权与窗口在采集/CLI 前后复核。窗口只读取一次，不随 preopen 延长；过期或失锁不开放。真实文件 journal 已与 host/collector 组合测试，不再仅用固定 attempt。
+
+**此处仅完成普通路径的消费端接线，仍不是可运行的生产整流程。** 上述事实接口的生产默认组装尚未安装；默认 host 会明确返回 `MAINTENANCE_EVIDENCE_ADAPTER_REQUIRED`，在创建发布锁、构建及关服务之前拒绝。不得用操作员 success JSON、既有报告或测试数据填补它。首次 host、双主机事实/入口阶段协调、DB/provider 实际适配、首次 shell 及 Task5/6 仍待完成。正常 shell 使用已安装 driver，因此首次切换必须安装包含新参数契约的候选；不能直接拿新 shell 调用历史旧 driver 并宣称兼容。
+
+新测试先确认旧参数/顺序失败，新增维护窗口到期 RED→GREEN；真实 journal 测试最初因 Mac `/var` 到 `/private/var` 的目录别名被正确拒绝，fixture 改用 realpath，未放宽生产检查。浏览器发布回归315/315、隔离 Linux Node22 host27/27通过；后者仅 journal 为真实文件，进程/外部服务为模拟边界，不是 Linux 整切换验收。三个触碰MJS的Biome、shell语法和diff-check通过。完整 `pnpm test:ops` 退出0，应用侧readiness三文件57/57通过；应用全套本轮未重跑。日志 `/tmp/holaday-host-evidence-*`。全部测试已退出，隔离容器已自动移除。本轮未连接生产、未部署、未改支付结算/权益/额度、模型路由、UI或扩展。
+
 ### 2026-09-26 root 文件安装层接线
 
 新增 `browser-first-cutover-ingress-files.mjs`，提供原 fence 链使用的 readConfig/backupOriginal/readBackup/replaceConfig，Linux 演练已换用该实现的真实默认 fs，不再用测试写文件回调代替安装。root 原配置和 UID501 的 Aliyun release 一律不改；只原子替换 sites-enabled 下批准的启用链接，临时配置在 root 0700 的独立 attempt 目录。源内容/UID/GID/模式/完整链接链绑定；原文备份与原链接清单均0600并同步落盘。旧 attempt、备份硬链接、权限异常、源/链接/待安装文件/持久意图变化及超期均拒绝；不自动恢复或重试。

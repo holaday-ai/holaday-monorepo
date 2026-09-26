@@ -1,9 +1,9 @@
-import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, copyFile, readFile, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { test } from 'node:test';
 
 async function fixture(t) {
   const dir = await mkdtemp(join(tmpdir(), 'holaday-deploy-entry-'));
@@ -49,7 +49,7 @@ if (event === 'probe') {
   console.log(JSON.stringify({ protocol:1, identity:{candidate:'a'.repeat(40),bootId:'b'.repeat(32)},mode:'serving',needsReconciliation:true,idle:false }));
 } else {
   if (process.env.TEST_CASE === 'release-failed') process.exit(45);
-  if (!text.includes('codex/release') || !text.includes('c'.repeat(40)) || !text.includes('e'.repeat(64)) || !text.includes('f'.repeat(64))) process.exit(92);
+  if (!text.includes('codex/release') || !text.includes('c'.repeat(40)) || !text.includes('e'.repeat(64)) || !text.includes('f'.repeat(64)) || !text.includes('9'.repeat(64))) process.exit(92);
   console.log(JSON.stringify({ok:true,phase:'opened',identity:{candidate:'c'.repeat(40),bootId:'d'.repeat(32)}}));
 }
 `,
@@ -65,15 +65,16 @@ if (event === 'probe') {
     VULTR_PASSWORD: 'synthetic-credential-never-print',
     HOLADAY_TARGET_CONFIG_SHA256: 'e'.repeat(64),
     HOLADAY_MIGRATION_MANIFEST_SHA256: 'f'.repeat(64),
+    HOLADAY_HOST_INVENTORY_SHA256: '9'.repeat(64),
     DEPLOY_REMOTE_RETRIES: '1',
     DEPLOY_REMOTE_RETRY_SLEEP: '0',
     CN_PAYMENT_PREFLIGHT_VERIFIED: '1',
     PAYPAL_PREFLIGHT_VERIFIED: '1',
   };
-  const run = (mode, args = ['codex/release', 'c'.repeat(40)]) =>
+  const run = (mode, args = ['codex/release', 'c'.repeat(40)], extraEnv = {}) =>
     spawnSync('bash', [join(dir, 'scripts/deploy-orchestrator.sh'), ...args], {
       encoding: 'utf8',
-      env: { ...env, TEST_CASE: mode },
+      env: { ...env, TEST_CASE: mode, ...extraEnv },
       timeout: 10000,
     });
   const events = async () => {
@@ -88,29 +89,36 @@ if (event === 'probe') {
 }
 for (const mode of ['legacy', 'timeout', 'malformed'])
   test(`${mode} capability refuses before upload/build/migration/stop`, async (t) => {
-    const f = await fixture(t),
-      result = f.run(mode);
+    const f = await fixture(t);
+    const result = f.run(mode);
     assert.equal(result.status, 1, result.stderr);
     assert.match(result.stderr, /LEGACY_DRAIN_UNSUPPORTED/);
     assert.deepEqual(await f.events(), ['probe']);
     assert.doesNotMatch(result.stdout + result.stderr, /synthetic-credential-never-print/);
   });
 test('exact target is required before loading credentials or connecting', async (t) => {
-  const f = await fixture(t),
-    result = f.run('success', ['codex/release']);
+  const f = await fixture(t);
+  const result = f.run('success', ['codex/release']);
   assert.equal(result.status, 1);
   assert.deepEqual(await f.events(), []);
 });
+test('missing inventory binding refuses before any SSH command', async (t) => {
+  const f = await fixture(t);
+  const result = f.run('success', undefined, { HOLADAY_HOST_INVENTORY_SHA256: '' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /MAINTENANCE_MANIFEST_REQUIRED/);
+  assert.deepEqual(await f.events(), []);
+});
 test('successful capability dispatches exactly one fully bound release', async (t) => {
-  const f = await fixture(t),
-    result = f.run('success');
+  const f = await fixture(t);
+  const result = f.run('success');
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(await f.events(), ['probe', 'release']);
   assert.match(result.stdout, /MAINTENANCE_RELEASE_OPENED/);
 });
 test('uncertain release is never retried or replaced by legacy rollback', async (t) => {
-  const f = await fixture(t),
-    result = f.run('release-failed');
+  const f = await fixture(t);
+  const result = f.run('release-failed');
   assert.equal(result.status, 1);
   assert.deepEqual(await f.events(), ['probe', 'release']);
   assert.match(result.stderr, /MAINTENANCE_RELEASE_INCOMPLETE_INSPECT_PHASE/);
