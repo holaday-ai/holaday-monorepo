@@ -6,6 +6,14 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-26 22:28 JST：支付绑定真实输入缺口
+
+从 `4ee2963d` 继续只读现场核查，未改产品实现。两台SSH和Vultr数据库只读事务成功；不要再把浏览器/SSH权限当作当前阻塞。PayPal pending 1条明确标记sandbox，而当前主站配置live；微信pending3、支付宝pending9的metadata缺环境/商户字段。当前及旧国内网关缺支付宝seller ID，当前PayPal配置缺merchant ID；本机限定配置路径也没有sandbox凭据。详见 `2026-09-25-browser-first-cutover-payment-evidence.md` 最新节。
+
+4011并非“环境为空的无用服务”：Node使用 `--env-file`，磁盘.env存在微信/支付宝/内部桥接配置，仍监听；不得自动停用。旧任务/支付状态均未修改。现有query helper仍要求正确环境与独立商户身份，不允许用live凭据查sandbox后把404当关闭，或从同一响应反填预期身份。
+
+下一步需要原sandbox应用/商户受保护配置、支付宝seller及历史应用绑定依据；可在已登录商户后台核对，不让用户在聊天里发密钥。其余Task4真实完整host/双主机组装、Task5恢复演练与Task6整流程仍未完成。本轮无产品测试/新增通过数字、无push/PR/merge/deploy；生产仅只读，所有SSH退出。脱敏证据保存在本计划QA `payment-binding-audit-20260926/`，已有 `scripts/__pycache__/` 保留。
+
 ### 2026-09-26 首次入口隔离的持久阶段回执
 
 在首次 host 中新增 `createFirstCutoverFenceStore`，替换 nginx 演练原先的内存 receipt。固定 root0700目录下每attempt一个0600记录；先记录 installing/restoring 意图再由现有 fence 执行动作，阶段只能按 orders installing/active → all-writers installing/active → restoring/restored 前进。绑定真实 journal 的 attempt、candidate/config/migration/inventory，恢复必须对应本候选且 bootId 不变。文件范围与原文/备份摘要不变，只有进入 all-writers 时允许新的生成摘要。
