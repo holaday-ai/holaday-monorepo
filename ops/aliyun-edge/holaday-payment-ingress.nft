@@ -1,0 +1,8 @@
+# First-cutover direct-ingress fence for the audited Aliyun payment ports only.
+# Apply as ONE nft -f transaction, only under the approved host inventory/journal.
+# create (not add) refuses an existing table: never flush/adopt unrelated rules.
+# Keep this fence on failure and after reopening nginx. No expiry/auto-removal.
+# Not boot-persistent by itself; a host restart invalidates isolation evidence.
+create table inet holaday_payment_ingress
+add chain inet holaday_payment_ingress input { type filter hook input priority -10; policy accept; }
+add rule inet holaday_payment_ingress input iifname != "lo" tcp dport { 4010, 4011 } reject with tcp reset

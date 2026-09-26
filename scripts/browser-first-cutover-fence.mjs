@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { installPaymentPortFence, verifyPaymentPortFence } from './browser-payment-port-fence.mjs';
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const validDigest = (s) => typeof s === 'string' && /^[a-f0-9]{64}$/.test(s);
 const fail = () => {
@@ -276,6 +277,19 @@ function checkReceipt(r, binding, approval) {
   }
 }
 
+async function paymentPorts(binding, approval, stage, io, install = false) {
+  if (!approval.files.some((f) => f.profile === 'aliyun-pay-20260926')) return;
+  await (install ? installPaymentPortFence : verifyPaymentPortFence)(
+    { binding, stage },
+    {
+      ...io.paymentPortFence,
+      now: io.now,
+      assertJournalOwnership: io.assertJournalOwnership,
+      readFenceReceipt: io.readFenceReceipt,
+    },
+  );
+}
+
 /** IO is the root host adapter: fixed protected backups/receipt, compare-and-swap
  * file replacement, actual nginx -t/reload, and invalid-signature HTTP probes.
  * There is no arbitrary config-upload or success-boolean CLI. */
@@ -325,6 +339,7 @@ export async function applyCutoverFence(input, io) {
       })),
     };
     await io.persistFenceReceipt({ ...receipt, phase: 'installing' });
+    await paymentPorts(binding, approval, input.stage, io, input.stage === 'orders');
     for (const f of files) {
       await context(input, io);
       await io.replaceConfig(f.path, f.expected, f.generated);
@@ -346,6 +361,7 @@ export async function verifyCutoverFence(input, io) {
     const receipt = await io.readFenceReceipt();
     checkReceipt(receipt, binding, approval);
     if (receipt.stage !== input.stage) fail();
+    await paymentPorts(binding, approval, input.stage, io);
     for (const f of receipt.files)
       if (digest(await io.readConfig(f.path)) !== f.generatedDigest) fail();
     const results = await io.probeIngress(approval, input.stage);
@@ -378,6 +394,7 @@ export async function verifyCutoverFence(input, io) {
       ['existingSockets', 'internalWriters', 'producersRunning'].some((k) => results[k] !== 0)
     )
       fail();
+    await paymentPorts(binding, approval, input.stage, io);
     return {
       inventoryDigest: input.inventoryDigest,
       stage: input.stage,
@@ -402,6 +419,7 @@ export async function restoreCutoverIngress({ inventoryDigest, identity }, io) {
     const receipt = await io.readFenceReceipt();
     checkReceipt(receipt, binding, approval);
     if (receipt.stage !== 'all-writers') fail();
+    await paymentPorts(binding, approval, 'all-writers', io);
     const opened = await io.verifyOpenedIdentity(identity);
     if (!isDeepStrictEqual(opened?.identity, identity) || opened.mode !== 'serving') fail();
     const restore = [];
@@ -421,6 +439,7 @@ export async function restoreCutoverIngress({ inventoryDigest, identity }, io) {
     for (const f of restore) if (digest(await io.readConfig(f.path)) !== f.originalDigest) fail();
     await io.reloadNginx();
     await io.persistFenceReceipt({ ...receipt, identity, phase: 'restored' });
+    await paymentPorts(binding, approval, 'all-writers', io);
   } catch {
     throw new Error('CUTOVER_FENCE_UNPROVEN');
   }

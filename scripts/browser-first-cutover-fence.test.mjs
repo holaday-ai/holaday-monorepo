@@ -17,11 +17,48 @@ const original = `server {
  location = /health { return 200; }
 }\n`;
 const digest = 'a'.repeat(64);
+const paymentTable = {
+  nftables: [
+    { table: { family: 'inet', name: 'holaday_payment_ingress', handle: 1 } },
+    {
+      chain: {
+        family: 'inet',
+        table: 'holaday_payment_ingress',
+        name: 'input',
+        handle: 1,
+        type: 'filter',
+        hook: 'input',
+        prio: -10,
+        policy: 'accept',
+      },
+    },
+    {
+      rule: {
+        family: 'inet',
+        table: 'holaday_payment_ingress',
+        chain: 'input',
+        handle: 3,
+        expr: [
+          { match: { op: '!=', left: { meta: { key: 'iifname' } }, right: 'lo' } },
+          {
+            match: {
+              op: '==',
+              left: { payload: { protocol: 'tcp', field: 'dport' } },
+              right: { set: [4010, 4011] },
+            },
+          },
+          { reject: { type: 'tcp reset' } },
+        ],
+      },
+    },
+  ],
+};
 function fixture(site) {
   let bytes = site?.bytes ?? original;
   let receipt;
   let backup;
   const events = [];
+  let networkInstalled = false;
   const input = { inventoryDigest: digest, stage: 'orders' };
   const file = {
     path: '/etc/nginx/conf.d/holaday.conf',
@@ -49,6 +86,24 @@ function fixture(site) {
   };
   if (site) Object.assign(file, describeCutoverSite(site.bytes, site.profile));
   const io = {
+    paymentPortFence: {
+      platform: 'linux',
+      uid: 0,
+      execNft: async (args) => {
+        if (args.includes('ruleset'))
+          return JSON.stringify(networkInstalled ? paymentTable : { nftables: [] });
+        if (args.includes('table'))
+          return JSON.stringify(networkInstalled ? paymentTable : { nftables: [] });
+        if (args.includes('--check')) {
+          events.push('network-check');
+          return '';
+        }
+        assert.deepEqual(args, ['-f', '-']);
+        events.push('network-install');
+        networkInstalled = true;
+        return '';
+      },
+    },
     now: () => 1000,
     assertJournalOwnership: async () => ({
       inventoryDigest: digest,
@@ -123,6 +178,77 @@ const sites = [
   profile,
   bytes: readFileSync(new URL(`./fixtures/cutover-nginx/${name}.conf`, import.meta.url), 'utf8'),
 }));
+
+test('payment ingress is fenced after durable intent and before nginx replacement', async () => {
+  const f = fixture(sites.find((s) => s.profile === 'aliyun-pay-20260926'));
+  await applyCutoverFence(f.input, f.io);
+  assert.ok(f.events.includes('network-install'));
+  assert.ok(f.events.indexOf('receipt:installing') < f.events.indexOf('network-install'));
+  assert.ok(f.events.indexOf('network-install') < f.events.indexOf('replace'));
+});
+
+test('missing direct-port isolation rejects a valid nginx fence without restoring ingress', async () => {
+  const f = fixture(sites.find((s) => s.profile === 'aliyun-pay-20260926'));
+  await applyCutoverFence(f.input, f.io);
+  f.io.paymentPortFence.execNft = async () => JSON.stringify({ nftables: [] });
+  await assert.rejects(verifyCutoverFence(f.input, f.io), /CUTOVER_FENCE_UNPROVEN/);
+});
+
+for (const fault of ['accept-rule', 'wrong-port', 'loopback-bypass', 'extra-rule', 'ipv4-only']) {
+  test(`payment direct-port rule drift refuses readiness: ${fault}`, async () => {
+    const f = fixture(sites.find((s) => s.profile === 'aliyun-pay-20260926'));
+    await applyCutoverFence(f.input, f.io);
+    const changed = structuredClone(paymentTable);
+    const rule = changed.nftables[2].rule;
+    if (fault === 'accept-rule') rule.expr[2] = { accept: null };
+    if (fault === 'wrong-port') rule.expr[1].match.right.set = [4010];
+    if (fault === 'loopback-bypass') rule.expr[0].match.op = '==';
+    if (fault === 'extra-rule')
+      changed.nftables.push({ rule: { ...rule, expr: [{ accept: null }] } });
+    if (fault === 'ipv4-only') changed.nftables[0].table.family = 'ip';
+    f.io.paymentPortFence.execNft = async () => JSON.stringify(changed);
+    await assert.rejects(verifyCutoverFence(f.input, f.io), /CUTOVER_FENCE_UNPROVEN/);
+  });
+}
+
+test('uncertain network install leaves installing intent and does not mutate nginx', async () => {
+  const f = fixture(sites.find((s) => s.profile === 'aliyun-pay-20260926'));
+  const exec = f.io.paymentPortFence.execNft;
+  f.io.paymentPortFence.execNft = async (args) => {
+    if (args[0] === '-f') throw new Error('uncertain acknowledgement');
+    return exec(args);
+  };
+  await assert.rejects(applyCutoverFence(f.input, f.io), /CUTOVER_FENCE_UNPROVEN/);
+  assert.equal((await f.io.readFenceReceipt()).phase, 'installing');
+  assert.equal(f.events.includes('replace'), false);
+});
+
+test('unreviewed network policy bytes are rejected before any nft transaction', async () => {
+  const f = fixture(sites.find((s) => s.profile === 'aliyun-pay-20260926'));
+  f.io.paymentPortFence.readPolicy = async () => 'flush ruleset\n';
+  await assert.rejects(applyCutoverFence(f.input, f.io), /CUTOVER_FENCE_UNPROVEN/);
+  assert.equal(f.events.includes('network-install'), false);
+  assert.equal(f.events.includes('network-check'), false);
+  assert.equal(f.events.includes('replace'), false);
+});
+
+test('existing payment table is not adopted or overwritten', async () => {
+  const f = fixture(sites.find((s) => s.profile === 'aliyun-pay-20260926'));
+  f.io.paymentPortFence.execNft = async () => JSON.stringify(paymentTable);
+  await assert.rejects(applyCutoverFence(f.input, f.io), /CUTOVER_FENCE_UNPROVEN/);
+  assert.equal(f.events.includes('replace'), false);
+});
+
+test('rule loss during HTTP probes refuses a successful nginx result', async () => {
+  const f = fixture(sites.find((s) => s.profile === 'aliyun-pay-20260926'));
+  const probe = f.io.probeIngress;
+  f.io.probeIngress = async (...args) => {
+    const result = await probe(...args);
+    f.io.paymentPortFence.execNft = async () => JSON.stringify({ nftables: [] });
+    return result;
+  };
+  await assert.rejects(applyCutoverFence(f.input, f.io), /CUTOVER_FENCE_UNPROVEN/);
+});
 
 for (const site of sites) {
   test(`${site.profile}: real captured topology applies both stages and restores exact bytes`, async () => {

@@ -12,12 +12,14 @@
 
 ## 可复现验证
 
-在已有本地镜像上执行（源码绝对路径按当前 checkout 填写）：
+在已有本地镜像上增加nftables测试依赖，再执行（源码绝对路径按当前checkout填写）。NET_ADMIN只授予无网络容器自己的网络命名空间，不使用host网络：
 
 ```sh
-docker run --rm --network none \
+docker build -t holaday-first-cutover-network:qa - < scripts/fixtures/payment-ingress-qa.Dockerfile
+docker run --rm --network none --cap-add NET_ADMIN \
   --mount type=bind,src=/ABSOLUTE/CHECKOUT/scripts,dst=/source,readonly \
-  holaday-first-cutover-task3:qa \
+  --mount type=bind,src=/ABSOLUTE/CHECKOUT/ops/aliyun-edge,dst=/ops/aliyun-edge,readonly \
+  holaday-first-cutover-network:qa \
   /opt/node22/bin/node /source/fixtures/browser-site-fence-linux.mjs
 ```
 
@@ -27,4 +29,18 @@ docker run --rm --network none \
 
 文件层已接入 `createCutoverIngressFiles` 的真实默认 fs：容器内重建 root 启用链接 → root 配置链接 → UID501/GID50 的 release 文件；两阶段只把启用链接切换到 root 私密配置，源文件内容、inode 和归属不变。原配置备份及含绑定信息的原链接清单保存为0600，窗口/归属/源配置/链接/备份漂移会拒绝切换；恢复重新核验并还原原始链接文本，不覆盖 release 文件。原文件、备份和失败现场均保留，无自动重试/回滚。
 
-测试仍使用模拟的批准清单、操作锁与阶段读取，以及上一段列出的非 HTTP 输入。生产主 host 尚未完成全部接线，必须另行读取受保护批准/阶段、分类完整源 inventory、持有实际互斥并观察 reload/探针。检查与 rename 不是操作系统级条件事务，不能声称抵抗恶意 root 或允许并发部署；host 必须排除其他部署写入。
+测试使用实际文件journal/互斥和实际root私密fence store；批准清单及非HTTP工作状态仍为测试输入，不是完整生命周期/现场业务事实。生产主host尚未完成全部接线，必须另行读取受保护批准/阶段、分类完整source inventory并观察reload/探针。检查与rename不是操作系统级条件事务，不能声称抵抗恶意root或允许并发部署；host必须排除其他部署写入。
+
+## 支付端口直连隔离
+
+`browser-payment-ingress-linux.mjs`另建一个带专用标签的Docker内部IPv4/IPv6网络及两个一次性容器，真实检查4010/4011新连接和已建立keep-alive连接拒绝、两种loopback连接保留、nginx代理可用、22/443/8080测试端口不受影响、无关nft表原样保留、重复安装原子拒绝。22是HTTP测试监听，不是实际SSH认证；443在该fixture是HTTP代理，TLS行为由上述nginx站点fixture独立验证。没有公开端口映射、生产挂载或真实付款，finally删除本次容器及网络。
+
+```sh
+node scripts/fixtures/browser-payment-ingress-linux.mjs
+# 负对照应失败：证明测试能发现未隔离状态，不是成功开关。
+node scripts/fixtures/browser-payment-ingress-linux.mjs --without-policy
+```
+
+候选策略文件为`ops/aliyun-edge/holaday-payment-ingress.nft`，摘要固定在`browser-payment-port-fence.mjs`中；摘要改变必须重新审查。安装仅接受Linux/root、同一发布记录归属及持久化orders:installing意图；使用nft检查后一次create事务，不flush规则、不接管已存在表、不自动重试/移除。实际阿里云支付profile在nginx配置替换前调用它；两阶段验证和恢复前后都读取内核精确规则。重新开放nginx不删除网络屏障。
+
+**范围限制：** 仅覆盖阿里云指定支付端口的非loopback入站TCP。不是所有主机/端口/本机写入或业务排空证明；不代替外部探针。当前策略仅运行时生效，未修改系统开机配置，主机重启会使隔离证据失效；生产切换仍需核清持久化网络入口与重启策略，不能仅凭本测试称为部署就绪。首次完整host和双主机provider/DB组装仍待完成。nftables基本表操作参考[官方文档](https://wiki.nftables.org/wiki-nftables/index.php/Configuring_tables)。

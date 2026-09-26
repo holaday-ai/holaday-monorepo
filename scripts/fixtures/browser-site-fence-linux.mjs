@@ -1,4 +1,4 @@
-// Run only in the disposable --network none Linux QA container. No credentials.
+// Run only in disposable --network none Linux QA with private NET_ADMIN. No credentials.
 // Real nginx/TLS/proxying against recorded configs; mock application backends.
 // This proves forwarding/fencing, NOT provider verification or host-wide isolation.
 import assert from 'node:assert/strict';

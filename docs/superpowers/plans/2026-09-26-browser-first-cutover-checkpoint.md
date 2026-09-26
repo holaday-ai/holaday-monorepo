@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-27：旧支付端口隔离接入现有nginx维护流程
+
+从`4bdaca7b`继续。新增固定Aliyun支付端口nft策略及窄执行器`browser-payment-port-fence.mjs`，不增加通用防火墙配置接口。实际`aliyun-pay-20260926`站点profile在orders:installing持久意图之后、nginx替换之前调用；沿用同一journal归属和fence store窗口。规则字节SHA256固定，先`--check`再单次create事务，已有同名表直接拒绝、不接管/flush/重试；失败保留规则和意图。两阶段验证在HTTP探针前后核对内核完整表/链/规则，恢复nginx前后同样复核且不删除屏障。未知scope不自动扩展到其他主机或端口。
+
+策略仅阻断非loopback入站TCP4010/4011，inet同时覆盖IPv4/IPv6，不改变默认主机策略、SSH或其他端口。候选本机监听修复仍保留。**这不是生产防火墙已生效，也不是完整隔离证明。** 规则目前仅运行时有效，未设置开机恢复；重启将使证据失效，生产切换仍须核清持久化网络入口/重启策略、本机写入和全主机清单。
+
+验证：新增接线用例先出现8项真实断言RED（原流程忽略网络隔离），加上未经审查规则字节RED后修复；专项最终25通过。完整浏览器发布366/366、完整test:ops退出0（120/59/16/73及shell）；5个触碰MJS的Biome和diff-check通过。测试初版规则文件不存在而失败，随后`--without-policy`负对照在实际可达网络上按拒绝断言失败，最后实际策略通过。初次Biome两处参数重赋值已修正，不隐去失败。
+
+真实Linux验证两层均通过：①两个临时容器的内部双栈网络中，新连接及已建立keep-alive直连被拒绝，IPv4/IPv6 loopback和nginx转发保留，22/443/8080测试监听及无关nft表不变，重复安装原子拒绝；22只是HTTP测试监听，不冒称真实SSH登录验收。②既有站点fixture使用真实文件journal/fence store、真实nft和nginx，orders/all-writers/restore通过，原链接和UID501源inode不变；后台及非HTTP工作状态仍为替身，不是整部署。测试容器/专用网络已清理，镜像保留供复现。
+
+Aliyun现场仅执行`nft --check -f -`及规则摘要读取：实际nft1.0.2检查通过，前后摘要均`ba9a5a8d6eac1a04c281dd60469d784f95dcf783f525b9e4be8dea6043c9e39e`。没有应用规则、关闭端口或停服务。日志`/tmp/holaday-payment-ingress-{red,red2,green,final,host-check}.log`、`/tmp/holaday-port-{fence-wiring-red,fence-wiring-green,policy-red,policy-green}.log`、`/tmp/holaday-network-{browser-final,ops-final,site-linux-final}.log`；README补充镜像构建和复现命令。
+
+Task4仍未完成：下一步完整双主机inventory/host适配、实际业务及provider证据、网络持久化/重启边界和首次shell，再进行Task5备份恢复及Task6整流程/审查。BASE仍为844c2ced。本轮未改支付/权益/额度/SQL/UI/模型/扩展，也未重跑应用套件；不复用上轮83/8587等数字。PayPal新支付继续延后。未PR/合并/部署，不称为可上线。
+
 ### 2026-09-27：4010/4011公网旁路定位，候选网关限制本机监听
 
 从`6b3030e0`继续。已实证从Mac能TCP连接阿里云公网4010和4011，主机nft/iptables规则空、UFW未启用；nginx没有4011路由不再是可据以放行的假设。4011来自旧083a发布，输出仍占用已删除的candidate-health日志、会话abandoned，入口源摘要与Git一致；推断是健康检查残留，但日志样本和有限启动来源搜索不证明完全无业务。详情见[现场核查](2026-09-26-browser-host-readonly-audit.md)最新节。没有停服务或改防火墙。
