@@ -14,6 +14,7 @@ import {
   describeCutoverSite,
   restoreCutoverIngress,
 } from '/source/browser-first-cutover-fence.mjs';
+import { createCutoverIngressFiles } from '/source/browser-first-cutover-ingress-files.mjs';
 
 await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
@@ -92,8 +93,32 @@ const sites = await Promise.all(
   ].map(async ([profile, name, port]) => {
     const original = await fs.readFile(`/source/fixtures/cutover-nginx/${name}.conf`, 'utf8');
     const path = `/etc/nginx/sites-available/${name}`;
-    await fs.writeFile(path, original);
-    return { ...describeCutoverSite(original, profile), path, original, port };
+    const enabledPath = `/etc/nginx/sites-enabled/${name}`;
+    const linked = profile === 'aliyun-app-20260926';
+    const sourcePath = linked
+      ? '/opt/holaday-edge/releases/20260905035410-30748/ops/aliyun-edge/nginx-hd-app.conf'
+      : path;
+    await fs.mkdir(sourcePath.slice(0, sourcePath.lastIndexOf('/')), { recursive: true });
+    await fs.writeFile(sourcePath, original, { mode: 0o644 });
+    if (linked) {
+      await fs.chown(sourcePath, 501, 50);
+      await fs.symlink(sourcePath, path);
+    }
+    const target = `../sites-available/${name}`;
+    await fs.symlink(target, enabledPath);
+    return {
+      ...describeCutoverSite(original, profile),
+      path,
+      original,
+      port,
+      enabledPath,
+      sourcePath,
+      sourceUid: linked ? 501 : 0,
+      sourceGid: linked ? 50 : 0,
+      sourceMode: 0o644,
+      sourceStat: await fs.lstat(sourcePath),
+      links: [{ path: enabledPath, target }, ...(linked ? [{ path, target: sourcePath }] : [])],
+    };
   }),
 );
 // Each unmodified source must parse on its original ports first. Combined live
@@ -110,7 +135,7 @@ for (const site of sites) {
 async function render() {
   const bytes = await Promise.all(
     sites.map(async (site) => {
-      let source = await fs.readFile(site.path, 'utf8');
+      let source = await fs.readFile(site.enabledPath, 'utf8');
       source = source
         .replaceAll('listen 443 ', `listen ${site.port} `)
         .replaceAll('listen [::]:443 ', `listen [::]:${site.port} `);
@@ -167,16 +192,6 @@ const io = {
   readFenceReceipt: async () => receipt,
   persistFenceReceipt: async (r) => {
     receipt = structuredClone(r);
-  },
-  readConfig: (path) => fs.readFile(path, 'utf8'),
-  backupOriginal: async (f, b) => {
-    await fs.writeFile(`${root}/${f.originalDigest}.backup`, b, { flag: 'wx', mode: 0o600 });
-    return hash(b);
-  },
-  readBackup: (f) => fs.readFile(`${root}/${f.backupDigest}.backup`, 'utf8'),
-  replaceConfig: async (path, expected, bytes) => {
-    assert.equal(hash(await fs.readFile(path)), expected);
-    await fs.writeFile(path, bytes);
   },
   testNginx: async () => {
     await render();
@@ -262,6 +277,18 @@ const io = {
   }),
   verifyOpenedIdentity: async (identity) => ({ identity, mode: 'serving' }),
 };
+await fs.mkdir('/var/lib/holaday-deploy/maintenance', { recursive: true, mode: 0o700 });
+Object.assign(
+  io,
+  await createCutoverIngressFiles(
+    {
+      binding: { inventoryDigest, attempt: '11111111-1111-4111-8111-111111111111' },
+      files: sites,
+      maintenanceEndsAtMs: Date.now() + 60000,
+    },
+    io,
+  ),
+);
 for (const [name, operation] of Object.entries(io)) {
   if (name === 'now') continue;
   io[name] = async (...args) => {
@@ -288,6 +315,13 @@ try {
   for (const stage of ['orders', 'all-writers']) {
     expectedStage = stage;
     await applyCutoverFence({ inventoryDigest, stage }, io);
+    for (const site of sites) {
+      const stat = await fs.lstat(site.sourcePath);
+      assert.equal(stat.ino, site.sourceStat.ino);
+      assert.equal(stat.uid, site.sourceUid);
+      assert.equal(hash(await fs.readFile(site.sourcePath)), site.digest);
+      assert((await fs.readlink(site.enabledPath)).startsWith('/etc/nginx/holaday-maintenance/'));
+    }
     for (const site of sites) {
       for (const route of site.locations.filter((r) => r.kind === 'health')) {
         assert.equal((await request(site, route.selector.slice(2))).status, 200);
@@ -342,8 +376,15 @@ try {
     { inventoryDigest, identity: { candidate: 'b'.repeat(40), bootId: 'c'.repeat(32) } },
     io,
   );
-  for (const site of sites) assert.equal(await fs.readFile(site.path, 'utf8'), site.original);
-  console.log('restore: exact originals and real reopened upstreams passed');
+  for (const site of sites) {
+    assert.equal(await fs.readFile(site.path, 'utf8'), site.original);
+    assert.equal(await fs.readlink(site.enabledPath), site.links[0].target);
+    assert.equal((await fs.lstat(site.sourcePath)).uid, site.sourceUid);
+    assert.equal((await fs.lstat(site.sourcePath)).ino, site.sourceStat.ino);
+  }
+  console.log(
+    'restore: original link chains/UID501 inode preserved, protected backups and real reopened upstreams passed',
+  );
 } catch (error) {
   console.error(await fs.readFile(`${root}/error.log`, 'utf8').catch(() => 'no nginx log'));
   throw error;

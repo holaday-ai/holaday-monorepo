@@ -1,10 +1,20 @@
-# 首次切换实施断点：真实站点两阶段隔离已验证，Task 4 整流程接线未完成
+# 首次切换实施断点：真实文件安装与站点隔离已验证，Task 4 整流程接线未完成
 
 日期：2026-09-26（Asia/Tokyo）。本地实施中，未部署。
 
 最新授权：2026-09-26 用户表示“我要出去一下 你自行安排任务 允许期间的所有操作 包含PR 部署 验证”。当前浏览器上线大项允许自主实施、PR、必要合并、部署与验证；下方历史“仅本地/未授权部署”限制已被本次授权取代。授权不等于验收通过；必须完成剩余真实接线、恢复演练与发布门槛，不得修改历史业务记录来伪造通过。
 
 ## 最新恢复点（优先于下方历史段落）
+
+### 2026-09-26 root 文件安装层接线
+
+新增 `browser-first-cutover-ingress-files.mjs`，提供原 fence 链使用的 readConfig/backupOriginal/readBackup/replaceConfig，Linux 演练已换用该实现的真实默认 fs，不再用测试写文件回调代替安装。root 原配置和 UID501 的 Aliyun release 一律不改；只原子替换 sites-enabled 下批准的启用链接，临时配置在 root 0700 的独立 attempt 目录。源内容/UID/GID/模式/完整链接链绑定；原文备份与原链接清单均0600并同步落盘。旧 attempt、备份硬链接、权限异常、源/链接/待安装文件/持久意图变化及超期均拒绝；不自动恢复或重试。
+
+12项真实文件测试通过，浏览器发布回归306/306通过。Linux Node22真实 root/UID501两级链接 + nginx 两阶段/TLS/恢复再次通过，原文件 inode/归属/内容保留。日志 `/tmp/holaday-ingress-files-{green-final,browser-final,linux-final}.log`。测试最初发现自己的 rename 会改变 symlink ctime，已保留 inode/设备等身份而重新采纳该次自有 rename 后的 ctime；其他时刻仍全元数据核验。暂存内容篡改与最终异步校验跨越截止时间均先RED再修复通过。一次文件编辑自动审批超时未执行，精确重试成功。
+
+**仍是 Task4 部分完成，不是已部署：** 实际受保护 inventory/阶段读写、完整 ingress 分类、双主机协调、DB/provider IO、主 host/readiness/shell 仍待接线；Task5备份恢复/迁移/外部支付、Task6整流程/独立审查仍未完成。此模块以受信 host 提供的批准、journal/阶段接口为边界；隔离测试的这些接口及非HTTP写入事实是模拟值。检查与 rename 不构成系统级条件事务，host 仍须排除并发部署。未修改应用支付/权益/额度、UI、模型路由或浏览器扩展。
+
+最终门槛：完整 `pnpm test:ops` 退出0（120/50/16/65及shell，`/tmp/holaday-ingress-files-ops-final.log`）；三个触碰MJS的Biome和diff-check通过。应用全量测试未重跑。阿里云新增只读SSH成功确认启用链接文本为 `/etc/nginx/sites-available/hd-app.orangebench.tech`，该路径再链接 `/opt/holaday-edge/releases/20260905035410-30748/ops/aliyun-edge/nginx-hd-app.conf`，源归属501:50/0644，与适配一致。没有线上写入/reload；没有DB/provider调用。全部测试/SSH进程已退出、隔离容器自动移除，预存 `scripts/__pycache__/` 保留；未push/PR/merge/deploy。
 
 ### 2026-09-26 三站点真实 nginx 隔离适配
 
