@@ -387,6 +387,70 @@ function hostFixture() {
   };
   return { io, calls, files };
 }
+function hostTreeFixture() {
+  const f = hostFixture();
+  const links = new Map();
+  const pids = ['401'];
+  const add = (pid, ppid, exe, argv) => {
+    pids.push(String(pid));
+    f.files.set(`/proc/${pid}/cmdline`, `${argv}\0`);
+    f.files.set(`/proc/${pid}/status`, `Uid:\t0\t0\t0\t0\nPPid:\t${ppid}\n`);
+    f.files.set(
+      `/proc/${pid}/stat`,
+      `${pid} (child) S ${Array(18).fill('1').join(' ')} ${pid}00 0`,
+    );
+    f.files.set(`/proc/${pid}/cgroup`, '0::/system.slice/service');
+    links.set(`/proc/${pid}/exe`, exe);
+    links.set(`/proc/${pid}/cwd`, '/srv/gateway');
+  };
+  // Grandchild sorts before parent: closure must not depend on /proc ordering.
+  add(20, 30, '/usr/bin/esbuild', 'esbuild --service');
+  add(30, 401, '/usr/bin/dash', 'sh -c runner');
+  add(50, 1, '/usr/bin/dash', 'sh unrelated-job');
+  add(51, 50, '/usr/bin/sleep', 'sleep 300');
+  const readlink = f.io.readlink;
+  f.io.readlink = async (path) => links.get(path) ?? readlink(path);
+  f.io.readdir = async () => [...pids, 'self'];
+  return { ...f, add, links };
+}
+test('host facts retain non-Node descendants transitively without annexing unrelated trees', async () => {
+  const f = hostTreeFixture();
+  const result = await readCutoverHostSnapshot(f.io);
+  assert.deepEqual(
+    result.processes.map((p) => p.pid).sort((a, b) => a - b),
+    [20, 30, 401],
+  );
+  assert.equal(result.processes.find((p) => p.pid === 20).ppid, 30);
+  assert.equal(result.processes.find((p) => p.pid === 30).exe, '/usr/bin/dash');
+  assert.equal(JSON.stringify(result).includes('sh -c runner'), false);
+});
+test('host facts recognize Node by executable even when its process title was replaced', async () => {
+  const f = hostTreeFixture();
+  f.add(60, 1, '/usr/bin/node', 'renamed-worker');
+  const result = await readCutoverHostSnapshot(f.io);
+  assert.ok(result.processes.some((p) => p.pid === 60));
+});
+for (const change of ['spawn', 'reparent', 'replace', 'cgroup']) {
+  test(`host observation rejects descendant ${change} during startup and ingress observation`, async () => {
+    const f = hostTreeFixture();
+    const exec = f.io.exec;
+    f.io.exec = async (...args) => {
+      const result = await exec(...args);
+      if (args[0] === 'crontab') {
+        if (change === 'spawn') f.add(21, 20, '/usr/bin/sleep', 'sleep 600');
+        if (change === 'reparent') f.files.set('/proc/30/status', 'Uid:\t0\t0\t0\t0\nPPid:\t1\n');
+        if (change === 'replace')
+          f.files.set('/proc/20/stat', `20 (child) S ${Array(18).fill('1').join(' ')} 90000 0`);
+        if (change === 'cgroup') f.files.set('/proc/20/cgroup', '0::/other.scope');
+      }
+      return result;
+    };
+    await assert.rejects(
+      readCutoverHostSnapshot(f.io),
+      /^Error: MAINTENANCE_HOST_OBSERVATION_UNPROVEN$/,
+    );
+  });
+}
 test('host facts include unmanaged 4011, full proc identity and startup sources', async () => {
   const f = hostFixture();
   const result = await readCutoverHostSnapshot(f.io);

@@ -388,7 +388,6 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
     const observedAtMs = io.now();
     const bootId = String(await io.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim();
     if (!/^[a-f0-9-]{36}$/.test(bootId)) throw new Error('boot identity');
-    const processes = [];
     const start = (raw, pid) => {
       const value = String(raw);
       if (!value.startsWith(`${pid} (`)) throw new Error('pid');
@@ -399,55 +398,77 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
       if (!/^\d+$/.test(stamp ?? '')) throw new Error('start');
       return stamp;
     };
-    for (const name of (await io.readdir('/proc')).filter((p) => /^[1-9]\d*$/.test(p)).sort()) {
-      const pid = Number(name);
-      const root = `/proc/${pid}`;
-      try {
-        const cmdline = String(await io.readFile(`${root}/cmdline`, 'utf8'));
-        if (!cmdline) continue;
-        const status = String(await io.readFile(`${root}/status`, 'utf8'));
-        const match = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m.exec(status);
-        if (!match) throw new Error('uid');
-        const uids = match.slice(1).map(Number);
-        // Capture every service UID process, every Holaday argv and all Node runtimes.
-        // Unknown Node/worker runtimes remain visible to the approval classifier.
-        if (!uids.includes(998) && !/holaday|(?:^|\/)node(?:\0|$)/i.test(cmdline)) continue;
-        const before = start(await io.readFile(`${root}/stat`, 'utf8'), pid);
-        const cwd = await io.readlink(`${root}/cwd`);
-        const exe = await io.readlink(`${root}/exe`);
-        const cgroup = String(await io.readFile(`${root}/cgroup`, 'utf8'));
-        const after = start(await io.readFile(`${root}/stat`, 'utf8'), pid);
-        const ppid = Number(/^PPid:\s+(\d+)/m.exec(status)?.[1]);
-        if (!Number.isSafeInteger(ppid) || ppid < 0) throw new Error('parent');
-        const afterStatus = String(await io.readFile(`${root}/status`, 'utf8'));
-        const afterUids = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m
-          .exec(afterStatus)
-          ?.slice(1)
-          .map(Number);
-        if (
-          before !== after ||
-          cmdline !== String(await io.readFile(`${root}/cmdline`, 'utf8')) ||
-          !same(uids, afterUids) ||
-          ppid !== Number(/^PPid:\s+(\d+)/m.exec(afterStatus)?.[1]) ||
-          cwd !== (await io.readlink(`${root}/cwd`)) ||
-          exe !== (await io.readlink(`${root}/exe`))
-        )
-          throw new Error('changed');
-        processes.push({
-          pid,
-          start: before,
-          ppid,
-          uids,
-          cwd,
-          exe,
-          argvDigest: digest(cmdline),
-          cgroup,
-        });
-      } catch {
-        // Process churn is not a stable, exhaustive observation; recollect once externally.
-        throw new Error('MAINTENANCE_HOST_OBSERVATION_UNPROVEN');
+    const readProcesses = async () => {
+      const all = [];
+      const included = new Set();
+      for (const name of (await io.readdir('/proc')).filter((p) => /^[1-9]\d*$/.test(p)).sort()) {
+        const pid = Number(name);
+        const root = `/proc/${pid}`;
+        try {
+          const cmdline = String(await io.readFile(`${root}/cmdline`, 'utf8'));
+          if (!cmdline) continue;
+          const status = String(await io.readFile(`${root}/status`, 'utf8'));
+          const match = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m.exec(status);
+          if (!match) throw new Error('uid');
+          const uids = match.slice(1).map(Number);
+          const before = start(await io.readFile(`${root}/stat`, 'utf8'), pid);
+          const cwd = await io.readlink(`${root}/cwd`);
+          const exe = await io.readlink(`${root}/exe`);
+          const cgroup = String(await io.readFile(`${root}/cgroup`, 'utf8'));
+          const after = start(await io.readFile(`${root}/stat`, 'utf8'), pid);
+          const ppid = Number(/^PPid:\s+(\d+)/m.exec(status)?.[1]);
+          if (!Number.isSafeInteger(ppid) || ppid < 0) throw new Error('parent');
+          const afterStatus = String(await io.readFile(`${root}/status`, 'utf8'));
+          const afterUids = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m
+            .exec(afterStatus)
+            ?.slice(1)
+            .map(Number);
+          if (
+            before !== after ||
+            cmdline !== String(await io.readFile(`${root}/cmdline`, 'utf8')) ||
+            !same(uids, afterUids) ||
+            ppid !== Number(/^PPid:\s+(\d+)/m.exec(afterStatus)?.[1]) ||
+            cwd !== (await io.readlink(`${root}/cwd`)) ||
+            exe !== (await io.readlink(`${root}/exe`)) ||
+            cgroup !== String(await io.readFile(`${root}/cgroup`, 'utf8'))
+          )
+            throw new Error('changed');
+          if (
+            uids.includes(998) ||
+            /holaday|(?:^|\/)node(?:\0|$)/i.test(cmdline) ||
+            /\/node(?: \(deleted\))?$/.test(exe)
+          )
+            included.add(pid);
+          all.push({
+            pid,
+            start: before,
+            ppid,
+            uids,
+            cwd,
+            exe,
+            argvDigest: digest(cmdline),
+            cgroup,
+          });
+        } catch {
+          // Process churn is not a stable, exhaustive observation; recollect once externally.
+          throw new Error('MAINTENANCE_HOST_OBSERVATION_UNPROVEN');
+        }
       }
-    }
+      // Select after reading the parent graph: shell/esbuild/browser descendants
+      // need not carry a recognizable name, and /proc order is not tree order.
+      let changed;
+      do {
+        changed = false;
+        for (const process of all) {
+          if (included.has(process.ppid) && !included.has(process.pid)) {
+            included.add(process.pid);
+            changed = true;
+          }
+        }
+      } while (changed);
+      return all.filter((process) => included.has(process.pid));
+    };
+    const processes = await readProcesses();
     const rows = JSON.parse(await io.exec('pm2', ['jlist']));
     if (!Array.isArray(rows)) throw new Error('manager');
     const managers = rows.map((row) => ({
@@ -488,6 +509,7 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
     const cron = await io.exec('crontab', ['-l']);
     if (
       String(await io.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim() !== bootId ||
+      !same(processes, await readProcesses()) ||
       !fresh(observedAtMs, io.now())
     )
       throw new Error('changed');

@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-26：全主机观测补齐实际子进程树
+
+从`11f9fe8f`继续Task4接线检查，发现`readCutoverHostSnapshot`在建立父子关系前就按UID/argv过滤，会漏掉实际网关的shell/esbuild等非Node后代。现先观察用户态进程身份，再从既有Holaday/UID998/Node范围递归纳入后代；Node另按真实exe识别，避免进程标题被改写后漏采。无关树不并入目标；返回值仍不包含原始argv或环境。启动来源/入口采样结束后重新观察整棵相关树，新增、重新挂父、PID复用及cgroup漂移均拒绝。此结果是有界观测，不是进程冻结、完整主机分类或允许停止的证明。
+
+六个新增用例实际RED→GREEN；采集器46/46，完整浏览器发布回归355/355、完整`pnpm test:ops`退出0，三个触碰MJS的Biome与diff-check通过。首次浏览器全套因沙箱禁止Unix socket而在client测试中EPERM失败，限定提权完整重跑后通过，未修改业务或测试断言来绕过。新增可复现`fixtures/browser-host-tree-linux.mjs`在既有无网络、私有PID Linux镜像中用真实/proc验证shell/sleep后代及中途新增子进程拒绝；PM2/nginx/systemd命令读者为替身，不能称为Linux主机整流程。fixture清理lint问题已修正并重跑最终版本。
+
+日志：`/tmp/holaday-host-tree-{red,green,browser,browser-final,ops,linux,linux-final}.log`。没有生产连接、停服务、配置/数据库写入、支付/权益/额度/UI/模型/扩展修改；PayPal继续暂停。测试进程已退出，一次性容器自动移除，预存`__pycache__`未动。本轮未重跑应用全套。
+
+**Task4仍未完成，BASE844c2ced不变。** 后续仍需受保护全主机清单和来源分类、真实双主机/DB/provider组装、首次host余下阶段及显式shell；然后Task5备份恢复/支付演练、Task6整流程及一次全分支审查。4011的入口责任仍未证明，不能因本轮补齐进程采集就擅自停止。候选准备无需重做；本轮没有PR、合并或部署。
+
 ### 2026-09-26：首次候选准备接入真实journal，复用普通发布准备逻辑
 
 从`04a8f3ce`继续。普通host抽出共用的配置策略、候选环境和`stageReleaseCandidate`，首次host新增`prepareFirstCutoverCandidate({attempt}, io)`：从固定受保护批准文件读取实际绑定，先验证旧来源、配置、UID/GID及目标不存在，再取得同一个真实首次journal/reserved attempt，随后克隆、固定分支提交、校验祖先关系、detached checkout、配置落盘、安装及构建、绑定完整迁移清单。构建后再次核对HEAD与detached状态。每次命令前后检查锁和截止时间；首次路径还复核批准文件、构建后旧来源及配置漂移。失败只关闭文件句柄，保留锁与部分候选，不自动重试或清理。
