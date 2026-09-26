@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { readFirstCutoverApproval } from './browser-first-cutover-host.mjs';
+import * as firstHost from './browser-first-cutover-host.mjs';
+import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 
 const root = '/var/lib/holaday-deploy/maintenance';
 const path = `${root}/first-cutover-approved.json`;
@@ -22,6 +24,191 @@ const approved = {
   reconcileByMs: 3000,
   operatorRef: 'qa-operator',
 };
+
+async function preparationFixture(t) {
+  const config = Buffer.from('SYNTHETIC_ONLY=1\n');
+  const migrationManifest = { replaysNumberedSql: true };
+  const approval = {
+    ...approved,
+    configDigest: createHash('sha256').update(config).digest('hex'),
+    migrationDigest: createHash('sha256').update(JSON.stringify(migrationManifest)).digest('hex'),
+  };
+  const f = await fixture(t, approval);
+  const events = [];
+  const sourceCandidate = 'f'.repeat(40);
+  let journal;
+  let liveApproval = approval;
+  let time = 1000;
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    now: () => time,
+    readApproval: async (options) => {
+      events.push('approval');
+      assert.deepEqual(options, { attempt: approved.attempt });
+      return {
+        ...liveApproval,
+        approvalDigest: createHash('sha256').update(JSON.stringify(liveApproval)).digest('hex'),
+      };
+    },
+    inspectLegacySource: async () => ({
+      sourceCandidate,
+      legacyDigest: approved.legacyDigest,
+      observedAtMs: 1000,
+    }),
+    readConfig: async () => config,
+    parseConfig: () => ({
+      MODEL_RUNTIME_POLICY: 'qwen_only',
+      QWEN_CORE_ROLLOUT_MODE: 'off',
+      QWEN_CORE_ENABLED_LANES: 'browser',
+      DASHSCOPE_INTL_API_KEY: 'synthetic',
+      DASHSCOPE_INTL_ANTHROPIC_BASE_URL: 'https://example.invalid/anthropic',
+      DASHSCOPE_INTL_RESPONSES_BASE_URL: 'https://example.invalid/responses',
+      TEAM_TASK_LIFECYCLE_ENABLED: 'false',
+      ACCOUNT_CLOSURE_WORKER_ENABLED: 'false',
+    }),
+    targetAbsent: async () => events.push('absent'),
+    journal: async (path, metadata) => {
+      assert.equal(path, root);
+      assert.equal(metadata.kind, 'first-cutover');
+      assert.equal(metadata.oldIdentity, undefined);
+      events.push('lock');
+      journal = await acquireReleaseJournal(f.directory, metadata);
+      return journal;
+    },
+    manifest: () => ({ sha256: approval.migrationDigest, manifest: migrationManifest }),
+    stageConfig: async () => events.push('config'),
+    exec: async (command, args) => {
+      events.push([command, ...args].join(' '));
+      if (command === 'id') return '998\n';
+      if (command === 'git' && args.includes('get-url'))
+        return 'https://example.invalid/repo.git\n';
+      if (command === 'git' && args.includes('rev-parse')) return `${approved.candidate}\n`;
+      return '';
+    },
+  };
+  t.after(async () => {
+    await journal?.close();
+  });
+  return {
+    ...f,
+    approvalFileIo: f.io,
+    io,
+    events,
+    approval,
+    sourceCandidate,
+    setTime: (value) => {
+      time = value;
+    },
+    changeApproval: (change) => {
+      liveApproval = { ...liveApproval, ...change };
+    },
+  };
+}
+
+test('first preparation binds a real reserved journal and stages without fabricating an old boot or stopping services', async (t) => {
+  assert.equal(typeof firstHost.prepareFirstCutoverCandidate, 'function');
+  const f = await preparationFixture(t);
+  f.io.readApproval = (options) => readFirstCutoverApproval(options, f.approvalFileIo);
+  const prepared = await firstHost.prepareFirstCutoverCandidate(
+    { attempt: approved.attempt },
+    f.io,
+  );
+  assert.equal(prepared.root, `/opt/holaday-releases/${approved.candidate}`);
+  assert.equal(prepared.sourceCandidate, f.sourceCandidate);
+  const held = await prepared.journal.assertOwnership();
+  assert.equal(held.attempt, approved.attempt);
+  assert.equal(held.oldIdentity, undefined);
+  const record = JSON.parse(
+    await fs.readFile(join(f.directory, `${approved.attempt}.json`), 'utf8'),
+  );
+  assert.equal(record.phase, 'preflight');
+  assert.equal(record.kind, 'first-cutover');
+  assert.ok(record.migrationManifest);
+  assert.ok(f.events.indexOf('lock') < f.events.findIndex((e) => e.startsWith('git clone')));
+  assert.ok(!f.events.some((e) => /pm2|nginx|db:migrate|control\.mjs/.test(e)));
+  await assert.rejects(
+    acquireReleaseJournal(f.directory, {
+      candidate: approved.candidate,
+      configDigest: f.approval.configDigest,
+      migrationDigest: approved.migrationDigest,
+      oldIdentity: { candidate: f.sourceCandidate, bootId: '1'.repeat(32) },
+    }),
+    /MAINTENANCE_RELEASE_LOCKED/,
+  );
+});
+
+for (const fault of [
+  'missing-observer',
+  'source-drift',
+  'source-stale',
+  'source-commit',
+  'config',
+  'policy',
+  'existing-target',
+]) {
+  test(`first preparation rejects ${fault} before acquiring a journal or staging`, async (t) => {
+    assert.equal(typeof firstHost.prepareFirstCutoverCandidate, 'function');
+    const f = await preparationFixture(t);
+    if (fault === 'missing-observer') f.io.inspectLegacySource = undefined;
+    if (fault === 'source-drift')
+      f.io.inspectLegacySource = async () => ({
+        sourceCandidate: f.sourceCandidate,
+        legacyDigest: '0'.repeat(64),
+        observedAtMs: 1000,
+      });
+    if (fault === 'source-stale') {
+      f.io.now = () => 100000;
+      f.changeApproval({ maintenanceEndsAtMs: 200000, reconcileByMs: 300000 });
+    }
+    if (fault === 'source-commit')
+      f.io.inspectLegacySource = async () => ({
+        sourceCandidate: 'HEAD',
+        legacyDigest: approved.legacyDigest,
+        observedAtMs: 1000,
+      });
+    if (fault === 'config') f.io.readConfig = async () => Buffer.from('WRONG=1');
+    if (fault === 'policy') f.io.parseConfig = () => ({ MODEL_RUNTIME_POLICY: 'legacy' });
+    if (fault === 'existing-target')
+      f.io.targetAbsent = async () => {
+        throw new Error('MAINTENANCE_TARGET_EXISTS');
+      };
+    await assert.rejects(
+      firstHost.prepareFirstCutoverCandidate({ attempt: approved.attempt }, f.io),
+    );
+    assert.ok(!f.events.includes('lock'));
+    assert.ok(!f.events.some((e) => e.startsWith('git clone')));
+  });
+}
+
+for (const fault of ['approval-drift', 'expired-after-build', 'clock-rollback', 'build-failure']) {
+  test(`first preparation ${fault} preserves the incomplete lock and never proceeds to services`, async (t) => {
+    assert.equal(typeof firstHost.prepareFirstCutoverCandidate, 'function');
+    const f = await preparationFixture(t);
+    const exec = f.io.exec;
+    f.io.exec = async (command, args) => {
+      const result = await exec(command, args);
+      if (args.includes('build')) {
+        if (fault === 'approval-drift') f.changeApproval({ operatorRef: 'changed' });
+        if (fault === 'expired-after-build') f.setTime(2000);
+        if (fault === 'clock-rollback') f.setTime(999);
+        if (fault === 'build-failure') throw new Error('synthetic failure');
+      }
+      return result;
+    };
+    await assert.rejects(
+      firstHost.prepareFirstCutoverCandidate({ attempt: approved.attempt }, f.io),
+    );
+    assert.ok(f.events.includes('lock'));
+    await fs.stat(join(f.directory, 'release.lock'));
+    const record = JSON.parse(
+      await fs.readFile(join(f.directory, `${approved.attempt}.json`), 'utf8'),
+    );
+    assert.equal(record.phase, 'preflight');
+    assert.ok(!record.migrationManifest);
+    assert.ok(!f.events.some((e) => /pm2|nginx|db:migrate|control\.mjs/.test(e)));
+  });
+}
 async function fixture(t, record = approved) {
   const directory = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'holaday-approved-input-')));
   await fs.chmod(directory, 0o700);

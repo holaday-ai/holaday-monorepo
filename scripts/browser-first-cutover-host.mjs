@@ -2,6 +2,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
+import {
+  candidatePreparationSystem,
+  maintenanceCandidateEnvironment,
+  parseMaintenanceCandidateConfig,
+  stageReleaseCandidate,
+} from './browser-maintenance-host.mjs';
 
 const system = { ...fs, platform: process.platform, uid: process.getuid?.(), now: Date.now };
 const directory = '/var/lib/holaday-deploy/maintenance';
@@ -28,6 +34,123 @@ const privateFile = (stat) =>
   stat.isFile() && stat.uid === 0 && (stat.mode & 0o7777) === 0o600 && stat.nlink === 1;
 const privateDirectory = (stat) =>
   stat.isDirectory() && stat.uid === 0 && (stat.mode & 0o7777) === 0o700;
+
+/** Preparation segment of the first host, not a deploy command or readiness
+ * proof. Real source classification is mandatory and has no permissive default.
+ * A successful return retains the actual journal for the remaining lifecycle;
+ * failure closes handles only, preserving the lock and any staged candidate.
+ */
+export async function prepareFirstCutoverCandidate(options, overrides = {}) {
+  const io = {
+    ...candidatePreparationSystem(),
+    now: Date.now,
+    readApproval: readFirstCutoverApproval,
+    ...overrides,
+  };
+  if (io.platform !== 'linux' || io.uid !== 0) throw new Error('MAINTENANCE_LINUX_ROOT_REQUIRED');
+  if (!options || Object.keys(options).length !== 1 || !uuid(options.attempt))
+    throw new Error('CUTOVER_APPROVAL_UNPROVEN');
+  if (typeof io.inspectLegacySource !== 'function')
+    throw new Error('CUTOVER_HOST_OBSERVER_REQUIRED');
+  const approval = structuredClone(await io.readApproval(options));
+  const binding = Object.fromEntries(
+    ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map((key) => [
+      key,
+      approval[key],
+    ]),
+  );
+  const root = `/opt/holaday-releases/${approval.candidate}`;
+  const sourceRoot = '/opt/holaday-monorepo';
+  let journal;
+  let lastTime = -1;
+  const guard = async () => {
+    const now = io.now();
+    if (
+      !Number.isSafeInteger(now) ||
+      now < 0 ||
+      now < lastTime ||
+      now >= approval.maintenanceEndsAtMs
+    )
+      throw new Error('CUTOVER_DEADLINE_UNPROVEN');
+    lastTime = now;
+    if (!isDeepStrictEqual(await io.readApproval(options), approval))
+      throw new Error('CUTOVER_APPROVAL_UNPROVEN');
+    if (journal && !isDeepStrictEqual(await journal.assertOwnership(), binding))
+      throw new Error('MAINTENANCE_JOURNAL_UNPROVEN');
+    const after = io.now();
+    if (!Number.isSafeInteger(after) || after < now || after >= approval.maintenanceEndsAtMs)
+      throw new Error('CUTOVER_DEADLINE_UNPROVEN');
+    lastTime = after;
+  };
+  const source = async () => {
+    const observed = await io.inspectLegacySource(structuredClone(approval));
+    const now = io.now();
+    if (
+      !/^[a-f0-9]{40}$/.test(observed?.sourceCandidate ?? '') ||
+      observed.legacyDigest !== approval.legacyDigest ||
+      !Number.isSafeInteger(observed.observedAtMs) ||
+      observed.observedAtMs < 0 ||
+      observed.observedAtMs > now ||
+      now - observed.observedAtMs > 60000
+    )
+      throw new Error('CUTOVER_LEGACY_SOURCE_UNPROVEN');
+    return observed.sourceCandidate;
+  };
+  try {
+    await guard();
+    const sourceCandidate = await source();
+    const config = Buffer.from(await io.readConfig());
+    if (createHash('sha256').update(config).digest('hex') !== approval.configDigest)
+      throw new Error('MAINTENANCE_CONFIG_UNPROVEN');
+    const parsed = parseMaintenanceCandidateConfig(config, sourceRoot, io);
+    if ((await io.exec('id', ['-u', 'holaday'])).trim() !== '998')
+      throw new Error('MAINTENANCE_RUNTIME_UNPROVEN');
+    const gidText = (await io.exec('id', ['-g', 'holaday'])).trim();
+    const gid = Number(gidText);
+    if (!/^[1-9][0-9]*$/.test(gidText) || !Number.isSafeInteger(gid))
+      throw new Error('MAINTENANCE_RUNTIME_UNPROVEN');
+    await io.targetAbsent(root);
+    await guard();
+    journal = await io.journal(directory, {
+      ...binding,
+      kind: 'first-cutover',
+      legacyDigest: approval.legacyDigest,
+    });
+    await guard();
+    await stageReleaseCandidate(
+      {
+        branch: approval.branch,
+        candidate: approval.candidate,
+        sourceRoot,
+        sourceCandidate,
+        config,
+        configDigest: approval.configDigest,
+        migrationDigest: approval.migrationDigest,
+        gid,
+        env: maintenanceCandidateEnvironment(parsed, approval.candidate),
+      },
+      {
+        ...io,
+        assertOwnership: guard,
+        bindManifest: async (manifest) => {
+          if (
+            (await source()) !== sourceCandidate ||
+            createHash('sha256')
+              .update(await io.readConfig())
+              .digest('hex') !== approval.configDigest
+          )
+            throw new Error('CUTOVER_LEGACY_SOURCE_UNPROVEN');
+          await guard();
+          await journal.bindManifest(manifest);
+        },
+      },
+    );
+    return { approval, binding, root, sourceCandidate, applicationGid: gid, journal };
+  } catch (error) {
+    await journal?.close();
+    throw error;
+  }
+}
 
 /** Read-only approval metadata, not evidence that hosts/payments are safe.
  * The future host adapter must still collect live facts under its real journal.

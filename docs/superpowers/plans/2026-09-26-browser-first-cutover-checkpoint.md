@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-26：首次候选准备接入真实journal，复用普通发布准备逻辑
+
+从`04a8f3ce`继续。普通host抽出共用的配置策略、候选环境和`stageReleaseCandidate`，首次host新增`prepareFirstCutoverCandidate({attempt}, io)`：从固定受保护批准文件读取实际绑定，先验证旧来源、配置、UID/GID及目标不存在，再取得同一个真实首次journal/reserved attempt，随后克隆、固定分支提交、校验祖先关系、detached checkout、配置落盘、安装及构建、绑定完整迁移清单。构建后再次核对HEAD与detached状态。每次命令前后检查锁和截止时间；首次路径还复核批准文件、构建后旧来源及配置漂移。失败只关闭文件句柄，保留锁与部分候选，不自动重试或清理。
+
+本段不调用nginx、PM2、迁移或应用控制命令。成功仍停留在journal的preflight，返回同一个journal供后续完整host使用；不写prepared/ready、不伪造旧bootId。生产旧来源观察器`inspectLegacySource`的默认组装尚未实现，缺少时在锁和克隆之前报`CUTOVER_HOST_OBSERVER_REQUIRED`，没有JSON成功开关或可执行部署入口。
+
+新鲜验证：共用候选准备12项、首次批准/准备24项、普通host27项，共63项通过；最终全部浏览器发布脚本349/349，完整`pnpm test:ops`退出0（120/59/16/73及shell）；四个触碰MJS的Biome和diff-check通过。真实临时Git仓库验证clone/fetch/祖先/detached/旧checkout不变；其中安装和构建仍为边界替身，不冒称真实产品构建或Linux整流程。首次组合用真实批准文件读取与journal，Mac测试仅root身份模拟。两个时间测试初次失败来自替换已复制的时钟函数，修正为可变时钟值后通过，未放宽产品检查。新增构建后HEAD变化/重新挂分支用例实际RED→GREEN。
+
+日志`/tmp/holaday-candidate-stage-red.log`、`/tmp/holaday-first-preparation-{red,green,green2,final-targeted}.log`、`/tmp/holaday-candidate-final-head-red.log`、`/tmp/holaday-first-preparation-{browser,ops}-final2.log`。任务脚本首次自动审批超时未执行；默认权限写忽略目录被拒后，经限定权限成功刷新说明。真实Git测试补丁首次审批超时未执行，精确重试一次成功。
+
+**Task4仍未完成，BASE仍为844c2ced。** 下一步是实际来源/全主机清单观察器、两台主机与DB/provider接线，以及首次host其余阶段和shell；候选准备段不替代这些缺口。Task5恢复/支付演练和Task6整流程/独立审查也仍未完成。本轮无生产连接或部署，无支付/权益/额度/SQL/UI/扩展/模型路由改动；PayPal继续暂停，已核实的两笔支付宝超时关闭不重复调查。应用全套及Linux整流程本轮未运行。
+
 ### 2026-09-26 23:12 JST：支付宝商户明细核对
 
 从本地提交`c39b36e2`继续，浏览器只读核对9笔订单：两笔关闭订单详情均明确为“超时关闭”，列表退款金额0、支付时间空；7笔在原始订单号与8月4日至6日创建时间范围内未检出，与签名API相符。完整事实见支付证据最新节及忽略QA的`alipay-console-order-observation.json`。这解决了两笔关闭原因的UI核对，不再重复调查；7笔保留范围限定，未改本地pending或查询器unknown分类。

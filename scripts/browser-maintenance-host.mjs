@@ -129,6 +129,116 @@ const system = {
   },
 };
 
+export function candidatePreparationSystem() {
+  return { ...system };
+}
+
+export function parseMaintenanceCandidateConfig(bytes, sourceRoot, io) {
+  const parsed = io.parseConfig(bytes, sourceRoot);
+  if (
+    parsed.MODEL_RUNTIME_POLICY !== 'qwen_only' ||
+    [
+      'QWEN_CORE_ENABLED_LANES',
+      'DASHSCOPE_INTL_API_KEY',
+      'DASHSCOPE_INTL_ANTHROPIC_BASE_URL',
+      'DASHSCOPE_INTL_RESPONSES_BASE_URL',
+    ].some((key) => !parsed[key]?.trim()) ||
+    !['off', 'synthetic', 'internal', 'all'].includes(parsed.QWEN_CORE_ROLLOUT_MODE) ||
+    parsed.TEAM_TASK_LIFECYCLE_ENABLED !== 'false' ||
+    !['true', 'false'].includes(parsed.ACCOUNT_CLOSURE_WORKER_ENABLED) ||
+    parsed.HOLADAY_POOL_BOOT !== undefined ||
+    parsed.HOLADAY_POOL_CANDIDATE !== undefined ||
+    (parsed.BROWSER_VNC_WS_ENABLED ?? 'false') !== 'false'
+  )
+    throw new Error('MAINTENANCE_CONFIG_UNPROVEN');
+  return parsed;
+}
+
+export function maintenanceCandidateEnvironment(parsed, candidate) {
+  return {
+    ...parsed,
+    PATH: '/opt/node22/bin:/usr/local/bin:/usr/bin:/bin',
+    HOME: '/var/lib/holaday',
+    USER: 'holaday',
+    LOGNAME: 'holaday',
+    PM2_HOME: '/root/.pm2',
+    XDG_RUNTIME_DIR: '/var/lib/holaday/.runtime',
+    NODE_ENV: 'production',
+    HOLADAY_ORDINARY_MAINTENANCE: '1',
+    HOLADAY_ORDINARY_CANDIDATE: candidate,
+    ORCHESTRATOR_REPO_ROOT: rootFor(candidate),
+    ORCHESTRATOR_NODE_BIN: node,
+  };
+}
+
+/** Shared preparation only: neither stops services nor migrates the database.
+ * The caller owns the journal, verifies the source identity, and proves the
+ * destination absent before calling. First cutover never invents oldIdentity.
+ */
+export async function stageReleaseCandidate(input, io) {
+  const { branch, candidate, sourceRoot, sourceCandidate, configDigest, migrationDigest, gid } =
+    input;
+  const config = Buffer.from(input.config);
+  const env = { ...input.env };
+  const root = rootFor(candidate);
+  if (
+    !sha(candidate) ||
+    !sha(sourceCandidate) ||
+    candidate === sourceCandidate ||
+    !/^[a-zA-Z0-9][a-zA-Z0-9/_-]*$/.test(branch ?? '') ||
+    !['/opt/holaday-monorepo', rootFor(sourceCandidate)].includes(sourceRoot) ||
+    !digest(migrationDigest) ||
+    !digest(configDigest) ||
+    createHash('sha256').update(config).digest('hex') !== configDigest ||
+    !Number.isSafeInteger(gid) ||
+    gid < 1
+  )
+    throw new Error('MAINTENANCE_TARGET_UNPROVEN');
+  const run = async (command, args, settings) => {
+    await io.assertOwnership();
+    const result = await io.exec(command, args, settings);
+    await io.assertOwnership();
+    return result;
+  };
+  const manifest = () => {
+    const result = io.manifest(root);
+    if (result.sha256 !== migrationDigest) throw new Error('MAINTENANCE_MIGRATIONS_UNPROVEN');
+    return result.manifest;
+  };
+  const origin = (await run('git', ['-C', sourceRoot, 'remote', 'get-url', 'origin'])).trim();
+  if (!origin || /[\r\n\0]/.test(origin)) throw new Error('MAINTENANCE_TARGET_UNPROVEN');
+  await run('git', ['clone', '--no-hardlinks', '--no-checkout', '--', sourceRoot, root]);
+  await run('git', ['-C', root, 'remote', 'set-url', 'origin', origin]);
+  await run('git', ['-C', root, 'fetch', 'origin', `refs/heads/${branch}`]);
+  if (
+    (await run('git', ['-C', root, 'rev-parse', '--verify', 'FETCH_HEAD^{commit}'])).trim() !==
+    candidate
+  )
+    throw new Error('MAINTENANCE_TARGET_UNPROVEN');
+  try {
+    await run('git', ['-C', root, 'merge-base', '--is-ancestor', sourceCandidate, candidate]);
+  } catch (error) {
+    if (/^MAINTENANCE_/.test(error?.message)) throw error;
+    throw new Error('MAINTENANCE_ANCESTRY_UNPROVEN');
+  }
+  await run('git', ['-C', root, 'checkout', '--detach', candidate]);
+  manifest();
+  await io.assertOwnership();
+  await io.stageConfig(root, config, gid);
+  await run('pnpm', ['install', '--frozen-lockfile'], { cwd: root, env });
+  await run('pnpm', ['--filter', '@holaday/orchestrator', 'build'], { cwd: root, env });
+  if (
+    (await run('git', ['-C', root, 'rev-parse', '--verify', 'HEAD^{commit}'])).trim() !==
+      candidate ||
+    (await run('git', ['-C', root, 'branch', '--show-current'])).trim() !== ''
+  )
+    throw new Error('MAINTENANCE_TARGET_UNPROVEN');
+  await io.assertOwnership();
+  await io.bindManifest(manifest());
+  await io.assertOwnership();
+  return root;
+}
+
 /** Effects for one exact, locked host release. No production commands run at
  * import time. First bootstrap of a legacy host is deliberately unsupported. */
 export function createHostReleaseAdapter(options, io = system) {
@@ -181,20 +291,7 @@ export function createHostReleaseAdapter(options, io = system) {
       throw new Error('MAINTENANCE_IDENTITY_MISMATCH');
     return result;
   };
-  const maintenanceEnv = () => ({
-    ...parsed,
-    PATH: '/opt/node22/bin:/usr/local/bin:/usr/bin:/bin',
-    HOME: '/var/lib/holaday',
-    USER: 'holaday',
-    LOGNAME: 'holaday',
-    PM2_HOME: '/root/.pm2',
-    XDG_RUNTIME_DIR: '/var/lib/holaday/.runtime',
-    NODE_ENV: 'production',
-    HOLADAY_ORDINARY_MAINTENANCE: '1',
-    HOLADAY_ORDINARY_CANDIDATE: candidate,
-    ORCHESTRATOR_REPO_ROOT: root,
-    ORCHESTRATOR_NODE_BIN: node,
-  });
+  const maintenanceEnv = () => maintenanceCandidateEnvironment(parsed, candidate);
   const pm2 = (args) => io.exec('pm2', args, { cwd: root, env: maintenanceEnv() });
   const assertEvidenceWindow = () => {
     const now = io.wallNow();
@@ -307,23 +404,7 @@ export function createHostReleaseAdapter(options, io = system) {
       config = await io.readConfig();
       if (createHash('sha256').update(config).digest('hex') !== configDigest)
         throw new Error('MAINTENANCE_CONFIG_UNPROVEN');
-      parsed = io.parseConfig(config, oldRoot);
-      if (
-        parsed.MODEL_RUNTIME_POLICY !== 'qwen_only' ||
-        [
-          'QWEN_CORE_ENABLED_LANES',
-          'DASHSCOPE_INTL_API_KEY',
-          'DASHSCOPE_INTL_ANTHROPIC_BASE_URL',
-          'DASHSCOPE_INTL_RESPONSES_BASE_URL',
-        ].some((key) => !parsed[key]?.trim()) ||
-        !['off', 'synthetic', 'internal', 'all'].includes(parsed.QWEN_CORE_ROLLOUT_MODE) ||
-        parsed.TEAM_TASK_LIFECYCLE_ENABLED !== 'false' ||
-        !['true', 'false'].includes(parsed.ACCOUNT_CLOSURE_WORKER_ENABLED) ||
-        parsed.HOLADAY_POOL_BOOT !== undefined ||
-        parsed.HOLADAY_POOL_CANDIDATE !== undefined ||
-        (parsed.BROWSER_VNC_WS_ENABLED ?? 'false') !== 'false'
-      )
-        throw new Error('MAINTENANCE_CONFIG_UNPROVEN');
+      parsed = parseMaintenanceCandidateConfig(config, oldRoot, io);
       if ((await io.exec('id', ['-u', 'holaday'])).trim() !== '998')
         throw new Error('MAINTENANCE_RUNTIME_UNPROVEN');
       gid = (await io.exec('id', ['-g', 'holaday'])).trim();
@@ -347,38 +428,27 @@ export function createHostReleaseAdapter(options, io = system) {
       captured = await io.observe(identity);
     },
     stage: async () => {
-      const origin = (await io.exec('git', ['-C', oldRoot, 'remote', 'get-url', 'origin'])).trim();
-      if (!origin || /[\r\n\0]/.test(origin)) throw new Error('MAINTENANCE_TARGET_UNPROVEN');
-      await io.exec('git', ['clone', '--no-hardlinks', '--no-checkout', '--', oldRoot, root]);
-      await io.exec('git', ['-C', root, 'remote', 'set-url', 'origin', origin]);
-      await io.exec('git', ['-C', root, 'fetch', 'origin', `refs/heads/${branch}`]);
-      if (
-        (
-          await io.exec('git', ['-C', root, 'rev-parse', '--verify', 'FETCH_HEAD^{commit}'])
-        ).trim() !== candidate
-      )
-        throw new Error('MAINTENANCE_TARGET_UNPROVEN');
-      try {
-        await io.exec('git', [
-          '-C',
-          root,
-          'merge-base',
-          '--is-ancestor',
-          oldIdentity.candidate,
+      await stageReleaseCandidate(
+        {
+          branch,
           candidate,
-        ]);
-      } catch {
-        throw new Error('MAINTENANCE_ANCESTRY_UNPROVEN');
-      }
-      await io.exec('git', ['-C', root, 'checkout', '--detach', candidate]);
-      assertManifest();
-      await io.stageConfig(root, config, gid);
-      await io.exec('pnpm', ['install', '--frozen-lockfile'], { cwd: root, env: maintenanceEnv() });
-      await io.exec('pnpm', ['--filter', '@holaday/orchestrator', 'build'], {
-        cwd: root,
-        env: maintenanceEnv(),
-      });
-      await journal.bindManifest(assertManifest());
+          sourceRoot: oldRoot,
+          sourceCandidate: oldIdentity.candidate,
+          config,
+          configDigest,
+          migrationDigest,
+          gid: Number(gid),
+          env: maintenanceEnv(),
+        },
+        {
+          ...io,
+          assertOwnership: async () => {
+            await assertEvidenceOwnership();
+            assertEvidenceWindow();
+          },
+          bindManifest: (manifest) => journal.bindManifest(manifest),
+        },
+      );
       // Candidate tools exist only after staging/build. Prepare evidence and
       // readiness still precede the transition's first service-closing intent.
       await readiness(undefined, true);
