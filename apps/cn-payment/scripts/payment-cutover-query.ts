@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createVerify, randomBytes } from 'node:crypto';
 import { AlipaySdk } from 'alipay-sdk';
 import WxPay from 'wechatpay-node-v3';
 import { z } from 'zod';
@@ -117,15 +117,33 @@ export async function queryPaymentOrder(value: unknown, io: QueryIO): Promise<Pa
         body: sdk.sdkExecute('alipay.trade.query', { bizContent: { outTradeNo: input.orderId } }),
       });
       if (!response.ok) throw new Error('query');
-      raw = await response.text();
+      const bytes = Buffer.from(await response.arrayBuffer());
       observedAtMs = now();
-      if (Buffer.byteLength(raw) > 256 * 1024) throw new Error('size');
-      archive = raw;
+      if (bytes.length > 256 * 1024) throw new Error('size');
+      const contentType = response.headers.get('content-type');
+      archive = JSON.stringify({ contentType, bodyBase64: bytes.toString('base64') });
       await io.retain(archive);
+      const charset =
+        /charset\s*=\s*["']?([a-zA-Z0-9_-]+)/i.exec(contentType ?? '')?.[1]?.toLowerCase() ??
+        'utf-8';
+      if (!['utf-8', 'utf8', 'gbk', 'gb2312', 'gb18030'].includes(charset))
+        throw new Error('charset');
+      raw = new TextDecoder(charset, { fatal: true }).decode(bytes);
       const envelope = z
         .object({ alipay_trade_query_response: z.unknown(), sign: z.string().min(1) })
         .parse(JSON.parse(raw));
-      sdk.checkResponseSign(raw, 'alipay_trade_query_response', envelope.sign, '');
+      // SDK checkResponseSign re-encodes text as UTF-8. GBK responses are signed over
+      // their original bytes; use the SDK envelope slicer with a lossless byte mapping.
+      const signedBytes = Buffer.from(
+        sdk.getSignStr(bytes.toString('latin1'), 'alipay_trade_query_response'),
+        'latin1',
+      );
+      if (
+        !createVerify('RSA-SHA256')
+          .update(signedBytes)
+          .verify(sdk.config.alipayPublicKey, envelope.sign, 'base64')
+      )
+        throw new Error('signature');
       data = envelope.alipay_trade_query_response;
     } else {
       const sdk = new WxPay({

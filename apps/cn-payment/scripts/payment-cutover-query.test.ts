@@ -94,7 +94,8 @@ describe('domestic payment cutover queries', () => {
     expect(body.get('method')).toBe('alipay.trade.query');
     expect(JSON.parse(body.get('biz_content') ?? '')).toEqual({ out_trade_no: 'PRIVATEORDER' });
     expect(body.get('sign')).toBeTruthy();
-    expect(f.kept[0]).toContain('"sign":');
+    const archive = JSON.parse(f.kept[0] ?? '{}');
+    expect(Buffer.from(archive.bodyBase64, 'base64').toString('utf8')).toContain('"sign":');
     expect(JSON.stringify(result)).not.toMatch(/PRIVATEORDER|MERCHANT|TRADE/);
   });
   it('uses a signed WeChat GET and verifies response before classifying', async () => {
@@ -110,6 +111,35 @@ describe('domestic payment cutover queries', () => {
     expect(new Headers(request.init.headers).get('authorization')).toContain(
       'WECHATPAY2-SHA256-RSA2048',
     );
+  });
+  it.each([false, true])('verifies original GBK response bytes, tampered=%s', async (tampered) => {
+    // Catches decoding to UTF-8 before verification. These are literal GBK bytes for 错误.
+    const payload = Buffer.concat([
+      Buffer.from('{"code":"40004","msg":"'),
+      Buffer.from([0xb4, 0xed, 0xce, 0xf3]),
+      Buffer.from('","sub_code":"ACQ.TRADE_NOT_EXIST","out_trade_no":"PRIVATEORDER"}'),
+    ]);
+    const signature = createSign('RSA-SHA256').update(payload).sign(keys.privateKey, 'base64');
+    const body = Buffer.concat([
+      Buffer.from('{"alipay_trade_query_response":'),
+      payload,
+      Buffer.from(`,"sign":${JSON.stringify(signature)}}`),
+    ]);
+    if (tampered) body[body.indexOf(Buffer.from('40004'))] = 0x35;
+    const f = fixture('alipay', alipayOrder());
+    f.io.transport = async () =>
+      new Response(body, { headers: { 'content-type': 'text/html;charset=GBK' } });
+    if (tampered) {
+      await expect(queryPaymentOrder(ali, f.io)).rejects.toThrow(
+        'MAINTENANCE_PAYMENT_QUERY_FAILED',
+      );
+    } else {
+      const result = await queryPaymentOrder(ali, f.io);
+      expect(result.state).toBe('unknown');
+      const archive = JSON.parse(f.kept[0] ?? '{}');
+      expect(archive.contentType).toBe('text/html;charset=GBK');
+      expect(Buffer.from(archive.bodyBase64, 'base64')).toEqual(body);
+    }
   });
   it.each(['alipay', 'wechat'])('requires verified local accounting for %s', async (provider) => {
     const request = provider === 'alipay' ? ali : wx;
