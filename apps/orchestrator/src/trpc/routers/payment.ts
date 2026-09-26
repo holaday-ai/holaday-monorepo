@@ -43,6 +43,19 @@ import { protectedProcedure, publicProcedure, router } from '../trpc.js';
 export const CN_PAYMENT_HEALTH_TIMEOUT_MS = 8_000;
 export const CN_PAYMENT_CREATE_TIMEOUT_MS = 15_000;
 
+// Separate new checkout availability from the adapter used by historical
+// captures/webhooks. Missing or invalid configuration keeps new sales closed.
+const paypalCheckoutEnabled = () =>
+  process.env.PAYPAL_CHECKOUT_ENABLED?.trim().toLowerCase() === 'true';
+function requirePayPalCheckout() {
+  if (!paypalCheckoutEnabled()) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: 'PayPal 支付暂未开放，请选择其他支付方式',
+    });
+  }
+}
+
 const createOrderInput = z.object({
   plan: z.enum(['basic', 'pro']),
   /**
@@ -340,7 +353,7 @@ export const paymentRouter = router({
       }));
   }),
   /**
-   * Tells the SPA whether the PayPal lane is wired this deploy. The
+   * Tells the SPA whether new PayPal checkout is enabled AND wired. The
    * frontend hides the PayPal button when the answer is false, the
    * same way auth.loginOptions hides the Google button.
    *
@@ -348,13 +361,17 @@ export const paymentRouter = router({
    * PayPal JS SDK URL, which is public-facing by design (the secret
    * is the *client secret*, which never leaves the server).
    */
-  options: publicProcedure.query(({ ctx }) => ({
-    paypal: Boolean(ctx.paypalAdapter),
-    paypalEnv: ctx.paypalAdapter?.env ?? null,
-    paypalClientId: ctx.paypalAdapter ? (process.env.PAYPAL_CLIENT_ID ?? null) : null,
-  })),
+  options: publicProcedure.query(({ ctx }) => {
+    const available = paypalCheckoutEnabled() && Boolean(ctx.paypalAdapter);
+    return {
+      paypal: available,
+      paypalEnv: available ? (ctx.paypalAdapter?.env ?? null) : null,
+      paypalClientId: available ? (process.env.PAYPAL_CLIENT_ID ?? null) : null,
+    };
+  }),
 
   createOrder: protectedProcedure.input(createOrderInput).mutation(async ({ ctx, input }) => {
+    requirePayPalCheckout();
     if (!ctx.paypalAdapter) {
       throw new TRPCError({
         code: 'PRECONDITION_FAILED',
@@ -598,6 +615,7 @@ export const paymentRouter = router({
   createAddonOrder: protectedProcedure
     .input(createAddonOrderInput)
     .mutation(async ({ ctx, input }) => {
+      requirePayPalCheckout();
       if (!ctx.paypalAdapter) {
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',

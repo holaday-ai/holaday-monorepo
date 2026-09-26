@@ -395,6 +395,8 @@ describe('internal payment bridge health', () => {
 describe('PayPal webhook verification', () => {
   beforeEach(() => {
     vi.stubEnv('NODE_ENV', 'production');
+    // Pausing new checkout must not suppress verification/settlement of old orders.
+    vi.stubEnv('PAYPAL_CHECKOUT_ENABLED', 'false');
     paymentRows.length = 0;
     Object.assign(userState, {
       id: 42,

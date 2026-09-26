@@ -5318,7 +5318,7 @@ export const tasksRouter = router({
             })().catch((err) => ctx.logger.warn({ err, taskId }, 'plan-step persist failed')));
           },
           onStatsRecord: ({ laneUsed, targetSite, success, latencyMs, errorType }) => {
-            void runTaskBackground(ctx, async (ctx) => statsService.record({
+            void runTaskBackground(ctx, async () => statsService.record({
               userIdInternal: userRow.id,
               taskExternalId: taskId,
               taskType: taskTypeForStats,
@@ -7492,7 +7492,7 @@ export const tasksRouter = router({
       // Phase 24 — fire directly (no per-user FIFO queue). Per-task
       // isolation removes the need for serialisation; per-user
       // concurrency is gated upstream at admit time.
-      void runTaskBackground(ctx, async (ctx) => runTaskFn());
+      void runTaskBackground(ctx, async () => runTaskFn());
       return {
         taskId,
         status: 'executing' as const,
@@ -8131,7 +8131,7 @@ export const tasksRouter = router({
       const logger = ctx.logger;
       const db = ctx.db;
       const intentText = row.intent;
-      void runTaskBackground(ctx, async (ctx) => (async () => {
+      void runTaskBackground(ctx, async () => (async () => {
         const taskInternalId = await taskInternalIdFor(db, newTaskId);
         if (taskInternalId == null) return;
         const taskHeartbeat = startTaskHeartbeat(db, newTaskId, {

@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-26至27日：用户确认PayPal新支付延后，候选默认隐藏入口
+
+从`f49c0a26`继续。用户明确要求“paypal支付可以先隐藏，上线后再优化”，并确认同时关闭新订单、保留历史订单处理。新增独立`PAYPAL_CHECKOUT_ENABLED`，只有显式true才允许新支付，缺失/false/空值/无效值关闭。`payment.options`关闭时返回paypal=false且不提供SDK配置，复用现有PlanPage条件渲染；`createOrder`/`createAddonOrder`在DB/provider副作用之前拒绝。`PAYPAL_ENABLED`、适配器创建、capture、历史查询、webhook实现和权益/额度算法未改。样例配置明确新开关false；没有读写真实凭据或生产配置。
+
+新支付开通/体验验收延后，不再作为本次上线功能；历史sandbox/live身份、未解决交易和恢复风险仍需独立核清，不能因隐藏入口而过滤历史记录或改变readiness结论。设计、实施计划和支付证据顶部已同步范围。本地实现完成不等于线上已隐藏，部署清单须确认新开关关闭且历史适配器配置不被误关。
+
+新路由用例先RED（6失败：options仍公开、两种订单仍能创建）再GREEN。最终支付路由/HTTP回调43项通过，明确关闭checkout时已有capture/验签/匹配金额结算保留；旧结算规则未修改。现有PlanPage组件新增两项行为锁定测试：套餐和加量包均保留支付宝按钮，且不挂载PayPal SDK；页面/状态专项23项、工作台整套257文件2508项通过。后台完整test命令通过，Vitest506文件8587通过/1既有跳过，前置Node测试同样通过；orchestrator类型检查已通过。页面证据为happy-dom组件测试，非真实浏览器/线上付款验收。
+
+过程限制：首次Vitest沙箱临时配置写入EPERM，限定权限后成功；产品补丁首次自动审批超时未执行，一次精确重试成功。新测试的tRPC Context联合类型错误和非空断言lint已修正，没有降低断言或类型门槛。工作台类型检查另发现`tasks.ts`三处既有未使用回调参数，仅清除这三个形参，不改变runTaskBackground调用或执行逻辑；最终工作台完整类型检查退出0，任务执行/后台回执/排空/计费专项5文件39项通过。上方后台全套在这三处参数清理前运行，清理后未再跑全套。四个支付/页面测试相关TS文件Biome与diff-check通过，未对巨大tasks.ts全文件重排或宣称全仓lint通过。日志`/tmp/holaday-paypal-pause-{red,red2,red3,green,targeted-final,orchestrator-full,web-targeted,web-full,types,types-final,web-types,web-types-final,task-regression}.log`。参数清理和本段记录的补丁各遇一次审批超时未执行，各一次精确重试成功。全部测试已退出，无后台测试或浏览器会话遗留。
+
+Task4–6仍未完成，未PR/合并/部署；当前改动不涉及真实支付调用、扣款、退款、旧订单状态、SQL、浏览器扩展或模型路由。后续继续完整首次切换接线与恢复演练，不重开PayPal登录/新支付优化，也不能以本次局部成功宣称整体可上线。
+
 ### 2026-09-26：全主机观测补齐实际子进程树
 
 从`11f9fe8f`继续Task4接线检查，发现`readCutoverHostSnapshot`在建立父子关系前就按UID/argv过滤，会漏掉实际网关的shell/esbuild等非Node后代。现先观察用户态进程身份，再从既有Holaday/UID998/Node范围递归纳入后代；Node另按真实exe识别，避免进程标题被改写后漏采。无关树不并入目标；返回值仍不包含原始argv或环境。启动来源/入口采样结束后重新观察整棵相关树，新增、重新挂父、PID复用及cgroup漂移均拒绝。此结果是有界观测，不是进程冻结、完整主机分类或允许停止的证明。

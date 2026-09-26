@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Outlet, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlanPage } from './PlanPage';
@@ -39,6 +39,37 @@ afterEach(() => {
 });
 
 describe('PlanPage renewal disclosure', () => {
+  it('keeps Alipay subscription checkout available without mounting PayPal when the server disables it', async () => {
+    cnOptionsQuery.mockResolvedValue({ enabled: true, wechat: false, alipay: true });
+    render(
+      <MemoryRouter initialEntries={['/plan']}>
+        <PlanPage />
+      </MemoryRouter>,
+    );
+    const [upgrade] = await screen.findAllByRole('button', { name: '升级' });
+    if (!upgrade) throw new Error('upgrade entry missing');
+    fireEvent.click(upgrade);
+    expect(await screen.findByRole('button', { name: '支付宝' })).toBeTruthy();
+    expect(screen.queryByText(/PayPal/i)).toBeNull();
+    expect(document.querySelector('script[src*="paypal.com/sdk/js"]')).toBeNull();
+  });
+
+  it('keeps Alipay addon checkout available without mounting PayPal when the server disables it', async () => {
+    authMeQuery.mockResolvedValue({ plan: 'pro' });
+    cnOptionsQuery.mockResolvedValue({ enabled: true, wechat: false, alipay: true });
+    render(
+      <MemoryRouter initialEntries={['/plan']}>
+        <PlanPage />
+      </MemoryRouter>,
+    );
+    const [buy] = await screen.findAllByRole('button', { name: '购买' });
+    if (!buy) throw new Error('addon entry missing');
+    fireEvent.click(buy);
+    expect(await screen.findByRole('button', { name: '支付宝' })).toBeTruthy();
+    expect(screen.queryByText(/PayPal/i)).toBeNull();
+    expect(document.querySelector('script[src*="paypal.com/sdk/js"]')).toBeNull();
+  });
+
   it('uses the authenticated shell plan immediately instead of waiting on a duplicate profile request', () => {
     authMeQuery.mockReturnValue(new Promise(() => {}));
 
@@ -128,5 +159,4 @@ describe('PlanPage renewal disclosure', () => {
     expect(screen.getByText('3 并发 · 自选 5 个角色')).toBeTruthy();
     expect(screen.getByText('5 并发 · 全部 33 个角色')).toBeTruthy();
   });
-
 });
