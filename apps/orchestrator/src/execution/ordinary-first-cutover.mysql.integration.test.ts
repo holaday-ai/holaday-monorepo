@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { copyFile, mkdir, mkdtemp, readdir, rm, symlink } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, symlink } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -25,7 +25,7 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
       { label: 'current observed payment shape', missingTime: false },
       { label: 'unsafe completed payment with missing time', missingTime: true },
     ])(
-      '$label: restore and full replay preserve historical business values',
+      '$label: restore, then migrate safely or refuse before writing',
       async ({ missingTime }) => {
         const url = new URL(process.env.CORE_MYSQL_TEST_ADMIN_URL ?? 'http://invalid');
         const container = process.env.CORE_MYSQL_TEST_CONTAINER ?? '';
@@ -242,6 +242,38 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
           expect(await inventory()).toEqual(beforeRestore);
           for (const file of files)
             await copyFile(join(appRoot, 'drizzle', file), join(snapshotApp, 'drizzle', file));
+          if (missingTime) {
+            // Catch a missing runner precondition, not merely a changed SQL string:
+            // unsafe data must fail BEFORE any DDL/DML and remain byte-equivalent.
+            await expect(migrate(target)).rejects.toThrow('MIGRATION_PAYMENT_TIME_UNPROVEN');
+            expect(await inventory()).toEqual(beforeRestore);
+
+            // An older schema without completed_at must not bypass the guard.
+            await connection.query('ALTER TABLE payments DROP INDEX ix_payments_status_completed');
+            await connection.query('ALTER TABLE payments DROP COLUMN completed_at');
+            const legacyInventory = await inventory();
+            await expect(migrate(target)).rejects.toThrow('MIGRATION_PAYMENT_TIME_UNPROVEN');
+            expect(await inventory()).toEqual(legacyInventory);
+
+            // Retain direct evidence of WHY the unchanged 0042 is unsafe. Execute
+            // it only in this disposable restore DB, outside the guarded runner.
+            const file = '0042_payment_completed_at.sql';
+            // This fixed file has three simple statements, no quoted semicolons.
+            const rawSql = await readFile(join(appRoot, 'drizzle', file), 'utf8');
+            for (const statement of rawSql
+              .split(';')
+              .map((sql) => sql.trim())
+              .filter(Boolean))
+              await connection.query(statement);
+            const [affected] = await rows(
+              "SELECT updated_at,completed_at FROM payments WHERE external_id = 'pay_missing_time'",
+            );
+            expect(affected?.completed_at).toBe('2026-01-02 03:04:05.123');
+            expect(affected?.updated_at).not.toBe('2026-01-02 03:04:05.123');
+            await use(source);
+            expect(await inventory()).toEqual(beforeRestore);
+            return;
+          }
           await migrate(target);
           await checkMaintenanceSchema(rows);
           expect(await rows('SELECT external_id,status FROM tasks ORDER BY external_id')).toEqual(
@@ -253,16 +285,9 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
           const migratedPayments = await rows(
             'SELECT external_id,amount_cents,status,updated_at,completed_at FROM payments ORDER BY external_id',
           );
-          // Existing explicit times and pending NULL must remain untouched. 0042's
-          // backfill is characterized separately; it must not rewrite updated_at.
-          const expectedPayments = baselinePayments.map((row) =>
-            row.external_id === 'pay_missing_time'
-              ? { ...row, completed_at: '2026-01-02 03:04:05.123' }
-              : row,
-          );
           await use(source);
           expect(await inventory()).toEqual(beforeRestore);
-          expect(migratedPayments).toEqual(expectedPayments);
+          expect(migratedPayments).toEqual(baselinePayments);
         } finally {
           try {
             assert.equal(
