@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { request as httpsRequest } from 'node:https';
 import { isDeepStrictEqual } from 'node:util';
+import { createCutoverNginxIO } from './browser-first-cutover-nginx.mjs';
 import { installPaymentPortFence, verifyPaymentPortFence } from './browser-payment-port-fence.mjs';
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const validDigest = (s) => typeof s === 'string' && /^[a-f0-9]{64}$/.test(s);
@@ -462,13 +463,31 @@ async function paymentPorts(binding, approval, stage, io, install = false) {
   );
 }
 
+function nginxIO(io, binding) {
+  if (typeof io.testNginx === 'function' && typeof io.reloadNginx === 'function') return io;
+  if (io.testNginx !== undefined || io.reloadNginx !== undefined) fail();
+  return {
+    ...io,
+    ...createCutoverNginxIO(
+      { binding, maintenanceEndsAtMs: io.nginx?.maintenanceEndsAtMs },
+      {
+        ...io.nginx,
+        now: io.now,
+        assertJournalOwnership: io.assertJournalOwnership,
+        readFenceReceipt: io.readFenceReceipt,
+      },
+    ),
+  };
+}
+
 /** IO is the root host adapter: fixed protected backups/receipt, compare-and-swap
  * file replacement, actual nginx -t/reload, and invalid-signature HTTP probes.
  * There is no arbitrary config-upload or success-boolean CLI. */
-export async function applyCutoverFence(input, io) {
+export async function applyCutoverFence(input, overrides) {
   try {
     if (!['orders', 'all-writers'].includes(input.stage)) fail();
-    const { binding, approval } = await context(input, io);
+    const { binding, approval } = await context(input, overrides);
+    const io = nginxIO(overrides, binding);
     const previous = await io.readFenceReceipt();
     if (input.stage === 'orders') {
       if (previous) fail();
@@ -583,14 +602,15 @@ export async function verifyCutoverFence(input, io) {
   }
 }
 
-export async function restoreCutoverIngress({ inventoryDigest, identity }, io) {
+export async function restoreCutoverIngress({ inventoryDigest, identity }, overrides) {
   try {
     if (
       !/^[a-f0-9]{40}$/.test(identity?.candidate ?? '') ||
       !/^[a-f0-9]{32}$/.test(identity?.bootId ?? '')
     )
       fail();
-    const { binding, approval } = await context({ inventoryDigest }, io);
+    const { binding, approval } = await context({ inventoryDigest }, overrides);
+    const io = nginxIO(overrides, binding);
     const receipt = await io.readFenceReceipt();
     checkReceipt(receipt, binding, approval);
     if (receipt.stage !== 'all-writers') fail();

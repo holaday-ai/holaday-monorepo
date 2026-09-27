@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28：正式 nginx 生效接线完成，保留共享站点连接
+
+承接`ea873cc4`、Task4原BASE844c2ced，新增固定nginx测试/重载与Linux进程观察，接入现有apply和restore的默认I/O。原成对注入接口保留；半套替代接口、缺窗口、过期或非Linux/root在文件修改前拒绝。完整配置、同一journal/回执及master/服务代际核对后只发送一次reload；超时/丢确认不重试、不stop/quit、不强制终止worker。
+
+实施中的“所有旧nginx worker必须消失”判据经复查收窄：共享主机还承载无关服务，不能让其长连接阻塞HOLADAY切换或强制断开。两个明确RED后改为新服务代际稳定、旧代际进入graceful shutdown；已在退出的旧代际自然消失不算配置漂移。HOLADAY自己的旧WS/内部写入仍由独立实际停写证据证明，此观察器不伪报零写入。裁决已记原ledger，不扩建业务功能。
+
+原Linux实体夹具已删除代办重载的实现，调用正式默认PID/proc读取和重载控制器，仅映射容器合成配置路径。首次读跨UID的`/proc/<worker>/exe`遇EACCES，定位后给本例隔离容器添加SYS_PTRACE；没有放宽代码或使用宿主PID。最终Node22/Linux45/45、0跳过；实际三站点双栈TLS、两阶段维护、恢复原UID501/inode/链接及恢复后HTTP响应通过。真实无关长连接在旧worker内贯穿整个过程、恢复后仍可继续收发。镜像`holaday-first-cutover-network:qa`身份`sha256:ff58ba973281d0804a90d92cee112ef1240386875f2584f975bf0bbf93893abf`，无外网、scripts/ops只读、无生产凭据。日志`/tmp/holaday-nginx-linux-complete.log`。
+
+最终浏览器699/699、0跳过，日志`/tmp/holaday-nginx-browser-complete.log`；最终全ops退出0，120/59/16/527及Python7全部通过、0跳过，日志`/tmp/holaday-nginx-ops-complete.log`。触及四MJS的Biome及shell语法/diff检查通过。没有生产SSH/安装/服务/数据库/支付操作，没有PayPal访问或密钥改动；旧`__pycache__`保留。应用全套、真实MySQL恢复和全分支审查未在本批重跑。当前只完成nginx这段正式效果接线，不是完整site adapter、首次CLI或整条发布完成；Task4/5/6仍部分完成，后续继续双机受保护效果处理、停写备份恢复及整体演练/审查，不能重复已完成商户和密钥工作。
+
 ### 2026-09-27：入口探测接入实际网络，整条首次发布仍未完成
 
 承接`9ee8f795`，Task4原BASE844c2ced不变。把Linux夹具独有的HTTP验证责任接入现有`browser-first-cutover-fence.mjs`，`verifyCutoverFence`默认使用真实TLS探测；原注入接口保留。只探测三个已审核站点的固定本机路由，真实WS握手、无效回调、严格TLS、超时/响应上限/无重定向/不重试。写入者证据必须另行提供新鲜观察，不能默认零；完整site I/O仍未接完。

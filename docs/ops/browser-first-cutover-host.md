@@ -37,6 +37,16 @@
 
 ## 必须连接的现场接口
 
+### 正式 nginx 测试、重载与生效观察（2026-09-28）
+
+`applyCutoverFence / restoreCutoverIngress`未提供成对的`testNginx / reloadNginx`替代接口时，现默认调用`browser-first-cutover-nginx.mjs`。现场必须提供同一操作的`nginx.maintenanceEndsAtMs`，沿用原journal/受保护入口回执；缺窗口、过期、非Linux/root或接口不完整时拒绝，不通过CLI接受任意命令。一个控制器只执行一次测试/重载，不把失败或丢确认改成可重试。
+
+正式命令固定为`/usr/sbin/nginx -t / -T / -s reload`，使用清理过的环境。测试后的完整配置输出、同一master与正在服务的worker代际须在发送重载前保持一致；调用前后及轮询期间检查原窗口/操作/回执。发送一次reload后，最多观察30秒且不超过维护截止，新worker必须连续两次稳定、旧worker不再接受新连接；随后重核完整配置。失败不调用stop/quit，不回滚、不强制杀worker。
+
+默认从`/run/nginx.pid`及真实`/proc`读取master和worker的PID、启动时刻、UID、exe、父进程和运行角色。未知活子进程、权限不足、主进程变化、复用PID或无新服务代际不能当成成功。共享nginx上无关站点的旧连接允许由已经进入graceful shutdown的旧worker继续持有；不能将其强制断开，也不能由此推导HOLADAY已无写入。后续实际HTTP探针及独立HOLADAY停写证明仍必需。
+
+现有Linux实体夹具已使用此默认控制器和默认PID/proc读取，仅将nginx配置路径映射到容器的合成多站点配置。需要容器自有PID/network namespace中的`NET_ADMIN`和`SYS_PTRACE`，不挂宿主PID或凭据。真实无关长连接贯穿两次维护重载和恢复仍可传输数据；真实目标业务响应在隔离时拒绝、恢复后正常。该结果不代表双机现场副作用通道或整项切换已完成。
+
 ### 真实入口探测（2026-09-27）
 
 `verifyCutoverFence` 未提供替代 `probeIngress` 时，默认调用同模块的 `probeCutoverIngress(approval, stage, io.ingressProbe)`。它只向三个已审核站点配置所描述的本机443端口发送请求：IPv4/IPv6、固定SNI/Host、正常证书验证、无凭据的无效回调，以及真实WebSocket Upgrade请求。不跟随重定向、不重试、不降级HTTP；每个请求最多5秒和64KiB响应。所有请求结束后才返回完整观察；超时、截断、错误证书或成功Upgrade拒绝整次观察。
@@ -45,7 +55,7 @@
 
 现场适配必须另外提供`ingressProbe.observeWriters()`，返回同inventoryDigest下的新鲜`existingSockets / internalWriters / producersRunning / observedAtMs`。探测前后都读取，缺失、漂移、无效或过期拒绝；非零计数原样保留，不能从HTTP 503推导零写入者。它不自动实现双机观察合并、业务核清、nginx重载或完整生产适配。
 
-隔离Linux验收现复用该生产探测器：实际nginx、证书、双栈和37个路由/监听组合，两阶段隔离后恢复原链接/UID501文件；不可信证书37项均拒绝。测试使用已有`holaday-first-cutover-network:qa`，只读挂载scripts/ops、`--network none --cap-add NET_ADMIN`；`holaday-cutover-ssh:qa`不含nft，不能用于此项。应用后端及非HTTP写入者计数仍为合成数据，本测试不是生产停写证明，也不访问PayPal服务。
+隔离Linux验收现复用该生产探测器：实际nginx、证书、双栈和37个路由/监听组合，两阶段隔离后恢复原链接/UID501文件；不可信证书37项均拒绝。测试使用已有`holaday-first-cutover-network:qa`，只读挂载scripts/ops、`--network none --cap-add NET_ADMIN --cap-add SYS_PTRACE`；`holaday-cutover-ssh:qa`不含nft，不能用于此项。应用后端及非HTTP写入者计数仍为合成数据，本测试不是生产停写证明，也不访问PayPal服务。
 
 ### 退役后的联合观察（2026-09-27）
 

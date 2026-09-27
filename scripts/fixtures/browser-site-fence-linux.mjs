@@ -1,4 +1,5 @@
-// Run only in disposable --network none Linux QA with private NET_ADMIN. No credentials.
+// Run only in disposable --network none Linux QA with NET_ADMIN/SYS_PTRACE in
+// its own PID/network namespaces. No host PID namespace or credentials.
 // Real nginx/TLS/proxying against recorded configs; mock application backends.
 // This proves forwarding/fencing, NOT provider verification or host-wide isolation.
 import assert from 'node:assert/strict';
@@ -7,7 +8,6 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import http from 'node:http';
 import https from 'node:https';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import {
   applyCutoverFence,
@@ -17,6 +17,7 @@ import {
 } from '/source/browser-first-cutover-fence.mjs';
 import { createFirstCutoverFenceStore } from '/source/browser-first-cutover-host.mjs';
 import { createCutoverIngressFiles } from '/source/browser-first-cutover-ingress-files.mjs';
+import { readCutoverNginxRuntime } from '/source/browser-first-cutover-nginx.mjs';
 import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 
 await fs.access('/.dockerenv');
@@ -26,6 +27,8 @@ const hash = (b) => createHash('sha256').update(b).digest('hex');
 const root = await fs.mkdtemp('/tmp/holaday-site-fence-');
 const records = [];
 const backends = [];
+let heldBackend;
+let heldClient;
 for (const port of [4001, 4002, 4010, 6080]) {
   const server = http.createServer(async (req, res) => {
     const chunks = [];
@@ -36,6 +39,12 @@ for (const port of [4001, 4002, 4010, 6080]) {
       body: Buffer.concat(chunks).toString(),
       headers: req.headers,
     });
+    if (port === 4001 && req.url === '/qa-held') {
+      heldBackend = res;
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.write('initial\n');
+      return;
+    }
     res.statusCode = /\/(?:notify|webhook|confirm)(?:\?|$)/.test(req.url) ? 401 : 200;
     res.end('qa-backend');
   });
@@ -127,7 +136,7 @@ const sites = await Promise.all(
 // Each unmodified source must parse on its original ports first. Combined live
 // fixture rebinds ONLY listeners and the edge's origin IP to loopback; it retains
 // URI rewriting, TLS SNI/verification, headers, locations and exact body bytes.
-const prelude = `pid ${root}/nginx.pid; error_log ${root}/error.log; events {}\nhttp { access_log off;\n`;
+const prelude = `pid /run/nginx.pid; error_log ${root}/error.log; events {}\nhttp { access_log off;\n`;
 for (const site of sites) {
   const map = site.profile.startsWith('aliyun-app')
     ? 'map $http_upgrade $connection_upgrade { default upgrade; "" close; }\n'
@@ -150,7 +159,9 @@ async function render() {
       return source;
     }),
   );
-  await fs.writeFile(`${root}/nginx.conf`, `${prelude}${bytes.join('\n')}\n}\n`);
+  const unrelated =
+    'server { listen 127.0.0.1:4999; location /qa-held { proxy_buffering off; proxy_pass http://127.0.0.1:4001; } }';
+  await fs.writeFile(`${root}/nginx.conf`, `${prelude}${bytes.join('\n')}\n${unrelated}\n}\n`);
 }
 function request(site, uri, { method = 'GET', body = '', host, ipv6 = false, headers = {} } = {}) {
   return new Promise((resolve, reject) => {
@@ -182,7 +193,6 @@ function request(site, uri, { method = 'GET', body = '', host, ipv6 = false, hea
     req.end(body);
   });
 }
-let expectedStage;
 const inventoryDigest = 'a'.repeat(64);
 const maintenanceEndsAtMs = Date.now() + 60000;
 await fs.mkdir('/var/lib/holaday-deploy/maintenance', { recursive: true, mode: 0o700 });
@@ -200,58 +210,19 @@ const io = {
   now: Date.now,
   assertJournalOwnership: journal.assertOwnership,
   readApprovedIngress: async () => ({ inventoryDigest, unknownIngress: [], files: sites }),
-  testNginx: async () => {
-    await render();
-    await exec('nginx', ['-t', '-c', `${root}/nginx.conf`]);
-  },
-  reloadNginx: async () => {
-    const master = (await fs.readFile(`${root}/nginx.pid`, 'utf8')).trim();
-    const oldWorkers = (await fs.readFile(`/proc/${master}/task/${master}/children`, 'utf8'))
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean);
-    await exec('nginx', ['-s', 'reload', '-c', `${root}/nginx.conf`]);
-    // This fixture has no established long-lived sockets. Wait for the previous
-    // workers to retire instead of mistaking a few new-worker responses for a
-    // completed reload. Production must separately account for existing sockets.
-    for (let n = 0; ; n++) {
-      const alive = await Promise.all(
-        oldWorkers.map((pid) =>
-          fs.access(`/proc/${pid}`).then(
-            () => true,
-            () => false,
-          ),
-        ),
-      );
-      if (alive.every((v) => !v)) break;
-      if (n >= 100) throw new Error('old fixture nginx workers did not retire');
-      await sleep(50);
-    }
-    // Reload acknowledgment is not worker activation: wait on observed responses.
-    for (let n = 0; ; n++) {
-      const responses = await Promise.all(
-        sites.flatMap((site) => [
-          request(site, site.profile.startsWith('aliyun-pay') ? '/payment/create' : '/api/tasks'),
-          request(
-            site,
-            site.profile.startsWith('aliyun-pay')
-              ? '/payment/wechat/notify'
-              : '/api/internal/payment/confirm',
-            { method: 'POST' },
-          ),
-        ]),
-      );
-      if (
-        responses.every(
-          (r, i) =>
-            r.status ===
-            (i % 2 ? (expectedStage === 'all-writers' ? 503 : 401) : expectedStage ? 503 : 200),
-        )
-      )
-        break;
-      if (n >= 50) throw new Error('reload did not activate the expected routes');
-      await sleep(50);
-    }
+  nginx: {
+    maintenanceEndsAtMs,
+    exec: async (file, args, options) => {
+      // Only the container's combined QA config path is substituted. The
+      // production controller performs testing, reload, and /proc observation.
+      assert.equal(file, '/usr/sbin/nginx');
+      if (args[0] === '-t') await render();
+      const result = await promisify(execFile)(file, [...args, '-c', `${root}/nginx.conf`], {
+        encoding: 'utf8',
+        ...options,
+      });
+      return result.stdout;
+    },
   },
   ingressProbe: {
     // Only the non-HTTP writer facts remain synthetic in this network fixture.
@@ -302,8 +273,18 @@ for (const [name, operation] of Object.entries(io)) {
 try {
   await render();
   await exec('nginx', ['-c', `${root}/nginx.conf`]);
+  const heldText = [];
+  heldClient = await new Promise((resolve, reject) => {
+    const req = http.get('http://127.0.0.1:4999/qa-held', (response) => {
+      response.on('data', (bytes) => heldText.push(bytes.toString()));
+      response.once('data', () => resolve(response));
+    });
+    req.on('error', reject);
+  });
+  const originalWorkers = (await readCutoverNginxRuntime()).workers.map(
+    (p) => `${p.pid}:${p.start}`,
+  );
   for (const stage of ['orders', 'all-writers']) {
-    expectedStage = stage;
     await applyCutoverFence({ inventoryDigest, stage }, io);
     if (stage === 'orders') {
       // Trusted fixture CA above is explicit; untrusted TLS must never become
@@ -390,17 +371,44 @@ try {
       `${stage}: real nginx IPv4/IPv6, chained TLS, body/URI, static, default-host and WS probes passed`,
     );
   }
-  expectedStage = undefined;
   await restoreCutoverIngress(
     { inventoryDigest, identity: { candidate: 'b'.repeat(40), bootId: 'c'.repeat(32) } },
     io,
   );
   assert.equal((await io.readFenceReceipt()).phase, 'restored');
+  const runtime = await readCutoverNginxRuntime();
+  assert.ok(
+    runtime.workers.some((p) => originalWorkers.includes(`${p.pid}:${p.start}`) && p.shuttingDown),
+  );
+  assert.equal(heldClient.destroyed, false);
+  const delivered = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('unrelated stream lost after reload')), 3000);
+    heldClient.once('data', (bytes) => {
+      clearTimeout(timer);
+      resolve(bytes.toString());
+    });
+  });
+  heldBackend.write('still-connected\n');
+  assert.equal(await delivered, 'still-connected\n');
+  assert.equal(heldText.join(''), 'initial\nstill-connected\n');
+  console.log(
+    'unrelated stream: original draining worker and connection survive both fences and restore',
+  );
   for (const site of sites) {
     assert.equal(await fs.readFile(site.path, 'utf8'), site.original);
     assert.equal(await fs.readlink(site.enabledPath), site.links[0].target);
     assert.equal((await fs.lstat(site.sourcePath)).uid, site.sourceUid);
     assert.equal((await fs.lstat(site.sourcePath)).ino, site.sourceStat.ino);
+    const pay = site.profile.startsWith('aliyun-pay');
+    assert.equal((await request(site, pay ? '/payment/create' : '/api/tasks')).status, 200);
+    assert.equal(
+      (
+        await request(site, pay ? '/payment/wechat/notify' : '/api/internal/payment/confirm', {
+          method: 'POST',
+        })
+      ).status,
+      401,
+    );
   }
   console.log(
     'restore: original link chains/UID501 inode preserved, protected backups and real reopened upstreams passed',
@@ -409,6 +417,8 @@ try {
   console.error(await fs.readFile(`${root}/error.log`, 'utf8').catch(() => 'no nginx log'));
   throw error;
 } finally {
+  heldClient?.destroy();
+  heldBackend?.end();
   await journal.close(); // Keep journal/receipt evidence; container removal owns cleanup.
   await exec('nginx', ['-s', 'quit', '-c', `${root}/nginx.conf`]).catch(() => {});
   for (const server of backends) {
