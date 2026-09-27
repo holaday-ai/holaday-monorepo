@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { describeCutoverSite } from '/source/browser-first-cutover-fence.mjs';
+import { connectFirstCutoverGatewaySession } from '/source/browser-first-cutover-gateway-session.mjs';
 import { connectFirstCutoverIngressSession } from '/source/browser-first-cutover-ingress-session.mjs';
 import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 
@@ -139,6 +140,48 @@ try {
   });
   console.log(
     'ingress SSH: real forced entry, pinned module bundle, protected approval, live owned journal, no-effect detach, changed-approval refusal passed',
+  );
+  const gatewayPath = `${directory}/first-cutover-gateway-approved.json`;
+  const gatewayBytes = JSON.stringify({
+    schemaVersion: 1,
+    host: 'aliyun',
+    binding,
+    maintenanceEndsAtMs,
+    startupFiles: [
+      {
+        path: '/root/.pm2/dump.pm2',
+        digest: '1'.repeat(64),
+        remove: [{ name: 'holaday-cn-payment', entryDigest: '2'.repeat(64) }],
+      },
+      { path: '/root/.pm2/dump.pm2.bak', digest: null, remove: [] },
+    ],
+  });
+  await fs.writeFile(gatewayPath, gatewayBytes, { mode: 0o600 });
+  const noEffect = async () => {
+    throw new Error('not an effect test');
+  };
+  const gatewayIO = {
+    journal,
+    open: io.open,
+    verifyFence: noEffect,
+    observer: {
+      read: noEffect,
+      readRegistrationProgress: noEffect,
+      readUnmanagedProgress: noEffect,
+      retireUnmanaged: noEffect,
+    },
+  };
+  const gatewayExpected = { binding, maintenanceEndsAtMs, siteDigest: hash(gatewayBytes) };
+  const gatewayClient = await connectFirstCutoverGatewaySession(gatewayExpected, gatewayIO);
+  await gatewayClient.close();
+  await fs.chmod(gatewayPath, 0o644);
+  await assert.rejects(
+    connectFirstCutoverGatewaySession(gatewayExpected, gatewayIO),
+    /CUTOVER_GATEWAY_SESSION_UNPROVEN/,
+  );
+  assert.equal(connects, 4);
+  console.log(
+    'gateway SSH: separate fixed entry, 24 pinned modules including signal helper, independent approval, live original journal, no-effect detach and writable-approval refusal passed',
   );
 } finally {
   await journal.close();

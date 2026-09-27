@@ -13,6 +13,44 @@ if channel:
 
 
 class ChannelTest(unittest.TestCase):
+    def policy(self, parent):
+        folder = parent / 'ops'
+        folder.mkdir(mode=0o700)
+        folder = folder / 'aliyun-edge'
+        folder.mkdir(mode=0o700)
+        policy = folder / 'holaday-payment-ingress.nft'
+        policy.write_bytes(path.parent.parent.joinpath('ops/aliyun-edge/holaday-payment-ingress.nft').read_bytes())
+        policy.chmod(0o600)
+        return policy
+
+    def test_bundle_without_fixed_policy_fails_before_session_start(self):
+        import hashlib
+        import json
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder).resolve() / 'ingress'
+            root.mkdir(mode=0o700)
+            files = {}
+            for name in channel.INGRESS_MODULES:
+                value = ('// fixture ' + name + '\n').encode()
+                (root / name).write_bytes(value)
+                (root / name).chmod(0o600)
+                files[name] = hashlib.sha256(value).hexdigest()
+            (root / 'bundle.json').write_text(json.dumps({'schemaVersion': 1, 'files': files}))
+            (root / 'bundle.json').chmod(0o600)
+            with self.assertRaises(RuntimeError):
+                channel.verify_ingress_bundle(root, os.geteuid())
+            policy = self.policy(root.parent)
+            self.assertEqual(channel.verify_ingress_bundle(root, os.geteuid()), root / 'browser-first-cutover-ingress-session.mjs')
+            original = policy.read_bytes()
+            for bad in [b'', original + b'\n', b'flush ruleset\n']:
+                policy.write_bytes(bad)
+                with self.assertRaises(RuntimeError):
+                    channel.verify_ingress_bundle(root, os.geteuid())
+            policy.write_bytes(original)
+            policy.chmod(0o666)
+            with self.assertRaises(RuntimeError):
+                channel.verify_ingress_bundle(root, os.geteuid())
+
     def setUp(self):
         self.assertIsNotNone(channel, 'restricted channel implementation missing')
 
@@ -28,12 +66,45 @@ class ChannelTest(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 channel.parse_command('holaday-cutover-v1 ingress ' + suffix)
 
+    def test_gateway_dispatch_is_fixed_and_cannot_select_a_command(self):
+        attempt = '12345678-1234-4234-8234-123456789abc'
+        self.assertEqual(channel.parse_command('holaday-cutover-v1 gateway ' + attempt), ('gateway', attempt))
+        for suffix in [attempt + ' /bin/sh', attempt + '\n', '../approved', 'a' * 32]:
+            with self.assertRaises(RuntimeError):
+                channel.parse_command('holaday-cutover-v1 gateway ' + suffix)
+
+    def test_gateway_bundle_requires_pinned_python_signal_and_cannot_use_ingress_only_bundle(self):
+        import hashlib
+        import json
+        self.assertTrue(hasattr(channel, 'verify_gateway_bundle'))
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder).resolve() / 'gateway'
+            root.mkdir(mode=0o700)
+            self.policy(root.parent)
+            files = {}
+            for name in channel.GATEWAY_MODULES:
+                value = ('# fixture ' + name + '\n').encode()
+                (root / name).write_bytes(value)
+                (root / name).chmod(0o600)
+                files[name] = hashlib.sha256(value).hexdigest()
+            manifest = root / 'bundle.json'
+            manifest.write_text(json.dumps({'schemaVersion': 1, 'files': files}))
+            manifest.chmod(0o600)
+            self.assertEqual(channel.verify_gateway_bundle(root, os.geteuid()), root / 'browser-first-cutover-gateway-session.mjs')
+            (root / 'browser-first-cutover-signal.py').write_text('altered pinned helper')
+            with self.assertRaises(RuntimeError):
+                channel.verify_gateway_bundle(root, os.geteuid())
+            with self.assertRaises(RuntimeError):
+                channel.verify_ingress_bundle(root, os.geteuid())
+
     def test_ingress_bundle_requires_exact_pinned_modules_and_rejects_tampering(self):
         import hashlib
         import json
         self.assertTrue(hasattr(channel, 'verify_ingress_bundle'))
         with tempfile.TemporaryDirectory() as folder:
-            root = pathlib.Path(folder).resolve()
+            root = pathlib.Path(folder).resolve() / 'ingress'
+            root.mkdir(mode=0o700)
+            self.policy(root.parent)
             files = {}
             for name in channel.INGRESS_MODULES:
                 value = ('// module ' + name + '\n').encode()

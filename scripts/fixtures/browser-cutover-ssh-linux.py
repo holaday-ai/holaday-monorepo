@@ -116,8 +116,40 @@ LogLevel VERBOSE
             digests[name] = hashlib.sha256(value).hexdigest()
         (bundle / 'bundle.json').write_text(json.dumps({'schemaVersion': 1, 'files': digests}))
         (bundle / 'bundle.json').chmod(0o600)
+        result = ssh(['holaday-cutover-v1 gateway 12345678-1234-4234-8234-123456789abc'])
+        assert result.returncode != 0 and b'CUTOVER_CHANNEL_UNPROVEN' in result.stderr
+        gateway_bundle = base / 'gateway'
+        gateway_bundle.mkdir(mode=0o700)
+        gateway_digests = {}
+        for name in channel.GATEWAY_MODULES:
+            value = pathlib.Path('/source', name).read_bytes()
+            (gateway_bundle / name).write_bytes(value)
+            (gateway_bundle / name).chmod(0o600)
+            gateway_digests[name] = hashlib.sha256(value).hexdigest()
+        (gateway_bundle / 'bundle.json').write_text(json.dumps({'schemaVersion': 1, 'files': gateway_digests}))
+        (gateway_bundle / 'bundle.json').chmod(0o600)
+        # Code alone must fail before attach: actual fence execution also needs
+        # the existing fixed policy at the adapter's module-relative location.
+        for action in ['ingress', 'gateway']:
+            result = ssh([f'holaday-cutover-v1 {action} 12345678-1234-4234-8234-123456789abc'])
+            assert result.returncode != 0 and b'CUTOVER_CHANNEL_UNPROVEN' in result.stderr
+        policy_folder = base / 'ops'
+        policy_folder.mkdir(mode=0o700)
+        policy_folder = policy_folder / 'aliyun-edge'
+        policy_folder.mkdir(mode=0o700)
+        policy = policy_folder / 'holaday-payment-ingress.nft'
+        policy.write_bytes(pathlib.Path('/ops/aliyun-edge/holaday-payment-ingress.nft').read_bytes())
+        policy.chmod(0o600)
         result = run(['/opt/node22/bin/node', '/source/fixtures/browser-ingress-ssh-client.mjs', str(root)], timeout=20)
         print(result.stdout.decode().strip())
+        policy.write_bytes(b'changed fixed policy')
+        for action in ['ingress', 'gateway']:
+            result = ssh([f'holaday-cutover-v1 {action} 12345678-1234-4234-8234-123456789abc'])
+            assert result.returncode != 0 and b'CUTOVER_CHANNEL_UNPROVEN' in result.stderr
+        policy.write_bytes(pathlib.Path('/ops/aliyun-edge/holaday-payment-ingress.nft').read_bytes())
+        (gateway_bundle / 'browser-first-cutover-signal.py').write_text('changed pinned signal helper')
+        result = ssh(['holaday-cutover-v1 gateway 12345678-1234-4234-8234-123456789abc'])
+        assert result.returncode != 0 and b'CUTOVER_CHANNEL_UNPROVEN' in result.stderr
         (bundle / 'browser-first-cutover-fence.mjs').write_text('changed dependency')
         result = ssh(['holaday-cutover-v1 ingress 12345678-1234-4234-8234-123456789abc'])
         assert result.returncode != 0 and b'CUTOVER_CHANNEL_UNPROVEN' in result.stderr

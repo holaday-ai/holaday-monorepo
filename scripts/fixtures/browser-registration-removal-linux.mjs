@@ -6,6 +6,7 @@ import * as fs from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
+import { connectFirstCutoverGatewaySession } from '/source/browser-first-cutover-gateway-session.mjs';
 import {
   createFirstCutoverRetirementObserver,
   readReviewedFirstCutoverLegacySource,
@@ -31,9 +32,19 @@ const rows = async () => JSON.parse(await pm2('jlist'));
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 assert.ok(
   process.argv.length === 2 ||
-    (process.argv.length === 3 && ['--gateways', '--gateways-lost-ack'].includes(process.argv[2])),
+    (process.argv.length === 3 &&
+      [
+        '--gateways',
+        '--gateways-lost-ack',
+        '--gateway-session',
+        '--gateway-session-lost-ack',
+        '--gateway-session-observed-executor',
+      ].includes(process.argv[2])),
 );
 const lostAck = process.argv[2] === '--gateways-lost-ack';
+const sessionMode = process.argv[2]?.startsWith('--gateway-session');
+const sessionLostAck = process.argv[2] === '--gateway-session-lost-ack';
+const observeExecutor = process.argv[2] === '--gateway-session-observed-executor';
 const gateways = process.argv.length === 3;
 const mainPort = gateways ? 4010 : 4001;
 const mainName = gateways ? 'holaday-cn-payment' : 'holaday-account-closure-worker';
@@ -54,6 +65,8 @@ const binding = {
 };
 let journal;
 let gateway;
+let receiver;
+let receiverCompletion;
 try {
   await pm2(
     'start',
@@ -300,6 +313,8 @@ try {
     second.processes = second.processes.filter((p) => p.pid !== gateway.pid);
     second.listeners = '';
     const gatewayHost = gateways ? snapshot : second;
+    if (observeExecutor && receiver && receiver.exitCode === null && receiver.signalCode === null)
+      gatewayHost.processes.push(raw(await proc(receiver.pid)));
     if (gateway.exitCode === null && gateway.signalCode === null)
       gatewayHost.processes.push(raw(await proc(gateway.pid)));
     gatewayHost.listeners += await exec('ss', ['-H', '-ltnp', 'sport = :4011']);
@@ -397,57 +412,149 @@ try {
         producersRunning: 0,
       }),
     };
-    const prepared = await prepareLocalFirstCutoverGateway(input, io);
-    assert.equal(prepared.phase, 'startup_prepared');
-    assert.equal((await fetch('http://127.0.0.1:4010')).status, 200);
-    assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
-    assert.equal((await journal.readFirstCutoverEffects()).registrationEvents.length, 0);
-    await assert.rejects(retireLocalFirstCutoverGateways(input, io));
-    await journal.persist('all_fenced', { candidate: 'b'.repeat(40) });
-    await journal.persist('stopped', { candidate: 'b'.repeat(40) });
-    if (lostAck) {
-      let deletions = 0;
-      const system = {
-        exec: async (file, argv) => {
-          const result = await exec(file, argv);
-          if (argv[1] === 'delete') {
-            deletions++;
-            throw new Error('QA lost acknowledgement after real PM2 delete');
-          }
-          return result;
-        },
+    let client;
+    if (sessionMode) {
+      const fullBinding = await journal.assertOwnership();
+      const approval = {
+        schemaVersion: 1,
+        kind: 'first-cutover',
+        ...fullBinding,
+        legacyDigest: proof.legacyDigest,
+        branch: 'codex/qa-gateway-session',
+        maintenanceEndsAtMs: input.maintenanceEndsAtMs,
+        reconcileByMs: input.maintenanceEndsAtMs + 60000,
+        operatorRef: 'qa-only',
       };
-      await assert.rejects(
-        retireLocalFirstCutoverGateways(input, io, system),
-        /CUTOVER_REGISTRATION_UNCERTAIN/,
+      await fs.writeFile(`${directory}/first-cutover-approved.json`, JSON.stringify(approval), {
+        mode: 0o600,
+      });
+      const siteBytes = JSON.stringify({
+        schemaVersion: 1,
+        host: 'aliyun',
+        binding: fullBinding,
+        maintenanceEndsAtMs: input.maintenanceEndsAtMs,
+        startupFiles: files,
+      });
+      await fs.writeFile(`${directory}/first-cutover-gateway-approved.json`, siteBytes, {
+        mode: 0o600,
+      });
+      receiver = spawn(
+        '/usr/bin/node',
+        ['/source/browser-first-cutover-gateway-session.mjs', binding.attempt],
+        { stdio: ['pipe', 'pipe', 'pipe'] },
       );
-      await assert.rejects(fetch('http://127.0.0.1:4010'));
+      receiver.stderr.resume();
+      receiverCompletion = new Promise((resolve) =>
+        receiver.once('close', (code) => resolve({ code })),
+      );
+      const originalRecord = journal.recordRegistrationEvent.bind(journal);
+      client = await connectFirstCutoverGatewaySession(
+        {
+          binding: fullBinding,
+          maintenanceEndsAtMs: input.maintenanceEndsAtMs,
+          siteDigest: sha(siteBytes),
+        },
+        {
+          ...io,
+          journal: {
+            ...journal,
+            recordRegistrationEvent: async (event) => {
+              await originalRecord(event);
+              if (sessionLostAck && event.phase === 'registration-deleted') receiver.stdin.end();
+            },
+          },
+          open: async () => ({
+            input: receiver.stdout,
+            output: receiver.stdin,
+            completion: receiverCompletion,
+          }),
+        },
+      );
+    }
+    if (observeExecutor) {
+      await assert.rejects(client.prepare(), /CUTOVER_GATEWAY_SESSION_UNPROVEN/);
+      assert.equal((await receiverCompletion).code, 1);
+      assert.equal((await journal.readFirstCutoverEffects()).startupEvents.length, 0);
+      assert.equal((await fetch('http://127.0.0.1:4010')).status, 200);
       assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
-      const effects = await journal.readFirstCutoverEffects();
-      assert.equal(effects.registrationEvents.at(-1).phase, 'registration-delete-intent');
-      assert.equal(effects.unmanagedEvents.length, 0);
-      await assert.rejects(retireLocalFirstCutoverGateways(input, io, system));
-      assert.equal(deletions, 1);
-      assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
+      for (const file of files) assert.equal(sha(await fs.readFile(file.path)), file.digest);
       console.log(
-        'PASS physical gateway lost ACK: actual managed stop, intent retained, unmanaged gateway untouched, repeat refused',
+        'PASS refusal: newly observed unreviewed executor blocks preparation without stopping gateways or changing startup files; full-site executor attribution still required',
       );
     } else {
-      const stopped = await retireLocalFirstCutoverGateways(input, io);
-      assert.equal(stopped.host, 'aliyun');
-      assert.equal(stopped.phase, 'stopped');
-      await assert.rejects(fetch('http://127.0.0.1:4010'));
-      await assert.rejects(fetch('http://127.0.0.1:4011'));
-      assert.equal(gateway.signalCode, 'SIGTERM');
-      const effects = await journal.readFirstCutoverEffects();
-      assert.equal(effects.registrationEvents.length, 4);
-      assert.ok(effects.registrationEvents.every((e) => e.host === 'aliyun'));
-      assert.equal(effects.unmanagedEvents.length, 2);
-      assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
+      const prepared = client
+        ? await client.prepare()
+        : await prepareLocalFirstCutoverGateway(input, io);
+      assert.equal(prepared.phase, 'startup_prepared');
+      assert.equal((await fetch('http://127.0.0.1:4010')).status, 200);
+      assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
+      assert.equal((await journal.readFirstCutoverEffects()).registrationEvents.length, 0);
       await assert.rejects(retireLocalFirstCutoverGateways(input, io));
-      console.log(
-        'PASS physical gateway composition: prepare keeps both live; stopped retires managed and pinned unmanaged gateway once; unrelated PID preserved',
-      );
+      await journal.persist('all_fenced', { candidate: 'b'.repeat(40) });
+      await journal.persist('stopped', { candidate: 'b'.repeat(40) });
+      if (sessionLostAck) {
+        await assert.rejects(client.retire(), /CUTOVER_GATEWAY_SESSION_UNPROVEN/);
+        await assert.rejects(client.retire(), /CUTOVER_GATEWAY_SESSION_UNPROVEN/);
+        await assert.rejects(fetch('http://127.0.0.1:4010'));
+        assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
+        const effects = await journal.readFirstCutoverEffects();
+        assert.equal(effects.registrationEvents.at(-1).phase, 'registration-deleted');
+        assert.equal(effects.unmanagedEvents.length, 0);
+        assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
+        assert.equal((await receiverCompletion).code, 1);
+        console.log(
+          'PASS physical remote disconnect: actual deletion recorded, no signal or resend, unrelated PID unchanged',
+        );
+      } else if (lostAck) {
+        let deletions = 0;
+        const system = {
+          exec: async (file, argv) => {
+            const result = await exec(file, argv);
+            if (argv[1] === 'delete') {
+              deletions++;
+              throw new Error('QA lost acknowledgement after real PM2 delete');
+            }
+            return result;
+          },
+        };
+        await assert.rejects(
+          retireLocalFirstCutoverGateways(input, io, system),
+          /CUTOVER_REGISTRATION_UNCERTAIN/,
+        );
+        await assert.rejects(fetch('http://127.0.0.1:4010'));
+        assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
+        const effects = await journal.readFirstCutoverEffects();
+        assert.equal(effects.registrationEvents.at(-1).phase, 'registration-delete-intent');
+        assert.equal(effects.unmanagedEvents.length, 0);
+        await assert.rejects(retireLocalFirstCutoverGateways(input, io, system));
+        assert.equal(deletions, 1);
+        assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
+        console.log(
+          'PASS physical gateway lost ACK: actual managed stop, intent retained, unmanaged gateway untouched, repeat refused',
+        );
+      } else {
+        const stopped = client
+          ? await client.retire()
+          : await retireLocalFirstCutoverGateways(input, io);
+        assert.equal(stopped.host, 'aliyun');
+        assert.equal(stopped.phase, 'stopped');
+        await assert.rejects(fetch('http://127.0.0.1:4010'));
+        await assert.rejects(fetch('http://127.0.0.1:4011'));
+        assert.equal(gateway.signalCode, 'SIGTERM');
+        const effects = await journal.readFirstCutoverEffects();
+        assert.equal(effects.registrationEvents.length, 4);
+        assert.ok(effects.registrationEvents.every((e) => e.host === 'aliyun'));
+        assert.equal(effects.unmanagedEvents.length, 2);
+        assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
+        await assert.rejects(retireLocalFirstCutoverGateways(input, io));
+        if (client) {
+          await client.close();
+          assert.equal((await receiverCompletion).code, 0);
+        }
+        console.log(
+          'PASS physical gateway composition: prepare keeps both live; stopped retires managed and pinned unmanaged gateway once; unrelated PID preserved',
+        );
+      }
     }
   } else {
     const readProgress = async () => (await observer.readRegistrationProgress('vultr')).inventory;
@@ -516,16 +623,20 @@ try {
       'PASS physical protected registration removal: memory-enabled UID998 worker exited, stopped cron removed, unrelated PID unchanged, private backup and six real journal events',
     );
   }
-  await pm2('kill');
-  await pm2('resurrect');
-  assert.deepEqual(
-    (await rows()).map((r) => r.name),
-    ['qa-unrelated'],
-  );
-  console.log(
-    'PASS independent saved-entry removal: daemon restart restores only unrelated fixture',
-  );
+  if (!observeExecutor) {
+    await pm2('kill');
+    await pm2('resurrect');
+    assert.deepEqual(
+      (await rows()).map((r) => r.name),
+      ['qa-unrelated'],
+    );
+    console.log(
+      'PASS independent saved-entry removal: daemon restart restores only unrelated fixture',
+    );
+  }
 } finally {
+  receiver?.stdin.end();
+  if (receiverCompletion) await receiverCompletion;
   if (gateway && gateway.exitCode === null && gateway.signalCode === null) gateway.kill('SIGTERM');
   await pm2('kill');
   await journal?.close();

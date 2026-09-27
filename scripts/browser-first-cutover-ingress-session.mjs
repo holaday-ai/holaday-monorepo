@@ -44,6 +44,14 @@ function validate(input, now) {
  * supplied through stdin can select a host, path, configuration or approval file.
  */
 export async function readFirstCutoverIngressSite(options, overrides = {}) {
+  return readProtectedSite(options, overrides, 'ingress');
+}
+
+export async function readFirstCutoverGatewaySite(options, overrides = {}) {
+  return readProtectedSite(options, overrides, 'gateway');
+}
+
+async function readProtectedSite(options, overrides, kind) {
   const io = {
     fs,
     platform: process.platform,
@@ -53,7 +61,8 @@ export async function readFirstCutoverIngressSite(options, overrides = {}) {
     ...overrides,
   };
   const folder = '/var/lib/holaday-deploy/maintenance';
-  const path = `${folder}/first-cutover-ingress-approved.json`;
+  const path = `${folder}/first-cutover-${kind}-approved.json`;
+  const scopeKey = kind === 'ingress' ? 'ingress' : 'startupFiles';
   let handle;
   try {
     if (
@@ -100,33 +109,59 @@ export async function readFirstCutoverIngressSite(options, overrides = {}) {
       fail();
     const value = JSON.parse(bytes.toString('utf8'));
     if (
-      !keys(value, ['schemaVersion', 'host', 'binding', 'maintenanceEndsAtMs', 'ingress']) ||
+      !keys(value, ['schemaVersion', 'host', 'binding', 'maintenanceEndsAtMs', scopeKey]) ||
       value.schemaVersion !== 1 ||
       value.host !== 'aliyun' ||
       !bindingKeys.every((k) => value.binding?.[k] === beforeApproval[k]) ||
       value.binding.attempt !== options.attempt ||
-      value.maintenanceEndsAtMs !== beforeApproval.maintenanceEndsAtMs ||
-      !keys(value.ingress, ['inventoryDigest', 'unknownIngress', 'files']) ||
-      value.ingress.inventoryDigest !== value.binding.inventoryDigest ||
-      !Array.isArray(value.ingress.unknownIngress) ||
-      value.ingress.unknownIngress.length ||
-      !Array.isArray(value.ingress.files) ||
-      value.ingress.files.length !== 2 ||
-      ![
-        ['hd-app.orangebench.tech', 'aliyun-app-20260926'],
-        ['hd-pay.orangebench.tech', 'aliyun-pay-20260926'],
-      ].every(
-        ([name, profile]) =>
-          value.ingress.files.filter(
-            (f) => f?.path === `/etc/nginx/sites-available/${name}` && f.profile === profile,
-          ).length === 1,
-      )
+      value.maintenanceEndsAtMs !== beforeApproval.maintenanceEndsAtMs
+    )
+      fail();
+    if (
+      kind === 'ingress' &&
+      (!keys(value.ingress, ['inventoryDigest', 'unknownIngress', 'files']) ||
+        value.ingress.inventoryDigest !== value.binding.inventoryDigest ||
+        !Array.isArray(value.ingress.unknownIngress) ||
+        value.ingress.unknownIngress.length ||
+        !Array.isArray(value.ingress.files) ||
+        value.ingress.files.length !== 2 ||
+        ![
+          ['hd-app.orangebench.tech', 'aliyun-app-20260926'],
+          ['hd-pay.orangebench.tech', 'aliyun-pay-20260926'],
+        ].every(
+          ([name, profile]) =>
+            value.ingress.files.filter(
+              (f) => f?.path === `/etc/nginx/sites-available/${name}` && f.profile === profile,
+            ).length === 1,
+        ))
+    )
+      fail();
+    if (
+      kind === 'gateway' &&
+      (!Array.isArray(value.startupFiles) ||
+        value.startupFiles.length !== 2 ||
+        value.startupFiles.some(
+          (f, i) =>
+            !keys(f, ['path', 'digest', 'remove']) ||
+            f.path !== `/root/.pm2/${i ? 'dump.pm2.bak' : 'dump.pm2'}` ||
+            !(f.digest === null || hash(f.digest)) ||
+            !Array.isArray(f.remove) ||
+            f.remove.length > 1 ||
+            (f.digest === null && f.remove.length !== 0) ||
+            f.remove.some(
+              (r) =>
+                !keys(r, ['name', 'entryDigest']) ||
+                r.name !== 'holaday-cn-payment' ||
+                !hash(r.entryDigest),
+            ),
+        ) ||
+        !value.startupFiles.some((f) => f.remove.length))
     )
       fail();
     const result = {
       binding: value.binding,
       maintenanceEndsAtMs: value.maintenanceEndsAtMs,
-      ingress: value.ingress,
+      [scopeKey]: value[scopeKey],
       siteDigest: createHash('sha256').update(bytes).digest('hex'),
     };
     const now = io.now();
@@ -142,7 +177,7 @@ export async function readFirstCutoverIngressSite(options, overrides = {}) {
 
 // One bounded ordered stream, not a general RPC dispatcher. No executable, path,
 // environment, file bytes, callback function, or reconnect request crosses here.
-function wire(input, output, deadline, now) {
+export function createFirstCutoverSessionWire(input, output, deadline, now) {
   const limit = 256 * 1024;
   let buffer = Buffer.alloc(0);
   let failure;
@@ -233,6 +268,7 @@ function wire(input, output, deadline, now) {
     },
   };
 }
+const wire = createFirstCutoverSessionWire;
 
 const operationNames = [
   'attach',

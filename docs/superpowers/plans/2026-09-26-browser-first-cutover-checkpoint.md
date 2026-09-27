@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 夜间续跑：固定远端网关调用已接通；完整现场仍受执行进程归属约束
+
+承接 `961f7cfd`，原Task4 BASE844c2ced不变。新增固定 `gateway <attempt>` SSH会话，独立于入口会话，复用已有有界通信及受保护清单读取。直接调用上一批本机网关准备/退役函数；Vultr原journal和retirement observer仍负责事件与原始身份摘要，Aliyun接收端独立重读固定启动清单和批准窗口。未托管退役由原observer编排、接收端执行原pidfd helper，嵌套期间只允许必要的只读核对；无通用远端命令、复制日志、自动重连或不明结果重试。
+
+新增会话10项回归含真实临时权限文件、空回执/范围漂移/丢确认/重复操作拒绝，先RED后GREEN。原Python强制入口支持独立24模块固定闭包（原入口20模块不变），含启动文件与signal helper。实体Linux独立接收进程使用原journal/observer、真实PM2与pidfd：准备后4010/4011均存活，停止阶段两者退出，无关PID保持，PM2重启仅恢复无关应用；独立丢ACK容器证明真实删除后不再信号或重发。实际sshd验证固定命令、原journal、独立批准及文件篡改拒绝。此处业务计数、另一逻辑主机以及受控进程清单仍属QA合成，不是完整现场成功。
+
+**已确认的整链接线缺口，不能忽略：** `--gateway-session-observed-executor`将真实接收进程加入观察后，原observer正确拒绝新未知进程，准备阶段零启动事件、文件未变、两端口仍200。当前成功夹具未包含这个新增执行进程，不能拿其成功代表生产可执行。后续完整site必须精确绑定本次可信协调器、接收端及其受控子进程的身份/来源/生命周期，并保留原始观察；禁止过滤快照、泛化“所有root/Node可信”、伪造review或原legacyDigest。本次未改变分类门禁。原journal、legacy baseline及信号代码不需重写。
+
+实体入口回归首轮失败：此次Docker调用漏挂原只读`/ops`，当前版本与HEAD对照都在nginx执行前失败。定位到固定nft策略读取后，补齐`--mount .../ops,dst=/ops,readonly`通过；临时诊断已移除，干净再次运行退出0。这也暴露执行包缺少资源预检：现强制入口启动前校验固定相邻`ops/aliyun-edge/holaday-payment-ingress.nft`、原字节摘要、root私密目录/文件。缺策略测试真实RED→GREEN；实际SSH缺失/篡改资源拒绝通过。策略规则/字节未变，无生产安装。
+
+最终同口径browser **763/763**、Linux相关八组 **300/300**，均0跳过、退出0；实际网关成功/丢ACK/未知执行进程拒绝三个模式、真实SSH、真实TLS/nginx两阶段/恢复/无关长连接均退出0。最新全ops **120/59/16/597 + Python12**、0跳过、退出0。日志：`/tmp/holaday-gateway-session-{browser-final,linux-final,disconnect-final,observed-executor,ingress-final}.log`、`/tmp/holaday-gateway-policy-{ssh-final,ops-final}.log`；保留失败日志`/tmp/holaday-gateway-session-ingress-regression.log`、`/tmp/holaday-gateway-ingress-baseline.log`、策略RED日志。五MJS Biome、shell语法、diff-check通过。不宣称应用全套、真实MySQL恢复或整分支独立审查已通过。
+
+确切接续：先完成上述执行进程精确归属与完整site读者接线，复用已完成固定双会话、入口与网关模块；再接首次CLI、真实停写备份/隔离恢复、非PayPal恢复证据、完整成功/故障演练与整分支审查。首次CLI和完整site仍不可用于生产。PayPal/商户/密钥保管/只读通道不重做，无生产SSH/服务/DB/支付/密钥操作，无PR/合并/部署；原缓存保留，Task4–6未完成，自动化保持本线程继续。
+
 ### 2026-09-28 夜间续跑：阿里云网关准备与实际退役已接为两阶段本机调用
 
 承接本地 `fd97b24e`，原Task4 BASE844c2ced不变。在原registrations模块增加 `prepareLocalFirstCutoverGateway` 与 `retireLocalFirstCutoverGateways`，沿用原启动文件、PM2注册、pidfd及retirement observer/journal。前者只在producers_stopped备份和移除批准的启动条目，保留活网关；后者只在stopped、全隔离/工作核清后依次移除托管注册和原未托管网关。核对真实本机内核主机名、原journal、绝对截止、新鲜观察；有部分效果就拒绝重新执行。没有放宽journal阶段或给未接线的业务观察补零。

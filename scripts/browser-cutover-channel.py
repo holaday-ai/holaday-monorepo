@@ -31,6 +31,12 @@ INGRESS_MODULES = frozenset([
     'browser-maintenance-runtime-system.mjs', 'browser-maintenance-runtime.mjs',
     'browser-maintenance-transition.mjs', 'browser-payment-port-fence.mjs',
 ])
+GATEWAY_MODULES = INGRESS_MODULES | frozenset([
+    'browser-first-cutover-gateway-session.mjs',
+    'browser-first-cutover-registrations.mjs',
+    'browser-first-cutover-startup.mjs',
+    'browser-first-cutover-signal.py',
+])
 
 
 def parse_command(value):
@@ -39,9 +45,9 @@ def parse_command(value):
     match = re.fullmatch(r'holaday-cutover-v1 observe ([a-f0-9]{32})', value)
     if match:
         return 'observe', match[1]
-    match = re.fullmatch(r'holaday-cutover-v1 ingress ([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})', value)
+    match = re.fullmatch(r'holaday-cutover-v1 (ingress|gateway) ([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})', value)
     if match:
-        return 'ingress', match[1]
+        return match[1], match[2]
     raise RuntimeError(ERROR)
 
 
@@ -98,26 +104,55 @@ def read_verified_file(path, expected_digest=None, owner=0, limit=1024 * 1024):
 
 
 def verify_ingress_bundle(root, owner=0):
-    """Fixed complete module closure, immutable to application users. No upload API."""
+    return verify_bundle(root, owner, INGRESS_MODULES, 'browser-first-cutover-ingress-session.mjs')
+
+
+def verify_gateway_bundle(root, owner=0):
+    return verify_bundle(root, owner, GATEWAY_MODULES, 'browser-first-cutover-gateway-session.mjs')
+
+
+def verify_bundle(root, owner, modules, entry):
+    """Fixed module/resource closure, immutable to application users. No upload API."""
     root = pathlib.Path(root)
     before = root.lstat()
     if (not stat.S_ISDIR(before.st_mode) or before.st_uid != owner or
             stat.S_IMODE(before.st_mode) != 0o700 or root.resolve() != root or
-            {p.name for p in root.iterdir()} != INGRESS_MODULES | {'bundle.json'}):
+            {p.name for p in root.iterdir()} != modules | {'bundle.json'}):
         raise RuntimeError(ERROR)
     manifest = json.loads(read_verified_file(root / 'bundle.json', owner=owner, limit=16 * 1024))
     if (set(manifest) != {'schemaVersion', 'files'} or manifest['schemaVersion'] != 1 or
-            not isinstance(manifest['files'], dict) or set(manifest['files']) != INGRESS_MODULES):
+            not isinstance(manifest['files'], dict) or set(manifest['files']) != modules):
         raise RuntimeError(ERROR)
     for name, digest in manifest['files'].items():
         if not isinstance(digest, str) or not re.fullmatch('[a-f0-9]{64}', digest):
             raise RuntimeError(ERROR)
         read_verified_file(root / name, digest, owner=owner)
+    # The existing payment adapter resolves this relative to its module, not the
+    # working directory. Reject an incomplete package BEFORE creating a session
+    # or journaling/installing an ingress fence. The policy remains unchanged.
+    try:
+        folders = [root.parent / 'ops', root.parent / 'ops' / 'aliyun-edge']
+        stats = []
+        for folder in folders:
+            value = folder.lstat()
+            if (not stat.S_ISDIR(value.st_mode) or value.st_uid != owner or
+                    stat.S_IMODE(value.st_mode) != 0o700 or folder.resolve() != folder):
+                raise RuntimeError(ERROR)
+            stats.append(value)
+        read_verified_file(folders[-1] / 'holaday-payment-ingress.nft',
+                           'de27f46f3bdad7d0c239c18a44e2775ef5c27e936d1a859f3f81d8fb8ee1cdb2',
+                           owner=owner)
+        signature = lambda s: (s.st_dev, s.st_ino, s.st_mode, s.st_uid, s.st_mtime_ns, s.st_ctime_ns)
+        if any(signature(before) != signature(folder.lstat()) or folder.resolve() != folder
+               for before, folder in zip(stats, folders)):
+            raise RuntimeError(ERROR)
+    except OSError as error:
+        raise RuntimeError(ERROR) from error
     current = root.lstat()
     if (before.st_dev, before.st_ino, before.st_mtime_ns, before.st_ctime_ns) != (
             current.st_dev, current.st_ino, current.st_mtime_ns, current.st_ctime_ns):
         raise RuntimeError(ERROR)
-    return root / 'browser-first-cutover-ingress-session.mjs'
+    return root / entry
 
 
 def install_sender(target, trusted_host, owner=0):
@@ -237,8 +272,9 @@ def main():
                 s.st_mode & (0o077 if folder == ROOT else 0o022) or folder.resolve() != folder):
             raise RuntimeError(ERROR)
     entry_digest = hashlib.sha256(read_verified_file(ENTRY)).hexdigest()
-    if action == 'ingress':
-        entry = verify_ingress_bundle(ROOT / 'ingress')
+    if action in ['ingress', 'gateway']:
+        entry = (verify_ingress_bundle(ROOT / 'ingress') if action == 'ingress'
+                 else verify_gateway_bundle(ROOT / 'gateway'))
         os.chdir('/')
         os.execve('/usr/bin/node', ['/usr/bin/node', str(entry), request_id],
                   {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': '/root',
