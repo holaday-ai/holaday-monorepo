@@ -212,6 +212,75 @@ describe('domestic payment cutover queries', () => {
       expect((await queryPaymentOrder(wx, fixture('wechat', value).io)).state).toBe('unknown');
     },
   );
+  it('recognizes a signed closed WeChat order when the provider omits amount', async () => {
+    // Real Native CLOSED responses omit both amount and transaction_id. Only
+    // the transport is replaced; the production SDK/signature verifier is real.
+    const response = {
+      appid: 'APP',
+      mchid: 'MERCHANT',
+      out_trade_no: 'PRIVATEORDER',
+      trade_state: 'CLOSED',
+    };
+    const f = fixture('wechat', response);
+    const result = await queryPaymentOrder(wx, f.io);
+    expect(result.state).toBe('closed');
+    expect(result.rawDigest).toBe(
+      createHash('sha256')
+        .update(f.kept[0] ?? '')
+        .digest('hex'),
+    );
+    expect(f.sent).toHaveLength(1);
+    expect(f.sent[0]?.init.method).toBe('GET');
+    expect(f.sent[0]?.init.body).toBeUndefined();
+  });
+  it.each([
+    { appid: 'OTHER' },
+    { mchid: 'OTHER' },
+    { out_trade_no: 'OTHER' },
+    { transaction_id: 'TRADE' },
+    { amount: null },
+    { amount: { total: 1, currency: 'CNY' } },
+    { amount: { total: 1234, currency: 'USD' } },
+    { amount: { total: 0, currency: 'CNY' } },
+    { amount: { total: 1234 } },
+  ])('does not accept conflicting or malformed closure evidence: %j', async (override) => {
+    const response = {
+      appid: 'APP',
+      mchid: 'MERCHANT',
+      out_trade_no: 'PRIVATEORDER',
+      trade_state: 'CLOSED',
+      ...override,
+    };
+    expect((await queryPaymentOrder(wx, fixture('wechat', response).io)).state).toBe('unknown');
+  });
+  it.each(['SUCCESS', 'NOTPAY', 'REFUND', 'USERPAYING', 'PAYERROR'])(
+    'still requires amount for a non-closed WeChat response: %s',
+    async (trade_state) => {
+      const response = {
+        appid: 'APP',
+        mchid: 'MERCHANT',
+        out_trade_no: 'PRIVATEORDER',
+        trade_state,
+        ...(trade_state === 'SUCCESS' ? { transaction_id: 'TRADE' } : {}),
+      };
+      expect((await queryPaymentOrder(wx, fixture('wechat', response).io)).state).toBe('unknown');
+    },
+  );
+  it('does not accept missing-amount closure over a local settlement or invalid signature', async () => {
+    const response = {
+      appid: 'APP',
+      mchid: 'MERCHANT',
+      out_trade_no: 'PRIVATEORDER',
+      trade_state: 'CLOSED',
+    };
+    const settlement = { transactionId: 'TRADE', amountCents: 1234, currency: 'CNY' };
+    expect(
+      (await queryPaymentOrder({ ...wx, settlement }, fixture('wechat', response).io)).state,
+    ).toBe('unknown');
+    await expect(queryPaymentOrder(wx, fixture('wechat', response, true).io)).rejects.toThrow(
+      'MAINTENANCE_PAYMENT_QUERY_FAILED',
+    );
+  });
   it.each(['seller', 'amount', 'order'])('rejects mismatched Alipay %s', async (field) => {
     const value = alipayOrder();
     if (field === 'seller') value.seller_id = 'OTHER';

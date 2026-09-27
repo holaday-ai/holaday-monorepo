@@ -2,6 +2,38 @@
 
 2026-09-26。不得据此放行生产或宣称真实支付方重投成功。
 
+## 2026-09-27：微信4笔历史订单已取得真实签名核对结果
+
+使用本次会话核实的原配置和现有只读查询器，在两次只读数据库事务之间执行4次微信商户订单GET查询。没有访问商户后台、改变登录或配置，也没有创建、支付、关单、退款、补结算或PayPal操作。2026-09-27 09:14:51 UTC开始的支付方结果：4/4 HTTP200且真实签名验证通过；商户号、AppID与商户订单号逐一一致。数据库前后完整被选字段一致，两个原网关的进程身份、配置及所用签名/验证文件摘要在核查期间不变。
+
+| 本地记录 | 支付方状态 | 已核清的结果 |
+| --- | --- | --- |
+| completed 1笔 | SUCCESS | 金额、币种、交易号与本地结算记录一致，判定settled；本地完成时间2026-08-04 15:14:56.168，是原微信测试的历史记录，不是本轮新付款 |
+| pending 3笔 | CLOSED | 签名及商户/应用/订单身份一致，无transaction_id；响应未返回amount，不能声称已核对不存在的金额；按微信关闭状态解释为closed，本地pending原样保留 |
+
+首次查询器将后三笔保留unknown，原因是本次新增运维工具把所有状态的amount都视为必填，而真实Native CLOSED响应省略该字段。微信官方[Transaction类型](https://github.com/wechatpay-apiv3/wechatpay-go/blob/main/docs/payments/Transaction.md)将amount标为可选，[Native状态说明](https://pay.wechatpay.cn/doc/v3/merchant/4012791891)区分未支付转CLOSED与支付成功转REFUND。只修`payment-cutover-query.ts`：签名和精确三项身份通过、无本地结算、无transaction_id时允许CLOSED省略amount；若amount提供则仍须合法且匹配。SUCCESS/NOTPAY仍要求金额，错误商户/金额/签名、退款、冲突结算仍拒绝或unknown。没有修改原微信接入、回调、结算、权益或额度规则。
+
+16项回归新增，其中真实缺字段形态先RED（unknown而非closed）后GREEN，错误签名/三项身份/金额/币种/本地结算及其他状态覆盖保留。没有重复请求支付方：09:17:17 UTC以原验证配置离线回放刚保存的4份签名原文，使用各自原观测时间，结果为3closed+1settled。离线回放不是新的动态支付观察，也不是实际回调重投或生产切换恢复演练。
+
+私密证据目录均0700、文件0600，原文/订单号不提交Git：
+
+- 原始核查：`/private/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-wechat-readonly-6IIU4v`，`provider-results.json` SHA256 `663f52f8ca5e30a0fc159269b87e5ed87d994977dd1fe60a24584dbe38e3409e`；包含查询前后scope。
+- 离线重验：`/private/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-wechat-readonly-BpLN76`，`provider-results.json` SHA256 `4b44785356d91922ef3767b2e5ae14c1f5c8f21f2677f491d2139ff57fe0b166`，原观测时间保留；回放源码摘要`7dc7dd1372e3c33e2f48c77e17014a3af73e1ebef03c585d0c81d5c613d53cd0`。
+
+本轮国内支付完整8文件99/99通过；应用typecheck与查询器/测试显式严格tsc通过，触及2文件Biome通过。首次全套在沙箱中监听用例`src/index-listener.test.ts`失败，带本机临时监听权限后同一全套通过，没有改该测试或监听逻辑；第一次QA在本地esbuild解析退出，未连接服务器，改为复用已安装tsx的构建依赖后执行4次查询。日志`/tmp/holaday-wechat-closed-{red,green,suite,suite-final,types}.log`保留。
+
+既有普通/partner结算幂等专项2文件40/40通过，日志`/tmp/holaday-wechat-closed-settlement-final.log`；首次Vitest配置临时编译被工作树EPERM阻止，获准后完整运行。该套件中的PayPal为原有本地合成用例，没有访问真实PayPal。阶段观察相关原有inventory/journal基线68/68通过，但本轮没有修改这两个模块，不能把基线描述为新完成的现场接线。
+
+**已收口的是原微信编号与4笔历史订单核查，不是Task4–6或支付恢复演练。** 不再要求用户重复提供编号或重做微信接入；最终切换时仍需按原计划检查当时的新鲜订单集合。本次没有生产发布。
+
+## 2026-09-27：复用原微信配置和历史完成记录，不重新接入
+
+用户提供原编号并提醒微信此前已测试。09:03:45 UTC只读核对4010/4011对应两个既有release的指定.env：AppID与商户号完全一致，且与9月26日4010启动环境已保存的SHA256逐一匹配。用户提供的编号实际对应`WX_MCHID`，不是`WX_APPID`；已在会话中返回准确字段，不改环境配置。AppID摘要为`5ab10623050828fc36fb20c00ec80494c766d1e1abac693f927959482318a76b`，商户号摘要为`91d1e9e6f8e09826510ae309c82625f22ba3edca6c0797fe82cf5b594f0c94d9`。完整编号不纳入Git。
+
+9月26日13:27:49 UTC的只读数据库证据包含微信completed 1笔（有provider capture ID）、pending 3笔。因此不能再将微信描述为“从未接入/未测试”，也不再要求用户重复提供这组编号。用户要求避免重复劳动：历史接入和配置证据复用；本次只补尚未取得的支付方订单对照、切换恢复证据和发生变化后的必要检查。
+
+上述来源是用户输入、现有服务器配置和历史数据库记录，不是商户后台截图，也不单独证明实际支付方状态或失败重投。微信商户后台的工具策略拒绝仍有效，不换通道访问该后台；既有只读订单查询与后台身份取证区分。PayPal全部延期不变。本节未创建订单、付款、退款、关单、补权益、修改配置或部署。
+
 ## 2026-09-27 最新授权：用户本人小额支付演练同意，尚未执行
 
 用户对上一轮“小额测试由你本人付款，金额先确认”的请求回复“同意”。允许安排用户本人完成的非PayPal测试付款；具体金额、商品/权益、时点及验证步骤仍须先说明并确认。不是代理代付款、退款、直接补发权益或改历史订单的许可。本次没有创建订单、收付款或调用退款接口。

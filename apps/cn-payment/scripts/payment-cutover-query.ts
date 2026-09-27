@@ -57,7 +57,7 @@ const wechatResponse = z.object({
   out_trade_no: text,
   transaction_id: text.optional(),
   trade_state: text,
-  amount: z.object({ total: money, currency: z.literal('CNY') }),
+  amount: z.object({ total: money, currency: z.literal('CNY') }).optional(),
 });
 export type PaymentObservation = {
   provider: 'alipay' | 'wechat';
@@ -223,15 +223,28 @@ export async function queryPaymentOrder(value: unknown, io: QueryIO): Promise<Pa
         order.data.out_trade_no !== input.orderId ||
         order.data.mchid !== input.merchantId ||
         order.data.appid !== input.appId ||
-        order.data.amount.total !== input.amountCents
+        (order.data.amount !== undefined && order.data.amount.total !== input.amountCents)
       )
         return result;
+      // Native CLOSED can omit amount. A signed terminal closure bound to the
+      // exact app/merchant/order is not a money-matched settlement. Never extend
+      // this exception to paid/waiting orders, conflicts or malformed amounts.
+      // https://github.com/wechatpay-apiv3/wechatpay-go/blob/main/docs/payments/Transaction.md
+      if (
+        order.data.trade_state === 'CLOSED' &&
+        input.settlement === null &&
+        order.data.transaction_id === undefined
+      ) {
+        result.state = 'closed';
+        return result;
+      }
+      if (order.data.amount === undefined) return result;
       if (
         input.settlement === null &&
         !order.data.transaction_id &&
-        ['NOTPAY', 'CLOSED'].includes(order.data.trade_state)
+        order.data.trade_state === 'NOTPAY'
       ) {
-        result.state = order.data.trade_state === 'NOTPAY' ? 'unpaid-valid' : 'closed';
+        result.state = 'unpaid-valid';
         return result;
       }
       if (order.data.trade_state !== 'SUCCESS' || !order.data.transaction_id) return result;
