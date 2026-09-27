@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 夜间续跑：本机入口生命周期已接合，双机现场执行仍待完成
+
+承接 `b6f9263b`，Task4 原 BASE844c2ced不变。在原 `browser-first-cutover-host.mjs` 增加 `createFirstCutoverIngressLifecycle`，直接组合已有 fence store、文件隔离、正式 nginx 及 TLS 探测。构造只观察；原真实 journal 的阶段意图、完整记录摘要、受保护入口清单在效果边界核验。隔离、全隔离、同实例恢复每项一次，禁止并发和不确定重载的重试；错误保留 installing/restoring 文件，不伪装成功。实际 writer 与候选控制观察仍为必需接口。没有新增通用命令/RPC或修改已安装只读通道。
+
+新增十项测试：真实临时文件/链接/journal/回执的完整入口循环、未写意图、审批漂移、确认丢失、错误boot、操作中阶段漂移、并发、关闭态候选、生存写入者及缺观察器/过期。最初6项因缺方法RED；实施后测试真实journal拒绝缺manifest，定位为新夹具缺原有前置步骤，补合成manifest/backup/bootstrap后通过，未放宽原journal。额外4项为接线回归。原Linux实体夹具改为消费新生命周期，不再手动拼接三个模块。真实网络/进程/文件；业务核清、备份和候选仍是明确合成前置条件，不能当整流程或双机现场成功。
+
+本轮完整browser709/709、0跳过，`/tmp/holaday-ingress-lifecycle-browser.log`；完整ops退出0，120/59/16/537及Python7全部通过、0跳过，`/tmp/holaday-ingress-lifecycle-ops.log`。Linux首次及格式化后最终复验均55/55、0跳过、退出0，实体三站点隔离/恢复/无关长连接通过，最终`/tmp/holaday-ingress-lifecycle-linux-final.log`。三代码文件Biome、shell语法和diff-check通过。重型验证串行且均已结束，无生产SSH/服务/数据库/支付/PayPal/密钥操作，未重跑应用全套、MySQL恢复及整分支审查；旧`__pycache__`保留。
+
+下一步不是复做nginx/HTTP/商户/密钥：将这个本机实例接入固定双机现场效果处理（原通道仍仅probe/observe），提供真实受保护现场审批及writer/control观察；继续完整site I/O、首次执行入口、真正停写备份/隔离恢复、非PayPal恢复证据与整链故障演练/全分支审查。当前Task4–6仍部分完成，不调用task-done、不推为可发布候选。夜间自动化保持原ACTIVE续跑，无需重复询问已授权动作。
+
 ### 2026-09-28：正式 nginx 生效接线完成，保留共享站点连接
 
 承接`ea873cc4`、Task4原BASE844c2ced，新增固定nginx测试/重载与Linux进程观察，接入现有apply和restore的默认I/O。原成对注入接口保留；半套替代接口、缺窗口、过期或非Linux/root在文件修改前拒绝。完整配置、同一journal/回执及master/服务代际核对后只发送一次reload；超时/丢确认不重试、不stop/quit、不强制终止worker。

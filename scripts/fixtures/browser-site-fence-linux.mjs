@@ -9,14 +9,8 @@ import * as fs from 'node:fs/promises';
 import http from 'node:http';
 import https from 'node:https';
 import { promisify } from 'node:util';
-import {
-  applyCutoverFence,
-  describeCutoverSite,
-  probeCutoverIngress,
-  restoreCutoverIngress,
-} from '/source/browser-first-cutover-fence.mjs';
-import { createFirstCutoverFenceStore } from '/source/browser-first-cutover-host.mjs';
-import { createCutoverIngressFiles } from '/source/browser-first-cutover-ingress-files.mjs';
+import { describeCutoverSite, probeCutoverIngress } from '/source/browser-first-cutover-fence.mjs';
+import { createFirstCutoverIngressLifecycle } from '/source/browser-first-cutover-host.mjs';
 import { readCutoverNginxRuntime } from '/source/browser-first-cutover-nginx.mjs';
 import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 
@@ -195,21 +189,31 @@ function request(site, uri, { method = 'GET', body = '', host, ipv6 = false, hea
 }
 const inventoryDigest = 'a'.repeat(64);
 const maintenanceEndsAtMs = Date.now() + 60000;
+const manifest = { synthetic: 'network-ingress-lifecycle-only' };
 await fs.mkdir('/var/lib/holaday-deploy/maintenance', { recursive: true, mode: 0o700 });
 const journal = await acquireReleaseJournal('/var/lib/holaday-deploy/maintenance', {
   kind: 'first-cutover',
   candidate: 'b'.repeat(40),
   configDigest: 'c'.repeat(64),
-  migrationDigest: 'd'.repeat(64),
+  migrationDigest: hash(JSON.stringify(manifest)),
   legacyDigest: 'e'.repeat(64),
   inventoryDigest,
   attempt: '11111111-1111-4111-8111-111111111111',
 });
+await journal.bindManifest(manifest);
 const binding = await journal.assertOwnership();
 const io = {
   now: Date.now,
-  assertJournalOwnership: journal.assertOwnership,
+  journal,
   readApprovedIngress: async () => ({ inventoryDigest, unknownIngress: [], files: sites }),
+  // Business quiescence remains an explicit synthetic boundary of this fixture.
+  observeWriters: async () => ({
+    inventoryDigest,
+    observedAtMs: Date.now(),
+    existingSockets: 0,
+    internalWriters: 0,
+    producersRunning: 0,
+  }),
   nginx: {
     maintenanceEndsAtMs,
     exec: async (file, args, options) => {
@@ -225,14 +229,6 @@ const io = {
     },
   },
   ingressProbe: {
-    // Only the non-HTTP writer facts remain synthetic in this network fixture.
-    observeWriters: async () => ({
-      inventoryDigest,
-      observedAtMs: Date.now(),
-      existingSockets: 0,
-      internalWriters: 0,
-      producersRunning: 0,
-    }),
     request: (options, callback) => {
       const site = sites.find((s) => s.locations[0].serverName === options.servername);
       assert(site);
@@ -240,23 +236,13 @@ const io = {
       return https.request({ ...options, port: site.port, ca: qaCertificate }, callback);
     },
   },
-  verifyOpenedIdentity: async (identity) => ({ identity, mode: 'serving' }),
+  verifyOpenedIdentity: async (identity) => ({
+    identity,
+    mode: 'serving',
+    idle: false,
+    needsReconciliation: true,
+  }),
 };
-Object.assign(
-  io,
-  await createFirstCutoverFenceStore({ binding, files: sites, maintenanceEndsAtMs }, io),
-);
-Object.assign(
-  io,
-  await createCutoverIngressFiles(
-    {
-      binding,
-      files: sites,
-      maintenanceEndsAtMs,
-    },
-    io,
-  ),
-);
 const qaCertificate = await fs.readFile(`${root}/cert.pem`);
 for (const [name, operation] of Object.entries(io)) {
   if (name === 'now' || typeof operation !== 'function') continue;
@@ -270,6 +256,8 @@ for (const [name, operation] of Object.entries(io)) {
     }
   };
 }
+const ingress = await createFirstCutoverIngressLifecycle({ binding, maintenanceEndsAtMs }, io);
+await journal.persist('prepared', { candidate: binding.candidate });
 try {
   await render();
   await exec('nginx', ['-c', `${root}/nginx.conf`]);
@@ -285,14 +273,24 @@ try {
     (p) => `${p.pid}:${p.start}`,
   );
   for (const stage of ['orders', 'all-writers']) {
-    await applyCutoverFence({ inventoryDigest, stage }, io);
+    if (stage === 'orders') {
+      await journal.persist('orders_fenced', { candidate: binding.candidate });
+      await ingress.fenceOrders();
+    } else {
+      // Journal steps below model business/producer completion only. The nginx,
+      // file and network effects are actual; no DB or provider is represented.
+      for (const phase of ['legacy_settled', 'producers_stopped', 'all_fenced'])
+        await journal.persist(phase, { candidate: binding.candidate });
+      await ingress.fenceAll();
+      assert.equal((await ingress.verifyFence()).existingSockets, 0);
+    }
     if (stage === 'orders') {
       // Trusted fixture CA above is explicit; untrusted TLS must never become
       // a successful maintenance observation or fall back to HTTP.
       const errors = [];
       await assert.rejects(
         probeCutoverIngress(await io.readApprovedIngress(), stage, {
-          observeWriters: io.ingressProbe.observeWriters,
+          observeWriters: io.observeWriters,
           request: (options, callback) => {
             const site = sites.find((s) => s.locations[0].serverName === options.servername);
             const req = https.request({ ...options, port: site.port, ca: [] }, callback);
@@ -371,11 +369,26 @@ try {
       `${stage}: real nginx IPv4/IPv6, chained TLS, body/URI, static, default-host and WS probes passed`,
     );
   }
-  await restoreCutoverIngress(
-    { inventoryDigest, identity: { candidate: 'b'.repeat(40), bootId: 'c'.repeat(32) } },
-    io,
-  );
-  assert.equal((await io.readFenceReceipt()).phase, 'restored');
+  await journal.persist('stopped', { candidate: binding.candidate });
+  await journal.persist('backup_verified', { candidate: binding.candidate });
+  await journal.bindBackupReceipt({
+    ...binding,
+    restoredAtMs: Date.now(),
+    backupDigest: '1'.repeat(64),
+    databaseIdentityDigest: '2'.repeat(64),
+    isolatedTargetDigest: '3'.repeat(64),
+    encryptionProfileDigest: '4'.repeat(64),
+    comparisonDigest: '5'.repeat(64),
+    schemaDigest: '6'.repeat(64),
+    businessDigest: '7'.repeat(64),
+  });
+  await journal.persist('migration_started', { candidate: binding.candidate });
+  await journal.bindBootstrapSeed('8'.repeat(32));
+  await journal.persist('candidate_started', { candidate: binding.candidate });
+  const identity = { candidate: binding.candidate, bootId: 'c'.repeat(32) };
+  await journal.persist('verified', { candidate: binding.candidate, identity });
+  await ingress.restoreIngress(identity);
+  assert.equal((await ingress.readFenceReceipt()).phase, 'restored');
   const runtime = await readCutoverNginxRuntime();
   assert.ok(
     runtime.workers.some((p) => originalWorkers.includes(`${p.pid}:${p.start}`) && p.shuttingDown),

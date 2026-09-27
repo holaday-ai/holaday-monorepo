@@ -47,6 +47,16 @@
 
 现有Linux实体夹具已使用此默认控制器和默认PID/proc读取，仅将nginx配置路径映射到容器的合成多站点配置。需要容器自有PID/network namespace中的`NET_ADMIN`和`SYS_PTRACE`，不挂宿主PID或凭据。真实无关长连接贯穿两次维护重载和恢复仍可传输数据；真实目标业务响应在隔离时拒绝、恢复后正常。该结果不代表双机现场副作用通道或整项切换已完成。
 
+### 本机入口生命周期组装（2026-09-28）
+
+`createFirstCutoverIngressLifecycle({binding,maintenanceEndsAtMs},io)` 复用原 fence store、文件安装、nginx 生效及 TLS 探测，返回 `fenceOrders()`、`fenceAll()`、`verifyFence()`、`restoreIngress(identity)`、`readFenceReceipt()`。现场调用方必须在持有原真实共享 journal 的 preflight/prepared 阶段建立实例；构造仅观察，不创建备份或改站点。之后分别要求 journal 的 orders_fenced、all_fenced、verified 意图。单次动作期间固定完整 journal 记录摘要，不能在阶段或子事件改变后继续副作用。
+
+`io.journal` 必须是实际持锁对象；`readApprovedIngress` 来自受保护现场清单，完整配置在构造时封存并在每个效果边界重读比较。`observeWriters` 和 `verifyOpenedIdentity` 仍是必需的现场读接口，不接受默认零写入者或手工成功标志。恢复要求 journal 的真实候选 SHA/boot 与实际 serving/非 idle/需 reconciliation 状态一致。使用当前本机生成的持久回执，不接受上传回执，也不接管已有半途操作。
+
+相同实例上的并发动作被拒绝。任一修改动作失败后，后续修改都停止；丢失重载确认不重试、不自动恢复。只读回执仍可核查（仍须原窗口、journal 和审批有效），其中 installing/restoring 不构成成功。生产默认使用 Linux/root、固定配置文件处理、真实 nginx/PID/proc 和 TLS；测试可注入受信底层 I/O，不存在把这些接口作为外部 JSON 授权的入口。
+
+原 Linux 网络夹具已改为直接调用此生命周期，而非在夹具手动组装三个模块。它实际执行三个站点的本机文件、回执、重载、双栈 TLS、恢复及无关长连接保护；业务核清、备份/迁移/候选状态仍是明确的合成 journal 前置条件。三个站点在同一隔离容器里，不是双机现场效果通道，也不是完整 `createFirstCutoverHostAdapter` 的生产 site I/O。后续必须在完整现场适配中为各主机接上该实例、真实 writer/控制观察以及受限跨主机传输，不能将本段独立通过写成首次发布完成。
+
 ### 真实入口探测（2026-09-27）
 
 `verifyCutoverFence` 未提供替代 `probeIngress` 时，默认调用同模块的 `probeCutoverIngress(approval, stage, io.ingressProbe)`。它只向三个已审核站点配置所描述的本机443端口发送请求：IPv4/IPv6、固定SNI/Host、正常证书验证、无凭据的无效回调，以及真实WebSocket Upgrade请求。不跟随重定向、不重试、不降级HTTP；每个请求最多5秒和64KiB响应。所有请求结束后才返回完整观察；超时、截断、错误证书或成功Upgrade拒绝整次观察。

@@ -5,6 +5,12 @@ import { isDeepStrictEqual } from 'node:util';
 import { collectCutoverEvidence } from './browser-cutover-evidence.mjs';
 import { backupAndRestoreCheck } from './browser-first-cutover-backup.mjs';
 import {
+  applyCutoverFence,
+  restoreCutoverIngress,
+  verifyCutoverFence,
+} from './browser-first-cutover-fence.mjs';
+import { createCutoverIngressFiles } from './browser-first-cutover-ingress-files.mjs';
+import {
   classifyFirstCutoverHostPair,
   classifyFirstCutoverRetirementPair,
 } from './browser-first-cutover-inventory.mjs';
@@ -1214,6 +1220,187 @@ export async function readFirstCutoverApproval(options, io = system) {
     throw new Error('CUTOVER_APPROVAL_UNPROVEN');
   } finally {
     await handle?.close();
+  }
+}
+
+/** Local ingress slice of the existing first-cutover lifecycle. The site owns
+ * the protected approval reader and LIVE shared journal; these callbacks are
+ * trusted code, not a deserialized authorization or a remote success report.
+ * Construction observes only. Each mutation requires the persisted phase intent,
+ * pins that journal revision throughout the operation, and is attempted once.
+ * Files/store/nginx/TLS default to the actual local Linux implementations.
+ * This does not replace business settlement, stop proof, or cross-host transport.
+ */
+export async function createFirstCutoverIngressLifecycle(input, overrides = {}) {
+  const reject = () => {
+    throw new Error('CUTOVER_INGRESS_LIFECYCLE_UNPROVEN');
+  };
+  try {
+    const io = { platform: process.platform, uid: process.getuid?.(), now: Date.now, ...overrides };
+    const { binding, maintenanceEndsAtMs } = structuredClone(input);
+    if (
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      !Number.isSafeInteger(maintenanceEndsAtMs) ||
+      ['assertOwnership', 'readFirstCutoverEffects'].some(
+        (k) => typeof io.journal?.[k] !== 'function',
+      ) ||
+      ['readApprovedIngress', 'observeWriters', 'verifyOpenedIdentity'].some(
+        (k) => typeof io[k] !== 'function',
+      )
+    )
+      reject();
+    const journal = {
+      assertOwnership: io.journal.assertOwnership.bind(io.journal),
+      readFirstCutoverEffects: io.journal.readFirstCutoverEffects.bind(io.journal),
+    };
+    let last = -1;
+    let approval = null;
+    let revision;
+    let busy = false;
+    let failed = false;
+    const attempted = new Set();
+    const clock = () => {
+      const now = io.now();
+      if (!Number.isSafeInteger(now) || now < 0 || now < last || now >= maintenanceEndsAtMs)
+        reject();
+      last = now;
+    };
+    const guard = async (phases) => {
+      clock();
+      if (!isDeepStrictEqual(await journal.assertOwnership(), binding)) reject();
+      const record = await journal.readFirstCutoverEffects();
+      if (
+        !Object.entries(binding).every(([key, value]) => record[key] === value) ||
+        !/^[a-f0-9]{64}$/.test(record.recordDigest ?? '') ||
+        (revision !== undefined && revision !== record.recordDigest) ||
+        (phases && !phases.includes(record.phase))
+      )
+        reject();
+      const current = structuredClone(await io.readApprovedIngress());
+      if (
+        current?.inventoryDigest !== binding.inventoryDigest ||
+        !Array.isArray(current.unknownIngress) ||
+        current.unknownIngress.length ||
+        (approval && !isDeepStrictEqual(current, approval))
+      )
+        reject();
+      clock();
+      return { record, current };
+    };
+    const initial = await guard(['preflight', 'prepared']);
+    approval = initial.current;
+    revision = initial.record.recordDigest;
+    const assertJournalOwnership = async () => {
+      await guard();
+      return structuredClone(binding);
+    };
+    const dependencies = {
+      ...io,
+      assertJournalOwnership,
+      readApprovedIngress: async () => {
+        await guard();
+        return structuredClone(approval);
+      },
+      nginx: { ...io.nginx, maintenanceEndsAtMs },
+      ingressProbe: { ...io.ingressProbe, observeWriters: io.observeWriters },
+      verifyOpenedIdentity: async (identity) => {
+        const { record } = await guard(['verified']);
+        if (
+          !isDeepStrictEqual(record.identity, identity) ||
+          identity.candidate !== binding.candidate
+        )
+          reject();
+        const opened = await io.verifyOpenedIdentity(structuredClone(identity));
+        if (
+          !isDeepStrictEqual(opened?.identity, identity) ||
+          opened.mode !== 'serving' ||
+          opened.idle !== false ||
+          opened.needsReconciliation !== true
+        )
+          reject();
+        await guard(['verified']);
+        return opened;
+      },
+    };
+    const args = { binding, files: approval.files, maintenanceEndsAtMs };
+    Object.assign(dependencies, await createFirstCutoverFenceStore(args, dependencies));
+    Object.assign(dependencies, await createCutoverIngressFiles(args, dependencies));
+    await guard(['preflight', 'prepared']);
+    revision = undefined;
+    const run = async (name, phases, operation, mutation = false) => {
+      if (busy || (mutation && (failed || attempted.has(name)))) reject();
+      busy = true;
+      if (mutation) attempted.add(name);
+      try {
+        const { record } = await guard(phases);
+        revision = record.recordDigest;
+        const value = await operation();
+        await guard(phases);
+        return value;
+      } catch {
+        if (mutation) failed = true;
+        reject();
+      } finally {
+        revision = undefined;
+        busy = false;
+      }
+    };
+    const verifyPhases = [
+      'all_fenced',
+      'stopped',
+      'backup_verified',
+      'migration_started',
+      'candidate_started',
+      'verified',
+    ];
+    return {
+      fenceOrders: () =>
+        run(
+          'orders',
+          ['orders_fenced'],
+          () =>
+            applyCutoverFence(
+              { inventoryDigest: binding.inventoryDigest, stage: 'orders' },
+              dependencies,
+            ),
+          true,
+        ),
+      fenceAll: () =>
+        run(
+          'all-writers',
+          ['all_fenced'],
+          () =>
+            applyCutoverFence(
+              { inventoryDigest: binding.inventoryDigest, stage: 'all-writers' },
+              dependencies,
+            ),
+          true,
+        ),
+      verifyFence: () =>
+        run('verify', verifyPhases, () =>
+          verifyCutoverFence(
+            { inventoryDigest: binding.inventoryDigest, stage: 'all-writers' },
+            dependencies,
+          ),
+        ),
+      restoreIngress: (identity) =>
+        run(
+          'restore',
+          ['verified'],
+          () =>
+            restoreCutoverIngress(
+              { inventoryDigest: binding.inventoryDigest, identity: structuredClone(identity) },
+              dependencies,
+            ),
+          true,
+        ),
+      // Preserve read-only access to an uncertain installing/restoring receipt;
+      // it is diagnostic evidence, never an instruction to replay the operation.
+      readFenceReceipt: () => run('receipt', undefined, () => dependencies.readFenceReceipt()),
+    };
+  } catch {
+    reject();
   }
 }
 
