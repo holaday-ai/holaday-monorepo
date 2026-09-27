@@ -37,6 +37,16 @@
 
 ## 必须连接的现场接口
 
+### 真实入口探测（2026-09-27）
+
+`verifyCutoverFence` 未提供替代 `probeIngress` 时，默认调用同模块的 `probeCutoverIngress(approval, stage, io.ingressProbe)`。它只向三个已审核站点配置所描述的本机443端口发送请求：IPv4/IPv6、固定SNI/Host、正常证书验证、无凭据的无效回调，以及真实WebSocket Upgrade请求。不跟随重定向、不重试、不降级HTTP；每个请求最多5秒和64KiB响应。所有请求结束后才返回完整观察；超时、截断、错误证书或成功Upgrade拒绝整次观察。
+
+业务前缀使用专用测试后缀，精确`/ws`保持原址，避免把`/healthz`精确健康例外误当成被隔离的业务前缀。结果保留实际HTTP状态和缓存头；原verify仍负责判断503/no-store或无效签名拒绝是否符合当前阶段。
+
+现场适配必须另外提供`ingressProbe.observeWriters()`，返回同inventoryDigest下的新鲜`existingSockets / internalWriters / producersRunning / observedAtMs`。探测前后都读取，缺失、漂移、无效或过期拒绝；非零计数原样保留，不能从HTTP 503推导零写入者。它不自动实现双机观察合并、业务核清、nginx重载或完整生产适配。
+
+隔离Linux验收现复用该生产探测器：实际nginx、证书、双栈和37个路由/监听组合，两阶段隔离后恢复原链接/UID501文件；不可信证书37项均拒绝。测试使用已有`holaday-first-cutover-network:qa`，只读挂载scripts/ops、`--network none --cap-add NET_ADMIN`；`holaday-cutover-ssh:qa`不含nft，不能用于此项。应用后端及非HTTP写入者计数仍为合成数据，本测试不是生产停写证明，也不访问PayPal服务。
+
 ### 退役后的联合观察（2026-09-27）
 
 `createFirstCutoverRetirementObserver({reviews,binding,legacyDigest}, {journal,readPair,readFenceReceipts,now})` 在副作用发生前采集并封存原始双机基线，实算旧版摘要必须与批准一致。后续 `read()` 使用新鲜双机观察，并在读取前后核对同一真实 journal 和维护入口回执；不会把当前现场重新生成为批准基线。

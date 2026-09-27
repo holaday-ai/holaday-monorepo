@@ -12,6 +12,7 @@ import { promisify } from 'node:util';
 import {
   applyCutoverFence,
   describeCutoverSite,
+  probeCutoverIngress,
   restoreCutoverIngress,
 } from '/source/browser-first-cutover-fence.mjs';
 import { createFirstCutoverFenceStore } from '/source/browser-first-cutover-host.mjs';
@@ -53,7 +54,7 @@ await exec('openssl', [
   '-subj',
   '/CN=holaday.ai',
   '-addext',
-  'subjectAltName=DNS:holaday.ai',
+  'subjectAltName=DNS:holaday.ai,DNS:hd-app.orangebench.tech,DNS:hd-pay.orangebench.tech',
   '-keyout',
   `${root}/key.pem`,
   '-out',
@@ -252,35 +253,22 @@ const io = {
       await sleep(50);
     }
   },
-  probeIngress: async (approval) => ({
-    inventoryDigest,
-    observedAtMs: Date.now(),
-    // Synthetic non-HTTP facts: never claim this fixture proves real writers stopped.
-    existingSockets: 0,
-    internalWriters: 0,
-    producersRunning: 0,
-    probes: await Promise.all(
-      approval.files.flatMap((site) =>
-        site.locations
-          .filter((r) => r.kind !== 'health')
-          .map(async (r) => {
-            const literal = r.selector.replace(/^(?:=|\^~) /, '');
-            const uri =
-              r.kind === 'business' && literal !== '/ws' ? `${literal}fixture-write` : literal;
-            const response = await request(site, uri, {
-              method: 'POST',
-              ipv6: r.listen.startsWith('[::]'),
-            });
-            return {
-              ...r,
-              path: site.path,
-              status: response.status,
-              noStore: response.headers['cache-control'] === 'no-store',
-            };
-          }),
-      ),
-    ),
-  }),
+  ingressProbe: {
+    // Only the non-HTTP writer facts remain synthetic in this network fixture.
+    observeWriters: async () => ({
+      inventoryDigest,
+      observedAtMs: Date.now(),
+      existingSockets: 0,
+      internalWriters: 0,
+      producersRunning: 0,
+    }),
+    request: (options, callback) => {
+      const site = sites.find((s) => s.locations[0].serverName === options.servername);
+      assert(site);
+      assert.equal(options.rejectUnauthorized, true);
+      return https.request({ ...options, port: site.port, ca: qaCertificate }, callback);
+    },
+  },
   verifyOpenedIdentity: async (identity) => ({ identity, mode: 'serving' }),
 };
 Object.assign(
@@ -298,19 +286,12 @@ Object.assign(
     io,
   ),
 );
+const qaCertificate = await fs.readFile(`${root}/cert.pem`);
 for (const [name, operation] of Object.entries(io)) {
-  if (name === 'now') continue;
+  if (name === 'now' || typeof operation !== 'function') continue;
   io[name] = async (...args) => {
     try {
       const value = await operation(...args);
-      if (name === 'probeIngress') {
-        const failures = value.probes.filter((p) =>
-          p.kind === 'business' || expectedStage === 'all-writers'
-            ? p.status !== 503 || !p.noStore
-            : p.status !== 401,
-        );
-        if (failures.length) console.error('unexpected HTTP probes:', JSON.stringify(failures));
-      }
       return value;
     } catch (error) {
       console.error(`fixture IO ${name}:`, error.message);
@@ -324,6 +305,26 @@ try {
   for (const stage of ['orders', 'all-writers']) {
     expectedStage = stage;
     await applyCutoverFence({ inventoryDigest, stage }, io);
+    if (stage === 'orders') {
+      // Trusted fixture CA above is explicit; untrusted TLS must never become
+      // a successful maintenance observation or fall back to HTTP.
+      const errors = [];
+      await assert.rejects(
+        probeCutoverIngress(await io.readApprovedIngress(), stage, {
+          observeWriters: io.ingressProbe.observeWriters,
+          request: (options, callback) => {
+            const site = sites.find((s) => s.locations[0].serverName === options.servername);
+            const req = https.request({ ...options, port: site.port, ca: [] }, callback);
+            req.on('error', (error) => errors.push(error.code));
+            return req;
+          },
+        }),
+        /CUTOVER_INGRESS_PROBE_UNPROVEN/,
+      );
+      assert.equal(errors.length, 37);
+      assert.ok(errors.every((code) => code === 'DEPTH_ZERO_SELF_SIGNED_CERT'));
+      console.log('TLS: untrusted certificates rejected for all 37 route/listener probes');
+    }
     const persisted = JSON.parse(
       await fs.readFile(
         `/var/lib/holaday-deploy/maintenance/${binding.attempt}.ingress.json`,

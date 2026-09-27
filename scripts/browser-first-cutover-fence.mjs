@@ -1,4 +1,5 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { request as httpsRequest } from 'node:https';
 import { isDeepStrictEqual } from 'node:util';
 import { installPaymentPortFence, verifyPaymentPortFence } from './browser-payment-port-fence.mjs';
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -229,6 +230,177 @@ function generate(bytes, file, stage) {
     generated = `${generated.slice(0, at)}\n add_header Cache-Control "no-store" always;\n return 503;\n${generated.slice(at)}`;
   return generated;
 }
+/** Actual local TLS probes for the three reviewed sites, not a writer detector.
+ * The site adapter must supply its current physical/business writer observation.
+ * No credentials, valid payment signature, remote destination or redirect follow.
+ */
+export async function probeCutoverIngress(approval, stage, overrides = {}) {
+  const io = { now: Date.now, request: httpsRequest, ...overrides };
+  const reject = () => {
+    throw new Error('CUTOVER_INGRESS_PROBE_UNPROVEN');
+  };
+  try {
+    const scope = structuredClone(approval);
+    const began = io.now();
+    if (
+      !Number.isSafeInteger(began) ||
+      began < 0 ||
+      !['orders', 'all-writers'].includes(stage) ||
+      !validDigest(scope?.inventoryDigest) ||
+      !Array.isArray(scope.unknownIngress) ||
+      scope.unknownIngress.length ||
+      !Array.isArray(scope.files) ||
+      !scope.files.length ||
+      scope.files.length > 3 ||
+      new Set(scope.files.map((f) => f.profile)).size !== scope.files.length ||
+      typeof io.observeWriters !== 'function'
+    )
+      reject();
+    const paths = {
+      'vultr-20260926': 'holaday',
+      'aliyun-app-20260926': 'hd-app.orangebench.tech',
+      'aliyun-pay-20260926': 'hd-pay.orangebench.tech',
+    };
+    for (const file of scope.files) {
+      validateSiteDescription(file);
+      if (file.path !== `/etc/nginx/sites-available/${paths[file.profile]}`) reject();
+    }
+    let lastTime = began;
+    const clock = () => {
+      const now = io.now();
+      if (!Number.isSafeInteger(now) || now < lastTime || now - began > 60000) reject();
+      lastTime = now;
+      return now;
+    };
+    const counts = ['existingSockets', 'internalWriters', 'producersRunning'];
+    const writers = async () => {
+      const observed = structuredClone(await io.observeWriters());
+      const now = clock();
+      if (
+        observed?.inventoryDigest !== scope.inventoryDigest ||
+        !Number.isSafeInteger(observed.observedAtMs) ||
+        observed.observedAtMs < 0 ||
+        observed.observedAtMs > now ||
+        now - observed.observedAtMs > 60000 ||
+        counts.some((k) => !Number.isSafeInteger(observed[k]) || observed[k] < 0)
+      )
+        reject();
+      return observed;
+    };
+    const before = await writers();
+    const targets = scope.files.flatMap((file) =>
+      file.locations.filter((r) => r.kind !== 'health').map((route) => ({ file, route })),
+    );
+    const observe = ({ file, route }) =>
+      new Promise((resolve, rejectRequest) => {
+        let req;
+        let timer;
+        let finished = false;
+        const finish = (error, value) => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          if (error) {
+            req?.destroy();
+            rejectRequest(new Error('CUTOVER_INGRESS_PROBE_UNPROVEN'));
+          } else resolve(value);
+        };
+        try {
+          clock();
+          const literal = route.selector.replace(/^(?:=|\^~) /, '');
+          const ws =
+            route.kind === 'business' && ['/ws', '/screencast-ws/', '/vnc-ws/'].includes(literal);
+          const uri =
+            route.kind === 'business' && !route.selector.startsWith('= ') && literal !== '/ws'
+              ? `${literal}__holaday_cutover_probe__`
+              : literal;
+          const headers = {
+            host: route.serverName,
+            'cache-control': 'no-cache',
+            connection: ws ? 'Upgrade' : 'close',
+            ...(ws
+              ? {
+                  upgrade: 'websocket',
+                  'sec-websocket-version': '13',
+                  'sec-websocket-key': randomBytes(16).toString('base64'),
+                }
+              : { 'content-type': 'application/json', 'content-length': '2' }),
+          };
+          req = io.request(
+            {
+              hostname: route.listen.startsWith('[::]') ? '::1' : '127.0.0.1',
+              port: 443,
+              servername: route.serverName,
+              rejectUnauthorized: true,
+              agent: false,
+              path: uri,
+              method: ws ? 'GET' : 'POST',
+              headers,
+            },
+            (res) => {
+              let bytes = 0;
+              res.on('data', (chunk) => {
+                bytes += chunk.length;
+                if (bytes > 65536) {
+                  res.destroy();
+                  finish(true);
+                }
+              });
+              res.once('aborted', () => finish(true));
+              res.once('error', () => finish(true));
+              res.once('end', () => {
+                if (
+                  !res.complete ||
+                  !Number.isInteger(res.statusCode) ||
+                  res.statusCode < 100 ||
+                  res.statusCode > 599
+                )
+                  return finish(true);
+                const cache = res.headers['cache-control'];
+                finish(null, {
+                  ...route,
+                  path: file.path,
+                  status: res.statusCode,
+                  noStore:
+                    typeof cache === 'string' &&
+                    cache
+                      .toLowerCase()
+                      .split(',')
+                      .some((v) => v.trim() === 'no-store'),
+                });
+              });
+            },
+          );
+          req.once('error', () => finish(true));
+          req.once('upgrade', (_res, socket) => {
+            socket.destroy();
+            finish(true);
+          });
+          timer = setTimeout(() => finish(true), 5000);
+          timer.unref?.();
+          req.end(ws ? undefined : '{}');
+        } catch {
+          finish(true);
+        }
+      });
+    // Await every bounded request before exposing a result/error. No half-success,
+    // detached socket, automatic retry, or caller-controlled concurrency target.
+    const results = await Promise.allSettled(targets.map(observe));
+    if (results.some((r) => r.status !== 'fulfilled')) reject();
+    const after = await writers();
+    if (counts.some((k) => before[k] !== after[k])) reject();
+    clock();
+    return {
+      inventoryDigest: scope.inventoryDigest,
+      observedAtMs: Math.min(began, before.observedAtMs, after.observedAtMs),
+      ...Object.fromEntries(counts.map((k) => [k, after[k]])),
+      probes: results.map((r) => r.value),
+    };
+  } catch {
+    reject();
+  }
+}
+
 async function context(input, io) {
   if (!validDigest(input.inventoryDigest)) fail();
   const binding = await io.assertJournalOwnership();
@@ -364,7 +536,10 @@ export async function verifyCutoverFence(input, io) {
     await paymentPorts(binding, approval, input.stage, io);
     for (const f of receipt.files)
       if (digest(await io.readConfig(f.path)) !== f.generatedDigest) fail();
-    const results = await io.probeIngress(approval, input.stage);
+    const results =
+      typeof io.probeIngress === 'function'
+        ? await io.probeIngress(approval, input.stage)
+        : await probeCutoverIngress(approval, input.stage, { ...io.ingressProbe, now: io.now });
     const now = io.now();
     if (
       results?.inventoryDigest !== input.inventoryDigest ||
