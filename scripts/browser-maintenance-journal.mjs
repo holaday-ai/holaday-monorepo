@@ -32,14 +32,32 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
   let currentIdentity;
   const startupEvents = [];
   const registrationEvents = [];
-  let registrationPhase;
+  const startupBatches = new Map();
+  const registrationBatches = new Map();
+  let eventHostMode;
+  const eventBatch = (event, batches) => {
+    if (!event || typeof event !== 'object' || Array.isArray(event)) throw unproven();
+    const { host, ...value } = event;
+    const mode = host === undefined ? 'local' : 'named';
+    if (
+      (host !== undefined && !['aliyun', 'vultr'].includes(host)) ||
+      (eventHostMode !== undefined && eventHostMode !== mode)
+    )
+      throw unproven();
+    const key = host ?? 'local';
+    return { value, mode, key, batch: batches.get(key) ?? { events: [], phase: undefined } };
+  };
   const registrationDone = () =>
-    registrationEvents.length >= 2 &&
-    registrationEvents.length === 2 + registrationEvents[1].registrations.length * 2;
-  const startupChanges = () =>
-    (startupEvents[1]?.files ?? []).filter((f) => f.beforeDigest !== f.afterDigest).reverse();
+    [...registrationBatches.values()].every(
+      ({ events }) =>
+        events.length >= 2 && events.length === 2 + events[1].registrations.length * 2,
+    );
+  const startupChanges = (events) =>
+    (events[1]?.files ?? []).filter((f) => f.beforeDigest !== f.afterDigest).reverse();
   const startupDone = () =>
-    startupEvents.length >= 2 && startupEvents.length === 2 + startupChanges().length * 2;
+    [...startupBatches.values()].every(
+      ({ events }) => events.length >= 2 && events.length === 2 + startupChanges(events).length * 2,
+    );
   const first = metadata?.kind === 'first-cutover';
   const reservedAttempt = metadata?.attempt;
   const oldIdentity = metadata?.oldIdentity && { ...metadata.oldIdentity };
@@ -270,23 +288,24 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
         await write(phase);
       }),
     recordRegistrationEvent: (event) => {
-      const e = structuredClone(event);
+      const original = structuredClone(event);
       return serial(async () => {
+        const { value: e, key, mode, batch } = eventBatch(original, registrationBatches);
+        const events = batch.events;
         if (
           !first ||
           !['producers_stopped', 'all_fenced'].includes(phase) ||
           !migrationManifest ||
           e?.attempt !== attempt ||
           e.inventoryDigest !== inventoryDigest ||
-          (registrationPhase !== undefined && registrationPhase !== phase)
+          (batch.phase !== undefined && batch.phase !== phase)
         )
           throw unproven();
         const base = { attempt, inventoryDigest };
-        if (!registrationEvents.length) {
+        if (!events.length) {
           if (!isDeepStrictEqual(e, { ...base, phase: 'registration-backup-intent' }))
             throw unproven();
-          registrationPhase = phase;
-        } else if (registrationEvents.length === 1) {
+        } else if (events.length === 1) {
           if (
             e.phase !== 'registration-backed-up' ||
             Object.keys(e).length !== 5 ||
@@ -313,22 +332,25 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
           )
             throw unproven();
         } else {
-          const registration =
-            registrationEvents[1].registrations[Math.floor((registrationEvents.length - 2) / 2)];
+          const registration = events[1].registrations[Math.floor((events.length - 2) / 2)];
           const next =
-            registrationEvents.length % 2 === 0
-              ? 'registration-delete-intent'
-              : 'registration-deleted';
+            events.length % 2 === 0 ? 'registration-delete-intent' : 'registration-deleted';
           if (!registration || !isDeepStrictEqual(e, { ...base, ...registration, phase: next }))
             throw unproven();
         }
-        registrationEvents.push(e);
+        batch.phase = phase;
+        events.push(e);
+        registrationBatches.set(key, batch);
+        eventHostMode = mode;
+        registrationEvents.push(original);
         await write(phase, currentIdentity);
       });
     },
     recordStartupEvent: (event) => {
-      const e = structuredClone(event);
+      const original = structuredClone(event);
       return serial(async () => {
+        const { value: e, key, mode, batch } = eventBatch(original, startupBatches);
+        const events = batch.events;
         if (
           !first ||
           phase !== 'producers_stopped' ||
@@ -338,9 +360,9 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
         )
           throw unproven();
         const base = { attempt, inventoryDigest };
-        if (startupEvents.length === 0) {
+        if (events.length === 0) {
           if (!isDeepStrictEqual(e, { ...base, phase: 'startup-backup-intent' })) throw unproven();
-        } else if (startupEvents.length === 1) {
+        } else if (events.length === 1) {
           if (
             e.phase !== 'startup-backed-up' ||
             Object.keys(e).length !== 4 ||
@@ -361,14 +383,16 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
           )
             throw unproven();
         } else {
-          const index = Math.floor((startupEvents.length - 2) / 2);
-          const change = startupChanges()[index];
-          const next =
-            startupEvents.length % 2 === 0 ? 'startup-file-intent' : 'startup-file-written';
+          const index = Math.floor((events.length - 2) / 2);
+          const change = startupChanges(events)[index];
+          const next = events.length % 2 === 0 ? 'startup-file-intent' : 'startup-file-written';
           if (!change || !isDeepStrictEqual(e, { ...base, phase: next, ...change }))
             throw unproven();
         }
-        startupEvents.push(e);
+        events.push(e);
+        startupBatches.set(key, batch);
+        eventHostMode = mode;
+        startupEvents.push(original);
         await write(phase, currentIdentity);
       });
     },

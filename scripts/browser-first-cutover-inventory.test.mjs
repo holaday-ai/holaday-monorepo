@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
+import * as firstHost from './browser-first-cutover-host.mjs';
 import * as inventory from './browser-first-cutover-inventory.mjs';
 import {
   captureLegacyRegistrations,
@@ -133,7 +134,12 @@ function pairFixture() {
     pair: {
       observedAtMs: 1000,
       sourceDigest: 'b'.repeat(64),
-      hosts: fixtures.map((f) => ({ host: f.host, snapshot: f.snapshot })),
+      sourceCandidate: 'c'.repeat(40),
+      hosts: fixtures.map((f) => ({
+        host: f.host,
+        sourceCandidate: f.host === 'vultr' ? 'c'.repeat(40) : null,
+        snapshot: f.snapshot,
+      })),
     },
     reviews: Object.fromEntries(
       fixtures.map((f) => [
@@ -147,6 +153,90 @@ function pairFixture() {
     ),
   };
 }
+
+async function readLegacy(f, now = 1000) {
+  assert.equal(typeof firstHost.readReviewedFirstCutoverLegacySource, 'function');
+  return firstHost.readReviewedFirstCutoverLegacySource(
+    { inventoryDigest: f.inventoryDigest, reviews: f.reviews },
+    { readPair: async () => structuredClone(f.pair), now: () => now },
+  );
+}
+
+test('legacy source identity binds real reviewed scope without exposing host secrets', async () => {
+  const f = pairFixture();
+  const actual = await readLegacy(f);
+  assert.deepEqual(Object.keys(actual).sort(), ['legacyDigest', 'observedAtMs', 'sourceCandidate']);
+  assert.equal(actual.sourceCandidate, 'c'.repeat(40));
+  assert.equal(actual.observedAtMs, 1000);
+  assert.match(actual.legacyDigest, /^[a-f0-9]{64}$/);
+  assert.ok(!JSON.stringify(actual).includes('private-environment-never-return'));
+  f.pair.observedAtMs = 1050;
+  for (const h of f.pair.hosts) {
+    h.snapshot.observedAtMs = 1050;
+    h.snapshot.observer.pid = 101;
+    h.snapshot.observer.start = '10100';
+    h.snapshot.processes[h.snapshot.processes.length - 1] = structuredClone(h.snapshot.observer);
+    h.snapshot.processes.reverse();
+    h.snapshot.managers.reverse();
+  }
+  f.pair.hosts.reverse();
+  const fresh = await readLegacy(f, 1050);
+  assert.equal(
+    fresh.legacyDigest,
+    actual.legacyDigest,
+    'refresh and collector PID must not rebind legacy ownership',
+  );
+  assert.equal(fresh.observedAtMs, 1050);
+});
+
+for (const [name, change] of [
+  [
+    'unknown launcher',
+    (f) => {
+      f.reviews.aliyun.review.sources.pop();
+    },
+  ],
+  [
+    'old host observation',
+    (f) => {
+      f.pair.hosts[0].snapshot.observedAtMs = 0;
+    },
+  ],
+  [
+    'missing source commit',
+    (f) => {
+      f.pair.sourceCandidate = undefined;
+    },
+  ],
+  [
+    'inconsistent source commit',
+    (f) => {
+      f.pair.sourceCandidate = 'f'.repeat(40);
+    },
+  ],
+])
+  test(`legacy preparation refuses ${name} without producing a source proof`, async () => {
+    const f = pairFixture();
+    change(f);
+    await assert.rejects(readLegacy(f), /CUTOVER_LEGACY_SOURCE_UNPROVEN/);
+  });
+
+test('changing a genuinely reviewed source commit changes the legacy binding', async () => {
+  const f = pairFixture();
+  const before = await readLegacy(f);
+  f.pair.sourceCandidate = 'f'.repeat(40);
+  f.pair.hosts.find((h) => h.host === 'vultr').sourceCandidate = f.pair.sourceCandidate;
+  assert.notEqual((await readLegacy(f)).legacyDigest, before.legacyDigest);
+});
+
+test('same PID with reviewed new start time changes legacy binding', async () => {
+  const f = pairFixture();
+  const before = await readLegacy(f);
+  const process = f.pair.hosts[0].snapshot.processes.find((p) => p.pid === 20);
+  process.start = '9000';
+  f.reviews.aliyun.review.processes.find((p) => p.pid === 20).identityDigest = hash(process);
+  assert.notEqual((await readLegacy(f)).legacyDigest, before.legacyDigest);
+});
 
 test('two-host classification preserves each host and keeps unresolved sources visible', () => {
   assert.equal(typeof inventory.classifyFirstCutoverHostPair, 'function');

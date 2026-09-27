@@ -4,6 +4,12 @@
 
 这是合成数据测试，不是生产备份、加密或停写证明。默认测试配置排除 integration 文件；必须显式使用 `vitest.integration.config.ts`，不能把 skip 当通过。
 
+## 完整比较器接入（2026-09-27）
+
+安全样本现在调用正式 `browser-first-cutover-mysql.mjs`，不是只在夹具里计算摘要。覆盖FUNCTION、PROCEDURE、EVENT、TRIGGER、VIEW和全部基础表；恢复前后完整比较，迁移后按原始列投影核对所有历史数据，源库再次完整读取确认不变。mysql2启用大整数、JSON及日期的无损字符串读取；QA原独立inventory与金额/状态断言仍保留作交叉检查。
+
+19项单测先因缺模块失败再通过；另加行序/二进制与SQL字面量验证，总计21通过。真实MySQL首次发现身份查询将保留字database用作未引用别名而报1064；通过只记录SQL边界的临时诊断定位，引用别名后2/2通过（`/tmp/holaday-mysql-adapter-real2.log`），临时诊断已移除。测试fixture自己的条件表达式优先级错误也已修正，没有为测试放宽正式比较条件。整个61SQL、结算规则及生产数据未改。
+
 ## 最新组合验证：真实age文件链路（2026-09-27）
 
 安全样本现使用`scripts/browser-backup-age.mjs`（由既有backup模块导出）的实际文件/子进程适配：真实mysqldump流 → age公钥加密 → 私密密文文件 → 摘要复核 → age解密至私密partial → 完整认证与复核后发布verified SQL → 启动隔离mysql导入 → 全对象/数据比较 → 全61SQL和业务字段核验 → 原文件journal回执。原合成AES-GCM夹具已替换，不是另加一套加密格式；本例密钥仍为临时QA密钥，不接触用户Mac私钥或生产数据。

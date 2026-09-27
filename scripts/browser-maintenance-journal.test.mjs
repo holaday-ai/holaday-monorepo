@@ -173,6 +173,151 @@ test('registration journal requires backup then exact delete intents and blocks 
   await journal.persist('all_fenced', { candidate: metadata.candidate });
 });
 
+async function firstEventFixture(t) {
+  const journal = await acquireReleaseJournal(await fixture(t), firstMetadata);
+  t.after(() => journal.close());
+  await journal.bindManifest(manifest);
+  for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
+    await journal.persist(phase, { candidate: metadata.candidate });
+  const { attempt, inventoryDigest } = await journal.assertOwnership();
+  return {
+    journal,
+    binding: { attempt, inventoryDigest },
+    advance: () => journal.persist('all_fenced', { candidate: metadata.candidate }),
+  };
+}
+
+test('one actual journal records both hosts same startup paths and refuses a partially written second host', async (t) => {
+  const { journal, binding, advance } = await firstEventFixture(t);
+  for (const host of ['vultr', 'aliyun'])
+    await journal.recordStartupEvent({ ...binding, host, phase: 'startup-backup-intent' });
+  for (const host of ['vultr', 'aliyun']) {
+    const files = [
+      {
+        path: '/root/.pm2/dump.pm2',
+        beforeDigest: (host === 'vultr' ? 'a' : 'b').repeat(64),
+        afterDigest: 'c'.repeat(64),
+      },
+      { path: '/root/.pm2/dump.pm2.bak', beforeDigest: null, afterDigest: null },
+    ];
+    await journal.recordStartupEvent({ ...binding, host, phase: 'startup-backed-up', files });
+    await journal.recordStartupEvent({
+      ...binding,
+      host,
+      phase: 'startup-file-intent',
+      ...files[0],
+    });
+    await assert.rejects(advance(), /UNPROVEN/);
+    await journal.recordStartupEvent({
+      ...binding,
+      host,
+      phase: 'startup-file-written',
+      ...files[0],
+    });
+  }
+  await assert.rejects(
+    journal.recordStartupEvent({ ...binding, host: 'vultr', phase: 'startup-backup-intent' }),
+    /UNPROVEN/,
+  );
+  await advance();
+  const saved = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+  assert.equal(saved.startupEvents.length, 8);
+  for (const host of ['vultr', 'aliyun']) {
+    const events = saved.startupEvents.filter((e) => e.host === host);
+    assert.deepEqual(
+      events.map((e) => e.phase),
+      ['startup-backup-intent', 'startup-backed-up', 'startup-file-intent', 'startup-file-written'],
+    );
+    assert.equal(events[1].files[0].beforeDigest, (host === 'vultr' ? 'a' : 'b').repeat(64));
+  }
+});
+
+test('registration deletion binds host as well as PM2 id and can span the approved two phases', async (t) => {
+  const { journal, binding, advance } = await firstEventFixture(t);
+  for (const host of ['vultr', 'aliyun']) {
+    const entry = {
+      pmId: 5,
+      name: host === 'vultr' ? 'holaday-files-cron' : 'holaday-cn-payment',
+      configDigest: (host === 'vultr' ? 'a' : 'b').repeat(64),
+    };
+    await journal.recordRegistrationEvent({
+      ...binding,
+      host,
+      phase: 'registration-backup-intent',
+    });
+    await journal.recordRegistrationEvent({
+      ...binding,
+      host,
+      phase: 'registration-backed-up',
+      backupDigest: 'c'.repeat(64),
+      registrations: [entry],
+    });
+    if (host === 'aliyun')
+      await assert.rejects(
+        journal.persist('stopped', { candidate: metadata.candidate }),
+        /UNPROVEN/,
+      );
+    await journal.recordRegistrationEvent({
+      ...binding,
+      host,
+      phase: 'registration-delete-intent',
+      ...entry,
+    });
+    await journal.recordRegistrationEvent({
+      ...binding,
+      host,
+      phase: 'registration-deleted',
+      ...entry,
+    });
+    if (host === 'vultr') await advance();
+  }
+  await journal.persist('stopped', { candidate: metadata.candidate });
+  const saved = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+  assert.equal(saved.registrationEvents.length, 8);
+  assert.deepEqual(
+    saved.registrationEvents
+      .filter((e) => e.phase === 'registration-deleted')
+      .map((e) => [e.host, e.pmId, e.name]),
+    [
+      ['vultr', 5, 'holaday-files-cron'],
+      ['aliyun', 5, 'holaday-cn-payment'],
+    ],
+  );
+});
+
+test('host-tagged first events reject unknown hosts and cannot mix named and legacy local records', async (t) => {
+  for (const namedFirst of [true, false]) {
+    const { journal, binding } = await firstEventFixture(t);
+    await assert.rejects(
+      journal.recordStartupEvent({ ...binding, host: 'other', phase: 'startup-backup-intent' }),
+      /UNPROVEN/,
+    );
+    await journal.recordStartupEvent({
+      ...binding,
+      ...(namedFirst ? { host: 'vultr' } : {}),
+      phase: 'startup-backup-intent',
+    });
+    await assert.rejects(
+      journal.recordRegistrationEvent({
+        ...binding,
+        ...(namedFirst ? {} : { host: 'aliyun' }),
+        phase: 'registration-backup-intent',
+      }),
+      /UNPROVEN/,
+    );
+  }
+});
+
+test('malformed first event payloads refuse without creating a host batch', async (t) => {
+  const { journal, binding } = await firstEventFixture(t);
+  for (const event of [null, undefined, [], 1]) {
+    await assert.rejects(journal.recordStartupEvent(event), /MAINTENANCE_JOURNAL_UNPROVEN/);
+    await assert.rejects(journal.recordRegistrationEvent(event), /MAINTENANCE_JOURNAL_UNPROVEN/);
+  }
+  await journal.recordStartupEvent({ ...binding, host: 'aliyun', phase: 'startup-backup-intent' });
+  assert.equal(JSON.parse(await fs.readFile(journal.path, 'utf8')).startupEvents.length, 1);
+});
+
 test('registration journal rejects normal releases, wrong phases, foreign ownership and secret payload', async (t) => {
   for (const kind of ['normal', 'phase', 'owner', 'secret']) {
     const directory = await fixture(t);

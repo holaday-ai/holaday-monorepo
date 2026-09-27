@@ -67,7 +67,13 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
         )
           throw new Error('QA_CONTAINER_SCOPE_UNPROVEN');
 
-        const connection = await mysql.createConnection({ uri: url.toString(), dateStrings: true });
+        const connection = await mysql.createConnection({
+          uri: url.toString(),
+          dateStrings: true,
+          supportBigNumbers: true,
+          bigNumberStrings: true,
+          jsonStrings: true,
+        });
         const suffix = randomBytes(8).toString('hex');
         const source = `holaday_first_cutover_${suffix}_source_integration`;
         const target = `holaday_first_cutover_${suffix}_restore_integration`;
@@ -145,6 +151,10 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
               'PROCEDURE',
               "SELECT ROUTINE_NAME AS name FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = DATABASE() AND ROUTINE_TYPE = 'PROCEDURE'",
             ],
+            [
+              'FUNCTION',
+              "SELECT ROUTINE_NAME AS name FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = DATABASE() AND ROUTINE_TYPE = 'FUNCTION'",
+            ],
           ] as const) {
             for (const { name } of await rows(query)) {
               if (typeof name !== 'string' || !/^[a-z0-9_]+$/.test(name))
@@ -215,6 +225,9 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
             'CREATE EVENT qa_disabled_event ON SCHEDULE EVERY 1 DAY DISABLE DO INSERT INTO qa_object_probe VALUES (99)',
           );
           await connection.query('CREATE PROCEDURE qa_probe_procedure() SELECT 1');
+          await connection.query(
+            'CREATE FUNCTION qa_probe_function() RETURNS INT DETERMINISTIC NO SQL RETURN 1',
+          );
           const beforeRestore = await inventory();
           const baselinePayments = await rows(
             'SELECT external_id,amount_cents,status,updated_at,completed_at FROM payments ORDER BY external_id',
@@ -282,6 +295,9 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
             const { acquireReleaseJournal } = await import(
               moduleAt('browser-maintenance-journal.mjs')
             );
+            const { readCutoverMysqlSnapshot, compareCutoverMysqlSnapshots } = await import(
+              moduleAt('browser-first-cutover-mysql.mjs')
+            );
             const { buildMaintenanceMigrationManifest } = await import(
               moduleAt('browser-maintenance-manifest.mjs')
             );
@@ -315,8 +331,6 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
               await expect(
                 journal.persist('migration_started', { candidate: binding.candidate }),
               ).rejects.toThrow('UNPROVEN');
-              const hash = (value: unknown) =>
-                createHash('sha256').update(JSON.stringify(value)).digest('hex');
               // Same mature codec as the configured facility; disposable QA key,
               // never the real Mac recovery identity or any production input.
               const executable = await realpath(
@@ -345,6 +359,12 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
               if (typeof identity !== 'string') throw new Error('QA_SERVER_ID_INVALID');
               const sourceIdentity: Identity = { serverUuid: identity, database: source };
               const isolatedTarget: Identity = { serverUuid: identity, database: target };
+              const sourceSnapshot = await readCutoverMysqlSnapshot(connection, sourceIdentity);
+              expect(
+                sourceSnapshot.objects.some(
+                  (object: { kind: string }) => object.kind === 'FUNCTION',
+                ),
+              ).toBe(true);
               const business = async () => ({
                 payments: await rows(
                   'SELECT external_id,amount_cents,status,updated_at,completed_at FROM payments ORDER BY external_id',
@@ -419,15 +439,17 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
                   compareInventoryAndData: async () => {
                     await use(source);
                     expect(await inventory()).toEqual(beforeRestore);
+                    expect(await readCutoverMysqlSnapshot(connection, sourceIdentity)).toEqual(
+                      sourceSnapshot,
+                    );
                     await use(target);
                     const restored = await inventory();
                     expect(restored).toEqual(beforeRestore);
                     expect(await business()).toEqual(beforeBusiness);
-                    return {
-                      comparisonDigest: hash({ source: beforeRestore, restored }),
-                      sourceDigest: hash(beforeRestore),
-                      businessDigest: hash(beforeBusiness),
-                    };
+                    return compareCutoverMysqlSnapshots(
+                      sourceSnapshot,
+                      await readCutoverMysqlSnapshot(connection, isolatedTarget),
+                    );
                   },
                   runApprovedMigrations: async (destination: Identity, approvedDigest: string) => {
                     expect(destination).toEqual(isolatedTarget);
@@ -438,14 +460,18 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
                     await use(target);
                     await checkMaintenanceSchema(rows);
                     expect(await business()).toEqual(beforeBusiness);
+                    const migrated = await readCutoverMysqlSnapshot(connection, isolatedTarget, {
+                      projection: sourceSnapshot.projection,
+                    });
                     return {
-                      schemaDigest: hash(await inventory()),
-                      businessDigest: hash(await business()),
+                      schemaDigest: migrated.schemaDigest,
+                      businessDigest: migrated.businessDigest,
                     };
                   },
                   readSourceDigest: async () => {
                     await use(source);
-                    return hash(await inventory());
+                    return (await readCutoverMysqlSnapshot(connection, sourceIdentity))
+                      .sourceDigest;
                   },
                   sealReceipt: (value: unknown) => journal.bindBackupReceipt(value),
                 },

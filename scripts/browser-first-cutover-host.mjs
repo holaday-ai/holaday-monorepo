@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { collectCutoverEvidence } from './browser-cutover-evidence.mjs';
 import { backupAndRestoreCheck } from './browser-first-cutover-backup.mjs';
+import { classifyFirstCutoverHostPair } from './browser-first-cutover-inventory.mjs';
 import { initializeFirstMaintenanceState } from './browser-first-cutover-runtime.mjs';
 import {
   candidatePreparationSystem,
@@ -169,6 +170,91 @@ export async function readFirstCutoverHostPair(overrides = {}) {
   } catch {
     // Do not expose process/config contents or SSH diagnostics to public output.
     throw new Error('CUTOVER_HOST_PAIR_UNPROVEN');
+  }
+}
+
+/** Source proof for prepareFirstCutoverCandidate's existing inspectLegacySource
+ * boundary. Reviews must come from the protected site inventory: this function
+ * never creates or approves them. A fresh two-host read must match every review.
+ * Hash physical identities and reviewed source fingerprints, not transient
+ * observation time or the collector process. No raw environment leaves here.
+ */
+export async function readReviewedFirstCutoverLegacySource(input, overrides = {}) {
+  const io = { readPair: readFirstCutoverHostPair, now: Date.now, ...overrides };
+  try {
+    const { reviews, inventoryDigest } = structuredClone(input);
+    if (
+      !/^[a-f0-9]{64}$/.test(inventoryDigest ?? '') ||
+      !reviews ||
+      Object.keys(reviews).length !== 2 ||
+      !reviews.aliyun ||
+      !reviews.vultr
+    )
+      throw new Error('review');
+    const began = io.now();
+    const pair = await io.readPair();
+    const now = io.now();
+    if (
+      !Number.isSafeInteger(began) ||
+      began < 0 ||
+      !Number.isSafeInteger(now) ||
+      now < began ||
+      !/^[a-f0-9]{40}$/.test(pair?.sourceCandidate ?? '') ||
+      pair.hosts?.find((h) => h.host === 'vultr')?.sourceCandidate !== pair.sourceCandidate ||
+      pair.hosts?.find((h) => h.host === 'aliyun')?.sourceCandidate !== null
+    )
+      throw new Error('source');
+    const actual = classifyFirstCutoverHostPair(
+      { pair, reviews, inventoryDigest },
+      { now: () => now },
+    );
+    if (actual.unknownLaunchers.length) throw new Error('unreviewed');
+    const byNumber = (key) => (a, b) => a[key] - b[key];
+    const canonical = (value) =>
+      Array.isArray(value)
+        ? value.map(canonical)
+        : value && typeof value === 'object'
+          ? Object.fromEntries(
+              Object.keys(value)
+                .sort()
+                .map((key) => [key, canonical(value[key])]),
+            )
+          : value;
+    const scope = (s) => ({
+      host: s.host,
+      bootId: s.bootId,
+      ports: [...s.ports].sort((a, b) => a - b),
+      processes: [...s.processes].sort(byNumber('pid')),
+      managers: [...s.managers].sort(byNumber('pmId')),
+      listeners: [...s.listeners].sort((a, b) => a.port - b.port || a.pid - b.pid),
+    });
+    const physical = actual.hosts.map((host) => ({
+      host: host.host,
+      registered: scope(host.registered),
+      unmanaged: scope(host.unmanaged),
+      preservedProcesses: [...host.preservedProcesses].sort(byNumber('pid')),
+      preservedManagers: [...host.preservedManagers].sort(byNumber('pmId')),
+      sources: host.sources,
+    }));
+    const legacyDigest = createHash('sha256')
+      .update(
+        JSON.stringify(
+          canonical({
+            inventoryDigest,
+            sourceCandidate: pair.sourceCandidate,
+            collectorDigest: pair.sourceDigest,
+            hosts: physical,
+          }),
+        ),
+      )
+      .digest('hex');
+    return {
+      sourceCandidate: pair.sourceCandidate,
+      legacyDigest,
+      observedAtMs: actual.observedAtMs,
+    };
+  } catch {
+    throw new Error('CUTOVER_LEGACY_SOURCE_UNPROVEN');
   }
 }
 
