@@ -306,6 +306,186 @@ test('PM2 axm_monitor telemetry changes do not impersonate launch configuration 
   assert.equal(f.rows[0].pid, 888);
 });
 
+test('gateway startup preparation and final retirement use distinct real journal phases', async (t) => {
+  for (const mode of [
+    'success',
+    'already-absent',
+    'busy',
+    'early-stop',
+    'foreign-host',
+    'startup-drift',
+    'lost-ack',
+  ])
+    await t.test(mode, async (t) => {
+      const f = await fixture(t);
+      const config = { name: 'holaday-cn-payment', status: 'online', secret: 'never-output' };
+      const manager = {
+        ...f.inventory.managers[0],
+        name: config.name,
+        status: 'online',
+        rootPid: 70,
+        configDigest: sha(JSON.stringify(config)),
+        cron: false,
+      };
+      const target = {
+        host: 'aliyun',
+        bootId: 'd'.repeat(32),
+        pid: 70,
+        ppid: 50,
+        start: '700',
+        uids: [0, 0, 0, 0],
+        exe: '/usr/bin/node',
+        cwd: '/opt/holaday-cn-payment/releases/123456789abc-20260927080000/apps/cn-payment',
+        argvDigest: 'c'.repeat(64),
+        role: 'gateway',
+        managerIdentity: manager,
+      };
+      Object.assign(f.inventory, {
+        host: 'aliyun',
+        ports: [4010, 4011],
+        managers: [manager],
+        processes: [target],
+        listeners: [{ port: 4010, pid: 70 }],
+      });
+      f.rows[0] = { pm_id: 5, name: config.name, pid: 70, pm2_env: config };
+      f.system.hostname = () => (mode === 'foreign-host' ? 'vultr' : 'aliyun');
+      f.system.fs.rename = (a, b) => fs.rename(f.root + a, f.root + b);
+      const raw = JSON.stringify(config);
+      const bytes =
+        mode === 'already-absent' ? '[{"name":"unrelated"}]\n' : `[${raw},{"name":"unrelated"}]\n`;
+      await fs.writeFile(`${f.root}/root/.pm2/dump.pm2`, bytes, { mode: 0o600 });
+      let phase = 'producers_stopped';
+      const journal = {
+        assertOwnership: async () => ({ ...binding, candidate: 'b'.repeat(40) }),
+        readFirstCutoverEffects: async () => ({
+          ...binding,
+          phase,
+          startupEvents: f.events.filter((e) => e.phase.startsWith('startup-')),
+          registrationEvents: f.events.filter((e) => e.phase.startsWith('registration-')),
+          unmanagedEvents: [],
+        }),
+        recordStartupEvent: f.io.persist,
+        recordRegistrationEvent: f.io.persist,
+      };
+      const observer = {
+        read: async () => ({
+          inventoryDigest: binding.inventoryDigest,
+          unknownLaunchers: [],
+          hosts: [
+            {
+              host: 'aliyun',
+              registered: await f.io.readInventory(),
+              unmanaged: {
+                ...(await f.io.readInventory()),
+                managers: [],
+                processes: [],
+                listeners: [],
+              },
+            },
+          ],
+        }),
+        readRegistrationProgress: async (h) => {
+          assert.equal(h, 'aliyun');
+          return {
+            purpose: 'registration-progress',
+            host: h,
+            inventory: await f.io.readInventory(),
+          };
+        },
+      };
+      const io = {
+        journal,
+        observer,
+        now: f.io.now,
+        sleep: f.io.sleep,
+        verifyFence: async () => ({
+          inventoryDigest: binding.inventoryDigest,
+          stage: phase === 'producers_stopped' ? 'orders' : 'all-writers',
+          observedAtMs: f.io.now(),
+          unsettledWork: mode === 'busy' ? 1 : 0,
+          externalWork: 0,
+          activeRequests: 0,
+          unknownWriters: 0,
+          producersRunning: 0,
+        }),
+      };
+      const input = {
+        binding,
+        maintenanceEndsAtMs: 20000,
+        files: [
+          {
+            path: '/root/.pm2/dump.pm2',
+            digest: sha(bytes),
+            remove: mode === 'already-absent' ? [] : [{ name: config.name, entryDigest: sha(raw) }],
+          },
+          { path: '/root/.pm2/dump.pm2.bak', digest: null, remove: [] },
+        ],
+      };
+      f.system.exec = async (file, argv) => {
+        assert.equal(file, '/usr/bin/node');
+        if (argv[1] === 'jlist') return JSON.stringify(f.rows);
+        assert.equal(phase, 'stopped');
+        assert.deepEqual(argv, ['/usr/lib/node_modules/pm2/bin/pm2', 'delete', '5']);
+        assert.equal(f.events.at(-1).host, 'aliyun');
+        assert.equal(f.events.at(-1).phase, 'registration-delete-intent');
+        f.commands.push(argv);
+        f.rows.shift();
+        f.inventory.managers = [];
+        f.inventory.processes = [];
+        f.inventory.listeners = [];
+        if (mode === 'lost-ack') throw new Error('lost acknowledgement');
+        return '';
+      };
+      assert.equal(typeof registrations.prepareLocalFirstCutoverGateway, 'function');
+      assert.equal(typeof registrations.retireLocalFirstCutoverGateways, 'function');
+      // This first-cutover contract requires an actual reviewed startup change.
+      // An already absent target must not be promoted to a completed first run.
+      if (['already-absent', 'busy', 'foreign-host'].includes(mode)) {
+        await assert.rejects(
+          registrations.prepareLocalFirstCutoverGateway(input, io, f.system),
+          /CUTOVER_/,
+        );
+        assert.equal(f.events.length, 0);
+        assert.equal(await fs.readFile(`${f.root}/root/.pm2/dump.pm2`, 'utf8'), bytes);
+        return;
+      }
+      await registrations.prepareLocalFirstCutoverGateway(input, io, f.system);
+      assert.equal(f.commands.length, 0); // Preparing startup must not stop the callback gateway.
+      assert.equal(f.rows[0].pid, 70);
+      assert.equal(
+        await fs.readFile(
+          `${f.root}${archive}/startup-${binding.attempt}/dump.pm2.original`,
+          'utf8',
+        ),
+        bytes,
+      );
+      if (mode !== 'early-stop') phase = 'stopped';
+      if (mode === 'startup-drift') await fs.writeFile(`${f.root}/root/.pm2/dump.pm2`, bytes);
+      const stopInput = { binding, maintenanceEndsAtMs: 20000 };
+      if (mode === 'success') {
+        const result = await registrations.retireLocalFirstCutoverGateways(stopInput, io, f.system);
+        assert.equal(result.host, 'aliyun');
+        assert.equal(result.phase, 'stopped');
+        assert.deepEqual(result.survivors, []);
+        assert.deepEqual(result.listeners, []);
+        assert.equal(f.events.at(-1).phase, 'registration-deleted');
+      } else
+        await assert.rejects(
+          registrations.retireLocalFirstCutoverGateways(stopInput, io, f.system),
+          /CUTOVER_/,
+        );
+      assert.equal(f.commands.length, ['success', 'lost-ack'].includes(mode) ? 1 : 0);
+      assert.equal(f.rows.find((r) => r.name === 'unrelated').pid, 888);
+      if (['success', 'lost-ack'].includes(mode)) {
+        await assert.rejects(
+          registrations.retireLocalFirstCutoverGateways(stopInput, io, f.system),
+          /CUTOVER_/,
+        );
+        assert.equal(f.commands.length, 1);
+      }
+    });
+});
+
 test('empty fabricated capture cannot produce a successful empty retirement receipt', async (t) => {
   const f = await fixture(t);
   f.input.captured.managers = [];

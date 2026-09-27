@@ -12,7 +12,9 @@ import {
 } from '/source/browser-first-cutover-host.mjs';
 import { firstCutoverSourceBindings } from '/source/browser-first-cutover-inventory.mjs';
 import {
+  prepareLocalFirstCutoverGateway,
   registrationConfigDigest,
+  retireLocalFirstCutoverGateways,
   retireLocalFirstCutoverProducers,
 } from '/source/browser-first-cutover-registrations.mjs';
 import { createLegacyRuntimeEffects } from '/source/browser-first-cutover-runtime.mjs';
@@ -27,12 +29,23 @@ const exec = async (file, argv) =>
 const pm2 = (...args) => exec('/usr/bin/node', ['/usr/lib/node_modules/pm2/bin/pm2', ...args]);
 const rows = async () => JSON.parse(await pm2('jlist'));
 const sha = (b) => createHash('sha256').update(b).digest('hex');
-const cwd = '/opt/holaday-monorepo/apps/orchestrator';
+assert.ok(
+  process.argv.length === 2 ||
+    (process.argv.length === 3 && ['--gateways', '--gateways-lost-ack'].includes(process.argv[2])),
+);
+const lostAck = process.argv[2] === '--gateways-lost-ack';
+const gateways = process.argv.length === 3;
+const mainPort = gateways ? 4010 : 4001;
+const mainName = gateways ? 'holaday-cn-payment' : 'holaday-account-closure-worker';
+const cwd = gateways
+  ? '/opt/holaday-cn-payment/releases/123456789abc-20260927070000/apps/cn-payment'
+  : '/opt/holaday-monorepo/apps/orchestrator';
 const directory = '/var/lib/holaday-deploy/maintenance';
 await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+await fs.mkdir(cwd, { recursive: true });
 await fs.writeFile(
   `${cwd}/registry-worker.cjs`,
-  "require('http').createServer((q,r)=>r.end('qa')).listen(4001);process.on('SIGINT',()=>{});\n",
+  `require('http').createServer((q,r)=>r.end('qa')).listen(${mainPort});process.on('SIGINT',()=>{});\n`,
 );
 await fs.writeFile('/tmp/registry-idle.cjs', 'setInterval(()=>{},1000);\n');
 const binding = {
@@ -46,36 +59,38 @@ try {
     'start',
     `${cwd}/registry-worker.cjs`,
     '--name',
-    'holaday-account-closure-worker',
+    mainName,
     '--cwd',
     cwd,
     '--interpreter',
-    '/opt/node22/bin/node',
+    gateways ? '/usr/bin/node' : '/opt/node22/bin/node',
     '--uid',
-    '998',
+    gateways ? '0' : '998',
     '--gid',
-    '998',
+    gateways ? '0' : '998',
     '--max-memory-restart',
     '512M',
     '--kill-timeout',
     '200',
   );
-  await pm2(
-    'start',
-    '/tmp/registry-idle.cjs',
-    '--name',
-    'holaday-files-cron',
-    '--cron-restart',
-    '0 * * * *',
-    '--no-autorestart',
-  );
-  await pm2('stop', 'holaday-files-cron');
+  if (!gateways) {
+    await pm2(
+      'start',
+      '/tmp/registry-idle.cjs',
+      '--name',
+      'holaday-files-cron',
+      '--cron-restart',
+      '0 * * * *',
+      '--no-autorestart',
+    );
+    await pm2('stop', 'holaday-files-cron');
+  }
   await pm2('start', '/tmp/registry-idle.cjs', '--name', 'qa-unrelated');
   await pm2('save');
   await pm2('save');
   for (let n = 0; ; n++) {
     try {
-      assert.equal((await fetch('http://127.0.0.1:4001')).status, 200);
+      assert.equal((await fetch(`http://127.0.0.1:${mainPort}`)).status, 200);
       break;
     } catch (e) {
       if (n > 50) throw e;
@@ -106,7 +121,7 @@ try {
   const daemonPid = Number((await fs.readFile('/root/.pm2/pm2.pid', 'utf8')).trim());
   const initial = await rows();
   const unrelated = initial.find((r) => r.name === 'qa-unrelated');
-  const names = ['holaday-account-closure-worker', 'holaday-files-cron'];
+  const names = gateways ? [mainName] : [mainName, 'holaday-files-cron'];
   const readInventory = async () => {
     const daemon = await proc(daemonPid);
     const current = (await rows()).filter((r) => names.includes(r.name));
@@ -140,7 +155,7 @@ try {
         if (!m) throw new Error('unexpected physical fixture process');
         processes.push({
           ...p,
-          role: 'worker',
+          role: gateways ? 'gateway' : 'worker',
           managerIdentity: Object.fromEntries(
             Object.entries(m).filter(([k]) => !['status', 'rootPid'].includes(k)),
           ),
@@ -149,7 +164,7 @@ try {
         if (!['ENOENT', 'ESRCH'].includes(e.code)) throw e;
       }
     }
-    const sockets = await exec('ss', ['-H', '-ltnp', 'sport = :4001']);
+    const sockets = await exec('ss', ['-H', '-ltnp', `sport = :${mainPort}`]);
     return {
       inventoryDigest: binding.inventoryDigest,
       host: hostname(),
@@ -157,9 +172,9 @@ try {
       observedAtMs: Date.now(),
       processes,
       managers,
-      ports: [4001, 4002],
+      ports: gateways ? [4010, 4011] : [4001, 4002],
       listeners: [...sockets.matchAll(/pid=(\d+)/g)].map((m) => ({
-        port: 4001,
+        port: mainPort,
         pid: Number(m[1]),
       })),
       unknownLaunchers: [],
@@ -269,7 +284,7 @@ try {
       timers: '',
       cron: '',
       rootCrontabPresent: false,
-      listeners: await exec('ss', ['-H', '-ltnp', 'sport = :4001']),
+      listeners: await exec('ss', ['-H', '-ltnp', `sport = :${mainPort}`]),
     };
     assert.equal(scope.processes.length, processes.filter((p) => p.cwd === cwd).length);
     if (!second) {
@@ -283,16 +298,26 @@ try {
     }
     second.observedAtMs = snapshot.observedAtMs;
     second.processes = second.processes.filter((p) => p.pid !== gateway.pid);
+    second.listeners = '';
+    const gatewayHost = gateways ? snapshot : second;
     if (gateway.exitCode === null && gateway.signalCode === null)
-      second.processes.push(raw(await proc(gateway.pid)));
-    second.listeners = await exec('ss', ['-H', '-ltnp', 'sport = :4011']);
+      gatewayHost.processes.push(raw(await proc(gateway.pid)));
+    gatewayHost.listeners += await exec('ss', ['-H', '-ltnp', 'sport = :4011']);
     return {
       sourceDigest: sha('physical-pm2-fixture'),
       sourceCandidate: 'c'.repeat(40),
       observedAtMs: snapshot.observedAtMs,
       hosts: [
-        { host: 'aliyun', sourceCandidate: null, snapshot: structuredClone(second) },
-        { host: 'vultr', sourceCandidate: 'c'.repeat(40), snapshot },
+        {
+          host: 'aliyun',
+          sourceCandidate: null,
+          snapshot: gateways ? snapshot : structuredClone(second),
+        },
+        {
+          host: 'vultr',
+          sourceCandidate: 'c'.repeat(40),
+          snapshot: gateways ? structuredClone(second) : snapshot,
+        },
       ],
     };
   };
@@ -321,7 +346,7 @@ try {
               identityDigest: sha(JSON.stringify(p)),
               disposition: [cwd, gatewayCwd].includes(p.cwd) ? 'retire' : 'preserve',
               ...(p.cwd === cwd
-                ? { role: 'worker' }
+                ? { role: gateways ? 'gateway' : 'worker' }
                 : p.cwd === gatewayCwd
                   ? { role: 'gateway' }
                   : {}),
@@ -350,71 +375,147 @@ try {
   await journal.bindManifest([]);
   for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
     await journal.persist(phase, { candidate: 'b'.repeat(40) });
-  const readProgress = async () => (await observer.readRegistrationProgress('vultr')).inventory;
-  const result = await retireLocalFirstCutoverProducers(
-    { files, binding, maintenanceEndsAtMs: Date.now() + 60000 },
-    {
+  if (gateways) {
+    const input = { files, binding, maintenanceEndsAtMs: Date.now() + 60000 };
+    const io = {
       now: Date.now,
       sleep,
       journal,
       observer,
-      verifyFence: async () => {
-        const s = await readProgress();
-        return {
-          inventoryDigest: binding.inventoryDigest,
-          stage: 'orders',
-          observedAtMs: Date.now(),
-          unsettledWork: 0,
-          externalWork: 0,
-          activeRequests: 0,
-          unknownWriters: 0,
-          producersRunning: s.processes.length,
-          runningProducers: s.processes,
-        };
+      // Business facts are explicitly synthetic; proc/files/PM2/journal/pidfd are real.
+      verifyFence: async () => ({
+        inventoryDigest: binding.inventoryDigest,
+        stage:
+          (await journal.readFirstCutoverEffects()).phase === 'producers_stopped'
+            ? 'orders'
+            : 'all-writers',
+        observedAtMs: Date.now(),
+        unsettledWork: 0,
+        externalWork: 0,
+        activeRequests: 0,
+        unknownWriters: 0,
+        producersRunning: 0,
+      }),
+    };
+    const prepared = await prepareLocalFirstCutoverGateway(input, io);
+    assert.equal(prepared.phase, 'startup_prepared');
+    assert.equal((await fetch('http://127.0.0.1:4010')).status, 200);
+    assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
+    assert.equal((await journal.readFirstCutoverEffects()).registrationEvents.length, 0);
+    await assert.rejects(retireLocalFirstCutoverGateways(input, io));
+    await journal.persist('all_fenced', { candidate: 'b'.repeat(40) });
+    await journal.persist('stopped', { candidate: 'b'.repeat(40) });
+    if (lostAck) {
+      let deletions = 0;
+      const system = {
+        exec: async (file, argv) => {
+          const result = await exec(file, argv);
+          if (argv[1] === 'delete') {
+            deletions++;
+            throw new Error('QA lost acknowledgement after real PM2 delete');
+          }
+          return result;
+        },
+      };
+      await assert.rejects(
+        retireLocalFirstCutoverGateways(input, io, system),
+        /CUTOVER_REGISTRATION_UNCERTAIN/,
+      );
+      await assert.rejects(fetch('http://127.0.0.1:4010'));
+      assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
+      const effects = await journal.readFirstCutoverEffects();
+      assert.equal(effects.registrationEvents.at(-1).phase, 'registration-delete-intent');
+      assert.equal(effects.unmanagedEvents.length, 0);
+      await assert.rejects(retireLocalFirstCutoverGateways(input, io, system));
+      assert.equal(deletions, 1);
+      assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
+      console.log(
+        'PASS physical gateway lost ACK: actual managed stop, intent retained, unmanaged gateway untouched, repeat refused',
+      );
+    } else {
+      const stopped = await retireLocalFirstCutoverGateways(input, io);
+      assert.equal(stopped.host, 'aliyun');
+      assert.equal(stopped.phase, 'stopped');
+      await assert.rejects(fetch('http://127.0.0.1:4010'));
+      await assert.rejects(fetch('http://127.0.0.1:4011'));
+      assert.equal(gateway.signalCode, 'SIGTERM');
+      const effects = await journal.readFirstCutoverEffects();
+      assert.equal(effects.registrationEvents.length, 4);
+      assert.ok(effects.registrationEvents.every((e) => e.host === 'aliyun'));
+      assert.equal(effects.unmanagedEvents.length, 2);
+      assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
+      await assert.rejects(retireLocalFirstCutoverGateways(input, io));
+      console.log(
+        'PASS physical gateway composition: prepare keeps both live; stopped retires managed and pinned unmanaged gateway once; unrelated PID preserved',
+      );
+    }
+  } else {
+    const readProgress = async () => (await observer.readRegistrationProgress('vultr')).inventory;
+    const result = await retireLocalFirstCutoverProducers(
+      { files, binding, maintenanceEndsAtMs: Date.now() + 60000 },
+      {
+        now: Date.now,
+        sleep,
+        journal,
+        observer,
+        verifyFence: async () => {
+          const s = await readProgress();
+          return {
+            inventoryDigest: binding.inventoryDigest,
+            stage: 'orders',
+            observedAtMs: Date.now(),
+            unsettledWork: 0,
+            externalWork: 0,
+            activeRequests: 0,
+            unknownWriters: 0,
+            producersRunning: s.processes.length,
+            runningProducers: s.processes,
+          };
+        },
       },
-    },
-  );
-  assert.equal(result.phase, 'producers_stopped');
-  assert.equal(result.removed.length, 2);
-  assert.deepEqual((await observer.read()).unknownLaunchers, []);
-  assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
-  await assert.rejects(fetch('http://127.0.0.1:4001'));
-  const record = JSON.parse(await fs.readFile(journal.path, 'utf8'));
-  assert.equal(record.registrationEvents.length, 6);
-  await journal.persist('all_fenced', { candidate: 'b'.repeat(40) });
-  await journal.persist('stopped', { candidate: 'b'.repeat(40) });
-  const verifyGatewayFence = async () => ({
-    inventoryDigest: binding.inventoryDigest,
-    stage: 'all-writers',
-    unsettledWork: 0,
-    externalWork: 0,
-    producersRunning: 0,
-  });
-  const gatewayEffects = createLegacyRuntimeEffects({
-    now: Date.now,
-    assertJournalOwnership: () => journal.assertOwnership(),
-    verifyFence: verifyGatewayFence,
-    readInventory: async () => (await observer.readUnmanagedProgress('aliyun')).inventory,
-  });
-  const stopped = await observer.retireUnmanaged(
-    { maintenanceEndsAtMs: Date.now() + 30000 },
-    {
-      sleep,
+    );
+    assert.equal(result.phase, 'producers_stopped');
+    assert.equal(result.removed.length, 2);
+    assert.deepEqual((await observer.read()).unknownLaunchers, []);
+    assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
+    await assert.rejects(fetch('http://127.0.0.1:4001'));
+    const record = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+    assert.equal(record.registrationEvents.length, 6);
+    await journal.persist('all_fenced', { candidate: 'b'.repeat(40) });
+    await journal.persist('stopped', { candidate: 'b'.repeat(40) });
+    const verifyGatewayFence = async () => ({
+      inventoryDigest: binding.inventoryDigest,
+      stage: 'all-writers',
+      unsettledWork: 0,
+      externalWork: 0,
+      producersRunning: 0,
+    });
+    const gatewayEffects = createLegacyRuntimeEffects({
+      now: Date.now,
+      assertJournalOwnership: () => journal.assertOwnership(),
       verifyFence: verifyGatewayFence,
-      signalPinned: gatewayEffects.signalPinned,
-    },
-  );
-  assert.equal(stopped.host, hostname());
-  assert.equal(gateway.signalCode, 'SIGTERM');
-  assert.equal((await journal.readFirstCutoverEffects()).unmanagedEvents.length, 2);
-  assert.deepEqual((await observer.read()).unknownLaunchers, []);
-  await assert.rejects(fetch('http://127.0.0.1:4011'));
-  console.log(
-    'PASS physical unmanaged gateway retirement: kernel hostname, pinned SIGTERM, owned intent/completion and fresh joint observation',
-  );
-  console.log(
-    'PASS physical protected registration removal: memory-enabled UID998 worker exited, stopped cron removed, unrelated PID unchanged, private backup and six real journal events',
-  );
+      readInventory: async () => (await observer.readUnmanagedProgress('aliyun')).inventory,
+    });
+    const stopped = await observer.retireUnmanaged(
+      { maintenanceEndsAtMs: Date.now() + 30000 },
+      {
+        sleep,
+        verifyFence: verifyGatewayFence,
+        signalPinned: gatewayEffects.signalPinned,
+      },
+    );
+    assert.equal(stopped.host, hostname());
+    assert.equal(gateway.signalCode, 'SIGTERM');
+    assert.equal((await journal.readFirstCutoverEffects()).unmanagedEvents.length, 2);
+    assert.deepEqual((await observer.read()).unknownLaunchers, []);
+    await assert.rejects(fetch('http://127.0.0.1:4011'));
+    console.log(
+      'PASS physical unmanaged gateway retirement: kernel hostname, pinned SIGTERM, owned intent/completion and fresh joint observation',
+    );
+    console.log(
+      'PASS physical protected registration removal: memory-enabled UID998 worker exited, stopped cron removed, unrelated PID unchanged, private backup and six real journal events',
+    );
+  }
   await pm2('kill');
   await pm2('resurrect');
   assert.deepEqual(

@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 夜间续跑：阿里云网关准备与实际退役已接为两阶段本机调用
+
+承接本地 `fd97b24e`，原Task4 BASE844c2ced不变。在原registrations模块增加 `prepareLocalFirstCutoverGateway` 与 `retireLocalFirstCutoverGateways`，沿用原启动文件、PM2注册、pidfd及retirement observer/journal。前者只在producers_stopped备份和移除批准的启动条目，保留活网关；后者只在stopped、全隔离/工作核清后依次移除托管注册和原未托管网关。核对真实本机内核主机名、原journal、绝对截止、新鲜观察；有部分效果就拒绝重新执行。没有放宽journal阶段或给未接线的业务观察补零。
+
+六个新场景先因缺方法RED、实施后GREEN；追加“启动条目已不存在”拒绝回归。该追加测试最初错误期望可成功，实际追查原startup/journal/inventory三处契约均要求至少一个批准的真实启动文件变化，故只修测试，未修改生产门禁。单元覆盖实际临时文件/原字节备份、准备不误停、提前停止/忙碌/错误主机/启动文件漂移拒绝及删除后丢确认不重试。
+
+复用原 `browser-registration-removal-linux.mjs` 的 `--gateways` 模式：真实root网关、PM2、/proc、4010/4011监听、原journal及pidfd；准备后两个网关仍200，stopped后托管与未托管退出，无关PID不变，PM2重启只恢复无关应用。独立 `--gateways-lost-ack` 容器在真实删除后抛丢确认，确认删除意图保留、未托管网关仍200、不再删除或继续信号。默认生产者/停止态cron/未托管网关模式也复验通过。业务计数与另一逻辑主机明确为QA合成，不是双机业务停写或发布完成。
+
+本批最终browser **753/753**、Linux相关六组 **277/277**，均0跳过、退出0；三个独立实体模式均退出0。日志 `/tmp/holaday-gateway-site-browser-complete.log`、`/tmp/holaday-gateway-site-linux-final.log`、`/tmp/holaday-gateway-site-linux-lost-ack.log`、`/tmp/holaday-gateway-site-producer-regression.log`。三MJS Biome、现有shell语法、diff-check通过。最终全ops **120/59/16/587 + Python9**、0跳过、退出0，日志 `/tmp/holaday-gateway-site-ops-complete.log`；早先586项不含最后拒绝测试，以本最终结果为准。所有测试已退出，一次性容器自动移除。
+
+确切接续：这两个函数仅是Aliyun本机执行组合，尚未通过固定SSH接入完整site。原retirement observer应继续持有原Vultr journal及原始进程身份摘要；不能复制/伪造日志，不能把 `observer.retireUnmanaged` 简化为空成功。固定远端执行须同时支持受保护启动清单、实时原journal写入及原observer管理的未托管退役；避免在入口会话的writers回调内递归读取同一会话。当前20模块入口包尚不含registrations/startup/Python signal，不能只加远端动词就声称可部署。随后仍需真实业务/连接/writer观察、完整site与首次CLI、停写备份/隔离恢复、非PayPal恢复证据、全流程成功/故障演练及整分支审查。不要重建已完成的入口/退役模块、商户、通道或密钥。
+
+无生产连接/安装/服务/数据库/支付/PayPal/密钥操作；无PR/合并/部署。未重跑应用全套、MySQL恢复或整分支审查。原`__pycache__`保留，Task4–6仍未完成，夜间自动化保持本线程续跑。
+
 ### 2026-09-28 夜间续跑：生产者启动记录与运行注册已接为正式调用
 
 双机入口与host会话接线已保存本地提交 `77ee22ac`，本批接续原Task4、BASE844c2ced不变。在已有registrations模块增加 `retireLocalFirstCutoverProducers`，直接接原journal、retirement observer、启动文件备份/替换及真实PM2删除器；固定本机Vultr内核主机身份，工作核清必须发生在启动文件修改前。完整匹配原main/worker/停止态cron，不允许借该接口处理阿里云网关或无关名称；有本次部分事件就拒绝重新执行，丢删除确认不补发。返回值仅是生产者阶段，不冒充双机stopped。
