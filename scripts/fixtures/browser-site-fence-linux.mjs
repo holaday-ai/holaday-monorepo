@@ -10,12 +10,20 @@ import http from 'node:http';
 import https from 'node:https';
 import { promisify } from 'node:util';
 import { describeCutoverSite, probeCutoverIngress } from '/source/browser-first-cutover-fence.mjs';
-import { connectFirstCutoverIngressSession } from '/source/browser-first-cutover-ingress-session.mjs';
+import { createFirstCutoverIngressLifecycle } from '/source/browser-first-cutover-host.mjs';
+import {
+  connectFirstCutoverIngressSession,
+  createFirstCutoverIngressPair,
+} from '/source/browser-first-cutover-ingress-session.mjs';
 import { readCutoverNginxRuntime } from '/source/browser-first-cutover-nginx.mjs';
 import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 
 await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
+assert(
+  process.argv.length === 2 || (process.argv.length === 3 && process.argv[2] === '--lose-edge-ack'),
+);
+const loseEdgeAck = process.argv[2] === '--lose-edge-ack';
 const exec = (file, args) => promisify(execFile)(file, args, { encoding: 'utf8' });
 const hash = (b) => createHash('sha256').update(b).digest('hex');
 const root = await fs.mkdtemp('/tmp/holaday-site-fence-');
@@ -188,7 +196,7 @@ function request(site, uri, { method = 'GET', body = '', host, ipv6 = false, hea
   });
 }
 const inventoryDigest = 'a'.repeat(64);
-const maintenanceEndsAtMs = Date.now() + 60000;
+const maintenanceEndsAtMs = Date.now() + 120000;
 const manifest = { synthetic: 'network-ingress-lifecycle-only' };
 await fs.mkdir('/var/lib/holaday-deploy/maintenance', { recursive: true, mode: 0o700 });
 const journal = await acquireReleaseJournal('/var/lib/holaday-deploy/maintenance', {
@@ -237,28 +245,84 @@ const site = {
   binding,
   maintenanceEndsAtMs,
   siteDigest: hash('qa-network-site'),
-  ingress: await io.readApprovedIngress(),
+  ingress: {
+    inventoryDigest,
+    unknownIngress: [],
+    files: sites.filter((s) => s.profile !== 'vultr-20260926'),
+  },
 };
-await fs.writeFile(`${root}/session.json`, JSON.stringify({ site, root, prelude, sites }), {
-  mode: 0o600,
-});
-const ingress = await connectFirstCutoverIngressSession(
-  { binding, maintenanceEndsAtMs, siteDigest: site.siteDigest },
+await fs.mkdir(`${root}/aliyun-maintenance`, { mode: 0o700 });
+await fs.writeFile(
+  `${root}/session.json`,
+  JSON.stringify({ site, root, prelude, sites, loseEdgeAck }),
+  {
+    mode: 0o600,
+  },
+);
+const ca = await fs.readFile(`${root}/cert.pem`);
+const ingress = await createFirstCutoverIngressPair(
+  { binding, maintenanceEndsAtMs },
   {
     journal,
+    createLocal: async (...args) => {
+      try {
+        return await createFirstCutoverIngressLifecycle(...args);
+      } catch (error) {
+        console.error('QA local construction:', error.message);
+        throw error;
+      }
+    },
+    connectRemote: async (...args) => {
+      try {
+        return await connectFirstCutoverIngressSession(...args);
+      } catch (error) {
+        console.error('QA remote construction:', error.message);
+        throw error;
+      }
+    },
     observeWriters: io.observeWriters,
     verifyOpenedIdentity: io.verifyOpenedIdentity,
-    open: async (file, args, options) => {
-      assert.equal(file, '/usr/bin/ssh');
-      assert.equal(args.at(-1), `holaday-cutover-v1 ingress ${binding.attempt}`);
-      assert.equal(options.shell, false);
-      const child = spawn(
-        '/opt/node22/bin/node',
-        ['/source/fixtures/browser-ingress-session-child.mjs', `${root}/session.json`],
-        { stdio: ['pipe', 'pipe', 'inherit'] },
-      );
-      const completion = new Promise((resolve) => child.once('close', (code) => resolve({ code })));
-      return { input: child.stdout, output: child.stdin, completion };
+    // Production approvals are decoded JSON. Exclude fs.Stats prototypes from
+    // fixture-only source metadata instead of pretending they are file content.
+    readApprovedPair: async () =>
+      JSON.parse(
+        JSON.stringify({ ...(await io.readApprovedIngress()), remoteSiteDigest: site.siteDigest }),
+      ),
+    local: {
+      nginx: {
+        exec: async (file, args, options) => {
+          assert.equal(file, '/usr/sbin/nginx');
+          if (args[0] === '-t') await render();
+          return (
+            await promisify(execFile)(file, [...args, '-c', `${root}/nginx.conf`], {
+              ...options,
+              encoding: 'utf8',
+            })
+          ).stdout;
+        },
+      },
+      ingressProbe: {
+        request: (options, callback) => {
+          assert.equal(options.servername, 'holaday.ai');
+          return https.request({ ...options, port: 4443, ca }, callback);
+        },
+      },
+    },
+    remote: {
+      open: async (file, args, options) => {
+        assert.equal(file, '/usr/bin/ssh');
+        assert.equal(args.at(-1), `holaday-cutover-v1 ingress ${binding.attempt}`);
+        assert.equal(options.shell, false);
+        const child = spawn(
+          '/opt/node22/bin/node',
+          ['/source/fixtures/browser-ingress-session-child.mjs', `${root}/session.json`],
+          { stdio: ['pipe', 'pipe', 'inherit'] },
+        );
+        const completion = new Promise((resolve) =>
+          child.once('close', (code) => resolve({ code })),
+        );
+        return { input: child.stdout, output: child.stdin, completion };
+      },
     },
   },
 );
@@ -280,6 +344,10 @@ try {
   for (const stage of ['orders', 'all-writers']) {
     if (stage === 'orders') {
       await journal.persist('orders_fenced', { candidate: binding.candidate });
+      if (loseEdgeAck) {
+        await assert.rejects(ingress.fenceOrders(), /CUTOVER_INGRESS_PAIR_UNPROVEN/);
+        throw new Error('QA_EXPECTED_ACK_LOSS');
+      }
       await ingress.fenceOrders();
     } else {
       // Journal steps below model business/producer completion only. The nginx,
@@ -309,21 +377,32 @@ try {
       assert.ok(errors.every((code) => code === 'DEPTH_ZERO_SELF_SIGNED_CERT'));
       console.log('TLS: untrusted certificates rejected for all 37 route/listener probes');
     }
-    const persisted = JSON.parse(
-      await fs.readFile(
-        `/var/lib/holaday-deploy/maintenance/${binding.attempt}.ingress.json`,
-        'utf8',
-      ),
+    const receipts = await ingress.readFenceReceipts();
+    assert.equal(receipts.length, 2);
+    assert.deepEqual(
+      receipts.map((r) => [r.host, r.receipt.files.length]),
+      [
+        ['vultr', 1],
+        ['aliyun', 2],
+      ],
     );
-    assert.equal(persisted.stage, stage);
-    assert.equal(persisted.phase, 'active');
-    assert.equal(persisted.attempt, (await journal.assertOwnership()).attempt);
+    for (const { receipt: persisted } of receipts) {
+      assert.equal(persisted.stage, stage);
+      assert.equal(persisted.phase, 'active');
+      assert.equal(persisted.attempt, (await journal.assertOwnership()).attempt);
+    }
     for (const site of sites) {
       const stat = await fs.lstat(site.sourcePath);
       assert.equal(stat.ino, site.sourceStat.ino);
       assert.equal(stat.uid, site.sourceUid);
       assert.equal(hash(await fs.readFile(site.sourcePath)), site.digest);
-      assert((await fs.readlink(site.enabledPath)).startsWith('/etc/nginx/holaday-maintenance/'));
+      assert(
+        (await fs.readlink(site.enabledPath)).startsWith(
+          site.profile === 'vultr-20260926'
+            ? '/etc/nginx/holaday-maintenance/'
+            : `${root}/aliyun-generated/`,
+        ),
+      );
     }
     for (const site of sites) {
       for (const route of site.locations.filter((r) => r.kind === 'health')) {
@@ -393,10 +472,10 @@ try {
   const identity = { candidate: binding.candidate, bootId: 'c'.repeat(32) };
   await journal.persist('verified', { candidate: binding.candidate, identity });
   await ingress.restoreIngress(identity);
-  assert.equal((await ingress.readFenceReceipt()).phase, 'restored');
+  assert((await ingress.readFenceReceipts()).every((r) => r.receipt.phase === 'restored'));
   await ingress.close();
   console.log(
-    'session: separate receiver process used live parent journal across both fences and restoration',
+    'pair: local origin and separate edge receiver used one live journal, separate receipts, both fences and restoration',
   );
   const runtime = await readCutoverNginxRuntime();
   assert.ok(
@@ -436,8 +515,41 @@ try {
     'restore: original link chains/UID501 inode preserved, protected backups and real reopened upstreams passed',
   );
 } catch (error) {
-  console.error(await fs.readFile(`${root}/error.log`, 'utf8').catch(() => 'no nginx log'));
-  throw error;
+  if (error.message !== 'QA_EXPECTED_ACK_LOSS' || !loseEdgeAck) {
+    console.error(await fs.readFile(`${root}/error.log`, 'utf8').catch(() => 'no nginx log'));
+    throw error;
+  }
+  const before = await readCutoverNginxRuntime();
+  await assert.rejects(ingress.fenceOrders(), /CUTOVER_INGRESS_PAIR_UNPROVEN/);
+  await assert.rejects(ingress.fenceAll(), /CUTOVER_INGRESS_PAIR_UNPROVEN/);
+  const after = await readCutoverNginxRuntime();
+  assert.deepEqual(after, before); // no second reload after uncertain outcome
+  assert.equal((await journal.readFirstCutoverEffects()).phase, 'orders_fenced');
+  for (const directory of ['/var/lib/holaday-deploy/maintenance', `${root}/aliyun-maintenance`]) {
+    const receipt = JSON.parse(
+      await fs.readFile(`${directory}/${binding.attempt}.ingress.json`, 'utf8'),
+    );
+    assert.equal(receipt.phase, 'active');
+    assert.equal(receipt.stage, 'orders');
+  }
+  for (const site of sites) {
+    assert.equal(
+      (
+        await request(
+          site,
+          site.profile.startsWith('aliyun-pay') ? '/payment/create' : '/api/tasks',
+          { method: 'POST', body: '{}' },
+        )
+      ).status,
+      503,
+    );
+    assert.equal(hash(await fs.readFile(site.sourcePath)), site.digest);
+    assert.notEqual(await fs.readlink(site.enabledPath), site.links[0].target);
+  }
+  assert.equal(heldClient.destroyed, false);
+  console.log(
+    'lost ACK: actual edge receiver exited after reload; both physical fences/receipts remain, no replay/reload/restore, same retained journal',
+  );
 } finally {
   heldClient?.destroy();
   heldBackend?.end();

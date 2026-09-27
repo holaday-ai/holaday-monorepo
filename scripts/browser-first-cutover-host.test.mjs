@@ -169,6 +169,15 @@ async function lifecycleFixture(t, fault) {
     },
   };
   f.io.lifecycle = {
+    attach: async (context) => {
+      assert.deepEqual(await context.journal.assertOwnership(), binding);
+      await expectPhase('preflight', 'site-attach');
+    },
+    detach: async () => {
+      await fs.stat(join(f.directory, 'release.lock'));
+      events.push('site-detach');
+      if (fault === 'site-detach') throw new Error('CUTOVER_TEST_FAILURE');
+    },
     fenceOrders: async () => expectPhase('orders_fenced', 'fence-orders'),
     settleLegacy: async () => expectPhase('legacy_settled', 'settle'),
     stopProducers: async () => expectPhase('producers_stopped', 'stop-producers'),
@@ -355,6 +364,52 @@ test('first host connects real journal, backup receipt and bootstrap before exac
   assert.equal(f.events.filter((v) => v === 'evidence:preopen').length, 2);
   await adapter.finish(result);
   await assert.rejects(fs.stat(join(f.directory, 'release.lock')), { code: 'ENOENT' });
+});
+
+test('site attaches to owned journal before readiness and detaches before reconciliation', async (t) => {
+  const f = await lifecycleFixture(t);
+  const { adapter, result } = await runLifecycle(f);
+  assert.equal(result.ok, true);
+  assert(f.events.indexOf('lock') < f.events.indexOf('site-attach'));
+  assert(f.events.indexOf('site-attach') < f.events.indexOf('evidence:prepare'));
+  assert(f.events.indexOf('resume-worker') < f.events.indexOf('site-detach'));
+  assert(f.events.indexOf('site-detach') < f.events.indexOf('reconcile'));
+  await adapter.finish(result);
+  assert.equal(f.events.filter((e) => e === 'site-detach').length, 1);
+});
+
+test('failed read-only site attach never fences and still closes resources with lock retained', async (t) => {
+  const f = await lifecycleFixture(t, 'site-attach');
+  const { adapter, result } = await runLifecycle(f);
+  assert.equal(result.ok, false);
+  assert(!f.events.includes('fence-orders'));
+  assert(!f.events.includes('evidence:prepare'));
+  await adapter.finish(result);
+  assert.equal(f.events.filter((e) => e === 'site-detach').length, 1);
+  await fs.stat(join(f.directory, 'release.lock'));
+});
+
+test('uncertain detach closes candidate, keeps journal and is never repeated by finish', async (t) => {
+  const f = await lifecycleFixture(t, 'site-detach');
+  const { adapter, result } = await runLifecycle(f);
+  assert.equal(result.ok, false);
+  assert.equal(result.closeAcknowledged, true);
+  assert(!f.events.includes('reconcile'));
+  await adapter.finish(result);
+  assert.equal(f.events.filter((e) => e === 'site-detach').length, 1);
+  await fs.stat(join(f.directory, 'release.lock'));
+});
+
+test('missing attach or detach refuses before acquisition or any build', async (t) => {
+  for (const method of ['attach', 'detach']) {
+    const f = await lifecycleFixture(t);
+    delete f.io.lifecycle[method];
+    assert.throws(
+      () => firstHost.createFirstCutoverHostAdapter({ attempt: approved.attempt }, f.io),
+      /CUTOVER_HOST_OBSERVER_REQUIRED/,
+    );
+    assert(!f.events.includes('lock'));
+  }
 });
 
 for (const fault of [

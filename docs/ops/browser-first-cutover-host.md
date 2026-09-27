@@ -37,6 +37,10 @@
 
 ## 必须连接的现场接口
 
+现场生命周期现在必须实现 `attach(context)` 与 `detach(context)`。host在实际候选准备、持锁及配置校验完成后、prepare证据采集前调用attach；此时journal仍为preflight，适合构造固定双机入口和原退役观察器。attach只读接线，不能停服务或修改入口；不应藏在证据读取回调中，也不能等到orders_fenced才构造。缺任一方法在获取锁/构建之前拒绝，没有默认空实现。
+
+detach关闭本次执行会话：成功路径在同实例恢复入口、恢复worker之后且维护截止前调用，之后独立只读核对可以继续到reconcile截止。失败路径finish仍在持锁状态清理已开始的attach；detach调用只尝试一次，确认丢失不重试、不杀远端进程。成功解除发布锁必须同时满足原reconciliation条件与detach已完成；异常则关闭候选准入、保留实际journal/锁。独立核对连接和数据库恢复仍由完整site提供，不能把detach当成业务核对或恢复完成。
+
 ### 正式 nginx 测试、重载与生效观察（2026-09-28）
 
 `applyCutoverFence / restoreCutoverIngress`未提供成对的`testNginx / reloadNginx`替代接口时，现默认调用`browser-first-cutover-nginx.mjs`。现场必须提供同一操作的`nginx.maintenanceEndsAtMs`，沿用原journal/受保护入口回执；缺窗口、过期、非Linux/root或接口不完整时拒绝，不通过CLI接受任意命令。一个控制器只执行一次测试/重载，不把失败或丢确认改成可重试。
@@ -48,6 +52,12 @@
 现有Linux实体夹具已使用此默认控制器和默认PID/proc读取，仅将nginx配置路径映射到容器的合成多站点配置。需要容器自有PID/network namespace中的`NET_ADMIN`和`SYS_PTRACE`，不挂宿主PID或凭据。真实无关长连接贯穿两次维护重载和恢复仍可传输数据；真实目标业务响应在隔离时拒绝、恢复后正常。该结果不代表双机现场副作用通道或整项切换已完成。
 
 ### 固定跨主机入口会话（2026-09-28，本地实现，未安装生产）
+
+`createFirstCutoverIngressPair({binding,maintenanceEndsAtMs},io)` 是完整site可消费的固定双机入口组合。`readApprovedPair()` 从受保护现场清单提供 `{inventoryDigest,unknownIngress:[],files:三个已审核站点,remoteSiteDigest}`；remoteSiteDigest绑定阿里云独立审批文件的完整字节。它在preflight/prepared阶段持有真实journal时构造本机生命周期和远端会话。两阶段隔离依次执行Vultr→Aliyun；恢复在同实例serving已确认后依次Aliyun→Vultr。每个跨机操作始终绑定同一个journal记录摘要、完整清单和绝对窗口，中途变化或一侧失败都不继续后续写操作、重试或自动回滚。
+
+两台主机取得的是同一个全局writer观察，不能相加成重复计数；必须一致、新鲜且全隔离时为零，返回最早观察时间，不刷新旧时间。每次隔离核对两份实际回执及各自精确文件范围；`readFenceReceipts()` 返回 `{host,receipt}`，可供原退役观察器消费。writer读取器必须独立读取实际事实，不能递归调用正在执行的入口会话；不从nginx探针推断 `unsettledWork/externalWork` 为零。`close()` 只结束会话，不解除维护或清除journal。构造与结束须由完整site生命周期安排；尚无默认生产site提供者，不能据此启动完整发布。
+
+Linux演练现由真正本机生命周期和独立接收进程执行，分别保存私密回执/备份/生成文件，使用同一个真实journal。容器为节省资源共享一个网络命名空间及nginx，端口和目录映射明确属于QA，不宣称两台真实主机。除完整两阶段/恢复外，另让测试接收进程在实际nginx重载后、发送确认前退出：两份实际隔离和回执保留、journal停在orders_fenced、重复调用不产生第二次重载、无自动恢复，原文件和无关连接仍保留。业务停写及候选控制仍为明确合成边界，真实SSH授权独立验证。
 
 `browser-first-cutover-ingress-session.mjs` 把已有本机入口生命周期接到受限 SSH 的双向标准输入/输出。控制端 `connectFirstCutoverIngressSession({binding,maintenanceEndsAtMs,siteDigest},io)` 只能连接既有 Vultr→Aliyun 身份/固定地址/严格主机指纹，使用 `holaday-cutover-v1 ingress <attempt>`，没有自定义主机、命令、环境、文件上传或重连参数。只暴露两阶段隔离、验证、同实例恢复、回执读取及结束会话；结束会话不清除发布锁。丢确认/协议错误停止该客户端，不重试动作、不恢复旧配置、不发送杀进程信号。
 

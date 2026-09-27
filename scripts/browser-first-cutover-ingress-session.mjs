@@ -614,6 +614,315 @@ export async function connectFirstCutoverIngressSession(input, overrides = {}) {
   }
 }
 
+/** Fixed site composition, not a new transport. The caller supplies a protected
+ * three-site approval reader and independently observed global writer facts.
+ * A writer reader must not recursively query this in-flight ingress session.
+ * Business settlement is deliberately NOT inferred from network isolation.
+ */
+export async function createFirstCutoverIngressPair(input, overrides = {}) {
+  const io = {
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    createLocal: createFirstCutoverIngressLifecycle,
+    connectRemote: connectFirstCutoverIngressSession,
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_INGRESS_PAIR_UNPROVEN');
+  };
+  let remote;
+  try {
+    const args = structuredClone(input);
+    if (
+      !keys(args, ['binding', 'maintenanceEndsAtMs']) ||
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      ['assertOwnership', 'readFirstCutoverEffects'].some(
+        (k) => typeof io.journal?.[k] !== 'function',
+      ) ||
+      ['readApprovedPair', 'observeWriters', 'verifyOpenedIdentity'].some(
+        (k) => typeof io[k] !== 'function',
+      )
+    )
+      reject();
+    const scope = structuredClone(await io.readApprovedPair());
+    validate({ ...args, siteDigest: scope?.remoteSiteDigest }, io.now());
+    const paths = [
+      ['vultr-20260926', '/etc/nginx/sites-available/holaday'],
+      ['aliyun-app-20260926', '/etc/nginx/sites-available/hd-app.orangebench.tech'],
+      ['aliyun-pay-20260926', '/etc/nginx/sites-available/hd-pay.orangebench.tech'],
+    ];
+    if (
+      !keys(scope, ['inventoryDigest', 'unknownIngress', 'files', 'remoteSiteDigest']) ||
+      scope.inventoryDigest !== args.binding.inventoryDigest ||
+      !Array.isArray(scope.unknownIngress) ||
+      scope.unknownIngress.length ||
+      !Array.isArray(scope.files) ||
+      scope.files.length !== 3 ||
+      !paths.every(
+        ([profile, path]) =>
+          scope.files.filter((f) => f?.profile === profile && f.path === path && hash(f.digest))
+            .length === 1,
+      )
+    )
+      reject();
+    let last = -1;
+    let revision;
+    let busy = false;
+    let failed = false;
+    let closed = false;
+    const used = new Set();
+    const journal = {
+      assertOwnership: io.journal.assertOwnership.bind(io.journal),
+      readFirstCutoverEffects: io.journal.readFirstCutoverEffects.bind(io.journal),
+    };
+    const clock = () => {
+      const now = io.now();
+      if (!Number.isSafeInteger(now) || now < 0 || now < last || now >= args.maintenanceEndsAtMs)
+        reject();
+      last = now;
+      return now;
+    };
+    const guard = async (phases) => {
+      clock();
+      if (!isDeepStrictEqual(await journal.assertOwnership(), args.binding)) reject();
+      const record = await journal.readFirstCutoverEffects();
+      if (
+        !bindingKeys.every((k) => record?.[k] === args.binding[k]) ||
+        !hash(record.recordDigest) ||
+        (revision !== undefined && revision !== record.recordDigest) ||
+        (phases && !phases.includes(record.phase)) ||
+        !isDeepStrictEqual(await io.readApprovedPair(), scope)
+      )
+        reject();
+      clock();
+      return record;
+    };
+    const initial = await guard(['preflight', 'prepared']);
+    revision = initial.recordDigest;
+    const shared = {
+      now: io.now,
+      journal: {
+        assertOwnership: async () => {
+          await guard();
+          return structuredClone(args.binding);
+        },
+        readFirstCutoverEffects: () => guard(),
+      },
+      observeWriters: io.observeWriters,
+      verifyOpenedIdentity: io.verifyOpenedIdentity,
+    };
+    const local = await io.createLocal(args, {
+      ...io.local,
+      ...shared,
+      platform: io.platform,
+      uid: io.uid,
+      readApprovedIngress: async () => {
+        await guard();
+        return {
+          inventoryDigest: scope.inventoryDigest,
+          unknownIngress: [],
+          files: structuredClone(scope.files.filter((f) => f.profile === 'vultr-20260926')),
+        };
+      },
+    });
+    await guard(['preflight', 'prepared']);
+    remote = await io.connectRemote(
+      { ...args, siteDigest: scope.remoteSiteDigest },
+      { ...io.remote, ...shared, platform: io.platform, uid: io.uid },
+    );
+    await guard(['preflight', 'prepared']);
+    revision = undefined;
+    const endpoints = { vultr: local, aliyun: remote };
+    const receipts = async () => {
+      const result = [];
+      for (const host of ['vultr', 'aliyun']) {
+        await guard();
+        const receipt = await endpoints[host].readFenceReceipt();
+        if (receipt !== undefined) {
+          const files = scope.files.filter(
+            (f) => (f.profile === 'vultr-20260926') === (host === 'vultr'),
+          );
+          const restoring = ['restoring', 'restored'].includes(receipt.phase);
+          if (
+            !keys(receipt, [
+              'schemaVersion',
+              'attempt',
+              'inventoryDigest',
+              'stage',
+              'phase',
+              'files',
+              ...(restoring ? ['identity'] : []),
+            ]) ||
+            receipt.schemaVersion !== 1 ||
+            receipt.attempt !== args.binding.attempt ||
+            receipt.inventoryDigest !== scope.inventoryDigest ||
+            !['installing', 'active', 'restoring', 'restored'].includes(receipt.phase) ||
+            !['orders', 'all-writers'].includes(receipt.stage) ||
+            !Array.isArray(receipt.files) ||
+            receipt.files.length !== files.length ||
+            files.some(
+              (f) =>
+                receipt.files.filter(
+                  (r) =>
+                    r.path === f.path &&
+                    r.originalDigest === f.digest &&
+                    r.backupDigest === f.digest &&
+                    hash(r.generatedDigest),
+                ).length !== 1,
+            ) ||
+            (restoring &&
+              (receipt.stage !== 'all-writers' ||
+                receipt.identity?.candidate !== args.binding.candidate ||
+                !/^[a-f0-9]{32}$/.test(receipt.identity?.bootId ?? '')))
+          )
+            reject();
+          result.push({ host, receipt: structuredClone(receipt) });
+        }
+        await guard();
+      }
+      return result;
+    };
+    const counts = ['existingSockets', 'internalWriters', 'producersRunning'];
+    const prove = (results, stage) => {
+      const now = clock();
+      if (
+        results.length !== 2 ||
+        results.some(
+          (r) =>
+            !keys(r, ['inventoryDigest', 'stage', 'observedAtMs', ...counts]) ||
+            r.inventoryDigest !== scope.inventoryDigest ||
+            r.stage !== stage ||
+            !Number.isSafeInteger(r.observedAtMs) ||
+            r.observedAtMs < 0 ||
+            r.observedAtMs > now ||
+            now - r.observedAtMs > 60000 ||
+            counts.some(
+              (k) =>
+                !Number.isSafeInteger(r[k]) ||
+                r[k] < 0 ||
+                r[k] !== results[0][k] ||
+                (stage === 'all-writers' && r[k] !== 0),
+            ),
+        )
+      )
+        reject();
+      return { ...results[0], observedAtMs: Math.min(...results.map((r) => r.observedAtMs)) };
+    };
+    const run = async (name, phases, operation, mutation = false) => {
+      if (busy || closed || (mutation && (failed || used.has(name)))) reject();
+      busy = true;
+      if (mutation) used.add(name);
+      try {
+        revision = (await guard(phases)).recordDigest;
+        const result = await operation();
+        await guard(phases);
+        return result;
+      } catch {
+        failed = true;
+        reject();
+      } finally {
+        revision = undefined;
+        busy = false;
+      }
+    };
+    const fence = async (name, stage) => {
+      const results = [];
+      for (const host of ['vultr', 'aliyun']) {
+        await guard();
+        results.push(await endpoints[host][name]());
+        await guard();
+      }
+      const proof = prove(results, stage);
+      const actual = await receipts();
+      if (
+        actual.length !== 2 ||
+        actual.some((r) => r.receipt.phase !== 'active' || r.receipt.stage !== stage)
+      )
+        reject();
+      // Recheck freshness after receipt reads, never freshen an old observation.
+      prove(results, stage);
+      return proof;
+    };
+    return {
+      fenceOrders: () =>
+        run('orders', ['orders_fenced'], () => fence('fenceOrders', 'orders'), true),
+      fenceAll: () => run('all', ['all_fenced'], () => fence('fenceAll', 'all-writers'), true),
+      verifyFence: () =>
+        run(
+          'verify',
+          [
+            'all_fenced',
+            'stopped',
+            'backup_verified',
+            'migration_started',
+            'candidate_started',
+            'verified',
+          ],
+          () => fence('verifyFence', 'all-writers'),
+        ),
+      readFenceReceipts: () => run('receipts', undefined, receipts),
+      restoreIngress: (identity) =>
+        run(
+          'restore',
+          ['verified'],
+          async () => {
+            const target = structuredClone(identity);
+            const record = await guard();
+            if (
+              !keys(target, ['candidate', 'bootId']) ||
+              !isDeepStrictEqual(record.identity, target)
+            )
+              reject();
+            // Restore the edge/payment host first, public origin last. A partial
+            // failure never retries restoration; the owning host closes admission.
+            for (const host of ['aliyun', 'vultr']) {
+              const opened = await io.verifyOpenedIdentity(structuredClone(target));
+              if (
+                !isDeepStrictEqual(opened?.identity, target) ||
+                opened.mode !== 'serving' ||
+                opened.idle !== false ||
+                opened.needsReconciliation !== true
+              )
+                reject();
+              await guard(['verified']);
+              await endpoints[host].restoreIngress(target);
+              await guard(['verified']);
+            }
+            const actual = await receipts();
+            if (
+              actual.length !== 2 ||
+              actual.some(
+                (r) =>
+                  r.receipt.phase !== 'restored' || !isDeepStrictEqual(r.receipt.identity, target),
+              )
+            )
+              reject();
+          },
+          true,
+        ),
+      close: async () => {
+        if (busy || closed) reject();
+        closed = true;
+        try {
+          await remote.close();
+        } catch {
+          reject();
+        }
+      },
+    };
+  } catch {
+    // Detach is not a retry of an uncertain effect, and never clears the lock.
+    try {
+      await remote?.close();
+    } catch {
+      /* Preserve the original failure. */
+    }
+    reject();
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     if (process.platform !== 'linux' || process.getuid?.() !== 0 || process.argv.length !== 3)

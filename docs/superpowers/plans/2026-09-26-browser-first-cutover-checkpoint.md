@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 夜间续跑：双机入口与现场会话生命周期接线
+
+承接 `39452d1b`，Task4原BASE844c2ced不变。在原入口会话模块组合本机Vultr与固定SSH的Aliyun两个生命周期：同一实际journal、受保护三站点范围、跨两端同一记录版本及原绝对截止时间；隔离Vultr→Aliyun，恢复Aliyun→Vultr。两端回执分别绑定主机，全局writer计数要求一致而非相加；任意一端确认不明就锁住后续效果，不重试或自动恢复。实际writer/control观察仍是必需项，不以零值补齐。
+
+原host补必要的 `lifecycle.attach/detach`：持有真实日志锁、候选暂存后且首次readiness前建立现场会话；恢复入口及worker后、维护窗口内结束执行会话，再做可延长的只读补核对。初始化失败不开始隔离，结束确认不明不解锁、不重复结束；失败收尾仍保持日志所有权。只读补核对必须使用独立观察路径，writer回调不能递归调用同一个进行中的远端会话。
+
+实际Linux夹具已调用正式双机组合，本机路径与独立接收进程分别操作各自私密文件和回执；真实nginx/TLS两阶段隔离、恢复、六次重载期间无关长连接保持通过。单容器共享nginx和网络命名空间，不冒充两台生产机器。另一个独立容器实测接收进程在隔离已重载后丢ACK：两个实体回执保留，后续动作被拒、未再次重载/恢复、无关连接保持。业务核清/备份/候选前置仍明确合成，不是整链成功证据。
+
+最终browser **737/737**，完整ops **120/59/16/565 + Python9**；实际Linux **136/136** 加实体双入口演练，真实sshd/Python9及固定入口断言通过。上述均0跳过、退出0。日志 `/tmp/holaday-ingress-pair-browser-complete.log`、`/tmp/holaday-ingress-pair-ops-complete.log`、`/tmp/holaday-ingress-pair-linux-complete.log`、`/tmp/holaday-ingress-pair-ssh-final.log`；丢ACK实体日志 `/tmp/holaday-ingress-pair-lost-ack-final.log`，该项在host生命周期改动前通过、相关入口代码此后未变。六个MJS的Biome、shell语法、diff-check通过。初次实体失败是QA清单携带fs.Stats原型而非生产JSON；以独立诊断确认后只修QA，不放宽生产范围比较。原RED/失败日志保留。
+
+没有生产SSH/安装/服务/DB/支付/PayPal/密钥操作，未重跑应用全套、MySQL恢复或整分支审查；原`__pycache__`保留。本轮仍是Task4局部接线，Task4–6未完成、无生产首次CLI、不能部署。下一步从新的attach持有journal入口组合已有现场观察/退役模块，补真实业务/writer/control读者、完整site provider及首次CLI，再完成停写备份恢复、非PayPal恢复证据、全链故障演练和整分支审查。不要重建已通过的入口会话、商户或恢复密钥。自动化继续本线程。
+
 ### 2026-09-28 夜间续跑：固定 SSH 入口会话已验证，未安装生产
 
 承接 `152f5755`，原Task4 BASE844c2ced不变。已有入口生命周期现可通过固定 `holaday-cutover-v1 ingress <attempt>` 会话调用；接收端独立读取root受保护审批与两个阿里云入口清单，控制端按序实时调用原journal、writer及候选观察器。没有上传配置/命令、任意主机、重新连接或不确定动作重试。固定20模块的工具包及每文件摘要必须验证；仅源码增加新命令，生产强制入口/身份/authorized_keys/sshd仍保持原只读版本。

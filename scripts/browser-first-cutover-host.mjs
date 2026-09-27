@@ -589,6 +589,8 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
   const request = { attempt: options.attempt };
   const required = {
     lifecycle: [
+      'attach',
+      'detach',
       'fenceOrders',
       'settleLegacy',
       'stopProducers',
@@ -639,6 +641,9 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
   let seed;
   let migrated = false;
   let reconciled = false;
+  let siteAttachStarted = false;
+  let siteDetachStarted = false;
+  let siteDetached = false;
   let lastTime = -1;
   const attempted = new Set();
   const reject = () => {
@@ -651,6 +656,15 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
     applicationGid: prepared.applicationGid,
     journal: prepared.journal,
   });
+  const detachSite = async () => {
+    if (siteDetached) return;
+    if (siteDetachStarted) reject();
+    siteDetachStarted = true;
+    // Resource closure never authorizes another effect or clears the journal.
+    // A failed/lost acknowledgement is not replayed by finish().
+    await io.lifecycle.detach(context());
+    siteDetached = true;
+  };
   const clock = (reconciling = false) => {
     const now = io.now();
     if (
@@ -828,6 +842,9 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
           parseMaintenanceCandidateConfig(bytes, prepared.root, io),
           approval.candidate,
         );
+        siteAttachStarted = true;
+        await io.lifecycle.attach(context());
+        await guard();
         await readiness();
       }),
     persist: async (next, detail) => {
@@ -981,7 +998,11 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
         await io.lifecycle.restoreIngress(context(), target);
       }),
     resumeWorker: (target) =>
-      once('resumeWorker', 'verified', () => io.lifecycle.resumeWorker(context(), target)),
+      once('resumeWorker', 'verified', async () => {
+        await io.lifecycle.resumeWorker(context(), target);
+        await guard();
+        await detachSite();
+      }),
     reconcile: (target) =>
       once(
         'reconcile',
@@ -1009,8 +1030,15 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
     finish: async (result) => {
       if (!prepared) return;
       try {
+        if (siteAttachStarted && !siteDetachStarted) await detachSite();
         if (result.ok) {
-          if (!reconciled || phase !== 'reconciled' || !sameIdentity(result.identity)) reject();
+          if (
+            !siteDetached ||
+            !reconciled ||
+            phase !== 'reconciled' ||
+            !sameIdentity(result.identity)
+          )
+            reject();
           await guard(true);
           await prepared.journal.finish();
         }

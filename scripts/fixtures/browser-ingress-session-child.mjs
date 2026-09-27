@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import https from 'node:https';
 import { promisify } from 'node:util';
+import { createFirstCutoverIngressLifecycle } from '/source/browser-first-cutover-host.mjs';
 import { serveFirstCutoverIngressSession } from '/source/browser-first-cutover-ingress-session.mjs';
 
 await fs.access('/.dockerenv');
@@ -15,15 +16,53 @@ const fixture = JSON.parse(raw);
 const { site, root, prelude, sites } = fixture;
 assert.equal(path, `${root}/session.json`);
 const ca = await fs.readFile(`${root}/cert.pem`);
+// The fixture shares one network namespace/nginx, but each logical host has an
+// independent private receipt/backup/generated-file root. Never map production.
+const mappings = [
+  ['/var/lib/holaday-deploy/maintenance', `${root}/aliyun-maintenance`],
+  ['/etc/nginx/holaday-maintenance', `${root}/aliyun-generated`],
+];
+const map = (p) => {
+  const match = mappings.find(([from]) => p === from || p.startsWith(`${from}/`));
+  return match ? match[1] + p.slice(match[0].length) : p;
+};
+const unmap = (p) => {
+  const match = mappings.find(([, to]) => p === to || p.startsWith(`${to}/`));
+  return match ? match[0] + p.slice(match[1].length) : p;
+};
+const disk = {
+  ...fs,
+  lstat: (p) => fs.lstat(map(p)),
+  realpath: async (p) => unmap(await fs.realpath(map(p))),
+  open: (p, ...args) => fs.open(map(p), ...args),
+  mkdir: (p, options) => fs.mkdir(map(p), options),
+  readlink: async (p) => unmap(await fs.readlink(map(p))),
+  symlink: (a, b) => fs.symlink(map(a), map(b)),
+  rename: (a, b) => fs.rename(map(a), map(b)),
+};
 try {
   await serveFirstCutoverIngressSession(
     { attempt: site.binding.attempt },
     {
+      createLifecycle: async (...args) => {
+        const lifecycle = await createFirstCutoverIngressLifecycle(...args);
+        if (!fixture.loseEdgeAck) return lifecycle;
+        return {
+          ...lifecycle,
+          fenceOrders: async () => {
+            await lifecycle.fenceOrders();
+            // Real effect completed; terminate only this disposable test receiver
+            // before its response. Production has no failure-injection option.
+            process.exit(71);
+          },
+        };
+      },
       readSite: async () => {
         assert.equal(await fs.readFile(path, 'utf8'), raw);
         return structuredClone(site);
       },
       lifecycleIO: {
+        fs: disk,
         nginx: {
           exec: async (file, args, options) => {
             assert.equal(file, '/usr/sbin/nginx');
