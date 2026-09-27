@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import { execFile, spawn } from 'node:child_process';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import {
+  chmod,
   copyFile,
   mkdir,
   mkdtemp,
@@ -15,6 +17,8 @@ import {
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import type { Writable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import mysql from 'mysql2/promise';
@@ -223,26 +227,34 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
           );
           for (const file of files)
             await copyFile(join(appRoot, 'drizzle', file), join(snapshotApp, 'drizzle', file));
+          const dumpArgs = [
+            'exec',
+            container,
+            'mysqldump',
+            '-uroot',
+            '--single-transaction',
+            '--routines',
+            '--events',
+            '--triggers',
+            '--set-gtid-purged=OFF',
+            '--no-tablespaces',
+            source,
+          ];
           const exportPlain = async () =>
-            (
-              await run(
-                'docker',
-                [
-                  'exec',
-                  container,
-                  'mysqldump',
-                  '-uroot',
-                  '--single-transaction',
-                  '--routines',
-                  '--events',
-                  '--triggers',
-                  '--set-gtid-purged=OFF',
-                  '--no-tablespaces',
-                  source,
-                ],
-                { maxBuffer: 16 * 1024 * 1024 },
-              )
-            ).stdout;
+            (await run('docker', dumpArgs, { maxBuffer: 16 * 1024 * 1024 })).stdout;
+          const exportStream = async (sink: Writable) => {
+            const child = spawn('docker', dumpArgs, { stdio: ['ignore', 'pipe', 'ignore'] });
+            // EOF alone is not success: mysqldump/docker may fail after output.
+            await Promise.all([
+              pipeline(child.stdout, sink),
+              new Promise<void>((resolve, reject) => {
+                child.once('error', reject);
+                child.once('close', (code) =>
+                  code === 0 ? resolve() : reject(new Error('QA_DUMP_FAILED')),
+                );
+              }),
+            ]);
+          };
           const importPlain = async (plain: string | Buffer) =>
             new Promise<void>((resolve, reject) => {
               const child = execFile(
@@ -260,9 +272,13 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
             // does not configure production keys, storage, or host isolation.
             const moduleAt = (file: string) =>
               new URL(`../../../../scripts/${file}`, import.meta.url).href;
-            const { backupAndRestoreCheck } = await import(
-              moduleAt('browser-first-cutover-backup.mjs')
-            );
+            const {
+              backupAndRestoreCheck,
+              inspectAgeBackupFacility,
+              encryptAgeBackup,
+              hashAgeBackupArtifact,
+              decryptAgeBackupToFile,
+            } = await import(moduleAt('browser-first-cutover-backup.mjs'));
             const { acquireReleaseJournal } = await import(
               moduleAt('browser-maintenance-journal.mjs')
             );
@@ -301,9 +317,30 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
               ).rejects.toThrow('UNPROVEN');
               const hash = (value: unknown) =>
                 createHash('sha256').update(JSON.stringify(value)).digest('hex');
-              const encryptionProfileDigest = hash('QA-only ephemeral AES-256-GCM facility');
-              const key = randomBytes(32);
-              const reference = join(snapshot, 'synthetic-backup.enc');
+              // Same mature codec as the configured facility; disposable QA key,
+              // never the real Mac recovery identity or any production input.
+              const executable = await realpath(
+                process.env.CUTOVER_TEST_AGE_EXECUTABLE ?? '/not-configured',
+              );
+              const ageDirectory = join(await realpath(snapshot), 'age');
+              await mkdir(ageDirectory, { mode: 0o700 });
+              const identityFile = join(ageDirectory, 'identity.txt');
+              await run(join(dirname(executable), 'age-keygen'), ['-o', identityFile]);
+              await chmod(identityFile, 0o600);
+              const recipientFile = join(ageDirectory, 'recipient.txt');
+              const recipient = (
+                await run(join(dirname(executable), 'age-keygen'), ['-y', identityFile])
+              ).stdout;
+              await writeFile(recipientFile, recipient, { mode: 0o600, flag: 'wx' });
+              const facility = {
+                executable,
+                executableDigest: createHash('sha256')
+                  .update(await readFile(executable))
+                  .digest('hex'),
+                recipientFile,
+                recipientDigest: createHash('sha256').update(recipient).digest('hex'),
+              };
+              const ageOptions = { facility, directory: ageDirectory, attempt: binding.attempt };
               type Identity = { serverUuid: string; database: string };
               if (typeof identity !== 'string') throw new Error('QA_SERVER_ID_INVALID');
               const sourceIdentity: Identity = { serverUuid: identity, database: source };
@@ -347,34 +384,37 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
                     );
                     return { serverUuid: actual?.serverUuid, database: actual?.db };
                   },
-                  inspectBackupFacility: async () => ({ encryptionProfileDigest }),
+                  inspectBackupFacility: () => inspectAgeBackupFacility(facility),
                   exportDatabase: async (destination: Identity) => {
                     expect(destination).toEqual(sourceIdentity);
-                    const nonce = randomBytes(12);
-                    const cipher = createCipheriv('aes-256-gcm', key, nonce);
-                    const encrypted = Buffer.concat([
-                      cipher.update(await exportPlain(), 'utf8'),
-                      cipher.final(),
-                    ]);
-                    await writeFile(
-                      reference,
-                      Buffer.concat([nonce, cipher.getAuthTag(), encrypted]),
-                      { mode: 0o600, flag: 'wx' },
-                    );
-                    return { reference, encryptionProfileDigest };
+                    return encryptAgeBackup(ageOptions, exportStream);
                   },
-                  hashArtifact: async () =>
-                    createHash('sha256')
-                      .update(await readFile(reference))
-                      .digest('hex'),
-                  restoreIsolated: async (_artifact: unknown, destination: Identity) => {
+                  hashArtifact: (artifact: unknown) => hashAgeBackupArtifact(artifact, ageOptions),
+                  restoreIsolated: async (artifact: unknown, destination: Identity) => {
                     expect(destination).toEqual(isolatedTarget);
-                    const bytes = await readFile(reference);
-                    const decipher = createDecipheriv('aes-256-gcm', key, bytes.subarray(0, 12));
-                    decipher.setAuthTag(bytes.subarray(12, 28));
-                    await importPlain(
-                      Buffer.concat([decipher.update(bytes.subarray(28)), decipher.final()]),
+                    const expectedBackupDigest = await hashAgeBackupArtifact(artifact, ageOptions);
+                    const verified = await decryptAgeBackupToFile({
+                      ...ageOptions,
+                      artifact,
+                      identityFile,
+                      expectedBackupDigest,
+                    });
+                    // Start mysql ONLY after complete authentication, never pipe
+                    // a partially authenticated age plaintext stream into a DB.
+                    const child = spawn(
+                      'docker',
+                      ['exec', '-i', container, 'mysql', '-uroot', target],
+                      { stdio: ['pipe', 'ignore', 'ignore'] },
                     );
+                    await Promise.all([
+                      pipeline(createReadStream(verified.reference), child.stdin),
+                      new Promise<void>((resolve, reject) => {
+                        child.once('error', reject);
+                        child.once('close', (code) =>
+                          code === 0 ? resolve() : reject(new Error('QA_RESTORE_FAILED')),
+                        );
+                      }),
+                    ]);
                   },
                   compareInventoryAndData: async () => {
                     await use(source);

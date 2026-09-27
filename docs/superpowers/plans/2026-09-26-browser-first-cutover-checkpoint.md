@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-27：实际age文件适配已接入原MySQL备份恢复编排
+
+从`c9e30a68`继续，没有重新生成/读取用户恢复私钥，没有生产连接。新增窄文件适配`browser-backup-age.mjs`，从原backup模块导出：固定工具/公钥摘要、规范私密目录/文件、独占partial和不覆盖发布、源进程完成要求、密文hash、完整age认证后才发布verified SQL。无自研加密格式、自动keygen、生产CLI或成功布尔；缺host的真实停写/隔离证明仍拒绝。解密失败可能保留私密明文前缀，不能导入，须由已绑定恢复流程处理；不上传私钥到生产。
+
+既有合成MySQL安全用例已替换QA AES为实际age文件I/O、真实mysqldump流和认证后启动mysql导入，随后仍全对象/全行/业务字段/全61SQL及真实journal回执核验。新鲜MySQL2/2通过，危险0042样本拒绝与原SQL风险证据保留；16项实际age用例通过；Linux Node22无网络只读源码age/backup/journal66/66通过；完整浏览器回归413/413通过。首次浏览器回归11项Unix socket EPERM，授权后原样完整重跑通过；Biome首次受沙箱阻止写入，授权格式化后4文件检查通过。日志`/tmp/holaday-age-{red,permissions-red,final,mysql,types,browser-final2,linux-final,ops-final,orchestrator-final}.log`。原输入/输出权限测试RED发现输出模式变化未拒绝，修复后GREEN，没有削弱断言。
+
+最终完整test:ops退出0（120/59/16/120及shell），后台类型检查、4文件Biome/shell语法/diff-check通过。后台默认全套本轮实际退出0：前置Node73通过，Vitest507文件8595通过/1既有跳过；默认全套仍不包含上面的独立MySQL集成，二者分别计数。新QA容器/网络`holaday-first-cutover-qa-c271a9d7fe690ab2` / `holaday-cutover-mysql-c271a9d7fe690ab2`已移除，删除前确认临时库为0，Linux测试容器自动删除，所有本轮测试会话已退出。既有3306/Redis和缓存保留，镜像留作复现。
+
+范围裁决：复用正式批准的age工具格式，将实际文件I/O接入既有编排测试，而不是把上轮加密探针冒充备份回执；代价是恢复机需私密plaintext暂存并验证足够空间。Task4/5/6仍未完成，完整双主机host/运输/Mac隔离目标/首次shell及整项审查尚待组装；离线副本待可写专用介质。未改历史SQL、结算/权益/额度、UI、模型或扩展，未导出生产数据、PR、合并或部署。
+
 ### 2026-09-27：用户允许密钥保管方案，真实公钥链路已配置和验证
 
 用户对上轮恢复私钥留Mac、另做离线副本、服务器只留公钥明确回复“允许”。无需再次请求同一授权。实施详情及恢复须知见[恢复密钥记录](../../ops/browser-backup-recovery.md)：Mac FileVault已开启，独立age密钥已生成于仓库外用户0700目录，私钥0600未打印/上传；Vultr仅安装发行版age包、新建root0700目录并收到公钥与无业务数据探针。公钥及密文双端摘要一致，Mac真实解密/仅公钥拒绝/篡改拒绝/截断拒绝及权限检查均通过。

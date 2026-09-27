@@ -4,7 +4,29 @@
 
 这是合成数据测试，不是生产备份、加密或停写证明。默认测试配置排除 integration 文件；必须显式使用 `vitest.integration.config.ts`，不能把 skip 当通过。
 
-## 最新组合验证：备份编排与实际发布记录（2026-09-27）
+## 最新组合验证：真实age文件链路（2026-09-27）
+
+安全样本现使用`scripts/browser-backup-age.mjs`（由既有backup模块导出）的实际文件/子进程适配：真实mysqldump流 → age公钥加密 → 私密密文文件 → 摘要复核 → age解密至私密partial → 完整认证与复核后发布verified SQL → 启动隔离mysql导入 → 全对象/数据比较 → 全61SQL和业务字段核验 → 原文件journal回执。原合成AES-GCM夹具已替换，不是另加一套加密格式；本例密钥仍为临时QA密钥，不接触用户Mac私钥或生产数据。
+
+新鲜MySQL2/2通过（`/tmp/holaday-age-mysql.log`），危险0042样本仍保持迁移入口拒绝、全快照不变和原SQL风险的验证。新适配16/16实际文件/age用例通过，包含导出末尾失败、错误hash/公钥/工具、权限及链接异常、禁止覆盖/重试、错误私钥及认证尾部损坏。大于单个age块的输入用于证明：即使前缀能解密，损坏尾部也不能发布可导入的verified文件。失败保留私密partial，不自动清理/恢复/重试。
+
+Mac实际age1.3.1；无网络Linux Node22+age1.2.1容器中，age/backup/journal66/66通过（`/tmp/holaday-age-linux-final.log`）。这是本地组件与合成数据库验证，不是两台生产主机完整停写/运输/身份/业务比对证明。完整host、Mac隔离目标接线、离线密钥副本及真实生产停写备份仍待完成。
+
+`CUTOVER_TEST_AGE_EXECUTABLE`必须显式指向已安装的age。缺少它时，Node文件用例的实际加密测试会标记skip，**不能计入验收**；显式MySQL集成会拒绝。生产代码不使用此测试环境变量，不自动生成密钥，也没有默认成功设施。
+
+```bash
+CUTOVER_TEST_AGE_EXECUTABLE=/opt/homebrew/bin/age node --test scripts/browser-first-cutover-age.test.mjs
+docker build -f scripts/fixtures/backup-age-qa.Dockerfile -t holaday-first-cutover-age:qa scripts/fixtures
+docker run --rm --network none \
+  --mount type=bind,source=/绝对路径/holaday-monorepo/scripts,target=/source,readonly \
+  -e CUTOVER_TEST_AGE_EXECUTABLE=/usr/bin/age holaday-first-cutover-age:qa \
+  /opt/node22/bin/node --test /source/browser-first-cutover-age.test.mjs \
+  /source/browser-first-cutover-backup.test.mjs /source/browser-maintenance-journal.test.mjs
+```
+
+镜像构建时需要包仓库网络；实际Linux测试无网络、源码只读、无生产挂载。当前QA镜像基于已有`holaday-first-cutover-task3:qa`，不把该依赖当独立可从零构建的发布镜像。
+
+## 上轮组合验证：备份编排与实际发布记录（2026-09-27）
 
 安全样本现在直接调用`scripts/browser-first-cutover-backup.mjs`的`backupAndRestoreCheck`，并使用真实`acquireReleaseJournal`记录结果。链路为：检查本例无其他数据库会话 → 实际mysqldump → 合成AES-256-GCM加密文件（0600，一次性内存密钥）→ 校验密文摘要 → 实际解密/恢复 → 完整对象/数据比对 → 全61SQL → schema及关键业务字段复核 → 源库/密文再次核对 → 原子持久化回执。真实MySQL2/2通过，日志`/tmp/holaday-backup-coordinator-mysql.log`；风险样本仍独立验证入口拒绝及原0042时间漂移。
 
@@ -53,6 +75,7 @@ docker exec holaday-first-cutover-qa-9fe641c18a7d3502 mysqladmin -uroot ping
 
 ```bash
 CORE_MYSQL_INTEGRATION=1 \
+CUTOVER_TEST_AGE_EXECUTABLE=/opt/homebrew/bin/age \
 CORE_MYSQL_TEST_ADMIN_URL=mysql://root@127.0.0.1:13316/ \
 CORE_MYSQL_TEST_CONTAINER=holaday-first-cutover-qa-9fe641c18a7d3502 \
 pnpm --filter @holaday/orchestrator exec vitest run \

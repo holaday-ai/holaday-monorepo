@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
+export {
+  decryptAgeBackupToFile,
+  encryptAgeBackup,
+  hashAgeBackupArtifact,
+  inspectAgeBackupFacility,
+} from './browser-backup-age.mjs';
+
 const hash = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const uuid = (value) =>
   typeof value === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value);
