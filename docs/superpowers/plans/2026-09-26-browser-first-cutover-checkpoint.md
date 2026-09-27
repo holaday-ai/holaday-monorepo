@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-27：首次主流程与既有模块接通，真实双机现场适配仍未完成
+
+从`6eee28fd`继续，新增`createFirstCutoverHostAdapter({attempt},io)`，复用真实候选准备、同一journal、证据采集、备份协调器/回执、首次状态与共用transition尾段。受保护批准提供全部身份和窗口；不伪造旧boot，不增加成功开关或默认生产执行。接口与剩余生产组装见[主流程说明](../../ops/browser-first-cutover-host.md)。Task4原BASE不变，Task4/5/6仍部分完成。
+
+本次真实RED：18项初始组合用例因缺factory失败；补充停写丢失用例证明原接线仅查退出、不查入口，修复后通过；另4项证明过期/残留socket/内部writer未拒绝及并发stage进入两次，修复为完整停写复核与await前保留一次性动作。主机测试53/53通过，实际临时journal/回执/bootstrap文件参与；远端执行、数据库与支付仍合成，不冒充真实双机演练。迁移超时不重跑，已知dirty候选关闭，恢复入口超时仍close，reconcile意图不等于成功，丢open ACK不重复open均覆盖。
+
+本轮完整`node --test scripts/browser-*.test.mjs`为435/435、Linux Node22无网络只读源码组合173/173、完整`pnpm test:ops`退出0（120/59/16/227及shell），全部无跳过。Linux使用已有age QA镜像且容器自动删除，无生产挂载/网络/密钥；未新增MySQL现场或应用全套测试声明。日志`/tmp/holaday-first-host-{wiring-red,fence-red,boundaries-red,wiring-final,browser,linux,ops}.log`。两个MJS已格式化；新增三组进入日常运维门槛。一次测试patch自动审批超时未执行，按工具许可原样重试一次成功。
+
+最终格式化后再次完整回归：`browser-final.log`435/435、`ops-final.log`全套退出0、两个MJS Biome检查无修改、Node/bash语法和diff-check通过。所有测试会话已退出；按镜像只读确认无残留本轮测试容器。没有将本批测试数与上轮不同命令的测试数直接作增量比较。
+
+裁决：factory参数收窄为已批准attempt，避免重引CLI可覆盖候选/窗口；现场接口保持强制、无默认值，未连接时在构建/锁之前拒绝，代价是此批接线仍不能作为生产CLI。完整双机controller/受保护清单/transport/真实恢复目标/旧任务及支付核对/首次shell/整项独立审查仍是下一阶段，不能重复已经完成的age或主流程工作。本轮无SSH、生产数据导出/修改、真实私钥读取或再生成、PR/合并/部署；既有`__pycache__`保留。
+
 ### 2026-09-27：实际age文件适配已接入原MySQL备份恢复编排
 
 从`c9e30a68`继续，没有重新生成/读取用户恢复私钥，没有生产连接。新增窄文件适配`browser-backup-age.mjs`，从原backup模块导出：固定工具/公钥摘要、规范私密目录/文件、独占partial和不覆盖发布、源进程完成要求、密文hash、完整age认证后才发布verified SQL。无自研加密格式、自动keygen、生产CLI或成功布尔；缺host的真实停写/隔离证明仍拒绝。解密失败可能保留私密明文前缀，不能导入，须由已绑定恢复流程处理；不上传私钥到生产。

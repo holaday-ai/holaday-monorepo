@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { readFirstCutoverApproval } from './browser-first-cutover-host.mjs';
 import * as firstHost from './browser-first-cutover-host.mjs';
+import { performFirstCutover } from './browser-first-cutover-transition.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 
 const root = '/var/lib/holaday-deploy/maintenance';
@@ -25,11 +26,12 @@ const approved = {
   operatorRef: 'qa-operator',
 };
 
-async function preparationFixture(t) {
+async function preparationFixture(t, changes = {}) {
   const config = Buffer.from('SYNTHETIC_ONLY=1\n');
   const migrationManifest = { replaysNumberedSql: true };
   const approval = {
     ...approved,
+    ...changes,
     configDigest: createHash('sha256').update(config).digest('hex'),
     migrationDigest: createHash('sha256').update(JSON.stringify(migrationManifest)).digest('hex'),
   };
@@ -105,6 +107,437 @@ async function preparationFixture(t) {
     },
   };
 }
+
+// Real staging orchestration, journal, evidence collector, backup coordinator and
+// bootstrap files. Remote processes/DB/providers are deliberately synthetic: this
+// tests wiring, NOT a two-host production rehearsal or payment recovery proof.
+async function lifecycleFixture(t, fault) {
+  const inventory = { configurationDigests: ['1'.repeat(64)], merchants: [], targets: [] };
+  const f = await preparationFixture(t, {
+    inventoryDigest: createHash('sha256').update(JSON.stringify(inventory)).digest('hex'),
+  });
+  const events = f.events;
+  const identity = { candidate: approved.candidate, bootId: '9'.repeat(32) };
+  const binding = Object.fromEntries(
+    ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map((k) => [
+      k,
+      f.approval[k],
+    ]),
+  );
+  let mode = 'closed';
+  let journal;
+  const originalJournal = f.io.journal;
+  f.io.journal = async (...args) => {
+    journal = await originalJournal(...args);
+    return journal;
+  };
+  const record = async () =>
+    JSON.parse(await fs.readFile(join(f.directory, `${approved.attempt}.json`), 'utf8'));
+  const expectPhase = async (phase, name) => {
+    assert.equal((await record()).phase, phase);
+    events.push(name);
+    if (fault === name) throw new Error('CUTOVER_TEST_FAILURE');
+  };
+  const stopped = () => ({
+    inventoryDigest: binding.inventoryDigest,
+    phase: 'stopped',
+    observedAtMs: f.io.now(),
+    survivors: [],
+    listeners: [],
+    unknownLaunchers: [],
+  });
+  const stateRoot = join(f.directory, 'state-parent');
+  await fs.mkdir(stateRoot, { mode: 0o700 });
+  const base = '/var/lib/holaday';
+  const map = (p) => {
+    assert.ok(p === base || p.startsWith(`${base}/`));
+    return stateRoot + p.slice(base.length);
+  };
+  f.io.stateFs = {
+    ...fs,
+    lstat: async (p) => Object.assign(await fs.lstat(map(p)), { uid: 998 }),
+    realpath: async (p) => (await fs.realpath(map(p))).replace(stateRoot, base),
+    mkdir: async (p, settings) => {
+      await expectPhase('migration_started', 'initialize');
+      return fs.mkdir(map(p), settings);
+    },
+    chown: async () => {},
+    open: async (p, flags, permissions) => {
+      const h = await fs.open(map(p), flags, permissions);
+      h.chown = async () => {};
+      return h;
+    },
+  };
+  f.io.lifecycle = {
+    fenceOrders: async () => expectPhase('orders_fenced', 'fence-orders'),
+    settleLegacy: async () => expectPhase('legacy_settled', 'settle'),
+    stopProducers: async () => expectPhase('producers_stopped', 'stop-producers'),
+    fenceAll: async () => expectPhase('all_fenced', 'fence-all'),
+    stopLegacy: async () => {
+      await expectPhase('stopped', 'stop-legacy');
+      return stopped();
+    },
+    assertStopped: async () => stopped(),
+    verifyFence: async () => ({
+      inventoryDigest: binding.inventoryDigest,
+      stage: 'all-writers',
+      observedAtMs: f.io.now(),
+      existingSockets: 0,
+      internalWriters: 0,
+      unsettledWork: 0,
+      externalWork: 0,
+      producersRunning: 0,
+    }),
+    restoreIngress: async (_context, actual) => {
+      assert.deepEqual(actual, identity);
+      assert.equal(mode, 'serving');
+      await expectPhase('verified', 'restore-ingress');
+    },
+    resumeWorker: async () => expectPhase('verified', 'resume-worker'),
+    reconcile: async () => expectPhase('reconciled', 'reconcile'),
+    holdMaintenance: async () => events.push('hold'),
+    readBackupPlan: async () => ({
+      sourceIdentity: { serverUuid: '11111111-1111-1111-1111-111111111111', database: 'source_qa' },
+      isolatedTarget: {
+        serverUuid: '22222222-2222-2222-2222-222222222222',
+        database: 'restore_qa',
+      },
+    }),
+  };
+  f.io.backup = {
+    readDatabaseIdentity: async (v) => structuredClone(v),
+    inspectBackupFacility: async () => ({ encryptionProfileDigest: 'e'.repeat(64) }),
+    exportDatabase: async () => {
+      await expectPhase('backup_verified', 'backup');
+      return { reference: 'synthetic-artifact', encryptionProfileDigest: 'e'.repeat(64) };
+    },
+    hashArtifact: async () => 'f'.repeat(64),
+    restoreIsolated: async () => expectPhase('backup_verified', 'restore-db'),
+    compareInventoryAndData: async () => ({
+      comparisonDigest: '1'.repeat(64),
+      sourceDigest: '2'.repeat(64),
+      businessDigest: '3'.repeat(64),
+    }),
+    runApprovedMigrations: async () => expectPhase('backup_verified', 'restore-migrate'),
+    verifySchema: async () => ({ schemaDigest: '4'.repeat(64), businessDigest: '3'.repeat(64) }),
+    readSourceDigest: async () => '2'.repeat(64),
+  };
+  f.io.evidence = {
+    readHostInventory: async () => ({
+      inventory,
+      observedAtMs: f.io.now(),
+      unknownWriters: fault === 'unknown-writer' ? ['unknown'] : [],
+      externalWork: [],
+      producersRunning: [],
+    }),
+    readDatabaseScope: async () => ({ observedAtMs: f.io.now(), orders: [], unsettled: [] }),
+    queryOrders: async () => [],
+    readRehearsalArtifacts: async () => ({
+      ...binding,
+      observedAtMs: 1,
+      recovery: 'retry-proven',
+      recoveryUntilMs: 4000,
+      artifacts: [],
+    }),
+    readFenceState: async ({ stage }) => ({
+      inventoryDigest: binding.inventoryDigest,
+      observedAtMs: f.io.now(),
+      stage: stage === 'prepare' ? 'observed' : 'all-writers',
+      uncovered: [],
+      liveLegacy: [],
+      regeneratedLegacy: [],
+    }),
+  };
+  f.io.publishEvidence = async (evidence, settings) => {
+    assert.deepEqual(await settings.assertJournalOwnership(), binding);
+    events.push(`evidence:${evidence.report.stage}`);
+  };
+  f.io.observe = async (actual) => {
+    assert.deepEqual(actual, identity);
+    events.push('observe-candidate');
+  };
+  const exec = f.io.exec;
+  f.io.exec = async (command, args, settings) => {
+    if (args.includes('db:migrate:numbered')) {
+      await expectPhase('migration_started', 'migrate');
+      assert.equal((await record()).backupReceipt.backupDigest, 'f'.repeat(64));
+    }
+    if (command === 'pm2') {
+      assert.equal(args[0], 'start'); // No global save/delete or old-name reuse.
+      await expectPhase('candidate_started', 'start');
+      const state = JSON.parse(
+        await fs.readFile(join(stateRoot, 'ordinary-maintenance/state.json'), 'utf8'),
+      );
+      assert.equal(state.bootId, (await record()).bootstrapSeed);
+      assert.notEqual(identity.bootId, state.bootId);
+      assert.equal(args[args.indexOf('--uid') + 1], '998');
+    }
+    const controlAt = args.findIndex((v) => v.endsWith('/browser-maintenance-control.mjs'));
+    if (controlAt >= 0) {
+      const op = args[controlAt + 1];
+      if (args.length > controlAt + 2)
+        assert.deepEqual(args.slice(controlAt + 2), [identity.candidate, identity.bootId]);
+      events.push(`control:${op}`);
+      if (op === 'open') {
+        mode = 'serving';
+        if (fault === 'open-ack') throw new Error('lost ACK');
+      }
+      if (op === 'close') mode = 'closed';
+      return JSON.stringify({
+        protocol: 1,
+        identity,
+        mode,
+        idle: mode === 'closed',
+        needsReconciliation: mode === 'serving',
+      });
+    }
+    return exec(command, args, settings);
+  };
+  return { ...f, binding, identity, record, stateRoot, journal: () => journal };
+}
+
+async function runLifecycle(f) {
+  assert.equal(typeof firstHost.createFirstCutoverHostAdapter, 'function');
+  const adapter = firstHost.createFirstCutoverHostAdapter({ attempt: approved.attempt }, f.io);
+  const result = await performFirstCutover({
+    candidate: approved.candidate,
+    adapter,
+    window: f.approval,
+    clock: f.io.now,
+  });
+  return { adapter, result };
+}
+
+test('first host connects real journal, backup receipt and bootstrap before exact new-instance open', async (t) => {
+  const f = await lifecycleFixture(t);
+  const { adapter, result } = await runLifecycle(f);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const r = await f.record();
+  assert.equal(r.phase, 'reconciled');
+  assert.equal(r.oldIdentity, undefined);
+  assert.equal(r.backupReceipt.attempt, approved.attempt);
+  assert.deepEqual(
+    f.events.filter((v) =>
+      [
+        'fence-orders',
+        'settle',
+        'stop-producers',
+        'fence-all',
+        'stop-legacy',
+        'backup',
+        'restore-db',
+        'restore-migrate',
+        'migrate',
+        'initialize',
+        'start',
+        'restore-ingress',
+        'resume-worker',
+        'reconcile',
+      ].includes(v),
+    ),
+    [
+      'fence-orders',
+      'settle',
+      'stop-producers',
+      'fence-all',
+      'stop-legacy',
+      'backup',
+      'restore-db',
+      'restore-migrate',
+      'migrate',
+      'initialize',
+      'start',
+      'restore-ingress',
+      'resume-worker',
+      'reconcile',
+    ],
+  );
+  assert.equal(f.events.filter((v) => v === 'evidence:preopen').length, 2);
+  await adapter.finish(result);
+  await assert.rejects(fs.stat(join(f.directory, 'release.lock')), { code: 'ENOENT' });
+});
+
+for (const fault of [
+  'fence-orders',
+  'settle',
+  'stop-producers',
+  'fence-all',
+  'stop-legacy',
+  'backup',
+  'restore-db',
+  'restore-migrate',
+  'migrate',
+  'initialize',
+  'start',
+  'restore-ingress',
+  'resume-worker',
+  'reconcile',
+]) {
+  test(`first host retains journal and stops advancing after ${fault} fails`, async (t) => {
+    const f = await lifecycleFixture(t, fault);
+    const { adapter, result } = await runLifecycle(f);
+    assert.equal(result.ok, false);
+    assert.ok(f.events.includes('hold'));
+    assert.equal(f.events.filter((v) => v === fault).length, 1);
+    if (['restore-ingress', 'resume-worker', 'reconcile'].includes(fault))
+      assert.ok(f.events.includes('control:close'));
+    else assert.ok(!f.events.includes('control:open'));
+    await adapter.finish(result);
+    await fs.stat(join(f.directory, 'release.lock'));
+  });
+}
+
+test('first host resolves lost open ACK against same instance without repeating open', async (t) => {
+  const f = await lifecycleFixture(t, 'open-ack');
+  const { adapter, result } = await runLifecycle(f);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(f.events.filter((v) => v === 'control:open').length, 1);
+  await adapter.finish(result);
+});
+
+test('missing remote lifecycle or backup observers refuses before staging or locking', async (t) => {
+  for (const missing of ['lifecycle', 'backup', 'evidence']) {
+    const f = await lifecycleFixture(t);
+    delete f.io[missing];
+    assert.equal(typeof firstHost.createFirstCutoverHostAdapter, 'function');
+    assert.throws(
+      () => firstHost.createFirstCutoverHostAdapter({ attempt: approved.attempt }, f.io),
+      /CUTOVER_HOST_OBSERVER_REQUIRED/,
+    );
+    assert.ok(!f.events.includes('lock'));
+  }
+});
+
+test('unresolved prepare evidence cannot reach first ingress mutation', async (t) => {
+  const f = await lifecycleFixture(t, 'unknown-writer');
+  const { adapter, result } = await runLifecycle(f);
+  assert.equal(result.ok, false);
+  assert.ok(!f.events.includes('fence-orders'));
+  await adapter.finish(result);
+  await fs.stat(join(f.directory, 'release.lock'));
+});
+
+test('lost all-writer fence after retirement prevents exporting or migrating despite empty process proof', async (t) => {
+  const f = await lifecycleFixture(t);
+  f.io.lifecycle.verifyFence = async () => ({
+    inventoryDigest: f.binding.inventoryDigest,
+    stage: 'orders',
+    unsettledWork: 0,
+    externalWork: 0,
+    producersRunning: 0,
+  });
+  const { adapter, result } = await runLifecycle(f);
+  assert.equal(result.ok, false);
+  assert.ok(!f.events.includes('backup'));
+  assert.ok(!f.events.includes('migrate'));
+  await adapter.finish(result);
+});
+
+test('stopped proof cannot be accepted after any process reappears', async (t) => {
+  const f = await lifecycleFixture(t);
+  const read = f.io.lifecycle.assertStopped;
+  f.io.lifecycle.assertStopped = async (...args) => ({
+    ...(await read(...args)),
+    survivors: [123],
+  });
+  const { adapter, result } = await runLifecycle(f);
+  assert.equal(result.ok, false);
+  assert.ok(!f.events.includes('backup'));
+  await adapter.finish(result);
+});
+
+for (const change of [{ observedAtMs: -60000 }, { existingSockets: 1 }, { internalWriters: 1 }]) {
+  test(`backup refuses incomplete global isolation: ${JSON.stringify(change)}`, async (t) => {
+    const f = await lifecycleFixture(t);
+    const read = f.io.lifecycle.verifyFence;
+    f.io.lifecycle.verifyFence = async (...args) => ({ ...(await read(...args)), ...change });
+    const { adapter, result } = await runLifecycle(f);
+    assert.equal(result.ok, false);
+    assert.ok(!f.events.includes('backup'));
+    await adapter.finish(result);
+  });
+}
+
+test('concurrent stage requests never start a second candidate preparation', async (t) => {
+  const f = await lifecycleFixture(t);
+  const adapter = firstHost.createFirstCutoverHostAdapter({ attempt: approved.attempt }, f.io);
+  await adapter.preflight(approved.candidate);
+  const results = await Promise.allSettled([adapter.stage(), adapter.stage()]);
+  assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+  assert.equal(f.events.filter((e) => e === 'lock').length, 1);
+  await adapter.finish({ ok: false });
+});
+
+test('candidate known from dirty startup is closed even before transition receives start identity', async (t) => {
+  const f = await lifecycleFixture(t);
+  const exec = f.io.exec;
+  f.io.exec = async (command, args, settings) => {
+    const value = await exec(command, args, settings);
+    if (args.includes('status'))
+      return JSON.stringify({ ...JSON.parse(value), needsReconciliation: true });
+    return value;
+  };
+  const { adapter, result } = await runLifecycle(f);
+  assert.equal(result.ok, false);
+  assert.equal(result.closeAcknowledged, true);
+  assert.equal(f.events.filter((v) => v === 'control:close').length, 1);
+  assert.ok(!f.events.includes('control:open'));
+  await adapter.finish(result);
+});
+
+test('window expiring after migration neither replays migration nor initializes or starts', async (t) => {
+  const f = await lifecycleFixture(t);
+  const exec = f.io.exec;
+  f.io.exec = async (command, args, settings) => {
+    const value = await exec(command, args, settings);
+    if (args.includes('db:migrate:numbered')) f.setTime(2000);
+    return value;
+  };
+  const { adapter, result } = await runLifecycle(f);
+  assert.equal(result.ok, false);
+  assert.equal(f.events.filter((v) => v === 'migrate').length, 1);
+  assert.ok(!f.events.includes('initialize'));
+  await assert.rejects(adapter.migrate(), /CUTOVER_/);
+  assert.equal(f.events.filter((v) => v === 'migrate').length, 1);
+  await adapter.finish(result);
+  await fs.stat(join(f.directory, 'release.lock'));
+});
+
+test('protective close still executes when ingress restoration exceeds maintenance deadline', async (t) => {
+  const f = await lifecycleFixture(t);
+  const restore = f.io.lifecycle.restoreIngress;
+  f.io.lifecycle.restoreIngress = async (...args) => {
+    await restore(...args);
+    f.setTime(2000);
+  };
+  const { adapter, result } = await runLifecycle(f);
+  assert.equal(result.ok, false);
+  assert.equal(result.closeAcknowledged, true);
+  assert.ok(!f.events.includes('resume-worker'));
+  await adapter.finish(result);
+});
+
+test('reconciliation can finish after maintenance deadline but before separately approved reconcile deadline', async (t) => {
+  const f = await lifecycleFixture(t);
+  const reconcile = f.io.lifecycle.reconcile;
+  f.io.lifecycle.reconcile = async (...args) => {
+    await reconcile(...args);
+    f.setTime(2500);
+  };
+  const { adapter, result } = await runLifecycle(f);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  await adapter.finish(result);
+  await assert.rejects(fs.stat(join(f.directory, 'release.lock')), { code: 'ENOENT' });
+});
+
+test('reconciled intent without successful effect cannot release the actual journal', async (t) => {
+  const f = await lifecycleFixture(t, 'reconcile');
+  const { adapter, result } = await runLifecycle(f);
+  assert.equal(result.ok, false);
+  assert.equal((await f.record()).phase, 'reconciled');
+  await assert.rejects(adapter.finish({ ...result, ok: true }), /CUTOVER_HOST_STATE_UNPROVEN/);
+  await fs.stat(join(f.directory, 'release.lock'));
+});
 
 test('first preparation binds a real reserved journal and stages without fabricating an old boot or stopping services', async (t) => {
   assert.equal(typeof firstHost.prepareFirstCutoverCandidate, 'function');
