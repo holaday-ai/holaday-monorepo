@@ -291,6 +291,7 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
               encryptAgeBackup,
               hashAgeBackupArtifact,
               decryptAgeBackupToFile,
+              pullFirstCutoverAgeBackup,
             } = await import(moduleAt('browser-first-cutover-backup.mjs'));
             const { acquireReleaseJournal } = await import(
               moduleAt('browser-maintenance-journal.mjs')
@@ -338,7 +339,9 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
               );
               const ageDirectory = join(await realpath(snapshot), 'age');
               await mkdir(ageDirectory, { mode: 0o700 });
-              const identityFile = join(ageDirectory, 'identity.txt');
+              const recoveryDirectory = join(await realpath(snapshot), 'recovery');
+              await mkdir(recoveryDirectory, { mode: 0o700 });
+              const identityFile = join(recoveryDirectory, 'identity.txt');
               await run(join(dirname(executable), 'age-keygen'), ['-o', identityFile]);
               await chmod(identityFile, 0o600);
               const recipientFile = join(ageDirectory, 'recipient.txt');
@@ -355,6 +358,13 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
                 recipientDigest: createHash('sha256').update(recipient).digest('hex'),
               };
               const ageOptions = { facility, directory: ageDirectory, attempt: binding.attempt };
+              const recoveryRecipient = join(recoveryDirectory, 'recipient.txt');
+              await writeFile(recoveryRecipient, recipient, { mode: 0o600, flag: 'wx' });
+              const recoveryOptions = {
+                facility: { ...facility, recipientFile: recoveryRecipient },
+                directory: recoveryDirectory,
+                attempt: binding.attempt,
+              };
               type Identity = { serverUuid: string; database: string };
               if (typeof identity !== 'string') throw new Error('QA_SERVER_ID_INVALID');
               const sourceIdentity: Identity = { serverUuid: identity, database: source };
@@ -413,9 +423,31 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
                   restoreIsolated: async (artifact: unknown, destination: Identity) => {
                     expect(destination).toEqual(isolatedTarget);
                     const expectedBackupDigest = await hashAgeBackupArtifact(artifact, ageOptions);
+                    const sourceArtifact = artifact as { reference: string };
+                    const received = await pullFirstCutoverAgeBackup(
+                      {
+                        source: { options: ageOptions, artifact },
+                        destination: recoveryOptions,
+                        expectedBackupDigest,
+                        expectedBytes: (await readFile(sourceArtifact.reference)).length,
+                      },
+                      {
+                        // Synthetic SSH boundary only. The transmitted production
+                        // reader is run unmodified in an actual separate process.
+                        spawn: (
+                          _command: string,
+                          _argv: string[],
+                          options: { stdio: ['pipe', 'pipe', 'ignore'] },
+                        ) =>
+                          spawn(process.execPath, ['--input-type=module'], {
+                            stdio: options.stdio,
+                          }),
+                      },
+                    );
+                    expect(received.reference).not.toBe(sourceArtifact.reference);
                     const verified = await decryptAgeBackupToFile({
-                      ...ageOptions,
-                      artifact,
+                      ...recoveryOptions,
+                      artifact: received,
                       identityFile,
                       expectedBackupDigest,
                     });

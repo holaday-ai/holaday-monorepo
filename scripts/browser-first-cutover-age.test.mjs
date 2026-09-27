@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   chmod,
   copyFile,
   link,
+  mkdir,
   mkdtemp,
   readFile,
   readdir,
@@ -59,10 +60,236 @@ test('age host I/O is exported by the existing backup module', () => {
     'encryptAgeBackup',
     'hashAgeBackupArtifact',
     'decryptAgeBackupToFile',
+    'streamAgeBackupArtifact',
+    'receiveAgeBackup',
+    'pullFirstCutoverAgeBackup',
   ]) {
     assert.equal(typeof backup[method], 'function', `${method} is not implemented`);
   }
 });
+
+// Catch publishing a partial transfer, accepting a different backup, or sending
+// plaintext/key material between hosts. Real age and filesystem, no DB/network.
+test(
+  'ciphertext transfers to a separate private recovery directory before decryption',
+  { skip: !age },
+  async (t) => {
+    const f = await fixture(t);
+    const source = await backup.encryptAgeBackup(f.options, f.producer);
+    const bytes = await readFile(source.reference);
+    const expectedBackupDigest = hash(bytes);
+    const destination = join(f.directory, 'recovery');
+    await mkdir(destination, { mode: 0o700 });
+    const options = {
+      ...f.options,
+      directory: destination,
+      expectedBackupDigest,
+      expectedBytes: bytes.length,
+    };
+    const artifact = await backup.receiveAgeBackup(options, (sink) =>
+      backup.streamAgeBackupArtifact(source, f.options, expectedBackupDigest, bytes.length, sink),
+    );
+    assert.equal(artifact.reference, join(destination, `${f.options.attempt}.sql.age`));
+    assert.deepEqual(await readFile(artifact.reference), bytes);
+    const restored = await backup.decryptAgeBackupToFile({
+      ...options,
+      artifact,
+      identityFile: f.identityFile,
+    });
+    assert.deepEqual(await readFile(restored.reference), f.plaintext);
+    assert.deepEqual(await readFile(source.reference), bytes);
+    assert.equal((await stat(artifact.reference)).mode & 0o777, 0o600);
+  },
+);
+
+for (const fault of ['short', 'long', 'checksum', 'late-exit']) {
+  test(`transfer ${fault} does not publish or overwrite a backup`, { skip: !age }, async (t) => {
+    const f = await fixture(t);
+    const source = await backup.encryptAgeBackup(f.options, f.producer);
+    const bytes = await readFile(source.reference);
+    const destination = join(f.directory, 'recovery');
+    await mkdir(destination, { mode: 0o700 });
+    const options = {
+      ...f.options,
+      directory: destination,
+      expectedBackupDigest: hash(bytes),
+      expectedBytes: bytes.length,
+    };
+    const payload = Buffer.from(bytes);
+    if (fault === 'checksum') payload[22] ^= 1;
+    const producer = async (sink) => {
+      await pipeline(
+        Readable.from([
+          fault === 'short'
+            ? payload.subarray(0, -1)
+            : fault === 'long'
+              ? Buffer.concat([payload, Buffer.from('!')])
+              : payload,
+        ]),
+        sink,
+      );
+      if (fault === 'late-exit') throw new Error('private SSH diagnostic');
+    };
+    await assert.rejects(backup.receiveAgeBackup(options, producer), {
+      message: 'CUTOVER_AGE_BACKUP_UNPROVEN',
+    });
+    assert.deepEqual(await readdir(destination), [`${f.options.attempt}.sql.age.partial`]);
+    const partial = await readFile(join(destination, `${f.options.attempt}.sql.age.partial`));
+    let calls = 0;
+    await assert.rejects(
+      backup.receiveAgeBackup(options, () => {
+        calls++;
+      }),
+      /UNPROVEN/,
+    );
+    assert.equal(calls, 0);
+    assert.deepEqual(
+      await readFile(join(destination, `${f.options.attempt}.sql.age.partial`)),
+      partial,
+    );
+  });
+}
+
+test(
+  'source rejects a wrong checksum or size before exposing ciphertext',
+  { skip: !age },
+  async (t) => {
+    const f = await fixture(t);
+    const source = await backup.encryptAgeBackup(f.options, f.producer);
+    const bytes = await readFile(source.reference);
+    for (const [expected, size] of [
+      ['0'.repeat(64), bytes.length],
+      [hash(bytes), bytes.length + 1],
+    ]) {
+      const chunks = [];
+      const { Writable } = await import('node:stream');
+      const sink = new Writable({
+        write(chunk, _encoding, next) {
+          chunks.push(Buffer.from(chunk));
+          next();
+        },
+      });
+      await assert.rejects(
+        backup.streamAgeBackupArtifact(source, f.options, expected, size, sink),
+        /UNPROVEN/,
+      );
+      assert.equal(chunks.length, 0);
+      sink.end();
+    }
+  },
+);
+
+async function transportFixture(t) {
+  const f = await fixture(t);
+  const artifact = await backup.encryptAgeBackup(f.options, f.producer);
+  const ciphertext = await readFile(artifact.reference);
+  const directory = join(f.directory, 'download');
+  await mkdir(directory, { mode: 0o700 });
+  const input = {
+    source: { options: f.options, artifact },
+    destination: { ...f.options, directory },
+    expectedBackupDigest: hash(ciphertext),
+    expectedBytes: ciphertext.length,
+  };
+  const calls = [];
+  const children = [];
+  const io = {
+    spawn(command, argv, options) {
+      calls.push({ command, argv, options });
+      // Only external SSH is substituted. Execute the EXACT transmitted source
+      // using a real child, private source files and real streams/exit status.
+      const child = spawn(process.execPath, ['--input-type=module'], { stdio: options.stdio });
+      children.push(child);
+      return child;
+    },
+  };
+  return { f, input, ciphertext, calls, children, io };
+}
+
+test(
+  'fixed SSH download consumes the actual remote reader and preserves exact ciphertext',
+  { skip: !age },
+  async (t) => {
+    const f = await transportFixture(t);
+    const result = await backup.pullFirstCutoverAgeBackup(f.input, f.io);
+    assert.deepEqual(await readFile(result.reference), f.ciphertext);
+    assert.equal(f.calls.length, 1);
+    const [{ command, argv, options }] = f.calls;
+    assert.equal(command, 'ssh');
+    assert.deepEqual(argv.slice(-2), [
+      'root@207.148.70.106',
+      '/opt/node22/bin/node --input-type=module',
+    ]);
+    for (const setting of [
+      'StrictHostKeyChecking=yes',
+      'ForwardAgent=no',
+      'ClearAllForwardings=yes',
+    ])
+      assert(argv.includes(setting));
+    assert(
+      argv.includes(
+        'ProxyCommand=ssh -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ConnectTimeout=15 -W %h:%p root@47.99.169.186',
+      ),
+    );
+    assert.equal(options.shell, false);
+    assert.deepEqual(options.stdio, ['pipe', 'pipe', 'ignore']);
+    assert.equal(f.children[0].exitCode, 0);
+    const restored = await backup.decryptAgeBackupToFile({
+      ...f.input.destination,
+      artifact: result,
+      identityFile: f.f.identityFile,
+      expectedBackupDigest: f.input.expectedBackupDigest,
+    });
+    assert.deepEqual(await readFile(restored.reference), f.f.plaintext);
+  },
+);
+
+for (const fault of [
+  'different-attempt',
+  'different-recipient',
+  'private-key-field',
+  'extra-host',
+]) {
+  test(
+    `SSH download rejects ${fault} before opening the remote channel`,
+    { skip: !age },
+    async (t) => {
+      const f = await transportFixture(t);
+      if (fault === 'different-attempt') f.input.destination.attempt = randomUUID();
+      if (fault === 'different-recipient')
+        f.input.destination = {
+          ...f.input.destination,
+          facility: { ...f.input.destination.facility, recipientDigest: '0'.repeat(64) },
+        };
+      if (fault === 'private-key-field')
+        f.input.source.options = { ...f.input.source.options, identityFile: f.f.identityFile };
+      if (fault === 'extra-host') f.input.host = 'unapproved.example';
+      await assert.rejects(backup.pullFirstCutoverAgeBackup(f.input, f.io), {
+        message: 'CUTOVER_BACKUP_TRANSFER_UNPROVEN',
+      });
+      assert.equal(f.calls.length, 0);
+      assert.deepEqual(await readdir(f.input.destination.directory), []);
+    },
+  );
+}
+
+test(
+  'remote failure after ciphertext EOF retains partial and is never retried',
+  { skip: !age },
+  async (t) => {
+    const f = await transportFixture(t);
+    f.io.readSource = async () =>
+      `${await readFile(new URL('./browser-backup-age.mjs', import.meta.url), 'utf8')}\nprocess.once('beforeExit', () => { process.exitCode = 23; });\n`;
+    await assert.rejects(backup.pullFirstCutoverAgeBackup(f.input, f.io), {
+      message: 'CUTOVER_BACKUP_TRANSFER_UNPROVEN',
+    });
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.children[0].exitCode, 23);
+    assert.deepEqual(await readdir(f.input.destination.directory), [
+      `${f.f.options.attempt}.sql.age.partial`,
+    ]);
+  },
+);
 
 test(
   'real age backup roundtrip publishes only authenticated private files',

@@ -30,6 +30,8 @@
 
 上述比较器已接入真实age+mysqldump/mysql+原journal+全61SQL的合成集成测试，代替仅QA内的业务字段摘要；它不代表生产备份已执行。双机副作用适配、Mac运输、首次shell与整流程演练仍未完成。
 
+同日后续：Mac运输已有 `pullFirstCutoverAgeBackup({source:{options,artifact},destination,expectedBackupDigest,expectedBytes})`，返回恢复机本地密文artifact，再交给 `decryptAgeBackupToFile`。`source.options` 和 `destination` 各自仅接受facility/directory/attempt，私钥不属于运输参数；两端工具路径/二进制摘要可不同，但attempt及公钥摘要须一致。配置仍由受保护site I/O提供，不可把CLI上传参数当作批准。隔离集成测试已接上这个实际运输代码，SSH替换为本地真实读取进程；另外用户明确授权后，真实Vultr→固定跳板→Mac无业务探针于UTC08:46:23通过，见[运输证据](browser-backup-recovery.md)。完整生产source/target计划、现场生命周期以及首次shell仍须组装，不能把无业务探针当停写后的真实数据库恢复。
+
 ### 双机只读通道（2026-09-27）
 
 `readFirstCutoverHostPair()` 已使用真实 SSH 连接固定阿里云/Vultr目标，Vultr沿既有阿里云跳板进入。复用现有采集器，经stdin在远端Node内存执行，不安装远端文件；保持严格主机密钥校验、关闭agent/端口转发，不接受调用方替换目标地址或提供任意远端命令。凭据沿用既有SSH/askpass环境，不进入返回值或日志。

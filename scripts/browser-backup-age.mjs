@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
+import { Writable } from 'node:stream';
+import { finished, pipeline } from 'node:stream/promises';
 
 const sha = (value) => createHash('sha256').update(value).digest('hex');
 const validHash = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
@@ -247,6 +249,100 @@ export const hashAgeBackupArtifact = guarded(async (artifact, options) => {
     return await fileHash(file);
   } finally {
     await file.handle.close();
+  }
+});
+
+/** Ciphertext-only source for the authenticated SSH channel. The destination
+ * must wait for both stream EOF AND this function/process to finish successfully.
+ * No private key or SQL is read. Does not end the caller-owned destination.
+ */
+export const streamAgeBackupArtifact = guarded(
+  async (artifact, options, expectedBackupDigest, expectedBytes, sink) => {
+    if (
+      !validHash(expectedBackupDigest) ||
+      !Number.isSafeInteger(expectedBytes) ||
+      expectedBytes <= 0
+    )
+      throw new Error('transfer binding');
+    const observed = await scope(options);
+    checkArtifact(artifact, options, observed);
+    const input = await checkedFile(artifact.reference);
+    try {
+      if (input.before.size !== expectedBytes || (await fileHash(input)) !== expectedBackupDigest)
+        throw new Error('source binding');
+      await pipeline(
+        input.handle.createReadStream({ start: 0, end: expectedBytes - 1, autoClose: false }),
+        sink,
+        { end: false },
+      );
+      if ((await fileHash(input)) !== expectedBackupDigest) throw new Error('source changed');
+      await recheck(options, observed);
+    } finally {
+      await input.handle.close();
+    }
+  },
+);
+
+/** Recovery-machine receipt of one exact encrypted artifact. The producer is a
+ * trusted transport, not a success report: await its process exit even after EOF.
+ * Failure retains a private partial, never overwrites/retries an earlier attempt,
+ * and never returns a path accepted by decryption. No SQL consumer is involved.
+ */
+export const receiveAgeBackup = guarded(async (options, producer) => {
+  if (
+    typeof producer !== 'function' ||
+    !validHash(options.expectedBackupDigest) ||
+    !Number.isSafeInteger(options.expectedBytes) ||
+    options.expectedBytes <= 0
+  )
+    throw new Error('transfer binding');
+  const observed = await scope(options);
+  const reference = join(options.directory, `${options.attempt}.sql.age`);
+  const output = await exclusiveOutput(reference);
+  let received = 0;
+  const sink = new Writable({
+    write(chunk, _encoding, next) {
+      (async () => {
+        if (received + chunk.length > options.expectedBytes) throw new Error('oversized');
+        let offset = 0;
+        while (offset < chunk.length) {
+          const { bytesWritten } = await output.write(chunk, offset, chunk.length - offset);
+          if (bytesWritten < 1) throw new Error('short write');
+          offset += bytesWritten;
+        }
+        received += chunk.length;
+      })().then(() => next(), next);
+    },
+  });
+  const complete = finished(sink, { cleanup: true });
+  try {
+    await Promise.all([
+      complete,
+      Promise.resolve().then(async () => {
+        await producer(sink);
+        if (!sink.writableEnded) sink.end();
+      }),
+    ]);
+    if (received !== options.expectedBytes) throw new Error('short transfer');
+    const receivedFile = await checkedFile(`${reference}.partial`);
+    try {
+      if (
+        !same(receivedFile.before, await output.stat()) ||
+        (await fileHash(receivedFile)) !== options.expectedBackupDigest
+      )
+        throw new Error('received checksum');
+    } finally {
+      await receivedFile.handle.close();
+    }
+    await recheck(options, observed);
+    await publish(output, reference, options.directory);
+    return { reference, encryptionProfileDigest: observed.facility.encryptionProfileDigest };
+  } catch (error) {
+    sink.destroy();
+    await complete.catch(() => {});
+    throw error;
+  } finally {
+    await output.close();
   }
 });
 

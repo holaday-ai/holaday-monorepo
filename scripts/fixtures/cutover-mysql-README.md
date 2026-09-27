@@ -4,6 +4,10 @@
 
 这是合成数据测试，不是生产备份、加密或停写证明。默认测试配置排除 integration 文件；必须显式使用 `vitest.integration.config.ts`，不能把 skip 当通过。
 
+## 密文传输接入（2026-09-27）
+
+安全样本现在将加密源文件与恢复端文件分置于两个私密目录，私钥只在恢复端；使用正式 `pullFirstCutoverAgeBackup` 和原样运行的真实Node读取子进程接收密文，核对摘要、字节数及进程退出状态，随后真实age认证解密、MySQL导入和全61SQL/全对象与历史业务列比较。SSH网络层替换为本地子进程，不替换文件/加解密/比较器/journal/迁移为固定成功。实际2/2通过，日志 `/tmp/holaday-backup-transfer-mysql.log`；这不是生产SSH运输、实际生产备份或完整首次切换验收。旧危险0042反例仍保留。
+
 ## 完整比较器接入（2026-09-27）
 
 安全样本现在调用正式 `browser-first-cutover-mysql.mjs`，不是只在夹具里计算摘要。覆盖FUNCTION、PROCEDURE、EVENT、TRIGGER、VIEW和全部基础表；恢复前后完整比较，迁移后按原始列投影核对所有历史数据，源库再次完整读取确认不变。mysql2启用大整数、JSON及日期的无损字符串读取；QA原独立inventory与金额/状态断言仍保留作交叉检查。

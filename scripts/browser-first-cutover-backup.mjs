@@ -1,11 +1,18 @@
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { isAbsolute, join } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { isDeepStrictEqual } from 'node:util';
+import { receiveAgeBackup } from './browser-backup-age.mjs';
 
 export {
   decryptAgeBackupToFile,
   encryptAgeBackup,
   hashAgeBackupArtifact,
   inspectAgeBackupFacility,
+  receiveAgeBackup,
+  streamAgeBackupArtifact,
 } from './browser-backup-age.mjs';
 
 const hash = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
@@ -21,6 +28,121 @@ const identityValid = (value) =>
   uuid(value.serverUuid) &&
   typeof value.database === 'string' &&
   /^[a-zA-Z0-9_]{1,64}$/.test(value.database);
+
+/** Recovery-side transport, called with already approved source/destination
+ * facilities by the site adapter. No CLI parameters select an arbitrary host,
+ * no plaintext/private key crosses SSH, and no backup_verified receipt is made.
+ * Production remains responsible for source stop/isolation and ownership proofs.
+ */
+export async function pullFirstCutoverAgeBackup(input, overrides = {}) {
+  const io = {
+    spawn,
+    readSource: () => readFile(new URL('./browser-backup-age.mjs', import.meta.url)),
+    ...overrides,
+  };
+  try {
+    const request = structuredClone(input);
+    const { source, destination, expectedBackupDigest, expectedBytes } = request;
+    const validOptions = (options) =>
+      keys(options, ['facility', 'directory', 'attempt']) &&
+      uuid(options.attempt) &&
+      typeof options.directory === 'string' &&
+      isAbsolute(options.directory) &&
+      keys(options.facility, [
+        'executable',
+        'executableDigest',
+        'recipientFile',
+        'recipientDigest',
+      ]) &&
+      ['executable', 'recipientFile'].every(
+        (k) => typeof options.facility[k] === 'string' && isAbsolute(options.facility[k]),
+      ) &&
+      ['executableDigest', 'recipientDigest'].every((k) => hash(options.facility[k]));
+    if (
+      !keys(request, ['source', 'destination', 'expectedBackupDigest', 'expectedBytes']) ||
+      !keys(source, ['options', 'artifact']) ||
+      !validOptions(source.options) ||
+      !validOptions(destination) ||
+      source.options.attempt !== destination.attempt ||
+      source.options.facility.recipientDigest !== destination.facility.recipientDigest ||
+      !keys(source.artifact, ['reference', 'encryptionProfileDigest']) ||
+      source.artifact.reference !==
+        join(source.options.directory, `${source.options.attempt}.sql.age`) ||
+      !hash(source.artifact.encryptionProfileDigest) ||
+      !hash(expectedBackupDigest) ||
+      !Number.isSafeInteger(expectedBytes) ||
+      expectedBytes <= 0
+    )
+      throw new Error('binding');
+    const code = Buffer.from(await io.readSource());
+    if (
+      code.length < 1 ||
+      code.length > 1024 * 1024 ||
+      !Buffer.from(code.toString('utf8')).equals(code)
+    )
+      throw new Error('reader');
+    // Only these explicit public source fields are serialized. In particular,
+    // the recovery machine's configuration or identity file is never sent.
+    const remoteInput = `${code.toString('utf8')}\ntry {
+  await streamAgeBackupArtifact(${JSON.stringify(source.artifact)}, ${JSON.stringify(source.options)}, ${JSON.stringify(expectedBackupDigest)}, ${expectedBytes}, process.stdout);
+} catch {
+  process.stderr.write('CUTOVER_BACKUP_TRANSFER_UNPROVEN\\n'); process.exitCode = 1;
+}\n`;
+    return await receiveAgeBackup(
+      { ...destination, expectedBackupDigest, expectedBytes },
+      async (sink) => {
+        const child = io.spawn(
+          'ssh',
+          [
+            '-o',
+            'StrictHostKeyChecking=yes',
+            '-o',
+            'ForwardAgent=no',
+            '-o',
+            'ClearAllForwardings=yes',
+            '-o',
+            'ConnectTimeout=15',
+            '-o',
+            'ServerAliveInterval=10',
+            '-o',
+            'ServerAliveCountMax=2',
+            '-o',
+            'ProxyCommand=ssh -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ConnectTimeout=15 -W %h:%p root@47.99.169.186',
+            '-T',
+            'root@207.148.70.106',
+            '/opt/node22/bin/node --input-type=module',
+          ],
+          { shell: false, stdio: ['pipe', 'pipe', 'ignore'] },
+        );
+        child.stdin.on('error', () => {});
+        const exited = new Promise((resolve, reject) => {
+          child.once('error', reject);
+          child.once('close', (status) =>
+            status === 0 ? resolve() : reject(new Error('transport exit')),
+          );
+        });
+        try {
+          await Promise.all([
+            exited,
+            pipeline(child.stdout, sink),
+            new Promise((resolve, reject) =>
+              child.stdin.end(remoteInput, (error) => (error ? reject(error) : resolve())),
+            ),
+          ]);
+        } catch (error) {
+          child.stdin.destroy();
+          child.stdout.destroy();
+          // Only our read-only SSH client, never a database/process on the host.
+          if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+          await exited.catch(() => {});
+          throw error;
+        }
+      },
+    );
+  } catch {
+    throw new Error('CUTOVER_BACKUP_TRANSFER_UNPROVEN');
+  }
+}
 
 /** The fixed backup stage, not a production CLI or a default success adapter.
  * Host I/O must observe identities, prove isolation, export using its approved
