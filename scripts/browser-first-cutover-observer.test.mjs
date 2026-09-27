@@ -4,6 +4,61 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import * as host from './browser-first-cutover-host.mjs';
 
+test('candidate runtime reader binds two actual control statuses around the existing process observer', async () => {
+  assert.equal(typeof host.readFirstCutoverCandidateRuntime, 'function');
+  const identity = { candidate: 'a'.repeat(40), bootId: 'b'.repeat(32) };
+  const runtime = {
+    identity,
+    root: `/opt/holaday-releases/${identity.candidate}`,
+    main: { pid: 70 },
+    worker: null,
+  };
+  const calls = [];
+  let status = { protocol: 1, identity, mode: 'closed', idle: true, needsReconciliation: false };
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    exec: async (file, argv, options) => {
+      calls.push({ file, argv, options });
+      return JSON.stringify(status);
+    },
+    observe: async (asked) => {
+      assert.deepEqual(asked, identity);
+      return runtime;
+    },
+  };
+  const value = await host.readFirstCutoverCandidateRuntime(identity, io);
+  assert.deepEqual(value, {
+    identity,
+    mode: 'closed',
+    idle: true,
+    needsReconciliation: false,
+    runtime,
+  });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].file, 'runuser');
+  assert.deepEqual(calls[0].argv.slice(-3), ['status', identity.candidate, identity.bootId]);
+  assert.ok(
+    calls[0].argv.includes(
+      `/opt/holaday-releases/${identity.candidate}/scripts/browser-maintenance-control.mjs`,
+    ),
+  );
+  await assert.rejects(
+    host.readFirstCutoverCandidateRuntime(identity, { ...io, platform: 'darwin' }),
+    /UNPROVEN/,
+  );
+  await assert.rejects(
+    host.readFirstCutoverCandidateRuntime(identity, {
+      ...io,
+      observe: async () => {
+        status = { ...status, mode: 'serving', idle: false, needsReconciliation: true };
+        return runtime;
+      },
+    }),
+    /UNPROVEN/,
+  );
+});
+
 const nonce = '12345678-1234-4234-8234-123456789abc';
 const source = Buffer.from('export const synthetic = true;');
 const sourceDigest = createHash('sha256').update(source).digest('hex');

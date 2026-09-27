@@ -8,7 +8,11 @@ import {
   classifyFirstCutoverHostPair,
   classifyFirstCutoverRetirementPair,
 } from './browser-first-cutover-inventory.mjs';
-import { initializeFirstMaintenanceState } from './browser-first-cutover-runtime.mjs';
+import {
+  captureLegacyRuntime,
+  initializeFirstMaintenanceState,
+  retireLegacyRuntime,
+} from './browser-first-cutover-runtime.mjs';
 import {
   candidatePreparationSystem,
   maintenanceCandidateEnvironment,
@@ -261,6 +265,76 @@ export async function readReviewedFirstCutoverLegacySource(input, overrides = {}
   }
 }
 
+/** Read the candidate's real control socket as the application user, bracketing
+ * the existing full local runtime observer. Read-only and fixed argv only. */
+export async function readFirstCutoverCandidateRuntime(identity, overrides = {}) {
+  const io = { ...candidatePreparationSystem(), ...overrides };
+  const fail = () => {
+    throw new Error('CUTOVER_CANDIDATE_OBSERVATION_UNPROVEN');
+  };
+  try {
+    if (
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      !identity ||
+      Object.keys(identity).length !== 2 ||
+      !/^[a-f0-9]{40}$/.test(identity.candidate ?? '') ||
+      !/^[a-f0-9]{32}$/.test(identity.bootId ?? '')
+    )
+      fail();
+    const root = `/opt/holaday-releases/${identity.candidate}`;
+    const read = async () => {
+      const status = JSON.parse(
+        await io.exec(
+          'runuser',
+          [
+            '-u',
+            'holaday',
+            '--',
+            '/opt/node22/bin/node',
+            `${root}/scripts/browser-maintenance-control.mjs`,
+            'status',
+            identity.candidate,
+            identity.bootId,
+          ],
+          {
+            cwd: `${root}/apps/orchestrator`,
+            env: {
+              PATH: '/opt/node22/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+              PM2_HOME: '/root/.pm2',
+            },
+          },
+        ),
+      );
+      if (
+        status.protocol !== 1 ||
+        !isDeepStrictEqual(status.identity, identity) ||
+        !['closed', 'serving'].includes(status.mode) ||
+        typeof status.idle !== 'boolean' ||
+        typeof status.needsReconciliation !== 'boolean'
+      )
+        fail();
+      return {
+        identity: status.identity,
+        mode: status.mode,
+        idle: status.idle,
+        needsReconciliation: status.needsReconciliation,
+      };
+    };
+    const before = await read();
+    const runtime = await io.observe(identity);
+    if (
+      !isDeepStrictEqual(before, await read()) ||
+      !isDeepStrictEqual(runtime.identity, identity) ||
+      runtime.root !== root
+    )
+      fail();
+    return { ...before, runtime };
+  } catch {
+    fail();
+  }
+}
+
 /** Capture the approved baseline BEFORE effects and keep it private for later
  * observations. The same live journal is read on both sides of each fresh pair;
  * no uploaded event log, automatic baseline refresh, or "all stopped" fallback.
@@ -270,6 +344,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
   const io = {
     readPair: readFirstCutoverHostPair,
     readFenceReceipts: async () => [],
+    readCandidateRuntime: readFirstCutoverCandidateRuntime,
     now: Date.now,
     ...overrides,
   };
@@ -294,6 +369,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       !['preflight', 'prepared'].includes(first.phase) ||
       first.startupEvents.length ||
       first.registrationEvents.length ||
+      first.unmanagedEvents?.length ||
       !isDeepStrictEqual(await io.readFenceReceipts(), [])
     )
       fail();
@@ -316,41 +392,123 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       return now;
     };
     checkClock();
-    return {
-      read: async () => {
-        try {
-          checkClock();
-          const before = await effects();
-          const fences = structuredClone(await io.readFenceReceipts());
-          const pair = structuredClone(await io.readPair());
-          if (
-            !isDeepStrictEqual(before, await effects()) ||
-            !isDeepStrictEqual(fences, await io.readFenceReceipts()) ||
-            pair.sourceCandidate !== baseline.sourceCandidate ||
-            pair.sourceDigest !== baseline.sourceDigest ||
-            !['aliyun', 'vultr'].every(
-              (host) =>
-                pair.hosts.find((h) => h.host === host)?.sourceCandidate ===
-                baseline.hosts.find((h) => h.host === host)?.sourceCandidate,
-            )
-          )
-            fail();
-          const result = classifyFirstCutoverRetirementPair(
-            {
-              baseline,
-              pair,
-              reviews,
-              inventoryDigest: binding.inventoryDigest,
-              effects: before,
-              fences,
-            },
-            { now: checkClock },
-          );
-          if (result.unknownLaunchers.length) fail();
-          return result;
-        } catch {
+    const read = async (registrationProgressHost, unmanagedProgressHost, candidateIdentity) => {
+      try {
+        checkClock();
+        const before = await effects();
+        const fences = structuredClone(await io.readFenceReceipts());
+        const candidate =
+          candidateIdentity === undefined
+            ? undefined
+            : await io.readCandidateRuntime(candidateIdentity);
+        if (
+          candidateIdentity !== undefined &&
+          !isDeepStrictEqual(candidate?.identity, candidateIdentity)
+        )
           fail();
-        }
+        const pair = structuredClone(await io.readPair());
+        if (
+          !isDeepStrictEqual(before, await effects()) ||
+          !isDeepStrictEqual(fences, await io.readFenceReceipts()) ||
+          (candidateIdentity !== undefined &&
+            !isDeepStrictEqual(candidate, await io.readCandidateRuntime(candidateIdentity))) ||
+          pair.sourceCandidate !== baseline.sourceCandidate ||
+          pair.sourceDigest !== baseline.sourceDigest ||
+          !['aliyun', 'vultr'].every(
+            (host) =>
+              pair.hosts.find((h) => h.host === host)?.sourceCandidate ===
+              baseline.hosts.find((h) => h.host === host)?.sourceCandidate,
+          )
+        )
+          fail();
+        const result = classifyFirstCutoverRetirementPair(
+          {
+            baseline,
+            pair,
+            reviews,
+            inventoryDigest: binding.inventoryDigest,
+            effects: before,
+            fences,
+            registrationProgressHost,
+            unmanagedProgressHost,
+            candidate,
+          },
+          { now: checkClock },
+        );
+        if (result.unknownLaunchers.length) fail();
+        if (registrationProgressHost !== undefined)
+          return {
+            purpose: 'registration-progress',
+            host: registrationProgressHost,
+            inventory: result.hosts.find((h) => h.host === registrationProgressHost).registered,
+          };
+        if (unmanagedProgressHost !== undefined)
+          return {
+            purpose: 'unmanaged-progress',
+            host: unmanagedProgressHost,
+            inventory: result.hosts.find((h) => h.host === unmanagedProgressHost).unmanaged,
+          };
+        return result;
+      } catch {
+        fail();
+      }
+    };
+    let unmanagedAttempted = false;
+    return {
+      read: () => read(),
+      readRegistrationProgress: (host) => read(host ?? 'invalid'),
+      readUnmanagedProgress: (host) => read(undefined, host ?? 'invalid'),
+      readWithCandidate: (identity) => read(undefined, undefined, structuredClone(identity ?? {})),
+      // Signal execution is a trusted, fixed-host I/O seam; production supplies
+      // createLegacyRuntimeEffects on that host, never a command from approval.
+      retireUnmanaged: async ({ maintenanceEndsAtMs }, operations) => {
+        if (
+          unmanagedAttempted ||
+          !Number.isSafeInteger(maintenanceEndsAtMs) ||
+          ['verifyFence', 'sleep', 'signalPinned'].some(
+            (k) => typeof operations?.[k] !== 'function',
+          )
+        )
+          fail();
+        unmanagedAttempted = true;
+        const remaining = maintenanceEndsAtMs - checkClock();
+        if (remaining <= 0 || remaining > 900000 || (await effects()).phase !== 'stopped') fail();
+        const inventory = (await read()).hosts.find((h) => h.host === 'aliyun').unmanaged;
+        const captured = await captureLegacyRuntime(
+          { inventory, approvedTargets: inventory.processes },
+          { now: checkClock },
+        );
+        const original = baseline.hosts.find((h) => h.host === 'aliyun').snapshot;
+        const base = {
+          attempt: binding.attempt,
+          inventoryDigest: binding.inventoryDigest,
+          host: 'aliyun',
+          targets: captured.targets
+            .map((p) => ({
+              pid: p.pid,
+              identityDigest: createHash('sha256')
+                .update(JSON.stringify(original.processes.find((r) => r.pid === p.pid)))
+                .digest('hex'),
+            }))
+            .sort((a, b) => a.pid - b.pid),
+        };
+        await io.journal.recordUnmanagedEvent({ ...base, phase: 'unmanaged-stop-intent' });
+        const left = maintenanceEndsAtMs - checkClock();
+        if (left <= 0) fail();
+        const result = await retireLegacyRuntime(
+          { captured, deadlineMs: left },
+          {
+            now: checkClock,
+            sleep: operations.sleep,
+            verifyFence: operations.verifyFence,
+            signalPinned: operations.signalPinned,
+            assertJournalOwnership: () => io.journal.assertOwnership(),
+            readInventory: async () => (await read(undefined, 'aliyun')).inventory,
+          },
+        );
+        await io.journal.recordUnmanagedEvent({ ...base, phase: 'unmanaged-stopped' });
+        await read();
+        return result;
       },
     };
   } catch {

@@ -33,6 +33,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
   let currentIdentity;
   const startupEvents = [];
   const registrationEvents = [];
+  const unmanagedEvents = [];
   const startupBatches = new Map();
   const registrationBatches = new Map();
   let eventHostMode;
@@ -148,6 +149,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
           ...(backupReceipt ? { backupReceipt } : {}),
           ...(startupEvents.length ? { startupEvents } : {}),
           ...(registrationEvents.length ? { registrationEvents } : {}),
+          ...(unmanagedEvents.length ? { unmanagedEvents } : {}),
           oldIdentity,
           phase: next,
           identity,
@@ -281,9 +283,12 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
             migrationDigest,
             inventoryDigest,
             legacyDigest: firstFields.legacyDigest,
+            ...(record.identity ? { identity: record.identity } : {}),
+            ...(record.bootstrapSeed ? { bootstrapSeed: record.bootstrapSeed } : {}),
             phase: record.phase,
             startupEvents: record.startupEvents ?? [],
             registrationEvents: record.registrationEvents ?? [],
+            unmanagedEvents: record.unmanagedEvents ?? [],
           };
         } catch {
           throw unproven();
@@ -348,6 +353,41 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
         bootstrapSeed = seed;
         await write(phase);
       }),
+    recordUnmanagedEvent: (event) => {
+      const e = structuredClone(event);
+      return serial(async () => {
+        if (
+          !first ||
+          phase !== 'stopped' ||
+          !migrationManifest ||
+          eventHostMode === 'local' ||
+          e?.host !== 'aliyun' ||
+          e.attempt !== attempt ||
+          e.inventoryDigest !== inventoryDigest ||
+          Object.keys(e).length !== 5 ||
+          !Array.isArray(e.targets) ||
+          !e.targets.length ||
+          e.targets.length > 128 ||
+          new Set(e.targets.map((p) => p.pid)).size !== e.targets.length ||
+          e.targets.some(
+            (p) =>
+              !p ||
+              Object.keys(p).length !== 2 ||
+              !Number.isSafeInteger(p.pid) ||
+              p.pid <= 1 ||
+              !/^[a-f0-9]{64}$/.test(p.identityDigest ?? ''),
+          ) ||
+          (unmanagedEvents.length === 0
+            ? e.phase !== 'unmanaged-stop-intent'
+            : unmanagedEvents.length !== 1 ||
+              !isDeepStrictEqual(e, { ...unmanagedEvents[0], phase: 'unmanaged-stopped' }))
+        )
+          throw unproven();
+        eventHostMode = 'named';
+        unmanagedEvents.push(e);
+        await write(phase, currentIdentity);
+      });
+    },
     recordRegistrationEvent: (event) => {
       const original = structuredClone(event);
       return serial(async () => {
@@ -355,7 +395,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
         const events = batch.events;
         if (
           !first ||
-          !['producers_stopped', 'all_fenced'].includes(phase) ||
+          !['producers_stopped', 'all_fenced', 'stopped'].includes(phase) ||
           !migrationManifest ||
           e?.attempt !== attempt ||
           e.inventoryDigest !== inventoryDigest ||
@@ -474,10 +514,11 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
       serial(async () => {
         if (!migrationManifest) throw new Error('MAINTENANCE_MIGRATIONS_UNPROVEN');
         if (first) {
+          if (next === 'backup_verified' && unmanagedEvents.length === 1) throw unproven();
           if (next === 'migration_started' && !backupReceipt) throw unproven();
           if (next === 'all_fenced' && startupEvents.length && !startupDone()) throw unproven();
           if (
-            ['all_fenced', 'stopped'].includes(next) &&
+            ['all_fenced', 'stopped', 'backup_verified'].includes(next) &&
             registrationEvents.length &&
             !registrationDone()
           )

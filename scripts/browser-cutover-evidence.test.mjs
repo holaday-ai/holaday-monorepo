@@ -524,6 +524,7 @@ function hostFixture() {
   ]);
   const io = {
     platform: 'linux',
+    hostname: () => 'qa-linux',
     uid: 0,
     now: () => 100_000,
     pm2RuntimeSnapshot: async () => ({
@@ -630,8 +631,16 @@ test('PM2 runtime observes actual daemon settings and audited defaults without e
 });
 test('host snapshot includes independently observed PM2 defaults', async () => {
   const f = hostFixture();
+  f.io.hostname = () => 'iZbp1ActualNodeZ';
   const result = await readCutoverHostSnapshot(f.io);
   assert.equal(result.pm2Runtime?.killTimeoutMs, 1600);
+  assert.equal(result.hostname, 'iZbp1ActualNodeZ');
+});
+test('host snapshot refuses hostname drift while observing the machine', async () => {
+  const f = hostFixture();
+  let reads = 0;
+  f.io.hostname = () => (reads++ ? 'other-host' : 'i-actual-host');
+  await assert.rejects(readCutoverHostSnapshot(f.io), /MAINTENANCE_HOST_OBSERVATION_UNPROVEN/);
 });
 function hostTreeFixture() {
   const f = hostFixture();

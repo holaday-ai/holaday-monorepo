@@ -15,6 +15,16 @@ import * as firstRuntime from './browser-first-cutover-runtime.mjs';
 import { retireMaintenanceRuntime } from './browser-maintenance-runtime.mjs';
 
 const digest = 'a'.repeat(64);
+test('runtime preserves the actual mixed-case kernel hostname in captured targets', async () => {
+  const f = fixture();
+  f.inventory.host = 'iZbp1ActualNodeZ';
+  f.inventory.processes[0].host = f.inventory.host;
+  const captured = await captureLegacyRuntime(
+    { inventory: f.inventory, approvedTargets: f.inventory.processes },
+    f.io,
+  );
+  assert.equal(captured.targets[0].host, f.inventory.host);
+});
 const manager = {
   kind: 'pm2',
   pid: 50,

@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { readFile, readdir, readlink } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { posix } from 'node:path';
 import { promisify } from 'node:util';
 // Shared with exact-registration retirement. Heap/latency gauges are volatile;
@@ -627,6 +628,8 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
   if (io.platform !== 'linux' || io.uid !== 0) fail('MAINTENANCE_HOST_OBSERVATION_UNPROVEN');
   try {
     const observedAtMs = io.now();
+    const machine = (io.hostname ?? hostname)();
+    if (!/^[a-zA-Z0-9.-]{1,128}$/.test(machine)) throw new Error('host identity');
     const bootId = String(await io.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim();
     if (!/^[a-f0-9-]{36}$/.test(bootId)) throw new Error('boot identity');
     const start = (raw, pid) => {
@@ -790,6 +793,7 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
     const startup = await io.startupSnapshot();
     if (
       String(await io.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim() !== bootId ||
+      (io.hostname ?? hostname)() !== machine ||
       !same(processes, await readProcesses()) ||
       !same(managers, await readManagers()) ||
       !same(pm2Runtime, await io.pm2RuntimeSnapshot()) ||
@@ -800,6 +804,7 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
     return {
       observedAtMs,
       bootId,
+      hostname: machine,
       processes,
       managers,
       pm2Runtime,

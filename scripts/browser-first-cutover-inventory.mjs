@@ -27,12 +27,149 @@ const lines = (text) => {
  * of ingress isolation. Source changes without separate evidence remain unknown.
  */
 export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }) {
-  const { baseline, pair, reviews, inventoryDigest, effects, fences = [] } = structuredClone(input);
+  const {
+    baseline,
+    pair,
+    reviews,
+    inventoryDigest,
+    effects,
+    fences = [],
+    registrationProgressHost,
+    unmanagedProgressHost,
+    candidate,
+  } = structuredClone(input);
+  if (candidate !== undefined) {
+    const { identity, runtime, mode } = candidate ?? {};
+    if (
+      registrationProgressHost !== undefined ||
+      unmanagedProgressHost !== undefined ||
+      !['candidate_started', 'verified', 'opened', 'reconciled'].includes(effects?.phase) ||
+      identity?.candidate !== effects.candidate ||
+      !/^[a-f0-9]{32}$/.test(identity?.bootId ?? '') ||
+      identity.bootId === effects.bootstrapSeed ||
+      (effects.identity && !equal(identity, effects.identity)) ||
+      !equal(runtime?.identity, identity) ||
+      runtime.root !== `/opt/holaday-releases/${identity.candidate}` ||
+      (mode === 'closed'
+        ? candidate.idle !== true ||
+          candidate.needsReconciliation !== false ||
+          runtime.worker !== null
+        : mode !== 'serving' ||
+          effects.phase === 'candidate_started' ||
+          candidate.idle !== false ||
+          candidate.needsReconciliation !== true)
+    )
+      fail();
+    const live = pair.hosts.find((h) => h.host === 'vultr').snapshot;
+    const old = baseline.hosts.find((h) => h.host === 'vultr').snapshot;
+    const selected = [];
+    for (const [role, name] of [
+      ['main', 'holaday-orchestrator'],
+      ['worker', 'holaday-account-closure-worker'],
+    ]) {
+      const p = runtime[role];
+      if (role === 'worker' && p === null) continue;
+      const actual = live.processes.find((r) => r.pid === p?.pid);
+      const managers = live.managers.filter((m) => m.name === name);
+      if (
+        !p ||
+        !actual ||
+        p.uid !== 998 ||
+        p.command !== role ||
+        p.autorestart !== false ||
+        p.cwd !== `${runtime.root}/apps/orchestrator` ||
+        p.start !== actual.start ||
+        p.cwd !== actual.cwd ||
+        !equal(actual.uids, [998, 998, 998, 998]) ||
+        actual.exe !== '/opt/node22/bin/node' ||
+        actual.ppid !== live.pm2Runtime.pid ||
+        old.processes.some((r) => r.pid === p.pid) ||
+        managers.length !== 1 ||
+        managers[0].pid !== p.pid ||
+        managers[0].status !== 'online' ||
+        managers[0].watch ||
+        managers[0].cronRestart ||
+        managers[0].maxMemoryRestart
+      )
+        fail();
+      selected.push({ pid: p.pid, pmId: managers[0].pmId });
+    }
+    const candidatePorts = new Set();
+    live.listeners = lines(live.listeners)
+      .filter((line) => {
+        const port = Number(/:(\d+)$/.exec(line.split(/\s+/)[3] ?? '')?.[1]);
+        if (![4001, 4002].includes(port)) return true;
+        const pids = [...line.matchAll(/\bpid=(\d+)\b/g)].map((m) => Number(m[1]));
+        if (!pids.length || pids.some((pid) => pid !== runtime.main.pid)) fail();
+        candidatePorts.add(port);
+        return false;
+      })
+      .join('\n');
+    if (candidatePorts.size !== 2) fail();
+    live.processes = live.processes.filter((p) => !selected.some((r) => r.pid === p.pid));
+    live.managers = live.managers.filter((m) => !selected.some((r) => r.pmId === m.pmId));
+  }
+  if (
+    unmanagedProgressHost !== undefined &&
+    (unmanagedProgressHost !== 'aliyun' ||
+      effects?.phase !== 'stopped' ||
+      registrationProgressHost !== undefined)
+  )
+    fail();
+  if (
+    registrationProgressHost !== undefined &&
+    !(
+      (registrationProgressHost === 'vultr' && effects?.phase === 'producers_stopped') ||
+      (registrationProgressHost === 'aliyun' && ['all_fenced', 'stopped'].includes(effects?.phase))
+    )
+  )
+    fail();
   const adjusted = structuredClone(reviews);
   const actualSources = new Map(
     pair.hosts.map((h) => [h.host, firstCutoverSourceBindings(h.snapshot)]),
   );
   if (!Array.isArray(effects?.registrationEvents) || !Array.isArray(effects.startupEvents)) fail();
+  const unmanaged = effects.unmanagedEvents ?? [];
+  if (!Array.isArray(unmanaged) || unmanaged.length > 2) fail();
+  if (unmanaged.length) {
+    const intent = unmanaged[0];
+    const original = classifyFirstCutoverHostPair(
+      { pair: baseline, reviews, inventoryDigest },
+      { now: () => baseline.observedAtMs },
+    );
+    const snapshot = baseline.hosts.find((h) => h.host === 'aliyun').snapshot;
+    const expected = original.hosts
+      .find((h) => h.host === 'aliyun')
+      .unmanaged.processes.map((p) => ({
+        pid: p.pid,
+        identityDigest: digest(snapshot.processes.find((r) => r.pid === p.pid)),
+      }))
+      .sort((a, b) => a.pid - b.pid);
+    if (
+      original.unknownLaunchers.length ||
+      !expected.length ||
+      !equal(intent, {
+        attempt: effects.attempt,
+        inventoryDigest,
+        host: 'aliyun',
+        phase: 'unmanaged-stop-intent',
+        targets: expected,
+      }) ||
+      (unmanaged.length === 2
+        ? !equal(unmanaged[1], { ...intent, phase: 'unmanaged-stopped' })
+        : unmanagedProgressHost !== 'aliyun')
+    )
+      fail();
+    const actual = pair.hosts.find((h) => h.host === 'aliyun').snapshot;
+    for (const p of expected) {
+      const remains = actual.processes.some((row) => row.pid === p.pid);
+      if (unmanaged.length === 2 && remains) fail();
+      if (!remains)
+        adjusted.aliyun.review.processes = adjusted.aliyun.review.processes.filter(
+          (r) => r.pid !== p.pid,
+        );
+    }
+  }
   if (
     !Array.isArray(fences) ||
     fences.length > 2 ||
@@ -54,6 +191,7 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
       !before ||
       !current ||
       before.bootId !== current.bootId ||
+      before.hostname !== current.hostname ||
       !equal(before.pm2Runtime, current.pm2Runtime) ||
       !equal(
         before.processes.find((p) => p.pid === before.pm2Runtime.pid),
@@ -63,13 +201,19 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
       fail();
     const fence = fences.find((f) => f.host === host)?.receipt;
     if (fence) {
+      const restored = fence.phase === 'restored';
       const names =
         host === 'vultr' ? ['holaday'] : ['hd-app.orangebench.tech', 'hd-pay.orangebench.tech'];
       if (
         fence.schemaVersion !== 1 ||
         fence.attempt !== effects.attempt ||
         fence.inventoryDigest !== inventoryDigest ||
-        fence.phase !== 'active' ||
+        (!restored && fence.phase !== 'active') ||
+        (restored &&
+          (fence.stage !== 'all-writers' ||
+            candidate?.mode !== 'serving' ||
+            !equal(fence.identity, candidate.identity) ||
+            !['verified', 'opened', 'reconciled'].includes(effects.phase))) ||
         !['orders', 'all-writers'].includes(fence.stage) ||
         !Array.isArray(fence.files) ||
         fence.files.length !== names.length ||
@@ -85,6 +229,7 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
             'candidate_started',
             'verified',
             'opened',
+            'reconciled',
           ].includes(effects.phase))
       )
         fail();
@@ -101,13 +246,15 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
           !hash(record.generatedDigest) ||
           record.originalDigest !== original.digest ||
           record.backupDigest !== original.digest ||
-          file.digest !== record.generatedDigest ||
-          file.uid !== 0 ||
-          file.gid !== 0 ||
-          file.mode !== 0o600 ||
-          file.resolved !==
-            `/etc/nginx/holaday-maintenance/${effects.attempt}/${name}-${record.generatedDigest}.conf` ||
-          !equal(Object.keys(original).sort(), Object.keys(file).sort())
+          (restored
+            ? !equal(file, original)
+            : file.digest !== record.generatedDigest ||
+              file.uid !== 0 ||
+              file.gid !== 0 ||
+              file.mode !== 0o600 ||
+              file.resolved !==
+                `/etc/nginx/holaday-maintenance/${effects.attempt}/${name}-${record.generatedDigest}.conf` ||
+              !equal(Object.keys(original).sort(), Object.keys(file).sort()))
         )
           fail();
         current.nginxFiles[index] = structuredClone(original);
@@ -177,25 +324,47 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
     }
     const events = effects.registrationEvents.filter((e) => e.host === host);
     if (!events.length) continue;
+    const progress = registrationProgressHost === host;
+    if (progress && events.length === 1 && events[0].phase === 'registration-backup-intent')
+      continue;
     const backed = events[1];
     if (
       events[0]?.phase !== 'registration-backup-intent' ||
       backed?.phase !== 'registration-backed-up' ||
       !Array.isArray(backed.registrations) ||
-      events.length !== 2 + backed.registrations.length * 2
+      (progress
+        ? events.length > 2 + backed.registrations.length * 2
+        : events.length !== 2 + backed.registrations.length * 2)
     )
       fail();
     for (const [i, registration] of backed.registrations.entries()) {
       const base = { attempt: effects.attempt, inventoryDigest, host, ...registration };
+      const intent = events[2 + i * 2];
+      const completed = events[3 + i * 2];
+      if (progress && !intent) continue;
       if (
-        !equal(events[2 + i * 2], { ...base, phase: 'registration-delete-intent' }) ||
-        !equal(events[3 + i * 2], { ...base, phase: 'registration-deleted' })
+        !equal(intent, { ...base, phase: 'registration-delete-intent' }) ||
+        (completed
+          ? !equal(completed, { ...base, phase: 'registration-deleted' })
+          : !progress || events.length !== 3 + i * 2)
       )
         fail();
       const manager = before.managers.find((m) => m.pmId === registration.pmId);
       const reviewed = adjusted[host].review.registrations.find(
         (r) => r.pmId === registration.pmId,
       );
+      // Progress consumers still compare returned remaining targets to their
+      // own captured scope. An intent cannot remove a still-present manager.
+      if (progress && !completed && current.managers.some((m) => m.pmId === manager?.pmId)) {
+        if (
+          !equal(
+            current.managers.find((m) => m.pmId === manager.pmId),
+            manager,
+          )
+        )
+          fail();
+        continue;
+      }
       if (
         !manager ||
         manager.name !== registration.name ||
@@ -222,6 +391,7 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
     }
   }
   const result = classifyFirstCutoverHostPair({ pair, reviews: adjusted, inventoryDigest }, io);
+  if (candidate !== undefined) result.candidate = candidate;
   for (const host of result.hosts) host.sources = actualSources.get(host.host);
   return result;
 }
@@ -337,9 +507,11 @@ export function firstCutoverSourceBindings(snapshot) {
  * required. It does not pretend old PM2 sources remain unchanged after removal. */
 export function classifyFirstCutoverHost(input, io = { now: Date.now }) {
   const { snapshot: s, review, host, ports, inventoryDigest } = structuredClone(input);
+  const machine = s?.hostname ?? host;
   const now = io.now();
   if (
     !['aliyun', 'vultr'].includes(host) ||
+    !/^[a-zA-Z0-9.-]{1,128}$/.test(machine) ||
     !hash(inventoryDigest) ||
     !Number.isSafeInteger(now) ||
     !Number.isSafeInteger(s?.observedAtMs) ||
@@ -508,7 +680,7 @@ export function classifyFirstCutoverHost(input, io = { now: Date.now }) {
       continue;
     }
     const target = {
-      host,
+      host: machine,
       bootId: s.bootId.replaceAll('-', ''),
       pid: p.pid,
       ppid: p.ppid,
@@ -544,7 +716,7 @@ export function classifyFirstCutoverHost(input, io = { now: Date.now }) {
   }
   const scope = (processes, managers) => ({
     inventoryDigest,
-    host,
+    host: machine,
     bootId: s.bootId.replaceAll('-', ''),
     observedAtMs: s.observedAtMs,
     ports,

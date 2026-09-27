@@ -204,6 +204,11 @@ async function retirementFixture(t, setup = () => {}) {
         return structuredClone(f.pair);
       },
       readFenceReceipts: async () => structuredClone(f.fences ?? []),
+      readCandidateRuntime: async (identity) => {
+        await f.onCandidateRead?.();
+        assert.deepEqual(identity, f.candidate?.identity);
+        return structuredClone(f.candidate);
+      },
       now: () => f.now ?? 1000,
     },
   );
@@ -245,10 +250,351 @@ test('retirement observation consumes the real journal and fresh paired state, n
   assert.ok(!JSON.stringify(actual).includes('private-environment-never-return'));
 });
 
+async function candidateFixture(t, setup = () => {}) {
+  const r = await retirementFixture(t, setup);
+  await r.remove();
+  for (const phase of ['all_fenced', 'stopped', 'backup_verified'])
+    await r.journal.persist(phase, { candidate: r.binding.candidate });
+  await r.journal.bindBackupReceipt({
+    ...r.binding,
+    backupDigest: '1'.repeat(64),
+    databaseIdentityDigest: '2'.repeat(64),
+    isolatedTargetDigest: '3'.repeat(64),
+    encryptionProfileDigest: '4'.repeat(64),
+    comparisonDigest: '5'.repeat(64),
+    schemaDigest: '6'.repeat(64),
+    businessDigest: '7'.repeat(64),
+    restoredAtMs: 1000,
+  });
+  await r.journal.persist('migration_started', { candidate: r.binding.candidate });
+  await r.journal.bindBootstrapSeed('8'.repeat(32));
+  await r.journal.persist('candidate_started', { candidate: r.binding.candidate });
+  const s = r.f.pair.hosts[1].snapshot;
+  const p = {
+    pid: 80,
+    ppid: 10,
+    start: '8000',
+    uids: [998, 998, 998, 998],
+    exe: '/opt/node22/bin/node',
+    cwd: `/opt/holaday-releases/${r.binding.candidate}/apps/orchestrator`,
+    argvDigest: hash('candidate'),
+    cgroup: '0::/user.slice',
+  };
+  s.processes.push(p);
+  s.managers.push({
+    pmId: 4,
+    name: 'holaday-orchestrator',
+    pid: 80,
+    status: 'online',
+    watch: false,
+    configDigest: hash('candidate configuration'),
+  });
+  s.listeners =
+    'LISTEN 0 128 127.0.0.1:4001 0.0.0.0:* users:(("node",pid=80,fd=5))\nLISTEN 0 128 127.0.0.1:4002 0.0.0.0:* users:(("node",pid=80,fd=6))';
+  const identity = { candidate: r.binding.candidate, bootId: '9'.repeat(32) };
+  r.f.candidate = {
+    identity,
+    mode: 'closed',
+    idle: true,
+    needsReconciliation: false,
+    runtime: {
+      identity,
+      root: `/opt/holaday-releases/${identity.candidate}`,
+      main: { pid: 80, start: '8000', uid: 998, cwd: p.cwd, command: 'main', autorestart: false },
+      worker: null,
+    },
+  };
+  return { ...r, identity, snapshot: s };
+}
+
+test('candidate observation joins the live controlled runtime without hiding old writers', async (t) => {
+  const r = await candidateFixture(t);
+  assert.equal(typeof r.observer.readWithCandidate, 'function');
+  await assert.rejects(r.observer.read(), /UNPROVEN/);
+  const observed = await r.observer.readWithCandidate(r.identity);
+  assert.deepEqual(observed.candidate, r.f.candidate);
+  assert.deepEqual(observed.unknownLaunchers, []);
+  assert.equal(observed.hosts[1].registered.managers.length, 1, 'old stopped cron remains visible');
+});
+
+test('candidate observation rejects foreign, changing, orphaned and physically mismatched new runtime', async (t) => {
+  for (const mode of [
+    'foreign',
+    'changed',
+    'orphan',
+    'pid',
+    'uid',
+    'port',
+    'manager',
+    'bootstrap',
+    'verified-identity',
+  ])
+    await t.test(mode, async (t) => {
+      const r = await candidateFixture(t);
+      assert.equal(typeof r.observer.readWithCandidate, 'function');
+      if (mode === 'foreign') r.identity = { ...r.identity, candidate: 'a'.repeat(40) };
+      if (mode === 'changed') {
+        let calls = 0;
+        r.f.onCandidateRead = () => {
+          if (calls++) r.f.candidate.runtime.main.start = '9999';
+        };
+      }
+      if (mode === 'orphan') r.snapshot.processes.push({ ...r.snapshot.processes.at(-1), pid: 81 });
+      if (mode === 'pid') r.snapshot.processes.at(-1).start = '9000';
+      if (mode === 'uid') r.snapshot.processes.at(-1).uids = [0, 0, 0, 0];
+      if (mode === 'port') r.snapshot.listeners = r.snapshot.listeners.replace('4002', '4003');
+      if (mode === 'manager') r.snapshot.managers.at(-1).pid = 81;
+      if (mode === 'bootstrap') {
+        r.identity.bootId = '8'.repeat(32);
+        r.f.candidate.identity = r.identity;
+        r.f.candidate.runtime.identity = r.identity;
+      }
+      if (mode === 'verified-identity') {
+        await r.journal.persist('verified', {
+          candidate: r.binding.candidate,
+          identity: r.identity,
+        });
+        r.identity = { ...r.identity, bootId: 'a'.repeat(32) };
+        r.f.candidate.identity = r.identity;
+        r.f.candidate.runtime.identity = r.identity;
+      }
+      await assert.rejects(r.observer.readWithCandidate(r.identity), /UNPROVEN/);
+    });
+});
+
+test('restored ingress requires original bytes, actual serving identity and the same completed owned fence receipt', async (t) => {
+  for (const mode of ['success', 'closed', 'other-boot', 'partial', 'wrong-bytes', 'changed-owner'])
+    await t.test(mode, async (t) => {
+      const r = await candidateFixture(t, ingressFixture);
+      const originals = structuredClone(r.f.pair.hosts.map((h) => h.snapshot.nginxFiles));
+      installFence(r);
+      await r.journal.persist('verified', { candidate: r.binding.candidate, identity: r.identity });
+      r.f.candidate.mode = mode === 'closed' ? 'closed' : 'serving';
+      r.f.candidate.idle = mode === 'closed';
+      r.f.candidate.needsReconciliation = mode !== 'closed';
+      for (const [i, f] of r.f.fences.entries()) {
+        f.receipt.stage = 'all-writers';
+        f.receipt.phase = mode === 'partial' ? 'restoring' : 'restored';
+        f.receipt.identity =
+          mode === 'other-boot' ? { ...r.identity, bootId: 'a'.repeat(32) } : r.identity;
+        r.f.pair.hosts[i].snapshot.nginxFiles = originals[i];
+      }
+      if (mode === 'wrong-bytes') {
+        originals[0][0].content = 'changed';
+        originals[0][0].digest = createHash('sha256').update('changed').digest('hex');
+      }
+      if (mode === 'changed-owner') originals[0][0].uid = 0;
+      if (mode === 'success')
+        assert.deepEqual((await r.observer.readWithCandidate(r.identity)).unknownLaunchers, []);
+      else await assert.rejects(r.observer.readWithCandidate(r.identity), /UNPROVEN/);
+    });
+});
+
+test('runtime targets carry the observed kernel hostname, not the SSH routing alias', async (t) => {
+  const r = await retirementFixture(t, (f) => {
+    withUnmanagedGateway(f);
+    f.pair.hosts[0].snapshot.hostname = 'iZbp1ActualNodeZ';
+  });
+  const h = (await r.observer.read()).hosts.find((h) => h.host === 'aliyun');
+  assert.equal(h.unmanaged.host, 'iZbp1ActualNodeZ');
+  assert.equal(h.unmanaged.processes[0].host, 'iZbp1ActualNodeZ');
+  r.f.pair.hosts[0].snapshot.hostname = 'other-machine';
+  await assert.rejects(r.observer.read(), /UNPROVEN/);
+});
+
+function withUnmanagedGateway(f) {
+  const s = f.pair.hosts.find((h) => h.host === 'aliyun').snapshot;
+  const p = {
+    ...structuredClone(s.processes.find((p) => p.pid === 20)),
+    pid: 71,
+    ppid: 1,
+    start: '7100',
+  };
+  s.processes.push(p);
+  f.reviews.aliyun.review.processes.push({
+    pid: p.pid,
+    identityDigest: hash(p),
+    disposition: 'retire',
+    role: 'gateway',
+    reason: 'reviewed unmanaged gateway',
+  });
+}
+
+test('observed unmanaged retirement composes capture, intent, pinned signal, double observation and completion', async (t) => {
+  for (const mode of ['success', 'signal-error', 'busy'])
+    await t.test(mode, async (t) => {
+      const r = await retirementFixture(t, withUnmanagedGateway);
+      await r.journal.persist('all_fenced', { candidate: r.binding.candidate });
+      await r.journal.persist('stopped', { candidate: r.binding.candidate });
+      const s = r.f.pair.hosts.find((h) => h.host === 'aliyun').snapshot;
+      let signals = 0;
+      let waits = 0;
+      const io = {
+        verifyFence: async () => ({
+          inventoryDigest: r.binding.inventoryDigest,
+          stage: 'all-writers',
+          unsettledWork: mode === 'busy' ? 1 : 0,
+          externalWork: 0,
+          producersRunning: 0,
+        }),
+        sleep: async () => {
+          waits++;
+        },
+        signalPinned: async (p) => {
+          signals++;
+          assert.equal(p.pid, 71);
+          assert.deepEqual(
+            (await r.journal.readFirstCutoverEffects()).unmanagedEvents.map((e) => e.phase),
+            ['unmanaged-stop-intent'],
+          );
+          if (mode === 'signal-error') throw new Error('CUTOVER_STOP_UNCERTAIN');
+          s.processes = s.processes.filter((row) => row.pid !== p.pid);
+        },
+      };
+      assert.equal(typeof r.observer.retireUnmanaged, 'function');
+      if (mode === 'success') {
+        const result = await r.observer.retireUnmanaged({ maintenanceEndsAtMs: 5000 }, io);
+        assert.equal(result.phase, 'stopped');
+        assert.equal(signals, 1);
+        assert.ok(waits >= 1);
+        assert.equal((await r.journal.readFirstCutoverEffects()).unmanagedEvents.length, 2);
+        assert.deepEqual((await r.observer.read()).unknownLaunchers, []);
+      } else {
+        await assert.rejects(r.observer.retireUnmanaged({ maintenanceEndsAtMs: 5000 }, io));
+        assert.equal(signals, mode === 'busy' ? 0 : 1);
+        assert.equal((await r.journal.readFirstCutoverEffects()).unmanagedEvents.length, 1);
+        await assert.rejects(r.observer.read(), /UNPROVEN/);
+      }
+      await assert.rejects(
+        r.observer.retireUnmanaged({ maintenanceEndsAtMs: 5000 }, io),
+        /UNPROVEN/,
+      );
+    });
+});
+
+test('unmanaged stop progress observes disappearance but strict reads require durable completion', async (t) => {
+  const r = await retirementFixture(t, withUnmanagedGateway);
+  await r.journal.persist('all_fenced', { candidate: r.binding.candidate });
+  await r.journal.persist('stopped', { candidate: r.binding.candidate });
+  const s = r.f.pair.hosts.find((h) => h.host === 'aliyun').snapshot;
+  const p = s.processes.find((p) => p.pid === 71);
+  const base = {
+    attempt: r.binding.attempt,
+    inventoryDigest: r.binding.inventoryDigest,
+    host: 'aliyun',
+    targets: [{ pid: 71, identityDigest: hash(p) }],
+  };
+  assert.equal(typeof r.journal.recordUnmanagedEvent, 'function');
+  assert.equal(typeof r.observer.readUnmanagedProgress, 'function');
+  await r.journal.recordUnmanagedEvent({ ...base, phase: 'unmanaged-stop-intent' });
+  assert.equal((await r.observer.readUnmanagedProgress('aliyun')).inventory.processes.length, 1);
+  s.processes = s.processes.filter((p) => p.pid !== 71);
+  assert.deepEqual((await r.observer.readUnmanagedProgress('aliyun')).inventory.processes, []);
+  await assert.rejects(r.observer.read(), /UNPROVEN/);
+  await r.journal.recordUnmanagedEvent({ ...base, phase: 'unmanaged-stopped' });
+  assert.deepEqual((await r.observer.read()).unknownLaunchers, []);
+  s.processes.push(p);
+  await assert.rejects(r.observer.read(), /UNPROVEN/);
+});
+
+test('unmanaged progress rejects disappearance without intent, PID reuse, wrong scope and wrong host', async (t) => {
+  for (const mode of ['no-intent', 'reused-pid', 'wrong-scope', 'wrong-host'])
+    await t.test(mode, async (t) => {
+      const r = await retirementFixture(t, withUnmanagedGateway);
+      await r.journal.persist('all_fenced', { candidate: r.binding.candidate });
+      await r.journal.persist('stopped', { candidate: r.binding.candidate });
+      const s = r.f.pair.hosts.find((h) => h.host === 'aliyun').snapshot;
+      const p = s.processes.find((p) => p.pid === 71);
+      const targets = [
+        { pid: 71, identityDigest: mode === 'wrong-scope' ? 'f'.repeat(64) : hash(p) },
+      ];
+      if (mode !== 'no-intent')
+        await r.journal.recordUnmanagedEvent({
+          attempt: r.binding.attempt,
+          inventoryDigest: r.binding.inventoryDigest,
+          host: 'aliyun',
+          targets,
+          phase: 'unmanaged-stop-intent',
+        });
+      if (mode === 'reused-pid') p.start = '99999';
+      else s.processes = s.processes.filter((p) => p.pid !== 71);
+      await assert.rejects(
+        r.observer.readUnmanagedProgress(mode === 'wrong-host' ? 'vultr' : 'aliyun'),
+        /UNPROVEN/,
+      );
+    });
+});
+
+test('gateway progress follows the real stopped-intent lifecycle, not the previous fencing phase', async (t) => {
+  const r = await retirementFixture(t);
+  await r.journal.persist('all_fenced', { candidate: r.binding.candidate });
+  await r.journal.persist('stopped', { candidate: r.binding.candidate });
+  const { base, row } = await r.remove('aliyun', false);
+  const progress = await r.observer.readRegistrationProgress('aliyun');
+  assert.deepEqual(progress.inventory.processes, []);
+  assert.deepEqual(progress.inventory.managers, []);
+  await assert.rejects(r.observer.read(), /UNPROVEN/);
+  await r.journal.recordRegistrationEvent({ ...base, ...row, phase: 'registration-deleted' });
+  assert.deepEqual((await r.observer.read()).unknownLaunchers, []);
+});
+
 test('a delete intent alone cannot explain a missing registration or process', async (t) => {
   const { observer, remove } = await retirementFixture(t);
   await remove('vultr', false);
   await assert.rejects(observer.read(), /UNPROVEN/);
+});
+
+test('registration progress can observe physical deletion before its completion event without issuing completion proof', async (t) => {
+  const r = await retirementFixture(t);
+  const { base, row } = await r.remove('vultr', false);
+  assert.equal(typeof r.observer.readRegistrationProgress, 'function');
+  const progress = await r.observer.readRegistrationProgress('vultr');
+  assert.equal(progress.purpose, 'registration-progress');
+  assert.equal(progress.host, 'vultr');
+  assert.deepEqual(progress.inventory.processes, []);
+  assert.equal(progress.inventory.managers.length, 1);
+  await assert.rejects(r.observer.read(), /UNPROVEN/);
+  await r.journal.recordRegistrationEvent({ ...base, ...row, phase: 'registration-deleted' });
+  assert.deepEqual((await r.observer.read()).unknownLaunchers, []);
+});
+
+test('registration progress cannot explain changes without that host intent, or surviving old processes', async (t) => {
+  for (const fault of ['other-host', 'survivor', 'no-intent']) {
+    await t.test(fault, async (t) => {
+      const r = await retirementFixture(t);
+      const original = structuredClone(r.f.pair.hosts[1].snapshot.processes[1]);
+      assert.equal(typeof r.observer.readRegistrationProgress, 'function');
+      if (fault === 'no-intent') {
+        r.f.pair.hosts[1].snapshot.managers = r.f.pair.hosts[1].snapshot.managers.filter(
+          (m) => m.pmId !== 1,
+        );
+        r.f.pair.hosts[1].snapshot.processes = r.f.pair.hosts[1].snapshot.processes.filter(
+          (p) => p.pid !== 20,
+        );
+        r.f.pair.hosts[1].snapshot.listeners = '';
+      } else await r.remove('vultr', false);
+      if (fault === 'survivor') r.f.pair.hosts[1].snapshot.processes.push(original);
+      await assert.rejects(
+        r.observer.readRegistrationProgress(fault === 'other-host' ? 'aliyun' : 'vultr'),
+        /UNPROVEN/,
+      );
+    });
+  }
+});
+
+test('registration progress allows backup intent and pending registrations while returning actual remaining targets', async (t) => {
+  const r = await retirementFixture(t);
+  assert.equal(typeof r.observer.readRegistrationProgress, 'function');
+  const base = {
+    attempt: r.binding.attempt,
+    inventoryDigest: r.binding.inventoryDigest,
+    host: 'vultr',
+  };
+  await r.journal.recordRegistrationEvent({ ...base, phase: 'registration-backup-intent' });
+  const progress = await r.observer.readRegistrationProgress('vultr');
+  assert.equal(progress.inventory.processes.length, 1);
+  assert.equal(progress.inventory.managers.length, 2);
+  await assert.rejects(r.observer.read(), /UNPROVEN/);
 });
 
 test('retirement observation never approves respawn, preserved-service loss or changed source bytes', async (t) => {

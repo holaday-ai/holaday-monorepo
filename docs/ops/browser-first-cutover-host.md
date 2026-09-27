@@ -25,14 +25,25 @@
 `createFirstCutoverRetirementObserver({reviews,binding,legacyDigest}, {journal,readPair,readFenceReceipts,now})` 在副作用发生前采集并封存原始双机基线，实算旧版摘要必须与批准一致。后续 `read()` 使用新鲜双机观察，并在读取前后核对同一真实 journal 和维护入口回执；不会把当前现场重新生成为批准基线。
 
 - journal 的 `readFirstCutoverEffects()` 校验仍持有原锁、持久文件身份/权限/完整字节，返回事件及完整记录的 `recordDigest`。同阶段追加备份回执、manifest或bootstrap也会改变摘要，不能混入一次正在进行的观察。
-- 完整具名主机的注册备份→删除意图→删除完成，才允许原审核中对应注册与进程树缺失；仍检查实际进程不存在，PID复用、进程回生、保留服务丢失均拒绝。该观察器不是正在进行中的PM2 stop轮询器，也不凭主阶段意图解释无管理器网关消失。
+- 完整具名主机的注册备份→删除意图→删除完成，才允许严格 `read()` 中原审核对应注册与进程树缺失；仍检查实际进程不存在，PID复用、进程回生、保留服务丢失均拒绝。
+- `readRegistrationProgress(host)` 仅供原注册删除执行器的中途核对：Vultr生产者停止阶段，或Aliyun全隔离/停止意图阶段。返回带 `purpose: registration-progress` 的实际剩余注册清单，不是完成证明；只有精确删除意图已记录才解释对应对象消失，严格读取仍拒绝未完成批次。真实主流程在 `stopped` 意图后删除网关注册，因此journal接受该阶段，并阻止未完成批次推进到备份。
+- `retireUnmanaged({maintenanceEndsAtMs}, operations)` 复用原 `captureLegacyRuntime` / `retireLegacyRuntime`。只处理审核过的Aliyun未托管网关完整清单，真实journal先写精确 `unmanaged-stop-intent`，随后经固定主机的 `signalPinned` 执行、连续两次观察退出，再写 `unmanaged-stopped`。`readUnmanagedProgress` 仅作中途观察；无意图、错身份、PID复用、回生均拒绝。中途失败保留意图、禁止重试和推进备份；该方法不自行证明业务已核清，`verifyFence` 必须由现场接口供给。
+- 运行时目标的host来自两次一致的实采kernel hostname，不把SSH路由别名当真实hostname；绑定仍包含实际boot与进程启动身份。具名journal继续使用固定aliyun/vultr路由身份，两者不混用。
 - 启动文件只解释本次已完成写入的精确新摘要、固定路径及安全原子替换元数据；备用文件原本不存在就必须仍不存在。实际写入器保留原属组，不因root进程创建临时文件而改变原属组；保留失败发生在替换前。
 - `readFenceReceipts` 必须来自同一操作的受保护 fence store，按 `{host,receipt}` 返回，不接受CLI上传成功报告。只解释 `active` 回执对应的固定站点、同attempt生成路径、root:root/0600及完整生成字节；其他nginx来源保持原审核约束。未接此接口时空回执不会容忍任何入口文件变化。
 - 返回来源指纹为当前实际字节，不是被规范化用于比较的旧指纹。原始配置/环境只留在闭包，不返回到公开报告。
 
-这是**已完成退役操作的事后观察接口**，不是完整生产site adapter。生产中的stop轮询、无管理器网关退出、候选新进程/恢复入口后的阶段观察、业务停写及外部工作仍需按原计划接线；不得把本接口返回无unknown等同于全部进程退出、入口隔离有效或可部署。
+`readWithCandidate(identity)` 在新鲜双机读取前后，分别通过实际维护控制socket和PM2/proc/4001/4002监听取得候选观察。候选必须匹配当前journal的SHA/实际boot，不能使用bootstrap seed；关闭态必须idle且无worker，开放态必须已有reconciliation标记。只从旧版对比中扣除精确已证明的新主程序/worker，额外进程、原PID复用及其他未知来源仍拒绝。`readFirstCutoverCandidateRuntime` 默认以真实Linux root执行固定runuser/候选控制工具，不接受外部成功报告。
+
+入口恢复后仅接受同实例serving、all-writers且实际原文件完整还原的 `restored` 回执；半途restoring、身份变化及原文件漂移仍拒绝。kernel hostname保留原始大小写，用于与Python pidfd执行主机精确匹配，不按路由别名或转为小写。
+
+这些是退役执行与阶段观察接口，不是完整生产site adapter。真实双机副作用传输、业务停写及外部工作仍需按原计划接线；不得把本接口返回无unknown等同于全部进程退出、入口隔离有效或可部署。
+
+`scripts/fixtures/browser-registration-removal-linux.mjs` 使用真实PM2、UID998生产者、停止状态cron、主/备用dump、root journal，以及真实未托管网关与pidfd SIGTERM验证上述连接。Docker使用 `--init --cap-add SYS_PTRACE --network none`，源码只读挂载；不共享宿主PID或凭据。双机路由在单个隔离容器中模拟、业务隔离计数为QA固定值，不能冒充生产双机整流程。验证还包括PM2守护进程重启后仅恢复无关fixture。
 
 `scripts/fixtures/browser-retirement-observation-linux.mjs` 在无网络的一次性root Linux容器中，以实际 `removeSavedStartupEntries`、真实文件/属组998、真实持久journal和新读取的stat/字节验证连接，含真实磁盘篡改拒绝。主机/进程/PM2信息仍为合成场景，不能称为真实双机整流程演练。
+
+`scripts/fixtures/browser-candidate-observation-linux.mjs` 验证默认候选读取器的实际PM2 6.0.14、UID998 Node、proc、双端口及Unix socket传输，并拒绝错误身份、真实孤儿进程和两次socket读取间状态变化。候选协议内容是明确的合成模型，不是完整应用或联合退役/隔离证明；`--without-control` 实际失败，不把无控制socket认作通过。
 
 ### 旧版身份与完整数据库比较（2026-09-27）
 

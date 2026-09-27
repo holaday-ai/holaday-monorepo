@@ -32,6 +32,18 @@ class Kernel:
 
 
 class Tests(unittest.TestCase):
+    def test_case_sensitive_kernel_hostname_is_not_a_lowercase_route_alias(self):
+        kernel = Kernel()
+        actual = {**TARGET, 'host': 'iZbp1ActualNodeZ'}
+        kernel.actual['host'] = actual['host']
+        module.signal_legacy(actual, kernel)
+        self.assertIn(('term-fd', 9), kernel.events)
+        kernel = Kernel()
+        kernel.actual['host'] = actual['host'].lower()
+        with self.assertRaisesRegex(RuntimeError, 'CUTOVER_PROCESS_IDENTITY'):
+            module.signal_legacy(actual, kernel)
+        self.assertNotIn(('term-fd', 9), kernel.events)
+
     def test_only_pinned_original_receives_term(self):
         kernel = Kernel()
         module.signal_legacy(TARGET, kernel)

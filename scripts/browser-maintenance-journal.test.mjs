@@ -48,6 +48,7 @@ test('first-cutover effects are read from the owned durable journal without muta
     phase: 'preflight',
     startupEvents: [],
     registrationEvents: [],
+    unmanagedEvents: [],
   });
   initial.startupEvents.push({ phase: 'forged' });
   assert.deepEqual((await journal.readFirstCutoverEffects()).startupEvents, []);
@@ -284,6 +285,70 @@ test('one actual journal records both hosts same startup paths and refuses a par
     );
     assert.equal(events[1].files[0].beforeDigest, (host === 'vultr' ? 'a' : 'b').repeat(64));
   }
+});
+
+test('unmanaged gateway intent is durable but cannot advance to backup without its exact completion', async (t) => {
+  const { journal, binding, advance } = await firstEventFixture(t);
+  const targets = [{ pid: 71, identityDigest: 'a'.repeat(64) }];
+  const base = { ...binding, host: 'aliyun', targets };
+  assert.equal(typeof journal.recordUnmanagedEvent, 'function');
+  await assert.rejects(
+    journal.recordUnmanagedEvent({ ...base, phase: 'unmanaged-stop-intent' }),
+    /UNPROVEN/,
+  );
+  await advance();
+  await journal.persist('stopped', { candidate: metadata.candidate });
+  await assert.rejects(
+    journal.recordUnmanagedEvent({ ...base, host: 'vultr', phase: 'unmanaged-stop-intent' }),
+    /UNPROVEN/,
+  );
+  await journal.recordUnmanagedEvent({ ...base, phase: 'unmanaged-stop-intent' });
+  await assert.rejects(
+    journal.persist('backup_verified', { candidate: metadata.candidate }),
+    /UNPROVEN/,
+  );
+  await assert.rejects(
+    journal.recordUnmanagedEvent({
+      ...base,
+      targets: [{ pid: 72, identityDigest: 'a'.repeat(64) }],
+      phase: 'unmanaged-stopped',
+    }),
+    /UNPROVEN/,
+  );
+  await journal.recordUnmanagedEvent({ ...base, phase: 'unmanaged-stopped' });
+  assert.equal((await journal.readFirstCutoverEffects()).unmanagedEvents.length, 2);
+  await assert.rejects(
+    journal.recordUnmanagedEvent({ ...base, phase: 'unmanaged-stopped' }),
+    /UNPROVEN/,
+  );
+  await journal.persist('backup_verified', { candidate: metadata.candidate });
+});
+
+test('gateway registration deletion runs after the stopped intent and blocks backup until complete', async (t) => {
+  const { journal, binding, advance } = await firstEventFixture(t);
+  await advance();
+  await journal.persist('stopped', { candidate: metadata.candidate });
+  const base = { ...binding, host: 'aliyun' };
+  const entry = { pmId: 5, name: 'holaday-cn-payment', configDigest: 'a'.repeat(64) };
+  await journal.recordRegistrationEvent({ ...base, phase: 'registration-backup-intent' });
+  await assert.rejects(
+    journal.persist('backup_verified', { candidate: metadata.candidate }),
+    /UNPROVEN/,
+  );
+  await journal.recordRegistrationEvent({
+    ...base,
+    phase: 'registration-backed-up',
+    backupDigest: 'b'.repeat(64),
+    registrations: [entry],
+  });
+  await journal.recordRegistrationEvent({ ...base, ...entry, phase: 'registration-delete-intent' });
+  await assert.rejects(
+    journal.persist('backup_verified', { candidate: metadata.candidate }),
+    /UNPROVEN/,
+  );
+  await journal.recordRegistrationEvent({ ...base, ...entry, phase: 'registration-deleted' });
+  await journal.persist('backup_verified', { candidate: metadata.candidate });
+  assert.equal((await journal.readFirstCutoverEffects()).phase, 'backup_verified');
 });
 
 test('registration deletion binds host as well as PM2 id and can span the approved two phases', async (t) => {

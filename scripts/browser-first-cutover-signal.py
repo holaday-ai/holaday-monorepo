@@ -25,7 +25,7 @@ def signal_legacy(target, kernel):
                     bool(re.fullmatch(r'/opt/holaday-cn-payment/releases/[a-f0-9]{12}-[0-9]{14}/apps/cn-payment', p.get('cwd', ''))))
     if (type(p.get('pid')) is not int or p['pid'] <= 1 or
             type(p.get('ppid')) is not int or p['ppid'] < 1 or
-            not re.fullmatch(r'[a-z0-9.-]{1,128}', p.get('host', '')) or
+            not re.fullmatch(r'[a-zA-Z0-9.-]{1,128}', p.get('host', '')) or
             not re.fullmatch(r'[a-f0-9]{32}', p.get('bootId', '')) or
             not re.fullmatch(r'[0-9]+', p.get('start', '')) or
             not (application_identity or root_gateway) or

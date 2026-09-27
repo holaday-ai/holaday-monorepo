@@ -105,7 +105,7 @@ function isRootGateway(p) {
 function checkTarget(p, registration = false) {
   if (
     !p ||
-    !/^[a-z0-9.-]{1,128}$/.test(p.host ?? '') ||
+    !/^[a-zA-Z0-9.-]{1,128}$/.test(p.host ?? '') ||
     !/^[a-f0-9]{32}$/.test(p.bootId ?? '') ||
     !Number.isSafeInteger(p.pid) ||
     p.pid <= 1 ||

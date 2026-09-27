@@ -1,16 +1,24 @@
 // Disposable, private-PID Linux QA. No production access or credentials.
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import {
+  createFirstCutoverRetirementObserver,
+  readReviewedFirstCutoverLegacySource,
+} from '/source/browser-first-cutover-host.mjs';
+import { firstCutoverSourceBindings } from '/source/browser-first-cutover-inventory.mjs';
+import {
   registrationConfigDigest,
   removeLegacyRegistrations,
 } from '/source/browser-first-cutover-registrations.mjs';
-import { captureLegacyRegistrations } from '/source/browser-first-cutover-runtime.mjs';
+import {
+  captureLegacyRegistrations,
+  createLegacyRuntimeEffects,
+} from '/source/browser-first-cutover-runtime.mjs';
 import { removeSavedStartupEntries } from '/source/browser-first-cutover-startup.mjs';
 import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 await fs.access('/.dockerenv');
@@ -35,17 +43,8 @@ const binding = {
   attempt: '22222222-2222-4222-8222-222222222222',
   inventoryDigest: 'a'.repeat(64),
 };
-const journal = await acquireReleaseJournal(directory, {
-  ...binding,
-  kind: 'first-cutover',
-  candidate: 'b'.repeat(40),
-  configDigest: 'c'.repeat(64),
-  migrationDigest: sha('[]'),
-  legacyDigest: 'd'.repeat(64),
-});
-await journal.bindManifest([]);
-for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
-  await journal.persist(phase, { candidate: 'b'.repeat(40) });
+let journal;
+let gateway;
 const assertOwnership = async () => {
   const b = await journal.assertOwnership();
   return { attempt: b.attempt, inventoryDigest: b.inventoryDigest };
@@ -189,11 +188,186 @@ try {
       ),
     });
   }
+  const gatewayCwd = '/opt/holaday-cn-payment/releases/123456789abc-20260927080000/apps/cn-payment';
+  await fs.mkdir(gatewayCwd, { recursive: true });
+  await fs.writeFile(
+    `${gatewayCwd}/qa-gateway.cjs`,
+    "require('http').createServer((q,r)=>r.end('qa gateway')).listen(4011);\n",
+    { flag: 'wx' },
+  );
+  gateway = spawn('/usr/bin/node', [`${gatewayCwd}/qa-gateway.cjs`], {
+    cwd: gatewayCwd,
+    stdio: 'ignore',
+  });
+  for (let n = 0; ; n++) {
+    try {
+      assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
+      break;
+    } catch (e) {
+      if (n > 50) throw e;
+      await sleep(100);
+    }
+  }
+  // Exercise the production progress observer around the REAL registration
+  // executor. Only the second host and non-PM2 launcher inventory are synthetic;
+  // local proc identities, PM2 rows, listeners, saved files and journal are real.
+  const raw = ({ host, bootId, ...p }) => p;
+  const savedFile = async (path) => {
+    const metadata = (s) =>
+      Object.fromEntries(
+        ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'].map((k) => [
+          k,
+          s[k],
+        ]),
+      );
+    const content = await fs.readFile(path, 'utf8');
+    return {
+      path,
+      present: true,
+      resolved: await fs.realpath(path),
+      content,
+      digest: sha(content),
+      link: metadata(await fs.lstat(path)),
+      stat: metadata(await fs.stat(path)),
+    };
+  };
+  let second;
+  const readPair = async () => {
+    const scope = await readInventory();
+    const daemon = raw(await proc(daemonPid));
+    const observer = raw(await proc(process.pid));
+    const processes = [daemon, observer];
+    const managers = [];
+    for (const row of await rows()) {
+      if (row.pid > 1) processes.push(raw(await proc(row.pid)));
+      managers.push({
+        pmId: row.pm_id,
+        name: row.name,
+        pid: row.pid,
+        status: row.pm2_env.status,
+        watch: row.pm2_env.watch,
+        configDigest: registrationConfigDigest(row.pm2_env),
+        killTimeoutMs: row.pm2_env.kill_timeout ?? 1600,
+        cronRestart: row.pm2_env.cron_restart ?? false,
+        maxMemoryRestart: row.pm2_env.max_memory_restart ?? 0,
+      });
+    }
+    const snapshot = {
+      observedAtMs: Date.now(),
+      hostname: hostname(),
+      bootId: (await fs.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim(),
+      processes,
+      observer,
+      managers,
+      pm2Runtime: {
+        pid: daemonPid,
+        version: '6.0.14',
+        killSignal: 'SIGINT',
+        killTimeoutMs: 1600,
+        sourceDigest: sha(await fs.readFile('/usr/lib/node_modules/pm2/package.json')),
+      },
+      startup: {
+        files: await Promise.all(files.map((f) => savedFile(f.path))),
+        directories: [],
+        pm2Unit: 'fixture launcher',
+      },
+      nginxFiles: [],
+      systemd: '',
+      unitFiles: '',
+      timers: '',
+      cron: '',
+      rootCrontabPresent: false,
+      listeners: await exec('ss', ['-H', '-ltnp', 'sport = :4001']),
+    };
+    assert.equal(scope.processes.length, processes.filter((p) => p.cwd === cwd).length);
+    if (!second) {
+      second = structuredClone(snapshot);
+      second.processes = second.processes.filter((p) =>
+        [daemonPid, process.pid, unrelated.pid].includes(p.pid),
+      );
+      second.managers = second.managers.filter((m) => m.name === 'qa-unrelated');
+      second.startup.files = [];
+      second.listeners = '';
+    }
+    second.observedAtMs = snapshot.observedAtMs;
+    second.processes = second.processes.filter((p) => p.pid !== gateway.pid);
+    if (gateway.exitCode === null && gateway.signalCode === null)
+      second.processes.push(raw(await proc(gateway.pid)));
+    second.listeners = await exec('ss', ['-H', '-ltnp', 'sport = :4011']);
+    return {
+      sourceDigest: sha('physical-pm2-fixture'),
+      sourceCandidate: 'c'.repeat(40),
+      observedAtMs: snapshot.observedAtMs,
+      hosts: [
+        { host: 'aliyun', sourceCandidate: null, snapshot: structuredClone(second) },
+        { host: 'vultr', sourceCandidate: 'c'.repeat(40), snapshot },
+      ],
+    };
+  };
+  const baseline = await readPair();
+  const reviews = Object.fromEntries(
+    baseline.hosts.map(({ host, snapshot }) => [
+      host,
+      {
+        bootId: snapshot.bootId,
+        ports: host === 'vultr' ? [4001, 4002] : [4010, 4011],
+        review: {
+          sources: firstCutoverSourceBindings(snapshot).map((s) => ({
+            ...s,
+            reason: 'explicit test fixture sources',
+          })),
+          registrations: snapshot.managers.map((m) => ({
+            pmId: m.pmId,
+            configDigest: m.configDigest,
+            disposition: names.includes(m.name) ? 'retire' : 'preserve',
+            reason: 'explicit test fixture manager',
+          })),
+          processes: snapshot.processes
+            .filter((p) => ![daemonPid, process.pid].includes(p.pid))
+            .map((p) => ({
+              pid: p.pid,
+              identityDigest: sha(JSON.stringify(p)),
+              disposition: [cwd, gatewayCwd].includes(p.cwd) ? 'retire' : 'preserve',
+              ...(p.cwd === cwd
+                ? { role: 'worker' }
+                : p.cwd === gatewayCwd
+                  ? { role: 'gateway' }
+                  : {}),
+              reason: 'explicit test fixture process',
+            })),
+        },
+      },
+    ]),
+  );
+  const proof = await readReviewedFirstCutoverLegacySource(
+    { reviews, inventoryDigest: binding.inventoryDigest },
+    { readPair },
+  );
+  journal = await acquireReleaseJournal(directory, {
+    ...binding,
+    kind: 'first-cutover',
+    candidate: 'b'.repeat(40),
+    configDigest: 'c'.repeat(64),
+    migrationDigest: sha('[]'),
+    legacyDigest: proof.legacyDigest,
+  });
+  const observer = await createFirstCutoverRetirementObserver(
+    { reviews, binding: await journal.assertOwnership(), legacyDigest: proof.legacyDigest },
+    { journal, readPair },
+  );
+  await journal.bindManifest([]);
+  for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
+    await journal.persist(phase, { candidate: 'b'.repeat(40) });
   await removeSavedStartupEntries(
     { binding, files, maintenanceEndsAtMs: Date.now() + 60000 },
-    { now: Date.now, assertOwnership, persist: (e) => journal.recordStartupEvent(e) },
+    {
+      now: Date.now,
+      assertOwnership,
+      persist: (e) => journal.recordStartupEvent({ ...e, host: 'vultr' }),
+    },
   );
-  const inventory = await readInventory();
+  const readProgress = async () => (await observer.readRegistrationProgress('vultr')).inventory;
+  const inventory = await readProgress();
   const captured = await captureLegacyRegistrations(
     { inventory, approvedTargets: inventory.processes, approvedRegistrations: inventory.managers },
     { now: Date.now },
@@ -204,10 +378,10 @@ try {
       now: Date.now,
       sleep,
       assertOwnership,
-      readInventory,
-      persist: (e) => journal.recordRegistrationEvent(e),
+      readInventory: readProgress,
+      persist: (e) => journal.recordRegistrationEvent({ ...e, host: 'vultr' }),
       verifyFence: async () => {
-        const s = await readInventory();
+        const s = await readProgress();
         return {
           inventoryDigest: binding.inventoryDigest,
           stage: 'orders',
@@ -223,11 +397,42 @@ try {
     },
   );
   assert.equal(result.removed.length, 2);
+  assert.deepEqual((await observer.read()).unknownLaunchers, []);
   assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
   await assert.rejects(fetch('http://127.0.0.1:4001'));
   const record = JSON.parse(await fs.readFile(journal.path, 'utf8'));
   assert.equal(record.registrationEvents.length, 6);
   await journal.persist('all_fenced', { candidate: 'b'.repeat(40) });
+  await journal.persist('stopped', { candidate: 'b'.repeat(40) });
+  const verifyGatewayFence = async () => ({
+    inventoryDigest: binding.inventoryDigest,
+    stage: 'all-writers',
+    unsettledWork: 0,
+    externalWork: 0,
+    producersRunning: 0,
+  });
+  const gatewayEffects = createLegacyRuntimeEffects({
+    now: Date.now,
+    assertJournalOwnership: () => journal.assertOwnership(),
+    verifyFence: verifyGatewayFence,
+    readInventory: async () => (await observer.readUnmanagedProgress('aliyun')).inventory,
+  });
+  const stopped = await observer.retireUnmanaged(
+    { maintenanceEndsAtMs: Date.now() + 30000 },
+    {
+      sleep,
+      verifyFence: verifyGatewayFence,
+      signalPinned: gatewayEffects.signalPinned,
+    },
+  );
+  assert.equal(stopped.host, hostname());
+  assert.equal(gateway.signalCode, 'SIGTERM');
+  assert.equal((await journal.readFirstCutoverEffects()).unmanagedEvents.length, 2);
+  assert.deepEqual((await observer.read()).unknownLaunchers, []);
+  await assert.rejects(fetch('http://127.0.0.1:4011'));
+  console.log(
+    'PASS physical unmanaged gateway retirement: kernel hostname, pinned SIGTERM, owned intent/completion and fresh joint observation',
+  );
   console.log(
     'PASS physical protected registration removal: memory-enabled UID998 worker exited, stopped cron removed, unrelated PID unchanged, private backup and six real journal events',
   );
@@ -241,6 +446,7 @@ try {
     'PASS independent saved-entry removal: daemon restart restores only unrelated fixture',
   );
 } finally {
+  if (gateway && gateway.exitCode === null && gateway.signalCode === null) gateway.kill('SIGTERM');
   await pm2('kill');
-  await journal.close();
+  await journal?.close();
 }
