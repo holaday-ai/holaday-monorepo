@@ -21,6 +21,211 @@ const lines = (text) => {
     .sort();
 };
 
+/** Reconcile completed, named-host registration retirements against the ORIGINAL
+ * reviewed snapshot. The host obtains effects from its owned live journal. This
+ * is an observation, never permission to delete, a replacement review, or proof
+ * of ingress isolation. Source changes without separate evidence remain unknown.
+ */
+export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }) {
+  const { baseline, pair, reviews, inventoryDigest, effects, fences = [] } = structuredClone(input);
+  const adjusted = structuredClone(reviews);
+  const actualSources = new Map(
+    pair.hosts.map((h) => [h.host, firstCutoverSourceBindings(h.snapshot)]),
+  );
+  if (!Array.isArray(effects?.registrationEvents) || !Array.isArray(effects.startupEvents)) fail();
+  if (
+    !Array.isArray(fences) ||
+    fences.length > 2 ||
+    new Set(fences.map((f) => f.host)).size !== fences.length ||
+    fences.some((f) => !['aliyun', 'vultr'].includes(f.host))
+  )
+    fail();
+  for (const event of [...effects.registrationEvents, ...effects.startupEvents])
+    if (
+      !['aliyun', 'vultr'].includes(event.host) ||
+      event.attempt !== effects.attempt ||
+      event.inventoryDigest !== inventoryDigest
+    )
+      fail();
+  for (const host of ['aliyun', 'vultr']) {
+    const before = baseline.hosts.find((h) => h.host === host)?.snapshot;
+    const current = pair.hosts.find((h) => h.host === host)?.snapshot;
+    if (
+      !before ||
+      !current ||
+      before.bootId !== current.bootId ||
+      !equal(before.pm2Runtime, current.pm2Runtime) ||
+      !equal(
+        before.processes.find((p) => p.pid === before.pm2Runtime.pid),
+        current.processes.find((p) => p.pid === current.pm2Runtime.pid),
+      )
+    )
+      fail();
+    const fence = fences.find((f) => f.host === host)?.receipt;
+    if (fence) {
+      const names =
+        host === 'vultr' ? ['holaday'] : ['hd-app.orangebench.tech', 'hd-pay.orangebench.tech'];
+      if (
+        fence.schemaVersion !== 1 ||
+        fence.attempt !== effects.attempt ||
+        fence.inventoryDigest !== inventoryDigest ||
+        fence.phase !== 'active' ||
+        !['orders', 'all-writers'].includes(fence.stage) ||
+        !Array.isArray(fence.files) ||
+        fence.files.length !== names.length ||
+        new Set(fence.files.map((f) => f.path)).size !== names.length ||
+        (fence.stage === 'orders' &&
+          !['orders_fenced', 'legacy_settled', 'producers_stopped'].includes(effects.phase)) ||
+        (fence.stage === 'all-writers' &&
+          ![
+            'all_fenced',
+            'stopped',
+            'backup_verified',
+            'migration_started',
+            'candidate_started',
+            'verified',
+            'opened',
+          ].includes(effects.phase))
+      )
+        fail();
+      for (const name of names) {
+        const record = fence.files.find((f) => f.path === `/etc/nginx/sites-available/${name}`);
+        const path = `/etc/nginx/sites-enabled/${name}`;
+        const original = before.nginxFiles.find((f) => f.path === path);
+        const index = current.nginxFiles.findIndex((f) => f.path === path);
+        const file = current.nginxFiles[index];
+        if (
+          !record ||
+          !original ||
+          !file ||
+          !hash(record.generatedDigest) ||
+          record.originalDigest !== original.digest ||
+          record.backupDigest !== original.digest ||
+          file.digest !== record.generatedDigest ||
+          file.uid !== 0 ||
+          file.gid !== 0 ||
+          file.mode !== 0o600 ||
+          file.resolved !==
+            `/etc/nginx/holaday-maintenance/${effects.attempt}/${name}-${record.generatedDigest}.conf` ||
+          !equal(Object.keys(original).sort(), Object.keys(file).sort())
+        )
+          fail();
+        current.nginxFiles[index] = structuredClone(original);
+      }
+    }
+    const startup = effects.startupEvents.filter((e) => e.host === host);
+    if (startup.length) {
+      const backed = startup[1];
+      if (
+        startup[0]?.phase !== 'startup-backup-intent' ||
+        backed?.phase !== 'startup-backed-up' ||
+        !Array.isArray(backed.files) ||
+        backed.files.length !== 2 ||
+        backed.files.some((f, i) => f.path !== `/root/.pm2/${i ? 'dump.pm2.bak' : 'dump.pm2'}`)
+      )
+        fail();
+      const changes = backed.files.filter((f) => f.beforeDigest !== f.afterDigest).reverse();
+      if (!changes.length || startup.length !== 2 + changes.length * 2) fail();
+      for (const f of backed.files) {
+        const original = before.startup.files.find((row) => row.path === f.path);
+        if (!original || (original.present ? original.digest : null) !== f.beforeDigest) fail();
+      }
+      for (const [i, change] of changes.entries()) {
+        const base = { attempt: effects.attempt, inventoryDigest, host, ...change };
+        if (
+          !equal(startup[2 + i * 2], { ...base, phase: 'startup-file-intent' }) ||
+          !equal(startup[3 + i * 2], { ...base, phase: 'startup-file-written' })
+        )
+          fail();
+        const original = before.startup.files.find((f) => f.path === change.path);
+        const index = current.startup.files.findIndex((f) => f.path === change.path);
+        const file = current.startup.files[index];
+        const a = original?.stat;
+        const b = file?.stat;
+        const keys = ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'];
+        if (
+          !a ||
+          !b ||
+          !original.present ||
+          !file.present ||
+          original.resolved !== change.path ||
+          file.resolved !== change.path ||
+          !equal(original.link, a) ||
+          !equal(file.link, b) ||
+          !equal(Object.keys(original).sort(), Object.keys(file).sort()) ||
+          !equal(Object.keys(b).sort(), [...keys].sort()) ||
+          !keys.every((key) => Number.isFinite(b[key]) && b[key] >= 0) ||
+          !Number.isSafeInteger(b.ino) ||
+          b.ino < 1 ||
+          b.dev !== a.dev ||
+          b.uid !== 0 ||
+          b.gid !== a.gid ||
+          b.mode !== a.mode ||
+          (b.mode & 0o170000) !== 0o100000 ||
+          b.mode & 0o7022 ||
+          b.nlink !== 1 ||
+          typeof file.content !== 'string' ||
+          b.size !== Buffer.byteLength(file.content) ||
+          file.digest !== change.afterDigest ||
+          !hash(change.afterDigest)
+        )
+          fail();
+        // Only this completed atomic replacement is compared to the old source
+        // review. Every other source, including an absent backup, stays exact.
+        current.startup.files[index] = structuredClone(original);
+      }
+    }
+    const events = effects.registrationEvents.filter((e) => e.host === host);
+    if (!events.length) continue;
+    const backed = events[1];
+    if (
+      events[0]?.phase !== 'registration-backup-intent' ||
+      backed?.phase !== 'registration-backed-up' ||
+      !Array.isArray(backed.registrations) ||
+      events.length !== 2 + backed.registrations.length * 2
+    )
+      fail();
+    for (const [i, registration] of backed.registrations.entries()) {
+      const base = { attempt: effects.attempt, inventoryDigest, host, ...registration };
+      if (
+        !equal(events[2 + i * 2], { ...base, phase: 'registration-delete-intent' }) ||
+        !equal(events[3 + i * 2], { ...base, phase: 'registration-deleted' })
+      )
+        fail();
+      const manager = before.managers.find((m) => m.pmId === registration.pmId);
+      const reviewed = adjusted[host].review.registrations.find(
+        (r) => r.pmId === registration.pmId,
+      );
+      if (
+        !manager ||
+        manager.name !== registration.name ||
+        manager.configDigest !== registration.configDigest ||
+        reviewed?.disposition !== 'retire' ||
+        reviewed.configDigest !== registration.configDigest ||
+        current.managers.some((m) => m.pmId === manager.pmId || m.name === manager.name)
+      )
+        fail();
+      const descendants = new Set(manager.pid > 1 ? [manager.pid] : []);
+      for (let i = 0; i < before.processes.length; i++)
+        for (const p of before.processes) if (descendants.has(p.ppid)) descendants.add(p.pid);
+      // A deleted registration is not proof that its process tree exited.
+      if (current.processes.some((p) => descendants.has(p.pid))) fail();
+      for (const pid of descendants)
+        if (adjusted[host].review.processes.find((r) => r.pid === pid)?.disposition !== 'retire')
+          fail();
+      adjusted[host].review.registrations = adjusted[host].review.registrations.filter(
+        (r) => r.pmId !== manager.pmId,
+      );
+      adjusted[host].review.processes = adjusted[host].review.processes.filter(
+        (r) => !descendants.has(r.pid),
+      );
+    }
+  }
+  const result = classifyFirstCutoverHostPair({ pair, reviews: adjusted, inventoryDigest }, io);
+  for (const host of result.hosts) host.sources = actualSources.get(host.host);
+  return result;
+}
+
 /** Pair the actual two-host observations with their separately reviewed source
  * and process identities. A review is trusted protected input, never generated
  * by this function. Unknowns stay visible and cannot become a stop/readiness

@@ -20,6 +20,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
   let failed = false;
   let phase = 'preflight';
   let latest;
+  let latestBytes;
   let chain = Promise.resolve();
   const candidate = metadata?.candidate;
   const configDigest = metadata?.configDigest;
@@ -134,26 +135,26 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
         0o600,
       );
       try {
-        await handle.writeFile(
-          `${JSON.stringify({
-            schemaVersion: 1,
-            attempt,
-            candidate,
-            configDigest,
-            migrationDigest,
-            migrationManifest,
-            ...inventoryFields,
-            ...firstFields,
-            bootstrapSeed,
-            ...(backupReceipt ? { backupReceipt } : {}),
-            ...(startupEvents.length ? { startupEvents } : {}),
-            ...(registrationEvents.length ? { registrationEvents } : {}),
-            oldIdentity,
-            phase: next,
-            identity,
-          })}\n`,
-        );
+        const bytes = `${JSON.stringify({
+          schemaVersion: 1,
+          attempt,
+          candidate,
+          configDigest,
+          migrationDigest,
+          migrationManifest,
+          ...inventoryFields,
+          ...firstFields,
+          bootstrapSeed,
+          ...(backupReceipt ? { backupReceipt } : {}),
+          ...(startupEvents.length ? { startupEvents } : {}),
+          ...(registrationEvents.length ? { registrationEvents } : {}),
+          oldIdentity,
+          phase: next,
+          identity,
+        })}\n`;
+        await handle.writeFile(bytes);
         await handle.sync();
+        latestBytes = bytes;
       } finally {
         await handle.close();
       }
@@ -230,6 +231,66 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
   }
   return {
     path,
+    // Observers consume the same live journal, not an uploaded receipt or an
+    // in-memory success flag. Intent events remain intents; callers must still
+    // reconcile actual processes and source bytes with completed events.
+    readFirstCutoverEffects: () =>
+      serial(async () => {
+        let handle;
+        try {
+          if (!first) throw unproven();
+          await assertOwnership();
+          handle = await io.open(
+            path,
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+          );
+          const before = await handle.stat();
+          if (
+            !privateFile(before) ||
+            !sameFile(latest, before) ||
+            before.size !== Buffer.byteLength(latestBytes)
+          )
+            throw unproven();
+          const bytes = Buffer.alloc(before.size + 1);
+          let length = 0;
+          while (length < bytes.length) {
+            const { bytesRead } = await handle.read(bytes, length, bytes.length - length, null);
+            if (!bytesRead) break;
+            length += bytesRead;
+          }
+          const after = await handle.stat();
+          const current = await io.lstat(path);
+          if (
+            length !== before.size ||
+            bytes.subarray(0, length).toString() !== latestBytes ||
+            !privateFile(after) ||
+            !privateFile(current) ||
+            !sameFile(before, current) ||
+            ['size', 'mtimeMs', 'ctimeMs', 'mode'].some(
+              (key) => before[key] !== after[key] || after[key] !== current[key],
+            )
+          )
+            throw unproven();
+          await assertOwnership();
+          const record = JSON.parse(latestBytes);
+          return {
+            recordDigest: createHash('sha256').update(latestBytes).digest('hex'),
+            attempt,
+            candidate,
+            configDigest,
+            migrationDigest,
+            inventoryDigest,
+            legacyDigest: firstFields.legacyDigest,
+            phase: record.phase,
+            startupEvents: record.startupEvents ?? [],
+            registrationEvents: record.registrationEvents ?? [],
+          };
+        } catch {
+          throw unproven();
+        } finally {
+          await handle?.close();
+        }
+      }),
     assertOwnership: () =>
       serial(async () => {
         await assertOwnership();

@@ -113,6 +113,50 @@ test('missing fallback remains absent and is not invented from the primary', asy
   assert.equal(receipt.files[1].afterDigest, null);
 });
 
+test('replacement explicitly preserves the source group before either atomic rename', async (t) => {
+  const f = await fixture(t);
+  const calls = [];
+  const open = f.io.fs.open;
+  f.io.fs.open = async (path, ...args) => {
+    const handle = await open(path, ...args);
+    if (path.startsWith(`${home}/.holaday-startup-`)) {
+      const chown = handle.chown.bind(handle);
+      handle.chown = async (uid, gid) => {
+        calls.push({ path, uid, gid });
+        return chown(uid, gid);
+      };
+    }
+    return handle;
+  };
+  const gid = (await fs.stat(f.path(`${home}/dump.pm2`))).gid;
+  await removeSavedStartupEntries(f.input, f.io);
+  assert.deepEqual(
+    calls.map(({ uid, gid }) => ({ uid, gid })),
+    [
+      { uid: -1, gid },
+      { uid: -1, gid },
+    ],
+  );
+  for (const file of f.files) assert.equal((await fs.stat(f.path(file.path))).gid, gid);
+});
+
+test('failed source-group preservation leaves both original startup files in place', async (t) => {
+  const f = await fixture(t);
+  const open = f.io.fs.open;
+  f.io.fs.open = async (path, ...args) => {
+    const handle = await open(path, ...args);
+    if (path.startsWith(`${home}/.holaday-startup-`))
+      handle.chown = async () => {
+        throw new Error('chown failed');
+      };
+    return handle;
+  };
+  await assert.rejects(removeSavedStartupEntries(f.input, f.io), /CUTOVER_STARTUP_/);
+  assert.equal(await fs.readFile(f.path(`${home}/dump.pm2`), 'utf8'), f.primary);
+  assert.equal(await fs.readFile(f.path(`${home}/dump.pm2.bak`), 'utf8'), f.fallback);
+  assert.ok(!f.events.some((e) => e.startsWith('rename:')));
+});
+
 test('malformed, duplicate, unapproved or drifted entries are rejected before any write', async (t) => {
   for (const fault of ['digest', 'entry', 'name', 'duplicate', 'json', 'missing', 'path']) {
     const f = await fixture(t);

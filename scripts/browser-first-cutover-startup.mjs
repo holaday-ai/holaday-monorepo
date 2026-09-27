@@ -173,7 +173,7 @@ export async function removeSavedStartupEntries(input, io) {
           !fileOK(current) ||
           !same(before, current) ||
           !same(before, after) ||
-          ['size', 'mtimeMs', 'ctimeMs', 'mode'].some(
+          ['size', 'mtimeMs', 'ctimeMs', 'mode', 'gid'].some(
             (k) => before[k] !== after[k] || after[k] !== current[k],
           )
         )
@@ -181,7 +181,7 @@ export async function removeSavedStartupEntries(input, io) {
         await dirGuard();
         const bytes = buffer.subarray(0, length);
         if (!Buffer.from(bytes.toString('utf8')).equals(bytes)) fail();
-        return { bytes, mode: before.mode & 0o777, digest: sha(bytes) };
+        return { bytes, mode: before.mode & 0o777, gid: before.gid, digest: sha(bytes) };
       } finally {
         await h?.close();
       }
@@ -294,11 +294,19 @@ export async function removeSavedStartupEntries(input, io) {
       );
       open.push(h);
       await h.writeFile(p.after);
+      // Atomic replacement must retain the reviewed source's group, not inherit
+      // the deployment process's primary group. Failure precedes either rename.
+      await h.chown(-1, p.source.gid);
       await h.sync();
       await verify();
       await verifyBackups();
       const tempStat = await h.stat();
-      if (!fileOK(tempStat) || !same(tempStat, await disk.lstat(temp))) fail();
+      if (
+        !fileOK(tempStat) ||
+        tempStat.gid !== p.source.gid ||
+        !same(tempStat, await disk.lstat(temp))
+      )
+        fail();
       await disk.rename(temp, p.path);
       await syncDirectory(home);
       expected[i] = p.afterDigest;

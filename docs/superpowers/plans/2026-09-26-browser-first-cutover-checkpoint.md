@@ -6,6 +6,22 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-27：同一操作的退役事后观察接通，保留整项未完成状态
+
+承接 `dbbcffdd`，沿用原Task4 BASE `844c2ced`。没有重新核对商户、查询订单、支付或登录PayPal；微信历史签名证据继续使用下节记录。
+
+新增 `createFirstCutoverRetirementObserver`：在副作用前核对实算旧版摘要并保留原审核基线，之后将真实持久journal的具名主机事件、维护入口回执与新鲜双机快照对齐。正常完成的注册/进程树删除、精确启动文件替换、active维护配置不再因与退役前状态不同而一律失败；意图未完成、进程仍存活/回生、无关服务丢失、来源漂移、跨主机/attempt混用、采集期间日志/入口变化仍拒绝。详情及限制见[现场接口](../../ops/browser-first-cutover-host.md)。
+
+独立Sol只读审查发现两项P2，已先复现RED后修复：①同阶段journal写入原投影不变，增加完整持久字节 `recordDigest`；②原属组非0的启动文件被root临时文件替换后属组丢失，实际写入器在rename前保留原GID并检查。同一审查席复查确认这两项解除，仅认可本批提交，不认可整项合并或部署。另补基线采集期间维护回执变化的真实RED→GREEN。
+
+最终完整浏览器测试 **608/608，0跳过**，`/tmp/holaday-retirement-browser-with-age.log`（显式 `CUTOVER_TEST_AGE_EXECUTABLE=/opt/homebrew/bin/age`，临时合成密钥）；离线只读挂载Linux关联测试 **183/183，0跳过**，`/tmp/holaday-retirement-linux-final.log`。完整 `test:ops` 退出0，组120/59/16及后续416通过、27个未设置age环境的条件跳过；这27项已在上述完整浏览器测试实际执行通过，不能把ops本身说成无跳过。最终8代码文件Biome和diff-check通过；本轮未重跑应用全量/数据库恢复，因为未改应用、SQL、数据库比较或加密运输实现。
+
+新增隔离实体文件QA `scripts/fixtures/browser-retirement-observation-linux.mjs` 实际执行startup写入器与持久journal，验证root:998原文件替换后仍保留GID998、剩余对象字节不变、缺失备用文件仍缺失、新鲜事后读取通过、随后真实磁盘篡改被拒绝。无网络、最小CHOWN能力、一次性容器，退出0并自动移除，日志 `/tmp/holaday-retirement-physical-linux.log`。双机进程/PM2数据仍为合成场景，**不是整流程生产演练**。
+
+初次本地全量回归遇到既有Unix socket沙箱EPERM，授权重跑；首次Biome写文件也需外部worktree权限后重跑。没有为这些环境限制放宽代码。最终全量测试已覆盖其后补丁。唯一原有未跟踪 `scripts/__pycache__/` 保留。无生产服务、数据库、支付、密钥、UI、扩展、模型路由变更；没有PR/合并/部署。
+
+**下一步仍按原Task4–6**：连接完整受保护site I/O，特别是在途stop轮询、无管理器网关退出、候选启动/恢复入口后的新身份观察，以及实际source/restore计划和首次shell；完成真实整流程Linux成功/故障矩阵与非PayPal恢复门槛，再做全分支审查及首次切换。本次接口只覆盖已完成退役的事后观察，不能单独填充整个 `readHostInventory`，不能把无unknown当停写/全部退出/已隔离。Task4/5/6仍部分完成，不新增旁支或重做已验证事项。
+
 ### 2026-09-27：微信历史证据收口，原配置复用
 
 用户纠正“以前测试过，不要重复劳动”。已从两个原支付release只读找回相同AppID/商户号，并与9月26日线上配置指纹相符；不要再问用户要相同编号，不把微信当新接入。原微信completed1/pending3本轮取得4份真实签名查单：1SUCCESS金额/币种/交易号与本地一致，3CLOSED无交易号且省略金额；前后DB范围与配置稳定，没有任何付款/业务写入。关闭响应缺amount暴露的是新增只读查询工具兼容问题，非原支付失败；仅修改查询器与测试，16新增覆盖、缺字段用例RED→GREEN，国内支付99/99与types、脚本严格tsc、Biome通过。原始签名证据离线复验3closed+1settled，没有重复外部查单。详见[支付证据最新节](2026-09-25-browser-first-cutover-payment-evidence.md)。

@@ -33,6 +33,60 @@ const firstMetadata = {
   inventoryDigest: '4'.repeat(64),
 };
 
+test('first-cutover effects are read from the owned durable journal without mutable aliases', async (t) => {
+  const journal = await acquireReleaseJournal(await fixture(t), firstMetadata);
+  t.after(() => journal.close());
+  assert.equal(typeof journal.readFirstCutoverEffects, 'function');
+  const binding = await journal.assertOwnership();
+  const initial = await journal.readFirstCutoverEffects();
+  assert.deepEqual(initial, {
+    ...binding,
+    recordDigest: createHash('sha256')
+      .update(await fs.readFile(journal.path))
+      .digest('hex'),
+    legacyDigest: firstMetadata.legacyDigest,
+    phase: 'preflight',
+    startupEvents: [],
+    registrationEvents: [],
+  });
+  initial.startupEvents.push({ phase: 'forged' });
+  assert.deepEqual((await journal.readFirstCutoverEffects()).startupEvents, []);
+  await journal.bindManifest(manifest);
+  const bound = await journal.readFirstCutoverEffects();
+  assert.equal(bound.phase, initial.phase);
+  assert.notEqual(bound.recordDigest, initial.recordDigest);
+  for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
+    await journal.persist(phase, { candidate: metadata.candidate });
+  const event = {
+    attempt: binding.attempt,
+    inventoryDigest: binding.inventoryDigest,
+    host: 'vultr',
+    phase: 'registration-backup-intent',
+  };
+  await journal.recordRegistrationEvent(event);
+  const current = await journal.readFirstCutoverEffects();
+  assert.equal(current.phase, 'producers_stopped');
+  assert.deepEqual(current.registrationEvents, [event]);
+  assert.ok(!JSON.stringify(current).includes('migrationManifest'));
+});
+
+test('effect reads reject normal releases, closed handles and in-place journal tampering', async (t) => {
+  const normal = await acquireReleaseJournal(await fixture(t), metadata);
+  t.after(() => normal.close());
+  assert.equal(typeof normal.readFirstCutoverEffects, 'function');
+  await assert.rejects(normal.readFirstCutoverEffects(), /UNPROVEN/);
+  for (const change of ['bytes', 'mode', 'close']) {
+    const journal = await acquireReleaseJournal(await fixture(t), firstMetadata);
+    t.after(() => journal.close());
+    if (change === 'bytes') {
+      const bytes = await fs.readFile(journal.path, 'utf8');
+      await fs.writeFile(journal.path, bytes.replace('preflight', 'reconciled'));
+    } else if (change === 'mode') await fs.chmod(journal.path, 0o644);
+    else await journal.close();
+    await assert.rejects(journal.readFirstCutoverEffects(), /UNPROVEN/);
+  }
+});
+
 const backupReceiptFor = async (journal) => ({
   ...(await journal.assertOwnership()),
   backupDigest: '1'.repeat(64),

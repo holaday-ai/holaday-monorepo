@@ -20,6 +20,20 @@
 
 ## 必须连接的现场接口
 
+### 退役后的联合观察（2026-09-27）
+
+`createFirstCutoverRetirementObserver({reviews,binding,legacyDigest}, {journal,readPair,readFenceReceipts,now})` 在副作用发生前采集并封存原始双机基线，实算旧版摘要必须与批准一致。后续 `read()` 使用新鲜双机观察，并在读取前后核对同一真实 journal 和维护入口回执；不会把当前现场重新生成为批准基线。
+
+- journal 的 `readFirstCutoverEffects()` 校验仍持有原锁、持久文件身份/权限/完整字节，返回事件及完整记录的 `recordDigest`。同阶段追加备份回执、manifest或bootstrap也会改变摘要，不能混入一次正在进行的观察。
+- 完整具名主机的注册备份→删除意图→删除完成，才允许原审核中对应注册与进程树缺失；仍检查实际进程不存在，PID复用、进程回生、保留服务丢失均拒绝。该观察器不是正在进行中的PM2 stop轮询器，也不凭主阶段意图解释无管理器网关消失。
+- 启动文件只解释本次已完成写入的精确新摘要、固定路径及安全原子替换元数据；备用文件原本不存在就必须仍不存在。实际写入器保留原属组，不因root进程创建临时文件而改变原属组；保留失败发生在替换前。
+- `readFenceReceipts` 必须来自同一操作的受保护 fence store，按 `{host,receipt}` 返回，不接受CLI上传成功报告。只解释 `active` 回执对应的固定站点、同attempt生成路径、root:root/0600及完整生成字节；其他nginx来源保持原审核约束。未接此接口时空回执不会容忍任何入口文件变化。
+- 返回来源指纹为当前实际字节，不是被规范化用于比较的旧指纹。原始配置/环境只留在闭包，不返回到公开报告。
+
+这是**已完成退役操作的事后观察接口**，不是完整生产site adapter。生产中的stop轮询、无管理器网关退出、候选新进程/恢复入口后的阶段观察、业务停写及外部工作仍需按原计划接线；不得把本接口返回无unknown等同于全部进程退出、入口隔离有效或可部署。
+
+`scripts/fixtures/browser-retirement-observation-linux.mjs` 在无网络的一次性root Linux容器中，以实际 `removeSavedStartupEntries`、真实文件/属组998、真实持久journal和新读取的stat/字节验证连接，含真实磁盘篡改拒绝。主机/进程/PM2信息仍为合成场景，不能称为真实双机整流程演练。
+
 ### 旧版身份与完整数据库比较（2026-09-27）
 
 `readReviewedFirstCutoverLegacySource({reviews,inventoryDigest})` 将实际双机读取、原分类器和准备阶段的 `inspectLegacySource` 返回协议接在一起。只有两台主机都匹配受保护审核清单且没有unknown，才返回实算的旧版摘要；摘要绑定来源提交、采集代码、进程/启动时间、管理器、监听、保留对象及来源指纹，不从批准文件照抄摘要。时间刷新、采集进程更换、列表排序不改变旧版身份；真实进程或来源变化会改变绑定。**仍需现场适配从受保护配置提供reviews**，本函数不批准来源，也不是首次执行CLI。

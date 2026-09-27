@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import * as firstHost from './browser-first-cutover-host.mjs';
 import * as inventory from './browser-first-cutover-inventory.mjs';
@@ -7,6 +10,7 @@ import {
   captureLegacyRegistrations,
   captureLegacyRuntime,
 } from './browser-first-cutover-runtime.mjs';
+import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const digest = 'a'.repeat(64);
@@ -161,6 +165,350 @@ async function readLegacy(f, now = 1000) {
     { readPair: async () => structuredClone(f.pair), now: () => now },
   );
 }
+
+async function retirementFixture(t, setup = () => {}) {
+  const f = pairFixture();
+  setup(f);
+  const proof = await readLegacy(f);
+  const manifest = {
+    replaysNumberedSql: true,
+    runnerSha256: '1'.repeat(64),
+    migrations: [{ name: '0042_core.sql', sha256: '2'.repeat(64) }],
+  };
+  const directory = await fs.realpath(
+    await fs.mkdtemp(join(tmpdir(), 'holaday-retirement-observer-')),
+  );
+  await fs.chmod(directory, 0o700);
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const journal = await acquireReleaseJournal(directory, {
+    kind: 'first-cutover',
+    candidate: 'd'.repeat(40),
+    configDigest: 'e'.repeat(64),
+    migrationDigest: hash(manifest),
+    inventoryDigest: f.inventoryDigest,
+    legacyDigest: proof.legacyDigest,
+  });
+  t.after(() => journal.close());
+  const binding = await journal.assertOwnership();
+  assert.equal(typeof firstHost.createFirstCutoverRetirementObserver, 'function');
+  const observer = await firstHost.createFirstCutoverRetirementObserver(
+    {
+      reviews: f.reviews,
+      binding,
+      legacyDigest: proof.legacyDigest,
+    },
+    {
+      journal,
+      readPair: async () => {
+        await f.onRead?.();
+        return structuredClone(f.pair);
+      },
+      readFenceReceipts: async () => structuredClone(f.fences ?? []),
+      now: () => f.now ?? 1000,
+    },
+  );
+  await journal.bindManifest(manifest);
+  for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
+    await journal.persist(phase, { candidate: binding.candidate });
+  const remove = async (host = 'vultr', finish = true) => {
+    const h = f.pair.hosts.find((h) => h.host === host);
+    const m = h.snapshot.managers.find((m) => m.pmId === 1);
+    const base = { attempt: binding.attempt, inventoryDigest: binding.inventoryDigest, host };
+    const row = { pmId: m.pmId, name: m.name, configDigest: m.configDigest };
+    await journal.recordRegistrationEvent({ ...base, phase: 'registration-backup-intent' });
+    await journal.recordRegistrationEvent({
+      ...base,
+      phase: 'registration-backed-up',
+      backupDigest: 'f'.repeat(64),
+      registrations: [row],
+    });
+    await journal.recordRegistrationEvent({ ...base, ...row, phase: 'registration-delete-intent' });
+    h.snapshot.managers = h.snapshot.managers.filter((m) => m.pmId !== 1);
+    h.snapshot.processes = h.snapshot.processes.filter((p) => p.pid !== 20);
+    h.snapshot.listeners = '';
+    if (finish)
+      await journal.recordRegistrationEvent({ ...base, ...row, phase: 'registration-deleted' });
+    return { h, base, row };
+  };
+  return { f, journal, binding, observer, remove };
+}
+
+test('retirement observation consumes the real journal and fresh paired state, not pre-retirement reviews', async (t) => {
+  const { observer, remove } = await retirementFixture(t);
+  await remove('vultr');
+  const actual = await observer.read();
+  assert.deepEqual(actual.unknownLaunchers, []);
+  const v = actual.hosts.find((h) => h.host === 'vultr');
+  assert.deepEqual(v.registered.processes, []);
+  assert.equal(v.registered.managers.length, 1); // The stopped hourly cron remains registered.
+  assert.equal(v.preservedProcesses.length, 2);
+  assert.ok(!JSON.stringify(actual).includes('private-environment-never-return'));
+});
+
+test('a delete intent alone cannot explain a missing registration or process', async (t) => {
+  const { observer, remove } = await retirementFixture(t);
+  await remove('vultr', false);
+  await assert.rejects(observer.read(), /UNPROVEN/);
+});
+
+test('retirement observation never approves respawn, preserved-service loss or changed source bytes', async (t) => {
+  for (const kind of ['respawn', 'preserved', 'source', 'daemon', 'other-host', 'stale']) {
+    await t.test(kind, async (t) => {
+      const { f, observer, remove } = await retirementFixture(t);
+      const old = structuredClone(f.pair.hosts.find((h) => h.host === 'vultr').snapshot);
+      const { h } = await remove();
+      if (kind === 'respawn') h.snapshot.processes.push({ ...old.processes[1], pid: 21 });
+      if (kind === 'preserved')
+        h.snapshot.processes = h.snapshot.processes.filter((p) => p.pid !== 31);
+      if (kind === 'source') h.snapshot.startup.pm2Unit += '\nRestart=always';
+      if (kind === 'daemon') h.snapshot.processes[0].start = '99999';
+      if (kind === 'other-host')
+        f.pair.hosts[0].snapshot.processes = f.pair.hosts[0].snapshot.processes.filter(
+          (p) => p.pid !== 20,
+        );
+      if (kind === 'stale') h.snapshot.observedAtMs = 1001;
+      await assert.rejects(observer.read(), /UNPROVEN/);
+    });
+  }
+});
+
+test('retirement observation refuses changed journal bytes and does not silently refresh its baseline', async (t) => {
+  const { observer, journal, remove } = await retirementFixture(t);
+  await remove();
+  const bytes = await fs.readFile(journal.path, 'utf8');
+  await fs.writeFile(journal.path, bytes.replace('registration-deleted', 'registration-invented'));
+  await assert.rejects(observer.read(), /UNPROVEN/);
+});
+
+function startupFixture(f) {
+  for (const h of f.pair.hosts) {
+    const file = h.snapshot.startup.files[0];
+    const stat = {
+      dev: 1,
+      ino: 100,
+      uid: 0,
+      gid: 0,
+      mode: 0o100600,
+      nlink: 1,
+      size: Buffer.byteLength(file.content),
+      mtimeMs: 10,
+      ctimeMs: 10,
+    };
+    Object.assign(file, { resolved: file.path, stat, link: structuredClone(stat) });
+    h.snapshot.startup.files.push({ path: '/root/.pm2/dump.pm2.bak', present: false });
+    f.reviews[h.host].review.sources = inventory
+      .firstCutoverSourceBindings(h.snapshot)
+      .map((s) => ({ ...s, reason: 'reviewed original startup bytes and metadata' }));
+  }
+}
+
+async function changeStartup(r, finish = true) {
+  const h = r.f.pair.hosts.find((h) => h.host === 'vultr');
+  const file = h.snapshot.startup.files[0];
+  const base = {
+    attempt: r.binding.attempt,
+    inventoryDigest: r.binding.inventoryDigest,
+    host: 'vultr',
+  };
+  const change = {
+    path: file.path,
+    beforeDigest: file.digest,
+    afterDigest: createHash('sha256').update('[]\n').digest('hex'),
+  };
+  await r.journal.recordStartupEvent({ ...base, phase: 'startup-backup-intent' });
+  await r.journal.recordStartupEvent({
+    ...base,
+    phase: 'startup-backed-up',
+    files: [change, { path: '/root/.pm2/dump.pm2.bak', beforeDigest: null, afterDigest: null }],
+  });
+  await r.journal.recordStartupEvent({ ...base, ...change, phase: 'startup-file-intent' });
+  file.content = '[]\n';
+  file.digest = change.afterDigest;
+  file.stat = { ...file.stat, ino: 101, size: 3, mtimeMs: 20, ctimeMs: 20 };
+  file.link = structuredClone(file.stat);
+  if (finish)
+    await r.journal.recordStartupEvent({ ...base, ...change, phase: 'startup-file-written' });
+  return file;
+}
+
+test('completed saved-startup writes explain exact new bytes and safe atomic replacement metadata', async (t) => {
+  const r = await retirementFixture(t, startupFixture);
+  await changeStartup(r);
+  await r.remove();
+  const result = await r.observer.read();
+  assert.deepEqual(result.unknownLaunchers, []);
+  const h = r.f.pair.hosts.find((h) => h.host === 'vultr');
+  assert.deepEqual(
+    result.hosts.find((h) => h.host === 'vultr').sources,
+    inventory.firstCutoverSourceBindings(h.snapshot),
+  );
+});
+
+test('saved-startup reconciliation rejects intent-only writes, links, unsafe metadata and unexpected bytes', async (t) => {
+  for (const kind of [
+    'intent',
+    'content',
+    'mode',
+    'owner',
+    'link',
+    'backup-appeared',
+    'other-file',
+  ]) {
+    await t.test(kind, async (t) => {
+      const r = await retirementFixture(t, startupFixture);
+      const file = await changeStartup(r, kind !== 'intent');
+      const h = r.f.pair.hosts.find((h) => h.host === 'vultr');
+      if (kind === 'content') {
+        file.content = '[{}]\n';
+        file.digest = createHash('sha256').update(file.content).digest('hex');
+      }
+      if (kind === 'mode') file.stat.mode = file.link.mode = 0o100666;
+      if (kind === 'owner') file.stat.uid = file.link.uid = 501;
+      if (kind === 'link') file.resolved = '/tmp/elsewhere';
+      if (kind === 'backup-appeared')
+        h.snapshot.startup.files[1] = { ...file, path: '/root/.pm2/dump.pm2.bak' };
+      if (kind === 'other-file')
+        h.snapshot.startup.files.push({ path: '/etc/new-startup', present: false });
+      await assert.rejects(r.observer.read(), /UNPROVEN/);
+    });
+  }
+});
+
+test('a concurrent journal advance cannot be joined to an older paired observation', async (t) => {
+  const r = await retirementFixture(t);
+  r.f.onRead = () => r.journal.persist('all_fenced', { candidate: r.binding.candidate });
+  await assert.rejects(r.observer.read(), /UNPROVEN/);
+});
+
+test('a same-phase backup receipt write invalidates the concurrent observation', async (t) => {
+  const r = await retirementFixture(t);
+  for (const phase of ['all_fenced', 'stopped', 'backup_verified'])
+    await r.journal.persist(phase, { candidate: r.binding.candidate });
+  r.f.onRead = () =>
+    r.journal.bindBackupReceipt({
+      ...r.binding,
+      backupDigest: '1'.repeat(64),
+      databaseIdentityDigest: '2'.repeat(64),
+      isolatedTargetDigest: '3'.repeat(64),
+      encryptionProfileDigest: '4'.repeat(64),
+      comparisonDigest: '5'.repeat(64),
+      schemaDigest: '6'.repeat(64),
+      businessDigest: '7'.repeat(64),
+      restoredAtMs: 1000,
+    });
+  await assert.rejects(r.observer.read(), /UNPROVEN/);
+});
+
+test('baseline capture refuses a concurrent fence receipt installation', async (t) => {
+  await assert.rejects(
+    retirementFixture(t, (f) => {
+      f.onRead = () => {
+        f.fences = [{ host: 'vultr', receipt: { phase: 'installing' } }];
+      };
+    }),
+    /UNPROVEN/,
+  );
+});
+
+function ingressFixture(f) {
+  for (const h of f.pair.hosts) {
+    const names =
+      h.host === 'vultr' ? ['holaday'] : ['hd-app.orangebench.tech', 'hd-pay.orangebench.tech'];
+    h.snapshot.nginxFiles = names.map((name) => ({
+      path: `/etc/nginx/sites-enabled/${name}`,
+      resolved: `/etc/nginx/sites-available/${name}`,
+      uid: 501,
+      gid: 501,
+      mode: 0o644,
+      content: `original ${name}`,
+      digest: createHash('sha256').update(`original ${name}`).digest('hex'),
+    }));
+    f.reviews[h.host].review.sources = inventory
+      .firstCutoverSourceBindings(h.snapshot)
+      .map((s) => ({ ...s, reason: 'reviewed original nginx include' }));
+  }
+}
+function installFence(r) {
+  r.f.fences = r.f.pair.hosts.map((h) => ({
+    host: h.host,
+    receipt: {
+      schemaVersion: 1,
+      attempt: r.binding.attempt,
+      inventoryDigest: r.binding.inventoryDigest,
+      stage: 'orders',
+      phase: 'active',
+      files: h.snapshot.nginxFiles.map((file) => {
+        const name = file.path.split('/').at(-1);
+        const originalDigest = file.digest;
+        file.content = `maintenance ${name}`;
+        file.digest = createHash('sha256').update(file.content).digest('hex');
+        file.resolved = `/etc/nginx/holaday-maintenance/${r.binding.attempt}/${name}-${file.digest}.conf`;
+        file.uid = file.gid = 0;
+        file.mode = 0o600;
+        return {
+          path: `/etc/nginx/sites-available/${name}`,
+          originalDigest,
+          backupDigest: originalDigest,
+          generatedDigest: file.digest,
+        };
+      }),
+    },
+  }));
+}
+
+test('owned active fence receipts explain only the exact generated nginx include targets', async (t) => {
+  const r = await retirementFixture(t, (f) => {
+    startupFixture(f);
+    ingressFixture(f);
+  });
+  installFence(r);
+  await changeStartup(r);
+  await r.remove();
+  const result = await r.observer.read();
+  assert.deepEqual(result.unknownLaunchers, []);
+  for (const h of result.hosts)
+    assert.deepEqual(
+      h.sources,
+      inventory.firstCutoverSourceBindings(r.f.pair.hosts.find((p) => p.host === h.host).snapshot),
+    );
+});
+
+test('fence source observations reject foreign, partial and substituted configurations', async (t) => {
+  for (const kind of [
+    'attempt',
+    'inventory',
+    'intent',
+    'target',
+    'bytes',
+    'owner',
+    'backup',
+    'host',
+    'missing',
+    'extra',
+  ]) {
+    await t.test(kind, async (t) => {
+      const r = await retirementFixture(t, ingressFixture);
+      installFence(r);
+      const row = r.f.fences[1];
+      const file = r.f.pair.hosts[1].snapshot.nginxFiles[0];
+      if (kind === 'attempt') row.receipt.attempt = '22222222-2222-4222-8222-222222222222';
+      if (kind === 'inventory') row.receipt.inventoryDigest = 'f'.repeat(64);
+      if (kind === 'intent') row.receipt.phase = 'installing';
+      if (kind === 'target') file.resolved = '/tmp/arbitrary.conf';
+      if (kind === 'bytes') {
+        file.content = 'wrong';
+        file.digest = createHash('sha256').update('wrong').digest('hex');
+      }
+      if (kind === 'owner') file.uid = 501;
+      if (kind === 'backup') row.receipt.files[0].backupDigest = 'f'.repeat(64);
+      if (kind === 'host') row.host = 'aliyun';
+      if (kind === 'missing') r.f.fences.pop();
+      if (kind === 'extra')
+        r.f.pair.hosts[1].snapshot.nginxFiles.push({ ...file, path: '/etc/nginx/new.conf' });
+      await assert.rejects(r.observer.read(), /UNPROVEN/);
+    });
+  }
+});
 
 test('legacy source identity binds real reviewed scope without exposing host secrets', async () => {
   const f = pairFixture();

@@ -4,7 +4,10 @@ import * as fs from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { collectCutoverEvidence } from './browser-cutover-evidence.mjs';
 import { backupAndRestoreCheck } from './browser-first-cutover-backup.mjs';
-import { classifyFirstCutoverHostPair } from './browser-first-cutover-inventory.mjs';
+import {
+  classifyFirstCutoverHostPair,
+  classifyFirstCutoverRetirementPair,
+} from './browser-first-cutover-inventory.mjs';
 import { initializeFirstMaintenanceState } from './browser-first-cutover-runtime.mjs';
 import {
   candidatePreparationSystem,
@@ -255,6 +258,103 @@ export async function readReviewedFirstCutoverLegacySource(input, overrides = {}
     };
   } catch {
     throw new Error('CUTOVER_LEGACY_SOURCE_UNPROVEN');
+  }
+}
+
+/** Capture the approved baseline BEFORE effects and keep it private for later
+ * observations. The same live journal is read on both sides of each fresh pair;
+ * no uploaded event log, automatic baseline refresh, or "all stopped" fallback.
+ * This does not by itself verify fences or authorize advancement of the release.
+ */
+export async function createFirstCutoverRetirementObserver(input, overrides = {}) {
+  const io = {
+    readPair: readFirstCutoverHostPair,
+    readFenceReceipts: async () => [],
+    now: Date.now,
+    ...overrides,
+  };
+  const fail = () => {
+    throw new Error('CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN');
+  };
+  try {
+    const { reviews, binding, legacyDigest } = structuredClone(input);
+    let last = io.now();
+    const effects = async () => {
+      if (!isDeepStrictEqual(await io.journal.assertOwnership(), binding)) fail();
+      const record = await io.journal.readFirstCutoverEffects();
+      if (
+        !Object.entries(binding).every(([key, value]) => record[key] === value) ||
+        record.legacyDigest !== legacyDigest
+      )
+        fail();
+      return record;
+    };
+    const first = await effects();
+    if (
+      !['preflight', 'prepared'].includes(first.phase) ||
+      first.startupEvents.length ||
+      first.registrationEvents.length ||
+      !isDeepStrictEqual(await io.readFenceReceipts(), [])
+    )
+      fail();
+    const baseline = structuredClone(await io.readPair());
+    const proof = await readReviewedFirstCutoverLegacySource(
+      { reviews, inventoryDigest: binding.inventoryDigest },
+      { readPair: async () => baseline, now: io.now },
+    );
+    if (
+      proof.legacyDigest !== legacyDigest ||
+      !isDeepStrictEqual(first, await effects()) ||
+      !isDeepStrictEqual(await io.readFenceReceipts(), [])
+    )
+      fail();
+    const checkClock = () => {
+      const now = io.now();
+      if (!Number.isSafeInteger(now) || !Number.isSafeInteger(last) || last < 0 || now < last)
+        fail();
+      last = now;
+      return now;
+    };
+    checkClock();
+    return {
+      read: async () => {
+        try {
+          checkClock();
+          const before = await effects();
+          const fences = structuredClone(await io.readFenceReceipts());
+          const pair = structuredClone(await io.readPair());
+          if (
+            !isDeepStrictEqual(before, await effects()) ||
+            !isDeepStrictEqual(fences, await io.readFenceReceipts()) ||
+            pair.sourceCandidate !== baseline.sourceCandidate ||
+            pair.sourceDigest !== baseline.sourceDigest ||
+            !['aliyun', 'vultr'].every(
+              (host) =>
+                pair.hosts.find((h) => h.host === host)?.sourceCandidate ===
+                baseline.hosts.find((h) => h.host === host)?.sourceCandidate,
+            )
+          )
+            fail();
+          const result = classifyFirstCutoverRetirementPair(
+            {
+              baseline,
+              pair,
+              reviews,
+              inventoryDigest: binding.inventoryDigest,
+              effects: before,
+              fences,
+            },
+            { now: checkClock },
+          );
+          if (result.unknownLaunchers.length) fail();
+          return result;
+        } catch {
+          fail();
+        }
+      },
+    };
+  } catch {
+    fail();
   }
 }
 
