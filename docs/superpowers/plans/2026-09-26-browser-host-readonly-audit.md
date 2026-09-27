@@ -1,5 +1,43 @@
 # 首次切换：真实主机只读核查与有限修正清单
 
+## 2026-09-27 14:24 JST：真实启动文件和 PM2 主备差异已采集
+
+沿用户已明确授权的两台主机/只读配置范围，原采集器新增 `readCutoverStartupSnapshot` 并在主机快照调用。固定读取 PM2 主/备用文件、systemd 有效 pm2-root 属性与其 Fragment/DropIn 源文件、`/etc/systemd/system` 和 `/run/systemd/system`、系统 cron 目录、Debian/Ubuntu 用户 crontab 目录、rc.local 及实采 PM2 所指向的六个 Holaday 启动脚本。前后两次完整读取并比较内容/链接/目录/元数据；无法读取、内容漂移、循环链接、非文本或超限时拒绝，不把缺失与失败混同。原文可能含私密配置，只保存在 Mac 0700目录/0600文件，不发布到仓库或用户可读报告。
+
+最终实际观察 UTC `05:24:03.390` / `05:24:08.165`，归档 `/private/tmp/holaday-live-host-observer-9ILKHc/{aliyun,vultr}.json`。源码SHA256 `44be604ecaee59509a121dfd26140b7b38b5abc00d879609f55d8319e71f53b8`；阿里云文件SHA256 `76ea9d75187e501bd4d703282167b6472244bd407c6c603b4e7a60376f6a3424`；Vultr文件SHA256 `f331217e6340131d095d360f13436cc7d908eeea612887c4f506988230b3c1ae`。分别175/211条文件观察记录（含显式缺失和同源链接）、30/31个目录，不是175/211个待停止对象。上一次不含五个后补启动脚本的快照为 `...-5FmIVV`。本次在远端用实际 `process.pid` 绑定观察器身份并留原始记录，不再猜测当前采集Node；阿里云1213228、Vultr207630，不据此排除其他root Node。
+
+| 启动来源 | 实际结果 | 切换要求 |
+| --- | --- | --- |
+| 阿里云 PM2 主文件 | orangebench + holaday-cn-payment；支付入口为 `/opt/holaday-cn-payment/start.sh` | 定向处理支付条目，保留orangebench |
+| 阿里云 PM2 备份文件 | 只有orangebench，没有支付条目；摘要不同于主文件 | 不把主文件复制过去，不制造新启动条目 |
+| Vultr PM2 主、备文件 | 均含主应用、注销worker、stopped/PID0的files-cron及其他服务；主备摘要不同 | 分别按原始字节核验和保留，不能用全局save替代 |
+| files-cron | 两份均有 `0 * * * *`，脚本仍调用cleanup-cron | 无当前PID仍属于未来写入生产者 |
+| pm2-root unit | 两端enabled，Restart=on-failure，无DropIn；Aliyun inactive，Vultr active | 保留共享daemon/unit，仅处理批准应用，不把inactive当无开机入口 |
+| 云端 headed-browser | `/opt/holaday-headed/start.sh` 第48行删除 `Default/Sessions`，第49行清理Singleton文件 | 不为应用切换附带重启浏览器；这是会话恢复文件，不据此宣称Cookie或登录态已丢失 |
+
+六个启动脚本的存在性、正文和摘要均已读取；没有执行脚本，没有读取浏览器profile、Cookie或历史页面。Vultr主/worker入口分别是 `/var/lib/holaday-deploy/start-orchestrator-production.sh` 和 `start-account-closure-worker-production.sh`。系统cron/rc文件在所采范围未见Holaday字面引用，但字面搜索不是任意间接脚本不存在的证明。
+
+仍需完成：实采清单的逐项职责分类及其引用依赖、受保护批准绑定、双机现场I/O接线和整项演练。用户级systemd/容器调度等不因本次固定范围采集而宣称已穷尽；不返回 `unknownLaunchers=[]` 来假放行。超过60秒的快照仅作历史核查，不作为执行时新鲜证据。本次未停服务、改启动/防火墙/数据库/订单/支付、读取恢复私钥或部署。
+
+## 2026-09-27 13:58 JST：用户明确授权后的双机完整采集器快照
+
+用户回复“允许上述只读采集”后，将现有采集器通过严格 SSH 传入指定两台主机的 Node 内存执行；无远端落盘、服务/配置修改、数据库或支付查询。这里“完整”仅指当前采集器的所有字段均成功返回，不是所有主机启动源或业务责任已穷尽。
+
+首次 Vultr 成功、阿里云拒绝。最小诊断确认是 `crontab -l` 返回 code 1、空 stdout、`no crontab for root`；不是连接失败或读取权限失败。本地采集器现仅接受这一精确正常缺失结果，单独记录 `rootCrontabPresent=false`，并在最终快照前复读比较。权限错误、部分输出、信号中断、其他用户、其他退出码及期间状态变化仍拒绝。没有在服务器创建空 crontab。
+
+修正后两端均成功，以下为 UTC 时间：
+
+| 主机 | 采样时间 | 关键事实 |
+| --- | --- | --- |
+| 阿里云 | 2026-09-27 04:58:35.429 | 12 条相关进程、2 个 PM2 注册、12 份 nginx 来源；4010 PID1098048 与旧4011 PID965055 仍通配监听。现用支付完整包装树/旧独立树均保留；root 无个人 crontab。 |
+| Vultr | 2026-09-27 04:58:40.223 | 28 条相关进程、9 个 PM2 注册、17 份 nginx 来源；orchestrator PID733273、account-closure-worker PID67648 均 UID998；root 个人 crontab 存在，80字节。 |
+
+阿里云 `pm2-root.service` inactive/dead 但 enabled，PM2 daemon PID128388 仍在；Vultr 同名 unit active/running 且 enabled，daemon PID1170。两端 cron/nginx 均 active/enabled。运行状态和开机配置必须分别处理，不能把 inactive 当作不会重启。无关 orangebench/akshare、浏览器/VNC 树也被观察到；这些不是自动停止清单。
+
+原始快照仅在 Mac 私密目录 `/private/tmp/holaday-live-host-observer-sVf60k`（0700），两文件0600，未放仓库。采集器源码 SHA256 `4c054eefe12f88ec8ab49b423b5a5e2087435453805d42bb6b5e73818aa48b83`；`aliyun.json` SHA256 `03106d8e49c77a0fdce0df9705dda5733f4855ced9d547e76ecd45e8b099c9c5`；`vultr.json` SHA256 `ddcc3a98e96dccf6fb9ec7368432eb997a53b11ea1110d514966999a91a14943`。初次 Vultr 成功在 `...-AefxXu`，阿里云定位诊断在 `...-9eZ87a`；均非生产备份。
+
+边界：原始清单含采集当时的 Node 观察进程候选（阿里云1212896、Vultr204324），尚未绑定观察器自身身份，不得按名称忽略所有 root Node。systemd 列表不是 unit 完整配置，root crontab 不覆盖系统 cron/其他用户，nginx 原文也尚待路由分类。受保护停止清单、启动源全量分类及实际双机切换仍待完成；旧支付树不据此自动退役。此快照超过60秒后仅可作历史核查，不能直接作为部署时的实时许可。
+
 ## 2026-09-27 后续实际变更：恢复公钥设施
 
 用户允许上节之后提出的Mac私钥/离线副本/生产仅公钥方案。本轮不再是全只读：Vultr新增发行版签名age包`1.0.0-1ubuntu0.1`，没有升级其他包，设置needrestart为只列出而不自动重启；新建`/var/lib/holaday-deploy/recovery-20260927` root0700，只有root0600公钥及无业务数据密文探针。Mac生成私钥、公钥并接收探针，私钥从未上传。详见[完整密钥记录](../../ops/browser-backup-recovery.md)。

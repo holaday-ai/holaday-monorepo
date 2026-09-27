@@ -11,6 +11,7 @@ import {
   readCutoverHostSnapshot,
   readCutoverNginxSnapshot,
   readCutoverRehearsalArtifacts,
+  readCutoverStartupSnapshot,
 } from './browser-cutover-evidence.mjs';
 
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -342,6 +343,12 @@ function hostFixture() {
     platform: 'linux',
     uid: 0,
     now: () => 100_000,
+    startupSnapshot: async () => ({
+      observedAtMs: 100_000,
+      files: [],
+      directories: [],
+      pm2Unit: {},
+    }),
     nginxSnapshot: async () => ({
       observedAtMs: 100_000,
       dump: 'observed configuration',
@@ -470,6 +477,78 @@ test('host facts include unmanaged 4011, full proc identity and startup sources'
     true,
   );
 });
+function absentRootCrontab(overrides = {}) {
+  return Object.assign(new Error('crontab failed'), {
+    code: 1,
+    stdout: '',
+    stderr: 'no crontab for root\n',
+    killed: false,
+    signal: null,
+    ...overrides,
+  });
+}
+test('host snapshot records confirmed root crontab absence without losing other facts', async () => {
+  const f = hostFixture();
+  const exec = f.io.exec;
+  f.io.exec = async (command, args) => {
+    if (command === 'crontab') throw absentRootCrontab();
+    return exec(command, args);
+  };
+  const result = await readCutoverHostSnapshot(f.io);
+  assert.equal(result.cron, '');
+  assert.equal(result.rootCrontabPresent, false);
+  assert.equal(result.processes[0].pid, 401);
+  assert.equal(result.listeners.includes(':4011'), true);
+});
+test('empty installed root crontab is distinct from an absent root crontab', async () => {
+  const f = hostFixture();
+  const exec = f.io.exec;
+  f.io.exec = async (command, args) => (command === 'crontab' ? '' : exec(command, args));
+  const result = await readCutoverHostSnapshot(f.io);
+  assert.equal(result.cron, '');
+  assert.equal(result.rootCrontabPresent, true);
+});
+for (const overrides of [
+  { code: 2 },
+  { code: 'ENOENT' },
+  { stderr: 'permission denied\n' },
+  { stderr: 'no crontab for root\npermission denied\n' },
+  { stderr: 'no crontab for another-user\n' },
+  { stdout: '* * * * * /srv/worker\n' },
+  { killed: true },
+  { signal: 'SIGTERM' },
+]) {
+  test(`crontab error is not absence: ${JSON.stringify(overrides)}`, async () => {
+    const f = hostFixture();
+    const exec = f.io.exec;
+    f.io.exec = async (command, args) => {
+      if (command === 'crontab') throw absentRootCrontab(overrides);
+      return exec(command, args);
+    };
+    await assert.rejects(
+      readCutoverHostSnapshot(f.io),
+      /^Error: MAINTENANCE_HOST_OBSERVATION_UNPROVEN$/,
+    );
+  });
+}
+for (const first of ['absent', 'present', 'content']) {
+  test(`root crontab changing from ${first} during collection rejects`, async () => {
+    const f = hostFixture();
+    const exec = f.io.exec;
+    let reads = 0;
+    f.io.exec = async (command, args) => {
+      if (command !== 'crontab') return exec(command, args);
+      reads++;
+      if ((first === 'absent' && reads === 1) || (first === 'present' && reads > 1))
+        throw absentRootCrontab();
+      return first === 'content' ? `* * * * * /srv/worker-${reads}\n` : '';
+    };
+    await assert.rejects(
+      readCutoverHostSnapshot(f.io),
+      /^Error: MAINTENANCE_HOST_OBSERVATION_UNPROVEN$/,
+    );
+  });
+}
 test('host observation failure is not an empty inventory and never touches PM2 state', async () => {
   const f = hostFixture();
   f.io.readFile = async () => {
@@ -493,6 +572,160 @@ test('normal proc accounting changes do not masquerade as process identity chang
   const result = await readCutoverHostSnapshot(f.io);
   assert.equal(result.processes.length, 1);
 });
+async function startupFixture(t) {
+  const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'holaday-startup-observation-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const path = (p) => root + p;
+  const write = async (p, value) => {
+    await fs.mkdir(join(path(p), '..'), { recursive: true });
+    await fs.writeFile(path(p), value, { mode: 0o600 });
+  };
+  await write(
+    '/root/.pm2/dump.pm2',
+    '[{"name":"holaday-orchestrator","env":{"TEST_SECRET":"private"}}]\n',
+  );
+  await write('/root/.pm2/dump.pm2.bak', '[{"name":"backup-only"}]\n');
+  await write('/etc/crontab', '* * * * * root /srv/system-job\n');
+  await write('/etc/cron.d/holaday', '* * * * * root /srv/holaday-job\n');
+  await write('/var/spool/cron/crontabs/app', '* * * * * /srv/user-job\n');
+  await write(
+    '/lib/systemd/system/pm2-root.service',
+    '[Service]\nExecStart=/usr/bin/pm2 resurrect\n',
+  );
+  await write(
+    '/etc/systemd/system/pm2-root.service.d/override.conf',
+    '[Service]\nRestart=always\n',
+  );
+  await fs.mkdir(path('/etc/systemd/system/multi-user.target.wants'), { recursive: true });
+  await fs.symlink(
+    path('/lib/systemd/system/pm2-root.service'),
+    path('/etc/systemd/system/multi-user.target.wants/pm2-root.service'),
+  );
+  const properties =
+    'Id=pm2-root.service\nLoadState=loaded\nActiveState=inactive\nSubState=dead\nUnitFileState=enabled\nFragmentPath=/lib/systemd/system/pm2-root.service\nDropInPaths=/etc/systemd/system/pm2-root.service.d/override.conf\nExecStart={ path=/usr/bin/pm2 ; argv[]=/usr/bin/pm2 resurrect ; }\nRestart=always\n';
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    now: () => 100_000,
+    lstat: (p) => fs.lstat(path(p)),
+    realpath: async (p) => (await fs.realpath(path(p))).slice(root.length),
+    open: (p, ...args) => fs.open(path(p), ...args),
+    readdir: (p) => fs.readdir(path(p)),
+    exec: async (command, args) => {
+      assert.equal(command, 'systemctl');
+      assert.equal(args[0], 'show');
+      assert.equal(args[1], 'pm2-root.service');
+      return properties;
+    },
+  };
+  return { io, path, write, properties };
+}
+test('startup snapshot retains independent PM2 backups, system and user cron, effective unit sources', async (t) => {
+  const f = await startupFixture(t);
+  const result = await readCutoverStartupSnapshot(f.io);
+  const file = (p) => result.files.find((row) => row.path === p);
+  assert.equal(
+    file('/root/.pm2/dump.pm2').content,
+    '[{"name":"holaday-orchestrator","env":{"TEST_SECRET":"private"}}]\n',
+  );
+  assert.equal(file('/root/.pm2/dump.pm2.bak').content, '[{"name":"backup-only"}]\n');
+  assert.equal(file('/etc/rc.local').present, false);
+  assert.equal(file('/etc/crontab').content, '* * * * * root /srv/system-job\n');
+  assert.equal(file('/var/spool/cron/crontabs/app').content, '* * * * * /srv/user-job\n');
+  assert.equal(
+    file('/etc/systemd/system/multi-user.target.wants/pm2-root.service').resolved,
+    '/lib/systemd/system/pm2-root.service',
+  );
+  assert.equal(
+    file('/lib/systemd/system/pm2-root.service').content,
+    '[Service]\nExecStart=/usr/bin/pm2 resurrect\n',
+  );
+  assert.equal(
+    file('/etc/systemd/system/pm2-root.service.d/override.conf').content,
+    '[Service]\nRestart=always\n',
+  );
+  assert.equal(result.pm2Unit, f.properties);
+  assert.equal(result.observedAtMs, 100_000);
+});
+test('startup snapshot includes the observed application, cleanup and browser launcher files', async (t) => {
+  const f = await startupFixture(t);
+  const launchers = [
+    '/var/lib/holaday-deploy/start-orchestrator-production.sh',
+    '/var/lib/holaday-deploy/start-account-closure-worker-production.sh',
+    '/opt/holaday-monorepo/start-files-cron.sh',
+    '/opt/holaday-headed/start.sh',
+    '/opt/holaday-vnc/start.sh',
+  ];
+  for (const path of launchers) await f.write(path, `#!/bin/sh\n# observed ${path}\n`);
+  const result = await readCutoverStartupSnapshot(f.io);
+  for (const path of launchers) {
+    assert.equal(
+      result.files.find((file) => file.path === path)?.content,
+      `#!/bin/sh\n# observed ${path}\n`,
+    );
+  }
+});
+for (const fault of [
+  'content',
+  'new-file',
+  'new-optional',
+  'unit-drift',
+  'permission',
+  'oversized',
+  'invalid-utf8',
+  'dangling-link',
+  'directory-cycle',
+  'stale',
+]) {
+  test(`startup observation refuses ${fault} instead of publishing incomplete sources`, async (t) => {
+    const f = await startupFixture(t);
+    if (fault === 'permission') {
+      const lstat = f.io.lstat;
+      f.io.lstat = async (p) => {
+        if (p === '/etc/cron.d')
+          throw Object.assign(new Error('private failure'), { code: 'EACCES' });
+        return lstat(p);
+      };
+    }
+    if (fault === 'oversized') await f.write('/etc/cron.d/huge', Buffer.alloc(8 * 1024 * 1024 + 1));
+    if (fault === 'invalid-utf8') await f.write('/etc/cron.d/broken', Buffer.from([0xff]));
+    if (fault === 'dangling-link') await fs.symlink(f.path('/missing'), f.path('/etc/cron.d/link'));
+    if (fault === 'directory-cycle')
+      await fs.symlink(f.path('/etc/cron.d'), f.path('/etc/cron.d/loop'));
+    let shows = 0;
+    const exec = f.io.exec;
+    f.io.exec = async (...args) => {
+      const value = await exec(...args);
+      if (++shows === 2) {
+        if (fault === 'content') await f.write('/root/.pm2/dump.pm2.bak', '[{"name":"changed"}]');
+        if (fault === 'new-file')
+          await f.write('/etc/cron.d/new-job', '* * * * * root /srv/new-job\n');
+        if (fault === 'new-optional') await f.write('/etc/rc.local', '#!/bin/sh\n/srv/launcher\n');
+        if (fault === 'unit-drift') return value.replace('Restart=always', 'Restart=no');
+        if (fault === 'stale') f.io.now = () => 160_001;
+      }
+      return value;
+    };
+    await assert.rejects(
+      readCutoverStartupSnapshot(f.io),
+      /^Error: MAINTENANCE_STARTUP_OBSERVATION_UNPROVEN$/,
+    );
+  });
+}
+test('host observation includes startup facts and refuses a failed startup read', async () => {
+  const f = hostFixture();
+  const startup = { observedAtMs: 100_000, files: [{ path: '/etc/rc.local', present: false }] };
+  f.io.startupSnapshot = async () => startup;
+  assert.deepEqual((await readCutoverHostSnapshot(f.io)).startup, startup);
+  f.io.startupSnapshot = async () => {
+    throw new Error('read failed');
+  };
+  await assert.rejects(
+    readCutoverHostSnapshot(f.io),
+    /^Error: MAINTENANCE_HOST_OBSERVATION_UNPROVEN$/,
+  );
+});
+
 async function nginxFixture(t) {
   const directory = await fs.realpath(
     await fs.mkdtemp(join(tmpdir(), 'holaday-nginx-observation-')),

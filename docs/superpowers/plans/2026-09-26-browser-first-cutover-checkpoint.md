@@ -6,6 +6,34 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-27 14:24 JST：启动来源采集接入，双机实际主备差异核实
+
+继续同一Task4/BASE，不重做备份或新建发布框架。原evidence模块加入固定范围 `readCutoverStartupSnapshot` 并接入真实host采集；PM2主备、有效systemd源文件/本地与运行时树、系统与用户cron、rc.local及实际启动脚本双读校验，原文只留Mac。两台主机实际成功，原始归档 `.../holaday-live-host-observer-9ILKHc` 及准确摘要/范围见[主机核查](2026-09-26-browser-host-readonly-audit.md)顶部。实采观察器身份单独记录，不按root Node名称猜排除。
+
+现场裁决：Aliyun支付只在主dump中，备用只有orangebench；Vultr主备都有stopped但仍按小时调度的files-cron，因此沿已有定向条目处理接口，不用全局PM2save/delete/kill。旧headed-browser启动脚本清理会话恢复文件；保留浏览器进程，不随应用一起重启，不把会话文件等同Cookie。无服务/配置/业务修改，无浏览器profile或私钥读取，无部署。完整职责分类/双机I/O/恢复/历史业务/首次shell/整项审查仍未完成，Task4/5/6仍部分完成。
+
+测试：新增函数缺失RED后实现；再实测五个启动依赖遗漏RED，加入真实已观察路径后GREEN。最终Mac证据72/72、全部浏览器发布脚本461/461；Linux Node22证据72/72，容器root:998、无网络、只读源码、临时/tmp，结束自动删除。首次Linux为71/72：既有publisher夹具取默认容器GID0而产品要求正数applicationGid；核清后仅调整容器GID998，未放宽产品校验或删除用例。原完整ops先跑退出0；新增证据文件接入日常ops门槛后另记最终结果。没有应用全量或新MySQL整流程通过声明。
+
+两次权限审核超时均未执行：浏览器回归命令和五条固定路径patch，各按工具许可原样重试一次成功；SSH只读两次均成功。保留既有`__pycache__`。本次包含上轮未提交的精确root-crontab缺失修正与记录，未覆盖其他改动。
+
+最终门槛已完成：加入evidence后完整`pnpm test:ops`退出0（120/59/16/299及shell，均无跳过），日志`/tmp/holaday-startup-observer-ops-final.log`；两MJS Biome、Node/bash语法与diff-check通过。所有本轮SSH/测试进程已退出，Linux容器已自动删除。五个跟踪文件作为本地检查点保存，未push/PR/合并/部署，未将此子项标为整个首次切换完成。
+
+### 2026-09-27 13:58 JST：具体只读授权已获准，双机快照成功
+
+用户明确回复“允许上述只读采集”，前节权限阻塞已解除；经严格SSH传送原采集模块在两台指定主机内存执行，原始结果只存Mac私密临时目录。首次Vultr成功、阿里云拒绝，诊断确认为root无个人crontab的code1被误判；按TDD新增13项，真实RED4项，最小修复精确缺失识别、显式present字段和前后复核，权限/异常输出/中断仍拒绝。
+
+修正后阿里云与Vultr均实际成功，UTC04:58:35/04:58:40，源码SHA`4c054eefe12f88ec8ab49b423b5a5e2087435453805d42bb6b5e73818aa48b83`，原始文件`/private/tmp/holaday-live-host-observer-sVf60k/{aliyun,vultr}.json`，0700目录/0600文件。事实和摘要见[主机核查](2026-09-26-browser-host-readonly-audit.md)顶部；4010/4011仍在，Aliyun PM2 unit inactive但enabled，不能据此跳过持久启动源。没有停服务、改配置/防火墙、读取数据库或支付方、读取恢复私钥、部署应用。
+
+针对性59/59、完整浏览器448/448通过且无跳过，两MJS Biome通过。首次全浏览器11项Unix socket EPERM，获准后原样完整重跑通过；不是代码失败被忽略。完整`pnpm test:ops`最终退出0，日志`/tmp/holaday-host-crontab-{red,browser,browser-final,ops}.log`；ops初次权限审核超时未执行，按许可原样重试一次成功。diff-check通过，所有SSH/测试会话已退出；本轮未重跑应用全套、Linux或MySQL演练，不复用历史数字。已有`__pycache__`保留，Task4原BASE844c2ced不变，Task4/5/6仍部分完成。下一步沿现有适配接口分类真实进程/启动源/路由并组装双机，不重做age/主流程；观察器自身身份及系统cron/其他用户等仍需覆盖，现有历史快照不能当部署实时许可。
+
+### 2026-09-27 13:17 JST：现场基础摘要刷新，完整只读采集等待具体授权
+
+从`fdc8249b`继续。仅阿里云既有脱敏诊断实际执行成功，观察时间`2026-09-27T04:17:33.411Z`：4010仍由PID1098048监听、现用PM2 id1的根进程1097924及包装树存在；4011仍为独立965039→965055旧树，身份/路径与此前一致。现用`orangebench`仍online，PM2 daemon仍在；阿里云`pm2-root.service`显示inactive/dead，不应与Vultr此前active状态混为一谈。采样时4010/4011 established计数为0、iptables-save为空；不代表完整排空、业务无副作用或公网入口已隔离。没有停止/修改任何服务，也未查业务数据库或支付方。
+
+准备的忽略诊断脚本`qa/live-host-observer-20260927.mjs`拟将现有`browser-cutover-evidence.mjs`经严格SSH传入两台主机的Node内存，只调用只读采集器，完整结果留Mac私密临时目录。该远程命令被自动权限审核拒绝，理由为完整内部源码载荷及接收地址缺少具体用户授权。随后只读核对`deploy-cn-payment.sh:7`和`deploy-current.sh:27`分别固定这两个生产目标；附证据原样重审仍被拒绝。未换通道、未缩减/改写远程载荷绕过拒绝，也未执行该脚本、创建其临时归档或远端文件。
+
+已向用户异步明确请求：允许将上述采集器发送至阿里云`47.99.169.186`及Vultr`207.148.70.106`只读采集进程/端口/启动与nginx配置，原始结果仅留Mac私密目录；等待实际答复，预选项不构成同意。下一步获准后运行这次原样验证，不重做主流程/age或扩大支付操作。此轮只有基础只读核查和文档，未新增产品代码/测试通过结果，Task4/5/6仍部分完成；保留既有缓存与未提交的本次记录。
+
 ### 2026-09-27：首次主流程与既有模块接通，真实双机现场适配仍未完成
 
 从`6eee28fd`继续，新增`createFirstCutoverHostAdapter({attempt},io)`，复用真实候选准备、同一journal、证据采集、备份协调器/回执、首次状态与共用transition尾段。受保护批准提供全部身份和窗口；不伪造旧boot，不增加成功开关或默认生产执行。接口与剩余生产组装见[主流程说明](../../ops/browser-first-cutover-host.md)。Task4原BASE不变，Task4/5/6仍部分完成。

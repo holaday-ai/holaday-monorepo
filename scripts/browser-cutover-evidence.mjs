@@ -286,7 +286,176 @@ const hostSystem = {
     return result.stdout;
   },
   nginxSnapshot: () => readCutoverNginxSnapshot(),
+  startupSnapshot: () => readCutoverStartupSnapshot(),
 };
+
+/** Private raw startup evidence only, not an authorization to retire anything.
+ * Covers PM2's two independent dumps, its effective system unit, local/runtime
+ * systemd configuration, system cron and Debian/Ubuntu per-user crontabs.
+ * Unit contents may refer to further scripts/configuration: the site classifier
+ * must resolve those dependencies; this does not claim all launchers are known. */
+export async function readCutoverStartupSnapshot(io = hostSystem) {
+  try {
+    if (io.platform !== 'linux' || io.uid !== 0) throw new Error('host');
+    const observedAtMs = io.now();
+    const fixedFiles = [
+      '/root/.pm2/dump.pm2',
+      '/root/.pm2/dump.pm2.bak',
+      '/etc/crontab',
+      '/etc/anacrontab',
+      '/etc/rc.local',
+      '/opt/holaday-cn-payment/start.sh',
+      '/var/lib/holaday-deploy/start-orchestrator-production.sh',
+      '/var/lib/holaday-deploy/start-account-closure-worker-production.sh',
+      '/opt/holaday-monorepo/start-files-cron.sh',
+      '/opt/holaday-headed/start.sh',
+      '/opt/holaday-vnc/start.sh',
+    ];
+    const fixedDirectories = [
+      '/etc/systemd/system',
+      '/run/systemd/system',
+      '/etc/cron.d',
+      '/etc/cron.hourly',
+      '/etc/cron.daily',
+      '/etc/cron.weekly',
+      '/etc/cron.monthly',
+      '/etc/cron.yearly',
+      '/var/spool/cron/crontabs',
+    ];
+    const metadata = (s) =>
+      Object.fromEntries(
+        ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'].map((k) => [
+          k,
+          s[k],
+        ]),
+      );
+    const pathOK = (p) =>
+      typeof p === 'string' && p.startsWith('/') && posix.normalize(p) === p && !/[\r\n\0]/.test(p);
+    const pass = async () => {
+      const pm2Unit = await io.exec('systemctl', [
+        'show',
+        'pm2-root.service',
+        '--no-pager',
+        '--property=Id,LoadState,ActiveState,SubState,UnitFileState,FragmentPath,DropInPaths,ExecStart,ExecStop,Restart',
+      ]);
+      if (typeof pm2Unit !== 'string' || Buffer.byteLength(pm2Unit) > 1024 * 1024)
+        throw new Error('unit');
+      const properties = new Map(
+        pm2Unit
+          .trimEnd()
+          .split('\n')
+          .map((line) => {
+            const i = line.indexOf('=');
+            if (i < 1) throw new Error('property');
+            return [line.slice(0, i), line.slice(i + 1)];
+          }),
+      );
+      if (properties.get('Id') !== 'pm2-root.service' || properties.get('LoadState') !== 'loaded')
+        throw new Error('unit not loaded');
+      const fragment = properties.get('FragmentPath');
+      const dropIns = properties.get('DropInPaths');
+      if (!pathOK(fragment) || typeof dropIns !== 'string' || /[\\\r\n]/.test(dropIns))
+        throw new Error('unit paths');
+      const unitFiles = [fragment, ...dropIns.split(' ').filter(Boolean)];
+      const files = [];
+      const directories = [];
+      const visited = new Set();
+      let totalBytes = 0;
+      const visit = async (path, optional, ancestors = []) => {
+        if (!pathOK(path) || ancestors.length > 12) throw new Error('path');
+        if (visited.has(path)) return;
+        if (visited.size >= 2048) throw new Error('inventory limit');
+        visited.add(path);
+        let link;
+        try {
+          link = await io.lstat(path);
+        } catch (error) {
+          if (optional && error.code === 'ENOENT') {
+            files.push({ path, present: false });
+            return;
+          }
+          throw error;
+        }
+        const resolved = await io.realpath(path);
+        if (!pathOK(resolved)) throw new Error('resolved');
+        const before = await io.lstat(resolved);
+        const record = {
+          path,
+          present: true,
+          resolved,
+          link: metadata(link),
+          stat: metadata(before),
+        };
+        if (before.isDirectory()) {
+          if (ancestors.includes(resolved)) throw new Error('directory cycle');
+          const entries = (await io.readdir(path)).sort();
+          if (
+            entries.length > 2048 ||
+            entries.some((name) => !name || name === '.' || name === '..' || /[/\r\n\0]/.test(name))
+          )
+            throw new Error('entries');
+          directories.push({ ...record, entries });
+          for (const name of entries)
+            await visit(`${path}/${name}`, false, [...ancestors, resolved]);
+          if (!same(entries, (await io.readdir(path)).sort())) throw new Error('directory drift');
+        } else if (
+          resolved === '/dev/null' &&
+          link.isSymbolicLink() &&
+          before.isCharacterDevice()
+        ) {
+          files.push({ ...record, masked: true });
+        } else {
+          if (!before.isFile() || before.size > 8 * 1024 * 1024) throw new Error('file');
+          totalBytes += before.size;
+          if (totalBytes > 12 * 1024 * 1024) throw new Error('bytes');
+          const handle = await io.open(
+            resolved,
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+          );
+          try {
+            if (!same(metadata(before), metadata(await handle.stat())))
+              throw new Error('opened drift');
+            const buffer = Buffer.alloc(before.size + 1);
+            let count = 0;
+            while (count < buffer.length) {
+              const { bytesRead } = await handle.read(buffer, count, buffer.length - count, null);
+              if (!bytesRead) break;
+              count += bytesRead;
+            }
+            const bytes = buffer.subarray(0, count);
+            if (
+              count !== before.size ||
+              !Buffer.from(bytes.toString('utf8')).equals(bytes) ||
+              !same(metadata(before), metadata(await handle.stat()))
+            )
+              throw new Error('read drift');
+            files.push({
+              ...record,
+              digest: createHash('sha256').update(bytes).digest('hex'),
+              content: bytes.toString('utf8'),
+            });
+          } finally {
+            await handle.close();
+          }
+        }
+        if (
+          (await io.realpath(path)) !== resolved ||
+          !same(metadata(link), metadata(await io.lstat(path))) ||
+          !same(metadata(before), metadata(await io.lstat(resolved)))
+        )
+          throw new Error('path drift');
+      };
+      for (const path of [...fixedFiles, ...fixedDirectories]) await visit(path, true);
+      for (const path of unitFiles) await visit(path, false);
+      return { files, directories, pm2Unit };
+    };
+    const result = await pass();
+    if (!same(result, await pass()) || !fresh(observedAtMs, io.now())) throw new Error('changed');
+    return { observedAtMs, ...result };
+  } catch {
+    fail('MAINTENANCE_STARTUP_OBSERVATION_UNPROVEN');
+  }
+}
 
 /** Disk configuration tested by nginx, NOT proof of the running workers' config.
  * Preserve all included source bytes and resolved ownership for the host classifier.
@@ -506,10 +675,29 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
       '--no-pager',
       '--no-legend',
     ]);
-    const cron = await io.exec('crontab', ['-l']);
+    const readRootCrontab = async () => {
+      try {
+        return { present: true, content: await io.exec('crontab', ['-l']) };
+      } catch (error) {
+        // LC_ALL=C: only this exact, successful observation of absence is normal.
+        // Permission errors, partial output and interrupted commands remain fatal.
+        if (
+          error.code === 1 &&
+          error.stdout === '' &&
+          error.stderr === 'no crontab for root\n' &&
+          error.killed === false &&
+          error.signal === null
+        )
+          return { present: false, content: '' };
+        throw error;
+      }
+    };
+    const rootCrontab = await readRootCrontab();
+    const startup = await io.startupSnapshot();
     if (
       String(await io.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim() !== bootId ||
       !same(processes, await readProcesses()) ||
+      !same(rootCrontab, await readRootCrontab()) ||
       !fresh(observedAtMs, io.now())
     )
       throw new Error('changed');
@@ -524,7 +712,9 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
       systemd,
       unitFiles,
       timers,
-      cron,
+      cron: rootCrontab.content,
+      rootCrontabPresent: rootCrontab.present,
+      startup,
     };
   } catch {
     fail('MAINTENANCE_HOST_OBSERVATION_UNPROVEN');
