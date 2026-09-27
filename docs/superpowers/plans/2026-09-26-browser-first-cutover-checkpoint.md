@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-27：完整 SQL 隔离恢复验证及 0042 风险边界
+
+从 `f1a63318` 继续。阿里云 ECS 控制台已用 Computer Use 在 Chrome 打开，但当前需要用户登录；安全组尚未读取/修改，不得声称已持久化端口隔离。没有新增开机防火墙框架，已有运行时 nft 组件不重做。
+
+并行推进既定 Task5 中不依赖云登录的真实 MySQL 核验，新增 `ordinary-first-cutover.mysql.integration.test.ts` 与[复现说明](../../../scripts/fixtures/cutover-mysql-README.md)。复制现有 runner/全部61个SQL到无dotenv的临时源码快照，独立loopback13316容器、随机source/restore库、真实dump/restore、表/列/全表数据及view/trigger/event/procedure核对；随后在恢复库重放完整SQL，验证关键业务字段和维护schema，并确认源库不变。
+
+最终结果1通过/1失败：当前已观察支付形态通过；缺失完成时间的已完成订单明确RED，0042回填completed_at会触发updated_at改为迁移时刻。保持历史SQL和断言不变，不将反例改成expected-failure绿色。线上只读事务 `2026-09-27T02:27:51.322Z` 得 completed2、缺完成时间0，pending13；目前快照不命中该风险，不等于维护停写后仍可放行。真实备份/迁移适配器需要零缺失的鲜明前置检查或另行审查迁移策略，仍未接入。
+
+本例测试环境最初内部Docker网络不发布端口，未执行SQL；随后恢复对比暴露显式字符集/触发器重建时间的非业务差异，改为同时核对真实列元数据并只规范化这两项后，才取得真实业务RED。初次类型tuple推断、finally/lint问题均在测试文件修正。日志 `/tmp/holaday-first-restore-{initial,run2,run3,final}.log`；不是生产备份、加密或完整迁移无条件通过。临时数据库、容器及网络均已清理，既有本机MySQL/Redis未动。
+
+Task4仍部分完成，Task5仅新增合成恢复与条件风险证据，Task6未完成；没有实现完整首次host/shell/跨主机执行，也没有生产写入、支付方API调用、PR、合并或部署。PayPal新支付继续暂停，支付/权益/额度、原SQL、UI/模型/扩展和既有`__pycache__`未改。
+
+本轮最终默认后台测试命令退出0，Vitest506文件、8587通过/1既有跳过；该默认配置不包含上述集成测试，不能合并成全绿声明。最终类型检查退出0，新增TS文件Biome与diff-check通过。日志 `/tmp/holaday-first-restore-orchestrator-full.log`、`/tmp/holaday-first-restore-types-final2.log`。所有本轮测试/SSH进程均退出；Chrome阿里云登录页保留供用户登录。下一步在登录后只读核对目标ECS安全组范围，同时继续完整host接线；最终备份/迁移门槛必须处理本节已明确的0042前置条件，不重做已完成的dump演练或默认后台全量。
+
 ### 2026-09-27：旧支付端口隔离接入现有nginx维护流程
 
 从`4bdaca7b`继续。新增固定Aliyun支付端口nft策略及窄执行器`browser-payment-port-fence.mjs`，不增加通用防火墙配置接口。实际`aliyun-pay-20260926`站点profile在orders:installing持久意图之后、nginx替换之前调用；沿用同一journal归属和fence store窗口。规则字节SHA256固定，先`--check`再单次create事务，已有同名表直接拒绝、不接管/flush/重试；失败保留规则和意图。两阶段验证在HTTP探针前后核对内核完整表/链/规则，恢复nginx前后同样复核且不删除屏障。未知scope不自动扩展到其他主机或端口。

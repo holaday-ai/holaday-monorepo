@@ -8,6 +8,8 @@
 
 ## 本地已验证
 
+2026-09-27补充：真实MySQL备份恢复及完整61个SQL已在合成库执行，当前已观察支付形态通过；缺失completed_at的completed订单反例失败，因为0042连带刷新updated_at。完整结果为1通过/1失败，不是全量迁移验收通过。线上只读聚合为completed2/缺失0、pending13（观测时间02:27:51Z）；仍需隔离停写后的新证据。见[复现及限制](../../../scripts/fixtures/cutover-mysql-README.md)。没有修改SQL、订单或结算规则。
+
 - 网关新增12条行为锁定测试：微信/支付宝 × 普通订阅/partner充值 × 成功/Promise拒绝/未确认。结算 Promise 未完成时不应答；成功后才成功应答；失败保持原非成功结果。支付、权益和额度实现未修改。
 - `pnpm --filter @holaday/cn-payment test`：7文件、80通过，退出0；类型检查退出0。日志 `/tmp/holaday-cutover-payment-characterization-final.log`、`/tmp/holaday-cutover-payment-types-final.log`。
 - 原普通与 partner 幂等专项：`src/http.payment.test.ts`、`src/partner/payment-confirm-service.test.ts`，2文件40通过，退出0；覆盖现有重复确认与权益行为，不新建结算路径。日志 `/tmp/holaday-cutover-payment-idempotency.log`。
