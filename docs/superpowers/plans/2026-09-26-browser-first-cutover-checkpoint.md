@@ -6,6 +6,22 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 夜间续跑：SSH 客户端归属与已连接会话的基线接线
+
+承接 `2dec13dd`，Task4原BASE844c2ced不变。两种固定会话复用同一SSH启动边界，只从自己实际启动的ChildProcess读取两次内核身份；核对完整argv、root UID、父PID、启动时间、boot、exe、cwd与cgroup，后续身份必须保持一致。新增`readTransportIdentity()`返回绑定原attempt/candidate/config/migration/inventory/site的Vultr客户端身份；断连、关闭、过期或核验失败不重连、不重发、不发信号，身份失败关闭通信流。原同步远端接收身份接口不变，入口pair另提供本机身份读者，允许在隔离回调中读取而不递归占用SSH流。
+
+原分类器只增加精确的Vultr `ingress-ssh/gateway-ssh` 类型；未知子进程、监听者、进程/父身份改变和错误主机/绑定仍拒绝，原始快照不删除、旧review与legacyDigest不改。root双机采集改为远端只读SSH退出后再采本机，两端仍各读一次并等结果，不自动重试；Mac管理员路径保持原并发，原新鲜度限制保持。
+
+修复原流程两处实际接线问题：①已连接接收端会让初始source/baseline判为未知，现将同一活句柄及完整批准绑定放在基线实际采集前后验证；②实体退役演练发现未托管停止阶段重新分类旧基线时遗漏其执行身份，现保留基线当时的不可变身份，重分类时复用，不拿后来身份改写历史。第二处先由实际Linux失败发现，再以单元`attached-baseline`复现RED，修复后完整实体网关退役通过。
+
+新增Linux实体模式`--gateway-session-baseline`在原journal处于preflight时先连接真实接收进程，再建立原observer，随后实际准备/PM2删除/pidfd退出；两个网关按序退出、无关PID保留、PM2重启只恢复无关应用。原丢ACK与无归属拒绝模式仍通过。真实SSH固定入口夹具使用正式spawn/内核读者，仅映射隔离QA地址与密钥路径；两个客户端与接收端身份、真实/proc argv摘要、关闭后拒绝均通过。实体nginx/TLS两阶段隔离、恢复及无关长连接保持通过。业务计数、逻辑另一主机仍为明确QA合成，这不是整双机停写或发布完成。
+
+最后修复后完整browser **797/797**、实际Linux九组 **344/344**、完整ops **120/59/16/631及Python12**，均退出0、0跳过；上述实体基线/网关退役、真实SSH、nginx/TLS及两种拒绝模式退出0。日志`/tmp/holaday-coordinator-{browser-final,linux-final,ops-final,ssh-final,ingress-final}.log`及`/tmp/holaday-coordinator--gateway-session-{lost-ack,observed-executor}.log`。初始实体失败保留在`/tmp/holaday-coordinator-baseline-physical.log`，对应RED见`/tmp/holaday-coordinator-unmanaged-baseline-red.log`。11个MJS的Biome、现有shell语法、diff-check通过；不沿用较早796项结果。
+
+确切下一步：**Vultr协调器自身的固定入口/受保护工具来源与生命周期归属仍未接通**，不能把root或Node一律豁免。将这项与原首次CLI/完整site一起接合，沿用已有会话客户端、接收端、基线及原journal；不要再新建通用发布引擎。还需实际业务/writer/control读者、停写备份与隔离恢复、非PayPal恢复证据、完整成功/故障演练与整分支审查。当前首次CLI仍不存在，不能生产执行，Tasks4–6未完成。无生产SSH/安装/服务/DB/支付/PayPal/密钥操作，无PR/合并/部署；原`__pycache__`保留，自动化继续本线程。未运行应用全套、真实MySQL恢复或整分支独立审查。
+
+本批验证补充：原生产者默认实体模式也已退出0，日志`/tmp/holaday-coordinator-producers-ptrace-final.log`。首次QA调用漏加跨UID读取所需的容器`SYS_PTRACE`，在退役前读UID998的`/proc/cwd`报EACCES；按已有隔离配置补齐后通过，未放宽代码，也未使用宿主PID。失败日志`/tmp/holaday-coordinator-producers-final.log`保留。所有测试已退出。
+
 ### 2026-09-28 夜间续跑：接收端真实进程身份接入原观察器
 
 承接 `260710c0`，原Task4 BASE844c2ced不变。本批解决下方恢复点中**远端接收进程**被误判为未知的问题，不宣称所有执行进程已接齐。两个固定SSH接收端从自身`/proc`两次读取完整身份，核对固定入口/attempt argv、root UID、实际exe/cwd、启动时间、父PID、boot及cgroup。已固定SSH入口校验的执行包仍是来源信任边界，不防御已被攻破的root。会话句柄提供绑定原批准范围的身份副本；关闭、断连、过期或身份改变后拒绝继续使用。

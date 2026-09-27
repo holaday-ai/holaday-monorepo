@@ -150,6 +150,46 @@ test('ingress receiver identity stays independently bound to the live session', 
   assert.throws(() => client.readExecutionIdentity(), /UNPROVEN/);
 });
 
+test('ingress transport identity is bound to its owned child and refuses after detach', async (t) => {
+  const f = await pair(t);
+  const open = f.io.open;
+  const actual = {
+    bootId: execution.bootId,
+    process: { ...execution.process, pid: 920, exe: '/usr/bin/ssh' },
+  };
+  f.io.open = async (...args) => ({
+    ...(await open(...args)),
+    readIdentity: async () => structuredClone(actual),
+  });
+  const client = await f.connect();
+  assert.equal(typeof client.readTransportIdentity, 'function');
+  assert.deepEqual(await client.readTransportIdentity(), {
+    host: 'vultr',
+    role: 'ingress-ssh',
+    binding,
+    siteDigest,
+    ...actual,
+  });
+  await client.close();
+  await assert.rejects(client.readTransportIdentity(), /UNPROVEN/);
+});
+
+test('lost SSH identity closes the ingress wire without retrying an operation', async (t) => {
+  const f = await pair(t);
+  const open = f.io.open;
+  f.io.open = async (...args) => ({
+    ...(await open(...args)),
+    readIdentity: async () => {
+      throw Error('gone');
+    },
+  });
+  const client = await f.connect();
+  await assert.rejects(client.readTransportIdentity(), /UNPROVEN/);
+  assert.equal(f.toServer.writableEnded, true);
+  await assert.rejects(client.fenceOrders(), /UNPROVEN/);
+  assert.deepEqual(f.calls, []);
+});
+
 test('fixed SSH session fetches live journal facts and dispatches only the ingress lifecycle', async (t) => {
   const f = await pair(t);
   const client = await f.connect();

@@ -160,12 +160,11 @@ export async function readFirstCutoverHostPair(overrides = {}) {
             ],
           },
         ];
-    const results = await Promise.allSettled(
-      requests.map(async ({ host, args, command = 'ssh', channel = false }) => {
-        // This self-contained, existing collector is sent only through stdin; no
-        // arbitrary operation/target parameter or remote installation is accepted.
-        const envelope = { protocol: 1, requestId, host, sourceDigest };
-        const input = `${source.toString('utf8')}\ntry {
+    const read = async ({ host, args, command = 'ssh', channel = false }) => {
+      // This self-contained, existing collector is sent only through stdin; no
+      // arbitrary operation/target parameter or remote installation is accepted.
+      const envelope = { protocol: 1, requestId, host, sourceDigest };
+      const input = `${source.toString('utf8')}\ntry {
   process.env.GIT_OPTIONAL_LOCKS = '0';
   const readSource = async () => {
     if (${JSON.stringify(host)} !== 'vultr') return null;
@@ -182,24 +181,32 @@ export async function readFirstCutoverHostPair(overrides = {}) {
 } catch {
   process.stderr.write('CUTOVER_HOST_PAIR_UNPROVEN\\n'); process.exitCode = 1;
 }\n`;
-        const output = await io.exec(command, args, {
-          ...(channel ? {} : { input }),
-          shell: false,
-          maxBuffer: 16 * 1024 * 1024,
-        });
-        if (typeof output !== 'string' || Buffer.byteLength(output) > 16 * 1024 * 1024)
-          throw new Error('output');
-        const result = JSON.parse(output);
-        if (
-          !Object.entries(envelope).every(([key, value]) => result?.[key] === value) ||
-          (host === 'vultr'
-            ? !/^[a-f0-9]{40}$/.test(result.sourceCandidate ?? '')
-            : result.sourceCandidate !== null)
-        )
-          throw new Error('response');
-        return { host, sourceCandidate: result.sourceCandidate, snapshot: result.snapshot };
-      }),
-    );
+      const output = await io.exec(command, args, {
+        ...(channel ? {} : { input }),
+        shell: false,
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      if (typeof output !== 'string' || Buffer.byteLength(output) > 16 * 1024 * 1024)
+        throw new Error('output');
+      const result = JSON.parse(output);
+      if (
+        !Object.entries(envelope).every(([key, value]) => result?.[key] === value) ||
+        (host === 'vultr'
+          ? !/^[a-f0-9]{40}$/.test(result.sourceCandidate ?? '')
+          : result.sourceCandidate !== null)
+      )
+        throw new Error('response');
+      return { host, sourceCandidate: result.sourceCandidate, snapshot: result.snapshot };
+    };
+    const results = [];
+    if (rootChannel) {
+      // The local collector follows descendants of this coordinator. Finish
+      // the transient observe SSH first so it cannot appear/disappear midway
+      // through that snapshot. Still settle both reads once, never retry.
+      for (const request of requests) results.push(...(await Promise.allSettled([read(request)])));
+    } else {
+      results.push(...(await Promise.allSettled(requests.map(read))));
+    }
     if (results.some((result) => result.status !== 'fulfilled')) throw new Error('transport');
     const hosts = results.map((result) => result.value);
     const now = io.now();
@@ -241,9 +248,14 @@ export async function readFirstCutoverHostPair(overrides = {}) {
  * observation time or the collector process. No raw environment leaves here.
  */
 export async function readReviewedFirstCutoverLegacySource(input, overrides = {}) {
-  const io = { readPair: readFirstCutoverHostPair, now: Date.now, ...overrides };
+  const io = {
+    readPair: readFirstCutoverHostPair,
+    readExecutionIdentities: async () => [],
+    now: Date.now,
+    ...overrides,
+  };
   try {
-    const { reviews, inventoryDigest } = structuredClone(input);
+    const { reviews, inventoryDigest, binding } = structuredClone(input);
     if (
       !/^[a-f0-9]{64}$/.test(inventoryDigest ?? '') ||
       !reviews ||
@@ -253,7 +265,21 @@ export async function readReviewedFirstCutoverLegacySource(input, overrides = {}
     )
       throw new Error('review');
     const began = io.now();
+    const execution = structuredClone(await io.readExecutionIdentities());
     const pair = await io.readPair();
+    if (
+      !Array.isArray(execution) ||
+      !isDeepStrictEqual(execution, await io.readExecutionIdentities()) ||
+      execution.some((receipt) => !binding || !isDeepStrictEqual(receipt.binding, binding)) ||
+      (execution.length &&
+        (Object.keys(binding).length !== 5 ||
+          !uuid(binding.attempt) ||
+          !/^[a-f0-9]{40}$/.test(binding.candidate ?? '') ||
+          !/^[a-f0-9]{64}$/.test(binding.configDigest ?? '') ||
+          !/^[a-f0-9]{64}$/.test(binding.migrationDigest ?? '') ||
+          binding.inventoryDigest !== inventoryDigest))
+    )
+      throw new Error('execution');
     const now = io.now();
     if (
       !Number.isSafeInteger(began) ||
@@ -266,7 +292,7 @@ export async function readReviewedFirstCutoverLegacySource(input, overrides = {}
     )
       throw new Error('source');
     const actual = classifyFirstCutoverHostPair(
-      { pair, reviews, inventoryDigest },
+      { pair, reviews, inventoryDigest, execution },
       { now: () => now },
     );
     if (actual.unknownLaunchers.length) throw new Error('unreviewed');
@@ -429,10 +455,21 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       !isDeepStrictEqual(await io.readFenceReceipts(), [])
     )
       fail();
-    const baseline = structuredClone(await io.readPair());
+    let baseline;
+    let baselineExecution;
     const proof = await readReviewedFirstCutoverLegacySource(
-      { reviews, inventoryDigest: binding.inventoryDigest },
-      { readPair: async () => baseline, now: io.now },
+      { reviews, inventoryDigest: binding.inventoryDigest, binding },
+      {
+        readPair: async () => {
+          baseline = structuredClone(await io.readPair());
+          return baseline;
+        },
+        readExecutionIdentities: async () => {
+          baselineExecution = structuredClone(await io.readExecutionIdentities());
+          return baselineExecution;
+        },
+        now: io.now,
+      },
     );
     if (
       proof.legacyDigest !== legacyDigest ||
@@ -482,6 +519,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         const result = classifyFirstCutoverRetirementPair(
           {
             baseline,
+            baselineExecution,
             pair,
             reviews,
             inventoryDigest: binding.inventoryDigest,

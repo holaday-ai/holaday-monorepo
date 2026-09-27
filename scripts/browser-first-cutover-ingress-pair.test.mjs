@@ -95,6 +95,23 @@ async function fixture(t) {
       return action === 'restore' ? undefined : proof(stage);
     };
     return {
+      readTransportIdentity: async () => ({
+        host: 'vultr',
+        binding,
+        siteDigest: approval.remoteSiteDigest,
+        role: 'ingress-ssh',
+        bootId: '11111111-1111-4111-8111-111111111111',
+        process: {
+          pid: 920,
+          ppid: 900,
+          start: '100',
+          uids: [0, 0, 0, 0],
+          cwd: '/',
+          exe: '/usr/bin/ssh',
+          argvDigest: '7'.repeat(64),
+          cgroup: '0::/qa\n',
+        },
+      }),
       readExecutionIdentity: () => ({
         host,
         binding,
@@ -212,6 +229,7 @@ async function fixture(t) {
 test('pair exposes receiver proof during an in-flight fence without recursively using its stream', async (t) => {
   const f = await fixture(t);
   const pair = await f.start();
+  assert.equal(typeof pair.readTransportIdentity, 'function');
   let observations = 0;
   f.change.after = async () => {
     const [receipt] = pair.readExecutionIdentities();
@@ -219,6 +237,10 @@ test('pair exposes receiver proof during an in-flight fence without recursively 
     assert.equal(receipt.process.pid, 910);
     assert.deepEqual(receipt.binding, f.binding);
     assert.equal(receipt.siteDigest, f.approval.remoteSiteDigest);
+    const transport = await pair.readTransportIdentity();
+    assert.equal(transport.host, 'vultr');
+    assert.equal(transport.process.pid, 920);
+    assert.deepEqual(transport.binding, f.binding);
     observations++;
   };
   await f.advance('orders_fenced');
@@ -226,6 +248,7 @@ test('pair exposes receiver proof during an in-flight fence without recursively 
   assert.equal(observations, 2);
   f.setTime(9000);
   assert.throws(() => pair.readExecutionIdentities(), /UNPROVEN/);
+  await assert.rejects(pair.readTransportIdentity(), /UNPROVEN/);
 });
 
 test('one journal drives both fixed hosts and preserves host-tagged receipts', async (t) => {

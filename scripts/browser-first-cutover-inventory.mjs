@@ -20,6 +20,12 @@ const lines = (text) => {
     .filter(Boolean)
     .sort();
 };
+const executionHost = (role) =>
+  ['ingress', 'gateway'].includes(role)
+    ? 'aliyun'
+    : ['ingress-ssh', 'gateway-ssh'].includes(role)
+      ? 'vultr'
+      : null;
 
 /** Reconcile completed, named-host registration retirements against the ORIGINAL
  * reviewed snapshot. The host obtains effects from its owned live journal. This
@@ -29,6 +35,7 @@ const lines = (text) => {
 export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }) {
   const {
     baseline,
+    baselineExecution = [],
     pair,
     reviews,
     inventoryDigest,
@@ -41,7 +48,8 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
   } = structuredClone(input);
   if (
     !Array.isArray(execution) ||
-    execution.some(
+    !Array.isArray(baselineExecution) ||
+    [...execution, ...baselineExecution].some(
       (row) =>
         !equal(
           row.binding,
@@ -150,7 +158,7 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
   if (unmanaged.length) {
     const intent = unmanaged[0];
     const original = classifyFirstCutoverHostPair(
-      { pair: baseline, reviews, inventoryDigest },
+      { pair: baseline, reviews, inventoryDigest, execution: baselineExecution },
       { now: () => baseline.observedAtMs },
     );
     const snapshot = baseline.hosts.find((h) => h.host === 'aliyun').snapshot;
@@ -436,13 +444,13 @@ export function classifyFirstCutoverHostPair(input, io = { now: Date.now }) {
     fail();
   if (
     !Array.isArray(execution) ||
-    execution.length > 2 ||
+    execution.length > 4 ||
     new Set(execution.map((r) => `${r.host}:${r.role}`)).size !== execution.length ||
     execution.some(
       (r) =>
         !r ||
-        r.host !== 'aliyun' ||
-        !['gateway', 'ingress'].includes(r.role) ||
+        !executionHost(r.role) ||
+        r.host !== executionHost(r.role) ||
         r.binding?.inventoryDigest !== inventoryDigest ||
         !hash(r.siteDigest),
     )
@@ -699,11 +707,10 @@ export function classifyFirstCutoverHost(input, io = { now: Date.now }) {
   for (const receipt of execution) {
     const p = s.processes.find((row) => row.pid === receipt.process?.pid);
     // No removal from the snapshot and no implicit child exemption. Only the
-    // exact owned receiver can be separate from immutable legacy review rows.
+    // exact owned receiver/client can be separate from immutable legacy reviews.
     if (
       receipt.host !== host ||
-      host !== 'aliyun' ||
-      !['gateway', 'ingress'].includes(receipt.role) ||
+      host !== executionHost(receipt.role) ||
       receipt.bootId !== s.bootId ||
       receipt.binding?.inventoryDigest !== inventoryDigest ||
       !hash(receipt.siteDigest) ||
@@ -711,7 +718,7 @@ export function classifyFirstCutoverHost(input, io = { now: Date.now }) {
       !equal(p, receipt.process) ||
       !equal(p.uids, [0, 0, 0, 0]) ||
       p.cwd !== '/' ||
-      p.exe !== '/usr/bin/node' ||
+      p.exe !== (host === 'vultr' ? '/usr/bin/ssh' : '/usr/bin/node') ||
       !hash(p.argvDigest) ||
       typeof p.cgroup !== 'string' ||
       !p.cgroup ||

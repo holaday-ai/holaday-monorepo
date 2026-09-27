@@ -172,6 +172,38 @@ test('root channel refuses wrong platform, non-root and unknown transport before
   }
 });
 
+test('root observation waits for transient remote SSH to exit before collecting its own host', async () => {
+  for (const remoteFails of [false, true]) {
+    let remoteLive = false;
+    let overlap = false;
+    const f = fixture(async (reply, name) => {
+      reply.requestId = nonce.replaceAll('-', '');
+      if (name === 'aliyun') {
+        remoteLive = true;
+        await new Promise((resolve) => setImmediate(resolve));
+        remoteLive = false;
+        if (remoteFails) throw new Error('remote failed');
+      } else {
+        overlap = remoteLive;
+      }
+    });
+    const result = host.readFirstCutoverHostPair({
+      ...f.io,
+      transport: 'root-channel',
+      platform: 'linux',
+      uid: 0,
+    });
+    if (remoteFails) await assert.rejects(result, /CUTOVER_HOST_PAIR_UNPROVEN/);
+    else await result;
+    assert.equal(
+      overlap,
+      false,
+      'transient observer transport must not enter local process inventory',
+    );
+    assert.equal(f.calls.length, 2, 'both reads settle once, even on remote failure');
+  }
+});
+
 for (const [name, change] of [
   [
     'old request',

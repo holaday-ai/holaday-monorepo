@@ -78,7 +78,7 @@ export function assertFirstCutoverSessionIdentity(value, role) {
   if (
     !keys(value, ['role', 'bootId', 'process']) ||
     value.role !== role ||
-    !['ingress', 'gateway'].includes(role) ||
+    !['ingress', 'gateway', 'ingress-ssh', 'gateway-ssh'].includes(role) ||
     !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value.bootId ?? '') ||
     !keys(p, ['pid', 'ppid', 'start', 'uids', 'cwd', 'exe', 'argvDigest', 'cgroup']) ||
     !Number.isSafeInteger(p.pid) ||
@@ -88,7 +88,7 @@ export function assertFirstCutoverSessionIdentity(value, role) {
     !/^[0-9]+$/.test(p.start ?? '') ||
     !isDeepStrictEqual(p.uids, [0, 0, 0, 0]) ||
     p.cwd !== '/' ||
-    p.exe !== '/usr/bin/node' ||
+    p.exe !== (role.endsWith('-ssh') ? '/usr/bin/ssh' : '/usr/bin/node') ||
     !hash(p.argvDigest) ||
     typeof p.cgroup !== 'string' ||
     !p.cgroup ||
@@ -477,19 +477,94 @@ export async function serveFirstCutoverIngressSession({ attempt }, overrides = {
   }
 }
 
-function openSsh(file, args, options) {
-  const child = spawn(file, args, { ...options, stdio: ['pipe', 'pipe', 'pipe'] });
+// Internal spawn boundary shared by the two fixed clients. Identity always comes
+// from this owned ChildProcess, never an uploaded PID or a process-name allowlist.
+export function openFirstCutoverSsh(file, args, options) {
+  if (process.platform !== 'linux' || process.getuid?.() !== 0 || file !== '/usr/bin/ssh') fail();
+  const argv = [file, ...args];
+  const child = spawn(file, args, { ...options, cwd: '/', stdio: ['pipe', 'pipe', 'pipe'] });
+  let ended = false;
+  let identity;
   // Drain diagnostics without exposing credentials/configuration to the caller.
   child.stderr.resume();
   const completion = new Promise((resolve) => {
     child.once('error', () => {
+      ended = true;
       child.stdout.destroy();
       child.stdin.destroy();
       resolve({ code: 1 });
     });
-    child.once('close', (code, signal) => resolve({ code: signal ? 1 : code }));
+    child.once('close', (code, signal) => {
+      ended = true;
+      resolve({ code: signal ? 1 : code });
+    });
   });
-  return { input: child.stdout, output: child.stdin, completion };
+  const read = async () => {
+    if (ended || !child.pid || child.exitCode !== null || child.signalCode !== null) fail();
+    const root = `/proc/${child.pid}`;
+    const stat = await fs.readFile(`${root}/stat`, 'utf8');
+    if (!stat.startsWith(`${child.pid} (`)) fail();
+    const fields = stat
+      .slice(stat.lastIndexOf(')') + 2)
+      .trim()
+      .split(/\s+/);
+    const status = await fs.readFile(`${root}/status`, 'utf8');
+    const cmdline = await fs.readFile(`${root}/cmdline`);
+    const value = {
+      bootId: (await fs.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim(),
+      process: {
+        pid: child.pid,
+        ppid: Number(fields[1]),
+        start: fields[19],
+        uids: /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m.exec(status)?.slice(1).map(Number),
+        cwd: await fs.readlink(`${root}/cwd`),
+        exe: await fs.readlink(`${root}/exe`),
+        argvDigest: createHash('sha256').update(cmdline).digest('hex'),
+        cgroup: await fs.readFile(`${root}/cgroup`, 'utf8'),
+      },
+    };
+    if (
+      ended ||
+      fields[0] === 'Z' ||
+      value.process.ppid !== process.pid ||
+      !Buffer.from(`${argv.join('\0')}\0`).equals(cmdline)
+    )
+      fail();
+    assertFirstCutoverSessionIdentity({ ...value, role: 'ingress-ssh' }, 'ingress-ssh');
+    return value;
+  };
+  return {
+    input: child.stdout,
+    output: child.stdin,
+    completion,
+    readIdentity: async () => {
+      try {
+        const actual = await read();
+        if (
+          !isDeepStrictEqual(actual, await read()) ||
+          (identity && !isDeepStrictEqual(identity, actual))
+        )
+          fail();
+        identity = actual;
+        return structuredClone(actual);
+      } catch {
+        fail();
+      }
+    },
+  };
+}
+
+export async function readFirstCutoverTransportIdentity(connection, expected, role) {
+  const actual = structuredClone(await connection.readIdentity());
+  if (!keys(actual, ['bootId', 'process'])) fail();
+  assertFirstCutoverSessionIdentity({ ...actual, role }, role);
+  return {
+    host: 'vultr',
+    binding: structuredClone(expected.binding),
+    siteDigest: expected.siteDigest,
+    role,
+    ...actual,
+  };
 }
 
 export async function connectFirstCutoverIngressSession(input, overrides = {}) {
@@ -497,7 +572,7 @@ export async function connectFirstCutoverIngressSession(input, overrides = {}) {
     platform: process.platform,
     uid: process.getuid?.(),
     now: Date.now,
-    open: openSsh,
+    open: openFirstCutoverSsh,
     ...overrides,
   };
   let channel;
@@ -700,6 +775,24 @@ export async function connectFirstCutoverIngressSession(input, overrides = {}) {
       fail();
     assertFirstCutoverSessionIdentity(attached.execution, 'ingress');
     return {
+      readTransportIdentity: async () => {
+        try {
+          if (failed) fail();
+          channel.assert();
+          const value = await readFirstCutoverTransportIdentity(
+            connection,
+            expected,
+            'ingress-ssh',
+          );
+          if (failed) fail();
+          channel.assert();
+          return value;
+        } catch {
+          failed = true;
+          channel.close();
+          fail();
+        }
+      },
       readExecutionIdentity: () => {
         if (failed) fail();
         channel.assert();
@@ -997,6 +1090,32 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
             'ingress',
           );
           return [structuredClone(receipt)];
+        } catch {
+          failed = true;
+          reject();
+        }
+      },
+      // Local /proc only: safe even while a writer callback owns the SSH wire.
+      readTransportIdentity: async () => {
+        try {
+          if (failed || closed) reject();
+          clock();
+          const receipt = await remote.readTransportIdentity();
+          if (
+            failed ||
+            closed ||
+            receipt.host !== 'vultr' ||
+            receipt.role !== 'ingress-ssh' ||
+            receipt.siteDigest !== scope.remoteSiteDigest ||
+            !isDeepStrictEqual(receipt.binding, args.binding)
+          )
+            reject();
+          clock();
+          assertFirstCutoverSessionIdentity(
+            { role: receipt.role, bootId: receipt.bootId, process: receipt.process },
+            'ingress-ssh',
+          );
+          return structuredClone(receipt);
         } catch {
           failed = true;
           reject();

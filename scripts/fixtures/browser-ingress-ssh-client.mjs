@@ -1,11 +1,11 @@
 // Real authenticated SSH attach/validation in a disposable container, not deployment.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { describeCutoverSite } from '/source/browser-first-cutover-fence.mjs';
 import { connectFirstCutoverGatewaySession } from '/source/browser-first-cutover-gateway-session.mjs';
-import { connectFirstCutoverIngressSession } from '/source/browser-first-cutover-ingress-session.mjs';
+import * as sessions from '/source/browser-first-cutover-ingress-session.mjs';
+const { connectFirstCutoverIngressSession } = sessions;
 import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 
 await fs.access('/.dockerenv');
@@ -88,7 +88,8 @@ const io = {
     connects++;
     assert.equal(command, '/usr/bin/ssh');
     assert.equal(args.at(-2), 'root@47.99.169.186');
-    const child = spawn(
+    assert.equal(typeof sessions.openFirstCutoverSsh, 'function');
+    return sessions.openFirstCutoverSsh(
       command,
       [
         '-F',
@@ -115,16 +116,31 @@ const io = {
         'root@127.0.0.1',
         args.at(-1),
       ],
-      { ...options, stdio: ['pipe', 'pipe', 'pipe'] },
+      options,
     );
-    child.stderr.resume();
-    const completion = new Promise((resolve) => child.once('close', (code) => resolve({ code })));
-    return { input: child.stdout, output: child.stdin, completion };
   },
 };
 try {
   const expected = { binding, maintenanceEndsAtMs, siteDigest: hash(scopeBytes) };
   const client = await connectFirstCutoverIngressSession(expected, io);
+  const checkTransport = async (client, role) => {
+    const receipt = await client.readTransportIdentity();
+    assert.equal(receipt.host, 'vultr');
+    assert.equal(receipt.role, `${role}-ssh`);
+    assert.deepEqual(receipt.binding, binding);
+    assert.equal(receipt.process.ppid, process.pid);
+    assert.equal(receipt.process.exe, '/usr/bin/ssh');
+    assert.equal(receipt.process.cwd, '/');
+    assert.deepEqual(receipt.process.uids, [0, 0, 0, 0]);
+    assert.equal(
+      receipt.process.argvDigest,
+      hash(await fs.readFile(`/proc/${receipt.process.pid}/cmdline`)),
+    );
+    const copy = structuredClone(receipt);
+    receipt.process.start = '0';
+    assert.deepEqual(await client.readTransportIdentity(), copy);
+  };
+  await checkTransport(client, 'ingress');
   const ingressExecutor = client.readExecutionIdentity();
   assert.equal(ingressExecutor.role, 'ingress');
   assert.equal(ingressExecutor.process.exe, '/usr/bin/node');
@@ -134,6 +150,7 @@ try {
   );
   assert.equal(await client.readFenceReceipt(), undefined);
   await client.close();
+  await assert.rejects(client.readTransportIdentity(), /UNPROVEN/);
   // Receiver must independently reject a changed application-writable approval.
   await fs.chmod(`${directory}/first-cutover-ingress-approved.json`, 0o644);
   await assert.rejects(
@@ -180,6 +197,7 @@ try {
   };
   const gatewayExpected = { binding, maintenanceEndsAtMs, siteDigest: hash(gatewayBytes) };
   const gatewayClient = await connectFirstCutoverGatewaySession(gatewayExpected, gatewayIO);
+  await checkTransport(gatewayClient, 'gateway');
   const gatewayExecutor = gatewayClient.readExecutionIdentity();
   assert.equal(gatewayExecutor.role, 'gateway');
   assert.equal(
@@ -187,6 +205,7 @@ try {
     hash(await fs.readFile(`/proc/${gatewayExecutor.process.pid}/cmdline`)),
   );
   await gatewayClient.close();
+  await assert.rejects(gatewayClient.readTransportIdentity(), /UNPROVEN/);
   await fs.chmod(gatewayPath, 0o644);
   await assert.rejects(
     connectFirstCutoverGatewaySession(gatewayExpected, gatewayIO),

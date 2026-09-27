@@ -37,6 +37,7 @@ assert.ok(
         '--gateways',
         '--gateways-lost-ack',
         '--gateway-session',
+        '--gateway-session-baseline',
         '--gateway-session-lost-ack',
         '--gateway-session-observed-executor',
       ].includes(process.argv[2])),
@@ -45,6 +46,7 @@ const lostAck = process.argv[2] === '--gateways-lost-ack';
 const sessionMode = process.argv[2]?.startsWith('--gateway-session');
 const sessionLostAck = process.argv[2] === '--gateway-session-lost-ack';
 const observeExecutor = process.argv[2] === '--gateway-session-observed-executor';
+const attachedBaseline = process.argv[2] === '--gateway-session-baseline';
 const gateways = process.argv.length === 3;
 const mainPort = gateways ? 4010 : 4001;
 const mainName = gateways ? 'holaday-cn-payment' : 'holaday-account-closure-worker';
@@ -385,25 +387,35 @@ try {
     migrationDigest: sha('[]'),
     legacyDigest: proof.legacyDigest,
   });
-  const observer = await createFirstCutoverRetirementObserver(
-    { reviews, binding: await journal.assertOwnership(), legacyDigest: proof.legacyDigest },
-    {
-      journal,
-      readPair,
-      readExecutionIdentities: async () =>
-        client && !observeExecutor ? [client.readExecutionIdentity()] : [],
-    },
-  );
+  const createObserver = async () =>
+    createFirstCutoverRetirementObserver(
+      { reviews, binding: await journal.assertOwnership(), legacyDigest: proof.legacyDigest },
+      {
+        journal,
+        readPair,
+        readExecutionIdentities: async () =>
+          client && !observeExecutor ? [client.readExecutionIdentity()] : [],
+      },
+    );
+  let observer = attachedBaseline ? undefined : await createObserver();
   await journal.bindManifest([]);
-  for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
-    await journal.persist(phase, { candidate: 'b'.repeat(40) });
+  const advanceToPrepare = async () => {
+    for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
+      await journal.persist(phase, { candidate: 'b'.repeat(40) });
+  };
+  if (!attachedBaseline) await advanceToPrepare();
   if (gateways) {
     const input = { files, binding, maintenanceEndsAtMs: Date.now() + 60000 };
     const io = {
       now: Date.now,
       sleep,
       journal,
-      observer,
+      observer: {
+        read: (...args) => observer.read(...args),
+        readRegistrationProgress: (...args) => observer.readRegistrationProgress(...args),
+        readUnmanagedProgress: (...args) => observer.readUnmanagedProgress(...args),
+        retireUnmanaged: (...args) => observer.retireUnmanaged(...args),
+      },
       // Business facts are explicitly synthetic; proc/files/PM2/journal/pidfd are real.
       verifyFence: async () => ({
         inventoryDigest: binding.inventoryDigest,
@@ -475,6 +487,14 @@ try {
             completion: receiverCompletion,
           }),
         },
+      );
+    }
+    if (attachedBaseline) {
+      observer = await createObserver();
+      assert.equal((await observer.read()).unknownLaunchers.length, 0);
+      await advanceToPrepare();
+      console.log(
+        'PASS physical baseline after receiver attachment, original legacy digest unchanged',
       );
     }
     if (observeExecutor) {

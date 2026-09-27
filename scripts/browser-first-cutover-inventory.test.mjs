@@ -166,7 +166,7 @@ async function readLegacy(f, now = 1000) {
   );
 }
 
-async function retirementFixture(t, setup = () => {}) {
+async function retirementFixture(t, setup = () => {}, beforeBaseline = () => {}) {
   const f = pairFixture();
   setup(f);
   const proof = await readLegacy(f);
@@ -190,6 +190,7 @@ async function retirementFixture(t, setup = () => {}) {
   });
   t.after(() => journal.close());
   const binding = await journal.assertOwnership();
+  beforeBaseline(f, binding);
   assert.equal(typeof firstHost.createFirstCutoverRetirementObserver, 'function');
   const observer = await firstHost.createFirstCutoverRetirementObserver(
     {
@@ -263,6 +264,96 @@ function addReceiver(f, binding) {
     },
   ];
   return { snapshot, process, receipt: f.execution[0] };
+}
+
+function addTransport(f, binding) {
+  const snapshot = f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+  const process = {
+    pid: 920,
+    ppid: 900,
+    start: '100',
+    uids: [0, 0, 0, 0],
+    exe: '/usr/bin/ssh',
+    cwd: '/',
+    argvDigest: '7'.repeat(64),
+    cgroup: '0::/qa\n',
+  };
+  snapshot.processes.push(process);
+  const receipt = {
+    host: 'vultr',
+    binding,
+    siteDigest: '9'.repeat(64),
+    role: 'gateway-ssh',
+    bootId: snapshot.bootId,
+    process: structuredClone(process),
+  };
+  f.execution = [...(f.execution ?? []), receipt];
+  return { snapshot, process, receipt };
+}
+
+test('owned persistent SSH is attributed on Vultr before baseline and throughout retirement', async (t) => {
+  const { f, observer, remove } = await retirementFixture(t, undefined, addTransport);
+  await remove();
+  const actual = await observer.read();
+  assert.deepEqual(actual.unknownLaunchers, []);
+  assert.deepEqual(
+    actual.hosts.find((h) => h.host === 'vultr').executionProcesses.map((p) => p.pid),
+    [920],
+  );
+  assert.equal(
+    f.reviews.vultr.review.processes.some((p) => p.pid === 920),
+    false,
+  );
+});
+
+for (const fault of ['host', 'exe', 'child', 'listener', 'missing', 'parent', 'binding']) {
+  test(`persistent SSH classification refuses ${fault} changes`, async (t) => {
+    const { f, binding, observer } = await retirementFixture(t);
+    const { snapshot, process, receipt } = addTransport(f, structuredClone(binding));
+    if (fault === 'host') receipt.host = 'aliyun';
+    if (fault === 'exe') {
+      process.exe = '/usr/bin/node';
+      receipt.process.exe = process.exe;
+    }
+    if (fault === 'parent') process.ppid++;
+    if (fault === 'binding') receipt.binding.candidate = 'f'.repeat(40);
+    if (fault === 'child') snapshot.processes.push({ ...process, pid: 921, ppid: 920 });
+    if (fault === 'missing') snapshot.processes = snapshot.processes.filter((p) => p.pid !== 920);
+    if (fault === 'listener')
+      snapshot.listeners += 'LISTEN 0 511 0.0.0.0:9999 0.0.0.0:* users:(("ssh",pid=920,fd=1))\n';
+    await assert.rejects(observer.read(), /UNPROVEN/);
+  });
+}
+
+test('already attached receiver does not invalidate the original approved legacy digest at observer construction', async (t) => {
+  const { f, observer, journal } = await retirementFixture(t, undefined, addReceiver);
+  const before = await journal.readFirstCutoverEffects();
+  const actual = await observer.read();
+  assert.deepEqual(actual.unknownLaunchers, []);
+  assert.equal(actual.hosts.find((h) => h.host === 'aliyun').executionProcesses[0].pid, 910);
+  assert.equal(
+    f.reviews.aliyun.review.processes.some((p) => p.pid === 910),
+    false,
+  );
+  assert.deepEqual(await journal.readFirstCutoverEffects(), before);
+});
+
+for (const fault of ['attempt', 'candidate', 'drift', 'unowned']) {
+  test(`observer baseline refuses ${fault} execution evidence before starting retirement`, async (t) => {
+    await assert.rejects(
+      retirementFixture(t, undefined, (f, binding) => {
+        const { receipt } = addReceiver(f, structuredClone(binding));
+        if (fault === 'attempt') receipt.binding.attempt = '22222222-2222-4222-8222-222222222222';
+        if (fault === 'candidate') receipt.binding.candidate = 'f'.repeat(40);
+        if (fault === 'unowned') f.execution = [];
+        if (fault === 'drift')
+          f.onRead = () => {
+            f.execution = [];
+          };
+      }),
+      /CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN/,
+    );
+  });
 }
 
 test('owned gateway receiver remains visible without changing original legacy reviews or journal binding', async (t) => {
@@ -517,9 +608,13 @@ function withUnmanagedGateway(f) {
 }
 
 test('observed unmanaged retirement composes capture, intent, pinned signal, double observation and completion', async (t) => {
-  for (const mode of ['success', 'signal-error', 'busy'])
+  for (const mode of ['success', 'attached-baseline', 'signal-error', 'busy'])
     await t.test(mode, async (t) => {
-      const r = await retirementFixture(t, withUnmanagedGateway);
+      const r = await retirementFixture(
+        t,
+        withUnmanagedGateway,
+        mode === 'attached-baseline' ? addReceiver : undefined,
+      );
       await r.journal.persist('all_fenced', { candidate: r.binding.candidate });
       await r.journal.persist('stopped', { candidate: r.binding.candidate });
       const s = r.f.pair.hosts.find((h) => h.host === 'aliyun').snapshot;
@@ -548,7 +643,7 @@ test('observed unmanaged retirement composes capture, intent, pinned signal, dou
         },
       };
       assert.equal(typeof r.observer.retireUnmanaged, 'function');
-      if (mode === 'success') {
+      if (mode === 'success' || mode === 'attached-baseline') {
         const result = await r.observer.retireUnmanaged({ maintenanceEndsAtMs: 5000 }, io);
         assert.equal(result.phase, 'stopped');
         assert.equal(signals, 1);

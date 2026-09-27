@@ -1,12 +1,13 @@
-import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual as equal } from 'node:util';
 import {
   assertFirstCutoverSessionIdentity,
   createFirstCutoverSessionWire,
+  openFirstCutoverSsh,
   readFirstCutoverGatewaySite,
   readFirstCutoverSessionIdentity,
+  readFirstCutoverTransportIdentity,
 } from './browser-first-cutover-ingress-session.mjs';
 import {
   prepareLocalFirstCutoverGateway,
@@ -203,27 +204,13 @@ export async function serveFirstCutoverGatewaySession({ attempt }, overrides = {
   }
 }
 
-function open(file, argv, options) {
-  const child = spawn(file, argv, { ...options, stdio: ['pipe', 'pipe', 'pipe'] });
-  child.stderr.resume();
-  const completion = new Promise((resolve) => {
-    child.once('error', () => {
-      child.stdout.destroy();
-      child.stdin.destroy();
-      resolve({ code: 1 });
-    });
-    child.once('close', (code, signal) => resolve({ code: signal ? 1 : code }));
-  });
-  return { input: child.stdout, output: child.stdin, completion };
-}
-
 export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
   const io = {
     platform: process.platform,
     uid: process.getuid?.(),
     now: Date.now,
     sleep,
-    open,
+    open: openFirstCutoverSsh,
     ...overrides,
   };
   let channel;
@@ -497,6 +484,24 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
     };
     await run('attach');
     return {
+      readTransportIdentity: async () => {
+        try {
+          if (failed) fail();
+          channel.assert();
+          const value = await readFirstCutoverTransportIdentity(
+            connection,
+            expected,
+            'gateway-ssh',
+          );
+          if (failed) fail();
+          channel.assert();
+          return value;
+        } catch {
+          failed = true;
+          channel.close();
+          fail();
+        }
+      },
       readExecutionIdentity: () => {
         if (failed) fail();
         channel.assert();
