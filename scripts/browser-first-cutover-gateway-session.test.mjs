@@ -12,6 +12,20 @@ const binding = {
   migrationDigest: 'c'.repeat(64),
   inventoryDigest: 'd'.repeat(64),
 };
+const execution = {
+  role: 'gateway',
+  bootId: '11111111-1111-4111-8111-111111111111',
+  process: {
+    pid: 910,
+    ppid: 900,
+    start: '100',
+    uids: [0, 0, 0, 0],
+    cwd: '/',
+    exe: '/usr/bin/node',
+    argvDigest: '8'.repeat(64),
+    cgroup: '0::/qa\n',
+  },
+};
 test('protected gateway scope pins startup paths, file mode and independent attempt approval', async (t) => {
   assert.equal(typeof api.readFirstCutoverGatewaySite, 'function');
   const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'holaday-gateway-scope-')));
@@ -80,6 +94,7 @@ async function pair(t, mode = '') {
   const input = { binding, maintenanceEndsAtMs: Date.now() + 30000, siteDigest: 'e'.repeat(64) };
   const site = { ...input, startupFiles: [] };
   let siteChanged = false;
+  let identityReads = 0;
   let phase = 'producers_stopped';
   const events = [];
   const actions = [];
@@ -91,6 +106,12 @@ async function pair(t, mode = '') {
       {
         input: upstream,
         output: downstream,
+        readIdentity: async () => {
+          const value = structuredClone(execution);
+          if (mode === 'bad-identity') value.process.uids = [998, 998, 998, 998];
+          if (mode === 'identity-drift' && ++identityReads > 2) value.process.start = '101';
+          return value;
+        },
         readSite: async () => {
           if (mode === 'reject-site') throw new Error('private scope');
           return siteChanged ? { ...site, siteDigest: 'f'.repeat(64) } : site;
@@ -229,6 +250,28 @@ async function pair(t, mode = '') {
     connect: () => api.connectFirstCutoverGatewaySession(input, io),
   };
 }
+
+test('live gateway exposes its exact independently captured receiver identity, not a mutable receipt', async (t) => {
+  const f = await pair(t);
+  const client = await f.connect();
+  const proof = client.readExecutionIdentity();
+  assert.deepEqual(proof, { host: 'aliyun', binding, siteDigest: 'e'.repeat(64), ...execution });
+  proof.process.pid = 123;
+  assert.equal(client.readExecutionIdentity().process.pid, 910);
+  await client.close();
+  assert.throws(() => client.readExecutionIdentity(), /UNPROVEN/);
+});
+
+test('non-root receiver identity and later kernel identity drift cannot precede a gateway effect', async (t) => {
+  const bad = await pair(t, 'bad-identity');
+  await assert.rejects(bad.connect(), /UNPROVEN/);
+  assert.deepEqual(bad.actions, []);
+  const drift = await pair(t, 'identity-drift');
+  const client = await drift.connect();
+  await assert.rejects(client.prepare(), /UNPROVEN/);
+  assert.deepEqual(drift.actions, []);
+  assert.throws(() => client.readExecutionIdentity(), /UNPROVEN/);
+});
 test('gateway session retains original journal writes and original observer orchestration through nested pinned effects', async (t) => {
   const f = await pair(t);
   const client = await f.connect();

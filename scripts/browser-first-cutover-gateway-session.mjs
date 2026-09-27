@@ -3,8 +3,10 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual as equal } from 'node:util';
 import {
+  assertFirstCutoverSessionIdentity,
   createFirstCutoverSessionWire,
   readFirstCutoverGatewaySite,
+  readFirstCutoverSessionIdentity,
 } from './browser-first-cutover-ingress-session.mjs';
 import {
   prepareLocalFirstCutoverGateway,
@@ -64,6 +66,7 @@ export async function serveFirstCutoverGatewaySession({ attempt }, overrides = {
     now: Date.now,
     sleep,
     readSite: readFirstCutoverGatewaySite,
+    readIdentity: readFirstCutoverSessionIdentity,
     prepare: prepareLocalFirstCutoverGateway,
     retire: retireLocalFirstCutoverGateways,
     ...overrides,
@@ -74,6 +77,8 @@ export async function serveFirstCutoverGatewaySession({ attempt }, overrides = {
     const site = structuredClone(await io.readSite({ attempt }));
     validate(site, io.now());
     if (site.binding.attempt !== attempt) fail();
+    const execution = await io.readIdentity({ role: 'gateway', attempt });
+    assertFirstCutoverSessionIdentity(execution, 'gateway');
     channel = createFirstCutoverSessionWire(io.input, io.output, site.maintenanceEndsAtMs, io.now);
     const used = new Set();
     let sequence = 0;
@@ -91,6 +96,7 @@ export async function serveFirstCutoverGatewaySession({ attempt }, overrides = {
         fail();
       used.add(request.name);
       if (!equal(await io.readSite({ attempt }), site)) fail();
+      if (!equal(await io.readIdentity({ role: 'gateway', attempt }), execution)) fail();
       let factSequence = 0;
       let signalSequence = 0;
       const fact = async (name, value = null, signal = undefined) => {
@@ -140,6 +146,7 @@ export async function serveFirstCutoverGatewaySession({ attempt }, overrides = {
           binding: site.binding,
           maintenanceEndsAtMs: site.maintenanceEndsAtMs,
           siteDigest: site.siteDigest,
+          execution,
         };
       } else if (request.name === 'detach') {
         await channel.write({ protocol: 1, type: 'result', seq, value: null });
@@ -298,6 +305,7 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
       io.now,
     );
     let sequence = 0;
+    let execution;
     const used = new Set();
     const run = async (name) => {
       if (failed || busy || used.has(name)) fail();
@@ -418,7 +426,18 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
           if (!keys(response, ['protocol', 'type', 'seq', 'value'])) fail();
           await ownership();
           const r = response.value;
-          if (name === 'attach' && !equal(r, { host: 'aliyun', ...expected })) fail();
+          if (name === 'attach') {
+            if (
+              !keys(r, ['host', ...Object.keys(expected), 'execution']) ||
+              !equal(
+                { ...r, execution: undefined },
+                { host: 'aliyun', ...expected, execution: undefined },
+              )
+            )
+              fail();
+            assertFirstCutoverSessionIdentity(r.execution, 'gateway');
+            execution = structuredClone(r.execution);
+          }
           if (name === 'detach' && r !== null) fail();
           if (
             name === 'prepare' &&
@@ -478,6 +497,16 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
     };
     await run('attach');
     return {
+      readExecutionIdentity: () => {
+        if (failed) fail();
+        channel.assert();
+        return structuredClone({
+          host: 'aliyun',
+          binding: expected.binding,
+          siteDigest: expected.siteDigest,
+          ...execution,
+        });
+      },
       prepare: () => run('prepare'),
       retire: () => run('retire'),
       close: async () => {

@@ -95,6 +95,23 @@ async function fixture(t) {
       return action === 'restore' ? undefined : proof(stage);
     };
     return {
+      readExecutionIdentity: () => ({
+        host,
+        binding,
+        siteDigest: approval.remoteSiteDigest,
+        role: 'ingress',
+        bootId: '11111111-1111-4111-8111-111111111111',
+        process: {
+          pid: 910,
+          ppid: 900,
+          start: '100',
+          uids: [0, 0, 0, 0],
+          cwd: '/',
+          exe: '/usr/bin/node',
+          argvDigest: '8'.repeat(64),
+          cgroup: '0::/qa\n',
+        },
+      }),
       fenceOrders: () => mutate('orders', 'orders'),
       fenceAll: () => mutate('all', 'all-writers'),
       verifyFence: async () => {
@@ -191,6 +208,25 @@ async function fixture(t) {
     },
   };
 }
+
+test('pair exposes receiver proof during an in-flight fence without recursively using its stream', async (t) => {
+  const f = await fixture(t);
+  const pair = await f.start();
+  let observations = 0;
+  f.change.after = async () => {
+    const [receipt] = pair.readExecutionIdentities();
+    assert.equal(receipt.role, 'ingress');
+    assert.equal(receipt.process.pid, 910);
+    assert.deepEqual(receipt.binding, f.binding);
+    assert.equal(receipt.siteDigest, f.approval.remoteSiteDigest);
+    observations++;
+  };
+  await f.advance('orders_fenced');
+  await pair.fenceOrders();
+  assert.equal(observations, 2);
+  f.setTime(9000);
+  assert.throws(() => pair.readExecutionIdentities(), /UNPROVEN/);
+});
 
 test('one journal drives both fixed hosts and preserves host-tagged receipts', async (t) => {
   const f = await fixture(t);

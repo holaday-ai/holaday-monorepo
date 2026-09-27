@@ -37,7 +37,23 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
     registrationProgressHost,
     unmanagedProgressHost,
     candidate,
+    execution = [],
   } = structuredClone(input);
+  if (
+    !Array.isArray(execution) ||
+    execution.some(
+      (row) =>
+        !equal(
+          row.binding,
+          Object.fromEntries(
+            ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map(
+              (key) => [key, effects?.[key]],
+            ),
+          ),
+        ),
+    )
+  )
+    fail();
   if (candidate !== undefined) {
     const { identity, runtime, mode } = candidate ?? {};
     if (
@@ -390,7 +406,10 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
       );
     }
   }
-  const result = classifyFirstCutoverHostPair({ pair, reviews: adjusted, inventoryDigest }, io);
+  const result = classifyFirstCutoverHostPair(
+    { pair, reviews: adjusted, inventoryDigest, execution },
+    io,
+  );
   if (candidate !== undefined) result.candidate = candidate;
   for (const host of result.hosts) host.sources = actualSources.get(host.host);
   return result;
@@ -402,7 +421,7 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
  * receipt. Boot changes invalidate the review even when numeric PIDs recur.
  */
 export function classifyFirstCutoverHostPair(input, io = { now: Date.now }) {
-  const { pair, reviews, inventoryDigest } = structuredClone(input ?? {});
+  const { pair, reviews, inventoryDigest, execution = [] } = structuredClone(input ?? {});
   const names = ['aliyun', 'vultr'];
   if (
     !hash(inventoryDigest) ||
@@ -413,6 +432,20 @@ export function classifyFirstCutoverHostPair(input, io = { now: Date.now }) {
     !reviews ||
     Object.keys(reviews).length !== 2 ||
     !names.every((name) => Object.hasOwn(reviews, name))
+  )
+    fail();
+  if (
+    !Array.isArray(execution) ||
+    execution.length > 2 ||
+    new Set(execution.map((r) => `${r.host}:${r.role}`)).size !== execution.length ||
+    execution.some(
+      (r) =>
+        !r ||
+        r.host !== 'aliyun' ||
+        !['gateway', 'ingress'].includes(r.role) ||
+        r.binding?.inventoryDigest !== inventoryDigest ||
+        !hash(r.siteDigest),
+    )
   )
     fail();
   const now = io.now();
@@ -429,6 +462,7 @@ export function classifyFirstCutoverHostPair(input, io = { now: Date.now }) {
           inventoryDigest,
           ports: approved.ports,
           review: approved.review,
+          execution: execution.filter((row) => row.host === host),
         },
         { now: () => now },
       ),
@@ -506,7 +540,14 @@ export function firstCutoverSourceBindings(snapshot) {
  * This is pre-retirement inventory; after effects, a new reviewed observation is
  * required. It does not pretend old PM2 sources remain unchanged after removal. */
 export function classifyFirstCutoverHost(input, io = { now: Date.now }) {
-  const { snapshot: s, review, host, ports, inventoryDigest } = structuredClone(input);
+  const {
+    snapshot: s,
+    review,
+    host,
+    ports,
+    inventoryDigest,
+    execution = [],
+  } = structuredClone(input);
   const machine = s?.hostname ?? host;
   const now = io.now();
   if (
@@ -649,8 +690,43 @@ export function classifyFirstCutoverHost(input, io = { now: Date.now }) {
   const registered = [];
   const unmanaged = [];
   const preserved = [];
+  const executionProcesses = [];
+  if (
+    !Array.isArray(execution) ||
+    new Set(execution.map((r) => r.process?.pid)).size !== execution.length
+  )
+    fail();
+  for (const receipt of execution) {
+    const p = s.processes.find((row) => row.pid === receipt.process?.pid);
+    // No removal from the snapshot and no implicit child exemption. Only the
+    // exact owned receiver can be separate from immutable legacy review rows.
+    if (
+      receipt.host !== host ||
+      host !== 'aliyun' ||
+      !['gateway', 'ingress'].includes(receipt.role) ||
+      receipt.bootId !== s.bootId ||
+      receipt.binding?.inventoryDigest !== inventoryDigest ||
+      !hash(receipt.siteDigest) ||
+      !p ||
+      !equal(p, receipt.process) ||
+      !equal(p.uids, [0, 0, 0, 0]) ||
+      p.cwd !== '/' ||
+      p.exe !== '/usr/bin/node' ||
+      !hash(p.argvDigest) ||
+      typeof p.cgroup !== 'string' ||
+      !p.cgroup ||
+      [daemon.pid, observer.pid].includes(p.pid) ||
+      p.ppid === daemon.pid ||
+      owner(p) ||
+      review.processes.some((r) => r.pid === p.pid) ||
+      [...s.listeners.matchAll(/\bpid=(\d+)\b/g)].some((m) => Number(m[1]) === p.pid)
+    )
+      fail();
+    executionProcesses.push(p);
+  }
   for (const p of s.processes) {
     if ([daemon.pid, observer.pid].includes(p.pid)) continue;
+    if (executionProcesses.some((r) => r.pid === p.pid)) continue;
     const r = review.processes.find((row) => row.pid === p.pid);
     if (!explained(r) || r.identityDigest !== digest(p)) {
       unresolved('process', p.pid);
@@ -729,6 +805,7 @@ export function classifyFirstCutoverHost(input, io = { now: Date.now }) {
     registered: scope(registered, selectedManagers),
     unmanaged: scope(unmanaged, []),
     preservedProcesses: preserved,
+    executionProcesses,
     preservedManagers,
     unknownLaunchers: unknown,
     sources,

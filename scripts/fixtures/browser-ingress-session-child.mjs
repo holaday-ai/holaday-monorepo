@@ -1,6 +1,7 @@
 // Isolated network fixture child only, never a production entry or uploaded code.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import https from 'node:https';
 import { promisify } from 'node:util';
@@ -44,6 +45,38 @@ try {
   await serveFirstCutoverIngressSession(
     { attempt: site.binding.attempt },
     {
+      // This mapped-network fixture is a custom entry, not the production fixed
+      // SSH entry. Report its REAL kernel identity; default source/argv checking
+      // is separately exercised by the real-sshd fixture without this override.
+      readIdentity: async ({ role, attempt }) => {
+        assert.equal(role, 'ingress');
+        assert.equal(attempt, site.binding.attempt);
+        const proc = `/proc/${process.pid}`;
+        const fields = (await fs.readFile(`${proc}/stat`, 'utf8'))
+          .split(') ')
+          .at(-1)
+          .trim()
+          .split(/\s+/);
+        return {
+          role,
+          bootId: (await fs.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim(),
+          process: {
+            pid: process.pid,
+            ppid: Number(fields[1]),
+            start: fields[19],
+            uids: /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m
+              .exec(await fs.readFile(`${proc}/status`, 'utf8'))
+              .slice(1)
+              .map(Number),
+            cwd: await fs.readlink(`${proc}/cwd`),
+            exe: await fs.readlink(`${proc}/exe`),
+            argvDigest: createHash('sha256')
+              .update(await fs.readFile(`${proc}/cmdline`))
+              .digest('hex'),
+            cgroup: await fs.readFile(`${proc}/cgroup`, 'utf8'),
+          },
+        };
+      },
       createLifecycle: async (...args) => {
         const lifecycle = await createFirstCutoverIngressLifecycle(...args);
         if (!fixture.loseEdgeAck) return lifecycle;

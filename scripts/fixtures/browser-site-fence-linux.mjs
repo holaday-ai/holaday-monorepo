@@ -20,6 +20,7 @@ import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 
 await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
+await fs.copyFile('/opt/node22/bin/node', '/usr/bin/node');
 assert(
   process.argv.length === 2 || (process.argv.length === 3 && process.argv[2] === '--lose-edge-ack'),
 );
@@ -314,7 +315,7 @@ const ingress = await createFirstCutoverIngressPair(
         assert.equal(args.at(-1), `holaday-cutover-v1 ingress ${binding.attempt}`);
         assert.equal(options.shell, false);
         const child = spawn(
-          '/opt/node22/bin/node',
+          '/usr/bin/node',
           ['/source/fixtures/browser-ingress-session-child.mjs', `${root}/session.json`],
           { stdio: ['pipe', 'pipe', 'inherit'] },
         );

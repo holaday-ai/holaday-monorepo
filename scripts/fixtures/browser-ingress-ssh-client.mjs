@@ -125,6 +125,13 @@ const io = {
 try {
   const expected = { binding, maintenanceEndsAtMs, siteDigest: hash(scopeBytes) };
   const client = await connectFirstCutoverIngressSession(expected, io);
+  const ingressExecutor = client.readExecutionIdentity();
+  assert.equal(ingressExecutor.role, 'ingress');
+  assert.equal(ingressExecutor.process.exe, '/usr/bin/node');
+  assert.equal(
+    ingressExecutor.process.argvDigest,
+    hash(await fs.readFile(`/proc/${ingressExecutor.process.pid}/cmdline`)),
+  );
   assert.equal(await client.readFenceReceipt(), undefined);
   await client.close();
   // Receiver must independently reject a changed application-writable approval.
@@ -173,6 +180,12 @@ try {
   };
   const gatewayExpected = { binding, maintenanceEndsAtMs, siteDigest: hash(gatewayBytes) };
   const gatewayClient = await connectFirstCutoverGatewaySession(gatewayExpected, gatewayIO);
+  const gatewayExecutor = gatewayClient.readExecutionIdentity();
+  assert.equal(gatewayExecutor.role, 'gateway');
+  assert.equal(
+    gatewayExecutor.process.argvDigest,
+    hash(await fs.readFile(`/proc/${gatewayExecutor.process.pid}/cmdline`)),
+  );
   await gatewayClient.close();
   await fs.chmod(gatewayPath, 0o644);
   await assert.rejects(

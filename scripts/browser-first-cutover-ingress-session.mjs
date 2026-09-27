@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import {
   createFirstCutoverIngressLifecycle,
@@ -24,6 +24,78 @@ const keys = (v, names) =>
   !Array.isArray(v) &&
   Object.keys(v).length === names.length &&
   names.every((k) => Object.hasOwn(v, k));
+
+// Only our own fixed receiver, never a PID supplied by a remote client. The SSH
+// forced entry independently verifies the installed module closure before exec.
+export async function readFirstCutoverSessionIdentity({ role, attempt }) {
+  if (
+    process.platform !== 'linux' ||
+    process.getuid?.() !== 0 ||
+    !['ingress', 'gateway'].includes(role) ||
+    !uuid(attempt)
+  )
+    fail();
+  const entry = fileURLToPath(
+    new URL(`./browser-first-cutover-${role}-session.mjs`, import.meta.url),
+  );
+  const expected = Buffer.from(`/usr/bin/node\0${entry}\0${attempt}\0`);
+  const read = async () => {
+    const root = `/proc/${process.pid}`;
+    const stat = await fs.readFile(`${root}/stat`, 'utf8');
+    if (!stat.startsWith(`${process.pid} (`)) fail();
+    const fields = stat
+      .slice(stat.lastIndexOf(')') + 2)
+      .trim()
+      .split(/\s+/);
+    const status = await fs.readFile(`${root}/status`, 'utf8');
+    const uids = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m.exec(status)?.slice(1).map(Number);
+    const cmdline = await fs.readFile(`${root}/cmdline`);
+    const value = {
+      role,
+      bootId: (await fs.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim(),
+      process: {
+        pid: process.pid,
+        ppid: Number(fields[1]),
+        start: fields[19],
+        uids,
+        cwd: await fs.readlink(`${root}/cwd`),
+        exe: await fs.readlink(`${root}/exe`),
+        argvDigest: createHash('sha256').update(cmdline).digest('hex'),
+        cgroup: await fs.readFile(`${root}/cgroup`, 'utf8'),
+      },
+    };
+    if (!expected.equals(cmdline) || fields[0] === 'Z') fail();
+    assertFirstCutoverSessionIdentity(value, role);
+    return value;
+  };
+  const before = await read();
+  if (!isDeepStrictEqual(before, await read())) fail();
+  return before;
+}
+
+export function assertFirstCutoverSessionIdentity(value, role) {
+  const p = value?.process;
+  if (
+    !keys(value, ['role', 'bootId', 'process']) ||
+    value.role !== role ||
+    !['ingress', 'gateway'].includes(role) ||
+    !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value.bootId ?? '') ||
+    !keys(p, ['pid', 'ppid', 'start', 'uids', 'cwd', 'exe', 'argvDigest', 'cgroup']) ||
+    !Number.isSafeInteger(p.pid) ||
+    p.pid <= 1 ||
+    !Number.isSafeInteger(p.ppid) ||
+    p.ppid < 1 ||
+    !/^[0-9]+$/.test(p.start ?? '') ||
+    !isDeepStrictEqual(p.uids, [0, 0, 0, 0]) ||
+    p.cwd !== '/' ||
+    p.exe !== '/usr/bin/node' ||
+    !hash(p.argvDigest) ||
+    typeof p.cgroup !== 'string' ||
+    !p.cgroup ||
+    p.cgroup.length > 65536
+  )
+    fail();
+}
 function validate(input, now) {
   const b = input?.binding;
   if (
@@ -295,6 +367,7 @@ export async function serveFirstCutoverIngressSession({ attempt }, overrides = {
     output: process.stdout,
     now: Date.now,
     readSite: readFirstCutoverIngressSite,
+    readIdentity: readFirstCutoverSessionIdentity,
     createLifecycle: createFirstCutoverIngressLifecycle,
     ...overrides,
   };
@@ -304,6 +377,8 @@ export async function serveFirstCutoverIngressSession({ attempt }, overrides = {
     const site = structuredClone(await io.readSite({ attempt }));
     validate(site, io.now());
     if (site.binding.attempt !== attempt) fail();
+    const execution = await io.readIdentity({ role: 'ingress', attempt });
+    assertFirstCutoverSessionIdentity(execution, 'ingress');
     channel = wire(io.input, io.output, site.maintenanceEndsAtMs, io.now);
     let lifecycle;
     let sequence = 0;
@@ -326,6 +401,8 @@ export async function serveFirstCutoverIngressSession({ attempt }, overrides = {
         fail();
       used.add(name);
       if (!isDeepStrictEqual(await io.readSite({ attempt }), site)) fail();
+      if (!isDeepStrictEqual(await io.readIdentity({ role: 'ingress', attempt }), execution))
+        fail();
       let factSequence = 0;
       const fact = async (name, value = null) => {
         const factSeq = ++factSequence;
@@ -376,6 +453,7 @@ export async function serveFirstCutoverIngressSession({ attempt }, overrides = {
           binding: site.binding,
           maintenanceEndsAtMs: site.maintenanceEndsAtMs,
           siteDigest: site.siteDigest,
+          execution,
         };
       } else if (name === 'detach') {
         await channel.write({ protocol: 1, type: 'result', seq, value: null });
@@ -612,8 +690,26 @@ export async function connectFirstCutoverIngressSession(input, overrides = {}) {
       }
     };
     const attached = await run('attach');
-    if (!isDeepStrictEqual(attached, { host: 'aliyun', ...expected })) fail();
+    if (
+      !keys(attached, ['host', ...Object.keys(expected), 'execution']) ||
+      !isDeepStrictEqual(
+        { ...attached, execution: undefined },
+        { host: 'aliyun', ...expected, execution: undefined },
+      )
+    )
+      fail();
+    assertFirstCutoverSessionIdentity(attached.execution, 'ingress');
     return {
+      readExecutionIdentity: () => {
+        if (failed) fail();
+        channel.assert();
+        return structuredClone({
+          host: 'aliyun',
+          binding: expected.binding,
+          siteDigest: expected.siteDigest,
+          ...attached.execution,
+        });
+      },
       fenceOrders: () => run('fenceOrders'),
       fenceAll: () => run('fenceAll'),
       verifyFence: () => run('verifyFence'),
@@ -882,6 +978,30 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
       return proof;
     };
     return {
+      // Deliberately synchronous: writer/retirement observations can run while
+      // this pair owns the ingress stream. Never send a recursive RPC for this.
+      readExecutionIdentities: () => {
+        try {
+          if (failed || closed) reject();
+          clock();
+          const receipt = remote.readExecutionIdentity();
+          if (
+            receipt.host !== 'aliyun' ||
+            receipt.role !== 'ingress' ||
+            receipt.siteDigest !== scope.remoteSiteDigest ||
+            !isDeepStrictEqual(receipt.binding, args.binding)
+          )
+            reject();
+          assertFirstCutoverSessionIdentity(
+            { role: receipt.role, bootId: receipt.bootId, process: receipt.process },
+            'ingress',
+          );
+          return [structuredClone(receipt)];
+        } catch {
+          failed = true;
+          reject();
+        }
+      },
       fenceOrders: () =>
         run('orders', ['orders_fenced'], () => fence('fenceOrders', 'orders'), true),
       fenceAll: () => run('all', ['all_fenced'], () => fence('fenceAll', 'all-writers'), true),

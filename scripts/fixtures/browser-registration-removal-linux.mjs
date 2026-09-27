@@ -67,6 +67,7 @@ let journal;
 let gateway;
 let receiver;
 let receiverCompletion;
+let client;
 try {
   await pm2(
     'start',
@@ -129,6 +130,7 @@ try {
       exe: await fs.readlink(`${base}/exe`),
       cwd: await fs.readlink(`${base}/cwd`),
       argvDigest: sha(await fs.readFile(`${base}/cmdline`)),
+      cgroup: await fs.readFile(`${base}/cgroup`, 'utf8'),
     };
   };
   const daemonPid = Number((await fs.readFile('/root/.pm2/pm2.pid', 'utf8')).trim());
@@ -313,7 +315,7 @@ try {
     second.processes = second.processes.filter((p) => p.pid !== gateway.pid);
     second.listeners = '';
     const gatewayHost = gateways ? snapshot : second;
-    if (observeExecutor && receiver && receiver.exitCode === null && receiver.signalCode === null)
+    if (sessionMode && receiver && receiver.exitCode === null && receiver.signalCode === null)
       gatewayHost.processes.push(raw(await proc(receiver.pid)));
     if (gateway.exitCode === null && gateway.signalCode === null)
       gatewayHost.processes.push(raw(await proc(gateway.pid)));
@@ -385,7 +387,12 @@ try {
   });
   const observer = await createFirstCutoverRetirementObserver(
     { reviews, binding: await journal.assertOwnership(), legacyDigest: proof.legacyDigest },
-    { journal, readPair },
+    {
+      journal,
+      readPair,
+      readExecutionIdentities: async () =>
+        client && !observeExecutor ? [client.readExecutionIdentity()] : [],
+    },
   );
   await journal.bindManifest([]);
   for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
@@ -412,7 +419,6 @@ try {
         producersRunning: 0,
       }),
     };
-    let client;
     if (sessionMode) {
       const fullBinding = await journal.assertOwnership();
       const approval = {

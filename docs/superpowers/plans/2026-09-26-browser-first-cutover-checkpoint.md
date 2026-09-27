@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 夜间续跑：接收端真实进程身份接入原观察器
+
+承接 `260710c0`，原Task4 BASE844c2ced不变。本批解决下方恢复点中**远端接收进程**被误判为未知的问题，不宣称所有执行进程已接齐。两个固定SSH接收端从自身`/proc`两次读取完整身份，核对固定入口/attempt argv、root UID、实际exe/cwd、启动时间、父PID、boot及cgroup。已固定SSH入口校验的执行包仍是来源信任边界，不防御已被攻破的root。会话句柄提供绑定原批准范围的身份副本；关闭、断连、过期或身份改变后拒绝继续使用。
+
+原retirement observer在每次完整主机观察前后核对同一批活会话身份，分类器单列`executionProcesses`。原始快照保留，旧review、legacyDigest与journal不重写；只有精确匹配的本次接收端被单独分类，未知子进程不继承豁免。错主机boot/attempt/candidate、PID身份漂移、监听端口、PM2归属、进程消失、观察中归属变化、把旧review进程冒充新执行者均拒绝。双入口组合暴露同步身份读取，不递归占用正在执行的通信会话。
+
+原Linux网关成功夹具现**实际包含接收进程**并向原observer提供活句柄：准备仍保留两网关，停止后真实PM2/pidfd退出、原journal完整、无关PID保持、重启只恢复无关服务通过。不给归属证据的`--gateway-session-observed-executor`仍在任何启动文件修改前拒绝；实际删除后丢ACK仍不重发/不继续信号。真实sshd默认入口分别核对两种接收端的内核argv摘要并完成attach/detach；该SSH夹具不执行支付网关停止。实际nginx/TLS夹具仍使用明确的映射入口，其新增身份读者读取真实内核字段，但固定生产入口来源验证由上述SSH夹具单独证明，不冒称生产整链。
+
+验证：新增关键场景先RED后GREEN，最终browser **778/778**、Linux八个专项组 **294/294**，均0跳过、退出0；Linux本批选组不同于上一批300项，不能按数字判断退步。完整ops **120/59/16/612 + Python12**，0跳过、退出0。实体网关成功、丢ACK、未归属拒绝、原生产者默认路径、真实SSH和nginx/TLS两阶段隔离/恢复/无关长连接均退出0。日志 `/tmp/holaday-executor-{browser-final,linux-final,ops-final,ssh,ingress-physical-final,lost-ack-final,unowned-final,producers-final}.log`。12个MJS的Biome、相关shell语法与diff-check通过。
+
+两处实体测试失败已定位并保留证据：网关QA原proc数据漏掉生产采集器已有的cgroup，补读真实字段；入口QA新增UID正则误写成三列，改为真实四列。未删身份字段或放宽生产条件。单元首轮两处测试设置错误也修正：必须先connect才能访问句柄；原observer会复制review，因此旧身份冲突需放进原baseline而非事后修改测试对象。失败与RED日志保留在`/tmp/holaday-executor-*`；不将这些初次失败写成产品回归已通过。
+
+**确切下一步仍是完整现场接线**：Vultr协调器自身及持久SSH客户端尚需真实来源/身份/生命周期归属，当前分类支持的是Aliyun两个接收端；原生产采集器会保留所有Node/holaday进程及子树，禁止忽略它们或自动扩展旧review。随后补实际业务/连接/writer读者、同锁完整site与首次CLI、真实停写备份/隔离恢复、非PayPal恢复证据、完整成功/故障演练和整分支独立审查。上述未完成前不能部署。不要重写已接好的会话、网关退役、商户、密钥或只读通道。本批无生产SSH/安装/服务/DB/支付/密钥/PayPal操作，无PR/合并/部署；原缓存保留，应用全套/真实MySQL恢复/整分支独立审查本批未跑，Task4–6未完成，自动化继续本线程。
+
 ### 2026-09-28 夜间续跑：固定远端网关调用已接通；完整现场仍受执行进程归属约束
 
 承接 `961f7cfd`，原Task4 BASE844c2ced不变。新增固定 `gateway <attempt>` SSH会话，独立于入口会话，复用已有有界通信及受保护清单读取。直接调用上一批本机网关准备/退役函数；Vultr原journal和retirement observer仍负责事件与原始身份摘要，Aliyun接收端独立重读固定启动清单和批准窗口。未托管退役由原observer编排、接收端执行原pidfd helper，嵌套期间只允许必要的只读核对；无通用远端命令、复制日志、自动重连或不明结果重试。

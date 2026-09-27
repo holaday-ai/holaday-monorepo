@@ -17,6 +17,20 @@ const binding = {
 const deadline = Date.now() + 120000;
 const siteDigest = 'e'.repeat(64);
 const input = { binding, maintenanceEndsAtMs: deadline, siteDigest };
+const execution = {
+  role: 'ingress',
+  bootId: '11111111-1111-4111-8111-111111111111',
+  process: {
+    pid: 910,
+    ppid: 900,
+    start: '100',
+    uids: [0, 0, 0, 0],
+    cwd: '/',
+    exe: '/usr/bin/node',
+    argvDigest: '8'.repeat(64),
+    cgroup: '0::/qa\n',
+  },
+};
 
 async function pair(t, change = {}) {
   assert.equal(typeof session.serveFirstCutoverIngressSession, 'function');
@@ -40,6 +54,7 @@ async function pair(t, change = {}) {
   const serverIO = {
     input: toServer,
     output: toClient,
+    readIdentity: async () => structuredClone(execution),
     readSite: async () => {
       if (change.rejectSite) throw new Error('private site data');
       return {
@@ -121,6 +136,19 @@ async function pair(t, change = {}) {
       session.connectFirstCutoverIngressSession({ ...input, ...overrides }, io),
   };
 }
+
+test('ingress receiver identity stays independently bound to the live session', async (t) => {
+  const f = await pair(t);
+  const client = await f.connect();
+  assert.deepEqual(client.readExecutionIdentity(), {
+    host: 'aliyun',
+    binding,
+    siteDigest,
+    ...execution,
+  });
+  await client.close();
+  assert.throws(() => client.readExecutionIdentity(), /UNPROVEN/);
+});
 
 test('fixed SSH session fetches live journal facts and dispatches only the ingress lifecycle', async (t) => {
   const f = await pair(t);

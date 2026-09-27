@@ -398,6 +398,8 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
   const io = {
     readPair: readFirstCutoverHostPair,
     readFenceReceipts: async () => [],
+    // Trusted live session handles, never a CLI/uploaded process allowlist.
+    readExecutionIdentities: async () => [],
     readCandidateRuntime: readFirstCutoverCandidateRuntime,
     now: Date.now,
     ...overrides,
@@ -450,6 +452,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       try {
         checkClock();
         const before = await effects();
+        const execution = structuredClone(await io.readExecutionIdentities());
         const fences = structuredClone(await io.readFenceReceipts());
         const candidate =
           candidateIdentity === undefined
@@ -463,6 +466,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         const pair = structuredClone(await io.readPair());
         if (
           !isDeepStrictEqual(before, await effects()) ||
+          !isDeepStrictEqual(execution, await io.readExecutionIdentities()) ||
           !isDeepStrictEqual(fences, await io.readFenceReceipts()) ||
           (candidateIdentity !== undefined &&
             !isDeepStrictEqual(candidate, await io.readCandidateRuntime(candidateIdentity))) ||
@@ -486,6 +490,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             registrationProgressHost,
             unmanagedProgressHost,
             candidate,
+            execution,
           },
           { now: checkClock },
         );

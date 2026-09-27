@@ -204,6 +204,7 @@ async function retirementFixture(t, setup = () => {}) {
         return structuredClone(f.pair);
       },
       readFenceReceipts: async () => structuredClone(f.fences ?? []),
+      readExecutionIdentities: async () => structuredClone(f.execution ?? []),
       readCandidateRuntime: async (identity) => {
         await f.onCandidateRead?.();
         assert.deepEqual(identity, f.candidate?.identity);
@@ -237,6 +238,101 @@ async function retirementFixture(t, setup = () => {}) {
   };
   return { f, journal, binding, observer, remove };
 }
+
+function addReceiver(f, binding) {
+  const snapshot = f.pair.hosts.find((h) => h.host === 'aliyun').snapshot;
+  const process = {
+    pid: 910,
+    ppid: 900,
+    start: '100',
+    uids: [0, 0, 0, 0],
+    exe: '/usr/bin/node',
+    cwd: '/',
+    argvDigest: '8'.repeat(64),
+    cgroup: '0::/qa\n',
+  };
+  snapshot.processes.push(process);
+  f.execution = [
+    {
+      host: 'aliyun',
+      binding,
+      siteDigest: '9'.repeat(64),
+      role: 'gateway',
+      bootId: snapshot.bootId,
+      process: structuredClone(process),
+    },
+  ];
+  return { snapshot, process, receipt: f.execution[0] };
+}
+
+test('owned gateway receiver remains visible without changing original legacy reviews or journal binding', async (t) => {
+  const { f, binding, observer, journal } = await retirementFixture(t);
+  const before = await journal.readFirstCutoverEffects();
+  const reviews = structuredClone(f.reviews);
+  const { snapshot, process } = addReceiver(f, binding);
+  const actual = await observer.read();
+  assert.deepEqual(actual.unknownLaunchers, []);
+  assert.deepEqual(actual.hosts.find((h) => h.host === 'aliyun').executionProcesses, [process]);
+  assert.ok(snapshot.processes.some((p) => p.pid === 910));
+  assert.deepEqual(f.reviews, reviews);
+  assert.deepEqual(await journal.readFirstCutoverEffects(), before);
+  assert.ok(
+    !actual.hosts.find((h) => h.host === 'aliyun').preservedProcesses.some((p) => p.pid === 910),
+  );
+  f.execution = [];
+  await assert.rejects(observer.read(), /CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN/);
+});
+
+for (const mutation of [
+  'boot',
+  'attempt',
+  'candidate',
+  'identity',
+  'child',
+  'listener',
+  'manager',
+  'missing',
+  'drift',
+])
+  test(`owned execution receipt rejects ${mutation} without hiding a writer`, async (t) => {
+    const { f, binding, observer } = await retirementFixture(t);
+    const { snapshot, process, receipt } = addReceiver(f, binding);
+    if (mutation === 'boot') receipt.bootId = '22222222-2222-4222-8222-222222222222';
+    if (mutation === 'attempt') receipt.binding.attempt = '22222222-2222-4222-8222-222222222222';
+    if (mutation === 'candidate') receipt.binding.candidate = 'f'.repeat(40);
+    if (mutation === 'identity') process.start = '101';
+    if (mutation === 'child') snapshot.processes.push({ ...process, pid: 911, ppid: 910 });
+    if (mutation === 'listener')
+      snapshot.listeners += 'LISTEN 0 511 0.0.0.0:9999 0.0.0.0:* users:(("node",pid=910,fd=1))\n';
+    if (mutation === 'manager') {
+      process.ppid = 10;
+      receipt.process.ppid = 10;
+    }
+    if (mutation === 'missing')
+      snapshot.processes = snapshot.processes.filter((p) => p.pid !== 910);
+    if (mutation === 'drift')
+      f.onRead = () => {
+        f.execution = [];
+      };
+    await assert.rejects(observer.read(), /CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN/);
+  });
+
+test('original reviewed process cannot be reclassified as a newly owned executor', async (t) => {
+  let receipt;
+  const { f, binding, observer } = await retirementFixture(t, (f) => {
+    const row = addReceiver(f, {});
+    receipt = row.receipt;
+    f.execution = [];
+    f.reviews.aliyun.review.processes.push({
+      pid: 910,
+      identityDigest: hash(row.process),
+      disposition: 'preserve',
+      reason: 'original reviewed process',
+    });
+  });
+  f.execution = [{ ...receipt, binding }];
+  await assert.rejects(observer.read(), /CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN/);
+});
 
 test('retirement observation consumes the real journal and fresh paired state, not pre-retirement reviews', async (t) => {
   const { observer, remove } = await retirementFixture(t);
