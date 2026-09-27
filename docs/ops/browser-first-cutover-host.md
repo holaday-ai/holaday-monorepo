@@ -47,6 +47,18 @@
 
 现有Linux实体夹具已使用此默认控制器和默认PID/proc读取，仅将nginx配置路径映射到容器的合成多站点配置。需要容器自有PID/network namespace中的`NET_ADMIN`和`SYS_PTRACE`，不挂宿主PID或凭据。真实无关长连接贯穿两次维护重载和恢复仍可传输数据；真实目标业务响应在隔离时拒绝、恢复后正常。该结果不代表双机现场副作用通道或整项切换已完成。
 
+### 固定跨主机入口会话（2026-09-28，本地实现，未安装生产）
+
+`browser-first-cutover-ingress-session.mjs` 把已有本机入口生命周期接到受限 SSH 的双向标准输入/输出。控制端 `connectFirstCutoverIngressSession({binding,maintenanceEndsAtMs,siteDigest},io)` 只能连接既有 Vultr→Aliyun 身份/固定地址/严格主机指纹，使用 `holaday-cutover-v1 ingress <attempt>`，没有自定义主机、命令、环境、文件上传或重连参数。只暴露两阶段隔离、验证、同实例恢复、回执读取及结束会话；结束会话不清除发布锁。丢确认/协议错误停止该客户端，不重试动作、不恢复旧配置、不发送杀进程信号。
+
+控制端必须提供真实 `journal.assertOwnership/readFirstCutoverEffects` 以及 `observeWriters/verifyOpenedIdentity`。接收端每次需要事实时按当前序号向同一控制端请求，控制端调用这些活接口，不缓存旧journal或在动作包里夹带成功报告。双端均为既有可信root部署进程；此机制不是抵御root主机被攻陷的方案，也不能让网页或CLI上传JSON取得部署权。帧有大小/顺序限制，读取、发送和结束等待受原绝对窗口约束。
+
+接收端默认独立读取本机 `/var/lib/holaday-deploy/maintenance/first-cutover-approved.json` 与 `first-cutover-ingress-approved.json`；后者必须root、0600、非链接、单硬链接，目录0700。格式为 `{schemaVersion:1,host:'aliyun',binding,maintenanceEndsAtMs,ingress:{inventoryDigest,unknownIngress:[],files:[...]}}`，只允许已有Aliyun app/pay两个完整已审核站点。实际文件/链接及原字节仍由原安装器核验。清单完整字节摘要须与控制端受保护配置给出的siteDigest一致，操作期间重新读取，不能从操作请求替换清单。
+
+`browser-cutover-channel.py` 的新源码增加此精确命令，但先要求私密 `channel/ingress/` 下的固定20个依赖模块和 `bundle.json` 完整集合。清单为 `{schemaVersion:1,files:{固定文件名:sha256}}`；每个模块root/0600/非链接且完整hash匹配，未知文件、缺依赖、路径穿越或篡改均拒绝。入口仍不提供安装功能，不重装密钥/authorized_keys/sshd。原probe/observe接口不变；生产仍是此前只读版本，这次没有传包或改线上强制命令。后续现场安装须单独核对候选、工具包摘要及有效审批，不能直接把源码变更当通道已上线。
+
+验证分为两段，不能混称双机整切换：现有网络容器中，实际接收子进程通过流请求父进程持有的真实journal，完成三站点实际nginx/TLS隔离与恢复，保留无关长连接；配置端口、CA和业务/备份/候选观察为显式合成边界。另一个现有SSH容器使用真实sshd、原restrict强制入口、完整模块包和独立保护文件，完成无副作用attach/读取/结束，并拒绝缺包、审批权限放宽、依赖篡改及原所有shell/转发攻击。SSH段未运行nginx修改，网络段没有跨生产网络；完整双机site、writer事实、首次shell、停写备份恢复和发布验收仍需继续。
+
 ### 本机入口生命周期组装（2026-09-28）
 
 `createFirstCutoverIngressLifecycle({binding,maintenanceEndsAtMs},io)` 复用原 fence store、文件安装、nginx 生效及 TLS 探测，返回 `fenceOrders()`、`fenceAll()`、`verifyFence()`、`restoreIngress(identity)`、`readFenceReceipt()`。现场调用方必须在持有原真实共享 journal 的 preflight/prepared 阶段建立实例；构造仅观察，不创建备份或改站点。之后分别要求 journal 的 orders_fenced、all_fenced、verified 意图。单次动作期间固定完整 journal 记录摘要，不能在阶段或子事件改变后继续副作用。

@@ -3,14 +3,14 @@
 // Real nginx/TLS/proxying against recorded configs; mock application backends.
 // This proves forwarding/fencing, NOT provider verification or host-wide isolation.
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import http from 'node:http';
 import https from 'node:https';
 import { promisify } from 'node:util';
 import { describeCutoverSite, probeCutoverIngress } from '/source/browser-first-cutover-fence.mjs';
-import { createFirstCutoverIngressLifecycle } from '/source/browser-first-cutover-host.mjs';
+import { connectFirstCutoverIngressSession } from '/source/browser-first-cutover-ingress-session.mjs';
 import { readCutoverNginxRuntime } from '/source/browser-first-cutover-nginx.mjs';
 import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 
@@ -214,28 +214,6 @@ const io = {
     internalWriters: 0,
     producersRunning: 0,
   }),
-  nginx: {
-    maintenanceEndsAtMs,
-    exec: async (file, args, options) => {
-      // Only the container's combined QA config path is substituted. The
-      // production controller performs testing, reload, and /proc observation.
-      assert.equal(file, '/usr/sbin/nginx');
-      if (args[0] === '-t') await render();
-      const result = await promisify(execFile)(file, [...args, '-c', `${root}/nginx.conf`], {
-        encoding: 'utf8',
-        ...options,
-      });
-      return result.stdout;
-    },
-  },
-  ingressProbe: {
-    request: (options, callback) => {
-      const site = sites.find((s) => s.locations[0].serverName === options.servername);
-      assert(site);
-      assert.equal(options.rejectUnauthorized, true);
-      return https.request({ ...options, port: site.port, ca: qaCertificate }, callback);
-    },
-  },
   verifyOpenedIdentity: async (identity) => ({
     identity,
     mode: 'serving',
@@ -243,7 +221,6 @@ const io = {
     needsReconciliation: true,
   }),
 };
-const qaCertificate = await fs.readFile(`${root}/cert.pem`);
 for (const [name, operation] of Object.entries(io)) {
   if (name === 'now' || typeof operation !== 'function') continue;
   io[name] = async (...args) => {
@@ -256,7 +233,35 @@ for (const [name, operation] of Object.entries(io)) {
     }
   };
 }
-const ingress = await createFirstCutoverIngressLifecycle({ binding, maintenanceEndsAtMs }, io);
+const site = {
+  binding,
+  maintenanceEndsAtMs,
+  siteDigest: hash('qa-network-site'),
+  ingress: await io.readApprovedIngress(),
+};
+await fs.writeFile(`${root}/session.json`, JSON.stringify({ site, root, prelude, sites }), {
+  mode: 0o600,
+});
+const ingress = await connectFirstCutoverIngressSession(
+  { binding, maintenanceEndsAtMs, siteDigest: site.siteDigest },
+  {
+    journal,
+    observeWriters: io.observeWriters,
+    verifyOpenedIdentity: io.verifyOpenedIdentity,
+    open: async (file, args, options) => {
+      assert.equal(file, '/usr/bin/ssh');
+      assert.equal(args.at(-1), `holaday-cutover-v1 ingress ${binding.attempt}`);
+      assert.equal(options.shell, false);
+      const child = spawn(
+        '/opt/node22/bin/node',
+        ['/source/fixtures/browser-ingress-session-child.mjs', `${root}/session.json`],
+        { stdio: ['pipe', 'pipe', 'inherit'] },
+      );
+      const completion = new Promise((resolve) => child.once('close', (code) => resolve({ code })));
+      return { input: child.stdout, output: child.stdin, completion };
+    },
+  },
+);
 await journal.persist('prepared', { candidate: binding.candidate });
 try {
   await render();
@@ -389,6 +394,10 @@ try {
   await journal.persist('verified', { candidate: binding.candidate, identity });
   await ingress.restoreIngress(identity);
   assert.equal((await ingress.readFenceReceipt()).phase, 'restored');
+  await ingress.close();
+  console.log(
+    'session: separate receiver process used live parent journal across both fences and restoration',
+  );
   const runtime = await readCutoverNginxRuntime();
   assert.ok(
     runtime.workers.some((p) => originalWorkers.includes(`${p.pid}:${p.start}`) && p.shuttingDown),

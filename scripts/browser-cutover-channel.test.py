@@ -21,6 +21,39 @@ class ChannelTest(unittest.TestCase):
         nonce = 'a' * 32
         self.assertEqual(channel.parse_command('holaday-cutover-v1 observe ' + nonce), ('observe', nonce))
 
+    def test_ingress_dispatch_requires_exact_reserved_attempt_not_a_command(self):
+        attempt = '12345678-1234-4234-8234-123456789abc'
+        self.assertEqual(channel.parse_command('holaday-cutover-v1 ingress ' + attempt), ('ingress', attempt))
+        for suffix in [attempt + ' /bin/sh', attempt + '\n', '../approved', 'a' * 32, attempt.replace('-4234-', '-1234-')]:
+            with self.assertRaises(RuntimeError):
+                channel.parse_command('holaday-cutover-v1 ingress ' + suffix)
+
+    def test_ingress_bundle_requires_exact_pinned_modules_and_rejects_tampering(self):
+        import hashlib
+        import json
+        self.assertTrue(hasattr(channel, 'verify_ingress_bundle'))
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder).resolve()
+            files = {}
+            for name in channel.INGRESS_MODULES:
+                value = ('// module ' + name + '\n').encode()
+                path = root / name
+                path.write_bytes(value)
+                path.chmod(0o600)
+                files[name] = hashlib.sha256(value).hexdigest()
+            manifest = root / 'bundle.json'
+            manifest.write_text(json.dumps({'schemaVersion': 1, 'files': files}))
+            manifest.chmod(0o600)
+            entry = channel.verify_ingress_bundle(root, os.geteuid())
+            self.assertEqual(entry, root / 'browser-first-cutover-ingress-session.mjs')
+            (root / 'browser-first-cutover-host.mjs').write_text('modified dependency')
+            with self.assertRaises(RuntimeError):
+                channel.verify_ingress_bundle(root, os.geteuid())
+            files['../outside.mjs'] = 'a' * 64
+            manifest.write_text(json.dumps({'schemaVersion': 1, 'files': files}))
+            with self.assertRaises(RuntimeError):
+                channel.verify_ingress_bundle(root, os.geteuid())
+
     def test_shell_subsystems_mutations_and_extra_arguments_never_dispatch(self):
         for command in ['', 'sh', 'bash -s', 'scp -t /tmp/x', 'internal-sftp',
                         'holaday-cutover-v1 probe;id', 'holaday-cutover-v1 probe\nid',

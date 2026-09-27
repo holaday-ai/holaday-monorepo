@@ -102,6 +102,25 @@ LogLevel VERBOSE
         assert result.returncode != 0 and b'Permission denied' in result.stderr
         assert not pathlib.Path('/tmp/cutover-ssh-user-rc-ran').exists()
         assert not pathlib.Path('/tmp/cutover-ssh-escaped').exists()
+        # No reinstall/key changes: exercise the new optional fixed ingress entry
+        # with its separately provisioned exact module closure in this container.
+        result = ssh(['holaday-cutover-v1 ingress 12345678-1234-4234-8234-123456789abc'])
+        assert result.returncode != 0 and b'CUTOVER_CHANNEL_UNPROVEN' in result.stderr
+        bundle = base / 'ingress'
+        bundle.mkdir(mode=0o700)
+        digests = {}
+        for name in channel.INGRESS_MODULES:
+            value = pathlib.Path('/source', name).read_bytes()
+            (bundle / name).write_bytes(value)
+            (bundle / name).chmod(0o600)
+            digests[name] = hashlib.sha256(value).hexdigest()
+        (bundle / 'bundle.json').write_text(json.dumps({'schemaVersion': 1, 'files': digests}))
+        (bundle / 'bundle.json').chmod(0o600)
+        result = run(['/opt/node22/bin/node', '/source/fixtures/browser-ingress-ssh-client.mjs', str(root)], timeout=20)
+        print(result.stdout.decode().strip())
+        (bundle / 'browser-first-cutover-fence.mjs').write_text('changed dependency')
+        result = ssh(['holaday-cutover-v1 ingress 12345678-1234-4234-8234-123456789abc'])
+        assert result.returncode != 0 and b'CUTOVER_CHANNEL_UNPROVEN' in result.stderr
         print(json.dumps({'probe': 'passed', 'observe': 'passed', 'changedObserver': 'denied', 'arbitraryCommand': 'denied', 'scpSftp': 'denied',
                           'directForward': 'denied', 'remoteForward': 'denied', 'pty': 'denied',
                           'wrongSource': 'denied', 'userRc': 'not-executed'}))

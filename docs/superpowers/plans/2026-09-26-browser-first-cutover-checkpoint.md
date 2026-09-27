@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 夜间续跑：固定 SSH 入口会话已验证，未安装生产
+
+承接 `152f5755`，原Task4 BASE844c2ced不变。已有入口生命周期现可通过固定 `holaday-cutover-v1 ingress <attempt>` 会话调用；接收端独立读取root受保护审批与两个阿里云入口清单，控制端按序实时调用原journal、writer及候选观察器。没有上传配置/命令、任意主机、重新连接或不确定动作重试。固定20模块的工具包及每文件摘要必须验证；仅源码增加新命令，生产强制入口/身份/authorized_keys/sshd仍保持原只读版本。
+
+13项会话测试含缺实现、虚假成功值、重复动作、审批拒绝后未关闭流、发送阻塞超时的实际RED→GREEN，另有范围/序号/丢ACK/超长输入回归；Python固定包与命令测试9项。最终完整browser **722/722**，ops **120/59/16/550 + Python9**，均0跳过、退出0。实际Linux专项 **68/68** 及独立接收进程的真实journal/nginx/TLS/两阶段隔离/原配置恢复/无关长连接全部通过；真实sshd独立测试固定包、独立审批、持有journal的控制端attach/read/detach和缺包/改审批权限/篡改拒绝通过，退出0。日志 `/tmp/holaday-ingress-session-{browser,ops,network,ssh}-final.log`。触及MJS的Biome、shell语法、diff-check通过；重型验证串行，全部退出。
+
+证据边界：网络段包含明确合成业务/备份/候选观察，SSH段只读、不运行nginx修改；两段不等于完整双机业务切换。未重跑应用全套、MySQL恢复或整分支独立审查。没有生产SSH、服务/DB/支付/PayPal/密钥修改；原 `scripts/__pycache__/` 保留。当前仍无完整生产site adapter或首次执行CLI，Task4–6部分完成，不能上线。
+
+接续优先完成原首次执行入口与完整site接线、真实writer/control/退役效果、停写备份与隔离恢复、非PayPal恢复证据、整链成功/故障演练及全分支审查；不重做这次已验证的入口会话或商户/密钥。新入口在完整site缺失时必须拒绝，不得以未接线入口或组件测试替代发布验收。夜间自动化继续本线程。
+
 ### 2026-09-28 夜间续跑：本机入口生命周期已接合，双机现场执行仍待完成
 
 承接 `b6f9263b`，Task4 原 BASE844c2ced不变。在原 `browser-first-cutover-host.mjs` 增加 `createFirstCutoverIngressLifecycle`，直接组合已有 fence store、文件隔离、正式 nginx 及 TLS 探测。构造只观察；原真实 journal 的阶段意图、完整记录摘要、受保护入口清单在效果边界核验。隔离、全隔离、同实例恢复每项一次，禁止并发和不确定重载的重试；错误保留 installing/restoring 文件，不伪装成功。实际 writer 与候选控制观察仍为必需接口。没有新增通用命令/RPC或修改已安装只读通道。

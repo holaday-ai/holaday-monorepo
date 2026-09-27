@@ -1,7 +1,8 @@
 """Fixed SSH entry for the approved Vultr -> Aliyun deployment identity.
 
-Only probe and the existing read-only observer are enabled here. This is NOT a
-remote shell, installer, permission to mutate, or a replacement release journal.
+Probe/observe remain read-only. The fixed ingress session additionally requires
+a separately installed protected bundle and attempt approval on the receiving
+host. This is NOT a remote shell, installer, or replacement release journal.
 """
 import base64
 import hashlib
@@ -18,6 +19,18 @@ ROOT = pathlib.Path('/var/lib/holaday-deploy/channel')
 ENTRY = ROOT / 'browser-cutover-channel.py'
 SOURCE_IP = '207.148.70.106'
 ERROR = 'CUTOVER_CHANNEL_UNPROVEN'
+INGRESS_MODULES = frozenset([
+    'browser-backup-age.mjs', 'browser-cutover-evidence.mjs',
+    'browser-first-cutover-backup.mjs', 'browser-first-cutover-fence.mjs',
+    'browser-first-cutover-host.mjs', 'browser-first-cutover-ingress-files.mjs',
+    'browser-first-cutover-ingress-session.mjs', 'browser-first-cutover-inventory.mjs',
+    'browser-first-cutover-nginx.mjs', 'browser-first-cutover-runtime.mjs',
+    'browser-maintenance-host.mjs', 'browser-maintenance-journal.mjs',
+    'browser-maintenance-linux.mjs', 'browser-maintenance-manifest.mjs',
+    'browser-maintenance-policy.mjs', 'browser-maintenance-release-tail.mjs',
+    'browser-maintenance-runtime-system.mjs', 'browser-maintenance-runtime.mjs',
+    'browser-maintenance-transition.mjs', 'browser-payment-port-fence.mjs',
+])
 
 
 def parse_command(value):
@@ -26,6 +39,9 @@ def parse_command(value):
     match = re.fullmatch(r'holaday-cutover-v1 observe ([a-f0-9]{32})', value)
     if match:
         return 'observe', match[1]
+    match = re.fullmatch(r'holaday-cutover-v1 ingress ([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})', value)
+    if match:
+        return 'ingress', match[1]
     raise RuntimeError(ERROR)
 
 
@@ -79,6 +95,29 @@ def read_verified_file(path, expected_digest=None, owner=0, limit=1024 * 1024):
     finally:
         if fd is not None:
             os.close(fd)
+
+
+def verify_ingress_bundle(root, owner=0):
+    """Fixed complete module closure, immutable to application users. No upload API."""
+    root = pathlib.Path(root)
+    before = root.lstat()
+    if (not stat.S_ISDIR(before.st_mode) or before.st_uid != owner or
+            stat.S_IMODE(before.st_mode) != 0o700 or root.resolve() != root or
+            {p.name for p in root.iterdir()} != INGRESS_MODULES | {'bundle.json'}):
+        raise RuntimeError(ERROR)
+    manifest = json.loads(read_verified_file(root / 'bundle.json', owner=owner, limit=16 * 1024))
+    if (set(manifest) != {'schemaVersion', 'files'} or manifest['schemaVersion'] != 1 or
+            not isinstance(manifest['files'], dict) or set(manifest['files']) != INGRESS_MODULES):
+        raise RuntimeError(ERROR)
+    for name, digest in manifest['files'].items():
+        if not isinstance(digest, str) or not re.fullmatch('[a-f0-9]{64}', digest):
+            raise RuntimeError(ERROR)
+        read_verified_file(root / name, digest, owner=owner)
+    current = root.lstat()
+    if (before.st_dev, before.st_ino, before.st_mtime_ns, before.st_ctime_ns) != (
+            current.st_dev, current.st_ino, current.st_mtime_ns, current.st_ctime_ns):
+        raise RuntimeError(ERROR)
+    return root / 'browser-first-cutover-ingress-session.mjs'
 
 
 def install_sender(target, trusted_host, owner=0):
@@ -198,6 +237,12 @@ def main():
                 s.st_mode & (0o077 if folder == ROOT else 0o022) or folder.resolve() != folder):
             raise RuntimeError(ERROR)
     entry_digest = hashlib.sha256(read_verified_file(ENTRY)).hexdigest()
+    if action == 'ingress':
+        entry = verify_ingress_bundle(ROOT / 'ingress')
+        os.chdir('/')
+        os.execve('/usr/bin/node', ['/usr/bin/node', str(entry), request_id],
+                  {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': '/root',
+                   'PM2_HOME': '/root/.pm2', 'LANG': 'C', 'GIT_OPTIONAL_LOCKS': '0'})
     if action == 'probe':
         print(json.dumps({'protocol': 1, 'host': 'aliyun', 'hostname': socket.gethostname(),
                           'entryDigest': entry_digest, 'actions': ['probe', 'observe']}))
