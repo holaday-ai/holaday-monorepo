@@ -6,6 +6,24 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-27：原始主机清单接到既有定向退出接口，整项仍未部署
+
+本轮从 `cd7046f9` 继续同一 Task4/BASE。新增 `browser-first-cutover-inventory.mjs`：用真实主机快照和逐对象/来源审查，把受管目标、未托管目标、保留的浏览器/VNC/其他服务分开，输出可供现有 `captureLegacyRegistrations` / `captureLegacyRuntime` 校验的清单。未知或漂移对象保留为阻塞，不从列表中过滤掉。该模块不批准执行、不停止服务、不生成就绪回执，尚不是完整双机 site adapter。
+
+修复接线实测暴露的缺口：采集器提供与删除接口一致的 PM2 配置摘要和显式停止超时，采集末尾复查 PM2，配置/环境/cron/PID漂移拒绝，只有堆/延迟仪表的变化不算配置变更。另只读核对实际 daemon 版本、已安装 PM2 6.0.14 的默认参数及 daemon 环境中的两项停止参数，不输出其他环境。主服务 4002 WebSocket 监听必须和 4001 一起纳入 Vultr 范围，阿里云仍必须同时覆盖4010/4011。没有新增部署绕过开关。
+
+双机在 UTC05:50:30/36 实采成功，Mac私密归档 `.../holaday-live-host-observer-bA6yUF`。候选分类（不是执行批准）：Aliyun当前网关5个进程，保留orangebench3个；旧4011两个未托管进程仍待职责核清。Vultr主进程/worker两个目标、PID0但仍小时调度的files-cron注册；保留24个其他进程。源码/版本最终复核见下方追加结果。原始来源仍须完整审查，不能由程序生成全部“已审”理由来消除未知项。
+
+UTC05:54:18仅查询任务与调度，明确排除全部支付表：6月24日explorer任务仍running，14次浏览器操作、22次模型调用，未自动取消或改终态；2个未来计划仍active。已一次性询问旧PayPal记录的只读核查许可、单条explorer操作记录核查许可，以及可写离线私钥备份位置；回复前不恢复相关动作。旧PayPal问题沿用此前证据，未在本轮访问支付方或查询支付表。
+
+测试：首次完整浏览器回归476通过/15条件跳过；发现未设置既有age测试变量后重跑，492/492通过、无跳过。清单22项含正向接入原capture函数、未知进程/来源/监听拒绝、完整树与保留浏览器、4002遗漏等。Linux Node22针对性109/109通过。完整ops退出0（120/59/16/330及shell）；orchestrator完整测试退出0（Node73，Vitest507文件8595通过/1既有CDP条件跳过）。最后daemon版本核验后的最终日志为 `/tmp/holaday-inventory-browser-final2.log`，其他日志 `holaday-inventory-{application,ops,linux}.log`。无新MySQL全流程/生产备份/整分支审查通过声明。
+
+剩余必须按一项收口：受保护的真实清单与启动依赖审查、双机生命周期/数据库/支付/备份传输的实际I/O和首次shell入口、真实恢复/支付演练、整项审查和部署。当前不能把“单元/应用测试通过”当成“首次切换已完成”。保留既有 `scripts/__pycache__/`；没有生产配置、服务、防火墙、数据库、支付、浏览器profile或私钥变更。
+
+最终双机实采UTC06:04:32/37再次成功，运行daemon与安装版本一致，归档 `.../holaday-live-host-observer-aJmL6H`，摘要见主机核查。最后代码版浏览器492/492、Linux109/109均通过，无跳过；五MJS Biome及diff-check通过。未把未审来源数量归零，未写受保护上线批准文件。
+
+最后完整ops重跑退出0（120/59/16/330及shell，无跳过），`/tmp/holaday-inventory-ops-final.log`；全部SSH/测试会话已结束，Linux测试容器自动删除。本地八文件检查点，不含原始证据/密钥/忽略QA/旧缓存；不创建或宣称可部署PR。
+
 ### 2026-09-27 14:24 JST：启动来源采集接入，双机实际主备差异核实
 
 继续同一Task4/BASE，不重做备份或新建发布框架。原evidence模块加入固定范围 `readCutoverStartupSnapshot` 并接入真实host采集；PM2主备、有效systemd源文件/本地与运行时树、系统与用户cron、rc.local及实际启动脚本双读校验，原文只留Mac。两台主机实际成功，原始归档 `.../holaday-live-host-observer-9ILKHc` 及准确摘要/范围见[主机核查](2026-09-26-browser-host-readonly-audit.md)顶部。实采观察器身份单独记录，不按root Node名称猜排除。

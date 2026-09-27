@@ -4,18 +4,16 @@ import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { isDeepStrictEqual as equal, promisify } from 'node:util';
 import { captureLegacyRegistrations } from './browser-first-cutover-runtime.mjs';
+export { cutoverRegistrationConfigDigest as registrationConfigDigest } from './browser-cutover-evidence.mjs';
+import { cutoverRegistrationConfigDigest as registrationConfigDigest } from './browser-cutover-evidence.mjs';
 
 const archive = '/var/lib/holaday-deploy/maintenance';
 const home = '/root/.pm2';
 const pm2 = '/usr/lib/node_modules/pm2/bin/pm2';
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 const hash = (v) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
-// PM2 updates axm_monitor heap/latency gauges during observation. All launch,
-// environment, restart, status and scheduling fields remain identity-bearing.
-const stableConfig = (value) => {
-  return Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'axm_monitor'));
-};
-export const registrationConfigDigest = (value) => sha(JSON.stringify(stableConfig(value)));
+const stableConfig = (value) =>
+  Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'axm_monitor'));
 const fail = () => {
   throw new Error('CUTOVER_REGISTRATION_UNPROVEN');
 };

@@ -1,5 +1,17 @@
 # 首次切换：真实主机只读核查与有限修正清单
 
+## 2026-09-27 14:50 JST：真实停止参数与物理清单接线
+
+两台主机只读采集均成功：`/private/tmp/holaday-live-host-observer-bA6yUF/{aliyun,vultr}.json`，源SHA `899dd40e959e2042465b254d95282b4881ac1b9c17cb0862406f74d688292d6f`（后续补daemon运行版本核验，不将此旧摘要写作最终版本）。两个实际PM2 daemon分别128388/1170，已安装版本6.0.14，读取的默认停止参数SIGINT/1600ms，daemon无这两项环境覆盖；worker显式660000ms、memory restart 536870912不被填零。所有环境原值均未输出。
+
+将本次实采资料输入新只读分类器作历史观察（使用观察时刻，不冒充当前60秒内批准）。Aliyun可识别当前网关完整5进程和orangebench3个保留进程；965039/965055的4011旧未托管树仍保留未解决项。Vultr识别主程序733273、worker67648和PID0小时files-cron，保留浏览器/VNC/akshare/orangebench等24个进程。监听器检查真实发现4002，已纳入必须覆盖的端口，与4001一起核对。分类器没有全局PM2操作或信号发送能力，实际退出仍由原capture/effects和journal/fence条件控制。
+
+源文件/目录/服务/cron/计时器等全部绑定审查，不以关键词没有命中推导“无未知启动源”。该次未提供源码审查结论，Aliyun223、Vultr265个来源绑定仍未批准；这些是审查记录数，不是新增服务或待删除对象数。PM2实时仪表排除后配置摘要在前后读取间保持一致；实际配置漂移仍拒绝。
+
+另在UTC05:54:18只读查询任务/调度计数，未执行脚本内原支付查询：仍1个6月24日running explorer任务，14次navigate/click、22条模型调用，2个未来active计划；未做业务记录清理。私钥、浏览器profile、支付表/支付方、所有服务状态均未改变。
+
+最终源码加入 `/proc/<daemon>/cmdline` 的实际运行版本校验后，两台主机再次采集成功，UTC `06:04:32.030` / `06:04:37.566`，观察器PID1213763/213706。归档 `/private/tmp/holaday-live-host-observer-aJmL6H/{aliyun,vultr}.json`；源码SHA `1fc086c94ba0b214fc57c2dc9d9bbee46cc71b7b10f87d8aee910c9e4c0480b6`；原始文件SHA分别 `924d136122b1e835472b89cfc737b1688fea36fd9129a4fa7c8f392692a8dbd4` / `9272e152987b3603d39b5daf7a2d0b1396a3f328dc5732fda8392cd1298f8eef`。应用/PM2目标PID保持不变；这是只读事实，不是有效至未来的部署批准。
+
 ## 2026-09-27 14:24 JST：真实启动文件和 PM2 主备差异已采集
 
 沿用户已明确授权的两台主机/只读配置范围，原采集器新增 `readCutoverStartupSnapshot` 并在主机快照调用。固定读取 PM2 主/备用文件、systemd 有效 pm2-root 属性与其 Fragment/DropIn 源文件、`/etc/systemd/system` 和 `/run/systemd/system`、系统 cron 目录、Debian/Ubuntu 用户 crontab 目录、rc.local 及实采 PM2 所指向的六个 Holaday 启动脚本。前后两次完整读取并比较内容/链接/目录/元数据；无法读取、内容漂移、循环链接、非文本或超限时拒绝，不把缺失与失败混同。原文可能含私密配置，只保存在 Mac 0700目录/0600文件，不发布到仓库或用户可读报告。

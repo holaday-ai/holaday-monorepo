@@ -5,6 +5,16 @@ import * as fs from 'node:fs/promises';
 import { readFile, readdir, readlink } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { promisify } from 'node:util';
+// Shared with exact-registration retirement. Heap/latency gauges are volatile;
+// all environment, launch, restart and scheduling fields remain identity-bearing.
+export const cutoverRegistrationConfigDigest = (value) =>
+  createHash('sha256')
+    .update(
+      JSON.stringify(
+        Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'axm_monitor')),
+      ),
+    )
+    .digest('hex');
 const publicationSystem = {
   ...fs,
   platform: process.platform,
@@ -287,7 +297,69 @@ const hostSystem = {
   },
   nginxSnapshot: () => readCutoverNginxSnapshot(),
   startupSnapshot: () => readCutoverStartupSnapshot(),
+  pm2RuntimeSnapshot: () => readCutoverPM2RuntimeSnapshot(),
 };
+
+/** Observe the installed, explicitly supported PM2 stop defaults and the live
+ * daemon's overrides. Never execute source text or return its other environment.
+ * Version/source/daemon drift is refusal, not a guessed 1600ms/SIGINT fallback. */
+export async function readCutoverPM2RuntimeSnapshot(io = hostSystem) {
+  try {
+    if (io.platform !== 'linux' || io.uid !== 0) throw new Error('host');
+    const started = io.now();
+    const read = async (path) => {
+      const value = await io.readFile(path, 'utf8');
+      if (typeof value !== 'string' || Buffer.byteLength(value) > 2 * 1024 * 1024)
+        throw new Error('source');
+      return value;
+    };
+    const pass = async () => {
+      const rawPid = await read('/root/.pm2/pm2.pid');
+      if (!/^[1-9]\d*\n?$/.test(rawPid)) throw new Error('pid');
+      const pid = Number(rawPid.trim());
+      if (!Number.isSafeInteger(pid) || pid <= 1) throw new Error('pid');
+      const pkg = await read('/usr/lib/node_modules/pm2/package.json');
+      const source = await read('/usr/lib/node_modules/pm2/constants.js');
+      const version = JSON.parse(pkg).version;
+      if (
+        version !== '6.0.14' ||
+        (await read(`/proc/${pid}/cmdline`)).replace(/\0+$/, '') !==
+          'PM2 v6.0.14: God Daemon (/root/.pm2)' ||
+        !/^\s*KILL_TIMEOUT\s*:\s*process\.env\.PM2_KILL_TIMEOUT \|\| 1600,\s*$/m.test(source) ||
+        !/^\s*KILL_SIGNAL\s*:\s*process\.env\.PM2_KILL_SIGNAL \|\| 'SIGINT',\s*$/m.test(source)
+      )
+        throw new Error('unsupported defaults');
+      const entries = (await read(`/proc/${pid}/environ`))
+        .split('\0')
+        .filter((value) => /^PM2_KILL_(SIGNAL|TIMEOUT)=/.test(value));
+      const pairs = entries.map((value) => [
+        value.slice(0, value.indexOf('=')),
+        value.slice(value.indexOf('=') + 1),
+      ]);
+      if (new Set(pairs.map(([key]) => key)).size !== pairs.length) throw new Error('duplicate');
+      const settings = Object.fromEntries(pairs);
+      const timeout = settings.PM2_KILL_TIMEOUT || '1600';
+      const killSignal = settings.PM2_KILL_SIGNAL || 'SIGINT';
+      if (!/^[1-9]\d*$/.test(timeout) || !['SIGINT', 'SIGTERM'].includes(killSignal))
+        throw new Error('settings');
+      const killTimeoutMs = Number(timeout);
+      if (!Number.isSafeInteger(killTimeoutMs) || killTimeoutMs > 900000)
+        throw new Error('timeout');
+      return {
+        pid,
+        version,
+        killSignal,
+        killTimeoutMs,
+        sourceDigest: digest({ pkg, source, settings }),
+      };
+    };
+    const result = await pass();
+    if (!same(result, await pass()) || !fresh(started, io.now())) throw new Error('drift');
+    return result;
+  } catch {
+    fail('MAINTENANCE_PM2_OBSERVATION_UNPROVEN');
+  }
+}
 
 /** Private raw startup evidence only, not an authorization to retire anything.
  * Covers PM2's two independent dumps, its effective system unit, local/runtime
@@ -638,22 +710,44 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
       return all.filter((process) => included.has(process.pid));
     };
     const processes = await readProcesses();
-    const rows = JSON.parse(await io.exec('pm2', ['jlist']));
-    if (!Array.isArray(rows)) throw new Error('manager');
-    const managers = rows.map((row) => ({
-      pid: row.pid,
-      name: row.name,
-      pmId: row.pm_id,
-      cwd: row.pm2_env?.pm_cwd,
-      execPath: row.pm2_env?.pm_exec_path,
-      interpreter: row.pm2_env?.exec_interpreter,
-      argsDigest: digest(row.pm2_env?.args ?? []),
-      status: row.pm2_env?.status,
-      autorestart: row.pm2_env?.autorestart,
-      watch: row.pm2_env?.watch,
-      maxMemoryRestart: row.pm2_env?.max_memory_restart,
-      cronRestart: row.pm2_env?.cron_restart,
-    }));
+    const pm2Runtime = await io.pm2RuntimeSnapshot();
+    const readManagers = async () => {
+      const rows = JSON.parse(await io.exec('pm2', ['jlist']));
+      if (
+        !Array.isArray(rows) ||
+        rows.length > 10000 ||
+        rows.some(
+          (row) =>
+            !row?.pm2_env ||
+            typeof row.pm2_env !== 'object' ||
+            Array.isArray(row.pm2_env) ||
+            !Number.isSafeInteger(row.pm_id) ||
+            row.pm_id < 0 ||
+            typeof row.name !== 'string',
+        ) ||
+        new Set(rows.map((row) => row.pm_id)).size !== rows.length
+      )
+        throw new Error('manager');
+      return rows
+        .map((row) => ({
+          pid: row.pid,
+          name: row.name,
+          pmId: row.pm_id,
+          cwd: row.pm2_env?.pm_cwd,
+          execPath: row.pm2_env?.pm_exec_path,
+          interpreter: row.pm2_env?.exec_interpreter,
+          argsDigest: digest(row.pm2_env?.args ?? []),
+          status: row.pm2_env?.status,
+          autorestart: row.pm2_env?.autorestart,
+          watch: row.pm2_env?.watch,
+          maxMemoryRestart: row.pm2_env?.max_memory_restart,
+          cronRestart: row.pm2_env?.cron_restart,
+          killTimeoutMs: row.pm2_env.kill_timeout,
+          configDigest: cutoverRegistrationConfigDigest(row.pm2_env),
+        }))
+        .sort((a, b) => a.pmId - b.pmId);
+    };
+    const managers = await readManagers();
     const listeners = await io.exec('ss', ['-H', '-ltnp']);
     const nginx = await io.nginxSnapshot();
     const systemd = await io.exec('systemctl', [
@@ -697,6 +791,8 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
     if (
       String(await io.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim() !== bootId ||
       !same(processes, await readProcesses()) ||
+      !same(managers, await readManagers()) ||
+      !same(pm2Runtime, await io.pm2RuntimeSnapshot()) ||
       !same(rootCrontab, await readRootCrontab()) ||
       !fresh(observedAtMs, io.now())
     )
@@ -706,6 +802,7 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
       bootId,
       processes,
       managers,
+      pm2Runtime,
       listeners,
       nginx: nginx.dump,
       nginxFiles: nginx.files,

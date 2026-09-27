@@ -343,6 +343,13 @@ function hostFixture() {
     platform: 'linux',
     uid: 0,
     now: () => 100_000,
+    pm2RuntimeSnapshot: async () => ({
+      pid: 10,
+      version: '6.0.14',
+      killSignal: 'SIGINT',
+      killTimeoutMs: 1600,
+      sourceDigest: 'a'.repeat(64),
+    }),
     startupSnapshot: async () => ({
       observedAtMs: 100_000,
       files: [],
@@ -394,6 +401,55 @@ function hostFixture() {
   };
   return { io, calls, files };
 }
+test('PM2 runtime observes actual daemon settings and audited defaults without exposing environment', async () => {
+  const module = await import('./browser-cutover-evidence.mjs');
+  assert.equal(typeof module.readCutoverPM2RuntimeSnapshot, 'function');
+  const files = new Map([
+    ['/root/.pm2/pm2.pid', '50\n'],
+    ['/usr/lib/node_modules/pm2/package.json', '{"version":"6.0.14"}'],
+    [
+      '/usr/lib/node_modules/pm2/constants.js',
+      "  KILL_TIMEOUT            : process.env.PM2_KILL_TIMEOUT || 1600,\n  KILL_SIGNAL             : process.env.PM2_KILL_SIGNAL || 'SIGINT',\n",
+    ],
+    ['/proc/50/environ', 'PRIVATE_KEY=never-return\0PM2_KILL_TIMEOUT=2200\0'],
+    ['/proc/50/cmdline', 'PM2 v6.0.14: God Daemon (/root/.pm2)\0'],
+  ]);
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    now: () => 1000,
+    readFile: async (path) => {
+      assert.ok(files.has(path));
+      return files.get(path);
+    },
+  };
+  const result = await module.readCutoverPM2RuntimeSnapshot(io);
+  assert.equal(result.killTimeoutMs, 2200);
+  assert.equal(result.killSignal, 'SIGINT');
+  assert.equal(result.pid, 50);
+  assert.equal(result.version, '6.0.14');
+  assert.equal(JSON.stringify(result).includes('never-return'), false);
+  files.set('/proc/50/environ', 'PRIVATE_KEY=never-return\0');
+  assert.equal((await module.readCutoverPM2RuntimeSnapshot(io)).killTimeoutMs, 1600);
+  files.set('/proc/50/environ', 'PM2_KILL_SIGNAL=SIGTERM\0');
+  assert.equal((await module.readCutoverPM2RuntimeSnapshot(io)).killSignal, 'SIGTERM');
+  files.set('/proc/50/cmdline', 'PM2 v6.0.13: God Daemon (/root/.pm2)\0');
+  await assert.rejects(
+    module.readCutoverPM2RuntimeSnapshot(io),
+    /MAINTENANCE_PM2_OBSERVATION_UNPROVEN/,
+  );
+  files.set('/proc/50/cmdline', 'PM2 v6.0.14: God Daemon (/root/.pm2)\0');
+  files.set('/usr/lib/node_modules/pm2/constants.js', 'other defaults');
+  await assert.rejects(
+    module.readCutoverPM2RuntimeSnapshot(io),
+    /MAINTENANCE_PM2_OBSERVATION_UNPROVEN/,
+  );
+});
+test('host snapshot includes independently observed PM2 defaults', async () => {
+  const f = hostFixture();
+  const result = await readCutoverHostSnapshot(f.io);
+  assert.equal(result.pm2Runtime?.killTimeoutMs, 1600);
+});
 function hostTreeFixture() {
   const f = hostFixture();
   const links = new Map();
@@ -476,6 +532,67 @@ test('host facts include unmanaged 4011, full proc identity and startup sources'
     f.calls.some((call) => call[0] === 'crontab'),
     true,
   );
+});
+test('host observations bind private PM2 configuration without returning its values', async () => {
+  const f = hostFixture();
+  const exec = f.io.exec;
+  f.io.exec = async (command, args) => {
+    const raw = await exec(command, args);
+    if (command !== 'pm2') return raw;
+    const rows = JSON.parse(raw);
+    rows[0].pm2_env.kill_timeout = 660000;
+    return JSON.stringify(rows);
+  };
+  const result = await readCutoverHostSnapshot(f.io);
+  const { registrationConfigDigest } = await import('./browser-first-cutover-registrations.mjs');
+  assert.equal(
+    result.managers[0].configDigest,
+    registrationConfigDigest({
+      pm_cwd: '/opt/holaday-cn-payment',
+      autorestart: true,
+      status: 'online',
+      PRIVATE_KEY: 'secret',
+      kill_timeout: 660000,
+    }),
+  );
+  assert.equal(result.managers[0].killTimeoutMs, 660000);
+  assert.equal(JSON.stringify(result).includes('secret'), false);
+});
+for (const change of ['pid', 'new-registration', 'environment', 'kill-timeout', 'schedule']) {
+  test(`host snapshot rejects PM2 ${change} drift during the same observation`, async () => {
+    const f = hostFixture();
+    const exec = f.io.exec;
+    let reads = 0;
+    f.io.exec = async (command, args) => {
+      const raw = await exec(command, args);
+      if (command !== 'pm2') return raw;
+      const rows = JSON.parse(raw);
+      if (++reads > 1) {
+        if (change === 'pid') rows[0].pid = 402;
+        if (change === 'new-registration') rows.push({ ...rows[0], pm_id: 3 });
+        if (change === 'environment') rows[0].pm2_env.PRIVATE_KEY = 'rotated-private-value';
+        if (change === 'kill-timeout') rows[0].pm2_env.kill_timeout = 1;
+        if (change === 'schedule') rows[0].pm2_env.cron_restart = '* * * * *';
+      }
+      return JSON.stringify(rows);
+    };
+    await assert.rejects(readCutoverHostSnapshot(f.io), /MAINTENANCE_HOST_OBSERVATION_UNPROVEN/);
+  });
+}
+test('PM2 heap metrics may vary without losing the configuration binding', async () => {
+  const f = hostFixture();
+  const exec = f.io.exec;
+  let reads = 0;
+  f.io.exec = async (command, args) => {
+    const raw = await exec(command, args);
+    if (command !== 'pm2') return raw;
+    const rows = JSON.parse(raw);
+    rows[0].pm2_env.axm_monitor = { heap: ++reads };
+    return JSON.stringify(rows);
+  };
+  const result = await readCutoverHostSnapshot(f.io);
+  assert.match(result.managers[0].configDigest, /^[a-f0-9]{64}$/);
+  assert.equal(reads, 2);
 });
 function absentRootCrontab(overrides = {}) {
   return Object.assign(new Error('crontab failed'), {
