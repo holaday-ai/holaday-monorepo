@@ -23,7 +23,7 @@ const lines = (text) => {
 const executionHost = (role) =>
   ['ingress', 'gateway'].includes(role)
     ? 'aliyun'
-    : ['ingress-ssh', 'gateway-ssh'].includes(role)
+    : ['ingress-ssh', 'gateway-ssh', 'coordinator'].includes(role)
       ? 'vultr'
       : null;
 
@@ -444,7 +444,7 @@ export function classifyFirstCutoverHostPair(input, io = { now: Date.now }) {
     fail();
   if (
     !Array.isArray(execution) ||
-    execution.length > 4 ||
+    execution.length > 5 ||
     new Set(execution.map((r) => `${r.host}:${r.role}`)).size !== execution.length ||
     execution.some(
       (r) =>
@@ -452,7 +452,7 @@ export function classifyFirstCutoverHostPair(input, io = { now: Date.now }) {
         !executionHost(r.role) ||
         r.host !== executionHost(r.role) ||
         r.binding?.inventoryDigest !== inventoryDigest ||
-        !hash(r.siteDigest),
+        !hash(r.role === 'coordinator' ? r.toolDigest : r.siteDigest),
     )
   )
     fail();
@@ -713,12 +713,17 @@ export function classifyFirstCutoverHost(input, io = { now: Date.now }) {
       host !== executionHost(receipt.role) ||
       receipt.bootId !== s.bootId ||
       receipt.binding?.inventoryDigest !== inventoryDigest ||
-      !hash(receipt.siteDigest) ||
+      !hash(receipt.role === 'coordinator' ? receipt.toolDigest : receipt.siteDigest) ||
       !p ||
       !equal(p, receipt.process) ||
       !equal(p.uids, [0, 0, 0, 0]) ||
       p.cwd !== '/' ||
-      p.exe !== (host === 'vultr' ? '/usr/bin/ssh' : '/usr/bin/node') ||
+      p.exe !==
+        (receipt.role === 'coordinator'
+          ? '/opt/node22/bin/node'
+          : host === 'vultr'
+            ? '/usr/bin/ssh'
+            : '/usr/bin/node') ||
       !hash(p.argvDigest) ||
       typeof p.cgroup !== 'string' ||
       !p.cgroup ||

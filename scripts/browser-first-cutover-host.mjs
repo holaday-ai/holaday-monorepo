@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { collectCutoverEvidence } from './browser-cutover-evidence.mjs';
 import { backupAndRestoreCheck } from './browser-first-cutover-backup.mjs';
@@ -51,6 +52,289 @@ const privateFile = (stat) =>
   stat.isFile() && stat.uid === 0 && (stat.mode & 0o7777) === 0o600 && stat.nlink === 1;
 const privateDirectory = (stat) =>
   stat.isDirectory() && stat.uid === 0 && (stat.mode & 0o7777) === 0o700;
+
+// Same closed tool set as the protected ingress bundle. These are source
+// attestations, not readiness evidence or permission to perform a cutover.
+const coordinatorModules = [
+  'browser-backup-age.mjs',
+  'browser-cutover-evidence.mjs',
+  'browser-first-cutover-backup.mjs',
+  'browser-first-cutover-fence.mjs',
+  'browser-first-cutover-host.mjs',
+  'browser-first-cutover-ingress-files.mjs',
+  'browser-first-cutover-ingress-session.mjs',
+  'browser-first-cutover-inventory.mjs',
+  'browser-first-cutover-nginx.mjs',
+  'browser-first-cutover-runtime.mjs',
+  'browser-maintenance-host.mjs',
+  'browser-maintenance-journal.mjs',
+  'browser-maintenance-linux.mjs',
+  'browser-maintenance-manifest.mjs',
+  'browser-maintenance-policy.mjs',
+  'browser-maintenance-release-tail.mjs',
+  'browser-maintenance-runtime-system.mjs',
+  'browser-maintenance-runtime.mjs',
+  'browser-maintenance-transition.mjs',
+  'browser-payment-port-fence.mjs',
+];
+
+/** Own fixed-entry Linux identity, pinned to protected approval and actual Git
+ * candidate bytes. The trusted site holds this handle; no caller-provided PID
+ * or receipt is accepted by the command entry. Any failed read ends its lifetime.
+ */
+export async function createFirstCutoverCoordinatorIdentity(input, overrides = {}) {
+  const io = {
+    fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    pid: process.pid,
+    entry: fileURLToPath(import.meta.url),
+    now: Date.now,
+    readApproval: readFirstCutoverApproval,
+    exec: candidatePreparationSystem().exec,
+    ...overrides,
+  };
+  let closed = false;
+  let initial;
+  let originalApproval;
+  let lastTime = -1;
+  const reject = () => {
+    throw new Error('CUTOVER_COORDINATOR_UNPROVEN');
+  };
+  const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
+  const read = async () => {
+    try {
+      if (
+        closed ||
+        io.platform !== 'linux' ||
+        io.uid !== 0 ||
+        !input ||
+        Object.keys(input).length !== 2 ||
+        !uuid(input.attempt) ||
+        input.mode !== 'check' ||
+        !Number.isSafeInteger(io.pid) ||
+        io.pid <= 1
+      )
+        reject();
+      const approval = await io.readApproval({ attempt: input.attempt });
+      const now = io.now();
+      if (
+        (originalApproval && !isDeepStrictEqual(originalApproval, approval)) ||
+        approval.attempt !== input.attempt ||
+        !/^[a-f0-9]{40}$/.test(approval.candidate ?? '') ||
+        !/^[a-zA-Z0-9][a-zA-Z0-9/_-]*$/.test(approval.branch ?? '') ||
+        !['configDigest', 'migrationDigest', 'inventoryDigest'].every((k) =>
+          /^[a-f0-9]{64}$/.test(approval[k] ?? ''),
+        ) ||
+        !Number.isSafeInteger(now) ||
+        now < 0 ||
+        now < lastTime ||
+        !Number.isSafeInteger(approval.maintenanceEndsAtMs) ||
+        now >= approval.maintenanceEndsAtMs
+      )
+        reject();
+      const folder = `/var/lib/holaday-deploy/first-cutover/${approval.candidate}`;
+      const entry = `${folder}/browser-first-cutover-host.mjs`;
+      if (io.entry !== entry) reject();
+      const dir = await io.fs.lstat(folder);
+      if (!privateDirectory(dir) || (await io.fs.realpath(folder)) !== folder) reject();
+      const readPrivate = async (path) => {
+        const handle = await io.fs.open(
+          path,
+          constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        );
+        try {
+          const a = await handle.stat();
+          if (!privateFile(a) || a.size < 1 || a.size > 1024 * 1024) reject();
+          const bytes = await handle.readFile();
+          const b = await handle.stat();
+          const c = await io.fs.lstat(path);
+          if (
+            ![b, c].every(
+              (s) =>
+                privateFile(s) &&
+                sameFile(a, s) &&
+                s.size === a.size &&
+                s.mtimeMs === a.mtimeMs &&
+                s.ctimeMs === a.ctimeMs,
+            ) ||
+            bytes.length !== a.size
+          )
+            reject();
+          return bytes;
+        } finally {
+          await handle.close();
+        }
+      };
+      const manifestBytes = await readPrivate(`${folder}/bundle.json`);
+      const manifest = JSON.parse(manifestBytes.toString('utf8'));
+      if (
+        !isDeepStrictEqual(Object.keys(manifest).sort(), ['candidate', 'files', 'schemaVersion']) ||
+        manifest.schemaVersion !== 1 ||
+        manifest.candidate !== approval.candidate ||
+        !isDeepStrictEqual(Object.keys(manifest.files).sort(), [...coordinatorModules].sort()) ||
+        !isDeepStrictEqual(
+          (await io.fs.readdir(folder)).sort(),
+          [...coordinatorModules, 'bundle.json'].sort(),
+        )
+      )
+        reject();
+      const git = ['--no-replace-objects', '-C', '/opt/holaday-monorepo'];
+      await io.exec('git', [
+        ...git,
+        'merge-base',
+        '--is-ancestor',
+        approval.candidate,
+        `refs/remotes/origin/${approval.branch}`,
+      ]);
+      for (const name of coordinatorModules) {
+        const bytes = await readPrivate(`${folder}/${name}`);
+        const source = await io.exec('git', [
+          ...git,
+          'show',
+          `${approval.candidate}:scripts/${name}`,
+        ]);
+        if (sha(bytes) !== manifest.files[name] || !bytes.equals(Buffer.from(source))) reject();
+      }
+      // Existing port-fence adapter reads this fixed module-relative resource.
+      const policyRoot = '/var/lib/holaday-deploy/first-cutover/ops';
+      for (const path of [policyRoot, `${policyRoot}/aliyun-edge`])
+        if (!privateDirectory(await io.fs.lstat(path)) || (await io.fs.realpath(path)) !== path)
+          reject();
+      const policy = await readPrivate(`${policyRoot}/aliyun-edge/holaday-payment-ingress.nft`);
+      if (
+        sha(policy) !== 'de27f46f3bdad7d0c239c18a44e2775ef5c27e936d1a859f3f81d8fb8ee1cdb2' ||
+        !policy.equals(
+          Buffer.from(
+            await io.exec('git', [
+              ...git,
+              'show',
+              `${approval.candidate}:ops/aliyun-edge/holaday-payment-ingress.nft`,
+            ]),
+          ),
+        )
+      )
+        reject();
+      const currentDir = await io.fs.lstat(folder);
+      if (
+        !privateDirectory(currentDir) ||
+        !sameFile(dir, currentDir) ||
+        (await io.fs.realpath(folder)) !== folder ||
+        !manifestBytes.equals(await readPrivate(`${folder}/bundle.json`))
+      )
+        reject();
+      const processIdentity = async () => {
+        const root = `/proc/${io.pid}`;
+        const stat = await io.fs.readFile(`${root}/stat`, 'utf8');
+        if (!stat.startsWith(`${io.pid} (`)) reject();
+        const fields = stat
+          .slice(stat.lastIndexOf(')') + 2)
+          .trim()
+          .split(/\s+/);
+        const uids = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m
+          .exec(await io.fs.readFile(`${root}/status`, 'utf8'))
+          ?.slice(1)
+          .map(Number);
+        const cmdline = await io.fs.readFile(`${root}/cmdline`);
+        const bootId = (await io.fs.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim();
+        const process = {
+          pid: io.pid,
+          ppid: Number(fields[1]),
+          start: fields[19],
+          uids,
+          cwd: await io.fs.readlink(`${root}/cwd`),
+          exe: await io.fs.readlink(`${root}/exe`),
+          argvDigest: sha(cmdline),
+          cgroup: await io.fs.readFile(`${root}/cgroup`, 'utf8'),
+        };
+        if (
+          fields[0] === 'Z' ||
+          !Number.isSafeInteger(process.ppid) ||
+          process.ppid < 1 ||
+          !/^[0-9]+$/.test(process.start ?? '') ||
+          !isDeepStrictEqual(uids, [0, 0, 0, 0]) ||
+          process.cwd !== '/' ||
+          process.exe !== '/opt/node22/bin/node' ||
+          !Buffer.from(`/opt/node22/bin/node\0${entry}\0--check\0${input.attempt}\0`).equals(
+            cmdline,
+          ) ||
+          !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(bootId) ||
+          !process.cgroup ||
+          process.cgroup.length > 65536
+        )
+          reject();
+        return { bootId, process };
+      };
+      const self = await processIdentity();
+      if (
+        !isDeepStrictEqual(self, await processIdentity()) ||
+        !isDeepStrictEqual(approval, await io.readApproval({ attempt: input.attempt })) ||
+        io.now() < now ||
+        io.now() >= approval.maintenanceEndsAtMs
+      )
+        reject();
+      const finished = io.now();
+      if (
+        closed ||
+        !Number.isSafeInteger(finished) ||
+        finished < now ||
+        finished >= approval.maintenanceEndsAtMs
+      )
+        reject();
+      const result = {
+        host: 'vultr',
+        role: 'coordinator',
+        binding: Object.fromEntries(
+          ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map(
+            (k) => [k, approval[k]],
+          ),
+        ),
+        toolDigest: sha(manifestBytes),
+        ...self,
+      };
+      if (initial && !isDeepStrictEqual(initial, result)) reject();
+      initial ??= result;
+      originalApproval ??= structuredClone(approval);
+      lastTime = finished;
+      return structuredClone(result);
+    } catch {
+      closed = true;
+      reject();
+    }
+  };
+  await read();
+  return {
+    readExecutionIdentity: read,
+    close: () => {
+      closed = true;
+    },
+  };
+}
+
+// Explicit inspection only. Until the original full site is wired, --execute
+// must fail; source identity must never be reported as release readiness.
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  try {
+    const [mode, attempt, ...extra] = process.argv.slice(2);
+    if (extra.length || !uuid(attempt) || !['--check', '--execute'].includes(mode))
+      throw new Error('CUTOVER_COORDINATOR_USAGE');
+    if (mode === '--execute') throw new Error('CUTOVER_COORDINATOR_SITE_UNAVAILABLE');
+    const handle = await createFirstCutoverCoordinatorIdentity({ mode: 'check', attempt });
+    try {
+      const value = await handle.readExecutionIdentity();
+      process.stdout.write(
+        `${JSON.stringify({ kind: 'coordinator-source-inspection', candidate: value.binding.candidate, toolDigest: value.toolDigest, releaseReady: false })}\n`,
+      );
+    } finally {
+      handle.close();
+    }
+  } catch (error) {
+    process.stderr.write(
+      `${/^CUTOVER_COORDINATOR_[A-Z_]+$/.test(error.message) ? error.message : 'CUTOVER_COORDINATOR_UNPROVEN'}\n`,
+    );
+    process.exitCode = 1;
+  }
+}
 
 /** Real read-only transport for the two reviewed deployment hosts. Linux root
  * uses the dedicated Vultr channel and a local observer; the Mac audit path

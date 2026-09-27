@@ -9,6 +9,8 @@ node --test "$SCRIPT_DIR/browser-maintenance-manifest.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-mysql.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-age.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-host.test.mjs" \
+  "$SCRIPT_DIR/browser-first-cutover-coordinator.test.mjs" \
+  "$SCRIPT_DIR/deploy-browser-first-cutover.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-ingress-host.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-ingress-session.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-gateway-session.test.mjs" \

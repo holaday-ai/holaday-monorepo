@@ -291,6 +291,47 @@ function addTransport(f, binding) {
   return { snapshot, process, receipt };
 }
 
+function addCoordinator(f, binding) {
+  const row = addTransport(f, binding);
+  row.process.exe = '/opt/node22/bin/node';
+  row.receipt.process.exe = row.process.exe;
+  row.receipt.role = 'coordinator';
+  row.receipt.toolDigest = '6'.repeat(64);
+  row.receipt.siteDigest = undefined;
+  return row;
+}
+
+test('owned coordinator is observed before and after retirement without changing legacy approval', async (t) => {
+  const { f, observer, remove } = await retirementFixture(t, undefined, addCoordinator);
+  const reviews = structuredClone(f.reviews);
+  await remove();
+  const actual = await observer.read();
+  assert.deepEqual(actual.unknownLaunchers, []);
+  assert.deepEqual(
+    actual.hosts.find((h) => h.host === 'vultr').executionProcesses.map((p) => p.pid),
+    [920],
+  );
+  assert.deepEqual(f.reviews, reviews);
+});
+
+for (const fault of ['source', 'host', 'exe', 'child', 'listener', 'binding']) {
+  test(`coordinator classification refuses ${fault}`, async (t) => {
+    const { f, binding, observer } = await retirementFixture(t);
+    const { snapshot, process, receipt } = addCoordinator(f, structuredClone(binding));
+    if (fault === 'source') receipt.toolDigest = undefined;
+    if (fault === 'host') receipt.host = 'aliyun';
+    if (fault === 'exe') {
+      process.exe = '/usr/bin/node';
+      receipt.process.exe = process.exe;
+    }
+    if (fault === 'binding') receipt.binding.candidate = 'f'.repeat(40);
+    if (fault === 'child') snapshot.processes.push({ ...process, pid: 921, ppid: 920 });
+    if (fault === 'listener')
+      snapshot.listeners += 'LISTEN 0 511 0.0.0.0:9999 0.0.0.0:* users:(("node",pid=920,fd=1))\n';
+    await assert.rejects(observer.read(), /UNPROVEN/);
+  });
+}
+
 test('owned persistent SSH is attributed on Vultr before baseline and throughout retirement', async (t) => {
   const { f, observer, remove } = await retirementFixture(t, undefined, addTransport);
   await remove();

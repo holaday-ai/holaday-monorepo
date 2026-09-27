@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 夜间续跑：控制器来源、固定检查入口与真实 Linux 身份
+
+承接 `ebf85ec1`，Task4原BASE844c2ced不变。`createFirstCutoverCoordinatorIdentity` 现在验证固定候选目录中的20个模块、root私密manifest和原NFT依赖，并逐文件核对真实Git候选对象及批准分支可达性。控制器只读取自身内核PID，不接收CLI提供的PID；完整argv/固定entry/attempt、root四UID、exe/cwd/boot/start/parent/cgroup均核对并绑定句柄生命周期。批准内容与绝对窗口不可在句柄存活期间更换，时间倒退、关闭中读取、来源漂移或失败均拒绝。分类器只增加精确`coordinator`角色，允许与两端会话/本机SSH一起作为独立执行进程；不豁免未知子进程/监听者，不删除原快照，不更改旧review或legacyDigest。
+
+原host增加直接`--check <attempt>`入口；新增计划中的`deploy-browser-first-cutover.sh <candidate> <attempt> [--check]`复用既有凭据加载，严格主机指纹、固定SSH argv、远端空环境、单次只读调用，无上传/重试/回退。只返回`coordinator-source-inspection`且`releaseReady:false`；**`--execute`在凭据加载前明确拒绝，完整site尚未接齐，因此这仍不是可部署的首次执行CLI。** 工具检查依赖预先安装的固定候选工具包和受保护批准，不能把源码检查当作准备、停写或发布成功。
+
+真实隔离Linux中使用默认读者（非伪造/proc或Git），固定入口、实际候选Git字节、root权限、实际进程argv、关闭执行入口验证通过。即使修改工具同时更新manifest摘要，只要不符Git候选仍拒绝；NFT漂移、错误cwd及审批权限也拒绝，未创建维护journal或调用服务效果。QA初次在准备阶段因既有task3镜像无Git而ENOENT退出，日志`/tmp/holaday-self-linux-physical.log`保留；之后复用同一镜像，只在一次性容器安装Git、关闭eth0后实测，不重建镜像、不挂生产凭据、不使用hostPID。最终实体日志`/tmp/holaday-self-linux-physical-final.log`退出0。真实SSH两种固定接收入口及来源/权限/转发拒绝回归退出0，日志`/tmp/holaday-self-ssh-final.log`。
+
+最终浏览器及两种发布入口 **832/832**、实际Linux四组 **227/227**（coordinator/inventory/host/首次shell），均退出0、0跳过，日志`/tmp/holaday-self-browser-final.log`与`/tmp/holaday-self-linux-final.log`。完整ops最终退出0，**120/59/16/666及Python12**，无跳过；日志`/tmp/holaday-self-ops-final.log`，不用较早652项结果。六个MJS的Biome、四个shell语法及diff-check通过。未重跑应用全套、真实MySQL恢复、nginx实体退役全链或整分支独立审查，不将历史结果列为本批新鲜门槛。
+
+剩余明确：完整site需把现有自身份句柄、入口pair、网关会话、retirement observer和原journal接到同一生命周期；真实业务/writer/control读者、停写备份与隔离恢复、非PayPal恢复、首次实际execute及准备安装、完整成功/故障演练与整分支审查仍待完成。不要重建这些已有模块、扩展通用部署框架或重复商户/通道/密钥核查。全部本轮操作为本地或临时QA，未连接生产、未改服务/数据库/支付/PayPal/密钥，无PR/合并/部署；原`__pycache__`保留，Task4–6未完成，自动化继续本线程。
+
 ### 2026-09-28 夜间续跑：SSH 客户端归属与已连接会话的基线接线
 
 承接 `2dec13dd`，Task4原BASE844c2ced不变。两种固定会话复用同一SSH启动边界，只从自己实际启动的ChildProcess读取两次内核身份；核对完整argv、root UID、父PID、启动时间、boot、exe、cwd与cgroup，后续身份必须保持一致。新增`readTransportIdentity()`返回绑定原attempt/candidate/config/migration/inventory/site的Vultr客户端身份；断连、关闭、过期或核验失败不重连、不重发、不发信号，身份失败关闭通信流。原同步远端接收身份接口不变，入口pair另提供本机身份读者，允许在隔离回调中读取而不递归占用SSH流。
