@@ -1,5 +1,21 @@
 # 首次切换：真实主机只读核查与有限修正清单
 
+## 2026-09-27 15:31–15:33 JST：启动依赖与证书续期的定向复核
+
+复用06:04双机快照查看六份应用/浏览器/VNC启动脚本及systemd启动指令；未执行这些脚本。应用和注销worker通过各自wrapper指向旧源码/构建入口，files-cron独立调用cleanup-cron；headed浏览器与VNC及它们的子进程须保留，不执行unit中的`reload all`或`kill`。这不是全部223/265来源绑定已审通过，也没有生成全量批准清单。
+
+随后通过严格SSH只读复核Vultr四份启动文件摘要/属主，并核对两机三个已知业务域名的证书续期配置和固定pre/deploy/post钩子目录。未读取证书私钥、acme账户密钥或其他域名配置；未执行续期或改服务。原始私密归档：`/private/tmp/holaday-launch-dependencies-a4Itfj`、`/private/tmp/holaday-renewal-dependencies-xsb3TU`，均0700目录/0600文件。
+
+| 项目 | 现场事实 | 解释边界 |
+| --- | --- | --- |
+| Aliyun hd-app / hd-pay | Certbot续期配置存在，authenticator=webroot；三个固定钩子目录均空 | 不代表更新过程中所有并发配置变化都被排除 |
+| Vultr holaday.ai | authenticator=nginx、installer=nginx；三个固定钩子目录均空 | 不能把“空钩子目录”当成不会触碰nginx配置的证明；上线窗口需沿现有隔离/配置漂移复核覆盖续期并发 |
+| acme.sh | Aliyun目录缺失；Vultr仅在限定业务域名名册中未匹配目录 | 不外推为全机无acme任务；Vultr既有root cron仍调用acme.sh |
+
+首轮临时诊断的域名正则转义过度，漏匹配风险已在本地用已知域名复现；改为8个明确域名目录名集合，4个正向/4个反向检查通过后重新采样两机。首次空结果不作为缺失证明。最终采样UTC06:33:31.124/06:33:33.991；续期配置摘要：Aliyun hd-app `383d40c7162726b81529ca9bd515e17ac52f1864587a760412c19478e9a0fc5a`、hd-pay `cf1cd277ddcc5a9ed63586b4c7b01d5b96dafd3d5f22b37c68f554fbe7bfb617`，Vultr `95605af59a9f7d2eab03464dec0b203ac752d3bd3113443d64eb0582440a6aef`。
+
+本轮无产品代码修改或产品测试通过声明；未更新生产配置/服务/数据库、执行支付操作、部署或更改浏览器登录态。PayPal页面本轮仍是未填写的登录表单，已保留，不反复刷新。旧explorer的普通取消路径限制另见最新断点。继续需要实际现场接线与完整演练，不能以本节替代。
+
 ## 2026-09-27 15:18 JST：获准的旧 explorer 操作记录核查
 
 用户已明确允许上轮提出的单条旧任务和旧 PayPal 记录只读调查。Vultr精确范围的一致性只读事务成功，观察UTC `2026-09-27T06:18:03.159Z`，结束ROLLBACK，无数据库更新。原始内容留Mac私密归档 `/private/tmp/holaday-authorized-legacy-review-zDa2mv/review.json`，未查询动作input_value、截图或其他用户任务。
