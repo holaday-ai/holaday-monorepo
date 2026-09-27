@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-27：原自动化方案继续，双机只读通道进入正式模块
+
+用户明确“我认为你要实现的自动化系统的方向是对的，按原方案来完成”。不采用上一轮讨论的手工切换替代；按原Task4–6收口，PayPal延期、已取消的唯一旧任务、恢复私钥USB保管结论保持，不重做、不扩项。Task4 BASE仍为844c2ced，恢复前HEAD63cd1386，既有`scripts/__pycache__/`保留。
+
+本次在既有first-host内实现真实`readFirstCutoverHostPair`：固定目标/跳板、严格SSH主机校验、stdin运行既有collector、随机请求绑定、自身PID身份、双机全量返回及最后统一时效检查，失败不重试。Vultr旧checkout前后HEAD/已跟踪diff检查只证明源码来源。既有inventory增加双机配对，复用单机分类器、核对boot，保留所有unknown；没有生成或自动批准生产review。新增observer测试进入日常`test:ops`。
+
+真实只读调用成功：UTC07:39:43.984起，旧checkout107857fe70503e30691073f267d87275596edb20，collectorSHA30d6dc866a3f7563e0e5dde7c0206fa7f74fb0e583849b65b72204e8561d306a。阿里云12进程/2PM2注册/223来源，Vultr28进程/9注册/265来源；原始`/private/tmp/holaday-first-site-pair-Cuj0Xo/pair.json`在0700目录、0600文件。没有写远端文件、停服务、改nginx/防火墙、读写业务库或访问任何支付方。该历史快照不是部署时的有效许可，source数量不是审核通过数量。
+
+TDD：首次15个observer用例因缺函数RED；双机分类11新用例RED；checkout绑定与实际stdin载荷3RED，随后通过。基线129/129，新专项50/50；完整浏览器533/533无跳过（显式已有age），Linux Node22.20离线只读scripts/UID998为50/50、容器自动移除。全量ops结果待本段后续记录。触及4个MJS文件Biome最终通过，初次2个测试用delete风格错误改为等价缺字段夹具，无生产校验放宽。日志`/tmp/holaday-first-site-{baseline,red,classifier-red,source-red,targeted,browser,ops,linux22}.log`。
+
+最终ops退出0：120/59/16/364和全部shell检查通过，0跳过；上方“待后续记录”已由本结果替代。文档patch首次权限审核超时、未执行，按工具许可原样重试一次成功。所有测试和SSH会话已退出，Linux容器已自动移除；应用TS/前端/模型/支付结算/额度代码未修改，本轮未重跑应用全套，不复用上一轮结果。先提交本次接线及证据，不把它标成整个分支验收完成。
+
+仍未完成：生产受保护完整分类清单及阶段变化观察、双机副作用I/O/首次shell、真实停写后的备份恢复、剩余非PayPal外部证据、全流程演练与全分支审查。当前只读通道与分类不是整个Task4完成，也不是自动化系统已部署。不得把上方真实读取成功改述为双机切换成功。
+
 ### 2026-09-27：唯一 PayPal Sandbox 延期例外已批准并落实到候选
 
 用户回复“可以”明确批准上一轮提案：只将已知旧Sandbox测试单保留为“未核验、上线后处理”，不再阻塞本次发布。不是所有PayPal/测试单豁免，也不是恢复登录、商户/API核查的许可。下方“延期提案待确认”已失效。设计、计划、支付证据与host接线契约已同步。

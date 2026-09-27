@@ -125,6 +125,129 @@ function reviewed(f) {
     .map((s) => ({ ...s, reason: 'explicit source review' }));
   return f;
 }
+
+function pairFixture() {
+  const fixtures = ['aliyun', 'vultr'].map((name) => reviewed(fixture(name)));
+  return {
+    inventoryDigest: digest,
+    pair: {
+      observedAtMs: 1000,
+      sourceDigest: 'b'.repeat(64),
+      hosts: fixtures.map((f) => ({ host: f.host, snapshot: f.snapshot })),
+    },
+    reviews: Object.fromEntries(
+      fixtures.map((f) => [
+        f.host,
+        {
+          bootId: f.snapshot.bootId,
+          ports: f.ports,
+          review: f.review,
+        },
+      ]),
+    ),
+  };
+}
+
+test('two-host classification preserves each host and keeps unresolved sources visible', () => {
+  assert.equal(typeof inventory.classifyFirstCutoverHostPair, 'function');
+  const f = pairFixture();
+  const result = inventory.classifyFirstCutoverHostPair(f, { now: () => 1000 });
+  assert.equal(result.observedAtMs, 1000);
+  assert.deepEqual(result.unknownLaunchers, []);
+  assert.deepEqual(
+    result.hosts.map((h) => [h.host, h.registered.processes[0].role]),
+    [
+      ['aliyun', 'gateway'],
+      ['vultr', 'main'],
+    ],
+  );
+  assert.equal(result.hosts[0].preservedProcesses.length, 2);
+  assert.equal(result.hosts[1].preservedProcesses.length, 2);
+  assert.ok(!JSON.stringify(result).includes('private-environment-never-return'));
+  f.reviews.aliyun.review.sources.pop();
+  const unknown = inventory.classifyFirstCutoverHostPair(f, { now: () => 1000 });
+  assert.equal(unknown.unknownLaunchers.length, 1);
+  assert.equal(unknown.unknownLaunchers[0].host, 'aliyun');
+  assert.equal(unknown.unknownLaunchers[0].kind, 'source');
+});
+
+for (const [name, change] of [
+  [
+    'one host missing',
+    (f) => {
+      f.pair.hosts.pop();
+    },
+  ],
+  [
+    'duplicate host',
+    (f) => {
+      f.pair.hosts[1] = f.pair.hosts[0];
+    },
+  ],
+  [
+    'extra host',
+    (f) => {
+      f.pair.hosts.push(f.pair.hosts[0]);
+    },
+  ],
+  [
+    'wrong boot binding',
+    (f) => {
+      f.reviews.vultr.bootId = '22222222-2222-4222-8222-222222222222';
+    },
+  ],
+  [
+    'missing review',
+    (f) => {
+      f.reviews = { vultr: f.reviews.vultr };
+    },
+  ],
+  [
+    'extra review',
+    (f) => {
+      f.reviews.unrelated = f.reviews.aliyun;
+    },
+  ],
+  [
+    'concealed stale host',
+    (f) => {
+      f.pair.hosts[0].snapshot.observedAtMs = -61000;
+    },
+  ],
+  [
+    'invented observation time',
+    (f) => {
+      f.pair.observedAtMs = 1001;
+    },
+  ],
+  [
+    'unbound observer source',
+    (f) => {
+      f.pair.sourceDigest = undefined;
+    },
+  ],
+]) {
+  test(`two-host classification refuses ${name}`, () => {
+    assert.equal(typeof inventory.classifyFirstCutoverHostPair, 'function');
+    const f = pairFixture();
+    change(f);
+    assert.throws(
+      () => inventory.classifyFirstCutoverHostPair(f, { now: () => 1000 }),
+      /CUTOVER_INVENTORY_UNPROVEN/,
+    );
+  });
+}
+
+test('reversing transport order does not exchange host reviews', () => {
+  assert.equal(typeof inventory.classifyFirstCutoverHostPair, 'function');
+  const f = pairFixture();
+  f.pair.hosts.reverse();
+  const result = inventory.classifyFirstCutoverHostPair(f, { now: () => 1000 });
+  assert.deepEqual(
+    result.hosts.map((h) => h.host),
+    ['aliyun', 'vultr'],
+  );
+});
 const classify = (f) => inventory.classifyFirstCutoverHost(f, { now: () => 1000 });
 
 test('registered main and stopped cron feed the existing retirement capture; browser tree remains preserved', async () => {

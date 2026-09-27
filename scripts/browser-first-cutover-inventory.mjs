@@ -21,6 +21,57 @@ const lines = (text) => {
     .sort();
 };
 
+/** Pair the actual two-host observations with their separately reviewed source
+ * and process identities. A review is trusted protected input, never generated
+ * by this function. Unknowns stay visible and cannot become a stop/readiness
+ * receipt. Boot changes invalidate the review even when numeric PIDs recur.
+ */
+export function classifyFirstCutoverHostPair(input, io = { now: Date.now }) {
+  const { pair, reviews, inventoryDigest } = structuredClone(input ?? {});
+  const names = ['aliyun', 'vultr'];
+  if (
+    !hash(inventoryDigest) ||
+    !hash(pair?.sourceDigest) ||
+    !Array.isArray(pair.hosts) ||
+    pair.hosts.length !== 2 ||
+    !names.every((name) => pair.hosts.filter((row) => row?.host === name).length === 1) ||
+    !reviews ||
+    Object.keys(reviews).length !== 2 ||
+    !names.every((name) => Object.hasOwn(reviews, name))
+  )
+    fail();
+  const now = io.now();
+  const hosts = names.map((host) => {
+    const { snapshot } = pair.hosts.find((row) => row.host === host);
+    const approved = reviews[host];
+    if (!approved || approved.bootId !== snapshot?.bootId) fail();
+    return {
+      host,
+      ...classifyFirstCutoverHost(
+        {
+          snapshot,
+          host,
+          inventoryDigest,
+          ports: approved.ports,
+          review: approved.review,
+        },
+        { now: () => now },
+      ),
+    };
+  });
+  const observedAtMs = Math.min(...hosts.map((h) => h.registered.observedAtMs));
+  if (pair.observedAtMs !== observedAtMs) fail();
+  return {
+    observedAtMs,
+    inventoryDigest,
+    sourceDigest: pair.sourceDigest,
+    hosts,
+    unknownLaunchers: hosts.flatMap((host) =>
+      host.unknownLaunchers.map((row) => ({ host: host.host, ...row })),
+    ),
+  };
+}
+
 /** Fingerprints for EXPLICIT source review, not a launcher allowlist generator.
  * The caller must review referenced dependencies beyond the collector's bounded
  * roots too. A hash match establishes unchanged bytes, not their safety or scope.

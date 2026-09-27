@@ -38,6 +38,140 @@ const privateFile = (stat) =>
 const privateDirectory = (stat) =>
   stat.isDirectory() && stat.uid === 0 && (stat.mode & 0o7777) === 0o700;
 
+/** Real read-only transport for the two reviewed deployment hosts. Credentials
+ * remain in the existing SSH/askpass environment. Raw snapshots contain private
+ * configuration: return them to the trusted caller, never log them. No host
+ * classification, approval, readiness, lock, remote file or service mutation is
+ * implied. Both reads settle before return, including a failed pair; no retry.
+ */
+export async function readFirstCutoverHostPair(overrides = {}) {
+  const io = {
+    now: Date.now,
+    randomUUID,
+    readObserverSource: () =>
+      fs.readFile(new URL('./browser-cutover-evidence.mjs', import.meta.url)),
+    exec: candidatePreparationSystem().exec,
+    ...overrides,
+  };
+  try {
+    const began = io.now();
+    const requestId = io.randomUUID();
+    const source = Buffer.from(await io.readObserverSource());
+    if (
+      !Number.isSafeInteger(began) ||
+      began < 0 ||
+      !uuid(requestId) ||
+      source.length < 1 ||
+      source.length > 1024 * 1024 ||
+      !Buffer.from(source.toString('utf8')).equals(source)
+    )
+      throw new Error('input');
+    const sourceDigest = createHash('sha256').update(source).digest('hex');
+    const common = [
+      '-o',
+      'StrictHostKeyChecking=yes',
+      '-o',
+      'ForwardAgent=no',
+      '-o',
+      'ClearAllForwardings=yes',
+      '-o',
+      'ConnectTimeout=15',
+      '-o',
+      'ServerAliveInterval=10',
+      '-o',
+      'ServerAliveCountMax=2',
+      '-T',
+    ];
+    const requests = [
+      {
+        host: 'aliyun',
+        args: [...common, 'root@47.99.169.186', '/usr/bin/node --input-type=module'],
+      },
+      {
+        host: 'vultr',
+        args: [
+          ...common,
+          '-o',
+          'ProxyCommand=ssh -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ConnectTimeout=15 -W %h:%p root@47.99.169.186',
+          'root@207.148.70.106',
+          '/opt/node22/bin/node --input-type=module',
+        ],
+      },
+    ];
+    const results = await Promise.allSettled(
+      requests.map(async ({ host, args }) => {
+        // This self-contained, existing collector is sent only through stdin; no
+        // arbitrary operation/target parameter or remote installation is accepted.
+        const envelope = { protocol: 1, requestId, host, sourceDigest };
+        const input = `${source.toString('utf8')}\ntry {
+  process.env.GIT_OPTIONAL_LOCKS = '0';
+  const readSource = async () => {
+    if (${JSON.stringify(host)} !== 'vultr') return null;
+    const head = (await hostSystem.exec('git', ['-C', '/opt/holaday-monorepo', 'rev-parse', '--verify', 'HEAD^{commit}'])).trim();
+    if (!/^[a-f0-9]{40}$/.test(head)) throw new Error('checkout');
+    await hostSystem.exec('git', ['-C', '/opt/holaday-monorepo', 'diff', '--no-ext-diff', '--no-textconv', '--quiet', 'HEAD', '--']);
+    return head;
+  };
+  const sourceCandidate = await readSource();
+  const snapshot = await readCutoverHostSnapshot();
+  snapshot.observer = snapshot.processes.find(row => row.pid === process.pid);
+  if (!snapshot.observer || await readSource() !== sourceCandidate) throw new Error('observer');
+  process.stdout.write(JSON.stringify({...${JSON.stringify(envelope)}, sourceCandidate, snapshot}));
+} catch {
+  process.stderr.write('CUTOVER_HOST_PAIR_UNPROVEN\\n'); process.exitCode = 1;
+}\n`;
+        const output = await io.exec('ssh', args, {
+          input,
+          shell: false,
+          maxBuffer: 16 * 1024 * 1024,
+        });
+        if (typeof output !== 'string' || Buffer.byteLength(output) > 16 * 1024 * 1024)
+          throw new Error('output');
+        const result = JSON.parse(output);
+        if (
+          !Object.entries(envelope).every(([key, value]) => result?.[key] === value) ||
+          (host === 'vultr'
+            ? !/^[a-f0-9]{40}$/.test(result.sourceCandidate ?? '')
+            : result.sourceCandidate !== null)
+        )
+          throw new Error('response');
+        return { host, sourceCandidate: result.sourceCandidate, snapshot: result.snapshot };
+      }),
+    );
+    if (results.some((result) => result.status !== 'fulfilled')) throw new Error('transport');
+    const hosts = results.map((result) => result.value);
+    const now = io.now();
+    if (!Number.isSafeInteger(now) || now < began) throw new Error('clock');
+    for (const { snapshot } of hosts) {
+      if (
+        !Number.isSafeInteger(snapshot?.observedAtMs) ||
+        snapshot.observedAtMs < 0 ||
+        snapshot.observedAtMs > now ||
+        now - snapshot.observedAtMs > 60000 ||
+        !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(snapshot.bootId ?? '') ||
+        !Number.isSafeInteger(snapshot.observer?.pid) ||
+        snapshot.observer.pid <= 1 ||
+        !Array.isArray(snapshot.processes) ||
+        snapshot.processes.filter((p) => p.pid === snapshot.observer.pid).length !== 1 ||
+        !isDeepStrictEqual(
+          snapshot.processes.find((p) => p.pid === snapshot.observer.pid),
+          snapshot.observer,
+        )
+      )
+        throw new Error('snapshot');
+    }
+    return {
+      sourceDigest,
+      sourceCandidate: hosts.find(({ host }) => host === 'vultr').sourceCandidate,
+      observedAtMs: Math.min(...hosts.map(({ snapshot }) => snapshot.observedAtMs)),
+      hosts,
+    };
+  } catch {
+    // Do not expose process/config contents or SSH diagnostics to public output.
+    throw new Error('CUTOVER_HOST_PAIR_UNPROVEN');
+  }
+}
+
 /** Compose the first lifecycle around ONE real prepared journal. Site-specific
  * two-host observations/effects remain mandatory trusted I/O, not uploaded
  * success reports. No default site adapter, shell entry or old protocol identity.
