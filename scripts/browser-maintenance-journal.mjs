@@ -28,6 +28,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
   const inventoryFields = inventoryDigest === undefined ? {} : { inventoryDigest };
   let migrationManifest;
   let bootstrapSeed;
+  let backupReceipt;
   let currentIdentity;
   const startupEvents = [];
   const registrationEvents = [];
@@ -126,6 +127,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
             ...inventoryFields,
             ...firstFields,
             bootstrapSeed,
+            ...(backupReceipt ? { backupReceipt } : {}),
             ...(startupEvents.length ? { startupEvents } : {}),
             ...(registrationEvents.length ? { registrationEvents } : {}),
             oldIdentity,
@@ -220,6 +222,40 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
           migrationDigest,
           ...inventoryFields,
         };
+      }),
+    bindBackupReceipt: (value) =>
+      serial(async () => {
+        const receipt = structuredClone(value);
+        const bindings = { attempt, candidate, configDigest, migrationDigest, inventoryDigest };
+        const hashes = [
+          'backupDigest',
+          'databaseIdentityDigest',
+          'isolatedTargetDigest',
+          'encryptionProfileDigest',
+          'comparisonDigest',
+          'schemaDigest',
+          'businessDigest',
+        ];
+        const allowed = [...Object.keys(bindings), ...hashes, 'restoredAtMs'];
+        if (
+          !first ||
+          phase !== 'backup_verified' ||
+          backupReceipt ||
+          !receipt ||
+          Object.keys(receipt).length !== allowed.length ||
+          !allowed.every((key) => Object.hasOwn(receipt, key)) ||
+          !Object.entries(bindings).every(([key, expected]) => receipt[key] === expected) ||
+          !hashes.every(
+            (key) => typeof receipt[key] === 'string' && /^[a-f0-9]{64}$/.test(receipt[key]),
+          ) ||
+          receipt.databaseIdentityDigest === receipt.isolatedTargetDigest ||
+          !Number.isSafeInteger(receipt.restoredAtMs) ||
+          receipt.restoredAtMs < 0
+        )
+          throw unproven();
+        backupReceipt = receipt;
+        await write(phase);
+        return structuredClone(backupReceipt);
       }),
     bindBootstrapSeed: (seed) =>
       serial(async () => {
@@ -353,6 +389,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
       serial(async () => {
         if (!migrationManifest) throw new Error('MAINTENANCE_MIGRATIONS_UNPROVEN');
         if (first) {
+          if (next === 'migration_started' && !backupReceipt) throw unproven();
           if (next === 'all_fenced' && startupEvents.length && !startupDone()) throw unproven();
           if (
             ['all_fenced', 'stopped'].includes(next) &&

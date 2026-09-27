@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-27：备份编排接入真实发布记录和MySQL组合测试
+
+从`ccdd269b`继续。新增计划内`browser-first-cutover-backup.mjs`，协调受信host的停写、身份/窗口/锁复核、已批准加密设施、export/hash/restore/全对象比对、隔离库迁移、schema/业务字段及源库复核、回执封存。缺少任何真实I/O或设施就拒绝，不接受成功布尔、自动加密密钥、重试/回滚或生产CLI默认执行。实际生产host/加密设施/隔离目标仍未接入，不能把摘要返回值本身当验证事实。
+
+发现并处理既有阶段语义：`backup_verified`原本先persist再执行，因此只是意图。首次journal新增不可重复的`bindBackupReceipt`，复用真实私密文件/fsync/原子rename；未有匹配本次绑定的回执时禁止`migration_started`。普通升级条件未变。范围裁决及代价：回执增记恢复目标/加密设施/schema/业务摘要，旧首次fixture需显式合成回执，真实host必须提供已验证产物；不能以阶段名冒充通过。首次transition已有失败保持维护路径与本模块组合测试通过。
+
+MySQL安全样本已使用真实编排、真实文件journal、实际mysqldump/mysql、QA一次性AES-GCM密文文件、完整对象/数据比对、全部61SQL和实际schema/业务核验；最终2/2通过，风险样本保留原入口拒绝和0042事实。仅本例隔离容器/合成数据，绝非生产备份或正式密钥保管方案。Linux Node22无网络只读源码容器内备份/journal50/50通过；Mac完整浏览器发布397/397通过，类型检查及5文件Biome/shell语法/diff-check通过。新增备份单测接入既有test:ops迁移门槛，不留只可手工运行的回归。
+
+最终完整test:ops退出0（120/59/16/104及shell）；日志`/tmp/holaday-backup-{coordinator-mysql,coordinator-types,browser-final,linux-final,ops-final}.log`。本轮合成MySQL容器`holaday-first-cutover-qa-64b039e2d85a71fc`及专用网络、随机库、临时密文和文件journal均已清理，既有holaday-mysql/Redis仍运行；Linux测试容器自动移除，所有本轮测试会话退出，镜像留供复现。原`scripts/__pycache__/`未动。
+
+初次缺模块RED后实现；真实journal先出现“没有回执也能进入migration_started”的RED，再修复。格式化首次delete提示已修正。一次追加测试补丁权限审核超时未执行，精确重试后成功，不是权限被永久拒绝。Task4/5/6仍未完成；下一步是实际生产host/设施配置、双主机事实和首次shell，最后整流程/独立审查。未改原SQL、应用支付/权益/额度、UI、模型路由和扩展，未连接生产或修改安全组，无PR/合并/部署。本轮应用全量未重跑，不复用上轮8595数字。
+
 ### 2026-09-27：0042风险接入真实迁移入口，拒绝而非改写历史数据
 
 从`1b48f90b`继续。既有编号runner在任何写入SQL前及0042前只读检查支付完成时间；已完成记录缺时间、旧表缺列且存在已完成记录、读取失败或status列缺失均返回`MIGRATION_PAYMENT_TIME_UNPROVEN`。新库/仅未付款旧表/完整时间数据可继续。检查置于现有manifest绑定的runner中，两个发布路径均受约束；不另加独立预检框架或绕过开关。代价是命中风险的旧库必须另审迁移策略，不能直接用旧SQL回填。原61个SQL、支付结算/权益/额度、生产数据均未改。

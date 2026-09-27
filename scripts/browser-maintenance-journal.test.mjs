@@ -33,6 +33,100 @@ const firstMetadata = {
   inventoryDigest: '4'.repeat(64),
 };
 
+const backupReceiptFor = async (journal) => ({
+  ...(await journal.assertOwnership()),
+  backupDigest: '1'.repeat(64),
+  databaseIdentityDigest: '2'.repeat(64),
+  isolatedTargetDigest: '3'.repeat(64),
+  encryptionProfileDigest: '4'.repeat(64),
+  comparisonDigest: '5'.repeat(64),
+  schemaDigest: '6'.repeat(64),
+  businessDigest: '7'.repeat(64),
+  restoredAtMs: 1000,
+});
+const reachBackup = async (journal) => {
+  await journal.bindManifest(manifest);
+  for (const phase of [
+    'prepared',
+    'orders_fenced',
+    'legacy_settled',
+    'producers_stopped',
+    'all_fenced',
+    'stopped',
+    'backup_verified',
+  ])
+    await journal.persist(phase, { candidate: metadata.candidate });
+};
+test('a backup phase intent alone cannot authorize the first production migration', async (t) => {
+  const journal = await acquireReleaseJournal(await fixture(t), firstMetadata);
+  t.after(() => journal.close());
+  await reachBackup(journal);
+  await assert.rejects(
+    journal.persist('migration_started', { candidate: metadata.candidate }),
+    /UNPROVEN/,
+  );
+  assert.equal(JSON.parse(await fs.readFile(journal.path, 'utf8')).phase, 'backup_verified');
+});
+test('a bound backup receipt is durable, immutable and preserved into migration', async (t) => {
+  const journal = await acquireReleaseJournal(await fixture(t), firstMetadata);
+  t.after(() => journal.close());
+  await reachBackup(journal);
+  const receipt = await backupReceiptFor(journal);
+  assert.equal(typeof journal.bindBackupReceipt, 'function');
+  assert.deepEqual(await journal.bindBackupReceipt(receipt), receipt);
+  assert.deepEqual(JSON.parse(await fs.readFile(journal.path, 'utf8')).backupReceipt, receipt);
+  await assert.rejects(journal.bindBackupReceipt(receipt), /UNPROVEN/);
+  await journal.persist('migration_started', { candidate: metadata.candidate });
+  assert.deepEqual(JSON.parse(await fs.readFile(journal.path, 'utf8')).backupReceipt, receipt);
+});
+test('receipt rejects wrong release, extra payload, identical source/target and non-digests', async (t) => {
+  const journal = await acquireReleaseJournal(await fixture(t), firstMetadata);
+  t.after(() => journal.close());
+  await reachBackup(journal);
+  const receipt = await backupReceiptFor(journal);
+  assert.equal(typeof journal.bindBackupReceipt, 'function');
+  for (const overrides of [
+    { candidate: '0'.repeat(40) },
+    { restored: true },
+    { backupDigest: true },
+    { isolatedTargetDigest: receipt.databaseIdentityDigest },
+    { restoredAtMs: -1 },
+  ])
+    await assert.rejects(journal.bindBackupReceipt({ ...receipt, ...overrides }), /UNPROVEN/);
+  assert.equal(JSON.parse(await fs.readFile(journal.path, 'utf8')).backupReceipt, undefined);
+});
+
+test('backup receipts cannot be attached to a normal release or before backup intent', async (t) => {
+  for (const meta of [metadata, firstMetadata]) {
+    const journal = await acquireReleaseJournal(await fixture(t), meta);
+    t.after(() => journal.close());
+    await assert.rejects(journal.bindBackupReceipt(await backupReceiptFor(journal)), /UNPROVEN/);
+    assert.equal(JSON.parse(await fs.readFile(journal.path, 'utf8')).backupReceipt, undefined);
+  }
+});
+test('a failed backup receipt disk write retains the intent and refuses migration', async (t) => {
+  let failWrite = false;
+  const journal = await acquireReleaseJournal(await fixture(t), firstMetadata, {
+    ...fs,
+    rename: async (...args) => {
+      if (failWrite) throw new Error('disk failure');
+      return fs.rename(...args);
+    },
+  });
+  t.after(() => journal.close());
+  await reachBackup(journal);
+  const receipt = await backupReceiptFor(journal);
+  failWrite = true;
+  await assert.rejects(journal.bindBackupReceipt(receipt), /UNPROVEN/);
+  await assert.rejects(
+    journal.persist('migration_started', { candidate: metadata.candidate }),
+    /UNPROVEN/,
+  );
+  const record = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+  assert.equal(record.phase, 'backup_verified');
+  assert.equal(record.backupReceipt, undefined);
+});
+
 test('registration journal requires backup then exact delete intents and blocks advancing a partial removal', async (t) => {
   const directory = await fixture(t);
   const journal = await acquireReleaseJournal(directory, firstMetadata);
@@ -329,6 +423,8 @@ test('bootstrap seed is recorded separately and cannot serve as a real candidate
     'migration_started',
   ]) {
     await journal.persist(phase, detail);
+    if (phase === 'backup_verified')
+      await journal.bindBackupReceipt(await backupReceiptFor(journal));
   }
   await journal.bindBootstrapSeed('5'.repeat(32));
   const record = JSON.parse(await fs.readFile(journal.path, 'utf8'));
@@ -401,8 +497,11 @@ test('candidate-start intent precedes creation of its real boot identity', async
     'stopped',
     'backup_verified',
     'migration_started',
-  ])
+  ]) {
     await journal.persist(phase, detail);
+    if (phase === 'backup_verified')
+      await journal.bindBackupReceipt(await backupReceiptFor(journal));
+  }
   await journal.bindBootstrapSeed('5'.repeat(32));
   await journal.persist('candidate_started', detail);
   assert.equal('identity' in JSON.parse(await fs.readFile(journal.path, 'utf8')), false);

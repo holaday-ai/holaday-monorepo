@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, symlink } from 'node:fs/promises';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -211,37 +221,208 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
           const baselineCosts = await rows(
             'SELECT external_id,cost_usd FROM llm_calls ORDER BY external_id',
           );
-          const dump = await run(
-            'docker',
-            [
-              'exec',
-              container,
-              'mysqldump',
-              '-uroot',
-              '--single-transaction',
-              '--routines',
-              '--events',
-              '--triggers',
-              '--set-gtid-purged=OFF',
-              '--no-tablespaces',
-              source,
-            ],
-            { maxBuffer: 16 * 1024 * 1024 },
-          );
-          await new Promise<void>((resolve, reject) => {
-            const child = execFile(
-              'docker',
-              ['exec', '-i', container, 'mysql', '-uroot', target],
-              { maxBuffer: 1024 * 1024 },
-              (error) => (error ? reject(error) : resolve()),
-            );
-            child.stdin?.on('error', reject);
-            child.stdin?.end(dump.stdout);
-          });
-          await use(target);
-          expect(await inventory()).toEqual(beforeRestore);
           for (const file of files)
             await copyFile(join(appRoot, 'drizzle', file), join(snapshotApp, 'drizzle', file));
+          const exportPlain = async () =>
+            (
+              await run(
+                'docker',
+                [
+                  'exec',
+                  container,
+                  'mysqldump',
+                  '-uroot',
+                  '--single-transaction',
+                  '--routines',
+                  '--events',
+                  '--triggers',
+                  '--set-gtid-purged=OFF',
+                  '--no-tablespaces',
+                  source,
+                ],
+                { maxBuffer: 16 * 1024 * 1024 },
+              )
+            ).stdout;
+          const importPlain = async (plain: string | Buffer) =>
+            new Promise<void>((resolve, reject) => {
+              const child = execFile(
+                'docker',
+                ['exec', '-i', container, 'mysql', '-uroot', target],
+                { maxBuffer: 1024 * 1024 },
+                (error) => (error ? reject(error) : resolve()),
+              );
+              child.stdin?.on('error', reject);
+              child.stdin?.end(plain);
+            });
+          if (!missingTime) {
+            // The REAL coordinator and filesystem journal, using a QA-only
+            // encrypted facility and the existing actual MySQL fixture. This
+            // does not configure production keys, storage, or host isolation.
+            const moduleAt = (file: string) =>
+              new URL(`../../../../scripts/${file}`, import.meta.url).href;
+            const { backupAndRestoreCheck } = await import(
+              moduleAt('browser-first-cutover-backup.mjs')
+            );
+            const { acquireReleaseJournal } = await import(
+              moduleAt('browser-maintenance-journal.mjs')
+            );
+            const { buildMaintenanceMigrationManifest } = await import(
+              moduleAt('browser-maintenance-manifest.mjs')
+            );
+            const manifest = buildMaintenanceMigrationManifest(join(appRoot, '../..'));
+            const binding = {
+              attempt: randomUUID(),
+              candidate: 'a'.repeat(40),
+              configDigest: 'b'.repeat(64),
+              migrationDigest: manifest.sha256,
+              inventoryDigest: 'd'.repeat(64),
+            };
+            const journalDirectory = join(await realpath(snapshot), 'journal');
+            await mkdir(journalDirectory, { mode: 0o700 });
+            const journal = await acquireReleaseJournal(journalDirectory, {
+              ...binding,
+              kind: 'first-cutover',
+              legacyDigest: 'e'.repeat(64),
+            });
+            try {
+              await journal.bindManifest(manifest.manifest);
+              for (const phase of [
+                'prepared',
+                'orders_fenced',
+                'legacy_settled',
+                'producers_stopped',
+                'all_fenced',
+                'stopped',
+                'backup_verified',
+              ])
+                await journal.persist(phase, { candidate: binding.candidate });
+              await expect(
+                journal.persist('migration_started', { candidate: binding.candidate }),
+              ).rejects.toThrow('UNPROVEN');
+              const hash = (value: unknown) =>
+                createHash('sha256').update(JSON.stringify(value)).digest('hex');
+              const encryptionProfileDigest = hash('QA-only ephemeral AES-256-GCM facility');
+              const key = randomBytes(32);
+              const reference = join(snapshot, 'synthetic-backup.enc');
+              type Identity = { serverUuid: string; database: string };
+              if (typeof identity !== 'string') throw new Error('QA_SERVER_ID_INVALID');
+              const sourceIdentity: Identity = { serverUuid: identity, database: source };
+              const isolatedTarget: Identity = { serverUuid: identity, database: target };
+              const business = async () => ({
+                payments: await rows(
+                  'SELECT external_id,amount_cents,status,updated_at,completed_at FROM payments ORDER BY external_id',
+                ),
+                tasks: await rows('SELECT external_id,status FROM tasks ORDER BY external_id'),
+                costs: await rows(
+                  'SELECT external_id,cost_usd FROM llm_calls ORDER BY external_id',
+                ),
+              });
+              const beforeBusiness = {
+                payments: baselinePayments,
+                tasks: baselineTasks,
+                costs: baselineCosts,
+              };
+              const receipt = await backupAndRestoreCheck(
+                {
+                  binding,
+                  sourceIdentity,
+                  isolatedTarget,
+                  maintenanceEndsAtMs: Date.now() + 120_000,
+                },
+                {
+                  now: Date.now,
+                  assertOwnership: () => journal.assertOwnership(),
+                  assertWritersStopped: async () => {
+                    expect(
+                      await rows(
+                        'SELECT ID FROM information_schema.PROCESSLIST WHERE DB IN (?,?) AND ID <> CONNECTION_ID()',
+                        [source, target],
+                      ),
+                    ).toEqual([]);
+                  },
+                  readDatabaseIdentity: async (destination: Identity) => {
+                    await use(destination.database);
+                    const [actual] = await rows(
+                      'SELECT @@server_uuid AS serverUuid, DATABASE() AS db',
+                    );
+                    return { serverUuid: actual?.serverUuid, database: actual?.db };
+                  },
+                  inspectBackupFacility: async () => ({ encryptionProfileDigest }),
+                  exportDatabase: async (destination: Identity) => {
+                    expect(destination).toEqual(sourceIdentity);
+                    const nonce = randomBytes(12);
+                    const cipher = createCipheriv('aes-256-gcm', key, nonce);
+                    const encrypted = Buffer.concat([
+                      cipher.update(await exportPlain(), 'utf8'),
+                      cipher.final(),
+                    ]);
+                    await writeFile(
+                      reference,
+                      Buffer.concat([nonce, cipher.getAuthTag(), encrypted]),
+                      { mode: 0o600, flag: 'wx' },
+                    );
+                    return { reference, encryptionProfileDigest };
+                  },
+                  hashArtifact: async () =>
+                    createHash('sha256')
+                      .update(await readFile(reference))
+                      .digest('hex'),
+                  restoreIsolated: async (_artifact: unknown, destination: Identity) => {
+                    expect(destination).toEqual(isolatedTarget);
+                    const bytes = await readFile(reference);
+                    const decipher = createDecipheriv('aes-256-gcm', key, bytes.subarray(0, 12));
+                    decipher.setAuthTag(bytes.subarray(12, 28));
+                    await importPlain(
+                      Buffer.concat([decipher.update(bytes.subarray(28)), decipher.final()]),
+                    );
+                  },
+                  compareInventoryAndData: async () => {
+                    await use(source);
+                    expect(await inventory()).toEqual(beforeRestore);
+                    await use(target);
+                    const restored = await inventory();
+                    expect(restored).toEqual(beforeRestore);
+                    expect(await business()).toEqual(beforeBusiness);
+                    return {
+                      comparisonDigest: hash({ source: beforeRestore, restored }),
+                      sourceDigest: hash(beforeRestore),
+                      businessDigest: hash(beforeBusiness),
+                    };
+                  },
+                  runApprovedMigrations: async (destination: Identity, approvedDigest: string) => {
+                    expect(destination).toEqual(isolatedTarget);
+                    expect(approvedDigest).toBe(manifest.sha256);
+                    await migrate(destination.database);
+                  },
+                  verifySchema: async () => {
+                    await use(target);
+                    await checkMaintenanceSchema(rows);
+                    expect(await business()).toEqual(beforeBusiness);
+                    return {
+                      schemaDigest: hash(await inventory()),
+                      businessDigest: hash(await business()),
+                    };
+                  },
+                  readSourceDigest: async () => {
+                    await use(source);
+                    return hash(await inventory());
+                  },
+                  sealReceipt: (value: unknown) => journal.bindBackupReceipt(value),
+                },
+              );
+              const stored = JSON.parse(await readFile(journal.path, 'utf8'));
+              expect(stored.backupReceipt).toEqual(receipt);
+              await journal.persist('migration_started', { candidate: binding.candidate });
+              await use(source);
+              expect(await inventory()).toEqual(beforeRestore);
+            } finally {
+              await journal.close();
+            }
+            return;
+          }
+          await importPlain(await exportPlain());
+          await use(target);
+          expect(await inventory()).toEqual(beforeRestore);
           if (missingTime) {
             // Catch a missing runner precondition, not merely a changed SQL string:
             // unsafe data must fail BEFORE any DDL/DML and remain byte-equivalent.
@@ -274,20 +455,6 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
             expect(await inventory()).toEqual(beforeRestore);
             return;
           }
-          await migrate(target);
-          await checkMaintenanceSchema(rows);
-          expect(await rows('SELECT external_id,status FROM tasks ORDER BY external_id')).toEqual(
-            baselineTasks,
-          );
-          expect(
-            await rows('SELECT external_id,cost_usd FROM llm_calls ORDER BY external_id'),
-          ).toEqual(baselineCosts);
-          const migratedPayments = await rows(
-            'SELECT external_id,amount_cents,status,updated_at,completed_at FROM payments ORDER BY external_id',
-          );
-          await use(source);
-          expect(await inventory()).toEqual(beforeRestore);
-          expect(migratedPayments).toEqual(baselinePayments);
         } finally {
           try {
             assert.equal(
