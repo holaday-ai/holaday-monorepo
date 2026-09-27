@@ -46,8 +46,9 @@ const privateFile = (stat) =>
 const privateDirectory = (stat) =>
   stat.isDirectory() && stat.uid === 0 && (stat.mode & 0o7777) === 0o700;
 
-/** Real read-only transport for the two reviewed deployment hosts. Credentials
- * remain in the existing SSH/askpass environment. Raw snapshots contain private
+/** Real read-only transport for the two reviewed deployment hosts. Linux root
+ * uses the dedicated Vultr channel and a local observer; the Mac audit path
+ * retains existing administrator SSH/askpass. Raw snapshots contain private
  * configuration: return them to the trusted caller, never log them. No host
  * classification, approval, readiness, lock, remote file or service mutation is
  * implied. Both reads settle before return, including a failed pair; no retry.
@@ -59,16 +60,27 @@ export async function readFirstCutoverHostPair(overrides = {}) {
     readObserverSource: () =>
       fs.readFile(new URL('./browser-cutover-evidence.mjs', import.meta.url)),
     exec: candidatePreparationSystem().exec,
+    transport:
+      process.platform === 'linux' && process.getuid?.() === 0 ? 'root-channel' : 'administrator',
+    platform: process.platform,
+    uid: process.getuid?.(),
     ...overrides,
   };
   try {
+    if (
+      !['administrator', 'root-channel'].includes(io.transport) ||
+      (io.transport === 'root-channel' && (io.platform !== 'linux' || io.uid !== 0))
+    )
+      throw new Error('transport');
+    const rootChannel = io.transport === 'root-channel';
     const began = io.now();
-    const requestId = io.randomUUID();
+    const requestUuid = io.randomUUID();
+    if (!uuid(requestUuid)) throw new Error('request');
+    const requestId = rootChannel ? requestUuid.replaceAll('-', '') : requestUuid;
     const source = Buffer.from(await io.readObserverSource());
     if (
       !Number.isSafeInteger(began) ||
       began < 0 ||
-      !uuid(requestId) ||
       source.length < 1 ||
       source.length > 1024 * 1024 ||
       !Buffer.from(source.toString('utf8')).equals(source)
@@ -90,24 +102,60 @@ export async function readFirstCutoverHostPair(overrides = {}) {
       'ServerAliveCountMax=2',
       '-T',
     ];
-    const requests = [
-      {
-        host: 'aliyun',
-        args: [...common, 'root@47.99.169.186', '/usr/bin/node --input-type=module'],
-      },
-      {
-        host: 'vultr',
-        args: [
-          ...common,
-          '-o',
-          'ProxyCommand=ssh -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ConnectTimeout=15 -W %h:%p root@47.99.169.186',
-          'root@207.148.70.106',
-          '/opt/node22/bin/node --input-type=module',
-        ],
-      },
-    ];
+    const requests = rootChannel
+      ? [
+          {
+            host: 'aliyun',
+            command: '/usr/bin/ssh',
+            channel: true,
+            args: [
+              '-F',
+              '/dev/null',
+              ...common,
+              '-o',
+              'BatchMode=yes',
+              '-o',
+              'IdentitiesOnly=yes',
+              '-o',
+              'IdentityAgent=none',
+              '-o',
+              'PreferredAuthentications=publickey',
+              '-o',
+              'PasswordAuthentication=no',
+              '-o',
+              'KbdInteractiveAuthentication=no',
+              '-o',
+              'UserKnownHostsFile=/var/lib/holaday-deploy/channel/known_hosts',
+              '-o',
+              'GlobalKnownHostsFile=/dev/null',
+              '-o',
+              'HostKeyAlgorithms=ssh-ed25519',
+              '-i',
+              '/var/lib/holaday-deploy/channel/identity',
+              'root@47.99.169.186',
+              `holaday-cutover-v1 observe ${requestId}`,
+            ],
+          },
+          { host: 'vultr', command: '/opt/node22/bin/node', args: ['--input-type=module'] },
+        ]
+      : [
+          {
+            host: 'aliyun',
+            args: [...common, 'root@47.99.169.186', '/usr/bin/node --input-type=module'],
+          },
+          {
+            host: 'vultr',
+            args: [
+              ...common,
+              '-o',
+              'ProxyCommand=ssh -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ConnectTimeout=15 -W %h:%p root@47.99.169.186',
+              'root@207.148.70.106',
+              '/opt/node22/bin/node --input-type=module',
+            ],
+          },
+        ];
     const results = await Promise.allSettled(
-      requests.map(async ({ host, args }) => {
+      requests.map(async ({ host, args, command = 'ssh', channel = false }) => {
         // This self-contained, existing collector is sent only through stdin; no
         // arbitrary operation/target parameter or remote installation is accepted.
         const envelope = { protocol: 1, requestId, host, sourceDigest };
@@ -128,8 +176,8 @@ export async function readFirstCutoverHostPair(overrides = {}) {
 } catch {
   process.stderr.write('CUTOVER_HOST_PAIR_UNPROVEN\\n'); process.exitCode = 1;
 }\n`;
-        const output = await io.exec('ssh', args, {
-          input,
+        const output = await io.exec(command, args, {
+          ...(channel ? {} : { input }),
           shell: false,
           maxBuffer: 16 * 1024 * 1024,
         });

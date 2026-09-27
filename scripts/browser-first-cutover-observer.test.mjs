@@ -73,6 +73,7 @@ function fixture(change = () => {}) {
       now = value;
     },
     io: {
+      transport: 'administrator',
       now: () => now,
       randomUUID: () => nonce,
       readObserverSource: async () => source,
@@ -124,6 +125,51 @@ test('two-host observation uses fixed strict SSH endpoints and returns actual bo
   }
   assert.ok(f.calls[1].args.some((arg) => arg.startsWith('ProxyCommand=ssh ')));
   assert.ok(!JSON.stringify(result).includes('ready'), 'an observation is not readiness');
+});
+
+test('root channel pair uses one fixed-key SSH and one local observer, not Mac credentials', async () => {
+  const f = fixture((reply) => {
+    reply.requestId = nonce.replaceAll('-', '');
+  });
+  const result = await host.readFirstCutoverHostPair({
+    ...f.io,
+    transport: 'root-channel',
+    platform: 'linux',
+    uid: 0,
+  });
+  const [remote, local] = f.calls;
+  assert.equal(remote.command, '/usr/bin/ssh');
+  assert.ok(remote.args.includes('/dev/null'));
+  assert.ok(remote.args.includes('IdentityAgent=none'));
+  assert.ok(remote.args.includes('BatchMode=yes'));
+  assert.ok(remote.args.includes('IdentitiesOnly=yes'));
+  assert.ok(remote.args.includes('UserKnownHostsFile=/var/lib/holaday-deploy/channel/known_hosts'));
+  assert.ok(remote.args.includes('/var/lib/holaday-deploy/channel/identity'));
+  assert.equal(remote.args.at(-1), `holaday-cutover-v1 observe ${nonce.replaceAll('-', '')}`);
+  assert.equal(remote.options.input, undefined);
+  assert.equal(local.command, '/opt/node22/bin/node');
+  assert.deepEqual(local.args, ['--input-type=module']);
+  assert.equal(typeof local.options.input, 'string');
+  assert.equal(result.sourceCandidate, 'c'.repeat(40));
+});
+
+test('root channel refuses wrong platform, non-root and unknown transport before any command', async () => {
+  for (const setting of [
+    { platform: 'darwin', uid: 0 },
+    { platform: 'linux', uid: 998 },
+    { platform: 'linux', uid: 0, transport: 'arbitrary' },
+  ]) {
+    const f = fixture();
+    await assert.rejects(
+      host.readFirstCutoverHostPair({
+        ...f.io,
+        transport: 'root-channel',
+        ...setting,
+      }),
+      /CUTOVER_HOST_PAIR_UNPROVEN/,
+    );
+    assert.equal(f.calls.length, 0);
+  }
 });
 
 for (const [name, change] of [
@@ -200,6 +246,22 @@ for (const [name, change] of [
     await assert.rejects(host.readFirstCutoverHostPair(f.io), /CUTOVER_HOST_PAIR_UNPROVEN/);
     assert.ok(f.calls.length <= 2);
   });
+  test(`root channel observation refuses ${name} without retrying`, async () => {
+    const f = fixture((reply, hostName) => {
+      reply.requestId = nonce.replaceAll('-', '');
+      change(reply, hostName);
+    });
+    await assert.rejects(
+      host.readFirstCutoverHostPair({
+        ...f.io,
+        transport: 'root-channel',
+        platform: 'linux',
+        uid: 0,
+      }),
+      /CUTOVER_HOST_PAIR_UNPROVEN/,
+    );
+    assert.equal(f.calls.length, 2);
+  });
 }
 
 test('one failed host never yields a partial successful pair or leaks remote stderr', async () => {
@@ -232,6 +294,7 @@ async function readCutoverHostSnapshot() {
 }
 `);
   const result = await host.readFirstCutoverHostPair({
+    transport: 'administrator',
     readObserverSource: async () => code,
     exec: async (_command, _args, { input }) => {
       payloads.push(input);

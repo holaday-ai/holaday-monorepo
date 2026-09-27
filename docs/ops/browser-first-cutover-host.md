@@ -6,6 +6,23 @@
 
 ## 调用契约
 
+### 专用跨主机通道（2026-09-27 已安装并实测）
+
+用户已明确批准此凭据边界。Vultr 的 `/var/lib/holaday-deploy/channel/identity` 是新生成的 ED25519 专用身份，root 私密目录0700、文件0600；私钥只留原机，没有传到 Mac、阿里云或 Git。阿里云只追加对应公钥，原管理员授权完整保留，安装前原文备份在 `/var/lib/holaday-deploy/channel/authorized_keys.before`。不修改 sshd 全局配置、不重启 SSH。
+
+- 公钥指纹：`SHA256:mTMfZx3UlwAYB6A331mjGhgHDBwpdcML76GMHQSLTyg`。授权限定 `from="207.148.70.106"`、`restrict` 和固定 `/usr/bin/python3 -I /var/lib/holaday-deploy/channel/browser-cutover-channel.py`；不开放 shell、PTY、文件传输、端口/agent/X11 转发或用户 rc。
+- 仅接受完全匹配的 `holaday-cutover-v1 probe` 和 `holaday-cutover-v1 observe <32位小写十六进制nonce>`。采集器必须匹配安装摘要、root所有权和0600权限；调用方不能上传代码、路径或写操作。Node替换入口进程，避免留下一个未分类的额外采集父进程。
+- Vultr 的独立 `known_hosts` 来自 Mac 已信任的阿里云 ED25519 记录，不采用首次连接自动信任。客户端固定SSH配置、密钥及主机，禁止agent/密码回退，不使用Mac凭据。身份目录已存在则安装器拒绝，不在不确定状态下重新生成密钥。
+- `readFirstCutoverHostPair` 在真实Linux root默认使用本机采集 + 此阿里云通道；Mac保留原管理员只读审计路径。仍检查nonce、源码摘要、主机、原checkout、boot、精确observer和60秒新鲜度，两端均结束才返回，不自动重试失败观察。
+
+安装入口SHA256：`cf00acb2fae7cca75428dcc01ce2eb0ffe24d8b9a477fe28edf9f6c384d86a3d`；采集器SHA256：`58511139b884091781bafd78bcd98cdab3972916135857730cc073e114f0d218`。后续修改采集器必须先验证再按管理员维护流程更新固定安装和摘要，不会接受客户端临时源码替换。
+
+真实新身份已验证probe/observe，以及拒绝任意命令、scp/sftp、未实现execute、命令拼接、直接转发和PTY。隔离sshd另验证错误来源、远程转发、用户rc和摘要篡改拒绝。最终真实双机观察 `observedAtMs=1790518727337`，Aliyun12/Vultr30个相关进程，旧checkout仍为 `107857fe70503e30691073f267d87275596edb20`；这是当时观察，不是长期有效发布许可。私密原文在Mac `/private/tmp/holaday-root-pair-final-ztkNFu`，单通道验收在 `/private/tmp/holaday-channel-verification-3hg7m9`。
+
+撤销时通过保留的管理员入口，先按以上公钥指纹确认，只移除该专用公钥的授权行；不要把备份整文件覆盖回去，以免抹掉之后加入的其他管理员授权。专用私钥不属于Mac恢复密钥，不复制到USB。当前没有任何远程写操作opcode，固定发布副作用、受保护批准清单、真实journal和维护窗口仍须原计划接线；这一步不等于整项部署完成。
+
+### 原发布调用约束
+
 - 只接受 `attempt`，其余候选、摘要、分支和绝对窗口由已有受保护批准文件读取；不接受 CLI 手填字段覆盖批准。
 - 构造无副作用；缺少任何现场适配接口时，获取锁和构建之前拒绝。`preflight` 只读批准，`stage` 复用实际准备函数持锁、构建并做 prepare readiness；只有通过后才进入入口修改。
 - 调用方必须在 transition 返回后调用 `adapter.finish(result)`。失败只关闭文件句柄、保留锁与记录；`reconciled` 是意图，实际后续核对成功且仍在核对窗口内才释放锁。

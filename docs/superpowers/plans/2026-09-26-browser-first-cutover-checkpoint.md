@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-27：专用通道已获准、安装并接入真实双机观察
+
+最新“允许”已解决下方历史凭据授权等待。Vultr独立生成新ED25519身份，私钥仅留原机；阿里云追加绑定来源/固定命令/restrict的公钥，原授权先备份并完整保留。不复制既有Mac或恢复密钥，不改sshd、不重启服务。具体路径、摘要、公钥指纹及撤销边界见 `docs/ops/browser-first-cutover-host.md` 的专用通道段落。
+
+新增Python入口和安装函数先RED→GREEN；真实隔离sshd验证probe/observe、篡改及命令/文件传输/转发/PTY/错误来源/rc拒绝。测试镜像曾因/tmp授权路径及copyfile丢失Node可执行位失败，分别修正夹具私密目录和保留文件权限，没有放宽产品限制。生产新身份probe/observe和七类拒绝实测通过；原始证据仅保留在Mac私密临时目录。
+
+现有 `readFirstCutoverHostPair` 的Linux root默认路径已改为Vultr本机 + 阿里云专用SSH；保留Mac管理员审计路径与全部绑定/时效/失败不重试检查。首次组合观察返回UNPROVEN，原文不足以归因；一次脱敏阶段诊断、之后一次最终无诊断观察均成功，不宣称已定位首次失败根因、不放宽门槛。最终观察 `1790518727337`，源码 `58511139b884091781bafd78bcd98cdab3972916135857730cc073e114f0d218`，原checkout `107857fe70503e30691073f267d87275596edb20`，Aliyun12/Vultr30相关进程。后者包含实际控制端进程，未擅自过滤或审批未知来源。
+
+新鲜验证：浏览器679/679、0跳过；Linux root专项Python7/7、Node31/31，隔离真实sshd全部断言通过。初次误设age测试变量导致27项跳过，已使用 `CUTOVER_TEST_AGE_EXECUTABLE=/opt/homebrew/bin/age` 完整重跑，不以跳过算通过。完整ops最终退出0，末组507/507、0跳过，新Python7项进入常规门槛；两份MJS的Biome、shell语法和diff-check通过。日志 `/tmp/holaday-channel-{browser,ops}-complete.log`。本轮未修改应用代码，未重跑应用全套、真实MySQL恢复或全分支审查，不沿用旧通过结果作为本轮整体验收。工作树保留既有 `scripts/__pycache__/`；Task4原BASE844c2ced不变。
+
+仅部署了受限只读工具通道，未发布候选应用、未改业务进程/数据库/订单/支付配置，PayPal没有访问。Task4/5/6仍未完成：完整受保护现场清单和副作用I/O、首次CLI、真实停写备份/隔离恢复、非PayPal外部恢复证据、整流程及全分支审查。下一步沿原host/transition接固定效果处理器，不重新审计已通过通道、不重建发布引擎，也不把本组件成功称作上线大项完成。
+
 ### 2026-09-27：9139e277已提交，跨主机凭据边界待明确
 
 九笔延期补丁已本地提交 `9139e277`，无push/PR/合并/部署。工作树仅剩原有 `scripts/__pycache__/`。后续只读检查从Mac known_hosts提取已信任的Aliyun ED25519公有记录，经stdin供Vultr上的SSH本次读取（StrictHostKeyChecking=yes，未写known_hosts、未传密码/私钥）；主机密钥校验通过后，BatchMode认证返回 `Permission denied (publickey,password)`。因此之前缺主机信任之外，现成无人值守服务器间认证也不可直接使用；不是Aliyun网络不可达。
