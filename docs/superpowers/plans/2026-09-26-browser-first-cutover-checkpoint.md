@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 夜间续跑：生产者启动记录与运行注册已接为正式调用
+
+双机入口与host会话接线已保存本地提交 `77ee22ac`，本批接续原Task4、BASE844c2ced不变。在已有registrations模块增加 `retireLocalFirstCutoverProducers`，直接接原journal、retirement observer、启动文件备份/替换及真实PM2删除器；固定本机Vultr内核主机身份，工作核清必须发生在启动文件修改前。完整匹配原main/worker/停止态cron，不允许借该接口处理阿里云网关或无关名称；有本次部分事件就拒绝重新执行，丢删除确认不补发。返回值仅是生产者阶段，不冒充双机stopped。
+
+7个新场景含真实临时文件、原字节备份、大整数保留、主机/阶段/忙碌/越界拒绝及删除后丢确认；先见缺方法RED再GREEN。另一个真实RED发现“全观察对象相等”误把正常采样时间前进当漂移，改为原capture验证完整身份/范围及新鲜度后比较无时间戳的capture；未忽略实际状态漂移。原Linux实体夹具已删除自行编排启动清理/注册删除的代码，直接调用正式组合，实际UID998生产者退出、停止态cron移除、无关PID保持、备份与主机标记journal成立、PM2重启后只恢复无关应用通过；同时原未托管网关pidfd测试保持通过。业务fence计数及另一个主机仍为合成，不等于真实双机业务停写。
+
+本批浏览器与部署入口完整同口径 **745/745**、0跳过、退出0，日志 `/tmp/holaday-producer-site-browser-complete.log`；Linux专项 **180/180**、0跳过且实体退役/回生演练退出0，日志 `/tmp/holaday-producer-site-linux-final.log`。三个MJS的Biome、shell语法、diff-check通过。新组合测试已补入原test:ops门禁，最终全命令退出0，**120/59/16/579 + Python9**、0跳过，日志 `/tmp/holaday-producer-site-ops-complete.log`；不要把较早未含该测试的565项当最终门禁。测试均已结束、一次性容器自动移除。全部操作仍限本地及隔离容器，无生产连接/改动、PayPal、密钥或历史业务修改；未重跑应用全套/真实MySQL恢复/整分支审查。
+
+确切下一步：完整site在attach内创建已有入口pair和retirement observer；stopProducers调用上述正式组合，真实独立业务/连接/writer观察需补齐，不能将fixture的零计数带入生产，且不能在入口会话writers回调递归读取该会话。还需阿里云受保护网关退役效果、同锁首次CLI、停写备份/隔离恢复、非PayPal恢复证据及完整成功/故障演练和全分支审查。Task4–6仍部分完成，无PR/合并/部署，不反复重做商户/密钥或这些已接通模块。夜间自动化保持续跑。
+
 ### 2026-09-28 夜间续跑：双机入口与现场会话生命周期接线
 
 承接 `39452d1b`，Task4原BASE844c2ced不变。在原入口会话模块组合本机Vultr与固定SSH的Aliyun两个生命周期：同一实际journal、受保护三站点范围、跨两端同一记录版本及原绝对截止时间；隔离Vultr→Aliyun，恢复Aliyun→Vultr。两端回执分别绑定主机，全局writer计数要求一致而非相加；任意一端确认不明就锁住后续效果，不重试或自动恢复。实际writer/control观察仍是必需项，不以零值补齐。

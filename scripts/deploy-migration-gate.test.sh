@@ -16,6 +16,7 @@ node --test "$SCRIPT_DIR/browser-maintenance-manifest.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-ingress-probe.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-nginx.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-inventory.test.mjs" \
+  "$SCRIPT_DIR/browser-first-cutover-registrations.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-transition.test.mjs" \
   "$SCRIPT_DIR/browser-maintenance-release-tail.test.mjs" \
   "$SCRIPT_DIR/browser-maintenance-journal.test.mjs" \

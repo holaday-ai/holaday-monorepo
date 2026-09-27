@@ -2,8 +2,10 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { isDeepStrictEqual as equal, promisify } from 'node:util';
 import { captureLegacyRegistrations } from './browser-first-cutover-runtime.mjs';
+import { removeSavedStartupEntries } from './browser-first-cutover-startup.mjs';
 export { cutoverRegistrationConfigDigest as registrationConfigDigest } from './browser-cutover-evidence.mjs';
 import { cutoverRegistrationConfigDigest as registrationConfigDigest } from './browser-cutover-evidence.mjs';
 
@@ -19,6 +21,159 @@ const fail = () => {
 };
 const sameFile = (a, b) => a.ino === b.ino && a.dev === b.dev;
 const env = { PATH: '/usr/bin:/bin', HOME: '/root', PM2_HOME: home, LANG: 'C', NO_COLOR: '1' };
+
+/** Fixed local producer slice for lifecycle.stopProducers. Observations and the
+ * journal are the original held instances, never uploaded completion reports.
+ * Startup file digests/entry hashes come from the site's protected review.
+ * This does not retire Aliyun gateways or establish global stopped evidence. */
+export async function retireLocalFirstCutoverProducers(input, io, system = {}) {
+  const { binding, files, maintenanceEndsAtMs } = structuredClone(input ?? {});
+  if (
+    (system.platform ?? process.platform) !== 'linux' ||
+    (system.uid ?? process.getuid?.()) !== 0 ||
+    !binding ||
+    Object.keys(binding).length !== 2 ||
+    !Number.isSafeInteger(maintenanceEndsAtMs) ||
+    ['now', 'sleep', 'verifyFence'].some((k) => typeof io?.[k] !== 'function') ||
+    typeof io?.observer?.read !== 'function' ||
+    typeof io.observer.readRegistrationProgress !== 'function'
+  )
+    fail();
+  let last = -1;
+  const guard = async () => {
+    const now = io.now();
+    if (!Number.isSafeInteger(now) || now < 0 || now < last || now >= maintenanceEndsAtMs) fail();
+    last = now;
+    const owner = await io.journal.assertOwnership();
+    const record = await io.journal.readFirstCutoverEffects();
+    if (
+      !['attempt', 'inventoryDigest'].every(
+        (k) => owner[k] === binding[k] && record[k] === binding[k],
+      ) ||
+      record.phase !== 'producers_stopped'
+    )
+      fail();
+    return record;
+  };
+  const before = await guard();
+  if (
+    !Array.isArray(before.startupEvents) ||
+    !Array.isArray(before.registrationEvents) ||
+    [...before.startupEvents, ...before.registrationEvents].some((e) => e.host === 'vultr')
+  )
+    fail();
+  const read = async () => {
+    await guard();
+    const result = await io.observer.readRegistrationProgress('vultr');
+    if (result?.host !== 'vultr' || result.purpose !== 'registration-progress') fail();
+    await guard();
+    return result.inventory;
+  };
+  const pair = await io.observer.read();
+  const inventory = pair?.hosts?.find((h) => h.host === 'vultr')?.registered;
+  if (
+    pair.inventoryDigest !== binding.inventoryDigest ||
+    pair.unknownLaunchers?.length !== 0 ||
+    inventory?.host !== (system.hostname ?? hostname)() ||
+    inventory.processes.some((p) => !['main', 'worker'].includes(p.role)) ||
+    inventory.managers.some(
+      (m) =>
+        !['holaday-orchestrator', 'holaday-account-closure-worker', 'holaday-files-cron'].includes(
+          m.name,
+        ),
+    )
+  )
+    fail();
+  const captured = await captureLegacyRegistrations(
+    {
+      inventory,
+      approvedTargets: inventory.processes,
+      approvedRegistrations: inventory.managers,
+    },
+    { now: io.now },
+  );
+  if (
+    !Array.isArray(files) ||
+    files.some(
+      (f) =>
+        !Array.isArray(f.remove) ||
+        f.remove.some((r) => !captured.managers.some((m) => m.name === r.name)),
+    )
+  )
+    fail();
+  const fence = await io.verifyFence();
+  const now = io.now();
+  if (
+    fence?.inventoryDigest !== binding.inventoryDigest ||
+    fence.stage !== 'orders' ||
+    !Number.isSafeInteger(fence.observedAtMs) ||
+    fence.observedAtMs < 0 ||
+    fence.observedAtMs > now ||
+    now - fence.observedAtMs > 60000 ||
+    ['unsettledWork', 'externalWork', 'activeRequests', 'unknownWriters'].some(
+      (k) => fence[k] !== 0,
+    ) ||
+    fence.producersRunning !== inventory.processes.length ||
+    !equal(fence.runningProducers, inventory.processes) ||
+    !equal(
+      await captureLegacyRegistrations(
+        {
+          inventory: await read(),
+          approvedTargets: captured.targets,
+          approvedRegistrations: captured.managers,
+        },
+        { now: io.now },
+      ),
+      captured,
+    ) ||
+    now + captured.managers.reduce((sum, m) => sum + m.killTimeoutMs, 100) >= maintenanceEndsAtMs
+  )
+    fail();
+  const assertOwnership = async () => {
+    await guard();
+    return { ...binding };
+  };
+  await removeSavedStartupEntries(
+    { binding, files, maintenanceEndsAtMs },
+    {
+      ...system,
+      now: io.now,
+      assertOwnership,
+      persist: async (e) => {
+        await guard();
+        await io.journal.recordStartupEvent({ ...e, host: 'vultr' });
+      },
+    },
+  );
+  await io.observer.read();
+  const result = await removeLegacyRegistrations(
+    { captured, binding, maintenanceEndsAtMs },
+    {
+      now: io.now,
+      sleep: io.sleep,
+      assertOwnership,
+      readInventory: read,
+      verifyFence: io.verifyFence,
+      persist: async (e) => {
+        await guard();
+        await io.journal.recordRegistrationEvent({ ...e, host: 'vultr' });
+      },
+    },
+    system,
+  );
+  const after = await io.observer.read();
+  const stopped = after?.hosts?.find((h) => h.host === 'vultr')?.registered;
+  if (
+    after.inventoryDigest !== binding.inventoryDigest ||
+    after.unknownLaunchers?.length !== 0 ||
+    stopped?.processes?.length !== 0 ||
+    stopped.managers?.length !== 0 ||
+    stopped.listeners?.length !== 0
+  )
+    fail();
+  await guard();
+  return { ...result, host: 'vultr', phase: 'producers_stopped' };
+}
 
 /** First-only removal of exact registrations, including stopped/PID0 cron.
  * Host-owned observers must classify the complete physical scope and hold the

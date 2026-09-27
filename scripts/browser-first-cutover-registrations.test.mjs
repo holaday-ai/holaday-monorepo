@@ -161,6 +161,136 @@ test('exact stopped cron registration is archived privately and removed without 
   assert.equal(f.commands.length, 1);
 });
 
+test('local producer retirement connects saved files, owned host journal and exact live registration removal', async (t) => {
+  for (const mode of [
+    'success',
+    'fresh-observation',
+    'busy',
+    'foreign-host',
+    'wrong-phase',
+    'unapproved-name',
+    'lost-delete-ack',
+  ])
+    await t.test(mode, async (t) => {
+      const f = await fixture(t);
+      const raw = JSON.stringify(f.rows[0].pm2_env);
+      const bytes = `[${raw},{"name":"unrelated","number":9007199254740993}]\n`;
+      await fs.writeFile(`${f.root}/root/.pm2/dump.pm2`, bytes, { mode: 0o600 });
+      f.system.fs.rename = (a, b) => fs.rename(f.root + a, f.root + b);
+      f.system.hostname = () => (mode === 'foreign-host' ? 'other-machine' : 'vultr');
+      const phase = mode === 'wrong-phase' ? 'legacy_settled' : 'producers_stopped';
+      const journal = {
+        assertOwnership: async () => ({ ...binding, candidate: 'b'.repeat(40) }),
+        readFirstCutoverEffects: async () => ({
+          ...binding,
+          phase,
+          startupEvents: f.events.filter((e) => e.phase.startsWith('startup-')),
+          registrationEvents: f.events.filter((e) => e.phase.startsWith('registration-')),
+        }),
+        recordStartupEvent: f.io.persist,
+        recordRegistrationEvent: f.io.persist,
+      };
+      const observer = {
+        read: async () => ({
+          inventoryDigest: binding.inventoryDigest,
+          unknownLaunchers: [],
+          hosts: [{ host: 'vultr', registered: await f.io.readInventory() }],
+        }),
+        readRegistrationProgress: async (host) => {
+          assert.equal(host, 'vultr');
+          if (mode === 'fresh-observation') await f.io.sleep(1);
+          return { purpose: 'registration-progress', host, inventory: await f.io.readInventory() };
+        },
+      };
+      const input = {
+        binding,
+        maintenanceEndsAtMs: 20000,
+        files: [
+          {
+            path: '/root/.pm2/dump.pm2',
+            digest: sha(bytes),
+            remove: [
+              {
+                name: mode === 'unapproved-name' ? 'holaday-cn-payment' : 'holaday-files-cron',
+                entryDigest: sha(raw),
+              },
+            ],
+          },
+          { path: '/root/.pm2/dump.pm2.bak', digest: null, remove: [] },
+        ],
+      };
+      const io = {
+        journal,
+        observer,
+        now: f.io.now,
+        sleep: f.io.sleep,
+        verifyFence: async () => ({
+          ...(await f.io.verifyFence()),
+          externalWork: mode === 'busy' ? 1 : 0,
+        }),
+      };
+      if (mode === 'lost-delete-ack') {
+        const exec = f.system.exec;
+        f.system.exec = async (...args) => {
+          const value = await exec(...args);
+          if (args[1][1] === 'delete') throw new Error('lost acknowledgement');
+          return value;
+        };
+      }
+      assert.equal(typeof registrations.retireLocalFirstCutoverProducers, 'function');
+      if (mode === 'success' || mode === 'fresh-observation') {
+        const result = await registrations.retireLocalFirstCutoverProducers(input, io, f.system);
+        assert.equal(result.phase, 'producers_stopped');
+        assert.deepEqual(result.removed, [{ pmId: 5, name: 'holaday-files-cron' }]);
+        assert.equal(
+          await fs.readFile(`${f.root}/root/.pm2/dump.pm2`, 'utf8'),
+          '[{"name":"unrelated","number":9007199254740993}]\n',
+        );
+        assert.equal(
+          await fs.readFile(
+            `${f.root}${archive}/startup-${binding.attempt}/dump.pm2.original`,
+            'utf8',
+          ),
+          bytes,
+        );
+        assert.deepEqual(
+          f.events.map((e) => [e.host, e.phase]),
+          [
+            ['vultr', 'startup-backup-intent'],
+            ['vultr', 'startup-backed-up'],
+            ['vultr', 'startup-file-intent'],
+            ['vultr', 'startup-file-written'],
+            ['vultr', 'registration-backup-intent'],
+            ['vultr', 'registration-backed-up'],
+            ['vultr', 'registration-delete-intent'],
+            ['vultr', 'registration-deleted'],
+          ],
+        );
+      } else {
+        await assert.rejects(
+          registrations.retireLocalFirstCutoverProducers(input, io, f.system),
+          /CUTOVER_/,
+        );
+        if (mode !== 'lost-delete-ack') {
+          assert.equal(await fs.readFile(`${f.root}/root/.pm2/dump.pm2`, 'utf8'), bytes);
+          assert.equal(f.events.length, 0);
+        } else assert.equal(f.events.at(-1).phase, 'registration-delete-intent');
+      }
+      const calls = f.commands.length;
+      if (['success', 'fresh-observation', 'lost-delete-ack'].includes(mode))
+        await assert.rejects(
+          registrations.retireLocalFirstCutoverProducers(input, io, f.system),
+          /CUTOVER_/,
+        );
+      assert.equal(f.commands.length, calls);
+      assert.equal(
+        calls,
+        ['success', 'fresh-observation', 'lost-delete-ack'].includes(mode) ? 1 : 0,
+      );
+      assert.equal(f.rows.find((r) => r.name === 'unrelated').pid, 888);
+    });
+});
+
 test('PM2 axm_monitor telemetry changes do not impersonate launch configuration drift', async (t) => {
   const f = await fixture(t);
   const persist = f.io.persist;

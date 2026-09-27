@@ -110,6 +110,8 @@ Linux演练现由真正本机生命周期和独立接收进程执行，分别保
 
 `scripts/fixtures/browser-registration-removal-linux.mjs` 使用真实PM2、UID998生产者、停止状态cron、主/备用dump、root journal，以及真实未托管网关与pidfd SIGTERM验证上述连接。Docker使用 `--init --cap-add SYS_PTRACE --network none`，源码只读挂载；不共享宿主PID或凭据。双机路由在单个隔离容器中模拟、业务隔离计数为QA固定值，不能冒充生产双机整流程。验证还包括PM2守护进程重启后仅恢复无关fixture。
 
+本机生产者接线使用 `browser-first-cutover-registrations.mjs` 的 `retireLocalFirstCutoverProducers({binding,files,maintenanceEndsAtMs}, {journal,observer,verifyFence,now,sleep})`：`binding`只含attempt/inventoryDigest，files沿用受保护主备启动清单。仅Linux/root且实际内核主机名匹配Vultr已审核观察；原journal必须在producers_stopped意图阶段且尚无该主机退役事件。核清工作、核对完整注册与剩余时间后，复用原私密备份/主备替换和定向注册删除；全部事件直接写原journal并标记Vultr，最后由原观察器核验退出。只返回生产者阶段结果，不能冒充双机stopped。已有部分事件或丢失删除确认不重做，保留副本与锁。上述实体夹具现在直接调用该正式组合，不再自己编排两个写入器；业务核对及其他主机仍须完整site提供真实观察。
+
 `scripts/fixtures/browser-retirement-observation-linux.mjs` 在无网络的一次性root Linux容器中，以实际 `removeSavedStartupEntries`、真实文件/属组998、真实持久journal和新读取的stat/字节验证连接，含真实磁盘篡改拒绝。主机/进程/PM2信息仍为合成场景，不能称为真实双机整流程演练。
 
 `scripts/fixtures/browser-candidate-observation-linux.mjs` 验证默认候选读取器的实际PM2 6.0.14、UID998 Node、proc、双端口及Unix socket传输，并拒绝错误身份、真实孤儿进程和两次socket读取间状态变化。候选协议内容是明确的合成模型，不是完整应用或联合退役/隔离证明；`--without-control` 实际失败，不把无控制socket认作通过。

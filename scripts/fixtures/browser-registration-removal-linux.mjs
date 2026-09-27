@@ -13,13 +13,9 @@ import {
 import { firstCutoverSourceBindings } from '/source/browser-first-cutover-inventory.mjs';
 import {
   registrationConfigDigest,
-  removeLegacyRegistrations,
+  retireLocalFirstCutoverProducers,
 } from '/source/browser-first-cutover-registrations.mjs';
-import {
-  captureLegacyRegistrations,
-  createLegacyRuntimeEffects,
-} from '/source/browser-first-cutover-runtime.mjs';
-import { removeSavedStartupEntries } from '/source/browser-first-cutover-startup.mjs';
+import { createLegacyRuntimeEffects } from '/source/browser-first-cutover-runtime.mjs';
 import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
@@ -45,10 +41,6 @@ const binding = {
 };
 let journal;
 let gateway;
-const assertOwnership = async () => {
-  const b = await journal.assertOwnership();
-  return { attempt: b.attempt, inventoryDigest: b.inventoryDigest };
-};
 try {
   await pm2(
     'start',
@@ -358,28 +350,14 @@ try {
   await journal.bindManifest([]);
   for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
     await journal.persist(phase, { candidate: 'b'.repeat(40) });
-  await removeSavedStartupEntries(
-    { binding, files, maintenanceEndsAtMs: Date.now() + 60000 },
-    {
-      now: Date.now,
-      assertOwnership,
-      persist: (e) => journal.recordStartupEvent({ ...e, host: 'vultr' }),
-    },
-  );
   const readProgress = async () => (await observer.readRegistrationProgress('vultr')).inventory;
-  const inventory = await readProgress();
-  const captured = await captureLegacyRegistrations(
-    { inventory, approvedTargets: inventory.processes, approvedRegistrations: inventory.managers },
-    { now: Date.now },
-  );
-  const result = await removeLegacyRegistrations(
-    { captured, binding, maintenanceEndsAtMs: Date.now() + 60000 },
+  const result = await retireLocalFirstCutoverProducers(
+    { files, binding, maintenanceEndsAtMs: Date.now() + 60000 },
     {
       now: Date.now,
       sleep,
-      assertOwnership,
-      readInventory: readProgress,
-      persist: (e) => journal.recordRegistrationEvent({ ...e, host: 'vultr' }),
+      journal,
+      observer,
       verifyFence: async () => {
         const s = await readProgress();
         return {
@@ -396,6 +374,7 @@ try {
       },
     },
   );
+  assert.equal(result.phase, 'producers_stopped');
   assert.equal(result.removed.length, 2);
   assert.deepEqual((await observer.read()).unknownLaunchers, []);
   assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
