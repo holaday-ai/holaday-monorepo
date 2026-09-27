@@ -67,6 +67,22 @@ const reportSchema = bindingSchema
         recovery: z.enum(['retry-proven', 'query-and-existing-settlement-proven']),
         recoveryUntilMs: timestamp,
         rehearsalDigest: hash,
+        deferredUnverified: z
+          .array(
+            z
+              .object({
+                // Keep this exact approved historical record aligned with the collector.
+                recordDigest: z.literal(
+                  '75467f5b0aec5367761433a57fbd45aa9a41347e638f385178c12f5af7740b95',
+                ),
+                fieldsDigest: hash,
+                approvalRef: z.literal('paypal-sandbox-20260927'),
+                state: z.literal('unverified-deferred'),
+              })
+              .strict(),
+          )
+          .length(1)
+          .optional(),
       })
       .strict(),
   })
@@ -124,6 +140,17 @@ export function validateServicesEvidence(value: unknown, expected: ServicesConte
   )
     throw denied();
   if (new Set(report.sources.map((source) => source.kind)).size !== 4) throw denied();
+  const deferred = report.payments.deferredUnverified;
+  const databaseDigest = deferred
+    ? createHash('sha256')
+        .update(
+          JSON.stringify([
+            report.payments.scopeDigest,
+            deferred.map((row) => [row.recordDigest, row.fieldsDigest, row.approvalRef, row.state]),
+          ]),
+        )
+        .digest('hex')
+    : report.payments.scopeDigest;
   for (const source of report.sources) {
     const historical = source.kind === 'provider-rehearsal';
     const target = source.kind === 'host' ? context.inventoryDigest : context.configDigest;
@@ -131,7 +158,7 @@ export function validateServicesEvidence(value: unknown, expected: ServicesConte
       source.kind === 'host'
         ? context.inventoryDigest
         : source.kind === 'database'
-          ? report.payments.scopeDigest
+          ? databaseDigest
           : source.kind === 'provider-query'
             ? report.payments.queriedScopeDigest
             : report.payments.rehearsalDigest;

@@ -59,6 +59,61 @@ import {
 } from './ordinary-maintenance-services.js';
 
 const denied = 'MAINTENANCE_PAYMENT_BOUNDARY_UNPROVEN';
+const approvedSandboxDigest = '75467f5b0aec5367761433a57fbd45aa9a41347e638f385178c12f5af7740b95';
+it('accepts an explicit unverified sandbox exception only with separately bound database evidence', () => {
+  const r = evidence();
+  const deferred = [
+    {
+      recordDigest: approvedSandboxDigest,
+      fieldsDigest: '5'.repeat(64),
+      approvalRef: 'paypal-sandbox-20260927',
+      state: 'unverified-deferred',
+    },
+  ];
+  const value = { ...r, payments: { ...r.payments, deferredUnverified: deferred } };
+  source(r, 1).digest = createHash('sha256')
+    .update(
+      JSON.stringify([
+        r.payments.scopeDigest,
+        [[approvedSandboxDigest, '5'.repeat(64), 'paypal-sandbox-20260927', 'unverified-deferred']],
+      ]),
+    )
+    .digest('hex');
+  expect(() => validateServicesEvidence(value, context)).not.toThrow();
+  source(r, 1).digest = r.payments.scopeDigest;
+  expect(() => validateServicesEvidence(value, context)).toThrow(denied);
+});
+it('rejects additional, verified, unbound or malformed sandbox exceptions', () => {
+  const d = {
+    recordDigest: approvedSandboxDigest,
+    fieldsDigest: '5'.repeat(64),
+    approvalRef: 'paypal-sandbox-20260927',
+    state: 'unverified-deferred',
+  };
+  for (const deferred of [
+    [d, d],
+    [{ ...d, state: 'verified' }],
+    [{ ...d, approvalRef: 'skip-all' }],
+    [{ ...d, recordDigest: 'bad' }],
+    [{ ...d, recordDigest: '0'.repeat(64) }],
+  ]) {
+    const r = evidence();
+    source(r, 1).digest = createHash('sha256')
+      .update(
+        JSON.stringify([
+          r.payments.scopeDigest,
+          deferred.map((d) => [d.recordDigest, d.fieldsDigest, d.approvalRef, d.state]),
+        ]),
+      )
+      .digest('hex');
+    expect(() =>
+      validateServicesEvidence(
+        { ...r, payments: { ...r.payments, deferredUnverified: deferred } },
+        context,
+      ),
+    ).toThrow(denied);
+  }
+});
 const context: ServicesContext = {
   attempt: '11111111-1111-4111-8111-111111111111',
   candidate: 'a'.repeat(40),

@@ -34,6 +34,24 @@
 
 ## 已验证与尚未验证
 
+### 已批准的唯一 Sandbox 延期项
+
+用户2026-09-27批准旧PayPal测试单延期；它仍未被支付方核验，不是已关闭或已支付。现场 `readHostInventory` 必须从受保护批准清单带入以下字段，并将实际新PayPal开关配置纳入 `configurationDigests`，不得凭空填写 `false`：
+
+```json
+{
+  "paypalCheckoutEnabled": false,
+  "deferredSandboxPayment": {
+    "recordDigest": "75467f5b0aec5367761433a57fbd45aa9a41347e638f385178c12f5af7740b95",
+    "approvalRef": "paypal-sandbox-20260927"
+  }
+}
+```
+
+数据库适配将同一 `deferredSandboxPayment` 传入已有 `readCutoverDatabaseScope`。此函数只在完整分页/计数覆盖下将精确匹配行输出为 `deferredUnverified`；其他订单照常核验。不调用PayPal merchant解析器、OAuth或订单API，发现另一条PayPal记录即拒绝。`inventory.merchants` 与演练证据对应本次实际核验的商户，不为此延期项伪造PayPal商户或演练回执；原PayPal历史回调路径仍按两阶段入口隔离规则保护。指纹使用表名、外部ID、provider订单/capture ID、金额币种、状态、排序metadata键值和UTC创建/更新时间；报告只输出摘要，不含原订单号。实际该指纹已从私密历史归档生成，不能替换为任意测试单。
+
+采集器和readiness双重固定此唯一记录，拒绝额外/重复/被改写的例外。`payments.scopeDigest/queriedScopeDigest` 仅对应须查询的订单；database source摘要另外绑定延期数组，provider-query摘要不冒充验证延期项。准备与开放前都重采，读前后变动即拒绝。没有延期时原V1报告语义不变。现场适配、备份恢复、首次shell仍需按上文接口完成；本段不是已安装生产配置。
+
 新组合测试使用真实候选准备编排、临时文件 journal、证据采集器、备份协调器及首次状态文件；Git/构建、远端进程、业务/支付、数据库及文件属主是明确的合成边界。Linux Node 22 运行这些组合测试也不等于真实双主机切换。
 
 尚未完成：实际受保护双机分类清单及上述生产接口组装、密文运输到指定 Mac 隔离库、生产停写后的真实备份恢复、历史任务/支付核清、持久入口与启动配置验收、首次 shell 入口、整项演练及独立审查。恢复私钥已于2026-09-27复制到用户指定的Yalei USB并实际解密验证，详见[保管记录](browser-backup-recovery.md)；介质未额外加密，待用户物理离线保管，不能替代生产恢复演练。不得据本页执行生产切换或宣称浏览器已上线。

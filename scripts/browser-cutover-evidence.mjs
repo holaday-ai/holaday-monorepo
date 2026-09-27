@@ -826,6 +826,90 @@ const fail = (code = 'MAINTENANCE_PAYMENT_BOUNDARY_UNPROVEN') => {
   throw new Error(code);
 };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const deferralRef = 'paypal-sandbox-20260927';
+function checkDeferralApproval(approval) {
+  if (
+    !approval ||
+    Object.keys(approval).sort().join(',') !== 'approvalRef,recordDigest' ||
+    approval.approvalRef !== deferralRef ||
+    !hash(approval.recordDigest)
+  )
+    fail();
+}
+function checkDeferredScope(scope, inventory) {
+  const deferred = scope.deferredUnverified ?? [];
+  const approval = inventory.deferredSandboxPayment;
+  if (!Array.isArray(deferred) || deferred.length > 1) fail();
+  if (approval !== undefined) {
+    checkDeferralApproval(approval);
+    // One user-approved historical record, not a configurable allowlist.
+    if (
+      approval.recordDigest !== '75467f5b0aec5367761433a57fbd45aa9a41347e638f385178c12f5af7740b95'
+    )
+      fail();
+    if (
+      inventory.paypalCheckoutEnabled !== false ||
+      deferred.length !== 1 ||
+      scope.orders.some((row) => row.provider === 'paypal')
+    )
+      fail();
+  } else if (deferred.length) fail();
+  for (const row of deferred) {
+    if (
+      !row ||
+      Object.keys(row).sort().join(',') !== 'approvalRef,fieldsDigest,recordDigest,state' ||
+      row.approvalRef !== approval.approvalRef ||
+      row.recordDigest !== approval.recordDigest ||
+      !hash(row.fieldsDigest) ||
+      row.state !== 'unverified-deferred'
+    )
+      fail();
+  }
+}
+const databaseScopeDigest = (scopeDigest, deferred) =>
+  deferred?.length
+    ? digest([
+        scopeDigest,
+        deferred.map((row) => [row.recordDigest, row.fieldsDigest, row.approvalRef, row.state]),
+      ])
+    : scopeDigest;
+
+// Exact historical row fingerprint; no provider contact or merchant inference.
+function sandboxRecordDigest(row, table, windowStartMs) {
+  if (
+    table !== 'payments' ||
+    row.provider !== 'paypal' ||
+    row.status !== 'pending' ||
+    row.provider_capture_id != null
+  )
+    return null;
+  const metadata = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+  if (!metadata || Array.isArray(metadata) || metadata.env !== 'sandbox') return null;
+  const date = (value) =>
+    new Date(
+      typeof value === 'string' && /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}$/.test(value)
+        ? `${value.replace(' ', 'T')}Z`
+        : value,
+    ).toISOString();
+  const created = date(row.created_at);
+  const updated = date(row.updated_at);
+  if (Date.parse(created) >= windowStartMs || Date.parse(updated) >= windowStartMs) return null;
+  return digest([
+    table,
+    row.external_id,
+    row.provider,
+    row.provider_order_id,
+    row.provider_capture_id ?? null,
+    Number(row.amount_cents),
+    row.currency,
+    row.status,
+    Object.keys(metadata)
+      .sort()
+      .map((key) => [key, metadata[key]]),
+    created,
+    updated,
+  ]);
+}
 const bindingKeys = ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'];
 function checkBinding(value) {
   if (
@@ -888,10 +972,16 @@ export async function collectCutoverEvidence(input, io) {
   const host = structuredClone(await io.readHostInventory());
   const before = structuredClone(await io.readDatabaseScope());
   checkScope(before, io.now());
+  checkDeferredScope(before, host.inventory);
   const observations = structuredClone(await io.queryOrders(before));
   const after = structuredClone(await io.readDatabaseScope());
   checkScope(after, io.now());
-  if (!same(before.orders, after.orders) || !same(before.unsettled, after.unsettled))
+  checkDeferredScope(after, host.inventory);
+  if (
+    !same(before.orders, after.orders) ||
+    !same(before.unsettled, after.unsettled) ||
+    !same(before.deferredUnverified ?? [], after.deferredUnverified ?? [])
+  )
     fail('MAINTENANCE_PAYMENT_SCOPE_CHANGED');
   const rehearsal = structuredClone(await io.readRehearsalArtifacts());
   const fence = structuredClone(await io.readFenceState());
@@ -1020,7 +1110,7 @@ export async function collectCutoverEvidence(input, io) {
       },
       {
         kind: 'database',
-        digest: scopeDigest,
+        digest: databaseScopeDigest(scopeDigest, before.deferredUnverified),
         targetDigest: binding.configDigest,
         observedAtMs: before.observedAtMs,
       },
@@ -1054,6 +1144,9 @@ export async function collectCutoverEvidence(input, io) {
       recovery: rehearsal.recovery,
       recoveryUntilMs: rehearsal.recoveryUntilMs,
       rehearsalDigest,
+      ...(before.deferredUnverified?.length
+        ? { deferredUnverified: before.deferredUnverified }
+        : {}),
     },
   };
   const finalJournal = await io.assertJournalOwnership();
@@ -1068,18 +1161,20 @@ export async function collectCutoverEvidence(input, io) {
 /** mysql2 connection must be dedicated; queries never enter a write transaction. */
 export async function readCutoverDatabaseScope(
   db,
-  { windowStartMs, now = Date.now, resolveMerchant } = {},
+  { windowStartMs, now = Date.now, resolveMerchant, deferredSandboxPayment } = {},
 ) {
   if (!Number.isSafeInteger(windowStartMs) || windowStartMs < 0 || windowStartMs > now())
     fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
   let transaction = false;
   try {
+    if (deferredSandboxPayment !== undefined) checkDeferralApproval(deferredSandboxPayment);
     await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
     await db.query('START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY');
     transaction = true;
     const observedAtMs = now();
     const orders = [];
     const unsettled = [];
+    const deferredUnverified = [];
     const since = new Date(windowStartMs);
     for (const table of ['payments', 'partner_recharge_orders']) {
       const amountColumn = table === 'payments' ? 'amount_cents' : 'amount_cny_cents';
@@ -1096,7 +1191,7 @@ export async function readCutoverDatabaseScope(
         !Number.isSafeInteger(count) ||
         count < 0 ||
         count >= 10_000 ||
-        orders.length + count >= 10_000
+        orders.length + deferredUnverified.length + count >= 10_000
       )
         fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
       let cursor = 0;
@@ -1117,10 +1212,24 @@ export async function readCutoverDatabaseScope(
             !['alipay', 'wechat', 'paypal'].includes(row.provider) ||
             !Number.isSafeInteger(Number(row.amount_cents)) ||
             Number(row.amount_cents) <= 0 ||
-            !['USD', 'CNY'].includes(row.currency) ||
-            typeof resolveMerchant !== 'function'
+            !['USD', 'CNY'].includes(row.currency)
           )
             fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
+          if (deferredSandboxPayment !== undefined && row.provider === 'paypal') {
+            const recordDigest = sandboxRecordDigest(row, table, windowStartMs);
+            if (recordDigest !== deferredSandboxPayment.recordDigest || deferredUnverified.length)
+              fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
+            deferredUnverified.push({
+              recordDigest,
+              approvalRef: deferralRef,
+              fieldsDigest: digest(row),
+              state: 'unverified-deferred',
+            });
+            cursor = id;
+            found++;
+            continue;
+          }
+          if (typeof resolveMerchant !== 'function') fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
           const merchant = resolveMerchant(row.provider, row, table);
           if (
             !hash(merchant?.merchantDigest) ||
@@ -1137,6 +1246,8 @@ export async function readCutoverDatabaseScope(
       }
       if (found !== count) fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
     }
+    if (deferredSandboxPayment !== undefined && deferredUnverified.length !== 1)
+      fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
     const work = [
       [
         'tasks',
@@ -1153,7 +1264,12 @@ export async function readCutoverDatabaseScope(
       if (!Array.isArray(rows) || rows.length >= 100) fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
       unsettled.push(...rows.map((row) => ({ table, ...row })));
     }
-    return { observedAtMs, orders, unsettled };
+    return {
+      observedAtMs,
+      orders,
+      unsettled,
+      ...(deferredSandboxPayment !== undefined ? { deferredUnverified } : {}),
+    };
   } catch {
     fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
   } finally {

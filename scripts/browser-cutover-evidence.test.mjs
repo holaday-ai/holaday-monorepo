@@ -16,6 +16,7 @@ import {
 
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const merchant = '9'.repeat(64);
+const approvedSandboxDigest = '75467f5b0aec5367761433a57fbd45aa9a41347e638f385178c12f5af7740b95';
 function fixture() {
   const inventory = {
     hosts: ['vultr', 'aliyun'],
@@ -329,6 +330,188 @@ for (const kind of ['missing-page', 'overflow', 'duplicate']) {
     assert.equal(f.calls.at(-1).sql, 'ROLLBACK');
   });
 }
+function deferredDatabaseFixture() {
+  const f = databaseFixture();
+  const row = {
+    id: 2,
+    external_id: 'synthetic-sandbox',
+    provider: 'paypal',
+    provider_order_id: 'synthetic-order',
+    provider_capture_id: null,
+    amount_cents: 990,
+    currency: 'USD',
+    status: 'pending',
+    metadata: { env: 'sandbox' },
+    created_at: '1970-01-01T00:00:01.000Z',
+    updated_at: '1970-01-01T00:00:01.000Z',
+  };
+  const recordDigest = hash([
+    'payments',
+    'synthetic-sandbox',
+    'paypal',
+    'synthetic-order',
+    null,
+    990,
+    'USD',
+    'pending',
+    [['env', 'sandbox']],
+    '1970-01-01T00:00:01.000Z',
+    '1970-01-01T00:00:01.000Z',
+  ]);
+  f.options.deferredSandboxPayment = { recordDigest, approvalRef: 'paypal-sandbox-20260927' };
+  f.options.resolveMerchant = (provider) => {
+    assert.notEqual(provider, 'paypal', 'must not resolve PayPal credentials');
+    return { environment: 'production', merchantDigest: merchant };
+  };
+  f.rows.payments.push(row);
+  return { ...f, row };
+}
+test('one approved unchanged sandbox record is explicitly deferred without merchant access or writes', async () => {
+  const f = deferredDatabaseFixture();
+  const original = structuredClone(f.rows);
+  const scope = await readCutoverDatabaseScope(f.db, f.options);
+  assert.equal(scope.orders.length, 1);
+  assert.deepEqual(scope.deferredUnverified, [
+    {
+      ...f.options.deferredSandboxPayment,
+      fieldsDigest: hash(f.row),
+      state: 'unverified-deferred',
+    },
+  ]);
+  assert.deepEqual(f.rows, original);
+  assert.equal(
+    f.calls.some((c) => /^(UPDATE|DELETE|INSERT|REPLACE)/.test(c.sql)),
+    false,
+  );
+  assert.equal(f.calls.at(-1).sql, 'ROLLBACK');
+});
+test('deferral refuses other records, production, changed money/status/capture/time and missing approval target', async () => {
+  for (const mutate of [
+    (f) => {
+      f.row.external_id = 'another';
+    },
+    (f) => {
+      f.row.metadata.env = 'live';
+    },
+    (f) => {
+      f.row.amount_cents++;
+    },
+    (f) => {
+      f.row.status = 'completed';
+    },
+    (f) => {
+      f.row.provider_capture_id = 'capture';
+    },
+    (f) => {
+      f.row.updated_at = '1970-01-01T00:00:02.000Z';
+    },
+    (f) => {
+      f.rows.payments.pop();
+    },
+    (f) => {
+      f.rows.payments.push({ ...f.row, id: 3, external_id: 'second' });
+    },
+    (f) => {
+      f.options.deferredSandboxPayment.allowAll = true;
+    },
+  ]) {
+    const f = deferredDatabaseFixture();
+    mutate(f);
+    await assert.rejects(
+      readCutoverDatabaseScope(f.db, f.options),
+      /MAINTENANCE_PAYMENT_SCOPE_UNPROVEN/,
+    );
+  }
+});
+function deferredCollectorFixture() {
+  const f = fixture();
+  const approval = { recordDigest: approvedSandboxDigest, approvalRef: 'paypal-sandbox-20260927' };
+  f.host.inventory.deferredSandboxPayment = approval;
+  f.host.inventory.paypalCheckoutEnabled = false;
+  f.binding.inventoryDigest = hash(f.host.inventory);
+  f.rehearsal.inventoryDigest = f.binding.inventoryDigest;
+  f.fence.inventoryDigest = f.binding.inventoryDigest;
+  f.scope.deferredUnverified = [
+    { ...approval, fieldsDigest: '5'.repeat(64), state: 'unverified-deferred' },
+  ];
+  return f;
+}
+test('collector reports the unverified exception separately and binds it to database evidence, not provider verification', async () => {
+  const f = deferredCollectorFixture();
+  f.io.queryOrders = async (scope) => {
+    assert.equal(scope.orders.length, 1);
+    assert.equal(scope.orders[0].provider, 'wechat');
+    return f.observations;
+  };
+  const report = await collectCutoverEvidence(f.input, f.io);
+  assert.deepEqual(report.payments.deferredUnverified, f.scope.deferredUnverified);
+  assert.equal(report.payments.scopeDigest, hash(f.scope.orders));
+  assert.equal(
+    report.sources.find((s) => s.kind === 'database').digest,
+    hash([
+      hash(f.scope.orders),
+      [[approvedSandboxDigest, '5'.repeat(64), 'paypal-sandbox-20260927', 'unverified-deferred']],
+    ]),
+  );
+  assert.equal(
+    report.sources.find((s) => s.kind === 'provider-query').digest,
+    hash(f.scope.orders),
+  );
+});
+test('collector refuses missing/foreign/duplicate deferrals and checkout enabled before provider calls', async () => {
+  for (const mutate of [
+    (f) => {
+      f.scope.deferredUnverified = undefined;
+    },
+    (f) => {
+      f.scope.deferredUnverified[0].recordDigest = '0'.repeat(64);
+    },
+    (f) => {
+      f.scope.deferredUnverified.push(f.scope.deferredUnverified[0]);
+    },
+    (f) => {
+      f.host.inventory.deferredSandboxPayment = undefined;
+    },
+    (f) => {
+      f.host.inventory.paypalCheckoutEnabled = true;
+    },
+    (f) => {
+      f.scope.orders.push({ ...f.scope.orders[0], provider: 'paypal' });
+    },
+  ]) {
+    const f = deferredCollectorFixture();
+    mutate(f);
+    let queried = false;
+    f.io.queryOrders = async () => {
+      queried = true;
+      return f.observations;
+    };
+    await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_/);
+    assert.equal(queried, false);
+    assert.equal(f.published.length, 0);
+  }
+});
+test('deferral changes during queries or another unknown payment still block publication', async () => {
+  const f = deferredCollectorFixture();
+  f.io.queryOrders = async () => {
+    f.scope.deferredUnverified[0].fieldsDigest = '6'.repeat(64);
+    return f.observations;
+  };
+  await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_PAYMENT_SCOPE_CHANGED/);
+  const other = deferredCollectorFixture();
+  other.observations[0].state = 'unknown';
+  await assert.rejects(collectCutoverEvidence(other.input, other.io), /MAINTENANCE_/);
+  assert.equal(f.published.length + other.published.length, 0);
+});
+test('even a rebound inventory cannot extend this approval to a different sandbox record', async () => {
+  const f = deferredCollectorFixture();
+  f.host.inventory.deferredSandboxPayment.recordDigest = '0'.repeat(64);
+  f.scope.deferredUnverified[0].recordDigest = '0'.repeat(64);
+  f.binding.inventoryDigest = hash(f.host.inventory);
+  f.rehearsal.inventoryDigest = f.binding.inventoryDigest;
+  f.fence.inventoryDigest = f.binding.inventoryDigest;
+  await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_/);
+});
 function hostFixture() {
   const calls = [];
   const args = '/opt/node22/bin/node\0/opt/holaday-cn-payment/src/index.ts\0';
