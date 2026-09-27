@@ -1,5 +1,15 @@
 # 首次切换：真实主机只读核查与有限修正清单
 
+## 2026-09-27 15:18 JST：获准的旧 explorer 操作记录核查
+
+用户已明确允许上轮提出的单条旧任务和旧 PayPal 记录只读调查。Vultr精确范围的一致性只读事务成功，观察UTC `2026-09-27T06:18:03.159Z`，结束ROLLBACK，无数据库更新。原始内容留Mac私密归档 `/private/tmp/holaday-authorized-legacy-review-zDa2mv/review.json`，未查询动作input_value、截图或其他用户任务。
+
+6月24日任务 `tsk_r3W3wh5LMNbJcgGDRi22D` 的指令明确是免登录、只读探索 figma.com，学习新建文件/模板浏览等代表流程，并在登录、注册、订单、支付、真实提交之前停止。14条动作全部位于Figma：3次导航，11次点击，涉及Community、Resources、模板主页、Wireframe Kits、Brainstorming和Breakout session模板；未见type、付款或提交记录。这是内部explorer任务的残留running状态，不应称作正在执行的客户任务。
+
+边界：记录为best-effort，序号有间隔（最大21），单凭这14行不能证明所有工具动作或绝对零副作用。当前`explore-sites.ts`已有终态映射及best-effort状态写回，但没有核对6月24日的确切运行版本/异常日志，因此不认定某个catch就是历史根因。未取消、删除、重跑或改终态。建议后续经明确授权后将这条过时内部探索标为取消/失败并保留原动作及LLM记录，而非改成完成；具体路径与并发复核届时核实。
+
+同批核实PayPal精确一条旧Sandbox待处理记录，见[支付证据](2026-09-25-browser-first-cutover-payment-evidence.md)。Yalei USB副本已实际核验，见[密钥保管](../../ops/browser-backup-recovery.md)；不是生产数据库备份。未停服务或写生产配置/业务数据，未部署。
+
 ## 2026-09-27 14:50 JST：真实停止参数与物理清单接线
 
 两台主机只读采集均成功：`/private/tmp/holaday-live-host-observer-bA6yUF/{aliyun,vultr}.json`，源SHA `899dd40e959e2042465b254d95282b4881ac1b9c17cb0862406f74d688292d6f`（后续补daemon运行版本核验，不将此旧摘要写作最终版本）。两个实际PM2 daemon分别128388/1170，已安装版本6.0.14，读取的默认停止参数SIGINT/1600ms，daemon无这两项环境覆盖；worker显式660000ms、memory restart 536870912不被填零。所有环境原值均未输出。

@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-27：授权的旧记录核查与 Yalei 私钥副本
+
+从 `2c1334854663ef1728fd552f6187b6812142a6f4` 继续。用户“都允许 私钥副本存到U盘 Yalei”明确回复上一轮三个问题：单条旧 PayPal Sandbox 记录及商户归属只读核查、单条6月24日 explorer 操作记录只读核查、独立 USB 私钥副本。不是改订单/任务终态或进行扣款的授权；不重复请求这三项许可。
+
+Yalei 副本已完成：`/Volumes/Yalei/HOLADAY-recovery-20260927`，原私钥、公钥、无业务数据探针逐字节相同，U盘私钥导出公钥一致且实际探针解密成功，Mac原件保留。恢复说明已写入并读回。该盘为未额外加密的 ExFAT，已提醒安全弹出、物理离线保管；没有格式化、改盘权限或自动卸载。详见[密钥记录](../../ops/browser-backup-recovery.md)。不要再把“未提供可写备份盘”列为阻塞；真正生产备份及隔离恢复仍待执行。
+
+UTC `06:18:03.159` 在 Vultr 用只读一致性事务核查精确两条业务记录。原始结果仅在 Mac 0700目录/0600文件 `/private/tmp/holaday-authorized-legacy-review-zDa2mv/review.json`。旧任务明确为 Figma 免登录只读探索，14条记录是3次导航/11次点击，未见填写或支付记录；采集为best-effort且动作序号不连续，不能推为完整零副作用证明。任务仍running，未取消、重跑或改为成功。
+
+旧 PayPal pending 为4月26日 Sandbox $9.90，无capture ID，metadata只保存sandbox环境。当前配置为Live且缺少独立merchant ID，不能混用凭据验证旧单。已按授权恢复一次 Chrome 开发者后台核查；初次登录页只显示Logo，刷新一次后显示邮箱登录表单，没有有效登录态。页面已保留并请用户自行登录，未输入未知账户、解验证码、改密码、创建应用或调用支付API。详见[支付证据](2026-09-25-browser-first-cutover-payment-evidence.md)。
+
+本轮无产品代码变化或新增产品测试通过声明；生产只读，无服务/配置/订单/权益/额度写入，无部署。新QA只读脚本忽略、不提交；原`__pycache__`保留。Task4/5/6及整分支审查仍未完成。下一步继续真实来源/依赖审查、双机现场I/O与恢复接线；旧任务需要明确处置授权，PayPal需要原Sandbox应用/商户依据，不以自动清理记录放行。
+
 ### 2026-09-27：原始主机清单接到既有定向退出接口，整项仍未部署
 
 本轮从 `cd7046f9` 继续同一 Task4/BASE。新增 `browser-first-cutover-inventory.mjs`：用真实主机快照和逐对象/来源审查，把受管目标、未托管目标、保留的浏览器/VNC/其他服务分开，输出可供现有 `captureLegacyRegistrations` / `captureLegacyRuntime` 校验的清单。未知或漂移对象保留为阻塞，不从列表中过滤掉。该模块不批准执行、不停止服务、不生成就绪回执，尚不是完整双机 site adapter。

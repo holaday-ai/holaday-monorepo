@@ -2,6 +2,16 @@
 
 2026-09-26。不得据此放行生产或宣称真实支付方重投成功。
 
+## 2026-09-27：旧 PayPal 只读核查获准，开发者登录待完成
+
+用户“都允许 私钥副本存到U盘 Yalei”明确批准上轮请求的旧Sandbox订单及商户归属只读核查，因此本节替代下方历史“完全暂停PayPal核查”。新支付仍延后；不恢复checkout，不进行capture、关单、退款、改订单或权益补发。
+
+UTC `06:18:03.159` 在 Vultr 以只读一致性事务核查精确一条pending PayPal记录：创建于 `2026-04-26T14:46:28.990Z`，金额990美分USD，无capture ID，metadata仅有`env: sandbox`。当前应用dotenv为Live、client ID/secret存在但merchant ID缺失；只记录存在性及client ID摘要，不输出凭据。事务最后ROLLBACK，订单号、引用号和动作原文只留 `/private/tmp/holaday-authorized-legacy-review-zDa2mv/review.json`，目录0700/文件0600，不提交Git。
+
+通过 Chrome 打开 `https://developer.paypal.com/dashboard/applications/sandbox`，实际重定向登录页。初次仅Logo，刷新一次后显示邮箱/手机号和下一步，没有已登录开发者后台；保留页面并请用户完成登录。未猜测账户、读取浏览器密码、完成验证码、重置登录、创建新应用或访问支付API。尚未取得原Sandbox应用/商户身份，不能用Live配置查询后把not-found解释成未支付。
+
+本节没有新的支付状态判定或恢复演练通过结论。下一步从登录后的原Sandbox应用与商户依据继续，再使用已有只读订单查询器；不扩大到全账户流水或生产支付操作。产品代码未改，未重跑产品测试。
+
 ## 最新范围：PayPal新支付延后，历史交易核对保留
 
 2026-09-26用户确认隐藏PayPal套餐/加量包入口并禁止新建订单；采用独立`PAYPAL_CHECKOUT_ENABLED`，不因隐藏入口而关闭历史适配器、capture或回调。新支付开通与体验验收不再是本次上线功能门槛；下方旧sandbox订单和live配置的事实仍待核清，不自动豁免、不改状态、不做真实扣款或补结算。现有回调验签与恢复条件不降低。上线时须验证新订单API拒绝且options不暴露可用入口；代码验证不等于线上已隐藏。
