@@ -69,19 +69,30 @@ const reportSchema = bindingSchema
         rehearsalDigest: hash,
         deferredUnverified: z
           .array(
-            z
-              .object({
-                // Keep this exact approved historical record aligned with the collector.
-                recordDigest: z.literal(
-                  '75467f5b0aec5367761433a57fbd45aa9a41347e638f385178c12f5af7740b95',
-                ),
-                fieldsDigest: hash,
-                approvalRef: z.literal('paypal-sandbox-20260927'),
-                state: z.literal('unverified-deferred'),
-              })
-              .strict(),
+            z.union([
+              z
+                .object({
+                  // Keep this exact approved historical record aligned with the collector.
+                  recordDigest: z.literal(
+                    '75467f5b0aec5367761433a57fbd45aa9a41347e638f385178c12f5af7740b95',
+                  ),
+                  fieldsDigest: hash,
+                  approvalRef: z.literal('paypal-sandbox-20260927'),
+                  state: z.literal('unverified-deferred'),
+                })
+                .strict(),
+              z
+                .object({
+                  recordDigest: hash,
+                  fieldsDigest: hash,
+                  approvalRef: z.literal('alipay-historical-20260927'),
+                  state: z.literal('unverified-deferred'),
+                })
+                .strict(),
+            ]),
           )
-          .length(1)
+          .min(1)
+          .max(10)
           .optional(),
       })
       .strict(),
@@ -141,6 +152,19 @@ export function validateServicesEvidence(value: unknown, expected: ServicesConte
     throw denied();
   if (new Set(report.sources.map((source) => source.kind)).size !== 4) throw denied();
   const deferred = report.payments.deferredUnverified;
+  if (deferred) {
+    const paypal = deferred.filter((row) => row.approvalRef === 'paypal-sandbox-20260927');
+    const alipay = deferred.filter((row) => row.approvalRef === 'alipay-historical-20260927');
+    if (
+      paypal.length > 1 ||
+      (alipay.length &&
+        (alipay.length !== 9 ||
+          createHash('sha256')
+            .update(JSON.stringify(alipay.map((row) => row.recordDigest).sort()))
+            .digest('hex') !== '6e81aade39333ad180272497a70b06aeffb57194a643c525fde264684df69686'))
+    )
+      throw denied();
+  }
   const databaseDigest = deferred
     ? createHash('sha256')
         .update(

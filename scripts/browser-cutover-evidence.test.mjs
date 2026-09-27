@@ -17,6 +17,18 @@ import {
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const merchant = '9'.repeat(64);
 const approvedSandboxDigest = '75467f5b0aec5367761433a57fbd45aa9a41347e638f385178c12f5af7740b95';
+const approvedAlipayDigests = [
+  '001badc1fe5ae82c8f8f761344928d08736216196677247509a25b1fcee2bc98',
+  '02f656819686a0bb479aae7ebd52d1ff73967b37f19450ffa9c08118d54c7bfc',
+  '1e17c25e56c43777ec1a5e7c1d97458be38e36e344e7584ddb2c898e01b5cb35',
+  '4d03c0f56f550ba70d085c9cb927f119deb9b212f1a1a86313918bc90345ee33',
+  'a2cbccfb414687563f62d9268a4dad4884d275e7bb3185ffbbdc6d7de8fe9185',
+  'cd4575108c3bf6a0efeb0cc33ef747abe7950159a34deb7d6d7e015c04323521',
+  'd0aaa2afa7249ec178781a4c053a317fe730439ead0538cca2dc2a99f40ad354',
+  'e6c83abd5d94b0df14d485d49d8bcfb92886f12d8baf752ed0fc451c3599c9b0',
+  'fccf56cb4d1199c08e19ee0c5c2dea0b1a8c89e0f809a079c39c11ee9632a738',
+];
+const alipayRef = 'alipay-historical-20260927';
 function fixture() {
   const inventory = {
     hosts: ['vultr', 'aliyun'],
@@ -511,6 +523,263 @@ test('even a rebound inventory cannot extend this approval to a different sandbo
   f.rehearsal.inventoryDigest = f.binding.inventoryDigest;
   f.fence.inventoryDigest = f.binding.inventoryDigest;
   await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_/);
+});
+function alipayDatabaseFixture() {
+  const f = deferredDatabaseFixture();
+  const rows = Array.from({ length: 9 }, (_, n) => ({
+    id: n + 3,
+    external_id: `synthetic-alipay-${n}`,
+    provider: 'alipay',
+    provider_order_id: `synthetic-alipay-order-${n}`,
+    provider_capture_id: null,
+    amount_cents: 9900,
+    currency: 'CNY',
+    status: 'pending',
+    metadata: null,
+    created_at: '1970-01-01T00:00:01.000Z',
+    updated_at: '1970-01-01T00:00:02.000Z',
+  }));
+  f.rows.payments.push(...rows);
+  f.options.deferredAlipayPayments = {
+    approvalRef: alipayRef,
+    recordDigests: rows
+      .map((r) =>
+        hash([
+          'payments',
+          r.id,
+          'alipay',
+          r.provider_order_id,
+          null,
+          9900,
+          'CNY',
+          'pending',
+          '1970-01-01T00:00:01.000Z',
+          '1970-01-01T00:00:02.000Z',
+        ]),
+      )
+      .sort(),
+  };
+  return { ...f, alipay: rows };
+}
+test('nine exact historical Alipay rows coexist with the sandbox deferral without hiding new orders', async () => {
+  const f = alipayDatabaseFixture();
+  f.rows.payments.push({
+    ...f.alipay[0],
+    id: 12,
+    external_id: 'new',
+    provider_order_id: 'new',
+    created_at: '1970-01-01T00:01:01.000Z',
+    updated_at: '1970-01-01T00:01:01.000Z',
+  });
+  const original = structuredClone(f.rows);
+  const s = await readCutoverDatabaseScope(f.db, f.options);
+  assert.equal(s.deferredUnverified.length, 10);
+  assert.equal(s.orders.length, 2);
+  assert.equal(s.orders[1].provider_order_id, 'new');
+  assert.deepEqual(
+    s.deferredUnverified
+      .filter((r) => r.approvalRef === alipayRef)
+      .map((r) => r.recordDigest)
+      .sort(),
+    f.options.deferredAlipayPayments.recordDigests,
+  );
+  assert.ok(s.deferredUnverified.every((r) => r.state === 'unverified-deferred'));
+  for (const row of f.alipay)
+    assert.ok(s.deferredUnverified.some((r) => r.fieldsDigest === hash(row)));
+  assert.deepEqual(f.rows, original);
+  assert.equal(f.calls.at(-1).sql, 'ROLLBACK');
+  assert.equal(
+    f.calls.some((c) => /^(UPDATE|DELETE|INSERT|REPLACE)/.test(c.sql)),
+    false,
+  );
+});
+test('unarchived Alipay fields remain bound independently of historical identity', async () => {
+  const f = alipayDatabaseFixture();
+  const before = await readCutoverDatabaseScope(f.db, f.options);
+  f.alipay[0].external_id = 'changed-current-external-id';
+  f.alipay[0].metadata = { current: 'new-value' };
+  const after = await readCutoverDatabaseScope(f.db, f.options);
+  assert.deepEqual(
+    before.deferredUnverified.map((r) => r.recordDigest),
+    after.deferredUnverified.map((r) => r.recordDigest),
+  );
+  const record = after.deferredUnverified.find((r) => r.fieldsDigest === hash(f.alipay[0]));
+  assert.ok(record);
+  assert.notEqual(
+    before.deferredUnverified.find((r) => r.recordDigest === record.recordDigest).fieldsDigest,
+    record.fieldsDigest,
+  );
+});
+test('missing Alipay approval does not silently omit historical pending rows', async () => {
+  const f = alipayDatabaseFixture();
+  f.options.deferredAlipayPayments = undefined;
+  const s = await readCutoverDatabaseScope(f.db, f.options);
+  assert.equal(s.orders.length, 10);
+  assert.equal(s.deferredUnverified.length, 1);
+});
+test('Alipay-only approval and SQL UTC dates retain the same exact historical scope', async () => {
+  const f = alipayDatabaseFixture();
+  f.options.deferredSandboxPayment = undefined;
+  f.rows.payments.splice(f.rows.payments.indexOf(f.row), 1);
+  for (const row of f.alipay) {
+    row.created_at = '1970-01-01 00:00:01';
+    row.updated_at = '1970-01-01 00:00:02.000';
+  }
+  const s = await readCutoverDatabaseScope(f.db, f.options);
+  assert.equal(s.deferredUnverified.length, 9);
+  assert.equal(s.orders.length, 1);
+  assert.deepEqual(
+    s.deferredUnverified.map((r) => r.recordDigest).sort(),
+    f.options.deferredAlipayPayments.recordDigests,
+  );
+});
+test('PayPal target after Alipay rows is counted independently', async () => {
+  const f = alipayDatabaseFixture();
+  const paypal = f.rows.payments.find((r) => r.provider === 'paypal');
+  paypal.id = 20;
+  f.rows.payments.sort((a, b) => a.id - b.id);
+  const s = await readCutoverDatabaseScope(f.db, f.options);
+  assert.equal(s.deferredUnverified.length, 10);
+  assert.equal(s.deferredUnverified.at(-1).approvalRef, 'paypal-sandbox-20260927');
+});
+test('Alipay deferral refuses changed identity, money, time, status, capture and incomplete scope', async () => {
+  for (const change of [
+    (f) => {
+      f.alipay[0].id = 99;
+    },
+    (f) => {
+      f.alipay[0].provider_order_id = 'replaced';
+    },
+    (f) => {
+      f.alipay[0].amount_cents++;
+    },
+    (f) => {
+      f.alipay[0].currency = 'USD';
+    },
+    (f) => {
+      f.alipay[0].status = 'completed';
+    },
+    (f) => {
+      f.alipay[0].provider_capture_id = 'paid';
+    },
+    (f) => {
+      f.alipay[0].updated_at = '1970-01-01T00:00:03.000Z';
+    },
+    (f) => {
+      f.options.windowStartMs = 1000;
+    },
+    (f) => {
+      f.rows.payments.pop();
+    },
+    (f) => {
+      f.options.deferredAlipayPayments.recordDigests.pop();
+    },
+    (f) => {
+      f.options.deferredAlipayPayments.recordDigests[0] =
+        f.options.deferredAlipayPayments.recordDigests[1];
+    },
+    (f) => {
+      f.options.deferredAlipayPayments.approvalRef = 'all-alipay';
+    },
+  ]) {
+    const f = alipayDatabaseFixture();
+    change(f);
+    await assert.rejects(
+      readCutoverDatabaseScope(f.db, f.options),
+      /MAINTENANCE_PAYMENT_SCOPE_UNPROVEN/,
+    );
+  }
+});
+function alipayCollectorFixture() {
+  const f = deferredCollectorFixture();
+  f.host.inventory.deferredAlipayPayments = {
+    recordDigests: [...approvedAlipayDigests],
+    approvalRef: alipayRef,
+  };
+  f.scope.deferredUnverified.push(
+    ...approvedAlipayDigests.map((recordDigest) => ({
+      recordDigest,
+      fieldsDigest: '6'.repeat(64),
+      approvalRef: alipayRef,
+      state: 'unverified-deferred',
+    })),
+  );
+  f.binding.inventoryDigest = hash(f.host.inventory);
+  f.rehearsal.inventoryDigest = f.binding.inventoryDigest;
+  f.fence.inventoryDigest = f.binding.inventoryDigest;
+  return f;
+}
+test('collector separately binds both approved deferrals and does not call them provider-verified', async () => {
+  const f = alipayCollectorFixture();
+  const r = await collectCutoverEvidence(f.input, f.io);
+  assert.equal(r.payments.deferredUnverified.length, 10);
+  assert.equal(r.payments.scopeDigest, hash(f.scope.orders));
+  assert.notEqual(r.sources.find((s) => s.kind === 'database').digest, r.payments.scopeDigest);
+  assert.equal(r.sources.find((s) => s.kind === 'provider-query').digest, r.payments.scopeDigest);
+});
+test('Alipay-only collector approval does not require PayPal checkout to be disabled', async () => {
+  const f = alipayCollectorFixture();
+  f.host.inventory.deferredSandboxPayment = undefined;
+  f.host.inventory.paypalCheckoutEnabled = undefined;
+  f.scope.deferredUnverified.shift();
+  f.binding.inventoryDigest = hash(f.host.inventory);
+  f.rehearsal.inventoryDigest = f.binding.inventoryDigest;
+  f.fence.inventoryDigest = f.binding.inventoryDigest;
+  const r = await collectCutoverEvidence(f.input, f.io);
+  assert.equal(r.payments.deferredUnverified.length, 9);
+});
+test('collector cannot extend or partly apply Alipay approval even with a rebound inventory', async () => {
+  for (const change of [
+    (f) => {
+      f.scope.deferredUnverified.pop();
+    },
+    (f) => {
+      f.scope.deferredUnverified.push(f.scope.deferredUnverified[1]);
+    },
+    (f) => {
+      f.scope.deferredUnverified[1].state = 'settled';
+    },
+    (f) => {
+      f.host.inventory.deferredAlipayPayments = undefined;
+    },
+    (f) => {
+      f.host.inventory.deferredAlipayPayments.recordDigests[0] = '0'.repeat(64);
+      f.scope.deferredUnverified[1].recordDigest = '0'.repeat(64);
+    },
+  ]) {
+    const f = alipayCollectorFixture();
+    change(f);
+    f.binding.inventoryDigest = hash(f.host.inventory);
+    f.rehearsal.inventoryDigest = f.binding.inventoryDigest;
+    f.fence.inventoryDigest = f.binding.inventoryDigest;
+    await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_/);
+    assert.equal(f.published.length, 0);
+  }
+});
+test('Alipay deferred field drift during collection and unknown new orders still block', async () => {
+  const f = alipayCollectorFixture();
+  f.io.queryOrders = async () => {
+    f.scope.deferredUnverified[1].fieldsDigest = '7'.repeat(64);
+    return f.observations;
+  };
+  await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_PAYMENT_SCOPE_CHANGED/);
+  const g = alipayCollectorFixture();
+  const order = { ...g.scope.orders[0], provider: 'alipay', orderRef: 'a'.repeat(64) };
+  g.scope.orders.push(order);
+  g.observations.push({
+    ...order,
+    observedAtMs: 99_000,
+    rawDigest: '3'.repeat(64),
+    state: 'unknown',
+  });
+  let queried;
+  g.io.queryOrders = async (orders) => {
+    queried = structuredClone(orders);
+    return g.observations;
+  };
+  await assert.rejects(collectCutoverEvidence(g.input, g.io), /MAINTENANCE_/);
+  assert.ok(queried.orders.some((r) => r.provider === 'alipay' && r.orderRef === order.orderRef));
+  assert.equal(g.published.length, 0);
 });
 function hostFixture() {
   const calls = [];

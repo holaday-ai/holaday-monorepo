@@ -832,6 +832,20 @@ const fail = (code = 'MAINTENANCE_PAYMENT_BOUNDARY_UNPROVEN') => {
 };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const deferralRef = 'paypal-sandbox-20260927';
+const alipayDeferralRef = 'alipay-historical-20260927';
+const approvedAlipaySetDigest = '6e81aade39333ad180272497a70b06aeffb57194a643c525fde264684df69686';
+function checkAlipayDeferralApproval(approval) {
+  if (
+    !approval ||
+    Object.keys(approval).sort().join(',') !== 'approvalRef,recordDigests' ||
+    approval.approvalRef !== alipayDeferralRef ||
+    !Array.isArray(approval.recordDigests) ||
+    approval.recordDigests.length !== 9 ||
+    !approval.recordDigests.every(hash) ||
+    new Set(approval.recordDigests).size !== 9
+  )
+    fail();
+}
 function checkDeferralApproval(approval) {
   if (
     !approval ||
@@ -844,7 +858,11 @@ function checkDeferralApproval(approval) {
 function checkDeferredScope(scope, inventory) {
   const deferred = scope.deferredUnverified ?? [];
   const approval = inventory.deferredSandboxPayment;
-  if (!Array.isArray(deferred) || deferred.length > 1) fail();
+  const alipayApproval = inventory.deferredAlipayPayments;
+  if (!Array.isArray(deferred) || deferred.length > 10) fail();
+  const paypal = deferred.filter((row) => row?.approvalRef === deferralRef);
+  const alipay = deferred.filter((row) => row?.approvalRef === alipayDeferralRef);
+  if (paypal.length + alipay.length !== deferred.length) fail();
   if (approval !== undefined) {
     checkDeferralApproval(approval);
     // One user-approved historical record, not a configurable allowlist.
@@ -854,17 +872,26 @@ function checkDeferredScope(scope, inventory) {
       fail();
     if (
       inventory.paypalCheckoutEnabled !== false ||
-      deferred.length !== 1 ||
+      paypal.length !== 1 ||
+      paypal[0].recordDigest !== approval.recordDigest ||
       scope.orders.some((row) => row.provider === 'paypal')
     )
       fail();
-  } else if (deferred.length) fail();
+  } else if (paypal.length) fail();
+  if (alipayApproval !== undefined) {
+    checkAlipayDeferralApproval(alipayApproval);
+    if (
+      digest([...alipayApproval.recordDigests].sort()) !== approvedAlipaySetDigest ||
+      alipay.length !== 9 ||
+      digest(alipay.map((row) => row.recordDigest).sort()) !== approvedAlipaySetDigest
+    )
+      fail();
+  } else if (alipay.length) fail();
   for (const row of deferred) {
     if (
       !row ||
       Object.keys(row).sort().join(',') !== 'approvalRef,fieldsDigest,recordDigest,state' ||
-      row.approvalRef !== approval.approvalRef ||
-      row.recordDigest !== approval.recordDigest ||
+      !hash(row.recordDigest) ||
       !hash(row.fieldsDigest) ||
       row.state !== 'unverified-deferred'
     )
@@ -878,6 +905,40 @@ const databaseScopeDigest = (scopeDigest, deferred) =>
         deferred.map((row) => [row.recordDigest, row.fieldsDigest, row.approvalRef, row.state]),
       ])
     : scopeDigest;
+
+// Historical archive contains these fields only. fieldsDigest separately binds
+// every currently selected field across the two live database observations.
+function alipayRecordDigest(row, table, windowStartMs) {
+  if (
+    table !== 'payments' ||
+    row.provider !== 'alipay' ||
+    row.status !== 'pending' ||
+    row.currency !== 'CNY' ||
+    row.provider_capture_id != null
+  )
+    return null;
+  const date = (value) =>
+    new Date(
+      typeof value === 'string' && /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d{3})?$/.test(value)
+        ? `${value.replace(' ', 'T')}Z`
+        : value,
+    ).toISOString();
+  const created = date(row.created_at);
+  const updated = date(row.updated_at);
+  if (Date.parse(created) >= windowStartMs || Date.parse(updated) >= windowStartMs) return null;
+  return digest([
+    table,
+    Number(row.id),
+    row.provider,
+    row.provider_order_id,
+    row.provider_capture_id ?? null,
+    Number(row.amount_cents),
+    row.currency,
+    row.status,
+    created,
+    updated,
+  ]);
+}
 
 // Exact historical row fingerprint; no provider contact or merchant inference.
 function sandboxRecordDigest(row, table, windowStartMs) {
@@ -1166,13 +1227,20 @@ export async function collectCutoverEvidence(input, io) {
 /** mysql2 connection must be dedicated; queries never enter a write transaction. */
 export async function readCutoverDatabaseScope(
   db,
-  { windowStartMs, now = Date.now, resolveMerchant, deferredSandboxPayment } = {},
+  {
+    windowStartMs,
+    now = Date.now,
+    resolveMerchant,
+    deferredSandboxPayment,
+    deferredAlipayPayments,
+  } = {},
 ) {
   if (!Number.isSafeInteger(windowStartMs) || windowStartMs < 0 || windowStartMs > now())
     fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
   let transaction = false;
   try {
     if (deferredSandboxPayment !== undefined) checkDeferralApproval(deferredSandboxPayment);
+    if (deferredAlipayPayments !== undefined) checkAlipayDeferralApproval(deferredAlipayPayments);
     await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
     await db.query('START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY');
     transaction = true;
@@ -1222,7 +1290,10 @@ export async function readCutoverDatabaseScope(
             fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
           if (deferredSandboxPayment !== undefined && row.provider === 'paypal') {
             const recordDigest = sandboxRecordDigest(row, table, windowStartMs);
-            if (recordDigest !== deferredSandboxPayment.recordDigest || deferredUnverified.length)
+            if (
+              recordDigest !== deferredSandboxPayment.recordDigest ||
+              deferredUnverified.some((record) => record.approvalRef === deferralRef)
+            )
               fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
             deferredUnverified.push({
               recordDigest,
@@ -1233,6 +1304,22 @@ export async function readCutoverDatabaseScope(
             cursor = id;
             found++;
             continue;
+          }
+          if (deferredAlipayPayments !== undefined && row.provider === 'alipay') {
+            const recordDigest = alipayRecordDigest(row, table, windowStartMs);
+            if (deferredAlipayPayments.recordDigests.includes(recordDigest)) {
+              if (deferredUnverified.some((record) => record.recordDigest === recordDigest))
+                fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
+              deferredUnverified.push({
+                recordDigest,
+                approvalRef: alipayDeferralRef,
+                fieldsDigest: digest(row),
+                state: 'unverified-deferred',
+              });
+              cursor = id;
+              found++;
+              continue;
+            }
           }
           if (typeof resolveMerchant !== 'function') fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
           const merchant = resolveMerchant(row.provider, row, table);
@@ -1251,7 +1338,15 @@ export async function readCutoverDatabaseScope(
       }
       if (found !== count) fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
     }
-    if (deferredSandboxPayment !== undefined && deferredUnverified.length !== 1)
+    if (
+      deferredSandboxPayment !== undefined &&
+      deferredUnverified.filter((row) => row.approvalRef === deferralRef).length !== 1
+    )
+      fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
+    if (
+      deferredAlipayPayments !== undefined &&
+      deferredUnverified.filter((row) => row.approvalRef === alipayDeferralRef).length !== 9
+    )
       fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
     const work = [
       [
@@ -1273,7 +1368,9 @@ export async function readCutoverDatabaseScope(
       observedAtMs,
       orders,
       unsettled,
-      ...(deferredSandboxPayment !== undefined ? { deferredUnverified } : {}),
+      ...(deferredSandboxPayment !== undefined || deferredAlipayPayments !== undefined
+        ? { deferredUnverified }
+        : {}),
     };
   } catch {
     fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');

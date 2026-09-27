@@ -60,6 +60,78 @@ import {
 
 const denied = 'MAINTENANCE_PAYMENT_BOUNDARY_UNPROVEN';
 const approvedSandboxDigest = '75467f5b0aec5367761433a57fbd45aa9a41347e638f385178c12f5af7740b95';
+const alipayDigests = [
+  '001badc1fe5ae82c8f8f761344928d08736216196677247509a25b1fcee2bc98',
+  '02f656819686a0bb479aae7ebd52d1ff73967b37f19450ffa9c08118d54c7bfc',
+  '1e17c25e56c43777ec1a5e7c1d97458be38e36e344e7584ddb2c898e01b5cb35',
+  '4d03c0f56f550ba70d085c9cb927f119deb9b212f1a1a86313918bc90345ee33',
+  'a2cbccfb414687563f62d9268a4dad4884d275e7bb3185ffbbdc6d7de8fe9185',
+  'cd4575108c3bf6a0efeb0cc33ef747abe7950159a34deb7d6d7e015c04323521',
+  'd0aaa2afa7249ec178781a4c053a317fe730439ead0538cca2dc2a99f40ad354',
+  'e6c83abd5d94b0df14d485d49d8bcfb92886f12d8baf752ed0fc451c3599c9b0',
+  'fccf56cb4d1199c08e19ee0c5c2dea0b1a8c89e0f809a079c39c11ee9632a738',
+];
+const alipayDeferred = () =>
+  alipayDigests.map((recordDigest) => ({
+    recordDigest,
+    fieldsDigest: '6'.repeat(64),
+    approvalRef: 'alipay-historical-20260927',
+    state: 'unverified-deferred',
+  }));
+function requiredItem<T>(rows: T[], index = 0): T {
+  const row = rows[index];
+  if (row === undefined) throw new Error('missing test fixture row');
+  return row;
+}
+function withDeferred(rows: ReturnType<typeof alipayDeferred>) {
+  const r = evidence();
+  source(r, 1).digest = createHash('sha256')
+    .update(
+      JSON.stringify([
+        r.payments.scopeDigest,
+        rows.map((d) => [d.recordDigest, d.fieldsDigest, d.approvalRef, d.state]),
+      ]),
+    )
+    .digest('hex');
+  return { ...r, payments: { ...r.payments, deferredUnverified: rows } };
+}
+it('accepts only the exact nine Alipay records, alone or beside the original sandbox exception', () => {
+  const rows = alipayDeferred();
+  expect(() => validateServicesEvidence(withDeferred(rows), context)).not.toThrow();
+  rows.push({
+    recordDigest: approvedSandboxDigest,
+    fieldsDigest: '5'.repeat(64),
+    approvalRef: 'paypal-sandbox-20260927',
+    state: 'unverified-deferred',
+  });
+  expect(() => validateServicesEvidence(withDeferred(rows), context)).not.toThrow();
+});
+it('rejects partial, duplicated, substituted or mislabelled historical Alipay reports', () => {
+  for (const change of [
+    (r: ReturnType<typeof alipayDeferred>) => {
+      r.pop();
+    },
+    (r: ReturnType<typeof alipayDeferred>) => {
+      r[0] = requiredItem(r, 1);
+    },
+    (r: ReturnType<typeof alipayDeferred>) => {
+      requiredItem(r).recordDigest = '0'.repeat(64);
+    },
+    (r: ReturnType<typeof alipayDeferred>) => {
+      requiredItem(r).approvalRef = 'skip-all';
+    },
+    (r: ReturnType<typeof alipayDeferred>) => {
+      requiredItem(r).state = 'closed';
+    },
+  ]) {
+    const rows = alipayDeferred();
+    change(rows);
+    expect(() => validateServicesEvidence(withDeferred(rows), context)).toThrow(denied);
+  }
+  const r = withDeferred(alipayDeferred());
+  requiredItem(r.sources, 1).digest = r.payments.scopeDigest;
+  expect(() => validateServicesEvidence(r, context)).toThrow(denied);
+});
 it('accepts an explicit unverified sandbox exception only with separately bound database evidence', () => {
   const r = evidence();
   const deferred = [

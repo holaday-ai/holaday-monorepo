@@ -87,6 +87,14 @@
 
 ## 已验证与尚未验证
 
+### 已批准的九笔支付宝历史记录延期
+
+2026-09-27用户明确批准：这九笔保持未核实、单独延期核对，不阻断本次上线。受保护inventory与数据库reader传入同一 `deferredAlipayPayments: { approvalRef: 'alipay-historical-20260927', recordDigests: [...] }`；九个摘要排序后JSON的SHA256固定为 `6e81aade39333ad180272497a70b06aeffb57194a643c525fde264684df69686`。采集器与应用readiness分别固定该完整集合；少一笔、替换、重复或加入新单都不能沿用批准。
+
+历史身份指纹只包含原归档已有的表名、数字主键、provider、provider订单/capture ID、金额、币种、状态和UTC创建/更新时间；必须为维护窗口以前的pending/CNY/无capture支付宝payments记录。原归档没有external_id及metadata，不宣称这些字段已完成历史比对；现场完整选中行的fieldsDigest仍参加两次观察和数据库source绑定。新支付宝单照常查询，订单、回调、结算、权益不改，TRADE_CLOSED或未找到仍不伪装为已核验未支付。
+
+可单独使用九笔批准，或与下方唯一PayPal批准同时使用（总计十笔）。两种批准互不扩展；此处不要求关闭新支付宝支付、不恢复PayPal访问。原始订单资料仍留私密归档，Git只包含摘要和合成测试。本段是实现契约，不是已经安装到生产的批准文件。
+
 ### 已批准的唯一 Sandbox 延期项
 
 用户2026-09-27批准旧PayPal测试单延期；它仍未被支付方核验，不是已关闭或已支付。现场 `readHostInventory` 必须从受保护批准清单带入以下字段，并将实际新PayPal开关配置纳入 `configurationDigests`，不得凭空填写 `false`：
