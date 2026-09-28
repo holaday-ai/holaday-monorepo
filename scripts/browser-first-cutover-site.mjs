@@ -3,6 +3,7 @@ import { isDeepStrictEqual as equal } from 'node:util';
 import { connectFirstCutoverGatewaySession } from './browser-first-cutover-gateway-session.mjs';
 import {
   createFirstCutoverRetirementObserver,
+  readFirstCutoverCandidateRuntime,
   readFirstCutoverHostPair,
   readFirstCutoverPersistedWork,
   readReviewedFirstCutoverLegacySource,
@@ -19,9 +20,10 @@ const fail = () => {
 };
 
 /** Wire the existing physical operations into the original host's lifecycle.
- * Business/control/backup readers are mandatory trusted site code, NOT uploaded
+ * Business/backup readers are mandatory trusted site code, NOT uploaded
  * booleans or zero-count defaults. They must not call this ingress session from
- * its own writer callback. This module does not install tools or enable the CLI.
+ * its own writer callback. Candidate control uses the existing actual socket
+ * and runtime observer. This module does not install tools or enable the CLI.
  */
 export function createFirstCutoverExecutionSite(options, overrides = {}) {
   const io = {
@@ -31,6 +33,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     sleep,
     readPair: readFirstCutoverHostPair,
     readPersistedWork: readFirstCutoverPersistedWork,
+    readCandidateRuntime: readFirstCutoverCandidateRuntime,
     inspectSource: readReviewedFirstCutoverLegacySource,
     createIngress: createFirstCutoverIngressPair,
     connectGateway: connectFirstCutoverGatewaySession,
@@ -51,7 +54,6 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     [
       'observeWriters',
       'observeWork',
-      'verifyOpenedIdentity',
       'settleLegacy',
       'resumeWorker',
       'reconcile',
@@ -127,15 +129,55 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
   };
   const fresh = (value) =>
     Number.isSafeInteger(value) && value >= 0 && value <= io.now() && io.now() - value <= 60000;
-  const boundary = async () => {
+  const checkIdentity = (identity, record) => {
+    if (
+      !identity ||
+      !equal(Object.keys(identity).sort(), ['bootId', 'candidate']) ||
+      identity.candidate !== context.binding.candidate ||
+      !/^[a-f0-9]{32}$/.test(identity.bootId ?? '') ||
+      !/^[a-f0-9]{32}$/.test(record.bootstrapSeed ?? '') ||
+      identity.bootId === record.bootstrapSeed ||
+      (record.identity !== undefined && !equal(record.identity, identity))
+    )
+      fail();
+  };
+  const legacy = (actual) =>
+    actual.hosts.flatMap((host) =>
+      [host.registered, host.unmanaged].flatMap((part) =>
+        [...part.processes, ...part.managers, ...part.listeners].map((value) => ({
+          host: host.host,
+          ...value,
+        })),
+      ),
+    );
+  const boundary = async (identity) => {
     const record = await guard(context);
+    if (identity !== undefined) {
+      if (!['candidate_started', 'verified'].includes(record.phase)) fail();
+      checkIdentity(identity, record);
+    }
     const orders = ['orders_fenced', 'legacy_settled', 'producers_stopped'].includes(record.phase);
     const work = structuredClone(await facts.observeWork(context));
     const persisted = await io.readPersistedWork(context);
     const fence = await ingress[orders ? 'verifyOrders' : 'verifyFence']();
-    const progress = await observer.readFenceProgress();
-    if (progress?.purpose !== 'fence-progress') fail();
-    const actual = progress.pair;
+    let actual;
+    if (identity !== undefined) {
+      actual = await observer.readWithCandidate(identity);
+      const candidate = actual.candidate;
+      if (
+        !equal(candidate?.identity, identity) ||
+        candidate.mode !== 'closed' ||
+        candidate.idle !== true ||
+        candidate.needsReconciliation !== false ||
+        candidate.runtime?.worker !== null ||
+        legacy(actual).length
+      )
+        fail();
+    } else {
+      const progress = await observer.readFenceProgress();
+      if (progress?.purpose !== 'fence-progress') fail();
+      actual = progress.pair;
+    }
     const after = await facts.observeWork(context);
     const persistedAfter = await io.readPersistedWork(context);
     const counts = ['unsettledWork', 'externalWork', 'activeRequests', 'unknownWriters'];
@@ -162,16 +204,20 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       .filter((p) => ['main', 'worker'].includes(p.role));
     if (fence.producersRunning !== runningProducers.length || (!orders && runningProducers.length))
       fail();
-    await guard(context, [record.phase]);
+    if (!equal(record, await guard(context, [record.phase]))) fail();
     return {
       ...fence,
       ...Object.fromEntries(counts.map((k) => [k, work[k]])),
       runningProducers,
+      liveLegacy: legacy(actual),
+      regeneratedLegacy: actual.unknownLaunchers,
       observedAtMs: Math.min(
         work.observedAtMs,
         after.observedAtMs,
         fence.observedAtMs,
         actual.observedAtMs,
+        persisted.observedAtMs,
+        persistedAfter.observedAtMs,
       ),
     };
   };
@@ -249,7 +295,27 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
             return structuredClone(scope.ingress);
           },
           observeWriters: () => facts.observeWriters(context),
-          verifyOpenedIdentity: (id) => facts.verifyOpenedIdentity(context, id),
+          verifyOpenedIdentity: async (id) => {
+            const record = await guard(context, ['verified']);
+            checkIdentity(id, record);
+            if (!equal(record.identity, id)) fail();
+            const candidate = await io.readCandidateRuntime(id);
+            const actual = await observer.readWithCandidate(id);
+            if (
+              !equal(candidate.identity, id) ||
+              candidate.mode !== 'serving' ||
+              candidate.idle !== false ||
+              candidate.needsReconciliation !== true ||
+              !equal(actual.candidate, candidate) ||
+              !fresh(actual.observedAtMs) ||
+              actual.inventoryDigest !== context.binding.inventoryDigest ||
+              actual.unknownLaunchers.length ||
+              legacy(actual).length ||
+              !equal(record, await guard(context, ['verified']))
+            )
+              fail();
+            return candidate;
+          },
         });
         const proxy = Object.fromEntries(
           ['read', 'readRegistrationProgress', 'readUnmanagedProgress', 'retireUnmanaged'].map(
@@ -359,6 +425,62 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
   };
   return {
     lifecycle,
+    // Pass this reader directly to the existing host evidence collector. The
+    // preopen identity comes from start(), NOT from an early verified journal.
+    evidence: {
+      readFenceState: (input) =>
+        run(
+          'readiness-fence',
+          context,
+          undefined,
+          async () => {
+            const request = structuredClone(input);
+            if (
+              !equal(request?.binding, context.binding) ||
+              !equal(request.window, {
+                maintenanceEndsAtMs: context.approval.maintenanceEndsAtMs,
+                reconcileByMs: context.approval.reconcileByMs,
+                operatorRef: context.approval.operatorRef,
+              }) ||
+              !['prepare', 'preopen'].includes(request.stage) ||
+              !Array.isArray(scope.ingress.unknownIngress) ||
+              scope.ingress.unknownIngress.length
+            )
+              fail();
+            let proof;
+            if (request.stage === 'prepare') {
+              const record = await guard(context, ['preflight', 'prepared']);
+              if (request.identity !== undefined) fail();
+              const actual = await observer.read();
+              if (
+                !fresh(actual.observedAtMs) ||
+                actual.inventoryDigest !== context.binding.inventoryDigest ||
+                actual.unknownLaunchers.length ||
+                !equal(record, await guard(context, [record.phase]))
+              )
+                fail();
+              proof = {
+                ...actual,
+                stage: 'observed',
+                liveLegacy: legacy(actual),
+                regeneratedLegacy: actual.unknownLaunchers,
+              };
+            } else {
+              if (request.identity === undefined) fail();
+              proof = await boundary(request.identity);
+            }
+            return {
+              inventoryDigest: context.binding.inventoryDigest,
+              observedAtMs: proof.observedAtMs,
+              stage: proof.stage,
+              uncovered: structuredClone(scope.ingress.unknownIngress),
+              liveLegacy: proof.liveLegacy,
+              regeneratedLegacy: proof.regeneratedLegacy,
+            };
+          },
+          false,
+        ),
+    },
     inspectLegacySource: async (approval) => {
       const reviewed = await readScope(approval);
       return io.inspectSource(

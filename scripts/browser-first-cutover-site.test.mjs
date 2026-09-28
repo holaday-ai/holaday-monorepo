@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import * as siteModule from './browser-first-cutover-site.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
+import { finishStoppedRelease } from './browser-maintenance-release-tail.mjs';
 
 async function fixture(t) {
   const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'cutover-site-')));
@@ -17,7 +18,13 @@ async function fixture(t) {
     migrationDigest: createHash('sha256').update('[]').digest('hex'),
     inventoryDigest: 'd'.repeat(64),
   };
-  const approval = { ...binding, legacyDigest: 'e'.repeat(64), maintenanceEndsAtMs: 9000 };
+  const approval = {
+    ...binding,
+    legacyDigest: 'e'.repeat(64),
+    maintenanceEndsAtMs: 9000,
+    reconcileByMs: 12000,
+    operatorRef: 'synthetic-qa',
+  };
   const journal = await acquireReleaseJournal(root, {
     ...binding,
     legacyDigest: approval.legacyDigest,
@@ -37,7 +44,7 @@ async function fixture(t) {
     maintenanceEndsAtMs: 9000,
     legacyDigest: approval.legacyDigest,
     reviews: { synthetic: true },
-    ingress: { synthetic: true },
+    ingress: { synthetic: true, unknownIngress: [] },
     gatewaySiteDigest: 'f'.repeat(64),
     producerStartupFiles: [],
   };
@@ -105,7 +112,7 @@ async function fixture(t) {
         unknownWriters: 0,
       }),
       verifyOpenedIdentity: async () => {
-        throw new Error('not used in this pre-stop fixture');
+        throw new Error('legacy callback must not authorize restoration');
       },
       settleLegacy: async () => events.push('settled'),
       resumeWorker: async () => events.push('worker'),
@@ -126,7 +133,10 @@ async function fixture(t) {
         fenceAll: async () => events.push('all'),
         verifyOrders: () => verify('orders'),
         verifyFence: () => verify('all-writers'),
-        restoreIngress: async () => events.push('restore'),
+        restoreIngress: async (identity) => {
+          await deps.verifyOpenedIdentity(identity);
+          events.push('restore');
+        },
         close: async () => events.push('close-ingress'),
       };
     },
@@ -197,7 +207,165 @@ async function fixture(t) {
     approval,
     binding,
     make: () => siteModule.createFirstCutoverExecutionSite({ attempt: binding.attempt }, io),
+    observer: () => activeObserver,
   };
+}
+
+async function candidateFixture(t) {
+  const f = await fixture(t);
+  const identity = { candidate: f.binding.candidate, bootId: '7'.repeat(32) };
+  let mode = 'closed';
+  const candidate = () => ({
+    identity,
+    mode,
+    idle: mode === 'closed',
+    needsReconciliation: mode === 'serving',
+    runtime: { identity, root: f.context.root, main: { pid: 70 }, worker: null },
+  });
+  f.io.readCandidateRuntime = async (asked) => {
+    assert.deepEqual(asked, identity);
+    f.events.push('control-read');
+    return structuredClone(candidate());
+  };
+  const site = f.make();
+  await site.lifecycle.attach(f.context);
+  const observe = f.observer().read;
+  f.observer().readWithCandidate = async (asked) => {
+    assert.deepEqual(asked, identity);
+    f.events.push('candidate-pair');
+    return { ...(await observe()), candidate: structuredClone(candidate()) };
+  };
+  const request = (stage = 'preopen') => ({
+    binding: f.binding,
+    stage,
+    window: {
+      maintenanceEndsAtMs: f.approval.maintenanceEndsAtMs,
+      reconcileByMs: f.approval.reconcileByMs,
+      operatorRef: f.approval.operatorRef,
+    },
+    ...(stage === 'preopen' ? { identity } : {}),
+  });
+  const advance = async () => {
+    for (const phase of [
+      'prepared',
+      'orders_fenced',
+      'legacy_settled',
+      'producers_stopped',
+      'all_fenced',
+      'stopped',
+      'backup_verified',
+    ])
+      await f.journal.persist(phase, { candidate: f.binding.candidate });
+    await f.journal.bindBackupReceipt({
+      ...f.binding,
+      backupDigest: '1'.repeat(64),
+      databaseIdentityDigest: '2'.repeat(64),
+      isolatedTargetDigest: '3'.repeat(64),
+      encryptionProfileDigest: '4'.repeat(64),
+      comparisonDigest: '5'.repeat(64),
+      schemaDigest: '6'.repeat(64),
+      businessDigest: '7'.repeat(64),
+      restoredAtMs: 1000,
+    });
+    f.state.producers = 0;
+    f.state.gateways = 0;
+  };
+  return {
+    ...f,
+    site,
+    identity,
+    request,
+    advance,
+    candidate,
+    setMode: (value) => {
+      mode = value;
+    },
+  };
+}
+
+test('site readiness and opened control follow the existing release tail without early verified persistence', async (t) => {
+  const f = await candidateFixture(t);
+  const prepare = await f.site.evidence.readFenceState(f.request('prepare'));
+  assert.equal(prepare.stage, 'observed');
+  assert.equal(prepare.liveLegacy.length, 2);
+  assert(!f.events.includes('candidate-pair'));
+  await f.advance();
+  const verify = async (expectedPhase) => {
+    const record = await f.journal.readFirstCutoverEffects();
+    assert.equal(record.phase, expectedPhase);
+    assert.deepEqual(record.identity, expectedPhase === 'verified' ? f.identity : undefined);
+    const evidence = await f.site.evidence.readFenceState(f.request());
+    assert.equal(evidence.stage, 'all-writers');
+    assert.deepEqual(evidence.liveLegacy, []);
+    assert.deepEqual(evidence.regeneratedLegacy, []);
+    assert.equal((await f.journal.readFirstCutoverEffects()).recordDigest, record.recordDigest);
+  };
+  const result = await finishStoppedRelease({
+    candidate: f.binding.candidate,
+    adapter: {
+      persist: f.journal.persist,
+      migrate: () => f.journal.bindBootstrapSeed('8'.repeat(32)),
+      start: async () => f.identity,
+      verify: () => verify('candidate_started'),
+      beforeOpen: () => verify('verified'),
+      open: async () => {
+        f.setMode('serving');
+        return { protocol: 1, ...f.candidate() };
+      },
+      status: async () => {
+        throw new Error('no retry expected');
+      },
+      afterOpen: (identity) => f.site.lifecycle.restoreIngress(f.context, identity),
+      resumeWorker: (identity) => f.site.lifecycle.resumeWorker(f.context, identity),
+      close: async () => {
+        throw new Error('no close expected');
+      },
+    },
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal((await f.journal.readFirstCutoverEffects()).phase, 'opened');
+  assert.equal(f.events.filter((e) => e === 'candidate-pair').length, 3);
+  assert(f.events.indexOf('control-read') < f.events.indexOf('restore'));
+  assert(f.events.indexOf('restore') < f.events.indexOf('worker'));
+  await f.site.lifecycle.detach(f.context);
+});
+
+for (const fault of [
+  'binding',
+  'window',
+  'phase',
+  'missing-identity',
+  'bootstrap',
+  'serving',
+  'legacy',
+  'busy',
+  'runtime-drift',
+]) {
+  test(`candidate readiness refuses ${fault} without advancing the journal or restoring ingress`, async (t) => {
+    const f = await candidateFixture(t);
+    await f.advance();
+    await f.journal.persist('migration_started', { candidate: f.binding.candidate });
+    await f.journal.bindBootstrapSeed('8'.repeat(32));
+    if (fault !== 'phase')
+      await f.journal.persist('candidate_started', { candidate: f.binding.candidate });
+    const input = structuredClone(f.request());
+    if (fault === 'binding') input.binding.configDigest = '0'.repeat(64);
+    if (fault === 'window') input.window.maintenanceEndsAtMs++;
+    if (fault === 'missing-identity') input.identity = undefined;
+    if (fault === 'bootstrap') input.identity.bootId = '8'.repeat(32);
+    if (fault === 'serving') f.setMode('serving');
+    if (fault === 'legacy') f.state.gateways = 1;
+    if (fault === 'busy') f.state.busy = 1;
+    if (fault === 'runtime-drift')
+      f.observer().readWithCandidate = async () => {
+        throw new Error('unproven process');
+      };
+    const before = await f.journal.readFirstCutoverEffects();
+    await assert.rejects(() => f.site.evidence.readFenceState(input), /UNPROVEN/);
+    assert.deepEqual(await f.journal.readFirstCutoverEffects(), before);
+    assert(!f.events.includes('restore'));
+    await f.site.lifecycle.detach(f.context);
+  });
 }
 
 test('database work cannot be hidden by zero-valued external observations', async (t) => {

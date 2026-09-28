@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 续跑：候选启动后的 readiness 与恢复入口身份接线
+
+承接 `433948f3`，Task4 原 BASE844c2ced不变。原 execution site 现提供 `evidence.readFenceState(scope)`，直接给已有 host/collector 使用。prepare 只返回原受审基线的实际观察，不假装已停写；preopen 使用 host 从 start 得到的真实 identity，进入已有 `observer.readWithCandidate`，核对关闭、idle、无 worker、无旧进程/管理注册/监听者，并保留独立业务事实与两侧十二表读取。`candidate_started` 的 journal 此时仍无 identity；测试确认只在 verify 后由原 tail 写入 verified，不添加状态机或提前成功记录。
+
+入口恢复不再依赖尚未实现的 `facts.verifyOpenedIdentity`，而使用现有默认 `readFirstCutoverCandidateRuntime`（真实 control/status → runtime → status）及同一双机 observer。必须为 journal 中已验证的同一 candidate/boot、serving、needsReconciliation=true、idle=false，且旧运行时未回生才交给原 ingress 恢复。失败仍由原 host/tail 精确关闭、保留 journal，不重试开放或恢复。scope 绑定完整原窗口/责任人，观察期间 journal 必须不变。SQL时间也纳入最老证据时间，不用空SQL推断内存工作。
+
+新增十项站点回归先看到缺失 evidence 接口 RED，后 GREEN。另有三项 **真实 host + collector + journal + tail + site 的合成集成**（成功、候选观察失败、开放后观察失败），外部主机/业务DB/备份仍合成，不冒充完整现场演练。实际隔离 Linux 四组 **262/262、0跳过、退出0**：`/tmp/holaday-candidate-linux.log`。原实际 PM2/受保护文件/journal/pidfd 退役成功及丢ACK均退出0：`/tmp/holaday-candidate-site-{physical,lost-ack}.log`。原默认候选读者的真实 runuser/UID998/PM2/proc/4001+4002/socket、错误身份、状态翻转、孤儿进程拒绝与无关PID保持也退出0：`/tmp/holaday-candidate-control-physical.log`；候选协议为合成，不是完整应用。三MJS Biome、两个shell语法、diff-check通过。
+
+完整 browser 首轮因沙箱禁止临时 Unix socket 返回 EPERM，退出1，保留 `/tmp/holaday-candidate-browser-final.log`；按权限流程获准重跑，不改代码门槛。最终 browser **877/877**、ops **120/59/16/711 + Python12**，均退出0、0跳过，分别为 `/tmp/holaday-candidate-browser-approved.log`、`/tmp/holaday-candidate-ops-final.log`。所有测试已退出；隔离容器受限内存/CPU、无hostPID/生产凭据，均自动清理，运行列表仅原 holaday-mysql/mysql8.4 和 holaday-redis/redis7.4。未重跑应用全套、真实MySQL恢复、nginx全链或整分支审查，不沿用历史结果冒充本轮门槛。
+
+下一步是**剩余真实 site 事实与原首次 execute 的闭环**，不是重做候选观测或再加控制框架：实际旧来源/DB归属、在途请求/浏览器/provider及连接/writer；readiness完整host inventory/商户metadata、backup设施/source/target；恢复worker/持久启动和reconcile/hold；工具安装及execute；真实停写备份/Mac隔离恢复/非PayPal恢复，完整成功故障矩阵及整分支审查。只读旧 Git 源码 `107857fe70503e30691073f267d87275596edb20` 确认 `/healthz` 只有健康/env/time/executor，不能当在途工作证据；原 TaskQueue 的 inFlight 是内存计数。现有普通 host 的 `resumeWorker` 含全局 `pm2 save --force`，首次共享主机不能原样复制，需要沿原定向启动条目机制保持无关应用。以上仅定位待接线点，未改旧生产程序或引入新功能。Task4–6仍未完成、execute仍拒绝；未push/PR/合并/部署，支付/PayPal/密钥/UI/扩展不动，原`__pycache__`保留，自动化继续本线程。
+
 ### 2026-09-28 续跑：真实数据库工作观察接入原现场边界
 
 承接 `1454c352`，原Task4 BASE844c2ced不变。本轮沿旧版Git对象 `107857fe70503e30691073f267d87275596edb20` 核对已存在的探索、视频渲染、注销工作表及计划派发状态，不改这些产品功能。发现原readiness数据库查询只看四类工作表，而且 `planned_task_runs` 的真实 `dispatching` 状态被漏掉；真实MySQL反例返回空数组，日志 `/tmp/holaday-work-dispatch-red.log`。

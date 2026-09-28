@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { readFirstCutoverApproval } from './browser-first-cutover-host.mjs';
 import * as firstHost from './browser-first-cutover-host.mjs';
+import { createFirstCutoverExecutionSite } from './browser-first-cutover-site.mjs';
 import { performFirstCutover } from './browser-first-cutover-transition.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 
@@ -374,7 +375,20 @@ async function lifecycleFixture(t, fault) {
     }
     return exec(command, args, settings);
   };
-  return { ...f, binding, identity, record, stateRoot, journal: () => journal };
+  return {
+    ...f,
+    binding,
+    identity,
+    record,
+    stateRoot,
+    journal: () => journal,
+    candidateStatus: () => ({
+      identity,
+      mode,
+      idle: mode === 'closed',
+      needsReconciliation: mode === 'serving',
+    }),
+  };
 }
 
 async function runLifecycle(f) {
@@ -387,6 +401,139 @@ async function runLifecycle(f) {
     clock: f.io.now,
   });
   return { adapter, result };
+}
+
+// Real host, collector, release tail and durable journal; external machines,
+// database/backup and runtime processes are explicitly synthetic here.
+for (const fault of [undefined, 'candidate-observation', 'opened-observation']) {
+  test(`existing host consumes site fence evidence across the full transition (${fault ?? 'success'})`, async (t) => {
+    const f = await lifecycleFixture(t);
+    const original = f.io.lifecycle;
+    let context;
+    const pair = () => ({
+      observedAtMs: f.io.now(),
+      inventoryDigest: f.binding.inventoryDigest,
+      unknownLaunchers: [],
+      hosts: [],
+    });
+    const candidate = () => ({
+      ...f.candidateStatus(),
+      runtime: {
+        identity: f.identity,
+        root: `/opt/holaday-releases/${f.binding.candidate}`,
+        main: { pid: 70 },
+        worker: null,
+      },
+    });
+    const site = createFirstCutoverExecutionSite(
+      { attempt: f.binding.attempt },
+      {
+        platform: 'linux',
+        uid: 0,
+        now: f.io.now,
+        readSite: async () => ({
+          binding: f.binding,
+          legacyDigest: f.approval.legacyDigest,
+          maintenanceEndsAtMs: f.approval.maintenanceEndsAtMs,
+          reviews: {},
+          ingress: { unknownIngress: [] },
+          gatewaySiteDigest: 'f'.repeat(64),
+          producerStartupFiles: [],
+        }),
+        readCoordinatorIdentity: async () => ({ binding: f.binding }),
+        readPersistedWork: async () => ({ observedAtMs: f.io.now(), unsettled: [] }),
+        readCandidateRuntime: async () => candidate(),
+        facts: {
+          observeWriters: () => original.verifyFence(context),
+          observeWork: async () => ({
+            inventoryDigest: f.binding.inventoryDigest,
+            observedAtMs: f.io.now(),
+            unsettledWork: 0,
+            externalWork: 0,
+            activeRequests: 0,
+            unknownWriters: 0,
+          }),
+          settleLegacy: original.settleLegacy,
+          resumeWorker: original.resumeWorker,
+          readBackupPlan: original.readBackupPlan,
+          reconcile: original.reconcile,
+          holdMaintenance: original.holdMaintenance,
+        },
+        createIngress: async (_args, deps) => ({
+          readExecutionIdentities: () => [],
+          readTransportIdentity: async () => ({ binding: f.binding }),
+          fenceOrders: () => original.fenceOrders(context),
+          fenceAll: () => original.fenceAll(context),
+          verifyOrders: async () => ({ ...(await original.verifyFence(context)), stage: 'orders' }),
+          verifyFence: () => original.verifyFence(context),
+          restoreIngress: async (identity) => {
+            await deps.verifyOpenedIdentity(identity);
+            return original.restoreIngress(context, identity);
+          },
+          close: async () => {},
+        }),
+        connectGateway: async () => ({
+          readExecutionIdentity: () => ({ binding: f.binding }),
+          readTransportIdentity: async () => ({ binding: f.binding }),
+          prepare: async () => {},
+          retire: () => original.stopLegacy(context),
+          close: async () => {},
+        }),
+        createObserver: async () => ({
+          read: async () => pair(),
+          readFenceProgress: async () => ({ purpose: 'fence-progress', pair: pair() }),
+          readWithCandidate: async (identity) => {
+            assert.deepEqual(identity, f.identity);
+            const record = await f.record();
+            f.events.push(`site-candidate:${record.phase}`);
+            if (
+              (fault === 'candidate-observation' && record.phase === 'candidate_started') ||
+              (fault === 'opened-observation' && f.candidateStatus().mode === 'serving')
+            )
+              throw new Error('CUTOVER_CANDIDATE_OBSERVATION_UNPROVEN');
+            assert.deepEqual(
+              record.identity,
+              record.phase === 'candidate_started' ? undefined : identity,
+            );
+            return { ...pair(), candidate: candidate() };
+          },
+        }),
+        retireProducers: () => original.stopProducers(context),
+      },
+    );
+    f.io.lifecycle = {
+      ...site.lifecycle,
+      attach: async (ctx) => {
+        context = ctx;
+        await original.attach(ctx);
+        await site.lifecycle.attach(ctx);
+      },
+      detach: async (ctx) => {
+        await site.lifecycle.detach(ctx);
+        await original.detach(ctx);
+      },
+    };
+    f.io.evidence = { ...f.io.evidence, ...site.evidence };
+    const { adapter, result } = await runLifecycle(f);
+    assert.equal(result.ok, fault === undefined, JSON.stringify(result));
+    if (fault) {
+      assert.equal(result.closeAcknowledged, true);
+      assert(!f.events.includes('restore-ingress'));
+      assert(!f.events.includes('resume-worker'));
+      assert(!f.events.includes('reconcile'));
+      assert.equal(
+        (await f.record()).phase,
+        fault === 'candidate-observation' ? 'candidate_started' : 'verified',
+      );
+    } else {
+      assert.deepEqual(
+        f.events.filter((event) => event.startsWith('site-candidate:')),
+        ['site-candidate:candidate_started', 'site-candidate:verified', 'site-candidate:verified'],
+      );
+      assert.equal((await f.record()).phase, 'reconciled');
+    }
+    await adapter.finish(result);
+  });
 }
 
 test('first host connects real journal, backup receipt and bootstrap before exact new-instance open', async (t) => {
