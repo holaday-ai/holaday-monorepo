@@ -15,6 +15,7 @@ import {
   readCutoverWorkScope,
 } from './browser-cutover-evidence.mjs';
 import { readFirstCutoverPaymentScope } from './browser-first-cutover-host.mjs';
+import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const merchant = '9'.repeat(64);
@@ -141,6 +142,122 @@ test('collects twice, binds all sources, and only publishes redacted facts', asy
   assert.equal(f.published.length, 1);
   assert.equal(JSON.stringify(result).includes('vultr'), false);
   assert.equal(JSON.stringify(result).includes('4011'), false);
+});
+async function interruptionFixture(t) {
+  const f = fixture();
+  const manifest = {
+    replaysNumberedSql: true,
+    runnerSha256: '1'.repeat(64),
+    migrations: [{ name: '0042_core.sql', sha256: '2'.repeat(64) }],
+  };
+  f.binding.migrationDigest = hash(manifest);
+  const directory = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'holaday-risk-journal-')));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const j = await acquireReleaseJournal(directory, {
+    ...f.binding,
+    ...f.input.window,
+    schemaVersion: 2,
+    kind: 'first-cutover',
+    legacyDigest: 'a'.repeat(64),
+    legacyInterruption: {
+      mode: 'controlled-interruption',
+      scope: 'legacy-non-payment-memory',
+      approvalRef: 'legacy-interruption-20260928',
+      capabilityDigest: '7'.repeat(64),
+      observeUntilMs: 140_000,
+      noAutomaticReplay: true,
+    },
+  });
+  t.after(() => j.close());
+  await j.bindManifest(manifest);
+  f.io.assertJournalOwnership = j.assertOwnership;
+  f.io.readFirstCutoverEffects = j.readFirstCutoverEffects;
+  f.input.kind = 'first-cutover';
+  f.input.riskDigest = (await j.readFirstCutoverEffects()).riskDigest;
+  return { ...f, j };
+}
+test('collector carries actual owned first journal risk into report without claiming legacy settled', async (t) => {
+  const f = await interruptionFixture(t);
+  const r = await collectCutoverEvidence(f.input, f.io);
+  assert.equal(r.schemaVersion, 2);
+  assert.equal(r.kind, 'first-cutover');
+  assert.deepEqual(r.legacyInterruption, {
+    riskDigest: f.input.riskDigest,
+    capabilityDigest: '7'.repeat(64),
+    status: 'authorized-not-stopped',
+    sourceDigest: hash({ host: f.host, lastHost: f.host, fence: f.fence }),
+  });
+  assert.deepEqual(f.published[0].raw.firstCutover, await f.j.readFirstCutoverEffects());
+});
+test('collector rejects stripped risk, changed window, missing live journal and unreceipted preopen', async (t) => {
+  for (const fault of ['stripped', 'window', 'missing', 'preopen', 'payment', 'journal-changed']) {
+    const f = await interruptionFixture(t);
+    if (fault === 'stripped') {
+      f.input = Object.fromEntries(
+        Object.entries(f.input).filter(([key]) => !['kind', 'riskDigest'].includes(key)),
+      );
+    }
+    if (fault === 'window') f.input.window.reconcileByMs++;
+    if (fault === 'missing')
+      f.io = Object.fromEntries(
+        Object.entries(f.io).filter(([key]) => key !== 'readFirstCutoverEffects'),
+      );
+    if (fault === 'preopen') {
+      f.input.stage = 'preopen';
+      f.input.identity = { candidate: f.binding.candidate, bootId: 'b'.repeat(32) };
+      f.fence.stage = 'all-writers';
+    }
+    if (fault === 'payment') f.observations[0].state = 'unknown';
+    if (fault === 'journal-changed')
+      f.io.queryOrders = async () => {
+        await f.j.close();
+        return f.observations;
+      };
+    await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_|CUTOVER_/, fault);
+    assert.equal(f.published.length, 0, fault);
+  }
+});
+test('real journal residual risk reaches preopen only with a new boot and physical stop observations', async (t) => {
+  const f = await interruptionFixture(t);
+  const detail = { candidate: f.binding.candidate };
+  for (const phase of ['prepared', 'orders_fenced', 'legacy_interruption_accepted'])
+    await f.j.persist(phase, detail);
+  await assert.rejects(collectCutoverEvidence(f.input, f.io), /UNPROVEN/);
+  await f.j.bindLegacyInterruption({
+    riskDigest: f.input.riskDigest,
+    sourceDigest: '8'.repeat(64),
+    fenceDigest: '9'.repeat(64),
+    observedAtMs: 99_000,
+  });
+  for (const phase of ['producers_stopped', 'all_fenced', 'stopped', 'backup_verified'])
+    await f.j.persist(phase, detail);
+  // Synthetic restore receipt: this test exercises durable protocol binding,
+  // not an actual database backup or production stop.
+  await f.j.bindBackupReceipt({
+    ...f.binding,
+    backupDigest: '1'.repeat(64),
+    databaseIdentityDigest: '2'.repeat(64),
+    isolatedTargetDigest: '3'.repeat(64),
+    encryptionProfileDigest: '4'.repeat(64),
+    comparisonDigest: '5'.repeat(64),
+    schemaDigest: '6'.repeat(64),
+    businessDigest: '7'.repeat(64),
+    restoredAtMs: 99_000,
+  });
+  await f.j.persist('migration_started', detail);
+  await f.j.bindBootstrapSeed('5'.repeat(32));
+  f.input.stage = 'preopen';
+  f.input.identity = { candidate: f.binding.candidate, bootId: '6'.repeat(32) };
+  await f.j.persist('candidate_started', { ...detail, identity: f.input.identity });
+  f.fence.stage = 'all-writers';
+  const report = await collectCutoverEvidence(f.input, f.io);
+  assert.equal(report.legacyInterruption.status, 'accepted-unknown');
+  assert.equal(report.legacyInterruption.riskDigest, f.input.riskDigest);
+  assert.equal(report.legacyInterruption.stopDigest, hash({ lastHost: f.host, fence: f.fence }));
+  f.published.length = 0;
+  f.fence.liveLegacy = ['still-alive'];
+  await assert.rejects(collectCutoverEvidence(f.input, f.io), /UNPROVEN/);
+  assert.equal(f.published.length, 0);
 });
 test('scope changing during provider requests cannot publish a partial success', async () => {
   const f = fixture();
@@ -1639,6 +1756,40 @@ test('publishes protected raw evidence before a group-readable report and bound 
     '/var/lib/holaday-deploy/evidence/active.json',
   );
   assert.equal(f.events.at(-1)[0], 'sync');
+});
+test('publisher binds first-only index to live journal risk and rejects hand-edited projection', async (t) => {
+  const f = await interruptionFixture(t);
+  await collectCutoverEvidence(f.input, f.io);
+  const p = await publisherFixture(t);
+  const options = {
+    ...p.options,
+    assertJournalOwnership: f.j.assertOwnership,
+    readFirstCutoverEffects: f.j.readFirstCutoverEffects,
+  };
+  await publishCutoverEvidence(f.published[0], options, p.io);
+  const indexPath = join(p.directory, 'evidence', 'active.json');
+  const saved = await fs.readFile(indexPath, 'utf8');
+  assert.equal(JSON.parse(saved).riskDigest, f.input.riskDigest);
+  assert.equal(JSON.parse(saved).kind, 'first-cutover');
+  for (const fault of ['risk', 'source', 'v1', 'missing-reader']) {
+    const e = structuredClone(f.published[0]);
+    if (fault === 'risk') e.report.legacyInterruption.riskDigest = '0'.repeat(64);
+    if (fault === 'source') e.report.legacyInterruption.sourceDigest = '0'.repeat(64);
+    if (fault === 'v1') {
+      e.report = {
+        ...Object.fromEntries(
+          Object.entries(e.report).filter(([key]) => !['kind', 'legacyInterruption'].includes(key)),
+        ),
+        schemaVersion: 1,
+      };
+    }
+    await assert.rejects(
+      publishCutoverEvidence(e, fault === 'missing-reader' ? p.options : options, p.io),
+      /UNPROVEN/,
+      fault,
+    );
+    assert.equal(await fs.readFile(indexPath, 'utf8'), saved);
+  }
 });
 test('replaced or writable publication directories cannot publish an index', async (t) => {
   const f = await publisherFixture(t);

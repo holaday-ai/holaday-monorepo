@@ -24,13 +24,18 @@ const bindingSchema = z
   })
   .strict();
 const stage = z.enum(['prepare', 'preopen']);
-const contextSchema = bindingSchema
+const ordinaryContextSchema = bindingSchema
   .extend({
     stage,
     nowMs: timestamp,
     identity: identitySchema.optional(),
   })
   .strict();
+const firstContextFields = { kind: z.literal('first-cutover'), riskDigest: hash };
+const contextSchema = z.union([
+  ordinaryContextSchema,
+  ordinaryContextSchema.extend(firstContextFields).strict(),
+]);
 const sourceSchema = z
   .object({
     kind: z.enum(['host', 'database', 'provider-query', 'provider-rehearsal']),
@@ -39,7 +44,7 @@ const sourceSchema = z
     targetDigest: hash,
   })
   .strict();
-const reportSchema = bindingSchema
+const ordinaryReportSchema = bindingSchema
   .extend({
     schemaVersion: z.literal(1),
     stage,
@@ -98,9 +103,41 @@ const reportSchema = bindingSchema
       .strict(),
   })
   .strict();
-const indexSchema = bindingSchema
+const reportSchema = z.discriminatedUnion('schemaVersion', [
+  ordinaryReportSchema,
+  ordinaryReportSchema
+    .extend({
+      schemaVersion: z.literal(2),
+      kind: z.literal('first-cutover'),
+      legacyInterruption: z.discriminatedUnion('status', [
+        z
+          .object({
+            riskDigest: hash,
+            capabilityDigest: hash,
+            sourceDigest: hash,
+            status: z.literal('authorized-not-stopped'),
+          })
+          .strict(),
+        z
+          .object({
+            riskDigest: hash,
+            capabilityDigest: hash,
+            sourceDigest: hash,
+            status: z.literal('accepted-unknown'),
+            stopDigest: hash,
+          })
+          .strict(),
+      ]),
+    })
+    .strict(),
+]);
+const ordinaryIndexSchema = bindingSchema
   .extend({ stage, identity: identitySchema.optional(), reportDigest: hash })
   .strict();
+const indexSchema = z.union([
+  ordinaryIndexSchema,
+  ordinaryIndexSchema.extend(firstContextFields).strict(),
+]);
 export type CutoverBinding = z.infer<typeof bindingSchema>;
 export type ServicesContext = z.infer<typeof contextSchema>;
 export type CutoverEvidence = z.infer<typeof reportSchema>;
@@ -134,6 +171,15 @@ export function validateServicesEvidence(value: unknown, expected: ServicesConte
   const result = reportSchema.safeParse(value);
   if (!result.success) throw denied();
   const report = result.data;
+  if (report.schemaVersion === 2) {
+    if (
+      !('kind' in context) ||
+      context.riskDigest !== report.legacyInterruption.riskDigest ||
+      report.legacyInterruption.status !==
+        (context.stage === 'prepare' ? 'authorized-not-stopped' : 'accepted-unknown')
+    )
+      throw denied();
+  } else if ('kind' in context) throw denied();
   if (
     !sameBinding(report, context) ||
     report.stage !== context.stage ||
@@ -280,6 +326,9 @@ async function readBoundReport(
   const index = decodeIndex(indexFile);
   if (
     !sameBinding(index, context) ||
+    ('kind' in index
+      ? !('kind' in context) || index.riskDigest !== context.riskDigest
+      : 'kind' in context) ||
     index.stage !== context.stage ||
     !sameIdentity(index.identity, context.identity)
   )

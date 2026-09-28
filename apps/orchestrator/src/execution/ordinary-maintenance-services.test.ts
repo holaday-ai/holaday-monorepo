@@ -59,6 +59,52 @@ import {
 } from './ordinary-maintenance-services.js';
 
 const denied = 'MAINTENANCE_PAYMENT_BOUNDARY_UNPROVEN';
+it('requires an explicit first-cutover context for unknown legacy risk and still rejects unpaid gaps', () => {
+  const first = { ...context, kind: 'first-cutover' as const, riskDigest: '7'.repeat(64) };
+  const r = {
+    ...evidence(),
+    schemaVersion: 2,
+    kind: 'first-cutover',
+    legacyInterruption: {
+      riskDigest: first.riskDigest,
+      capabilityDigest: '8'.repeat(64),
+      status: 'authorized-not-stopped',
+      sourceDigest: '9'.repeat(64),
+    },
+  };
+  expect(() => validateServicesEvidence(r, first)).not.toThrow();
+  expect(() => validateServicesEvidence(r, context)).toThrow(denied);
+  expect(() => validateServicesEvidence({ ...r, schemaVersion: 1 }, first)).toThrow(denied);
+  expect(() => validateServicesEvidence(r, { ...first, riskDigest: '6'.repeat(64) })).toThrow(
+    denied,
+  );
+  expect(() =>
+    validateServicesEvidence({ ...r, payments: { ...r.payments, unresolved: 1 } }, first),
+  ).toThrow(denied);
+  expect(() =>
+    validateServicesEvidence({ ...r, host: { ...r.host, unknownWriters: 1 } }, first),
+  ).toThrow(denied);
+  const identity = { candidate: first.candidate, bootId: '5'.repeat(32) };
+  const preopen = { ...first, stage: 'preopen' as const, identity };
+  const after = {
+    ...r,
+    stage: 'preopen',
+    identity,
+    host: { ...r.host, phase: 'fenced-stopped' },
+    legacyInterruption: {
+      ...r.legacyInterruption,
+      status: 'accepted-unknown',
+      stopDigest: '4'.repeat(64),
+    },
+  };
+  expect(() => validateServicesEvidence(after, preopen)).not.toThrow();
+  expect(() =>
+    validateServicesEvidence(
+      { ...after, legacyInterruption: { ...r.legacyInterruption, status: 'accepted-unknown' } },
+      preopen,
+    ),
+  ).toThrow(denied);
+});
 const approvedSandboxDigest = '75467f5b0aec5367761433a57fbd45aa9a41347e638f385178c12f5af7740b95';
 const alipayDigests = [
   '001badc1fe5ae82c8f8f761344928d08736216196677247509a25b1fcee2bc98',
@@ -485,6 +531,43 @@ it('only reads active preopen context matching the running instance', async () =
   ).rejects.toThrow(denied);
   await writeReport();
   await expect(readActiveServicesContext(report.identity, context.nowMs)).rejects.toThrow(denied);
+});
+it('preserves v2 risk across protected index/report reads and rejects a stripped or changed index', async () => {
+  const identity = { candidate: context.candidate, bootId: '2'.repeat(32) };
+  const riskDigest = '7'.repeat(64);
+  const report: CutoverEvidence = {
+    ...evidence(),
+    schemaVersion: 2,
+    kind: 'first-cutover',
+    stage: 'preopen',
+    identity,
+    host: { ...evidence().host, phase: 'fenced-stopped' },
+    legacyInterruption: {
+      riskDigest,
+      capabilityDigest: '8'.repeat(64),
+      sourceDigest: '9'.repeat(64),
+      status: 'accepted-unknown',
+      stopDigest: '4'.repeat(64),
+    },
+  };
+  await writeReport(report);
+  const path = join(disk.root, 'active.json');
+  const index = JSON.parse(await realFs.readFile(path, 'utf8'));
+  await expect(readActiveServicesContext(identity, context.nowMs)).rejects.toThrow(denied);
+  await realFs.writeFile(path, JSON.stringify({ ...index, kind: 'first-cutover', riskDigest }));
+  expect(await readActiveServicesContext(identity, context.nowMs)).toMatchObject({
+    kind: 'first-cutover',
+    riskDigest,
+    identity,
+  });
+  await expect(readServicesEvidence({ ...context, stage: 'preopen', identity })).rejects.toThrow(
+    denied,
+  );
+  await realFs.writeFile(
+    path,
+    JSON.stringify({ ...index, kind: 'first-cutover', riskDigest: '0'.repeat(64) }),
+  );
+  await expect(readActiveServicesContext(identity, context.nowMs)).rejects.toThrow(denied);
 });
 it.each([
   'owner',

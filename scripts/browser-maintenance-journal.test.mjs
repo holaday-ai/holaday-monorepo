@@ -62,6 +62,95 @@ const firstMetadata = {
   inventoryDigest: '4'.repeat(64),
 };
 
+test('interruption receipt is durable before producer stop and survives backup seed and boot', async (t) => {
+  const policy = {
+    mode: 'controlled-interruption',
+    scope: 'legacy-non-payment-memory',
+    approvalRef: 'legacy-interruption-20260928',
+    capabilityDigest: '7'.repeat(64),
+    observeUntilMs: 1800,
+    noAutomaticReplay: true,
+  };
+  const input = {
+    ...firstMetadata,
+    schemaVersion: 2,
+    attempt: '12345678-1234-4234-8234-123456789abc',
+    maintenanceEndsAtMs: 2000,
+    reconcileByMs: 3000,
+    operatorRef: 'qa-operator',
+    legacyInterruption: policy,
+  };
+  const j = await acquireReleaseJournal(await fixture(t), input);
+  t.after(() => j.close());
+  await j.bindManifest(manifest);
+  for (const p of ['prepared', 'orders_fenced', 'legacy_interruption_accepted'])
+    await j.persist(p, { candidate: input.candidate });
+  await assert.rejects(j.persist('producers_stopped', { candidate: input.candidate }), /UNPROVEN/);
+  const before = await j.readFirstCutoverEffects();
+  const exposed = await j.readFirstCutoverEffects();
+  exposed.legacyInterruption.scope = 'all-work';
+  assert.deepEqual((await j.readFirstCutoverEffects()).legacyInterruption, policy);
+  const receipt = {
+    riskDigest: before.riskDigest,
+    sourceDigest: '8'.repeat(64),
+    fenceDigest: '9'.repeat(64),
+    observedAtMs: 1500,
+  };
+  for (const invalid of [
+    { ...receipt, riskDigest: '0'.repeat(64) },
+    { ...receipt, sourceDigest: null },
+    { ...receipt, fenceDigest: '' },
+    { ...receipt, observedAtMs: 1801 },
+    { ...receipt, observedAtMs: -1 },
+    { ...receipt, allLegacyDrained: true },
+  ]) {
+    await assert.rejects(j.bindLegacyInterruption(invalid), /UNPROVEN/);
+    assert.equal((await j.readFirstCutoverEffects()).interruptionObservation, undefined);
+  }
+  await j.bindLegacyInterruption(receipt);
+  await assert.rejects(j.bindLegacyInterruption(receipt), /UNPROVEN/);
+  for (const p of ['producers_stopped', 'all_fenced', 'stopped', 'backup_verified'])
+    await j.persist(p, { candidate: input.candidate });
+  await j.bindBackupReceipt(await backupReceiptFor(j));
+  await j.persist('migration_started', { candidate: input.candidate });
+  await j.bindBootstrapSeed('5'.repeat(32));
+  await j.persist('candidate_started', {
+    candidate: input.candidate,
+    identity: { candidate: input.candidate, bootId: '6'.repeat(32) },
+  });
+  const saved = JSON.parse(await fs.readFile(j.path, 'utf8'));
+  assert.equal(saved.schemaVersion, 2);
+  assert.deepEqual(saved.legacyInterruption, policy);
+  assert.deepEqual(saved.interruptionObservation, receipt);
+  assert.deepEqual((await j.readFirstCutoverEffects()).interruptionObservation, receipt);
+  assert.equal(saved.riskDigest, before.riskDigest);
+});
+test('ordinary and v1 journals cannot silently discard an interruption approval', async (t) => {
+  const policy = {
+    mode: 'controlled-interruption',
+    scope: 'legacy-non-payment-memory',
+    approvalRef: 'legacy-interruption-20260928',
+    capabilityDigest: '7'.repeat(64),
+    observeUntilMs: 1800,
+    noAutomaticReplay: true,
+  };
+  for (const invalid of [
+    { ...metadata, schemaVersion: 2, legacyInterruption: policy },
+    { ...firstMetadata, schemaVersion: 1, legacyInterruption: policy },
+    { ...firstMetadata, riskDigest: '7'.repeat(64) },
+    { ...firstMetadata, schemaVersion: 3 },
+  ]) {
+    const directory = await fixture(t);
+    await assert.rejects(acquireReleaseJournal(directory, invalid), /UNPROVEN/);
+    assert.deepEqual(await fs.readdir(directory), []);
+  }
+  for (const input of [metadata, firstMetadata]) {
+    const j = await acquireReleaseJournal(await fixture(t), input);
+    t.after(() => j.close());
+    await assert.rejects(j.bindLegacyInterruption({}), /UNPROVEN/);
+  }
+});
+
 test('candidate startup intent must finish both exact files before opened and cannot bind another boot', async (t) => {
   const journal = await acquireReleaseJournal(await fixture(t), firstMetadata);
   t.after(() => journal.close());

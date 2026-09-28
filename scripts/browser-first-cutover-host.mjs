@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import {
   collectCutoverEvidence,
+  cutoverLegacyInterruptionRisk,
   readCutoverDatabaseScope,
   readCutoverWorkScope,
 } from './browser-cutover-evidence.mjs';
@@ -1736,6 +1737,9 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
     const { binding, root, applicationGid } = prepared;
     const scope = {
       binding: { ...binding },
+      ...(approval.schemaVersion === 2
+        ? { kind: 'first-cutover', riskDigest: cutoverLegacyInterruptionRisk(approval) }
+        : {}),
       stage: target ? 'preopen' : 'prepare',
       window: {
         maintenanceEndsAtMs: approval.maintenanceEndsAtMs,
@@ -1747,6 +1751,7 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
     await collectCutoverEvidence(scope, {
       now: io.now,
       assertJournalOwnership: ownership,
+      readFirstCutoverEffects: prepared.journal.readFirstCutoverEffects,
       ...Object.fromEntries(
         ['readHostInventory', 'readDatabaseScope', 'readRehearsalArtifacts', 'readFenceState'].map(
           (name) => [name, () => io.evidence[name](structuredClone(scope))],
@@ -1754,7 +1759,11 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
       ),
       queryOrders: (orders) => io.evidence.queryOrders(orders, structuredClone(scope)),
       publishPrivate: (evidence) =>
-        io.publishEvidence(evidence, { applicationGid, assertJournalOwnership: ownership }),
+        io.publishEvidence(evidence, {
+          applicationGid,
+          assertJournalOwnership: ownership,
+          readFirstCutoverEffects: prepared.journal.readFirstCutoverEffects,
+        }),
     });
     await guard();
     await io.exec(
@@ -1767,13 +1776,14 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
         '--import',
         'tsx',
         `${root}/apps/orchestrator/scripts/browser-maintenance-readiness.ts`,
-        target ? 'verify' : 'services',
+        `${target ? 'verify' : 'services'}${approval.schemaVersion === 2 ? '-first-cutover' : ''}`,
         binding.attempt,
         binding.candidate,
         binding.configDigest,
         binding.migrationDigest,
         binding.inventoryDigest,
         ...(target ? [target.bootId] : []),
+        ...(approval.schemaVersion === 2 ? [scope.riskDigest] : []),
       ],
       { cwd: `${root}/apps/orchestrator`, env },
     );
@@ -2110,6 +2120,16 @@ export async function prepareFirstCutoverCandidate(options, overrides = {}) {
       ...binding,
       kind: 'first-cutover',
       legacyDigest: approval.legacyDigest,
+      ...(approval.schemaVersion === 2
+        ? {
+            schemaVersion: 2,
+            legacyInterruption: approval.legacyInterruption,
+            maintenanceEndsAtMs: approval.maintenanceEndsAtMs,
+            reconcileByMs: approval.reconcileByMs,
+            operatorRef: approval.operatorRef,
+            riskDigest: cutoverLegacyInterruptionRisk(approval),
+          }
+        : {}),
     });
     await guard();
     await stageReleaseCandidate(
@@ -2196,11 +2216,12 @@ export async function readFirstCutoverApproval(options, io = system) {
       throw new Error('changed');
     const record = JSON.parse(bytes.toString('utf8'));
     const now = io.now();
+    const expectedFields = record?.schemaVersion === 2 ? [...fields, 'legacyInterruption'] : fields;
     if (
       !record ||
-      Object.keys(record).length !== fields.length ||
-      !fields.every((k) => Object.hasOwn(record, k)) ||
-      record.schemaVersion !== 1 ||
+      Object.keys(record).length !== expectedFields.length ||
+      !expectedFields.every((k) => Object.hasOwn(record, k)) ||
+      ![1, 2].includes(record.schemaVersion) ||
       record.kind !== 'first-cutover' ||
       record.attempt !== options.attempt ||
       typeof record.branch !== 'string' ||
@@ -2220,7 +2241,9 @@ export async function readFirstCutoverApproval(options, io = system) {
       !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(record.operatorRef)
     )
       throw new Error('binding');
-    return { ...record, approvalDigest: createHash('sha256').update(bytes).digest('hex') };
+    const risk =
+      record.schemaVersion === 2 ? { riskDigest: cutoverLegacyInterruptionRisk(record) } : {};
+    return { ...record, ...risk, approvalDigest: createHash('sha256').update(bytes).digest('hex') };
   } catch {
     throw new Error('CUTOVER_APPROVAL_UNPROVEN');
   } finally {

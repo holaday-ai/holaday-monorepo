@@ -29,6 +29,36 @@ describe('readiness command used by the release driver', () => {
     expect(io.verify).not.toHaveBeenCalled();
     expect(io.closeDatabase).not.toHaveBeenCalled();
   });
+  it('first-cutover commands carry explicit risk binding without changing ordinary arguments', async () => {
+    const riskDigest = '7'.repeat(64);
+    const io = operations();
+    await runMaintenanceReadinessCommand(['services-first-cutover', ...binding, riskDigest], io);
+    expect(io.services).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'first-cutover', riskDigest, stage: 'prepare' }),
+    );
+    await runMaintenanceReadinessCommand(
+      ['verify-first-cutover', ...binding, identity.bootId, riskDigest],
+      io,
+    );
+    expect(io.verify).toHaveBeenCalledWith(
+      identity,
+      identity,
+      expect.objectContaining({ kind: 'first-cutover', riskDigest, stage: 'preopen' }),
+    );
+    for (const args of [
+      ['services', ...binding, riskDigest],
+      ['services-first-cutover', ...binding],
+      ['verify-first-cutover', ...binding, identity.bootId, ''],
+      ['verify', ...binding, identity.bootId, riskDigest],
+    ]) {
+      const deniedIo = operations();
+      await expect(runMaintenanceReadinessCommand(args, deniedIo)).rejects.toThrow(
+        'MAINTENANCE_READINESS_INPUT',
+      );
+      expect(deniedIo.services).not.toHaveBeenCalled();
+      expect(deniedIo.verify).not.toHaveBeenCalled();
+    }
+  });
   it('wrong target rejects before importing or querying database', async () => {
     const io = operations();
     await expect(
@@ -135,8 +165,8 @@ describe('maintenance readiness', () => {
     expect(probes.schemaCheck).toHaveBeenCalledOnce();
     expect(probes.recordsCheck).toHaveBeenCalledOnce();
     expect(probes.servicesCheck).toHaveBeenCalledOnce();
-    expect(probes.recordsCheck.mock.invocationCallOrder[0]).toBeLessThan(
-      probes.servicesCheck.mock.invocationCallOrder[0]!,
-    );
+    const servicesCall = probes.servicesCheck.mock.invocationCallOrder[0];
+    if (servicesCall === undefined) throw new Error('missing services call');
+    expect(probes.recordsCheck.mock.invocationCallOrder[0]).toBeLessThan(servicesCall);
   });
 });

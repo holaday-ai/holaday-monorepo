@@ -167,6 +167,33 @@ export async function publishCutoverEvidence(evidence, options, io = publication
     const assertJournal = async () => {
       const current = await options.assertJournalOwnership();
       if (!bindingKeys.every((key) => current?.[key] === binding[key])) throw new Error('journal');
+      const first = await options.readFirstCutoverEffects?.();
+      const projection = firstInterruptionProjection(
+        first,
+        {
+          binding,
+          stage: report.stage,
+          identity: report.identity,
+          kind: report.kind,
+          riskDigest: report.legacyInterruption?.riskDigest,
+          window: report,
+        },
+        evidence.raw,
+        io.now(),
+      );
+      if (projection) {
+        if (
+          report.schemaVersion !== 2 ||
+          !same(projection, report.legacyInterruption) ||
+          !same(first, evidence.raw.firstCutover)
+        )
+          throw new Error('risk');
+      } else if (
+        report.schemaVersion !== 1 ||
+        report.legacyInterruption !== undefined ||
+        evidence.raw.firstCutover?.schemaVersion === 2
+      )
+        throw new Error('version');
     };
     await assertJournal();
     const folders = [
@@ -264,6 +291,9 @@ export async function publishCutoverEvidence(evidence, options, io = publication
     const reportDigest = createHash('sha256').update(reportBytes).digest('hex');
     const index = {
       ...binding,
+      ...(report.schemaVersion === 2
+        ? { kind: 'first-cutover', riskDigest: report.legacyInterruption.riskDigest }
+        : {}),
       stage: report.stage,
       ...(report.identity ? { identity: report.identity } : {}),
       reportDigest,
@@ -977,6 +1007,56 @@ function sandboxRecordDigest(row, table, windowStartMs) {
   ]);
 }
 const bindingKeys = ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'];
+/** First-release exception only. This digest is separate from inventory, so
+ * neither the approval nor its later receipt introduces a circular binding. */
+export function cutoverLegacyInterruptionRisk(approval) {
+  const binding = Object.fromEntries(bindingKeys.map((key) => [key, approval?.[key]]));
+  checkBinding(binding);
+  const policy = approval?.legacyInterruption;
+  const keys = [
+    'mode',
+    'scope',
+    'approvalRef',
+    'capabilityDigest',
+    'observeUntilMs',
+    'noAutomaticReplay',
+  ];
+  if (
+    approval.schemaVersion !== 2 ||
+    approval.kind !== 'first-cutover' ||
+    !hash(approval.legacyDigest) ||
+    !Number.isSafeInteger(approval.maintenanceEndsAtMs) ||
+    approval.maintenanceEndsAtMs <= 0 ||
+    !Number.isSafeInteger(approval.reconcileByMs) ||
+    approval.reconcileByMs < approval.maintenanceEndsAtMs ||
+    typeof approval.operatorRef !== 'string' ||
+    !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(approval.operatorRef) ||
+    !policy ||
+    Object.keys(policy).length !== keys.length ||
+    !keys.every((key) => Object.hasOwn(policy, key)) ||
+    policy.mode !== 'controlled-interruption' ||
+    policy.scope !== 'legacy-non-payment-memory' ||
+    policy.approvalRef !== 'legacy-interruption-20260928' ||
+    !hash(policy.capabilityDigest) ||
+    !Number.isSafeInteger(policy.observeUntilMs) ||
+    policy.observeUntilMs < 0 ||
+    policy.observeUntilMs > approval.maintenanceEndsAtMs ||
+    policy.noAutomaticReplay !== true
+  )
+    throw new Error('CUTOVER_INTERRUPTION_UNPROVEN');
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        binding,
+        legacyDigest: approval.legacyDigest,
+        maintenanceEndsAtMs: approval.maintenanceEndsAtMs,
+        reconcileByMs: approval.reconcileByMs,
+        operatorRef: approval.operatorRef,
+        legacyInterruption: Object.fromEntries(keys.map((key) => [key, policy[key]])),
+      }),
+    )
+    .digest('hex');
+}
 function checkBinding(value) {
   if (
     !value ||
@@ -988,6 +1068,82 @@ function checkBinding(value) {
     !['configDigest', 'migrationDigest', 'inventoryDigest'].every((k) => hash(value[k]))
   )
     fail();
+}
+// Reads a live, owned journal projection; a caller-supplied report is not an
+// approval. The original host/payment checks remain required independently.
+function firstInterruptionProjection(first, input, raw, now) {
+  const { binding, stage, identity, window } = input;
+  if (first?.schemaVersion !== 2) {
+    if (
+      input.kind !== undefined ||
+      input.riskDigest !== undefined ||
+      (first?.schemaVersion !== undefined && first.schemaVersion !== 1)
+    )
+      fail('MAINTENANCE_JOURNAL_UNPROVEN');
+    return undefined;
+  }
+  if (
+    input.kind !== 'first-cutover' ||
+    !hash(first.recordDigest) ||
+    first.failureObservation ||
+    !bindingKeys.every((key) => first[key] === binding[key]) ||
+    first.riskDigest !== cutoverLegacyInterruptionRisk(first) ||
+    input.riskDigest !== first.riskDigest ||
+    !['maintenanceEndsAtMs', 'reconcileByMs', 'operatorRef'].every(
+      (key) => first[key] === window[key],
+    ) ||
+    (stage === 'prepare' && !['preflight', 'prepared'].includes(first.phase)) ||
+    now >= first.maintenanceEndsAtMs
+  )
+    fail('MAINTENANCE_JOURNAL_UNPROVEN');
+  if (!raw) return undefined; // Early binding check before gathering external observations.
+  const { host, lastHost, fence } = raw;
+  if (
+    ![host, lastHost].every(
+      (value) =>
+        value &&
+        fresh(value.observedAtMs, now) &&
+        digest(value.inventory) === binding.inventoryDigest &&
+        ['unknownWriters', 'externalWork'].every(
+          (key) => Array.isArray(value[key]) && value[key].length === 0,
+        ),
+    ) ||
+    !fence ||
+    !fresh(fence.observedAtMs, now) ||
+    fence.inventoryDigest !== binding.inventoryDigest ||
+    !Array.isArray(fence.uncovered) ||
+    fence.uncovered.length
+  )
+    fail();
+  if (stage === 'preopen') {
+    const receipt = first.interruptionObservation;
+    if (
+      !['candidate_started', 'verified', 'opened', 'reconciled'].includes(first.phase) ||
+      !same(first.identity, identity) ||
+      !receipt ||
+      receipt.riskDigest !== first.riskDigest ||
+      !hash(receipt.sourceDigest) ||
+      !hash(receipt.fenceDigest) ||
+      !Number.isSafeInteger(receipt.observedAtMs) ||
+      receipt.observedAtMs < 0 ||
+      receipt.observedAtMs > first.legacyInterruption.observeUntilMs ||
+      ![host, lastHost].every(
+        (value) => Array.isArray(value.producersRunning) && value.producersRunning.length === 0,
+      ) ||
+      fence.stage !== 'all-writers' ||
+      !['liveLegacy', 'regeneratedLegacy'].every(
+        (key) => Array.isArray(fence[key]) && fence[key].length === 0,
+      )
+    )
+      fail('MAINTENANCE_JOURNAL_UNPROVEN');
+  }
+  return {
+    riskDigest: first.riskDigest,
+    capabilityDigest: first.legacyInterruption.capabilityDigest,
+    status: stage === 'prepare' ? 'authorized-not-stopped' : 'accepted-unknown',
+    sourceDigest: digest({ host, lastHost, fence }),
+    ...(stage === 'preopen' ? { stopDigest: digest({ lastHost, fence }) } : {}),
+  };
 }
 const orderKey = (row) =>
   JSON.stringify([row.provider, row.environment, row.merchantDigest, row.orderRef]);
@@ -1035,6 +1191,8 @@ export async function collectCutoverEvidence(input, io) {
   const journal = await io.assertJournalOwnership();
   if (!bindingKeys.every((key) => journal?.[key] === binding[key]))
     fail('MAINTENANCE_JOURNAL_UNPROVEN');
+  const firstCutover = structuredClone(await io.readFirstCutoverEffects?.());
+  firstInterruptionProjection(firstCutover, input, undefined, io.now());
   const host = structuredClone(await io.readHostInventory());
   const before = structuredClone(await io.readDatabaseScope());
   checkScope(before, io.now());
@@ -1161,7 +1319,18 @@ export async function collectCutoverEvidence(input, io) {
     .map((row) => row.orderRef)
     .sort();
   const report = {
-    schemaVersion: 1,
+    schemaVersion: firstCutover?.schemaVersion === 2 ? 2 : 1,
+    ...(firstCutover?.schemaVersion === 2
+      ? {
+          kind: 'first-cutover',
+          legacyInterruption: firstInterruptionProjection(
+            firstCutover,
+            input,
+            { host, lastHost, fence },
+            now,
+          ),
+        }
+      : {}),
     ...binding,
     stage,
     ...(identity ? { identity } : {}),
@@ -1218,9 +1387,21 @@ export async function collectCutoverEvidence(input, io) {
   const finalJournal = await io.assertJournalOwnership();
   if (!bindingKeys.every((key) => finalJournal?.[key] === binding[key]))
     fail('MAINTENANCE_JOURNAL_UNPROVEN');
+  if (firstCutover?.schemaVersion === 2 && !same(firstCutover, await io.readFirstCutoverEffects()))
+    fail('MAINTENANCE_JOURNAL_UNPROVEN');
   await io.publishPrivate({
     report,
-    raw: { host, lastHost, before, after, observations, rehearsal, fence, followup },
+    raw: {
+      host,
+      lastHost,
+      before,
+      after,
+      observations,
+      rehearsal,
+      fence,
+      followup,
+      ...(firstCutover?.schemaVersion === 2 ? { firstCutover } : {}),
+    },
   });
   return report;
 }

@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+import { cutoverLegacyInterruptionRisk } from './browser-cutover-evidence.mjs';
 
 const identityValid = (value) =>
   /^[a-f0-9]{40}$/.test(value?.candidate ?? '') && /^[a-f0-9]{32}$/.test(value?.bootId ?? '');
@@ -31,6 +32,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
   let bootstrapSeed;
   let backupReceipt;
   let failureObservation;
+  let interruptionObservation;
   let currentIdentity;
   const startupEvents = [];
   const candidateStartupEvents = [];
@@ -65,11 +67,37 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
   const first = metadata?.kind === 'first-cutover';
   const reservedAttempt = metadata?.attempt;
   const oldIdentity = metadata?.oldIdentity && { ...metadata.oldIdentity };
+  let interruptionFields = {};
+  try {
+    if (metadata?.schemaVersion === 2) {
+      interruptionFields = {
+        maintenanceEndsAtMs: metadata.maintenanceEndsAtMs,
+        reconcileByMs: metadata.reconcileByMs,
+        operatorRef: metadata.operatorRef,
+        legacyInterruption: structuredClone(metadata.legacyInterruption),
+        riskDigest: cutoverLegacyInterruptionRisk(metadata),
+      };
+      if (
+        metadata.riskDigest !== undefined &&
+        metadata.riskDigest !== interruptionFields.riskDigest
+      )
+        throw unproven();
+    } else if (
+      (metadata?.schemaVersion !== undefined && metadata.schemaVersion !== 1) ||
+      metadata?.legacyInterruption !== undefined ||
+      metadata?.riskDigest !== undefined
+    )
+      throw unproven();
+  } catch {
+    throw unproven();
+  }
+  const interrupted = metadata?.schemaVersion === 2;
   const firstFields = first
     ? {
         kind: 'first-cutover',
         legacyDigest: metadata.legacyDigest,
         inventoryDigest: metadata.inventoryDigest,
+        ...interruptionFields,
       }
     : {};
   if (
@@ -140,7 +168,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
       );
       try {
         const bytes = `${JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: interrupted ? 2 : 1,
           attempt,
           candidate,
           configDigest,
@@ -151,6 +179,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
           bootstrapSeed,
           ...(backupReceipt ? { backupReceipt } : {}),
           ...(failureObservation ? { failureObservation } : {}),
+          ...(interruptionObservation ? { interruptionObservation } : {}),
           ...(startupEvents.length ? { startupEvents } : {}),
           ...(candidateStartupEvents.length ? { candidateStartupEvents } : {}),
           ...(registrationEvents.length ? { registrationEvents } : {}),
@@ -306,6 +335,12 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
             migrationDigest,
             inventoryDigest,
             legacyDigest: firstFields.legacyDigest,
+            ...(interrupted
+              ? { schemaVersion: 2, kind: 'first-cutover', ...structuredClone(interruptionFields) }
+              : {}),
+            ...(record.interruptionObservation
+              ? { interruptionObservation: record.interruptionObservation }
+              : {}),
             ...(record.identity ? { identity: record.identity } : {}),
             ...(record.bootstrapSeed ? { bootstrapSeed: record.bootstrapSeed } : {}),
             phase: record.phase,
@@ -322,6 +357,29 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
         } finally {
           await handle?.close();
         }
+      }),
+    bindLegacyInterruption: (value) =>
+      serial(async () => {
+        const event = structuredClone(value);
+        const keys = ['riskDigest', 'sourceDigest', 'fenceDigest', 'observedAtMs'];
+        if (
+          !interrupted ||
+          phase !== 'legacy_interruption_accepted' ||
+          interruptionObservation ||
+          !event ||
+          Object.keys(event).length !== keys.length ||
+          !keys.every((key) => Object.hasOwn(event, key)) ||
+          event.riskDigest !== interruptionFields.riskDigest ||
+          !['sourceDigest', 'fenceDigest'].every(
+            (key) => typeof event[key] === 'string' && /^[a-f0-9]{64}$/.test(event[key]),
+          ) ||
+          !Number.isSafeInteger(event.observedAtMs) ||
+          event.observedAtMs < 0 ||
+          event.observedAtMs > interruptionFields.legacyInterruption.observeUntilMs
+        )
+          throw unproven();
+        interruptionObservation = event;
+        await write(phase, currentIdentity);
       }),
     assertOwnership: () =>
       serial(async () => {
@@ -659,6 +717,8 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
       serial(async () => {
         if (!migrationManifest) throw new Error('MAINTENANCE_MIGRATIONS_UNPROVEN');
         if (first) {
+          if (next === 'producers_stopped' && interrupted && !interruptionObservation)
+            throw unproven();
           if (
             next === 'opened' &&
             candidateStartupEvents.length &&
@@ -678,7 +738,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
             'preflight',
             'prepared',
             'orders_fenced',
-            'legacy_settled',
+            interrupted ? 'legacy_interruption_accepted' : 'legacy_settled',
             'producers_stopped',
             'all_fenced',
             'stopped',

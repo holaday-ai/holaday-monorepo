@@ -25,10 +25,18 @@ export async function runMaintenanceReadinessCommand(
     closeDatabase(): Promise<void>;
   },
 ): Promise<void> {
-  const [command, attempt, candidate, configDigest, migrationDigest, inventoryDigest, bootId] =
-    args;
+  const [command, attempt, candidate, configDigest, migrationDigest, inventoryDigest] = args;
+  const first = command === 'services-first-cutover' || command === 'verify-first-cutover';
+  const verify = command === 'verify' || command === 'verify-first-cutover';
+  const bootId = verify ? args[6] : undefined;
+  const riskDigest = first ? args[verify ? 7 : 6] : undefined;
   if (
-    !((command === 'services' && args.length === 6) || (command === 'verify' && args.length === 7))
+    !(
+      (command === 'services' && args.length === 6) ||
+      (command === 'verify' && args.length === 7) ||
+      (command === 'services-first-cutover' && args.length === 7) ||
+      (command === 'verify-first-cutover' && args.length === 8)
+    )
   )
     throw new Error('MAINTENANCE_READINESS_INPUT');
   let context: ServicesContext;
@@ -39,14 +47,15 @@ export async function runMaintenanceReadinessCommand(
       configDigest,
       migrationDigest,
       inventoryDigest,
-      stage: command === 'services' ? 'prepare' : 'preopen',
+      stage: verify ? 'preopen' : 'prepare',
       nowMs: Date.now(),
-      ...(command === 'verify' ? { identity: { candidate, bootId } } : {}),
+      ...(verify ? { identity: { candidate, bootId } } : {}),
+      ...(first ? { kind: 'first-cutover', riskDigest } : {}),
     });
   } catch {
     throw new Error('MAINTENANCE_READINESS_INPUT');
   }
-  if (command === 'services') return operations.services(context);
+  if (!verify) return operations.services(context);
   const expected = context.identity;
   if (!expected) throw new Error('MAINTENANCE_READINESS_INPUT');
   const identity = operations.readIdentity();

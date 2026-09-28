@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 差异计划已批准：4.R1风险证据链已验证，继续4.R2
+
+用户对`834022c7`回复“继续”，已开始原工作树串行实施，不再等待计划确认。审批v2→原持锁journal→采集/发布→索引/context→readiness首次专用命令已接入：风险摘要固定绑定原五字段、旧源、窗口、责任人与窄范围批准；中断观察必须实际写盘才能进入停止意图；备份、seed和新boot保留残余风险。普通/v1路径不接受此例外。尚未接完4.R2实际停止分支，不是可执行现场发布。
+
+新增测试均已先观察到预期失败。当前本机browser973/973退出0、0跳过；其后补了“进入中断阶段不能退回prepare报告”限制，关联collector113/113及实际LinuxNode22/UID998三文件222/222退出0、0跳过。应用入口/readiness/证据读取69/69，orchestrator类型检查退出0。日志`/tmp/holaday-interruption-r1-{browser,collector-final,linux,ts,typecheck}.log`。真实临时文件/journal/索引与Linux属主路径是本轮证据；外部主机、停止、恢复回执仍为合成边界测试，不能冒充现场停写/恢复通过。
+
+最终验证：应用前置Node73/73、orchestrator507文件8602通过/1条件跳过，退出0；跳过的是`authenticated diagnostic child`，父测试真实调用该专属子进程，不能把它计成独立恢复演练。日志`/tmp/holaday-interruption-r1-app-full.log`。显式合成DB65534/Redis65533、2GB堆且排除integration；更正初始“单worker”记录：配置中的maxThreads=4优先于--maxWorkers=1，后续显式`--no-file-parallelism`并固定线程池上下限1，不重跑已通过全套制造重复劳动。
+
+自审的prepare阶段限制与日志返回独立副本均经RED→GREEN；最终原ops套件120/59/16/824与Python12通过、0跳过、退出0，`/tmp/holaday-interruption-r1-ops.log`。最后修正后的LinuxNode22/UID998三文件222/222通过、0跳过、退出0，`/tmp/holaday-interruption-r1-linux-final.log`。最终typecheck退出0，十个改动代码/测试文件Biome和diff-check通过。两次apply_patch审核超时均未执行，按工具允许各原样重试一次成功；无权限绕过。所有回归进程及临时QA已结束，未挂生产凭据/宿主PID，原数据库Redis未动。
+
+4.R1本地提交后直接继续4.R2工作观察/停止分支，再做6.R3及原Task4–6真实闭环，不等待重复批准。4.R1只是可验证的协议/证据单元，不是完整可上线流程；整分支独立审查仍待Task6。Task4BASE844c2ced不变、自动化仍暂停、CLIexecute关闭；没有push/PR/合并/部署或远端变更，原缓存保留。
+
 ### 2026-09-28 第 0 节已获书面确认：原计划差异待审阅
 
 用户对 `527db416` 的原设计第 0 节明确回复“确认”。已更新设计状态，依 writing-plans 技能在原 `2026-09-25-browser-first-cutover-implementation.md` 增补差异执行单，未另建计划或重置 Task4 BASE844c2ced。保留原 Native/主智能体串行方式：4.R1绑定首次批准/journal/报告，4.R2接工作观察/停止/物理停写分支，6.R3接原完整演练及未完现场闭环。已完成模块不重建；范围级未知不能替代支付、持久工作或写入隔离证据。

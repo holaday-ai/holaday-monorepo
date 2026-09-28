@@ -27,6 +27,76 @@ const approved = {
   operatorRef: 'qa-operator',
 };
 
+test('v2 approval binds a first-only interruption without widening the payment or replay scope', async (t) => {
+  const record = {
+    ...approved,
+    schemaVersion: 2,
+    legacyInterruption: {
+      mode: 'controlled-interruption',
+      scope: 'legacy-non-payment-memory',
+      approvalRef: 'legacy-interruption-20260928',
+      capabilityDigest: '7'.repeat(64),
+      observeUntilMs: 1800,
+      noAutomaticReplay: true,
+    },
+  };
+  const f = await fixture(t, record);
+  const result = await readFirstCutoverApproval({ attempt: record.attempt }, f.io);
+  const binding = Object.fromEntries(
+    ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map((k) => [
+      k,
+      record[k],
+    ]),
+  );
+  const expected = createHash('sha256')
+    .update(
+      JSON.stringify({
+        binding,
+        legacyDigest: record.legacyDigest,
+        maintenanceEndsAtMs: 2000,
+        reconcileByMs: 3000,
+        operatorRef: 'qa-operator',
+        legacyInterruption: record.legacyInterruption,
+      }),
+    )
+    .digest('hex');
+  assert.equal(result.riskDigest, expected);
+  assert.deepEqual(result.legacyInterruption, record.legacyInterruption);
+  for (const change of [
+    (r) => {
+      r.schemaVersion = 1;
+    },
+    (r) => {
+      r.legacyInterruption.scope = 'all-work';
+    },
+    (r) => {
+      r.legacyInterruption.noAutomaticReplay = false;
+    },
+    (r) => {
+      r.legacyInterruption.observeUntilMs = 2001;
+    },
+    (r) => {
+      r.legacyInterruption.allowUnknownPayment = true;
+    },
+    (r) => {
+      r.legacyInterruption.capabilityDigest = '';
+    },
+  ]) {
+    const bad = structuredClone(record);
+    change(bad);
+    const b = await fixture(t, bad);
+    await assert.rejects(
+      readFirstCutoverApproval({ attempt: record.attempt }, b.io),
+      /CUTOVER_APPROVAL_UNPROVEN/,
+    );
+  }
+  const changed = await fixture(t, { ...record, reconcileByMs: 3001 });
+  assert.notEqual(
+    (await readFirstCutoverApproval({ attempt: record.attempt }, changed.io)).riskDigest,
+    expected,
+  );
+});
+
 test('failure observation reads exact status after expiry and never upgrades a lost or busy close', async () => {
   for (const mode of [
     'closed',
@@ -1444,6 +1514,28 @@ test('first preparation binds a real reserved journal and stages without fabrica
     }),
     /MAINTENANCE_RELEASE_LOCKED/,
   );
+});
+test('first preparation preserves v2 approval and risk in the real reserved journal', async (t) => {
+  const f = await preparationFixture(t);
+  Object.assign(f.approval, {
+    schemaVersion: 2,
+    legacyInterruption: {
+      mode: 'controlled-interruption',
+      scope: 'legacy-non-payment-memory',
+      approvalRef: 'legacy-interruption-20260928',
+      capabilityDigest: '7'.repeat(64),
+      observeUntilMs: 1800,
+      noAutomaticReplay: true,
+    },
+  });
+  const prepared = await firstHost.prepareFirstCutoverCandidate(
+    { attempt: approved.attempt },
+    f.io,
+  );
+  const effects = await prepared.journal.readFirstCutoverEffects();
+  assert.equal(effects.schemaVersion, 2);
+  assert.deepEqual(effects.legacyInterruption, f.approval.legacyInterruption);
+  assert.match(effects.riskDigest, /^[a-f0-9]{64}$/);
 });
 
 for (const fault of [
