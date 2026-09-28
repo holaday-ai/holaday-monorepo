@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -11,6 +12,7 @@ import { connectFirstCutoverGatewaySession } from '/source/browser-first-cutover
 import {
   createFirstCutoverRetirementObserver,
   readReviewedFirstCutoverLegacySource,
+  recordFirstCutoverFailure,
 } from '/source/browser-first-cutover-host.mjs';
 import {
   classifyFirstCutoverHostPair,
@@ -24,6 +26,7 @@ import {
 } from '/source/browser-first-cutover-registrations.mjs';
 import { createLegacyRuntimeEffects } from '/source/browser-first-cutover-runtime.mjs';
 import { createFirstCutoverExecutionSite } from '/source/browser-first-cutover-site.mjs';
+import { performFirstCutover } from '/source/browser-first-cutover-transition.mjs';
 import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
@@ -48,12 +51,18 @@ assert.ok(
         '--execution-site',
         '--execution-site-interruption',
         '--execution-site-lost-ack',
+        '--execution-site-lost-effect',
+        '--execution-site-known-effect',
       ].includes(process.argv[2])),
 );
 const lostAck = process.argv[2] === '--gateways-lost-ack';
 const siteMode = process.argv[2]?.startsWith('--execution-site');
 const siteLostAck = process.argv[2] === '--execution-site-lost-ack';
-const interruption = process.argv[2] === '--execution-site-interruption';
+const lostEffect = ['--execution-site-lost-effect', '--execution-site-known-effect'].includes(
+  process.argv[2],
+);
+const knownEffect = process.argv[2] === '--execution-site-known-effect';
+const interruption = lostEffect || process.argv[2] === '--execution-site-interruption';
 const sessionMode = siteMode || process.argv[2]?.startsWith('--gateway-session');
 const sessionLostAck = process.argv[2] === '--gateway-session-lost-ack';
 const observeExecutor = process.argv[2] === '--gateway-session-observed-executor';
@@ -67,9 +76,32 @@ const cwd = gateways
 const directory = '/var/lib/holaday-deploy/maintenance';
 await fs.mkdir(directory, { recursive: true, mode: 0o700 });
 await fs.mkdir(cwd, { recursive: true });
+let effectCount = 0;
+let knownEffectVisible = false;
+let effectServer;
+let effectUrl;
+if (lostEffect) {
+  // Independent non-payment test oracle, never passed to production observers.
+  // Complete the effect then destroy the response. Every legacy restart would
+  // repeat the effect: there is intentionally no persistent deduplication key.
+  effectServer = createServer((request) => {
+    request.resume();
+    request.on('end', () => {
+      effectCount++;
+      request.socket.destroy();
+    });
+  });
+  await new Promise((resolve, reject) => {
+    effectServer.once('error', reject);
+    effectServer.listen(0, '127.0.0.1', resolve);
+  });
+  effectUrl = `http://127.0.0.1:${effectServer.address().port}/non-payment-effect`;
+}
 await fs.writeFile(
   `${cwd}/registry-worker.cjs`,
-  `require('http').createServer((q,r)=>r.end('qa')).listen(${mainPort});process.on('SIGINT',()=>{});\n`,
+  lostEffect
+    ? `const http=require('http');const request=http.request(${JSON.stringify(effectUrl)},{method:'POST'},()=>process.exit(2));request.once('error',()=>{http.createServer((q,r)=>r.end('qa')).listen(${mainPort});});request.end('synthetic');process.on('SIGINT',()=>{});\n`
+    : `require('http').createServer((q,r)=>r.end('qa')).listen(${mainPort});process.on('SIGINT',()=>{});\n`,
 );
 await fs.writeFile('/tmp/registry-idle.cjs', 'setInterval(()=>{},1000);\n');
 // Approved metadata is synthetic; process and protected-file observations below
@@ -135,6 +167,7 @@ try {
   const bootId = (await fs.readFile('/proc/sys/kernel/random/boot_id', 'utf8'))
     .trim()
     .replaceAll('-', '');
+  if (lostEffect) assert.equal(effectCount, 1, 'legacy acted once and the HTTP response was lost');
   const proc = async (pid) => {
     const base = `/proc/${pid}`;
     const stat = (await fs.readFile(`${base}/stat`, 'utf8')).split(') ').at(-1).trim().split(/\s+/);
@@ -561,7 +594,12 @@ try {
           },
         );
       if (siteMode) {
-        siteContext = { approval, binding: fullBinding, journal };
+        siteContext = {
+          approval,
+          binding: fullBinding,
+          journal,
+          root: `/opt/holaday-releases/${fullBinding.candidate}`,
+        };
         // One physical Aliyun host + receiver. Other host, ingress and business
         // counts are explicitly synthetic, NOT full two-host cutover evidence.
         const fence = (stage) => ({
@@ -634,7 +672,9 @@ try {
                       schemaVersion: 2,
                       activeRequests: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
                       externalWork: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
-                      knownExternalWork: [],
+                      knownExternalWork: knownEffectVisible
+                        ? [{ privateEvidenceRef: sha('known QA action'), outcome: 'unknown' }]
+                        : [],
                       capabilityDigest: interruptionMetadata.legacyInterruption.capabilityDigest,
                       replaySourcesDigest: sha('synthetic QA replay source'),
                       pendingReplay: 0,
@@ -651,7 +691,7 @@ try {
               reconcile: async () => {
                 throw Error('not exercised');
               },
-              holdMaintenance: async () => {},
+              holdMaintenance: lostEffect ? recordFirstCutoverFailure : async () => {},
               readBackupPlan: async () => {
                 throw Error('not exercised');
               },
@@ -774,76 +814,182 @@ try {
       } else client = await connect();
     }
     if (siteMode) {
-      for (const [phase, method] of [
-        ['prepared', null],
-        ['orders_fenced', 'fenceOrders'],
-        interruption
-          ? ['legacy_interruption_accepted', 'acceptLegacyInterruption']
-          : ['legacy_settled', 'settleLegacy'],
-        ['producers_stopped', 'stopProducers'],
-        ['all_fenced', 'fenceAll'],
-        ['stopped', 'stopLegacy'],
-      ]) {
-        await journal.persist(phase, { candidate: 'b'.repeat(40) });
-        if (siteLostAck && phase === 'stopped') {
-          await assert.rejects(executionSite.lifecycle.stopLegacy(siteContext), /UNPROVEN/);
-          const count = (await journal.readFirstCutoverEffects()).registrationEvents.length;
-          await assert.rejects(executionSite.lifecycle.stopLegacy(siteContext), /UNPROVEN/);
-          await assert.rejects(executionSite.lifecycle.assertStopped(siteContext), /UNPROVEN/);
-          assert.equal((await journal.readFirstCutoverEffects()).registrationEvents.length, count);
-          assert.equal((await journal.readFirstCutoverEffects()).unmanagedEvents.length, 0);
-          break;
-        }
-        if (method)
-          try {
-            await executionSite.lifecycle[method](siteContext);
-          } catch (error) {
-            const effects = await journal.readFirstCutoverEffects();
-            console.error(
-              'QA composition failure',
-              phase,
-              effects.startupEvents.at(-1)?.phase,
-              effects.registrationEvents.at(-1)?.phase,
-              effects.unmanagedEvents.at(-1)?.phase,
-            );
-            throw error;
-          }
-        if (phase === 'producers_stopped') {
-          assert.equal(
-            (await fetch('http://127.0.0.1:4010', { headers: { connection: 'close' } })).status,
-            200,
-          );
-          assert.equal(
-            (await fetch('http://127.0.0.1:4011', { headers: { connection: 'close' } })).status,
-            200,
-          );
-        }
-      }
-      await assert.rejects(fetch('http://127.0.0.1:4010'));
-      assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
-      if (siteLostAck) {
-        assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
-        await assert.rejects(executionSite.lifecycle.detach(siteContext), /UNPROVEN/);
-        assert.equal((await receiverCompletion).code, 1);
-        console.log(
-          'PASS execution-site lost ACK: physical deletion retained, no replay or unmanaged signal, no false stopped proof; synthetic ingress/business/other-host boundaries',
+      if (lostEffect) {
+        // Exercise the real transition/site/journal through retirement. The
+        // not-yet-integrated restore/start/readiness tail MUST fail, not return
+        // a fabricated success. This is deliberately NOT a full cutover pass.
+        const forbiddenTail = async () => {
+          throw new Error('CUTOVER_QA_UNEXPECTED_TAIL');
+        };
+        const adapter = Object.fromEntries(
+          [
+            'settleLegacy',
+            'migrate',
+            'initializeState',
+            'start',
+            'verify',
+            'beforeOpen',
+            'open',
+            'status',
+            'afterOpen',
+            'resumeWorker',
+            'reconcile',
+            'close',
+          ].map((name) => [name, forbiddenTail]),
         );
-      } else {
-        assert.deepEqual((await executionSite.lifecycle.assertStopped(siteContext)).survivors, []);
-        if (interruption) {
-          const effects = await journal.readFirstCutoverEffects();
-          assert.equal(effects.schemaVersion, 2);
+        Object.assign(adapter, {
+          preflight: async (candidate) => assert.equal(candidate, siteContext.binding.candidate),
+          stage: async () => assert.deepEqual(await journal.assertOwnership(), siteContext.binding),
+          persist: (phase, detail) => {
+            if (knownEffect && phase === 'legacy_interruption_accepted') knownEffectVisible = true;
+            return journal.persist(phase, detail);
+          },
+          backupAndRestoreCheck: async () => {
+            throw new Error('CUTOVER_QA_RESTORE_NOT_CONFIGURED');
+          },
+          holdMaintenance: (result) => executionSite.lifecycle.holdMaintenance(siteContext, result),
+        });
+        for (const method of [
+          'readLegacyDisposition',
+          'acceptLegacyInterruption',
+          'fenceOrders',
+          'stopProducers',
+          'fenceAll',
+          'stopLegacy',
+        ])
+          adapter[method] = () => executionSite.lifecycle[method](siteContext);
+        const result = await performFirstCutover({
+          candidate: siteContext.binding.candidate,
+          adapter,
+          window: siteContext.approval,
+        });
+        assert.equal(result.ok, false);
+        assert.equal(result.action, 'hold_maintenance');
+        assert.equal(
+          result.phase,
+          knownEffect ? 'legacy_interruption_accepted' : 'backup_verified',
+        );
+        const effects = await journal.readFirstCutoverEffects();
+        assert.equal(effects.failureObservation.status.mode, 'not-started');
+        assert.equal(effects.failureObservation.status.closeAcknowledged, false);
+        if (knownEffect) {
+          // The real site intentionally normalizes inner boundary failures.
+          assert.equal(result.code, 'CUTOVER_SITE_UNPROVEN');
+          assert.equal(effects.interruptionObservation, undefined);
+          assert.equal(effects.registrationEvents.length, 0);
+          assert.equal(effects.unmanagedEvents.length, 0);
+          assert.equal((await fetch(`http://127.0.0.1:${mainPort}`)).status, 200);
+        } else {
+          assert.equal(result.code, 'CUTOVER_QA_RESTORE_NOT_CONFIGURED');
           assert.equal(effects.interruptionObservation.riskDigest, effects.riskDigest);
-          console.log(
-            'PASS controlled interruption: durable owned risk survives physical gateway retirement; business and ingress observations remain synthetic',
+          assert.equal(effects.legacyInterruption.scope, 'legacy-non-payment-memory');
+          assert.equal(effects.legacyInterruption.noAutomaticReplay, true);
+          assert.deepEqual(
+            (await executionSite.lifecycle.assertStopped(siteContext)).survivors,
+            [],
           );
+          await assert.rejects(fetch(`http://127.0.0.1:${mainPort}`));
         }
-        await assert.rejects(fetch('http://127.0.0.1:4011'));
+        assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
         await executionSite.lifecycle.detach(siteContext);
         assert.equal((await receiverCompletion).code, 0);
+        if (!knownEffect) {
+          await pm2('kill');
+          await pm2('resurrect');
+          assert.deepEqual(
+            (await rows()).map((r) => r.name),
+            ['qa-unrelated'],
+          );
+        }
+        assert.equal(effectCount, 1, 'no retry, old startup replay, or business compensation');
         console.log(
-          'PASS execution-site composition: actual gateway receiver, owned journal, protected startup, PM2 and pidfd retirement; synthetic ingress/business/other-host boundaries',
+          `QA_LOST_EFFECT_RESULT ${JSON.stringify({
+            scope: 'retirement-and-failure-only',
+            knownEffect,
+            phase: result.phase,
+            effectCount,
+            riskDigest: effects.riskDigest,
+            releaseReady: false,
+          })}`,
         );
+      } else {
+        for (const [phase, method] of [
+          ['prepared', null],
+          ['orders_fenced', 'fenceOrders'],
+          interruption
+            ? ['legacy_interruption_accepted', 'acceptLegacyInterruption']
+            : ['legacy_settled', 'settleLegacy'],
+          ['producers_stopped', 'stopProducers'],
+          ['all_fenced', 'fenceAll'],
+          ['stopped', 'stopLegacy'],
+        ]) {
+          await journal.persist(phase, { candidate: 'b'.repeat(40) });
+          if (siteLostAck && phase === 'stopped') {
+            await assert.rejects(executionSite.lifecycle.stopLegacy(siteContext), /UNPROVEN/);
+            const count = (await journal.readFirstCutoverEffects()).registrationEvents.length;
+            await assert.rejects(executionSite.lifecycle.stopLegacy(siteContext), /UNPROVEN/);
+            await assert.rejects(executionSite.lifecycle.assertStopped(siteContext), /UNPROVEN/);
+            assert.equal(
+              (await journal.readFirstCutoverEffects()).registrationEvents.length,
+              count,
+            );
+            assert.equal((await journal.readFirstCutoverEffects()).unmanagedEvents.length, 0);
+            break;
+          }
+          if (method)
+            try {
+              await executionSite.lifecycle[method](siteContext);
+            } catch (error) {
+              const effects = await journal.readFirstCutoverEffects();
+              console.error(
+                'QA composition failure',
+                phase,
+                effects.startupEvents.at(-1)?.phase,
+                effects.registrationEvents.at(-1)?.phase,
+                effects.unmanagedEvents.at(-1)?.phase,
+              );
+              throw error;
+            }
+          if (phase === 'producers_stopped') {
+            assert.equal(
+              (await fetch('http://127.0.0.1:4010', { headers: { connection: 'close' } })).status,
+              200,
+            );
+            assert.equal(
+              (await fetch('http://127.0.0.1:4011', { headers: { connection: 'close' } })).status,
+              200,
+            );
+          }
+        }
+        await assert.rejects(fetch('http://127.0.0.1:4010'));
+        assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
+        if (siteLostAck) {
+          assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
+          await assert.rejects(executionSite.lifecycle.detach(siteContext), /UNPROVEN/);
+          assert.equal((await receiverCompletion).code, 1);
+          console.log(
+            'PASS execution-site lost ACK: physical deletion retained, no replay or unmanaged signal, no false stopped proof; synthetic ingress/business/other-host boundaries',
+          );
+        } else {
+          assert.deepEqual(
+            (await executionSite.lifecycle.assertStopped(siteContext)).survivors,
+            [],
+          );
+          if (interruption) {
+            const effects = await journal.readFirstCutoverEffects();
+            assert.equal(effects.schemaVersion, 2);
+            assert.equal(effects.interruptionObservation.riskDigest, effects.riskDigest);
+            console.log(
+              'PASS controlled interruption: durable owned risk survives physical gateway retirement; business and ingress observations remain synthetic',
+            );
+          }
+          await assert.rejects(fetch('http://127.0.0.1:4011'));
+          await executionSite.lifecycle.detach(siteContext);
+          assert.equal((await receiverCompletion).code, 0);
+          console.log(
+            'PASS execution-site composition: actual gateway receiver, owned journal, protected startup, PM2 and pidfd retirement; synthetic ingress/business/other-host boundaries',
+          );
+        }
       }
     } else {
       if (attachedBaseline) {
@@ -1007,7 +1153,7 @@ try {
       'PASS physical protected registration removal: memory-enabled UID998 worker exited, stopped cron removed, unrelated PID unchanged, private backup and six real journal events',
     );
   }
-  if (!observeExecutor) {
+  if (!lostEffect && !observeExecutor) {
     await pm2('kill');
     await pm2('resurrect');
     assert.deepEqual(
@@ -1024,4 +1170,8 @@ try {
   if (gateway && gateway.exitCode === null && gateway.signalCode === null) gateway.kill('SIGTERM');
   await pm2('kill');
   await journal?.close();
+  if (effectServer)
+    await new Promise((resolve, reject) =>
+      effectServer.close((error) => (error ? reject(error) : resolve())),
+    );
 }

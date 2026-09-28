@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 6.R3续跑：丢失外部响应的真实停止/故障段已接通，完整切换仍未完成
+
+承接`e994cfd0`，原Task4 BASE不变。没有重试下方被拒绝的管理凭据读取，也没有SSH/SQL/支付方访问。本轮沿原6.R3创建预定的`browser-first-cutover.integration.test.mjs`入口，扩展原Linux停止夹具；没有改生产模块、重建镜像或新增框架。
+
+真实测试旧进程向容器内独立非支付HTTP计数服务发送一次动作；服务完成动作后断开响应，旧进程仅在收到网络错误后开放健康端口。计数器不提供给生产观察器，没有持久去重键，每次旧进程复活都会再发一次。原`performFirstCutover`→site→journal→受保护停止会话实际串联：未知场景完成真实PM2/pidfd停止及启动来源删除，在尚未配置的恢复阶段明确失败并保留真实failureObservation/riskDigest；QA重启PM2后只恢复无关测试进程，计数仍为1。已知场景在中断意图阶段暴露具体未决动作，原site拒绝，旧进程仍活、没有停止事件、计数仍为1。没有把已发生动作写成resolved或无损完成。
+
+**边界：** 仅`retirement-and-failure-only`，不是原6.R3完整成功/故障演练通过。另一主机、入口、能力/业务/数据库/恢复来源观察仍为夹具中明确的合成事实；stage只核对预先建立的真实journal，未覆盖完整host安装。恢复阶段故意抛`CUTOVER_QA_RESTORE_NOT_CONFIGURED`，其后的迁移/新候选/readiness/open方法全部拒绝而非成功替身。完整备份恢复、新boot不确定工作、开放后晚到已知动作、现场独立facts和整分支审查仍须完成；CLI execute继续关闭。
+
+回归有效性：仅在`/private/tmp/holaday-lost-effect-mutation.edgPrA/`临时模块副本移除knownExternalWork保护，再只读覆盖挂载到QA，已知场景错误前进到backup_verified，断言失败0/1、退出1、零跳过（`/tmp/holaday-lost-effect-mutant.log`）；仓库生产模块未修改。最终验证结果、命令和初始夹具错误详见原verification文件。每个案例独立新容器，保留失败状态直到容器销毁，不为下一个案例擦除受保护日志。
+
+最终未知/已知案例各1/1、原物理停止模式、ops120/59/16/868及Python12全部退出0、零跳过；两MJS Biome/diff-check通过。日志`/tmp/holaday-lost-effect-{unknown-verified,known-site-contract,original-physical-verified,ops}.log`。初始夹具摘要/EEXIST、原模式PID1、site拒绝码预期及样式失败均已在verification记录，没有降级生产校验。未重跑完整browser/应用全套，未做独立整分支审查。
+
+下一步直接扩展这个既有入口接原备份/恢复/候选尾段与剩余成功/故障案例，不重复本次计数器或停止证明；现场观察权限路径仍等待特定授权，不绕过、不将覆盖不足填零。自动化继续；R2/Task4–6未完成，无push/PR/合并/部署。原缓存、历史订单/额度/商户、私钥/USB/通道、PayPal、UI及扩展均未改。
+
 ### 2026-09-29 现场写入者核查：确认应用账号视野不完整，接入独立数据库观察原语
 
 已保存本地提交`82e0b9d1`，提交后仅原` scripts/__pycache__/ `未跟踪。之后拟编写一次限定SSH诊断，检查Vultr `/root/.my.cnf`、`/etc/mysql/debian.cnf`是否有现成连接配置；**在创建本地诊断文件的apply_patch阶段被权限审核拒绝，未创建脚本、未执行SSH、未读取这两个文件或任何密码。** 审核原因是应用账号权限不足后的管理凭据查找缺少针对性授权。不得改用其他工具/路径/间接执行绕过，也不重复无密码认证。已向用户说明，需要明确批准仅读取上述固定文件内已有连接参数用于只读元数据核查；不展示/复制凭据，不创建账号/授予权限/改业务数据。此新增权限阻断不否定下述已完成的原应用账号只读检查或QA结果。其他独立6.R3工作仍可推进，因此未将自动化误标为无事可做而暂停；后续轮次不能重复尝试此受阻凭据路径。
