@@ -268,6 +268,74 @@ test('persisted-work host reader owns and closes a dedicated approved database c
   }
 });
 
+test('database writer host observation is bound, closes its connection, and rejects partial visibility', async () => {
+  assert.equal(typeof firstHost.readFirstCutoverDatabaseWriters, 'function');
+  const config = Buffer.from('DATABASE_URL=mysql://synthetic@127.0.0.1/qa');
+  const binding = Object.fromEntries(
+    ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map((k) => [
+      k,
+      approved[k],
+    ]),
+  );
+  binding.configDigest = createHash('sha256').update(config).digest('hex');
+  const identity = { database: 'qa', serverUuid: '11111111-1111-4111-8111-111111111111' };
+  const context = {
+    binding,
+    approval: { ...approved, ...binding },
+    root: `/opt/holaday-releases/${binding.candidate}`,
+    journal: { assertOwnership: async () => binding },
+  };
+  for (const fault of ['none', 'permission', 'config', 'ownership', 'root', 'deadline', 'close']) {
+    let connections = 0;
+    let closes = 0;
+    const io = {
+      platform: 'linux',
+      uid: 0,
+      now: () => (fault === 'deadline' ? approved.maintenanceEndsAtMs : 1000),
+      readConfig: async () => (fault === 'config' ? Buffer.from('changed') : config),
+      parseConfig: () => ({ DATABASE_URL: 'mysql://synthetic@127.0.0.1/qa' }),
+      connectWorkDatabase: async () => {
+        connections++;
+        return {
+          query: async ({ sql }) => {
+            if (sql.includes('@@server_uuid'))
+              return [
+                [{ ...identity, version: '8.0.46', performanceSchema: 1, partialRevokes: 0 }],
+              ];
+            if (sql === 'SHOW GRANTS FOR CURRENT_USER')
+              return [
+                [
+                  {
+                    grant: `GRANT ${fault === 'permission' ? 'USAGE' : 'PROCESS, EVENT'} ON *.* TO qa`,
+                  },
+                ],
+              ];
+            return [[]];
+          },
+          end: async () => {
+            closes++;
+            if (fault === 'close') throw new Error('private');
+          },
+        };
+      },
+    };
+    const ctx = { ...context };
+    if (fault === 'root') ctx.root = '/wrong';
+    if (fault === 'ownership')
+      ctx.journal = { assertOwnership: async () => ({ ...binding, attempt: 'wrong' }) };
+    if (fault === 'none') {
+      const result = await firstHost.readFirstCutoverDatabaseWriters(ctx, identity, io);
+      assert.equal(result.scope, 'mysql-server-observation-only');
+      assert.equal(result.unknownWriters, undefined);
+    } else
+      await assert.rejects(firstHost.readFirstCutoverDatabaseWriters(ctx, identity, io), {
+        message: 'CUTOVER_DATABASE_WRITERS_UNPROVEN',
+      });
+    assert.equal(connections, ['none', 'permission', 'close'].includes(fault) ? 1 : 0, fault);
+    assert.equal(closes, connections, fault);
+  }
+});
+
 test('backup plan reads the actual source identity and never treats a configured target as restored', async () => {
   assert.equal(typeof firstHost.readFirstCutoverBackupPlan, 'function');
   const sourceIdentity = {

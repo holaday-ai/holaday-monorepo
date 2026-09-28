@@ -6,6 +6,144 @@ const api = await import('./browser-first-cutover-mysql.mjs').catch((error) => {
   throw error;
 });
 const identity = { serverUuid: '11111111-1111-4111-8111-111111111111', database: 'source_db' };
+
+function writerFixture() {
+  const state = {
+    calls: [],
+    reads: 0,
+    grants: ['GRANT PROCESS, EVENT ON *.* TO `observer`@`localhost`'],
+    server: { ...identity, version: '8.0.46', performanceSchema: 1, partialRevokes: 0 },
+    sources: {
+      PROCESSLIST: [{ id: 7, command: 'Sleep' }],
+      INNODB_TRX: [],
+      EVENTS: [],
+      replication_connection_status: [],
+      replication_applier_status: [],
+    },
+  };
+  const db = {
+    query: async (input) => {
+      const sql = input.sql;
+      assert.equal(input.timeout, 4000);
+      state.calls.push(sql);
+      if (state.fail?.(sql)) throw new Error('password=must-not-escape');
+      if (sql.includes('@@server_uuid')) return [[{ ...state.server }]];
+      if (sql === 'SHOW GRANTS FOR CURRENT_USER') return [state.grants.map((grant) => ({ grant }))];
+      const key = Object.keys(state.sources).find((key) => sql.includes(`.${key} `));
+      if (!key) throw new Error('unexpected query');
+      if (key === 'PROCESSLIST') state.reads++;
+      return [structuredClone(state.sources[key])];
+    },
+  };
+  return { state, db };
+}
+async function readWriters(f, options = {}) {
+  assert.equal(typeof api.readCutoverMysqlWriters, 'function');
+  return api.readCutoverMysqlWriters(f.db, identity, { now: () => 1000, ...options });
+}
+
+test('writer observation checks full metadata visibility before reading any sessions', async () => {
+  const f = writerFixture();
+  const result = await readWriters(f);
+  assert.deepEqual(result.counts, {
+    sessions: 1,
+    transactions: 0,
+    enabledEvents: 0,
+    replicationReceivers: 0,
+    replicationAppliers: 0,
+  });
+  assert.equal(result.scope, 'mysql-server-observation-only');
+  assert.equal(result.observedAtMs, 1000);
+  assert.match(result.sourceDigest, /^[a-f0-9]{64}$/);
+  assert.equal(f.state.reads, 2);
+  assert.ok(!JSON.stringify(result).includes('observer'));
+  assert.ok(f.state.calls.every((sql) => /^(SELECT|SHOW) /.test(sql)));
+  assert.ok(
+    f.state.calls
+      .filter((sql) => sql.includes('.EVENTS '))
+      .every((sql) => !sql.includes('EVENT_SCHEMA=DATABASE()')),
+  );
+  assert.ok(
+    f.state.calls
+      .filter((sql) => sql.includes('.PROCESSLIST '))
+      .every((sql) => sql.includes('ID<>CONNECTION_ID()') && !sql.includes('INFO')),
+  );
+});
+
+for (const grants of [
+  ['GRANT USAGE ON *.* TO `observer`@`localhost`'],
+  [
+    'GRANT PROCESS ON *.* TO `observer`@`localhost`',
+    'GRANT EVENT ON `source_db`.* TO `observer`@`localhost`',
+  ],
+  ['GRANT `PROCESS`@`localhost` TO `observer`@`localhost`'],
+  ['GRANT SELECT ON `PROCESS ON *.* TO observer`.* TO `observer`@`localhost`'],
+])
+  test('partial or role-only grants cannot prove writer observation coverage', async () => {
+    const f = writerFixture();
+    f.state.grants = grants;
+    await assert.rejects(readWriters(f), /CUTOVER_MYSQL_WRITERS_UNPROVEN/);
+    assert.equal(f.state.reads, 0);
+  });
+
+for (const fault of [
+  'performance-off',
+  'partial-revokes',
+  'foreign-server',
+  'foreign-database',
+  'wrong-version',
+  'query-denied',
+  'clock-backwards',
+  'stale',
+  'session-drift',
+  'grant-drift',
+  'overflow',
+  'null-row',
+  'null-field',
+  'missing-field',
+  'extra-field',
+]) {
+  test(`writer observations refuse ${fault} without a zero fallback`, async () => {
+    const f = writerFixture();
+    let calls = 0;
+    if (fault === 'performance-off') f.state.server.performanceSchema = 0;
+    if (fault === 'partial-revokes') f.state.server.partialRevokes = 1;
+    if (fault === 'foreign-server')
+      f.state.server.serverUuid = '22222222-2222-4222-8222-222222222222';
+    if (fault === 'foreign-database') f.state.server.database = 'other';
+    if (fault === 'wrong-version') f.state.server.version = '10.11.0-MariaDB';
+    if (fault === 'query-denied') f.state.fail = (sql) => sql.includes('.INNODB_TRX ');
+    if (fault === 'overflow')
+      f.state.sources.PROCESSLIST = Array.from({ length: 10001 }, (_, id) => ({
+        id,
+        command: 'Sleep',
+      }));
+    if (fault === 'null-row') f.state.sources.PROCESSLIST = [null];
+    if (fault === 'null-field') f.state.sources.PROCESSLIST[0].id = null;
+    if (fault === 'missing-field') f.state.sources.PROCESSLIST = [{ id: 7 }];
+    if (fault === 'extra-field') f.state.sources.PROCESSLIST[0].INFO = 'private SQL';
+    const query = f.db.query;
+    f.db.query = async (input) => {
+      if (f.state.reads === 1 && fault === 'session-drift') f.state.sources.PROCESSLIST[0].id = 8;
+      if (f.state.reads === 1 && fault === 'grant-drift')
+        f.state.grants = ['GRANT PROCESS ON *.* TO `observer`@`localhost`'];
+      return query(input);
+    };
+    await assert.rejects(
+      readWriters(f, {
+        now: () =>
+          ++calls === 1
+            ? 1000
+            : fault === 'clock-backwards'
+              ? 999
+              : fault === 'stale'
+                ? 61001
+                : 1000,
+      }),
+      { message: 'CUTOVER_MYSQL_WRITERS_UNPROVEN' },
+    );
+  });
+}
 function fixture(database = 'source_db') {
   const state = {
     database,

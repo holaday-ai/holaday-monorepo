@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 现场写入者核查：确认应用账号视野不完整，接入独立数据库观察原语
+
+承接`21b0fac6`，原Task4 BASE不变。UTC2026-09-28T17:18:05.809Z–17:18:05.820Z沿原跳板完成一次只读MySQL覆盖核查，退出0；证明`/private/tmp/holaday-writer-coverage.7Qwbtz/proof.json`。现有应用账号没有直接全局PROCESS、没有角色授予；仅看到同账号4个Sleep连接。INNODB_TRX返回ER_SPECIFIC_ACCESS_DENIED_ERROR，两项复制元数据返回ER_TABLEACCESS_DENIED_ERROR。所选schema可见enabled events=0，而服务器event_scheduler=ON、read_only/super_read_only=0。这些是覆盖不足的证据，**不是没有写入者、无外部工作或停写成功**。没有改生产权限/账号/全局变量、没有业务写入或支付方调用，也没有重试同一失败查询。
+
+在原mysql模块新增`readCutoverMysqlWriters`，原host以`readFirstCutoverDatabaseWriters`接入既有受保护配置/窗口/journal所有权/专用连接关闭。要求MySQL8.0、独立核对源身份、直接全局PROCESS及EVENT、无partial revokes、Performance Schema启用且实际元数据可读；角色名称/局部授权不能伪装全局授权。查询全服务器会话（包括Sleep与无默认DB）、事务、所有schema的启用事件、复制receiver与总applier。前后权限/身份与两遍行身份摘要一致，限时/限行/严格返回形态；异常一律拒绝，不返回零。只输出数量、时间和摘要，不返回SQL正文/账号/事件内容。
+
+**范围限制：** 它只是`mysql-server-observation-only`，不是隔离、未来无法重连或未知写入者归零证明；不自动授予权限，不推荐给应用账号补全局EVENT（它还包含事件管理权限）。原site的四个独立facts仍必需，尚未把此子来源组合成生产`observeWriters/observeWork`默认实现。当前应用账号在新读取器上应被拒绝；需要已有、经批准且视野完整的观察路径，不能反复用应用账号、静默提权或改零值绕过。保持CLI execute关闭。
+
+验证：接口RED日志17失败/21通过（测试退出失败，首个shell的tail掩盖退出码，不算通过）；host新增边界RED退出1；严格返回形态补测先3失败/38通过、退出1。最终Mac双文件115/115，真实LinuxNode22双文件115/115；完整browser **1019/1019**，全部退出0、零跳过。四MJS Biome/diff-check通过。日志`/tmp/holaday-writer-{observation-red,host-red,shape-red,pair-final,linux-unit,browser}.log`。本轮没有重跑原ops/应用全套或重新验证已完成13表/TCP/恢复链，历史结果不改称新验收。
+
+真实LinuxNode22+独立MySQL8合成库完成：受限账号拒绝、跨账号无默认DB的Sleep连接可见、跨schema启用事件可见、实际未提交事务可见、撤回元数据权限后拒绝。最终日志`/tmp/holaday-writer-linux-mysql-final.log`退出0；初始化日志`/tmp/holaday-writer-linux-mysql.log`。QA脚本保留`/private/tmp/holaday-writer-qa.NR6ZRp/{run,verify}.mjs`；数据库用专有internal网络、无宿主端口、无生产挂载/凭据，Node依赖只读。测试后核实标签并清理`holaday-writer-mysql-nr6zrp`及`holaday-writer-nr6zrp`网络，只删除本例合成数据，原MySQL/Redis健康。默认沙箱Docker/格式化拒绝后通过正常审批运行，没有替代方式绕过权限。
+
+下一步仍是原4.R2现场闭环：解决观察路径覆盖权限，结合已有进程/启动来源/浏览器与外部工作事实，完成独立facts及恢复来源接线；不能再次重做本轮数据库观察器来替代它们。随后原6.R3完整成功/故障/丢响应不重放、单次现场入口、真实停写备份/Mac恢复、非PayPal恢复证据和整分支审查。R2/Task4–6未完成，自动化未暂停；没有push/PR/合并/部署，没有商户/密钥/USB/PayPal操作。
+
 ### 2026-09-29 夜间续跑：真实WS恢复配对通过，现场工具模块闭包补齐
 
 承接`b9454ca1`，原Task4 BASE不变。原执行步骤重启集成用例扩为旧模式/受控模式配对：真实MySQL持久任务/步骤、JWT和WS，旧模式派发一次、受控模式不重派发，历史任务/步骤整行保持不变；DrainController及状态文件真实，开放授权回调明确合成。仅在临时源码副本删除保护，实际收到click使严格分支断言失败（3通过/1失败、退出1）；恢复原实现后原三组WS **9/9**、队列 **54/54**，退出0、零跳过。不是完整切换或外部效果“恰好一次”证明。

@@ -21,7 +21,10 @@ import {
   classifyFirstCutoverHostPair,
   classifyFirstCutoverRetirementPair,
 } from './browser-first-cutover-inventory.mjs';
-import { readCutoverMysqlSnapshot } from './browser-first-cutover-mysql.mjs';
+import {
+  readCutoverMysqlSnapshot,
+  readCutoverMysqlWriters,
+} from './browser-first-cutover-mysql.mjs';
 import {
   captureLegacyRuntime,
   initializeFirstMaintenanceState,
@@ -1048,6 +1051,19 @@ export async function readFirstCutoverPersistedWork(context, overrides = {}) {
         now: io.now,
         includeReplaySources: context.approval.schemaVersion === 2,
       }),
+  );
+}
+
+/** One independent source for the eventual writer facts, not their substitute.
+ * Uses the approved DB connection and refuses insufficient metadata privileges.
+ * Never creates an observer account, grants privileges, or fills unknownWriters.
+ */
+export async function readFirstCutoverDatabaseWriters(context, expectedIdentity, overrides = {}) {
+  return withApprovedCutoverDatabase(
+    context,
+    overrides,
+    'CUTOVER_DATABASE_WRITERS_UNPROVEN',
+    (connection, io) => readCutoverMysqlWriters(connection, expectedIdentity, { now: io.now }),
   );
 }
 

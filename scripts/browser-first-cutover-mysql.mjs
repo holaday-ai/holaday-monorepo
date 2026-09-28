@@ -31,6 +31,156 @@ const digest = (value) => createHash('sha256').update(encode(value)).digest('hex
 const same = (left, right) => encode(left) === encode(right);
 const order = (left, right) => (left < right ? -1 : left > right ? 1 : 0);
 
+/** Dedicated MySQL 8.0 metadata observation, NOT a stopped-writer receipt.
+ * PROCESSLIST/INNODB_TRX require global PROCESS; EVENTS requires global EVENT
+ * to cover other schemas whose events may write into the selected database.
+ * Do not provision these privileges on an application account here. Existing
+ * roles/partial revokes are deliberately not inferred. No SQL text, user names,
+ * event bodies or channel credentials leave this reader. Idle sessions count.
+ * A stable double observation is not a lock, cannot exclude transient work or
+ * future reconnects, and must never alone become facts.unknownWriters = 0.
+ */
+export async function readCutoverMysqlWriters(db, expectedIdentity, { now = Date.now } = {}) {
+  const reject = () => {
+    throw new Error('CUTOVER_MYSQL_WRITERS_UNPROVEN');
+  };
+  try {
+    identifier(expectedIdentity.database);
+    if (!/^[a-f0-9-]{36}$/i.test(expectedIdentity.serverUuid)) reject();
+    const started = now();
+    let last = started;
+    const time = () => {
+      const current = now();
+      if (
+        !Number.isSafeInteger(started) ||
+        started < 0 ||
+        !Number.isSafeInteger(current) ||
+        current < last ||
+        current - started > 60000
+      )
+        reject();
+      last = current;
+      return current;
+    };
+    time();
+    const query = async (sql) => {
+      time();
+      const [rows] = await db.query({ sql, timeout: 4000 });
+      time();
+      if (
+        !Array.isArray(rows) ||
+        rows.length > 10000 ||
+        rows.some((r) => !r || typeof r !== 'object' || Array.isArray(r))
+      )
+        reject();
+      return rows;
+    };
+    const coverage = async () => {
+      const rows = await query(
+        'SELECT @@server_uuid AS serverUuid, DATABASE() AS `database`, VERSION() AS version, @@performance_schema AS performanceSchema, @@global.partial_revokes AS partialRevokes',
+      );
+      const s = rows[0];
+      if (
+        rows.length !== 1 ||
+        s.serverUuid !== expectedIdentity.serverUuid ||
+        s.database !== expectedIdentity.database ||
+        !/^8\.0\.\d+(?:[-.].*)?$/.test(s.version) ||
+        Number(s.performanceSchema) !== 1 ||
+        ![0, '0'].includes(s.partialRevokes)
+      )
+        reject();
+      const grants = (await query('SHOW GRANTS FOR CURRENT_USER'))
+        .map((row) => {
+          const values = Object.values(row);
+          if (values.length !== 1 || typeof values[0] !== 'string' || values[0].length > 32768)
+            reject();
+          return values[0];
+        })
+        .sort();
+      const privileges = new Set();
+      for (const grant of grants) {
+        if (grant.startsWith('REVOKE ')) reject();
+        // Anchor the privilege list before the first ON; an identifier or role
+        // named PROCESS must not be mistaken for the actual static privilege.
+        const match = /^GRANT ([A-Z_ ]+(?:, [A-Z_ ]+)*) ON \*\.\* TO /.exec(grant);
+        if (match) for (const p of match[1].split(', ')) privileges.add(p);
+      }
+      if (
+        !privileges.has('ALL PRIVILEGES') &&
+        (!privileges.has('PROCESS') || !privileges.has('EVENT'))
+      )
+        reject();
+      return digest({ server: s, grants });
+    };
+    const queries = {
+      sessions:
+        'SELECT ID AS id, COMMAND AS command FROM information_schema.PROCESSLIST WHERE ID<>CONNECTION_ID() LIMIT 10001',
+      transactions:
+        'SELECT trx_id AS id, trx_mysql_thread_id AS sessionId FROM information_schema.INNODB_TRX WHERE trx_mysql_thread_id<>CONNECTION_ID() LIMIT 10001',
+      enabledEvents:
+        "SELECT EVENT_SCHEMA AS schemaName, EVENT_NAME AS name FROM information_schema.EVENTS WHERE STATUS='ENABLED' LIMIT 10001",
+      replicationReceivers:
+        "SELECT CHANNEL_NAME AS name, SERVICE_STATE AS state FROM performance_schema.replication_connection_status WHERE SERVICE_STATE<>'OFF' LIMIT 10001",
+      replicationAppliers:
+        "SELECT CHANNEL_NAME AS name, SERVICE_STATE AS state FROM performance_schema.replication_applier_status WHERE SERVICE_STATE<>'OFF' LIMIT 10001",
+    };
+    const observe = async () => {
+      const sources = {};
+      const shapes = {
+        sessions: ['command', 'id'],
+        transactions: ['id', 'sessionId'],
+        enabledEvents: ['name', 'schemaName'],
+        replicationReceivers: ['name', 'state'],
+        replicationAppliers: ['name', 'state'],
+      };
+      for (const [name, sql] of Object.entries(queries)) {
+        const rows = await query(sql);
+        for (const row of rows) {
+          if (!same(Object.keys(row).sort(), shapes[name])) reject();
+          for (const [key, value] of Object.entries(row)) {
+            if (key === 'id' || key === 'sessionId') {
+              if (
+                !(typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) &&
+                !(typeof value === 'string' && /^[0-9]{1,30}$/.test(value))
+              )
+                reject();
+            } else if (
+              typeof value !== 'string' ||
+              value.length > 256 ||
+              (!value && !(key === 'name' && name.startsWith('replication')))
+            )
+              reject();
+          }
+        }
+        // Digest identities as well as counts: replacement at the same count
+        // cannot be reported as a stable observation. Do not return raw rows.
+        const records = rows.map(encode).sort();
+        if (new Set(records).size !== records.length) reject();
+        sources[name] = { count: rows.length, digest: digest(records) };
+      }
+      return sources;
+    };
+    const beforeCoverage = await coverage();
+    const first = await observe();
+    const second = await observe();
+    const afterCoverage = await coverage();
+    if (beforeCoverage !== afterCoverage || !same(first, second)) reject();
+    const observedAtMs = time();
+    return {
+      schemaVersion: 1,
+      scope: 'mysql-server-observation-only',
+      startedAtMs: started,
+      observedAtMs,
+      counts: Object.fromEntries(
+        Object.entries(second).map(([name, value]) => [name, value.count]),
+      ),
+      sourceDigest: digest({ coverage: afterCoverage, sources: second, started, observedAtMs }),
+    };
+  } catch {
+    reject();
+  }
+}
+
 // SHOW CREATE is SQL, not free text: never replace database-like text inside
 // string literals. Only the quoted qualifier followed by a dot is rebound.
 function normalizeDefinition(sql, database, sqlMode) {
