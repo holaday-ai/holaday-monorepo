@@ -1,6 +1,7 @@
 // Actual recovery-machine Docker/age/import exercise. The caller creates the
 // dedicated no-network container/volume; this fixture never stops/removes one.
-// Payload and key are synthetic. Source SSH and live coordinator are simulated.
+// Payload and key are synthetic. Source SSH and physical stopped facts are
+// simulated; recovery session pipes and the coordinator's journal are real.
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -16,6 +17,7 @@ import {
   pullFirstCutoverAgeBackup,
   restoreFirstCutoverAgeBackup,
 } from '../browser-first-cutover-backup.mjs';
+import { serveFirstCutoverRecoverySession } from '../browser-first-cutover-recovery-session.mjs';
 
 const [containerId, imageId, attempt] = process.argv.slice(2);
 assert.match(containerId ?? '', /^[a-f0-9]{64}$/);
@@ -86,11 +88,7 @@ const transfer = {
   expectedBackupDigest: hash(bytes),
   expectedBytes: bytes.length,
 };
-let checks = 0;
 const io = {
-  assertScope: async () => {
-    checks++;
-  }, // synthetic coordinator, not production stop proof
   pull: (input) =>
     pullFirstCutoverAgeBackup(input, {
       spawn: () =>
@@ -98,8 +96,91 @@ const io = {
     }),
 };
 const request = { transfer, identityFile, target };
-assert.deepEqual(await restoreFirstCutoverAgeBackup(request, io), identity);
-assert(checks >= 8);
+const binding = {
+  attempt,
+  candidate: 'a'.repeat(40),
+  configDigest: 'b'.repeat(64),
+  migrationDigest: hash('[]'),
+  inventoryDigest: 'd'.repeat(64),
+};
+const scope = {
+  schemaVersion: 1,
+  binding,
+  maintenanceEndsAtMs: Date.now() + 120000,
+  sourceOptions,
+  destination,
+  identityFile,
+  target,
+  sourceIdentity: {
+    serverUuid: '11111111-1111-4111-8111-111111111111',
+    database: 'synthetic_source',
+  },
+};
+const scopeBytes = JSON.stringify(scope);
+await writeFile(join(directory, `first-cutover-${attempt}.json`), scopeBytes, {
+  mode: 0o600,
+  flag: 'wx',
+});
+const scopeDigest = hash(scopeBytes);
+const publicScope = {
+  binding,
+  maintenanceEndsAtMs: scope.maintenanceEndsAtMs,
+  scopeDigest,
+  sourceIdentity: scope.sourceIdentity,
+  isolatedTarget: identity,
+};
+const journalDirectory = join(directory, 'journal');
+await mkdir(journalDirectory, { mode: 0o700 });
+// Child models the original Linux coordinator over exactly its stdin/stdout.
+// Only public metadata is sent, never the Mac identity file or private key.
+const script = `
+import assert from 'node:assert/strict';
+import { acquireReleaseJournal } from ${JSON.stringify(new URL('../browser-maintenance-journal.mjs', import.meta.url).href)};
+import { connectFirstCutoverRecoverySession } from ${JSON.stringify(new URL('../browser-first-cutover-recovery-session.mjs', import.meta.url).href)};
+const scope = ${JSON.stringify(publicScope)};
+const journal = await acquireReleaseJournal(${JSON.stringify(journalDirectory)}, { ...scope.binding, kind:'first-cutover', legacyDigest:'e'.repeat(64) });
+try {
+  await journal.bindManifest([]);
+  for (const phase of ['prepared','orders_fenced','legacy_settled','producers_stopped','all_fenced','stopped','backup_verified']) await journal.persist(phase, {candidate:scope.binding.candidate});
+  const baseline = await journal.readFirstCutoverEffects();
+  let checks=0;
+  const client = await connectFirstCutoverRecoverySession(scope, { input:process.stdin, output:process.stdout, assertScope:async()=>{
+    assert.deepEqual(await journal.assertOwnership(),scope.binding);
+    assert.deepEqual(await journal.readFirstCutoverEffects(),baseline);
+    assert.equal(baseline.phase,'backup_verified');
+    checks++;
+  }});
+  assert.deepEqual(await client.inspect(),scope.isolatedTarget);
+  assert.deepEqual(await client.restore(${JSON.stringify({ artifact, expectedBackupDigest: transfer.expectedBackupDigest, expectedBytes: transfer.expectedBytes })}),scope.isolatedTarget);
+  assert.deepEqual(await client.inspect(),scope.isolatedTarget);
+  await client.close();
+  assert(checks>=8);
+} finally { await journal.close(); }
+`;
+const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+  stdio: ['pipe', 'pipe', 'ignore'],
+});
+const exited = new Promise((resolve, reject) => {
+  child.once('error', reject);
+  child.once('close', (code) =>
+    code === 0 ? resolve() : reject(new Error('QA_COORDINATOR_FAILED')),
+  );
+});
+// Retain the child outcome even if local serving fails; never restart imports.
+exited.catch(() => {});
+try {
+  await serveFirstCutoverRecoverySession(
+    { directory, attempt, scopeDigest },
+    {
+      input: child.stdout,
+      output: child.stdin,
+      restore: (input, deps) => restoreFirstCutoverAgeBackup(input, { ...io, ...deps }),
+    },
+  );
+} finally {
+  child.stdin.end();
+}
+await exited;
 assert.equal(
   await query('SELECT HEX(text_value), HEX(payload), optional_value IS NULL FROM sample'),
   'E6B5B7E8BEB9\t00FF5C27\t1',
@@ -112,10 +193,13 @@ assert.equal(
   await query('SELECT COUNT(*) FROM information_schema.EVENTS WHERE EVENT_SCHEMA=DATABASE()'),
   '1',
 );
-await assert.rejects(restoreFirstCutoverAgeBackup(request, io), {
-  message: 'CUTOVER_RECOVERY_IMPORT_UNPROVEN',
-});
+await assert.rejects(
+  restoreFirstCutoverAgeBackup(request, { ...io, assertScope: async () => {} }),
+  {
+    message: 'CUTOVER_RECOVERY_IMPORT_UNPROVEN',
+  },
+);
 assert.equal(await query('SELECT COUNT(*) FROM sample'), '1');
 console.log(
-  'PASS actual pinned no-network Docker target + authenticated age descriptor import; UTF8/BLOB/NULL/trigger/event and repeat refusal; no production or migration proof',
+  'PASS actual pinned no-network Docker + authenticated age import over real coordinator child pipes and file journal; UTF8/BLOB/NULL/trigger/event and repeat refusal; physical stopped facts/source SSH synthetic, no production or migration proof',
 );

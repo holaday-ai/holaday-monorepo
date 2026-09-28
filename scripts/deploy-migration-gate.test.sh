@@ -6,6 +6,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 "$SCRIPT_DIR/browser-cutover-channel.test.py"
 node --test "$SCRIPT_DIR/browser-maintenance-manifest.test.mjs" \
   "$SCRIPT_DIR/browser-cutover-evidence.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-backup.test.mjs" \
+  "$SCRIPT_DIR/browser-first-cutover-recovery-session.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-mysql.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-age.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-host.test.mjs" \

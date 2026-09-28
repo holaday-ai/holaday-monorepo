@@ -428,7 +428,20 @@ test('coordinator site scope reads the fixed protected file and binds both hosts
     (await session.readFirstCutoverExecutionSiteScope({ attempt: binding.attempt }, io)).inventory,
     value.site.inventory,
   );
+  // Recovery metadata includes binding.inventoryDigest. Its own digest must
+  // therefore be bound OUTSIDE inventory, avoiding an impossible hash cycle.
+  value.site.backupRecoveryDigest = '8'.repeat(64);
+  await write();
+  const recoveryScope = await session.readFirstCutoverExecutionSiteScope(
+    { attempt: binding.attempt },
+    io,
+  );
+  assert.equal(recoveryScope.backupRecoveryDigest, '8'.repeat(64));
+  assert.equal(recoveryScope.binding.inventoryDigest, inventoryDigest);
   for (const mutate of [
+    (v) => {
+      v.site.backupRecoveryDigest = 'bad';
+    },
     (v) => {
       v.site.inventory.targets.push({ forged: true });
     },

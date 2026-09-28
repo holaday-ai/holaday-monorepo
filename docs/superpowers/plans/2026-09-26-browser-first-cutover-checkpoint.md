@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 续跑：原协调器管道上的Mac恢复会话与真实子进程演练
+
+承接 `724cd827`，Task4原BASE844c2ced不变。新增恢复会话端点复用原 `createFirstCutoverSessionWire`，没有新增SSH引擎、反向登录或第二协调器：Mac父进程消费原协调器SSH的stdout/stdin，Linux端使用同一连接。固定attach/inspect/restore/detach与单次restore；每次导入内部scope检查沿连接回原协调器。原site新增 `recovery.assertScope(publicScope)`，核验同一原journal、受保护执行清单、backup_verified阶段、不变effects记录与实际停写观察器；并非Mac上传stopped布尔值。
+
+Mac元数据0700目录/0600当前用户单链接文件与预先批准摘要绑定；私钥及identityFile路径不上传。**摘要放在原execution.site.backupRecoveryDigest，不能放inventory**：元数据本身含binding.inventoryDigest，内嵌会造成循环摘要。原无此字段的scope仍能读，但不能授权恢复。程序只读批准，不自动造清单。
+
+先观察七个缺失接口RED，site回调及受保护scope外部摘要绑定RED后GREEN。真实子进程演练发现detach结束回执与最后异步journal核验的EOF竞态，保留现场只读检查确认合成数据已导入（行/trigger/event各1），不重试原SQL；新增可靠RED，补detached确认握手后用全新目标验收通过。`/tmp/holaday-recovery-session-physical.log` 为失败证据，`/tmp/holaday-recovery-session-physical-final.log` 退出0：真实子进程管道、原文件journal、默认禁网Docker目标检查、age认证fd导入、UTF8/BLOB/NULL/trigger/event和重复拒绝均通过。源SSH及物理停写事实在此夹具仍合成，**不是Vultr/Mac真实跨机全流程或生产恢复证明**。
+
+新鲜验证：Mac三组 **67/67**、实际Linux同组 **67/67**；完整browser含两个发布入口 **934/934**；ops **120/59/16/768 + Python12**，全部退出0、0跳过。日志 `/tmp/holaday-recovery-session-{binding,linux,browser,ops}.log`。七MJS Biome、shell语法、diff-check通过。最初测试监听器提前消费管道导致握手丢失，修正夹具tap并精确停止仅本轮测试PID32910/32913；该中断不计通过。QA卷删除曾因--rm异步移除未结束被拒绝，Linux当时未启动；只读确认容器消失/卷无引用后完成清理和验证，非未知SQL重试。
+
+两个目标attempt `397a8c88-3216-4a41-b941-3a8c1aa0413c`（结束握手失败）及 `84026b17-422c-4c8b-b4bc-75fb1a4f3d96`（通过）的专用容器/卷均已移除，只含可再生成合成数据；原MySQL/Redis、缓存、私钥/USB/支付与历史业务不动。全部验证进程结束。没有push、PR、merge或部署，CLI execute继续关闭。
+
+下一步不要重写恢复端点：将该会话接入原backup完整I/O及首次入口（实际工具闭包/受保护元数据安装仍未做），复用原 `readCutoverMysqlSnapshot/compareCutoverMysqlSnapshots`、全部61SQL原runner、schema/业务对比和journal回执。现有纯MySQL目标没有Node工具，须明确批准的隔离执行工具/副本；runner会主动读dotenv，所以隔离副本不得含 `.env*`，不能仅清环境变量。继续原独立工作/写入事实、定向worker持久化、reconcile/hold及完整成功/故障演练/整分支审查；Tasks4–6尚未完成。
+
 ### 2026-09-28 同轮接线复核：原备份协调器与site导出契约修正
 
 Mac恢复端七文件已提交 `4bf74aeab23836da0557583b7d4d8c053e71ea72`。继续串联时发现上一轮site导出接口接收了错误的参数形状：原 `backupAndRestoreCheck` 实际传 `{binding,facility}`，site却比较整份backupPlan与维护截止时间，因此单独测试通过但原协调器接入会拒绝。

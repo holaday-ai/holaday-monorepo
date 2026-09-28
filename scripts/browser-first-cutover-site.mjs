@@ -85,6 +85,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
   let closed = false;
   let closeFailed = false;
   let last = -1;
+  let recoveryRecord;
   const used = new Set();
   const readScope = async (approval) => {
     const value = structuredClone(await io.readSite(approval));
@@ -485,6 +486,35 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
   };
   return {
     lifecycle,
+    recovery: {
+      // Supply directly to the recovery session's live scope callback. The Mac
+      // never supplies stopped booleans or a substitute journal/approval.
+      assertScope: (input) =>
+        run(
+          'recovery-scope',
+          context,
+          ['backup_verified'],
+          async () => {
+            const inventory = approvedInventory();
+            if (
+              !/^[a-f0-9]{64}$/.test(scope.backupRecoveryDigest ?? '') ||
+              !equal(input, {
+                ...inventory.backupPlan,
+                binding: context.binding,
+                maintenanceEndsAtMs: context.approval.maintenanceEndsAtMs,
+                scopeDigest: scope.backupRecoveryDigest,
+              })
+            )
+              fail();
+            const record = await guard(context, ['backup_verified']);
+            if (recoveryRecord && !equal(recoveryRecord, record)) fail();
+            await stopped();
+            if (!equal(record, await guard(context, ['backup_verified']))) fail();
+            recoveryRecord = structuredClone(record);
+          },
+          false,
+        ),
+    },
     // Merge only these implemented source operations into the host's original
     // backup I/O. Target restore/compare/migrations remain mandatory elsewhere.
     backup: {

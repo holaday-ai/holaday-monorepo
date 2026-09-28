@@ -211,7 +211,9 @@ async function readProtectedSite(options, overrides, kind) {
           'gatewaySiteDigest',
           'producerStartupFiles',
           ...(Object.hasOwn(s, 'inventory') ? ['inventory'] : []),
+          ...(Object.hasOwn(s, 'backupRecoveryDigest') ? ['backupRecoveryDigest'] : []),
         ]) ||
+        (Object.hasOwn(s, 'backupRecoveryDigest') && !hash(s.backupRecoveryDigest)) ||
         (Object.hasOwn(s, 'inventory') &&
           (!s.inventory ||
             typeof s.inventory !== 'object' ||

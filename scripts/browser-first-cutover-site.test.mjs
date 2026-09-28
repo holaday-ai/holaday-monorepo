@@ -882,6 +882,50 @@ test('original backup coordinator can consume site source export without reshapi
   await site.lifecycle.detach(f.context);
 });
 
+test('recovery callback uses the original held site journal, approved target and physical stopped facts', async (t) => {
+  for (const fault of ['none', 'digest', 'target', 'busy', 'deadline']) {
+    const plan = {
+      sourceIdentity: { serverUuid: '11111111-1111-4111-8111-111111111111', database: 'source_qa' },
+      isolatedTarget: {
+        serverUuid: '22222222-2222-4222-8222-222222222222',
+        database: 'restore_qa',
+      },
+    };
+    const f = await fixture(t, { backupPlan: plan });
+    f.scope.backupRecoveryDigest = '8'.repeat(64);
+    const site = f.make();
+    assert.equal(typeof site.recovery?.assertScope, 'function');
+    await site.lifecycle.attach(f.context);
+    for (const phase of [
+      'prepared',
+      'orders_fenced',
+      'legacy_settled',
+      'producers_stopped',
+      'all_fenced',
+      'stopped',
+      'backup_verified',
+    ])
+      await f.journal.persist(phase, { candidate: f.binding.candidate });
+    f.state.producers = f.state.gateways = 0;
+    const request = {
+      ...plan,
+      binding: f.binding,
+      scopeDigest: '8'.repeat(64),
+      maintenanceEndsAtMs: 9000,
+    };
+    await site.recovery.assertScope(request);
+    if (fault === 'digest') request.scopeDigest = '9'.repeat(64);
+    if (fault === 'target') request.isolatedTarget = plan.sourceIdentity;
+    if (fault === 'busy') f.state.busy = 1;
+    if (fault === 'deadline') f.state.now = 9000;
+    if (fault === 'none') await site.recovery.assertScope(request);
+    else await assert.rejects(site.recovery.assertScope(request), /UNPROVEN/);
+    assert(!f.events.includes('restore'));
+    assert.equal(JSON.parse(await fs.readFile(f.journal.path, 'utf8')).backupReceipt, undefined);
+    await site.lifecycle.detach(f.context);
+  }
+});
+
 test('site refuses missing independent business facts before opening either session', async (t) => {
   const f = await fixture(t);
   f.io.facts.observeWork = undefined;
