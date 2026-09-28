@@ -10,9 +10,14 @@
 
 **Spec:** [用户已批准设计](../specs/2026-09-25-browser-first-cutover-design.md)。执行者必须完整阅读本文与设计，不能只读其中一个任务。
 
+**2026-09-28 当前阶段：** 用户已确认原设计第 0 节（`527db416`），下方“受控中断差异执行单”为本轮新写、待审阅的计划差异；本轮不实施代码或生产操作。沿用用户已指定的 Native/主智能体串行、重型验证串行方式，无需重选执行方式。原 Task4 BASE `844c2ced779fa360b62e2bfbdd87d4909d13b8a0` 不变；当前代码锚点 `89b7b02b`，文档锚点 `527db416`。以下旧任务勾选不是实时完成状态，恢复时以最新 checkpoint/SDD ledger 为准，不从 Task 1 重做。
+
 **2026-09-26 批准修订：** 首次 PM2 托管对象采用独立的定向停止适配器，接受已核对的管理器信号和超时强杀。须先隔离入口、核清未结工作，核对管理器/应用/完整进程树/版本/超时及重启来源，按唯一 pm_id 定向停止；不停止 daemon、不使用全局名称操作。未托管对象仍由 pidfd 固定身份后只发 SIGTERM，无数字 PID 回退。普通维护停止不变。此修订仅授权本地实施和隔离测试。
 
 ## Global Constraints
+
+- 2026-09-28 设计第 0 节已批准：仅首次、仅不可枚举的旧非支付内存请求可保留范围级未知风险；不承诺零损失。已知未决任务/子记录/租约/外部操作、支付观测缺口、未知写入者仍阻断。旧未知不能代填零、冒充排空或清除候选自身 dirty。
+- 差异执行单优先于旧 Task 1–4 中固定 v1、`legacy_settled` 和“所有旧请求为零”的接口示例，仅覆盖首次中断分支；普通路径与严格首次排空路径不变。窗口、UID998、报告60秒、权限、全61SQL、单次写操作及全部实际验收门槛不变。
 
 2026-09-27新增批准：用户“允许”只将已归档的九笔历史支付宝pending记录延期核对，不阻断本次上线。复用现有deferredUnverified，固定九笔完整摘要集合、独立批准引用、读前后完整字段绑定；新订单正常核验。原订单状态、结算、权益及查询器状态解释均不变，PayPal限制不变。现场接口需将受保护deferredAlipayPayments传给现有reader；不得将此批准当Task4–6或支付恢复演练完成。指纹及历史字段覆盖限制见设计与支付证据最新节。
 
@@ -42,6 +47,8 @@
 4. open 实际成功但 ACK 丢失，或外部入口恢复失败：核对同一实例，关闭接单并保留阶段，不恢复旧数据库。归属 Task 4、6。
 5. 恢复备份可读但遗漏历史表/触发器/事件，或旧 SQL 改写时间：不能以新列存在代替完整恢复验证。归属 Task 5、6。
 
+本次差异额外检查的五类输入：旧消费者丢弃风险字段（4.R1）；读错误被当作不可观测（4.R2）；退出后新增持久子工作/重派发来源（4.R2、6.R3）；新 boot 继承旧未知并被误写为 clean（4.R2、6.R3）；维护后出现具体外部结果却自动重放（6.R3）。对应断言随各任务列出，不新增功能范围。
+
 ## 执行基线、依赖与结束点
 
 - 工作树：`/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo`。
@@ -63,6 +70,58 @@
 | 综合证据 | 各模块同名测试，新增 `scripts/browser-first-cutover.integration.test.mjs` 与 `scripts/browser-first-cutover.qa.Dockerfile`；新增隔离 MySQL 测试和验收文档 | 不把合成支付回调当支付方真实重投 |
 
 新文件只有在对应任务实现时创建；本轮只保存计划。以下接口均为拟实现接口，不代表已经存在。
+
+## 2026-09-28 受控中断差异执行单（待审阅）
+
+只完成以下三个连贯验收单元，再接原 Task4–6 尚未完成的现场闭环。不新建计划/工作树/发布引擎；已存在的通道、注册退休、备份/Mac恢复、worker持久化和失败收尾不重建。测试命令在本文工作树执行，使用已有 Node24 PATH；Linux 使用既有 QA 镜像及 Node22，单容器、1CPU/768MiB、隔离网络/端口，不挂生产凭据、宿主PID或Docker socket。
+
+### 4.R1：首次批准、日志和候选证据使用同一风险绑定
+
+**Files（均为已有文件，修改并扩展同名测试）：** `scripts/browser-first-cutover-host.mjs`、`scripts/browser-maintenance-journal.mjs`、`scripts/browser-cutover-evidence.mjs`、`apps/orchestrator/src/execution/ordinary-maintenance-services.ts`。索引/应用入口回归使用已有 `apps/orchestrator/src/application-entry.test.ts` 和 `apps/orchestrator/scripts/browser-maintenance-readiness.test.ts`。
+
+**Interfaces：** 保留现有函数签名 `readFirstCutoverApproval(options,io)`、`acquireReleaseJournal(directory,metadata,io)`、`collectCutoverEvidence(input,io)`、`validateServicesEvidence(value,context)`。新增字段只存在于显式首次中断协议：批准文件、首次 journal、报告各用 `schemaVersion:2`；报告/索引/context 显式带 `kind:'first-cutover'` 和下述 `legacyInterruption` 摘要绑定。无中断的严格首次和普通路径保持原 v1；不是将所有 schemaVersion=1 全局替换。
+
+- 批准文件的 `legacyInterruption` 固定字段：`mode:'controlled-interruption'`、`scope:'legacy-non-payment-memory'`、`approvalRef:'legacy-interruption-20260928'`、`capabilityDigest`（已核实旧源码观测缺口的SHA256）、`observeUntilMs`、`noAutomaticReplay:true`。直接复用该批准文件已有 attempt/candidate/configDigest/migrationDigest/inventoryDigest/legacyDigest/operatorRef/maintenanceEndsAtMs/reconcileByMs；观察截止不得晚于维护截止，不能靠超时自动批准。
+- `riskDigest` 定义为固定键顺序 `JSON.stringify({binding,legacyDigest,maintenanceEndsAtMs,reconcileByMs,operatorRef,legacyInterruption})` 的 UTF-8 SHA256；`binding` 按 attempt/candidate/configDigest/migrationDigest/inventoryDigest 顺序构造，`legacyInterruption` 按上行顺序构造。字段缺失/额外/类型不对均拒绝，不能对调用者任意对象直接 hash。风险字段在原 inventory 外，避免将已含 inventoryDigest 的对象再塞回 inventory 造成循环摘要。
+- 首次 journal 保存原批准字段与 riskDigest；新增 `bindLegacyInterruption(observation): Promise<void>`，只在同锁 `legacy_interruption_accepted` 意图阶段调用一次，保存实际观察摘要、已核实入口隔离摘要和时间；然后才能 `producers_stopped`。读者检查该绑定完整保留，后续原 seed/备份/真实 boot 事件不能抹掉它。沿用原 intent→effect 语义，阶段名不单独表示操作已完成。
+- v2报告的 `legacyInterruption` 投影为 `{riskDigest,capabilityDigest,status,sourceDigest}`：prepare 的 status 固定 `authorized-not-stopped`，preopen 固定 `accepted-unknown` 并额外要求 `stopDigest`（实际停止事实摘要）。原四类来源、支付字段及其校验完整保留。索引/context 显式绑定 riskDigest；普通 context 拒绝 v2，不能只看报告自报 kind。旧v1报告夹带风险字段、跨attempt/boot报告均拒绝。
+
+- [ ] **RED。** 在上述同名测试增加 `rejects-interruption-on-v1-or-ordinary-context`（拒绝旧版/普通context）、`binds-interruption-before-producer-stop`（先意图→观察回执→停止；回执丢失不得停止）、`keeps-residual-through-backup-seed-and-new-boot`（风险摘要不丢）、`rejects-cross-window-risk-and-payment-waiver`（换窗口/目标/支付未知均拒绝）。使用实际临时 journal/索引/报告文件，不以布尔 mock 替代完整记录。
+- [ ] **运行RED。** `node --test scripts/browser-maintenance-journal.test.mjs scripts/browser-first-cutover-host.test.mjs scripts/browser-cutover-evidence.test.mjs`；`pnpm --filter @holaday/orchestrator exec vitest run src/execution/ordinary-maintenance-services.test.ts --maxWorkers=1`。预期新增 v2 合法样本或新绑定方法失败；已有严格拒绝用例可直接通过，不能人为破坏原实现制造RED。
+- [ ] **最小实现上述接口。** 原安全文件读取、来源采集和支付核验不变；发布器从真实持锁journal生成投影，不接受手写成功报告。扩展现有严格字段列表及版本分支，所有v2消费者缺失能力时失败，普通缺证据仍拒绝。
+- [ ] **GREEN及回归。** 重跑RED命令，另跑 `pnpm --filter @holaday/orchestrator exec vitest run src/application-entry.test.ts scripts/browser-maintenance-readiness.test.ts --maxWorkers=1` 和 orchestrator typecheck。预期退出0，记录每组通过/失败/跳过；本单元完成不允许开启CLI execute。
+- [ ] **提交。** 仅显式暂存本单元文件，提交 `feat(ops): bind first-cutover legacy interruption evidence`，更新原checkpoint/ledger。
+
+### 4.R2：从工作观察到实际停止的一条完整分支
+
+**Files（修改及同名测试）：** `scripts/browser-first-cutover-runtime.mjs`、`scripts/browser-first-cutover-site.mjs`、`scripts/browser-first-cutover-transition.mjs`、`scripts/browser-first-cutover-host.mjs`、`scripts/browser-first-cutover-inventory.mjs`、`scripts/browser-cutover-evidence.mjs`。已有真实文件/进程组合回归在 `scripts/browser-first-cutover-coordinator.test.mjs`；需要适配的原备份/恢复/session读者只传递4.R1绑定，不重写其流程。
+
+**Interfaces：** v1观察保持原样。v2的 `facts.observeWork(context)` 返回 `{schemaVersion:2,inventoryDigest,observedAtMs,unsettledWork,unknownWriters,knownExternalWork,activeRequests,externalWork,capabilityDigest,replaySourcesDigest,pendingReplay}`。前两个计数和pendingReplay必须为实际观察到的0，knownExternalWork必须是实际核对后的空集合；不能从观测缺失推导这些值。两个请求字段使用 `ObservedCount = {kind:'observed',count:number} | {kind:'unobservable',reason:'legacy-no-inflight-api'}`，只接受完整结构；非零 observed 拒绝，不将其改成 unobservable。capabilityDigest绑定受保护批准的源代码缺口，动态事实/恢复来源摘要随每次真实采集生成，不复用旧时间戳。
+
+在原runtime导出 `validateLegacyWorkBoundary({observation,approval,phase,nowMs}): {mode:'drained'} | {mode:'controlled-interruption',riskDigest:string}`，供site/host/runtime同一判断使用。返回值不是独立批准，调用者仍需原真实journal与进程/入口证据。支付请求不使用此未知分支，原支付覆盖/历史核对/恢复证据仍独立检查；采集异常直接失败。
+
+`performFirstCutover`签名不变；adapter新增只读 `readLegacyDisposition(): Promise<{mode:'drained'} | {mode:'controlled-interruption',riskDigest:string}>` 及 `acceptLegacyInterruption(): Promise<void>`。前者在同一受保护批准下选择分支，不按检查失败降级；后者调用真实观察及4.R1绑定，不执行停止。次序为 `orders_fenced → legacy_settled / legacy_interruption_accepted → producers_stopped`，其余原阶段不变。site/runtime停止前复查独立入口与持久工作，停止后再查，host备份前校验实际物理停写；unknown旧请求值始终保留。
+
+- [ ] **RED。** 追加 `distinguishes-unknown-zero-positive-and-read-error`（v2未知可走窄分支，读取失败/非零/null/缺字段不能）、`does-not-stop-before-owned-interruption-receipt`（原锁/批准/持久观察缺一不发信号）、`rejects-new-child-work-and-replay-after-stop`（退出后出现子run/租约/重派发仍阻断备份/启动）、`refuses-payment-gap-and-unknown-writer`（支付覆盖缺失不能转范围风险）、`ordinary-never-falls-back-to-interruption`。断言停止/SQL/open调用次数，而非只检查抛异常。
+- [ ] **运行RED。** `node --test scripts/browser-first-cutover-runtime.test.mjs scripts/browser-first-cutover-site.test.mjs scripts/browser-first-cutover-transition.test.mjs scripts/browser-first-cutover-inventory.test.mjs scripts/browser-first-cutover-coordinator.test.mjs`。预期新分支因阶段/接口缺失失败，保存具体断言与退出码，不把权限、网络或环境错误计为RED。
+- [ ] **接原闭环。** 按上述接口扩展host/site/runtime、原日志观察器的阶段白名单及证据生产者；orders隔离必须阻止既有WS继续派发，不能凭nginx reload认定旧连接停止。观察器继续验证共享站点/无关进程不动。已停止旧进程只能证明当前本地请求不再执行，旧外部结果仍以风险投影保留；候选idle/needsReconciliation单独实读。
+- [ ] **接真实恢复来源检查。** 只读核查实际候选 `apps/orchestrator/src/ws/server.ts`、`queue/task-queue.ts`、`agent/task-queue-persistence.ts`、`planned/planned-runner.ts`、`application-entry.ts` 的恢复入口和实际持久来源，补原事实适配器对这些来源的覆盖。若有无法识别归属的待派发数据，拒绝；不清队列、不改业务状态、不设计新恢复平台。未来计划可在完成全部开放检查后按原规则恢复，不能将新计划误当重放。
+- [ ] **GREEN及Linux复核。** 重跑上述命令与4.R1相关测试；原QA镜像中UID998运行runtime/site/observer/journal实际文件和进程用例，必须零平台跳过。验证PID/start漂移、原PM2单对象停止、未知应答不重试；现有普通runtime和release-tail回归必须通过。
+- [ ] **提交。** 仅暂存实际触及文件，提交 `feat(ops): compose controlled legacy interruption with cutover`，记清已接通项和仍未取得的现场事实，不能把本单元写成可部署。
+
+### 6.R3：把中断风险带进原完整演练与交付
+
+**Files：** 扩展已有 `scripts/browser-first-cutover-coordinator.test.mjs`、`scripts/browser-first-cutover-site.test.mjs`、`scripts/browser-first-cutover-runtime.test.mjs`、`apps/orchestrator/src/execution/ordinary-first-cutover.mysql.integration.test.ts`；按原Task6创建 `scripts/browser-first-cutover.integration.test.mjs`（当前不存在，不是追加新框架）。候选启动/恢复回归复用已有 `apps/orchestrator/src/ws/restart-recovery.integration.test.ts`、`restart-recovery-executing.integration.test.ts`、`restart-recovery-transient.integration.test.ts`、`apps/orchestrator/src/agent/task-queue-persistence.test.ts`。记录更新原checkpoint、payment-evidence和原Task6 verification/deployment-checklist；已有QA镜像不重建。
+
+**Interfaces：** 消费4.R1–R2的真实 `performFirstCutover`/host/site/journal/报告，输出原 `passed | failed | blocked | not-run` 证据及riskDigest。测试只替代外部provider/公网为隔离合成服务；原真实进程、HTTP/WS、备份恢复、迁移、应用启动与readiness不能用统一成功stub替代。
+
+- [ ] **先固定失败断言。** `retains-lost-legacy-response-without-replay`：旧测试进程向隔离非支付计数服务发出一次动作后响应中断；旧进程没有持久记录/枚举接口，计数仅供测试端独立断言。完整切换后计数仍为1，旧结果保持unknown，不出现全量排空/成功声明。配对反例一旦观察器能识别具体未决动作就必须阻断，不能将已知动作藏进未知集合。`new-candidate-dirty-is-not-legacy-risk`：新boot不确定工作仍不能open。`late-known-effect-closes-without-replay`：开放后识别到具体未决动作，原hold关闭同实例且不发第二次外部动作、不回滚。另覆盖停止后新持久记录、备份前旧写入源回生、报告丢风险、停止/开放ACK丢失及旧恢复来源残留。
+- [ ] **运行RED并完成接线。** 在已有隔离Linux QA运行 `node --test scripts/browser-first-cutover.integration.test.mjs`；错误须来自上述断言而非不存在的依赖/镜像。只修原接线，不新增业务补偿。跑同一命令到GREEN，另显式开启原MySQL测试守卫，验证整个备份→恢复→全61SQL→比对链，记录合成与实际边界。
+- [ ] **运行完整串行回归。** 执行原Task6命令组，browser Node测试显式 `CUTOVER_TEST_AGE_EXECUTABLE=/opt/homebrew/bin/age`（Mac）或QA内实际age路径；MySQL opt-in按已有 `scripts/fixtures/cutover-mysql-README.md` 的专用13316容器/随机库守卫真实运行，显式 `--config vitest.integration.config.ts`，不把skip计为通过。应用恢复分两条命令：`pnpm --filter @holaday/orchestrator exec vitest run --config vitest.integration.config.ts src/ws/restart-recovery.integration.test.ts src/ws/restart-recovery-executing.integration.test.ts src/ws/restart-recovery-transient.integration.test.ts --maxWorkers=1`；`pnpm --filter @holaday/orchestrator exec vitest run src/agent/task-queue-persistence.test.ts --maxWorkers=1`。默认配置确实排除integration文件，0文件收集不是通过。三项WS测试会迁移并写库，只在不含任何`.env*`的隔离源码快照、明确的新建本例MySQL库/Redis实例及专用WS端口运行，禁止其默认3306/6379回退到原服务；清理仅本例拥有的库/实例。所有结果记录命令/环境/提交/日志/退出码/跳过理由。
+- [ ] **继续原Task4–6现场闭环。** 完成尚缺的受保护现场facts、工具封闭包/单次入口、真实停写备份/Mac恢复、非PayPal恢复证据和整分支审查。先验证安装包固定模块闭包、协议新旧配对与Linux实测；在完整验收和新鲜受保护维护清单具备前保持CLI execute关闭。现场步骤按原授权范围执行，不自动重试未知远端写入，不重做商户/密钥/通道；无法取得事实则只阻断对应放行。
+- [ ] **交付与提交。** 原部署清单增加本次批准/不可观测范围/riskDigest/实际停止证据/核对责任及期限，明确“按已接受的首次中断风险完成切换”与“所有旧请求无损完成”的区别。核对期限到达只汇总风险，不把未知转resolved。提交 `test(ops): verify first-cutover interruption end to end`；push/PR、合并、部署、上线分别按实际结果记录，创建PR后附加本线程，大项通过或真实无路可推进才收尾。
+
+**本轮计划自审与交接：** 设计0.1–0.3落在4.R1/4.R2，0.4–0.6落在4.R2/6.R3；保护条件与失败收尾均有对应断言。以上是待实现的接口约定，不是当前已有能力或测试结果。沿原串行方式执行；需要用户审阅这份计划差异后开始，不重复索取已批准风险选择。
 
 ## Task 1：让 readiness 能消费真实、有时效的证据
 
