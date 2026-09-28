@@ -70,6 +70,48 @@ try {
     await connection.query(`INSERT INTO ${table} (id, ${column}) VALUES (1, ?)`, [dormant]);
   }
   assert.deepEqual((await readCutoverWorkScope(connection)).unsettled, []);
+  // The explorer persists halted_sensitive only after browse returns; archived
+  // plan definitions are not dispatched. Neither observation settles running
+  // descendants or memory/provider work, which have independent checks.
+  for (const [table, status] of [
+    ['exploration_runs', 'halted_sensitive'],
+    ['planned_tasks', 'archived'],
+  ]) {
+    await connection.query(`UPDATE ${table} SET status = ? WHERE id = 1`, [status]);
+    const before = JSON.stringify((await connection.query(`SELECT * FROM ${table}`))[0]);
+    assert.deepEqual(
+      (await readCutoverWorkScope(connection)).unsettled,
+      [],
+      `${table}:${status} is persisted history, not active work`,
+    );
+    assert.equal(JSON.stringify((await connection.query(`SELECT * FROM ${table}`))[0]), before);
+  }
+  for (const table of [
+    'tasks',
+    'planned_task_runs',
+    'planned_task_run_items',
+    'batch_task_items',
+  ]) {
+    await connection.query(`UPDATE ${table} SET status = 'executing' WHERE id = 1`);
+    assert.deepEqual((await readCutoverWorkScope(connection)).unsettled, [
+      { table, id: 1, status: 'executing' },
+    ]);
+    await connection.query(`UPDATE ${table} SET status = 'completed' WHERE id = 1`);
+  }
+  for (const table of ['exploration_runs', 'planned_tasks']) {
+    await connection.query(`UPDATE ${table} SET status = 'unknown_halt' WHERE id = 1`);
+    assert.deepEqual((await readCutoverWorkScope(connection)).unsettled, [
+      { table, id: 1, status: 'unknown_halt' },
+    ]);
+    await connection.query(`UPDATE ${table} SET status = ? WHERE id = 1`, [
+      table === 'exploration_runs' ? 'halted_sensitive' : 'archived',
+    ]);
+  }
+  await connection.query("UPDATE exploration_runs SET status = 'completed' WHERE id = 1");
+  await connection.query("UPDATE planned_tasks SET status = 'active' WHERE id = 1");
+  console.log(
+    'PASS terminal history is unchanged; active descendants and unknown halt states still block',
+  );
   for (const [table, column, dormant, active] of cases) {
     await connection.query(`UPDATE ${table} SET ${column} = ? WHERE id = 1`, [active]);
     const before = JSON.stringify((await connection.query(`SELECT * FROM ${table}`))[0]);

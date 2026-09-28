@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 21:30 JST 续跑：现场工作核清发现两类历史状态误报
+
+用户先批准最小观测/排空方案评审，随后“继续”。沿原计划只读检查现状；没有批准以未知工作中断换取放行，也没有安装旧版补丁。Git起点`b650f9e0`，Task4 BASE仍为844c2ced。自动化仍暂停，不把继续核查解释为后台循环重启。
+
+双机原主机采集器成功，私密原文位于`/private/tmp/holaday-live-host-observer-pDMZJO/`；主程序、注销worker、现用支付网关与4011旧实例仍在。files-cron当前PID0但保留每小时调度，不能当作已退休。首次采集未加载候选工作树不存在的凭据文件而认证失败（退出1），归档`...-B8yvUw/`；明确指定原主目录`.env.deploy.local`后同一只读入口成功（退出0），没有重新生成密钥或安装通道。UTC12:23:50现场只读核实Git仍为`107857fe70503e30691073f267d87275596edb20`，explorer-browse、explorer-browse-runner、planned-tasks router、planned-runner四份源码SHA与该Git原文完全一致。主/worker身份前后稳定，连接计数非零；这些均不是内存工作或外部副作用归零证明。
+
+UTC12:22:28原`readCutoverWorkScope`在专用只读事务报告13条：10条`exploration_runs:halted_sensitive`、3条`planned_tasks:archived`。普通任务全为终态；两条scheduled active均未到期，最早UTC2026-09-29 01:07:14.024；注销请求只有cancelled、steps只有skipped。没有查询支付表、任务正文、用户资料或调用provider。核对真实源码：halted_sensitive在await浏览函数返回后持久化，浏览runner finally尝试清理上下文；archived清空nextRunAt且调度只选择active。**清理失败可能仍有残余浏览器/外部工作，因此状态分类不代替独立工作核查。**
+
+Task4 Ruling：原只读工作分类漏识别这两个已有历史状态，最小修正仅为各自允许列表补一个精确值；不改业务记录，不豁免其他halted状态、NULL、未知状态、活动子run/item或未释放租约。误判代价是漏报真实工作，故独立内存/外部工作门槛原样保留，不能把本修正用于直接停机。原SQL夹具新增不可变历史、活动子记录和未知halt状态断言，真实Linux MySQL8服务器/本机Node24客户端先后独立RED两个状态，再完整GREEN退出0。初次QA internal网络未发布端口、连接拒绝，不能计RED；定向重建本轮临时QA为原专用bridge/回环端口后才得到断言RED。测试限1CPU/768MB、无生产挂载，最终随机库及临时容器/匿名卷/网络已清理，原MySQL/Redis未动。
+
+UTC12:28:39修正后再次只读采集，persisted unsettled=0；前后普通任务/计划/注销状态聚合完全一致，非全字段一致或零写入证明。`/private/tmp/holaday-legacy-work-review-qEc0le/{work.json,work-after.json}`保存脱敏观察；该目录也保留临时采集脚本和测试日志。两次快照不是维护窗口报告、不能未来复用为ready。Linux证据/真实age测试144/144、0跳过退出0；完整browser首次949通过/34跳过（未设置age路径），补指定已有age后最终983/983、0跳过；日志分别`linux.log`、`browser.log`、`browser-final.log`。最终SQL夹具`mysql-final.log`退出0；两MJS Biome与diff-check通过。完整`pnpm test:ops`为120/59/16/816及Python12，退出0、0跳过，`ops-final.log`；所有本轮测试/SSH已退出。没有重跑应用全套或整分支独立审查。
+
+剩余阻塞不是13条新任务：原site仍要求`facts.observeWork`独立证明activeRequests/externalWork/unknownWriters；旧版无该接口，数据库空集和TCP计数不能代填零。真实停写/备份恢复、非PayPal恢复演练、首次execute与整流程审查均未完成。不得再次无限加组件来替代这一前提；如改变首次停机的风险标准，必须明确向用户说明具体中断/未知结果处理并获得批准。尚未push/PR/合并/部署，execute仍关闭；PayPal、历史订单、商户/密钥/USB、UI/扩展/模型及原cache均未动。
+
 ### 2026-09-28 本轮最终断点：代码15e3ac4f，独立应用验证完成，等待范围选择
 
 失败收尾八文件已本地提交`15e3ac4f`；原Task4 BASE844c2ced不变。完整应用验证使用内置Node24.19.0、单worker/2GB堆、显式合成DB/Redis地址：前置Node73/73；orchestrator **507文件、8599通过、1跳过**，退出0，`/tmp/holaday-hold-orchestrator-node24.log`。跳过的是`playwright-executor.cdp-auth.test.ts`的`authenticated diagnostic child`，仅在专属子进程环境启用，父用例正常调用并通过；不能把该跳过说成恢复演练通过。cn-payment **8文件99/99**退出0，`/tmp/holaday-hold-cn-full.log`；cn-payment/orchestrator类型检查及orchestrator构建均退出0，`/tmp/holaday-hold-types-build.log`。这些不替代Linux整流程、实际停写恢复、真实商户回调与整分支审查。

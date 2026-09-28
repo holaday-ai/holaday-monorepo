@@ -1242,7 +1242,13 @@ async function readPersistedCutoverWork(db) {
       "status NOT IN ('completed','partial_success','failed','cancelled')",
     ],
     ['batch_tasks', 'status', "status NOT IN ('completed','partial','cancelled')"],
-    ['exploration_runs', 'status', "status NOT IN ('completed','failed','cancelled')"],
+    // Explorer browse persists halted_sensitive only after its runner returns.
+    // This settles the row, not independent browser/provider work.
+    [
+      'exploration_runs',
+      'status',
+      "status NOT IN ('completed','failed','cancelled','halted_sensitive')",
+    ],
     ['video_edit_render_attempts', 'status', "status NOT IN ('completed','failed')"],
     ['video_edit_versions', 'render_status', "render_status NOT IN ('idle','completed','failed')"],
     [
@@ -1268,7 +1274,8 @@ async function readPersistedCutoverWork(db) {
     [
       'planned_tasks',
       'status',
-      "status NOT IN ('active','paused','completed','failed','cancelled')",
+      // Archived definitions do not dispatch; runs/items above remain independent.
+      "status NOT IN ('active','paused','completed','failed','cancelled','archived')",
     ],
   ];
   const unsettled = [];
