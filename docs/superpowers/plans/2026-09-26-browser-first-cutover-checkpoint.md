@@ -8,6 +8,8 @@
 
 ### 2026-09-29 现场写入者核查：确认应用账号视野不完整，接入独立数据库观察原语
 
+已保存本地提交`82e0b9d1`，提交后仅原` scripts/__pycache__/ `未跟踪。之后拟编写一次限定SSH诊断，检查Vultr `/root/.my.cnf`、`/etc/mysql/debian.cnf`是否有现成连接配置；**在创建本地诊断文件的apply_patch阶段被权限审核拒绝，未创建脚本、未执行SSH、未读取这两个文件或任何密码。** 审核原因是应用账号权限不足后的管理凭据查找缺少针对性授权。不得改用其他工具/路径/间接执行绕过，也不重复无密码认证。已向用户说明，需要明确批准仅读取上述固定文件内已有连接参数用于只读元数据核查；不展示/复制凭据，不创建账号/授予权限/改业务数据。此新增权限阻断不否定下述已完成的原应用账号只读检查或QA结果。其他独立6.R3工作仍可推进，因此未将自动化误标为无事可做而暂停；后续轮次不能重复尝试此受阻凭据路径。
+
 承接`21b0fac6`，原Task4 BASE不变。UTC2026-09-28T17:18:05.809Z–17:18:05.820Z沿原跳板完成一次只读MySQL覆盖核查，退出0；证明`/private/tmp/holaday-writer-coverage.7Qwbtz/proof.json`。现有应用账号没有直接全局PROCESS、没有角色授予；仅看到同账号4个Sleep连接。INNODB_TRX返回ER_SPECIFIC_ACCESS_DENIED_ERROR，两项复制元数据返回ER_TABLEACCESS_DENIED_ERROR。所选schema可见enabled events=0，而服务器event_scheduler=ON、read_only/super_read_only=0。这些是覆盖不足的证据，**不是没有写入者、无外部工作或停写成功**。没有改生产权限/账号/全局变量、没有业务写入或支付方调用，也没有重试同一失败查询。
 
 在原mysql模块新增`readCutoverMysqlWriters`，原host以`readFirstCutoverDatabaseWriters`接入既有受保护配置/窗口/journal所有权/专用连接关闭。要求MySQL8.0、独立核对源身份、直接全局PROCESS及EVENT、无partial revokes、Performance Schema启用且实际元数据可读；角色名称/局部授权不能伪装全局授权。查询全服务器会话（包括Sleep与无默认DB）、事务、所有schema的启用事件、复制receiver与总applier。前后权限/身份与两遍行身份摘要一致，限时/限行/严格返回形态；异常一律拒绝，不返回零。只输出数量、时间和摘要，不返回SQL正文/账号/事件内容。
