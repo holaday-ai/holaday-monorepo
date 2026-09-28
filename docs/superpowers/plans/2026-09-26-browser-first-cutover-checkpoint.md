@@ -6,6 +6,22 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 续跑：真实数据库工作观察接入原现场边界
+
+承接 `1454c352`，原Task4 BASE844c2ced不变。本轮沿旧版Git对象 `107857fe70503e30691073f267d87275596edb20` 核对已存在的探索、视频渲染、注销工作表及计划派发状态，不改这些产品功能。发现原readiness数据库查询只看四类工作表，而且 `planned_task_runs` 的真实 `dispatching` 状态被漏掉；真实MySQL反例返回空数组，日志 `/tmp/holaday-work-dispatch-red.log`。
+
+现有 `browser-cutover-evidence.mjs` 内共用十二表只读查询：普通任务、旧调度、计划运行、批量、独立探索、视频渲染attempt/version、注销request/step、计划/批量子项及计划父项。按实际终态/静止态排除，派发中、未知状态、未清租约（即使过期）保留为未解决；不自动过期、取消或清洗历史行。NULL、缺表、达到100行上限、非法ID/状态、读时钟倒退/超60秒或回滚失败均拒绝。支付readiness复用同一查询及原单次只读事务；原精确一笔/九笔延期和商户逻辑不变。
+
+`readFirstCutoverPersistedWork` 复用原受保护候选配置、候选目录与持有的journal，校验配置摘要/窗口/归属前后不变，使用候选mysql2新建独立连接，read-only repeatable-read后ROLLBACK并关闭，错误不泄漏数据库细节。不调用商户/provider、不自动加载其他.env。原execution site默认使用这个实际读者，在入口/进程观察两侧各读一次；不能由 `facts.observeWork` 的零值盖过数据库工作。已有物理退役夹具显式标注其数据库边界仍为合成，不冒充全业务闭环。
+
+新 `scripts/fixtures/browser-work-scope-mysql.mjs` 已在专用Linux MySQL8.0容器真实验证十二类查询、dispatching、过期租约、未知/NULL、上限和缺表拒绝，并逐表验证读取未改数据，最终退出0：`/tmp/holaday-work-real-mysql-final.log`。这是只含实际查询列的合成SQL夹具，不是全量迁移schema或生产恢复。随机QA库已清理，专用容器 `holaday-first-cutover-qa-742918bd094fcaa1` 已移除；既有MySQL/Redis未动。Linux Node22三组179/179、0跳过、退出0（UID/GID998），日志 `/tmp/holaday-work-linux-uid998-final.log`。第一次误用root组触发原证据发布夹具拒绝，保留失败 `/tmp/holaday-work-linux-final.log`，未放宽产品条件。原实际PM2/受保护scope/接收端/journal/pidfd退役与仅无关应用回生回归退出0，日志 `/tmp/holaday-work-site-physical.log`。
+
+**仍未完成整项**：该读者只证明批准数据库里的持久工作状态，不能推导内存请求、浏览器外部动作或provider轮询已结束，也不能单独证明旧进程用的就是本次批准数据库。独立实际旧来源/业务/连接/writer观察、readiness与控制尾段/backup设施完整绑定、首次工具安装/execute、真实停写备份/Mac隔离恢复/非PayPal恢复、整流程及整分支审查仍待完成。下一步从这些真实提供者接线继续，不重建十二表读者/原site/通道/密钥，不再只增加组件数量。CLI execute保持拒绝，Tasks4–6不标完成。无生产连接、业务记录/支付/PayPal/密钥变更，无PR/合并/部署；原 `scripts/__pycache__/` 保留。
+
+最终全browser **864/864**、ops **120/59/16/698及Python12**，均退出0、0跳过；日志 `/tmp/holaday-work-browser-complete.log`、`/tmp/holaday-work-ops-final.log`。八MJS的Biome、原四shell语法、diff-check通过。真实删除后丢ACK模式也退出0，日志 `/tmp/holaday-work-site-lost-ack.log`，保留已发生删除、不重试/继续未托管信号/出具错误stopped证明。应用全套、全量迁移恢复、实际双机业务整链及整分支独立审查本轮未跑，不能借本批结果宣称这些通过。
+
+后续接线的具体接口注意点已查明：原release tail在`candidate_started`先start→verify/readiness，之后才persist verified identity，顺序不能倒置。新候选启动后的readiness必须把它从host传入的真实identity交给已有 `observer.readWithCandidate(identity)`；不能沿用site现有仅旧进程阶段的 `readFenceProgress()`，也不能仅从尚无identity的journal推断候选。已有 `readFirstCutoverCandidateRuntime` 会真实control-status/完整runtime/status夹读，可复用于开放身份事实；无需另建控制器/状态机或提前写verified。十二表读者只补齐DB维度，下一轮应接此完整readiness/control段及剩余事实，不重做本轮SQL夹具。
+
 ### 2026-09-28 夜间续跑：原现场生命周期接线与实体退役成功／丢确认演练
 
 承接 `dd44cb82`，Task4原BASE844c2ced不变。新增 `createFirstCutoverExecutionSite`，把原双机入口、固定网关会话、真实生产者退役及retirement observer接到**同一个原journal**。先连接两个会话再建立完整基线；运行时身份包含控制器、两接收端和两条本机SSH；工作核清、生产者停止、网关启动条目处理、全停写及网关退役沿原顺序执行，不新建另一套状态机。失败不重复动作；退出反向尝试关闭两个句柄，关闭结果不明不冒充成功。业务／writer／控制／备份事实仍为必须提供的可信读者，未补默认零值。

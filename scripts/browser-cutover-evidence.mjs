@@ -1225,6 +1225,110 @@ export async function collectCutoverEvidence(input, io) {
   return report;
 }
 /** mysql2 connection must be dedicated; queries never enter a write transaction. */
+// These are persisted work observations, not proof that memory-only requests or
+// provider-side work have drained. The site must still independently observe
+// those facts. Never expire/cancel a row or swallow a missing-table error here.
+async function readPersistedCutoverWork(db) {
+  const scopes = [
+    [
+      'tasks',
+      'status',
+      "status NOT IN ('completed','partial_success','failed','cancelled','paused','awaiting_user')",
+    ],
+    ['scheduled_tasks', 'status', "status NOT IN ('active','paused','completed','failed')"],
+    [
+      'planned_task_runs',
+      'status',
+      "status NOT IN ('completed','partial_success','failed','cancelled')",
+    ],
+    ['batch_tasks', 'status', "status NOT IN ('completed','partial','cancelled')"],
+    ['exploration_runs', 'status', "status NOT IN ('completed','failed','cancelled')"],
+    ['video_edit_render_attempts', 'status', "status NOT IN ('completed','failed')"],
+    ['video_edit_versions', 'render_status', "render_status NOT IN ('idle','completed','failed')"],
+    [
+      'account_closure_requests',
+      'status',
+      "status NOT IN ('pending_grace','cancelled','completed') OR completion_lease_owner IS NOT NULL OR completion_lease_until IS NOT NULL",
+    ],
+    [
+      'account_closure_steps',
+      'status',
+      "status NOT IN ('pending','succeeded','skipped') OR lease_owner IS NOT NULL OR lease_until IS NOT NULL",
+    ],
+    [
+      'planned_task_run_items',
+      'status',
+      "status NOT IN ('completed','partial_success','failed','cancelled')",
+    ],
+    [
+      'batch_task_items',
+      'status',
+      "status NOT IN ('completed','partial_success','failed','cancelled')",
+    ],
+    [
+      'planned_tasks',
+      'status',
+      "status NOT IN ('active','paused','completed','failed','cancelled')",
+    ],
+  ];
+  const unsettled = [];
+  for (const [table, column, where] of scopes) {
+    const [rows] = await db.query(
+      `SELECT id, ${column} AS status FROM ${table} WHERE (${where}) OR ${column} IS NULL ORDER BY id LIMIT 100`,
+    );
+    if (!Array.isArray(rows) || rows.length >= 100) fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+    let previous = 0;
+    for (const row of rows) {
+      const id = Number(row?.id);
+      if (
+        !Number.isSafeInteger(id) ||
+        id <= previous ||
+        typeof row.status !== 'string' ||
+        !/^[a-z_]{1,32}$/.test(row.status)
+      )
+        fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+      previous = id;
+      unsettled.push({ table, id, status: row.status });
+    }
+  }
+  return unsettled;
+}
+
+/** Frequent business checks need no payment credentials or provider queries.
+ * Owns one read-only snapshot; call with a dedicated mysql2 connection, not a
+ * pool whose query calls could switch sessions, or an existing transaction.
+ */
+export async function readCutoverWorkScope(db, { now = Date.now } = {}) {
+  let transaction = false;
+  try {
+    await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+    await db.query('START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY');
+    transaction = true;
+    const observedAtMs = now();
+    const unsettled = await readPersistedCutoverWork(db);
+    const finishedAtMs = now();
+    if (
+      !Number.isSafeInteger(observedAtMs) ||
+      observedAtMs < 0 ||
+      !Number.isSafeInteger(finishedAtMs) ||
+      finishedAtMs < observedAtMs ||
+      finishedAtMs - observedAtMs > 60000
+    )
+      fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+    return { observedAtMs, unsettled };
+  } catch {
+    fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+  } finally {
+    if (transaction) {
+      try {
+        await db.query('ROLLBACK');
+      } catch {
+        fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+      }
+    }
+  }
+}
+
 export async function readCutoverDatabaseScope(
   db,
   {
@@ -1246,7 +1350,6 @@ export async function readCutoverDatabaseScope(
     transaction = true;
     const observedAtMs = now();
     const orders = [];
-    const unsettled = [];
     const deferredUnverified = [];
     const since = new Date(windowStartMs);
     for (const table of ['payments', 'partner_recharge_orders']) {
@@ -1348,22 +1451,7 @@ export async function readCutoverDatabaseScope(
       deferredUnverified.filter((row) => row.approvalRef === alipayDeferralRef).length !== 9
     )
       fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
-    const work = [
-      [
-        'tasks',
-        "status NOT IN ('completed','partial_success','failed','cancelled','paused','awaiting_user')",
-      ],
-      ['scheduled_tasks', "status = 'running'"],
-      ['planned_task_runs', "status IN ('pending','running')"],
-      ['batch_tasks', "status IN ('pending','running')"],
-    ];
-    for (const [table, where] of work) {
-      const [rows] = await db.query(
-        `SELECT id, status FROM ${table} WHERE ${where} ORDER BY id LIMIT 100`,
-      );
-      if (!Array.isArray(rows) || rows.length >= 100) fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
-      unsettled.push(...rows.map((row) => ({ table, ...row })));
-    }
+    const unsettled = await readPersistedCutoverWork(db);
     return {
       observedAtMs,
       orders,

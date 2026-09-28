@@ -12,6 +12,7 @@ import {
   readCutoverNginxSnapshot,
   readCutoverRehearsalArtifacts,
   readCutoverStartupSnapshot,
+  readCutoverWorkScope,
 } from './browser-cutover-evidence.mjs';
 
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -320,6 +321,89 @@ function databaseFixture(overrides = {}) {
   };
   return { db: { query }, calls, options, rows };
 }
+test('work-only reader shares a read-only snapshot and never reads merchant orders', async () => {
+  const calls = [];
+  const work = {
+    exploration_runs: { id: 1, status: 'running' },
+    video_edit_render_attempts: { id: 2, status: 'pending' },
+    video_edit_versions: { id: 3, status: 'rendering' },
+    account_closure_requests: { id: 4, status: 'processing' },
+    account_closure_steps: { id: 5, status: 'running' },
+    planned_task_run_items: { id: 6, status: 'running' },
+    batch_task_items: { id: 7, status: 'running' },
+  };
+  const db = {
+    query: async (sql) => {
+      calls.push(sql);
+      const table = /FROM ([a-z_]+) WHERE/.exec(sql)?.[1];
+      return [table && work[table] ? [work[table]] : [], []];
+    },
+  };
+  const result = await readCutoverWorkScope(db, { now: () => 100_000 });
+  assert.deepEqual(
+    result.unsettled,
+    Object.entries(work).map(([table, row]) => ({ table, ...row })),
+  );
+  assert.equal(result.observedAtMs, 100_000);
+  assert.equal(calls[0], 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+  assert.equal(calls[1], 'START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY');
+  assert.equal(calls.at(-1), 'ROLLBACK');
+  assert.equal(calls.filter((sql) => sql.startsWith('SELECT')).length, 12);
+  assert(!calls.some((sql) => /payments|partner_recharge_orders|UPDATE|DELETE|INSERT/.test(sql)));
+});
+test('payment readiness includes independent work even when ordinary tasks are empty', async () => {
+  const f = databaseFixture();
+  const query = f.db.query;
+  f.db.query = async (sql, params) =>
+    sql.includes('FROM video_edit_render_attempts ')
+      ? [[{ id: 17, status: 'pending' }], []]
+      : query(sql, params);
+  const scope = await readCutoverDatabaseScope(f.db, f.options);
+  assert.deepEqual(scope.unsettled, [
+    { table: 'video_edit_render_attempts', id: 17, status: 'pending' },
+  ]);
+  assert.equal(f.calls.filter((c) => c.sql.startsWith('START TRANSACTION')).length, 1);
+  const ready = fixture();
+  ready.io.readDatabaseScope = async () => ({ ...ready.scope, unsettled: scope.unsettled });
+  await assert.rejects(collectCutoverEvidence(ready.input, ready.io), /MAINTENANCE_/);
+  assert.deepEqual(ready.published, []);
+});
+for (const kind of [
+  'missing-table',
+  'truncated',
+  'bad-id',
+  'bad-status',
+  'duplicate',
+  'clock-reversed',
+  'stale',
+]) {
+  test(`work reader refuses ${kind} without replacing uncertainty with zero`, async () => {
+    const calls = [];
+    let clock = 100_000;
+    const db = {
+      query: async (sql) => {
+        calls.push(sql);
+        if (!sql.includes('FROM exploration_runs ')) return [[], []];
+        if (kind === 'missing-table') throw new Error('ER_NO_SUCH_TABLE');
+        if (kind === 'clock-reversed') clock--;
+        if (kind === 'stale') clock += 60_001;
+        const row = {
+          id: kind === 'bad-id' ? 'unsafe' : 1,
+          status: kind === 'bad-status' ? null : 'running',
+        };
+        return [
+          kind === 'truncated' ? Array(100).fill(row) : kind === 'duplicate' ? [row, row] : [row],
+          [],
+        ];
+      },
+    };
+    await assert.rejects(
+      readCutoverWorkScope(db, { now: () => clock }),
+      /MAINTENANCE_WORK_SCOPE_UNPROVEN/,
+    );
+    assert.equal(calls.at(-1), 'ROLLBACK');
+  });
+}
 test('reads ordinary and partner orders with full counts in one read-only snapshot', async () => {
   const f = databaseFixture();
   const result = await readCutoverDatabaseScope(f.db, f.options);
@@ -328,6 +412,15 @@ test('reads ordinary and partner orders with full counts in one read-only snapsh
   assert.equal(result.orders[0].orderRef, hash([merchant, 'ORDER']));
   assert.equal(f.calls.filter((c) => c.sql.includes('COUNT')).length, 2);
   assert.equal(f.calls.at(-1).sql, 'ROLLBACK');
+});
+test('failed work snapshot rollback never exposes database diagnostics or returns success', async () => {
+  const db = {
+    query: async (sql) => {
+      if (sql === 'ROLLBACK') throw new Error('private database detail');
+      return [[], []];
+    },
+  };
+  await assert.rejects(readCutoverWorkScope(db), /^Error: MAINTENANCE_WORK_SCOPE_UNPROVEN$/);
 });
 for (const kind of ['missing-page', 'overflow', 'duplicate']) {
   test(`database ${kind} cannot be silently accepted`, async () => {

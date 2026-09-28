@@ -108,6 +108,8 @@ Linux演练现由真正本机生命周期和独立接收进程执行，分别保
 
 这些是退役执行与阶段观察接口，不是完整生产site adapter。真实双机副作用传输、业务停写及外部工作仍需按原计划接线；不得把本接口返回无unknown等同于全部进程退出、入口隔离有效或可部署。
 
+持久业务工作核查已由 `readFirstCutoverPersistedWork(context)` 接到原execution site：从原root私密批准配置取得数据库，使用候选mysql2独立连接；前后核对原journal、配置摘要、候选目录和窗口。现有 `readCutoverWorkScope` 与支付readiness共享十二表查询，覆盖真实 `dispatching`、探索/渲染/注销及计划/批量子项，保留未知状态与未清租约，不改历史行；任何缺表/截断/异常都不返回零工作。现场边界在入口/进程读前后调用，不接受外部零计数覆盖非空数据库结果。**这不是外部工作完成证明**：旧实例数据库归属、内存请求、浏览器副作用和provider轮询仍需独立核清，不能仅凭SQL或socket为零放行。专用合成MySQL验证入口为 `scripts/fixtures/browser-work-scope-mysql.mjs <专用QA容器名>`，仅接受原QA标签、loopback13316及无生产挂载；创建/清理自己的随机库，不对生产使用。
+
 `scripts/fixtures/browser-registration-removal-linux.mjs` 使用真实PM2、UID998生产者、停止状态cron、主/备用dump、root journal，以及真实未托管网关与pidfd SIGTERM验证上述连接。Docker使用 `--init --cap-add SYS_PTRACE --network none`，源码只读挂载；不共享宿主PID或凭据。双机路由在单个隔离容器中模拟、业务隔离计数为QA固定值，不能冒充生产双机整流程。验证还包括PM2守护进程重启后仅恢复无关fixture。
 
 本机生产者接线使用 `browser-first-cutover-registrations.mjs` 的 `retireLocalFirstCutoverProducers({binding,files,maintenanceEndsAtMs}, {journal,observer,verifyFence,now,sleep})`：`binding`只含attempt/inventoryDigest，files沿用受保护主备启动清单。仅Linux/root且实际内核主机名匹配Vultr已审核观察；原journal必须在producers_stopped意图阶段且尚无该主机退役事件。核清工作、核对完整注册与剩余时间后，复用原私密备份/主备替换和定向注册删除；全部事件直接写原journal并标记Vultr，最后由原观察器核验退出。只返回生产者阶段结果，不能冒充双机stopped。已有部分事件或丢失删除确认不重做，保留副本与锁。上述实体夹具现在直接调用该正式组合，不再自己编排两个写入器；业务核对及其他主机仍须完整site提供真实观察。

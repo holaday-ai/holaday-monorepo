@@ -79,6 +79,7 @@ async function fixture(t) {
     sleep: async () => {},
     readSite: async () => structuredClone(scope),
     readCoordinatorIdentity: async () => receipt('vultr', 'coordinator', 100),
+    readPersistedWork: async () => ({ observedAtMs: state.now, unsettled: [] }),
     readPair: async () => ({ synthetic: true }),
     inspectSource: async (_input, deps) => {
       assert.deepEqual(
@@ -197,6 +198,52 @@ async function fixture(t) {
     binding,
     make: () => siteModule.createFirstCutoverExecutionSite({ attempt: binding.attempt }, io),
   };
+}
+
+test('database work cannot be hidden by zero-valued external observations', async (t) => {
+  const f = await fixture(t);
+  f.io.readPersistedWork = async () => ({
+    observedAtMs: f.state.now,
+    unsettled: [{ table: 'video_edit_render_attempts', id: 1, status: 'pending' }],
+  });
+  const site = f.make();
+  await site.lifecycle.attach(f.context);
+  await f.journal.persist('prepared', { candidate: f.binding.candidate });
+  await f.journal.persist('orders_fenced', { candidate: f.binding.candidate });
+  await site.lifecycle.fenceOrders(f.context);
+  await f.journal.persist('legacy_settled', { candidate: f.binding.candidate });
+  await assert.rejects(site.lifecycle.settleLegacy(f.context), /CUTOVER_SITE_UNPROVEN/);
+  assert(!f.events.includes('stop-producers'));
+  await site.lifecycle.detach(f.context);
+});
+
+for (const kind of ['stale', 'future', 'after-busy', 'missing', 'failed']) {
+  test(`persisted ${kind} observation cannot authorize retirement`, async (t) => {
+    const f = await fixture(t);
+    let reads = 0;
+    f.io.readPersistedWork = async () => {
+      reads++;
+      if (kind === 'failed') throw new Error('database unavailable');
+      return {
+        observedAtMs: kind === 'stale' ? -1 : kind === 'future' ? f.state.now + 1 : f.state.now,
+        unsettled:
+          kind === 'missing'
+            ? undefined
+            : kind === 'after-busy' && reads === 2
+              ? [{ table: 'exploration_runs', id: 1, status: 'running' }]
+              : [],
+      };
+    };
+    const site = f.make();
+    await site.lifecycle.attach(f.context);
+    await f.journal.persist('prepared', { candidate: f.binding.candidate });
+    await f.journal.persist('orders_fenced', { candidate: f.binding.candidate });
+    await site.lifecycle.fenceOrders(f.context);
+    await f.journal.persist('legacy_settled', { candidate: f.binding.candidate });
+    await assert.rejects(site.lifecycle.settleLegacy(f.context));
+    assert(!f.events.includes('stop-producers'));
+    await site.lifecycle.detach(f.context);
+  });
 }
 
 test('existing sessions and retirement share one journal from baseline through stopped', async (t) => {

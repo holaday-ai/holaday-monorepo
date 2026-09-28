@@ -26,6 +26,78 @@ const approved = {
   operatorRef: 'qa-operator',
 };
 
+test('persisted-work host reader owns and closes a dedicated approved database connection', async () => {
+  const config = Buffer.from('DATABASE_URL=mysql://synthetic@127.0.0.1/qa');
+  const binding = Object.fromEntries(
+    ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map((k) => [
+      k,
+      approved[k],
+    ]),
+  );
+  binding.configDigest = createHash('sha256').update(config).digest('hex');
+  const events = [];
+  const context = {
+    binding,
+    approval: { ...approved, ...binding },
+    root: `/opt/holaday-releases/${binding.candidate}`,
+    journal: { assertOwnership: async () => binding },
+  };
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    now: () => 1000,
+    readConfig: async () => config,
+    parseConfig: () => ({ DATABASE_URL: 'mysql://synthetic@127.0.0.1/qa' }),
+    connectWorkDatabase: async (url, sourceRoot) => {
+      assert.equal(url, 'mysql://synthetic@127.0.0.1/qa');
+      assert.equal(sourceRoot, context.root);
+      events.push('connect');
+      return {
+        query: async (sql) => {
+          events.push(sql);
+          return [[], []];
+        },
+        end: async () => events.push('end'),
+      };
+    },
+  };
+  const result = await firstHost.readFirstCutoverPersistedWork(context, io);
+  assert.deepEqual(result, { observedAtMs: 1000, unsettled: [] });
+  assert.equal(events[0], 'connect');
+  assert.deepEqual(events.slice(-2), ['ROLLBACK', 'end']);
+  assert.equal(events.filter((v) => v.startsWith('SELECT')).length, 12);
+  for (const kind of ['config', 'ownership', 'root', 'deadline', 'query', 'close']) {
+    const changes = { ...io };
+    const ctx = { ...context };
+    let closed = 0;
+    let connected = 0;
+    changes.connectWorkDatabase = async () => {
+      connected++;
+      return {
+        query: async () => {
+          if (kind === 'query') throw new Error('secret database details must not escape');
+          return [[], []];
+        },
+        end: async () => {
+          closed++;
+          if (kind === 'close') throw new Error('private connection');
+        },
+      };
+    };
+    if (kind === 'config') changes.readConfig = async () => Buffer.from('wrong');
+    if (kind === 'ownership')
+      ctx.journal = { assertOwnership: async () => ({ ...binding, attempt: 'wrong' }) };
+    if (kind === 'root') ctx.root = '/wrong';
+    if (kind === 'deadline') changes.now = () => approved.maintenanceEndsAtMs;
+    await assert.rejects(
+      firstHost.readFirstCutoverPersistedWork(ctx, changes),
+      /^Error: CUTOVER_WORK_OBSERVATION_UNPROVEN$/,
+    );
+    assert.equal(connected, ['query', 'close'].includes(kind) ? 1 : 0);
+    assert.equal(closed, connected);
+  }
+});
+
 async function preparationFixture(t, changes = {}) {
   const config = Buffer.from('SYNTHETIC_ONLY=1\n');
   const migrationManifest = { replaysNumberedSql: true };

@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { collectCutoverEvidence } from './browser-cutover-evidence.mjs';
+import { collectCutoverEvidence, readCutoverWorkScope } from './browser-cutover-evidence.mjs';
 import { backupAndRestoreCheck } from './browser-first-cutover-backup.mjs';
 import {
   applyCutoverFence,
@@ -696,6 +697,75 @@ export async function readFirstCutoverCandidateRuntime(identity, overrides = {})
     return { ...before, runtime };
   } catch {
     fail();
+  }
+}
+
+/** Use the already staged candidate and protected approved configuration. Each
+ * read owns one dedicated connection, never a pool or an application's session.
+ * No dotenv auto-loading, provider API call, lease cleanup or status mutation.
+ */
+export async function readFirstCutoverPersistedWork(context, overrides = {}) {
+  const io = {
+    ...candidatePreparationSystem(),
+    now: Date.now,
+    connectWorkDatabase: (uri, root) =>
+      createRequire(`${root}/apps/orchestrator/package.json`)('mysql2/promise').createConnection({
+        uri,
+        connectTimeout: 5000,
+        supportBigNumbers: true,
+        bigNumberStrings: true,
+      }),
+    ...overrides,
+  };
+  const fail = () => {
+    throw new Error('CUTOVER_WORK_OBSERVATION_UNPROVEN');
+  };
+  let connection;
+  let firstTime;
+  try {
+    const binding = structuredClone(context?.binding);
+    const guard = async () => {
+      const now = io.now();
+      if (
+        io.platform !== 'linux' ||
+        io.uid !== 0 ||
+        !/^[a-f0-9]{40}$/.test(binding?.candidate ?? '') ||
+        !/^[a-f0-9]{64}$/.test(binding?.configDigest ?? '') ||
+        context.root !== `/opt/holaday-releases/${binding.candidate}` ||
+        !['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].every(
+          (k) => context.approval?.[k] === binding[k],
+        ) ||
+        !Number.isSafeInteger(now) ||
+        now < 0 ||
+        (firstTime !== undefined && now < firstTime) ||
+        !Number.isSafeInteger(context.approval.maintenanceEndsAtMs) ||
+        now >= context.approval.maintenanceEndsAtMs ||
+        !isDeepStrictEqual(await context.journal.assertOwnership(), binding)
+      )
+        fail();
+      firstTime ??= now;
+      const bytes = await io.readConfig();
+      if (createHash('sha256').update(bytes).digest('hex') !== binding.configDigest) fail();
+      return bytes;
+    };
+    const bytes = await guard();
+    const config = io.parseConfig(bytes, context.root);
+    const url = new URL(config.DATABASE_URL);
+    if (url.protocol !== 'mysql:' || !url.hostname || url.pathname.length < 2) fail();
+    connection = await io.connectWorkDatabase(config.DATABASE_URL, context.root);
+    const work = await readCutoverWorkScope(connection, { now: io.now });
+    await guard();
+    return work;
+  } catch {
+    fail();
+  } finally {
+    if (connection) {
+      try {
+        await connection.end();
+      } catch {
+        fail();
+      }
+    }
   }
 }
 

@@ -4,6 +4,7 @@ import { connectFirstCutoverGatewaySession } from './browser-first-cutover-gatew
 import {
   createFirstCutoverRetirementObserver,
   readFirstCutoverHostPair,
+  readFirstCutoverPersistedWork,
   readReviewedFirstCutoverLegacySource,
 } from './browser-first-cutover-host.mjs';
 import {
@@ -29,6 +30,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     now: Date.now,
     sleep,
     readPair: readFirstCutoverHostPair,
+    readPersistedWork: readFirstCutoverPersistedWork,
     inspectSource: readReviewedFirstCutoverLegacySource,
     createIngress: createFirstCutoverIngressPair,
     connectGateway: connectFirstCutoverGatewaySession,
@@ -129,14 +131,22 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     const record = await guard(context);
     const orders = ['orders_fenced', 'legacy_settled', 'producers_stopped'].includes(record.phase);
     const work = structuredClone(await facts.observeWork(context));
+    const persisted = await io.readPersistedWork(context);
     const fence = await ingress[orders ? 'verifyOrders' : 'verifyFence']();
     const progress = await observer.readFenceProgress();
     if (progress?.purpose !== 'fence-progress') fail();
     const actual = progress.pair;
     const after = await facts.observeWork(context);
+    const persistedAfter = await io.readPersistedWork(context);
     const counts = ['unsettledWork', 'externalWork', 'activeRequests', 'unknownWriters'];
     if (
       !fresh(work.observedAtMs) ||
+      ![persisted, persistedAfter].every(
+        (value) =>
+          fresh(value?.observedAtMs) &&
+          Array.isArray(value.unsettled) &&
+          value.unsettled.length === 0,
+      ) ||
       !fresh(after?.observedAtMs) ||
       !fresh(fence.observedAtMs) ||
       !fresh(actual.observedAtMs) ||
