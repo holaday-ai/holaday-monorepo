@@ -4,6 +4,7 @@ import { isDeepStrictEqual as equal } from 'node:util';
 import {
   cutoverLegacyInterruptionRisk,
   readCutoverRehearsalArtifacts,
+  validateCutoverLegacyCapability,
 } from './browser-cutover-evidence.mjs';
 import {
   inspectAgeBackupArtifact,
@@ -261,6 +262,14 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       fail();
     return structuredClone(inventory);
   };
+  const checkLegacyCapability = (actual) => {
+    if (context.approval.schemaVersion !== 2) return;
+    if (
+      validateCutoverLegacyCapability(actual.legacyCapability, io.now()) !==
+      context.approval.legacyInterruption.capabilityDigest
+    )
+      fail();
+  };
   const boundary = async (identity) => {
     const record = await guard(context);
     if (identity !== undefined) {
@@ -285,6 +294,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       actual = progress.pair;
     }
     const { work: after, persisted: persistedAfter } = await observeWork();
+    checkLegacyCapability(actual);
     const counts = ['unsettledWork', 'externalWork', 'activeRequests', 'unknownWriters'];
     const workPhase = identity ? 'preopen' : orders ? 'before-stop' : 'after-stop';
     const disposition = validateLegacyWorkBoundary({
@@ -344,6 +354,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
         ? {
             riskDigest: disposition.riskDigest,
             legacyWork: { before: work, after },
+            legacyCapability: actual.legacyCapability,
             connectedTcp: actual.hosts.map(({ host, tcpObservation }) => ({
               host,
               ...tcpObservation,
@@ -360,6 +371,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
         actual.observedAtMs,
         persisted.observedAtMs,
         persistedAfter.observedAtMs,
+        ...(context.approval.schemaVersion === 2 ? [actual.legacyCapability.observedAtMs] : []),
       ),
     };
   };
@@ -963,6 +975,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
                 : await observer.readWithCandidate(request.identity);
             if (request.stage === 'preopen') closedCandidate(actual, request.identity);
             const { work: after } = await observeWork();
+            checkLegacyCapability(actual);
             const disposition = validateLegacyWorkBoundary({
               observation: before,
               approval: context.approval,
@@ -1003,7 +1016,14 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
             if (!equal(record, await guard(context, [record.phase]))) fail();
             return {
               inventory: structuredClone(inventory),
-              observedAtMs: Math.min(before.observedAtMs, actual.observedAtMs, after.observedAtMs),
+              observedAtMs: Math.min(
+                before.observedAtMs,
+                actual.observedAtMs,
+                after.observedAtMs,
+                ...(context.approval.schemaVersion === 2
+                  ? [actual.legacyCapability.observedAtMs]
+                  : []),
+              ),
               producersRunning,
               unknownWriters: [],
               externalWork:
@@ -1014,6 +1034,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
                 ? {
                     riskDigest: disposition.riskDigest,
                     legacyWork: structuredClone({ before, after }),
+                    legacyCapability: structuredClone(actual.legacyCapability),
                   }
                 : {}),
             };

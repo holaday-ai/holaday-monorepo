@@ -18,6 +18,72 @@ import { readFirstCutoverPaymentScope } from './browser-first-cutover-host.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const legacyCapabilityDigest = '8eae2e6ebcaab8d92eb5694bb6f8f89923a23005888342309278fcc35ac35a72';
+test('legacy capability requires the audited revision and both actual source digest passes', async () => {
+  const module = await import('./browser-cutover-evidence.mjs');
+  assert.equal(typeof module.readCutoverLegacyCapability, 'function');
+  const sourceCandidate = '107857fe70503e30691073f267d87275596edb20';
+  const digests = new Map([
+    ['http.ts', '8380c38abb207c932bc08823d3bfcaf8c976bb2aaef968981c494628de4c4536'],
+    ['index.ts', '2ba90ffb6bb0cb0d84a8746cef7eeccd02ae746292e8e3c42e9cb924781e8e64'],
+    ['trpc/router.ts', '4d3c781e814242973acca1b2fc728c6334ba8850ec7fa475922d74350ada829d'],
+    ['queue/task-queue.ts', 'c8bd31c21aa3bbe6975960f98b01506215e9b7b863bc793c82596dd7e64c3e9c'],
+    ['agent/batch-executor.ts', '2c73b7521e1ebdd9946fa9a4a6ed558dbc66b72195f11723704b42b558f3b746'],
+    [
+      'browser-pool/browser-pool.ts',
+      'cb5d3a54e56fa922206dc640a93fdfb8ab32aefe658f21b42acef0242d71e1a3',
+    ],
+  ]);
+  const seen = [];
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    now: () => 1000,
+    digestSource: async (path) => {
+      assert.ok(path.startsWith('/opt/holaday-monorepo/apps/orchestrator/src/'));
+      const key = path.slice('/opt/holaday-monorepo/apps/orchestrator/src/'.length);
+      assert.ok(digests.has(key));
+      seen.push(key);
+      return digests.get(key);
+    },
+  };
+  const proof = await module.readCutoverLegacyCapability({ sourceCandidate }, io);
+  assert.deepEqual(proof, {
+    schemaVersion: 1,
+    sourceCandidate,
+    observedAtMs: 1000,
+    capabilityDigest: legacyCapabilityDigest,
+  });
+  assert.equal(seen.length, 12);
+  assert.equal(module.validateCutoverLegacyCapability(proof, 1000), legacyCapabilityDigest);
+  for (const mode of ['revision', 'changed', 'late-change', 'failed', 'expired', 'not-root']) {
+    let calls = 0;
+    const bad = {
+      ...io,
+      now: () => (mode === 'expired' && calls ? 62000 : 1000),
+      uid: mode === 'not-root' ? 998 : 0,
+      digestSource: async (path) => {
+        calls++;
+        if (mode === 'failed') throw new Error('unreadable');
+        if (mode === 'changed' || (mode === 'late-change' && calls > 6)) return 'f'.repeat(64);
+        return io.digestSource(path);
+      },
+    };
+    await assert.rejects(
+      module.readCutoverLegacyCapability(
+        { sourceCandidate: mode === 'revision' ? 'a'.repeat(40) : sourceCandidate },
+        bad,
+      ),
+      /UNPROVEN/,
+    );
+  }
+  assert.throws(
+    () =>
+      module.validateCutoverLegacyCapability({ ...proof, capabilityDigest: '7'.repeat(64) }, 1000),
+    /UNPROVEN/,
+  );
+  assert.throws(() => module.validateCutoverLegacyCapability(proof, 62000), /UNPROVEN/);
+});
 const merchant = '9'.repeat(64);
 const approvedSandboxDigest = '75467f5b0aec5367761433a57fbd45aa9a41347e638f385178c12f5af7740b95';
 const approvedAlipayDigests = [

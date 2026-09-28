@@ -9,6 +9,7 @@ import { backupAndRestoreCheck } from './browser-first-cutover-backup.mjs';
 import * as siteModule from './browser-first-cutover-site.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 import { finishStoppedRelease } from './browser-maintenance-release-tail.mjs';
+const capabilityDigest = '8eae2e6ebcaab8d92eb5694bb6f8f89923a23005888342309278fcc35ac35a72';
 
 async function fixture(t, extraInventory = {}, interrupted = false) {
   const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'cutover-site-')));
@@ -40,7 +41,7 @@ async function fixture(t, extraInventory = {}, interrupted = false) {
             mode: 'controlled-interruption',
             scope: 'legacy-non-payment-memory',
             approvalRef: 'legacy-interruption-20260928',
-            capabilityDigest: '7'.repeat(64),
+            capabilityDigest,
             observeUntilMs: 8000,
             noAutomaticReplay: true,
           },
@@ -80,18 +81,25 @@ async function fixture(t, extraInventory = {}, interrupted = false) {
     failedPrepare: false,
     failedClose: false,
     tcp: { observedAtMs: 1000, existingSockets: 0, sourceDigest: '6'.repeat(64) },
+    capability: {
+      schemaVersion: 1,
+      sourceCandidate: '107857fe70503e30691073f267d87275596edb20',
+      observedAtMs: 1000,
+      capabilityDigest,
+    },
     legacyWork: {
       schemaVersion: 2,
       knownExternalWork: [],
       activeRequests: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
       externalWork: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
-      capabilityDigest: '7'.repeat(64),
+      capabilityDigest,
       replaySourcesDigest: '8'.repeat(64),
       pendingReplay: 0,
     },
   };
   const receipt = (host, role, pid) => ({ binding, host, role, process: { pid } });
   const classified = () => ({
+    legacyCapability: structuredClone(state.capability),
     observedAtMs: state.now,
     inventoryDigest: binding.inventoryDigest,
     unknownLaunchers: state.foreign ? [{ pid: 999 }] : [],
@@ -272,8 +280,11 @@ test('site prepare evidence preserves both unknown observations rather than only
   assert.notEqual(evidence.legacyWork.before.replaySourcesDigest, independent.replaySourcesDigest);
   assert.deepEqual(evidence.legacyWork.after, evidence.legacyWork.before);
   assert.equal(evidence.riskDigest, record.riskDigest);
+  assert.deepEqual(evidence.legacyCapability, f.state.capability);
   evidence.legacyWork.before.pendingReplay = 1;
   assert.equal((await site.evidence.readHostInventory(input)).legacyWork.before.pendingReplay, 0);
+  f.state.capability = undefined;
+  await assert.rejects(() => site.evidence.readHostInventory(input), /UNPROVEN/);
   await site.lifecycle.detach(f.context);
 });
 test('site keeps tagged unknown work and requires a durable receipt before producer stop', async (t) => {
@@ -302,6 +313,23 @@ test('site keeps tagged unknown work and requires a durable receipt before produ
   assert.equal(f.events.filter((event) => event === 'stop-producers').length, 1);
   assert.deepEqual((await f.journal.readFirstCutoverEffects()).interruptionObservation, receipt);
   await site.lifecycle.detach(f.context);
+});
+test('site cannot accept unknown memory work from approval digest alone without live source proof', async (t) => {
+  for (const mode of ['missing', 'changed', 'future', 'unsupported']) {
+    const f = await fixture(t, {}, true);
+    const site = f.make();
+    await site.lifecycle.attach(f.context);
+    for (const phase of ['prepared', 'orders_fenced', 'legacy_interruption_accepted'])
+      await f.journal.persist(phase, { candidate: f.binding.candidate });
+    if (mode === 'missing') f.state.capability = undefined;
+    if (mode === 'changed') f.state.capability.capabilityDigest = '7'.repeat(64);
+    if (mode === 'future') f.state.capability.observedAtMs = 1001;
+    if (mode === 'unsupported') f.state.capability.sourceCandidate = 'a'.repeat(40);
+    await assert.rejects(site.lifecycle.acceptLegacyInterruption(f.context), /UNPROVEN/);
+    assert.equal((await f.journal.readFirstCutoverEffects()).interruptionObservation, undefined);
+    assert.equal(f.events.includes('stop-producers'), false);
+    await site.lifecycle.detach(f.context);
+  }
 });
 test('independent connected TCP blocks interruption even when writer callback claims zero', async (t) => {
   for (const tcp of [

@@ -351,7 +351,7 @@ try {
     gatewayHost.listeners += await exec('ss', ['-H', '-ltnp', 'sport = :4011']);
     return {
       sourceDigest: sha('physical-pm2-fixture'),
-      sourceCandidate: 'c'.repeat(40),
+      sourceCandidate: interruption ? '107857fe70503e30691073f267d87275596edb20' : 'c'.repeat(40),
       observedAtMs: snapshot.observedAtMs,
       hosts: [
         {
@@ -361,8 +361,25 @@ try {
         },
         {
           host: 'vultr',
-          sourceCandidate: 'c'.repeat(40),
-          snapshot: gateways ? structuredClone(second) : snapshot,
+          sourceCandidate: interruption
+            ? '107857fe70503e30691073f267d87275596edb20'
+            : 'c'.repeat(40),
+          snapshot: {
+            ...(gateways ? structuredClone(second) : snapshot),
+            // Synthetic source proof: this fixture verifies physical retirement,
+            // not the legacy source files (tested independently with real I/O).
+            ...(interruption
+              ? {
+                  legacyCapability: {
+                    schemaVersion: 1,
+                    sourceCandidate: '107857fe70503e30691073f267d87275596edb20',
+                    observedAtMs: snapshot.observedAtMs,
+                    capabilityDigest:
+                      '8eae2e6ebcaab8d92eb5694bb6f8f89923a23005888342309278fcc35ac35a72',
+                  },
+                }
+              : {}),
+          },
         },
       ],
     };
@@ -425,7 +442,7 @@ try {
           mode: 'controlled-interruption',
           scope: 'legacy-non-payment-memory',
           approvalRef: 'legacy-interruption-20260928',
-          capabilityDigest: sha('synthetic QA legacy capability'),
+          capabilityDigest: '8eae2e6ebcaab8d92eb5694bb6f8f89923a23005888342309278fcc35ac35a72',
           observeUntilMs: maintenanceEndsAtMs,
           noAutomaticReplay: true,
         },

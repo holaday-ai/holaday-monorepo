@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 4.R2继续：旧版本能力缺口绑定现场源码，真实只读核对通过
+
+承接`d27db17b`，Task4原BASE`844c2ced`不变。原collector增加固定旧版本`107857fe70503e30691073f267d87275596edb20`的六文件能力核对（http/index/router/task-queue/batch-executor/browser-pool）：两遍真实字节哈希、固定物理路径、普通文件及有界读取、前后元数据一致；错误、版本/字节改变、超时不能解释成unobservable。只返回源版本/时间/能力摘要；不执行旧应用、不采集业务内容。六文件对应已审查的“无完整in-flight接口”缺口，不声称覆盖全部依赖、运行时实例、外部工作或零活动。
+
+原Mac/Vultr现场采集传输在Git前后核对之间读取该证明；原双机分类器仅接受Vultr与pair一致的源版本，不能把Aliyun证明移作旧源证明。v2 site的prepare/preopen和停止边界独立要求实际证明匹配批准摘要，保留到原证据与fenceDigest；v1不要求此证明，其他未审查版本只能得到缺失而不能放行v2。独立facts.observeWork/observeWriters/settleLegacy/reconcile仍为必需，没有把批准摘要或数据库空集变成knownExternalWork/unknownWriters零值。
+
+两项针对性RED明确失败（退出1），接线后通过。首轮完整browser为995/996，一项stdin测试替身缺新能力接口；同步原替身并验证仅Vultr读取后，采集器32/32通过。最终完整browser **996/996**、实际Linux Node22 UID998四组 **360/360**、ops **120/59/16/845 + Python12**，全部退出0、零跳过。九MJS Biome、diff检查干净。日志`/tmp/holaday-capability-{red,green,observer,browser,browser-final,linux,ops}.log`。
+
+已有QA镜像默认root读取器无I/O替身、无网络、只读挂载旧Git六文件归档，实际文件验证退出0（`/tmp/holaday-capability-source.log`、归档`/private/tmp/holaday-capability-source.wxoEeg/`）。原真实ss/PM2/pidfd/gateway/journal停止夹具退出0（`/tmp/holaday-capability-physical.log`）；该夹具能力/业务/入口/另一主机仍是明确合成事实，不能称完整切换或生产恢复演练。容器已自动移除，实时Docker仅原健康MySQL/Redis。
+
+**UTC 2026-09-28 15:27:27.613实际现场只读验证成功**：通过原阿里云跳板使用既有本地凭据，仅在Vultr执行Git HEAD/clean前后核对和上述默认六文件双读；源版本仍107857fe，能力摘要`8eae2e6ebcaab8d92eb5694bb6f8f89923a23005888342309278fcc35ac35a72`。脱敏证明`/private/tmp/holaday-capability-live.7PBCUb/proof.json`，退出0，不重试、没有安装文件/改配置/重启/SQL/支付方访问。它是当时源码证据，**不是维护窗口、当前无工作或可部署证明**，未来必须重采。
+
+本轮没有push/PR/合并/部署，没有重跑应用全套、独立整分支审查或完整成功/故障流程。CLI execute继续关闭；原cache、PayPal、历史支付/商户/恢复私钥/USB、UI与扩展均未改。原夜间自动化安排不暂停。R2/Task4–6仍未完成；下一步直接接剩余独立knownExternalWork/unknownWriters与恢复入口事实，不能再重做能力核对、13表摘要或TCP模块；随后原6.R3完整演练、首次执行、真实停写备份/Mac恢复及非PayPal恢复证据和整分支审查。
+
 ### 2026-09-29 睡前再次授权：恢复原线程夜间续跑
 
 用户明确要求“继续 我去睡觉了 你自行推进 允许期间的所有操作”。据此通过应用原自动化接口，将既有`holaday`每小时heartbeat由PAUSED恢复为ACTIVE，仍只运行本线程，不新建任务或重复自动化。工具已确认ACTIVE；该确认只代表安排已恢复，不代表后续运行、部署或上线已完成。本条覆盖下方“自动化暂停”的历史记录，其他门槛不变。

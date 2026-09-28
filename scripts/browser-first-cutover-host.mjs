@@ -470,6 +470,9 @@ export async function readFirstCutoverHostPair(overrides = {}) {
   };
   const sourceCandidate = await readSource();
   const snapshot = await readCutoverHostSnapshot();
+  if (sourceCandidate === legacyCapability.sourceCandidate) {
+    snapshot.legacyCapability = await readCutoverLegacyCapability({ sourceCandidate });
+  }
   snapshot.observer = snapshot.processes.find(row => row.pid === process.pid);
   if (!snapshot.observer || await readSource() !== sourceCandidate) throw new Error('observer');
   process.stdout.write(JSON.stringify({...${JSON.stringify(envelope)}, sourceCandidate, snapshot}));

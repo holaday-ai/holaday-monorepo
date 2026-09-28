@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 import { isDeepStrictEqual as equal } from 'node:util';
-import { cutoverLegacyInterruptionRisk } from './browser-cutover-evidence.mjs';
+import {
+  cutoverLegacyInterruptionRisk,
+  validateCutoverLegacyCapability,
+} from './browser-cutover-evidence.mjs';
 
 const digest = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const hash = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
@@ -635,10 +638,23 @@ export function classifyFirstCutoverHostPair(input, io = { now: Date.now }) {
   });
   const observedAtMs = Math.min(...hosts.map((h) => h.registered.observedAtMs));
   if (pair.observedAtMs !== observedAtMs) fail();
+  const source = pair.hosts.find((row) => row.host === 'vultr');
+  const capability = source.snapshot.legacyCapability;
+  if (pair.hosts.find((row) => row.host === 'aliyun').snapshot.legacyCapability !== undefined)
+    fail();
+  if (capability !== undefined) {
+    validateCutoverLegacyCapability(capability, now);
+    if (
+      capability.sourceCandidate !== source.sourceCandidate ||
+      capability.sourceCandidate !== pair.sourceCandidate
+    )
+      fail();
+  }
   return {
     observedAtMs,
     inventoryDigest,
     sourceDigest: pair.sourceDigest,
+    ...(capability === undefined ? {} : { legacyCapability: capability }),
     hosts,
     unknownLaunchers: hosts.flatMap((host) =>
       host.unknownLaunchers.map((row) => ({ host: host.host, ...row })),

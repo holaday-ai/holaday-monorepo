@@ -195,6 +195,30 @@ function pairFixture() {
   };
 }
 
+test('pair capability stays bound to Vultr source revision and cannot move to the gateway', () => {
+  const f = pairFixture();
+  const vultr = f.pair.hosts.find((h) => h.host === 'vultr');
+  const proof = {
+    schemaVersion: 1,
+    sourceCandidate: '107857fe70503e30691073f267d87275596edb20',
+    observedAtMs: 1000,
+    capabilityDigest: '8eae2e6ebcaab8d92eb5694bb6f8f89923a23005888342309278fcc35ac35a72',
+  };
+  assert.equal(
+    inventory.classifyFirstCutoverHostPair(f, { now: () => 1000 }).legacyCapability,
+    undefined,
+  );
+  vultr.snapshot.legacyCapability = proof;
+  assert.throws(() => inventory.classifyFirstCutoverHostPair(f, { now: () => 1000 }), /UNPROVEN/);
+  f.pair.sourceCandidate = vultr.sourceCandidate = proof.sourceCandidate;
+  assert.deepEqual(
+    inventory.classifyFirstCutoverHostPair(f, { now: () => 1000 }).legacyCapability,
+    proof,
+  );
+  f.pair.hosts.find((h) => h.host === 'aliyun').snapshot.legacyCapability = proof;
+  assert.throws(() => inventory.classifyFirstCutoverHostPair(f, { now: () => 1000 }), /UNPROVEN/);
+});
+
 async function readLegacy(f, now = 1000) {
   assert.equal(typeof firstHost.readReviewedFirstCutoverLegacySource, 'function');
   return firstHost.readReviewedFirstCutoverLegacySource(

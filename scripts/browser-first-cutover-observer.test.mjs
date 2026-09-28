@@ -315,9 +315,16 @@ test('the actual stdin payload invokes the collector and checks the old checkout
   assert.equal(typeof host.readFirstCutoverHostPair, 'function');
   const payloads = [];
   const code = Buffer.from(`
+const legacyCapability = {sourceCandidate:'107857fe70503e30691073f267d87275596edb20'};
+let capabilityRead = false;
+async function readCutoverLegacyCapability({sourceCandidate}) {
+  if (sourceCandidate !== legacyCapability.sourceCandidate || capabilityRead) throw Error('capability source');
+  capabilityRead = true;
+  return {sourceCandidate, capabilityDigest:'${'a'.repeat(64)}'};
+}
 const hostSystem = {exec: async (command, args) => {
   if (command !== 'git' || args[0] !== '-C' || args[1] !== '/opt/holaday-monorepo') throw Error('bad command');
-  if (args.includes('rev-parse')) return '${'c'.repeat(40)}\\n';
+  if (args.includes('rev-parse')) return legacyCapability.sourceCandidate+'\\n';
   if (args.includes('diff')) return '';
   throw Error('unexpected effect');
 }};
@@ -345,7 +352,12 @@ async function readCutoverHostSnapshot() {
     },
   });
   assert.equal(payloads.length, 2);
-  assert.equal(result.sourceCandidate, 'c'.repeat(40));
+  assert.equal(result.sourceCandidate, '107857fe70503e30691073f267d87275596edb20');
+  assert.equal(
+    result.hosts.find((h) => h.host === 'vultr').snapshot.legacyCapability.sourceCandidate,
+    result.sourceCandidate,
+  );
+  assert.equal(result.hosts.find((h) => h.host === 'aliyun').snapshot.legacyCapability, undefined);
   assert.ok(result.hosts.every(({ snapshot }) => snapshot.observer.pid !== process.pid));
 });
 

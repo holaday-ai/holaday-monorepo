@@ -6,6 +6,112 @@ import { readFile, readdir, readlink } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { posix } from 'node:path';
 import { promisify } from 'node:util';
+
+// This reviewed legacy revision has no complete in-flight request observation
+// API. Matching its bytes proves only that limitation, never absence of work.
+const legacyCapability = {
+  schemaVersion: 1,
+  sourceCandidate: '107857fe70503e30691073f267d87275596edb20',
+  scope: 'legacy-non-payment-memory',
+  reason: 'legacy-no-inflight-api',
+  sources: [
+    ['http.ts', '8380c38abb207c932bc08823d3bfcaf8c976bb2aaef968981c494628de4c4536'],
+    ['index.ts', '2ba90ffb6bb0cb0d84a8746cef7eeccd02ae746292e8e3c42e9cb924781e8e64'],
+    ['trpc/router.ts', '4d3c781e814242973acca1b2fc728c6334ba8850ec7fa475922d74350ada829d'],
+    ['queue/task-queue.ts', 'c8bd31c21aa3bbe6975960f98b01506215e9b7b863bc793c82596dd7e64c3e9c'],
+    ['agent/batch-executor.ts', '2c73b7521e1ebdd9946fa9a4a6ed558dbc66b72195f11723704b42b558f3b746'],
+    [
+      'browser-pool/browser-pool.ts',
+      'cb5d3a54e56fa922206dc640a93fdfb8ab32aefe658f21b42acef0242d71e1a3',
+    ],
+  ].map(([path, digest]) => ({ path: `apps/orchestrator/src/${path}`, digest })),
+};
+const legacyCapabilityDigest = createHash('sha256')
+  .update(JSON.stringify(legacyCapability))
+  .digest('hex');
+const legacyCapabilitySystem = {
+  platform: process.platform,
+  uid: process.getuid?.(),
+  now: Date.now,
+  async digestSource(path) {
+    if ((await fs.realpath(path)) !== path) throw new Error('path');
+    const handle = await fs.open(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    try {
+      const before = await handle.stat();
+      if (!before.isFile() || before.size < 1 || before.size > 2 * 1024 * 1024)
+        throw new Error('file');
+      const bytes = Buffer.alloc(before.size + 1);
+      let size = 0;
+      while (size < bytes.length) {
+        const { bytesRead } = await handle.read(bytes, size, bytes.length - size, size);
+        if (!bytesRead) break;
+        size += bytesRead;
+      }
+      const after = await handle.stat();
+      const current = await fs.lstat(path);
+      if (
+        size !== before.size ||
+        !current.isFile() ||
+        (await fs.realpath(path)) !== path ||
+        ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].some(
+          (key) => before[key] !== after[key] || after[key] !== current[key],
+        )
+      )
+        throw new Error('changed');
+      return createHash('sha256').update(bytes.subarray(0, size)).digest('hex');
+    } finally {
+      await handle.close();
+    }
+  },
+};
+export function validateCutoverLegacyCapability(proof, nowMs) {
+  if (
+    !proof ||
+    Object.keys(proof).sort().join(',') !==
+      'capabilityDigest,observedAtMs,schemaVersion,sourceCandidate' ||
+    proof.schemaVersion !== 1 ||
+    proof.sourceCandidate !== legacyCapability.sourceCandidate ||
+    proof.capabilityDigest !== legacyCapabilityDigest ||
+    !Number.isSafeInteger(nowMs) ||
+    !Number.isSafeInteger(proof.observedAtMs) ||
+    proof.observedAtMs < 0 ||
+    proof.observedAtMs > nowMs ||
+    nowMs - proof.observedAtMs > 60000
+  )
+    throw new Error('CUTOVER_LEGACY_CAPABILITY_UNPROVEN');
+  return legacyCapabilityDigest;
+}
+export async function readCutoverLegacyCapability({ sourceCandidate }, overrides = {}) {
+  const io = { ...legacyCapabilitySystem, ...overrides };
+  try {
+    if (
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      sourceCandidate !== legacyCapability.sourceCandidate
+    )
+      throw new Error('source');
+    const observedAtMs = io.now();
+    for (let pass = 0; pass < 2; pass++) {
+      for (const { path, digest } of legacyCapability.sources) {
+        if ((await io.digestSource(`/opt/holaday-monorepo/${path}`)) !== digest)
+          throw new Error('bytes');
+      }
+    }
+    const proof = {
+      schemaVersion: 1,
+      sourceCandidate,
+      observedAtMs,
+      capabilityDigest: legacyCapabilityDigest,
+    };
+    validateCutoverLegacyCapability(proof, io.now());
+    return proof;
+  } catch {
+    throw new Error('CUTOVER_LEGACY_CAPABILITY_UNPROVEN');
+  }
+}
 // Shared with exact-registration retirement. Heap/latency gauges are volatile;
 // all environment, launch, restart and scheduling fields remain identity-bearing.
 export const cutoverRegistrationConfigDigest = (value) =>
