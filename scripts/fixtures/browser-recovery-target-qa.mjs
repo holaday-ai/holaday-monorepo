@@ -2,7 +2,8 @@
 // dedicated no-network container/volume; this fixture never stops/removes one.
 // Payload and key are synthetic. Optional separate source container exercises
 // the original backup coordinator with mysqldump and a durable journal receipt.
-// Source SSH and physical stopped facts are NOT proven; pipes/journal are real.
+// CUTOVER_QA_RETIREMENT binds the real Linux stopping fixture to this session.
+// Production coverage, source SSH and the full host/candidate tail are NOT proven.
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -30,7 +31,9 @@ const fullSource = Boolean(sourceContainerId);
 const retirementLink = process.env.CUTOVER_QA_RETIREMENT === '1';
 const recoveryDrift = process.env.CUTOVER_QA_RECOVERY_DRIFT === '1';
 assert.ok(!recoveryDrift || retirementLink);
-assert.ok(!retirementLink || (!runtimeRoot && !fullSource));
+assert.ok(!retirementLink || fullSource || !runtimeRoot);
+const stoppedSource = retirementLink && fullSource;
+assert.ok(!stoppedSource || !recoveryDrift);
 // QA-only mutation: a lying adapter returns a receipt without persisting it.
 // The independent journal assertion below must reject this run.
 const omitReceipt = process.env.CUTOVER_QA_OMIT_RECEIPT === '1';
@@ -111,8 +114,72 @@ const optionsFor = async (path) => {
   await writeFile(recipientFile, recipient, { mode: 0o600, flag: 'wx' });
   return { facility: { ...facility, recipientFile }, directory: path, attempt };
 };
-const sourceOptions = await optionsFor(sourceDirectory);
+let sourceOptions = await optionsFor(sourceDirectory);
 const destination = await optionsFor(recoveryDirectory);
+let sourceQa;
+if (stoppedSource) {
+  // Reuse the cached client in the existing stop image; no image build, package
+  // installation, Docker socket, recovery private key or production credential.
+  const clientDirectory = join(directory, 'client');
+  await mkdir(clientDirectory, { mode: 0o700 });
+  await run('docker', [
+    'cp',
+    `${sourceContainerId}:/usr/bin/mysqldump`,
+    join(clientDirectory, 'mysqldump'),
+  ]);
+  const { build } = await import(
+    '../../node_modules/.pnpm/esbuild@0.25.12/node_modules/esbuild/lib/main.js'
+  );
+  await build({
+    entryPoints: [resolve('apps/orchestrator/node_modules/mysql2/promise.js')],
+    outfile: join(clientDirectory, 'mysql2.cjs'),
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node22',
+    logLevel: 'silent',
+  });
+  const ageDigest = (
+    await run('docker', [
+      'run',
+      '--rm',
+      '--network',
+      'none',
+      '--cpus=1',
+      '--memory=128m',
+      '--pids-limit=64',
+      '--entrypoint',
+      '/usr/bin/sha256sum',
+      'holaday-first-cutover-age:qa',
+      '/usr/bin/age',
+    ])
+  ).stdout.split(' ')[0];
+  assert.match(ageDigest, /^[a-f0-9]{64}$/);
+  sourceOptions = {
+    facility: {
+      executable: '/usr/bin/age',
+      executableDigest: ageDigest,
+      recipientFile: '/var/lib/holaday-deploy/source-backup/recipient.txt',
+      recipientDigest: hash(recipient),
+    },
+    directory: '/var/lib/holaday-deploy/source-backup',
+    attempt,
+  };
+  const config = 'DATABASE_URL=mysql://root@127.0.0.1/restore_qa';
+  sourceQa = {
+    clientDirectory,
+    recipient,
+    sourceOptions,
+    config,
+    configDigest: hash(config),
+    backupSource: {
+      facility: sourceOptions.facility,
+      directory: sourceOptions.directory,
+      executable: '/usr/local/bin/mysqldump',
+      executableDigest: hash(await readFile(join(clientDirectory, 'mysqldump'))),
+    },
+  };
+}
 const sql = Buffer.from(
   "SET NAMES utf8mb4; CREATE TABLE sample(id INT PRIMARY KEY, text_value TEXT, payload BLOB, optional_value INT NULL); INSERT INTO sample VALUES(1,'海边',0x00ff5c27,NULL); CREATE TABLE audit(id INT); CREATE TRIGGER qa_trigger AFTER INSERT ON sample FOR EACH ROW INSERT INTO audit VALUES(NEW.id); CREATE EVENT qa_event ON SCHEDULE EVERY 1 DAY DISABLE DO INSERT INTO audit VALUES(99);\n",
 );
@@ -134,7 +201,19 @@ const io = {
   pull: (input) =>
     pullFirstCutoverAgeBackup(input, {
       spawn: () =>
-        spawn(process.execPath, ['--input-type=module'], { stdio: ['pipe', 'pipe', 'ignore'] }),
+        stoppedSource
+          ? spawn(
+              'docker',
+              [
+                'exec',
+                '-i',
+                `holaday-retirement-recovery-${attempt}`,
+                '/usr/bin/node',
+                '--input-type=module',
+              ],
+              { stdio: ['pipe', 'pipe', 'ignore'] },
+            )
+          : spawn(process.execPath, ['--input-type=module'], { stdio: ['pipe', 'pipe', 'ignore'] }),
     }),
 };
 const request = { transfer, identityFile, target };
@@ -148,15 +227,16 @@ const sourceIdentity = sourceTarget?.identity ?? {
 const binding = {
   attempt,
   candidate: (retirementLink ? 'b' : 'a').repeat(40),
-  configDigest: (retirementLink ? 'c' : 'b').repeat(64),
+  configDigest: sourceQa?.configDigest ?? (retirementLink ? 'c' : 'b').repeat(64),
   migrationDigest: hash(JSON.stringify(migrationManifest)),
   inventoryDigest: retirementLink
     ? hash(
         JSON.stringify({
-          configurationDigests: ['c'.repeat(64)],
+          configurationDigests: [sourceQa?.configDigest ?? 'c'.repeat(64)],
           merchants: [],
           targets: [],
           backupPlan: { sourceIdentity, isolatedTarget: identity },
+          ...(sourceQa ? { backupSource: sourceQa.backupSource } : {}),
         }),
       )
     : 'd'.repeat(64),
@@ -310,7 +390,7 @@ const child = retirementLink
         '--name',
         `holaday-retirement-recovery-${attempt}`,
         '--network',
-        'none',
+        stoppedSource ? `container:${sourceContainerId}` : 'none',
         '--cpus=1',
         '--memory=512m',
         '--pids-limit=256',
@@ -325,6 +405,14 @@ const child = retirementLink
         `CUTOVER_QA_RECOVERY_SCOPE=${JSON.stringify(publicScope)}`,
         '--env',
         `CUTOVER_QA_RECOVERY_DRIFT=${recoveryDrift ? '1' : '0'}`,
+        ...(stoppedSource
+          ? [
+              '--mount',
+              `type=bind,src=${sourceQa.clientDirectory},dst=/qa-source,readonly`,
+              '--env',
+              `CUTOVER_QA_SOURCE=${JSON.stringify({ ...sourceQa, clientDirectory: undefined, migrationManifest, omitReceipt })}`,
+            ]
+          : []),
         'holaday-first-cutover-age:qa',
         '/opt/node22/bin/node',
         '--input-type=module',
@@ -381,25 +469,53 @@ if (retirementLink) {
   assert.deepEqual(
     { ...proof, riskDigest: undefined },
     {
-      scope: 'retirement-and-failure-only',
+      scope: stoppedSource ? 'retirement-backup-and-tail-refusal' : 'retirement-and-failure-only',
       knownEffect: false,
-      phase: 'backup_verified',
+      phase: stoppedSource ? 'migration_started' : 'backup_verified',
       effectCount: 1,
       releaseReady: false,
       recoveryLinked: !recoveryDrift,
       recoveryRejected: recoveryDrift,
+      ...(stoppedSource ? { backupReceipt: true } : {}),
       riskDigest: undefined,
     },
   );
   assert.match(proof.riskDigest, /^[a-f0-9]{64}$/);
-  assert.equal(
-    await query('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()'),
-    '0',
-  );
+  if (stoppedSource) {
+    // Independent semantic assertions, in addition to the production complete
+    // snapshot comparator and original migration/schema contract.
+    const values = 'SELECT HEX(text_value), HEX(payload), optional_value IS NULL FROM sample';
+    assert.equal(await query(values), 'E6B5B7E8BEB9\t00FF5C27\t1');
+    assert.equal(await queryAt(sourceContainerId, values), 'E6B5B7E8BEB9\t00FF5C27\t1');
+    assert.equal(
+      await query(
+        'SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA=DATABASE()',
+      ),
+      '1',
+    );
+    assert.equal(
+      await query('SELECT COUNT(*) FROM information_schema.EVENTS WHERE EVENT_SCHEMA=DATABASE()'),
+      '1',
+    );
+    assert.equal(
+      await queryAt(
+        sourceContainerId,
+        'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()',
+      ),
+      '2',
+    );
+    await inspectFirstCutoverRecoveryTarget(sourceTarget, { requireEmpty: false });
+  } else
+    assert.equal(
+      await query('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()'),
+      '0',
+    );
   console.log(
-    recoveryDrift
-      ? 'PASS real Linux site rejected newly identified external work during original Mac recovery attach; target empty, no receipt/candidate/replay. NOT full cutover.'
-      : 'PASS same actual Linux stopped attempt/site/journal -> original Mac recovery pipes -> pinned isolated target identity; source export/restore/candidate tail intentionally NOT configured, no backup receipt or replay. NOT full cutover.',
+    stoppedSource
+      ? 'PASS same Linux physical retirement/site/journal -> original source dump/age -> Mac isolated restore/all61 migrations -> original durable receipt; candidate tail explicitly refused, no replay. NOT full cutover.'
+      : recoveryDrift
+        ? 'PASS real Linux site rejected newly identified external work during original Mac recovery attach; target empty, no receipt/candidate/replay. NOT full cutover.'
+        : 'PASS same actual Linux stopped attempt/site/journal -> original Mac recovery pipes -> pinned isolated target identity; source export/restore/candidate tail intentionally NOT configured, no backup receipt or replay. NOT full cutover.',
   );
 } else {
   assert.equal(

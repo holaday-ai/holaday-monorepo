@@ -4,13 +4,18 @@ import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
 import { createConnection } from 'node:net';
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
+import { backupAndRestoreCheck } from '/source/browser-first-cutover-backup.mjs';
 import { connectFirstCutoverGatewaySession } from '/source/browser-first-cutover-gateway-session.mjs';
 import {
   createFirstCutoverRetirementObserver,
+  exportFirstCutoverSourceBackup,
+  readFirstCutoverBackupPlan,
+  readFirstCutoverSourceSnapshot,
   readReviewedFirstCutoverLegacySource,
   recordFirstCutoverFailure,
 } from '/source/browser-first-cutover-host.mjs';
@@ -43,6 +48,45 @@ const recoveryLink = process.argv[2] === '--execution-site-recovery';
 const recoveryDrift = process.env.CUTOVER_QA_RECOVERY_DRIFT === '1';
 assert.ok(!recoveryDrift || recoveryLink);
 const recoveryScope = recoveryLink ? JSON.parse(process.env.CUTOVER_QA_RECOVERY_SCOPE) : undefined;
+const sourceQa = process.env.CUTOVER_QA_SOURCE
+  ? JSON.parse(process.env.CUTOVER_QA_SOURCE)
+  : undefined;
+assert.ok(!sourceQa || (recoveryLink && !recoveryDrift));
+let sourceIo;
+if (sourceQa) {
+  assert.equal(sha(sourceQa.config), recoveryScope.binding.configDigest);
+  await fs.mkdir(sourceQa.sourceOptions.directory, { recursive: true, mode: 0o700 });
+  await fs.chmod(sourceQa.sourceOptions.directory, 0o700);
+  await fs.writeFile(sourceQa.sourceOptions.facility.recipientFile, sourceQa.recipient, {
+    mode: 0o600,
+    flag: 'wx',
+  });
+  await fs.copyFile('/qa-source/mysqldump', sourceQa.backupSource.executable);
+  await fs.chmod(sourceQa.backupSource.executable, 0o755);
+  assert.equal(
+    sha(await fs.readFile(sourceQa.backupSource.executable)),
+    sourceQa.backupSource.executableDigest,
+  );
+  await fs.copyFile('/qa-source/mysql2.cjs', '/tmp/qa-mysql2.cjs');
+  const mysql = createRequire(import.meta.url)('/tmp/qa-mysql2.cjs');
+  await fs.writeFile('/var/lib/holaday-deploy/maintenance-target.env', sourceQa.config, {
+    mode: 0o600,
+    flag: 'wx',
+  });
+  sourceIo = {
+    parseConfig: (bytes) => ({ DATABASE_URL: bytes.toString().slice('DATABASE_URL='.length) }),
+    connectWorkDatabase: (uri) =>
+      mysql.createConnection({
+        uri,
+        connectTimeout: 5000,
+        dateStrings: true,
+        supportBigNumbers: true,
+        bigNumberStrings: true,
+        jsonStrings: true,
+        timezone: 'Z',
+      }),
+  };
+}
 if (recoveryLink) {
   // stdout is exclusively the original recovery protocol, never QA narration.
   console.log = (...values) => console.error(...values);
@@ -118,12 +162,17 @@ await fs.writeFile(
 await fs.writeFile('/tmp/registry-idle.cjs', 'setInterval(()=>{},1000);\n');
 // Approved metadata is synthetic; process and protected-file observations below
 // remain real. No production merchant or recovery transcript is used here.
-const readinessInventory = { configurationDigests: ['c'.repeat(64)], merchants: [], targets: [] };
+const readinessInventory = {
+  configurationDigests: [sourceQa ? recoveryScope.binding.configDigest : 'c'.repeat(64)],
+  merchants: [],
+  targets: [],
+};
 if (recoveryLink)
   readinessInventory.backupPlan = {
     sourceIdentity: recoveryScope.sourceIdentity,
     isolatedTarget: recoveryScope.isolatedTarget,
   };
+if (sourceQa) readinessInventory.backupSource = sourceQa.backupSource;
 const binding = {
   attempt: recoveryScope?.binding.attempt ?? '22222222-2222-4222-8222-222222222222',
   inventoryDigest: siteMode ? sha(JSON.stringify(readinessInventory)) : 'a'.repeat(64),
@@ -503,8 +552,8 @@ try {
     ...binding,
     kind: 'first-cutover',
     candidate: 'b'.repeat(40),
-    configDigest: 'c'.repeat(64),
-    migrationDigest: sha('[]'),
+    configDigest: sourceQa ? recoveryScope.binding.configDigest : 'c'.repeat(64),
+    migrationDigest: sourceQa ? recoveryScope.binding.migrationDigest : sha('[]'),
     legacyDigest: proof.legacyDigest,
     ...interruptionMetadata,
   });
@@ -519,7 +568,7 @@ try {
       },
     );
   let observer = attachedBaseline ? undefined : await createObserver();
-  await journal.bindManifest([]);
+  await journal.bindManifest(sourceQa?.migrationManifest ?? []);
   const advanceToPrepare = async () => {
     for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
       await journal.persist(phase, { candidate: 'b'.repeat(40) });
@@ -668,8 +717,18 @@ try {
           { attempt: binding.attempt },
           {
             readCoordinatorIdentity: async () => ({ binding: fullBinding }),
-            // This process-retirement fixture has no business database. SQL
-            // semantics are exercised by the separate real MySQL fixture.
+            ...(sourceQa
+              ? {
+                  readBackupPlan: (ctx, inventory) =>
+                    readFirstCutoverBackupPlan(ctx, inventory, sourceIo),
+                  exportSourceBackup: (ctx, inventory, deps) =>
+                    exportFirstCutoverSourceBackup(ctx, inventory, { ...sourceIo, ...deps }),
+                  readSourceSnapshot: (ctx, inventory, deps) =>
+                    readFirstCutoverSourceSnapshot(ctx, inventory, { ...sourceIo, ...deps }),
+                }
+              : {}),
+            // Persisted-work/other-host facts remain explicitly synthetic.
+            // sourceQa adds a real backup database, not production work coverage.
             readPersistedWork: async () => ({
               observedAtMs: Date.now(),
               unsettled: [],
@@ -712,9 +771,13 @@ try {
                 throw Error('not exercised');
               },
               holdMaintenance: lostEffect ? recordFirstCutoverFailure : async () => {},
-              readBackupPlan: async () => {
-                throw Error('not exercised');
-              },
+              ...(sourceQa
+                ? {}
+                : {
+                    readBackupPlan: async () => {
+                      throw Error('not exercised');
+                    },
+                  }),
             },
             createIngress: async () => ({
               verifyOrders: async () => fence('orders'),
@@ -835,9 +898,9 @@ try {
     }
     if (siteMode) {
       if (lostEffect) {
-        // Exercise the real transition/site/journal through retirement. The
-        // not-yet-integrated restore/start/readiness tail MUST fail, not return
-        // a fabricated success. This is deliberately NOT a full cutover pass.
+        // Exercise the real transition/site/journal through retirement and,
+        // when sourceQa is supplied, the real backup/restore segment. The still
+        // unconnected candidate tail MUST fail, not fabricate a full cutover.
         const forbiddenTail = async () => {
           throw new Error('CUTOVER_QA_UNEXPECTED_TAIL');
         };
@@ -865,6 +928,37 @@ try {
             return journal.persist(phase, detail);
           },
           backupAndRestoreCheck: async () => {
+            if (sourceQa) {
+              const plan = await executionSite.lifecycle.readBackupPlan(siteContext);
+              const receipt = await backupAndRestoreCheck(
+                {
+                  ...plan,
+                  binding: siteContext.binding,
+                  maintenanceEndsAtMs: siteContext.approval.maintenanceEndsAtMs,
+                },
+                {
+                  ...executionSite.backup,
+                  now: Date.now,
+                  assertOwnership: () => journal.assertOwnership(),
+                  assertWritersStopped: () => executionSite.lifecycle.assertStopped(siteContext),
+                  sealReceipt: sourceQa.omitReceipt
+                    ? (r) => r
+                    : (r) => journal.bindBackupReceipt(r),
+                },
+              );
+              try {
+                assert.deepEqual(
+                  JSON.parse(await fs.readFile(journal.path, 'utf8')).backupReceipt,
+                  receipt,
+                  'verified recovery must be durably bound to the same stopped attempt',
+                );
+              } catch {
+                console.error('QA_DURABLE_RECEIPT_MISSING');
+                throw new Error('QA_DURABLE_RECEIPT_MISSING');
+              }
+              await executionSite.backup.finishRecovery(siteContext);
+              return receipt;
+            }
             if (recoveryLink) {
               // Real stopped Linux attempt owns this Mac session. This is only
               // attach/target inspection: NO source export, restore or receipt.
@@ -905,7 +999,11 @@ try {
         assert.equal(result.action, 'hold_maintenance');
         assert.equal(
           result.phase,
-          knownEffect ? 'legacy_interruption_accepted' : 'backup_verified',
+          knownEffect
+            ? 'legacy_interruption_accepted'
+            : sourceQa
+              ? 'migration_started'
+              : 'backup_verified',
         );
         const effects = await journal.readFirstCutoverEffects();
         assert.equal(effects.failureObservation.status.mode, 'not-started');
@@ -922,7 +1020,9 @@ try {
             result.code,
             recoveryDrift
               ? 'CUTOVER_RECOVERY_SESSION_UNPROVEN'
-              : 'CUTOVER_QA_RESTORE_NOT_CONFIGURED',
+              : sourceQa
+                ? 'CUTOVER_QA_UNEXPECTED_TAIL'
+                : 'CUTOVER_QA_RESTORE_NOT_CONFIGURED',
           );
           assert.equal(effects.interruptionObservation.riskDigest, effects.riskDigest);
           assert.equal(effects.legacyInterruption.scope, 'legacy-non-payment-memory');
@@ -939,7 +1039,7 @@ try {
               undefined,
             );
             await assert.rejects(executionSite.lifecycle.assertStopped(siteContext), /UNPROVEN/);
-          } else
+          } else if (!sourceQa)
             assert.deepEqual(
               (await executionSite.lifecycle.assertStopped(siteContext)).survivors,
               [],
@@ -960,7 +1060,7 @@ try {
         assert.equal(effectCount, 1, 'no retry, old startup replay, or business compensation');
         console.log(
           `QA_LOST_EFFECT_RESULT ${JSON.stringify({
-            scope: 'retirement-and-failure-only',
+            scope: sourceQa ? 'retirement-backup-and-tail-refusal' : 'retirement-and-failure-only',
             knownEffect,
             phase: result.phase,
             effectCount,
@@ -968,6 +1068,13 @@ try {
             releaseReady: false,
             ...(recoveryLink
               ? { recoveryLinked: !recoveryDrift, recoveryRejected: recoveryDrift }
+              : {}),
+            ...(sourceQa
+              ? {
+                  backupReceipt: Boolean(
+                    JSON.parse(await fs.readFile(journal.path, 'utf8')).backupReceipt,
+                  ),
+                }
               : {}),
           })}`,
         );

@@ -1,10 +1,26 @@
-# 首次切换实施断点：真实文件安装与站点隔离已验证，Task 4 整流程接线未完成
+# 首次切换实施断点：同次停止/源备份/Mac恢复已验证，完整host及候选尾段未完成
 
 日期：2026-09-26（Asia/Tokyo）。本地实施中，未部署。
 
 最新授权：2026-09-26 用户表示“我要出去一下 你自行安排任务 允许期间的所有操作 包含PR 部署 验证”。当前浏览器上线大项允许自主实施、PR、必要合并、部署与验证；下方历史“仅本地/未授权部署”限制已被本次授权取代。授权不等于验收通过；必须完成剩余真实接线、恢复演练与发布门槛，不得修改历史业务记录来伪造通过。
 
 ## 最新恢复点（优先于下方历史段落）
+
+### 2026-09-29 JST（2026-09-28 22:17Z heartbeat）：同一Linux停写日志接通真实源导出和Mac恢复
+
+起点`ede74e47`，Task4原BASE不变。只扩展原两份QA夹具，未改生产模块：`CUTOVER_QA_RETIREMENT=1`现在可与原runtime/source参数共同使用。**原停止镜像缺mysqldump的问题已经解决，不要再次调查或重建镜像：** 从已缓存的MySQL8镜像提取客户端，实测可直接运行于原Debian停止镜像，依赖均已有。父端只读挂载客户端和本地打包的mysql2，子端复制到私有QA文件系统，原导出器按实际可执行文件摘要校验。没有安装软件、重建镜像、新传输协议或Docker socket。
+
+协调器使用专属源容器的无外网网络命名空间，PID仍各自私有；源和恢复目标使用不同serverUUID/卷，目标保持原严格network-none隔离。原Linux transition/site/journal/PM2/pidfd实际停止后，原`site.lifecycle.readBackupPlan`、全部`site.backup`、`exportFirstCutoverSourceBackup`、原受保护配置读取器和原Mac恢复session串联。同一个attempt/config/inventory/全61SQL manifest/窗口贯穿源身份、mysqldump/age、跨端读取、独立导入、完整快照比较、61迁移、schema/业务摘要、源未变及`journal.bindBackupReceipt`。原`finishRecovery`在进入migration_started前关闭会话。Mac恢复私钥不进Linux；全为合成QA数据和QA密钥。
+
+正常模式已两次新源/目标退出0；最终有独立中文/BLOB/NULL/触发器/事件及源2表未迁移断言。之后在`migration_started`遇到未接候选尾段的明确拒绝，原failure/risk保留，旧HTTP外部效果计数仍1、旧注册不回生、未启动候选/open。反例故意让适配器返回回执却不落盘：真实恢复和61迁移完成，但独立日志检查报`QA_DURABLE_RECEIPT_MISSING`，最终退出1，未进入候选尾段。日志和精确验证结果见verification最新节。
+
+**不能称完整6.R3或生产备份：** stage仍是夹具预先建journal后核对，不是`createFirstCutoverHostAdapter`负责的真实clone/install/build/readiness；旧网关及外部计数是实际进程，其他主机/入口/持久工作等事实仍明确合成。源库用于备份而非证明全部业务写入者；源没有执行上线迁移。新boot/dirty/open/晚到工作故障、完整现场facts和非PayPal恢复仍未完成，CLI execute保持关闭。
+
+下一步具体接线：原host的stage必须亲自取得journal并调用`prepareFirstCutoverCandidate`，不能注入本夹具预建日志；把夹具的site/gateway准备移到原lifecycle.attach上下文，沿已接通的backup接口继续原迁移/seed/start/readiness/open。完整stage还需要隔离QA候选git源、完整测试配置和Linux构建工具；本轮只读确认原task3镜像没有git/pnpm/tsc，不能用Mac原生esbuild或成功stub替代。原候选build为tsc；此处不是新的业务规划，也不应再次改造已完成源导出/DB/TCP/恢复握手。
+
+生产管理凭据被拒路径未重试；没有SSH/支付服务/商户复核/历史业务写入/真实密钥与USB操作，无push/PR/合并/部署。原缓存保留。自动化继续原设置，不标大项完成。
+
+最终验证：关联六文件244/244、Linux原未知/已知各1/1、原ops120/59/16/868及Python12，全部退出0、零跳过；漏回执变异按预期退出1且明确命中持久回执断言。两MJS Biome/node语法/diff检查通过。所有测试已结束，本轮源/目标/卷及客户端提取空容器已准确核验后清理，只有合成数据；日志、QA恢复资料保留。Docker最终仅原健康MySQL/Redis。详细复现和日志在verification最新节，不据此声称整项通过。
 
 ### 2026-09-29 21:16Z heartbeat：真实停写日志已接原Mac恢复握手，仍未接源导出/候选尾段
 

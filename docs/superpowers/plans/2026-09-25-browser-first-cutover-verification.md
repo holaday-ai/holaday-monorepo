@@ -2,6 +2,28 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29同attempt物理停止→真实源导出→Mac隔离恢复（基于ede74e47）
+
+复用原`browser-recovery-target-qa.mjs`六参数模式，增加`CUTOVER_QA_RETIREMENT=1`；错误回执反例再加`CUTOVER_QA_OMIT_RECEIPT=1`。原握手三参数模式、独立源Mac协调器模式和未知/已知Linux停止入口均保留。原停止镜像、MySQL8镜像和`holaday-recovery-pack-lkZ2Vd`不变；新Mac打包mysql2仅提供QA数据库连接，不替换源导出/快照/迁移实现。mysqldump为缓存MySQL镜像真实客户端，版本8.0.46，Debian原库满足其依赖；不复制生产配置或恢复私钥。
+
+每例新建两份带独立attempt标签的MySQL容器及卷，network-none/无宿主端口/1CPU/768MiB/256PIDs/event_scheduler=OFF。Linux停止容器1CPU/512MiB/256PIDs，私有PID、原SYS_PTRACE，网络仅共享该合成源容器的孤立命名空间，不能到公网；恢复目标未与协调器共享网络、卷或进程。只读scripts/ops/client挂载，原保护要求不放宽。源预置原两张表、中文/BLOB/NULL、触发器和禁用事件；Mac恢复目标必须空。源配置使用实际root:0600的maintenance-target.env和原保护读取器。数据流是实际mysqldump→age→原密文读取器（QA docker exec替代SSH）→Mac认证解密→原独立恢复工具/61SQL→原receipt。
+
+| 验证 | 实际结果 | 日志 |
+| --- | --- | --- |
+| 首个同Linux attempt完整备份段 | 退出0；真实停止/恢复/回执通过，未接候选尾段明确拒绝 | `/private/tmp/holaday-stopped-source-first.log` |
+| 最终版本及独立业务值/原受保护配置检查 | 退出0；源保持2表，目标61迁移后90表；旧外部效果1，未重放 | `/private/tmp/holaday-stopped-source-final.log` |
+| 初始漏回执反例 | 预期退出1，实际目标90表而原日志检查失败 | `/private/tmp/holaday-stopped-source-mutant.log` |
+| 最终漏回执反例 | 预期退出1，明确`QA_DURABLE_RECEIPT_MISSING,AssertionError`；不是环境依赖失败 | `/private/tmp/holaday-stopped-source-mutant-final.log` |
+| backup/host/site/recovery-session/mysql/journal六文件串行回归 | 244/244，退出0，零跳过 | `/private/tmp/holaday-stopped-source-regression.log` |
+
+本轮临时资源驱动和精确清理脚本保留`/private/tmp/holaday-stopped-source-{qa,cleanup}.mjs`，各次资源ID/attempt/卷记录在同前缀UUID JSON。驱动不重试导入：失败保留容器供观察，另行核验后清理；成功读取源/目标表数后清理本例资源。三参数及六参数的具体调用方式可从原QA夹具参数读取；runtime仍用原builder生成并以root:root/0700复制进专属目标。恢复目标软件闭包、候选清单和原迁移摘要均校验。
+
+附带调查如实记录：首次镜像格式命令因镜像无Entrypoint字段退出1，仅查询模板错误；改用实际容器命令核对OS/ldd/client。等待恢复期间怀疑Node22文件流关闭，独立无秘密小文件探测退出0，原正常流程随后通过，**没有所谓产品流关闭故障或相应修复**。一次只读探测遇到QA已自动移除，退出1。以上均非功能验收或有效RED。
+
+仍未使用原host完整stage/候选安装、源上线迁移、实际新应用启动/readiness/open、其他主机及所有业务事实；新模式只闭合“物理停止到持久备份回执”，不与旧组件结果相加为整发布通过。没有重跑完整browser/应用套件或独立整分支审查，没有生产操作/部署。
+
+最终串行回归：原Linux未知/已知入口各1/1、退出0、零跳过，日志`/private/tmp/holaday-stopped-source-{unknown,known}-regression.log`。原`pnpm test:ops`的120/59/16/868及Python12全部退出0、零跳过，日志`/private/tmp/holaday-stopped-source-ops.log`（含原离线PayPal假SSH测试，没有调用PayPal服务）。两MJS Biome/node语法与git diff检查退出0。所有测试会话结束；两次正常和两次反例各自的新源/目标及卷已按精确ID/标签/归属清理，另删除了仅提取客户端的未启动QA容器和空匿名卷。仅删除可重建合成数据，私有QA恢复证据/资源记录/日志保留。Docker最终仅原健康`holaday-mysql`和`holaday-redis`，无生产变更、无全分支验收或发布结论。
+
 ## 2026-09-29同attempt物理停止到Mac恢复会话（基于30eedbea）
 
 仅改原两个QA夹具，不改产品/部署模块。Mac父端运行原恢复服务器，Linux端复用`holaday-first-cutover-age:qa`（镜像ID `43e32ddaf0de5743635ec79acd32940d32151fd495ad6e642100b935fd3776bf`）及原物理停止夹具、transition/site/journal。每例新Linux容器，无网络/宿主端口，1CPU/512MiB/256PIDs、私有PID，SYS_PTRACE只限容器既有进程检查，scripts/ops只读挂载；不挂Docker socket或Mac密钥。独立MySQL8目标按原严格目标契约持有专属卷、1CPU/768MiB，无网络且全程无导入。
