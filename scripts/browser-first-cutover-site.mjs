@@ -85,6 +85,39 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
   )
     fail();
   const facts = { ...io.facts };
+  const observeWork = async () => {
+    const work = structuredClone(await facts.observeWork(context));
+    const persisted = await io.readPersistedWork(context);
+    if (context.approval.schemaVersion === 2) {
+      // Validate the independent observation before combining digests: a missing
+      // external proof must never become a valid hash of an undefined field.
+      validateLegacyWorkBoundary({
+        observation: work,
+        approval: context.approval,
+        phase: 'prepare',
+        nowMs: io.now(),
+      });
+      if (
+        !fresh(persisted?.observedAtMs) ||
+        !Array.isArray(persisted.unsettled) ||
+        persisted.unsettled.length ||
+        persisted.pendingReplay !== 0 ||
+        !/^[a-f0-9]{64}$/.test(persisted.replaySourcesDigest ?? '')
+      )
+        fail();
+      work.replaySourcesDigest = createHash('sha256')
+        .update(
+          JSON.stringify({
+            candidate: context.binding.candidate,
+            independent: work.replaySourcesDigest,
+            persisted: persisted.replaySourcesDigest,
+          }),
+        )
+        .digest('hex');
+      work.observedAtMs = Math.min(work.observedAtMs, persisted.observedAtMs);
+    }
+    return { work, persisted };
+  };
   const attempt = options.attempt;
   let context;
   let scope;
@@ -240,8 +273,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       'legacy_interruption_accepted',
       'producers_stopped',
     ].includes(record.phase);
-    const work = structuredClone(await facts.observeWork(context));
-    const persisted = await io.readPersistedWork(context);
+    const { work, persisted } = await observeWork();
     const fence = await ingress[orders ? 'verifyOrders' : 'verifyFence']();
     let actual;
     if (identity !== undefined) {
@@ -252,8 +284,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       if (progress?.purpose !== 'fence-progress') fail();
       actual = progress.pair;
     }
-    const after = await facts.observeWork(context);
-    const persistedAfter = await io.readPersistedWork(context);
+    const { work: after, persisted: persistedAfter } = await observeWork();
     const counts = ['unsettledWork', 'externalWork', 'activeRequests', 'unknownWriters'];
     const workPhase = identity ? 'preopen' : orders ? 'before-stop' : 'after-stop';
     const disposition = validateLegacyWorkBoundary({
@@ -904,13 +935,13 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
             if (request.stage === 'prepare') {
               if (request.identity !== undefined) fail();
             } else checkIdentity(request.identity, record);
-            const before = structuredClone(await facts.observeWork(context));
+            const { work: before } = await observeWork();
             const actual =
               request.stage === 'prepare'
                 ? await observer.read()
                 : await observer.readWithCandidate(request.identity);
             if (request.stage === 'preopen') closedCandidate(actual, request.identity);
-            const after = await facts.observeWork(context);
+            const { work: after } = await observeWork();
             const disposition = validateLegacyWorkBoundary({
               observation: before,
               approval: context.approval,

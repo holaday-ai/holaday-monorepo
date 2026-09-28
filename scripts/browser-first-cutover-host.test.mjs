@@ -227,6 +227,15 @@ test('persisted-work host reader owns and closes a dedicated approved database c
   assert.deepEqual(events.slice(-2), ['ROLLBACK', 'end']);
   assert.equal(events.filter((v) => v.startsWith('SELECT')).length, 13);
   assert.equal(events.filter((v) => v.includes(' FROM task_steps ')).length, 1);
+  const replay = await firstHost.readFirstCutoverPersistedWork(
+    {
+      ...context,
+      approval: { ...context.approval, schemaVersion: 2 },
+    },
+    io,
+  );
+  assert.equal(replay.pendingReplay, 0);
+  assert.match(replay.replaySourcesDigest, /^[a-f0-9]{64}$/);
   for (const kind of ['config', 'ownership', 'root', 'deadline', 'query', 'close']) {
     const changes = { ...io };
     const ctx = { ...context };
@@ -1106,7 +1115,12 @@ for (const fault of [undefined, 'candidate-observation', 'opened-observation']) 
           inventory: f.inventory,
         }),
         readCoordinatorIdentity: async () => ({ binding: f.binding }),
-        readPersistedWork: async () => ({ observedAtMs: f.io.now(), unsettled: [] }),
+        readPersistedWork: async () => ({
+          observedAtMs: f.io.now(),
+          unsettled: [],
+          pendingReplay: 0,
+          replaySourcesDigest: '9'.repeat(64),
+        }),
         readCandidateRuntime: async () => candidate(),
         readPaymentScope: (context, inventory) => {
           assert.deepEqual(context.binding, f.binding);

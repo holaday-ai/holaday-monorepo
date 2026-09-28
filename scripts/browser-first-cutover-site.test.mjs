@@ -117,7 +117,11 @@ async function fixture(t, extraInventory = {}, interrupted = false) {
     sleep: async () => {},
     readSite: async () => structuredClone(scope),
     readCoordinatorIdentity: async () => receipt('vultr', 'coordinator', 100),
-    readPersistedWork: async () => ({ observedAtMs: state.now, unsettled: [] }),
+    readPersistedWork: async () => ({
+      observedAtMs: state.now,
+      unsettled: [],
+      ...(interrupted ? { pendingReplay: 0, replaySourcesDigest: '9'.repeat(64) } : {}),
+    }),
     readPair: async () => ({ synthetic: true }),
     inspectSource: async (_input, deps) => {
       assert.deepEqual(
@@ -261,7 +265,9 @@ test('site prepare evidence preserves both unknown observations rather than only
   };
   const evidence = await site.evidence.readHostInventory(input);
   assert.deepEqual(evidence.externalWork, []);
-  assert.deepEqual(evidence.legacyWork.before, await f.io.facts.observeWork());
+  const independent = await f.io.facts.observeWork();
+  assert.deepEqual(evidence.legacyWork.before.activeRequests, independent.activeRequests);
+  assert.notEqual(evidence.legacyWork.before.replaySourcesDigest, independent.replaySourcesDigest);
   assert.deepEqual(evidence.legacyWork.after, evidence.legacyWork.before);
   assert.equal(evidence.riskDigest, record.riskDigest);
   evidence.legacyWork.before.pendingReplay = 1;
@@ -673,6 +679,37 @@ test('database work cannot be hidden by zero-valued external observations', asyn
   await assert.rejects(site.lifecycle.settleLegacy(f.context), /CUTOVER_SITE_UNPROVEN/);
   assert(!f.events.includes('stop-producers'));
   await site.lifecycle.detach(f.context);
+});
+test('interruption cannot accept a zero work observation without actual persisted replay proof', async (t) => {
+  for (const fault of ['missing', 'malformed', 'pending', 'late-pending', 'stale', 'read-failed']) {
+    const f = await fixture(t, {}, true);
+    let reads = 0;
+    f.io.readPersistedWork = async () => {
+      reads++;
+      if (fault === 'read-failed') throw Error('synthetic database unavailable');
+      return {
+        observedAtMs: fault === 'stale' ? -1 : f.state.now,
+        unsettled: [],
+        ...(fault === 'missing'
+          ? {}
+          : {
+              pendingReplay:
+                fault === 'pending' || (fault === 'late-pending' && reads === 2) ? 1 : 0,
+              replaySourcesDigest: fault === 'malformed' ? '' : '9'.repeat(64),
+            }),
+      };
+    };
+    const site = f.make();
+    await site.lifecycle.attach(f.context);
+    await f.journal.persist('prepared', { candidate: f.binding.candidate });
+    await f.journal.persist('orders_fenced', { candidate: f.binding.candidate });
+    await site.lifecycle.fenceOrders(f.context);
+    await f.journal.persist('legacy_interruption_accepted', { candidate: f.binding.candidate });
+    await assert.rejects(site.lifecycle.acceptLegacyInterruption(f.context), /UNPROVEN/);
+    assert.equal((await f.journal.readFirstCutoverEffects()).interruptionObservation, undefined);
+    assert(!f.events.includes('stop-producers'));
+    await site.lifecycle.detach(f.context);
+  }
 });
 
 for (const kind of ['stale', 'future', 'after-busy', 'missing', 'failed']) {

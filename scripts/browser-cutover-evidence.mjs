@@ -1565,10 +1565,10 @@ async function readPersistedCutoverWork(db) {
     ],
   ];
   const unsettled = [];
+  const sources = [];
   for (const [table, column, where] of scopes) {
-    const [rows] = await db.query(
-      `SELECT id, ${column} AS status FROM ${table} WHERE (${where}) OR ${column} IS NULL ORDER BY id LIMIT 100`,
-    );
+    const sql = `SELECT id, ${column} AS status FROM ${table} WHERE (${where}) OR ${column} IS NULL ORDER BY id LIMIT 100`;
+    const [rows] = await db.query(sql);
     if (!Array.isArray(rows) || rows.length >= 100) fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
     let previous = 0;
     for (const row of rows) {
@@ -1583,22 +1583,31 @@ async function readPersistedCutoverWork(db) {
       previous = id;
       unsettled.push({ table, id, status: row.status });
     }
+    sources.push({
+      table,
+      queryDigest: digest(sql),
+      rows: unsettled.filter((row) => row.table === table),
+    });
   }
-  return unsettled;
+  return { unsettled, sources };
 }
 
 /** Frequent business checks need no payment credentials or provider queries.
  * Owns one read-only snapshot; call with a dedicated mysql2 connection, not a
  * pool whose query calls could switch sessions, or an existing transaction.
  */
-export async function readCutoverWorkScope(db, { now = Date.now } = {}) {
+export async function readCutoverWorkScope(
+  db,
+  { now = Date.now, includeReplaySources = false } = {},
+) {
   let transaction = false;
   try {
+    if (typeof includeReplaySources !== 'boolean') fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
     await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
     await db.query('START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY');
     transaction = true;
     const observedAtMs = now();
-    const unsettled = await readPersistedCutoverWork(db);
+    const { unsettled, sources } = await readPersistedCutoverWork(db);
     const finishedAtMs = now();
     if (
       !Number.isSafeInteger(observedAtMs) ||
@@ -1608,7 +1617,18 @@ export async function readCutoverWorkScope(db, { now = Date.now } = {}) {
       finishedAtMs - observedAtMs > 60000
     )
       fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
-    return { observedAtMs, unsettled };
+    return {
+      observedAtMs,
+      unsettled,
+      ...(includeReplaySources
+        ? {
+            // Conservative persisted recovery blockers, not a claim about memory
+            // or provider-side effects. Unknown statuses remain blockers as well.
+            pendingReplay: unsettled.length,
+            replaySourcesDigest: digest({ schemaVersion: 1, observedAtMs, sources }),
+          }
+        : {}),
+    };
   } catch {
     fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
   } finally {
@@ -1744,7 +1764,7 @@ export async function readCutoverDatabaseScope(
       deferredUnverified.filter((row) => row.approvalRef === alipayDeferralRef).length !== 9
     )
       fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
-    const unsettled = await readPersistedCutoverWork(db);
+    const { unsettled } = await readPersistedCutoverWork(db);
     return {
       observedAtMs,
       orders,

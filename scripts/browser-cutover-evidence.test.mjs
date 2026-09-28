@@ -523,6 +523,32 @@ test('payment readiness includes independent work even when ordinary tasks are e
   await assert.rejects(collectCutoverEvidence(ready.input, ready.io), /MAINTENANCE_/);
   assert.deepEqual(ready.published, []);
 });
+test('replay source observation binds actual selected rows and time in the same read-only transaction', async () => {
+  let rows = [];
+  let now = 100_000;
+  const calls = [];
+  const db = {
+    query: async (sql) => {
+      calls.push(sql);
+      return [sql.includes(' FROM task_steps ') ? structuredClone(rows) : [], []];
+    },
+  };
+  const read = () => readCutoverWorkScope(db, { now: () => now, includeReplaySources: true });
+  const empty = await read();
+  assert.equal(empty.pendingReplay, 0);
+  assert.match(empty.replaySourcesDigest, /^[a-f0-9]{64}$/);
+  rows = [{ id: 9, status: 'executing' }];
+  const active = await read();
+  assert.equal(active.pendingReplay, 1);
+  assert.notEqual(active.replaySourcesDigest, empty.replaySourcesDigest);
+  assert.deepEqual(active.unsettled, [{ table: 'task_steps', id: 9, status: 'executing' }]);
+  now++;
+  assert.notEqual((await read()).replaySourcesDigest, active.replaySourcesDigest);
+  assert.equal(calls.filter((sql) => sql.startsWith('START TRANSACTION')).length, 3);
+  assert.equal(calls.filter((sql) => sql === 'ROLLBACK').length, 3);
+  assert(!calls.some((sql) => /INSERT|UPDATE|DELETE|payments/.test(sql)));
+  await assert.rejects(readCutoverWorkScope(db, { includeReplaySources: 'yes' }), /UNPROVEN/);
+});
 for (const kind of [
   'missing-table',
   'truncated',

@@ -71,6 +71,10 @@ try {
     await connection.query(`INSERT INTO ${table} (id, ${column}) VALUES (1, ?)`, [dormant]);
   }
   assert.deepEqual((await readCutoverWorkScope(connection)).unsettled, []);
+  const replayOptions = { now: () => 100_000, includeReplaySources: true };
+  const emptyReplay = await readCutoverWorkScope(connection, replayOptions);
+  assert.equal(emptyReplay.pendingReplay, 0);
+  assert.match(emptyReplay.replaySourcesDigest, /^[a-f0-9]{64}$/);
   // The explorer persists halted_sensitive only after browse returns; archived
   // plan definitions are not dispatched. Neither observation settles running
   // descendants or memory/provider work, which have independent checks.
@@ -117,12 +121,20 @@ try {
   for (const [table, column, dormant, active] of cases) {
     await connection.query(`UPDATE ${table} SET ${column} = ? WHERE id = 1`, [active]);
     const before = JSON.stringify((await connection.query(`SELECT * FROM ${table}`))[0]);
-    assert.deepEqual((await readCutoverWorkScope(connection)).unsettled, [
-      { table, id: 1, status: active },
-    ]);
+    const activeReplay = await readCutoverWorkScope(connection, replayOptions);
+    assert.deepEqual(activeReplay.unsettled, [{ table, id: 1, status: active }]);
+    assert.equal(activeReplay.pendingReplay, 1);
+    assert.notEqual(activeReplay.replaySourcesDigest, emptyReplay.replaySourcesDigest);
     assert.equal(JSON.stringify((await connection.query(`SELECT * FROM ${table}`))[0]), before);
     await connection.query(`UPDATE ${table} SET ${column} = ? WHERE id = 1`, [dormant]);
   }
+  assert.equal(
+    (await readCutoverWorkScope(connection, replayOptions)).replaySourcesDigest,
+    emptyReplay.replaySourcesDigest,
+  );
+  console.log(
+    'PASS real persisted replay source digest changes with selected work, remains stable for the same snapshot, no business writes by reader',
+  );
   for (const [table, prefix] of [
     ['account_closure_requests', 'completion_lease'],
     ['account_closure_steps', 'lease'],

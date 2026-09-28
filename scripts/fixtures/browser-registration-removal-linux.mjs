@@ -583,7 +583,13 @@ try {
             readCoordinatorIdentity: async () => ({ binding: fullBinding }),
             // This process-retirement fixture has no business database. SQL
             // semantics are exercised by the separate real MySQL fixture.
-            readPersistedWork: async () => ({ observedAtMs: Date.now(), unsettled: [] }),
+            readPersistedWork: async () => ({
+              observedAtMs: Date.now(),
+              unsettled: [],
+              ...(interruption
+                ? { pendingReplay: 0, replaySourcesDigest: sha('synthetic QA persisted source') }
+                : {}),
+            }),
             readPair,
             facts: {
               observeWriters: async () => fence('orders'),

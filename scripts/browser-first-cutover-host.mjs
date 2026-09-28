@@ -1033,7 +1033,11 @@ export async function readFirstCutoverPersistedWork(context, overrides = {}) {
     context,
     overrides,
     'CUTOVER_WORK_OBSERVATION_UNPROVEN',
-    (connection, io) => readCutoverWorkScope(connection, { now: io.now }),
+    (connection, io) =>
+      readCutoverWorkScope(connection, {
+        now: io.now,
+        includeReplaySources: context.approval.schemaVersion === 2,
+      }),
   );
 }
 
