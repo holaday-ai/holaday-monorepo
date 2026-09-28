@@ -10,6 +10,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import {
   readFirstCutoverCandidateRuntime,
+  recordFirstCutoverFailure,
   resumeFirstCutoverCandidateWorker,
 } from '/source/browser-first-cutover-host.mjs';
 import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
@@ -337,6 +338,36 @@ try {
       );
       const unrelatedAfter = (await rows()).find((r) => r.pid === unrelatedPid);
       assert.equal(unrelatedAfter.pm2_env.restart_time, unrelatedBefore.pm2_env.restart_time);
+      if (process.argv.includes('--record-hold')) {
+        // Only the synthetic protocol changes; this is NOT a real app close or
+        // settlement proof. The fixed control CLI and journal are production code.
+        await fs.unlink(`${controlDirectory}/serving`);
+        context.approval.operatorRef = 'qa-hold';
+        context.approval.reconcileByMs = Date.now() - 1000;
+        context.approval.maintenanceEndsAtMs = Date.now() - 2000;
+        const held = await recordFirstCutoverFailure(context, {
+          identity,
+          closeAcknowledged: false,
+          errorCode: 'CUTOVER_QA_FAILURE',
+        });
+        assert.deepEqual(held, { closeAcknowledged: true });
+        const saved = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+        assert.equal(saved.phase, 'verified');
+        assert.deepEqual(saved.failureObservation.identity, identity);
+        assert.equal(saved.failureObservation.status.mode, 'closed');
+        assert.equal(saved.failureObservation.status.unknown, 0);
+        assert(saved.failureObservation.observedAtMs > saved.failureObservation.reconcileByMs);
+        await assert.rejects(journal.finish(), /NOT_OPENED/);
+        await assert.rejects(
+          journal.persist('opened', { candidate: identity.candidate, identity }),
+          /UNPROVEN/,
+        );
+        await assert.rejects(recordFirstCutoverFailure(context, { identity }), /UNPROVEN/);
+        await fs.stat(`${storage}/release.lock`);
+        console.log(
+          'PASS expired failure hold: fixed status CLI, same boot, durable original journal, retained lock, no subsequent success (synthetic control state)',
+        );
+      }
       console.log(
         `PASS real worker enabled=${enabled} missingBackup=${missingBackup}: same main + original journal/atomic persistence; unrelated PID/restarts/raw integers preserved; replay refused (synthetic workload/legacy scope)`,
       );

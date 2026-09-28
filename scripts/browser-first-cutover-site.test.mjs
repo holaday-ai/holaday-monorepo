@@ -442,6 +442,26 @@ test('site worker default uses the same live serving observer and rejects regene
   }
 });
 
+test('site defaults failure recording to the held journal even after the window or detach', async (t) => {
+  const f = await fixture(t);
+  f.io.facts.holdMaintenance = undefined;
+  let calls = 0;
+  f.io.recordFailure = async (ctx, result) => {
+    assert.equal(ctx.journal, f.journal);
+    assert.equal(result.closeAcknowledged, true);
+    calls++;
+    return { closeAcknowledged: false };
+  };
+  const site = f.make();
+  await site.lifecycle.attach(f.context);
+  await site.lifecycle.detach(f.context);
+  f.state.now = 20000;
+  assert.deepEqual(await site.lifecycle.holdMaintenance(f.context, { closeAcknowledged: true }), {
+    closeAcknowledged: false,
+  });
+  assert.equal(calls, 1);
+});
+
 test('site readiness and opened control follow the existing release tail without early verified persistence', async (t) => {
   const f = await candidateFixture(t);
   const prepare = await f.site.evidence.readFenceState(f.request('prepare'));

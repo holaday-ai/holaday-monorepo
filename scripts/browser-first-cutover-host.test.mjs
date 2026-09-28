@@ -27,6 +27,95 @@ const approved = {
   operatorRef: 'qa-operator',
 };
 
+test('failure observation reads exact status after expiry and never upgrades a lost or busy close', async () => {
+  for (const mode of [
+    'closed',
+    'draining',
+    'blocked',
+    'serving',
+    'unknown',
+    'foreign',
+    'not-started',
+  ]) {
+    assert.equal(typeof firstHost.recordFirstCutoverFailure, 'function');
+    const binding = Object.fromEntries(
+      ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map((k) => [
+        k,
+        approved[k],
+      ]),
+    );
+    const identity =
+      mode === 'not-started' ? undefined : { candidate: binding.candidate, bootId: 'f'.repeat(32) };
+    const phase = identity ? 'verified' : 'prepared';
+    let written;
+    let calls = 0;
+    const ctx = {
+      binding,
+      approval: { ...approved },
+      root: `/opt/holaday-releases/${binding.candidate}`,
+      journal: {
+        assertOwnership: async () => binding,
+        readFirstCutoverEffects: async () => ({
+          ...binding,
+          identity,
+          phase,
+          bootstrapSeed: 'e'.repeat(32),
+          recordDigest: '1'.repeat(64),
+        }),
+        recordFirstCutoverFailure: async (value) => {
+          written = value;
+        },
+      },
+    };
+    const io = {
+      platform: 'linux',
+      uid: 0,
+      now: () => 4000,
+      exec: async (command, args) => {
+        calls++;
+        assert.equal(command, 'runuser');
+        assert.deepEqual(args, [
+          '-u',
+          'holaday',
+          '--',
+          '/opt/node22/bin/node',
+          `${ctx.root}/scripts/browser-maintenance-control.mjs`,
+          'status',
+          identity.candidate,
+          identity.bootId,
+        ]);
+        if (mode === 'unknown') throw new Error('private transport failure');
+        const idle = mode === 'closed';
+        return JSON.stringify({
+          protocol: 1,
+          identity: mode === 'foreign' ? { ...identity, bootId: 'a'.repeat(32) } : identity,
+          mode,
+          idle,
+          needsReconciliation: true,
+          counts: {
+            mode: mode === 'serving' ? 'open' : mode === 'blocked' ? 'blocked' : 'closed',
+            idle,
+            active: idle ? 0 : 1,
+            unknown: mode === 'blocked' ? 1 : 0,
+          },
+        });
+      },
+    };
+    const actual = await firstHost.recordFirstCutoverFailure(
+      ctx,
+      { phase, identity, code: 'secret raw detail', closeAcknowledged: true },
+      io,
+    );
+    assert.equal(actual.closeAcknowledged, mode === 'closed');
+    assert.equal(written.status.mode, ['unknown', 'foreign'].includes(mode) ? 'unknown' : mode);
+    assert.equal(written.phase, phase);
+    assert.equal(written.errorCode, 'CUTOVER_FAILED');
+    assert.equal(written.observedAtMs, 4000);
+    assert.equal(calls, mode === 'not-started' ? 0 : 1);
+    assert(!JSON.stringify(written).includes('secret'));
+  }
+});
+
 test('persisted-work host reader owns and closes a dedicated approved database connection', async () => {
   const config = Buffer.from('DATABASE_URL=mysql://synthetic@127.0.0.1/qa');
   const binding = Object.fromEntries(
@@ -705,7 +794,10 @@ async function lifecycleFixture(t, fault) {
     },
     resumeWorker: async () => expectPhase('verified', 'resume-worker'),
     reconcile: async () => expectPhase('reconciled', 'reconcile'),
-    holdMaintenance: async () => events.push('hold'),
+    holdMaintenance: async (_ctx, value) => {
+      events.push('hold');
+      return { closeAcknowledged: value.closeAcknowledged };
+    },
     readBackupPlan: async () => ({
       sourceIdentity: { serverUuid: '11111111-1111-1111-1111-111111111111', database: 'source_qa' },
       isolatedTarget: {
@@ -1235,6 +1327,37 @@ test('candidate known from dirty startup is closed even before transition receiv
   assert.equal(f.events.filter((v) => v === 'control:close').length, 1);
   assert.ok(!f.events.includes('control:open'));
   await adapter.finish(result);
+});
+
+test('host does not report a clean close when independent hold observation is unknown', async (t) => {
+  const f = await lifecycleFixture(t, 'site-detach');
+  f.io.lifecycle.holdMaintenance = async () => ({ closeAcknowledged: false });
+  const { adapter, result } = await runLifecycle(f);
+  assert.equal(result.ok, false);
+  assert.equal(result.closeAcknowledged, false);
+  assert(f.events.includes('control:close'));
+  await adapter.finish(result);
+});
+
+test('lost close response is observed but never repeated by hold or finish', async (t) => {
+  const f = await lifecycleFixture(t, 'site-detach');
+  const exec = f.io.exec;
+  let closes = 0;
+  f.io.exec = async (command, args, options) => {
+    const value = await exec(command, args, options);
+    if (args.includes('close')) {
+      closes++;
+      throw new Error('lost close response after side effect');
+    }
+    return value;
+  };
+  const { adapter, result } = await runLifecycle(f);
+  assert.equal(result.ok, false);
+  assert.equal(result.closeAcknowledged, false);
+  assert.equal(closes, 1);
+  await adapter.finish(result);
+  assert.equal(closes, 1);
+  await fs.stat(join(f.directory, 'release.lock'));
 });
 
 test('window expiring after migration neither replays migration nor initializes or starts', async (t) => {

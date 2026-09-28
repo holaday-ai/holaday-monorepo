@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 续跑：失败收尾真实状态与原日志接通
+
+承接`d8975db4`，原Task4 BASE不变。原site.holdMaintenance现在默认使用原固定status命令，独立核对同一candidate/boot，写入持锁journal的failureObservation；允许在维护/核对期限后进行保护性只读观察，不重开入口、不重试关闭、不修改业务、不释放锁。closed/draining/blocked/serving/unknown分别保留；已落盘失败不能继续登记成功。原phase保持，记录责任引用及原核对截止时间，不保存原始错误/业务内容。
+
+两个实际串联缺陷已先RED再修复：host忽略site独立hold结果而误保留closeAcknowledged=true；tail关闭应答丢失后外层hold再次发送close（RED观测2次而非1）。现在使用独立结果，并在同实例第一次关闭发出前记录单次尝试，不因未知应答自动重发。没有改普通升级路径或增加回滚引擎。
+
+新鲜完整browser及两入口**983/983**、Linux六组**337/337**、原ops**120/59/16/816 + Python12**，全部退出0、0跳过，日志`/tmp/holaday-hold-{browser-final,linux-final,ops}.log`。真实既有QA镜像的runuser/socket/PM2及原文件journal验证退出0：`/tmp/holaday-hold-physical.log`；超期仍记录同boot关闭事实，锁保留，重复/继续成功拒绝。**控制状态与工作负载为明确合成，不是生产关停或完整应用恢复证明**。七MJS格式检查、shell语法、diff-check通过；未重跑应用全套/独立整分支审查。本轮全部验证结束、QA临时容器自动移除，只有原MySQL/Redis；进度文档首次审批超时明确未执行，一次原样重试获准。仅本地提交准备，未推送/PR/合并/部署，execute仍关闭。
+
+只读拓展检查旧Git `107857fe...`：`/trpc/health`也只有status/time；browserPool.stats虽有注释声称供health/ops，但没有实际路由调用；TaskQueue inFlight、batch executor inFlight均为内部变量。因此旧版内存工作不能由两个health或DB空集证明。不是新的服务器故障，也不能靠继续增加组件测试解决；须在原审批范围内找到真实独立工作依据，若必须改变旧版观测/允许中断，则先明确方案范围，不能默认填零。
+
+仍待原独立旧源DB归属/内存请求/browser/provider/writer事实、reconcile实际闭环、受保护工具安装与首次execute、真实停写备份/Mac恢复及非PayPal恢复证据、整流程故障矩阵/整分支审查。PayPal/历史订单/商户/密钥/USB/UI/扩展不动，原cache保留。普通模块通过不是整项完成。
+
 ### 2026-09-28 续跑：同实例 worker 恢复与原启动清单双文件持久化接通
 
 承接`80545eb6`，Task4原BASE844c2ced不变。原site.lifecycle.resumeWorker已有默认真实适配：在受保护配置、同一verified journal/候选boot、真实主进程和双机旧源观察器约束下，只启动配置启用的UID998 worker一次，使用原运行时读者与原日志权限脚本；不使用全局PM2 save、不重启或删除无关应用，启动应答未知不重试。

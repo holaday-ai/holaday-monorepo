@@ -896,6 +896,132 @@ export async function resumeFirstCutoverCandidateWorker(
   }
 }
 
+/** Failure observation uses only the held journal and the original fixed status
+ * command. It remains available after either deadline; it never opens, retries
+ * close, settles work, changes ingress, clears dirty state or releases the lock.
+ */
+export async function recordFirstCutoverFailure(context, result, overrides = {}) {
+  const io = { ...candidatePreparationSystem(), now: Date.now, ...overrides };
+  const fail = () => {
+    throw new Error('CUTOVER_HOLD_UNPROVEN');
+  };
+  try {
+    const { binding, approval, journal, root } = context;
+    const keys = ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'];
+    if (
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      root !== `/opt/holaday-releases/${binding?.candidate}` ||
+      !keys.every((k) => binding[k] === approval[k]) ||
+      !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(approval.operatorRef ?? '') ||
+      !Number.isSafeInteger(approval.reconcileByMs)
+    )
+      fail();
+    const before = io.now();
+    const guard = async () => {
+      if (
+        !Number.isSafeInteger(before) ||
+        before < 0 ||
+        !Number.isSafeInteger(io.now()) ||
+        io.now() < before ||
+        !isDeepStrictEqual(await journal.assertOwnership(), binding)
+      )
+        fail();
+      const record = await journal.readFirstCutoverEffects();
+      if (!keys.every((k) => record[k] === binding[k]) || record.failureObservation) fail();
+      return record;
+    };
+    const record = await guard();
+    const identity = result.identity;
+    if (
+      identity &&
+      (!isDeepStrictEqual(Object.keys(identity).sort(), ['bootId', 'candidate']) ||
+        identity.candidate !== binding.candidate ||
+        !/^[a-f0-9]{32}$/.test(identity.bootId ?? '') ||
+        identity.bootId === record.bootstrapSeed ||
+        (record.identity && !isDeepStrictEqual(identity, record.identity)))
+    )
+      fail();
+    let status = {
+      mode:
+        !identity &&
+        !['candidate_started', 'verified', 'opened', 'reconciled'].includes(record.phase)
+          ? 'not-started'
+          : 'unknown',
+      closeAcknowledged: false,
+    };
+    if (identity) {
+      try {
+        const output = await io.exec(
+          'runuser',
+          [
+            '-u',
+            'holaday',
+            '--',
+            '/opt/node22/bin/node',
+            `${root}/scripts/browser-maintenance-control.mjs`,
+            'status',
+            identity.candidate,
+            identity.bootId,
+          ],
+          {
+            cwd: `${root}/apps/orchestrator`,
+            env: {
+              PATH: '/opt/node22/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+              PM2_HOME: '/root/.pm2',
+            },
+          },
+        );
+        if (typeof output !== 'string' || Buffer.byteLength(output) > 8192) fail();
+        const actual = JSON.parse(output);
+        const c = actual.counts;
+        if (
+          actual.protocol !== 1 ||
+          !isDeepStrictEqual(actual.identity, identity) ||
+          !['closed', 'draining', 'blocked', 'serving'].includes(actual.mode) ||
+          typeof actual.idle !== 'boolean' ||
+          typeof actual.needsReconciliation !== 'boolean' ||
+          actual.idle !== c?.idle ||
+          ![c?.active, c?.unknown].every((n) => Number.isSafeInteger(n) && n >= 0 && n <= 65536) ||
+          c.mode !==
+            (actual.mode === 'serving'
+              ? 'open'
+              : actual.mode === 'blocked'
+                ? 'blocked'
+                : 'closed') ||
+          actual.idle !== (c.mode === 'closed' && c.active === 0 && c.unknown === 0) ||
+          (actual.mode === 'closed' && !actual.idle)
+        )
+          fail();
+        status = {
+          mode: actual.mode,
+          closeAcknowledged: actual.mode === 'closed',
+          idle: actual.idle,
+          active: c.active,
+          unknown: c.unknown,
+          needsReconciliation: actual.needsReconciliation,
+        };
+      } catch {
+        /* Lost/foreign/invalid status remains unknown, never a clean claim. */
+      }
+    }
+    if (!isDeepStrictEqual(record, await guard())) fail();
+    const code = result.errorCode ?? result.code;
+    await journal.recordFirstCutoverFailure({
+      phase: record.phase,
+      ...(identity ? { identity } : {}),
+      observedAtMs: io.now(),
+      operatorRef: approval.operatorRef,
+      reconcileByMs: approval.reconcileByMs,
+      errorCode: /^(CUTOVER|MAINTENANCE)_[A-Z_]{1,100}$/.test(code ?? '') ? code : 'CUTOVER_FAILED',
+      status,
+    });
+    return { closeAcknowledged: status.closeAcknowledged };
+  } catch {
+    fail();
+  }
+}
+
 /** Use the already staged candidate and protected approved configuration. Each
  * read owns one dedicated connection, never a pool or an application's session.
  * No dotenv auto-loading, provider API call, lease cleanup or status mutation.
@@ -1477,6 +1603,7 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
   let seed;
   let migrated = false;
   let reconciled = false;
+  let closeAttempted = false;
   let siteAttachStarted = false;
   let siteDetachStarted = false;
   let siteDetached = false;
@@ -1577,6 +1704,11 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
   const control = async (op, target, discovery = false) => {
     if (!prepared || (!discovery && !sameIdentity(target)))
       throw new Error('MAINTENANCE_IDENTITY_MISMATCH');
+    if (op === 'close') {
+      // A lost response cannot authorize replay by an outer cleanup layer.
+      if (closeAttempted) throw new Error('MAINTENANCE_CLOSE_UNPROVEN');
+      closeAttempted = true;
+    }
     const args = [
       '-u',
       'holaday',
@@ -1862,8 +1994,14 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
           closeAcknowledged = false;
         }
       }
-      if (prepared)
-        await io.lifecycle.holdMaintenance(context(), { ...result, identity, closeAcknowledged });
+      if (prepared) {
+        const held = await io.lifecycle.holdMaintenance(context(), {
+          ...result,
+          identity,
+          closeAcknowledged,
+        });
+        closeAcknowledged = held?.closeAcknowledged === true;
+      }
       return { closeAcknowledged };
     },
     finish: async (result) => {

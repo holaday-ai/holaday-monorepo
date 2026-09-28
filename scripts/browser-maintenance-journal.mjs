@@ -30,6 +30,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
   let migrationManifest;
   let bootstrapSeed;
   let backupReceipt;
+  let failureObservation;
   let currentIdentity;
   const startupEvents = [];
   const candidateStartupEvents = [];
@@ -127,7 +128,8 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
     if (bytes.subarray(0, bytesRead).toString() !== lockBytes) throw unproven();
     if (latest && !sameFile(latest, await io.lstat(path))) throw unproven();
   }
-  async function write(next, identity) {
+  async function write(next, identity, recordingFailure = false) {
+    if (failureObservation && !recordingFailure) throw unproven();
     try {
       await assertOwnership();
       const temp = join(directory, `${attempt}.${randomUUID()}.tmp`);
@@ -148,6 +150,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
           ...firstFields,
           bootstrapSeed,
           ...(backupReceipt ? { backupReceipt } : {}),
+          ...(failureObservation ? { failureObservation } : {}),
           ...(startupEvents.length ? { startupEvents } : {}),
           ...(candidateStartupEvents.length ? { candidateStartupEvents } : {}),
           ...(registrationEvents.length ? { registrationEvents } : {}),
@@ -306,6 +309,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
             ...(record.identity ? { identity: record.identity } : {}),
             ...(record.bootstrapSeed ? { bootstrapSeed: record.bootstrapSeed } : {}),
             phase: record.phase,
+            ...(record.failureObservation ? { failureObservation: record.failureObservation } : {}),
             startupEvents: record.startupEvents ?? [],
             ...(record.candidateStartupEvents
               ? { candidateStartupEvents: record.candidateStartupEvents }
@@ -329,6 +333,68 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
           migrationDigest,
           ...inventoryFields,
         };
+      }),
+    recordFirstCutoverFailure: (value) =>
+      serial(async () => {
+        const event = structuredClone(value);
+        const status = event?.status;
+        const known = ['closed', 'draining', 'blocked', 'serving'].includes(status?.mode);
+        const keys = [
+          'phase',
+          'observedAtMs',
+          'operatorRef',
+          'reconcileByMs',
+          'errorCode',
+          'status',
+          ...(event?.identity ? ['identity'] : []),
+        ];
+        if (
+          !first ||
+          failureObservation ||
+          !event ||
+          !isDeepStrictEqual(Object.keys(event).sort(), keys.sort()) ||
+          event.phase !== phase ||
+          !Number.isSafeInteger(event.observedAtMs) ||
+          event.observedAtMs < 0 ||
+          !Number.isSafeInteger(event.reconcileByMs) ||
+          event.reconcileByMs < 0 ||
+          !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(event.operatorRef ?? '') ||
+          !/^(CUTOVER|MAINTENANCE)_[A-Z_]{1,100}$/.test(event.errorCode ?? '') ||
+          !status ||
+          !['not-started', 'unknown', 'closed', 'draining', 'blocked', 'serving'].includes(
+            status.mode,
+          ) ||
+          !isDeepStrictEqual(
+            Object.keys(status).sort(),
+            [
+              'mode',
+              'closeAcknowledged',
+              ...(known ? ['idle', 'active', 'unknown', 'needsReconciliation'] : []),
+            ].sort(),
+          ) ||
+          typeof status.closeAcknowledged !== 'boolean' ||
+          status.closeAcknowledged !== (status.mode === 'closed') ||
+          (known &&
+            (!event.identity ||
+              typeof status.idle !== 'boolean' ||
+              typeof status.needsReconciliation !== 'boolean' ||
+              ![status.active, status.unknown].every(
+                (n) => Number.isSafeInteger(n) && n >= 0 && n <= 65536,
+              ) ||
+              (status.mode === 'closed' &&
+                (!status.idle || status.active !== 0 || status.unknown !== 0)))) ||
+          (status.mode === 'not-started' &&
+            (event.identity ||
+              ['candidate_started', 'verified', 'opened', 'reconciled'].includes(phase))) ||
+          (event.identity &&
+            (!identityValid(event.identity) ||
+              event.identity.candidate !== candidate ||
+              event.identity.bootId === bootstrapSeed ||
+              (currentIdentity && !isDeepStrictEqual(event.identity, currentIdentity))))
+        )
+          throw unproven();
+        failureObservation = event;
+        await write(phase, currentIdentity, true);
       }),
     bindBackupReceipt: (value) =>
       serial(async () => {
@@ -660,7 +726,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
       }),
     finish: () =>
       serial(async () => {
-        if (phase !== (first ? 'reconciled' : 'opened'))
+        if (failureObservation || phase !== (first ? 'reconciled' : 'opened'))
           throw new Error('MAINTENANCE_RELEASE_NOT_OPENED');
         try {
           await assertOwnership();

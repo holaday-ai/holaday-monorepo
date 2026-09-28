@@ -17,6 +17,7 @@ import {
   readFirstCutoverPersistedWork,
   readFirstCutoverSourceSnapshot,
   readReviewedFirstCutoverLegacySource,
+  recordFirstCutoverFailure,
   resumeFirstCutoverCandidateWorker,
 } from './browser-first-cutover-host.mjs';
 import {
@@ -61,6 +62,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     createObserver: createFirstCutoverRetirementObserver,
     retireProducers: retireLocalFirstCutoverProducers,
     resumeWorker: resumeFirstCutoverCandidateWorker,
+    recordFailure: recordFirstCutoverFailure,
     readSite: (approval) => readFirstCutoverExecutionSiteScope({ attempt: approval.attempt }),
     ...overrides,
   };
@@ -73,7 +75,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       options.attempt ?? '',
     ) ||
     ['readSite', 'readCoordinatorIdentity'].some((k) => typeof io[k] !== 'function') ||
-    ['observeWriters', 'observeWork', 'settleLegacy', 'reconcile', 'holdMaintenance'].some(
+    ['observeWriters', 'observeWork', 'settleLegacy', 'reconcile'].some(
       (k) => typeof io.facts?.[k] !== 'function',
     )
   )
@@ -579,7 +581,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     },
     holdMaintenance: (ctx, result) => {
       if (ctx.journal !== context?.journal) fail();
-      return facts.holdMaintenance(context, result);
+      return (facts.holdMaintenance ?? io.recordFailure)(context, result);
     },
   };
   return {

@@ -6,6 +6,35 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 
+test('first-cutover failure remains in the owned journal and prevents later success', async (t) => {
+  const directory = await fixture(t);
+  const journal = await acquireReleaseJournal(directory, firstMetadata);
+  t.after(() => journal.close());
+  await journal.bindManifest(manifest);
+  await journal.persist('prepared', { candidate: metadata.candidate });
+  assert.equal(typeof journal.recordFirstCutoverFailure, 'function');
+  const failure = {
+    phase: 'prepared',
+    observedAtMs: 3000,
+    operatorRef: 'qa-operator',
+    reconcileByMs: 2000,
+    errorCode: 'CUTOVER_TEST_FAILURE',
+    status: { mode: 'not-started', closeAcknowledged: false },
+  };
+  await journal.recordFirstCutoverFailure(failure);
+  assert.deepEqual((await journal.readFirstCutoverEffects()).failureObservation, failure);
+  const saved = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+  assert.equal(saved.phase, 'prepared');
+  assert.deepEqual(saved.failureObservation, failure);
+  await assert.rejects(
+    journal.persist('orders_fenced', { candidate: metadata.candidate }),
+    /UNPROVEN/,
+  );
+  await assert.rejects(journal.finish(), /NOT_OPENED/);
+  await assert.rejects(journal.recordFirstCutoverFailure(failure), /UNPROVEN/);
+  await fs.stat(join(directory, 'release.lock'));
+});
+
 const metadata = {
   candidate: 'c'.repeat(40),
   configDigest: 'e'.repeat(64),
