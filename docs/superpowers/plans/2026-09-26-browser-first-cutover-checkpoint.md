@@ -6,6 +6,19 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 19:15Z heartbeat接口核对：未新增通过项，下一段接线位置已定位
+
+本轮起点为`25d7f25d`，仅原缓存未跟踪。没有代码实现、测试运行、生产操作或新的发布通过结论；下方已通过结果仍是上一轮证据。管理凭据读取的特定授权没有新增，因此没有重试。原自动化不暂停：独立QA接线仍可推进，不能把生产观察权限阻断扩大为所有工作都不可做。
+
+后续无需重查以下接口：
+
+- `createFirstCutoverHostAdapter`的`backupAndRestoreCheck`已调用原备份协调器，真实锁/停写检查及`journal.bindBackupReceipt`由host绑定，随后必须`site.backup.finishRecovery`；不应新建一个能上传成功回执的入口。
+- `createFirstCutoverExecutionSite`已提供`lifecycle.readBackupPlan`、全部`backup`I/O及`recovery.assertScope`。后者通过原journal的`forBackupRecovery`投影维持恢复会话绑定；不能替换成固定true或绕过物理停止检查。Mac会话与Linux协调器复用stdin/stdout，只发送公开scope，不发送私钥。
+- `scripts/fixtures/browser-registration-removal-linux.mjs`目前丢响应场景在恢复阶段明确失败，尚未接上上述backup I/O；尾段拒绝不能改成成功替身。`scripts/fixtures/browser-source-backup-mysql.mjs`虽使用真实源导出适配、mysqldump/age/原比较器，但journal是替身，源与目标是同实例两个库，不能当独立恢复链。`scripts/fixtures/browser-recovery-target-qa.mjs`及`browser-recovery-runtime-qa.mjs`虽有真实独立Docker目标/会话/61SQL，但源SQL和停止条件合成；不能直接串行跑两份夹具就称同attempt完整链。
+- `scripts/fixtures/build-recovery-runtime-qa.mjs`已能构建原61SQL与原runner的固定无dotenv工具包，禁止另写迁移器。现有`holaday-first-cutover-age:qa`内有Node/PM2/age，但实际只读探测确认没有mysql/mysqldump；不能未经实现就声称该停止容器能导出数据库。MySQL8缓存镜像已有；优先使用原Mac恢复端及隔离目标的既有工具调用，不能将宿主Docker socket/生产凭据挂进停止容器。
+
+下一次从原Linux集成入口出发，把同一个真实attempt/journal停写证明接到原host备份协调器和原Mac恢复会话，再接原迁移/关闭启动/验证/开放尾段。每次只核验新增接线，不重做既有计数器、密钥、商户、13表或TCP模块；验收必须列明仍为合成的现场facts。此处是恢复调查记录，不是新方案批准、实现交付或整项完成。
+
 ### 2026-09-29 6.R3续跑：丢失外部响应的真实停止/故障段已接通，完整切换仍未完成
 
 承接`e994cfd0`，原Task4 BASE不变。没有重试下方被拒绝的管理凭据读取，也没有SSH/SQL/支付方访问。本轮沿原6.R3创建预定的`browser-first-cutover.integration.test.mjs`入口，扩展原Linux停止夹具；没有改生产模块、重建镜像或新增框架。
