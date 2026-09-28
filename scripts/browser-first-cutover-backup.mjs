@@ -165,6 +165,133 @@ export async function inspectFirstCutoverRecoveryTarget(input, overrides = {}) {
   }
 }
 
+/** Mac-side fixed invocation of the copied target tool. Never installs it or
+ * kills/retries a running migration. The caller supplies the original live
+ * coordinator scope check; all errors stay sanitized, including child output.
+ */
+export async function executeFirstCutoverRecoveryTargetTool(input, overrides = {}) {
+  try {
+    const { target, runtime, migrationDigest, action, projection } = structuredClone(input);
+    if (
+      !keys(
+        input,
+        action === 'verify'
+          ? ['target', 'runtime', 'migrationDigest', 'action', 'projection']
+          : ['target', 'runtime', 'migrationDigest', 'action'],
+      ) ||
+      !targetValid(target) ||
+      !keys(runtime, ['manifestDigest', 'nodeDigest', 'toolDigest']) ||
+      !Object.values(runtime).every(hash) ||
+      !hash(migrationDigest) ||
+      !['snapshot', 'migrate', 'verify'].includes(action) ||
+      (action === 'verify' && (!Array.isArray(projection) || projection.length === 0)) ||
+      typeof overrides.assertScope !== 'function'
+    )
+      throw new Error('input');
+    const run = overrides.execFile ?? promisify(execFile);
+    const inspect = overrides.inspectTarget ?? inspectFirstCutoverRecoveryTarget;
+    const guard = async () => {
+      await overrides.assertScope();
+      if (!isDeepStrictEqual(await inspect(target, { requireEmpty: false }), target.identity))
+        throw new Error('identity');
+      const expected = `${runtime.nodeDigest}  /opt/holaday-recovery/node\n${runtime.toolDigest}  /opt/holaday-recovery/recovery-tool.mjs\n${runtime.manifestDigest}  /opt/holaday-recovery/runtime.json\n`;
+      const observed = await run(
+        'docker',
+        [
+          'exec',
+          '--user',
+          '0',
+          target.containerId,
+          '/usr/bin/sha256sum',
+          '/opt/holaday-recovery/node',
+          '/opt/holaday-recovery/recovery-tool.mjs',
+          '/opt/holaday-recovery/runtime.json',
+        ],
+        { encoding: 'utf8', maxBuffer: 4096, timeout: 15000 },
+      );
+      if (observed.stdout !== expected) throw new Error('runtime');
+      await overrides.assertScope();
+    };
+    await guard();
+    const child = (overrides.spawn ?? spawn)(
+      'docker',
+      [
+        'exec',
+        '-i',
+        '--user',
+        '0',
+        target.containerId,
+        '/usr/bin/env',
+        '-i',
+        '/opt/holaday-recovery/node',
+        '/opt/holaday-recovery/recovery-tool.mjs',
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    const chunks = [];
+    let bytes = 0;
+    let invalid = false;
+    child.stdout.on('data', (chunk) => {
+      bytes += chunk.length;
+      if (bytes > 1024 * 1024) invalid = true;
+      else chunks.push(chunk);
+    });
+    child.stderr.on('data', () => {
+      invalid = true;
+    });
+    child.stdin.on('error', () => {
+      invalid = true;
+    });
+    const exited = new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', (code, signal) => resolve({ code, signal }));
+    });
+    child.stdin.end(
+      JSON.stringify({
+        identity: target.identity,
+        runtimeDigest: runtime.manifestDigest,
+        migrationDigest,
+        action,
+        ...(action === 'verify' ? { projection } : {}),
+      }),
+    );
+    const { code, signal } = await exited;
+    if (code !== 0 || signal || invalid) throw new Error('tool');
+    const content = Buffer.concat(chunks);
+    if (!Buffer.from(content.toString('utf8')).equals(content)) throw new Error('encoding');
+    const result = JSON.parse(content.toString('utf8'));
+    if (action === 'migrate' && !isDeepStrictEqual(result, { migrationDigest }))
+      throw new Error('migration');
+    if (
+      action === 'verify' &&
+      (!keys(result, ['schemaDigest', 'businessDigest']) || !Object.values(result).every(hash))
+    )
+      throw new Error('verification');
+    if (
+      action === 'snapshot' &&
+      (!keys(result, [
+        'identity',
+        'objects',
+        'projection',
+        'schemaDigest',
+        'sourceDigest',
+        'businessDigest',
+      ]) ||
+        !isDeepStrictEqual(result.identity, target.identity) ||
+        !['schemaDigest', 'sourceDigest', 'businessDigest'].every((k) => hash(result[k])) ||
+        !Array.isArray(result.objects) ||
+        !result.objects.length ||
+        !Array.isArray(result.projection) ||
+        !result.projection.length)
+    )
+      throw new Error('snapshot');
+    await guard();
+    return result;
+  } catch {
+    throw new Error('CUTOVER_RECOVERY_TARGET_TOOL_UNPROVEN');
+  }
+}
+
 /** Actual Mac/recovery-side import. The original coordinator must supply a live
  * scope/ownership/stop check over its existing session. No uploaded receipt or
  * "restored" flag. This only imports; full comparison/migrations remain required.

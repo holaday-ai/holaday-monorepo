@@ -50,15 +50,21 @@ Mac Homebrew安装自动清理了旧下载缓存、日志和临时安装残留�
 
 ### 同一协调器连接上的恢复端会话（实现中，未安装/启用生产入口）
 
-`browser-first-cutover-recovery-session.mjs` 复用现有 `createFirstCutoverSessionWire`，不启动另一个SSH、反向连接或协调器。Mac父进程将原SSH子进程stdout/stdin交给 `serveFirstCutoverRecoverySession`；Vultr原协调器在同一stdin/stdout使用 `connectFirstCutoverRecoverySession`。协议只允许attach/inspect/restore/detach；结束回执后等待协调器完成最后一次异步日志核验并确认detached，再由调用方关闭管道。重复/错序、失联、身份或批准漂移均终止会话，不重试导入。
+`browser-first-cutover-recovery-session.mjs` 复用现有 `createFirstCutoverSessionWire`，不启动另一个SSH、反向连接或协调器。Mac父进程将原SSH子进程stdout/stdin交给 `serveFirstCutoverRecoverySession`；Vultr原协调器在同一stdin/stdout使用 `connectFirstCutoverRecoverySession`。协议允许attach/inspect/restore/snapshot/migrate/verify/detach；恢复后才能取全量快照，快照后才能单次迁移，迁移后才可校验原始列投影，业务摘要变化拒绝。结束回执后等待协调器完成最后一次异步日志核验并确认detached，再由调用方关闭管道。重复/错序、失联、身份或批准漂移均终止会话，不重试导入或迁移。
 
-Mac受保护目录下 `first-cutover-<attempt>.json` 使用0700目录、当前用户0600单链接文件，检查无软链接、文件身份及预先批准SHA256。结构为 `{schemaVersion:1,binding,maintenanceEndsAtMs,sourceOptions,sourceIdentity,destination,identityFile,target}`；`sourceOptions`、`destination` 沿用原 `{facility,directory,attempt}`，target沿用上一节完整目标。私钥及identityFile路径不经过会话传输。该保管不防御Mac当前用户/管理员被攻陷。
+Mac受保护目录下 `first-cutover-<attempt>.json` 使用0700目录、当前用户0600单链接文件，检查无软链接、文件身份及预先批准SHA256。结构为 `{schemaVersion:1,binding,maintenanceEndsAtMs,sourceOptions,sourceIdentity,destination,identityFile,target,runtime?}`；`sourceOptions`、`destination` 沿用原 `{facility,directory,attempt}`，target沿用上一节完整目标。runtime是 `{manifestDigest,nodeDigest,toolDigest}`，随整份Mac批准摘要绑定；缺失时只允许原导入，不允许快照/迁移验收。私钥及identityFile路径不经过会话传输。该保管不防御Mac当前用户/管理员被攻陷。
 
 创建顺序：先批准原inventory和binding；再形成Mac清单摘要；最后将摘要绑定到原受保护 **execution.site.backupRecoveryDigest**（与gatewaySiteDigest同级）。不能把摘要放进inventory：Mac清单本身含binding.inventoryDigest，否则产生循环摘要。程序只读，不自动生成批准。
 
 Linux端实时回调使用原 `site.recovery.assertScope(publicScope)`；publicScope只包含binding、维护截止、scopeDigest、源身份、隔离目标身份。它绑定原持有journal、原受保护site和原物理停写观察器，且只在backup_verified意图阶段、同一effects记录有效，不接受Mac上传的stopped标志。恢复函数内部所有scope检查均沿该连接回到此回调。
 
-新增真实子进程夹具已验证原文件journal、会话管道和真实禁网Docker/age导入；源SSH和物理停写事实仍为合成边界。完整备份适配器的比较/61迁移/回执及首次CLI入口接线仍未完成，不能把这个会话验收称为跨主机生产演练或发布通过。
+2026-09-28新增真实子进程夹具已验证原文件journal、同一会话管道、真实禁网Docker/age导入、原全量快照、原61项迁移和原schema/历史列业务比较：`/tmp/holaday-recovery-session-all61.log`退出0。源SSH和物理停写事实仍为合成边界。完整备份适配器的源库比较/回执、正式工具安装及首次CLI入口接线仍未完成，不能把这个会话验收称为跨主机生产演练或发布通过。
+
+恢复目标固定工具树为 `/opt/holaday-recovery`，含现有Linux Node22、`recovery-tool.mjs`、原runner的独立ESM包及原TS/contract、全部原SQL和`runtime.json`。runtime清单绑定每个文件摘要及原`buildMaintenanceMigrationManifest`摘要；仅允许固定树，目录0700、当前执行用户私密普通单链接文件，禁止软链接、`.env*`和额外依赖/文件。Mac调用前后检查Node/入口/清单摘要与实际隔离目标，再通过`env -i`固定参数执行，不接受任意命令或数据库地址。库连接固定目标内MySQL socket，原runner的DATABASE_URL也固定该socket；不接触工作区dotenv。
+
+迁移调用在启动原runner前排他创建并同步`migration-started.json`和目录；即使迁移失败或回执丢失也保留，禁止原目标重试。子进程不因观察超时或输出量被强杀后重跑，原SQL诊断不外泄。worker只返回原快照/摘要，不能生成发布通过或backup回执；原备份协调器仍须比较源库、确认源不变并封存原journal。
+
+`scripts/fixtures/build-recovery-runtime-qa.mjs`只为QA复用现有esbuild/Node构建无凭据副本，不是生产安装器或批准生成器。实际QA发现Docker复制保留Mac UID501，root检查正确拒绝，且只读确认未生成迁移标记；仅修正合成QA工具树属主后通过。正式准备阶段必须显式验证属主与摘要，不能据此放宽校验。旧下节“未跑全迁移”是早期夹具历史，不覆盖本轮同会话61迁移证据。
 
 本轮Mac实测用新建禁网MySQL8合成库、独有卷和临时QA密钥，真实Docker检查/age/固定fd导入通过，并验证中文/BLOB/NULL/trigger/event及重复导入拒绝。源SSH换为执行原读取器的本机子进程，协调器回调明确合成；没有运行全迁移，没有访问生产数据库/恢复密钥，也不代表完整双机发布通过。夹具位于 `scripts/fixtures/browser-recovery-target-qa.mjs`，日志 `/tmp/holaday-recovery-target-physical.log`。
 

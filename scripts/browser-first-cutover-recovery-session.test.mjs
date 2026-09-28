@@ -70,6 +70,127 @@ test('recovery metadata reads only exact private approved bytes and refuses perm
   await assert.rejects(session.readFirstCutoverRecoveryScope(f.request), /UNPROVEN/);
 });
 
+for (const fault of [
+  'none',
+  'runtime-absent',
+  'early-migration',
+  'repeat-migration',
+  'migration-failed',
+  'business-drift',
+])
+  test(`recovery runtime session ${fault}: ordered snapshot, single migration and original projection`, async (t) => {
+    const f = await fixture(t);
+    if (fault !== 'runtime-absent')
+      f.scope.runtime = {
+        manifestDigest: '5'.repeat(64),
+        nodeDigest: '6'.repeat(64),
+        toolDigest: '7'.repeat(64),
+      };
+    const bytes = JSON.stringify(f.scope);
+    await fs.writeFile(f.file, bytes);
+    f.request.scopeDigest = hash(bytes);
+    assert.deepEqual(await session.readFirstCutoverRecoveryScope(f.request), f.scope);
+    const toMac = new PassThrough();
+    const toCoordinator = new PassThrough();
+    t.after(() => {
+      toMac.destroy();
+      toCoordinator.destroy();
+    });
+    const observed = [];
+    const snapshot = {
+      identity: f.scope.target.identity,
+      objects: [
+        {
+          name: 'sample',
+          kind: 'BASE TABLE',
+          engine: 'InnoDB',
+          rowCount: 1,
+          definitionDigest: '8'.repeat(64),
+          columnsDigest: '9'.repeat(64),
+          dataDigest: 'a'.repeat(64),
+        },
+      ],
+      projection: [{ table: 'sample', columns: ['id'] }],
+      schemaDigest: '8'.repeat(64),
+      sourceDigest: '9'.repeat(64),
+      businessDigest: 'a'.repeat(64),
+    };
+    const serving = session
+      .serveFirstCutoverRecoverySession(f.request, {
+        input: toMac,
+        output: toCoordinator,
+        inspectTarget: async () => f.scope.target.identity,
+        restore: async () => f.scope.target.identity,
+        executeTool: async (input, { assertScope }) => {
+          await assertScope();
+          assert.deepEqual(input.target, f.scope.target);
+          assert.deepEqual(input.runtime, f.scope.runtime);
+          assert.equal(input.migrationDigest, binding.migrationDigest);
+          observed.push(input.action);
+          if (input.action === 'snapshot') return snapshot;
+          if (input.action === 'migrate') {
+            if (fault === 'migration-failed') throw new Error('private runner diagnostics');
+            return { migrationDigest: binding.migrationDigest };
+          }
+          assert.deepEqual(input.projection, snapshot.projection);
+          return {
+            schemaDigest: 'b'.repeat(64),
+            businessDigest: fault === 'business-drift' ? 'c'.repeat(64) : snapshot.businessDigest,
+          };
+        },
+      })
+      .then(
+        () => {
+          toCoordinator.end();
+          return 0;
+        },
+        () => {
+          toCoordinator.end();
+          return 1;
+        },
+      );
+    const client = await session.connectFirstCutoverRecoverySession(
+      {
+        binding,
+        maintenanceEndsAtMs: f.scope.maintenanceEndsAtMs,
+        scopeDigest: f.request.scopeDigest,
+        sourceIdentity: f.scope.sourceIdentity,
+        isolatedTarget: f.scope.target.identity,
+      },
+      { input: toCoordinator, output: toMac, assertScope: async () => {} },
+    );
+    await client.restore({
+      artifact: {
+        reference: `/approved/source/${binding.attempt}.sql.age`,
+        encryptionProfileDigest: 'b'.repeat(64),
+      },
+      expectedBackupDigest: 'c'.repeat(64),
+      expectedBytes: 12,
+    });
+    const rejects = async (operation, count) => {
+      await assert.rejects(operation(), /CUTOVER_RECOVERY_SESSION_UNPROVEN/);
+      assert.equal(await serving, 1);
+      const previous = observed.length;
+      await assert.rejects(client.migrate(), /CUTOVER_RECOVERY_SESSION_UNPROVEN/);
+      assert.equal(observed.length, previous);
+      assert.equal(observed.filter((v) => v === 'migrate').length, count);
+    };
+    if (fault === 'runtime-absent') return rejects(client.snapshot, 0);
+    if (fault === 'early-migration') return rejects(client.migrate, 0);
+    assert.deepEqual(await client.snapshot(), snapshot);
+    if (fault === 'migration-failed') return rejects(client.migrate, 1);
+    assert.deepEqual(await client.migrate(), { migrationDigest: binding.migrationDigest });
+    if (fault === 'repeat-migration') return rejects(client.migrate, 1);
+    if (fault === 'business-drift') return rejects(client.verify, 1);
+    assert.deepEqual(await client.verify(), {
+      schemaDigest: 'b'.repeat(64),
+      businessDigest: snapshot.businessDigest,
+    });
+    await client.close();
+    assert.equal(await serving, 0);
+    assert.deepEqual(observed, ['snapshot', 'migrate', 'verify']);
+  });
+
 for (const fault of ['none', 'scope', 'metadata', 'source', 'ack', 'identity']) {
   test(`recovery session ${fault}: live coordinator checks and no import replay`, async (t) => {
     assert.equal(typeof session.serveFirstCutoverRecoverySession, 'function');

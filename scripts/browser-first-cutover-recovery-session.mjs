@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { isDeepStrictEqual as equal } from 'node:util';
 import {
+  executeFirstCutoverRecoveryTargetTool,
   inspectFirstCutoverRecoveryTarget,
   restoreFirstCutoverAgeBackup,
 } from './browser-first-cutover-backup.mjs';
@@ -28,6 +29,33 @@ const identity = (v) =>
   /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(v.serverUuid) &&
   /^[a-zA-Z0-9_]{1,64}$/.test(v.database);
 const absolute = (v) => typeof v === 'string' && isAbsolute(v) && !/[\r\n\0]/.test(v);
+function resultValid(name, value, approved) {
+  if (name === 'snapshot')
+    return (
+      keys(value, [
+        'identity',
+        'objects',
+        'projection',
+        'schemaDigest',
+        'sourceDigest',
+        'businessDigest',
+      ]) &&
+      equal(value.identity, approved.isolatedTarget) &&
+      ['schemaDigest', 'sourceDigest', 'businessDigest'].every((k) => hash(value[k])) &&
+      Array.isArray(value.objects) &&
+      value.objects.length > 0 &&
+      Array.isArray(value.projection) &&
+      value.projection.length > 0
+    );
+  if (name === 'migrate')
+    return equal(value, { migrationDigest: approved.binding.migrationDigest });
+  if (name === 'verify')
+    return keys(value, ['schemaDigest', 'businessDigest']) && Object.values(value).every(hash);
+  return equal(
+    value,
+    name === 'attach' ? approved : name === 'detach' ? null : approved.isolatedTarget,
+  );
+}
 function publicValid(v, now) {
   if (
     !keys(v, [
@@ -131,10 +159,17 @@ export async function readFirstCutoverRecoveryScope(request) {
         'destination',
         'identityFile',
         'target',
+        ...(Object.hasOwn(scope, 'runtime') ? ['runtime'] : []),
       ]) ||
       scope.schemaVersion !== 1 ||
       scope.binding?.attempt !== request.attempt ||
       !absolute(scope.identityFile)
+    )
+      fail();
+    if (
+      Object.hasOwn(scope, 'runtime') &&
+      (!keys(scope.runtime, ['manifestDigest', 'nodeDigest', 'toolDigest']) ||
+        !Object.values(scope.runtime).every(hash))
     )
       fail();
     const target = scope.target;
@@ -169,6 +204,7 @@ export async function serveFirstCutoverRecoverySession(request, overrides = {}) 
     readScope: readFirstCutoverRecoveryScope,
     inspectTarget: inspectFirstCutoverRecoveryTarget,
     restore: restoreFirstCutoverAgeBackup,
+    executeTool: executeFirstCutoverRecoveryTargetTool,
     ...overrides,
   };
   let channel;
@@ -185,6 +221,9 @@ export async function serveFirstCutoverRecoverySession(request, overrides = {}) 
     let sequence = 0;
     let attempted = false;
     let restored = false;
+    let snapshot;
+    let migrationAttempted = false;
+    let migrated = false;
     for (;;) {
       const message = await channel.read();
       const seq = ++sequence;
@@ -193,7 +232,9 @@ export async function serveFirstCutoverRecoverySession(request, overrides = {}) 
         message.protocol !== 1 ||
         message.type !== 'operation' ||
         message.seq !== seq ||
-        !['attach', 'inspect', 'restore', 'detach'].includes(message.name) ||
+        !['attach', 'inspect', 'restore', 'snapshot', 'migrate', 'verify', 'detach'].includes(
+          message.name,
+        ) ||
         (seq === 1 ? message.name !== 'attach' : message.name === 'attach')
       )
         fail();
@@ -229,6 +270,30 @@ export async function serveFirstCutoverRecoverySession(request, overrides = {}) 
       } else if (message.name === 'detach') {
         if (message.value !== null) fail();
         value = null;
+      } else if (['snapshot', 'migrate', 'verify'].includes(message.name)) {
+        if (message.value !== null || !restored || !scope.runtime) fail();
+        if (message.name === 'snapshot' && (snapshot || migrationAttempted)) fail();
+        if (message.name === 'migrate') {
+          if (!snapshot || migrationAttempted) fail();
+          migrationAttempted = true;
+        }
+        if (message.name === 'verify' && !migrated) fail();
+        await assertScope();
+        value = await io.executeTool(
+          {
+            target: scope.target,
+            runtime: scope.runtime,
+            migrationDigest: scope.binding.migrationDigest,
+            action: message.name,
+            ...(message.name === 'verify' ? { projection: snapshot.projection } : {}),
+          },
+          { assertScope },
+        );
+        if (!resultValid(message.name, value, approved)) fail();
+        if (message.name === 'snapshot') snapshot = structuredClone(value);
+        if (message.name === 'migrate') migrated = true;
+        if (message.name === 'verify' && value.businessDigest !== snapshot.businessDigest) fail();
+        await assertScope();
       } else {
         await assertScope();
         if (message.name === 'inspect') {
@@ -337,10 +402,7 @@ export async function connectFirstCutoverRecoverySession(input, overrides = {}) 
           if (
             !keys(answer, ['protocol', 'type', 'seq', 'value']) ||
             answer.type !== 'result' ||
-            !equal(
-              answer.value,
-              name === 'attach' ? approved : name === 'detach' ? null : approved.isolatedTarget,
-            )
+            !resultValid(name, answer.value, approved)
           )
             fail();
           await io.assertScope();
@@ -358,6 +420,9 @@ export async function connectFirstCutoverRecoverySession(input, overrides = {}) 
     await operation('attach', approved);
     return {
       inspect: () => operation('inspect', null),
+      snapshot: () => operation('snapshot', null),
+      migrate: () => operation('migrate', null),
+      verify: () => operation('verify', null),
       restore: async (value) => {
         if (attempted) {
           failed = true;

@@ -18,8 +18,9 @@ import {
   restoreFirstCutoverAgeBackup,
 } from '../browser-first-cutover-backup.mjs';
 import { serveFirstCutoverRecoverySession } from '../browser-first-cutover-recovery-session.mjs';
+import { buildMaintenanceMigrationManifest } from '../browser-maintenance-manifest.mjs';
 
-const [containerId, imageId, attempt] = process.argv.slice(2);
+const [containerId, imageId, attempt, runtimeRoot] = process.argv.slice(2);
 assert.match(containerId ?? '', /^[a-f0-9]{64}$/);
 assert.match(imageId ?? '', /^sha256:[a-f0-9]{64}$/);
 assert.match(attempt ?? '', /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/);
@@ -96,11 +97,14 @@ const io = {
     }),
 };
 const request = { transfer, identityFile, target };
+const migrationManifest = runtimeRoot
+  ? buildMaintenanceMigrationManifest(runtimeRoot).manifest
+  : [];
 const binding = {
   attempt,
   candidate: 'a'.repeat(40),
   configDigest: 'b'.repeat(64),
-  migrationDigest: hash('[]'),
+  migrationDigest: hash(JSON.stringify(migrationManifest)),
   inventoryDigest: 'd'.repeat(64),
 };
 const scope = {
@@ -116,6 +120,17 @@ const scope = {
     database: 'synthetic_source',
   },
 };
+if (runtimeRoot) {
+  const bytes = await readFile(join(runtimeRoot, 'runtime.json'));
+  const runtime = JSON.parse(bytes);
+  assert.equal(runtime.migrationDigest, binding.migrationDigest);
+  assert.equal(migrationManifest.migrations.length, 61);
+  scope.runtime = {
+    manifestDigest: hash(bytes),
+    nodeDigest: runtime.files.node,
+    toolDigest: runtime.files['recovery-tool.mjs'],
+  };
+}
 const scopeBytes = JSON.stringify(scope);
 await writeFile(join(directory, `first-cutover-${attempt}.json`), scopeBytes, {
   mode: 0o600,
@@ -140,7 +155,7 @@ import { connectFirstCutoverRecoverySession } from ${JSON.stringify(new URL('../
 const scope = ${JSON.stringify(publicScope)};
 const journal = await acquireReleaseJournal(${JSON.stringify(journalDirectory)}, { ...scope.binding, kind:'first-cutover', legacyDigest:'e'.repeat(64) });
 try {
-  await journal.bindManifest([]);
+  await journal.bindManifest(${JSON.stringify(migrationManifest)});
   for (const phase of ['prepared','orders_fenced','legacy_settled','producers_stopped','all_fenced','stopped','backup_verified']) await journal.persist(phase, {candidate:scope.binding.candidate});
   const baseline = await journal.readFirstCutoverEffects();
   let checks=0;
@@ -153,6 +168,16 @@ try {
   assert.deepEqual(await client.inspect(),scope.isolatedTarget);
   assert.deepEqual(await client.restore(${JSON.stringify({ artifact, expectedBackupDigest: transfer.expectedBackupDigest, expectedBytes: transfer.expectedBytes })}),scope.isolatedTarget);
   assert.deepEqual(await client.inspect(),scope.isolatedTarget);
+  ${
+    runtimeRoot
+      ? `const before = await client.snapshot();
+  assert.equal(before.objects.find(v=>v.name==='sample').rowCount,1);
+  assert.deepEqual(await client.migrate(),{migrationDigest:scope.binding.migrationDigest});
+  const verified = await client.verify();
+  assert.equal(verified.businessDigest,before.businessDigest);
+  assert.notEqual(verified.schemaDigest,before.schemaDigest);`
+      : ''
+  }
   await client.close();
   assert(checks>=8);
 } finally { await journal.close(); }
@@ -201,5 +226,7 @@ await assert.rejects(
 );
 assert.equal(await query('SELECT COUNT(*) FROM sample'), '1');
 console.log(
-  'PASS actual pinned no-network Docker + authenticated age import over real coordinator child pipes and file journal; UTF8/BLOB/NULL/trigger/event and repeat refusal; physical stopped facts/source SSH synthetic, no production or migration proof',
+  runtimeRoot
+    ? 'PASS actual same coordinator child pipes/file journal + pinned no-network Docker + age fd import + original full snapshot + all61 original migrations + schema/business check. Physical stopped facts/source SSH synthetic; not production/complete release proof.'
+    : 'PASS actual pinned no-network Docker + authenticated age import over real coordinator child pipes and file journal; UTF8/BLOB/NULL/trigger/event and repeat refusal; physical stopped facts/source SSH synthetic, no production or migration proof',
 );

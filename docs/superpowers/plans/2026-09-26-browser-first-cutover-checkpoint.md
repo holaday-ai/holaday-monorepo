@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 续跑：同一恢复会话接通原全量快照、61迁移与业务校验
+
+承接`05fb4206`，Task4原BASE844c2ced不变。不是新建迁移/备份引擎：恢复worker复用`readCutoverMysqlSnapshot`、原`checkMaintenanceSchema`与原`apply-numbered-migrations.ts`独立ESM包及全部61原SQL。固定无dotenv工具副本`/opt/holaday-recovery`绑定Node/入口/全部文件摘要与原迁移manifest；元数据`runtime:{manifestDigest,nodeDigest,toolDigest}`随原Mac清单摘要批准，不放inventory、不生成批准。已有Linux Node22.20.0已实际在纯MySQL8镜像执行通过，无新依赖安装或镜像重建。
+
+原recovery-session增加snapshot/migrate/verify，只有恢复完成后可取快照、仅快照后可单次迁移、再以原列投影核对业务；缺工具批准、错序、重复、迁移失败、业务漂移会终止会话。默认Mac调用器在原scope回调及实际目标检查前后核验固定Node/入口/manifest，`env -i`固定参数，只连接目标内socket，无任意SQL/命令入口。原runner启动前排他落盘并同步migration-started标记；失败/未知不重试、不强杀后重跑，不输出原SQL诊断或生成backup成功回执。
+
+实际新目标的同一子进程管道+原文件journal+age认证fd恢复→原全量快照→61迁移→原schema/历史列业务摘要通过，`/tmp/holaday-recovery-session-all61.log`退出0。仍是合成数据、源SSH与物理停写事实合成，**不是Vultr生产停写备份/完整源库恢复比较/发布通过**。先前独立阶段同样通过，日志`/tmp/holaday-recovery-runtime-physical-final.log`；初次`physical.log`退出1因Docker cp保留MacUID501，摘要一致且迁移标记不存在，仅修正专属QA工具属主后继续首次迁移，未重试未知SQL。QA builder只是夹具，不是正式安装入口。
+
+TDD缺失runtime/worker/入口/快照/会话操作RED→GREEN；空库快照夹具初次被原比较器拒绝，改为真实契约要求的非空对象清单，未放宽比较器。最终Mac新增两组33/33；实际Linux四组**82/82**、完整browser及两发布入口**960/960**、ops**120/59/16/794 + Python12**，全部退出0、0跳过。日志`/tmp/holaday-recovery-runtime-{linux,browser,ops}.log`。九MJS Biome、shell语法与diff-check通过；未跑应用全套或声称整分支独立审查。几次自动审批超时均明确未执行、只重试一次后获准，未绕过权限。
+
+本轮两个合成QA目标attempt`0af41bb2-987e-4901-b9c0-8a2291e5ccf5`和`5e299e59-666d-44ab-8d7a-fcda9ca9e412`及各自专用卷已精确清理，早期兼容性探针亦已清理；原MySQL/Redis、scripts/__pycache__、真实密钥/USB/PayPal/订单不动。没有push/PR/merge/部署，CLI execute继续关闭。
+
+下一步直接补原backup完整I/O，不重做恢复端：在原`withApprovedCutoverDatabase`/source配置和journal/物理stopped检查下读源全量快照，使用原`compareCutoverMysqlSnapshots`对照会话snapshot；把源identity/facility/hash、会话restore/migrate/verify、源不变检查接入原`backupAndRestoreCheck`与原journal sealReceipt。仍需受保护工具闭包/安装及首次入口、独立旧源工作/数据库归属事实、worker定向持久化、reconcile/hold、真实恢复与非PayPal证据、完整成功/故障演练及整分支审查。Tasks4–6尚未完成，自动化继续原范围。
+
 ### 2026-09-28 续跑：原协调器管道上的Mac恢复会话与真实子进程演练
 
 承接 `724cd827`，Task4原BASE844c2ced不变。新增恢复会话端点复用原 `createFirstCutoverSessionWire`，没有新增SSH引擎、反向登录或第二协调器：Mac父进程消费原协调器SSH的stdout/stdin，Linux端使用同一连接。固定attach/inspect/restore/detach与单次restore；每次导入内部scope检查沿连接回原协调器。原site新增 `recovery.assertScope(publicScope)`，核验同一原journal、受保护执行清单、backup_verified阶段、不变effects记录与实际停写观察器；并非Mac上传stopped布尔值。
