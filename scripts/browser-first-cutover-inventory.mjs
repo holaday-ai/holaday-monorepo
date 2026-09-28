@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isIP } from 'node:net';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { cutoverLegacyInterruptionRisk } from './browser-cutover-evidence.mjs';
 
@@ -7,6 +8,61 @@ const hash = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value
 const fail = () => {
   throw new Error('CUTOVER_INVENTORY_UNPROVEN');
 };
+
+// Supplemental host-network TCP evidence, not an in-flight request count or
+// proof about other network namespaces/external effects. In particular an
+// ownerless socket on a reviewed service port must not disappear with its
+// listener. TIME-WAIT cannot dispatch; half-closed connections still block.
+function observeConnectedTcp(snapshot, ports) {
+  const tcp = snapshot.tcp;
+  if (!tcp || Object.keys(tcp).sort().join(',') !== 'after,before') fail();
+  const endpoint = (text) => {
+    const match = /^(\[[^\]]+\]|[^\s]+):(\d+|\*)$/.exec(text ?? '');
+    if (!match) fail();
+    const address = match[1].replace(/^\[|\]$/g, '').split('%')[0];
+    if (address !== '*' && !isIP(address)) fail();
+    const port = match[2] === '*' ? 0 : Number(match[2]);
+    if (!Number.isSafeInteger(port) || port < 0 || port > 65535) fail();
+    return port;
+  };
+  const selected = (raw) => {
+    if (typeof raw !== 'string' || Buffer.byteLength(raw) > 8 * 1024 * 1024) fail();
+    return lines(raw)
+      .flatMap((line) => {
+        const [state, received, sent, local, remote, ...owner] = line.split(/\s+/);
+        if (
+          ![
+            'ESTAB',
+            'SYN-SENT',
+            'SYN-RECV',
+            'FIN-WAIT-1',
+            'FIN-WAIT-2',
+            'TIME-WAIT',
+            'CLOSE-WAIT',
+            'LAST-ACK',
+            'LISTEN',
+            'CLOSING',
+            'UNCONN',
+          ].includes(state) ||
+          !/^\d+$/.test(received ?? '') ||
+          !/^\d+$/.test(sent ?? '')
+        )
+          fail();
+        const port = endpoint(local);
+        endpoint(remote);
+        if (!ports.includes(port) || ['LISTEN', 'TIME-WAIT'].includes(state)) return [];
+        return [JSON.stringify([state, local, remote, owner.join(' ')])];
+      })
+      .sort();
+  };
+  const before = selected(tcp.before);
+  if (!equal(before, selected(tcp.after))) fail();
+  return {
+    observedAtMs: snapshot.observedAtMs,
+    existingSockets: before.length,
+    sourceDigest: digest({ bootId: snapshot.bootId, ports, tcp }),
+  };
+}
 const retiredNames = new Map([
   ['holaday-orchestrator', 'main'],
   ['holaday-account-closure-worker', 'worker'],
@@ -922,5 +978,6 @@ export function classifyFirstCutoverHost(input, io = { now: Date.now }) {
     preservedManagers,
     unknownLaunchers: unknown,
     sources,
+    ...(s.tcp !== undefined ? { tcpObservation: observeConnectedTcp(s, ports) } : {}),
   };
 }

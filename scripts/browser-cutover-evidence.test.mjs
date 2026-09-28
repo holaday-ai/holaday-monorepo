@@ -1227,6 +1227,27 @@ test('host snapshot includes independently observed PM2 defaults', async () => {
   assert.equal(result.pm2Runtime?.killTimeoutMs, 1600);
   assert.equal(result.hostname, 'iZbp1ActualNodeZ');
 });
+test('host snapshot collects connected TCP before and after, independently of listeners', async () => {
+  const f = hostFixture();
+  const original = f.io.exec;
+  let reads = 0;
+  const connected = 'ESTAB 0 0 127.0.0.1:4011 127.0.0.1:51000 users:(("node",pid=401,fd=9))\n';
+  f.io.exec = async (command, args) => {
+    if (command === 'ss' && args.join(' ') === '-H -antp') {
+      reads++;
+      return connected;
+    }
+    return original(command, args);
+  };
+  const result = await readCutoverHostSnapshot(f.io);
+  assert.deepEqual(result.tcp, { before: connected, after: connected });
+  assert.equal(reads, 2);
+  f.io.exec = async (command, args) => {
+    if (command === 'ss' && args.join(' ') === '-H -antp') throw new Error('permission');
+    return original(command, args);
+  };
+  await assert.rejects(readCutoverHostSnapshot(f.io), /MAINTENANCE_HOST_OBSERVATION_UNPROVEN/);
+});
 test('host snapshot refuses hostname drift while observing the machine', async () => {
   const f = hostFixture();
   let reads = 0;

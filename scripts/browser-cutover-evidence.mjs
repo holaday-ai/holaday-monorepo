@@ -782,6 +782,7 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
     };
     const managers = await readManagers();
     const listeners = await io.exec('ss', ['-H', '-ltnp']);
+    const tcpBefore = await io.exec('ss', ['-H', '-antp']);
     const nginx = await io.nginxSnapshot();
     const systemd = await io.exec('systemctl', [
       'list-units',
@@ -821,7 +822,11 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
     };
     const rootCrontab = await readRootCrontab();
     const startup = await io.startupSnapshot();
+    const tcpAfter = await io.exec('ss', ['-H', '-antp']);
     if (
+      [tcpBefore, tcpAfter].some(
+        (value) => typeof value !== 'string' || Buffer.byteLength(value) > 8 * 1024 * 1024,
+      ) ||
       String(await io.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim() !== bootId ||
       (io.hostname ?? hostname)() !== machine ||
       !same(processes, await readProcesses()) ||
@@ -839,6 +844,7 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
       managers,
       pm2Runtime,
       listeners,
+      tcp: { before: tcpBefore, after: tcpAfter },
       nginx: nginx.dump,
       nginxFiles: nginx.files,
       systemd,

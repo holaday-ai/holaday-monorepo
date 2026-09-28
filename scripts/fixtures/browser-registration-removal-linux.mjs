@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
+import { createConnection } from 'node:net';
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
@@ -121,7 +122,10 @@ try {
   await pm2('save');
   for (let n = 0; ; n++) {
     try {
-      assert.equal((await fetch(`http://127.0.0.1:${mainPort}`)).status, 200);
+      assert.equal(
+        (await fetch(`http://127.0.0.1:${mainPort}`, { headers: { connection: 'close' } })).status,
+        200,
+      );
       break;
     } catch (e) {
       if (n > 50) throw e;
@@ -240,7 +244,10 @@ try {
   });
   for (let n = 0; ; n++) {
     try {
-      assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
+      assert.equal(
+        (await fetch('http://127.0.0.1:4011', { headers: { connection: 'close' } })).status,
+        200,
+      );
       break;
     } catch (e) {
       if (n > 50) throw e;
@@ -272,6 +279,7 @@ try {
   };
   let second;
   const readPair = async () => {
+    const tcpBefore = await exec('ss', ['-H', '-antp']);
     const scope = await readInventory();
     const daemon = raw(await proc(daemonPid));
     const observer = raw(await proc(process.pid));
@@ -317,6 +325,7 @@ try {
       cron: '',
       rootCrontabPresent: false,
       listeners: await exec('ss', ['-H', '-ltnp', `sport = :${mainPort}`]),
+      tcp: { before: tcpBefore, after: await exec('ss', ['-H', '-antp']) },
     };
     assert.equal(scope.processes.length, processes.filter((p) => p.cwd === cwd).length);
     if (!second) {
@@ -329,6 +338,9 @@ try {
       second.listeners = '';
     }
     second.observedAtMs = snapshot.observedAtMs;
+    // Both logical hosts here share this isolated QA network namespace.
+    // Classifier selects only each host's separately approved service ports.
+    second.tcp = structuredClone(snapshot.tcp);
     second.processes = second.processes.filter((p) => p.pid !== gateway.pid);
     second.listeners = '';
     const gatewayHost = gateways ? snapshot : second;
@@ -674,6 +686,31 @@ try {
           },
         );
         await executionSite.lifecycle.attach(siteContext);
+        if (interruption) {
+          const socket = createConnection({ host: '127.0.0.1', port: 4011 });
+          try {
+            await new Promise((resolve, reject) => {
+              socket.once('connect', resolve);
+              socket.once('error', reject);
+            });
+            const connected = await observer.read();
+            assert.equal(
+              connected.hosts.find((h) => h.host === 'aliyun').tcpObservation.existingSockets,
+              1,
+            );
+            assert.equal(
+              connected.hosts.find((h) => h.host === 'vultr').tcpObservation.existingSockets,
+              0,
+            );
+          } finally {
+            const closed = new Promise((resolve) => socket.once('close', resolve));
+            socket.destroy();
+            await closed;
+          }
+          console.log(
+            'PASS real ss observation sees retained service connection independently of synthetic writer counts',
+          );
+        }
         const readinessScope = {
           binding: fullBinding,
           stage: 'prepare',
@@ -755,8 +792,14 @@ try {
             throw error;
           }
         if (phase === 'producers_stopped') {
-          assert.equal((await fetch('http://127.0.0.1:4010')).status, 200);
-          assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
+          assert.equal(
+            (await fetch('http://127.0.0.1:4010', { headers: { connection: 'close' } })).status,
+            200,
+          );
+          assert.equal(
+            (await fetch('http://127.0.0.1:4011', { headers: { connection: 'close' } })).status,
+            200,
+          );
         }
       }
       await assert.rejects(fetch('http://127.0.0.1:4010'));

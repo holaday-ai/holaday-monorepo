@@ -131,6 +131,43 @@ function reviewed(f) {
   return f;
 }
 
+test('reviewed host retains live connections even without a listener or process owner', () => {
+  const f = reviewed(fixture());
+  const tcp = [
+    'ESTAB 0 0 127.0.0.1:4001 127.0.0.1:51000 users:(("node",pid=20,fd=9))',
+    'CLOSE-WAIT 0 0 [::1]:4002 [::1]:51001',
+    'TIME-WAIT 0 0 127.0.0.1:4001 127.0.0.1:51002',
+    'ESTAB 0 0 127.0.0.1:9999 127.0.0.1:51003',
+  ].join('\n');
+  f.snapshot.listeners = '';
+  f.snapshot.tcp = { before: tcp, after: tcp };
+  const result = inventory.classifyFirstCutoverHost(f, { now: () => 1000 });
+  assert.equal(result.tcpObservation.existingSockets, 2);
+  assert.equal(result.tcpObservation.observedAtMs, 1000);
+  assert.match(result.tcpObservation.sourceDigest, /^[a-f0-9]{64}$/);
+  f.snapshot.tcp = { before: '', after: '' };
+  assert.equal(
+    inventory.classifyFirstCutoverHost(f, { now: () => 1000 }).tcpObservation.existingSockets,
+    0,
+  );
+});
+
+test('connected TCP parse errors and changing selected sockets cannot become zero evidence', () => {
+  for (const tcp of [
+    { before: '', after: 'ESTAB 0 0 127.0.0.1:4001 127.0.0.1:51000' },
+    { before: '', after: null },
+    { before: 'truncated output', after: 'truncated output' },
+    {
+      before: 'UNKNOWN 0 0 127.0.0.1:4001 127.0.0.1:1',
+      after: 'UNKNOWN 0 0 127.0.0.1:4001 127.0.0.1:1',
+    },
+  ]) {
+    const f = reviewed(fixture());
+    f.snapshot.tcp = tcp;
+    assert.throws(() => inventory.classifyFirstCutoverHost(f, { now: () => 1000 }), /UNPROVEN/);
+  }
+});
+
 function pairFixture() {
   const fixtures = ['aliyun', 'vultr'].map((name) => reviewed(fixture(name)));
   return {

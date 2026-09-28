@@ -79,6 +79,7 @@ async function fixture(t, extraInventory = {}, interrupted = false) {
     foreign: false,
     failedPrepare: false,
     failedClose: false,
+    tcp: { observedAtMs: 1000, existingSockets: 0, sourceDigest: '6'.repeat(64) },
     legacyWork: {
       schemaVersion: 2,
       knownExternalWork: [],
@@ -96,6 +97,7 @@ async function fixture(t, extraInventory = {}, interrupted = false) {
     unknownLaunchers: state.foreign ? [{ pid: 999 }] : [],
     hosts: ['vultr', 'aliyun'].map((host) => ({
       host,
+      tcpObservation: structuredClone(state.tcp),
       registered: {
         processes:
           host === 'vultr' && state.producers
@@ -294,10 +296,31 @@ test('site keeps tagged unknown work and requires a durable receipt before produ
   assert.equal(proof.externalWork.kind, 'unobservable');
   assert.equal(proof.activeRequests.kind, 'unobservable');
   assert.equal(proof.legacyWork.before.pendingReplay, 0);
+  assert.equal(proof.connectedTcp.length, 2);
+  assert.ok(proof.connectedTcp.every((tcp) => tcp.sourceDigest === '6'.repeat(64)));
   assert.equal(f.events.includes('settled'), false);
   assert.equal(f.events.filter((event) => event === 'stop-producers').length, 1);
   assert.deepEqual((await f.journal.readFirstCutoverEffects()).interruptionObservation, receipt);
   await site.lifecycle.detach(f.context);
+});
+test('independent connected TCP blocks interruption even when writer callback claims zero', async (t) => {
+  for (const tcp of [
+    undefined,
+    { observedAtMs: 1000, existingSockets: 1, sourceDigest: '6'.repeat(64) },
+    { observedAtMs: 1001, existingSockets: 0, sourceDigest: '6'.repeat(64) },
+    { observedAtMs: 1000, existingSockets: 0, sourceDigest: '' },
+  ]) {
+    const f = await fixture(t, {}, true);
+    const site = f.make();
+    await site.lifecycle.attach(f.context);
+    for (const phase of ['prepared', 'orders_fenced', 'legacy_interruption_accepted'])
+      await f.journal.persist(phase, { candidate: f.binding.candidate });
+    f.state.tcp = tcp;
+    await assert.rejects(site.lifecycle.acceptLegacyInterruption(f.context), /UNPROVEN/);
+    assert.equal((await f.journal.readFirstCutoverEffects()).interruptionObservation, undefined);
+    assert.equal(f.events.includes('stop-producers'), false);
+    await site.lifecycle.detach(f.context);
+  }
 });
 test('site interruption refuses known work, source failure and new replay after stop', async (t) => {
   for (const fault of ['known', 'busy', 'foreign', 'read-error', 'after-replay']) {

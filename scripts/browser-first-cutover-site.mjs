@@ -320,6 +320,20 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     const runningProducers = actual.hosts
       .flatMap((h) => [...h.registered.processes, ...h.unmanaged.processes])
       .filter((p) => ['main', 'worker'].includes(p.role));
+    if (
+      context.approval.schemaVersion === 2 &&
+      (actual.hosts.length !== 2 ||
+        !['aliyun', 'vultr'].every(
+          (host) => actual.hosts.filter((h) => h.host === host).length === 1,
+        ) ||
+        actual.hosts.some(
+          ({ tcpObservation: tcp }) =>
+            !fresh(tcp?.observedAtMs) ||
+            tcp.existingSockets !== 0 ||
+            !/^[a-f0-9]{64}$/.test(tcp.sourceDigest ?? ''),
+        ))
+    )
+      fail();
     if (fence.producersRunning !== runningProducers.length || (!orders && runningProducers.length))
       fail();
     if (!equal(record, await guard(context, [record.phase]))) fail();
@@ -327,7 +341,14 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       ...fence,
       ...Object.fromEntries(counts.map((k) => [k, work[k]])),
       ...(disposition.mode === 'controlled-interruption'
-        ? { riskDigest: disposition.riskDigest, legacyWork: { before: work, after } }
+        ? {
+            riskDigest: disposition.riskDigest,
+            legacyWork: { before: work, after },
+            connectedTcp: actual.hosts.map(({ host, tcpObservation }) => ({
+              host,
+              ...tcpObservation,
+            })),
+          }
         : {}),
       runningProducers,
       liveLegacy: legacy(actual),
