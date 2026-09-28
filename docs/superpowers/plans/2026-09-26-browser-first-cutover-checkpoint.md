@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 本轮最终断点：代码15e3ac4f，独立应用验证完成，等待范围选择
+
+失败收尾八文件已本地提交`15e3ac4f`；原Task4 BASE844c2ced不变。完整应用验证使用内置Node24.19.0、单worker/2GB堆、显式合成DB/Redis地址：前置Node73/73；orchestrator **507文件、8599通过、1跳过**，退出0，`/tmp/holaday-hold-orchestrator-node24.log`。跳过的是`playwright-executor.cdp-auth.test.ts`的`authenticated diagnostic child`，仅在专属子进程环境启用，父用例正常调用并通过；不能把该跳过说成恢复演练通过。cn-payment **8文件99/99**退出0，`/tmp/holaday-hold-cn-full.log`；cn-payment/orchestrator类型检查及orchestrator构建均退出0，`/tmp/holaday-hold-types-build.log`。这些不替代Linux整流程、实际停写恢复、真实商户回调与整分支审查。
+
+初次应用全套实际用了系统Node25.6.0，前置73通过后长时间未产出文件结果；只读采样后定向终止本次Vitest，退出143，保留`/tmp/holaday-hold-orchestrator-full.log`及`/tmp/holaday-hold-vitest-sample.txt`。Node24也有较长启动/收集时间，最终完整通过；**未证明Node25是原因**，首次运行不能计通过。cn-payment命令首次系统审批超时未执行，一次原样重试获准。所有测试/构建已退出，不留本轮验证进程。
+
+已向用户提出一个必要选择，尚无答复：**是否接受先评审最小旧版观测/排空补充方案**。原因是原已批准设计明确不先改旧版本，而已核实旧版没有完整在途工作的观测接口；继续健康检查、DB空集或组件用例不能填补这个发布前提。不能据宽泛部署授权自行降低门槛、允许中断未知工作或偷偷部署旧版补丁。后续关键现场接线/完整演练依赖这项范围决定，停止在此，不继续按未解决前提扩建。
+
+原自动化`holaday`已通过应用工具设为**PAUSED**，保留原名称/提示/周期/目标线程；暂停是等待范围确认，**不是完成上线**。恢复时先读取用户对范围的明确答复及本断点，再决定原计划最小修订，不重做本轮hold/worker/备份模块或已有商户/密钥/通道。仍无push/PR/合并/部署，CLI execute关闭；PayPal全部延期、原九笔/单笔例外不变；原`__pycache__`及无关内容保留。
+
 ### 2026-09-28 续跑：失败收尾真实状态与原日志接通
 
 承接`d8975db4`，原Task4 BASE不变。原site.holdMaintenance现在默认使用原固定status命令，独立核对同一candidate/boot，写入持锁journal的failureObservation；允许在维护/核对期限后进行保护性只读观察，不重开入口、不重试关闭、不修改业务、不释放锁。closed/draining/blocked/serving/unknown分别保留；已落盘失败不能继续登记成功。原phase保持，记录责任引用及原核对截止时间，不保存原始错误/业务内容。
