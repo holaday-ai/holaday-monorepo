@@ -5,6 +5,7 @@ import { readCutoverRehearsalArtifacts } from './browser-cutover-evidence.mjs';
 import { connectFirstCutoverGatewaySession } from './browser-first-cutover-gateway-session.mjs';
 import {
   createFirstCutoverRetirementObserver,
+  exportFirstCutoverSourceBackup,
   readFirstCutoverBackupPlan,
   readFirstCutoverCandidateRuntime,
   readFirstCutoverHostPair,
@@ -41,6 +42,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     readRehearsal: readCutoverRehearsalArtifacts,
     readPaymentScope: readFirstCutoverPaymentScope,
     readBackupPlan: readFirstCutoverBackupPlan,
+    exportSourceBackup: exportFirstCutoverSourceBackup,
     inspectSource: readReviewedFirstCutoverLegacySource,
     createIngress: createFirstCutoverIngressPair,
     connectGateway: connectFirstCutoverGatewaySession,
@@ -481,6 +483,32 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
   };
   return {
     lifecycle,
+    // Merge only these implemented source operations into the host's original
+    // backup I/O. Target restore/compare/migrations remain mandatory elsewhere.
+    backup: {
+      exportDatabase: (source, input) =>
+        run('source-backup', context, ['backup_verified'], async () => {
+          const inventory = approvedInventory();
+          const expected = {
+            ...inventory.backupPlan,
+            binding: context.binding,
+            maintenanceEndsAtMs: context.approval.maintenanceEndsAtMs,
+          };
+          if (!equal(input, expected) || !equal(source, inventory.backupPlan?.sourceIdentity))
+            fail();
+          const record = await guard(context, ['backup_verified']);
+          const verify = async () => {
+            if (!equal(record, await guard(context, ['backup_verified']))) fail();
+            await stopped();
+          };
+          await verify();
+          const artifact = await io.exportSourceBackup(context, inventory, {
+            assertWritersStopped: verify,
+          });
+          await verify();
+          return artifact;
+        }),
+    },
     // Pass this reader directly to the existing host evidence collector. The
     // preopen identity comes from start(), NOT from an early verified journal.
     evidence: {

@@ -9,13 +9,14 @@ import * as siteModule from './browser-first-cutover-site.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 import { finishStoppedRelease } from './browser-maintenance-release-tail.mjs';
 
-async function fixture(t) {
+async function fixture(t, extraInventory = {}) {
   const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'cutover-site-')));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const inventory = {
     configurationDigests: ['b'.repeat(64)],
     merchants: [],
     targets: [{ host: 'vultr', pid: 10, start: '1000', role: 'main', ports: [4001, 4002] }],
+    ...extraInventory,
   };
   const binding = {
     attempt: '12345678-1234-4234-8234-123456789abc',
@@ -720,6 +721,94 @@ test('site connects the backup plan reader only around fresh physical-stop check
   await assert.rejects(site.lifecycle.readBackupPlan(f.context), /UNPROVEN/);
   assert.equal(reads, 1);
   await site.lifecycle.detach(f.context);
+});
+
+test('site source export is single-attempt, bound and checks stopped during the producer', async (t) => {
+  const plan = {
+    sourceIdentity: { database: 'source_qa' },
+    isolatedTarget: { database: 'restore_qa' },
+  };
+  const f = await fixture(t, { backupPlan: plan });
+  let exports = 0;
+  f.io.exportSourceBackup = async (context, inventory, deps) => {
+    assert.equal(context.journal, f.journal);
+    assert.deepEqual(inventory, f.scope.inventory);
+    await deps.assertWritersStopped();
+    exports++;
+    f.state.busy = 1;
+    await deps.assertWritersStopped();
+    return { reference: 'must-not-return' };
+  };
+  const site = f.make();
+  assert.equal(typeof site.backup?.exportDatabase, 'function');
+  await site.lifecycle.attach(f.context);
+  for (const phase of [
+    'prepared',
+    'orders_fenced',
+    'legacy_settled',
+    'producers_stopped',
+    'all_fenced',
+    'stopped',
+    'backup_verified',
+  ])
+    await f.journal.persist(phase, { candidate: f.binding.candidate });
+  f.state.producers = f.state.gateways = 0;
+  const scope = {
+    ...plan,
+    binding: f.binding,
+    maintenanceEndsAtMs: f.context.approval.maintenanceEndsAtMs,
+  };
+  await assert.rejects(site.backup.exportDatabase(plan.sourceIdentity, scope), /UNPROVEN/);
+  assert.equal(exports, 1);
+  f.state.busy = 0;
+  await assert.rejects(site.backup.exportDatabase(plan.sourceIdentity, scope), /UNPROVEN/);
+  assert.equal(exports, 1);
+  assert.equal((await f.journal.readFirstCutoverEffects()).backupReceipt, undefined);
+  await site.lifecycle.detach(f.context);
+});
+
+test('site source export refuses a different source or binding before invoking a producer', async (t) => {
+  for (const fault of ['source', 'binding', 'none']) {
+    const plan = {
+      sourceIdentity: { database: 'source_qa' },
+      isolatedTarget: { database: 'restore_qa' },
+    };
+    const f = await fixture(t, { backupPlan: plan });
+    let exports = 0;
+    f.io.exportSourceBackup = async (_context, _inventory, deps) => {
+      await deps.assertWritersStopped();
+      exports++;
+      return { reference: 'encrypted-only' };
+    };
+    const site = f.make();
+    assert.equal(typeof site.backup?.exportDatabase, 'function');
+    await site.lifecycle.attach(f.context);
+    for (const phase of [
+      'prepared',
+      'orders_fenced',
+      'legacy_settled',
+      'producers_stopped',
+      'all_fenced',
+      'stopped',
+      'backup_verified',
+    ])
+      await f.journal.persist(phase, { candidate: f.binding.candidate });
+    f.state.producers = f.state.gateways = 0;
+    const scope = {
+      ...plan,
+      binding: { ...f.binding },
+      maintenanceEndsAtMs: f.context.approval.maintenanceEndsAtMs,
+    };
+    if (fault === 'binding') scope.binding.attempt = 'foreign';
+    const action = site.backup.exportDatabase(
+      fault === 'source' ? { database: 'wrong' } : plan.sourceIdentity,
+      scope,
+    );
+    if (fault === 'none') assert.deepEqual(await action, { reference: 'encrypted-only' });
+    else await assert.rejects(action, /UNPROVEN/);
+    assert.equal(exports, fault === 'none' ? 1 : 0);
+    await site.lifecycle.detach(f.context);
+  }
 });
 
 test('site refuses missing independent business facts before opening either session', async (t) => {

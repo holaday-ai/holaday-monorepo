@@ -9,7 +9,7 @@ import {
   readCutoverDatabaseScope,
   readCutoverWorkScope,
 } from './browser-cutover-evidence.mjs';
-import { backupAndRestoreCheck } from './browser-first-cutover-backup.mjs';
+import { backupAndRestoreCheck, encryptMysqlAgeBackup } from './browser-first-cutover-backup.mjs';
 import {
   applyCutoverFence,
   restoreCutoverIngress,
@@ -822,6 +822,75 @@ export async function readFirstCutoverBackupPlan(context, input, overrides = {})
   }
 }
 
+/** Actual source export, using the same approved configuration as the original
+ * source identity reader. The site's physical stopped observer is mandatory;
+ * an artifact here is not a restore result or a journal backup receipt. */
+export async function exportFirstCutoverSourceBackup(context, input, overrides = {}) {
+  const code = 'CUTOVER_SOURCE_BACKUP_UNPROVEN';
+  try {
+    if (typeof overrides.assertWritersStopped !== 'function') throw new Error(code);
+    const inventory = structuredClone(input);
+    const plan = await readFirstCutoverBackupPlan(context, inventory, overrides);
+    const source = inventory.backupSource;
+    if (
+      !source ||
+      !isDeepStrictEqual(Object.keys(source).sort(), [
+        'directory',
+        'executable',
+        'executableDigest',
+        'facility',
+      ])
+    )
+      throw new Error(code);
+    const record = structuredClone(await context.journal.readFirstCutoverEffects());
+    return await withApprovedCutoverDatabase(
+      context,
+      overrides,
+      code,
+      async (connection, io, config, checkConfig) => {
+        const verify = async () => {
+          await checkConfig();
+          if (
+            record.phase !== 'backup_verified' ||
+            !isDeepStrictEqual(record, await context.journal.readFirstCutoverEffects())
+          )
+            throw new Error(code);
+          await overrides.assertWritersStopped();
+          const [rows] = await connection.query(
+            'SELECT @@server_uuid AS serverUuid, DATABASE() AS `database`',
+          );
+          if (
+            !Array.isArray(rows) ||
+            rows.length !== 1 ||
+            !isDeepStrictEqual(rows[0], plan.sourceIdentity)
+          )
+            throw new Error(code);
+          await checkConfig();
+          if (!isDeepStrictEqual(record, await context.journal.readFirstCutoverEffects()))
+            throw new Error(code);
+        };
+        await verify();
+        return (io.encryptMysqlAgeBackup ?? encryptMysqlAgeBackup)(
+          {
+            facility: source.facility,
+            directory: source.directory,
+            attempt: context.binding.attempt,
+          },
+          {
+            executable: source.executable,
+            executableDigest: source.executableDigest,
+            databaseUrl: config.DATABASE_URL,
+            database: plan.sourceIdentity.database,
+          },
+          verify,
+        );
+      },
+    );
+  } catch {
+    throw new Error(code);
+  }
+}
+
 async function withApprovedCutoverDatabase(context, overrides, errorCode, read) {
   const io = {
     ...candidatePreparationSystem(),
@@ -874,7 +943,7 @@ async function withApprovedCutoverDatabase(context, overrides, errorCode, read) 
     const url = new URL(config.DATABASE_URL);
     if (url.protocol !== 'mysql:' || !url.hostname || url.pathname.length < 2) fail();
     connection = await io.connectWorkDatabase(config.DATABASE_URL, context.root);
-    const work = await read(connection, io);
+    const work = await read(connection, io, config, guard);
     await guard();
     return work;
   } catch {

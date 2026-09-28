@@ -6,6 +6,22 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 续跑：实际 mysqldump 导出接入原 age / host / site
+
+承接 `2a8ca2d3`；Task4原BASE844c2ced不变。`site.backup.exportDatabase` 已连接原host/source计划与同一受保护配置，原age适配新增实际mysqldump生产者。批准清单增加 `backupSource: {facility,directory,executable,executableDigest}`；只在原backup_verified意图、同一journal/源身份/绝对窗口与物理stopped条件下执行一次。固定完整数据及routine/event/trigger导出，等待stdout与进程退出双成功后，再核验源库/配置/停写才发布密文；无重试、无生产明文备份、无提前恢复回执。不是另建加密、密钥、传输或发布框架。
+
+凭据仅写入先排他创建、立即取消目录链接的空0600描述符，再继承给本次dump；不放argv/env/诊断，不留命名凭据文件，不声称内存专用或管理员不可读。使用原恢复公钥；不支持的URL选项（含尚未接通的TLS参数）或控制字符直接拒绝，不降级忽略。只有本地代码，尚未安装生产工具/清单或导出生产库。
+
+新鲜验证：host/site **104/104**；完整browser **922/922**；实际Linux四组 **163/163**；ops **120/59/16/756 + Python12**，全部退出0、0跳过。日志 `/tmp/holaday-source-{site-green,browser,linux,ops}.log`；八MJS Biome与diff-check通过。五个age生产者、host绑定、两个site接线测试均观察缺失方法RED后GREEN；覆盖晚退出失败、摘要不符、源/配置/journal漂移、忙碌及禁止重试。没有重跑应用全套或声称整分支审查通过。
+
+真实MySQL8.0.46测试运行正式source适配与真实mysqldump、age、原密文读写/解密，再导入同一隔离实例的另一个QA库；特殊字符密码、中文、BLOB、NULL和例程/事件/触发器名称清单通过，源行不变：`/tmp/holaday-source-mysql-final2.log`退出0。夹具为 `scripts/fixtures/browser-source-backup-mysql.mjs`；target UUID、journal/stopped前置和配置路径投影仍合成，SSH换为运行原读取器的独立子进程；**不是Mac目标隔离、全61迁移或生产停写恢复证明**。沿用既有QA镜像，无新安装/镜像重建/宿主PID/生产凭据挂载。
+
+QA修正记录：只读目录内嵌套挂载在容器启动前失败，核实无遗留后修正；合成账号localhost与实际127.0.0.1不符、启用binlog时低权限账号不能建trigger，均在测试夹具修正（既有QA管理员以该用户DEFINER建对象，不增加账号SUPER或改全局设置）。本地pnpm未暴露esbuild，直接使用现有0.25.12可执行文件打包QA依赖，无依赖安装。两次自动审批超时均明确未执行后只重试一次，未绕过权限。测试容器68c94bc4（e9784b15309ca621）在随机库/账号finally清理后停止并--rm移除其合成卷；原MySQL/Redis与原缓存不动。
+
+**下一步：** 源导出已接上，勿再重做。继续原 `backupAndRestoreCheck` 的实际Mac目标身份/隔离、取回与恢复、原全对象比较器和全部迁移、回执现场I/O，以及原worker定向持久启动/reconcile/hold和工具安装/execute。旧来源DB归属及内存请求/浏览器/provider/writer独立事实仍须真实解决，不能以SQL空或healthz代替。生产协调器运行在Vultr，Mac恢复不能假设远端直接访问Mac文件；必须在原执行链中明确实际恢复端的调用与返回验证，不能手填restored或搬私钥到服务器。完整成功/失败演练与整分支审查仍未完成。
+
+Task4–6未完成，CLI execute继续关闭；没有push/PR/merge/部署，无PayPal/历史业务/支付权益/生产配置/密钥/UI/扩展变更。原 `scripts/__pycache__/` 保留；当前heartbeat继续同线程，不暂停自动化或创建重复任务。
+
 ### 2026-09-28 续跑：备份计划连接实际源库身份与原 stopped 观察
 
 承接 `5b2fb301`。原 site 的 `readBackupPlan` 现在有默认现场读者，不再必须由外部回调手填返回值。复用现有受保护 `inventory.backupPlan: {sourceIdentity,isolatedTarget}` 与原专用数据库连接，核对完整清单/候选配置摘要、同一 journal 的 `backup_verified` 意图阶段，两次实际读取源库 `@@server_uuid/DATABASE()`；源库不符、阶段漂移、查询或连接关闭失败均拒绝。site 调用前后独立执行原物理 stopped 检查，未生成备份回执、未提前证明恢复成功。按已定 Mac 恢复路径拒绝源库与目标共用 serverUuid；目标仍是待独立核验的批准身份，不把 metadata 当隔离证明。

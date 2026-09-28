@@ -59,7 +59,17 @@ detach关闭本次执行会话：成功路径在同实例恢复入口、恢复wo
 
 site 在原 `backup_verified` **意图**阶段前后各调用已有物理 stopped 观察，再使用原受保护候选配置建立专用数据库连接；两次读取实际 `@@server_uuid/DATABASE()` 必须匹配源库身份，同一 journal/阶段/配置/截止在读取期间不变，连接失败或关闭失败均拒绝。没有导出、恢复、迁移或回执副作用，也没有向恢复目标连接。目标仍只是批准 metadata，必须由原 `backupAndRestoreCheck` 后续独立实测隔离与身份、真实恢复和比较；本读者不能充当 `backupReceipt`。
 
-真实 MySQL8.0 合成库已验证身份匹配和错误源库拒绝、读取不改变原行；不是生产源库身份或 Mac 恢复证明。加密设施、真实 source/target I/O、备份导出及恢复闭环仍待接通。
+真实 MySQL8.0 合成库已验证身份匹配和错误源库拒绝、读取不改变原行；不是生产源库身份或 Mac 恢复证明。
+
+### 实际源库导出接线（2026-09-28，尚未执行生产备份）
+
+site 的 `backup.exportDatabase(source, scope)` 现在调用原 host 的 `exportFirstCutoverSourceBackup`，仅在同一 `backup_verified` 意图、批准源身份/完整scope、物理 stopped 观察通过后运行一次。完整清单新增 `backupSource: {facility,directory,executable,executableDigest}`：facility沿用原age四字段公钥设施；directory是已批准的私密密文目录；executable及摘要绑定mysqldump。attempt始终来自原持锁记录；不接受临时命令或数据库地址覆盖。它只返回加密文件，不登记恢复成功。
+
+源连接取自同一受保护候选配置。固定mysqldump参数导出数据、routine/event/trigger，使用single-transaction、utf8mb4、hex-blob，关闭GTID导出和tablespace元数据。原age适配负责排他partial、文件权限/摘要复核与发布；必须同时等到dump数据流结束、进程退出0，再复核实际源库/配置/journal/时限/停写。出现不确定性不重试、不停止数据库，也不返回备份成功回执。
+
+MySQL凭据写入**先排他创建并立即取消目录链接的空0600描述符**，然后仅把该描述符继承给本次mysqldump；写入凭据时已不存在文件名，正常结束关闭描述符。它不是无落盘保证（系统缓存、交换区及管理员仍属宿主安全边界），但没有命名凭据文件、明文备份、argv/env或原始错误日志。固定环境屏蔽MySQL登录路径；含未支持URL选项或控制字符的配置拒绝，不能默默丢弃TLS参数。使用已有恢复公钥，不生成/上传生产恢复私钥。
+
+target identity、隔离恢复、全对象/业务比较、全部迁移、receipt、首次execute仍须接上原备份协调器，不能只合并source方法就宣称完整host可用。实际生产工具摘要/清单尚未安装。
 
 ### 正式 nginx 测试、重载与生效观察（2026-09-28）
 

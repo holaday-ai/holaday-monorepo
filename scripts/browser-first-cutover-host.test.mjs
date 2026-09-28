@@ -185,6 +185,134 @@ test('backup plan reads the actual source identity and never treats a configured
   }
 });
 
+test('source export binds the original plan, private config, live journal and stopped checks', async () => {
+  assert.equal(typeof firstHost.exportFirstCutoverSourceBackup, 'function');
+  const sourceIdentity = {
+    serverUuid: '11111111-1111-4111-8111-111111111111',
+    database: 'source_qa',
+  };
+  const databaseUrl = 'mysql://synthetic:private@127.0.0.1/source_qa';
+  const config = Buffer.from(`DATABASE_URL=${databaseUrl}`);
+  for (const fault of [
+    'none',
+    'missing-stop',
+    'busy',
+    'config-drift',
+    'source-drift',
+    'phase-drift',
+    'export',
+    'inventory',
+  ]) {
+    const inventory = {
+      backupPlan: {
+        sourceIdentity,
+        isolatedTarget: {
+          serverUuid: '22222222-2222-4222-8222-222222222222',
+          database: 'restore_qa',
+        },
+      },
+      backupSource: {
+        facility: { qa: true },
+        directory: '/private-backup',
+        executable: '/usr/bin/mysqldump',
+        executableDigest: 'f'.repeat(64),
+      },
+    };
+    const binding = {
+      ...Object.fromEntries(
+        ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map((k) => [
+          k,
+          approved[k],
+        ]),
+      ),
+      configDigest: createHash('sha256').update(config).digest('hex'),
+      inventoryDigest: createHash('sha256').update(JSON.stringify(inventory)).digest('hex'),
+    };
+    let drift = false;
+    let exports = 0;
+    let stoppedChecks = 0;
+    let opened = 0;
+    let closed = 0;
+    const context = {
+      binding,
+      root: `/opt/holaday-releases/${binding.candidate}`,
+      approval: { ...approved, ...binding },
+      journal: {
+        assertOwnership: async () => binding,
+        readFirstCutoverEffects: async () => ({
+          ...binding,
+          phase: drift && fault === 'phase-drift' ? 'migration_started' : 'backup_verified',
+        }),
+      },
+    };
+    const io = {
+      platform: 'linux',
+      uid: 0,
+      now: () => 1000,
+      readConfig: async () => (drift && fault === 'config-drift' ? Buffer.from('changed') : config),
+      parseConfig: () => ({ DATABASE_URL: databaseUrl }),
+      connectWorkDatabase: async () => {
+        opened++;
+        return {
+          query: async (sql) => {
+            assert.equal(sql, 'SELECT @@server_uuid AS serverUuid, DATABASE() AS `database`');
+            return [
+              [
+                {
+                  ...sourceIdentity,
+                  ...(drift && fault === 'source-drift' ? { database: 'wrong' } : {}),
+                },
+              ],
+            ];
+          },
+          end: async () => {
+            closed++;
+          },
+        };
+      },
+      assertWritersStopped: async () => {
+        stoppedChecks++;
+        if (fault === 'busy') throw new Error('writer appeared');
+      },
+      encryptMysqlAgeBackup: async (options, source, verify) => {
+        assert.deepEqual(options, {
+          facility: inventory.backupSource.facility,
+          directory: '/private-backup',
+          attempt: binding.attempt,
+        });
+        assert.deepEqual(source, {
+          executable: '/usr/bin/mysqldump',
+          executableDigest: 'f'.repeat(64),
+          databaseUrl,
+          database: 'source_qa',
+        });
+        await verify();
+        exports++;
+        drift = true;
+        if (fault === 'export') throw new Error('sensitive mysql diagnostic');
+        await verify();
+        return { reference: 'encrypted-qa', encryptionProfileDigest: '1'.repeat(64) };
+      },
+    };
+    if (fault === 'missing-stop') io.assertWritersStopped = undefined;
+    if (fault === 'inventory') inventory.backupSource.directory = '/wrong';
+    if (fault === 'none') {
+      assert.deepEqual(await firstHost.exportFirstCutoverSourceBackup(context, inventory, io), {
+        reference: 'encrypted-qa',
+        encryptionProfileDigest: '1'.repeat(64),
+      });
+      assert(stoppedChecks >= 2);
+      assert.equal(exports, 1);
+    } else {
+      await assert.rejects(firstHost.exportFirstCutoverSourceBackup(context, inventory, io), {
+        message: 'CUTOVER_SOURCE_BACKUP_UNPROVEN',
+      });
+      assert.equal(exports, ['missing-stop', 'busy', 'inventory'].includes(fault) ? 0 : 1);
+    }
+    assert.equal(closed, opened);
+  }
+});
+
 test('payment database site reader reuses approved connection and original read-only scope', async () => {
   assert.equal(typeof firstHost.readFirstCutoverPaymentScope, 'function');
   const config = Buffer.from('DATABASE_URL=mysql://synthetic@127.0.0.1/qa');

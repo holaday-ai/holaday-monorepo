@@ -231,6 +231,105 @@ export const encryptAgeBackup = guarded(async (options, producer) => {
   }
 });
 
+/** Source-side producer for the original age facility. Credentials exist only
+ * in an already-unlinked private descriptor (never argv, env, logs or backup).
+ * The caller proves the approved source and physically stopped writers again
+ * before spawn and after BOTH EOF and child exit. This does not seal a receipt.
+ */
+export const encryptMysqlAgeBackup = guarded(async (options, source, verifySource) => {
+  if (
+    !['linux', 'darwin'].includes(process.platform) ||
+    typeof verifySource !== 'function' ||
+    !source ||
+    Object.keys(source).sort().join(',') !== 'database,databaseUrl,executable,executableDigest' ||
+    !validHash(source.executableDigest) ||
+    !/^[a-zA-Z0-9_]{1,64}$/.test(source.database ?? '')
+  )
+    throw new Error('source');
+  const url = new URL(source.databaseUrl);
+  if (
+    url.protocol !== 'mysql:' ||
+    !url.hostname ||
+    !url.username ||
+    url.search ||
+    url.hash ||
+    decodeURIComponent(url.pathname.slice(1)) !== source.database ||
+    (url.port && (!/^[0-9]+$/.test(url.port) || +url.port < 1 || +url.port > 65535))
+  )
+    throw new Error('connection');
+  const quote = (value) => {
+    if ([...value].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127))
+      throw new Error('option value');
+    return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+  };
+  const config = Buffer.from(
+    `[client]\nuser=${quote(decodeURIComponent(url.username))}\npassword=${quote(decodeURIComponent(url.password))}\nhost=${quote(url.hostname.replace(/^\[|\]$/g, ''))}\nport=${url.port || '3306'}\nprotocol=TCP\n`,
+  );
+  let credential;
+  let executable;
+  try {
+    await scope(options);
+    executable = await checkedFile(source.executable, false);
+    if ((await fileHash(executable)) !== source.executableDigest) throw new Error('dump binary');
+    const credentialPath = join(options.directory, `${options.attempt}.mysqldump.cnf`);
+    credential = await fs.open(
+      credentialPath,
+      constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
+    );
+    // Unlink while EMPTY. Even a crash while writing cannot leave a named secret.
+    await fs.unlink(credentialPath);
+    if ((await credential.stat()).nlink !== 0) throw new Error('credential links');
+    if ((await credential.write(config, 0, config.length, 0)).bytesWritten !== config.length)
+      throw new Error('credential write');
+    config.fill(0);
+    return await encryptAgeBackup(options, async (sink) => {
+      await verifySource();
+      await unchanged(executable);
+      const child = spawn(
+        source.executable,
+        [
+          `--defaults-file=${process.platform === 'linux' ? '/proc/self/fd/3' : '/dev/fd/3'}`,
+          '--single-transaction',
+          '--routines',
+          '--events',
+          '--triggers',
+          '--set-gtid-purged=OFF',
+          '--no-tablespaces',
+          '--hex-blob',
+          '--default-character-set=utf8mb4',
+          '--skip-column-statistics',
+          source.database,
+        ],
+        {
+          shell: false,
+          env: {
+            PATH: '/usr/bin:/bin',
+            LC_ALL: 'C',
+            HOME: options.directory,
+            MYSQL_TEST_LOGIN_FILE: '/dev/null',
+          },
+          stdio: ['ignore', 'pipe', 'ignore', credential.fd],
+        },
+      );
+      const exited = new Promise((resolve, reject) => {
+        child.once('error', reject);
+        child.once('close', (code) => (code === 0 ? resolve() : reject(new Error('dump exit'))));
+      });
+      // allSettled waits for this read-only child even if its stream fails. Do
+      // not kill/retry a source process or return while an unobserved dump runs.
+      const results = await Promise.allSettled([exited, pipeline(child.stdout, sink)]);
+      if (results.some((r) => r.status !== 'fulfilled')) throw new Error('dump failed');
+      await unchanged(executable);
+      await verifySource();
+    });
+  } finally {
+    config.fill(0);
+    await credential?.close();
+    await executable?.handle.close();
+  }
+});
+
 function checkArtifact(artifact, options, observed) {
   if (
     !artifact ||

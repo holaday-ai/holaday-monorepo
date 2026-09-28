@@ -68,6 +68,68 @@ test('age host I/O is exported by the existing backup module', () => {
   }
 });
 
+// Catch a dump's late nonzero exit being accepted as a complete backup, and
+// credentials leaking into argv/environment or a named file. The child below
+// is a synthetic mysqldump boundary; age and filesystem operations are real.
+for (const fault of ['none', 'late-exit', 'wrong-binary', 'source-drift', 'url-options']) {
+  test(`encrypted mysql export: ${fault}`, { skip: !age }, async (t) => {
+    assert.equal(typeof backup.encryptMysqlAgeBackup, 'function');
+    const f = await fixture(t);
+    const executable = join(f.directory, 'dump-fixture');
+    const password = 'qa #"\\secret';
+    const code = `#!${process.execPath}
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const args = process.argv.slice(2);
+assert(!JSON.stringify(args).includes('secret'));
+assert(!JSON.stringify(process.env).includes('secret'));
+assert.equal(args[0], '--defaults-file=' + (${JSON.stringify(process.platform)} === 'linux' ? '/proc/self/fd/3' : '/dev/fd/3'));
+const cfg = fs.readFileSync(3, 'utf8');
+assert(cfg.includes('password="qa #\\\\"\\\\\\\\secret"'));
+assert.equal(fs.fstatSync(3).nlink, 0);
+assert(args.includes('--single-transaction'));
+assert(args.includes('--routines') && args.includes('--events') && args.includes('--triggers'));
+assert(args.includes('--hex-blob'));
+assert.equal(args.at(-1), 'qa_source');
+assert.equal(process.env.MYSQL_TEST_LOGIN_FILE, '/dev/null');
+process.stdout.write('INSERT INTO qa VALUES ("海边", 4900);\\n');
+process.stdout.end(() => setTimeout(() => { process.exitCode = ${fault === 'late-exit' ? 23 : 0}; }, 20));
+`;
+    await writeFile(executable, code, { mode: 0o700, flag: 'wx' });
+    const source = {
+      executable,
+      executableDigest: fault === 'wrong-binary' ? '0'.repeat(64) : hash(code),
+      databaseUrl: `mysql://synthetic:${encodeURIComponent(password)}@127.0.0.1:3306/qa_source${fault === 'url-options' ? '?ssl=true' : ''}`,
+      database: 'qa_source',
+    };
+    let checks = 0;
+    const verifySource = async () => {
+      checks++;
+      if (fault === 'source-drift' && checks > 1) throw new Error('private source drift');
+    };
+    if (fault === 'none') {
+      const artifact = await backup.encryptMysqlAgeBackup(f.options, source, verifySource);
+      const restored = await backup.decryptAgeBackupToFile({
+        ...f.options,
+        artifact,
+        identityFile: f.identityFile,
+        expectedBackupDigest: await backup.hashAgeBackupArtifact(artifact, f.options),
+      });
+      assert.equal(
+        await readFile(restored.reference, 'utf8'),
+        'INSERT INTO qa VALUES ("海边", 4900);\n',
+      );
+      assert(checks >= 2);
+    } else {
+      await assert.rejects(backup.encryptMysqlAgeBackup(f.options, source, verifySource), {
+        message: 'CUTOVER_AGE_BACKUP_UNPROVEN',
+      });
+      assert(!(await readdir(f.directory)).includes(`${f.options.attempt}.sql.age`));
+    }
+    assert(!(await readdir(f.directory)).some((n) => n.endsWith('.cnf')));
+  });
+}
+
 // Catch publishing a partial transfer, accepting a different backup, or sending
 // plaintext/key material between hosts. Real age and filesystem, no DB/network.
 test(

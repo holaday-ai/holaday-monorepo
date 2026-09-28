@@ -9,6 +9,7 @@ import { receiveAgeBackup } from './browser-backup-age.mjs';
 export {
   decryptAgeBackupToFile,
   encryptAgeBackup,
+  encryptMysqlAgeBackup,
   hashAgeBackupArtifact,
   inspectAgeBackupFacility,
   receiveAgeBackup,
