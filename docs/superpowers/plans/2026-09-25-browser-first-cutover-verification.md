@@ -2,6 +2,23 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29独立源/目标备份恢复段（基于8e83ea76）
+
+只扩展原`scripts/fixtures/browser-recovery-target-qa.mjs`，生产模块未改。新参数形式为原四参数后追加`sourceContainerId sourceAttempt`；两容器都须先按原隔离契约建立，容器和卷均有对应attempt标签、不同serverUUID、无网络/端口/绑定挂载，1CPU/768MiB/256PIDs，event_scheduler=OFF。源仅预置夹具的两张合成表、中文/BLOB/NULL、触发器和禁用事件；目标必须空。每次导入使用新目标，不重跑失败或已迁移目标。
+
+使用原`build-recovery-runtime-qa.mjs`新编译工具包，目标及源工具目录必须root:root/0700，原manifest及全文件闭包校验不放宽。本轮包`holaday-recovery-pack-lkZ2Vd`，runtimeDigest=`b6853507198b46b5f9ca808b9b23625ac5dc00e9f6dfb33b60d4d9be3988deeb`，migrationDigest=`dd989a28fd9728b2f3f68bac80a29576b28cfa5863b7dc1641f72914c60fdb42`。源工具仅snapshot，不运行迁移；mysqldump流直接交age，无明文SQL文件。Mac父进程保管QA私钥，子进程仅公开scope；不是生产SSH/真实恢复私钥测试。
+
+| 本轮验证 | 结果 | 日志 |
+| --- | --- | --- |
+| 原备份协调器→独立真实源导出→原恢复会话→快照比较→61迁移→业务/源未变→原日志回执 | 两次新目标退出0，无跳过分支 | `/tmp/holaday-recovery-distinct-green-verified.log`、`/tmp/holaday-recovery-distinct-final.log` |
+| `CUTOVER_QA_OMIT_RECEIPT=1`：QA适配器只返回成功、没有落盘 | 预期退出1，`QA_COORDINATOR_FAILED: AssertionError`；目标90表证明迁移已执行，实际日志无backupReceipt/候选/open | `/tmp/holaday-recovery-distinct-receipt-mutant.log` |
+| 原backup/recovery-session/mysql/journal四文件串行回归 | 119/119，退出0，零跳过 | `/tmp/holaday-recovery-distinct-regression.log` |
+| 触及MJS Biome、node --check、git diff --check | 退出0 | 本轮命令结果 |
+
+初始失败不掩盖：旧模式试跑`holaday-recovery-seal-red.log`在工具目录0755处失败，没有达到新增回执断言，不算有效RED；第一独立源运行`holaday-recovery-distinct-first.log`已完成迁移并实际写回执，但测试错误读取不含回执的effects投影，退出1，已改为受保护日志原文件断言；另一个新目标`holaday-recovery-distinct-green.log`在初始目标检查拒绝（卷未贴attempt标签、表数0），改为另建标签完整目标，没有放宽保护或重放SQL。最终故障消息只输出白名单错误码，不输出子进程原始数据/密钥；即使父会话失败也等子进程退出。
+
+协调器运行在Mac Node24.19；真实MySQL/快照/迁移工具运行在Linux，不能写成整个协调器已Linux通过。物理停止、host安装、现场facts、候选与open仍未接入本模式；journal阶段是夹具设定。此处不能与另一次停止演练结果相加为同attempt完整成功。未运行完整browser/ops/应用全套或整分支审查。所有本轮QA容器/卷仅含合成数据，身份核实后清理，日志保留；原服务未改。没有生产备份、部署或任务完成结论。
+
 2026-09-29续跑（基于`e994cfd0`）：原6.R3预定Linux入口现串联真实transition/site/journal及PM2/pidfd停止，新增非支付HTTP动作已发生但响应丢失的未知/已知配对。只覆盖停止与故障保留段，未覆盖完整恢复/新候选开放；详见下方“丢响应物理演练”。不重试被拒绝的数据库管理凭据查找，现场独立facts仍未具备。
 
 2026-09-29后续核查（基于`21b0fac6`）：真实应用数据库账号缺全局PROCESS，事务/复制状态查询被拒绝，只见同账号4个Sleep连接；不证明未知写入者为零。原host现可调用严格权限覆盖的独立MySQL观察器，但它只覆盖数据库这一来源，原site的完整独立facts仍待组合，生产权限没有更改。新鲜browser1019/1019、Linux关联115/115及真实LinuxNode22/MySQL五项权限/跨账号/跨库事件/事务反例均通过、零跳过、退出0；详见checkpoint最新段。并未执行全切换、生产备份、ops/应用全套或部署。
