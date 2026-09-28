@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { readCutoverRehearsalArtifacts } from './browser-cutover-evidence.mjs';
+import { inspectAgeBackupFacility } from './browser-first-cutover-backup.mjs';
 import { connectFirstCutoverGatewaySession } from './browser-first-cutover-gateway-session.mjs';
 import {
   createFirstCutoverRetirementObserver,
@@ -43,6 +44,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     readPaymentScope: readFirstCutoverPaymentScope,
     readBackupPlan: readFirstCutoverBackupPlan,
     exportSourceBackup: exportFirstCutoverSourceBackup,
+    inspectSourceFacility: inspectAgeBackupFacility,
     inspectSource: readReviewedFirstCutoverLegacySource,
     createIngress: createFirstCutoverIngressPair,
     connectGateway: connectFirstCutoverGatewaySession,
@@ -489,10 +491,10 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       exportDatabase: (source, input) =>
         run('source-backup', context, ['backup_verified'], async () => {
           const inventory = approvedInventory();
+          const facility = await io.inspectSourceFacility(inventory.backupSource?.facility);
           const expected = {
-            ...inventory.backupPlan,
             binding: context.binding,
-            maintenanceEndsAtMs: context.approval.maintenanceEndsAtMs,
+            facility,
           };
           if (!equal(input, expected) || !equal(source, inventory.backupPlan?.sourceIdentity))
             fail();
@@ -506,6 +508,11 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
             assertWritersStopped: verify,
           });
           await verify();
+          if (
+            !equal(await io.inspectSourceFacility(inventory.backupSource?.facility), facility) ||
+            artifact?.encryptionProfileDigest !== facility.encryptionProfileDigest
+          )
+            fail();
           return artifact;
         }),
     },

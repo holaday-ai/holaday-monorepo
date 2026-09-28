@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 同轮接线复核：原备份协调器与site导出契约修正
+
+Mac恢复端七文件已提交 `4bf74aeab23836da0557583b7d4d8c053e71ea72`。继续串联时发现上一轮site导出接口接收了错误的参数形状：原 `backupAndRestoreCheck` 实际传 `{binding,facility}`，site却比较整份backupPlan与维护截止时间，因此单独测试通过但原协调器接入会拒绝。
+
+新增测试直接把真实 `site.backup.exportDatabase` 交给原备份协调器及真实文件journal，先观察 `CUTOVER_BACKUP_UNPROVEN` RED，再只修site契约；保留同一次attempt/物理停写/源身份约束，并在导出前后检查批准加密设施与返回密文profile一致。没有放松原协调器或重写备份流程。数据库/恢复/迁移在这条契约测试中明确为合成边界，不据此宣称真实完整恢复。测试最初误用effects投影读取receipt，已改为核对原journal文件；未改产品journal行为。
+
+新鲜结果：site **41/41**；实际Linux site/host **105/105**；browser与首次入口 **919/919**；ops **120/59/16/760 + Python12**（含普通入口7项），全部退出0、0跳过。日志 `/tmp/holaday-source-contract-{green,linux,browser-final,ops}.log`。第一轮browser遗漏age环境配置有33项跳过，不计验收；随后配置 `/opt/homebrew/bin/age` 重跑通过。两MJS Biome、syntax、diff-check通过。
+
+仍停留Task4–6实施，下一步及发布阻塞与下节一致：跨Mac/Vultr受保护恢复会话、原全量比较/61迁移及真实工作归属与完整演练尚缺。没有推送、PR、合并或部署；执行入口继续关闭，原缓存保留。下方历史925项是上一代码快照的组合验收，不覆盖本次修复。
+
 ### 2026-09-28 续跑：Mac恢复端真实隔离目标检查与固定fd导入
 
 承接 `92898dd1`，Task4原BASE844c2ced不变。原backup模块已接入实际Docker目标检查：完整容器/镜像ID、同attempt标签、独占本地卷、无网络/端口/host绑定/特权/设备、资源上限及真实MySQL身份；首次导入要求空库、无其他业务库/连接且事件关闭。原age解密只在完整认证、私有文件发布及inode检查后提供只读fd；固定mysql socket命令单次消费该fd，前后复核目标与调用方scope。失败不自动重试SQL或删除目标。

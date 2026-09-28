@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { readCutoverRehearsalArtifacts } from './browser-cutover-evidence.mjs';
+import { backupAndRestoreCheck } from './browser-first-cutover-backup.mjs';
 import * as siteModule from './browser-first-cutover-site.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 import { finishStoppedRelease } from './browser-maintenance-release-tail.mjs';
@@ -729,6 +730,8 @@ test('site source export is single-attempt, bound and checks stopped during the 
     isolatedTarget: { database: 'restore_qa' },
   };
   const f = await fixture(t, { backupPlan: plan });
+  const facility = { encryptionProfileDigest: '4'.repeat(64) };
+  f.io.inspectSourceFacility = async () => facility;
   let exports = 0;
   f.io.exportSourceBackup = async (context, inventory, deps) => {
     assert.equal(context.journal, f.journal);
@@ -754,9 +757,8 @@ test('site source export is single-attempt, bound and checks stopped during the 
     await f.journal.persist(phase, { candidate: f.binding.candidate });
   f.state.producers = f.state.gateways = 0;
   const scope = {
-    ...plan,
     binding: f.binding,
-    maintenanceEndsAtMs: f.context.approval.maintenanceEndsAtMs,
+    facility,
   };
   await assert.rejects(site.backup.exportDatabase(plan.sourceIdentity, scope), /UNPROVEN/);
   assert.equal(exports, 1);
@@ -768,17 +770,22 @@ test('site source export is single-attempt, bound and checks stopped during the 
 });
 
 test('site source export refuses a different source or binding before invoking a producer', async (t) => {
-  for (const fault of ['source', 'binding', 'none']) {
+  for (const fault of ['source', 'binding', 'facility', 'returned-profile', 'none']) {
     const plan = {
       sourceIdentity: { database: 'source_qa' },
       isolatedTarget: { database: 'restore_qa' },
     };
     const f = await fixture(t, { backupPlan: plan });
+    const facility = { encryptionProfileDigest: '4'.repeat(64) };
+    f.io.inspectSourceFacility = async () => facility;
     let exports = 0;
     f.io.exportSourceBackup = async (_context, _inventory, deps) => {
       await deps.assertWritersStopped();
       exports++;
-      return { reference: 'encrypted-only' };
+      return {
+        reference: 'encrypted-only',
+        encryptionProfileDigest: (fault === 'returned-profile' ? '5' : '4').repeat(64),
+      };
     };
     const site = f.make();
     assert.equal(typeof site.backup?.exportDatabase, 'function');
@@ -795,20 +802,84 @@ test('site source export refuses a different source or binding before invoking a
       await f.journal.persist(phase, { candidate: f.binding.candidate });
     f.state.producers = f.state.gateways = 0;
     const scope = {
-      ...plan,
       binding: { ...f.binding },
-      maintenanceEndsAtMs: f.context.approval.maintenanceEndsAtMs,
+      facility: fault === 'facility' ? { encryptionProfileDigest: '5'.repeat(64) } : facility,
     };
     if (fault === 'binding') scope.binding.attempt = 'foreign';
     const action = site.backup.exportDatabase(
       fault === 'source' ? { database: 'wrong' } : plan.sourceIdentity,
       scope,
     );
-    if (fault === 'none') assert.deepEqual(await action, { reference: 'encrypted-only' });
+    if (fault === 'none')
+      assert.deepEqual(await action, { reference: 'encrypted-only', ...facility });
     else await assert.rejects(action, /UNPROVEN/);
-    assert.equal(exports, fault === 'none' ? 1 : 0);
+    assert.equal(exports, ['none', 'returned-profile'].includes(fault) ? 1 : 0);
     await site.lifecycle.detach(f.context);
   }
+});
+
+test('original backup coordinator can consume site source export without reshaping its contract', async (t) => {
+  const plan = {
+    sourceIdentity: { serverUuid: '11111111-1111-4111-8111-111111111111', database: 'source_qa' },
+    isolatedTarget: { serverUuid: '22222222-2222-4222-8222-222222222222', database: 'restore_qa' },
+  };
+  const facility = { encryptionProfileDigest: '4'.repeat(64) };
+  const profile = { synthetic: 'approved-source-profile' };
+  const f = await fixture(t, { backupPlan: plan, backupSource: { facility: profile } });
+  f.io.inspectSourceFacility = async (input) => {
+    assert.deepEqual(input, profile);
+    return facility;
+  };
+  f.io.exportSourceBackup = async (_context, _inventory, deps) => {
+    await deps.assertWritersStopped();
+    f.events.push('source-export');
+    return { reference: '/synthetic/encrypted.sql.age', ...facility };
+  };
+  const site = f.make();
+  await site.lifecycle.attach(f.context);
+  for (const phase of [
+    'prepared',
+    'orders_fenced',
+    'legacy_settled',
+    'producers_stopped',
+    'all_fenced',
+    'stopped',
+    'backup_verified',
+  ])
+    await f.journal.persist(phase, { candidate: f.binding.candidate });
+  f.state.producers = f.state.gateways = 0;
+  const receipt = await backupAndRestoreCheck(
+    { ...plan, binding: f.binding, maintenanceEndsAtMs: 9000 },
+    {
+      now: () => f.state.now,
+      assertOwnership: () => f.journal.assertOwnership(),
+      assertWritersStopped: () => site.lifecycle.assertStopped(f.context),
+      readDatabaseIdentity: async (value) => value,
+      inspectBackupFacility: async () => facility,
+      exportDatabase: site.backup.exportDatabase,
+      hashArtifact: async () => '1'.repeat(64),
+      restoreIsolated: async () => {
+        f.events.push('restore-synthetic');
+      },
+      compareInventoryAndData: async () => ({
+        comparisonDigest: '2'.repeat(64),
+        sourceDigest: '3'.repeat(64),
+        businessDigest: '5'.repeat(64),
+      }),
+      runApprovedMigrations: async () => {
+        f.events.push('migrate-synthetic');
+      },
+      verifySchema: async () => ({ schemaDigest: '6'.repeat(64), businessDigest: '5'.repeat(64) }),
+      readSourceDigest: async () => '3'.repeat(64),
+      sealReceipt: (value) => f.journal.bindBackupReceipt(value),
+    },
+  );
+  assert.deepEqual(JSON.parse(await fs.readFile(f.journal.path, 'utf8')).backupReceipt, receipt);
+  assert.deepEqual(
+    f.events.filter((e) => ['source-export', 'restore-synthetic', 'migrate-synthetic'].includes(e)),
+    ['source-export', 'restore-synthetic', 'migrate-synthetic'],
+  );
+  await site.lifecycle.detach(f.context);
 });
 
 test('site refuses missing independent business facts before opening either session', async (t) => {
