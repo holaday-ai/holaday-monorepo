@@ -26,6 +26,7 @@ import {
   captureLegacyRuntime,
   initializeFirstMaintenanceState,
   retireLegacyRuntime,
+  validateOwnedLegacyFence,
 } from './browser-first-cutover-runtime.mjs';
 import { persistCandidateStartupEntries } from './browser-first-cutover-startup.mjs';
 import {
@@ -1519,6 +1520,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             verifyFence: operations.verifyFence,
             signalPinned: operations.signalPinned,
             assertJournalOwnership: () => io.journal.assertOwnership(),
+            readFirstCutoverEffects: () => io.journal.readFirstCutoverEffects(),
             readInventory: async () => (await read(undefined, 'aliyun')).inventory,
           },
         );
@@ -1680,6 +1682,11 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
     )
       throw new Error('CUTOVER_RUNTIME_UNPROVEN');
     const fence = await io.lifecycle.verifyFence(context());
+    const interrupted = await validateOwnedLegacyFence(fence, {
+      now: io.now,
+      assertJournalOwnership: ownership,
+      readFirstCutoverEffects: prepared.journal.readFirstCutoverEffects,
+    });
     const observedNow = io.now();
     if (
       fence?.inventoryDigest !== prepared.binding.inventoryDigest ||
@@ -1691,7 +1698,7 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
       fence.existingSockets !== 0 ||
       fence.internalWriters !== 0 ||
       fence.unsettledWork !== 0 ||
-      fence.externalWork !== 0 ||
+      (!interrupted && fence.externalWork !== 0) ||
       fence.producersRunning !== 0
     )
       throw new Error('CUTOVER_FENCE_UNPROVEN');
@@ -1806,6 +1813,13 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
       approval = structuredClone(await io.readApproval(request));
       if (approval.candidate !== candidate || approval.attempt !== request.attempt)
         throw new Error('CUTOVER_APPROVAL_UNPROVEN');
+      if (
+        approval.schemaVersion === 2 &&
+        ['readLegacyDisposition', 'acceptLegacyInterruption'].some(
+          (key) => typeof io.lifecycle[key] !== 'function',
+        )
+      )
+        throw new Error('CUTOVER_HOST_OBSERVER_REQUIRED');
       await guard();
     },
     stage: () =>
@@ -1830,6 +1844,24 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
       await prepared.journal.persist(next, detail);
       phase = next;
     },
+    readLegacyDisposition: async () => {
+      await guard();
+      if (phase !== 'orders_fenced') reject();
+      if (approval.schemaVersion !== 2) return { mode: 'drained' };
+      const disposition = await io.lifecycle.readLegacyDisposition(context());
+      const expected = {
+        mode: 'controlled-interruption',
+        riskDigest: cutoverLegacyInterruptionRisk(approval),
+      };
+      if (!isDeepStrictEqual(disposition, expected)) reject();
+      await guard();
+      return expected;
+    },
+    acceptLegacyInterruption: () =>
+      once('acceptLegacyInterruption', 'legacy_interruption_accepted', async () => {
+        if (approval.schemaVersion !== 2) reject();
+        await io.lifecycle.acceptLegacyInterruption(context());
+      }),
     ...Object.fromEntries(
       [
         ['fenceOrders', 'orders_fenced'],
@@ -1895,6 +1927,7 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
             applicationGid: prepared.applicationGid,
             assertJournalOwnership: ownership,
             assertStopped,
+            readFirstCutoverEffects: prepared.journal.readFirstCutoverEffects,
             verifyFence: () => io.lifecycle.verifyFence(context()),
             recordBootstrap: (value) => prepared.journal.bindBootstrapSeed(value),
           },
@@ -1946,6 +1979,7 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
           )
             throw new Error('MAINTENANCE_START_UNPROVEN');
           await io.observe(identity);
+          if (approval.schemaVersion === 2) await prepared.journal.bindCandidateIdentity(identity);
           return { ...identity };
         }
       }),

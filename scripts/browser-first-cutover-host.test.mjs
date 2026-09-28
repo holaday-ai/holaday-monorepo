@@ -225,7 +225,8 @@ test('persisted-work host reader owns and closes a dedicated approved database c
   assert.deepEqual(result, { observedAtMs: 1000, unsettled: [] });
   assert.equal(events[0], 'connect');
   assert.deepEqual(events.slice(-2), ['ROLLBACK', 'end']);
-  assert.equal(events.filter((v) => v.startsWith('SELECT')).length, 12);
+  assert.equal(events.filter((v) => v.startsWith('SELECT')).length, 13);
+  assert.equal(events.filter((v) => v.includes(' FROM task_steps ')).length, 1);
   for (const kind of ['config', 'ownership', 'root', 'deadline', 'query', 'close']) {
     const changes = { ...io };
     const ctx = { ...context };
@@ -994,6 +995,76 @@ async function runLifecycle(f) {
   });
   return { adapter, result };
 }
+test('host composes first-only disposition and durable interruption into the original release tail', async (t) => {
+  const f = await lifecycleFixture(t);
+  Object.assign(f.approval, {
+    schemaVersion: 2,
+    legacyInterruption: {
+      mode: 'controlled-interruption',
+      scope: 'legacy-non-payment-memory',
+      approvalRef: 'legacy-interruption-20260928',
+      capabilityDigest: '7'.repeat(64),
+      observeUntilMs: 1800,
+      noAutomaticReplay: true,
+    },
+  });
+  f.io.lifecycle.readLegacyDisposition = async (ctx) => ({
+    mode: 'controlled-interruption',
+    riskDigest: (await ctx.journal.readFirstCutoverEffects()).riskDigest,
+  });
+  f.io.lifecycle.acceptLegacyInterruption = async (ctx) => {
+    assert.equal((await f.record()).phase, 'legacy_interruption_accepted');
+    f.events.push('accept-interruption');
+    await ctx.journal.bindLegacyInterruption({
+      riskDigest: (await ctx.journal.readFirstCutoverEffects()).riskDigest,
+      sourceDigest: '8'.repeat(64),
+      fenceDigest: '9'.repeat(64),
+      observedAtMs: f.io.now(),
+    });
+  };
+  const observeWork = () => ({
+    schemaVersion: 2,
+    inventoryDigest: f.binding.inventoryDigest,
+    observedAtMs: f.io.now(),
+    unsettledWork: 0,
+    unknownWriters: 0,
+    knownExternalWork: [],
+    activeRequests: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+    externalWork: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+    capabilityDigest: f.approval.legacyInterruption.capabilityDigest,
+    replaySourcesDigest: '8'.repeat(64),
+    pendingReplay: 0,
+  });
+  const readHostInventory = f.io.evidence.readHostInventory;
+  f.io.evidence.readHostInventory = async () => ({
+    ...(await readHostInventory()),
+    riskDigest: (await f.record()).riskDigest,
+    legacyWork: { before: observeWork(), after: observeWork() },
+  });
+  const verifyFence = f.io.lifecycle.verifyFence;
+  f.io.lifecycle.verifyFence = async (ctx) => {
+    const record = await ctx.journal.readFirstCutoverEffects();
+    const work = observeWork();
+    return {
+      ...(await verifyFence(ctx)),
+      unknownWriters: work.unknownWriters,
+      activeRequests: work.activeRequests,
+      externalWork: work.externalWork,
+      riskDigest: record.riskDigest,
+      legacyWork: { before: work, after: structuredClone(work) },
+    };
+  };
+  const { result } = await runLifecycle(f);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const saved = await f.record();
+  assert.equal(saved.schemaVersion, 2);
+  assert.equal(saved.phase, 'reconciled');
+  assert.equal(saved.interruptionObservation.riskDigest, saved.riskDigest);
+  assert.equal(f.events.includes('settle'), false);
+  assert.equal(f.events.filter((event) => event === 'accept-interruption').length, 1);
+  assert(f.events.some((event) => event.includes('services-first-cutover')));
+  assert(f.events.some((event) => event.includes('verify-first-cutover')));
+});
 
 // Real host, collector, release tail and durable journal; external machines,
 // database/backup and runtime processes are explicitly synthetic here.

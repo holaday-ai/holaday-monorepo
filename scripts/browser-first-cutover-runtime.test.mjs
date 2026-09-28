@@ -15,6 +15,129 @@ import * as firstRuntime from './browser-first-cutover-runtime.mjs';
 import { retireMaintenanceRuntime } from './browser-maintenance-runtime.mjs';
 
 const digest = 'a'.repeat(64);
+function interruptionWork() {
+  const approval = {
+    schemaVersion: 2,
+    kind: 'first-cutover',
+    attempt: '12345678-1234-4234-8234-123456789abc',
+    candidate: 'a'.repeat(40),
+    configDigest: 'b'.repeat(64),
+    migrationDigest: 'c'.repeat(64),
+    inventoryDigest: digest,
+    legacyDigest: 'd'.repeat(64),
+    maintenanceEndsAtMs: 2000,
+    reconcileByMs: 3000,
+    operatorRef: 'qa-operator',
+    legacyInterruption: {
+      mode: 'controlled-interruption',
+      scope: 'legacy-non-payment-memory',
+      approvalRef: 'legacy-interruption-20260928',
+      capabilityDigest: '7'.repeat(64),
+      observeUntilMs: 1800,
+      noAutomaticReplay: true,
+    },
+  };
+  return {
+    approval,
+    phase: 'before-stop',
+    nowMs: 1000,
+    observation: {
+      schemaVersion: 2,
+      inventoryDigest: digest,
+      observedAtMs: 999,
+      unsettledWork: 0,
+      unknownWriters: 0,
+      knownExternalWork: [],
+      activeRequests: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+      externalWork: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+      capabilityDigest: '7'.repeat(64),
+      replaySourcesDigest: '8'.repeat(64),
+      pendingReplay: 0,
+    },
+  };
+}
+test('legacy work boundary distinguishes approved unobservable from zero, positive, malformed and expired observations', () => {
+  assert.equal(typeof firstRuntime.validateLegacyWorkBoundary, 'function');
+  const input = interruptionWork();
+  const result = firstRuntime.validateLegacyWorkBoundary(input);
+  assert.equal(result.mode, 'controlled-interruption');
+  assert.match(result.riskDigest, /^[a-f0-9]{64}$/);
+  for (const field of ['activeRequests', 'externalWork']) {
+    const zero = structuredClone(input);
+    zero.observation[field] = { kind: 'observed', count: 0 };
+    assert.deepEqual(firstRuntime.validateLegacyWorkBoundary(zero), result);
+    for (const value of [
+      null,
+      undefined,
+      0,
+      { kind: 'observed', count: 1 },
+      { kind: 'observed', count: -1 },
+      { kind: 'unobservable', reason: 'timeout' },
+      { kind: 'unobservable', reason: 'legacy-no-inflight-api', count: 0 },
+    ]) {
+      const bad = structuredClone(input);
+      bad.observation[field] = value;
+      assert.throws(() => firstRuntime.validateLegacyWorkBoundary(bad), /CUTOVER_/);
+    }
+  }
+  for (const [key, value] of [
+    ['unsettledWork', 1],
+    ['unknownWriters', 1],
+    ['knownExternalWork', ['known-action']],
+    ['pendingReplay', 1],
+    ['replaySourcesDigest', null],
+    ['capabilityDigest', '0'.repeat(64)],
+    ['inventoryDigest', '0'.repeat(64)],
+    ['observedAtMs', 1001],
+    ['schemaVersion', 1],
+  ]) {
+    const bad = structuredClone(input);
+    bad.observation[key] = value;
+    assert.throws(() => firstRuntime.validateLegacyWorkBoundary(bad), /CUTOVER_/, key);
+  }
+  assert.throws(
+    () => firstRuntime.validateLegacyWorkBoundary({ ...input, nowMs: 1801 }),
+    /CUTOVER_/,
+  );
+  assert.deepEqual(
+    firstRuntime.validateLegacyWorkBoundary({ ...input, nowMs: 1801, phase: 'after-stop' }),
+    result,
+  );
+  assert.throws(
+    () => firstRuntime.validateLegacyWorkBoundary({ ...input, nowMs: 2000, phase: 'preopen' }),
+    /CUTOVER_/,
+  );
+  assert.throws(
+    () => firstRuntime.validateLegacyWorkBoundary({ ...input, phase: 'unknown' }),
+    /CUTOVER_/,
+  );
+  assert.throws(
+    () =>
+      firstRuntime.validateLegacyWorkBoundary({
+        ...input,
+        approval: { ...input.approval, kind: 'ordinary' },
+      }),
+    /CUTOVER_/,
+  );
+  const strict = {
+    ...input,
+    approval: { schemaVersion: 1, inventoryDigest: digest },
+    observation: {
+      inventoryDigest: digest,
+      observedAtMs: 999,
+      unsettledWork: 0,
+      externalWork: 0,
+      activeRequests: 0,
+      unknownWriters: 0,
+    },
+  };
+  assert.deepEqual(firstRuntime.validateLegacyWorkBoundary(strict), { mode: 'drained' });
+  strict.observation.externalWork = null;
+  assert.throws(() => firstRuntime.validateLegacyWorkBoundary(strict), /CUTOVER_/);
+  strict.observation.externalWork = 0;
+  strict.approval.schemaVersion = 3;
+  assert.throws(() => firstRuntime.validateLegacyWorkBoundary(strict), /CUTOVER_/);
+});
 test('runtime preserves the actual mixed-case kernel hostname in captured targets', async () => {
   const f = fixture();
   f.inventory.host = 'iZbp1ActualNodeZ';
@@ -258,6 +381,75 @@ function producerFixture() {
   });
   return f;
 }
+test('interrupted producer stop needs the live owned receipt and rejects replay on the post-stop read', async () => {
+  for (const fault of [
+    undefined,
+    'missing-reader',
+    'missing-receipt',
+    'wrong-risk',
+    'wrong-owner',
+    'wrong-phase',
+    'failure',
+    'known-work',
+    'stripped',
+    'post-stop-replay',
+  ]) {
+    const f = producerFixture();
+    const input = interruptionWork();
+    const riskDigest = firstRuntime.validateLegacyWorkBoundary(input).riskDigest;
+    const effects = {
+      ...input.approval,
+      riskDigest,
+      recordDigest: '1'.repeat(64),
+      phase: 'producers_stopped',
+      interruptionObservation: {
+        riskDigest,
+        sourceDigest: '2'.repeat(64),
+        fenceDigest: '3'.repeat(64),
+        observedAtMs: 999,
+      },
+    };
+    if (fault === 'missing-receipt') effects.interruptionObservation = undefined;
+    if (fault === 'wrong-risk') effects.riskDigest = '0'.repeat(64);
+    if (fault === 'wrong-phase') effects.phase = 'orders_fenced';
+    if (fault === 'failure') effects.failureObservation = {};
+    if (fault !== 'missing-reader')
+      f.io.readFirstCutoverEffects = async () => structuredClone(effects);
+    f.io.assertJournalOwnership = async () => ({
+      inventoryDigest: digest,
+      attempt: fault === 'wrong-owner' ? 'other' : effects.attempt,
+    });
+    const base = f.io.verifyFence;
+    f.io.verifyFence = async () => {
+      const observation = structuredClone(input.observation);
+      if (fault === 'known-work') observation.knownExternalWork = ['identified-action'];
+      if (fault === 'post-stop-replay' && f.events.length) observation.pendingReplay = 1;
+      if (fault === 'stripped') return base();
+      return {
+        ...(await base()),
+        activeRequests: observation.activeRequests,
+        externalWork: observation.externalWork,
+        riskDigest,
+        legacyWork: { before: observation, after: structuredClone(observation) },
+      };
+    };
+    const captured = await capture(f);
+    if (fault) {
+      await assert.rejects(
+        retireLegacyProducers({ captured, deadlineMs: 5000 }, f.io),
+        /CUTOVER_/,
+        fault,
+      );
+      assert.equal(f.events.length, fault === 'post-stop-replay' ? 1 : 0, fault);
+    } else {
+      assert.equal(
+        (await retireLegacyProducers({ captured, deadlineMs: 5000 }, f.io)).phase,
+        'producers-stopped',
+      );
+      assert.deepEqual(f.events, [['pm2', 100, 2]]);
+    }
+  }
+});
 test('producer-first stop accepts observed running producers only after orders isolation and work checks', async () => {
   const f = producerFixture();
   const captured = await capture(f);

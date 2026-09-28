@@ -99,6 +99,69 @@ test('first cutover uses ordered intents, initializes after migration and comple
   });
   assert.deepEqual(f.events, success);
 });
+test('first interruption selection uses its own intent and never falls back to a drain claim', async () => {
+  const f = fixture();
+  f.adapter.readLegacyDisposition = async () => ({
+    mode: 'controlled-interruption',
+    riskDigest: '7'.repeat(64),
+  });
+  f.adapter.acceptLegacyInterruption = async () => f.events.push('accept-interruption');
+  assert.equal((await run(f, { window: { ...window, schemaVersion: 2 } })).ok, true);
+  assert.deepEqual(
+    f.events,
+    success.map((name) =>
+      name === 'phase:legacy_settled'
+        ? 'phase:legacy_interruption_accepted'
+        : name === 'settleLegacy'
+          ? 'accept-interruption'
+          : name,
+    ),
+  );
+  for (const fault of ['reader', 'missing-effect', 'receipt', 'malformed']) {
+    const g = fixture();
+    g.adapter.readLegacyDisposition = async () => {
+      if (fault === 'reader') throw new Error('CUTOVER_WORK_UNPROVEN');
+      return {
+        mode: 'controlled-interruption',
+        riskDigest: fault === 'malformed' ? '' : '7'.repeat(64),
+      };
+    };
+    if (fault !== 'missing-effect')
+      g.adapter.acceptLegacyInterruption = async () => {
+        throw new Error('CUTOVER_WORK_UNPROVEN');
+      };
+    assert.equal((await run(g, { window: { ...window, schemaVersion: 2 } })).ok, false, fault);
+    assert.equal(g.events.includes('stopProducers'), false, fault);
+    assert.equal(g.events.includes('settleLegacy'), false, fault);
+    assert.equal(g.events.includes('migrate'), false, fault);
+  }
+});
+test('legacy and v1 windows cannot opt into interruption through an adapter result', async () => {
+  for (const version of [{}, { schemaVersion: 1 }]) {
+    const f = fixture();
+    f.adapter.readLegacyDisposition = async () => ({
+      mode: 'controlled-interruption',
+      riskDigest: '7'.repeat(64),
+    });
+    f.adapter.acceptLegacyInterruption = async () => f.events.push('accept-interruption');
+    assert.equal((await run(f, { window: { ...window, ...version } })).ok, false);
+    assert.equal(f.events.includes('accept-interruption'), false);
+    assert.equal(f.events.includes('stopProducers'), false);
+    assert.equal(f.events.includes('migrate'), false);
+  }
+});
+test('a v2 window cannot fall through an old adapter or claim the strict drain path', async () => {
+  for (const kind of ['old-adapter', 'drained']) {
+    const f = fixture();
+    if (kind === 'drained') {
+      f.adapter.readLegacyDisposition = async () => ({ mode: 'drained' });
+      f.adapter.acceptLegacyInterruption = async () => {};
+    }
+    assert.equal((await run(f, { window: { ...window, schemaVersion: 2 } })).ok, false);
+    assert.equal(f.events.includes('settleLegacy'), false);
+    assert.equal(f.events.includes('stopProducers'), false);
+  }
+});
 for (const fault of success.filter((event) => event !== 'open')) {
   test(`first cutover interruption at ${fault} never advances or repeats the failed step`, async () => {
     const f = fixture(fault);

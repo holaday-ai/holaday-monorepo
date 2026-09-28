@@ -358,6 +358,24 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
           await handle?.close();
         }
       }),
+    bindCandidateIdentity: (value) =>
+      serial(async () => {
+        const actual = structuredClone(value);
+        if (
+          !interrupted ||
+          phase !== 'candidate_started' ||
+          currentIdentity ||
+          !bootstrapSeed ||
+          !identityValid(actual) ||
+          Object.keys(actual).length !== 2 ||
+          !['candidate', 'bootId'].every((key) => Object.hasOwn(actual, key)) ||
+          actual.candidate !== candidate ||
+          actual.bootId === bootstrapSeed
+        )
+          throw unproven();
+        await write(phase, actual);
+        currentIdentity = actual;
+      }),
     bindLegacyInterruption: (value) =>
       serial(async () => {
         const event = structuredClone(value);

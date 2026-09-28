@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { isDeepStrictEqual as equal } from 'node:util';
-import { readCutoverRehearsalArtifacts } from './browser-cutover-evidence.mjs';
+import {
+  cutoverLegacyInterruptionRisk,
+  readCutoverRehearsalArtifacts,
+} from './browser-cutover-evidence.mjs';
 import {
   inspectAgeBackupArtifact,
   inspectAgeBackupFacility,
@@ -27,6 +30,7 @@ import {
 import { compareCutoverMysqlSnapshots } from './browser-first-cutover-mysql.mjs';
 import { connectFirstCutoverRecoverySession } from './browser-first-cutover-recovery-session.mjs';
 import { retireLocalFirstCutoverProducers } from './browser-first-cutover-registrations.mjs';
+import { validateLegacyWorkBoundary } from './browser-first-cutover-runtime.mjs';
 
 const bindingKeys = ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'];
 const fail = () => {
@@ -136,6 +140,12 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       fail();
     const record = await context.journal.readFirstCutoverEffects();
     if (
+      context.approval.schemaVersion === 2 &&
+      (record.schemaVersion !== 2 ||
+        record.riskDigest !== cutoverLegacyInterruptionRisk(context.approval))
+    )
+      fail();
+    if (
       !bindingKeys.every((k) => record[k] === context.binding[k]) ||
       record.legacyDigest !== scope.legacyDigest ||
       (phases && !phases.includes(record.phase))
@@ -224,7 +234,12 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       if (!['candidate_started', 'verified'].includes(record.phase)) fail();
       checkIdentity(identity, record);
     }
-    const orders = ['orders_fenced', 'legacy_settled', 'producers_stopped'].includes(record.phase);
+    const orders = [
+      'orders_fenced',
+      'legacy_settled',
+      'legacy_interruption_accepted',
+      'producers_stopped',
+    ].includes(record.phase);
     const work = structuredClone(await facts.observeWork(context));
     const persisted = await io.readPersistedWork(context);
     const fence = await ingress[orders ? 'verifyOrders' : 'verifyFence']();
@@ -240,6 +255,19 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     const after = await facts.observeWork(context);
     const persistedAfter = await io.readPersistedWork(context);
     const counts = ['unsettledWork', 'externalWork', 'activeRequests', 'unknownWriters'];
+    const workPhase = identity ? 'preopen' : orders ? 'before-stop' : 'after-stop';
+    const disposition = validateLegacyWorkBoundary({
+      observation: work,
+      approval: context.approval,
+      phase: workPhase,
+      nowMs: io.now(),
+    });
+    const afterDisposition = validateLegacyWorkBoundary({
+      observation: after,
+      approval: context.approval,
+      phase: workPhase,
+      nowMs: io.now(),
+    });
     if (
       !fresh(work.observedAtMs) ||
       ![persisted, persistedAfter].every(
@@ -255,7 +283,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       after.inventoryDigest !== context.binding.inventoryDigest ||
       actual.inventoryDigest !== context.binding.inventoryDigest ||
       actual.unknownLaunchers.length ||
-      counts.some((k) => work[k] !== 0 || after[k] !== 0)
+      !equal(disposition, afterDisposition)
     )
       fail();
     const runningProducers = actual.hosts
@@ -267,6 +295,9 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     return {
       ...fence,
       ...Object.fromEntries(counts.map((k) => [k, work[k]])),
+      ...(disposition.mode === 'controlled-interruption'
+        ? { riskDigest: disposition.riskDigest, legacyWork: { before: work, after } }
+        : {}),
       runningProducers,
       liveLegacy: legacy(actual),
       regeneratedLegacy: actual.unknownLaunchers,
@@ -486,6 +517,33 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     },
     detach,
     fenceOrders: (ctx) => run('orders', ctx, ['orders_fenced'], () => ingress.fenceOrders()),
+    readLegacyDisposition: (ctx) =>
+      run(
+        'legacy-disposition',
+        ctx,
+        ['orders_fenced'],
+        async () => {
+          return context.approval.schemaVersion === 2
+            ? {
+                mode: 'controlled-interruption',
+                riskDigest: cutoverLegacyInterruptionRisk(context.approval),
+              }
+            : { mode: 'drained' };
+        },
+        false,
+      ),
+    acceptLegacyInterruption: (ctx) =>
+      run('legacy-interruption', ctx, ['legacy_interruption_accepted'], async () => {
+        if (context.approval.schemaVersion !== 2) fail();
+        const proof = await boundary();
+        const digest = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+        await context.journal.bindLegacyInterruption({
+          riskDigest: proof.riskDigest,
+          sourceDigest: digest(proof.legacyWork),
+          fenceDigest: digest(proof),
+          observedAtMs: proof.observedAtMs,
+        });
+      }),
     settleLegacy: (ctx) =>
       run('settle', ctx, ['legacy_settled'], async () => {
         await facts.settleLegacy(context);
@@ -853,15 +911,20 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
                 : await observer.readWithCandidate(request.identity);
             if (request.stage === 'preopen') closedCandidate(actual, request.identity);
             const after = await facts.observeWork(context);
+            const disposition = validateLegacyWorkBoundary({
+              observation: before,
+              approval: context.approval,
+              phase: request.stage,
+              nowMs: io.now(),
+            });
+            const afterDisposition = validateLegacyWorkBoundary({
+              observation: after,
+              approval: context.approval,
+              phase: request.stage,
+              nowMs: io.now(),
+            });
             if (
-              ![before, after].every(
-                (v) =>
-                  fresh(v?.observedAtMs) &&
-                  v.inventoryDigest === context.binding.inventoryDigest &&
-                  ['unsettledWork', 'externalWork', 'activeRequests', 'unknownWriters'].every(
-                    (k) => v[k] === 0,
-                  ),
-              ) ||
+              !equal(disposition, afterDisposition) ||
               !fresh(actual.observedAtMs) ||
               actual.inventoryDigest !== context.binding.inventoryDigest ||
               actual.unknownLaunchers.length
@@ -891,7 +954,16 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
               observedAtMs: Math.min(before.observedAtMs, actual.observedAtMs, after.observedAtMs),
               producersRunning,
               unknownWriters: [],
-              externalWork: [],
+              externalWork:
+                disposition.mode === 'controlled-interruption'
+                  ? structuredClone(before.knownExternalWork)
+                  : [],
+              ...(disposition.mode === 'controlled-interruption'
+                ? {
+                    riskDigest: disposition.riskDigest,
+                    legacyWork: structuredClone({ before, after }),
+                  }
+                : {}),
             };
           },
           false,

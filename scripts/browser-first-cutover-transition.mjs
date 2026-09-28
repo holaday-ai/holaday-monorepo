@@ -38,6 +38,11 @@ export async function performFirstCutover({ candidate, adapter, window, clock = 
   }
   try {
     if (
+      (window?.schemaVersion !== undefined && ![1, 2].includes(window.schemaVersion)) ||
+      (window?.schemaVersion === 2 &&
+        ['readLegacyDisposition', 'acceptLegacyInterruption'].some(
+          (key) => typeof adapter?.[key] !== 'function',
+        )) ||
       !Number.isSafeInteger(maintenanceEndsAtMs) ||
       maintenanceEndsAtMs <= 0 ||
       !Number.isSafeInteger(reconcileByMs) ||
@@ -107,9 +112,35 @@ export async function performFirstCutover({ candidate, adapter, window, clock = 
     await adapter.stage(candidate);
     checkDeadline();
     await mark('prepared');
+    await mark('orders_fenced');
+    await adapter.fenceOrders();
+    checkDeadline();
+    const disposition =
+      typeof effects.readLegacyDisposition === 'function'
+        ? await effects.readLegacyDisposition()
+        : { mode: 'drained' };
+    checkDeadline();
+    const interrupted = disposition?.mode === 'controlled-interruption';
+    if (interrupted && window?.schemaVersion !== 2) throw new Error('CUTOVER_WORK_UNPROVEN');
+    if (window?.schemaVersion === 2 && !interrupted) throw new Error('CUTOVER_WORK_UNPROVEN');
+    if (
+      !disposition ||
+      (interrupted
+        ? Object.keys(disposition).length !== 2 ||
+          !/^[a-f0-9]{64}$/.test(disposition.riskDigest ?? '') ||
+          typeof effects.acceptLegacyInterruption !== 'function'
+        : disposition.mode !== 'drained' || Object.keys(disposition).length !== 1)
+    )
+      throw new Error('CUTOVER_WORK_UNPROVEN');
+    if (interrupted) {
+      await mark('legacy_interruption_accepted');
+      checkDeadline();
+      await effects.acceptLegacyInterruption();
+    } else {
+      await mark('legacy_settled');
+      await adapter.settleLegacy();
+    }
     for (const [next, action] of [
-      ['orders_fenced', 'fenceOrders'],
-      ['legacy_settled', 'settleLegacy'],
       ['producers_stopped', 'stopProducers'],
       ['all_fenced', 'fenceAll'],
       ['stopped', 'stopLegacy'],

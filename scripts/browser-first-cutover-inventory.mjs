@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual as equal } from 'node:util';
+import { cutoverLegacyInterruptionRisk } from './browser-cutover-evidence.mjs';
 
 const digest = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const hash = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
@@ -46,6 +47,11 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
     candidate,
     execution = [],
   } = structuredClone(input);
+  if (
+    effects?.phase === 'legacy_interruption_accepted' &&
+    (effects.schemaVersion !== 2 || effects.riskDigest !== cutoverLegacyInterruptionRisk(effects))
+  )
+    fail();
   if (
     !Array.isArray(execution) ||
     !Array.isArray(baselineExecution) ||
@@ -279,7 +285,12 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
         fence.files.length !== names.length ||
         new Set(fence.files.map((f) => f.path)).size !== names.length ||
         (fence.stage === 'orders' &&
-          !['orders_fenced', 'legacy_settled', 'producers_stopped'].includes(effects.phase)) ||
+          ![
+            'orders_fenced',
+            'legacy_settled',
+            'legacy_interruption_accepted',
+            'producers_stopped',
+          ].includes(effects.phase)) ||
         (fence.stage === 'all-writers' &&
           ![
             'all_fenced',

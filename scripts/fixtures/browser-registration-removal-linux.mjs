@@ -11,7 +11,10 @@ import {
   createFirstCutoverRetirementObserver,
   readReviewedFirstCutoverLegacySource,
 } from '/source/browser-first-cutover-host.mjs';
-import { firstCutoverSourceBindings } from '/source/browser-first-cutover-inventory.mjs';
+import {
+  classifyFirstCutoverHostPair,
+  firstCutoverSourceBindings,
+} from '/source/browser-first-cutover-inventory.mjs';
 import {
   prepareLocalFirstCutoverGateway,
   registrationConfigDigest,
@@ -42,12 +45,14 @@ assert.ok(
         '--gateway-session-lost-ack',
         '--gateway-session-observed-executor',
         '--execution-site',
+        '--execution-site-interruption',
         '--execution-site-lost-ack',
       ].includes(process.argv[2])),
 );
 const lostAck = process.argv[2] === '--gateways-lost-ack';
 const siteMode = process.argv[2]?.startsWith('--execution-site');
 const siteLostAck = process.argv[2] === '--execution-site-lost-ack';
+const interruption = process.argv[2] === '--execution-site-interruption';
 const sessionMode = siteMode || process.argv[2]?.startsWith('--gateway-session');
 const sessionLostAck = process.argv[2] === '--gateway-session-lost-ack';
 const observeExecutor = process.argv[2] === '--gateway-session-observed-executor';
@@ -385,10 +390,35 @@ try {
       },
     ]),
   );
+  assert.deepEqual(
+    classifyFirstCutoverHostPair({
+      pair: await readPair(),
+      reviews,
+      inventoryDigest: binding.inventoryDigest,
+    }).unknownLaunchers,
+    [],
+  );
   const proof = await readReviewedFirstCutoverLegacySource(
     { reviews, inventoryDigest: binding.inventoryDigest },
     { readPair },
   );
+  const maintenanceEndsAtMs = Date.now() + 60000;
+  const interruptionMetadata = interruption
+    ? {
+        schemaVersion: 2,
+        maintenanceEndsAtMs,
+        reconcileByMs: maintenanceEndsAtMs + 60000,
+        operatorRef: 'qa-only',
+        legacyInterruption: {
+          mode: 'controlled-interruption',
+          scope: 'legacy-non-payment-memory',
+          approvalRef: 'legacy-interruption-20260928',
+          capabilityDigest: sha('synthetic QA legacy capability'),
+          observeUntilMs: maintenanceEndsAtMs,
+          noAutomaticReplay: true,
+        },
+      }
+    : {};
   journal = await acquireReleaseJournal(directory, {
     ...binding,
     kind: 'first-cutover',
@@ -396,6 +426,7 @@ try {
     configDigest: 'c'.repeat(64),
     migrationDigest: sha('[]'),
     legacyDigest: proof.legacyDigest,
+    ...interruptionMetadata,
   });
   const createObserver = async () =>
     createFirstCutoverRetirementObserver(
@@ -415,7 +446,7 @@ try {
   };
   if (!attachedBaseline) await advanceToPrepare();
   if (gateways) {
-    const input = { files, binding, maintenanceEndsAtMs: Date.now() + 60000 };
+    const input = { files, binding, maintenanceEndsAtMs };
     const io = {
       now: Date.now,
       sleep,
@@ -452,6 +483,7 @@ try {
         maintenanceEndsAtMs: input.maintenanceEndsAtMs,
         reconcileByMs: input.maintenanceEndsAtMs + 60000,
         operatorRef: 'qa-only',
+        ...interruptionMetadata,
       };
       await fs.writeFile(`${directory}/first-cutover-approved.json`, JSON.stringify(approval), {
         mode: 0o600,
@@ -562,6 +594,17 @@ try {
                 externalWork: 0,
                 activeRequests: 0,
                 unknownWriters: 0,
+                ...(interruption
+                  ? {
+                      schemaVersion: 2,
+                      activeRequests: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+                      externalWork: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+                      knownExternalWork: [],
+                      capabilityDigest: interruptionMetadata.legacyInterruption.capabilityDigest,
+                      replaySourcesDigest: sha('synthetic QA replay source'),
+                      pendingReplay: 0,
+                    }
+                  : {}),
               }),
               settleLegacy: async () => {},
               verifyOpenedIdentity: async () => {
@@ -637,6 +680,14 @@ try {
         const actualInventory = await executionSite.evidence.readHostInventory(readinessScope);
         assert.deepEqual(actualInventory.inventory, readinessInventory);
         assert.deepEqual(actualInventory.producersRunning, []); // This fixture has only gateways.
+        if (interruption) {
+          assert.equal(
+            actualInventory.riskDigest,
+            (await journal.readFirstCutoverEffects()).riskDigest,
+          );
+          assert.equal(actualInventory.legacyWork.before.activeRequests.kind, 'unobservable');
+          assert.equal(actualInventory.legacyWork.after.externalWork.kind, 'unobservable');
+        }
         const evidenceDirectory = '/var/lib/holaday-deploy/evidence-private';
         await fs.mkdir(evidenceDirectory, { mode: 0o700 });
         await fs.writeFile(
@@ -666,7 +717,9 @@ try {
       for (const [phase, method] of [
         ['prepared', null],
         ['orders_fenced', 'fenceOrders'],
-        ['legacy_settled', 'settleLegacy'],
+        interruption
+          ? ['legacy_interruption_accepted', 'acceptLegacyInterruption']
+          : ['legacy_settled', 'settleLegacy'],
         ['producers_stopped', 'stopProducers'],
         ['all_fenced', 'fenceAll'],
         ['stopped', 'stopLegacy'],
@@ -711,6 +764,14 @@ try {
         );
       } else {
         assert.deepEqual((await executionSite.lifecycle.assertStopped(siteContext)).survivors, []);
+        if (interruption) {
+          const effects = await journal.readFirstCutoverEffects();
+          assert.equal(effects.schemaVersion, 2);
+          assert.equal(effects.interruptionObservation.riskDigest, effects.riskDigest);
+          console.log(
+            'PASS controlled interruption: durable owned risk survives physical gateway retirement; business and ingress observations remain synthetic',
+          );
+        }
         await assert.rejects(fetch('http://127.0.0.1:4011'));
         await executionSite.lifecycle.detach(siteContext);
         assert.equal((await receiverCompletion).code, 0);

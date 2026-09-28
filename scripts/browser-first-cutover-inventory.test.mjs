@@ -166,7 +166,12 @@ async function readLegacy(f, now = 1000) {
   );
 }
 
-async function retirementFixture(t, setup = () => {}, beforeBaseline = () => {}) {
+async function retirementFixture(
+  t,
+  setup = () => {},
+  beforeBaseline = () => {},
+  interrupted = false,
+) {
   const f = pairFixture();
   setup(f);
   const proof = await readLegacy(f);
@@ -187,6 +192,23 @@ async function retirementFixture(t, setup = () => {}, beforeBaseline = () => {})
     migrationDigest: hash(manifest),
     inventoryDigest: f.inventoryDigest,
     legacyDigest: proof.legacyDigest,
+    ...(interrupted
+      ? {
+          schemaVersion: 2,
+          attempt: '12345678-1234-4234-8234-123456789abc',
+          maintenanceEndsAtMs: 9000,
+          reconcileByMs: 12000,
+          operatorRef: 'qa-operator',
+          legacyInterruption: {
+            mode: 'controlled-interruption',
+            scope: 'legacy-non-payment-memory',
+            approvalRef: 'legacy-interruption-20260928',
+            capabilityDigest: '7'.repeat(64),
+            observeUntilMs: 8000,
+            noAutomaticReplay: true,
+          },
+        }
+      : {}),
   });
   t.after(() => journal.close());
   const binding = await journal.assertOwnership();
@@ -215,7 +237,9 @@ async function retirementFixture(t, setup = () => {}, beforeBaseline = () => {})
     },
   );
   await journal.bindManifest(manifest);
-  for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
+  for (const phase of interrupted
+    ? ['prepared', 'orders_fenced', 'legacy_interruption_accepted']
+    : ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
     await journal.persist(phase, { candidate: binding.candidate });
   const remove = async (host = 'vultr', finish = true) => {
     const h = f.pair.hosts.find((h) => h.host === host);
@@ -1170,6 +1194,22 @@ function installFence(r) {
   }));
 }
 
+test('owned interruption intent allows observing the existing orders fence without claiming stopped producers', async (t) => {
+  const r = await retirementFixture(
+    t,
+    (f) => {
+      startupFixture(f);
+      ingressFixture(f);
+    },
+    () => {},
+    true,
+  );
+  installFence(r);
+  const result = await r.observer.read();
+  assert.deepEqual(result.unknownLaunchers, []);
+  assert(result.hosts.some((host) => host.registered.processes.length > 0));
+  assert.equal((await r.journal.readFirstCutoverEffects()).phase, 'legacy_interruption_accepted');
+});
 test('owned active fence receipts explain only the exact generated nginx include targets', async (t) => {
   const r = await retirementFixture(t, (f) => {
     startupFixture(f);

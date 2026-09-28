@@ -10,7 +10,7 @@ import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 
 const sha = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const identity = { candidate: 'a'.repeat(40), bootId: 'b'.repeat(32) };
-async function fixture(t) {
+async function fixture(t, interrupted = false) {
   const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'holaday-ingress-pair-')));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const manifest = { synthetic: 'two-host-ingress-wiring' };
@@ -25,6 +25,22 @@ async function fixture(t) {
     ...binding,
     kind: 'first-cutover',
     legacyDigest: 'e'.repeat(64),
+    ...(interrupted
+      ? {
+          schemaVersion: 2,
+          maintenanceEndsAtMs: 9000,
+          reconcileByMs: 12000,
+          operatorRef: 'qa-operator',
+          legacyInterruption: {
+            mode: 'controlled-interruption',
+            scope: 'legacy-non-payment-memory',
+            approvalRef: 'legacy-interruption-20260928',
+            capabilityDigest: '7'.repeat(64),
+            observeUntilMs: 8000,
+            noAutomaticReplay: true,
+          },
+        }
+      : {}),
   });
   t.after(() => journal.close());
   await journal.bindManifest(manifest);
@@ -230,6 +246,22 @@ async function fixture(t) {
   };
 }
 
+test('orders isolation remains verifiable at the owned interruption intent before its receipt', async (t) => {
+  const f = await fixture(t, true);
+  const pair = await f.start();
+  await f.advance('orders_fenced');
+  await pair.fenceOrders();
+  await f.journal.persist('legacy_interruption_accepted', { candidate: f.binding.candidate });
+  assert.equal((await pair.verifyOrders()).stage, 'orders');
+  assert.deepEqual(f.calls, [
+    'vultr:orders',
+    'aliyun:orders',
+    'vultr:verify-orders',
+    'aliyun:verify-orders',
+  ]);
+  assert.equal((await f.journal.readFirstCutoverEffects()).interruptionObservation, undefined);
+  await pair.close();
+});
 test('orders remain freshly verifiable while producers settle without repeating either fence mutation', async (t) => {
   const f = await fixture(t);
   const pair = await f.start();

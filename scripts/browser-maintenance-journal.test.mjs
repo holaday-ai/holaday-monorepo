@@ -83,6 +83,10 @@ test('interruption receipt is durable before producer stop and survives backup s
   const j = await acquireReleaseJournal(await fixture(t), input);
   t.after(() => j.close());
   await j.bindManifest(manifest);
+  await assert.rejects(
+    j.bindCandidateIdentity({ candidate: input.candidate, bootId: '6'.repeat(32) }),
+    /UNPROVEN/,
+  );
   for (const p of ['prepared', 'orders_fenced', 'legacy_interruption_accepted'])
     await j.persist(p, { candidate: input.candidate });
   await assert.rejects(j.persist('producers_stopped', { candidate: input.candidate }), /UNPROVEN/);
@@ -114,10 +118,28 @@ test('interruption receipt is durable before producer stop and survives backup s
   await j.bindBackupReceipt(await backupReceiptFor(j));
   await j.persist('migration_started', { candidate: input.candidate });
   await j.bindBootstrapSeed('5'.repeat(32));
-  await j.persist('candidate_started', {
-    candidate: input.candidate,
-    identity: { candidate: input.candidate, bootId: '6'.repeat(32) },
-  });
+  await j.persist('candidate_started', { candidate: input.candidate });
+  assert.equal((await j.readFirstCutoverEffects()).identity, undefined);
+  assert.equal(typeof j.bindCandidateIdentity, 'function');
+  const actualIdentity = { candidate: input.candidate, bootId: '6'.repeat(32) };
+  for (const invalid of [
+    undefined,
+    {},
+    { ...actualIdentity, extra: true },
+    { ...actualIdentity, bootId: '' },
+  ])
+    await assert.rejects(j.bindCandidateIdentity(invalid), /UNPROVEN/);
+  await assert.rejects(
+    j.bindCandidateIdentity({ ...actualIdentity, bootId: '5'.repeat(32) }),
+    /UNPROVEN/,
+  );
+  await assert.rejects(
+    j.bindCandidateIdentity({ ...actualIdentity, candidate: 'f'.repeat(40) }),
+    /UNPROVEN/,
+  );
+  await j.bindCandidateIdentity(actualIdentity);
+  await assert.rejects(j.bindCandidateIdentity(actualIdentity), /UNPROVEN/);
+  assert.deepEqual((await j.readFirstCutoverEffects()).identity, actualIdentity);
   const saved = JSON.parse(await fs.readFile(j.path, 'utf8'));
   assert.equal(saved.schemaVersion, 2);
   assert.deepEqual(saved.legacyInterruption, policy);
@@ -148,6 +170,10 @@ test('ordinary and v1 journals cannot silently discard an interruption approval'
     const j = await acquireReleaseJournal(await fixture(t), input);
     t.after(() => j.close());
     await assert.rejects(j.bindLegacyInterruption({}), /UNPROVEN/);
+    await assert.rejects(
+      j.bindCandidateIdentity({ candidate: input.candidate, bootId: '6'.repeat(32) }),
+      /UNPROVEN/,
+    );
   }
 });
 

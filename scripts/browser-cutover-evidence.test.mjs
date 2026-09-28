@@ -174,8 +174,44 @@ async function interruptionFixture(t) {
   f.io.readFirstCutoverEffects = j.readFirstCutoverEffects;
   f.input.kind = 'first-cutover';
   f.input.riskDigest = (await j.readFirstCutoverEffects()).riskDigest;
+  const work = {
+    schemaVersion: 2,
+    inventoryDigest: f.binding.inventoryDigest,
+    observedAtMs: f.io.now(),
+    unsettledWork: 0,
+    unknownWriters: 0,
+    knownExternalWork: [],
+    activeRequests: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+    externalWork: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+    capabilityDigest: '7'.repeat(64),
+    replaySourcesDigest: '8'.repeat(64),
+    pendingReplay: 0,
+  };
+  f.host.riskDigest = f.input.riskDigest;
+  f.host.legacyWork = { before: work, after: structuredClone(work) };
   return { ...f, j };
 }
+test('collector refuses stripped or contradictory legacy work instead of publishing unknown as empty', async (t) => {
+  for (const fault of ['missing', 'risk', 'replay', 'capability', 'known', 'positive']) {
+    const f = await interruptionFixture(t);
+    if (fault === 'missing') f.host.legacyWork = undefined;
+    if (fault === 'risk') f.host.riskDigest = '0'.repeat(64);
+    if (fault === 'replay') f.host.legacyWork.after.pendingReplay = 1;
+    if (fault === 'capability') f.host.legacyWork.after.capabilityDigest = '0'.repeat(64);
+    if (fault === 'known') f.host.legacyWork.after.knownExternalWork = ['identified-action'];
+    if (fault === 'positive')
+      f.host.legacyWork.before.activeRequests = { kind: 'observed', count: 1 };
+    await assert.rejects(collectCutoverEvidence(f.input, f.io), /UNPROVEN/, fault);
+    assert.equal(f.published.length, 0, fault);
+  }
+});
+test('ordinary collector refuses interruption-only work metadata rather than dropping it', async () => {
+  const f = fixture();
+  f.host.riskDigest = '7'.repeat(64);
+  f.host.legacyWork = {};
+  await assert.rejects(collectCutoverEvidence(f.input, f.io), /UNPROVEN/);
+  assert.equal(f.published.length, 0);
+});
 test('collector carries actual owned first journal risk into report without claiming legacy settled', async (t) => {
   const f = await interruptionFixture(t);
   const r = await collectCutoverEvidence(f.input, f.io);
@@ -442,6 +478,7 @@ function databaseFixture(overrides = {}) {
 test('work-only reader shares a read-only snapshot and never reads merchant orders', async () => {
   const calls = [];
   const work = {
+    task_steps: { id: 8, status: 'executing' },
     exploration_runs: { id: 1, status: 'running' },
     video_edit_render_attempts: { id: 2, status: 'pending' },
     video_edit_versions: { id: 3, status: 'rendering' },
@@ -466,7 +503,7 @@ test('work-only reader shares a read-only snapshot and never reads merchant orde
   assert.equal(calls[0], 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
   assert.equal(calls[1], 'START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY');
   assert.equal(calls.at(-1), 'ROLLBACK');
-  assert.equal(calls.filter((sql) => sql.startsWith('SELECT')).length, 12);
+  assert.equal(calls.filter((sql) => sql.startsWith('SELECT')).length, 13);
   assert(!calls.some((sql) => /payments|partner_recharge_orders|UPDATE|DELETE|INSERT/.test(sql)));
 });
 test('payment readiness includes independent work even when ordinary tasks are empty', async () => {

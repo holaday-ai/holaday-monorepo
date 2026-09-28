@@ -1071,12 +1071,95 @@ function checkBinding(value) {
 }
 // Reads a live, owned journal projection; a caller-supplied report is not an
 // approval. The original host/payment checks remain required independently.
+/** Observability is a tagged fact, never a fallback for a read error. The caller
+ * must independently own the approval/journal and verify actual writer fences. */
+export function validateLegacyWorkBoundary({ observation, approval, phase, nowMs } = {}) {
+  try {
+    if (
+      !['prepare', 'before-stop', 'after-stop', 'preopen'].includes(phase) ||
+      !Number.isSafeInteger(nowMs) ||
+      nowMs < 0 ||
+      !observation ||
+      !Number.isSafeInteger(observation.observedAtMs) ||
+      observation.observedAtMs < 0 ||
+      observation.observedAtMs > nowMs ||
+      nowMs - observation.observedAtMs > 60000 ||
+      !hash(observation.inventoryDigest) ||
+      observation.inventoryDigest !== approval?.inventoryDigest ||
+      observation.unsettledWork !== 0 ||
+      observation.unknownWriters !== 0
+    )
+      fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+    if (approval.schemaVersion !== 2) {
+      if (
+        (approval.schemaVersion !== undefined && approval.schemaVersion !== 1) ||
+        (observation.schemaVersion !== undefined && observation.schemaVersion !== 1) ||
+        observation.activeRequests !== 0 ||
+        observation.externalWork !== 0 ||
+        approval.legacyInterruption !== undefined ||
+        approval.riskDigest !== undefined
+      )
+        fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+      return { mode: 'drained' };
+    }
+    const riskDigest = cutoverLegacyInterruptionRisk(approval);
+    const keys = [
+      'schemaVersion',
+      'inventoryDigest',
+      'observedAtMs',
+      'unsettledWork',
+      'unknownWriters',
+      'knownExternalWork',
+      'activeRequests',
+      'externalWork',
+      'capabilityDigest',
+      'replaySourcesDigest',
+      'pendingReplay',
+    ];
+    if (
+      Object.keys(observation).length !== keys.length ||
+      !keys.every((key) => Object.hasOwn(observation, key)) ||
+      observation.schemaVersion !== 2 ||
+      observation.capabilityDigest !== approval.legacyInterruption.capabilityDigest ||
+      !hash(observation.replaySourcesDigest) ||
+      observation.pendingReplay !== 0 ||
+      !Array.isArray(observation.knownExternalWork) ||
+      observation.knownExternalWork.length ||
+      (approval.riskDigest !== undefined && approval.riskDigest !== riskDigest) ||
+      nowMs >= approval.maintenanceEndsAtMs ||
+      (phase === 'before-stop' && nowMs > approval.legacyInterruption.observeUntilMs)
+    )
+      fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+    for (const key of ['activeRequests', 'externalWork']) {
+      const value = observation[key];
+      if (
+        !value ||
+        typeof value !== 'object' ||
+        Array.isArray(value) ||
+        Object.keys(value).length !== 2 ||
+        !Object.hasOwn(value, 'kind') ||
+        !Object.hasOwn(value, value.kind === 'observed' ? 'count' : 'reason') ||
+        (value.kind === 'observed'
+          ? value.count !== 0
+          : value.kind !== 'unobservable' || value.reason !== 'legacy-no-inflight-api')
+      )
+        fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+    }
+    // A currently observed zero cannot erase accepted historical uncertainty.
+    return { mode: 'controlled-interruption', riskDigest };
+  } catch {
+    fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+  }
+}
 function firstInterruptionProjection(first, input, raw, now) {
   const { binding, stage, identity, window } = input;
   if (first?.schemaVersion !== 2) {
     if (
       input.kind !== undefined ||
       input.riskDigest !== undefined ||
+      [raw?.host, raw?.lastHost, raw?.fence].some(
+        (value) => value?.riskDigest !== undefined || value?.legacyWork !== undefined,
+      ) ||
       (first?.schemaVersion !== undefined && first.schemaVersion !== 1)
     )
       fail('MAINTENANCE_JOURNAL_UNPROVEN');
@@ -1098,6 +1181,19 @@ function firstInterruptionProjection(first, input, raw, now) {
     fail('MAINTENANCE_JOURNAL_UNPROVEN');
   if (!raw) return undefined; // Early binding check before gathering external observations.
   const { host, lastHost, fence } = raw;
+  for (const value of [host, lastHost]) {
+    if (
+      value?.riskDigest !== first.riskDigest ||
+      !value.legacyWork ||
+      Object.keys(value.legacyWork).length !== 2
+    )
+      fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+    for (const observation of [value.legacyWork.before, value.legacyWork.after]) {
+      validateLegacyWorkBoundary({ observation, approval: first, phase: stage, nowMs: now });
+      if (!same(value.externalWork, observation.knownExternalWork))
+        fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+    }
+  }
   if (
     ![host, lastHost].every(
       (value) =>
@@ -1318,17 +1414,18 @@ export async function collectCutoverEvidence(input, io) {
     .filter((row) => row.state === 'unpaid-valid')
     .map((row) => row.orderRef)
     .sort();
+  const legacyInterruption = firstInterruptionProjection(
+    firstCutover,
+    input,
+    { host, lastHost, fence },
+    now,
+  );
   const report = {
     schemaVersion: firstCutover?.schemaVersion === 2 ? 2 : 1,
     ...(firstCutover?.schemaVersion === 2
       ? {
           kind: 'first-cutover',
-          legacyInterruption: firstInterruptionProjection(
-            firstCutover,
-            input,
-            { host, lastHost, fence },
-            now,
-          ),
+          legacyInterruption,
         }
       : {}),
     ...binding,
@@ -1415,6 +1512,14 @@ async function readPersistedCutoverWork(db) {
       'tasks',
       'status',
       "status NOT IN ('completed','partial_success','failed','cancelled','paused','awaiting_user')",
+    ],
+    // Step effects have their own durable state. A terminal/paused parent is
+    // not proof that an executing child effect finished. Dormant/confirmation
+    // steps are not automatic dispatch; unknown step states remain blocking.
+    [
+      'task_steps',
+      'status',
+      "status NOT IN ('completed','partial_success','failed','cancelled','skipped','pending','awaiting_user')",
     ],
     ['scheduled_tasks', 'status', "status NOT IN ('active','paused','completed','failed')"],
     [

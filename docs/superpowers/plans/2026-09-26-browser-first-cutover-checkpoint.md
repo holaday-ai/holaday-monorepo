@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 4.R2续跑：中断分支已接到真实停止；现场事实与完整切换仍未完
+
+承接`865b81ce`，原Task4 BASE844c2ced不变。新增实际接线：site→host→原停止/注册删除/备份前检查共同消费带类型的未知观察及持锁journal回执，停止前后均核查持久工作；不把未知转成0。原ingress/inventory允许中断意图阶段但不将意图当停止结果；报告保留完整前后观察，普通报告拒绝夹带风险字段。新候选真实boot在原candidate_started意图内单次原子绑定后才能进入readiness，风险记录不丢。调度器明确要求v2窗口，旧版/未指定窗口不能靠adapter返回中断分支。
+
+恢复来源按现有源码审阅：application-main受控启动跳过旧启动恢复，task queue是新建内存队列，持久化落在TaskRepository；ws重连、task_steps与planned runner的恢复入口仍独立存在。发现父任务完成/暂停不能证明执行中子步骤已结束，原只读工作范围补入task_steps（共13表），不改任何历史状态。真实隔离MySQL8先RED（漏执行子步骤）再GREEN；覆盖已结束父记录、独立子记录、未知/NULL、过期租约、截断和缺表拒绝。日志`/tmp/holaday-r2-replay-mysql-{red,green}.log`，退出1/0；临时数据库及专用容器/网络已清理，既有MySQL/Redis未动。
+
+原物理夹具增加中断模式，在已有隔离Linux镜像完成真实gateway session、root保护日志、启动文件、PM2单对象与pidfd停止；无关进程仍存活，PM2重启只恢复无关项，中断风险/回执保留。`/tmp/holaday-r2-physical-interruption-final.log`退出0。入口、业务/恢复来源/capability观察和另一主机是合成数据，不能写成双机现场停止或支付恢复通过。首次启动把观察器置为PID1而被身份校验拒绝，改容器私有`--init`后通过，未放宽产品限制；容器均自动移除。
+
+最终本机browser **987/987**、实际LinuxNode22/UID998十组 **569/569**，均退出0、0跳过；日志`/tmp/holaday-r2-browser-final2.log`、`/tmp/holaday-r2-linux-final.log`。版本混用反例RED→GREEN，transition+host114/114。最初Mac21项socket EPERM是沙箱限制；获本地测试权限后只剩旧断言12表（实际13表），同步数量并明确断言task_steps查询后最终全绿。20个MJS Biome和diff-check通过。原ops **120/59/16/836 + Python12**全部通过、0跳过、退出0，`/tmp/holaday-r2-ops.log`；未重跑已完成的应用8602项。所有本轮测试进程已退出。
+
+**下一步精确范围：** 继续原4.R2的受保护现场`facts.observeWork`及实际恢复来源摘要/pendingReplay组合（目前现场仍无默认适配器，不能填合成0），再接原6.R3完整成功/故障/不重放演练和Task4–6剩余现场工具闭包/单次入口、真实停写备份与Mac恢复、非PayPal恢复证据、整分支审查。本轮不能标R2/Task4/大项完成，CLI execute仍关闭、自动化PAUSED。无生产SSH/停机/支付/PayPal操作，无push/PR/合并/部署；原缓存和无关内容保留。原计划差异已批准，不重复询问风险/计划，不重建已完成模块。
+
 ### 2026-09-28 差异计划已批准：4.R1风险证据链已验证，继续4.R2
 
 用户对`834022c7`回复“继续”，已开始原工作树串行实施，不再等待计划确认。审批v2→原持锁journal→采集/发布→索引/context→readiness首次专用命令已接入：风险摘要固定绑定原五字段、旧源、窗口、责任人与窄范围批准；中断观察必须实际写盘才能进入停止意图；备份、seed和新boot保留残余风险。普通/v1路径不接受此例外。尚未接完4.R2实际停止分支，不是可执行现场发布。

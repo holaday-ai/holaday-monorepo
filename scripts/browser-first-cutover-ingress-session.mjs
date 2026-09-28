@@ -4,6 +4,7 @@ import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import { cutoverLegacyInterruptionRisk } from './browser-cutover-evidence.mjs';
 import {
   createFirstCutoverIngressLifecycle,
   readFirstCutoverApproval,
@@ -1005,6 +1006,11 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
       if (!isDeepStrictEqual(await journal.assertOwnership(), args.binding)) reject();
       const record = await journal.readFirstCutoverEffects();
       if (
+        record.phase === 'legacy_interruption_accepted' &&
+        (record.schemaVersion !== 2 || record.riskDigest !== cutoverLegacyInterruptionRisk(record))
+      )
+        reject();
+      if (
         !bindingKeys.every((k) => record?.[k] === args.binding[k]) ||
         !hash(record.recordDigest) ||
         (revision !== undefined && revision !== record.recordDigest) ||
@@ -1216,8 +1222,10 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
         run('orders', ['orders_fenced'], () => fence('fenceOrders', 'orders'), true),
       fenceAll: () => run('all', ['all_fenced'], () => fence('fenceAll', 'all-writers'), true),
       verifyOrders: () =>
-        run('verify-orders', ['orders_fenced', 'legacy_settled', 'producers_stopped'], () =>
-          fence('verifyOrders', 'orders'),
+        run(
+          'verify-orders',
+          ['orders_fenced', 'legacy_settled', 'legacy_interruption_accepted', 'producers_stopped'],
+          () => fence('verifyOrders', 'orders'),
         ),
       verifyFence: () =>
         run(

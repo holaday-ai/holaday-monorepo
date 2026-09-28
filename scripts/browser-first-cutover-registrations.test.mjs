@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { cutoverLegacyInterruptionRisk } from './browser-cutover-evidence.mjs';
 import * as registrations from './browser-first-cutover-registrations.mjs';
 import { captureLegacyRegistrations } from './browser-first-cutover-runtime.mjs';
 
@@ -131,6 +132,76 @@ async function fixture(t) {
   };
 }
 
+test('registration removal keeps interrupted work tagged and requires the original owned receipt', async (t) => {
+  for (const missing of [false, true]) {
+    const f = await fixture(t);
+    const record = {
+      ...binding,
+      schemaVersion: 2,
+      kind: 'first-cutover',
+      candidate: 'b'.repeat(40),
+      configDigest: 'c'.repeat(64),
+      migrationDigest: 'd'.repeat(64),
+      legacyDigest: 'e'.repeat(64),
+      maintenanceEndsAtMs: 20000,
+      reconcileByMs: 30000,
+      operatorRef: 'qa-operator',
+      legacyInterruption: {
+        mode: 'controlled-interruption',
+        scope: 'legacy-non-payment-memory',
+        approvalRef: 'legacy-interruption-20260928',
+        capabilityDigest: '7'.repeat(64),
+        observeUntilMs: 18000,
+        noAutomaticReplay: true,
+      },
+      phase: 'producers_stopped',
+      recordDigest: '6'.repeat(64),
+    };
+    record.riskDigest = cutoverLegacyInterruptionRisk(record);
+    if (!missing)
+      record.interruptionObservation = {
+        riskDigest: record.riskDigest,
+        sourceDigest: '8'.repeat(64),
+        fenceDigest: '9'.repeat(64),
+        observedAtMs: 999,
+      };
+    f.io.readFirstCutoverEffects = async () => structuredClone(record);
+    const base = f.io.verifyFence;
+    f.io.verifyFence = async () => {
+      const work = {
+        schemaVersion: 2,
+        inventoryDigest: binding.inventoryDigest,
+        observedAtMs: f.io.now(),
+        unsettledWork: 0,
+        unknownWriters: 0,
+        knownExternalWork: [],
+        activeRequests: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+        externalWork: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+        capabilityDigest: '7'.repeat(64),
+        replaySourcesDigest: '8'.repeat(64),
+        pendingReplay: 0,
+      };
+      return {
+        ...(await base()),
+        activeRequests: work.activeRequests,
+        externalWork: work.externalWork,
+        riskDigest: record.riskDigest,
+        legacyWork: { before: work, after: structuredClone(work) },
+      };
+    };
+    if (missing) {
+      await assert.rejects(
+        registrations.removeLegacyRegistrations(f.input, f.io, f.system),
+        /CUTOVER_/,
+      );
+      assert.equal(f.commands.length, 0);
+    } else {
+      const result = await registrations.removeLegacyRegistrations(f.input, f.io, f.system);
+      assert.deepEqual(result.removed, [{ pmId: 5, name: 'holaday-files-cron' }]);
+      assert.equal(f.commands.length, 1);
+    }
+  }
+});
 test('exact stopped cron registration is archived privately and removed without global PM2 operations', async (t) => {
   const f = await fixture(t);
   assert.equal(typeof registrations.removeLegacyRegistrations, 'function');

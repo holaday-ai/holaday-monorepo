@@ -7,6 +7,7 @@ import { isDeepStrictEqual as equal, promisify } from 'node:util';
 import {
   captureLegacyRegistrations,
   createLegacyRuntimeEffects,
+  validateOwnedLegacyFence,
 } from './browser-first-cutover-runtime.mjs';
 import { removeSavedStartupEntries } from './browser-first-cutover-startup.mjs';
 export { cutoverRegistrationConfigDigest as registrationConfigDigest } from './browser-cutover-evidence.mjs';
@@ -89,6 +90,11 @@ async function gatewayContext(input, io, system, phase) {
   const verifyFence = async () => {
     await guard();
     const fence = await io.verifyFence();
+    const interrupted = await validateOwnedLegacyFence(fence, {
+      now: io.now,
+      assertJournalOwnership: () => io.journal.assertOwnership(),
+      readFirstCutoverEffects: () => io.journal.readFirstCutoverEffects(),
+    });
     const now = io.now();
     if (
       fence?.inventoryDigest !== binding.inventoryDigest ||
@@ -97,9 +103,10 @@ async function gatewayContext(input, io, system, phase) {
       fence.observedAtMs < 0 ||
       fence.observedAtMs > now ||
       now - fence.observedAtMs > 60000 ||
-      ['unsettledWork', 'externalWork', 'activeRequests', 'unknownWriters'].some(
-        (k) => fence[k] !== 0,
-      ) ||
+      (interrupted
+        ? ['unsettledWork', 'unknownWriters']
+        : ['unsettledWork', 'externalWork', 'activeRequests', 'unknownWriters']
+      ).some((k) => fence[k] !== 0) ||
       (phase === 'stopped' && fence.producersRunning !== 0)
     )
       fail();
@@ -220,6 +227,7 @@ export async function retireLocalFirstCutoverGateways(input, io, system = {}) {
       assertOwnership: c.assertOwnership,
       readInventory: readRegistered,
       verifyFence: c.verifyFence,
+      readFirstCutoverEffects: () => io.journal.readFirstCutoverEffects(),
       persist: async (e) => {
         await c.guard();
         await io.journal.recordRegistrationEvent({ ...e, host: 'aliyun' });
@@ -233,6 +241,7 @@ export async function retireLocalFirstCutoverGateways(input, io, system = {}) {
       {
         now: io.now,
         assertJournalOwnership: c.assertOwnership,
+        readFirstCutoverEffects: () => io.journal.readFirstCutoverEffects(),
         verifyFence: c.verifyFence,
         readInventory: async () => {
           await c.guard();
@@ -351,6 +360,11 @@ export async function retireLocalFirstCutoverProducers(input, io, system = {}) {
   )
     fail();
   const fence = await io.verifyFence();
+  const interrupted = await validateOwnedLegacyFence(fence, {
+    now: io.now,
+    assertJournalOwnership: () => io.journal.assertOwnership(),
+    readFirstCutoverEffects: () => io.journal.readFirstCutoverEffects(),
+  });
   const now = io.now();
   if (
     fence?.inventoryDigest !== binding.inventoryDigest ||
@@ -359,9 +373,10 @@ export async function retireLocalFirstCutoverProducers(input, io, system = {}) {
     fence.observedAtMs < 0 ||
     fence.observedAtMs > now ||
     now - fence.observedAtMs > 60000 ||
-    ['unsettledWork', 'externalWork', 'activeRequests', 'unknownWriters'].some(
-      (k) => fence[k] !== 0,
-    ) ||
+    (interrupted
+      ? ['unsettledWork', 'unknownWriters']
+      : ['unsettledWork', 'externalWork', 'activeRequests', 'unknownWriters']
+    ).some((k) => fence[k] !== 0) ||
     fence.producersRunning !== inventory.processes.length ||
     !equal(fence.runningProducers, inventory.processes) ||
     !equal(
@@ -403,6 +418,7 @@ export async function retireLocalFirstCutoverProducers(input, io, system = {}) {
       assertOwnership,
       readInventory: read,
       verifyFence: io.verifyFence,
+      readFirstCutoverEffects: () => io.journal.readFirstCutoverEffects(),
       persist: async (e) => {
         await guard();
         await io.journal.recordRegistrationEvent({ ...e, host: 'vultr' });
@@ -590,14 +606,19 @@ export async function removeLegacyRegistrations(input, io, system = {}) {
       )
         fail();
       const fence = await io.verifyFence();
+      const interrupted = await validateOwnedLegacyFence(fence, {
+        now: io.now,
+        assertJournalOwnership: io.assertOwnership,
+        readFirstCutoverEffects: io.readFirstCutoverEffects,
+      });
       if (
         fence?.inventoryDigest !== c.inventoryDigest ||
         !Number.isSafeInteger(fence.observedAtMs) ||
         fence.observedAtMs > io.now() ||
         io.now() - fence.observedAtMs > 60000 ||
         fence.unsettledWork !== 0 ||
-        fence.externalWork !== 0 ||
-        fence.activeRequests !== 0 ||
+        (!interrupted && fence.externalWork !== 0) ||
+        (!interrupted && fence.activeRequests !== 0) ||
         fence.unknownWriters !== 0
       )
         fail();

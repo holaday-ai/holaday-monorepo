@@ -4,9 +4,95 @@ import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import {
+  cutoverLegacyInterruptionRisk,
+  validateLegacyWorkBoundary as validateWork,
+} from './browser-cutover-evidence.mjs';
 
 const hash = (x) => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
+export function validateLegacyWorkBoundary(input) {
+  try {
+    return validateWork(input);
+  } catch {
+    fail();
+  }
+}
 const producerReceipts = new WeakMap();
+/** A tagged observation is usable for stopping only under the live owned first
+ * journal's durable receipt. Never normalize unknown requests into zero. */
+export async function validateOwnedLegacyFence(fence, io) {
+  const binding = await io.assertJournalOwnership();
+  const record = await io.readFirstCutoverEffects?.();
+  if (record?.schemaVersion !== 2) {
+    if (
+      fence?.riskDigest !== undefined ||
+      fence?.legacyWork !== undefined ||
+      record?.riskDigest !== undefined ||
+      record?.legacyInterruption !== undefined
+    )
+      fail();
+    return false;
+  }
+  const riskDigest = cutoverLegacyInterruptionRisk(record);
+  const receipt = record.interruptionObservation;
+  const orders = fence?.stage === 'orders';
+  if (
+    !binding ||
+    Object.keys(binding).some((key) => record[key] !== binding[key]) ||
+    binding.inventoryDigest !== record.inventoryDigest ||
+    fence?.inventoryDigest !== record.inventoryDigest ||
+    record.riskDigest !== riskDigest ||
+    fence.riskDigest !== riskDigest ||
+    !hash(record.recordDigest) ||
+    record.failureObservation !== undefined ||
+    !(
+      orders
+        ? ['producers_stopped']
+        : [
+            'all_fenced',
+            'stopped',
+            'backup_verified',
+            'migration_started',
+            'candidate_started',
+            'verified',
+          ]
+    ).includes(record.phase) ||
+    (!orders && fence.stage !== 'all-writers') ||
+    !receipt ||
+    Object.keys(receipt).length !== 4 ||
+    receipt.riskDigest !== riskDigest ||
+    !hash(receipt.sourceDigest) ||
+    !hash(receipt.fenceDigest) ||
+    !Number.isSafeInteger(receipt.observedAtMs) ||
+    receipt.observedAtMs < 0 ||
+    receipt.observedAtMs > record.legacyInterruption.observeUntilMs ||
+    receipt.observedAtMs > io.now() ||
+    !fence.legacyWork ||
+    Object.keys(fence.legacyWork).length !== 2 ||
+    !Number.isSafeInteger(fence.observedAtMs) ||
+    fence.observedAtMs < 0 ||
+    fence.observedAtMs > io.now() ||
+    io.now() - fence.observedAtMs > 60000
+  )
+    fail();
+  for (const observation of [fence.legacyWork.before, fence.legacyWork.after]) {
+    validateLegacyWorkBoundary({
+      observation,
+      approval: record,
+      phase: orders ? 'before-stop' : 'after-stop',
+      nowMs: io.now(),
+    });
+  }
+  if (
+    !['unsettledWork', 'unknownWriters', 'activeRequests', 'externalWork'].every((key) =>
+      isDeepStrictEqual(fence[key], fence.legacyWork.before[key]),
+    ) ||
+    !isDeepStrictEqual(record, await io.readFirstCutoverEffects()) ||
+    !isDeepStrictEqual(binding, await io.assertJournalOwnership())
+  )
+    fail();
+  return true;
+}
 function producerScope(captured) {
   if (
     !captured?.targets?.length ||
@@ -15,7 +101,7 @@ function producerScope(captured) {
     fail();
   for (const target of captured.targets) checkTarget(target);
 }
-function verifyProducerFence(fence, snapshot, captured, now) {
+function verifyProducerFence(fence, snapshot, captured, now, interrupted = false) {
   producerScope(captured);
   checkSnapshot(snapshot, captured, now);
   if (
@@ -25,8 +111,8 @@ function verifyProducerFence(fence, snapshot, captured, now) {
     fence.observedAtMs > now ||
     now - fence.observedAtMs > 60000 ||
     fence.unsettledWork !== 0 ||
-    fence.externalWork !== 0 ||
-    fence.activeRequests !== 0 ||
+    (!interrupted && fence.externalWork !== 0) ||
+    (!interrupted && fence.activeRequests !== 0) ||
     fence.unknownWriters !== 0 ||
     !Array.isArray(fence.runningProducers) ||
     fence.producersRunning !== fence.runningProducers.length ||
@@ -337,15 +423,16 @@ async function retireCapturedRuntime({ captured, deadlineMs, producerReceipt }, 
     if (now < start || now >= deadline) throw new Error('CUTOVER_STOP_TIMEOUT');
     if ((await io.assertJournalOwnership()).inventoryDigest !== c.inventoryDigest) fail();
     const fence = await io.verifyFence();
+    const interrupted = await validateOwnedLegacyFence(fence, io);
     if (producers) {
-      verifyProducerFence(fence, await io.readInventory(), c, io.now());
+      verifyProducerFence(fence, await io.readInventory(), c, io.now(), interrupted);
       return;
     }
     if (
       fence?.inventoryDigest !== c.inventoryDigest ||
       fence.stage !== 'all-writers' ||
       fence.unsettledWork !== 0 ||
-      fence.externalWork !== 0 ||
+      (!interrupted && fence.externalWork !== 0) ||
       fence.producersRunning !== 0
     )
       fail();
@@ -489,11 +576,12 @@ export async function initializeFirstMaintenanceState({ candidate, attempt, stop
       )
         fail();
       const fence = await io.verifyFence();
+      const interrupted = await validateOwnedLegacyFence(fence, io);
       if (
         fence?.inventoryDigest !== scope ||
         fence.stage !== 'all-writers' ||
         fence.unsettledWork !== 0 ||
-        fence.externalWork !== 0 ||
+        (!interrupted && fence.externalWork !== 0) ||
         fence.producersRunning !== 0
       )
         fail();
@@ -598,6 +686,7 @@ function runtimeEffects(observation, system, producerCapture) {
     checkTarget(p);
     const binding = await observation.assertJournalOwnership();
     const fence = await observation.verifyFence();
+    const interrupted = await validateOwnedLegacyFence(fence, observation);
     const snapshot = await observation.readInventory();
     if (producerCapture) {
       if (
@@ -605,13 +694,13 @@ function runtimeEffects(observation, system, producerCapture) {
         !producerCapture.targets.some((t) => sameProcess(t, p))
       )
         fail();
-      verifyProducerFence(fence, snapshot, producerCapture, observation.now());
+      verifyProducerFence(fence, snapshot, producerCapture, observation.now(), interrupted);
     } else if (
       !hash(binding.inventoryDigest) ||
       fence?.inventoryDigest !== binding.inventoryDigest ||
       fence.stage !== 'all-writers' ||
       fence.unsettledWork !== 0 ||
-      fence.externalWork !== 0 ||
+      (!interrupted && fence.externalWork !== 0) ||
       fence.producersRunning !== 0
     )
       fail();

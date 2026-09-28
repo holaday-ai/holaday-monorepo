@@ -39,6 +39,7 @@ const identity = (await connection.query('SELECT @@server_uuid AS identity'))[0]
 let created = false;
 const cases = [
   ['tasks', 'status', 'completed', 'executing'],
+  ['task_steps', 'status', 'completed', 'executing'],
   ['scheduled_tasks', 'status', 'active', 'running'],
   ['planned_task_runs', 'status', 'completed', 'dispatching'],
   ['batch_tasks', 'status', 'completed', 'running'],
@@ -88,6 +89,7 @@ try {
   }
   for (const table of [
     'tasks',
+    'task_steps',
     'planned_task_runs',
     'planned_task_run_items',
     'batch_task_items',
@@ -136,6 +138,7 @@ try {
   }
   for (const table of [
     'exploration_runs',
+    'task_steps',
     'video_edit_render_attempts',
     'planned_task_runs',
     'batch_tasks',
@@ -149,6 +152,13 @@ try {
   await connection.query('UPDATE exploration_runs SET status = NULL WHERE id = 1');
   await assert.rejects(readCutoverWorkScope(connection), /MAINTENANCE_WORK_SCOPE_UNPROVEN/);
   await connection.query("UPDATE exploration_runs SET status = 'completed' WHERE id = 1");
+  for (const status of ['pending', 'awaiting_user', 'skipped']) {
+    await connection.query('UPDATE task_steps SET status = ? WHERE id = 1', [status]);
+    assert.deepEqual((await readCutoverWorkScope(connection)).unsettled, []);
+  }
+  await connection.query('UPDATE task_steps SET status = NULL WHERE id = 1');
+  await assert.rejects(readCutoverWorkScope(connection), /MAINTENANCE_WORK_SCOPE_UNPROVEN/);
+  await connection.query("UPDATE task_steps SET status = 'completed' WHERE id = 1");
   for (let id = 2; id <= 101; id++)
     await connection.query("INSERT INTO tasks (id,status) VALUES (?, 'executing')", [id]);
   await assert.rejects(readCutoverWorkScope(connection), /MAINTENANCE_WORK_SCOPE_UNPROVEN/);
@@ -254,7 +264,7 @@ try {
   await connection.query('DROP TABLE video_edit_render_attempts');
   await assert.rejects(readCutoverWorkScope(connection), /MAINTENANCE_WORK_SCOPE_UNPROVEN/);
   console.log(
-    'PASS real MySQL: 12 work tables, dispatching, unchanged reads, expired leases, unknown/NULL states, truncation and missing-table refusal',
+    'PASS real MySQL: 13 work tables including independent task steps, dispatching, unchanged reads, expired leases, unknown/NULL states, truncation and missing-table refusal',
   );
 } finally {
   try {

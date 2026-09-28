@@ -10,7 +10,7 @@ import * as siteModule from './browser-first-cutover-site.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 import { finishStoppedRelease } from './browser-maintenance-release-tail.mjs';
 
-async function fixture(t, extraInventory = {}) {
+async function fixture(t, extraInventory = {}, interrupted = false) {
   const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'cutover-site-')));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const inventory = {
@@ -32,10 +32,23 @@ async function fixture(t, extraInventory = {}) {
     maintenanceEndsAtMs: 9000,
     reconcileByMs: 12000,
     operatorRef: 'synthetic-qa',
+    ...(interrupted
+      ? {
+          schemaVersion: 2,
+          kind: 'first-cutover',
+          legacyInterruption: {
+            mode: 'controlled-interruption',
+            scope: 'legacy-non-payment-memory',
+            approvalRef: 'legacy-interruption-20260928',
+            capabilityDigest: '7'.repeat(64),
+            observeUntilMs: 8000,
+            noAutomaticReplay: true,
+          },
+        }
+      : {}),
   };
   const journal = await acquireReleaseJournal(root, {
-    ...binding,
-    legacyDigest: approval.legacyDigest,
+    ...approval,
     kind: 'first-cutover',
   });
   t.after(() => journal.close());
@@ -66,6 +79,15 @@ async function fixture(t, extraInventory = {}) {
     foreign: false,
     failedPrepare: false,
     failedClose: false,
+    legacyWork: {
+      schemaVersion: 2,
+      knownExternalWork: [],
+      activeRequests: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+      externalWork: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+      capabilityDigest: '7'.repeat(64),
+      replaySourcesDigest: '8'.repeat(64),
+      pendingReplay: 0,
+    },
   };
   const receipt = (host, role, pid) => ({ binding, host, role, process: { pid } });
   const classified = () => ({
@@ -119,6 +141,7 @@ async function fixture(t, extraInventory = {}) {
         externalWork: 0,
         activeRequests: 0,
         unknownWriters: 0,
+        ...(interrupted ? structuredClone(state.legacyWork) : {}),
       }),
       verifyOpenedIdentity: async () => {
         throw new Error('legacy callback must not authorize restoration');
@@ -219,6 +242,94 @@ async function fixture(t, extraInventory = {}) {
     observer: () => activeObserver,
   };
 }
+
+test('site prepare evidence preserves both unknown observations rather than only an empty external list', async (t) => {
+  const f = await fixture(t, {}, true);
+  const site = f.make();
+  await site.lifecycle.attach(f.context);
+  const record = await f.journal.readFirstCutoverEffects();
+  const input = {
+    binding: f.binding,
+    stage: 'prepare',
+    kind: 'first-cutover',
+    riskDigest: record.riskDigest,
+    window: {
+      maintenanceEndsAtMs: f.approval.maintenanceEndsAtMs,
+      reconcileByMs: f.approval.reconcileByMs,
+      operatorRef: f.approval.operatorRef,
+    },
+  };
+  const evidence = await site.evidence.readHostInventory(input);
+  assert.deepEqual(evidence.externalWork, []);
+  assert.deepEqual(evidence.legacyWork.before, await f.io.facts.observeWork());
+  assert.deepEqual(evidence.legacyWork.after, evidence.legacyWork.before);
+  assert.equal(evidence.riskDigest, record.riskDigest);
+  evidence.legacyWork.before.pendingReplay = 1;
+  assert.equal((await site.evidence.readHostInventory(input)).legacyWork.before.pendingReplay, 0);
+  await site.lifecycle.detach(f.context);
+});
+test('site keeps tagged unknown work and requires a durable receipt before producer stop', async (t) => {
+  const f = await fixture(t, {}, true);
+  const site = f.make();
+  await site.lifecycle.attach(f.context);
+  const detail = { candidate: f.binding.candidate };
+  for (const phase of ['prepared', 'orders_fenced']) await f.journal.persist(phase, detail);
+  await site.lifecycle.fenceOrders(f.context);
+  const disposition = await site.lifecycle.readLegacyDisposition(f.context);
+  assert.equal(disposition.mode, 'controlled-interruption');
+  await f.journal.persist('legacy_interruption_accepted', detail);
+  await assert.rejects(f.journal.persist('producers_stopped', detail), /UNPROVEN/);
+  await site.lifecycle.acceptLegacyInterruption(f.context);
+  const receipt = (await f.journal.readFirstCutoverEffects()).interruptionObservation;
+  assert.equal(receipt.riskDigest, disposition.riskDigest);
+  await f.journal.persist('producers_stopped', detail);
+  await site.lifecycle.stopProducers(f.context);
+  const proof = await site.lifecycle.verifyFence(f.context);
+  assert.equal(proof.externalWork.kind, 'unobservable');
+  assert.equal(proof.activeRequests.kind, 'unobservable');
+  assert.equal(proof.legacyWork.before.pendingReplay, 0);
+  assert.equal(f.events.includes('settled'), false);
+  assert.equal(f.events.filter((event) => event === 'stop-producers').length, 1);
+  assert.deepEqual((await f.journal.readFirstCutoverEffects()).interruptionObservation, receipt);
+  await site.lifecycle.detach(f.context);
+});
+test('site interruption refuses known work, source failure and new replay after stop', async (t) => {
+  for (const fault of ['known', 'busy', 'foreign', 'read-error', 'after-replay']) {
+    const f = await fixture(t, {}, true);
+    if (fault === 'known') f.state.legacyWork.knownExternalWork = ['specific-unresolved-action'];
+    if (fault === 'busy') f.state.busy = 1;
+    if (fault === 'foreign') f.state.foreign = true;
+    if (fault === 'read-error')
+      f.io.facts.observeWork = async () => {
+        throw new Error('cannot observe');
+      };
+    if (fault === 'after-replay') {
+      const original = f.io.retireProducers;
+      f.io.retireProducers = async (...args) => {
+        await original(...args);
+        f.state.legacyWork.pendingReplay = 1;
+      };
+    }
+    const site = f.make();
+    await site.lifecycle.attach(f.context);
+    const detail = { candidate: f.binding.candidate };
+    for (const phase of ['prepared', 'orders_fenced']) await f.journal.persist(phase, detail);
+    await site.lifecycle.fenceOrders(f.context);
+    await f.journal.persist('legacy_interruption_accepted', detail);
+    if (fault === 'after-replay') {
+      await site.lifecycle.acceptLegacyInterruption(f.context);
+      await f.journal.persist('producers_stopped', detail);
+      await assert.rejects(site.lifecycle.stopProducers(f.context), /UNPROVEN/);
+      assert.equal(f.events.filter((event) => event === 'stop-producers').length, 1);
+      assert.equal(f.events.includes('prepare-gateway'), false);
+    } else {
+      await assert.rejects(site.lifecycle.acceptLegacyInterruption(f.context), /UNPROVEN/);
+      assert.equal(f.events.includes('stop-producers'), false);
+      assert.equal((await f.journal.readFirstCutoverEffects()).interruptionObservation, undefined);
+    }
+    await site.lifecycle.detach(f.context);
+  }
+});
 
 async function candidateFixture(t, customize = async () => {}) {
   const f = await fixture(t);
