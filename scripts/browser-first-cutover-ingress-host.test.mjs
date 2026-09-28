@@ -158,6 +158,23 @@ async function fixture(t) {
   };
 }
 
+test('orders can be verified again before producer stop without file mutation or reload', async (t) => {
+  const f = await fixture(t);
+  const ingress = await f.start();
+  await f.advance('orders_fenced');
+  await ingress.fenceOrders();
+  const receipt = await ingress.readFenceReceipt();
+  const effects = [...f.effects];
+  await f.advance('producers_stopped');
+  f.setTime(1100);
+  assert.equal(typeof ingress.verifyOrders, 'function');
+  assert.equal((await ingress.verifyOrders()).observedAtMs, 1100);
+  assert.deepEqual(await ingress.readFenceReceipt(), receipt);
+  assert.deepEqual(f.effects, effects);
+  await f.advance('all_fenced');
+  await assert.rejects(ingress.verifyOrders(), /UNPROVEN/);
+});
+
 test('owned journal drives real fence files through both stages and same-instance restoration', async (t) => {
   const f = await fixture(t);
   const ingress = await f.start();

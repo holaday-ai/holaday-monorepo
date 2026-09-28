@@ -776,6 +776,53 @@ test('a delete intent alone cannot explain a missing registration or process', a
   await assert.rejects(observer.read(), /UNPROVEN/);
 });
 
+test('fence progress derives the in-flight host from the owned journal without issuing completion proof', async (t) => {
+  for (const host of ['vultr', 'aliyun'])
+    await t.test(host, async (t) => {
+      const r = await retirementFixture(t);
+      if (host === 'aliyun') {
+        await r.journal.persist('all_fenced', { candidate: r.binding.candidate });
+        await r.journal.persist('stopped', { candidate: r.binding.candidate });
+      }
+      await r.remove(host, false);
+      const value = await r.observer.readFenceProgress();
+      assert.equal(value.purpose, 'fence-progress');
+      assert.equal(value.pair.hosts.length, 2);
+      assert.deepEqual(value.pair.hosts.find((h) => h.host === host).registered.processes, []);
+      await assert.rejects(r.observer.read(), /UNPROVEN/);
+      r.f.pair.hosts.find((h) => h.host === host).snapshot.cron = 'unreviewed writer';
+      await assert.rejects(r.observer.readFenceProgress(), /UNPROVEN/);
+    });
+});
+
+test('fence progress observes pending unmanaged retirement but cannot erase its unfinished intent', async (t) => {
+  const r = await retirementFixture(t, withUnmanagedGateway);
+  await r.journal.persist('all_fenced', { candidate: r.binding.candidate });
+  await r.journal.persist('stopped', { candidate: r.binding.candidate });
+  const s = r.f.pair.hosts.find((h) => h.host === 'aliyun').snapshot;
+  const p = s.processes.find((p) => p.pid === 71);
+  await r.journal.recordUnmanagedEvent({
+    attempt: r.binding.attempt,
+    inventoryDigest: r.binding.inventoryDigest,
+    host: 'aliyun',
+    targets: [{ pid: 71, identityDigest: hash(p) }],
+    phase: 'unmanaged-stop-intent',
+  });
+  assert.equal(
+    (await r.observer.readFenceProgress()).pair.hosts.find((h) => h.host === 'aliyun').unmanaged
+      .processes.length,
+    1,
+  );
+  s.processes = s.processes.filter((p) => p.pid !== 71);
+  s.listeners = '';
+  assert.deepEqual(
+    (await r.observer.readFenceProgress()).pair.hosts.find((h) => h.host === 'aliyun').unmanaged
+      .processes,
+    [],
+  );
+  await assert.rejects(r.observer.read(), /UNPROVEN/);
+});
+
 test('registration progress can observe physical deletion before its completion event without issuing completion proof', async (t) => {
   const r = await retirementFixture(t);
   const { base, row } = await r.remove('vultr', false);

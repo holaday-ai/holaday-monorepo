@@ -123,6 +123,11 @@ export async function readFirstCutoverGatewaySite(options, overrides = {}) {
   return readProtectedSite(options, overrides, 'gateway');
 }
 
+export async function readFirstCutoverExecutionSiteScope(options, overrides = {}) {
+  const value = await readProtectedSite(options, overrides, 'execution');
+  return { ...value.site, binding: value.binding, maintenanceEndsAtMs: value.maintenanceEndsAtMs };
+}
+
 async function readProtectedSite(options, overrides, kind) {
   const io = {
     fs,
@@ -134,7 +139,7 @@ async function readProtectedSite(options, overrides, kind) {
   };
   const folder = '/var/lib/holaday-deploy/maintenance';
   const path = `${folder}/first-cutover-${kind}-approved.json`;
-  const scopeKey = kind === 'ingress' ? 'ingress' : 'startupFiles';
+  const scopeKey = kind === 'execution' ? 'site' : kind === 'ingress' ? 'ingress' : 'startupFiles';
   let handle;
   try {
     if (
@@ -183,12 +188,69 @@ async function readProtectedSite(options, overrides, kind) {
     if (
       !keys(value, ['schemaVersion', 'host', 'binding', 'maintenanceEndsAtMs', scopeKey]) ||
       value.schemaVersion !== 1 ||
-      value.host !== 'aliyun' ||
+      value.host !== (kind === 'execution' ? 'vultr' : 'aliyun') ||
       !bindingKeys.every((k) => value.binding?.[k] === beforeApproval[k]) ||
       value.binding.attempt !== options.attempt ||
       value.maintenanceEndsAtMs !== beforeApproval.maintenanceEndsAtMs
     )
       fail();
+    if (kind === 'execution') {
+      const s = value.site;
+      if (
+        !keys(s, [
+          'legacyDigest',
+          'reviews',
+          'ingress',
+          'gatewaySiteDigest',
+          'producerStartupFiles',
+        ]) ||
+        s.legacyDigest !== beforeApproval.legacyDigest ||
+        !hash(s.legacyDigest) ||
+        !keys(s.reviews, ['vultr', 'aliyun']) ||
+        !hash(s.gatewaySiteDigest) ||
+        !keys(s.ingress, ['inventoryDigest', 'unknownIngress', 'files', 'remoteSiteDigest']) ||
+        s.ingress.inventoryDigest !== value.binding.inventoryDigest ||
+        !hash(s.ingress.remoteSiteDigest) ||
+        !Array.isArray(s.ingress.unknownIngress) ||
+        s.ingress.unknownIngress.length ||
+        !Array.isArray(s.ingress.files) ||
+        s.ingress.files.length !== 3 ||
+        ![
+          ['holaday', 'vultr-20260926'],
+          ['hd-app.orangebench.tech', 'aliyun-app-20260926'],
+          ['hd-pay.orangebench.tech', 'aliyun-pay-20260926'],
+        ].every(
+          ([name, profile]) =>
+            s.ingress.files.filter(
+              (f) => f?.path === `/etc/nginx/sites-available/${name}` && f.profile === profile,
+            ).length === 1,
+        ) ||
+        !Array.isArray(s.producerStartupFiles) ||
+        s.producerStartupFiles.length !== 2 ||
+        s.producerStartupFiles.some(
+          (f, i) =>
+            !keys(f, ['path', 'digest', 'remove']) ||
+            f.path !== `/root/.pm2/${i ? 'dump.pm2.bak' : 'dump.pm2'}` ||
+            !(f.digest === null || hash(f.digest)) ||
+            !Array.isArray(f.remove) ||
+            f.remove.length > 3 ||
+            (f.digest === null && f.remove.length !== 0) ||
+            new Set(f.remove.map((r) => r.name)).size !== f.remove.length ||
+            f.remove.some(
+              (r) =>
+                !keys(r, ['name', 'entryDigest']) ||
+                ![
+                  'holaday-orchestrator',
+                  'holaday-account-closure-worker',
+                  'holaday-files-cron',
+                ].includes(r.name) ||
+                !hash(r.entryDigest),
+            ),
+        ) ||
+        !s.producerStartupFiles.some((f) => f.remove.length)
+      )
+        fail();
+    }
     if (
       kind === 'ingress' &&
       (!keys(value.ingress, ['inventoryDigest', 'unknownIngress', 'files']) ||
@@ -347,6 +409,7 @@ const operationNames = [
   'fenceOrders',
   'fenceAll',
   'verifyFence',
+  'verifyOrders',
   'restoreIngress',
   'readFenceReceipt',
   'detach',
@@ -665,9 +728,11 @@ export async function connectFirstCutoverIngressSession(input, overrides = {}) {
             if (!keys(response, ['protocol', 'type', 'seq', 'value'])) fail();
             await ownership();
             const result = response.value;
-            if (['fenceOrders', 'fenceAll', 'verifyFence'].includes(name)) {
+            if (['fenceOrders', 'fenceAll', 'verifyFence', 'verifyOrders'].includes(name)) {
               const counts = ['existingSockets', 'internalWriters', 'producersRunning'];
-              const stage = name === 'fenceOrders' ? 'orders' : 'all-writers';
+              const stage = ['fenceOrders', 'verifyOrders'].includes(name)
+                ? 'orders'
+                : 'all-writers';
               const now = io.now();
               if (
                 !keys(result, ['inventoryDigest', 'stage', 'observedAtMs', ...counts]) ||
@@ -806,6 +871,7 @@ export async function connectFirstCutoverIngressSession(input, overrides = {}) {
       fenceOrders: () => run('fenceOrders'),
       fenceAll: () => run('fenceAll'),
       verifyFence: () => run('verifyFence'),
+      verifyOrders: () => run('verifyOrders'),
       restoreIngress: async (identity) => {
         if ((await run('restoreIngress', structuredClone(identity))) !== null) fail();
       },
@@ -1124,6 +1190,10 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
       fenceOrders: () =>
         run('orders', ['orders_fenced'], () => fence('fenceOrders', 'orders'), true),
       fenceAll: () => run('all', ['all_fenced'], () => fence('fenceAll', 'all-writers'), true),
+      verifyOrders: () =>
+        run('verify-orders', ['orders_fenced', 'legacy_settled', 'producers_stopped'], () =>
+          fence('verifyOrders', 'orders'),
+        ),
       verifyFence: () =>
         run(
           'verify',

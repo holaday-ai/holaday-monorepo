@@ -6,6 +6,25 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 夜间续跑：原现场生命周期接线与实体退役成功／丢确认演练
+
+承接 `dd44cb82`，Task4原BASE844c2ced不变。新增 `createFirstCutoverExecutionSite`，把原双机入口、固定网关会话、真实生产者退役及retirement observer接到**同一个原journal**。先连接两个会话再建立完整基线；运行时身份包含控制器、两接收端和两条本机SSH；工作核清、生产者停止、网关启动条目处理、全停写及网关退役沿原顺序执行，不新建另一套状态机。失败不重复动作；退出反向尝试关闭两个句柄，关闭结果不明不冒充成功。业务／writer／控制／备份事实仍为必须提供的可信读者，未补默认零值。
+
+复用既有root私密文件读取器增加固定 `first-cutover-execution-approved.json`，绑定原候选、attempt、配置、迁移、清单、legacyDigest和绝对截止；只接受三处既有nginx入口、主／备两份PM2启动文件和批准的main／worker／cron名称。现场组合已默认使用该真实文件读取器；不会从CLI接受路径或命令，也不会因为文件可读就认定业务排空。
+
+接线发现并修正两处接口缺口：
+
+1. 原入口只有全停写复查，停止生产者前无法新鲜验证“新任务关闭、回调仍通”。新增只读 `verifyOrders`，复用原围栏验证、不重载、不重复修改；穿过原本地／固定远端／双机pair。
+2. 真实Linux组合在 `stopped / registration-backup-intent` 暴露围栏回调误用严格完成观察。新增 `readFenceProgress`，仅由持有的journal阶段／事件选择原progress分类器，明确返回非完成的双机观察；严格 `read()` 和最终 `assertStopped` 要求不变。真实失败日志 `/tmp/holaday-site-physical-{red,diagnostic}.log` 保留。Vultr／Aliyun删除中及未托管停止中的missing-method RED后GREEN，未知来源仍拒绝。
+
+实体夹具复用原Linux镜像及 `browser-registration-removal-linux.mjs`：`--execution-site` 使用默认受保护文件读取、真实固定网关接收进程、原journal、真实启动文件／PM2／pidfd；准备阶段网关仍在线，退役成功后两个旧网关退出、无关PID不变、PM2重启只恢复无关应用。`--execution-site-lost-ack` 在真实删除后断开确认，保留删除记录，不重复删除、不继续向未托管网关发信号、不出具stopped证明。**另一逻辑主机、入口和业务事实仍为合成边界，不是生产双机停写或整流程验收。** 两模式退出0，日志 `/tmp/holaday-site-physical-{final,lost-ack}.log`。
+
+真实nginx／双栈／TLS／WS夹具已在orders_fenced和producers_stopped调用新复查，并验证原回执不变；两段围栏、恢复原链接／UID501与共享旧长连接保持通过。真实SSH固定入口、两类接收端／客户端身份及越权拒绝回归通过。日志 `/tmp/holaday-site-ingress-physical-final.log`、`/tmp/holaday-site-ssh-final.log`，均退出0。实际Linux八组288/288、最终浏览器及两入口847/847，均0跳过、退出0；日志 `/tmp/holaday-site-linux-final.log`、`/tmp/holaday-site-browser-complete.log`。最终ops **120/59/16/681及Python12**，0跳过、退出0，日志 `/tmp/holaday-site-ops-complete.log`；不用早期不含新scope读者的680项。十MJS的Biome、四shell语法及diff-check通过。应用全套、真实MySQL恢复和整分支独立审查本轮未重复运行。
+
+确切接续：现场生命周期已组合，但独立真实业务／连接／外部工作事实读者、readiness与控制尾段、backup实际设施仍需接上；不能只凭SQL零行／ss零连接假定排空。固定工具包安装及首次CLI `--execute` 仍未开放，需与这些读者及原host组成完整流程；保留原20模块check包和24模块网关包的职责，不把新site漏出最终执行包。然后继续真实停写备份／Mac隔离恢复／非PayPal恢复证据、全成功与故障流程和整分支审查。既有合成MySQL／61SQL／age演练已完成，不为增加通过数重做；原商户、密钥和通道不重建。
+
+原生产者实体路径最终回归退出0：实际UID998 worker退出、停止态cron移除、未托管网关pidfd退出、无关PID保持及仅无关服务回生；日志 `/tmp/holaday-site-producers-final.log`。所有测试会话已结束、一次性QA容器自动移除。无生产连接／安装／服务／数据库／支付／PayPal／密钥变更，无PR／合并／部署；Task4–6未完成，不标上线成功。原 `scripts/__pycache__/` 保留，自动化继续本线程。
+
 ### 2026-09-28 夜间续跑：控制器来源、固定检查入口与真实 Linux 身份
 
 承接 `ebf85ec1`，Task4原BASE844c2ced不变。`createFirstCutoverCoordinatorIdentity` 现在验证固定候选目录中的20个模块、root私密manifest和原NFT依赖，并逐文件核对真实Git候选对象及批准分支可达性。控制器只读取自身内核PID，不接收CLI提供的PID；完整argv/固定entry/attempt、root四UID、exe/cwd/boot/start/parent/cgroup均核对并绑定句柄生命周期。批准内容与绝对窗口不可在句柄存活期间更换，时间倒退、关闭中读取、来源漂移或失败均拒绝。分类器只增加精确`coordinator`角色，允许与两端会话/本机SSH一起作为独立执行进程；不豁免未知子进程/监听者，不删除原快照，不更改旧review或legacyDigest。

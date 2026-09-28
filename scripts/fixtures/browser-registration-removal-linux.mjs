@@ -19,6 +19,7 @@ import {
   retireLocalFirstCutoverProducers,
 } from '/source/browser-first-cutover-registrations.mjs';
 import { createLegacyRuntimeEffects } from '/source/browser-first-cutover-runtime.mjs';
+import { createFirstCutoverExecutionSite } from '/source/browser-first-cutover-site.mjs';
 import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
@@ -40,13 +41,17 @@ assert.ok(
         '--gateway-session-baseline',
         '--gateway-session-lost-ack',
         '--gateway-session-observed-executor',
+        '--execution-site',
+        '--execution-site-lost-ack',
       ].includes(process.argv[2])),
 );
 const lostAck = process.argv[2] === '--gateways-lost-ack';
-const sessionMode = process.argv[2]?.startsWith('--gateway-session');
+const siteMode = process.argv[2]?.startsWith('--execution-site');
+const siteLostAck = process.argv[2] === '--execution-site-lost-ack';
+const sessionMode = siteMode || process.argv[2]?.startsWith('--gateway-session');
 const sessionLostAck = process.argv[2] === '--gateway-session-lost-ack';
 const observeExecutor = process.argv[2] === '--gateway-session-observed-executor';
-const attachedBaseline = process.argv[2] === '--gateway-session-baseline';
+const attachedBaseline = siteMode || process.argv[2] === '--gateway-session-baseline';
 const gateways = process.argv.length === 3;
 const mainPort = gateways ? 4010 : 4001;
 const mainName = gateways ? 'holaday-cn-payment' : 'holaday-account-closure-worker';
@@ -70,6 +75,8 @@ let gateway;
 let receiver;
 let receiverCompletion;
 let client;
+let executionSite;
+let siteContext;
 try {
   await pm2(
     'start',
@@ -466,120 +473,302 @@ try {
         receiver.once('close', (code) => resolve({ code })),
       );
       const originalRecord = journal.recordRegistrationEvent.bind(journal);
-      client = await connectFirstCutoverGatewaySession(
-        {
-          binding: fullBinding,
-          maintenanceEndsAtMs: input.maintenanceEndsAtMs,
-          siteDigest: sha(siteBytes),
-        },
-        {
-          ...io,
-          journal: {
-            ...journal,
-            recordRegistrationEvent: async (event) => {
-              await originalRecord(event);
-              if (sessionLostAck && event.phase === 'registration-deleted') receiver.stdin.end();
+      const connect = () =>
+        connectFirstCutoverGatewaySession(
+          {
+            binding: fullBinding,
+            maintenanceEndsAtMs: input.maintenanceEndsAtMs,
+            siteDigest: sha(siteBytes),
+          },
+          {
+            ...io,
+            journal: {
+              ...journal,
+              recordRegistrationEvent: async (event) => {
+                await originalRecord(event);
+                if (sessionLostAck && event.phase === 'registration-deleted') receiver.stdin.end();
+              },
+            },
+            open: async () => ({
+              input: receiver.stdout,
+              output: receiver.stdin,
+              completion: receiverCompletion,
+            }),
+          },
+        );
+      if (siteMode) {
+        siteContext = { approval, binding: fullBinding, journal };
+        // One physical Aliyun host + receiver. Other host, ingress and business
+        // counts are explicitly synthetic, NOT full two-host cutover evidence.
+        const fence = (stage) => ({
+          inventoryDigest: binding.inventoryDigest,
+          stage,
+          observedAtMs: Date.now(),
+          existingSockets: 0,
+          internalWriters: 0,
+          producersRunning: 0,
+        });
+        await fs.writeFile(
+          `${directory}/first-cutover-execution-approved.json`,
+          JSON.stringify({
+            schemaVersion: 1,
+            host: 'vultr',
+            binding: fullBinding,
+            maintenanceEndsAtMs: input.maintenanceEndsAtMs,
+            site: {
+              legacyDigest: proof.legacyDigest,
+              reviews,
+              gatewaySiteDigest: sha(siteBytes),
+              ingress: {
+                inventoryDigest: binding.inventoryDigest,
+                unknownIngress: [],
+                remoteSiteDigest: sha('synthetic ingress'),
+                files: [
+                  ['holaday', 'vultr-20260926'],
+                  ['hd-app.orangebench.tech', 'aliyun-app-20260926'],
+                  ['hd-pay.orangebench.tech', 'aliyun-pay-20260926'],
+                ].map(([name, profile]) => ({
+                  path: `/etc/nginx/sites-available/${name}`,
+                  profile,
+                })),
+              },
+              producerStartupFiles: ['dump.pm2', 'dump.pm2.bak'].map((name) => ({
+                path: `/root/.pm2/${name}`,
+                digest: sha('synthetic other host'),
+                remove: [{ name: 'holaday-orchestrator', entryDigest: sha('synthetic producer') }],
+              })),
+            },
+          }),
+          { mode: 0o600 },
+        );
+        executionSite = createFirstCutoverExecutionSite(
+          { attempt: binding.attempt },
+          {
+            readCoordinatorIdentity: async () => ({ binding: fullBinding }),
+            readPair,
+            facts: {
+              observeWriters: async () => fence('orders'),
+              observeWork: async () => ({
+                inventoryDigest: binding.inventoryDigest,
+                observedAtMs: Date.now(),
+                unsettledWork: 0,
+                externalWork: 0,
+                activeRequests: 0,
+                unknownWriters: 0,
+              }),
+              settleLegacy: async () => {},
+              verifyOpenedIdentity: async () => {
+                throw Error('not exercised');
+              },
+              resumeWorker: async () => {
+                throw Error('not exercised');
+              },
+              reconcile: async () => {
+                throw Error('not exercised');
+              },
+              holdMaintenance: async () => {},
+              readBackupPlan: async () => {
+                throw Error('not exercised');
+              },
+            },
+            createIngress: async () => ({
+              verifyOrders: async () => fence('orders'),
+              verifyFence: async () => fence('all-writers'),
+              fenceOrders: async () => {},
+              fenceAll: async () => {},
+              readFenceReceipts: async () => [],
+              close: async () => {},
+            }),
+            connectGateway: async (args, deps) => {
+              client = await connectFirstCutoverGatewaySession(args, {
+                ...deps,
+                ...(siteLostAck
+                  ? {
+                      journal: {
+                        ...deps.journal,
+                        recordRegistrationEvent: async (event) => {
+                          await deps.journal.recordRegistrationEvent(event);
+                          if (event.phase === 'registration-deleted') receiver.stdin.end();
+                        },
+                      },
+                    }
+                  : {}),
+                open: async () => ({
+                  input: receiver.stdout,
+                  output: receiver.stdin,
+                  completion: receiverCompletion,
+                }),
+              });
+              return client;
+            },
+            createObserver: async (args, deps) => {
+              observer = await createFirstCutoverRetirementObserver(args, {
+                ...deps,
+                readExecutionIdentities: async () => [client.readExecutionIdentity()],
+              });
+              return observer;
+            },
+            retireProducers: async () => {
+              assert.equal(
+                (await observer.read()).hosts.find((h) => h.host === 'vultr').registered.processes
+                  .length,
+                0,
+              );
             },
           },
-          open: async () => ({
-            input: receiver.stdout,
-            output: receiver.stdin,
-            completion: receiverCompletion,
-          }),
-        },
-      );
+        );
+        await executionSite.lifecycle.attach(siteContext);
+      } else client = await connect();
     }
-    if (attachedBaseline) {
-      observer = await createObserver();
-      assert.equal((await observer.read()).unknownLaunchers.length, 0);
-      await advanceToPrepare();
-      console.log(
-        'PASS physical baseline after receiver attachment, original legacy digest unchanged',
-      );
-    }
-    if (observeExecutor) {
-      await assert.rejects(client.prepare(), /CUTOVER_GATEWAY_SESSION_UNPROVEN/);
-      assert.equal((await receiverCompletion).code, 1);
-      assert.equal((await journal.readFirstCutoverEffects()).startupEvents.length, 0);
-      assert.equal((await fetch('http://127.0.0.1:4010')).status, 200);
-      assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
-      for (const file of files) assert.equal(sha(await fs.readFile(file.path)), file.digest);
-      console.log(
-        'PASS refusal: newly observed unreviewed executor blocks preparation without stopping gateways or changing startup files; full-site executor attribution still required',
-      );
-    } else {
-      const prepared = client
-        ? await client.prepare()
-        : await prepareLocalFirstCutoverGateway(input, io);
-      assert.equal(prepared.phase, 'startup_prepared');
-      assert.equal((await fetch('http://127.0.0.1:4010')).status, 200);
-      assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
-      assert.equal((await journal.readFirstCutoverEffects()).registrationEvents.length, 0);
-      await assert.rejects(retireLocalFirstCutoverGateways(input, io));
-      await journal.persist('all_fenced', { candidate: 'b'.repeat(40) });
-      await journal.persist('stopped', { candidate: 'b'.repeat(40) });
-      if (sessionLostAck) {
-        await assert.rejects(client.retire(), /CUTOVER_GATEWAY_SESSION_UNPROVEN/);
-        await assert.rejects(client.retire(), /CUTOVER_GATEWAY_SESSION_UNPROVEN/);
-        await assert.rejects(fetch('http://127.0.0.1:4010'));
+    if (siteMode) {
+      for (const [phase, method] of [
+        ['prepared', null],
+        ['orders_fenced', 'fenceOrders'],
+        ['legacy_settled', 'settleLegacy'],
+        ['producers_stopped', 'stopProducers'],
+        ['all_fenced', 'fenceAll'],
+        ['stopped', 'stopLegacy'],
+      ]) {
+        await journal.persist(phase, { candidate: 'b'.repeat(40) });
+        if (siteLostAck && phase === 'stopped') {
+          await assert.rejects(executionSite.lifecycle.stopLegacy(siteContext), /UNPROVEN/);
+          const count = (await journal.readFirstCutoverEffects()).registrationEvents.length;
+          await assert.rejects(executionSite.lifecycle.stopLegacy(siteContext), /UNPROVEN/);
+          await assert.rejects(executionSite.lifecycle.assertStopped(siteContext), /UNPROVEN/);
+          assert.equal((await journal.readFirstCutoverEffects()).registrationEvents.length, count);
+          assert.equal((await journal.readFirstCutoverEffects()).unmanagedEvents.length, 0);
+          break;
+        }
+        if (method)
+          try {
+            await executionSite.lifecycle[method](siteContext);
+          } catch (error) {
+            const effects = await journal.readFirstCutoverEffects();
+            console.error(
+              'QA composition failure',
+              phase,
+              effects.startupEvents.at(-1)?.phase,
+              effects.registrationEvents.at(-1)?.phase,
+              effects.unmanagedEvents.at(-1)?.phase,
+            );
+            throw error;
+          }
+        if (phase === 'producers_stopped') {
+          assert.equal((await fetch('http://127.0.0.1:4010')).status, 200);
+          assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
+        }
+      }
+      await assert.rejects(fetch('http://127.0.0.1:4010'));
+      assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
+      if (siteLostAck) {
         assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
-        const effects = await journal.readFirstCutoverEffects();
-        assert.equal(effects.registrationEvents.at(-1).phase, 'registration-deleted');
-        assert.equal(effects.unmanagedEvents.length, 0);
-        assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
+        await assert.rejects(executionSite.lifecycle.detach(siteContext), /UNPROVEN/);
         assert.equal((await receiverCompletion).code, 1);
         console.log(
-          'PASS physical remote disconnect: actual deletion recorded, no signal or resend, unrelated PID unchanged',
-        );
-      } else if (lostAck) {
-        let deletions = 0;
-        const system = {
-          exec: async (file, argv) => {
-            const result = await exec(file, argv);
-            if (argv[1] === 'delete') {
-              deletions++;
-              throw new Error('QA lost acknowledgement after real PM2 delete');
-            }
-            return result;
-          },
-        };
-        await assert.rejects(
-          retireLocalFirstCutoverGateways(input, io, system),
-          /CUTOVER_REGISTRATION_UNCERTAIN/,
-        );
-        await assert.rejects(fetch('http://127.0.0.1:4010'));
-        assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
-        const effects = await journal.readFirstCutoverEffects();
-        assert.equal(effects.registrationEvents.at(-1).phase, 'registration-delete-intent');
-        assert.equal(effects.unmanagedEvents.length, 0);
-        await assert.rejects(retireLocalFirstCutoverGateways(input, io, system));
-        assert.equal(deletions, 1);
-        assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
-        console.log(
-          'PASS physical gateway lost ACK: actual managed stop, intent retained, unmanaged gateway untouched, repeat refused',
+          'PASS execution-site lost ACK: physical deletion retained, no replay or unmanaged signal, no false stopped proof; synthetic ingress/business/other-host boundaries',
         );
       } else {
-        const stopped = client
-          ? await client.retire()
-          : await retireLocalFirstCutoverGateways(input, io);
-        assert.equal(stopped.host, 'aliyun');
-        assert.equal(stopped.phase, 'stopped');
-        await assert.rejects(fetch('http://127.0.0.1:4010'));
+        assert.deepEqual((await executionSite.lifecycle.assertStopped(siteContext)).survivors, []);
         await assert.rejects(fetch('http://127.0.0.1:4011'));
-        assert.equal(gateway.signalCode, 'SIGTERM');
-        const effects = await journal.readFirstCutoverEffects();
-        assert.equal(effects.registrationEvents.length, 4);
-        assert.ok(effects.registrationEvents.every((e) => e.host === 'aliyun'));
-        assert.equal(effects.unmanagedEvents.length, 2);
-        assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
-        await assert.rejects(retireLocalFirstCutoverGateways(input, io));
-        if (client) {
-          await client.close();
-          assert.equal((await receiverCompletion).code, 0);
-        }
+        await executionSite.lifecycle.detach(siteContext);
+        assert.equal((await receiverCompletion).code, 0);
         console.log(
-          'PASS physical gateway composition: prepare keeps both live; stopped retires managed and pinned unmanaged gateway once; unrelated PID preserved',
+          'PASS execution-site composition: actual gateway receiver, owned journal, protected startup, PM2 and pidfd retirement; synthetic ingress/business/other-host boundaries',
         );
+      }
+    } else {
+      if (attachedBaseline) {
+        observer = await createObserver();
+        assert.equal((await observer.read()).unknownLaunchers.length, 0);
+        await advanceToPrepare();
+        console.log(
+          'PASS physical baseline after receiver attachment, original legacy digest unchanged',
+        );
+      }
+      if (observeExecutor) {
+        await assert.rejects(client.prepare(), /CUTOVER_GATEWAY_SESSION_UNPROVEN/);
+        assert.equal((await receiverCompletion).code, 1);
+        assert.equal((await journal.readFirstCutoverEffects()).startupEvents.length, 0);
+        assert.equal((await fetch('http://127.0.0.1:4010')).status, 200);
+        assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
+        for (const file of files) assert.equal(sha(await fs.readFile(file.path)), file.digest);
+        console.log(
+          'PASS refusal: newly observed unreviewed executor blocks preparation without stopping gateways or changing startup files; full-site executor attribution still required',
+        );
+      } else {
+        const prepared = client
+          ? await client.prepare()
+          : await prepareLocalFirstCutoverGateway(input, io);
+        assert.equal(prepared.phase, 'startup_prepared');
+        assert.equal((await fetch('http://127.0.0.1:4010')).status, 200);
+        assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
+        assert.equal((await journal.readFirstCutoverEffects()).registrationEvents.length, 0);
+        await assert.rejects(retireLocalFirstCutoverGateways(input, io));
+        await journal.persist('all_fenced', { candidate: 'b'.repeat(40) });
+        await journal.persist('stopped', { candidate: 'b'.repeat(40) });
+        if (sessionLostAck) {
+          await assert.rejects(client.retire(), /CUTOVER_GATEWAY_SESSION_UNPROVEN/);
+          await assert.rejects(client.retire(), /CUTOVER_GATEWAY_SESSION_UNPROVEN/);
+          await assert.rejects(fetch('http://127.0.0.1:4010'));
+          assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
+          const effects = await journal.readFirstCutoverEffects();
+          assert.equal(effects.registrationEvents.at(-1).phase, 'registration-deleted');
+          assert.equal(effects.unmanagedEvents.length, 0);
+          assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
+          assert.equal((await receiverCompletion).code, 1);
+          console.log(
+            'PASS physical remote disconnect: actual deletion recorded, no signal or resend, unrelated PID unchanged',
+          );
+        } else if (lostAck) {
+          let deletions = 0;
+          const system = {
+            exec: async (file, argv) => {
+              const result = await exec(file, argv);
+              if (argv[1] === 'delete') {
+                deletions++;
+                throw new Error('QA lost acknowledgement after real PM2 delete');
+              }
+              return result;
+            },
+          };
+          await assert.rejects(
+            retireLocalFirstCutoverGateways(input, io, system),
+            /CUTOVER_REGISTRATION_UNCERTAIN/,
+          );
+          await assert.rejects(fetch('http://127.0.0.1:4010'));
+          assert.equal((await fetch('http://127.0.0.1:4011')).status, 200);
+          const effects = await journal.readFirstCutoverEffects();
+          assert.equal(effects.registrationEvents.at(-1).phase, 'registration-delete-intent');
+          assert.equal(effects.unmanagedEvents.length, 0);
+          await assert.rejects(retireLocalFirstCutoverGateways(input, io, system));
+          assert.equal(deletions, 1);
+          assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
+          console.log(
+            'PASS physical gateway lost ACK: actual managed stop, intent retained, unmanaged gateway untouched, repeat refused',
+          );
+        } else {
+          const stopped = client
+            ? await client.retire()
+            : await retireLocalFirstCutoverGateways(input, io);
+          assert.equal(stopped.host, 'aliyun');
+          assert.equal(stopped.phase, 'stopped');
+          await assert.rejects(fetch('http://127.0.0.1:4010'));
+          await assert.rejects(fetch('http://127.0.0.1:4011'));
+          assert.equal(gateway.signalCode, 'SIGTERM');
+          const effects = await journal.readFirstCutoverEffects();
+          assert.equal(effects.registrationEvents.length, 4);
+          assert.ok(effects.registrationEvents.every((e) => e.host === 'aliyun'));
+          assert.equal(effects.unmanagedEvents.length, 2);
+          assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
+          await assert.rejects(retireLocalFirstCutoverGateways(input, io));
+          if (client) {
+            await client.close();
+            assert.equal((await receiverCompletion).code, 0);
+          }
+          console.log(
+            'PASS physical gateway composition: prepare keeps both live; stopped retires managed and pinned unmanaged gateway once; unrelated PID preserved',
+          );
+        }
       }
     }
   } else {

@@ -131,6 +131,10 @@ async function fixture(t) {
       }),
       fenceOrders: () => mutate('orders', 'orders'),
       fenceAll: () => mutate('all', 'all-writers'),
+      verifyOrders: async () => {
+        calls.push(`${host}:verify-orders`);
+        return proof('orders');
+      },
       verifyFence: async () => {
         calls.push(`${host}:verify`);
         return proof('all-writers');
@@ -225,6 +229,31 @@ async function fixture(t) {
     },
   };
 }
+
+test('orders remain freshly verifiable while producers settle without repeating either fence mutation', async (t) => {
+  const f = await fixture(t);
+  const pair = await f.start();
+  await f.advance('orders_fenced');
+  await pair.fenceOrders();
+  const receipts = structuredClone(f.receipts);
+  await f.advance('producers_stopped');
+  f.setTime(1100);
+  assert.equal(typeof pair.verifyOrders, 'function');
+  const result = await pair.verifyOrders();
+  assert.equal(result.stage, 'orders');
+  assert.equal(result.observedAtMs, 1100);
+  assert.equal(result.producersRunning, 1);
+  assert.deepEqual(f.receipts, receipts);
+  assert.deepEqual(f.calls, [
+    'vultr:orders',
+    'aliyun:orders',
+    'vultr:verify-orders',
+    'aliyun:verify-orders',
+  ]);
+  await pair.verifyOrders();
+  await f.advance('all_fenced');
+  await assert.rejects(pair.verifyOrders(), /UNPROVEN/);
+});
 
 test('pair exposes receiver proof during an in-flight fence without recursively using its stream', async (t) => {
   const f = await fixture(t);

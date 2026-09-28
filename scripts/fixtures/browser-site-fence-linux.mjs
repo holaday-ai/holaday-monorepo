@@ -350,11 +350,16 @@ try {
         throw new Error('QA_EXPECTED_ACK_LOSS');
       }
       await ingress.fenceOrders();
+      const before = await ingress.readFenceReceipts();
+      assert.equal((await ingress.verifyOrders()).stage, 'orders');
+      assert.deepEqual(await ingress.readFenceReceipts(), before);
     } else {
       // Journal steps below model business/producer completion only. The nginx,
       // file and network effects are actual; no DB or provider is represented.
-      for (const phase of ['legacy_settled', 'producers_stopped', 'all_fenced'])
+      for (const phase of ['legacy_settled', 'producers_stopped'])
         await journal.persist(phase, { candidate: binding.candidate });
+      assert.equal((await ingress.verifyOrders()).stage, 'orders');
+      await journal.persist('all_fenced', { candidate: binding.candidate });
       await ingress.fenceAll();
       assert.equal((await ingress.verifyFence()).existingSockets, 0);
     }

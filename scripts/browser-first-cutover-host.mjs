@@ -769,10 +769,27 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       return now;
     };
     checkClock();
-    const read = async (registrationProgressHost, unmanagedProgressHost, candidateIdentity) => {
+    const read = async (
+      requestedRegistrationHost,
+      requestedUnmanagedHost,
+      candidateIdentity,
+      fenceProgress = false,
+    ) => {
       try {
         checkClock();
         const before = await effects();
+        let registrationProgressHost = requestedRegistrationHost;
+        let unmanagedProgressHost = requestedUnmanagedHost;
+        if (fenceProgress) {
+          // Read-only in-flight fence checks use the existing progress classifier,
+          // with scope selected by THIS owned journal, never caller-supplied host.
+          // Strict completion reads below keep their original semantics.
+          if (before.phase === 'producers_stopped') registrationProgressHost = 'vultr';
+          else if (['all_fenced', 'stopped'].includes(before.phase)) {
+            if (before.unmanagedEvents?.length === 1) unmanagedProgressHost = 'aliyun';
+            else registrationProgressHost = 'aliyun';
+          }
+        }
         const execution = structuredClone(await io.readExecutionIdentities());
         const fences = structuredClone(await io.readFenceReceipts());
         const candidate =
@@ -817,6 +834,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           { now: checkClock },
         );
         if (result.unknownLaunchers.length) fail();
+        if (fenceProgress) return { purpose: 'fence-progress', pair: result };
         if (registrationProgressHost !== undefined)
           return {
             purpose: 'registration-progress',
@@ -837,6 +855,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
     let unmanagedAttempted = false;
     return {
       read: () => read(),
+      readFenceProgress: () => read(undefined, undefined, undefined, true),
       readRegistrationProgress: (host) => read(host ?? 'invalid'),
       readUnmanagedProgress: (host) => read(undefined, host ?? 'invalid'),
       readWithCandidate: (identity) => read(undefined, undefined, structuredClone(identity ?? {})),
@@ -1736,6 +1755,13 @@ export async function createFirstCutoverIngressLifecycle(input, overrides = {}) 
         run('verify', verifyPhases, () =>
           verifyCutoverFence(
             { inventoryDigest: binding.inventoryDigest, stage: 'all-writers' },
+            dependencies,
+          ),
+        ),
+      verifyOrders: () =>
+        run('verify-orders', ['orders_fenced', 'legacy_settled', 'producers_stopped'], () =>
+          verifyCutoverFence(
+            { inventoryDigest: binding.inventoryDigest, stage: 'orders' },
             dependencies,
           ),
         ),

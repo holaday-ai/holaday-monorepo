@@ -82,6 +82,10 @@ async function pair(t, change = {}) {
           return { ...counts, stage: 'all-writers' };
         },
         verifyFence: async () => ({ ...counts, stage: 'all-writers' }),
+        verifyOrders: async () => {
+          calls.push('verify-orders');
+          return { ...(await io.observeWriters()), stage: 'orders' };
+        },
         restoreIngress: async (identity) => {
           await io.verifyOpenedIdentity(identity);
           calls.push('restore');
@@ -136,6 +140,19 @@ async function pair(t, change = {}) {
       session.connectFirstCutoverIngressSession({ ...input, ...overrides }, io),
   };
 }
+
+test('orders verification crosses the fixed session repeatedly without replaying its fence', async (t) => {
+  const f = await pair(t);
+  const client = await f.connect();
+  f.setPhase('orders_fenced');
+  await client.fenceOrders();
+  assert.equal(typeof client.verifyOrders, 'function');
+  f.setPhase('producers_stopped');
+  assert.equal((await client.verifyOrders()).stage, 'orders');
+  assert.equal((await client.verifyOrders()).stage, 'orders');
+  assert.deepEqual(f.calls, ['orders', 'verify-orders', 'verify-orders']);
+  await client.close();
+});
 
 test('ingress receiver identity stays independently bound to the live session', async (t) => {
   const f = await pair(t);
@@ -336,6 +353,105 @@ test('a bare success flag is not accepted as remote fence evidence', async (t) =
   f.setPhase('orders_fenced');
   await assert.rejects(client.fenceOrders(), /CUTOVER_INGRESS_SESSION_UNPROVEN/);
   assert.deepEqual(f.calls, ['orders']);
+});
+
+test('coordinator site scope reads the fixed protected file and binds both hosts to the original approval', async (t) => {
+  const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'execution-site-scope-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const folder = '/var/lib/holaday-deploy/maintenance';
+  const path = `${folder}/first-cutover-execution-approved.json`;
+  await fs.mkdir(root + folder, { recursive: true, mode: 0o700 });
+  const approval = { ...binding, maintenanceEndsAtMs: deadline, legacyDigest: '9'.repeat(64) };
+  const value = {
+    schemaVersion: 1,
+    host: 'vultr',
+    binding,
+    maintenanceEndsAtMs: deadline,
+    site: {
+      legacyDigest: approval.legacyDigest,
+      reviews: { vultr: {}, aliyun: {} },
+      gatewaySiteDigest: 'f'.repeat(64),
+      ingress: {
+        inventoryDigest: binding.inventoryDigest,
+        unknownIngress: [],
+        remoteSiteDigest: 'e'.repeat(64),
+        files: [
+          { path: '/etc/nginx/sites-available/holaday', profile: 'vultr-20260926' },
+          {
+            path: '/etc/nginx/sites-available/hd-app.orangebench.tech',
+            profile: 'aliyun-app-20260926',
+          },
+          {
+            path: '/etc/nginx/sites-available/hd-pay.orangebench.tech',
+            profile: 'aliyun-pay-20260926',
+          },
+        ],
+      },
+      producerStartupFiles: ['dump.pm2', 'dump.pm2.bak'].map((name) => ({
+        path: `/root/.pm2/${name}`,
+        digest: '1'.repeat(64),
+        remove: [{ name: 'holaday-orchestrator', entryDigest: '2'.repeat(64) }],
+      })),
+    },
+  };
+  const write = () => fs.writeFile(root + path, JSON.stringify(value), { mode: 0o600 });
+  await write();
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    now: Date.now,
+    readApproval: async () => structuredClone(approval),
+    fs: {
+      lstat: async (p) => Object.assign(await fs.lstat(root + p), { uid: 0 }),
+      realpath: async (p) => (await fs.realpath(root + p)).slice(root.length),
+      open: async (p, flags) => {
+        const h = await fs.open(root + p, flags);
+        const stat = h.stat.bind(h);
+        h.stat = async () => Object.assign(await stat(), { uid: 0 });
+        return h;
+      },
+    },
+  };
+  assert.deepEqual(
+    await session.readFirstCutoverExecutionSiteScope({ attempt: binding.attempt }, io),
+    { ...value.site, binding, maintenanceEndsAtMs: deadline },
+  );
+  for (const mutate of [
+    (v) => {
+      v.host = 'aliyun';
+    },
+    (v) => {
+      v.site.legacyDigest = '0'.repeat(64);
+    },
+    (v) => v.site.ingress.files.pop(),
+    (v) => {
+      v.site.ingress.remoteSiteDigest = 'bad';
+    },
+    (v) => {
+      v.site.producerStartupFiles[0].remove[0].name = 'unrelated';
+    },
+    (v) => {
+      v.site.producerStartupFiles[0].path = '/tmp/unapproved';
+    },
+    (v) => {
+      v.site.extra = true;
+    },
+  ]) {
+    const clean = structuredClone(value);
+    mutate(value);
+    await write();
+    await assert.rejects(
+      session.readFirstCutoverExecutionSiteScope({ attempt: binding.attempt }, io),
+      /UNPROVEN/,
+    );
+    Object.assign(value, clean);
+  }
+  await write();
+  await fs.chmod(root + path, 0o644);
+  await assert.rejects(
+    session.readFirstCutoverExecutionSiteScope({ attempt: binding.attempt }, io),
+    /UNPROVEN/,
+  );
 });
 
 test('successful mutation cannot be sent again by the same client', async (t) => {
