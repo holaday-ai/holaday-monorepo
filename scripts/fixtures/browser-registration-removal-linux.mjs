@@ -18,6 +18,7 @@ import {
   classifyFirstCutoverHostPair,
   firstCutoverSourceBindings,
 } from '/source/browser-first-cutover-inventory.mjs';
+import { connectFirstCutoverRecoverySession } from '/source/browser-first-cutover-recovery-session.mjs';
 import {
   prepareLocalFirstCutoverGateway,
   registrationConfigDigest,
@@ -38,6 +39,14 @@ const exec = async (file, argv) =>
 const pm2 = (...args) => exec('/usr/bin/node', ['/usr/lib/node_modules/pm2/bin/pm2', ...args]);
 const rows = async () => JSON.parse(await pm2('jlist'));
 const sha = (b) => createHash('sha256').update(b).digest('hex');
+const recoveryLink = process.argv[2] === '--execution-site-recovery';
+const recoveryDrift = process.env.CUTOVER_QA_RECOVERY_DRIFT === '1';
+assert.ok(!recoveryDrift || recoveryLink);
+const recoveryScope = recoveryLink ? JSON.parse(process.env.CUTOVER_QA_RECOVERY_SCOPE) : undefined;
+if (recoveryLink) {
+  // stdout is exclusively the original recovery protocol, never QA narration.
+  console.log = (...values) => console.error(...values);
+}
 assert.ok(
   process.argv.length === 2 ||
     (process.argv.length === 3 &&
@@ -53,14 +62,17 @@ assert.ok(
         '--execution-site-lost-ack',
         '--execution-site-lost-effect',
         '--execution-site-known-effect',
+        '--execution-site-recovery',
       ].includes(process.argv[2])),
 );
 const lostAck = process.argv[2] === '--gateways-lost-ack';
 const siteMode = process.argv[2]?.startsWith('--execution-site');
 const siteLostAck = process.argv[2] === '--execution-site-lost-ack';
-const lostEffect = ['--execution-site-lost-effect', '--execution-site-known-effect'].includes(
-  process.argv[2],
-);
+const lostEffect = [
+  '--execution-site-lost-effect',
+  '--execution-site-known-effect',
+  '--execution-site-recovery',
+].includes(process.argv[2]);
 const knownEffect = process.argv[2] === '--execution-site-known-effect';
 const interruption = lostEffect || process.argv[2] === '--execution-site-interruption';
 const sessionMode = siteMode || process.argv[2]?.startsWith('--gateway-session');
@@ -107,8 +119,13 @@ await fs.writeFile('/tmp/registry-idle.cjs', 'setInterval(()=>{},1000);\n');
 // Approved metadata is synthetic; process and protected-file observations below
 // remain real. No production merchant or recovery transcript is used here.
 const readinessInventory = { configurationDigests: ['c'.repeat(64)], merchants: [], targets: [] };
+if (recoveryLink)
+  readinessInventory.backupPlan = {
+    sourceIdentity: recoveryScope.sourceIdentity,
+    isolatedTarget: recoveryScope.isolatedTarget,
+  };
 const binding = {
-  attempt: '22222222-2222-4222-8222-222222222222',
+  attempt: recoveryScope?.binding.attempt ?? '22222222-2222-4222-8222-222222222222',
   inventoryDigest: siteMode ? sha(JSON.stringify(readinessInventory)) : 'a'.repeat(64),
 };
 let journal;
@@ -118,6 +135,7 @@ let receiverCompletion;
 let client;
 let executionSite;
 let siteContext;
+let recoveryScopeChecks = 0;
 try {
   await pm2(
     'start',
@@ -464,7 +482,7 @@ try {
     { reviews, inventoryDigest: binding.inventoryDigest },
     { readPair },
   );
-  const maintenanceEndsAtMs = Date.now() + 60000;
+  const maintenanceEndsAtMs = recoveryScope?.maintenanceEndsAtMs ?? Date.now() + 60000;
   const interruptionMetadata = interruption
     ? {
         schemaVersion: 2,
@@ -536,6 +554,7 @@ try {
     };
     if (sessionMode) {
       const fullBinding = await journal.assertOwnership();
+      if (recoveryLink) assert.deepEqual(fullBinding, recoveryScope.binding);
       const approval = {
         schemaVersion: 1,
         kind: 'first-cutover',
@@ -619,6 +638,7 @@ try {
             maintenanceEndsAtMs: input.maintenanceEndsAtMs,
             site: {
               legacyDigest: proof.legacyDigest,
+              ...(recoveryLink ? { backupRecoveryDigest: recoveryScope.scopeDigest } : {}),
               inventory: readinessInventory,
               reviews,
               gatewaySiteDigest: sha(siteBytes),
@@ -845,6 +865,24 @@ try {
             return journal.persist(phase, detail);
           },
           backupAndRestoreCheck: async () => {
+            if (recoveryLink) {
+              // Real stopped Linux attempt owns this Mac session. This is only
+              // attach/target inspection: NO source export, restore or receipt.
+              const recovery = await connectFirstCutoverRecoverySession(recoveryScope, {
+                input: process.stdin,
+                output: process.stdout,
+                assertScope: () => {
+                  // Introduce identifiable work after attach has begun, not a
+                  // fabricated remote failure. The actual site must refuse it.
+                  if (recoveryDrift && ++recoveryScopeChecks >= 3) knownEffectVisible = true;
+                  return executionSite.recovery.assertScope(recoveryScope);
+                },
+              });
+              assert.deepEqual(await recovery.inspect(), recoveryScope.isolatedTarget);
+              await recovery.close();
+              const durable = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+              assert.equal(durable.backupReceipt, undefined);
+            }
             throw new Error('CUTOVER_QA_RESTORE_NOT_CONFIGURED');
           },
           holdMaintenance: (result) => executionSite.lifecycle.holdMaintenance(siteContext, result),
@@ -880,14 +918,32 @@ try {
           assert.equal(effects.unmanagedEvents.length, 0);
           assert.equal((await fetch(`http://127.0.0.1:${mainPort}`)).status, 200);
         } else {
-          assert.equal(result.code, 'CUTOVER_QA_RESTORE_NOT_CONFIGURED');
+          assert.equal(
+            result.code,
+            recoveryDrift
+              ? 'CUTOVER_RECOVERY_SESSION_UNPROVEN'
+              : 'CUTOVER_QA_RESTORE_NOT_CONFIGURED',
+          );
           assert.equal(effects.interruptionObservation.riskDigest, effects.riskDigest);
           assert.equal(effects.legacyInterruption.scope, 'legacy-non-payment-memory');
           assert.equal(effects.legacyInterruption.noAutomaticReplay, true);
-          assert.deepEqual(
-            (await executionSite.lifecycle.assertStopped(siteContext)).survivors,
-            [],
-          );
+          if (recoveryDrift) {
+            assert.ok(recoveryScopeChecks >= 3);
+            assert.equal(knownEffectVisible, true);
+            assert.ok(
+              Date.now() < recoveryScope.maintenanceEndsAtMs,
+              'reject work drift before deadline, not because of timeout',
+            );
+            assert.equal(
+              JSON.parse(await fs.readFile(journal.path, 'utf8')).backupReceipt,
+              undefined,
+            );
+            await assert.rejects(executionSite.lifecycle.assertStopped(siteContext), /UNPROVEN/);
+          } else
+            assert.deepEqual(
+              (await executionSite.lifecycle.assertStopped(siteContext)).survivors,
+              [],
+            );
           await assert.rejects(fetch(`http://127.0.0.1:${mainPort}`));
         }
         assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
@@ -910,6 +966,9 @@ try {
             effectCount,
             riskDigest: effects.riskDigest,
             releaseReady: false,
+            ...(recoveryLink
+              ? { recoveryLinked: !recoveryDrift, recoveryRejected: recoveryDrift }
+              : {}),
           })}`,
         );
       } else {
@@ -1174,4 +1233,7 @@ try {
     await new Promise((resolve, reject) =>
       effectServer.close((error) => (error ? reject(error) : resolve())),
     );
+  // The failed wire has ended stdout. Stop this fixture's inherited stdin
+  // reader after journal/remote cleanup so the parent gets EOF promptly.
+  if (recoveryLink) process.stdin.pause();
 }

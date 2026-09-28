@@ -2,6 +2,18 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29同attempt物理停止到Mac恢复会话（基于30eedbea）
+
+仅改原两个QA夹具，不改产品/部署模块。Mac父端运行原恢复服务器，Linux端复用`holaday-first-cutover-age:qa`（镜像ID `43e32ddaf0de5743635ec79acd32940d32151fd495ad6e642100b935fd3776bf`）及原物理停止夹具、transition/site/journal。每例新Linux容器，无网络/宿主端口，1CPU/512MiB/256PIDs、私有PID，SYS_PTRACE只限容器既有进程检查，scripts/ops只读挂载；不挂Docker socket或Mac密钥。独立MySQL8目标按原严格目标契约持有专属卷、1CPU/768MiB，无网络且全程无导入。
+
+在原目标夹具三个参数后不传runtime/source参数，显式`CUTOVER_QA_RETIREMENT=1`；负例另设`CUTOVER_QA_RECOVERY_DRIFT=1`。从repo根运行，保留原PATH/TMPDIR/age参数。父端只将公开scope给Linux子进程，candidate/config/manifest/inventory/attempt相等有实际断言；Linux完成真实停止后，每次恢复检查调用原site动态检查，而非固定true。正例目标身份检查完成仍保持`backup_verified`失败意图、无receipt/候选/open。负例第三次检查加入合成已知动作，拒绝必须发生在绝对窗口之前，计数仍1、QA resurrect不恢复旧目标。源身份占位仅为握手；没有执行源导出或恢复，不能与上一轮结果相加为完整发布。
+
+正常最终日志`/tmp/holaday-retirement-recovery-final.log`退出0；已知动作及新增新鲜窗口断言日志`/tmp/holaday-retirement-recovery-known-final.log`退出0；清理修正后的`/tmp/holaday-retirement-recovery-known-cleanup.log`退出0，实际约15秒结束（日志创建到完成06:33:26–06:33:41 JST），不再等满120秒。原Linux入口未知/已知各1/1、退出0、零跳过，日志`/tmp/holaday-retirement-recovery-{unknown,known}-regression.log`。静态Biome/node语法/diff检查通过。完整新host安装/源导出/恢复/应用启动/开放仍未运行。
+
+初次`/tmp/holaday-retirement-recovery-first.log`退出1，因为直接把观察夹具作为容器PID1，违反已有pid>1/ppid>=1契约；这是QA调用错误不是产品RED。改为复用原文档中的Node父进程spawnSync，镜像/身份校验不变。第一次故障案例虽然在新鲜窗口内拒绝，但继承stdin仍在读取，使容器等满120秒；最终QA在journal/远端清理之后暂停自己继承的stdin，不修改原wire。清理前调查镜像缺少ps，退出127；随后容器已退出导致只读/proc检查报不存在，退出1，均不算验收通过。
+
+最终原`pnpm test:ops`：120/59/16/868及Python12，退出0、零跳过，`/tmp/holaday-retirement-recovery-ops.log`；两MJS Biome/node语法/diff检查退出0。没有运行完整browser/应用全套或独立审查。所有会话已退出；最后核对专属目标仍0表后，删除本轮QA容器及专属卷，只移除空测试设施；原MySQL/Redis健康，日志及受保护QA临时元数据保留。
+
 ## 2026-09-29独立源/目标备份恢复段（基于8e83ea76）
 
 只扩展原`scripts/fixtures/browser-recovery-target-qa.mjs`，生产模块未改。新参数形式为原四参数后追加`sourceContainerId sourceAttempt`；两容器都须先按原隔离契约建立，容器和卷均有对应attempt标签、不同serverUUID、无网络/端口/绑定挂载，1CPU/768MiB/256PIDs，event_scheduler=OFF。源仅预置夹具的两张合成表、中文/BLOB/NULL、触发器和禁用事件；目标必须空。每次导入使用新目标，不重跑失败或已迁移目标。

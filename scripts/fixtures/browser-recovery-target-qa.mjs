@@ -8,7 +8,7 @@ import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
@@ -27,6 +27,10 @@ assert.match(containerId ?? '', /^[a-f0-9]{64}$/);
 assert.match(imageId ?? '', /^sha256:[a-f0-9]{64}$/);
 assert.match(attempt ?? '', /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/);
 const fullSource = Boolean(sourceContainerId);
+const retirementLink = process.env.CUTOVER_QA_RETIREMENT === '1';
+const recoveryDrift = process.env.CUTOVER_QA_RECOVERY_DRIFT === '1';
+assert.ok(!recoveryDrift || retirementLink);
+assert.ok(!retirementLink || (!runtimeRoot && !fullSource));
 // QA-only mutation: a lying adapter returns a receipt without persisting it.
 // The independent journal assertion below must reject this run.
 const omitReceipt = process.env.CUTOVER_QA_OMIT_RECEIPT === '1';
@@ -112,18 +116,20 @@ const destination = await optionsFor(recoveryDirectory);
 const sql = Buffer.from(
   "SET NAMES utf8mb4; CREATE TABLE sample(id INT PRIMARY KEY, text_value TEXT, payload BLOB, optional_value INT NULL); INSERT INTO sample VALUES(1,'海边',0x00ff5c27,NULL); CREATE TABLE audit(id INT); CREATE TRIGGER qa_trigger AFTER INSERT ON sample FOR EACH ROW INSERT INTO audit VALUES(NEW.id); CREATE EVENT qa_event ON SCHEDULE EVERY 1 DAY DISABLE DO INSERT INTO audit VALUES(99);\n",
 );
-const artifact = fullSource
-  ? undefined
-  : await encryptAgeBackup(sourceOptions, (sink) => pipeline(Readable.from([sql]), sink));
-const bytes = fullSource ? undefined : await readFile(artifact.reference);
-const transfer = fullSource
-  ? undefined
-  : {
-      source: { options: sourceOptions, artifact },
-      destination,
-      expectedBackupDigest: hash(bytes),
-      expectedBytes: bytes.length,
-    };
+const artifact =
+  fullSource || retirementLink
+    ? undefined
+    : await encryptAgeBackup(sourceOptions, (sink) => pipeline(Readable.from([sql]), sink));
+const bytes = fullSource || retirementLink ? undefined : await readFile(artifact.reference);
+const transfer =
+  fullSource || retirementLink
+    ? undefined
+    : {
+        source: { options: sourceOptions, artifact },
+        destination,
+        expectedBackupDigest: hash(bytes),
+        expectedBytes: bytes.length,
+      };
 const io = {
   pull: (input) =>
     pullFirstCutoverAgeBackup(input, {
@@ -135,12 +141,25 @@ const request = { transfer, identityFile, target };
 const migrationManifest = runtimeRoot
   ? buildMaintenanceMigrationManifest(runtimeRoot).manifest
   : [];
+const sourceIdentity = sourceTarget?.identity ?? {
+  serverUuid: '11111111-1111-4111-8111-111111111111',
+  database: 'synthetic_source',
+};
 const binding = {
   attempt,
-  candidate: 'a'.repeat(40),
-  configDigest: 'b'.repeat(64),
+  candidate: (retirementLink ? 'b' : 'a').repeat(40),
+  configDigest: (retirementLink ? 'c' : 'b').repeat(64),
   migrationDigest: hash(JSON.stringify(migrationManifest)),
-  inventoryDigest: 'd'.repeat(64),
+  inventoryDigest: retirementLink
+    ? hash(
+        JSON.stringify({
+          configurationDigests: ['c'.repeat(64)],
+          merchants: [],
+          targets: [],
+          backupPlan: { sourceIdentity, isolatedTarget: identity },
+        }),
+      )
+    : 'd'.repeat(64),
 };
 const scope = {
   schemaVersion: 1,
@@ -150,10 +169,7 @@ const scope = {
   destination,
   identityFile,
   target,
-  sourceIdentity: sourceTarget?.identity ?? {
-    serverUuid: '11111111-1111-4111-8111-111111111111',
-    database: 'synthetic_source',
-  },
+  sourceIdentity,
 };
 if (runtimeRoot) {
   const bytes = await readFile(join(runtimeRoot, 'runtime.json'));
@@ -284,9 +300,42 @@ try {
   assert(checks>=8);
 } finally { await journal.close(); }
 `;
-const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
-  stdio: ['pipe', 'pipe', 'pipe'],
-});
+const child = retirementLink
+  ? spawn(
+      'docker',
+      [
+        'run',
+        '--rm',
+        '-i',
+        '--name',
+        `holaday-retirement-recovery-${attempt}`,
+        '--network',
+        'none',
+        '--cpus=1',
+        '--memory=512m',
+        '--pids-limit=256',
+        '--cap-add=SYS_PTRACE',
+        '--label',
+        `holaday.cutover.attempt=${attempt}`,
+        '--mount',
+        `type=bind,src=${resolve('scripts')},dst=/source,readonly`,
+        '--mount',
+        `type=bind,src=${resolve('ops')},dst=/ops,readonly`,
+        '--env',
+        `CUTOVER_QA_RECOVERY_SCOPE=${JSON.stringify(publicScope)}`,
+        '--env',
+        `CUTOVER_QA_RECOVERY_DRIFT=${recoveryDrift ? '1' : '0'}`,
+        'holaday-first-cutover-age:qa',
+        '/opt/node22/bin/node',
+        '--input-type=module',
+        '-e',
+        "import {spawnSync} from 'node:child_process'; const r=spawnSync(process.execPath,['/source/fixtures/browser-registration-removal-linux.mjs','--execution-site-recovery'],{stdio:'inherit'}); process.exit(r.status ?? 1);",
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    )
+  : spawn(process.execPath, ['--input-type=module', '-e', script], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
 let diagnostic = '';
 child.stderr.on('data', (chunk) => {
   // QA-only child diagnostics; emit codes, never snapshot rows or key material.
@@ -323,31 +372,61 @@ try {
   child.stdin.end();
 }
 await exited;
-if (servingError) throw servingError;
-assert.equal(
-  await query('SELECT HEX(text_value), HEX(payload), optional_value IS NULL FROM sample'),
-  'E6B5B7E8BEB9\t00FF5C27\t1',
-);
-assert.equal(
-  await query('SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA=DATABASE()'),
-  '1',
-);
-assert.equal(
-  await query('SELECT COUNT(*) FROM information_schema.EVENTS WHERE EVENT_SCHEMA=DATABASE()'),
-  '1',
-);
-if (!fullSource)
-  await assert.rejects(
-    restoreFirstCutoverAgeBackup(request, { ...io, assertScope: async () => {} }),
+if (servingError && !(retirementLink && recoveryDrift)) throw servingError;
+if (retirementLink) {
+  if (recoveryDrift) assert.equal(servingError?.message, 'CUTOVER_RECOVERY_SESSION_UNPROVEN');
+  const lines = diagnostic.split('\n').filter((line) => line.startsWith('QA_LOST_EFFECT_RESULT '));
+  assert.equal(lines.length, 1);
+  const proof = JSON.parse(lines[0].slice('QA_LOST_EFFECT_RESULT '.length));
+  assert.deepEqual(
+    { ...proof, riskDigest: undefined },
     {
-      message: 'CUTOVER_RECOVERY_IMPORT_UNPROVEN',
+      scope: 'retirement-and-failure-only',
+      knownEffect: false,
+      phase: 'backup_verified',
+      effectCount: 1,
+      releaseReady: false,
+      recoveryLinked: !recoveryDrift,
+      recoveryRejected: recoveryDrift,
+      riskDigest: undefined,
     },
   );
-assert.equal(await query('SELECT COUNT(*) FROM sample'), '1');
-console.log(
-  fullSource
-    ? 'PASS actual distinct no-network MySQL source -> mysqldump/age -> original recovery session -> full comparison -> all61 migrations -> source unchanged -> original sealed backup receipt. Mac coordinator; production physical stop/SSH and full cutover NOT proven.'
-    : runtimeRoot
-      ? 'PASS actual same coordinator child pipes/file journal + pinned no-network Docker + age fd import + original full snapshot + all61 original migrations + schema/business check. Physical stopped facts/source SSH synthetic; not production/complete release proof.'
-      : 'PASS actual pinned no-network Docker + authenticated age import over real coordinator child pipes and file journal; UTF8/BLOB/NULL/trigger/event and repeat refusal; physical stopped facts/source SSH synthetic, no production or migration proof',
-);
+  assert.match(proof.riskDigest, /^[a-f0-9]{64}$/);
+  assert.equal(
+    await query('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()'),
+    '0',
+  );
+  console.log(
+    recoveryDrift
+      ? 'PASS real Linux site rejected newly identified external work during original Mac recovery attach; target empty, no receipt/candidate/replay. NOT full cutover.'
+      : 'PASS same actual Linux stopped attempt/site/journal -> original Mac recovery pipes -> pinned isolated target identity; source export/restore/candidate tail intentionally NOT configured, no backup receipt or replay. NOT full cutover.',
+  );
+} else {
+  assert.equal(
+    await query('SELECT HEX(text_value), HEX(payload), optional_value IS NULL FROM sample'),
+    'E6B5B7E8BEB9\t00FF5C27\t1',
+  );
+  assert.equal(
+    await query('SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA=DATABASE()'),
+    '1',
+  );
+  assert.equal(
+    await query('SELECT COUNT(*) FROM information_schema.EVENTS WHERE EVENT_SCHEMA=DATABASE()'),
+    '1',
+  );
+  if (!fullSource)
+    await assert.rejects(
+      restoreFirstCutoverAgeBackup(request, { ...io, assertScope: async () => {} }),
+      {
+        message: 'CUTOVER_RECOVERY_IMPORT_UNPROVEN',
+      },
+    );
+  assert.equal(await query('SELECT COUNT(*) FROM sample'), '1');
+  console.log(
+    fullSource
+      ? 'PASS actual distinct no-network MySQL source -> mysqldump/age -> original recovery session -> full comparison -> all61 migrations -> source unchanged -> original sealed backup receipt. Mac coordinator; production physical stop/SSH and full cutover NOT proven.'
+      : runtimeRoot
+        ? 'PASS actual same coordinator child pipes/file journal + pinned no-network Docker + age fd import + original full snapshot + all61 original migrations + schema/business check. Physical stopped facts/source SSH synthetic; not production/complete release proof.'
+        : 'PASS actual pinned no-network Docker + authenticated age import over real coordinator child pipes and file journal; UTF8/BLOB/NULL/trigger/event and repeat refusal; physical stopped facts/source SSH synthetic, no production or migration proof',
+  );
+}

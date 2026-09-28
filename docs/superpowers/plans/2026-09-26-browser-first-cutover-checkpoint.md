@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 21:16Z heartbeat：真实停写日志已接原Mac恢复握手，仍未接源导出/候选尾段
+
+承接`30eedbea`，只扩展两个原QA夹具。`browser-recovery-target-qa.mjs`新增`CUTOVER_QA_RETIREMENT=1`，通过已有Linux镜像的stdin/stdout运行原物理停止夹具新`--execution-site-recovery`模式；不建新传输协议、不重建镜像、不挂宿主Docker socket或恢复私钥。Linux真实transition/site/journal/PM2/pidfd完成原停止后，用同一binding、scopeDigest、绝对窗口和`site.recovery.assertScope`连接原Mac恢复端，检查真正独立Docker目标身份并关闭握手。目标只读且保持空，未输出备份回执。
+
+配对反例`CUTOVER_QA_RECOVERY_DRIFT=1`在握手第三次现场检查时提供合成的具体已知未决动作，原site拒绝；断言拒绝发生在窗口到期前、原风险摘要保留、候选未启动、无backupReceipt、外部计数仍1及目标仍空。不是等待超时当通过。正常模式检查完成后仍明确抛`CUTOVER_QA_RESTORE_NOT_CONFIGURED`，保留失败，不以检查目标代替真实源导出/恢复。
+
+**边界：** 此处是同attempt的“物理停止→受现场检查约束的跨端握手→拒绝未配置恢复”段；没有把上一轮独立源备份夹具的成功拼接成同attempt备份成功。完整host预检/候选安装、其他主机/入口/业务事实、真实源导出、恢复/61SQL/新候选/readiness/open仍未整体接入。源身份为明确的合成占位，仅用于协议分离验证；本模式没有调用它导出数据。Linux端仅收到公开scope，Mac私钥不进容器。原CLI execute关闭。
+
+验证明细、初始PID1拒绝与QA stdin清理记录见verification新增段。原未知/已知Linux入口因夹具变更做关联回归各1/1、退出0、零跳过；不是重做商户、13表、TCP或旧通道。生产凭据受阻路径未重试，无SSH/生产变更/支付方操作/PR/push/合并/部署。原缓存保留。
+
+本轮最终：跨端正常模式退出0，已知工作新鲜窗口拒绝及清理退出0（约15秒，不再等待120秒截止）；原ops120/59/16/868及Python12全部退出0、零跳过。两MJS Biome/node语法/diff检查通过。测试进程均结束，Linux夹具容器已自动移除；最后单独核验目标仍0表后删除该空QA容器及专属卷，只有可重建合成设施，无用户数据；所有日志保留，Docker读回仅原健康MySQL/Redis。未重跑完整browser/应用套件，没有独立整分支审查，不标Task4完成。
+
+下一步沿现有原host/site.backup把源导出接到同一Linux协调器，然后再消费已验证的恢复/迁移段；不能继续把每段单测通过当整项完成。已有QA停止镜像没有数据库客户端，而原源导出要求本机批准的mysqldump与受保护配置；本轮未安装依赖、未改变镜像或替换导出器。必须解决这一实际执行位置/受保护源工具接线，再接候选尾段，不能虚构源SQL或把旧回执上传成新成功。生产独立facts、真实恢复、非PayPal恢复及整分支审查仍未完成。
+
 ### 2026-09-29 20:15Z heartbeat：独立源库到原恢复会话和日志回执的备份段已接通
 
 承接`8e83ea76`，Task4原BASE不变。在原`browser-recovery-target-qa.mjs`增加独立源容器模式，调用原`backupAndRestoreCheck`、真实mysqldump/age、原Mac恢复会话、原完整快照比较器、原61SQL迁移工具与实际`journal.bindBackupReceipt`。源和目标是不同serverUUID、不同专属卷的无网络MySQL8容器，不再以同实例两个库或硬编码SQL冒充源导出。恢复前后源快照一致，迁移后业务摘要一致，中文/BLOB/NULL/触发器/事件及原日志实际落盘回执均断言；重复回执绑定被拒绝。仅QA合成样本/QA密钥，未触碰真实恢复私钥、生产数据库或支付服务。
