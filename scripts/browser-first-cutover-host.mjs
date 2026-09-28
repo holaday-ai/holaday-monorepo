@@ -62,21 +62,28 @@ const privateFile = (stat) =>
 const privateDirectory = (stat) =>
   stat.isDirectory() && stat.uid === 0 && (stat.mode & 0o7777) === 0o700;
 
-// Same closed tool set as the protected ingress bundle. These are source
-// attestations, not readiness evidence or permission to perform a cutover.
+// Closed coordinator/site/transition module set, including their session
+// clients. Remote tools and native helpers have separate protected identities;
+// importing this bundle is not readiness evidence or cutover authorization.
 const coordinatorModules = [
   'browser-backup-age.mjs',
   'browser-cutover-evidence.mjs',
   'browser-first-cutover-backup.mjs',
   'browser-first-cutover-fence.mjs',
+  'browser-first-cutover-gateway-session.mjs',
   'browser-first-cutover-host.mjs',
   'browser-first-cutover-ingress-files.mjs',
   'browser-first-cutover-ingress-session.mjs',
   'browser-first-cutover-inventory.mjs',
   'browser-first-cutover-mysql.mjs',
   'browser-first-cutover-nginx.mjs',
+  'browser-first-cutover-payments.mjs',
+  'browser-first-cutover-recovery-session.mjs',
+  'browser-first-cutover-registrations.mjs',
   'browser-first-cutover-runtime.mjs',
+  'browser-first-cutover-site.mjs',
   'browser-first-cutover-startup.mjs',
+  'browser-first-cutover-transition.mjs',
   'browser-maintenance-host.mjs',
   'browser-maintenance-journal.mjs',
   'browser-maintenance-linux.mjs',

@@ -14,14 +14,20 @@ const modules = [
   'browser-cutover-evidence.mjs',
   'browser-first-cutover-backup.mjs',
   'browser-first-cutover-fence.mjs',
+  'browser-first-cutover-gateway-session.mjs',
   'browser-first-cutover-host.mjs',
   'browser-first-cutover-ingress-files.mjs',
   'browser-first-cutover-ingress-session.mjs',
   'browser-first-cutover-inventory.mjs',
   'browser-first-cutover-mysql.mjs',
   'browser-first-cutover-nginx.mjs',
+  'browser-first-cutover-payments.mjs',
+  'browser-first-cutover-recovery-session.mjs',
+  'browser-first-cutover-registrations.mjs',
   'browser-first-cutover-runtime.mjs',
+  'browser-first-cutover-site.mjs',
   'browser-first-cutover-startup.mjs',
+  'browser-first-cutover-transition.mjs',
   'browser-maintenance-host.mjs',
   'browser-maintenance-journal.mjs',
   'browser-maintenance-linux.mjs',
@@ -34,6 +40,23 @@ const modules = [
   'browser-payment-port-fence.mjs',
 ];
 const hash = (v) => createHash('sha256').update(v).digest('hex');
+
+test('the protected coordinator bundle loads its real module closure without the checkout', async (t) => {
+  const root = await fs.mkdtemp(join(tmpdir(), 'holaday-coordinator-closure-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  for (const name of modules) await fs.copyFile(new URL(name, import.meta.url), join(root, name));
+  const probe = join(root, 'closure-import-probe.mjs');
+  await fs.writeFile(probe, 'await import(process.argv[2]);\n', { mode: 0o600 });
+  for (const entry of ['host', 'site', 'transition']) {
+    const result = spawnSync(
+      process.execPath,
+      [probe, join(root, `browser-first-cutover-${entry}.mjs`)],
+      { cwd: root, env: { PATH: process.env.PATH }, encoding: 'utf8', timeout: 10_000 },
+    );
+    assert.equal(result.status, 0, result.stderr);
+  }
+});
+
 const binding = {
   attempt: '12345678-1234-4234-8234-123456789abc',
   candidate: 'a'.repeat(40),
@@ -179,6 +202,7 @@ test('coordinator identity belongs to the fixed approved entry and actual candid
 for (const fault of [
   'candidate-bytes',
   'missing-module',
+  'missing-site',
   'writable-file',
   'wrong-entry',
   'wrong-argv',
@@ -202,6 +226,8 @@ for (const fault of [
     if (fault === 'candidate-bytes')
       f.source.set('browser-first-cutover-host.mjs', Buffer.from('different candidate code'));
     if (fault === 'missing-module') await fs.unlink(path);
+    if (fault === 'missing-site')
+      await fs.unlink(f.local(`${f.folder}/browser-first-cutover-site.mjs`));
     if (fault === 'writable-file') await fs.chmod(path, 0o644);
     if (fault === 'wrong-entry')
       await fs.writeFile(f.local('/proc/910/cmdline'), 'node\0arbitrary.mjs\0');

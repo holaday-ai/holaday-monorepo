@@ -6,6 +6,22 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 夜间续跑：真实WS恢复配对通过，现场工具模块闭包补齐
+
+承接`b9454ca1`，原Task4 BASE不变。原执行步骤重启集成用例扩为旧模式/受控模式配对：真实MySQL持久任务/步骤、JWT和WS，旧模式派发一次、受控模式不重派发，历史任务/步骤整行保持不变；DrainController及状态文件真实，开放授权回调明确合成。仅在临时源码副本删除保护，实际收到click使严格分支断言失败（3通过/1失败、退出1）；恢复原实现后原三组WS **9/9**、队列 **54/54**，退出0、零跳过。不是完整切换或外部效果“恰好一次”证明。
+
+原协调器22模块只覆盖检查入口；把已有site/transition及gateway-session/payments/recovery-session/registrations六模块纳入原严格受保护集合，共28文件，没有新增框架或打开execute。真实文件复制到独立目录并用真实子进程导入host/site/transition；新清单先RED（15失败/4通过），正式清单补齐后19/19。LinuxNode22既有QA镜像、无网络/只读源码/1核512MB，最终 **19/19**、零跳过、退出0。身份/Git/proc用例仍合成，只证明模块包与校验契约，不冒充完整root现场安装/执行。
+
+本轮完整browser **998/998**、零跳过、退出0（`/tmp/holaday-recovery-closure-browser-final.log`）；orchestrator类型检查2GB堆退出0（`/tmp/holaday-recovery-typecheck-final.log`）。首轮1536MB类型检查OOM退出134，不算通过；结束QA数据库后串行2GB复核成功，未启动更多重型任务。未重跑此前8602项应用全套。原ops最终 **120/59/16/847 + Python12**、零跳过、退出0（`/tmp/holaday-recovery-closure-ops.log`），全部测试已结束。checkpoint/ledger首次写入审核超时未执行，核对无变化后仅原样重试一次获准成功，未绕过权限。
+
+现场只读UTC2026-09-28T16:18:20.951Z：既有跳板→Vultr9223，前后监听归属稳定，1个page/1个about:blank/其他0，只输出数量/摘要。没有页面导航、内容/cookie/profile读取、关闭页面、SQL或支付方访问。`/private/tmp/holaday-browser-source-observation.Q34mom/proof.json`退出0；它不是无脚本/无外部效果/已隔离证明，不能填knownExternalWork或unknownWriters零值。
+
+完整边界、日志和未完成矩阵已写原Task6预定文件`2026-09-25-browser-first-cutover-verification.md`。实际恢复测试用无.env源码快照、清空环境、新建独立MySQL13316/Redis16379/WS端口；Mac应用+LinuxDB，不能声称Linux应用通过。专用容器`holaday-recovery-{mysql,redis}-0c24df2bc9ea998f`与专用网络在核对标签后已清理，只删除合成测试数据；原MySQL/Redis健康，原缓存保留。日志与临时无secret源码快照保留。
+
+已知测试环境修正：首次DB连接沙箱EPERM/4skip不计RED；获测试网络权限后才取得变异断言失败。Linux导入探针误用argv先触发CLI、再触发不存在文件realpath，改真实probe文件后通过，未改生产入口。env-i省略TMPDIR使两个原Mac发布夹具继承wheel组，完整browser首轮995/998，显式用户TMPDIR及最终probe修正后998/998。记录失败，不降低断言。
+
+**下一步不可省略：** 独立现场knownExternalWork/unknownWriters及所有恢复来源facts仍未完整接入；不能用本轮空白浏览器、WS配对或28模块导入替代。继续原6.R3全流程成功/故障/丢响应不重放、单次现场入口、实际停写备份/Mac恢复、非PayPal恢复证据及整分支审查。执行开关保持关闭，R2/Task4–6未完成，自动化继续ACTIVE；本轮无push/PR/合并/部署，不重做商户/密钥/USB/通道或PayPal。串行自审不是独立整分支审查。
+
 ### 2026-09-29 4.R2继续：旧版本能力缺口绑定现场源码，真实只读核对通过
 
 承接`d27db17b`，Task4原BASE`844c2ced`不变。原collector增加固定旧版本`107857fe70503e30691073f267d87275596edb20`的六文件能力核对（http/index/router/task-queue/batch-executor/browser-pool）：两遍真实字节哈希、固定物理路径、普通文件及有界读取、前后元数据一致；错误、版本/字节改变、超时不能解释成unobservable。只返回源版本/时间/能力摘要；不执行旧应用、不采集业务内容。六文件对应已审查的“无完整in-flight接口”缺口，不声称覆盖全部依赖、运行时实例、外部工作或零活动。

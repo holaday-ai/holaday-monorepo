@@ -1,4 +1,8 @@
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { DrainController } from '../execution/drain-controller.js';
 
 const WS_TEST_PORT = Number(process.env.WS_PORT ?? '38200') + 16;
 
@@ -20,13 +24,16 @@ function must<T>(v: T | null | undefined, n: string): T {
 
 /**
  * W1 rehearsal backlog b1: a task left in status='executing' across an
- * orchestrator restart must have its current step re-dispatched on
- * reconnect. Previously only awaiting_user and paused were re-emitted;
+ * legacy orchestrator restart has its current step re-dispatched on
+ * reconnect. A controlled candidate must not recreate that authority.
+ * Previously only awaiting_user and paused were re-emitted;
  * an executing task would sit idle until the user manually re-triggered
  * it — a real correctness gap for crash recovery.
  */
 describe('restart recovery: executing re-emits server.task.dispatch', () => {
   let close: () => Promise<void> = async () => {};
+  let control: DrainController | undefined;
+  let controlDirectory: string | undefined;
 
   beforeAll(async () => {
     const { applyMigrations } = await import('../test/db-helper.js');
@@ -34,17 +41,28 @@ describe('restart recovery: executing re-emits server.task.dispatch', () => {
   });
 
   afterEach(async () => {
-    await close();
-    close = async () => {};
+    try {
+      await close();
+    } finally {
+      close = async () => {};
+      control?.state.abandon();
+      control = undefined;
+      if (controlDirectory) rmSync(controlDirectory, { recursive: true });
+      controlDirectory = undefined;
+    }
   });
 
-  it('reconnecting client resumes the in-flight executing step', async () => {
+  // Removing server.ts's strict rehydration guard must fail the strict case;
+  // removing all legacy dispatch must fail the paired legacy case.
+  it.each([false, true])('reconnect obeys execution authority (strict=%s)', async (strict) => {
     const { newExternalId, WS_SUBPROTOCOL, parseServerMessage } = await import(
       '@holaday/shared-types'
     );
     const { db } = await import('../db/client.js');
     const { eq } = await import('drizzle-orm');
     const { users } = await import('../db/schema/users.js');
+    const { tasks } = await import('../db/schema/tasks.js');
+    const { taskSteps } = await import('../db/schema/task-steps.js');
     const { TaskController } = await import('../agent/task-controller.js');
     const { TaskRepository } = await import('../agent/task-repository.js');
     const { signAccessToken } = await import('../auth/jwt.js');
@@ -101,41 +119,78 @@ describe('restart recovery: executing re-emits server.task.dispatch', () => {
     expect(s1.status).toBe('executing');
     expect(s1.cursor).toBe(1);
     await repo.applyStepResult(s0, s1, { note: 'arrived' });
+    const taskBefore = must(
+      (await db.select().from(tasks).where(eq(tasks.externalId, s0.taskId)))[0],
+      'persisted task',
+    );
+    const stepsBefore = await db
+      .select()
+      .from(taskSteps)
+      .where(eq(taskSteps.taskId, taskBefore.id))
+      .orderBy(taskSteps.id);
 
     // "Restart": fresh loadRehydratedTasks + fresh WS server + reconnect.
     const summary = await loadRehydratedTasks();
     expect(summary.taskCount).toBeGreaterThanOrEqual(1);
 
+    if (strict) {
+      controlDirectory = realpathSync(mkdtempSync(join(tmpdir(), 'hd-ws-recovery-')));
+      const identity = { epoch: 'a'.repeat(32), candidate: 'b'.repeat(40), bootId: 'c'.repeat(32) };
+      writeFileSync(
+        join(controlDirectory, 'state.json'),
+        `${JSON.stringify({
+          schemaVersion: 1,
+          ...identity,
+          bootId: 'd'.repeat(32),
+          sequence: 1,
+          mode: 'closed',
+          dirty: false,
+        })}\n`,
+        { mode: 0o600 },
+      );
+      // Opening authorization is synthetic here; state storage, controller,
+      // DB rehydration, JWT authentication and WS delivery remain real.
+      control = new DrainController(controlDirectory, identity, async () => {});
+      const session = control.connect();
+      const opened = await control.execute(
+        session,
+        Buffer.from(
+          `${JSON.stringify({
+            protocol: 1,
+            op: 'open',
+            ...identity,
+            version: 2,
+            serial: 1,
+            expiresAt: Date.now() + 10_000,
+          })}\n`,
+        ),
+      );
+      expect(opened.ok).toBe(true);
+    }
     const port = WS_TEST_PORT;
-    const ws = createWsServer(port, { authenticateToken: authenticateSignedTestToken });
+    const ws = createWsServer(port, {
+      authenticateToken: authenticateSignedTestToken,
+      executionDrain: control,
+    });
     close = async () => {
+      for (const socket of ws.wss.clients) socket.terminate();
       await ws.close();
     };
 
     const token = await signAccessToken({ sub: userExternalId, plan: 'free' });
     const client = new WebSocket(`ws://127.0.0.1:${port}`, [WS_SUBPROTOCOL, `jwt.${token}`]);
 
-    const dispatchPromise = new Promise<{
-      taskId: string;
-      stepId: string;
-      kind: string;
-    }>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('no dispatch re-emitted')), 5_000);
-      client.on('message', (raw) => {
-        const parsed = parseServerMessage(raw.toString());
-        if (parsed.success && parsed.data.type === 'server.task.dispatch') {
-          clearTimeout(timer);
-          resolve({
-            taskId: parsed.data.taskId,
-            stepId: parsed.data.stepId,
-            kind: parsed.data.action.kind,
-          });
-        }
-      });
-      client.on('error', (err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
+    const frames: string[] = [];
+    const dispatches: Array<{ taskId: string; stepId: string; kind: string }> = [];
+    client.on('message', (raw) => {
+      frames.push(JSON.parse(raw.toString()).type);
+      const parsed = parseServerMessage(raw.toString());
+      if (parsed.success && parsed.data.type === 'server.task.dispatch')
+        dispatches.push({
+          taskId: parsed.data.taskId,
+          stepId: parsed.data.stepId,
+          kind: parsed.data.action.kind,
+        });
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -144,10 +199,28 @@ describe('restart recovery: executing re-emits server.task.dispatch', () => {
     });
     client.send(JSON.stringify({ type: 'client.hello', token, extensionVersion: 'web-workbench' }));
 
-    const dispatch = await dispatchPromise;
-    expect(dispatch.taskId).toBe(s0.taskId);
-    expect(dispatch.stepId).toBe(step2Id);
-    expect(dispatch.kind).toBe('click');
+    await vi.waitFor(() => expect(frames).toContain('server.welcome'));
+    // Ordered server-to-client marker avoids treating a short sleep or an
+    // unauthenticated/closed socket as proof of no replay. Executing hydration
+    // has no awaited DB write on this valid-cursor path.
+    must([...ws.wss.clients][0], 'server socket').send(
+      JSON.stringify({ type: 'synthetic.recovery.marker' }),
+    );
+    await vi.waitFor(() => expect(frames).toContain('synthetic.recovery.marker'));
+    expect(dispatches).toEqual(
+      strict ? [] : [{ taskId: s0.taskId, stepId: step2Id, kind: 'click' }],
+    );
+    expect(frames).not.toContain('server.error');
+    expect((await db.select().from(tasks).where(eq(tasks.id, taskBefore.id)))[0]).toEqual(
+      taskBefore,
+    );
+    expect(
+      await db
+        .select()
+        .from(taskSteps)
+        .where(eq(taskSteps.taskId, taskBefore.id))
+        .orderBy(taskSteps.id),
+    ).toEqual(stepsBefore);
 
     client.close();
   });
@@ -236,10 +309,7 @@ describe('restart recovery: executing re-emits server.task.dispatch', () => {
     });
     extension.send(JSON.stringify({ type: 'client.hello', token, extensionVersion: '0.0.1' }));
 
-    await Promise.race([
-      new Promise((resolve) => setTimeout(resolve, 100)),
-      extensionDispatch,
-    ]);
+    await Promise.race([new Promise((resolve) => setTimeout(resolve, 100)), extensionDispatch]);
 
     const web = new WebSocket(`ws://127.0.0.1:${port}`, [WS_SUBPROTOCOL, `jwt.${token}`]);
     const webDispatch = new Promise<{
@@ -364,7 +434,9 @@ describe('restart recovery: executing re-emits server.task.dispatch', () => {
         client.once('open', () => resolve());
         client.once('error', reject);
       });
-      client.send(JSON.stringify({ type: 'client.hello', token, extensionVersion: 'web-workbench' }));
+      client.send(
+        JSON.stringify({ type: 'client.hello', token, extensionVersion: 'web-workbench' }),
+      );
 
       const terminal = await terminalPromise;
       expect(terminal).toEqual({
