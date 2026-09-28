@@ -5,6 +5,7 @@ import { readCutoverRehearsalArtifacts } from './browser-cutover-evidence.mjs';
 import { connectFirstCutoverGatewaySession } from './browser-first-cutover-gateway-session.mjs';
 import {
   createFirstCutoverRetirementObserver,
+  readFirstCutoverBackupPlan,
   readFirstCutoverCandidateRuntime,
   readFirstCutoverHostPair,
   readFirstCutoverPaymentScope,
@@ -39,6 +40,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     readCandidateRuntime: readFirstCutoverCandidateRuntime,
     readRehearsal: readCutoverRehearsalArtifacts,
     readPaymentScope: readFirstCutoverPaymentScope,
+    readBackupPlan: readFirstCutoverBackupPlan,
     inspectSource: readReviewedFirstCutoverLegacySource,
     createIngress: createFirstCutoverIngressPair,
     connectGateway: connectFirstCutoverGatewaySession,
@@ -63,7 +65,6 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       'resumeWorker',
       'reconcile',
       'holdMaintenance',
-      'readBackupPlan',
     ].some((k) => typeof io.facts?.[k] !== 'function')
   )
     fail();
@@ -450,7 +451,23 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     resumeWorker: (ctx, id) =>
       run('worker', ctx, ['verified'], () => facts.resumeWorker(context, id)),
     readBackupPlan: (ctx) =>
-      run('backup-plan', ctx, ['backup_verified'], () => facts.readBackupPlan(context), false),
+      run(
+        'backup-plan',
+        ctx,
+        ['backup_verified'],
+        async () => {
+          const record = await guard(context, ['backup_verified']);
+          await stopped();
+          const plan = await (facts.readBackupPlan ?? io.readBackupPlan)(
+            context,
+            approvedInventory(),
+          );
+          await stopped();
+          if (!equal(record, await guard(context, ['backup_verified']))) fail();
+          return plan;
+        },
+        false,
+      ),
     // Host owns reconciliation's longer deadline and protective close. Neither
     // callback reopens sessions or performs an implicit ingress restoration.
     reconcile: (ctx, id) => {

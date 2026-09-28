@@ -765,6 +765,63 @@ export async function readFirstCutoverPaymentScope(context, input, overrides = {
   }
 }
 
+/** Select the original backup plan only after physical stop has been checked by
+ * the site. This verifies the connected SOURCE, not target isolation or restore;
+ * the existing backup coordinator must independently verify both databases. */
+export async function readFirstCutoverBackupPlan(context, input, overrides = {}) {
+  const code = 'CUTOVER_BACKUP_PLAN_UNPROVEN';
+  try {
+    const inventory = structuredClone(input);
+    const plan = inventory?.backupPlan;
+    const validIdentity = (v) =>
+      v &&
+      isDeepStrictEqual(Object.keys(v).sort(), ['database', 'serverUuid']) &&
+      /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(v.serverUuid ?? '') &&
+      /^[a-zA-Z0-9_]{1,64}$/.test(v.database ?? '');
+    if (
+      !inventory ||
+      createHash('sha256').update(JSON.stringify(inventory)).digest('hex') !==
+        context?.binding?.inventoryDigest ||
+      !plan ||
+      !isDeepStrictEqual(Object.keys(plan).sort(), ['isolatedTarget', 'sourceIdentity']) ||
+      !validIdentity(plan.sourceIdentity) ||
+      !validIdentity(plan.isolatedTarget) ||
+      plan.sourceIdentity.serverUuid === plan.isolatedTarget.serverUuid
+    )
+      throw new Error(code);
+    const record = structuredClone(await context.journal.readFirstCutoverEffects());
+    const assertPhase = async () => {
+      if (
+        record.phase !== 'backup_verified' ||
+        !['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].every(
+          (k) => record[k] === context.binding[k],
+        ) ||
+        !isDeepStrictEqual(record, await context.journal.readFirstCutoverEffects())
+      )
+        throw new Error(code);
+    };
+    await assertPhase();
+    return await withApprovedCutoverDatabase(context, overrides, code, async (connection) => {
+      for (let sample = 0; sample < 2; sample++) {
+        await assertPhase();
+        const [rows] = await connection.query(
+          'SELECT @@server_uuid AS serverUuid, DATABASE() AS `database`',
+        );
+        if (
+          !Array.isArray(rows) ||
+          rows.length !== 1 ||
+          !isDeepStrictEqual(rows[0], plan.sourceIdentity)
+        )
+          throw new Error(code);
+      }
+      await assertPhase();
+      return plan;
+    });
+  } catch {
+    throw new Error(code);
+  }
+}
+
 async function withApprovedCutoverDatabase(context, overrides, errorCode, read) {
   const io = {
     ...candidatePreparationSystem(),

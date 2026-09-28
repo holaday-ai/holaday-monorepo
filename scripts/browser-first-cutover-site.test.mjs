@@ -685,6 +685,43 @@ test('site sends selected orders through the existing gateway only within the sa
   await site.lifecycle.detach(f.context);
 });
 
+test('site connects the backup plan reader only around fresh physical-stop checks', async (t) => {
+  const f = await fixture(t);
+  f.io.facts.readBackupPlan = undefined;
+  let reads = 0;
+  const plan = {
+    sourceIdentity: { database: 'source_qa' },
+    isolatedTarget: { database: 'restore_qa' },
+  };
+  f.io.readBackupPlan = async (context, inventory) => {
+    assert.equal(context.journal, f.journal);
+    assert.deepEqual(inventory, f.scope.inventory);
+    assert.equal((await f.journal.readFirstCutoverEffects()).phase, 'backup_verified');
+    reads++;
+    return plan;
+  };
+  const site = f.make();
+  await site.lifecycle.attach(f.context);
+  for (const phase of [
+    'prepared',
+    'orders_fenced',
+    'legacy_settled',
+    'producers_stopped',
+    'all_fenced',
+    'stopped',
+    'backup_verified',
+  ])
+    await f.journal.persist(phase, { candidate: f.binding.candidate });
+  f.state.producers = 0;
+  f.state.gateways = 0;
+  assert.deepEqual(await site.lifecycle.readBackupPlan(f.context), plan);
+  assert.equal((await f.journal.readFirstCutoverEffects()).backupReceipt, undefined);
+  f.state.busy = 1;
+  await assert.rejects(site.lifecycle.readBackupPlan(f.context), /UNPROVEN/);
+  assert.equal(reads, 1);
+  await site.lifecycle.detach(f.context);
+});
+
 test('site refuses missing independent business facts before opening either session', async (t) => {
   const f = await fixture(t);
   f.io.facts.observeWork = undefined;

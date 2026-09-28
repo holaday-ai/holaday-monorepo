@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 续跑：备份计划连接实际源库身份与原 stopped 观察
+
+承接 `5b2fb301`。原 site 的 `readBackupPlan` 现在有默认现场读者，不再必须由外部回调手填返回值。复用现有受保护 `inventory.backupPlan: {sourceIdentity,isolatedTarget}` 与原专用数据库连接，核对完整清单/候选配置摘要、同一 journal 的 `backup_verified` 意图阶段，两次实际读取源库 `@@server_uuid/DATABASE()`；源库不符、阶段漂移、查询或连接关闭失败均拒绝。site 调用前后独立执行原物理 stopped 检查，未生成备份回执、未提前证明恢复成功。按已定 Mac 恢复路径拒绝源库与目标共用 serverUuid；目标仍是待独立核验的批准身份，不把 metadata 当隔离证明。
+
+缺失host方法、缺失site默认接线两项RED→GREEN；host/site **101/101**，完整browser **914/914**，Linux四组 **148/148**，ops **120/59/16/748 + Python12**，均退出0、0跳过。日志 `/tmp/holaday-backup-{plan-red,site-red,site-green,plan-linux,plan-browser,plan-ops}.log`。真实MySQL8.0合成库验证源身份匹配、错误批准源拒绝及数据不变，退出0：`/tmp/holaday-backup-plan-mysql.log`；沿用原十二表/支付只读夹具，不查询商户或动生产数据。临时容器 `holaday-first-cutover-qa-a645c19e052fb381` 与合成匿名卷已移除，原MySQL/Redis不动。一次ops启动时上一browser会话尚未交付退出结果；随后进程核验browser已结束，仅ops运行，不再启动并发重型任务。不是应用全套、真实源库备份或目标恢复/迁移验收。
+
+**下一步仍为原闭环，不重做已完成读者：** 备份设施及实际导出→Mac隔离恢复的现场I/O、原 worker 定向持久启动/reconcile/hold、工具安装和首次execute；在此前继续解决独立旧来源DB归属、在途请求/浏览器/provider及writer观测。只读核对旧Git `107857fe...` 的 `TaskQueue` 接口仅有enqueue/signalSlotFreed/size/snapshot/stop，`inFlight`是闭包内变量、snapshot仅排队项；`http.ts` 的 `/healthz` 仅status/env/time/executor。这些接口不能直接作为全部内存工作已空的证据，不能填默认零值或用新候选协议冒充旧实例。未改旧运行程序、未增加调试端口或发送进程信号。
+
+Task4原BASE844c2ced不变；Task4–6未完成，CLI execute仍关闭。PayPal/历史订单/商户核查/恢复密钥/只读通道/UI/浏览器产品代码均未动；没有push/PR/merge/部署。保留原 `scripts/__pycache__/`。
+
 ### 2026-09-28 续跑：原签名查单器接入同一阿里云 gateway 会话
 
 承接 `76ea3b23`，Task4 BASE844c2ced不变。本轮补上 site 的第五个 readiness 回调 `queryOrders`，经原 gateway 会话调用既有 `apps/cn-payment/scripts/payment-cutover-query.ts`。同一 journal/审批/清单/绝对窗口，prepare 与 preopen 不改变原时序；客户端只响应 ownership/effects，只收七字段脱敏观察。请求先核对整批 SQL 选中行，PayPal/重复/商户环境冲突/行摘要变化在任何商户请求前拒绝。业务原文与凭据不回 Mac，不修改订单、回调或权益。

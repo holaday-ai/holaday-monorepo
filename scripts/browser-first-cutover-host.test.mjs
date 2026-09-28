@@ -99,6 +99,92 @@ test('persisted-work host reader owns and closes a dedicated approved database c
   }
 });
 
+test('backup plan reads the actual source identity and never treats a configured target as restored', async () => {
+  assert.equal(typeof firstHost.readFirstCutoverBackupPlan, 'function');
+  const sourceIdentity = {
+    serverUuid: '11111111-1111-4111-8111-111111111111',
+    database: 'source_qa',
+  };
+  const isolatedTarget = {
+    serverUuid: '22222222-2222-4222-8222-222222222222',
+    database: 'restore_qa',
+  };
+  const config = Buffer.from('DATABASE_URL=mysql://synthetic@127.0.0.1/source_qa');
+  for (const fault of [
+    'none',
+    'source',
+    'target-same-server',
+    'inventory',
+    'phase',
+    'phase-drift',
+    'query',
+    'close',
+  ]) {
+    const inventory = { backupPlan: { sourceIdentity, isolatedTarget: { ...isolatedTarget } } };
+    if (fault === 'target-same-server')
+      inventory.backupPlan.isolatedTarget.serverUuid = sourceIdentity.serverUuid;
+    const binding = {
+      ...Object.fromEntries(
+        ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map((k) => [
+          k,
+          approved[k],
+        ]),
+      ),
+      configDigest: createHash('sha256').update(config).digest('hex'),
+      inventoryDigest: createHash('sha256').update(JSON.stringify(inventory)).digest('hex'),
+    };
+    if (fault === 'inventory')
+      inventory.backupPlan.sourceIdentity = { ...sourceIdentity, database: 'other' };
+    let phase = fault === 'phase' ? 'preflight' : 'backup_verified';
+    const context = {
+      binding,
+      approval: { ...approved, ...binding },
+      root: `/opt/holaday-releases/${binding.candidate}`,
+      journal: {
+        assertOwnership: async () => binding,
+        readFirstCutoverEffects: async () => ({ ...binding, phase }),
+      },
+    };
+    const queries = [];
+    let closed = 0;
+    const io = {
+      platform: 'linux',
+      uid: 0,
+      now: () => 1000,
+      readConfig: async () => config,
+      parseConfig: () => ({ DATABASE_URL: 'mysql://synthetic@127.0.0.1/source_qa' }),
+      connectWorkDatabase: async () => ({
+        query: async (sql) => {
+          queries.push(sql);
+          assert.equal(sql, 'SELECT @@server_uuid AS serverUuid, DATABASE() AS `database`');
+          if (fault === 'query') throw new Error('private database error');
+          if (fault === 'phase-drift') phase = 'migration_started';
+          return [
+            [{ ...sourceIdentity, ...(fault === 'source' ? { database: 'wrong' } : {}) }],
+            [],
+          ];
+        },
+        end: async () => {
+          closed++;
+          if (fault === 'close') throw new Error('private close error');
+        },
+      }),
+    };
+    if (fault === 'none') {
+      assert.deepEqual(await firstHost.readFirstCutoverBackupPlan(context, inventory, io), {
+        sourceIdentity,
+        isolatedTarget,
+      });
+      assert.equal(queries.length, 2);
+    } else
+      await assert.rejects(
+        firstHost.readFirstCutoverBackupPlan(context, inventory, io),
+        /^Error: CUTOVER_BACKUP_PLAN_UNPROVEN$/,
+      );
+    assert.equal(closed, ['target-same-server', 'inventory', 'phase'].includes(fault) ? 0 : 1);
+  }
+});
+
 test('payment database site reader reuses approved connection and original read-only scope', async () => {
   assert.equal(typeof firstHost.readFirstCutoverPaymentScope, 'function');
   const config = Buffer.from('DATABASE_URL=mysql://synthetic@127.0.0.1/qa');

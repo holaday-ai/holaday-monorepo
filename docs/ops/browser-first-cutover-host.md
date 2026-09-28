@@ -53,6 +53,14 @@ detach关闭本次执行会话：成功路径在同实例恢复入口、恢复wo
 
 当前只有本地接线及合成签名测试，**尚未安装该查询包或真实 metadata，也未调用任何真实支付服务**。程序包应由同一候选与锁定依赖构建、独立审核绑定，不能临时提供任意脚本。恢复文件仍使用原root私密读者，不生成回执。业务内存工作、旧来源DB归属及连接/writer的独立事实、备份/worker/reconcile/hold和完整execute仍未就绪；下方接口要求继续有效。
 
+### 备份计划的实际源库核验（2026-09-28，本地接线，未执行生产备份）
+
+原 execution site 的 `readBackupPlan` 默认读取同一受保护 `inventory.backupPlan: {sourceIdentity, isolatedTarget}`；两个身份仍使用原 `{serverUuid,database}` 格式。完整清单摘要必须匹配批准，恢复目标按已定 Mac 恢复路径不得与源库共用 serverUuid。不是从命令行或当前数据库输出生成批准。
+
+site 在原 `backup_verified` **意图**阶段前后各调用已有物理 stopped 观察，再使用原受保护候选配置建立专用数据库连接；两次读取实际 `@@server_uuid/DATABASE()` 必须匹配源库身份，同一 journal/阶段/配置/截止在读取期间不变，连接失败或关闭失败均拒绝。没有导出、恢复、迁移或回执副作用，也没有向恢复目标连接。目标仍只是批准 metadata，必须由原 `backupAndRestoreCheck` 后续独立实测隔离与身份、真实恢复和比较；本读者不能充当 `backupReceipt`。
+
+真实 MySQL8.0 合成库已验证身份匹配和错误源库拒绝、读取不改变原行；不是生产源库身份或 Mac 恢复证明。加密设施、真实 source/target I/O、备份导出及恢复闭环仍待接通。
+
 ### 正式 nginx 测试、重载与生效观察（2026-09-28）
 
 `applyCutoverFence / restoreCutoverIngress`未提供成对的`testNginx / reloadNginx`替代接口时，现默认调用`browser-first-cutover-nginx.mjs`。现场必须提供同一操作的`nginx.maintenanceEndsAtMs`，沿用原journal/受保护入口回执；缺窗口、过期、非Linux/root或接口不完整时拒绝，不通过CLI接受任意命令。一个控制器只执行一次测试/重载，不把失败或丢确认改成可重试。

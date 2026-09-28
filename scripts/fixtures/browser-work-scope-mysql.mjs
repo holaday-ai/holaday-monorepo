@@ -5,7 +5,10 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { readCutoverWorkScope } from '../browser-cutover-evidence.mjs';
-import { readFirstCutoverPaymentScope } from '../browser-first-cutover-host.mjs';
+import {
+  readFirstCutoverBackupPlan,
+  readFirstCutoverPaymentScope,
+} from '../browser-first-cutover-host.mjs';
 
 const container = process.argv[2];
 assert.equal(process.argv.length, 3);
@@ -180,6 +183,31 @@ try {
   );
   console.log(
     'PASS real MySQL payment readiness: dedicated read-only connection, original scope, exact datetime/JSON and contradictory merchant refusal; synthetic metadata, no provider call',
+  );
+  // Actual source identity; target is deliberately only approved metadata here.
+  // This fixture never connects to it or claims a restored database.
+  inventory.backupPlan = {
+    sourceIdentity: { serverUuid: identity, database },
+    isolatedTarget: {
+      serverUuid: '22222222-2222-4222-8222-222222222222',
+      database: 'synthetic_recovery',
+    },
+  };
+  binding.inventoryDigest = createHash('sha256').update(JSON.stringify(inventory)).digest('hex');
+  context.approval.inventoryDigest = binding.inventoryDigest;
+  context.journal.readFirstCutoverEffects = async () => ({ ...binding, phase: 'backup_verified' });
+  const beforePlan = JSON.stringify((await connection.query('SELECT * FROM payments'))[0]);
+  assert.deepEqual(await readFirstCutoverBackupPlan(context, inventory, io), inventory.backupPlan);
+  inventory.backupPlan.sourceIdentity.database = 'wrong_source';
+  binding.inventoryDigest = createHash('sha256').update(JSON.stringify(inventory)).digest('hex');
+  context.approval.inventoryDigest = binding.inventoryDigest;
+  await assert.rejects(
+    readFirstCutoverBackupPlan(context, inventory, io),
+    /CUTOVER_BACKUP_PLAN_UNPROVEN/,
+  );
+  assert.equal(JSON.stringify((await connection.query('SELECT * FROM payments'))[0]), beforePlan);
+  console.log(
+    'PASS real MySQL backup source: actual server/database matched, contradictory approved source refused, no data mutation or restore claim',
   );
   await connection.query('DROP TABLE video_edit_render_attempts');
   await assert.rejects(readCutoverWorkScope(connection), /MAINTENANCE_WORK_SCOPE_UNPROVEN/);
