@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { removeSavedStartupEntries } from './browser-first-cutover-startup.mjs';
+import * as startup from './browser-first-cutover-startup.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -16,6 +17,70 @@ const target =
   '{"name":"holaday-files-cron","cron_restart":"0 * * * *","env":{"TOKEN":"test-only"}}';
 // Preserve raw retained data, including integers JSON.parse/stringify would round.
 const retained = '{ "name": "unrelated", "counter": 9007199254740993, "value": "a,}\\"b" }';
+
+test('candidate persistence reuses atomic two-file editor and preserves each unrelated raw entry', async (t) => {
+  const f = await fixture(t);
+  const removed = await removeSavedStartupEntries(f.input, f.io);
+  const identity = { candidate: 'c'.repeat(40), bootId: 'd'.repeat(32) };
+  const entries = ['holaday-orchestrator', 'holaday-account-closure-worker'].map((name) => ({
+    name,
+    pm_exec_path: `/opt/holaday-releases/${identity.candidate}/scripts/start-${name === 'holaday-orchestrator' ? 'orchestrator' : 'account-closure-worker'}-production.sh`,
+    pm_cwd: `/opt/holaday-releases/${identity.candidate}/apps/orchestrator`,
+    exec_interpreter: '/usr/bin/bash',
+    uid: 998,
+    gid: 998,
+    autorestart: false,
+    watch: false,
+    status: 'online',
+    exec_mode: 'fork_mode',
+    instances: 1,
+    pm_id: 11,
+    prev_restart_delay: 0,
+    env: { KEEP: 'synthetic-only' },
+  }));
+  const input = {
+    binding,
+    identity,
+    applicationGid: 998,
+    workerEnabled: true,
+    files: removed.files.map((v) => ({ path: v.path, digest: v.afterDigest, remove: [] })),
+    maintenanceEndsAtMs: 5000,
+  };
+  assert.equal(typeof startup.persistCandidateStartupEntries, 'function');
+  let checks = 0;
+  const io = {
+    ...f.io,
+    assertCandidate: async (id) => {
+      assert.deepEqual(id, identity);
+      checks++;
+      return structuredClone(entries);
+    },
+  };
+  const result = await startup.persistCandidateStartupEntries(input, io);
+  assert(checks > 2);
+  for (const [i, kept] of [retained, f.fallbackRetained].entries()) {
+    const content = await fs.readFile(f.path(result.files[i].path), 'utf8');
+    assert(content.includes(kept));
+    const list = JSON.parse(content);
+    assert.deepEqual(
+      list.map((v) => v.name),
+      [
+        i ? 'backup-only-app' : 'unrelated',
+        'holaday-orchestrator',
+        'holaday-account-closure-worker',
+      ],
+    );
+    for (const saved of list.slice(1)) {
+      assert.equal(saved.pm_id, undefined);
+      assert.equal(saved.instances, undefined);
+      assert.equal(saved.prev_restart_delay, undefined);
+      assert.equal(saved.env.KEEP, 'synthetic-only');
+    }
+    assert.equal(sha(content), result.files[i].afterDigest);
+  }
+  assert.equal(entries[0].pm_id, 11);
+  await assert.rejects(startup.persistCandidateStartupEntries(input, io), /UNPROVEN/);
+});
 
 async function fixture(t) {
   const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'startup-files-')));

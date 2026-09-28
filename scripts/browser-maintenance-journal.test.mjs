@@ -33,6 +33,75 @@ const firstMetadata = {
   inventoryDigest: '4'.repeat(64),
 };
 
+test('candidate startup intent must finish both exact files before opened and cannot bind another boot', async (t) => {
+  const journal = await acquireReleaseJournal(await fixture(t), firstMetadata);
+  t.after(() => journal.close());
+  await journal.bindManifest(manifest);
+  assert.equal(typeof journal.recordCandidateStartupEvent, 'function');
+  const owner = await journal.assertOwnership();
+  const identity = { candidate: metadata.candidate, bootId: '6'.repeat(32) };
+  const base = { attempt: owner.attempt, inventoryDigest: owner.inventoryDigest, ...identity };
+  await assert.rejects(
+    journal.recordCandidateStartupEvent({ ...base, phase: 'candidate-startup-backup-intent' }),
+    /UNPROVEN/,
+  );
+  for (const phase of [
+    'prepared',
+    'orders_fenced',
+    'legacy_settled',
+    'producers_stopped',
+    'all_fenced',
+    'stopped',
+    'backup_verified',
+  ])
+    await journal.persist(phase, { candidate: metadata.candidate });
+  await journal.bindBackupReceipt(await backupReceiptFor(journal));
+  await journal.persist('migration_started', { candidate: metadata.candidate });
+  await journal.bindBootstrapSeed('5'.repeat(32));
+  for (const phase of ['candidate_started', 'verified'])
+    await journal.persist(phase, { candidate: metadata.candidate, identity });
+  await assert.rejects(
+    journal.recordCandidateStartupEvent({
+      ...base,
+      bootId: '7'.repeat(32),
+      phase: 'candidate-startup-backup-intent',
+    }),
+    /UNPROVEN/,
+  );
+  const files = [
+    { path: '/root/.pm2/dump.pm2', beforeDigest: 'a'.repeat(64), afterDigest: 'b'.repeat(64) },
+    { path: '/root/.pm2/dump.pm2.bak', beforeDigest: null, afterDigest: 'c'.repeat(64) },
+  ];
+  await journal.recordCandidateStartupEvent({ ...base, phase: 'candidate-startup-backup-intent' });
+  await journal.recordCandidateStartupEvent({
+    ...base,
+    phase: 'candidate-startup-backed-up',
+    files,
+  });
+  for (const file of [...files].reverse()) {
+    await journal.recordCandidateStartupEvent({
+      ...base,
+      phase: 'candidate-startup-file-intent',
+      ...file,
+    });
+    await assert.rejects(
+      journal.persist('opened', { candidate: metadata.candidate, identity }),
+      /UNPROVEN/,
+    );
+    await journal.recordCandidateStartupEvent({
+      ...base,
+      phase: 'candidate-startup-file-written',
+      ...file,
+    });
+  }
+  assert.equal((await journal.readFirstCutoverEffects()).candidateStartupEvents.length, 6);
+  await journal.persist('opened', { candidate: metadata.candidate, identity });
+  await assert.rejects(
+    journal.recordCandidateStartupEvent({ ...base, phase: 'candidate-startup-backup-intent' }),
+    /UNPROVEN/,
+  );
+});
+
 test('backup recovery scope survives only the owned receipt append, not phase or file drift', async (t) => {
   for (const fault of ['phase', 'file']) {
     const journal = await acquireReleaseJournal(await fixture(t), firstMetadata);

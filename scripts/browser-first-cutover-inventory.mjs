@@ -153,6 +153,42 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
     pair.hosts.map((h) => [h.host, firstCutoverSourceBindings(h.snapshot)]),
   );
   if (!Array.isArray(effects?.registrationEvents) || !Array.isArray(effects.startupEvents)) fail();
+  const candidateStartup = effects.candidateStartupEvents ?? [];
+  if (!Array.isArray(candidateStartup)) fail();
+  if (candidateStartup.length) {
+    const base = { attempt: effects.attempt, inventoryDigest, ...candidate?.identity };
+    const backed = candidateStartup[1];
+    if (
+      candidate?.mode !== 'serving' ||
+      !['verified', 'opened', 'reconciled'].includes(effects.phase) ||
+      candidateStartup.length !== 6 ||
+      !equal(candidateStartup[0], { ...base, phase: 'candidate-startup-backup-intent' }) ||
+      !equal(backed, { ...base, phase: 'candidate-startup-backed-up', files: backed?.files }) ||
+      !Array.isArray(backed?.files) ||
+      backed.files.length !== 2
+    )
+      fail();
+    for (const [i, change] of [...backed.files].reverse().entries()) {
+      if (
+        !equal(Object.keys(change).sort(), ['afterDigest', 'beforeDigest', 'path']) ||
+        change.path !== `/root/.pm2/${i === 0 ? 'dump.pm2.bak' : 'dump.pm2'}` ||
+        !(change.beforeDigest === null || hash(change.beforeDigest)) ||
+        !hash(change.afterDigest) ||
+        change.beforeDigest === change.afterDigest ||
+        !equal(candidateStartup[2 + i * 2], {
+          ...base,
+          ...change,
+          phase: 'candidate-startup-file-intent',
+        }) ||
+        !equal(candidateStartup[3 + i * 2], {
+          ...base,
+          ...change,
+          phase: 'candidate-startup-file-written',
+        })
+      )
+        fail();
+    }
+  }
   const unmanaged = effects.unmanagedEvents ?? [];
   if (!Array.isArray(unmanaged) || unmanaged.length > 2) fail();
   if (unmanaged.length) {
@@ -285,6 +321,59 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
       }
     }
     const startup = effects.startupEvents.filter((e) => e.host === host);
+    const candidateChanges =
+      host === 'vultr' && candidateStartup.length ? candidateStartup[1].files : [];
+    for (const change of candidateChanges) {
+      const original = before.startup.files.find((f) => f.path === change.path);
+      const retired = startup[1]?.files?.find((f) => f.path === change.path);
+      const prior = retired ? retired.afterDigest : original?.present ? original.digest : null;
+      const index = current.startup.files.findIndex((f) => f.path === change.path);
+      const file = current.startup.files[index];
+      const a = original?.stat;
+      const b = file?.stat;
+      const keys = ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'];
+      if (
+        !original ||
+        change.beforeDigest !== prior ||
+        !file?.present ||
+        !b ||
+        file.resolved !== change.path ||
+        !equal(file.link, b) ||
+        !equal(Object.keys(file).sort(), [
+          'content',
+          'digest',
+          'link',
+          'path',
+          'present',
+          'resolved',
+          'stat',
+        ]) ||
+        !equal(Object.keys(b).sort(), [...keys].sort()) ||
+        !keys.every((key) => Number.isFinite(b[key]) && b[key] >= 0) ||
+        !Number.isSafeInteger(b.ino) ||
+        b.ino < 1 ||
+        b.uid !== 0 ||
+        b.nlink !== 1 ||
+        (original.present
+          ? !a ||
+            original.resolved !== change.path ||
+            !equal(original.link, a) ||
+            b.dev !== a.dev ||
+            b.gid !== a.gid ||
+            b.mode !== a.mode
+          : b.gid !== 0 || b.mode !== 0o100600) ||
+        (b.mode & 0o170000) !== 0o100000 ||
+        b.mode & 0o7022 ||
+        typeof file.content !== 'string' ||
+        b.size !== Buffer.byteLength(file.content) ||
+        file.digest !== change.afterDigest ||
+        createHash('sha256').update(file.content).digest('hex') !== change.afterDigest
+      )
+        fail();
+      // Only the complete same-boot journal chain accounts for these bytes.
+      // The old retirement chain below is still validated against its review.
+      current.startup.files[index] = structuredClone(original);
+    }
     if (startup.length) {
       const backed = startup[1];
       if (
@@ -308,6 +397,7 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
           !equal(startup[3 + i * 2], { ...base, phase: 'startup-file-written' })
         )
           fail();
+        if (candidateChanges.some((f) => f.path === change.path)) continue;
         const original = before.startup.files.find((f) => f.path === change.path);
         const index = current.startup.files.findIndex((f) => f.path === change.path);
         const file = current.startup.files[index];

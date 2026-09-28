@@ -25,6 +25,7 @@ INGRESS_MODULES = frozenset([
     'browser-first-cutover-host.mjs', 'browser-first-cutover-ingress-files.mjs',
     'browser-first-cutover-ingress-session.mjs', 'browser-first-cutover-inventory.mjs',
     'browser-first-cutover-nginx.mjs', 'browser-first-cutover-runtime.mjs',
+    'browser-first-cutover-startup.mjs',
     'browser-maintenance-host.mjs', 'browser-maintenance-journal.mjs',
     'browser-maintenance-linux.mjs', 'browser-maintenance-manifest.mjs',
     'browser-first-cutover-mysql.mjs',

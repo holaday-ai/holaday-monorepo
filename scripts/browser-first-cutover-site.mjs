@@ -17,6 +17,7 @@ import {
   readFirstCutoverPersistedWork,
   readFirstCutoverSourceSnapshot,
   readReviewedFirstCutoverLegacySource,
+  resumeFirstCutoverCandidateWorker,
 } from './browser-first-cutover-host.mjs';
 import {
   createFirstCutoverIngressPair,
@@ -59,6 +60,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     connectGateway: connectFirstCutoverGatewaySession,
     createObserver: createFirstCutoverRetirementObserver,
     retireProducers: retireLocalFirstCutoverProducers,
+    resumeWorker: resumeFirstCutoverCandidateWorker,
     readSite: (approval) => readFirstCutoverExecutionSiteScope({ attempt: approval.attempt }),
     ...overrides,
   };
@@ -71,14 +73,9 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       options.attempt ?? '',
     ) ||
     ['readSite', 'readCoordinatorIdentity'].some((k) => typeof io[k] !== 'function') ||
-    [
-      'observeWriters',
-      'observeWork',
-      'settleLegacy',
-      'resumeWorker',
-      'reconcile',
-      'holdMaintenance',
-    ].some((k) => typeof io.facts?.[k] !== 'function')
+    ['observeWriters', 'observeWork', 'settleLegacy', 'reconcile', 'holdMaintenance'].some(
+      (k) => typeof io.facts?.[k] !== 'function',
+    )
   )
     fail();
   const facts = { ...io.facts };
@@ -530,7 +527,32 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     restoreIngress: (ctx, id) =>
       run('restore', ctx, ['verified'], () => ingress.restoreIngress(id)),
     resumeWorker: (ctx, id) =>
-      run('worker', ctx, ['verified'], () => facts.resumeWorker(context, id)),
+      run('worker', ctx, ['verified'], async () => {
+        if (facts.resumeWorker) return facts.resumeWorker(context, id);
+        return io.resumeWorker(context, id, scope.producerStartupFiles, {
+          now: io.now,
+          sleep: io.sleep,
+          readCandidate: io.readCandidateRuntime,
+          assertNoLegacy: async (identity) => {
+            const record = await guard(context, ['verified']);
+            checkIdentity(identity, record);
+            const actual = await observer.readWithCandidate(identity);
+            if (
+              !equal(record.identity, identity) ||
+              !equal(actual.candidate?.identity, identity) ||
+              actual.candidate.mode !== 'serving' ||
+              actual.candidate.idle !== false ||
+              actual.candidate.needsReconciliation !== true ||
+              !fresh(actual.observedAtMs) ||
+              actual.inventoryDigest !== context.binding.inventoryDigest ||
+              actual.unknownLaunchers.length ||
+              legacy(actual).length ||
+              !equal(record, await guard(context, ['verified']))
+            )
+              fail();
+          },
+        });
+      }),
     readBackupPlan: (ctx) =>
       run(
         'backup-plan',

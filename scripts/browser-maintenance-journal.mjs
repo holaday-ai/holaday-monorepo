@@ -32,6 +32,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
   let backupReceipt;
   let currentIdentity;
   const startupEvents = [];
+  const candidateStartupEvents = [];
   const registrationEvents = [];
   const unmanagedEvents = [];
   const startupBatches = new Map();
@@ -148,6 +149,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
           bootstrapSeed,
           ...(backupReceipt ? { backupReceipt } : {}),
           ...(startupEvents.length ? { startupEvents } : {}),
+          ...(candidateStartupEvents.length ? { candidateStartupEvents } : {}),
           ...(registrationEvents.length ? { registrationEvents } : {}),
           ...(unmanagedEvents.length ? { unmanagedEvents } : {}),
           oldIdentity,
@@ -305,6 +307,9 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
             ...(record.bootstrapSeed ? { bootstrapSeed: record.bootstrapSeed } : {}),
             phase: record.phase,
             startupEvents: record.startupEvents ?? [],
+            ...(record.candidateStartupEvents
+              ? { candidateStartupEvents: record.candidateStartupEvents }
+              : {}),
             registrationEvents: record.registrationEvents ?? [],
             unmanagedEvents: record.unmanagedEvents ?? [],
           };
@@ -515,6 +520,62 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
         await write(phase, currentIdentity);
       });
     },
+    recordCandidateStartupEvent: (event) => {
+      const e = structuredClone(event);
+      return serial(async () => {
+        const base = { attempt, inventoryDigest, candidate, bootId: currentIdentity?.bootId };
+        if (
+          !first ||
+          phase !== 'verified' ||
+          !identityValid(currentIdentity) ||
+          !migrationManifest ||
+          !e ||
+          !Object.entries(base).every(([k, v]) => e[k] === v)
+        )
+          throw unproven();
+        const events = candidateStartupEvents;
+        if (!events.length) {
+          if (!isDeepStrictEqual(e, { ...base, phase: 'candidate-startup-backup-intent' }))
+            throw unproven();
+        } else if (events.length === 1) {
+          if (
+            !isDeepStrictEqual(
+              Object.keys(e).sort(),
+              [...Object.keys(base), 'phase', 'files'].sort(),
+            ) ||
+            e.phase !== 'candidate-startup-backed-up' ||
+            !Array.isArray(e.files) ||
+            e.files.length !== 2 ||
+            e.files.some(
+              (f, i) =>
+                !f ||
+                Object.keys(f).length !== 3 ||
+                f.path !== `/root/.pm2/${i ? 'dump.pm2.bak' : 'dump.pm2'}` ||
+                !(f.beforeDigest === null || /^[a-f0-9]{64}$/.test(f.beforeDigest ?? '')) ||
+                !/^[a-f0-9]{64}$/.test(f.afterDigest ?? '') ||
+                f.beforeDigest === f.afterDigest,
+            )
+          )
+            throw unproven();
+        } else {
+          const file = events[1].files[1 - Math.floor((events.length - 2) / 2)];
+          if (
+            !file ||
+            !isDeepStrictEqual(e, {
+              ...base,
+              phase:
+                events.length % 2 === 0
+                  ? 'candidate-startup-file-intent'
+                  : 'candidate-startup-file-written',
+              ...file,
+            })
+          )
+            throw unproven();
+        }
+        events.push(e);
+        await write(phase, currentIdentity);
+      });
+    },
     bindManifest: (manifest) =>
       serial(async () => {
         const bytes = JSON.stringify(manifest);
@@ -532,6 +593,12 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
       serial(async () => {
         if (!migrationManifest) throw new Error('MAINTENANCE_MIGRATIONS_UNPROVEN');
         if (first) {
+          if (
+            next === 'opened' &&
+            candidateStartupEvents.length &&
+            candidateStartupEvents.length !== 6
+          )
+            throw unproven();
           if (next === 'backup_verified' && unmanagedEvents.length === 1) throw unproven();
           if (next === 'migration_started' && !backupReceipt) throw unproven();
           if (next === 'all_fenced' && startupEvents.length && !startupDone()) throw unproven();

@@ -3,11 +3,16 @@
 // Catches bypassed identity validation, missed app orphans, and broken fixed argv.
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import * as fs from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
-import { readFirstCutoverCandidateRuntime } from '/source/browser-first-cutover-host.mjs';
+import {
+  readFirstCutoverCandidateRuntime,
+  resumeFirstCutoverCandidateWorker,
+} from '/source/browser-first-cutover-host.mjs';
+import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 
 await fs.access('/.dockerenv');
 assert.equal(process.platform, 'linux');
@@ -83,7 +88,7 @@ try {
             socket.end(JSON.stringify({ok:false,code:'IDENTITY_MISMATCH'})+'\\n'); return;
           }
           if (fs.existsSync(directory+'/flip')) reads++; else reads = 0;
-          const serving = reads > 1;
+          const serving = reads > 1 || fs.existsSync(directory+'/serving');
           const counts = {mode: serving?'open':'closed',idle:!serving,active:0,roots:0,children:0,unknown:0,
             byKind:{request:0,execution:0,suggestions:0,database:0,model:0,scheduler:0}};
           socket.end(JSON.stringify({ok:true,snapshot:{identity,mode:serving?'serving':'closed',needsReconciliation:serving,counts}})+'\\n');
@@ -97,7 +102,7 @@ try {
     { flag: 'wx' },
   );
   await fs.writeFile(
-    `${root}/start.sh`,
+    `${root}/scripts/start-orchestrator-production.sh`,
     `#!/bin/sh\nexec /opt/node22/bin/node ${cwd}/dist/index.js ${process.argv.includes('--without-control') ? '--without-control' : ''}\n`,
     { flag: 'wx', mode: 0o755 },
   );
@@ -119,13 +124,13 @@ try {
   process.env.HOLADAY_ORDINARY_CANDIDATE = identity.candidate;
   await pm2(
     'start',
-    `${root}/start.sh`,
+    `${root}/scripts/start-orchestrator-production.sh`,
     '--name',
     'holaday-orchestrator',
     '--cwd',
     cwd,
     '--interpreter',
-    '/bin/sh',
+    '/usr/bin/bash',
     '--uid',
     '998',
     '--gid',
@@ -206,6 +211,139 @@ try {
   console.log(
     'PASS wrong candidate/boot/extra identity rejected; real UID998 orphan rejected; recovery and unrelated PID preserved',
   );
+  if (process.argv.includes('--resume-worker')) {
+    // Real worker/proc/PM2/save/journal I/O; only candidate workload/control and
+    // legacy two-host scope are synthetic. No source database or live service.
+    const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
+    await fs.copyFile('/source/secure-pm2-logs.mjs', `${root}/scripts/secure-pm2-logs.mjs`);
+    await fs.mkdir(`${cwd}/dist/account-closure`);
+    await fs.writeFile(
+      `${cwd}/dist/account-closure/worker-entry.js`,
+      'setInterval(()=>{},1000);\n',
+      { flag: 'wx' },
+    );
+    await fs.writeFile(
+      `${root}/scripts/start-account-closure-worker-production.sh`,
+      `#!/bin/sh\nexec /opt/node22/bin/node ${cwd}/dist/account-closure/worker-entry.js\n`,
+      { flag: 'wx', mode: 0o755 },
+    );
+    await fs.mkdir('/var/lib/holaday-deploy', { recursive: true });
+    const storage = '/var/lib/holaday-deploy/maintenance';
+    await fs.mkdir(storage, { mode: 0o700 });
+    const enabled = !process.argv.includes('--worker-disabled');
+    const missingBackup = process.argv.includes('--missing-backup');
+    const config = Buffer.from(`ACCOUNT_CLOSURE_WORKER_ENABLED=${enabled}\n`);
+    await fs.writeFile('/var/lib/holaday-deploy/maintenance-target.env', config, {
+      flag: 'wx',
+      mode: 0o600,
+    });
+    const binding = {
+      attempt: '11111111-1111-4111-8111-111111111111',
+      candidate: identity.candidate,
+      configDigest: sha(config),
+      migrationDigest: sha('[]'),
+      inventoryDigest: '1'.repeat(64),
+    };
+    const journal = await acquireReleaseJournal(storage, {
+      ...binding,
+      legacyDigest: '2'.repeat(64),
+      kind: 'first-cutover',
+    });
+    try {
+      await journal.bindManifest([]);
+      for (const phase of [
+        'prepared',
+        'orders_fenced',
+        'legacy_settled',
+        'producers_stopped',
+        'all_fenced',
+        'stopped',
+        'backup_verified',
+      ])
+        await journal.persist(phase, { candidate: identity.candidate });
+      await journal.bindBackupReceipt({
+        ...binding,
+        backupDigest: '1'.repeat(64),
+        databaseIdentityDigest: '2'.repeat(64),
+        isolatedTargetDigest: '3'.repeat(64),
+        encryptionProfileDigest: '4'.repeat(64),
+        comparisonDigest: '5'.repeat(64),
+        schemaDigest: '6'.repeat(64),
+        businessDigest: '7'.repeat(64),
+        restoredAtMs: Date.now(),
+      });
+      await journal.persist('migration_started', { candidate: identity.candidate });
+      await journal.bindBootstrapSeed('8'.repeat(32));
+      await journal.persist('candidate_started', { candidate: identity.candidate });
+      await journal.persist('verified', { candidate: identity.candidate, identity });
+      await fs.writeFile(`${controlDirectory}/serving`, '', { flag: 'wx' });
+      const primary = '[{ "name": "unrelated-primary", "counter": 9007199254740993 }]\n';
+      const fallback = '[{ "name": "unrelated-backup", "counter": 9007199254740995 }]\n';
+      await fs.writeFile('/root/.pm2/dump.pm2', primary, { flag: 'wx', mode: 0o600 });
+      if (!missingBackup)
+        await fs.writeFile('/root/.pm2/dump.pm2.bak', fallback, { flag: 'wx', mode: 0o600 });
+      const files = [primary, fallback].map((bytes, i) => ({
+        path: `/root/.pm2/${i ? 'dump.pm2.bak' : 'dump.pm2'}`,
+        digest: i === 1 && missingBackup ? null : sha(bytes),
+        remove: [],
+      }));
+      const context = {
+        binding,
+        approval: { ...binding, maintenanceEndsAtMs: Date.now() + 120000 },
+        journal,
+        root,
+        applicationGid: 998,
+      };
+      const unrelatedBefore = (await rows()).find((r) => r.pid === unrelatedPid);
+      const overrides = {
+        parseConfig: () => ({ ACCOUNT_CLOSURE_WORKER_ENABLED: String(enabled) }),
+        assertNoLegacy: async (id) => {
+          assert.deepEqual(id, identity);
+          assert.equal(
+            (await rows()).find((r) => r.name === 'qa-candidate-observation-unrelated').pid,
+            unrelatedPid,
+          );
+        },
+      };
+      await resumeFirstCutoverCandidateWorker(context, identity, files, overrides);
+      const actual = await readFirstCutoverCandidateRuntime(identity);
+      assert.equal(actual.runtime.main.pid, observed.runtime.main.pid);
+      if (enabled) {
+        assert.equal(actual.runtime.worker.uid, 998);
+        assert.equal(actual.runtime.worker.command, 'worker');
+      } else assert.equal(actual.runtime.worker, null);
+      assert.equal(actual.mode, 'serving');
+      for (const [i, original] of [primary, fallback].entries()) {
+        const bytes = await fs.readFile(files[i].path, 'utf8');
+        if (!(i === 1 && missingBackup)) assert(bytes.includes(original.slice(1, -2)));
+        assert.deepEqual(
+          JSON.parse(bytes).map((r) => r.name),
+          [
+            ...(i === 1 && missingBackup ? [] : [i ? 'unrelated-backup' : 'unrelated-primary']),
+            'holaday-orchestrator',
+            ...(enabled ? ['holaday-account-closure-worker'] : []),
+          ],
+        );
+        assert.equal((await fs.stat(files[i].path)).mode & 0o777, 0o600);
+      }
+      assert.equal((await journal.readFirstCutoverEffects()).candidateStartupEvents.length, 6);
+      await assert.rejects(
+        resumeFirstCutoverCandidateWorker(context, identity, files, overrides),
+        /UNPROVEN/,
+      );
+      assert.equal(
+        (await rows()).find((r) => r.name === 'holaday-account-closure-worker')?.pid ?? null,
+        actual.runtime.worker?.pid ?? null,
+      );
+      const unrelatedAfter = (await rows()).find((r) => r.pid === unrelatedPid);
+      assert.equal(unrelatedAfter.pm2_env.restart_time, unrelatedBefore.pm2_env.restart_time);
+      console.log(
+        `PASS real worker enabled=${enabled} missingBackup=${missingBackup}: same main + original journal/atomic persistence; unrelated PID/restarts/raw integers preserved; replay refused (synthetic workload/legacy scope)`,
+      );
+    } finally {
+      await journal.close();
+    }
+  }
 } finally {
   if (orphan) {
     orphan.kill('SIGTERM');

@@ -1394,6 +1394,135 @@ for (const fault of ['approval-drift', 'expired-after-build', 'clock-rollback', 
     assert.ok(!f.events.some((e) => /pm2|nginx|db:migrate|control\.mjs/.test(e)));
   });
 }
+test('first worker resume uses the pinned candidate once and never global PM2 save', async () => {
+  for (const fault of [
+    'none',
+    'disabled',
+    'wrong-boot',
+    'config',
+    'busy',
+    'lost-start',
+    'already-worker',
+    'persist-failed',
+  ]) {
+    assert.equal(typeof firstHost.resumeFirstCutoverCandidateWorker, 'function');
+    const identity = { candidate: 'c'.repeat(40), bootId: 'd'.repeat(32) };
+    const config = Buffer.from('synthetic-worker-config');
+    const binding = {
+      attempt: approved.attempt,
+      candidate: identity.candidate,
+      inventoryDigest: 'a'.repeat(64),
+      configDigest: createHash('sha256').update(config).digest('hex'),
+      migrationDigest: 'b'.repeat(64),
+    };
+    const files = [
+      { path: '/root/.pm2/dump.pm2', digest: '1'.repeat(64), remove: [] },
+      { path: '/root/.pm2/dump.pm2.bak', digest: null, remove: [] },
+    ];
+    let worker = fault === 'already-worker';
+    const commands = [];
+    let persisted = false;
+    const ctx = {
+      binding,
+      approval: { ...binding, maintenanceEndsAtMs: 5000 },
+      root: `/opt/holaday-releases/${identity.candidate}`,
+      applicationGid: 998,
+      journal: {
+        assertOwnership: async () => binding,
+        readFirstCutoverEffects: async () => ({
+          ...binding,
+          identity,
+          phase: 'verified',
+          startupEvents: [],
+        }),
+        recordCandidateStartupEvent: async () => {},
+      },
+    };
+    const io = {
+      platform: 'linux',
+      uid: 0,
+      now: () => 1000,
+      sleep: async () => {},
+      readConfig: async () => (fault === 'config' ? Buffer.from('changed') : config),
+      parseConfig: () => ({
+        ACCOUNT_CLOSURE_WORKER_ENABLED: fault === 'disabled' ? 'false' : 'true',
+      }),
+      assertNoLegacy: async () => {
+        if (fault === 'busy') throw new Error('unknown');
+      },
+      readCandidate: async () => ({
+        identity: fault === 'wrong-boot' ? { ...identity, bootId: 'e'.repeat(32) } : identity,
+        mode: 'serving',
+        idle: false,
+        needsReconciliation: true,
+        runtime: {
+          identity,
+          root: ctx.root,
+          main: { pid: 101, start: '10' },
+          worker: worker ? { pid: 102, start: '11' } : null,
+        },
+      }),
+      exec: async (command, args, options) => {
+        commands.push([command, ...args]);
+        if (command === 'pm2' && args[0] === 'start') {
+          assert.equal(args[1], `${ctx.root}/scripts/start-account-closure-worker-production.sh`);
+          assert.equal(args[args.indexOf('--uid') + 1], '998');
+          assert(args.includes('--no-autorestart'));
+          assert.equal(options.env.HOLADAY_ORDINARY_CANDIDATE, identity.candidate);
+          worker = true;
+          if (fault === 'lost-start') throw new Error('unknown start');
+          return '';
+        }
+        if (command === 'pm2' && args[0] === 'jlist')
+          return JSON.stringify([
+            { name: 'holaday-orchestrator', pid: 101, pm2_env: { name: 'holaday-orchestrator' } },
+            ...(worker
+              ? [
+                  {
+                    name: 'holaday-account-closure-worker',
+                    pid: 102,
+                    pm2_env: { name: 'holaday-account-closure-worker' },
+                  },
+                ]
+              : []),
+          ]);
+        assert.equal(command, '/opt/node22/bin/node');
+        assert.equal(args[0], `${ctx.root}/scripts/secure-pm2-logs.mjs`);
+        assert(options.input);
+        return '';
+      },
+      persistStartup: async (input, deps) => {
+        assert.deepEqual(input.files, files);
+        assert.deepEqual(input.identity, identity);
+        assert.equal(input.workerEnabled, fault !== 'disabled');
+        const rows = await deps.assertCandidate(identity);
+        assert.equal(rows.length, fault === 'disabled' ? 1 : 2);
+        if (fault === 'persist-failed') throw new Error('disk failed');
+        persisted = true;
+        return { files: [] };
+      },
+    };
+    if (['none', 'disabled'].includes(fault)) {
+      await firstHost.resumeFirstCutoverCandidateWorker(ctx, identity, files, io);
+      assert(persisted);
+    } else {
+      await assert.rejects(
+        firstHost.resumeFirstCutoverCandidateWorker(ctx, identity, files, io),
+        /UNPROVEN/,
+      );
+      assert.equal(persisted, false);
+    }
+    assert(
+      !commands.some((v) => v.includes('save') || v.includes('delete') || v.includes('restart')),
+    );
+    assert.equal(
+      commands.filter((v) => v[1] === 'start').length,
+      ['none', 'lost-start', 'persist-failed'].includes(fault) ? 1 : 0,
+      fault,
+    );
+  }
+});
+
 async function fixture(t, record = approved) {
   const directory = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'holaday-approved-input-')));
   await fs.chmod(directory, 0o700);

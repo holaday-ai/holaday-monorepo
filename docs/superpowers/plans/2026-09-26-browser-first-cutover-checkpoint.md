@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 续跑：同实例 worker 恢复与原启动清单双文件持久化接通
+
+承接`80545eb6`，Task4原BASE844c2ced不变。原site.lifecycle.resumeWorker已有默认真实适配：在受保护配置、同一verified journal/候选boot、真实主进程和双机旧源观察器约束下，只启动配置启用的UID998 worker一次，使用原运行时读者与原日志权限脚本；不使用全局PM2 save、不重启或删除无关应用，启动应答未知不重试。
+
+持久化复用原`removeSavedStartupEntries`的双文件编辑器，不另建保存引擎：分别保留primary/fallback的无关原始对象（包括超出JS安全整数的原文），追加实际同实例PM2配置；只按PM2现有序列化去除instances/pm_id/prev_restart_delay。独立candidate-startup私密备份、原journal六步意图/完成事件绑定候选boot，备用文件先写；不存在的备用文件只创建0600、root:root新文件，不复制另一份的无关条目。未完成双文件事件不能登记opened。重复/文件篡改/不安全元数据保持拒绝。
+
+原retirement观察器已衔接完整candidate-startup链与旧retirement摘要，并检查新内容真实哈希、属主/权限/链接/metadata；只解释这两份文件的合法改变，原review与实际source摘要仍保留。先观察合法保存被旧观察器拒绝RED，再修此接线；partial、字节/权限/属主/链接篡改、另一台机器变化仍拒绝。host新增直接import的startup模块已加入原固定工具闭包及通道模块列表，仅本地源码，未重新安装生产通道。
+
+新鲜验收：完整browser+两发布入口**978/978**；实际Linux六组**332/332**；原ops**120/59/16/811 + Python12**，全部退出0、0跳过。日志`/tmp/holaday-worker-{browser-final,linux,ops}.log`。13MJS Biome、shell语法与diff-check通过。已有task3镜像真实PM2/proc/runuser/socket、原journal/文件I/O两种组合均退出0：`/tmp/holaday-worker-physical-final.log`（worker开、两文件原有）、`/tmp/holaday-worker-disabled-physical.log`（worker关、备用缺失），主进程/无关PID与重启数不变、独立原文保留、重复拒绝。**工作负载/候选控制协议、旧源双机事实与早期备份回执为合成夹具，不是生产或完整应用恢复/发布证明**。本轮未重跑依赖Git安装的固定入口物理夹具；当前工具闭包由默认模块加载和原coordinator契约测试覆盖，不能把上一提交物理入口日志冒充本次。
+
+保留失败证据：初次全量Mac978项957通过21失败，均sandbox Unix socket EPERM（`/tmp/holaday-worker-browser.log`）；获准按原代码重跑后全过，未改产品权限。首次格式化sandbox拒绝无改动，获准后完成格式化；四处noDelete改为无副作用过滤/测试undefined，未放宽保护。测试命令均结束；临时QA容器自动回收，只含可再生成合成数据；最终docker只有原MySQL/Redis。原cache/草稿、数据库/Redis、支付/PayPal/商户配置/密钥/USB/UI/扩展均未动。
+
+未push/PR/合并/部署；CLI execute仍关闭，Task4–6未完成。下一步**不要重做worker/备份/通道/商户**：继续原独立旧源DB归属、内存请求/浏览器/provider和writer事实，开放后reconcile与失败hold的实际适配、受保护工具安装和首次execute，再做真实停写备份/Mac隔离恢复、非PayPal恢复证据、完整成功/故障演练、整分支审查。后续进展以Git和ledger为准，自动化继续本线程。
+
 ### 2026-09-28 续跑：原备份协调器完整site I/O、回执与关闭时序接通
 
 承接`00c71983`，原Task4 BASE844c2ced不变。原site.backup已接入源身份/设施、实际单次导出、原密文摘要和字节数固定、同一Mac恢复会话restore/snapshot/migrate/verify、原全对象比较器、源不变检查与原journal sealReceipt。新增源全量快照读者复用原受保护配置/专用连接，前后核查源身份、原journal和实际停写，不采样、不接收上传摘要。原工具闭包增加该mysql读者，仅本地代码，未重新安装生产通道。

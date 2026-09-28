@@ -21,6 +21,7 @@ const modules = [
   'browser-first-cutover-mysql.mjs',
   'browser-first-cutover-nginx.mjs',
   'browser-first-cutover-runtime.mjs',
+  'browser-first-cutover-startup.mjs',
   'browser-maintenance-host.mjs',
   'browser-maintenance-journal.mjs',
   'browser-maintenance-linux.mjs',

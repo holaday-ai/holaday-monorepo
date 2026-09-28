@@ -416,6 +416,32 @@ for (const fault of [
   });
 }
 
+test('site worker default uses the same live serving observer and rejects regenerated legacy', async (t) => {
+  for (const foreign of [false, true]) {
+    const f = await candidateFixture(t, async (f) => {
+      f.io.facts.resumeWorker = undefined;
+      f.io.resumeWorker = async (ctx, id, files, deps) => {
+        assert.equal(ctx.journal, f.journal);
+        assert.deepEqual(files, f.scope.producerStartupFiles);
+        await deps.assertNoLegacy(id);
+        f.events.push('worker-started');
+      };
+    });
+    await f.advance();
+    await f.journal.persist('migration_started', { candidate: f.binding.candidate });
+    await f.journal.bindBootstrapSeed('8'.repeat(32));
+    await f.journal.persist('candidate_started', { candidate: f.binding.candidate });
+    await f.journal.persist('verified', { candidate: f.binding.candidate, identity: f.identity });
+    f.setMode('serving');
+    f.state.foreign = foreign;
+    if (foreign)
+      await assert.rejects(f.site.lifecycle.resumeWorker(f.context, f.identity), /UNPROVEN/);
+    else await f.site.lifecycle.resumeWorker(f.context, f.identity);
+    assert.equal(f.events.includes('worker-started'), !foreign);
+    await f.site.lifecycle.detach(f.context);
+  }
+});
+
 test('site readiness and opened control follow the existing release tail without early verified persistence', async (t) => {
   const f = await candidateFixture(t);
   const prepare = await f.site.evidence.readFenceState(f.request('prepare'));

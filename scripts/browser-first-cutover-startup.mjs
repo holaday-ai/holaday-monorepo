@@ -77,8 +77,101 @@ function rows(text) {
  * Caller holds the shared journal and supplies the protected approved inventory.
  * No CLI, no automatic retry, no restore-on-error, no whole-daemon save. */
 export async function removeSavedStartupEntries(input, io) {
+  return editSavedStartupEntries(input, io);
+}
+
+/** Candidate-only append after old registrations have been removed. The live
+ * reader must verify the same serving boot and return its actual PM2 env rows;
+ * no CLI-supplied success flag or whole-daemon dump/save is accepted. */
+export async function persistCandidateStartupEntries(input, io) {
+  try {
+    const { identity, applicationGid, workerEnabled } = structuredClone(input);
+    if (
+      !/^[a-f0-9]{40}$/.test(identity?.candidate ?? '') ||
+      !/^[a-f0-9]{32}$/.test(identity?.bootId ?? '') ||
+      !Number.isSafeInteger(applicationGid) ||
+      applicationGid < 1 ||
+      typeof workerEnabled !== 'boolean' ||
+      typeof io.assertCandidate !== 'function' ||
+      input.files?.some((f) => f.remove?.length !== 0)
+    )
+      fail();
+    const expectedNames = [
+      'holaday-orchestrator',
+      ...(workerEnabled ? ['holaday-account-closure-worker'] : []),
+    ];
+    const root = `/opt/holaday-releases/${identity.candidate}`;
+    let captured;
+    const verifyCandidate = async () => {
+      const entries = structuredClone(await io.assertCandidate(identity));
+      if (!Array.isArray(entries) || entries.length !== expectedNames.length) fail();
+      const selected = expectedNames.map((name) => {
+        const matches = entries.filter((e) => e?.name === name);
+        if (matches.length !== 1) fail();
+        const e = matches[0];
+        const script = name === expectedNames[0] ? 'orchestrator' : 'account-closure-worker';
+        if (
+          e.pm_exec_path !== `${root}/scripts/start-${script}-production.sh` ||
+          e.pm_cwd !== `${root}/apps/orchestrator` ||
+          e.exec_interpreter !== '/usr/bin/bash' ||
+          String(e.uid) !== '998' ||
+          String(e.gid) !== String(applicationGid) ||
+          e.autorestart !== false ||
+          e.watch ||
+          e.cron_restart ||
+          e.pmx_module ||
+          e.status !== 'online' ||
+          e.exec_mode !== 'fork_mode'
+        )
+          fail();
+        // Match the existing PM2 dump serializer, excluding only its known
+        // live monitor counter for equality checks, never unrelated saved rows.
+        const stable = Object.fromEntries(
+          Object.entries(e).filter(([key]) => key !== 'axm_monitor'),
+        );
+        return { entry: e, stable };
+      });
+      if (
+        captured &&
+        !isDeepStrictEqual(
+          captured.map((e) => e.stable),
+          selected.map((e) => e.stable),
+        )
+      )
+        fail();
+      captured ??= selected;
+    };
+    await verifyCandidate();
+    const additions = captured.map(({ entry }) =>
+      JSON.stringify(
+        Object.fromEntries(
+          Object.entries(entry).filter(
+            ([key]) => !['instances', 'pm_id', 'prev_restart_delay'].includes(key),
+          ),
+        ),
+      ),
+    );
+    return await editSavedStartupEntries(
+      input,
+      {
+        ...io,
+        assertOwnership: async () => {
+          await verifyCandidate();
+          return io.assertOwnership();
+        },
+        persist: (event) => io.persist({ ...event, ...identity }),
+      },
+      additions,
+    );
+  } catch {
+    fail();
+  }
+}
+
+async function editSavedStartupEntries(input, io, additions) {
   const disk = io.fs ?? fs;
   const open = [];
+  const prefix = additions ? 'candidate-startup' : 'startup';
   try {
     const { binding, files, maintenanceEndsAtMs } = structuredClone(input);
     if (
@@ -98,7 +191,7 @@ export async function removeSavedStartupEntries(input, io) {
           f.remove.some((r) => !names.has(r.name) || !hash(r.entryDigest)) ||
           new Set(f.remove.map((r) => r.name)).size !== f.remove.length,
       ) ||
-      !files.some((f) => f.remove.length)
+      (!additions && !files.some((f) => f.remove.length))
     )
       fail();
     const began = io.now();
@@ -194,6 +287,7 @@ export async function removeSavedStartupEntries(input, io) {
       let after = source?.bytes;
       if (source) {
         const entries = rows(source.bytes.toString('utf8'));
+        if (additions && entries.some((e) => names.has(e.name))) fail();
         for (const r of f.remove) {
           const matches = entries.filter((e) => e.name === r.name);
           if (matches.length !== 1 || matches[0].digest !== r.entryDigest) fail();
@@ -206,6 +300,11 @@ export async function removeSavedStartupEntries(input, io) {
               .join(',')}]\n`,
           );
       }
+      if (additions)
+        after = Buffer.from(
+          `[${[...(source ? rows(source.bytes.toString('utf8')).map((e) => e.raw) : []), ...additions].join(',')}]\n`,
+        );
+      if (after && after.length > 8 * 1024 * 1024) fail();
       planned.push({ ...f, source, after, afterDigest: after ? sha(after) : null });
     }
     const expected = planned.map((p) => p.digest);
@@ -217,14 +316,14 @@ export async function removeSavedStartupEntries(input, io) {
       for (let i = 0; i < paths.length; i++)
         if (expected[i] === null && (await read(paths[i])) !== null) fail();
     };
-    const folder = `${archive}/startup-${binding.attempt}`;
+    const folder = `${archive}/${prefix}-${binding.attempt}`;
     try {
       await disk.lstat(folder);
       fail();
     } catch (e) {
       if (e.code !== 'ENOENT') throw e;
     }
-    await io.persist({ phase: 'startup-backup-intent', ...binding });
+    await io.persist({ phase: `${prefix}-backup-intent`, ...binding });
     await verify();
     await disk.mkdir(folder, { mode: 0o700 });
     const folderStat = await directory(folder, true);
@@ -276,34 +375,34 @@ export async function removeSavedStartupEntries(input, io) {
         afterDigest: p.afterDigest,
       })),
     };
-    await io.persist({ phase: 'startup-backed-up', ...receipt });
+    await io.persist({ phase: `${prefix}-backed-up`, ...receipt });
     await verify();
     await verifyBackups();
     // Fallback first: never leave an old fallback as the last recovery source.
     for (const i of [1, 0]) {
       const p = planned[i];
       if (p.afterDigest === p.digest) continue;
-      await io.persist({ phase: 'startup-file-intent', ...binding, ...receipt.files[i] });
+      await io.persist({ phase: `${prefix}-file-intent`, ...binding, ...receipt.files[i] });
       await verify();
       await verifyBackups();
-      const temp = `${home}/.holaday-startup-${binding.attempt}-${i}`;
+      const temp = `${home}/.holaday-${prefix}-${binding.attempt}-${i}`;
       const h = await disk.open(
         temp,
         constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-        p.source.mode,
+        p.source?.mode ?? 0o600,
       );
       open.push(h);
       await h.writeFile(p.after);
       // Atomic replacement must retain the reviewed source's group, not inherit
       // the deployment process's primary group. Failure precedes either rename.
-      await h.chown(-1, p.source.gid);
+      await h.chown(-1, p.source?.gid ?? 0);
       await h.sync();
       await verify();
       await verifyBackups();
       const tempStat = await h.stat();
       if (
         !fileOK(tempStat) ||
-        tempStat.gid !== p.source.gid ||
+        tempStat.gid !== (p.source?.gid ?? 0) ||
         !same(tempStat, await disk.lstat(temp))
       )
         fail();
@@ -311,7 +410,7 @@ export async function removeSavedStartupEntries(input, io) {
       await syncDirectory(home);
       expected[i] = p.afterDigest;
       await verify();
-      await io.persist({ phase: 'startup-file-written', ...binding, ...receipt.files[i] });
+      await io.persist({ phase: `${prefix}-file-written`, ...binding, ...receipt.files[i] });
     }
     await verify();
     await verifyBackups();

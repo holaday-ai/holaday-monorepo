@@ -478,8 +478,9 @@ test('retirement observation consumes the real journal and fresh paired state, n
   assert.ok(!JSON.stringify(actual).includes('private-environment-never-return'));
 });
 
-async function candidateFixture(t, setup = () => {}) {
+async function candidateFixture(t, setup = () => {}, beforeCandidate = async () => {}) {
   const r = await retirementFixture(t, setup);
+  await beforeCandidate(r);
   await r.remove();
   for (const phase of ['all_fenced', 'stopped', 'backup_verified'])
     await r.journal.persist(phase, { candidate: r.binding.candidate });
@@ -967,6 +968,94 @@ test('completed saved-startup writes explain exact new bytes and safe atomic rep
     result.hosts.find((h) => h.host === 'vultr').sources,
     inventory.firstCutoverSourceBindings(h.snapshot),
   );
+});
+
+test('candidate startup persistence is reconciled only by complete same-boot journal evidence', async (t) => {
+  for (const fault of [
+    'none',
+    'no-retirement',
+    'partial',
+    'content',
+    'mode',
+    'owner',
+    'link',
+    'foreign-host',
+  ]) {
+    await t.test(fault, async (t) => {
+      const r = await candidateFixture(
+        t,
+        startupFixture,
+        fault === 'no-retirement' ? undefined : changeStartup,
+      );
+      await r.journal.persist('verified', { candidate: r.binding.candidate, identity: r.identity });
+      Object.assign(r.f.candidate, { mode: 'serving', idle: false, needsReconciliation: true });
+      const snapshot = r.f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+      const base = {
+        attempt: r.binding.attempt,
+        inventoryDigest: r.binding.inventoryDigest,
+        ...r.identity,
+      };
+      const content = '[{"name":"holaday-orchestrator"}]\n';
+      const files = snapshot.startup.files.map((f) => ({
+        path: f.path,
+        beforeDigest: f.present ? f.digest : null,
+        afterDigest: createHash('sha256').update(content).digest('hex'),
+      }));
+      await r.journal.recordCandidateStartupEvent({
+        ...base,
+        phase: 'candidate-startup-backup-intent',
+      });
+      await r.journal.recordCandidateStartupEvent({
+        ...base,
+        phase: 'candidate-startup-backed-up',
+        files,
+      });
+      for (const change of [...files].reverse()) {
+        await r.journal.recordCandidateStartupEvent({
+          ...base,
+          ...change,
+          phase: 'candidate-startup-file-intent',
+        });
+        const index = snapshot.startup.files.findIndex((f) => f.path === change.path);
+        const stat = {
+          ...snapshot.startup.files[0].stat,
+          ino: 500 + index,
+          size: Buffer.byteLength(content),
+        };
+        snapshot.startup.files[index] = {
+          path: change.path,
+          present: true,
+          resolved: change.path,
+          content,
+          digest: change.afterDigest,
+          stat,
+          link: structuredClone(stat),
+        };
+        if (fault === 'partial') break;
+        await r.journal.recordCandidateStartupEvent({
+          ...base,
+          ...change,
+          phase: 'candidate-startup-file-written',
+        });
+      }
+      const file = snapshot.startup.files[0];
+      if (fault === 'content') file.content += ' ';
+      if (fault === 'mode') file.stat.mode = file.link.mode = 0o100666;
+      if (fault === 'owner') file.stat.uid = file.link.uid = 998;
+      if (fault === 'link') file.resolved = '/tmp/foreign';
+      if (fault === 'foreign-host')
+        r.f.pair.hosts.find((h) => h.host === 'aliyun').snapshot.startup.files[0] =
+          structuredClone(file);
+      if (['none', 'no-retirement'].includes(fault)) {
+        const actual = await r.observer.readWithCandidate(r.identity);
+        assert.deepEqual(actual.unknownLaunchers, []);
+        assert.deepEqual(
+          actual.hosts.find((h) => h.host === 'vultr').sources,
+          inventory.firstCutoverSourceBindings(snapshot),
+        );
+      } else await assert.rejects(r.observer.readWithCandidate(r.identity), /UNPROVEN/);
+    });
+  }
 });
 
 test('saved-startup reconciliation rejects intent-only writes, links, unsafe metadata and unexpected bytes', async (t) => {

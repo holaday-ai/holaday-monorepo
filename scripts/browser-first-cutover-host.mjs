@@ -26,6 +26,7 @@ import {
   initializeFirstMaintenanceState,
   retireLegacyRuntime,
 } from './browser-first-cutover-runtime.mjs';
+import { persistCandidateStartupEntries } from './browser-first-cutover-startup.mjs';
 import {
   candidatePreparationSystem,
   maintenanceCandidateEnvironment,
@@ -73,6 +74,7 @@ const coordinatorModules = [
   'browser-first-cutover-mysql.mjs',
   'browser-first-cutover-nginx.mjs',
   'browser-first-cutover-runtime.mjs',
+  'browser-first-cutover-startup.mjs',
   'browser-maintenance-host.mjs',
   'browser-maintenance-journal.mjs',
   'browser-maintenance-linux.mjs',
@@ -701,6 +703,194 @@ export async function readFirstCutoverCandidateRuntime(identity, overrides = {})
     )
       fail();
     return { ...before, runtime };
+  } catch {
+    fail();
+  }
+}
+
+/** Resume only the selected worker and persist candidate entries through the
+ * original atomic editor. Caller supplies the same live two-host observer; no
+ * global save, restart, recovery of an unknown start or old worker reuse. */
+export async function resumeFirstCutoverCandidateWorker(
+  context,
+  identity,
+  approvedFiles,
+  overrides = {},
+) {
+  const bindingKeys = [
+    'attempt',
+    'candidate',
+    'configDigest',
+    'migrationDigest',
+    'inventoryDigest',
+  ];
+  const io = {
+    ...candidatePreparationSystem(),
+    now: Date.now,
+    readCandidate: readFirstCutoverCandidateRuntime,
+    persistStartup: persistCandidateStartupEntries,
+    ...overrides,
+  };
+  const fail = () => {
+    throw new Error('CUTOVER_CANDIDATE_WORKER_UNPROVEN');
+  };
+  try {
+    const { binding, root, applicationGid } = context;
+    if (
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      typeof io.assertNoLegacy !== 'function' ||
+      root !== `/opt/holaday-releases/${binding?.candidate}` ||
+      identity?.candidate !== binding.candidate ||
+      !/^[a-f0-9]{32}$/.test(identity?.bootId ?? '') ||
+      !Number.isSafeInteger(applicationGid) ||
+      applicationGid < 1
+    )
+      fail();
+    let last = -1;
+    const guard = async () => {
+      const now = io.now();
+      if (
+        !Number.isSafeInteger(now) ||
+        now < last ||
+        now < 0 ||
+        now >= context.approval.maintenanceEndsAtMs ||
+        !Number.isSafeInteger(context.approval.maintenanceEndsAtMs) ||
+        !bindingKeys.every((k) => context.approval[k] === binding[k]) ||
+        !isDeepStrictEqual(await context.journal.assertOwnership(), binding)
+      )
+        fail();
+      last = now;
+      const record = await context.journal.readFirstCutoverEffects();
+      if (
+        record.phase !== 'verified' ||
+        !isDeepStrictEqual(record.identity, identity) ||
+        !bindingKeys.every((k) => record[k] === binding[k])
+      )
+        fail();
+      const config = await io.readConfig();
+      if (createHash('sha256').update(config).digest('hex') !== binding.configDigest) fail();
+      return { record, config };
+    };
+    const initial = await guard();
+    if (initial.record.candidateStartupEvents?.length) fail();
+    const parsed = io.parseConfig(initial.config, root);
+    const enabled = parsed.ACCOUNT_CLOSURE_WORKER_ENABLED === 'true';
+    const env = maintenanceCandidateEnvironment(parsed, binding.candidate);
+    const read = async () => {
+      await guard();
+      const actual = await io.readCandidate(identity);
+      if (
+        !isDeepStrictEqual(actual.identity, identity) ||
+        actual.mode !== 'serving' ||
+        actual.idle !== false ||
+        actual.needsReconciliation !== true ||
+        !isDeepStrictEqual(actual.runtime?.identity, identity) ||
+        actual.runtime.root !== root
+      )
+        fail();
+      await guard();
+      return actual.runtime;
+    };
+    await io.assertNoLegacy(identity);
+    const before = await read();
+    if (!before.main || before.worker !== null) fail();
+    if (enabled) {
+      await guard();
+      await io.exec(
+        'pm2',
+        [
+          'start',
+          `${root}/scripts/start-account-closure-worker-production.sh`,
+          '--name',
+          'holaday-account-closure-worker',
+          '--interpreter',
+          '/usr/bin/bash',
+          '--cwd',
+          `${root}/apps/orchestrator`,
+          '--uid',
+          '998',
+          '--gid',
+          String(applicationGid),
+          '--no-autorestart',
+        ],
+        { cwd: root, env },
+      );
+      await guard();
+    }
+    let runtime;
+    const deadline = Math.min(io.now() + 60000, context.approval.maintenanceEndsAtMs);
+    for (;;) {
+      runtime = await read();
+      if (!isDeepStrictEqual(runtime.main, before.main)) fail();
+      if (Boolean(runtime.worker) === enabled) break;
+      if (io.now() >= deadline) fail();
+      await io.sleep(100);
+    }
+    const wanted = ['holaday-orchestrator', ...(enabled ? ['holaday-account-closure-worker'] : [])];
+    const registrations = async () => {
+      const observed = await read();
+      if (!isDeepStrictEqual(observed, runtime)) fail();
+      const output = await io.exec('pm2', ['jlist'], { cwd: root, env });
+      if (typeof output !== 'string' || Buffer.byteLength(output) > 16 * 1024 * 1024) fail();
+      const list = JSON.parse(output);
+      if (!Array.isArray(list)) fail();
+      const rows = wanted.map((name, i) => {
+        const matches = list.filter((r) => r.name === name);
+        if (
+          matches.length !== 1 ||
+          matches[0].pid !== (i ? runtime.worker : runtime.main).pid ||
+          !matches[0].pm2_env
+        )
+          fail();
+        return matches[0].pm2_env;
+      });
+      if (!isDeepStrictEqual(await read(), runtime)) fail();
+      return { rows, output };
+    };
+    await io.assertNoLegacy(identity);
+    const { output } = await registrations();
+    await io.exec('/opt/node22/bin/node', [`${root}/scripts/secure-pm2-logs.mjs`, ...wanted], {
+      cwd: root,
+      env,
+      input: output,
+    });
+    const effects = (await guard()).record;
+    const backed = effects.startupEvents.filter(
+      (e) => e.host === 'vultr' && e.phase === 'startup-backed-up',
+    );
+    if (!Array.isArray(approvedFiles) || approvedFiles.length !== 2 || backed.length > 1) fail();
+    const files = approvedFiles.map((f, i) => {
+      if (f.path !== `/root/.pm2/${i ? 'dump.pm2.bak' : 'dump.pm2'}`) fail();
+      const change = backed[0]?.files[i];
+      if (change && (change.path !== f.path || change.beforeDigest !== f.digest)) fail();
+      if (!change && f.remove?.length) fail();
+      return { path: f.path, digest: change ? change.afterDigest : f.digest, remove: [] };
+    });
+    await io.persistStartup(
+      {
+        binding: { attempt: binding.attempt, inventoryDigest: binding.inventoryDigest },
+        identity,
+        applicationGid,
+        workerEnabled: enabled,
+        files,
+        maintenanceEndsAtMs: context.approval.maintenanceEndsAtMs,
+      },
+      {
+        fs: io.startupFs,
+        platform: io.platform,
+        uid: io.uid,
+        now: io.now,
+        assertOwnership: async () => {
+          await guard();
+          return { attempt: binding.attempt, inventoryDigest: binding.inventoryDigest };
+        },
+        assertCandidate: async () => (await registrations()).rows,
+        persist: (event) => context.journal.recordCandidateStartupEvent(event),
+      },
+    );
+    await guard();
+    await io.assertNoLegacy(identity);
   } catch {
     fail();
   }
