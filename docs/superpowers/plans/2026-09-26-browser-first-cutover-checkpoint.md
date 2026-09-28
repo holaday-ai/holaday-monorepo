@@ -1,10 +1,24 @@
-# 首次切换实施断点：同次停止/源备份/Mac恢复已验证，完整host及候选尾段未完成
+# 首次切换实施断点：真实host准备链已验证并修复PATH，尚未合并完整停止/恢复/候选尾段
 
 日期：2026-09-26（Asia/Tokyo）。本地实施中，未部署。
 
 最新授权：2026-09-26 用户表示“我要出去一下 你自行安排任务 允许期间的所有操作 包含PR 部署 验证”。当前浏览器上线大项允许自主实施、PR、必要合并、部署与验证；下方历史“仅本地/未授权部署”限制已被本次授权取代。授权不等于验收通过；必须完成剩余真实接线、恢复演练与发布门槛，不得修改历史业务记录来伪造通过。
 
 ## 最新恢复点（优先于下方历史段落）
+
+### 2026-09-29 JST（2026-09-28 23:18Z heartbeat）：原host真实构建/低权限readiness及PATH修复
+
+起点`6a46ee0f`，Task4 BASE不变。没有重做源备份、Mac恢复、商户或旧通道。新增专属Linux诊断夹具`browser-candidate-stage-linux.mjs`，直接调用原`createFirstCutoverHostAdapter.preflight/stage`，原host亲自取得journal、调用prepare、clone/fetch/ancestry/detached SHA核查、锁文件安装、真实tsc构建、绑定全61SQL manifest、attach、原证据发布与真实`runuser -u holaday`读取。候选实际`6a46ee0f`，源实际`ede74e47`；协调器从本轮scripts副本运行（包含下述PATH修复），不是完整新候选已发布。首次/v1准备段的外部观察全部明确合成，不作为生产readiness；未执行transition、停止、备份、SQL、候选start/open。
+
+**发现并修复实际发布缺陷：** 原`maintenanceCandidateEnvironment`固定PATH缺`/usr/sbin`，Debian的`runuser`因此在原host真实readiness中报ENOENT（最小复现同PATH失败，绝对路径成功）。现共用环境加入固定`/usr/sbin`、`/sbin`，仍不继承配置或调用者PATH；普通及首次readiness/control均受益。新单测先RED退出1，随后两host组Mac102/102和实际Linux102/102均退出0、零跳过。未改执行门禁或将错误吞成成功。
+
+另一个失败属于QA安装条件：原stop-only镜像`/var/lib/holaday-deploy`为0700，应用组不能遍历。只在本QA中设root:998的0710，evidence子目录0750、摘要0640、所有私密子目录0700不变；生产目录未改。**现场安装仍须核验完整祖先路径的遍历权限，不能只检查摘要本身。** 最终原host完整准备链退出0；同一次新鲜报告的真实uid998消费者：正常通过→摘要0600拒绝→恢复0640后通过，字节不变，phase仍preflight、无backupReceipt、原锁保留、detach一次。
+
+构建工具缺口已解决，不要再次从头调查/安装：复用原age镜像，在一次性容器内安装公开git与pnpm10.33.0、真实Linux锁定依赖。未重建/commit镜像、未挂生产配置/密钥/socket或宿主PID、无宿主端口；安装后断开bridge，后续真实构建均使用缓存。容器`holaday-host-stage-20260929-uxFCY0`，完整ID`c0f4c822de9a90343ade1a060266014589ebd8eb170b1bc2f69bd6710f1c2199`，label`holaday.qa=host-stage-20260929-uxFCY0`，1CPU/3GiB/384PIDs。只读两提交裸仓库`/private/tmp/holaday-host-stage.uxFCY0/origin.git`；QA工具`/qa-tools`、真实源`/opt/holaday-monorepo`及依赖/构建产物保留。已结束的各QA尝试连同锁和候选移入容器内`/qa-preserved-stage-*`，未删除或恢复执行；不能重用旧attempt/过期批准。结束时只停止本容器并保留磁盘用于后续整合，原MySQL/Redis不动。
+
+**下一步仍是同一完整闭环，不是再跑本准备段：** 把原物理夹具的journal创建移交原host（由lifecycle.attach接收context），将已验证的备份接口接在同一adapter。需要把本QA真实Git/构建环境与原network-none源/恢复目标的执行环境整合；不上传Mac私钥、不以假pnpm或build/readiness成功替身替代。现有物理夹具仍预建journal，不能把两个独立attempt相加称完整6.R3通过。继续原迁移/seed/start/新boot/dirty/open/晚到工作故障、现场独立facts、生产恢复、非PayPal恢复与整分支审查。CLI execute关闭，未push/PR/合并/部署；被拒管理凭据路径未重试。原缓存及草稿保留。日志/退出码见verification本轮节，自动化维持原设置。
+
+本轮最终：Mac102/102、Linux102/102、原ops120/60/16/869及Python12全部退出0、零跳过；原host真实构建/消费者权限正反例退出0。初次ops沙箱监听EPERM和age未启用的失败/跳过另记，不计通过。三个MJS静态检查/diff-check退出0。所有session结束，专属QA容器已停止（不删除），构建缓存/候选/锁保留；原MySQL/Redis健康。未进行整分支独立审查，不标整项/Task4完成。
 
 ### 2026-09-29 JST（2026-09-28 22:17Z heartbeat）：同一Linux停写日志接通真实源导出和Mac恢复
 

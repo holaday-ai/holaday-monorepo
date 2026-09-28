@@ -4,7 +4,10 @@ import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { createHostReleaseAdapter } from './browser-maintenance-host.mjs';
+import {
+  createHostReleaseAdapter,
+  maintenanceCandidateEnvironment,
+} from './browser-maintenance-host.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 import { performMaintenanceRelease } from './browser-maintenance-transition.mjs';
 
@@ -13,6 +16,12 @@ const next = { candidate: 'c'.repeat(40), bootId: 'd'.repeat(32) };
 const root = `/opt/holaday-releases/${next.candidate}`;
 const oldRoot = `/opt/holaday-releases/${old.candidate}`;
 const attempt = '11111111-1111-4111-8111-111111111111';
+test('candidate environment resolves Linux system administration tools without inheriting an untrusted PATH', () => {
+  const env = maintenanceCandidateEnvironment({ PATH: '/tmp/untrusted-bin' }, next.candidate);
+  assert.equal(env.PATH, '/opt/node22/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin');
+  assert.equal(env.NODE_ENV, 'production');
+  assert.equal(env.HOLADAY_ORDINARY_CANDIDATE, next.candidate);
+});
 const inventory = {
   configurationDigests: ['1'.repeat(64)],
   merchants: [],

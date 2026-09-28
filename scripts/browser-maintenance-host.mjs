@@ -157,7 +157,9 @@ export function parseMaintenanceCandidateConfig(bytes, sourceRoot, io) {
 export function maintenanceCandidateEnvironment(parsed, candidate) {
   return {
     ...parsed,
-    PATH: '/opt/node22/bin:/usr/local/bin:/usr/bin:/bin',
+    // runuser is installed in /usr/sbin on supported Debian/Ubuntu hosts.
+    // Keep a fixed system-only path for both readiness and candidate control.
+    PATH: '/opt/node22/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
     HOME: '/var/lib/holaday',
     USER: 'holaday',
     LOGNAME: 'holaday',

@@ -2,6 +2,25 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29原host候选构建与低权限readiness（基于6a46ee0f）
+
+实际Debian/Node22、原host自己持锁并stage；候选6a46ee0f、源ede74e47、全61SQL摘要`dd989a28fd9728b2f3f68bac80a29576b28cfa5863b7dc1641f72914c60fdb42`。新增夹具必须显式`CUTOVER_QA_STAGE=1`，Docker/root、固定只读QA origin和新文件排他创建；不是生产入口。schema1外部facts为合成、商户为空；不证明v2现场观察或真实支付恢复。实际tsc退出0，不以产物存在或mock build作为唯一依据。执行工具使用本轮源码副本，候选仍为上述已存在提交，最终发布还须重新固定完整工具/候选摘要。
+
+| 验证 | 实际结果 | 日志 |
+| --- | --- | --- |
+| 最初真实stage及缺失证据拒绝诊断 | 退出0；clone/install/tsc/原journal通过，按预期拒绝未配置readiness；未调用原生消费者 | `/private/tmp/holaday-host-stage-red.log` |
+| 首次真实uid998消费者 | 退出1；定位固定PATH找不到`/usr/sbin/runuser`，不是验收通过 | `/private/tmp/holaday-host-stage-ready.log` |
+| 固定PATH回归RED | 1项失败、退出1、零跳过；确切PATH断言 | `/private/tmp/holaday-stage-path-red.log` |
+| 修复PATH后真实消费者 | 退出1；已进入消费者，QA父目录0700导致EACCES；未放宽生产门禁 | `/private/tmp/holaday-host-stage-fixed.log` |
+| 最终真实host stage、原证据发布/uid998读取及权限反例 | 退出0；正常读取→0600拒绝→0640恢复读取，journal保留preflight/锁，无候选启动/SQL | `/private/tmp/holaday-host-stage-final.log` |
+| 普通/首次host关联Mac回归 | 102/102，退出0，零跳过 | `/private/tmp/holaday-stage-path-regression.log` |
+| 同两组实际Linux Node22回归 | 102/102，退出0，零跳过 | `/private/tmp/holaday-stage-path-linux-regression.log` |
+| 最终原ops回归 | 120/60/16/869及Python12，整命令退出0，零跳过 | `/private/tmp/holaday-stage-path-ops-final.log` |
+
+准备工具只在独立QA容器内安装，原镜像未重建，网络下载仅公开构建依赖；后续断网缓存构建。无生产配置/密钥/socket/hostPID/宿主端口。所有合成尝试的锁、候选和报告完整保留，不清锁续跑；正常场景的测试模型端点只指127.0.0.1:1且rollout=off，没有调用模型/支付API。最终新fixture的默认正反例已实跑，额外`--expect-missing-evidence`选项尚未单独重跑（最初缺证据诊断是临时夹具，不混写成最终夹具完整覆盖）。三文件Biome及diff-check退出0。只修共用候选PATH，没有新增生产执行能力；原6.R3全链、生产facts/恢复/非PayPal/整分支审查及发布仍未完成。
+
+ops初次在默认沙箱中退出1：本地HTTP/WS监听127.0.0.1被EPERM拒绝（10失败），且未显式启用age导致34跳过；此记录`/private/tmp/holaday-stage-path-ops.log`不是代码RED或通过。正常申请仅本地测试所需权限并显式传`CUTOVER_TEST_AGE_EXECUTABLE=/opt/homebrew/bin/age`后，上表最终全命令退出0、零跳过；没有绕过拒绝或调用真实支付服务（PayPal相关脚本仅离线假SSH回归）。全部测试session已结束；核对标签/完整ID/无活跃测试后停止并保留专属QA容器，原两个健康MySQL/Redis仍运行。没有完整应用/浏览器成功率重测或独立整分支审查结论。
+
 ## 2026-09-29同attempt物理停止→真实源导出→Mac隔离恢复（基于ede74e47）
 
 复用原`browser-recovery-target-qa.mjs`六参数模式，增加`CUTOVER_QA_RETIREMENT=1`；错误回执反例再加`CUTOVER_QA_OMIT_RECEIPT=1`。原握手三参数模式、独立源Mac协调器模式和未知/已知Linux停止入口均保留。原停止镜像、MySQL8镜像和`holaday-recovery-pack-lkZ2Vd`不变；新Mac打包mysql2仅提供QA数据库连接，不替换源导出/快照/迁移实现。mysqldump为缓存MySQL镜像真实客户端，版本8.0.46，Debian原库满足其依赖；不复制生产配置或恢复私钥。
