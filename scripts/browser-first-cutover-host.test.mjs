@@ -380,6 +380,7 @@ async function lifecycleFixture(t, fault) {
     binding,
     identity,
     record,
+    inventory,
     stateRoot,
     journal: () => journal,
     candidateStatus: () => ({
@@ -409,6 +410,7 @@ for (const fault of [undefined, 'candidate-observation', 'opened-observation']) 
   test(`existing host consumes site fence evidence across the full transition (${fault ?? 'success'})`, async (t) => {
     const f = await lifecycleFixture(t);
     const original = f.io.lifecycle;
+    const originalEvidence = f.io.evidence;
     let context;
     const pair = () => ({
       observedAtMs: f.io.now(),
@@ -439,10 +441,15 @@ for (const fault of [undefined, 'candidate-observation', 'opened-observation']) 
           ingress: { unknownIngress: [] },
           gatewaySiteDigest: 'f'.repeat(64),
           producerStartupFiles: [],
+          inventory: f.inventory,
         }),
         readCoordinatorIdentity: async () => ({ binding: f.binding }),
         readPersistedWork: async () => ({ observedAtMs: f.io.now(), unsettled: [] }),
         readCandidateRuntime: async () => candidate(),
+        readRehearsal: (input) => {
+          assert.deepEqual(input, { binding: f.binding, merchants: f.inventory.merchants });
+          return originalEvidence.readRehearsalArtifacts();
+        },
         facts: {
           observeWriters: () => original.verifyFence(context),
           observeWork: async () => ({
@@ -528,7 +535,15 @@ for (const fault of [undefined, 'candidate-observation', 'opened-observation']) 
     } else {
       assert.deepEqual(
         f.events.filter((event) => event.startsWith('site-candidate:')),
-        ['site-candidate:candidate_started', 'site-candidate:verified', 'site-candidate:verified'],
+        [
+          'site-candidate:candidate_started',
+          'site-candidate:candidate_started',
+          'site-candidate:candidate_started',
+          'site-candidate:verified',
+          'site-candidate:verified',
+          'site-candidate:verified',
+          'site-candidate:verified',
+        ],
       );
       assert.equal((await f.record()).phase, 'reconciled');
     }

@@ -416,7 +416,22 @@ test('coordinator site scope reads the fixed protected file and binds both hosts
     await session.readFirstCutoverExecutionSiteScope({ attempt: binding.attempt }, io),
     { ...value.site, binding, maintenanceEndsAtMs: deadline },
   );
+  value.site.inventory = { configurationDigests: ['a'.repeat(64)], merchants: [], targets: [] };
+  const inventoryDigest = createHash('sha256')
+    .update(JSON.stringify(value.site.inventory))
+    .digest('hex');
+  value.binding = { ...binding, inventoryDigest };
+  approval.inventoryDigest = inventoryDigest;
+  value.site.ingress.inventoryDigest = inventoryDigest;
+  await write();
+  assert.deepEqual(
+    (await session.readFirstCutoverExecutionSiteScope({ attempt: binding.attempt }, io)).inventory,
+    value.site.inventory,
+  );
   for (const mutate of [
+    (v) => {
+      v.site.inventory.targets.push({ forged: true });
+    },
     (v) => {
       v.host = 'aliyun';
     },

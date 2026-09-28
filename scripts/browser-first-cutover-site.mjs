@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { isDeepStrictEqual as equal } from 'node:util';
+import { readCutoverRehearsalArtifacts } from './browser-cutover-evidence.mjs';
 import { connectFirstCutoverGatewaySession } from './browser-first-cutover-gateway-session.mjs';
 import {
   createFirstCutoverRetirementObserver,
@@ -34,6 +36,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     readPair: readFirstCutoverHostPair,
     readPersistedWork: readFirstCutoverPersistedWork,
     readCandidateRuntime: readFirstCutoverCandidateRuntime,
+    readRehearsal: readCutoverRehearsalArtifacts,
     inspectSource: readReviewedFirstCutoverLegacySource,
     createIngress: createFirstCutoverIngressPair,
     connectGateway: connectFirstCutoverGatewaySession,
@@ -150,6 +153,49 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
         })),
       ),
     );
+  const readinessScope = (input) => {
+    const request = structuredClone(input);
+    if (
+      !equal(request?.binding, context.binding) ||
+      !equal(request.window, {
+        maintenanceEndsAtMs: context.approval.maintenanceEndsAtMs,
+        reconcileByMs: context.approval.reconcileByMs,
+        operatorRef: context.approval.operatorRef,
+      }) ||
+      !['prepare', 'preopen'].includes(request.stage) ||
+      !Array.isArray(scope.ingress.unknownIngress) ||
+      scope.ingress.unknownIngress.length
+    )
+      fail();
+    return request;
+  };
+  const closedCandidate = (actual, identity) => {
+    const candidate = actual.candidate;
+    if (
+      !equal(candidate?.identity, identity) ||
+      candidate.mode !== 'closed' ||
+      candidate.idle !== true ||
+      candidate.needsReconciliation !== false ||
+      candidate.runtime?.worker !== null ||
+      legacy(actual).length
+    )
+      fail();
+  };
+  const approvedInventory = () => {
+    const inventory = scope.inventory;
+    if (
+      !inventory ||
+      !Array.isArray(inventory.targets) ||
+      !Array.isArray(inventory.merchants) ||
+      !Array.isArray(inventory.configurationDigests) ||
+      !inventory.configurationDigests.length ||
+      !inventory.configurationDigests.every((value) => /^[a-f0-9]{64}$/.test(value)) ||
+      createHash('sha256').update(JSON.stringify(inventory)).digest('hex') !==
+        context.binding.inventoryDigest
+    )
+      fail();
+    return structuredClone(inventory);
+  };
   const boundary = async (identity) => {
     const record = await guard(context);
     if (identity !== undefined) {
@@ -163,16 +209,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     let actual;
     if (identity !== undefined) {
       actual = await observer.readWithCandidate(identity);
-      const candidate = actual.candidate;
-      if (
-        !equal(candidate?.identity, identity) ||
-        candidate.mode !== 'closed' ||
-        candidate.idle !== true ||
-        candidate.needsReconciliation !== false ||
-        candidate.runtime?.worker !== null ||
-        legacy(actual).length
-      )
-        fail();
+      closedCandidate(actual, identity);
     } else {
       const progress = await observer.readFenceProgress();
       if (progress?.purpose !== 'fence-progress') fail();
@@ -428,25 +465,105 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     // Pass this reader directly to the existing host evidence collector. The
     // preopen identity comes from start(), NOT from an early verified journal.
     evidence: {
+      readRehearsalArtifacts: (input) =>
+        run(
+          'readiness-rehearsal',
+          context,
+          undefined,
+          async () => {
+            const request = readinessScope(input);
+            const record = await guard(
+              context,
+              request.stage === 'prepare'
+                ? ['preflight', 'prepared']
+                : ['candidate_started', 'verified'],
+            );
+            if (request.stage === 'prepare') {
+              if (request.identity !== undefined) fail();
+            } else checkIdentity(request.identity, record);
+            const result = await io.readRehearsal({
+              binding: structuredClone(context.binding),
+              merchants: approvedInventory().merchants,
+            });
+            if (!equal(record, await guard(context, [record.phase]))) fail();
+            return result;
+          },
+          false,
+        ),
+      readHostInventory: (input) =>
+        run(
+          'readiness-host',
+          context,
+          undefined,
+          async () => {
+            const request = readinessScope(input);
+            const record = await guard(
+              context,
+              request.stage === 'prepare'
+                ? ['preflight', 'prepared']
+                : ['candidate_started', 'verified'],
+            );
+            const inventory = approvedInventory();
+            if (request.stage === 'prepare') {
+              if (request.identity !== undefined) fail();
+            } else checkIdentity(request.identity, record);
+            const before = structuredClone(await facts.observeWork(context));
+            const actual =
+              request.stage === 'prepare'
+                ? await observer.read()
+                : await observer.readWithCandidate(request.identity);
+            if (request.stage === 'preopen') closedCandidate(actual, request.identity);
+            const after = await facts.observeWork(context);
+            if (
+              ![before, after].every(
+                (v) =>
+                  fresh(v?.observedAtMs) &&
+                  v.inventoryDigest === context.binding.inventoryDigest &&
+                  ['unsettledWork', 'externalWork', 'activeRequests', 'unknownWriters'].every(
+                    (k) => v[k] === 0,
+                  ),
+              ) ||
+              !fresh(actual.observedAtMs) ||
+              actual.inventoryDigest !== context.binding.inventoryDigest ||
+              actual.unknownLaunchers.length
+            )
+              fail();
+            const producersRunning = [];
+            const seen = new Set();
+            for (const host of actual.hosts) {
+              for (const process of [...host.registered.processes, ...host.unmanaged.processes]) {
+                if (!['main', 'worker'].includes(process.role)) continue;
+                const matches = inventory.targets.filter(
+                  (target) =>
+                    target.host === host.host &&
+                    target.pid === process.pid &&
+                    target.start === process.start &&
+                    target.role === process.role,
+                );
+                const key = `${host.host}:${process.pid}`;
+                if (matches.length !== 1 || seen.has(key)) fail();
+                seen.add(key);
+                producersRunning.push(structuredClone(matches[0]));
+              }
+            }
+            if (!equal(record, await guard(context, [record.phase]))) fail();
+            return {
+              inventory: structuredClone(inventory),
+              observedAtMs: Math.min(before.observedAtMs, actual.observedAtMs, after.observedAtMs),
+              producersRunning,
+              unknownWriters: [],
+              externalWork: [],
+            };
+          },
+          false,
+        ),
       readFenceState: (input) =>
         run(
           'readiness-fence',
           context,
           undefined,
           async () => {
-            const request = structuredClone(input);
-            if (
-              !equal(request?.binding, context.binding) ||
-              !equal(request.window, {
-                maintenanceEndsAtMs: context.approval.maintenanceEndsAtMs,
-                reconcileByMs: context.approval.reconcileByMs,
-                operatorRef: context.approval.operatorRef,
-              }) ||
-              !['prepare', 'preopen'].includes(request.stage) ||
-              !Array.isArray(scope.ingress.unknownIngress) ||
-              scope.ingress.unknownIngress.length
-            )
-              fail();
+            const request = readinessScope(input);
             let proof;
             if (request.stage === 'prepare') {
               const record = await guard(context, ['preflight', 'prepared']);

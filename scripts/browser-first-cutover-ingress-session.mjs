@@ -203,7 +203,14 @@ async function readProtectedSite(options, overrides, kind) {
           'ingress',
           'gatewaySiteDigest',
           'producerStartupFiles',
+          ...(Object.hasOwn(s, 'inventory') ? ['inventory'] : []),
         ]) ||
+        (Object.hasOwn(s, 'inventory') &&
+          (!s.inventory ||
+            typeof s.inventory !== 'object' ||
+            Array.isArray(s.inventory) ||
+            createHash('sha256').update(JSON.stringify(s.inventory)).digest('hex') !==
+              value.binding.inventoryDigest)) ||
         s.legacyDigest !== beforeApproval.legacyDigest ||
         !hash(s.legacyDigest) ||
         !keys(s.reviews, ['vultr', 'aliyun']) ||

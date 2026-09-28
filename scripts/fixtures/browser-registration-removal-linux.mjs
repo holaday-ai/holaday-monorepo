@@ -66,9 +66,12 @@ await fs.writeFile(
   `require('http').createServer((q,r)=>r.end('qa')).listen(${mainPort});process.on('SIGINT',()=>{});\n`,
 );
 await fs.writeFile('/tmp/registry-idle.cjs', 'setInterval(()=>{},1000);\n');
+// Approved metadata is synthetic; process and protected-file observations below
+// remain real. No production merchant or recovery transcript is used here.
+const readinessInventory = { configurationDigests: ['c'.repeat(64)], merchants: [], targets: [] };
 const binding = {
   attempt: '22222222-2222-4222-8222-222222222222',
-  inventoryDigest: 'a'.repeat(64),
+  inventoryDigest: siteMode ? sha(JSON.stringify(readinessInventory)) : 'a'.repeat(64),
 };
 let journal;
 let gateway;
@@ -517,6 +520,7 @@ try {
             maintenanceEndsAtMs: input.maintenanceEndsAtMs,
             site: {
               legacyDigest: proof.legacyDigest,
+              inventory: readinessInventory,
               reviews,
               gatewaySiteDigest: sha(siteBytes),
               ingress: {
@@ -621,6 +625,41 @@ try {
           },
         );
         await executionSite.lifecycle.attach(siteContext);
+        const readinessScope = {
+          binding: fullBinding,
+          stage: 'prepare',
+          window: {
+            maintenanceEndsAtMs: approval.maintenanceEndsAtMs,
+            reconcileByMs: approval.reconcileByMs,
+            operatorRef: approval.operatorRef,
+          },
+        };
+        const actualInventory = await executionSite.evidence.readHostInventory(readinessScope);
+        assert.deepEqual(actualInventory.inventory, readinessInventory);
+        assert.deepEqual(actualInventory.producersRunning, []); // This fixture has only gateways.
+        const evidenceDirectory = '/var/lib/holaday-deploy/evidence-private';
+        await fs.mkdir(evidenceDirectory, { mode: 0o700 });
+        await fs.writeFile(
+          `${evidenceDirectory}/rehearsal-${fullBinding.configDigest}.json`,
+          JSON.stringify({
+            schemaVersion: 1,
+            candidate: fullBinding.candidate,
+            configDigest: fullBinding.configDigest,
+            inventoryDigest: fullBinding.inventoryDigest,
+            observedAtMs: Date.now(),
+            recoveryUntilMs: approval.reconcileByMs,
+            recovery: 'retry-proven',
+            artifacts: [],
+          }),
+          { mode: 0o600, flag: 'wx' },
+        );
+        assert.equal(
+          (await executionSite.evidence.readRehearsalArtifacts(readinessScope)).recoveryUntilMs,
+          approval.reconcileByMs,
+        );
+        console.log(
+          'PASS site readiness readers: default root-protected inventory/rehearsal file readers and actual process observer; synthetic merchant metadata, NOT payment recovery',
+        );
       } else client = await connect();
     }
     if (siteMode) {

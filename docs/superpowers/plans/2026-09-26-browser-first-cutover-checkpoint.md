@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 续跑：原 readiness 主机清单与受保护恢复证据接入现场
+
+承接 `01e32ba6`，Task4 原 BASE844c2ced不变。现有 execution site 的 `readHostInventory`、`readFenceState`、`readRehearsalArtifacts` 已一同接入原 host/collector。清单只接受原批准 inventoryDigest 对应的完整 metadata；实际旧生产者由原双机 observer 以 host/pid/start/role 精确映射，并夹读独立业务事实，拒绝 PID 复用、未知来源、忙碌、陈旧、窗口或 journal 漂移。preopen 使用 start 返回身份，仍只由原 verify 后写 verified，不提前登记成功。
+
+恢复证据直接复用原 root 私密文件读取器，绑定同一 candidate/config/inventory 与原商户集合，不调用支付方、不生成“已恢复”标记。collector 继续验证恢复覆盖及 reconcileBy。受保护 execution scope 允许携带原批准 inventory；兼容旧五字段 scope 仅用于原有退役路径，缺 inventory 时新 readiness 明确拒绝，不能生成新清单来重置批准。
+
+新增十二项 RED→GREEN；相关 site/host/ingress 回归 **114/114**，实际隔离 Linux UID998 五组 **368/368**，均0跳过、退出0。原物理夹具新增默认受保护 scope/恢复文件与真实进程观察的消费，成功及真实删除丢ACK两模式退出0，原 PM2/pidfd/journal/无关进程与启动条目保持；**商户 metadata/业务/另一逻辑主机仍为合成，不是支付恢复或完整生产演练**。日志 `/tmp/holaday-inventory-{site-green,linux-final,site-physical,site-lost-ack}.log`。最终 browser **889/889**、ops **120/59/16/723及Python12**，0跳过、退出0，日志 `/tmp/holaday-inventory-{browser-final,ops-final}.log`。六MJS Biome、两shell语法和diff-check通过；未重跑应用全套/实际MySQL恢复/nginx整链/整分支审查。
+
+剩余按原 Task4–6：独立旧来源与DB归属、内存请求/browser/provider和writer事实；原 DB/payment readiness 读者接入；真实备份设施/source/隔离target；worker定向持久启动、reconcile/hold；工具安装及首次execute；真实停写备份/Mac隔离恢复/非PayPal恢复、完整成功故障演练和整分支审查。新三个读者只是接线，不替代这些现场事实。execute仍关闭、未push/PR/合并/部署，PayPal/支付记录/密钥/UI/扩展未动，原cache保留，自动化继续。
+
 ### 2026-09-28 续跑：候选启动后的 readiness 与恢复入口身份接线
 
 承接 `433948f3`，Task4 原 BASE844c2ced不变。原 execution site 现提供 `evidence.readFenceState(scope)`，直接给已有 host/collector 使用。prepare 只返回原受审基线的实际观察，不假装已停写；preopen 使用 host 从 start 得到的真实 identity，进入已有 `observer.readWithCandidate`，核对关闭、idle、无 worker、无旧进程/管理注册/监听者，并保留独立业务事实与两侧十二表读取。`candidate_started` 的 journal 此时仍无 identity；测试确认只在 verify 后由原 tail 写入 verified，不添加状态机或提前成功记录。
