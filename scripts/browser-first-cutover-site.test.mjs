@@ -617,6 +617,38 @@ for (const fault of ['busy', 'changed-scope', 'foreign-journal', 'lost-prepare',
   });
 }
 
+test('site routes prepare and preopen database scope through the same held journal and inventory', async (t) => {
+  let reads = 0;
+  const f = await candidateFixture(t, async (f) => {
+    f.io.readPaymentScope = async (context, inventory) => {
+      assert.equal(context.journal, f.journal);
+      assert.deepEqual(inventory, f.scope.inventory);
+      reads++;
+      return { observedAtMs: f.state.now, orders: [], unsettled: [] };
+    };
+  });
+  assert.equal(typeof f.site.evidence.readDatabaseScope, 'function');
+  assert.deepEqual(await f.site.evidence.readDatabaseScope(f.request('prepare')), {
+    observedAtMs: f.state.now,
+    orders: [],
+    unsettled: [],
+  });
+  await f.advance();
+  await f.journal.persist('migration_started', { candidate: f.binding.candidate });
+  await f.journal.bindBootstrapSeed('8'.repeat(32));
+  await f.journal.persist('candidate_started', { candidate: f.binding.candidate });
+  assert.deepEqual(await f.site.evidence.readDatabaseScope(f.request()), {
+    observedAtMs: f.state.now,
+    orders: [],
+    unsettled: [],
+  });
+  assert.equal(reads, 2);
+  assert.equal((await f.journal.readFirstCutoverEffects()).identity, undefined);
+  f.scope.gatewaySiteDigest = '1'.repeat(64);
+  await assert.rejects(f.site.evidence.readDatabaseScope(f.request()), /UNPROVEN/);
+  assert.equal(reads, 2);
+});
+
 test('site refuses missing independent business facts before opening either session', async (t) => {
   const f = await fixture(t);
   f.io.facts.observeWork = undefined;

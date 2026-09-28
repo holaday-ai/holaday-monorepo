@@ -14,6 +14,7 @@ import {
   readCutoverStartupSnapshot,
   readCutoverWorkScope,
 } from './browser-cutover-evidence.mjs';
+import { readFirstCutoverPaymentScope } from './browser-first-cutover-host.mjs';
 
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const merchant = '9'.repeat(64);
@@ -686,6 +687,54 @@ test('nine exact historical Alipay rows coexist with the sandbox deferral withou
     false,
   );
 });
+test('first site database connection preserves both exact deferrals and never resolves PayPal', async () => {
+  const f = alipayDatabaseFixture();
+  const expected = await readCutoverDatabaseScope(f.db, f.options);
+  const config = Buffer.from('DATABASE_URL=mysql://qa@127.0.0.1/fixture');
+  const inventory = {
+    paymentWindowStartMs: f.options.windowStartMs,
+    merchants: [{ provider: 'wechat', environment: 'production', merchantDigest: merchant }],
+    deferredSandboxPayment: f.options.deferredSandboxPayment,
+    deferredAlipayPayments: f.options.deferredAlipayPayments,
+  };
+  const binding = {
+    candidate: 'a'.repeat(40),
+    attempt: '11111111-1111-4111-8111-111111111111',
+    configDigest: createHash('sha256').update(config).digest('hex'),
+    inventoryDigest: hash(inventory),
+    migrationDigest: 'b'.repeat(64),
+  };
+  const context = {
+    binding,
+    approval: { ...binding, maintenanceEndsAtMs: 200_000 },
+    root: `/opt/holaday-releases/${binding.candidate}`,
+    journal: { assertOwnership: async () => binding },
+  };
+  let closed = 0;
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    now: f.options.now,
+    readConfig: async () => config,
+    parseConfig: () => ({ DATABASE_URL: 'mysql://qa@127.0.0.1/fixture' }),
+    connectWorkDatabase: async () => ({ ...f.db, end: async () => closed++ }),
+  };
+  assert.deepEqual(await readFirstCutoverPaymentScope(context, inventory, io), expected);
+  assert.equal(expected.deferredUnverified.length, 10);
+  assert.equal(closed, 1);
+  f.rows.payments.push({
+    ...f.rows.payments.find((r) => r.provider === 'paypal'),
+    id: 99,
+    external_id: 'OTHER',
+  });
+  await assert.rejects(
+    readFirstCutoverPaymentScope(context, inventory, io),
+    /CUTOVER_PAYMENT_OBSERVATION_UNPROVEN/,
+  );
+  assert.equal(closed, 2);
+  assert.equal(f.calls.at(-1).sql, 'ROLLBACK');
+});
+
 test('unarchived Alipay fields remain bound independently of historical identity', async () => {
   const f = alipayDatabaseFixture();
   const before = await readCutoverDatabaseScope(f.db, f.options);

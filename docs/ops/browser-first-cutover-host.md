@@ -41,6 +41,14 @@
 
 detach关闭本次执行会话：成功路径在同实例恢复入口、恢复worker之后且维护截止前调用，之后独立只读核对可以继续到reconcile截止。失败路径finish仍在持锁状态清理已开始的attach；detach调用只尝试一次，确认丢失不重试、不杀远端进程。成功解除发布锁必须同时满足原reconciliation条件与detach已完成；异常则关闭候选准入、保留实际journal/锁。独立核对连接和数据库恢复仍由完整site提供，不能把detach当成业务核对或恢复完成。
 
+### 现场 readiness 读者（2026-09-28，本地已接线，未部署）
+
+原 execution site 现提供 `readHostInventory/readFenceState/readRehearsalArtifacts/readDatabaseScope` 给同一 host/collector。受保护 execution scope 可携带原批准 `inventory`，其完整 JSON 摘要必须等于原 inventoryDigest。旧格式仍可用于已实现的退役观察，但缺清单不能通过 readiness，不自动生成或刷新批准。
+
+数据库读者复用 `readCutoverDatabaseScope` 与既有专用候选数据库连接。要求同一清单明确 `paymentWindowStartMs`，不能用当前时间缩短应核查范围；商户来自该清单的 `merchants`，每个非PayPal provider只能唯一对应一个明确环境/商户摘要，行内环境冲突、未知或多义映射拒绝。同一 `deferredSandboxPayment/deferredAlipayPayments` 原样交给原精确指纹逻辑。只读一致性事务后回滚并关闭连接，维护窗口/配置/持锁前后核验；UTC参数和无损时间/JSON读取不改变库内数据。此映射不是历史商户归属证明，真实签名查单仍须独立完成。
+
+`queryOrders` 的现场凭据/私密原文保留/既有查询器调用尚未接通；不能以数据库reader成功替代支付方核验。恢复文件使用原root私密读者，不生成回执或调用支付服务。业务内存工作、旧来源DB归属及连接/writer的独立事实、备份/worker/reconcile/hold和完整execute仍未就绪；下方接口要求继续有效。
+
 ### 正式 nginx 测试、重载与生效观察（2026-09-28）
 
 `applyCutoverFence / restoreCutoverIngress`未提供成对的`testNginx / reloadNginx`替代接口时，现默认调用`browser-first-cutover-nginx.mjs`。现场必须提供同一操作的`nginx.maintenanceEndsAtMs`，沿用原journal/受保护入口回执；缺窗口、过期、非Linux/root或接口不完整时拒绝，不通过CLI接受任意命令。一个控制器只执行一次测试/重载，不把失败或丢确认改成可重试。

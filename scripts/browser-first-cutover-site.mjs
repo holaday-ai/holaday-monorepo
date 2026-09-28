@@ -7,6 +7,7 @@ import {
   createFirstCutoverRetirementObserver,
   readFirstCutoverCandidateRuntime,
   readFirstCutoverHostPair,
+  readFirstCutoverPaymentScope,
   readFirstCutoverPersistedWork,
   readReviewedFirstCutoverLegacySource,
 } from './browser-first-cutover-host.mjs';
@@ -37,6 +38,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     readPersistedWork: readFirstCutoverPersistedWork,
     readCandidateRuntime: readFirstCutoverCandidateRuntime,
     readRehearsal: readCutoverRehearsalArtifacts,
+    readPaymentScope: readFirstCutoverPaymentScope,
     inspectSource: readReviewedFirstCutoverLegacySource,
     createIngress: createFirstCutoverIngressPair,
     connectGateway: connectFirstCutoverGatewaySession,
@@ -465,6 +467,28 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     // Pass this reader directly to the existing host evidence collector. The
     // preopen identity comes from start(), NOT from an early verified journal.
     evidence: {
+      readDatabaseScope: (input) =>
+        run(
+          'readiness-database',
+          context,
+          undefined,
+          async () => {
+            const request = readinessScope(input);
+            const record = await guard(
+              context,
+              request.stage === 'prepare'
+                ? ['preflight', 'prepared']
+                : ['candidate_started', 'verified'],
+            );
+            if (request.stage === 'prepare') {
+              if (request.identity !== undefined) fail();
+            } else checkIdentity(request.identity, record);
+            const result = await io.readPaymentScope(context, approvedInventory());
+            if (!equal(record, await guard(context, [record.phase]))) fail();
+            return result;
+          },
+          false,
+        ),
       readRehearsalArtifacts: (input) =>
         run(
           'readiness-rehearsal',

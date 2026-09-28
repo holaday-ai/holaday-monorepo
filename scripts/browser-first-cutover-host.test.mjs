@@ -99,6 +99,106 @@ test('persisted-work host reader owns and closes a dedicated approved database c
   }
 });
 
+test('payment database site reader reuses approved connection and original read-only scope', async () => {
+  assert.equal(typeof firstHost.readFirstCutoverPaymentScope, 'function');
+  const config = Buffer.from('DATABASE_URL=mysql://synthetic@127.0.0.1/qa');
+  const inventory = {
+    paymentWindowStartMs: 500,
+    merchants: [{ provider: 'wechat', environment: 'production', merchantDigest: '9'.repeat(64) }],
+  };
+  const binding = Object.fromEntries(
+    ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map((k) => [
+      k,
+      approved[k],
+    ]),
+  );
+  binding.configDigest = createHash('sha256').update(config).digest('hex');
+  const row = {
+    id: 1,
+    external_id: 'SYNTHETIC',
+    provider: 'wechat',
+    provider_order_id: 'QAORDER',
+    provider_capture_id: null,
+    amount_cents: 1234,
+    currency: 'CNY',
+    status: 'pending',
+    metadata: null,
+  };
+  const calls = [];
+  let closed = 0;
+  let connections = 0;
+  const context = {
+    binding,
+    approval: { ...approved, ...binding },
+    root: `/opt/holaday-releases/${binding.candidate}`,
+    journal: { assertOwnership: async () => binding },
+  };
+  const rebind = () => {
+    binding.inventoryDigest = createHash('sha256').update(JSON.stringify(inventory)).digest('hex');
+    context.approval.inventoryDigest = binding.inventoryDigest;
+  };
+  rebind();
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    now: () => 1000,
+    readConfig: async () => config,
+    parseConfig: () => ({ DATABASE_URL: 'mysql://synthetic@127.0.0.1/qa' }),
+    connectWorkDatabase: async (url) => {
+      assert.equal(url, 'mysql://synthetic@127.0.0.1/qa');
+      connections++;
+      return {
+        query: async (sql, params) => {
+          calls.push({ sql, params });
+          if (sql.includes('COUNT'))
+            return [[{ total: sql.includes('FROM payments ') ? 1 : 0 }], []];
+          if (sql.includes('FROM payments ')) return [[row], []];
+          return [[], []];
+        },
+        end: async () => closed++,
+      };
+    },
+  };
+  const result = await firstHost.readFirstCutoverPaymentScope(context, inventory, io);
+  assert.equal(result.orders[0].merchantDigest, inventory.merchants[0].merchantDigest);
+  assert.deepEqual(result.unsettled, []);
+  assert.equal(calls.at(-1).sql, 'ROLLBACK');
+  assert.equal(calls.find((v) => v.sql.includes('COUNT')).params[0].getTime(), 500);
+  assert.equal(closed, 1);
+  for (const fault of ['window', 'digest', 'ambiguous', 'paypal', 'row-env', 'config', 'close']) {
+    const inv = structuredClone(inventory);
+    const ctx = { ...context, binding: { ...binding }, approval: { ...context.approval } };
+    const deps = { ...io };
+    if (fault === 'window') inv.paymentWindowStartMs = undefined;
+    if (fault === 'ambiguous') inv.merchants.push({ ...inv.merchants[0] });
+    if (fault === 'paypal') row.provider = 'paypal';
+    if (fault === 'row-env') row.metadata = { env: 'sandbox' };
+    if (fault === 'config') deps.readConfig = async () => Buffer.from('different');
+    if (fault === 'close')
+      deps.connectWorkDatabase = async (...args) => ({
+        ...(await io.connectWorkDatabase(...args)),
+        end: async () => {
+          closed++;
+          throw new Error('SECRET');
+        },
+      });
+    if (fault !== 'digest') {
+      ctx.binding.inventoryDigest = createHash('sha256').update(JSON.stringify(inv)).digest('hex');
+      ctx.approval.inventoryDigest = ctx.binding.inventoryDigest;
+    } else inv.paymentWindowStartMs++;
+    const count = connections;
+    await assert.rejects(
+      firstHost.readFirstCutoverPaymentScope(ctx, inv, deps),
+      /^Error: CUTOVER_PAYMENT_OBSERVATION_UNPROVEN$/,
+    );
+    if (['window', 'digest', 'ambiguous', 'config'].includes(fault))
+      assert.equal(connections, count);
+    assert.equal(closed, connections);
+    row.provider = 'wechat';
+    row.metadata = null;
+  }
+});
+
 async function preparationFixture(t, changes = {}) {
   const config = Buffer.from('SYNTHETIC_ONLY=1\n');
   const migrationManifest = { replaysNumberedSql: true };
@@ -446,6 +546,11 @@ for (const fault of [undefined, 'candidate-observation', 'opened-observation']) 
         readCoordinatorIdentity: async () => ({ binding: f.binding }),
         readPersistedWork: async () => ({ observedAtMs: f.io.now(), unsettled: [] }),
         readCandidateRuntime: async () => candidate(),
+        readPaymentScope: (context, inventory) => {
+          assert.deepEqual(context.binding, f.binding);
+          assert.deepEqual(inventory, f.inventory);
+          return originalEvidence.readDatabaseScope();
+        },
         readRehearsal: (input) => {
           assert.deepEqual(input, { binding: f.binding, merchants: f.inventory.merchants });
           return originalEvidence.readRehearsalArtifacts();

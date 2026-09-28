@@ -4,7 +4,11 @@ import * as fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { collectCutoverEvidence, readCutoverWorkScope } from './browser-cutover-evidence.mjs';
+import {
+  collectCutoverEvidence,
+  readCutoverDatabaseScope,
+  readCutoverWorkScope,
+} from './browser-cutover-evidence.mjs';
 import { backupAndRestoreCheck } from './browser-first-cutover-backup.mjs';
 import {
   applyCutoverFence,
@@ -705,6 +709,63 @@ export async function readFirstCutoverCandidateRuntime(identity, overrides = {})
  * No dotenv auto-loading, provider API call, lease cleanup or status mutation.
  */
 export async function readFirstCutoverPersistedWork(context, overrides = {}) {
+  return withApprovedCutoverDatabase(
+    context,
+    overrides,
+    'CUTOVER_WORK_OBSERVATION_UNPROVEN',
+    (connection, io) => readCutoverWorkScope(connection, { now: io.now }),
+  );
+}
+
+/** This maps only explicit approved metadata. It does not prove historical
+ * merchant ownership, query a provider, or manufacture a recovery receipt. */
+export async function readFirstCutoverPaymentScope(context, input, overrides = {}) {
+  const code = 'CUTOVER_PAYMENT_OBSERVATION_UNPROVEN';
+  try {
+    const inventory = structuredClone(input);
+    if (
+      !inventory ||
+      createHash('sha256').update(JSON.stringify(inventory)).digest('hex') !==
+        context?.binding?.inventoryDigest ||
+      !Number.isSafeInteger(inventory.paymentWindowStartMs) ||
+      inventory.paymentWindowStartMs < 0 ||
+      inventory.paymentWindowStartMs >= context.approval.maintenanceEndsAtMs ||
+      !Array.isArray(inventory.merchants)
+    )
+      throw new Error(code);
+    const merchants = new Map();
+    for (const m of inventory.merchants) {
+      if (
+        !['wechat', 'alipay'].includes(m?.provider) ||
+        !['sandbox', 'production'].includes(m.environment) ||
+        !/^[a-f0-9]{64}$/.test(m.merchantDigest ?? '') ||
+        merchants.has(m.provider)
+      )
+        throw new Error(code);
+      merchants.set(m.provider, { merchantDigest: m.merchantDigest, environment: m.environment });
+    }
+    return await withApprovedCutoverDatabase(context, overrides, code, (connection, io) =>
+      readCutoverDatabaseScope(connection, {
+        now: io.now,
+        windowStartMs: inventory.paymentWindowStartMs,
+        deferredSandboxPayment: inventory.deferredSandboxPayment,
+        deferredAlipayPayments: inventory.deferredAlipayPayments,
+        resolveMerchant: (provider, row) => {
+          const merchant = merchants.get(provider);
+          const metadata =
+            typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+          if (!merchant || (metadata?.env !== undefined && metadata.env !== merchant.environment))
+            throw new Error(code);
+          return structuredClone(merchant);
+        },
+      }),
+    );
+  } catch {
+    throw new Error(code);
+  }
+}
+
+async function withApprovedCutoverDatabase(context, overrides, errorCode, read) {
   const io = {
     ...candidatePreparationSystem(),
     now: Date.now,
@@ -714,11 +775,14 @@ export async function readFirstCutoverPersistedWork(context, overrides = {}) {
         connectTimeout: 5000,
         supportBigNumbers: true,
         bigNumberStrings: true,
+        dateStrings: true,
+        jsonStrings: true,
+        timezone: 'Z',
       }),
     ...overrides,
   };
   const fail = () => {
-    throw new Error('CUTOVER_WORK_OBSERVATION_UNPROVEN');
+    throw new Error(errorCode);
   };
   let connection;
   let firstTime;
@@ -753,7 +817,7 @@ export async function readFirstCutoverPersistedWork(context, overrides = {}) {
     const url = new URL(config.DATABASE_URL);
     if (url.protocol !== 'mysql:' || !url.hostname || url.pathname.length < 2) fail();
     connection = await io.connectWorkDatabase(config.DATABASE_URL, context.root);
-    const work = await readCutoverWorkScope(connection, { now: io.now });
+    const work = await read(connection, io);
     await guard();
     return work;
   } catch {

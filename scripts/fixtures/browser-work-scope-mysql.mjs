@@ -2,9 +2,10 @@
 // callbacks, migrations or source records. Only its new random database is writable.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { readCutoverWorkScope } from '../browser-cutover-evidence.mjs';
+import { readFirstCutoverPaymentScope } from '../browser-first-cutover-host.mjs';
 
 const container = process.argv[2];
 assert.equal(process.argv.length, 3);
@@ -107,6 +108,79 @@ try {
     await connection.query("INSERT INTO tasks (id,status) VALUES (?, 'executing')", [id]);
   await assert.rejects(readCutoverWorkScope(connection), /MAINTENANCE_WORK_SCOPE_UNPROVEN/);
   await connection.query('DELETE FROM tasks WHERE id > 1');
+  // Real SQL/connection boundary, synthetic approved scope and credentials. This
+  // is not a provider query, historical merchant proof or production recovery.
+  for (const table of ['payments', 'partner_recharge_orders']) {
+    await connection.query(`CREATE TABLE ${table} (
+      id BIGINT UNSIGNED PRIMARY KEY, external_id VARCHAR(64), provider VARCHAR(16),
+      provider_order_id VARCHAR(64), provider_capture_id VARCHAR(64), amount_cents INT,
+      amount_cny_cents INT, currency VARCHAR(3), status VARCHAR(32), metadata JSON,
+      created_at DATETIME(3), updated_at DATETIME(3)
+    ) ENGINE=InnoDB`);
+  }
+  await connection.query(`INSERT INTO payments VALUES
+    (1,'SYNTHETIC','wechat','QA_ORDER',NULL,1234,1234,'CNY','pending',
+    '{"env":"production"}','2026-01-01 00:00:00.123','2026-01-01 00:00:00.456'),
+    (2,'SYNTHETIC_2','wechat','QA_ORDER_2','QA_CAPTURE',1234,1234,'CNY','completed',
+    '{"env":"production"}','2026-01-01 00:00:00.123','2026-01-01 00:00:00.456'),
+    (3,'SYNTHETIC_3','wechat','QA_ORDER_3','QA_CAPTURE_3',1234,1234,'CNY','completed',
+    '{"env":"production"}','2026-01-01 00:00:00.123','2026-01-01 00:00:00.123')`);
+  const uri = `mysql://root@127.0.0.1:13316/${database}`;
+  const config = Buffer.from(`DATABASE_URL=${uri}`);
+  const inventory = {
+    paymentWindowStartMs: Date.parse('2026-01-01T00:00:00.200Z'),
+    merchants: [{ provider: 'wechat', environment: 'production', merchantDigest: '9'.repeat(64) }],
+  };
+  const binding = {
+    attempt: '11111111-1111-4111-8111-111111111111',
+    candidate: 'a'.repeat(40),
+    migrationDigest: 'b'.repeat(64),
+    configDigest: createHash('sha256').update(config).digest('hex'),
+    inventoryDigest: createHash('sha256').update(JSON.stringify(inventory)).digest('hex'),
+  };
+  const context = {
+    binding,
+    approval: { ...binding, maintenanceEndsAtMs: Date.now() + 60000 },
+    root: `/opt/holaday-releases/${binding.candidate}`,
+    journal: { assertOwnership: async () => binding },
+  };
+  const before = JSON.stringify((await connection.query('SELECT * FROM payments'))[0]);
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    readConfig: async () => config,
+    parseConfig: () => ({ DATABASE_URL: uri }),
+    connectWorkDatabase: (approvedUri) => {
+      assert.equal(approvedUri, uri);
+      return mysql.createConnection({
+        uri,
+        supportBigNumbers: true,
+        bigNumberStrings: true,
+        dateStrings: true,
+        jsonStrings: true,
+        timezone: 'Z',
+      });
+    },
+  };
+  const observed = await readFirstCutoverPaymentScope(context, inventory, io);
+  assert.equal(observed.orders.length, 2);
+  assert.deepEqual(
+    observed.orders.map((row) => Number(row.id)),
+    [1, 2],
+  );
+  assert.deepEqual(observed.unsettled, []);
+  assert.equal(observed.orders[0].created_at, '2026-01-01 00:00:00.123');
+  assert.equal(observed.orders[0].updated_at, '2026-01-01 00:00:00.456');
+  assert.equal(typeof observed.orders[0].metadata, 'string');
+  assert.equal(JSON.stringify((await connection.query('SELECT * FROM payments'))[0]), before);
+  await connection.query('UPDATE payments SET metadata = \'{"env":"sandbox"}\' WHERE id = 1');
+  await assert.rejects(
+    readFirstCutoverPaymentScope(context, inventory, io),
+    /CUTOVER_PAYMENT_OBSERVATION_UNPROVEN/,
+  );
+  console.log(
+    'PASS real MySQL payment readiness: dedicated read-only connection, original scope, exact datetime/JSON and contradictory merchant refusal; synthetic metadata, no provider call',
+  );
   await connection.query('DROP TABLE video_edit_render_attempts');
   await assert.rejects(readCutoverWorkScope(connection), /MAINTENANCE_WORK_SCOPE_UNPROVEN/);
   console.log(

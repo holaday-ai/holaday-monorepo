@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 同轮继续：原数据库支付核对接入同一现场与专用连接
+
+上一批已提交 `32c5f8c8`，未push。继续原Task4，site新增 `readDatabaseScope`，默认调用 `readFirstCutoverPaymentScope`，复用原 `readCutoverDatabaseScope`、十二表查询与既有受保护候选配置/专用连接 guard。prepare/preopen都使用原journal、原绝对窗口和原scope，不提前登记verified。清单必须有摘要绑定的 `paymentWindowStartMs`；原商户列表每个非PayPal provider只能有一个明确映射，缺失、多义、行内环境冲突拒绝。此映射不是历史商户归属证据；真实签名查单仍独立必需。唯一PayPal及九笔支付宝延期对象原样传入原指纹逻辑，额外PayPal拒绝，不查询其API。
+
+专用mysql2连接固定UTC参数，保留时间/大数/JSON原文，只读一致性快照后ROLLBACK并关闭；错误不输出连接或订单细节。复用原SQL夹具验证实际MySQL8.0下的UTC窗口选取（宿主TZ=Asia/Tokyo）、精确毫秒/JSON、原记录不变及环境冲突拒绝；夹具是随机合成库，无商户调用/生产凭据，不是实际恢复演练。临时容器与其匿名卷已清理，原MySQL/Redis未动。`/tmp/holaday-payment-site-mysql-final.log`退出0，十二工作表实际SQL回归同样通过。
+
+两个缺失方法RED→GREEN，另补原十笔延期/额外记录回归；相关三组 **207/207**，browser **892/892**，ops **120/59/16/726及Python12**，均0跳过、退出0。日志 `/tmp/holaday-payment-site-{red,green,browser,ops}.log`。六MJS Biome、两shell语法、diff-check通过。整host组合中的DB/备份/另一主机仍是显式合成边界；本轮只对新增SQL连接补实际MySQL验证，未重跑应用全套、全量迁移恢复或整分支审查。
+
+最终源码另在实际隔离Linux UID998通过 **207/207，0跳过、退出0**，日志 `/tmp/holaday-payment-site-linux-final.log`。所有测试会话结束。
+
+下一步从**原 `queryPaymentOrder` 的真实凭据/历史商户归属/私密原文保留绑定及独立work/writer事实**继续，不重做四个已接通readiness读者或已完成商户历史查询。仍需backup设施/source/target、worker定向持久启动、reconcile/hold、工具安装/execute、实际停写备份及Mac隔离恢复/非PayPal恢复、完整成功故障矩阵和整分支审查。原Task4BASE844c2ced不变，Tasks4–6仍未完成，execute仍关闭，无PR/合并/部署或生产业务变更；原cache与自动化保留。
+
 ### 2026-09-28 续跑：原 readiness 主机清单与受保护恢复证据接入现场
 
 承接 `01e32ba6`，Task4 原 BASE844c2ced不变。现有 execution site 的 `readHostInventory`、`readFenceState`、`readRehearsalArtifacts` 已一同接入原 host/collector。清单只接受原批准 inventoryDigest 对应的完整 metadata；实际旧生产者由原双机 observer 以 host/pid/start/role 精确映射，并夹读独立业务事实，拒绝 PID 复用、未知来源、忙碌、陈旧、窗口或 journal 漂移。preopen 使用 start 返回身份，仍只由原 verify 后写 verified，不提前登记成功。
