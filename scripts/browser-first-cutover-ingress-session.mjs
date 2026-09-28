@@ -186,7 +186,14 @@ async function readProtectedSite(options, overrides, kind) {
       fail();
     const value = JSON.parse(bytes.toString('utf8'));
     if (
-      !keys(value, ['schemaVersion', 'host', 'binding', 'maintenanceEndsAtMs', scopeKey]) ||
+      !keys(value, [
+        'schemaVersion',
+        'host',
+        'binding',
+        'maintenanceEndsAtMs',
+        scopeKey,
+        ...(kind === 'gateway' && Object.hasOwn(value, 'payments') ? ['payments'] : []),
+      ]) ||
       value.schemaVersion !== 1 ||
       value.host !== (kind === 'execution' ? 'vultr' : 'aliyun') ||
       !bindingKeys.every((k) => value.binding?.[k] === beforeApproval[k]) ||
@@ -279,7 +286,13 @@ async function readProtectedSite(options, overrides, kind) {
       fail();
     if (
       kind === 'gateway' &&
-      (!Array.isArray(value.startupFiles) ||
+      ((Object.hasOwn(value, 'payments') &&
+        (!value.payments ||
+          typeof value.payments !== 'object' ||
+          Array.isArray(value.payments) ||
+          createHash('sha256').update(JSON.stringify(value.payments.inventory)).digest('hex') !==
+            value.binding.inventoryDigest)) ||
+        !Array.isArray(value.startupFiles) ||
         value.startupFiles.length !== 2 ||
         value.startupFiles.some(
           (f, i) =>
@@ -304,6 +317,9 @@ async function readProtectedSite(options, overrides, kind) {
       maintenanceEndsAtMs: value.maintenanceEndsAtMs,
       [scopeKey]: value[scopeKey],
       siteDigest: createHash('sha256').update(bytes).digest('hex'),
+      ...(kind === 'gateway' && Object.hasOwn(value, 'payments')
+        ? { payments: value.payments }
+        : {}),
     };
     const now = io.now();
     if (now < began || !isDeepStrictEqual(beforeApproval, await io.readApproval(options))) fail();

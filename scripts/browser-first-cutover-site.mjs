@@ -467,6 +467,41 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     // Pass this reader directly to the existing host evidence collector. The
     // preopen identity comes from start(), NOT from an early verified journal.
     evidence: {
+      queryOrders: (database, input) =>
+        run(
+          'readiness-query',
+          context,
+          undefined,
+          async () => {
+            const request = readinessScope(input);
+            const record = await guard(
+              context,
+              request.stage === 'prepare'
+                ? ['preflight', 'prepared']
+                : ['candidate_started', 'verified'],
+            );
+            if (request.stage === 'prepare') {
+              if (request.identity !== undefined) fail();
+            } else checkIdentity(request.identity, record);
+            const selected = structuredClone(database);
+            if (
+              !fresh(selected?.observedAtMs) ||
+              !Array.isArray(selected.orders) ||
+              !Array.isArray(selected.unsettled) ||
+              selected.unsettled.length
+            )
+              fail();
+            const result = await gateway.queryOrders({
+              stage: request.stage,
+              observedAtMs: selected.observedAtMs,
+              orders: selected.orders,
+              ...(request.identity ? { identity: request.identity } : {}),
+            });
+            if (!equal(record, await guard(context, [record.phase]))) fail();
+            return result;
+          },
+          false,
+        ),
       readDatabaseScope: (input) =>
         run(
           'readiness-database',

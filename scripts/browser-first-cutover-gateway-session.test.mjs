@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -67,6 +68,21 @@ test('protected gateway scope pins startup paths, file mode and independent atte
   };
   const read = () => api.readFirstCutoverGatewaySite({ attempt: binding.attempt }, io);
   assert.deepEqual((await read()).startupFiles, value.startupFiles);
+  const approved = { ...binding };
+  value.binding = approved;
+  value.payments = { inventory: { merchants: [] }, profiles: [] };
+  approved.inventoryDigest = createHash('sha256')
+    .update(JSON.stringify(value.payments.inventory))
+    .digest('hex');
+  io.readApproval = async () => ({ ...approved, maintenanceEndsAtMs: deadline });
+  await save();
+  assert.deepEqual((await read()).payments, value.payments);
+  value.payments.inventory.merchants.push({ provider: 'unexpected' });
+  await save();
+  await assert.rejects(read());
+  value.payments = undefined;
+  value.binding = binding;
+  io.readApproval = async () => ({ ...binding, maintenanceEndsAtMs: deadline });
   value.startupFiles[0].remove[0].name = 'unrelated';
   await save();
   await assert.rejects(read());
@@ -115,6 +131,25 @@ async function pair(t, mode = '') {
         readSite: async () => {
           if (mode === 'reject-site') throw new Error('private scope');
           return siteChanged ? { ...site, siteDigest: 'f'.repeat(64) } : site;
+        },
+        query: async (actualSite, request, io) => {
+          assert.deepEqual(actualSite, site);
+          assert.deepEqual(await io.assertScope(), site);
+          assert.equal((await io.journal.readFirstCutoverEffects()).phase, phase);
+          assert.deepEqual(await io.journal.assertOwnership(), binding);
+          actions.push('query');
+          if (mode === 'query-failure') throw new Error('private provider failure');
+          if (mode === 'query-writer') await io.journal.recordStartupEvent({});
+          return request.orders.map((order) => ({
+            provider: order.provider,
+            environment: order.environment,
+            orderRef: order.orderRef,
+            merchantDigest: order.merchantDigest,
+            observedAtMs: Date.now(),
+            rawDigest: '1'.repeat(64),
+            state: 'closed',
+            ...(mode === 'query-leak' ? { secret: 'PRIVATE' } : {}),
+          }));
         },
         // Transport tests replace only host-local effects. The physical fixture
         // runs these same dispatch paths against real PM2/proc/pidfd and journal.
@@ -249,6 +284,59 @@ async function pair(t, mode = '') {
     },
     connect: () => api.connectFirstCutoverGatewaySession(input, io),
   };
+}
+
+test('gateway queries share original ownership without exposing remote write callbacks', async (t) => {
+  const f = await pair(t);
+  const client = await f.connect();
+  const request = {
+    stage: 'prepare',
+    observedAtMs: Date.now(),
+    orders: [
+      {
+        provider: 'wechat',
+        environment: 'production',
+        orderRef: '2'.repeat(64),
+        merchantDigest: '3'.repeat(64),
+      },
+    ],
+  };
+  assert.equal(typeof client.queryOrders, 'function');
+  const result = await client.queryOrders(request);
+  assert.equal(result[0].state, 'closed');
+  assert.equal(result[0].orderRef, request.orders[0].orderRef);
+  await client.queryOrders({
+    ...request,
+    stage: 'preopen',
+    identity: { candidate: binding.candidate, bootId: '4'.repeat(32) },
+  });
+  assert.deepEqual(f.events, []);
+  assert.deepEqual(f.actions, ['query', 'query']);
+  await client.close();
+  assert.equal((await f.serving).code, 0);
+});
+for (const fault of ['query-failure', 'query-writer', 'query-leak']) {
+  test(`gateway ${fault} aborts and never retries the provider operation`, async (t) => {
+    const f = await pair(t, fault);
+    const client = await f.connect();
+    assert.equal(typeof client.queryOrders, 'function');
+    const request = {
+      stage: 'prepare',
+      observedAtMs: Date.now(),
+      orders: [
+        {
+          provider: 'wechat',
+          environment: 'production',
+          orderRef: '2'.repeat(64),
+          merchantDigest: '3'.repeat(64),
+        },
+      ],
+    };
+    await assert.rejects(client.queryOrders(request), /CUTOVER_GATEWAY_SESSION_UNPROVEN/);
+    await assert.rejects(client.queryOrders(request), /CUTOVER_GATEWAY_SESSION_UNPROVEN/);
+    assert.deepEqual(f.events, []);
+    assert.deepEqual(f.actions, ['query']);
+  });
 }
 
 test('gateway transport identity is bound to its owned child and refuses after detach', async (t) => {

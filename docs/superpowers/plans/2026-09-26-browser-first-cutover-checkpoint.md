@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 续跑：原签名查单器接入同一阿里云 gateway 会话
+
+承接 `76ea3b23`，Task4 BASE844c2ced不变。本轮补上 site 的第五个 readiness 回调 `queryOrders`，经原 gateway 会话调用既有 `apps/cn-payment/scripts/payment-cutover-query.ts`。同一 journal/审批/清单/绝对窗口，prepare 与 preopen 不改变原时序；客户端只响应 ownership/effects，只收七字段脱敏观察。请求先核对整批 SQL 选中行，PayPal/重复/商户环境冲突/行摘要变化在任何商户请求前拒绝。业务原文与凭据不回 Mac，不修改订单、回调或权益。
+
+新增 `browser-first-cutover-payments.mjs` 是该原查询器的固定现场适配，不是新支付实现。原阿里云 release 的 `.env`、微信证书/私钥/验证公钥路径及摘要由受保护 gateway metadata 固定；清单完整 JSON 摘要与同一 inventoryDigest 绑定。固定全依赖 CJS 包 `/var/lib/holaday-deploy/channel/payment-cutover-query.cjs` root/0600，由批准摘要锁定；签名响应只在原主机 root/0700 私密目录中排他创建、fsync、回读核验，即使后续不确定也保留，不自动重试。gateway 精确模块闭包增加此适配；独立查询包不放入该模块目录。旧 scope 无支付 metadata 时仍可做原退役，但不能通过查单。
+
+先观察缺失方法 RED，再完成站点/gateway/原查询器组合。独立打包后新增合成签名测试失败，实测 external 包10,561字节、全依赖包2,452,516字节，确认为共用1MiB读取上限所致；仅固定摘要锁定的查询包上限改8MiB，配置/凭据仍1MiB，补超限拒绝测试。支付宝/微信都运行原 SDK 签名与验签，微信证书由临时合成测试密钥生成，不是重新生成生产或恢复密钥。保留失败日志 `/tmp/holaday-query-providers.log`，修正后通过。测试现直接用默认程序包加载器，不替换查询器。
+
+本轮没有实际商户调用、生产安装、服务修改、数据库写入、真实备份恢复或部署。真实配置/程序包尚未安装。PayPal及精确十笔延期不动，历史商户核查/私钥保管/只读通道不重做，原 `scripts/__pycache__/` 保留。
+
+本轮验证：browser **912/912、0跳过、退出0**（`/tmp/holaday-query-browser.log`）；ops前三组 **120/59/16** 与Python **12** 通过，初次末段因未传 `CUTOVER_TEST_AGE_EXECUTABLE` 跳过27项，保留 `/tmp/holaday-query-ops.log`，只补跑原末段后 **746/746、0跳过、退出0**（`/tmp/holaday-query-ops-gate-final.log`）。默认查询包加载器的最终隔离Linux五组 **150/150、0跳过、退出0**（`/tmp/holaday-query-linux-final.log`），容器禁网/UID998/768MiB/单CPU，无生产凭据或宿主PID；文件路径和属主投影仍是测试夹具，不冒充真实安装。原 SDK 查询器 **41/41、退出0**（`/tmp/holaday-query-original-sdk.log`）。真实受限sshd/ssh两角色/默认身份/审批篡改拒绝 **退出0**（`/tmp/holaday-query-ssh.log`）；SSH段验证实际通道与模块加载，不是跨生产网络商户调用。八MJS Biome、两shell语法与diff-check通过。未重跑应用全套、实际MySQL恢复、nginx整链或整分支独立审查。
+
+**仍需继续原Task4–6：** 独立真实旧来源/数据库归属、内存请求/浏览器/provider工作及连接/writer读者；原 backup 设施/source/target现场配置、定向 worker 持久启动、reconcile/hold；工具准备安装与首次execute；真实停写备份→Mac隔离恢复→非PayPal恢复证据，完整成功/故障演练及整分支审查。当前CLI `--execute`仍拒绝，不能把本轮查单接线或组件数量当发布完成。不要重建原 site、查询 SDK、通道或密钥，也不要用DB空集/健康状态冒充所有内存工作为零。
+
 ### 2026-09-28 同轮继续：原数据库支付核对接入同一现场与专用连接
 
 上一批已提交 `32c5f8c8`，未push。继续原Task4，site新增 `readDatabaseScope`，默认调用 `readFirstCutoverPaymentScope`，复用原 `readCutoverDatabaseScope`、十二表查询与既有受保护候选配置/专用连接 guard。prepare/preopen都使用原journal、原绝对窗口和原scope，不提前登记verified。清单必须有摘要绑定的 `paymentWindowStartMs`；原商户列表每个非PayPal provider只能有一个明确映射，缺失、多义、行内环境冲突拒绝。此映射不是历史商户归属证据；真实签名查单仍独立必需。唯一PayPal及九笔支付宝延期对象原样传入原指纹逻辑，额外PayPal拒绝，不查询其API。

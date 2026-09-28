@@ -649,6 +649,42 @@ test('site routes prepare and preopen database scope through the same held journ
   assert.equal(reads, 2);
 });
 
+test('site sends selected orders through the existing gateway only within the same readiness scope', async (t) => {
+  const f = await fixture(t);
+  const connect = f.io.connectGateway;
+  const orders = [{ provider: 'wechat', orderRef: '1'.repeat(64) }];
+  let calls = 0;
+  f.io.connectGateway = async (...args) => ({
+    ...(await connect(...args)),
+    queryOrders: async (request) => {
+      assert.equal(request.stage, 'prepare');
+      assert.deepEqual(request.orders, orders);
+      assert.equal((await f.journal.readFirstCutoverEffects()).phase, 'preflight');
+      calls++;
+      return [{ state: 'closed' }];
+    },
+  });
+  const site = f.make();
+  await site.lifecycle.attach(f.context);
+  const scope = {
+    binding: f.binding,
+    stage: 'prepare',
+    window: { maintenanceEndsAtMs: 9000, reconcileByMs: 12000, operatorRef: 'synthetic-qa' },
+  };
+  assert.equal(typeof site.evidence.queryOrders, 'function');
+  assert.deepEqual(
+    await site.evidence.queryOrders({ observedAtMs: 1000, orders, unsettled: [] }, scope),
+    [{ state: 'closed' }],
+  );
+  await assert.rejects(
+    site.evidence.queryOrders({ observedAtMs: 1000, orders, unsettled: [{ id: 1 }] }, scope),
+    /UNPROVEN/,
+  );
+  assert.equal(calls, 1);
+  assert(!f.events.includes('restore'));
+  await site.lifecycle.detach(f.context);
+});
+
 test('site refuses missing independent business facts before opening either session', async (t) => {
   const f = await fixture(t);
   f.io.facts.observeWork = undefined;

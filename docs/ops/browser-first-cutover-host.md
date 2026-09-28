@@ -43,11 +43,15 @@ detach关闭本次执行会话：成功路径在同实例恢复入口、恢复wo
 
 ### 现场 readiness 读者（2026-09-28，本地已接线，未部署）
 
-原 execution site 现提供 `readHostInventory/readFenceState/readRehearsalArtifacts/readDatabaseScope` 给同一 host/collector。受保护 execution scope 可携带原批准 `inventory`，其完整 JSON 摘要必须等于原 inventoryDigest。旧格式仍可用于已实现的退役观察，但缺清单不能通过 readiness，不自动生成或刷新批准。
+原 execution site 现提供 `readHostInventory/readFenceState/readRehearsalArtifacts/readDatabaseScope/queryOrders` 给同一 host/collector。受保护 execution scope 可携带原批准 `inventory`，其完整 JSON 摘要必须等于原 inventoryDigest。旧格式仍可用于已实现的退役观察，但缺清单不能通过 readiness，不自动生成或刷新批准。
 
 数据库读者复用 `readCutoverDatabaseScope` 与既有专用候选数据库连接。要求同一清单明确 `paymentWindowStartMs`，不能用当前时间缩短应核查范围；商户来自该清单的 `merchants`，每个非PayPal provider只能唯一对应一个明确环境/商户摘要，行内环境冲突、未知或多义映射拒绝。同一 `deferredSandboxPayment/deferredAlipayPayments` 原样交给原精确指纹逻辑。只读一致性事务后回滚并关闭连接，维护窗口/配置/持锁前后核验；UTC参数和无损时间/JSON读取不改变库内数据。此映射不是历史商户归属证明，真实签名查单仍须独立完成。
 
-`queryOrders` 的现场凭据/私密原文保留/既有查询器调用尚未接通；不能以数据库reader成功替代支付方核验。恢复文件使用原root私密读者，不生成回执或调用支付服务。业务内存工作、旧来源DB归属及连接/writer的独立事实、备份/worker/reconcile/hold和完整execute仍未就绪；下方接口要求继续有效。
+`queryOrders` 复用同一 gateway 会话把已选订单送到原阿里云凭据主机，调用既有 `apps/cn-payment/scripts/payment-cutover-query.ts`；不新建远程命令、支付接口或 journal。受保护 gateway scope 的可选 `payments` 必须绑定同一完整 inventory，含 `queryBundleDigest/dependencyRoot/profiles`。每个 profile 绑定 provider、environment、merchantDigest、原 release `.env` 路径及摘要；微信另外固定原证书、私钥和验证公钥的路径及摘要。没有此 metadata 的旧 scope 仍可退役，但不能查单。
+
+独立编译的全依赖 CJS 查询器固定安装于 `/var/lib/holaday-deploy/channel/payment-cutover-query.cjs`（root/0600、摘要匹配、最大8MiB）；它不混入原 gateway 精确模块目录。配置与密钥维持1MiB读取上限；每次查询前后重读摘要、原审批和同一 journal/阶段/绝对窗口。只返回原查询器的七字段脱敏观察，不传回凭据或业务原文。原始签名响应排他写入 `/var/lib/holaday-deploy/evidence-private`（root/0700；文件0600、fsync及回读核验），即使后续失败也不删除、不重试。prepare/preopen沿原时序执行，不提前登记 verified，不允许查询端写 journal。PayPal无 profile/handler，原十笔延期指纹仍由既有采集器处理，不扩大例外。
+
+当前只有本地接线及合成签名测试，**尚未安装该查询包或真实 metadata，也未调用任何真实支付服务**。程序包应由同一候选与锁定依赖构建、独立审核绑定，不能临时提供任意脚本。恢复文件仍使用原root私密读者，不生成回执。业务内存工作、旧来源DB归属及连接/writer的独立事实、备份/worker/reconcile/hold和完整execute仍未就绪；下方接口要求继续有效。
 
 ### 正式 nginx 测试、重载与生效观察（2026-09-28）
 

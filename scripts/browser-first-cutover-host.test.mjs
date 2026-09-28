@@ -585,6 +585,12 @@ for (const fault of [undefined, 'candidate-observation', 'opened-observation']) 
           close: async () => {},
         }),
         connectGateway: async () => ({
+          queryOrders: (request) =>
+            originalEvidence.queryOrders({
+              observedAtMs: request.observedAtMs,
+              orders: request.orders,
+              unsettled: [],
+            }),
           readExecutionIdentity: () => ({ binding: f.binding }),
           readTransportIdentity: async () => ({ binding: f.binding }),
           prepare: async () => {},

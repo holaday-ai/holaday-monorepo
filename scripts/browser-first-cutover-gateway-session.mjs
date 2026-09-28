@@ -9,6 +9,7 @@ import {
   readFirstCutoverSessionIdentity,
   readFirstCutoverTransportIdentity,
 } from './browser-first-cutover-ingress-session.mjs';
+import { queryFirstCutoverOrders } from './browser-first-cutover-payments.mjs';
 import {
   prepareLocalFirstCutoverGateway,
   retireLocalFirstCutoverGateways,
@@ -24,6 +25,16 @@ const keys = (v, k) =>
   Object.keys(v).length === k.length &&
   k.every((x) => Object.hasOwn(v, x));
 const hash = (v) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
+const digestObservation = (row, now) =>
+  ['wechat', 'alipay'].includes(row.provider) &&
+  hash(row.merchantDigest) &&
+  hash(row.orderRef) &&
+  hash(row.rawDigest) &&
+  Number.isSafeInteger(row.observedAtMs) &&
+  row.observedAtMs >= 0 &&
+  row.observedAtMs <= now &&
+  now - row.observedAtMs <= 60000 &&
+  ['settled', 'closed', 'unpaid-valid', 'paid-unsettled', 'unknown'].includes(row.state);
 const uuid = (v) =>
   typeof v === 'string' &&
   /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(v);
@@ -70,6 +81,7 @@ export async function serveFirstCutoverGatewaySession({ attempt }, overrides = {
     readIdentity: readFirstCutoverSessionIdentity,
     prepare: prepareLocalFirstCutoverGateway,
     retire: retireLocalFirstCutoverGateways,
+    query: queryFirstCutoverOrders,
     ...overrides,
   };
   let channel;
@@ -89,13 +101,15 @@ export async function serveFirstCutoverGatewaySession({ attempt }, overrides = {
       envelope(request, 'operation', seq);
       if (
         !keys(request, ['protocol', 'type', 'seq', 'name', 'value']) ||
-        request.value !== null ||
-        !['attach', 'prepare', 'retire', 'detach'].includes(request.name) ||
+        (request.name === 'query'
+          ? !request.value || typeof request.value !== 'object'
+          : request.value !== null) ||
+        !['attach', 'prepare', 'retire', 'detach', 'query'].includes(request.name) ||
         (seq === 1 ? request.name !== 'attach' : request.name === 'attach') ||
-        used.has(request.name)
+        (request.name !== 'query' && used.has(request.name))
       )
         fail();
-      used.add(request.name);
+      if (request.name !== 'query') used.add(request.name);
       if (!equal(await io.readSite({ attempt }), site)) fail();
       if (!equal(await io.readIdentity({ role: 'gateway', attempt }), execution)) fail();
       let factSequence = 0;
@@ -149,6 +163,15 @@ export async function serveFirstCutoverGatewaySession({ attempt }, overrides = {
           siteDigest: site.siteDigest,
           execution,
         };
+      } else if (request.name === 'query') {
+        value = await io.query(site, request.value, {
+          now: io.now,
+          assertScope: () => io.readSite({ attempt }),
+          journal: {
+            assertOwnership: () => fact('ownership'),
+            readFirstCutoverEffects: () => fact('effects'),
+          },
+        });
       } else if (request.name === 'detach') {
         await channel.write({ protocol: 1, type: 'result', seq, value: null });
         return;
@@ -294,9 +317,9 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
     let sequence = 0;
     let execution;
     const used = new Set();
-    const run = async (name) => {
-      if (failed || busy || used.has(name)) fail();
-      used.add(name);
+    const run = async (name, payload = null) => {
+      if (failed || busy || (name !== 'query' && used.has(name))) fail();
+      if (name !== 'query') used.add(name);
       busy = true;
       try {
         await ownership();
@@ -304,13 +327,27 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
         let factSequence = 0;
         let signalSequence = 0;
         let unmanagedStarted = false;
-        await channel.write({ protocol: 1, type: 'operation', seq, name, value: null });
+        const input = structuredClone(payload);
+        if (
+          name === 'query' &&
+          (!keys(input, [
+            'stage',
+            'observedAtMs',
+            'orders',
+            ...(input?.identity ? ['identity'] : []),
+          ]) ||
+            !['prepare', 'preopen'].includes(input.stage) ||
+            !Array.isArray(input.orders))
+        )
+          fail();
+        await channel.write({ protocol: 1, type: 'operation', seq, name, value: input });
         const service = async (request, nested = false) => {
           envelope(request, 'fact', seq);
           if (
             !keys(request, ['protocol', 'type', 'seq', 'factSeq', 'name', 'value']) ||
             request.factSeq !== ++factSequence ||
             !factNames.includes(request.name) ||
+            (name === 'query' && !['ownership', 'effects'].includes(request.name)) ||
             (nested && !['ownership', 'effects', 'unmanaged', 'fence'].includes(request.name)) ||
             (!['startupEvent', 'registrationEvent'].includes(request.name) &&
               request.value !== null) ||
@@ -413,6 +450,29 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
           if (!keys(response, ['protocol', 'type', 'seq', 'value'])) fail();
           await ownership();
           const r = response.value;
+          if (name === 'query') {
+            if (
+              !Array.isArray(r) ||
+              r.length !== input.orders.length ||
+              r.some(
+                (row, index) =>
+                  !keys(row, [
+                    'provider',
+                    'environment',
+                    'merchantDigest',
+                    'orderRef',
+                    'observedAtMs',
+                    'rawDigest',
+                    'state',
+                  ]) ||
+                  !['provider', 'environment', 'merchantDigest', 'orderRef'].every(
+                    (k) => row[k] === input.orders[index][k],
+                  ) ||
+                  !digestObservation(row, io.now()),
+              )
+            )
+              fail();
+          }
           if (name === 'attach') {
             if (
               !keys(r, ['host', ...Object.keys(expected), 'execution']) ||
@@ -514,6 +574,7 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
       },
       prepare: () => run('prepare'),
       retire: () => run('retire'),
+      queryOrders: (request) => run('query', request),
       close: async () => {
         await run('detach');
         failed = true;

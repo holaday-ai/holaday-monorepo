@@ -33,6 +33,7 @@ INGRESS_MODULES = frozenset([
 ])
 GATEWAY_MODULES = INGRESS_MODULES | frozenset([
     'browser-first-cutover-gateway-session.mjs',
+    'browser-first-cutover-payments.mjs',
     'browser-first-cutover-registrations.mjs',
     'browser-first-cutover-startup.mjs',
     'browser-first-cutover-signal.py',

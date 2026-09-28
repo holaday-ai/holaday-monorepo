@@ -14,6 +14,7 @@ node --test "$SCRIPT_DIR/browser-maintenance-manifest.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-ingress-host.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-ingress-session.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-gateway-session.test.mjs" \
+  "$SCRIPT_DIR/browser-first-cutover-payments.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-ingress-pair.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-site.test.mjs" \
   "$SCRIPT_DIR/browser-first-cutover-observer.test.mjs" \
