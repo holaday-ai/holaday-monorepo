@@ -236,11 +236,17 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
     // Observers consume the same live journal, not an uploaded receipt or an
     // in-memory success flag. Intent events remain intents; callers must still
     // reconcile actual processes and source bytes with completed events.
-    readFirstCutoverEffects: () =>
+    readFirstCutoverEffects: (options) =>
       serial(async () => {
         let handle;
         try {
-          if (!first) throw unproven();
+          if (
+            !first ||
+            (options !== undefined &&
+              (!isDeepStrictEqual(options, { forBackupRecovery: true }) ||
+                phase !== 'backup_verified'))
+          )
+            throw unproven();
           await assertOwnership();
           handle = await io.open(
             path,
@@ -275,8 +281,20 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
             throw unproven();
           await assertOwnership();
           const record = JSON.parse(latestBytes);
+          // The original backup coordinator appends its receipt BEFORE its
+          // final identity/stop guard. Recovery scope excludes only that owned
+          // append; every byte/inode check above still uses the complete file.
+          // All other observers retain the original full-record digest.
+          const scopeBytes =
+            options === undefined
+              ? latestBytes
+              : JSON.stringify(
+                  Object.fromEntries(
+                    Object.entries(record).filter(([key]) => key !== 'backupReceipt'),
+                  ),
+                );
           return {
-            recordDigest: createHash('sha256').update(latestBytes).digest('hex'),
+            recordDigest: createHash('sha256').update(scopeBytes).digest('hex'),
             attempt,
             candidate,
             configDigest,

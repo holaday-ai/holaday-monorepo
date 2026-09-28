@@ -882,6 +882,200 @@ test('original backup coordinator can consume site source export without reshapi
   await site.lifecycle.detach(f.context);
 });
 
+test('original backup coordinator consumes the full site adapter and closes recovery after sealing the real journal', async (t) => {
+  for (const fault of [
+    'none',
+    'target-identity',
+    'artifact-drift',
+    'target-data',
+    'migration-ack',
+    'business-drift',
+    'source-drift',
+    'close-unknown',
+  ]) {
+    const plan = {
+      sourceIdentity: { serverUuid: '11111111-1111-4111-8111-111111111111', database: 'source_qa' },
+      isolatedTarget: {
+        serverUuid: '22222222-2222-4222-8222-222222222222',
+        database: 'restore_qa',
+      },
+    };
+    const facility = { encryptionProfileDigest: '4'.repeat(64) };
+    const source = {
+      facility: { synthetic: true },
+      directory: '/private/approved-source',
+      executable: '/usr/bin/mysqldump',
+      executableDigest: '6'.repeat(64),
+    };
+    const f = await fixture(t, { backupPlan: plan, backupSource: source });
+    f.scope.backupRecoveryDigest = '8'.repeat(64);
+    const artifact = { reference: `${source.directory}/${f.binding.attempt}.sql.age`, ...facility };
+    const sourceSnapshot = {
+      identity: plan.sourceIdentity,
+      objects: [
+        {
+          name: 'sample',
+          kind: 'BASE TABLE',
+          engine: 'InnoDB',
+          rowCount: 1,
+          definitionDigest: 'a'.repeat(64),
+          columnsDigest: 'b'.repeat(64),
+          dataDigest: 'c'.repeat(64),
+        },
+      ],
+      projection: [{ table: 'sample', columns: ['id'] }],
+      schemaDigest: '1'.repeat(64),
+      sourceDigest: '2'.repeat(64),
+      businessDigest: '3'.repeat(64),
+    };
+    f.io.inspectSourceFacility = async (input) => {
+      assert.deepEqual(input, source.facility);
+      return facility;
+    };
+    f.io.readBackupPlan = async () => plan;
+    let artifactReads = 0;
+    f.io.inspectSourceArtifact = async (input, options) => {
+      assert.deepEqual(input, artifact);
+      assert.deepEqual(options, {
+        facility: source.facility,
+        directory: source.directory,
+        attempt: f.binding.attempt,
+      });
+      artifactReads++;
+      return {
+        backupDigest: '5'.repeat(64),
+        bytes: fault === 'artifact-drift' && artifactReads > 1 ? 124 : 123,
+      };
+    };
+    f.io.exportSourceBackup = async (_context, _inventory, deps) => {
+      await deps.assertWritersStopped();
+      return artifact;
+    };
+    let sourceReads = 0;
+    f.io.readSourceSnapshot = async (_context, inventory, deps) => {
+      assert.deepEqual(inventory.backupPlan, plan);
+      await deps.assertWritersStopped();
+      sourceReads++;
+      return {
+        ...structuredClone(sourceSnapshot),
+        sourceDigest:
+          fault === 'source-drift' && sourceReads > 1
+            ? '9'.repeat(64)
+            : sourceSnapshot.sourceDigest,
+      };
+    };
+    let recoveryClosed = false;
+    const operations = [];
+    f.io.connectRecovery = async (scope, deps) => {
+      assert.deepEqual(scope, {
+        ...plan,
+        binding: f.binding,
+        maintenanceEndsAtMs: 9000,
+        scopeDigest: f.scope.backupRecoveryDigest,
+      });
+      await deps.assertScope();
+      return Object.fromEntries(
+        ['inspect', 'restore', 'snapshot', 'migrate', 'verify', 'close'].map((name) => [
+          name,
+          async (value) => {
+            assert.equal(recoveryClosed, false);
+            await deps.assertScope();
+            operations.push(name);
+            if (name === 'restore') {
+              assert.deepEqual(value, {
+                artifact,
+                expectedBackupDigest: '5'.repeat(64),
+                expectedBytes: 123,
+              });
+              return plan.isolatedTarget;
+            }
+            if (name === 'inspect')
+              return fault === 'target-identity' ? plan.sourceIdentity : plan.isolatedTarget;
+            if (name === 'snapshot')
+              return {
+                ...structuredClone(sourceSnapshot),
+                identity: plan.isolatedTarget,
+                sourceDigest:
+                  fault === 'target-data' ? '9'.repeat(64) : sourceSnapshot.sourceDigest,
+              };
+            if (name === 'migrate')
+              return {
+                migrationDigest:
+                  fault === 'migration-ack' ? '9'.repeat(64) : f.binding.migrationDigest,
+              };
+            if (name === 'verify')
+              return {
+                schemaDigest: '7'.repeat(64),
+                businessDigest:
+                  fault === 'business-drift' ? '9'.repeat(64) : sourceSnapshot.businessDigest,
+              };
+            if (fault === 'close-unknown') throw new Error('SYNTHETIC_ACK_LOST');
+            recoveryClosed = true;
+          },
+        ]),
+      );
+    };
+    const site = f.make();
+    await site.lifecycle.attach(f.context);
+    for (const phase of [
+      'prepared',
+      'orders_fenced',
+      'legacy_settled',
+      'producers_stopped',
+      'all_fenced',
+      'stopped',
+      'backup_verified',
+    ])
+      await f.journal.persist(phase, { candidate: f.binding.candidate });
+    f.state.producers = f.state.gateways = 0;
+    const pending = backupAndRestoreCheck(
+      { ...plan, binding: f.binding, maintenanceEndsAtMs: 9000 },
+      {
+        ...site.backup,
+        now: () => f.state.now,
+        assertOwnership: () => f.journal.assertOwnership(),
+        assertWritersStopped: () => site.lifecycle.assertStopped(f.context),
+        sealReceipt: (value) => f.journal.bindBackupReceipt(value),
+      },
+    );
+    if (!['none', 'close-unknown'].includes(fault)) {
+      await assert.rejects(pending, /UNPROVEN/, fault);
+      assert.equal(
+        JSON.parse(await fs.readFile(f.journal.path, 'utf8')).backupReceipt,
+        undefined,
+        fault,
+      );
+      assert(operations.filter((name) => name === 'migrate').length <= 1, fault);
+      if (['target-identity', 'artifact-drift', 'target-data'].includes(fault))
+        assert(!operations.includes('migrate'), fault);
+      // A failed site cannot acknowledge a successful recovery close; keep the
+      // uncertainty visible instead of treating cleanup as a successful release.
+      await assert.rejects(site.lifecycle.detach(f.context), /UNPROVEN/);
+      continue;
+    }
+    const receipt = await pending;
+    assert.deepEqual(JSON.parse(await fs.readFile(f.journal.path, 'utf8')).backupReceipt, receipt);
+    assert.equal(receipt.sourceDigest, undefined);
+    assert.equal(receipt.businessDigest, sourceSnapshot.businessDigest);
+    assert.equal(receipt.schemaDigest, '7'.repeat(64));
+    assert.equal(recoveryClosed, false);
+    if (fault === 'close-unknown') {
+      await assert.rejects(site.backup.finishRecovery(f.context), /UNPROVEN/);
+      await assert.rejects(site.backup.finishRecovery(f.context), /UNPROVEN/);
+      assert.equal(operations.filter((name) => name === 'migrate').length, 1);
+      assert.equal(operations.filter((name) => name === 'close').length, 1);
+      continue;
+    }
+    await site.backup.finishRecovery(f.context);
+    assert.equal(recoveryClosed, true);
+    assert.deepEqual(
+      operations.filter((name) => name !== 'inspect'),
+      ['restore', 'snapshot', 'migrate', 'verify', 'close'],
+    );
+    await site.lifecycle.detach(f.context);
+  }
+});
+
 test('recovery callback uses the original held site journal, approved target and physical stopped facts', async (t) => {
   for (const fault of ['none', 'digest', 'target', 'busy', 'deadline']) {
     const plan = {

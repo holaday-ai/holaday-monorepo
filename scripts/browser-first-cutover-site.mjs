@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { readCutoverRehearsalArtifacts } from './browser-cutover-evidence.mjs';
-import { inspectAgeBackupFacility } from './browser-first-cutover-backup.mjs';
+import {
+  inspectAgeBackupArtifact,
+  inspectAgeBackupFacility,
+} from './browser-first-cutover-backup.mjs';
 import { connectFirstCutoverGatewaySession } from './browser-first-cutover-gateway-session.mjs';
 import {
   createFirstCutoverRetirementObserver,
@@ -12,12 +15,15 @@ import {
   readFirstCutoverHostPair,
   readFirstCutoverPaymentScope,
   readFirstCutoverPersistedWork,
+  readFirstCutoverSourceSnapshot,
   readReviewedFirstCutoverLegacySource,
 } from './browser-first-cutover-host.mjs';
 import {
   createFirstCutoverIngressPair,
   readFirstCutoverExecutionSiteScope,
 } from './browser-first-cutover-ingress-session.mjs';
+import { compareCutoverMysqlSnapshots } from './browser-first-cutover-mysql.mjs';
+import { connectFirstCutoverRecoverySession } from './browser-first-cutover-recovery-session.mjs';
 import { retireLocalFirstCutoverProducers } from './browser-first-cutover-registrations.mjs';
 
 const bindingKeys = ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'];
@@ -45,6 +51,9 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     readBackupPlan: readFirstCutoverBackupPlan,
     exportSourceBackup: exportFirstCutoverSourceBackup,
     inspectSourceFacility: inspectAgeBackupFacility,
+    inspectSourceArtifact: inspectAgeBackupArtifact,
+    readSourceSnapshot: readFirstCutoverSourceSnapshot,
+    connectRecovery: connectFirstCutoverRecoverySession,
     inspectSource: readReviewedFirstCutoverLegacySource,
     createIngress: createFirstCutoverIngressPair,
     connectGateway: connectFirstCutoverGatewaySession,
@@ -86,6 +95,12 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
   let closeFailed = false;
   let last = -1;
   let recoveryRecord;
+  let recovery;
+  let recoveryStarted = false;
+  let sourceArtifact;
+  let sourceTransfer;
+  let backupStage;
+  let comparedSnapshot;
   const used = new Set();
   const readScope = async (approval) => {
     const value = structuredClone(await io.readSite(approval));
@@ -294,7 +309,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       return;
     }
     closed = true;
-    for (const handle of [gateway, ingress]) {
+    for (const handle of [recovery, gateway, ingress]) {
       try {
         await handle?.close();
       } catch {
@@ -316,6 +331,67 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       fail();
     }
   };
+  const backupContext = () => ({
+    ...approvedInventory().backupPlan,
+    binding: context.binding,
+    maintenanceEndsAtMs: context.approval.maintenanceEndsAtMs,
+  });
+  const recoveryScope = () => ({ ...backupContext(), scopeDigest: scope.backupRecoveryDigest });
+  const assertRecoveryScope = (input) =>
+    run(
+      'recovery-scope',
+      context,
+      ['backup_verified'],
+      async () => {
+        if (
+          !/^[a-f0-9]{64}$/.test(scope.backupRecoveryDigest ?? '') ||
+          !equal(input, recoveryScope())
+        )
+          fail();
+        await guard(context, ['backup_verified']);
+        const record = await context.journal.readFirstCutoverEffects({ forBackupRecovery: true });
+        if (recoveryRecord && !equal(recoveryRecord, record)) fail();
+        await stopped();
+        await guard(context, ['backup_verified']);
+        if (
+          !equal(record, await context.journal.readFirstCutoverEffects({ forBackupRecovery: true }))
+        )
+          fail();
+        recoveryRecord = structuredClone(record);
+      },
+      false,
+    );
+  const recoveryConnection = async () => {
+    if (recovery) return recovery;
+    if (recoveryStarted) fail();
+    recoveryStarted = true;
+    const approved = recoveryScope();
+    recovery = await io.connectRecovery(approved, {
+      input: process.stdin,
+      output: process.stdout,
+      assertScope: () => assertRecoveryScope(approved),
+    });
+    return recovery;
+  };
+  const backupRead = (name, operation, once = false) =>
+    run(
+      name,
+      context,
+      ['backup_verified'],
+      async () => {
+        const record = await guard(context, ['backup_verified']);
+        const verify = async () => {
+          if (!equal(record, await guard(context, ['backup_verified']))) fail();
+          await stopped();
+          if (!equal(record, await guard(context, ['backup_verified']))) fail();
+        };
+        await verify();
+        const result = await operation(approvedInventory(), verify);
+        await verify();
+        return result;
+      },
+      once,
+    );
   const lifecycle = {
     attach: async (ctx) => {
       try {
@@ -489,35 +565,132 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     recovery: {
       // Supply directly to the recovery session's live scope callback. The Mac
       // never supplies stopped booleans or a substitute journal/approval.
-      assertScope: (input) =>
-        run(
-          'recovery-scope',
-          context,
-          ['backup_verified'],
-          async () => {
-            const inventory = approvedInventory();
+      assertScope: assertRecoveryScope,
+    },
+    // Original backup coordinator owns ordering and seals its own journal.
+    // No uploaded completion flags, replacement receipt or second coordinator.
+    backup: {
+      readDatabaseIdentity: (identity) =>
+        backupRead('backup-identity', async (inventory) => {
+          if (equal(identity, inventory.backupPlan?.sourceIdentity)) {
+            const plan = await io.readBackupPlan(context, inventory);
+            if (!equal(plan, inventory.backupPlan)) fail();
+            return plan.sourceIdentity;
+          }
+          if (!equal(identity, inventory.backupPlan?.isolatedTarget)) fail();
+          const result = await (await recoveryConnection()).inspect();
+          if (!equal(result, identity)) fail();
+          return result;
+        }),
+      inspectBackupFacility: (input) =>
+        backupRead('backup-facility', async (inventory) => {
+          if (!equal(input, backupContext())) fail();
+          return io.inspectSourceFacility(inventory.backupSource?.facility);
+        }),
+      hashArtifact: (artifact) =>
+        backupRead('backup-hash', async (inventory) => {
+          if (!sourceArtifact || !equal(artifact, sourceArtifact)) fail();
+          const source = inventory.backupSource;
+          const observed = await io.inspectSourceArtifact(artifact, {
+            facility: source.facility,
+            directory: source.directory,
+            attempt,
+          });
+          if (
+            !observed ||
+            !equal(Object.keys(observed).sort(), ['backupDigest', 'bytes']) ||
+            !/^[a-f0-9]{64}$/.test(observed.backupDigest) ||
+            !Number.isSafeInteger(observed.bytes) ||
+            observed.bytes <= 0
+          )
+            fail();
+          const transfer = {
+            artifact,
+            expectedBackupDigest: observed.backupDigest,
+            expectedBytes: observed.bytes,
+          };
+          if (sourceTransfer && !equal(sourceTransfer, transfer)) fail();
+          sourceTransfer = structuredClone(transfer);
+          return observed.backupDigest;
+        }),
+      restoreIsolated: (artifact, target) =>
+        backupRead(
+          'backup-restore',
+          async (inventory) => {
             if (
-              !/^[a-f0-9]{64}$/.test(scope.backupRecoveryDigest ?? '') ||
-              !equal(input, {
-                ...inventory.backupPlan,
-                binding: context.binding,
-                maintenanceEndsAtMs: context.approval.maintenanceEndsAtMs,
-                scopeDigest: scope.backupRecoveryDigest,
-              })
+              !sourceTransfer ||
+              !equal(artifact, sourceArtifact) ||
+              !equal(target, inventory.backupPlan?.isolatedTarget)
             )
               fail();
-            const record = await guard(context, ['backup_verified']);
-            if (recoveryRecord && !equal(recoveryRecord, record)) fail();
-            await stopped();
-            if (!equal(record, await guard(context, ['backup_verified']))) fail();
-            recoveryRecord = structuredClone(record);
+            if (!equal(await (await recoveryConnection()).restore(sourceTransfer), target)) fail();
+            backupStage = 'restored';
           },
-          false,
+          true,
         ),
-    },
-    // Merge only these implemented source operations into the host's original
-    // backup I/O. Target restore/compare/migrations remain mandatory elsewhere.
-    backup: {
+      compareInventoryAndData: (input) =>
+        backupRead(
+          'backup-compare',
+          async (inventory, verify) => {
+            if (backupStage !== 'restored' || !equal(input, backupContext())) fail();
+            const source = await io.readSourceSnapshot(context, inventory, {
+              assertWritersStopped: verify,
+            });
+            const target = await (await recoveryConnection()).snapshot();
+            const comparison = compareCutoverMysqlSnapshots(source, target);
+            comparedSnapshot = structuredClone(source);
+            backupStage = 'compared';
+            return comparison;
+          },
+          true,
+        ),
+      runApprovedMigrations: (target, digest) =>
+        backupRead(
+          'backup-migrate',
+          async (inventory) => {
+            if (
+              backupStage !== 'compared' ||
+              !equal(target, inventory.backupPlan?.isolatedTarget) ||
+              digest !== context.binding.migrationDigest
+            )
+              fail();
+            if (!equal(await (await recoveryConnection()).migrate(), { migrationDigest: digest }))
+              fail();
+            backupStage = 'migrated';
+          },
+          true,
+        ),
+      verifySchema: (target) =>
+        backupRead(
+          'backup-schema',
+          async (inventory) => {
+            if (backupStage !== 'migrated' || !equal(target, inventory.backupPlan?.isolatedTarget))
+              fail();
+            const result = await (await recoveryConnection()).verify();
+            if (result?.businessDigest !== comparedSnapshot.businessDigest) fail();
+            backupStage = 'verified';
+            return result;
+          },
+          true,
+        ),
+      readSourceDigest: (source) =>
+        backupRead('backup-source-digest', async (inventory, verify) => {
+          if (backupStage !== 'verified' || !equal(source, inventory.backupPlan?.sourceIdentity))
+            fail();
+          return (await io.readSourceSnapshot(context, inventory, { assertWritersStopped: verify }))
+            .sourceDigest;
+        }),
+      finishRecovery: (ctx) =>
+        backupRead(
+          'backup-finish',
+          async () => {
+            if (backupStage !== 'verified' || ctx.journal !== context.journal) fail();
+            await (await recoveryConnection()).close();
+            recovery = undefined;
+            backupStage = 'finished';
+          },
+          true,
+        ),
       exportDatabase: (source, input) =>
         run('source-backup', context, ['backup_verified'], async () => {
           const inventory = approvedInventory();
@@ -543,6 +716,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
             artifact?.encryptionProfileDigest !== facility.encryptionProfileDigest
           )
             fail();
+          sourceArtifact = structuredClone(artifact);
           return artifact;
         }),
     },

@@ -11,6 +11,7 @@ export {
   encryptAgeBackup,
   encryptMysqlAgeBackup,
   hashAgeBackupArtifact,
+  inspectAgeBackupArtifact,
   inspectAgeBackupFacility,
   receiveAgeBackup,
   streamAgeBackupArtifact,

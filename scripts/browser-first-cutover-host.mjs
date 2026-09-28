@@ -20,6 +20,7 @@ import {
   classifyFirstCutoverHostPair,
   classifyFirstCutoverRetirementPair,
 } from './browser-first-cutover-inventory.mjs';
+import { readCutoverMysqlSnapshot } from './browser-first-cutover-mysql.mjs';
 import {
   captureLegacyRuntime,
   initializeFirstMaintenanceState,
@@ -69,6 +70,7 @@ const coordinatorModules = [
   'browser-first-cutover-ingress-files.mjs',
   'browser-first-cutover-ingress-session.mjs',
   'browser-first-cutover-inventory.mjs',
+  'browser-first-cutover-mysql.mjs',
   'browser-first-cutover-nginx.mjs',
   'browser-first-cutover-runtime.mjs',
   'browser-maintenance-host.mjs',
@@ -822,6 +824,43 @@ export async function readFirstCutoverBackupPlan(context, input, overrides = {})
   }
 }
 
+/** Original full reader, on a dedicated approved SOURCE connection. No sampled
+ * rows or hashes supplied by a caller. Raw business/DDL data never leaves it.
+ */
+export async function readFirstCutoverSourceSnapshot(context, input, overrides = {}) {
+  const code = 'CUTOVER_SOURCE_SNAPSHOT_UNPROVEN';
+  try {
+    if (typeof overrides.assertWritersStopped !== 'function') throw new Error(code);
+    const plan = await readFirstCutoverBackupPlan(context, input, overrides);
+    const record = structuredClone(await context.journal.readFirstCutoverEffects());
+    return await withApprovedCutoverDatabase(
+      context,
+      overrides,
+      code,
+      async (connection, _io, _config, checkConfig) => {
+        const verify = async () => {
+          await checkConfig();
+          if (
+            record.phase !== 'backup_verified' ||
+            !isDeepStrictEqual(record, await context.journal.readFirstCutoverEffects())
+          )
+            throw new Error(code);
+          await overrides.assertWritersStopped();
+          await checkConfig();
+          if (!isDeepStrictEqual(record, await context.journal.readFirstCutoverEffects()))
+            throw new Error(code);
+        };
+        await verify();
+        const snapshot = await readCutoverMysqlSnapshot(connection, plan.sourceIdentity);
+        await verify();
+        return snapshot;
+      },
+    );
+  } catch {
+    throw new Error(code);
+  }
+}
+
 /** Actual source export, using the same approved configuration as the original
  * source identity reader. The site's physical stopped observer is mandatory;
  * an artifact here is not a restore result or a journal backup receipt. */
@@ -1220,6 +1259,7 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
       'runApprovedMigrations',
       'verifySchema',
       'readSourceDigest',
+      'finishRecovery',
     ],
     evidence: [
       'readHostInventory',
@@ -1491,6 +1531,9 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
             sealReceipt: (receipt) => prepared.journal.bindBackupReceipt(receipt),
           },
         );
+        // The target session is bound to backup scope, not the subsequent
+        // production migration. A lost final ACK must hold before that phase.
+        await io.backup.finishRecovery(context());
       }),
     migrate: () =>
       once('migrate', 'migration_started', async () => {

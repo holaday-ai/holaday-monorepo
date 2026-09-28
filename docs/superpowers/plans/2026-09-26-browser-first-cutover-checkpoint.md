@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 续跑：原备份协调器完整site I/O、回执与关闭时序接通
+
+承接`00c71983`，原Task4 BASE844c2ced不变。原site.backup已接入源身份/设施、实际单次导出、原密文摘要和字节数固定、同一Mac恢复会话restore/snapshot/migrate/verify、原全对象比较器、源不变检查与原journal sealReceipt。新增源全量快照读者复用原受保护配置/专用连接，前后核查源身份、原journal和实际停写，不采样、不接收上传摘要。原工具闭包增加该mysql读者，仅本地代码，未重新安装生产通道。
+
+完整协调器+真实文件journal测试先发现合法bindBackupReceipt改变recordDigest，导致最后恢复身份检查拒绝。保留原最后检查，只给backup_verified阶段恢复会话提供排除自有backupReceipt的scope投影；全文件字节/inode/属主核验仍保留，默认读者仍是完整摘要，外部回执篡改和阶段漂移均拒绝。原host在生产migration_started之前等待finishRecovery最终应答，关闭未知保持不确定，不重试恢复/迁移。源/目标/密文字节漂移、迁移回执错误、业务变化、关闭未知的串联故障用例通过；外部DB/crypto/transport在此契约测试仍为合成边界。
+
+真实MySQL8中，正式源快照适配→实际mysqldump/age/原取回/恢复→原完整对象/数据比较及源快照前后不变通过：`/tmp/holaday-source-snapshot-physical.log`退出0。源/恢复在同一临时实例两个合成库，不能替代独立Mac目标或生产停写；独立目标/原61迁移实测见上一恢复点。当前没有完成生产源到Mac的正式全流程演练。
+
+最终完整browser含两发布入口**965/965**、实际Linux五组**194/194**、ops**120/59/16/799 + Python12**，全部退出0、0跳过。日志`/tmp/holaday-backup-composition-{browser,linux-final,ops}.log`。12MJS Biome、shell语法及diff-check通过。原固定入口/proc/候选Git字节闭包实测退出0：`/tmp/holaday-backup-composition-entry-linux-verified.log`，仍拒绝execute、releaseReady=false。未跑应用全套或整分支独立审查。
+
+保留失败证据：Linux初次194项15失败（14缺策略只读挂载、1临时目录noexec），补QA挂载后全过，未改产品；入口前两次既有镜像均无Git、尚未到被测步骤，查历史确认以前在一次性容器临时安装Git，复用既有镜像按同样方式安装后断网测试通过，未重建镜像。新增故障测试最初错误期待失败site仍能成功detach，修正测试为保留关闭未知，未放宽产品。临时源MySQL容器a1625008及匿名卷已回收；固定入口容器4f0c14cb亦定向回收，只含可再生成合成数据。原MySQL/Redis、缓存、私钥/USB、PayPal与历史业务不动。
+
+没有push/PR/merge/部署。下一步勿再拆写备份模块：继续剩余独立旧源DB归属/在途工作/writer事实、worker定向持久恢复、reconcile/hold，受保护工具安装与首次execute；再做真实停写备份/Mac恢复、非PayPal恢复证据、完整成功/故障演练与整分支审查。Tasks4–6尚未完成，自动化继续同线程。
+
 ### 2026-09-28 续跑：同一恢复会话接通原全量快照、61迁移与业务校验
 
 承接`05fb4206`，Task4原BASE844c2ced不变。不是新建迁移/备份引擎：恢复worker复用`readCutoverMysqlSnapshot`、原`checkMaintenanceSchema`与原`apply-numbered-migrations.ts`独立ESM包及全部61原SQL。固定无dotenv工具副本`/opt/holaday-recovery`绑定Node/入口/全部文件摘要与原迁移manifest；元数据`runtime:{manifestDigest,nodeDigest,toolDigest}`随原Mac清单摘要批准，不放inventory、不生成批准。已有Linux Node22.20.0已实际在纯MySQL8镜像执行通过，无新依赖安装或镜像重建。

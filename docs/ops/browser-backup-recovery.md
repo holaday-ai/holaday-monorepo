@@ -58,7 +58,17 @@ Mac受保护目录下 `first-cutover-<attempt>.json` 使用0700目录、当前�
 
 Linux端实时回调使用原 `site.recovery.assertScope(publicScope)`；publicScope只包含binding、维护截止、scopeDigest、源身份、隔离目标身份。它绑定原持有journal、原受保护site和原物理停写观察器，且只在backup_verified意图阶段、同一effects记录有效，不接受Mac上传的stopped标志。恢复函数内部所有scope检查均沿该连接回到此回调。
 
-2026-09-28新增真实子进程夹具已验证原文件journal、同一会话管道、真实禁网Docker/age导入、原全量快照、原61项迁移和原schema/历史列业务比较：`/tmp/holaday-recovery-session-all61.log`退出0。源SSH和物理停写事实仍为合成边界。完整备份适配器的源库比较/回执、正式工具安装及首次CLI入口接线仍未完成，不能把这个会话验收称为跨主机生产演练或发布通过。
+2026-09-28新增真实子进程夹具已验证原文件journal、同一会话管道、真实禁网Docker/age导入、原全量快照、原61项迁移和原schema/历史列业务比较：`/tmp/holaday-recovery-session-all61.log`退出0。源SSH和物理停写事实仍为合成边界。后续已补齐下节原备份适配器的源库比较/回执接线；正式工具安装及首次CLI入口仍未完成，不能把这个会话验收称为跨主机生产演练或发布通过。
+
+### 原备份协调器的完整站点接线（2026-09-28，本地实现）
+
+原 `site.backup` 现在提供 `backupAndRestoreCheck` 的全套实际默认 I/O：源身份及设施→单次加密导出→密文摘要/字节数固定→原 Mac 会话恢复→源/目标原完整快照比较→目标原批准迁移→schema/历史列业务核对→源摘要不变→原 journal 回执。源快照复用原受保护配置与专用连接，完整读取前后核对原 journal、配置、源身份和现场停写观察器，不接受上传摘要或抽样数据。
+
+回执由原 host 的 `journal.bindBackupReceipt` 写入，site 不造回执。原协调器保留写入后的最后一次身份/停写核查；为支持合法回执追加，恢复会话只在 `backup_verified` 阶段使用原 journal 的专用 scope 投影：只排除 `backupReceipt` 的自有追加，全文件字节/inode/属主校验仍在，阶段、事件及其他字段不变。默认读取仍是完整记录摘要，外部改写回执也会拒绝。
+
+原 host 在生产迁移阶段之前调用 `finishRecovery`，等待同会话最终关闭应答。失败或应答丢失保持不确定，不重新恢复/迁移或因已有回执继续生产迁移。数据/目标/密文字节漂移、目标迁移回执不符、业务变化和关闭未知均有原协调器+真实文件 journal 的串联测试；其中数据库/加密/传输是明确合成边界。
+
+另在真实隔离 MySQL8 中验证正式源快照适配、实际 mysqldump/age/取回/恢复与原全对象摘要比较，源快照前后相同：`/tmp/holaday-source-snapshot-physical.log`退出0。这个源测试仍用同一临时实例的两个随机合成库，不能当作独立 Mac 目标或生产停写证明；独立目标、原61项迁移的实测证据见上一节。完整源站点到 Mac 目标的正式现场演练仍待完成。
 
 恢复目标固定工具树为 `/opt/holaday-recovery`，含现有Linux Node22、`recovery-tool.mjs`、原runner的独立ESM包及原TS/contract、全部原SQL和`runtime.json`。runtime清单绑定每个文件摘要及原`buildMaintenanceMigrationManifest`摘要；仅允许固定树，目录0700、当前执行用户私密普通单链接文件，禁止软链接、`.env*`和额外依赖/文件。Mac调用前后检查Node/入口/清单摘要与实际隔离目标，再通过`env -i`固定参数执行，不接受任意命令或数据库地址。库连接固定目标内MySQL socket，原runner的DATABASE_URL也固定该socket；不接触工作区dotenv。
 

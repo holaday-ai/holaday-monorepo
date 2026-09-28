@@ -69,6 +69,23 @@ test('age host I/O is exported by the existing backup module', () => {
 });
 
 test(
+  'encrypted artifact metadata binds the exact bytes needed by the existing recovery session',
+  { skip: !age },
+  async (t) => {
+    assert.equal(typeof backup.inspectAgeBackupArtifact, 'function');
+    const f = await fixture(t);
+    const artifact = await backup.encryptAgeBackup(f.options, f.producer);
+    const bytes = await readFile(artifact.reference);
+    assert.deepEqual(await backup.inspectAgeBackupArtifact(artifact, f.options), {
+      backupDigest: hash(bytes),
+      bytes: bytes.length,
+    });
+    await chmod(artifact.reference, 0o644);
+    await assert.rejects(backup.inspectAgeBackupArtifact(artifact, f.options), /UNPROVEN/);
+  },
+);
+
+test(
   'authenticated decryption supplies a pinned read descriptor only after complete verification',
   { skip: !age },
   async (t) => {

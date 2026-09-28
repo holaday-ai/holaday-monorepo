@@ -27,6 +27,7 @@ INGRESS_MODULES = frozenset([
     'browser-first-cutover-nginx.mjs', 'browser-first-cutover-runtime.mjs',
     'browser-maintenance-host.mjs', 'browser-maintenance-journal.mjs',
     'browser-maintenance-linux.mjs', 'browser-maintenance-manifest.mjs',
+    'browser-first-cutover-mysql.mjs',
     'browser-maintenance-policy.mjs', 'browser-maintenance-release-tail.mjs',
     'browser-maintenance-runtime-system.mjs', 'browser-maintenance-runtime.mjs',
     'browser-maintenance-transition.mjs', 'browser-payment-port-fence.mjs',

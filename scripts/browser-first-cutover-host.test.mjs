@@ -185,6 +185,120 @@ test('backup plan reads the actual source identity and never treats a configured
   }
 });
 
+test('source full snapshot reuses original reader under approved config, journal and physical stop checks', async () => {
+  assert.equal(typeof firstHost.readFirstCutoverSourceSnapshot, 'function');
+  const sourceIdentity = {
+    serverUuid: '11111111-1111-4111-8111-111111111111',
+    database: 'source_qa',
+  };
+  const inventory = {
+    backupPlan: {
+      sourceIdentity,
+      isolatedTarget: {
+        serverUuid: '22222222-2222-4222-8222-222222222222',
+        database: 'restore_qa',
+      },
+    },
+  };
+  const config = Buffer.from('DATABASE_URL=mysql://synthetic@127.0.0.1/source_qa');
+  for (const fault of [
+    'none',
+    'missing-stop',
+    'source',
+    'config-drift',
+    'phase-drift',
+    'busy',
+    'query',
+    'close',
+  ]) {
+    const binding = {
+      ...Object.fromEntries(
+        ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map((k) => [
+          k,
+          approved[k],
+        ]),
+      ),
+      configDigest: createHash('sha256').update(config).digest('hex'),
+      inventoryDigest: createHash('sha256').update(JSON.stringify(inventory)).digest('hex'),
+    };
+    let drift = false;
+    let opened = 0;
+    let closed = 0;
+    let guards = 0;
+    const queries = [];
+    const context = {
+      binding,
+      approval: { ...approved, ...binding },
+      root: `/opt/holaday-releases/${binding.candidate}`,
+      journal: {
+        assertOwnership: async () => binding,
+        readFirstCutoverEffects: async () => ({
+          ...binding,
+          phase: drift && fault === 'phase-drift' ? 'migration_started' : 'backup_verified',
+        }),
+      },
+    };
+    const io = {
+      platform: 'linux',
+      uid: 0,
+      now: () => 1000,
+      readConfig: async () => (drift && fault === 'config-drift' ? Buffer.from('changed') : config),
+      parseConfig: () => ({ DATABASE_URL: 'mysql://synthetic@127.0.0.1/source_qa' }),
+      assertWritersStopped: async () => {
+        guards++;
+        if (fault === 'busy') throw new Error('active writer');
+      },
+      connectWorkDatabase: async () => {
+        opened++;
+        return {
+          query: async (sql) => {
+            queries.push(sql);
+            if (sql.includes('@@server_uuid'))
+              return [
+                [fault === 'source' ? { ...sourceIdentity, database: 'wrong' } : sourceIdentity],
+              ];
+            if (sql.includes('information_schema.SCHEMATA')) {
+              drift = true;
+              return [[{ charset: 'utf8mb4', collation: 'utf8mb4_0900_ai_ci' }]];
+            }
+            if (sql.includes('information_schema.TABLES'))
+              return [[{ name: 'sample', kind: 'BASE TABLE', engine: 'InnoDB' }]];
+            if (sql.includes('information_schema.COLUMNS'))
+              return [[{ COLUMN_NAME: 'note', ORDINAL_POSITION: 1, COLUMN_TYPE: 'text' }]];
+            if (sql.startsWith('SHOW CREATE'))
+              return [[{ Table: 'sample', 'Create Table': 'CREATE TABLE `sample` (`note` text)' }]];
+            if (sql.startsWith('SELECT COUNT')) return [[{ rowCount: 1 }]];
+            if (sql === 'SELECT `note` FROM `sample`') {
+              if (fault === 'query') throw new Error('private SQL');
+              return [[{ note: 'private business text' }]];
+            }
+            return [[]];
+          },
+          end: async () => {
+            closed++;
+            if (fault === 'close') throw new Error('private connection');
+          },
+        };
+      },
+    };
+    if (fault === 'missing-stop') io.assertWritersStopped = undefined;
+    if (fault === 'none') {
+      const result = await firstHost.readFirstCutoverSourceSnapshot(context, inventory, io);
+      assert.deepEqual(result.identity, sourceIdentity);
+      assert.equal(result.objects[0].rowCount, 1);
+      assert.deepEqual(result.projection, [{ table: 'sample', columns: ['note'] }]);
+      assert.equal(JSON.stringify(result).includes('private business text'), false);
+      assert.ok(queries.includes('START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY'));
+      assert.ok(queries.includes('ROLLBACK'));
+      assert.ok(guards >= 2);
+    } else
+      await assert.rejects(firstHost.readFirstCutoverSourceSnapshot(context, inventory, io), {
+        message: 'CUTOVER_SOURCE_SNAPSHOT_UNPROVEN',
+      });
+    assert.equal(opened, closed);
+  }
+});
+
 test('source export binds the original plan, private config, live journal and stopped checks', async () => {
   assert.equal(typeof firstHost.exportFirstCutoverSourceBackup, 'function');
   const sourceIdentity = {
@@ -617,6 +731,7 @@ async function lifecycleFixture(t, fault) {
     runApprovedMigrations: async () => expectPhase('backup_verified', 'restore-migrate'),
     verifySchema: async () => ({ schemaDigest: '4'.repeat(64), businessDigest: '3'.repeat(64) }),
     readSourceDigest: async () => '2'.repeat(64),
+    finishRecovery: async () => {},
   };
   f.io.evidence = {
     readHostInventory: async () => ({
@@ -875,6 +990,29 @@ for (const fault of [undefined, 'candidate-observation', 'opened-observation']) 
     await adapter.finish(result);
   });
 }
+
+test('first host closes recovery in backup phase and never begins production migration after an uncertain close', async (t) => {
+  for (const fault of [false, true]) {
+    const f = await lifecycleFixture(t);
+    let closes = 0;
+    f.io.backup.finishRecovery = async (context) => {
+      closes++;
+      assert.equal(context.journal, f.journal());
+      assert.equal((await f.record()).phase, 'backup_verified');
+      assert.ok((await f.record()).backupReceipt);
+      assert.equal(f.events.includes('migrate'), false);
+      if (fault) throw new Error('uncertain recovery close');
+    };
+    const { adapter, result } = await runLifecycle(f);
+    assert.equal(result.ok, !fault);
+    assert.equal(closes, 1);
+    if (fault) {
+      assert.equal(f.events.includes('migrate'), false);
+      assert.equal(f.events.includes('start'), false);
+    }
+    await adapter.finish(result);
+  }
+});
 
 test('first host connects real journal, backup receipt and bootstrap before exact new-instance open', async (t) => {
   const f = await lifecycleFixture(t);

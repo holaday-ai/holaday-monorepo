@@ -24,7 +24,14 @@ import {
   hashAgeBackupArtifact,
   pullFirstCutoverAgeBackup,
 } from '../browser-first-cutover-backup.mjs';
-import { exportFirstCutoverSourceBackup } from '../browser-first-cutover-host.mjs';
+import {
+  exportFirstCutoverSourceBackup,
+  readFirstCutoverSourceSnapshot,
+} from '../browser-first-cutover-host.mjs';
+import {
+  compareCutoverMysqlSnapshots,
+  readCutoverMysqlSnapshot,
+} from '../browser-first-cutover-mysql.mjs';
 
 assert.equal(process.env.HOLADAY_SOURCE_BACKUP_QA, 'isolated-mysql8');
 assert.equal(process.platform, 'linux');
@@ -122,7 +129,15 @@ try {
   const io = {
     readConfig: async () => config,
     parseConfig: () => ({ DATABASE_URL: databaseUrl }),
-    connectWorkDatabase: (url) => mysql.createConnection(url),
+    connectWorkDatabase: (url) =>
+      mysql.createConnection({
+        uri: url,
+        dateStrings: true,
+        supportBigNumbers: true,
+        bigNumberStrings: true,
+        jsonStrings: true,
+        decimalNumbers: false,
+      }),
     assertWritersStopped: async () => {
       // Only this fixture and its owned observation connection may exist; no
       // application or provider workload is claimed to have been observed.
@@ -133,6 +148,7 @@ try {
       assert.deepEqual(rows, []);
     },
   };
+  const before = await readFirstCutoverSourceSnapshot(context, inventory, io);
   const artifact = await exportFirstCutoverSourceBackup(context, inventory, io);
   const options = { facility, directory: outgoing, attempt: binding.attempt };
   const expectedBackupDigest = await hashAgeBackupArtifact(artifact, options);
@@ -179,6 +195,28 @@ try {
   } finally {
     await input.close();
   }
+  const restored = await mysql.createConnection({
+    host: '127.0.0.1',
+    user: 'root',
+    database: target,
+    dateStrings: true,
+    supportBigNumbers: true,
+    bigNumberStrings: true,
+    jsonStrings: true,
+    decimalNumbers: false,
+  });
+  try {
+    const targetSnapshot = await readCutoverMysqlSnapshot(restored, {
+      ...identity,
+      database: target,
+    });
+    const comparison = compareCutoverMysqlSnapshots(before, targetSnapshot);
+    assert.equal(comparison.sourceDigest, before.sourceDigest);
+    assert.equal(comparison.businessDigest, before.businessDigest);
+  } finally {
+    await restored.end();
+  }
+  assert.deepEqual(await readFirstCutoverSourceSnapshot(context, inventory, io), before);
   const [original] = await root.query(`SELECT * FROM ${source}.sample`);
   assert.deepEqual((await root.query(`SELECT * FROM ${target}.sample`))[0], original);
   for (const [table, schemaColumn, nameColumn] of [
@@ -198,7 +236,7 @@ try {
     [`${binding.attempt}.sql.age`, 'recipient.txt'].sort(),
   );
   console.log(
-    'PASS actual MySQL8 source adapter -> mysqldump -> age -> original transfer -> same-instance QA restore; data and objects preserved; no production proof',
+    'PASS actual MySQL8 source snapshot -> mysqldump -> age -> original transfer -> same-instance QA restore -> full snapshot comparison and source unchanged; no production proof',
   );
 } finally {
   await app?.end();

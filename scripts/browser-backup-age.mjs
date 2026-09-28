@@ -341,11 +341,17 @@ function checkArtifact(artifact, options, observed) {
 }
 
 export const hashAgeBackupArtifact = guarded(async (artifact, options) => {
+  return (await inspectAgeBackupArtifact(artifact, options)).backupDigest;
+});
+
+export const inspectAgeBackupArtifact = guarded(async (artifact, options) => {
   const observed = await scope(options);
   checkArtifact(artifact, options, observed);
   const file = await checkedFile(artifact.reference);
   try {
-    return await fileHash(file);
+    const backupDigest = await fileHash(file);
+    await recheck(options, observed);
+    return { backupDigest, bytes: file.before.size };
   } finally {
     await file.handle.close();
   }

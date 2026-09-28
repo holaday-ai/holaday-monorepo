@@ -33,6 +33,40 @@ const firstMetadata = {
   inventoryDigest: '4'.repeat(64),
 };
 
+test('backup recovery scope survives only the owned receipt append, not phase or file drift', async (t) => {
+  for (const fault of ['phase', 'file']) {
+    const journal = await acquireReleaseJournal(await fixture(t), firstMetadata);
+    t.after(() => journal.close());
+    await journal.bindManifest(manifest);
+    for (const phase of [
+      'prepared',
+      'orders_fenced',
+      'legacy_settled',
+      'producers_stopped',
+      'all_fenced',
+      'stopped',
+      'backup_verified',
+    ])
+      await journal.persist(phase, { candidate: metadata.candidate });
+    const fullBefore = await journal.readFirstCutoverEffects();
+    const before = await journal.readFirstCutoverEffects({ forBackupRecovery: true });
+    await journal.bindBackupReceipt(await backupReceiptFor(journal));
+    assert.notEqual(
+      (await journal.readFirstCutoverEffects()).recordDigest,
+      fullBefore.recordDigest,
+    );
+    assert.deepEqual(await journal.readFirstCutoverEffects({ forBackupRecovery: true }), before);
+    if (fault === 'phase')
+      await journal.persist('migration_started', { candidate: metadata.candidate });
+    else {
+      const record = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+      record.backupReceipt.restoredAtMs++;
+      await fs.writeFile(journal.path, `${JSON.stringify(record)}\n`);
+    }
+    await assert.rejects(journal.readFirstCutoverEffects({ forBackupRecovery: true }), /UNPROVEN/);
+  }
+});
+
 test('first-cutover effects are read from the owned durable journal without mutable aliases', async (t) => {
   const journal = await acquireReleaseJournal(await fixture(t), firstMetadata);
   t.after(() => journal.close());
