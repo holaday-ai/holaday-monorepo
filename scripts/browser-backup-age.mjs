@@ -451,7 +451,8 @@ export const receiveAgeBackup = guarded(async (options, producer) => {
  * Caller still must prove isolation, import into the exact owned target, compare
  * all objects/data, migrate and seal the existing coordinator's final receipt.
  */
-export const decryptAgeBackupToFile = guarded(async (options) => {
+export const decryptAgeBackupToFile = guarded(async (options, consume) => {
+  if (consume !== undefined && typeof consume !== 'function') throw new Error('consumer');
   if (!validHash(options.expectedBackupDigest)) throw new Error('digest');
   const observed = await scope(options);
   checkArtifact(options.artifact, options, observed);
@@ -476,6 +477,18 @@ export const decryptAgeBackupToFile = guarded(async (options) => {
       throw new Error('ciphertext changed');
     await recheck(options, observed);
     await publish(output, reference, options.directory);
+    if (consume) {
+      const verified = await checkedFile(reference);
+      try {
+        if (!same(await output.stat(), verified.before)) throw new Error('verified inode');
+        const beforeDigest = await fileHash(verified);
+        await consume(verified.handle.fd);
+        if ((await fileHash(verified)) !== beforeDigest) throw new Error('verified changed');
+        await recheck(options, observed);
+      } finally {
+        await verified.handle.close();
+      }
+    }
     return { reference, backupDigest: options.expectedBackupDigest };
   } finally {
     await output?.close();

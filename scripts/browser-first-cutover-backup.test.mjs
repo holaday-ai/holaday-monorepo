@@ -20,6 +20,159 @@ const isolatedTarget = {
 const input = { binding, sourceIdentity, isolatedTarget, maintenanceEndsAtMs: 2000 };
 const artifact = { reference: 'private-backup', encryptionProfileDigest: 'e'.repeat(64) };
 
+test('recovery target refuses shared, networked, mounted or nonempty databases before import', async () => {
+  assert.equal(typeof backup.inspectFirstCutoverRecoveryTarget, 'function');
+  for (const fault of [
+    'none',
+    'network',
+    'mount',
+    'image',
+    'privileged',
+    'pid',
+    'volume-driver',
+    'shared',
+    'uuid',
+    'busy',
+    'events',
+    'nonempty',
+    'environment',
+  ]) {
+    const target = {
+      containerId: '1'.repeat(64),
+      imageId: `sha256:${'2'.repeat(64)}`,
+      volume: `holaday-cutover-restore-${binding.attempt}`,
+      attempt: binding.attempt,
+      identity: isolatedTarget,
+    };
+    const container = {
+      Id: target.containerId,
+      Image: target.imageId,
+      State: { Running: true, Paused: false, Restarting: false, OOMKilled: false },
+      Config: {
+        Labels: { 'holaday.cutover.attempt': binding.attempt },
+        Env: ['MYSQL_ALLOW_EMPTY_PASSWORD=yes'],
+      },
+      HostConfig: {
+        NetworkMode: 'none',
+        Privileged: false,
+        PidMode: '',
+        IpcMode: 'private',
+        CapAdd: null,
+        Devices: [],
+        DeviceRequests: null,
+        Binds: null,
+        PortBindings: {},
+        Memory: 805306368,
+        NanoCpus: 1000000000,
+        PidsLimit: 256,
+        RestartPolicy: { Name: 'no' },
+      },
+      Mounts: [{ Type: 'volume', Name: target.volume, Destination: '/var/lib/mysql', RW: true }],
+      NetworkSettings: { Networks: { none: {} }, Ports: {} },
+    };
+    const volume = {
+      Name: target.volume,
+      Driver: 'local',
+      Options: null,
+      Scope: 'local',
+      Labels: { 'holaday.cutover.attempt': binding.attempt },
+    };
+    const db = {
+      ...isolatedTarget,
+      eventScheduler: 'OFF',
+      foreignSchemas: 0,
+      connections: 0,
+      objects: 0,
+    };
+    if (fault === 'network') container.HostConfig.NetworkMode = 'bridge';
+    if (fault === 'mount') container.Mounts.push({ Type: 'bind', Destination: '/source' });
+    if (fault === 'image') container.Image = `sha256:${'3'.repeat(64)}`;
+    if (fault === 'privileged') container.HostConfig.Privileged = true;
+    if (fault === 'pid') container.HostConfig.PidMode = 'host';
+    if (fault === 'volume-driver')
+      volume.Options = { device: '/production', type: 'none', o: 'bind' };
+    if (fault === 'uuid') db.serverUuid = sourceIdentity.serverUuid;
+    if (fault === 'busy') db.connections = 1;
+    if (fault === 'events') db.eventScheduler = 'ON';
+    if (fault === 'nonempty') db.objects = 1;
+    if (fault === 'environment') container.Config.Env.push('DATABASE_URL=production');
+    const calls = [];
+    const execFile = async (command, args) => {
+      assert.equal(command, 'docker');
+      calls.push(args);
+      if (args[0] === 'inspect') return { stdout: JSON.stringify([container]) };
+      if (args[0] === 'volume') return { stdout: JSON.stringify([volume]) };
+      if (args[0] === 'ps')
+        return { stdout: `${target.containerId}\n${fault === 'shared' ? '3'.repeat(64) : ''}` };
+      assert.equal(args[0], 'exec');
+      assert(args.includes(target.containerId));
+      assert(args.includes(`--database=${isolatedTarget.database}`));
+      return { stdout: `${JSON.stringify(db)}\n` };
+    };
+    if (fault === 'none')
+      assert.deepEqual(
+        await backup.inspectFirstCutoverRecoveryTarget(target, { execFile }),
+        isolatedTarget,
+      );
+    else
+      await assert.rejects(backup.inspectFirstCutoverRecoveryTarget(target, { execFile }), {
+        message: 'CUTOVER_RECOVERY_TARGET_UNPROVEN',
+      });
+    assert(!calls.some((args) => args[0] === 'rm' || args[0] === 'stop'));
+  }
+});
+
+test('recovery import consumes only authenticated plaintext and never retries an uncertain SQL process', async () => {
+  assert.equal(typeof backup.restoreFirstCutoverAgeBackup, 'function');
+  for (const fault of ['none', 'scope', 'authentication', 'import']) {
+    const target = {
+      containerId: '1'.repeat(64),
+      imageId: `sha256:${'2'.repeat(64)}`,
+      volume: `holaday-cutover-restore-${binding.attempt}`,
+      attempt: binding.attempt,
+      identity: isolatedTarget,
+    };
+    let imports = 0;
+    let decrypted = 0;
+    const request = {
+      transfer: { destination: { attempt: binding.attempt }, expectedBackupDigest: 'f'.repeat(64) },
+      identityFile: '/private/identity',
+      target,
+    };
+    const io = {
+      assertScope: async () => {
+        if (fault === 'scope') throw new Error('scope');
+      },
+      inspectTarget: async (actual) => {
+        assert.deepEqual(actual, target);
+        return isolatedTarget;
+      },
+      pull: async () => artifact,
+      decrypt: async (options, consume) => {
+        assert.equal(options.identityFile, '/private/identity');
+        assert.equal(options.artifact, artifact);
+        decrypted++;
+        if (fault === 'authentication') throw new Error('authentication');
+        await consume(55);
+      },
+      importDescriptor: async (actual, fd) => {
+        assert.deepEqual(actual, target);
+        assert.equal(fd, 55);
+        imports++;
+        if (fault === 'import') throw new Error('private sql diagnostic');
+      },
+    };
+    if (fault === 'none')
+      assert.deepEqual(await backup.restoreFirstCutoverAgeBackup(request, io), isolatedTarget);
+    else
+      await assert.rejects(backup.restoreFirstCutoverAgeBackup(request, io), {
+        message: 'CUTOVER_RECOVERY_IMPORT_UNPROVEN',
+      });
+    assert.equal(imports, ['none', 'import'].includes(fault) ? 1 : 0);
+    assert.equal(decrypted, fault === 'scope' ? 0 : 1);
+  }
+});
+
 // These are trusted host I/O boundaries, NOT a production encryption or database
 // adapter. Tests exercise coordinator ordering/rejection, not real restore claims.
 function fixture() {

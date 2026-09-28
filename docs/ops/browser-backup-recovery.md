@@ -38,6 +38,18 @@ Mac Homebrew安装自动清理了旧下载缓存、日志和临时安装残留�
 
 ## 仍待接线，不可用探针替代
 
+### 2026-09-28：恢复端实际隔离目标检查与导入
+
+原 `browser-first-cutover-backup.mjs` 新增 `inspectFirstCutoverRecoveryTarget` / `restoreFirstCutoverAgeBackup`，不另建备份或加密引擎。目标由批准元数据固定 `{containerId,imageId,volume,attempt,identity}`：完整容器ID、镜像ID、同attempt专用命名卷及实际 `{serverUuid,database}`。恢复函数不创建、清空、停止或删除任何数据库/容器。
+
+导入前后都检查：容器运行且非特权/宿主PID；network=none、无开放端口、无宿主挂载/额外能力/设备；唯一local专用卷的标签一致且没有其他容器引用；固定资源上限及不自动重启；环境仅允许镜像字段和隔离MySQL初始化字段。数据库必须身份匹配、没有其他业务schema/连接，event_scheduler=OFF；首次导入要求目标库没有表/视图/例程/事件。未知或不符合条件直接拒绝，不能按名称碰原MySQL。
+
+恢复仍由原密文拉取、hash/完整age认证负责。`decryptAgeBackupToFile` 的可选消费回调只在认证、同步发布与inode核验完成后拿到固定只读fd；保持fd打开，消费后再次核验文件字节。正式消费者用固定 `docker exec` 参数把fd送入精确目标的mysql socket客户端，禁用local-infile/自动重连并开启batch binary-mode。只等待一次进程结束，不自动重放SQL，不在失败时删除部分恢复结果。恢复私钥和明文均不上传源服务器。
+
+恢复端必须由原协调器提供实时 `assertScope` 检查；这个回调的跨Mac/Vultr会话绑定尚未接通，**不得以空回调启用生产执行**。本方法只返回已实测目标身份，不产生backupReceipt；原全对象/数据比较、全61SQL与schema/历史字段核验、原journal回执仍须完成。固定目标信息须来自受保护批准，不能把本次探测输出自动当批准。
+
+本轮Mac实测用新建禁网MySQL8合成库、独有卷和临时QA密钥，真实Docker检查/age/固定fd导入通过，并验证中文/BLOB/NULL/trigger/event及重复导入拒绝。源SSH换为执行原读取器的本机子进程，协调器回调明确合成；没有运行全迁移，没有访问生产数据库/恢复密钥，也不代表完整双机发布通过。夹具位于 `scripts/fixtures/browser-recovery-target-qa.mjs`，日志 `/tmp/holaday-recovery-target-physical.log`。
+
 ### 2026-09-27：密文运输接口及获准的真实主机探针通过
 
 既有age适配新增 `streamAgeBackupArtifact` / `receiveAgeBackup`；既有backup模块提供 `pullFirstCutoverAgeBackup`。来源与接收端分别使用自己的已批准工具/公钥配置，绑定同一attempt、公钥摘要、密文摘要和准确字节数。默认下载固定走严格主机密钥验证的阿里云跳板→Vultr SSH，不接受额外host或私钥字段；SSH只承载经过显式字段选择的公钥配置、读取代码和密文，Mac恢复私钥不上传。

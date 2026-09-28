@@ -1,10 +1,10 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { isDeepStrictEqual } from 'node:util';
-import { receiveAgeBackup } from './browser-backup-age.mjs';
+import { isDeepStrictEqual, promisify } from 'node:util';
+import { decryptAgeBackupToFile, receiveAgeBackup } from './browser-backup-age.mjs';
 
 export {
   decryptAgeBackupToFile,
@@ -29,6 +29,202 @@ const identityValid = (value) =>
   uuid(value.serverUuid) &&
   typeof value.database === 'string' &&
   /^[a-zA-Z0-9_]{1,64}$/.test(value.database);
+
+const targetValid = (target) =>
+  keys(target, ['containerId', 'imageId', 'volume', 'attempt', 'identity']) &&
+  hash(target.containerId) &&
+  /^sha256:[a-f0-9]{64}$/.test(target.imageId ?? '') &&
+  uuid(target.attempt) &&
+  target.volume === `holaday-cutover-restore-${target.attempt}` &&
+  identityValid(target.identity);
+const mysqlTargetArgs = (target) => [
+  'exec',
+  '--user',
+  '0',
+  '--env',
+  'MYSQL_TEST_LOGIN_FILE=/dev/null',
+  '-i',
+  target.containerId,
+  '/usr/bin/mysql',
+  '--no-defaults',
+  '--protocol=SOCKET',
+  '--socket=/var/run/mysqld/mysqld.sock',
+  '-uroot',
+  '--binary-mode=1',
+  '--local-infile=0',
+  '--skip-reconnect',
+  `--database=${target.identity.database}`,
+];
+
+/** Recovery-machine observation of an already approved dedicated container.
+ * Never creates, empties, stops or removes a database/container. Identity and
+ * volume are pinned; no host mounts, shared volume, network or other databases.
+ */
+export async function inspectFirstCutoverRecoveryTarget(input, overrides = {}) {
+  try {
+    const target = structuredClone(input);
+    if (!targetValid(target)) throw new Error('target');
+    const run = overrides.execFile ?? promisify(execFile);
+    const command = async (args) =>
+      (await run('docker', args, { encoding: 'utf8', maxBuffer: 1024 * 1024, timeout: 15000 }))
+        .stdout;
+    const inspect = async () => {
+      const rows = JSON.parse(await command(['inspect', target.containerId]));
+      if (!Array.isArray(rows) || rows.length !== 1) throw new Error('inspect');
+      const c = rows[0];
+      const h = c.HostConfig;
+      if (
+        c.Id !== target.containerId ||
+        c.Image !== target.imageId ||
+        !c.State.Running ||
+        c.State.Paused ||
+        c.State.Restarting ||
+        c.State.OOMKilled ||
+        c.Config.Labels?.['holaday.cutover.attempt'] !== target.attempt ||
+        !Array.isArray(c.Config.Env) ||
+        c.Config.Env.some(
+          (v) =>
+            ![
+              'PATH',
+              'GOSU_VERSION',
+              'MYSQL_MAJOR',
+              'MYSQL_VERSION',
+              'MYSQL_SHELL_VERSION',
+              'MYSQL_ALLOW_EMPTY_PASSWORD',
+              'MYSQL_DATABASE',
+            ].includes(v.split('=')[0]),
+        ) ||
+        h.NetworkMode !== 'none' ||
+        h.Privileged ||
+        h.PidMode ||
+        h.IpcMode !== 'private' ||
+        h.CapAdd?.length ||
+        h.Devices?.length ||
+        h.DeviceRequests?.length ||
+        h.Binds?.length ||
+        Object.keys(h.PortBindings ?? {}).length ||
+        h.RestartPolicy?.Name !== 'no' ||
+        !(h.Memory > 0 && h.Memory <= 1073741824) ||
+        !(h.NanoCpus > 0 && h.NanoCpus <= 1000000000) ||
+        !(h.PidsLimit > 0 && h.PidsLimit <= 256) ||
+        !isDeepStrictEqual(Object.keys(c.NetworkSettings.Networks), ['none']) ||
+        Object.values(c.NetworkSettings.Ports ?? {}).some((v) => v?.length) ||
+        c.Mounts.length !== 1 ||
+        c.Mounts[0].Type !== 'volume' ||
+        c.Mounts[0].Name !== target.volume ||
+        c.Mounts[0].Destination !== '/var/lib/mysql' ||
+        !c.Mounts[0].RW
+      )
+        throw new Error('isolation');
+      const volumes = JSON.parse(await command(['volume', 'inspect', target.volume]));
+      if (!Array.isArray(volumes) || volumes.length !== 1) throw new Error('volume');
+      const v = volumes[0];
+      if (
+        v.Name !== target.volume ||
+        v.Driver !== 'local' ||
+        v.Scope !== 'local' ||
+        Object.keys(v.Options ?? {}).length ||
+        v.Labels?.['holaday.cutover.attempt'] !== target.attempt
+      )
+        throw new Error('volume');
+      if (
+        (
+          await command(['ps', '-aq', '--no-trunc', '--filter', `volume=${target.volume}`])
+        ).trim() !== target.containerId
+      )
+        throw new Error('shared volume');
+    };
+    await inspect();
+    const sql = `SELECT JSON_OBJECT('serverUuid',@@server_uuid,'database',DATABASE(),'eventScheduler',@@event_scheduler,'foreignSchemas',(SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME NOT IN ('mysql','sys','information_schema','performance_schema',DATABASE())),'connections',(SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE ID<>CONNECTION_ID()),'objects',(SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE())+(SELECT COUNT(*) FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA=DATABASE())+(SELECT COUNT(*) FROM information_schema.EVENTS WHERE EVENT_SCHEMA=DATABASE()))`;
+    const row = JSON.parse(
+      (
+        await command([
+          ...mysqlTargetArgs(target),
+          '--batch',
+          '--skip-column-names',
+          '--raw',
+          '--execute',
+          sql,
+        ])
+      ).trim(),
+    );
+    if (
+      !isDeepStrictEqual({ serverUuid: row.serverUuid, database: row.database }, target.identity) ||
+      row.eventScheduler !== 'OFF' ||
+      row.foreignSchemas !== 0 ||
+      row.connections !== 0 ||
+      !Number.isSafeInteger(row.objects) ||
+      row.objects < 0 ||
+      (overrides.requireEmpty !== false && row.objects !== 0)
+    )
+      throw new Error('database');
+    await inspect();
+    return structuredClone(target.identity);
+  } catch {
+    throw new Error('CUTOVER_RECOVERY_TARGET_UNPROVEN');
+  }
+}
+
+/** Actual Mac/recovery-side import. The original coordinator must supply a live
+ * scope/ownership/stop check over its existing session. No uploaded receipt or
+ * "restored" flag. This only imports; full comparison/migrations remain required.
+ */
+export async function restoreFirstCutoverAgeBackup(input, overrides = {}) {
+  try {
+    const request = structuredClone(input);
+    if (
+      !keys(request, ['transfer', 'identityFile', 'target']) ||
+      !targetValid(request.target) ||
+      request.target.attempt !== request.transfer?.destination?.attempt ||
+      typeof overrides.assertScope !== 'function'
+    )
+      throw new Error('scope');
+    const io = {
+      inspectTarget: inspectFirstCutoverRecoveryTarget,
+      pull: pullFirstCutoverAgeBackup,
+      decrypt: decryptAgeBackupToFile,
+      importDescriptor: async (target, fd) => {
+        const child = spawn('docker', mysqlTargetArgs(target), {
+          shell: false,
+          stdio: [fd, 'ignore', 'ignore'],
+        });
+        await new Promise((resolve, reject) => {
+          child.once('error', reject);
+          child.once('close', (code) =>
+            code === 0 ? resolve() : reject(new Error('import exit')),
+          );
+        });
+      },
+      ...overrides,
+    };
+    const guard = async (requireEmpty) => {
+      await io.assertScope();
+      const actual = await io.inspectTarget(request.target, { requireEmpty });
+      if (!isDeepStrictEqual(actual, request.target.identity)) throw new Error('identity');
+      await io.assertScope();
+    };
+    await guard(true);
+    const artifact = await io.pull(request.transfer);
+    await guard(true);
+    await io.decrypt(
+      {
+        ...request.transfer.destination,
+        artifact,
+        expectedBackupDigest: request.transfer.expectedBackupDigest,
+        identityFile: request.identityFile,
+      },
+      async (fd) => {
+        await guard(true);
+        await io.importDescriptor(request.target, fd);
+        await guard(false);
+      },
+    );
+    await guard(false);
+    return structuredClone(request.target.identity);
+  } catch {
+    throw new Error('CUTOVER_RECOVERY_IMPORT_UNPROVEN');
+  }
+}
 
 /** Recovery-side transport, called with already approved source/destination
  * facilities by the site adapter. No CLI parameters select an arbitrary host,

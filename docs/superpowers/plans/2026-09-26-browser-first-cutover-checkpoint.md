@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-28 续跑：Mac恢复端真实隔离目标检查与固定fd导入
+
+承接 `92898dd1`，Task4原BASE844c2ced不变。原backup模块已接入实际Docker目标检查：完整容器/镜像ID、同attempt标签、独占本地卷、无网络/端口/host绑定/特权/设备、资源上限及真实MySQL身份；首次导入要求空库、无其他业务库/连接且事件关闭。原age解密只在完整认证、私有文件发布及inode检查后提供只读fd；固定mysql socket命令单次消费该fd，前后复核目标与调用方scope。失败不自动重试SQL或删除目标。
+
+`restoreFirstCutoverAgeBackup` 复用原pull/decrypt，仅返回目标身份，必须提供真实 `assertScope`，不生成恢复通过回执。Mac/Vultr同一协调器会话绑定、受保护恢复清单、原全量snapshot比较、全部61项迁移及原journal回执仍未接通，不能用fixture的合成scope上线。
+
+新鲜验证：完整browser **925/925**；实际Linux age/backup **62/62**；ops **120/59/16/759 + Python12**，全部退出0、0跳过。日志 `/tmp/holaday-recovery-browser.log`、`/tmp/holaday-recovery-linux.log`、`/tmp/holaday-recovery-ops.log`。五MJS Biome、diff-check通过。实际Mac无网络MySQL8目标完成原age→传输→认证fd导入，验证UTF8/BLOB/NULL/trigger/event及重复导入拒绝，日志 `/tmp/holaday-recovery-target-physical.log` 退出0；源SSH与scope在该fixture仍是明确合成边界，不是生产/完整迁移恢复证明。
+
+专用QA容器和带本次attempt标签的卷已精确移除（仅可再生成合成数据）；最终docker仅原mysql/redis，所有验证进程结束，原 `scripts/__pycache__/` 保留。未触碰生产、真实私钥、PayPal或历史订单。未push/PR/merge/deploy；Task4–6未完成，execute保持关闭。
+
+下一步：沿原计划连接受保护Mac元数据与同一Vultr协调器scope，再复用原snapshot比较、61迁移/业务比较与journal回执；继续独立旧源在途/写入事实、定向worker持久化、reconcile/hold、首次入口和完整故障演练/整分支审查。不重做导出、加密、目标fd导入、通道、密钥或商户核查。
+
 ### 2026-09-28 续跑：实际 mysqldump 导出接入原 age / host / site
 
 承接 `2a8ca2d3`；Task4原BASE844c2ced不变。`site.backup.exportDatabase` 已连接原host/source计划与同一受保护配置，原age适配新增实际mysqldump生产者。批准清单增加 `backupSource: {facility,directory,executable,executableDigest}`；只在原backup_verified意图、同一journal/源身份/绝对窗口与物理stopped条件下执行一次。固定完整数据及routine/event/trigger导出，等待stdout与进程退出双成功后，再核验源库/配置/停写才发布密文；无重试、无生产明文备份、无提前恢复回执。不是另建加密、密钥、传输或发布框架。

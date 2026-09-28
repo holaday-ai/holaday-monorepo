@@ -68,6 +68,53 @@ test('age host I/O is exported by the existing backup module', () => {
   }
 });
 
+test(
+  'authenticated decryption supplies a pinned read descriptor only after complete verification',
+  { skip: !age },
+  async (t) => {
+    const f = await fixture(t);
+    const artifact = await backup.encryptAgeBackup(f.options, f.producer);
+    const expectedBackupDigest = await backup.hashAgeBackupArtifact(artifact, f.options);
+    let consumed = 0;
+    await backup.decryptAgeBackupToFile(
+      { ...f.options, artifact, identityFile: f.identityFile, expectedBackupDigest },
+      async (fd) => {
+        assert.equal(typeof fd, 'number');
+        const result = await new Promise((resolve, reject) => {
+          const child = spawn(process.execPath, ['-e', 'process.stdin.pipe(process.stdout)'], {
+            stdio: [fd, 'pipe', 'ignore'],
+          });
+          const chunks = [];
+          child.stdout.on('data', (chunk) => chunks.push(chunk));
+          child.once('error', reject);
+          child.once('close', (code) =>
+            code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error('reader')),
+          );
+        });
+        assert.deepEqual(result, f.plaintext);
+        consumed++;
+      },
+    );
+    assert.equal(consumed, 1);
+    const other = await fixture(t);
+    const otherArtifact = await backup.encryptAgeBackup(other.options, other.producer);
+    await assert.rejects(
+      backup.decryptAgeBackupToFile(
+        {
+          ...other.options,
+          artifact: otherArtifact,
+          identityFile: f.identityFile,
+          expectedBackupDigest: await backup.hashAgeBackupArtifact(otherArtifact, other.options),
+        },
+        () => {
+          consumed++;
+        },
+      ),
+    );
+    assert.equal(consumed, 1);
+  },
+);
+
 // Catch a dump's late nonzero exit being accepted as a complete backup, and
 // credentials leaking into argv/environment or a named file. The child below
 // is a synthetic mysqldump boundary; age and filesystem operations are real.
