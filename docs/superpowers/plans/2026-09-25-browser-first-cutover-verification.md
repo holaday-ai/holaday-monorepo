@@ -2,6 +2,12 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 同轮续跑：PM2停止后的限定策略恢复已实际验证
+
+原夹具`--scoped-pm2`模式21620 RED退出1后，8020物理GREEN退出0：真实PM2 6.0.14、独立QA daemon，旧实例autorestart=true；两次精确数字ID停止各核清9个真实profile进程均退出，无关应用和独立Xvfb保留。恢复实例使用私有只读策略/全能力清零且autorestart=false；旧target正对照存在，而恢复后旧target/HTTP增量为零，原profile哨兵/持久cookie/用户偏好/父策略保留，会话cookie中断按既有批准接受。新QA恢复配置不是生产配置已绑定，未执行不安全原启动脚本。
+
+这补齐下方仅CDP clean-close的限制，但不证明生产VNC/共享显示、受保护journal或任意后台不重放。原ops63072退出0（120/60/16/951+Python12，零跳过），物理夹具独立于ops计数。日志`/private/tmp/holaday-browser-pm2-recovery-{red,green,ops}-20260930.log`；精确容器已移除、原DB/Redis健康。未重跑完整DB链或冒用旧browser计数，未触碰生产。后续仍需精确范围及恢复配置绑定、独立现场facts、真实恢复和整分支验收；CLI关闭。
+
 ## 2026-09-30 JST（09-29 17:14Z）：进程私有浏览器策略路径通过，尚未接入生产恢复
 
 原真实Brave夹具增加scoped模式：62194先因旧target恢复RED退出1；私有mount namespace/只读策略/启动前能力全部清零实现后76839和最终89707退出0。父namespace策略不变、原用户启动偏好不变、独立Xvfb存活、原合成profile哨兵/持久cookie保留，创建blank后无旧target/旧HTTP增量。按既有授权接受会话cookie中断，没有关闭Brave隐私特性，历史失败模式不改。去掉容器SYS_ADMIN的57738明确拒绝、退出1，不回退、不重试；不是该负向测试“通过启动”。所有精确QA容器已自动移除，原DB/Redis健康，没有生产或全机策略变更。

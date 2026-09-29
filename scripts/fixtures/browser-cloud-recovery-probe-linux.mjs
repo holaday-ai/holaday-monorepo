@@ -9,6 +9,8 @@
 // --scoped-policy tests process-private policy visibility, NOT production recovery.
 // This mode needs SYS_ADMIN in the disposable container for unshare/mount only;
 // the browser runs with all capability sets cleared and no-new-privileges.
+// --scoped-pm2 adds real numeric PM2 stops before and after recovery. Its daemon
+// and unrelated app are disposable; production startup scripts are NOT executed.
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -21,11 +23,14 @@ assert.equal(process.getuid(), 0);
 assert.ok(
   process.argv.length === 2 ||
     (process.argv.length === 3 &&
-      ['--app-blank', '--policy-probe', '--scoped-policy'].includes(process.argv[2])),
+      ['--app-blank', '--policy-probe', '--scoped-policy', '--scoped-pm2'].includes(
+        process.argv[2],
+      )),
 );
 const appBlank = process.argv[2] === '--app-blank';
 const policyProbe = process.argv[2] === '--policy-probe';
-const scopedPolicy = process.argv[2] === '--scoped-policy';
+const scopedPm2 = process.argv[2] === '--scoped-pm2';
+const scopedPolicy = process.argv[2] === '--scoped-policy' || scopedPm2;
 const policyRoot = '/etc/brave/policies/managed';
 let originalPolicy;
 if (scopedPolicy) {
@@ -72,6 +77,35 @@ let browser;
 let socket;
 let sequence = 0;
 const pending = new Map();
+let physicalStops = 0;
+const pm2Home = scopedPm2 ? await fs.mkdtemp('/tmp/holaday-browser-pm2-') : undefined;
+const pm2 = async (...argv) =>
+  (
+    await promisify(execFile)(
+      '/opt/node22/bin/node',
+      ['/opt/node22/lib/node_modules/pm2/bin/pm2', ...argv],
+      { env: { ...process.env, PM2_HOME: pm2Home, DISPLAY: ':99' }, maxBuffer: 8 * 1024 * 1024 },
+    )
+  ).stdout;
+let managed;
+let unrelated;
+async function processIdentity(pid) {
+  try {
+    const stat = await fs.readFile(`/proc/${pid}/stat`, 'utf8');
+    const fields = stat
+      .slice(stat.lastIndexOf(')') + 2)
+      .trim()
+      .split(/\s+/);
+    return { pid, ppid: Number(fields[1]), state: fields[0], start: fields[19] };
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+async function sameLive(identity) {
+  const current = await processIdentity(identity.pid);
+  return current?.start === identity.start && current.state !== 'Z';
+}
 const args = [
   '--no-sandbox',
   '--disable-dev-shm-usage',
@@ -96,7 +130,7 @@ async function until(predicate, ms = 15000) {
   } while (Date.now() < limit);
   throw Error('QA_CONDITION_TIMEOUT');
 }
-async function launch(extra, privatePolicy) {
+async function launch(extra, privatePolicy, usePm2 = false) {
   // QA-only characterization, not an installed privileged launcher. The
   // container's parent policy remains untouched; exec keeps a single exact PID.
   const command = privatePolicy ? '/usr/bin/unshare' : exe;
@@ -115,12 +149,35 @@ async function launch(extra, privatePolicy) {
         ...extra,
       ]
     : [...args, ...extra];
-  browser = spawn(command, argv, {
-    env: { ...process.env, DISPLAY: ':99' },
-    stdio: ['ignore', 'ignore', 'pipe'],
-  });
+  if (usePm2) {
+    await pm2(
+      'start',
+      command,
+      '--name',
+      'qa-browser',
+      '--interpreter',
+      'none',
+      '--kill-timeout',
+      '1600',
+      ...(privatePolicy ? ['--no-autorestart'] : []),
+      '--',
+      ...argv,
+    );
+    const matches = JSON.parse(await pm2('jlist')).filter((r) => r.name === 'qa-browser');
+    assert.equal(matches.length, 1);
+    assert.equal(matches[0].pm2_env.status, 'online');
+    assert.equal(matches[0].pm2_env.autorestart, !privatePolicy);
+    managed = { pmId: matches[0].pm_id, identity: await processIdentity(matches[0].pid) };
+    assert.ok(managed.identity);
+    browser = { pid: managed.identity.pid, exitCode: null };
+  } else {
+    browser = spawn(command, argv, {
+      env: { ...process.env, DISPLAY: ':99' },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+  }
   let errors = '';
-  browser.stderr.on('data', (b) => {
+  browser.stderr?.on('data', (b) => {
     errors = (errors + b.toString()).slice(-8192);
   });
   let endpoint;
@@ -165,9 +222,52 @@ function cdp(method, params = {}) {
   });
 }
 async function close() {
-  const done = once(browser, 'exit');
-  await cdp('Browser.close');
-  await done;
+  if (managed) {
+    // Observe the real owned profile processes as well as descendants: a
+    // reparented crash handler must not evade the post-stop assertion.
+    const observed = [];
+    for (const name of (await fs.readdir('/proc')).filter((n) => /^[0-9]+$/.test(n))) {
+      const pid = Number(name);
+      let argv;
+      try {
+        argv = await fs.readFile(`/proc/${pid}/cmdline`, 'utf8');
+      } catch (error) {
+        if (error.code === 'ENOENT' || error.code === 'ESRCH') continue;
+        throw error;
+      }
+      if (pid === managed.identity.pid || argv.includes(profile)) {
+        const identity = await processIdentity(pid);
+        if (identity && identity.state !== 'Z') observed.push(identity);
+      }
+    }
+    assert.ok(observed.length > 1, 'real browser children were observed');
+    assert.equal(await sameLive(managed.identity), true);
+    await pm2('stop', String(managed.pmId)); // Exactly one numeric stop, no retry.
+    await until(async () => (await Promise.all(observed.map(sameLive))).every((live) => !live));
+    const rows = JSON.parse(await pm2('jlist'));
+    const stopped = rows.find((r) => r.pm_id === managed.pmId);
+    assert.equal(stopped.pm2_env.status, 'stopped');
+    assert.equal(stopped.pid, 0);
+    assert.equal(await sameLive(unrelated), true);
+    assert.equal(xvfb.exitCode, null);
+    process.kill(xvfb.pid, 0);
+    physicalStops++;
+    console.log(
+      JSON.stringify({
+        physicalPm2Stop: physicalStops,
+        observedProcesses: observed.length,
+        oldProcessesLive: false,
+        unrelatedAndDisplayPreserved: true,
+      }),
+    );
+    await pm2('delete', String(managed.pmId));
+    managed = undefined;
+    browser.exitCode = 0;
+  } else {
+    const done = once(browser, 'exit');
+    await cdp('Browser.close');
+    await done;
+  }
   socket.close();
   await until(async () => {
     try {
@@ -179,6 +279,28 @@ async function close() {
   });
 }
 try {
+  if (scopedPm2) {
+    assert.equal(
+      JSON.parse(await fs.readFile('/opt/node22/lib/node_modules/pm2/package.json', 'utf8'))
+        .version,
+      '6.0.14',
+    );
+    // Dedicated QA daemon, never the host/shared PM2. Keep an unrelated app
+    // alive through each exact browser stop and recovery.
+    await pm2(
+      'start',
+      '/usr/bin/sleep',
+      '--name',
+      'qa-unrelated',
+      '--interpreter',
+      'none',
+      '--',
+      '600',
+    );
+    const row = JSON.parse(await pm2('jlist')).find((r) => r.name === 'qa-unrelated');
+    unrelated = await processIdentity(row.pid);
+    assert.ok(unrelated);
+  }
   await until(async () =>
     fs.access('/tmp/.X11-unix/X99').then(
       () => true,
@@ -223,7 +345,7 @@ try {
   // A target can be restored without an observed HTTP request. Prove this
   // control through the real old target, not an assumed network reload.
   const primed = visits;
-  await launch(['about:blank']);
+  await launch(['about:blank'], undefined, scopedPm2);
   let restored;
   await until(async () => {
     restored = (await cdp('Target.getTargets')).targetInfos.find(
@@ -267,7 +389,11 @@ try {
       flag: 'wx',
     });
   }
-  await launch(appBlank ? ['--app=about:blank'] : ['--no-startup-window'], privatePolicy);
+  await launch(
+    appBlank ? ['--app=about:blank'] : ['--no-startup-window'],
+    privatePolicy,
+    scopedPm2,
+  );
   await sleep(2000);
   const initial = await cdp('Target.getTargets');
   assert.equal(
@@ -372,6 +498,7 @@ try {
     assert.equal(xvfb.exitCode, null, 'the separate display remains running');
     process.kill(xvfb.pid, 0);
   }
+  if (scopedPm2) assert.equal(physicalStops, 2, 'both reviewed PM2 lifetimes actually stopped');
   console.log(
     scopedPolicy
       ? 'BROWSER_SCOPED_POLICY_PASS: original policy outside namespace unchanged; private read-only policy, browser capabilities zero; same synthetic profile/persistent cookie, old-target positive control, no old URL on blank; session interruption accepted. NOT production or arbitrary background replay proof.'
@@ -379,7 +506,8 @@ try {
   );
 } finally {
   // Only disposable processes this test itself spawned; the container is --rm.
-  if (browser?.exitCode === null) browser.kill('SIGKILL');
+  if (browser?.exitCode === null) browser.kill?.('SIGKILL');
+  if (pm2Home) await pm2('kill'); // Only the disposable fixture's private daemon.
   socket?.close();
   xvfb.kill('SIGTERM');
   server.close();

@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 同轮续跑：真实PM2停止→限定策略恢复闭环通过
+
+在`e6682f35`后继续原夹具的`--scoped-pm2`模式，未止于下方CDP clean-close证据。21620先因没有实际PM2停止而退出1；随后接真实PM2 6.0.14的全新私有PM2_HOME，旧浏览器autorestart=true，恢复实例autorestart=false（明确的新QA恢复配置，不声称生产配置已批准或安装）。每次仅调用一个数字ID的stop一次，读取PM2 stopped/pid0及真实`/proc` PID/start/state；观测包含带合成profile参数的重归属crash handler，不能只看根进程或PM2状态。
+
+实际物理运行8020退出0、无跳过：旧实例和恢复实例各观测9个进程，停止后原身份均不再存活；同一个无关sleep和独立Xvfb保持存活。原启动确实恢复旧target的正对照成立，PM2停止后私有只读策略恢复不出现旧target，新增页面全blank，旧HTTP动作增量0。原profile哨兵、持久cookie、用户启动偏好和父namespace策略均保留，session-cookie中断仍按原批准接受。浏览器实际能力集全部零、NoNewPrivs=1。不能据此声称发生过超时SIGKILL、任意后台副作用均已隔离、生产VNC/共享显示/journal已联合验收。
+
+日志`/private/tmp/holaday-browser-pm2-recovery-{red,green,ops}-20260930.log`。原ops63072退出0：Node120/60/16/951和Python12，零跳过；最终源码仅在物理运行后补两行说明注释。实际运行仍是原无网络QA镜像、私有PID、1CPU/768MiB/256pids、只读公开包和夹具，SYS_ADMIN仅供容器内unshare/mount，浏览器执行前清空；没有宿主PID、生产凭据或宿主可写挂载。0614a4只读核对精确QA label已空，原MySQL/Redis健康；没有新数据库/卷或活动测试。2fd4fd仅为容器启动可用性检查，不列为功能验收。
+
+**下一步：** 将真实停止/恢复配置、原源码与限定策略/工具摘要接入原受保护清单和journal；恢复禁用autorestart的差异必须显式绑定，不能复用会删除profile及操作共享对象的旧启动脚本。历史headed树包含Xvfb，先用新鲜显示归属证明核对整个批准组，不能仅凭祖先关系扩大停止范围。原独立facts、真实停写备份/Mac恢复、非PayPal恢复和完整审查仍未完成；生产CLI关闭，无生产变更/push/PR/合并/部署，自动化不变。
+
 ### 2026-09-30 JST（09-29 17:14Z）：限定浏览器策略的真实隔离恢复路径已验证
 
 从`9a6f2d8e`继续，只扩展原`browser-cloud-recovery-probe-linux.mjs`的`--scoped-policy`模式，保留原silent/app/global-policy失败模式。新模式按已批准的云端会话中断边界验证，不再使用关闭Brave会话cookie清理的隐私特性开关；不把全部登录状态保留当硬门槛。没有重新运行已通过的完整数据库切换链、安装通道、生成密钥、访问商户或读取真实profile。
