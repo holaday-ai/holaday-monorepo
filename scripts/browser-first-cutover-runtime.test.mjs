@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { cutoverRegistrationConfigDigest } from './browser-cutover-evidence.mjs';
 import {
   captureLegacyRuntime,
   createLegacyProducerEffects,
@@ -13,6 +15,218 @@ import {
 } from './browser-first-cutover-runtime.mjs';
 import * as firstRuntime from './browser-first-cutover-runtime.mjs';
 import { retireMaintenanceRuntime } from './browser-maintenance-runtime.mjs';
+
+function cloudRestartFixture() {
+  const f = cloudRecoveryObservationFixture();
+  const manager = structuredClone(f.manager);
+  manager.pid = 0;
+  Object.assign(manager.pm2_env, {
+    pm_id: 7,
+    status: 'stopped',
+    pm_exec_path: '/opt/holaday-headed/start.sh',
+    args: [],
+    exec_mode: 'fork_mode',
+    autorestart: true,
+    restart_time: 12,
+  });
+  const launchDigest = createHash('sha256')
+    .update(
+      JSON.stringify(
+        firstRuntime.firstCutoverCloudBrowserRecoveryLaunch({ attempt: f.input.attempt }),
+      ),
+    )
+    .digest('hex');
+  const scope = [
+    { name: 'holaday-vnc', pmId: 6, scopeDigest: 'a'.repeat(64), recoveryDigest: 'b'.repeat(64) },
+    { name: manager.name, pmId: 7, scopeDigest: 'c'.repeat(64), recoveryDigest: launchDigest },
+  ];
+  const binding = {
+    attempt: f.input.attempt,
+    candidate: 'a'.repeat(40),
+    configDigest: 'b'.repeat(64),
+    migrationDigest: 'c'.repeat(64),
+    inventoryDigest: 'd'.repeat(64),
+  };
+  const record = {
+    ...binding,
+    phase: 'verified',
+    executionSiteDigest: 'e'.repeat(64),
+    cloudMaintenanceScope: scope,
+    cloudMaintenanceEvents: scope.flatMap((entry) =>
+      ['cloud-stop-intent', 'cloud-stopped'].map((phase) => ({
+        ...entry,
+        attempt: binding.attempt,
+        inventoryDigest: binding.inventoryDigest,
+        host: 'vultr',
+        phase,
+      })),
+    ),
+  };
+  const input = {
+    ...f.input,
+    stoppedConfigDigest: cutoverRegistrationConfigDigest(manager.pm2_env),
+    maintenanceEndsAtMs: 8000,
+  };
+  const calls = [];
+  let now = 1000;
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    now: () => now,
+    journal: {
+      assertOwnership: async () => structuredClone(binding),
+      readFirstCutoverEffects: async () => structuredClone(record),
+      recordCloudMaintenanceEvent: async (event) => {
+        assert.equal(record.cloudMaintenanceEvents.length, 4);
+        assert.equal(event.phase, 'cloud-restore-intent');
+        record.cloudMaintenanceEvents.push(structuredClone(event));
+      },
+    },
+    assertRecoveryScope: async (actual) => {
+      assert.deepEqual(actual, input);
+    },
+    rpc: async (method, args, beforeSend) => {
+      if (method === 'getMonitorData') return structuredClone([manager]);
+      if (beforeSend) await beforeSend();
+      calls.push({ method, args });
+      assert.equal(record.cloudMaintenanceEvents.length, 5, 'durable intent precedes RPC');
+      assert.equal(method, 'restartProcessId');
+      assert.equal(args.id, 7);
+      assert.equal(args.env.current_conf.pm_exec_path, '/usr/bin/unshare');
+      assert.equal(args.env.current_conf.autorestart, false);
+      assert.equal(args.env.current_conf.max_memory_restart, 0);
+      assert.equal(args.env.current_conf.watch, false);
+      assert.equal(args.env.current_conf.cron_restart, '');
+      return {};
+    },
+  };
+  return {
+    input,
+    io,
+    record,
+    manager,
+    binding,
+    calls,
+    setTime: (v) => {
+      now = v;
+    },
+  };
+}
+
+test('cloud browser same-ID restore records one original-journal intent before fixed RPC and never retries it', async () => {
+  const f = cloudRestartFixture();
+  assert.equal(typeof firstRuntime.restoreFirstCutoverCloudBrowser, 'function');
+  await firstRuntime.restoreFirstCutoverCloudBrowser(f.input, f.io);
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.record.cloudMaintenanceEvents.length, 5, 'RPC ACK is not physical recovery proof');
+  await assert.rejects(firstRuntime.restoreFirstCutoverCloudBrowser(f.input, f.io), /UNPROVEN/);
+  assert.equal(f.calls.length, 1);
+});
+
+test('cloud browser same-ID restore rejects missing scope, drift, partial stops and deadline before dispatch', async () => {
+  assert.equal(typeof firstRuntime.restoreFirstCutoverCloudBrowser, 'function');
+  for (const fault of [
+    (f) => {
+      f.io.assertRecoveryScope = undefined;
+    },
+    (f) => {
+      f.io.assertRecoveryScope = async () => false;
+    },
+    (f) => {
+      f.io.assertRecoveryScope = async () => {
+        throw Error('unknown writer');
+      };
+    },
+    (f) => {
+      f.manager.pid = 40;
+      f.manager.pm2_env.status = 'online';
+    },
+    (f) => {
+      f.manager.pm2_env.args = ['old-action'];
+    },
+    (f) => {
+      f.record.cloudMaintenanceEvents.pop();
+    },
+    (f) => {
+      f.record.phase = 'candidate_started';
+    },
+    (f) => {
+      f.record.maintenanceEndsAtMs = 7000;
+    },
+    (f) => {
+      f.record.failureObservation = {};
+    },
+    (f) => {
+      f.binding.attempt = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    },
+    (f) => {
+      f.record.cloudMaintenanceScope[1].recoveryDigest = '0'.repeat(64);
+    },
+    (f) => {
+      f.setTime(8000);
+    },
+    (f) => {
+      f.input.command = '/bin/sh';
+    },
+    (f) => {
+      f.io.uid = 998;
+    },
+  ]) {
+    const f = cloudRestartFixture();
+    fault(f);
+    await assert.rejects(firstRuntime.restoreFirstCutoverCloudBrowser(f.input, f.io), /UNPROVEN/);
+    assert.equal(f.calls.length, 0);
+  }
+});
+
+test('cloud browser same-ID restore rechecks live scope after connection delay before sending', async () => {
+  const f = cloudRestartFixture();
+  const rpc = f.io.rpc;
+  f.io.rpc = async (method, args, beforeSend) => {
+    if (method === 'restartProcessId') f.setTime(8000);
+    return rpc(method, args, beforeSend);
+  };
+  await assert.rejects(
+    firstRuntime.restoreFirstCutoverCloudBrowser(f.input, f.io),
+    /UNPROVEN|UNCERTAIN/,
+  );
+  assert.equal(f.calls.length, 0, 'deadline expired while connecting, do not send the write');
+  assert.equal(f.record.cloudMaintenanceEvents.length, 5);
+});
+
+test('cloud browser same-ID restore keeps uncertain intent and refuses late drift without retry', async () => {
+  assert.equal(typeof firstRuntime.restoreFirstCutoverCloudBrowser, 'function');
+  for (const kind of ['lost-ack', 'expired', 'drift', 'scope']) {
+    const f = cloudRestartFixture();
+    if (kind === 'scope')
+      f.io.assertRecoveryScope = async () => {
+        if (f.record.cloudMaintenanceEvents.length === 5) throw Error('unproven');
+      };
+    if (kind === 'lost-ack') {
+      const rpc = f.io.rpc;
+      f.io.rpc = async (...args) => {
+        const result = await rpc(...args);
+        if (args[0] === 'restartProcessId') throw Error('secret raw error');
+        return result;
+      };
+    } else {
+      const record = f.io.journal.recordCloudMaintenanceEvent;
+      f.io.journal.recordCloudMaintenanceEvent = async (event) => {
+        await record(event);
+        if (kind === 'expired') f.setTime(8000);
+        if (kind === 'drift') f.manager.pm2_env.args.push('unsafe');
+      };
+    }
+    await assert.rejects(
+      firstRuntime.restoreFirstCutoverCloudBrowser(f.input, f.io),
+      kind === 'lost-ack' ? /^Error: CUTOVER_CLOUD_RESTORE_UNCERTAIN$/ : /UNPROVEN/,
+    );
+    assert.equal(f.record.cloudMaintenanceEvents.length, 5);
+    assert.equal(f.calls.length, kind === 'lost-ack' ? 1 : 0);
+    await assert.rejects(firstRuntime.restoreFirstCutoverCloudBrowser(f.input, f.io), /UNPROVEN/);
+    assert.equal(f.calls.length, kind === 'lost-ack' ? 1 : 0);
+  }
+});
 
 const digest = 'a'.repeat(64);
 function cloudRecoveryObservationFixture() {

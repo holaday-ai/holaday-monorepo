@@ -2,6 +2,14 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 JST（09-29 23:19Z）：同ID单次恢复效果，不是完整恢复通过
+
+原runtime的固定恢复效果要求原verified日志/四条停止记录、受保护恢复摘要、停后完整PM2配置及强制实时范围回调；第五条意图落盘后才发送单次数字ID RPC。连接后复核期限，不排队、不重连、不自动重试、不delete/start另建注册；RPC ACK不生成恢复确认。真实site范围回调及完整新树/VNC接线未完成，原inventory和CLI继续拒绝，不能把QA合成范围当生产事实。
+
+最终`8133`：原隔离Brave夹具的成功/无SYS_ADMIN拒绝模式串行退出0。原真实journal、默认产品RPC与独立运行态读取验证同一PM2 ID/历史计数/cwd保留、旧target/HTTP不重放、profile哨兵/持久cookie/无关应用/显示保留。拒绝模式实际unshare退出1且不重试，只保留恢复意图；不是恢复成功。夹具VNC/备份/候选事实合成，未生产操作或数据库恢复。日志`/private/tmp/holaday-cloud-same-id-{final,denied}-20260930.log`。
+
+最终`2360`：Linux480/480，原ops Node120/60/16/1000、Python12，全部退出0/零跳过，日志`/private/tmp/holaday-cloud-same-id-{linux,ops}-20260930.log`。四项定向测试覆盖丢应答不重试、窗口/配置/阶段/范围拒绝、连接期间超时不得发送，实际RED219c4e/a639d1/13d8ef后通过；中途scope夹具闭包及Biome noDelete错误均有记录，不计作产品通过。三文件Biome及diff-check通过；978bff确认原QA镜像未变、无QA遗留、原MySQL/Redis健康。未整分支独立审查/PR/push/合并/部署，PayPal未访问。
+
 ## 2026-09-30 JST（09-29 22:19Z）：恢复运行态与原开放前门禁
 
 最终物理读取采用**不自动启动daemon的现有socket RPC**，而非会自动daemonize的pm2 jlist。a8fd5c禁止CLI反例退出1后改正。41984退出0，日志`/private/tmp/holaday-cloud-recovery-readonly-rpc-physical-20260930.log`；仅私有socket路径为QA选择，默认产品RPC/procfs/策略读取全部实际执行。新增缺失daemon目录保持空反例，无PM2文件创建，实际可写策略拒绝和正常恢复观察均通过。前述jlist物理结果仅历史。最终93405：Linux476/476、ops Node120/60/16/1000及Python12均退出0、零跳过，日志`/private/tmp/holaday-cloud-recovery-rpc-final-{linux,ops}-20260930.log`；五文件Biome/diff-check通过，原MySQL/Redis健康、无QA遗留。未完成全分支审查或整项上线验收，未访问PayPal服务。

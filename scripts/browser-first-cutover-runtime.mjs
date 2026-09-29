@@ -7,10 +7,224 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import {
   cutoverLegacyInterruptionRisk,
+  cutoverRegistrationConfigDigest,
   validateLegacyWorkBoundary as validateWork,
 } from './browser-cutover-evidence.mjs';
 
 const hash = (x) => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
+
+// Internal transport only. Do not construct the PM2 Client/API (it autostarts
+// a missing daemon). Never queue a request or reconnect and replay a write.
+async function cloudPm2Rpc(method, payload, io, beforeSend) {
+  if (!['getMonitorData', 'restartProcessId'].includes(method)) fail();
+  const before = await io.lstat(io.rpcSocket);
+  if (before.uid !== 0 || (before.mode & 0o170000) !== 0o140000) fail();
+  const require = createRequire('/opt/node22/lib/node_modules/pm2/package.json');
+  const socket = require('pm2-axon').socket('req');
+  socket.set('retry timeout', 0);
+  socket.set('hwm', 0);
+  const client = new (require('pm2-axon-rpc').Client)(socket);
+  const result = await new Promise((resolve, reject) => {
+    let finished = false;
+    const done = (error, value) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      socket.close();
+      if (error) reject(error);
+      else resolve(value);
+    };
+    // This bounds only the transport. It neither kills the remote process nor
+    // means a write did not happen; the durable intent remains unresolved.
+    const timer = setTimeout(() => done(new Error('rpc unavailable')), 5000);
+    socket.once('error', (error) => done(error));
+    socket.once('close', () => done(new Error('rpc closed')));
+    socket.once('drop', () => done(new Error('rpc not connected')));
+    socket.once('connect', async () => {
+      if (finished) return;
+      try {
+        await beforeSend?.();
+        if (!finished) client.call(method, payload, done);
+      } catch (error) {
+        done(error);
+      }
+    });
+    try {
+      socket.connect(io.rpcSocket);
+    } catch (error) {
+      done(error);
+    }
+  });
+  const after = await io.lstat(io.rpcSocket);
+  if (
+    before.dev !== after.dev ||
+    before.ino !== after.ino ||
+    after.uid !== 0 ||
+    (after.mode & 0o170000) !== 0o140000
+  )
+    fail();
+  return result;
+}
+
+/** One stopped registration's fixed restore EFFECT, not recovery acceptance.
+ * The original site must supply its live, exclusive scope guard: original tree
+ * absent, reviewed stopped config, unchanged daemon/tools, protected policies,
+ * display ownership and settled work/fences. There is deliberately no default
+ * guard and no CLI entrypoint. A successful RPC is NOT a cloud-restored event;
+ * the original observer must independently validate the complete new tree.
+ */
+export async function restoreFirstCutoverCloudBrowser(input, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    rpcSocket: '/root/.pm2/rpc.sock',
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+  };
+  let dispatched = false;
+  try {
+    const approved = structuredClone(input);
+    const { attempt, pmId, stoppedConfigDigest, maintenanceEndsAtMs } = approved;
+    const launch = firstCutoverCloudBrowserRecoveryLaunch({ attempt });
+    if (
+      Object.keys(approved).sort().join(',') !==
+        'attempt,maintenanceEndsAtMs,pmId,stoppedConfigDigest' ||
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      !Number.isSafeInteger(pmId) ||
+      pmId < 0 ||
+      !hash(stoppedConfigDigest) ||
+      !Number.isSafeInteger(maintenanceEndsAtMs) ||
+      typeof io.assertRecoveryScope !== 'function'
+    )
+      reject();
+    const launchDigest = createHash('sha256').update(JSON.stringify(launch)).digest('hex');
+    let last = io.now();
+    const clock = () => {
+      const now = io.now();
+      if (
+        !Number.isSafeInteger(last) ||
+        last < 0 ||
+        !Number.isSafeInteger(now) ||
+        now < last ||
+        maintenanceEndsAtMs - now <= 0 ||
+        maintenanceEndsAtMs - now > 900000
+      )
+        reject();
+      last = now;
+    };
+    const binding = structuredClone(await io.journal.assertOwnership());
+    if (binding.attempt !== attempt) reject();
+    const state = async (count) => {
+      clock();
+      if (!isDeepStrictEqual(await io.journal.assertOwnership(), binding)) reject();
+      const record = await io.journal.readFirstCutoverEffects();
+      const scope = record.cloudMaintenanceScope;
+      if (
+        !Object.entries(binding).every(([k, v]) => record[k] === v) ||
+        record.phase !== 'verified' ||
+        record.failureObservation ||
+        !hash(record.executionSiteDigest) ||
+        (record.maintenanceEndsAtMs !== undefined &&
+          record.maintenanceEndsAtMs !== maintenanceEndsAtMs) ||
+        !Array.isArray(scope) ||
+        scope.length !== 2 ||
+        scope[0].name !== 'holaday-vnc' ||
+        scope[1].name !== 'holaday-chromium-headed' ||
+        scope[1].pmId !== pmId ||
+        scope[0].pmId === pmId ||
+        scope[1].recoveryDigest !== launchDigest ||
+        scope.some((s) => !hash(s.scopeDigest) || !hash(s.recoveryDigest)) ||
+        record.cloudMaintenanceEvents?.length !== count
+      )
+        reject();
+      const base = (s) => ({
+        ...s,
+        attempt,
+        inventoryDigest: binding.inventoryDigest,
+        host: 'vultr',
+      });
+      const expected = scope.flatMap((s) =>
+        ['cloud-stop-intent', 'cloud-stopped'].map((phase) => ({ ...base(s), phase })),
+      );
+      if (count === 5) expected.push({ ...base(scope[1]), phase: 'cloud-restore-intent' });
+      if (!isDeepStrictEqual(record.cloudMaintenanceEvents, expected)) reject();
+      return structuredClone(record);
+    };
+    const rpc = io.rpc ?? ((method, args, beforeSend) => cloudPm2Rpc(method, args, io, beforeSend));
+    const stopped = async () => {
+      const rows = await rpc('getMonitorData', {});
+      if (!Array.isArray(rows)) reject();
+      const matches = rows.filter((r) => r.pm_id === pmId || r.name === 'holaday-chromium-headed');
+      const row = matches[0];
+      if (
+        matches.length !== 1 ||
+        row.pm_id !== pmId ||
+        row.name !== 'holaday-chromium-headed' ||
+        row.pid !== 0 ||
+        row.pm2_env?.pm_id !== pmId ||
+        row.pm2_env.name !== row.name ||
+        row.pm2_env.status !== 'stopped' ||
+        row.pm2_env.watch !== false ||
+        row.pm2_env.exec_mode !== 'fork_mode' ||
+        !Number.isSafeInteger(row.pm2_env.restart_time) ||
+        row.pm2_env.restart_time < 0 ||
+        cutoverRegistrationConfigDigest(row.pm2_env) !== stoppedConfigDigest
+      )
+        reject();
+    };
+    const guard = async (count) => {
+      const before = await state(count);
+      // Only a trusted local controller, not uploaded facts or booleans.
+      if ((await io.assertRecoveryScope(structuredClone(approved))) !== undefined) reject();
+      await stopped();
+      if (!isDeepStrictEqual(before, await state(count))) reject();
+      return before;
+    };
+    const before = await guard(4);
+    await io.journal.recordCloudMaintenanceEvent({
+      ...before.cloudMaintenanceScope[1],
+      attempt,
+      inventoryDigest: binding.inventoryDigest,
+      host: 'vultr',
+      phase: 'cloud-restore-intent',
+    });
+    await guard(5);
+    // No delete/recreate, name-wide restart, inherited startup script, fallback,
+    // retry, PM2 save or restart-counter reset. The stopped registration keeps
+    // its ID and existing environment; reviewed launch fields change explicitly.
+    dispatched = true;
+    await rpc(
+      'restartProcessId',
+      {
+        id: pmId,
+        env: {
+          DISPLAY: ':98',
+          current_conf: {
+            pm_exec_path: launch.command,
+            args: launch.args,
+            exec_interpreter: 'none',
+            exec_mode: 'fork_mode',
+            autorestart: false,
+            watch: false,
+            cron_restart: '',
+            max_memory_restart: 0,
+            DISPLAY: ':98',
+          },
+        },
+      },
+      () => guard(5),
+    );
+    await state(5);
+  } catch {
+    if (dispatched) throw new Error('CUTOVER_CLOUD_RESTORE_UNCERTAIN');
+    reject();
+  }
+}
 /** Fixed recovery MATERIAL, not permission to start a process. The site binds
  * its digest in the existing journal; execution still needs fresh exclusive
  * ownership, tool/policy bytes, stop and recovery facts. No caller argv, URL,

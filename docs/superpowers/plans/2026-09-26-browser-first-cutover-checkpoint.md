@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 JST（09-29 23:19Z heartbeat）：同一 PM2 注册的单次恢复效果已真实验证
+
+从`0ed5045f`继续原Task4。原runtime新增`restoreFirstCutoverCloudBrowser`，只接受固定headed服务的数字ID、attempt、已审阅停后配置摘要及维护截止；要求原owned journal处于verified、原双服务四条停止记录完整、恢复材料摘要匹配、无失败记录，以及**必须由原site提供的实时排他范围检查**。先在原journal写第五条恢复意图，再通过已有socket向PM2发送一次固定`restartProcessId`。不删除/重建注册、不执行旧启动脚本、不重置历史计数、不save/全局操作；明确关闭自动重启、watch、cron和内存阈值重启。没有默认范围检查，布尔“通过”不被接受。
+
+原镜像PM2/axon源码只读检查`5f09ef/715f57`确认配置合并与默认队列/重连机制；新写入运输明确关闭队列和重连，5秒限制只关闭运输、不杀远端进程。连接建立后、真正发送前再次核对原日志、停后完整配置、现场范围和截止；丢应答/超时/连接变化均保留未决意图，不自动重试。**RPC返回不写cloud-restored确认，不证明完整新进程树或VNC恢复。** 原inventory仍拒绝>4事件、CLI仍关闭，实际site的工具/策略/显示/并发配置写入者排除及observer接线仍未完成。
+
+RED`219c4e`退出1（缺实现），`a639d1`退出1（布尔范围检查、连接期间超期反例），`13d8ef`退出1（批准窗口不匹配），最终`16f1b1`四项定向测试通过/零跳过。中间`635cb6`的scope反例错误替换已复制回调，改成原回调读取状态；未放宽产品门禁。Biome`235cec`因noDelete退出1，显式改为undefined后检查通过。
+
+最终物理`8133`串行成功与权限拒绝均退出0：沿原Brave夹具改为**保留原注册→原真实journal→产品默认RPC恢复同ID→原独立运行态读取**，不再delete/start另建注册。核对真实PM2 ID、历史重启计数及cwd保留、旧进程退出、私有只读策略/能力清零、旧target和HTTP动作不重放，合成profile/持久cookie/哨兵/无关进程及显示保留。无SYS_ADMIN模式实际unshare退出1、无自动重试/直接启动回退，日志只留第五条意图。日志`/private/tmp/holaday-cloud-same-id-{final,denied}-20260930.log`；较早`31270`为发送前复核补强前的历史成功。VNC、备份和候选事实在此夹具中明确合成，不能记作整项发布或真实数据库恢复证据。
+
+最终`2360`串行Linux五模块**480/480**及原ops Node**120/60/16/1000**、Python**12**全部退出0、零跳过；日志`/private/tmp/holaday-cloud-same-id-{linux,ops}-20260930.log`。`978bff`确认原镜像完整摘要未变、只剩原健康MySQL/Redis，无QA遗留；所有测试已结束。本轮只做定向自查，未整分支独立审查。未生产SSH/停机/恢复、未修改支付/数据库/密钥/生产profile，未push/PR/合并/部署，原缓存/BASE/自动化不变。
+
+下一步：在**原site/observer**接入这个已验证的单次恢复效果及真实范围检查，完成恢复后的完整新树/管理器配置/历史计数与原基线核对，再按原顺序恢复VNC；不能用事件数量或本夹具的合成范围检查放行。接着仍须原独立业务facts、真实停写备份/Mac隔离恢复、非PayPal恢复、完整成功/故障/不重放演练、整分支审查及新鲜窗口。不要重做同ID RPC/Brave探索、通道、商户或密钥；大项尚未完成。
+
 ### 2026-09-30 JST（09-29 22:19Z heartbeat）：恢复运行态独立读取接入原开放前检查
 
 从`0b9d9d9a`继续原Task4。在原runtime增加只读`readFirstCutoverCloudBrowserRecovery`，只选受保护声明的数字PM2 ID及固定headed名称，核对既有固定恢复命令、真实/proc执行文件/完整参数/UID/DISPLAY/start/boot、五组能力全部为零、NoNewPrivs、不同且不传播的挂载命名空间、策略只读挂载、挂载前后策略inode/权限/字节、原父策略不变及精确RestoreOnStartup=5。两轮现场读取及PM2前后核对拒绝竞态；输出只含身份和摘要，不输出环境或策略正文。

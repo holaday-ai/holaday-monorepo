@@ -15,15 +15,19 @@
 // failed recovery stays failed, with no PM2 restart or direct-browser fallback.
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import * as fs from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
+import { cutoverRegistrationConfigDigest } from '../browser-cutover-evidence.mjs';
 import {
   firstCutoverCloudBrowserRecoveryLaunch,
   readFirstCutoverCloudBrowserRecovery,
+  restoreFirstCutoverCloudBrowser,
 } from '../browser-first-cutover-runtime.mjs';
+import { acquireReleaseJournal } from '../browser-maintenance-journal.mjs';
 await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
 assert.ok(
@@ -127,7 +131,109 @@ const pm2 = async (...argv) =>
     )
   ).stdout;
 let managed;
+let stoppedManager;
+let restoreJournal;
 let unrelated;
+const sha = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+async function restoreSameRegistration(recovery) {
+  assert.ok(stoppedManager);
+  assert.equal(stoppedManager.pid, 0);
+  const candidate = 'a'.repeat(40);
+  const manifest = {
+    replaysNumberedSql: true,
+    runnerSha256: 'b'.repeat(64),
+    migrations: [{ name: '0042_qa.sql', sha256: 'c'.repeat(64) }],
+  };
+  const directory = await fs.mkdtemp('/tmp/holaday-cloud-restore-journal-');
+  await fs.chmod(directory, 0o700);
+  restoreJournal = await acquireReleaseJournal(directory, {
+    kind: 'first-cutover',
+    attempt,
+    candidate,
+    configDigest: 'd'.repeat(64),
+    migrationDigest: sha(manifest),
+    inventoryDigest: 'e'.repeat(64),
+    legacyDigest: 'f'.repeat(64),
+  });
+  await restoreJournal.bindManifest(manifest);
+  // VNC/backup/candidate facts are synthetic in THIS focused physical test.
+  // No production assertion, database restore, VNC restoration or release gate.
+  const scope = [
+    {
+      name: 'holaday-vnc',
+      pmId: stoppedManager.pm_id + 100,
+      scopeDigest: '1'.repeat(64),
+      recoveryDigest: '2'.repeat(64),
+    },
+    {
+      name: stoppedManager.name,
+      pmId: stoppedManager.pm_id,
+      scopeDigest: sha(retiredIdentities),
+      recoveryDigest: sha(recovery),
+    },
+  ];
+  await restoreJournal.bindExecutionSite('3'.repeat(64), scope);
+  for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
+    await restoreJournal.persist(phase, { candidate });
+  const binding = await restoreJournal.assertOwnership();
+  for (const s of scope)
+    for (const phase of ['cloud-stop-intent', 'cloud-stopped'])
+      await restoreJournal.recordCloudMaintenanceEvent({
+        ...s,
+        attempt,
+        inventoryDigest: binding.inventoryDigest,
+        host: 'vultr',
+        phase,
+      });
+  for (const phase of ['all_fenced', 'stopped', 'backup_verified'])
+    await restoreJournal.persist(phase, { candidate });
+  await restoreJournal.bindBackupReceipt({
+    ...binding,
+    backupDigest: '1'.repeat(64),
+    databaseIdentityDigest: '2'.repeat(64),
+    isolatedTargetDigest: '3'.repeat(64),
+    encryptionProfileDigest: '4'.repeat(64),
+    comparisonDigest: '5'.repeat(64),
+    schemaDigest: '6'.repeat(64),
+    businessDigest: '7'.repeat(64),
+    restoredAtMs: Date.now(),
+  });
+  await restoreJournal.persist('migration_started', { candidate });
+  await restoreJournal.bindBootstrapSeed('5'.repeat(32));
+  const identity = { candidate, bootId: '6'.repeat(32) };
+  for (const phase of ['candidate_started', 'verified'])
+    await restoreJournal.persist(phase, { candidate, identity });
+  const input = {
+    attempt,
+    pmId: stoppedManager.pm_id,
+    stoppedConfigDigest: cutoverRegistrationConfigDigest(stoppedManager.pm2_env),
+    maintenanceEndsAtMs: Date.now() + 60000,
+  };
+  const io = {
+    journal: restoreJournal,
+    rpcSocket: `${pm2Home}/rpc.sock`,
+    assertRecoveryScope: async (actual) => {
+      assert.deepEqual(actual, input);
+      assert.ok((await Promise.all(retiredIdentities.map(sameLive))).every((v) => !v));
+      assert.equal(await sameLive(unrelated), true);
+      assert.equal(xvfb.exitCode, null);
+      assert.equal(await fs.readFile(`${policyRoot}/existing.json`, 'utf8'), originalPolicy);
+      assert.deepEqual(
+        JSON.parse(
+          await fs.readFile(
+            `/var/lib/holaday-deploy/maintenance/${attempt}/cloud-browser-policy/recovery.json`,
+            'utf8',
+          ),
+        ),
+        { RestoreOnStartup: 5 },
+      );
+    },
+  };
+  await restoreFirstCutoverCloudBrowser(input, io);
+  assert.equal((await restoreJournal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 5);
+  await assert.rejects(restoreFirstCutoverCloudBrowser(input, io), /UNPROVEN/);
+  await assert.rejects(restoreJournal.persist('opened', { candidate, identity }), /UNPROVEN/);
+}
 async function processIdentity(pid) {
   try {
     const stat = await fs.readFile(`/proc/${pid}/stat`, 'utf8');
@@ -212,25 +318,32 @@ async function launch(extra, privatePolicy, usePm2 = false) {
   const command = recovery?.command ?? exe;
   const argv = recovery?.args ?? [...args, ...extra];
   if (usePm2) {
-    await pm2(
-      'start',
-      command,
-      '--name',
-      'holaday-chromium-headed',
-      '--interpreter',
-      'none',
-      '--kill-timeout',
-      '1600',
-      ...(recovery?.autorestart === false ? ['--no-autorestart'] : []),
-      '--',
-      ...argv,
-    );
+    if (recovery) await restoreSameRegistration(recovery);
+    else
+      await pm2(
+        'start',
+        command,
+        '--name',
+        'holaday-chromium-headed',
+        '--interpreter',
+        'none',
+        '--kill-timeout',
+        '1600',
+        ...(recovery?.autorestart === false ? ['--no-autorestart'] : []),
+        '--',
+        ...argv,
+      );
     const matches = JSON.parse(await pm2('jlist')).filter(
       (r) => r.name === 'holaday-chromium-headed',
     );
     assert.equal(matches.length, 1);
     assert.equal(matches[0].pm2_env.status, 'online');
     assert.equal(matches[0].pm2_env.autorestart, !privatePolicy);
+    if (recovery) {
+      assert.equal(matches[0].pm_id, stoppedManager.pm_id, 'same preserved numeric registration');
+      assert.equal(matches[0].pm2_env.restart_time, stoppedManager.pm2_env.restart_time);
+      assert.equal(matches[0].pm2_env.pm_cwd, stoppedManager.pm2_env.pm_cwd);
+    }
     managed = { pmId: matches[0].pm_id, identity: await processIdentity(matches[0].pid) };
     assert.ok(managed.identity);
     browser = { pid: managed.identity.pid, exitCode: null };
@@ -311,8 +424,7 @@ async function close() {
         unrelatedAndDisplayPreserved: true,
       }),
     );
-    await pm2('delete', String(managed.pmId));
-    managed = undefined;
+    stoppedManager = structuredClone(stopped);
     browser.exitCode = 0;
   } else {
     const done = once(browser, 'exit');
@@ -489,6 +601,7 @@ try {
     );
     assert.equal(observation.pid, browser.pid);
     assert.equal(observation.start, managed.identity.start);
+    assert.equal(observation.restartCount, stoppedManager.pm2_env.restart_time);
     assert.equal(observation.purpose, 'cloud-browser-runtime-observation');
     const policyFile = `${privatePolicy}/recovery.json`;
     const originalMode = (await fs.stat(policyFile)).mode & 0o777;
@@ -504,7 +617,7 @@ try {
       browser.pid,
     );
     console.log(
-      'CLOUD_RECOVERY_OBSERVATION_PASS: real PM2, procfs, private read-only policy and zero capabilities',
+      'CLOUD_SAME_ID_RESTORE_PASS: original journal intent, single default RPC, same numeric registration and restart count; independent procfs/private policy observation. No physical-recovery ACK or candidate open.',
     );
   }
   const initial = await cdp('Target.getTargets');
@@ -631,6 +744,8 @@ try {
     assert.equal(rows.length, 1);
     const row = rows[0];
     assert.equal(row.pid, 0);
+    assert.equal(row.pm_id, stoppedManager.pm_id);
+    assert.equal((await restoreJournal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 5);
     assert.ok(['stopped', 'errored'].includes(row.pm2_env.status));
     assert.equal(row.pm2_env.autorestart, false);
     assert.equal(row.pm2_env.restart_time, 0);
@@ -683,6 +798,7 @@ try {
   // Only disposable processes this test itself spawned; the container is --rm.
   if (browser?.exitCode === null) browser.kill?.('SIGKILL');
   if (pm2Home) await pm2('kill'); // Only the disposable fixture's private daemon.
+  await restoreJournal?.close();
   socket?.close();
   xvfb.kill('SIGTERM');
   server.close();
