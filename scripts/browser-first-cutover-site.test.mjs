@@ -496,8 +496,8 @@ test('site interruption refuses known work, source failure and new replay after 
   }
 });
 
-async function candidateFixture(t, customize = async () => {}) {
-  const f = await fixture(t);
+async function candidateFixture(t, customize = async () => {}, extraInventory = {}) {
+  const f = await fixture(t, extraInventory);
   const identity = { candidate: f.binding.candidate, bootId: '7'.repeat(32) };
   let mode = 'closed';
   const candidate = () => ({
@@ -568,6 +568,100 @@ async function candidateFixture(t, customize = async () => {}) {
     },
   };
 }
+
+test('readiness cannot omit its approved independent database writer source', async (t) => {
+  for (const stage of ['prepare', 'preopen']) {
+    for (const fault of [
+      'none',
+      'active',
+      'late-active',
+      'unavailable',
+      'writer-count',
+      'foreign',
+      'older',
+      'sockets',
+      'negative-sockets',
+      'internal',
+    ]) {
+      await t.test(`${stage}/${fault}`, async (t) => {
+        let reads = 0;
+        const f = await candidateFixture(
+          t,
+          async (f) => {
+            f.io.readAdministrativeWriters = async () => {
+              reads++;
+              if (fault === 'unavailable') throw Error('private unavailable source');
+              return {
+                schemaVersion: 1,
+                scope: 'mysql-server-observation-only',
+                startedAtMs: fault === 'older' ? 900 : 1000,
+                observedAtMs: 1000,
+                counts: {
+                  sessions: 1,
+                  transactions:
+                    fault === 'active' || (fault === 'late-active' && reads > 1) ? 1 : 0,
+                  enabledEvents: 0,
+                  replicationReceivers: 0,
+                  replicationAppliers: 0,
+                },
+                sourceDigest: '3'.repeat(64),
+                sessionAttribution: {
+                  scope: 'current-session-attribution-only',
+                  observedAtMs: 1000,
+                  sessions: 1,
+                  unattributed: 0,
+                  eventSchedulers: 1,
+                  processes: [],
+                  sourceDigest: '5'.repeat(64),
+                  unknownWritersZeroProven: false,
+                },
+              };
+            };
+            const original = f.io.facts.observeWriters;
+            f.io.facts.observeWriters = async (ctx, sources) => {
+              assert.equal(sources.database.scope, 'mysql-server-observation-only');
+              const value = await original(ctx);
+              if (fault === 'writer-count') value.producersRunning++;
+              if (fault === 'foreign') value.inventoryDigest = '0'.repeat(64);
+              if (fault === 'sockets') value.existingSockets = 1;
+              if (fault === 'negative-sockets') value.existingSockets = -1;
+              if (fault === 'internal') value.internalWriters = 1;
+              return value;
+            };
+          },
+          {
+            databaseObserver: {
+              configDigest: 'd'.repeat(64),
+              sourceIdentity: {
+                database: 'qa',
+                serverUuid: '11111111-1111-4111-8111-111111111111',
+              },
+            },
+          },
+        );
+        if (stage === 'preopen') {
+          await f.advance();
+          await f.journal.persist('migration_started', { candidate: f.binding.candidate });
+          await f.journal.bindBootstrapSeed('8'.repeat(32));
+          await f.journal.persist('candidate_started', { candidate: f.binding.candidate });
+        }
+        if (
+          ['none', 'older'].includes(fault) ||
+          (stage === 'prepare' && ['sockets', 'internal'].includes(fault))
+        ) {
+          const result = await f.site.evidence.readHostInventory(f.request(stage));
+          assert.equal(reads, 2);
+          assert.equal(result.observedAtMs, fault === 'older' ? 900 : 1000);
+        } else {
+          await assert.rejects(f.site.evidence.readHostInventory(f.request(stage)), /UNPROVEN/);
+        }
+        assert.equal(f.events.includes('stop-producers'), false);
+        assert.equal(f.events.includes('restore'), false);
+        await f.site.lifecycle.detach(f.context);
+      });
+    }
+  }
+});
 
 test('host inventory preserves approved bytes but derives live producers from fresh observations', async (t) => {
   const f = await candidateFixture(t);

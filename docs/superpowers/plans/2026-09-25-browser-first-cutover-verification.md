@@ -2,6 +2,16 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29 prepare/preopen 独立 writer 来源接线修复
+
+最终结果：79759退出0，browser1116/1116、ops120/60/16/947与Python12，全部零失败/跳过；48594最终Linux238/238退出0零跳过。三份最终日志`/private/tmp/holaday-readiness-writers-{browser,ops,linux}-final.log`。所有测试结束，两文件Biome、diff-check退出0；下方运行中说明已被本段取代。未重做真实MySQL/物理停止/恢复演练，未宣称完整现场facts或最终独立审查通过，无远端操作、支付方请求或部署。
+
+最终阶段语义：prepare允许合法的已知写入者观察，preopen要求归零；新增反例先19通过/2失败退出1，修正后Linux238/238退出0零跳过（`/private/tmp/holaday-readiness-writers-linux-final.log`）。完整browser恢复原42文件清单后1116/1116退出0零跳过（`/private/tmp/holaday-readiness-writers-browser-final.log`），ops仍待收尾。此前41文件列表错误包含Linux专用integration，Mac1098通过/1失败退出1，不计全套通过，不改平台保护或冒充实际Linux物理演练。该修复只覆盖readiness独立来源消费，不是完整生产facts提供者；下方早期“回归运行中”状态由本段替代。
+
+实际缺口在原 `site.evidence.readHostInventory`：批准的数据库管理来源只供入口检查使用，未被两个 readiness 阶段消费。原报告在活动事务/来源读取失败反例仍返回；RED15失败、退出1，日志 `/private/tmp/holaday-readiness-writers-red.log`。修复复用已有受保护来源，前后观察、范围/生产者数/最早时间绑定；保留 prepare 与 preopen 对既有连接的不同要求，不把独立数据库观察提升为全局 unknownWriters 证明。
+
+首轮 site83/83退出0；最终真实Linux site/host/mysql238/238、零跳过、退出0，`/private/tmp/holaday-readiness-writers-linux.log`。原镜像只读脚本、无网络/私有PID/512MiB单核，退出自清理，不重做已完成的数据库物理夹具。两源码文件Biome和diff-check退出0。完整显式41文件browser回归session66135尚运行，另记最终结果；不以部分通过代表完成。现场facts/执行入口、真实恢复、非PayPal恢复及整分支审查仍未完成，CLI关闭，无生产变更。
+
 ## 2026-09-29 当前会话归属接线与现网只读证据（不是停写证明）
 
 **最终串行结果（覆盖下方运行中记录）：** session26686退出0：browser1095/1095、Linux217/217、ops120/60/16/926及Python12，全部零失败/取消/跳过；原连接器/journal/真实MySQL/proc/ss隔离夹具亦退出0。七MJS Biome与diff-check退出0。本轮主智能体定向自查已修证据年龄，但不是整分支独立审查；没有生产写操作/PR/push/merge/deploy，CLI关闭，原Task4仍未完成。九个明确文件待保存提交；旧cache保留。

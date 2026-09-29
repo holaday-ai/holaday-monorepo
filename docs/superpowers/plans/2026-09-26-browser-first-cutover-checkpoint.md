@@ -6,6 +6,22 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 09:24 UTC：独立数据库来源接入 prepare/preopen 报告，未开放执行
+
+最终收尾：session79759退出0，browser1116/1116、ops120/60/16/947及Python12全部通过且零跳过；最终Linux238/238退出0零跳过。日志`/private/tmp/holaday-readiness-writers-{browser,ops,linux}-final.log`。所有测试已结束，两MJS Biome及diff-check退出0。仅提交site/同名测试/本checkpoint/原verification四文件，原cache不动；下方运行中内容是历史过程。当前仅局部修复通过，不是Task4–6完成、现场facts齐备或上线成功；不重跑之前已经完成的会话/恢复组件来替代剩余事实。
+
+后续复核：prepare尚未隔离，不能新增“已知internalWriters也必须为零”的前置条件。该阶段保持合法非负观察，preopen才要求连接及内部写入均为零；专门反例19通过/2失败退出1后修正，最终Linux238/238退出0零跳过，日志`/private/tmp/holaday-readiness-writers-linux-final.log`。原41文件发现列表误包含Linux专用integration入口，Mac运行因此1098通过/1失败退出1（未执行Linux物理动作），不改平台断言；恢复此前已保存的42文件清单（排除该Linux专用入口、包含两份deploy入口测试）后，79759的browser1116/1116退出0零跳过，日志`/private/tmp/holaday-readiness-writers-browser-final.log`，接下来的ops尚运行。原66135已结束，本段取代下方运行中描述。
+
+从 `10b2146a4e4021480c6c178a2d437ac3cf994fa1` 续跑。原 site 的独立管理观察只在 ingress writer 回调中消费，`evidence.readHostInventory` 在 prepare/preopen 均未消费；即使批准的来源已报告活动事务或不可读取，也会返回该阶段的 host 报告。新增反例先复现：`/private/tmp/holaday-readiness-writers-red.log`，15失败/0通过、退出1，原因是未拒绝和读取次数0，不是权限或环境问题。
+
+仅修改原 site 与同名测试：当受保护 inventory 明确声明 `databaseObserver`，主机观察前后均复用原 `observeWriters`，核对独立来源和已分类生产者数，使用全部来源最早时间。活动数据库来源、读取失败、第二次出现活动事务、范围/生产者计数不符均拒绝；prepare 可有既有连接，preopen 不可有，负数不能通过。不改 MySQL/主机/TCP 采集器、不生成生产 facts 默认零、不改变 CLI execute 关闭状态。未声明该来源的旧接口不自动读取管理配置，原独立 facts 仍必需。
+
+首轮 site 83/83退出0；补充连接/内部写入边界后，真实 Linux 三组 site/host/mysql 共238/238，零失败/取消/跳过、退出0，日志 `/private/tmp/holaday-readiness-writers-linux.log`。使用原 QA 镜像、无网络、私有PID、512MiB/1CPU、仅只读挂 scripts；容器退出自动移除，不运行数据库或触碰原 MySQL/Redis。两文件 Biome 与 diff-check退出0。显式41文件完整 browser 回归session66135进行中，未结束前不计通过；源码冻结，不在其运行中追加测试。
+
+**未完成项仍是事实和交付，不是重复组件工作：** `facts.observeWork/observeWriters/settleLegacy/reconcile` 仍无完整生产默认提供者；当前会话归属、13表恢复读者、旧版能力观察和WS恢复演练均已完成，不再重做。实际已知外部操作/浏览器执行归属、未来写入源排除仍须从真实来源接到这些接口，不能拿 about:blank、空持久集合或合成夹具来填零。之后才是受保护单次入口、真实停写备份/Mac恢复、非PayPal恢复证据及整分支审查。历史微信查询不是支付恢复；用户本人小额演练的具体金额/时点仍未确认，不代付款或改历史单。管理元数据读取授权已解决，不列为阻塞。
+
+本轮无远端读取/写入、商户核查、密钥/USB/PayPal操作、PR/push/merge/deploy；Task4 BASE不变，原 `scripts/__pycache__/` 保留。局部串行自审不是整分支独立审查，不能标 Task4–6 或首次发布完成。
+
 ### 2026-09-29 JST：当前会话归属已接通，取得同次真实只读归属证据
 
 最终收尾：session26686退出0，browser1095/1095、真实Linux217/217、ops120/60/16/926及Python12，均零失败/取消/跳过；真实隔离MySQL默认连接器/proc/ss夹具亦退出0。七MJS Biome和diff-check退出0，所有本轮测试进程已结束。下面“运行中/待收”段落仅为过程记录，已由本段取代。九个明确源码/测试/记录文件准备保存提交，原cache不纳入。主智能体按审查清单复核本轮差异并修复证据年龄，不称独立整分支审查已完成；尚未判断整分支可以合并。没有生产写入、PR/push/merge/deploy，CLI关闭。现网只读会话归属已实证，无需下一轮重做；接下来应接剩余独立facts及真实恢复/最终交付。

@@ -1039,11 +1039,18 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
               if (request.identity !== undefined) fail();
             } else checkIdentity(request.identity, record);
             const { work: before } = await observeWork();
+            // The separately approved database source must also participate in
+            // readiness, not only the ingress callback. Bracket the host read;
+            // do not publish a clean report over a newly active database writer.
+            const writerBefore = Object.hasOwn(inventory, 'databaseObserver')
+              ? await observeWriters()
+              : undefined;
             const actual =
               request.stage === 'prepare'
                 ? await observer.read()
                 : await observer.readWithCandidate(request.identity);
             if (request.stage === 'preopen') closedCandidate(actual, request.identity);
+            const writerAfter = writerBefore === undefined ? undefined : await observeWriters();
             const { work: after } = await observeWork();
             checkLegacyCapability(actual);
             const disposition = validateLegacyWorkBoundary({
@@ -1083,6 +1090,24 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
                 producersRunning.push(structuredClone(matches[0]));
               }
             }
+            const writerTimes = [];
+            if (Object.hasOwn(inventory, 'databaseObserver')) {
+              for (const writer of [writerBefore, writerAfter]) {
+                if (
+                  !fresh(writer?.observedAtMs) ||
+                  writer.inventoryDigest !== context.binding.inventoryDigest ||
+                  !Number.isSafeInteger(writer.internalWriters) ||
+                  writer.internalWriters < 0 ||
+                  writer.producersRunning !== producersRunning.length ||
+                  !Number.isSafeInteger(writer.existingSockets) ||
+                  writer.existingSockets < 0 ||
+                  (request.stage === 'preopen' &&
+                    (writer.existingSockets !== 0 || writer.internalWriters !== 0))
+                )
+                  fail();
+                writerTimes.push(writer.observedAtMs);
+              }
+            }
             if (!equal(record, await guard(context, [record.phase]))) fail();
             return {
               inventory: structuredClone(inventory),
@@ -1090,6 +1115,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
                 before.observedAtMs,
                 actual.observedAtMs,
                 after.observedAtMs,
+                ...writerTimes,
                 ...(context.approval.schemaVersion === 2
                   ? [actual.legacyCapability.observedAtMs]
                   : []),
