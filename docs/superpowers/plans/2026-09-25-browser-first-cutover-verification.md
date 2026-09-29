@@ -2,6 +2,19 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29原启动保存接线（基于787607a0）
+
+原两份QA文件新增after-worker。复用真实停止态cron和原定向注册移除，随后原resumeFirstCutoverCandidateWorker在worker=false配置下验证候选、保护日志并保存两份startup。只使用目录映射区分同一隔离命名空间中的两个逻辑主机，不伪造文件stat、进程、SQL、应用或journal；不能称独立生产双机或worker启用验收。
+
+| 验证 | 实际结果 | 日志 |
+| --- | --- | --- |
+| 新模式RED | 原允许模式拒绝after-worker，退出1，Docker/I/O之前；旧ID仅语法输入、未访问或复用 | `/private/tmp/holaday-native-worker-mode-red.log` |
+| 首次接线 | session9807退出1，preflight拒绝空remove；源2/目标0，未迁移 | `/private/tmp/holaday-native-worker-connected.log`、opTWjm诊断 |
+| 真实旧cron接线 | session2214退出1，producers_stopped；双逻辑主机归档目录冲突，未迁移 | `/private/tmp/holaday-native-worker-startup-connected.log`、ETf0aK诊断 |
+| 独立启动及归档目录 | session10696退出0、源90/目标90；原完整链到实际startup保存后故障，一次close/两个HTTPS入口503/dirty保留、不重放 | `/private/tmp/holaday-native-worker-separated.log` |
+
+失败轮269211c3与90ac80ff、成功轮74f1dbbe的源/目标/专属卷已核验精确清理，日志/私有恢复资料保留。原防覆盖规则和现场scope校验未改，不以empty/noop绕过。真实PID0 cron被原注册/启动文件移除函数处理；原候选worker=false函数实际执行readCandidate/PM2/log权限/两文件保存，原六条日志及实际文件摘要、无关行不变已断言。QA仍只有共享daemon的两个逻辑host，不声称候选startup已跨重启验证，也不声称worker=true已测。两QA文件Biome/diff-check退出0；完整串行回归session19015退出0，browser1044/1044、ops120/60/16/875及Python12，全部零跳过；browser+ops日志`/private/tmp/holaday-native-startup-{browser,ops}-regression.log`。所有测试session已结束。
+
 ## 2026-09-29真实nginx同次接线（基于17428802）
 
 | 验证 | 实际结果 | 日志 |

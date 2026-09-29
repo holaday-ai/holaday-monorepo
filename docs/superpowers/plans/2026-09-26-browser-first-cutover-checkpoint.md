@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 JST：原worker关闭配置／启动保存同次故障验收通过（787607a0之后）
+
+已提交入口恢复修复`787607a0`，未push/合并/部署。当前仅原两份QA夹具增加`after-worker`：沿同次原host/source/recovery/nginx链，再调用原`resumeFirstCutoverCandidateWorker`，不替换控制socket、运行观察、日志权限保护或启动保存实现。配置明确worker=false，不声称已启用worker。预定断言原六条candidateStartupEvents、两份实际落盘摘要、同一候选路径/UID998/no-autorestart及无关原始行保留后，才在worker返回边界注入故障；最后仍检查一次close、dirty和两个HTTPS入口503，reconcile未执行。
+
+首轮session9807在preflight拒绝：新夹具的空remove不符合原受保护清单，不是迁移失败；源2/目标0。没有放宽产品门禁，改用原真实停止态PID0 cron注册及原定向启动文件/注册移除函数。第二轮session2214在producers_stopped拒绝：两个逻辑主机的startup文件虽已分开，但备份归档仍共用`startup-<attempt>`，与原禁止覆盖契约冲突。仅为QA新增精确目录映射，Vultr的startup和归档分别落在`/qa-vultr-pm2`和`/qa-vultr-maintenance`，Aliyun仍用本例原目录；真实stat/open/rename/fsync及journal不替换，仍非生产独立双机。
+
+最终session10696退出0，`/private/tmp/holaday-native-worker-separated.log`，源90/目标90；同次原链真实完成旧cron注册及保存项移除、备份/Mac恢复/源61SQL、新boot/preopen/open/nginx恢复、原worker=false身份核验/日志保护及两份startup落盘。六条原candidateStartupEvents及两文件hash、UID998、候选路径、no-autorestart、无关原始行保留均已断言；故障只在原函数返回后注入，原close一次、dirty/draining/false acknowledgment和两HTTPS入口503保持，旧效果1不重放。这里只resurrect原Aliyun QA保存文件证明旧网关未重放，不声称新的Vultr候选启动文件已跨重启演练。
+
+resource74f1dbbe对应源/目标/卷已driver精确核验清理。269211c3及90ac80ff两个失败轮资源也已清理，仅合成数据，日志/私有证据保留；不重试旧SQL/窗口。两份QA文件Biome/diff-check通过。完整串行session19015退出0：browser1044/1044（test-concurrency=1、age显式启用），ops120/60/16/875及Python12，全部零跳过；日志`/private/tmp/holaday-native-startup-{browser,ops}-regression.log`。所有测试session已结束。原CLI execute保持关闭，Task4 BASE不变；剩余真实reconcile、完整成功与故障矩阵、现场facts/工具包/真实生产恢复/非PayPal恢复/整分支审查不变。
+
 ### 2026-09-29 JST（02:05Z轮）：真实入口恢复后故障同次演练通过
 
 承接`17428802`。原nginx Linux夹具的三profile、TLS和文件映射抽取为`browser-nginx-sites-qa.mjs`，供原独立验收及同次host/source恢复夹具复用；新增`after-ingress`，在实际入口恢复、原站点serving身份校验、原配置/软链接/权限恢复及源站和国内边缘真实HTTPS 404验证之后，才在worker边界注入故障。不是完整成功路径，不能省略原worker/startup保存/reconcile。

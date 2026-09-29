@@ -19,6 +19,7 @@ import {
   readFirstCutoverSourceSnapshot,
   readReviewedFirstCutoverLegacySource,
   recordFirstCutoverFailure,
+  resumeFirstCutoverCandidateWorker,
 } from '/source/browser-first-cutover-host.mjs';
 import {
   classifyFirstCutoverHostPair,
@@ -58,23 +59,30 @@ const sourceQa = process.env.CUTOVER_QA_SOURCE
 const fullHost = process.env.CUTOVER_QA_HOST === '1';
 const afterStart =
   fullHost &&
-  ['after-start', 'before-open', 'after-open', 'after-ingress'].includes(
+  ['after-start', 'before-open', 'after-open', 'after-ingress', 'after-worker'].includes(
     process.env.CUTOVER_QA_HOST_FAULT,
   );
 const beforeOpen = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'before-open';
 const afterOpen = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-open';
 const afterIngress = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-ingress';
-const preopenGate = beforeOpen || afterOpen || afterIngress;
-const openedCandidate = afterOpen || afterIngress;
+const afterWorker = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-worker';
+const nativeIngress = afterIngress || afterWorker;
+const preopenGate = beforeOpen || afterOpen || nativeIngress;
+const openedCandidate = afterOpen || nativeIngress;
 let nginxFixture;
 assert.ok(
   !fullHost || process.argv[2] === '--execution-site-lost-effect' || (recoveryLink && sourceQa),
 );
 if (fullHost && sourceQa) {
   assert.ok(
-    ['before-migration', 'after-start', 'before-open', 'after-open', 'after-ingress'].includes(
-      process.env.CUTOVER_QA_HOST_FAULT,
-    ),
+    [
+      'before-migration',
+      'after-start',
+      'before-open',
+      'after-open',
+      'after-ingress',
+      'after-worker',
+    ].includes(process.env.CUTOVER_QA_HOST_FAULT),
   );
   assert.equal(sourceQa.omitReceipt, false);
 }
@@ -214,7 +222,7 @@ if (lostEffect) {
 }
 // Only the QA payment callback boundary is simulated; it belongs to the real
 // retired gateway process. Never create an unclassified legacy origin listener.
-const legacyHttpHandler = afterIngress
+const legacyHttpHandler = nativeIngress
   ? `(q,r)=>{r.statusCode=/\\/(notify|webhook|confirm)(\\?|$)/.test(q.url)?401:200;r.end('qa');}`
   : `(q,r)=>r.end('qa')`;
 const legacyHttpStart = `http.createServer(${legacyHttpHandler}).listen(${mainPort});`;
@@ -282,7 +290,7 @@ try {
     '--kill-timeout',
     '200',
   );
-  if (!gateways) {
+  if (!gateways || afterWorker) {
     await pm2(
       'start',
       '/tmp/registry-idle.cjs',
@@ -309,7 +317,7 @@ try {
       await sleep(100);
     }
   }
-  if (afterIngress) {
+  if (nativeIngress) {
     for (const port of [mainPort])
       assert.equal(
         (
@@ -409,11 +417,23 @@ try {
     };
   };
   const files = [];
+  // Two logical hosts share only this disposable namespace. Keep Vultr's real
+  // startup bytes separate from Aliyun's real PM2 dump; never alias both hosts.
+  const vultrStartupRoot = '/qa-vultr-pm2';
+  const vultrArchive = '/qa-vultr-maintenance';
+  const vultrStartupFiles = [];
+  if (afterWorker) {
+    await fs.mkdir(vultrStartupRoot, { mode: 0o700 });
+    await fs.mkdir(vultrArchive, { mode: 0o700 });
+  }
   for (const suffix of ['dump.pm2', 'dump.pm2.bak']) {
     const path = `/root/.pm2/${suffix}`;
     const saved = JSON.parse(await fs.readFile(path, 'utf8'));
     const raw = saved.map((r) => JSON.stringify(r));
-    const text = `[${raw.join(',')}]\n`;
+    const aliyunRaw = afterWorker
+      ? raw.filter((_r, i) => saved[i].name !== 'holaday-files-cron')
+      : raw;
+    const text = `[${aliyunRaw.join(',')}]\n`;
     await fs.writeFile(path, text);
     files.push({
       path,
@@ -422,7 +442,41 @@ try {
         names.includes(r.name) ? [{ name: r.name, entryDigest: sha(raw[i]) }] : [],
       ),
     });
+    if (afterWorker) {
+      const preserved = `[${raw.filter((_r, i) => saved[i].name === 'qa-unrelated').join(',')}]\n`;
+      assert.equal(JSON.parse(preserved).length, 1);
+      const cron = raw.filter((_r, i) => saved[i].name === 'holaday-files-cron');
+      assert.equal(cron.length, 1);
+      const original = `${preserved.trim().slice(0, -1)},${cron[0]}]\n`;
+      await fs.writeFile(`${vultrStartupRoot}/${suffix}`, original, { mode: 0o600, flag: 'wx' });
+      vultrStartupFiles.push({
+        path,
+        digest: sha(original),
+        remove: [{ name: 'holaday-files-cron', entryDigest: sha(cron[0]) }],
+        preserved,
+      });
+    }
   }
+  const startupMappings = [
+    ['/root/.pm2', vultrStartupRoot],
+    ['/var/lib/holaday-deploy/maintenance', vultrArchive],
+  ];
+  const mapStartup = (path) => {
+    const entry = startupMappings.find(([from]) => path === from || path.startsWith(`${from}/`));
+    return entry ? entry[1] + path.slice(entry[0].length) : path;
+  };
+  const startupFs = {
+    ...fs,
+    lstat: (p) => fs.lstat(mapStartup(p)),
+    realpath: async (p) => {
+      const actual = await fs.realpath(mapStartup(p));
+      const entry = startupMappings.find(([, to]) => actual === to || actual.startsWith(`${to}/`));
+      return entry ? entry[0] + actual.slice(entry[1].length) : actual;
+    },
+    open: (p, ...args) => fs.open(mapStartup(p), ...args),
+    mkdir: (p, options) => fs.mkdir(mapStartup(p), options),
+    rename: (a, b) => fs.rename(mapStartup(a), mapStartup(b)),
+  };
   const gatewayCwd = '/opt/holaday-cn-payment/releases/123456789abc-20260927080000/apps/cn-payment';
   await fs.mkdir(gatewayCwd, { recursive: true });
   await fs.writeFile(
@@ -530,6 +584,20 @@ try {
       second.listeners = '';
     }
     second.observedAtMs = snapshot.observedAtMs;
+    if (afterWorker) {
+      // Real stopped/PID0 cron registration belongs only to logical Vultr.
+      // Re-read it each time so native deletion cannot leave a stale projection.
+      second.managers = second.managers.filter((m) => m.name !== 'holaday-files-cron');
+      second.managers.push(...snapshot.managers.filter((m) => m.name === 'holaday-files-cron'));
+      snapshot.managers = snapshot.managers.filter((m) => m.name !== 'holaday-files-cron');
+      second.startup.files = await Promise.all(
+        vultrStartupFiles.map(async (f) => {
+          const actual = await savedFile(mapStartup(f.path));
+          assert.equal(actual.resolved, mapStartup(f.path));
+          return { ...actual, path: f.path, resolved: f.path };
+        }),
+      );
+    }
     // Both logical hosts here share this isolated QA network namespace.
     // Classifier selects only each host's separately approved service ports.
     second.tcp = structuredClone(snapshot.tcp);
@@ -602,7 +670,7 @@ try {
       ],
     };
   };
-  if (afterIngress) {
+  if (nativeIngress) {
     nginxFixture = await createQaNginxSites({ fencedCallbackPort: 4010 });
     await nginxFixture.start();
   }
@@ -621,7 +689,10 @@ try {
           registrations: snapshot.managers.map((m) => ({
             pmId: m.pmId,
             configDigest: m.configDigest,
-            disposition: names.includes(m.name) ? 'retire' : 'preserve',
+            disposition:
+              names.includes(m.name) || (afterWorker && m.name === 'holaday-files-cron')
+                ? 'retire'
+                : 'preserve',
             reason: 'explicit test fixture manager',
           })),
           processes: snapshot.processes
@@ -847,7 +918,7 @@ try {
                 inventory: readinessInventory,
                 reviews,
                 gatewaySiteDigest: sha(siteBytes),
-                ingress: afterIngress
+                ingress: nativeIngress
                   ? nginxFixture.approval(binding.inventoryDigest)
                   : {
                       inventoryDigest: binding.inventoryDigest,
@@ -862,13 +933,15 @@ try {
                         profile,
                       })),
                     },
-                producerStartupFiles: ['dump.pm2', 'dump.pm2.bak'].map((name) => ({
-                  path: `/root/.pm2/${name}`,
-                  digest: sha('synthetic other host'),
-                  remove: [
-                    { name: 'holaday-orchestrator', entryDigest: sha('synthetic producer') },
-                  ],
-                })),
+                producerStartupFiles: afterWorker
+                  ? vultrStartupFiles.map(({ preserved, ...approved }) => approved)
+                  : ['dump.pm2', 'dump.pm2.bak'].map((name) => ({
+                      path: `/root/.pm2/${name}`,
+                      digest: sha('synthetic other host'),
+                      remove: [
+                        { name: 'holaday-orchestrator', entryDigest: sha('synthetic producer') },
+                      ],
+                    })),
               },
             }),
             { mode: 0o600 },
@@ -897,6 +970,44 @@ try {
                   : {}),
               }),
               readPair,
+              ...(afterWorker
+                ? {
+                    resumeWorker: async (ctx, identity, approved, deps) => {
+                      await nginxFixture.assertRestored(identity);
+                      assert.equal(
+                        parseEnv(hostConfig.toString()).ACCOUNT_CLOSURE_WORKER_ENABLED,
+                        'false',
+                      );
+                      await resumeFirstCutoverCandidateWorker(ctx, identity, approved, {
+                        ...deps,
+                        startupFs,
+                      });
+                      const durable = await journal.readFirstCutoverEffects();
+                      assert.equal(durable.candidateStartupEvents.length, 6);
+                      for (const f of vultrStartupFiles) {
+                        const text = await fs.readFile(mapStartup(f.path), 'utf8');
+                        assert.ok(text.startsWith(`${f.preserved.trim().slice(0, -1)},`));
+                        const saved = JSON.parse(text);
+                        assert.deepEqual(
+                          saved.map((r) => r.name),
+                          ['qa-unrelated', 'holaday-orchestrator'],
+                        );
+                        assert.equal(saved[1].pm_cwd, `${ctx.root}/apps/orchestrator`);
+                        assert.equal(saved[1].autorestart, false);
+                        assert.equal(String(saved[1].uid), '998');
+                        assert.equal(
+                          durable.candidateStartupEvents[1].files.find((x) => x.path === f.path)
+                            .afterDigest,
+                          sha(text),
+                        );
+                      }
+                      assert.equal(hostOpenCommands, 1);
+                      assert.equal(hostPreopenReadiness, 2);
+                      hostStartFaults++;
+                      throw Error('CUTOVER_QA_AFTER_WORKER_FAULT');
+                    },
+                  }
+                : {}),
               facts: {
                 observeWriters: async () => fence('orders'),
                 observeWork: async () => ({
@@ -924,16 +1035,20 @@ try {
                 verifyOpenedIdentity: async () => {
                   throw Error('not exercised');
                 },
-                resumeWorker: async (_ctx, identity) => {
-                  if (afterIngress) {
-                    await nginxFixture.assertRestored(identity);
-                    assert.equal(hostOpenCommands, 1);
-                    assert.equal(hostPreopenReadiness, 2);
-                    hostStartFaults++;
-                    throw Error('CUTOVER_QA_AFTER_INGRESS_FAULT');
-                  }
-                  throw Error('not exercised');
-                },
+                ...(!afterWorker
+                  ? {
+                      resumeWorker: async (_ctx, identity) => {
+                        if (afterIngress) {
+                          await nginxFixture.assertRestored(identity);
+                          assert.equal(hostOpenCommands, 1);
+                          assert.equal(hostPreopenReadiness, 2);
+                          hostStartFaults++;
+                          throw Error('CUTOVER_QA_AFTER_INGRESS_FAULT');
+                        }
+                        throw Error('not exercised');
+                      },
+                    }
+                  : {}),
                 reconcile: async () => {
                   throw Error('not exercised');
                 },
@@ -947,7 +1062,7 @@ try {
                     }),
               },
               createIngress: async (_input, deps) =>
-                afterIngress
+                nativeIngress
                   ? nginxFixture.connect(_input, deps)
                   : {
                       verifyOrders: async () => fence('orders'),
@@ -1022,7 +1137,14 @@ try {
                 }
                 return observer;
               },
-              retireProducers: async () => {
+              retireProducers: async (input, deps) => {
+                if (afterWorker) {
+                  await retireLocalFirstCutoverProducers(input, deps, { fs: startupFs });
+                  assert.equal(
+                    (await rows()).some((r) => r.name === 'holaday-files-cron'),
+                    false,
+                  );
+                }
                 assert.equal(
                   (await observer.read()).hosts.find((h) => h.host === 'vultr').registered.processes
                     .length,
@@ -1117,7 +1239,7 @@ try {
                 console.error('QA_SITE_FAILED', group, name, error.message);
                 throw error;
               } finally {
-                if (afterIngress) console.error('QA_SITE_TIMING', group, name, Date.now() - began);
+                if (nativeIngress) console.error('QA_SITE_TIMING', group, name, Date.now() - began);
               }
             },
           ]),
@@ -1364,6 +1486,17 @@ try {
         });
         hostResult = result;
         if (fullHost) console.log('QA_HOST_OUTCOME', JSON.stringify(result));
+        if (afterWorker) {
+          const effects = await journal.readFirstCutoverEffects();
+          console.error(
+            'QA_STARTUP_EFFECTS',
+            JSON.stringify({
+              startup: effects.startupEvents.map((e) => `${e.host}:${e.phase}`),
+              registrations: effects.registrationEvents.map((e) => `${e.host}:${e.phase}`),
+              candidate: (effects.candidateStartupEvents ?? []).map((e) => e.phase),
+            }),
+          );
+        }
         if (afterStart && hostStartFaults === 0) {
           for (const row of (await rows()).filter(
             (value) => value.name === 'holaday-orchestrator',
@@ -1516,7 +1649,7 @@ try {
               assert.equal((await fetch('http://127.0.0.1:4001/trpc/tasks.list')).status, 503);
               if (openedCandidate)
                 assert.equal((await fetch('http://127.0.0.1:4001/qa-admission-probe')).status, 503);
-              if (afterIngress) {
+              if (nativeIngress) {
                 for (const site of nginxFixture.sites.filter(
                   (s) => s.profile !== 'aliyun-pay-20260926',
                 ))
@@ -1567,8 +1700,9 @@ try {
               : {}),
             ...(preopenGate ? { nativePreopenVerified: true } : {}),
             ...(openedCandidate
-              ? { candidateOpened: true, needsReconciliation: true, ingressRestored: afterIngress }
+              ? { candidateOpened: true, needsReconciliation: true, ingressRestored: nativeIngress }
               : {}),
+            ...(afterWorker ? { nativeStartupPersisted: true, workerEnabled: false } : {}),
             ...(recoveryLink
               ? { recoveryLinked: !recoveryDrift, recoveryRejected: recoveryDrift }
               : {}),
