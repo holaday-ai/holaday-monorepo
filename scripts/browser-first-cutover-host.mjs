@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { constants } from 'node:fs';
+import { constants, writeSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -1536,11 +1536,45 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
     readExecutionIdentities: async () => [],
     readCandidateRuntime: readFirstCutoverCandidateRuntime,
     now: Date.now,
+    reportRejection: (event) => writeSync(2, `${JSON.stringify(event)}\n`),
     ...overrides,
   };
   const fail = () => {
     throw new Error('CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN');
   };
+  // Keep this at the observer boundary: outer site/transport errors intentionally
+  // redact their causes. Never emit the input, raw error, stack, argv or business
+  // payload. Diagnostics must not turn a refusal into a retry or a success.
+  const report = async (error, operation, step) => {
+    let code = 'UNCLASSIFIED';
+    try {
+      const value = Object.getOwnPropertyDescriptor(error, 'message')?.value;
+      if (
+        [
+          'CUTOVER_HOST_PAIR_UNPROVEN',
+          'CUTOVER_LEGACY_SOURCE_UNPROVEN',
+          'CUTOVER_CANDIDATE_OBSERVATION_UNPROVEN',
+          'CUTOVER_INVENTORY_UNPROVEN',
+          'CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN',
+        ].includes(value)
+      )
+        code = value;
+    } catch {
+      // Do not invoke error getters or serialize arbitrary thrown objects.
+    }
+    try {
+      await io.reportRejection({
+        schemaVersion: 1,
+        component: 'cutover-retirement-observer',
+        operation,
+        step,
+        code,
+      });
+    } catch {
+      // A broken diagnostic sink cannot suppress or replace the original refusal.
+    }
+  };
+  let initialStep = 'input';
   try {
     const { reviews, binding, legacyDigest } = structuredClone(input);
     let last = io.now();
@@ -1554,7 +1588,9 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         fail();
       return record;
     };
+    initialStep = 'initial-effects';
     const first = await effects();
+    initialStep = 'initial-state';
     if (
       !['preflight', 'prepared'].includes(first.phase) ||
       first.startupEvents.length ||
@@ -1565,6 +1601,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       fail();
     let baseline;
     let baselineExecution;
+    initialStep = 'reviewed-source';
     const proof = await readReviewedFirstCutoverLegacySource(
       { reviews, inventoryDigest: binding.inventoryDigest, binding },
       {
@@ -1579,6 +1616,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         now: io.now,
       },
     );
+    initialStep = 'initial-stability';
     if (
       proof.legacyDigest !== legacyDigest ||
       !isDeepStrictEqual(first, await effects()) ||
@@ -1592,6 +1630,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       last = now;
       return now;
     };
+    initialStep = 'initial-clock';
     checkClock();
     const read = async (
       requestedRegistrationHost,
@@ -1599,8 +1638,19 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       candidateIdentity,
       fenceProgress = false,
     ) => {
+      const operation = fenceProgress
+        ? 'fence-progress'
+        : candidateIdentity !== undefined
+          ? 'candidate'
+          : requestedRegistrationHost !== undefined
+            ? 'registration-progress'
+            : requestedUnmanagedHost !== undefined
+              ? 'unmanaged-progress'
+              : 'read';
+      let step = 'clock';
       try {
         checkClock();
+        step = 'effects-before';
         const before = await effects();
         let registrationProgressHost = requestedRegistrationHost;
         let unmanagedProgressHost = requestedUnmanagedHost;
@@ -1614,8 +1664,11 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             else registrationProgressHost = 'aliyun';
           }
         }
+        step = 'execution-before';
         const execution = structuredClone(await io.readExecutionIdentities());
+        step = 'fences-before';
         const fences = structuredClone(await io.readFenceReceipts());
+        step = 'candidate-before';
         const candidate =
           candidateIdentity === undefined
             ? undefined
@@ -1625,7 +1678,9 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           !isDeepStrictEqual(candidate?.identity, candidateIdentity)
         )
           fail();
+        step = 'host-pair';
         const pair = structuredClone(await io.readPair());
+        step = 'stability';
         if (
           !isDeepStrictEqual(before, await effects()) ||
           !isDeepStrictEqual(execution, await io.readExecutionIdentities()) ||
@@ -1641,6 +1696,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           )
         )
           fail();
+        step = 'classification';
         const result = classifyFirstCutoverRetirementPair(
           {
             baseline,
@@ -1657,6 +1713,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           },
           { now: checkClock },
         );
+        step = 'unknown-launchers';
         if (result.unknownLaunchers.length) fail();
         if (fenceProgress) return { purpose: 'fence-progress', pair: result };
         if (registrationProgressHost !== undefined)
@@ -1672,7 +1729,8 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             inventory: result.hosts.find((h) => h.host === unmanagedProgressHost).unmanaged,
           };
         return result;
-      } catch {
+      } catch (error) {
+        await report(error, operation, step);
         fail();
       }
     };
@@ -1736,7 +1794,8 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         return result;
       },
     };
-  } catch {
+  } catch (error) {
+    await report(error, 'initialize', initialStep);
     fail();
   }
 }

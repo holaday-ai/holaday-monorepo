@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -274,6 +275,7 @@ async function retirementFixture(
   t.after(() => journal.close());
   const binding = await journal.assertOwnership();
   beforeBaseline(f, binding);
+  f.rejections = [];
   assert.equal(typeof firstHost.createFirstCutoverRetirementObserver, 'function');
   const observer = await firstHost.createFirstCutoverRetirementObserver(
     {
@@ -295,6 +297,10 @@ async function retirementFixture(
         return structuredClone(f.candidate);
       },
       now: () => f.now ?? 1000,
+      reportRejection: async (event) => {
+        f.rejections.push(event);
+        await f.onRejection?.(event);
+      },
     },
   );
   await journal.bindManifest(manifest);
@@ -324,6 +330,95 @@ async function retirementFixture(
   };
   return { f, journal, binding, observer, remove };
 }
+
+test('retirement rejection reports the failed boundary without exposing transport secrets', async (t) => {
+  const { f, observer } = await retirementFixture(t);
+  assert.deepEqual(f.rejections, [], 'successful construction is silent');
+  let reads = 0;
+  f.onRead = async () => {
+    reads++;
+    throw new Error('PRIVATE_TEST_TRANSPORT_TOKEN', { cause: { raw: 'PRIVATE_TEST_PAYLOAD' } });
+  };
+  await assert.rejects(observer.read(), { message: 'CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN' });
+  assert.equal(reads, 1, 'diagnostics must not retry the observation');
+  assert.deepEqual(f.rejections, [
+    {
+      schemaVersion: 1,
+      component: 'cutover-retirement-observer',
+      operation: 'read',
+      step: 'host-pair',
+      code: 'UNCLASSIFIED',
+    },
+  ]);
+});
+
+test('retirement diagnostic distinguishes a known read failure from classification refusal', async (t) => {
+  const { f, observer } = await retirementFixture(t);
+  f.onRead = async () => {
+    throw new Error('CUTOVER_HOST_PAIR_UNPROVEN');
+  };
+  await assert.rejects(observer.readFenceProgress(), /CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN/);
+  assert.deepEqual(f.rejections.at(-1), {
+    schemaVersion: 1,
+    component: 'cutover-retirement-observer',
+    operation: 'fence-progress',
+    step: 'host-pair',
+    code: 'CUTOVER_HOST_PAIR_UNPROVEN',
+  });
+  f.onRead = undefined;
+  f.pair.hosts[0].snapshot.processes[0].start = '999999';
+  await assert.rejects(observer.read(), /CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN/);
+  assert.equal(f.rejections.at(-1).step, 'classification');
+  assert.equal(f.rejections.at(-1).code, 'CUTOVER_INVENTORY_UNPROVEN');
+});
+
+test('retirement diagnostic failure cannot replace or suppress the original refusal', async (t) => {
+  const { f, observer } = await retirementFixture(t);
+  let messageRead = false;
+  f.onRead = async () => {
+    throw Object.defineProperty({}, 'message', {
+      get() {
+        messageRead = true;
+        throw new Error('PRIVATE_GETTER');
+      },
+    });
+  };
+  f.onRejection = async () => {
+    throw new Error('PRIVATE_LOGGER_FAILURE');
+  };
+  await assert.rejects(observer.read(), { message: 'CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN' });
+  assert.equal(messageRead, false);
+  assert.equal(f.rejections.length, 1);
+  assert.equal(f.rejections[0].code, 'UNCLASSIFIED');
+});
+
+test('retirement default stderr reports only bounded metadata even before construction completes', () => {
+  const moduleUrl = new URL('./browser-first-cutover-host.mjs', import.meta.url).href;
+  const child = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `
+    import assert from 'node:assert/strict';
+    import { createFirstCutoverRetirementObserver } from ${JSON.stringify(moduleUrl)};
+    await assert.rejects(createFirstCutoverRetirementObserver({}, {
+      journal: { assertOwnership: async () => { throw new Error('PRIVATE_TEST_KEY'); } },
+    }), { message: 'CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN' });
+  `,
+    ],
+    { encoding: 'utf8', timeout: 10000 },
+  );
+  assert.equal(child.status, 0);
+  assert.equal(child.stdout, '');
+  assert.deepEqual(JSON.parse(child.stderr), {
+    schemaVersion: 1,
+    component: 'cutover-retirement-observer',
+    operation: 'initialize',
+    step: 'initial-effects',
+    code: 'UNCLASSIFIED',
+  });
+});
 
 function addReceiver(f, binding) {
   const snapshot = f.pair.hosts.find((h) => h.host === 'aliyun').snapshot;

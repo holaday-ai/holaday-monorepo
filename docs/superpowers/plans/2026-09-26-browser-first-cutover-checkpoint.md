@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 16:13Z heartbeat续跑：退休观察器拒绝诊断与一次完整合成链
+
+从`ab54a2b1`继续原Task4/6，未重试已否定的Brave启动参数或原源码授权。仅在原`createFirstCutoverRetirementObserver`增加失败边界诊断：初始化/读取的固定步骤、固定操作类别和五项白名单错误码；其余异常统一`UNCLASSIFIED`。默认同步写stderr，不序列化输入、原异常、cause、stack、参数或业务数据，不调用message getter；诊断自身失败仍抛原拒绝。成功路径不新增日志或等待，原观察顺序、分类谓词、范围和门禁不变。这是可保留的拒绝原因诊断，**不是历史间歇故障根因修复**。
+
+四项新增反例最终RED退出1（`holaday-observer-diagnostic-red-final.log`），实现后GREEN 4/4退出0；覆盖运输异常脱敏、已知错误码/分类区别、getter与异步诊断失败不影响拒绝、真实子进程默认stderr。完整`pnpm test:ops` session21876退出0：Node120/60/16/951，Python12，零跳过；日志`/private/tmp/holaday-observer-diagnostic-ops.log`。真实Linux原无网络镜像、私有PID、1CPU/384MiB/128pids、仅scripts只读挂载，session43511退出0，inventory组163/163零跳过；日志`/private/tmp/holaday-observer-diagnostic-linux.log`。两MJS Biome和diff-check退出0。上述仍是局部/组合验证，不是整项发布。
+
+单次新attempt完整原合成链session7295退出0，日志`/private/tmp/holaday-observer-diagnostic-full-chain.log`：同次源mysqldump/age、Mac隔离恢复与比较、原61迁移、真实候选、启用中的UID998 worker、实际poll、同进程核对、两份启动文件、一开零关/不重放、最终解锁；source90/target90。使用原缓存候选`6a46ee0f`和本轮协调器代码，不冒称最终生产候选。16:32只读观察曾为backup_verified且无回执，随后真实推进candidate_started且有回执；没有将意图阶段误当完成，没有延长期限或重试导入。此次历史间歇拒绝未复现，成功时原父夹具不保存完整stderr，不能声称所有瞬时错误不存在或稳定根因已解决。
+
+本次资源清单`/private/tmp/holaday-stopped-source-86905167-49f9-42e0-9ebe-d5f2a0d0d336.json`，driver已核对精确标签和卷后删除自身两个合成MySQL容器/卷；协调器容器自动移除，随后docker只见原MySQL/Redis健康运行。临时数据库已删除，日志及私密恢复证据保留；未碰真实恢复私钥、生产凭据、业务记录、PayPal、共享服务或真实profile。
+
+最终42文件浏览器脚本串行回归session73362退出0：1120/1120，零失败/取消/跳过，日志`/private/tmp/holaday-observer-diagnostic-browser.log`。首次5034自动审核超时未执行，工具允许的唯一重试才产生上述结果。该组明确排除Linux专用integration入口（不是跳过其平台断言）；真实Linux组已独立执行。所有本轮作业已结束，不为一次成功反复运行完整DB链。下一步继续精确云端恢复接线、独立现场facts、受保护执行入口、真实停写/Mac恢复、非PayPal恢复证据与整分支审查。CLI execute继续关闭，Task4 BASE不变，无push/PR/合并/部署，既有自动化保持，原`__pycache__`不纳入提交。
+
 ### 2026-09-30 同版本真实浏览器恢复诊断：启动参数不能证明不恢复旧标签
 
 从`dae538e3`继续，仅新增可重复的隔离诊断`scripts/fixtures/browser-cloud-recovery-probe-linux.mjs`和证据记录，未改产品恢复器或生产配置。用户固定源码审阅权限已解决，不再提问。原Task4 BASE、PayPal延期和所有生产门槛不变。
