@@ -6,6 +6,22 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 本地续跑：正文审阅授权已解除，原恢复副作用确认；VNC原PM2停止经校准通过
+
+从`4b57e367`续跑。用户明确回复“允许 都允许 别再问了”，覆盖`/opt/holaday-headed/start.sh`及`/opt/holaday-vnc/start.sh`的只读代码审阅；下方14:39正文权限阻塞已解除，不重复请求。54248退出0，原受限SSH读取两份固定源文件，敏感模式行过滤后保存`/private/tmp/holaday-cloud-maintenance-authorized-source-20260929.json`。摘要仍为headed `7e79a8f273485b716f8aafb3106d75886b738fe7768c288f190574ea6fb5a43c`、VNC `951940eeb19094d7d3e9b37a2a9e6830d63558bfac9258f347849f5952eb64ba`。未执行脚本或读取profile内容。
+
+headed源除已知Sessions/Singleton删除，还写共享openbox配置、按名称pkill、启动openbox及用xdotool调整窗口；不能原样恢复来兑现不删profile/不动共享对象。VNC源的TERM/INT/EXIT trap仅`pkill -P $$`，外层及后台循环会重启工具。97948退出0：display :98两处Unix监听及11个已建立连接，均解析归属这两个服务；仅当次观察，不证明未来独占性或外部工作清零。证据`/private/tmp/holaday-cloud-maintenance-display-20260929.json`。
+
+隔离探索中新增后删除未接入产品的独立VNC监督器原型：七种直接子进程场景通过不能证明websockify fork后代退出，故不交付此替代管理器。当前仅保留新的原PM2 6.0.14物理夹具`scripts/fixtures/browser-cloud-vnc-linux.mjs`。11809、6981（仅冻结合成根进程对照）、39588均退出1，PM2 stopped而合成后代存活；随后确认原QA镜像没有`ps`、`pkill`、`pgrep`。PM2 TreeKill依赖ps，缺失时不能验证真实树停止；这些是**环境无效的失败，不是生产缺陷证明**。冻结实验已撤掉，未增加产品信号动作。夹具已加入启动前真实procps工具检查；下一步用真实工具重验，不用模拟ps或放松后代存活断言。
+
+**校准完成：** 下载`procps/libproc2-0 2:4.0.4-9 arm64`到`/private/tmp/holaday-procps-qa.0TbMLx`，39560退出0。首次下载审批超时未执行，仅一次许可重试；包只解到无网络一次性容器，主机与原镜像未安装/修改。libproc2 SHA256 `e81069b58fe82223c71fcd74c760cb0fd3b0e61792fbaf2e5675fd948dc16dba`，procps `9afd4ad2e8da92322715114fb9555c63ce92f6c72bf72867e76ab2d6a7a3b541`。41741及最终格式化后32503均退出0：真实PM2单次数字ID停止、原循环控制结构、忽略温和信号的两服务与fork处理者均无存活进程，未回生；无关进程、合成profile哨兵保留。日志`/private/tmp/holaday-vnc-{real,final}-procps-20260930.log`。缺依赖反例也已验证在PM2/脚本/桩写入之前退出1，包装断言退出0，日志`/private/tmp/holaday-vnc-prereq-20260930.log`。不增加冻结/新监督器/新生产杀进程行为；这只是批准停止边界的物理特征测试，不是生产VNC退出或整项验收。
+
+复现最终夹具：原镜像`holaday-first-cutover-network:qa`（`ff58ba973281…`），`--rm --network none --cpus=1 --memory=384m --pids-limit=96`；只读挂本工作树scripts到`/source`和上述包目录到`/packages`。私有bash父进程内串行`dpkg-deb -x /packages/libproc2-0_2%3a4.0.4-9_arm64.deb /`及procps包，随后`/opt/node22/bin/node /source/fixtures/browser-cloud-vnc-linux.mjs`。包解压仅发生在可丢弃容器根；不能对主机运行该解压命令，也不挂生产凭据/数据/宿主PID。fixture故意不接受冻结选项；最终无任何活动测试容器或后台作业。
+
+实际只读版本查询7909退出0：生产`brave-browser 1.89.141`、`procps 2:3.3.17-6ubuntu2.1`，ps/pkill均为真实3.3.17；首次未带原askpass的BatchMode查询退出255，没有远端动作，随后使用已有认证完成，不新建密钥。生产工具与QA4.0.4不同，不能冒称同版本验收。[Brave对应发布](https://github.com/brave/brave-browser/releases/tag/v1.89.141)标注Chromium147.0.7727.102；后续安全恢复必须针对该版本核实，不用旧flag名称或隐藏恢复提示推断没有旧页面/后台重放。
+
+64438的`CUTOVER_TEST_AGE_EXECUTABLE=/opt/homebrew/bin/age pnpm test:ops`退出0：Node120/60/16/947及Python12，零跳过；日志`/private/tmp/holaday-cloud-vnc-ops-20260929.log`。它没有覆盖新增VNC夹具，不是整项验收。4851的Docker审批超时未执行，唯一获准重试为6981。原生产服务/数据库/Redis/profile/PayPal未改，CLI关闭，无push/PR/合并/部署。原Task4 BASE、缓存和`__pycache__`保留，原独立facts/受保护入口/真实恢复/非PayPal恢复/整分支审查及旧完整链间歇故障仍未完成。
+
 ### 2026-09-29 14:39 UTC：云端维护范围已批准；只读审计发现原恢复脚本删除会话目录
 
 从`0d2be0e7`续跑，工作树仅原`scripts/__pycache__/`未跟踪。用户对上一轮精确范围问题回复“允许”：批准切换时定向停止并恢复`holaday-chromium-headed`、`holaday-vnc`及核实后的专属后代，接受可能中断云端会话；不删profile、不动本机Chrome、共享PM2/Xvfb或无关应用。已在原设计第0节记录，覆盖下方所有“范围待决定/未获特定确认”的历史状态，不重复索取同一批准。
