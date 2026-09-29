@@ -603,6 +603,14 @@ try {
     assert.equal(observation.start, managed.identity.start);
     assert.equal(observation.restartCount, stoppedManager.pm2_env.restart_time);
     assert.equal(observation.purpose, 'cloud-browser-runtime-observation');
+    const recoveredManager = JSON.parse(await pm2('jlist')).find((r) => r.pm_id === managed.pmId);
+    assert.equal(
+      observation.configDigest,
+      cutoverRegistrationConfigDigest(recoveredManager.pm2_env),
+    );
+    assert.equal(recoveredManager.pm2_env.exec_mode, 'fork_mode');
+    assert.equal(recoveredManager.pm2_env.cron_restart, '');
+    assert.equal(recoveredManager.pm2_env.max_memory_restart, 0);
     const policyFile = `${privatePolicy}/recovery.json`;
     const originalMode = (await fs.stat(policyFile)).mode & 0o777;
     await fs.chmod(policyFile, 0o666);

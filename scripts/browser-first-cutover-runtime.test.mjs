@@ -271,6 +271,9 @@ function cloudRecoveryObservationFixture() {
       autorestart: false,
       watch: false,
       restart_time: 0,
+      exec_mode: 'fork_mode',
+      cron_restart: '',
+      max_memory_restart: 0,
       DISPLAY: ':98',
     },
   };
@@ -325,6 +328,49 @@ test('cloud recovery observation retains historical PM2 restart count without tr
   const proof = await firstRuntime.readFirstCutoverCloudBrowserRecovery(f.input, f.io);
   assert.equal(proof.restartCount, 12);
 });
+test('cloud recovery observation binds the full stable manager config while excluding monitoring counters', async () => {
+  const f = cloudRecoveryObservationFixture();
+  f.manager.pm2_env.env = { PRIVATE_VALUE: 'must-not-escape' };
+  let calls = 0;
+  const read = f.io.readManagers;
+  f.io.readManagers = async () => {
+    f.manager.pm2_env.axm_monitor = { changing: calls++ };
+    return read();
+  };
+  const proof = await firstRuntime.readFirstCutoverCloudBrowserRecovery(f.input, f.io);
+  assert.equal(proof.configDigest, cutoverRegistrationConfigDigest(f.manager.pm2_env));
+  assert.equal(JSON.stringify(proof).includes('must-not-escape'), false);
+});
+for (const [field, value] of [
+  ['cron_restart', '* * * * *'],
+  ['max_memory_restart', 1024],
+  ['exec_mode', 'cluster_mode'],
+  ['cron_restart', undefined],
+  ['max_memory_restart', undefined],
+  ['exec_mode', undefined],
+])
+  test(`cloud recovery refuses mismatched fixed lifecycle field ${field}=${value}`, async () => {
+    const f = cloudRecoveryObservationFixture();
+    f.manager.pm2_env[field] = value;
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudBrowserRecovery(f.input, f.io),
+      /CUTOVER_CLOUD_RECOVERY_UNPROVEN/,
+    );
+  });
+for (const field of ['env', 'pm_cwd', 'unknown_future_option'])
+  test(`cloud recovery refuses full config drift during observation: ${field}`, async () => {
+    const f = cloudRecoveryObservationFixture();
+    let calls = 0;
+    const read = f.io.readManagers;
+    f.io.readManagers = async () => {
+      if (calls++) f.manager.pm2_env[field] = { changed: true };
+      return read();
+    };
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudBrowserRecovery(f.input, f.io),
+      /CUTOVER_CLOUD_RECOVERY_UNPROVEN/,
+    );
+  });
 test('cloud recovery observation refuses unsafe launch, missing protection, conflicting policy and identity races', async () => {
   assert.equal(typeof firstRuntime.readFirstCutoverCloudBrowserRecovery, 'function');
   const faults = {

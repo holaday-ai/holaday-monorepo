@@ -1255,10 +1255,22 @@ for (const observed of [
   'wrong-id',
   'lost-runtime',
   'expired-runtime',
+  'changed-pid',
+  'changed-start',
+  'changed-boot',
+  'changed-parent',
+  'changed-config',
+  'changed-policy',
+  'changed-namespace',
+  'changed-restarts',
+  'fresh-same-runtime',
+  'missing-config',
+  'missing-restarts',
+  'invalid-parent',
 ])
   test(`cloud recovery prefix ${observed} requires acknowledgements and independent runtime before open`, async (t) => {
     const acknowledged = typeof observed === 'string' ? 4 : observed;
-    const permitted = observed === 4;
+    const permitted = observed === 4 || observed === 'fresh-same-runtime';
     const f = await lifecycleFixture(t);
     const services = ['holaday-vnc', 'holaday-chromium-headed'].map((name, index) => ({
       name,
@@ -1295,18 +1307,38 @@ for (const observed of [
         f.setTime(f.approval.maintenanceEndsAtMs);
       if (observed === 'unsafe-runtime' || (observed === 'lost-runtime' && runtimeReads === 2))
         throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
-      return {
+      const proof = {
         purpose: 'cloud-browser-runtime-observation',
         name: 'holaday-chromium-headed',
         pmId: observed === 'wrong-id' ? 99 : pmId,
         pid: 123,
+        ppid: observed === 'invalid-parent' ? 0 : 20,
+        restartCount: observed === 'missing-restarts' ? undefined : 12,
+        configDigest: observed === 'missing-config' ? undefined : '9'.repeat(64),
         start: '100',
         bootId: '12345678-1234-4234-8234-123456789def',
         launchDigest: services[1].recoveryDigest,
         policyDigest: '8'.repeat(64),
         mountNamespace: 'mnt:[2]',
-        observedAtMs: observed === 'stale-runtime' ? f.io.now() - 60001 : f.io.now(),
+        observedAtMs:
+          observed === 'stale-runtime'
+            ? f.io.now() - 60001
+            : f.io.now() - (observed === 'fresh-same-runtime' && runtimeReads === 1 ? 1 : 0),
       };
+      if (runtimeReads === 2) {
+        const changes = {
+          'changed-pid': { pid: 124 },
+          'changed-start': { start: '101' },
+          'changed-boot': { bootId: '12345678-1234-4234-8234-123456789dee' },
+          'changed-parent': { ppid: 21 },
+          'changed-config': { configDigest: 'a'.repeat(64) },
+          'changed-policy': { policyDigest: 'b'.repeat(64) },
+          'changed-namespace': { mountNamespace: 'mnt:[3]' },
+          'changed-restarts': { restartCount: 13 },
+        };
+        Object.assign(proof, changes[observed]);
+      }
+      return proof;
     };
     let supplied = false;
     f.io.observe = async (...args) => {
@@ -1336,7 +1368,7 @@ for (const observed of [
         result.code,
         observed === 'expired-runtime'
           ? 'CUTOVER_DEADLINE_UNPROVEN'
-          : observed === 'lost-runtime'
+          : observed === 'lost-runtime' || String(observed).startsWith('changed-')
             ? 'MAINTENANCE_OPEN_UNPROVEN'
             : 'CUTOVER_CLOUD_RECOVERY_UNPROVEN',
         'expired status checks retain the deadline error; a closed status retains the existing open-unproven result',
@@ -1352,7 +1384,9 @@ for (const observed of [
       runtimeReads,
       acknowledged < 4
         ? 0
-        : permitted || ['lost-runtime', 'expired-runtime'].includes(observed)
+        : permitted ||
+            ['lost-runtime', 'expired-runtime'].includes(observed) ||
+            String(observed).startsWith('changed-')
           ? 2
           : 1,
     );

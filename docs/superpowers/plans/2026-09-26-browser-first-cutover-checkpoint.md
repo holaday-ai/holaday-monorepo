@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 JST 用户“继续”：恢复读取到实际开放之间绑定同一运行态
+
+从`240ce148`继续原Task4恢复接线，核对原reader→host时发现两个真实漏检：固定恢复写入会关闭cron/内存阈值重启并指定fork模式，但读取器没有检查；原host两次分别认可看似有效的观察，却未要求两次为同一进程/配置/策略。`5247a5`定向RED退出1，18项全部失败（包括8种第二次运行态替换），并非生产故障。
+
+原runtime现在明确核对`exec_mode=fork_mode`、`cron_restart=''`及`max_memory_restart=0`，缺字段也拒绝；用既有`cutoverRegistrationConfigDigest`绑定整个PM2配置（仅排除原已定义的axm_monitor），前后读取变化拒绝，输出仅摘要、不输出环境正文。原host在beforeOpen捕获身份/父进程/历史重启计数/完整配置摘要/策略/命名空间，实际发送open前要求同一事实，允许观察时间更新。缺摘要/计数/有效父进程拒绝，变化不执行open、候选保持closed；不修改原丢应答核对语义。**这证明观察期间及开放边界的稳定性，不证明恢复配置相对原停止基线已完整保留，也不证明完整新进程树。** 原inventory仍拒绝>4 cloud事件，不以这次补强放行新树或CLI。
+
+`fee43d`定向32/32通过；追加缺字段/新时间正例后，`c89072`真实Linux五模块502/502退出0、零跳过，日志`/private/tmp/holaday-cloud-config-linux-20260930.log`。原Brave夹具只增加实际PM2完整配置摘要和三项固定字段核对；`5d058d`退出0，日志`/private/tmp/holaday-cloud-config-physical-20260930.log`，仍为默认产品RPC/procfs/策略读取、原journal同ID单次效果、私有PM2/profile/显示，旧target/HTTP不重放、无关进程及持久cookie保留。其VNC/业务/备份仍合成，未重跑此前已验证的拒绝模式、未声称完整恢复或发布通过。原镜像ff58ba97完整摘要未变，断网私有PID/限资源/只读代码与公开离线包，无生产凭据。
+
+原ops最终`978a65`退出0：Node120/60/16/1012、Python12，全部零跳过，日志`/private/tmp/holaday-cloud-config-ops-20260930.log`。所有测试已结束；最终五文件Biome`3767cf`和diff-check退出0。本轮完成定向自查，不是整分支独立审查。当前未生产SSH/停机/支付/数据库/profile/密钥操作，未push/PR/合并/部署。下一步仍须原site原observer的原基线配置/计数与完整新树、真实排他工具/策略/显示来源核对及VNC恢复，而非再重复同ID恢复实验；之后是现场独立业务facts、真实停写备份/Mac恢复、非PayPal恢复、完整成功/故障/不重放演练、整分支审查、新鲜窗口。Task4 BASE、自动化、原缓存不变，所有历史组件结果不得当上线完成。
+
 ### 2026-09-30 JST（09-29 23:19Z heartbeat）：同一 PM2 注册的单次恢复效果已真实验证
 
 从`0ed5045f`继续原Task4。原runtime新增`restoreFirstCutoverCloudBrowser`，只接受固定headed服务的数字ID、attempt、已审阅停后配置摘要及维护截止；要求原owned journal处于verified、原双服务四条停止记录完整、恢复材料摘要匹配、无失败记录，以及**必须由原site提供的实时排他范围检查**。先在原journal写第五条恢复意图，再通过已有socket向PM2发送一次固定`restartProcessId`。不删除/重建注册、不执行旧启动脚本、不重置历史计数、不save/全局操作；明确关闭自动重启、watch、cron和内存阈值重启。没有默认范围检查，布尔“通过”不被接受。

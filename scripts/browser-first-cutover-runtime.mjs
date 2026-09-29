@@ -360,19 +360,24 @@ export async function readFirstCutoverCloudBrowserRecovery(input, overrides = {}
         env.pm_exec_path !== launch.command ||
         !isDeepStrictEqual(env.args, launch.args) ||
         env.exec_interpreter !== 'none' ||
+        env.exec_mode !== 'fork_mode' ||
         env.autorestart !== false ||
         env.watch !== false ||
+        env.cron_restart !== '' ||
+        env.max_memory_restart !== 0 ||
         !Number.isSafeInteger(env.restart_time) ||
         env.restart_time < 0 ||
         env.DISPLAY !== ':98'
       )
         reject();
-      // PM2 monitoring counters can change during a read; only bind launch and
-      // process identity here. The original inventory checks the full config.
+      // Bind every registration field (including environment/unknown options)
+      // across these reads; only axm_monitor is excluded by the original digest.
+      // This is current stability, NOT preservation against the stopped baseline.
       return {
         pid: row.pid,
         pmId: row.pm_id,
         name: row.name,
+        configDigest: cutoverRegistrationConfigDigest(env),
         launch: Object.fromEntries(
           [
             'name',
@@ -518,6 +523,7 @@ export async function readFirstCutoverCloudBrowserRecovery(input, overrides = {}
       pmId,
       pid,
       restartCount: selected.launch.restart_time,
+      configDigest: selected.configDigest,
       bootId: before.bootId,
       start: before.start,
       ppid: before.ppid,

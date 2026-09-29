@@ -2076,6 +2076,7 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
     value?.candidate === approval?.candidate &&
     /^[a-f0-9]{32}$/.test(value?.bootId ?? '') &&
     (!identity || value.bootId === identity.bootId);
+  let verifiedCloudRuntime;
   const assertCloudRecovered = async () => {
     const effects = await prepared.journal.readFirstCutoverEffects();
     if (!effects.cloudMaintenanceScope) return;
@@ -2094,6 +2095,11 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
       runtime.launchDigest !== declared.recoveryDigest ||
       !Number.isSafeInteger(runtime.pid) ||
       runtime.pid <= 1 ||
+      !Number.isSafeInteger(runtime.ppid) ||
+      runtime.ppid <= 1 ||
+      !Number.isSafeInteger(runtime.restartCount) ||
+      runtime.restartCount < 0 ||
+      !/^[a-f0-9]{64}$/.test(runtime.configDigest ?? '') ||
       !/^\d+$/.test(runtime.start ?? '') ||
       !uuid(runtime.bootId) ||
       !/^[a-f0-9]{64}$/.test(runtime.policyDigest ?? '') ||
@@ -2104,6 +2110,13 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
       !isDeepStrictEqual(effects, await prepared.journal.readFirstCutoverEffects())
     )
       throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+    // The expensive beforeOpen observation cannot be silently replaced by a
+    // different, independently plausible runtime at the actual send boundary.
+    // Fresh timestamps may advance; identity/config/policy must remain exact.
+    const { observedAtMs: _observedAtMs, ...stable } = runtime;
+    if (verifiedCloudRuntime && !isDeepStrictEqual(verifiedCloudRuntime, stable))
+      throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+    verifiedCloudRuntime = structuredClone(stable);
   };
   const control = async (op, target, discovery = false) => {
     if (!prepared || (!discovery && !sameIdentity(target)))
