@@ -2,6 +2,22 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29原host至真实源备份/Mac恢复同次故障链（基于75760ffe）
+
+原恢复父夹具六参数、原Linux物理夹具、原host/site/journal/backup/恢复工具均复用。增加`CUTOVER_QA_HOST=1`和只读公开缓存路径，恢复后的故障只能为`before-migration`。不是源SQL成功或新候选启动：在原host第一次调用源迁移命令前抛错；此时实际恢复回执必须已落盘、journal为migration_started，无bootstrapSeed。断言计数恰为1及原归一化错误`MAINTENANCE_RELEASE_FAILED`，不自动重试。真实候选6a46ee0f与当前协调器源码分开记录，现场/支付scope仍合成。
+
+| 验证 | 实际结果 | 日志 |
+| --- | --- | --- |
+| 原组合未接的RED | 退出1；真实离线安装成功后命中原fullHost/sourceQa互斥断言，源2表目标0表 | `/private/tmp/holaday-host-recovery-red-ready.log` |
+| 首次接通链 | 退出1；实际源导出/恢复/61SQL/回执均已完成，源2表目标90表；测试误期待未归一化故障文本，不能计通过 | `/private/tmp/holaday-host-recovery-connected.log` |
+| 最终原host同次故障链 | 退出0；原host准备/停止/真实备份/恢复/61SQL/回执后故障一次，源2表目标90表，未seed/start/open，效果计数1 | `/private/tmp/holaday-host-recovery-final.log` |
+
+前两次bootstrap失败另记于red.log和diagnostic.log：overlay目录fs.rename EXDEV，不是产品门禁失败；改QA启动为mv保留占位后继续。诊断只写私有0600限长16KiB文件，不输出业务行/密钥。每次尝试新源/目标/attempt/窗口，没有重用不明SQL结果；失败资源逐一身份核验清理，最终正常资源由原driver核验清理。仅删除可重建合成QA数据，日志/备份资料保留。两MJS Biome/node语法/diff检查退出0。完整ops关联回归本轮另附最终结果，不冒称生产/整分支验收。
+
+最终原`pnpm test:ops`（显式QA age）：120/60/16/869及Python12，退出0、零跳过；`/private/tmp/holaday-host-recovery-ops.log`。仅离线支付回归，不调用PayPal/商户/模型服务。本次没有修改生产模块，没有新鲜整分支独立审查、完整应用成功率或部署通过结论。
+
+原非host六参数入口兼容性回归亦退出0：`/private/tmp/holaday-host-recovery-legacy-regression.log`，parseEnv仍正确消费原单行配置；同次停止/真实备份/恢复/61SQL/回执后原明确尾段拒绝，源2表目标90表，未seed/start/open/replay。该8bda1020资源记录的源/目标/卷经driver核验清理，仅合成QA数据；新host和原入口两例的日志/私有恢复证据均保留。两MJS最终静态检查和diff-check退出0。
+
 ## 2026-09-29原host准备与同日志物理停止（基于bc6cc0f3）
 
 原`browser-first-cutover.integration.test.mjs`新增`CUTOVER_QA_LOST_EFFECT_CASE=host`。需要保留的QA Git/build环境；原unknown/known仍用新原age镜像容器。host模式直接使用原host所有方法，不预建journal、不替换stage/migrate/start；attach接原site/receiver。原Git候选6a46ee0f、源ede74e47，协调器为当前源码副本；真实锁定安装/tsc、完整61SQL manifest、uid998 v2报告读取、原风险绑定/startup/注册/pidfd停止，同attempt到缺备份拒绝。空数据库/支付事实、另一主机与入口仍明确合成，没有源备份/恢复/候选启动或生产效果。

@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { createConnection } from 'node:net';
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { promisify } from 'node:util';
+import { parseEnv, promisify } from 'node:util';
 import { backupAndRestoreCheck } from '/source/browser-first-cutover-backup.mjs';
 import { connectFirstCutoverGatewaySession } from '/source/browser-first-cutover-gateway-session.mjs';
 import {
@@ -55,22 +55,29 @@ const sourceQa = process.env.CUTOVER_QA_SOURCE
   ? JSON.parse(process.env.CUTOVER_QA_SOURCE)
   : undefined;
 const fullHost = process.env.CUTOVER_QA_HOST === '1';
-assert.ok(!fullHost || process.argv[2] === '--execution-site-lost-effect');
-assert.ok(!fullHost || !sourceQa);
+assert.ok(
+  !fullHost || process.argv[2] === '--execution-site-lost-effect' || (recoveryLink && sourceQa),
+);
+if (fullHost && sourceQa) {
+  assert.equal(process.env.CUTOVER_QA_HOST_FAULT, 'before-migration');
+  assert.equal(sourceQa.omitReceipt, false);
+}
 const hostConfig = fullHost
-  ? Buffer.from(
-      [
-        'MODEL_RUNTIME_POLICY=qwen_only',
-        'QWEN_CORE_ENABLED_LANES=browser',
-        'DASHSCOPE_INTL_API_KEY=synthetic-qa-not-a-provider-key',
-        'DASHSCOPE_INTL_ANTHROPIC_BASE_URL=http://127.0.0.1:1',
-        'DASHSCOPE_INTL_RESPONSES_BASE_URL=http://127.0.0.1:1',
-        'QWEN_CORE_ROLLOUT_MODE=off',
-        'TEAM_TASK_LIFECYCLE_ENABLED=false',
-        'ACCOUNT_CLOSURE_WORKER_ENABLED=false',
-        '',
-      ].join('\n'),
-    )
+  ? sourceQa
+    ? Buffer.from(sourceQa.config)
+    : Buffer.from(
+        [
+          'MODEL_RUNTIME_POLICY=qwen_only',
+          'QWEN_CORE_ENABLED_LANES=browser',
+          'DASHSCOPE_INTL_API_KEY=synthetic-qa-not-a-provider-key',
+          'DASHSCOPE_INTL_ANTHROPIC_BASE_URL=http://127.0.0.1:1',
+          'DASHSCOPE_INTL_RESPONSES_BASE_URL=http://127.0.0.1:1',
+          'QWEN_CORE_ROLLOUT_MODE=off',
+          'TEAM_TASK_LIFECYCLE_ENABLED=false',
+          'ACCOUNT_CLOSURE_WORKER_ENABLED=false',
+          '',
+        ].join('\n'),
+      )
   : undefined;
 let hostCandidate;
 if (fullHost) {
@@ -80,10 +87,12 @@ if (fullHost) {
   );
   hostCandidate = (await exec('git', ['--git-dir=/qa-origin.git', 'rev-parse', 'HEAD'])).trim();
   assert.match(hostCandidate, /^[a-f0-9]{40}$/);
-  await fs.writeFile('/var/lib/holaday-deploy/maintenance-target.env', hostConfig, {
-    flag: 'wx',
-    mode: 0o600,
-  });
+  if (sourceQa) assert.equal(hostCandidate, recoveryScope.binding.candidate);
+  else
+    await fs.writeFile('/var/lib/holaday-deploy/maintenance-target.env', hostConfig, {
+      flag: 'wx',
+      mode: 0o600,
+    });
 }
 assert.ok(!sourceQa || (recoveryLink && !recoveryDrift));
 let sourceIo;
@@ -108,7 +117,7 @@ if (sourceQa) {
     flag: 'wx',
   });
   sourceIo = {
-    parseConfig: (bytes) => ({ DATABASE_URL: bytes.toString().slice('DATABASE_URL='.length) }),
+    parseConfig: (bytes) => parseEnv(bytes.toString()),
     connectWorkDatabase: (uri) =>
       mysql.createConnection({
         uri,
@@ -224,6 +233,7 @@ let executionSite;
 let siteContext;
 let hostAdapter;
 let hostResult;
+let hostMigrationFaults = 0;
 let recoveryScopeChecks = 0;
 try {
   await pm2(
@@ -1047,8 +1057,8 @@ try {
               'readRehearsalArtifacts',
               'readFenceState',
             ]),
-            // This fixture has no database or payment service. Keep that scope
-            // explicitly synthetic rather than accidentally invoking merchants.
+            // The optional backup database does not prove application work or
+            // payment coverage. Keep those scopes explicitly synthetic.
             readDatabaseScope: async () => ({
               observedAtMs: Date.now(),
               orders: [],
@@ -1069,6 +1079,19 @@ try {
           }),
           exec: async (command, args, options) => {
             console.log('QA_HOST_COMMAND', command, JSON.stringify(args));
+            if (sourceQa && command === 'pnpm' && args.includes('db:migrate:numbered')) {
+              const durable = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+              assert.equal(durable.phase, 'migration_started');
+              assert.ok(
+                durable.backupReceipt,
+                'original host must persist the real recovery receipt before migration',
+              );
+              assert.equal(durable.bootstrapSeed, undefined);
+              // This is the explicit first host fault case, not a successful
+              // candidate release. No source SQL is executed or retried here.
+              hostMigrationFaults++;
+              throw new Error('QA_INJECTED_MIGRATION_FAILURE');
+            }
             return system.exec(command, args, options);
           },
         },
@@ -1174,6 +1197,12 @@ try {
           window: hostApproval ?? siteContext.approval,
         });
         hostResult = result;
+        if (fullHost && sourceQa)
+          assert.equal(
+            hostMigrationFaults,
+            1,
+            'fault must occur exactly once after real durable recovery',
+          );
         if (fullHost) console.log('QA_HOST_OUTCOME', JSON.stringify(result));
         if (process.env.CUTOVER_QA_HOST === '1') {
           // The old fixture's precreated bbbb journal cannot satisfy this: the
@@ -1220,7 +1249,9 @@ try {
             recoveryDrift
               ? 'CUTOVER_RECOVERY_SESSION_UNPROVEN'
               : sourceQa
-                ? 'CUTOVER_QA_UNEXPECTED_TAIL'
+                ? fullHost
+                  ? 'MAINTENANCE_RELEASE_FAILED'
+                  : 'CUTOVER_QA_UNEXPECTED_TAIL'
                 : fullHost
                   ? 'CUTOVER_SITE_UNPROVEN'
                   : 'CUTOVER_QA_RESTORE_NOT_CONFIGURED',
@@ -1243,12 +1274,18 @@ try {
           } else if (fullHost) {
             // Unlike the old adapter's artificial backup throw, the real site
             // latches its failed backup boundary. It must not issue new proofs.
-            await assert.rejects(
-              executionSite.lifecycle.assertStopped(siteContext),
-              /CUTOVER_SITE_UNPROVEN/,
-            );
+            if (sourceQa)
+              assert.deepEqual(
+                (await executionSite.lifecycle.assertStopped(siteContext)).survivors,
+                [],
+              );
+            else
+              await assert.rejects(
+                executionSite.lifecycle.assertStopped(siteContext),
+                /CUTOVER_SITE_UNPROVEN/,
+              );
             const durable = JSON.parse(await fs.readFile(journal.path, 'utf8'));
-            assert.equal(durable.backupReceipt, undefined);
+            assert.equal(Boolean(durable.backupReceipt), Boolean(sourceQa));
             assert.equal(durable.bootstrapSeed, undefined);
             assert.equal(effects.unmanagedEvents.at(-1).phase, 'unmanaged-stopped');
             await assert.rejects(fetch('http://127.0.0.1:4011'));

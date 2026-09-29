@@ -1,10 +1,22 @@
-# 首次切换实施断点：原host持锁准备与实际停止已接线，完整恢复/候选尾段仍待同次验收
+# 首次切换实施断点：原host至Mac恢复同次接通，成功候选尾段仍待验收
 
 日期：2026-09-26（Asia/Tokyo）。本地实施中，未部署。
 
 最新授权：2026-09-26 用户表示“我要出去一下 你自行安排任务 允许期间的所有操作 包含PR 部署 验证”。当前浏览器上线大项允许自主实施、PR、必要合并、部署与验证；下方历史“仅本地/未授权部署”限制已被本次授权取代。授权不等于验收通过；必须完成剩余真实接线、恢复演练与发布门槛，不得修改历史业务记录来伪造通过。
 
 ## 最新恢复点（优先于下方历史段落）
+
+### 2026-09-29 JST（00:19Z轮续）：原host、物理停写、源备份和Mac恢复同一日志接通
+
+承接`75760ffe`，只改原两份QA夹具。原host/sourceQa互斥已解除，原恢复父夹具`CUTOVER_QA_HOST=1`配合`CUTOVER_QA_BUILD_CACHE`，在原age镜像内通过只读公开Git/pnpm/store及QA origin缓存，实际clone源ede74e47、stage候选6a46ee0f、冻结安装/tsc/uid998 v2 readiness。原host唯一创建的journal贯穿原site/PM2/pidfd停止、真实源mysqldump/age、Mac隔离恢复、原全部61SQL、数据/源身份比较与持久backupReceipt。恢复私钥仍只在Mac；没有镜像重建、生产配置或真实支付调用。外部工作/支付/另一主机/入口仍明确合成，不能当生产独立facts。
+
+**本次是明确的恢复后故障场景，不是成功切换：** 仅允许`CUTOVER_QA_HOST_FAULT=before-migration`，在原host即将执行源`pnpm db:migrate:numbered`时注入一次故障。独立断言该时刻确有`migration_started`和持久恢复回执，且没有seed；原host按自身契约归一化为`MAINTENANCE_RELEASE_FAILED`并保持维护。原停止证据仍成立，旧端口关闭、效果计数1、QA resurrect只有无关进程；源始终2表、目标实际迁移后90表，未启动候选/open、不重放、不重试SQL。最终session20657退出0，资源记录5bfbf127对应的新源/目标及卷经精确核验后清理；所有日志和私有恢复资料保留。
+
+公开缓存已就绪：`/private/tmp/holaday-cutover-build-cache.Nj3E4X`含git/git-core/pnpm/store及QA cache.json，不含home/密钥/生产配置。复制旧store时只在projects旧软链接报错（未跟随），完整files/index实际离线安装6.8秒验证通过。新overlay容器原占位源码目录`fs.rename`会EXDEV，夹具使用mv保留到`/qa-image-original-source`。不要重装缓存或为这些QA安装条件改产品门禁。原prepared容器c0f4c822仍保留；只在无需测试时停止，不删除。
+
+测试红绿与故障记录见verification最新节。**下一步仍是原迁移/seed/真实新候选closed启动/readiness/open和完整故障矩阵**，不能把本次迁移前拒绝写成成功尾段。源库配置现在由原parseEnv读取而非单行字符串切片；实际候选应用对环境、主机分类和独立facts的需要必须沿原模块接，不写成功替身。CLI execute关闭，Task4 BASE不变，现场受保护接口、真实生产恢复、非PayPal恢复及整分支审查仍未完成，无push/PR/合并/部署。
+
+成功尾段接线定位（只读核对，未实现/未通过）：原host.migrate依次执行候选`db:migrate:numbered`与`db:verify`，initializeState仅迁移成功后绑定seed，start用原production脚本/PM2 uid998 no-autorestart并经控制socket读取新boot的closed/idle/clean状态。不要移除本故障模式而丢失覆盖，应新增明确成功场景。候选env.ts还要求REDIS_URL和至少32字符JWT_SECRET，现QA配置只够prepare；Redis模块lazyConnect且没有发现直接消费者，不能凭字段存在就新增Redis服务。原生产启动会unset PM2_HOME并用同一Node进程import tsx运行应用。现物理readPair把真实PM2行归Aliyun、Vultr为合成快照，成功尾段必须按真实候选位置正确观察，不能原样冒充双机事实；现facts.verifyOpenedIdentity/resumeWorker/reconcile显式拒绝、createIngress无restoreIngress，均不能换成空成功。下一轮从这些已有原接口继续，不再重装Git/cache/SQL客户端或重做恢复握手。
 
 ### 2026-09-29 JST（00:19Z heartbeat）：原host拥有同一个stage与物理停止日志
 

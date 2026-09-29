@@ -33,6 +33,19 @@ const recoveryDrift = process.env.CUTOVER_QA_RECOVERY_DRIFT === '1';
 assert.ok(!recoveryDrift || retirementLink);
 assert.ok(!retirementLink || fullSource || !runtimeRoot);
 const stoppedSource = retirementLink && fullSource;
+const fullHost = process.env.CUTOVER_QA_HOST === '1';
+assert.ok(!fullHost || stoppedSource);
+const buildCache = fullHost ? await realpath(process.env.CUTOVER_QA_BUILD_CACHE) : undefined;
+const buildProfile = fullHost
+  ? JSON.parse(await readFile(join(buildCache, 'cache.json'), 'utf8'))
+  : undefined;
+if (fullHost) {
+  assert.equal(buildProfile.schemaVersion, 1);
+  assert.equal(buildProfile.observations, 'synthetic-qa-only');
+  for (const key of ['candidate', 'sourceCandidate'])
+    assert.match(buildProfile[key], /^[a-f0-9]{40}$/);
+  assert.equal(await realpath(buildProfile.origin), buildProfile.origin);
+}
 assert.ok(!stoppedSource || !recoveryDrift);
 // QA-only mutation: a lying adapter returns a receipt without persisting it.
 // The independent journal assertion below must reject this run.
@@ -165,7 +178,20 @@ if (stoppedSource) {
     directory: '/var/lib/holaday-deploy/source-backup',
     attempt,
   };
-  const config = 'DATABASE_URL=mysql://root@127.0.0.1/restore_qa';
+  const config = fullHost
+    ? [
+        'DATABASE_URL=mysql://root@127.0.0.1/restore_qa',
+        'MODEL_RUNTIME_POLICY=qwen_only',
+        'QWEN_CORE_ENABLED_LANES=browser',
+        'DASHSCOPE_INTL_API_KEY=synthetic-qa-not-a-provider-key',
+        'DASHSCOPE_INTL_ANTHROPIC_BASE_URL=http://127.0.0.1:1',
+        'DASHSCOPE_INTL_RESPONSES_BASE_URL=http://127.0.0.1:1',
+        'QWEN_CORE_ROLLOUT_MODE=off',
+        'TEAM_TASK_LIFECYCLE_ENABLED=false',
+        'ACCOUNT_CLOSURE_WORKER_ENABLED=false',
+        '',
+      ].join('\n')
+    : 'DATABASE_URL=mysql://root@127.0.0.1/restore_qa';
   sourceQa = {
     clientDirectory,
     recipient,
@@ -226,7 +252,7 @@ const sourceIdentity = sourceTarget?.identity ?? {
 };
 const binding = {
   attempt,
-  candidate: (retirementLink ? 'b' : 'a').repeat(40),
+  candidate: fullHost ? buildProfile.candidate : (retirementLink ? 'b' : 'a').repeat(40),
   configDigest: sourceQa?.configDigest ?? (retirementLink ? 'c' : 'b').repeat(64),
   migrationDigest: hash(JSON.stringify(migrationManifest)),
   inventoryDigest: retirementLink
@@ -244,7 +270,7 @@ const binding = {
 const scope = {
   schemaVersion: 1,
   binding,
-  maintenanceEndsAtMs: Date.now() + 120000,
+  maintenanceEndsAtMs: Date.now() + (fullHost ? 600000 : 120000),
   sourceOptions,
   destination,
   identityFile,
@@ -392,7 +418,7 @@ const child = retirementLink
         '--network',
         stoppedSource ? `container:${sourceContainerId}` : 'none',
         '--cpus=1',
-        '--memory=512m',
+        fullHost ? '--memory=3g' : '--memory=512m',
         '--pids-limit=256',
         '--cap-add=SYS_PTRACE',
         '--label',
@@ -405,6 +431,18 @@ const child = retirementLink
         `CUTOVER_QA_RECOVERY_SCOPE=${JSON.stringify(publicScope)}`,
         '--env',
         `CUTOVER_QA_RECOVERY_DRIFT=${recoveryDrift ? '1' : '0'}`,
+        ...(fullHost
+          ? [
+              '--mount',
+              `type=bind,src=${buildCache},dst=/qa-build,readonly`,
+              '--mount',
+              `type=bind,src=${buildProfile.origin},dst=/qa-origin.git,readonly`,
+              '--env',
+              'CUTOVER_QA_HOST=1',
+              '--env',
+              'CUTOVER_QA_HOST_FAULT=before-migration',
+            ]
+          : []),
         ...(stoppedSource
           ? [
               '--mount',
@@ -417,7 +455,31 @@ const child = retirementLink
         '/opt/node22/bin/node',
         '--input-type=module',
         '-e',
-        "import {spawnSync} from 'node:child_process'; const r=spawnSync(process.execPath,['/source/fixtures/browser-registration-removal-linux.mjs','--execution-site-recovery'],{stdio:'inherit'}); process.exit(r.status ?? 1);",
+        `${
+          fullHost
+            ? `
+          import assert from 'node:assert/strict';
+          import * as fs from 'node:fs/promises';
+          import {execFileSync} from 'node:child_process';
+          await fs.access('/.dockerenv'); assert.equal(process.getuid(),0);
+          const profile=JSON.parse(await fs.readFile('/qa-build/cache.json','utf8'));
+          const call=(command,args,options={})=>execFileSync(command,args,{stdio:['ignore',2,2],...options});
+          call('cp',['-a','/qa-build/git','/usr/bin/git']);
+          call('cp',['-a','/qa-build/git-core','/usr/lib/git-core']);
+          call('cp',['-a','/qa-build/pnpm','/opt/node22/lib/node_modules/pnpm']);
+          await fs.symlink('/opt/node22/lib/node_modules/pnpm/bin/pnpm.cjs','/opt/node22/bin/pnpm');
+          await fs.mkdir('/var/lib/holaday/.local/share/pnpm',{recursive:true});
+          call('cp',['-a','/qa-build/store','/var/lib/holaday/.local/share/pnpm/store']);
+          call('mv',['/opt/holaday-monorepo','/qa-image-original-source']);
+          call('git',['clone','--no-hardlinks','/qa-origin.git','/opt/holaday-monorepo']);
+          call('git',['-C','/opt/holaday-monorepo','checkout','--detach',profile.sourceCandidate]);
+          call('/opt/node22/bin/pnpm',['install','--frozen-lockfile','--offline'],{
+            cwd:'/opt/holaday-monorepo',env:{PATH:'/opt/node22/bin:/usr/bin:/bin',HOME:'/var/lib/holaday'}
+          });
+        `
+            : ''
+        }
+        import {spawnSync} from 'node:child_process'; const r=spawnSync(process.execPath,['/source/fixtures/browser-registration-removal-linux.mjs','--execution-site-recovery'],{stdio:'inherit'}); process.exit(r.status ?? 1);`,
       ],
       { stdio: ['pipe', 'pipe', 'pipe'] },
     )
@@ -459,7 +521,16 @@ try {
 } finally {
   child.stdin.end();
 }
-await exited;
+try {
+  await exited;
+} catch (error) {
+  // This fixture contains synthetic QA material only; keep bounded diagnostics
+  // in its private directory, never print database rows or key material.
+  const diagnosticPath = join(directory, 'coordinator-diagnostic.log');
+  await writeFile(diagnosticPath, diagnostic, { mode: 0o600, flag: 'wx' });
+  console.error('QA diagnostic path:', diagnosticPath);
+  throw error;
+}
 if (servingError && !(retirementLink && recoveryDrift)) throw servingError;
 if (retirementLink) {
   if (recoveryDrift) assert.equal(servingError?.message, 'CUTOVER_RECOVERY_SESSION_UNPROVEN');
@@ -477,6 +548,7 @@ if (retirementLink) {
       recoveryLinked: !recoveryDrift,
       recoveryRejected: recoveryDrift,
       ...(stoppedSource ? { backupReceipt: true } : {}),
+      ...(fullHost ? { originalHost: true, nativeCandidatePreparation: true } : {}),
       riskDigest: undefined,
     },
   );
