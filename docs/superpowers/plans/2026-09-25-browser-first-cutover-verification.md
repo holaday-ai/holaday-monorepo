@@ -2,6 +2,14 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29 已授权管理配置只读现场核查
+
+用户明确授权后，正常审批通过。session86409配置存在性检查退出0；68945原`readCutoverMysqlWriters`实际生产只读采集退出0，源身份先与应用连接核对，现成管理配置只在Vultr内部使用，凭据不回传。直接全局PROCESS/EVENT与实际元数据覆盖通过；会话5、其他活动事务0、启用事件0、运行复制receiver/applier0。读取器未修改，只执行SELECT/SHOW，不改数据/权限/服务。首次因工作树未加载部署凭据未连接完成，指定既有主仓库配置后成功，未改服务器认证。
+
+31446两遍只读TCP/proc会话归属观察退出0，4会话对应2个现有UID998/Node22 Holaday进程；该次另1未归属如实保留。56166专项核对退出0，确认其为MySQL `thread/sql/event_scheduler`，TYPE实际FOREGROUND而非临时诊断假设的BACKGROUND。三次采集各自带时间戳，不合并伪造成同次停写证明；内部线程当时没有启用事件也不能证明未来无写入源。证据`/private/tmp/holaday-admin-writers-{live,ownership,daemon}-20260929.json`，配置存在性`/private/tmp/holaday-admin-metadata-config-20260929.json`，均为脱敏私密文件，不含凭据/业务原文。
+
+该特定权限阻塞已解除，既有自动化确认恢复ACTIVE，未开execute。临时采集尚非受保护现场adapter，unknownWriters零值、完整facts/恢复/最终候选验收仍未证明。没有新增产品源码或重跑组件套件，本段退出码指实际只读观察，不是整项测试通过。继续原计划，不重复索取同一授权。
+
 ## 2026-09-29 当前候选离线工具包验收（36c42add）
 
 原闭包28/22/26模块、observer、固定NFT及原查询器编译产物合计85文件封装于`/private/tmp/holaday-first-cutover-tools-jxQvxN`，manifest SHA256`12fca5965758aa8fc8740f71858dd4874c4043371eacdf0d3ece660a37bb2144`，不含现场批准/凭据/私钥/商户元数据/facts。实际LinuxNode22 session94245退出0：85文件摘要、76个MJS路径导入、原ingress/gateway校验器每侧4项篡改拒绝和复原通过；原支付查询接线15/15，零失败/取消/跳过。日志`/private/tmp/holaday-fixed-tools-linux.log`。这是当前产物验证，不重计历史整套回归数量。

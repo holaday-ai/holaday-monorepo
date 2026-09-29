@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 JST：用户明确授权管理配置只读核查，原权限阻塞已解除
+
+用户针对上一轮“只读使用Vultr现有数据库管理配置核查写入者元数据，不输出凭据、不改数据或权限”回复“授权”。经正常工具审批实施，不绕过权限。首次SSH未完成，本地排障确认工作树未加载主仓库部署配置且两个认证变量为空；明确指定既有主仓库`.env.deploy.local`后重试一次成功，没有改认证/网络设置。session86409退出0：`/root/.my.cnf`不存在，`/etc/mysql/debian.cnf`为root私密常规文件且具备现成client配置，只返回存在性/字段布尔值，没有输出配置值。
+
+session68945退出0：管理凭据仅在Vultr内部管道传递，先用既有应用连接只读核对源身份、关闭应用诊断连接，再用现成管理配置运行原`readCutoverMysqlWriters`。原模块摘要`c1bdbc5a470a06f7847f720c06ad0d3f3c14f88525b6274aa126ea3e6fea91ce`，没有替换原权限/双观测/身份校验。直接全局权限及实际事务/事件/复制元数据可读，返回会话5、其他活动事务0、启用事件0、运行复制receiver/applier均0。仅执行SELECT/SHOW，未创建账号、grant、改全局参数、业务数据、订单或服务。
+
+后续session31446退出0：两遍会话/TCP/proc关联一致，4个TCP会话对应两个现有UID998、Node22、原Holaday源目录进程。另1个未归属是临时诊断错误地要求内部daemon线程TYPE为BACKGROUND；保留该次unattributed=1，不改原报告。session56166只读进一步核实实际线程名为`thread/sql/event_scheduler`、TYPE=FOREGROUND、COMMAND=Daemon、无默认数据库，证明它是MySQL事件调度线程。不同采集有各自时间/摘要，不拼成同一受保护发布回执，当前连接归属也不证明未来不能重连或unknownWriters=0。
+
+私密脱敏证据：`/private/tmp/holaday-admin-metadata-config-20260929.json`、`/private/tmp/holaday-admin-writers-{live,ownership,daemon}-20260929.json`；本地临时采集器`/private/tmp/holaday-admin-{metadata-config,writers-live}-20260929.mjs`。所有实际连接已关闭，未持久化服务器脚本、未传回管理凭据，未碰PayPal/商户核查/恢复私钥。原既有`holaday`自动化已由应用工具确认恢复ACTIVE，保留原周期/线程并追加本授权恢复点，不新建任务。
+
+下一步不再将上述读取权限列为阻塞：把已可读的独立数据库观察接入原受保护现场facts（管理观察配置须单独受保护和绑定，不把应用运行账号改成管理账号）；结合原双机进程/入口/浏览器与外部工作/恢复来源事实继续闭环。临时诊断不是生产adapter，不自动给unknownWriters填零。之后仍是原受保护安装/单次入口、真实停写备份/Mac恢复、非PayPal恢复和整分支审查；当前CLI关闭、未部署、原Task4 BASE不变。此次仅现场只读采集及文档记录，不重跑已通过组件测试，不改产品源码。
+
 ### 2026-09-29 JST：当前36c42add离线工具包与原始Git固定入口验证完成，现场权限仍阻断
 
 本轮未改产品源码、未安装或重启任何服务。按原Task6.R3直接封装提交`36c42addc6e73884fadb4e4f053a9babf674944b`的现有固定模块，不新建发布框架：协调器28、ingress22、gateway26，原只读支付查询器编译包、observer及固定NFT资源，共85文件。包在`/private/tmp/holaday-first-cutover-tools-jxQvxN`；`packet.json` SHA256为`12fca5965758aa8fc8740f71858dd4874c4043371eacdf0d3ece660a37bb2144`。只读Git取出已提交工具字节；查询器编译前后检查源码与lockfile相对候选无差异。包明确prepareOnly=true/releaseReady=false，不含批准清单、凭据、恢复私钥、商户元数据或生产facts。生成器`/private/tmp/holaday-build-fixed-tools-20260929.mjs`为临时离线产物脚本，未加入产品源码。
