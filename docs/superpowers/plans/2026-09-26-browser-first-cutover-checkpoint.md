@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 同轮收口：恢复失败不重启、完整后代观察及真实只读范围证据
+
+从`0b48f37f`继续同一夹具，新增`--scoped-pm2-denied`：容器明确不具备SYS_ADMIN，旧实例真实PM2停止后，恢复的unshare退出1。2654退出0是**拒绝行为断言通过**，不是恢复成功：实际PM2 autorestart=false、restart_time=0、退出码1、仅一条预期unshare权限错误，间隔观察无CDP监听/旧profile进程/旧HTTP动作，无关应用、独立Xvfb、父策略、profile哨兵与用户偏好保持。临时副本去掉禁重启选项后65506退出1（autorestart true≠false），证明不会把重试路径当拒绝通过；更早46797只有变异副本注释导致的语法错误，不能算有效反例。原工作树从未去掉禁重试选项。
+
+复核发现原夹具只按profile参数收集进程，不能覆盖无该参数的后代；这不改变之前“9个观测profile进程退出”的事实，但当时不应据此推断完整树。新增真实父子进程反例46810退出1，明确漏掉无标签子进程；修正为真实PPID闭包加profile种子（保留重归属crash handler），并在失败观察中再次核对已退休全部PID/start。最终25612串行的denied及success均退出0、无跳过：反例检查通过，两种模式都实际停止旧实例，成功模式还停止恢复实例，各观测9个浏览器进程；失败分支保持拒绝。最终日志`/private/tmp/holaday-browser-tree-final-{denied,success}-20260930.log`，反例`holaday-browser-tree-red-20260930.log`，变异`holaday-browser-pm2-denied-mutant-fixed-20260930.log`。744173的Biome/Node语法/diff-check退出0。原ops63072为本轮此前的回归，测试列表不含此物理夹具；没有重跑整仓或把旧计数标为此次物理覆盖。
+
+**真实只读采集已完成，SSH权限不是当前阻塞。** 初次ebd28c未得到证据；1362b8固定跳板`true`诊断为SSH255认证拒绝、非指纹/网络/超时。原因是临时脚本未加载原部署凭据：工作树默认位置无凭据，4f1e6e通过原`load-deploy-env.sh`读取既有主仓`.env.deploy.local`，只输出字段存在性。随后用限两主机的本地临时askpass和原严格SSH跳板路线，71845退出0；未改凭据、密钥、服务器通道、agent或主机指纹，没有明文值输出。不要把先前认证失败继续报告为用户需处理的阻塞。
+
+UTC`2026-09-29T17:56:51.435Z`观察：两服务配置及进程身份前后稳定，headed16进程/VNC4进程；显示2个Unix监听、11个连接，11行客户端均归属获准两服务、无未归属或组外客户端。unshare/mount/setpriv均已核对root所有权、文件摘要与util-linux2.37.2版本；该只读root进程的有效/边界能力包含SYS_ADMIN，**未创建生产namespace或执行挂载**。证明`/private/tmp/holaday-cloud-maintenance-display-tools-20260930.json`。这仅是该时点的命名空间/连接归属和工具元数据，不证明未来独占、所有后台工作为零、恢复配置已批准或生产工具实际执行通过。
+
+剩余可执行工作仍为：把限定恢复配置与已审阅源/工具摘要接入原保护清单、journal和两服务单次执行入口；恢复差异必须显式绑定，不直接运行删除profile/操作共享对象的旧脚本。之后是独立facts、真实停写/Mac恢复、非PayPal恢复及整分支审查。此轮未修改产品模块或开启CLI，未停止生产服务/改profile、支付、数据库、私钥，没有push/PR/合并/部署；保持原自动化，旧Task4 BASE与`__pycache__`不变。
+
 ### 2026-09-30 同轮续跑：真实PM2停止→限定策略恢复闭环通过
 
 在`e6682f35`后继续原夹具的`--scoped-pm2`模式，未止于下方CDP clean-close证据。21620先因没有实际PM2停止而退出1；随后接真实PM2 6.0.14的全新私有PM2_HOME，旧浏览器autorestart=true，恢复实例autorestart=false（明确的新QA恢复配置，不声称生产配置已批准或安装）。每次仅调用一个数字ID的stop一次，读取PM2 stopped/pid0及真实`/proc` PID/start/state；观测包含带合成profile参数的重归属crash handler，不能只看根进程或PM2状态。

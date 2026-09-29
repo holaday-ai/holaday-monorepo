@@ -11,6 +11,8 @@
 // the browser runs with all capability sets cleared and no-new-privileges.
 // --scoped-pm2 adds real numeric PM2 stops before and after recovery. Its daemon
 // and unrelated app are disposable; production startup scripts are NOT executed.
+// --scoped-pm2-denied requires a container WITHOUT SYS_ADMIN and checks that
+// failed recovery stays failed, with no PM2 restart or direct-browser fallback.
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -23,14 +25,25 @@ assert.equal(process.getuid(), 0);
 assert.ok(
   process.argv.length === 2 ||
     (process.argv.length === 3 &&
-      ['--app-blank', '--policy-probe', '--scoped-policy', '--scoped-pm2'].includes(
-        process.argv[2],
-      )),
+      [
+        '--app-blank',
+        '--policy-probe',
+        '--scoped-policy',
+        '--scoped-pm2',
+        '--scoped-pm2-denied',
+      ].includes(process.argv[2])),
 );
 const appBlank = process.argv[2] === '--app-blank';
 const policyProbe = process.argv[2] === '--policy-probe';
-const scopedPm2 = process.argv[2] === '--scoped-pm2';
+const deniedRecovery = process.argv[2] === '--scoped-pm2-denied';
+const scopedPm2 = process.argv[2] === '--scoped-pm2' || deniedRecovery;
 const scopedPolicy = process.argv[2] === '--scoped-policy' || scopedPm2;
+if (deniedRecovery) {
+  const status = await fs.readFile('/proc/self/status', 'utf8');
+  const bounded = /^CapBnd:\s+([0-9a-f]+)$/m.exec(status)?.[1];
+  assert.ok(bounded);
+  assert.equal(BigInt(`0x${bounded}`) & (1n << 21n), 0n, 'fault fixture lacks SYS_ADMIN');
+}
 const policyRoot = '/etc/brave/policies/managed';
 let originalPolicy;
 if (scopedPolicy) {
@@ -78,6 +91,8 @@ let socket;
 let sequence = 0;
 const pending = new Map();
 let physicalStops = 0;
+let recoveryVisits;
+const retiredIdentities = [];
 const pm2Home = scopedPm2 ? await fs.mkdtemp('/tmp/holaday-browser-pm2-') : undefined;
 const pm2 = async (...argv) =>
   (
@@ -105,6 +120,37 @@ async function processIdentity(pid) {
 async function sameLive(identity) {
   const current = await processIdentity(identity.pid);
   return current?.start === identity.start && current.state !== 'Z';
+}
+async function ownedProcesses(root) {
+  const observed = [];
+  const selected = new Set([root.pid]);
+  for (const name of (await fs.readdir('/proc')).filter((n) => /^[0-9]+$/.test(n))) {
+    const pid = Number(name);
+    let argv;
+    try {
+      argv = await fs.readFile(`/proc/${pid}/cmdline`, 'utf8');
+    } catch (error) {
+      if (error.code === 'ENOENT' || error.code === 'ESRCH') continue;
+      throw error;
+    }
+    const identity = await processIdentity(pid);
+    if (!identity || identity.state === 'Z') continue;
+    observed.push(identity);
+    if (argv.includes(profile)) selected.add(pid);
+  }
+  // Parent closure includes untagged descendants; profile seeds also cover
+  // reparented crash handlers. Neither a name match nor ancestry alone suffices.
+  let changed;
+  do {
+    changed = false;
+    for (const p of observed) {
+      if (selected.has(p.ppid) && !selected.has(p.pid)) {
+        selected.add(p.pid);
+        changed = true;
+      }
+    }
+  } while (changed);
+  return observed.filter((p) => selected.has(p.pid));
 }
 const args = [
   '--no-sandbox',
@@ -225,21 +271,7 @@ async function close() {
   if (managed) {
     // Observe the real owned profile processes as well as descendants: a
     // reparented crash handler must not evade the post-stop assertion.
-    const observed = [];
-    for (const name of (await fs.readdir('/proc')).filter((n) => /^[0-9]+$/.test(n))) {
-      const pid = Number(name);
-      let argv;
-      try {
-        argv = await fs.readFile(`/proc/${pid}/cmdline`, 'utf8');
-      } catch (error) {
-        if (error.code === 'ENOENT' || error.code === 'ESRCH') continue;
-        throw error;
-      }
-      if (pid === managed.identity.pid || argv.includes(profile)) {
-        const identity = await processIdentity(pid);
-        if (identity && identity.state !== 'Z') observed.push(identity);
-      }
-    }
+    const observed = await ownedProcesses(managed.identity);
     assert.ok(observed.length > 1, 'real browser children were observed');
     assert.equal(await sameLive(managed.identity), true);
     await pm2('stop', String(managed.pmId)); // Exactly one numeric stop, no retry.
@@ -251,6 +283,7 @@ async function close() {
     assert.equal(await sameLive(unrelated), true);
     assert.equal(xvfb.exitCode, null);
     process.kill(xvfb.pid, 0);
+    retiredIdentities.push(...observed);
     physicalStops++;
     console.log(
       JSON.stringify({
@@ -280,6 +313,31 @@ async function close() {
 }
 try {
   if (scopedPm2) {
+    // A real descendant without the profile argument must still be observed.
+    // This private canary exits before the actual PM2/browser experiment starts.
+    const control = spawn(
+      '/opt/node22/bin/node',
+      [
+        '-e',
+        'const {spawn}=require("node:child_process");const c=spawn("/usr/bin/sleep",["600"]);console.log(c.pid);process.on("SIGTERM",()=>c.kill("SIGTERM"));c.on("exit",()=>process.exit(0));',
+        profile,
+      ],
+      { stdio: ['ignore', 'pipe', 'inherit'] },
+    );
+    try {
+      const [bytes] = await once(control.stdout, 'data');
+      const childPid = Number(bytes.toString().trim());
+      assert.ok(Number.isSafeInteger(childPid) && childPid > 1);
+      const root = await processIdentity(control.pid);
+      assert.ok(
+        (await ownedProcesses(root)).some((p) => p.pid === childPid),
+        'include untagged descendant',
+      );
+    } finally {
+      const done = once(control, 'exit');
+      control.kill('SIGTERM');
+      await done;
+    }
     assert.equal(
       JSON.parse(await fs.readFile('/opt/node22/lib/node_modules/pm2/package.json', 'utf8'))
         .version,
@@ -371,6 +429,7 @@ try {
   );
   await close();
   const before = visits;
+  recoveryVisits = before;
   if (policyProbe) {
     // Characterize policy in a disposable container ONLY. This is a global
     // location, not a production-safe per-service solution.
@@ -499,10 +558,73 @@ try {
     process.kill(xvfb.pid, 0);
   }
   if (scopedPm2) assert.equal(physicalStops, 2, 'both reviewed PM2 lifetimes actually stopped');
+  assert.equal(deniedRecovery, false, 'a denied recovery cannot report successful recovery');
   console.log(
     scopedPolicy
       ? 'BROWSER_SCOPED_POLICY_PASS: original policy outside namespace unchanged; private read-only policy, browser capabilities zero; same synthetic profile/persistent cookie, old-target positive control, no old URL on blank; session interruption accepted. NOT production or arbitrary background replay proof.'
       : 'BROWSER_RECOVERY_PROBE_PASS: real headed Brave, positive control, same synthetic cookie, no old URL on silent startup or explicit blank; NOT production or arbitrary background replay proof',
+  );
+} catch (error) {
+  if (!deniedRecovery || physicalStops !== 1) throw error;
+  // Do not accept just any rejection as the injected failure. Check actual
+  // PM2 exit metadata and its private stderr, then observe no subsequent start.
+  const observeFailure = async () => {
+    assert.equal(visits, recoveryVisits, 'failed recovery cannot repeat the old HTTP action');
+    assert.ok(
+      (await Promise.all(retiredIdentities.map(sameLive))).every((live) => !live),
+      'old untagged descendants remain stopped',
+    );
+    const rows = JSON.parse(await pm2('jlist')).filter((r) => r.name === 'qa-browser');
+    assert.equal(rows.length, 1);
+    const row = rows[0];
+    assert.equal(row.pid, 0);
+    assert.ok(['stopped', 'errored'].includes(row.pm2_env.status));
+    assert.equal(row.pm2_env.autorestart, false);
+    assert.equal(row.pm2_env.restart_time, 0);
+    assert.equal(row.pm2_env.exit_code, 1);
+    assert.ok(row.pm2_env.pm_err_log_path.startsWith(`${pm2Home}/logs/`));
+    const stderr = await fs.readFile(row.pm2_env.pm_err_log_path, 'utf8');
+    assert.equal(
+      (stderr.match(/unshare: unshare failed: Operation not permitted/g) ?? []).length,
+      1,
+      'one failed unshare launch, no replay',
+    );
+    for (const name of (await fs.readdir('/proc')).filter((n) => /^[0-9]+$/.test(n))) {
+      let argv;
+      try {
+        argv = await fs.readFile(`/proc/${name}/cmdline`, 'utf8');
+      } catch (readError) {
+        if (['ENOENT', 'ESRCH'].includes(readError.code)) continue;
+        throw readError;
+      }
+      assert.equal(argv.includes(profile), false, 'no fallback or revived profile process');
+    }
+    assert.equal(await sameLive(unrelated), true);
+    assert.equal(xvfb.exitCode, null);
+    process.kill(xvfb.pid, 0);
+    await assert.rejects(
+      fetch('http://127.0.0.1:9229/json/version', {
+        signal: AbortSignal.timeout(500),
+      }),
+    );
+    return [row.pm_id, row.pm2_env.pm_uptime, row.pm2_env.restart_time, stderr];
+  };
+  const failed = await observeFailure();
+  await sleep(2000);
+  assert.deepEqual(await observeFailure(), failed);
+  assert.deepEqual(await fs.readdir(policyRoot), ['existing.json']);
+  assert.equal(await fs.readFile(`${policyRoot}/existing.json`, 'utf8'), originalPolicy);
+  assert.equal(
+    await fs.readFile(`${profile}/Default/Sessions/preserve-sentinel`, 'utf8'),
+    'synthetic-preserve',
+  );
+  assert.equal(
+    JSON.parse(await fs.readFile(`${profile}/Default/Preferences`, 'utf8')).session
+      .restore_on_startup,
+    1,
+  );
+  console.log(
+    'BROWSER_RECOVERY_DENIAL_PROVEN: one PM2 startup exited 1 at unshare; restart count zero, no profile process or CDP listener, unrelated app/display and parent policy/profile sentinel preserved. Recovery did NOT succeed; no production or arbitrary replay proof.',
   );
 } finally {
   // Only disposable processes this test itself spawned; the container is --rm.
