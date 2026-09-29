@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 JST（09-29 17:14Z）：限定浏览器策略的真实隔离恢复路径已验证
+
+从`9a6f2d8e`继续，只扩展原`browser-cloud-recovery-probe-linux.mjs`的`--scoped-policy`模式，保留原silent/app/global-policy失败模式。新模式按已批准的云端会话中断边界验证，不再使用关闭Brave会话cookie清理的隐私特性开关；不把全部登录状态保留当硬门槛。没有重新运行已通过的完整数据库切换链、安装通道、生成密钥、访问商户或读取真实profile。
+
+**本次物理证据：** 原QA镜像具备unshare/mount/setpriv，私有挂载及丢弃能力预检3e818c退出0。扩展断言但未改变启动时，62194退出1，真实旧target恢复（HTTP增量仍为0）；这是预期RED。随后仅在浏览器自身私有mount namespace中只读绑定`RestoreOnStartup:5`策略目录，保留模拟原有策略，再exec实际Brave前清空Inh/Prm/Eff/Bnd/Amb能力并设置NoNewPrivs。76839及格式化、补充断言后的89707均退出0：子/父mount namespace不同，`/proc`实际证明只读挂载/零能力；父命名空间原策略文件列表和内容在前中后不变；原用户`restore_on_startup=1`未改写；旧target=false、所有新页面blank、旧HTTP增量0；原合成profile哨兵和持久cookie保留；独立Xvfb保持运行。新模式会话cookie消失是已接受的中断影响，不称为全部登录无损。
+
+缺少SYS_ADMIN的负向运行57738退出1，错误明确为`unshare failed: Operation not permitted`，未降级为原直接启动/全机策略，也未重试这个失败attempt。所有测试使用原`holaday-first-cutover-network:qa`、私有PID/network none、1CPU/768MiB/256pids，公开包缓存和夹具只读挂载；仅成功模式在一次性容器临时授予SYS_ADMIN，未使用privileged、宿主PID/生产凭据/宿主可写挂载。包沿用已校验的Brave1.89.141 arm64，非生产同架构证明；没有改原镜像或主机安全配置。普通Biome写入受工作树沙箱限制退出1后，通过正常权限审批7d8154格式化退出0，不绕过权限。精确label查询确认final/denied容器均已移除，原MySQL/Redis健康；没有创建数据库或新卷。
+
+日志`/private/tmp/holaday-browser-scoped-policy-{red,green,final,denied}-20260930.log`。项目原`pnpm test:ops`93937串行回归退出0，Node120/60/16/951、Python12均通过且零跳过；日志`/private/tmp/holaday-browser-scoped-policy-ops-20260930.log`。最终夹具Biome/Node语法/git diff-check均退出0。所有本轮作业已结束；未重跑上一轮1120/browser或完整DB链，不冒用为本轮新验收。
+
+**实际边界与下一步：** 这是目标进程策略隔离、原profile复用且不恢复旧标签的真实路径，不是已经安装的生产恢复器，也不证明任意service worker/后台外部行为都不会发生。当前浏览器夹具经CDP clean close后恢复，不能把此前独立VNC/PM2停止测试相加称为真实PM2停止后恢复已通过。下一步把已验证的限定启动材料及工具摘要绑定原受保护清单/journal和精确PM2恢复入口，联合原定向停止做完整物理停止→恢复检查，不再探索已否定的flags或全机策略。历史真实headed树中包含Xvfb；不能仅凭祖先关系把它或其他后代判为专属，必须重新核清整个获准组的显示连接/共享对象边界，禁止连带停止共享服务。独立现场facts、真实停写/Mac恢复、非PayPal恢复与整分支审查仍未齐备。没有生产启动/停止/profile/配置/数据库/支付/私钥修改，无push/PR/合并/部署，CLI仍关闭，自动化保持原设置。
+
 ### 2026-09-30 16:13Z heartbeat续跑：退休观察器拒绝诊断与一次完整合成链
 
 从`ab54a2b1`继续原Task4/6，未重试已否定的Brave启动参数或原源码授权。仅在原`createFirstCutoverRetirementObserver`增加失败边界诊断：初始化/读取的固定步骤、固定操作类别和五项白名单错误码；其余异常统一`UNCLASSIFIED`。默认同步写stderr，不序列化输入、原异常、cause、stack、参数或业务数据，不调用message getter；诊断自身失败仍抛原拒绝。成功路径不新增日志或等待，原观察顺序、分类谓词、范围和门禁不变。这是可保留的拒绝原因诊断，**不是历史间歇故障根因修复**。

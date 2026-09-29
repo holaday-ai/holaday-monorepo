@@ -1,11 +1,14 @@
 // Diagnostic for the approved cloud-browser recovery boundary, NOT a release gate.
-// Its no-replay + cookie-retention assertions currently FAIL for every tested mode.
+// Historical silent/app/global-policy modes retain their failed hypotheses.
 // Run only in a disposable network-none Linux container, never with a real profile.
 // No argument: silent startup; --app-blank: app window; --policy-probe: global
 // policy characterization INSIDE THE CONTAINER ONLY. Never install this policy
 // on a shared host. See the 2026-09-30 checkpoint for exact failures and limits.
 // Retaining BOTH cookies is an exploratory hypothesis, not an added release
 // requirement: the approved maintenance scope already accepts session interruption.
+// --scoped-policy tests process-private policy visibility, NOT production recovery.
+// This mode needs SYS_ADMIN in the disposable container for unshare/mount only;
+// the browser runs with all capability sets cleared and no-new-privileges.
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -17,10 +20,22 @@ await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
 assert.ok(
   process.argv.length === 2 ||
-    (process.argv.length === 3 && ['--app-blank', '--policy-probe'].includes(process.argv[2])),
+    (process.argv.length === 3 &&
+      ['--app-blank', '--policy-probe', '--scoped-policy'].includes(process.argv[2])),
 );
 const appBlank = process.argv[2] === '--app-blank';
 const policyProbe = process.argv[2] === '--policy-probe';
+const scopedPolicy = process.argv[2] === '--scoped-policy';
+const policyRoot = '/etc/brave/policies/managed';
+let originalPolicy;
+if (scopedPolicy) {
+  // Fresh container ONLY: an unrelated existing policy must remain visible and
+  // unchanged outside the recovered browser's future private mount namespace.
+  await fs.mkdir(policyRoot, { recursive: true });
+  assert.deepEqual(await fs.readdir(policyRoot), []);
+  originalPolicy = JSON.stringify({ HomepageLocation: 'about:blank' });
+  await fs.writeFile(`${policyRoot}/existing.json`, originalPolicy, { flag: 'wx' });
+}
 const exe = '/opt/brave.com/brave/brave';
 const version = (await promisify(execFile)(exe, ['--version'])).stdout;
 assert.match(version, /^Brave Browser 147\.1\.89\.141 /);
@@ -68,7 +83,7 @@ const args = [
   '--password-store=basic',
   '--hide-crash-restore-bubble',
   '--disable-session-crashed-bubble',
-  '--disable-features=BraveCleanupSessionCookiesOnSessionRestore',
+  ...(scopedPolicy ? [] : ['--disable-features=BraveCleanupSessionCookiesOnSessionRestore']),
   '--remote-debugging-address=127.0.0.1',
   '--remote-debugging-port=9229',
   `--user-data-dir=${profile}`,
@@ -81,8 +96,26 @@ async function until(predicate, ms = 15000) {
   } while (Date.now() < limit);
   throw Error('QA_CONDITION_TIMEOUT');
 }
-async function launch(extra) {
-  browser = spawn(exe, [...args, ...extra], {
+async function launch(extra, privatePolicy) {
+  // QA-only characterization, not an installed privileged launcher. The
+  // container's parent policy remains untouched; exec keeps a single exact PID.
+  const command = privatePolicy ? '/usr/bin/unshare' : exe;
+  const argv = privatePolicy
+    ? [
+        '--mount',
+        '--propagation',
+        'private',
+        '/bin/sh',
+        '-ceu',
+        'mount --bind "$1" /etc/brave/policies/managed; mount -o remount,bind,ro /etc/brave/policies/managed; shift; exec /usr/bin/setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs "$@"',
+        'qa-private-policy',
+        privatePolicy,
+        exe,
+        ...args,
+        ...extra,
+      ]
+    : [...args, ...extra];
+  browser = spawn(command, argv, {
     env: { ...process.env, DISPLAY: ':99' },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
@@ -226,7 +259,15 @@ try {
       { flag: 'wx' },
     );
   }
-  await launch(appBlank ? ['--app=about:blank'] : ['--no-startup-window']);
+  let privatePolicy;
+  if (scopedPolicy) {
+    privatePolicy = await fs.mkdtemp('/tmp/holaday-private-policy-');
+    await fs.writeFile(`${privatePolicy}/existing.json`, originalPolicy, { flag: 'wx' });
+    await fs.writeFile(`${privatePolicy}/recovery.json`, JSON.stringify({ RestoreOnStartup: 5 }), {
+      flag: 'wx',
+    });
+  }
+  await launch(appBlank ? ['--app=about:blank'] : ['--no-startup-window'], privatePolicy);
   await sleep(2000);
   const initial = await cdp('Target.getTargets');
   assert.equal(
@@ -247,9 +288,10 @@ try {
     }),
   );
   // Observe page restoration independently before asserting cookie retention.
-  // All original retention gates remain below; a policy-only result is NOT
-  // overall acceptance and may correctly fail the session-cookie assertion.
-  if (policyProbe) {
+  // Historical modes retain both-cookie assertions. The scoped mode follows
+  // the accepted session interruption boundary, without a privacy override.
+  // A policy-only result is NOT whole-release acceptance.
+  if (policyProbe || scopedPolicy) {
     await cdp('Target.createTarget', { url: 'about:blank' });
     await sleep(1000);
     const pages = (await cdp('Target.getTargets')).targetInfos.filter((t) => t.type === 'page');
@@ -268,14 +310,38 @@ try {
     );
     assert.equal(visits, before, 'policy must not request old action');
   }
+  if (scopedPolicy) {
+    assert.deepEqual(await fs.readdir(policyRoot), ['existing.json'], 'no host policy installed');
+    assert.equal(await fs.readFile(`${policyRoot}/existing.json`, 'utf8'), originalPolicy);
+    assert.notEqual(
+      await fs.readlink(`/proc/${browser.pid}/ns/mnt`),
+      await fs.readlink('/proc/self/ns/mnt'),
+      'browser policy must be process-private',
+    );
+    const status = await fs.readFile(`/proc/${browser.pid}/status`, 'utf8');
+    for (const name of ['CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb'])
+      assert.match(status, new RegExp(`^${name}:\\s+0+$`, 'm'), 'browser has no capabilities');
+    assert.match(status, /^NoNewPrivs:\s+1$/m);
+    const privateRoot = `/proc/${browser.pid}/root${policyRoot}`;
+    assert.equal(await fs.readFile(`${privateRoot}/existing.json`, 'utf8'), originalPolicy);
+    assert.deepEqual(JSON.parse(await fs.readFile(`${privateRoot}/recovery.json`, 'utf8')), {
+      RestoreOnStartup: 5,
+    });
+    const mount = (await fs.readFile(`/proc/${browser.pid}/mountinfo`, 'utf8'))
+      .split('\n')
+      .map((line) => line.split(' '))
+      .find((fields) => fields[4] === policyRoot);
+    assert.ok(mount?.[5].split(',').includes('ro'), 'private policy mount is read-only');
+  }
   assert.ok(
     cookies.cookies.some((c) => c.name === 'qa_login' && c.value === 'synthetic'),
     'same profile retained synthetic login',
   );
-  assert.ok(
-    cookies.cookies.some((c) => c.name === 'qa_session' && c.value === 'synthetic'),
-    'same profile retained synthetic session cookie',
-  );
+  if (!scopedPolicy)
+    assert.ok(
+      cookies.cookies.some((c) => c.name === 'qa_session' && c.value === 'synthetic'),
+      'same profile retained synthetic session cookie',
+    );
   await cdp('Target.createTarget', { url: 'about:blank' });
   await sleep(1000);
   assert.equal(visits, before, 'explicit blank target must not restore old action');
@@ -284,7 +350,7 @@ try {
     'explicit blank cannot revive hidden old tab',
   );
   const afterBlank = await cdp('Storage.getCookies');
-  for (const name of ['qa_login', 'qa_session'])
+  for (const name of scopedPolicy ? ['qa_login'] : ['qa_login', 'qa_session'])
     assert.ok(
       afterBlank.cookies.some((c) => c.name === name && c.value === 'synthetic'),
       `blank retains ${name}`,
@@ -294,8 +360,22 @@ try {
     'synthetic-preserve',
   );
   await close();
+  if (scopedPolicy) {
+    assert.deepEqual(await fs.readdir(policyRoot), ['existing.json']);
+    assert.equal(await fs.readFile(`${policyRoot}/existing.json`, 'utf8'), originalPolicy);
+    assert.equal(
+      JSON.parse(await fs.readFile(`${profile}/Default/Preferences`, 'utf8')).session
+        .restore_on_startup,
+      1,
+      'managed policy must not replace the saved user startup preference',
+    );
+    assert.equal(xvfb.exitCode, null, 'the separate display remains running');
+    process.kill(xvfb.pid, 0);
+  }
   console.log(
-    'BROWSER_RECOVERY_PROBE_PASS: real headed Brave, positive control, same synthetic cookie, no old URL on silent startup or explicit blank; NOT production or arbitrary background replay proof',
+    scopedPolicy
+      ? 'BROWSER_SCOPED_POLICY_PASS: original policy outside namespace unchanged; private read-only policy, browser capabilities zero; same synthetic profile/persistent cookie, old-target positive control, no old URL on blank; session interruption accepted. NOT production or arbitrary background replay proof.'
+      : 'BROWSER_RECOVERY_PROBE_PASS: real headed Brave, positive control, same synthetic cookie, no old URL on silent startup or explicit blank; NOT production or arbitrary background replay proof',
   );
 } finally {
   // Only disposable processes this test itself spawned; the container is --rm.
