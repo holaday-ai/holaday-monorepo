@@ -30,6 +30,7 @@ import {
 import {
   captureLegacyRuntime,
   initializeFirstMaintenanceState,
+  readFirstCutoverCloudBrowserRecovery,
   retireLegacyRuntime,
   validateOwnedLegacyFence,
 } from './browser-first-cutover-runtime.mjs';
@@ -1910,6 +1911,7 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
     ...candidatePreparationSystem(),
     now: Date.now,
     readApproval: readFirstCutoverApproval,
+    readCloudBrowserRecovery: readFirstCutoverCloudBrowserRecovery,
     ...overrides,
   };
   if (io.platform !== 'linux' || io.uid !== 0) throw new Error('MAINTENANCE_LINUX_ROOT_REQUIRED');
@@ -2076,7 +2078,31 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
     (!identity || value.bootId === identity.bootId);
   const assertCloudRecovered = async () => {
     const effects = await prepared.journal.readFirstCutoverEffects();
-    if (effects.cloudMaintenanceScope && effects.cloudMaintenanceEvents?.length !== 8)
+    if (!effects.cloudMaintenanceScope) return;
+    if (effects.cloudMaintenanceEvents?.length !== 8)
+      throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+    const declared = effects.cloudMaintenanceScope[1];
+    const runtime = await io.readCloudBrowserRecovery({
+      attempt: approval.attempt,
+      pmId: declared.pmId,
+    });
+    const now = io.now();
+    if (
+      runtime?.purpose !== 'cloud-browser-runtime-observation' ||
+      runtime.name !== declared.name ||
+      runtime.pmId !== declared.pmId ||
+      runtime.launchDigest !== declared.recoveryDigest ||
+      !Number.isSafeInteger(runtime.pid) ||
+      runtime.pid <= 1 ||
+      !/^\d+$/.test(runtime.start ?? '') ||
+      !uuid(runtime.bootId) ||
+      !/^[a-f0-9]{64}$/.test(runtime.policyDigest ?? '') ||
+      !/^mnt:\[\d+\]$/.test(runtime.mountNamespace ?? '') ||
+      !Number.isSafeInteger(runtime.observedAtMs) ||
+      runtime.observedAtMs > now ||
+      now - runtime.observedAtMs > 60000 ||
+      !isDeepStrictEqual(effects, await prepared.journal.readFirstCutoverEffects())
+    )
       throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
   };
   const control = async (op, target, discovery = false) => {
@@ -2086,6 +2112,9 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
       // `opened` is a post-effect journal phase. Reject incomplete temporary
       // recovery here, before issuing open, not only when persisting success.
       await assertCloudRecovered();
+      // The read-only physical observation can itself consume the remaining
+      // window. Revalidate authority/deadline before, not after, sending open.
+      await guard();
     }
     if (op === 'close') {
       // A lost response cannot authorize replay by an outer cleanup layer.

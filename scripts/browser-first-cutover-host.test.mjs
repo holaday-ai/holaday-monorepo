@@ -1244,8 +1244,21 @@ async function runLifecycle(f) {
   return { adapter, result };
 }
 
-for (const acknowledged of [0, 1, 2, 3, 4])
-  test(`cloud recovery prefix ${acknowledged} permits open only when both services are acknowledged`, async (t) => {
+for (const observed of [
+  0,
+  1,
+  2,
+  3,
+  4,
+  'unsafe-runtime',
+  'stale-runtime',
+  'wrong-id',
+  'lost-runtime',
+  'expired-runtime',
+])
+  test(`cloud recovery prefix ${observed} requires acknowledgements and independent runtime before open`, async (t) => {
+    const acknowledged = typeof observed === 'string' ? 4 : observed;
+    const permitted = observed === 4;
     const f = await lifecycleFixture(t);
     const services = ['holaday-vnc', 'holaday-chromium-headed'].map((name, index) => ({
       name,
@@ -1273,6 +1286,28 @@ for (const acknowledged of [0, 1, 2, 3, 4])
           });
     };
     const observe = f.io.observe;
+    let runtimeReads = 0;
+    f.io.readCloudBrowserRecovery = async ({ attempt, pmId }) => {
+      assert.equal(attempt, f.binding.attempt);
+      assert.equal(pmId, 8);
+      runtimeReads++;
+      if (observed === 'expired-runtime' && runtimeReads === 2)
+        f.setTime(f.approval.maintenanceEndsAtMs);
+      if (observed === 'unsafe-runtime' || (observed === 'lost-runtime' && runtimeReads === 2))
+        throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+      return {
+        purpose: 'cloud-browser-runtime-observation',
+        name: 'holaday-chromium-headed',
+        pmId: observed === 'wrong-id' ? 99 : pmId,
+        pid: 123,
+        start: '100',
+        bootId: '12345678-1234-4234-8234-123456789def',
+        launchDigest: services[1].recoveryDigest,
+        policyDigest: '8'.repeat(64),
+        mountNamespace: 'mnt:[2]',
+        observedAtMs: observed === 'stale-runtime' ? f.io.now() - 60001 : f.io.now(),
+      };
+    };
     let supplied = false;
     f.io.observe = async (...args) => {
       await observe(...args);
@@ -1294,21 +1329,33 @@ for (const acknowledged of [0, 1, 2, 3, 4])
       }
     };
     const { result } = await runLifecycle(f);
-    assert.equal(result.ok, acknowledged === 4);
-    if (acknowledged < 4) {
+    assert.equal(result.ok, permitted);
+    if (!permitted) {
       assert.equal(result.phase, 'verified');
       assert.equal(
         result.code,
-        'CUTOVER_CLOUD_RECOVERY_UNPROVEN',
-        'a failed precondition is not a lost open acknowledgement',
+        observed === 'expired-runtime'
+          ? 'CUTOVER_DEADLINE_UNPROVEN'
+          : observed === 'lost-runtime'
+            ? 'MAINTENANCE_OPEN_UNPROVEN'
+            : 'CUTOVER_CLOUD_RECOVERY_UNPROVEN',
+        'expired status checks retain the deadline error; a closed status retains the existing open-unproven result',
       );
     }
     assert.equal(
       f.events.includes('control:open'),
-      acknowledged === 4,
+      permitted,
       'must refuse before the actual open effect',
     );
-    assert.equal(f.candidateStatus().mode, acknowledged === 4 ? 'serving' : 'closed');
+    assert.equal(f.candidateStatus().mode, permitted ? 'serving' : 'closed');
+    assert.equal(
+      runtimeReads,
+      acknowledged < 4
+        ? 0
+        : permitted || ['lost-runtime', 'expired-runtime'].includes(observed)
+          ? 2
+          : 1,
+    );
   });
 
 test('host composes first-only disposition and durable interruption into the original release tail', async (t) => {

@@ -6,6 +6,24 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 JST（09-29 22:19Z heartbeat）：恢复运行态独立读取接入原开放前检查
+
+从`0b9d9d9a`继续原Task4。在原runtime增加只读`readFirstCutoverCloudBrowserRecovery`，只选受保护声明的数字PM2 ID及固定headed名称，核对既有固定恢复命令、真实/proc执行文件/完整参数/UID/DISPLAY/start/boot、五组能力全部为零、NoNewPrivs、不同且不传播的挂载命名空间、策略只读挂载、挂载前后策略inode/权限/字节、原父策略不变及精确RestoreOnStartup=5。两轮现场读取及PM2前后核对拒绝竞态；输出只含身份和摘要，不输出环境或策略正文。
+
+原host在beforeOpen及真正发送open前读取上述事实并与原声明恢复摘要匹配，发送前再次核对期限/权限。完整八事件仍不等于恢复：实际读失败、错ID、过期观察、两次检查之间失去运行态或读取耗尽维护窗口均不发送open。该读取不证明完整新进程树、显示独占、工具文件字节、VNC恢复或任意外部请求没有重放；原inventory仍拒绝超过四条cloud事件，CLI仍关闭，未扩大任何上线豁免。
+
+产品读取RED58cb51退出1，实际DISPLAY反例d2834d退出1后接入真实environ核对；原host的八事件但运行态拒绝反例90204退出1后通过。最终真实Brave物理60389退出0（较早82829也通过）：只覆盖私有PM2命名空间选择，所有/proc和策略读取均走产品默认实现；增加真实策略文件改成可写后的拒绝与恢复权限后的成功读取。原策略、合成profile哨兵和持久cookie、无关进程/显示保留，旧target/HTTP动作未重放。原拒绝模式58482退出0代表实际unshare启动退出1、无自动重启/回退，不是恢复成功。日志`/private/tmp/holaday-cloud-recovery-observation-{physical,final,denied}-20260930.log`。原隔离镜像/公开离线缓存、私有PID、断网、1CPU/768MiB/256pids，无生产凭据/profile挂载。
+
+截止反例最初错误替换已经复制的io.now，随后改用夹具已有setTime；再沿原release-tail核实过期status检查返回截止错误。17579/55239及Linux22520因此失败，22520为474/475、零跳过，其后的ops未执行。这些失败不是生产逻辑通过。最终本机80377十种前缀/运行态反例10/10退出0、零跳过。为证明RED而临时移除新guard的补丁遭安全检查拒绝且未执行；保留guard，只修正测试，不绕过限制，不把此截止覆盖声称为有效的先失败后实现证据。
+
+69238随后完成Linux475/475及原ops Node120/60/16/1000、Python12，退出0、零跳过；这是重启计数修正前版本。只读原隔离镜像PM2 6.0.14源码（b86976/71a8e4，无PM2启动）确认restartProcessId对stopped对象直接startProcessId，不清零历史restart_time，resetState仅重置created_at/unstable_restarts/prev_restart_delay。因此不能要求历史计数为0：新增f69fd8反例退出1，改成非负安全整数、两次读取值不变并在结果保留restartCount，反例包含采集中计数变化；本机03cbcc 3/3通过。该值仍须由后续完整恢复控制器对比原停止基线，不能凭此次读值证明没有历史或本次重启。未来同ID恢复入口还需核实配置合并，仅源码检查不表示已接通或可直接调用PM2 API。
+
+提交前只读源码核对f0016f发现`pm2 jlist`/Client.start会自动拉起缺失daemon，不能作为本次严格只读默认值。a8fd5c禁止CLI的反例退出1后，改为仅用原PM2的axon/RPC依赖连接已存在socket，固定调用getMonitorData，不构造Client/API、不初始化目录、不调用start；前后校验socket类型/owner/inode，5秒只读超时关闭连接。物理41984最终退出0，只有私有socket路径由夹具选择，RPC/procfs/策略全部产品默认；缺失daemon时目录保持空、真实Brave观察/可写策略拒绝/无旧target与profile保留通过。日志`/private/tmp/holaday-cloud-recovery-readonly-rpc-physical-20260930.log`。这是本轮最终物理读取证据，前述jlist版本降为历史。此轮不顺带重写原有其他采集器，整体发布仍需整分支审查。
+
+最终RPC版本93405串行Linux476/476及原ops Node120/60/16/1000、Python12全部退出0、零跳过；日志`/private/tmp/holaday-cloud-recovery-rpc-final-{linux,ops}-20260930.log`。五文件Biome/dd24d6及diff-check通过。f7bf18核实原QA镜像仍为ff58ba97完整摘要，只有原MySQL/Redis容器且健康，无遗留QA；所有测试任务已结束。原ops中的PayPal命名用例为离线预检测试，没有访问PayPal服务。未重跑完整DB物理链或完成整分支审查。
+
+未进行生产SSH、双服务恢复/停机、数据库/支付/密钥/profile变更，未push/PR/合并/部署。下一步必须将原恢复执行器及observer的新身份/完整树核对接通，绑定新鲜工具、策略和显示事实，再完成原现场业务facts、停写备份/Mac恢复、非PayPal恢复、完整演练、整分支审查与新鲜窗口。本次观察器不能替代这些剩余验收，不重做已完成通道、商户或密钥。原inventory对>4事件仍拒绝，CLI/首次发布仍未开放，Task4 BASE与既有自动化不变。
+
 ### 2026-09-30 JST（09-29 21:18Z heartbeat）：原执行入口接通临时双服务停止与独立现场核对
 
 从`6d1057e9`继续原Task4。原site在生产者退役和gateway准备后调用原observer的`stopCloudServices`；固定VNC→headed顺序、原journal持久化意图后，默认执行器发送单次数字ID的`pm2 stop … --watch`，不按名称扩大范围、不删除注册、不添加超时杀CLI或自动重试。执行前再次核对原声明、主机/boot、daemon、完整PPID后代和保留配置；执行后从独立快照证明原树全部消失、注册确实stopped/pid0、固定服务端口无监听，才记确认。残留或重新托管的后代、未知新进程、来源/daemon/配置漂移、丢应答、超期均拒绝继续第二个服务。共享Xvfb/Xorg/openbox不得进入目标树。

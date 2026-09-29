@@ -15,6 +15,215 @@ import * as firstRuntime from './browser-first-cutover-runtime.mjs';
 import { retireMaintenanceRuntime } from './browser-maintenance-runtime.mjs';
 
 const digest = 'a'.repeat(64);
+function cloudRecoveryObservationFixture() {
+  const input = { attempt: '12345678-1234-4234-8234-123456789abc', pmId: 7 };
+  const launch = firstRuntime.firstCutoverCloudBrowserRecoveryLaunch({ attempt: input.attempt });
+  const policy = '/etc/brave/policies/managed';
+  const source = `/var/lib/holaday-deploy/maintenance/${input.attempt}/cloud-browser-policy`;
+  const privatePolicy = `/proc/40/root${policy}`;
+  const files = new Map([
+    ['/proc/sys/kernel/random/boot_id', '12345678-1234-4234-8234-123456789def\n'],
+    ['/proc/40/stat', `40 (brave) S 20 ${Array(17).fill('0').join(' ')} 1234 0`],
+    [
+      '/proc/40/cmdline',
+      `${launch.args.slice(launch.args.indexOf('/opt/brave.com/brave/brave')).join('\0')}\0`,
+    ],
+    ['/proc/40/environ', 'DISPLAY=:98\0PRIVATE_VALUE=never-exported\0'],
+    [
+      '/proc/40/status',
+      'Uid:\t0\t0\t0\t0\nCapInh:\t00000000\nCapPrm:\t00000000\nCapEff:\t00000000\nCapBnd:\t00000000\nCapAmb:\t00000000\nNoNewPrivs:\t1\n',
+    ],
+    ['/proc/40/mountinfo', `23 21 0:1 /private ${policy} ro,relatime - ext4 /dev/qa rw\n`],
+  ]);
+  for (const path of [policy, source, privatePolicy]) {
+    files.set(`${path}/existing.json`, '{"HomepageLocation":"about:blank"}');
+    if (path !== policy) files.set(`${path}/recovery.json`, '{"RestoreOnStartup":5}');
+  }
+  const links = new Map([
+    ['/proc/40/exe', '/opt/brave.com/brave/brave'],
+    ['/proc/40/ns/mnt', 'mnt:[2]'],
+    ['/proc/self/ns/mnt', 'mnt:[1]'],
+  ]);
+  const manager = {
+    name: 'holaday-chromium-headed',
+    pm_id: 7,
+    pid: 40,
+    pm2_env: {
+      name: 'holaday-chromium-headed',
+      status: 'online',
+      pm_exec_path: launch.command,
+      args: launch.args,
+      exec_interpreter: 'none',
+      autorestart: false,
+      watch: false,
+      restart_time: 0,
+      DISPLAY: ':98',
+    },
+  };
+  const stat = (path) => ({
+    uid: 0,
+    mode: files.has(path) ? 0o100644 : 0o40755,
+    dev: 1,
+    ino: path.includes('recovery.json') ? 4 : path.endsWith('.json') ? 3 : 2,
+    size: Buffer.byteLength(files.get(path) ?? ''),
+    mtimeMs: 1,
+    ctimeMs: 1,
+    nlink: 1,
+  });
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    now: () => 1000,
+    readManagers: async () => structuredClone([manager]),
+    exec: async () => {
+      throw new Error('read-only observation must never launch the PM2 CLI');
+    },
+    readFile: async (path) => {
+      assert.ok(files.has(path), path);
+      return files.get(path);
+    },
+    readlink: async (path) => {
+      assert.ok(links.has(path), path);
+      return links.get(path);
+    },
+    readdir: async (path) =>
+      path === policy ? ['existing.json'] : ['existing.json', 'recovery.json'],
+    lstat: async (path) => stat(path),
+  };
+  return { input, io, manager, files, links, source, privatePolicy, policy };
+}
+test('cloud recovery observation reads actual fixed manager, process and private policy without returning configuration contents', async () => {
+  const f = cloudRecoveryObservationFixture();
+  assert.equal(typeof firstRuntime.readFirstCutoverCloudBrowserRecovery, 'function');
+  const proof = await firstRuntime.readFirstCutoverCloudBrowserRecovery(f.input, f.io);
+  assert.equal(proof.pid, 40);
+  assert.equal(proof.start, '1234');
+  assert.equal(proof.pmId, 7);
+  assert.equal(proof.observedAtMs, 1000);
+  assert.equal(proof.purpose, 'cloud-browser-runtime-observation');
+  assert.match(proof.policyDigest, /^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(proof).includes('HomepageLocation'), false);
+  assert.equal('unknownWriters' in proof, false);
+});
+test('cloud recovery observation retains historical PM2 restart count without treating it as a new recovery retry', async () => {
+  const f = cloudRecoveryObservationFixture();
+  f.manager.pm2_env.restart_time = 12;
+  const proof = await firstRuntime.readFirstCutoverCloudBrowserRecovery(f.input, f.io);
+  assert.equal(proof.restartCount, 12);
+});
+test('cloud recovery observation refuses unsafe launch, missing protection, conflicting policy and identity races', async () => {
+  assert.equal(typeof firstRuntime.readFirstCutoverCloudBrowserRecovery, 'function');
+  const faults = {
+    platform: (f) => {
+      f.io.platform = 'darwin';
+    },
+    uid: (f) => {
+      f.io.uid = 998;
+    },
+    arbitraryInput: (f) => {
+      f.input.pid = 40;
+    },
+    manager: (f) => {
+      f.manager.pm_id++;
+    },
+    restart: (f) => {
+      f.manager.pm2_env.autorestart = true;
+    },
+    replay: (f) => {
+      f.manager.pm2_env.args = [...f.manager.pm2_env.args, 'https://example.invalid/action'];
+    },
+    script: (f) => {
+      f.manager.pm2_env.pm_exec_path = '/opt/holaday-headed/start.sh';
+    },
+    display: (f) => {
+      f.manager.pm2_env.DISPLAY = ':0';
+    },
+    actualDisplay: (f) => {
+      f.files.set('/proc/40/environ', 'DISPLAY=:0\0');
+    },
+    environmentDisplayDuplicate: (f) => {
+      f.files.set('/proc/40/environ', 'DISPLAY=:98\0DISPLAY=:0\0');
+    },
+    actualArgv: (f) => {
+      f.files.set('/proc/40/cmdline', '/opt/brave.com/brave/brave\0--restore-last-session\0');
+    },
+    actualExe: (f) => {
+      f.links.set('/proc/40/exe', '/usr/bin/sleep');
+    },
+    sameNamespace: (f) => {
+      f.links.set('/proc/40/ns/mnt', 'mnt:[1]');
+    },
+    writableMount: (f) => {
+      f.files.set('/proc/40/mountinfo', f.files.get('/proc/40/mountinfo').replace(' ro,', ' rw,'));
+    },
+    privilege: (f) => {
+      f.files.set(
+        '/proc/40/status',
+        f.files.get('/proc/40/status').replace('CapBnd:\t00000000', 'CapBnd:\t00000001'),
+      );
+    },
+    newPrivileges: (f) => {
+      f.files.set(
+        '/proc/40/status',
+        f.files.get('/proc/40/status').replace('NoNewPrivs:\t1', 'NoNewPrivs:\t0'),
+      );
+    },
+    policyOverride: (f) => {
+      f.files.set(`${f.privatePolicy}/recovery.json`, '{"RestoreOnStartup":1}');
+    },
+    sourceDrift: (f) => {
+      f.files.set(`${f.source}/recovery.json`, '{"RestoreOnStartup":1}');
+    },
+    parentDrift: (f) => {
+      f.files.set(`${f.policy}/existing.json`, '{"RestoreOnStartup":1}');
+    },
+    symlink: (f) => {
+      const stat = f.io.lstat;
+      f.io.lstat = async (p) => ({ ...(await stat(p)), mode: 0o120777 });
+    },
+    writable: (f) => {
+      const stat = f.io.lstat;
+      f.io.lstat = async (p) => ({ ...(await stat(p)), mode: (await stat(p)).mode | 0o002 });
+    },
+    identityRace: (f) => {
+      const read = f.io.readFile;
+      let n = 0;
+      f.io.readFile = async (p) =>
+        p === '/proc/40/stat' && n++ ? (await read(p)).replace('1234', '1235') : read(p);
+    },
+    managerRace: (f) => {
+      const readManagers = f.io.readManagers;
+      let n = 0;
+      f.io.readManagers = async () => {
+        if (n++) f.manager.pid++;
+        return readManagers();
+      };
+    },
+    restartRace: (f) => {
+      const readManagers = f.io.readManagers;
+      let n = 0;
+      f.io.readManagers = async () => {
+        if (n++) f.manager.pm2_env.restart_time++;
+        return readManagers();
+      };
+    },
+    policyRace: (f) => {
+      const read = f.io.readFile;
+      let n = 0;
+      f.io.readFile = async (p) =>
+        p === `${f.source}/recovery.json` && n++ ? '{"RestoreOnStartup":1}' : read(p);
+    },
+  };
+  for (const [name, mutate] of Object.entries(faults)) {
+    const f = cloudRecoveryObservationFixture();
+    mutate(f);
+    await assert.rejects(
+      () => firstRuntime.readFirstCutoverCloudBrowserRecovery(f.input, f.io),
+      /CUTOVER_CLOUD_RECOVERY_UNPROVEN/,
+      name,
+    );
+  }
+});
 test('cloud recovery launch cannot select another profile, command, policy directory or restart behavior', () => {
   const build = firstRuntime.firstCutoverCloudBrowserRecoveryLaunch;
   assert.equal(typeof build, 'function');

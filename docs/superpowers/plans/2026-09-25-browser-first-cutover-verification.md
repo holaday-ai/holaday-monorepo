@@ -2,6 +2,16 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 JST（09-29 22:19Z）：恢复运行态与原开放前门禁
+
+最终物理读取采用**不自动启动daemon的现有socket RPC**，而非会自动daemonize的pm2 jlist。a8fd5c禁止CLI反例退出1后改正。41984退出0，日志`/private/tmp/holaday-cloud-recovery-readonly-rpc-physical-20260930.log`；仅私有socket路径为QA选择，默认产品RPC/procfs/策略读取全部实际执行。新增缺失daemon目录保持空反例，无PM2文件创建，实际可写策略拒绝和正常恢复观察均通过。前述jlist物理结果仅历史。最终93405：Linux476/476、ops Node120/60/16/1000及Python12均退出0、零跳过，日志`/private/tmp/holaday-cloud-recovery-rpc-final-{linux,ops}-20260930.log`；五文件Biome/diff-check通过，原MySQL/Redis健康、无QA遗留。未完成全分支审查或整项上线验收，未访问PayPal服务。
+
+原runtime的只读观察器直接读取实际PM2、procfs及私有只读策略；原host的beforeOpen和实际open前消费，不能仅凭八条恢复事件开放。实际argv/exe/DISPLAY/权限、策略字节/原父策略和两轮身份稳定性均检查，原完整进程树/显示独占/工具审查尚未接完；原inventory仍拒绝恢复事件，首次CLI未开启。
+
+真实Brave最终60389退出0，含可写策略拒绝及恢复权限后再次读取；拒绝模式58482退出0代表恢复命令实际退出1且无重试/回退。旧target/HTTP动作不重放、合成profile哨兵/持久cookie/无关进程/显示保留。默认产品读取真实/proc与文件，仅测试私有PM2命名空间为夹具选择。日志`/private/tmp/holaday-cloud-recovery-observation-{final,denied}-20260930.log`。
+
+本机最终80377开放门禁10/10退出0、零跳过；首次Linux22520为474/475退出1、零跳过，因截止夹具时钟和错误码预期不正确，已按原setTime及release-tail/status调用链修正；ops未在该失败后运行。暂移除guard以复现RED的补丁被安全拒绝，未执行且未绕过；该截止测试只计覆盖，不记为有效RED→GREEN。产品读取及运行态失败门禁有实际缺实现RED58cb51/d2834d/90204。69238完成较早版本Linux475/475、ops120/60/16/1000和Python12，退出0、零跳过。随后依据原PM2源码加入历史重启计数兼容：f69fd8先退出1，03cbcc 3/3通过，允许历史非零但拒绝采集中改变并返回restartCount供后续基线比较；不是证明无重启。最终Linux/ops待续记。无生产/PayPal/数据库/密钥变更；整项发布仍未通过。
+
 ## 2026-09-30 JST（09-29 21:18Z）：临时双服务停止的产品执行闭环
 
 原site→原observer/controller→原journal意图→默认固定数字ID PM2停止→独立进程快照确认→原journal确认，按VNC/headed顺序接通。保留注册和无关进程，不重建框架；原永久退役名单不变。原声明必须匹配新鲜完整树和配置，残留/重新托管/回生进程、丢应答、来源或配置变化、未知写入者和截止时间失败均不继续下一服务、不自动重试。

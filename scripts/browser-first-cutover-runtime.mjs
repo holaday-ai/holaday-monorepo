@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import {
@@ -55,6 +56,265 @@ export function firstCutoverCloudBrowserRecoveryLaunch(input) {
     env: { DISPLAY: ':98' },
     autorestart: false,
   };
+}
+
+/** Independent, read-only observation of the fixed recovered browser. This is
+ * not stop/restore authorization, display exclusivity, a tool audit, or proof
+ * about all external work. Its caller must still prove those separately. Raw
+ * environment, policy and PM2 configuration never leave this boundary. */
+export async function readFirstCutoverCloudBrowserRecovery(input, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    rpcSocket: '/root/.pm2/rpc.sock',
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+  };
+  const sha = (value) => createHash('sha256').update(value).digest('hex');
+  try {
+    const { attempt, pmId } = structuredClone(input);
+    if (
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      Object.keys(input).sort().join(',') !== 'attempt,pmId' ||
+      !Number.isSafeInteger(pmId) ||
+      pmId < 0
+    )
+      reject();
+    const launch = firstCutoverCloudBrowserRecoveryLaunch({ attempt });
+    const name = 'holaday-chromium-headed';
+    const startTime = io.now();
+    if (!Number.isSafeInteger(startTime) || startTime < 0) reject();
+    const readManagers =
+      io.readManagers ??
+      (async () => {
+        // The PM2 CLI and Client.start automatically spawn a missing daemon.
+        // Connect only to the existing socket with PM2's RPC dependencies; never
+        // construct its Client/API, initialize files, or invoke a launch method.
+        const before = await io.lstat(io.rpcSocket);
+        if (before.uid !== 0 || (before.mode & 0o170000) !== 0o140000) reject();
+        const require = createRequire('/opt/node22/lib/node_modules/pm2/package.json');
+        const socket = require('pm2-axon').socket('req');
+        const client = new (require('pm2-axon-rpc').Client)(socket);
+        const rows = await new Promise((resolve, rejectRead) => {
+          let finished = false;
+          const done = (error, value) => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timer);
+            socket.close();
+            if (error) rejectRead(error);
+            else resolve(value);
+          };
+          const timer = setTimeout(() => done(new Error('timeout')), 5000);
+          socket.once('error', (error) => done(error));
+          socket.once('connect', () => client.call('getMonitorData', {}, done));
+          try {
+            socket.connect(io.rpcSocket);
+          } catch (error) {
+            done(error);
+          }
+        });
+        const after = await io.lstat(io.rpcSocket);
+        if (
+          before.dev !== after.dev ||
+          before.ino !== after.ino ||
+          after.uid !== 0 ||
+          (after.mode & 0o170000) !== 0o140000
+        )
+          reject();
+        return rows;
+      });
+    const manager = async () => {
+      const rows = await readManagers();
+      if (!Array.isArray(rows)) reject();
+      const matches = rows.filter((r) => r.name === name || r.pm_id === pmId);
+      const row = matches[0];
+      const env = row?.pm2_env;
+      if (
+        matches.length !== 1 ||
+        row.name !== name ||
+        row.pm_id !== pmId ||
+        !Number.isSafeInteger(row.pid) ||
+        row.pid <= 1 ||
+        env?.name !== name ||
+        env.status !== 'online' ||
+        env.pm_exec_path !== launch.command ||
+        !isDeepStrictEqual(env.args, launch.args) ||
+        env.exec_interpreter !== 'none' ||
+        env.autorestart !== false ||
+        env.watch !== false ||
+        !Number.isSafeInteger(env.restart_time) ||
+        env.restart_time < 0 ||
+        env.DISPLAY !== ':98'
+      )
+        reject();
+      // PM2 monitoring counters can change during a read; only bind launch and
+      // process identity here. The original inventory checks the full config.
+      return {
+        pid: row.pid,
+        pmId: row.pm_id,
+        name: row.name,
+        launch: Object.fromEntries(
+          [
+            'name',
+            'status',
+            'pm_exec_path',
+            'args',
+            'exec_interpreter',
+            'autorestart',
+            'watch',
+            'restart_time',
+            'DISPLAY',
+          ].map((k) => [k, env[k]]),
+        ),
+      };
+    };
+    const selected = await manager();
+    const pid = selected.pid;
+    const root = '/etc/brave/policies/managed';
+    const source = `/var/lib/holaday-deploy/maintenance/${attempt}/cloud-browser-policy`;
+    const mounted = `/proc/${pid}/root${root}`;
+    const metadata = async (path, type) => {
+      const s = await io.lstat(path);
+      if (s.uid !== 0 || (s.mode & 0o170000) !== type || s.mode & 0o022) reject();
+      return Object.fromEntries(
+        ['dev', 'ino', 'uid', 'mode', 'size', 'mtimeMs', 'ctimeMs', 'nlink'].map((k) => [k, s[k]]),
+      );
+    };
+    const policies = async (path) => {
+      const directory = await metadata(path, 0o40000);
+      const names = (await io.readdir(path)).sort();
+      if (names.length > 64 || names.some((n) => !/^[A-Za-z0-9_-]+\.json$/.test(n))) reject();
+      const entries = [];
+      for (const name of names) {
+        const file = `${path}/${name}`;
+        const stat = await metadata(file, 0o100000);
+        if (stat.size > 1024 * 1024 || stat.nlink !== 1) reject();
+        const raw = await io.readFile(file, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (
+          !parsed ||
+          typeof parsed !== 'object' ||
+          Array.isArray(parsed) ||
+          Buffer.byteLength(raw) !== stat.size ||
+          !isDeepStrictEqual(stat, await metadata(file, 0o100000))
+        )
+          reject();
+        entries.push({ name, stat, digest: sha(raw), parsed });
+      }
+      if (
+        !isDeepStrictEqual(names, (await io.readdir(path)).sort()) ||
+        !isDeepStrictEqual(directory, await metadata(path, 0o40000))
+      )
+        reject();
+      return entries;
+    };
+    const sample = async () => {
+      const bootId = (await io.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim();
+      if (!/^[a-f0-9-]{36}$/.test(bootId)) reject();
+      const fields = await io.readFile(`/proc/${pid}/stat`, 'utf8');
+      if (!fields.startsWith(`${pid} (`)) reject();
+      const stat = fields
+        .slice(fields.lastIndexOf(')') + 2)
+        .trim()
+        .split(/\s+/);
+      if (!['R', 'S', 'D', 'I'].includes(stat[0]) || !/^\d+$/.test(stat[19] ?? '')) reject();
+      if ((await io.readlink(`/proc/${pid}/exe`)) !== '/opt/brave.com/brave/brave') reject();
+      const argv = (await io.readFile(`/proc/${pid}/cmdline`, 'utf8')).split('\0');
+      if (
+        argv.pop() !== '' ||
+        !isDeepStrictEqual(
+          argv,
+          launch.args.slice(launch.args.indexOf('/opt/brave.com/brave/brave')),
+        )
+      )
+        reject();
+      const displays = (await io.readFile(`/proc/${pid}/environ`, 'utf8'))
+        .split('\0')
+        .filter((value) => value.startsWith('DISPLAY='));
+      if (!isDeepStrictEqual(displays, ['DISPLAY=:98'])) reject();
+      const status = await io.readFile(`/proc/${pid}/status`, 'utf8');
+      if (!/^Uid:\s+0\s+0\s+0\s+0$/m.test(status) || !/^NoNewPrivs:\s+1$/m.test(status)) reject();
+      for (const key of ['CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb'])
+        if (!new RegExp(`^${key}:\\s+0+$`, 'm').test(status)) reject();
+      const namespace = await io.readlink(`/proc/${pid}/ns/mnt`);
+      if (
+        !/^mnt:\[\d+\]$/.test(namespace) ||
+        namespace === (await io.readlink('/proc/self/ns/mnt'))
+      )
+        reject();
+      const mounts = (await io.readFile(`/proc/${pid}/mountinfo`, 'utf8'))
+        .split('\n')
+        .map((line) => line.split(' '))
+        .filter((row) => row[4] === root);
+      if (
+        mounts.length !== 1 ||
+        !mounts[0][5].split(',').includes('ro') ||
+        mounts[0].some((field) => /^(shared|master|propagate_from):/.test(field))
+      )
+        reject();
+      const original = await policies(root);
+      const privateFiles = await policies(source);
+      const actual = await policies(mounted);
+      if (
+        !isDeepStrictEqual(privateFiles, actual) ||
+        original.some((p) => p.name === 'recovery.json') ||
+        !isDeepStrictEqual(
+          privateFiles.map((p) => p.name).sort(),
+          [...original.map((p) => p.name), 'recovery.json'].sort(),
+        ) ||
+        original.some(
+          (p) =>
+            !isDeepStrictEqual(p.parsed, privateFiles.find((f) => f.name === p.name)?.parsed) ||
+            p.digest !== privateFiles.find((f) => f.name === p.name)?.digest ||
+            Object.hasOwn(p.parsed, 'RestoreOnStartup'),
+        ) ||
+        !isDeepStrictEqual(privateFiles.find((p) => p.name === 'recovery.json')?.parsed, {
+          RestoreOnStartup: 5,
+        })
+      )
+        reject();
+      return {
+        bootId,
+        start: stat[19],
+        ppid: Number(stat[1]),
+        namespace,
+        policyDigest: sha(JSON.stringify({ original, privateFiles })),
+        mount: mounts[0],
+      };
+    };
+    const before = await sample();
+    if (!isDeepStrictEqual(before, await sample()) || !isDeepStrictEqual(selected, await manager()))
+      reject();
+    const observedAtMs = io.now();
+    if (
+      !Number.isSafeInteger(observedAtMs) ||
+      observedAtMs < startTime ||
+      observedAtMs - startTime > 60000
+    )
+      reject();
+    return {
+      purpose: 'cloud-browser-runtime-observation',
+      name,
+      pmId,
+      pid,
+      restartCount: selected.launch.restart_time,
+      bootId: before.bootId,
+      start: before.start,
+      ppid: before.ppid,
+      mountNamespace: before.namespace,
+      policyDigest: before.policyDigest,
+      launchDigest: sha(JSON.stringify(launch)),
+      observedAtMs,
+    };
+  } catch {
+    reject();
+  }
 }
 
 export function validateLegacyWorkBoundary(input) {

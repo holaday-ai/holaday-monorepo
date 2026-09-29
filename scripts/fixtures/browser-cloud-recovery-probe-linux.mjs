@@ -20,7 +20,10 @@ import * as fs from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
-import { firstCutoverCloudBrowserRecoveryLaunch } from '../browser-first-cutover-runtime.mjs';
+import {
+  firstCutoverCloudBrowserRecoveryLaunch,
+  readFirstCutoverCloudBrowserRecovery,
+} from '../browser-first-cutover-runtime.mjs';
 await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
 assert.ok(
@@ -99,6 +102,22 @@ let physicalStops = 0;
 let recoveryVisits;
 const retiredIdentities = [];
 const pm2Home = scopedPm2 ? await fs.mkdtemp('/tmp/holaday-browser-pm2-') : undefined;
+if (scopedPm2) {
+  // An absent daemon must stay absent. The default product reader, with only
+  // the disposable socket path selected, may not create a PM2 pid/socket/file.
+  const empty = await fs.readdir(pm2Home);
+  await assert.rejects(
+    () =>
+      readFirstCutoverCloudBrowserRecovery(
+        { attempt, pmId: 0 },
+        {
+          rpcSocket: `${pm2Home}/rpc.sock`,
+        },
+      ),
+    /CUTOVER_CLOUD_RECOVERY_UNPROVEN/,
+  );
+  assert.deepEqual(await fs.readdir(pm2Home), empty);
+}
 const pm2 = async (...argv) =>
   (
     await promisify(execFile)(
@@ -197,7 +216,7 @@ async function launch(extra, privatePolicy, usePm2 = false) {
       'start',
       command,
       '--name',
-      'qa-browser',
+      'holaday-chromium-headed',
       '--interpreter',
       'none',
       '--kill-timeout',
@@ -206,7 +225,9 @@ async function launch(extra, privatePolicy, usePm2 = false) {
       '--',
       ...argv,
     );
-    const matches = JSON.parse(await pm2('jlist')).filter((r) => r.name === 'qa-browser');
+    const matches = JSON.parse(await pm2('jlist')).filter(
+      (r) => r.name === 'holaday-chromium-headed',
+    );
     assert.equal(matches.length, 1);
     assert.equal(matches[0].pm2_env.status, 'online');
     assert.equal(matches[0].pm2_env.autorestart, !privatePolicy);
@@ -456,6 +477,36 @@ try {
     scopedPm2,
   );
   await sleep(2000);
+  if (scopedPm2) {
+    const observationIo = {
+      // Only select the exclusive disposable socket. Actual read-only RPC,
+      // process and policy reads use the product observer's Linux defaults.
+      rpcSocket: `${pm2Home}/rpc.sock`,
+    };
+    const observation = await readFirstCutoverCloudBrowserRecovery(
+      { attempt, pmId: managed.pmId },
+      observationIo,
+    );
+    assert.equal(observation.pid, browser.pid);
+    assert.equal(observation.start, managed.identity.start);
+    assert.equal(observation.purpose, 'cloud-browser-runtime-observation');
+    const policyFile = `${privatePolicy}/recovery.json`;
+    const originalMode = (await fs.stat(policyFile)).mode & 0o777;
+    await fs.chmod(policyFile, 0o666);
+    await assert.rejects(
+      () => readFirstCutoverCloudBrowserRecovery({ attempt, pmId: managed.pmId }, observationIo),
+      /CUTOVER_CLOUD_RECOVERY_UNPROVEN/,
+    );
+    await fs.chmod(policyFile, originalMode);
+    assert.equal(
+      (await readFirstCutoverCloudBrowserRecovery({ attempt, pmId: managed.pmId }, observationIo))
+        .pid,
+      browser.pid,
+    );
+    console.log(
+      'CLOUD_RECOVERY_OBSERVATION_PASS: real PM2, procfs, private read-only policy and zero capabilities',
+    );
+  }
   const initial = await cdp('Target.getTargets');
   assert.equal(
     initial.targetInfos.filter((t) => t.type === 'page').length,
@@ -576,7 +627,7 @@ try {
       (await Promise.all(retiredIdentities.map(sameLive))).every((live) => !live),
       'old untagged descendants remain stopped',
     );
-    const rows = JSON.parse(await pm2('jlist')).filter((r) => r.name === 'qa-browser');
+    const rows = JSON.parse(await pm2('jlist')).filter((r) => r.name === 'holaday-chromium-headed');
     assert.equal(rows.length, 1);
     const row = rows[0];
     assert.equal(row.pid, 0);
