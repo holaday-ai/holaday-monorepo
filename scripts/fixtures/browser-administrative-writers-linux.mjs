@@ -1,11 +1,15 @@
 // Disposable, network-isolated Linux/MySQL fixture only. No production files.
 // The driver must mount the QA socket at /var/run/mysqld and dependencies /deps.
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { promisify } from 'node:util';
+import { readCutoverHostSnapshot } from '../browser-cutover-evidence.mjs';
 import {
   readFirstCutoverAdministrativeWriters,
+  readFirstCutoverAttributedWriters,
   readFirstCutoverDatabaseWriters,
 } from '../browser-first-cutover-host.mjs';
 import { acquireReleaseJournal } from '../browser-maintenance-journal.mjs';
@@ -38,6 +42,8 @@ try {
   await root.query('INSERT INTO source_qa.probe VALUES (1, 0)');
   await root.query("CREATE USER 'limited'@'localhost'");
   await root.query('GRANT SELECT ON source_qa.* TO limited@localhost');
+  await root.query("CREATE USER 'tcp_limited'@'127.0.0.1' IDENTIFIED BY 'synthetic-tcp'");
+  await root.query("GRANT SELECT ON source_qa.* TO 'tcp_limited'@'127.0.0.1'");
   await root.query("CREATE USER 'observer'@'localhost' IDENTIFIED BY 'synthetic-private'");
   await root.query('GRANT PROCESS, EVENT, REPLICATION CLIENT ON *.* TO observer@localhost');
   await root.query('GRANT SELECT ON performance_schema.* TO observer@localhost');
@@ -99,6 +105,57 @@ try {
   assert.equal(observed.counts.enabledEvents, 1);
   assert.equal(observed.counts.replicationReceivers, 0);
   assert.equal(observed.counts.replicationAppliers, 0);
+  // Real loopback TCP in the isolated DB network namespace; PID namespace stays
+  // private. Only absent QA service-manager/startup/nginx boundaries are stubbed.
+  // /proc enumeration/identity stability and both ss observations use originals.
+  const execute = promisify(execFile);
+  const readSessionHost = () =>
+    readCutoverHostSnapshot({
+      ...fs,
+      platform: process.platform,
+      uid: process.getuid(),
+      now: Date.now,
+      pm2RuntimeSnapshot: async () => ({ synthetic: true }),
+      nginxSnapshot: async () => ({ dump: '', files: [] }),
+      startupSnapshot: async () => [],
+      exec: async (command, args) => {
+        if (command === 'ss') return (await execute('ss', args, { timeout: 5000 })).stdout;
+        if (command === 'pm2') return '[]';
+        if (command === 'systemctl' || command === 'crontab') return '';
+        throw new Error('unexpected QA command');
+      },
+    });
+  const tcpClient = await mysql.createConnection({
+    host: '127.0.0.1',
+    port: 3306,
+    user: 'tcp_limited',
+    password: 'synthetic-tcp',
+    database: 'source_qa',
+    connectTimeout: 5000,
+  });
+  connections.push(tcpClient);
+  await tcpClient.query('SELECT 1');
+  const attributed = await readFirstCutoverAttributedWriters(context, inventory, {
+    ...io,
+    readSessionHost,
+  });
+  assert.equal(attributed.sessionAttribution.sessions, 3);
+  assert.equal(attributed.sessionAttribution.unattributed, 2); // two Unix clients must remain unknown
+  assert.equal(attributed.sessionAttribution.eventSchedulers, 0);
+  assert.equal(attributed.sessionAttribution.unknownWritersZeroProven, false);
+  assert.equal(attributed.sessionAttribution.processes.length, 1);
+  assert.equal(attributed.sessionAttribution.processes[0].pid, process.pid);
+  assert.equal(attributed.unknownWriters, undefined);
+  assert.equal(JSON.stringify(attributed).includes('synthetic-private'), false);
+  await tcpClient.end();
+  connections.splice(connections.indexOf(tcpClient), 1);
+  const disconnected = await readFirstCutoverAttributedWriters(context, inventory, {
+    ...io,
+    readSessionHost,
+  });
+  assert.equal(disconnected.sessionAttribution.sessions, 2);
+  assert.equal(disconnected.sessionAttribution.unattributed, 2);
+  assert.deepEqual(disconnected.sessionAttribution.processes, []);
   await root.query('START TRANSACTION');
   await root.query('UPDATE source_qa.probe SET value=1 WHERE id=1');
   let active;
@@ -121,7 +178,7 @@ try {
     message: 'CUTOVER_DATABASE_WRITERS_UNPROVEN',
   });
   console.log(
-    'PASS Linux original administrative adapter: real private CNF, original connector/query/journal; restricted app unchanged; sessions/event/transaction visible; revoked permission and config drift rejected. Synthetic observation only, not release readiness.',
+    'PASS Linux original administrative/attribution adapters: real private CNF, connector/query/journal, MySQL TCP to original proc/ss collector; current PID attributed and disappears on disconnect; Unix sessions remain unknown; restricted app unchanged; sessions/event/transaction visible; revoked permission and config drift rejected. QA manager/startup/nginx stubs, not global writer exclusion or release readiness.',
   );
 } finally {
   for (const connection of connections.reverse()) await connection.end();

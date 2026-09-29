@@ -340,6 +340,7 @@ test('administrative writer observation binds a private config without promoting
   assert.equal(typeof firstHost.readFirstCutoverAdministrativeWriters, 'function');
   for (const fault of [
     'none',
+    'attributed',
     'inventory',
     'mode',
     'owner',
@@ -419,6 +420,12 @@ test('administrative writer observation binds a private config without promoting
         connectWorkDatabase: async () => {
           throw new Error('application connection must not be promoted or used');
         },
+        readSessionHost: async () => ({
+          observedAtMs: 1000,
+          bootId: '11111111-1111-4111-8111-111111111111',
+          processes: [],
+          tcp: { before: '', after: '' },
+        }),
         observerFs: {
           realpath: async (p) => ((await fs.realpath(mapped(p))) === path ? p : '/different'),
           lstat: async (p) => rootStat(await fs.lstat(mapped(p))),
@@ -441,6 +448,7 @@ test('administrative writer observation binds a private config without promoting
             query: async ({ sql }) => {
               queries++;
               assert.match(sql, /^(SELECT|SHOW) /);
+              if (sql === 'SELECT @@port AS port') return [[{ port: 3306 }]];
               if (fault === 'drift' && queries === 1) await fs.appendFile(path, '# changed\n');
               if (sql.includes('@@server_uuid'))
                 return [
@@ -475,18 +483,24 @@ test('administrative writer observation binds a private config without promoting
         },
       };
       if (fault === 'inventory') inventory.databaseObserver.configDigest = '0'.repeat(64);
-      if (fault === 'none') {
-        const result = await firstHost.readFirstCutoverAdministrativeWriters(ctx, inventory, io);
+      if (['none', 'attributed'].includes(fault)) {
+        const result = await firstHost[
+          fault === 'attributed'
+            ? 'readFirstCutoverAttributedWriters'
+            : 'readFirstCutoverAdministrativeWriters'
+        ](ctx, inventory, io);
         assert.equal(result.scope, 'mysql-server-observation-only');
         assert.equal(result.unknownWriters, undefined);
         assert.equal(JSON.stringify(result).includes('synthetic-private'), false);
+        if (fault === 'attributed')
+          assert.equal(result.sessionAttribution.unknownWritersZeroProven, false);
       } else
         await assert.rejects(firstHost.readFirstCutoverAdministrativeWriters(ctx, inventory, io), {
           message: 'CUTOVER_DATABASE_WRITERS_UNPROVEN',
         });
       assert.equal(
         connections,
-        ['none', 'identity', 'drift', 'permission', 'close'].includes(fault) ? 1 : 0,
+        ['none', 'attributed', 'identity', 'drift', 'permission', 'close'].includes(fault) ? 1 : 0,
       );
       assert.equal(closes, connections);
     });

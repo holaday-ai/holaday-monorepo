@@ -8,6 +8,7 @@ import {
   collectCutoverEvidence,
   cutoverLegacyInterruptionRisk,
   readCutoverDatabaseScope,
+  readCutoverHostSnapshot,
   readCutoverWorkScope,
 } from './browser-cutover-evidence.mjs';
 import { backupAndRestoreCheck, encryptMysqlAgeBackup } from './browser-first-cutover-backup.mjs';
@@ -22,6 +23,7 @@ import {
   classifyFirstCutoverRetirementPair,
 } from './browser-first-cutover-inventory.mjs';
 import {
+  readCutoverMysqlSessionOwners,
   readCutoverMysqlSnapshot,
   readCutoverMysqlWriters,
 } from './browser-first-cutover-mysql.mjs';
@@ -1198,9 +1200,13 @@ export async function readFirstCutoverAdministrativeWriters(context, input, over
       },
       code,
       async (connection, activeIO) => {
-        const proof = await readCutoverMysqlWriters(connection, metadata.sourceIdentity, {
-          now: activeIO.now,
-        });
+        const proof = await (io.readAdministrativeObservation ?? readCutoverMysqlWriters)(
+          connection,
+          metadata.sourceIdentity,
+          {
+            now: activeIO.now,
+          },
+        );
         if (!original.equals(await readPrivate())) reject();
         return proof;
       },
@@ -1208,6 +1214,22 @@ export async function readFirstCutoverAdministrativeWriters(context, input, over
   } catch {
     reject();
   }
+}
+
+/** Same protected local administrative connection, plus the existing local
+ * process/TCP collector. No SSH recursion from an ingress writer callback.
+ * Session attribution still does not prove future-writer exclusion. */
+export function readFirstCutoverAttributedWriters(context, inventory, overrides = {}) {
+  return readFirstCutoverAdministrativeWriters(context, inventory, {
+    ...overrides,
+    readAdministrativeObservation: (connection, identity, options) =>
+      readCutoverMysqlSessionOwners(
+        connection,
+        identity,
+        overrides.readSessionHost ?? readCutoverHostSnapshot,
+        options,
+      ),
+  });
 }
 
 /** This maps only explicit approved metadata. It does not prove historical

@@ -2,6 +2,18 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29 当前会话归属接线与现网只读证据（不是停写证明）
+
+**最终串行结果（覆盖下方运行中记录）：** session26686退出0：browser1095/1095、Linux217/217、ops120/60/16/926及Python12，全部零失败/取消/跳过；原连接器/journal/真实MySQL/proc/ss隔离夹具亦退出0。七MJS Biome与diff-check退出0。本轮主智能体定向自查已修证据年龄，但不是整分支独立审查；没有生产写操作/PR/push/merge/deploy，CLI关闭，原Task4仍未完成。九个明确文件待保存提交；旧cache保留。
+
+原MySQL reader→原proc/ss稳定观察→原受保护管理连接→site已接通。只唯一归属当前本地TCP会话；未归属、漂移、假冒事件线程或权限缺失不放行，原独立facts仍必需。标准事件线程按真实FOREGROUND识别。输出计数与身份摘要，保留`unknownWritersZeroProven:false`，不推导未来无法写入。原应用账号/权限/业务数据/支付、普通发布及CLI execute不变。
+
+新功能RED→GREEN：初始54项，接线修正后22968为213/213；真实驱动字符串端口16081诊断后加规范字符串/非法格式反例，56/56；最早采集时间及site传播反例RED后92589为125/125。各GREEN退出0零跳过。最终217项真实Linux与原连接器/journal/MySQL/proc/ss隔离fixture已通过，session26686仍在继续完整42文件/ops回归，待收尾；日志`/private/tmp/holaday-session-owners-{linux,real-linux,browser,ops}-final.log`。
+
+现网36610退出0，凭据仅服务器内部：同次5会话归属4TCP→2UID998进程+1真实MySQL事件线程，未归属0、事务/启用事件/复制活动0。原完整host观察器未替换；脱敏证据`/private/tmp/holaday-admin-writers-attributed-20260929.json`，读取器摘要及边界见checkpoint。本次在后续时间保守修复前采集，不声称最终部署候选/窗口验收，也不将全局unknownWriters填0。第一次工具权限审核超时未执行，唯一重试正常获批，无生产写操作。
+
+失败记录保留：8631补丁误置导致site失败；36821隔离TCP账号未建，21869原默认驱动字符串端口未支持，16081诊断确认；12476完整回归受沙箱Unix socket EPERM影响1072通过/21失败；56316完整回归读到新年龄RED反例1092通过/2失败。均退出1、不计通过。最终重跑使用冻结的修复代码。隔离fixture仅manager/startup/nginx是合成边界，真实proc/ss/MySQL与默认保护读者不替换；不是生产双机/停写/恢复验收。所有本轮合成容器/卷按标签清理，可重建，既有数据库Redis不动。
+
 ## 2026-09-29 独立管理观察接线（非发布通过）
 
 原host增加显式受保护管理观察，原site在`inventory.databaseObserver`绑定下把脱敏来源交给独立facts；不切换应用账号、不修改权限，不凭会话计数判断全局停写。固定Debian配置路径、摘要/文件身份、源UUID/库名、原journal与窗口均校验；原MySQL读者不改。新的site不能用回调零值盖过活动事务/事件/复制或缺失/陈旧/漂移来源；其他独立facts仍必须提供，CLI execute仍关闭。

@@ -353,6 +353,7 @@ test('independent connected TCP blocks interruption even when writer callback cl
 test('approved administrative observation feeds writer facts and independently blocks active database sources', async (t) => {
   for (const fault of [
     'none',
+    'older-attribution',
     'transactions',
     'enabledEvents',
     'replicationReceivers',
@@ -362,6 +363,11 @@ test('approved administrative observation feeds writer facts and independently b
     'digest',
     'read-error',
     'scope-drift',
+    'attribution-missing',
+    'unattributed',
+    'counter-mismatch',
+    'future-attribution',
+    'claim-global',
   ]) {
     await t.test(fault, async (t) => {
       const databaseObserver = {
@@ -382,10 +388,34 @@ test('approved administrative observation feeds writer facts and independently b
           replicationAppliers: 0,
         },
         sourceDigest: '3'.repeat(64),
+        sessionAttribution: {
+          scope: 'current-session-attribution-only',
+          observedAtMs: 1000,
+          sessions: 5,
+          unattributed: 0,
+          eventSchedulers: 1,
+          processes: [
+            {
+              pid: 10,
+              start: '1000',
+              ppid: 1,
+              uids: [998, 998, 998, 998],
+              identityDigest: '4'.repeat(64),
+            },
+          ],
+          sourceDigest: '5'.repeat(64),
+          unknownWritersZeroProven: false,
+        },
       };
       if (fault in proof.counts) proof.counts[fault] = 1;
       if (fault === 'future') proof.observedAtMs = 1001;
       if (fault === 'digest') proof.sourceDigest = '';
+      if (fault === 'attribution-missing') proof.sessionAttribution = undefined;
+      if (fault === 'unattributed') proof.sessionAttribution.unattributed = 1;
+      if (fault === 'counter-mismatch') proof.sessionAttribution.sessions = 4;
+      if (fault === 'future-attribution') proof.sessionAttribution.observedAtMs = 1001;
+      if (fault === 'older-attribution') proof.sessionAttribution.observedAtMs = 900;
+      if (fault === 'claim-global') proof.sessionAttribution.unknownWritersZeroProven = true;
       let reads = 0;
       f.io.readAdministrativeWriters = async (ctx, inventory) => {
         reads++;
@@ -404,11 +434,21 @@ test('approved administrative observation feeds writer facts and independently b
         assert.equal(sources.database.unknownWriters, undefined);
         return original(ctx);
       };
+      const createIngress = f.io.createIngress;
+      f.io.createIngress = (input, deps) =>
+        createIngress(input, {
+          ...deps,
+          observeWriters: async () => {
+            const result = await deps.observeWriters();
+            if (fault === 'older-attribution') assert.equal(result.observedAtMs, 900);
+            return result;
+          },
+        });
       const site = f.make();
       await site.lifecycle.attach(f.context);
       for (const phase of ['prepared', 'orders_fenced', 'legacy_interruption_accepted'])
         await f.journal.persist(phase, { candidate: f.binding.candidate });
-      if (fault === 'none') {
+      if (['none', 'older-attribution'].includes(fault)) {
         await site.lifecycle.acceptLegacyInterruption(f.context);
         assert.ok(delivered > 0);
       } else await assert.rejects(site.lifecycle.acceptLegacyInterruption(f.context), /UNPROVEN/);

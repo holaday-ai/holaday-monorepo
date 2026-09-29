@@ -42,6 +42,149 @@ async function readWriters(f, options = {}) {
   return api.readCutoverMysqlWriters(f.db, identity, { now: () => 1000, ...options });
 }
 
+test('session attribution joins real session identities to stable local TCP owners without claiming global exclusion', async (t) => {
+  for (const fault of [
+    'none',
+    'string-port',
+    'clock-progress',
+    'invalid-port',
+    'remote',
+    'unix',
+    'ownerless',
+    'ambiguous',
+    'unknown-process',
+    'fake-daemon',
+    'row-drift',
+    'tcp-drift',
+    'future-host',
+    'duplicate-session',
+    'permission',
+  ]) {
+    await t.test(fault, async () => {
+      assert.equal(typeof api.readCutoverMysqlSessionOwners, 'function');
+      const f = writerFixture();
+      f.state.sources.PROCESSLIST.push({ id: 8, command: 'Daemon' });
+      const rows = [
+        {
+          id: 7,
+          account: 'private-account',
+          host: 'localhost:45000',
+          selectedDatabase: 'source_db',
+          command: 'Sleep',
+          threadName: 'thread/sql/one_connection',
+          threadType: 'FOREGROUND',
+        },
+        {
+          id: 8,
+          account: 'event_scheduler',
+          host: 'localhost',
+          selectedDatabase: null,
+          command: 'Daemon',
+          threadName: 'thread/sql/event_scheduler',
+          threadType: 'FOREGROUND',
+        },
+      ];
+      const tcp = 'ESTAB 0 0 127.0.0.1:45000 127.0.0.1:3306 users:(("node",pid=42,fd=20))';
+      const host = {
+        observedAtMs: 1000,
+        bootId: '11111111-1111-4111-8111-111111111111',
+        tcp: { before: tcp, after: tcp },
+        processes: [
+          {
+            pid: 42,
+            ppid: 1,
+            start: '4200',
+            uids: [998, 998, 998, 998],
+            exe: '/opt/node22/bin/node',
+            cwd: '/private-source',
+            argvDigest: 'a'.repeat(64),
+            cgroup: '0::/system.slice',
+          },
+        ],
+      };
+      if (fault === 'remote') rows[0].host = '192.0.2.1:45000';
+      if (fault === 'unix') rows[0].host = 'localhost';
+      if (fault === 'ownerless') host.tcp.before = host.tcp.after = tcp.split(' users:')[0];
+      if (fault === 'ambiguous') host.tcp.before = host.tcp.after = `${tcp},("node",pid=43,fd=21)`;
+      if (fault === 'unknown-process') host.processes = [];
+      if (fault === 'fake-daemon') rows[1].threadName = 'thread/sql/one_connection';
+      if (fault === 'tcp-drift') host.tcp.after = tcp.replace('pid=42', 'pid=43');
+      if (fault === 'future-host') host.observedAtMs = 1001;
+      if (fault === 'duplicate-session') rows[1].id = 7;
+      if (fault === 'permission') f.state.grants = ['GRANT USAGE ON *.* TO qa'];
+      let reads = 0;
+      const original = f.db.query;
+      f.db.query = async (input) => {
+        if (input.sql === 'SELECT @@port AS port')
+          return [
+            [
+              {
+                port:
+                  fault === 'string-port' ? '3306' : fault === 'invalid-port' ? '3.306e3' : 3306,
+              },
+            ],
+          ];
+        if (input.sql.includes('LEFT JOIN performance_schema.threads')) {
+          assert.equal(input.timeout, 4000);
+          reads++;
+          const copy = structuredClone(rows);
+          if (fault === 'row-drift' && reads === 2) copy[0].id = 9;
+          return [copy];
+        }
+        return original(input);
+      };
+      let time = 1000;
+      const read = () =>
+        api.readCutoverMysqlSessionOwners(
+          f.db,
+          identity,
+          async () => {
+            if (fault === 'clock-progress') time = 2000;
+            return structuredClone(host);
+          },
+          { now: () => time },
+        );
+      if (
+        [
+          'row-drift',
+          'tcp-drift',
+          'future-host',
+          'duplicate-session',
+          'permission',
+          'invalid-port',
+        ].includes(fault)
+      ) {
+        await assert.rejects(read, { message: 'CUTOVER_MYSQL_SESSION_ATTRIBUTION_UNPROVEN' });
+      } else {
+        const result = await read();
+        const attribution = result.sessionAttribution;
+        assert.equal(attribution.scope, 'current-session-attribution-only');
+        assert.equal(attribution.observedAtMs, 1000);
+        assert.equal(attribution.sessions, 2);
+        assert.equal(
+          attribution.unattributed,
+          ['none', 'string-port', 'clock-progress'].includes(fault) ? 0 : 1,
+        );
+        assert.equal(attribution.eventSchedulers, fault === 'fake-daemon' ? 0 : 1);
+        assert.equal(attribution.unknownWritersZeroProven, false);
+        assert.equal(result.unknownWriters, undefined);
+        assert.equal(
+          attribution.processes.length,
+          ['none', 'string-port', 'clock-progress', 'fake-daemon'].includes(fault) ? 1 : 0,
+        );
+        if (attribution.processes.length)
+          assert.deepEqual(
+            { pid: attribution.processes[0].pid, start: attribution.processes[0].start },
+            { pid: 42, start: '4200' },
+          );
+        assert.match(attribution.sourceDigest, /^[a-f0-9]{64}$/);
+        assert.equal(JSON.stringify(result).includes('private-account'), false);
+        assert.equal(JSON.stringify(result).includes('/private-source'), false);
+      }
+    });
+  }
+});
+
 test('writer observation checks full metadata visibility before reading any sessions', async () => {
   const f = writerFixture();
   const result = await readWriters(f);

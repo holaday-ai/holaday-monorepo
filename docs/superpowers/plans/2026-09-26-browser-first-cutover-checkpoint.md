@@ -6,6 +6,22 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 JST：当前会话归属已接通，取得同次真实只读归属证据
+
+最终收尾：session26686退出0，browser1095/1095、真实Linux217/217、ops120/60/16/926及Python12，均零失败/取消/跳过；真实隔离MySQL默认连接器/proc/ss夹具亦退出0。七MJS Biome和diff-check退出0，所有本轮测试进程已结束。下面“运行中/待收”段落仅为过程记录，已由本段取代。九个明确源码/测试/记录文件准备保存提交，原cache不纳入。主智能体按审查清单复核本轮差异并修复证据年龄，不称独立整分支审查已完成；尚未判断整分支可以合并。没有生产写入、PR/push/merge/deploy，CLI关闭。现网只读会话归属已实证，无需下一轮重做；接下来应接剩余独立facts及真实恢复/最终交付。
+
+从已提交`fa99119e1536aca259d30823247155e695c263ad`继续，原Task4 BASE不变。原MySQL模块增加`readCutoverMysqlSessionOwners`：复用原全局元数据/权限/双观测读者，用前后两次MySQL会话与线程身份夹住原`readCutoverHostSnapshot`的稳定proc/TCP观察；只唯一匹配本地ESTAB连接到实际进程身份。远端、Unix、无属主、多属主或进程缺失仍记未归属，漂移/权限错误拒绝；事件线程须匹配真实`thread/sql/event_scheduler`、FOREGROUND、Daemon及无默认库，不凭用户名豁免。输出只有计数、进程身份与摘要，不输出账号、SQL、路径或业务原文，明确`unknownWritersZeroProven:false`。
+
+原host通过同一个受保护管理配置/源身份/journal提供`readFirstCutoverAttributedWriters`，原site显式选择该来源。存在未归属会话、计数/范围/时间/摘要错误均先拒绝，不让独立facts里的零覆盖缺口；仍必须提供独立knownExternalWork/unknownWriters及恢复来源事实，不能用会话归属代替未来写入排除。自审另修证据年龄：归属时间保留最早采集时间，site合并时取最早来源，并在回调后再次检查新鲜度，不能由最后一次SQL刷新60秒窗口。
+
+TDD：会话归属初始缺导出RED，后54项通过；host/site接线RED后，首次GREEN补丁误放到observeWork导致失败，移到observeWriters后session22968为213/213退出0零跳过。真实mysql2默认`bigNumberStrings`把@@port返回字符串，隔离诊断16081确认；string-port反例RED后支持规范十进制字符串，拒绝指数等非规范文本，56/56通过。最早时间两个反例各RED（mysql clock-progress、site older-attribution），修复后92589为125/125退出0零跳过。
+
+现网session36610退出0：原严格SSH通道、现成管理配置不离开Vultr，直接调用本轮原MySQL读取器及完整原host读取器，无QA替身。会话5，4个TCP会话归属两个既有UID998应用进程，1个真实事件线程；未归属0，事务/启用事件/运行复制均0。证据`/private/tmp/holaday-admin-writers-attributed-20260929.json`，mysql读取器摘要`84d73b8cecdd82500b8ff7fe99a3b6f484dfbe19c3624bcc952c22892e2fa381`、host读取器摘要`25ec292c330169440dd74f8c622e08cda03ed5a99cc03b9d6262e06194d8bd42`。这是该次当前连接归属，不是受保护部署attempt、全局停写或未来unknownWriters=0；采集发生在证据时间保守修复之前，不冒充最终候选新鲜证据。首个权限审核超时且未执行，工具明确允许的一次重试获批；没有权限绕过、服务器文件安装、SQL写入、账号/grant/服务变化。无需重复此前通道、密钥或商户核查。
+
+最终代码串行验收session26686运行中：Linux三组217/217零跳过及真实隔离MySQL/proc/ss夹具已退出0，后接显式42文件browser/ops，未结束前不计最终通过。复用旧QA镜像；Node共享本轮MySQL的无外网网络namespace以测真实loopback TCP，PID仍私有、无宿主端口，512MiB/768MiB各1CPU，只挂源码/依赖/本轮socket卷。原默认管理连接器/journal/真实MySQL/proc/ss通过；夹具只替代不存在的manager/startup/nginx环境，Unix两会话仍未知、TCP关闭后归属消失。真实连接测试36821因夹具缺TCP账号失败，21869因字符串端口拒绝失败，均不抹除；修复后36711及最终夹具通过，按精确标签清理本轮合成库/卷，可重建，既有mysql/redis未动。
+
+完整回归12476因本地Unix socket沙箱EPERM退出1（1072通过/21失败/零跳过），正常提权后的56316读到新增年龄RED反例而退出1（1092通过/2失败/零跳过），都不计最终通过。最终日志`/private/tmp/holaday-session-owners-{linux,real-linux,browser,ops}-final.log`；七MJS Biome/diff-check已退出0。当前源码/测试/记录未提交，原`scripts/__pycache__/`不动。CLI关闭，无push/PR/合并/部署。下一步收最终回归并保存本轮，然后继续原独立facts/受保护入口/真实停写备份Mac恢复/非PayPal恢复/整分支审查，不重复本轮会话观察来替代剩余门槛。
+
 ### 2026-09-29 JST：独立管理观察已接入原 host/site，整项仍未完成
 
 从`7abc29a2`继续，未改应用数据库账号、权限或原应用连接读取器。原host新增显式`readFirstCutoverAdministrativeWriters(context,inventory)`：只读取本机固定`/etc/mysql/debian.cnf`，要求root:0600、单链接、真实路径、有限长度和读取前后文件身份一致；配置摘要和源UUID/库名由原受保护`inventoryDigest`绑定。仅支持已知Debian无引号client格式，未知选项/includes/重复项/远端目标拒绝。管理凭据不进入应用配置、不输出，原SELECT/SHOW权限及双观测读者保持不变。

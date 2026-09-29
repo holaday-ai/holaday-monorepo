@@ -14,7 +14,7 @@ import { connectFirstCutoverGatewaySession } from './browser-first-cutover-gatew
 import {
   createFirstCutoverRetirementObserver,
   exportFirstCutoverSourceBackup,
-  readFirstCutoverAdministrativeWriters,
+  readFirstCutoverAttributedWriters,
   readFirstCutoverBackupPlan,
   readFirstCutoverCandidateRuntime,
   readFirstCutoverHostPair,
@@ -53,7 +53,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     sleep,
     readPair: readFirstCutoverHostPair,
     readPersistedWork: readFirstCutoverPersistedWork,
-    readAdministrativeWriters: readFirstCutoverAdministrativeWriters,
+    readAdministrativeWriters: readFirstCutoverAttributedWriters,
     readCandidateRuntime: readFirstCutoverCandidateRuntime,
     readRehearsal: readCutoverRehearsalArtifacts,
     readPaymentScope: readFirstCutoverPaymentScope,
@@ -293,6 +293,20 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
         active.some((key) => database.counts[key] !== 0)
       )
         fail();
+      const attribution = database.sessionAttribution;
+      if (
+        attribution?.scope !== 'current-session-attribution-only' ||
+        !fresh(attribution.observedAtMs) ||
+        attribution.sessions !== database.counts.sessions ||
+        attribution.unattributed !== 0 ||
+        attribution.unknownWritersZeroProven !== false ||
+        !/^[a-f0-9]{64}$/.test(attribution.sourceDigest ?? '') ||
+        !Number.isSafeInteger(attribution.eventSchedulers) ||
+        attribution.eventSchedulers < 0 ||
+        attribution.eventSchedulers > 1 ||
+        !Array.isArray(attribution.processes)
+      )
+        fail();
       // Sessions require separate attribution/exclusion; five idle sessions
       // neither mean five active writers nor prove zero unknown writers.
       if (!equal(record, await guard(context))) fail();
@@ -304,8 +318,17 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     );
     if (!equal(record, await guard(context))) fail();
     if (database) {
-      if (!fresh(database.observedAtMs) || !fresh(result?.observedAtMs)) fail();
-      result.observedAtMs = Math.min(result.observedAtMs, database.startedAtMs);
+      if (
+        !fresh(database.observedAtMs) ||
+        !fresh(database.sessionAttribution.observedAtMs) ||
+        !fresh(result?.observedAtMs)
+      )
+        fail();
+      result.observedAtMs = Math.min(
+        result.observedAtMs,
+        database.startedAtMs,
+        database.sessionAttribution.observedAtMs,
+      );
     }
     return result;
   };

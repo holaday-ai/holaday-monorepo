@@ -181,6 +181,217 @@ export async function readCutoverMysqlWriters(db, expectedIdentity, { now = Date
   }
 }
 
+/** Bracket the existing stable local host observation with actual MySQL session
+ * identities. This only attributes CURRENT sessions; neither idle sessions nor
+ * an empty unattributed set proves exclusion of future writers/reconnections.
+ * Host observation must be the trusted local collector, never uploaded facts.
+ */
+export async function readCutoverMysqlSessionOwners(
+  db,
+  expectedIdentity,
+  readHost,
+  { now = Date.now } = {},
+) {
+  const reject = () => {
+    throw new Error('CUTOVER_MYSQL_SESSION_ATTRIBUTION_UNPROVEN');
+  };
+  try {
+    const began = now();
+    let last = began;
+    const clock = () => {
+      const time = now();
+      if (
+        !Number.isSafeInteger(time) ||
+        !Number.isSafeInteger(began) ||
+        began < 0 ||
+        time < last ||
+        time - began > 60000
+      )
+        reject();
+      last = time;
+      return time;
+    };
+    const query = async (sql) => {
+      clock();
+      const [rows] = await db.query({ sql, timeout: 4000 });
+      clock();
+      if (!Array.isArray(rows) || rows.length > 10000) reject();
+      return rows;
+    };
+    const first = await readCutoverMysqlWriters(db, expectedIdentity, { now });
+    const ports = await query('SELECT @@port AS port');
+    const rawPort = ports[0]?.port;
+    // The existing mysql2 connection deliberately preserves BIGINT as strings.
+    // Accept only its canonical decimal representation, never coercible text.
+    const port =
+      typeof rawPort === 'string' && /^[1-9][0-9]{0,4}$/.test(rawPort) ? Number(rawPort) : rawPort;
+    if (ports.length !== 1 || !Number.isSafeInteger(port) || port < 1 || port > 65535) reject();
+    const sql =
+      'SELECT p.ID AS id, p.USER AS account, p.HOST AS host, p.DB AS selectedDatabase, p.COMMAND AS command, t.NAME AS threadName, t.TYPE AS threadType FROM information_schema.PROCESSLIST p LEFT JOIN performance_schema.threads t ON t.PROCESSLIST_ID=p.ID WHERE p.ID<>CONNECTION_ID() ORDER BY p.ID LIMIT 10001';
+    const before = await query(sql);
+    const snapshot = await readHost();
+    const after = await query(sql);
+    const proof = await readCutoverMysqlWriters(db, expectedIdentity, { now });
+    clock();
+    if (
+      encode(before) !== encode(after) ||
+      encode(first.counts) !== encode(proof.counts) ||
+      proof.counts.sessions !== after.length ||
+      !Number.isSafeInteger(snapshot?.observedAtMs) ||
+      snapshot.observedAtMs < began ||
+      snapshot.observedAtMs > last ||
+      !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(snapshot.bootId ?? '') ||
+      !Array.isArray(snapshot.processes) ||
+      snapshot.processes.length > 10000
+    )
+      reject();
+    const processes = new Map();
+    for (const p of snapshot.processes) {
+      if (
+        !Number.isSafeInteger(p.pid) ||
+        p.pid < 1 ||
+        processes.has(p.pid) ||
+        !/^[0-9]{1,30}$/.test(p.start ?? '') ||
+        !Number.isSafeInteger(p.ppid) ||
+        p.ppid < 0 ||
+        !Array.isArray(p.uids) ||
+        p.uids.length !== 4 ||
+        p.uids.some((n) => !Number.isSafeInteger(n) || n < 0) ||
+        !['cwd', 'exe', 'cgroup'].every(
+          (key) => typeof p[key] === 'string' && p[key].length > 0 && p[key].length <= 65536,
+        ) ||
+        !/^[a-f0-9]{64}$/.test(p.argvDigest ?? '')
+      )
+        reject();
+      processes.set(p.pid, p);
+    }
+    const endpoint = (value) => {
+      const m = /^(\[[^\]]+\]|[^\s]+):(\d+)$/.exec(value ?? '');
+      if (!m || Number(m[2]) < 1 || Number(m[2]) > 65535) return null;
+      return { address: m[1].replace(/^\[|\]$/g, ''), port: Number(m[2]) };
+    };
+    const local = (address) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address);
+    const tcp = (raw) => {
+      if (typeof raw !== 'string' || Buffer.byteLength(raw) > 8 * 1024 * 1024) reject();
+      return raw
+        .split('\n')
+        .filter((line) => line.trim())
+        .flatMap((line) => {
+          const fields = line.trim().split(/\s+/);
+          if (fields.length < 5) reject();
+          const client = endpoint(fields[3]);
+          const server = endpoint(fields[4]);
+          if (
+            !client ||
+            !server ||
+            server.port !== port ||
+            !local(client.address) ||
+            !local(server.address)
+          )
+            return [];
+          const pids = [
+            ...new Set([...line.matchAll(/pid=(\d+),/g)].map((m) => Number(m[1]))),
+          ].sort((a, b) => a - b);
+          return [{ state: fields[0], client, server, pids }];
+        })
+        .sort((a, b) => encode(a).localeCompare(encode(b)));
+    };
+    const sockets = tcp(snapshot.tcp?.before);
+    if (encode(sockets) !== encode(tcp(snapshot.tcp?.after))) reject();
+    const ids = new Set();
+    const owners = new Map();
+    let unattributed = 0;
+    let eventSchedulers = 0;
+    for (const row of after) {
+      if (
+        !row ||
+        encode(Object.keys(row).sort()) !==
+          encode([
+            'account',
+            'command',
+            'host',
+            'id',
+            'selectedDatabase',
+            'threadName',
+            'threadType',
+          ]) ||
+        !/^[1-9][0-9]{0,29}$/.test(String(row.id)) ||
+        (typeof row.id === 'number' && !Number.isSafeInteger(row.id)) ||
+        ids.has(String(row.id)) ||
+        !['account', 'command', 'host'].every(
+          (k) => typeof row[k] === 'string' && row[k].length <= 256,
+        ) ||
+        !['selectedDatabase', 'threadName', 'threadType'].every(
+          (k) => row[k] === null || (typeof row[k] === 'string' && row[k].length <= 256),
+        )
+      )
+        reject();
+      ids.add(String(row.id));
+      if (
+        row.account === 'event_scheduler' &&
+        row.command === 'Daemon' &&
+        row.selectedDatabase === null &&
+        row.threadName === 'thread/sql/event_scheduler' &&
+        row.threadType === 'FOREGROUND'
+      ) {
+        eventSchedulers++;
+        continue;
+      }
+      const client = endpoint(row.host);
+      const matches =
+        client &&
+        (client.address === 'localhost' || local(client.address)) &&
+        row.threadName === 'thread/sql/one_connection' &&
+        row.threadType === 'FOREGROUND'
+          ? sockets.filter(
+              (s) =>
+                s.state === 'ESTAB' &&
+                s.client.port === client.port &&
+                (client.address === 'localhost' || s.client.address === client.address),
+            )
+          : [];
+      const pid =
+        matches.length === 1 && matches[0].pids.length === 1 ? matches[0].pids[0] : undefined;
+      const owner = processes.get(pid);
+      if (!owner) {
+        unattributed++;
+        continue;
+      }
+      owners.set(pid, {
+        pid,
+        start: owner.start,
+        ppid: owner.ppid,
+        uids: [...owner.uids],
+        identityDigest: digest({ bootId: snapshot.bootId, owner }),
+      });
+    }
+    clock();
+    return {
+      ...proof,
+      sessionAttribution: {
+        scope: 'current-session-attribution-only',
+        // Keep the oldest read in the bracket; later SQL must not renew it.
+        observedAtMs: began,
+        sessions: after.length,
+        unattributed,
+        eventSchedulers,
+        processes: [...owners.values()].sort((a, b) => a.pid - b.pid),
+        unknownWritersZeroProven: false,
+        sourceDigest: digest({
+          identity: expectedIdentity,
+          sessions: after,
+          bootId: snapshot.bootId,
+          sockets,
+          owners: [...owners.values()],
+          source: proof.sourceDigest,
+        }),
+      },
+    };
+  } catch {
+    reject();
+  }
+}
+
 // SHOW CREATE is SQL, not free text: never replace database-like text inside
 // string literals. Only the quoted qualifier followed by a dot is rebound.
 function normalizeDefinition(sql, database, sqlMode) {
