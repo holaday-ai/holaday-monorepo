@@ -72,7 +72,8 @@ async function fixture(t, interrupted = false) {
   let now = 1000;
   // Files/nginx/SSH are privileged external boundaries already covered by their
   // physical fixtures. Here real journal transitions drive the two-host ordering.
-  const endpoint = async (host, scopeReader) => {
+  let endpointBusy = false;
+  const endpoint = async (host, scopeReader, verifyOpened) => {
     const scope = await scopeReader();
     assert.deepEqual(
       scope.files.map((f) => f.path).sort(),
@@ -157,9 +158,20 @@ async function fixture(t, interrupted = false) {
       },
       restoreIngress: async (v) => {
         assert.deepEqual(v, identity);
+        if (change.observeInsideEndpoint) {
+          endpointBusy = true;
+          try {
+            await verifyOpened(v);
+          } finally {
+            endpointBusy = false;
+          }
+        }
         return mutate('restore', 'all-writers');
       },
-      readFenceReceipt: async () => structuredClone(receipts[host]),
+      readFenceReceipt: async () => {
+        assert.equal(endpointBusy, false, 'must not recursively occupy an endpoint transport');
+        return structuredClone(receipts[host]);
+      },
       close: async () => {
         calls.push(`${host}:close`);
       },
@@ -184,11 +196,15 @@ async function fixture(t, interrupted = false) {
     }),
     createLocal: async (input, deps) => {
       assert.deepEqual(input.binding, binding);
-      return endpoint('vultr', deps.readApprovedIngress);
+      return endpoint('vultr', deps.readApprovedIngress, deps.verifyOpenedIdentity);
     },
-    connectRemote: async (input) => {
+    connectRemote: async (input, deps) => {
       assert.equal(input.siteDigest, approval.remoteSiteDigest);
-      return endpoint('aliyun', async () => ({ ...approval, files: files.slice(1) }));
+      return endpoint(
+        'aliyun',
+        async () => ({ ...approval, files: files.slice(1) }),
+        deps.verifyOpenedIdentity,
+      );
     },
   };
   const phases = [
@@ -411,6 +427,61 @@ test('count drift across hosts cannot become one stable fence proof', async (t) 
   await assert.rejects(pair.fenceOrders(), /CUTOVER_INGRESS_PAIR_UNPROVEN/);
   await pair.close();
 });
+
+test('opened identity observation reads bound fence receipts during restoration without recursive transport', async (t) => {
+  const f = await fixture(t);
+  f.change.observeInsideEndpoint = true;
+  const observed = [];
+  f.io.verifyOpenedIdentity = async () => {
+    observed.push((await pair.readFenceReceipts()).map((r) => r.receipt.phase));
+    return { identity, mode: 'serving', idle: false, needsReconciliation: true };
+  };
+  const pair = await f.start();
+  await f.advance('orders_fenced');
+  await pair.fenceOrders();
+  Object.assign(f.counts, { existingSockets: 0, internalWriters: 0, producersRunning: 0 });
+  await f.advance('all_fenced');
+  await pair.fenceAll();
+  await f.advance('verified');
+  await pair.restoreIngress(identity);
+  assert.deepEqual(observed, [
+    ['active', 'active'],
+    ['active', 'active'],
+    ['active', 'restored'],
+    ['active', 'restored'],
+  ]);
+  assert.deepEqual(
+    (await pair.readFenceReceipts()).map((r) => r.receipt.phase),
+    ['restored', 'restored'],
+  );
+  await pair.close();
+});
+
+for (const drift of ['window', 'phase', 'approval', 'concurrent-mutation']) {
+  test(`identity receipt observation refuses ${drift} drift and never restores the public origin`, async (t) => {
+    const f = await fixture(t);
+    f.io.verifyOpenedIdentity = async () => {
+      if (drift === 'window') f.setTime(9000);
+      if (drift === 'phase')
+        await f.journal.persist('opened', { candidate: identity.candidate, identity });
+      if (drift === 'approval') f.approval.remoteSiteDigest = '9'.repeat(64);
+      if (drift === 'concurrent-mutation') await pair.restoreIngress(identity);
+      await pair.readFenceReceipts();
+      return { identity, mode: 'serving', idle: false, needsReconciliation: true };
+    };
+    const pair = await f.start();
+    await f.advance('orders_fenced');
+    await pair.fenceOrders();
+    Object.assign(f.counts, { existingSockets: 0, internalWriters: 0, producersRunning: 0 });
+    await f.advance('all_fenced');
+    await pair.fenceAll();
+    await f.advance('verified');
+    await assert.rejects(pair.restoreIngress(identity), /CUTOVER_INGRESS_PAIR_UNPROVEN/);
+    assert.equal(f.calls.filter((c) => c.endsWith(':restore')).length, 0);
+    await assert.rejects(pair.restoreIngress(identity), /CUTOVER_INGRESS_PAIR_UNPROVEN/);
+    await pair.close();
+  });
+}
 
 test('restoration failure does not reopen remaining public ingress', async (t) => {
   const f = await fixture(t);

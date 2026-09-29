@@ -9,7 +9,7 @@ import * as fs from 'node:fs/promises';
 import http from 'node:http';
 import https from 'node:https';
 import { promisify } from 'node:util';
-import { describeCutoverSite, probeCutoverIngress } from '/source/browser-first-cutover-fence.mjs';
+import { probeCutoverIngress } from '/source/browser-first-cutover-fence.mjs';
 import { createFirstCutoverIngressLifecycle } from '/source/browser-first-cutover-host.mjs';
 import {
   connectFirstCutoverIngressSession,
@@ -17,6 +17,7 @@ import {
 } from '/source/browser-first-cutover-ingress-session.mjs';
 import { readCutoverNginxRuntime } from '/source/browser-first-cutover-nginx.mjs';
 import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
+import { createQaNginxSites } from '/source/fixtures/browser-nginx-sites-qa.mjs';
 
 await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
@@ -27,7 +28,7 @@ assert(
 const loseEdgeAck = process.argv[2] === '--lose-edge-ack';
 const exec = (file, args) => promisify(execFile)(file, args, { encoding: 'utf8' });
 const hash = (b) => createHash('sha256').update(b).digest('hex');
-const root = await fs.mkdtemp('/tmp/holaday-site-fence-');
+const { root, sites, render, request, prelude } = await createQaNginxSites();
 const records = [];
 const backends = [];
 let heldBackend;
@@ -53,148 +54,6 @@ for (const port of [4001, 4002, 4010, 6080]) {
   });
   await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
   backends.push(server);
-}
-const names = ['holaday.ai', 'hd-app.orangebench.tech', 'hd-pay.orangebench.tech'];
-await exec('openssl', [
-  'req',
-  '-x509',
-  '-newkey',
-  'rsa:2048',
-  '-nodes',
-  '-days',
-  '1',
-  '-subj',
-  '/CN=holaday.ai',
-  '-addext',
-  'subjectAltName=DNS:holaday.ai,DNS:hd-app.orangebench.tech,DNS:hd-pay.orangebench.tech',
-  '-keyout',
-  `${root}/key.pem`,
-  '-out',
-  `${root}/cert.pem`,
-]);
-for (const name of names) {
-  const directory = `/etc/letsencrypt/live/${name}`;
-  await fs.mkdir(directory, { recursive: true });
-  await fs.copyFile(`${root}/key.pem`, `${directory}/privkey.pem`);
-  await fs.copyFile(`${root}/cert.pem`, `${directory}/fullchain.pem`);
-}
-await fs.copyFile(`${root}/cert.pem`, '/etc/ssl/certs/ca-certificates.crt');
-await fs.writeFile('/etc/letsencrypt/options-ssl-nginx.conf', 'ssl_protocols TLSv1.2 TLSv1.3;\n');
-await exec('openssl', [
-  'genpkey',
-  '-genparam',
-  '-algorithm',
-  'DH',
-  '-pkeyopt',
-  'group:ffdhe2048',
-  '-out',
-  '/etc/letsencrypt/ssl-dhparams.pem',
-]);
-for (const directory of [
-  '/opt/holaday-landing',
-  '/opt/holaday-edge/current/apps/holaday-landing',
-  '/opt/holaday-monorepo/apps/web-workbench/dist',
-  '/opt/holaday-edge/current/apps/web-workbench/dist',
-]) {
-  await fs.mkdir(`${directory}/assets`, { recursive: true });
-  await fs.writeFile(`${directory}/index.html`, 'qa-static');
-  await fs.writeFile(`${directory}/assets/app.js`, 'qa-asset');
-}
-const sites = await Promise.all(
-  [
-    ['vultr-20260926', 'holaday', 4443],
-    ['aliyun-app-20260926', 'hd-app.orangebench.tech', 443],
-    ['aliyun-pay-20260926', 'hd-pay.orangebench.tech', 4444],
-  ].map(async ([profile, name, port]) => {
-    const original = await fs.readFile(`/source/fixtures/cutover-nginx/${name}.conf`, 'utf8');
-    const path = `/etc/nginx/sites-available/${name}`;
-    const enabledPath = `/etc/nginx/sites-enabled/${name}`;
-    const linked = profile === 'aliyun-app-20260926';
-    const sourcePath = linked
-      ? '/opt/holaday-edge/releases/20260905035410-30748/ops/aliyun-edge/nginx-hd-app.conf'
-      : path;
-    await fs.mkdir(sourcePath.slice(0, sourcePath.lastIndexOf('/')), { recursive: true });
-    await fs.writeFile(sourcePath, original, { mode: 0o644 });
-    if (linked) {
-      await fs.chown(sourcePath, 501, 50);
-      await fs.symlink(sourcePath, path);
-    }
-    const target = `../sites-available/${name}`;
-    await fs.symlink(target, enabledPath);
-    return {
-      ...describeCutoverSite(original, profile),
-      path,
-      original,
-      port,
-      enabledPath,
-      sourcePath,
-      sourceUid: linked ? 501 : 0,
-      sourceGid: linked ? 50 : 0,
-      sourceMode: 0o644,
-      sourceStat: await fs.lstat(sourcePath),
-      links: [{ path: enabledPath, target }, ...(linked ? [{ path, target: sourcePath }] : [])],
-    };
-  }),
-);
-// Each unmodified source must parse on its original ports first. Combined live
-// fixture rebinds ONLY listeners and the edge's origin IP to loopback; it retains
-// URI rewriting, TLS SNI/verification, headers, locations and exact body bytes.
-const prelude = `pid /run/nginx.pid; error_log ${root}/error.log; events {}\nhttp { access_log off;\n`;
-for (const site of sites) {
-  const map = site.profile.startsWith('aliyun-app')
-    ? 'map $http_upgrade $connection_upgrade { default upgrade; "" close; }\n'
-    : '';
-  await fs.writeFile(`${root}/single.conf`, `${prelude}${map}${site.original}\n}\n`);
-  await exec('nginx', ['-t', '-c', `${root}/single.conf`]);
-}
-async function render() {
-  const bytes = await Promise.all(
-    sites.map(async (site) => {
-      let source = await fs.readFile(site.enabledPath, 'utf8');
-      source = source
-        .replaceAll('listen 443 ', `listen ${site.port} `)
-        .replaceAll('listen [::]:443 ', `listen [::]:${site.port} `);
-      if (site.profile.startsWith('aliyun-app'))
-        source = source.replaceAll(
-          'proxy_pass https://207.148.70.106;',
-          'proxy_pass https://127.0.0.1:4443;',
-        );
-      return source;
-    }),
-  );
-  const unrelated =
-    'server { listen 127.0.0.1:4999; location /qa-held { proxy_buffering off; proxy_pass http://127.0.0.1:4001; } }';
-  await fs.writeFile(`${root}/nginx.conf`, `${prelude}${bytes.join('\n')}\n${unrelated}\n}\n`);
-}
-function request(site, uri, { method = 'GET', body = '', host, ipv6 = false, headers = {} } = {}) {
-  return new Promise((resolve, reject) => {
-    const req = https.request(
-      {
-        hostname: ipv6 ? '::1' : '127.0.0.1',
-        port: site.port,
-        servername: site.locations[0].serverName,
-        rejectUnauthorized: false,
-        path: uri,
-        method,
-        agent: false,
-        headers: { host: host ?? site.locations[0].serverName, ...headers },
-      },
-      (res) => {
-        const chunks = [];
-        res.on('data', (b) => chunks.push(b));
-        res.on('end', () =>
-          resolve({
-            status: res.statusCode,
-            headers: res.headers,
-            body: Buffer.concat(chunks).toString(),
-          }),
-        );
-      },
-    );
-    req.on('error', reject);
-    req.setTimeout(3000, () => req.destroy(new Error('fixture request timeout')));
-    req.end(body);
-  });
 }
 const inventoryDigest = 'a'.repeat(64);
 const maintenanceEndsAtMs = Date.now() + 120000;

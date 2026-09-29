@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 JST（02:05Z轮）：真实入口恢复后故障同次演练通过
+
+承接`17428802`。原nginx Linux夹具的三profile、TLS和文件映射抽取为`browser-nginx-sites-qa.mjs`，供原独立验收及同次host/source恢复夹具复用；新增`after-ingress`，在实际入口恢复、原站点serving身份校验、原配置/软链接/权限恢复及源站和国内边缘真实HTTPS 404验证之后，才在worker边界注入故障。不是完整成功路径，不能省略原worker/startup保存/reconcile。
+
+接线暴露的两项产品问题已RED→GREEN：原订单围栏verifyOrders漏接已批准的`legacy_interruption_accepted`阶段；原pair.restoreIngress身份核验通过observer回读receipt会递归占用同一通信通道。后者改为每个endpoint派发前捕获新receipt，只在自有pre-mutation身份回调期间开放该绑定帧，回调前后验证窗口/批准清单/journal，实际host文件仍由observer核对，派发结束销毁、不跨endpoint复用；并发变更/窗口/phase/approval漂移均拒绝。没有开放execute或放宽未知写入条件。
+
+Linux定向31/31及完整ops120/60/16/875、Python12均退出0、零跳过（session18355）；原真实nginx独立夹具抽取回归session9069退出0。两者不是完整发布验收。同次session74814源90/目标90、真实新候选关闭启动已到candidate_started，但原十分钟QA窗口到期、入口会话拒绝；没有open，close/hold确认不完整，不能计通过。失败日志保留在`/private/tmp/holaday-ingress-callback-connected.log`及eyOdqT私有诊断目录，精确77148902合成容器/卷已核验清理。
+
+最终session87732退出0，日志`/private/tmp/holaday-ingress-fresh-window.log`，新attempt使用十五分钟隔离QA窗口，**不延长旧attempt、不修改生产窗口**。源90/目标90，原host完成停写、备份/Mac恢复、61SQL源迁移、seed/新boot、两次preopen、一次open；原site/双端会话实际恢复三站nginx、原配置/链接/权限及receipt，源站和国内边缘HTTPS只读未知路径404。随后worker边界明确注入故障，原close一次、入口均503、draining/dirty/closeAcknowledged=false保留；旧效果仍1、不重放，QA PM2恢复仅无关进程。e70521ab资源记录对应源/目标/卷已由driver核验清理，日志和私有恢复资料保留。不是完整worker/reconcile或成功上线。
+
+复用原network镜像ff58ba97和公开构建缓存中的age二进制，无镜像重建或密钥复制；NET_ADMIN仅在本例私有网络命名空间。维护配置的QA回调端口仅绑定既有合成旧4010，恢复配置仍指向真实新4001；两个逻辑host共享本例PID/netns，外部工作/商户事实仍明确合成，不是独立生产双机或支付证明。九个代码文件Biome和diff-check退出0；所有测试session已结束。两次额外只读阶段检查均自动审批超时未执行，不影响原已批准测试结果，也未再重试。
+
+生产独立facts、受保护入口、真实停写备份/Mac恢复、非PayPal恢复、整分支审查及成功尾段仍未完成。CLI execute关闭、BASE不变、无PR/push/合并/部署；未重试被拒管理凭据。原prepared容器停止保留，原MySQL/Redis和无关__pycache__不动。
+
 ### 2026-09-29 JST：真实open后入口故障、精确关闭和dirty保留已同次验收
 
 承接`514e8967`，只扩展原两份QA夹具，新增`after-open`故障模式，保留先前全部模式。原host/source备份/隔离恢复/源迁移/seed/新关闭启动/verify/beforeOpen均真实执行；原open和afterOpen不替换。原site注入到createIngress的verifyOpenedIdentity实际验证serving、idle=false、needsReconciliation=true、当前runtime与退休清单一致、无旧进程；随后在QA入口恢复边界明确抛错，**没有恢复实际nginx**。原site将错误归一化为CUTOVER_SITE_UNPROVEN，发布阶段仍verified，不声称整项opened。

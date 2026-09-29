@@ -2477,11 +2477,14 @@ export async function createFirstCutoverIngressLifecycle(input, overrides = {}) 
           ),
         ),
       verifyOrders: () =>
-        run('verify-orders', ['orders_fenced', 'legacy_settled', 'producers_stopped'], () =>
-          verifyCutoverFence(
-            { inventoryDigest: binding.inventoryDigest, stage: 'orders' },
-            dependencies,
-          ),
+        run(
+          'verify-orders',
+          ['orders_fenced', 'legacy_settled', 'legacy_interruption_accepted', 'producers_stopped'],
+          () =>
+            verifyCutoverFence(
+              { inventoryDigest: binding.inventoryDigest, stage: 'orders' },
+              dependencies,
+            ),
         ),
       restoreIngress: (identity) =>
         run(

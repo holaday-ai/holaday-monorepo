@@ -1023,6 +1023,24 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
     };
     const initial = await guard(['preflight', 'prepared']);
     revision = initial.recordDigest;
+    // During the fixed endpoint's pre-mutation identity callback its SSH wire
+    // is already occupied. Pin freshly read receipts BEFORE dispatch, then let
+    // the retirement observer corroborate them against actual host files. Only
+    // this owned callback may read that frame; never reuse it after dispatch.
+    let openedReceipts;
+    let verifyingOpened = false;
+    const verifyOpened = async (identity) => {
+      if (!openedReceipts || verifyingOpened) reject();
+      verifyingOpened = true;
+      try {
+        await guard(['verified']);
+        const value = await io.verifyOpenedIdentity(identity);
+        await guard(['verified']);
+        return value;
+      } finally {
+        verifyingOpened = false;
+      }
+    };
     const shared = {
       now: io.now,
       journal: {
@@ -1033,7 +1051,7 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
         readFirstCutoverEffects: () => guard(),
       },
       observeWriters: io.observeWriters,
-      verifyOpenedIdentity: io.verifyOpenedIdentity,
+      verifyOpenedIdentity: verifyOpened,
     };
     const local = await io.createLocal(args, {
       ...io.local,
@@ -1240,7 +1258,12 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
           ],
           () => fence('verifyFence', 'all-writers'),
         ),
-      readFenceReceipts: () => run('receipts', undefined, receipts),
+      readFenceReceipts: async () => {
+        if (!busy) return run('receipts', undefined, receipts);
+        if (closed || failed || !verifyingOpened || !openedReceipts) reject();
+        await guard(['verified']);
+        return structuredClone(openedReceipts);
+      },
       restoreIngress: (identity) =>
         run(
           'restore',
@@ -1256,17 +1279,22 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
             // Restore the edge/payment host first, public origin last. A partial
             // failure never retries restoration; the owning host closes admission.
             for (const host of ['aliyun', 'vultr']) {
-              const opened = await io.verifyOpenedIdentity(structuredClone(target));
-              if (
-                !isDeepStrictEqual(opened?.identity, target) ||
-                opened.mode !== 'serving' ||
-                opened.idle !== false ||
-                opened.needsReconciliation !== true
-              )
-                reject();
-              await guard(['verified']);
-              await endpoints[host].restoreIngress(target);
-              await guard(['verified']);
+              openedReceipts = await receipts();
+              try {
+                const opened = await verifyOpened(structuredClone(target));
+                if (
+                  !isDeepStrictEqual(opened?.identity, target) ||
+                  opened.mode !== 'serving' ||
+                  opened.idle !== false ||
+                  opened.needsReconciliation !== true
+                )
+                  reject();
+                await guard(['verified']);
+                await endpoints[host].restoreIngress(target);
+                await guard(['verified']);
+              } finally {
+                openedReceipts = undefined;
+              }
             }
             const actual = await receipts();
             if (

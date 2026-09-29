@@ -37,6 +37,7 @@ import { performFirstCutover } from '/source/browser-first-cutover-transition.mj
 import { candidatePreparationSystem } from '/source/browser-maintenance-host.mjs';
 import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 import { buildMaintenanceMigrationManifest } from '/source/browser-maintenance-manifest.mjs';
+import { createQaNginxSites } from '/source/fixtures/browser-nginx-sites-qa.mjs';
 await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
 await fs.copyFile('/opt/node22/bin/node', '/usr/bin/node');
@@ -57,16 +58,21 @@ const sourceQa = process.env.CUTOVER_QA_SOURCE
 const fullHost = process.env.CUTOVER_QA_HOST === '1';
 const afterStart =
   fullHost &&
-  ['after-start', 'before-open', 'after-open'].includes(process.env.CUTOVER_QA_HOST_FAULT);
+  ['after-start', 'before-open', 'after-open', 'after-ingress'].includes(
+    process.env.CUTOVER_QA_HOST_FAULT,
+  );
 const beforeOpen = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'before-open';
 const afterOpen = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-open';
-const preopenGate = beforeOpen || afterOpen;
+const afterIngress = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-ingress';
+const preopenGate = beforeOpen || afterOpen || afterIngress;
+const openedCandidate = afterOpen || afterIngress;
+let nginxFixture;
 assert.ok(
   !fullHost || process.argv[2] === '--execution-site-lost-effect' || (recoveryLink && sourceQa),
 );
 if (fullHost && sourceQa) {
   assert.ok(
-    ['before-migration', 'after-start', 'before-open', 'after-open'].includes(
+    ['before-migration', 'after-start', 'before-open', 'after-open', 'after-ingress'].includes(
       process.env.CUTOVER_QA_HOST_FAULT,
     ),
   );
@@ -206,10 +212,16 @@ if (lostEffect) {
   });
   effectUrl = `http://127.0.0.1:${effectServer.address().port}/non-payment-effect`;
 }
+// Only the QA payment callback boundary is simulated; it belongs to the real
+// retired gateway process. Never create an unclassified legacy origin listener.
+const legacyHttpHandler = afterIngress
+  ? `(q,r)=>{r.statusCode=/\\/(notify|webhook|confirm)(\\?|$)/.test(q.url)?401:200;r.end('qa');}`
+  : `(q,r)=>r.end('qa')`;
+const legacyHttpStart = `http.createServer(${legacyHttpHandler}).listen(${mainPort});`;
 await fs.writeFile(
   `${cwd}/registry-worker.cjs`,
   lostEffect
-    ? `const http=require('http');const request=http.request(${JSON.stringify(effectUrl)},{method:'POST'},()=>process.exit(2));request.once('error',()=>{http.createServer((q,r)=>r.end('qa')).listen(${mainPort});});request.end('synthetic');process.on('SIGINT',()=>{});\n`
+    ? `const http=require('http');const request=http.request(${JSON.stringify(effectUrl)},{method:'POST'},()=>process.exit(2));request.once('error',()=>{${legacyHttpStart}});request.end('synthetic');process.on('SIGINT',()=>{});\n`
     : `require('http').createServer((q,r)=>r.end('qa')).listen(${mainPort});process.on('SIGINT',()=>{});\n`,
 );
 await fs.writeFile('/tmp/registry-idle.cjs', 'setInterval(()=>{},1000);\n');
@@ -296,6 +308,20 @@ try {
       if (n > 50) throw e;
       await sleep(100);
     }
+  }
+  if (afterIngress) {
+    for (const port of [mainPort])
+      assert.equal(
+        (
+          await fetch(`http://127.0.0.1:${port}/payment/wechat/notify`, {
+            method: 'POST',
+            body: '{}',
+            headers: { connection: 'close' },
+          })
+        ).status,
+        401,
+        'synthetic old callback backend must reject invalid input before fencing',
+      );
   }
   const bootId = (await fs.readFile('/proc/sys/kernel/random/boot_id', 'utf8'))
     .trim()
@@ -514,6 +540,12 @@ try {
       gatewayHost.processes.push(raw(await proc(receiver.pid)));
     if (gateway.exitCode === null && gateway.signalCode === null)
       gatewayHost.processes.push(raw(await proc(gateway.pid)));
+    if (nginxFixture) {
+      for (const identity of nginxFixture.executionIdentities())
+        gatewayHost.processes.push(raw(await proc(identity.process.pid)));
+      snapshot.nginxFiles = await nginxFixture.snapshot('aliyun');
+      second.nginxFiles = await nginxFixture.snapshot('vultr');
+    }
     gatewayHost.listeners += await exec('ss', ['-H', '-ltnp', 'sport = :4011']);
     if (fullHost && gateways) {
       // Two logical QA hosts share this private PID namespace. Old gateways
@@ -570,6 +602,10 @@ try {
       ],
     };
   };
+  if (afterIngress) {
+    nginxFixture = await createQaNginxSites({ fencedCallbackPort: 4010 });
+    await nginxFixture.start();
+  }
   const baseline = await readPair();
   const reviews = Object.fromEntries(
     baseline.hosts.map(({ host, snapshot }) => [
@@ -811,19 +847,21 @@ try {
                 inventory: readinessInventory,
                 reviews,
                 gatewaySiteDigest: sha(siteBytes),
-                ingress: {
-                  inventoryDigest: binding.inventoryDigest,
-                  unknownIngress: [],
-                  remoteSiteDigest: sha('synthetic ingress'),
-                  files: [
-                    ['holaday', 'vultr-20260926'],
-                    ['hd-app.orangebench.tech', 'aliyun-app-20260926'],
-                    ['hd-pay.orangebench.tech', 'aliyun-pay-20260926'],
-                  ].map(([name, profile]) => ({
-                    path: `/etc/nginx/sites-available/${name}`,
-                    profile,
-                  })),
-                },
+                ingress: afterIngress
+                  ? nginxFixture.approval(binding.inventoryDigest)
+                  : {
+                      inventoryDigest: binding.inventoryDigest,
+                      unknownIngress: [],
+                      remoteSiteDigest: sha('synthetic ingress'),
+                      files: [
+                        ['holaday', 'vultr-20260926'],
+                        ['hd-app.orangebench.tech', 'aliyun-app-20260926'],
+                        ['hd-pay.orangebench.tech', 'aliyun-pay-20260926'],
+                      ].map(([name, profile]) => ({
+                        path: `/etc/nginx/sites-available/${name}`,
+                        profile,
+                      })),
+                    },
                 producerStartupFiles: ['dump.pm2', 'dump.pm2.bak'].map((name) => ({
                   path: `/root/.pm2/${name}`,
                   digest: sha('synthetic other host'),
@@ -886,7 +924,14 @@ try {
                 verifyOpenedIdentity: async () => {
                   throw Error('not exercised');
                 },
-                resumeWorker: async () => {
+                resumeWorker: async (_ctx, identity) => {
+                  if (afterIngress) {
+                    await nginxFixture.assertRestored(identity);
+                    assert.equal(hostOpenCommands, 1);
+                    assert.equal(hostPreopenReadiness, 2);
+                    hostStartFaults++;
+                    throw Error('CUTOVER_QA_AFTER_INGRESS_FAULT');
+                  }
                   throw Error('not exercised');
                 },
                 reconcile: async () => {
@@ -901,33 +946,36 @@ try {
                       },
                     }),
               },
-              createIngress: async (_input, deps) => ({
-                verifyOrders: async () => fence('orders'),
-                verifyFence: async () => fence('all-writers'),
-                fenceOrders: async () => {},
-                fenceAll: async () => {},
-                readFenceReceipts: async () => [],
-                restoreIngress: async (identity) => {
-                  if (!afterOpen) throw new Error('not exercised');
-                  // Actual original site checks serving/dirty identity AND the
-                  // physical retirement observer before this explicit failure.
-                  const actual = await deps.verifyOpenedIdentity(identity);
-                  assert.deepEqual(actual.identity, identity);
-                  assert.equal(actual.mode, 'serving');
-                  assert.equal(actual.needsReconciliation, true);
-                  assert.equal(actual.idle, false);
-                  assert.equal(hostOpenCommands, 1);
-                  assert.equal(hostPreopenReadiness, 2);
-                  const response = await fetch('http://127.0.0.1:4001/qa-admission-probe', {
-                    headers: { connection: 'close' },
-                  });
-                  await response.text();
-                  assert.equal(response.status, 404); // Unknown read-only route, NOT a task.
-                  hostStartFaults++;
-                  throw new Error('CUTOVER_QA_INGRESS_FAULT');
-                },
-                close: async () => {},
-              }),
+              createIngress: async (_input, deps) =>
+                afterIngress
+                  ? nginxFixture.connect(_input, deps)
+                  : {
+                      verifyOrders: async () => fence('orders'),
+                      verifyFence: async () => fence('all-writers'),
+                      fenceOrders: async () => {},
+                      fenceAll: async () => {},
+                      readFenceReceipts: async () => [],
+                      restoreIngress: async (identity) => {
+                        if (!afterOpen) throw new Error('not exercised');
+                        // Actual original site checks serving/dirty identity AND the
+                        // physical retirement observer before this explicit failure.
+                        const actual = await deps.verifyOpenedIdentity(identity);
+                        assert.deepEqual(actual.identity, identity);
+                        assert.equal(actual.mode, 'serving');
+                        assert.equal(actual.needsReconciliation, true);
+                        assert.equal(actual.idle, false);
+                        assert.equal(hostOpenCommands, 1);
+                        assert.equal(hostPreopenReadiness, 2);
+                        const response = await fetch('http://127.0.0.1:4001/qa-admission-probe', {
+                          headers: { connection: 'close' },
+                        });
+                        await response.text();
+                        assert.equal(response.status, 404); // Unknown read-only route, NOT a task.
+                        hostStartFaults++;
+                        throw new Error('CUTOVER_QA_INGRESS_FAULT');
+                      },
+                      close: async () => {},
+                    },
               connectGateway: async (args, deps) => {
                 client = await connectFirstCutoverGatewaySession(args, {
                   ...deps,
@@ -953,7 +1001,10 @@ try {
               createObserver: async (args, deps) => {
                 observer = await createFirstCutoverRetirementObserver(args, {
                   ...deps,
-                  readExecutionIdentities: async () => [client.readExecutionIdentity()],
+                  readExecutionIdentities: async () => [
+                    client.readExecutionIdentity(),
+                    ...(nginxFixture?.executionIdentities() ?? []),
+                  ],
                 });
                 if (fullHost) {
                   for (const name of Object.keys(observer)) {
@@ -1059,11 +1110,14 @@ try {
             name,
             async (...args) => {
               assert.ok(executionSite, 'site must be attached by the original host');
+              const began = Date.now();
               try {
                 return await executionSite[group][name](...args);
               } catch (error) {
                 console.error('QA_SITE_FAILED', group, name, error.message);
                 throw error;
+              } finally {
+                if (afterIngress) console.error('QA_SITE_TIMING', group, name, Date.now() - began);
               }
             },
           ]),
@@ -1388,10 +1442,10 @@ try {
         if (afterStart) {
           assert.equal(result.closeAcknowledged, false);
           assert.equal(hostCloseCommands, 1);
-          assert.equal(hostOpenCommands, afterOpen ? 1 : 0);
+          assert.equal(hostOpenCommands, openedCandidate ? 1 : 0);
           assert.equal(hostStartCommands, 1);
           assert.equal(hostMigrationCommands, 1);
-          assert.equal(effects.failureObservation.status.needsReconciliation, afterOpen);
+          assert.equal(effects.failureObservation.status.needsReconciliation, openedCandidate);
         }
         if (knownEffect) {
           // The real site intentionally normalizes inner boundary failures.
@@ -1406,7 +1460,7 @@ try {
             recoveryDrift
               ? 'CUTOVER_RECOVERY_SESSION_UNPROVEN'
               : afterStart
-                ? afterOpen
+                ? openedCandidate
                   ? 'CUTOVER_SITE_UNPROVEN'
                   : beforeOpen
                     ? 'CUTOVER_QA_BEFORE_OPEN_FAULT'
@@ -1457,11 +1511,20 @@ try {
               assert.equal(held.counts.mode, 'closed');
               assert.equal(held.counts.active, 0);
               assert.equal(held.counts.unknown, 0);
-              assert.equal(held.needsReconciliation, afterOpen);
+              assert.equal(held.needsReconciliation, openedCandidate);
               assert.equal((await fetch('http://127.0.0.1:4001/healthz')).status, 200);
               assert.equal((await fetch('http://127.0.0.1:4001/trpc/tasks.list')).status, 503);
-              if (afterOpen)
+              if (openedCandidate)
                 assert.equal((await fetch('http://127.0.0.1:4001/qa-admission-probe')).status, 503);
+              if (afterIngress) {
+                for (const site of nginxFixture.sites.filter(
+                  (s) => s.profile !== 'aliyun-pay-20260926',
+                ))
+                  assert.equal(
+                    (await nginxFixture.request(site, '/api/qa-admission-probe')).status,
+                    503,
+                  );
+              }
             } else assert.equal(durable.bootstrapSeed, undefined);
             assert.equal(effects.unmanagedEvents.at(-1).phase, 'unmanaged-stopped');
             await assert.rejects(fetch('http://127.0.0.1:4011'));
@@ -1503,8 +1566,8 @@ try {
                 }
               : {}),
             ...(preopenGate ? { nativePreopenVerified: true } : {}),
-            ...(afterOpen
-              ? { candidateOpened: true, needsReconciliation: true, ingressRestored: false }
+            ...(openedCandidate
+              ? { candidateOpened: true, needsReconciliation: true, ingressRestored: afterIngress }
               : {}),
             ...(recoveryLink
               ? { recoveryLinked: !recoveryDrift, recoveryRejected: recoveryDrift }
@@ -1784,6 +1847,7 @@ try {
   if (gateway && gateway.exitCode === null && gateway.signalCode === null) gateway.kill('SIGTERM');
   await pm2('kill');
   await journal?.close();
+  await nginxFixture?.close();
   if (effectServer)
     await new Promise((resolve, reject) =>
       effectServer.close((error) => (error ? reject(error) : resolve())),

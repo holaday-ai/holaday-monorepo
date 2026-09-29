@@ -103,6 +103,11 @@ try {
               const source = await Promise.all(
                 sites.map(async (s) => {
                   let bytes = await fs.readFile(s.enabledPath, 'utf8');
+                  if (fixture.fencedCallbackPort !== undefined) {
+                    assert.equal(fixture.fencedCallbackPort, 4010);
+                    if (s.profile === 'vultr-20260926' && bytes !== s.original)
+                      bytes = bytes.replaceAll('http://127.0.0.1:4001', 'http://127.0.0.1:4010');
+                  }
                   bytes = bytes
                     .replaceAll('listen 443 ', `listen ${s.port} `)
                     .replaceAll('listen [::]:443 ', `listen [::]:${s.port} `);

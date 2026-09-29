@@ -14,7 +14,7 @@ const identity = { candidate: 'a'.repeat(40), bootId: 'f'.repeat(32) };
 
 // Real files, links, fence store and release journal. Mac metadata is mapped to
 // root; nginx/network are synthetic here, exercised physically in the Linux fixture.
-async function fixture(t) {
+async function fixture(t, interrupted = false) {
   const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'cutover-ingress-host-')));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   for (const path of [archive, '/etc/nginx/sites-enabled', '/etc/nginx/sites-available'])
@@ -49,6 +49,22 @@ async function fixture(t) {
     ...binding,
     kind: 'first-cutover',
     legacyDigest: 'e'.repeat(64),
+    ...(interrupted
+      ? {
+          schemaVersion: 2,
+          maintenanceEndsAtMs: 5000,
+          reconcileByMs: 6000,
+          operatorRef: 'qa-operator',
+          legacyInterruption: {
+            mode: 'controlled-interruption',
+            scope: 'legacy-non-payment-memory',
+            approvalRef: 'legacy-interruption-20260928',
+            capabilityDigest: '7'.repeat(64),
+            observeUntilMs: 4000,
+            noAutomaticReplay: true,
+          },
+        }
+      : {}),
   });
   t.after(() => journal.close());
   await journal.bindManifest(manifest);
@@ -157,6 +173,19 @@ async function fixture(t) {
       host.createFirstCutoverIngressLifecycle({ binding, maintenanceEndsAtMs: 5000 }, io),
   };
 }
+
+test('controlled interruption verifies the actual existing order fence without reinstalling it', async (t) => {
+  const f = await fixture(t, true);
+  const ingress = await f.start();
+  await f.advance('orders_fenced');
+  await ingress.fenceOrders();
+  const receipt = await ingress.readFenceReceipt();
+  const effects = [...f.effects];
+  await f.io.journal.persist('legacy_interruption_accepted', { candidate: identity.candidate });
+  assert.equal((await ingress.verifyOrders()).stage, 'orders');
+  assert.deepEqual(await ingress.readFenceReceipt(), receipt);
+  assert.deepEqual(f.effects, effects);
+});
 
 test('orders can be verified again before producer stop without file mutation or reload', async (t) => {
   const f = await fixture(t);

@@ -2,6 +2,25 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29真实nginx同次接线（基于17428802）
+
+| 验证 | 实际结果 | 日志 |
+| --- | --- | --- |
+| 恢复身份回读receipt RED | 14通过/1失败，原pair拒绝递归通道；不是通过 | `/private/tmp/holaday-ingress-reentrant-red.log` |
+| 受控中断订单围栏 RED | 11通过/1失败，原lifecycle漏接批准阶段 | `/private/tmp/holaday-ingress-interruption-red.log` |
+| 两项修复及漂移反例，本机 | 31/31，退出0、零跳过 | `/private/tmp/holaday-ingress-host-pair-green.log` |
+| 同组实际Linux | session18355，31/31，退出0、零跳过 | `/private/tmp/holaday-ingress-linux-regression.log` |
+| 完整ops | 120/60/16/875及Python12，退出0、零跳过 | `/private/tmp/holaday-ingress-ops-regression.log` |
+| 抽取原nginx夹具回归 | session9069退出0，真实TLS/双栈/WS/持有无关流/配置权限和软链接恢复；独立组件验收 | `/private/tmp/holaday-nginx-extraction-regression.log` |
+| 同次入口完整链，十分钟QA窗口 | session74814退出1；源90/目标90，新关闭候选启动后超时、未open、未到预定worker故障点，不计通过 | `/private/tmp/holaday-ingress-callback-connected.log` |
+| 全新十五分钟QA窗口 | session87732退出0；源90/目标90，同次原三站nginx实际恢复后worker边界注入故障，一次close、两应用入口503、dirty保留、不重放 | `/private/tmp/holaday-ingress-fresh-window.log` |
+
+最终e70521ab新源/目标及专属卷已由driver核验清理，仅删除合成数据，日志/私有恢复资料保留；原MySQL/Redis未动。实际原备份/Mac恢复/源61SQL/seed/新关闭boot/两个preopen/open/入口restore均保留，原site/observer身份和文件验证未替换；assertRestored逐站核对原bytes/链接/uid/gid/mode及两个receipt身份，原close后draining、closeAcknowledged=false和needsReconciliation=true保持。原效果计数1、QA resurrect只含无关进程。九个代码文件Biome及diff-check退出0。该场景通过不是完整成功路径；未执行原worker/startup保存或reconcile，不标整项完成。
+
+先前54138原fake ingress拒绝、72267旧age镜像缺nft、10557缺旧回调后端、63795额外4001监听被正确判未知，均退出1，不计通过、不重跑原attempt。仅修QA资源及维护端口映射，保留原生产监听分类门禁。以上失败对应合成数据库/专属卷已按精确身份清理，日志/私有恢复证据保留。network镜像无age，复用已停止prepared容器的公开age程序，不复制home或私钥、不新增镜像；私有网络允许NET_ADMIN以测试原nft规则，不使用宿主PID/网络或生产凭据。
+
+产品修复限于阶段接线和避免原身份回调递归通信；receipt帧逐endpoint新采、仅持有回调可读，当前文件/进程/批准/journal/窗口仍须验证。两逻辑主机仍是同一隔离PID/netns，不冒充独立现场事实；真实worker/startup保存/reconcile、完整成功和生产恢复尚未验证，CLI execute仍关闭。
+
 ## 2026-09-29真实open后入口失败与dirty保留（基于514e8967）
 
 原两份QA夹具增加after-open：完整复用原host迁移/启动/verify/beforeOpen/open/afterOpen，只有QA入口恢复边界在原site的真实serving身份核验后明确注入故障，不返回成功、不恢复实际nginx。不替换控制socket、进程观察或状态文件。原发布阶段仍verified，原site归一化错误CUTOVER_SITE_UNPROVEN，不能写成发布opened。
