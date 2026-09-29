@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 13:48 UTC：两次完整隔离成功，间歇拒绝仍未定位
+
+从`6dfed3d9`继续原Task6，未改变产品行为、维护期限或拒绝条件。5532退出1：source2/target2，真实隔离恢复及数据比较完成，随后`backup.inspectBackupFacility`被site.run统一包装为`CUTOVER_SITE_UNPROVEN`，host在backup_verified保留维护；尚未迁移或启动候选。初次栈诊断只定位到包装层，不能认定底层根因。日志`/private/tmp/holaday-site-attach-reject-20260929.log`，私密wuUXoZ/coordinator-diagnostic.log；精确9a4e6048资源的两个容器/卷已核对标签、network none及唯一挂载后清理，保留证据。
+
+补齐错误路径诊断后，4158、7127两个全新attempt均退出0，source90/target90：同次恢复、全部迁移、新boot、两次preopen、单次open、真实nginx入口恢复、启用UID998 worker及实际idle poll、同进程reconcile、两份启动文件和锁释放全部通过；close0、旧效果1、无自动重放。日志分别`/private/tmp/holaday-site-operation-cause-20260929.log`、`/private/tmp/holaday-cutover-underlying-rejection-20260929.log`。两个完整通过均带临时错误路径诊断；第二轮临时继承QA gateway stderr。它们不能替代最终无诊断候选的验收，更不能覆盖5532及更早失败或宣称根因已修复。应用仍是原6a46ee0f合成缓存，不是最终候选、生产双机或支付恢复证据。
+
+为缩小问题，原nginx夹具在既有`--repeat-receipts`分支增加20次连续原verifyFence，每次仍对照原回执，非新框架、不降低请求/身份条件。56223诊断运行退出0；移除全部七个产品文件的临时输出、恢复QA gateway stderr后，60775最终退出0、无跳过：同会话100次回执、20次入口核验、37条不可信TLS拒绝、IPv4/IPv6/WS、入口恢复、无关长连接保持均通过。最终日志`/private/tmp/holaday-repeat-fence-clean-20260929.log`。Biome、语法及diff-check退出0。仅保留此QA覆盖与本次证据文档；未重跑或冒用历史browser/ops/Linux计数作为新验收。
+
+所有本轮测试结束；0ea374d6、87b22727专属QA数据库/卷由原driver核实后清理，精简容器自清理，原DB/Redis、构建缓存和`__pycache__`不动。下一步不得继续无新定位信息的完整备份链重跑：在原site/入口/observer组合边界收窄最小复现，保留首次底层异常，不把连续通过算作修复。生产headed browser/VNC范围选择本轮已通过非阻塞问题单独列出，未收到新决定；不扩大停止对象。独立facts、受保护execute、真实停写恢复、非PayPal恢复和整分支审查仍待完成，CLI关闭，未push/PR/合并/部署，自动化未改。
+
 ### 2026-09-29 12:29 heartbeat：启用 worker 完整链曾通过，最终复验仍不稳定
 
 从 `a4ef07fd` 继续原 Task6，没有修改产品实现或放宽门槛。95243退出0，源/目标均90表：原完整链实际完成备份恢复、迁移、新boot、两次preopen、单次open、入口恢复、真实UID998 worker轮询、同进程核对、两份启动文件持久化和锁释放；无close/旧效果重放。日志 `/private/tmp/holaday-ingress-full-reject-trace.log`。此轮带有仅错误路径输出栈位置的临时诊断，应用仍是原6a46ee0f合成QA缓存，不是最终候选、生产双机或支付恢复验收。

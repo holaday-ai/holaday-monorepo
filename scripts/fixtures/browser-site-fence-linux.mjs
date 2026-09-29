@@ -249,6 +249,11 @@ try {
     if (repeatReceipts && stage === 'all-writers') {
       for (let n = 0; n < 100; n++) assert.deepEqual(await ingress.readFenceReceipts(), receipts);
       console.log('PASS 100 sequential unchanged receipt observations on the same live session');
+      for (let n = 0; n < 20; n++) {
+        assert.equal((await ingress.verifyFence()).stage, 'all-writers');
+        assert.deepEqual(await ingress.readFenceReceipts(), receipts);
+      }
+      console.log('PASS 20 consecutive original fence verifications on the same live session');
     }
     assert.equal(receipts.length, 2);
     assert.deepEqual(

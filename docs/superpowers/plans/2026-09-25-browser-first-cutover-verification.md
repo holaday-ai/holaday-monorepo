@@ -2,6 +2,15 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29 13:48 UTC：完整隔离连续两轮通过，拒绝根因仍未关闭
+
+- 5532退出1，源2/目标2：隔离恢复和比较后，备份设施再核验被site.run统一包装拒绝；未迁移/启动候选。`/private/tmp/holaday-site-attach-reject-20260929.log`及私密wuUXoZ/coordinator-diagnostic.log。包装层不是底层根因，不能称已定位修复。
+- 4158、7127均退出0，源90/目标90：原完整恢复/迁移/新boot/两次preopen/单次open/nginx恢复/真实启用worker轮询/同进程核对/双启动文件/锁释放通过，close0、不重放。日志`/private/tmp/holaday-site-operation-cause-20260929.log`和`/private/tmp/holaday-cutover-underlying-rejection-20260929.log`。两个attempt全新、串行，均带临时诊断，不覆盖历史失败，不等于最终无诊断候选或生产支付恢复。
+- 精简原nginx物理夹具56223退出0；移除全部产品临时诊断后60775退出0、零跳过：100次回执和新增20次连续原入口核验，原37条TLS拒绝、双栈/WS/恢复/无关长连接保持通过。最终`/private/tmp/holaday-repeat-fence-clean-20260929.log`。该精简路径未复现完整组合链拒绝。
+- 唯一保留的实现差异是原QA夹具五行连续核验；Biome、node语法、diff-check退出0。全部产品源码及临时gateway stderr更改已恢复至本轮HEAD；不声称新的产品bug修复，也未重跑旧组件套件。
+
+本轮各专属容器/合成卷已核实后清理，日志及恢复工件保留；所有测试结束。后续先收窄原site/入口/observer组合的最小复现，不再无新信息重复完整备份链。生产范围问题已单独列出、未获新选择；CLI、真实现场facts/恢复/非PayPal证据及整分支审查门槛均未解除，未push/PR/合并/部署。
+
 ## 2026-09-29 12:29 heartbeat：完整启用 worker 曾通过，稳定性仍未验收
 
 | 检查 | 实际结果 | 证据 |
