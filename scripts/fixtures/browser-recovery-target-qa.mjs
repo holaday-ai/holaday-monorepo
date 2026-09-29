@@ -34,6 +34,9 @@ assert.ok(!recoveryDrift || retirementLink);
 assert.ok(!retirementLink || fullSource || !runtimeRoot);
 const stoppedSource = retirementLink && fullSource;
 const fullHost = process.env.CUTOVER_QA_HOST === '1';
+const hostFault = process.env.CUTOVER_QA_HOST_FAULT ?? 'before-migration';
+assert.ok(['before-migration', 'after-start'].includes(hostFault));
+assert.ok(hostFault === 'before-migration' || fullHost);
 assert.ok(!fullHost || stoppedSource);
 const buildCache = fullHost ? await realpath(process.env.CUTOVER_QA_BUILD_CACHE) : undefined;
 const buildProfile = fullHost
@@ -181,11 +184,22 @@ if (stoppedSource) {
   const config = fullHost
     ? [
         'DATABASE_URL=mysql://root@127.0.0.1/restore_qa',
+        ...(hostFault === 'after-start'
+          ? [
+              'REDIS_URL=redis://127.0.0.1:6379',
+              'JWT_SECRET=synthetic-qa-only-not-a-production-secret',
+              'EXECUTOR_MODE=legacy',
+              'HTTP_PORT=4001',
+              'WS_PORT=4002',
+            ]
+          : []),
         'MODEL_RUNTIME_POLICY=qwen_only',
         'QWEN_CORE_ENABLED_LANES=browser',
         'DASHSCOPE_INTL_API_KEY=synthetic-qa-not-a-provider-key',
-        'DASHSCOPE_INTL_ANTHROPIC_BASE_URL=http://127.0.0.1:1',
-        'DASHSCOPE_INTL_RESPONSES_BASE_URL=http://127.0.0.1:1',
+        // The application validates regional URL syntax even with rollout off.
+        // This QA namespace has no external network and only a synthetic key.
+        `DASHSCOPE_INTL_ANTHROPIC_BASE_URL=${hostFault === 'after-start' ? 'https://dashscope-intl.aliyuncs.com/apps/anthropic' : 'http://127.0.0.1:1'}`,
+        `DASHSCOPE_INTL_RESPONSES_BASE_URL=${hostFault === 'after-start' ? 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1' : 'http://127.0.0.1:1'}`,
         'QWEN_CORE_ROLLOUT_MODE=off',
         'TEAM_TASK_LIFECYCLE_ENABLED=false',
         'ACCOUNT_CLOSURE_WORKER_ENABLED=false',
@@ -440,7 +454,7 @@ const child = retirementLink
               '--env',
               'CUTOVER_QA_HOST=1',
               '--env',
-              'CUTOVER_QA_HOST_FAULT=before-migration',
+              `CUTOVER_QA_HOST_FAULT=${hostFault}`,
             ]
           : []),
         ...(stoppedSource
@@ -542,13 +556,26 @@ if (retirementLink) {
     {
       scope: stoppedSource ? 'retirement-backup-and-tail-refusal' : 'retirement-and-failure-only',
       knownEffect: false,
-      phase: stoppedSource ? 'migration_started' : 'backup_verified',
+      phase:
+        hostFault === 'after-start'
+          ? 'candidate_started'
+          : stoppedSource
+            ? 'migration_started'
+            : 'backup_verified',
       effectCount: 1,
       releaseReady: false,
       recoveryLinked: !recoveryDrift,
       recoveryRejected: recoveryDrift,
       ...(stoppedSource ? { backupReceipt: true } : {}),
       ...(fullHost ? { originalHost: true, nativeCandidatePreparation: true } : {}),
+      ...(hostFault === 'after-start'
+        ? {
+            candidateStartedClosed: true,
+            failureMode: 'draining',
+            closeAcknowledged: false,
+            admissionClosed: true,
+          }
+        : {}),
       riskDigest: undefined,
     },
   );
@@ -574,7 +601,7 @@ if (retirementLink) {
         sourceContainerId,
         'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()',
       ),
-      '2',
+      hostFault === 'after-start' ? '90' : '2',
     );
     await inspectFirstCutoverRecoveryTarget(sourceTarget, { requireEmpty: false });
   } else
@@ -583,11 +610,13 @@ if (retirementLink) {
       '0',
     );
   console.log(
-    stoppedSource
-      ? 'PASS same Linux physical retirement/site/journal -> original source dump/age -> Mac isolated restore/all61 migrations -> original durable receipt; candidate tail explicitly refused, no replay. NOT full cutover.'
-      : recoveryDrift
-        ? 'PASS real Linux site rejected newly identified external work during original Mac recovery attach; target empty, no receipt/candidate/replay. NOT full cutover.'
-        : 'PASS same actual Linux stopped attempt/site/journal -> original Mac recovery pipes -> pinned isolated target identity; source export/restore/candidate tail intentionally NOT configured, no backup receipt or replay. NOT full cutover.',
+    hostFault === 'after-start'
+      ? 'PASS original host/retirement/backup/Mac restore -> actual source migration/seed/new closed candidate -> post-start fault, one close, draining retained and actual HTTP work denied; no open/replay. NOT full cutover.'
+      : stoppedSource
+        ? 'PASS same Linux physical retirement/site/journal -> original source dump/age -> Mac isolated restore/all61 migrations -> original durable receipt; candidate tail explicitly refused, no replay. NOT full cutover.'
+        : recoveryDrift
+          ? 'PASS real Linux site rejected newly identified external work during original Mac recovery attach; target empty, no receipt/candidate/replay. NOT full cutover.'
+          : 'PASS same actual Linux stopped attempt/site/journal -> original Mac recovery pipes -> pinned isolated target identity; source export/restore/candidate tail intentionally NOT configured, no backup receipt or replay. NOT full cutover.',
   );
 } else {
   assert.equal(

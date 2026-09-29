@@ -2,6 +2,22 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29原同次源迁移及候选关闭启动后故障（基于45ce6f79）
+
+新增原QA显式after-start模式，原before-migration保留。原host的迁移/seed/start/control/物理观察均真实执行，只有verify被一次明确故障替换，故不计开放前验收或成功切换。候选6a46ee0f、协调器当前WIP，数据库/代码均隔离QA，外部工作和支付事实明确合成。
+
+| 验证 | 实际结果 | 日志 |
+| --- | --- | --- |
+| 原模式拒绝新场景RED | 退出1，旧after-start/before-migration断言拒绝，源2目标0 | `/private/tmp/holaday-host-start-red.log` |
+| 初次接线及诊断重跑 | 各退出1，源90目标90；候选启动失败，未到verify注入点，不计启动成功 | `/private/tmp/holaday-host-start-connected.log`、`/private/tmp/holaday-host-start-diagnostic.log` |
+| 实际候选uid998 env模块正反例 | 旧localhost千问区域URL退出1（两项校验）；合法区域URL语法退出0。网络隔离、假key，无API调用 | `/private/tmp/holaday-host-start-env-red.log`、`/private/tmp/holaday-host-start-env-green.log` |
+| 修正QA配置后链 | 退出1；实际新候选closed启动/seed/boot/原观察/注入点均通过，失败为测试误期待closed、真实返回draining | `/private/tmp/holaday-host-start-fixed-config.log` |
+| 最终同次启动后故障 | session69825退出0；源90目标90；一次迁移/start/close，零open；draining及closeAcknowledged=false如实保留，实际health200/任务503，旧效果1不重放 | `/private/tmp/holaday-host-start-final.log` |
+
+原close是准入关闭屏障，不承诺已得到空闲确认；测试未调用wait/reset或修改产品使状态变绿。真实Linux uid998候选boot与seed不同、日志绑定一致、backupReceipt保留。仅after-start QA配置增加必需启动字段，4001/4002遵守原observer契约。每次新attempt/窗口/源目标，不重跑旧SQL；失败和正常尝试资源均准确核验后清理，日志/私有恢复证据保留。只删除可重建的合成QA数据，无生产、PayPal或真实模型调用。
+
+本轮原`pnpm test:ops`显式`CUTOVER_TEST_AGE_EXECUTABLE=/opt/homebrew/bin/age`，session19935退出0，日志`/private/tmp/holaday-host-start-ops.log`。两MJS Biome/node语法及git diff --check退出0。没有完整应用/整分支独立审查或生产切换结论。
+
 ## 2026-09-29原host至真实源备份/Mac恢复同次故障链（基于75760ffe）
 
 原恢复父夹具六参数、原Linux物理夹具、原host/site/journal/backup/恢复工具均复用。增加`CUTOVER_QA_HOST=1`和只读公开缓存路径，恢复后的故障只能为`before-migration`。不是源SQL成功或新候选启动：在原host第一次调用源迁移命令前抛错；此时实际恢复回执必须已落盘、journal为migration_started，无bootstrapSeed。断言计数恰为1及原归一化错误`MAINTENANCE_RELEASE_FAILED`，不自动重试。真实候选6a46ee0f与当前协调器源码分开记录，现场/支付scope仍合成。

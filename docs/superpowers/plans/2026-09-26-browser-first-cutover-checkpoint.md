@@ -1,10 +1,20 @@
-# 首次切换实施断点：原host至Mac恢复同次接通，成功候选尾段仍待验收
+# 首次切换实施断点：同次迁移和真实候选启动已接通，开放前后仍待验收
 
 日期：2026-09-26（Asia/Tokyo）。本地实施中，未部署。
 
 最新授权：2026-09-26 用户表示“我要出去一下 你自行安排任务 允许期间的所有操作 包含PR 部署 验证”。当前浏览器上线大项允许自主实施、PR、必要合并、部署与验证；下方历史“仅本地/未授权部署”限制已被本次授权取代。授权不等于验收通过；必须完成剩余真实接线、恢复演练与发布门槛，不得修改历史业务记录来伪造通过。
 
 ## 最新恢复点（优先于下方历史段落）
+
+### 2026-09-29 JST：同一host完成源迁移、新seed及真实候选关闭启动后的故障演练
+
+承接`45ce6f79`，只改两份原QA夹具。新增显式`CUTOVER_QA_HOST_FAULT=after-start`，保留原`before-migration`。原stage/site/停止/源导出/Mac隔离恢复/全部61SQL/持久回执之后，原host实际执行源迁移与schema校验、初始化seed、通过原PM2和uid998启动候选6a46ee0f，再由原控制socket/物理运行观察确认新boot且closed/idle/clean。此后仅在verify边界注入一次故障，不替代start/status，也不声称verify或preopen完成。源与恢复目标均90表；中文/BLOB/NULL/trigger/event仍独立核对。
+
+最终session69825退出0：`/private/tmp/holaday-host-start-final.log`。确切一次源迁移、一次候选start、一次保护性close、零open；原失败日志保留identity/seed/backupReceipt及`draining`、`closeAcknowledged:false`。原close只建立准入屏障，不等于waitForIdle出具closed回执；未改产品或自动wait/reset。原status的counts实际closed/active0/unknown0，真实HTTP healthz=200、任务入口=503；旧端口关闭、旧外部效果仍1、QA resurrect仅无关进程。bbcee014资源记录的源/目标/卷已核验清理，仅合成数据，日志及私有恢复资料保留。
+
+启动失败根因是QA配置而非发布门禁：候选env即使rollout=off仍校验千问区域URL，旧prepare用localhost不适合真实boot。离线uid998 env-only正反例已验证；仅after-start模式提供合法区域URL语法、假key、JWT/REDIS_URL及4001/4002，容器network-none，无API/支付访问，不新增Redis服务。原候选与当前协调器源码分开记录。两次初始startup失败及一次draining断言失败均不计通过，详见verification。
+
+下一步接原verify/beforeOpen的新鲜证据和真实候选所在主机分类，再接实际入口恢复/worker/对账与完整成功故障矩阵。现readPair实际PM2集中在Aliyun，原候选分类要求Vultr，不能把第二主机合成快照当真实事实；入口/外部工作/支付仍合成且尾部明确拒绝。生产独立facts、受保护入口、真实生产恢复及整分支审查仍缺。CLI execute关闭、Task4 BASE不变，无PR/push/合并/部署；未重试被拒管理凭据。
 
 ### 2026-09-29 JST（00:19Z轮续）：原host、物理停写、源备份和Mac恢复同一日志接通
 

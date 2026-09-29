@@ -55,11 +55,12 @@ const sourceQa = process.env.CUTOVER_QA_SOURCE
   ? JSON.parse(process.env.CUTOVER_QA_SOURCE)
   : undefined;
 const fullHost = process.env.CUTOVER_QA_HOST === '1';
+const afterStart = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-start';
 assert.ok(
   !fullHost || process.argv[2] === '--execution-site-lost-effect' || (recoveryLink && sourceQa),
 );
 if (fullHost && sourceQa) {
-  assert.equal(process.env.CUTOVER_QA_HOST_FAULT, 'before-migration');
+  assert.ok(['before-migration', 'after-start'].includes(process.env.CUTOVER_QA_HOST_FAULT));
   assert.equal(sourceQa.omitReceipt, false);
 }
 const hostConfig = fullHost
@@ -234,6 +235,11 @@ let siteContext;
 let hostAdapter;
 let hostResult;
 let hostMigrationFaults = 0;
+let hostStartFaults = 0;
+let hostCloseCommands = 0;
+let hostOpenCommands = 0;
+let hostStartCommands = 0;
+let hostMigrationCommands = 0;
 let recoveryScopeChecks = 0;
 try {
   await pm2(
@@ -1079,7 +1085,19 @@ try {
           }),
           exec: async (command, args, options) => {
             console.log('QA_HOST_COMMAND', command, JSON.stringify(args));
-            if (sourceQa && command === 'pnpm' && args.includes('db:migrate:numbered')) {
+            if (afterStart) {
+              if (command === 'runuser' && args.includes('close')) hostCloseCommands++;
+              if (command === 'runuser' && args.includes('open')) hostOpenCommands++;
+              if (command === 'pm2' && args[0] === 'start') hostStartCommands++;
+              if (command === 'pnpm' && args.includes('db:migrate:numbered'))
+                hostMigrationCommands++;
+            }
+            if (
+              sourceQa &&
+              !afterStart &&
+              command === 'pnpm' &&
+              args.includes('db:migrate:numbered')
+            ) {
               const durable = JSON.parse(await fs.readFile(journal.path, 'utf8'));
               assert.equal(durable.phase, 'migration_started');
               assert.ok(
@@ -1096,6 +1114,28 @@ try {
           },
         },
       );
+      if (afterStart) {
+        // Inject only AFTER the original host has physically started, observed
+        // and journal-bound a fresh closed process. Never substitute start/status.
+        hostAdapter.verify = async (identity) => {
+          const status = await hostAdapter.status(identity);
+          assert.equal(status.mode, 'closed');
+          assert.equal(status.idle, true);
+          assert.equal(status.needsReconciliation, false);
+          const durable = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+          assert.ok(durable.backupReceipt);
+          assert.match(durable.bootstrapSeed, /^[a-f0-9]{32}$/);
+          assert.notEqual(identity.bootId, durable.bootstrapSeed);
+          assert.deepEqual(durable.identity, identity);
+          assert.equal(
+            (await rows()).filter((row) => row.name === 'holaday-orchestrator' && row.pid > 1)
+              .length,
+            1,
+          );
+          hostStartFaults++;
+          throw new Error('CUTOVER_QA_AFTER_START_FAULT');
+        };
+      }
     } else await setupSite();
     if (siteMode) {
       if (lostEffect) {
@@ -1197,13 +1237,41 @@ try {
           window: hostApproval ?? siteContext.approval,
         });
         hostResult = result;
+        if (fullHost) console.log('QA_HOST_OUTCOME', JSON.stringify(result));
+        if (afterStart && hostStartFaults === 0) {
+          for (const row of (await rows()).filter(
+            (value) => value.name === 'holaday-orchestrator',
+          )) {
+            console.error(
+              'QA_CANDIDATE_STATE',
+              JSON.stringify({
+                pid: row.pid,
+                status: row.pm2_env.status,
+                exitCode: row.pm2_env.exit_code,
+              }),
+            );
+            // Synthetic offline QA only. Preserve bounded startup diagnostics
+            // before container cleanup; the parent keeps them in its 0600 log.
+            for (const key of ['pm_err_log_path', 'pm_out_log_path']) {
+              const path = row.pm2_env[key];
+              assert.ok(path.startsWith('/root/.pm2/logs/'));
+              const log = await fs.readFile(path, 'utf8').catch(() => 'unavailable');
+              console.error('QA_CANDIDATE_LOG', key, log.slice(-4096));
+            }
+          }
+        }
         if (fullHost && sourceQa)
           assert.equal(
             hostMigrationFaults,
-            1,
+            afterStart ? 0 : 1,
             'fault must occur exactly once after real durable recovery',
           );
-        if (fullHost) console.log('QA_HOST_OUTCOME', JSON.stringify(result));
+        if (afterStart)
+          assert.equal(
+            hostStartFaults,
+            1,
+            'original source migration/seed/new closed candidate must succeed before injected failure',
+          );
         if (process.env.CUTOVER_QA_HOST === '1') {
           // The old fixture's precreated bbbb journal cannot satisfy this: the
           // original host must stage the actual Git candidate before stopping.
@@ -1229,13 +1297,27 @@ try {
           result.phase,
           knownEffect
             ? 'legacy_interruption_accepted'
-            : sourceQa
-              ? 'migration_started'
-              : 'backup_verified',
+            : afterStart
+              ? 'candidate_started'
+              : sourceQa
+                ? 'migration_started'
+                : 'backup_verified',
         );
         const effects = await journal.readFirstCutoverEffects();
-        assert.equal(effects.failureObservation.status.mode, 'not-started');
+        assert.equal(
+          effects.failureObservation.status.mode,
+          afterStart ? 'draining' : 'not-started',
+        );
+        // close is an admission barrier, not an idle/closed receipt. Preserve
+        // the real protocol's uncertainty; do not call wait/reset to fabricate clean.
         assert.equal(effects.failureObservation.status.closeAcknowledged, false);
+        if (afterStart) {
+          assert.equal(result.closeAcknowledged, false);
+          assert.equal(hostCloseCommands, 1);
+          assert.equal(hostOpenCommands, 0);
+          assert.equal(hostStartCommands, 1);
+          assert.equal(hostMigrationCommands, 1);
+        }
         if (knownEffect) {
           // The real site intentionally normalizes inner boundary failures.
           assert.equal(result.code, 'CUTOVER_SITE_UNPROVEN');
@@ -1248,13 +1330,15 @@ try {
             result.code,
             recoveryDrift
               ? 'CUTOVER_RECOVERY_SESSION_UNPROVEN'
-              : sourceQa
-                ? fullHost
-                  ? 'MAINTENANCE_RELEASE_FAILED'
-                  : 'CUTOVER_QA_UNEXPECTED_TAIL'
-                : fullHost
-                  ? 'CUTOVER_SITE_UNPROVEN'
-                  : 'CUTOVER_QA_RESTORE_NOT_CONFIGURED',
+              : afterStart
+                ? 'CUTOVER_QA_AFTER_START_FAULT'
+                : sourceQa
+                  ? fullHost
+                    ? 'MAINTENANCE_RELEASE_FAILED'
+                    : 'CUTOVER_QA_UNEXPECTED_TAIL'
+                  : fullHost
+                    ? 'CUTOVER_SITE_UNPROVEN'
+                    : 'CUTOVER_QA_RESTORE_NOT_CONFIGURED',
           );
           assert.equal(effects.interruptionObservation.riskDigest, effects.riskDigest);
           assert.equal(effects.legacyInterruption.scope, 'legacy-non-payment-memory');
@@ -1274,19 +1358,29 @@ try {
           } else if (fullHost) {
             // Unlike the old adapter's artificial backup throw, the real site
             // latches its failed backup boundary. It must not issue new proofs.
-            if (sourceQa)
+            if (sourceQa && !afterStart)
               assert.deepEqual(
                 (await executionSite.lifecycle.assertStopped(siteContext)).survivors,
                 [],
               );
-            else
+            else if (!sourceQa)
               await assert.rejects(
                 executionSite.lifecycle.assertStopped(siteContext),
                 /CUTOVER_SITE_UNPROVEN/,
               );
             const durable = JSON.parse(await fs.readFile(journal.path, 'utf8'));
             assert.equal(Boolean(durable.backupReceipt), Boolean(sourceQa));
-            assert.equal(durable.bootstrapSeed, undefined);
+            if (afterStart) {
+              assert.match(durable.bootstrapSeed, /^[a-f0-9]{32}$/);
+              assert.deepEqual(durable.identity, result.identity);
+              const held = await hostAdapter.status(result.identity);
+              assert.equal(held.mode, 'draining');
+              assert.equal(held.counts.mode, 'closed');
+              assert.equal(held.counts.active, 0);
+              assert.equal(held.counts.unknown, 0);
+              assert.equal((await fetch('http://127.0.0.1:4001/healthz')).status, 200);
+              assert.equal((await fetch('http://127.0.0.1:4001/trpc/tasks.list')).status, 503);
+            } else assert.equal(durable.bootstrapSeed, undefined);
             assert.equal(effects.unmanagedEvents.at(-1).phase, 'unmanaged-stopped');
             await assert.rejects(fetch('http://127.0.0.1:4011'));
           } else if (!sourceQa)
@@ -1318,6 +1412,14 @@ try {
             riskDigest: effects.riskDigest,
             releaseReady: false,
             ...(fullHost ? { originalHost: true, nativeCandidatePreparation: true } : {}),
+            ...(afterStart
+              ? {
+                  candidateStartedClosed: true,
+                  failureMode: 'draining',
+                  closeAcknowledged: false,
+                  admissionClosed: true,
+                }
+              : {}),
             ...(recoveryLink
               ? { recoveryLinked: !recoveryDrift, recoveryRejected: recoveryDrift }
               : {}),
