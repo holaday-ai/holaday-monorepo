@@ -2,6 +2,12 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 18:15Z heartbeat：现场配置固定到原journal
+
+原site→journal现已单次绑定完整受保护配置摘要，必须在preflight、任何接收器连接前持久化；首次审阅到连接之间、重复审阅和后续guard不能更换配置。已绑定attempt不能由另一site重接，失败不自动重试。初始3项RED退出1，实现后本机site/journal129/129及host/receiver110/110退出0。加入配置绑定竞态与双次审阅漂移反例后，真实Linux三模块223/223退出0、零跳过；原实际PM2/pidfd停止组合退出0。日志`/private/tmp/holaday-site-binding-linux-{unit,physical}-20260930.log`。原镜像、私有PID/network none、受限资源，仅挂载只读代码，无生产配置或凭据。
+
+扩大回归首次退出1（10项本机监听EPERM）；正常权限审批后原迁移门禁退出0：Node922通过/34跳过/0失败，Python12通过，日志`/private/tmp/holaday-site-binding-regression-approved-20260930.log`。34个未配置age工具的用例未验收，不写成零跳过，也不重用历史通过数；本轮Linux改动模块和原停止组合均实际执行。Biome/语法/diff-check通过。这里只完成配置与日志接线，不证明云浏览器/VNC实际恢复、独立生产facts、真实停写备份/Mac恢复或发布门禁通过；CLI仍关闭，未部署，自动化不变。
+
 ## 2026-09-30 同轮收口：恢复拒绝与真实范围观察
 
 最终原夹具25612串行成功/拒绝模式均退出0、无跳过；拒绝模式的真实恢复仍然退出1，PM2 restart=0、单次unshare错误，无回退浏览器/CDP/旧HTTP动作，无关应用及独立显示保持。临时移除禁重启选项的有效变异65506退出1；最初变异副本语法错误不算反例。额外真实无profile参数子进程46810先RED，补完整PPID闭包和已退休身份复核后同一最终运行GREEN；此前只查profile参数的9进程证据不扩大成完整后代证明。最终日志`/private/tmp/holaday-browser-tree-final-{denied,success}-20260930.log`；Biome/Node语法/diff-check退出0，原ops未重复计数。

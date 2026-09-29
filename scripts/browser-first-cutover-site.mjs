@@ -140,6 +140,8 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
   let sourceTransfer;
   let backupStage;
   let comparedSnapshot;
+  let inspectedScope;
+  let executionSiteDigest;
   const used = new Set();
   const readScope = async (approval) => {
     const value = structuredClone(await io.readSite(approval));
@@ -184,6 +186,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     if (
       !bindingKeys.every((k) => record[k] === context.binding[k]) ||
       record.legacyDigest !== scope.legacyDigest ||
+      record.executionSiteDigest !== executionSiteDigest ||
       (phases && !phases.includes(record.phase))
     )
       fail();
@@ -567,7 +570,12 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
           approval: structuredClone(ctx.approval),
         };
         scope = await readScope(context.approval);
-        await guard(ctx, ['preflight', 'prepared']);
+        if (inspectedScope && !equal(inspectedScope, scope)) fail();
+        await guard(ctx, ['preflight']);
+        const digest = createHash('sha256').update(JSON.stringify(scope)).digest('hex');
+        await context.journal.bindExecutionSite(digest);
+        executionSiteDigest = digest;
+        await guard(ctx, ['preflight']);
         const args = { binding: context.binding, maintenanceEndsAtMs: scope.maintenanceEndsAtMs };
         ingress = await io.createIngress(args, {
           ...io.ingress,
@@ -1180,7 +1188,8 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     },
     inspectLegacySource: async (approval) => {
       const reviewed = await readScope(approval);
-      return io.inspectSource(
+      if (inspectedScope && !equal(inspectedScope, reviewed)) fail();
+      const result = await io.inspectSource(
         {
           reviews: reviewed.reviews,
           inventoryDigest: reviewed.binding.inventoryDigest,
@@ -1192,6 +1201,9 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
           readExecutionIdentities: async () => [await io.readCoordinatorIdentity()],
         },
       );
+      if (!equal(reviewed, await readScope(approval))) fail();
+      inspectedScope = reviewed;
+      return result;
     },
   };
 }

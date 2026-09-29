@@ -257,6 +257,79 @@ async function fixture(t, extraInventory = {}, interrupted = false) {
   };
 }
 
+test('site pins the complete protected configuration in the real journal before connecting receivers', async (t) => {
+  const f = await fixture(t);
+  f.scope.backupRecoveryDigest = '1'.repeat(64);
+  const expected = createHash('sha256').update(JSON.stringify(f.scope)).digest('hex');
+  const connect = f.io.createIngress;
+  f.io.createIngress = async (...args) => {
+    const disk = JSON.parse(await fs.readFile(f.journal.path, 'utf8'));
+    assert.equal(disk.executionSiteDigest, expected);
+    assert.equal((await f.journal.readFirstCutoverEffects()).executionSiteDigest, expected);
+    return connect(...args);
+  };
+  const site = f.make();
+  await site.inspectLegacySource(f.approval);
+  await site.lifecycle.attach(f.context);
+  await f.journal.persist('prepared', { candidate: f.binding.candidate });
+  assert.equal((await f.journal.readFirstCutoverEffects()).executionSiteDigest, expected);
+  await site.lifecycle.detach(f.context);
+  const effects = [...f.events];
+  await assert.rejects(f.make().lifecycle.attach(f.context), /UNPROVEN/);
+  assert.deepEqual(f.events, effects, 'a new site must not resume the same persisted attempt');
+});
+
+test('site refuses configuration replacement between review and attachment without receiver effects', async (t) => {
+  for (const key of ['backupRecoveryDigest', 'gatewaySiteDigest']) {
+    const f = await fixture(t);
+    f.scope.backupRecoveryDigest = '1'.repeat(64);
+    const site = f.make();
+    await site.inspectLegacySource(f.approval);
+    f.scope[key] = '2'.repeat(64);
+    await assert.rejects(site.lifecycle.attach(f.context), /UNPROVEN/);
+    assert.deepEqual(f.events, []);
+    assert.equal((await f.journal.readFirstCutoverEffects()).executionSiteDigest, undefined);
+  }
+});
+
+test('site detects a configuration race while binding and never connects or retries the attempt', async (t) => {
+  const f = await fixture(t);
+  const digest = createHash('sha256').update(JSON.stringify(f.scope)).digest('hex');
+  const bind = f.journal.bindExecutionSite;
+  f.journal.bindExecutionSite = async (value) => {
+    await bind(value);
+    f.scope.gatewaySiteDigest = '2'.repeat(64);
+  };
+  const site = f.make();
+  await assert.rejects(site.lifecycle.attach(f.context), /UNPROVEN/);
+  assert.deepEqual(f.events, []);
+  assert.equal((await f.journal.readFirstCutoverEffects()).executionSiteDigest, digest);
+  f.scope.gatewaySiteDigest = 'f'.repeat(64);
+  await assert.rejects(site.lifecycle.attach(f.context), /UNPROVEN/);
+  await assert.rejects(f.make().lifecycle.attach(f.context), /UNPROVEN/);
+  assert.deepEqual(f.events, []);
+});
+
+test('source review refuses configuration drift during inspection and on a later inspection', async (t) => {
+  for (const during of [true, false]) {
+    const f = await fixture(t);
+    const inspect = f.io.inspectSource;
+    f.io.inspectSource = async (...args) => {
+      const result = await inspect(...args);
+      if (during) f.scope.gatewaySiteDigest = '2'.repeat(64);
+      return result;
+    };
+    const site = f.make();
+    if (!during) {
+      await site.inspectLegacySource(f.approval);
+      f.scope.gatewaySiteDigest = '2'.repeat(64);
+    }
+    await assert.rejects(site.inspectLegacySource(f.approval), /UNPROVEN/);
+    assert.deepEqual(f.events, []);
+    assert.equal((await f.journal.readFirstCutoverEffects()).executionSiteDigest, undefined);
+  }
+});
+
 test('site prepare evidence preserves both unknown observations rather than only an empty external list', async (t) => {
   const f = await fixture(t, {}, true);
   const site = f.make();

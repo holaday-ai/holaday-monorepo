@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 18:15Z heartbeat：审阅配置与原现场执行日志已绑定
+
+从`0d8197ff`继续原Task4，修改的是原`browser-first-cutover-site.mjs`与`browser-maintenance-journal.mjs`，没有新增执行框架。现场站点现在记住首次源审阅使用的完整受保护配置，重复审阅和attach前后须保持一致；attach只在preflight进行，在连接入口/gateway接收器之前将完整配置的SHA256单次写入并同步原journal。后续所有site guard核对持久`executionSiteDigest`，另一site实例不得续接同一次已经绑定的attempt。该摘要涵盖现有恢复摘要、双机review、入口配置、启动材料、inventory、发布绑定和窗口，不写入秘密或业务正文。不改变原锁身份、不新增恢复锁、不允许prepared阶段重新接入；写入后连接失败仍保留原证据，不能自动重试。
+
+三项初始反例3df6cf退出1（未落盘、审阅后配置替换被接受、缺少绑定API）；实现后两文件38695为129/129退出0零跳过，host/receiver11039为110/110退出0零跳过。新增绑定期间竞态、恢复配置回退后仍不续跑、重复源审阅及审阅中漂移的反例后，真实Linux本轮site/journal/host串行51899为223/223退出0零跳过，日志`/private/tmp/holaday-site-binding-linux-unit-20260930.log`。原Linux `--execution-site-interruption` 86436退出0，真实PM2/pidfd/受保护文件与journal停止组合继续通过（业务与部分入口事实仍合成），日志`/private/tmp/holaday-site-binding-linux-physical-20260930.log`。均沿原`ff58ba97...`隔离镜像、私有PID、无网络、限CPU/内存、仅代码只读挂载，无生产凭据/宿主PID/新数据库卷。
+
+扩大原迁移门禁回归73786退出1：10项回环端口监听受沙箱EPERM拒绝，另34项因未配置age测试工具跳过；没有改产品来压下错误。正常权限审批后36138退出0，Node956项中922通过、34跳过、0失败，Python12通过；日志`/private/tmp/holaday-site-binding-regression-approved-20260930.log`。**不把34项跳过算通过，也不把旧加密/恢复证据算本轮新验收。** 本轮没有重跑完整DB恢复链或上一轮Brave恢复实验。Biome四文件、Node语法和diff-check通过。
+
+仍未完成两云服务的受保护实际停止/限定恢复执行器及其专属进程/显示事实接线；本次配置摘要不是它们已经执行或已恢复的证明。下一步把已审阅的源/工具/限定恢复差异材料与两服务单次效果接入同一site/journal，保留原分类器拒绝未知进程和共享服务的边界，不再重复增加摘要框架或重做原QA。独立现场facts、真实停写/Mac恢复、非PayPal恢复、整分支审查和新鲜窗口仍须完成后才能开启CLI。无生产改动、SSH重试、支付/业务记录/密钥修改、push/PR/合并/部署；原自动化、Task4 BASE及`__pycache__`保留。
+
 ### 2026-09-30 同轮收口：恢复失败不重启、完整后代观察及真实只读范围证据
 
 从`0b48f37f`继续同一夹具，新增`--scoped-pm2-denied`：容器明确不具备SYS_ADMIN，旧实例真实PM2停止后，恢复的unshare退出1。2654退出0是**拒绝行为断言通过**，不是恢复成功：实际PM2 autorestart=false、restart_time=0、退出码1、仅一条预期unshare权限错误，间隔观察无CDP监听/旧profile进程/旧HTTP动作，无关应用、独立Xvfb、父策略、profile哨兵与用户偏好保持。临时副本去掉禁重启选项后65506退出1（autorestart true≠false），证明不会把重试路径当拒绝通过；更早46797只有变异副本注释导致的语法错误，不能算有效反例。原工作树从未去掉禁重试选项。

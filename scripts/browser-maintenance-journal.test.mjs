@@ -62,6 +62,27 @@ const firstMetadata = {
   inventoryDigest: '4'.repeat(64),
 };
 
+test('execution site binding is first-cutover-only, single-use and cannot be added after preparation', async (t) => {
+  const j = await acquireReleaseJournal(await fixture(t), firstMetadata);
+  t.after(() => j.close());
+  await j.bindManifest(manifest);
+  for (const invalid of [undefined, '', 'x'.repeat(64), { digest: '5'.repeat(64) }])
+    await assert.rejects(() => j.bindExecutionSite(invalid), /UNPROVEN/);
+  await j.bindExecutionSite('5'.repeat(64));
+  assert.equal(JSON.parse(await fs.readFile(j.path, 'utf8')).executionSiteDigest, '5'.repeat(64));
+  await assert.rejects(j.bindExecutionSite('5'.repeat(64)), /UNPROVEN/);
+  await assert.rejects(j.bindExecutionSite('6'.repeat(64)), /UNPROVEN/);
+  assert.equal((await j.readFirstCutoverEffects()).executionSiteDigest, '5'.repeat(64));
+  const late = await acquireReleaseJournal(await fixture(t), firstMetadata);
+  t.after(() => late.close());
+  await late.bindManifest(manifest);
+  await late.persist('prepared', { candidate: metadata.candidate });
+  await assert.rejects(late.bindExecutionSite('5'.repeat(64)), /UNPROVEN/);
+  const ordinary = await acquireReleaseJournal(await fixture(t), metadata);
+  t.after(() => ordinary.close());
+  await assert.rejects(ordinary.bindExecutionSite('5'.repeat(64)), /UNPROVEN/);
+});
+
 test('interruption receipt is durable before producer stop and survives backup seed and boot', async (t) => {
   const policy = {
     mode: 'controlled-interruption',

@@ -34,6 +34,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
   let failureObservation;
   let interruptionObservation;
   let currentIdentity;
+  let executionSiteDigest;
   const startupEvents = [];
   const candidateStartupEvents = [];
   const registrationEvents = [];
@@ -180,6 +181,7 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
           ...(backupReceipt ? { backupReceipt } : {}),
           ...(failureObservation ? { failureObservation } : {}),
           ...(interruptionObservation ? { interruptionObservation } : {}),
+          ...(executionSiteDigest ? { executionSiteDigest } : {}),
           ...(startupEvents.length ? { startupEvents } : {}),
           ...(candidateStartupEvents.length ? { candidateStartupEvents } : {}),
           ...(registrationEvents.length ? { registrationEvents } : {}),
@@ -342,6 +344,9 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
               ? { interruptionObservation: record.interruptionObservation }
               : {}),
             ...(record.identity ? { identity: record.identity } : {}),
+            ...(record.executionSiteDigest
+              ? { executionSiteDigest: record.executionSiteDigest }
+              : {}),
             ...(record.bootstrapSeed ? { bootstrapSeed: record.bootstrapSeed } : {}),
             phase: record.phase,
             ...(record.failureObservation ? { failureObservation: record.failureObservation } : {}),
@@ -718,6 +723,22 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
         await write(phase, currentIdentity);
       });
     },
+    // Pin one complete operator-reviewed site before opening receiver sessions.
+    // This is not a resume token: even an identical second bind is rejected.
+    bindExecutionSite: (digest) =>
+      serial(async () => {
+        if (
+          !first ||
+          phase !== 'preflight' ||
+          !migrationManifest ||
+          executionSiteDigest !== undefined ||
+          typeof digest !== 'string' ||
+          !/^[a-f0-9]{64}$/.test(digest)
+        )
+          throw unproven();
+        executionSiteDigest = digest;
+        await write(phase, currentIdentity);
+      }),
     bindManifest: (manifest) =>
       serial(async () => {
         const bytes = JSON.stringify(manifest);
