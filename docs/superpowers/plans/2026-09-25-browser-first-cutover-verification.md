@@ -2,6 +2,14 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29 当前候选离线工具包验收（36c42add）
+
+原闭包28/22/26模块、observer、固定NFT及原查询器编译产物合计85文件封装于`/private/tmp/holaday-first-cutover-tools-jxQvxN`，manifest SHA256`12fca5965758aa8fc8740f71858dd4874c4043371eacdf0d3ece660a37bb2144`，不含现场批准/凭据/私钥/商户元数据/facts。实际LinuxNode22 session94245退出0：85文件摘要、76个MJS路径导入、原ingress/gateway校验器每侧4项篡改拒绝和复原通过；原支付查询接线15/15，零失败/取消/跳过。日志`/private/tmp/holaday-fixed-tools-linux.log`。这是当前产物验证，不重计历史整套回归数量。
+
+session11701退出0：用34个真实Git对象保留原候选SHA，在独立无网络Linux中调用原固定协调器入口；/proc/UID/argv/cwd、Git实际字节、toolDigest匹配通过，改模块并重算manifest、错误cwd、开放批准文件权限均拒绝；execute继续拒绝，无journal/service写入。日志`/private/tmp/holaday-fixed-entry-candidate-linux.log`。QA浅对象库只含需要的代码树/对象，codex/qa引用和批准在QA内部合成，不证明生产分支可达性、完整checkout/build或生产批准。两个容器均512MiB/1核/私有PID、无网络、不挂生产凭据，退出自动移除。临时校验脚本与包路径见checkpoint，未更改产品源码。
+
+结果边界：工具封装/固定入口源检查已获当前产物证据，不能等价为独立现场facts、安装完成、真实生产备份/恢复、非PayPal恢复或独立整分支审查。既有数据库管理凭据路径权限拒绝尚未针对性解除，未重试或绕过；CLI仍关闭，未push/PR/合并/部署。后续文档提交不等于包的候选自动升级。
+
 ## 2026-09-29 查询响应流上限审查修复（基于1ea2922b）
 
 原查单查询器先完整读响应再检查大小，256KiB未约束读取过程。两个合成ReadableStream反例先失败（69086，`/private/tmp/holaday-query-stream-red.log`，41通过/2失败）：原实现消费全部正文，没有在超限时取消。修复为按实际字节计数，超过上限立即取消/释放reader，单次查询、不保留超限原文；不依赖Content-Length。两个有效签名恰好256KiB正例仍保留完整原字节。仅改原查询器和原测试，不调用任何真实支付服务。

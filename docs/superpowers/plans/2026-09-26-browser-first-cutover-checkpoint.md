@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 JST：当前36c42add离线工具包与原始Git固定入口验证完成，现场权限仍阻断
+
+本轮未改产品源码、未安装或重启任何服务。按原Task6.R3直接封装提交`36c42addc6e73884fadb4e4f053a9babf674944b`的现有固定模块，不新建发布框架：协调器28、ingress22、gateway26，原只读支付查询器编译包、observer及固定NFT资源，共85文件。包在`/private/tmp/holaday-first-cutover-tools-jxQvxN`；`packet.json` SHA256为`12fca5965758aa8fc8740f71858dd4874c4043371eacdf0d3ece660a37bb2144`。只读Git取出已提交工具字节；查询器编译前后检查源码与lockfile相对候选无差异。包明确prepareOnly=true/releaseReady=false，不含批准清单、凭据、恢复私钥、商户元数据或生产facts。生成器`/private/tmp/holaday-build-fixed-tools-20260929.mjs`为临时离线产物脚本，未加入产品源码。
+
+实际既有Linux Node22无网络镜像、私有PID、512MiB/1核、只读输入：session94245退出0，85摘要核对、76个MJS路径实际导入；原Python ingress/gateway校验器各拒绝字节篡改、错误权限、多余文件和NFT漂移，恢复后通过；该包的原支付查询接线15/15、零跳过。日志`/private/tmp/holaday-fixed-tools-linux.log`，脚本`/private/tmp/holaday-verify-fixed-tools-20260929.mjs`。没有借Mac跳过冒称Linux通过。
+
+另以34个原始Git对象（真实候选commit、必要tree、28模块和NFT blob）构造隔离QA对象库，不生成替代候选commit。原固定路径入口直接检查本包，session11701退出0：实际/proc/UID/argv/cwd、候选Git字节与toolDigest通过；修改工具同时重算manifest、错误cwd、0644批准文件均拒绝，execute仍unavailable，无journal/service写入。日志`/private/tmp/holaday-fixed-entry-candidate-linux.log`；脚本及对象包`/private/tmp/holaday-fixed-entry-candidate-20260929.{mjs,pack}`，pack SHA256`c7e87e099ed094756af057f5b5f4a3b581c8a1264854b95423bcadce1df27474`。仅QA内创建合成批准和codex/qa引用；这不是全库checkout/build、生产分支可达性或生产批准。两个专属容器均--rm退出，旧prepared缓存不动。
+
+主智能体继续定向检查host固定入口、payments/gateway接线和site工作边界，没有据此宣称独立整分支审查完成。site输出unknownWriters空数组之前原validateLegacyWorkBoundary要求独立观察值严格为0；不能去掉该检查或以空数据库替代观察。下一实际闭环仍需要独立生产facts及受保护安装/单次入口、真实停写备份/Mac恢复、非PayPal恢复、最终整分支审查。此前自动权限审核拒绝的数据库管理凭据路径未重试、未换工具/路径绕过；需要针对该只读元数据权限的明确批准或已授权元数据通道。停止于此真实现场权限边界，不用新增组件或重复演练替代。此包固定36c42add，后续文档提交不自动改写其候选；正式执行必须重新绑定最终候选和新鲜窗口。原Task4 BASE不变，CLI关闭，未push/PR/合并/部署。
+
 ### 2026-09-29 JST：隔离闭环已保存，审查修复查单响应的实际内存上限
 
 隔离成功/晚发现未决动作及原受保护入口夹具已保存为`1ea2922b`（五个明确文件，原cache未纳入）。随后主智能体按原Task4 BASE开始风险定向自审，不称整分支或独立审查完成：发现`payment-cutover-query.ts`在完整arrayBuffer/text之后才检查256KiB，不能限制读取过程内存。只改该原查询器与原测试：两个真实ReadableStream反例先RED（session69086退出1，41通过/2失败，均因没有提前取消）；加入有界读取，实际字节超过上限即取消并释放reader，不保留超限正文、不重试查询，保留签名/商户/状态/错误脱敏逻辑。新增两条恰好256KiB有效签名及原始字节保留正例。
