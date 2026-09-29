@@ -6,6 +6,24 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 JST：隔离成功与晚发现动作反例最终结果
+
+session66686退出0：同次open/nginx恢复/启动保存后，独立只读接口发现具体unknown旧动作，原hold关闭同一dirty候选一次，双HTTPS503、锁保留、动作计数1。源90/目标90，d35c5604专属资源已核验清理，日志`/private/tmp/holaday-late-known-effect-connected.log`。此前success3117亦退出0；两个attempt不拼成生产验收。
+
+原Linux协调器夹具补齐原28模块中的6个漏项，真实固定入口RED拒绝后session9123退出0；Git/proc/UID/私密文件通过，工具及manifest篡改、policy漂移拒绝，execute不可用。日志`/private/tmp/holaday-coordinator-physical-closure-{red,green}.log`；不是生产安装。
+
+最终串行session12708退出0：browser1044/1044、ops120/60/16/875及Python12，全部零失败/取消/跳过。日志`/private/tmp/holaday-success-late-{browser,ops}-corrected.log`。此前35080因PATH漏rg触发默认全库发现，终止退出143，97通过/334失败/502取消不计验收；未发现外部调用记录，详见verification。三个MJS静态检查及diff-check通过，全部测试session结束。五个预期跟踪文件待提交，原cache不动。
+
+剩余：独立生产facts/受保护入口、真实停写备份/Mac恢复、非PayPal恢复及整分支审查。生产DB管理凭据路径此前被拒，不重试或换路绕过。CLI关闭、Task4未完成、BASE不变、未PR/push/合并/部署；不重复本轮已通过物理演练。下段“运行中”为已被取代的过程记录。
+
+### 2026-09-29 JST：同一attempt完整隔离成功路径已通过，晚发现工作反例运行中
+
+基于`04b4d1a1`，只扩展原两份QA夹具，未开启CLI execute。session3117退出0，`/private/tmp/holaday-full-success-connected.log`：同次原host/实际退休/源导出/age/Mac隔离恢复/全部61SQL/新boot/两次preopen/一次open/真实三站nginx恢复/原worker=false启动保存之后，QA reconcile实际读取同一源serverUUID/database，调用原13表工作和支付只读读取器两次，夹在真实PM2、4010/4011关闭、新health200、两个HTTPS未知只读路径404及相同serving/dirty身份检查之间。原transition达到reconciled，原finish释放锁；零close，旧计数服务效果始终1，既有风险摘要与noAutomaticReplay保留。源90/目标90，resource2a0520bc的源/目标/专属卷已driver精确核验清理，日志及私有证据保留。
+
+这证明隔离QA成功链，不是生产facts或商户恢复：外部旧工作范围仍合成、两个逻辑host共享namespace、worker关闭；没有生产备份/支付方重投/完整故障矩阵或整分支审查。原候选应用仍为缓存6a46ee0f，协调器为当前分支，二者区分。原组件/故障测试不能叠加称上线完成。
+
+后续新增`late-known-effect`：实际非支付计数服务提供独立只读发现接口，只有开放/启动保存/实际库检查后才查询，出现具体unknown动作时原reconcile拒绝，要求原hold关闭同一dirty实例、双HTTPS503、锁保留、计数仍1。session66686运行中，`/private/tmp/holaday-late-known-effect-connected.log`，不得重跑或复用其SQL/窗口。一次格式化审批超时未执行，唯一重试成功，两QA文件Biome/语法/diff-check退出0。原完整browser/ops回归尚未对本轮新改动重跑。下一步先收该反例及串行回归，再继续现场facts、工具封闭包/入口、真实生产恢复、非PayPal恢复与整分支审查。未PR/push/合并/部署。
+
 ### 2026-09-29 JST：原worker关闭配置／启动保存同次故障验收通过（787607a0之后）
 
 已提交入口恢复修复`787607a0`，未push/合并/部署。当前仅原两份QA夹具增加`after-worker`：沿同次原host/source/recovery/nginx链，再调用原`resumeFirstCutoverCandidateWorker`，不替换控制socket、运行观察、日志权限保护或启动保存实现。配置明确worker=false，不声称已启用worker。预定断言原六条candidateStartupEvents、两份实际落盘摘要、同一候选路径/UID998/no-autorestart及无关原始行保留后，才在worker返回边界注入故障；最后仍检查一次close、dirty和两个HTTPS入口503，reconcile未执行。

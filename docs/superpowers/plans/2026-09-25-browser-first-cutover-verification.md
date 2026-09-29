@@ -2,6 +2,20 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29 同一次完整隔离成功链（基于04b4d1a1）
+
+最终回归：session12708退出0，browser1044/1044，ops120/60/16/875及Python12，全部零失败/取消/跳过。日志`/private/tmp/holaday-success-late-{browser,ops}-corrected.log`；原三夹具静态检查及diff-check通过。下文“运行中／待更新”为过程记录，已被本段取代；全部测试session结束。只代表隔离接线与回归，不改变生产切换禁止结论。
+
+后续结果：late-known-effect session66686退出0，源90/目标90，原hold仅关闭同一候选一次，两个HTTPS入口503，dirty/风险/锁保留，独立服务计数1。d35c5604源/目标/卷已driver精确核验清理。原受保护协调器Linux夹具因仍列旧22模块先退出1（`/private/tmp/holaday-coordinator-physical-closure-red.log`，原入口CUTOVER_COORDINATOR_UNPROVEN）；只补原28模块清单中的六个既有模块后session9123退出0（`/private/tmp/holaday-coordinator-physical-closure-green.log`）。实际Git候选字节/原固定入口/proc/UID/私密文件通过，修改工具及manifest仍拒绝，NFT策略漂移拒绝，execute继续unavailable且无journal/service写入；均为新的无网络512MiB私有容器，退出已自动移除，没有重建镜像。
+
+回归命令操作失误单列：session35080的精简PATH漏掉rg，生成空文件数组，Node回退默认全仓发现。发现后定向SIGTERM已核实Node69414及包装shell69407，session退出143；日志`/private/tmp/holaday-success-late-browser-regression.log`保留，97pass/334fail/502cancelled不计本项通过，后续ops没有执行。日志明确中止于core-generation-review.test.ts导入，生产supercar冒烟脚本均在未执行取消集合；PayPal/Playwright入口为模块加载失败，非真实服务调用。已读取误收集的dist/test/db-helper.js：仅导出函数，没有顶层连接或迁移；其余已过用例为本地合成/静态契约。没有发现外部调用记录或遗留测试进程，Git仍只有本轮预期改动及原cache。纠正为先独立发现并校验42个允许文件，然后命令显式逐个列出，不依赖受限PATH中的rg或允许空列表；新session12708串行运行浏览器和ops，`/private/tmp/holaday-success-late-{browser,ops}-corrected.log`，结果待更新。错误运行不覆盖、不冒充全套验收。
+
+session3117退出0，`/private/tmp/holaday-full-success-connected.log`。原host从准备、退休、备份和Mac隔离恢复、61SQL、新boot及两次preopen，经过一次open、实际nginx恢复和原worker=false启动保存，最终调用QA限定reconcile。该核对实际读取同源身份、原13表工作及支付范围两次，检查实际PM2、旧端口拒绝、候选health200和两个HTTPS只读未知路径404、相同serving/dirty身份；不是空成功回调。原transition返回reconciled、原finish释放锁，零close、风险摘要不变、外部效果1且不重放。源90/目标90，中文/BLOB/NULL/触发器/事件另由父夹具比对；原resource2a0520bc合成资源已核验清理。
+
+此前success模式RED仅为允许模式断言退出1，发生在Docker/I/O之前（`/private/tmp/holaday-cutover-success-mode-red.log`），不把它称作完整行为RED。当前成功证据仅覆盖合成旧工作、共享命名空间的两个逻辑host、空支付范围和关闭worker；候选应用6a46ee0f与当前协调器分开记录，不证明生产独立facts、真实生产恢复、商户恢复或发布就绪。没有修改应用/包/锁文件；6a46ee0f到04b4d1a1的这些目录差异为空。
+
+配对`late-known-effect`场景session66686仍运行，日志`/private/tmp/holaday-late-known-effect-connected.log`。仅在实际开放、入口恢复、原启动保存及数据库核对后，通过独立计数服务的只读接口发现具体unknown动作，要求原hold关闭同一dirty候选、双入口503、锁保留、无第二次动作。尚未计通过。两QA文件静态语法、Biome与diff检查退出0；完整串行回归待本轮最后修改后重跑。一次格式化审批超时未执行，唯一重试已成功，不是测试失败。
+
 ## 2026-09-29原启动保存接线（基于787607a0）
 
 原两份QA文件新增after-worker。复用真实停止态cron和原定向注册移除，随后原resumeFirstCutoverCandidateWorker在worker=false配置下验证候选、保护日志并保存两份startup。只使用目录映射区分同一隔离命名空间中的两个逻辑主机，不伪造文件stat、进程、SQL、应用或journal；不能称独立生产双机或worker启用验收。

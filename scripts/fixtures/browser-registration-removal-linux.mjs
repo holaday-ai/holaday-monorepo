@@ -9,6 +9,10 @@ import { createConnection } from 'node:net';
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseEnv, promisify } from 'node:util';
+import {
+  readCutoverDatabaseScope,
+  readCutoverWorkScope,
+} from '/source/browser-cutover-evidence.mjs';
 import { backupAndRestoreCheck } from '/source/browser-first-cutover-backup.mjs';
 import { connectFirstCutoverGatewaySession } from '/source/browser-first-cutover-gateway-session.mjs';
 import {
@@ -59,14 +63,23 @@ const sourceQa = process.env.CUTOVER_QA_SOURCE
 const fullHost = process.env.CUTOVER_QA_HOST === '1';
 const afterStart =
   fullHost &&
-  ['after-start', 'before-open', 'after-open', 'after-ingress', 'after-worker'].includes(
-    process.env.CUTOVER_QA_HOST_FAULT,
-  );
+  [
+    'after-start',
+    'before-open',
+    'after-open',
+    'after-ingress',
+    'after-worker',
+    'success',
+    'late-known-effect',
+  ].includes(process.env.CUTOVER_QA_HOST_FAULT);
 const beforeOpen = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'before-open';
 const afterOpen = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-open';
 const afterIngress = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-ingress';
+const lateKnownEffect = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'late-known-effect';
+const successfulCutover = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'success';
 const afterWorker = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-worker';
-const nativeIngress = afterIngress || afterWorker;
+const nativeWorker = afterWorker || successfulCutover || lateKnownEffect;
+const nativeIngress = afterIngress || nativeWorker;
 const preopenGate = beforeOpen || afterOpen || nativeIngress;
 const openedCandidate = afterOpen || nativeIngress;
 let nginxFixture;
@@ -82,6 +95,8 @@ if (fullHost && sourceQa) {
       'after-open',
       'after-ingress',
       'after-worker',
+      'success',
+      'late-known-effect',
     ].includes(process.env.CUTOVER_QA_HOST_FAULT),
   );
   assert.equal(sourceQa.omitReceipt, false);
@@ -207,7 +222,20 @@ if (lostEffect) {
   // Independent non-payment test oracle, never passed to production observers.
   // Complete the effect then destroy the response. Every legacy restart would
   // repeat the effect: there is intentionally no persistent deduplication key.
-  effectServer = createServer((request) => {
+  effectServer = createServer((request, response) => {
+    // Separate read-only discovery: never invokes the action again. Only the
+    // late-known scenario asks this oracle AFTER open and startup persistence.
+    if (request.method === 'GET' && request.url === '/observations') {
+      response.setHeader('content-type', 'application/json');
+      response.end(
+        JSON.stringify(
+          effectCount === 1
+            ? [{ privateEvidenceRef: sha('known QA action'), outcome: 'unknown' }]
+            : [],
+        ),
+      );
+      return;
+    }
     request.resume();
     request.on('end', () => {
       effectCount++;
@@ -263,6 +291,8 @@ let executionSite;
 let siteContext;
 let hostAdapter;
 let hostResult;
+let hostFinished = false;
+let reconciliationChecks = 0;
 let hostMigrationFaults = 0;
 let hostStartFaults = 0;
 let hostCloseCommands = 0;
@@ -290,7 +320,7 @@ try {
     '--kill-timeout',
     '200',
   );
-  if (!gateways || afterWorker) {
+  if (!gateways || nativeWorker) {
     await pm2(
       'start',
       '/tmp/registry-idle.cjs',
@@ -422,7 +452,7 @@ try {
   const vultrStartupRoot = '/qa-vultr-pm2';
   const vultrArchive = '/qa-vultr-maintenance';
   const vultrStartupFiles = [];
-  if (afterWorker) {
+  if (nativeWorker) {
     await fs.mkdir(vultrStartupRoot, { mode: 0o700 });
     await fs.mkdir(vultrArchive, { mode: 0o700 });
   }
@@ -430,7 +460,7 @@ try {
     const path = `/root/.pm2/${suffix}`;
     const saved = JSON.parse(await fs.readFile(path, 'utf8'));
     const raw = saved.map((r) => JSON.stringify(r));
-    const aliyunRaw = afterWorker
+    const aliyunRaw = nativeWorker
       ? raw.filter((_r, i) => saved[i].name !== 'holaday-files-cron')
       : raw;
     const text = `[${aliyunRaw.join(',')}]\n`;
@@ -442,7 +472,7 @@ try {
         names.includes(r.name) ? [{ name: r.name, entryDigest: sha(raw[i]) }] : [],
       ),
     });
-    if (afterWorker) {
+    if (nativeWorker) {
       const preserved = `[${raw.filter((_r, i) => saved[i].name === 'qa-unrelated').join(',')}]\n`;
       assert.equal(JSON.parse(preserved).length, 1);
       const cron = raw.filter((_r, i) => saved[i].name === 'holaday-files-cron');
@@ -584,7 +614,7 @@ try {
       second.listeners = '';
     }
     second.observedAtMs = snapshot.observedAtMs;
-    if (afterWorker) {
+    if (nativeWorker) {
       // Real stopped/PID0 cron registration belongs only to logical Vultr.
       // Re-read it each time so native deletion cannot leave a stale projection.
       second.managers = second.managers.filter((m) => m.name !== 'holaday-files-cron');
@@ -690,7 +720,7 @@ try {
             pmId: m.pmId,
             configDigest: m.configDigest,
             disposition:
-              names.includes(m.name) || (afterWorker && m.name === 'holaday-files-cron')
+              names.includes(m.name) || (nativeWorker && m.name === 'holaday-files-cron')
                 ? 'retire'
                 : 'preserve',
             reason: 'explicit test fixture manager',
@@ -933,7 +963,7 @@ try {
                         profile,
                       })),
                     },
-                producerStartupFiles: afterWorker
+                producerStartupFiles: nativeWorker
                   ? vultrStartupFiles.map(({ preserved, ...approved }) => approved)
                   : ['dump.pm2', 'dump.pm2.bak'].map((name) => ({
                       path: `/root/.pm2/${name}`,
@@ -970,7 +1000,7 @@ try {
                   : {}),
               }),
               readPair,
-              ...(afterWorker
+              ...(nativeWorker
                 ? {
                     resumeWorker: async (ctx, identity, approved, deps) => {
                       await nginxFixture.assertRestored(identity);
@@ -1003,8 +1033,10 @@ try {
                       }
                       assert.equal(hostOpenCommands, 1);
                       assert.equal(hostPreopenReadiness, 2);
-                      hostStartFaults++;
-                      throw Error('CUTOVER_QA_AFTER_WORKER_FAULT');
+                      if (afterWorker) {
+                        hostStartFaults++;
+                        throw Error('CUTOVER_QA_AFTER_WORKER_FAULT');
+                      }
                     },
                   }
                 : {}),
@@ -1035,7 +1067,7 @@ try {
                 verifyOpenedIdentity: async () => {
                   throw Error('not exercised');
                 },
-                ...(!afterWorker
+                ...(!nativeWorker
                   ? {
                       resumeWorker: async (_ctx, identity) => {
                         if (afterIngress) {
@@ -1049,8 +1081,85 @@ try {
                       },
                     }
                   : {}),
-                reconcile: async () => {
-                  throw Error('not exercised');
+                // QA-only facts: actual same-source DB and candidate, not a
+                // production external-work/merchant reconciliation implementation.
+                reconcile: async (ctx, identity) => {
+                  if (!successfulCutover && !lateKnownEffect) throw Error('not exercised');
+                  assert.equal(++reconciliationChecks, 1);
+                  const checkOwned = async () => {
+                    assert.equal(ctx.journal, journal);
+                    assert.deepEqual(await journal.assertOwnership(), ctx.binding);
+                    const durable = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+                    assert.equal(durable.phase, 'reconciled');
+                    assert.deepEqual(durable.identity, identity);
+                    assert.ok(Date.now() < ctx.approval.reconcileByMs);
+                    const status = await hostAdapter.status(identity);
+                    assert.deepEqual(status.identity, identity);
+                    assert.equal(status.mode, 'serving');
+                    assert.equal(status.needsReconciliation, true);
+                    assert.equal(status.idle, false);
+                    if (knownEffectVisible) throw Error('CUTOVER_KNOWN_EXTERNAL_WORK_UNPROVEN');
+                    assert.equal(effectCount, 1);
+                    return durable;
+                  };
+                  const before = await checkOwned();
+                  const connection = await sourceIo.connectWorkDatabase(
+                    parseEnv(hostConfig.toString()).DATABASE_URL,
+                  );
+                  try {
+                    const readActual = async () => {
+                      const [identities] = await connection.query(
+                        'SELECT @@server_uuid AS serverUuid, DATABASE() AS `database`',
+                      );
+                      assert.deepEqual(identities, [recoveryScope.sourceIdentity]);
+                      const work = await readCutoverWorkScope(connection, {
+                        includeReplaySources: true,
+                      });
+                      const payments = await readCutoverDatabaseScope(connection, {
+                        windowStartMs: 0,
+                        resolveMerchant: () => assert.fail('unexpected merchant in isolated QA'),
+                      });
+                      assert.deepEqual(work.unsettled, []);
+                      assert.equal(work.pendingReplay, 0);
+                      assert.match(work.replaySourcesDigest, /^[a-f0-9]{64}$/);
+                      assert.deepEqual(payments.orders, []);
+                      assert.deepEqual(payments.unsettled, []);
+                      assert.deepEqual(payments.deferredUnverified ?? [], []);
+                    };
+                    await readActual();
+                    assert.deepEqual((await rows()).map((r) => r.name).sort(), [
+                      'holaday-orchestrator',
+                      'qa-unrelated',
+                    ]);
+                    await assert.rejects(fetch('http://127.0.0.1:4010'));
+                    await assert.rejects(fetch('http://127.0.0.1:4011'));
+                    const health = await fetch('http://127.0.0.1:4001/healthz');
+                    await health.text();
+                    assert.equal(health.status, 200);
+                    for (const site of nginxFixture.sites.filter(
+                      (s) => s.profile !== 'aliyun-pay-20260926',
+                    ))
+                      assert.equal(
+                        (await nginxFixture.request(site, '/api/qa-admission-probe')).status,
+                        404,
+                      );
+                    await readActual();
+                    if (lateKnownEffect) {
+                      const discovery = await fetch(
+                        effectUrl.replace('/non-payment-effect', '/observations'),
+                      );
+                      assert.equal(discovery.status, 200);
+                      const known = await discovery.json();
+                      assert.deepEqual(known, [
+                        { privateEvidenceRef: sha('known QA action'), outcome: 'unknown' },
+                      ]);
+                      knownEffectVisible = known.length > 0;
+                    }
+                    const after = await checkOwned();
+                    assert.deepEqual(after, before);
+                  } finally {
+                    await connection.end();
+                  }
                 },
                 holdMaintenance: lostEffect ? recordFirstCutoverFailure : async () => {},
                 ...(sourceQa
@@ -1138,7 +1247,7 @@ try {
                 return observer;
               },
               retireProducers: async (input, deps) => {
-                if (afterWorker) {
+                if (nativeWorker) {
                   await retireLocalFirstCutoverProducers(input, deps, { fs: startupFs });
                   assert.equal(
                     (await rows()).some((r) => r.name === 'holaday-files-cron'),
@@ -1486,7 +1595,7 @@ try {
         });
         hostResult = result;
         if (fullHost) console.log('QA_HOST_OUTCOME', JSON.stringify(result));
-        if (afterWorker) {
+        if (nativeWorker) {
           const effects = await journal.readFirstCutoverEffects();
           console.error(
             'QA_STARTUP_EFFECTS',
@@ -1497,7 +1606,7 @@ try {
             }),
           );
         }
-        if (afterStart && hostStartFaults === 0) {
+        if (afterStart && !successfulCutover && !lateKnownEffect && hostStartFaults === 0) {
           for (const row of (await rows()).filter(
             (value) => value.name === 'holaday-orchestrator',
           )) {
@@ -1528,7 +1637,7 @@ try {
         if (afterStart)
           assert.equal(
             hostStartFaults,
-            1,
+            successfulCutover || lateKnownEffect ? 0 : 1,
             'original source migration/seed/new closed candidate must succeed before injected failure',
           );
         if (process.env.CUTOVER_QA_HOST === '1') {
@@ -1550,129 +1659,169 @@ try {
           assert.equal(published.candidate, actualCandidate);
           assert.equal(published.stage, preopenGate ? 'preopen' : 'prepare');
         }
-        assert.equal(result.ok, false);
-        assert.equal(result.action, 'hold_maintenance');
-        assert.equal(
-          result.phase,
-          knownEffect
-            ? 'legacy_interruption_accepted'
-            : preopenGate
-              ? 'verified'
-              : afterStart
-                ? 'candidate_started'
-                : sourceQa
-                  ? 'migration_started'
-                  : 'backup_verified',
-        );
         const effects = await journal.readFirstCutoverEffects();
-        assert.equal(
-          effects.failureObservation.status.mode,
-          afterStart ? 'draining' : 'not-started',
-        );
-        // close is an admission barrier, not an idle/closed receipt. Preserve
-        // the real protocol's uncertainty; do not call wait/reset to fabricate clean.
-        assert.equal(effects.failureObservation.status.closeAcknowledged, false);
-        if (afterStart) {
-          assert.equal(result.closeAcknowledged, false);
-          assert.equal(hostCloseCommands, 1);
-          assert.equal(hostOpenCommands, openedCandidate ? 1 : 0);
+        if (successfulCutover) {
+          assert.equal(result.ok, true);
+          assert.equal(result.phase, 'reconciled');
+          assert.equal(reconciliationChecks, 1);
+          assert.equal(hostCloseCommands, 0);
+          assert.equal(hostOpenCommands, 1);
           assert.equal(hostStartCommands, 1);
           assert.equal(hostMigrationCommands, 1);
-          assert.equal(effects.failureObservation.status.needsReconciliation, openedCandidate);
-        }
-        if (knownEffect) {
-          // The real site intentionally normalizes inner boundary failures.
-          assert.equal(result.code, 'CUTOVER_SITE_UNPROVEN');
-          assert.equal(effects.interruptionObservation, undefined);
-          assert.equal(effects.registrationEvents.length, 0);
-          assert.equal(effects.unmanagedEvents.length, 0);
-          assert.equal((await fetch(`http://127.0.0.1:${mainPort}`)).status, 200);
-        } else {
-          assert.equal(
-            result.code,
-            recoveryDrift
-              ? 'CUTOVER_RECOVERY_SESSION_UNPROVEN'
-              : afterStart
-                ? openedCandidate
-                  ? 'CUTOVER_SITE_UNPROVEN'
-                  : beforeOpen
-                    ? 'CUTOVER_QA_BEFORE_OPEN_FAULT'
-                    : 'CUTOVER_QA_AFTER_START_FAULT'
-                : sourceQa
-                  ? fullHost
-                    ? 'MAINTENANCE_RELEASE_FAILED'
-                    : 'CUTOVER_QA_UNEXPECTED_TAIL'
-                  : fullHost
-                    ? 'CUTOVER_SITE_UNPROVEN'
-                    : 'CUTOVER_QA_RESTORE_NOT_CONFIGURED',
-          );
+          assert.equal(effects.failureObservation, undefined);
+          assert.equal(effects.candidateStartupEvents.length, 6);
           assert.equal(effects.interruptionObservation.riskDigest, effects.riskDigest);
           assert.equal(effects.legacyInterruption.scope, 'legacy-non-payment-memory');
           assert.equal(effects.legacyInterruption.noAutomaticReplay, true);
-          if (recoveryDrift) {
-            assert.ok(recoveryScopeChecks >= 3);
-            assert.equal(knownEffectVisible, true);
-            assert.ok(
-              Date.now() < recoveryScope.maintenanceEndsAtMs,
-              'reject work drift before deadline, not because of timeout',
-            );
+          const durable = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+          assert.ok(durable.backupReceipt);
+          assert.deepEqual(durable.identity, result.identity);
+        } else {
+          assert.equal(result.ok, false);
+          assert.equal(result.action, 'hold_maintenance');
+          assert.equal(
+            result.phase,
+            lateKnownEffect
+              ? 'reconciled'
+              : knownEffect
+                ? 'legacy_interruption_accepted'
+                : preopenGate
+                  ? 'verified'
+                  : afterStart
+                    ? 'candidate_started'
+                    : sourceQa
+                      ? 'migration_started'
+                      : 'backup_verified',
+          );
+          assert.equal(
+            effects.failureObservation.status.mode,
+            afterStart ? 'draining' : 'not-started',
+          );
+          // close is an admission barrier, not an idle/closed receipt. Preserve
+          // the real protocol's uncertainty; do not call wait/reset to fabricate clean.
+          assert.equal(effects.failureObservation.status.closeAcknowledged, false);
+          if (afterStart) {
+            assert.equal(result.closeAcknowledged, false);
+            assert.equal(hostCloseCommands, 1);
+            assert.equal(hostOpenCommands, openedCandidate ? 1 : 0);
+            assert.equal(hostStartCommands, 1);
+            assert.equal(hostMigrationCommands, 1);
+            assert.equal(effects.failureObservation.status.needsReconciliation, openedCandidate);
+          }
+          if (knownEffect) {
+            // The real site intentionally normalizes inner boundary failures.
+            assert.equal(result.code, 'CUTOVER_SITE_UNPROVEN');
+            assert.equal(effects.interruptionObservation, undefined);
+            assert.equal(effects.registrationEvents.length, 0);
+            assert.equal(effects.unmanagedEvents.length, 0);
+            assert.equal((await fetch(`http://127.0.0.1:${mainPort}`)).status, 200);
+          } else {
             assert.equal(
-              JSON.parse(await fs.readFile(journal.path, 'utf8')).backupReceipt,
-              undefined,
+              result.code,
+              lateKnownEffect
+                ? 'CUTOVER_KNOWN_EXTERNAL_WORK_UNPROVEN'
+                : recoveryDrift
+                  ? 'CUTOVER_RECOVERY_SESSION_UNPROVEN'
+                  : afterStart
+                    ? openedCandidate
+                      ? 'CUTOVER_SITE_UNPROVEN'
+                      : beforeOpen
+                        ? 'CUTOVER_QA_BEFORE_OPEN_FAULT'
+                        : 'CUTOVER_QA_AFTER_START_FAULT'
+                    : sourceQa
+                      ? fullHost
+                        ? 'MAINTENANCE_RELEASE_FAILED'
+                        : 'CUTOVER_QA_UNEXPECTED_TAIL'
+                      : fullHost
+                        ? 'CUTOVER_SITE_UNPROVEN'
+                        : 'CUTOVER_QA_RESTORE_NOT_CONFIGURED',
             );
-            await assert.rejects(executionSite.lifecycle.assertStopped(siteContext), /UNPROVEN/);
-          } else if (fullHost) {
-            // Unlike the old adapter's artificial backup throw, the real site
-            // latches its failed backup boundary. It must not issue new proofs.
-            if (sourceQa && !afterStart)
+            assert.equal(effects.interruptionObservation.riskDigest, effects.riskDigest);
+            assert.equal(effects.legacyInterruption.scope, 'legacy-non-payment-memory');
+            assert.equal(effects.legacyInterruption.noAutomaticReplay, true);
+            if (recoveryDrift) {
+              assert.ok(recoveryScopeChecks >= 3);
+              assert.equal(knownEffectVisible, true);
+              assert.ok(
+                Date.now() < recoveryScope.maintenanceEndsAtMs,
+                'reject work drift before deadline, not because of timeout',
+              );
+              assert.equal(
+                JSON.parse(await fs.readFile(journal.path, 'utf8')).backupReceipt,
+                undefined,
+              );
+              await assert.rejects(executionSite.lifecycle.assertStopped(siteContext), /UNPROVEN/);
+            } else if (fullHost) {
+              // Unlike the old adapter's artificial backup throw, the real site
+              // latches its failed backup boundary. It must not issue new proofs.
+              if (sourceQa && !afterStart)
+                assert.deepEqual(
+                  (await executionSite.lifecycle.assertStopped(siteContext)).survivors,
+                  [],
+                );
+              else if (!sourceQa)
+                await assert.rejects(
+                  executionSite.lifecycle.assertStopped(siteContext),
+                  /CUTOVER_SITE_UNPROVEN/,
+                );
+              const durable = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+              assert.equal(Boolean(durable.backupReceipt), Boolean(sourceQa));
+              if (afterStart) {
+                assert.match(durable.bootstrapSeed, /^[a-f0-9]{32}$/);
+                assert.deepEqual(durable.identity, result.identity);
+                const held = await hostAdapter.status(result.identity);
+                assert.equal(held.mode, 'draining');
+                assert.equal(held.counts.mode, 'closed');
+                assert.equal(held.counts.active, 0);
+                assert.equal(held.counts.unknown, 0);
+                assert.equal(held.needsReconciliation, openedCandidate);
+                assert.equal((await fetch('http://127.0.0.1:4001/healthz')).status, 200);
+                assert.equal((await fetch('http://127.0.0.1:4001/trpc/tasks.list')).status, 503);
+                if (openedCandidate)
+                  assert.equal(
+                    (await fetch('http://127.0.0.1:4001/qa-admission-probe')).status,
+                    503,
+                  );
+                if (nativeIngress) {
+                  for (const site of nginxFixture.sites.filter(
+                    (s) => s.profile !== 'aliyun-pay-20260926',
+                  ))
+                    assert.equal(
+                      (await nginxFixture.request(site, '/api/qa-admission-probe')).status,
+                      503,
+                    );
+                }
+              } else assert.equal(durable.bootstrapSeed, undefined);
+              assert.equal(effects.unmanagedEvents.at(-1).phase, 'unmanaged-stopped');
+              await assert.rejects(fetch('http://127.0.0.1:4011'));
+            } else if (!sourceQa)
               assert.deepEqual(
                 (await executionSite.lifecycle.assertStopped(siteContext)).survivors,
                 [],
               );
-            else if (!sourceQa)
-              await assert.rejects(
-                executionSite.lifecycle.assertStopped(siteContext),
-                /CUTOVER_SITE_UNPROVEN/,
-              );
-            const durable = JSON.parse(await fs.readFile(journal.path, 'utf8'));
-            assert.equal(Boolean(durable.backupReceipt), Boolean(sourceQa));
-            if (afterStart) {
-              assert.match(durable.bootstrapSeed, /^[a-f0-9]{32}$/);
-              assert.deepEqual(durable.identity, result.identity);
-              const held = await hostAdapter.status(result.identity);
-              assert.equal(held.mode, 'draining');
-              assert.equal(held.counts.mode, 'closed');
-              assert.equal(held.counts.active, 0);
-              assert.equal(held.counts.unknown, 0);
-              assert.equal(held.needsReconciliation, openedCandidate);
-              assert.equal((await fetch('http://127.0.0.1:4001/healthz')).status, 200);
-              assert.equal((await fetch('http://127.0.0.1:4001/trpc/tasks.list')).status, 503);
-              if (openedCandidate)
-                assert.equal((await fetch('http://127.0.0.1:4001/qa-admission-probe')).status, 503);
-              if (nativeIngress) {
-                for (const site of nginxFixture.sites.filter(
-                  (s) => s.profile !== 'aliyun-pay-20260926',
-                ))
-                  assert.equal(
-                    (await nginxFixture.request(site, '/api/qa-admission-probe')).status,
-                    503,
-                  );
-              }
-            } else assert.equal(durable.bootstrapSeed, undefined);
-            assert.equal(effects.unmanagedEvents.at(-1).phase, 'unmanaged-stopped');
-            await assert.rejects(fetch('http://127.0.0.1:4011'));
-          } else if (!sourceQa)
-            assert.deepEqual(
-              (await executionSite.lifecycle.assertStopped(siteContext)).survivors,
-              [],
-            );
-          await assert.rejects(fetch(`http://127.0.0.1:${mainPort}`));
+            await assert.rejects(fetch(`http://127.0.0.1:${mainPort}`));
+          }
+        }
+        if (lateKnownEffect) {
+          assert.equal(reconciliationChecks, 1);
+          assert.equal(knownEffectVisible, true);
+          assert.equal(effects.candidateStartupEvents.length, 6);
+          assert.equal(effects.failureObservation.status.needsReconciliation, true);
         }
         assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
-        if (fullHost) await hostAdapter.finish(result);
-        else await executionSite.lifecycle.detach(siteContext);
+        if (fullHost) {
+          await hostAdapter.finish(result);
+          hostFinished = true;
+          if (successfulCutover)
+            await assert.rejects(
+              fs.access(`${journal.path.slice(0, journal.path.lastIndexOf('/'))}/release.lock`),
+              { code: 'ENOENT' },
+            );
+          if (lateKnownEffect)
+            await fs.access(`${journal.path.slice(0, journal.path.lastIndexOf('/'))}/release.lock`);
+        } else await executionSite.lifecycle.detach(siteContext);
         assert.equal((await receiverCompletion).code, 0);
-        if (!knownEffect) {
+        if (!knownEffect && !successfulCutover) {
           await pm2('kill');
           await pm2('resurrect');
           assert.deepEqual(
@@ -1683,14 +1832,24 @@ try {
         assert.equal(effectCount, 1, 'no retry, old startup replay, or business compensation');
         console.log(
           `QA_LOST_EFFECT_RESULT ${JSON.stringify({
-            scope: sourceQa ? 'retirement-backup-and-tail-refusal' : 'retirement-and-failure-only',
+            scope: successfulCutover
+              ? 'synthetic-complete-cutover'
+              : sourceQa
+                ? 'retirement-backup-and-tail-refusal'
+                : 'retirement-and-failure-only',
+            ...(successfulCutover
+              ? { qaFlowPassed: true, reconciliationChecks, lockReleased: true }
+              : {}),
+            ...(lateKnownEffect
+              ? { lateKnownEffectBlocked: true, reconciliationChecks, lockRetained: true }
+              : {}),
             knownEffect,
             phase: result.phase,
             effectCount,
             riskDigest: effects.riskDigest,
             releaseReady: false,
             ...(fullHost ? { originalHost: true, nativeCandidatePreparation: true } : {}),
-            ...(afterStart
+            ...(afterStart && !successfulCutover
               ? {
                   candidateStartedClosed: true,
                   failureMode: 'draining',
@@ -1702,7 +1861,7 @@ try {
             ...(openedCandidate
               ? { candidateOpened: true, needsReconciliation: true, ingressRestored: nativeIngress }
               : {}),
-            ...(afterWorker ? { nativeStartupPersisted: true, workerEnabled: false } : {}),
+            ...(nativeWorker ? { nativeStartupPersisted: true, workerEnabled: false } : {}),
             ...(recoveryLink
               ? { recoveryLinked: !recoveryDrift, recoveryRejected: recoveryDrift }
               : {}),
@@ -1968,7 +2127,7 @@ try {
     );
   }
 } finally {
-  if (hostAdapter) {
+  if (hostAdapter && !hostFinished) {
     try {
       await hostAdapter.finish(hostResult ?? { ok: false });
     } catch (error) {
