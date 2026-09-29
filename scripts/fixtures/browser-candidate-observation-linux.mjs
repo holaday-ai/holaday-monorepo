@@ -14,6 +14,7 @@ import {
   resumeFirstCutoverCandidateWorker,
 } from '/source/browser-first-cutover-host.mjs';
 import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
+import { candidatePreparationSystem } from '/source/browser-maintenance-host.mjs';
 
 await fs.access('/.dockerenv');
 assert.equal(process.platform, 'linux');
@@ -225,7 +226,9 @@ try {
     );
     await fs.writeFile(
       `${root}/scripts/start-account-closure-worker-production.sh`,
-      `#!/bin/sh\nexec /opt/node22/bin/node ${cwd}/dist/account-closure/worker-entry.js\n`,
+      // Model the existing shell preflight before exec: PM2 can report online
+      // while its owned PID is still bash, not yet the worker Node entry.
+      `#!/bin/sh\n${process.argv.includes('--slow-worker-start') ? 'sleep 2\n' : ''}exec /opt/node22/bin/node ${cwd}/dist/account-closure/worker-entry.js\n`,
       { flag: 'wx', mode: 0o755 },
     );
     await fs.mkdir('/var/lib/holaday-deploy', { recursive: true });
@@ -296,8 +299,32 @@ try {
         applicationGid: 998,
       };
       const unrelatedBefore = (await rows()).find((r) => r.pid === unrelatedPid);
+      let workerStarts = 0;
+      let pendingObservations = 0;
       const overrides = {
         parseConfig: () => ({ ACCOUNT_CLOSURE_WORKER_ENABLED: String(enabled) }),
+        exec: async (...args) => {
+          if (args[0] === 'pm2' && args[1][0] === 'start') workerStarts++;
+          return candidatePreparationSystem().exec(...args);
+        },
+        readCandidate: async (id) => {
+          try {
+            return await readFirstCutoverCandidateRuntime(id);
+          } catch (error) {
+            if (process.argv.includes('--slow-worker-start')) {
+              const worker = (await rows()).find(
+                (r) => r.name === 'holaday-account-closure-worker',
+              );
+              assert.equal(worker?.pm2_env.status, 'online');
+              assert.equal(
+                (await journal.readFirstCutoverEffects()).candidateStartupEvents?.length ?? 0,
+                0,
+              );
+              pendingObservations++;
+            }
+            throw error;
+          }
+        },
         assertNoLegacy: async (id) => {
           assert.deepEqual(id, identity);
           assert.equal(
@@ -307,6 +334,9 @@ try {
         },
       };
       await resumeFirstCutoverCandidateWorker(context, identity, files, overrides);
+      assert.equal(workerStarts, enabled ? 1 : 0);
+      if (enabled && process.argv.includes('--slow-worker-start'))
+        assert.ok(pendingObservations > 0);
       const actual = await readFirstCutoverCandidateRuntime(identity);
       assert.equal(actual.runtime.main.pid, observed.runtime.main.pid);
       if (enabled) {

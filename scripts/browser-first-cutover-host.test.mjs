@@ -1943,6 +1943,14 @@ test('first worker resume uses the pinned candidate once and never global PM2 sa
     'lost-start',
     'already-worker',
     'persist-failed',
+    'starting-worker',
+    'unobservable-worker',
+    'config-during-wait',
+    'worker-main-drift',
+    'unexpected-read-error',
+    'worker-wrong-boot',
+    'worker-closed',
+    'worker-ready-after-budget',
   ]) {
     assert.equal(typeof firstHost.resumeFirstCutoverCandidateWorker, 'function');
     const identity = { candidate: 'c'.repeat(40), bootId: 'd'.repeat(32) };
@@ -1961,9 +1969,14 @@ test('first worker resume uses the pinned candidate once and never global PM2 sa
     let worker = fault === 'already-worker';
     const commands = [];
     let persisted = false;
+    let clock = 1000;
+    let pendingReads = 0;
     const ctx = {
       binding,
-      approval: { ...binding, maintenanceEndsAtMs: 5000 },
+      approval: {
+        ...binding,
+        maintenanceEndsAtMs: fault === 'worker-ready-after-budget' ? 100000 : 5000,
+      },
       root: `/opt/holaday-releases/${identity.candidate}`,
       applicationGid: 998,
       journal: {
@@ -1980,27 +1993,48 @@ test('first worker resume uses the pinned candidate once and never global PM2 sa
     const io = {
       platform: 'linux',
       uid: 0,
-      now: () => 1000,
-      sleep: async () => {},
-      readConfig: async () => (fault === 'config' ? Buffer.from('changed') : config),
+      now: () => clock,
+      sleep: async () => {
+        clock += 1000;
+      },
+      readConfig: async () =>
+        fault === 'config' || (fault === 'config-during-wait' && clock > 1000)
+          ? Buffer.from('changed')
+          : config,
       parseConfig: () => ({
         ACCOUNT_CLOSURE_WORKER_ENABLED: fault === 'disabled' ? 'false' : 'true',
       }),
       assertNoLegacy: async () => {
         if (fault === 'busy') throw new Error('unknown');
       },
-      readCandidate: async () => ({
-        identity: fault === 'wrong-boot' ? { ...identity, bootId: 'e'.repeat(32) } : identity,
-        mode: 'serving',
-        idle: false,
-        needsReconciliation: true,
-        runtime: {
-          identity,
-          root: ctx.root,
-          main: { pid: 101, start: '10' },
-          worker: worker ? { pid: 102, start: '11' } : null,
-        },
-      }),
+      readCandidate: async () => {
+        if (worker) {
+          if (fault === 'worker-ready-after-budget') clock = 62000;
+          if (fault === 'unexpected-read-error') throw new Error('unexpected');
+          if (
+            fault === 'unobservable-worker' ||
+            (['starting-worker', 'config-during-wait'].includes(fault) && pendingReads++ < 2)
+          ) {
+            assert.equal(persisted, false);
+            throw new Error('CUTOVER_CANDIDATE_OBSERVATION_UNPROVEN');
+          }
+        }
+        return {
+          identity:
+            fault === 'wrong-boot' || (worker && fault === 'worker-wrong-boot')
+              ? { ...identity, bootId: 'e'.repeat(32) }
+              : identity,
+          mode: worker && fault === 'worker-closed' ? 'closed' : 'serving',
+          idle: false,
+          needsReconciliation: true,
+          runtime: {
+            identity,
+            root: ctx.root,
+            main: { pid: worker && fault === 'worker-main-drift' ? 201 : 101, start: '10' },
+            worker: worker ? { pid: 102, start: '11' } : null,
+          },
+        };
+      },
       exec: async (command, args, options) => {
         commands.push([command, ...args]);
         if (command === 'pm2' && args[0] === 'start') {
@@ -2041,22 +2075,39 @@ test('first worker resume uses the pinned candidate once and never global PM2 sa
         return { files: [] };
       },
     };
-    if (['none', 'disabled'].includes(fault)) {
+    if (['none', 'disabled', 'starting-worker'].includes(fault)) {
       await firstHost.resumeFirstCutoverCandidateWorker(ctx, identity, files, io);
       assert(persisted);
+      if (fault === 'starting-worker') assert.equal(clock, 3000);
     } else {
       await assert.rejects(
         firstHost.resumeFirstCutoverCandidateWorker(ctx, identity, files, io),
         /UNPROVEN/,
       );
       assert.equal(persisted, false);
+      if (fault === 'unobservable-worker') assert.equal(clock, 5000);
+      if (['unexpected-read-error', 'worker-main-drift'].includes(fault)) assert.equal(clock, 1000);
     }
     assert(
       !commands.some((v) => v.includes('save') || v.includes('delete') || v.includes('restart')),
     );
     assert.equal(
       commands.filter((v) => v[1] === 'start').length,
-      ['none', 'lost-start', 'persist-failed'].includes(fault) ? 1 : 0,
+      [
+        'none',
+        'lost-start',
+        'persist-failed',
+        'starting-worker',
+        'unobservable-worker',
+        'config-during-wait',
+        'worker-main-drift',
+        'unexpected-read-error',
+        'worker-wrong-boot',
+        'worker-closed',
+        'worker-ready-after-budget',
+      ].includes(fault)
+        ? 1
+        : 0,
       fault,
     );
   }

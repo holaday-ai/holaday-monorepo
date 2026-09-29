@@ -2,6 +2,16 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29 启用 worker 启动过渡（局部修复通过，完整链失败）
+
+最终结果覆盖下方运行中记录：三种专用Linux物理场景通过，Linux183/183；15075退出0，browser1116/1116、ops120/60/16/947及Python12，均零失败/跳过。五MJS格式检查及diff-check退出0。日志`/private/tmp/holaday-worker-start-{physical-final,linux-final,browser-noskip,ops-noskip}.log`。86597先前因未传既有age路径，browser及ops末组各34跳过，已保留日志并用既有age补跑，不计为全通过。所有测试结束，QA专属容器/合成卷精确清理，私密日志和恢复工件保留。已确认修复的是worker shell→Node启动过渡及60秒预算越界；20817完整链仍因备份观察失败而未通过，尚未验证完整启用worker应用链，不准上线。定向自审不是最终独立整分支审查，未push/PR/合并/部署。
+
+原Task6完整成功路径新增启用worker分支。新增QA配置前置错误修正后，完整链曾走到真实open/入口恢复但worker恢复失败；另两轮在更早备份/会话阶段失败，均保留且未宣称根因已关闭。详细轮次、日志和资源清理见checkpoint最新段。
+
+原专用Linux夹具增加shell预检延迟，真实PM2已online而PID仍为bash时，原恢复函数错误地立即终止。物理反例89596退出1、单元反例退出1，修复后物理53071和单元检查退出0。仅启动一次后的只读就绪观察允许在原有期限内继续采集；不重复启动、不弱化最终身份/配置/所有权/启动文件证明。物理夹具的候选协议和业务负载是合成的，不是完整应用或生产恢复。完整应用链20817及最终串行回归尚未收尾，不计整项通过。
+
+20817已退出1：source2/target90，隔离目标恢复/比较/迁移完成，但后续备份设施检查的retirement observer.read拒绝，尚未运行worker。日志`/private/tmp/holaday-enabled-worker-fixed-chain.log`及brKbyW私密诊断；原891e22cf资源已精确清理。该观察问题仍未查明，不归为worker修复成功。QA诊断只修参数遮蔽并覆盖实际失败的read入口。另补60秒预算读取越界反例RED→GREEN，保留错误boot/closed/main/config等拒绝与一次启动断言。最终串行回归86597待终态；不复用历史通过数作为本次结果。
+
 ## 2026-09-29 原完整隔离闭环：真实开放后丢回执
 
 在等待上一轮浏览器维护范围决定期间，继续原 Task6 故障矩阵，不重复现场观察。仅扩展原两份QA夹具：`CUTOVER_QA_LOST_OPEN_ACK=1`只允许完整success模式；在原host的真实open控制命令成功返回后丢弃结果并抛错。原共享release-tail、host状态查询、journal、备份恢复、候选、nginx及核对代码不替换、不修改。断言真实open命令恰好1次、回执丢弃1次、之后至少有一次真实status查询、close为0、迁移/启动各1次、原旧外部动作效果始终1，最后reconciled且原锁释放。

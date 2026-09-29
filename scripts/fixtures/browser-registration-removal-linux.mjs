@@ -27,6 +27,7 @@ import {
 } from '/source/browser-first-cutover-host.mjs';
 import {
   classifyFirstCutoverHostPair,
+  classifyFirstCutoverRetirementPair,
   firstCutoverSourceBindings,
 } from '/source/browser-first-cutover-inventory.mjs';
 import { connectFirstCutoverRecoverySession } from '/source/browser-first-cutover-recovery-session.mjs';
@@ -79,6 +80,8 @@ const lateKnownEffect = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'late-
 const successfulCutover = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'success';
 const lostOpenAck = process.env.CUTOVER_QA_LOST_OPEN_ACK === '1';
 assert.ok(!lostOpenAck || successfulCutover);
+const enabledWorker = process.env.CUTOVER_QA_ENABLED_WORKER === '1';
+assert.ok(!enabledWorker || (successfulCutover && !lostOpenAck));
 const afterWorker = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-worker';
 const nativeWorker = afterWorker || successfulCutover || lateKnownEffect;
 const nativeIngress = afterIngress || nativeWorker;
@@ -295,6 +298,8 @@ let hostAdapter;
 let hostResult;
 let hostFinished = false;
 let reconciliationChecks = 0;
+let resumedWorker;
+let workerTickObserved = false;
 let hostMigrationFaults = 0;
 let hostStartFaults = 0;
 let hostCloseCommands = 0;
@@ -1010,25 +1015,127 @@ try {
                       await nginxFixture.assertRestored(identity);
                       assert.equal(
                         parseEnv(hostConfig.toString()).ACCOUNT_CLOSURE_WORKER_ENABLED,
-                        'false',
+                        enabledWorker ? 'true' : 'false',
                       );
                       await resumeFirstCutoverCandidateWorker(ctx, identity, approved, {
                         ...deps,
                         startupFs,
+                        ...(enabledWorker
+                          ? {
+                              exec: async (...args) => {
+                                console.error('QA_WORKER_EXEC', args[0], args[1][0]);
+                                const result = await candidatePreparationSystem().exec(...args);
+                                console.error('QA_WORKER_EXEC_DONE', args[0], args[1][0]);
+                                return result;
+                              },
+                              assertNoLegacy: async (...args) => {
+                                console.error('QA_WORKER_LEGACY_CHECK');
+                                await deps.assertNoLegacy(...args);
+                                console.error('QA_WORKER_LEGACY_CHECK_DONE');
+                              },
+                              readCandidate: async (...args) => {
+                                try {
+                                  const actual = await deps.readCandidate(...args);
+                                  console.error(
+                                    'QA_WORKER_OBSERVED',
+                                    Boolean(actual.runtime.worker),
+                                  );
+                                  return actual;
+                                } catch (error) {
+                                  console.error('QA_WORKER_OBSERVATION_FAILED', error.stack);
+                                  const worker = (await rows()).find(
+                                    (r) => r.name === 'holaday-account-closure-worker',
+                                  );
+                                  if (worker) {
+                                    console.error(
+                                      'QA_WORKER_STATE',
+                                      JSON.stringify({
+                                        pid: worker.pid,
+                                        status: worker.pm2_env.status,
+                                        restarts: worker.pm2_env.restart_time,
+                                      }),
+                                    );
+                                    if (worker.pid > 1) {
+                                      console.error(
+                                        'QA_WORKER_ARGV',
+                                        await fs.readFile(`/proc/${worker.pid}/cmdline`, 'utf8'),
+                                      );
+                                    }
+                                    for (const key of ['pm_err_log_path', 'pm_out_log_path']) {
+                                      console.error(
+                                        'QA_WORKER_LOG',
+                                        key,
+                                        (await fs.readFile(worker.pm2_env[key], 'utf8')).slice(
+                                          -4000,
+                                        ),
+                                      );
+                                    }
+                                  }
+                                  throw error;
+                                }
+                              },
+                            }
+                          : {}),
                       });
                       const durable = await journal.readFirstCutoverEffects();
                       assert.equal(durable.candidateStartupEvents.length, 6);
+                      if (enabledWorker) {
+                        const actual = await deps.readCandidate(identity);
+                        resumedWorker = actual.runtime.worker;
+                        assert.ok(resumedWorker?.pid > 0, 'enabled worker must be a live process');
+                        assert.equal(resumedWorker.uid, 998);
+                        assert.equal(resumedWorker.command, 'worker');
+                        assert.equal(resumedWorker.cwd, `${ctx.root}/apps/orchestrator`);
+                        const row = (await rows()).find((r) => r.pid === resumedWorker.pid);
+                        assert.equal(row.name, 'holaday-account-closure-worker');
+                        assert.equal(row.pm2_env.status, 'online');
+                        assert.equal(row.pm2_env.restart_time, 0);
+                        const logPath = row.pm2_env.pm_out_log_path;
+                        assert.ok(logPath.startsWith('/root/.pm2/logs/'));
+                        // A registration alone is insufficient: wait for an actual
+                        // completed empty-database poll from the real worker entry.
+                        for (let n = 0; n < 100; n++) {
+                          const log = await fs.readFile(logPath, 'utf8');
+                          workerTickObserved = log.split('\n').some((line) => {
+                            try {
+                              const entry = JSON.parse(line);
+                              return (
+                                entry.msg === 'account-closure-worker tick' &&
+                                entry.result === 'idle'
+                              );
+                            } catch {
+                              return false;
+                            }
+                          });
+                          if (workerTickObserved) break;
+                          await sleep(100);
+                        }
+                        assert.equal(workerTickObserved, true, 'real worker must complete a poll');
+                        assert.deepEqual(
+                          (await deps.readCandidate(identity)).runtime.worker,
+                          resumedWorker,
+                        );
+                      }
                       for (const f of vultrStartupFiles) {
                         const text = await fs.readFile(mapStartup(f.path), 'utf8');
                         assert.ok(text.startsWith(`${f.preserved.trim().slice(0, -1)},`));
                         const saved = JSON.parse(text);
                         assert.deepEqual(
                           saved.map((r) => r.name),
-                          ['qa-unrelated', 'holaday-orchestrator'],
+                          [
+                            'qa-unrelated',
+                            'holaday-orchestrator',
+                            ...(enabledWorker ? ['holaday-account-closure-worker'] : []),
+                          ],
                         );
                         assert.equal(saved[1].pm_cwd, `${ctx.root}/apps/orchestrator`);
                         assert.equal(saved[1].autorestart, false);
                         assert.equal(String(saved[1].uid), '998');
+                        if (enabledWorker) {
+                          assert.equal(saved[2].pm_cwd, `${ctx.root}/apps/orchestrator`);
+                          assert.equal(saved[2].autorestart, false);
+                          assert.equal(String(saved[2].uid), '998');
+                        }
                         assert.equal(
                           durable.candidateStartupEvents[1].files.find((x) => x.path === f.path)
                             .afterDigest,
@@ -1132,9 +1239,16 @@ try {
                     };
                     await readActual();
                     assert.deepEqual((await rows()).map((r) => r.name).sort(), [
+                      ...(enabledWorker ? ['holaday-account-closure-worker'] : []),
                       'holaday-orchestrator',
                       'qa-unrelated',
                     ]);
+                    if (enabledWorker) {
+                      assert.ok(resumedWorker);
+                      const current = await proc(resumedWorker.pid);
+                      assert.equal(current.start, resumedWorker.start);
+                      assert.equal(workerTickObserved, true);
+                    }
                     await assert.rejects(fetch('http://127.0.0.1:4010'));
                     await assert.rejects(fetch('http://127.0.0.1:4011'));
                     const health = await fetch('http://127.0.0.1:4001/healthz');
@@ -1226,13 +1340,42 @@ try {
                 });
                 return client;
               },
-              createObserver: async (args, deps) => {
-                observer = await createFirstCutoverRetirementObserver(args, {
+              createObserver: async (observerInput, deps) => {
+                let initialPair;
+                let lastPair;
+                let initialExecutors;
+                let lastExecutors;
+                observer = await createFirstCutoverRetirementObserver(observerInput, {
                   ...deps,
-                  readExecutionIdentities: async () => [
-                    client.readExecutionIdentity(),
-                    ...(nginxFixture?.executionIdentities() ?? []),
-                  ],
+                  readPair: async () => {
+                    try {
+                      const value = await deps.readPair();
+                      if (enabledWorker) {
+                        initialPair ??= structuredClone(value);
+                        lastPair = structuredClone(value);
+                      }
+                      return value;
+                    } catch (error) {
+                      console.error('QA_PAIR_READ_FAILED', error.stack);
+                      throw error;
+                    }
+                  },
+                  readExecutionIdentities: async () => {
+                    try {
+                      const value = [
+                        client.readExecutionIdentity(),
+                        ...(nginxFixture?.executionIdentities() ?? []),
+                      ];
+                      if (enabledWorker) {
+                        initialExecutors ??= structuredClone(value);
+                        lastExecutors = structuredClone(value);
+                      }
+                      return value;
+                    } catch (error) {
+                      console.error('QA_EXECUTOR_READ_FAILED', error.stack);
+                      throw error;
+                    }
+                  },
                 });
                 if (fullHost) {
                   for (const name of Object.keys(observer)) {
@@ -1243,6 +1386,38 @@ try {
                         return await original(...args);
                       } catch (error) {
                         console.error('QA_OBSERVER_FAILED', name, error.message);
+                        // Diagnostic replay of already observed synthetic inputs.
+                        // Never substitute its result or reread/retry a side effect.
+                        if (
+                          enabledWorker &&
+                          ['read', 'readFenceProgress'].includes(name) &&
+                          lastPair
+                        ) {
+                          try {
+                            const effects = await deps.journal.readFirstCutoverEffects();
+                            if (effects.phase === 'backup_verified') {
+                              const classified = classifyFirstCutoverRetirementPair({
+                                baseline: initialPair,
+                                baselineExecution: initialExecutors,
+                                pair: lastPair,
+                                reviews: observerInput.reviews,
+                                inventoryDigest: observerInput.binding.inventoryDigest,
+                                effects,
+                                fences: await deps.readFenceReceipts(),
+                                execution: lastExecutors,
+                              });
+                              console.error(
+                                'QA_CLASSIFICATION_DIAGNOSTIC',
+                                JSON.stringify({
+                                  unknownLaunchers: classified.unknownLaunchers,
+                                  ageMs: Date.now() - lastPair.observedAtMs,
+                                }),
+                              );
+                            }
+                          } catch (cause) {
+                            console.error('QA_CLASSIFICATION_FAILED', cause.stack);
+                          }
+                        }
                         throw error;
                       }
                     };
@@ -1619,7 +1794,7 @@ try {
             }),
           );
         }
-        if (afterStart && !successfulCutover && !lateKnownEffect && hostStartFaults === 0) {
+        if (afterStart && !result.ok && hostStartFaults === 0) {
           for (const row of (await rows()).filter(
             (value) => value.name === 'holaday-orchestrator',
           )) {
@@ -1881,7 +2056,8 @@ try {
             ...(openedCandidate
               ? { candidateOpened: true, needsReconciliation: true, ingressRestored: nativeIngress }
               : {}),
-            ...(nativeWorker ? { nativeStartupPersisted: true, workerEnabled: false } : {}),
+            ...(nativeWorker ? { nativeStartupPersisted: true, workerEnabled: enabledWorker } : {}),
+            ...(enabledWorker ? { workerTickObserved: true } : {}),
             ...(recoveryLink
               ? { recoveryLinked: !recoveryDrift, recoveryRejected: recoveryDrift }
               : {}),

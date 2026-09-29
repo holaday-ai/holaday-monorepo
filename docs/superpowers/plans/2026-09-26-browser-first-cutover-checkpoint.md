@@ -6,6 +6,26 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 启用 worker 完整链验收与启动过渡修复（完整链仍未通过）
+
+**最终恢复入口：局部修复验证通过，完整链仍失败。** 86597的三种Linux物理夹具（慢启动+过期失败保留、worker关闭、备用启动文件缺失）均通过；Linux183/183零跳过。该轮Mac browser1082通过/34跳过、ops最后组913通过/34跳过，是漏传既有age路径，不计完整验收。15075使用`CUTOVER_TEST_AGE_EXECUTABLE=/opt/homebrew/bin/age`串行补跑，退出0：browser1116/1116、ops120/60/16/947及Python12，全部零失败/跳过。最终日志`/private/tmp/holaday-worker-start-{physical-final,linux-final,browser-noskip,ops-noskip}.log`，五MJS格式检查与diff-check退出0。全部测试结束，所有本轮专属容器/卷已清理；原mysql/redis和`__pycache__`保留。七个明确文件保存本次局部修复与尚未通过的完整QA分支，不标Task4–6完成或发布就绪。
+
+**下一步不要重做已通过worker/组件回归：** 先使用原完整链新补的read/readFenceProgress及executor诊断，定位反复出现的备份阶段`CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN`；不得自动重试旧attempt/SQL，不放宽观察门槛，不把物理worker合成协议测试代替完整真实应用链。原生产facts/维护范围/恢复/整分支审查门槛仍在。自动化未修改，没有运行中测试进程。
+
+从 `9d49c581` 继续原 Task6。原完整成功路径仅覆盖 worker=false；在原两 QA 夹具增加 success-only `CUTOVER_QA_ENABLED_WORKER=1`，要求真实 UID998 worker 完成 idle poll、同一进程贯穿 reconciliation、两份启动文件包含该 worker、单次 open、不重放和锁释放。仅合成配置，应用沿用原6a46ee0f缓存；不重建产品架构、不伪造生产来源或支付恢复。
+
+失败须保留：47898因新增QA遗漏原有两个注销数据清理配置前置条件，在候选启动失败（source90/target90），补齐仅适用于全新合成数据的配置；77506在备份前观察失败（source2/target0）；83896完成备份/Mac恢复/迁移/newboot/preopen/open/入口恢复后，在resumeWorker失败，未持久化candidate启动条目（source90/target90）；1622在restoreIsolated前失败（source2/target0），未得到新的worker证据。后两类备份/会话失败根因尚未确认，不能写成已修复。四轮均退出1，日志分别为 `/private/tmp/holaday-enabled-worker-{connected,final,diagnostic,trace}.log`；私密详细日志在对应恢复目录cs7fwo/p556mH/d1PpUu/6J1gnh。四轮专属容器和合成卷均核对精确标签后清理，日志和恢复工件保留，原mysql/redis不动。
+
+为避免盲跑完整链，复用原 `browser-candidate-observation-linux.mjs` 增加2秒shell启动过渡。真实PM2 start成功返回，但其PID仍是bash、startupEvents为0，原native worker恢复函数立即报UNPROVEN：89596退出1，`/private/tmp/holaday-worker-start-pending-red.log`。这确认了一个真实启动过渡缺陷，不宣称解释了所有完整链失败。新增单元反例先退出1；修复只在一次已确认start之后，对指定的只读观察未就绪错误在原60秒/维护期限内轮询，其他错误及已返回的错误身份直接拒绝。最终main/worker身份、config、journal、旧进程与两份启动文件检查不变；不重发启动命令，不重试SQL。
+
+单元反例修复后退出0；物理53071退出0，真实延迟worker、同main、两份持久文件、无关PID不变及重复执行拒绝通过。之后清理诊断输出并增强断言，最终物理回归尚待重跑。完整链20817正在运行，日志 `/private/tmp/holaday-enabled-worker-fixed-chain.log`，资源清单891e22cf；先收集此同一进程，不新开并发重型验证。最终browser/Linux/ops及定向审查尚待完成，当前不能提交为发布通过。
+
+**20817终态覆盖上段运行中状态：退出1，source2/target90。** 隔离恢复、数据比较和目标迁移已通过，但随后backup.inspectBackupFacility内部的observer.read报`CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN`，未进入源迁移/候选启动/worker；完整链仍失败。详细日志brKbyW/coordinator-diagnostic.log。精确891e22cf容器/合成卷已清理，日志/恢复工件保留，不重试旧SQL。QA诊断修复了observer参数被调用参数遮蔽的问题，扩展到read/readFenceProgress并记录execution身份读取失败；不改变生产观察规则或把诊断重放当证明。
+
+定向审查补充原60秒预算边界：即使最后一次读取成功也不能超过预算；反例退出1（Missing expected rejection），调整为读取后先核对截止再接受成功。新增wrong-boot/closed/main漂移、配置变化、持续不可观察及非就绪异常反例均保持拒绝，启动至多一次。最终单元反例退出0零跳过。session86597串行执行三种专用Linux物理夹具、Linux host/site/runtime、原42文件browser和ops，尚待收集；源码冻结。主智能体按review技能清单定向自审，遵守单智能体约束，**不是独立整分支审查**。最终结果写入后才保存已验证局部修复，不称首次发布完成。
+
+生产范围决定仍未变：headed browser/VNC定向维护尚无明确新批准，真实独立facts、受保护execute、真实停写备份/Mac恢复、非PayPal恢复及整分支审查未完成。CLI保持关闭，无生产操作、push/PR/合并/部署；不把既有每小时自动化误当新范围授权。
+
 ### 2026-09-29 10:16 heartbeat：完整隔离丢开放回执用例通过，未扩大生产范围
 
 从`19ffefd6`继续。尚未收到对headed browser/VNC新维护范围的明确答复，本heartbeat不替代该决定，不重复上一轮现场采集。沿原Task6继续不依赖生产停机的工作：原两QA夹具新增success-only丢open回执故障，实际open完成后丢结果，原host/release-tail查询同候选状态后完成原备份恢复/迁移/nginx/核对闭环。15610退出0，open一次、丢回执一次、后续真实status、close零、迁移/启动各一次、旧效果仍1，reconciled且锁释放。源/目标90表，本轮精确标签的容器/卷已清理，旧mysql/redis不动。日志`/private/tmp/holaday-lost-open-ack-connected.log`，资源清单`/private/tmp/holaday-stopped-source-efa53dab-0f29-45b8-bde1-9315c809eb14.json`。

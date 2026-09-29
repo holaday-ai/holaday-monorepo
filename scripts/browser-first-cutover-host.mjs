@@ -794,9 +794,19 @@ export async function resumeFirstCutoverCandidateWorker(
     const parsed = io.parseConfig(initial.config, root);
     const enabled = parsed.ACCOUNT_CLOSURE_WORKER_ENABLED === 'true';
     const env = maintenanceCandidateEnvironment(parsed, binding.candidate);
-    const read = async () => {
+    const read = async (starting = false) => {
       await guard();
-      const actual = await io.readCandidate(identity);
+      let actual;
+      try {
+        actual = await io.readCandidate(identity);
+      } catch (error) {
+        // PM2 acknowledges the shell before its preflight execs the Node entry.
+        // Poll read-only observations after this one acknowledged start only;
+        // never repeat start or accept an unproven runtime for persistence.
+        if (!starting || error?.message !== 'CUTOVER_CANDIDATE_OBSERVATION_UNPROVEN') throw error;
+        await guard();
+        return null;
+      }
       if (
         !isDeepStrictEqual(actual.identity, identity) ||
         actual.mode !== 'serving' ||
@@ -838,10 +848,12 @@ export async function resumeFirstCutoverCandidateWorker(
     let runtime;
     const deadline = Math.min(io.now() + 60000, context.approval.maintenanceEndsAtMs);
     for (;;) {
-      runtime = await read();
-      if (!isDeepStrictEqual(runtime.main, before.main)) fail();
-      if (Boolean(runtime.worker) === enabled) break;
+      runtime = await read(enabled);
       if (io.now() >= deadline) fail();
+      if (runtime) {
+        if (!isDeepStrictEqual(runtime.main, before.main)) fail();
+        if (Boolean(runtime.worker) === enabled) break;
+      }
       await io.sleep(100);
     }
     const wanted = ['holaday-orchestrator', ...(enabled ? ['holaday-account-closure-worker'] : [])];
