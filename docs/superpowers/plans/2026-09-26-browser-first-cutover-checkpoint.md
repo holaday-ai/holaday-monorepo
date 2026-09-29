@@ -6,6 +6,14 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 JST：原verify与beforeOpen同次接通，开放命令前故障已通过
+
+承接`1a71aa12`，只改原两份QA夹具。新增`before-open`，保留前两故障模式。原host完成备份/恢复/源迁移/seed/真实新boot后，verify与beforeOpen分别运行原证据采集、root私有报告发布和实际uid998 `verify-first-cutover`；两次均完成后才注入故障，原open方法未替换、未调用。最终session18861退出0，`/private/tmp/holaday-preopen-connected.log`，源90/目标90，report.stage=preopen且identity与journal/newboot一致。一次迁移/start/close，零open，实际任务503，draining/closeAcknowledged=false保留，旧效果1不重放。
+
+真实反例session5531退出1，明确在readWithCandidate/readHostInventory拒绝：旧夹具将所有PM2进程归Aliyun，原候选分类固定要求Vultr。只修QA投影，把实际候选cwd匹配的PM2行、proc身份及真实4001/4002监听移入逻辑Vultr，旧网关仍归Aliyun；没有造PID/身份/空清单或放宽原分类。两个逻辑主机仍共享本例私有PID/netns，**不是独立双机现场证据**。模式拒绝RED和实际主机归属RED详见verification。12ce1c4b最终资源和d22d8a43反例资源已核验清理，日志/恢复资料保留。
+
+下一步沿原afterOpen→实际入口恢复→worker/startup保存→reconcile，不能把仍显式拒绝的fake入口/worker/reconcile换成空成功。原site已向createIngress提供verifyOpenedIdentity，可在入口故障场景调用它验证真实serving/dirty/newboot及无旧进程，再验证单次close保留dirty；完整成功还须接原nginx会话与实际文件恢复。现source/业务/支付范围边界不变，非PayPal恢复仍非本QA覆盖。CLI关闭、Task4未完成、无生产切换。本轮ops120/60/16/869及Python12全退出0、零跳过，session84126已结束。
+
 ### 2026-09-29 JST：同一host完成源迁移、新seed及真实候选关闭启动后的故障演练
 
 承接`45ce6f79`，只改两份原QA夹具。新增显式`CUTOVER_QA_HOST_FAULT=after-start`，保留原`before-migration`。原stage/site/停止/源导出/Mac隔离恢复/全部61SQL/持久回执之后，原host实际执行源迁移与schema校验、初始化seed、通过原PM2和uid998启动候选6a46ee0f，再由原控制socket/物理运行观察确认新boot且closed/idle/clean。此后仅在verify边界注入一次故障，不替代start/status，也不声称verify或preopen完成。源与恢复目标均90表；中文/BLOB/NULL/trigger/event仍独立核对。

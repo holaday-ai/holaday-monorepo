@@ -2,6 +2,18 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29同次原verify／beforeOpen和开放前故障（基于1a71aa12）
+
+原host两个实际readiness步骤均保留；注入点位于原beforeOpen成功返回后、open之前。阶段verified，root发布的preopen报告绑定同一candidate/bootId，实际uid998消费者执行两次。QA逻辑主机共享私有PID命名空间，不冒充生产双机独立观察；支付/业务范围继续明确合成。
+
+| 验证 | 实际结果 | 日志 |
+| --- | --- | --- |
+| 旧模式拒绝RED | 退出1，新before-open不在原允许模式中；在任何Docker/I/O前拒绝 | `/private/tmp/holaday-preopen-mode-red.log` |
+| 原主机投影RED | session5531退出1，实际候选online且源90目标90；readWithCandidate拒绝，未到故障注入点 | `/private/tmp/holaday-preopen-pair-red.log`、私有f9LZeE/coordinator-diagnostic.log |
+| 投影修正后同次原链 | session18861退出0，原两次preopen验收成功后注入故障；一次close、零open，health200/tasks503，未重放；源90目标90 | `/private/tmp/holaday-preopen-connected.log` |
+
+修正仅移动实际候选cwd对应的PM2/proc数据及真实ss监听到逻辑Vultr；原进程身份、UID998、exe/start/ppid/注册/监听由原classifier核验，不提供成功替身。原beforeOpen完成后才抛故障，未在open里抛错误当丢ACK路径。两份MJS语法/Biome/git diff --check退出0。最终和反例源/目标/卷精确核验后删除，仅合成数据可重建，日志/恢复证据保留。完整ops session84126退出0，120/60/16/869及Python12全部通过、零跳过，日志`/private/tmp/holaday-preopen-ops.log`；无实际入口恢复/worker/reconcile或整项成功结论。
+
 ## 2026-09-29原同次源迁移及候选关闭启动后故障（基于45ce6f79）
 
 新增原QA显式after-start模式，原before-migration保留。原host的迁移/seed/start/control/物理观察均真实执行，只有verify被一次明确故障替换，故不计开放前验收或成功切换。候选6a46ee0f、协调器当前WIP，数据库/代码均隔离QA，外部工作和支付事实明确合成。

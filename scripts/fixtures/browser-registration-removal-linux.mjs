@@ -55,12 +55,16 @@ const sourceQa = process.env.CUTOVER_QA_SOURCE
   ? JSON.parse(process.env.CUTOVER_QA_SOURCE)
   : undefined;
 const fullHost = process.env.CUTOVER_QA_HOST === '1';
-const afterStart = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-start';
+const afterStart =
+  fullHost && ['after-start', 'before-open'].includes(process.env.CUTOVER_QA_HOST_FAULT);
+const beforeOpen = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'before-open';
 assert.ok(
   !fullHost || process.argv[2] === '--execution-site-lost-effect' || (recoveryLink && sourceQa),
 );
 if (fullHost && sourceQa) {
-  assert.ok(['before-migration', 'after-start'].includes(process.env.CUTOVER_QA_HOST_FAULT));
+  assert.ok(
+    ['before-migration', 'after-start', 'before-open'].includes(process.env.CUTOVER_QA_HOST_FAULT),
+  );
   assert.equal(sourceQa.omitReceipt, false);
 }
 const hostConfig = fullHost
@@ -240,6 +244,7 @@ let hostCloseCommands = 0;
 let hostOpenCommands = 0;
 let hostStartCommands = 0;
 let hostMigrationCommands = 0;
+let hostPreopenReadiness = 0;
 let recoveryScopeChecks = 0;
 try {
   await pm2(
@@ -505,6 +510,26 @@ try {
     if (gateway.exitCode === null && gateway.signalCode === null)
       gatewayHost.processes.push(raw(await proc(gateway.pid)));
     gatewayHost.listeners += await exec('ss', ['-H', '-ltnp', 'sport = :4011']);
+    if (fullHost && gateways) {
+      // Two logical QA hosts share this private PID namespace. Old gateways
+      // belong to Aliyun; the ACTUAL new candidate belongs to Vultr. Project
+      // observed rows/proc/listeners, never fabricate a candidate or empty set.
+      const candidateCwd = `/opt/holaday-releases/${hostCandidate}/apps/orchestrator`;
+      const candidateNames = ['holaday-orchestrator', 'holaday-account-closure-worker'];
+      second.processes = second.processes.filter((p) => p.cwd !== candidateCwd);
+      second.managers = second.managers.filter((m) => !candidateNames.includes(m.name));
+      const selected = snapshot.managers.filter(
+        (m) =>
+          candidateNames.includes(m.name) &&
+          snapshot.processes.some((p) => p.pid === m.pid && p.cwd === candidateCwd),
+      );
+      const selectedPids = new Set(selected.map((m) => m.pid));
+      second.processes.push(...snapshot.processes.filter((p) => selectedPids.has(p.pid)));
+      second.managers.push(...selected);
+      snapshot.processes = snapshot.processes.filter((p) => !selectedPids.has(p.pid));
+      snapshot.managers = snapshot.managers.filter((m) => !selected.includes(m));
+      second.listeners = await exec('ss', ['-H', '-ltnp', '( sport = :4001 or sport = :4002 )']);
+    }
     return {
       sourceDigest: sha('physical-pm2-fixture'),
       sourceCandidate: interruption ? '107857fe70503e30691073f267d87275596edb20' : 'c'.repeat(40),
@@ -1091,6 +1116,8 @@ try {
               if (command === 'pm2' && args[0] === 'start') hostStartCommands++;
               if (command === 'pnpm' && args.includes('db:migrate:numbered'))
                 hostMigrationCommands++;
+              if (command === 'runuser' && args.includes('verify-first-cutover'))
+                hostPreopenReadiness++;
             }
             if (
               sourceQa &&
@@ -1117,6 +1144,7 @@ try {
       if (afterStart) {
         // Inject only AFTER the original host has physically started, observed
         // and journal-bound a fresh closed process. Never substitute start/status.
+        const nativeVerify = hostAdapter.verify;
         hostAdapter.verify = async (identity) => {
           const status = await hostAdapter.status(identity);
           assert.equal(status.mode, 'closed');
@@ -1132,9 +1160,29 @@ try {
               .length,
             1,
           );
+          if (beforeOpen) return nativeVerify(identity);
           hostStartFaults++;
           throw new Error('CUTOVER_QA_AFTER_START_FAULT');
         };
+        if (beforeOpen) {
+          // No open command is sent: both original readiness passes must
+          // finish and publish evidence before this explicit fault boundary.
+          const nativeBeforeOpen = hostAdapter.beforeOpen;
+          hostAdapter.beforeOpen = async (identity) => {
+            await nativeBeforeOpen(identity);
+            assert.equal(hostPreopenReadiness, 2);
+            const durable = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+            assert.equal(durable.phase, 'verified');
+            assert.deepEqual(durable.identity, identity);
+            const published = JSON.parse(
+              await fs.readFile(`/var/lib/holaday-deploy/evidence/${binding.attempt}.json`, 'utf8'),
+            );
+            assert.equal(published.stage, 'preopen');
+            assert.deepEqual(published.identity, identity);
+            hostStartFaults++;
+            throw new Error('CUTOVER_QA_BEFORE_OPEN_FAULT');
+          };
+        }
       }
     } else await setupSite();
     if (siteMode) {
@@ -1289,7 +1337,7 @@ try {
           );
           assert.equal(published.attempt, binding.attempt);
           assert.equal(published.candidate, actualCandidate);
-          assert.equal(published.stage, 'prepare');
+          assert.equal(published.stage, beforeOpen ? 'preopen' : 'prepare');
         }
         assert.equal(result.ok, false);
         assert.equal(result.action, 'hold_maintenance');
@@ -1297,11 +1345,13 @@ try {
           result.phase,
           knownEffect
             ? 'legacy_interruption_accepted'
-            : afterStart
-              ? 'candidate_started'
-              : sourceQa
-                ? 'migration_started'
-                : 'backup_verified',
+            : beforeOpen
+              ? 'verified'
+              : afterStart
+                ? 'candidate_started'
+                : sourceQa
+                  ? 'migration_started'
+                  : 'backup_verified',
         );
         const effects = await journal.readFirstCutoverEffects();
         assert.equal(
@@ -1331,7 +1381,9 @@ try {
             recoveryDrift
               ? 'CUTOVER_RECOVERY_SESSION_UNPROVEN'
               : afterStart
-                ? 'CUTOVER_QA_AFTER_START_FAULT'
+                ? beforeOpen
+                  ? 'CUTOVER_QA_BEFORE_OPEN_FAULT'
+                  : 'CUTOVER_QA_AFTER_START_FAULT'
                 : sourceQa
                   ? fullHost
                     ? 'MAINTENANCE_RELEASE_FAILED'
@@ -1420,6 +1472,7 @@ try {
                   admissionClosed: true,
                 }
               : {}),
+            ...(beforeOpen ? { nativePreopenVerified: true } : {}),
             ...(recoveryLink
               ? { recoveryLinked: !recoveryDrift, recoveryRejected: recoveryDrift }
               : {}),
