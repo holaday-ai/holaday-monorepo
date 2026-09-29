@@ -6,6 +6,35 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 同版本真实浏览器恢复诊断：启动参数不能证明不恢复旧标签
+
+从`dae538e3`继续，仅新增可重复的隔离诊断`scripts/fixtures/browser-cloud-recovery-probe-linux.mjs`和证据记录，未改产品恢复器或生产配置。用户固定源码审阅权限已解决，不再提问。原Task4 BASE、PayPal延期和所有生产门槛不变。
+
+官方Brave `1.89.141` arm64 deb（124793960字节）SHA256为`3900af7b046b0190f7e1894a15a4c2d2a9c9849e4b1979f672d755af52ca9b50`，与官方GitHub release API返回一致；实际二进制`Brave Browser 147.1.89.141`、CDP内核`147.0.7727.102`。这不是生产同架构证明。公开包及135个deb的本地校验清单在`/private/tmp/holaday-brave-recovery-qa.cgxjrr/`，未安装到Mac或生产，原QA镜像未重建。
+
+测试仅用原`holaday-first-cutover-network:qa`、network none、私有PID、1CPU/768MiB/256pids、只读公开文件挂载、真实Xvfb/Brave。每次创建全新合成profile，设置恢复旧会话偏好、一个仅loopback的旧页面及持久/会话两类假cookie；不读取或复制真实profile、凭据、站点数据。下表是探索性假设检验，**不是发布通过数**：
+
+| 对照 | 实际结果 | 结论 |
+|---|---|---|
+| 原`about:blank`启动，保存会话偏好为1 | 旧URL对应的真实page target恢复；HTTP请求计数不增加 | 没有新HTTP请求不等于没有旧页面恢复；懒加载/缓存原因未证实 |
+| `--no-startup-window` | 初始无page；创建第一个新空白target后旧target重新出现，43533退出1 | 零初始窗口不能作为不重放证据 |
+| `--app=about:blank` | 初始page为2而预期1，77511退出1 | app窗口也未满足无旧页面条件 |
+| Brave默认冷启动 | 磁盘已保存两类假cookie，但重新启动后会话cookie消失 | 是可观察的恢复影响，不能承诺全部登录状态保留 |
+| 仅在QA关闭`BraveCleanupSessionCookiesOnSessionRestore` | 两类假cookie都保留，但旧target仍恢复，43533退出1 | cookie保留与旧标签不恢复是独立问题，未将隐私开关推广到生产 |
+| QA内新增全局`RestoreOnStartup:5`，仍保留上述QA开关 | 新空白target不恢复旧target、HTTP增量0，但会话cookie消失；85040退出1 | 这个组合假设被否定；不是允许安装全机策略或证明任意后台任务不重放 |
+
+对应日志在`/private/tmp/holaday-brave-{native-cleanup-control,app-blank,policy-probe}-20260930.log`。磁盘cookie元数据仅来自本次合成库，日志不含真实cookie。会话cookie两类同时保留是诊断目标，**不新增发布硬门槛**：原批准已接受云端会话中断。真正仍须解决的是精确服务范围内、不由发布脚本删除/改写profile、不影响共享对象且不自动重放旧效果的恢复接线；不能为了让诊断转绿自行扩大范围或改写原验收条件。
+
+原始失败也保留：44590退出1缺libcairo、22115 apt下载退出100缺仓库专用brave-keyring，尚未形成有效浏览器实验；补齐deb声明的运行依赖后14056退出0。9498/34038/51827/5035退出1，其中早期正对照错误地要求HTTP重访；实际旧target已恢复，因此改用真实target作为正对照，没有放宽安全路径的无旧target断言。11726/26490/44593/44764/65579均退出1：逐边界证明会话cookie已在原about:blank冷启动丢失；移除旧disable-restore-session-state或增加restore-last-session都未解决。compound4914审批超时导致当次诊断补丁未执行，后来单独补丁与读取核实后才运行；不能将34038称作包含那份新增诊断。所有失败不算通过、不自动重试远端操作。
+
+根因依据：[Brave有意清理冷启动会话cookie的官方变更](https://github.com/brave/brave-core/pull/17122)，同版本真实QA关闭对应特性后验证了这个因果关系；[Chromium同版本RestoreOnStartup定义](https://github.com/chromium/chromium/blob/147.0.7727.102/components/policy/resources/templates/policy_definitions/Startup/RestoreOnStartup.yaml)中5为新标签页。[Brave官方策略文档](https://support.brave.app/hc/en-us/articles/360039248271-Group-Policy)使用`/etc/brave/policies/managed/`。该位置会影响主机浏览器，不能直接用于仅两个服务获准维护的生产范围。网页渲染失败后只读curl取到匹配版本源码；未以此调整生产策略。
+
+复现只在一次性容器中将上述缓存只读挂到`/qa`，将已保存诊断只读挂到`/probe.mjs`，用私有bash父进程串行解包公开deb、ldconfig、`/opt/node22/bin/node /probe.mjs [--app-blank|--policy-probe]`；无参数为silent对照。不能在宿主执行包解压或复用真实profile。脚本预期保留失败断言，不纳入ops绿色计数。原长期诊断容器`a91f902c…`已到期自动移除并经inspect确认不存在；85040的一次性容器也经精确label查询确认移除。
+
+最终保存并格式化后的脚本38097退出1、无跳过，日志`/private/tmp/holaday-brave-policy-final-20260930.log`：正对照旧target恢复，policy模式旧target=false/allBlank=true/HTTP增量0，随后明确失败于会话cookie保留断言，与85040一致。不是修复或验收通过。精确label `holaday.qa=browser-policy-final-cgxjrr` 查询为空，容器已自动移除；所有本轮作业已结束，未留数据库/卷或后台测试。脚本Biome、Node语法和git diff-check退出0；初次Biome五项风格问题已修正，不声称全仓lint/ops或最终回归通过。
+
+**下一步：** 不再重复这些已否定的参数组合，不把全机策略当现成生产修复，也不将cookie保留扩成未批准的大项。沿原恢复接线核实只作用精确服务的实现路径，并继续原独立facts/受保护入口/真实停写备份与Mac恢复/非PayPal恢复/完整故障矩阵和整分支审查。旧完整链间歇拒绝仍未定位；本轮不盲跑该链、不冒用历史ops计数。CLI仍关闭；没有本机Chrome、生产服务/数据库/profile/PayPal修改，没有push/PR/合并/部署，自动化不重复创建或修改。
+
 ### 2026-09-30 本地续跑：正文审阅授权已解除，原恢复副作用确认；VNC原PM2停止经校准通过
 
 从`4b57e367`续跑。用户明确回复“允许 都允许 别再问了”，覆盖`/opt/holaday-headed/start.sh`及`/opt/holaday-vnc/start.sh`的只读代码审阅；下方14:39正文权限阻塞已解除，不重复请求。54248退出0，原受限SSH读取两份固定源文件，敏感模式行过滤后保存`/private/tmp/holaday-cloud-maintenance-authorized-source-20260929.json`。摘要仍为headed `7e79a8f273485b716f8aafb3106d75886b738fe7768c288f190574ea6fb5a43c`、VNC `951940eeb19094d7d3e9b37a2a9e6830d63558bfac9258f347849f5952eb64ba`。未执行脚本或读取profile内容。
