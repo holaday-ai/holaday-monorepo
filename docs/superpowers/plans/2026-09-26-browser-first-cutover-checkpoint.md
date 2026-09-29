@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 JST：隔离闭环已保存，审查修复查单响应的实际内存上限
+
+隔离成功/晚发现未决动作及原受保护入口夹具已保存为`1ea2922b`（五个明确文件，原cache未纳入）。随后主智能体按原Task4 BASE开始风险定向自审，不称整分支或独立审查完成：发现`payment-cutover-query.ts`在完整arrayBuffer/text之后才检查256KiB，不能限制读取过程内存。只改该原查询器与原测试：两个真实ReadableStream反例先RED（session69086退出1，41通过/2失败，均因没有提前取消）；加入有界读取，实际字节超过上限即取消并释放reader，不保留超限正文、不重试查询，保留签名/商户/状态/错误脱敏逻辑。新增两条恰好256KiB有效签名及原始字节保留正例。
+
+cn-payment完整8文件103/103及typecheck退出0（session36814）；日志`/private/tmp/holaday-query-stream-cn-{suite,typecheck}.log`。新编译查询包在已有无网络Linux Node22镜像中，原受保护查单接线15/15、零跳过、退出0（40575，`/private/tmp/holaday-query-stream-linux.log`）；只读脚本与无凭据包，512MiB/1核/私有PID，专属容器已自动移除，未访问支付服务。
+
+本轮显式42文件串行回归84533退出0：1010通过、34跳过，原因是age环境变量名误写，不计全套零跳过。按源码正确`CUTOVER_TEST_AGE_EXECUTABLE`单独补跑原age文件75332，35/35、零跳过、退出0；两轮合起来覆盖1044个不同用例，一项重复，不能称单轮1044零跳过。日志`/private/tmp/holaday-query-stream-{browser-regression,age-enabled}.log`。两个TS的Biome及diff-check通过，所有测试已结束。本轮不改运行中应用、生产配置/支付状态/额度或CLI开关；此前完整物理成功证据早于本查询器修改，不冒充最终发布候选验收。
+
+下一步仍须接生产独立facts/受保护工具与入口、真实备份恢复、非PayPal恢复、完整整分支审查。生产应用DB账号不能完成写入者元数据核查；先前管理凭据路径权限拒绝仍有效，不改用其他路径或工具绕过。需要用户明确针对该只读权限边界的批准，或提供已具备所需元数据权限的专用只读通道；广泛部署授权不自动越过该拒绝。保持CLI关闭、旧服务不动、原Task4 BASE不变，未push/PR/合并/部署。自动化未修改；不得下一轮重复成功演练、查商户或读取已拒凭据来耗时。
+
 ### 2026-09-29 JST：隔离成功与晚发现动作反例最终结果
 
 session66686退出0：同次open/nginx恢复/启动保存后，独立只读接口发现具体unknown旧动作，原hold关闭同一dirty候选一次，双HTTPS503、锁保留、动作计数1。源90/目标90，d35c5604专属资源已核验清理，日志`/private/tmp/holaday-late-known-effect-connected.log`。此前success3117亦退出0；两个attempt不拼成生产验收。

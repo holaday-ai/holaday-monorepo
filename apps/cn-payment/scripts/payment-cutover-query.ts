@@ -75,6 +75,29 @@ type QueryIO = {
 };
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 
+async function readQueryBody(response: Response): Promise<Buffer> {
+  if (!response.body) throw new Error('body');
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return Buffer.concat(chunks, size);
+      size += value.byteLength;
+      // Bound actual decoded HTTP bytes, not an untrusted Content-Length.
+      // Reject before retaining this chunk or reading the remainder.
+      if (size > 256 * 1024) throw new Error('size');
+      chunks.push(Buffer.from(value));
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 /** SDK signing/verification with raw HTTP retained; never create, close, refund or settle. */
 export async function queryPaymentOrder(value: unknown, io: QueryIO): Promise<PaymentObservation> {
   const parsed = inputSchema.safeParse(value);
@@ -117,9 +140,8 @@ export async function queryPaymentOrder(value: unknown, io: QueryIO): Promise<Pa
         body: sdk.sdkExecute('alipay.trade.query', { bizContent: { outTradeNo: input.orderId } }),
       });
       if (!response.ok) throw new Error('query');
-      const bytes = Buffer.from(await response.arrayBuffer());
+      const bytes = await readQueryBody(response);
       observedAtMs = now();
-      if (bytes.length > 256 * 1024) throw new Error('size');
       const contentType = response.headers.get('content-type');
       archive = JSON.stringify({ contentType, bodyBase64: bytes.toString('base64') });
       await io.retain(archive);
@@ -167,9 +189,8 @@ export async function queryPaymentOrder(value: unknown, io: QueryIO): Promise<Pa
         },
       });
       if (!response.ok) throw new Error('query');
-      raw = await response.text();
+      raw = new TextDecoder().decode(await readQueryBody(response));
       observedAtMs = now();
-      if (Buffer.byteLength(raw) > 256 * 1024) throw new Error('size');
       const headers = Object.fromEntries(response.headers.entries());
       archive = JSON.stringify({ headers, body: raw });
       await io.retain(archive);

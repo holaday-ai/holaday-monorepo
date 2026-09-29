@@ -2,6 +2,14 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29 查询响应流上限审查修复（基于1ea2922b）
+
+原查单查询器先完整读响应再检查大小，256KiB未约束读取过程。两个合成ReadableStream反例先失败（69086，`/private/tmp/holaday-query-stream-red.log`，41通过/2失败）：原实现消费全部正文，没有在超限时取消。修复为按实际字节计数，超过上限立即取消/释放reader，单次查询、不保留超限原文；不依赖Content-Length。两个有效签名恰好256KiB正例仍保留完整原字节。仅改原查询器和原测试，不调用任何真实支付服务。
+
+完整cn-payment suite103/103与类型检查均退出0；Linux Node22无网络/512MiB/1核原查询包接线15/15、零跳过、退出0，新包`/private/tmp/holaday-query-stream-bundle-C9PTLA/query.cjs`仅QA无凭据。日志`/private/tmp/holaday-query-stream-cn-{suite,typecheck}.log`及`/private/tmp/holaday-query-stream-linux.log`。42文件回归首轮1010通过/34跳过/退出0（age变量名误写），补跑正确开关后age35/35零跳过退出0；去重覆盖1044项，不伪称单轮零跳过，原始日志`/private/tmp/holaday-query-stream-{browser-regression,age-enabled}.log`保留。Biome/diff-check通过，所有session结束。
+
+这是主智能体定向自审，不是119文件整分支独立审查。生产DB权限和独立事实/受保护安装/真实恢复门槛未消失，CLI保持关闭，前一物理成功候选不是本修改后的最终发布证明。
+
 ## 2026-09-29 同一次完整隔离成功链（基于04b4d1a1）
 
 最终回归：session12708退出0，browser1044/1044，ops120/60/16/875及Python12，全部零失败/取消/跳过。日志`/private/tmp/holaday-success-late-{browser,ops}-corrected.log`；原三夹具静态检查及diff-check通过。下文“运行中／待更新”为过程记录，已被本段取代；全部测试session结束。只代表隔离接线与回归，不改变生产切换禁止结论。

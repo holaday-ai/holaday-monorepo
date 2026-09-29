@@ -83,6 +83,81 @@ function fixture(provider: string, value: unknown, badSign = false) {
   };
 }
 describe('domestic payment cutover queries', () => {
+  it.each([ali, wx])(
+    'accepts a signed $provider response exactly at the byte limit',
+    async (input) => {
+      const value = {
+        ...(input.provider === 'alipay' ? alipayOrder() : wechatOrder()),
+        extra: '中文',
+      };
+      const initial = await signed(input.provider, value).arrayBuffer();
+      value.extra += 'a'.repeat(256 * 1024 - initial.byteLength);
+      const response = signed(input.provider, value);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      expect(bytes.byteLength).toBe(256 * 1024);
+      let offset = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(bytes.slice(offset, offset + 32767));
+          offset += 32767;
+          if (offset >= bytes.length) controller.close();
+        },
+      });
+      const f = fixture(input.provider, value);
+      f.io.transport = async () => new Response(body, { headers: response.headers });
+      expect((await queryPaymentOrder(input, f.io)).state).toBe('paid-unsettled');
+      expect(f.kept).toHaveLength(1);
+      const archive = JSON.parse(f.kept[0] ?? '{}');
+      expect(
+        input.provider === 'alipay'
+          ? Buffer.from(archive.bodyBase64, 'base64')
+          : Buffer.from(archive.body),
+      ).toEqual(Buffer.from(bytes));
+      expect(body.locked).toBe(false);
+    },
+  );
+
+  it.each([ali, wx])(
+    'cancels an oversized $provider stream before consuming the remainder',
+    async (input) => {
+      let pulls = 0;
+      let cancelled = false;
+      let requests = 0;
+      const kept: string[] = [];
+      const body = new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            pulls++;
+            controller.enqueue(new Uint8Array(64 * 1024));
+            if (pulls === 8) controller.close();
+          },
+          cancel() {
+            cancelled = true;
+          },
+        },
+        { highWaterMark: 0 },
+      );
+      await expect(
+        queryPaymentOrder(input, {
+          now: () => 100_000,
+          retain: async (raw) => {
+            kept.push(raw);
+          },
+          transport: async () => {
+            requests++;
+            // A lying or absent Content-Length must not bypass the byte limit.
+            return new Response(body, { headers: { 'content-length': '1' } });
+          },
+        }),
+      ).rejects.toThrow(/^MAINTENANCE_PAYMENT_QUERY_FAILED$/);
+      expect(cancelled).toBe(true);
+      expect(pulls).toBe(5);
+      expect(requests).toBe(1);
+      expect(kept).toEqual([]);
+      expect(body.locked).toBe(false);
+    },
+  );
+
   it('uses only signed alipay.trade.query and retains signed raw bytes', async () => {
     const f = fixture('alipay', alipayOrder());
     const result = await queryPaymentOrder(ali, f.io);
