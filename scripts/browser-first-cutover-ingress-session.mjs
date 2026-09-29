@@ -213,8 +213,10 @@ async function readProtectedSite(options, overrides, kind) {
           'producerStartupFiles',
           ...(Object.hasOwn(s, 'inventory') ? ['inventory'] : []),
           ...(Object.hasOwn(s, 'backupRecoveryDigest') ? ['backupRecoveryDigest'] : []),
+          ...(Object.hasOwn(s, 'cloudBrowserRecoveryDigest') ? ['cloudBrowserRecoveryDigest'] : []),
         ]) ||
         (Object.hasOwn(s, 'backupRecoveryDigest') && !hash(s.backupRecoveryDigest)) ||
+        (Object.hasOwn(s, 'cloudBrowserRecoveryDigest') && !hash(s.cloudBrowserRecoveryDigest)) ||
         (Object.hasOwn(s, 'inventory') &&
           (!s.inventory ||
             typeof s.inventory !== 'object' ||

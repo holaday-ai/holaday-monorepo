@@ -2,6 +2,16 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 JST（09-29 19:16Z）：产品恢复材料与真实夹具共用
+
+已有runtime导出固定恢复材料；原保护读取器/site校验其摘要并由既有完整site摘要绑定原journal。物理夹具使用同一产品函数与固定合成profile/显示/端口，未另造QA命令。新增拒绝任意路径/命令/自动重启、错误摘要及非法字段测试；初始RED退出1，相关本机158/158退出0零跳过。七个触及JS文件Biome及diff-check通过。
+
+实际Linux原镜像、无网络、私有PID、1CPU/768MiB/256pids、公开缓存及代码只读挂载：33130成功模式退出0，73827无SYS_ADMIN拒绝模式退出0；后者恢复命令实际退出1且不重启、不回退。成功模式真实PM2停止前后各9个浏览器进程退出，旧target正对照成立，产品恢复后无旧target/HTTP动作；原合成profile哨兵/持久cookie/父策略和无关应用/显示保持，私有只读挂载及零能力实际观察通过。日志`/private/tmp/holaday-cloud-launch-product-{final,denied}-20260930.log`。准备失败96683/21435以及夹具旧显示号失败67021退出1均保留，不算产品通过；最终使用原有离线解包流程。
+
+最终Linux四模块196/196退出0零跳过；原ops启用现有age后退出0，Node120/60/16/958与Python12均通过、零跳过。日志`/private/tmp/holaday-cloud-launch-linux-unit-20260930.log`和`/private/tmp/holaday-cloud-launch-ops-20260930.log`。QA容器均已退出，原MySQL/Redis健康；没有新数据库/卷、生产凭据挂载或商户调用。未重跑完整数据库物理链或整分支独立审查。
+
+这不是两云服务生产控制器、任意后台不重放或完整发布通过。尚需独立工具/策略字节、真实独占事实、停止/恢复执行及整条发布验收；不重新解释历史组件数为本次上线成功，CLI仍关闭。
+
 ## 2026-09-30 18:15Z heartbeat：现场配置固定到原journal
 
 原site→journal现已单次绑定完整受保护配置摘要，必须在preflight、任何接收器连接前持久化；首次审阅到连接之间、重复审阅和后续guard不能更换配置。已绑定attempt不能由另一site重接，失败不自动重试。初始3项RED退出1，实现后本机site/journal129/129及host/receiver110/110退出0。加入配置绑定竞态与双次审阅漂移反例后，真实Linux三模块223/223退出0、零跳过；原实际PM2/pidfd停止组合退出0。日志`/private/tmp/holaday-site-binding-linux-{unit,physical}-20260930.log`。原镜像、私有PID/network none、受限资源，仅挂载只读代码，无生产配置或凭据。

@@ -10,6 +10,53 @@ import {
 } from './browser-cutover-evidence.mjs';
 
 const hash = (x) => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
+/** Fixed recovery MATERIAL, not permission to start a process. The site binds
+ * its digest in the existing journal; execution still needs fresh exclusive
+ * ownership, tool/policy bytes, stop and recovery facts. No caller argv, URL,
+ * executable, display or profile selection, and no unsafe old startup script.
+ * unshare/mount failure exits without a direct-browser fallback. */
+export function firstCutoverCloudBrowserRecoveryLaunch(input) {
+  if (
+    !input ||
+    typeof input !== 'object' ||
+    Array.isArray(input) ||
+    Object.keys(input).length !== 1 ||
+    typeof input.attempt !== 'string' ||
+    !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(input.attempt)
+  )
+    fail();
+  return {
+    command: '/usr/bin/unshare',
+    args: [
+      '--mount',
+      '--propagation',
+      'private',
+      '/bin/sh',
+      '-ceu',
+      '/usr/bin/mount --bind "$1" /etc/brave/policies/managed; /usr/bin/mount -o remount,bind,ro /etc/brave/policies/managed; shift; exec /usr/bin/setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs "$@"',
+      'holaday-private-browser-policy',
+      `/var/lib/holaday-deploy/maintenance/${input.attempt}/cloud-browser-policy`,
+      '/opt/brave.com/brave/brave',
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--disable-extensions',
+      '--password-store=basic',
+      '--hide-crash-restore-bubble',
+      '--disable-session-crashed-bubble',
+      '--remote-debugging-address=127.0.0.1',
+      '--remote-debugging-port=9223',
+      '--user-data-dir=/var/lib/holaday-headed-brave',
+      '--no-startup-window',
+    ],
+    env: { DISPLAY: ':98' },
+    autorestart: false,
+  };
+}
+
 export function validateLegacyWorkBoundary(input) {
   try {
     return validateWork(input);

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { readCutoverRehearsalArtifacts } from './browser-cutover-evidence.mjs';
 import { backupAndRestoreCheck } from './browser-first-cutover-backup.mjs';
+import * as runtimeModule from './browser-first-cutover-runtime.mjs';
 import * as siteModule from './browser-first-cutover-site.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 import { finishStoppedRelease } from './browser-maintenance-release-tail.mjs';
@@ -256,6 +257,33 @@ async function fixture(t, extraInventory = {}, interrupted = false) {
     observer: () => activeObserver,
   };
 }
+
+test('site rejects a recovery recipe digest that differs from the packaged fixed launch before any session', async (t) => {
+  const f = await fixture(t);
+  f.scope.cloudBrowserRecoveryDigest = '2'.repeat(64);
+  await assert.rejects(f.make().lifecycle.attach(f.context), /UNPROVEN/);
+  assert.deepEqual(f.events, []);
+  assert.equal((await f.journal.readFirstCutoverEffects()).executionSiteDigest, undefined);
+});
+
+test('site binds the packaged recovery recipe as part of the actual durable scope', async (t) => {
+  const f = await fixture(t);
+  assert.equal(typeof runtimeModule.firstCutoverCloudBrowserRecoveryLaunch, 'function');
+  f.scope.cloudBrowserRecoveryDigest = createHash('sha256')
+    .update(
+      JSON.stringify(
+        runtimeModule.firstCutoverCloudBrowserRecoveryLaunch({ attempt: f.binding.attempt }),
+      ),
+    )
+    .digest('hex');
+  const site = f.make();
+  await site.lifecycle.attach(f.context);
+  assert.equal(
+    (await f.journal.readFirstCutoverEffects()).executionSiteDigest,
+    createHash('sha256').update(JSON.stringify(f.scope)).digest('hex'),
+  );
+  await site.lifecycle.detach(f.context);
+});
 
 test('site pins the complete protected configuration in the real journal before connecting receivers', async (t) => {
   const f = await fixture(t);

@@ -32,7 +32,10 @@ import {
 import { compareCutoverMysqlSnapshots } from './browser-first-cutover-mysql.mjs';
 import { connectFirstCutoverRecoverySession } from './browser-first-cutover-recovery-session.mjs';
 import { retireLocalFirstCutoverProducers } from './browser-first-cutover-registrations.mjs';
-import { validateLegacyWorkBoundary } from './browser-first-cutover-runtime.mjs';
+import {
+  firstCutoverCloudBrowserRecoveryLaunch,
+  validateLegacyWorkBoundary,
+} from './browser-first-cutover-runtime.mjs';
 
 const bindingKeys = ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'];
 const fail = () => {
@@ -154,6 +157,11 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       !value.reviews ||
       !value.ingress ||
       !Array.isArray(value.producerStartupFiles) ||
+      (Object.hasOwn(value, 'cloudBrowserRecoveryDigest') &&
+        value.cloudBrowserRecoveryDigest !==
+          createHash('sha256')
+            .update(JSON.stringify(firstCutoverCloudBrowserRecoveryLaunch({ attempt })))
+            .digest('hex')) ||
       !/^[a-f0-9]{64}$/.test(value.gatewaySiteDigest ?? '')
     )
       fail();

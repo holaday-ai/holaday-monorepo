@@ -416,6 +416,20 @@ test('coordinator site scope reads the fixed protected file and binds both hosts
     await session.readFirstCutoverExecutionSiteScope({ attempt: binding.attempt }, io),
     { ...value.site, binding, maintenanceEndsAtMs: deadline },
   );
+  value.site.cloudBrowserRecoveryDigest = '6'.repeat(64);
+  await write();
+  assert.equal(
+    (await session.readFirstCutoverExecutionSiteScope({ attempt: binding.attempt }, io))
+      .cloudBrowserRecoveryDigest,
+    '6'.repeat(64),
+  );
+  value.site.cloudBrowserRecoveryDigest = { command: '/bin/sh' };
+  await write();
+  await assert.rejects(
+    session.readFirstCutoverExecutionSiteScope({ attempt: binding.attempt }, io),
+    /UNPROVEN/,
+  );
+  value.site.cloudBrowserRecoveryDigest = '6'.repeat(64);
   value.site.inventory = { configurationDigests: ['a'.repeat(64)], merchants: [], targets: [] };
   const inventoryDigest = createHash('sha256')
     .update(JSON.stringify(value.site.inventory))

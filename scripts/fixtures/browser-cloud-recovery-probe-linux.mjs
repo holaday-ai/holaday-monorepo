@@ -20,6 +20,7 @@ import * as fs from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
+import { firstCutoverCloudBrowserRecoveryLaunch } from '../browser-first-cutover-runtime.mjs';
 await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
 assert.ok(
@@ -58,7 +59,11 @@ const exe = '/opt/brave.com/brave/brave';
 const version = (await promisify(execFile)(exe, ['--version'])).stdout;
 assert.match(version, /^Brave Browser 147\.1\.89\.141 /);
 console.log(version.trim());
-const profile = await fs.mkdtemp('/tmp/holaday-synthetic-browser-');
+// These fixed product paths exist ONLY inside this fresh disposable container.
+// Fail rather than reuse any pre-existing profile.
+const profile = '/var/lib/holaday-headed-brave';
+await fs.mkdir(profile, { mode: 0o700 });
+const attempt = '12345678-1234-4234-8234-123456789abc';
 await fs.mkdir(`${profile}/Default/Sessions`, { recursive: true });
 await fs.writeFile(`${profile}/Default/Sessions/preserve-sentinel`, 'synthetic-preserve', {
   flag: 'wx',
@@ -83,7 +88,7 @@ await fs.writeFile(
   JSON.stringify({ session: { restore_on_startup: 1 } }),
   { flag: 'wx' },
 );
-const xvfb = spawn('/usr/bin/Xvfb', [':99', '-screen', '0', '1280x800x24', '-nolisten', 'tcp'], {
+const xvfb = spawn('/usr/bin/Xvfb', [':98', '-screen', '0', '1280x800x24', '-nolisten', 'tcp'], {
   stdio: 'ignore',
 });
 let browser;
@@ -99,7 +104,7 @@ const pm2 = async (...argv) =>
     await promisify(execFile)(
       '/opt/node22/bin/node',
       ['/opt/node22/lib/node_modules/pm2/bin/pm2', ...argv],
-      { env: { ...process.env, PM2_HOME: pm2Home, DISPLAY: ':99' }, maxBuffer: 8 * 1024 * 1024 },
+      { env: { ...process.env, PM2_HOME: pm2Home, DISPLAY: ':98' }, maxBuffer: 8 * 1024 * 1024 },
     )
   ).stdout;
 let managed;
@@ -165,7 +170,7 @@ const args = [
   '--disable-session-crashed-bubble',
   ...(scopedPolicy ? [] : ['--disable-features=BraveCleanupSessionCookiesOnSessionRestore']),
   '--remote-debugging-address=127.0.0.1',
-  '--remote-debugging-port=9229',
+  '--remote-debugging-port=9223',
   `--user-data-dir=${profile}`,
 ];
 async function until(predicate, ms = 15000) {
@@ -177,24 +182,16 @@ async function until(predicate, ms = 15000) {
   throw Error('QA_CONDITION_TIMEOUT');
 }
 async function launch(extra, privatePolicy, usePm2 = false) {
-  // QA-only characterization, not an installed privileged launcher. The
-  // container's parent policy remains untouched; exec keeps a single exact PID.
-  const command = privatePolicy ? '/usr/bin/unshare' : exe;
-  const argv = privatePolicy
-    ? [
-        '--mount',
-        '--propagation',
-        'private',
-        '/bin/sh',
-        '-ceu',
-        'mount --bind "$1" /etc/brave/policies/managed; mount -o remount,bind,ro /etc/brave/policies/managed; shift; exec /usr/bin/setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs "$@"',
-        'qa-private-policy',
-        privatePolicy,
-        exe,
-        ...args,
-        ...extra,
-      ]
-    : [...args, ...extra];
+  // Execute the exact material from the packaged runtime, not a parallel QA
+  // shell recipe. The fixture alone provisions synthetic policy/profile files.
+  const recovery = privatePolicy ? firstCutoverCloudBrowserRecoveryLaunch({ attempt }) : null;
+  if (recovery) {
+    assert.equal(recovery.autorestart, false);
+    assert.deepEqual(recovery.env, { DISPLAY: ':98' });
+    assert.ok(recovery.args.includes(privatePolicy));
+  }
+  const command = recovery?.command ?? exe;
+  const argv = recovery?.args ?? [...args, ...extra];
   if (usePm2) {
     await pm2(
       'start',
@@ -205,7 +202,7 @@ async function launch(extra, privatePolicy, usePm2 = false) {
       'none',
       '--kill-timeout',
       '1600',
-      ...(privatePolicy ? ['--no-autorestart'] : []),
+      ...(recovery?.autorestart === false ? ['--no-autorestart'] : []),
       '--',
       ...argv,
     );
@@ -218,7 +215,7 @@ async function launch(extra, privatePolicy, usePm2 = false) {
     browser = { pid: managed.identity.pid, exitCode: null };
   } else {
     browser = spawn(command, argv, {
-      env: { ...process.env, DISPLAY: ':99' },
+      env: { ...process.env, DISPLAY: ':98', ...recovery?.env },
       stdio: ['ignore', 'ignore', 'pipe'],
     });
   }
@@ -231,7 +228,7 @@ async function launch(extra, privatePolicy, usePm2 = false) {
     if (browser.exitCode !== null) throw Error(`QA_BROWSER_EXIT_${browser.exitCode}: ${errors}`);
     let v;
     try {
-      const r = await fetch('http://127.0.0.1:9229/json/version', {
+      const r = await fetch('http://127.0.0.1:9223/json/version', {
         signal: AbortSignal.timeout(500),
       });
       v = await r.json();
@@ -304,7 +301,7 @@ async function close() {
   socket.close();
   await until(async () => {
     try {
-      await fetch('http://127.0.0.1:9229/json/version', { signal: AbortSignal.timeout(200) });
+      await fetch('http://127.0.0.1:9223/json/version', { signal: AbortSignal.timeout(200) });
       return false;
     } catch {
       return true;
@@ -360,7 +357,7 @@ try {
     assert.ok(unrelated);
   }
   await until(async () =>
-    fs.access('/tmp/.X11-unix/X99').then(
+    fs.access('/tmp/.X11-unix/X98').then(
       () => true,
       () => false,
     ),
@@ -442,7 +439,12 @@ try {
   }
   let privatePolicy;
   if (scopedPolicy) {
-    privatePolicy = await fs.mkdtemp('/tmp/holaday-private-policy-');
+    await fs.mkdir(`/var/lib/holaday-deploy/maintenance/${attempt}`, {
+      recursive: true,
+      mode: 0o700,
+    });
+    privatePolicy = `/var/lib/holaday-deploy/maintenance/${attempt}/cloud-browser-policy`;
+    await fs.mkdir(privatePolicy, { mode: 0o700 });
     await fs.writeFile(`${privatePolicy}/existing.json`, originalPolicy, { flag: 'wx' });
     await fs.writeFile(`${privatePolicy}/recovery.json`, JSON.stringify({ RestoreOnStartup: 5 }), {
       flag: 'wx',
@@ -603,7 +605,7 @@ try {
     assert.equal(xvfb.exitCode, null);
     process.kill(xvfb.pid, 0);
     await assert.rejects(
-      fetch('http://127.0.0.1:9229/json/version', {
+      fetch('http://127.0.0.1:9223/json/version', {
         signal: AbortSignal.timeout(500),
       }),
     );

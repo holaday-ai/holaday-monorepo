@@ -15,6 +15,36 @@ import * as firstRuntime from './browser-first-cutover-runtime.mjs';
 import { retireMaintenanceRuntime } from './browser-maintenance-runtime.mjs';
 
 const digest = 'a'.repeat(64);
+test('cloud recovery launch cannot select another profile, command, policy directory or restart behavior', () => {
+  const build = firstRuntime.firstCutoverCloudBrowserRecoveryLaunch;
+  assert.equal(typeof build, 'function');
+  const attempt = '12345678-1234-4234-8234-123456789abc';
+  for (const input of [
+    undefined,
+    { attempt: '../other' },
+    { attempt, profile: '/another/profile' },
+    { attempt, command: '/bin/sh' },
+    { attempt, policyDirectory: '/etc/brave/policies/managed' },
+    { attempt, autorestart: true },
+    { attempt, args: ['https://example.invalid/action'] },
+  ])
+    assert.throws(() => build(input), /UNPROVEN/);
+  const launch = build({ attempt });
+  assert.equal(launch.command, '/usr/bin/unshare');
+  assert.deepEqual(launch.env, { DISPLAY: ':98' });
+  assert.equal(launch.autorestart, false);
+  assert.ok(launch.args.includes('--user-data-dir=/var/lib/holaday-headed-brave'));
+  assert.ok(launch.args.includes('--remote-debugging-port=9223'));
+  assert.ok(launch.args.includes('--no-startup-window'));
+  assert.ok(
+    launch.args.includes(`/var/lib/holaday-deploy/maintenance/${attempt}/cloud-browser-policy`),
+  );
+  launch.args.push('https://example.invalid/action');
+  launch.env.DISPLAY = ':0';
+  assert.equal(build({ attempt }).args.includes('https://example.invalid/action'), false);
+  assert.deepEqual(build({ attempt }).env, { DISPLAY: ':98' });
+});
+
 function interruptionWork() {
   const approval = {
     schemaVersion: 2,

@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 JST（09-29 19:16Z heartbeat）：实际恢复命令接回原运行时与保护配置
+
+从`4abef69f`继续原Task4。将上一轮通过真实Brave验证的限定恢复材料放进已有打包模块`browser-first-cutover-runtime.mjs`，原物理夹具直接消费同一函数，不再维护另一份QA shell。函数只接收本次UUID；固定工具、profile、显示98、CDP9223、无启动页面、私有只读策略挂载、浏览器能力清零及NoNewPrivs，PM2不自动重启。原受保护配置读取器只新增可选`cloudBrowserRecoveryDigest`摘要字段，site独立核对实际固定命令的摘要，随后由原完整site摘要单次绑定到journal；不能提交任意命令、路径或策略正文。
+
+这是**恢复材料接线**，不是生产双服务执行器。缺少该字段不会授予云服务操作权；已有保留进程分类、未知写入者和独占性门禁均未放宽。该材料还需要受保护工具/策略文件字节、新鲜专属进程与显示事实以及真实停止/恢复回执；静默启动、关闭扩展及禁止PM2自动重启属于显式配置差异，不声称原脚本已安全复用或生产配置已安装。夹具在全新容器排他创建固定合成profile路径，不读取生产profile。
+
+初始功能反例1b7650及保护配置反例643fdc均退出1；158/158本机相关模块通过、零跳过。96683与21435误用`dpkg -i`导致容器内systemd/Brave依赖配置失败，浏览器功能尚未运行；回到此前已验证的离线`dpkg-deb -x`和ldconfig方式，无下载或镜像重建。67021随后真实失败于夹具还等待旧X99；修正为固定X98后，33130成功模式退出0，73827拒绝模式退出0，均无跳过。成功模式真实PM2两次定向停止，各观察9个浏览器进程退出；同一产品恢复命令无旧target/HTTP动作，父策略、合成profile哨兵、持久cookie、无关应用及独立显示保留，浏览器能力实际为零。拒绝模式不具备SYS_ADMIN，恢复本身退出1，PM2重启数0、无回退启动/CDP/旧进程；退出0仅表示拒绝断言成立。日志`/private/tmp/holaday-cloud-launch-product-{final,denied}-20260930.log`，失败日志保留。不将会话cookie中断说成无损，也不推断任意后台外部行为均被隔离。
+
+最终Linux57266相关四模块196/196退出0零跳过，日志`/private/tmp/holaday-cloud-launch-linux-unit-20260930.log`。原`CUTOVER_TEST_AGE_EXECUTABLE=/opt/homebrew/bin/age pnpm test:ops`9697退出0，Node120/60/16/958及Python12均通过、零跳过，日志`/private/tmp/holaday-cloud-launch-ops-20260930.log`；该命令里的支付检查仅本地假SSH夹具，无商户调用。七JS文件Biome、diff-check通过；53f196只读容器清单只剩原健康MySQL/Redis，无活动QA。未重跑完整数据库物理链或整分支独立审查。
+
+下一步仍需在原site/journal接两云服务的单次实际停止/恢复及独立现场facts，不能把固定命令摘要当文件完整性、全局无写入者或恢复完成证明。真实停写/Mac恢复、非PayPal恢复、完整成功/故障演练、整分支审查和新鲜窗口仍是发布门槛；CLI关闭，未生产执行、push/PR/合并/部署。没有生产SSH、支付/业务记录/密钥变更，Task4 BASE、自动化及原`__pycache__`不变。
+
 ### 2026-09-30 18:15Z heartbeat：审阅配置与原现场执行日志已绑定
 
 从`0d8197ff`继续原Task4，修改的是原`browser-first-cutover-site.mjs`与`browser-maintenance-journal.mjs`，没有新增执行框架。现场站点现在记住首次源审阅使用的完整受保护配置，重复审阅和attach前后须保持一致；attach只在preflight进行，在连接入口/gateway接收器之前将完整配置的SHA256单次写入并同步原journal。后续所有site guard核对持久`executionSiteDigest`，另一site实例不得续接同一次已经绑定的attempt。该摘要涵盖现有恢复摘要、双机review、入口配置、启动材料、inventory、发布绑定和窗口，不写入秘密或业务正文。不改变原锁身份、不新增恢复锁、不允许prepared阶段重新接入；写入后连接失败仍保留原证据，不能自动重试。
