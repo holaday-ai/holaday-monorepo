@@ -2,6 +2,10 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29 14:39 UTC：已批准云端范围的只读恢复审计
+
+68245/63646/43180/36581/84432五次逐步缩小问题的只读观察均退出0，无服务/数据改动。两项服务PM2自动重启开启、进程树16/4、同display :98；两份启动dump与live均只差pm_id。原headed脚本确认含会话目录删除与两条pkill，恢复安全性未通过；没有执行这些命令或读取profile内容。证据`/private/tmp/holaday-cloud-maintenance-fixed-targets-20260929.json`及同前缀分步JSON，详见checkpoint。后续正文审阅在本地补丁阶段被安全审核拒绝，未执行远端读取、未落盘脚本正文；需特定只读授权，不绕过。仅改原设计/清单/证据文档和忽略ledger，未改产品源码，故不重跑历史组件测试或冒用其通过数。范围批准已生效，但隔离、恢复、最终QA与生产切换仍未完成。
+
 ## 2026-09-29 14:27 UTC：一次完整首抛诊断通过，非最终验收
 
 87744现有known-effect反例退出0，临时进程内Inspector校准能捕获底层evidence→runtime→site抛出位置；仅公开位置/固定代码，无端口、局部变量或载荷输出。99193全新完整隔离诊断退出0，source90/target90，真实worker轮询、单次open、无close/重放、两份启动文件和锁释放通过；无跳过。日志`/private/tmp/holaday-first-throw-calibration-20260929.log`与`/private/tmp/holaday-full-first-throw-20260929.log`。

@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 14:39 UTC：云端维护范围已批准；只读审计发现原恢复脚本删除会话目录
+
+从`0d2be0e7`续跑，工作树仅原`scripts/__pycache__/`未跟踪。用户对上一轮精确范围问题回复“允许”：批准切换时定向停止并恢复`holaday-chromium-headed`、`holaday-vnc`及核实后的专属后代，接受可能中断云端会话；不删profile、不动本机Chrome、共享PM2/Xvfb或无关应用。已在原设计第0节记录，覆盖下方所有“范围待决定/未获特定确认”的历史状态，不重复索取同一批准。
+
+沿既有SSH只读采集的68245/63646/43180/36581/84432均退出0，无跳过；没有产品代码修改或新QA执行。新证据依次保存在`/private/tmp/holaday-cloud-maintenance-{review,review-detail,script-review,operation-targets,fixed-targets}-20260929.json`，驱动`/private/tmp/holaday-cloud-maintenance-review-20260929.mjs`只返回白名单命令/路径/配置字段名和摘要，不输出脚本正文、凭据或profile内容。实际PM2 6.0.14，两个服务分别16/4个进程，autorestart=true，内存重启阈值1500/500MiB，SIGINT/1600ms；监听还包含此前未列的5900。Xvfb属于headed服务树，二者均用display :98，但尚未证明没有其他显示消费者；不能把树归属当作独占性。两份PM2 dump中两项服务均唯一，和live的字段差异仅`pm_id`；没有证据证明配置值漂移，不修改现有严格运行身份摘要。
+
+**实际恢复风险：** `/opt/holaday-headed/start.sh`（SHA256 `7e79a8f273485b716f8aafb3106d75886b738fe7768c288f190574ea6fb5a43c`）含两条`pkill -f`、`rm -rf /var/lib/holaday-headed-brave/Default/Sessions`和`rm -f /var/lib/holaday-headed-brave/Singleton*`。这不等于删除整个profile，但会删除保存会话；不允许盲目复用原启动脚本来兑现“不删profile”约束。VNC脚本摘要`951940eeb19094d7d3e9b37a2a9e6830d63558bfac9258f347849f5952eb64ba`，有`pkill -P`，仍须核实信号及恢复语义。观察没有执行任何上述命令，也没有停止或重启服务。
+
+拟进一步只读审阅浏览器启动脚本正文时，**在修改本地采集驱动的apply_patch阶段被安全审查拒绝**，原因是原授权仅覆盖元数据采集，导出内部脚本正文缺少特定授权。补丁及后续SSH均未执行；本地无source-review文件，驱动无publicBrowserLauncher字段。不能改用编码、分片、间接工具或远端副作用来绕过。下一步请求仅审阅这两个固定启动脚本、敏感值仍不输出的权限；获批后先核清所有副作用，再实现/隔离验证保留profile及不重放的恢复方式，不直接改生产启动源。新阻塞不是重新索取已批准的定向维护范围。
+
+不得将该许可写成已停止、已恢复、knownExternalWork空或unknownWriters零。旧间歇QA拒绝仍未定位，不再盲跑完整恢复链。CLI execute仍关闭，生产未变更，尚未push/PR/合并/部署；所有本轮命令已结束，无新增容器，自动化未修改，原cache及`__pycache__`保留。原独立facts、受保护入口、真实恢复、非PayPal恢复及整分支审查仍未完成。
+
 ### 2026-09-29 14:27 UTC：首抛追踪校准及完整诊断通过，生产范围仍待决定
 
 从`64855c36`续跑。静态核对原recovery session：客户端operation、scope请求和最终assertScope均串行await，没有证据支持并发重入假设，不据此改代码。临时在原QA入口启用进程内Inspector异常追踪（不开放端口）：只输出白名单公开源码位置、固定CUTOVER错误码、前四组位置，不读/打印局部变量、异常原文或业务载荷。87744已知未决工作反例退出0，成功捕获evidence1244/1263→runtime→site统一包装之前的位置，日志`/private/tmp/holaday-first-throw-calibration-20260929.log`；只是校准，不是原间歇故障复现。
