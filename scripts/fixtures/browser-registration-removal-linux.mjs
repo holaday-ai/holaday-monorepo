@@ -56,14 +56,19 @@ const sourceQa = process.env.CUTOVER_QA_SOURCE
   : undefined;
 const fullHost = process.env.CUTOVER_QA_HOST === '1';
 const afterStart =
-  fullHost && ['after-start', 'before-open'].includes(process.env.CUTOVER_QA_HOST_FAULT);
+  fullHost &&
+  ['after-start', 'before-open', 'after-open'].includes(process.env.CUTOVER_QA_HOST_FAULT);
 const beforeOpen = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'before-open';
+const afterOpen = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-open';
+const preopenGate = beforeOpen || afterOpen;
 assert.ok(
   !fullHost || process.argv[2] === '--execution-site-lost-effect' || (recoveryLink && sourceQa),
 );
 if (fullHost && sourceQa) {
   assert.ok(
-    ['before-migration', 'after-start', 'before-open'].includes(process.env.CUTOVER_QA_HOST_FAULT),
+    ['before-migration', 'after-start', 'before-open', 'after-open'].includes(
+      process.env.CUTOVER_QA_HOST_FAULT,
+    ),
   );
   assert.equal(sourceQa.omitReceipt, false);
 }
@@ -896,12 +901,31 @@ try {
                       },
                     }),
               },
-              createIngress: async () => ({
+              createIngress: async (_input, deps) => ({
                 verifyOrders: async () => fence('orders'),
                 verifyFence: async () => fence('all-writers'),
                 fenceOrders: async () => {},
                 fenceAll: async () => {},
                 readFenceReceipts: async () => [],
+                restoreIngress: async (identity) => {
+                  if (!afterOpen) throw new Error('not exercised');
+                  // Actual original site checks serving/dirty identity AND the
+                  // physical retirement observer before this explicit failure.
+                  const actual = await deps.verifyOpenedIdentity(identity);
+                  assert.deepEqual(actual.identity, identity);
+                  assert.equal(actual.mode, 'serving');
+                  assert.equal(actual.needsReconciliation, true);
+                  assert.equal(actual.idle, false);
+                  assert.equal(hostOpenCommands, 1);
+                  assert.equal(hostPreopenReadiness, 2);
+                  const response = await fetch('http://127.0.0.1:4001/qa-admission-probe', {
+                    headers: { connection: 'close' },
+                  });
+                  await response.text();
+                  assert.equal(response.status, 404); // Unknown read-only route, NOT a task.
+                  hostStartFaults++;
+                  throw new Error('CUTOVER_QA_INGRESS_FAULT');
+                },
                 close: async () => {},
               }),
               connectGateway: async (args, deps) => {
@@ -1160,7 +1184,7 @@ try {
               .length,
             1,
           );
-          if (beforeOpen) return nativeVerify(identity);
+          if (preopenGate) return nativeVerify(identity);
           hostStartFaults++;
           throw new Error('CUTOVER_QA_AFTER_START_FAULT');
         };
@@ -1337,7 +1361,7 @@ try {
           );
           assert.equal(published.attempt, binding.attempt);
           assert.equal(published.candidate, actualCandidate);
-          assert.equal(published.stage, beforeOpen ? 'preopen' : 'prepare');
+          assert.equal(published.stage, preopenGate ? 'preopen' : 'prepare');
         }
         assert.equal(result.ok, false);
         assert.equal(result.action, 'hold_maintenance');
@@ -1345,7 +1369,7 @@ try {
           result.phase,
           knownEffect
             ? 'legacy_interruption_accepted'
-            : beforeOpen
+            : preopenGate
               ? 'verified'
               : afterStart
                 ? 'candidate_started'
@@ -1364,9 +1388,10 @@ try {
         if (afterStart) {
           assert.equal(result.closeAcknowledged, false);
           assert.equal(hostCloseCommands, 1);
-          assert.equal(hostOpenCommands, 0);
+          assert.equal(hostOpenCommands, afterOpen ? 1 : 0);
           assert.equal(hostStartCommands, 1);
           assert.equal(hostMigrationCommands, 1);
+          assert.equal(effects.failureObservation.status.needsReconciliation, afterOpen);
         }
         if (knownEffect) {
           // The real site intentionally normalizes inner boundary failures.
@@ -1381,9 +1406,11 @@ try {
             recoveryDrift
               ? 'CUTOVER_RECOVERY_SESSION_UNPROVEN'
               : afterStart
-                ? beforeOpen
-                  ? 'CUTOVER_QA_BEFORE_OPEN_FAULT'
-                  : 'CUTOVER_QA_AFTER_START_FAULT'
+                ? afterOpen
+                  ? 'CUTOVER_SITE_UNPROVEN'
+                  : beforeOpen
+                    ? 'CUTOVER_QA_BEFORE_OPEN_FAULT'
+                    : 'CUTOVER_QA_AFTER_START_FAULT'
                 : sourceQa
                   ? fullHost
                     ? 'MAINTENANCE_RELEASE_FAILED'
@@ -1430,8 +1457,11 @@ try {
               assert.equal(held.counts.mode, 'closed');
               assert.equal(held.counts.active, 0);
               assert.equal(held.counts.unknown, 0);
+              assert.equal(held.needsReconciliation, afterOpen);
               assert.equal((await fetch('http://127.0.0.1:4001/healthz')).status, 200);
               assert.equal((await fetch('http://127.0.0.1:4001/trpc/tasks.list')).status, 503);
+              if (afterOpen)
+                assert.equal((await fetch('http://127.0.0.1:4001/qa-admission-probe')).status, 503);
             } else assert.equal(durable.bootstrapSeed, undefined);
             assert.equal(effects.unmanagedEvents.at(-1).phase, 'unmanaged-stopped');
             await assert.rejects(fetch('http://127.0.0.1:4011'));
@@ -1472,7 +1502,10 @@ try {
                   admissionClosed: true,
                 }
               : {}),
-            ...(beforeOpen ? { nativePreopenVerified: true } : {}),
+            ...(preopenGate ? { nativePreopenVerified: true } : {}),
+            ...(afterOpen
+              ? { candidateOpened: true, needsReconciliation: true, ingressRestored: false }
+              : {}),
             ...(recoveryLink
               ? { recoveryLinked: !recoveryDrift, recoveryRejected: recoveryDrift }
               : {}),

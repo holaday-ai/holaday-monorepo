@@ -2,6 +2,19 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29真实open后入口失败与dirty保留（基于514e8967）
+
+原两份QA夹具增加after-open：完整复用原host迁移/启动/verify/beforeOpen/open/afterOpen，只有QA入口恢复边界在原site的真实serving身份核验后明确注入故障，不返回成功、不恢复实际nginx。不替换控制socket、进程观察或状态文件。原发布阶段仍verified，原site归一化错误CUTOVER_SITE_UNPROVEN，不能写成发布opened。
+
+| 验证 | 实际结果 | 日志 |
+| --- | --- | --- |
+| 新模式RED | 退出1，旧允许模式拒绝after-open；任何Docker/I/O前，未接触旧attempt | `/private/tmp/holaday-after-open-mode-red.log` |
+| 同次真实open后入口故障 | session98831退出0，源90/目标90；原open一次、close一次；原site实际serving/dirty/同实例/无旧进程核验后故障；原失败日志保留dirty | `/private/tmp/holaday-after-open-connected.log` |
+
+无认证未知GET `/qa-admission-probe` 在open后404、close后503，未调用任务创建或业务路由。原HTTP health200、tasks503；原status与持久失败观察均draining、needsReconciliation=true、closeAcknowledged=false，未把dirty清成false。原恢复资料/seed/新boot/journal绑定保留，旧效果1，无二次open/重放；QA PM2恢复仅无关进程。network-none且假key，无模型/支付/外部网络访问。最终1762297a源/目标/卷核验清理，只删除可重建合成数据，日志与私有恢复资料保留。
+
+两MJS node语法、Biome及git diff --check退出0。原ops session40868退出0：120/60/16/869及Python12全部通过、零跳过，日志`/private/tmp/holaday-after-open-ops.log`；仅离线支付测试，没有调用PayPal。所有测试session结束。真实nginx恢复、worker/startup、reconcile、完整成功路径和生产/整分支验收仍未通过；本例不能证明生产双机独立事实。
+
 ## 2026-09-29同次原verify／beforeOpen和开放前故障（基于1a71aa12）
 
 原host两个实际readiness步骤均保留；注入点位于原beforeOpen成功返回后、open之前。阶段verified，root发布的preopen报告绑定同一candidate/bootId，实际uid998消费者执行两次。QA逻辑主机共享私有PID命名空间，不冒充生产双机独立观察；支付/业务范围继续明确合成。

@@ -35,8 +35,9 @@ assert.ok(!retirementLink || fullSource || !runtimeRoot);
 const stoppedSource = retirementLink && fullSource;
 const fullHost = process.env.CUTOVER_QA_HOST === '1';
 const hostFault = process.env.CUTOVER_QA_HOST_FAULT ?? 'before-migration';
-assert.ok(['before-migration', 'after-start', 'before-open'].includes(hostFault));
+assert.ok(['before-migration', 'after-start', 'before-open', 'after-open'].includes(hostFault));
 const candidateTail = hostFault !== 'before-migration';
+const preopenGate = ['before-open', 'after-open'].includes(hostFault);
 assert.ok(hostFault === 'before-migration' || fullHost);
 assert.ok(!fullHost || stoppedSource);
 const buildCache = fullHost ? await realpath(process.env.CUTOVER_QA_BUILD_CACHE) : undefined;
@@ -557,14 +558,13 @@ if (retirementLink) {
     {
       scope: stoppedSource ? 'retirement-backup-and-tail-refusal' : 'retirement-and-failure-only',
       knownEffect: false,
-      phase:
-        hostFault === 'before-open'
-          ? 'verified'
-          : candidateTail
-            ? 'candidate_started'
-            : stoppedSource
-              ? 'migration_started'
-              : 'backup_verified',
+      phase: preopenGate
+        ? 'verified'
+        : candidateTail
+          ? 'candidate_started'
+          : stoppedSource
+            ? 'migration_started'
+            : 'backup_verified',
       effectCount: 1,
       releaseReady: false,
       recoveryLinked: !recoveryDrift,
@@ -579,7 +579,10 @@ if (retirementLink) {
             admissionClosed: true,
           }
         : {}),
-      ...(hostFault === 'before-open' ? { nativePreopenVerified: true } : {}),
+      ...(preopenGate ? { nativePreopenVerified: true } : {}),
+      ...(hostFault === 'after-open'
+        ? { candidateOpened: true, needsReconciliation: true, ingressRestored: false }
+        : {}),
       riskDigest: undefined,
     },
   );
@@ -614,15 +617,17 @@ if (retirementLink) {
       '0',
     );
   console.log(
-    hostFault === 'before-open'
-      ? 'PASS same original host/retirement/backup/Mac restore/source migration/new closed boot -> native verify and beforeOpen evidence -> fault before open, one close, actual HTTP work denied; no open/replay. NOT full cutover.'
-      : hostFault === 'after-start'
-        ? 'PASS original host/retirement/backup/Mac restore -> actual source migration/seed/new closed candidate -> post-start fault, one close, draining retained and actual HTTP work denied; no open/replay. NOT full cutover.'
-        : stoppedSource
-          ? 'PASS same Linux physical retirement/site/journal -> original source dump/age -> Mac isolated restore/all61 migrations -> original durable receipt; candidate tail explicitly refused, no replay. NOT full cutover.'
-          : recoveryDrift
-            ? 'PASS real Linux site rejected newly identified external work during original Mac recovery attach; target empty, no receipt/candidate/replay. NOT full cutover.'
-            : 'PASS same actual Linux stopped attempt/site/journal -> original Mac recovery pipes -> pinned isolated target identity; source export/restore/candidate tail intentionally NOT configured, no backup receipt or replay. NOT full cutover.',
+    hostFault === 'after-open'
+      ? 'PASS same original recovery/migration/start/verify/beforeOpen -> one actual open and native serving identity proof -> explicit ingress failure, one close, dirty retained and HTTP work denied; no reopen/replay. NOT full cutover.'
+      : hostFault === 'before-open'
+        ? 'PASS same original host/retirement/backup/Mac restore/source migration/new closed boot -> native verify and beforeOpen evidence -> fault before open, one close, actual HTTP work denied; no open/replay. NOT full cutover.'
+        : hostFault === 'after-start'
+          ? 'PASS original host/retirement/backup/Mac restore -> actual source migration/seed/new closed candidate -> post-start fault, one close, draining retained and actual HTTP work denied; no open/replay. NOT full cutover.'
+          : stoppedSource
+            ? 'PASS same Linux physical retirement/site/journal -> original source dump/age -> Mac isolated restore/all61 migrations -> original durable receipt; candidate tail explicitly refused, no replay. NOT full cutover.'
+            : recoveryDrift
+              ? 'PASS real Linux site rejected newly identified external work during original Mac recovery attach; target empty, no receipt/candidate/replay. NOT full cutover.'
+              : 'PASS same actual Linux stopped attempt/site/journal -> original Mac recovery pipes -> pinned isolated target identity; source export/restore/candidate tail intentionally NOT configured, no backup receipt or replay. NOT full cutover.',
   );
 } else {
   assert.equal(

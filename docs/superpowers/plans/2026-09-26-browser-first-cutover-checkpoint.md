@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 JST：真实open后入口故障、精确关闭和dirty保留已同次验收
+
+承接`514e8967`，只扩展原两份QA夹具，新增`after-open`故障模式，保留先前全部模式。原host/source备份/隔离恢复/源迁移/seed/新关闭启动/verify/beforeOpen均真实执行；原open和afterOpen不替换。原site注入到createIngress的verifyOpenedIdentity实际验证serving、idle=false、needsReconciliation=true、当前runtime与退休清单一致、无旧进程；随后在QA入口恢复边界明确抛错，**没有恢复实际nginx**。原site将错误归一化为CUTOVER_SITE_UNPROVEN，发布阶段仍verified，不声称整项opened。
+
+session98831退出0，`/private/tmp/holaday-after-open-connected.log`。实际源90/目标90，单次源迁移/start/open/close，真实未知无认证GET探针404→503，health仍200、tasks503；持久失败观察及原status均保留draining和needsReconciliation=true、closeAcknowledged=false。没有wait/reset/二次open/重试/重放；旧效果仍1、QA resurrect仅无关进程。1762297a资源记录中的源目标及卷由driver核验清理；日志/私有恢复资料保留，原生产MySQL/Redis不动。
+
+下一步是**实际nginx入口恢复、原worker及startup保存、真实reconcile和成功闭环**，不是再重做本次备份/启动/两个preopen/开放故障。复用`browser-site-fence-linux.mjs`已有真实三profile配置、TLS/文件映射/本地lifecycle及`browser-ingress-session-child.mjs`接收端；它目前自建journal和模拟候选，不能直接把那次独立通过拼成本次成功。现物理夹具两个逻辑host仍共用隔离PID/netns，入口/外部工作/商户scope仍明确合成。原resumeFirstCutoverCandidateWorker即使worker开关关闭，也必须实际验证候选并保存startup；当前scope.producerStartupFiles仍合成，不能空成功替代。CLI execute关闭，生产事实/受保护接口/真实生产恢复/非PayPal恢复/整分支审查仍缺；禁止再尝试被拒管理凭据。
+
+本轮ops session40868退出0，120/60/16/869及Python12全部通过、零跳过；静态语法/Biome/diff检查退出0。三条新同次场景（启动后、开放前、开放后入口失败）均有独立新attempt和真实Linux/Mac恢复，不能相加称完整成功路径。所有测试session已结束。保留的prepared容器c0f4c822仅sleep，经身份/进程核验后停止并保留构建缓存，不删除、不重装。未PR/push/合并/部署。原Task4 BASE不变。
+
 ### 2026-09-29 JST：原verify与beforeOpen同次接通，开放命令前故障已通过
 
 承接`1a71aa12`，只改原两份QA夹具。新增`before-open`，保留前两故障模式。原host完成备份/恢复/源迁移/seed/真实新boot后，verify与beforeOpen分别运行原证据采集、root私有报告发布和实际uid998 `verify-first-cutover`；两次均完成后才注入故障，原open方法未替换、未调用。最终session18861退出0，`/private/tmp/holaday-preopen-connected.log`，源90/目标90，report.stage=preopen且identity与journal/newboot一致。一次迁移/start/close，零open，实际任务503，draining/closeAcknowledged=false保留，旧效果1不重放。
