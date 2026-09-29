@@ -336,6 +336,163 @@ test('database writer host observation is bound, closes its connection, and reje
   }
 });
 
+test('administrative writer observation binds a private config without promoting the application connection', async (t) => {
+  assert.equal(typeof firstHost.readFirstCutoverAdministrativeWriters, 'function');
+  for (const fault of [
+    'none',
+    'inventory',
+    'mode',
+    'owner',
+    'symlink',
+    'digest',
+    'include',
+    'duplicate',
+    'quoted',
+    'remote',
+    'schema',
+    'identity',
+    'drift',
+    'permission',
+    'deadline',
+    'close',
+  ]) {
+    await t.test(fault, async (t) => {
+      const folder = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'holaday-admin-writer-')));
+      t.after(() => fs.rm(folder, { recursive: true, force: true }));
+      const path = join(folder, 'debian.cnf');
+      const identity = { database: 'qa', serverUuid: '11111111-1111-4111-8111-111111111111' };
+      let text =
+        '[client]\nhost = localhost\nuser = qa-observer\npassword = synthetic-private\nsocket = /var/run/mysqld/mysqld.sock\n[mysql_upgrade]\nuser = qa-observer\n';
+      if (fault === 'include') text += '!include /private/other\n';
+      if (fault === 'duplicate')
+        text = text.replace('[mysql_upgrade]', 'user = second\n[mysql_upgrade]');
+      if (fault === 'quoted') text = text.replace('synthetic-private', '"synthetic-private"');
+      const bytes = Buffer.from(text);
+      await fs.writeFile(path, bytes, { mode: fault === 'mode' ? 0o644 : 0o600 });
+      if (fault === 'symlink') {
+        await fs.rename(path, join(folder, 'target'));
+        await fs.symlink(join(folder, 'target'), path);
+      }
+      const hash = (v) => createHash('sha256').update(v).digest('hex');
+      const inventory = {
+        databaseObserver: {
+          configDigest: fault === 'digest' ? 'f'.repeat(64) : hash(bytes),
+          sourceIdentity: identity,
+        },
+      };
+      const appConfig = Buffer.from('DATABASE_URL=mysql://application@127.0.0.1/qa');
+      const binding = Object.fromEntries(
+        ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map((k) => [
+          k,
+          approved[k],
+        ]),
+      );
+      binding.configDigest = hash(appConfig);
+      binding.inventoryDigest = hash(JSON.stringify(inventory));
+      const ctx = {
+        binding,
+        approval: { ...approved, ...binding },
+        root: `/opt/holaday-releases/${binding.candidate}`,
+        journal: { assertOwnership: async () => binding },
+      };
+      let connections = 0;
+      let closes = 0;
+      let queries = 0;
+      const rootStat = (s) => Object.assign(s, { uid: fault === 'owner' ? 998 : 0 });
+      const mapped = (p) => {
+        assert.equal(p, '/etc/mysql/debian.cnf');
+        return path;
+      };
+      const io = {
+        platform: 'linux',
+        uid: 0,
+        now: () => (fault === 'deadline' ? approved.maintenanceEndsAtMs : 1000),
+        readConfig: async () => appConfig,
+        parseConfig: () => ({
+          DATABASE_URL:
+            fault === 'remote'
+              ? 'mysql://application@external.invalid/qa'
+              : fault === 'schema'
+                ? 'mysql://application@127.0.0.1/other'
+                : 'mysql://application@127.0.0.1/qa',
+        }),
+        connectWorkDatabase: async () => {
+          throw new Error('application connection must not be promoted or used');
+        },
+        observerFs: {
+          realpath: async (p) => ((await fs.realpath(mapped(p))) === path ? p : '/different'),
+          lstat: async (p) => rootStat(await fs.lstat(mapped(p))),
+          open: async (p, flags) => {
+            const h = await fs.open(mapped(p), flags);
+            const stat = h.stat.bind(h);
+            h.stat = async () => rootStat(await stat());
+            return h;
+          },
+        },
+        connectObserverDatabase: async (options, root) => {
+          connections++;
+          assert.equal(root, ctx.root);
+          assert.equal(options.user, 'qa-observer');
+          assert.equal(options.password, 'synthetic-private');
+          assert.equal(options.socketPath, '/var/run/mysqld/mysqld.sock');
+          assert.equal(options.database, 'qa');
+          assert.equal(options.uri, undefined);
+          return {
+            query: async ({ sql }) => {
+              queries++;
+              assert.match(sql, /^(SELECT|SHOW) /);
+              if (fault === 'drift' && queries === 1) await fs.appendFile(path, '# changed\n');
+              if (sql.includes('@@server_uuid'))
+                return [
+                  [
+                    {
+                      ...identity,
+                      serverUuid:
+                        fault === 'identity'
+                          ? '22222222-2222-4222-8222-222222222222'
+                          : identity.serverUuid,
+                      version: '8.0.46',
+                      performanceSchema: 1,
+                      partialRevokes: 0,
+                    },
+                  ],
+                ];
+              if (sql === 'SHOW GRANTS FOR CURRENT_USER')
+                return [
+                  [
+                    {
+                      grant: `GRANT ${fault === 'permission' ? 'USAGE' : 'PROCESS, EVENT'} ON *.* TO qa`,
+                    },
+                  ],
+                ];
+              return [[]];
+            },
+            end: async () => {
+              closes++;
+              if (fault === 'close') throw new Error('synthetic-private');
+            },
+          };
+        },
+      };
+      if (fault === 'inventory') inventory.databaseObserver.configDigest = '0'.repeat(64);
+      if (fault === 'none') {
+        const result = await firstHost.readFirstCutoverAdministrativeWriters(ctx, inventory, io);
+        assert.equal(result.scope, 'mysql-server-observation-only');
+        assert.equal(result.unknownWriters, undefined);
+        assert.equal(JSON.stringify(result).includes('synthetic-private'), false);
+      } else
+        await assert.rejects(firstHost.readFirstCutoverAdministrativeWriters(ctx, inventory, io), {
+          message: 'CUTOVER_DATABASE_WRITERS_UNPROVEN',
+        });
+      assert.equal(
+        connections,
+        ['none', 'identity', 'drift', 'permission', 'close'].includes(fault) ? 1 : 0,
+      );
+      assert.equal(closes, connections);
+    });
+  }
+});
+
 test('backup plan reads the actual source identity and never treats a configured target as restored', async () => {
   assert.equal(typeof firstHost.readFirstCutoverBackupPlan, 'function');
   const sourceIdentity = {

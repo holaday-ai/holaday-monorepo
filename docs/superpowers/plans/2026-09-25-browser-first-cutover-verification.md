@@ -2,6 +2,16 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29 独立管理观察接线（非发布通过）
+
+原host增加显式受保护管理观察，原site在`inventory.databaseObserver`绑定下把脱敏来源交给独立facts；不切换应用账号、不修改权限，不凭会话计数判断全局停写。固定Debian配置路径、摘要/文件身份、源UUID/库名、原journal与窗口均校验；原MySQL读者不改。新的site不能用回调零值盖过活动事务/事件/复制或缺失/陈旧/漂移来源；其他独立facts仍必须提供，CLI execute仍关闭。
+
+RED：host98794退出1（缺导出）；site29337退出1（来源未接，新增10子例失败）。GREEN：host95947为91/91，site59175为62/62，退出0、零跳过。真实Linux/MySQL合成fixture在62353、73348退出0，原默认管理连接及查询器可见跨账号会话/跨库启用事件/未提交事务，应用账号保持原SELECT权限，撤销观察权限及配置漂移均拒绝。日志`/private/tmp/holaday-admin-writer-linux{4,5}-20260929.log`；使用已有镜像、无外网、无宿主PID/端口/生产配置，每轮独立合成数据及socket卷已精确清理。
+
+失败不抹除：Mac路径别名夹具导致71614退出1后改canonical路径；Linux78277缺fixture legacyDigest、22047/51509元数据读者拒绝均退出1。后两轮根因未完全确定，随后避免连接初始化临时MySQL，最终PID1 mysqld及socket就绪才开始新测试。没有放宽产品检查或自动重试生产SQL。
+
+最终85074退出0：browser1072/1072、ops120/60/16/903及Python12，全部零跳过；`/private/tmp/holaday-admin-writer-{browser,ops}-regression.log`。63974退出0：真实Linux受影响测试194/194零跳过，及最终原默认连接器/MySQL合成夹具通过，`/private/tmp/holaday-admin-writer-linux-{regression,final}.log`。五MJS Biome和git diff-check退出0。本轮资源已按精确标签清理，仅合成数据、可重建；既有mysql/redis保留。未宣称应用全套、整分支独立审查、生产停写或真实生产恢复通过；这些仍是后续门槛。没有PR/push/merge/deploy，旧36c42add离线包的历史结果不能当作新源码发布结果。
+
 ## 2026-09-29 已授权管理配置只读现场核查
 
 用户明确授权后，正常审批通过。session86409配置存在性检查退出0；68945原`readCutoverMysqlWriters`实际生产只读采集退出0，源身份先与应用连接核对，现成管理配置只在Vultr内部使用，凭据不回传。直接全局PROCESS/EVENT与实际元数据覆盖通过；会话5、其他活动事务0、启用事件0、运行复制receiver/applier0。读取器未修改，只执行SELECT/SHOW，不改数据/权限/服务。首次因工作树未加载部署凭据未连接完成，指定既有主仓库配置后成功，未改服务器认证。

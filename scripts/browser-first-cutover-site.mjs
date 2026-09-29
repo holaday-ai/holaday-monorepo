@@ -14,6 +14,7 @@ import { connectFirstCutoverGatewaySession } from './browser-first-cutover-gatew
 import {
   createFirstCutoverRetirementObserver,
   exportFirstCutoverSourceBackup,
+  readFirstCutoverAdministrativeWriters,
   readFirstCutoverBackupPlan,
   readFirstCutoverCandidateRuntime,
   readFirstCutoverHostPair,
@@ -52,6 +53,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     sleep,
     readPair: readFirstCutoverHostPair,
     readPersistedWork: readFirstCutoverPersistedWork,
+    readAdministrativeWriters: readFirstCutoverAdministrativeWriters,
     readCandidateRuntime: readFirstCutoverCandidateRuntime,
     readRehearsal: readCutoverRehearsalArtifacts,
     readPaymentScope: readFirstCutoverPaymentScope,
@@ -261,6 +263,51 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     )
       fail();
     return structuredClone(inventory);
+  };
+  const observeWriters = async () => {
+    const record = await guard(context);
+    const inventory = approvedInventory();
+    let database;
+    // This is an explicit, separately approved source, never a privilege
+    // fallback for the original application reader or independent classifier.
+    if (Object.hasOwn(inventory, 'databaseObserver')) {
+      database = structuredClone(await io.readAdministrativeWriters(context, inventory));
+      const active = [
+        'transactions',
+        'enabledEvents',
+        'replicationReceivers',
+        'replicationAppliers',
+      ];
+      if (
+        database?.schemaVersion !== 1 ||
+        database.scope !== 'mysql-server-observation-only' ||
+        !fresh(database.startedAtMs) ||
+        !fresh(database.observedAtMs) ||
+        database.startedAtMs > database.observedAtMs ||
+        !/^[a-f0-9]{64}$/.test(database.sourceDigest ?? '') ||
+        !database.counts ||
+        !equal(Object.keys(database.counts).sort(), [...active, 'sessions'].sort()) ||
+        !Number.isSafeInteger(database.counts.sessions) ||
+        database.counts.sessions < 0 ||
+        database.counts.sessions > 10000 ||
+        active.some((key) => database.counts[key] !== 0)
+      )
+        fail();
+      // Sessions require separate attribution/exclusion; five idle sessions
+      // neither mean five active writers nor prove zero unknown writers.
+      if (!equal(record, await guard(context))) fail();
+    }
+    const result = structuredClone(
+      await facts.observeWriters(context, {
+        ...(database ? { database: structuredClone(database) } : {}),
+      }),
+    );
+    if (!equal(record, await guard(context))) fail();
+    if (database) {
+      if (!fresh(database.observedAtMs) || !fresh(result?.observedAtMs)) fail();
+      result.observedAtMs = Math.min(result.observedAtMs, database.startedAtMs);
+    }
+    return result;
   };
   const checkLegacyCapability = (actual) => {
     if (context.approval.schemaVersion !== 2) return;
@@ -509,7 +556,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
             await guard(context);
             return structuredClone(scope.ingress);
           },
-          observeWriters: () => facts.observeWriters(context),
+          observeWriters,
           verifyOpenedIdentity: async (id) => {
             const record = await guard(context, ['verified']);
             checkIdentity(id, record);

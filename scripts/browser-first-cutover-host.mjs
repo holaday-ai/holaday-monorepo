@@ -1067,6 +1067,149 @@ export async function readFirstCutoverDatabaseWriters(context, expectedIdentity,
   );
 }
 
+/** Separately approved metadata connection. Never substitute administrative
+ * credentials into the application's runtime/backup configuration or infer a
+ * stopped writer from this observation. The fixed existing Debian client file
+ * stays on its original host and is pinned by the protected inventory. */
+export async function readFirstCutoverAdministrativeWriters(context, input, overrides = {}) {
+  const code = 'CUTOVER_DATABASE_WRITERS_UNPROVEN';
+  const reject = () => {
+    throw new Error(code);
+  };
+  const io = {
+    observerFs: fs,
+    connectObserverDatabase: (options, root) =>
+      createRequire(`${root}/apps/orchestrator/package.json`)('mysql2/promise').createConnection({
+        ...options,
+        connectTimeout: 5000,
+        supportBigNumbers: true,
+        bigNumberStrings: true,
+        dateStrings: true,
+        jsonStrings: true,
+        timezone: 'Z',
+      }),
+    ...overrides,
+  };
+  try {
+    const inventory = structuredClone(input);
+    const metadata = inventory?.databaseObserver;
+    if (
+      createHash('sha256').update(JSON.stringify(inventory)).digest('hex') !==
+        context?.binding?.inventoryDigest ||
+      !metadata ||
+      !isDeepStrictEqual(Object.keys(metadata).sort(), ['configDigest', 'sourceIdentity']) ||
+      !/^[a-f0-9]{64}$/.test(metadata.configDigest ?? '') ||
+      !metadata.sourceIdentity ||
+      !isDeepStrictEqual(Object.keys(metadata.sourceIdentity).sort(), ['database', 'serverUuid']) ||
+      !/^[A-Za-z0-9_]{1,64}$/.test(metadata.sourceIdentity.database ?? '') ||
+      !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(
+        metadata.sourceIdentity.serverUuid ?? '',
+      )
+    )
+      reject();
+    const path = '/etc/mysql/debian.cnf';
+    const readPrivate = async () => {
+      if ((await io.observerFs.realpath(path)) !== path) reject();
+      const handle = await io.observerFs.open(
+        path,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      try {
+        const before = await handle.stat();
+        if (!privateFile(before) || before.size < 1 || before.size > 65536) reject();
+        // Bounded even if a privileged concurrent writer grows the file.
+        const buffer = Buffer.alloc(before.size + 1);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        const after = await handle.stat();
+        const current = await io.observerFs.lstat(path);
+        if (
+          bytesRead !== before.size ||
+          [after, current].some(
+            (s) =>
+              !privateFile(s) ||
+              ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'].some(
+                (k) => s[k] !== before[k],
+              ),
+          ) ||
+          (await io.observerFs.realpath(path)) !== path
+        )
+          reject();
+        const bytes = buffer.subarray(0, bytesRead);
+        if (
+          createHash('sha256').update(bytes).digest('hex') !== metadata.configDigest ||
+          !Buffer.from(bytes.toString('utf8')).equals(bytes)
+        )
+          reject();
+        return bytes;
+      } finally {
+        await handle.close();
+      }
+    };
+    let original;
+    return await withApprovedCutoverDatabase(
+      context,
+      {
+        ...io,
+        connectWorkDatabase: async (uri, root) => {
+          const url = new URL(uri);
+          if (
+            !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) ||
+            decodeURIComponent(url.pathname.slice(1)) !== metadata.sourceIdentity.database
+          )
+            reject();
+          original = await readPrivate();
+          // Deliberately support only the verified unquoted Debian format.
+          // Includes, escapes, duplicates and unfamiliar options fail closed.
+          const groups = new Map();
+          let section;
+          for (const raw of original.toString('utf8').split(/\r?\n/)) {
+            const line = raw.trim();
+            if (!line || /^[#;]/.test(line)) continue;
+            const group = /^\[(client|mysql_upgrade)\]$/.exec(line);
+            if (group) {
+              if (groups.has(group[1])) reject();
+              section = new Map();
+              groups.set(group[1], section);
+              continue;
+            }
+            const option = /^(host|user|password|socket|port)\s*=\s*([^\s'"\\#;]+)$/.exec(line);
+            if (!section || !option || section.has(option[1])) reject();
+            section.set(option[1], option[2]);
+          }
+          const config = Object.fromEntries(groups.get('client') ?? []);
+          if (
+            !config.user ||
+            !config.password ||
+            !['localhost', '127.0.0.1', '::1'].includes(config.host) ||
+            !/^\/(?:var\/)?run\/mysqld\/[A-Za-z0-9_.-]+\.sock$/.test(config.socket ?? '') ||
+            (config.port !== undefined && config.port !== (url.port || '3306'))
+          )
+            reject();
+          return io.connectObserverDatabase(
+            {
+              user: config.user,
+              password: config.password,
+              socketPath: config.socket,
+              database: metadata.sourceIdentity.database,
+            },
+            root,
+          );
+        },
+      },
+      code,
+      async (connection, activeIO) => {
+        const proof = await readCutoverMysqlWriters(connection, metadata.sourceIdentity, {
+          now: activeIO.now,
+        });
+        if (!original.equals(await readPrivate())) reject();
+        return proof;
+      },
+    );
+  } catch {
+    reject();
+  }
+}
+
 /** This maps only explicit approved metadata. It does not prove historical
  * merchant ownership, query a provider, or manufacture a recovery receipt. */
 export async function readFirstCutoverPaymentScope(context, input, overrides = {}) {

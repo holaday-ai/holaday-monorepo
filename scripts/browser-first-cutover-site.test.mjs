@@ -350,6 +350,74 @@ test('independent connected TCP blocks interruption even when writer callback cl
     await site.lifecycle.detach(f.context);
   }
 });
+test('approved administrative observation feeds writer facts and independently blocks active database sources', async (t) => {
+  for (const fault of [
+    'none',
+    'transactions',
+    'enabledEvents',
+    'replicationReceivers',
+    'replicationAppliers',
+    'missing',
+    'future',
+    'digest',
+    'read-error',
+    'scope-drift',
+  ]) {
+    await t.test(fault, async (t) => {
+      const databaseObserver = {
+        configDigest: 'd'.repeat(64),
+        sourceIdentity: { database: 'qa', serverUuid: '11111111-1111-4111-8111-111111111111' },
+      };
+      const f = await fixture(t, { databaseObserver }, true);
+      const proof = {
+        schemaVersion: 1,
+        scope: 'mysql-server-observation-only',
+        startedAtMs: 999,
+        observedAtMs: 1000,
+        counts: {
+          sessions: 5,
+          transactions: 0,
+          enabledEvents: 0,
+          replicationReceivers: 0,
+          replicationAppliers: 0,
+        },
+        sourceDigest: '3'.repeat(64),
+      };
+      if (fault in proof.counts) proof.counts[fault] = 1;
+      if (fault === 'future') proof.observedAtMs = 1001;
+      if (fault === 'digest') proof.sourceDigest = '';
+      let reads = 0;
+      f.io.readAdministrativeWriters = async (ctx, inventory) => {
+        reads++;
+        assert.deepEqual(ctx.binding, f.binding);
+        assert.deepEqual(inventory.databaseObserver, databaseObserver);
+        if (fault === 'read-error') throw new Error('unavailable');
+        if (fault === 'scope-drift')
+          f.scope.inventory.databaseObserver.configDigest = '0'.repeat(64);
+        return fault === 'missing' ? undefined : structuredClone(proof);
+      };
+      const original = f.io.facts.observeWriters;
+      let delivered = 0;
+      f.io.facts.observeWriters = async (ctx, sources) => {
+        delivered++;
+        assert.deepEqual(sources.database, proof);
+        assert.equal(sources.database.unknownWriters, undefined);
+        return original(ctx);
+      };
+      const site = f.make();
+      await site.lifecycle.attach(f.context);
+      for (const phase of ['prepared', 'orders_fenced', 'legacy_interruption_accepted'])
+        await f.journal.persist(phase, { candidate: f.binding.candidate });
+      if (fault === 'none') {
+        await site.lifecycle.acceptLegacyInterruption(f.context);
+        assert.ok(delivered > 0);
+      } else await assert.rejects(site.lifecycle.acceptLegacyInterruption(f.context), /UNPROVEN/);
+      assert.ok(reads > 0);
+      assert.equal(f.events.includes('stop-producers'), false);
+      await site.lifecycle.detach(f.context);
+    });
+  }
+});
 test('site interruption refuses known work, source failure and new replay after stop', async (t) => {
   for (const fault of ['known', 'busy', 'foreign', 'read-error', 'after-replay']) {
     const f = await fixture(t, {}, true);

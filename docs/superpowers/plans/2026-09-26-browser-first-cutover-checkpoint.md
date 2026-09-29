@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 JST：独立管理观察已接入原 host/site，整项仍未完成
+
+从`7abc29a2`继续，未改应用数据库账号、权限或原应用连接读取器。原host新增显式`readFirstCutoverAdministrativeWriters(context,inventory)`：只读取本机固定`/etc/mysql/debian.cnf`，要求root:0600、单链接、真实路径、有限长度和读取前后文件身份一致；配置摘要和源UUID/库名由原受保护`inventoryDigest`绑定。仅支持已知Debian无引号client格式，未知选项/includes/重复项/远端目标拒绝。管理凭据不进入应用配置、不输出，原SELECT/SHOW权限及双观测读者保持不变。
+
+原site在inventory明确声明`databaseObserver`时调用该独立来源，向原`facts.observeWriters(context,{database})`传递脱敏观察；真实事务/启用事件/运行复制非零、缺失/过期证明、范围漂移都在相信回调零值之前拒绝。没有声明时仍为原必需可信facts接口，不自动探测管理凭据或降级重试。会话计数不转换成`unknownWriters=0`；会话归属、未来重连排除、knownExternalWork等独立事实仍待接完，不能据此打开execute。
+
+本地host RED缺导出后91/91、site RED未接来源后62/62通过，均退出0零跳过。host首轮GREEN失败来自Mac临时路径别名，修正夹具为realpath，未放宽产品检查。新增`scripts/fixtures/browser-administrative-writers-linux.mjs`用真实Linux私密配置、原默认mysql2连接器/查询器和真实journal验证跨账号会话、跨库事件、未提交事务、权限撤销/配置变化拒绝及应用权限不变。session62353、73348退出0；后者确认最终PID1 mysqld就绪。早期78277因夹具漏legacyDigest失败；22047/51509元数据观察拒绝保留为失败、根因未完全确定，未计为通过；驱动已避免把mysqladmin在初始化临时实例应答当正式就绪。
+
+Linux驱动`/private/tmp/holaday-admin-writer-linux-run-20260929.mjs`，结果`/private/tmp/holaday-admin-writer-linux{4,5}-20260929.log`。现有QA镜像ff58ba97及MySQL7dcddc01，私有PID、无网络/宿主端口、Node512MiB/MySQL768MiB、各1CPU；仅挂源码/依赖及本轮新socket卷，不挂生产配置。每轮核实标签后移除该轮合成库与卷，可重新生成；既有mysql/redis未触碰。
+
+最终串行回归session85074退出0：42个显式browser文件1072/1072，ops120/60/16/903及Python12，全部零跳过；日志`/private/tmp/holaday-admin-writer-{browser,ops}-regression.log`。session63974退出0：真实Linux host/site/MySQL测试194/194零跳过，最终无诊断代码的真实MySQL夹具也通过，日志`/private/tmp/holaday-admin-writer-linux-{regression,final}.log`。最终驱动摘要`846f3a2cefc0709e393ea0c65f3e92b7e39509c40e74f264cefca1cc62ed4c01`，所有本轮进程结束、合成资源清理；五MJS Biome及diff-check退出0。七个明确源码/测试/记录文件待保存提交，原缓存不纳入。原Task4 BASE不变；没有生产读写、PR/push/merge/deploy或开启CLI；自动化仍ACTIVE。下一步不要重做临时现场授权/凭据检查，完成原会话归属与独立facts、受保护现场入口、真实停写备份/Mac恢复、非PayPal恢复和整分支独立审查；本轮自查不是独立审查通过。旧36c42add工具包仍是历史候选，不能直接用于更新后的代码部署。
+
 ### 2026-09-29 JST：用户明确授权管理配置只读核查，原权限阻塞已解除
 
 用户针对上一轮“只读使用Vultr现有数据库管理配置核查写入者元数据，不输出凭据、不改数据或权限”回复“授权”。经正常工具审批实施，不绕过权限。首次SSH未完成，本地排障确认工作树未加载主仓库部署配置且两个认证变量为空；明确指定既有主仓库`.env.deploy.local`后重试一次成功，没有改认证/网络设置。session86409退出0：`/root/.my.cnf`不存在，`/etc/mysql/debian.cnf`为root私密常规文件且具备现成client配置，只返回存在性/字段布尔值，没有输出配置值。
