@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 10:13 UTC：现场浏览器控制链归属已核实，保留对象的隔离范围待决定
+
+从 `0158a2bdca860a49db1ba6eb36a1fac61f7b915e` 继续，原 Task4 BASE 不变。本轮没有产品代码修改。session54654 退出0：沿原严格 SSH 通道，在 Vultr 内直接调用现有 `readCutoverHostSnapshot()`，将稳定 proc/PM2/ss 结果投影为身份、端口、计数和摘要；未读取页面正文、cookie/profile、业务记录或凭据输出，未发送信号、导航、安装文件、改配置或执行SQL。
+
+实证：旧 `holaday-orchestrator`（PM2 271、UID998）有一条已建立的 loopback CDP 连接到9223；对端 Brave 属于独立 `holaday-chromium-headed`（PM2 3、autorestart=true）的后代。5901/6080归属独立 `holaday-vnc`（PM2 4、autorestart=true）的后代。5901有一条观察为非loopback的监听，但本次只保存地址类别，**不能据此宣称公网可达或存在未授权访问**。这些服务不随 orchestrator 的定向停止天然退出；断开CDP也不能证明页面脚本停止或外部动作完成。
+
+私密脱敏证据 `/private/tmp/holaday-browser-ownership-20260929.json`，驱动 `/private/tmp/holaday-browser-ownership-20260929.mjs`；观察时间1790676655184，原host读取器SHA256 `25ec292c330169440dd74f8c622e08cda03ed5a99cc03b9d6262e06194d8bd42`，snapshotDigest `dbb9fa77e006e476937933f6628b8dbdc2afe7ccef63847d93c527e48ab12e3a`。这是历史归属事实，不是部署attempt批准、隔离完成、knownExternalWork空或unknownWriters零；后续真实执行必须重新绑定新鲜身份。不要重复此前blank-page或本次归属观察来替代隔离方案。
+
+原已批准设计0.2.4明确保护未批准的 headed browser/VNC。下一步需要一个范围决定：是否将**这两个精确服务及核实后的专属后代**纳入本次维护的定向停止与后续恢复范围（可能中断云端浏览器会话，不能保证未保存页面状态无损；不停止共享PM2/Xvfb或其他应用，不删profile，不触碰用户本机Chrome登录态）。目前只是建议，未获此项明确决定、未修改原批准设计或停止清单。若选择继续保留，则须有可验证的执行/外联隔离途径，不能以没有当前任务/断开控制连接填零。执行计划技能要求在这个安全敏感范围变化前暂停该生产操作，不擅自扩大。
+
+本轮 `node --check` 驱动及只读观察均退出0；无产品修改，因此未重跑历史browser/Linux/ops组件套件，历史通过数仍见下方，不冒充新鲜验收。所有本轮进程已结束，无新增容器。保留原 `scripts/__pycache__/`。CLI execute仍关闭，未push/PR/合并/部署，自动化未修改。其余原未完成项仍为生产facts/未来写入源排除、受保护单次入口、真实停写备份与Mac恢复、非PayPal恢复证据及整分支审查；支付恢复不能由历史查单替代，不能代用户付款。
+
 ### 2026-09-29 09:24 UTC：独立数据库来源接入 prepare/preopen 报告，未开放执行
 
 最终收尾：session79759退出0，browser1116/1116、ops120/60/16/947及Python12全部通过且零跳过；最终Linux238/238退出0零跳过。日志`/private/tmp/holaday-readiness-writers-{browser,ops,linux}-final.log`。所有测试已结束，两MJS Biome及diff-check退出0。仅提交site/同名测试/本checkpoint/原verification四文件，原cache不动；下方运行中内容是历史过程。当前仅局部修复通过，不是Task4–6完成、现场facts齐备或上线成功；不重跑之前已经完成的会话/恢复组件来替代剩余事实。
