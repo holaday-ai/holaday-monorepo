@@ -304,6 +304,7 @@ async function retirementFixture(
     },
   );
   await journal.bindManifest(manifest);
+  if (f.cloudScope) await journal.bindExecutionSite('6'.repeat(64), f.cloudScope);
   for (const phase of interrupted
     ? ['prepared', 'orders_fenced', 'legacy_interruption_accepted']
     : ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
@@ -329,6 +330,241 @@ async function retirementFixture(
     return { h, base, row };
   };
   return { f, journal, binding, observer, remove };
+}
+
+// Real journal and production observer/controller; only OS inventory and PM2
+// execution are synthetic here. This is not a live cloud maintenance receipt.
+function addCloudPair(f) {
+  const s = f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+  s.hostname = 'qa-vultr';
+  s.managers.push({
+    pmId: 7,
+    name: 'holaday-vnc',
+    pid: 40,
+    status: 'online',
+    watch: false,
+    configDigest: hash('vnc'),
+  });
+  for (const [pid, ppid] of [
+    [40, 10],
+    [41, 40],
+  ]) {
+    const p = { ...s.processes.find((p) => p.pid === 30), pid, ppid, start: String(pid * 100) };
+    s.processes.push(p);
+    f.reviews.vultr.review.processes.push({
+      pid,
+      identityDigest: hash(p),
+      disposition: 'preserve',
+      reason: 'explicit cloud tree review',
+    });
+  }
+  f.reviews.vultr.review.registrations.push({
+    pmId: 7,
+    configDigest: hash('vnc'),
+    disposition: 'preserve',
+    reason: 'explicit VNC review',
+  });
+  f.cloudScope = [
+    ['holaday-vnc', [40, 41]],
+    ['holaday-chromium-headed', [30, 31]],
+  ].map(([name, pids]) => {
+    const manager = s.managers.find((m) => m.name === name);
+    manager.stopConfigDigest = hash(`launch:${name}`);
+    return {
+      name,
+      pmId: manager.pmId,
+      recoveryDigest: '7'.repeat(64),
+      scopeDigest: hash({
+        host: 'vultr',
+        hostname: s.hostname,
+        bootId: s.bootId,
+        pm2Runtime: s.pm2Runtime,
+        daemon: s.processes.find((p) => p.pid === 10),
+        manager,
+        processes: pids.map((pid) => s.processes.find((p) => p.pid === pid)),
+      }),
+    };
+  });
+}
+
+test('cloud controller records intent before exact numeric PM2 stop and independently confirms both preserved trees absent', async (t) => {
+  const r = await retirementFixture(t, addCloudPair);
+  const commands = [];
+  await r.observer.stopCloudServices(
+    { maintenanceEndsAtMs: 8000 },
+    {
+      platform: 'linux',
+      uid: 0,
+      verifyFence: async () => ({
+        inventoryDigest: digest,
+        stage: 'orders',
+        observedAtMs: 1000,
+        unsettledWork: 0,
+        externalWork: 0,
+        activeRequests: 0,
+        unknownWriters: 0,
+      }),
+      exec: async (command, args, options) => {
+        const events = (await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents;
+        assert.equal(events.at(-1).phase, 'cloud-stop-intent');
+        assert.equal(events.at(-1).pmId, Number(args[1]));
+        assert.equal(command, 'pm2');
+        assert.deepEqual(args, ['stop', commands.length === 0 ? '7' : '2', '--watch']);
+        assert.equal(options.cwd, '/');
+        assert.equal(options.env.PM2_HOME, '/root/.pm2');
+        commands.push(args);
+        const s = r.f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+        const ids = args[1] === '7' ? [40, 41] : [30, 31];
+        const m = s.managers.find((m) => m.pmId === Number(args[1]));
+        m.pid = 0;
+        m.status = 'stopped';
+        m.configDigest = hash(`stopped:${m.name}`);
+        s.processes = s.processes.filter((p) => !ids.includes(p.pid));
+      },
+    },
+  );
+  assert.equal(commands.length, 2);
+  assert.deepEqual(
+    (await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.map((e) => e.phase),
+    ['cloud-stop-intent', 'cloud-stopped', 'cloud-stop-intent', 'cloud-stopped'],
+  );
+  const observation = await r.observer.read();
+  assert.equal(observation.unknownLaunchers.length, 0);
+  assert.deepEqual(
+    observation.cloudMaintenance.map((s) => s.status),
+    ['stopped', 'stopped'],
+  );
+  assert.equal(observation.hosts.find((h) => h.host === 'vultr').preservedManagers.length, 2);
+  await assert.rejects(r.observer.stopCloudServices({ maintenanceEndsAtMs: 8000 }, {}), /UNPROVEN/);
+  assert.equal(commands.length, 2, 'a second attempt must not execute');
+});
+
+for (const fault of [
+  'lost-ack',
+  'surviving-child',
+  'reparented-child',
+  'respawn',
+  'manager-missing',
+  'manager-config',
+  'listener',
+  'unrelated-loss',
+  'source-change',
+  'daemon-change',
+  'late-return',
+]) {
+  test(`cloud stop ${fault} retains unresolved intent and never stops the second service or retries`, async (t) => {
+    const r = await retirementFixture(t, addCloudPair);
+    let commands = 0;
+    const operations = {
+      platform: 'linux',
+      uid: 0,
+      verifyFence: async () => ({
+        inventoryDigest: digest,
+        stage: 'orders',
+        observedAtMs: 1000,
+        unsettledWork: 0,
+        externalWork: 0,
+        activeRequests: 0,
+        unknownWriters: 0,
+      }),
+      exec: async () => {
+        commands++;
+        const s = r.f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+        const child = s.processes.find((p) => p.pid === 41);
+        s.processes = s.processes.filter((p) => ![40, 41].includes(p.pid));
+        const m = s.managers.find((m) => m.pmId === 7);
+        m.pid = 0;
+        m.status = 'stopped';
+        if (fault === 'lost-ack') throw new Error('private stderr must not escape');
+        if (fault === 'surviving-child') s.processes.push(child);
+        if (fault === 'reparented-child') s.processes.push({ ...child, ppid: 1 });
+        if (fault === 'respawn') s.processes.push({ ...child, pid: 42, ppid: 1 });
+        if (fault === 'manager-missing') s.managers = s.managers.filter((m) => m.pmId !== 7);
+        if (fault === 'manager-config') {
+          m.configDigest = 'f'.repeat(64);
+          m.stopConfigDigest = 'f'.repeat(64);
+        }
+        if (fault === 'listener') s.listeners += 'LISTEN 0 511 127.0.0.1:6080 0.0.0.0:*\n';
+        if (fault === 'unrelated-loss') s.processes = s.processes.filter((p) => p.pid !== 31);
+        if (fault === 'source-change') s.cron = 'new launcher';
+        if (fault === 'daemon-change') s.processes.find((p) => p.pid === 10).start = '999';
+        if (fault === 'late-return') r.f.now = 8001;
+      },
+    };
+    await assert.rejects(
+      r.observer.stopCloudServices({ maintenanceEndsAtMs: 8000 }, operations),
+      fault === 'lost-ack' ? /CUTOVER_CLOUD_STOP_UNCERTAIN/ : /UNPROVEN/,
+    );
+    assert.equal(commands, 1);
+    assert.equal((await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 1);
+    await assert.rejects(
+      r.observer.stopCloudServices({ maintenanceEndsAtMs: 8000 }, operations),
+      /UNPROVEN/,
+    );
+    assert.equal(commands, 1);
+    await assert.rejects(r.observer.read(), /UNPROVEN/, 'intent alone is not strict completion');
+  });
+}
+
+for (const fault of [
+  'scope',
+  'late',
+  'nonroot',
+  'nonlinux',
+  'unknown-writer',
+  'external-work',
+  'stale-fence',
+  'wrong-stage',
+  'new-descendant',
+  'target-start-drift',
+  'concurrent-call',
+]) {
+  test(`cloud stop refuses ${fault} before any PM2 effect`, async (t) => {
+    const r = await retirementFixture(t, (f) => {
+      addCloudPair(f);
+      if (fault === 'scope') f.cloudScope[0].scopeDigest = 'f'.repeat(64);
+    });
+    let commands = 0;
+    const operations = {
+      platform: fault === 'nonlinux' ? 'darwin' : 'linux',
+      uid: fault === 'nonroot' ? 501 : 0,
+      verifyFence: async () => ({
+        inventoryDigest: digest,
+        stage: fault === 'wrong-stage' ? 'all-writers' : 'orders',
+        observedAtMs: fault === 'stale-fence' ? -61000 : 1000,
+        unsettledWork: 0,
+        externalWork: fault === 'external-work' ? 1 : 0,
+        activeRequests: 0,
+        unknownWriters: fault === 'unknown-writer' ? 1 : 0,
+      }),
+      exec: async () => {
+        commands++;
+      },
+    };
+    const s = r.f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+    if (fault === 'late') r.f.now = 8000;
+    if (fault === 'target-start-drift') s.processes.find((p) => p.pid === 40).start = '999';
+    if (fault === 'new-descendant')
+      s.processes.push({ ...s.processes.find((p) => p.pid === 41), pid: 42 });
+    if (fault === 'concurrent-call') {
+      operations.verifyFence = async () => {
+        throw new Error('UNPROVEN');
+      };
+      await Promise.all(
+        [1, 2].map(() =>
+          assert.rejects(
+            r.observer.stopCloudServices({ maintenanceEndsAtMs: 8000 }, operations),
+            /UNPROVEN/,
+          ),
+        ),
+      );
+    } else
+      await assert.rejects(
+        r.observer.stopCloudServices({ maintenanceEndsAtMs: 8000 }, operations),
+        /UNPROVEN/,
+      );
+    assert.equal(commands, 0);
+  });
 }
 
 test('retirement rejection reports the failed boundary without exposing transport secrets', async (t) => {

@@ -1596,6 +1596,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       first.startupEvents.length ||
       first.registrationEvents.length ||
       first.unmanagedEvents?.length ||
+      first.cloudMaintenanceEvents?.length ||
       !isDeepStrictEqual(await io.readFenceReceipts(), [])
     )
       fail();
@@ -1637,6 +1638,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       requestedUnmanagedHost,
       candidateIdentity,
       fenceProgress = false,
+      cloudProgress = false,
     ) => {
       const operation = fenceProgress
         ? 'fence-progress'
@@ -1710,6 +1712,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             unmanagedProgressHost,
             candidate,
             execution,
+            cloudProgress: cloudProgress || (fenceProgress && before.phase === 'producers_stopped'),
           },
           { now: checkClock },
         );
@@ -1735,12 +1738,108 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       }
     };
     let unmanagedAttempted = false;
+    let cloudAttempted = false;
     return {
       read: () => read(),
       readFenceProgress: () => read(undefined, undefined, undefined, true),
       readRegistrationProgress: (host) => read(host ?? 'invalid'),
       readUnmanagedProgress: (host) => read(undefined, host ?? 'invalid'),
       readWithCandidate: (identity) => read(undefined, undefined, structuredClone(identity ?? {})),
+      // The owned declaration selects the fixed pair; callers cannot supply a
+      // name, PID, argv, environment, timeout or retry policy. A failed attempt
+      // stays consumed even when the PM2 result is unknown.
+      stopCloudServices: async ({ maintenanceEndsAtMs }, operations = {}) => {
+        if (
+          cloudAttempted ||
+          !Number.isSafeInteger(maintenanceEndsAtMs) ||
+          (operations.platform ?? process.platform) !== 'linux' ||
+          (operations.uid ?? process.getuid?.()) !== 0 ||
+          typeof operations.verifyFence !== 'function'
+        )
+          fail();
+        cloudAttempted = true;
+        const guard = async () => {
+          const left = maintenanceEndsAtMs - checkClock();
+          const record = await effects();
+          if (
+            left <= 0 ||
+            left > 900000 ||
+            record.phase !== 'producers_stopped' ||
+            record.failureObservation ||
+            !record.cloudMaintenanceScope
+          )
+            fail();
+          const fence = await operations.verifyFence();
+          const interrupted = await validateOwnedLegacyFence(fence, {
+            assertJournalOwnership: () => io.journal.assertOwnership(),
+            readFirstCutoverEffects: effects,
+          });
+          if (
+            fence?.stage !== 'orders' ||
+            fence.inventoryDigest !== binding.inventoryDigest ||
+            fence.unsettledWork !== 0 ||
+            fence.unknownWriters !== 0 ||
+            (!interrupted && (fence.externalWork !== 0 || fence.activeRequests !== 0)) ||
+            !Number.isSafeInteger(fence.observedAtMs) ||
+            fence.observedAtMs > checkClock() ||
+            checkClock() - fence.observedAtMs > 60000 ||
+            !isDeepStrictEqual(record, await effects()) ||
+            checkClock() >= maintenanceEndsAtMs
+          )
+            fail();
+          return record;
+        };
+        const first = await guard();
+        if (first.cloudMaintenanceEvents?.length) fail();
+        for (const declaration of first.cloudMaintenanceScope) {
+          await guard();
+          const state = await read();
+          if (state.cloudMaintenance?.find((s) => s.name === declaration.name)?.status !== 'online')
+            fail();
+          const base = {
+            attempt: binding.attempt,
+            inventoryDigest: binding.inventoryDigest,
+            host: 'vultr',
+            ...declaration,
+          };
+          await io.journal.recordCloudMaintenanceEvent({ ...base, phase: 'cloud-stop-intent' });
+          const recorded = await guard();
+          const checked = await read(undefined, undefined, undefined, false, true);
+          if (
+            checked.cloudMaintenance?.find((s) => s.name === declaration.name)?.status !==
+              'online' ||
+            !isDeepStrictEqual(recorded, await effects()) ||
+            checkClock() >= maintenanceEndsAtMs
+          )
+            fail();
+          try {
+            await (operations.exec ?? candidatePreparationSystem().exec)(
+              'pm2',
+              ['stop', String(declaration.pmId), '--watch'],
+              {
+                cwd: '/',
+                env: {
+                  PATH: '/opt/node22/bin:/usr/local/bin:/usr/bin:/bin',
+                  HOME: '/root',
+                  PM2_HOME: '/root/.pm2',
+                  LC_ALL: 'C',
+                },
+              },
+            );
+          } catch {
+            throw new Error('CUTOVER_CLOUD_STOP_UNCERTAIN');
+          }
+          const observed = await read(undefined, undefined, undefined, false, true);
+          if (
+            observed.cloudMaintenance?.find((s) => s.name === declaration.name)?.status !==
+            'stopped'
+          )
+            fail();
+          await guard();
+          await io.journal.recordCloudMaintenanceEvent({ ...base, phase: 'cloud-stopped' });
+          await read();
+        }
+      },
       // Signal execution is a trusted, fixed-host I/O seam; production supplies
       // createLegacyRuntimeEffects on that host, never a command from approval.
       retireUnmanaged: async ({ maintenanceEndsAtMs }, operations) => {

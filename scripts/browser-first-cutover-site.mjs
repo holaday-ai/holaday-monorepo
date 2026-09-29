@@ -723,6 +723,12 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
           io.producerSystem,
         );
         await gateway.prepare();
+        if (scope.cloudMaintenanceScope) {
+          await observer.stopCloudServices(
+            { maintenanceEndsAtMs: scope.maintenanceEndsAtMs },
+            { ...io.cloudSystem, verifyFence: boundary },
+          );
+        }
       }),
     fenceAll: (ctx) => run('all', ctx, ['all_fenced'], () => ingress.fenceAll()),
     stopLegacy: (ctx) =>

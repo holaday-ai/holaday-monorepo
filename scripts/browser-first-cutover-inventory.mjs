@@ -87,6 +87,136 @@ const executionHost = (role) =>
       ? 'vultr'
       : null;
 
+// Temporary stop accounting stays separate from permanent retirement. Compare
+// with the original protected process review, never create a new allowlist from
+// whatever happens to be running after an effect. Recovery is not inferred here.
+function observeCloudStops({ baseline, pair, adjusted, effects, inventoryDigest, progress }) {
+  const scope = effects.cloudMaintenanceScope;
+  const events = effects.cloudMaintenanceEvents ?? [];
+  if (scope === undefined) {
+    if (!Array.isArray(events) || events.length) fail();
+    return undefined;
+  }
+  const names = ['holaday-vnc', 'holaday-chromium-headed'];
+  if (
+    !hash(effects.executionSiteDigest) ||
+    !Array.isArray(scope) ||
+    scope.length !== 2 ||
+    new Set(scope.map((s) => s.pmId)).size !== 2 ||
+    !Array.isArray(events) ||
+    events.length > 4 ||
+    (events.length &&
+      ![
+        'producers_stopped',
+        'all_fenced',
+        'stopped',
+        'backup_verified',
+        'migration_started',
+        'candidate_started',
+        'verified',
+      ].includes(effects.phase)) ||
+    (events.length % 2 && (!progress || effects.phase !== 'producers_stopped'))
+  )
+    fail();
+  const before = baseline.hosts.find((h) => h.host === 'vultr')?.snapshot;
+  const current = pair.hosts.find((h) => h.host === 'vultr')?.snapshot;
+  const review = adjusted.vultr.review;
+  const tree = (snapshot, pid) => {
+    const ids = new Set([pid]);
+    for (let i = 0; i < snapshot.processes.length; i++)
+      for (const p of snapshot.processes) if (ids.has(p.ppid)) ids.add(p.pid);
+    return snapshot.processes.filter((p) => ids.has(p.pid)).sort((a, b) => a.pid - b.pid);
+  };
+  return scope.map((declaration, i) => {
+    if (
+      Object.keys(declaration).sort().join(',') !== 'name,pmId,recoveryDigest,scopeDigest' ||
+      declaration.name !== names[i] ||
+      !Number.isSafeInteger(declaration.pmId) ||
+      declaration.pmId < 0 ||
+      !hash(declaration.scopeDigest) ||
+      !hash(declaration.recoveryDigest) ||
+      before.hostname !== current.hostname ||
+      before.bootId !== current.bootId ||
+      !equal(before.pm2Runtime, current.pm2Runtime)
+    )
+      fail();
+    const matches = before.managers.filter((m) => m.name === declaration.name);
+    const manager = matches[0];
+    if (
+      matches.length !== 1 ||
+      manager.pmId !== declaration.pmId ||
+      manager.status !== 'online' ||
+      manager.pid <= 1 ||
+      manager.watch ||
+      !hash(manager.stopConfigDigest) ||
+      review.registrations.find((r) => r.pmId === manager.pmId)?.configDigest !==
+        manager.configDigest ||
+      review.registrations.find((r) => r.pmId === manager.pmId)?.disposition !== 'preserve'
+    )
+      fail();
+    const processes = tree(before, manager.pid);
+    const daemon = before.processes.find((p) => p.pid === before.pm2Runtime.pid);
+    if (
+      !processes.length ||
+      processes.find((p) => p.pid === manager.pid)?.ppid !== daemon?.pid ||
+      processes.some(
+        (p) =>
+          [daemon.pid, before.observer.pid].includes(p.pid) ||
+          /\/(?:Xvfb|Xorg|openbox)$/.test(p.exe) ||
+          review.processes.find((r) => r.pid === p.pid)?.disposition !== 'preserve',
+      ) ||
+      declaration.scopeDigest !==
+        digest({
+          host: 'vultr',
+          hostname: before.hostname,
+          bootId: before.bootId,
+          pm2Runtime: before.pm2Runtime,
+          daemon,
+          manager,
+          processes,
+        })
+    )
+      fail();
+    const liveMatches = current.managers.filter(
+      (m) => m.pmId === manager.pmId || m.name === manager.name,
+    );
+    if (liveMatches.length !== 1) fail();
+    const live = liveMatches[0];
+    const base = { attempt: effects.attempt, inventoryDigest, host: 'vultr', ...declaration };
+    const intent = events[i * 2];
+    const ack = events[i * 2 + 1];
+    if (intent && !equal(intent, { ...base, phase: 'cloud-stop-intent' })) fail();
+    if (ack && !equal(ack, { ...base, phase: 'cloud-stopped' })) fail();
+    if (!intent || (!ack && live.status === 'online')) {
+      if (!equal(live, manager) || !equal(tree(current, manager.pid), processes)) fail();
+      return { ...declaration, status: 'online' };
+    }
+    if (
+      !hash(live.configDigest) ||
+      live.stopConfigDigest !== manager.stopConfigDigest ||
+      !equal(live, { ...manager, pid: 0, status: 'stopped', configDigest: live.configDigest }) ||
+      current.processes.some((p) => processes.some((old) => old.pid === p.pid))
+    )
+      fail();
+    const ports = i === 0 ? [5901, 6080] : [9223];
+    if (
+      lines(current.listeners).some((line) =>
+        ports.includes(Number(/:(\d+)$/.exec(line.split(/\s+/)[3] ?? '')?.[1])),
+      )
+    )
+      fail();
+    // Only absent, explicitly stopped original processes are removed from the
+    // comparison. The preserved PM2 registration and every source stay checked.
+    review.processes = review.processes.filter((r) => !processes.some((p) => p.pid === r.pid));
+    // The collector's pre-bound stopConfigDigest compares ALL launch bytes,
+    // including environment, unknown fields and restart counters; only PM2
+    // status/exit_code differ on this proved stop. This is a local comparison
+    // clone, NOT mutation of a protected review or acceptance of arbitrary drift.
+    review.registrations.find((r) => r.pmId === manager.pmId).configDigest = live.configDigest;
+    return { ...declaration, status: 'stopped' };
+  });
+}
+
 /** Reconcile completed, named-host registration retirements against the ORIGINAL
  * reviewed snapshot. The host obtains effects from its owned live journal. This
  * is an observation, never permission to delete, a replacement review, or proof
@@ -105,6 +235,7 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
     unmanagedProgressHost,
     candidate,
     execution = [],
+    cloudProgress = false,
   } = structuredClone(input);
   if (
     effects?.phase === 'legacy_interruption_accepted' &&
@@ -214,6 +345,14 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
   )
     fail();
   const adjusted = structuredClone(reviews);
+  const cloudMaintenance = observeCloudStops({
+    baseline,
+    pair,
+    adjusted,
+    effects,
+    inventoryDigest,
+    progress: cloudProgress,
+  });
   const actualSources = new Map(
     pair.hosts.map((h) => [h.host, firstCutoverSourceBindings(h.snapshot)]),
   );
@@ -579,6 +718,7 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
     io,
   );
   if (candidate !== undefined) result.candidate = candidate;
+  if (cloudMaintenance !== undefined) result.cloudMaintenance = cloudMaintenance;
   for (const host of result.hosts) host.sources = actualSources.get(host.host);
   return result;
 }

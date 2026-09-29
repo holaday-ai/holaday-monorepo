@@ -2,6 +2,18 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 JST（09-29 21:18Z）：临时双服务停止的产品执行闭环
+
+原site→原observer/controller→原journal意图→默认固定数字ID PM2停止→独立进程快照确认→原journal确认，按VNC/headed顺序接通。保留注册和无关进程，不重建框架；原永久退役名单不变。原声明必须匹配新鲜完整树和配置，残留/重新托管/回生进程、丢应答、来源或配置变化、未知写入者和截止时间失败均不继续下一服务、不自动重试。
+
+真实Linux物理8739退出0，原控制器和默认PM2执行器实际停止两个夹具服务，procfs独立确认VNC两个合成服务及真实fork handler、headed名合成sleep退出；无关进程和合成profile保留。远端主机/来源/工作事实合成，不是Brave恢复或生产发布通过。日志`/private/tmp/holaday-cloud-controller-final-physical-20260930.log`。新增已有PM2目录拒绝反例b9399d退出0（内部夹具预期退出1/EEXIST），确认任何PM2启动、VNC脚本创建前拒绝，日志`/private/tmp/holaday-cloud-controller-namespace-refusal-20260930.log`。全部新容器privatePID/断网/有限资源/只读脚本与公开缓存，无生产凭据或宿主状态挂载。
+
+物理58451和诊断93880退出1揭示正常PM2停止改变status/exit_code：原完整摘要不能直接要求相同。新增仅为固定云服务提供的stopConfigDigest覆盖其他全部启动配置；原完整摘要和保护review不改，只在原绑定摘要相同及真实停后状态证明成立后解释本次克隆比较视图。配置与停后形状反例566c8e/12e0a0先失败后通过；漂移测试包含环境、未知字段、启动参数和重启计数。初次安全拒绝均未执行，补齐独占性证明及字段不变证据后获准，不绕过限制。
+
+最终Linux37252五模块543/543退出0、零跳过，日志`/private/tmp/holaday-cloud-controller-final-linux-20260930.log`。此前38038为541通过/2失败/0跳过：旧publication夹具要求非零应用组而容器GID为0；最终root UID/GID998满足原约束，无生产规则改动或跳过。更早283/283、25/25只作中间记录，不重复累计。恢复事件仍被真实observer拒绝，生产execute/open门槛未解除。
+
+原完整ops9511退出0：Node120/60/16/995及Python12全部通过、零跳过，使用已有age工具，日志`/private/tmp/holaday-cloud-controller-ops-20260930.log`。八个JS文件最终Biome527644、diff-check退出0；所有测试会话结束。未重跑完整数据库物理链或浏览器前端，尚未整分支独立审查、push/PR/合并/部署。
+
 ## 2026-09-30 JST（09-29 20:17Z）：临时云服务声明、原journal与open前拒绝
 
 两服务声明由原保护读取器/site绑定到同一个真实journal：固定VNC/headed顺序、唯一数字ID、范围和恢复摘要，headed绑定已打包恢复材料。按序记录停止/恢复意图和确认；声明后不能漏做、重复或换对象。原host在beforeOpen和实际open命令之前拒绝恢复未确认，避免“先open再写opened”以及前置失败误走丢应答核对。合成外部事实的原host+真实journal组合覆盖恢复前缀0至4，前四种无open，完整确认沿原尾段成功；不声称真实两服务恢复已执行。

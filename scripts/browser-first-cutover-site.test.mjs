@@ -316,6 +316,18 @@ test('site carries approved temporary cloud pair into the same durable journal a
     f.journal.persist('all_fenced', { candidate: f.binding.candidate }),
     /UNPROVEN/,
   );
+  f.observer().stopCloudServices = async (input, deps) => {
+    assert.equal(input.maintenanceEndsAtMs, 9000);
+    assert.equal((await deps.verifyFence()).producersRunning, 0);
+    assert.deepEqual(f.events.slice(-2), ['stop-producers', 'prepare-gateway']);
+    f.events.push('stop-cloud-pair');
+  };
+  await site.lifecycle.stopProducers(f.context);
+  assert.equal(
+    f.events.at(-1),
+    'stop-cloud-pair',
+    'original site must invoke the guarded controller',
+  );
   await site.lifecycle.detach(f.context);
 });
 

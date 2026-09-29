@@ -1428,6 +1428,91 @@ test('host observations bind private PM2 configuration without returning its val
   assert.equal(result.managers[0].killTimeoutMs, 660000);
   assert.equal(JSON.stringify(result).includes('secret'), false);
 });
+
+test('cloud stop observation binds all launch fields while separating only status and exit code changes', async () => {
+  const sample = async (state, exitCode, key = 'secret') => {
+    const f = hostFixture();
+    const exec = f.io.exec;
+    f.io.exec = async (command, args) => {
+      const raw = await exec(command, args);
+      if (command !== 'pm2') return raw;
+      const rows = JSON.parse(raw);
+      rows[0].name = 'holaday-vnc';
+      rows[0].pm2_env.status = state;
+      rows[0].pm2_env.exit_code = exitCode;
+      rows[0].pm2_env.PRIVATE_KEY = key;
+      return JSON.stringify(rows);
+    };
+    return (await readCutoverHostSnapshot(f.io)).managers[0];
+  };
+  const running = await sample('online', 0);
+  const stopped = await sample('stopped', 137);
+  assert.match(running.stopConfigDigest, /^[a-f0-9]{64}$/);
+  assert.equal(running.stopConfigDigest, stopped.stopConfigDigest);
+  assert.notEqual(running.configDigest, stopped.configDigest);
+  assert.notEqual(
+    running.stopConfigDigest,
+    (await sample('stopped', 137, 'changed')).stopConfigDigest,
+  );
+  assert.equal(JSON.stringify(stopped).includes('secret'), false);
+});
+
+test('temporary stop comparison never masks environment, argv, restart policy, identity or unknown field drift', async () => {
+  const { cutoverCloudStopConfigDigest } = await import('./browser-cutover-evidence.mjs');
+  const original = {
+    status: 'online',
+    exit_code: 0,
+    pm_cwd: '/opt/holaday-vnc',
+    pm_exec_path: '/opt/holaday-vnc/start.sh',
+    exec_interpreter: 'bash',
+    args: [],
+    env: { PRIVATE_KEY: 'fixture-only' },
+    uid: 0,
+    gid: 0,
+    autorestart: true,
+    watch: false,
+    cron_restart: '',
+    max_memory_restart: 524288000,
+    kill_timeout: 1600,
+    treekill: true,
+    restart_time: 0,
+    pm_uptime: 1000,
+  };
+  const digest = cutoverCloudStopConfigDigest(original);
+  assert.equal(
+    digest,
+    cutoverCloudStopConfigDigest({ ...original, status: 'stopped', exit_code: 130 }),
+  );
+  for (const [key, value] of Object.entries({
+    pm_cwd: '/other',
+    pm_exec_path: '/other/start.sh',
+    exec_interpreter: 'node',
+    args: ['--unapproved'],
+    env: { PRIVATE_KEY: 'different' },
+    uid: 501,
+    gid: 501,
+    autorestart: false,
+    watch: true,
+    cron_restart: '* * * * *',
+    max_memory_restart: 1,
+    kill_timeout: 1,
+    treekill: false,
+    restart_time: 1,
+    pm_uptime: 2000,
+    unknownFutureLaunchField: 'new',
+  })) {
+    assert.notEqual(
+      digest,
+      cutoverCloudStopConfigDigest({
+        ...original,
+        status: 'stopped',
+        exit_code: 130,
+        [key]: value,
+      }),
+      `must still bind ${key}`,
+    );
+  }
+});
 for (const change of ['pid', 'new-registration', 'environment', 'kill-timeout', 'schedule']) {
   test(`host snapshot rejects PM2 ${change} drift during the same observation`, async () => {
     const f = hostFixture();

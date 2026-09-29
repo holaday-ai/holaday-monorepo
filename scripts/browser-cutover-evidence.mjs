@@ -122,6 +122,15 @@ export const cutoverRegistrationConfigDigest = (value) =>
       ),
     )
     .digest('hex');
+// PM2's acknowledged stop changes status and exit_code. Keep the original full
+// config identity above; this additional comparison is ONLY for the temporary
+// cloud stop transition, never a registration deletion/recovery authorization.
+export const cutoverCloudStopConfigDigest = (value) =>
+  cutoverRegistrationConfigDigest(
+    Object.fromEntries(
+      Object.entries(value).filter(([key]) => !['status', 'exit_code'].includes(key)),
+    ),
+  );
 const publicationSystem = {
   ...fs,
   platform: process.platform,
@@ -883,6 +892,9 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
           cronRestart: row.pm2_env?.cron_restart,
           killTimeoutMs: row.pm2_env.kill_timeout,
           configDigest: cutoverRegistrationConfigDigest(row.pm2_env),
+          ...(['holaday-vnc', 'holaday-chromium-headed'].includes(row.name)
+            ? { stopConfigDigest: cutoverCloudStopConfigDigest(row.pm2_env) }
+            : {}),
         }))
         .sort((a, b) => a.pmId - b.pmId);
     };

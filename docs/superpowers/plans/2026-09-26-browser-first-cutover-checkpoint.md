@@ -6,6 +6,22 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 JST（09-29 21:18Z heartbeat）：原执行入口接通临时双服务停止与独立现场核对
+
+从`6d1057e9`继续原Task4。原site在生产者退役和gateway准备后调用原observer的`stopCloudServices`；固定VNC→headed顺序、原journal持久化意图后，默认执行器发送单次数字ID的`pm2 stop … --watch`，不按名称扩大范围、不删除注册、不添加超时杀CLI或自动重试。执行前再次核对原声明、主机/boot、daemon、完整PPID后代和保留配置；执行后从独立快照证明原树全部消失、注册确实stopped/pid0、固定服务端口无监听，才记确认。残留或重新托管的后代、未知新进程、来源/daemon/配置漂移、丢应答、超期均拒绝继续第二个服务。共享Xvfb/Xorg/openbox不得进入目标树。
+
+实际PM2演练发现旧完整配置摘要含`status`和`exit_code`，这两项在正常停止后会变化。58451物理测试在**第一条停止后**拒绝，93880仅输出合成夹具变化的字段名，确认只有这两项。保留原完整摘要，不修改永久退役规则；采集器只为固定云服务增加`stopConfigDigest`，仍覆盖环境、启动参数、路径、重启策略/计数、uid/gid和所有未知字段，仅分离status/exit_code（原有axm_monitor排除不变）。只有原范围绑定摘要一致、其余管理器字段一致、真实退出核对通过，才在本次分类的克隆视图解释这两个变化；不改受保护review文件。字段漂移测试308ff3通过，配置RED566c8e、停后形状RED12e0a0退出1后修复。该裁定的风险是若摘要漏掉启动字段会掩盖漂移，因此新增完整字段反例，而不是接受任意现场新摘要。
+
+安全检查曾拒绝未证明独占的测试PM2目录及直接接受停后摘要，拒绝的补丁均未执行。只读cb3911确认新镜像实例没有`/root/.pm2`；夹具增加私有PID中shell父进程检查、Docker socket拒绝及PM2目录排他创建，已有目录/文件/链接全部在任何PM2动作前拒绝。摘要接线在上述实际字段变化与全启动字段反例证明后获准；没有绕过限制，也没有遗留用户授权阻塞。
+
+最终物理8739退出0，日志`/private/tmp/holaday-cloud-controller-final-physical-20260930.log`：使用**原控制器、真实journal、默认固定PM2执行器、实际procfs**；VNC控制流下的两个合成服务及真实fork handler退出，headed名称的合成sleep也退出；无关进程及合成profile保留。远端主机、来源和工作事实仍为合成；不是生产云浏览器恢复或整项切换成功。原QA镜像不重建，断网/private PID/1CPU/512MiB/128pids，仅只读脚本和已有公开procps包；不挂生产凭据/数据库/宿主PID/socket。
+
+本轮RED859ba5（缺控制器）和2205f8（site未调用）退出1；局部52583最终25/25、零跳过退出0。首次五模块Linux38038共543项，541通过、2失败、零跳过：均为旧证据发布夹具将容器GID=0当应用组，原生产规则明确拒绝applicationGid<=0；不是本轮停止逻辑失败。最终37252使用root UID/非零应用GID 998串行重跑，543/543退出0、零跳过，不改校验或跳过，日志`/private/tmp/holaday-cloud-controller-final-linux-20260930.log`。新增b9399d已有PM2目录拒绝模式退出0（夹具实际预期退出1/EEXIST），确认无PM2启动或VNC脚本创建。八个JS文件Biome及diff-check通过。
+
+最终原`CUTOVER_TEST_AGE_EXECUTABLE=/opt/homebrew/bin/age pnpm test:ops`9511退出0：Node120/60/16/995及Python12通过、零跳过，日志`/private/tmp/holaday-cloud-controller-ops-20260930.log`。未重跑完整数据库物理链、浏览器前端或整分支独立审查；这些既有验收不能当作本次完整上线通过。所有本轮测试会话结束。
+
+当前只接通**停止侧**。独立observer对恢复事件仍拒绝，原beforeOpen八事件门禁仍保留；不能把本次四条停止记录写成双服务恢复完成。下一步沿原site/observer接安全恢复的真实身份、工具/策略字节及显示独占事实，再完成原独立业务facts、停写备份/Mac恢复、非PayPal恢复、完整演练、整分支审查和新鲜窗口。无生产SSH/停止/恢复/支付/数据库/密钥变更，未push/PR/合并/部署，CLI仍关闭，BASE/原缓存/既有自动化不变。
+
 ### 2026-09-30 JST（09-29 20:17Z heartbeat）：临时云服务维护声明接入原日志和真实open前置门禁
 
 从`781c7f67`继续。原受保护配置读取器新增严格的`cloudMaintenanceScope`，只接固定顺序的VNC/headed两条服务声明，绑定不同的数字PM2 ID、范围及恢复摘要；headed恢复摘要必须匹配上一轮固定运行时命令。原site attach将声明与完整site摘要一起单次持久化到原journal，异步入队前复制输入，拒绝绑定期间调用方改变范围。没有另建状态机/文件/锁，也没有把两服务加入永久退役列表。
