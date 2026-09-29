@@ -2,6 +2,14 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29 14:27 UTC：一次完整首抛诊断通过，非最终验收
+
+87744现有known-effect反例退出0，临时进程内Inspector校准能捕获底层evidence→runtime→site抛出位置；仅公开位置/固定代码，无端口、局部变量或载荷输出。99193全新完整隔离诊断退出0，source90/target90，真实worker轮询、单次open、无close/重放、两份启动文件和锁释放通过；无跳过。日志`/private/tmp/holaday-first-throw-calibration-20260929.log`与`/private/tmp/holaday-full-first-throw-20260929.log`。
+
+不代表5532等间歇问题已修复或生产可部署。追踪影响调度，且成功路径父夹具没有落盘完整stderr，不能声称无可恢复异常。所有临时QA追踪/环境传递已撤掉，源码与64855c36一致；本轮仅保存诊断记录。驱动按精确标签清理本轮两个合成数据库容器/卷，所有作业结束，原服务、缓存和草稿不动。原恢复会话静态检查未支持并发重入假设，未据此添加重试或放宽门槛。
+
+生产云端浏览器/VNC原保留范围仍需明确决定，独立facts及其后原真实恢复/支付恢复/整分支审查尚未完成。CLI仍关闭，无push/PR/merge/deploy。不要再以重复完整合成QA代替该范围决定及生产事实。
+
 ## 2026-09-29 14:08 UTC：失败边界最小组合验收，不是根因修复
 
 仅原物理registration夹具新增`--execution-site-fence-repeat`，产品源文件不变。41106：20次原site+真实nginx/TLS+observer停止边界，退出0；30907：20次原`backup.inspectBackupFacility`（真实受保护文件/公开age检查、前后停止证明），退出0；随后合成已知未决工作使原site拒绝，事实移除仍锁存失败，journal未变、没有backupReceipt；89740：原`--execution-site-interruption`回归退出0。均零跳过，日志分别`/private/tmp/holaday-site-fence-composition3-20260929.log`、`/private/tmp/holaday-site-facility-composition-20260929.log`、`/private/tmp/holaday-site-original-interruption-20260929.log`。最后仅QA说明文本修正，Biome/node语法/diff-check通过；未重跑未修改的历史全套组件来充当新证据。

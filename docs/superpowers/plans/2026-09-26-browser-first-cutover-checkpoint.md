@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 14:27 UTC：首抛追踪校准及完整诊断通过，生产范围仍待决定
+
+从`64855c36`续跑。静态核对原recovery session：客户端operation、scope请求和最终assertScope均串行await，没有证据支持并发重入假设，不据此改代码。临时在原QA入口启用进程内Inspector异常追踪（不开放端口）：只输出白名单公开源码位置、固定CUTOVER错误码、前四组位置，不读/打印局部变量、异常原文或业务载荷。87744已知未决工作反例退出0，成功捕获evidence1244/1263→runtime→site统一包装之前的位置，日志`/private/tmp/holaday-first-throw-calibration-20260929.log`；只是校准，不是原间歇故障复现。
+
+随后仅一次全新完整诊断99193退出0，日志`/private/tmp/holaday-full-first-throw-20260929.log`：源90表、目标90表，同次备份/Mac隔离恢复/比较/迁移/newboot/两次preopen/单次open/真实入口恢复/UID998 worker实际轮询/同身份reconcile/两份启动文件/锁释放完成，无close或旧效果重放。用原缓存和固定原QA镜像，私有PID、合成库无外网、资源受限串行；驱动核对标签后删除本轮源/目标容器和卷，保留日志/私密恢复工件，资源记录`/private/tmp/holaday-stopped-source-42eb8dc7-d436-4046-95bb-d543ed0a5cc3.json`。所有作业已结束。
+
+**证据限制：** 本轮没有复现5532等历史拒绝，也没有产品修复。Inspector会影响调度，因此这不是无追踪候选验收；原父夹具只在失败时保存完整stderr，本次成功仅保留结果摘要，不能据此声称成功过程中未出现可恢复异常。不可从连续诊断通过推导根因消失。两QA文件及临时驱动中的首抛开关均已撤掉，git确认所有源码完全回到64855c36，剩余仅本次记录；不再次启动完整链或补跑历史组件来制造进度。
+
+生产仍有实际范围决定：原设计保留云端`holaday-chromium-headed`和`holaday-vnc`，定向停止/恢复它们及核实后的专属子进程仍未获特定确认。该决定会影响独立外部工作/未来写入源事实，不能以本轮合成通过或泛泛“继续”代替；原有云端浏览器可能有未保存状态。本机Chrome、profile、共享PM2/Xvfb和无关应用不得动。等明确范围后沿原facts/受保护入口/真实停写备份Mac恢复/非PayPal恢复/整分支审查推进；在此之前不能开放execute。当前未push/PR/合并/部署，PayPal和生产业务未触碰，自动化未改，原cache/__pycache__保留。
+
 ### 2026-09-29 14:08 UTC：原站点最小组合已跑通，未复现旧间歇拒绝
 
 从`623138b0`续跑，没有再次启动完整数据库恢复链，也没有修改产品实现。在原`browser-registration-removal-linux.mjs`增加`--execution-site-fence-repeat`：复用真实gateway接收器、私有审批文件、journal、PM2/pidfd停止、原nginx/TLS入口和retirement observer；在原backup_verified阶段连续调用原site的`backup.inspectBackupFacility`，每次仍经过前后真实停止证明。业务事实与双机拓扑仍为明确合成数据；数据库身份只是输入标识，没有创建数据库、生成密钥、加密导出、恢复或迁移。公开age沿用原缓存，收件人只用63字节合成语法；不声称可用于真实加密。
