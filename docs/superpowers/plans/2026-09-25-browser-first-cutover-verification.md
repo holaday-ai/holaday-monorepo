@@ -2,6 +2,17 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29 12:29 heartbeat：完整启用 worker 曾通过，稳定性仍未验收
+
+| 检查 | 实际结果 | 证据 |
+| --- | --- | --- |
+| 原完整链，启用真实worker | 95243退出0，源90/目标90；恢复/迁移/newboot/preopen/open/入口恢复/真实worker poll/同进程reconcile/两份启动文件/锁释放均通过；带临时错误栈诊断 | `/private/tmp/holaday-ingress-full-reject-trace.log` |
+| 移除产品临时诊断后的完整复验 | 34270退出1，源2/目标0；preflight拒绝、无停止/迁移/启动事件，后续缺报告ENOENT是次生错误 | `/private/tmp/holaday-enabled-worker-clean-final.log`；dd6sAD私密诊断 |
+| 本轮首次备份边界复现 | 48985退出1，源2/目标0；入口会话先失败，导出期间retirement观察被拒绝 | `/private/tmp/holaday-observer-boundary-20260929.log`；irgezh私密诊断 |
+| 原nginx夹具100次同会话回执 | 64924及41739最终无产品诊断复验均退出0零跳过；100次回执、37条TLS拒绝、双栈/WS/入口恢复与无关连接保持通过 | `/private/tmp/holaday-ingress-receipts-policy-mounted.log`、`/private/tmp/holaday-ingress-receipts-clean-final.log` |
+
+上述一次完整通过不能覆盖前后失败；间歇性拒绝根因未确认，不宣称修复或稳定成功。精简命令最初缺`/ops`只读策略挂载的三次失败另行记录，不计产品回归；正确挂载后通过。产品三个临时诊断文件已恢复，交付仅两个QA夹具及证据文档，不重跑或冒用历史组件数作为新验收。两QA文件格式/语法/diff-check最终退出0（初次两处格式错误已修正）。精确QA容器和合成卷均清理，保留日志、恢复工件和原DB/Redis。生产维护范围、独立facts/执行入口、真实生产恢复、非PayPal恢复与最终整分支审查仍未完成；未上线。
+
 ## 2026-09-29 启用 worker 启动过渡（局部修复通过，完整链失败）
 
 最终结果覆盖下方运行中记录：三种专用Linux物理场景通过，Linux183/183；15075退出0，browser1116/1116、ops120/60/16/947及Python12，均零失败/跳过。五MJS格式检查及diff-check退出0。日志`/private/tmp/holaday-worker-start-{physical-final,linux-final,browser-noskip,ops-noskip}.log`。86597先前因未传既有age路径，browser及ops末组各34跳过，已保留日志并用既有age补跑，不计为全通过。所有测试结束，QA专属容器/合成卷精确清理，私密日志和恢复工件保留。已确认修复的是worker shell→Node启动过渡及60秒预算越界；20817完整链仍因备份观察失败而未通过，尚未验证完整启用worker应用链，不准上线。定向自审不是最终独立整分支审查，未push/PR/合并/部署。

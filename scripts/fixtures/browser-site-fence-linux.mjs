@@ -23,9 +23,12 @@ await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
 await fs.copyFile('/opt/node22/bin/node', '/usr/bin/node');
 assert(
-  process.argv.length === 2 || (process.argv.length === 3 && process.argv[2] === '--lose-edge-ack'),
+  process.argv.length === 2 ||
+    (process.argv.length === 3 &&
+      ['--lose-edge-ack', '--repeat-receipts'].includes(process.argv[2])),
 );
 const loseEdgeAck = process.argv[2] === '--lose-edge-ack';
+const repeatReceipts = process.argv[2] === '--repeat-receipts';
 const exec = (file, args) => promisify(execFile)(file, args, { encoding: 'utf8' });
 const hash = (b) => createHash('sha256').update(b).digest('hex');
 const { root, sites, render, request, prelude } = await createQaNginxSites();
@@ -243,6 +246,10 @@ try {
       console.log('TLS: untrusted certificates rejected for all 37 route/listener probes');
     }
     const receipts = await ingress.readFenceReceipts();
+    if (repeatReceipts && stage === 'all-writers') {
+      for (let n = 0; n < 100; n++) assert.deepEqual(await ingress.readFenceReceipts(), receipts);
+      console.log('PASS 100 sequential unchanged receipt observations on the same live session');
+    }
     assert.equal(receipts.length, 2);
     assert.deepEqual(
       receipts.map((r) => [r.host, r.receipt.files.length]),

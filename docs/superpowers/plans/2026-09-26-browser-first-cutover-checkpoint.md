@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 12:29 heartbeat：启用 worker 完整链曾通过，最终复验仍不稳定
+
+从 `a4ef07fd` 继续原 Task6，没有修改产品实现或放宽门槛。95243退出0，源/目标均90表：原完整链实际完成备份恢复、迁移、新boot、两次preopen、单次open、入口恢复、真实UID998 worker轮询、同进程核对、两份启动文件持久化和锁释放；无close/旧效果重放。日志 `/private/tmp/holaday-ingress-full-reject-trace.log`。此轮带有仅错误路径输出栈位置的临时诊断，应用仍是原6a46ee0f合成QA缓存，不是最终候选、生产双机或支付恢复验收。
+
+**不得把一次成功写成根因已修复或稳定通过。** 本轮更早48985退出1，源2/目标0；入口会话先失败，随后exportDatabase中的observer.readFenceProgress拒绝，日志 `/private/tmp/holaday-observer-boundary-20260929.log`，私密irgezh/coordinator-diagnostic.log。移除全部产品代码临时诊断后的最终34270又退出1，源2/目标0，在preflight以`CUTOVER_SITE_UNPROVEN`和`abort_without_mutation`退出，startup/registration/candidate事件均空；随后QA断言读取未生成报告触发ENOENT是次生错误。日志 `/private/tmp/holaday-enabled-worker-clean-final.log`，私密dd6sAD/coordinator-diagnostic.log。两类间歇性拒绝仍未定位，不能归为worker问题或声称已解决。
+
+精简原nginx物理夹具新增`--repeat-receipts`，同一真实会话连续100次读取原回执，再完成原TLS/双栈/WS/入口恢复及无关长连接保持。最初三次精简命令漏挂公开`ops`策略目录，导致payment-port fence拒绝，不能混同原备份失败；补齐只读`/ops`后64924退出0。日志 `/private/tmp/holaday-ingress-receipts-policy-mounted.log`。仅保留QA子进程的时钟倒退/超期/生命周期拒绝日志，不输出协议正文、凭据或业务数据；产品host/fence/session三文件已完全恢复至HEAD。两QA文件Biome最初报两处格式错误，修正后set-e格式、语法与diff-check退出0。最终无临时产品诊断的41739退出0：100次回执、原37条TLS拒绝、双栈/WS/入口恢复和无关长连接保持全部通过，无跳过；日志 `/private/tmp/holaday-ingress-receipts-clean-final.log`。所有本轮测试已结束，无运行中进程，不把此组件通过替代失败的完整链。
+
+本轮24c0d8c1、11d2515c和b5ed5185的精确QA数据库容器/卷已核对标签后清理，日志与私密恢复工件保留，原mysql/redis和`__pycache__`不动。下一步沿原site attach/preflight及入口会话边界定位拒绝，不能盲目重复整链、重试旧attempt/SQL或重做worker修复/全套组件回归来替代根因。生产headed browser/VNC维护范围仍待明确选择；原独立facts、受保护入口、真实停写备份/Mac恢复、非PayPal恢复及整分支审查门槛未过。未push/PR/合并/部署，CLI保持关闭，自动化未改。
+
 ### 2026-09-29 启用 worker 完整链验收与启动过渡修复（完整链仍未通过）
 
 **最终恢复入口：局部修复验证通过，完整链仍失败。** 86597的三种Linux物理夹具（慢启动+过期失败保留、worker关闭、备用启动文件缺失）均通过；Linux183/183零跳过。该轮Mac browser1082通过/34跳过、ops最后组913通过/34跳过，是漏传既有age路径，不计完整验收。15075使用`CUTOVER_TEST_AGE_EXECUTABLE=/opt/homebrew/bin/age`串行补跑，退出0：browser1116/1116、ops120/60/16/947及Python12，全部零失败/跳过。最终日志`/private/tmp/holaday-worker-start-{physical-final,linux-final,browser-noskip,ops-noskip}.log`，五MJS格式检查与diff-check退出0。全部测试结束，所有本轮专属容器/卷已清理；原mysql/redis和`__pycache__`保留。七个明确文件保存本次局部修复与尚未通过的完整QA分支，不标Task4–6完成或发布就绪。

@@ -41,10 +41,21 @@ const disk = {
   symlink: (a, b) => fs.symlink(map(a), map(b)),
   rename: (a, b) => fs.rename(map(a), map(b)),
 };
+// QA-only boundary diagnostics: no protocol payloads, site bytes or credentials.
+let previousClock = -1;
+const observedNow = () => {
+  const now = Date.now();
+  if (now < previousClock) console.error('QA_INGRESS_CLOCK_REGRESSED', previousClock - now);
+  if (now >= site.maintenanceEndsAtMs)
+    console.error('QA_INGRESS_DEADLINE_REACHED', now - site.maintenanceEndsAtMs);
+  previousClock = now;
+  return now;
+};
 try {
   await serveFirstCutoverIngressSession(
     { attempt: site.binding.attempt },
     {
+      now: observedNow,
       // This mapped-network fixture is a custom entry, not the production fixed
       // SSH entry. Report its REAL kernel identity; default source/argv checking
       // is separately exercised by the real-sshd fixture without this override.
@@ -79,6 +90,17 @@ try {
       },
       createLifecycle: async (...args) => {
         const lifecycle = await createFirstCutoverIngressLifecycle(...args);
+        for (const [name, operation] of Object.entries(lifecycle)) {
+          if (typeof operation !== 'function') continue;
+          lifecycle[name] = async (...values) => {
+            try {
+              return await operation(...values);
+            } catch (error) {
+              console.error('QA_INGRESS_LIFECYCLE_FAILED', name, error.message);
+              throw error;
+            }
+          };
+        }
         if (!fixture.loseEdgeAck) return lifecycle;
         return {
           ...lifecycle,
