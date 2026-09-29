@@ -2,6 +2,24 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29原host准备与同日志物理停止（基于bc6cc0f3）
+
+原`browser-first-cutover.integration.test.mjs`新增`CUTOVER_QA_LOST_EFFECT_CASE=host`。需要保留的QA Git/build环境；原unknown/known仍用新原age镜像容器。host模式直接使用原host所有方法，不预建journal、不替换stage/migrate/start；attach接原site/receiver。原Git候选6a46ee0f、源ede74e47，协调器为当前源码副本；真实锁定安装/tsc、完整61SQL manifest、uid998 v2报告读取、原风险绑定/startup/注册/pidfd停止，同attempt到缺备份拒绝。空数据库/支付事实、另一主机与入口仍明确合成，没有源备份/恢复/候选启动或生产效果。
+
+| 验证 | 实际结果 | 日志 |
+| --- | --- | --- |
+| 新断言对旧预建journal | 退出1，准确命中`QA_ORIGINAL_HOST_REQUIRED`，b40不等于真实候选 | `/private/tmp/holaday-original-host-red-actual.log` |
+| 原host正式Linux集成入口 | 1/1，退出0、零跳过；约60.9秒；备份缺失保持维护，无receipt/seed/open，site锁定不得重出证明，旧外部效果仍1，QA resurrect只恢复无关服务 | `/private/tmp/holaday-original-host-final.log` |
+| 原unknown Linux入口 | 1/1，退出0、零跳过 | `/private/tmp/holaday-original-host-unknown.log` |
+| 原known Linux入口 | 1/1，退出0、零跳过 | `/private/tmp/holaday-original-host-known.log` |
+| 不加SYS_PTRACE对照 | 原unknown 1/1，退出0、零跳过；不支持“需要扩大权限”的推测 | `/private/tmp/holaday-original-host-nocap.log` |
+
+诊断失败完整保留，不混入通过数：red.log为PPID0不符观察契约；red-final.log为/source软链接使接收端入口未执行；first.log为未提供合成数据库/支付scope；connected.log与diagnostic-clean.log为30分钟QA窗口超出原未托管停止剩余15分钟限制（原限制不改）；window-fixed.log已真实停止但测试错误要求失败锁定site再次出证明，修正为验证拒绝与独立停止/端口证据。中间一次finally错误遮蔽清理，diagnostic.log出现ETXTBSY；仅停止/重启精确QA容器终止遗留合成进程，修正夹具finally保留失败退出码且继续清理。无产品代码修复或放宽门禁。完整ops回归结果待本轮补充。
+
+全部旧尝试文件与锁保留，未清锁续跑。候选工具实际从/source运行（真实目录），继承上轮fixed PATH修复；本轮没有重新安装环境或构建镜像，没有支付/模型API或生产凭据访问。本模式当前与sourceQa组合显式互斥，原Mac恢复需要随后接入，不能称完整6.R3或首次发布完成。
+
+本轮最终原`pnpm test:ops`：120/60/16/869及Python12，全命令退出0、零跳过，日志`/private/tmp/holaday-original-host-ops.log`；两MJS Biome/node语法及diff-check退出0。PayPal测试仅离线假SSH，不访问其服务。没有新增完整浏览器/应用成功率或独立整分支审查结论。
+
 ## 2026-09-29原host候选构建与低权限readiness（基于6a46ee0f）
 
 实际Debian/Node22、原host自己持锁并stage；候选6a46ee0f、源ede74e47、全61SQL摘要`dd989a28fd9728b2f3f68bac80a29576b28cfa5863b7dc1641f72914c60fdb42`。新增夹具必须显式`CUTOVER_QA_STAGE=1`，Docker/root、固定只读QA origin和新文件排他创建；不是生产入口。schema1外部facts为合成、商户为空；不证明v2现场观察或真实支付恢复。实际tsc退出0，不以产物存在或mock build作为唯一依据。执行工具使用本轮源码副本，候选仍为上述已存在提交，最终发布还须重新固定完整工具/候选摘要。

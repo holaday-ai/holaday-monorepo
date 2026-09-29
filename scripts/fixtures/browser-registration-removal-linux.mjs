@@ -1,7 +1,7 @@
 // Disposable, private-PID Linux QA. No production access or credentials.
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
@@ -12,6 +12,7 @@ import { promisify } from 'node:util';
 import { backupAndRestoreCheck } from '/source/browser-first-cutover-backup.mjs';
 import { connectFirstCutoverGatewaySession } from '/source/browser-first-cutover-gateway-session.mjs';
 import {
+  createFirstCutoverHostAdapter,
   createFirstCutoverRetirementObserver,
   exportFirstCutoverSourceBackup,
   readFirstCutoverBackupPlan,
@@ -33,7 +34,9 @@ import {
 import { createLegacyRuntimeEffects } from '/source/browser-first-cutover-runtime.mjs';
 import { createFirstCutoverExecutionSite } from '/source/browser-first-cutover-site.mjs';
 import { performFirstCutover } from '/source/browser-first-cutover-transition.mjs';
+import { candidatePreparationSystem } from '/source/browser-maintenance-host.mjs';
 import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
+import { buildMaintenanceMigrationManifest } from '/source/browser-maintenance-manifest.mjs';
 await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
 await fs.copyFile('/opt/node22/bin/node', '/usr/bin/node');
@@ -51,6 +54,37 @@ const recoveryScope = recoveryLink ? JSON.parse(process.env.CUTOVER_QA_RECOVERY_
 const sourceQa = process.env.CUTOVER_QA_SOURCE
   ? JSON.parse(process.env.CUTOVER_QA_SOURCE)
   : undefined;
+const fullHost = process.env.CUTOVER_QA_HOST === '1';
+assert.ok(!fullHost || process.argv[2] === '--execution-site-lost-effect');
+assert.ok(!fullHost || !sourceQa);
+const hostConfig = fullHost
+  ? Buffer.from(
+      [
+        'MODEL_RUNTIME_POLICY=qwen_only',
+        'QWEN_CORE_ENABLED_LANES=browser',
+        'DASHSCOPE_INTL_API_KEY=synthetic-qa-not-a-provider-key',
+        'DASHSCOPE_INTL_ANTHROPIC_BASE_URL=http://127.0.0.1:1',
+        'DASHSCOPE_INTL_RESPONSES_BASE_URL=http://127.0.0.1:1',
+        'QWEN_CORE_ROLLOUT_MODE=off',
+        'TEAM_TASK_LIFECYCLE_ENABLED=false',
+        'ACCOUNT_CLOSURE_WORKER_ENABLED=false',
+        '',
+      ].join('\n'),
+    )
+  : undefined;
+let hostCandidate;
+if (fullHost) {
+  assert.equal(
+    (await exec('git', ['-C', '/opt/holaday-monorepo', 'remote', 'get-url', 'origin'])).trim(),
+    '/qa-origin.git',
+  );
+  hostCandidate = (await exec('git', ['--git-dir=/qa-origin.git', 'rev-parse', 'HEAD'])).trim();
+  assert.match(hostCandidate, /^[a-f0-9]{40}$/);
+  await fs.writeFile('/var/lib/holaday-deploy/maintenance-target.env', hostConfig, {
+    flag: 'wx',
+    mode: 0o600,
+  });
+}
 assert.ok(!sourceQa || (recoveryLink && !recoveryDrift));
 let sourceIo;
 if (sourceQa) {
@@ -163,7 +197,9 @@ await fs.writeFile('/tmp/registry-idle.cjs', 'setInterval(()=>{},1000);\n');
 // Approved metadata is synthetic; process and protected-file observations below
 // remain real. No production merchant or recovery transcript is used here.
 const readinessInventory = {
-  configurationDigests: [sourceQa ? recoveryScope.binding.configDigest : 'c'.repeat(64)],
+  configurationDigests: [
+    hostConfig ? sha(hostConfig) : sourceQa ? recoveryScope.binding.configDigest : 'c'.repeat(64),
+  ],
   merchants: [],
   targets: [],
 };
@@ -174,7 +210,9 @@ if (recoveryLink)
   };
 if (sourceQa) readinessInventory.backupSource = sourceQa.backupSource;
 const binding = {
-  attempt: recoveryScope?.binding.attempt ?? '22222222-2222-4222-8222-222222222222',
+  attempt:
+    recoveryScope?.binding.attempt ??
+    (fullHost ? randomUUID() : '22222222-2222-4222-8222-222222222222'),
   inventoryDigest: siteMode ? sha(JSON.stringify(readinessInventory)) : 'a'.repeat(64),
 };
 let journal;
@@ -184,6 +222,8 @@ let receiverCompletion;
 let client;
 let executionSite;
 let siteContext;
+let hostAdapter;
+let hostResult;
 let recoveryScopeChecks = 0;
 try {
   await pm2(
@@ -531,7 +571,8 @@ try {
     { reviews, inventoryDigest: binding.inventoryDigest },
     { readPair },
   );
-  const maintenanceEndsAtMs = recoveryScope?.maintenanceEndsAtMs ?? Date.now() + 60000;
+  const maintenanceEndsAtMs =
+    recoveryScope?.maintenanceEndsAtMs ?? Date.now() + (fullHost ? 600000 : 60000);
   const interruptionMetadata = interruption
     ? {
         schemaVersion: 2,
@@ -548,15 +589,39 @@ try {
         },
       }
     : {};
-  journal = await acquireReleaseJournal(directory, {
-    ...binding,
-    kind: 'first-cutover',
-    candidate: 'b'.repeat(40),
-    configDigest: sourceQa ? recoveryScope.binding.configDigest : 'c'.repeat(64),
-    migrationDigest: sourceQa ? recoveryScope.binding.migrationDigest : sha('[]'),
-    legacyDigest: proof.legacyDigest,
-    ...interruptionMetadata,
-  });
+  const hostApproval = fullHost
+    ? {
+        kind: 'first-cutover',
+        ...binding,
+        candidate: hostCandidate,
+        configDigest: sha(hostConfig),
+        migrationDigest: buildMaintenanceMigrationManifest('/opt/holaday-monorepo').sha256,
+        legacyDigest: proof.legacyDigest,
+        branch: 'codex/browser-release-candidate-20260925',
+        ...interruptionMetadata,
+      }
+    : undefined;
+  if (fullHost) {
+    await fs.writeFile(`${directory}/first-cutover-approved.json`, JSON.stringify(hostApproval), {
+      flag: 'wx',
+      mode: 0o600,
+    });
+    // Only synthetic QA installation. Keep private children protected while
+    // allowing the actual uid998 readiness reader to traverse the ancestor.
+    await fs.chown('/var/lib/holaday-deploy', 0, 998);
+    await fs.chmod('/var/lib/holaday-deploy', 0o710);
+    await fs.mkdir('/var/lib/holaday-deploy/evidence', { mode: 0o750 });
+    await fs.chown('/var/lib/holaday-deploy/evidence', 0, 998);
+  } else
+    journal = await acquireReleaseJournal(directory, {
+      ...binding,
+      kind: 'first-cutover',
+      candidate: 'b'.repeat(40),
+      configDigest: sourceQa ? recoveryScope.binding.configDigest : 'c'.repeat(64),
+      migrationDigest: sourceQa ? recoveryScope.binding.migrationDigest : sha('[]'),
+      legacyDigest: proof.legacyDigest,
+      ...interruptionMetadata,
+    });
   const createObserver = async () =>
     createFirstCutoverRetirementObserver(
       { reviews, binding: await journal.assertOwnership(), legacyDigest: proof.legacyDigest },
@@ -568,7 +633,7 @@ try {
       },
     );
   let observer = attachedBaseline ? undefined : await createObserver();
-  await journal.bindManifest(sourceQa?.migrationManifest ?? []);
+  if (!fullHost) await journal.bindManifest(sourceQa?.migrationManifest ?? []);
   const advanceToPrepare = async () => {
     for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
       await journal.persist(phase, { candidate: 'b'.repeat(40) });
@@ -601,301 +666,414 @@ try {
         producersRunning: 0,
       }),
     };
-    if (sessionMode) {
-      const fullBinding = await journal.assertOwnership();
-      if (recoveryLink) assert.deepEqual(fullBinding, recoveryScope.binding);
-      const approval = {
-        schemaVersion: 1,
-        kind: 'first-cutover',
-        ...fullBinding,
-        legacyDigest: proof.legacyDigest,
-        branch: 'codex/qa-gateway-session',
-        maintenanceEndsAtMs: input.maintenanceEndsAtMs,
-        reconcileByMs: input.maintenanceEndsAtMs + 60000,
-        operatorRef: 'qa-only',
-        ...interruptionMetadata,
-      };
-      await fs.writeFile(`${directory}/first-cutover-approved.json`, JSON.stringify(approval), {
-        mode: 0o600,
-      });
-      const siteBytes = JSON.stringify({
-        schemaVersion: 1,
-        host: 'aliyun',
-        binding: fullBinding,
-        maintenanceEndsAtMs: input.maintenanceEndsAtMs,
-        startupFiles: files,
-      });
-      await fs.writeFile(`${directory}/first-cutover-gateway-approved.json`, siteBytes, {
-        mode: 0o600,
-      });
-      receiver = spawn(
-        '/usr/bin/node',
-        ['/source/browser-first-cutover-gateway-session.mjs', binding.attempt],
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      );
-      receiver.stderr.resume();
-      receiverCompletion = new Promise((resolve) =>
-        receiver.once('close', (code) => resolve({ code })),
-      );
-      const originalRecord = journal.recordRegistrationEvent.bind(journal);
-      const connect = () =>
-        connectFirstCutoverGatewaySession(
-          {
-            binding: fullBinding,
-            maintenanceEndsAtMs: input.maintenanceEndsAtMs,
-            siteDigest: sha(siteBytes),
-          },
-          {
-            ...io,
-            journal: {
-              ...journal,
-              recordRegistrationEvent: async (event) => {
-                await originalRecord(event);
-                if (sessionLostAck && event.phase === 'registration-deleted') receiver.stdin.end();
-              },
-            },
-            open: async () => ({
-              input: receiver.stdout,
-              output: receiver.stdin,
-              completion: receiverCompletion,
-            }),
-          },
-        );
-      if (siteMode) {
-        siteContext = {
-          approval,
-          binding: fullBinding,
-          journal,
-          root: `/opt/holaday-releases/${fullBinding.candidate}`,
+    const setupSite = async (hostContext) => {
+      if (hostContext) {
+        assert.equal(journal, undefined, 'host must be the sole journal creator');
+        journal = hostContext.journal;
+        siteContext = hostContext;
+        assert.deepEqual(await journal.assertOwnership(), hostContext.binding);
+      }
+      if (sessionMode) {
+        const fullBinding = await journal.assertOwnership();
+        if (recoveryLink) assert.deepEqual(fullBinding, recoveryScope.binding);
+        const approval = hostContext?.approval ?? {
+          schemaVersion: 1,
+          kind: 'first-cutover',
+          ...fullBinding,
+          legacyDigest: proof.legacyDigest,
+          branch: 'codex/qa-gateway-session',
+          maintenanceEndsAtMs: input.maintenanceEndsAtMs,
+          reconcileByMs: input.maintenanceEndsAtMs + 60000,
+          operatorRef: 'qa-only',
+          ...interruptionMetadata,
         };
-        // One physical Aliyun host + receiver. Other host, ingress and business
-        // counts are explicitly synthetic, NOT full two-host cutover evidence.
-        const fence = (stage) => ({
-          inventoryDigest: binding.inventoryDigest,
-          stage,
-          observedAtMs: Date.now(),
-          existingSockets: 0,
-          internalWriters: 0,
-          producersRunning: 0,
+        if (!fullHost)
+          await fs.writeFile(`${directory}/first-cutover-approved.json`, JSON.stringify(approval), {
+            mode: 0o600,
+          });
+        const siteBytes = JSON.stringify({
+          schemaVersion: 1,
+          host: 'aliyun',
+          binding: fullBinding,
+          maintenanceEndsAtMs: input.maintenanceEndsAtMs,
+          startupFiles: files,
         });
-        await fs.writeFile(
-          `${directory}/first-cutover-execution-approved.json`,
-          JSON.stringify({
-            schemaVersion: 1,
-            host: 'vultr',
+        await fs.writeFile(`${directory}/first-cutover-gateway-approved.json`, siteBytes, {
+          mode: 0o600,
+        });
+        receiver = spawn(
+          '/usr/bin/node',
+          ['/source/browser-first-cutover-gateway-session.mjs', binding.attempt],
+          { stdio: ['pipe', 'pipe', 'pipe'] },
+        );
+        receiver.stderr.resume();
+        receiverCompletion = new Promise((resolve) =>
+          receiver.once('close', (code) => resolve({ code })),
+        );
+        const originalRecord = journal.recordRegistrationEvent.bind(journal);
+        const connect = () =>
+          connectFirstCutoverGatewaySession(
+            {
+              binding: fullBinding,
+              maintenanceEndsAtMs: input.maintenanceEndsAtMs,
+              siteDigest: sha(siteBytes),
+            },
+            {
+              ...io,
+              journal: {
+                ...journal,
+                recordRegistrationEvent: async (event) => {
+                  await originalRecord(event);
+                  if (sessionLostAck && event.phase === 'registration-deleted')
+                    receiver.stdin.end();
+                },
+              },
+              open: async () => ({
+                input: receiver.stdout,
+                output: receiver.stdin,
+                completion: receiverCompletion,
+              }),
+            },
+          );
+        if (siteMode) {
+          siteContext = hostContext ?? {
+            approval,
             binding: fullBinding,
-            maintenanceEndsAtMs: input.maintenanceEndsAtMs,
-            site: {
-              legacyDigest: proof.legacyDigest,
-              ...(recoveryLink ? { backupRecoveryDigest: recoveryScope.scopeDigest } : {}),
-              inventory: readinessInventory,
-              reviews,
-              gatewaySiteDigest: sha(siteBytes),
-              ingress: {
-                inventoryDigest: binding.inventoryDigest,
-                unknownIngress: [],
-                remoteSiteDigest: sha('synthetic ingress'),
-                files: [
-                  ['holaday', 'vultr-20260926'],
-                  ['hd-app.orangebench.tech', 'aliyun-app-20260926'],
-                  ['hd-pay.orangebench.tech', 'aliyun-pay-20260926'],
-                ].map(([name, profile]) => ({
-                  path: `/etc/nginx/sites-available/${name}`,
-                  profile,
+            journal,
+            root: `/opt/holaday-releases/${fullBinding.candidate}`,
+          };
+          // One physical Aliyun host + receiver. Other host, ingress and business
+          // counts are explicitly synthetic, NOT full two-host cutover evidence.
+          const fence = (stage) => ({
+            inventoryDigest: binding.inventoryDigest,
+            stage,
+            observedAtMs: Date.now(),
+            existingSockets: 0,
+            internalWriters: 0,
+            producersRunning: 0,
+          });
+          await fs.writeFile(
+            `${directory}/first-cutover-execution-approved.json`,
+            JSON.stringify({
+              schemaVersion: 1,
+              host: 'vultr',
+              binding: fullBinding,
+              maintenanceEndsAtMs: input.maintenanceEndsAtMs,
+              site: {
+                legacyDigest: proof.legacyDigest,
+                ...(recoveryLink ? { backupRecoveryDigest: recoveryScope.scopeDigest } : {}),
+                inventory: readinessInventory,
+                reviews,
+                gatewaySiteDigest: sha(siteBytes),
+                ingress: {
+                  inventoryDigest: binding.inventoryDigest,
+                  unknownIngress: [],
+                  remoteSiteDigest: sha('synthetic ingress'),
+                  files: [
+                    ['holaday', 'vultr-20260926'],
+                    ['hd-app.orangebench.tech', 'aliyun-app-20260926'],
+                    ['hd-pay.orangebench.tech', 'aliyun-pay-20260926'],
+                  ].map(([name, profile]) => ({
+                    path: `/etc/nginx/sites-available/${name}`,
+                    profile,
+                  })),
+                },
+                producerStartupFiles: ['dump.pm2', 'dump.pm2.bak'].map((name) => ({
+                  path: `/root/.pm2/${name}`,
+                  digest: sha('synthetic other host'),
+                  remove: [
+                    { name: 'holaday-orchestrator', entryDigest: sha('synthetic producer') },
+                  ],
                 })),
               },
-              producerStartupFiles: ['dump.pm2', 'dump.pm2.bak'].map((name) => ({
-                path: `/root/.pm2/${name}`,
-                digest: sha('synthetic other host'),
-                remove: [{ name: 'holaday-orchestrator', entryDigest: sha('synthetic producer') }],
-              })),
-            },
-          }),
-          { mode: 0o600 },
-        );
-        executionSite = createFirstCutoverExecutionSite(
-          { attempt: binding.attempt },
-          {
-            readCoordinatorIdentity: async () => ({ binding: fullBinding }),
-            ...(sourceQa
-              ? {
-                  readBackupPlan: (ctx, inventory) =>
-                    readFirstCutoverBackupPlan(ctx, inventory, sourceIo),
-                  exportSourceBackup: (ctx, inventory, deps) =>
-                    exportFirstCutoverSourceBackup(ctx, inventory, { ...sourceIo, ...deps }),
-                  readSourceSnapshot: (ctx, inventory, deps) =>
-                    readFirstCutoverSourceSnapshot(ctx, inventory, { ...sourceIo, ...deps }),
-                }
-              : {}),
-            // Persisted-work/other-host facts remain explicitly synthetic.
-            // sourceQa adds a real backup database, not production work coverage.
-            readPersistedWork: async () => ({
-              observedAtMs: Date.now(),
-              unsettled: [],
-              ...(interruption
-                ? { pendingReplay: 0, replaySourcesDigest: sha('synthetic QA persisted source') }
-                : {}),
             }),
-            readPair,
-            facts: {
-              observeWriters: async () => fence('orders'),
-              observeWork: async () => ({
-                inventoryDigest: binding.inventoryDigest,
+            { mode: 0o600 },
+          );
+          executionSite = createFirstCutoverExecutionSite(
+            { attempt: binding.attempt },
+            {
+              readCoordinatorIdentity: async () => ({ binding: fullBinding }),
+              ...(sourceQa
+                ? {
+                    readBackupPlan: (ctx, inventory) =>
+                      readFirstCutoverBackupPlan(ctx, inventory, sourceIo),
+                    exportSourceBackup: (ctx, inventory, deps) =>
+                      exportFirstCutoverSourceBackup(ctx, inventory, { ...sourceIo, ...deps }),
+                    readSourceSnapshot: (ctx, inventory, deps) =>
+                      readFirstCutoverSourceSnapshot(ctx, inventory, { ...sourceIo, ...deps }),
+                  }
+                : {}),
+              // Persisted-work/other-host facts remain explicitly synthetic.
+              // sourceQa adds a real backup database, not production work coverage.
+              readPersistedWork: async () => ({
                 observedAtMs: Date.now(),
-                unsettledWork: 0,
-                externalWork: 0,
-                activeRequests: 0,
-                unknownWriters: 0,
+                unsettled: [],
                 ...(interruption
-                  ? {
-                      schemaVersion: 2,
-                      activeRequests: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
-                      externalWork: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
-                      knownExternalWork: knownEffectVisible
-                        ? [{ privateEvidenceRef: sha('known QA action'), outcome: 'unknown' }]
-                        : [],
-                      capabilityDigest: interruptionMetadata.legacyInterruption.capabilityDigest,
-                      replaySourcesDigest: sha('synthetic QA replay source'),
-                      pendingReplay: 0,
-                    }
+                  ? { pendingReplay: 0, replaySourcesDigest: sha('synthetic QA persisted source') }
                   : {}),
               }),
-              settleLegacy: async () => {},
-              verifyOpenedIdentity: async () => {
-                throw Error('not exercised');
-              },
-              resumeWorker: async () => {
-                throw Error('not exercised');
-              },
-              reconcile: async () => {
-                throw Error('not exercised');
-              },
-              holdMaintenance: lostEffect ? recordFirstCutoverFailure : async () => {},
-              ...(sourceQa
-                ? {}
-                : {
-                    readBackupPlan: async () => {
-                      throw Error('not exercised');
-                    },
-                  }),
-            },
-            createIngress: async () => ({
-              verifyOrders: async () => fence('orders'),
-              verifyFence: async () => fence('all-writers'),
-              fenceOrders: async () => {},
-              fenceAll: async () => {},
-              readFenceReceipts: async () => [],
-              close: async () => {},
-            }),
-            connectGateway: async (args, deps) => {
-              client = await connectFirstCutoverGatewaySession(args, {
-                ...deps,
-                ...(siteLostAck
-                  ? {
-                      journal: {
-                        ...deps.journal,
-                        recordRegistrationEvent: async (event) => {
-                          await deps.journal.recordRegistrationEvent(event);
-                          if (event.phase === 'registration-deleted') receiver.stdin.end();
-                        },
-                      },
-                    }
-                  : {}),
-                open: async () => ({
-                  input: receiver.stdout,
-                  output: receiver.stdin,
-                  completion: receiverCompletion,
+              readPair,
+              facts: {
+                observeWriters: async () => fence('orders'),
+                observeWork: async () => ({
+                  inventoryDigest: binding.inventoryDigest,
+                  observedAtMs: Date.now(),
+                  unsettledWork: 0,
+                  externalWork: 0,
+                  activeRequests: 0,
+                  unknownWriters: 0,
+                  ...(interruption
+                    ? {
+                        schemaVersion: 2,
+                        activeRequests: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+                        externalWork: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+                        knownExternalWork: knownEffectVisible
+                          ? [{ privateEvidenceRef: sha('known QA action'), outcome: 'unknown' }]
+                          : [],
+                        capabilityDigest: interruptionMetadata.legacyInterruption.capabilityDigest,
+                        replaySourcesDigest: sha('synthetic QA replay source'),
+                        pendingReplay: 0,
+                      }
+                    : {}),
                 }),
-              });
-              return client;
+                settleLegacy: async () => {},
+                verifyOpenedIdentity: async () => {
+                  throw Error('not exercised');
+                },
+                resumeWorker: async () => {
+                  throw Error('not exercised');
+                },
+                reconcile: async () => {
+                  throw Error('not exercised');
+                },
+                holdMaintenance: lostEffect ? recordFirstCutoverFailure : async () => {},
+                ...(sourceQa
+                  ? {}
+                  : {
+                      readBackupPlan: async () => {
+                        throw Error('not exercised');
+                      },
+                    }),
+              },
+              createIngress: async () => ({
+                verifyOrders: async () => fence('orders'),
+                verifyFence: async () => fence('all-writers'),
+                fenceOrders: async () => {},
+                fenceAll: async () => {},
+                readFenceReceipts: async () => [],
+                close: async () => {},
+              }),
+              connectGateway: async (args, deps) => {
+                client = await connectFirstCutoverGatewaySession(args, {
+                  ...deps,
+                  ...(siteLostAck
+                    ? {
+                        journal: {
+                          ...deps.journal,
+                          recordRegistrationEvent: async (event) => {
+                            await deps.journal.recordRegistrationEvent(event);
+                            if (event.phase === 'registration-deleted') receiver.stdin.end();
+                          },
+                        },
+                      }
+                    : {}),
+                  open: async () => ({
+                    input: receiver.stdout,
+                    output: receiver.stdin,
+                    completion: receiverCompletion,
+                  }),
+                });
+                return client;
+              },
+              createObserver: async (args, deps) => {
+                observer = await createFirstCutoverRetirementObserver(args, {
+                  ...deps,
+                  readExecutionIdentities: async () => [client.readExecutionIdentity()],
+                });
+                if (fullHost) {
+                  for (const name of Object.keys(observer)) {
+                    if (typeof observer[name] !== 'function') continue;
+                    const original = observer[name];
+                    observer[name] = async (...args) => {
+                      try {
+                        return await original(...args);
+                      } catch (error) {
+                        console.error('QA_OBSERVER_FAILED', name, error.message);
+                        throw error;
+                      }
+                    };
+                  }
+                }
+                return observer;
+              },
+              retireProducers: async () => {
+                assert.equal(
+                  (await observer.read()).hosts.find((h) => h.host === 'vultr').registered.processes
+                    .length,
+                  0,
+                );
+              },
             },
-            createObserver: async (args, deps) => {
-              observer = await createFirstCutoverRetirementObserver(args, {
-                ...deps,
-                readExecutionIdentities: async () => [client.readExecutionIdentity()],
+          );
+          await executionSite.lifecycle.attach(siteContext);
+          if (interruption) {
+            const socket = createConnection({ host: '127.0.0.1', port: 4011 });
+            try {
+              await new Promise((resolve, reject) => {
+                socket.once('connect', resolve);
+                socket.once('error', reject);
               });
-              return observer;
-            },
-            retireProducers: async () => {
+              const connected = await observer.read();
               assert.equal(
-                (await observer.read()).hosts.find((h) => h.host === 'vultr').registered.processes
-                  .length,
+                connected.hosts.find((h) => h.host === 'aliyun').tcpObservation.existingSockets,
+                1,
+              );
+              assert.equal(
+                connected.hosts.find((h) => h.host === 'vultr').tcpObservation.existingSockets,
                 0,
               );
+            } finally {
+              const closed = new Promise((resolve) => socket.once('close', resolve));
+              socket.destroy();
+              await closed;
+            }
+            console.log(
+              'PASS real ss observation sees retained service connection independently of synthetic writer counts',
+            );
+          }
+          const readinessScope = {
+            binding: fullBinding,
+            stage: 'prepare',
+            window: {
+              maintenanceEndsAtMs: approval.maintenanceEndsAtMs,
+              reconcileByMs: approval.reconcileByMs,
+              operatorRef: approval.operatorRef,
+            },
+          };
+          const actualInventory = await executionSite.evidence.readHostInventory(readinessScope);
+          assert.deepEqual(actualInventory.inventory, readinessInventory);
+          assert.deepEqual(actualInventory.producersRunning, []); // This fixture has only gateways.
+          if (interruption) {
+            assert.equal(
+              actualInventory.riskDigest,
+              (await journal.readFirstCutoverEffects()).riskDigest,
+            );
+            assert.equal(actualInventory.legacyWork.before.activeRequests.kind, 'unobservable');
+            assert.equal(actualInventory.legacyWork.after.externalWork.kind, 'unobservable');
+          }
+          const evidenceDirectory = '/var/lib/holaday-deploy/evidence-private';
+          await fs.mkdir(evidenceDirectory, { mode: 0o700 });
+          await fs.writeFile(
+            `${evidenceDirectory}/rehearsal-${fullBinding.configDigest}.json`,
+            JSON.stringify({
+              schemaVersion: 1,
+              candidate: fullBinding.candidate,
+              configDigest: fullBinding.configDigest,
+              inventoryDigest: fullBinding.inventoryDigest,
+              observedAtMs: Date.now(),
+              recoveryUntilMs: approval.reconcileByMs,
+              recovery: 'retry-proven',
+              artifacts: [],
+            }),
+            { mode: 0o600, flag: 'wx' },
+          );
+          assert.equal(
+            (await executionSite.evidence.readRehearsalArtifacts(readinessScope)).recoveryUntilMs,
+            approval.reconcileByMs,
+          );
+          console.log(
+            'PASS site readiness readers: default root-protected inventory/rehearsal file readers and actual process observer; synthetic merchant metadata, NOT payment recovery',
+          );
+        } else client = await connect();
+      }
+    };
+    if (fullHost) {
+      const forward = (group, names) =>
+        Object.fromEntries(
+          names.map((name) => [
+            name,
+            async (...args) => {
+              assert.ok(executionSite, 'site must be attached by the original host');
+              try {
+                return await executionSite[group][name](...args);
+              } catch (error) {
+                console.error('QA_SITE_FAILED', group, name, error.message);
+                throw error;
+              }
+            },
+          ]),
+        );
+      const system = candidatePreparationSystem();
+      hostAdapter = createFirstCutoverHostAdapter(
+        { attempt: binding.attempt },
+        {
+          lifecycle: {
+            ...forward('lifecycle', [
+              'detach',
+              'fenceOrders',
+              'settleLegacy',
+              'stopProducers',
+              'fenceAll',
+              'stopLegacy',
+              'assertStopped',
+              'verifyFence',
+              'restoreIngress',
+              'resumeWorker',
+              'reconcile',
+              'holdMaintenance',
+              'readBackupPlan',
+              'readLegacyDisposition',
+              'acceptLegacyInterruption',
+            ]),
+            attach: setupSite,
+          },
+          backup: forward('backup', [
+            'readDatabaseIdentity',
+            'inspectBackupFacility',
+            'exportDatabase',
+            'hashArtifact',
+            'restoreIsolated',
+            'compareInventoryAndData',
+            'runApprovedMigrations',
+            'verifySchema',
+            'readSourceDigest',
+            'finishRecovery',
+          ]),
+          evidence: {
+            ...forward('evidence', [
+              'readHostInventory',
+              'readDatabaseScope',
+              'queryOrders',
+              'readRehearsalArtifacts',
+              'readFenceState',
+            ]),
+            // This fixture has no database or payment service. Keep that scope
+            // explicitly synthetic rather than accidentally invoking merchants.
+            readDatabaseScope: async () => ({
+              observedAtMs: Date.now(),
+              orders: [],
+              unsettled: [],
+            }),
+            queryOrders: async (database) => {
+              assert.deepEqual(database.orders, []);
+              assert.deepEqual(database.unsettled, []);
+              return [];
             },
           },
-        );
-        await executionSite.lifecycle.attach(siteContext);
-        if (interruption) {
-          const socket = createConnection({ host: '127.0.0.1', port: 4011 });
-          try {
-            await new Promise((resolve, reject) => {
-              socket.once('connect', resolve);
-              socket.once('error', reject);
-            });
-            const connected = await observer.read();
-            assert.equal(
-              connected.hosts.find((h) => h.host === 'aliyun').tcpObservation.existingSockets,
-              1,
-            );
-            assert.equal(
-              connected.hosts.find((h) => h.host === 'vultr').tcpObservation.existingSockets,
-              0,
-            );
-          } finally {
-            const closed = new Promise((resolve) => socket.once('close', resolve));
-            socket.destroy();
-            await closed;
-          }
-          console.log(
-            'PASS real ss observation sees retained service connection independently of synthetic writer counts',
-          );
-        }
-        const readinessScope = {
-          binding: fullBinding,
-          stage: 'prepare',
-          window: {
-            maintenanceEndsAtMs: approval.maintenanceEndsAtMs,
-            reconcileByMs: approval.reconcileByMs,
-            operatorRef: approval.operatorRef,
-          },
-        };
-        const actualInventory = await executionSite.evidence.readHostInventory(readinessScope);
-        assert.deepEqual(actualInventory.inventory, readinessInventory);
-        assert.deepEqual(actualInventory.producersRunning, []); // This fixture has only gateways.
-        if (interruption) {
-          assert.equal(
-            actualInventory.riskDigest,
-            (await journal.readFirstCutoverEffects()).riskDigest,
-          );
-          assert.equal(actualInventory.legacyWork.before.activeRequests.kind, 'unobservable');
-          assert.equal(actualInventory.legacyWork.after.externalWork.kind, 'unobservable');
-        }
-        const evidenceDirectory = '/var/lib/holaday-deploy/evidence-private';
-        await fs.mkdir(evidenceDirectory, { mode: 0o700 });
-        await fs.writeFile(
-          `${evidenceDirectory}/rehearsal-${fullBinding.configDigest}.json`,
-          JSON.stringify({
-            schemaVersion: 1,
-            candidate: fullBinding.candidate,
-            configDigest: fullBinding.configDigest,
-            inventoryDigest: fullBinding.inventoryDigest,
+          inspectLegacySource: async () => ({
+            sourceCandidate: (
+              await exec('git', ['-C', '/opt/holaday-monorepo', 'rev-parse', 'HEAD'])
+            ).trim(),
+            legacyDigest: proof.legacyDigest,
             observedAtMs: Date.now(),
-            recoveryUntilMs: approval.reconcileByMs,
-            recovery: 'retry-proven',
-            artifacts: [],
           }),
-          { mode: 0o600, flag: 'wx' },
-        );
-        assert.equal(
-          (await executionSite.evidence.readRehearsalArtifacts(readinessScope)).recoveryUntilMs,
-          approval.reconcileByMs,
-        );
-        console.log(
-          'PASS site readiness readers: default root-protected inventory/rehearsal file readers and actual process observer; synthetic merchant metadata, NOT payment recovery',
-        );
-      } else client = await connect();
-    }
+          exec: async (command, args, options) => {
+            console.log('QA_HOST_COMMAND', command, JSON.stringify(args));
+            return system.exec(command, args, options);
+          },
+        },
+      );
+    } else await setupSite();
     if (siteMode) {
       if (lostEffect) {
         // Exercise the real transition/site/journal through retirement and,
@@ -991,10 +1169,31 @@ try {
         ])
           adapter[method] = () => executionSite.lifecycle[method](siteContext);
         const result = await performFirstCutover({
-          candidate: siteContext.binding.candidate,
-          adapter,
-          window: siteContext.approval,
+          candidate: fullHost ? hostCandidate : siteContext.binding.candidate,
+          adapter: hostAdapter ?? adapter,
+          window: hostApproval ?? siteContext.approval,
         });
+        hostResult = result;
+        if (fullHost) console.log('QA_HOST_OUTCOME', JSON.stringify(result));
+        if (process.env.CUTOVER_QA_HOST === '1') {
+          // The old fixture's precreated bbbb journal cannot satisfy this: the
+          // original host must stage the actual Git candidate before stopping.
+          const actualCandidate = (
+            await exec('git', ['--git-dir=/qa-origin.git', 'rev-parse', 'HEAD'])
+          ).trim();
+          assert.equal(siteContext.binding.candidate, actualCandidate, 'QA_ORIGINAL_HOST_REQUIRED');
+          assert.equal(
+            (await exec('git', ['-C', siteContext.root, 'rev-parse', 'HEAD'])).trim(),
+            actualCandidate,
+          );
+          await fs.access(`${siteContext.root}/apps/orchestrator/dist/index.js`);
+          const published = JSON.parse(
+            await fs.readFile(`/var/lib/holaday-deploy/evidence/${binding.attempt}.json`, 'utf8'),
+          );
+          assert.equal(published.attempt, binding.attempt);
+          assert.equal(published.candidate, actualCandidate);
+          assert.equal(published.stage, 'prepare');
+        }
         assert.equal(result.ok, false);
         assert.equal(result.action, 'hold_maintenance');
         assert.equal(
@@ -1022,7 +1221,9 @@ try {
               ? 'CUTOVER_RECOVERY_SESSION_UNPROVEN'
               : sourceQa
                 ? 'CUTOVER_QA_UNEXPECTED_TAIL'
-                : 'CUTOVER_QA_RESTORE_NOT_CONFIGURED',
+                : fullHost
+                  ? 'CUTOVER_SITE_UNPROVEN'
+                  : 'CUTOVER_QA_RESTORE_NOT_CONFIGURED',
           );
           assert.equal(effects.interruptionObservation.riskDigest, effects.riskDigest);
           assert.equal(effects.legacyInterruption.scope, 'legacy-non-payment-memory');
@@ -1039,6 +1240,18 @@ try {
               undefined,
             );
             await assert.rejects(executionSite.lifecycle.assertStopped(siteContext), /UNPROVEN/);
+          } else if (fullHost) {
+            // Unlike the old adapter's artificial backup throw, the real site
+            // latches its failed backup boundary. It must not issue new proofs.
+            await assert.rejects(
+              executionSite.lifecycle.assertStopped(siteContext),
+              /CUTOVER_SITE_UNPROVEN/,
+            );
+            const durable = JSON.parse(await fs.readFile(journal.path, 'utf8'));
+            assert.equal(durable.backupReceipt, undefined);
+            assert.equal(durable.bootstrapSeed, undefined);
+            assert.equal(effects.unmanagedEvents.at(-1).phase, 'unmanaged-stopped');
+            await assert.rejects(fetch('http://127.0.0.1:4011'));
           } else if (!sourceQa)
             assert.deepEqual(
               (await executionSite.lifecycle.assertStopped(siteContext)).survivors,
@@ -1047,7 +1260,8 @@ try {
           await assert.rejects(fetch(`http://127.0.0.1:${mainPort}`));
         }
         assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
-        await executionSite.lifecycle.detach(siteContext);
+        if (fullHost) await hostAdapter.finish(result);
+        else await executionSite.lifecycle.detach(siteContext);
         assert.equal((await receiverCompletion).code, 0);
         if (!knownEffect) {
           await pm2('kill');
@@ -1066,6 +1280,7 @@ try {
             effectCount,
             riskDigest: effects.riskDigest,
             releaseReady: false,
+            ...(fullHost ? { originalHost: true, nativeCandidatePreparation: true } : {}),
             ...(recoveryLink
               ? { recoveryLinked: !recoveryDrift, recoveryRejected: recoveryDrift }
               : {}),
@@ -1331,6 +1546,14 @@ try {
     );
   }
 } finally {
+  if (hostAdapter) {
+    try {
+      await hostAdapter.finish(hostResult ?? { ok: false });
+    } catch (error) {
+      console.error('QA_HOST_FINISH_FAILED', error.message);
+      process.exitCode = 1;
+    }
+  }
   receiver?.stdin.end();
   if (receiverCompletion) await receiverCompletion;
   if (gateway && gateway.exitCode === null && gateway.signalCode === null) gateway.kill('SIGTERM');

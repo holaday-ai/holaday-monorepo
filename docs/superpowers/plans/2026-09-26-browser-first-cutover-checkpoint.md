@@ -1,10 +1,24 @@
-# 首次切换实施断点：真实host准备链已验证并修复PATH，尚未合并完整停止/恢复/候选尾段
+# 首次切换实施断点：原host持锁准备与实际停止已接线，完整恢复/候选尾段仍待同次验收
 
 日期：2026-09-26（Asia/Tokyo）。本地实施中，未部署。
 
 最新授权：2026-09-26 用户表示“我要出去一下 你自行安排任务 允许期间的所有操作 包含PR 部署 验证”。当前浏览器上线大项允许自主实施、PR、必要合并、部署与验证；下方历史“仅本地/未授权部署”限制已被本次授权取代。授权不等于验收通过；必须完成剩余真实接线、恢复演练与发布门槛，不得修改历史业务记录来伪造通过。
 
 ## 最新恢复点（优先于下方历史段落）
+
+### 2026-09-29 JST（00:19Z heartbeat）：原host拥有同一个stage与物理停止日志
+
+起点`bc6cc0f3`，Task4 BASE不变。只改原物理夹具和原Linux集成入口，不修改产品/部署模块。`CUTOVER_QA_LOST_EFFECT_CASE=host`通过`CUTOVER_QA_HOST=1`让原`createFirstCutoverHostAdapter`亲自preflight/stage、原Git/install/tsc、全61SQL manifest、实际uid998的v2 readiness；`lifecycle.attach`收到它创建的context后才接原site/网关接收器，夹具不再预建或注入另一个journal。随后同一个adapter/attempt/window执行原受控风险接受、startup删除、PM2唯一注册删除、pidfd未托管停止。数据库/支付及另一主机/入口事实明确合成，不调用商户。
+
+原缺少host的夹具已用实际Git候选断言RED：b40不等于真实6a46ee0f，退出1。接线后的真实执行到达`backup_verified`意图阶段，原site因没有备份计划拒绝并锁定；这不是备份完成，无receipt/seed/候选start/open。最终集成入口及回归结果待本轮补充。之前独立源备份/Mac恢复仍需合并到本次host模式，不能相加称完整6.R3。CLI execute关闭、未push/PR/合并/部署。
+
+已定位的QA安装/接线问题不要重查或改产品限制：docker exec的观察器必须由Node父进程启动（ppid>=1）；`/source`必须真实目录，软链接会令接收端import.meta入口不执行；原30分钟准备窗口不能用于未托管停止（原接口剩余窗口最多900000ms），本模式新批准用10分钟；备份失败锁定的site不得再成功出具assertStopped，需检查拒绝、持久停止事件、实际端口关闭/外部效果1。一次失败finally曾遮蔽后续清理，现只记录finish错误并保留退出1，仍清理本夹具进程；曾单次停止/重启精确QA容器清理遗留进程。无须提高容器权限：原unknown在不加SYS_PTRACE的新隔离容器已1/1通过。
+
+继续复用容器`c0f4c822de9a90343ade1a060266014589ebd8eb170b1bc2f69bd6710f1c2199`及只读`/qa-origin.git`。**工具目录已从/qa-tools移为真实/source**，源码/候选实际SHA仍ede74e47→6a46ee0f，执行协调器是当前源码副本，不是新分支已发布。旧attempt和候选/锁都在`/qa-preserved-host-*`及原stage目录，没有清锁续跑或删除。磁盘只读检查415GiB可用。未重装依赖/重建镜像；容器仍无外网/无端口/私有PID/1CPU3GiB。
+
+下一步具体环境接合：本host模式目前显式拒绝sourceQa组合，不能宣称其已接原Mac恢复。原恢复父夹具需要在**原age镜像的新隔离源netns容器**中获得已缓存git/pnpm/store/QA bare origin，再运行本attach路径；复用已准备构建文件，不重建镜像、不放宽恢复目标验证、不上传恢复私钥。只读ldd已确认/usr/bin/git依赖pcre2-8、z、libc及arm64 loader，本地QA origin不需要公网HTTPS。沿原backup接口接源导出/恢复/全61SQL及候选尾段；生产独立facts、非PayPal恢复、整分支审查仍未完成。被拒管理凭据路径未重试，原cache/草稿/自动化不变。
+
+本段最终验证：原host正式Linux集成1/1（60.9秒）、原unknown/known各1/1、ops120/60/16/869+Python12，全部退出0、零跳过；静态检查通过。日志见verification对应节。后续继续接原source/recovery，不标Task4完成。
 
 ### 2026-09-29 JST（2026-09-28 23:18Z heartbeat）：原host真实构建/低权限readiness及PATH修复
 

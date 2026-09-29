@@ -14,16 +14,19 @@ import { promisify } from 'node:util';
 const run = promisify(execFile);
 const scenario = process.env.CUTOVER_QA_LOST_EFFECT_CASE;
 const knownEffect = scenario === 'known';
+const fullHost = scenario === 'host';
 test(
-  knownEffect
-    ? 'identified lost external effect blocks retirement without replay'
-    : 'lost legacy response remains unknown through retirement and restore failure',
-  { timeout: 90000 },
+  fullHost
+    ? 'original host prepares its own candidate and journal before physical retirement and backup refusal'
+    : knownEffect
+      ? 'identified lost external effect blocks retirement without replay'
+      : 'lost legacy response remains unknown through retirement and restore failure',
+  { timeout: fullHost ? 720000 : 90000 },
   async () => {
     assert.equal(process.platform, 'linux', 'requires the existing isolated Linux QA image');
     assert.ok(
-      ['unknown', 'known'].includes(scenario),
-      'select unknown or known in a fresh QA container',
+      ['unknown', 'known', 'host'].includes(scenario),
+      'select unknown, known or host in a fresh QA attempt; host needs the prepared Git/build environment',
     );
     assert.equal(process.getuid(), 0);
     await access('/.dockerenv');
@@ -33,7 +36,11 @@ test(
         '/source/fixtures/browser-registration-removal-linux.mjs',
         knownEffect ? '--execution-site-known-effect' : '--execution-site-lost-effect',
       ],
-      { timeout: 80000, maxBuffer: 1024 * 1024 },
+      {
+        timeout: fullHost ? 660000 : 80000,
+        maxBuffer: 1024 * 1024,
+        env: { ...process.env, CUTOVER_QA_HOST: fullHost ? '1' : '0' },
+      },
     );
     const lines = result.stdout
       .split('\n')
@@ -49,6 +56,7 @@ test(
         effectCount: 1,
         riskDigest: undefined,
         releaseReady: false,
+        ...(fullHost ? { originalHost: true, nativeCandidatePreparation: true } : {}),
       },
     );
     assert.match(proof.riskDigest, /^[a-f0-9]{64}$/);
