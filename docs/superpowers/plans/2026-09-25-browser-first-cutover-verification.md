@@ -2,6 +2,14 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29 14:08 UTC：失败边界最小组合验收，不是根因修复
+
+仅原物理registration夹具新增`--execution-site-fence-repeat`，产品源文件不变。41106：20次原site+真实nginx/TLS+observer停止边界，退出0；30907：20次原`backup.inspectBackupFacility`（真实受保护文件/公开age检查、前后停止证明），退出0；随后合成已知未决工作使原site拒绝，事实移除仍锁存失败，journal未变、没有backupReceipt；89740：原`--execution-site-interruption`回归退出0。均零跳过，日志分别`/private/tmp/holaday-site-fence-composition3-20260929.log`、`/private/tmp/holaday-site-facility-composition-20260929.log`、`/private/tmp/holaday-site-original-interruption-20260929.log`。最后仅QA说明文本修正，Biome/node语法/diff-check通过；未重跑未修改的历史全套组件来充当新证据。
+
+31106的回调模拟200/401不符、64654的观察器PID1拒绝均退出1，修正夹具接线和容器父进程后通过，不是原间歇拒绝的根因。诊断只有合成业务事实/双机拓扑/收件人语法；没有数据库、源备份、恢复、迁移、新候选、真实商户或生产停写证明。固定原QA镜像、私有PID/无网络、768MiB/1CPU、只读公开挂载、退出自动移除，全部测试已结束；原服务和缓存未改。
+
+原5532等完整链失败仍未定位，不能宣称稳定发布。下一步只追踪完整链额外恢复会话/负载/阶段变化下的首次底层拒绝，以及原生产事实和发布门槛；不再重复本轮已完成最小组合。生产云端浏览器/VNC范围问题未获特定确认，CLI execute仍关闭，无push/PR/merge/deploy。完整命令、失败记录及恢复入口见同日checkpoint。
+
 ## 2026-09-29 13:48 UTC：完整隔离连续两轮通过，拒绝根因仍未关闭
 
 - 5532退出1，源2/目标2：隔离恢复和比较后，备份设施再核验被site.run统一包装拒绝；未迁移/启动候选。`/private/tmp/holaday-site-attach-reject-20260929.log`及私密wuUXoZ/coordinator-diagnostic.log。包装层不是底层根因，不能称已定位修复。

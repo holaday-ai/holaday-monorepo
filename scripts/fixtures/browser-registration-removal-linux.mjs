@@ -55,6 +55,7 @@ const pm2 = (...args) => exec('/usr/bin/node', ['/usr/lib/node_modules/pm2/bin/p
 const rows = async () => JSON.parse(await pm2('jlist'));
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 const recoveryLink = process.argv[2] === '--execution-site-recovery';
+const repeatSiteFence = process.argv[2] === '--execution-site-fence-repeat';
 const recoveryDrift = process.env.CUTOVER_QA_RECOVERY_DRIFT === '1';
 assert.ok(!recoveryDrift || recoveryLink);
 const recoveryScope = recoveryLink ? JSON.parse(process.env.CUTOVER_QA_RECOVERY_SCOPE) : undefined;
@@ -84,7 +85,7 @@ const enabledWorker = process.env.CUTOVER_QA_ENABLED_WORKER === '1';
 assert.ok(!enabledWorker || (successfulCutover && !lostOpenAck));
 const afterWorker = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-worker';
 const nativeWorker = afterWorker || successfulCutover || lateKnownEffect;
-const nativeIngress = afterIngress || nativeWorker;
+const nativeIngress = afterIngress || nativeWorker || repeatSiteFence;
 const preopenGate = beforeOpen || afterOpen || nativeIngress;
 const openedCandidate = afterOpen || nativeIngress;
 let nginxFixture;
@@ -190,6 +191,7 @@ assert.ok(
         '--gateway-session-observed-executor',
         '--execution-site',
         '--execution-site-interruption',
+        '--execution-site-fence-repeat',
         '--execution-site-lost-ack',
         '--execution-site-lost-effect',
         '--execution-site-known-effect',
@@ -205,7 +207,8 @@ const lostEffect = [
   '--execution-site-recovery',
 ].includes(process.argv[2]);
 const knownEffect = process.argv[2] === '--execution-site-known-effect';
-const interruption = lostEffect || process.argv[2] === '--execution-site-interruption';
+const interruption =
+  lostEffect || repeatSiteFence || process.argv[2] === '--execution-site-interruption';
 const sessionMode = siteMode || process.argv[2]?.startsWith('--gateway-session');
 const sessionLostAck = process.argv[2] === '--gateway-session-lost-ack';
 const observeExecutor = process.argv[2] === '--gateway-session-observed-executor';
@@ -263,7 +266,7 @@ await fs.writeFile(
   `${cwd}/registry-worker.cjs`,
   lostEffect
     ? `const http=require('http');const request=http.request(${JSON.stringify(effectUrl)},{method:'POST'},()=>process.exit(2));request.once('error',()=>{${legacyHttpStart}});request.end('synthetic');process.on('SIGINT',()=>{});\n`
-    : `require('http').createServer((q,r)=>r.end('qa')).listen(${mainPort});process.on('SIGINT',()=>{});\n`,
+    : `const http=require('http');${legacyHttpStart}process.on('SIGINT',()=>{});\n`,
 );
 await fs.writeFile('/tmp/registry-idle.cjs', 'setInterval(()=>{},1000);\n');
 // Approved metadata is synthetic; process and protected-file observations below
@@ -281,6 +284,27 @@ if (recoveryLink)
     isolatedTarget: recoveryScope.isolatedTarget,
   };
 if (sourceQa) readinessInventory.backupSource = sourceQa.backupSource;
+if (repeatSiteFence) {
+  // Public executable and deliberately synthetic recipient syntax only. This
+  // mode inspects the facility; it never encrypts, exports or restores data.
+  await fs.copyFile('/qa-age', '/usr/bin/age');
+  await fs.chmod('/usr/bin/age', 0o755);
+  const recipient = `age1${'q'.repeat(58)}\n`;
+  const recipientFile = `${directory}/qa-recipient.txt`;
+  await fs.writeFile(recipientFile, recipient, { mode: 0o600, flag: 'wx' });
+  readinessInventory.backupPlan = {
+    sourceIdentity: { serverUuid: '11111111-1111-4111-8111-111111111111', database: 'source_qa' },
+    isolatedTarget: { serverUuid: '22222222-2222-4222-8222-222222222222', database: 'restore_qa' },
+  };
+  readinessInventory.backupSource = {
+    facility: {
+      executable: '/usr/bin/age',
+      executableDigest: sha(await fs.readFile('/usr/bin/age')),
+      recipientFile,
+      recipientDigest: sha(recipient),
+    },
+  };
+}
 const binding = {
   attempt:
     recoveryScope?.binding.attempt ??
@@ -764,7 +788,8 @@ try {
     { readPair },
   );
   const maintenanceEndsAtMs =
-    recoveryScope?.maintenanceEndsAtMs ?? Date.now() + (fullHost ? 600000 : 60000);
+    recoveryScope?.maintenanceEndsAtMs ??
+    Date.now() + (fullHost || repeatSiteFence ? 600000 : 60000);
   const interruptionMetadata = interruption
     ? {
         schemaVersion: 2,
@@ -2133,19 +2158,64 @@ try {
             (await executionSite.lifecycle.assertStopped(siteContext)).survivors,
             [],
           );
+          if (repeatSiteFence) {
+            // The real site brackets its real observer with TLS ingress proofs,
+            // private approval reads and the unchanged owned journal. Repeating
+            // only standalone ingress reads does not exercise this composition.
+            // No database, recovery receipt, migration or candidate is simulated.
+            await journal.persist('backup_verified', { candidate: siteContext.binding.candidate });
+            const before = await journal.readFirstCutoverEffects();
+            const input = {
+              ...readinessInventory.backupPlan,
+              binding: siteContext.binding,
+              maintenanceEndsAtMs: siteContext.approval.maintenanceEndsAtMs,
+            };
+            const expectedFacility = {
+              encryptionProfileDigest: sha(
+                JSON.stringify({
+                  format: 'age-x25519-v1',
+                  recipientDigest: readinessInventory.backupSource.facility.recipientDigest,
+                }),
+              ),
+            };
+            for (let iteration = 0; iteration < 20; iteration++) {
+              assert.deepEqual(
+                await executionSite.backup.inspectBackupFacility(input),
+                expectedFacility,
+              );
+              assert.deepEqual(await journal.readFirstCutoverEffects(), before);
+              console.error('QA_SITE_FENCE_REPEAT', iteration + 1);
+            }
+            knownEffectVisible = true;
+            await assert.rejects(executionSite.backup.inspectBackupFacility(input), /UNPROVEN/);
+            knownEffectVisible = false;
+            await assert.rejects(executionSite.backup.inspectBackupFacility(input), /UNPROVEN/);
+            assert.deepEqual(await journal.readFirstCutoverEffects(), before);
+            assert.equal(
+              JSON.parse(await fs.readFile(journal.path, 'utf8')).backupReceipt,
+              undefined,
+            );
+            console.log(
+              'PASS 20 real site/observer/ingress/facility boundaries, late known work refuses and latches; no recovery claim',
+            );
+          }
           if (interruption) {
             const effects = await journal.readFirstCutoverEffects();
             assert.equal(effects.schemaVersion, 2);
             assert.equal(effects.interruptionObservation.riskDigest, effects.riskDigest);
             console.log(
-              'PASS controlled interruption: durable owned risk survives physical gateway retirement; business and ingress observations remain synthetic',
+              repeatSiteFence
+                ? 'PASS controlled interruption: durable owned risk survives physical gateway retirement; real ingress, synthetic business facts'
+                : 'PASS controlled interruption: durable owned risk survives physical gateway retirement; business and ingress observations remain synthetic',
             );
           }
           await assert.rejects(fetch('http://127.0.0.1:4011'));
           await executionSite.lifecycle.detach(siteContext);
           assert.equal((await receiverCompletion).code, 0);
           console.log(
-            'PASS execution-site composition: actual gateway receiver, owned journal, protected startup, PM2 and pidfd retirement; synthetic ingress/business/other-host boundaries',
+            repeatSiteFence
+              ? 'PASS execution-site composition: real receiver/journal/startup/PM2/pidfd/nginx/TLS; synthetic business and two-host topology'
+              : 'PASS execution-site composition: actual gateway receiver, owned journal, protected startup, PM2 and pidfd retirement; synthetic ingress/business/other-host boundaries',
           );
         }
       }

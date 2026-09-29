@@ -6,6 +6,18 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 14:08 UTC：原站点最小组合已跑通，未复现旧间歇拒绝
+
+从`623138b0`续跑，没有再次启动完整数据库恢复链，也没有修改产品实现。在原`browser-registration-removal-linux.mjs`增加`--execution-site-fence-repeat`：复用真实gateway接收器、私有审批文件、journal、PM2/pidfd停止、原nginx/TLS入口和retirement observer；在原backup_verified阶段连续调用原site的`backup.inspectBackupFacility`，每次仍经过前后真实停止证明。业务事实与双机拓扑仍为明确合成数据；数据库身份只是输入标识，没有创建数据库、生成密钥、加密导出、恢复或迁移。公开age沿用原缓存，收件人只用63字节合成语法；不声称可用于真实加密。
+
+结果：41106退出0，20次实际site停止边界、journal不变、独立PM2复活只保留无关进程；30907退出0，20次实际设施检查、相同journal、无backupReceipt，随后已知未决工作触发拒绝且移除该事实仍保持失败锁存；89740退出0，原受控中断模式回归通过。均无跳过。对应日志为`/private/tmp/holaday-site-fence-composition3-20260929.log`、`/private/tmp/holaday-site-facility-composition-20260929.log`、`/private/tmp/holaday-site-original-interruption-20260929.log`。设施检查运行后只修正两条QA输出对真实入口/合成拓扑的说明，不改变断言或产品行为；格式、语法与diff-check通过。
+
+早期夹具接线失败不隐去：31106退出1，原非lost-effect模拟回调始终200，改为复用已存在的native handler；64654退出1，Node被直接作为容器PID1启动，原进程身份校验正确拒绝，改用私有bash PID1父进程，未放宽pid/ppid条件。单次只读docker ps自动审批超时且未执行，无重试、无权限绕过。所有QA为原镜像、私有PID、network none、768MiB/1CPU、只读公开文件挂载和`--rm`；测试均已结束，无新增数据库/卷，原mysql/redis、缓存和`__pycache__`不动。
+
+复现入口：原镜像`ff58ba973281…`以`/bin/bash -c '/opt/node22/bin/node /source/fixtures/browser-registration-removal-linux.mjs --execution-site-fence-repeat; exit $?'`启动，只读挂本工作树scripts到`/source`、ops到`/ops`、`/private/tmp/holaday-cutover-build-cache.Nj3E4X/age`到`/qa-age`，参数`--rm --network none --cpus=1 --memory=768m --pids-limit=256 --cap-add=NET_ADMIN --cap-add=SYS_PTRACE`。不能省略父进程或策略挂载。此入口是原失败边界的缩小诊断，不是完整候选发布验收。
+
+**结论和下一步：** 原完整链5532等间歇失败仍未复现或定位，不能把20次通过写成已修复。当前无证据支持改guard、放宽超时或重试副作用；后续应对照完整链额外的恢复会话/负载/阶段变化定位首次底层拒绝，而非再盲跑或重复本轮已通过检查。生产headed browser/VNC特定维护范围仍待明确，独立事实、受保护execute、真实停写备份/Mac恢复、非PayPal恢复和整分支审查仍未完成。CLI关闭，未push/PR/合并/部署，自动化未改。本轮是串行局部QA审查，非整分支独立审查。
+
 ### 2026-09-29 13:48 UTC：两次完整隔离成功，间歇拒绝仍未定位
 
 从`6dfed3d9`继续原Task6，未改变产品行为、维护期限或拒绝条件。5532退出1：source2/target2，真实隔离恢复及数据比较完成，随后`backup.inspectBackupFacility`被site.run统一包装为`CUTOVER_SITE_UNPROVEN`，host在backup_verified保留维护；尚未迁移或启动候选。初次栈诊断只定位到包装层，不能认定底层根因。日志`/private/tmp/holaday-site-attach-reject-20260929.log`，私密wuUXoZ/coordinator-diagnostic.log；精确9a4e6048资源的两个容器/卷已核对标签、network none及唯一挂载后清理，保留证据。
