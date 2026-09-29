@@ -285,6 +285,55 @@ test('site binds the packaged recovery recipe as part of the actual durable scop
   await site.lifecycle.detach(f.context);
 });
 
+test('site carries approved temporary cloud pair into the same durable journal and forbids omission', async (t) => {
+  const f = await fixture(t);
+  const recipe = createHash('sha256')
+    .update(
+      JSON.stringify(
+        runtimeModule.firstCutoverCloudBrowserRecoveryLaunch({ attempt: f.binding.attempt }),
+      ),
+    )
+    .digest('hex');
+  f.scope.cloudBrowserRecoveryDigest = recipe;
+  f.scope.cloudMaintenanceScope = [
+    { name: 'holaday-vnc', pmId: 7, scopeDigest: '6'.repeat(64), recoveryDigest: '7'.repeat(64) },
+    {
+      name: 'holaday-chromium-headed',
+      pmId: 8,
+      scopeDigest: '8'.repeat(64),
+      recoveryDigest: recipe,
+    },
+  ];
+  const site = f.make();
+  await site.lifecycle.attach(f.context);
+  assert.deepEqual(
+    JSON.parse(await fs.readFile(f.journal.path, 'utf8')).cloudMaintenanceScope,
+    f.scope.cloudMaintenanceScope,
+  );
+  for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
+    await f.journal.persist(phase, { candidate: f.binding.candidate });
+  await assert.rejects(
+    f.journal.persist('all_fenced', { candidate: f.binding.candidate }),
+    /UNPROVEN/,
+  );
+  await site.lifecycle.detach(f.context);
+});
+
+test('site refuses a cloud pair whose headed recovery differs from the packaged recipe before sessions', async (t) => {
+  const f = await fixture(t);
+  f.scope.cloudMaintenanceScope = [
+    { name: 'holaday-vnc', pmId: 7, scopeDigest: '6'.repeat(64), recoveryDigest: '7'.repeat(64) },
+    {
+      name: 'holaday-chromium-headed',
+      pmId: 8,
+      scopeDigest: '8'.repeat(64),
+      recoveryDigest: '9'.repeat(64),
+    },
+  ];
+  await assert.rejects(f.make().lifecycle.attach(f.context), /UNPROVEN/);
+  assert.deepEqual(f.events, []);
+});
+
 test('site pins the complete protected configuration in the real journal before connecting receivers', async (t) => {
   const f = await fixture(t);
   f.scope.backupRecoveryDigest = '1'.repeat(64);

@@ -62,6 +62,167 @@ const firstMetadata = {
   inventoryDigest: '4'.repeat(64),
 };
 
+async function cloudJournal(t) {
+  const j = await acquireReleaseJournal(await fixture(t), firstMetadata);
+  t.after(() => j.close());
+  await j.bindManifest(manifest);
+  await j.bindExecutionSite('5'.repeat(64), cloudServices);
+  for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
+    await j.persist(phase, { candidate: metadata.candidate });
+  const binding = await j.assertOwnership();
+  const event = (name, phase) => ({
+    attempt: binding.attempt,
+    inventoryDigest: binding.inventoryDigest,
+    host: 'vultr',
+    phase,
+    name,
+    pmId: name === 'holaday-vnc' ? 7 : 8,
+    scopeDigest: '6'.repeat(64),
+    recoveryDigest: '7'.repeat(64),
+  });
+  return { j, event };
+}
+
+const cloudServices = ['holaday-vnc', 'holaday-chromium-headed'].map((name, index) => ({
+  name,
+  pmId: 7 + index,
+  scopeDigest: '6'.repeat(64),
+  recoveryDigest: '7'.repeat(64),
+}));
+
+test('cloud scope is snapshotted at binding and invalid declarations leave no binding', async (t) => {
+  const j = await acquireReleaseJournal(await fixture(t), firstMetadata);
+  t.after(() => j.close());
+  await j.bindManifest(manifest);
+  for (const bad of [
+    [],
+    cloudServices.slice(0, 1),
+    [...cloudServices].reverse(),
+    [cloudServices[0], { ...cloudServices[1], pmId: 7 }],
+    [{ ...cloudServices[0], command: 'ignored' }, cloudServices[1]],
+  ])
+    await assert.rejects(j.bindExecutionSite('5'.repeat(64), bad), /UNPROVEN/);
+  assert.equal((await j.readFirstCutoverEffects()).executionSiteDigest, undefined);
+  const scope = structuredClone(cloudServices);
+  const binding = j.bindExecutionSite('5'.repeat(64), scope);
+  scope[0].pmId = 99;
+  await binding;
+  assert.equal((await j.readFirstCutoverEffects()).cloudMaintenanceScope[0].pmId, 7);
+});
+
+test('declared cloud maintenance cannot be omitted and undeclared events cannot be added', async (t) => {
+  const { j, event } = await cloudJournal(t);
+  await assert.rejects(j.persist('all_fenced', { candidate: metadata.candidate }), /UNPROVEN/);
+  const plain = await acquireReleaseJournal(await fixture(t), firstMetadata);
+  t.after(() => plain.close());
+  await plain.bindManifest(manifest);
+  await plain.bindExecutionSite('5'.repeat(64));
+  for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
+    await plain.persist(phase, { candidate: metadata.candidate });
+  await assert.rejects(
+    plain.recordCloudMaintenanceEvent({
+      ...event('holaday-vnc', 'cloud-stop-intent'),
+      attempt: (await plain.assertOwnership()).attempt,
+    }),
+    /UNPROVEN/,
+  );
+  await assert.rejects(
+    j.recordCloudMaintenanceEvent({
+      ...event('holaday-vnc', 'cloud-stop-intent'),
+      scopeDigest: '8'.repeat(64),
+    }),
+    /UNPROVEN/,
+  );
+});
+
+test('temporary cloud stop intent is durable and cannot advance until both services stopped', async (t) => {
+  const { j, event } = await cloudJournal(t);
+  assert.equal(typeof j.recordCloudMaintenanceEvent, 'function');
+  const first = event('holaday-vnc', 'cloud-stop-intent');
+  await j.recordCloudMaintenanceEvent(first);
+  assert.deepEqual(JSON.parse(await fs.readFile(j.path, 'utf8')).cloudMaintenanceEvents, [first]);
+  await assert.rejects(j.persist('all_fenced', { candidate: metadata.candidate }), /UNPROVEN/);
+  await assert.rejects(j.recordCloudMaintenanceEvent(first), /UNPROVEN/);
+  await j.recordCloudMaintenanceEvent(event('holaday-vnc', 'cloud-stopped'));
+  await assert.rejects(j.persist('all_fenced', { candidate: metadata.candidate }), /UNPROVEN/);
+  for (const phase of ['cloud-stop-intent', 'cloud-stopped'])
+    await j.recordCloudMaintenanceEvent(event('holaday-chromium-headed', phase));
+  const events = (await j.readFirstCutoverEffects()).cloudMaintenanceEvents;
+  assert.equal(events.length, 4);
+  events[0].name = 'unrelated';
+  assert.equal((await j.readFirstCutoverEffects()).cloudMaintenanceEvents[0].name, 'holaday-vnc');
+  await j.persist('all_fenced', { candidate: metadata.candidate });
+});
+
+test('temporary cloud events reject scope drift, another host and out of order acknowledgement', async (t) => {
+  const { j, event } = await cloudJournal(t);
+  assert.equal(typeof j.recordCloudMaintenanceEvent, 'function');
+  const first = event('holaday-vnc', 'cloud-stop-intent');
+  for (const patch of [
+    { host: 'aliyun' },
+    { name: 'unrelated' },
+    { phase: 'cloud-stopped' },
+    { name: 'holaday-chromium-headed' },
+    { pmId: -1 },
+    { scopeDigest: '' },
+    { recoveryDigest: '' },
+    { command: '/bin/sh' },
+    { attempt: 'other' },
+  ])
+    await assert.rejects(j.recordCloudMaintenanceEvent({ ...first, ...patch }), /UNPROVEN/);
+  await j.recordCloudMaintenanceEvent(first);
+  for (const patch of [
+    { scopeDigest: '8'.repeat(64) },
+    { recoveryDigest: '8'.repeat(64) },
+    { pmId: 9 },
+  ])
+    await assert.rejects(
+      j.recordCloudMaintenanceEvent({ ...event('holaday-vnc', 'cloud-stopped'), ...patch }),
+      /UNPROVEN/,
+    );
+  await j.recordCloudMaintenanceEvent(event('holaday-vnc', 'cloud-stopped'));
+  await assert.rejects(
+    j.recordCloudMaintenanceEvent({
+      ...event('holaday-chromium-headed', 'cloud-stop-intent'),
+      pmId: 7,
+    }),
+    /UNPROVEN/,
+  );
+});
+
+test('temporary cloud recovery needs the verified candidate and both acknowledgements before opening', async (t) => {
+  const { j, event } = await cloudJournal(t);
+  assert.equal(typeof j.recordCloudMaintenanceEvent, 'function');
+  for (const name of ['holaday-vnc', 'holaday-chromium-headed'])
+    for (const phase of ['cloud-stop-intent', 'cloud-stopped'])
+      await j.recordCloudMaintenanceEvent(event(name, phase));
+  await assert.rejects(
+    j.recordCloudMaintenanceEvent(event('holaday-chromium-headed', 'cloud-restore-intent')),
+    /UNPROVEN/,
+  );
+  for (const phase of ['all_fenced', 'stopped', 'backup_verified'])
+    await j.persist(phase, { candidate: metadata.candidate });
+  await j.bindBackupReceipt(await backupReceiptFor(j));
+  await j.persist('migration_started', { candidate: metadata.candidate });
+  await j.bindBootstrapSeed('5'.repeat(32));
+  const identity = { candidate: metadata.candidate, bootId: '6'.repeat(32) };
+  await j.persist('candidate_started', { candidate: metadata.candidate, identity });
+  await j.persist('verified', { candidate: metadata.candidate, identity });
+  const opening = () => j.persist('opened', { candidate: metadata.candidate, identity });
+  await assert.rejects(opening(), /UNPROVEN/);
+  for (const name of ['holaday-chromium-headed', 'holaday-vnc']) {
+    await j.recordCloudMaintenanceEvent(event(name, 'cloud-restore-intent'));
+    await assert.rejects(opening(), /UNPROVEN/);
+    await j.recordCloudMaintenanceEvent(event(name, 'cloud-restored'));
+  }
+  await opening();
+  assert.equal((await j.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 8);
+  await assert.rejects(
+    j.recordCloudMaintenanceEvent(event('holaday-vnc', 'cloud-restore-intent')),
+    /UNPROVEN/,
+  );
+});
+
 test('execution site binding is first-cutover-only, single-use and cannot be added after preparation', async (t) => {
   const j = await acquireReleaseJournal(await fixture(t), firstMetadata);
   t.after(() => j.close());

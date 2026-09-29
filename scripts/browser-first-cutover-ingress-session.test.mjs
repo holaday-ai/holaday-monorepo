@@ -417,12 +417,43 @@ test('coordinator site scope reads the fixed protected file and binds both hosts
     { ...value.site, binding, maintenanceEndsAtMs: deadline },
   );
   value.site.cloudBrowserRecoveryDigest = '6'.repeat(64);
+  value.site.cloudMaintenanceScope = [
+    { name: 'holaday-vnc', pmId: 7, scopeDigest: '7'.repeat(64), recoveryDigest: '8'.repeat(64) },
+    {
+      name: 'holaday-chromium-headed',
+      pmId: 8,
+      scopeDigest: '9'.repeat(64),
+      recoveryDigest: '6'.repeat(64),
+    },
+  ];
   await write();
   assert.equal(
     (await session.readFirstCutoverExecutionSiteScope({ attempt: binding.attempt }, io))
       .cloudBrowserRecoveryDigest,
     '6'.repeat(64),
   );
+  assert.deepEqual(
+    (await session.readFirstCutoverExecutionSiteScope({ attempt: binding.attempt }, io))
+      .cloudMaintenanceScope,
+    value.site.cloudMaintenanceScope,
+  );
+  const approvedCloud = structuredClone(value.site.cloudMaintenanceScope);
+  for (const invalid of [
+    [],
+    [...approvedCloud].reverse(),
+    [approvedCloud[0], { ...approvedCloud[1], pmId: 7 }],
+    [{ ...approvedCloud[0], name: 'unrelated' }, approvedCloud[1]],
+    [approvedCloud[0], { ...approvedCloud[1], recoveryDigest: '0'.repeat(64) }],
+    [{ ...approvedCloud[0], command: '/bin/sh' }, approvedCloud[1]],
+  ]) {
+    value.site.cloudMaintenanceScope = invalid;
+    await write();
+    await assert.rejects(
+      session.readFirstCutoverExecutionSiteScope({ attempt: binding.attempt }, io),
+      /UNPROVEN/,
+    );
+  }
+  value.site.cloudMaintenanceScope = approvedCloud;
   value.site.cloudBrowserRecoveryDigest = { command: '/bin/sh' };
   await write();
   await assert.rejects(

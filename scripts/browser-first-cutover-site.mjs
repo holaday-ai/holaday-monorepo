@@ -162,6 +162,11 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
           createHash('sha256')
             .update(JSON.stringify(firstCutoverCloudBrowserRecoveryLaunch({ attempt })))
             .digest('hex')) ||
+      (Object.hasOwn(value, 'cloudMaintenanceScope') &&
+        (!Array.isArray(value.cloudMaintenanceScope) ||
+          value.cloudMaintenanceScope.length !== 2 ||
+          !value.cloudBrowserRecoveryDigest ||
+          value.cloudMaintenanceScope[1]?.recoveryDigest !== value.cloudBrowserRecoveryDigest)) ||
       !/^[a-f0-9]{64}$/.test(value.gatewaySiteDigest ?? '')
     )
       fail();
@@ -581,7 +586,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
         if (inspectedScope && !equal(inspectedScope, scope)) fail();
         await guard(ctx, ['preflight']);
         const digest = createHash('sha256').update(JSON.stringify(scope)).digest('hex');
-        await context.journal.bindExecutionSite(digest);
+        await context.journal.bindExecutionSite(digest, scope.cloudMaintenanceScope);
         executionSiteDigest = digest;
         await guard(ctx, ['preflight']);
         const args = { binding: context.binding, maintenanceEndsAtMs: scope.maintenanceEndsAtMs };

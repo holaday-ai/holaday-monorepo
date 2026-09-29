@@ -2,6 +2,14 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 JST（09-29 20:17Z）：临时云服务声明、原journal与open前拒绝
+
+两服务声明由原保护读取器/site绑定到同一个真实journal：固定VNC/headed顺序、唯一数字ID、范围和恢复摘要，headed绑定已打包恢复材料。按序记录停止/恢复意图和确认；声明后不能漏做、重复或换对象。原host在beforeOpen和实际open命令之前拒绝恢复未确认，避免“先open再写opened”以及前置失败误走丢应答核对。合成外部事实的原host+真实journal组合覆盖恢复前缀0至4，前四种无open，完整确认沿原尾段成功；不声称真实两服务恢复已执行。
+
+所有新增主行为均先RED：缺失接口/声明丢失/错误接受、异步绑定漂移、opened时才拒绝、错误被当丢应答。最终真实Linux四模块255/255退出0零跳过，日志`/private/tmp/holaday-cloud-maintenance-journal-final-linux-20260930.log`。Linux私有PID、无网络、1CPU/512MiB/128pids、只读代码，无生产凭据或数据库挂载。不重复上一轮实际Brave实验，不把事件数量当物理证明；真实执行器及observer接线、完整恢复/分支审查仍未完成，CLI关闭。
+
+原ops46231退出0：Node120/60/16/970和Python12均通过、零跳过，使用既有age测试工具；日志`/private/tmp/holaday-cloud-maintenance-journal-ops-20260930.log`。八JS文件Biome和diff-check通过，所有测试进程结束，原MySQL/Redis健康、无QA容器遗留。没有生产或支付调用，无push/PR/合并/部署。
+
 ## 2026-09-30 JST（09-29 19:16Z）：产品恢复材料与真实夹具共用
 
 已有runtime导出固定恢复材料；原保护读取器/site校验其摘要并由既有完整site摘要绑定原journal。物理夹具使用同一产品函数与固定合成profile/显示/端口，未另造QA命令。新增拒绝任意路径/命令/自动重启、错误摘要及非法字段测试；初始RED退出1，相关本机158/158退出0零跳过。七个触及JS文件Biome及diff-check通过。

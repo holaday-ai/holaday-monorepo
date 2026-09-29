@@ -1975,9 +1975,19 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
     value?.candidate === approval?.candidate &&
     /^[a-f0-9]{32}$/.test(value?.bootId ?? '') &&
     (!identity || value.bootId === identity.bootId);
+  const assertCloudRecovered = async () => {
+    const effects = await prepared.journal.readFirstCutoverEffects();
+    if (effects.cloudMaintenanceScope && effects.cloudMaintenanceEvents?.length !== 8)
+      throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+  };
   const control = async (op, target, discovery = false) => {
     if (!prepared || (!discovery && !sameIdentity(target)))
       throw new Error('MAINTENANCE_IDENTITY_MISMATCH');
+    if (op === 'open') {
+      // `opened` is a post-effect journal phase. Reject incomplete temporary
+      // recovery here, before issuing open, not only when persisting success.
+      await assertCloudRecovered();
+    }
     if (op === 'close') {
       // A lost response cannot authorize replay by an outer cleanup layer.
       if (closeAttempted) throw new Error('MAINTENANCE_CLOSE_UNPROVEN');
@@ -2260,6 +2270,8 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
         if (!sameIdentity(target)) throw new Error('MAINTENANCE_IDENTITY_MISMATCH');
         await io.observe(target);
         await readiness(target);
+        // Fail outside the release tail's lost-open-ACK reconciliation branch.
+        await assertCloudRecovered();
       }),
     open: (target) => once('open', 'verified', () => control('open', target)),
     status: async (target) => {

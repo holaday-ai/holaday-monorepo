@@ -35,10 +35,12 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
   let interruptionObservation;
   let currentIdentity;
   let executionSiteDigest;
+  let cloudMaintenanceScope;
   const startupEvents = [];
   const candidateStartupEvents = [];
   const registrationEvents = [];
   const unmanagedEvents = [];
+  const cloudMaintenanceEvents = [];
   const startupBatches = new Map();
   const registrationBatches = new Map();
   let eventHostMode;
@@ -182,10 +184,12 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
           ...(failureObservation ? { failureObservation } : {}),
           ...(interruptionObservation ? { interruptionObservation } : {}),
           ...(executionSiteDigest ? { executionSiteDigest } : {}),
+          ...(cloudMaintenanceScope ? { cloudMaintenanceScope } : {}),
           ...(startupEvents.length ? { startupEvents } : {}),
           ...(candidateStartupEvents.length ? { candidateStartupEvents } : {}),
           ...(registrationEvents.length ? { registrationEvents } : {}),
           ...(unmanagedEvents.length ? { unmanagedEvents } : {}),
+          ...(cloudMaintenanceEvents.length ? { cloudMaintenanceEvents } : {}),
           oldIdentity,
           phase: next,
           identity,
@@ -347,6 +351,9 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
             ...(record.executionSiteDigest
               ? { executionSiteDigest: record.executionSiteDigest }
               : {}),
+            ...(record.cloudMaintenanceScope
+              ? { cloudMaintenanceScope: record.cloudMaintenanceScope }
+              : {}),
             ...(record.bootstrapSeed ? { bootstrapSeed: record.bootstrapSeed } : {}),
             phase: record.phase,
             ...(record.failureObservation ? { failureObservation: record.failureObservation } : {}),
@@ -356,6 +363,9 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
               : {}),
             registrationEvents: record.registrationEvents ?? [],
             unmanagedEvents: record.unmanagedEvents ?? [],
+            ...(record.cloudMaintenanceEvents
+              ? { cloudMaintenanceEvents: record.cloudMaintenanceEvents }
+              : {}),
           };
         } catch {
           throw unproven();
@@ -523,6 +533,61 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
         bootstrapSeed = seed;
         await write(phase);
       }),
+    // Temporary maintenance is not permanent registration retirement. This
+    // records the controller's intent/observation; it does not approve a target
+    // or prove a process exited. The live observer must reconcile these events.
+    recordCloudMaintenanceEvent: (event) => {
+      const e = structuredClone(event);
+      return serial(async () => {
+        const index = cloudMaintenanceEvents.length;
+        const service = index < 2 || index >= 6 ? 'holaday-vnc' : 'holaday-chromium-headed';
+        const expected =
+          index < 4
+            ? index % 2
+              ? 'cloud-stopped'
+              : 'cloud-stop-intent'
+            : index % 2
+              ? 'cloud-restored'
+              : 'cloud-restore-intent';
+        if (
+          !first ||
+          !migrationManifest ||
+          !executionSiteDigest ||
+          !cloudMaintenanceScope ||
+          index >= 8 ||
+          phase !== (index < 4 ? 'producers_stopped' : 'verified') ||
+          !e ||
+          Object.keys(e).length !== 8 ||
+          e.attempt !== attempt ||
+          e.inventoryDigest !== inventoryDigest ||
+          e.host !== 'vultr' ||
+          e.name !== service ||
+          e.phase !== expected ||
+          !Number.isSafeInteger(e.pmId) ||
+          e.pmId < 0 ||
+          !/^[a-f0-9]{64}$/.test(e.scopeDigest ?? '') ||
+          !/^[a-f0-9]{64}$/.test(e.recoveryDigest ?? '')
+        )
+          throw unproven();
+        const approved = cloudMaintenanceScope.find((entry) => entry.name === service);
+        if (
+          !isDeepStrictEqual(e, {
+            attempt,
+            inventoryDigest,
+            host: 'vultr',
+            phase: expected,
+            ...approved,
+          })
+        )
+          throw unproven();
+        const original = cloudMaintenanceEvents.find((entry) => entry.name === service);
+        if (original && !isDeepStrictEqual(e, { ...original, phase: expected })) throw unproven();
+        if (!original && cloudMaintenanceEvents.some((entry) => entry.pmId === e.pmId))
+          throw unproven();
+        cloudMaintenanceEvents.push(e);
+        await write(phase, currentIdentity);
+      });
+    },
     recordUnmanagedEvent: (event) => {
       const e = structuredClone(event);
       return serial(async () => {
@@ -725,8 +790,9 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
     },
     // Pin one complete operator-reviewed site before opening receiver sessions.
     // This is not a resume token: even an identical second bind is rejected.
-    bindExecutionSite: (digest) =>
-      serial(async () => {
+    bindExecutionSite: (digest, scope) => {
+      const cloudScope = scope === undefined ? undefined : structuredClone(scope);
+      return serial(async () => {
         if (
           !first ||
           phase !== 'preflight' ||
@@ -736,9 +802,29 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
           !/^[a-f0-9]{64}$/.test(digest)
         )
           throw unproven();
+        if (cloudScope !== undefined) {
+          if (
+            !Array.isArray(cloudScope) ||
+            cloudScope.length !== 2 ||
+            cloudScope.some(
+              (s, i) =>
+                !s ||
+                Object.keys(s).length !== 4 ||
+                s.name !== ['holaday-vnc', 'holaday-chromium-headed'][i] ||
+                !Number.isSafeInteger(s.pmId) ||
+                s.pmId < 0 ||
+                !/^[a-f0-9]{64}$/.test(s.scopeDigest ?? '') ||
+                !/^[a-f0-9]{64}$/.test(s.recoveryDigest ?? ''),
+            ) ||
+            cloudScope[0].pmId === cloudScope[1].pmId
+          )
+            throw unproven();
+          cloudMaintenanceScope = structuredClone(cloudScope);
+        }
         executionSiteDigest = digest;
         await write(phase, currentIdentity);
-      }),
+      });
+    },
     bindManifest: (manifest) =>
       serial(async () => {
         const bytes = JSON.stringify(manifest);
@@ -756,6 +842,12 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
       serial(async () => {
         if (!migrationManifest) throw new Error('MAINTENANCE_MIGRATIONS_UNPROVEN');
         if (first) {
+          if (
+            cloudMaintenanceScope &&
+            ((next === 'all_fenced' && cloudMaintenanceEvents.length !== 4) ||
+              (next === 'opened' && cloudMaintenanceEvents.length !== 8))
+          )
+            throw unproven();
           if (next === 'producers_stopped' && interrupted && !interruptionObservation)
             throw unproven();
           if (

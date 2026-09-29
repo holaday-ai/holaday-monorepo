@@ -6,6 +6,20 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 JST（09-29 20:17Z heartbeat）：临时云服务维护声明接入原日志和真实open前置门禁
+
+从`781c7f67`继续。原受保护配置读取器新增严格的`cloudMaintenanceScope`，只接固定顺序的VNC/headed两条服务声明，绑定不同的数字PM2 ID、范围及恢复摘要；headed恢复摘要必须匹配上一轮固定运行时命令。原site attach将声明与完整site摘要一起单次持久化到原journal，异步入队前复制输入，拒绝绑定期间调用方改变范围。没有另建状态机/文件/锁，也没有把两服务加入永久退役列表。
+
+原journal记录VNC→headed的单次停止意图/确认，以及候选verified后headed→VNC的单次恢复意图/确认。错主机、错服务/ID、范围或恢复摘要变化、额外命令字段、重复/错序/提前确认均拒绝；未声明不能临时追加，已声明不能完全省略：两服务停止未确认不得进入all_fenced，恢复未确认不得写opened。**这些事件是执行记录契约，不是物理退出或恢复证明；新鲜进程、显示、工具、策略字节和独立观察仍由剩余执行器/observer提供。** 原观察器仍拒绝不明的保留进程消失，未增加例外或造零值。
+
+组合反例发现只在journal的opened阶段拦截太晚：原尾段先open才写opened。1ca0b6退出1，确认会到opened；追加原host发送open前拒绝后，原尾段又会将该错误当丢应答核对，9e6195退出1（错误变成MAINTENANCE_OPEN_UNPROVEN）。最终在原beforeOpen完成前检查恢复，同时保留control(open)发送前复核，不改变普通丢应答核对语义。使用原host、真实临时journal和合成外部事实检查恢复事件前缀0/1/2/3/4：前四种保持verified/closed且没有open效果，完整确认才走原成功尾段。不是生产双服务恢复通过。
+
+原journal/配置/site反例37a589、547e05、e2560d、087489退出1；绑定竞态b3e787退出1（99≠7）后修复。最终Linux64401四模块255/255退出0、零跳过，日志`/private/tmp/holaday-cloud-maintenance-journal-final-linux-20260930.log`；之前250/250和本机157/157是较早代码结果，不重复累计。当前没有生产SSH、云服务停止/启动、profile/数据库/支付/密钥变更，未重跑上一轮Brave实验。CLI保持关闭，Task4 BASE和原自动化不变。
+
+最终原`CUTOVER_TEST_AGE_EXECUTABLE=/opt/homebrew/bin/age pnpm test:ops`46231退出0，Node120/60/16/970及Python12全部通过、零跳过，日志`/private/tmp/holaday-cloud-maintenance-journal-ops-20260930.log`。八个JS文件Biome、diff-check通过；4dd8e1只读核对原MySQL/Redis健康，无QA容器或后台验证遗留。所有新记录保存在原受保护日志中；未进行实际云服务维护或整分支独立审查。
+
+下一步是把这份已经绑定的两服务声明/原日志事件交给真实定向执行器，并让原observer用新鲜完整树、显示独占和恢复身份解释临时变化；不能仅凭8条事件接受恢复。现有库/原PM2事实与限定启动命令继续复用，不重做通道、商户或密钥。之后仍需独立现场facts、真实停写/Mac恢复、非PayPal恢复、完整成功/故障演练、整分支审查和新鲜部署窗口；大项未完成，未push/PR/合并/部署。
+
 ### 2026-09-30 JST（09-29 19:16Z heartbeat）：实际恢复命令接回原运行时与保护配置
 
 从`4abef69f`继续原Task4。将上一轮通过真实Brave验证的限定恢复材料放进已有打包模块`browser-first-cutover-runtime.mjs`，原物理夹具直接消费同一函数，不再维护另一份QA shell。函数只接收本次UUID；固定工具、profile、显示98、CDP9223、无启动页面、私有只读策略挂载、浏览器能力清零及NoNewPrivs，PM2不自动重启。原受保护配置读取器只新增可选`cloudBrowserRecoveryDigest`摘要字段，site独立核对实际固定命令的摘要，随后由原完整site摘要单次绑定到journal；不能提交任意命令、路径或策略正文。

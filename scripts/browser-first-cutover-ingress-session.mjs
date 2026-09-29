@@ -214,9 +214,24 @@ async function readProtectedSite(options, overrides, kind) {
           ...(Object.hasOwn(s, 'inventory') ? ['inventory'] : []),
           ...(Object.hasOwn(s, 'backupRecoveryDigest') ? ['backupRecoveryDigest'] : []),
           ...(Object.hasOwn(s, 'cloudBrowserRecoveryDigest') ? ['cloudBrowserRecoveryDigest'] : []),
+          ...(Object.hasOwn(s, 'cloudMaintenanceScope') ? ['cloudMaintenanceScope'] : []),
         ]) ||
         (Object.hasOwn(s, 'backupRecoveryDigest') && !hash(s.backupRecoveryDigest)) ||
         (Object.hasOwn(s, 'cloudBrowserRecoveryDigest') && !hash(s.cloudBrowserRecoveryDigest)) ||
+        (Object.hasOwn(s, 'cloudMaintenanceScope') &&
+          (!Array.isArray(s.cloudMaintenanceScope) ||
+            s.cloudMaintenanceScope.length !== 2 ||
+            s.cloudMaintenanceScope.some(
+              (entry, index) =>
+                !keys(entry, ['name', 'pmId', 'scopeDigest', 'recoveryDigest']) ||
+                entry.name !== ['holaday-vnc', 'holaday-chromium-headed'][index] ||
+                !Number.isSafeInteger(entry.pmId) ||
+                entry.pmId < 0 ||
+                !hash(entry.scopeDigest) ||
+                !hash(entry.recoveryDigest),
+            ) ||
+            s.cloudMaintenanceScope[0].pmId === s.cloudMaintenanceScope[1].pmId ||
+            s.cloudMaintenanceScope[1].recoveryDigest !== s.cloudBrowserRecoveryDigest)) ||
         (Object.hasOwn(s, 'inventory') &&
           (!s.inventory ||
             typeof s.inventory !== 'object' ||

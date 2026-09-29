@@ -1243,6 +1243,74 @@ async function runLifecycle(f) {
   });
   return { adapter, result };
 }
+
+for (const acknowledged of [0, 1, 2, 3, 4])
+  test(`cloud recovery prefix ${acknowledged} permits open only when both services are acknowledged`, async (t) => {
+    const f = await lifecycleFixture(t);
+    const services = ['holaday-vnc', 'holaday-chromium-headed'].map((name, index) => ({
+      name,
+      pmId: 7 + index,
+      scopeDigest: '6'.repeat(64),
+      recoveryDigest: '7'.repeat(64),
+    }));
+    const attach = f.io.lifecycle.attach;
+    f.io.lifecycle.attach = async (ctx) => {
+      await attach(ctx);
+      await ctx.journal.bindExecutionSite('5'.repeat(64), services);
+    };
+    const stop = f.io.lifecycle.stopProducers;
+    f.io.lifecycle.stopProducers = async (ctx) => {
+      await stop(ctx);
+      // Synthetic lifecycle facts; the owned journal and original host are real.
+      for (const service of services)
+        for (const phase of ['cloud-stop-intent', 'cloud-stopped'])
+          await ctx.journal.recordCloudMaintenanceEvent({
+            attempt: f.binding.attempt,
+            inventoryDigest: f.binding.inventoryDigest,
+            host: 'vultr',
+            phase,
+            ...service,
+          });
+    };
+    const observe = f.io.observe;
+    let supplied = false;
+    f.io.observe = async (...args) => {
+      await observe(...args);
+      if (!supplied && (await f.record()).phase === 'verified') {
+        supplied = true;
+        // Inject only synthetic external recovery facts at the observation boundary.
+        // Real journal ordering and the original host's open effect remain exercised.
+        const events = [...services].reverse().flatMap((service) =>
+          ['cloud-restore-intent', 'cloud-restored'].map((phase) => ({
+            attempt: f.binding.attempt,
+            inventoryDigest: f.binding.inventoryDigest,
+            host: 'vultr',
+            phase,
+            ...service,
+          })),
+        );
+        for (const event of events.slice(0, acknowledged))
+          await f.journal().recordCloudMaintenanceEvent(event);
+      }
+    };
+    const { result } = await runLifecycle(f);
+    assert.equal(result.ok, acknowledged === 4);
+    if (acknowledged < 4) {
+      assert.equal(result.phase, 'verified');
+      assert.equal(
+        result.code,
+        'CUTOVER_CLOUD_RECOVERY_UNPROVEN',
+        'a failed precondition is not a lost open acknowledgement',
+      );
+    }
+    assert.equal(
+      f.events.includes('control:open'),
+      acknowledged === 4,
+      'must refuse before the actual open effect',
+    );
+    assert.equal(f.candidateStatus().mode, acknowledged === 4 ? 'serving' : 'closed');
+  });
+
 test('host composes first-only disposition and durable interruption into the original release tail', async (t) => {
   const f = await lifecycleFixture(t);
   Object.assign(f.approval, {
