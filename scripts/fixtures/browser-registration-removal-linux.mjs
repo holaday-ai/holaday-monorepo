@@ -77,6 +77,8 @@ const afterOpen = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-open'
 const afterIngress = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-ingress';
 const lateKnownEffect = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'late-known-effect';
 const successfulCutover = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'success';
+const lostOpenAck = process.env.CUTOVER_QA_LOST_OPEN_ACK === '1';
+assert.ok(!lostOpenAck || successfulCutover);
 const afterWorker = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-worker';
 const nativeWorker = afterWorker || successfulCutover || lateKnownEffect;
 const nativeIngress = afterIngress || nativeWorker;
@@ -297,6 +299,8 @@ let hostMigrationFaults = 0;
 let hostStartFaults = 0;
 let hostCloseCommands = 0;
 let hostOpenCommands = 0;
+let hostOpenAckDrops = 0;
+let hostStatusAfterLostAck = 0;
 let hostStartCommands = 0;
 let hostMigrationCommands = 0;
 let hostPreopenReadiness = 0;
@@ -1422,6 +1426,8 @@ try {
             if (afterStart) {
               if (command === 'runuser' && args.includes('close')) hostCloseCommands++;
               if (command === 'runuser' && args.includes('open')) hostOpenCommands++;
+              if (command === 'runuser' && args.includes('status') && hostOpenAckDrops)
+                hostStatusAfterLostAck++;
               if (command === 'pm2' && args[0] === 'start') hostStartCommands++;
               if (command === 'pnpm' && args.includes('db:migrate:numbered'))
                 hostMigrationCommands++;
@@ -1446,7 +1452,14 @@ try {
               hostMigrationFaults++;
               throw new Error('QA_INJECTED_MIGRATION_FAILURE');
             }
-            return system.exec(command, args, options);
+            const value = await system.exec(command, args, options);
+            // Lose only the already-completed control reply. The real candidate
+            // and journal remain live; production must inspect, not send open again.
+            if (lostOpenAck && command === 'runuser' && args.includes('open')) {
+              hostOpenAckDrops++;
+              throw new Error('QA_OPEN_REPLY_LOST_AFTER_REAL_EFFECT');
+            }
+            return value;
           },
         },
       );
@@ -1666,6 +1679,10 @@ try {
           assert.equal(reconciliationChecks, 1);
           assert.equal(hostCloseCommands, 0);
           assert.equal(hostOpenCommands, 1);
+          if (lostOpenAck) {
+            assert.equal(hostOpenAckDrops, 1);
+            assert.ok(hostStatusAfterLostAck >= 1, 'must query real status after lost open reply');
+          }
           assert.equal(hostStartCommands, 1);
           assert.equal(hostMigrationCommands, 1);
           assert.equal(effects.failureObservation, undefined);
@@ -1839,6 +1856,9 @@ try {
                 : 'retirement-and-failure-only',
             ...(successfulCutover
               ? { qaFlowPassed: true, reconciliationChecks, lockReleased: true }
+              : {}),
+            ...(lostOpenAck
+              ? { openAckLost: true, openCommands: hostOpenCommands, statusAfterLostAck: true }
               : {}),
             ...(lateKnownEffect
               ? { lateKnownEffectBlocked: true, reconciliationChecks, lockRetained: true }

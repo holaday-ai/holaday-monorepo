@@ -6,6 +6,14 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-29 10:16 heartbeat：完整隔离丢开放回执用例通过，未扩大生产范围
+
+从`19ffefd6`继续。尚未收到对headed browser/VNC新维护范围的明确答复，本heartbeat不替代该决定，不重复上一轮现场采集。沿原Task6继续不依赖生产停机的工作：原两QA夹具新增success-only丢open回执故障，实际open完成后丢结果，原host/release-tail查询同候选状态后完成原备份恢复/迁移/nginx/核对闭环。15610退出0，open一次、丢回执一次、后续真实status、close零、迁移/启动各一次、旧效果仍1，reconciled且锁释放。源/目标90表，本轮精确标签的容器/卷已清理，旧mysql/redis不动。日志`/private/tmp/holaday-lost-open-ack-connected.log`，资源清单`/private/tmp/holaday-stopped-source-efa53dab-0f29-45b8-bde1-9315c809eb14.json`。
+
+未修改产品实现，不称新bug修复或RED→GREEN；这是原矩阵缺少的组合覆盖。应用沿用合成QA缓存6a46ee0f、协调器当前分支，worker=false，不能冒充最终候选/生产双机或支付恢复。只用原镜像、私有PID、无生产凭据，重型测试串行。两QA文件Biome/diff通过（最初输出缩进格式错误退出1已修正）。后续39098已退出0：原显式42文件browser1116/1116，串行ops120/60/16/947及Python12，全部零失败/跳过。日志`/private/tmp/holaday-lost-open-ack-{browser,ops}.log`。所有本轮测试结束，无运行中任务。
+
+新增原计划Task6要求的`2026-09-25-browser-first-cutover-deployment-checklist.md`，把实际尚缺证据和解除条件列明，不创建新计划或更换既有门槛。定向自审未发现确认的生产实现缺陷，不等于独立整分支审查。本轮五个明确文件及ledger按已完成检查保存；随后推进原剩余事实/入口/恢复/审查，勿重做已通过丢回执用例。浏览器维护范围、真实非PayPal恢复等原门槛仍未过，CLI保持关闭，未push/PR/合并/部署，自动化未改，原Task4 BASE及缓存保留。
+
 ### 2026-09-29 10:13 UTC：现场浏览器控制链归属已核实，保留对象的隔离范围待决定
 
 从 `0158a2bdca860a49db1ba6eb36a1fac61f7b915e` 继续，原 Task4 BASE 不变。本轮没有产品代码修改。session54654 退出0：沿原严格 SSH 通道，在 Vultr 内直接调用现有 `readCutoverHostSnapshot()`，将稳定 proc/PM2/ss 结果投影为身份、端口、计数和摘要；未读取页面正文、cookie/profile、业务记录或凭据输出，未发送信号、导航、安装文件、改配置或执行SQL。

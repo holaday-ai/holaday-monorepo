@@ -2,6 +2,18 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-29 原完整隔离闭环：真实开放后丢回执
+
+在等待上一轮浏览器维护范围决定期间，继续原 Task6 故障矩阵，不重复现场观察。仅扩展原两份QA夹具：`CUTOVER_QA_LOST_OPEN_ACK=1`只允许完整success模式；在原host的真实open控制命令成功返回后丢弃结果并抛错。原共享release-tail、host状态查询、journal、备份恢复、候选、nginx及核对代码不替换、不修改。断言真实open命令恰好1次、回执丢弃1次、之后至少有一次真实status查询、close为0、迁移/启动各1次、原旧外部动作效果始终1，最后reconciled且原锁释放。
+
+**真实Linux/Mac隔离演练通过：session15610退出0。** 日志 `/private/tmp/holaday-lost-open-ack-connected.log`；同次源/目标各90表，原Mac age恢复及全部迁移、原双HTTPS入口恢复、实际数据及同boot核对通过。资源清单 `/private/tmp/holaday-stopped-source-efa53dab-0f29-45b8-bde1-9315c809eb14.json`，两个专属合成数据库/卷经原driver精确身份和标签核对后清理，协调器容器退出自清理；既有mysql/redis未动。无真实支付方访问、生产凭据、宿主PID或生产挂载。
+
+使用原网络QA镜像`sha256:ff58ba973281d0804a90d92cee112ef1240386875f2584f975bf0bbf93893abf`及原MySQL镜像`sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b`。私有PID、source/target各768MiB单核，协调器3GiB单核，共享的仅为本轮无外网QA源容器网络namespace；不并行跑其他重型任务。应用候选仍为缓存`6a46ee0fdf588034006e0a53a194b51d3c69608e`，协调器为当前分支；这不是最终发布候选、生产双机、enabled-worker或支付恢复验收。
+
+这是原有行为的新组合覆盖，不宣称修复了生产缺陷，也不虚构RED。初次静态检查仅QA输出缩进不符退出1，格式化后两MJS检查退出0。后续串行回归session39098退出0：原42文件browser1116/1116；ops120/60/16/947及Python12，全部零失败/跳过。日志`/private/tmp/holaday-lost-open-ack-{browser,ops}.log`。最终两MJS Biome和diff-check退出0，所有本轮测试结束。新增原计划要求的deployment-checklist，明确八项阻断/未完成证据、候选与QA产物的区别，以及单次执行与失败核对边界。
+
+主智能体按审查清单定向检查了原恢复会话、隔离目标、受保护入口和共享后半流程，未发现已确认的生产代码缺陷；这不是最终独立整分支审查。生产独立facts、浏览器执行隔离决定、受保护execute完整接线、真实停写备份/Mac恢复、非PayPal恢复及最终审查仍未完成；CLI关闭，未push/PR/合并/部署。
+
 ## 2026-09-29 prepare/preopen 独立 writer 来源接线修复
 
 最终结果：79759退出0，browser1116/1116、ops120/60/16/947与Python12，全部零失败/跳过；48594最终Linux238/238退出0零跳过。三份最终日志`/private/tmp/holaday-readiness-writers-{browser,ops,linux}-final.log`。所有测试结束，两文件Biome、diff-check退出0；下方运行中说明已被本段取代。未重做真实MySQL/物理停止/恢复演练，未宣称完整现场facts或最终独立审查通过，无远端操作、支付方请求或部署。

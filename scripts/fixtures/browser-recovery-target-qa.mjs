@@ -49,6 +49,8 @@ assert.ok(
 );
 const candidateTail = hostFault !== 'before-migration';
 const successfulCutover = hostFault === 'success';
+const lostOpenAck = process.env.CUTOVER_QA_LOST_OPEN_ACK === '1';
+assert.ok(!lostOpenAck || (fullHost && successfulCutover));
 const lateKnownEffect = hostFault === 'late-known-effect';
 const nativeIngress = ['after-ingress', 'after-worker', 'success', 'late-known-effect'].includes(
   hostFault,
@@ -483,6 +485,8 @@ const child = retirementLink
               'CUTOVER_QA_HOST=1',
               '--env',
               `CUTOVER_QA_HOST_FAULT=${hostFault}`,
+              '--env',
+              `CUTOVER_QA_LOST_OPEN_ACK=${lostOpenAck ? '1' : '0'}`,
             ]
           : []),
         ...(stoppedSource
@@ -591,6 +595,7 @@ if (retirementLink) {
       ...(successfulCutover
         ? { qaFlowPassed: true, reconciliationChecks: 1, lockReleased: true }
         : {}),
+      ...(lostOpenAck ? { openAckLost: true, openCommands: 1, statusAfterLostAck: true } : {}),
       ...(lateKnownEffect
         ? { lateKnownEffectBlocked: true, reconciliationChecks: 1, lockRetained: true }
         : {}),
@@ -666,25 +671,27 @@ if (retirementLink) {
       '0',
     );
   console.log(
-    lateKnownEffect
-      ? 'PASS actual same-attempt open/nginx/startup followed by late read-only discovery of a specific unresolved external action: original hold closes same dirty candidate, both HTTPS entrances deny work, lock retained, action count remains one. NOT production reconciliation.'
-      : successfulCutover
-        ? 'PASS synthetic same-attempt original host/retirement/backup/Mac recovery/migration/newboot/preopen/open/nginx/startup plus actual QA DB and identity reconciliation, lock released, effect retained without replay. NOT production release readiness or external payment recovery.'
-        : hostFault === 'after-worker'
-          ? 'PASS same original host/source/recovery/newboot/preopen/open/native ingress -> native disabled-worker verification and actual startup persistence -> explicit post-worker failure; dirty retained, both entrances deny work, no replay. NOT full cutover or enabled-worker verification.'
-          : hostFault === 'after-ingress'
-            ? 'PASS same original host/recovery/migration/new boot/preopen/open -> real three-site nginx restoration with bound receipts and HTTPS -> explicit pre-worker failure, one close, dirty retained, both application entrances deny work; NOT full cutover.'
-            : hostFault === 'after-open'
-              ? 'PASS same original recovery/migration/start/verify/beforeOpen -> one actual open and native serving identity proof -> explicit ingress failure, one close, dirty retained and HTTP work denied; no reopen/replay. NOT full cutover.'
-              : hostFault === 'before-open'
-                ? 'PASS same original host/retirement/backup/Mac restore/source migration/new closed boot -> native verify and beforeOpen evidence -> fault before open, one close, actual HTTP work denied; no open/replay. NOT full cutover.'
-                : hostFault === 'after-start'
-                  ? 'PASS original host/retirement/backup/Mac restore -> actual source migration/seed/new closed candidate -> post-start fault, one close, draining retained and actual HTTP work denied; no open/replay. NOT full cutover.'
-                  : stoppedSource
-                    ? 'PASS same Linux physical retirement/site/journal -> original source dump/age -> Mac isolated restore/all61 migrations -> original durable receipt; candidate tail explicitly refused, no replay. NOT full cutover.'
-                    : recoveryDrift
-                      ? 'PASS real Linux site rejected newly identified external work during original Mac recovery attach; target empty, no receipt/candidate/replay. NOT full cutover.'
-                      : 'PASS same actual Linux stopped attempt/site/journal -> original Mac recovery pipes -> pinned isolated target identity; source export/restore/candidate tail intentionally NOT configured, no backup receipt or replay. NOT full cutover.',
+    lostOpenAck
+      ? 'PASS same-attempt actual open effect with lost reply: original transition queries the real candidate and completes recovery/nginx/reconciliation with exactly one open, no close or replay. NOT production readiness or provider recovery.'
+      : lateKnownEffect
+        ? 'PASS actual same-attempt open/nginx/startup followed by late read-only discovery of a specific unresolved external action: original hold closes same dirty candidate, both HTTPS entrances deny work, lock retained, action count remains one. NOT production reconciliation.'
+        : successfulCutover
+          ? 'PASS synthetic same-attempt original host/retirement/backup/Mac recovery/migration/newboot/preopen/open/nginx/startup plus actual QA DB and identity reconciliation, lock released, effect retained without replay. NOT production release readiness or external payment recovery.'
+          : hostFault === 'after-worker'
+            ? 'PASS same original host/source/recovery/newboot/preopen/open/native ingress -> native disabled-worker verification and actual startup persistence -> explicit post-worker failure; dirty retained, both entrances deny work, no replay. NOT full cutover or enabled-worker verification.'
+            : hostFault === 'after-ingress'
+              ? 'PASS same original host/recovery/migration/new boot/preopen/open -> real three-site nginx restoration with bound receipts and HTTPS -> explicit pre-worker failure, one close, dirty retained, both application entrances deny work; NOT full cutover.'
+              : hostFault === 'after-open'
+                ? 'PASS same original recovery/migration/start/verify/beforeOpen -> one actual open and native serving identity proof -> explicit ingress failure, one close, dirty retained and HTTP work denied; no reopen/replay. NOT full cutover.'
+                : hostFault === 'before-open'
+                  ? 'PASS same original host/retirement/backup/Mac restore/source migration/new closed boot -> native verify and beforeOpen evidence -> fault before open, one close, actual HTTP work denied; no open/replay. NOT full cutover.'
+                  : hostFault === 'after-start'
+                    ? 'PASS original host/retirement/backup/Mac restore -> actual source migration/seed/new closed candidate -> post-start fault, one close, draining retained and actual HTTP work denied; no open/replay. NOT full cutover.'
+                    : stoppedSource
+                      ? 'PASS same Linux physical retirement/site/journal -> original source dump/age -> Mac isolated restore/all61 migrations -> original durable receipt; candidate tail explicitly refused, no replay. NOT full cutover.'
+                      : recoveryDrift
+                        ? 'PASS real Linux site rejected newly identified external work during original Mac recovery attach; target empty, no receipt/candidate/replay. NOT full cutover.'
+                        : 'PASS same actual Linux stopped attempt/site/journal -> original Mac recovery pipes -> pinned isolated target identity; source export/restore/candidate tail intentionally NOT configured, no backup receipt or replay. NOT full cutover.',
   );
 } else {
   assert.equal(
