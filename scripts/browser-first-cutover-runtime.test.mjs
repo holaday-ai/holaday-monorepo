@@ -64,6 +64,7 @@ async function sourceNativeFixture() {
     '/usr/bin/x11vnc',
     '/usr/bin/pkill',
     '/usr/bin/sleep',
+    '/usr/bin/date',
     '/opt/brave.com/brave/brave',
     '/opt/brave.com/brave/chrome_crashpad_handler',
     '/opt/holaday-vnc/start.sh',
@@ -190,11 +191,96 @@ async function sourceNativeFixture() {
     add,
   };
 }
+test('cloud sources compatibility binds the measured optional LF metadata marker', async () => {
+  const f = await sourceNativeFixture();
+  const path = '/usr/lib/python3/dist-packages/websockify-0.10.0.egg-info/not-zip-safe';
+  f.add(path, '\n');
+  f.modes.set(path, 0o100644);
+  const result = await firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io);
+  assert.deepEqual(
+    result.files.find((row) => row.path === path),
+    {
+      path,
+      resolvedPath: path,
+      uid: 0,
+      gid: 0,
+      mode: 0o644,
+      size: 1,
+      digest: '01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b',
+    },
+  );
+});
+for (const [name, content] of [
+  ['empty', ''],
+  ['different byte', 'x'],
+  ['extra LF', '\n\n'],
+]) {
+  test(`cloud sources compatibility refuses marker ${name}`, async () => {
+    const f = await sourceNativeFixture();
+    f.add('/usr/lib/python3/dist-packages/websockify-0.10.0.egg-info/not-zip-safe', content);
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io),
+      /CUTOVER_CLOUD_SOURCES_UNPROVEN/,
+    );
+  });
+}
+for (const kind of ['directory', 'alias']) {
+  test(`cloud sources compatibility refuses marker ${kind} before opening target`, async () => {
+    const f = await sourceNativeFixture();
+    const path = '/usr/lib/python3/dist-packages/websockify-0.10.0.egg-info/not-zip-safe';
+    const target = '/usr/lib/python3/dist-packages/websockify-0.10.0.egg-info/dependency_links.txt';
+    if (kind === 'directory') f.dirs.add(path);
+    else {
+      f.add(target, '\n');
+      f.links.set(path, target);
+    }
+    const opened = [];
+    const open = f.io.open;
+    f.io.open = async (p, ...args) => {
+      opened.push(p);
+      return open(p, ...args);
+    };
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io),
+      /CUTOVER_CLOUD_SOURCES_UNPROVEN/,
+    );
+    assert.equal(opened.includes(path), false);
+    // dependency_links is independently read by the ordinary sorted metadata loop;
+    // the alias must never trigger a second open of its target.
+    assert.ok(opened.filter((p) => p === target).length <= 1);
+  });
+}
+test('cloud sources compatibility binds actual synthetic date bytes', async () => {
+  const f = await sourceNativeFixture();
+  const before = await firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io);
+  assert.equal(
+    before.files.find((row) => row.path === '/usr/bin/date')?.digest,
+    createHash('sha256').update('binary').digest('hex'),
+  );
+  f.add('/usr/bin/date', 'changed synthetic date');
+  const after = await firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io);
+  assert.notDeepEqual(before.files, after.files);
+});
+for (const fault of ['missing', 'PATH shadow', 'untrusted']) {
+  test(`cloud sources compatibility refuses date ${fault}`, async () => {
+    const f = await sourceNativeFixture();
+    if (fault === 'missing') f.data.delete('/usr/bin/date');
+    if (fault === 'untrusted') f.modes.set('/usr/bin/date', 0o100777);
+    if (fault === 'PATH shadow') {
+      f.add('/opt/earlier/date', 'synthetic executable shadow');
+      f.input.configs[0].config.env.PATH = '/opt/earlier:/usr/bin';
+    }
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io),
+      /CUTOVER_CLOUD_SOURCES_UNPROVEN/,
+    );
+  });
+}
 test('cloud sources native reads bounded current bytes and stable private recovery selections', async () => {
   const f = await sourceNativeFixture();
   const saved = structuredClone(f.input);
   const a = await firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io);
-  assert.equal(a.files.length, 28);
+  assert.equal(a.files.length, 29);
   assert.equal(a.roles.length, 2);
   assert.equal(JSON.stringify(a).includes('never-export-this'), false);
   assert.deepEqual(f.input, saved);
@@ -366,7 +452,7 @@ test('cloud sources native streams through real filesystem IO with private synth
       },
     };
     const result = await firstRuntime.readFirstCutoverCloudRecoverySources(f.input, io);
-    assert.equal(result.files.length, 28);
+    assert.equal(result.files.length, 29);
     assert.equal(JSON.stringify(result).includes(directory), false);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });

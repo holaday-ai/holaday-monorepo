@@ -279,6 +279,7 @@ export async function readFirstCutoverCloudRecoverySources(input, overrides = {}
       '/usr/bin/websockify',
       '/usr/bin/pkill',
       '/usr/bin/sleep',
+      '/usr/bin/date',
       ...[
         'package.json',
         'lib/God.js',
@@ -353,10 +354,17 @@ export async function readFirstCutoverCloudRecoverySources(input, overrides = {}
           'RECORD',
           'WHEEL',
           'INSTALLER',
+          'not-zip-safe',
         ].includes(n)
       )
         reject();
-      await source(`${metadataPath}/${n}`, true);
+      const row = await source(`${metadataPath}/${n}`, true);
+      if (
+        n === 'not-zip-safe' &&
+        (row.size !== 1 ||
+          row.digest !== '01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b')
+      )
+        reject();
     }
     const meta = texts.get(`${metadataPath}/PKG-INFO`) ?? texts.get(`${metadataPath}/METADATA`);
     const version = /^Version: (.+)$/m.exec(meta ?? '')?.[1];
@@ -481,7 +489,7 @@ export async function readFirstCutoverCloudRecoverySources(input, overrides = {}
       for (const p of dirs) if (!(await stat(await chain(p))).isDirectory()) reject();
       const selected = [];
       if (!i)
-        for (const name of ['bash', 'x11vnc', 'websockify', 'pkill', 'sleep']) {
+        for (const name of ['bash', 'x11vnc', 'websockify', 'pkill', 'sleep', 'date']) {
           let found;
           for (const dir of dirs) {
             const p = posix.join(dir, name);

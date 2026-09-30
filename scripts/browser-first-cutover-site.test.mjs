@@ -23,6 +23,7 @@ function syntheticCloudSources(scope) {
     '/usr/bin/websockify',
     '/usr/bin/pkill',
     '/usr/bin/sleep',
+    '/usr/bin/date',
     '/usr/lib/python3.10/site.py',
     '/usr/lib/python3.10/importlib/metadata/__init__.py',
     '/usr/lib/node_modules/pm2/package.json',

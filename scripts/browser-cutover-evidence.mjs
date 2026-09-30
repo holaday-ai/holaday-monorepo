@@ -23,6 +23,7 @@ const cloudSourceTools = [
   '/usr/bin/websockify',
   '/usr/bin/pkill',
   '/usr/bin/sleep',
+  '/usr/bin/date',
   ...[
     'package.json',
     'lib/God.js',
@@ -47,6 +48,7 @@ const cloudMetadataFiles = [
   'RECORD',
   'WHEEL',
   'INSTALLER',
+  'not-zip-safe',
 ];
 const cloudSourceKeys = (value, keys) =>
   value !== null &&
@@ -155,6 +157,13 @@ export function validateFirstCutoverCloudSources(value, { scope, observed = fals
         posix.dirname(file.path) === entry.metadataPath &&
         cloudMetadataFiles.includes(posix.basename(file.path));
       if (!cloudSourceTools.includes(file.path) && !packageFile && !cachedFile && !metadataFile)
+        reject();
+      if (
+        metadataFile &&
+        posix.basename(file.path) === 'not-zip-safe' &&
+        (file.size !== 1 ||
+          file.digest !== '01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b')
+      )
         reject();
       const allowedTargets =
         file.path === '/bin/sh'

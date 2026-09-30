@@ -40,6 +40,7 @@ function sourceMaterialFixture() {
     '/usr/bin/websockify',
     '/usr/bin/pkill',
     '/usr/bin/sleep',
+    '/usr/bin/date',
     ...[
       'package.json',
       'lib/God.js',
@@ -86,6 +87,66 @@ function sourceMaterialFixture() {
     },
   };
 }
+test('cloud source compatibility accepts and binds only the measured optional marker', async () => {
+  const { validateFirstCutoverCloudSources: validate } = await import(
+    './browser-cutover-evidence.mjs'
+  );
+  const { value, scope } = sourceMaterialFixture();
+  // Entire source fixture is synthetic; only the marker size/digest is measured.
+  const path = `${value.pythonEntry.metadataPath}/not-zip-safe`;
+  value.files.push({
+    path,
+    resolvedPath: path,
+    uid: 0,
+    gid: 0,
+    mode: 0o644,
+    size: 1,
+    digest: '01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b',
+  });
+  value.files.sort((a, b) => (a.path < b.path ? -1 : 1));
+  assert.equal(validate(value, { scope }), undefined);
+  for (const change of [
+    (row) => {
+      row.digest = 'a'.repeat(64);
+    },
+    (row) => {
+      row.size = 0;
+    },
+    (row) => {
+      row.size = 2;
+    },
+    (row) => {
+      row.resolvedPath = `${value.pythonEntry.metadataPath}/dependency_links.txt`;
+    },
+    (row) => {
+      row.path = '/usr/lib/python3/dist-packages/websockify/not-zip-safe';
+    },
+  ]) {
+    const changed = structuredClone(value);
+    change(changed.files.find((row) => row.path === path));
+    changed.files.sort((a, b) => (a.path < b.path ? -1 : 1));
+    assert.throws(() => validate(changed, { scope }), /CUTOVER_CLOUD_SOURCES_UNPROVEN/);
+  }
+});
+test('cloud source compatibility requires date even with enough other source rows', async () => {
+  const { validateFirstCutoverCloudSources: validate } = await import(
+    './browser-cutover-evidence.mjs'
+  );
+  const { value, scope } = sourceMaterialFixture();
+  value.files = value.files.filter((row) => row.path !== '/usr/bin/date');
+  const path = `${value.pythonEntry.metadataPath}/requires.txt`;
+  value.files.push({
+    path,
+    resolvedPath: path,
+    uid: 0,
+    gid: 0,
+    mode: 0o644,
+    size: 0,
+    digest: 'a'.repeat(64),
+  });
+  value.files.sort((a, b) => (a.path < b.path ? -1 : 1));
+  assert.throws(() => validate(value, { scope }), /CUTOVER_CLOUD_SOURCES_UNPROVEN/);
+});
 test('cloud source material validates exact protected and observed contracts without approval flags', async () => {
   const { validateFirstCutoverCloudSources: validate } = await import(
     './browser-cutover-evidence.mjs'

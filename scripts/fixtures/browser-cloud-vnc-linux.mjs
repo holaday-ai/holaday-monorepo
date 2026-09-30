@@ -605,6 +605,7 @@ done
       '/usr/bin/websockify',
       '/usr/bin/pkill',
       '/usr/bin/sleep',
+      '/usr/bin/date',
       ...[
         'package.json',
         'lib/God.js',

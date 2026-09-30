@@ -2,6 +2,42 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 实测来源兼容性修正（本批验收通过，非发布验收）
+
+基线3eb86c6d。原两名Sol在互斥文件范围内实施，主控检查实际diff并串行回归；没有新增框架。原来源读取器和受保护材料校验器只接受实测的可选not-zip-safe单LF标记（size1及精确SHA256），新增真实wrapper需要的/usr/bin/date来源读取、PATH选择及摘要绑定；缺失、被前置路径遮蔽或不可信时仍拒绝。四处既有合成材料同步新增date，不改变真实停止/恢复断言。
+
+| 验证 | 实际结果 | 本机日志或报告 |
+| --- | --- | --- |
+| 定向TDD与完整runtime/evidence | RED12中7失败；GREEN12/12；完整607/607，退出0、零跳过 | `/private/tmp/holaday-vnc-source-compatibility-20260930-report.md` |
+| 首次实际Linux七模块 | 69953/a08d7c退出1；1135通过、11失败、零跳过，保留失败记录 | `/private/tmp/holaday-vnc-source-compatibility-linux-20260930.log` |
+| 两个遗漏的合成材料修正 | 仅site/ingress各增加date一行；修正前定向2失败，修正后完整132/132，退出0、零跳过 | `/private/tmp/holaday-vnc-source-compatibility-fixtures-20260930-report.md` |
+| 最终实际Linux七模块 | 21093/3083f5退出0；1146/1146、零跳过 | `/private/tmp/holaday-vnc-source-compatibility-linux-fix1-20260930.log` |
+| 独立范围复审 | I1已关闭，spec/quality PASS，无新发现；不是整分支审查 | `/private/tmp/holaday-vnc-source-compatibility-review-20260930.md` |
+| 八文件静态检查 | 7e3325退出0；Biome无修复、diff-check和冻结摘要一致 | 主控工具记录 |
+| 首次ops环境遗漏 | 84856/41cc15退出0；Node120/60/16和Python12通过，末组1276中1242通过、34跳过，不能计为零跳过验收 | `/private/tmp/holaday-vnc-source-compatibility-ops-20260930.log` |
+| 显式age的最终ops | 48839/41679c退出0；Node120/60/16/1276及Python12全部通过、零跳过 | `/private/tmp/holaday-vnc-source-compatibility-ops-age-20260930.log` |
+
+首次34项跳过原因是主控未传原计划要求的CUTOVER_TEST_AGE_EXECUTABLE；现成/opt/homebrew/bin/age v1.3.1已核实，不安装工具或操作用户密钥。使用该显式环境变量的原ops最终48839/41679c退出0，末组1276/1276、零跳过；此前环境遗漏和Linux11失败日志完整保留。最终4735a5核对八文件冻结摘要一致、diff-check退出0。三名原代理和全部验证进程已结束；独立审查报告记录的待验状态属于其写作时刻，主控最终实际结果见本表，不改写历史。
+
+Linux仍使用原固定QA镜像ff58ba97，单容器、1CPU/512MiB、私有PID、network-none、只读scripts、无生产凭据。未重跑已完成的VNC物理演练；该夹具本次一行是明确合成材料，不是生产date实测或新物理验收。实际生产date/PATH及五个未知启动文件仍未审查；原capability/专属归属、native恢复消费者、ACK、库存>4/Xvfb拒绝和CLI关闭保持。没有生产写入、支付业务改写、PayPal服务调用、push/PR/合并/部署。
+
+## 2026-09-30 已授权公开包来源实际采集（不是加载选择或恢复验收）
+
+精准公开包导出许可已由用户直接“允许”补齐，下文同日旧记录的“未授权/未执行”不再是当前状态。原通道与凭据仅在执行进程内使用，未输出；没有服务器写入、Python执行或业务读写。
+
+| 本次实际操作 | 结果 | 本机证据 |
+| --- | --- | --- |
+| 原固定采集 | 42743/c5b708退出1，路径保护拒绝，readBytes0；未重试 | `holaday-vnc-selection-source-20260930.json` |
+| 固定路径元数据诊断 | 36842/86a705退出0，定位sitecustomize链接到原边界外的/etc路径；不读内容 | `holaday-vnc-selection-diagnostic-20260930.json` |
+| 版本化公开包采集 | 22606/c330fc退出0，完整采集；hookBytesRead0 | `holaday-vnc-selection-source-v2-20260930.json`，49557字节0600，SHA256 `5cee87d6bdaa76fd573c7056642f97bb9c55b77cf20498f4231ebbda2a29113a` |
+| 固定七文件补充 | 20996/d9adda退出0，补齐四份此前仅有摘录的源码及三份元数据；四模块摘要完全匹配 | `holaday-vnc-package-completion-20260930.json`，96400字节0600，SHA256 `76376c259c6d2a22246a6ca0c962043e2e697dab269d89efd46bea5c3af20cb6` |
+
+上述文件均在`/private/tmp/`。补充采集器ff7c02f6经过主控完整审读，固定七个规范路径；同目录alias及越界alias均在open前拒绝。外层/远端语法和9个纯内存拒绝检查退出0、零跳过；这些是采集器局部检查，不是产品发布测试。
+
+已核实唯一安装metadata为websockify-0.10.0.egg-info，console入口为websockify.websocketproxy:websockify_init，websocketserver.py在实际导入链上。完整同摘要源码补齐了SIGTERM→terminate及正常多进程退出分支的child.terminate调用；它不证明全部子进程实际退出，原物理观察仍必需。not-zip-safe和dependency_links.txt实际为单LF，requires.txt为空；固定wrapper还依赖date。
+
+未知sitecustomize与四个zope命名空间.pth内容均未读取；五项继续阻断加载选择。两个采集结果均明确selection/production=false，补充结果recovery=false。只读审查这五个文件的具体权限已单独询问，未收到答复前不读；不把公开包授权扩大为任意自定义启动源码读取。代码修正和本轮产品测试状态以其后恢复点为准，不能引用本表声称恢复或上线完成。
+
 ## 2026-09-30 固定来源门禁接入原停止路径（本批验收通过，非发布验收）
 
 基线6950e329后的本批接通固定磁盘/启动选择来源、严格材料验证、完整受保护site摘要与journal绑定、双角色停止意图及派发前来源刷新；刷新后重取围栏，最后检查窗口。保留原两角色恢复前置、库存分类器和CLI硬拒绝，无恢复ACK或生产开放。

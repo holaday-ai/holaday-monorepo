@@ -6,6 +6,30 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 实测来源兼容性本批完成，下一步仅缺新的五文件审查权限
+
+在3eb86c6d上完成两项由真实包材料确定的最小修正：仅接受not-zip-safe精确单LF标记；把wrapper的/usr/bin/date纳入实际读取、PATH选择及受保护摘要。两名原Sol按互斥范围完成八个代码/测试/夹具文件；三名原代理均已关闭。独立I1复审spec/quality PASS，无未关闭发现；实际Linux1146/1146及显式age的ops120/60/16/1276+Python12全部退出0、零跳过，最终静态检查/冻结摘要/diff-check通过。首次Linux11失败已通过补齐两处合成材料修复；首次ops34跳过为主控漏传age环境，已正确补跑，原日志均保留。精确证据见verification同日最新节。
+
+公开包授权范围内的补充采集也已完成：四份全文与前次摘要一致，三份遗漏元数据取得；`/private/tmp/holaday-vnc-package-completion-20260930.json`为96400字节0600，SHA76376c259c6d2a22246a6ca0c962043e2e697dab269d89efd46bea5c3af20cb6。不再重复采集公开包、搭通道或生成密钥。
+
+下一步真实加载选择和原native恢复接线需要审查实际发现的五个启动文件：`/etc/python3.10/sitecustomize.py`及`/usr/lib/python3/dist-packages/`下zope.component-4.3.0、zope.event-4.4、zope.hookable-5.1.0、zope.interface-5.4.0四个-nspkg.pth。五者内容均未读；针对仅这五个文件只读审查、不执行/修改、凭据不输出的具体问题已异步提出，尚无答复。之前“允许”只解决公开包导出，不扩大到未知启动源码。不能按文件名默认安全、用QA版本替代生产事实或降低未知hook拒绝。
+
+本批完成不是完整Task4–6完成。两角色capability/专属归属、完整native消费者/ACK、真实停写备份/Mac恢复、非PayPal恢复、完整成功/故障/不重放演练、整分支审查及新鲜发布窗口仍待完成；生产date实测亦未取得。原库存>4/Xvfb及CLI关闭保持。没有生产写入、支付历史修改、PayPal调用、push/PR/合并/部署，原缓存保留。主控将保存本批并暂停既有自动化等待上述具体审查权限，避免反复采集或堆积无依据的接线；实际提交与自动化工具结果以progress最新条目为准。
+
+### 2026-09-30 已授权的固定来源导出成功，真实加载选择仍未放行
+
+主控审读版本化采集器f246a884后，沿原严格通道单次执行22606/c330fc退出0。新文件`/private/tmp/holaday-vnc-selection-source-v2-20260930.json`为49557字节、0600，SHA256 `5cee87d6bdaa76fd573c7056642f97bb9c55b77cf20498f4231ebbda2a29113a`。固定包九个模块、唯一`websockify-0.10.0.egg-info`及入口`websockify.websocketproxy:websockify_init`材料已取得；此前缺少的`websocketserver.py`已补齐，不重采。
+
+原采集拒绝已由一次metadata-only诊断定位：Python3.10的sitecustomize符号链接指向原边界外的`/etc/python3.10/sitecustomize.py`。新采集器对全部hook及`.pth`只读元数据，内容读取为0；实际发现该hook和四个zope命名空间`.pth`，均明确保留为未审查的选择阻断项。包材料采集完成不等于Python加载选择、两角色恢复能力或上线通过；两个证明标志均为false。未执行Python，未读凭据/业务原文，未改服务器、PayPal或密钥。
+
+原Sol A继续只读核对本机材料与既有恢复接口，报告`/private/tmp/holaday-vnc-selection-source-v2-analysis-20260930.md`；主控负责裁定接线，未新增任务或工作树。HEAD仍3eb86c6d，原已验收来源门禁不重做，原5–8事件消费者、能力/归属及Task4–6其余真实验收仍待完成，CLI关闭。自动化ACTIVE，旧“授权未答复/暂停/输出不存在”仅是历史，不再重复询问已解除的具体授权。
+
+### 2026-09-30 精准导出已获授权，实际采集在路径检查安全拒绝
+
+用户直接回复“允许”，明确覆盖上轮固定websockify公开包/入口/加载摘要的本机0600导出，旧授权阻塞解除，既有holaday自动化已由工具恢复ACTIVE。主控完整复核原3da68e采集器，首次本地命令839328因候选目录没有凭据文件在SSH前退出；随后原加载器指向主目录现有文件，原严格SSH/askpass通道执行一次42743/c5b708退出1。
+
+输出已真实保存`/private/tmp/holaday-vnc-selection-source-20260930.json`，1287字节、0600、readBytes=0、status=unproven、stage=fixed-search-directories。只观察到/usr/bin两hook缺失及/usr/lib/python3.10目录存在，未读包源码；不能称为来源或恢复能力通过。原Sol A仅制作固定候选路径的metadata-only诊断器，主控审读后定位具体路径拒绝，不直接重跑相同失败、不放宽未知hook/越界保护、不读自定义源码。详见progress最新状态；生产服务/业务/PayPal/密钥未改，完整发布及CLI仍关闭，下方PAUSED/文件不存在记录仅属历史。
+
 ### 2026-09-30 已保存01cc2878，等待唯一具体生产导出授权
 
 本批13文件已提交01cc2878，核实工作树仅原scripts/__pycache__/未跟踪，全部代理和重型验证已结束。下节最终验收结果有效，本地实施/审批缺口已解除。下一段两角色现场能力及完整VNC恢复消费者需要实际Ubuntu websockify入口/distribution/加载选择材料；此前固定只读导出被auto-review在SSH前拒绝，输出文件再次核实不存在，精准授权问题尚未答复。不能用QA不同版本或猜测路径填入受保护生产材料，也不再为缺失事实追加旁支框架/重复验收。
