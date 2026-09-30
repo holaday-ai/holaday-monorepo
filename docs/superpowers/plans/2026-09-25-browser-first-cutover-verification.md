@@ -2,6 +2,14 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+### 2026-10-01 修正版已获准执行；manager仍拒绝，固定诊断载荷被系统阻止
+
+用户先回复“允许授权所有必要的操作”，后进一步明确“我去睡觉了 你自行安排 允许期间的所有操作”。按正常系统审批执行已核对474111字节/dbfd2c...08eb修正版成功获准；实际只读结果仍为`unproven/read-managers`，命令退出1、stderr空。PM2路径本地修复及真实隔离socket验证仍成立，但不能推断现场manager读取已通过，source叶子尚未执行。原v2现场结果保存在`qa/native-vnc-resume-20260930/live-source-reader-v2.json`。
+
+准备有限诊断版`managers-diagnostic.mjs`：473698字节，SHA256 `eac571d833fc2b38a1f7856267c3dc357216f239c3ffe0f2c12d58de52f7bdfe`。仅在原manager拒绝处输出固定M1–M9编号及MODULE_NOT_FOUND/ENOENT/EACCES/ECONNREFUSED/other有限码，绝不输出配置值、error.message/stack或秘密；删去source读取，只调用原getMonitorData。目标仍root@207.148.70.106，经原严格跳板路径，75秒/192MiB，无远端落盘/启停/恢复/业务修改。正常审批执行前拒绝，认为用户未逐份明确授权该派生载荷外传。按拒绝允许的方式做本地逐字节范围审计：evidence完全相同，runtime除manager固定标记外前后完全一致，无新内部文件/配置；`diagnostic-scope-audit.md`含可核对66行差异。携此新证据正常复审同一载荷和同一路径，仍被拒绝，理由是范围审计不能替代这份具体payload的明确授权。两次均未执行SSH；停止重试，不换通道或间接执行。需要用户明确允许该诊断载荷向该主机的一次只读传输后再走正常审批。
+
+当前HEAD实现仍8cd2975e，原未跟踪__pycache__保留；本轮没有修改生产或实现代码，不重跑已通过1185组件测试。自动化仍暂停，无代理、无运行中测试/远端进程。Task4–6、来源/双角色恢复及新鲜发布窗口均未完成；无push/PR/merge/deploy或上线成功。此处是真实系统权限阻塞，不能把广泛用户授权当作绕过系统许可。
+
 ### 2026-09-30 首次授权已执行；真实PM2路径缺口修复，修正版传输仍受审批阻塞
 
 用户对原474131字节固定载荷明确授权后，正常审批允许执行。实际结果为`unproven/read-managers`（退出1、stderr空）；没有进入source叶子、没有停止/恢复。额外只读固定路径元数据确认现场`/opt/node22/lib/node_modules/pm2`不存在，而`/usr/lib/node_modules/pm2`及其RPC依赖存在，rpc.sock为root所有socket。原两个native读取位置已对齐来源校验既有/usr/lib路径。新增真实Linux PM2 socket夹具，在断网1CPU/512MiB固定镜像中把真实安装移至该路径，旧代码RED、修正GREEN；两管理器PID/restart计数不变，缺失socket不建daemon。原七模块1185/1185、零跳过，Biome/diff-check通过；仅作者范围审查，非整分支独立审查。
