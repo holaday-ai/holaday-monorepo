@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import {
@@ -15,6 +16,12 @@ import {
   readReviewedFirstCutoverLegacySource,
 } from '../browser-first-cutover-host.mjs';
 import { firstCutoverSourceBindings } from '../browser-first-cutover-inventory.mjs';
+import {
+  firstCutoverCloudBrowserRecoveryLaunch,
+  firstCutoverCloudVncRecoveryMaterial,
+  readFirstCutoverCloudManagers,
+  restoreFirstCutoverCloudVnc,
+} from '../browser-first-cutover-runtime.mjs';
 import { acquireReleaseJournal } from '../browser-maintenance-journal.mjs';
 
 await fs.access('/.dockerenv');
@@ -26,7 +33,10 @@ for (const tool of ['/usr/bin/ps', '/usr/bin/pkill']) {
   const { stdout } = await exec(tool, ['--version']);
   assert.match(stdout, /procps/, `${tool} must be the real procps executable`);
 }
-const controller = process.argv[2] === '--controller';
+// Recovery uses real PM2/procfs and forked Python server substitutes, NOT real
+// x11vnc/websockify, business/fence/display proof, or a full recovery ACK.
+const controllerRecovery = process.argv[2] === '--controller-recovery';
+const controller = process.argv[2] === '--controller' || controllerRecovery;
 assert.ok(process.argv.length === 2 || (controller && process.argv.length === 3));
 const pm2Home = controller ? '/root/.pm2' : '/tmp/vnc-pm2';
 if (controller) {
@@ -54,6 +64,29 @@ const pm2 = async (...args) =>
     })
   ).stdout;
 const log = '/tmp/vnc-qa-starts';
+const wrapper = controllerRecovery ? '/opt/holaday-vnc/start.sh' : '/tmp/legacy-vnc.sh';
+let workerIntervalMs;
+let compareVncRecoveryConfig;
+let assertPackagePremise;
+if (controllerRecovery) {
+  ({ compareCutoverCloudVncRecoveryConfig: compareVncRecoveryConfig } = await import(
+    '../browser-cutover-evidence.mjs'
+  ));
+  assert.equal(typeof compareVncRecoveryConfig, 'function', 'VNC comparator must be integrated');
+  const require = createRequire(import.meta.url);
+  assert.equal(require('/opt/node22/lib/node_modules/pm2/package.json').version, '6.0.14');
+  assert.equal(process.env.PM2_WORKER_INTERVAL, undefined);
+  const pm2Constants = require('/opt/node22/lib/node_modules/pm2/constants.js');
+  const utility = require('/opt/node22/lib/node_modules/pm2/lib/Utility.js');
+  workerIntervalMs = pm2Constants.WORKER_INTERVAL;
+  assertPackagePremise = () => {
+    // Actual cached source/package lookup, not proof of the production host.
+    assert.equal(pm2Constants.ENABLE_GIT_PARSING, false);
+    assert.equal(utility.findPackageVersion(wrapper), 'N/A');
+  };
+  assert.equal(workerIntervalMs, 30000);
+  await fs.mkdir('/opt/holaday-vnc', { mode: 0o700 });
+}
 // Real forked request handler, not just a direct-child sleep stub. It ignores
 // the graceful signal to exercise PM2's approved bounded tree escalation.
 const stub = `#!/usr/local/bin/python3
@@ -72,7 +105,7 @@ for (const file of ['/usr/bin/x11vnc', '/usr/bin/websockify'])
   await fs.writeFile(file, stub, { flag: 'wx', mode: 0o755 });
 // Control-flow equivalent of the authorized, reviewed production wrapper.
 await fs.writeFile(
-  '/tmp/legacy-vnc.sh',
+  wrapper,
   `#!/bin/bash
 set -u
 cleanup() { pkill -P $$ 2>/dev/null || true; }
@@ -91,12 +124,13 @@ done
 `,
   { flag: 'wx', mode: 0o700 },
 );
+if (controllerRecovery) assertPackagePremise();
 await fs.mkdir('/var/lib/holaday-headed-brave/Default/Sessions', { recursive: true });
 await fs.writeFile('/var/lib/holaday-headed-brave/Default/Sessions/qa-sentinel', 'synthetic-keep');
 await pm2('start', '/bin/sleep', '--name', 'unrelated', '--interpreter', 'none', '--', '300');
 await pm2(
   'start',
-  '/tmp/legacy-vnc.sh',
+  wrapper,
   '--name',
   'holaday-vnc',
   '--interpreter',
@@ -281,7 +315,13 @@ if (controller) {
       return {
         name,
         pmId: manager.pmId,
-        recoveryDigest: '7'.repeat(64),
+        recoveryDigest: controllerRecovery
+          ? sha(
+              name === 'holaday-vnc'
+                ? firstCutoverCloudVncRecoveryMaterial({ attempt: binding.attempt })
+                : firstCutoverCloudBrowserRecoveryLaunch({ attempt: binding.attempt }),
+            )
+          : '7'.repeat(64),
         scopeDigest: sha({
           host: 'vultr',
           hostname: original.hostname,
@@ -341,42 +381,291 @@ if (controller) {
     console.log(
       'CLOUD_CONTROLLER_PHYSICAL_PASS: original controller/journal, default numeric PM2 effects, live procfs exit proof',
     );
+    if (controllerRecovery) {
+      // Run EVERY original stop/tree/handler/profile assertion before recovery,
+      // while retaining this same owned journal until the new observation ends.
+      await assertOriginalStop();
+      const stoppedRecord = await journal.readFirstCutoverEffects();
+      const stoppedManagers = await readFirstCutoverCloudManagers();
+      const stoppedVnc = stoppedManagers[0];
+      assert.equal(stoppedVnc.pm_id, target.pm_id);
+      assert.equal(stoppedVnc.pid, 0);
+      assert.equal(stoppedVnc.pm2_env.status, 'stopped');
+      assert.equal(stoppedVnc.pm2_env.pm_exec_path, wrapper);
+      assert.equal(stoppedVnc.pm2_env.restart_time, target.pm2_env.restart_time);
+      const oldIds = new Set(
+        original.managers
+          .filter((m) => ['holaday-vnc', 'holaday-chromium-headed'].includes(m.name))
+          .map((m) => m.pid),
+      );
+      for (let i = 0; i < original.processes.length; i++)
+        for (const p of original.processes) if (oldIds.has(p.ppid)) oldIds.add(p.pid);
+      const retired = original.processes.filter((p) => oldIds.has(p.pid));
+      const unrelatedIdentity = original.processes.find((p) => p.pid === unrelated.pid);
+      assert.ok(unrelatedIdentity);
+      const wrapperBytes = await fs.readFile(wrapper, 'utf8');
+      const checkPreserved = async () => {
+        assertPackagePremise();
+        for (const p of retired)
+          assert.notEqual(
+            (await identity(p.pid))?.start,
+            p.start,
+            'old wrapper/children/handler gone',
+          );
+        assert.deepEqual(await identity(unrelated.pid), unrelatedIdentity);
+        assert.equal(await fs.readFile(wrapper, 'utf8'), wrapperBytes);
+        assert.equal(
+          await fs.readFile('/var/lib/holaday-headed-brave/Default/Sessions/qa-sentinel', 'utf8'),
+          'synthetic-keep',
+        );
+        assert.equal((await fs.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim(), bootId);
+        assert.deepEqual(
+          await identity(daemonPid),
+          original.processes.find((p) => p.pid === daemonPid),
+        );
+      };
+      // Explicit synthetic prerequisites ONLY: no database/candidate operation,
+      // no actual headed recovery. The real headed sleep remains stopped.
+      for (const phase of ['all_fenced', 'stopped', 'backup_verified'])
+        await journal.persist(phase, { candidate: binding.candidate });
+      await journal.bindBackupReceipt({
+        ...binding,
+        backupDigest: '1'.repeat(64),
+        databaseIdentityDigest: '2'.repeat(64),
+        isolatedTargetDigest: '3'.repeat(64),
+        encryptionProfileDigest: '4'.repeat(64),
+        comparisonDigest: '5'.repeat(64),
+        schemaDigest: '6'.repeat(64),
+        businessDigest: '7'.repeat(64),
+        restoredAtMs: Date.now(),
+      });
+      await journal.persist('migration_started', { candidate: binding.candidate });
+      await journal.bindBootstrapSeed('5'.repeat(32));
+      const candidateIdentity = { candidate: binding.candidate, bootId: '6'.repeat(32) };
+      for (const phase of ['candidate_started', 'verified'])
+        await journal.persist(phase, { candidate: binding.candidate, identity: candidateIdentity });
+      for (const phase of ['cloud-restore-intent', 'cloud-restored'])
+        await journal.recordCloudMaintenanceEvent({
+          ...scope[1],
+          attempt: binding.attempt,
+          inventoryDigest,
+          host: 'vultr',
+          phase,
+        });
+      console.log(
+        'VNC_RECOVERY_SYNTHETIC_PREREQUISITES: headed events5/6, backup/candidate, business/fences, display and other-host/source facts are synthetic; Python substitutes are not actual x11vnc/websockify.',
+      );
+      const input = {
+        attempt: binding.attempt,
+        pmId: stoppedVnc.pm_id,
+        stoppedConfigDigest: cutoverRegistrationConfigDigest(stoppedVnc.pm2_env),
+        maintenanceEndsAtMs: Date.now() + 60000,
+      };
+      const restoreStartedAtMs = Date.now();
+      await restoreFirstCutoverCloudVnc(input, {
+        journal,
+        assertRecoveryScope: async (actual) => {
+          assert.deepEqual(actual, input);
+          assert.ok(Date.now() < input.maintenanceEndsAtMs);
+          assert.deepEqual(await journal.assertOwnership(), binding);
+          const record = await journal.readFirstCutoverEffects();
+          assert.equal(record.phase, 'verified');
+          assert.ok([6, 7].includes(record.cloudMaintenanceEvents.length));
+          await checkPreserved();
+          const current = await readFirstCutoverCloudManagers();
+          for (const [i, row] of current.entries()) {
+            assert.equal(row.pid, 0);
+            assert.equal(row.pm_id, stoppedManagers[i].pm_id);
+            assert.equal(
+              cutoverRegistrationConfigDigest(row.pm2_env),
+              cutoverRegistrationConfigDigest(stoppedManagers[i].pm2_env),
+            );
+          }
+          assert.deepEqual(await journal.readFirstCutoverEffects(), record);
+          assert.ok(Date.now() < input.maintenanceEndsAtMs);
+        },
+      });
+      const intent = await journal.readFirstCutoverEffects();
+      assert.equal(intent.phase, 'verified');
+      assert.deepEqual(intent.cloudMaintenanceScope, stoppedRecord.cloudMaintenanceScope);
+      assert.equal(intent.cloudMaintenanceEvents.length, 7);
+      assert.equal(intent.cloudMaintenanceEvents[6].name, 'holaday-vnc');
+      assert.equal(intent.cloudMaintenanceEvents[6].phase, 'cloud-restore-intent');
+      // Wait only for this one replacement lifetime's three logged substitutes.
+      const readyBy = Date.now() + 8000;
+      let replacementLines;
+      do {
+        replacementLines = (await fs.readFile(log, 'utf8')).trim().split('\n');
+        if (replacementLines.length >= 6) break;
+        await sleep(30);
+      } while (Date.now() < readyBy);
+      assert.equal(replacementLines.length, 6);
+      assert.deepEqual(replacementLines.slice(0, 3), starts);
+      const logged = replacementLines.slice(3).map((line) => {
+        const [role, pid] = line.split(' ');
+        return { role, pid: Number(pid) };
+      });
+      assert.deepEqual(logged.map((p) => p.role).sort(), [
+        '/usr/bin/websockify',
+        '/usr/bin/x11vnc',
+        'handler',
+      ]);
+      const observeRecovered = async () => {
+        await checkPreserved();
+        const [row, headed] = await readFirstCutoverCloudManagers();
+        assert.equal(row.pm_id, stoppedVnc.pm_id);
+        assert.ok(row.pid > 1 && !oldIds.has(row.pid));
+        assert.equal(row.pm2_env.status, 'online');
+        assert.equal(row.pm2_env.restart_time, stoppedVnc.pm2_env.restart_time);
+        assert.deepEqual(row.pm2_env.env, stoppedVnc.pm2_env.env);
+        assert.equal(Object.hasOwn(row.pm2_env, 'max_memory_restart'), false);
+        assert.equal(Object.hasOwn(row.pm2_env.env, 'max_memory_restart'), false);
+        assert.equal(headed.pid, 0, 'headed prior recovery is synthetic, not a physical claim');
+        assert.equal(
+          cutoverRegistrationConfigDigest(headed.pm2_env),
+          cutoverRegistrationConfigDigest(stoppedManagers[1].pm2_env),
+        );
+        const configProof = compareVncRecoveryConfig({
+          attempt: binding.attempt,
+          pmId: row.pm_id,
+          pm2Version: '6.0.14',
+          stoppedConfig: stoppedVnc.pm2_env,
+          recoveredConfig: row.pm2_env,
+          launch: firstCutoverCloudVncRecoveryMaterial({ attempt: binding.attempt }),
+          expectedLaunchDigest: stoppedRecord.cloudMaintenanceScope[0].recoveryDigest,
+          restoreStartedAtMs,
+          observedAtMs: Date.now(),
+        });
+        assert.equal(configProof.stoppedConfigDigest, input.stoppedConfigDigest);
+        assert.equal(configProof.restartCount, stoppedVnc.pm2_env.restart_time);
+        const all = [];
+        for (const name of await fs.readdir('/proc')) {
+          if (!/^\d+$/.test(name)) continue;
+          const p = await identity(Number(name));
+          if (p) all.push(p);
+        }
+        const ids = new Set([row.pid]);
+        for (let i = 0; i < all.length; i++)
+          for (const p of all) if (ids.has(p.ppid)) ids.add(p.pid);
+        const tree = all.filter((p) => ids.has(p.pid)).sort((a, b) => a.pid - b.pid);
+        assert.equal(
+          tree.length,
+          5,
+          'root wrapper, supervision subshell, two substitute servers, forked handler',
+        );
+        const root = tree.find((p) => p.pid === row.pid);
+        assert.equal(root.ppid, daemonPid);
+        assert.match(root.exe, /\/bash$/);
+        assert.ok(
+          (await fs.readFile(`/proc/${root.pid}/cmdline`, 'utf8')).split('\0').includes(wrapper),
+        );
+        const server = (role) =>
+          tree.find((p) => p.pid === logged.find((r) => r.role === role)?.pid);
+        const x11 = server('/usr/bin/x11vnc');
+        const web = server('/usr/bin/websockify');
+        const handler = server('handler');
+        assert.ok(x11 && web && handler);
+        const loop = tree.find((p) => p.pid === x11.ppid);
+        assert.ok(loop && loop.pid !== root.pid);
+        assert.equal(loop.exe, root.exe);
+        assert.equal(loop.ppid, root.pid);
+        assert.equal(web.ppid, root.pid);
+        assert.equal(handler.ppid, web.pid);
+        assert.equal(x11.exe, web.exe);
+        assert.equal(handler.exe, web.exe);
+        for (const p of tree) {
+          assert.ok(!oldIds.has(p.pid));
+          assert.deepEqual(p.uids, [0, 0, 0, 0]);
+          assert.deepEqual(await identity(p.pid), p);
+        }
+        const repeated = (await readFirstCutoverCloudManagers())[0];
+        assert.equal(repeated.pid, row.pid);
+        assert.equal(
+          cutoverRegistrationConfigDigest(repeated.pm2_env),
+          configProof.recoveredConfigDigest,
+        );
+        assert.equal(
+          (await fs.readFile(log, 'utf8')).trim().split('\n').length,
+          6,
+          'no extra substitute lifetime',
+        );
+        assert.deepEqual(await journal.assertOwnership(), binding);
+        assert.deepEqual(await journal.readFirstCutoverEffects(), intent);
+        assert.ok(Date.now() < input.maintenanceEndsAtMs);
+        return { pid: row.pid, tree, configProof };
+      };
+      const recovered = await observeRecovered();
+      const waitMs = workerIntervalMs + 5000;
+      assert.ok(
+        waitMs <= 45000 && input.maintenanceEndsAtMs - Date.now() > waitMs + 5000,
+        'VNC_WORKER_STABILITY_WINDOW_TOO_SHORT',
+      );
+      const began = performance.now();
+      await sleep(waitMs);
+      assert.deepEqual(await observeRecovered(), recovered);
+      const elapsedMs = performance.now() - began;
+      assert.ok(
+        elapsedMs > workerIntervalMs && elapsedMs <= 45000,
+        'VNC_WORKER_STABILITY_INTERVAL_OUT_OF_BOUNDS',
+      );
+      console.log(
+        JSON.stringify({
+          marker: 'VNC_CONTROLLER_RECOVERY_COMPONENT_PASS',
+          workerIntervalMs,
+          elapsedMs,
+          sameRegistrationHistoryConfigAndTree: true,
+          journalEvents: 7,
+          vncRecoveryAck: false,
+          opened: false,
+          servers: 'Python control-flow substitutes; not actual x11vnc/websockify',
+          synthetic: [
+            'headed recovery5/6',
+            'backup/candidate',
+            'business/fence/display',
+            'other-host/source',
+          ],
+        }),
+      );
+    }
   } finally {
     await journal.close();
   }
 } else await pm2('stop', String(target.pm_id));
-assert.ok(Date.now() - stopStart < 10000, 'bounded single stop');
-await sleep(2300);
-const after = await rows();
-const stopped = after.find((r) => r.pm_id === target.pm_id);
-assert.equal(stopped.pm2_env.status, 'stopped');
-assert.equal(stopped.pid, 0);
-assert.equal(stopped.pm2_env.restart_time, target.pm2_env.restart_time);
-assert.equal(after.find((r) => r.pm_id === unrelated.pm_id).pid, unrelated.pid);
-process.kill(unrelated.pid, 0);
-const final = (await fs.readFile(log, 'utf8')).trim().split('\n');
-assert.equal(final.length, 3, 'neither loop resurrects a server after stop');
-const observed = [];
-for (const line of starts) {
-  const pid = Number(line.split(' ')[1]);
-  const stat = await fs.readFile(`/proc/${pid}/stat`, 'utf8').catch(() => '');
-  const fields = stat ? stat.slice(stat.lastIndexOf(')') + 2).split(' ') : [];
-  observed.push({
-    role: line.split(' ')[0],
-    pid,
-    state: fields[0] ?? 'gone',
-    ppid: Number(fields[1] ?? 0),
-  });
+if (!controllerRecovery) await assertOriginalStop();
+async function assertOriginalStop() {
+  assert.ok(Date.now() - stopStart < 10000, 'bounded single stop');
+  await sleep(2300);
+  const after = await rows();
+  const stopped = after.find((r) => r.pm_id === target.pm_id);
+  assert.equal(stopped.pm2_env.status, 'stopped');
+  assert.equal(stopped.pid, 0);
+  assert.equal(stopped.pm2_env.restart_time, target.pm2_env.restart_time);
+  assert.equal(after.find((r) => r.pm_id === unrelated.pm_id).pid, unrelated.pid);
+  process.kill(unrelated.pid, 0);
+  const final = (await fs.readFile(log, 'utf8')).trim().split('\n');
+  assert.equal(final.length, 3, 'neither loop resurrects a server after stop');
+  const observed = [];
+  for (const line of starts) {
+    const pid = Number(line.split(' ')[1]);
+    const stat = await fs.readFile(`/proc/${pid}/stat`, 'utf8').catch(() => '');
+    const fields = stat ? stat.slice(stat.lastIndexOf(')') + 2).split(' ') : [];
+    observed.push({
+      role: line.split(' ')[0],
+      pid,
+      state: fields[0] ?? 'gone',
+      ppid: Number(fields[1] ?? 0),
+    });
+  }
+  console.log(JSON.stringify({ mode: process.argv[2] ?? 'original', observed }));
+  assert.ok(
+    observed.every((p) => p.state === 'gone' || p.state === 'Z'),
+    'no living server or forked handler survives',
+  );
+  assert.equal(
+    await fs.readFile('/var/lib/holaday-headed-brave/Default/Sessions/qa-sentinel', 'utf8'),
+    'synthetic-keep',
+  );
+  console.log(
+    'VNC_PM2_TREE_PASS: one numeric-id stop, bounded escalation, forked handler gone, no restart, unrelated/profile preserved',
+  );
 }
-console.log(JSON.stringify({ mode: process.argv[2] ?? 'original', observed }));
-assert.ok(
-  observed.every((p) => p.state === 'gone' || p.state === 'Z'),
-  'no living server or forked handler survives',
-);
-assert.equal(
-  await fs.readFile('/var/lib/holaday-headed-brave/Default/Sessions/qa-sentinel', 'utf8'),
-  'synthetic-keep',
-);
-console.log(
-  'VNC_PM2_TREE_PASS: one numeric-id stop, bounded escalation, forked handler gone, no restart, unrelated/profile preserved',
-);

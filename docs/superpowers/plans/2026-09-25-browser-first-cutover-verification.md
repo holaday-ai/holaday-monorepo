@@ -2,6 +2,17 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 VNC有限配置核对、原site绑定与同ID物理恢复
+
+从153eb093完成五文件并行批次。新增VNC比较器复用私有有限PM2变换，完整保留原配置/未知字段/历史计数，核验实际内存阈值删除及嵌套覆盖拒绝；原site把既有index0 recoveryDigest绑定到本attempt的固定VNC材料，无新配置字段。A原66失败RED→357/357完整两文件GREEN，另有嵌套对象覆盖7失败RED→修补GREEN；最终统一计数以下方串行结果为准，不重复累加局部计数。
+
+- 最终87305/ed2d6d退出0：原--controller-recovery实际停止、原journal意图、默认同ID RPC、保留的停后完整配置对比和新树观察通过。35.072220266秒跨实际30秒Worker周期，配置/计数/进程身份不变，内存阈值缺失、无额外替身生命周期、原无关应用及profile哨兵保留；日志/private/tmp/holaday-vnc-recovery-physical-final-20260930.log。实际包查找及Git解析常量由原PM2代码在此QA中读取断言，不是手填N/A。源码只读164399/61aa53亦退出0。
+- 共同变换受影响的headed回归23355/7f8ac2退出0：真实Brave、35.175327141秒跨周期、原旧target正控、恢复后无旧target/HTTP重放、私有只读策略、能力清零及持久cookie/profile保留，日志/private/tmp/holaday-vnc-shared-headed-physical-20260930.log。
+- 同一87305串行后续：真实Linux948/948，ops Node120/60/16/1172与Python12，全部退出0、零跳过；日志/private/tmp/holaday-vnc-recovery-{linux,ops}-final-20260930.log。Mac ops明确Node24.13.0及实际age路径，Linux为既有隔离镜像Node22；无重新构建镜像或生产挂载。
+- 五文件Biome与diff-check退出0。独立A/B规范及质量审查PASS无发现，最终VNC夹具hash2f5c414c1ed77a5b37bba0b235ea41912e9cd802ed60bce71ae787d577bd4cc6补充亦复审通过，报告/private/tmp/holaday-vnc-{config,physical}-review-20260930.md。665c9d确认仅原健康MySQL/Redis，无QA容器。
+
+证据边界：VNC服务exe是明确的Python控制流替身，不是真实x11vnc/websockify能力；headed事件5/6、备份/候选/业务/fence/display及其他主机来源为合成前置。实际VNC事件只到第七条意图，没有恢复ACK或open。QA中的包/源码前提不证明生产前提；完整新树/现场守卫、独立facts、真实停写/Mac及非PayPal恢复、完整演练、整分支审查与新鲜窗口仍待完成。原>4分类器拒绝和CLI关闭保持，没有生产、支付服务、密钥或历史业务修改。
+
 ## 2026-09-30 原始/停后完整配置接入真实停止路径
 
 从13ddc45f继续的五文件接线：原socket getMonitorData只读叶节点→固定两服务私有完整配置→原observer双侧事实核对→原独立停止观察→停后副本锁定→原ACK；正常读取继续核对已保留副本，不能从恢复后的现场重新制造基线。没有公开原文、替代journal、放宽原分类器或开启CLI。

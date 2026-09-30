@@ -144,6 +144,23 @@ export const cutoverCloudStopConfigDigest = (value) =>
  * that package-lookup premise must still be verified on the actual host.
  */
 export function compareCutoverCloudBrowserRecoveryConfig(input) {
+  return compareCloudRecoveryConfig(input, 'headed');
+}
+
+/** Same protected nine-field contract as headed recovery, but retain the
+ * original VNC wrapper, interpreter, exact argv and entire environment. Only
+ * the canonical current_conf safety policy and finite PM2 lifecycle may change.
+ * The caller must verify the actual wrapper's package lookup yields N/A (and
+ * no asynchronous versioning branch); this pure comparison cannot prove that
+ * host premise or any physical tree. No runtime import or new authorization.
+ */
+export function compareCutoverCloudVncRecoveryConfig(input) {
+  return compareCloudRecoveryConfig(input, 'vnc');
+}
+
+// Strictly private role selection: shared PM2 6.0.14 stopped-start semantics,
+// not caller-selectable transformation rules or a new volatile exclusion list.
+function compareCloudRecoveryConfig(input, role) {
   const reject = () => {
     throw new Error('CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN');
   };
@@ -177,7 +194,7 @@ export function compareCutoverCloudBrowserRecoveryConfig(input) {
       !record(after) ||
       !record(before.env) ||
       Object.hasOwn(before.env, 'max_memory_restart') ||
-      before.name !== 'holaday-chromium-headed' ||
+      before.name !== (role === 'vnc' ? 'holaday-vnc' : 'holaday-chromium-headed') ||
       before.pm_id !== pmId ||
       before.status !== 'stopped' ||
       before.watch !== false ||
@@ -201,8 +218,36 @@ export function compareCutoverCloudBrowserRecoveryConfig(input) {
     // the shell/argv recipe. The parent supplies the canonical runtime material
     // plus the original journal's independently bound recoveryDigest. Shape
     // checks constrain the role; the bound hash checks ALL exact launch bytes.
-    if (
-      !record(launch) ||
+    if (!record(launch)) reject();
+    if (role === 'vnc') {
+      if (
+        !isDeepStrictEqual(launch, {
+          attempt,
+          command: '/opt/holaday-vnc/start.sh',
+          exec_interpreter: 'bash',
+          current_conf: {
+            autorestart: false,
+            watch: false,
+            cron_restart: '',
+            max_memory_restart: 'null',
+          },
+        }) ||
+        before.pm_exec_path !== launch.command ||
+        before.exec_interpreter !== launch.exec_interpreter
+      )
+        reject();
+      // Match dispatch's fixed-policy/retained-launch shadow refusal, even for
+      // object values PM2 would skip. Preserve matching and unrelated env keys.
+      for (const [key, value] of Object.entries({
+        ...launch.current_conf,
+        pm_exec_path: launch.command,
+        exec_interpreter: launch.exec_interpreter,
+        exec_mode: 'fork_mode',
+        args: before.args,
+      })) {
+        if (Object.hasOwn(before.env, key) && !isDeepStrictEqual(before.env[key], value)) reject();
+      }
+    } else if (
       Object.keys(launch).sort().join(',') !== 'args,autorestart,command,env' ||
       launch.command !== '/usr/bin/unshare' ||
       launch.autorestart !== false ||
@@ -214,7 +259,10 @@ export function compareCutoverCloudBrowserRecoveryConfig(input) {
       launch.args[7] !== `/var/lib/holaday-deploy/maintenance/${attempt}/cloud-browser-policy` ||
       launch.args[8] !== '/opt/brave.com/brave/brave' ||
       launch.args[21] !== '--user-data-dir=/var/lib/holaday-headed-brave' ||
-      launch.args[22] !== '--no-startup-window' ||
+      launch.args[22] !== '--no-startup-window'
+    )
+      reject();
+    if (
       typeof expectedLaunchDigest !== 'string' ||
       !/^[a-f0-9]{64}$/.test(expectedLaunchDigest) ||
       createHash('sha256').update(JSON.stringify(launch)).digest('hex') !== expectedLaunchDigest
@@ -222,15 +270,19 @@ export function compareCutoverCloudBrowserRecoveryConfig(input) {
       reject();
     const expected = {
       ...before,
-      pm_exec_path: launch.command,
-      args: launch.args,
-      exec_interpreter: 'none',
-      exec_mode: 'fork_mode',
+      ...(role === 'headed'
+        ? {
+            pm_exec_path: launch.command,
+            args: launch.args,
+            exec_interpreter: 'none',
+            exec_mode: 'fork_mode',
+            DISPLAY: ':98',
+            env: { ...before.env, DISPLAY: ':98' },
+          }
+        : {}),
       autorestart: false,
       watch: false,
       cron_restart: '',
-      DISPLAY: ':98',
-      env: { ...before.env, DISPLAY: ':98' },
       created_at: after.created_at,
       unstable_restarts: 0,
       prev_restart_delay: 0,

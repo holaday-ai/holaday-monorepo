@@ -285,8 +285,7 @@ test('site binds the packaged recovery recipe as part of the actual durable scop
   await site.lifecycle.detach(f.context);
 });
 
-test('site carries approved temporary cloud pair into the same durable journal and forbids omission', async (t) => {
-  const f = await fixture(t);
+function bindCloudRecoveryScope(f) {
   const recipe = createHash('sha256')
     .update(
       JSON.stringify(
@@ -296,7 +295,18 @@ test('site carries approved temporary cloud pair into the same durable journal a
     .digest('hex');
   f.scope.cloudBrowserRecoveryDigest = recipe;
   f.scope.cloudMaintenanceScope = [
-    { name: 'holaday-vnc', pmId: 7, scopeDigest: '6'.repeat(64), recoveryDigest: '7'.repeat(64) },
+    {
+      name: 'holaday-vnc',
+      pmId: 7,
+      scopeDigest: '6'.repeat(64),
+      recoveryDigest: createHash('sha256')
+        .update(
+          JSON.stringify(
+            runtimeModule.firstCutoverCloudVncRecoveryMaterial({ attempt: f.binding.attempt }),
+          ),
+        )
+        .digest('hex'),
+    },
     {
       name: 'holaday-chromium-headed',
       pmId: 8,
@@ -304,6 +314,32 @@ test('site carries approved temporary cloud pair into the same durable journal a
       recoveryDigest: recipe,
     },
   ];
+}
+
+for (const kind of ['wrong-digest', 'wrong-attempt', 'old-policy', 'missing']) {
+  test(`site rejects ${kind} VNC recovery material before sessions or durable scope binding`, async (t) => {
+    const f = await fixture(t);
+    bindCloudRecoveryScope(f);
+    const material = runtimeModule.firstCutoverCloudVncRecoveryMaterial({
+      attempt: f.binding.attempt,
+    });
+    if (kind === 'wrong-attempt') material.attempt = '22222222-2222-4222-8222-222222222222';
+    if (kind === 'old-policy') material.current_conf.max_memory_restart = 0;
+    f.scope.cloudMaintenanceScope[0].recoveryDigest =
+      kind === 'wrong-digest'
+        ? '7'.repeat(64)
+        : createHash('sha256').update(JSON.stringify(material)).digest('hex');
+    if (kind === 'missing')
+      Reflect.deleteProperty(f.scope.cloudMaintenanceScope[0], 'recoveryDigest');
+    await assert.rejects(f.make().lifecycle.attach(f.context), /UNPROVEN/);
+    assert.deepEqual(f.events, []);
+    assert.equal((await f.journal.readFirstCutoverEffects()).executionSiteDigest, undefined);
+  });
+}
+
+test('site carries approved temporary cloud pair into the same durable journal and forbids omission', async (t) => {
+  const f = await fixture(t);
+  bindCloudRecoveryScope(f);
   const site = f.make();
   await site.lifecycle.attach(f.context);
   assert.deepEqual(
@@ -333,15 +369,8 @@ test('site carries approved temporary cloud pair into the same durable journal a
 
 test('site refuses a cloud pair whose headed recovery differs from the packaged recipe before sessions', async (t) => {
   const f = await fixture(t);
-  f.scope.cloudMaintenanceScope = [
-    { name: 'holaday-vnc', pmId: 7, scopeDigest: '6'.repeat(64), recoveryDigest: '7'.repeat(64) },
-    {
-      name: 'holaday-chromium-headed',
-      pmId: 8,
-      scopeDigest: '8'.repeat(64),
-      recoveryDigest: '9'.repeat(64),
-    },
-  ];
+  bindCloudRecoveryScope(f);
+  f.scope.cloudMaintenanceScope[1].recoveryDigest = '9'.repeat(64);
   await assert.rejects(f.make().lifecycle.attach(f.context), /UNPROVEN/);
   assert.deepEqual(f.events, []);
 });

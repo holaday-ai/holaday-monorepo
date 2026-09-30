@@ -6,6 +6,16 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 VNC原配置核对与实际同注册恢复接通（未放行生产）
+
+从153eb093继续，复用两名原Sol实施者完成互斥五文件：VNC停后→恢复完整配置的有限PM2变换核对、原site对VNC恢复材料摘要的绑定，以及原VNC物理夹具的同ID恢复路径。VNC保留原wrapper/bash/argv/env/cwd/未知字段/历史计数，仅接受已绑定安全策略及明确生命周期变化；内存阈值必须实际删除，嵌套覆盖拒绝。headed共用变换逻辑，无新增公开原文、配置字段或发布框架。
+
+最终串行87305/ed2d6d退出0：VNC默认原RPC和原journal单次恢复通过，七条事件停在VNC恢复意图；真实procfs的合成替身进程树、完整配置和计数跨30000ms Worker周期保持35072.220266ms，原停止断言先通过，无关应用及profile哨兵保留。实际安装PM2的包查找N/A及关闭Git解析前提在同一QA夹具内独立断言。它不是真实x11vnc/websockify能力、headed5/6或备份/业务恢复证明，这些替身/前置事实均明确标为合成。受共同变换影响的真实Brave回归23355/7f8ac2也退出0，跨周期35175.327141ms，原不重放、私有策略与profile断言保留。
+
+实际Linux948/948；ops Node120/60/16/1172及Python12，全部退出0、零跳过；五文件Biome/diff-check通过。最终两路规范/质量独立复审PASS无发现，含VNC包前提补充后的精确hash复审。日志/private/tmp/holaday-vnc-recovery-{physical,linux,ops}-final-20260930.log、/private/tmp/holaday-vnc-shared-headed-physical-20260930.log；审查/private/tmp/holaday-vnc-{config,physical}-review-20260930.md。最终仅原健康MySQL/Redis，无QA或重型运行任务；确切提交见progress。
+
+下一步直接消费原observer已保留的停后配置及两种现成比较器，接原恢复消费者、完整新树/真实VNC能力证明与非递归现场守卫；不要重做私有基线捕获或上述PM2恢复实验。原inventory超过四条事件仍拒绝，未写生产恢复ACK、未启用CLI；独立现场facts、真实停写/Mac恢复、非PayPal恢复、完整演练、整分支审查及新鲜窗口仍未齐备。未生产操作、推送、PR、合并或部署；原Task4 BASE、缓存、支付和密钥保持。
+
 ### 2026-09-30 原观察器完整配置接线通过（前批已保存13ddc45f）
 
 前批八文件已保存为13ddc45f。本批继续同一主线：复用原socket只读RPC取得固定两服务完整配置，在原observer初始化与真实停止路径内保留私有原始/停后副本，以原完整摘要、stop摘要、历史计数、主机/boot/daemon、原审查和双侧journal/fence/execution观察绑定。缺失、漂移或后补scope拒绝；停后核验失败不写ACK、不执行第二次停止。不增加公开原文getter、持久格式或替代协调器，原inventory超过四条事件仍拒绝。

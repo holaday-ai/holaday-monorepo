@@ -15,7 +15,10 @@ import {
   readCutoverWorkScope,
 } from './browser-cutover-evidence.mjs';
 import { readFirstCutoverPaymentScope } from './browser-first-cutover-host.mjs';
-import { firstCutoverCloudBrowserRecoveryLaunch } from './browser-first-cutover-runtime.mjs';
+import {
+  firstCutoverCloudBrowserRecoveryLaunch,
+  firstCutoverCloudVncRecoveryMaterial,
+} from './browser-first-cutover-runtime.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -1586,6 +1589,256 @@ function headedRecoveryConfigFixture() {
     restoreStartedAtMs: 1000,
     observedAtMs: 1002,
   };
+}
+
+function vncRecoveryConfigFixture() {
+  const f = headedRecoveryConfigFixture();
+  f.launch = firstCutoverCloudVncRecoveryMaterial({ attempt: f.attempt });
+  f.expectedLaunchDigest = hash(f.launch);
+  for (const config of [f.stoppedConfig, f.recoveredConfig]) {
+    Object.assign(config, {
+      name: 'holaday-vnc',
+      pm_exec_path: '/opt/holaday-vnc/start.sh',
+      exec_interpreter: 'bash',
+      args: ['--original', 'space value', ''],
+      pm_cwd: '/root',
+      DISPLAY: ':77',
+    });
+    config.env.DISPLAY = ':77';
+  }
+  return f;
+}
+
+test('VNC recovery config preserves the original launch and private fields with only finite PM2 changes', async () => {
+  const { compareCutoverCloudVncRecoveryConfig: compare, cutoverRegistrationConfigDigest } =
+    await import('./browser-cutover-evidence.mjs');
+  assert.equal(typeof compare, 'function');
+  const f = vncRecoveryConfigFixture();
+  const original = structuredClone(f);
+  const proof = compare(f);
+  assert.deepEqual(proof, {
+    stoppedConfigDigest: cutoverRegistrationConfigDigest(f.stoppedConfig),
+    recoveredConfigDigest: cutoverRegistrationConfigDigest(f.recoveredConfig),
+    restartCount: 19,
+  });
+  assert.deepEqual(f, original);
+  assert.equal(JSON.stringify(proof).includes('fixture-only-secret'), false);
+  // Matching inherited launch/policy values and unrelated nested fields survive.
+  for (const config of [f.stoppedConfig, f.recoveredConfig]) {
+    Object.assign(config.env, {
+      pm_exec_path: '/opt/holaday-vnc/start.sh',
+      exec_interpreter: 'bash',
+      exec_mode: 'fork_mode',
+      args: structuredClone(config.args),
+      autorestart: false,
+      watch: false,
+      cron_restart: '',
+    });
+    config.vizion_running = true;
+  }
+  Reflect.deleteProperty(f.stoppedConfig, 'max_memory_restart');
+  f.recoveredConfig.axm_monitor = { heap: 123 };
+  assert.equal(compare(f).restartCount, 19);
+});
+
+for (const [field, value] of Object.entries({
+  pm_exec_path: '/opt/holaday-headed/start.sh',
+  exec_interpreter: 'none',
+  exec_mode: 'cluster_mode',
+  args: ['--original', 'changed', ''],
+  env: { PRIVATE_KEY: 'rotated', DISPLAY: ':77', opaque: { keep: ['env'] } },
+  PRIVATE_KEY: 'rotated',
+  DISPLAY: ':98',
+  pm_cwd: '/opt/holaday-vnc',
+  uid: 998,
+  gid: 998,
+  name: 'holaday-chromium-headed',
+  pm_id: 8,
+  autostart: false,
+  restart_time: 20,
+  exit_code: 0,
+  kill_timeout: 1,
+  treekill: false,
+  unknownFutureLaunchField: { keep: ['changed'] },
+  newlyAddedUnknownField: true,
+  autorestart: true,
+  watch: true,
+  cron_restart: '* * * * *',
+  status: 'launching',
+  created_at: 999,
+  pm_uptime: 1003,
+  unstable_restarts: 1,
+  prev_restart_delay: 1,
+  axm_actions: [{ name: 'new' }],
+  axm_options: { pid: 123 },
+  axm_dynamic: { changed: true },
+  vizion_running: true,
+  version: '1.0.0',
+})) {
+  test(`VNC recovery config refuses recovered drift in ${field}`, async () => {
+    const { compareCutoverCloudVncRecoveryConfig: compare } = await import(
+      './browser-cutover-evidence.mjs'
+    );
+    assert.equal(typeof compare, 'function');
+    const f = vncRecoveryConfigFixture();
+    f.recoveredConfig[field] = value;
+    assert.throws(() => compare(f), /^Error: CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN$/);
+  });
+}
+
+for (const value of [0, null, false, 'null', 524288000]) {
+  test(`VNC recovery config requires memory field deletion, not ${JSON.stringify(value)}`, async () => {
+    const { compareCutoverCloudVncRecoveryConfig: compare } = await import(
+      './browser-cutover-evidence.mjs'
+    );
+    assert.equal(typeof compare, 'function');
+    const f = vncRecoveryConfigFixture();
+    f.recoveredConfig.max_memory_restart = value;
+    assert.throws(() => compare(f), /CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN/);
+  });
+}
+
+for (const [key, value] of Object.entries({
+  pm_exec_path: '/opt/holaday-headed/start.sh',
+  exec_interpreter: 'none',
+  exec_mode: 'cluster_mode',
+  args: ['changed'],
+  autorestart: true,
+  watch: true,
+  cron_restart: '* * * * *',
+  max_memory_restart: null,
+})) {
+  test(`VNC recovery config refuses nested ${key} shadow even if recovered top level looks safe`, async () => {
+    const { compareCutoverCloudVncRecoveryConfig: compare } = await import(
+      './browser-cutover-evidence.mjs'
+    );
+    assert.equal(typeof compare, 'function');
+    const f = vncRecoveryConfigFixture();
+    f.stoppedConfig.env[key] = value;
+    f.recoveredConfig.env[key] = value;
+    assert.throws(() => compare(f), /CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN/);
+    // PM2 skips object-like values while flattening, but they still conflict
+    // with the fixed policy/launch and must not be blessed as matching shadows.
+    f.stoppedConfig.env[key] = {};
+    f.recoveredConfig.env[key] = {};
+    assert.throws(() => compare(f), /CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN/);
+  });
+}
+
+for (const [label, change] of [
+  [
+    'unknown field deletion',
+    (f) => Reflect.deleteProperty(f.recoveredConfig, 'unknownFutureLaunchField'),
+  ],
+  [
+    'unbound material',
+    (f) => {
+      f.expectedLaunchDigest = '0'.repeat(64);
+    },
+  ],
+  ['missing journal binding', (f) => Reflect.deleteProperty(f, 'expectedLaunchDigest')],
+  [
+    'extra input',
+    (f) => {
+      f.approved = true;
+    },
+  ],
+  [
+    'unsupported PM2',
+    (f) => {
+      f.pm2Version = '6.0.15';
+    },
+  ],
+  [
+    'wrong role',
+    (f) => {
+      f.stoppedConfig.name = 'holaday-chromium-headed';
+    },
+  ],
+  [
+    'wrong baseline command',
+    (f) => {
+      f.stoppedConfig.pm_exec_path = '/other';
+      f.recoveredConfig.pm_exec_path = '/other';
+    },
+  ],
+  [
+    'wrong baseline interpreter',
+    (f) => {
+      f.stoppedConfig.exec_interpreter = 'sh';
+      f.recoveredConfig.exec_interpreter = 'sh';
+    },
+  ],
+  [
+    'non-stopped baseline',
+    (f) => {
+      f.stoppedConfig.status = 'online';
+    },
+  ],
+  [
+    'unbounded observation',
+    (f) => {
+      f.observedAtMs = 901001;
+    },
+  ],
+  [
+    'lossy private value',
+    (f) => {
+      f.stoppedConfig.env.opaque = undefined;
+    },
+  ],
+  [
+    'material attempt',
+    (f) => {
+      f.launch.attempt = '22222222-2222-4222-8222-222222222222';
+      f.expectedLaunchDigest = hash(f.launch);
+    },
+  ],
+  [
+    'material command',
+    (f) => {
+      f.launch.command = '/other';
+      f.expectedLaunchDigest = hash(f.launch);
+    },
+  ],
+  [
+    'material interpreter',
+    (f) => {
+      f.launch.exec_interpreter = 'sh';
+      f.expectedLaunchDigest = hash(f.launch);
+    },
+  ],
+  [
+    'material zero threshold',
+    (f) => {
+      f.launch.current_conf.max_memory_restart = 0;
+      f.expectedLaunchDigest = hash(f.launch);
+    },
+  ],
+  [
+    'extra material policy',
+    (f) => {
+      f.launch.current_conf.args = [];
+      f.expectedLaunchDigest = hash(f.launch);
+    },
+  ],
+  [
+    'extra material env',
+    (f) => {
+      f.launch.env = {};
+      f.expectedLaunchDigest = hash(f.launch);
+    },
+  ],
+]) {
+  test(`VNC recovery config refuses ${label}`, async () => {
+    const { compareCutoverCloudVncRecoveryConfig: compare } = await import(
+      './browser-cutover-evidence.mjs'
+    );
+    assert.equal(typeof compare, 'function');
+    const f = vncRecoveryConfigFixture();
+    change(f);
+    assert.throws(() => compare(f), /CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN/);
+  });
 }
 
 test('headed recovery config accepts only the finite source-verified stopped restart transform', async () => {

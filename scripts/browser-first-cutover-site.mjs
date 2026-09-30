@@ -34,6 +34,7 @@ import { connectFirstCutoverRecoverySession } from './browser-first-cutover-reco
 import { retireLocalFirstCutoverProducers } from './browser-first-cutover-registrations.mjs';
 import {
   firstCutoverCloudBrowserRecoveryLaunch,
+  firstCutoverCloudVncRecoveryMaterial,
   validateLegacyWorkBoundary,
 } from './browser-first-cutover-runtime.mjs';
 
@@ -166,6 +167,10 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
         (!Array.isArray(value.cloudMaintenanceScope) ||
           value.cloudMaintenanceScope.length !== 2 ||
           !value.cloudBrowserRecoveryDigest ||
+          value.cloudMaintenanceScope[0]?.recoveryDigest !==
+            createHash('sha256')
+              .update(JSON.stringify(firstCutoverCloudVncRecoveryMaterial({ attempt })))
+              .digest('hex') ||
           value.cloudMaintenanceScope[1]?.recoveryDigest !== value.cloudBrowserRecoveryDigest)) ||
       !/^[a-f0-9]{64}$/.test(value.gatewaySiteDigest ?? '')
     )
