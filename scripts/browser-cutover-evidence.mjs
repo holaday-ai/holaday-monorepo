@@ -7,6 +7,202 @@ import { hostname } from 'node:os';
 import { posix } from 'node:path';
 import { isDeepStrictEqual, promisify } from 'node:util';
 
+// Finite source material, not capability, loaded-code equality or authorization.
+const cloudSourceTools = [
+  '/usr/bin/unshare',
+  '/bin/sh',
+  '/usr/bin/mount',
+  '/usr/bin/setpriv',
+  '/usr/bin/python3',
+  '/usr/bin/Xvfb',
+  '/opt/brave.com/brave/brave',
+  '/opt/brave.com/brave/chrome_crashpad_handler',
+  '/opt/holaday-vnc/start.sh',
+  '/usr/bin/bash',
+  '/usr/bin/x11vnc',
+  '/usr/bin/websockify',
+  '/usr/bin/pkill',
+  '/usr/bin/sleep',
+  ...[
+    'package.json',
+    'lib/God.js',
+    'lib/God/ForkMode.js',
+    'lib/Utility.js',
+    'lib/God/ActionMethods.js',
+  ].map((p) => `/usr/lib/node_modules/pm2/${p}`),
+  '/usr/lib/python3.10/site.py',
+  '/usr/lib/python3.10/importlib/metadata/__init__.py',
+];
+const cloudPythonRoot = '/usr/lib/python3/dist-packages';
+const cloudMetadataName = /^websockify(?:-[0-9][a-zA-Z0-9._+-]{0,63})?\.(?:egg|dist)-info$/;
+const cloudMetadataFiles = [
+  'PKG-INFO',
+  'METADATA',
+  'entry_points.txt',
+  'top_level.txt',
+  'SOURCES.txt',
+  'installed-files.txt',
+  'dependency_links.txt',
+  'requires.txt',
+  'RECORD',
+  'WHEEL',
+  'INSTALLER',
+];
+const cloudSourceKeys = (value, keys) =>
+  value !== null &&
+  Object.getPrototypeOf(value) === Object.prototype &&
+  Object.keys(value).sort().join(',') === [...keys].sort().join(',');
+const cloudSourceHash = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+export function validateFirstCutoverCloudSources(value, { scope, observed = false } = {}) {
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_SOURCES_UNPROVEN');
+  };
+  try {
+    if (
+      typeof observed !== 'boolean' ||
+      !cloudSourceKeys(value, [
+        'host',
+        'hostname',
+        'bootId',
+        'files',
+        'roles',
+        'pythonEntry',
+        ...(observed ? ['observedAtMs'] : []),
+      ]) ||
+      value.host !== 'vultr' ||
+      typeof value.hostname !== 'string' ||
+      !/^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$/.test(value.hostname) ||
+      !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(value.bootId)
+    )
+      reject();
+    if (observed && (!Number.isSafeInteger(value.observedAtMs) || value.observedAtMs < 0)) reject();
+    if (
+      !Array.isArray(scope) ||
+      scope.length !== 2 ||
+      !Array.isArray(value.roles) ||
+      value.roles.length !== 2
+    )
+      reject();
+    for (const [i, name] of ['holaday-vnc', 'holaday-chromium-headed'].entries()) {
+      const role = value.roles[i];
+      if (
+        scope[i]?.name !== name ||
+        !Number.isSafeInteger(scope[i].pmId) ||
+        scope[i].pmId < 0 ||
+        !cloudSourceKeys(role, [
+          'name',
+          'pmId',
+          'selectionDigest',
+          ...(observed ? ['configDigest'] : []),
+        ]) ||
+        role.name !== name ||
+        role.pmId !== scope[i].pmId ||
+        !cloudSourceHash(role.selectionDigest) ||
+        (observed && !cloudSourceHash(role.configDigest))
+      )
+        reject();
+    }
+    if (scope[0].pmId === scope[1].pmId) reject();
+    const entry = value.pythonEntry;
+    if (
+      !cloudSourceKeys(entry, ['metadataPath', 'name', 'version', 'group', 'entry', 'target']) ||
+      entry.name !== 'websockify' ||
+      entry.group !== 'console_scripts' ||
+      entry.entry !== 'websockify' ||
+      entry.target !== 'websockify.websocketproxy:websockify_init' ||
+      typeof entry.version !== 'string' ||
+      !/^[0-9]+(?:\.[0-9]+){1,3}(?:[a-zA-Z0-9.+-]{0,32})$/.test(entry.version) ||
+      posix.dirname(entry.metadataPath) !== cloudPythonRoot ||
+      !cloudMetadataName.test(posix.basename(entry.metadataPath))
+    )
+      reject();
+    if (
+      !Array.isArray(value.files) ||
+      value.files.length < cloudSourceTools.length + 7 ||
+      value.files.length > 128
+    )
+      reject();
+    let previous = '';
+    let total = 0;
+    const paths = new Set();
+    for (const file of value.files) {
+      if (
+        !cloudSourceKeys(file, ['path', 'resolvedPath', 'uid', 'gid', 'mode', 'size', 'digest']) ||
+        typeof file.path !== 'string' ||
+        file.path <= previous ||
+        !cloudSourceHash(file.digest) ||
+        file.uid !== 0 ||
+        !Number.isSafeInteger(file.gid) ||
+        file.gid < 0 ||
+        !Number.isSafeInteger(file.mode) ||
+        file.mode < 0 ||
+        file.mode > 0o777 ||
+        file.mode & 0o022 ||
+        !Number.isSafeInteger(file.size) ||
+        file.size < 0 ||
+        file.size > 512 * 1024 * 1024
+      )
+        reject();
+      const packageFile =
+        posix.dirname(file.path) === `${cloudPythonRoot}/websockify` &&
+        /^[a-zA-Z_][a-zA-Z0-9_]*\.py$/.test(posix.basename(file.path));
+      const cachedFile =
+        posix.dirname(file.path) === `${cloudPythonRoot}/websockify/__pycache__` &&
+        /^([a-zA-Z_][a-zA-Z0-9_]*)\.cpython-310(?:\.opt-[12])?\.pyc$/.test(
+          posix.basename(file.path),
+        );
+      const metadataFile =
+        posix.dirname(file.path) === entry.metadataPath &&
+        cloudMetadataFiles.includes(posix.basename(file.path));
+      if (!cloudSourceTools.includes(file.path) && !packageFile && !cachedFile && !metadataFile)
+        reject();
+      const allowedTargets =
+        file.path === '/bin/sh'
+          ? ['/bin/sh', '/usr/bin/sh', '/usr/bin/dash', '/usr/bin/bash']
+          : file.path === '/usr/bin/python3'
+            ? ['/usr/bin/python3', '/usr/bin/python3.10']
+            : [file.path];
+      if (!allowedTargets.includes(file.resolvedPath)) reject();
+      if (
+        (packageFile ||
+          cachedFile ||
+          metadataFile ||
+          file.path.endsWith('.js') ||
+          file.path.endsWith('.json') ||
+          file.path.endsWith('.py') ||
+          file.path.endsWith('.sh') ||
+          file.path === '/usr/bin/websockify') &&
+        file.size > 256 * 1024
+      )
+        reject();
+      if (file.size === 0 && !packageFile && !metadataFile) reject();
+      total += file.size;
+      paths.add(file.path);
+      previous = file.path;
+    }
+    for (const p of paths)
+      if (
+        p.includes('/websockify/__pycache__/') &&
+        !paths.has(`${cloudPythonRoot}/websockify/${posix.basename(p).split('.cpython-')[0]}.py`)
+      )
+        reject();
+    if (
+      total > 1024 * 1024 * 1024 ||
+      cloudSourceTools.some((p) => !paths.has(p)) ||
+      ['__init__', 'websocket', 'websocketserver', 'websocketproxy', 'websockifyserver'].some(
+        (p) => !paths.has(`${cloudPythonRoot}/websockify/${p}.py`),
+      ) ||
+      !paths.has(`${entry.metadataPath}/entry_points.txt`) ||
+      Number(paths.has(`${entry.metadataPath}/PKG-INFO`)) +
+        Number(paths.has(`${entry.metadataPath}/METADATA`)) !==
+        1
+    )
+      reject();
+  } catch {
+    reject();
+  }
+}
+
 // This reviewed legacy revision has no complete in-flight request observation
 // API. Matching its bytes proves only that limitation, never absence of work.
 const legacyCapability = {

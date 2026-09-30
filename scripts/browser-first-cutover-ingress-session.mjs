@@ -4,7 +4,10 @@ import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { cutoverLegacyInterruptionRisk } from './browser-cutover-evidence.mjs';
+import {
+  cutoverLegacyInterruptionRisk,
+  validateFirstCutoverCloudSources,
+} from './browser-cutover-evidence.mjs';
 import {
   createFirstCutoverIngressLifecycle,
   readFirstCutoverApproval,
@@ -215,7 +218,9 @@ async function readProtectedSite(options, overrides, kind) {
           ...(Object.hasOwn(s, 'backupRecoveryDigest') ? ['backupRecoveryDigest'] : []),
           ...(Object.hasOwn(s, 'cloudBrowserRecoveryDigest') ? ['cloudBrowserRecoveryDigest'] : []),
           ...(Object.hasOwn(s, 'cloudMaintenanceScope') ? ['cloudMaintenanceScope'] : []),
+          ...(Object.hasOwn(s, 'cloudRecoverySources') ? ['cloudRecoverySources'] : []),
         ]) ||
+        Object.hasOwn(s, 'cloudMaintenanceScope') !== Object.hasOwn(s, 'cloudRecoverySources') ||
         (Object.hasOwn(s, 'backupRecoveryDigest') && !hash(s.backupRecoveryDigest)) ||
         (Object.hasOwn(s, 'cloudBrowserRecoveryDigest') && !hash(s.cloudBrowserRecoveryDigest)) ||
         (Object.hasOwn(s, 'cloudMaintenanceScope') &&
@@ -284,6 +289,10 @@ async function readProtectedSite(options, overrides, kind) {
         !s.producerStartupFiles.some((f) => f.remove.length)
       )
         fail();
+      if (Object.hasOwn(s, 'cloudMaintenanceScope'))
+        validateFirstCutoverCloudSources(s.cloudRecoverySources, {
+          scope: s.cloudMaintenanceScope,
+        });
     }
     if (
       kind === 'ingress' &&

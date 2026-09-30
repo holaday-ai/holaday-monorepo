@@ -5,6 +5,68 @@ import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+
+// SYNTHETIC protected material: no production disk or package proof.
+function syntheticCloudSources(scope) {
+  const metadataPath = '/usr/lib/python3/dist-packages/websockify-0.10.0.egg-info';
+  const paths = [
+    '/usr/bin/unshare',
+    '/bin/sh',
+    '/usr/bin/mount',
+    '/usr/bin/setpriv',
+    '/usr/bin/python3',
+    '/usr/bin/Xvfb',
+    '/opt/brave.com/brave/brave',
+    '/opt/brave.com/brave/chrome_crashpad_handler',
+    '/opt/holaday-vnc/start.sh',
+    '/usr/bin/bash',
+    '/usr/bin/x11vnc',
+    '/usr/bin/websockify',
+    '/usr/bin/pkill',
+    '/usr/bin/sleep',
+    '/usr/lib/python3.10/site.py',
+    '/usr/lib/python3.10/importlib/metadata/__init__.py',
+    '/usr/lib/node_modules/pm2/package.json',
+    '/usr/lib/node_modules/pm2/lib/God.js',
+    '/usr/lib/node_modules/pm2/lib/God/ForkMode.js',
+    '/usr/lib/node_modules/pm2/lib/Utility.js',
+    '/usr/lib/node_modules/pm2/lib/God/ActionMethods.js',
+    ...[
+      '__init__.py',
+      'websockifyserver.py',
+      'websocketproxy.py',
+      'websocket.py',
+      'websocketserver.py',
+      'auth_plugins.py',
+      'token_plugins.py',
+    ].map((name) => `/usr/lib/python3/dist-packages/websockify/${name}`),
+    ...['entry_points.txt', 'PKG-INFO', 'top_level.txt'].map((name) => `${metadataPath}/${name}`),
+  ].sort();
+  return {
+    host: 'vultr',
+    hostname: 'qa-vultr',
+    bootId: '11111111-1111-4111-8111-111111111111',
+    files: paths.map((path) => ({
+      path,
+      resolvedPath: path,
+      uid: 0,
+      gid: 0,
+      mode: 0o755,
+      size: 1,
+      digest: '1'.repeat(64),
+    })),
+    roles: scope.map(({ name, pmId }) => ({ name, pmId, selectionDigest: '2'.repeat(64) })),
+    pythonEntry: {
+      metadataPath,
+      name: 'websockify',
+      version: '0.10.0',
+      group: 'console_scripts',
+      entry: 'websockify',
+      target: 'websockify.websocketproxy:websockify_init',
+    },
+  };
+}
+
 import {
   cutoverCloudStopConfigDigest,
   cutoverRegistrationConfigDigest,
@@ -281,16 +343,36 @@ async function retirementFixture(
   beforeBaseline(f, binding);
   f.rejections = [];
   await journal.bindManifest(manifest);
-  if (f.cloudScope) await journal.bindExecutionSite('6'.repeat(64), f.cloudScope);
+  if (f.cloudScope) {
+    f.executionSite = {
+      binding,
+      legacyDigest: proof.legacyDigest,
+      reviews: structuredClone(f.reviews),
+      maintenanceEndsAtMs: f.sourceWindow ?? 9000,
+      cloudMaintenanceScope: f.cloudScope,
+      cloudRecoverySources: structuredClone(f.sources),
+    };
+    const approvedSiteDigest = hash(f.executionSite);
+    await f.onExecutionSite?.(f.executionSite);
+    await journal.bindExecutionSite(approvedSiteDigest, f.cloudScope);
+  }
   assert.equal(typeof firstHost.createFirstCutoverRetirementObserver, 'function');
   const observer = await firstHost.createFirstCutoverRetirementObserver(
     {
       reviews: f.reviews,
       binding,
       legacyDigest: proof.legacyDigest,
+      ...(f.executionSite ? { executionSite: f.executionSite } : {}),
     },
     {
-      journal,
+      journal: {
+        ...journal,
+        readFirstCutoverEffects: async () => {
+          const record = await journal.readFirstCutoverEffects();
+          await f.onEffectsRead?.();
+          return record;
+        },
+      },
       readPair: async () => {
         await f.onRead?.();
         return structuredClone(f.pair);
@@ -298,6 +380,19 @@ async function retirementFixture(
       readCloudManagers: async () => {
         await f.onCloudRead?.(journal);
         return f.cloudManagers;
+      },
+      readCloudRecoverySources: async ({ attempt, configs }) => {
+        assert.equal(attempt, binding.attempt);
+        const result = {
+          ...structuredClone(f.sources),
+          observedAtMs: f.now ?? 1000,
+          roles: f.sources.roles.map((r, i) => ({
+            ...r,
+            configDigest: cutoverRegistrationConfigDigest(configs[i].config),
+          })),
+        };
+        await f.onSourceRead?.(result, journal);
+        return result;
       },
       readFenceReceipts: async () => structuredClone(f.fences ?? []),
       readExecutionIdentities: async () => structuredClone(f.execution ?? []),
@@ -415,6 +510,18 @@ function addCloudPair(f) {
       }),
     };
   });
+  f.sources = syntheticCloudSources(f.cloudScope);
+  const source = f.sources.files.find((r) => r.path === '/opt/holaday-vnc/start.sh');
+  s.startup.files.push({
+    path: source.path,
+    resolved: source.resolvedPath,
+    present: true,
+    digest: source.digest,
+    stat: { uid: source.uid, gid: source.gid, mode: 0o100755, size: source.size },
+  });
+  f.reviews.vultr.review.sources = inventory
+    .firstCutoverSourceBindings(s)
+    .map((r) => ({ ...r, reason: 'synthetic reviewed source' }));
 }
 
 function stopCloudFixture(f, pmId) {
@@ -448,6 +555,258 @@ function cloudStopOperations(r, effect) {
       await effect?.(Number(args[1]));
     },
   };
+}
+
+test('synthetic cloud sources must be observed during initialization before any effect', async (t) => {
+  await assert.rejects(
+    retirementFixture(t, addCloudPair, (f) => {
+      f.recoveryIO = { readCloudRecoverySources: async () => null };
+    }),
+    /UNPROVEN/,
+  );
+});
+
+test('synthetic cloud source drift before stop intent refuses without dispatch', async (t) => {
+  const r = await retirementFixture(t, addCloudPair);
+  r.f.onSourceRead = () => {
+    throw Error('CUTOVER_CLOUD_SOURCES_UNPROVEN');
+  };
+  let dispatched = 0;
+  await assert.rejects(
+    r.observer.stopCloudServices(
+      { maintenanceEndsAtMs: 9000 },
+      cloudStopOperations(r, () => {
+        dispatched++;
+      }),
+    ),
+    /UNPROVEN/,
+  );
+  assert.equal(dispatched, 0);
+  assert.deepEqual((await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents ?? [], []);
+});
+
+for (const fault of [
+  'missing-site',
+  'wrong-binding',
+  'wrong-reviews',
+  'wrong-legacy',
+  'wrong-scope',
+  'same-sources-other-site',
+]) {
+  test(`synthetic cloud source gate rejects ${fault} whole-site binding`, async (t) => {
+    await assert.rejects(
+      retirementFixture(t, addCloudPair, (f) => {
+        f.onExecutionSite = (site) => {
+          if (fault === 'missing-site') f.executionSite = undefined;
+          if (fault === 'wrong-binding')
+            site.binding = { ...site.binding, candidate: 'f'.repeat(40) };
+          if (fault === 'wrong-reviews') site.reviews = {};
+          if (fault === 'wrong-legacy') site.legacyDigest = '0'.repeat(64);
+          if (fault === 'wrong-scope')
+            site.cloudMaintenanceScope = [...site.cloudMaintenanceScope].reverse();
+          if (fault === 'same-sources-other-site') site.gatewaySiteDigest = '3'.repeat(64);
+        };
+      }),
+      /UNPROVEN/,
+    );
+  });
+}
+
+for (const fault of [
+  'source',
+  'config',
+  'hostname',
+  'boot',
+  'selection',
+  'missing-role',
+  'missing-field',
+  'unknown-field',
+  'stale',
+  'future',
+  'window',
+  'wrapper',
+]) {
+  test(`synthetic cloud source gate refuses ${fault} and does not leak private raw configuration`, async (t) => {
+    let fixture;
+    await assert.rejects(
+      retirementFixture(t, addCloudPair, (f) => {
+        fixture = f;
+        if (fault === 'wrapper')
+          f.sources.files.find((r) => r.path === '/opt/holaday-vnc/start.sh').digest = '9'.repeat(
+            64,
+          );
+        f.onSourceRead = (observed) => {
+          if (fault === 'source') observed.files[0].digest = '0'.repeat(64);
+          if (fault === 'config') observed.roles[0].configDigest = '0'.repeat(64);
+          if (fault === 'hostname') observed.hostname = 'wrong-host';
+          if (fault === 'boot') observed.bootId = '22222222-2222-4222-8222-222222222222';
+          if (fault === 'selection') observed.roles[1].selectionDigest = '0'.repeat(64);
+          if (fault === 'missing-role') observed.roles.pop();
+          if (fault === 'missing-field') Reflect.deleteProperty(observed, 'pythonEntry');
+          if (fault === 'unknown-field') observed.PRIVATE_CLOUD_BASELINE = true;
+          if (fault === 'stale') observed.observedAtMs = 0;
+          if (fault === 'future') observed.observedAtMs = 1001;
+          if (fault === 'window') f.now = 9000;
+        };
+      }),
+      /UNPROVEN/,
+    );
+    assert.equal(JSON.stringify(fixture.rejections).includes('PRIVATE_CLOUD_BASELINE'), false);
+  });
+}
+
+for (const intentCount of [1, 3]) {
+  test(`synthetic cloud source drift immediately before dispatch at intent${intentCount} retains intent without effect`, async (t) => {
+    const r = await retirementFixture(t, addCloudPair);
+    let commands = 0;
+    r.f.onSourceRead = async (observed, journal) => {
+      if ((await journal.readFirstCutoverEffects()).cloudMaintenanceEvents?.length === intentCount)
+        observed.roles[1].selectionDigest = '0'.repeat(64);
+    };
+    await assert.rejects(
+      r.observer.stopCloudServices(
+        { maintenanceEndsAtMs: 9000 },
+        cloudStopOperations(r, () => {
+          commands++;
+        }),
+      ),
+      /UNPROVEN/,
+    );
+    assert.equal(commands, (intentCount - 1) / 2);
+    assert.equal(
+      (await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length,
+      intentCount,
+    );
+    assert.ok(r.f.rejections.every((r) => !JSON.stringify(r).includes('PRIVATE_CLOUD_BASELINE')));
+  });
+}
+
+test('ordinary unscoped observer never reads native cloud sources', async (t) => {
+  const r = await retirementFixture(t, undefined, (f) => {
+    f.recoveryIO = {
+      readCloudRecoverySources: async () => {
+        throw Error('unexpected source RPC');
+      },
+    };
+  });
+  assert.deepEqual((await r.observer.read()).unknownLaunchers, []);
+});
+
+test('synthetic final source read cannot dispatch with a fence that expired during hashing', async (t) => {
+  const r = await retirementFixture(t, addCloudPair, (f) => {
+    f.sourceWindow = 200000;
+  });
+  const advance = (now) => {
+    r.f.now = now;
+    r.f.pair.observedAtMs = now;
+    for (const h of r.f.pair.hosts) h.snapshot.observedAtMs = now;
+  };
+  // The original fence is initially 57s old; only 4s of source reading crosses
+  // its 60s bound, well inside the separate 200s maintenance window.
+  advance(58000);
+  r.f.onSourceRead = async (observed, journal) => {
+    if ((await journal.readFirstCutoverEffects()).cloudMaintenanceEvents?.length === 1) {
+      advance(r.f.now + 4000);
+      observed.observedAtMs = r.f.now;
+    }
+  };
+  let commands = 0;
+  await assert.rejects(
+    r.observer.stopCloudServices(
+      { maintenanceEndsAtMs: 200000 },
+      cloudStopOperations(r, () => {
+        commands++;
+      }),
+    ),
+    /UNPROVEN/,
+  );
+  assert.equal(commands, 0, 'refuse before the effect, not in the post-stop ACK guard');
+  assert.equal((await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 1);
+  assert.ok(r.f.now < 200000);
+});
+
+for (const closingRead of ['raw', 'journal']) {
+  test(`synthetic source clock rollback initialization/${closingRead} refuses observer creation`, async (t) => {
+    let rolledBack = false;
+    await assert.rejects(
+      retirementFixture(t, addCloudPair, (f) => {
+        let armed = false;
+        f.onSourceRead = (observed) => {
+          observed.observedAtMs = 2000;
+          f.now = 2500;
+          armed = true;
+        };
+        const rollback = async () => {
+          if (!armed) return;
+          armed = false;
+          rolledBack = true;
+          f.now = 2250;
+        };
+        if (closingRead === 'raw') f.onCloudRead = rollback;
+        else f.onEffectsRead = rollback;
+      }),
+      /UNPROVEN/,
+    );
+    assert.equal(rolledBack, true);
+  });
+}
+
+for (const boundary of ['preintent', 'predispatch']) {
+  for (const closingRead of ['raw', 'journal']) {
+    for (const rollbackTo of [1500, 2250]) {
+      test(`synthetic source clock rollback ${boundary}/${closingRead}/${rollbackTo} refuses subsequent effects`, async (t) => {
+        const r = await retirementFixture(t, addCloudPair);
+        let armed = false;
+        let rolledBack = false;
+        const moveClock = (now) => {
+          r.f.now = now;
+          r.f.pair.observedAtMs = now;
+          for (const h of r.f.pair.hosts) h.snapshot.observedAtMs = now;
+        };
+        const rollback = async () => {
+          if (!armed) return;
+          armed = false;
+          rolledBack = true;
+          moveClock(rollbackTo);
+        };
+        r.f.onSourceRead = async (observed, journal) => {
+          const events = (await journal.readFirstCutoverEffects()).cloudMaintenanceEvents ?? [];
+          if (rolledBack || events.length !== (boundary === 'preintent' ? 0 : 1)) return;
+          // The reader returned a valid sample at 2000 and completed at 2500.
+          // Roll back only in the later closing raw/journal await, including a
+          // positive source age (2250) that still violates the 2500 high-water.
+          observed.observedAtMs = 2000;
+          moveClock(2500);
+          armed = true;
+        };
+        if (closingRead === 'raw') r.f.onCloudRead = rollback;
+        else r.f.onEffectsRead = rollback;
+        let commands = 0;
+        const operations = cloudStopOperations(r, () => {
+          commands++;
+        });
+        const fence = operations.verifyFence;
+        operations.verifyFence = async () => ({
+          ...(await fence()),
+          observedAtMs: r.f.now ?? 1000,
+        });
+        const error = await r.observer
+          .stopCloudServices({ maintenanceEndsAtMs: 9000 }, operations)
+          .then(
+            () => null,
+            (error) => error,
+          );
+        assert.equal(rolledBack, true, 'reach the intended closing await');
+        assert.equal(commands, 0, 'no PM2 effect after rollback');
+        assert.match(error?.message ?? '', /UNPROVEN/);
+        assert.equal(
+          ((await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents ?? []).length,
+          boundary === 'preintent' ? 0 : 1,
+          'no later intent or ACK',
+        );
+      });
+    }
+  }
 }
 
 for (const fault of [
@@ -582,7 +941,14 @@ for (const fault of [
 
 test('cloud raw stopped baseline remains privately immutable against later exit-code recapture', async (t) => {
   const r = await retirementFixture(t, addCloudPair);
+  let sourceReads = 0;
+  r.f.onSourceRead = () => {
+    sourceReads++;
+  };
   await r.observer.stopCloudServices({ maintenanceEndsAtMs: 8000 }, cloudStopOperations(r));
+  // Both roles are freshly compared before each intent and each dispatch;
+  // no repeated hash in intermediate guards, nor reuse across these boundaries.
+  assert.equal(sourceReads, 4);
   const observed = await r.observer.read();
   assert.equal(JSON.stringify(observed).includes('PRIVATE_CLOUD_BASELINE'), false);
   r.f.cloudManagers[0].pm2_env.exit_code = 0;
@@ -1294,6 +1660,10 @@ for (const fault of [
     await r.journal.persist('verified', { candidate: r.binding.candidate, identity: r.identity });
     assert.equal(typeof r.observer.restoreCloudServices, 'function');
     let leafReads = 0;
+    let recoverySourceReads = 0;
+    r.f.onSourceRead = () => {
+      recoverySourceReads++;
+    };
     const input = { identity: r.identity, maintenanceEndsAtMs: 8000 };
     if (fault === 'caller-proof') input.nativeVerified = true;
     const operations = {
@@ -1322,6 +1692,11 @@ for (const fault of [
     const expectedCensusReads = ['caller-proof', 'v2-replay'].includes(fault) ? 0 : 1;
     assert.equal(censusReads, expectedCensusReads);
     assert.equal(nativeReads, 0, 'post-effect proof is not pre-dispatch readiness');
+    assert.equal(
+      recoverySourceReads,
+      expectedCensusReads && fault !== 'census' ? 1 : 0,
+      'refresh both stopped source selections before retaining the capability refusal',
+    );
     assert.equal(
       r.f.rejections.at(-1).step,
       fault === 'caller-proof'

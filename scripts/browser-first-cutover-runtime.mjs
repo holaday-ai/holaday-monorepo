@@ -3,6 +3,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { hostname } from 'node:os';
+import { posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import {
@@ -11,9 +13,550 @@ import {
   firstCutoverCloudDisplayBootstrap,
   readFirstCutoverCloudDisplayListeners,
   readFirstCutoverCloudRecoveryCensus,
+  validateFirstCutoverCloudSources,
   validateLegacyWorkBoundary as validateWork,
 } from './browser-cutover-evidence.mjs';
 export { readFirstCutoverCloudRecoveryCensus };
+
+/** Private, read-only current-disk/launch selection. Does not prove capability,
+ * daemon loaded bytes, Python dynamic closure or authorize either effect. */
+export async function readFirstCutoverCloudRecoverySources(input, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    hostname,
+    now: Date.now,
+    monotonic: () => performance.now(),
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_SOURCES_UNPROVEN');
+  };
+  const digest = (value) =>
+    createHash('sha256')
+      .update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value))
+      .digest('hex');
+  const started = io.monotonic();
+  const clock = () => {
+    const elapsed = io.monotonic() - started;
+    if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > 60000) reject();
+  };
+  const records = new Map();
+  const directories = new Map();
+  const files = [];
+  const texts = new Map();
+  let total = 0;
+  const sameStat = (a, b) =>
+    ['dev', 'ino', 'mode', 'uid', 'gid', 'size', 'mtimeMs', 'ctimeMs'].every((k) => a[k] === b[k]);
+  const absolute = (p) =>
+    typeof p === 'string' &&
+    p.startsWith('/') &&
+    posix.normalize(p) === p &&
+    !p.includes('\0') &&
+    p.length <= 4096;
+  const stat = async (p) => {
+    clock();
+    const s = await io.lstat(p);
+    if (s.uid !== 0 || (!s.isSymbolicLink() && ((s.mode & 0o022) !== 0 || (s.mode & 0o7000) !== 0)))
+      reject();
+    const old = records.get(p);
+    if (old && !sameStat(old, s)) reject();
+    records.set(p, s);
+    return s;
+  };
+  const chain = async (p) => {
+    if (!absolute(p)) reject();
+    let current = '/';
+    await stat(current);
+    for (const part of p.slice(1).split('/').filter(Boolean)) {
+      current = posix.join(current, part);
+      await stat(current);
+    }
+    const resolved = await io.realpath(p);
+    if (!absolute(resolved)) reject();
+    if (resolved !== p) {
+      let c = '/';
+      for (const part of resolved.slice(1).split('/')) {
+        c = posix.join(c, part);
+        await stat(c);
+      }
+    }
+    return resolved;
+  };
+  const directory = async (p) => {
+    const real = await chain(p);
+    if (real !== p || !(await stat(p)).isDirectory()) reject();
+    const names = (await io.readdir(p)).sort();
+    if (
+      names.length > 512 ||
+      names.some((n) => typeof n !== 'string' || !n || n.includes('/') || n.includes('\0'))
+    )
+      reject();
+    const old = directories.get(p);
+    if (old && !isDeepStrictEqual(old, names)) reject();
+    directories.set(p, names);
+    clock();
+    return names;
+  };
+  const absent = async (p) => {
+    try {
+      await io.lstat(p);
+      reject();
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+    }
+  };
+  // The script directory precedes system packages for this non-isolated entry.
+  // Stream names only: /usr/bin may legitimately contain far more than 512
+  // unrelated commands. Never inspect/import candidate contents to accept one.
+  const checkEntryDirectory = async () => {
+    const path = '/usr/bin';
+    if ((await chain(path)) !== path || !(await stat(path)).isDirectory()) reject();
+    const handle = await io.opendir(path);
+    let count = 0;
+    let entrySeen = false;
+    try {
+      for (;;) {
+        clock();
+        const entry = await handle.read();
+        if (!entry) break;
+        if (
+          ++count > 16384 ||
+          typeof entry.name !== 'string' ||
+          !entry.name ||
+          Buffer.byteLength(entry.name) > 255 ||
+          /[\0/]/.test(entry.name)
+        )
+          reject();
+        const normalized = entry.name.toLowerCase().replace(/[-_.]+/g, '-');
+        if (!/^(?:websockify|sitecustomize|usercustomize|re|importlib)(?:-|$)/.test(normalized))
+          continue;
+        if (entry.name !== 'websockify' || entrySeen) reject();
+        entrySeen = true;
+      }
+      if (!entrySeen) reject();
+    } finally {
+      await handle.close();
+    }
+    clock();
+  };
+  const bounded = async (p, limit) => {
+    const handle = await io.open(
+      p,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    try {
+      const chunks = [];
+      let size = 0;
+      while (size <= limit) {
+        clock();
+        const buffer = Buffer.alloc(Math.min(65536, limit + 1 - size));
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+        if (!bytesRead) break;
+        chunks.push(buffer.subarray(0, bytesRead));
+        size += bytesRead;
+      }
+      if (size > limit) reject();
+      return Buffer.concat(chunks).toString('utf8');
+    } finally {
+      await handle.close();
+    }
+  };
+  const source = async (p, text = false) => {
+    if (files.length >= 128) reject();
+    const real = await chain(p);
+    const allowed =
+      p === '/bin/sh'
+        ? ['/bin/sh', '/usr/bin/sh', '/usr/bin/dash', '/usr/bin/bash']
+        : p === '/usr/bin/python3'
+          ? ['/usr/bin/python3', '/usr/bin/python3.10']
+          : [p];
+    if (!allowed.includes(real)) reject();
+    const before = await stat(real);
+    if (
+      !before.isFile() ||
+      before.size < 0 ||
+      before.size > (text ? 256 * 1024 : 512 * 1024 * 1024) ||
+      total + before.size > 1024 * 1024 * 1024
+    )
+      reject();
+    const handle = await io.open(
+      real,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    const h = createHash('sha256');
+    const chunks = [];
+    let size = 0;
+    try {
+      if (!sameStat(before, await handle.stat())) reject();
+      const buf = Buffer.alloc(65536);
+      for (;;) {
+        clock();
+        const { bytesRead } = await handle.read(buf, 0, buf.length, null);
+        if (!bytesRead) break;
+        size += bytesRead;
+        if (size > before.size) reject();
+        h.update(buf.subarray(0, bytesRead));
+        if (text) chunks.push(Buffer.from(buf.subarray(0, bytesRead)));
+      }
+      if (
+        size !== before.size ||
+        !sameStat(before, await handle.stat()) ||
+        !sameStat(before, await stat(real)) ||
+        (await io.realpath(p)) !== real
+      )
+        reject();
+    } finally {
+      await handle.close();
+    }
+    total += size;
+    const row = {
+      path: p,
+      resolvedPath: real,
+      uid: before.uid,
+      gid: before.gid,
+      mode: before.mode & 0o7777,
+      size,
+      digest: h.digest('hex'),
+    };
+    files.push(row);
+    if (text) texts.set(p, Buffer.concat(chunks).toString('utf8'));
+    return row;
+  };
+  try {
+    if (
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      !input ||
+      Object.keys(input).sort().join(',') !== 'attempt,configs'
+    )
+      reject();
+    const { attempt, configs } = input;
+    const launch = firstCutoverCloudBrowserRecoveryLaunch({ attempt });
+    const material = firstCutoverCloudVncRecoveryMaterial({ attempt });
+    if (!Array.isArray(configs) || configs.length !== 2) reject();
+    const scope = configs.map(({ name, pmId }) => ({ name, pmId }));
+    const bootId = (await bounded('/proc/sys/kernel/random/boot_id', 128)).trim();
+    const observedAtMs = io.now();
+    const daemon = async () => {
+      const pidText = (await bounded('/root/.pm2/pm2.pid', 32)).trim();
+      if (!/^[1-9]\d*$/.test(pidText) || Number(pidText) <= 1) reject();
+      const pid = Number(pidText);
+      const raw = await bounded(`/proc/${pid}/stat`, 4096);
+      const parts = raw
+        .slice(raw.lastIndexOf(')') + 2)
+        .trim()
+        .split(/\s+/);
+      if (!/^\d+$/.test(parts[19]) || ['Z', 'X'].includes(parts[0])) reject();
+      if (
+        (await bounded(`/proc/${pid}/cmdline`, 4096)).replace(/\0+$/, '') !==
+        'PM2 v6.0.14: God Daemon (/root/.pm2)'
+      )
+        reject();
+      const entries = (await bounded(`/proc/${pid}/environ`, 256 * 1024))
+        .split('\0')
+        .filter((s) => s.startsWith('PM2_NODE_OPTIONS='));
+      if (entries.length > 1 || entries.some((s) => s !== 'PM2_NODE_OPTIONS=')) reject();
+      const status = await bounded(`/proc/${pid}/status`, 65536);
+      if (!/^Uid:\s+0\s+0\s+0\s+0\s*$/m.test(status) || !/^Gid:\s+0\s+0\s+0\s+0\s*$/m.test(status))
+        reject();
+      return { pid, start: parts[19], optionsPresent: entries.length === 1 };
+    };
+    const daemonBefore = await daemon();
+    const fixed = [
+      '/usr/bin/unshare',
+      '/bin/sh',
+      '/usr/bin/mount',
+      '/usr/bin/setpriv',
+      '/usr/bin/python3',
+      '/usr/bin/Xvfb',
+      '/opt/brave.com/brave/brave',
+      '/opt/brave.com/brave/chrome_crashpad_handler',
+      '/opt/holaday-vnc/start.sh',
+      '/usr/bin/bash',
+      '/usr/bin/x11vnc',
+      '/usr/bin/websockify',
+      '/usr/bin/pkill',
+      '/usr/bin/sleep',
+      ...[
+        'package.json',
+        'lib/God.js',
+        'lib/God/ForkMode.js',
+        'lib/Utility.js',
+        'lib/God/ActionMethods.js',
+      ].map((p) => `/usr/lib/node_modules/pm2/${p}`),
+      '/usr/lib/python3.10/site.py',
+      '/usr/lib/python3.10/importlib/metadata/__init__.py',
+    ];
+    for (const p of fixed)
+      await source(p, /\.(?:json|js|py|sh)$/.test(p) || p === '/usr/bin/websockify');
+    if (
+      JSON.parse(texts.get('/usr/lib/node_modules/pm2/package.json')).version !== '6.0.14' ||
+      files.find((f) => f.path === '/usr/bin/python3').resolvedPath !== '/usr/bin/python3.10'
+    )
+      reject();
+    const pm2Hashes = {
+      'lib/God.js': 'a43594c030138c6db8d308ee1647903a72a49fc3ae781e600cc56338aa85ba90',
+      'lib/God/ForkMode.js': '3d1f57dee19060862b4856b15cd61ca406047e658071609e545ac5e1e7755cb4',
+      'lib/Utility.js': '97dc35e42a3ca1fdb4d79829346e8dbc693f1b180a764c99f202abc3328f3129',
+      'lib/God/ActionMethods.js':
+        'fac3eb453287059b94461cff459209c2d0a7c10bcb94ebf0f86aad8d087f82f8',
+    };
+    for (const [p, h] of Object.entries(pm2Hashes))
+      if (files.find((f) => f.path === `/usr/lib/node_modules/pm2/${p}`).digest !== h) reject();
+    // Exact reviewed Ubuntu entry shape; metadata is still independently read.
+    if (
+      files.find((f) => f.path === '/usr/bin/websockify').digest !==
+      '1a14abe56973818410c2a504f66496645dcb0df1b5a3d499a7b6f0cf0c848388'
+    )
+      reject();
+    const root = '/usr/lib/python3/dist-packages';
+    const system = await directory(root);
+    if (system.some((n) => /\.pth$|^(?:sitecustomize|usercustomize)(?:\.|$)/.test(n))) reject();
+    const metas = system.filter((n) => /^websockify.*\.(?:egg|dist)-info$/i.test(n));
+    if (
+      metas.some((n) => !/^websockify(?:-[0-9][a-zA-Z0-9._+-]{0,63})?\.(?:egg|dist)-info$/.test(n))
+    )
+      reject();
+    if (
+      metas.length !== 1 ||
+      system.filter((n) => !metas.includes(n) && /^websockify(?:\.|$)/.test(n)).join(',') !==
+        'websockify'
+    )
+      reject();
+    const metadataPath = `${root}/${metas[0]}`;
+    const packagePath = `${root}/websockify`;
+    const modules = await directory(packagePath);
+    for (const n of modules) {
+      if (n === '__pycache__') continue;
+      if (!/^[a-zA-Z_][a-zA-Z0-9_]*\.py$/.test(n)) reject();
+      await source(`${packagePath}/${n}`, true);
+    }
+    if (modules.includes('__pycache__'))
+      for (const n of await directory(`${packagePath}/__pycache__`)) {
+        const match = /^([a-zA-Z_][a-zA-Z0-9_]*)\.cpython-310(?:\.opt-[12])?\.pyc$/.exec(n);
+        if (!match || !modules.includes(`${match[1]}.py`)) reject();
+        await source(`${packagePath}/__pycache__/${n}`, true);
+      }
+    for (const n of await directory(metadataPath)) {
+      if (
+        ![
+          'PKG-INFO',
+          'METADATA',
+          'entry_points.txt',
+          'top_level.txt',
+          'SOURCES.txt',
+          'installed-files.txt',
+          'dependency_links.txt',
+          'requires.txt',
+          'RECORD',
+          'WHEEL',
+          'INSTALLER',
+        ].includes(n)
+      )
+        reject();
+      await source(`${metadataPath}/${n}`, true);
+    }
+    const meta = texts.get(`${metadataPath}/PKG-INFO`) ?? texts.get(`${metadataPath}/METADATA`);
+    const version = /^Version: (.+)$/m.exec(meta ?? '')?.[1];
+    if (
+      (meta?.match(/^Name: websockify$/gm) ?? []).length !== 1 ||
+      (meta?.match(/^Version: /gm) ?? []).length !== 1
+    )
+      reject();
+    const entryText = texts.get(`${metadataPath}/entry_points.txt`);
+    if (
+      !/^\[console_scripts\]\s*\nwebsockify\s*=\s*websockify\.websocketproxy:websockify_init\s*$/.test(
+        entryText ?? '',
+      )
+    )
+      reject();
+    // Finite Ubuntu search model. Never import Python or scan arbitrary homes.
+    await checkEntryDirectory();
+    const absentPaths = [
+      '/root/.local',
+      '/usr/lib/python310.zip',
+      '/usr/bin/pyvenv.cfg',
+      '/usr/pyvenv.cfg',
+    ];
+    for (const p of [
+      '/usr/lib/python3.10',
+      '/usr/lib/python3.10/lib-dynload',
+      '/usr/local/lib/python3.10/dist-packages',
+      '/usr/local/lib/python3.10/site-packages',
+    ]) {
+      let names;
+      try {
+        names = await directory(p);
+      } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+        absentPaths.push(p);
+        continue;
+      }
+      if (names.some((n) => /\.pth$|^(?:sitecustomize|usercustomize|websockify)(?:[.-]|$)/.test(n)))
+        reject();
+      if (p.includes('/usr/local/') && names.length) reject();
+    }
+    for (const p of absentPaths) await absent(p);
+    const roles = [];
+    for (const [i, row] of configs.entries()) {
+      if (
+        !row ||
+        Object.keys(row).sort().join(',') !== 'config,name,pmId' ||
+        row.name !== ['holaday-vnc', 'holaday-chromium-headed'][i] ||
+        row.config?.name !== row.name ||
+        row.config.pm_id !== row.pmId ||
+        !isDeepStrictEqual(row.config, JSON.parse(JSON.stringify(row.config)))
+      )
+        reject();
+      const config = structuredClone(row.config);
+      const nested = config.env;
+      if (
+        !nested ||
+        Object.getPrototypeOf(nested) !== Object.prototype ||
+        config.exec_mode !== 'fork_mode' ||
+        config.autostart !== true ||
+        config.increment_var ||
+        (config.instance_var && config.instance_var !== 'NODE_APP_INSTANCE')
+      )
+        reject();
+      const fixedFields = {
+        ...(i
+          ? { pm_exec_path: launch.command, args: launch.args, exec_interpreter: 'none' }
+          : { pm_exec_path: material.command, args: config.args, exec_interpreter: 'bash' }),
+        exec_mode: 'fork_mode',
+        autorestart: false,
+        watch: false,
+        cron_restart: '',
+      };
+      if (
+        unsafeCloudRecoveryEnvironment(nested, fixedFields) ||
+        (!i && (config.pm_exec_path !== material.command || config.exec_interpreter !== 'bash'))
+      )
+        reject();
+      if (i) nested.DISPLAY = ':98';
+      Object.assign(config, fixedFields);
+      Reflect.deleteProperty(config, 'max_memory_restart');
+      for (const [k, v] of Object.entries(nested)) {
+        // biome-ignore lint/suspicious/noDoubleEquals: actual PM2 Utility.extend.
+        if (v != '[object Object]') config[k] = v;
+      }
+      if (
+        config.exec_mode !== 'fork_mode' ||
+        config.autostart !== true ||
+        config.increment_var ||
+        (config.instance_var && config.instance_var !== 'NODE_APP_INSTANCE') ||
+        config.DISPLAY !== ':98' ||
+        config.HOME !== '/root' ||
+        (config.uid && config.uid !== 0) ||
+        (config.gid && config.gid !== 0) ||
+        !absolute(config.pm_cwd) ||
+        !config.PATH ||
+        typeof config.PATH !== 'string'
+      )
+        reject();
+      if (!i && Array.isArray(config.node_args) && config.node_args.length) reject();
+      const controls = [];
+      for (const k of Object.keys(config).sort())
+        if (
+          /^(?:LD_|PYTHON|BASH_FUNC_)|^(?:PATH|HOME|SHELL|BASH_ENV|ENV|SHELLOPTS|BASHOPTS|DISPLAY|XAUTHORITY|TMPDIR)$/.test(
+            k,
+          )
+        ) {
+          const v = config[k];
+          if (typeof v !== 'string' || v.includes('\0')) reject();
+          if (
+            /^(?:LD_|BASH_FUNC_)|^(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|XAUTHORITY|TMPDIR)$/.test(k) &&
+            v !== ''
+          )
+            reject();
+          if (!i && k.startsWith('PYTHON') && v !== '') reject();
+          controls.push([k, digest(v)]);
+        }
+      await chain(config.pm_cwd);
+      if (!(await stat(await io.realpath(config.pm_cwd))).isDirectory()) reject();
+      const dirs = config.PATH.split(':');
+      if (dirs.length > 16 || dirs.some((p) => !absolute(p))) reject();
+      for (const p of dirs) if (!(await stat(await chain(p))).isDirectory()) reject();
+      const selected = [];
+      if (!i)
+        for (const name of ['bash', 'x11vnc', 'websockify', 'pkill', 'sleep']) {
+          let found;
+          for (const dir of dirs) {
+            const p = posix.join(dir, name);
+            try {
+              const real = await chain(p);
+              const s = await stat(real);
+              if (!s.isFile() || !(s.mode & 0o111)) reject();
+              found = real;
+              break;
+            } catch (e) {
+              if (e.code !== 'ENOENT') throw e;
+              absentPaths.push(p);
+            }
+          }
+          if (found !== `/usr/bin/${name}`) reject();
+          selected.push([name, found]);
+        }
+      const args = i
+        ? launch.args
+        : [
+            material.command,
+            ...(config.args ? (Array.isArray(config.args) ? config.args : [config.args]) : []),
+          ];
+      if (args.some((a) => typeof a !== 'string' || a.includes('\0'))) reject();
+      roles.push({
+        name: row.name,
+        pmId: row.pmId,
+        configDigest: cutoverRegistrationConfigDigest(row.config),
+        selectionDigest: digest({
+          material: i ? launch : material,
+          command: i ? launch.command : 'bash',
+          args,
+          cwd: config.pm_cwd,
+          uid: config.uid ?? null,
+          gid: config.gid ?? null,
+          controls,
+          selected,
+          daemon: daemonBefore,
+        }),
+      });
+    }
+    for (const [p, s] of records) if (!sameStat(s, await io.lstat(p))) reject();
+    for (const [p, names] of directories)
+      if (!isDeepStrictEqual(names, (await io.readdir(p)).sort())) reject();
+    for (const f of files) if ((await io.realpath(f.path)) !== f.resolvedPath) reject();
+    for (const p of absentPaths) await absent(p);
+    if (
+      !isDeepStrictEqual(daemonBefore, await daemon()) ||
+      (await bounded('/proc/sys/kernel/random/boot_id', 128)).trim() !== bootId
+    )
+      reject();
+    await checkEntryDirectory();
+    clock();
+    const result = {
+      host: 'vultr',
+      hostname: io.hostname(),
+      bootId,
+      observedAtMs,
+      files: files.sort((a, b) => (a.path < b.path ? -1 : 1)),
+      roles,
+      pythonEntry: {
+        metadataPath,
+        name: 'websockify',
+        version,
+        group: 'console_scripts',
+        entry: 'websockify',
+        target: 'websockify.websocketproxy:websockify_init',
+      },
+    };
+    validateFirstCutoverCloudSources(result, { scope, observed: true });
+    return result;
+  } catch {
+    reject();
+  }
+}
 
 const hash = (x) => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
 

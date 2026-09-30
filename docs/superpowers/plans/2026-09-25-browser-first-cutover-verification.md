@@ -2,6 +2,25 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 固定来源门禁接入原停止路径（本批验收通过，非发布验收）
+
+基线6950e329后的本批接通固定磁盘/启动选择来源、严格材料验证、完整受保护site摘要与journal绑定、双角色停止意图及派发前来源刷新；刷新后重取围栏，最后检查窗口。保留原两角色恢复前置、库存分类器和CLI硬拒绝，无恢复ACK或生产开放。
+
+独立审查的I1来源后置括号时钟回退、I2固定Python入口目录替代distribution/native模块两项均经真实RED→GREEN修复；第1轮范围复审spec/quality PASS，无未关闭发现。I1十例失败后通过，完整inventory247；I2十例失败后通过，完整runtime294，均退出0、零跳过。`/usr/bin`只流式检查名字，固定上限16384、每名255字节及原60秒单调期限；package目录仍限512项，不执行Python/import，不证明生产兼容。
+
+| 最终修复后验证 | 结果 | 日志或报告 |
+| --- | --- | --- |
+| 实际隔离Linux七模块 | 23866/805b34退出0；1134/1134、零跳过 | `/private/tmp/holaday-cloud-source-gate-linux-fix1-20260930.log` |
+| 原ops回归 | 57880/a29864退出0；Node120/60/16/1274及Python12，零跳过 | `/private/tmp/holaday-cloud-source-gate-ops-fix1-20260930.log` |
+| 真实VNC恢复 | 39738/9905d4退出0；旧树/监听/RFB退出，新配置/历史/树稳定35096.212808000004ms | `/private/tmp/holaday-cloud-source-vnc-native-fix1-20260930.log` |
+| 原停止专用路径 | 15090/1249f5退出0；原控制器/journal/默认数字ID停止及三个实际受测角色退出 | `/private/tmp/holaday-cloud-source-vnc-stop-fix1-20260930.log` |
+| 11个代码/测试文件静态检查 | 1985f6退出0；Biome无修复、diff-check通过 | 主控工具记录 |
+| 独立范围复审及夹具审查 | I1/I2 ADDRESSED、spec/quality PASS；夹具PASS | `/private/tmp/holaday-cloud-source-review-fix1-20260930.md`、`/private/tmp/holaday-cloud-source-fixture-review-20260930.md` |
+
+首次修复后Linux审批超时，未执行；系统允许的一次相同重试成功，未绕过权限。修复前Linux1114、ops120/60/16/1264+Python12及真实VNC35104.373266ms亦曾通过，单独保留历史日志，不能替代以上最终结果。复审写作时尚未获Linux结果，主控随后取得实际退出0；不改写审查者的历史状态。
+
+VNC来源、headed5/6、业务/围栏、备份/候选与另一主机仍为明确合成前提；真实QA版本不同于生产，IPv6通配仅在network-none、无发布端口容器内观察。事件仅7条，无VNC恢复ACK/open。实际PM2 RPC和停止、真实x11vnc/websockify/WS→RFB与原断言保持。生产源码/选择元数据导出仍未执行，精确授权待补；本批没有生产、支付记录、PayPal、密钥、push/PR/合并/部署操作。完整两角色现场能力/独占归属/恢复消费者、真实停写备份/Mac恢复、非PayPal恢复、全流程演练及整分支审查/新鲜窗口仍未完成。
+
 ## 2026-09-30 真实服务隔离物理验收（优先于旧节）
 
 产品基线17028f3e；本批只改两份原物理夹具与记录，不改变生产门禁。串行、原固定镜像、私有PID、network-none、无发布端口或生产凭据。以下场景全部实际执行、退出0，无跳过；不是新增单元测试数量。

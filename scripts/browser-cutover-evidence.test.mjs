@@ -23,6 +23,143 @@ import {
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+
+function sourceMaterialFixture() {
+  const paths = [
+    '/usr/bin/unshare',
+    '/bin/sh',
+    '/usr/bin/mount',
+    '/usr/bin/setpriv',
+    '/usr/bin/python3',
+    '/usr/bin/Xvfb',
+    '/opt/brave.com/brave/brave',
+    '/opt/brave.com/brave/chrome_crashpad_handler',
+    '/opt/holaday-vnc/start.sh',
+    '/usr/bin/bash',
+    '/usr/bin/x11vnc',
+    '/usr/bin/websockify',
+    '/usr/bin/pkill',
+    '/usr/bin/sleep',
+    ...[
+      'package.json',
+      'lib/God.js',
+      'lib/God/ForkMode.js',
+      'lib/Utility.js',
+      'lib/God/ActionMethods.js',
+    ].map((p) => `/usr/lib/node_modules/pm2/${p}`),
+    '/usr/lib/python3.10/site.py',
+    '/usr/lib/python3.10/importlib/metadata/__init__.py',
+    ...['__init__', 'websocket', 'websocketserver', 'websocketproxy', 'websockifyserver'].map(
+      (p) => `/usr/lib/python3/dist-packages/websockify/${p}.py`,
+    ),
+    '/usr/lib/python3/dist-packages/websockify-0.10.0.egg-info/PKG-INFO',
+    '/usr/lib/python3/dist-packages/websockify-0.10.0.egg-info/entry_points.txt',
+  ].sort();
+  const scope = [
+    { name: 'holaday-vnc', pmId: 6 },
+    { name: 'holaday-chromium-headed', pmId: 7 },
+  ];
+  return {
+    scope,
+    value: {
+      host: 'vultr',
+      hostname: 'qa-vultr',
+      bootId: '11111111-1111-4111-8111-111111111111',
+      files: paths.map((path) => ({
+        path,
+        resolvedPath: path,
+        uid: 0,
+        gid: 0,
+        mode: 0o644,
+        size: 30,
+        digest: 'a'.repeat(64),
+      })),
+      roles: scope.map((r) => ({ ...r, selectionDigest: 'b'.repeat(64) })),
+      pythonEntry: {
+        metadataPath: '/usr/lib/python3/dist-packages/websockify-0.10.0.egg-info',
+        name: 'websockify',
+        version: '0.10.0',
+        group: 'console_scripts',
+        entry: 'websockify',
+        target: 'websockify.websocketproxy:websockify_init',
+      },
+    },
+  };
+}
+test('cloud source material validates exact protected and observed contracts without approval flags', async () => {
+  const { validateFirstCutoverCloudSources: validate } = await import(
+    './browser-cutover-evidence.mjs'
+  );
+  assert.equal(typeof validate, 'function');
+  const { value, scope } = sourceMaterialFixture();
+  assert.equal(validate(value, { scope }), undefined);
+  value.observedAtMs = 1000;
+  for (const role of value.roles) role.configDigest = 'c'.repeat(64);
+  assert.equal(validate(value, { scope, observed: true }), undefined);
+  assert.throws(() => validate(value, { scope }), /CUTOVER_CLOUD_SOURCES_UNPROVEN/);
+});
+for (const [name, change] of [
+  ['missing tool', (v) => v.files.shift()],
+  ['duplicate file', (v) => v.files.push(v.files[0])],
+  [
+    'unexpected file',
+    (v) => {
+      v.files[0].path = '/tmp/injected';
+    },
+  ],
+  [
+    'writable source',
+    (v) => {
+      v.files[0].mode = 0o666;
+    },
+  ],
+  [
+    'nonroot',
+    (v) => {
+      v.files[0].uid = 1;
+    },
+  ],
+  [
+    'escape',
+    (v) => {
+      v.files[0].resolvedPath = '/tmp/escape';
+    },
+  ],
+  ['role order', (v) => v.roles.reverse()],
+  [
+    'wrong entry',
+    (v) => {
+      v.pythonEntry.target = 'other:run';
+    },
+  ],
+  [
+    'approval flag',
+    (v) => {
+      v.approved = true;
+    },
+  ],
+  ['missing role', (v) => v.roles.pop()],
+  [
+    'bad digest',
+    (v) => {
+      v.roles[0].selectionDigest = 'x';
+    },
+  ],
+  [
+    'no module',
+    (v) => {
+      v.files = v.files.filter((f) => !f.path.endsWith('/websocketserver.py'));
+    },
+  ],
+])
+  test(`cloud source material refuses ${name}`, async () => {
+    const { validateFirstCutoverCloudSources: validate } = await import(
+      './browser-cutover-evidence.mjs'
+    );
+    const { value, scope } = sourceMaterialFixture();
+    change(value);
+    assert.throws(() => validate(value, { scope }), /CUTOVER_CLOUD_SOURCES_UNPROVEN/);
+  });
 const legacyCapabilityDigest = '8eae2e6ebcaab8d92eb5694bb6f8f89923a23005888342309278fcc35ac35a72';
 test('legacy capability requires the audited revision and both actual source digest passes', async () => {
   const module = await import('./browser-cutover-evidence.mjs');

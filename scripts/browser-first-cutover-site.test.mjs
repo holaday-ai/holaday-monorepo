@@ -4,6 +4,68 @@ import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+
+// SYNTHETIC protected material: no production disk or package proof.
+function syntheticCloudSources(scope) {
+  const metadataPath = '/usr/lib/python3/dist-packages/websockify-0.10.0.egg-info';
+  const paths = [
+    '/usr/bin/unshare',
+    '/bin/sh',
+    '/usr/bin/mount',
+    '/usr/bin/setpriv',
+    '/usr/bin/python3',
+    '/usr/bin/Xvfb',
+    '/opt/brave.com/brave/brave',
+    '/opt/brave.com/brave/chrome_crashpad_handler',
+    '/opt/holaday-vnc/start.sh',
+    '/usr/bin/bash',
+    '/usr/bin/x11vnc',
+    '/usr/bin/websockify',
+    '/usr/bin/pkill',
+    '/usr/bin/sleep',
+    '/usr/lib/python3.10/site.py',
+    '/usr/lib/python3.10/importlib/metadata/__init__.py',
+    '/usr/lib/node_modules/pm2/package.json',
+    '/usr/lib/node_modules/pm2/lib/God.js',
+    '/usr/lib/node_modules/pm2/lib/God/ForkMode.js',
+    '/usr/lib/node_modules/pm2/lib/Utility.js',
+    '/usr/lib/node_modules/pm2/lib/God/ActionMethods.js',
+    ...[
+      '__init__.py',
+      'websockifyserver.py',
+      'websocketproxy.py',
+      'websocket.py',
+      'websocketserver.py',
+      'auth_plugins.py',
+      'token_plugins.py',
+    ].map((name) => `/usr/lib/python3/dist-packages/websockify/${name}`),
+    ...['entry_points.txt', 'PKG-INFO', 'top_level.txt'].map((name) => `${metadataPath}/${name}`),
+  ].sort();
+  return {
+    host: 'vultr',
+    hostname: 'qa-vultr',
+    bootId: '11111111-1111-4111-8111-111111111111',
+    files: paths.map((path) => ({
+      path,
+      resolvedPath: path,
+      uid: 0,
+      gid: 0,
+      mode: 0o755,
+      size: 1,
+      digest: '1'.repeat(64),
+    })),
+    roles: scope.map(({ name, pmId }) => ({ name, pmId, selectionDigest: '2'.repeat(64) })),
+    pythonEntry: {
+      metadataPath,
+      name: 'websockify',
+      version: '0.10.0',
+      group: 'console_scripts',
+      entry: 'websockify',
+      target: 'websockify.websocketproxy:websockify_init',
+    },
+  };
+}
+
 import { readCutoverRehearsalArtifacts } from './browser-cutover-evidence.mjs';
 import { backupAndRestoreCheck } from './browser-first-cutover-backup.mjs';
 import * as runtimeModule from './browser-first-cutover-runtime.mjs';
@@ -217,6 +279,11 @@ async function fixture(t, extraInventory = {}, interrupted = false) {
       assert.equal(deps.journal, journal);
       assert.deepEqual(input.binding, binding);
       assert.deepEqual(
+        input.executionSite,
+        scope,
+        'whole protected scope reaches private observer',
+      );
+      assert.deepEqual(
         (await deps.readExecutionIdentities()).map((r) => r.role),
         ['coordinator', 'ingress', 'ingress-ssh', 'gateway', 'gateway-ssh'],
       );
@@ -314,6 +381,21 @@ function bindCloudRecoveryScope(f) {
       recoveryDigest: recipe,
     },
   ];
+  f.scope.cloudRecoverySources = syntheticCloudSources(f.scope.cloudMaintenanceScope);
+}
+
+for (const fault of ['missing', 'orphan', 'unknown', 'role']) {
+  test(`site rejects synthetic ${fault} cloud source material before sessions or binding`, async (t) => {
+    const f = await fixture(t);
+    bindCloudRecoveryScope(f);
+    if (fault === 'missing') Reflect.deleteProperty(f.scope, 'cloudRecoverySources');
+    if (fault === 'orphan') Reflect.deleteProperty(f.scope, 'cloudMaintenanceScope');
+    if (fault === 'unknown') f.scope.cloudRecoverySources.accepted = true;
+    if (fault === 'role') f.scope.cloudRecoverySources.roles.pop();
+    await assert.rejects(f.make().lifecycle.attach(f.context), /UNPROVEN/);
+    assert.deepEqual(f.events, []);
+    assert.equal((await f.journal.readFirstCutoverEffects()).executionSiteDigest, undefined);
+  });
 }
 
 for (const kind of ['wrong-digest', 'wrong-attempt', 'old-policy', 'missing']) {

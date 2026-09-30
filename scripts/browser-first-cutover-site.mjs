@@ -5,6 +5,7 @@ import {
   cutoverLegacyInterruptionRisk,
   readCutoverRehearsalArtifacts,
   validateCutoverLegacyCapability,
+  validateFirstCutoverCloudSources,
 } from './browser-cutover-evidence.mjs';
 import {
   inspectAgeBackupArtifact,
@@ -158,6 +159,8 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       !value.reviews ||
       !value.ingress ||
       !Array.isArray(value.producerStartupFiles) ||
+      Object.hasOwn(value, 'cloudMaintenanceScope') !==
+        Object.hasOwn(value, 'cloudRecoverySources') ||
       (Object.hasOwn(value, 'cloudBrowserRecoveryDigest') &&
         value.cloudBrowserRecoveryDigest !==
           createHash('sha256')
@@ -175,6 +178,10 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       !/^[a-f0-9]{64}$/.test(value.gatewaySiteDigest ?? '')
     )
       fail();
+    if (Object.hasOwn(value, 'cloudMaintenanceScope'))
+      validateFirstCutoverCloudSources(value.cloudRecoverySources, {
+        scope: value.cloudMaintenanceScope,
+      });
     return value;
   };
   const guard = async (ctx, phases) => {
@@ -653,7 +660,12 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
           },
         );
         observer = await io.createObserver(
-          { reviews: scope.reviews, binding: context.binding, legacyDigest: scope.legacyDigest },
+          {
+            reviews: scope.reviews,
+            binding: context.binding,
+            legacyDigest: scope.legacyDigest,
+            executionSite: structuredClone(scope),
+          },
           {
             now: io.now,
             journal: context.journal,

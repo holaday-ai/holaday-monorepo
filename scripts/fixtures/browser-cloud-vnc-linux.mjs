@@ -10,6 +10,7 @@ import { promisify } from 'node:util';
 import {
   cutoverCloudStopConfigDigest,
   cutoverRegistrationConfigDigest,
+  validateFirstCutoverCloudSources,
 } from '../browser-cutover-evidence.mjs';
 import {
   createFirstCutoverRetirementObserver,
@@ -585,6 +586,52 @@ done
     const sha = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
     const daemonPid = Number((await fs.readFile(`${pm2Home}/pm2.pid`, 'utf8')).trim());
     const bootId = (await fs.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim();
+    // SYNTHETIC source prerequisite only: fixed production-shaped paths/hashes
+    // are not measurements of this QA image or of production. Keep the actual
+    // process/default RPC/stop/recovery observations below independent of it.
+    const metadataPath = '/usr/lib/python3/dist-packages/websockify-0.10.0.egg-info';
+    const syntheticSourceFiles = [
+      '/usr/bin/unshare',
+      '/bin/sh',
+      '/usr/bin/mount',
+      '/usr/bin/setpriv',
+      '/usr/bin/python3',
+      '/usr/bin/Xvfb',
+      '/opt/brave.com/brave/brave',
+      '/opt/brave.com/brave/chrome_crashpad_handler',
+      '/opt/holaday-vnc/start.sh',
+      '/usr/bin/bash',
+      '/usr/bin/x11vnc',
+      '/usr/bin/websockify',
+      '/usr/bin/pkill',
+      '/usr/bin/sleep',
+      ...[
+        'package.json',
+        'lib/God.js',
+        'lib/God/ForkMode.js',
+        'lib/Utility.js',
+        'lib/God/ActionMethods.js',
+      ].map((path) => `/usr/lib/node_modules/pm2/${path}`),
+      '/usr/lib/python3.10/site.py',
+      '/usr/lib/python3.10/importlib/metadata/__init__.py',
+      ...['__init__', 'websocket', 'websocketserver', 'websocketproxy', 'websockifyserver'].map(
+        (name) => `/usr/lib/python3/dist-packages/websockify/${name}.py`,
+      ),
+      ...['entry_points.txt', 'PKG-INFO', 'top_level.txt'].map((name) => `${metadataPath}/${name}`),
+    ]
+      .sort()
+      .map((path) => ({
+        path,
+        resolvedPath: path,
+        uid: 0,
+        gid: 0,
+        mode: 0o755,
+        size: 1,
+        digest: sha(['SYNTHETIC_QA_SOURCE_NOT_DISK_BYTES', path]),
+      }));
+    const syntheticWrapper = syntheticSourceFiles.find(
+      (row) => row.path === '/opt/holaday-vnc/start.sh',
+    );
     const identity = qaIdentity;
     const pinned = new Set();
     const snapshot = async () => {
@@ -632,7 +679,19 @@ done
           killTimeoutMs: 1600,
           sourceDigest: sha('qa-pm2'),
         },
-        startup: { files: [], directories: [], pm2Unit: '' },
+        startup: {
+          files: [
+            {
+              path: syntheticWrapper.path,
+              resolved: syntheticWrapper.resolvedPath,
+              present: true,
+              digest: syntheticWrapper.digest,
+              stat: { uid: 0, gid: 0, mode: 0o100755, size: syntheticWrapper.size },
+            },
+          ],
+          directories: [],
+          pm2Unit: '',
+        },
         nginxFiles: [],
         systemd: '',
         unitFiles: '',
@@ -741,18 +800,70 @@ done
           }),
         };
       });
+      const cloudRecoverySources = {
+        host: 'vultr',
+        hostname: original.hostname,
+        bootId,
+        files: syntheticSourceFiles,
+        roles: scope.map(({ name, pmId }) => ({
+          name,
+          pmId,
+          selectionDigest: sha(['SYNTHETIC_QA_SELECTION_NOT_NATIVE_PROOF', name, pmId]),
+        })),
+        pythonEntry: {
+          metadataPath,
+          name: 'websockify',
+          version: '0.10.0',
+          group: 'console_scripts',
+          entry: 'websockify',
+          target: 'websockify.websocketproxy:websockify_init',
+        },
+      };
+      validateFirstCutoverCloudSources(cloudRecoverySources, { scope });
+      const maintenanceEndsAtMs = Date.now() + 30000;
+      const executionSite = {
+        binding,
+        reviews,
+        legacyDigest: proof.legacyDigest,
+        cloudMaintenanceScope: scope,
+        cloudRecoverySources,
+        maintenanceEndsAtMs,
+      };
       await journal.bindManifest(manifest);
-      await journal.bindExecutionSite('6'.repeat(64), scope);
+      await journal.bindExecutionSite(sha(executionSite), scope);
+      console.log(
+        'VNC_SOURCE_PREREQUISITES_SYNTHETIC: source files/selection/package and wrapper startup metadata are synthetic; whole-site journal binding, current raw-config digests and default PM2 RPC are real. Not native source/capability or production proof.',
+      );
       const observer = await createFirstCutoverRetirementObserver(
-        { reviews, binding, legacyDigest: proof.legacyDigest },
-        { journal, readPair: pair, now: Date.now },
+        { reviews, binding, legacyDigest: proof.legacyDigest, executionSite },
+        {
+          journal,
+          readPair: pair,
+          now: Date.now,
+          readCloudRecoverySources: async ({ attempt, configs }) => {
+            assert.equal(attempt, binding.attempt);
+            assert.deepEqual(
+              configs.map(({ name, pmId }) => ({ name, pmId })),
+              scope.map(({ name, pmId }) => ({ name, pmId })),
+            );
+            const observed = structuredClone(cloudRecoverySources);
+            return {
+              ...observed,
+              observedAtMs: Date.now(),
+              roles: observed.roles.map((role, i) => ({
+                ...role,
+                configDigest: cutoverRegistrationConfigDigest(configs[i].config),
+              })),
+            };
+          },
+        },
       );
       for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
         await journal.persist(phase, { candidate: binding.candidate });
       const configBefore = await rows();
       await observer
         .stopCloudServices(
-          { maintenanceEndsAtMs: Date.now() + 30000 },
+          { maintenanceEndsAtMs },
           {
             verifyFence: async () => ({
               inventoryDigest,

@@ -12,6 +12,7 @@ import {
   readCutoverDatabaseScope,
   readCutoverHostSnapshot,
   readCutoverWorkScope,
+  validateFirstCutoverCloudSources,
 } from './browser-cutover-evidence.mjs';
 import { backupAndRestoreCheck, encryptMysqlAgeBackup } from './browser-first-cutover-backup.mjs';
 import {
@@ -35,6 +36,7 @@ import {
   readFirstCutoverCloudBrowserRecovery,
   readFirstCutoverCloudManagers,
   readFirstCutoverCloudRecoveryCensus,
+  readFirstCutoverCloudRecoverySources,
   retireLegacyRuntime,
   validateLegacyWorkBoundary,
   validateOwnedLegacyFence,
@@ -1539,6 +1541,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
     readPair: readFirstCutoverHostPair,
     readCloudManagers: readFirstCutoverCloudManagers,
     readCloudRecoveryCensus: readFirstCutoverCloudRecoveryCensus,
+    readCloudRecoverySources: readFirstCutoverCloudRecoverySources,
     readFenceReceipts: async () => [],
     // Trusted live session handles, never a CLI/uploaded process allowlist.
     readExecutionIdentities: async () => [],
@@ -1566,6 +1569,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           'CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN',
           'CUTOVER_CLOUD_VNC_NATIVE_SOURCE_UNPROVEN',
           'CUTOVER_CLOUD_RECOVERY_CENSUS_UNPROVEN',
+          'CUTOVER_CLOUD_SOURCES_UNPROVEN',
         ].includes(value)
       )
         code = value;
@@ -1586,8 +1590,21 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
   };
   let initialStep = 'input';
   try {
-    const { reviews, binding, legacyDigest } = structuredClone(input);
+    const { reviews, binding, legacyDigest, executionSite } = structuredClone(input);
+    const siteDigest =
+      executionSite === undefined
+        ? undefined
+        : createHash('sha256').update(JSON.stringify(executionSite)).digest('hex');
     let last = io.now();
+    const checkClock = () => {
+      const now = io.now();
+      if (!Number.isSafeInteger(now) || !Number.isSafeInteger(last) || last < 0 || now < last)
+        fail();
+      last = now;
+      return now;
+    };
+    initialStep = 'initial-clock';
+    checkClock();
     let scopeCaptured = false;
     const effects = async () => {
       if (!isDeepStrictEqual(await io.journal.assertOwnership(), binding)) fail();
@@ -1595,6 +1612,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       if (
         !Object.entries(binding).every(([key, value]) => record[key] === value) ||
         record.legacyDigest !== legacyDigest ||
+        (siteDigest !== undefined && record.executionSiteDigest !== siteDigest) ||
         (scopeCaptured && !isDeepStrictEqual(record.cloudMaintenanceScope, originalCloudScope))
       )
         fail();
@@ -1604,6 +1622,23 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
     const first = await effects();
     const originalCloudScope = structuredClone(first.cloudMaintenanceScope);
     scopeCaptured = true;
+    initialStep = 'execution-site';
+    if (
+      (originalCloudScope && !executionSite) ||
+      (executionSite &&
+        (!isDeepStrictEqual(executionSite.binding, binding) ||
+          !isDeepStrictEqual(executionSite.reviews, reviews) ||
+          executionSite.legacyDigest !== legacyDigest ||
+          !isDeepStrictEqual(executionSite.cloudMaintenanceScope, originalCloudScope) ||
+          !Number.isSafeInteger(executionSite.maintenanceEndsAtMs) ||
+          executionSite.maintenanceEndsAtMs <= checkClock()))
+    )
+      fail();
+    if (!originalCloudScope && executionSite?.cloudRecoverySources !== undefined) fail();
+    if (originalCloudScope)
+      validateFirstCutoverCloudSources(executionSite.cloudRecoverySources, {
+        scope: originalCloudScope,
+      });
     initialStep = 'initial-state';
     if (
       !['preflight', 'prepared'].includes(first.phase) ||
@@ -1620,6 +1655,63 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
     // or recovered-state recapture. A lost observer must re-establish the
     // original pre-effect review, never adopt a post-effect registration.
     const cloudConfigs = new Map();
+    const compareSources = async (rows, pair) => {
+      const reject = () => {
+        throw new Error('CUTOVER_CLOUD_SOURCES_UNPROVEN');
+      };
+      const began = checkClock();
+      const configs = rows.map((row) => ({
+        name: row.name,
+        pmId: row.pm_id,
+        config: structuredClone(row.pm2_env),
+      }));
+      const observed = structuredClone(
+        await io.readCloudRecoverySources({ attempt: binding.attempt, configs }),
+      );
+      validateFirstCutoverCloudSources(observed, { scope: originalCloudScope, observed: true });
+      const now = checkClock();
+      const host = pair.hosts.find((h) => h.host === 'vultr').snapshot;
+      if (
+        !Number.isSafeInteger(began) ||
+        began < 0 ||
+        !Number.isSafeInteger(now) ||
+        now < began ||
+        now >= executionSite.maintenanceEndsAtMs ||
+        observed.observedAtMs < began ||
+        observed.observedAtMs > now ||
+        now - observed.observedAtMs > 60000 ||
+        observed.hostname !== host.hostname ||
+        observed.bootId !== host.bootId ||
+        observed.roles.some(
+          (r, i) => r.configDigest !== cutoverRegistrationConfigDigest(configs[i].config),
+        )
+      )
+        reject();
+      const { observedAtMs: _time, ...material } = observed;
+      material.roles = material.roles.map(({ configDigest: _config, ...role }) => role);
+      if (!isDeepStrictEqual(material, executionSite.cloudRecoverySources)) reject();
+      const path = '/opt/holaday-vnc/start.sh';
+      const source = observed.files.find((f) => f.path === path);
+      const wrapper = host.startup.files.filter((f) => f.path === path);
+      if (
+        wrapper.length !== 1 ||
+        !wrapper[0].present ||
+        wrapper[0].resolved !== source.resolvedPath ||
+        wrapper[0].digest !== source.digest ||
+        !wrapper[0].stat ||
+        ['uid', 'gid', 'size'].some((k) => wrapper[0].stat[k] !== source[k]) ||
+        (wrapper[0].stat.mode & 0o7777) !== source.mode
+      )
+        reject();
+      const { content: _content, ...metadata } = wrapper[0];
+      const approved = reviews.vultr.review.sources.filter((r) => r.key === `startup:${path}`);
+      if (
+        approved.length !== 1 ||
+        approved[0].digest !== createHash('sha256').update(JSON.stringify(metadata)).digest('hex')
+      )
+        reject();
+      return observed.observedAtMs;
+    };
     const bindCloudRows = (rows, pair, captureStoppedPmId) => {
       if (!originalCloudScope) return [];
       const original = baseline.hosts.find((h) => h.host === 'vultr').snapshot;
@@ -1695,6 +1787,13 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           baseline = structuredClone(await io.readPair());
           if (originalCloudScope) {
             bindCloudRows(raw, baseline);
+            initialStep = 'cloud-sources';
+            try {
+              await compareSources(raw, baseline);
+            } catch (error) {
+              await report(error, 'initialization', 'cloud-sources');
+              throw error;
+            }
             originalCloudConfigs = bindCloudRows(
               structuredClone(await io.readCloudManagers()),
               baseline,
@@ -1706,7 +1805,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           baselineExecution = structuredClone(await io.readExecutionIdentities());
           return baselineExecution;
         },
-        now: io.now,
+        now: checkClock,
       },
     );
     initialStep = 'initial-stability';
@@ -1719,15 +1818,26 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       fail();
     for (const { pmId, config } of originalCloudConfigs ?? [])
       cloudConfigs.set(pmId, { online: config });
-    const checkClock = () => {
-      const now = io.now();
-      if (!Number.isSafeInteger(now) || !Number.isSafeInteger(last) || last < 0 || now < last)
-        fail();
-      last = now;
-      return now;
-    };
     initialStep = 'initial-clock';
     checkClock();
+    const sourceGate = async () => {
+      try {
+        const before = await effects();
+        const raw = structuredClone(await io.readCloudManagers());
+        const pair = structuredClone(await io.readPair());
+        bindCloudRows(raw, pair);
+        const observedAtMs = await compareSources(raw, pair);
+        bindCloudRows(structuredClone(await io.readCloudManagers()), pair);
+        if (!isDeepStrictEqual(before, await effects())) fail();
+        const now = checkClock();
+        const age = now - observedAtMs;
+        if (age < 0 || age > 60000 || now >= executionSite.maintenanceEndsAtMs) fail();
+        return observedAtMs;
+      } catch (error) {
+        await report(error, 'cloud-sources', 'native-source-gate');
+        fail();
+      }
+    };
     const read = async (
       requestedRegistrationHost,
       requestedUnmanagedHost,
@@ -1945,6 +2055,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           )
             fail();
           step = 'recovery-native-prerequisites';
+          await sourceGate();
           // INCOMPLETE: there is no native BOTH-role source/display/capability
           // preflight yet. Post-restoration readers cannot supply that fact on
           // stopped services. Keep BOTH intents/effects closed; do not treat the
@@ -1968,7 +2079,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         )
           fail();
         cloudAttempted = true;
-        const guard = async () => {
+        const guard = async (refreshSources = false) => {
           const left = maintenanceEndsAtMs - checkClock();
           const record = await effects();
           if (
@@ -1979,12 +2090,18 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             !record.cloudMaintenanceScope
           )
             fail();
+          // A bounded native hash read can still consume the fence's whole
+          // freshness window. Read the fence afterwards, then age both proofs
+          // after the last asynchronous journal check, immediately before use.
+          const sourceTime = refreshSources ? await sourceGate() : null;
           const fence = await operations.verifyFence();
           const interrupted = await validateOwnedLegacyFence(fence, {
             now: checkClock,
             assertJournalOwnership: () => io.journal.assertOwnership(),
             readFirstCutoverEffects: effects,
           });
+          const current = await effects();
+          const now = checkClock();
           if (
             fence?.stage !== 'orders' ||
             fence.inventoryDigest !== binding.inventoryDigest ||
@@ -1992,10 +2109,12 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             fence.unknownWriters !== 0 ||
             (!interrupted && (fence.externalWork !== 0 || fence.activeRequests !== 0)) ||
             !Number.isSafeInteger(fence.observedAtMs) ||
-            fence.observedAtMs > checkClock() ||
-            checkClock() - fence.observedAtMs > 60000 ||
-            !isDeepStrictEqual(record, await effects()) ||
-            checkClock() >= maintenanceEndsAtMs
+            fence.observedAtMs > now ||
+            now - fence.observedAtMs > 60000 ||
+            (sourceTime !== null && (now - sourceTime < 0 || now - sourceTime > 60000)) ||
+            !isDeepStrictEqual(record, current) ||
+            now >= maintenanceEndsAtMs ||
+            now >= executionSite.maintenanceEndsAtMs
           )
             fail();
           return record;
@@ -2007,6 +2126,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           const state = await read();
           if (state.cloudMaintenance?.find((s) => s.name === declaration.name)?.status !== 'online')
             fail();
+          await guard(true);
           const base = {
             attempt: binding.attempt,
             inventoryDigest: binding.inventoryDigest,
@@ -2023,6 +2143,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             checkClock() >= maintenanceEndsAtMs
           )
             fail();
+          if (!isDeepStrictEqual(recorded, await guard(true))) fail();
           try {
             await (operations.exec ?? candidatePreparationSystem().exec)(
               'pm2',
