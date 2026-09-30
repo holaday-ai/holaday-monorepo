@@ -28,6 +28,7 @@ function cloudRestartFixture() {
     exec_mode: 'fork_mode',
     autorestart: true,
     restart_time: 12,
+    max_memory_restart: 1572864000,
   });
   const launchDigest = createHash('sha256')
     .update(
@@ -94,7 +95,7 @@ function cloudRestartFixture() {
       assert.equal(args.id, 7);
       assert.equal(args.env.current_conf.pm_exec_path, '/usr/bin/unshare');
       assert.equal(args.env.current_conf.autorestart, false);
-      assert.equal(args.env.current_conf.max_memory_restart, 0);
+      assert.equal(args.env.current_conf.max_memory_restart, 'null');
       assert.equal(args.env.current_conf.watch, false);
       assert.equal(args.env.current_conf.cron_restart, '');
       return {};
@@ -118,6 +119,10 @@ test('cloud browser same-ID restore records one original-journal intent before f
   assert.equal(typeof firstRuntime.restoreFirstCutoverCloudBrowser, 'function');
   await firstRuntime.restoreFirstCutoverCloudBrowser(f.input, f.io);
   assert.equal(f.calls.length, 1);
+  assert.equal(
+    JSON.parse(JSON.stringify(f.calls[0].args)).env.current_conf.max_memory_restart,
+    'null',
+  );
   assert.equal(f.record.cloudMaintenanceEvents.length, 5, 'RPC ACK is not physical recovery proof');
   await assert.rejects(firstRuntime.restoreFirstCutoverCloudBrowser(f.input, f.io), /UNPROVEN/);
   assert.equal(f.calls.length, 1);
@@ -228,6 +233,739 @@ test('cloud browser same-ID restore keeps uncertain intent and refuses late drif
   }
 });
 
+function expectedVncRecoveryMaterial(attempt) {
+  return {
+    attempt,
+    command: '/opt/holaday-vnc/start.sh',
+    exec_interpreter: 'bash',
+    current_conf: {
+      autorestart: false,
+      watch: false,
+      cron_restart: '',
+      max_memory_restart: 'null',
+    },
+  };
+}
+
+function cloudVncRestartFixture() {
+  const f = cloudRestartFixture();
+  f.input.pmId = 6;
+  f.manager.name = 'holaday-vnc';
+  f.manager.pm_id = 6;
+  Object.assign(f.manager.pm2_env, {
+    name: 'holaday-vnc',
+    pm_id: 6,
+    pm_exec_path: '/opt/holaday-vnc/start.sh',
+    exec_interpreter: 'bash',
+    autorestart: true,
+    max_memory_restart: 524288000,
+    pm_cwd: '/root',
+    uid: 0,
+    gid: 0,
+    env: { DISPLAY: ':98', PRIVATE_VALUE: 'must-not-escape' },
+    originalUnknownField: { retained: true },
+  });
+  const recoveryDigest = createHash('sha256')
+    .update(JSON.stringify(expectedVncRecoveryMaterial(f.input.attempt)))
+    .digest('hex');
+  f.record.cloudMaintenanceScope[0].recoveryDigest = recoveryDigest;
+  for (const event of f.record.cloudMaintenanceEvents)
+    if (event.name === 'holaday-vnc') event.recoveryDigest = recoveryDigest;
+  f.input.stoppedConfigDigest = cutoverRegistrationConfigDigest(f.manager.pm2_env);
+  const headed = f.record.cloudMaintenanceEvents[2];
+  f.record.cloudMaintenanceEvents.push(
+    { ...headed, phase: 'cloud-restore-intent' },
+    { ...headed, phase: 'cloud-restored' },
+  );
+  const guardInputs = [];
+  f.io.assertRecoveryScope = async (input) => {
+    guardInputs.push(structuredClone(input));
+    assert.deepEqual(input, f.input);
+  };
+  f.io.journal.recordCloudMaintenanceEvent = async (event) => {
+    assert.equal(f.record.cloudMaintenanceEvents.length, 6);
+    f.record.cloudMaintenanceEvents.push(structuredClone(event));
+  };
+  f.io.rpc = async (method, args, beforeSend) => {
+    if (method === 'getMonitorData') return structuredClone([f.manager]);
+    assert.equal(method, 'restartProcessId', 'no delete/start/save or other mutation');
+    await beforeSend();
+    assert.equal(f.record.cloudMaintenanceEvents.length, 7, 'intent precedes dispatch');
+    f.calls.push({ method, args: structuredClone(args) });
+    return {};
+  };
+  return { ...f, guardInputs };
+}
+
+test('cloud VNC same-ID restore requests only bound PM2 safety overrides with one dispatch and no restored ACK', async () => {
+  const f = cloudVncRestartFixture();
+  const prior = structuredClone(f.record.cloudMaintenanceEvents);
+  assert.equal(typeof firstRuntime.restoreFirstCutoverCloudVnc, 'function');
+  assert.equal(await firstRuntime.restoreFirstCutoverCloudVnc(f.input, f.io), undefined);
+  // This proves the requested payload only; the double does not execute PM2.
+  assert.deepEqual(JSON.parse(JSON.stringify(f.calls)), f.calls);
+  assert.deepEqual(f.calls, [
+    {
+      method: 'restartProcessId',
+      args: {
+        id: 6,
+        env: {
+          current_conf: {
+            autorestart: false,
+            watch: false,
+            cron_restart: '',
+            max_memory_restart: 'null',
+          },
+        },
+      },
+    },
+  ]);
+  assert.deepEqual(f.record.cloudMaintenanceEvents, [
+    ...prior,
+    {
+      name: 'holaday-vnc',
+      pmId: 6,
+      scopeDigest: 'a'.repeat(64),
+      recoveryDigest: f.record.cloudMaintenanceScope[0].recoveryDigest,
+      attempt: '12345678-1234-4234-8234-123456789abc',
+      inventoryDigest: 'd'.repeat(64),
+      host: 'vultr',
+      phase: 'cloud-restore-intent',
+    },
+  ]);
+  assert.equal(f.guardInputs.length, 3, 'live site guard runs again immediately before send');
+  await assert.rejects(firstRuntime.restoreFirstCutoverCloudVnc(f.input, f.io), /UNPROVEN/);
+  assert.equal(f.calls.length, 1);
+});
+
+test('cloud VNC recovery material binds only the fixed source and explicit PM2 safety override', () => {
+  const build = firstRuntime.firstCutoverCloudVncRecoveryMaterial;
+  assert.equal(typeof build, 'function');
+  const attempt = '12345678-1234-4234-8234-123456789abc';
+  assert.deepEqual(build({ attempt }), expectedVncRecoveryMaterial(attempt));
+  for (const input of [
+    undefined,
+    null,
+    [],
+    { attempt: 'bad' },
+    { attempt, args: [] },
+    { attempt, command: '/bin/sh' },
+    { attempt, current_conf: { autorestart: true } },
+  ])
+    assert.throws(() => build(input), /UNPROVEN/);
+  const material = build({ attempt });
+  material.current_conf.max_memory_restart = 0;
+  assert.deepEqual(build({ attempt }), expectedVncRecoveryMaterial(attempt));
+});
+
+test('cloud VNC refuses a coherently journaled material that does not approve the fixed safety override', async () => {
+  const f = cloudVncRestartFixture();
+  f.record.cloudMaintenanceScope[0].recoveryDigest = 'b'.repeat(64);
+  for (const event of f.record.cloudMaintenanceEvents)
+    if (event.name === 'holaday-vnc') event.recoveryDigest = 'b'.repeat(64);
+  await assert.rejects(firstRuntime.restoreFirstCutoverCloudVnc(f.input, f.io), /UNPROVEN/);
+  assert.equal(f.record.cloudMaintenanceEvents.length, 6);
+  assert.equal(f.calls.length, 0);
+});
+
+for (const value of [524288000, 0, null, false, 'null', undefined]) {
+  test(`cloud VNC explicitly overrides pre-bound stopped PM2 policy with memory=${JSON.stringify(value)}`, async () => {
+    const f = cloudVncRestartFixture();
+    Object.assign(f.manager.pm2_env, {
+      autorestart: true,
+      cron_restart: '* * * * *',
+      max_memory_restart: value,
+    });
+    f.input.stoppedConfigDigest = cutoverRegistrationConfigDigest(f.manager.pm2_env);
+    await firstRuntime.restoreFirstCutoverCloudVnc(f.input, f.io);
+    assert.deepEqual(f.calls, [
+      {
+        method: 'restartProcessId',
+        args: {
+          id: 6,
+          env: {
+            current_conf: {
+              autorestart: false,
+              watch: false,
+              cron_restart: '',
+              max_memory_restart: 'null',
+            },
+          },
+        },
+      },
+    ]);
+    assert.equal(f.record.cloudMaintenanceEvents.length, 7);
+  });
+}
+
+for (const role of ['headed', 'VNC']) {
+  for (const value of [524288000, 0, null, false, 'null', undefined]) {
+    test(`cloud ${role} refuses nested environment memory=${JSON.stringify(value)} before intent`, async () => {
+      const f = role === 'headed' ? cloudRestartFixture() : cloudVncRestartFixture();
+      f.manager.pm2_env.env = { max_memory_restart: value };
+      f.input.stoppedConfigDigest = cutoverRegistrationConfigDigest(f.manager.pm2_env);
+      const restore =
+        role === 'headed'
+          ? firstRuntime.restoreFirstCutoverCloudBrowser
+          : firstRuntime.restoreFirstCutoverCloudVnc;
+      await assert.rejects(restore(f.input, f.io), /UNPROVEN/);
+      assert.equal(f.record.cloudMaintenanceEvents.length, role === 'headed' ? 4 : 6);
+      assert.equal(f.calls.length, 0);
+    });
+  }
+}
+
+test('cloud VNC refuses an array carrying the four approved input fields', async () => {
+  const f = cloudVncRestartFixture();
+  f.input = Object.assign([], f.input);
+  f.io.assertRecoveryScope = async () => {};
+  await assert.rejects(firstRuntime.restoreFirstCutoverCloudVnc(f.input, f.io), /UNPROVEN/);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.record.cloudMaintenanceEvents.length, 6);
+});
+
+for (const role of ['headed', 'VNC']) {
+  for (const [field, value] of [
+    ['autorestart', true],
+    ['watch', true],
+    ['cron_restart', '* * * * *'],
+    ['pm_exec_path', '/opt/holaday-headed/start.sh'],
+    ['args', ['https://example.invalid/old-action']],
+    ['exec_interpreter', role === 'headed' ? 'bash' : 'node'],
+    ['exec_mode', 'cluster_mode'],
+  ]) {
+    test(`cloud ${role} refuses conflicting nested ${field} before intent or restart`, async () => {
+      const f = role === 'headed' ? cloudRestartFixture() : cloudVncRestartFixture();
+      f.manager.pm2_env.env = { PRIVATE_VALUE: 'retained', [field]: value };
+      f.input.stoppedConfigDigest = cutoverRegistrationConfigDigest(f.manager.pm2_env);
+      const restore =
+        role === 'headed'
+          ? firstRuntime.restoreFirstCutoverCloudBrowser
+          : firstRuntime.restoreFirstCutoverCloudVnc;
+      await assert.rejects(restore(f.input, f.io), /UNPROVEN/);
+      assert.equal(f.record.cloudMaintenanceEvents.length, role === 'headed' ? 4 : 6);
+      assert.equal(f.calls.length, 0);
+    });
+  }
+  test(`cloud ${role} permits matching nested safety fields and unrelated environment values`, async () => {
+    const f = role === 'headed' ? cloudRestartFixture() : cloudVncRestartFixture();
+    const launch = firstRuntime.firstCutoverCloudBrowserRecoveryLaunch({
+      attempt: f.input.attempt,
+    });
+    if (role === 'VNC') f.manager.pm2_env.args = ['--approved', 'literal value'];
+    f.manager.pm2_env.env = {
+      PRIVATE_VALUE: 'retained',
+      autorestart: false,
+      watch: false,
+      cron_restart: '',
+      ...(role === 'headed'
+        ? {
+            pm_exec_path: launch.command,
+            args: structuredClone(launch.args),
+            exec_interpreter: 'none',
+            exec_mode: 'fork_mode',
+            DISPLAY: ':77',
+          }
+        : {
+            pm_exec_path: '/opt/holaday-vnc/start.sh',
+            args: ['--approved', 'literal value'],
+            exec_interpreter: 'bash',
+            exec_mode: 'fork_mode',
+          }),
+    };
+    f.input.stoppedConfigDigest = cutoverRegistrationConfigDigest(f.manager.pm2_env);
+    const restore =
+      role === 'headed'
+        ? firstRuntime.restoreFirstCutoverCloudBrowser
+        : firstRuntime.restoreFirstCutoverCloudVnc;
+    await restore(f.input, f.io);
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.record.cloudMaintenanceEvents.length, role === 'headed' ? 5 : 7);
+    assert.equal(Object.hasOwn(f.calls[0].args.env, 'PRIVATE_VALUE'), false);
+    if (role === 'headed') assert.equal(f.calls[0].args.env.DISPLAY, ':98');
+  });
+}
+
+test('cloud VNC refuses an absent existing daemon socket without invoking a CLI or recording recovery', async () => {
+  const f = cloudVncRestartFixture();
+  f.io.rpc = undefined;
+  f.io.lstat = async (path) => {
+    assert.equal(path, '/root/.pm2/rpc.sock');
+    throw Error('ENOENT');
+  };
+  f.io.exec = async () => assert.fail('no daemon autostart or CLI fallback');
+  await assert.rejects(firstRuntime.restoreFirstCutoverCloudVnc(f.input, f.io), /UNPROVEN/);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.record.cloudMaintenanceEvents.length, 6);
+});
+
+for (const [name, fault] of [
+  [
+    'missing guard',
+    (f) => {
+      f.io.assertRecoveryScope = undefined;
+    },
+  ],
+  [
+    'false guard',
+    (f) => {
+      f.io.assertRecoveryScope = async () => false;
+    },
+  ],
+  [
+    'true guard',
+    (f) => {
+      f.io.assertRecoveryScope = async () => true;
+    },
+  ],
+  [
+    'site source/tools/display/fences not proven',
+    (f) => {
+      f.io.assertRecoveryScope = async () => {
+        throw Error('private source mismatch');
+      };
+    },
+  ],
+  [
+    'wrong input ID',
+    (f) => {
+      f.input.pmId = 7;
+    },
+  ],
+  [
+    'string input ID',
+    (f) => {
+      f.input.pmId = '6';
+    },
+  ],
+  [
+    'unsafe input ID',
+    (f) => {
+      f.input.pmId = Number.MAX_SAFE_INTEGER + 1;
+    },
+  ],
+  [
+    'unknown input field',
+    (f) => {
+      f.input.command = '/bin/sh';
+    },
+  ],
+  [
+    'invalid attempt',
+    (f) => {
+      f.input.attempt = 'not-an-attempt';
+    },
+  ],
+  [
+    'invalid stopped digest',
+    (f) => {
+      f.input.stoppedConfigDigest = 'bad';
+    },
+  ],
+  [
+    'non-root caller',
+    (f) => {
+      f.io.uid = 998;
+    },
+  ],
+  [
+    'non-Linux caller',
+    (f) => {
+      f.io.platform = 'darwin';
+    },
+  ],
+  [
+    'wrong phase',
+    (f) => {
+      f.record.phase = 'candidate_started';
+    },
+  ],
+  [
+    'failed attempt',
+    (f) => {
+      f.record.failureObservation = {};
+    },
+  ],
+  [
+    'wrong owner attempt',
+    (f) => {
+      f.binding.attempt = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    },
+  ],
+  [
+    'wrong record binding',
+    (f) => {
+      f.record.inventoryDigest = 'f'.repeat(64);
+    },
+  ],
+  [
+    'missing site binding',
+    (f) => {
+      f.record.executionSiteDigest = undefined;
+    },
+  ],
+  [
+    'wrong approved window',
+    (f) => {
+      f.record.maintenanceEndsAtMs = 7000;
+    },
+  ],
+  [
+    'expired window',
+    (f) => {
+      f.setTime(8000);
+    },
+  ],
+  [
+    'excessive window',
+    (f) => {
+      f.input.maintenanceEndsAtMs = 901001;
+    },
+  ],
+  [
+    'wrong scope name',
+    (f) => {
+      f.record.cloudMaintenanceScope[0].name = 'other-vnc';
+    },
+  ],
+  [
+    'wrong scope ID',
+    (f) => {
+      f.record.cloudMaintenanceScope[0].pmId = 8;
+    },
+  ],
+  [
+    'duplicate scope ID',
+    (f) => {
+      f.record.cloudMaintenanceScope[1].pmId = 6;
+    },
+  ],
+  [
+    'wrong headed scope name',
+    (f) => {
+      f.record.cloudMaintenanceScope[1].name = 'other';
+    },
+  ],
+  [
+    'wrong headed recovery material',
+    (f) => {
+      f.record.cloudMaintenanceScope[1].recoveryDigest = 'f'.repeat(64);
+    },
+  ],
+  [
+    'missing VNC recovery material',
+    (f) => {
+      f.record.cloudMaintenanceScope[0].recoveryDigest = undefined;
+    },
+  ],
+  [
+    'unknown scope field',
+    (f) => {
+      f.record.cloudMaintenanceScope[0].command = '/bin/sh';
+    },
+  ],
+  [
+    'missing headed restored observation',
+    (f) => {
+      f.record.cloudMaintenanceEvents.pop();
+    },
+  ],
+  [
+    'intent substituted for headed observation',
+    (f) => {
+      f.record.cloudMaintenanceEvents[5].phase = 'cloud-restore-intent';
+    },
+  ],
+  [
+    'prior event wrong service',
+    (f) => {
+      f.record.cloudMaintenanceEvents[5].name = 'holaday-vnc';
+    },
+  ],
+  [
+    'prior event wrong ID',
+    (f) => {
+      f.record.cloudMaintenanceEvents[0].pmId = 8;
+    },
+  ],
+  [
+    'prior event wrong source digest',
+    (f) => {
+      f.record.cloudMaintenanceEvents[5].recoveryDigest = 'f'.repeat(64);
+    },
+  ],
+  [
+    'prior event wrong attempt',
+    (f) => {
+      f.record.cloudMaintenanceEvents[5].attempt = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    },
+  ],
+  [
+    'prior event wrong host',
+    (f) => {
+      f.record.cloudMaintenanceEvents[5].host = 'aliyun';
+    },
+  ],
+  [
+    'unknown prior event field',
+    (f) => {
+      f.record.cloudMaintenanceEvents[5].command = '/bin/sh';
+    },
+  ],
+  [
+    'swapped prior events',
+    (f) => {
+      f.record.cloudMaintenanceEvents.reverse();
+    },
+  ],
+  [
+    'wrong manager name',
+    (f) => {
+      f.manager.name = 'holaday-chromium-headed';
+    },
+  ],
+  [
+    'wrong manager ID',
+    (f) => {
+      f.manager.pm_id = 8;
+    },
+  ],
+  [
+    'wrong nested manager ID',
+    (f) => {
+      f.manager.pm2_env.pm_id = 8;
+    },
+  ],
+  [
+    'wrong nested manager name',
+    (f) => {
+      f.manager.pm2_env.name = 'other';
+    },
+  ],
+  [
+    'live VNC process',
+    (f) => {
+      f.manager.pid = 40;
+    },
+  ],
+  [
+    'non-stopped VNC registration',
+    (f) => {
+      f.manager.pm2_env.status = 'online';
+    },
+  ],
+  [
+    'command drift',
+    (f) => {
+      f.manager.pm2_env.pm_exec_path = '/opt/holaday-headed/start.sh';
+    },
+  ],
+  [
+    'arguments drift',
+    (f) => {
+      f.manager.pm2_env.args.push('unsafe');
+    },
+  ],
+  [
+    'environment drift',
+    (f) => {
+      f.manager.pm2_env.env.PRIVATE_VALUE = 'changed';
+    },
+  ],
+  [
+    'unknown configuration drift',
+    (f) => {
+      f.manager.pm2_env.originalUnknownField.retained = false;
+    },
+  ],
+  [
+    'historical restart-count drift',
+    (f) => {
+      f.manager.pm2_env.restart_time = 13;
+    },
+  ],
+]) {
+  test(`cloud VNC refuses ${name} before any restore intent or dispatch`, async () => {
+    const f = cloudVncRestartFixture();
+    fault(f);
+    const events = structuredClone(f.record.cloudMaintenanceEvents);
+    assert.equal(typeof firstRuntime.restoreFirstCutoverCloudVnc, 'function');
+    await assert.rejects(firstRuntime.restoreFirstCutoverCloudVnc(f.input, f.io), /UNPROVEN/);
+    assert.deepEqual(f.record.cloudMaintenanceEvents, events);
+    assert.equal(f.calls.length, 0);
+  });
+}
+
+for (const [field, value] of [
+  ['pm_exec_path', '/opt/holaday-headed/start.sh'],
+  ['pm_exec_path', '/bin/sh'],
+  ['exec_interpreter', 'node'],
+  ['watch', true],
+  ['watch', []],
+  ['watch', undefined],
+  ['exec_mode', 'cluster_mode'],
+  ['exec_mode', undefined],
+  ['restart_time', -1],
+  ['restart_time', undefined],
+]) {
+  test(`cloud VNC refuses reviewed unsafe or missing manager policy ${field}=${value} without rewriting it`, async () => {
+    const f = cloudVncRestartFixture();
+    f.manager.pm2_env[field] = value;
+    f.input.stoppedConfigDigest = cutoverRegistrationConfigDigest(f.manager.pm2_env);
+    const original = structuredClone(f.manager.pm2_env);
+    assert.equal(typeof firstRuntime.restoreFirstCutoverCloudVnc, 'function');
+    await assert.rejects(firstRuntime.restoreFirstCutoverCloudVnc(f.input, f.io), /UNPROVEN/);
+    assert.deepEqual(f.manager.pm2_env, original);
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.record.cloudMaintenanceEvents.length, 6);
+  });
+}
+
+test('cloud VNC refuses duplicate numeric-ID or fixed-name manager rows', async () => {
+  for (const duplicate of [
+    { pm_id: 6, name: 'other' },
+    { pm_id: 8, name: 'holaday-vnc' },
+  ]) {
+    const f = cloudVncRestartFixture();
+    const rpc = f.io.rpc;
+    f.io.rpc = async (method, ...args) =>
+      method === 'getMonitorData' ? structuredClone([f.manager, duplicate]) : rpc(method, ...args);
+    assert.equal(typeof firstRuntime.restoreFirstCutoverCloudVnc, 'function');
+    await assert.rejects(firstRuntime.restoreFirstCutoverCloudVnc(f.input, f.io), /UNPROVEN/);
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.record.cloudMaintenanceEvents.length, 6);
+  }
+});
+
+for (const [name, fault] of [
+  ['deadline', (f) => f.setTime(8000)],
+  ['clock rollback', (f) => f.setTime(999)],
+  [
+    'owner',
+    (f) => {
+      f.binding.candidate = 'f'.repeat(40);
+    },
+  ],
+  [
+    'config',
+    (f) => {
+      f.manager.pm2_env.env.PRIVATE_VALUE = 'drift';
+    },
+  ],
+  [
+    'prior observation',
+    (f) => {
+      f.record.cloudMaintenanceEvents[5].phase = 'cloud-restore-intent';
+    },
+  ],
+  [
+    'site scope',
+    (f) => {
+      f.record.executionSiteDigest = 'f'.repeat(64);
+    },
+  ],
+  [
+    'coherent VNC scope change',
+    (f) => {
+      f.record.cloudMaintenanceScope[0].recoveryDigest = 'f'.repeat(64);
+      for (const event of f.record.cloudMaintenanceEvents)
+        if (event.name === 'holaday-vnc') event.recoveryDigest = 'f'.repeat(64);
+    },
+  ],
+]) {
+  for (const boundary of ['intent', 'connection']) {
+    test(`cloud VNC rechecks ${name} after ${boundary}, retains seventh intent and never sends or retries`, async () => {
+      const f = cloudVncRestartFixture();
+      if (boundary === 'intent') {
+        const append = f.io.journal.recordCloudMaintenanceEvent;
+        f.io.journal.recordCloudMaintenanceEvent = async (event) => {
+          await append(event);
+          fault(f);
+        };
+      } else {
+        const rpc = f.io.rpc;
+        f.io.rpc = async (method, ...args) => {
+          if (method === 'restartProcessId') fault(f);
+          return rpc(method, ...args);
+        };
+      }
+      assert.equal(typeof firstRuntime.restoreFirstCutoverCloudVnc, 'function');
+      await assert.rejects(
+        firstRuntime.restoreFirstCutoverCloudVnc(f.input, f.io),
+        /UNPROVEN|UNCERTAIN/,
+      );
+      assert.equal(f.calls.length, 0);
+      assert.equal(f.record.cloudMaintenanceEvents.length, 7);
+      await assert.rejects(firstRuntime.restoreFirstCutoverCloudVnc(f.input, f.io), /UNPROVEN/);
+      assert.equal(f.calls.length, 0);
+    });
+  }
+}
+
+test('cloud VNC requires the same live site guard before intent, after intent and immediately before dispatch', async () => {
+  for (const refusedCall of [1, 2, 3]) {
+    const f = cloudVncRestartFixture();
+    let calls = 0;
+    f.io.assertRecoveryScope = async () => {
+      if (++calls === refusedCall) throw Error('source/tools/display/fences changed');
+    };
+    assert.equal(typeof firstRuntime.restoreFirstCutoverCloudVnc, 'function');
+    await assert.rejects(
+      firstRuntime.restoreFirstCutoverCloudVnc(f.input, f.io),
+      /UNPROVEN|UNCERTAIN/,
+    );
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.record.cloudMaintenanceEvents.length, refusedCall === 1 ? 6 : 7);
+  }
+});
+
+for (const change of ['deadline', 'ownership']) {
+  test(`cloud VNC refuses ${change} lost while awaiting the final journal read before dispatch`, async () => {
+    const f = cloudVncRestartFixture();
+    let reads = 0;
+    const read = f.io.journal.readFirstCutoverEffects;
+    f.io.journal.readFirstCutoverEffects = async () => {
+      const record = await read();
+      if (++reads === 6) {
+        if (change === 'deadline') f.setTime(8000);
+        else f.binding.candidate = 'f'.repeat(40);
+      }
+      return record;
+    };
+    await assert.rejects(
+      firstRuntime.restoreFirstCutoverCloudVnc(f.input, f.io),
+      /UNPROVEN|UNCERTAIN/,
+    );
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.record.cloudMaintenanceEvents.length, 7);
+  });
+}
+
+test('cloud VNC preserves the seventh intent on uncertain RPC failure without leaking or retrying', async () => {
+  for (const failure of ['lost-ack', 'post-dispatch-window', 'post-dispatch-binding']) {
+    const f = cloudVncRestartFixture();
+    const rpc = f.io.rpc;
+    f.io.rpc = async (method, ...args) => {
+      const result = await rpc(method, ...args);
+      if (method === 'restartProcessId') {
+        if (failure === 'lost-ack') throw Error('secret raw environment');
+        if (failure === 'post-dispatch-window') f.setTime(8000);
+        if (failure === 'post-dispatch-binding') f.binding.configDigest = 'f'.repeat(64);
+      }
+      return result;
+    };
+    assert.equal(typeof firstRuntime.restoreFirstCutoverCloudVnc, 'function');
+    await assert.rejects(
+      firstRuntime.restoreFirstCutoverCloudVnc(f.input, f.io),
+      /^Error: CUTOVER_CLOUD_RESTORE_UNCERTAIN$/,
+    );
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.record.cloudMaintenanceEvents.length, 7);
+    await assert.rejects(firstRuntime.restoreFirstCutoverCloudVnc(f.input, f.io), /UNPROVEN/);
+    assert.equal(f.calls.length, 1);
+  }
+});
+
 const digest = 'a'.repeat(64);
 function cloudRecoveryObservationFixture() {
   const input = { attempt: '12345678-1234-4234-8234-123456789abc', pmId: 7 };
@@ -273,7 +1011,6 @@ function cloudRecoveryObservationFixture() {
       restart_time: 0,
       exec_mode: 'fork_mode',
       cron_restart: '',
-      max_memory_restart: 0,
       DISPLAY: ':98',
     },
   };
@@ -344,12 +1081,16 @@ test('cloud recovery observation binds the full stable manager config while excl
 for (const [field, value] of [
   ['cron_restart', '* * * * *'],
   ['max_memory_restart', 1024],
+  ['max_memory_restart', 0],
+  ['max_memory_restart', null],
+  ['max_memory_restart', false],
+  ['max_memory_restart', 'null'],
   ['exec_mode', 'cluster_mode'],
   ['cron_restart', undefined],
   ['max_memory_restart', undefined],
   ['exec_mode', undefined],
 ])
-  test(`cloud recovery refuses mismatched fixed lifecycle field ${field}=${value}`, async () => {
+  test(`cloud recovery refuses mismatched fixed lifecycle field ${field}=${JSON.stringify(value)}`, async () => {
     const f = cloudRecoveryObservationFixture();
     f.manager.pm2_env[field] = value;
     await assert.rejects(
@@ -357,6 +1098,22 @@ for (const [field, value] of [
       /CUTOVER_CLOUD_RECOVERY_UNPROVEN/,
     );
   });
+test('cloud recovery memory policy accepts only actual field absence', async () => {
+  const f = cloudRecoveryObservationFixture();
+  assert.equal(Object.hasOwn(f.manager.pm2_env, 'max_memory_restart'), false);
+  const proof = await firstRuntime.readFirstCutoverCloudBrowserRecovery(f.input, f.io);
+  assert.equal(proof.pmId, 7);
+});
+for (const value of [524288000, 0, null, false, 'null', undefined]) {
+  test(`cloud recovery refuses nested environment memory=${JSON.stringify(value)} even when outer field is absent`, async () => {
+    const f = cloudRecoveryObservationFixture();
+    f.manager.pm2_env.env = { max_memory_restart: value };
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudBrowserRecovery(f.input, f.io),
+      /UNPROVEN/,
+    );
+  });
+}
 for (const field of ['env', 'pm_cwd', 'unknown_future_option'])
   test(`cloud recovery refuses full config drift during observation: ${field}`, async () => {
     const f = cloudRecoveryObservationFixture();

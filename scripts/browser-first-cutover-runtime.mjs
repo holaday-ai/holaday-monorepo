@@ -13,6 +13,15 @@ import {
 
 const hash = (x) => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
 
+// executeApp flattens nested env after current_conf. Preserve matching and
+// unrelated values, but do not let them undo the fixed recovery settings.
+const unsafeCloudRecoveryEnvironment = (environment, fixed) =>
+  Object.hasOwn(environment ?? {}, 'max_memory_restart') ||
+  Object.entries(fixed).some(
+    ([key, value]) =>
+      Object.hasOwn(environment ?? {}, key) && !isDeepStrictEqual(environment[key], value),
+  );
+
 // Internal transport only. Do not construct the PM2 Client/API (it autostarts
 // a missing daemon). Never queue a request or reconnect and replay a write.
 async function cloudPm2Rpc(method, payload, io, beforeSend) {
@@ -171,6 +180,15 @@ export async function restoreFirstCutoverCloudBrowser(input, overrides = {}) {
         row.pm2_env.status !== 'stopped' ||
         row.pm2_env.watch !== false ||
         row.pm2_env.exec_mode !== 'fork_mode' ||
+        unsafeCloudRecoveryEnvironment(row.pm2_env.env, {
+          pm_exec_path: launch.command,
+          args: launch.args,
+          exec_interpreter: 'none',
+          exec_mode: 'fork_mode',
+          autorestart: false,
+          watch: false,
+          cron_restart: '',
+        }) ||
         !Number.isSafeInteger(row.pm2_env.restart_time) ||
         row.pm2_env.restart_time < 0 ||
         cutoverRegistrationConfigDigest(row.pm2_env) !== stoppedConfigDigest
@@ -212,7 +230,10 @@ export async function restoreFirstCutoverCloudBrowser(input, overrides = {}) {
             autorestart: false,
             watch: false,
             cron_restart: '',
-            max_memory_restart: 0,
+            // PM2 Worker treats zero as a threshold. Utility's literal string
+            // deletion marker survives JSON; executeApp must not restore it
+            // from nested env, which the stopped guard refuses above.
+            max_memory_restart: 'null',
             DISPLAY: ':98',
           },
         },
@@ -224,6 +245,213 @@ export async function restoreFirstCutoverCloudBrowser(input, overrides = {}) {
     if (dispatched) throw new Error('CUTOVER_CLOUD_RESTORE_UNCERTAIN');
     reject();
   }
+}
+/** Fixed VNC restore EFFECT, not recovery acceptance. The original site's
+ * mandatory live guard must prove the approved VNC source digest, exact scope,
+ * display/tools, settled work and fences (including independent headed recovery).
+ * Preserves the stopped wrapper/argv/environment while applying ONLY the
+ * explicitly digest-bound PM2 safety override below. Approved VNC child
+ * supervision remains intact. Independent post-recovery config/tree proof is
+ * still required; RPC success never creates a restored event.
+ */
+export async function restoreFirstCutoverCloudVnc(input, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    rpcSocket: '/root/.pm2/rpc.sock',
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+  };
+  let dispatched = false;
+  try {
+    const approved = structuredClone(input);
+    if (!approved || typeof approved !== 'object' || Array.isArray(approved)) reject();
+    const { attempt, pmId, stoppedConfigDigest, maintenanceEndsAtMs } = approved;
+    const headedLaunch = firstCutoverCloudBrowserRecoveryLaunch({ attempt });
+    const material = firstCutoverCloudVncRecoveryMaterial({ attempt });
+    if (
+      Object.keys(approved).sort().join(',') !==
+        'attempt,maintenanceEndsAtMs,pmId,stoppedConfigDigest' ||
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      !Number.isSafeInteger(pmId) ||
+      pmId < 0 ||
+      !hash(stoppedConfigDigest) ||
+      !Number.isSafeInteger(maintenanceEndsAtMs) ||
+      typeof io.assertRecoveryScope !== 'function'
+    )
+      reject();
+    const headedLaunchDigest = createHash('sha256')
+      .update(JSON.stringify(headedLaunch))
+      .digest('hex');
+    const recoveryDigest = createHash('sha256').update(JSON.stringify(material)).digest('hex');
+    let last = io.now();
+    const clock = () => {
+      const now = io.now();
+      if (
+        !Number.isSafeInteger(last) ||
+        last < 0 ||
+        !Number.isSafeInteger(now) ||
+        now < last ||
+        maintenanceEndsAtMs - now <= 0 ||
+        maintenanceEndsAtMs - now > 900000
+      )
+        reject();
+      last = now;
+    };
+    const binding = structuredClone(await io.journal.assertOwnership());
+    if (binding.attempt !== attempt) reject();
+    let originalRecord;
+    const state = async (count) => {
+      clock();
+      if (!isDeepStrictEqual(await io.journal.assertOwnership(), binding)) reject();
+      const record = await io.journal.readFirstCutoverEffects();
+      const scope = record.cloudMaintenanceScope;
+      if (
+        !Object.entries(binding).every(([key, value]) => record[key] === value) ||
+        record.phase !== 'verified' ||
+        record.failureObservation ||
+        !hash(record.executionSiteDigest) ||
+        (record.maintenanceEndsAtMs !== undefined &&
+          record.maintenanceEndsAtMs !== maintenanceEndsAtMs) ||
+        !Array.isArray(scope) ||
+        scope.length !== 2 ||
+        scope.some(
+          (entry, index) =>
+            !entry ||
+            Object.keys(entry).sort().join(',') !== 'name,pmId,recoveryDigest,scopeDigest' ||
+            entry.name !== ['holaday-vnc', 'holaday-chromium-headed'][index] ||
+            !Number.isSafeInteger(entry.pmId) ||
+            entry.pmId < 0 ||
+            !hash(entry.scopeDigest) ||
+            !hash(entry.recoveryDigest),
+        ) ||
+        scope[0].pmId !== pmId ||
+        scope[0].recoveryDigest !== recoveryDigest ||
+        scope[1].pmId === pmId ||
+        scope[1].recoveryDigest !== headedLaunchDigest ||
+        record.cloudMaintenanceEvents?.length !== count
+      )
+        reject();
+      const base = (entry) => ({
+        ...entry,
+        attempt,
+        inventoryDigest: binding.inventoryDigest,
+        host: 'vultr',
+      });
+      const expected = scope.flatMap((entry) =>
+        ['cloud-stop-intent', 'cloud-stopped'].map((phase) => ({ ...base(entry), phase })),
+      );
+      expected.push(
+        { ...base(scope[1]), phase: 'cloud-restore-intent' },
+        { ...base(scope[1]), phase: 'cloud-restored' },
+      );
+      if (count === 7) expected.push({ ...base(scope[0]), phase: 'cloud-restore-intent' });
+      if (!isDeepStrictEqual(record.cloudMaintenanceEvents, expected)) reject();
+      // Only our seventh event and the resulting owned record digest may change
+      // across the append. Keep the original scope/site and all other facts pinned.
+      const stable = Object.fromEntries(
+        Object.entries(record).filter(
+          ([key]) => !['recordDigest', 'cloudMaintenanceEvents'].includes(key),
+        ),
+      );
+      if (originalRecord && !isDeepStrictEqual(stable, originalRecord)) reject();
+      originalRecord ??= structuredClone(stable);
+      if (!isDeepStrictEqual(await io.journal.assertOwnership(), binding)) reject();
+      clock();
+      return structuredClone(record);
+    };
+    const rpc = io.rpc ?? ((method, args, beforeSend) => cloudPm2Rpc(method, args, io, beforeSend));
+    const stopped = async () => {
+      const rows = await rpc('getMonitorData', {});
+      if (!Array.isArray(rows)) reject();
+      const matches = rows.filter((row) => row.pm_id === pmId || row.name === 'holaday-vnc');
+      const row = matches[0];
+      if (
+        matches.length !== 1 ||
+        row.pm_id !== pmId ||
+        row.name !== 'holaday-vnc' ||
+        row.pid !== 0 ||
+        row.pm2_env?.pm_id !== pmId ||
+        row.pm2_env.name !== row.name ||
+        row.pm2_env.status !== 'stopped' ||
+        row.pm2_env.pm_exec_path !== material.command ||
+        row.pm2_env.exec_interpreter !== material.exec_interpreter ||
+        row.pm2_env.exec_mode !== 'fork_mode' ||
+        row.pm2_env.watch !== false ||
+        unsafeCloudRecoveryEnvironment(row.pm2_env.env, {
+          ...material.current_conf,
+          pm_exec_path: material.command,
+          args: row.pm2_env.args,
+          exec_interpreter: material.exec_interpreter,
+          exec_mode: 'fork_mode',
+        }) ||
+        !Number.isSafeInteger(row.pm2_env.restart_time) ||
+        row.pm2_env.restart_time < 0 ||
+        cutoverRegistrationConfigDigest(row.pm2_env) !== stoppedConfigDigest
+      )
+        reject();
+    };
+    const guard = async (count) => {
+      const before = await state(count);
+      if ((await io.assertRecoveryScope(structuredClone(approved))) !== undefined) reject();
+      await stopped();
+      if (!isDeepStrictEqual(before, await state(count))) reject();
+      return before;
+    };
+    const before = await guard(6);
+    await io.journal.recordCloudMaintenanceEvent({
+      ...before.cloudMaintenanceScope[0],
+      attempt,
+      inventoryDigest: binding.inventoryDigest,
+      host: 'vultr',
+      phase: 'cloud-restore-intent',
+    });
+    await guard(7);
+    // No command/argv/environment-value replacement or restart-count reset.
+    // This explicit, pre-bound policy is the entire approved config override.
+    dispatched = true;
+    await rpc(
+      'restartProcessId',
+      { id: pmId, env: { current_conf: structuredClone(material.current_conf) } },
+      () => guard(7),
+    );
+    await state(7);
+  } catch {
+    if (dispatched) throw new Error('CUTOVER_CLOUD_RESTORE_UNCERTAIN');
+    reject();
+  }
+}
+/** Fixed VNC recovery MATERIAL, not permission or proof of recovery. Hash the
+ * exact JSON serialization for the original journal's VNC recoveryDigest. The
+ * original wrapper/source bytes and retained config still need independent
+ * native proof. Only these four PM2 safety fields may change by this payload.
+ */
+export function firstCutoverCloudVncRecoveryMaterial(input) {
+  if (
+    !input ||
+    typeof input !== 'object' ||
+    Array.isArray(input) ||
+    Object.keys(input).length !== 1 ||
+    typeof input.attempt !== 'string' ||
+    !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(input.attempt)
+  )
+    fail();
+  return {
+    attempt: input.attempt,
+    command: '/opt/holaday-vnc/start.sh',
+    exec_interpreter: 'bash',
+    current_conf: {
+      autorestart: false,
+      watch: false,
+      cron_restart: '',
+      max_memory_restart: 'null',
+    },
+  };
 }
 /** Fixed recovery MATERIAL, not permission to start a process. The site binds
  * its digest in the existing journal; execution still needs fresh exclusive
@@ -364,7 +592,8 @@ export async function readFirstCutoverCloudBrowserRecovery(input, overrides = {}
         env.autorestart !== false ||
         env.watch !== false ||
         env.cron_restart !== '' ||
-        env.max_memory_restart !== 0 ||
+        Object.hasOwn(env, 'max_memory_restart') ||
+        Object.hasOwn(env.env ?? {}, 'max_memory_restart') ||
         !Number.isSafeInteger(env.restart_time) ||
         env.restart_time < 0 ||
         env.DISPLAY !== ':98'

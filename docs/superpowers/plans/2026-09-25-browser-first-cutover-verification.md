@@ -2,6 +2,28 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 并行批次最终验收（不是整分支/上线验收）
+
+A-R1 VNC嵌套启动覆盖四项RED实际失败，修补后8/8通过；最终定向144/144零跳过。独立审查A/B均通过，原I1/M1/A-R1已关闭。主智能体最终串行97538/eefb37退出0：真实Linux821/821，ops Node120/60/16/1085和Python12全部通过、零跳过；日志/private/tmp/holaday-parallel-final-{linux,ops}-20260930.log。30dd60六文件Biome与diff-check退出0；50e77a只读确认仅原健康MySQL/Redis、无QA容器。下段真实Brave证据对应最终仅VNC守卫修补前版本，headed及配置/物理夹具没有随后改动；VNC完整树/物理恢复仍待接线。
+
+未放宽inventory超过四条事件的拒绝，未启用CLI，未取得真实停写/Mac恢复/非PayPal恢复/整分支审查或新鲜生产窗口；没有生产、支付服务、凭据或历史业务修改。最终结果不能替代这些剩余门槛。
+
+## 2026-09-30 修正版物理配置与跨Worker周期验证
+
+真实Linux六模块85953退出0，817/817、零跳过（/private/tmp/holaday-parallel-corrected-linux-20260930.log）。实际PM2 Worker/Utility夹具6a6732退出0：0/null/false分别调用一次替身reload，缺字段与JSON字符串null删除均0次，嵌套环境影子重新引入0则1次；没有启动daemon或重启真实进程。
+
+真实Brave67259最终ea2a57退出0（/private/tmp/holaday-parallel-corrected-physical-20260930.log）：完整原配置到恢复配置的有限变换核验通过，实际Worker周期30000毫秒，观察35201.478808毫秒后同PID/start/历史计数/配置/日志保持，内存选项不存在。原两次精确停止、无关应用/显示保留、私有只读策略/能力清零、旧target正控及恢复后旧URL/HTTP不重放断言通过。仅使用原隔离QA镜像和公开离线缓存；VNC、备份及业务事实仍为合成，没有恢复ACK或开放生产。
+
+B静态复审通过无发现；A的VNC嵌套启动字段覆盖遗漏正在修正，以上817项在此窄修正之前。最终ops、修正后Linux及A复审尚待完成，不能把当前组件结果称为整项验收。历史零阈值假设的反证保留如下。
+
+## 2026-09-30 并行初版验证及 PM2 0 阈值反证（修正中）
+
+初版串行真实Linux六模块768/768、退出0、零跳过（/private/tmp/holaday-parallel-linux-20260930.log）；两个实施者的局部结果和独立VNC审查见原progress。它们只证明所覆盖用例，不证明原“0关闭内存重启”的假设。
+
+实际缓存PM2 6.0.14 Worker诊断48fb4f退出0：替身内存1024字节、autorestart=false、max_memory_restart=0，仍调用一次reload；缺字段则不调用。56d31e随后使用实际Utility.extendExtraConfig加JSON传输，证明current_conf的字符串'null'精确删除该字段、其他配置保留、Worker调用数0。源码检查均为隔离容器只读，诊断未启动PM2 daemon或重启真实进程；不是生产故障，也不是完整物理恢复通过。先前短时Brave夹具未覆盖Worker巡检，不能继续将其归纳为“无内存阈值重启”。
+
+正在修正原执行器/读取器/配置对比及夹具。最终Linux、真实Brave配置对比、实际Worker反例、整合审查均待新版本重跑。CLI关闭，未生产执行/提交/推送/PR/合并/部署。
+
 ## 2026-09-30 JST 用户续跑：恢复观察与发送open之间不允许替换运行态
 
 `5247a5`的18项RED均实际失败/退出1：遗漏固定cron/内存重启/fork设置、完整配置读取漂移及host两次观察间更换8类身份/配置事实。原runtime补齐固定字段及完整配置摘要前后稳定性，原host绑定首次观察与实际open前观察，时间可更新，身份/父进程/计数/配置/策略/命名空间不可替换；不输出环境原文。`fee43d`定向32/32退出0。追加正例及缺字段反例后`c89072`原Linux五模块502/502退出0、零跳过。日志`/private/tmp/holaday-cloud-config-{red,green,linux}-20260930.log`。

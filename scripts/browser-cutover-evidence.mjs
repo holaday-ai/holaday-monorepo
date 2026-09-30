@@ -5,7 +5,7 @@ import * as fs from 'node:fs/promises';
 import { readFile, readdir, readlink } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { posix } from 'node:path';
-import { promisify } from 'node:util';
+import { isDeepStrictEqual, promisify } from 'node:util';
 
 // This reviewed legacy revision has no complete in-flight request observation
 // API. Matching its bytes proves only that limitation, never absence of work.
@@ -131,6 +131,152 @@ export const cutoverCloudStopConfigDigest = (value) =>
       Object.entries(value).filter(([key]) => !['status', 'exit_code'].includes(key)),
     ),
   );
+
+/** Configuration proof for the existing fixed headed stopped-registration
+ * restart only. This does NOT prove a process/tree, authorize a restart/open,
+ * or relax the original observer. The caller supplies protected raw configs,
+ * the runtime's fixed launch MATERIAL, its separately journal-bound digest,
+ * and independently bracketed timestamps. This trusted internal interface is
+ * not a verifier of caller-supplied approval/digests.
+ * PM2 6.0.14 source: ActionMethods.restartProcessId/startProcessId,
+ * Methods.resetState, Utility.extend/extendExtraConfig, God.executeApp/readyCb.
+ * The fixed /usr/bin/unshare is outside a package (version = 'N/A'); tools and
+ * that package-lookup premise must still be verified on the actual host.
+ */
+export function compareCutoverCloudBrowserRecoveryConfig(input) {
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN');
+  };
+  try {
+    const copy = structuredClone(input);
+    // Raw RPC JSON only: refuse lossy values rather than letting a digest hide
+    // undefined/function/nonfinite values or special object serialization.
+    if (!isDeepStrictEqual(copy, JSON.parse(JSON.stringify(copy)))) reject();
+    const {
+      attempt,
+      pmId,
+      pm2Version,
+      stoppedConfig: before,
+      recoveredConfig: after,
+      launch,
+      expectedLaunchDigest,
+      restoreStartedAtMs,
+      observedAtMs,
+    } = copy;
+    const record = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+    if (
+      Object.keys(copy).sort().join(',') !==
+        'attempt,expectedLaunchDigest,launch,observedAtMs,pm2Version,pmId,recoveredConfig,restoreStartedAtMs,stoppedConfig' ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(
+        attempt ?? '',
+      ) ||
+      !Number.isSafeInteger(pmId) ||
+      pmId < 0 ||
+      pm2Version !== '6.0.14' ||
+      !record(before) ||
+      !record(after) ||
+      !record(before.env) ||
+      Object.hasOwn(before.env, 'max_memory_restart') ||
+      before.name !== 'holaday-chromium-headed' ||
+      before.pm_id !== pmId ||
+      before.status !== 'stopped' ||
+      before.watch !== false ||
+      before.exec_mode !== 'fork_mode' ||
+      before.autostart !== true ||
+      !Number.isSafeInteger(before.restart_time) ||
+      before.restart_time < 0 ||
+      !Number.isSafeInteger(restoreStartedAtMs) ||
+      restoreStartedAtMs < 0 ||
+      !Number.isSafeInteger(observedAtMs) ||
+      observedAtMs < restoreStartedAtMs ||
+      observedAtMs - restoreStartedAtMs > 900000 ||
+      !Number.isSafeInteger(after.created_at) ||
+      after.created_at < restoreStartedAtMs ||
+      !Number.isSafeInteger(after.pm_uptime) ||
+      after.pm_uptime < after.created_at ||
+      after.pm_uptime > observedAtMs
+    )
+      reject();
+    // No runtime import (runtime imports this module), and no second copy of
+    // the shell/argv recipe. The parent supplies the canonical runtime material
+    // plus the original journal's independently bound recoveryDigest. Shape
+    // checks constrain the role; the bound hash checks ALL exact launch bytes.
+    if (
+      !record(launch) ||
+      Object.keys(launch).sort().join(',') !== 'args,autorestart,command,env' ||
+      launch.command !== '/usr/bin/unshare' ||
+      launch.autorestart !== false ||
+      !isDeepStrictEqual(launch.env, { DISPLAY: ':98' }) ||
+      !Array.isArray(launch.args) ||
+      launch.args.length !== 23 ||
+      launch.args.some((arg) => typeof arg !== 'string' || !arg || arg.includes('\0')) ||
+      launch.args[6] !== 'holaday-private-browser-policy' ||
+      launch.args[7] !== `/var/lib/holaday-deploy/maintenance/${attempt}/cloud-browser-policy` ||
+      launch.args[8] !== '/opt/brave.com/brave/brave' ||
+      launch.args[21] !== '--user-data-dir=/var/lib/holaday-headed-brave' ||
+      launch.args[22] !== '--no-startup-window' ||
+      typeof expectedLaunchDigest !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(expectedLaunchDigest) ||
+      createHash('sha256').update(JSON.stringify(launch)).digest('hex') !== expectedLaunchDigest
+    )
+      reject();
+    const expected = {
+      ...before,
+      pm_exec_path: launch.command,
+      args: launch.args,
+      exec_interpreter: 'none',
+      exec_mode: 'fork_mode',
+      autorestart: false,
+      watch: false,
+      cron_restart: '',
+      DISPLAY: ':98',
+      env: { ...before.env, DISPLAY: ':98' },
+      created_at: after.created_at,
+      unstable_restarts: 0,
+      prev_restart_delay: 0,
+    };
+    // The fixed RPC uses current_conf.max_memory_restart = STRING 'null'.
+    // Utility.extendMix deletes that exact top-level key. Numeric 0/null/false
+    // remain defined thresholds and PM2 Worker can reload even autorestart=false.
+    // A nested env key was refused above: executeApp would flatten it back in.
+    Reflect.deleteProperty(expected, 'max_memory_restart');
+    // Utility.extend skips values coercing to '[object Object]', including the
+    // RPC's current_conf object; extendExtraConfig merges its fields only at
+    // top level. executeApp then flattens the preserved env again. Refuse an
+    // incoherent baseline/shadowing key instead of silently changing arbitrary
+    // original configuration or accepting an unsafe inherited launch.
+    for (const [key, value] of Object.entries(expected.env)) {
+      // biome-ignore lint/suspicious/noDoubleEquals: match PM2 6.0.14 Utility.extend coercion exactly.
+      if (value != '[object Object]') {
+        if (!Object.hasOwn(expected, key) || !isDeepStrictEqual(expected[key], value)) reject();
+        expected[key] = value;
+      }
+    }
+    Object.assign(expected, {
+      status: 'online',
+      pm_uptime: after.pm_uptime,
+      axm_actions: [],
+      axm_monitor: {},
+      axm_options: {},
+      axm_dynamic: {},
+      vizion_running: expected.vizion_running !== undefined ? expected.vizion_running : false,
+      version: 'N/A',
+    });
+    // Keep the shared digest's sole pre-existing monitor exception. Every
+    // other field, including unknown fields, nested env, uid/gid/cwd,
+    // historical restart_time AND stopped exit_code, must match the transform.
+    const stable = (value) =>
+      Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'axm_monitor'));
+    if (!isDeepStrictEqual(stable(expected), stable(after))) reject();
+    return {
+      stoppedConfigDigest: cutoverRegistrationConfigDigest(before),
+      recoveredConfigDigest: cutoverRegistrationConfigDigest(after),
+      restartCount: before.restart_time,
+    };
+  } catch {
+    reject();
+  }
+}
 const publicationSystem = {
   ...fs,
   platform: process.platform,
@@ -871,7 +1017,9 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
             Array.isArray(row.pm2_env) ||
             !Number.isSafeInteger(row.pm_id) ||
             row.pm_id < 0 ||
-            typeof row.name !== 'string',
+            typeof row.name !== 'string' ||
+            (['holaday-vnc', 'holaday-chromium-headed'].includes(row.name) &&
+              (!Number.isSafeInteger(row.pm2_env.restart_time) || row.pm2_env.restart_time < 0)),
         ) ||
         new Set(rows.map((row) => row.pm_id)).size !== rows.length
       )
@@ -893,7 +1041,10 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
           killTimeoutMs: row.pm2_env.kill_timeout,
           configDigest: cutoverRegistrationConfigDigest(row.pm2_env),
           ...(['holaday-vnc', 'holaday-chromium-headed'].includes(row.name)
-            ? { stopConfigDigest: cutoverCloudStopConfigDigest(row.pm2_env) }
+            ? {
+                stopConfigDigest: cutoverCloudStopConfigDigest(row.pm2_env),
+                restartCount: row.pm2_env.restart_time,
+              }
             : {}),
         }))
         .sort((a, b) => a.pmId - b.pmId);

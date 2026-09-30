@@ -19,9 +19,13 @@ import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import * as fs from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
-import { cutoverRegistrationConfigDigest } from '../browser-cutover-evidence.mjs';
+import {
+  compareCutoverCloudBrowserRecoveryConfig,
+  cutoverRegistrationConfigDigest,
+} from '../browser-cutover-evidence.mjs';
 import {
   firstCutoverCloudBrowserRecoveryLaunch,
   readFirstCutoverCloudBrowserRecovery,
@@ -133,6 +137,9 @@ const pm2 = async (...argv) =>
 let managed;
 let stoppedManager;
 let restoreJournal;
+let restoreStartedAtMs;
+let restoreMaintenanceEndsAtMs;
+let workerIntervalMs;
 let unrelated;
 const sha = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 async function restoreSameRegistration(recovery) {
@@ -229,6 +236,8 @@ async function restoreSameRegistration(recovery) {
       );
     },
   };
+  restoreMaintenanceEndsAtMs = input.maintenanceEndsAtMs;
+  restoreStartedAtMs = Date.now();
   await restoreFirstCutoverCloudBrowser(input, io);
   assert.equal((await restoreJournal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 5);
   await assert.rejects(restoreFirstCutoverCloudBrowser(input, io), /UNPROVEN/);
@@ -473,6 +482,15 @@ try {
         .version,
       '6.0.14',
     );
+    if (!deniedRecovery) {
+      // Read the same cached constant before starting the private daemon. Do
+      // not shorten its real interval to make a short probe look sufficient.
+      assert.equal(process.env.PM2_WORKER_INTERVAL, undefined, 'no Worker interval override');
+      workerIntervalMs = createRequire(import.meta.url)(
+        '/opt/node22/lib/node_modules/pm2/constants.js',
+      ).WORKER_INTERVAL;
+      assert.equal(workerIntervalMs, 30000, 'reviewed cached PM2 Worker interval');
+    }
     // Dedicated QA daemon, never the host/shared PM2. Keep an unrelated app
     // alive through each exact browser stop and recovery.
     await pm2(
@@ -610,7 +628,85 @@ try {
     );
     assert.equal(recoveredManager.pm2_env.exec_mode, 'fork_mode');
     assert.equal(recoveredManager.pm2_env.cron_restart, '');
-    assert.equal(recoveredManager.pm2_env.max_memory_restart, 0);
+    assert.equal(Object.hasOwn(recoveredManager.pm2_env, 'max_memory_restart'), false);
+    assert.equal(Object.hasOwn(recoveredManager.pm2_env.env, 'max_memory_restart'), false);
+    const recoveryRecord = await restoreJournal.readFirstCutoverEffects();
+    const configurationProof = compareCutoverCloudBrowserRecoveryConfig({
+      attempt,
+      pmId: managed.pmId,
+      pm2Version: '6.0.14', // Installed package version was asserted before the experiment.
+      stoppedConfig: stoppedManager.pm2_env,
+      recoveredConfig: recoveredManager.pm2_env,
+      launch: firstCutoverCloudBrowserRecoveryLaunch({ attempt }),
+      expectedLaunchDigest: recoveryRecord.cloudMaintenanceScope[1].recoveryDigest,
+      restoreStartedAtMs,
+      observedAtMs: Date.now(),
+    });
+    assert.equal(configurationProof.recoveredConfigDigest, observation.configDigest);
+    assert.equal(
+      configurationProof.stoppedConfigDigest,
+      cutoverRegistrationConfigDigest(stoppedManager.pm2_env),
+    );
+    assert.equal(configurationProof.restartCount, observation.restartCount);
+    console.log(
+      'CLOUD_STOPPED_TO_RECOVERED_CONFIG_PASS: exact finite PM2 transform; not a full-tree or release proof.',
+    );
+    if (!deniedRecovery) {
+      // The prior 2s probe could finish before the real periodic memory check.
+      // ONE success-only observation spans its unchanged interval, with a 5s
+      // completion margin. This is not a soak, new experiment, or recovery ACK.
+      const waitMs = workerIntervalMs + 5000;
+      const stabilityCapMs = 45000;
+      assert.ok(Number.isSafeInteger(waitMs) && waitMs > 0 && waitMs <= stabilityCapMs);
+      assert.ok(
+        restoreMaintenanceEndsAtMs - Date.now() > waitMs + 5000,
+        'QA_WORKER_STABILITY_WINDOW_TOO_SHORT: need interval plus observation margin',
+      );
+      const ownership = await restoreJournal.assertOwnership();
+      const stabilityStarted = performance.now();
+      await sleep(waitMs);
+      const stableObservation = await readFirstCutoverCloudBrowserRecovery(
+        { attempt, pmId: managed.pmId },
+        observationIo,
+      );
+      const stableManager = JSON.parse(await pm2('jlist')).find((r) => r.pm_id === managed.pmId);
+      assert.ok(stableManager);
+      assert.equal(stableManager.pid, recoveredManager.pid);
+      assert.equal(stableManager.pm2_env.status, 'online');
+      assert.equal(stableManager.pm2_env.restart_time, recoveredManager.pm2_env.restart_time);
+      assert.equal(stableManager.pm2_env.pm_uptime, recoveredManager.pm2_env.pm_uptime);
+      assert.equal(stableManager.pm2_env.created_at, recoveredManager.pm2_env.created_at);
+      assert.equal(Object.hasOwn(stableManager.pm2_env, 'max_memory_restart'), false);
+      assert.equal(Object.hasOwn(stableManager.pm2_env.env, 'max_memory_restart'), false);
+      assert.equal(stableObservation.pid, observation.pid);
+      assert.equal(stableObservation.start, observation.start);
+      assert.equal(stableObservation.restartCount, observation.restartCount);
+      assert.equal(stableObservation.configDigest, observation.configDigest);
+      assert.equal(
+        cutoverRegistrationConfigDigest(stableManager.pm2_env),
+        observation.configDigest,
+      );
+      assert.deepEqual(await restoreJournal.assertOwnership(), ownership);
+      assert.deepEqual(await restoreJournal.readFirstCutoverEffects(), recoveryRecord);
+      assert.equal(visits, before, 'Worker interval must not replay the old HTTP action');
+      const elapsedMs = performance.now() - stabilityStarted;
+      assert.ok(
+        elapsedMs >= workerIntervalMs && elapsedMs <= stabilityCapMs,
+        'QA_WORKER_STABILITY_INTERVAL_OUT_OF_BOUNDS',
+      );
+      assert.ok(Date.now() < restoreMaintenanceEndsAtMs, 'QA_WORKER_STABILITY_WINDOW_EXPIRED');
+      console.log(
+        JSON.stringify({
+          marker: 'CLOUD_PM2_WORKER_INTERVAL_STABLE',
+          workerIntervalMs,
+          elapsedMs,
+          samePidStartAndRestartCount: true,
+          memoryOptionAbsent: true,
+          journalUnchanged: true,
+          recoveryAckOrOpen: false,
+        }),
+      );
+    }
     const policyFile = `${privatePolicy}/recovery.json`;
     const originalMode = (await fs.stat(policyFile)).mode & 0o777;
     await fs.chmod(policyFile, 0o666);

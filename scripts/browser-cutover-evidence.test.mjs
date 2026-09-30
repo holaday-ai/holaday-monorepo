@@ -15,6 +15,7 @@ import {
   readCutoverWorkScope,
 } from './browser-cutover-evidence.mjs';
 import { readFirstCutoverPaymentScope } from './browser-first-cutover-host.mjs';
+import { firstCutoverCloudBrowserRecoveryLaunch } from './browser-first-cutover-runtime.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -1438,6 +1439,7 @@ test('cloud stop observation binds all launch fields while separating only statu
       if (command !== 'pm2') return raw;
       const rows = JSON.parse(raw);
       rows[0].name = 'holaday-vnc';
+      rows[0].pm2_env.restart_time = 0;
       rows[0].pm2_env.status = state;
       rows[0].pm2_env.exit_code = exitCode;
       rows[0].pm2_env.PRIVATE_KEY = key;
@@ -1513,6 +1515,404 @@ test('temporary stop comparison never masks environment, argv, restart policy, i
     );
   }
 });
+
+function headedRecoveryConfigFixture() {
+  const attempt = '11111111-1111-4111-8111-111111111111';
+  const launch = firstCutoverCloudBrowserRecoveryLaunch({ attempt });
+  const stoppedConfig = {
+    name: 'holaday-chromium-headed',
+    pm_id: 7,
+    status: 'stopped',
+    pm_exec_path: '/opt/holaday-headed/start.sh',
+    exec_interpreter: 'bash',
+    exec_mode: 'fork_mode',
+    args: [],
+    env: { PRIVATE_KEY: 'fixture-only-secret', DISPLAY: ':98', opaque: { keep: ['env'] } },
+    PRIVATE_KEY: 'fixture-only-secret',
+    DISPLAY: ':98',
+    pm_cwd: '/opt/holaday-headed',
+    uid: 0,
+    gid: 0,
+    autostart: true,
+    autorestart: true,
+    watch: false,
+    cron_restart: '',
+    max_memory_restart: 1572864000,
+    kill_timeout: 1600,
+    treekill: true,
+    restart_time: 19,
+    created_at: 100,
+    pm_uptime: 110,
+    unstable_restarts: 3,
+    prev_restart_delay: 1000,
+    exit_code: 130,
+    axm_actions: [{ name: 'old-action' }],
+    axm_monitor: { heap: 1 },
+    axm_options: { old: true },
+    axm_dynamic: { old: true },
+    version: 'old-version',
+    unknownFutureLaunchField: { keep: ['whole', { nested: true }] },
+  };
+  // Hand-specified PM2 6.0.14 stopped restart result, not a production
+  // transform builder: these exact values catch omissions and over-exclusions.
+  const recoveredConfig = {
+    ...structuredClone(stoppedConfig),
+    pm_exec_path: '/usr/bin/unshare',
+    args: structuredClone(launch.args),
+    exec_interpreter: 'none',
+    autorestart: false,
+    status: 'online',
+    created_at: 1000,
+    pm_uptime: 1001,
+    unstable_restarts: 0,
+    prev_restart_delay: 0,
+    axm_actions: [],
+    axm_monitor: {},
+    axm_options: {},
+    axm_dynamic: {},
+    vizion_running: false,
+    version: 'N/A',
+  };
+  // Utility.extendMix consumes the wire STRING 'null' by deleting the field.
+  Reflect.deleteProperty(recoveredConfig, 'max_memory_restart');
+  return {
+    attempt,
+    pmId: 7,
+    pm2Version: '6.0.14',
+    stoppedConfig,
+    recoveredConfig,
+    launch,
+    expectedLaunchDigest: hash(launch),
+    restoreStartedAtMs: 1000,
+    observedAtMs: 1002,
+  };
+}
+
+test('headed recovery config accepts only the finite source-verified stopped restart transform', async () => {
+  const { compareCutoverCloudBrowserRecoveryConfig, cutoverRegistrationConfigDigest } =
+    await import('./browser-cutover-evidence.mjs');
+  assert.equal(typeof compareCutoverCloudBrowserRecoveryConfig, 'function');
+  const f = headedRecoveryConfigFixture();
+  const before = structuredClone(f);
+  const proof = compareCutoverCloudBrowserRecoveryConfig(f);
+  assert.deepEqual(proof, {
+    stoppedConfigDigest: cutoverRegistrationConfigDigest(f.stoppedConfig),
+    recoveredConfigDigest: cutoverRegistrationConfigDigest(f.recoveredConfig),
+    restartCount: 19,
+  });
+  assert.deepEqual(f, before, 'comparison must not alter private inputs');
+  assert.equal(JSON.stringify(proof).includes('fixture-only-secret'), false);
+  assert.deepEqual(
+    compareCutoverCloudBrowserRecoveryConfig({
+      ...f,
+      launch: firstCutoverCloudBrowserRecoveryLaunch({ attempt: f.attempt }),
+    }),
+    proof,
+  );
+});
+
+for (const [field, value] of Object.entries({
+  unknownFutureLaunchField: { keep: ['changed'] },
+  newlyAddedUnknownField: true,
+  env: { PRIVATE_KEY: 'rotated', DISPLAY: ':98', opaque: { keep: ['env'] } },
+  PRIVATE_KEY: 'rotated',
+  pm_cwd: '/other',
+  uid: 998,
+  gid: 998,
+  name: 'holaday-vnc',
+  pm_id: 8,
+  autostart: false,
+  restart_time: 0,
+  exit_code: 0,
+  kill_timeout: 1,
+  treekill: false,
+  status: 'launching',
+  pm_exec_path: '/opt/holaday-headed/start.sh',
+  exec_interpreter: 'bash',
+  exec_mode: 'cluster_mode',
+  args: ['--unapproved'],
+  autorestart: true,
+  watch: true,
+  cron_restart: '* * * * *',
+  max_memory_restart: 1,
+  DISPLAY: ':99',
+  created_at: 999,
+  pm_uptime: 1003,
+  unstable_restarts: 1,
+  prev_restart_delay: 1,
+  axm_actions: [{ name: 'new-action' }],
+  axm_options: { pid: 10 },
+  axm_dynamic: { new: true },
+  vizion_running: true,
+  version: 'unreviewed',
+})) {
+  test(`headed recovery config rejects recovered ${field} drift instead of excluding it`, async () => {
+    const { compareCutoverCloudBrowserRecoveryConfig: compare } = await import(
+      './browser-cutover-evidence.mjs'
+    );
+    assert.equal(typeof compare, 'function');
+    const f = headedRecoveryConfigFixture();
+    f.recoveredConfig[field] = value;
+    assert.throws(() => compare(f), /^Error: CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN$/);
+  });
+}
+
+test('headed recovery config rejects deleted unknown fields and historically incremented restart counts', async () => {
+  const { compareCutoverCloudBrowserRecoveryConfig: compare } = await import(
+    './browser-cutover-evidence.mjs'
+  );
+  assert.equal(typeof compare, 'function');
+  const f = headedRecoveryConfigFixture();
+  Reflect.deleteProperty(f.recoveredConfig, 'unknownFutureLaunchField');
+  assert.throws(() => compare(f), /CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN/);
+  const g = headedRecoveryConfigFixture();
+  g.recoveredConfig.restart_time = 20;
+  assert.throws(() => compare(g), /CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN/);
+});
+
+for (const value of [0, null, false, 'null', 1572864000]) {
+  test(`headed recovery config requires memory threshold absence, refuses ${JSON.stringify(value)}`, async () => {
+    const { compareCutoverCloudBrowserRecoveryConfig: compare } = await import(
+      './browser-cutover-evidence.mjs'
+    );
+    const f = headedRecoveryConfigFixture();
+    f.recoveredConfig.max_memory_restart = value;
+    assert.throws(() => compare(f), /^Error: CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN$/);
+  });
+}
+
+for (const value of [0, null, false, 'null', 1572864000, {}]) {
+  test(`headed recovery config refuses nested memory threshold shadow ${JSON.stringify(value)}`, async () => {
+    const { compareCutoverCloudBrowserRecoveryConfig: compare } = await import(
+      './browser-cutover-evidence.mjs'
+    );
+    const f = headedRecoveryConfigFixture();
+    f.stoppedConfig.env.max_memory_restart = value;
+    f.recoveredConfig.env.max_memory_restart = structuredClone(value);
+    assert.throws(() => compare(f), /^Error: CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN$/);
+    // Even an after-snapshot claiming the inherited key disappeared is not a
+    // supported transform: nested env is preserved and the baseline must fail.
+    Reflect.deleteProperty(f.recoveredConfig.env, 'max_memory_restart');
+    assert.throws(() => compare(f), /^Error: CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN$/);
+  });
+}
+
+test('headed recovery config preserves already absent memory policy and rejects newly introduced nested policy', async () => {
+  const { compareCutoverCloudBrowserRecoveryConfig: compare } = await import(
+    './browser-cutover-evidence.mjs'
+  );
+  const f = headedRecoveryConfigFixture();
+  Reflect.deleteProperty(f.stoppedConfig, 'max_memory_restart');
+  assert.equal(compare(f).restartCount, 19);
+  f.recoveredConfig.env.max_memory_restart = 0;
+  assert.throws(() => compare(f), /^Error: CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN$/);
+});
+
+for (const [label, change] of [
+  [
+    'caller-selected command',
+    (f) => {
+      f.launch.command = '/bin/bash';
+    },
+  ],
+  [
+    'extra launch field',
+    (f) => {
+      f.launch.cwd = '/other';
+    },
+  ],
+  [
+    'caller-selected profile',
+    (f) => {
+      f.launch.args[21] = '--user-data-dir=/other';
+    },
+  ],
+  [
+    'another attempt policy',
+    (f) => {
+      f.launch.args[7] =
+        '/var/lib/holaday-deploy/maintenance/22222222-2222-4222-8222-222222222222/cloud-browser-policy';
+    },
+  ],
+  [
+    'extra launch environment',
+    (f) => {
+      f.launch.env.EXTRA = 'value';
+    },
+  ],
+  [
+    'missing bound launch digest',
+    (f) => {
+      Reflect.deleteProperty(f, 'expectedLaunchDigest');
+    },
+  ],
+  [
+    'different bound launch digest',
+    (f) => {
+      f.expectedLaunchDigest = 'f'.repeat(64);
+    },
+  ],
+  [
+    'recovered config digest in place of bound launch digest',
+    (f) => {
+      f.expectedLaunchDigest = hash(f.recoveredConfig);
+    },
+  ],
+  [
+    'another PM2 version',
+    (f) => {
+      f.pm2Version = '6.0.13';
+    },
+  ],
+  [
+    'unknown input',
+    (f) => {
+      f.ignoreFields = ['unknownFutureLaunchField'];
+    },
+  ],
+  [
+    'running baseline',
+    (f) => {
+      f.stoppedConfig.status = 'online';
+    },
+  ],
+  [
+    'wrong registration',
+    (f) => {
+      f.pmId = 8;
+    },
+  ],
+  [
+    'missing historical count',
+    (f) => {
+      Reflect.deleteProperty(f.stoppedConfig, 'restart_time');
+    },
+  ],
+  [
+    'invalid historical count',
+    (f) => {
+      f.stoppedConfig.restart_time = -1;
+    },
+  ],
+  [
+    'disabled autostart',
+    (f) => {
+      f.stoppedConfig.autostart = false;
+    },
+  ],
+  [
+    'backwards clock',
+    (f) => {
+      f.observedAtMs = 999;
+    },
+  ],
+  [
+    'uptime before reset',
+    (f) => {
+      f.recoveredConfig.pm_uptime = 999;
+    },
+  ],
+  [
+    'baseline environment shadows command',
+    (f) => {
+      f.stoppedConfig.env.pm_exec_path = '/unapproved';
+    },
+  ],
+]) {
+  test(`headed recovery config refuses ${label}`, async () => {
+    const { compareCutoverCloudBrowserRecoveryConfig: compare } = await import(
+      './browser-cutover-evidence.mjs'
+    );
+    assert.equal(typeof compare, 'function');
+    const f = headedRecoveryConfigFixture();
+    change(f);
+    assert.throws(() => compare(f), /^Error: CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN$/);
+  });
+}
+
+test('headed recovery config validates role shape even with a matching caller-supplied launch digest', async () => {
+  const { compareCutoverCloudBrowserRecoveryConfig: compare } = await import(
+    './browser-cutover-evidence.mjs'
+  );
+  for (const change of [
+    (f) => {
+      f.launch.command = '/bin/sh';
+    },
+    (f) => {
+      f.launch.env.EXTRA = 'value';
+    },
+    (f) => {
+      f.launch.autorestart = true;
+    },
+    (f) => {
+      f.launch.cwd = '/other';
+    },
+    (f) => {
+      f.launch.args[7] = '/other/policy';
+    },
+    (f) => {
+      f.launch.args[21] = '--user-data-dir=/other';
+    },
+  ]) {
+    const f = headedRecoveryConfigFixture();
+    change(f);
+    f.expectedLaunchDigest = hash(f.launch);
+    assert.throws(() => compare(f), /^Error: CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN$/);
+  }
+});
+
+test('headed recovery config accounts for exact DISPLAY merge and fixed restart policy without changing other env', async () => {
+  const { compareCutoverCloudBrowserRecoveryConfig: compare } = await import(
+    './browser-cutover-evidence.mjs'
+  );
+  const f = headedRecoveryConfigFixture();
+  f.stoppedConfig.env.DISPLAY = ':97';
+  f.stoppedConfig.DISPLAY = ':97';
+  f.stoppedConfig.cron_restart = '0 5 * * *';
+  f.stoppedConfig.vizion_running = true;
+  f.recoveredConfig.vizion_running = true;
+  assert.equal(compare(f).restartCount, 19);
+  const g = headedRecoveryConfigFixture();
+  g.recoveredConfig.env.opaque.keep = ['drift'];
+  assert.throws(() => compare(g), /CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN/);
+  const h = headedRecoveryConfigFixture();
+  h.recoveredConfig.env.current_conf = { pm_exec_path: '/usr/bin/unshare' };
+  assert.throws(() => compare(h), /CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN/);
+});
+
+test('cloud manager restart snapshot retains original nonzero counts for both fixed registrations', async () => {
+  for (const name of ['holaday-vnc', 'holaday-chromium-headed']) {
+    const f = hostFixture();
+    const exec = f.io.exec;
+    f.io.exec = async (command, args) => {
+      const raw = await exec(command, args);
+      if (command !== 'pm2') return raw;
+      const rows = JSON.parse(raw);
+      rows[0].name = name;
+      rows[0].pm2_env.restart_time = 19;
+      return JSON.stringify(rows);
+    };
+    const manager = (await readCutoverHostSnapshot(f.io)).managers[0];
+    assert.equal(manager.restartCount, 19);
+    assert.equal(JSON.stringify(manager).includes('secret'), false);
+  }
+});
+
+for (const value of [undefined, -1, 1.5, '19', Number.MAX_SAFE_INTEGER + 1]) {
+  test(`cloud manager restart snapshot rejects unproven historical count ${value}`, async () => {
+    const f = hostFixture();
+    const exec = f.io.exec;
+    f.io.exec = async (command, args) => {
+      const raw = await exec(command, args);
+      if (command !== 'pm2') return raw;
+      const rows = JSON.parse(raw);
+      rows[0].name = 'holaday-chromium-headed';
+      rows[0].pm2_env.restart_time = value;
+      return JSON.stringify(rows);
+    };
+    await assert.rejects(readCutoverHostSnapshot(f.io), /MAINTENANCE_HOST_OBSERVATION_UNPROVEN/);
+  });
+}
 for (const change of ['pid', 'new-registration', 'environment', 'kill-timeout', 'schedule']) {
   test(`host snapshot rejects PM2 ${change} drift during the same observation`, async () => {
     const f = hostFixture();
