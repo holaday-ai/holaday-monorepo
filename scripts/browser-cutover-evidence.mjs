@@ -132,6 +132,248 @@ export const cutoverCloudStopConfigDigest = (value) =>
     ),
   );
 
+// Fixed launch bytes shared only by the canonical material and finite comparator.
+// Not a standalone executable selector or source/capability approval.
+export const firstCutoverCloudDisplayBootstrap = String.raw`import os, sys, signal, time
+child = None
+stamp = None
+reaped = False
+def bounded(path, limit=65536):
+    with open(path, "rb", buffering=0) as f:
+        data = f.read(limit + 1)
+    if len(data) > limit:
+        raise RuntimeError("size")
+    return data.decode("utf-8")
+def exited():
+    global reaped
+    if not reaped:
+        reaped = os.waitpid(child, os.WNOHANG)[0] == child
+    return reaped
+def identity():
+    fields = bounded("/proc/%d/stat" % child).rsplit(")", 1)[1].split()
+    if int(fields[1]) != os.getpid():
+        raise RuntimeError("identity")
+    return fields[19]
+def sockets():
+    rows = bounded("/proc/net/unix", 1048576).splitlines()
+    if len(rows) > 16384:
+        raise RuntimeError("count")
+    return [r.split() for r in rows[1:] if r.split()[-1:] and r.split()[-1] in ("/tmp/.X11-unix/X98", "@/tmp/.X11-unix/X98")]
+def ready():
+    if exited():
+        raise RuntimeError("exit")
+    if identity() != stamp or os.readlink("/proc/%d/ns/mnt" % child) != os.readlink("/proc/self/ns/mnt"):
+        raise RuntimeError("drift")
+    # fork returns before child exec; the startup alarm remains unmasked here.
+    if os.readlink("/proc/%d/exe" % child) != "/usr/bin/Xvfb":
+        return False
+    with os.scandir("/proc/%d/fd" % child) as entries:
+        fds = []
+        for entry in entries:
+            if len(fds) >= 1024:
+                raise RuntimeError("fds")
+            fds.append(os.readlink(entry.path))
+    rows = sockets()
+    paths = sorted(r[-1] for r in rows)
+    if paths != ["/tmp/.X11-unix/X98", "@/tmp/.X11-unix/X98"]:
+        return False
+    if any(len(r) != 8 or r[3:6] != ["00010000", "0001", "01"] or "socket:[%s]" % r[6] not in fds for r in rows):
+        raise RuntimeError("ownership")
+    if len(set(r[6] for r in rows)) != 2 or identity() != stamp or exited():
+        raise RuntimeError("drift")
+    return True
+def interrupted(signum, frame):
+    raise RuntimeError("signal")
+for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGALRM):
+    signal.signal(sig, interrupted)
+signal.setitimer(signal.ITIMER_REAL, 5)
+try:
+    if os.path.lexists("/tmp/.X98-lock") or os.path.lexists("/tmp/.X11-unix/X98") or sockets():
+        raise RuntimeError("conflict")
+    # No exec error-pipe handshake. Parent retains its unreaped child PID
+    # before unmasking; only fork/PID assignment is in the masked region.
+    mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM, signal.SIGALRM})
+    try:
+        child = os.fork()
+        if child == 0:
+            try:
+                for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGALRM):
+                    signal.signal(sig, signal.SIG_DFL)
+                signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+                null = os.open("/dev/null", os.O_RDWR)
+                for fd in (0, 1, 2):
+                    os.dup2(null, fd)
+                fds = os.listdir("/proc/self/fd")
+                if len(fds) > 1024:
+                    os._exit(127)
+                for entry in fds:
+                    fd = int(entry)
+                    if fd > 2:
+                        try:
+                            os.close(fd)
+                        except OSError:
+                            pass
+                os.execv("/usr/bin/Xvfb", ["/usr/bin/Xvfb", ":98", "-screen", "0", "1280x800x24", "-nolisten", "tcp"])
+            except BaseException:
+                os._exit(127)
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+    stamp = identity()
+    deadline = time.monotonic() + 4.5
+    while not ready():
+        if time.monotonic() >= deadline:
+            raise RuntimeError("timeout")
+        time.sleep(0.025)
+    signal.setitimer(signal.ITIMER_REAL, 0)
+    os.execv("/opt/brave.com/brave/brave", sys.argv[1:])
+except BaseException:
+    signal.setitimer(signal.ITIMER_REAL, 0)
+    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM, signal.SIGALRM})
+    if child is not None and not exited():
+        # Unreaped child cannot be PID-reused. Recheck start immediately before
+        # the only cleanup signal; never signal after waitpid reports exit.
+        current = identity()
+        if stamp is None:
+            stamp = current
+        if current != stamp:
+            raise SystemExit("CLOUD_DISPLAY_CLEANUP_UNPROVEN")
+        os.kill(child, signal.SIGKILL)
+        deadline = time.monotonic() + 2
+        while not exited():
+            if time.monotonic() >= deadline:
+                raise SystemExit("CLOUD_DISPLAY_CLEANUP_UNPROVEN")
+            time.sleep(0.025)
+    raise SystemExit("CLOUD_DISPLAY_BOOTSTRAP_UNPROVEN")
+`;
+
+/** Actual bounded X98 listener ownership, not source approval or readiness by
+ * pathname. The caller binds this identity to its independent full census. */
+export async function readFirstCutoverCloudDisplayListeners(identity, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    ...overrides,
+  };
+  try {
+    const { pid, start, mountNamespace } = identity;
+    if (
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      Object.keys(identity).sort().join(',') !== 'mountNamespace,pid,start' ||
+      !Number.isSafeInteger(pid) ||
+      pid <= 1 ||
+      !/^[0-9]+$/.test(start) ||
+      !/^mnt:\[\d+\]$/.test(mountNamespace)
+    )
+      throw Error('identity');
+    const began = io.now();
+    const read = async (path, limit) => {
+      const handle = await io.open(
+        path,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      try {
+        const bytes = Buffer.alloc(limit + 1);
+        let size = 0;
+        while (size < bytes.length) {
+          const { bytesRead } = await handle.read(bytes, size, bytes.length - size, size);
+          if (!Number.isSafeInteger(bytesRead) || bytesRead < 0 || bytesRead > bytes.length - size)
+            throw Error('read');
+          if (!bytesRead) break;
+          size += bytesRead;
+        }
+        if (size > limit) throw Error('size');
+        return bytes.subarray(0, size).toString('utf8');
+      } finally {
+        await handle.close();
+      }
+    };
+    const proc = `/proc/${pid}`;
+    const check = async () => {
+      const stat = await read(`${proc}/stat`, 16384);
+      const fields = stat
+        .slice(stat.lastIndexOf(')') + 2)
+        .trim()
+        .split(/\s+/);
+      if (
+        !['R', 'S', 'D', 'I'].includes(fields[0]) ||
+        fields[19] !== start ||
+        (await io.readlink(`${proc}/ns/mnt`)) !== mountNamespace
+      )
+        throw Error('drift');
+    };
+    await check();
+    const paths = ['/tmp/.X11-unix/X98', '@/tmp/.X11-unix/X98'];
+    const rows = (await read('/proc/net/unix', 1048576)).trim().split('\n');
+    if (rows.length > 16384 || !rows.shift()?.startsWith('Num')) throw Error('table');
+    const matching = rows
+      .map((line) => line.trim().split(/\s+/))
+      .filter((row) => paths.includes(row.at(-1)));
+    // Accepted client sockets may carry the server pathname too. This proves
+    // listener ownership only; client exclusivity remains a separate gate.
+    if (
+      matching.some(
+        (row) =>
+          row.length !== 8 ||
+          !/^[1-9][0-9]{0,19}$/.test(row[6]) ||
+          row[4] !== '0001' ||
+          !(
+            (row[3] === '00010000' && row[5] === '01') ||
+            (row[3] === '00000000' && row[5] === '03')
+          ),
+      )
+    )
+      throw Error('table');
+    const selected = matching.filter((row) => row[3] === '00010000');
+    if (
+      selected.length !== 2 ||
+      selected.some(
+        (row) =>
+          row.length !== 8 ||
+          row[3] !== '00010000' ||
+          row[4] !== '0001' ||
+          row[5] !== '01' ||
+          !/^[1-9][0-9]{0,19}$/.test(row[6]),
+      )
+    )
+      throw Error('listeners');
+    const fds = await io.readdir(`${proc}/fd`);
+    if (fds.length > 1024 || fds.some((fd) => !/^[0-9]+$/.test(fd))) throw Error('fds');
+    const sockets = new Set();
+    for (const fd of fds) {
+      const target = await io.readlink(`${proc}/fd/${fd}`);
+      if (typeof target !== 'string' || target.length > 4096) throw Error('fd');
+      if (/^socket:\[[0-9]+\]$/.test(target)) sockets.add(target.slice(8, -1));
+    }
+    const result = selected
+      .map((row) => ({ path: row[7], inode: row[6] }))
+      .sort((a, b) => paths.indexOf(a.path) - paths.indexOf(b.path));
+    if (
+      !isDeepStrictEqual(
+        result.map((r) => r.path),
+        paths,
+      ) ||
+      new Set(result.map((r) => r.inode)).size !== 2 ||
+      result.some((r) => !sockets.has(r.inode))
+    )
+      throw Error('owner');
+    await check();
+    const now = io.now();
+    if (
+      !Number.isSafeInteger(began) ||
+      !Number.isSafeInteger(now) ||
+      now < began ||
+      now - began > 5000
+    )
+      throw Error('time');
+    return result;
+  } catch {
+    throw Error('CUTOVER_CLOUD_DISPLAY_UNPROVEN');
+  }
+}
+
 /** Configuration proof for the existing fixed headed stopped-registration
  * restart only. This does NOT prove a process/tree, authorize a restart/open,
  * or relax the original observer. The caller supplies protected raw configs,
@@ -253,13 +495,40 @@ function compareCloudRecoveryConfig(input, role) {
       launch.autorestart !== false ||
       !isDeepStrictEqual(launch.env, { DISPLAY: ':98' }) ||
       !Array.isArray(launch.args) ||
-      launch.args.length !== 23 ||
+      launch.args.length !== 28 ||
       launch.args.some((arg) => typeof arg !== 'string' || !arg || arg.includes('\0')) ||
       launch.args[6] !== 'holaday-private-browser-policy' ||
       launch.args[7] !== `/var/lib/holaday-deploy/maintenance/${attempt}/cloud-browser-policy` ||
-      launch.args[8] !== '/opt/brave.com/brave/brave' ||
-      launch.args[21] !== '--user-data-dir=/var/lib/holaday-headed-brave' ||
-      launch.args[22] !== '--no-startup-window'
+      !isDeepStrictEqual(launch.args, [
+        '--mount',
+        '--propagation',
+        'private',
+        '/bin/sh',
+        '-ceu',
+        '/usr/bin/mount --bind "$1" /etc/brave/policies/managed; /usr/bin/mount -o remount,bind,ro /etc/brave/policies/managed; shift; exec /usr/bin/setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs "$@"',
+        'holaday-private-browser-policy',
+        launch.args[7],
+        '/usr/bin/python3',
+        '-I',
+        '-S',
+        '-c',
+        firstCutoverCloudDisplayBootstrap,
+        '/opt/brave.com/brave/brave',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-background-networking',
+        '--disable-sync',
+        '--disable-extensions',
+        '--password-store=basic',
+        '--hide-crash-restore-bubble',
+        '--disable-session-crashed-bubble',
+        '--remote-debugging-address=127.0.0.1',
+        '--remote-debugging-port=9223',
+        '--user-data-dir=/var/lib/holaday-headed-brave',
+        '--no-startup-window',
+      ])
     )
       reject();
     if (

@@ -6,6 +6,36 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 显示启动有界交接已验证，真实恢复仍未通过
+
+当前基线仍为3e75d625。固定启动器改为一次fork、父进程立即恢复信号处理、限时等待并核对/回收唯一子进程，避免Popen握手期间屏蔽信号而无限等待。独立A-I1复审确认代码问题已关闭；取消测试的非阻断覆盖意见继续补强。实际Linux故障40144/802e16退出0：超时与取消2/2、零跳过，日志`/private/tmp/holaday-exclusive-display-I1-fault-20260930.log`。完整Linux88611/6c5746退出0：1034/1034；ops11739/8ca3dd退出0：120/60/16/1223及Python12，全部零跳过。普通套件不注册专用故障用例，不能用普通套件数量代替实际故障结果。
+
+IPC关联修正版Brave物理夹具a13143fe已通过静态独立审查，但实际24420/84edcb退出1，在最初显示就绪检查超时，尚未进行停止。不能记录为停止失败或恢复成功。原Sol A正补该夹具的有界失败诊断，另一路Sol B只改原VNC夹具，使用已下载公有依赖验证真实x11vnc/websockify及WS→RFB，不再把Python替身当真实服务。重型验证由主控串行执行；生产、CLI和两角色恢复前置拒绝均未改变。确切代理状态、文件归属、日志和后续结果见progress顶部；后续修正须重新验证对应用例。
+
+### 2026-09-30 专属显示依赖的范围裁定与联合身份补证
+
+独立范围复审 `/private/tmp/holaday-display-scope-review-20260930.md` 支持按原授权实现两服务专属显示组的停止与安全恢复，不再因Xvfb名称或crashpad已重新归属父进程泛泛索取授权。此结论不是生产放行，也不将原unproven采集改写为通过。实际treekill=true，必须真正恢复该显示依赖，不能沿用“停止后原display仍在”的假设。
+
+复审I1指出不同临时文件boot摘要编码及两轮peer记录未完整连接。原Sol提供联合只读采集器，主控完整阅读后沿原SSH通道执行一次39709/92aa71，退出0：`/private/tmp/holaday-display-joint-identity-20260930.json`保存两个明确窗口1790739561906–1790739562156，同host、同一boot读取同时产生canonical摘要a9fb…c279和旧raw摘要16dc…5092；每轮19个关联身份、11个显示client、2个crashpad，身份与双向peer图稳定。不是将不同摘要当相等，不重采来源或PM2配置，不输出原文、不改远端，不能用于稍后生产执行的前置证明。
+
+原两名Sol已按互斥文件实施：A负责固定单次私有命名空间Xvfb启动、同PID执行Brave及完整新树/监听核对；B负责原物理夹具中真实旧依赖退出、新依赖恢复及无关显示保留。任务说明 `/private/tmp/holaday-exclusive-display-implementation-20260930.md`，状态及报告见原progress顶部。仍保留原库存分类器、CLI和未具备两角色前置的拒绝；不会删guard直接放行。完整恢复消费者、实际VNC、停写备份/Mac恢复、非PayPal恢复、全演练及最终审查和窗口未完成。
+
+联合补证的独立复审已关闭上述I1，仅限历史编码/窗口/peer连接；报告 `/private/tmp/holaday-display-joint-identity-review-20260930.md`，实际JSON摘要224d0dc3…67df。约250毫秒双采样不证明长期或连续稳定，更不是对后来维护窗口的放行。没有重采或伪造源配置证明。
+
+### 2026-09-30 现场整树停止配置与重新归属的Brave辅助进程
+
+已保存实施批次3e75d625e7a366c114728cf7ec14b7bfa975365d，12个指定文件，原缓存保留。后续本节只读核查没有产品或生产改动。
+
+**授权与实现不能混为一谈：** 原范围允许两精确服务及核实后的专属后代，禁止共享Xvfb，并非禁止所有名为Xvfb的进程。独立范围判定/private/tmp/holaday-display-scope-decision-20260930.md据此纠正了过强的缺授权推论。当前显示父子关系首先是实现/归属证据问题；只有发现实际组外共享用途却仍拟改变它，才需新的范围决定。不要再泛泛询问用户授权，不以类型名放行或拒绝全部场景。
+
+实际已安装PM2 6.0.14四个公开源文件只读19661/ce5f8a退出0，记录/private/tmp/holaday-pm2-stop-source-20260930.json。stop RPC只取数字ID并使用现有配置，不合并传入treekill；restart可合并但会stop→start，不能用作无副作用设置。Methods.js摘要d0633425…、ActionMethods.js为fac3eb45…；这是磁盘源码，不宣称读到了daemon内存源码。原A只读可行性报告/private/tmp/holaday-display-preservation-feasibility-20260930.md不建议名称级信号、猜测参数或改共享daemon。
+
+固定范围只读采集51742/6af126退出1（有意拒绝而非传输失败），/private/tmp/holaday-display-ownership-20260930.json两轮stable=true：135个live userspace进程；:98共11个ESTAB客户端均回溯到两批准服务，0未匹配、0组外客户端；两项PM2注册treekill均为**布尔true**、autorestart为true，默认SIGINT/1600ms。仅当原treekill非true才成立的“单根停止保留display”候选因此不适用。未修改配置、调用停止或自动重试。
+
+该采集仍拒绝，是另有两个DISPLAY=:98进程PPID1（2968/start2367、2970/start2368）不在当前祖先树。后续精确只读56031/d78968和73710/7dc44c均退出0：它们为实际Brave crashpad handler；2968的initial-client socket对端均是headed Brave 2951及其后代（祖先回1217），2970的initial-client socket连接2968，两轮身份和对端稳定。证据/private/tmp/holaday-display-orphan-identity-20260930.json与/private/tmp/holaday-crashpad-peer-check-20260930.json；不能只凭exe名、DISPLAY或已否定的profile引用归属，更不能把这些历史PID当执行白名单。实测IPC关系不是连续谱系或停机授权，原采集退出1记录不改写为通过。
+
+启动文字中显示/两wrapper引用仅见原两wrapper及主备PM2 dump，摘要与已审阅源一致；其他运行注册无对应文字匹配。词法列出的109条未解析路径不是109个新增任务，也不能据此宣称全部动态来源已证明。范围审查/private/tmp/holaday-display-scope-review-20260930.md的最终裁定状态以progress为准。生产CLI及原拒绝保持，下一步针对真实组归属与可恢复的显示布局接原闭环，不再重建已通过的进程采集/PM2比較模块。
+
 ### 2026-09-30 本批最终核验与现场显示范围冲突
 
 夹具独立复审发现并修复异常父进程不输出PID时的无期限等待：原Sol仅修改原夹具，3秒握手及精确身份清理，未改产品读取器或拒绝模式。最终hash为2d3599abd46a64a49e116d89f28ac9a0c9b39860d487fc74f7915a1dd61f2bd0。实际Linux三种异常路径18716/96de3a退出0，均按期拒绝且无本例新活进程残留；正常Brave90718/3e8abe退出0，仍为8个替换进程、2个重新归属成员、额外无标签进程导致拒绝，同一恢复前采集保持，跨PM2巡检35208.860517ms稳定。日志/private/tmp/holaday-native-recovery-physical-final-20260930.log。最终夹具规范/质量复审通过、I1关闭；十文件Biome和diff-check994273退出0，十个代码文件hash与最终审查一致。原9个产品/测试文件未变化，不重复下方已通过的Linux1011和ops套件。4b7e2e确认仅原健康MySQL/Redis，无QA容器。

@@ -2,6 +2,22 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 专属显示实现及真实服务夹具（进行中，优先于旧节）
+
+固定启动材料现包含私有命名空间中的一次Xvfb启动及同PID Brave执行；实际双监听inode、精确子进程、完整新树、能力和有限配置比较已接入。启动握手独立复审发现Popen阻塞缺口，改为有界fork后关闭A-I1。取消用例M1补为SIGTERM后2.5秒内且早于普通启动截止；实际48686/bffd58退出0，2/2零跳过（超时4719ms、取消123ms），日志`/private/tmp/holaday-exclusive-display-I1-fault-final-20260930.log`。
+
+修正后产品Linux88611/6c5746退出0，1034/1034；ops11739/8ca3dd退出0，Node120/60/16/1223及Python12，全部零跳过。普通套件不注册专用Linux故障用例；未拿Mac跳过替代Linux。日志`/private/tmp/holaday-exclusive-display-{linux,ops}-final-20260930.log`。尚无本批完整物理成功证明。
+
+真实Brave夹具连续揭示并保留失败证据：并发启动两个Xvfb导致/tmp/.X11-unix创建竞争（已改为先证明独立显示就绪）；辅助进程的全部FD被错误套用initial-client私有性要求。实际55089/1bd1f9退出1、停止前拒绝，确认失败FD1与wrapper同号stdout同inode，对端仅为原私有PM2管理器，本地持有者为原树和已关联handler。正在做精确stdio分类，不允许名称回退、跳过未知对端或把管理器加进停止集合。
+
+原VNC夹具新增真实x11vnc/websockify/WS→RFB模式，尚未通过：36738/674f22退出1且在停止前。诊断显示“监听行数为2”误把x11vnc的IPv4/IPv6同端口当作两个服务，websockify尚未就绪。QA版本x11vnc0.9.17还实际监听额外IPv6；须完整记录和验证所有真实服务端口，不能称为loopback-only、不能更改QA wrapper掩盖行为、不能等同生产版本/网络能力通过。当前由两名原Sol按互斥夹具范围修正，主控串行实际验证。生产、历史业务、密钥、PayPal、CLI及完整两角色恢复前置拒绝不变；完整消费者、真实备份/Mac/非PayPal恢复和最终发布验收仍待完成。
+
+## 2026-09-30 后续现场范围核查（不是新的发布通过项）
+
+实施批次已提交3e75d625，后续无产品改动。公开PM2磁盘源码19661/ce5f8a退出0，stop不接受配置覆盖、在线restart不是无效果设置。显示归属51742/6af126退出1且两轮stable=true：135个完整live进程、11客户端均属于批准两服务，0未匹配/组外client；两注册treekill均布尔true、autorestart=true。拒绝原因是两个PPID1的DISPLAY98进程，不是权限或网络失败。原“单根停止而保留显示”条件候选不成立。
+
+精确元数据56031/d78968及IPC对端73710/7dc44c退出0，确认两个进程是Brave crashpad：主handler的initial-client对端属于headed Brave树，另一handler关联主handler。不把名称/环境字段当归属，不把IPC关系当连续谱系或停止授权；不改写原采集失败回执。原授权包含核实的专属后代，但排除共享Xvfb，不能把实现硬拒绝所有Xvfb等同于用户禁止全部Xvfb。完整来源、停止/恢复方式及原其它放行事实仍需接通；没有停止、付款、数据库、profile、密钥或部署操作。具体摘要/路径/边界见checkpoint最新节与progress。
+
 ## 2026-09-30 本批最终夹具修复与真实现场范围
 
 - 原夹具异常握手I1已修复，最终hash2d3599abd46a64a49e116d89f28ac9a0c9b39860d487fc74f7915a1dd61f2bd0；独立复审PASS无未结发现。18716/96de3a实际Linux三种失败路径均退出0：无PID退出、无PID超时、有PID后超时均及时拒绝且无新活进程遗留。未启动浏览器/profile/显示/PM2。

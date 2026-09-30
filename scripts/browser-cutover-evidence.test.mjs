@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   collectCutoverEvidence,
+  compareCutoverCloudBrowserRecoveryConfig,
   publishCutoverEvidence,
   readCutoverDatabaseScope,
   readCutoverHostSnapshot,
@@ -1764,6 +1765,219 @@ function headedRecoveryConfigFixture() {
     restoreStartedAtMs: 1000,
     observedAtMs: 1002,
   };
+}
+
+test('headed recovery config binds every exclusive display bootstrap byte even with a new self-consistent digest', () => {
+  const f = headedRecoveryConfigFixture();
+  f.launch.args[12] += '\n# unexpected bootstrap';
+  f.recoveredConfig.args = structuredClone(f.launch.args);
+  f.expectedLaunchDigest = createHash('sha256').update(JSON.stringify(f.launch)).digest('hex');
+  assert.throws(
+    () => compareCutoverCloudBrowserRecoveryConfig(f),
+    /CUTOVER_CLOUD_RECOVERY_CONFIG_UNPROVEN/,
+  );
+});
+
+// Explicit isolated Linux QA only; not a production fault hook or default skip.
+if (process.env.HOLADAY_DISPLAY_BOOTSTRAP_FAULT_QA === '1') {
+  for (const mode of ['deadline', 'cancel']) {
+    test(`exclusive display bootstrap actual stalled handoff ${mode}`, async () => {
+      assert.equal(process.platform, 'linux');
+      await fs.access('/.dockerenv');
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const { firstCutoverCloudDisplayBootstrap } = await import('./browser-cutover-evidence.mjs');
+      const harness = String.raw`import ast, os, signal, subprocess, sys, time
+source = sys.stdin.read()
+mode = sys.argv[1]
+class Fault(ast.NodeTransformer):
+    def visit_If(self, node):
+        node = self.generic_visit(node)
+        if len(node.body) == 1 and isinstance(node.body[0], ast.Raise) and '"conflict"' in ast.unparse(node.body[0]).replace("'", '"'):
+            node.test = ast.Constant(False)
+        return node
+    def visit_Lambda(self, node):
+        node = self.generic_visit(node)
+        # Pre-fix Popen fault: stop while its parent awaits the exec error pipe.
+        if "pthread_sigmask" in ast.unparse(node.body):
+            node.body = ast.Subscript(ast.Tuple([ast.parse("signal.raise_signal(signal.SIGSTOP)", mode="eval").body, node.body], ast.Load()), ast.Constant(1), ast.Load())
+        return node
+    def visit_Expr(self, node):
+        node = self.generic_visit(node)
+        call = node.value
+        if isinstance(call, ast.Call) and ast.unparse(call.func) == "os.execv" and call.args and isinstance(call.args[0], ast.Constant) and call.args[0].value == "/usr/bin/Xvfb":
+            return [ast.parse("signal.raise_signal(signal.SIGSTOP)").body[0], node]
+        return node
+code = ast.unparse(ast.fix_missing_locations(Fault().visit(ast.parse(source))))
+sentinel = subprocess.Popen([sys.executable, "-I", "-S", "-c", "import time; time.sleep(30)"])
+parent = subprocess.Popen([sys.executable, "-I", "-S", "-c", code, "/opt/brave.com/brave/brave"],
+    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+owned = None
+def identity(pid):
+    try:
+        with open("/proc/%d/stat" % pid) as f:
+            fields = f.read(16384).rsplit(")", 1)[1].split()
+        return (fields[19], fields[0])
+    except FileNotFoundError:
+        return None
+began = time.monotonic()
+try:
+    while time.monotonic() - began < 3:
+        with open("/proc/%d/task/%d/children" % (parent.pid, parent.pid)) as f:
+            children = f.read(1024).split()
+        if len(children) == 1:
+            pid = int(children[0])
+            current = identity(pid)
+            if current and current[1] == "T":
+                owned = (pid, current[0])
+                break
+        assert parent.poll() is None, "bootstrap exited before fault handoff"
+        time.sleep(0.01)
+    assert owned is not None, "no actual stopped pre-exec child"
+    cancelled_at = None
+    if mode == "cancel":
+        cancelled_at = time.monotonic()
+        parent.send_signal(signal.SIGTERM)
+    out, err = parent.communicate(timeout=8)
+    if cancelled_at is not None:
+        assert time.monotonic() - cancelled_at <= 2.5, "SIGTERM did not promptly cancel handoff"
+        assert time.monotonic() - began < 4.5, "ordinary startup deadline cannot satisfy cancellation"
+    assert parent.returncode != 0 and b"CLOUD_DISPLAY_BOOTSTRAP_UNPROVEN" in err, (parent.returncode, err)
+    assert time.monotonic() - began < 8, "creation/cleanup exceeded bound"
+    assert identity(owned[0]) is None, "owned child not reaped before failure return"
+    assert sentinel.poll() is None, "unrelated process was affected"
+    print("EXCLUSIVE_DISPLAY_HANDOFF_PASS", mode)
+finally:
+    # Failed regression cleanup cannot turn an assertion into a passing result.
+    if parent.poll() is None:
+        parent.kill()
+    parent.wait(timeout=2)
+    if owned and (current := identity(owned[0])) and current[0] == owned[1]:
+        os.kill(owned[0], signal.SIGKILL)
+    sentinel.kill()
+    sentinel.wait(timeout=2)
+`;
+      const run = promisify(execFile);
+      // execFile has no input option: write only fixed public bootstrap bytes.
+      const result = run('/usr/bin/python3', ['-I', '-S', '-c', harness, mode], {
+        timeout: 15000,
+        maxBuffer: 65536,
+      });
+      const child = result.child;
+      child.stdin.end(firstCutoverCloudDisplayBootstrap);
+      const { stdout } = await result;
+      assert.equal(stdout.trim(), `EXCLUSIVE_DISPLAY_HANDOFF_PASS ${mode}`);
+    });
+  }
+}
+
+function displayListenerFixture() {
+  const identity = { pid: 43, start: '430', mountNamespace: 'mnt:[2]' };
+  const fields = Array(20).fill('0');
+  fields[0] = 'S';
+  fields[1] = '40';
+  fields[19] = '430';
+  const files = new Map([
+    ['/proc/43/stat', `43 (Xvfb) ${fields.join(' ')}`],
+    [
+      '/proc/net/unix',
+      [
+        'Num       RefCount Protocol Flags    Type St Inode Path',
+        '0000: 00000002 00000000 00010000 0001 01 501 /tmp/.X11-unix/X98',
+        '0000: 00000002 00000000 00010000 0001 01 502 @/tmp/.X11-unix/X98',
+        '0000: 00000003 00000000 00000000 0001 03 601 /tmp/.X11-unix/X98',
+        '0000: 00000003 00000000 00000000 0001 03 602 @/tmp/.X11-unix/X98',
+        '',
+      ].join('\n'),
+    ],
+  ]);
+  const links = new Map([
+    ['/proc/43/ns/mnt', 'mnt:[2]'],
+    ['/proc/43/fd/3', 'socket:[501]'],
+    ['/proc/43/fd/4', 'socket:[502]'],
+  ]);
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    now: () => 1000,
+    open: async (path) => {
+      assert.ok(files.has(path), path);
+      const data = Buffer.from(files.get(path));
+      return {
+        read: async (buffer, offset, length, position) => ({
+          bytesRead: data.copy(buffer, offset, position, position + length),
+        }),
+        close: async () => {},
+      };
+    },
+    readdir: async () => ['3', '4'],
+    readlink: async (path) => {
+      assert.ok(links.has(path), path);
+      return links.get(path);
+    },
+  };
+  return { identity, files, links, io };
+}
+
+test('exclusive display listener reader proves both exact X98 listen inodes in owned child fds', async () => {
+  const { readFirstCutoverCloudDisplayListeners: read } = await import(
+    './browser-cutover-evidence.mjs'
+  );
+  const f = displayListenerFixture();
+  assert.deepEqual(await read(f.identity, f.io), [
+    { path: '/tmp/.X11-unix/X98', inode: '501' },
+    { path: '@/tmp/.X11-unix/X98', inode: '502' },
+  ]);
+});
+
+for (const mode of [
+  'foreign-fd',
+  'missing',
+  'extra',
+  'not-listen',
+  'wrong-type',
+  'same-inode',
+  'start-drift',
+  'namespace-drift',
+  'table-budget',
+  'fd-budget',
+  'time',
+  'permission',
+]) {
+  test(`exclusive display listener reader refuses ${mode}`, async () => {
+    const { readFirstCutoverCloudDisplayListeners: read } = await import(
+      './browser-cutover-evidence.mjs'
+    );
+    const f = displayListenerFixture();
+    let table = f.files.get('/proc/net/unix');
+    if (mode === 'foreign-fd') f.links.set('/proc/43/fd/4', 'socket:[999]');
+    if (mode === 'missing')
+      table = table
+        .split('\n')
+        .filter((l) => !l.includes('@'))
+        .join('\n');
+    if (mode === 'extra') table += `${table.split('\n')[1]}\n`;
+    if (mode === 'not-listen') table = table.replace('00010000', '00000000');
+    if (mode === 'wrong-type') table = table.replace('0001 01', '0002 01');
+    if (mode === 'same-inode') table = table.replace('502', '501');
+    if (mode === 'start-drift') f.identity.start = '431';
+    if (mode === 'namespace-drift') f.links.set('/proc/43/ns/mnt', 'mnt:[3]');
+    if (mode === 'table-budget') table += 'x'.repeat(1048577);
+    if (mode === 'fd-budget') f.io.readdir = async () => Array(1025).fill('3');
+    if (mode === 'time') {
+      let time = 0;
+      f.io.now = () => {
+        time += 5001;
+        return time;
+      };
+    }
+    if (mode === 'permission')
+      f.io.open = async () => {
+        throw Error('denied');
+      };
+    f.files.set('/proc/net/unix', table);
+    await assert.rejects(read(f.identity, f.io), /^Error: CUTOVER_CLOUD_DISPLAY_UNPROVEN$/);
+  });
 }
 
 function vncRecoveryConfigFixture() {

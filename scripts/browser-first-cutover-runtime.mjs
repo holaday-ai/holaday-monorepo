@@ -8,6 +8,8 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   cutoverLegacyInterruptionRisk,
   cutoverRegistrationConfigDigest,
+  firstCutoverCloudDisplayBootstrap,
+  readFirstCutoverCloudDisplayListeners,
   readFirstCutoverCloudRecoveryCensus,
   validateLegacyWorkBoundary as validateWork,
 } from './browser-cutover-evidence.mjs';
@@ -570,6 +572,11 @@ export function firstCutoverCloudBrowserRecoveryLaunch(input) {
       '/usr/bin/mount --bind "$1" /etc/brave/policies/managed; /usr/bin/mount -o remount,bind,ro /etc/brave/policies/managed; shift; exec /usr/bin/setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs "$@"',
       'holaday-private-browser-policy',
       `/var/lib/holaday-deploy/maintenance/${input.attempt}/cloud-browser-policy`,
+      '/usr/bin/python3',
+      '-I',
+      '-S',
+      '-c',
+      firstCutoverCloudDisplayBootstrap,
       '/opt/brave.com/brave/brave',
       '--no-sandbox',
       '--disable-dev-shm-usage',
@@ -961,9 +968,44 @@ export async function readFirstCutoverCloudRecovery(input, overrides = {}) {
     const current = structuredClone(await readCensus());
     census(current);
     const runtime = await readFirstCutoverCloudBrowserRecovery({ attempt, pmId }, io);
+    const displays = current.processes.filter(
+      (p) => p.exe === '/usr/bin/Xvfb' && p.mountNamespace === runtime.mountNamespace,
+    );
+    if (displays.length !== 1) reject();
+    const display = displays[0];
+    if (
+      display.ppid !== runtime.pid ||
+      display.argvDigest !==
+        sha(
+          `${['/usr/bin/Xvfb', ':98', '-screen', '0', '1280x800x24', '-nolisten', 'tcp'].join('\0')}\0`,
+        )
+    )
+      reject();
+    const displayIdentity = {
+      pid: display.pid,
+      start: display.start,
+      mountNamespace: display.mountNamespace,
+    };
+    const readDisplay =
+      io.readDisplayListeners ??
+      ((identity) => readFirstCutoverCloudDisplayListeners(identity, io));
+    const listeners = structuredClone(await readDisplay(displayIdentity));
+    if (
+      !Array.isArray(listeners) ||
+      listeners.length !== 2 ||
+      listeners.some(
+        (row, i) =>
+          !keys(row, 'inode,path') ||
+          row.path !== ['/tmp/.X11-unix/X98', '@/tmp/.X11-unix/X98'][i] ||
+          !/^[1-9][0-9]{0,19}$/.test(row.inode),
+      ) ||
+      listeners[0].inode === listeners[1].inode
+    )
+      reject();
     const after = structuredClone(await readCensus());
     census(after);
     const repeated = await readFirstCutoverCloudBrowserRecovery({ attempt, pmId }, io);
+    if (!isDeepStrictEqual(listeners, await readDisplay(displayIdentity))) reject();
     const stable = ({ observedAtMs: _time, ...value }) => value;
     const now = io.now();
     if (
@@ -1014,9 +1056,11 @@ export async function readFirstCutoverCloudRecovery(input, overrides = {}) {
         beforeCensus.processes.some((old) => old.pid === p.pid) ||
         p.mountNamespace !== root.mountNamespace ||
         p.cgroup !== root.cgroup ||
-        !['/opt/brave.com/brave/brave', '/opt/brave.com/brave/chrome_crashpad_handler'].includes(
-          p.exe,
-        ) ||
+        ![
+          '/opt/brave.com/brave/brave',
+          '/opt/brave.com/brave/chrome_crashpad_handler',
+          '/usr/bin/Xvfb',
+        ].includes(p.exe) ||
         !isDeepStrictEqual(p.uids, [0, 0, 0, 0]) ||
         p.state !== 'live' ||
         p.noNewPrivs !== 1 ||
@@ -1048,6 +1092,7 @@ export async function readFirstCutoverCloudRecovery(input, overrides = {}) {
       beforeCensusDigest: sha(beforeCensus),
       censusDigest: sha(after),
       processes,
+      display: { pid: display.pid, start: display.start, listeners },
       policyDigest: runtime.policyDigest,
       mountNamespace: runtime.mountNamespace,
     };

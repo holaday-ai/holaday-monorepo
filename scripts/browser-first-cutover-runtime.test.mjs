@@ -1478,6 +1478,16 @@ function cloudNativeRecoveryFixture() {
       root,
       process(41, 40, '/opt/brave.com/brave/brave', 'mnt:[2]'),
       process(42, 1, '/opt/brave.com/brave/chrome_crashpad_handler', 'mnt:[2]'),
+      {
+        ...process(43, 40, '/usr/bin/Xvfb', 'mnt:[2]'),
+        argvDigest: createHash('sha256')
+          .update(
+            JSON.stringify(
+              `${['/usr/bin/Xvfb', ':98', '-screen', '0', '1280x800x24', '-nolisten', 'tcp'].join('\0')}\0`,
+            ),
+          )
+          .digest('hex'),
+      },
     ].sort((a, b) => a.pid - b.pid),
   };
   const input = {
@@ -1491,7 +1501,14 @@ function cloudNativeRecoveryFixture() {
     input,
     before,
     current,
-    io: { ...f.io, readCensus: async () => structuredClone(current) },
+    io: {
+      ...f.io,
+      readCensus: async () => structuredClone(current),
+      readDisplayListeners: async () => [
+        { path: '/tmp/.X11-unix/X98', inode: '501' },
+        { path: '@/tmp/.X11-unix/X98', inode: '502' },
+      ],
+    },
   };
 }
 
@@ -1503,7 +1520,7 @@ test('native recovery proof accounts for rooted and detached private-namespace m
   assert.equal(proof.purpose, 'cloud-recovery-native-observation');
   assert.deepEqual(
     proof.processes.map((p) => p.pid),
-    [40, 41, 42],
+    [40, 41, 42, 43],
   );
   assert.equal(
     proof.beforeCensusDigest,
@@ -1524,6 +1541,7 @@ test('native recovery proof accounts for rooted and detached private-namespace m
       'bootId',
       'censusDigest',
       'configDigest',
+      'display',
       'hostname',
       'launchDigest',
       'mountNamespace',
@@ -1539,6 +1557,49 @@ test('native recovery proof accounts for rooted and detached private-namespace m
       'start',
     ].sort(),
   );
+});
+
+for (const mode of [
+  'missing',
+  'extra',
+  'foreign-parent',
+  'argv',
+  'namespace',
+  'missing-listener',
+  'duplicate-listener',
+  'listener-drift',
+]) {
+  test(`native recovery exclusive display refuses ${mode}`, async () => {
+    const f = cloudNativeRecoveryFixture();
+    const display = f.current.processes.find((p) => p.pid === 43);
+    if (mode === 'missing') f.current.processes = f.current.processes.filter((p) => p.pid !== 43);
+    if (mode === 'extra') f.current.processes.push({ ...display, pid: 44 });
+    if (mode === 'foreign-parent') display.ppid = 1;
+    if (mode === 'argv') display.argvDigest = 'b'.repeat(64);
+    if (mode === 'namespace') display.mountNamespace = 'mnt:[1]';
+    const read = f.io.readDisplayListeners;
+    let calls = 0;
+    f.io.readDisplayListeners = async () => {
+      const rows = await read();
+      if (mode === 'missing-listener') rows.pop();
+      if (mode === 'duplicate-listener') rows[1] = { ...rows[0] };
+      if (mode === 'listener-drift' && ++calls === 2) rows[0].inode = '503';
+      return rows;
+    };
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudRecovery(f.input, f.io),
+      /CUTOVER_CLOUD_RECOVERY_UNPROVEN/,
+    );
+  });
+}
+
+test('exclusive display launch uses isolated fixed bootstrap before same-PID Brave exec', () => {
+  const launch = firstRuntime.firstCutoverCloudBrowserRecoveryLaunch({
+    attempt: '12345678-1234-4234-8234-123456789abc',
+  });
+  assert.deepEqual(launch.args.slice(8, 12), ['/usr/bin/python3', '-I', '-S', '-c']);
+  assert.equal(typeof launch.args[12], 'string');
+  assert.equal(launch.args[13], '/opt/brave.com/brave/brave');
 });
 
 for (const mode of [
