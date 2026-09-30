@@ -130,7 +130,7 @@ async function fixture(t, extraInventory = {}, interrupted = false) {
     readCoordinatorIdentity: async () => receipt('vultr', 'coordinator', 100),
     readPersistedWork: async () => ({
       observedAtMs: state.now,
-      unsettled: [],
+      unsettled: structuredClone(state.persistedUnsettled ?? []),
       ...(interrupted ? { pendingReplay: 0, replaySourcesDigest: '9'.repeat(64) } : {}),
     }),
     readPair: async () => ({ synthetic: true }),
@@ -758,6 +758,94 @@ async function candidateFixture(t, customize = async () => {}, extraInventory = 
       mode = value;
     },
   };
+}
+
+async function cloudRecoverySiteFixture(t) {
+  const f = await candidateFixture(t, bindCloudRecoveryScope);
+  const persist = f.journal.persist;
+  f.journal.persist = async (phase, detail) => {
+    await persist(phase, detail);
+    if (phase === 'producers_stopped')
+      for (const service of f.scope.cloudMaintenanceScope)
+        for (const event of ['cloud-stop-intent', 'cloud-stopped'])
+          await f.journal.recordCloudMaintenanceEvent({
+            ...service,
+            attempt: f.binding.attempt,
+            inventoryDigest: f.binding.inventoryDigest,
+            host: 'vultr',
+            phase: event,
+          });
+  };
+  await f.advance();
+  f.journal.persist = persist;
+  await persist('migration_started', { candidate: f.binding.candidate });
+  await f.journal.bindBootstrapSeed('8'.repeat(32));
+  for (const phase of ['candidate_started', 'verified'])
+    await persist(phase, { candidate: f.binding.candidate, identity: f.identity });
+  return f;
+}
+
+test('site cloud recovery supplies only nonrecursive work/persisted/fence leaves to the original observer once', async (t) => {
+  const f = await cloudRecoverySiteFixture(t);
+  assert.equal(typeof f.site.lifecycle.restoreCloudServices, 'function');
+  for (const name of ['read', 'readWithCandidate', 'readFenceProgress'])
+    f.observer()[name] = async () => {
+      throw Error('ordinary observer recursion');
+    };
+  let calls = 0;
+  f.observer().restoreCloudServices = async (input, operations) => {
+    calls++;
+    assert.deepEqual(input, { identity: f.identity, maintenanceEndsAtMs: 9000 });
+    assert.deepEqual(Object.keys(operations), ['readRecoveryFacts']);
+    const facts = await operations.readRecoveryFacts();
+    assert.deepEqual(Object.keys(facts).sort(), ['fence', 'persisted', 'work']);
+    assert.equal(facts.fence.stage, 'all-writers');
+    assert.equal(facts.work.unsettledWork, 0);
+    assert.deepEqual(facts.persisted.unsettled, []);
+    assert.equal((await f.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 4);
+    // Synthetic observer boundary only; no claim of native restoration/ACK.
+  };
+  await f.site.lifecycle.restoreCloudServices(f.context, f.identity);
+  await assert.rejects(f.site.lifecycle.restoreCloudServices(f.context, f.identity), /UNPROVEN/);
+  assert.equal(calls, 1);
+  assert.equal(f.events.includes('restore'), false);
+  await f.site.lifecycle.detach(f.context);
+});
+
+for (const fault of [
+  'missing-controller',
+  'boolean-result',
+  'uncertain',
+  'work',
+  'persisted',
+  'fence',
+  'expired',
+  'identity',
+]) {
+  test(`site cloud recovery refuses ${fault} without recursive fallback or retry`, async (t) => {
+    const f = await cloudRecoverySiteFixture(t);
+    assert.equal(typeof f.site.lifecycle.restoreCloudServices, 'function');
+    let calls = 0;
+    if (fault !== 'missing-controller')
+      f.observer().restoreCloudServices = async (_input, operations) => {
+        calls++;
+        if (fault === 'boolean-result') return true;
+        if (fault === 'uncertain') throw Error('private uncertain effect');
+        await operations.readRecoveryFacts();
+      };
+    if (fault === 'work') f.state.busy = 1;
+    if (fault === 'persisted') f.state.persistedUnsettled = [{}];
+    if (fault === 'fence') f.state.producers = 1;
+    if (fault === 'expired') f.state.now = 9000;
+    const id = fault === 'identity' ? { ...f.identity, bootId: '0'.repeat(32) } : f.identity;
+    await assert.rejects(f.site.lifecycle.restoreCloudServices(f.context, id), /UNPROVEN/);
+    const attempted = calls;
+    await assert.rejects(f.site.lifecycle.restoreCloudServices(f.context, id), /UNPROVEN/);
+    assert.equal(calls, attempted);
+    assert.equal((await f.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 4);
+    assert.equal(f.events.includes('restore'), false);
+    await f.site.lifecycle.detach(f.context);
+  });
 }
 
 test('readiness cannot omit its approved independent database writer source', async (t) => {

@@ -1438,6 +1438,196 @@ function cloudRecoveryObservationFixture() {
   };
   return { input, io, manager, files, links, source, privatePolicy, policy };
 }
+function cloudNativeRecoveryFixture() {
+  const f = cloudRecoveryObservationFixture();
+  const caps = { CapInh: '0', CapPrm: '0', CapEff: '0', CapBnd: '0', CapAmb: '0' };
+  const process = (pid, ppid, exe, namespace = 'mnt:[1]') => ({
+    pid,
+    ppid,
+    start: String(pid * 10),
+    uids: [0, 0, 0, 0],
+    exe,
+    cwd: '/',
+    argvDigest: 'a'.repeat(64),
+    cgroup: '0::/shared\n',
+    mountNamespace: namespace,
+    state: 'live',
+    noNewPrivs: 1,
+    capabilities: { ...caps },
+  });
+  const before = {
+    hostname: 'native-qa',
+    bootId: '12345678-1234-4234-8234-123456789def',
+    observedAtMs: 900,
+    processes: [
+      process(1, 0, '/sbin/init'),
+      process(20, 1, '/opt/node22/bin/node'),
+      process(60, 1, '/bin/sleep'),
+    ],
+  };
+  const root = process(40, 20, '/opt/brave.com/brave/brave', 'mnt:[2]');
+  root.start = '1234';
+  root.argvDigest = createHash('sha256')
+    .update(JSON.stringify(f.files.get('/proc/40/cmdline')))
+    .digest('hex');
+  const current = {
+    ...structuredClone(before),
+    observedAtMs: 1000,
+    processes: [
+      ...structuredClone(before.processes),
+      root,
+      process(41, 40, '/opt/brave.com/brave/brave', 'mnt:[2]'),
+      process(42, 1, '/opt/brave.com/brave/chrome_crashpad_handler', 'mnt:[2]'),
+    ].sort((a, b) => a.pid - b.pid),
+  };
+  const input = {
+    ...f.input,
+    name: 'holaday-chromium-headed',
+    beforeCensus: before,
+    restoreStartedAtMs: 950,
+  };
+  return {
+    ...f,
+    input,
+    before,
+    current,
+    io: { ...f.io, readCensus: async () => structuredClone(current) },
+  };
+}
+
+test('native recovery proof accounts for rooted and detached private-namespace members against the pre-effect census', async () => {
+  assert.equal(typeof firstRuntime.readFirstCutoverCloudRecovery, 'function');
+  const f = cloudNativeRecoveryFixture();
+  const original = structuredClone(f.input);
+  const proof = await firstRuntime.readFirstCutoverCloudRecovery(f.input, f.io);
+  assert.equal(proof.purpose, 'cloud-recovery-native-observation');
+  assert.deepEqual(
+    proof.processes.map((p) => p.pid),
+    [40, 41, 42],
+  );
+  assert.equal(
+    proof.beforeCensusDigest,
+    createHash('sha256').update(JSON.stringify(f.before)).digest('hex'),
+  );
+  assert.equal(
+    proof.censusDigest,
+    createHash('sha256').update(JSON.stringify(f.current)).digest('hex'),
+  );
+  assert.equal(proof.configDigest, cutoverRegistrationConfigDigest(f.manager.pm2_env));
+  assert.equal(proof.mountNamespace, 'mnt:[2]');
+  assert.deepEqual(f.input, original);
+  assert.equal(JSON.stringify(proof).includes('never-exported'), false);
+  assert.deepEqual(
+    Object.keys(proof).sort(),
+    [
+      'beforeCensusDigest',
+      'bootId',
+      'censusDigest',
+      'configDigest',
+      'hostname',
+      'launchDigest',
+      'mountNamespace',
+      'name',
+      'observedAtMs',
+      'pid',
+      'pmId',
+      'policyDigest',
+      'ppid',
+      'processes',
+      'purpose',
+      'restartCount',
+      'start',
+    ].sort(),
+  );
+});
+
+for (const mode of [
+  'outside-birth',
+  'outside-exit',
+  'outside-reparent',
+  'outside-exec',
+  'pid-reuse',
+  'preexisting-namespace',
+  'escaped-child',
+  'unknown-member',
+  'deleted-exe',
+  'capability',
+  'no-new-privileges',
+  'uid',
+  'root-start',
+  'root-parent',
+  'boot',
+  'hostname',
+  'future-before',
+  'stale-before',
+  'stale-current',
+  'census-race',
+  'root-race',
+  'extra-input',
+  'duplicate-pid',
+  'missing-census',
+]) {
+  test(`native recovery proof refuses ${mode}`, async () => {
+    assert.equal(typeof firstRuntime.readFirstCutoverCloudRecovery, 'function');
+    const f = cloudNativeRecoveryFixture();
+    const root = f.current.processes.find((p) => p.pid === 40);
+    const child = f.current.processes.find((p) => p.pid === 41);
+    const outside = f.current.processes.find((p) => p.pid === 60);
+    if (mode === 'outside-birth') f.current.processes.push({ ...outside, pid: 61 });
+    if (mode === 'outside-exit')
+      f.current.processes = f.current.processes.filter((p) => p.pid !== 60);
+    if (mode === 'outside-reparent') outside.ppid = 20;
+    if (mode === 'outside-exec') outside.argvDigest = 'b'.repeat(64);
+    if (mode === 'pid-reuse') f.before.processes.push({ ...root, start: 'old' });
+    if (mode === 'preexisting-namespace') f.before.processes[0].mountNamespace = 'mnt:[2]';
+    if (mode === 'escaped-child') child.mountNamespace = 'mnt:[3]';
+    if (mode === 'unknown-member') child.exe = '/bin/sh';
+    if (mode === 'deleted-exe') child.exe += ' (deleted)';
+    if (mode === 'capability') child.capabilities.CapEff = '1';
+    if (mode === 'no-new-privileges') child.noNewPrivs = 0;
+    if (mode === 'uid') child.uids = [998, 998, 998, 998];
+    if (mode === 'root-start') root.start = '1235';
+    if (mode === 'root-parent') root.ppid = 1;
+    if (mode === 'boot') f.current.bootId = '22222222-2222-4222-8222-222222222222';
+    if (mode === 'hostname') f.current.hostname = 'other';
+    if (mode === 'future-before') f.before.observedAtMs = 951;
+    if (mode === 'stale-before') {
+      f.io.now = () => 62000;
+      f.current.observedAtMs = 62000;
+    }
+    if (mode === 'stale-current') f.current.observedAtMs = 800;
+    if (mode === 'extra-input') f.input.approved = true;
+    if (mode === 'duplicate-pid') f.current.processes.push({ ...root });
+    if (mode === 'missing-census') Reflect.deleteProperty(f.input, 'beforeCensus');
+    let reads = 0;
+    f.io.readCensus = async () => {
+      if (++reads === 2) {
+        if (mode === 'census-race') outside.start = 'changed';
+        if (mode === 'root-race') f.manager.pm2_env.PRIVATE_CHANGED = 'secret';
+      }
+      return structuredClone(f.current);
+    };
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudRecovery(f.input, f.io),
+      /^Error: CUTOVER_CLOUD_RECOVERY_UNPROVEN$/,
+    );
+  });
+}
+
+test('native recovery proof refuses VNC without a native source capability verifier, even with an accepting boolean hook', async () => {
+  assert.equal(typeof firstRuntime.readFirstCutoverCloudRecovery, 'function');
+  const f = cloudNativeRecoveryFixture();
+  f.input.name = 'holaday-vnc';
+  f.io.verifyVncSource = async () => true;
+  f.io.readCensus = async () => {
+    assert.fail('missing prerequisite must be discovered before observation');
+  };
+  await assert.rejects(
+    firstRuntime.readFirstCutoverCloudRecovery(f.input, f.io),
+    /^Error: CUTOVER_CLOUD_VNC_NATIVE_SOURCE_UNPROVEN$/,
+  );
+});
+
 test('cloud recovery observation reads actual fixed manager, process and private policy without returning configuration contents', async () => {
   const f = cloudRecoveryObservationFixture();
   assert.equal(typeof firstRuntime.readFirstCutoverCloudBrowserRecovery, 'function');

@@ -2,6 +2,26 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 本批最终夹具修复与真实现场范围
+
+- 原夹具异常握手I1已修复，最终hash2d3599abd46a64a49e116d89f28ac9a0c9b39860d487fc74f7915a1dd61f2bd0；独立复审PASS无未结发现。18716/96de3a实际Linux三种失败路径均退出0：无PID退出、无PID超时、有PID后超时均及时拒绝且无新活进程遗留。未启动浏览器/profile/显示/PM2。
+- 同一最终hash的正常物理90718/3e8abe退出0，日志/private/tmp/holaday-native-recovery-physical-final-20260930.log：8个替换进程含2个重新归属成员，真实额外detached进程拒绝、原恢复前采集保持；PM2巡检跨35208.860517ms，原profile/策略/不重放/无关显示断言通过。不是真实VNC能力、业务恢复或恢复ACK/open。
+- 最终十文件Biome及diff-check994273退出0；九个产品/测试hash保持下方Linux1011和ops最终验证版本。4b7e2e确认隔离容器均退出，原MySQL/Redis健康。
+- 新鲜只读22887/e8e030退出0，记录/private/tmp/holaday-display-parent-check-20260930.json：现场Xvfb1229/start1807仍直接挂在headed wrapper1217下；:98两监听及11个已建立socket归该server。仅server归属不是所有客户端独占证明。两次较早窄采集未通过角色识别，修正临时采集的同角色祖先根选择后才取得证据；无远端写入。
+- 此现场布局与原整树停止/Xvfb保留门槛冲突。不能用QA独立显示布局通过替代，更不能删拒绝分支。当前全成功恢复消费者、真实两角色前置与原后续发布验收仍未完成。
+
+## 2026-09-30 原完整进程采集与恢复前拒绝边界
+
+从e896989b继续：原完整采集、headed新树诊断和原beforeOpen/site/observer恢复前检查接通。当前真实两角色来源/显示/能力前置尚未实现，明确在任何恢复效果前拒绝；完整成功消费者、比较器/日志5–8/ACK6/8仍未完成。保留原v2风险语义、私有停后配置、不递归、不重试和原>4事件拒绝；没有上传PID白名单或成功布尔值。
+
+- Linux首跑23212/486e34退出1：1010通过、1失败、零跳过。原因是原inventory.test公开方法清单漏列restoreCloudServices；仅补一项期望后，实施者完整inventory/host/site440/440通过，独立B-I1复审关闭，私有getter及零效果检查未弱化。首跑后的ops未运行。
+- 最终97200/186599串行退出0：实际Linux1011/1011；ops Node120/60/16/1209及Python12，均零跳过。日志/private/tmp/holaday-native-recovery-{linux,ops}-final-20260930.log。原Node24/age和隔离Node22环境保持。
+- 完整采集实际Linux db7cf6退出0：root userspace、脱离父进程的无标签sleep和普通子进程均在结果中，未输出原argv/env。主控前一临时探针的无关错误二进制断言导致OOM/137（Docker事件77d3d2确认），去掉该断言后相同256MiB限额通过，不是产品修复或首跑通过。3c4010未获沙盒Docker访问、未执行测试；后续正常审批的实际运行如上。
+- 原Brave夹具67243/5ae39c退出0：恢复前完整采集在实际停止后、单次恢复前取得；默认完整采集/PM2/root/策略读取器核验实际8个替换进程，其中2个为重新归属父进程的成员。注入本例detached进程时拒绝、精确清理后沿用原采集重新验证通过；没有重采恢复后基线。原PM2巡检30秒跨35178.851433ms稳定，原profile/无关服务/不重放断言通过。日志/private/tmp/holaday-native-recovery-physical-20260930.log；物理脚本hash1086c6f5aacb7b6a7794bfd63d5abe6d7be743626442df096ddc1d5587489dd8。VNC/业务/备份前置仍合成，绝非两角色恢复或发布通过。
+- 原A/B子集独立审查通过，报告/private/tmp/holaday-native-recovery-{runtime,observer}-review-20260930.md；夹具独立复审与最终提交信息在progress记录。完整分支审查未完成。
+
+另外，既有通道两次只读采集退出0：旧VNC Python映射为deleted，字节不同于当前磁盘Python3.10.12-1~22.04.18；固定wrapper与x11vnc/websockify包/入口模块摘要已记录。该事实要求恢复前绑定当前磁盘来源，不能用旧运行进程代替；不是全动态导入闭包或实际恢复证明。未停止/恢复生产服务，未访问PayPal、改业务、复制密钥、push/PR/merge/deploy或开启CLI。
+
 ## 2026-09-30 VNC有限配置核对、原site绑定与同ID物理恢复
 
 从153eb093完成五文件并行批次。新增VNC比较器复用私有有限PM2变换，完整保留原配置/未知字段/历史计数，核验实际内存阈值删除及嵌套覆盖拒绝；原site把既有index0 recoveryDigest绑定到本attempt的固定VNC材料，无新配置字段。A原66失败RED→357/357完整两文件GREEN，另有嵌套对象覆盖7失败RED→修补GREEN；最终统一计数以下方串行结果为准，不重复累加局部计数。

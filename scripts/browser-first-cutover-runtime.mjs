@@ -8,8 +8,10 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   cutoverLegacyInterruptionRisk,
   cutoverRegistrationConfigDigest,
+  readFirstCutoverCloudRecoveryCensus,
   validateLegacyWorkBoundary as validateWork,
 } from './browser-cutover-evidence.mjs';
+export { readFirstCutoverCloudRecoveryCensus };
 
 const hash = (x) => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
 
@@ -849,6 +851,205 @@ export async function readFirstCutoverCloudBrowserRecovery(input, overrides = {}
       policyDigest: before.policyDigest,
       launchDigest: sha(JSON.stringify(launch)),
       observedAtMs,
+    };
+  } catch {
+    reject();
+  }
+}
+
+/** Post-effect native identity observation for the ORIGINAL observer. Its
+ * private pre-dispatch census is not an approval, and this reader is NOT a
+ * source/display/work preflight. The caller must independently bind the
+ * retained stopped configuration through the finite recovery comparator.
+ * No production restore may dispatch without those native prerequisites.
+ */
+export async function readFirstCutoverCloudRecovery(input, overrides = {}) {
+  // Current-disk Python differs from the historical deleted executable. Public
+  // package/module metadata alone does not verify its loaded dependency closure,
+  // actual display ownership or VNC service capability. Never accept a boolean
+  // callback, substitute process shape, or old-running==current-disk assumption.
+  if (input?.name === 'holaday-vnc') throw new Error('CUTOVER_CLOUD_VNC_NATIVE_SOURCE_UNPROVEN');
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+  };
+  try {
+    const copy = structuredClone(input);
+    const { attempt, name, pmId, beforeCensus, restoreStartedAtMs } = copy;
+    if (
+      !isDeepStrictEqual(copy, JSON.parse(JSON.stringify(copy))) ||
+      Object.keys(copy).sort().join(',') !== 'attempt,beforeCensus,name,pmId,restoreStartedAtMs' ||
+      name !== 'holaday-chromium-headed' ||
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      !Number.isSafeInteger(pmId) ||
+      pmId < 0 ||
+      !Number.isSafeInteger(restoreStartedAtMs) ||
+      restoreStartedAtMs < 0
+    )
+      reject();
+    const launch = firstCutoverCloudBrowserRecoveryLaunch({ attempt });
+    const sha = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    const keys = (value, expected) =>
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      Object.keys(value).sort().join(',') === expected;
+    const census = (value) => {
+      if (
+        !keys(value, 'bootId,hostname,observedAtMs,processes') ||
+        !/^[a-zA-Z0-9.-]{1,128}$/.test(value.hostname) ||
+        !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value.bootId) ||
+        !Number.isSafeInteger(value.observedAtMs) ||
+        value.observedAtMs < 0 ||
+        !Array.isArray(value.processes) ||
+        !value.processes.length ||
+        value.processes.length > 16384
+      )
+        reject();
+      let previous = 0;
+      for (const p of value.processes) {
+        if (
+          !keys(
+            p,
+            'argvDigest,capabilities,cgroup,cwd,exe,mountNamespace,noNewPrivs,pid,ppid,start,state,uids',
+          ) ||
+          !Number.isSafeInteger(p.pid) ||
+          p.pid <= previous ||
+          !Number.isSafeInteger(p.ppid) ||
+          p.ppid < 0 ||
+          p.ppid === p.pid ||
+          !/^\d+$/.test(p.start) ||
+          !hash(p.argvDigest) ||
+          !Array.isArray(p.uids) ||
+          p.uids.length !== 4 ||
+          p.uids.some((uid) => !Number.isSafeInteger(uid) || uid < 0) ||
+          ![p.cwd, p.exe].every(
+            (path) => typeof path === 'string' && path.startsWith('/') && path.length <= 4096,
+          ) ||
+          typeof p.cgroup !== 'string' ||
+          !p.cgroup ||
+          p.cgroup.length > 262144 ||
+          !/^mnt:\[\d+\]$/.test(p.mountNamespace) ||
+          !['live', 'stopped'].includes(p.state) ||
+          ![0, 1].includes(p.noNewPrivs) ||
+          !keys(p.capabilities, 'CapAmb,CapBnd,CapEff,CapInh,CapPrm') ||
+          Object.values(p.capabilities).some(
+            (cap) => typeof cap !== 'string' || !/^[0-9a-f]{1,16}$/.test(cap),
+          )
+        )
+          reject();
+        previous = p.pid;
+      }
+    };
+    census(beforeCensus);
+    const began = io.now();
+    if (
+      !Number.isSafeInteger(began) ||
+      beforeCensus.observedAtMs > restoreStartedAtMs ||
+      restoreStartedAtMs > began ||
+      began - beforeCensus.observedAtMs > 60000
+    )
+      reject();
+    const readCensus = io.readCensus ?? (() => readFirstCutoverCloudRecoveryCensus(io));
+    const current = structuredClone(await readCensus());
+    census(current);
+    const runtime = await readFirstCutoverCloudBrowserRecovery({ attempt, pmId }, io);
+    const after = structuredClone(await readCensus());
+    census(after);
+    const repeated = await readFirstCutoverCloudBrowserRecovery({ attempt, pmId }, io);
+    const stable = ({ observedAtMs: _time, ...value }) => value;
+    const now = io.now();
+    if (
+      !Number.isSafeInteger(now) ||
+      now < began ||
+      now - beforeCensus.observedAtMs > 60000 ||
+      current.observedAtMs < restoreStartedAtMs ||
+      current.observedAtMs > runtime.observedAtMs ||
+      after.observedAtMs < runtime.observedAtMs ||
+      after.observedAtMs > repeated.observedAtMs ||
+      repeated.observedAtMs > now ||
+      !isDeepStrictEqual(stable(current), stable(after)) ||
+      !isDeepStrictEqual(stable(runtime), stable(repeated)) ||
+      current.bootId !== beforeCensus.bootId ||
+      runtime.bootId !== current.bootId ||
+      current.hostname !== beforeCensus.hostname
+    )
+      reject();
+    const root = current.processes.find((p) => p.pid === runtime.pid);
+    if (
+      !root ||
+      root.start !== runtime.start ||
+      root.ppid !== runtime.ppid ||
+      root.mountNamespace !== runtime.mountNamespace ||
+      root.exe !== '/opt/brave.com/brave/brave' ||
+      root.argvDigest !==
+        sha(
+          `${launch.args.slice(launch.args.indexOf('/opt/brave.com/brave/brave')).join('\0')}\0`,
+        ) ||
+      !beforeCensus.processes.some((p) => p.pid === root.ppid) ||
+      beforeCensus.processes.some((p) => p.mountNamespace === root.mountNamespace)
+    )
+      reject();
+    const ids = new Set([root.pid]);
+    for (let pass = 0; pass < current.processes.length; pass++) {
+      let changed = false;
+      for (const p of current.processes) {
+        if ((ids.has(p.ppid) || p.mountNamespace === root.mountNamespace) && !ids.has(p.pid)) {
+          ids.add(p.pid);
+          changed = true;
+        }
+      }
+      if (!changed) break;
+    }
+    const processes = current.processes.filter((p) => ids.has(p.pid));
+    for (const p of processes) {
+      if (
+        beforeCensus.processes.some((old) => old.pid === p.pid) ||
+        p.mountNamespace !== root.mountNamespace ||
+        p.cgroup !== root.cgroup ||
+        !['/opt/brave.com/brave/brave', '/opt/brave.com/brave/chrome_crashpad_handler'].includes(
+          p.exe,
+        ) ||
+        !isDeepStrictEqual(p.uids, [0, 0, 0, 0]) ||
+        p.state !== 'live' ||
+        p.noNewPrivs !== 1 ||
+        Object.values(p.capabilities).some((cap) => !/^0+$/.test(cap)) ||
+        (p.pid !== root.pid && p.ppid !== 1 && !ids.has(p.ppid))
+      )
+        reject();
+    }
+    if (
+      !isDeepStrictEqual(
+        current.processes.filter((p) => !ids.has(p.pid)),
+        beforeCensus.processes,
+      )
+    )
+      reject();
+    return {
+      purpose: 'cloud-recovery-native-observation',
+      name,
+      pmId,
+      hostname: current.hostname,
+      bootId: runtime.bootId,
+      pid: runtime.pid,
+      start: runtime.start,
+      ppid: runtime.ppid,
+      configDigest: runtime.configDigest,
+      restartCount: runtime.restartCount,
+      launchDigest: runtime.launchDigest,
+      observedAtMs: now,
+      beforeCensusDigest: sha(beforeCensus),
+      censusDigest: sha(after),
+      processes,
+      policyDigest: runtime.policyDigest,
+      mountNamespace: runtime.mountNamespace,
     };
   } catch {
     reject();

@@ -1267,6 +1267,9 @@ for (const observed of [
   'missing-config',
   'missing-restarts',
   'invalid-parent',
+  'missing-controller',
+  'boolean-controller',
+  'uncertain-controller',
 ])
   test(`cloud recovery prefix ${observed} requires acknowledgements and independent runtime before open`, async (t) => {
     const acknowledged = typeof observed === 'string' ? 4 : observed;
@@ -1299,6 +1302,19 @@ for (const observed of [
     };
     const observe = f.io.observe;
     let runtimeReads = 0;
+    let recoveryCalls = 0;
+    if (observed !== 'missing-controller')
+      f.io.lifecycle.restoreCloudServices = async (ctx, target) => {
+        recoveryCalls++;
+        assert.deepEqual(target, f.identity);
+        assert.equal((await ctx.journal.readFirstCutoverEffects()).phase, 'verified');
+        assert.equal(f.candidateStatus().mode, 'closed');
+        f.events.push('cloud-recovery');
+        // Synthetic controller boundary only. Native full-tree proof belongs
+        // to the original retirement observer, not this host-ordering test.
+        if (observed === 'boolean-controller') return true;
+        if (observed === 'uncertain-controller') throw new Error('private uncertain effect');
+      };
     f.io.readCloudBrowserRecovery = async ({ attempt, pmId }) => {
       assert.equal(attempt, f.binding.attempt);
       assert.equal(pmId, 8);
@@ -1361,6 +1377,11 @@ for (const observed of [
       }
     };
     const { result } = await runLifecycle(f);
+    assert.equal(recoveryCalls, observed === 'missing-controller' ? 0 : 1);
+    if (permitted) {
+      assert.ok(f.events.indexOf('cloud-recovery') < f.events.lastIndexOf('evidence:preopen'));
+      assert.ok(f.events.lastIndexOf('evidence:preopen') < f.events.indexOf('control:open'));
+    }
     assert.equal(result.ok, permitted);
     if (!permitted) {
       assert.equal(result.phase, 'verified');
@@ -1382,7 +1403,7 @@ for (const observed of [
     assert.equal(f.candidateStatus().mode, permitted ? 'serving' : 'closed');
     assert.equal(
       runtimeReads,
-      acknowledged < 4
+      acknowledged < 4 || String(observed).endsWith('-controller')
         ? 0
         : permitted ||
             ['lost-runtime', 'expired-runtime'].includes(observed) ||

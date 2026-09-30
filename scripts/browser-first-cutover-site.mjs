@@ -750,6 +750,50 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
         false,
       ),
     verifyFence: (ctx) => run('fence', ctx, undefined, boundary, false),
+    restoreCloudServices: (ctx, identity) =>
+      run('cloud-recovery', ctx, ['verified'], async () => {
+        const record = await guard(ctx, ['verified']);
+        checkIdentity(identity, record);
+        if (!record.cloudMaintenanceScope || typeof observer.restoreCloudServices !== 'function')
+          fail();
+        // Recovery observes intent 5/7 itself. Ordinary boundary/readiness calls
+        // reject those prefixes and must never recurse into this callback.
+        const readRecoveryFacts = async () => {
+          const before = await guard(ctx, ['verified']);
+          checkIdentity(identity, before);
+          const { work, persisted } = await observeWork();
+          validateLegacyWorkBoundary({
+            observation: work,
+            approval: context.approval,
+            phase: 'preopen',
+            nowMs: io.now(),
+          });
+          const fence = await ingress.verifyFence();
+          if (
+            !fresh(work.observedAtMs) ||
+            work.inventoryDigest !== context.binding.inventoryDigest ||
+            !fresh(persisted?.observedAtMs) ||
+            !Array.isArray(persisted.unsettled) ||
+            persisted.unsettled.length ||
+            !fresh(fence?.observedAtMs) ||
+            fence.inventoryDigest !== context.binding.inventoryDigest ||
+            fence.stage !== 'all-writers' ||
+            ['existingSockets', 'internalWriters', 'producersRunning'].some(
+              (key) => fence[key] !== 0,
+            ) ||
+            !equal(before, await guard(ctx, ['verified']))
+          )
+            fail();
+          return structuredClone({ work, persisted, fence });
+        };
+        if (
+          (await observer.restoreCloudServices(
+            { identity: structuredClone(identity), maintenanceEndsAtMs: scope.maintenanceEndsAtMs },
+            { readRecoveryFacts },
+          )) !== undefined
+        )
+          fail();
+      }),
     restoreIngress: (ctx, id) =>
       run('restore', ctx, ['verified'], () => ingress.restoreIngress(id)),
     resumeWorker: (ctx, id) =>

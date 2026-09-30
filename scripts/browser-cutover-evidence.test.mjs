@@ -1290,6 +1290,181 @@ test('PM2 runtime observes actual daemon settings and audited defaults without e
     /MAINTENANCE_PM2_OBSERVATION_UNPROVEN/,
   );
 });
+function recoveryCensusFixture() {
+  const boot = '12345678-1234-4234-8234-123456789def';
+  const files = new Map([['/proc/sys/kernel/random/boot_id', `${boot}\n`]]);
+  const links = new Map();
+  const names = ['1', '7', '8', '20', '40', 'self'];
+  for (const [pid, state, flags, exe, ppid] of [
+    [1, 'S', 0, '/sbin/init', 0],
+    [7, 'S', 2097152, '', 0],
+    [8, 'Z', 0, '', 1],
+    [20, 'S', 0, '/opt/node22/bin/node', 1],
+    [40, 'S', 0, '/bin/sleep', 1],
+  ]) {
+    const fields = [state, String(ppid), ...Array(17).fill('0'), String(pid * 10)];
+    fields[6] = String(flags);
+    files.set(`/proc/${pid}/stat`, `${pid} (process) ${fields.join(' ')}\n`);
+    files.set(
+      `/proc/${pid}/status`,
+      `State:\t${state}\nPPid:\t${ppid}\nUid:\t0\t0\t0\t0\nNoNewPrivs:\t1\n${['CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb'].map((key) => `${key}:\t0000000000000000\n`).join('')}`,
+    );
+    files.set(`/proc/${pid}/cmdline`, exe ? `${exe}\0private-argument\0` : '');
+    files.set(`/proc/${pid}/cgroup`, '0::/shared.slice\n');
+    links.set(`/proc/${pid}/exe`, exe);
+    links.set(`/proc/${pid}/cwd`, '/');
+    links.set(`/proc/${pid}/ns/mnt`, 'mnt:[1]');
+  }
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    hostname: () => 'native-qa',
+    now: () => 1000,
+    readdir: async () => [...names],
+    readlink: async (path) => {
+      assert.ok(links.has(path), path);
+      return links.get(path);
+    },
+    open: async (path) => {
+      assert.ok(files.has(path), path);
+      const bytes = Buffer.from(files.get(path));
+      return {
+        read: async (buffer, offset, length, position) => {
+          const bytesRead = Math.max(0, Math.min(length, bytes.length - position));
+          bytes.copy(buffer, offset, position, position + bytesRead);
+          return { bytesRead };
+        },
+        close: async () => {},
+      };
+    },
+  };
+  return { io, files, links, names, boot };
+}
+
+test('recovery census includes untagged detached userspace and excludes only verified kernel and zombies', async () => {
+  const { readFirstCutoverCloudRecoveryCensus: read } = await import(
+    './browser-first-cutover-runtime.mjs'
+  );
+  assert.equal(typeof read, 'function');
+  const f = recoveryCensusFixture();
+  const result = await read(f.io);
+  assert.deepEqual(Object.keys(result).sort(), ['bootId', 'hostname', 'observedAtMs', 'processes']);
+  assert.equal(result.bootId, f.boot);
+  assert.deepEqual(
+    result.processes.map((p) => p.pid),
+    [1, 20, 40],
+  );
+  assert.deepEqual(result.processes[2], {
+    pid: 40,
+    start: '400',
+    ppid: 1,
+    uids: [0, 0, 0, 0],
+    cwd: '/',
+    exe: '/bin/sleep',
+    argvDigest: hash('/bin/sleep\0private-argument\0'),
+    cgroup: '0::/shared.slice\n',
+    mountNamespace: 'mnt:[1]',
+    state: 'live',
+    noNewPrivs: 1,
+    capabilities: {
+      CapInh: '0000000000000000',
+      CapPrm: '0000000000000000',
+      CapEff: '0000000000000000',
+      CapBnd: '0000000000000000',
+      CapAmb: '0000000000000000',
+    },
+  });
+  assert.equal(JSON.stringify(result).includes('private-argument'), false);
+});
+
+for (const mode of [
+  'non-root',
+  'non-linux',
+  'empty-live-command',
+  'oversize',
+  'too-many',
+  'permission',
+  'pid-reuse',
+  'namespace',
+  'reparent',
+  'capabilities',
+  'boot',
+  'hostname',
+  'clock',
+  'churn',
+  'bad-state',
+  'missing-capability',
+]) {
+  test(`recovery census refuses ${mode}`, async () => {
+    const { readFirstCutoverCloudRecoveryCensus: read } = await import(
+      './browser-first-cutover-runtime.mjs'
+    );
+    assert.equal(typeof read, 'function');
+    const f = recoveryCensusFixture();
+    if (mode === 'non-root') f.io.uid = 998;
+    if (mode === 'non-linux') f.io.platform = 'darwin';
+    if (mode === 'empty-live-command') f.files.set('/proc/40/cmdline', '');
+    if (mode === 'oversize') f.files.set('/proc/40/cmdline', 'x'.repeat(262145));
+    if (mode === 'too-many')
+      f.io.readdir = async () => Array.from({ length: 16385 }, (_, i) => String(i + 1));
+    if (mode === 'bad-state')
+      f.files.set('/proc/40/stat', f.files.get('/proc/40/stat').replace(') S', ') X'));
+    if (mode === 'missing-capability')
+      f.files.set('/proc/40/status', f.files.get('/proc/40/status').replace('CapBnd:', 'Absent:'));
+    if (mode === 'permission')
+      f.io.open = async () => {
+        throw Error('EACCES private detail');
+      };
+    let reads = 0;
+    let machine = 'native-qa';
+    let now = 1000;
+    f.io.hostname = () => machine;
+    f.io.now = () => now;
+    const open = f.io.open;
+    f.io.open = async (path, ...args) => {
+      if (path === '/proc/40/stat' && ++reads === 2) {
+        if (mode === 'pid-reuse') f.files.set(path, f.files.get(path).replace('400', '401'));
+        if (mode === 'namespace') f.links.set('/proc/40/ns/mnt', 'mnt:[9]');
+        if (mode === 'reparent')
+          f.files.set(
+            '/proc/40/status',
+            f.files.get('/proc/40/status').replace('PPid:\t1', 'PPid:\t2'),
+          );
+        if (mode === 'capabilities')
+          f.files.set(
+            '/proc/40/status',
+            f.files
+              .get('/proc/40/status')
+              .replace('CapEff:\t0000000000000000', 'CapEff:\t0000000000000001'),
+          );
+        if (mode === 'boot')
+          f.files.set('/proc/sys/kernel/random/boot_id', '22222222-2222-4222-8222-222222222222\n');
+        if (mode === 'hostname') machine = 'changed';
+        if (mode === 'clock') now = 999;
+        if (mode === 'churn') f.names.splice(f.names.indexOf('40'), 1);
+      }
+      return open(path, ...args);
+    };
+    await assert.rejects(read(f.io), /^Error: CUTOVER_CLOUD_RECOVERY_CENSUS_UNPROVEN$/);
+  });
+}
+
+test('recovery census normalizes scheduler transitions without accepting stopped or empty userspace ambiguity', async () => {
+  const { readFirstCutoverCloudRecoveryCensus: read } = await import(
+    './browser-first-cutover-runtime.mjs'
+  );
+  const f = recoveryCensusFixture();
+  const open = f.io.open;
+  let calls = 0;
+  f.io.open = async (path, ...args) => {
+    if (path === '/proc/40/stat' || path === '/proc/7/stat') {
+      f.files.set(path, f.files.get(path).replace(/\) [RS]/, `) ${++calls % 2 ? 'R' : 'S'}`));
+    }
+    return open(path, ...args);
+  };
+  assert.equal((await read(f.io)).processes.find((p) => p.pid === 40).state, 'live');
+});
+
 test('host snapshot includes independently observed PM2 defaults', async () => {
   const f = hostFixture();
   f.io.hostname = () => 'iZbp1ActualNodeZ';

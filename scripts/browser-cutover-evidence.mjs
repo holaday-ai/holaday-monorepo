@@ -965,6 +965,242 @@ export async function readCutoverNginxSnapshot(io = hostSystem) {
   }
 }
 
+// Shared collector; ordinary host snapshots keep their original filtered shape.
+// Complete mode is private recovery evidence, never a new process allowlist.
+async function readHostProcesses(io, complete = false) {
+  const start = (raw, pid) => {
+    const value = String(raw);
+    if (!value.startsWith(`${pid} (`)) throw new Error('pid');
+    const stamp = value
+      .slice(value.lastIndexOf(')') + 2)
+      .trim()
+      .split(/\s+/)[19];
+    if (!/^\d+$/.test(stamp ?? '')) throw new Error('start');
+    return stamp;
+  };
+  const all = [];
+  const excluded = [];
+  const included = new Set();
+  const names = (await io.readdir('/proc')).filter((p) => /^[1-9]\d*$/.test(p)).sort();
+  if (complete && (names.length > 16384 || new Set(names).size !== names.length))
+    throw new Error('count');
+  const metadata = async (pid) => {
+    const raw = String(await io.readFile(`/proc/${pid}/stat`, 'utf8'));
+    const stamp = start(raw, pid);
+    const fields = raw
+      .slice(raw.lastIndexOf(')') + 2)
+      .trim()
+      .split(/\s+/);
+    const ppid = Number(fields[1]);
+    const flags = Number(fields[6]);
+    if (
+      !Number.isSafeInteger(pid) ||
+      !Number.isSafeInteger(ppid) ||
+      ppid < 0 ||
+      !Number.isSafeInteger(flags) ||
+      flags < 0 ||
+      flags > 0xffffffff
+    )
+      throw new Error('stat');
+    // PF_KTHREAD is a kernel fact, not an inference from empty cmdline. Zombies
+    // cannot execute; retain their identity privately across both census passes.
+    if ((flags & 0x00200000) !== 0 || fields[0] === 'Z')
+      return {
+        pid,
+        start: stamp,
+        ppid,
+        flags,
+        state: fields[0] === 'Z' ? 'zombie' : 'kernel',
+        excluded: true,
+      };
+    const state = ['R', 'S', 'D', 'I'].includes(fields[0])
+      ? 'live'
+      : ['T', 't'].includes(fields[0])
+        ? 'stopped'
+        : null;
+    if (!state) throw new Error('state');
+    const status = String(await io.readFile(`/proc/${pid}/status`, 'utf8'));
+    if (Number(/^PPid:\s+(\d+)/m.exec(status)?.[1]) !== ppid) throw new Error('parent');
+    const noNewPrivs = Number(/^NoNewPrivs:\s+([01])\s*$/m.exec(status)?.[1]);
+    if (![0, 1].includes(noNewPrivs)) throw new Error('privileges');
+    const capabilities = {};
+    for (const key of ['CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb']) {
+      const value = new RegExp(`^${key}:\\s+([0-9a-f]{1,16})\\s*$`, 'm').exec(status)?.[1];
+      if (!value) throw new Error('capability');
+      capabilities[key] = value;
+    }
+    const mountNamespace = await io.readlink(`/proc/${pid}/ns/mnt`);
+    if (!/^mnt:\[\d+\]$/.test(mountNamespace)) throw new Error('namespace');
+    return { start: stamp, ppid, extra: { mountNamespace, state, noNewPrivs, capabilities } };
+  };
+  for (const name of names) {
+    const pid = Number(name);
+    const root = `/proc/${pid}`;
+    try {
+      const meta = complete ? await metadata(pid) : null;
+      if (meta?.excluded) {
+        if (!same(meta, await metadata(pid))) throw new Error('changed');
+        excluded.push(meta);
+        continue;
+      }
+      const cmdline = String(await io.readFile(`${root}/cmdline`, 'utf8'));
+      if (!cmdline) {
+        if (complete) throw new Error('empty userspace command');
+        continue;
+      }
+      const status = String(await io.readFile(`${root}/status`, 'utf8'));
+      const match = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m.exec(status);
+      if (!match) throw new Error('uid');
+      const uids = match.slice(1).map(Number);
+      const before = start(await io.readFile(`${root}/stat`, 'utf8'), pid);
+      const cwd = await io.readlink(`${root}/cwd`);
+      const exe = await io.readlink(`${root}/exe`);
+      const cgroup = String(await io.readFile(`${root}/cgroup`, 'utf8'));
+      const after = start(await io.readFile(`${root}/stat`, 'utf8'), pid);
+      const ppid = Number(/^PPid:\s+(\d+)/m.exec(status)?.[1]);
+      if (!Number.isSafeInteger(ppid) || ppid < 0) throw new Error('parent');
+      if (
+        complete &&
+        (meta.start !== before ||
+          meta.ppid !== ppid ||
+          !same(meta, await metadata(pid)) ||
+          uids.some((uid) => !Number.isSafeInteger(uid) || uid < 0) ||
+          ![cwd, exe].every(
+            (path) => typeof path === 'string' && path.startsWith('/') && path.length <= 4096,
+          ))
+      )
+        throw new Error('identity');
+      const afterStatus = String(await io.readFile(`${root}/status`, 'utf8'));
+      const afterUids = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m
+        .exec(afterStatus)
+        ?.slice(1)
+        .map(Number);
+      if (
+        before !== after ||
+        cmdline !== String(await io.readFile(`${root}/cmdline`, 'utf8')) ||
+        !same(uids, afterUids) ||
+        ppid !== Number(/^PPid:\s+(\d+)/m.exec(afterStatus)?.[1]) ||
+        cwd !== (await io.readlink(`${root}/cwd`)) ||
+        exe !== (await io.readlink(`${root}/exe`)) ||
+        cgroup !== String(await io.readFile(`${root}/cgroup`, 'utf8'))
+      )
+        throw new Error('changed');
+      if (
+        uids.includes(998) ||
+        /holaday|(?:^|\/)node(?:\0|$)/i.test(cmdline) ||
+        /\/node(?: \(deleted\))?$/.test(exe)
+      )
+        included.add(pid);
+      all.push({
+        pid,
+        start: before,
+        ppid,
+        uids,
+        cwd,
+        exe,
+        argvDigest: digest(cmdline),
+        cgroup,
+        ...(complete ? meta.extra : {}),
+      });
+    } catch {
+      // Process churn is not a stable, exhaustive observation; recollect once externally.
+      throw new Error('MAINTENANCE_HOST_OBSERVATION_UNPROVEN');
+    }
+  }
+  if (complete) return { processes: all.sort((a, b) => a.pid - b.pid), excluded };
+  // Select after reading the parent graph: shell/esbuild/browser descendants
+  // need not carry a recognizable name, and /proc order is not tree order.
+  let changed;
+  do {
+    changed = false;
+    for (const process of all) {
+      if (included.has(process.ppid) && !included.has(process.pid)) {
+        included.add(process.pid);
+        changed = true;
+      }
+    }
+  } while (changed);
+  return all.filter((process) => included.has(process.pid));
+}
+
+/** Bounded, unfiltered native census for the original recovery consumer. Raw
+ * cmdline/status never escape; errors intentionally contain no private bytes.
+ * Two equal samples bound observation, not continuous lineage or past effects.
+ */
+export async function readFirstCutoverCloudRecoveryCensus(overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    hostname,
+    now: Date.now,
+    ...overrides,
+  };
+  try {
+    if (io.platform !== 'linux' || io.uid !== 0) throw new Error('host');
+    const began = io.now();
+    let last = began;
+    let budget = 64 * 1024 * 1024;
+    const clock = () => {
+      const now = io.now();
+      if (
+        !Number.isSafeInteger(began) ||
+        began < 0 ||
+        !Number.isSafeInteger(now) ||
+        now < last ||
+        now - began > 60000
+      )
+        throw new Error('clock');
+      last = now;
+      return now;
+    };
+    const readFile = async (path) => {
+      clock();
+      const handle = await io.open(
+        path,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      try {
+        const buffer = Buffer.alloc(262145);
+        let size = 0;
+        while (size < buffer.length) {
+          const { bytesRead } = await handle.read(buffer, size, buffer.length - size, size);
+          if (!Number.isSafeInteger(bytesRead) || bytesRead < 0 || bytesRead > buffer.length - size)
+            throw new Error('read');
+          if (!bytesRead) break;
+          size += bytesRead;
+        }
+        budget -= size;
+        if (size > 262144 || budget < 0) throw new Error('size');
+        const bytes = buffer.subarray(0, size);
+        const value = bytes.toString('utf8');
+        if (!Buffer.from(value).equals(bytes)) throw new Error('encoding');
+        return value;
+      } finally {
+        await handle.close();
+      }
+    };
+    const machine = io.hostname();
+    const bootId = (await readFile('/proc/sys/kernel/random/boot_id')).trim();
+    if (
+      !/^[a-zA-Z0-9.-]{1,128}$/.test(machine) ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(bootId)
+    )
+      throw new Error('identity');
+    const sampling = { ...io, readFile };
+    const first = await readHostProcesses(sampling, true);
+    if (
+      !same(first, await readHostProcesses(sampling, true)) ||
+      machine !== io.hostname() ||
+      bootId !== (await readFile('/proc/sys/kernel/random/boot_id')).trim()
+    )
+      throw new Error('changed');
+    return { hostname: machine, bootId, observedAtMs: clock(), processes: first.processes };
+  } catch {
+    throw new Error('CUTOVER_CLOUD_RECOVERY_CENSUS_UNPROVEN');
+  }
+}
+
 /** Read facts only; callers must classify every process/startup/route before acceptance.
  * No environment-variable absence or missing PM2 row establishes non-writer status. */
 export async function readCutoverHostSnapshot(io = hostSystem) {
@@ -975,86 +1211,7 @@ export async function readCutoverHostSnapshot(io = hostSystem) {
     if (!/^[a-zA-Z0-9.-]{1,128}$/.test(machine)) throw new Error('host identity');
     const bootId = String(await io.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim();
     if (!/^[a-f0-9-]{36}$/.test(bootId)) throw new Error('boot identity');
-    const start = (raw, pid) => {
-      const value = String(raw);
-      if (!value.startsWith(`${pid} (`)) throw new Error('pid');
-      const stamp = value
-        .slice(value.lastIndexOf(')') + 2)
-        .trim()
-        .split(/\s+/)[19];
-      if (!/^\d+$/.test(stamp ?? '')) throw new Error('start');
-      return stamp;
-    };
-    const readProcesses = async () => {
-      const all = [];
-      const included = new Set();
-      for (const name of (await io.readdir('/proc')).filter((p) => /^[1-9]\d*$/.test(p)).sort()) {
-        const pid = Number(name);
-        const root = `/proc/${pid}`;
-        try {
-          const cmdline = String(await io.readFile(`${root}/cmdline`, 'utf8'));
-          if (!cmdline) continue;
-          const status = String(await io.readFile(`${root}/status`, 'utf8'));
-          const match = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m.exec(status);
-          if (!match) throw new Error('uid');
-          const uids = match.slice(1).map(Number);
-          const before = start(await io.readFile(`${root}/stat`, 'utf8'), pid);
-          const cwd = await io.readlink(`${root}/cwd`);
-          const exe = await io.readlink(`${root}/exe`);
-          const cgroup = String(await io.readFile(`${root}/cgroup`, 'utf8'));
-          const after = start(await io.readFile(`${root}/stat`, 'utf8'), pid);
-          const ppid = Number(/^PPid:\s+(\d+)/m.exec(status)?.[1]);
-          if (!Number.isSafeInteger(ppid) || ppid < 0) throw new Error('parent');
-          const afterStatus = String(await io.readFile(`${root}/status`, 'utf8'));
-          const afterUids = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m
-            .exec(afterStatus)
-            ?.slice(1)
-            .map(Number);
-          if (
-            before !== after ||
-            cmdline !== String(await io.readFile(`${root}/cmdline`, 'utf8')) ||
-            !same(uids, afterUids) ||
-            ppid !== Number(/^PPid:\s+(\d+)/m.exec(afterStatus)?.[1]) ||
-            cwd !== (await io.readlink(`${root}/cwd`)) ||
-            exe !== (await io.readlink(`${root}/exe`)) ||
-            cgroup !== String(await io.readFile(`${root}/cgroup`, 'utf8'))
-          )
-            throw new Error('changed');
-          if (
-            uids.includes(998) ||
-            /holaday|(?:^|\/)node(?:\0|$)/i.test(cmdline) ||
-            /\/node(?: \(deleted\))?$/.test(exe)
-          )
-            included.add(pid);
-          all.push({
-            pid,
-            start: before,
-            ppid,
-            uids,
-            cwd,
-            exe,
-            argvDigest: digest(cmdline),
-            cgroup,
-          });
-        } catch {
-          // Process churn is not a stable, exhaustive observation; recollect once externally.
-          throw new Error('MAINTENANCE_HOST_OBSERVATION_UNPROVEN');
-        }
-      }
-      // Select after reading the parent graph: shell/esbuild/browser descendants
-      // need not carry a recognizable name, and /proc order is not tree order.
-      let changed;
-      do {
-        changed = false;
-        for (const process of all) {
-          if (included.has(process.ppid) && !included.has(process.pid)) {
-            included.add(process.pid);
-            changed = true;
-          }
-        }
-      } while (changed);
-      return all.filter((process) => included.has(process.pid));
-    };
+    const readProcesses = () => readHostProcesses(io);
     const processes = await readProcesses();
     const pm2Runtime = await io.pm2RuntimeSnapshot();
     const readManagers = async () => {

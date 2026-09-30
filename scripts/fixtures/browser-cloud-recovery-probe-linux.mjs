@@ -13,6 +13,8 @@
 // and unrelated app are disposable; production startup scripts are NOT executed.
 // --scoped-pm2-denied requires a container WITHOUT SYS_ADMIN and checks that
 // failed recovery stays failed, with no PM2 restart or direct-browser fallback.
+// --orphan-handoff-failures checks only bounded canary failures/cleanup before
+// any browser, policy, profile, display or PM2 setup in the disposable container.
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -29,6 +31,8 @@ import {
 import {
   firstCutoverCloudBrowserRecoveryLaunch,
   readFirstCutoverCloudBrowserRecovery,
+  readFirstCutoverCloudRecovery,
+  readFirstCutoverCloudRecoveryCensus,
   restoreFirstCutoverCloudBrowser,
 } from '../browser-first-cutover-runtime.mjs';
 import { acquireReleaseJournal } from '../browser-maintenance-journal.mjs';
@@ -43,8 +47,35 @@ assert.ok(
         '--scoped-policy',
         '--scoped-pm2',
         '--scoped-pm2-denied',
+        '--orphan-handoff-failures',
       ].includes(process.argv[2])),
 );
+if (process.argv[2] === '--orphan-handoff-failures') {
+  for (const [fault, expected] of [
+    ['exit-without-pid', /^Error: QA_ORPHAN_NO_PID$/],
+    ['timeout-without-pid', /^Error: QA_ORPHAN_HANDOFF_TIMEOUT$/],
+    ['timeout-after-pid', /^Error: QA_ORPHAN_HANDOFF_TIMEOUT$/],
+  ]) {
+    const entries = (await fs.readdir('/proc')).filter((p) => /^[0-9]+$/.test(p));
+    const identities = await Promise.all(entries.map((p) => processIdentity(Number(p))));
+    const before = new Set(identities.filter(Boolean).map((p) => `${p.pid}:${p.start}`));
+    const started = performance.now();
+    await assert.rejects(
+      withOrphanCanary(() => assert.fail('failed handoff must not reach observation'), fault),
+      expected,
+    );
+    assert.ok(performance.now() - started < 8000, 'startup plus cleanup is bounded');
+    for (const entry of (await fs.readdir('/proc')).filter((p) => /^[0-9]+$/.test(p))) {
+      const current = await processIdentity(Number(entry));
+      assert.ok(
+        !current || current.state === 'Z' || before.has(`${current.pid}:${current.start}`),
+        'failed handoff leaves no new live parent or orphan in the isolated container',
+      );
+    }
+    console.log(JSON.stringify({ marker: 'ORPHAN_HANDOFF_FAILURE_PASS', fault }));
+  }
+  process.exit(0);
+}
 const appBlank = process.argv[2] === '--app-blank';
 const policyProbe = process.argv[2] === '--policy-probe';
 const deniedRecovery = process.argv[2] === '--scoped-pm2-denied';
@@ -138,6 +169,7 @@ let managed;
 let stoppedManager;
 let restoreJournal;
 let restoreStartedAtMs;
+let beforeRecoveryCensus;
 let restoreMaintenanceEndsAtMs;
 let workerIntervalMs;
 let unrelated;
@@ -237,6 +269,17 @@ async function restoreSameRegistration(recovery) {
     },
   };
   restoreMaintenanceEndsAtMs = input.maintenanceEndsAtMs;
+  if (!deniedRecovery) {
+    // Capture AFTER the original lifetime was proved stopped, before the one
+    // product dispatch. Never seed this baseline from the recovered process set.
+    beforeRecoveryCensus = await readFirstCutoverCloudRecoveryCensus();
+    assert.ok(
+      beforeRecoveryCensus.processes.every(
+        (p) => !retiredIdentities.some((old) => old.pid === p.pid),
+      ),
+      'old tree absent from the unfiltered pre-dispatch census',
+    );
+  }
   restoreStartedAtMs = Date.now();
   await restoreFirstCutoverCloudBrowser(input, io);
   assert.equal((await restoreJournal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 5);
@@ -259,6 +302,71 @@ async function processIdentity(pid) {
 async function sameLive(identity) {
   const current = await processIdentity(identity.pid);
   return current?.start === identity.start && current.state !== 'Z';
+}
+async function withOrphanCanary(inspect, fault) {
+  const source =
+    fault === 'exit-without-pid'
+      ? ''
+      : fault === 'timeout-without-pid'
+        ? 'setInterval(()=>{},1000);'
+        : `const {spawn}=require("node:child_process");const c=spawn("/usr/bin/sleep",["600"],{detached:true,stdio:"ignore"});console.log(c.pid);c.unref();${fault === 'timeout-after-pid' ? 'setInterval(()=>{},1000);' : ''}`;
+  const parent = spawn('/opt/node22/bin/node', ['-e', source], {
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  let closed = false;
+  let capture;
+  let timer;
+  try {
+    await new Promise((resolve, reject) => {
+      let output = '';
+      timer = setTimeout(() => reject(Error('QA_ORPHAN_HANDOFF_TIMEOUT')), 3000);
+      parent.on('error', reject);
+      parent.stdout.on('error', reject);
+      parent.stdout.on('data', (bytes) => {
+        output += bytes.toString();
+        if (output.length > 32 || !/^[0-9]*\n?$/.test(output)) {
+          reject(Error('QA_ORPHAN_INVALID_PID'));
+        } else if (!capture && output.endsWith('\n')) {
+          const pid = Number(output.trim());
+          if (!Number.isSafeInteger(pid) || pid <= 1) {
+            reject(Error('QA_ORPHAN_INVALID_PID'));
+            return;
+          }
+          // Start retaining PID/start immediately, even if this parent never exits.
+          capture = processIdentity(pid);
+          capture.catch(reject);
+        }
+      });
+      parent.stdout.once('end', () => {
+        if (!capture) reject(Error('QA_ORPHAN_NO_PID'));
+      });
+      parent.once('close', (code, signal) => {
+        closed = true;
+        if (code !== 0 || signal) reject(Error('QA_ORPHAN_PARENT_FAILED'));
+        else if (!capture) reject(Error('QA_ORPHAN_NO_PID'));
+        else capture.then(resolve, reject);
+      });
+    });
+    clearTimeout(timer);
+    const orphan = await capture;
+    assert.ok(orphan && (await sameLive(orphan)), 'created canary identity retained');
+    const current = await processIdentity(orphan.pid);
+    assert.equal(current?.start, orphan.start);
+    assert.equal(current.ppid, 1, 'canary actually detached to PID1');
+    await inspect(current);
+  } finally {
+    clearTimeout(timer);
+    try {
+      // This exact ChildProcess is ours, never a discovered/current-PID allowlist.
+      if (!closed) parent.kill('SIGKILL');
+      await until(() => closed, 2000);
+    } finally {
+      const orphan = await capture?.catch(() => null);
+      if (orphan && (await sameLive(orphan))) process.kill(orphan.pid, 'SIGKILL');
+      if (orphan) await until(async () => !(await sameLive(orphan)), 2000);
+      parent.stdout.destroy();
+    }
+  }
 }
 async function ownedProcesses(root) {
   const observed = [];
@@ -652,6 +760,70 @@ try {
       'CLOUD_STOPPED_TO_RECOVERED_CONFIG_PASS: exact finite PM2 transform; not a full-tree or release proof.',
     );
     if (!deniedRecovery) {
+      const nativeInput = {
+        attempt,
+        name: 'holaday-chromium-headed',
+        pmId: managed.pmId,
+        beforeCensus: beforeRecoveryCensus,
+        restoreStartedAtMs,
+      };
+      // Only the disposable socket differs from defaults. Census/root/policy
+      // observation is actual procfs/RPC, not a injected passing tree or hook.
+      const native = await readFirstCutoverCloudRecovery(nativeInput, observationIo);
+      assert.equal(native.purpose, 'cloud-recovery-native-observation');
+      assert.equal(native.pid, observation.pid);
+      assert.equal(native.start, observation.start);
+      assert.equal(native.ppid, observation.ppid);
+      assert.equal(native.configDigest, configurationProof.recoveredConfigDigest);
+      assert.equal(native.restartCount, configurationProof.restartCount);
+      assert.equal(native.launchDigest, recoveryRecord.cloudMaintenanceScope[1].recoveryDigest);
+      assert.equal(native.beforeCensusDigest, sha(beforeRecoveryCensus));
+      assert.match(native.censusDigest, /^[a-f0-9]{64}$/);
+      const independentlyObserved = await readFirstCutoverCloudRecoveryCensus();
+      assert.equal(native.hostname, independentlyObserved.hostname);
+      assert.equal(native.bootId, independentlyObserved.bootId);
+      assert.deepEqual(
+        native.processes,
+        independentlyObserved.processes.filter((p) => p.mountNamespace === native.mountNamespace),
+        'all actual private-namespace members, including any reparented helper',
+      );
+      assert.ok(native.processes.length > 1, 'real replacement descendants observed');
+      assert.deepEqual(
+        independentlyObserved.processes.filter((p) => p.mountNamespace !== native.mountNamespace),
+        beforeRecoveryCensus.processes,
+        'complete outside identities unchanged, not a current-PID allowlist',
+      );
+      // One disposable untagged orphan is outside the private browser namespace.
+      // It must remain visible and make the real reader refuse. No browser,
+      // shared daemon, profile or policy modification is used for this negative.
+      await withOrphanCanary(async (orphan) => {
+        const { pid } = orphan;
+        const census = await readFirstCutoverCloudRecoveryCensus();
+        const actual = census.processes.find((p) => p.pid === pid && p.start === orphan.start);
+        assert.ok(actual, 'untagged orphan visible in default all-process census');
+        assert.notEqual(actual.mountNamespace, native.mountNamespace);
+        assert.equal((await fs.readFile(`/proc/${pid}/cmdline`, 'utf8')).includes(profile), false);
+        await assert.rejects(
+          readFirstCutoverCloudRecovery(nativeInput, observationIo),
+          /^Error: CUTOVER_CLOUD_RECOVERY_UNPROVEN$/,
+        );
+        assert.equal(await sameLive(orphan), true, 'rejection cannot be explained by canary exit');
+      });
+      const afterOrphan = await readFirstCutoverCloudRecovery(nativeInput, observationIo);
+      assert.deepEqual(afterOrphan.processes, native.processes);
+      assert.equal(afterOrphan.configDigest, native.configDigest);
+      assert.equal(afterOrphan.beforeCensusDigest, native.beforeCensusDigest);
+      assert.deepEqual(await restoreJournal.readFirstCutoverEffects(), recoveryRecord);
+      console.log(
+        JSON.stringify({
+          marker: 'CLOUD_NATIVE_RECOVERY_TREE_PASS',
+          replacementProcesses: native.processes.length,
+          reparentedBrowserMembers: native.processes.filter((p) => p.ppid === 1).length,
+          untaggedDetachedCanaryRefused: true,
+          originalPreDispatchCensusRetained: true,
+          recoveryAckOrOpen: false,
+        }),
+      );
       // The prior 2s probe could finish before the real periodic memory check.
       // ONE success-only observation spans its unchanged interval, with a 5s
       // completion margin. This is not a soak, new experiment, or recovery ACK.

@@ -34,7 +34,9 @@ import {
   initializeFirstMaintenanceState,
   readFirstCutoverCloudBrowserRecovery,
   readFirstCutoverCloudManagers,
+  readFirstCutoverCloudRecoveryCensus,
   retireLegacyRuntime,
+  validateLegacyWorkBoundary,
   validateOwnedLegacyFence,
 } from './browser-first-cutover-runtime.mjs';
 import { persistCandidateStartupEntries } from './browser-first-cutover-startup.mjs';
@@ -1536,6 +1538,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
   const io = {
     readPair: readFirstCutoverHostPair,
     readCloudManagers: readFirstCutoverCloudManagers,
+    readCloudRecoveryCensus: readFirstCutoverCloudRecoveryCensus,
     readFenceReceipts: async () => [],
     // Trusted live session handles, never a CLI/uploaded process allowlist.
     readExecutionIdentities: async () => [],
@@ -1561,6 +1564,8 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           'CUTOVER_CANDIDATE_OBSERVATION_UNPROVEN',
           'CUTOVER_INVENTORY_UNPROVEN',
           'CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN',
+          'CUTOVER_CLOUD_VNC_NATIVE_SOURCE_UNPROVEN',
+          'CUTOVER_CLOUD_RECOVERY_CENSUS_UNPROVEN',
         ].includes(value)
       )
         code = value;
@@ -1849,12 +1854,107 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
     };
     let unmanagedAttempted = false;
     let cloudAttempted = false;
+    let cloudRecoveryAttempted = false;
     return {
       read: () => read(),
       readFenceProgress: () => read(undefined, undefined, undefined, true),
       readRegistrationProgress: (host) => read(host ?? 'invalid'),
       readUnmanagedProgress: (host) => read(undefined, host ?? 'invalid'),
       readWithCandidate: (identity) => read(undefined, undefined, structuredClone(identity ?? {})),
+      restoreCloudServices: async (input, operations = {}) => {
+        if (cloudRecoveryAttempted) fail();
+        cloudRecoveryAttempted = true;
+        let step = 'recovery-input';
+        try {
+          if (
+            !isDeepStrictEqual(Object.keys(input ?? {}).sort(), [
+              'identity',
+              'maintenanceEndsAtMs',
+            ]) ||
+            !isDeepStrictEqual(Object.keys(operations), ['readRecoveryFacts']) ||
+            typeof operations.readRecoveryFacts !== 'function'
+          )
+            fail();
+          const { identity, maintenanceEndsAtMs } = structuredClone(input);
+          const record = await effects();
+          const left = maintenanceEndsAtMs - checkClock();
+          if (
+            !Number.isSafeInteger(maintenanceEndsAtMs) ||
+            left <= 0 ||
+            left > 900000 ||
+            record.phase !== 'verified' ||
+            record.failureObservation ||
+            !isDeepStrictEqual(record.identity, identity) ||
+            !originalCloudScope ||
+            record.cloudMaintenanceEvents?.length !== 4 ||
+            originalCloudScope.some(({ pmId }) => !cloudConfigs.get(pmId)?.stopped)
+          )
+            fail();
+          step = 'recovery-leaves';
+          const { work, persisted, fence } = await operations.readRecoveryFacts();
+          const disposition = validateLegacyWorkBoundary({
+            observation: work,
+            approval: record,
+            phase: 'preopen',
+            nowMs: checkClock(),
+          });
+          if (
+            disposition.mode === 'controlled-interruption' &&
+            (record.riskDigest !== disposition.riskDigest ||
+              record.interruptionObservation?.riskDigest !== disposition.riskDigest)
+          )
+            fail();
+          const fresh = (value) =>
+            Number.isSafeInteger(value) &&
+            value >= 0 &&
+            value <= checkClock() &&
+            checkClock() - value <= 60000;
+          if (
+            work?.inventoryDigest !== binding.inventoryDigest ||
+            !fresh(work.observedAtMs) ||
+            !fresh(persisted?.observedAtMs) ||
+            !Array.isArray(persisted.unsettled) ||
+            persisted.unsettled.length ||
+            fence?.inventoryDigest !== binding.inventoryDigest ||
+            !fresh(fence.observedAtMs) ||
+            fence.stage !== 'all-writers' ||
+            ['existingSockets', 'internalWriters', 'producersRunning'].some((k) => fence[k] !== 0)
+          )
+            fail();
+          step = 'recovery-stopped-baseline';
+          const stopped = await read(undefined, undefined, identity);
+          if (
+            stopped.candidate?.mode !== 'closed' ||
+            stopped.candidate.idle !== true ||
+            stopped.candidate.needsReconciliation !== false ||
+            stopped.candidate.runtime?.worker !== null ||
+            !isDeepStrictEqual(record, await effects()) ||
+            checkClock() >= maintenanceEndsAtMs
+          )
+            fail();
+          step = 'recovery-census';
+          if (typeof io.readCloudRecoveryCensus !== 'function') fail();
+          const beforeCensus = structuredClone(await io.readCloudRecoveryCensus());
+          const originalHost = baseline.hosts.find((h) => h.host === 'vultr').snapshot;
+          if (
+            beforeCensus.hostname !== originalHost.hostname ||
+            beforeCensus.bootId !== originalHost.bootId ||
+            !fresh(beforeCensus.observedAtMs) ||
+            !isDeepStrictEqual(record, await effects()) ||
+            checkClock() >= maintenanceEndsAtMs
+          )
+            fail();
+          step = 'recovery-native-prerequisites';
+          // INCOMPLETE: there is no native BOTH-role source/display/capability
+          // preflight yet. Post-restoration readers cannot supply that fact on
+          // stopped services. Keep BOTH intents/effects closed; do not treat the
+          // census, an injected boolean or a current executable as authorization.
+          throw new Error('CUTOVER_CLOUD_VNC_NATIVE_SOURCE_UNPROVEN');
+        } catch (error) {
+          await report(error, 'cloud-recovery', step);
+          fail();
+        }
+      },
       // The owned declaration selects the fixed pair; callers cannot supply a
       // name, PID, argv, environment, timeout or retry policy. A failed attempt
       // stays consumed even when the PM2 result is unknown.
@@ -1881,6 +1981,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             fail();
           const fence = await operations.verifyFence();
           const interrupted = await validateOwnedLegacyFence(fence, {
+            now: checkClock,
             assertJournalOwnership: () => io.journal.assertOwnership(),
             readFirstCutoverEffects: effects,
           });
@@ -2529,6 +2630,18 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
       once('beforeOpen', 'verified', async () => {
         if (!sameIdentity(target)) throw new Error('MAINTENANCE_IDENTITY_MISMATCH');
         await io.observe(target);
+        if ((await prepared.journal.readFirstCutoverEffects()).cloudMaintenanceScope) {
+          try {
+            if (
+              typeof io.lifecycle.restoreCloudServices !== 'function' ||
+              (await io.lifecycle.restoreCloudServices(context(), target)) !== undefined
+            )
+              throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+          } catch {
+            throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+          }
+          await guard();
+        }
         await readiness(target);
         // Fail outside the release tail's lost-open-ACK reconciliation branch.
         await assertCloudRecovered();

@@ -311,6 +311,7 @@ async function retirementFixture(
         f.rejections.push(event);
         await f.onRejection?.(event);
       },
+      ...f.recoveryIO,
     },
   );
   await f.afterObserver?.(journal);
@@ -531,6 +532,7 @@ test('cloud raw baseline detects native drift before first intent and does not e
       'readRegistrationProgress',
       'readUnmanagedProgress',
       'readWithCandidate',
+      'restoreCloudServices',
       'retireUnmanaged',
       'stopCloudServices',
     ].sort(),
@@ -1130,8 +1132,13 @@ test('retirement observation consumes the real journal and fresh paired state, n
   assert.ok(!JSON.stringify(actual).includes('private-environment-never-return'));
 });
 
-async function candidateFixture(t, setup = () => {}, beforeCandidate = async () => {}) {
-  const r = await retirementFixture(t, setup);
+async function candidateFixture(
+  t,
+  setup = () => {},
+  beforeCandidate = async () => {},
+  interrupted = false,
+) {
+  const r = await retirementFixture(t, setup, undefined, interrupted);
   await beforeCandidate(r);
   await r.remove();
   for (const phase of ['all_fenced', 'stopped', 'backup_verified'])
@@ -1186,6 +1193,156 @@ async function candidateFixture(t, setup = () => {}, beforeCandidate = async () 
     },
   };
   return { ...r, identity, snapshot: s };
+}
+
+for (const fault of [
+  'native-unavailable',
+  'census',
+  'caller-proof',
+  'concurrent',
+  'v2-observed',
+  'v2-unobservable',
+  'v2-replay',
+]) {
+  test(`original cloud recovery preflight refuses ${fault} before either restore intent or effect`, async (t) => {
+    let censusReads = 0;
+    let nativeReads = 0;
+    const interrupted = fault.startsWith('v2-');
+    const workFor = (record) => ({
+      inventoryDigest: digest,
+      observedAtMs: 1000,
+      unsettledWork: 0,
+      unknownWriters: 0,
+      activeRequests: 0,
+      externalWork: 0,
+      ...(interrupted
+        ? {
+            schemaVersion: 2,
+            knownExternalWork: [],
+            activeRequests:
+              fault === 'v2-observed'
+                ? { kind: 'observed', count: 0 }
+                : { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+            externalWork:
+              fault === 'v2-observed'
+                ? { kind: 'observed', count: 0 }
+                : { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+            capabilityDigest: record.legacyInterruption.capabilityDigest,
+            replaySourcesDigest: '8'.repeat(64),
+            pendingReplay: 0,
+          }
+        : {}),
+    });
+    const r = await candidateFixture(
+      t,
+      (f) => {
+        addCloudPair(f);
+        f.recoveryIO = {
+          readCloudRecoveryCensus: async () => {
+            censusReads++;
+            if (fault === 'census') throw Error('CUTOVER_CLOUD_RECOVERY_CENSUS_UNPROVEN');
+            if (fault === 'concurrent') await nested();
+            const snapshot = f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+            // Synthetic census transport, not production executable/service proof.
+            return {
+              hostname: snapshot.hostname,
+              bootId: snapshot.bootId,
+              observedAtMs: 1000,
+              processes: snapshot.processes.map((p) => ({
+                ...p,
+                mountNamespace: 'mnt:[100]',
+                state: 'live',
+                noNewPrivs: 0,
+                capabilities: Object.fromEntries(
+                  ['CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb'].map((k) => [
+                    k,
+                    '0000000000000000',
+                  ]),
+                ),
+              })),
+            };
+          },
+          readCloudRecovery: async () => {
+            nativeReads++;
+            throw Error('post-restoration reader must not run as preflight');
+          },
+        };
+      },
+      async (r) => {
+        const operations = cloudStopOperations(r);
+        if (interrupted) {
+          const record = await r.journal.readFirstCutoverEffects();
+          await r.journal.bindLegacyInterruption({
+            riskDigest: record.riskDigest,
+            sourceDigest: '8'.repeat(64),
+            fenceDigest: '9'.repeat(64),
+            observedAtMs: 1000,
+          });
+          await r.journal.persist('producers_stopped', { candidate: r.binding.candidate });
+          const work = workFor(record);
+          operations.verifyFence = async () => ({
+            ...work,
+            stage: 'orders',
+            riskDigest: record.riskDigest,
+            legacyWork: { before: work, after: structuredClone(work) },
+          });
+        }
+        await r.observer.stopCloudServices({ maintenanceEndsAtMs: 8000 }, operations);
+      },
+      interrupted,
+    );
+    await r.journal.persist('verified', { candidate: r.binding.candidate, identity: r.identity });
+    assert.equal(typeof r.observer.restoreCloudServices, 'function');
+    let leafReads = 0;
+    const input = { identity: r.identity, maintenanceEndsAtMs: 8000 };
+    if (fault === 'caller-proof') input.nativeVerified = true;
+    const operations = {
+      readRecoveryFacts: async () => {
+        leafReads++;
+        const work = workFor(await r.journal.readFirstCutoverEffects());
+        if (fault === 'v2-replay') work.pendingReplay = 1;
+        return {
+          work,
+          persisted: { observedAtMs: 1000, unsettled: [] },
+          fence: {
+            inventoryDigest: digest,
+            observedAtMs: 1000,
+            stage: 'all-writers',
+            existingSockets: 0,
+            internalWriters: 0,
+            producersRunning: 0,
+          },
+        };
+      },
+    };
+    const nested = () =>
+      assert.rejects(r.observer.restoreCloudServices(input, operations), /UNPROVEN/);
+    await assert.rejects(r.observer.restoreCloudServices(input, operations), /UNPROVEN/);
+    assert.equal(leafReads, fault === 'caller-proof' ? 0 : 1);
+    const expectedCensusReads = ['caller-proof', 'v2-replay'].includes(fault) ? 0 : 1;
+    assert.equal(censusReads, expectedCensusReads);
+    assert.equal(nativeReads, 0, 'post-effect proof is not pre-dispatch readiness');
+    assert.equal(
+      r.f.rejections.at(-1).step,
+      fault === 'caller-proof'
+        ? 'recovery-input'
+        : fault === 'v2-replay'
+          ? 'recovery-leaves'
+          : fault === 'census'
+            ? 'recovery-census'
+            : 'recovery-native-prerequisites',
+    );
+    if (expectedCensusReads && fault !== 'census')
+      assert.equal(r.f.rejections.at(-1).code, 'CUTOVER_CLOUD_VNC_NATIVE_SOURCE_UNPROVEN');
+    await nested();
+    assert.equal(
+      censusReads,
+      expectedCensusReads,
+      'a failed attempt cannot acquire a new baseline',
+    );
+    assert.equal((await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 4);
+    assert.equal((await r.observer.readWithCandidate(r.identity)).unknownLaunchers.length, 0);
+  });
 }
 
 test('candidate observation joins the live controlled runtime without hiding old writers', async (t) => {
