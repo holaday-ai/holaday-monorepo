@@ -2189,6 +2189,339 @@ for (const mode of [
   });
 }
 
+async function vncNativeObservationFixture(handlerCount = 1) {
+  // Synthetic kernel/filesystem IO, real source/manager/policy validators.
+  // These facts do not represent production hooks, capability or authorization.
+  const h = cloudNativeRecoveryFixture();
+  const s = await sourceNativeFixture();
+  const bootId = h.current.bootId;
+  const sha = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  Object.assign(h.manager.pm2_env, {
+    pm_id: 7,
+    autostart: true,
+    pm_cwd: '/root',
+    env: { PATH: '/usr/bin', HOME: '/root', DISPLAY: ':98' },
+  });
+  const vnc = {
+    name: 'holaday-vnc',
+    pm_id: 6,
+    pid: 70,
+    pm2_env: {
+      ...structuredClone(s.input.configs[0].config),
+      autorestart: false,
+      watch: false,
+      cron_restart: '',
+    },
+  };
+  const managers = [vnc, h.manager];
+  h.io.readManagers = async () => structuredClone(managers);
+  const headedRecovery = await firstRuntime.readFirstCutoverCloudRecovery(h.input, h.io);
+  const before = { ...structuredClone(h.current), observedAtMs: 1100 };
+  const paths = new Map();
+  const fds = new Map();
+  const args = {
+    bash: ['bash', '/opt/holaday-vnc/start.sh'],
+    x11: [
+      'x11vnc',
+      '-display',
+      ':98',
+      '-forever',
+      '-nopw',
+      '-shared',
+      '-noxdamage',
+      '-listen',
+      '127.0.0.1',
+      '-rfbport',
+      '5901',
+    ],
+    web: [
+      '/usr/bin/python3',
+      '/usr/bin/websockify',
+      '--heartbeat',
+      '30',
+      '--web',
+      '/usr/share/novnc',
+      '127.0.0.1:6080',
+      '127.0.0.1:5901',
+    ],
+  };
+  const proc = (pid, ppid, exe, argv) => {
+    const cmd = `${argv.join('\0')}\0`;
+    s.add(`/proc/${pid}/cmdline`, cmd);
+    paths.set(`/proc/${pid}/exe`, exe);
+    fds.set(pid, new Map());
+    return {
+      ...structuredClone(before.processes.find((p) => p.pid === 60)),
+      pid,
+      ppid,
+      start: String(pid * 10),
+      exe,
+      cwd: '/root',
+      argvDigest: sha(cmd),
+      // Actual VNC need not inherit headed hardening or private namespace.
+      noNewPrivs: 0,
+      capabilities: { CapInh: '0', CapPrm: '1', CapEff: '1', CapBnd: '1', CapAmb: '0' },
+    };
+  };
+  const group = [
+    proc(70, 20, '/usr/bin/bash', args.bash),
+    proc(71, 70, '/usr/bin/bash', args.bash),
+    proc(72, 71, '/usr/bin/x11vnc', args.x11),
+    proc(73, 70, '/usr/bin/python3.10', args.web),
+  ];
+  for (let i = 0; i < handlerCount; i++)
+    group.push(proc(74 + i, 73, '/usr/bin/python3.10', args.web));
+  const current = {
+    ...structuredClone(before),
+    observedAtMs: 1200,
+    processes: [...structuredClone(before.processes), ...group].sort((a, b) => a.pid - b.pid),
+  };
+  s.add('/root/.pm2/pm2.pid', '20\n');
+  for (const part of ['stat', 'cmdline', 'status', 'environ'])
+    s.add(`/proc/20/${part}`, s.data.get(`/proc/40/${part}`));
+  s.add('/proc/20/stat', `20 (PM2 daemon) S 1 ${Array(17).fill('0').join(' ')} 200\n`);
+  s.add('/proc/sys/kernel/random/boot_id', `${bootId}\n`);
+  fds.set(
+    43,
+    new Map([
+      ['4', '501'],
+      ['5', '502'],
+      ['6', '700'],
+    ]),
+  );
+  fds.get(72).set('6', '701');
+  fds.get(72).set('7', '801');
+  fds.get(73).set('7', '800');
+  for (let i = 0; i < handlerCount; i++) fds.get(74 + i).set('7', '800');
+  const owner = (pid, fd) => `("qa",pid=${pid},fd=${fd})`;
+  const sockets = {
+    unix: [
+      `u_str LISTEN 0 128 /tmp/.X11-unix/X98 501 * 0 users:(${owner(43, 4)})`,
+      `u_str LISTEN 0 128 @/tmp/.X11-unix/X98 502 * 0 users:(${owner(43, 5)})`,
+      `u_str ESTAB 0 0 /tmp/.X11-unix/X98 700 * 701 users:(${owner(43, 6)})`,
+      `u_str ESTAB 0 0 * 701 * 700 users:(${owner(72, 6)})`,
+    ],
+    ipv4: [
+      `LISTEN 0 32 127.0.0.1:5901 0.0.0.0:* users:(${owner(72, 7)}) ino:801`,
+      `LISTEN 0 32 127.0.0.1:6080 0.0.0.0:* users:(${[owner(73, 7), ...Array.from({ length: handlerCount }, (_, i) => owner(74 + i, 7))].join(',')}) ino:800`,
+    ],
+    ipv6: [],
+  };
+  let now = 1200;
+  const io = {
+    ...s.io,
+    now: () => now,
+    hostname: () => current.hostname,
+    readManagers: h.io.readManagers,
+    readCensus: async () => structuredClone(current),
+    readDisplayListeners: h.io.readDisplayListeners,
+    readFile: async (path) =>
+      h.files.has(path) ? h.files.get(path) : s.data.get(path)?.toString('utf8'),
+    readlink: async (path) => {
+      const fd = /^\/proc\/(\d+)\/fd\/(\d+)$/.exec(path);
+      if (fd) {
+        assert.ok(fds.get(Number(fd[1]))?.has(fd[2]), path);
+        return `socket:[${fds.get(Number(fd[1])).get(fd[2])}]`;
+      }
+      const value = paths.get(path) ?? h.links.get(path) ?? s.links.get(path);
+      assert.ok(value, path);
+      return value;
+    },
+    lstat: async (path) =>
+      path.startsWith('/etc/brave') ||
+      path.startsWith('/var/lib/holaday-deploy') ||
+      path.startsWith('/proc/40/root')
+        ? h.io.lstat(path)
+        : s.io.lstat(path),
+    stat: async (path) => s.io.lstat(paths.get(path) ?? path),
+    readdir: async (path) => {
+      const fd = /^\/proc\/(\d+)\/fd$/.exec(path);
+      if (fd) {
+        assert.ok(fds.has(Number(fd[1])), path);
+        return [...fds.get(Number(fd[1])).keys()];
+      }
+      if (path === h.policy || path === h.source || path === h.privatePolicy)
+        return h.io.readdir(path);
+      return s.io.readdir(path);
+    },
+    exec: async (command, argv) => {
+      assert.equal(command, '/usr/bin/ss');
+      if (JSON.stringify(argv) === JSON.stringify(['-H', '-xapn'])) return sockets.unix.join('\n');
+      if (JSON.stringify(argv) === JSON.stringify(['-H', '-4', '-ltnpe']))
+        return sockets.ipv4.join('\n');
+      assert.deepEqual(argv, ['-H', '-6', '-ltnpe']);
+      return sockets.ipv6.join('\n');
+    },
+  };
+  const sources = await firstRuntime.readFirstCutoverCloudRecoverySources(
+    {
+      attempt: h.input.attempt,
+      configs: managers.map((r) => ({ name: r.name, pmId: r.pm_id, config: r.pm2_env })),
+    },
+    io,
+  );
+  return {
+    input: {
+      attempt: h.input.attempt,
+      name: 'holaday-vnc',
+      pmId: 6,
+      beforeCensus: before,
+      restoreStartedAtMs: 1150,
+      headedRecovery,
+      sources,
+    },
+    io,
+    current,
+    before,
+    managers,
+    sockets,
+    fds,
+    paths,
+    data: s.data,
+    setNow: (value) => {
+      now = value;
+    },
+  };
+}
+
+for (const count of [0, 1, 2]) {
+  test(`native VNC observation accounts for ${count} actual handlers without headed policy inheritance`, async () => {
+    const f = await vncNativeObservationFixture(count);
+    const result = await firstRuntime.readFirstCutoverCloudRecovery(f.input, f.io);
+    assert.equal(result.pmId, 6);
+    assert.equal(result.pid, 70);
+    assert.equal(result.mountNamespace, 'mnt:[1]');
+    assert.equal(Object.hasOwn(result, 'policyDigest'), false);
+    assert.equal(result.processes.length, 4 + count);
+    assert.deepEqual(
+      result.vnc.handlers.map((p) => p.pid),
+      Array.from({ length: count }, (_, i) => 74 + i),
+    );
+    assert.deepEqual(result.vnc.displayPeers, [
+      {
+        client: { pid: 72, start: '720', fd: 6, inode: '701' },
+        server: { pid: 43, start: '430', fd: 6, inode: '700' },
+      },
+    ]);
+    assert.equal(result.vnc.listeners.length, 2);
+    assert.equal(JSON.stringify(result).includes('never-export'), false);
+  });
+}
+
+for (const mode of [
+  'missing-headed',
+  'missing-sources',
+  'forged-headed',
+  'headed-history',
+  'headed-display',
+  'source-digest',
+  'source-stale',
+  'source-future',
+  'config-drift',
+  'clock-rollback',
+  'deleted-python',
+  'detached-handler',
+  'outside-drift',
+  'wrong-peer',
+  'unowned-peer',
+  'unknown-display-client',
+  'missing-listener',
+  'shared-listener',
+  'fd-drift',
+  'census-drift',
+  'manager-drift',
+  'source-drift',
+  'socket-drift',
+]) {
+  test(`native VNC observation refuses ${mode}`, async () => {
+    const f = await vncNativeObservationFixture();
+    const row = (pid) => f.current.processes.find((p) => p.pid === pid);
+    if (mode === 'missing-headed') Reflect.deleteProperty(f.input, 'headedRecovery');
+    if (mode === 'missing-sources') Reflect.deleteProperty(f.input, 'sources');
+    if (mode === 'forged-headed') f.input.headedRecovery.policyDigest = 'f'.repeat(64);
+    if (mode === 'headed-history') f.input.headedRecovery.restartCount++;
+    if (mode === 'headed-display') f.input.headedRecovery.display.pid = 60;
+    if (mode === 'source-digest') f.input.sources.files[0].digest = 'f'.repeat(64);
+    if (mode === 'source-stale') f.setNow(62000);
+    if (mode === 'source-future') f.input.sources.observedAtMs = 1201;
+    if (mode === 'config-drift') f.managers[0].pm2_env.env.PRIVATE_VALUE = 'changed';
+    if (mode === 'clock-rollback') {
+      let calls = 0;
+      f.io.now = () => (++calls < 3 ? 1200 : 1199);
+    }
+    if (mode === 'deleted-python') f.paths.set('/proc/73/exe', '/usr/bin/python3.10 (deleted)');
+    if (mode === 'detached-handler') row(74).ppid = 1;
+    if (mode === 'outside-drift') row(60).start = '999';
+    if (mode === 'wrong-peer') f.sockets.unix[3] = f.sockets.unix[3].replace('* 700', '* 999');
+    if (mode === 'unowned-peer') f.sockets.unix[3] = f.sockets.unix[3].replace(/ users:.*/, '');
+    if (mode === 'unknown-display-client') {
+      f.sockets.unix[3] = f.sockets.unix[3].replace('pid=72', 'pid=60');
+      f.fds.set(60, new Map([['6', '701']]));
+    }
+    if (mode === 'missing-listener') f.sockets.ipv4.shift();
+    if (mode === 'shared-listener') {
+      f.sockets.ipv4[0] = f.sockets.ipv4[0].replace(')) ino:', '),("outside",pid=60,fd=8)) ino:');
+      f.fds.set(60, new Map([['8', '801']]));
+    }
+    if (mode === 'fd-drift') f.fds.get(72).set('6', '999');
+    if (mode === 'census-drift') {
+      let calls = 0;
+      f.io.readCensus = async () => {
+        const value = structuredClone(f.current);
+        if (++calls > 1) value.processes.find((p) => p.pid === 73).start = '999';
+        return value;
+      };
+    }
+    if (mode === 'manager-drift') {
+      const read = f.io.readManagers;
+      let calls = 0;
+      f.io.readManagers = async () => {
+        const rows = await read();
+        if (++calls > 1) rows[0].pm2_env.restart_time++;
+        return rows;
+      };
+    }
+    if (mode === 'source-drift') {
+      const read = f.io.exec;
+      f.io.exec = async (...args) => {
+        f.data.set('/usr/bin/x11vnc', Buffer.from('changed-binary'));
+        return read(...args);
+      };
+    }
+    if (mode === 'socket-drift') {
+      const read = f.io.exec;
+      let calls = 0;
+      f.io.exec = async (...args) => {
+        const value = await read(...args);
+        return ++calls > 3 ? value.replaceAll('701', '702') : value;
+      };
+    }
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudRecovery(f.input, f.io),
+      /CUTOVER_CLOUD_(?:VNC_NATIVE_SOURCE|RECOVERY)_UNPROVEN/,
+    );
+  });
+}
+
+test('native VNC observation returns extra listeners without granting endpoint approval', async () => {
+  const f = await vncNativeObservationFixture(0);
+  f.sockets.ipv6.push('LISTEN 0 32 [::]:5900 [::]:* users:(("x11vnc",pid=72,fd=8)) ino:802');
+  f.fds.get(72).set('8', '802');
+  const result = await firstRuntime.readFirstCutoverCloudRecovery(f.input, f.io);
+  assert.deepEqual(
+    result.vnc.listeners.find((r) => r.port === 5900),
+    {
+      family: 'ipv6',
+      address: '::',
+      port: 5900,
+      inode: '802',
+      owners: [{ pid: 72, start: '720', fd: 8 }],
+    },
+  );
+  assert.equal(result.vnc.handlers.length, 0);
+  assert.equal(Object.hasOwn(result.vnc, 'capabilityVerified'), false);
+});
+
 test('native recovery proof refuses VNC without a native source capability verifier, even with an accepting boolean hook', async () => {
   assert.equal(typeof firstRuntime.readFirstCutoverCloudRecovery, 'function');
   const f = cloudNativeRecoveryFixture();

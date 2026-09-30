@@ -2,6 +2,18 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 单路 native VNC 观察实现（组件验证，非完整验收）
+
+最终新鲜Linux回归已完成：1173/1173、退出0、零跳过，日志在持久QA目录`linux.log`，内存512MiB/1CPU；两份实际hook缓存已用官方同版本Ubuntu3.10.12仅编译已审源码精确匹配（`exact-compiler-v3.json`），未执行钩子。以下“编译比对中/运行状态待定”为这一小节记录过程，最终状态以本段为准，source门禁代码尚未改变。
+
+原工作树HEAD35cb0c8d，Task4BASE不变。仅原runtime/test补七字段VNC观察，保留headed五字段。重新测量双角色来源和配置、headed私有策略/完整树、VNC实际根/监督shell/x11vnc/Python/可变handler树、前后完整census及当前非deleted二进制身份；通过ss与真实fd/inode核验双显示监听和reciprocal ESTAB对端，并明确返回额外监听，不赋予endpoint许可或WS能力。
+
+原三用例实际RED均为未实现分支拒绝；新增拒绝测试暴露原草稿before/current对象共享，已修为独立clone。中断前聚焦27用例、完整runtime331/331、原Linux七模块1173/1173均退出0、零跳过。宿主中断后/private/tmp临时日志/包缓存缺失，不把旧日志写成现存可审计文件。中断后runtime331/331和两文件Biome再次通过，新日志改存原ignored workspace `qa/native-vnc-resume-20260930/`；Linux重新留存日志的运行状态以progress最新条目为准。作者按接口/来源/树/对端/时钟/漂移逐项审查，不称独立或整分支审查。
+
+Ubuntu官方公开python3-apport 2.20.11-0ubuntu82.10中8063字节模块已与此前生产指纹精确匹配，未执行。五个已审启动文件不重采。新单次元数据观察发现两份实际sitecustomize/apport Python3.10缓存；指纹采集仅读4886字节，仅返回哈希和格式头，不导出字节码。源码匹配不等于缓存语义或完整加载选择通过，当前仍在做已审源码编译比对。所有材料/临时脚本在同一持久QA目录，不进入产品发布包。
+
+现有物理VNC夹具仍包含合成headed事件，且QA Python3.13/websockify0.12与产品固定3.10来源契约不同；不得伪造、改名解释器或放宽门禁来称新接口真实联合验收。source未知hook、host pre-effect、classifier、ACK及CLI仍关闭。Task4–6剩余真实联合恢复、停写备份/Mac/非PayPal恢复、全流程故障与不重放、整分支审查和新鲜发布窗口尚未完成。没有生产stop/start、支付历史或密钥修改、PayPal调用、push/PR/merge/deploy。单路，无代理，自动化保持暂停。
+
 ## 2026-09-30 实测来源兼容性修正（本批验收通过，非发布验收）
 
 基线3eb86c6d。原两名Sol在互斥文件范围内实施，主控检查实际diff并串行回归；没有新增框架。原来源读取器和受保护材料校验器只接受实测的可选not-zip-safe单LF标记（size1及精确SHA256），新增真实wrapper需要的/usr/bin/date来源读取、PATH选择及摘要绑定；缺失、被前置路径遮蔽或不可信时仍拒绝。四处既有合成材料同步新增date，不改变真实停止/恢复断言。

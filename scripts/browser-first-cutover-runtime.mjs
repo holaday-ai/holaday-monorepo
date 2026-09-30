@@ -1422,11 +1422,8 @@ export async function readFirstCutoverCloudBrowserRecovery(input, overrides = {}
  * No production restore may dispatch without those native prerequisites.
  */
 export async function readFirstCutoverCloudRecovery(input, overrides = {}) {
-  // Current-disk Python differs from the historical deleted executable. Public
-  // package/module metadata alone does not verify its loaded dependency closure,
-  // actual display ownership or VNC service capability. Never accept a boolean
-  // callback, substitute process shape, or old-running==current-disk assumption.
-  if (input?.name === 'holaday-vnc') throw new Error('CUTOVER_CLOUD_VNC_NATIVE_SOURCE_UNPROVEN');
+  if (input?.name === 'holaday-vnc' && (!input.headedRecovery || !input.sources))
+    throw new Error('CUTOVER_CLOUD_VNC_NATIVE_SOURCE_UNPROVEN');
   const io = {
     ...fs,
     platform: process.platform,
@@ -1442,8 +1439,11 @@ export async function readFirstCutoverCloudRecovery(input, overrides = {}) {
     const { attempt, name, pmId, beforeCensus, restoreStartedAtMs } = copy;
     if (
       !isDeepStrictEqual(copy, JSON.parse(JSON.stringify(copy))) ||
-      Object.keys(copy).sort().join(',') !== 'attempt,beforeCensus,name,pmId,restoreStartedAtMs' ||
-      name !== 'holaday-chromium-headed' ||
+      Object.keys(copy).sort().join(',') !==
+        (name === 'holaday-vnc'
+          ? 'attempt,beforeCensus,headedRecovery,name,pmId,restoreStartedAtMs,sources'
+          : 'attempt,beforeCensus,name,pmId,restoreStartedAtMs') ||
+      !['holaday-chromium-headed', 'holaday-vnc'].includes(name) ||
       io.platform !== 'linux' ||
       io.uid !== 0 ||
       !Number.isSafeInteger(pmId) ||
@@ -1518,6 +1518,16 @@ export async function readFirstCutoverCloudRecovery(input, overrides = {}) {
     const readCensus = io.readCensus ?? (() => readFirstCutoverCloudRecoveryCensus(io));
     const current = structuredClone(await readCensus());
     census(current);
+    if (name === 'holaday-vnc')
+      return await readCloudVncRecovery(copy, io, {
+        reject,
+        census,
+        sha,
+        keys,
+        began,
+        current,
+        readCensus,
+      });
     const runtime = await readFirstCutoverCloudBrowserRecovery({ attempt, pmId }, io);
     const displays = current.processes.filter(
       (p) => p.exe === '/usr/bin/Xvfb' && p.mountNamespace === runtime.mountNamespace,
@@ -1650,6 +1660,538 @@ export async function readFirstCutoverCloudRecovery(input, overrides = {}) {
   } catch {
     reject();
   }
+}
+
+/** Read-only VNC facts. Sources and the retained headed observation are
+ * remeasured here; neither their shape nor this result authorizes a restart. */
+async function readCloudVncRecovery(copy, io, context) {
+  const { reject, census, sha, keys, began, current, readCensus } = context;
+  const {
+    attempt,
+    name,
+    pmId,
+    beforeCensus,
+    restoreStartedAtMs,
+    headedRecovery: headed,
+    sources,
+  } = copy;
+  const stable = ({ observedAtMs: _time, ...value }) => value;
+  let highWater = began;
+  const started = performance.now();
+  const clock = () => {
+    const now = io.now();
+    if (
+      !Number.isSafeInteger(now) ||
+      now < highWater ||
+      now - beforeCensus.observedAtMs > 60000 ||
+      performance.now() - started > 60000
+    )
+      reject();
+    highWater = now;
+    return now;
+  };
+  const fresh = (time) => {
+    if (!Number.isSafeInteger(time) || time < 0 || time > clock() || highWater - time > 60000)
+      reject();
+  };
+  if (
+    !keys(
+      headed,
+      'beforeCensusDigest,bootId,censusDigest,configDigest,display,hostname,launchDigest,mountNamespace,name,observedAtMs,pid,pmId,policyDigest,ppid,processes,purpose,restartCount,start',
+    ) ||
+    headed.purpose !== 'cloud-recovery-native-observation' ||
+    headed.name !== 'holaday-chromium-headed' ||
+    headed.pmId === pmId ||
+    headed.observedAtMs > beforeCensus.observedAtMs ||
+    !hash(headed.beforeCensusDigest) ||
+    !hash(headed.censusDigest)
+  )
+    reject();
+  fresh(headed.observedAtMs);
+  const scope = [
+    { name, pmId },
+    { name: headed.name, pmId: headed.pmId },
+  ];
+  validateFirstCutoverCloudSources(sources, { scope, observed: true });
+  fresh(sources.observedAtMs);
+  if (
+    current.hostname !== beforeCensus.hostname ||
+    current.bootId !== beforeCensus.bootId ||
+    headed.hostname !== current.hostname ||
+    headed.bootId !== current.bootId ||
+    sources.hostname !== current.hostname ||
+    sources.bootId !== current.bootId ||
+    current.observedAtMs < restoreStartedAtMs
+  )
+    reject();
+  fresh(current.observedAtMs);
+  census({
+    hostname: current.hostname,
+    bootId: current.bootId,
+    observedAtMs: headed.observedAtMs,
+    processes: headed.processes,
+  });
+  const byPid = new Map(current.processes.map((p) => [p.pid, p]));
+  const headedIds = new Set(headed.processes.map((p) => p.pid));
+  if (
+    !headedIds.has(headed.pid) ||
+    !headedIds.has(headed.display?.pid) ||
+    !isDeepStrictEqual(
+      current.processes.filter((p) => headedIds.has(p.pid)),
+      headed.processes,
+    ) ||
+    !isDeepStrictEqual(
+      beforeCensus.processes.filter((p) => headedIds.has(p.pid)),
+      headed.processes,
+    )
+  )
+    reject();
+  for (const p of headed.processes) {
+    if (
+      p.mountNamespace !== headed.mountNamespace ||
+      p.state !== 'live' ||
+      p.noNewPrivs !== 1 ||
+      !isDeepStrictEqual(p.uids, [0, 0, 0, 0]) ||
+      Object.values(p.capabilities).some((v) => !/^0+$/.test(v)) ||
+      ![
+        '/opt/brave.com/brave/brave',
+        '/opt/brave.com/brave/chrome_crashpad_handler',
+        '/usr/bin/Xvfb',
+      ].includes(p.exe) ||
+      p.cgroup !== byPid.get(headed.pid).cgroup ||
+      (p.pid !== headed.pid && p.ppid !== 1 && !headedIds.has(p.ppid))
+    )
+      reject();
+  }
+  if (
+    current.processes.some(
+      (p) => p.mountNamespace === headed.mountNamespace && !headedIds.has(p.pid),
+    )
+  )
+    reject();
+  const material = firstCutoverCloudVncRecoveryMaterial({ attempt });
+  const launch = firstCutoverCloudBrowserRecoveryLaunch({ attempt });
+  const readManagers = io.readManagers ?? (() => readFirstCutoverCloudManagers(io));
+  const managerSample = async () => {
+    clock();
+    const rows = await readManagers();
+    if (!Array.isArray(rows) || rows.length > 16384) reject();
+    return scope.map((role) => {
+      const matches = rows.filter((r) => r.name === role.name || r.pm_id === role.pmId);
+      const r = matches[0];
+      if (
+        matches.length !== 1 ||
+        r.name !== role.name ||
+        r.pm_id !== role.pmId ||
+        !Number.isSafeInteger(r.pid) ||
+        r.pid <= 1 ||
+        r.pm2_env?.pm_id !== role.pmId ||
+        r.pm2_env.name !== role.name ||
+        r.pm2_env.status !== 'online' ||
+        r.pm2_env.exec_mode !== 'fork_mode' ||
+        r.pm2_env.autorestart !== false ||
+        r.pm2_env.watch !== false ||
+        r.pm2_env.cron_restart !== '' ||
+        Object.hasOwn(r.pm2_env, 'max_memory_restart') ||
+        Object.hasOwn(r.pm2_env.env ?? {}, 'max_memory_restart') ||
+        !Number.isSafeInteger(r.pm2_env.restart_time) ||
+        r.pm2_env.restart_time < 0
+      )
+        reject();
+      return structuredClone({ name: r.name, pm_id: r.pm_id, pid: r.pid, pm2_env: r.pm2_env });
+    });
+  };
+  const managers = await managerSample();
+  const vnc = managers[0];
+  if (
+    vnc.pm2_env.pm_exec_path !== material.command ||
+    vnc.pm2_env.exec_interpreter !== 'bash' ||
+    (vnc.pm2_env.args != null && !isDeepStrictEqual(vnc.pm2_env.args, [])) ||
+    managers[1].pid !== headed.pid
+  )
+    reject();
+  const configs = managers.map((r) => ({ name: r.name, pmId: r.pm_id, config: r.pm2_env }));
+  const sourceSample = async () => {
+    clock();
+    const measured = await readFirstCutoverCloudRecoverySources({ attempt, configs }, io);
+    fresh(measured.observedAtMs);
+    if (!isDeepStrictEqual(stable(measured), stable(sources))) reject();
+    return measured;
+  };
+  await sourceSample();
+  const readHeaded = async () => {
+    clock();
+    const measured = await readFirstCutoverCloudBrowserRecovery({ attempt, pmId: headed.pmId }, io);
+    fresh(measured.observedAtMs);
+    for (const k of [
+      'name',
+      'pmId',
+      'pid',
+      'start',
+      'ppid',
+      'bootId',
+      'configDigest',
+      'restartCount',
+      'launchDigest',
+      'mountNamespace',
+      'policyDigest',
+    ])
+      if (measured[k] !== headed[k]) reject();
+    const root = byPid.get(headed.pid);
+    if (
+      root.exe !== '/opt/brave.com/brave/brave' ||
+      root.start !== measured.start ||
+      root.ppid !== measured.ppid ||
+      root.argvDigest !==
+        sha(`${launch.args.slice(launch.args.indexOf('/opt/brave.com/brave/brave')).join('\0')}\0`)
+    )
+      reject();
+  };
+  await readHeaded();
+  const display = byPid.get(headed.display.pid);
+  if (
+    !keys(headed.display, 'listeners,pid,start') ||
+    display.exe !== '/usr/bin/Xvfb' ||
+    display.start !== headed.display.start ||
+    display.ppid !== headed.pid ||
+    headed.processes.filter((p) => p.exe === '/usr/bin/Xvfb').length !== 1 ||
+    display.argvDigest !==
+      sha(
+        `${['/usr/bin/Xvfb', ':98', '-screen', '0', '1280x800x24', '-nolisten', 'tcp'].join('\0')}\0`,
+      )
+  )
+    reject();
+  const readDisplay =
+    io.readDisplayListeners ?? ((identity) => readFirstCutoverCloudDisplayListeners(identity, io));
+  const displaySample = async () => {
+    const listeners = await readDisplay({
+      pid: display.pid,
+      start: display.start,
+      mountNamespace: display.mountNamespace,
+    });
+    if (
+      !Array.isArray(listeners) ||
+      listeners.length !== 2 ||
+      listeners.some(
+        (r, i) =>
+          !keys(r, 'inode,path') ||
+          r.path !== ['/tmp/.X11-unix/X98', '@/tmp/.X11-unix/X98'][i] ||
+          !/^[1-9]\d{0,19}$/.test(r.inode),
+      ) ||
+      listeners[0].inode === listeners[1].inode ||
+      !isDeepStrictEqual(listeners, headed.display.listeners)
+    )
+      reject();
+  };
+  await displaySample();
+  const root = byPid.get(vnc.pid);
+  const ids = new Set([vnc.pid]);
+  for (let pass = 0; pass < current.processes.length; pass++) {
+    let added = false;
+    for (const p of current.processes)
+      if (ids.has(p.ppid) && !ids.has(p.pid)) {
+        ids.add(p.pid);
+        added = true;
+      }
+    if (!added) break;
+  }
+  const processes = current.processes.filter((p) => ids.has(p.pid));
+  if (
+    !root ||
+    processes.length < 4 ||
+    processes.length > 512 ||
+    !isDeepStrictEqual(
+      current.processes.filter((p) => !ids.has(p.pid)),
+      beforeCensus.processes,
+    )
+  )
+    reject();
+  const daemonPidText = (await io.readFile('/root/.pm2/pm2.pid', 'utf8')).trim();
+  const daemon = byPid.get(Number(daemonPidText));
+  const daemonStat = await io.readFile(`/proc/${Number(daemonPidText)}/stat`, 'utf8');
+  const daemonParts = daemonStat
+    .slice(daemonStat.lastIndexOf(')') + 2)
+    .trim()
+    .split(/\s+/);
+  if (
+    !/^[1-9]\d*$/.test(daemonPidText) ||
+    !daemon ||
+    daemon.start !== daemonParts[19] ||
+    root.ppid !== daemon.pid ||
+    headed.ppid !== daemon.pid ||
+    root.mountNamespace === headed.mountNamespace
+  )
+    reject();
+  for (const p of processes)
+    if (
+      beforeCensus.processes.some((old) => old.pid === p.pid) ||
+      p.state !== 'live' ||
+      !isDeepStrictEqual(p.uids, [0, 0, 0, 0]) ||
+      p.cgroup !== root.cgroup ||
+      p.mountNamespace !== root.mountNamespace ||
+      p.cwd !== vnc.pm2_env.pm_cwd
+    )
+      reject();
+  const python = sources.files.find((f) => f.path === '/usr/bin/python3')?.resolvedPath;
+  const one = (predicate) => {
+    const rows = processes.filter(predicate);
+    if (rows.length !== 1) reject();
+    return rows[0];
+  };
+  if (root.exe !== '/usr/bin/bash') reject();
+  const supervisor = one((p) => p.ppid === root.pid && p.exe === '/usr/bin/bash');
+  const x11 = one((p) => p.ppid === supervisor.pid && p.exe === '/usr/bin/x11vnc');
+  const web = one((p) => p.ppid === root.pid && p.exe === python);
+  const handlers = processes.filter((p) => p.ppid === web.pid && p.exe === python);
+  if (processes.length !== 4 + handlers.length) reject();
+  const args = new Map([
+    [root.pid, ['bash', material.command]],
+    [supervisor.pid, ['bash', material.command]],
+    [
+      x11.pid,
+      [
+        'x11vnc',
+        '-display',
+        ':98',
+        '-forever',
+        '-nopw',
+        '-shared',
+        '-noxdamage',
+        '-listen',
+        '127.0.0.1',
+        '-rfbport',
+        '5901',
+      ],
+    ],
+    ...[web, ...handlers].map((p) => [
+      p.pid,
+      [
+        '/usr/bin/python3',
+        '/usr/bin/websockify',
+        '--heartbeat',
+        '30',
+        '--web',
+        '/usr/share/novnc',
+        '127.0.0.1:6080',
+        '127.0.0.1:5901',
+      ],
+    ]),
+  ]);
+  const processSample = async () => {
+    for (const p of processes) {
+      clock();
+      const cmd = await io.readFile(`/proc/${p.pid}/cmdline`, 'utf8');
+      if (
+        cmd !== `${args.get(p.pid).join('\0')}\0` ||
+        sha(cmd) !== p.argvDigest ||
+        (await io.readlink(`/proc/${p.pid}/exe`)) !== p.exe
+      )
+        reject();
+      const loaded = await io.stat(`/proc/${p.pid}/exe`);
+      const disk = await io.stat(p.exe);
+      if (
+        !sources.files.some((f) => f.resolvedPath === p.exe) ||
+        ['dev', 'ino', 'mode', 'uid', 'gid', 'size', 'mtimeMs', 'ctimeMs'].some(
+          (k) => loaded[k] !== disk[k],
+        ) ||
+        !disk.isFile()
+      )
+        reject();
+    }
+  };
+  await processSample();
+  const socketSample = async () => {
+    const exec = io.exec ?? execFixed;
+    const read = async (argv) => {
+      clock();
+      const out = await exec('/usr/bin/ss', argv, {
+        env: fixedEnv,
+        timeout: 5000,
+        maxBuffer: 1024 * 1024,
+      });
+      if (typeof out !== 'string' || Buffer.byteLength(out) > 1024 * 1024) reject();
+      const rows = out.trim() ? out.trim().split('\n') : [];
+      if (rows.length > 16384) reject();
+      return rows;
+    };
+    const fds = new Map();
+    const fdSet = async (pid) => {
+      if (!fds.has(pid)) {
+        const names = await io.readdir(`/proc/${pid}/fd`);
+        if (names.length > 4096 || names.some((n) => !/^\d+$/.test(n))) reject();
+        const map = new Map();
+        for (const fd of names) {
+          clock();
+          const link = await io.readlink(`/proc/${pid}/fd/${fd}`);
+          const m = /^socket:\[(\d+)\]$/.exec(link);
+          if (m) map.set(Number(fd), m[1]);
+        }
+        fds.set(pid, map);
+      }
+      return fds.get(pid);
+    };
+    const owners = async (line, inode) => {
+      const tuples = [...line.matchAll(/\("[^"\n]*",pid=(\d+),fd=(\d+)\)/g)];
+      if (
+        !tuples.length ||
+        tuples.length > 512 ||
+        tuples.length !== [...line.matchAll(/\bpid=/g)].length
+      )
+        reject();
+      const result = [];
+      for (const m of tuples) {
+        const pid = Number(m[1]);
+        const fd = Number(m[2]);
+        const p = byPid.get(pid);
+        if (
+          !p ||
+          !Number.isSafeInteger(fd) ||
+          (await fdSet(pid)).get(fd) !== inode ||
+          result.some((r) => r.pid === pid && r.fd === fd)
+        )
+          reject();
+        result.push({ pid, start: p.start, fd });
+      }
+      return result.sort((a, b) => a.pid - b.pid || a.fd - b.fd);
+    };
+    const unix = (await read(['-H', '-xapn'])).map((line) => {
+      const c = line.trim().split(/\s+/);
+      if (c.length < 8) reject();
+      return { line, kind: c[0], state: c[1], path: c[4], inode: c[5], peer: c[7] };
+    });
+    const addresses = ['/tmp/.X11-unix/X98', '@/tmp/.X11-unix/X98'];
+    const relevant = unix.filter((r) => addresses.includes(r.path));
+    const listeners = relevant.filter((r) => r.state === 'LISTEN');
+    if (
+      listeners.length !== 2 ||
+      relevant.some((r) => r.kind !== 'u_str' || !['LISTEN', 'ESTAB'].includes(r.state))
+    )
+      reject();
+    const peers = [];
+    const allPeers = [];
+    for (const r of relevant) {
+      if (!/^[1-9]\d{0,19}$/.test(r.inode) || unix.filter((q) => q.inode === r.inode).length !== 1)
+        reject();
+      const serverOwners = await owners(r.line, r.inode);
+      if (serverOwners.length !== 1 || serverOwners[0].pid !== display.pid) reject();
+      if (r.state === 'LISTEN') {
+        if (
+          !headed.display.listeners.some((q) => q.path === r.path && q.inode === r.inode) ||
+          listeners.filter((q) => q.path === r.path).length !== 1
+        )
+          reject();
+        continue;
+      }
+      const matches = unix.filter((q) => q.inode === r.peer);
+      const peer = matches[0];
+      if (
+        matches.length !== 1 ||
+        peer.state !== 'ESTAB' ||
+        peer.kind !== 'u_str' ||
+        peer.peer !== r.inode
+      )
+        reject();
+      const clientOwners = await owners(peer.line, peer.inode);
+      if (clientOwners.some((p) => !headedIds.has(p.pid) && !ids.has(p.pid))) reject();
+      const edge = {
+        server: { ...serverOwners[0], inode: r.inode },
+        clients: clientOwners.map((p) => ({ ...p, inode: peer.inode })),
+      };
+      allPeers.push(edge);
+      for (const p of clientOwners)
+        if (p.pid === x11.pid)
+          peers.push({
+            client: { ...p, inode: peer.inode },
+            server: { ...serverOwners[0], inode: r.inode },
+          });
+    }
+    if (!peers.length) reject();
+    const tcp = [];
+    for (const family of ['ipv4', 'ipv6'])
+      for (const line of await read(['-H', family === 'ipv4' ? '-4' : '-6', '-ltnpe'])) {
+        const c = line.trim().split(/\s+/);
+        const endpoint = /^(?:\[([^\]]+)\]|(.+)):(\d+)$/.exec(c[3] ?? '');
+        if (c[0] !== 'LISTEN' || !endpoint) reject();
+        const port = Number(endpoint[3]);
+        const ownerIds = [...line.matchAll(/\bpid=(\d+)/g)].map((m) => Number(m[1]));
+        if (![5900, 5901, 6080].includes(port) && !ownerIds.some((pid) => ids.has(pid))) continue;
+        const inode = /\bino:([1-9]\d{0,19})(?:\s|$)/.exec(line)?.[1];
+        if (!inode || port > 65535 || tcp.some((r) => r.inode === inode)) reject();
+        tcp.push({
+          family,
+          address: endpoint[1] ?? endpoint[2],
+          port,
+          inode,
+          owners: await owners(line, inode),
+        });
+      }
+    for (const [port, owner] of [
+      [5901, x11],
+      [6080, web],
+    ]) {
+      const rows = tcp.filter(
+        (r) => r.family === 'ipv4' && r.address === '127.0.0.1' && r.port === port,
+      );
+      const allowed = port === 5901 ? [x11.pid] : [web.pid, ...handlers.map((p) => p.pid)];
+      if (
+        rows.length !== 1 ||
+        !rows[0].owners.some((p) => p.pid === owner.pid) ||
+        rows[0].owners.some((p) => !allowed.includes(p.pid))
+      )
+        reject();
+    }
+    const sort = (a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b));
+    return {
+      listeners: tcp.sort(sort),
+      displayPeers: peers.sort(sort),
+      allPeers: allPeers.sort(sort),
+    };
+  };
+  const sockets = await socketSample();
+  await sourceSample();
+  await processSample();
+  await readHeaded();
+  await displaySample();
+  if (
+    !isDeepStrictEqual(managers, await managerSample()) ||
+    !isDeepStrictEqual(sockets, await socketSample())
+  )
+    reject();
+  const after = structuredClone(await readCensus());
+  census(after);
+  fresh(after.observedAtMs);
+  if (
+    after.observedAtMs < current.observedAtMs ||
+    !isDeepStrictEqual(stable(current), stable(after))
+  )
+    reject();
+  const identity = (p) => ({ pid: p.pid, start: p.start });
+  return {
+    purpose: 'cloud-recovery-native-observation',
+    name,
+    pmId,
+    hostname: current.hostname,
+    bootId: current.bootId,
+    ...identity(root),
+    ppid: root.ppid,
+    configDigest: cutoverRegistrationConfigDigest(vnc.pm2_env),
+    restartCount: vnc.pm2_env.restart_time,
+    launchDigest: sha(material),
+    observedAtMs: clock(),
+    beforeCensusDigest: sha(beforeCensus),
+    censusDigest: sha(after),
+    processes,
+    mountNamespace: root.mountNamespace,
+    display: structuredClone(headed.display),
+    vnc: {
+      supervisor: identity(supervisor),
+      x11vnc: identity(x11),
+      websockify: identity(web),
+      handlers: handlers.map(identity),
+      listeners: sockets.listeners,
+      displayPeers: sockets.displayPeers,
+    },
+  };
 }
 
 export function validateLegacyWorkBoundary(input) {
