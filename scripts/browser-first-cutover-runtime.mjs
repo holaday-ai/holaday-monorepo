@@ -610,7 +610,7 @@ async function cloudPm2Rpc(method, payload, io, beforeSend) {
   if (!['getMonitorData', 'restartProcessId'].includes(method)) fail();
   const before = await io.lstat(io.rpcSocket);
   if (before.uid !== 0 || (before.mode & 0o170000) !== 0o140000) fail();
-  const require = createRequire('/opt/node22/lib/node_modules/pm2/package.json');
+  const require = createRequire('/usr/lib/node_modules/pm2/package.json');
   const socket = require('pm2-axon').socket('req');
   socket.set('retry timeout', 0);
   socket.set('hwm', 0);
@@ -1215,7 +1215,7 @@ export async function readFirstCutoverCloudBrowserRecovery(input, overrides = {}
         // construct its Client/API, initialize files, or invoke a launch method.
         const before = await io.lstat(io.rpcSocket);
         if (before.uid !== 0 || (before.mode & 0o170000) !== 0o140000) reject();
-        const require = createRequire('/opt/node22/lib/node_modules/pm2/package.json');
+        const require = createRequire('/usr/lib/node_modules/pm2/package.json');
         const socket = require('pm2-axon').socket('req');
         const client = new (require('pm2-axon-rpc').Client)(socket);
         const rows = await new Promise((resolve, rejectRead) => {

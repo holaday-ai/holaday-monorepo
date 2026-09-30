@@ -2,6 +2,12 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+### 2026-09-30 首次授权已执行；真实PM2路径缺口修复，修正版传输仍受审批阻塞
+
+用户对原474131字节固定载荷明确授权后，正常审批允许执行。实际结果为`unproven/read-managers`（退出1、stderr空）；没有进入source叶子、没有停止/恢复。额外只读固定路径元数据确认现场`/opt/node22/lib/node_modules/pm2`不存在，而`/usr/lib/node_modules/pm2`及其RPC依赖存在，rpc.sock为root所有socket。原两个native读取位置已对齐来源校验既有/usr/lib路径。新增真实Linux PM2 socket夹具，在断网1CPU/512MiB固定镜像中把真实安装移至该路径，旧代码RED、修正GREEN；两管理器PID/restart计数不变，缺失socket不建daemon。原七模块1185/1185、零跳过，Biome/diff-check通过；仅作者范围审查，非整分支独立审查。
+
+修正版同两份内部源码+相同只读驱动为474111字节，SHA256 `dbfd2c373a368df24c66c867b1f870804d7822eae0a43caeb5aaf2dff6ca08eb`，准备文件`qa/native-vnc-resume-20260930/live-source-reader-v2.mjs`及`read-live-source-v2.sh`。通过正常审批申请再次传到同一Vultr207.148.70.106，被执行前拒绝：原授权只覆盖旧固定字节，不覆盖修改后载荷的内部源码外传。没有SSH重试、没有v2现场结果、不绕过；需要明确批准该修正版传输。原文件/失败证据保留。新增日志managers-{red,green,regression,biome-final}.log和pm2-transport-metadata.json。尚未完成source现场默认观察、真实headed+VNC联合验收、双角色前置能力/归属及Task4–6；发布门槛/CLI仍关闭。自动化暂停、单路、原缓存保留，无push/PR/merge/deploy。
+
 ## 2026-09-30 精确启动源码/cache绑定（本地通过，现场执行前被审批拒绝）
 
 在e2bd23cd之后，仅原runtime/evidence及runtime测试、惰性JSON夹具增加8个已审可选启动文件/缓存的精确路径、大小、SHA、目标绑定，拒绝未知hook/遮蔽/修改/无对应源码cache。原五文件不重采；新增两个实际缓存只采指纹及16字节格式头，共4886字节。Ubuntu官方同版本3.10.12仅编译已审source，两个bodySHA精确匹配，目标代码未执行。Mac3.10.6比较不匹配及临时容器缺libexpat、跨发行版/lib布局冲突均保留，后以/ compiler独立目录解决；不把这些失败计为通过。
