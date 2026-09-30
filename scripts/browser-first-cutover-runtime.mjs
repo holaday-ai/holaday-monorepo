@@ -75,6 +75,95 @@ async function cloudPm2Rpc(method, payload, io, beforeSend) {
   return result;
 }
 
+/** Private native leaf for the original observer's baseline bracket. Full raw
+ * configurations stay in trusted process memory; never publish this return as
+ * evidence or treat a successful read as stop/recovery permission.
+ */
+export async function readFirstCutoverCloudManagers(overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    rpcSocket: '/root/.pm2/rpc.sock',
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_MANAGERS_UNPROVEN');
+  };
+  // Refuse values whose JSON/RPC representation could silently lose data. Do
+  // not normalise unknown fields, monitor values or environment into a proof.
+  const jsonData = (value, ancestors = new Set()) => {
+    if (value === null || ['string', 'boolean'].includes(typeof value)) return;
+    if (typeof value === 'number') {
+      if (
+        !Number.isFinite(value) ||
+        Object.is(value, -0) ||
+        (Number.isInteger(value) && !Number.isSafeInteger(value))
+      )
+        reject();
+      return;
+    }
+    if (
+      typeof value !== 'object' ||
+      Object.getPrototypeOf(value) !==
+        (Array.isArray(value) ? Array.prototype : Object.prototype) ||
+      ancestors.has(value)
+    )
+      reject();
+    ancestors.add(value);
+    for (const key of Reflect.ownKeys(value)) {
+      if (Array.isArray(value) && key === 'length') continue;
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (typeof key !== 'string' || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value'))
+        reject();
+      jsonData(descriptor.value, ancestors);
+    }
+    ancestors.delete(value);
+  };
+  try {
+    if (io.platform !== 'linux' || io.uid !== 0) reject();
+    const rpc = io.rpc ?? ((method, payload) => cloudPm2Rpc(method, payload, io));
+    const rows = await rpc('getMonitorData', {});
+    if (!Array.isArray(rows)) reject();
+    const ids = new Set();
+    for (const row of rows) {
+      if (
+        !row ||
+        Object.getPrototypeOf(row) !== Object.prototype ||
+        ['pm_id', 'name', 'pid', 'pm2_env'].some(
+          (key) => !Object.hasOwn(Object.getOwnPropertyDescriptor(row, key) ?? {}, 'value'),
+        ) ||
+        !Number.isSafeInteger(row.pm_id) ||
+        Object.is(row.pm_id, -0) ||
+        row.pm_id < 0 ||
+        ids.has(row.pm_id) ||
+        typeof row.name !== 'string' ||
+        !row.name ||
+        !Number.isSafeInteger(row.pid) ||
+        Object.is(row.pid, -0) ||
+        row.pid < 0 ||
+        !row.pm2_env ||
+        Object.getPrototypeOf(row.pm2_env) !== Object.prototype ||
+        row.pm2_env.pm_id !== row.pm_id ||
+        row.pm2_env.name !== row.name
+      )
+        reject();
+      ids.add(row.pm_id);
+    }
+    return ['holaday-vnc', 'holaday-chromium-headed'].map((name) => {
+      const selected = rows.filter((row) => row.name === name);
+      if (selected.length !== 1) reject();
+      const row = selected[0];
+      jsonData(row.pm2_env);
+      const pm2_env = JSON.parse(JSON.stringify(row.pm2_env));
+      if (!isDeepStrictEqual(pm2_env, row.pm2_env)) reject();
+      return { pm_id: row.pm_id, name, pid: row.pid, pm2_env };
+    });
+  } catch {
+    reject();
+  }
+}
+
 /** One stopped registration's fixed restore EFFECT, not recovery acceptance.
  * The original site must supply its live, exclusive scope guard: original tree
  * absent, reviewed stopped config, unchanged daemon/tools, protected policies,

@@ -2,6 +2,14 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 原始/停后完整配置接入真实停止路径
+
+从13ddc45f继续的五文件接线：原socket getMonitorData只读叶节点→固定两服务私有完整配置→原observer双侧事实核对→原独立停止观察→停后副本锁定→原ACK；正常读取继续核对已保留副本，不能从恢复后的现场重新制造基线。没有公开原文、替代journal、放宽原分类器或开启CLI。
+
+实际66054/b1e0f7退出0：既有断网/私有PID/1CPU/384MiB/96pids镜像、两份公开procps包摘要校验后仅容器内解压；原--controller夹具使用默认新读取器，原PM2/journal/procfs停止链通过，两个服务与fork后代消失、无回生、无关应用/profile哨兵保留。其他主机/业务事实及服务exe仍合成，绝不是VNC恢复或真实业务恢复证明。日志/private/tmp/holaday-native-baseline-physical-20260930.log。
+
+实际串行25967/659b2b退出0：Linux881/881，ops Node120/60/16/1105、Python12，全零跳过；日志/private/tmp/holaday-native-baseline-{linux,ops}-20260930.log。A的40项及B的206项局部通过不重复累计到最终计数。五文件Biome/diff-check退出0，独立配对复审A/B规范与质量均PASS无发现，/private/tmp/holaday-parallel-baseline-review-20260930.md。未做整分支审查/生产切换；恢复完整树、VNC恢复和非递归现场守卫等剩余门槛不因本批通过而取消。
+
 ## 2026-09-30 并行批次最终验收（不是整分支/上线验收）
 
 A-R1 VNC嵌套启动覆盖四项RED实际失败，修补后8/8通过；最终定向144/144零跳过。独立审查A/B均通过，原I1/M1/A-R1已关闭。主智能体最终串行97538/eefb37退出0：真实Linux821/821，ops Node120/60/16/1085和Python12全部通过、零跳过；日志/private/tmp/holaday-parallel-final-{linux,ops}-20260930.log。30dd60六文件Biome与diff-check退出0；50e77a只读确认仅原健康MySQL/Redis、无QA容器。下段真实Brave证据对应最终仅VNC守卫修补前版本，headed及配置/物理夹具没有随后改动；VNC完整树/物理恢复仍待接线。

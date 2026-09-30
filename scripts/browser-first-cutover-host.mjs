@@ -6,7 +6,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import {
   collectCutoverEvidence,
+  cutoverCloudStopConfigDigest,
   cutoverLegacyInterruptionRisk,
+  cutoverRegistrationConfigDigest,
   readCutoverDatabaseScope,
   readCutoverHostSnapshot,
   readCutoverWorkScope,
@@ -31,6 +33,7 @@ import {
   captureLegacyRuntime,
   initializeFirstMaintenanceState,
   readFirstCutoverCloudBrowserRecovery,
+  readFirstCutoverCloudManagers,
   retireLegacyRuntime,
   validateOwnedLegacyFence,
 } from './browser-first-cutover-runtime.mjs';
@@ -1532,6 +1535,7 @@ async function withApprovedCutoverDatabase(context, overrides, errorCode, read) 
 export async function createFirstCutoverRetirementObserver(input, overrides = {}) {
   const io = {
     readPair: readFirstCutoverHostPair,
+    readCloudManagers: readFirstCutoverCloudManagers,
     readFenceReceipts: async () => [],
     // Trusted live session handles, never a CLI/uploaded process allowlist.
     readExecutionIdentities: async () => [],
@@ -1579,18 +1583,22 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
   try {
     const { reviews, binding, legacyDigest } = structuredClone(input);
     let last = io.now();
+    let scopeCaptured = false;
     const effects = async () => {
       if (!isDeepStrictEqual(await io.journal.assertOwnership(), binding)) fail();
       const record = await io.journal.readFirstCutoverEffects();
       if (
         !Object.entries(binding).every(([key, value]) => record[key] === value) ||
-        record.legacyDigest !== legacyDigest
+        record.legacyDigest !== legacyDigest ||
+        (scopeCaptured && !isDeepStrictEqual(record.cloudMaintenanceScope, originalCloudScope))
       )
         fail();
       return record;
     };
     initialStep = 'initial-effects';
     const first = await effects();
+    const originalCloudScope = structuredClone(first.cloudMaintenanceScope);
+    scopeCaptured = true;
     initialStep = 'initial-state';
     if (
       !['preflight', 'prepared'].includes(first.phase) ||
@@ -1603,12 +1611,90 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       fail();
     let baseline;
     let baselineExecution;
+    // Private, immutable-by-convention originals. No raw getter, journal field
+    // or recovered-state recapture. A lost observer must re-establish the
+    // original pre-effect review, never adopt a post-effect registration.
+    const cloudConfigs = new Map();
+    const bindCloudRows = (rows, pair, captureStoppedPmId) => {
+      if (!originalCloudScope) return [];
+      const original = baseline.hosts.find((h) => h.host === 'vultr').snapshot;
+      const current = pair.hosts.find((h) => h.host === 'vultr').snapshot;
+      if (
+        !Array.isArray(rows) ||
+        rows.length !== 2 ||
+        !Array.isArray(originalCloudScope) ||
+        originalCloudScope.length !== 2 ||
+        current.hostname !== original.hostname ||
+        current.bootId !== original.bootId ||
+        !isDeepStrictEqual(current.pm2Runtime, original.pm2Runtime) ||
+        !isDeepStrictEqual(
+          current.processes.find((p) => p.pid === current.pm2Runtime.pid),
+          original.processes.find((p) => p.pid === original.pm2Runtime.pid),
+        )
+      )
+        fail();
+      return originalCloudScope.map((declaration, i) => {
+        const name = ['holaday-vnc', 'holaday-chromium-headed'][i];
+        const old = original.managers.filter((m) => m.name === name || m.pmId === declaration.pmId);
+        const live = current.managers.filter((m) => m.name === name || m.pmId === declaration.pmId);
+        const row = rows[i];
+        const config = row?.pm2_env;
+        const manager = live[0];
+        if (
+          declaration.name !== name ||
+          old.length !== 1 ||
+          live.length !== 1 ||
+          old[0].name !== name ||
+          old[0].pmId !== declaration.pmId ||
+          old[0].status !== 'online' ||
+          reviews.vultr.review.registrations.find((r) => r.pmId === declaration.pmId)
+            ?.configDigest !== old[0].configDigest ||
+          manager.name !== name ||
+          manager.pmId !== declaration.pmId ||
+          row?.name !== name ||
+          row.pm_id !== declaration.pmId ||
+          row.pid !== manager.pid ||
+          config?.name !== name ||
+          config.pm_id !== declaration.pmId ||
+          config.status !== manager.status ||
+          !['online', 'stopped'].includes(config.status) ||
+          !Number.isSafeInteger(config.restart_time) ||
+          config.restart_time < 0 ||
+          config.restart_time !== old[0].restartCount ||
+          config.restart_time !== manager.restartCount ||
+          cutoverRegistrationConfigDigest(config) !== manager.configDigest ||
+          cutoverCloudStopConfigDigest(config) !== manager.stopConfigDigest ||
+          manager.stopConfigDigest !== old[0].stopConfigDigest
+        )
+          fail();
+        const retained = cloudConfigs.get(declaration.pmId);
+        const expected = config.status === 'online' ? retained?.online : retained?.stopped;
+        if (expected) {
+          if (cutoverRegistrationConfigDigest(config) !== cutoverRegistrationConfigDigest(expected))
+            fail();
+        } else if (config.status === 'stopped') {
+          if (!retained || captureStoppedPmId !== declaration.pmId) fail();
+        } else if (retained || manager.configDigest !== old[0].configDigest) fail();
+        return { pmId: declaration.pmId, config: structuredClone(config) };
+      });
+    };
+    let originalCloudConfigs;
     initialStep = 'reviewed-source';
     const proof = await readReviewedFirstCutoverLegacySource(
       { reviews, inventoryDigest: binding.inventoryDigest, binding },
       {
         readPair: async () => {
+          const raw = originalCloudScope
+            ? structuredClone(await io.readCloudManagers())
+            : undefined;
           baseline = structuredClone(await io.readPair());
+          if (originalCloudScope) {
+            bindCloudRows(raw, baseline);
+            originalCloudConfigs = bindCloudRows(
+              structuredClone(await io.readCloudManagers()),
+              baseline,
+            );
+          }
           return baseline;
         },
         readExecutionIdentities: async () => {
@@ -1622,9 +1708,12 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
     if (
       proof.legacyDigest !== legacyDigest ||
       !isDeepStrictEqual(first, await effects()) ||
+      !isDeepStrictEqual(baselineExecution, await io.readExecutionIdentities()) ||
       !isDeepStrictEqual(await io.readFenceReceipts(), [])
     )
       fail();
+    for (const { pmId, config } of originalCloudConfigs ?? [])
+      cloudConfigs.set(pmId, { online: config });
     const checkClock = () => {
       const now = io.now();
       if (!Number.isSafeInteger(now) || !Number.isSafeInteger(last) || last < 0 || now < last)
@@ -1640,6 +1729,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       candidateIdentity,
       fenceProgress = false,
       cloudProgress = false,
+      captureStoppedPmId = null,
     ) => {
       const operation = fenceProgress
         ? 'fence-progress'
@@ -1682,7 +1772,18 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         )
           fail();
         step = 'host-pair';
+        const raw = originalCloudScope ? structuredClone(await io.readCloudManagers()) : undefined;
         const pair = structuredClone(await io.readPair());
+        let captured;
+        if (originalCloudScope) {
+          step = 'cloud-config';
+          bindCloudRows(raw, pair, captureStoppedPmId);
+          captured = bindCloudRows(
+            structuredClone(await io.readCloudManagers()),
+            pair,
+            captureStoppedPmId,
+          );
+        }
         step = 'stability';
         if (
           !isDeepStrictEqual(before, await effects()) ||
@@ -1719,6 +1820,14 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         );
         step = 'unknown-launchers';
         if (result.unknownLaunchers.length) fail();
+        // Only this private post-effect read may retain a new stopped config,
+        // after independent tree/port/config classification and the full bracket.
+        if (captureStoppedPmId !== null) {
+          const stopped = captured?.find((row) => row.pmId === captureStoppedPmId);
+          if (stopped?.config.status !== 'stopped' || cloudConfigs.get(captureStoppedPmId)?.stopped)
+            fail();
+          cloudConfigs.get(captureStoppedPmId).stopped = stopped.config;
+        }
         if (fenceProgress) return { purpose: 'fence-progress', pair: result };
         if (registrationProgressHost !== undefined)
           return {
@@ -1830,13 +1939,23 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           } catch {
             throw new Error('CUTOVER_CLOUD_STOP_UNCERTAIN');
           }
-          const observed = await read(undefined, undefined, undefined, false, true);
+          const observed = await read(
+            undefined,
+            undefined,
+            undefined,
+            false,
+            true,
+            declaration.pmId,
+          );
           if (
             observed.cloudMaintenance?.find((s) => s.name === declaration.name)?.status !==
             'stopped'
           )
             fail();
-          await guard();
+          const beforeAck = await guard();
+          await read(undefined, undefined, undefined, false, true);
+          if (!isDeepStrictEqual(beforeAck, await effects()) || checkClock() >= maintenanceEndsAtMs)
+            fail();
           await io.journal.recordCloudMaintenanceEvent({ ...base, phase: 'cloud-stopped' });
           await read();
         }

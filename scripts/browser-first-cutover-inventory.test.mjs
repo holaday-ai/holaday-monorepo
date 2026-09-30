@@ -5,6 +5,10 @@ import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import {
+  cutoverCloudStopConfigDigest,
+  cutoverRegistrationConfigDigest,
+} from './browser-cutover-evidence.mjs';
 import * as firstHost from './browser-first-cutover-host.mjs';
 import * as inventory from './browser-first-cutover-inventory.mjs';
 import {
@@ -276,6 +280,8 @@ async function retirementFixture(
   const binding = await journal.assertOwnership();
   beforeBaseline(f, binding);
   f.rejections = [];
+  await journal.bindManifest(manifest);
+  if (f.cloudScope) await journal.bindExecutionSite('6'.repeat(64), f.cloudScope);
   assert.equal(typeof firstHost.createFirstCutoverRetirementObserver, 'function');
   const observer = await firstHost.createFirstCutoverRetirementObserver(
     {
@@ -288,6 +294,10 @@ async function retirementFixture(
       readPair: async () => {
         await f.onRead?.();
         return structuredClone(f.pair);
+      },
+      readCloudManagers: async () => {
+        await f.onCloudRead?.(journal);
+        return f.cloudManagers;
       },
       readFenceReceipts: async () => structuredClone(f.fences ?? []),
       readExecutionIdentities: async () => structuredClone(f.execution ?? []),
@@ -303,8 +313,7 @@ async function retirementFixture(
       },
     },
   );
-  await journal.bindManifest(manifest);
-  if (f.cloudScope) await journal.bindExecutionSite('6'.repeat(64), f.cloudScope);
+  await f.afterObserver?.(journal);
   for (const phase of interrupted
     ? ['prepared', 'orders_fenced', 'legacy_interruption_accepted']
     : ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
@@ -369,7 +378,27 @@ function addCloudPair(f) {
     ['holaday-chromium-headed', [30, 31]],
   ].map(([name, pids]) => {
     const manager = s.managers.find((m) => m.name === name);
-    manager.stopConfigDigest = hash(`launch:${name}`);
+    const pm2_env = {
+      pm_id: manager.pmId,
+      name,
+      status: 'online',
+      watch: false,
+      restart_time: 19,
+      env: { PRIVATE_KEY: 'PRIVATE_CLOUD_BASELINE', nested: { preserve: ['original'] } },
+      unknownFutureField: { preserve: ['original'] },
+    };
+    f.cloudManagers ??= [];
+    f.cloudManagers.push({
+      pm_id: manager.pmId,
+      name,
+      pid: manager.pid,
+      pm2_env,
+    });
+    manager.configDigest = cutoverRegistrationConfigDigest(pm2_env);
+    manager.stopConfigDigest = cutoverCloudStopConfigDigest(pm2_env);
+    manager.restartCount = 19;
+    f.reviews.vultr.review.registrations.find((r) => r.pmId === manager.pmId).configDigest =
+      manager.configDigest;
     return {
       name,
       pmId: manager.pmId,
@@ -386,6 +415,221 @@ function addCloudPair(f) {
     };
   });
 }
+
+function stopCloudFixture(f, pmId) {
+  const s = f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+  const row = f.cloudManagers.find((r) => r.pm_id === pmId);
+  row.pid = 0;
+  row.pm2_env.status = 'stopped';
+  row.pm2_env.exit_code = 130;
+  const m = s.managers.find((m) => m.pmId === pmId);
+  m.pid = 0;
+  m.status = 'stopped';
+  m.configDigest = cutoverRegistrationConfigDigest(row.pm2_env);
+  s.processes = s.processes.filter((p) => !(pmId === 7 ? [40, 41] : [30, 31]).includes(p.pid));
+}
+
+function cloudStopOperations(r, effect) {
+  return {
+    platform: 'linux',
+    uid: 0,
+    verifyFence: async () => ({
+      inventoryDigest: digest,
+      stage: 'orders',
+      observedAtMs: 1000,
+      unsettledWork: 0,
+      externalWork: 0,
+      activeRequests: 0,
+      unknownWriters: 0,
+    }),
+    exec: async (_command, args) => {
+      stopCloudFixture(r.f, Number(args[1]));
+      await effect?.(Number(args[1]));
+    },
+  };
+}
+
+for (const fault of [
+  'missing',
+  'raw-digest',
+  'raw-count',
+  'raw-id',
+  'raw-name',
+  'raw-pid',
+  'stop-digest',
+  'normalized-count',
+  'read-error',
+]) {
+  test(`cloud raw baseline refuses ${fault} during initialization without effects or secrets`, async (t) => {
+    let f;
+    await assert.rejects(
+      retirementFixture(
+        t,
+        (value) => {
+          f = value;
+          addCloudPair(f);
+        },
+        (value) => {
+          const raw = value.cloudManagers[0];
+          const manager = value.pair.hosts
+            .find((h) => h.host === 'vultr')
+            .snapshot.managers.find((m) => m.pmId === 7);
+          if (fault === 'missing') value.cloudManagers = undefined;
+          if (fault === 'raw-digest') raw.pm2_env.unknownFutureField.preserve.push('drift');
+          if (fault === 'raw-count') raw.pm2_env.restart_time++;
+          if (fault === 'raw-id') raw.pm_id++;
+          if (fault === 'raw-name') raw.pm2_env.name = 'other';
+          if (fault === 'raw-pid') raw.pid++;
+          if (fault === 'stop-digest') manager.stopConfigDigest = 'f'.repeat(64);
+          if (fault === 'normalized-count') manager.restartCount++;
+          if (fault === 'read-error')
+            value.onCloudRead = () => {
+              throw Error('PRIVATE_CLOUD_BASELINE');
+            };
+        },
+      ),
+      { message: 'CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN' },
+    );
+    assert.equal(JSON.stringify(f.rejections).includes('PRIVATE_CLOUD_BASELINE'), false);
+  });
+}
+
+test('cloud raw baseline brackets initialization native reads with owned effects and observations', async (t) => {
+  let reads = 0;
+  await assert.rejects(
+    retirementFixture(t, addCloudPair, (f) => {
+      f.onCloudRead = async (journal) => {
+        reads++;
+        if (reads === 1) await journal.persist('prepared', { candidate: 'd'.repeat(40) });
+      };
+    }),
+    /CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN/,
+  );
+  assert.ok(reads > 0);
+});
+
+test('cloud raw baseline detects native drift before first intent and does not expose private getters', async (t) => {
+  const r = await retirementFixture(t, addCloudPair);
+  r.f.cloudManagers[0].pm2_env.env.nested.preserve.push('drift');
+  let commands = 0;
+  await assert.rejects(
+    r.observer.stopCloudServices(
+      { maintenanceEndsAtMs: 8000 },
+      cloudStopOperations(r, () => {
+        commands++;
+      }),
+    ),
+    /UNPROVEN/,
+  );
+  assert.equal(commands, 0);
+  assert.equal((await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents?.length ?? 0, 0);
+  assert.deepEqual(
+    Object.keys(r.observer).sort(),
+    [
+      'read',
+      'readFenceProgress',
+      'readRegistrationProgress',
+      'readUnmanagedProgress',
+      'readWithCandidate',
+      'retireUnmanaged',
+      'stopCloudServices',
+    ].sort(),
+  );
+  assert.equal(JSON.stringify(r.f.rejections).includes('PRIVATE_CLOUD_BASELINE'), false);
+});
+
+for (const fault of [
+  'raw-digest',
+  'raw-count',
+  'raw-error',
+  'effect-race',
+  'fence-race',
+  'execution-race',
+]) {
+  test(`cloud raw stopped capture refuses ${fault} before stop ACK and second effect`, async (t) => {
+    const r = await retirementFixture(t, addCloudPair);
+    let commands = 0;
+    await assert.rejects(
+      r.observer.stopCloudServices(
+        { maintenanceEndsAtMs: 8000 },
+        cloudStopOperations(r, () => {
+          commands++;
+          const row = r.f.cloudManagers[0];
+          if (fault === 'raw-digest') row.pm2_env.unknownFutureField.preserve.push('drift');
+          if (fault === 'raw-count') row.pm2_env.restart_time++;
+          r.f.onCloudRead = async (journal) => {
+            if (fault === 'raw-error') throw Error('PRIVATE_CLOUD_BASELINE');
+            if (fault === 'effect-race')
+              await journal.recordCloudMaintenanceEvent({
+                ...(await journal.readFirstCutoverEffects()).cloudMaintenanceEvents[0],
+                phase: 'cloud-stopped',
+              });
+            if (fault === 'fence-race') r.f.fences = [{ unproved: true }];
+            if (fault === 'execution-race') r.f.execution = [{ unproved: true }];
+          };
+        }),
+      ),
+      /UNPROVEN/,
+    );
+    assert.equal(commands, 1);
+    const events = (await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents;
+    assert.equal(events.length, fault === 'effect-race' ? 2 : 1);
+    assert.equal(JSON.stringify(r.f.rejections).includes('PRIVATE_CLOUD_BASELINE'), false);
+  });
+}
+
+test('cloud raw stopped baseline remains privately immutable against later exit-code recapture', async (t) => {
+  const r = await retirementFixture(t, addCloudPair);
+  await r.observer.stopCloudServices({ maintenanceEndsAtMs: 8000 }, cloudStopOperations(r));
+  const observed = await r.observer.read();
+  assert.equal(JSON.stringify(observed).includes('PRIVATE_CLOUD_BASELINE'), false);
+  r.f.cloudManagers[0].pm2_env.exit_code = 0;
+  const s = r.f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+  s.managers.find((m) => m.pmId === 7).configDigest = cutoverRegistrationConfigDigest(
+    r.f.cloudManagers[0].pm2_env,
+  );
+  await assert.rejects(r.observer.read(), /UNPROVEN/);
+  assert.equal((await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 4);
+});
+
+test('non-cloud observer never requests private cloud configuration', async (t) => {
+  const r = await retirementFixture(
+    t,
+    () => {},
+    (f) => {
+      f.onCloudRead = () => {
+        throw Error('must not read unrelated environment');
+      };
+    },
+  );
+  assert.equal((await r.observer.read()).unknownLaunchers.length, 0);
+});
+
+test('cloud raw baseline cannot be added after an unscoped observer was initialized', async (t) => {
+  let reads = 0;
+  const r = await retirementFixture(t, addCloudPair, (f) => {
+    const lateScope = f.cloudScope;
+    f.cloudScope = undefined;
+    f.onCloudRead = () => {
+      reads++;
+    };
+    f.afterObserver = (journal) => journal.bindExecutionSite('6'.repeat(64), lateScope);
+  });
+  await assert.rejects(r.observer.read(), /UNPROVEN/);
+  let commands = 0;
+  await assert.rejects(
+    r.observer.stopCloudServices(
+      { maintenanceEndsAtMs: 8000 },
+      cloudStopOperations(r, () => {
+        commands++;
+      }),
+    ),
+    /UNPROVEN/,
+  );
+  assert.equal(reads, 0);
+  assert.equal(commands, 0);
+  assert.equal((await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents?.length ?? 0, 0);
+});
 
 test('cloud controller records intent before exact numeric PM2 stop and independently confirms both preserved trees absent', async (t) => {
   const r = await retirementFixture(t, addCloudPair);
@@ -413,13 +657,7 @@ test('cloud controller records intent before exact numeric PM2 stop and independ
         assert.equal(options.cwd, '/');
         assert.equal(options.env.PM2_HOME, '/root/.pm2');
         commands.push(args);
-        const s = r.f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
-        const ids = args[1] === '7' ? [40, 41] : [30, 31];
-        const m = s.managers.find((m) => m.pmId === Number(args[1]));
-        m.pid = 0;
-        m.status = 'stopped';
-        m.configDigest = hash(`stopped:${m.name}`);
-        s.processes = s.processes.filter((p) => !ids.includes(p.pid));
+        stopCloudFixture(r.f, Number(args[1]));
       },
     },
   );
@@ -471,10 +709,8 @@ for (const fault of [
         commands++;
         const s = r.f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
         const child = s.processes.find((p) => p.pid === 41);
-        s.processes = s.processes.filter((p) => ![40, 41].includes(p.pid));
+        stopCloudFixture(r.f, 7);
         const m = s.managers.find((m) => m.pmId === 7);
-        m.pid = 0;
-        m.status = 'stopped';
         if (fault === 'lost-ack') throw new Error('private stderr must not escape');
         if (fault === 'surviving-child') s.processes.push(child);
         if (fault === 'reparented-child') s.processes.push({ ...child, ppid: 1 });

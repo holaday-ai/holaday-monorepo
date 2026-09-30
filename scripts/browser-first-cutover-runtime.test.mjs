@@ -16,6 +16,398 @@ import {
 import * as firstRuntime from './browser-first-cutover-runtime.mjs';
 import { retireMaintenanceRuntime } from './browser-maintenance-runtime.mjs';
 
+function cloudManagersFixture() {
+  const vnc = {
+    pm_id: 6,
+    name: 'holaday-vnc',
+    pid: 40,
+    pm2_env: {
+      pm_id: 6,
+      name: 'holaday-vnc',
+      status: 'online',
+      restart_time: 12,
+      pm_exec_path: '/opt/holaday-vnc/start.sh',
+      args: ['--retained', 'literal value'],
+      env: { PRIVATE_VALUE: 'selected-private-value' },
+      unknown_future_option: { values: [null, false, 1.5, 'kept'] },
+      axm_monitor: { value: 2 },
+    },
+    extra: 'not part of the private projection',
+  };
+  const headed = {
+    pm_id: 7,
+    name: 'holaday-chromium-headed',
+    pid: 41,
+    pm2_env: {
+      pm_id: 7,
+      name: 'holaday-chromium-headed',
+      status: 'online',
+      restart_time: 9,
+      pm_exec_path: '/opt/holaday-headed/start.sh',
+      args: [],
+      env: { DISPLAY: ':98' },
+    },
+  };
+  const unrelated = {
+    pm_id: 8,
+    name: 'unrelated',
+    pid: 42,
+    pm2_env: { pm_id: 8, name: 'unrelated', env: { PRIVATE_VALUE: 'unrelated-private-value' } },
+  };
+  const rows = [headed, unrelated, vnc];
+  const calls = [];
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    rpc: async (method, payload) => {
+      calls.push({ method, payload });
+      return rows;
+    },
+    exec: async () => assert.fail('no PM2 CLI or daemon startup'),
+    writeFile: async () => assert.fail('no daemon files'),
+  };
+  return { vnc, headed, unrelated, rows, calls, io };
+}
+
+test('cloud managers privately returns only the ordered fixed pair with lossless detached configurations', async () => {
+  const f = cloudManagersFixture();
+  assert.equal(typeof firstRuntime.readFirstCutoverCloudManagers, 'function');
+  const result = await firstRuntime.readFirstCutoverCloudManagers(f.io);
+  assert.deepEqual(result, [
+    { pm_id: 6, name: 'holaday-vnc', pid: 40, pm2_env: f.vnc.pm2_env },
+    { pm_id: 7, name: 'holaday-chromium-headed', pid: 41, pm2_env: f.headed.pm2_env },
+  ]);
+  assert.deepEqual(f.calls, [{ method: 'getMonitorData', payload: {} }]);
+  assert.equal(JSON.stringify(result).includes('unrelated-private-value'), false);
+  result[0].pm2_env.env.PRIVATE_VALUE = 'changed';
+  result[0].pm2_env.args.push('changed');
+  assert.equal(f.vnc.pm2_env.env.PRIVATE_VALUE, 'selected-private-value');
+  assert.deepEqual(f.vnc.pm2_env.args, ['--retained', 'literal value']);
+});
+
+test('cloud managers reads the stopped pair without interpreting it as recovery proof', async () => {
+  const f = cloudManagersFixture();
+  for (const row of [f.vnc, f.headed]) {
+    row.pid = 0;
+    row.pm2_env.status = 'stopped';
+  }
+  assert.equal(typeof firstRuntime.readFirstCutoverCloudManagers, 'function');
+  const result = await firstRuntime.readFirstCutoverCloudManagers(f.io);
+  assert.equal(result[0].pid, 0);
+  assert.equal(result[1].pid, 0);
+  assert.equal(result[0].pm2_env.restart_time, 12);
+});
+
+test('cloud managers accepts numeric PM2 ID zero without normalising it', async () => {
+  const f = cloudManagersFixture();
+  f.vnc.pm_id = 0;
+  f.vnc.pm2_env.pm_id = 0;
+  const result = await firstRuntime.readFirstCutoverCloudManagers(f.io);
+  assert.equal(result[0].pm_id, 0);
+  assert.equal(result[0].pm2_env.pm_id, 0);
+});
+
+for (const [name, fault] of [
+  [
+    'missing VNC',
+    (f) => {
+      f.rows.pop();
+    },
+  ],
+  [
+    'missing headed',
+    (f) => {
+      f.rows.shift();
+    },
+  ],
+  [
+    'duplicate fixed role',
+    (f) => {
+      const duplicate = structuredClone(f.vnc);
+      duplicate.pm_id = 9;
+      duplicate.pm2_env.pm_id = 9;
+      f.rows.push(duplicate);
+    },
+  ],
+  [
+    'same ID across roles',
+    (f) => {
+      f.headed.pm_id = 6;
+      f.headed.pm2_env.pm_id = 6;
+    },
+  ],
+  [
+    'unrelated ID collision',
+    (f) => {
+      f.unrelated.pm_id = 6;
+      f.unrelated.pm2_env.pm_id = 6;
+    },
+  ],
+  [
+    'nested ID collision',
+    (f) => {
+      f.unrelated.pm2_env.pm_id = 6;
+    },
+  ],
+  [
+    'wrong nested role',
+    (f) => {
+      f.vnc.pm2_env.name = 'unrelated';
+    },
+  ],
+  [
+    'wrong top-level role',
+    (f) => {
+      f.vnc.name = 'unrelated';
+    },
+  ],
+  [
+    'missing nested name',
+    (f) => {
+      f.vnc.pm2_env.name = undefined;
+    },
+  ],
+  [
+    'wrong nested ID',
+    (f) => {
+      f.vnc.pm2_env.pm_id = 9;
+    },
+  ],
+  [
+    'missing nested ID',
+    (f) => {
+      f.vnc.pm2_env.pm_id = undefined;
+    },
+  ],
+  [
+    'string ID',
+    (f) => {
+      f.vnc.pm_id = '6';
+    },
+  ],
+  [
+    'unsafe ID',
+    (f) => {
+      f.vnc.pm_id = Number.MAX_SAFE_INTEGER + 1;
+    },
+  ],
+  [
+    'negative ID',
+    (f) => {
+      f.vnc.pm_id = -1;
+    },
+  ],
+  [
+    'negative-zero ID',
+    (f) => {
+      f.vnc.pm_id = -0;
+      f.vnc.pm2_env.pm_id = 0;
+    },
+  ],
+  [
+    'invalid pid',
+    (f) => {
+      f.vnc.pid = 1.5;
+    },
+  ],
+  [
+    'negative pid',
+    (f) => {
+      f.vnc.pid = -1;
+    },
+  ],
+  [
+    'negative-zero pid',
+    (f) => {
+      f.vnc.pid = -0;
+    },
+  ],
+  [
+    'missing config',
+    (f) => {
+      f.vnc.pm2_env = undefined;
+    },
+  ],
+  [
+    'array config',
+    (f) => {
+      f.vnc.pm2_env = [];
+    },
+  ],
+  [
+    'malformed list entry',
+    (f) => {
+      f.rows.push(null);
+    },
+  ],
+  [
+    'undefined config value',
+    (f) => {
+      f.vnc.pm2_env.extra = undefined;
+    },
+  ],
+  [
+    'nonfinite config value',
+    (f) => {
+      f.vnc.pm2_env.extra = Number.NaN;
+    },
+  ],
+  [
+    'unsafe integer config value',
+    (f) => {
+      f.vnc.pm2_env.extra = Number.MAX_SAFE_INTEGER + 1;
+    },
+  ],
+  [
+    'negative zero config value',
+    (f) => {
+      f.vnc.pm2_env.extra = -0;
+    },
+  ],
+  [
+    'bigint config value',
+    (f) => {
+      f.vnc.pm2_env.extra = 1n;
+    },
+  ],
+  [
+    'date config value',
+    (f) => {
+      f.vnc.pm2_env.extra = new Date(0);
+    },
+  ],
+  [
+    'map config value',
+    (f) => {
+      f.vnc.pm2_env.extra = new Map([['key', 'value']]);
+    },
+  ],
+  [
+    'sparse config array',
+    (f) => {
+      f.vnc.pm2_env.extra = Array(2);
+    },
+  ],
+  [
+    'symbol config key',
+    (f) => {
+      f.vnc.pm2_env[Symbol('hidden')] = 'private';
+    },
+  ],
+  [
+    'nonenumerable config key',
+    (f) => {
+      Object.defineProperty(f.vnc.pm2_env, 'hidden', { value: 'private' });
+    },
+  ],
+  [
+    'accessor config value',
+    (f) => {
+      Object.defineProperty(f.vnc.pm2_env, 'extra', { enumerable: true, get: () => 'private' });
+    },
+  ],
+  [
+    'cyclic config',
+    (f) => {
+      f.vnc.pm2_env.extra = f.vnc.pm2_env;
+    },
+  ],
+]) {
+  test(`cloud managers refuses ${name} without raw errors or retries`, async () => {
+    const f = cloudManagersFixture();
+    fault(f);
+    assert.equal(typeof firstRuntime.readFirstCutoverCloudManagers, 'function');
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudManagers(f.io),
+      /^Error: CUTOVER_CLOUD_MANAGERS_UNPROVEN$/,
+    );
+    assert.deepEqual(f.calls, [{ method: 'getMonitorData', payload: {} }]);
+  });
+}
+
+test('cloud managers refuses non-Linux or non-root before reading RPC', async () => {
+  for (const override of [{ platform: 'darwin' }, { uid: 998 }]) {
+    const f = cloudManagersFixture();
+    Object.assign(f.io, override);
+    assert.equal(typeof firstRuntime.readFirstCutoverCloudManagers, 'function');
+    await assert.rejects(firstRuntime.readFirstCutoverCloudManagers(f.io), /MANAGERS_UNPROVEN/);
+    assert.equal(f.calls.length, 0);
+  }
+});
+
+test('cloud managers sanitises transport and non-array responses without retrying', async () => {
+  for (const kind of ['throw', 'non-array']) {
+    let calls = 0;
+    assert.equal(typeof firstRuntime.readFirstCutoverCloudManagers, 'function');
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudManagers({
+        platform: 'linux',
+        uid: 0,
+        rpc: async () => {
+          calls++;
+          if (kind === 'throw') throw Error('raw unrelated environment secret');
+          return { private: 'must-not-escape' };
+        },
+      }),
+      (error) => {
+        assert.equal(error.message, 'CUTOVER_CLOUD_MANAGERS_UNPROVEN');
+        assert.equal(error.cause, undefined);
+        return true;
+      },
+    );
+    assert.equal(calls, 1);
+  }
+});
+
+test('cloud managers missing native socket does not create daemon files or invoke a CLI', async (t) => {
+  const directory = await fs.mkdtemp(join(tmpdir(), 'cutover-cloud-managers-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  let cliCalls = 0;
+  assert.equal(typeof firstRuntime.readFirstCutoverCloudManagers, 'function');
+  await assert.rejects(
+    firstRuntime.readFirstCutoverCloudManagers({
+      platform: 'linux',
+      uid: 0,
+      rpcSocket: join(directory, 'rpc.sock'),
+      exec: async () => {
+        cliCalls++;
+        throw Error('no PM2 startup');
+      },
+    }),
+    /^Error: CUTOVER_CLOUD_MANAGERS_UNPROVEN$/,
+  );
+  assert.equal(cliCalls, 0);
+  assert.deepEqual(await fs.readdir(directory), []);
+});
+
+test('cloud managers refuses an unowned or non-socket native endpoint before transport use', async () => {
+  for (const stat of [
+    { uid: 998, mode: 0o140600 },
+    { uid: 0, mode: 0o100600 },
+  ]) {
+    let reads = 0;
+    let cliCalls = 0;
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudManagers({
+        platform: 'linux',
+        uid: 0,
+        lstat: async (path) => {
+          assert.equal(path, '/root/.pm2/rpc.sock');
+          reads++;
+          return stat;
+        },
+        exec: async () => {
+          cliCalls++;
+          throw Error('no fallback');
+        },
+      }),
+      /^Error: CUTOVER_CLOUD_MANAGERS_UNPROVEN$/,
+    );
+    assert.equal(reads, 1);
+    assert.equal(cliCalls, 0);
+  }
+});
+
 function cloudRestartFixture() {
   const f = cloudRecoveryObservationFixture();
   const manager = structuredClone(f.manager);

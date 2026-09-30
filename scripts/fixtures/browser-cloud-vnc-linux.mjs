@@ -169,7 +169,10 @@ if (controller) {
       watch: r.pm2_env.watch,
       configDigest: cutoverRegistrationConfigDigest(r.pm2_env),
       ...(['holaday-vnc', 'holaday-chromium-headed'].includes(r.name)
-        ? { stopConfigDigest: cutoverCloudStopConfigDigest(r.pm2_env) }
+        ? {
+            stopConfigDigest: cutoverCloudStopConfigDigest(r.pm2_env),
+            restartCount: r.pm2_env.restart_time,
+          }
         : {}),
     }));
     const all = [];
@@ -270,10 +273,6 @@ if (controller) {
   });
   try {
     const binding = await journal.assertOwnership();
-    const observer = await createFirstCutoverRetirementObserver(
-      { reviews, binding, legacyDigest: proof.legacyDigest },
-      { journal, readPair: pair, now: Date.now },
-    );
     const scope = ['holaday-vnc', 'holaday-chromium-headed'].map((name) => {
       const manager = original.managers.find((m) => m.name === name);
       const ids = new Set([manager.pid]);
@@ -296,6 +295,10 @@ if (controller) {
     });
     await journal.bindManifest(manifest);
     await journal.bindExecutionSite('6'.repeat(64), scope);
+    const observer = await createFirstCutoverRetirementObserver(
+      { reviews, binding, legacyDigest: proof.legacyDigest },
+      { journal, readPair: pair, now: Date.now },
+    );
     for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
       await journal.persist(phase, { candidate: binding.candidate });
     const configBefore = await rows();

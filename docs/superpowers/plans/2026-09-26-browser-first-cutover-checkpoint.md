@@ -6,6 +6,14 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 原观察器完整配置接线通过（前批已保存13ddc45f）
+
+前批八文件已保存为13ddc45f。本批继续同一主线：复用原socket只读RPC取得固定两服务完整配置，在原observer初始化与真实停止路径内保留私有原始/停后副本，以原完整摘要、stop摘要、历史计数、主机/boot/daemon、原审查和双侧journal/fence/execution观察绑定。缺失、漂移或后补scope拒绝；停后核验失败不写ACK、不执行第二次停止。不增加公开原文getter、持久格式或替代协调器，原inventory超过四条事件仍拒绝。
+
+真实原--controller物理夹具66054/b1e0f7退出0：默认新RPC、原observer/journal和精确PM2停止实际串通，两个VNC服务及fork后代消失、无重启、无关应用/合成profile保留；其他主机/业务事实与VNC服务可执行文件仍合成，不是生产或完整恢复。串行25967/659b2b退出0：真实Linux881/881，ops Node120/60/16/1105和Python12，全部零跳过；五文件Biome/diff-check通过。日志/private/tmp/holaday-native-baseline-{physical,linux,ops}-20260930.log。两路独立复审均通过无发现，报告/private/tmp/holaday-parallel-baseline-review-20260930.md。
+
+下一步是原observer消费保留的停后配置完成恢复核对、完整新树与VNC恢复证明，以及不递归调用旧观察器的现场守卫；不能把同ID RPC或八条日志当恢复事实。随后仍需独立现场facts、真实停写/Mac恢复、非PayPal恢复、完整演练和整分支审查及新鲜窗口。CLI关闭；未生产操作、推送、PR、合并或部署。原缓存和Task4 BASE保持，代理确切状态及本批提交见progress顶部。
+
 ### 2026-09-30 两路并行实现、纠错及复审通过，待保存
 
 最终VNC启动字段覆盖修补已完成，实际RED四项失败后GREEN8/8；独立A复审关闭全部发现，B审查通过。最终统一串行验证退出0：真实Linux821/821；ops Node120/60/16/1085、Python12；全部零跳过，六个JS/CJS文件Biome及diff-check通过。日志/private/tmp/holaday-parallel-final-{linux,ops}-20260930.log。真实Brave35.201秒跨巡检证明见下段，早于最后仅VNC的六行影子字段修补，不能冒称VNC物理恢复通过。最终仅原健康MySQL/Redis，无QA容器或运行中的重型测试。
