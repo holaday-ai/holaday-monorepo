@@ -6,6 +6,12 @@
 
 ## 最新恢复点（优先于下方历史段落）
 
+### 2026-09-30 来源启动规则已验证；具体源码传输被自动审批拒绝
+
+VNC只读观察组件已保存e2bd23cd。下一批原source读取器/材料校验器只接受8个可选精确已审文件及cache；两实际cache指纹由同版Ubuntu3.10.12只编译已审源码匹配，不执行hook、不重采此前五文件。新用例2RED→12GREEN；完整runtime/evidence646/646、最终Linux1185/1185、零跳过，四文件Biome/diff通过，作者范围审查。日志/最新精简接续已持久保存至`.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/native-vnc-resume-20260930/resume.md`，避免依赖已丢失的/private/tmp。
+
+现场default source叶子检查在执行前被自动审批拒绝：474131字节内部runtime/evidence+只读驱动（SHA75c4d54c46d5474633d408d5adeaa99d17bf68300af1f7b0ead74763aaa9c680）经原严格SSH跳板发往root@207.148.70.106，审核认为缺少这份具体源码向该目的地传输的明确授权。无SSH执行/现场输出，禁止换通道、改载荷绕过；精准范围见同目录approval-scope.md。用户需明确允许该一次传输后再走正常审批。所有无关工作已保存，自动化保持暂停，无代理。完整Task4–6、真实headed+VNC联合验收、备份/Mac/非PayPal/整分支审查/新鲜发布窗口尚未完成；host/classifier/ACK/CLI仍关闭，无push/PR/merge/deploy。原__pycache__保留。
+
 ### 2026-09-30 新鲜组件证据已恢复，两份启动缓存已核对
 
 持久目录`qa/native-vnc-resume-20260930/`中重新取得Linux1173/1173、runtime331/331、零跳过，Biome/diff-check通过；原镜像ff58ba97仍在，Docker启动后原MySQL/Redis自动恢复健康。两份实际hook缓存仅采哈希/格式头共4886字节，无源码导出或远端Python执行；用官方同版本Ubuntu3.10.12在隔离容器只编译已审源码，两个缓存体SHA均精确一致，报告`exact-compiler-v3.json`。Mac3.10.6不匹配及容器依赖/布局失败均已定位并保留记录，不算通过。下一步在既有source接口严格绑定这些已审文件/缓存指纹；未知钩子、遮蔽及漂移继续拒绝。native只读观察组件准备保存，真实联合headed+VNC/整项验收及发布仍未完成；作者审查不等于整分支独立审查。自动化保持暂停，无代理/生产变更/支付历史或密钥变更。

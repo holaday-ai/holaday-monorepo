@@ -11,6 +11,7 @@ import {
   cutoverLegacyInterruptionRisk,
   cutoverRegistrationConfigDigest,
   firstCutoverCloudDisplayBootstrap,
+  firstCutoverCloudReviewedPythonStartup,
   readFirstCutoverCloudDisplayListeners,
   readFirstCutoverCloudRecoveryCensus,
   validateFirstCutoverCloudSources,
@@ -130,7 +131,11 @@ export async function readFirstCutoverCloudRecoverySources(input, overrides = {}
         )
           reject();
         const normalized = entry.name.toLowerCase().replace(/[-_.]+/g, '-');
-        if (!/^(?:websockify|sitecustomize|usercustomize|re|importlib)(?:-|$)/.test(normalized))
+        if (
+          !/^(?:websockify|sitecustomize|usercustomize|apport-python-hook|re|importlib)(?:-|$)/.test(
+            normalized,
+          )
+        )
           continue;
         if (entry.name !== 'websockify' || entrySeen) reject();
         entrySeen = true;
@@ -166,8 +171,10 @@ export async function readFirstCutoverCloudRecoverySources(input, overrides = {}
   const source = async (p, text = false) => {
     if (files.length >= 128) reject();
     const real = await chain(p);
-    const allowed =
-      p === '/bin/sh'
+    const startupFile = firstCutoverCloudReviewedPythonStartup.find((row) => row.path === p);
+    const allowed = startupFile
+      ? [startupFile.resolvedPath]
+      : p === '/bin/sh'
         ? ['/bin/sh', '/usr/bin/sh', '/usr/bin/dash', '/usr/bin/bash']
         : p === '/usr/bin/python3'
           ? ['/usr/bin/python3', '/usr/bin/python3.10']
@@ -223,6 +230,26 @@ export async function readFirstCutoverCloudRecoverySources(input, overrides = {}
     files.push(row);
     if (text) texts.set(p, Buffer.concat(chunks).toString('utf8'));
     return row;
+  };
+  const startupDirectory = async (path, names) => {
+    const known = new Set(firstCutoverCloudReviewedPythonStartup.map((row) => row.path));
+    const selected = names.filter((n) =>
+      /\.pth$|^(?:sitecustomize|usercustomize|apport_python_hook)(?:[.-]|$)/.test(n),
+    );
+    for (const name of selected) {
+      const file = posix.join(path, name);
+      if (!known.has(file)) reject();
+      await source(file, true);
+    }
+    if (names.includes('__pycache__')) {
+      const directoryPath = posix.join(path, '__pycache__');
+      for (const name of await directory(directoryPath)) {
+        if (!/^(?:sitecustomize|usercustomize|apport_python_hook)(?:[.-]|$)/.test(name)) continue;
+        const file = posix.join(directoryPath, name);
+        if (!known.has(file)) reject();
+        await source(file, true);
+      }
+    }
   };
   try {
     if (
@@ -314,7 +341,7 @@ export async function readFirstCutoverCloudRecoverySources(input, overrides = {}
       reject();
     const root = '/usr/lib/python3/dist-packages';
     const system = await directory(root);
-    if (system.some((n) => /\.pth$|^(?:sitecustomize|usercustomize)(?:\.|$)/.test(n))) reject();
+    await startupDirectory(root, system);
     const metas = system.filter((n) => /^websockify.*\.(?:egg|dist)-info$/i.test(n));
     if (
       metas.some((n) => !/^websockify(?:-[0-9][a-zA-Z0-9._+-]{0,63})?\.(?:egg|dist)-info$/.test(n))
@@ -402,8 +429,8 @@ export async function readFirstCutoverCloudRecoverySources(input, overrides = {}
         absentPaths.push(p);
         continue;
       }
-      if (names.some((n) => /\.pth$|^(?:sitecustomize|usercustomize|websockify)(?:[.-]|$)/.test(n)))
-        reject();
+      await startupDirectory(p, names);
+      if (names.some((n) => /^websockify(?:[.-]|$)/.test(n))) reject();
       if (p.includes('/usr/local/') && names.length) reject();
     }
     for (const p of absentPaths) await absent(p);

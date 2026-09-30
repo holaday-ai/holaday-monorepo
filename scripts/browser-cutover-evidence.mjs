@@ -34,6 +34,44 @@ const cloudSourceTools = [
   '/usr/lib/python3.10/site.py',
   '/usr/lib/python3.10/importlib/metadata/__init__.py',
 ];
+// Exact reviewed Ubuntu startup material. Optional presence is observed, never
+// a wildcard permission for other hooks. Cache bytes were reproduced with the
+// matching Ubuntu compiler from reviewed source without executing that source.
+export const firstCutoverCloudReviewedPythonStartup = Object.freeze(
+  [
+    {
+      path: '/usr/lib/python3.10/sitecustomize.py',
+      resolvedPath: '/etc/python3.10/sitecustomize.py',
+      size: 155,
+      digest: '43d81125d92376b1a69d53a71126a041cc9a18d8080e92dea0a2ae23be138b1e',
+    },
+    {
+      path: '/usr/lib/python3/dist-packages/apport_python_hook.py',
+      size: 8063,
+      digest: '7f56fc0bcfe9e80e8152f32262ec190c4db3b10bf2081c0db73e976285cab69e',
+    },
+    {
+      path: '/usr/lib/python3.10/__pycache__/sitecustomize.cpython-310.pyc',
+      size: 225,
+      digest: '2132f162f1b1622dbfd3d9b01b43d769e5432fdd6551dfe685243394579ce0b5',
+    },
+    {
+      path: '/usr/lib/python3/dist-packages/__pycache__/apport_python_hook.cpython-310.pyc',
+      size: 4661,
+      digest: '4beeaf52bfd13b80ecd323ddce720028f9560aa189b22b643683c2eac0696187',
+    },
+    ...[
+      'zope.component-4.3.0',
+      'zope.event-4.4',
+      'zope.hookable-5.1.0',
+      'zope.interface-5.4.0',
+    ].map((name) => ({
+      path: `/usr/lib/python3/dist-packages/${name}-nspkg.pth`,
+      size: 529,
+      digest: '4961151fe8c45ac298acbd2aa02e86049692b71fe22b11a8018f4f432705542e',
+    })),
+  ].map((row) => Object.freeze({ resolvedPath: row.path, ...row })),
+);
 const cloudPythonRoot = '/usr/lib/python3/dist-packages';
 const cloudMetadataName = /^websockify(?:-[0-9][a-zA-Z0-9._+-]{0,63})?\.(?:egg|dist)-info$/;
 const cloudMetadataFiles = [
@@ -145,6 +183,11 @@ export function validateFirstCutoverCloudSources(value, { scope, observed = fals
         file.size > 512 * 1024 * 1024
       )
         reject();
+      const startupFile = firstCutoverCloudReviewedPythonStartup.find(
+        (row) => row.path === file.path,
+      );
+      if (startupFile && (file.digest !== startupFile.digest || file.size !== startupFile.size))
+        reject();
       const packageFile =
         posix.dirname(file.path) === `${cloudPythonRoot}/websockify` &&
         /^[a-zA-Z_][a-zA-Z0-9_]*\.py$/.test(posix.basename(file.path));
@@ -156,7 +199,13 @@ export function validateFirstCutoverCloudSources(value, { scope, observed = fals
       const metadataFile =
         posix.dirname(file.path) === entry.metadataPath &&
         cloudMetadataFiles.includes(posix.basename(file.path));
-      if (!cloudSourceTools.includes(file.path) && !packageFile && !cachedFile && !metadataFile)
+      if (
+        !cloudSourceTools.includes(file.path) &&
+        !startupFile &&
+        !packageFile &&
+        !cachedFile &&
+        !metadataFile
+      )
         reject();
       if (
         metadataFile &&
@@ -165,8 +214,9 @@ export function validateFirstCutoverCloudSources(value, { scope, observed = fals
           file.digest !== '01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b')
       )
         reject();
-      const allowedTargets =
-        file.path === '/bin/sh'
+      const allowedTargets = startupFile
+        ? [startupFile.resolvedPath]
+        : file.path === '/bin/sh'
           ? ['/bin/sh', '/usr/bin/sh', '/usr/bin/dash', '/usr/bin/bash']
           : file.path === '/usr/bin/python3'
             ? ['/usr/bin/python3', '/usr/bin/python3.10']
@@ -189,6 +239,17 @@ export function validateFirstCutoverCloudSources(value, { scope, observed = fals
       paths.add(file.path);
       previous = file.path;
     }
+    for (const [cache, source] of [
+      [
+        '/usr/lib/python3.10/__pycache__/sitecustomize.cpython-310.pyc',
+        '/usr/lib/python3.10/sitecustomize.py',
+      ],
+      [
+        '/usr/lib/python3/dist-packages/__pycache__/apport_python_hook.cpython-310.pyc',
+        '/usr/lib/python3/dist-packages/apport_python_hook.py',
+      ],
+    ])
+      if (paths.has(cache) && !paths.has(source)) reject();
     for (const p of paths)
       if (
         p.includes('/websockify/__pycache__/') &&

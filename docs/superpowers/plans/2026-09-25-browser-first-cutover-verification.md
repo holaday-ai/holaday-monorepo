@@ -2,6 +2,21 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 精确启动源码/cache绑定（本地通过，现场执行前被审批拒绝）
+
+在e2bd23cd之后，仅原runtime/evidence及runtime测试、惰性JSON夹具增加8个已审可选启动文件/缓存的精确路径、大小、SHA、目标绑定，拒绝未知hook/遮蔽/修改/无对应源码cache。原五文件不重采；新增两个实际缓存只采指纹及16字节格式头，共4886字节。Ubuntu官方同版本3.10.12仅编译已审source，两个bodySHA精确匹配，目标代码未执行。Mac3.10.6比较不匹配及临时容器缺libexpat、跨发行版/lib布局冲突均保留，后以/ compiler独立目录解决；不把这些失败计为通过。
+
+| 验证 | 实际结果 | 持久QA目录文件 |
+| --- | --- | --- |
+| 启动规则TDD | 12项首次10通过/2失败，最终12/12；零跳过 | hooks-red.log、hooks-focused.log |
+| 完整runtime/evidence | 646/646，退出0、零跳过 | hooks-full.log |
+| 固定镜像Linux七模块 | 1185/1185，退出0、零跳过；1CPU/512MiB | hooks-linux.log |
+| 四文件Biome/diff-check | 通过，无修复 | hooks-biome-final.log及Git工具结果 |
+| 两缓存编译比对 | bodySHA均一致，未执行source | exact-compiler-v3.json |
+| 现场只读source叶子 | 自动审批执行前拒绝；无SSH、无输出文件 | approval-scope.md |
+
+目录：`.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/native-vnc-resume-20260930/`。拒绝原因是约474KB本地内部runtime/evidence源码payload传送至Vultr缺少具体明确授权；未换通道或改载荷重试。请求的是这份固定载荷经原严格SSH的一次stdin传输，包含内部实现/部署路径，具体边界和SHA见报告；不是泛泛部署许可。原source生产加载选择、双角色capability/归属及完整native消费者尚未验收，host/classifier/ACK/CLI保持关闭。作者审查不替代整分支独立审查；不计作Task4–6、部署或上线成功。
+
 ## 2026-09-30 单路 native VNC 观察实现（组件验证，非完整验收）
 
 最终新鲜Linux回归已完成：1173/1173、退出0、零跳过，日志在持久QA目录`linux.log`，内存512MiB/1CPU；两份实际hook缓存已用官方同版本Ubuntu3.10.12仅编译已审源码精确匹配（`exact-compiler-v3.json`），未执行钩子。以下“编译比对中/运行状态待定”为这一小节记录过程，最终状态以本段为准，source门禁代码尚未改变。

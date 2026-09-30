@@ -191,6 +191,91 @@ async function sourceNativeFixture() {
     add,
   };
 }
+async function reviewedPythonHooksFixture() {
+  const f = await sourceNativeFixture();
+  const fixture = JSON.parse(
+    await fs.readFile(
+      new URL('./fixtures/browser-cloud-reviewed-python-hooks.json', import.meta.url),
+      'utf8',
+    ),
+  );
+  for (const [path, bytes] of Object.entries(fixture.files))
+    f.add(path, Buffer.from(bytes, 'base64'));
+  f.links.set('/usr/lib/python3.10/sitecustomize.py', '/etc/python3.10/sitecustomize.py');
+  return f;
+}
+
+test('cloud sources binds exact reviewed startup hooks and matching compiled caches', async () => {
+  const f = await reviewedPythonHooksFixture();
+  const result = await firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io);
+  const site = result.files.find((r) => r.path === '/usr/lib/python3.10/sitecustomize.py');
+  assert.equal(site.resolvedPath, '/etc/python3.10/sitecustomize.py');
+  assert.equal(site.digest, '43d81125d92376b1a69d53a71126a041cc9a18d8080e92dea0a2ae23be138b1e');
+  assert.equal(
+    result.files.find((r) => r.path.endsWith('/apport_python_hook.cpython-310.pyc')).digest,
+    '4beeaf52bfd13b80ecd323ddce720028f9560aa189b22b643683c2eac0696187',
+  );
+  assert.equal(result.files.filter((r) => r.path.endsWith('-nspkg.pth')).length, 4);
+});
+
+for (const mode of [
+  'changed-source',
+  'changed-cache',
+  'changed-pth',
+  'alternate-cache',
+  'orphan-cache',
+  'entry-shadow',
+  'stdlib-shadow',
+  'local-shadow',
+  'unknown-pth',
+  'redirected-site',
+]) {
+  test(`cloud sources reviewed hooks refuse ${mode}`, async () => {
+    const f = await reviewedPythonHooksFixture();
+    if (mode === 'changed-source')
+      f.add('/usr/lib/python3/dist-packages/apport_python_hook.py', '# changed');
+    if (mode === 'changed-cache')
+      f.add(
+        '/usr/lib/python3/dist-packages/__pycache__/apport_python_hook.cpython-310.pyc',
+        'changed',
+      );
+    if (mode === 'changed-pth')
+      f.add('/usr/lib/python3/dist-packages/zope.event-4.4-nspkg.pth', 'import evil');
+    if (mode === 'alternate-cache')
+      f.add('/usr/lib/python3.10/__pycache__/sitecustomize.cpython-310.opt-1.pyc', 'other');
+    if (mode === 'orphan-cache')
+      f.data.delete('/usr/lib/python3/dist-packages/apport_python_hook.py');
+    if (mode === 'entry-shadow') f.add('/usr/bin/apport_python_hook.py', 'other');
+    if (mode === 'stdlib-shadow') f.add('/usr/lib/python3.10/apport_python_hook.py', 'other');
+    if (mode === 'local-shadow')
+      f.add('/usr/local/lib/python3.10/dist-packages/apport_python_hook.py', 'other');
+    if (mode === 'unknown-pth')
+      f.add('/usr/lib/python3/dist-packages/zope.other-nspkg.pth', 'other');
+    if (mode === 'redirected-site') {
+      f.add('/etc/other/sitecustomize.py', 'other');
+      f.links.set('/usr/lib/python3.10/sitecustomize.py', '/etc/other/sitecustomize.py');
+    }
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io),
+      /CUTOVER_CLOUD_SOURCES_UNPROVEN/,
+    );
+  });
+}
+
+test('cloud sources accepts reviewed source-only startup when no compiled caches are selected', async () => {
+  const f = await reviewedPythonHooksFixture();
+  for (const path of [...f.data.keys()]) if (path.endsWith('.pyc')) f.data.delete(path);
+  const result = await firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io);
+  assert.equal(
+    result.files.some((r) => r.path.endsWith('.pyc')),
+    false,
+  );
+  assert.equal(
+    result.files.some((r) => r.path.endsWith('/apport_python_hook.py')),
+    true,
+  );
+});
+
 test('cloud sources compatibility binds the measured optional LF metadata marker', async () => {
   const f = await sourceNativeFixture();
   const path = '/usr/lib/python3/dist-packages/websockify-0.10.0.egg-info/not-zip-safe';
