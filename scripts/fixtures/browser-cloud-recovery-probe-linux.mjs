@@ -13,6 +13,8 @@
 // and unrelated app are disposable; production startup scripts are NOT executed.
 // --scoped-pm2-denied requires a container WITHOUT SYS_ADMIN and checks that
 // failed recovery stays failed, with no PM2 restart or direct-browser fallback.
+// --scoped-pm2-display-occupied uses a QA-owned foreign :98 after old-group stop;
+// recovery must refuse without killing it, retrying or launching Brave.
 // --orphan-handoff-failures checks only bounded canary failures/cleanup before
 // any browser, policy, profile, display or PM2 setup in the disposable container.
 import assert from 'node:assert/strict';
@@ -47,6 +49,7 @@ assert.ok(
         '--scoped-policy',
         '--scoped-pm2',
         '--scoped-pm2-denied',
+        '--scoped-pm2-display-occupied',
         '--orphan-handoff-failures',
       ].includes(process.argv[2])),
 );
@@ -79,7 +82,8 @@ if (process.argv[2] === '--orphan-handoff-failures') {
 const appBlank = process.argv[2] === '--app-blank';
 const policyProbe = process.argv[2] === '--policy-probe';
 const deniedRecovery = process.argv[2] === '--scoped-pm2-denied';
-const scopedPm2 = process.argv[2] === '--scoped-pm2' || deniedRecovery;
+const occupiedDisplay = process.argv[2] === '--scoped-pm2-display-occupied';
+const scopedPm2 = process.argv[2] === '--scoped-pm2' || deniedRecovery || occupiedDisplay;
 const scopedPolicy = process.argv[2] === '--scoped-policy' || scopedPm2;
 if (deniedRecovery) {
   const status = await fs.readFile('/proc/self/status', 'utf8');
@@ -130,9 +134,31 @@ await fs.writeFile(
   JSON.stringify({ session: { restore_on_startup: 1 } }),
   { flag: 'wx' },
 );
-const xvfb = spawn('/usr/bin/Xvfb', [':98', '-screen', '0', '1280x800x24', '-nolisten', 'tcp'], {
-  stdio: 'ignore',
+const displayArgs = (number) => [`:${number}`, '-screen', '0', '1280x800x24', '-nolisten', 'tcp'];
+// :97 is deliberately outside the approved old/replacement group. Priming's
+// separate :98 exits before the old PM2 wrapper creates its OWN :98 child.
+const xvfb = spawn('/usr/bin/Xvfb', displayArgs(scopedPolicy ? 97 : 98), {
+  stdio: ['ignore', 'ignore', 'pipe'],
 });
+let primingDisplay;
+const displayDiagnostics = new WeakMap();
+function observeDisplayDiagnostics(child) {
+  const diagnostic = { spawnedAtMs: Date.now(), stderr: '', stderrBytes: 0, spawnError: null };
+  displayDiagnostics.set(child, diagnostic);
+  child.stderr.on('data', (bytes) => {
+    diagnostic.stderrBytes += bytes.length;
+    diagnostic.stderr = (diagnostic.stderr + bytes.toString()).slice(-4096);
+  });
+  child.once('error', (error) => {
+    diagnostic.spawnError = error.code ?? 'SPAWN_ERROR';
+  });
+}
+observeDisplayDiagnostics(xvfb);
+let independentDisplay;
+let oldDisplay;
+let recoveredDisplay;
+let conflictDisplay;
+let conflictDisplayProof;
 let browser;
 let socket;
 let sequence = 0;
@@ -140,6 +166,7 @@ const pending = new Map();
 let physicalStops = 0;
 let recoveryVisits;
 const retiredIdentities = [];
+const qaCrashpadCleanup = new Map();
 const pm2Home = scopedPm2 ? await fs.mkdtemp('/tmp/holaday-browser-pm2-') : undefined;
 if (scopedPm2) {
   // An absent daemon must stay absent. The default product reader, with only
@@ -255,7 +282,13 @@ async function restoreSameRegistration(recovery) {
       assert.deepEqual(actual, input);
       assert.ok((await Promise.all(retiredIdentities.map(sameLive))).every((v) => !v));
       assert.equal(await sameLive(unrelated), true);
-      assert.equal(xvfb.exitCode, null);
+      await assertIndependentDisplay();
+      assert.ok(oldDisplay && !(await sameLive(oldDisplay.identity)), 'old owned display exited');
+      if (occupiedDisplay)
+        assert.deepEqual(
+          await displayProof(98, conflictDisplayProof.identity),
+          conflictDisplayProof,
+        );
       assert.equal(await fs.readFile(`${policyRoot}/existing.json`, 'utf8'), originalPolicy);
       assert.deepEqual(
         JSON.parse(
@@ -302,6 +335,144 @@ async function processIdentity(pid) {
 async function sameLive(identity) {
   const current = await processIdentity(identity.pid);
   return current?.start === identity.start && current.state !== 'Z';
+}
+async function displayProof(number, expected) {
+  const identity = await processIdentity(expected.pid);
+  assert.ok(identity && identity.start === expected.start && identity.state !== 'Z');
+  const path = `/proc/${identity.pid}`;
+  assert.equal(await fs.readlink(`${path}/exe`), '/usr/bin/Xvfb');
+  assert.equal(
+    await fs.readFile(`${path}/cmdline`, 'utf8'),
+    ['/usr/bin/Xvfb', ...displayArgs(number), ''].join('\0'),
+  );
+  const mountNamespace = await fs.readlink(`${path}/ns/mnt`);
+  const fdNames = await fs.readdir(`${path}/fd`);
+  assert.ok(fdNames.length <= 256);
+  const inodes = new Set();
+  for (const fd of fdNames) {
+    const link = await fs.readlink(`${path}/fd/${fd}`);
+    const match = /^socket:\[(\d+)\]$/.exec(link);
+    if (match) inodes.add(match[1]);
+  }
+  const unix = await fs.readFile('/proc/net/unix', 'utf8');
+  assert.ok(Buffer.byteLength(unix) <= 1024 * 1024);
+  const addresses = [`/tmp/.X11-unix/X${number}`, `@/tmp/.X11-unix/X${number}`];
+  const listeners = unix
+    .trim()
+    .split('\n')
+    .slice(1)
+    .map((line) => line.trim().split(/\s+/))
+    .filter((fields) => addresses.includes(fields[7]) && fields[3] === '00010000')
+    .map((fields) => ({ address: fields[7], inode: fields[6] }))
+    .sort((a, b) => a.address.localeCompare(b.address));
+  assert.equal(listeners.length, 2, 'both real filesystem/abstract X11 listeners');
+  assert.deepEqual(listeners.map((s) => s.address).sort(), [...addresses].sort());
+  for (const listener of listeners)
+    assert.ok(inodes.has(listener.inode), 'listener inode belongs to this exact Xvfb');
+  const after = await processIdentity(identity.pid);
+  assert.equal(after?.start, identity.start);
+  assert.equal(after?.ppid, identity.ppid);
+  assert.notEqual(after?.state, 'Z');
+  return {
+    identity: { pid: identity.pid, start: identity.start, ppid: identity.ppid },
+    mountNamespace,
+    listeners,
+  };
+}
+async function waitDisplay(number, child) {
+  const startedAtMs = Date.now();
+  const started = performance.now();
+  let identity;
+  let lastUnix = '';
+  let polls = 0;
+  try {
+    identity = await processIdentity(child.pid);
+    assert.ok(identity);
+    await until(async () => {
+      polls++;
+      assert.equal(await sameLive(identity), true, 'display cannot exit during readiness');
+      const raw = await fs.readFile('/proc/net/unix', 'utf8');
+      lastUnix = raw.slice(0, 1024 * 1024);
+      return [`/tmp/.X11-unix/X${number}`, `@/tmp/.X11-unix/X${number}`].every((address) =>
+        raw.split('\n').some((line) => {
+          const fields = line.trim().split(/\s+/);
+          return fields[7] === address && fields[3] === '00010000';
+        }),
+      );
+    }, 5000);
+    return await displayProof(number, identity);
+  } catch (error) {
+    // Failure-only public QA metadata. Diagnostic errors cannot turn the
+    // original readiness failure into success or a retry.
+    const snapshot = await Promise.race([
+      Promise.allSettled([
+        processIdentity(child.pid),
+        fs.readlink(`/proc/${child.pid}/exe`),
+        fs.readlink(`/proc/${child.pid}/ns/mnt`),
+      ]).then((items) =>
+        items.map((item) =>
+          item.status === 'fulfilled'
+            ? { value: typeof item.value === 'string' ? item.value.slice(0, 512) : item.value }
+            : { error: item.reason?.code ?? 'DIAGNOSTIC_READ_FAILED' },
+        ),
+      ),
+      sleep(1000).then(() => ({ error: 'DIAGNOSTIC_TIMEOUT' })),
+    ]);
+    const rows = lastUnix
+      .split('\n')
+      .map((line) => line.trim().split(/\s+/))
+      .filter((fields) =>
+        [
+          '/tmp/.X11-unix/X97',
+          '@/tmp/.X11-unix/X97',
+          '/tmp/.X11-unix/X98',
+          '@/tmp/.X11-unix/X98',
+        ].includes(fields[7]),
+      );
+    console.error(
+      JSON.stringify({
+        marker: 'QA_DISPLAY_READINESS_FAILURE',
+        display: number,
+        pid: child.pid ?? null,
+        startedAtMs,
+        elapsedMs: performance.now() - started,
+        polls,
+        expectedIdentity: identity ?? null,
+        snapshot,
+        snapshotOrder: ['identity', 'executable', 'mountNamespace'],
+        exitCode: child.exitCode,
+        signalCode: child.signalCode,
+        failure: String(error.message).slice(0, 200),
+        ...displayDiagnostics.get(child),
+        unixSampleBytes: Buffer.byteLength(lastUnix),
+        relevantRowCount: rows.length,
+        relevantRows: rows.slice(0, 32).map((fields) => ({
+          flags: fields[3],
+          type: fields[4],
+          state: fields[5],
+          inode: fields[6],
+          path: fields[7],
+        })),
+      }),
+    );
+    throw error;
+  }
+}
+async function assertIndependentDisplay() {
+  assert.equal(xvfb.exitCode, null);
+  assert.deepEqual(
+    await displayProof(scopedPolicy ? 97 : 98, independentDisplay.identity),
+    independentDisplay,
+    'independent display retains identity, namespace and both listening sockets',
+  );
+}
+async function retirePrimingDisplay() {
+  if (!primingDisplay) return;
+  const identity = await processIdentity(primingDisplay.pid);
+  assert.ok(identity);
+  primingDisplay.kill('SIGTERM');
+  await until(async () => !(await sameLive(identity)), 3000);
+  primingDisplay = undefined;
 }
 async function withOrphanCanary(inspect, fault) {
   const source =
@@ -371,11 +542,14 @@ async function withOrphanCanary(inspect, fault) {
 async function ownedProcesses(root) {
   const observed = [];
   const selected = new Set([root.pid]);
-  for (const name of (await fs.readdir('/proc')).filter((n) => /^[0-9]+$/.test(n))) {
+  const executables = new Map();
+  const entries = (await fs.readdir('/proc')).filter((n) => /^[0-9]+$/.test(n));
+  assert.ok(entries.length <= 4096, 'QA IPC process count bound');
+  for (const name of entries) {
     const pid = Number(name);
-    let argv;
+    let executable;
     try {
-      argv = await fs.readFile(`/proc/${pid}/cmdline`, 'utf8');
+      executable = await fs.readlink(`/proc/${pid}/exe`);
     } catch (error) {
       if (error.code === 'ENOENT' || error.code === 'ESRCH') continue;
       throw error;
@@ -383,10 +557,10 @@ async function ownedProcesses(root) {
     const identity = await processIdentity(pid);
     if (!identity || identity.state === 'Z') continue;
     observed.push(identity);
-    if (argv.includes(profile)) selected.add(pid);
+    executables.set(pid, executable);
   }
-  // Parent closure includes untagged descendants; profile seeds also cover
-  // reparented crash handlers. Neither a name match nor ancestry alone suffices.
+  assert.equal(observed.find((p) => p.pid === root.pid)?.start, root.start);
+  // Actual root ancestry, NOT profile argv or a crashpad executable allowlist.
   let changed;
   do {
     changed = false;
@@ -397,6 +571,264 @@ async function ownedProcesses(root) {
       }
     }
   } while (changed);
+  const rootDescendants = new Set(selected);
+  const brave = new Set(
+    observed.filter((p) => selected.has(p.pid) && executables.get(p.pid) === exe).map((p) => p.pid),
+  );
+  if (brave.size) {
+    // Executable only selects candidates to inspect. Admission requires the
+    // actual initial-client fd -> reciprocal socket -> owned Brave/primary IPC.
+    // This private fixture observation is not native product preflight/effects.
+    const candidates = observed.filter(
+      (p) => executables.get(p.pid) === '/opt/brave.com/brave/chrome_crashpad_handler',
+    );
+    assert.ok(candidates.length <= 16, 'QA IPC handler count bound');
+    const began = performance.now();
+    const readSockets = async () => {
+      const { stdout } = await promisify(execFile)('/usr/bin/ss', ['-H', '-xap'], {
+        timeout: 5000,
+        maxBuffer: 1024 * 1024,
+      });
+      const lines = stdout.split('\n').filter(Boolean);
+      assert.ok(lines.length <= 16384, 'QA IPC socket count bound');
+      return lines.map((line) => {
+        const fields = line.trim().split(/\s+/);
+        assert.ok(fields.length >= 8);
+        return {
+          state: fields[1],
+          inode: fields[5],
+          peerInode: fields[7],
+          owners: [...new Set([...line.matchAll(/\bpid=(\d+)/g)].map((m) => Number(m[1])))].sort(
+            (a, b) => a - b,
+          ),
+        };
+      });
+    };
+    const fdSockets = async (pid) => {
+      const names = await fs.readdir(`/proc/${pid}/fd`);
+      assert.ok(names.length <= 256, 'QA IPC fd count bound');
+      const sockets = [];
+      for (const fd of names) {
+        const match = /^socket:\[(\d+)\]$/.exec(await fs.readlink(`/proc/${pid}/fd/${fd}`));
+        if (match) sockets.push({ fd: Number(fd), inode: match[1] });
+      }
+      return sockets.sort((a, b) => a.fd - b.fd);
+    };
+    const first = await readSockets();
+    const relevantInodes = new Set();
+    const edge = (inode, pid, localGroup) => {
+      const local = first.filter((r) => r.inode === inode && r.state === 'ESTAB');
+      assert.equal(local.length, 1, 'QA IPC unique connected local inode');
+      if (localGroup) {
+        // Non-initial inherited sockets may be shared by proved Brave members.
+        // Initial-client admission below remains exact single-handler ownership.
+        assert.ok(local[0].owners.includes(pid), 'QA IPC local fd includes exact handler');
+        assert.ok(
+          local[0].owners.every((owner) => localGroup.has(owner)),
+          'QA IPC mixed/foreign local owners refused',
+        );
+      } else assert.deepEqual(local[0].owners, [pid], 'QA IPC initial fd owned by exact handler');
+      const peer = first.filter(
+        (r) => r.inode === local[0].peerInode && r.peerInode === inode && r.state === 'ESTAB',
+      );
+      assert.equal(peer.length, 1, 'QA IPC unique reciprocal endpoint');
+      assert.ok(peer[0].owners.length > 0, 'QA IPC peer has real owners');
+      return peer[0];
+    };
+    const inspected = [];
+    for (const p of candidates) {
+      const cmd = await fs.readFile(`/proc/${p.pid}/cmdline`, 'utf8');
+      assert.ok(Buffer.byteLength(cmd) <= 262144, 'QA IPC argv bound');
+      const flags = cmd.split('\0').filter((arg) => arg.startsWith('--initial-client-fd='));
+      assert.equal(flags.length, 1, 'QA IPC exact initial fd flag');
+      assert.match(flags[0], /^--initial-client-fd=\d{1,6}$/);
+      const initialFd = Number(flags[0].split('=')[1]);
+      const sockets = await fdSockets(p.pid);
+      const initial = sockets.find((s) => s.fd === initialFd);
+      assert.ok(initial, 'QA IPC initial fd is an actual socket');
+      inspected.push({
+        identity: p,
+        initialFd,
+        sockets,
+        argvDigest: sha(cmd),
+        peer: edge(initial.inode, p.pid),
+      });
+      // Ancestry alone may not bypass peer verification even for a non-orphan.
+      selected.delete(p.pid);
+    }
+    const primary = new Set();
+    for (const c of inspected) {
+      if (!c.peer.owners.some((pid) => brave.has(pid))) continue;
+      assert.ok(
+        c.peer.owners.every((pid) => brave.has(pid)),
+        'QA IPC mixed/foreign primary peers refused',
+      );
+      primary.add(c.identity.pid);
+    }
+    assert.ok(primary.size > 0, 'QA IPC primary must connect to actual Brave descendants');
+    const associated = inspected.filter((c) => {
+      if (primary.has(c.identity.pid)) return true;
+      if (!c.peer.owners.some((pid) => primary.has(pid))) return false;
+      assert.equal(c.peer.owners.length, 1, 'QA IPC monitor has one exact primary peer');
+      const parent = inspected.find((p) => p.identity.pid === c.peer.owners[0]);
+      assert.ok(
+        parent.sockets.some((s) => s.fd !== parent.initialFd && s.inode === c.peer.inode),
+        'QA IPC secondary initial connects to primary non-initial fd',
+      );
+      return true;
+    });
+    for (const c of inspected)
+      assert.ok(
+        !rootDescendants.has(c.identity.pid) || associated.includes(c),
+        'QA IPC must not drop an unproved handler from the actual root tree',
+      );
+    for (const c of associated) selected.add(c.identity.pid);
+    const peerGroup = new Set([...brave, ...associated.map((c) => c.identity.pid)]);
+    const stdioGroup = new Set([...rootDescendants, ...associated.map((c) => c.identity.pid)]);
+    const rootStdio = new Map();
+    let stdioDaemon;
+    if (scopedPm2) {
+      for (const fd of [0, 1, 2])
+        rootStdio.set(fd, await fs.readlink(`/proc/${root.pid}/fd/${fd}`));
+    }
+    for (const c of associated) {
+      for (const socket of c.sockets) {
+        // Only exact inherited stdin/stdout/stderr may terminate at our private PM2
+        // daemon. It is evidence, never an admitted member or signal target.
+        if (
+          socket.fd !== c.initialFd &&
+          [0, 1, 2].includes(socket.fd) &&
+          rootStdio.get(socket.fd) === `socket:[${socket.inode}]`
+        ) {
+          if (!stdioDaemon) {
+            const daemonPid = (await fs.readFile(`${pm2Home}/pm2.pid`, 'utf8')).trim();
+            assert.match(daemonPid, /^[1-9]\d*$/);
+            assert.equal(Number(daemonPid), root.ppid, 'QA stdio peer is private PM2 parent');
+            stdioDaemon = observed.find((p) => p.pid === root.ppid);
+            assert.ok(stdioDaemon && !selected.has(stdioDaemon.pid));
+            assert.equal(executables.get(stdioDaemon.pid), '/opt/node22/bin/node');
+          }
+          const peer = edge(socket.inode, c.identity.pid, stdioGroup);
+          assert.deepEqual(peer.owners, [stdioDaemon.pid], 'QA stdio only private PM2 peer');
+          relevantInodes.add(socket.inode);
+          relevantInodes.add(peer.inode);
+          continue;
+        }
+        const local = first.find((r) => r.inode === socket.inode && r.state === 'ESTAB');
+        if (local?.owners.some((pid) => !peerGroup.has(pid)))
+          console.error(
+            JSON.stringify({
+              marker: 'QA_IPC_OUTSIDE_LOCAL_OWNER',
+              handler: c.identity.pid,
+              fd: socket.fd,
+              initialFd: c.initialFd,
+              inode: socket.inode,
+              owners: local.owners.map((pid) => ({
+                ...observed.find((p) => p.pid === pid),
+                pid,
+                exe: executables.get(pid),
+                rootDescendant: rootDescendants.has(pid),
+                associated: peerGroup.has(pid),
+              })),
+              root,
+              rootStdio: await Promise.all(
+                [0, 1, 2].map(async (fd) => ({
+                  fd,
+                  link: await fs.readlink(`/proc/${root.pid}/fd/${fd}`),
+                })),
+              ),
+              peer: first
+                .filter((r) => r.inode === local.peerInode && r.peerInode === local.inode)
+                .map((r) => ({
+                  ...r,
+                  ownerIdentities: r.owners.map((pid) => ({
+                    ...observed.find((p) => p.pid === pid),
+                    pid,
+                    exe: executables.get(pid),
+                    isRootParent: pid === root.ppid,
+                  })),
+                })),
+            }),
+          );
+        const peer = edge(socket.inode, c.identity.pid, peerGroup);
+        if (peer.owners.some((pid) => !peerGroup.has(pid)))
+          console.error(
+            JSON.stringify({
+              marker: 'QA_IPC_OUTSIDE_PEER_OWNER',
+              handler: c.identity,
+              fd: socket.fd,
+              initialFd: c.initialFd,
+              inode: socket.inode,
+              root,
+              rootStdio: await Promise.all(
+                [0, 1, 2].map(async (fd) => ({
+                  fd,
+                  link: await fs.readlink(`/proc/${root.pid}/fd/${fd}`),
+                })),
+              ),
+              peer: {
+                ...peer,
+                ownerIdentities: peer.owners.map((pid) => ({
+                  ...observed.find((p) => p.pid === pid),
+                  pid,
+                  exe: executables.get(pid),
+                  isRootParent: pid === root.ppid,
+                })),
+              },
+            }),
+          );
+        assert.ok(
+          peer.owners.every((pid) => peerGroup.has(pid)),
+          'QA IPC all matching owners within independently associated group',
+        );
+        relevantInodes.add(socket.inode);
+        relevantInodes.add(peer.inode);
+      }
+      assert.deepEqual(await fdSockets(c.identity.pid), c.sockets, 'QA IPC fd identities stable');
+      assert.equal(sha(await fs.readFile(`/proc/${c.identity.pid}/cmdline`, 'utf8')), c.argvDigest);
+    }
+    const project = (rows) =>
+      rows
+        .filter((r) => relevantInodes.has(r.inode) || relevantInodes.has(r.peerInode))
+        .sort((a, b) => a.inode.localeCompare(b.inode));
+    assert.deepEqual(
+      project(await readSockets()),
+      project(first),
+      'QA IPC reciprocal graph stable',
+    );
+    if (stdioDaemon) {
+      for (const [fd, link] of rootStdio)
+        assert.equal(await fs.readlink(`/proc/${root.pid}/fd/${fd}`), link, 'QA root stdio stable');
+      assert.equal(
+        (await fs.readFile(`${pm2Home}/pm2.pid`, 'utf8')).trim(),
+        String(stdioDaemon.pid),
+      );
+      const after = await processIdentity(stdioDaemon.pid);
+      assert.ok(after && after.state !== 'Z');
+      assert.equal(after.start, stdioDaemon.start, 'QA private PM2 PID/start stable');
+      assert.equal(after.ppid, stdioDaemon.ppid);
+      assert.equal(
+        await fs.readlink(`/proc/${stdioDaemon.pid}/exe`),
+        executables.get(stdioDaemon.pid),
+      );
+    }
+    assert.ok(performance.now() - began < 15000, 'QA IPC observation deadline');
+    console.log(
+      JSON.stringify({
+        marker: 'QA_CRASHPAD_IPC_CAPTURE',
+        primaryCount: primary.size,
+        associatedCount: associated.length,
+        unrelatedCandidateCount: inspected.length - associated.length,
+      }),
+    );
+  }
+  for (const p of observed.filter((p) => selected.has(p.pid))) {
+    const after = await processIdentity(p.pid);
+    assert.equal(after?.start, p.start, 'QA capture PID/start unchanged before stop');
+    assert.equal(after?.ppid, p.ppid, 'QA capture ancestry unchanged before stop');
+    assert.ok(after && after.state !== 'Z');
+    assert.equal(await fs.readlink(`/proc/${p.pid}/exe`), executables.get(p.pid));
+  }
   return observed.filter((p) => selected.has(p.pid));
 }
 const args = [
@@ -436,10 +868,18 @@ async function launch(extra, privatePolicy, usePm2 = false) {
   const argv = recovery?.args ?? [...args, ...extra];
   if (usePm2) {
     if (recovery) await restoreSameRegistration(recovery);
-    else
+    else {
+      // Synthetic OLD wrapper only; never execute the production wrapper.
+      // It retains both Xvfb and Brave as actual children of the PM2 root.
+      const wrapper = `${pm2Home}/old-headed.sh`;
+      await fs.writeFile(
+        wrapper,
+        '#!/bin/sh\nset -eu\n/usr/bin/Xvfb :98 -screen 0 1280x800x24 -nolisten tcp &\ndisplay=$!\ni=0\nwhile [ ! -S /tmp/.X11-unix/X98 ]; do kill -0 "$display"; i=$((i+1)); [ "$i" -lt 50 ]; sleep 0.1; done\n/opt/brave.com/brave/brave "$@" &\nwait\n',
+        { flag: 'wx', mode: 0o700 },
+      );
       await pm2(
         'start',
-        command,
+        '/bin/sh',
         '--name',
         'holaday-chromium-headed',
         '--interpreter',
@@ -448,8 +888,10 @@ async function launch(extra, privatePolicy, usePm2 = false) {
         '1600',
         ...(recovery?.autorestart === false ? ['--no-autorestart'] : []),
         '--',
+        wrapper,
         ...argv,
       );
+    }
     const matches = JSON.parse(await pm2('jlist')).filter(
       (r) => r.name === 'holaday-chromium-headed',
     );
@@ -503,6 +945,17 @@ async function launch(extra, privatePolicy, usePm2 = false) {
       }
     }
   });
+  if (usePm2 && !recovery) {
+    const tree = await ownedProcesses(managed.identity);
+    const displays = [];
+    for (const p of tree)
+      if ((await fs.readlink(`/proc/${p.pid}/exe`)) === '/usr/bin/Xvfb') displays.push(p);
+    assert.equal(displays.length, 1, 'old PM2 registration really owns its display');
+    oldDisplay = await displayProof(98, displays[0]);
+    assert.equal(oldDisplay.identity.ppid, managed.identity.pid);
+    assert.notEqual(oldDisplay.identity.pid, xvfb.pid, 'not the independent display');
+    await assertIndependentDisplay();
+  }
 }
 function cdp(method, params = {}) {
   return new Promise((resolve, reject) => {
@@ -517,20 +970,44 @@ function cdp(method, params = {}) {
 }
 async function close() {
   if (managed) {
-    // Observe the real owned profile processes as well as descendants: a
-    // reparented crash handler must not evade the post-stop assertion.
+    // Observe descendants plus real IPC-associated handlers, retaining every
+    // PID/start before stop. No profile-argv association or signal-based help.
     const observed = await ownedProcesses(managed.identity);
     assert.ok(observed.length > 1, 'real browser children were observed');
+    const ownedDisplay = recoveredDisplay ?? oldDisplay;
+    assert.ok(ownedDisplay);
+    assert.ok(
+      observed.some(
+        (p) => p.pid === ownedDisplay.identity.pid && p.start === ownedDisplay.identity.start,
+      ),
+    );
+    const crashpads = [];
+    for (const p of observed)
+      if (
+        (await fs.readlink(`/proc/${p.pid}/exe`)) === '/opt/brave.com/brave/chrome_crashpad_handler'
+      )
+        crashpads.push(p);
+    assert.ok(
+      crashpads.length > 0,
+      'actual captured crashpad members are covered by old-group exit',
+    );
+    for (const handler of crashpads)
+      qaCrashpadCleanup.set(`${handler.pid}:${handler.start}`, handler);
     assert.equal(await sameLive(managed.identity), true);
     await pm2('stop', String(managed.pmId)); // Exactly one numeric stop, no retry.
-    await until(async () => (await Promise.all(observed.map(sameLive))).every((live) => !live));
+    // Observe PM2's actual result without helping it pass. Surviving captured
+    // handlers fail this bounded stop; only finally may clean isolated QA PIDs.
+    await until(
+      async () => (await Promise.all(observed.map(sameLive))).every((live) => !live),
+      15000,
+    );
+    assert.equal(await sameLive(ownedDisplay.identity), false, 'old owned display cannot survive');
     const rows = JSON.parse(await pm2('jlist'));
     const stopped = rows.find((r) => r.pm_id === managed.pmId);
     assert.equal(stopped.pm2_env.status, 'stopped');
     assert.equal(stopped.pid, 0);
     assert.equal(await sameLive(unrelated), true);
-    assert.equal(xvfb.exitCode, null);
-    process.kill(xvfb.pid, 0);
+    await assertIndependentDisplay();
     retiredIdentities.push(...observed);
     physicalStops++;
     console.log(
@@ -538,6 +1015,8 @@ async function close() {
         physicalPm2Stop: physicalStops,
         observedProcesses: observed.length,
         oldProcessesLive: false,
+        ownedDisplayExited: true,
+        capturedCrashpadsExited: crashpads.length,
         unrelatedAndDisplayPreserved: true,
       }),
     );
@@ -559,6 +1038,16 @@ async function close() {
   });
 }
 try {
+  independentDisplay = await waitDisplay(scopedPolicy ? 97 : 98, xvfb);
+  if (scopedPolicy) {
+    // Concurrent X servers can race the initial /tmp/.X11-unix mkdir, leaving
+    // only an abstract listener. Prove :97 ready before starting priming :98.
+    primingDisplay = spawn('/usr/bin/Xvfb', displayArgs(98), {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    observeDisplayDiagnostics(primingDisplay);
+    await waitDisplay(98, primingDisplay);
+  }
   if (scopedPm2) {
     // A real descendant without the profile argument must still be observed.
     // This private canary exits before the actual PM2/browser experiment starts.
@@ -659,6 +1148,7 @@ try {
   // A target can be restored without an observed HTTP request. Prove this
   // control through the real old target, not an assumed network reload.
   const primed = visits;
+  if (scopedPm2) await retirePrimingDisplay();
   await launch(['about:blank'], undefined, scopedPm2);
   let restored;
   await until(async () => {
@@ -684,6 +1174,7 @@ try {
     }),
   );
   await close();
+  if (scopedPolicy && !scopedPm2) await retirePrimingDisplay();
   const before = visits;
   recoveryVisits = before;
   if (policyProbe) {
@@ -708,6 +1199,11 @@ try {
     await fs.writeFile(`${privatePolicy}/recovery.json`, JSON.stringify({ RestoreOnStartup: 5 }), {
       flag: 'wx',
     });
+  }
+  if (occupiedDisplay) {
+    conflictDisplay = spawn('/usr/bin/Xvfb', displayArgs(98), { stdio: 'ignore' });
+    conflictDisplayProof = await waitDisplay(98, conflictDisplay);
+    assert.notEqual(conflictDisplayProof.identity.pid, oldDisplay.identity.pid);
   }
   await launch(
     appBlank ? ['--app=about:blank'] : ['--no-startup-window'],
@@ -788,6 +1284,30 @@ try {
         'all actual private-namespace members, including any reparented helper',
       );
       assert.ok(native.processes.length > 1, 'real replacement descendants observed');
+      const newDisplays = native.processes.filter((p) => p.exe === '/usr/bin/Xvfb');
+      assert.equal(newDisplays.length, 1, 'exactly one actual replacement Xvfb');
+      const newDisplay = newDisplays[0];
+      assert.equal(newDisplay.ppid, native.pid, 'display is a child of the same PM2/Brave root');
+      assert.equal(newDisplay.mountNamespace, native.mountNamespace);
+      assert.equal(
+        newDisplay.argvDigest,
+        sha(['/usr/bin/Xvfb', ...displayArgs(98), ''].join('\0')),
+      );
+      assert.deepEqual(newDisplay.uids, [0, 0, 0, 0]);
+      assert.equal(newDisplay.noNewPrivs, 1);
+      for (const value of Object.values(newDisplay.capabilities)) assert.match(value, /^0+$/);
+      assert.ok(!retiredIdentities.some((p) => p.pid === newDisplay.pid));
+      assert.equal(await sameLive(oldDisplay.identity), false);
+      recoveredDisplay = await displayProof(98, newDisplay);
+      assert.equal(native.display.pid, newDisplay.pid);
+      assert.equal(native.display.start, newDisplay.start);
+      assert.deepEqual(
+        [...native.display.listeners].sort((a, b) => a.path.localeCompare(b.path)),
+        recoveredDisplay.listeners.map(({ address, inode }) => ({ path: address, inode })),
+      );
+      assert.notEqual(recoveredDisplay.mountNamespace, independentDisplay.mountNamespace);
+      assert.notEqual(recoveredDisplay.identity.pid, independentDisplay.identity.pid);
+      await assertIndependentDisplay();
       assert.deepEqual(
         independentlyObserved.processes.filter((p) => p.mountNamespace !== native.mountNamespace),
         beforeRecoveryCensus.processes,
@@ -818,6 +1338,7 @@ try {
         JSON.stringify({
           marker: 'CLOUD_NATIVE_RECOVERY_TREE_PASS',
           replacementProcesses: native.processes.length,
+          ownedReplacementDisplay: recoveredDisplay.identity,
           reparentedBrowserMembers: native.processes.filter((p) => p.ppid === 1).length,
           untaggedDetachedCanaryRefused: true,
           originalPreDispatchCensusRetained: true,
@@ -858,6 +1379,17 @@ try {
         cutoverRegistrationConfigDigest(stableManager.pm2_env),
         observation.configDigest,
       );
+      const stableNative = await readFirstCutoverCloudRecovery(nativeInput, observationIo);
+      assert.deepEqual(
+        stableNative.processes,
+        native.processes,
+        'same complete display/browser tree across actual Worker interval',
+      );
+      assert.deepEqual(stableNative.display, native.display);
+      assert.deepEqual(await displayProof(98, recoveredDisplay.identity), recoveredDisplay);
+      assert.equal(await sameLive(oldDisplay.identity), false);
+      await assertIndependentDisplay();
+      assert.equal(await sameLive(unrelated), true);
       assert.deepEqual(await restoreJournal.assertOwnership(), ownership);
       assert.deepEqual(await restoreJournal.readFirstCutoverEffects(), recoveryRecord);
       assert.equal(visits, before, 'Worker interval must not replay the old HTTP action');
@@ -873,6 +1405,7 @@ try {
           workerIntervalMs,
           elapsedMs,
           samePidStartAndRestartCount: true,
+          sameOwnedDisplayAndCompleteTree: true,
           memoryOptionAbsent: true,
           journalUnchanged: true,
           recoveryAckOrOpen: false,
@@ -996,18 +1529,21 @@ try {
       1,
       'managed policy must not replace the saved user startup preference',
     );
-    assert.equal(xvfb.exitCode, null, 'the separate display remains running');
-    process.kill(xvfb.pid, 0);
+    await assertIndependentDisplay();
   }
   if (scopedPm2) assert.equal(physicalStops, 2, 'both reviewed PM2 lifetimes actually stopped');
-  assert.equal(deniedRecovery, false, 'a denied recovery cannot report successful recovery');
+  assert.equal(
+    deniedRecovery || occupiedDisplay,
+    false,
+    'a denied recovery cannot report successful recovery',
+  );
   console.log(
     scopedPolicy
       ? 'BROWSER_SCOPED_POLICY_PASS: original policy outside namespace unchanged; private read-only policy, browser capabilities zero; same synthetic profile/persistent cookie, old-target positive control, no old URL on blank; session interruption accepted. NOT production or arbitrary background replay proof.'
       : 'BROWSER_RECOVERY_PROBE_PASS: real headed Brave, positive control, same synthetic cookie, no old URL on silent startup or explicit blank; NOT production or arbitrary background replay proof',
   );
 } catch (error) {
-  if (!deniedRecovery || physicalStops !== 1) throw error;
+  if (!(deniedRecovery || occupiedDisplay) || physicalStops !== 1) throw error;
   // Do not accept just any rejection as the injected failure. Check actual
   // PM2 exit metadata and its private stderr, then observe no subsequent start.
   const observeFailure = async () => {
@@ -1024,15 +1560,24 @@ try {
     assert.equal((await restoreJournal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 5);
     assert.ok(['stopped', 'errored'].includes(row.pm2_env.status));
     assert.equal(row.pm2_env.autorestart, false);
-    assert.equal(row.pm2_env.restart_time, 0);
+    assert.equal(row.pm2_env.restart_time, stoppedManager.pm2_env.restart_time);
     assert.equal(row.pm2_env.exit_code, 1);
     assert.ok(row.pm2_env.pm_err_log_path.startsWith(`${pm2Home}/logs/`));
     const stderr = await fs.readFile(row.pm2_env.pm_err_log_path, 'utf8');
-    assert.equal(
-      (stderr.match(/unshare: unshare failed: Operation not permitted/g) ?? []).length,
-      1,
-      'one failed unshare launch, no replay',
-    );
+    if (deniedRecovery)
+      assert.equal(
+        (stderr.match(/unshare: unshare failed: Operation not permitted/g) ?? []).length,
+        1,
+        'one failed unshare launch, no replay',
+      );
+    else {
+      // Actual A bootstrap marker: unlike generic PM2 exit1 this establishes
+      // entry into its guarded path. The unchanged occupied socket/lock is
+      // checked before any Popen/Brave in that fixed product bootstrap.
+      assert.equal((stderr.match(/CLOUD_DISPLAY_BOOTSTRAP_UNPROVEN/g) ?? []).length, 1);
+      assert.deepEqual(await displayProof(98, conflictDisplayProof.identity), conflictDisplayProof);
+      assert.equal(await sameLive(oldDisplay.identity), false);
+    }
     for (const name of (await fs.readdir('/proc')).filter((n) => /^[0-9]+$/.test(n))) {
       let argv;
       try {
@@ -1044,8 +1589,7 @@ try {
       assert.equal(argv.includes(profile), false, 'no fallback or revived profile process');
     }
     assert.equal(await sameLive(unrelated), true);
-    assert.equal(xvfb.exitCode, null);
-    process.kill(xvfb.pid, 0);
+    await assertIndependentDisplay();
     await assert.rejects(
       fetch('http://127.0.0.1:9223/json/version', {
         signal: AbortSignal.timeout(500),
@@ -1068,14 +1612,35 @@ try {
     1,
   );
   console.log(
-    'BROWSER_RECOVERY_DENIAL_PROVEN: one PM2 startup exited 1 at unshare; restart count zero, no profile process or CDP listener, unrelated app/display and parent policy/profile sentinel preserved. Recovery did NOT succeed; no production or arbitrary replay proof.',
+    occupiedDisplay
+      ? 'BROWSER_DISPLAY_CONFLICT_PROVEN: one fixed same-ID recovery refused occupied :98; foreign display/listener identities unchanged, no retry/Brave/CDP, unrelated :97/app and profile sentinel preserved. No recovery ACK/open.'
+      : 'BROWSER_RECOVERY_DENIAL_PROVEN: one PM2 startup exited 1 at unshare; restart count unchanged, no profile process or CDP listener, unrelated app/display and parent policy/profile sentinel preserved. Recovery did NOT succeed; no production or arbitrary replay proof.',
   );
 } finally {
   // Only disposable processes this test itself spawned; the container is --rm.
   if (browser?.exitCode === null) browser.kill?.('SIGKILL');
-  if (pm2Home) await pm2('kill'); // Only the disposable fixture's private daemon.
-  await restoreJournal?.close();
-  socket?.close();
-  xvfb.kill('SIGTERM');
-  server.close();
+  try {
+    if (pm2Home) await pm2('kill'); // Only the disposable fixture's private daemon.
+  } finally {
+    // Teardown only, never evidence that the numeric stop succeeded. Additional
+    // production orphan effects still need original scope/journal integration.
+    for (const handler of qaCrashpadCleanup.values()) {
+      if (!(await sameLive(handler))) continue;
+      console.error(
+        JSON.stringify({
+          marker: 'QA_FINALLY_CRASHPAD_CLEANUP',
+          pid: handler.pid,
+          start: handler.start,
+        }),
+      );
+      process.kill(handler.pid, 'SIGKILL');
+      await until(async () => !(await sameLive(handler)), 2000);
+    }
+    await restoreJournal?.close();
+    socket?.close();
+    primingDisplay?.kill('SIGTERM');
+    conflictDisplay?.kill('SIGTERM');
+    xvfb.kill('SIGTERM');
+    server.close();
+  }
 }

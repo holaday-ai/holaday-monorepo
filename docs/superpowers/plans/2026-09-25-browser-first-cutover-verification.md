@@ -2,6 +2,25 @@
 
 ## 当前结论：未完成，不能执行生产切换
 
+## 2026-09-30 真实服务隔离物理验收（优先于旧节）
+
+产品基线17028f3e；本批只改两份原物理夹具与记录，不改变生产门禁。串行、原固定镜像、私有PID、network-none、无发布端口或生产凭据。以下场景全部实际执行、退出0，无跳过；不是新增单元测试数量。
+
+| 场景 | 执行结果 | 证据 |
+| --- | --- | --- |
+| Brave完整正常恢复及最终停止 | 18525/ba00ca，退出0；两次实际停止、9成员恢复树、35568.664809ms巡检稳定、不重放 | `/private/tmp/holaday-exclusive-display-physical-final-20260930.log` |
+| 外部显示占用 | 60568/d333d1，退出0；保留外部显示，无Brave/CDP、无重试 | `/private/tmp/holaday-exclusive-display-occupied-final-20260930.log` |
+| 缺少隔离权限 | 63207/168e53，退出0；实际unshare拒绝，无重试/恢复ACK | `/private/tmp/holaday-exclusive-display-denied-corrected-20260930.log` |
+| 真实VNC停止/恢复 | 6030/758f4e，退出0；真实x11vnc/websockify/RFB、旧树/监听/连接消失、新树/连接/配置/历史计数跨35099.376516ms稳定 | `/private/tmp/holaday-vnc-native-physical-final-20260930.log` |
+| 原替身恢复模式回归 | 59463/986cb6，退出0；35073.444267ms巡检，保留原合成证据标记 | `/private/tmp/holaday-vnc-stub-regression-final-20260930.log` |
+| 原仅停止控制器模式回归 | 27093/aa05d2，退出0；原控制器/journal/默认停止及真实进程退出 | `/private/tmp/holaday-vnc-stop-regression-final-20260930.log` |
+
+Brave17f5f48d与VNC543b7504独立审查通过。最终Biome/diff-check0d220b退出0；Brave仅格式换行变为54b416af，反向单处替换完整hash检查9b6719退出0，确认无行为差异。VNC保持543b7504。原产品Linux1034、ops120/60/16/1223+Python12及实际启动故障2/2没有相关产品改动，沿用明确标注的本日历史验证，不为夹具格式重复重跑。
+
+保留失败历史：Brave两显示同时首次创建目录、IPC继承stdio分类、VNC双5901行误计为两端口、保留云端口误放入永久退役列表，均先实际失败、定向修正再通过；未删除外部归属/双监听/整树断言或放松产品分类器。首次无权限runner因Bash空数组在容器启动前退出1，不算一次实际权限演练；修正的是临时脚本。
+
+VNC真实版本与生产不同，实测IPv6通配5900/5901仅限隔离QA，非生产网络许可。其headed5/6、业务/围栏、备份/候选、另一主机与来源事实仍合成，事件7且ACK8/开放均无。因此这些通过不等于原整项恢复或上线通过。现场双角色前置与消费者、真实备份/Mac/非PayPal恢复、完整演练/整分支审查/新鲜窗口继续按原计划完成，CLI仍关闭。
+
 ## 2026-09-30 专属显示实现及真实服务夹具（进行中，优先于旧节）
 
 固定启动材料现包含私有命名空间中的一次Xvfb启动及同PID Brave执行；实际双监听inode、精确子进程、完整新树、能力和有限配置比较已接入。启动握手独立复审发现Popen阻塞缺口，改为有界fork后关闭A-I1。取消用例M1补为SIGTERM后2.5秒内且早于普通启动截止；实际48686/bffd58退出0，2/2零跳过（超时4719ms、取消123ms），日志`/private/tmp/holaday-exclusive-display-I1-fault-final-20260930.log`。
