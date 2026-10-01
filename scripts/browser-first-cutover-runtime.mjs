@@ -423,12 +423,24 @@ export async function readFirstCutoverCloudRecoverySources(input, overrides = {}
       reject();
     // Finite Ubuntu search model. Never import Python or scan arbitrary homes.
     await checkEntryDirectory();
-    const absentPaths = [
-      '/root/.local',
-      '/usr/lib/python310.zip',
-      '/usr/bin/pyvenv.cfg',
-      '/usr/pyvenv.cfg',
-    ];
+    const absentPaths = ['/usr/lib/python310.zip', '/usr/bin/pyvenv.cfg', '/usr/pyvenv.cfg'];
+    // Ubuntu Python 3.10 searches this user site, not all of ~/.local.
+    // Permit unrelated application data under protected real ancestors, while
+    // binding the first missing component before/after the complete read.
+    if ((await chain('/root')) !== '/root' || !(await stat('/root')).isDirectory()) reject();
+    const userSite = '/root/.local/lib/python3.10/site-packages';
+    for (const p of ['/root/.local', '/root/.local/lib', '/root/.local/lib/python3.10', userSite]) {
+      let metadata;
+      try {
+        metadata = await stat(p);
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+        absentPaths.push(p);
+        break;
+      }
+      // Check lstat type first: a dangling link must never count as absence.
+      if (!metadata.isDirectory() || (await chain(p)) !== p || p === userSite) reject();
+    }
     for (const p of [
       '/usr/lib/python3.10',
       '/usr/lib/python3.10/lib-dynload',

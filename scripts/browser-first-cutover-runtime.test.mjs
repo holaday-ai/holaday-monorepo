@@ -194,6 +194,80 @@ async function sourceNativeFixture() {
     add,
   };
 }
+const pythonUserSitePaths = [
+  '/root/.local',
+  '/root/.local/lib',
+  '/root/.local/lib/python3.10',
+  '/root/.local/lib/python3.10/site-packages',
+];
+for (const depth of [1, 2, 3]) {
+  test(`cloud sources accepts ${depth} protected user-base ancestors with no Python user site`, async () => {
+    const f = await sourceNativeFixture();
+    for (const path of pythonUserSitePaths.slice(0, depth)) f.dirs.add(path);
+    f.add('/root/.local/share/qa-note', 'unrelated application data');
+    const open = f.io.open;
+    f.io.open = async (path) => {
+      assert.ok(!path.startsWith('/root/.local/'), 'do not read unrelated user-base data');
+      return open(path);
+    };
+    const result = await firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io);
+    assert.equal(result.pythonEntry.name, 'websockify');
+    assert.ok(result.files.every((row) => !row.path.startsWith('/root/.local/')));
+  });
+}
+for (const fault of [
+  'present-site',
+  'symlink-local',
+  'symlink-lib',
+  'symlink-python',
+  'writable-local',
+  'writable-lib',
+  'writable-python',
+  'unowned-local',
+  'non-directory-lib',
+  'creation-drift',
+]) {
+  test(`cloud sources refuses unsafe user-base ${fault}`, async () => {
+    const f = await sourceNativeFixture();
+    for (const path of pythonUserSitePaths.slice(0, 3)) f.dirs.add(path);
+    if (fault === 'present-site') f.dirs.add(pythonUserSitePaths[3]);
+    for (const [part, index] of [
+      ['local', 0],
+      ['lib', 1],
+      ['python', 2],
+    ]) {
+      if (fault === `symlink-${part}`) {
+        f.links.set(pythonUserSitePaths[index], '/tmp/foreign-user-base');
+        f.dirs.add('/tmp/foreign-user-base');
+      }
+      if (fault === `writable-${part}`) f.modes.set(pythonUserSitePaths[index], 0o40777);
+    }
+    if (fault === 'unowned-local') {
+      const read = f.io.lstat;
+      f.io.lstat = async (path) => {
+        const stat = await read(path);
+        return path === pythonUserSitePaths[0] ? { ...stat, uid: 1000 } : stat;
+      };
+    }
+    if (fault === 'non-directory-lib') {
+      f.dirs.delete(pythonUserSitePaths[1]);
+      f.add(pythonUserSitePaths[1], 'not a directory');
+    }
+    if (fault === 'creation-drift') {
+      const read = f.io.lstat;
+      let absentReads = 0;
+      f.io.lstat = async (path) => {
+        if (path === pythonUserSitePaths[3] && ++absentReads === 3) f.dirs.add(path);
+        return read(path);
+      };
+    }
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io),
+      /SOURCES_UNPROVEN/,
+    );
+  });
+}
+
 test('cloud source schema preserves exact compatibility facts and refuses forged special targets', async () => {
   const f = await sourceNativeFixture();
   f.modes.set('/usr/bin/mount', 0o104755);
