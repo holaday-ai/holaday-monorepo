@@ -1,5 +1,16 @@
 # 首次切换实施断点：同次迁移和真实候选启动已接通，开放前后仍待验收
 
+### 2026-10-01 M6真实缺口已修复并提交a971adb3；当前来源复核待具体载荷授权
+
+用户对2582字节/SHA72a8ad...0224探针明确“授权批准”后，正常审批放行并实际执行，session7557退出0。manager-shape-probe.json显示9条记录中索引0/1（other）缺ownPid/integerPid；两个目标holaday-chromium-headed及holaday-vnc全部字段检查通过。没有配置值、任意服务名或秘密输出，没有生产启停/写入。
+
+原manager读取器错误地把无关注册缺pid当作固定目标缺失。a971adb3只容许无关记录缺省pid：所有记录仍要求完整名称/ID与嵌套一致、全局ID唯一；存在pid必须为自有数据且合法；两个选定目标必须显式pid，不补0、不认定其他注册停止。7新测试先47项46GREEN/1RED，修复后47/47零跳过；原七模块Linux1214/1214零失败零跳过、真实PM2 socket读取/原PID及重启计数保持/缺socket不启动daemon均EXIT0，Biome与diff-check通过。仅作者范围审查，未重跑未变化的Brave物理用例，原fb1fcb60联合证据保持其历史范围。
+
+准备当前runtime/evidence及只读驱动live-source-reader-v3.mjs：478582字节，SHA256 5e719a1d3eacb6ade35912ae3738bd0bb4e3456f7164006f189f01162cba09b0；两模块与a971adb3源文件解码逐字节一致（仅静态import嵌入），75秒/192MiB/单线程池，manager→source→manager，无启停/落盘/恢复/业务修改；失败只给固定源码行标签且仍失败。正常审批执行前拒绝，认为此前具体授权只覆盖2582字节，未覆盖这份新的内部源码载荷。未发送SSH、没有v3结果文件、未换通道重试。完整可审阅范围在qa/native-vnc-resume-20260930/live-source-v3-approval.md；需明确允许该固定载荷后再走正常审批。
+
+当前现场source默认叶子仍未完成，双角色执行前条件、原host/完整ACK、整项演练/审查/新鲜发布窗口仍未完成；没有push/PR/merge/deploy或上线。原__pycache__保留，自动化暂停，单路无代理。新鲜验证日志manager-optional-pid-{red,green,biome,linux,native}.log保留；不重复已完成验证，不把本地修复当现场通过。
+
+
 ### 2026-10-01 原固定诊断已获准执行；新结构探针待系统所需的具体授权
 
 用户在上一条固定载荷阻塞说明后明确“授权 继续”。正常审批现已允许原473698字节/SHA eac571d833fc2b38a1f7856267c3dc357216f239c3ffe0f2c12d58de52f7bdfe载荷，经原严格SSH路径实际执行：session58462退出1，stderr0，managers-diagnostic.json记录M6→M9→unproven/read-managers。它已通过socket/RPC到达PM2记录结构校验；尚不能确定M6多个条件中的哪一个，现场manager/source仍未证明。未停止/恢复/更改任何生产服务或业务。
