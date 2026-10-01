@@ -32,11 +32,13 @@ import {
   compareCutoverCloudBrowserRecoveryConfig,
   cutoverRegistrationConfigDigest,
 } from '../browser-cutover-evidence.mjs';
+import { validateFirstCutoverOwnedDisplayObservation } from '../browser-first-cutover-inventory.mjs';
 import {
   firstCutoverCloudBrowserRecoveryLaunch,
   firstCutoverCloudVncRecoveryMaterial,
   prepareFirstCutoverCloudBrowserPolicy,
   readFirstCutoverCloudBrowserRecovery,
+  readFirstCutoverCloudManagers,
   readFirstCutoverCloudOwnedDisplay,
   readFirstCutoverCloudRecovery,
   readFirstCutoverCloudRecoveryCensus,
@@ -1133,11 +1135,31 @@ function cdp(method, params = {}) {
 async function close() {
   if (managed) {
     if (jointVnc?.stop) {
+      let foreignClientChecked = false;
       const observeOwnedDisplay = async () => {
         const sources = await readJointSources(attempt);
+        const rows = await readFirstCutoverCloudManagers();
+        const census = await readFirstCutoverCloudRecoveryCensus();
         const proof = await readFirstCutoverCloudOwnedDisplay({
           sources,
           maintenanceEndsAtMs: Date.now() + 15000,
+        });
+        validateFirstCutoverOwnedDisplayObservation({
+          observation: proof,
+          now: Date.now(),
+          snapshot: {
+            hostname: census.hostname,
+            bootId: census.bootId,
+            processes: census.processes,
+            pm2Runtime: { pid: census.processes.find((p) => p.pid === rows[1].pid).ppid },
+            managers: rows.map((r) => ({
+              name: r.name,
+              pmId: r.pm_id,
+              pid: r.pid,
+              status: r.pm2_env.status,
+              configDigest: cutoverRegistrationConfigDigest(r.pm2_env),
+            })),
+          },
         });
         assert.equal(proof.display.pid, oldDisplay.identity.pid);
         assert.equal(proof.display.ppid, managed.identity.pid);
@@ -1151,6 +1173,65 @@ async function close() {
             productionStopPermission: false,
           }),
         );
+        if (!foreignClientChecked) {
+          foreignClientChecked = true;
+          // This child belongs to the disposable fixture, outside BOTH service
+          // roots. Observe its real reciprocal X connection before rejection.
+          const canary = spawn(
+            '/usr/bin/x11vnc',
+            ['-display', ':98', '-localhost', '-rfbport', '5998', '-nopw', '-forever', '-shared'],
+            { stdio: 'ignore' },
+          );
+          const closed = once(canary, 'close');
+          try {
+            await until(async () => {
+              const { stdout } = await promisify(execFile)('/usr/bin/ss', ['-H', '-xapn'], {
+                timeout: 5000,
+                maxBuffer: 1048576,
+              });
+              const rows = stdout
+                .trim()
+                .split('\n')
+                .map((line) => ({ line, c: line.trim().split(/\s+/) }));
+              return rows.some(
+                (r) =>
+                  r.c[1] === 'ESTAB' &&
+                  r.line.includes(`pid=${canary.pid},`) &&
+                  rows.some(
+                    (s) =>
+                      s.c[1] === 'ESTAB' &&
+                      ['/tmp/.X11-unix/X98', '@/tmp/.X11-unix/X98'].includes(s.c[4]) &&
+                      s.c[5] === r.c[7] &&
+                      s.c[7] === r.c[5],
+                  ),
+              );
+            }, 10000);
+            await assert.rejects(
+              readFirstCutoverCloudOwnedDisplay({
+                sources,
+                maintenanceEndsAtMs: Date.now() + 15000,
+              }),
+              /CUTOVER_CLOUD_DISPLAY_SCOPE_UNPROVEN/,
+            );
+            console.log(
+              JSON.stringify({
+                marker: 'CLOUD_OWNED_DISPLAY_ACTUAL_FOREIGN_CLIENT_REFUSED',
+                actualReciprocalPeer: true,
+                productionEffect: false,
+              }),
+            );
+          } finally {
+            if (canary.exitCode === null && canary.signalCode === null) canary.kill('SIGTERM');
+            const timer = setTimeout(() => canary.kill('SIGKILL'), 5000);
+            try {
+              await closed;
+            } finally {
+              clearTimeout(timer);
+            }
+          }
+          // Fresh proof after cleanup, never reuse the pre-canary observation.
+          return observeOwnedDisplay();
+        }
       };
       jointVnc = await jointVnc.stop(observeOwnedDisplay);
       await observeOwnedDisplay();

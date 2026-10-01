@@ -2797,3 +2797,323 @@ test('Vultr scope cannot omit the independently listening browser websocket on 4
   f.ports = [4001];
   assert.throws(() => classify(f), /CUTOVER_INVENTORY_UNPROVEN/);
 });
+
+function addOwnedCloudDisplay(f) {
+  addCloudPair(f);
+  const s = f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+  const display = s.processes.find((p) => p.pid === 31);
+  display.exe = '/usr/bin/Xvfb';
+  const wm = { ...display, pid: 32, ppid: 30, start: '3200', exe: '/usr/bin/openbox' };
+  s.processes.push(wm);
+  f.reviews.vultr.review.processes.find((p) => p.pid === 31).identityDigest = hash(display);
+  f.reviews.vultr.review.processes.push({
+    pid: 32,
+    identityDigest: hash(wm),
+    disposition: 'preserve',
+    reason: 'explicit dedicated display',
+  });
+  const manager = s.managers.find((m) => m.pmId === 2);
+  f.cloudScope[1].scopeDigest = hash({
+    host: 'vultr',
+    hostname: s.hostname,
+    bootId: s.bootId,
+    pm2Runtime: s.pm2Runtime,
+    daemon: s.processes.find((p) => p.pid === 10),
+    manager,
+    processes: s.processes.filter((p) => [30, 31, 32].includes(p.pid)),
+  });
+  f.displayObservations = [];
+  f.recoveryIO = {
+    readCloudOwnedDisplay: async ({ sources, maintenanceEndsAtMs }) => {
+      assert.equal(maintenanceEndsAtMs, f.executionSite.maintenanceEndsAtMs);
+      const { observedAtMs: _time, ...material } = sources;
+      const observation = {
+        purpose: 'cloud-owned-display-observation',
+        hostname: s.hostname,
+        bootId: s.bootId,
+        sourcesDigest: hash(material),
+        contextDigest: hash('context'),
+        censusDigest: hash('complete census'),
+        socketDigest: hash('actual sockets'),
+        observedAtMs: f.now ?? 1000,
+        roots: f.cloudScope.map((r) => {
+          const m = s.managers.find((m) => m.pmId === r.pmId);
+          return {
+            name: m.name,
+            pmId: m.pmId,
+            pid: m.pid,
+            start: m.pid ? s.processes.find((p) => p.pid === m.pid).start : null,
+            status: m.status,
+            configDigest: m.configDigest,
+          };
+        }),
+        display: { ...display, mountNamespace: 'mnt:[42]' },
+        members: [display, wm],
+        clients: [
+          {
+            pid: 32,
+            start: '3200',
+            fd: 5,
+            inode: '102',
+            serverInode: '202',
+            role: 'holaday-chromium-headed',
+          },
+        ],
+      };
+      observation.treeDigests = observation.roots.map((root) => {
+        const ids = new Set(root.pid ? [root.pid] : []);
+        for (let i = 0; i < s.processes.length; i++)
+          for (const p of s.processes) if (ids.has(p.ppid)) ids.add(p.pid);
+        return hash(
+          s.processes
+            .filter((p) => ids.has(p.pid))
+            .sort((a, b) => a.pid - b.pid)
+            .map((p) =>
+              Object.fromEntries(
+                ['pid', 'ppid', 'start', 'uids', 'exe', 'cwd', 'argvDigest', 'cgroup'].map((k) => [
+                  k,
+                  p[k],
+                ]),
+              ),
+            ),
+        );
+      });
+      const result = structuredClone(observation);
+      await f.onDisplayRead?.(result);
+      f.displayObservations.push(result);
+      return result;
+    },
+  };
+}
+
+test('original observer consumes native display facts across both ordered stops and retains original absence accounting', async (t) => {
+  const r = await retirementFixture(t, addOwnedCloudDisplay);
+  await r.observer.stopCloudServices(
+    { maintenanceEndsAtMs: 8000 },
+    cloudStopOperations(r, (id) => {
+      if (id === 2) {
+        const s = r.f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+        s.processes = s.processes.filter((p) => p.pid !== 32);
+      }
+    }),
+  );
+  assert.equal((await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 4);
+  assert(r.f.displayObservations.some((o) => o.roots[0].status === 'online'));
+  assert(r.f.displayObservations.some((o) => o.roots[0].status === 'stopped'));
+  const observed = await r.observer.read();
+  assert.equal(observed.unknownLaunchers.length, 0);
+  assert.equal(JSON.stringify(observed).includes('cloud-owned-display-observation'), false);
+});
+for (const fault of [
+  'boolean',
+  'stale',
+  'future',
+  'source',
+  'context',
+  'host',
+  'root',
+  'display-parent',
+  'member',
+  'member-extra',
+  'foreign-client',
+  'client-start',
+  'missing-window-manager-client',
+  'duplicate-client',
+  'extra-field',
+  'native-error',
+]) {
+  test(`original observer rejects ${fault} native display fact before stop intent`, async (t) => {
+    const r = await retirementFixture(t, addOwnedCloudDisplay);
+    r.f.onDisplayRead = (o) => {
+      if (fault === 'boolean') {
+        for (const k of Object.keys(o)) delete o[k];
+        o.ready = true;
+      }
+      if (fault === 'stale') o.observedAtMs = -60000;
+      if (fault === 'future') o.observedAtMs = 1001;
+      if (fault === 'source') o.sourcesDigest = 'f'.repeat(64);
+      if (fault === 'context') o.contextDigest = hash('changed daemon context');
+      if (fault === 'host') o.hostname = 'other';
+      if (fault === 'root') o.roots[1].start = '999';
+      if (fault === 'display-parent') o.display.ppid = 1;
+      if (fault === 'member') o.members[0].start = '999';
+      if (fault === 'member-extra') o.members.push({ ...o.members[0], pid: 99 });
+      if (fault === 'foreign-client') o.clients[0].pid = 99;
+      if (fault === 'client-start') o.clients[0].start = '999';
+      if (fault === 'missing-window-manager-client') o.clients = [];
+      if (fault === 'duplicate-client') o.clients.push({ ...o.clients[0] });
+      if (fault === 'extra-field') o.stopAuthorized = true;
+      if (fault === 'native-error') throw Error('PRIVATE_DISPLAY_FAILURE');
+    };
+    let commands = 0;
+    await assert.rejects(
+      r.observer.stopCloudServices(
+        { maintenanceEndsAtMs: 8000 },
+        cloudStopOperations(r, () => commands++),
+      ),
+      /UNPROVEN/,
+    );
+    assert.equal(commands, 0);
+    assert.equal(
+      (await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents?.length ?? 0,
+      0,
+    );
+    assert.equal(JSON.stringify(r.f.rejections).includes('PRIVATE_DISPLAY_FAILURE'), false);
+  });
+}
+
+for (const count of [1, 2, 3]) {
+  test(`native display drift at journal boundary ${count} refuses further effects without replay`, async (t) => {
+    const r = await retirementFixture(t, addOwnedCloudDisplay);
+    r.f.onCloudRead = async (journal) => {
+      if ((await journal.readFirstCutoverEffects()).cloudMaintenanceEvents?.length === count)
+        r.f.onDisplayRead = (o) => {
+          o.clients[0].pid = 99;
+        };
+    };
+    let commands = 0;
+    await assert.rejects(
+      r.observer.stopCloudServices(
+        { maintenanceEndsAtMs: 8000 },
+        cloudStopOperations(r, () => commands++),
+      ),
+      /UNPROVEN/,
+    );
+    assert.equal(commands, count === 1 ? 0 : 1);
+    assert.equal((await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, count);
+    await assert.rejects(
+      r.observer.stopCloudServices(
+        { maintenanceEndsAtMs: 8000 },
+        cloudStopOperations(r, () => commands++),
+      ),
+      /UNPROVEN/,
+    );
+    assert.equal(commands, count === 1 ? 0 : 1);
+  });
+}
+test('native display original facts are cloned and not recaptured after both roles stop', async (t) => {
+  const r = await retirementFixture(t, addOwnedCloudDisplay);
+  r.f.displayObservations[0].members[0].start = 'caller-mutated';
+  await r.observer.stopCloudServices(
+    { maintenanceEndsAtMs: 8000 },
+    cloudStopOperations(r, (id) => {
+      if (id === 2) {
+        const s = r.f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+        s.processes = s.processes.filter((p) => p.pid !== 32);
+        r.f.onDisplayRead = () => {
+          throw Error('must not recapture absent original display');
+        };
+      }
+    }),
+  );
+  assert.equal((await r.observer.read()).unknownLaunchers.length, 0);
+});
+test('native display retained window manager still alive prevents headed stop ACK', async (t) => {
+  const r = await retirementFixture(t, addOwnedCloudDisplay);
+  let commands = 0;
+  await assert.rejects(
+    r.observer.stopCloudServices(
+      { maintenanceEndsAtMs: 8000 },
+      cloudStopOperations(r, () => commands++),
+    ),
+    /UNPROVEN/,
+  );
+  assert.equal(commands, 2);
+  assert.equal((await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 3);
+});
+for (const fault of [
+  'missing-observation',
+  'xorg',
+  'wrong-owner',
+  'wrong-namespace',
+  'bad-context',
+  'null-client',
+  'zero-inode',
+]) {
+  test(`native display structured contract refuses ${fault}`, async () => {
+    const f = pairFixture();
+    addOwnedCloudDisplay(f);
+    f.executionSite = { maintenanceEndsAtMs: 9000 };
+    const snapshot = f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+    let observation = await f.recoveryIO.readCloudOwnedDisplay({
+      sources: f.sources,
+      maintenanceEndsAtMs: 9000,
+    });
+    if (fault === 'missing-observation') observation = undefined;
+    if (fault === 'xorg') {
+      snapshot.processes.find((p) => p.pid === 31).exe = '/usr/bin/Xorg';
+      observation.members[0].exe = '/usr/bin/Xorg';
+      observation.display.exe = '/usr/bin/Xorg';
+    }
+    if (fault === 'wrong-owner') {
+      snapshot.processes.find((p) => p.pid === 31).uids = [998, 998, 998, 998];
+      observation.members[0].uids = [998, 998, 998, 998];
+      observation.display.uids = [998, 998, 998, 998];
+    }
+    if (fault === 'wrong-namespace') observation.display.mountNamespace = 'unknown';
+    if (fault === 'bad-context') observation.contextDigest = 'yes';
+    if (fault === 'null-client') observation.clients = [null];
+    if (fault === 'zero-inode') observation.clients[0].inode = '0';
+    assert.throws(
+      () =>
+        inventory.validateFirstCutoverOwnedDisplayObservation({ observation, snapshot, now: 1000 }),
+      /UNPROVEN/,
+    );
+  });
+}
+
+for (const afterFirstStop of [false, true]) {
+  test(`native display complete current tree cannot widen original review afterFirstStop=${afterFirstStop}`, async (t) => {
+    const r = await retirementFixture(t, addOwnedCloudDisplay);
+    const add = () => {
+      const s = r.f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+      if (!s.processes.some((p) => p.pid === 33))
+        s.processes.push({
+          ...s.processes.find((p) => p.pid === 30),
+          pid: 33,
+          ppid: 30,
+          start: '3300',
+        });
+    };
+    if (afterFirstStop)
+      r.f.onCloudRead = async (journal) => {
+        if ((await journal.readFirstCutoverEffects()).cloudMaintenanceEvents?.length === 2) add();
+      };
+    else add();
+    let commands = 0;
+    await assert.rejects(
+      r.observer.stopCloudServices(
+        { maintenanceEndsAtMs: 8000 },
+        cloudStopOperations(r, () => commands++),
+      ),
+      /UNPROVEN/,
+    );
+    assert.equal(commands, afterFirstStop ? 1 : 0);
+    assert.equal(
+      (await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents?.length ?? 0,
+      afterFirstStop ? 2 : 0,
+    );
+  });
+}
+test('native display whole tree drift during final pre-dispatch source gate preserves intent with no effect', async (t) => {
+  const r = await retirementFixture(t, addOwnedCloudDisplay);
+  let atIntent = false;
+  let observations = 0;
+  let commands = 0;
+  r.f.onCloudRead = async (journal) => {
+    atIntent = (await journal.readFirstCutoverEffects()).cloudMaintenanceEvents?.length === 1;
+  };
+  r.f.onDisplayRead = (o) => {
+    if (atIntent && ++observations === 2) o.treeDigests[1] = hash('new non-display descendant');
+  };
+  await assert.rejects(
+    r.observer.stopCloudServices(
+      { maintenanceEndsAtMs: 8000 },
+      cloudStopOperations(r, () => commands++),
+    ),
+    /UNPROVEN/,
+  );
+  assert.equal(observations, 2);
+  assert.equal(commands, 0);
+  assert.equal((await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 1);
+});

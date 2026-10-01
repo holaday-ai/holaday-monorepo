@@ -87,10 +87,138 @@ const executionHost = (role) =>
       ? 'vultr'
       : null;
 
+// Private native observation contract. The host additionally binds sourcesDigest
+// to its freshly collected protected source material. This is not an input-file
+// approval or a replacement for the original reviewed process identities.
+export function validateFirstCutoverOwnedDisplayObservation({ observation, snapshot, now }) {
+  const o = observation;
+  const names = ['holaday-vnc', 'holaday-chromium-headed'];
+  const project = (p) =>
+    Object.fromEntries(
+      ['pid', 'ppid', 'start', 'uids', 'exe', 'cwd', 'argvDigest', 'cgroup'].map((k) => [k, p[k]]),
+    );
+  if (
+    !o ||
+    Object.keys(o).sort().join(',') !==
+      'bootId,censusDigest,clients,contextDigest,display,hostname,members,observedAtMs,purpose,roots,socketDigest,sourcesDigest,treeDigests' ||
+    o.purpose !== 'cloud-owned-display-observation' ||
+    o.hostname !== snapshot.hostname ||
+    o.bootId !== snapshot.bootId ||
+    ![o.sourcesDigest, o.contextDigest, o.censusDigest, o.socketDigest].every(hash) ||
+    !Number.isSafeInteger(o.observedAtMs) ||
+    !Number.isSafeInteger(now) ||
+    o.observedAtMs < 0 ||
+    o.observedAtMs > now ||
+    now - o.observedAtMs > 60000 ||
+    !Array.isArray(o.roots) ||
+    o.roots.length !== 2 ||
+    !Array.isArray(o.members) ||
+    !Array.isArray(o.clients) ||
+    o.clients.length > 16384
+  )
+    fail();
+  const roots = names.map((name) => {
+    const matches = snapshot.managers.filter((m) => m.name === name);
+    if (matches.length !== 1) fail();
+    const m = matches[0];
+    if (
+      !(
+        (m.status === 'online' && m.pid > 1) ||
+        (name === names[0] && m.status === 'stopped' && m.pid === 0)
+      )
+    )
+      fail();
+    const p = snapshot.processes.find((p) => p.pid === m.pid);
+    if (m.pid && (!p || p.ppid !== snapshot.pm2Runtime.pid)) fail();
+    return {
+      name,
+      pmId: m.pmId,
+      pid: m.pid,
+      start: p?.start ?? null,
+      status: m.status,
+      configDigest: m.configDigest,
+    };
+  });
+  if (!equal(o.roots, roots)) fail();
+  const groups = roots.map((root) => {
+    const ids = new Set(root.pid ? [root.pid] : []);
+    for (let i = 0; i < snapshot.processes.length; i++)
+      for (const p of snapshot.processes) if (ids.has(p.ppid)) ids.add(p.pid);
+    return ids;
+  });
+  const treeDigests = groups.map((ids) =>
+    digest(
+      snapshot.processes
+        .filter((p) => ids.has(p.pid))
+        .sort((a, b) => a.pid - b.pid)
+        .map(project),
+    ),
+  );
+  if (!equal(o.treeDigests, treeDigests)) fail();
+  const members = snapshot.processes
+    .filter((p) => groups.some((g) => g.has(p.pid)) && /\/(?:Xvfb|Xorg|openbox)$/.test(p.exe))
+    .sort((a, b) => a.pid - b.pid);
+  const displays = members.filter((p) => p.exe === '/usr/bin/Xvfb');
+  if (
+    displays.length !== 1 ||
+    !members.length ||
+    members.some(
+      (p) =>
+        !groups[1].has(p.pid) ||
+        groups[0].has(p.pid) ||
+        !['/usr/bin/Xvfb', '/usr/bin/openbox'].includes(p.exe) ||
+        p.uids?.length !== 4 ||
+        p.uids.some((u) => u !== 0),
+    ) ||
+    !equal(o.members, members.map(project)) ||
+    displays[0].ppid !== roots[1].pid ||
+    !o.display ||
+    Object.keys(o.display).sort().join(',') !==
+      'argvDigest,cgroup,cwd,exe,mountNamespace,pid,ppid,start,uids' ||
+    !/^mnt:\[\d+\]$/.test(o.display.mountNamespace) ||
+    !equal(project(o.display), project(displays[0]))
+  )
+    fail();
+  const seen = new Set();
+  for (const c of o.clients) {
+    if (!c) fail();
+    const role = names.indexOf(c.role);
+    const p = snapshot.processes.find((p) => p.pid === c.pid);
+    const key = `${c.pid}:${c.fd}`;
+    if (
+      !c ||
+      Object.keys(c).sort().join(',') !== 'fd,inode,pid,role,serverInode,start' ||
+      role < 0 ||
+      !p ||
+      !groups[role].has(c.pid) ||
+      groups[1 - role].has(c.pid) ||
+      c.start !== p.start ||
+      !Number.isSafeInteger(c.fd) ||
+      c.fd < 0 ||
+      !/^[1-9]\d{0,19}$/.test(c.inode) ||
+      !/^[1-9]\d{0,19}$/.test(c.serverInode) ||
+      seen.has(key)
+    )
+      fail();
+    seen.add(key);
+  }
+  if (members.some((p) => p.exe === '/usr/bin/openbox' && !o.clients.some((c) => c.pid === p.pid)))
+    fail();
+}
+
 // Temporary stop accounting stays separate from permanent retirement. Compare
 // with the original protected process review, never create a new allowlist from
 // whatever happens to be running after an effect. Recovery is not inferred here.
-function observeCloudStops({ baseline, pair, adjusted, effects, inventoryDigest, progress }) {
+function observeCloudStops({
+  baseline,
+  pair,
+  adjusted,
+  effects,
+  inventoryDigest,
+  progress,
+  cloudDisplay,
+  now,
+}) {
   const scope = effects.cloudMaintenanceScope;
   const events = effects.cloudMaintenanceEvents ?? [];
   if (scope === undefined) {
@@ -127,6 +255,43 @@ function observeCloudStops({ baseline, pair, adjusted, effects, inventoryDigest,
       for (const p of snapshot.processes) if (ids.has(p.ppid)) ids.add(p.pid);
     return snapshot.processes.filter((p) => ids.has(p.pid)).sort((a, b) => a.pid - b.pid);
   };
+  const special = scope.flatMap((d) => {
+    const m = before.managers.find((m) => m.name === d.name);
+    return m ? tree(before, m.pid).filter((p) => /\/(?:Xvfb|Xorg|openbox)$/.test(p.exe)) : [];
+  });
+  let approvedDisplay = [];
+  if (special.length) {
+    if (!cloudDisplay || Object.keys(cloudDisplay).sort().join(',') !== 'current,original') fail();
+    const original = cloudDisplay.original;
+    // This retained fact accounts for the original reviewed members after exit;
+    // it cannot substitute for a fresh live ownership observation before stop.
+    if (!original || original.observedAtMs < before.observedAtMs || original.observedAtMs > now)
+      fail();
+    validateFirstCutoverOwnedDisplayObservation({
+      observation: original,
+      snapshot: before,
+      now: original.observedAtMs,
+    });
+    const headed = current.managers.find((m) => m.name === names[1]);
+    if (headed?.status === 'online') {
+      validateFirstCutoverOwnedDisplayObservation({
+        observation: cloudDisplay.current,
+        snapshot: current,
+        now,
+      });
+      if (
+        !equal(original.members, cloudDisplay.current.members) ||
+        original.contextDigest !== cloudDisplay.current.contextDigest ||
+        cloudDisplay.current.roots.some(
+          (r, i) =>
+            r.status === 'online' &&
+            cloudDisplay.current.treeDigests[i] !== original.treeDigests[i],
+        )
+      )
+        fail();
+    } else if (cloudDisplay.current !== undefined) fail();
+    approvedDisplay = original.members;
+  } else if (cloudDisplay !== undefined) fail();
   return scope.map((declaration, i) => {
     if (
       Object.keys(declaration).sort().join(',') !== 'name,pmId,recoveryDigest,scopeDigest' ||
@@ -162,7 +327,8 @@ function observeCloudStops({ baseline, pair, adjusted, effects, inventoryDigest,
       processes.some(
         (p) =>
           [daemon.pid, before.observer.pid].includes(p.pid) ||
-          /\/(?:Xvfb|Xorg|openbox)$/.test(p.exe) ||
+          (/\/(?:Xvfb|Xorg|openbox)$/.test(p.exe) &&
+            !approvedDisplay.some((member) => equal(member, p))) ||
           review.processes.find((r) => r.pid === p.pid)?.disposition !== 'preserve',
       ) ||
       declaration.scopeDigest !==
@@ -236,6 +402,7 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
     candidate,
     execution = [],
     cloudProgress = false,
+    cloudDisplay,
   } = structuredClone(input);
   if (
     effects?.phase === 'legacy_interruption_accepted' &&
@@ -352,6 +519,8 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
     effects,
     inventoryDigest,
     progress: cloudProgress,
+    cloudDisplay,
+    now: io.now(),
   });
   const actualSources = new Map(
     pair.hosts.map((h) => [h.host, firstCutoverSourceBindings(h.snapshot)]),

@@ -597,6 +597,26 @@ test('owned cloud display measures scoped Xvfb, window manager and both roles ac
     result.members.map((p) => p.pid),
     [43, 44],
   );
+  assert.deepEqual(
+    result.treeDigests,
+    [
+      [41, 45],
+      [42, 43, 44, 46],
+    ].map((ids) =>
+      f.sha(
+        f.census.processes
+          .filter((p) => ids.includes(p.pid))
+          .map((p) =>
+            Object.fromEntries(
+              ['pid', 'ppid', 'start', 'uids', 'exe', 'cwd', 'argvDigest', 'cgroup'].map((k) => [
+                k,
+                p[k],
+              ]),
+            ),
+          ),
+      ),
+    ),
+  );
   assert.equal(result.display.pid, 43);
   assert.equal(result.display.ppid, 42);
   assert.equal(result.clients.length, 3);

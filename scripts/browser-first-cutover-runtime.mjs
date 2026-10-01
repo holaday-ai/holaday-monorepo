@@ -1258,6 +1258,7 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
       })),
       display: { ...project(display), mountNamespace: display.mountNamespace },
       members: members.map(project),
+      treeDigests: trees.map((tree) => sha(tree.map(project))),
       clients: network.clients,
       socketDigest: sha(network),
       observedAtMs: clock(),

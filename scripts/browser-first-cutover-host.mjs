@@ -24,6 +24,7 @@ import { createCutoverIngressFiles } from './browser-first-cutover-ingress-files
 import {
   classifyFirstCutoverHostPair,
   classifyFirstCutoverRetirementPair,
+  validateFirstCutoverOwnedDisplayObservation,
 } from './browser-first-cutover-inventory.mjs';
 import {
   readCutoverMysqlSessionOwners,
@@ -36,6 +37,7 @@ import {
   prepareFirstCutoverCloudBrowserPolicy,
   readFirstCutoverCloudBrowserRecovery,
   readFirstCutoverCloudManagers,
+  readFirstCutoverCloudOwnedDisplay,
   readFirstCutoverCloudRecoveryCensus,
   readFirstCutoverCloudRecoverySources,
   readFirstCutoverCloudRecoveryVacancy,
@@ -1542,6 +1544,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
   const io = {
     readPair: readFirstCutoverHostPair,
     readCloudManagers: readFirstCutoverCloudManagers,
+    readCloudOwnedDisplay: readFirstCutoverCloudOwnedDisplay,
     readCloudRecoveryCensus: readFirstCutoverCloudRecoveryCensus,
     readCloudRecoverySources: readFirstCutoverCloudRecoverySources,
     readCloudRecoveryVacancy: readFirstCutoverCloudRecoveryVacancy,
@@ -1574,6 +1577,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           'CUTOVER_CLOUD_RECOVERY_CENSUS_UNPROVEN',
           'CUTOVER_CLOUD_SOURCES_UNPROVEN',
           'CUTOVER_CLOUD_VACANCY_UNPROVEN',
+          'CUTOVER_CLOUD_DISPLAY_SCOPE_UNPROVEN',
         ].includes(value)
       )
         code = value;
@@ -1779,6 +1783,39 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         return { pmId: declaration.pmId, config: structuredClone(config) };
       });
     };
+    let displayRequired = false;
+    let originalDisplayObservation;
+    const observeDisplay = async (sources, pair) => {
+      if (!displayRequired) return undefined;
+      const snapshot = pair.hosts.find((h) => h.host === 'vultr').snapshot;
+      if (snapshot.managers.find((m) => m.name === 'holaday-chromium-headed')?.status === 'stopped')
+        return undefined;
+      const observation = structuredClone(
+        await io.readCloudOwnedDisplay({
+          sources,
+          maintenanceEndsAtMs: executionSite.maintenanceEndsAtMs,
+        }),
+      );
+      const { observedAtMs: _time, ...material } = sources;
+      if (
+        observation?.sourcesDigest !==
+        createHash('sha256').update(JSON.stringify(material)).digest('hex')
+      )
+        fail();
+      validateFirstCutoverOwnedDisplayObservation({ observation, snapshot, now: checkClock() });
+      if (
+        originalDisplayObservation &&
+        (observation.contextDigest !== originalDisplayObservation.contextDigest ||
+          observation.roots.some(
+            (r, i) =>
+              r.status === 'online' &&
+              observation.treeDigests[i] !== originalDisplayObservation.treeDigests[i],
+          ))
+      )
+        fail();
+      if (checkClock() >= executionSite.maintenanceEndsAtMs) fail();
+      return observation;
+    };
     let originalCloudConfigs;
     initialStep = 'reviewed-source';
     const proof = await readReviewedFirstCutoverLegacySource(
@@ -1793,7 +1830,19 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             bindCloudRows(raw, baseline);
             initialStep = 'cloud-sources';
             try {
-              await compareSources(raw, baseline);
+              const sources = await compareSources(raw, baseline);
+              const snapshot = baseline.hosts.find((h) => h.host === 'vultr').snapshot;
+              const roots = new Set(
+                originalCloudScope.map(
+                  (d) => snapshot.managers.find((m) => m.name === d.name)?.pid,
+                ),
+              );
+              for (let i = 0; i < snapshot.processes.length; i++)
+                for (const p of snapshot.processes) if (roots.has(p.ppid)) roots.add(p.pid);
+              displayRequired = snapshot.processes.some(
+                (p) => roots.has(p.pid) && /\/(?:Xvfb|Xorg|openbox)$/.test(p.exe),
+              );
+              originalDisplayObservation = await observeDisplay(sources, baseline);
             } catch (error) {
               await report(error, 'initialization', 'cloud-sources');
               throw error;
@@ -1831,6 +1880,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         const pair = structuredClone(await io.readPair());
         bindCloudRows(raw, pair);
         const observed = await compareSources(raw, pair);
+        await observeDisplay(observed, pair);
         const observedAtMs = observed.observedAtMs;
         bindCloudRows(structuredClone(await io.readCloudManagers()), pair);
         if (!isDeepStrictEqual(before, await effects())) fail();
@@ -1895,9 +1945,20 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         const raw = originalCloudScope ? structuredClone(await io.readCloudManagers()) : undefined;
         const pair = structuredClone(await io.readPair());
         let captured;
+        let currentDisplayObservation;
         if (originalCloudScope) {
           step = 'cloud-config';
           bindCloudRows(raw, pair, captureStoppedPmId);
+          if (
+            displayRequired &&
+            pair.hosts
+              .find((h) => h.host === 'vultr')
+              .snapshot.managers.find((m) => m.name === 'holaday-chromium-headed')?.status ===
+              'online'
+          ) {
+            step = 'cloud-display';
+            currentDisplayObservation = await observeDisplay(await compareSources(raw, pair), pair);
+          }
           captured = bindCloudRows(
             structuredClone(await io.readCloudManagers()),
             pair,
@@ -1935,6 +1996,14 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             candidate,
             execution,
             cloudProgress: cloudProgress || (fenceProgress && before.phase === 'producers_stopped'),
+            ...(displayRequired
+              ? {
+                  cloudDisplay: {
+                    original: originalDisplayObservation,
+                    current: currentDisplayObservation,
+                  },
+                }
+              : {}),
           },
           { now: checkClock },
         );
