@@ -1,5 +1,36 @@
 # 首次切换实施断点：同次迁移和真实候选启动已接通，开放前后仍待验收
 
+### 2026-10-01 显示归属及原host消费组件03df6d38完成，继续双角色完整恢复前置
+
+已提交3414e447原生显示归属、03df6d38原host/inventory消费：真实Xvfb/Openbox成员、Unix reciprocal peer/fd客户端、原两角色完整树摘要与PM2上下文都绑定到私有原审查事实；每次读/intent前/dispatch前重新观察，拒绝新增非显示子进程、未知共享客户端、上下文或PID/start漂移，原成员仍存活不写ACK。双方停止后只用原事实做退出账，不采纳副作用后的新PID。源数据、旧树保护、完整恢复硬拒绝/ACK>4/CLI门仍未解除。
+
+最终七模块session73998：1423/1423零失败零跳过，/private/tmp/holaday-display-consumer-regression-final.log；32消费者+27叶子定向覆盖，六文件Biome及diff通过。原真实联合fixture session66715 EXIT0，native-packages/joint-native-display-consumer.log：实际范围外x11vnc客户端已建立reciprocal X连接并被拒绝，清理后重新实采；两在线/仅VNC已停止原生契约、完整两角色恢复树、Worker周期、实际WS/RFB、持久QA cookie和旧URL无重放、两次清理均通过。夹具仍有合成备份/候选前置，不是整站验收或VNC ACK8。首次35646在成功online观察后的下一次census拒绝未复现；诊断26613及无改写4705通过，失败日志保留，不声称修复未知根因。
+
+现场最新只读v2/session65662 EXIT0/stderr0：载荷534261字节/SHA256 2b77ad6633b66bcc0d1576679aff2ba0ba78e7b418d1b5922486058c2070ef7a，驱动未变，runtime仅新treeDigests字段。54来源、Xvfb/Openbox两成员、11个客户端、两个完整树摘要均观察通过；live-owned-display-v2.json。原固定主机/跳板、75秒/192MiB/单线程，无生产写入或启停、stopPermission:false。先前3414e447现场session37865及物理组件session4705证据也保留。
+
+当前无运行中本轮验证或SSH；原__pycache__保留。下一步沿原未完任务：双角色完整恢复执行前能力/加载来源审计及旧关联孤儿归属；原host有序恢复、有限配置比较、ACK6/8/恢复后库存消费；Task4–6整体备份写入隔离/Mac/非PayPal/整项演练、分支审查及新鲜发布窗口。不要把完成的显示组件重做，也不能仅删recovery hardthrow。无push/PR/merge/deploy/上线成功。自动化暂停、单路无代理、既有授权持续有效，正常系统审批均已放行，无新增授权提问。
+
+
+### 2026-10-01 原生显示归属3414e447已提交，原host完整树消费草稿1422回归通过
+
+当前HEAD 3414e447，原生readFirstCutoverCloudOwnedDisplay及原联合fixture四文件已提交。27定向/七模块1391通过；无诊断改写的原真实joint session4705 EXIT0，native-packages/joint-native-owned-display-final.log，真实两服务在线及仅VNC停止的归属、两角色恢复树/Worker周期/WS-RFB/旧URL不重放/两次清理通过。首次35646在成功online归属之后的下一次完整census拒绝，诊断26613及最终4705未复现；保留失败日志，不声称根因修复。
+
+现场只读session37865 EXIT0/stderr0：live-owned-display.mjs 534177字节，SHA256 7a099b2b34a828edba86dce9f4e6d16c0d853056cf00795ce6206e6a4cf8f948；来源54项，Xvfb/Openbox两个显示成员，11个实际客户端均在两角色树内。它验证3414e447原接口，尚不含后加treeDigests契约；没有生产停止许可/写入/启停。正常系统审批通过，未再询问用户授权。
+
+当前新增未提交消费层：runtime/test增加两角色完整树treeDigests；inventory导出严格结构化验证并仅凭原审查成员+新鲜当前归属处理Xvfb/Openbox；host初始化保存私有原事实，每次读、intent前及dispatch前实采，来源/全树/成员/客户端绑定回原批准树。VNC停止后头服务仍实采，双方停止后只保留原成员退出账，不重采纳当前PID。Xorg、未知共享客户端、无效/陈旧/未来/错源/全树新增、空客户端和零inode拒绝；完整恢复hardthrow/ACK/CLI门仍保留。
+
+58定向通过（31消费+27叶子），最终七模块session5897为1422/1422零失败零跳过（/private/tmp/holaday-display-consumer-regression.log），五文件Biome通过。原fixture另新增实际消费validator和真实范围外x11vnc客户端拒绝对照：当前session66715，native-packages/joint-native-display-consumer.log，尚未通过，先收结果；run-joint-display-consumer.sh仍固定离线1CPU/768MiB。不存在其他重型验证/远端运行。后续先审查本批/原生结果，更新现场载荷treeDigests契约如需要，再继续原完整恢复消费/能力前置/Task4–6整体演练与新鲜发布窗口。
+
+原__pycache__保留，未推送/PR/合并/部署/上线。自动化保持暂停、单路无代理、既有连续授权有效；正常审批拒绝才记录具体动作/原因，不泛化为再次授权需求。不重做已完成组件或不适用的Node属主修复。
+
+
+### 2026-10-01 显示归属原生观察草稿，现场拓扑已核实，真实联合验证待完成
+
+当前HEAD a6f4e47e，四个未提交文件为runtime/test及两份原联合fixture；原__pycache__保留。现场只读v3/session65590和v4/session80706均EXIT0：Xvfb为headed直接子进程，headed含Openbox，双次peer/fd采样客户端均在两服务树内；这只确认原库存对Xvfb的笼统拒绝是实际缺口，不是生产停止许可。未做任何生产写入/启停。
+
+readFirstCutoverCloudOwnedDisplay草稿绑定真实来源/context、两角色配置及完整census、Xvfb加载inode/源码、Unix双listener和所有实际peer fd、全部客户端服务树归属、无Xvfb TCP共享，两次采样漂移拒绝。27定向测试通过；四文件Biome通过；七模块当前session37966，日志/private/tmp/holaday-owned-display-regression.log。原fixture新增两服务在线和仅VNC已停止两种真实观察，尚未验证；准备native-packages/run-joint-owned-display.sh。原host/classifier尚未消费新事实，完整恢复硬门/ACK仍关闭，不能仅删Xvfb保护。下一步先收回归再真实joint，补证据消费及原剩余Task4–6。自动化暂停、单路无代理、既有授权持续有效，无push/PR/merge/deploy/上线。
+
+
 ### 2026-10-01 原生空闲端点及原host消费37c70ae9完成组件验证，继续核对现场显示归属
 
 实现37c70ae9新增只读readFirstCutoverCloudRecoveryVacancy并由原恢复观察器在intent前消费：真实双stopped配置/source/context、自身与PM2/PID1三命名空间、X98锁/Unix端点、IPv4/IPv6的5901/6080/9223全部本地行双采样；布尔、陈旧、错来源或漂移拒绝。它不是预约、完整能力或旧树退出证明；原完整恢复硬门/ACK/CLI保持关闭。
