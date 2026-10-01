@@ -1,5 +1,15 @@
 # 浏览器首次切换验收记录
 
+### 2026-10-01 VNC缺省DISPLAY修复032c0b20已通过组件验证；v5现场复核被系统拒绝
+
+用户对3599字节/SHAce1c49...d65faf明确授权后，正常审批放行，session61626 EXIT0/stderr0。launch-shape-probe.json显示仅VNC缺DISPLAY，其他启动条件及headed全部通过；不输出原值、无生产服务改动。
+
+提交032c0b2095e6bfdbbff54472a9d6a5e60d7b6176精确区分VNC缺省DISPLAY与显式错误值：原注册/环境不变，缺省与有值的selectionDigest不同；headed仍固定:98，VNC完整树的x11vnc固定argv/实际X连接要求不变。13边界用例12GREEN/1RED→13GREEN，七模块Linux1240/1240零失败零跳过（session39376），Biome4文件及diff通过。原真实联合夹具改为VNC启动时不带DISPLAY，并断言PM2顶层/嵌套均无该键；session6735/joint-native-missing-display.log EXIT0，实际default sources、完整headed/VNC树、真实WS/RFB连接0→1handler、两角色跨Worker周期稳定、旧页面无重放、持久QA cookie保留和两次停止清理均通过。原Python user-base现场形态仍在同容器覆盖。作者组件验证，不是整分支独立审查或整项发布验收。
+
+当前新载荷live-source-reader-v5.mjs：479934字节，SHA256 6292993e71a3018ca27d307dfe9d685fa4d9450c4cff84970b913cd75ed4cfb8。runtime/evidence与032c0b20逐字节一致（仅静态import嵌入），evidence未变、驱动与已执行v4完全相同，75秒/192MiB；经原严格SSH跳板到同一207.148.70.106，只读manager→source→manager。正常审批发送前拒绝，明确认为用户批准的是前一探针，不能从助手拟议范围推导v5具体载荷及目的地授权。没有SSH执行、没有v5结果文件、没有重试/换通道或绕过。
+
+精确范围及拟议连续授权边界在qa/native-vnc-resume-20260930/live-source-v5-approval.md：如用户同意，明确允许固定目标上两份runtime/evidence及必要只读驱动的后续诊断迭代，有本地哈希/可审代码、有限资源、无秘密输出/远端写入/启停/业务修改，仍走系统审查。此范围目前未被用户明确批准，不能自行视作批准；项目原授权保持有效。下一步先获准v5后完成现场source读，再沿原方案继续双角色执行前能力/排他归属、host消费/完整ACK及Task4–6整项演练/审查/新鲜窗口。当前完整现场source仍未证明，无push/PR/merge/deploy/上线成功。原scripts/__pycache__保留，自动化暂停，单路无代理；无运行中本轮验证，不重做本批已完成检查。
+
 ### 2026-10-01 v4已执行；拒绝点推进到启动环境条件，3599字节诊断待具体授权
 
 用户对479654字节/SHAeb9be5...94c68e明确“授权”后正常审批放行。session88418实际退出1/stderr0；live-source-reader-v4.json记录source阶段runtime519→620拒绝，manager读取通过，前轮.local缺失检查已越过。519含多个启动环境条件，尚不能确定具体字段；没有实现改动或猜测性放宽。现场当前source完整证明仍unproven。
