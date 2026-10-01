@@ -1,5 +1,16 @@
 # 浏览器首次切换验收记录
 
+### 2026-10-01 精确Python用户路径修复3dcf5c25已验证；v4现场复核受系统审批阻塞
+
+已批准v3实际执行，manager通过、source因要求整个/root/.local缺失而拒绝。获准标准stat仅采七个固定路径元数据：.local是root:root755目录，lib和其下Python user-site、zip及pyvenv.cfg均ENOENT。官方缓存Ubuntu Python3.10.12 site.py证实真实用户包点为.local/lib/python3.10/site-packages，.local其他应用数据不进入该搜索点。
+
+3dcf5c25只改原runtime/test：逐级lstat/实际路径/保护权限校验祖先，绑定第一缺失组件并在读完后重查，不读取无关.local/share内容，不修改生产目录；存在用户site、链接（含悬空）、可写/非root/非目录祖先及并发创建仍拒绝。13新用例10GREEN/3RED→13GREEN；七模块1227/1227零失败零跳过，Biome/diff通过；真实joint-native-user-base.log/session90521 EXIT0，在.local/share存在且lib不存在的容器中通过真实默认source、headed/VNC/真实连接/分别35秒周期、无旧页面重放及两次停止清理。全为作者验证，非整项验收。
+
+当前v4复核载荷479654字节，SHA256 eb9be5f50cd0212513c808a97e045c33f637c4afbfecf871f86631da8394c68e。driver与已批准v3完全相同，evidence不变，runtime仅含3dcf5c25已验证改动，两模块与源文件解码逐字节一致。正常审批执行前拒绝，认为现有授权未具体覆盖新SHA内部源码传输；未SSH发送、无v4结果文件、未换通道或重试。精确范围qa/native-vnc-resume-20260930/live-source-v4-approval.md；需用户明确批准该固定载荷后再走系统审批。人类项目授权继续有效。
+
+组件修复已提交，现场当前版本source仍未通过；双角色执行前能力/排他归属、host/完整ACK及Task4–6整项演练/审查/新鲜窗口仍未完成。未push/PR/merge/deploy，上线未成功。无运行中本轮测试/远端操作，原__pycache__保留，自动化暂停，单路无代理。不要重做这批组件验证；批准v4后从现场default source事实继续。
+
+
 ### 2026-10-01 M6真实缺口已修复并提交a971adb3；当前来源复核待具体载荷授权
 
 用户对2582字节/SHA72a8ad...0224探针明确“授权批准”后，正常审批放行并实际执行，session7557退出0。manager-shape-probe.json显示9条记录中索引0/1（other）缺ownPid/integerPid；两个目标holaday-chromium-headed及holaday-vnc全部字段检查通过。没有配置值、任意服务名或秘密输出，没有生产启停/写入。
