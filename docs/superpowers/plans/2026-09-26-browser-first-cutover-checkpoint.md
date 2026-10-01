@@ -1,5 +1,13 @@
 # 首次切换实施断点：同次迁移和真实候选启动已接通，开放前后仍待验收
 
+### 2026-10-01 私有恢复策略及原staging接入557ff8e5完成组件验证
+
+实现提交557ff8e5。prepareFirstCutoverCloudBrowserPolicy已接入原host stage：site attach绑定scope后、readiness前，在原journal所有权和批准维护截止内独占创建attempt/cloud-browser-policy，复制受保护原策略原字节并增加RestoreOnStartup=5。目录已有/部分失败不采用不覆盖不重试；源漂移、链接/硬链、不安全模式、错误scope、锁丢失和过期拒绝。正式生产路径仍未执行。
+
+33策略定向（含真实v1 journal投影与截止）+5 host顺序/失败/不重试=38通过；七模块1329/1329零失败零跳过（session46089，policy-stage-linux.log）；五文件Biome及diff通过。最终原真实joint session97161 EXIT0，native-packages/joint-native-policy-stage-final.log：正式策略函数、实际source/context、完整headed/VNC树、各自Worker周期、真实WS/RFB0→1handler、持久QA cookie、旧URL无重放、两次停止/清理和无关服务保留。QA前提仍合成，不计整站验收、VNC ACK8或候选开放。初次joint34347因真实v1 journal省略字段而拒绝，真实journal回归修复后89993及最终97161通过；失败日志保留。
+
+剩余原任务：双角色执行前能力/排他归属、原host有序恢复/完整配置比较/ACK6/8消费、Task4–6整体演练/整分支审查/新鲜窗口。host恢复硬拒绝/库存>4/CLI未解除。无push/PR/merge/deploy/上线成功，无生产写入/启停。本轮所有QA已结束；原__pycache__保留、自动化暂停、单路无代理。既有连续授权有效；实际PM2加载root的/usr/bin/node，/opt属主草稿不适用生产。下一步沿原恢复前置缺口继续，不重跑本批。
+
 ### 2026-10-01 e72c2101原生上下文组件完成；现场来源+上下文通过，无Node属主修复任务
 
 当前实现提交e72c2101a7e12ab4ee4be69c0f04cda729b0512e；新增readFirstCutoverCloudRecoveryContext只读叶子，实际root权限/初始命名空间/加载Node inode、已审PM2源码字节及早于daemon的时间、加载器环境与漂移约束，安全标签不可用必须显式unknown。51定向测试（含IPC精确FD3/json引导对、nonroot文件/祖先、错误/漂移）通过；七模块1291/1291零失败零跳过，session71540；三文件Biome/diff通过。原真实joint-native-context-protected-node.log/session92751 EXIT0，恢复intent前原生context、真实来源、两角色完整树与Worker周期、真实WS/RFB连接、无旧页面重放及两次清理均通过。QA仅在一次性容器把原归档Node两路径安装为root:root；QA标签保持unavailable/EINVAL，不能当生产全部安全约束证明。作者组件验证，非整项验收。
