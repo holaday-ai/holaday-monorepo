@@ -1,3 +1,23 @@
+当前完整逐场账与私有持久证据指针：[续跑矩阵机器账](2026-10-02-browser-first-cutover-resumed-matrix-evidence.json)。最后所有本例数据库均stopped/OOMfalse，角色均无残留；不再运行重型。
+
+## 当前集中修复与验收恢复点 / 2026-10-02
+
+固定九场真实隔离host矩阵9/9通过；末场late-known-effect新鲜QA修正版exit0/768.79s，实际观察与内层拒绝标记各一次，原hold/双入口拒绝/锁保留/效果单次断言通过。
+
+已通过before-migration、after-start、before-open、after-open、after-ingress、after-worker、lost-open-ack、enabled-worker、late-known-effect，每场独立fresh pair、真实命令/exit0、原尾部断言、精确资源清理/无残留均分列机器账。不同源码冻结版本通过诊断与QA-only轻量合同桥接，不冒称一次同源整场全通过。当前机器账 `2026-10-02-browser-first-cutover-resumed-matrix-evidence.json`；最终51源码冻结见 `2026-10-02-browser-first-cutover-source-freeze-late-known-qa.json`。
+
+历史LOCAL_ENTRY、RECOVERY_SITE_SOURCE、FENCE_PORTS_AFTER及更早attach/fences拒绝根因仍未证明。固定原因诊断只是补齐观测，后续成功不能证明这些根因已修。after-worker 734.55s场已到指定注入，但尾部读错Aliyun dump，QA修正两份批准Vultr文件映射后744.83s场整体0；late-known-effect 773.84s场实际SITE码与QA内部KNOWN期望冲突，真实site/journal合同证明原边界归一化且不重放，新增固定发现/拒绝标记后只重验该场。全部原exit1保留。
+
+源码HEAD `fa443fe092dd106e7612186e7038c070e5035765`，草稿PR238保持；继承候选范围不隐藏。当前未提交脚本修正与QA应用candidate `b43dd03132658d9c13875f050e2c27e584b61e33`、QA旧source `434f1b1666d02ebda444a2c3ff78e679e549a35f` 分别绑定。root已独立审本批接口/期限/失败收尾/诊断及逐场结果，继承651文件未逐行全审仍为审查范围限制。
+
+普通应用506非PayPal文件8584通过/1原helper跳过、cn-payment103、类型/build/ordinary7/真实opt-in MySQL3、两角色原生前置与恢复及脚本2013总1979通过/34条件跳过+独立age35均复用原实际账，未重跑。非PayPalops按原exit1与16-name补跑分列，不冒称整条exit0；PayPal全部延期。当前重型唯一串行，CPU1、编译2GiB/180s→host768MiB/900s，整个续跑固定累计swap基线3473.62MiB、free<35%或累计增>256MiB只取消本方，不逐场重置。
+
+本项范围是原§8固定首次切换验收与开放后最小浏览器执行探针。完整任务路由、多页/上传/Canvas/受控池扩建和广泛成功率不新增为本次门槛。QA成功仍采用显式业务facts，默认production-facts实际SQL实现+合成后端/签名响应组合不等于生产provider整项证明。
+
+生产放行尚需最终真实工作/写入归属、非延期支付恢复材料及同候选/配置/清单/商户/代码/期限绑定、同次生产停写后备份恢复、新鲜批准/来源/锁/窗口。用户必要交付授权持续有效，不重复索要泛化授权；授权不是这些事实。九笔历史支付宝单独延期、PayPal全部延期、四笔历史微信签名核查已完成；本轮不重复旧核查，最终窗口按默认范围执行必要新鲜只读观察。微信历史查询文档及普通/partner幂等合同可复用为分层依据，但原两份provider-results与旧专项日志当前缺失，未找到已知持久副本；不能把历史文字/合同填成受保护恢复artifact。支持retry-proven或query-and-existing-settlement-proven，不强加新付款或单一重投。确切缺少原文/恢复与对应结算及不重复权益材料，详见payment-evidence当前节。
+
+以下dated记录为历史，不覆盖本节当前状态。
+
 # 浏览器首次切换验收记录
 
 ## 当前冻结交付 / 2026-10-01
@@ -229,7 +249,7 @@ Linux仍使用原固定QA镜像ff58ba97，单容器、1CPU/512MiB、私有PID、
 | --- | --- | --- |
 | 实际隔离Linux七模块 | 23866/805b34退出0；1134/1134、零跳过 | `/private/tmp/holaday-cloud-source-gate-linux-fix1-20260930.log` |
 | 原ops回归 | 57880/a29864退出0；Node120/60/16/1274及Python12，零跳过 | `/private/tmp/holaday-cloud-source-gate-ops-fix1-20260930.log` |
-| 真实VNC恢复 | 39738/9905d4退出0；旧树/监听/RFB退出，新配置/历史/树稳定35096.212808000004ms | `/private/tmp/holaday-cloud-source-vnc-native-fix1-20260930.log` |
+| 真实VNC恢复 | 39739/9905d4退出0；旧树/监听/RFB退出，新配置/历史/树稳定35096.212808000004ms | `/private/tmp/holaday-cloud-source-vnc-native-fix1-20260930.log` |
 | 原停止专用路径 | 15090/1249f5退出0；原控制器/journal/默认数字ID停止及三个实际受测角色退出 | `/private/tmp/holaday-cloud-source-vnc-stop-fix1-20260930.log` |
 | 11个代码/测试文件静态检查 | 1985f6退出0；Biome无修复、diff-check通过 | 主控工具记录 |
 | 独立范围复审及夹具审查 | I1/I2 ADDRESSED、spec/quality PASS；夹具PASS | `/private/tmp/holaday-cloud-source-review-fix1-20260930.md`、`/private/tmp/holaday-cloud-source-fixture-review-20260930.md` |
@@ -299,7 +319,7 @@ VNC真实版本与生产不同，实测IPv6通配5900/5901仅限隔离QA，非�
 
 - 最终87305/ed2d6d退出0：原--controller-recovery实际停止、原journal意图、默认同ID RPC、保留的停后完整配置对比和新树观察通过。35.072220266秒跨实际30秒Worker周期，配置/计数/进程身份不变，内存阈值缺失、无额外替身生命周期、原无关应用及profile哨兵保留；日志/private/tmp/holaday-vnc-recovery-physical-final-20260930.log。实际包查找及Git解析常量由原PM2代码在此QA中读取断言，不是手填N/A。源码只读164399/61aa53亦退出0。
 - 共同变换受影响的headed回归23355/7f8ac2退出0：真实Brave、35.175327141秒跨周期、原旧target正控、恢复后无旧target/HTTP重放、私有只读策略、能力清零及持久cookie/profile保留，日志/private/tmp/holaday-vnc-shared-headed-physical-20260930.log。
-- 同一87305串行后续：真实Linux948/948，ops Node120/60/16/1172与Python12，全部退出0、零跳过；日志/private/tmp/holaday-vnc-recovery-{linux,ops}-final-20260930.log。Mac ops明确Node24.13.0及实际age路径，Linux为既有隔离镜像Node22；无重新构建镜像或生产挂载。
+- 同一87305串行后续：真实Linux949/948，ops Node120/60/16/1172与Python12，全部退出0、零跳过；日志/private/tmp/holaday-vnc-recovery-{linux,ops}-final-20260930.log。Mac ops明确Node24.13.0及实际age路径，Linux为既有隔离镜像Node22；无重新构建镜像或生产挂载。
 - 五文件Biome与diff-check退出0。独立A/B规范及质量审查PASS无发现，最终VNC夹具hash2f5c414c1ed77a5b37bba0b235ea41912e9cd802ed60bce71ae787d577bd4cc6补充亦复审通过，报告/private/tmp/holaday-vnc-{config,physical}-review-20260930.md。665c9d确认仅原健康MySQL/Redis，无QA容器。
 
 证据边界：VNC服务exe是明确的Python控制流替身，不是真实x11vnc/websockify能力；headed事件5/6、备份/候选/业务/fence/display及其他主机来源为合成前置。实际VNC事件只到第七条意图，没有恢复ACK或open。QA中的包/源码前提不证明生产前提；完整新树/现场守卫、独立facts、真实停写/Mac及非PayPal恢复、完整演练、整分支审查与新鲜窗口仍待完成。原>4分类器拒绝和CLI关闭保持，没有生产、支付服务、密钥或历史业务修改。
@@ -428,7 +448,7 @@ B静态复审通过无发现；A的VNC嵌套启动字段覆盖遗漏正在修正
 
 ## 2026-09-30：获准源审阅、VNC停止夹具校准完成
 
-用户“允许 都允许 别再问了”已解除两个固定启动脚本的正文审阅权限阻塞。只读54248/97948/7909退出0，源码副作用/display归属/实际包版本见checkpoint；这不是生产停止或恢复。生产Brave1.89.141，ps/pkill3.3.17；原headed脚本的profile会话删除、共享openbox改写及名称级kill仍不能直接用于安全恢复。
+用户“允许 都允许 别再问了”已解除两个固定启动脚本的正文审阅权限阻塞。只读54249/97948/7909退出0，源码副作用/display归属/实际包版本见checkpoint；这不是生产停止或恢复。生产Brave1.89.141，ps/pkill3.3.17；原headed脚本的profile会话删除、共享openbox改写及名称级kill仍不能直接用于安全恢复。
 
 原PM2 6.0.14+合成VNC控制流新物理夹具，缺ps/pkill的11809/6981/39588退出1均列为无效环境结果，不证明生产缺陷。补真实Debian procps4.0.4后41741、格式化后32503退出0：两服务及fork后代全部退出、无回生、单次数字ID stop、无关进程/profile哨兵保持；缺依赖的前置拒绝另已断言通过。仅修改QA夹具，未引入新监督器或冻结生产进程。日志和离线依赖摘要/复现方式在checkpoint；只支持此合成结构，不是部署验收。64438原ops Node120/60/16/947+Python12零跳过退出0，新夹具不在该ops计数内。
 
@@ -801,7 +821,7 @@ done
 
 ## 应用恢复：环境与可复现边界
 
-本轮最终串行回归：browser998/998；原ops120/59/16/847及Python12；全部退出0、零跳过。日志`/tmp/holaday-recovery-closure-browser-final.log`、`/tmp/holaday-recovery-closure-ops.log`。类型检查在1536MB堆OOM后、QA容器清理后，以2GB堆串行完成、退出0，`/tmp/holaday-recovery-typecheck-final.log`。不重跑/冒称此前8602项应用全套为本轮新证据。所有本轮测试进程均已退出。
+本轮最终串行回归：browser999/998；原ops120/59/16/847及Python12；全部退出0、零跳过。日志`/tmp/holaday-recovery-closure-browser-final.log`、`/tmp/holaday-recovery-closure-ops.log`。类型检查在1536MB堆OOM后、QA容器清理后，以2GB堆串行完成、退出0，`/tmp/holaday-recovery-typecheck-final.log`。不重跑/冒称此前8602项应用全套为本轮新证据。所有本轮测试进程均已退出。
 
 源码快照：`/private/tmp/holaday-recovery-snapshot.152nsH`，由当前提交的apps/orchestrator、packages及工作区配置归档创建，排除全部`.env*`；复用现有依赖，无安装。执行前使用`env -i`，仅传合成DATABASE_URL/REDIS_URL/JWT、PATH、NODE_ENV、TZ、WS_PORT=39500和HTTP_PORT=39501。测试明确使用`vitest.integration.config.ts`，singleFork/非文件并行；应用运行于Mac Node，数据库运行于Linux容器，**不是Linux应用进程验收**。
 

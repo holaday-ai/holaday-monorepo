@@ -143,7 +143,19 @@ async function pair(t, change = {}) {
           calls.push('all');
           return { ...counts, stage: 'all-writers' };
         },
-        verifyFence: async () => ({ ...counts, stage: 'all-writers' }),
+        verifyFence: async () => {
+          if (change.probeDiagnostic) {
+            const { ingressDiagnosticError } = await import(
+              './browser-first-cutover-ingress-diagnostics.mjs'
+            );
+            throw ingressDiagnosticError(
+              'CUTOVER_INGRESS_LIFECYCLE_UNPROVEN',
+              'PROBE_TIMEOUT',
+              new Error('private raw'),
+            );
+          }
+          return { ...counts, stage: 'all-writers' };
+        },
         verifyOrders: async () => {
           calls.push('verify-orders');
           return { ...(await io.observeWriters()), stage: 'orders' };
@@ -160,7 +172,10 @@ async function pair(t, change = {}) {
     .serveFirstCutoverIngressSession({ attempt: binding.attempt }, serverIO)
     .then(
       () => ({ code: 0 }),
-      () => ({ code: 1 }),
+      (error) => ({
+        code: 1,
+        ...(change.probeDiagnostic ? { stage: error.cause?.ingressStage } : {}),
+      }),
     );
   const io = {
     platform: 'linux',
@@ -695,4 +710,150 @@ test('replayed sequence with an otherwise permitted mutation is rejected', async
   assert.deepEqual(await f.serving, { code: 1 });
   await assert.rejects(client.fenceOrders(), /CUTOVER_INGRESS_SESSION_UNPROVEN/);
   assert.deepEqual(f.calls, []);
+});
+
+test('receiver exposes only the fixed inner probe stage and keeps its public refusal code', async (t) => {
+  const { ingressDiagnosticStage } = await import(
+    './browser-first-cutover-ingress-diagnostics.mjs'
+  );
+  const f = await pair(t, { probeDiagnostic: true });
+  const client = await f.connect();
+  f.setPhase('all_fenced');
+  await assert.rejects(client.verifyFence(), /CUTOVER_INGRESS_SESSION_UNPROVEN/);
+  const outcome = await f.serving;
+  assert.equal(outcome.code, 1);
+  assert.equal(outcome.stage, 'PROBE_TIMEOUT');
+});
+
+test('source diagnostics bind actual site reader IO, approval and clock refusals without raw metadata', async (t) => {
+  const { ingressDiagnosticStage, ingressDiagnosticError } = await import(
+    './browser-first-cutover-ingress-diagnostics.mjs'
+  );
+  const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'execution-site-scope-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const folder = '/var/lib/holaday-deploy/maintenance';
+  const path = `${folder}/first-cutover-execution-approved.json`;
+  await fs.mkdir(root + folder, { recursive: true, mode: 0o700 });
+  const approval = { ...binding, maintenanceEndsAtMs: deadline, legacyDigest: '9'.repeat(64) };
+  const value = {
+    schemaVersion: 1,
+    host: 'vultr',
+    binding,
+    maintenanceEndsAtMs: deadline,
+    site: {
+      legacyDigest: approval.legacyDigest,
+      reviews: { vultr: {}, aliyun: {} },
+      gatewaySiteDigest: 'f'.repeat(64),
+      ingress: {
+        inventoryDigest: binding.inventoryDigest,
+        unknownIngress: [],
+        remoteSiteDigest: 'e'.repeat(64),
+        files: [
+          { path: '/etc/nginx/sites-available/holaday', profile: 'vultr-20260926' },
+          {
+            path: '/etc/nginx/sites-available/hd-app.orangebench.tech',
+            profile: 'aliyun-app-20260926',
+          },
+          {
+            path: '/etc/nginx/sites-available/hd-pay.orangebench.tech',
+            profile: 'aliyun-pay-20260926',
+          },
+        ],
+      },
+      producerStartupFiles: ['dump.pm2', 'dump.pm2.bak'].map((name) => ({
+        path: `/root/.pm2/${name}`,
+        digest: '1'.repeat(64),
+        remove: [{ name: 'holaday-orchestrator', entryDigest: '2'.repeat(64) }],
+      })),
+    },
+  };
+  const write = () => fs.writeFile(root + path, JSON.stringify(value), { mode: 0o600 });
+  await write();
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    now: Date.now,
+    readApproval: async () => structuredClone(approval),
+    fs: {
+      lstat: async (p) => Object.assign(await fs.lstat(root + p), { uid: 0 }),
+      realpath: async (p) => (await fs.realpath(root + p)).slice(root.length),
+      open: async (p, flags) => {
+        const h = await fs.open(root + p, flags);
+        const stat = h.stat.bind(h);
+        h.stat = async () => Object.assign(await stat(), { uid: 0 });
+        return h;
+      },
+    },
+  };
+
+  const original = { ...io, fs: { ...io.fs } };
+  for (const mode of [
+    'folder',
+    'file',
+    'read',
+    'json',
+    'shape',
+    'approval-before',
+    'approval-after',
+    'clock',
+    'validate',
+  ]) {
+    await write();
+    await fs.chmod(root + folder, 0o700);
+    await fs.chmod(root + path, 0o600);
+    Object.assign(io, original, { fs: { ...original.fs } });
+    if (mode === 'folder') await fs.chmod(root + folder, 0o755);
+    if (mode === 'file') await fs.chmod(root + path, 0o644);
+    if (mode === 'json') await fs.writeFile(root + path, '{');
+    if (mode === 'shape')
+      await fs.writeFile(root + path, JSON.stringify({ ...value, extra: true }));
+    if (mode === 'read') {
+      const open = io.fs.open;
+      io.fs.open = async (...args) => {
+        const h = await open(...args);
+        h.readFile = async () => {
+          throw Error('PRIVATE_PAYLOAD');
+        };
+        return h;
+      };
+    }
+    if (mode === 'approval-before')
+      io.readApproval = async () => {
+        throw ingressDiagnosticError('CUTOVER_APPROVAL_UNPROVEN', 'APPROVAL_DEADLINE');
+      };
+    if (mode === 'approval-after') {
+      let reads = 0;
+      io.readApproval = async () => ({
+        ...approval,
+        ...(++reads === 2 ? { candidate: '0'.repeat(40) } : {}),
+      });
+    }
+    if (mode === 'clock') {
+      let reads = 0;
+      io.now = () => (++reads === 1 ? 1000 : 999);
+    }
+    if (mode === 'validate') io.now = () => deadline + 1;
+    await assert.rejects(
+      session.readFirstCutoverExecutionSiteScope({ attempt: binding.attempt }, io),
+      (error) => {
+        assert.equal(error.message, 'CUTOVER_INGRESS_SESSION_UNPROVEN');
+        assert.equal(
+          ingressDiagnosticStage(error),
+          {
+            folder: 'SITE_FOLDER',
+            file: 'SITE_FILE',
+            read: 'SITE_CONTENT',
+            json: 'SITE_JSON',
+            shape: 'SITE_SHAPE',
+            'approval-before': 'APPROVAL_DEADLINE',
+            'approval-after': 'SITE_APPROVAL_AFTER',
+            clock: 'SITE_CLOCK',
+            validate: 'SITE_VALIDATE',
+          }[mode],
+        );
+        assert.ok(!JSON.stringify(error.cause).includes('PRIVATE'));
+        return true;
+      },
+    );
+  }
 });

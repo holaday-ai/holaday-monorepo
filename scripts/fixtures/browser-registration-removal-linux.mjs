@@ -397,6 +397,7 @@ let hostAdapter;
 let hostResult;
 let hostFinished = false;
 let reconciliationChecks = 0;
+let lateKnownRejections = 0;
 let resumedWorker;
 let workerTickObserved = false;
 let hostMigrationFaults = 0;
@@ -1363,7 +1364,15 @@ try {
                     assert.equal(status.mode, 'serving');
                     assert.equal(status.needsReconciliation, true);
                     assert.equal(status.idle, false);
-                    if (knownEffectVisible) throw Error('CUTOVER_KNOWN_EXTERNAL_WORK_UNPROVEN');
+                    if (knownEffectVisible) {
+                      if (lateKnownEffect) {
+                        lateKnownRejections++;
+                        console.error(
+                          'QA_LATE_KNOWN_REJECTED CUTOVER_KNOWN_EXTERNAL_WORK_UNPROVEN',
+                        );
+                      }
+                      throw Error('CUTOVER_KNOWN_EXTERNAL_WORK_UNPROVEN');
+                    }
                     assert.equal(effectCount, 1);
                     return durable;
                   };
@@ -1429,6 +1438,7 @@ try {
                         },
                       ]);
                       knownEffectVisible = known.length > 0;
+                      if (knownEffectVisible) console.error('QA_LATE_KNOWN_OBSERVED');
                     }
                     const after = await checkOwned();
                     assert.deepEqual(after, before);
@@ -2112,8 +2122,9 @@ try {
           } else {
             assert.equal(
               result.code,
+              // The original site boundary normalizes the inner known-work refusal.
               lateKnownEffect
-                ? 'CUTOVER_KNOWN_EXTERNAL_WORK_UNPROVEN'
+                ? 'CUTOVER_SITE_UNPROVEN'
                 : recoveryDrift
                   ? 'CUTOVER_RECOVERY_SESSION_UNPROVEN'
                   : afterStart
@@ -2197,6 +2208,11 @@ try {
           }
         }
         if (lateKnownEffect) {
+          assert.equal(
+            lateKnownRejections,
+            1,
+            'real oracle must reach the original inner known-work rejection once',
+          );
           assert.equal(reconciliationChecks, 1);
           assert.equal(knownEffectVisible, true);
           assert.equal(effects.candidateStartupEvents.length, 6);
@@ -2265,20 +2281,24 @@ try {
               assert.equal(entry.autorestart, false);
               assert.equal(String(entry.uid), '998');
             }
+            assert.deepEqual(
+              entries.map((row) => row.name).sort(),
+              [
+                ...(enabledWorker ? ['holaday-account-closure-worker'] : []),
+                'holaday-orchestrator',
+                'qa-unrelated',
+              ].sort(),
+            );
+            assert.equal(entries.filter((row) => row.name === 'holaday-orchestrator').length, 1);
+            assert.equal(
+              entries.find((row) => row.name === 'holaday-orchestrator').pm_cwd,
+              `${siteContext.root}/apps/orchestrator`,
+            );
           }
-          const saved = JSON.parse(await fs.readFile('/root/.pm2/dump.pm2', 'utf8'));
+          const aliyunSaved = JSON.parse(await fs.readFile('/root/.pm2/dump.pm2', 'utf8'));
           assert.deepEqual(
-            saved.map((row) => row.name).sort(),
-            [
-              ...(enabledWorker ? ['holaday-account-closure-worker'] : []),
-              'holaday-orchestrator',
-              'qa-unrelated',
-            ].sort(),
-          );
-          assert.equal(saved.filter((row) => row.name === 'holaday-orchestrator').length, 1);
-          assert.equal(
-            saved.find((row) => row.name === 'holaday-orchestrator').pm_cwd,
-            `${siteContext.root}/apps/orchestrator`,
+            aliyunSaved.map((row) => row.name),
+            ['qa-unrelated'],
           );
           // Do not resurrect a committed candidate to test legacy retirement:
           // that would create an extra boot after the observed failure.

@@ -221,40 +221,44 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
   const used = new Set();
   const readScope = async (approval) => {
     const value = structuredClone(await io.readSite(approval));
-    const binding = Object.fromEntries(bindingKeys.map((k) => [k, approval[k]]));
-    if (
-      approval.attempt !== attempt ||
-      !equal(value.binding, binding) ||
-      value.legacyDigest !== approval.legacyDigest ||
-      value.maintenanceEndsAtMs !== approval.maintenanceEndsAtMs ||
-      (Object.hasOwn(value, 'reconcileByMs') && value.reconcileByMs !== approval.reconcileByMs) ||
-      !value.reviews ||
-      !value.ingress ||
-      !Array.isArray(value.producerStartupFiles) ||
-      Object.hasOwn(value, 'cloudMaintenanceScope') !==
-        Object.hasOwn(value, 'cloudRecoverySources') ||
-      (Object.hasOwn(value, 'cloudBrowserRecoveryDigest') &&
-        value.cloudBrowserRecoveryDigest !==
-          createHash('sha256')
-            .update(JSON.stringify(firstCutoverCloudBrowserRecoveryLaunch({ attempt })))
-            .digest('hex')) ||
-      (Object.hasOwn(value, 'cloudMaintenanceScope') &&
-        (!Array.isArray(value.cloudMaintenanceScope) ||
-          value.cloudMaintenanceScope.length !== 2 ||
-          !value.cloudBrowserRecoveryDigest ||
-          value.cloudMaintenanceScope[0]?.recoveryDigest !==
+    try {
+      const binding = Object.fromEntries(bindingKeys.map((k) => [k, approval[k]]));
+      if (
+        approval.attempt !== attempt ||
+        !equal(value.binding, binding) ||
+        value.legacyDigest !== approval.legacyDigest ||
+        value.maintenanceEndsAtMs !== approval.maintenanceEndsAtMs ||
+        (Object.hasOwn(value, 'reconcileByMs') && value.reconcileByMs !== approval.reconcileByMs) ||
+        !value.reviews ||
+        !value.ingress ||
+        !Array.isArray(value.producerStartupFiles) ||
+        Object.hasOwn(value, 'cloudMaintenanceScope') !==
+          Object.hasOwn(value, 'cloudRecoverySources') ||
+        (Object.hasOwn(value, 'cloudBrowserRecoveryDigest') &&
+          value.cloudBrowserRecoveryDigest !==
             createHash('sha256')
-              .update(JSON.stringify(firstCutoverCloudVncRecoveryMaterial({ attempt })))
-              .digest('hex') ||
-          value.cloudMaintenanceScope[1]?.recoveryDigest !== value.cloudBrowserRecoveryDigest)) ||
-      !/^[a-f0-9]{64}$/.test(value.gatewaySiteDigest ?? '')
-    )
-      fail();
-    if (Object.hasOwn(value, 'cloudMaintenanceScope'))
-      validateFirstCutoverCloudSources(value.cloudRecoverySources, {
-        scope: value.cloudMaintenanceScope,
-      });
-    return value;
+              .update(JSON.stringify(firstCutoverCloudBrowserRecoveryLaunch({ attempt })))
+              .digest('hex')) ||
+        (Object.hasOwn(value, 'cloudMaintenanceScope') &&
+          (!Array.isArray(value.cloudMaintenanceScope) ||
+            value.cloudMaintenanceScope.length !== 2 ||
+            !value.cloudBrowserRecoveryDigest ||
+            value.cloudMaintenanceScope[0]?.recoveryDigest !==
+              createHash('sha256')
+                .update(JSON.stringify(firstCutoverCloudVncRecoveryMaterial({ attempt })))
+                .digest('hex') ||
+            value.cloudMaintenanceScope[1]?.recoveryDigest !== value.cloudBrowserRecoveryDigest)) ||
+        !/^[a-f0-9]{64}$/.test(value.gatewaySiteDigest ?? '')
+      )
+        fail();
+      if (Object.hasOwn(value, 'cloudMaintenanceScope'))
+        validateFirstCutoverCloudSources(value.cloudRecoverySources, {
+          scope: value.cloudMaintenanceScope,
+        });
+      return value;
+    } catch (error) {
+      fail('RECOVERY_SITE_SOURCE_SHAPE', error);
+    }
   };
   const guard = async (ctx, phases) => {
     if (
@@ -288,7 +292,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     if (
       !equal(await diagnosticRead('RECOVERY_SITE_SOURCE', () => readScope(context.approval)), scope)
     )
-      fail('RECOVERY_SITE_SOURCE');
+      fail('RECOVERY_SITE_SOURCE_DRIFT');
     const record = await diagnosticRead('RECOVERY_SITE_RECORD', () =>
       context.journal.readFirstCutoverEffects(),
     );

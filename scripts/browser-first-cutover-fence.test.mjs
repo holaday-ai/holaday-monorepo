@@ -1,3 +1,8 @@
+import { installPaymentPortFence, verifyPaymentPortFence } from './browser-payment-port-fence.mjs';
+import {
+  ingressDiagnosticError,
+  ingressDiagnosticStage,
+} from './browser-first-cutover-ingress-diagnostics.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -444,3 +449,336 @@ test('restoration requires same open identity, restores exact original and reval
   assert.equal(f.bytes(), original);
   assert.deepEqual(f.events.slice(-4), ['replace', 'test', 'reload', 'receipt:restored']);
 });
+
+const portBinding = { attempt: '11111111-1111-4111-8111-111111111111', inventoryDigest: digest };
+function portFixture() {
+  return {
+    platform: 'linux',
+    uid: 0,
+    now: () => 1000,
+    assertJournalOwnership: async () => portBinding,
+    readFenceReceipt: async () => ({ ...portBinding, stage: 'orders', phase: 'active' }),
+    execNft: async () => JSON.stringify(paymentTable),
+  };
+}
+const portOptions = { binding: portBinding, stage: 'orders' };
+for (const [name, mutate, stage] of [
+  [
+    'input',
+    (io) => {
+      io.uid = 1;
+    },
+    'PORT_INPUT',
+  ],
+  [
+    'clock',
+    (io) => {
+      io.now = () => NaN;
+    },
+    'PORT_CLOCK',
+  ],
+  [
+    'owner value',
+    (io) => {
+      io.assertJournalOwnership = async () => ({});
+    },
+    'PORT_OWNER',
+  ],
+  [
+    'owner read',
+    (io) => {
+      io.assertJournalOwnership = async () => {
+        throw new Error('SECRET');
+      };
+    },
+    'PORT_OWNER',
+  ],
+  [
+    'receipt value',
+    (io) => {
+      io.readFenceReceipt = async () => ({});
+    },
+    'PORT_RECEIPT',
+  ],
+  [
+    'receipt read',
+    (io) => {
+      io.readFenceReceipt = async () => {
+        throw new Error('SECRET');
+      };
+    },
+    'PORT_RECEIPT',
+  ],
+  [
+    'command',
+    (io) => {
+      io.execNft = async () => {
+        throw new Error('SECRET');
+      };
+    },
+    'PORT_COMMAND',
+  ],
+  [
+    'json',
+    (io) => {
+      io.execNft = async () => 'SECRET';
+    },
+    'PORT_JSON',
+  ],
+  [
+    'shape null item',
+    (io) => {
+      io.execNft = async () => '{"nftables":[null]}';
+    },
+    'PORT_SHAPE',
+  ],
+  [
+    'shape metadata',
+    (io) => {
+      io.execNft = async () => '{"nftables":[{"metainfo":{"json_schema_version":2}}]}';
+    },
+    'PORT_SHAPE',
+  ],
+  [
+    'shape handle',
+    (io) => {
+      const changed = structuredClone(paymentTable);
+      changed.nftables[0].table.handle = -1;
+      io.execNft = async () => JSON.stringify(changed);
+    },
+    'PORT_SHAPE',
+  ],
+  [
+    'rules',
+    (io) => {
+      io.execNft = async () => '{"nftables":[]}';
+    },
+    'PORT_RULES',
+  ],
+  [
+    'guard clock rollback',
+    (io) => {
+      let n = 0;
+      io.now = () => [1000, 999][n++];
+    },
+    'PORT_CLOCK',
+  ],
+  [
+    'guard elapsed',
+    (io) => {
+      let n = 0;
+      io.now = () => [1000, 61001][n++];
+    },
+    'PORT_DEADLINE',
+  ],
+  [
+    'overall elapsed',
+    (io) => {
+      let n = 0;
+      io.now = () => [1000, 1000, 61001, 61001][n++];
+    },
+    'PORT_DEADLINE',
+  ],
+  [
+    'overall rollback',
+    (io) => {
+      let n = 0;
+      io.now = () => [1000, 1000, 999, 999][n++];
+    },
+    'PORT_CLOCK',
+  ],
+]) {
+  test(`payment port diagnostics preserve rejection and classify ${name}`, async () => {
+    const io = portFixture();
+    mutate(io);
+    await assert.rejects(verifyPaymentPortFence(portOptions, io), (error) => {
+      assert.equal(error.message, 'CUTOVER_PAYMENT_PORT_FENCE_UNPROVEN');
+      assert.equal(ingressDiagnosticStage(error), stage);
+      assert.equal(JSON.stringify(error.cause).includes('SECRET'), false);
+      return true;
+    });
+  });
+}
+for (const stage of ['LOCAL_OWNER', 'STORE_CLOCK', 'APPROVAL_DEADLINE']) {
+  test(`payment port diagnostics retain nested ${stage}`, async () => {
+    const io = portFixture();
+    io.readFenceReceipt = async () => {
+      throw ingressDiagnosticError('original', stage);
+    };
+    await assert.rejects(
+      verifyPaymentPortFence(portOptions, io),
+      (e) =>
+        e.message === 'CUTOVER_PAYMENT_PORT_FENCE_UNPROVEN' && ingressDiagnosticStage(e) === stage,
+    );
+  });
+}
+test('payment port guard retains original successful read order and command exactly once', async () => {
+  const io = portFixture(),
+    calls = [];
+  for (const key of ['now', 'assertJournalOwnership', 'readFenceReceipt', 'execNft']) {
+    const original = io[key];
+    io[key] = (...args) => {
+      calls.push(key);
+      return original(...args);
+    };
+  }
+  assert.deepEqual(await verifyPaymentPortFence(portOptions, io), {
+    inventoryDigest: digest,
+    observedAtMs: 1000,
+    ports: [4010, 4011],
+  });
+  assert.deepEqual(calls, [
+    'now',
+    'assertJournalOwnership',
+    'readFenceReceipt',
+    'now',
+    'execNft',
+    'now',
+    'assertJournalOwnership',
+    'readFenceReceipt',
+    'now',
+  ]);
+});
+test('late payment port failure retains its fixed cause through real fence validation', async () => {
+  const f = fixture(sites.find((s) => s.profile === 'aliyun-pay-20260926'));
+  await applyCutoverFence(f.input, f.io);
+  const probe = f.io.probeIngress;
+  f.io.probeIngress = async (...args) => {
+    const result = await probe(...args);
+    f.io.paymentPortFence.execNft = async () => {
+      throw new Error('SECRET');
+    };
+    return result;
+  };
+  await assert.rejects(
+    verifyCutoverFence(f.input, f.io),
+    (e) => e.message === 'CUTOVER_FENCE_UNPROVEN' && ingressDiagnosticStage(e) === 'PORT_COMMAND',
+  );
+});
+
+for (const [fault, expectedStage] of [
+  [{ code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' }, 'PORT_OUTPUT_LIMIT'],
+  [{ killed: true, signal: 'SIGTERM' }, 'PORT_TERMINATED'],
+  [{ signal: 'SIGKILL' }, 'PORT_TERMINATED'],
+  [{ code: 1 }, 'PORT_EXIT'],
+  [{ code: 'ENOENT' }, 'PORT_START'],
+  ['stdin', 'PORT_STDIN'],
+]) {
+  test(`actual nft child wrapper keeps ${expectedStage} through fence`, async () => {
+    const source = readFileSync(
+      new URL('./browser-payment-port-fence.mjs', import.meta.url),
+      'utf8',
+    );
+    const block = source
+      .slice(source.indexOf('const system ='), source.indexOf('const fail ='))
+      .replace('import.meta.url', "'file:///qa/module.mjs'");
+    let invoked = 0;
+    const execFile = (command, args, options, callback) => {
+      invoked++;
+      assert.equal(command, 'nft');
+      assert.equal(options.timeout, 10000);
+      assert.equal(options.maxBuffer, 1024 * 1024);
+      let stdinError;
+      queueMicrotask(() => {
+        if (fault === 'stdin') stdinError(new Error('SECRET'));
+        else callback(Object.assign(new Error('SECRET'), fault), 'SECRET');
+      });
+      return {
+        stdin: {
+          on: (event, handler) => {
+            assert.equal(event, 'error');
+            stdinError = handler;
+          },
+          end: () => {},
+        },
+      };
+    };
+    const system = new Function(
+      'execFile',
+      'ingressDiagnosticError',
+      'readFile',
+      block + ';return system;',
+    )(execFile, ingressDiagnosticError, () => {});
+    const io = portFixture();
+    io.execNft = system.execNft;
+    await assert.rejects(
+      verifyPaymentPortFence(portOptions, io),
+      (e) =>
+        e.message === 'CUTOVER_PAYMENT_PORT_FENCE_UNPROVEN' &&
+        ingressDiagnosticStage(e) === expectedStage,
+    );
+    assert.equal(invoked, 1);
+    const f = fixture(sites.find((s) => s.profile === 'aliyun-pay-20260926'));
+    await applyCutoverFence(f.input, f.io);
+    f.io.paymentPortFence.execNft = system.execNft;
+    await assert.rejects(
+      verifyCutoverFence(f.input, f.io),
+      (e) => e.message === 'CUTOVER_FENCE_UNPROVEN' && ingressDiagnosticStage(e) === expectedStage,
+    );
+    assert.equal(invoked, 2);
+  });
+}
+
+test('payment installation keeps one atomic attempt and rejects uncertain acknowledgement without replay', async () => {
+  const io = portFixture(),
+    calls = [];
+  io.readFenceReceipt = async () => ({ ...portBinding, stage: 'orders', phase: 'installing' });
+  io.readPolicy = async () =>
+    readFileSync(
+      new URL('../ops/aliyun-edge/holaday-payment-ingress.nft', import.meta.url),
+      'utf8',
+    );
+  io.execNft = async (args) => {
+    calls.push(args);
+    if (args.includes('ruleset')) return '{"nftables":[]}';
+    if (args[0] === '-f') throw ingressDiagnosticError('secret', 'PORT_TERMINATED');
+    return '';
+  };
+  await assert.rejects(
+    installPaymentPortFence(portOptions, io),
+    (e) =>
+      e.message === 'CUTOVER_PAYMENT_PORT_FENCE_UNPROVEN' &&
+      ingressDiagnosticStage(e) === 'PORT_TERMINATED',
+  );
+  assert.deepEqual(calls, [
+    ['-j', 'list', 'ruleset'],
+    ['--check', '-f', '-'],
+    ['-f', '-'],
+  ]);
+});
+for (const [name, mutate, stage] of [
+  [
+    'existing',
+    (io) => {
+      io.execNft = async () => JSON.stringify(paymentTable);
+    },
+    'PORT_EXISTING',
+  ],
+  [
+    'policy read',
+    (io) => {
+      io.readPolicy = async () => {
+        throw new Error('SECRET');
+      };
+    },
+    'PORT_POLICY',
+  ],
+  [
+    'policy bytes',
+    (io) => {
+      io.readPolicy = async () => 'SECRET';
+    },
+    'PORT_POLICY',
+  ],
+])
+  test(`payment installation fixed diagnostics: ${name}`, async () => {
+    const io = portFixture();
+    io.readFenceReceipt = async () => ({ ...portBinding, stage: 'orders', phase: 'installing' });
+    io.execNft = async () => '{"nftables":[]}';
+    mutate(io);
+    await assert.rejects(
+      installPaymentPortFence(portOptions, io),
+      (e) =>
+        e.message === 'CUTOVER_PAYMENT_PORT_FENCE_UNPROVEN' && ingressDiagnosticStage(e) === stage,
+    );
+  });

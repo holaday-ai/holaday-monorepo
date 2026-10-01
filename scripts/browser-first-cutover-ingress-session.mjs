@@ -154,6 +154,7 @@ async function readProtectedSite(options, overrides, kind) {
   const path = `${folder}/first-cutover-${kind}-approved.json`;
   const scopeKey = kind === 'execution' ? 'site' : kind === 'ingress' ? 'ingress' : 'startupFiles';
   let handle;
+  let stage = 'SITE_SHAPE';
   try {
     if (
       io.platform !== 'linux' ||
@@ -162,8 +163,10 @@ async function readProtectedSite(options, overrides, kind) {
       !uuid(options.attempt)
     )
       fail();
+    stage = 'SITE_APPROVAL_BEFORE';
     const beforeApproval = await io.readApproval(options);
     const began = io.now();
+    stage = 'SITE_FOLDER';
     const directory = await io.fs.lstat(folder);
     const privateDirectory = (s) => s.isDirectory() && s.uid === 0 && (s.mode & 0o7777) === 0o700;
     const privateFile = (s) =>
@@ -174,12 +177,14 @@ async function readProtectedSite(options, overrides, kind) {
       s.size > 0 &&
       s.size <= 1024 * 1024;
     if (!privateDirectory(directory) || (await io.fs.realpath(folder)) !== folder) fail();
+    stage = 'SITE_FILE';
     handle = await io.fs.open(
       path,
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
     );
     const before = await handle.stat();
     if (!privateFile(before)) fail();
+    stage = 'SITE_CONTENT';
     const bytes = await handle.readFile();
     const after = await handle.stat();
     const current = await io.fs.lstat(path);
@@ -197,7 +202,9 @@ async function readProtectedSite(options, overrides, kind) {
       !Buffer.from(bytes.toString('utf8')).equals(bytes)
     )
       fail();
+    stage = 'SITE_JSON';
     const value = JSON.parse(bytes.toString('utf8'));
+    stage = 'SITE_SHAPE';
     if (
       !keys(value, [
         'schemaVersion',
@@ -362,15 +369,19 @@ async function readProtectedSite(options, overrides, kind) {
         ? { payments: value.payments }
         : {}),
     };
+    stage = 'SITE_CLOCK';
     const now = io.now();
-    if (now < began || !isDeepStrictEqual(beforeApproval, await io.readApproval(options))) fail();
+    if (now < began) fail(stage);
+    stage = 'SITE_APPROVAL_AFTER';
+    if (!isDeepStrictEqual(beforeApproval, await io.readApproval(options))) fail(stage);
+    stage = 'SITE_VALIDATE';
     validate(
       { ...result, maintenanceEndsAtMs: result.reconcileByMs ?? result.maintenanceEndsAtMs },
       now,
     );
     return result;
-  } catch {
-    fail();
+  } catch (error) {
+    fail(stage, error);
   } finally {
     await handle?.close();
   }

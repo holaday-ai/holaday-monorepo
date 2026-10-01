@@ -1,0 +1,738 @@
+{
+  "fixedCumulativeSwapBaselineMiB": 3473.62,
+  "passedCases": 9,
+  "totalCases": 9,
+  "records": [
+    {
+      "case": "before-migration",
+      "receipt": "/private/tmp/holaday-matrix-before-migration-373e7a71de2d40b180cd44a40b44c465.json",
+      "wrapperReceipt": "/private/tmp/holaday-matrix-before-migration-373e7a71de2d40b180cd44a40b44c465-wrapper-status.json",
+      "cleanupReceipt": "/private/tmp/holaday-matrix-before-migration-373e7a71de2d40b180cd44a40b44c465-stopped.json",
+      "residualReceipt": "/private/tmp/holaday-matrix-before-migration-373e7a71de2d40b180cd44a40b44c465-no-residual.json",
+      "exitCode": 0,
+      "wrapperExitCode": 0,
+      "seconds": 633.42,
+      "runnerError": null,
+      "cleanupError": null,
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-4b9modv1/run.log",
+      "logSha256": "6fc3bf87dc8220587ae3b9b2648aff2ff1122a5b4fb38570e161b90a2754be3d",
+      "releaseAcceptance": false,
+      "caseAccepted": true,
+      "failureStage": null,
+      "sourceManifestContentSha256": "a53e5c6f8050b1a78dedb2761985d72438894fea53bd3ec1e326cee693ecc8e6",
+      "sourceManifestFileSha256": "2d8818b69b3cc56ffcbdbc3650ca08b14faffa94d9c5e4b7731e2e6761f085bc",
+      "durableEvidence": {
+        "receipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/00-before-migration-receipt.json",
+          "sha256": "40e8dd8801e820fbcf9c41ffc59ec37261de6dd339c22099a480dcbcda021c27",
+          "bytes": 35212
+        },
+        "wrapperReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/00-before-migration-wrapperReceipt.json",
+          "sha256": "b530bbe99b31fba20effca575d42fe0a6ac91fa19bc0c85cdac2198eae4c53cd",
+          "bytes": 238
+        },
+        "cleanupReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/00-before-migration-cleanupReceipt.json",
+          "sha256": "5c77db2134cb8b4f4ee8b5502d47ed4602bf7e880f82939119cd5f2deb54d659",
+          "bytes": 525
+        },
+        "residualReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/00-before-migration-residualReceipt.json",
+          "sha256": "efeb50a3bd0862d2374ca532b7504134bc7f25e594eaa4e9964f054978807f2c",
+          "bytes": 436
+        },
+        "log": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/00-before-migration-log.log",
+          "sha256": "6fc3bf87dc8220587ae3b9b2648aff2ff1122a5b4fb38570e161b90a2754be3d",
+          "bytes": 211
+        },
+        "admission": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/00-before-migration-admission.json",
+          "sha256": "72b4b35cf45ddba5027d0e892e26a9c22303248f9bd9a9aeff6fbfc52c83b032",
+          "bytes": 21412
+        }
+      }
+    },
+    {
+      "case": "after-start",
+      "receipt": "/private/tmp/holaday-matrix-after-start-373e7a71de2d40b180cd44a40b44c465.json",
+      "wrapperReceipt": "/private/tmp/holaday-matrix-after-start-373e7a71de2d40b180cd44a40b44c465-wrapper-status.json",
+      "cleanupReceipt": "/private/tmp/holaday-matrix-after-start-373e7a71de2d40b180cd44a40b44c465-stopped.json",
+      "residualReceipt": "/private/tmp/holaday-matrix-after-start-373e7a71de2d40b180cd44a40b44c465-no-residual.json",
+      "exitCode": 0,
+      "wrapperExitCode": 0,
+      "seconds": 678.4,
+      "runnerError": null,
+      "cleanupError": null,
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-8o4a1b_o/run.log",
+      "logSha256": "b8749802f1e85f499f16e339dc2b114fbf90ed8f9bda06aa39f2233dfcecde4a",
+      "releaseAcceptance": false,
+      "caseAccepted": true,
+      "failureStage": null,
+      "sourceManifestContentSha256": "a53e5c6f8050b1a78dedb2761985d72438894fea53bd3ec1e326cee693ecc8e6",
+      "sourceManifestFileSha256": "2d8818b69b3cc56ffcbdbc3650ca08b14faffa94d9c5e4b7731e2e6761f085bc",
+      "durableEvidence": {
+        "receipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/01-after-start-receipt.json",
+          "sha256": "6b2526035c7a0097c73ff7b75836bba9cf9e627858e4f690dc0d984e042547e8",
+          "bytes": 37270
+        },
+        "wrapperReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/01-after-start-wrapperReceipt.json",
+          "sha256": "db2bad395f94817512fc09015d8a4f1322d40131c42e0f68b3b3e46dd093bade",
+          "bytes": 232
+        },
+        "cleanupReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/01-after-start-cleanupReceipt.json",
+          "sha256": "65b606945860fc75c9e82197a886a6c4077287b34a80011a3be7fb0e2b02511e",
+          "bytes": 525
+        },
+        "residualReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/01-after-start-residualReceipt.json",
+          "sha256": "fb732afc52f67d660f76ae4f7dd744a1e1928d57ea8da92c330f21d230878bfa",
+          "bytes": 610
+        },
+        "log": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/01-after-start-log.log",
+          "sha256": "b8749802f1e85f499f16e339dc2b114fbf90ed8f9bda06aa39f2233dfcecde4a",
+          "bytes": 215
+        },
+        "admission": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/01-after-start-admission.json",
+          "sha256": "acff12280565e5d6589eb77b151b08dcbbe73ee3d2e87c956d54cfb70dbc5ac0",
+          "bytes": 22864
+        }
+      }
+    },
+    {
+      "case": "before-open",
+      "receipt": "/private/tmp/holaday-matrix-before-open-373e7a71de2d40b180cd44a40b44c465.json",
+      "wrapperReceipt": "/private/tmp/holaday-matrix-before-open-373e7a71de2d40b180cd44a40b44c465-wrapper-status.json",
+      "cleanupReceipt": "/private/tmp/holaday-matrix-before-open-373e7a71de2d40b180cd44a40b44c465-stopped.json",
+      "residualReceipt": "/private/tmp/holaday-matrix-before-open-373e7a71de2d40b180cd44a40b44c465-no-residual.json",
+      "exitCode": 1,
+      "wrapperExitCode": 1,
+      "seconds": 257.69,
+      "runnerError": null,
+      "cleanupError": null,
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-q84fnaxt/run.log",
+      "logSha256": "1795480eaa32dc9451677d495c6941c1d2300607d5edb71904c61cacdb298f75",
+      "releaseAcceptance": false,
+      "caseAccepted": false,
+      "failureStage": "verifyFence/receiver/LOCAL_ENTRY before requested injection",
+      "sourceManifestContentSha256": "a53e5c6f8050b1a78dedb2761985d72438894fea53bd3ec1e326cee693ecc8e6",
+      "sourceManifestFileSha256": "2d8818b69b3cc56ffcbdbc3650ca08b14faffa94d9c5e4b7731e2e6761f085bc",
+      "durableEvidence": {
+        "receipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/02-before-open-receipt.json",
+          "sha256": "06dd75115ddd179328959cb17c638b3d1ffeee41b816ed9892f9fc33b0794427",
+          "bytes": 12607
+        },
+        "wrapperReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/02-before-open-wrapperReceipt.json",
+          "sha256": "8a1ee7b75210cf4e01a2ad16722e315c00cec656259b91c9700c952f2c47c441",
+          "bytes": 233
+        },
+        "cleanupReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/02-before-open-cleanupReceipt.json",
+          "sha256": "ac3b3b92973e778cb15a3d0a342adab1aaeac92e71cd65d449ac4b3428d87053",
+          "bytes": 525
+        },
+        "residualReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/02-before-open-residualReceipt.json",
+          "sha256": "e0b3d9fc0d12eaf215807ee8a12de4897a68af5fee8e1ee39dba71ba0d6eed27",
+          "bytes": 610
+        },
+        "log": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/02-before-open-log.log",
+          "sha256": "1795480eaa32dc9451677d495c6941c1d2300607d5edb71904c61cacdb298f75",
+          "bytes": 1925
+        },
+        "admission": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/02-before-open-admission.json",
+          "sha256": "60e9180304e8903bfb07b703e6ba81cc027ca0aef49c34d82b94d6f9d653b706",
+          "bytes": 9684
+        }
+      }
+    },
+    {
+      "case": "before-open",
+      "token": "97e59a14861f4735a7dca70870f2dace",
+      "sourceManifestContentSha256": "fe52f3fa2b504187213a9ba17e728bd0a8778fc9b5582caa4b524e04021d4bd4",
+      "sourceManifestFileSha256": "0e649c3826c1194e9a849896ef6b710f34af0cf54f34cdbb46919861edac1403",
+      "receipt": "/private/tmp/holaday-matrix-before-open-97e59a14861f4735a7dca70870f2dace.json",
+      "wrapperReceipt": "/private/tmp/holaday-matrix-before-open-97e59a14861f4735a7dca70870f2dace-wrapper-status.json",
+      "cleanupReceipt": "/private/tmp/holaday-matrix-before-open-97e59a14861f4735a7dca70870f2dace-stopped.json",
+      "residualReceipt": "/private/tmp/holaday-matrix-before-open-97e59a14861f4735a7dca70870f2dace-no-residual.json",
+      "exitCode": 1,
+      "wrapperExitCode": 1,
+      "seconds": 326.16,
+      "runnerError": null,
+      "cleanupError": null,
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-uy3peh18/run.log",
+      "logSha256": "5e805a0e00659227d506a290a90b4e0fa5c8035e1b2e058fd027111b4c170ea0",
+      "releaseAcceptance": false,
+      "caseAccepted": false,
+      "failureStage": "recovery-restore/client/RECOVERY_SITE_SOURCE before requested injection",
+      "durableEvidence": {
+        "receipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/03-before-open-receipt.json",
+          "sha256": "7351c545e36141288e1e874dd5c55bb5f4c7af14546032f5fa39ebdf58590c09",
+          "bytes": 16712
+        },
+        "wrapperReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/03-before-open-wrapperReceipt.json",
+          "sha256": "2b209dedc19a90da29e6445e04f7e4b81c8f92abe643e95a146f976637121473",
+          "bytes": 233
+        },
+        "cleanupReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/03-before-open-cleanupReceipt.json",
+          "sha256": "260ec7f850f50d66967e4e4c6e80a710f9f6c421ebc7b3938b5be0497af63179",
+          "bytes": 525
+        },
+        "residualReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/03-before-open-residualReceipt.json",
+          "sha256": "a25b825612c1b5a24b1a9f1f3fc5ce9d49cb34bafc8fbbae6255fc0f790bc58e",
+          "bytes": 610
+        },
+        "log": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/03-before-open-log.log",
+          "sha256": "5e805a0e00659227d506a290a90b4e0fa5c8035e1b2e058fd027111b4c170ea0",
+          "bytes": 1890
+        },
+        "admission": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/03-before-open-admission.json",
+          "sha256": "b3f45e7f272f6b7dcea20928b986f16f74e431ffe8e3b7065d0ca7f3545a6a84",
+          "bytes": 11750
+        }
+      }
+    },
+    {
+      "case": "before-open",
+      "token": "59d88ac5fed049dc8db63b381460a060",
+      "sourceManifestContentSha256": "44a3cc3b5e0ea68e0bec7fe383d45fce16504d2fa6cd96740bb1b7bc22f17407",
+      "sourceManifestFileSha256": "bb4c11f0871f41d17cbb6202878a27f251da71e19e0826e17aecdf6e2d72c057",
+      "receipt": "/private/tmp/holaday-matrix-before-open-59d88ac5fed049dc8db63b381460a060.json",
+      "wrapperReceipt": "/private/tmp/holaday-matrix-before-open-59d88ac5fed049dc8db63b381460a060-wrapper-status.json",
+      "cleanupReceipt": "/private/tmp/holaday-matrix-before-open-59d88ac5fed049dc8db63b381460a060-stopped.json",
+      "residualReceipt": "/private/tmp/holaday-matrix-before-open-59d88ac5fed049dc8db63b381460a060-no-residual.json",
+      "exitCode": 0,
+      "wrapperExitCode": 0,
+      "seconds": 687.54,
+      "runnerError": null,
+      "cleanupError": null,
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-spi0mm2o/run.log",
+      "logSha256": "c1b8a33cb75b8fe3206a53ccdde012cda40949ccd81bc1183f5b89f661574223",
+      "releaseAcceptance": false,
+      "caseAccepted": true,
+      "failureStage": null,
+      "durableEvidence": {
+        "receipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/04-before-open-receipt.json",
+          "sha256": "0894b801fa75ec814c67da20dccb7349dc342ad19bac7d7161faa522878bb394",
+          "bytes": 37900
+        },
+        "wrapperReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/04-before-open-wrapperReceipt.json",
+          "sha256": "59241f446bb6f15d581bd9686fca0271203fb880dba50e34e3abc850486bf767",
+          "bytes": 233
+        },
+        "cleanupReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/04-before-open-cleanupReceipt.json",
+          "sha256": "555301f4473cb12ac2d6d915d00dfa578e2ff15592fa1c21b00ce24a83fb7295",
+          "bytes": 525
+        },
+        "residualReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/04-before-open-residualReceipt.json",
+          "sha256": "d85888be8f76b78542b4d9e1285e3b166fc9447275d456f3048a9b72210067b7",
+          "bytes": 610
+        },
+        "log": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/04-before-open-log.log",
+          "sha256": "c1b8a33cb75b8fe3206a53ccdde012cda40949ccd81bc1183f5b89f661574223",
+          "bytes": 220
+        },
+        "admission": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/04-before-open-admission.json",
+          "sha256": "f56ed4bc16b7584ca7123d75857beafbc96d0a51dc28e412a29de43b19da76f2",
+          "bytes": 23026
+        }
+      }
+    },
+    {
+      "case": "after-open",
+      "receipt": "/private/tmp/holaday-matrix-after-open-59d88ac5fed049dc8db63b381460a060.json",
+      "wrapperReceipt": "/private/tmp/holaday-matrix-after-open-59d88ac5fed049dc8db63b381460a060-wrapper-status.json",
+      "cleanupReceipt": "/private/tmp/holaday-matrix-after-open-59d88ac5fed049dc8db63b381460a060-stopped.json",
+      "residualReceipt": "/private/tmp/holaday-matrix-after-open-59d88ac5fed049dc8db63b381460a060-no-residual.json",
+      "exitCode": 0,
+      "wrapperExitCode": 0,
+      "seconds": 693.29,
+      "runnerError": null,
+      "cleanupError": null,
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-rl_i4dtn/run.log",
+      "logSha256": "a65c7360696533e495c0cd8f7aaac07aefe02715d8ee702af2501ef0d7000d45",
+      "releaseAcceptance": false,
+      "caseAccepted": true,
+      "failureStage": null,
+      "sourceManifestContentSha256": "44a3cc3b5e0ea68e0bec7fe383d45fce16504d2fa6cd96740bb1b7bc22f17407",
+      "sourceManifestFileSha256": "bb4c11f0871f41d17cbb6202878a27f251da71e19e0826e17aecdf6e2d72c057",
+      "durableEvidence": {
+        "receipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/05-after-open-receipt.json",
+          "sha256": "ad446853cb664fc3b2ac4b01efecfef8e87ab2c9c6fb21e22609f245fe603186",
+          "bytes": 38002
+        },
+        "wrapperReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/05-after-open-wrapperReceipt.json",
+          "sha256": "7658be49ba62e97967a6b57bf04a68ee781be20a4ac329b58493abf2cc3b0800",
+          "bytes": 232
+        },
+        "cleanupReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/05-after-open-cleanupReceipt.json",
+          "sha256": "71e4d478e3772bf700cdac7896f076f10608ee01109fcb52eb56e4204aba0449",
+          "bytes": 525
+        },
+        "residualReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/05-after-open-residualReceipt.json",
+          "sha256": "4889ed5a931cb2df0b53b844dd7ccd8dcea9b47e8cfe0cdb872ff4b389380d50",
+          "bytes": 610
+        },
+        "log": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/05-after-open-log.log",
+          "sha256": "a65c7360696533e495c0cd8f7aaac07aefe02715d8ee702af2501ef0d7000d45",
+          "bytes": 228
+        },
+        "admission": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/05-after-open-admission.json",
+          "sha256": "5b7a11a11b57bb1649525f52631a07bae94846a734d423a56f72d09a6e724fe1",
+          "bytes": 23333
+        }
+      }
+    },
+    {
+      "case": "after-ingress",
+      "receipt": "/private/tmp/holaday-matrix-after-ingress-59d88ac5fed049dc8db63b381460a060.json",
+      "wrapperReceipt": "/private/tmp/holaday-matrix-after-ingress-59d88ac5fed049dc8db63b381460a060-wrapper-status.json",
+      "cleanupReceipt": "/private/tmp/holaday-matrix-after-ingress-59d88ac5fed049dc8db63b381460a060-stopped.json",
+      "residualReceipt": "/private/tmp/holaday-matrix-after-ingress-59d88ac5fed049dc8db63b381460a060-no-residual.json",
+      "exitCode": 0,
+      "wrapperExitCode": 0,
+      "seconds": 687.84,
+      "runnerError": null,
+      "cleanupError": null,
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-545ljyt8/run.log",
+      "logSha256": "0bb1930b310418564e30730107ed39a80d1cbed00199969ab7e78ecdb2792356",
+      "releaseAcceptance": false,
+      "caseAccepted": true,
+      "failureStage": null,
+      "sourceManifestContentSha256": "44a3cc3b5e0ea68e0bec7fe383d45fce16504d2fa6cd96740bb1b7bc22f17407",
+      "sourceManifestFileSha256": "bb4c11f0871f41d17cbb6202878a27f251da71e19e0826e17aecdf6e2d72c057",
+      "durableEvidence": {
+        "receipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/06-after-ingress-receipt.json",
+          "sha256": "86ebeea9d9321ccdc344ab78d351703b7157aa9539aa6251b673fbe8c281a53f",
+          "bytes": 37870
+        },
+        "wrapperReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/06-after-ingress-wrapperReceipt.json",
+          "sha256": "90e850f39d77de1c5979d848d334148238b30016ce253cc02b2e38061ace8780",
+          "bytes": 235
+        },
+        "cleanupReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/06-after-ingress-cleanupReceipt.json",
+          "sha256": "e84cec91086046ca1bbdfceec141521b25b838111065511bc7f05753a4fc2203",
+          "bytes": 525
+        },
+        "residualReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/06-after-ingress-residualReceipt.json",
+          "sha256": "3ecc9b3b1f526fe03584fe33812bfd1ddbfee69f3b22bf3728659abebfff468e",
+          "bytes": 610
+        },
+        "log": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/06-after-ingress-log.log",
+          "sha256": "0bb1930b310418564e30730107ed39a80d1cbed00199969ab7e78ecdb2792356",
+          "bytes": 247
+        },
+        "admission": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/06-after-ingress-admission.json",
+          "sha256": "db617c3a050a8a644100629eb98c822348083b2d0eeff146801f32fe15d45962",
+          "bytes": 23026
+        }
+      }
+    },
+    {
+      "case": "after-worker",
+      "receipt": "/private/tmp/holaday-matrix-after-worker-59d88ac5fed049dc8db63b381460a060.json",
+      "wrapperReceipt": "/private/tmp/holaday-matrix-after-worker-59d88ac5fed049dc8db63b381460a060-wrapper-status.json",
+      "cleanupReceipt": "/private/tmp/holaday-matrix-after-worker-59d88ac5fed049dc8db63b381460a060-stopped.json",
+      "residualReceipt": "/private/tmp/holaday-matrix-after-worker-59d88ac5fed049dc8db63b381460a060-no-residual.json",
+      "exitCode": 1,
+      "wrapperExitCode": 1,
+      "seconds": 297.62,
+      "runnerError": null,
+      "cleanupError": null,
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-jry8whru/run.log",
+      "logSha256": "fecb82f8088898149aaf4e1d9d23c761fd73846f460e7abeff56b305b7a4c028",
+      "releaseAcceptance": false,
+      "caseAccepted": false,
+      "failureStage": "FENCE_PORTS_AFTER",
+      "sourceManifestContentSha256": "44a3cc3b5e0ea68e0bec7fe383d45fce16504d2fa6cd96740bb1b7bc22f17407",
+      "sourceManifestFileSha256": "bb4c11f0871f41d17cbb6202878a27f251da71e19e0826e17aecdf6e2d72c057",
+      "durableEvidence": {
+        "receipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/07-after-worker-receipt.json",
+          "sha256": "f756c175a5de8558a93f67233ed9b987e1f1c007b3df0762cc45a535d9ea953f",
+          "bytes": 14963
+        },
+        "wrapperReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/07-after-worker-wrapperReceipt.json",
+          "sha256": "8e1822fbe656adf7f2bf57766b23758271864c84665cfd7765d5884d6044e212",
+          "bytes": 234
+        },
+        "cleanupReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/07-after-worker-cleanupReceipt.json",
+          "sha256": "1574cd9136767bd521bd7480b02bb2d6fd1baaead078a85ebbdd56fc51d886e0",
+          "bytes": 525
+        },
+        "residualReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/07-after-worker-residualReceipt.json",
+          "sha256": "1492cb6b2725958500d871541e3c0af8f08c2c10c930807f34cb89b7d0efbe4a",
+          "bytes": 610
+        },
+        "log": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/07-after-worker-log.log",
+          "sha256": "fecb82f8088898149aaf4e1d9d23c761fd73846f460e7abeff56b305b7a4c028",
+          "bytes": 2455
+        },
+        "admission": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/07-after-worker-admission.json",
+          "sha256": "fea4c1be1687d0327872cb6380834f34abe39f36f44ee264abc8dd810c3abec9",
+          "bytes": 10936
+        }
+      }
+    },
+    {
+      "case": "after-worker",
+      "receipt": "/private/tmp/holaday-matrix-after-worker-051d2536e91c48a89114a7a4caa69098.json",
+      "wrapperReceipt": "/private/tmp/holaday-matrix-after-worker-051d2536e91c48a89114a7a4caa69098-wrapper-status.json",
+      "cleanupReceipt": "/private/tmp/holaday-matrix-after-worker-051d2536e91c48a89114a7a4caa69098-stopped.json",
+      "residualReceipt": "/private/tmp/holaday-matrix-after-worker-051d2536e91c48a89114a7a4caa69098-no-residual.json",
+      "exitCode": 1,
+      "wrapperExitCode": 1,
+      "seconds": 734.55,
+      "runnerError": null,
+      "cleanupError": null,
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-5fog_igm/run.log",
+      "logSha256": "0908efa8ccc8e65ead4ff4458cb1fe09bbfd3630ab9f4bb3aae726c32593e015",
+      "releaseAcceptance": false,
+      "caseAccepted": false,
+      "failureStage": "QA_TAIL_WRONG_LOGICAL_HOST_DUMP",
+      "intendedFaultInjected": true,
+      "sourceManifestContentSha256": "db0ead0249c2c4ccb583fba026ec62e84d008b1133cdc697c737e0c1e364fe75",
+      "sourceManifestFileSha256": "f4cd2da7ea02ccb5fcd4bbaa3e6be2911db969bc1a566c5e4c79169fb91dc4fa",
+      "durableEvidence": {
+        "receipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/08-after-worker-receipt.json",
+          "sha256": "50c909fdc9440f9219bf0e3aa69da626f6fd9ccaa5bdb90ce4b92f2d8dec70bd",
+          "bytes": 40549
+        },
+        "wrapperReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/08-after-worker-wrapperReceipt.json",
+          "sha256": "fe56de3af4ab0fc814d82b253a89cb4524095c4bef62f8aab7d4d9b8a9f7b3c4",
+          "bytes": 234
+        },
+        "cleanupReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/08-after-worker-cleanupReceipt.json",
+          "sha256": "aadbd72584cb1780ebde18583e0ad920751cbdb31f811e17787921c8615312f0",
+          "bytes": 525
+        },
+        "residualReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/08-after-worker-residualReceipt.json",
+          "sha256": "04524d8e957e680c2b4d5950c062c8c726e69bc7a1fb79c54509b51703ad5104",
+          "bytes": 610
+        },
+        "log": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/08-after-worker-log.log",
+          "sha256": "0908efa8ccc8e65ead4ff4458cb1fe09bbfd3630ab9f4bb3aae726c32593e015",
+          "bytes": 3940
+        },
+        "admission": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/08-after-worker-admission.json",
+          "sha256": "1e2d918784f2058505964a3c299894c5d056852cfa343c6cb55b8b736dd9008d",
+          "bytes": 24591
+        }
+      }
+    },
+    {
+      "case": "after-worker",
+      "receipt": "/private/tmp/holaday-matrix-after-worker-6708c120a93746a58713a6afd074b803.json",
+      "wrapperReceipt": "/private/tmp/holaday-matrix-after-worker-6708c120a93746a58713a6afd074b803-wrapper-status.json",
+      "cleanupReceipt": "/private/tmp/holaday-matrix-after-worker-6708c120a93746a58713a6afd074b803-stopped.json",
+      "residualReceipt": "/private/tmp/holaday-matrix-after-worker-6708c120a93746a58713a6afd074b803-no-residual.json",
+      "exitCode": 0,
+      "wrapperExitCode": 0,
+      "seconds": 744.83,
+      "runnerError": null,
+      "cleanupError": null,
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-mil4d__5/run.log",
+      "logSha256": "d9c4b85d5cfb5316c6fd4068d3b594f6eed27af13785c127e6fdeeda6e319ff7",
+      "releaseAcceptance": false,
+      "caseAccepted": true,
+      "failureStage": null,
+      "sourceManifestContentSha256": "35f2be1b0d4948d402f02fc9fa1921f57597b7ed7a64f065a8624de7aa64225b",
+      "sourceManifestFileSha256": "83eeece51c1e18e8fd8c1325accaffdca25a981a621dc3e2150f2ff950ea20b8",
+      "durableEvidence": {
+        "receipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/09-after-worker-receipt.json",
+          "sha256": "ab5270f4d28ebd4936dd08f0f0d482ef123da5ec2d9f4e6e890c94208cc9cbd2",
+          "bytes": 41146
+        },
+        "wrapperReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/09-after-worker-wrapperReceipt.json",
+          "sha256": "c78569a696ae14bed41765cbf307e6e737461a4bd38960d959362274f6f05220",
+          "bytes": 234
+        },
+        "cleanupReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/09-after-worker-cleanupReceipt.json",
+          "sha256": "a5d530fe8716bfbab394b03d5f690ebf5189ee9fb4812fcbe2b2ac3223a8ddb1",
+          "bytes": 525
+        },
+        "residualReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/09-after-worker-residualReceipt.json",
+          "sha256": "64b47593ea3a9f479b2383a1a61549784db3d470bb93f6003943293f711ee716",
+          "bytes": 610
+        },
+        "log": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/09-after-worker-log.log",
+          "sha256": "d9c4b85d5cfb5316c6fd4068d3b594f6eed27af13785c127e6fdeeda6e319ff7",
+          "bytes": 324
+        },
+        "admission": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/09-after-worker-admission.json",
+          "sha256": "79a043dd66fa6e28f73d3cd09ea8e9b6a7bbad0d02fa6d3f81b2518cac853f7a",
+          "bytes": 24905
+        }
+      }
+    },
+    {
+      "case": "lost-open-ack",
+      "receipt": "/private/tmp/holaday-matrix-lost-open-ack-6708c120a93746a58713a6afd074b803.json",
+      "wrapperReceipt": "/private/tmp/holaday-matrix-lost-open-ack-6708c120a93746a58713a6afd074b803-wrapper-status.json",
+      "cleanupReceipt": "/private/tmp/holaday-matrix-lost-open-ack-6708c120a93746a58713a6afd074b803-stopped.json",
+      "residualReceipt": "/private/tmp/holaday-matrix-lost-open-ack-6708c120a93746a58713a6afd074b803-no-residual.json",
+      "exitCode": 0,
+      "wrapperExitCode": 0,
+      "seconds": 763.66,
+      "runnerError": null,
+      "cleanupError": null,
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-sy5pj3w1/run.log",
+      "logSha256": "3f16b6148dd418c884840ea1eefd1d04a5a33bff2df18a7d2554b2c7fe2aa5d4",
+      "releaseAcceptance": false,
+      "caseAccepted": true,
+      "failureStage": null,
+      "sourceManifestContentSha256": "35f2be1b0d4948d402f02fc9fa1921f57597b7ed7a64f065a8624de7aa64225b",
+      "sourceManifestFileSha256": "83eeece51c1e18e8fd8c1325accaffdca25a981a621dc3e2150f2ff950ea20b8",
+      "durableEvidence": {
+        "receipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/10-lost-open-ack-receipt.json",
+          "sha256": "9d57e74864c7cf2e62a7190ec0e250e37a32b620f5edbddd7b8b520b6e5ec797",
+          "bytes": 42419
+        },
+        "wrapperReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/10-lost-open-ack-wrapperReceipt.json",
+          "sha256": "3d07558df95eedaec8bc95aaeceafaa9aac102478c878ca55d4cf5563789fa7f",
+          "bytes": 235
+        },
+        "cleanupReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/10-lost-open-ack-cleanupReceipt.json",
+          "sha256": "ffc6f5798e2de90b269ddbbc616701c1f0f1612ec24a78f1ddceb9c54e6d4d3c",
+          "bytes": 525
+        },
+        "residualReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/10-lost-open-ack-residualReceipt.json",
+          "sha256": "dbac6338dc206ecc605ad0b8df5d7103b2b74fb2a0a0629efad751899710e050",
+          "bytes": 610
+        },
+        "log": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/10-lost-open-ack-log.log",
+          "sha256": "3f16b6148dd418c884840ea1eefd1d04a5a33bff2df18a7d2554b2c7fe2aa5d4",
+          "bytes": 235
+        },
+        "admission": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/10-lost-open-ack-admission.json",
+          "sha256": "f6a7b6886b5e84be4d3fdae66c48c86547c782b85fe9355900a98914d9f989ba",
+          "bytes": 25644
+        }
+      }
+    },
+    {
+      "case": "enabled-worker",
+      "receipt": "/private/tmp/holaday-matrix-enabled-worker-6708c120a93746a58713a6afd074b803.json",
+      "wrapperReceipt": "/private/tmp/holaday-matrix-enabled-worker-6708c120a93746a58713a6afd074b803-wrapper-status.json",
+      "cleanupReceipt": "/private/tmp/holaday-matrix-enabled-worker-6708c120a93746a58713a6afd074b803-stopped.json",
+      "residualReceipt": "/private/tmp/holaday-matrix-enabled-worker-6708c120a93746a58713a6afd074b803-no-residual.json",
+      "exitCode": 0,
+      "wrapperExitCode": 0,
+      "seconds": 778.48,
+      "runnerError": null,
+      "cleanupError": null,
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-xrvwf3e4/run.log",
+      "logSha256": "26c20f018431818df3c5d53c4268bdf1e8d8e804d52769eba3e473bbff4201d8",
+      "releaseAcceptance": false,
+      "caseAccepted": true,
+      "failureStage": null,
+      "sourceManifestContentSha256": "35f2be1b0d4948d402f02fc9fa1921f57597b7ed7a64f065a8624de7aa64225b",
+      "sourceManifestFileSha256": "83eeece51c1e18e8fd8c1325accaffdca25a981a621dc3e2150f2ff950ea20b8",
+      "durableEvidence": {
+        "receipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/11-enabled-worker-receipt.json",
+          "sha256": "d9ef774a7bed5fb07e2f5e8c2f4b890ad5c96b8d6dc54d4bc411e5c4867769d3",
+          "bytes": 43086
+        },
+        "wrapperReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/11-enabled-worker-wrapperReceipt.json",
+          "sha256": "0edcc874a5a7f808a4647bae635daab08e06316e2488bd1e4ac785e2420e9fda",
+          "bytes": 236
+        },
+        "cleanupReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/11-enabled-worker-cleanupReceipt.json",
+          "sha256": "edd3419cb1ecab7866447c7447007a7aefa39f53b55da41fef191144891854d8",
+          "bytes": 525
+        },
+        "residualReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/11-enabled-worker-residualReceipt.json",
+          "sha256": "93754142dc4597207e291054142a76f29c0a26a4c656b703465b926c730665a6",
+          "bytes": 610
+        },
+        "log": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/11-enabled-worker-log.log",
+          "sha256": "26c20f018431818df3c5d53c4268bdf1e8d8e804d52769eba3e473bbff4201d8",
+          "bytes": 228
+        },
+        "admission": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/11-enabled-worker-admission.json",
+          "sha256": "88427e5b79a078ac151695ad286c3e5fa15512e0064bdfd6821e9f85faaa08ac",
+          "bytes": 25853
+        }
+      }
+    },
+    {
+      "case": "late-known-effect",
+      "receipt": "/private/tmp/holaday-matrix-late-known-effect-6708c120a93746a58713a6afd074b803.json",
+      "wrapperReceipt": "/private/tmp/holaday-matrix-late-known-effect-6708c120a93746a58713a6afd074b803-wrapper-status.json",
+      "cleanupReceipt": "/private/tmp/holaday-matrix-late-known-effect-6708c120a93746a58713a6afd074b803-stopped.json",
+      "residualReceipt": "/private/tmp/holaday-matrix-late-known-effect-6708c120a93746a58713a6afd074b803-no-residual.json",
+      "exitCode": 1,
+      "wrapperExitCode": 1,
+      "seconds": 773.84,
+      "runnerError": null,
+      "cleanupError": null,
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-7opefco6/run.log",
+      "logSha256": "9af6c2cad94e9fdb1e6c4c419695cef4648fff44d43bb26017c01c958bc9bafd",
+      "releaseAcceptance": false,
+      "caseAccepted": false,
+      "failureStage": "QA_RESULT_CODE_EXPECTATION",
+      "sourceManifestContentSha256": "35f2be1b0d4948d402f02fc9fa1921f57597b7ed7a64f065a8624de7aa64225b",
+      "sourceManifestFileSha256": "83eeece51c1e18e8fd8c1325accaffdca25a981a621dc3e2150f2ff950ea20b8",
+      "intendedFaultReached": "not independently proven by this failed terminal assertion; fresh fixed markers required",
+      "durableEvidence": {
+        "receipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/12-late-known-effect-receipt.json",
+          "sha256": "e6e66569e883e1784f292da0ca6eb2941639e1ac9f607c4cec627b6b7d5cac72",
+          "bytes": 42719
+        },
+        "wrapperReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/12-late-known-effect-wrapperReceipt.json",
+          "sha256": "f23cf318d08d0297a0330d5aa40c7cf9f927306cfc962d54cd6902d739877839",
+          "bytes": 239
+        },
+        "cleanupReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/12-late-known-effect-cleanupReceipt.json",
+          "sha256": "163b10691fd85135fde6c563aacca177f20be955530243a73bce367c3ac75439",
+          "bytes": 525
+        },
+        "residualReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/12-late-known-effect-residualReceipt.json",
+          "sha256": "b5e3688c6c7e9606b7bd67782c4df8418b2bcedb5bc644816df5d2793d6b7950",
+          "bytes": 610
+        },
+        "log": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/12-late-known-effect-log.log",
+          "sha256": "9af6c2cad94e9fdb1e6c4c419695cef4648fff44d43bb26017c01c958bc9bafd",
+          "bytes": 2381
+        },
+        "admission": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/12-late-known-effect-admission.json",
+          "sha256": "bb72ed52190a6d4a4ea7fedf1af953a76207ffbeffce04cbc21a6a0f011e8c51",
+          "bytes": 25610
+        }
+      }
+    },
+    {
+      "case": "late-known-effect",
+      "receipt": "/private/tmp/holaday-matrix-late-known-effect-d4704ba008f4402f806d964fd5447d1a.json",
+      "wrapperReceipt": "/private/tmp/holaday-matrix-late-known-effect-d4704ba008f4402f806d964fd5447d1a-wrapper-status.json",
+      "cleanupReceipt": "/private/tmp/holaday-matrix-late-known-effect-d4704ba008f4402f806d964fd5447d1a-stopped.json",
+      "residualReceipt": "/private/tmp/holaday-matrix-late-known-effect-d4704ba008f4402f806d964fd5447d1a-no-residual.json",
+      "exitCode": 0,
+      "wrapperExitCode": 0,
+      "seconds": 768.79,
+      "runnerError": null,
+      "cleanupError": null,
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-f3auuako/run.log",
+      "logSha256": "078715b12cf6121005a11612bba52a9e6e95bf276b631a92a175b1481c31184a",
+      "releaseAcceptance": false,
+      "caseAccepted": true,
+      "failureStage": null,
+      "sourceManifestContentSha256": "5502ff51eefab5489d425678ef0bcf2e72c31125e6699aa1c92c8b70a39f7387",
+      "sourceManifestFileSha256": "4d9019bc7eca5202f26737a7d966d5fe5030ffd4506e21a13c5f2c3287c78b19",
+      "safeDiagnostics": "/private/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-recovery-target-hhzhwC/safe-stage-diagnostics.log",
+      "durableEvidence": {
+        "receipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/13-late-known-effect-receipt.json",
+          "sha256": "75f8a75938ac5ed6777b3197702dd1b21050752abc53dd46e7f5a84fa80066d3",
+          "bytes": 42399
+        },
+        "wrapperReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/13-late-known-effect-wrapperReceipt.json",
+          "sha256": "b151b06e6fe4f5b17936ea83131300eb69fa1d6eea940023506e855ae1881e6a",
+          "bytes": 239
+        },
+        "cleanupReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/13-late-known-effect-cleanupReceipt.json",
+          "sha256": "77c505382eb53dfd2a9e62118de8f6e8b19a5b2b679ad91852ce98fef28822e6",
+          "bytes": 525
+        },
+        "residualReceipt": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/13-late-known-effect-residualReceipt.json",
+          "sha256": "e1722ca8a0223408b00bd9b825d0ee1c584afcb07328bb97eba730ad7e67d65a",
+          "bytes": 610
+        },
+        "log": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/13-late-known-effect-log.log",
+          "sha256": "078715b12cf6121005a11612bba52a9e6e95bf276b631a92a175b1481c31184a",
+          "bytes": 270
+        },
+        "safeDiagnostics": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/13-late-known-effect-safeDiagnostics.log",
+          "sha256": "00a3e28018d7575fbf521ab4021818c005b806c81d38267d29abbf820a86b88c",
+          "bytes": 6062
+        },
+        "admission": {
+          "path": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/resumed-matrix-20261002/13-late-known-effect-admission.json",
+          "sha256": "42b37016739f2f61100dfb15e2484e0c7a18199040cd7b1ff922d3258d825011",
+          "bytes": 25412
+        }
+      }
+    }
+  ],
+  "nextDiagnosticManifestSha256": "fe52f3fa2b504187213a9ba17e728bd0a8778fc9b5582caa4b524e04021d4bd4",
+  "nextDiagnosticManifestFileSha256": "0e649c3826c1194e9a849896ef6b710f34af0cf54f34cdbb46919861edac1403",
+  "nextCase": null,
+  "currentSourceManifestContentSha256": "5502ff51eefab5489d425678ef0bcf2e72c31125e6699aa1c92c8b70a39f7387",
+  "currentSourceManifestFileSha256": "4d9019bc7eca5202f26737a7d966d5fe5030ffd4506e21a13c5f2c3287c78b19",
+  "pendingCases": [],
+  "status": "9/9 isolated full-host scenarios passed; production release acceptance remains false"
+}

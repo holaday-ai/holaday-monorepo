@@ -2218,3 +2218,65 @@ for (const afterDeadline of [false, true])
     await f.site.lifecycle.detach(f.context);
     assert.equal(f.events.filter((e) => e === 'close-gateway').length, 1);
   });
+
+test('source diagnostics separate validated scope drift from scope shape and reader failures', async (t) => {
+  const { ingressDiagnosticStage, ingressDiagnosticError } = await import(
+    './browser-first-cutover-ingress-diagnostics.mjs'
+  );
+  for (const mode of ['drift', 'shape', 'reader']) {
+    const f = await fixture(t);
+    const original = f.io.readSite;
+    let failReader = false;
+    f.io.readSite = async (...args) => {
+      if (failReader)
+        throw ingressDiagnosticError(
+          'CUTOVER_INGRESS_SESSION_UNPROVEN',
+          'SITE_CONTENT',
+          Error('PRIVATE_PAYLOAD'),
+        );
+      return original(...args);
+    };
+    const site = f.make();
+    await site.lifecycle.attach(f.context);
+    if (mode === 'drift') f.scope.reviews.extra = 'safe QA drift';
+    if (mode === 'shape') f.scope.legacyDigest = 'bad';
+    if (mode === 'reader') failReader = true;
+    await assert.rejects(site.lifecycle.verifyFence(f.context), (error) => {
+      assert.equal(error.message, 'CUTOVER_SITE_UNPROVEN');
+      assert.equal(
+        ingressDiagnosticStage(error),
+        {
+          drift: 'RECOVERY_SITE_SOURCE_DRIFT',
+          shape: 'RECOVERY_SITE_SOURCE_SHAPE',
+          reader: 'SITE_CONTENT',
+        }[mode],
+      );
+      return true;
+    });
+  }
+});
+
+test('real site reconciliation normalizes inner known external work refusal and latches failure', async (t) => {
+  let refusals = 0;
+  const f = await candidateFixture(t, async (f) => {
+    f.io.facts.reconcile = async () => {
+      refusals++;
+      throw new Error('CUTOVER_KNOWN_EXTERNAL_WORK_UNPROVEN');
+    };
+  });
+  await f.advance();
+  await f.journal.persist('migration_started', { candidate: f.binding.candidate });
+  await f.journal.bindBootstrapSeed('8'.repeat(32));
+  for (const phase of ['candidate_started', 'verified', 'opened', 'reconciled'])
+    await f.journal.persist(phase, { candidate: f.binding.candidate, identity: f.identity });
+  f.setMode('serving');
+  await assert.rejects(f.site.lifecycle.reconcile(f.context, f.identity), {
+    message: 'CUTOVER_SITE_UNPROVEN',
+  });
+  assert.equal(refusals, 1);
+  await assert.rejects(f.site.lifecycle.reconcile(f.context, f.identity), {
+    message: 'CUTOVER_SITE_UNPROVEN',
+  });
+  assert.equal(refusals, 1, 'no replay after refusal');
+  await f.site.lifecycle.detach(f.context);
+});

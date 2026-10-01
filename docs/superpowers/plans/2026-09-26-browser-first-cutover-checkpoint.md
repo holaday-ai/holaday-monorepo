@@ -1,3 +1,65 @@
+当前完整逐场账与私有持久证据指针：[续跑矩阵机器账](2026-10-02-browser-first-cutover-resumed-matrix-evidence.json)。最后所有本例数据库均stopped/OOMfalse，角色均无残留；不再运行重型。
+
+## 当前集中修复与验收恢复点 / 2026-10-02
+
+固定九场真实隔离host矩阵9/9通过；末场late-known-effect新鲜QA修正版exit0/768.79s，实际观察与内层拒绝标记各一次，原hold/双入口拒绝/锁保留/效果单次断言通过。
+
+已通过before-migration、after-start、before-open、after-open、after-ingress、after-worker、lost-open-ack、enabled-worker、late-known-effect，每场独立fresh pair、真实命令/exit0、原尾部断言、精确资源清理/无残留均分列机器账。不同源码冻结版本通过诊断与QA-only轻量合同桥接，不冒称一次同源整场全通过。当前机器账 `2026-10-02-browser-first-cutover-resumed-matrix-evidence.json`；最终51源码冻结见 `2026-10-02-browser-first-cutover-source-freeze-late-known-qa.json`。
+
+历史LOCAL_ENTRY、RECOVERY_SITE_SOURCE、FENCE_PORTS_AFTER及更早attach/fences拒绝根因仍未证明。固定原因诊断只是补齐观测，后续成功不能证明这些根因已修。after-worker 734.55s场已到指定注入，但尾部读错Aliyun dump，QA修正两份批准Vultr文件映射后744.83s场整体0；late-known-effect 773.84s场实际SITE码与QA内部KNOWN期望冲突，真实site/journal合同证明原边界归一化且不重放，新增固定发现/拒绝标记后只重验该场。全部原exit1保留。
+
+源码HEAD `fa443fe092dd106e7612186e7038c070e5035765`，草稿PR238保持；继承候选范围不隐藏。当前未提交脚本修正与QA应用candidate `b43dd03132658d9c13875f050e2c27e584b61e33`、QA旧source `434f1b1666d02ebda444a2c3ff78e679e549a35f` 分别绑定。root已独立审本批接口/期限/失败收尾/诊断及逐场结果，继承651文件未逐行全审仍为审查范围限制。
+
+普通应用506非PayPal文件8584通过/1原helper跳过、cn-payment103、类型/build/ordinary7/真实opt-in MySQL3、两角色原生前置与恢复及脚本2013总1979通过/34条件跳过+独立age35均复用原实际账，未重跑。非PayPalops按原exit1与16-name补跑分列，不冒称整条exit0；PayPal全部延期。当前重型唯一串行，CPU1、编译2GiB/180s→host768MiB/900s，整个续跑固定累计swap基线3473.62MiB、free<35%或累计增>256MiB只取消本方，不逐场重置。
+
+本项范围是原§8固定首次切换验收与开放后最小浏览器执行探针。完整任务路由、多页/上传/Canvas/受控池扩建和广泛成功率不新增为本次门槛。QA成功仍采用显式业务facts，默认production-facts实际SQL实现+合成后端/签名响应组合不等于生产provider整项证明。
+
+生产放行尚需最终真实工作/写入归属、非延期支付恢复材料及同候选/配置/清单/商户/代码/期限绑定、同次生产停写后备份恢复、新鲜批准/来源/锁/窗口。用户必要交付授权持续有效，不重复索要泛化授权；授权不是这些事实。九笔历史支付宝单独延期、PayPal全部延期、四笔历史微信签名核查已完成；本轮不重复旧核查，最终窗口按默认范围执行必要新鲜只读观察。微信历史查询文档及普通/partner幂等合同可复用为分层依据，但原两份provider-results与旧专项日志当前缺失，未找到已知持久副本；不能把历史文字/合同填成受保护恢复artifact。支持retry-proven或query-and-existing-settlement-proven，不强加新付款或单一重投。确切缺少原文/恢复与对应结算及不重复权益材料，详见payment-evidence当前节。
+
+以下dated记录为历史，不覆盖本节当前状态。
+
+## 当前尾部QA修正恢复点 / 2026-10-02
+
+固定九场仍5/9验收通过。after-worker端口诊断版新鲜场实际exit1/734.55s，已完成真实UID998 worker poll、candidateStartup6及两份批准文件hash验证，并触发原post-worker指定故障。最终尾部错误读取Aliyun真实/root/.pm2/dump.pm2（仅qa-unrelated），把它当Vultr批准文件（实际映射/qa-vultr-pm2），导致QA断言失败。窄修正对两份批准文件分别保留完整hash/name/唯一候选及worker/cwd/env/uid/autorestart断言，并独立拒绝Aliyun候选污染；同时修after-worker PASS优先级/措辞。此场原exit1保留，需新freeze/fresh attempt整体exit0后才验收。
+
+日志SHA0908efa8ccc8e65ead4ff4458cb1fe09bbfd3630ab9f4bb3aae726c32593e015；同次runnerError/cleanupError为null、两个自有DB stopped/OOMfalse、角色无残留，失败卷保留。51源码port诊断冻结对应本场，原50三版保留。历史PORTS_AFTER与LOCAL_ENTRY/SOURCE/attach/fences根因仍未证明，本次未复现不能称已修。当前无重型运行，累计swap基线3473.62MiB及原预算不变。
+
+实际矩阵账 /private/tmp/holaday-resumed-matrix-evidence.json；剩余after-worker、lost-open-ack、enabled-worker、late-known-effect，不增加旁支验收，不重新查历史订单/商户/密钥，PayPal及九历史支付宝延期保持。
+
+以下为历史恢复点，当前状态以本节为准。
+
+## 当前串行矩阵恢复点 / 2026-10-02
+
+固定九场已完成5/9：before-migration、after-start、before-open、after-open、after-ingress实际退出0，真实尾部断言与精确归属清理分别留账。前两场对应原50源码冻结；后三场对应来源诊断版冻结，不混称同一源码运行。草稿PR238未合并/未部署，HEAD fa443fe092dd106e7612186e7038c070e5035765。
+
+after-worker新鲜场实际exit1/297.62s，尚未到预期worker故障注入。最早固定原因是receiver FENCE_PORTS_AFTER，当前支付端口helper仍吞掉guard/nft/JSON/规则比较的具体原因，根因未知；没有证明规则漂移或OOM。OOM/oom_kill为0、资源取消null；两本场DB已停止、角色无残留，失败日志/卷保留。停止后续四场，先完成不放宽规则/10s/60s/安装一次语义的内部原因取证小包及轻量合同，再以新freeze、新token继续。历史LOCAL_ENTRY、RECOVERY_SITE_SOURCE及更早attach/fences拒绝也未被后续成功解释。
+
+当前机器账见 /private/tmp/holaday-resumed-matrix-evidence.json；after-worker失败日志SHA fecb82f8088898149aaf4e1d9d23c761fd73846f460e7abeff56b305b7a4c028，清理证明 /private/tmp/holaday-matrix-after-worker-59d88ac5fed049dc8db63b381460a060-no-residual.json。整个续跑累计swap基线仍3473.62MiB，不每场重置；free<35%或累计增>256MiB仅取消本方。重型串行，当前无重型运行。
+
+以下记录均为历史恢复点，当前状态以本节为准。
+
+## 最新来源取证恢复点 / 2026-10-01
+
+固定矩阵仍2/9通过。新增诊断版before-open新token `97e59a14861f4735a7dca70870f2dace` 实际exit1/326.16s，三inspect已done，随后restore前client `RECOVERY_SITE_SOURCE` 拒绝，close的 `RECOVERY_CLIENT_SCOPE_CHECK` 为下游；ingress退出0，OOM0，未触发资源取消，两自有DB已停止、角色无残留。没有到before-open指定注入，也没有证明上一场fence拒绝根因；两场失败及对应源码冻结账均保留。
+
+最新小包补全来源链固定原因：实际approval文件input/clock/deadline/folder/file/read/metadata/json/binding/risk，实际protected site的两次approval/文件/shape/clock/validation，site值形状与纯equal漂移分别分类。9文件受影响合同267/267退出0、无skip，公开错误/原守卫/原finally保持，未输出原值。此为取证能力，不是来源拒绝根因修复；新原树窄测/独立freeze核对后方可开始下一fresh before-open。累计swap基线3473.62MiB、既定预算及未知失败停定位保持。
+
+以下上一恢复点为历史状态，当前真实结论以本节为准。
+
+## 本轮串行故障矩阵恢复点 / 2026-10-01
+
+当前源码交付HEAD `fa443fe092dd106e7612186e7038c070e5035765`，草稿PR238保持未合并/未部署。固定九场已完成 **2/9**：before-migration exit0/633.42s、after-start exit0/678.4s，root独立核验日志SHA、真实尾部断言及精确资源清理。原50源码冻结账仍对应这两场，不冒称新诊断源码实跑。
+
+before-open fresh attempt exit1/257.69s，未到指定故障注入。最早真实诊断是 backup inspectBackupFacility → ingress verifyFence → receiver `LOCAL_ENTRY`；原 verifyCutoverFence 抹掉更内层原因，尚不能判定根因。OOM/oom_kill均0，未触发资源取消；两本场DB已停止、角色无残留、卷/失败日志保留。后续六场及before-open验收暂停，等待固定原因诊断小包后新的fresh pair，禁止旧attempt重放或加时。
+
+本批诊断只保留白名单cause：fence上下文/receipt/port/config/probe/响应形状/路由状态/writers，以及probe clock/writer/request/response/body/upgrade/timeout/drift，原公开拒绝码、5s/60s、全settled、无重试守卫保持。受影响合同72/72、独立落盘隐私过滤1/1；较早EPERM和QA材料失败日志保留。新源码需独立freeze与新token，应用后进行有界轻量确认，尚无新整机结果。
+
+整个续跑累计swap基线固定3473.62MiB；free<35%或较此基线增>256MiB仅取消本方。编译CPU1/2GiB/180s后host768MiB/900s，重型串行。当前无重型在跑。历史attach/fences拒绝根因仍未解释，不把后续成功写成已修历史根因。
+
+范围：九笔历史支付宝已单独延期、PayPal全部延期、四笔历史微信签名核对已完成。非PayPal恢复可按既有 retry-proven 或 query-and-existing-settlement-proven 路径证明；尚需据实确认对应恢复/结算证明及同次绑定，不将历史查询冒称恢复通过，也不额外要求新付款。原验收含开放后最小浏览器探针，不新增完整任务路由或广泛成功率门槛。生产现场事实及真实新鲜批准/来源/锁/窗口仍不能由QA替代。
+
+以下旧恢复点与过程均为历史记录，当前状态以上述为准。
+
 ## 已提交并交付草稿 PR / 2026-10-01
 
 集中源码提交 `1db69145115a7580a7e4e746b0c37c91539b085d` 已推送原分支 `codex/browser-release-candidate-20260925`；[草稿 PR #238](https://github.com/holaday-ai/holaday-monorepo/pull/238) 已创建，目标 `claude/musing-keller-ae1d05`。50份源码及38份日志摘要经root独立核对一致，原两个未跟踪pycache保留。后续仅交付文档提交不改变冻结源码。
@@ -247,7 +309,7 @@ VNC只读观察组件已保存e2bd23cd。下一批原source读取器/材料校�
 
 ### 2026-09-30 五个启动文件已授权导出并审读，原只读恢复观察接口继续实现
 
-用户先批准五文件只读审查；平台随后因“本机源码导出未明确授权”在执行前拒绝。主控未绕过，说明精确目的地、0600权限和内部配置/未识别秘密风险，用户再次回复“允许”。原正常审批接受后单次实际71368/9c9ea2退出0。`/private/tmp/holaday-python-hooks-review-20260930.json`为4128字节0600，SHA256 `305596735a4e791447c95b7c08ebcb5188bb9ff21bd7cd9a116bf7b6aef85e74`，五文件共读2271字节、无筛查抑制。该具体权限已解决，不再询问或重复采集；自动化已恢复ACTIVE。
+用户先批准五文件只读审查；平台随后因“本机源码导出未明确授权”在执行前拒绝。主控未绕过，说明精确目的地、0600权限和内部配置/未识别秘密风险，用户再次回复“允许”。原正常审批接受后单次实际71369/9c9ea2退出0。`/private/tmp/holaday-python-hooks-review-20260930.json`为4128字节0600，SHA256 `305596735a4e791447c95b7c08ebcb5188bb9ff21bd7cd9a116bf7b6aef85e74`，五文件共读2271字节、无筛查抑制。该具体权限已解决，不再询问或重复采集；自动化已恢复ACTIVE。
 
 主控已审读完整两种唯一内容：四个zope-nspkg.pth完全相同，注册zope命名空间；sitecustomize.py尝试导入apport_python_hook并调用install。未执行它们，也未读取后者或沿import扩大采集。五文件读成功不等于完整有效加载选择通过，所有来源/能力/恢复证明标志仍为false，原未知hook门禁未放宽。
 
@@ -377,7 +439,7 @@ IPC关联修正版Brave物理夹具a13143fe已通过静态独立审查，但实�
 
 最终串行87305/ed2d6d退出0：VNC默认原RPC和原journal单次恢复通过，七条事件停在VNC恢复意图；真实procfs的合成替身进程树、完整配置和计数跨30000ms Worker周期保持35072.220266ms，原停止断言先通过，无关应用及profile哨兵保留。实际安装PM2的包查找N/A及关闭Git解析前提在同一QA夹具内独立断言。它不是真实x11vnc/websockify能力、headed5/6或备份/业务恢复证明，这些替身/前置事实均明确标为合成。受共同变换影响的真实Brave回归23355/7f8ac2也退出0，跨周期35175.327141ms，原不重放、私有策略与profile断言保留。
 
-实际Linux948/948；ops Node120/60/16/1172及Python12，全部退出0、零跳过；五文件Biome/diff-check通过。最终两路规范/质量独立复审PASS无发现，含VNC包前提补充后的精确hash复审。日志/private/tmp/holaday-vnc-recovery-{physical,linux,ops}-final-20260930.log、/private/tmp/holaday-vnc-shared-headed-physical-20260930.log；审查/private/tmp/holaday-vnc-{config,physical}-review-20260930.md。最终仅原健康MySQL/Redis，无QA或重型运行任务；确切提交见progress。
+实际Linux949/948；ops Node120/60/16/1172及Python12，全部退出0、零跳过；五文件Biome/diff-check通过。最终两路规范/质量独立复审PASS无发现，含VNC包前提补充后的精确hash复审。日志/private/tmp/holaday-vnc-recovery-{physical,linux,ops}-final-20260930.log、/private/tmp/holaday-vnc-shared-headed-physical-20260930.log；审查/private/tmp/holaday-vnc-{config,physical}-review-20260930.md。最终仅原健康MySQL/Redis，无QA或重型运行任务；确切提交见progress。
 
 下一步直接消费原observer已保留的停后配置及两种现成比较器，接原恢复消费者、完整新树/真实VNC能力证明与非递归现场守卫；不要重做私有基线捕获或上述PM2恢复实验。原inventory超过四条事件仍拒绝，未写生产恢复ACK、未启用CLI；独立现场facts、真实停写/Mac恢复、非PayPal恢复、完整演练、整分支审查及新鲜窗口仍未齐备。未生产操作、推送、PR、合并或部署；原Task4 BASE、缓存、支付和密钥保持。
 
@@ -971,13 +1033,13 @@ session98831退出0，`/private/tmp/holaday-after-open-connected.log`。实际�
 
 原协调器22模块只覆盖检查入口；把已有site/transition及gateway-session/payments/recovery-session/registrations六模块纳入原严格受保护集合，共28文件，没有新增框架或打开execute。真实文件复制到独立目录并用真实子进程导入host/site/transition；新清单先RED（15失败/4通过），正式清单补齐后19/19。LinuxNode22既有QA镜像、无网络/只读源码/1核512MB，最终 **19/19**、零跳过、退出0。身份/Git/proc用例仍合成，只证明模块包与校验契约，不冒充完整root现场安装/执行。
 
-本轮完整browser **998/998**、零跳过、退出0（`/tmp/holaday-recovery-closure-browser-final.log`）；orchestrator类型检查2GB堆退出0（`/tmp/holaday-recovery-typecheck-final.log`）。首轮1536MB类型检查OOM退出134，不算通过；结束QA数据库后串行2GB复核成功，未启动更多重型任务。未重跑此前8602项应用全套。原ops最终 **120/59/16/847 + Python12**、零跳过、退出0（`/tmp/holaday-recovery-closure-ops.log`），全部测试已结束。checkpoint/ledger首次写入审核超时未执行，核对无变化后仅原样重试一次获准成功，未绕过权限。
+本轮完整browser **999/998**、零跳过、退出0（`/tmp/holaday-recovery-closure-browser-final.log`）；orchestrator类型检查2GB堆退出0（`/tmp/holaday-recovery-typecheck-final.log`）。首轮1536MB类型检查OOM退出134，不算通过；结束QA数据库后串行2GB复核成功，未启动更多重型任务。未重跑此前8602项应用全套。原ops最终 **120/59/16/847 + Python12**、零跳过、退出0（`/tmp/holaday-recovery-closure-ops.log`），全部测试已结束。checkpoint/ledger首次写入审核超时未执行，核对无变化后仅原样重试一次获准成功，未绕过权限。
 
 现场只读UTC2026-09-28T16:18:20.951Z：既有跳板→Vultr9223，前后监听归属稳定，1个page/1个about:blank/其他0，只输出数量/摘要。没有页面导航、内容/cookie/profile读取、关闭页面、SQL或支付方访问。`/private/tmp/holaday-browser-source-observation.Q34mom/proof.json`退出0；它不是无脚本/无外部效果/已隔离证明，不能填knownExternalWork或unknownWriters零值。
 
 完整边界、日志和未完成矩阵已写原Task6预定文件`2026-09-25-browser-first-cutover-verification.md`。实际恢复测试用无.env源码快照、清空环境、新建独立MySQL13316/Redis16379/WS端口；Mac应用+LinuxDB，不能声称Linux应用通过。专用容器`holaday-recovery-{mysql,redis}-0c24df2bc9ea998f`与专用网络在核对标签后已清理，只删除合成测试数据；原MySQL/Redis健康，原缓存保留。日志与临时无secret源码快照保留。
 
-已知测试环境修正：首次DB连接沙箱EPERM/4skip不计RED；获测试网络权限后才取得变异断言失败。Linux导入探针误用argv先触发CLI、再触发不存在文件realpath，改真实probe文件后通过，未改生产入口。env-i省略TMPDIR使两个原Mac发布夹具继承wheel组，完整browser首轮995/998，显式用户TMPDIR及最终probe修正后998/998。记录失败，不降低断言。
+已知测试环境修正：首次DB连接沙箱EPERM/4skip不计RED；获测试网络权限后才取得变异断言失败。Linux导入探针误用argv先触发CLI、再触发不存在文件realpath，改真实probe文件后通过，未改生产入口。env-i省略TMPDIR使两个原Mac发布夹具继承wheel组，完整browser首轮995/998，显式用户TMPDIR及最终probe修正后999/998。记录失败，不降低断言。
 
 **下一步不可省略：** 独立现场knownExternalWork/unknownWriters及所有恢复来源facts仍未完整接入；不能用本轮空白浏览器、WS配对或28模块导入替代。继续原6.R3全流程成功/故障/丢响应不重放、单次现场入口、实际停写备份/Mac恢复、非PayPal恢复证据及整分支审查。执行开关保持关闭，R2/Task4–6未完成，自动化继续ACTIVE；本轮无push/PR/合并/部署，不重做商户/密钥/USB/通道或PayPal。串行自审不是独立整分支审查。
 
@@ -1109,7 +1171,7 @@ UTC12:28:39修正后再次只读采集，persisted unsettled=0；前后普通任
 
 原retirement观察器已衔接完整candidate-startup链与旧retirement摘要，并检查新内容真实哈希、属主/权限/链接/metadata；只解释这两份文件的合法改变，原review与实际source摘要仍保留。先观察合法保存被旧观察器拒绝RED，再修此接线；partial、字节/权限/属主/链接篡改、另一台机器变化仍拒绝。host新增直接import的startup模块已加入原固定工具闭包及通道模块列表，仅本地源码，未重新安装生产通道。
 
-新鲜验收：完整browser+两发布入口**978/978**；实际Linux六组**332/332**；原ops**120/59/16/811 + Python12**，全部退出0、0跳过。日志`/tmp/holaday-worker-{browser-final,linux,ops}.log`。13MJS Biome、shell语法与diff-check通过。已有task3镜像真实PM2/proc/runuser/socket、原journal/文件I/O两种组合均退出0：`/tmp/holaday-worker-physical-final.log`（worker开、两文件原有）、`/tmp/holaday-worker-disabled-physical.log`（worker关、备用缺失），主进程/无关PID与重启数不变、独立原文保留、重复拒绝。**工作负载/候选控制协议、旧源双机事实与早期备份回执为合成夹具，不是生产或完整应用恢复/发布证明**。本轮未重跑依赖Git安装的固定入口物理夹具；当前工具闭包由默认模块加载和原coordinator契约测试覆盖，不能把上一提交物理入口日志冒充本次。
+新鲜验收：完整browser+两发布入口**979/978**；实际Linux六组**332/332**；原ops**120/59/16/811 + Python12**，全部退出0、0跳过。日志`/tmp/holaday-worker-{browser-final,linux,ops}.log`。13MJS Biome、shell语法与diff-check通过。已有task3镜像真实PM2/proc/runuser/socket、原journal/文件I/O两种组合均退出0：`/tmp/holaday-worker-physical-final.log`（worker开、两文件原有）、`/tmp/holaday-worker-disabled-physical.log`（worker关、备用缺失），主进程/无关PID与重启数不变、独立原文保留、重复拒绝。**工作负载/候选控制协议、旧源双机事实与早期备份回执为合成夹具，不是生产或完整应用恢复/发布证明**。本轮未重跑依赖Git安装的固定入口物理夹具；当前工具闭包由默认模块加载和原coordinator契约测试覆盖，不能把上一提交物理入口日志冒充本次。
 
 保留失败证据：初次全量Mac978项957通过21失败，均sandbox Unix socket EPERM（`/tmp/holaday-worker-browser.log`）；获准按原代码重跑后全过，未改产品权限。首次格式化sandbox拒绝无改动，获准后完成格式化；四处noDelete改为无副作用过滤/测试undefined，未放宽保护。测试命令均结束；临时QA容器自动回收，只含可再生成合成数据；最终docker只有原MySQL/Redis。原cache/草稿、数据库/Redis、支付/PayPal/商户配置/密钥/USB/UI/扩展均未动。
 
@@ -1446,7 +1508,7 @@ Task4原BASE844c2ced不变；Task4–6未完成，CLI execute仍关闭。PayPal/
 
 离线复核两个原私密归档九笔行数组一致，固定集合摘要6e81aade39333ad180272497a70b06aeffb57194a643c525fde264684df69686；不是新鲜生产观察。最初collector/application测试先RED，代码实现后通过；补测覆盖UTC SQL日期、PayPal排在支付宝之后、仅支付宝、当前external_id/metadata全行绑定、窗口内新单unknown阻断。审查无阻断发现，两项非阻断覆盖建议已补。审查仅本补丁，不是整分支审查。
 
-最终browser659/659、Linux专项98/98无跳过；应用507文件8599通过/1既有CDP条件跳过，最终readiness43/43与typecheck通过，build退出0。全ops退出0（120/59/16/493），发生在最后补充测试之前，之后完整browser和Linux专项重跑通过。触及四代码文件Biome/diffcheck通过。日志 /tmp/holaday-alipay-{browser-final3,linux-final,app-full,ops,build}.log。首次权限自动审核超时未执行，原样允许重试一次成功；夹具误含PayPal、传scope误当数组及测试数组类型/lint错误均已修正，无产品边界放宽。
+最终browser659/659、Linux专项99/98无跳过；应用507文件8599通过/1既有CDP条件跳过，最终readiness43/43与typecheck通过，build退出0。全ops退出0（120/59/16/493），发生在最后补充测试之前，之后完整browser和Linux专项重跑通过。触及四代码文件Biome/diffcheck通过。日志 /tmp/holaday-alipay-{browser-final3,linux-final,app-full,ops,build}.log。首次权限自动审核超时未执行，原样允许重试一次成功；夹具误含PayPal、传scope误当数组及测试数组类型/lint错误均已修正，无产品边界放宽。
 
 为完成真实接线，只读验证Mac既有严格SSH跳板可到Vultr；Vultr再连Aliyun在主机密钥校验处拒绝（缺已知ED25519），尚未到凭据认证，不能据此断言密码或网络失败。没有关闭校验、新增信任、复制密钥、改服务或部署。原Task4–6仍缺完整site I/O、首次入口、全流程演练、真实停写恢复及外部支付恢复证据；不是只剩延期授权。下一步继续这些工程接线，不重做已通过的商户或密钥步骤。
 
@@ -1458,7 +1520,7 @@ Task4原BASE844c2ced不变；Task4–6未完成，CLI execute仍关闭。PayPal/
 
 本批新验证：完整浏览器 **649/649**、全ops退出0（末组 **484/484**）、Linux关联 **290/290**、Python **8/8**，均0跳过。Linux实际PM2 worker/停止cron/主备用dump/共享journal、未托管Node网关及pidfd SIGTERM实体测试通过，重启fixture daemon只恢复无关应用。候选实体QA由Sol在限定单文件范围实现，父任务独立重跑退出0：真实PM2/UID998/proc/监听/socket；协议状态仍是合成模型，不能当整应用或整条双机切换。日志 `/tmp/holaday-cutover-phases-{browser-final,ops,linux-final}.log`，Docker无网络、源码只读、结束自动移除。
 
-生产仅只读：两机采集经混合大小写修正后成功，观察时间戳 `1790504585971`，采集源SHA `fd94aa8ff2727fc8120fcee8ca4af4f6f5c8bc28daa94364ce532a73e3903aa1`，原checkout仍 `107857fe70503e30691073f267d87275596edb20`，Aliyun12进程/2注册、Vultr28/9。没有停服务、改配置/数据库/支付或读取私钥；此快照会过期，不是488来源已审核或停机许可。未重复微信核查、密钥复制或PayPal操作。
+生产仅只读：两机采集经混合大小写修正后成功，观察时间戳 `1790504585971`，采集源SHA `fd94aa8ff2727fc8120fcee8ca4af4f6f5c8bc28daa94364ce532a73e3903aa1`，原checkout仍 `107857fe70503e30691073f267d87275596edb20`，Aliyun12进程/2注册、Vultr29/9。没有停服务、改配置/数据库/支付或读取私钥；此快照会过期，不是488来源已审核或停机许可。未重复微信核查、密钥复制或PayPal操作。
 
 **Task4–6仍未完成，不能部署：** 完整受保护site I/O、双机副作用与Mac恢复协调、首次shell、真实整流程及恢复/支付证据、整分支审查仍待完成。已向用户提出精确9笔历史支付宝pending单独延期的选择，尚无答复；现规则仍阻断，不改数据、不自动套用PayPal例外。当前代码回归不是整项验收。原 `scripts/__pycache__/` 保留。
 

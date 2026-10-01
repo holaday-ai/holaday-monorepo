@@ -1,3 +1,23 @@
+当前完整逐场账与私有持久证据指针：[续跑矩阵机器账](2026-10-02-browser-first-cutover-resumed-matrix-evidence.json)。最后所有本例数据库均stopped/OOMfalse，角色均无残留；不再运行重型。
+
+## 当前集中修复与验收恢复点 / 2026-10-02
+
+固定九场真实隔离host矩阵9/9通过；末场late-known-effect新鲜QA修正版exit0/768.79s，实际观察与内层拒绝标记各一次，原hold/双入口拒绝/锁保留/效果单次断言通过。
+
+已通过before-migration、after-start、before-open、after-open、after-ingress、after-worker、lost-open-ack、enabled-worker、late-known-effect，每场独立fresh pair、真实命令/exit0、原尾部断言、精确资源清理/无残留均分列机器账。不同源码冻结版本通过诊断与QA-only轻量合同桥接，不冒称一次同源整场全通过。当前机器账 `2026-10-02-browser-first-cutover-resumed-matrix-evidence.json`；最终51源码冻结见 `2026-10-02-browser-first-cutover-source-freeze-late-known-qa.json`。
+
+历史LOCAL_ENTRY、RECOVERY_SITE_SOURCE、FENCE_PORTS_AFTER及更早attach/fences拒绝根因仍未证明。固定原因诊断只是补齐观测，后续成功不能证明这些根因已修。after-worker 734.55s场已到指定注入，但尾部读错Aliyun dump，QA修正两份批准Vultr文件映射后744.83s场整体0；late-known-effect 773.84s场实际SITE码与QA内部KNOWN期望冲突，真实site/journal合同证明原边界归一化且不重放，新增固定发现/拒绝标记后只重验该场。全部原exit1保留。
+
+源码HEAD `fa443fe092dd106e7612186e7038c070e5035765`，草稿PR238保持；继承候选范围不隐藏。当前未提交脚本修正与QA应用candidate `b43dd03132658d9c13875f050e2c27e584b61e33`、QA旧source `434f1b1666d02ebda444a2c3ff78e679e549a35f` 分别绑定。root已独立审本批接口/期限/失败收尾/诊断及逐场结果，继承651文件未逐行全审仍为审查范围限制。
+
+普通应用506非PayPal文件8584通过/1原helper跳过、cn-payment103、类型/build/ordinary7/真实opt-in MySQL3、两角色原生前置与恢复及脚本2013总1979通过/34条件跳过+独立age35均复用原实际账，未重跑。非PayPalops按原exit1与16-name补跑分列，不冒称整条exit0；PayPal全部延期。当前重型唯一串行，CPU1、编译2GiB/180s→host768MiB/900s，整个续跑固定累计swap基线3473.62MiB、free<35%或累计增>256MiB只取消本方，不逐场重置。
+
+本项范围是原§8固定首次切换验收与开放后最小浏览器执行探针。完整任务路由、多页/上传/Canvas/受控池扩建和广泛成功率不新增为本次门槛。QA成功仍采用显式业务facts，默认production-facts实际SQL实现+合成后端/签名响应组合不等于生产provider整项证明。
+
+生产放行尚需最终真实工作/写入归属、非延期支付恢复材料及同候选/配置/清单/商户/代码/期限绑定、同次生产停写后备份恢复、新鲜批准/来源/锁/窗口。用户必要交付授权持续有效，不重复索要泛化授权；授权不是这些事实。九笔历史支付宝单独延期、PayPal全部延期、四笔历史微信签名核查已完成；本轮不重复旧核查，最终窗口按默认范围执行必要新鲜只读观察。微信历史查询文档及普通/partner幂等合同可复用为分层依据，但原两份provider-results与旧专项日志当前缺失，未找到已知持久副本；不能把历史文字/合同填成受保护恢复artifact。支持retry-proven或query-and-existing-settlement-proven，不强加新付款或单一重投。确切缺少原文/恢复与对应结算及不重复权益材料，详见payment-evidence当前节。
+
+以下dated记录为历史，不覆盖本节当前状态。
+
 # 2026-10-01 统一发布链路审计与修复账
 
 ## 当前冻结交付 / 2026-10-01
@@ -34,7 +54,7 @@
 | 真实full-host整链 | fresh成功场exit0/约673s，真实新boot/open/nginx/reconcile/锁释放；unknown/known原入口分别exit0 | 原host/停止/备份/61SQL/open协议真实，业务facts为明确QA-only；不替代默认production facts整项 |
 | 原Task6故障矩阵/生产 | [14类分层矩阵](2026-10-01-browser-first-cutover-failure-matrix.md)；9场固定故障/ACK/worker矩阵未完成，因累计宿主资源风险主动暂停，生产未执行 | 真实外部工作/非PayPal恢复/重复权益、新鲜批准/来源/锁/窗口未齐；PayPal全部延期 |
 
-下面是历史dated过程；其中旧缺实现/旧not-run不代表当前代码状态。root已独立风险审查关键应用实现、接口和证据；继承651文件未逐行全审，最终包仍待收口。
+下面是历史dated过程；其中旧缺实现/旧not-run不代表当前代码状态。root已独立风险审查关键应用实现、接口和证据；继承651文件未逐行全审，root本批收口审查完成，继承651文件逐行全审限制保留。
 
 ## 历史过程与逐项审计
 

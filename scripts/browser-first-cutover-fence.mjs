@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { request as httpsRequest } from 'node:https';
 import { isDeepStrictEqual } from 'node:util';
+import { ingressDiagnosticError } from './browser-first-cutover-ingress-diagnostics.mjs';
 import { createCutoverNginxIO } from './browser-first-cutover-nginx.mjs';
 import { installPaymentPortFence, verifyPaymentPortFence } from './browser-payment-port-fence.mjs';
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -237,8 +238,8 @@ function generate(bytes, file, stage) {
  */
 export async function probeCutoverIngress(approval, stage, overrides = {}) {
   const io = { now: Date.now, request: httpsRequest, ...overrides };
-  const reject = () => {
-    throw new Error('CUTOVER_INGRESS_PROBE_UNPROVEN');
+  const reject = (stage = 'PROBE_ENTRY', previous) => {
+    throw ingressDiagnosticError('CUTOVER_INGRESS_PROBE_UNPROVEN', stage, previous);
   };
   try {
     const scope = structuredClone(approval);
@@ -269,13 +270,19 @@ export async function probeCutoverIngress(approval, stage, overrides = {}) {
     let lastTime = began;
     const clock = () => {
       const now = io.now();
-      if (!Number.isSafeInteger(now) || now < lastTime || now - began > 60000) reject();
+      if (!Number.isSafeInteger(now) || now < lastTime || now - began > 60000)
+        reject('PROBE_CLOCK');
       lastTime = now;
       return now;
     };
     const counts = ['existingSockets', 'internalWriters', 'producersRunning'];
     const writers = async () => {
-      const observed = structuredClone(await io.observeWriters());
+      let observed;
+      try {
+        observed = structuredClone(await io.observeWriters());
+      } catch (error) {
+        reject('PROBE_WRITER_READ', error);
+      }
       const now = clock();
       if (
         observed?.inventoryDigest !== scope.inventoryDigest ||
@@ -285,7 +292,7 @@ export async function probeCutoverIngress(approval, stage, overrides = {}) {
         now - observed.observedAtMs > 60000 ||
         counts.some((k) => !Number.isSafeInteger(observed[k]) || observed[k] < 0)
       )
-        reject();
+        reject('PROBE_WRITER_SHAPE');
       return observed;
     };
     const before = await writers();
@@ -297,13 +304,15 @@ export async function probeCutoverIngress(approval, stage, overrides = {}) {
         let req;
         let timer;
         let finished = false;
-        const finish = (error, value) => {
+        const finish = (error, value, previous) => {
           if (finished) return;
           finished = true;
           clearTimeout(timer);
           if (error) {
             req?.destroy();
-            rejectRequest(new Error('CUTOVER_INGRESS_PROBE_UNPROVEN'));
+            rejectRequest(
+              ingressDiagnosticError('CUTOVER_INGRESS_PROBE_UNPROVEN', error, previous),
+            );
           } else resolve(value);
         };
         try {
@@ -344,11 +353,11 @@ export async function probeCutoverIngress(approval, stage, overrides = {}) {
                 bytes += chunk.length;
                 if (bytes > 65536) {
                   res.destroy();
-                  finish(true);
+                  finish('PROBE_BODY');
                 }
               });
-              res.once('aborted', () => finish(true));
-              res.once('error', () => finish(true));
+              res.once('aborted', () => finish(bytes > 65536 ? 'PROBE_BODY' : 'PROBE_RESPONSE'));
+              res.once('error', () => finish(bytes > 65536 ? 'PROBE_BODY' : 'PROBE_RESPONSE'));
               res.once('end', () => {
                 if (
                   !res.complete ||
@@ -356,7 +365,7 @@ export async function probeCutoverIngress(approval, stage, overrides = {}) {
                   res.statusCode < 100 ||
                   res.statusCode > 599
                 )
-                  return finish(true);
+                  return finish('PROBE_RESPONSE');
                 const cache = res.headers['cache-control'];
                 finish(null, {
                   ...route,
@@ -372,24 +381,25 @@ export async function probeCutoverIngress(approval, stage, overrides = {}) {
               });
             },
           );
-          req.once('error', () => finish(true));
+          req.once('error', () => finish('PROBE_REQUEST'));
           req.once('upgrade', (_res, socket) => {
             socket.destroy();
-            finish(true);
+            finish('PROBE_UPGRADE');
           });
-          timer = setTimeout(() => finish(true), 5000);
+          timer = setTimeout(() => finish('PROBE_TIMEOUT'), 5000);
           timer.unref?.();
           req.end(ws ? undefined : '{}');
-        } catch {
-          finish(true);
+        } catch (error) {
+          finish('PROBE_REQUEST', undefined, error);
         }
       });
     // Await every bounded request before exposing a result/error. No half-success,
     // detached socket, automatic retry, or caller-controlled concurrency target.
     const results = await Promise.allSettled(targets.map(observe));
-    if (results.some((r) => r.status !== 'fulfilled')) reject();
+    if (results.some((r) => r.status !== 'fulfilled'))
+      reject('PROBE_SETTLED', results.find((r) => r.status !== 'fulfilled').reason);
     const after = await writers();
-    if (counts.some((k) => before[k] !== after[k])) reject();
+    if (counts.some((k) => before[k] !== after[k])) reject('PROBE_WRITER_DRIFT');
     clock();
     return {
       inventoryDigest: scope.inventoryDigest,
@@ -397,8 +407,8 @@ export async function probeCutoverIngress(approval, stage, overrides = {}) {
       ...Object.fromEntries(counts.map((k) => [k, after[k]])),
       probes: results.map((r) => r.value),
     };
-  } catch {
-    reject();
+  } catch (error) {
+    reject('PROBE_ENTRY', error);
   }
 }
 
@@ -547,18 +557,24 @@ export async function applyCutoverFence(input, overrides) {
 }
 
 export async function verifyCutoverFence(input, io) {
+  let stage = 'FENCE_CONTEXT';
   try {
     const { binding, approval } = await context(input, io);
+    stage = 'FENCE_RECEIPT';
     const receipt = await io.readFenceReceipt();
     checkReceipt(receipt, binding, approval);
     if (receipt.stage !== input.stage) fail();
+    stage = 'FENCE_PORTS_BEFORE';
     await paymentPorts(binding, approval, input.stage, io);
+    stage = 'FENCE_CONFIG';
     for (const f of receipt.files)
       if (digest(await io.readConfig(f.path)) !== f.generatedDigest) fail();
+    stage = 'FENCE_PROBE';
     const results =
       typeof io.probeIngress === 'function'
         ? await io.probeIngress(approval, input.stage)
         : await probeCutoverIngress(approval, input.stage, { ...io.ingressProbe, now: io.now });
+    stage = 'FENCE_RESULT';
     const now = io.now();
     if (
       results?.inventoryDigest !== input.inventoryDigest ||
@@ -568,13 +584,16 @@ export async function verifyCutoverFence(input, io) {
       !Array.isArray(results.probes)
     )
       fail();
+    stage = 'FENCE_TARGETS';
     const required = approval.files.flatMap((f) =>
       f.locations.filter((r) => r.kind !== 'health').map((r) => ({ ...r, path: f.path })),
     );
     if (results.probes.length !== required.length) fail();
     for (const r of required) {
+      stage = 'FENCE_ROUTE';
       const p = results.probes.filter((v) => v.path === r.path && routeKey(v) === routeKey(r));
       if (p.length !== 1) fail();
+      stage = 'FENCE_STATUS';
       const blocked = r.kind === 'business' || input.stage === 'all-writers';
       if (
         blocked
@@ -583,11 +602,13 @@ export async function verifyCutoverFence(input, io) {
       )
         fail();
     }
+    stage = 'FENCE_WRITERS';
     if (
       input.stage === 'all-writers' &&
       ['existingSockets', 'internalWriters', 'producersRunning'].some((k) => results[k] !== 0)
     )
       fail();
+    stage = 'FENCE_PORTS_AFTER';
     await paymentPorts(binding, approval, input.stage, io);
     return {
       inventoryDigest: input.inventoryDigest,
@@ -597,8 +618,8 @@ export async function verifyCutoverFence(input, io) {
       internalWriters: results.internalWriters,
       producersRunning: results.producersRunning,
     };
-  } catch {
-    throw new Error('CUTOVER_FENCE_UNPROVEN');
+  } catch (error) {
+    throw ingressDiagnosticError('CUTOVER_FENCE_UNPROVEN', stage, error);
   }
 }
 

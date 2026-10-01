@@ -1,3 +1,19 @@
+当前完整逐场账与私有持久证据指针：[续跑矩阵机器账](2026-10-02-browser-first-cutover-resumed-matrix-evidence.json)。最后所有本例数据库均stopped/OOMfalse，角色均无残留；不再运行重型。
+
+## 当前非PayPal恢复材料与历史证据可复用范围 / 2026-10-02
+
+用户已允许九笔历史支付宝单独延期，PayPal全部延期；四笔历史微信签名查询已在2026-09-27完成，本轮不重复旧核查、不重新要求编号或重做商户/密钥核查；最终窗口按默认范围执行必要新鲜只读观察。历史结论保留：1笔SUCCESS对应已有完成记录、3笔CLOSED，未改订单/权益。该历史核查不自动等于本次切换恢复验收。
+
+限定原文指针核对发现以下文件当前不存在：`holaday-wechat-readonly-6IIU4v/provider-results.json`（历史SHA663f52f8…）、`holaday-wechat-readonly-BpLN76/provider-results.json`（历史SHA4b447853…）、`/tmp/holaday-wechat-closed-settlement-final.log`、`/tmp/holaday-cutover-payment-idempotency.log`。本任务已知ignored QA文件名清单无wechat/rehearsal/settlement持久副本；不广扫凭据、不访问provider。历史文档可引用已完成结论，但不是可重验签名原文。既有应用完整回归可复用为结算/重复确认合同，不冒称生产实际恢复或对应权益变化实证。
+
+默认reader `readCutoverRehearsalArtifacts` 要求root受保护`/var/lib/holaday-deploy/evidence-private/rehearsal-<configDigest>.json`及摘要命名JSON文件：retry-proven需transcriptDigest+retryDigest；query-and-existing-settlement-proven需transcriptDigest+queryDigest+settlementDigest。真实文件字节SHA须匹配，同candidate/config/inventory和merchant/environment/code绑定，recoveryUntilMs覆盖原reconcileByMs。不是强制新付款或支付方重投；已有真实查询+现有结算/重复权益证明齐全且期限适用时可以复用。当前缺的是可重验原始查询材料、实际恢复/已有结算对应及不重复权益证明的完整材料包与本次绑定，不能预断只缺摘要，也不能从历史文字生成假的文件/时间。
+
+可在授权范围内取得的下一步是恢复已知证据保管处的原字节（若有独立持久来源），或在最终新鲜窗口按原默认只读清单执行当前非延期订单观察并核实既有结算证据；本轮不为补旧材料重复上述四历史单核查；最终窗口按默认范围执行必要新鲜只读观察，不重做商户/密钥核查、不补结算/权益、不新付款。本次未做生产读取，因此不声称该材料包存在或已通过。
+
+当前安全取得能力：现有queryOrders可在最终窗口按默认精确集合取得新的签名查询，数据库scope reader可只读观察既有结算字段；这些是原授权执行步骤。现有readCutoverRehearsalArtifacts只验证已有材料，仓内写入该清单的入口仅隔离QA fixture，没有生产真实恢复材料生成器。单次当前结算快照不能证明恢复后重复通知没有重复权益，旧历史结论也不能替代已丢签名原文。当前不能安全生成的具体材料是实际恢复/对应结算与重复权益观测的transcript原文及其settlementDigest（或真实retryDigest）；未证明存在独立持久来源，不为此付款、改历史、补结算、改时间或重复商户/密钥核查。已有原始材料若另有已知保管来源可只读取回并核hash，当前不泛化等待授权。
+
+以下为历史记录。
+
 # 首次切换支付证据：局部行为已验证，外部恢复未验证
 
 2026-09-26。不得据此放行生产或宣称真实支付方重投成功。

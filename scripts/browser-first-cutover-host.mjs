@@ -3740,6 +3740,7 @@ export function readFirstCutoverApproval(options, io = system) {
 }
 async function readProtectedFirstCutoverApproval(options, io, reconciliation) {
   let handle;
+  let stage = 'APPROVAL_INPUT';
   try {
     if (
       io.platform !== 'linux' ||
@@ -3749,21 +3750,26 @@ async function readProtectedFirstCutoverApproval(options, io, reconciliation) {
       !uuid(options.attempt)
     )
       throw new Error('input');
+    stage = 'APPROVAL_CLOCK';
     const began = io.now();
     if (!Number.isSafeInteger(began) || began < 0) throw new Error('clock');
+    stage = 'APPROVAL_FOLDER';
     const folder = await io.lstat(directory);
     if (!privateDirectory(folder) || (await io.realpath(directory)) !== directory)
       throw new Error('directory');
+    stage = 'APPROVAL_FILE';
     handle = await io.open(
       approvalPath,
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
     );
     const before = await handle.stat();
     if (!privateFile(before) || before.size < 1 || before.size > 64 * 1024) throw new Error('file');
+    stage = 'APPROVAL_CONTENT';
     const bytes = await handle.readFile();
     const after = await handle.stat();
     const current = await io.lstat(approvalPath);
     const currentFolder = await io.lstat(directory);
+    stage = 'APPROVAL_CHANGED';
     if (
       !privateFile(after) ||
       !privateFile(current) ||
@@ -3782,8 +3788,10 @@ async function readProtectedFirstCutoverApproval(options, io, reconciliation) {
       !Buffer.from(bytes.toString('utf8')).equals(bytes)
     )
       throw new Error('changed');
+    stage = 'APPROVAL_JSON';
     const record = JSON.parse(bytes.toString('utf8'));
     const now = io.now();
+    stage = 'APPROVAL_BINDING';
     const expectedFields = record?.schemaVersion === 2 ? [...fields, 'legacyInterruption'] : fields;
     if (
       !record ||
@@ -3802,13 +3810,15 @@ async function readProtectedFirstCutoverApproval(options, io, reconciliation) {
       !Number.isSafeInteger(record.maintenanceEndsAtMs) ||
       !Number.isSafeInteger(record.reconcileByMs) ||
       record.reconcileByMs < record.maintenanceEndsAtMs ||
-      !Number.isSafeInteger(now) ||
-      now < began ||
-      now >= (reconciliation ? record.reconcileByMs : record.maintenanceEndsAtMs) ||
+      (!Number.isSafeInteger(now) && ((stage = 'APPROVAL_CLOCK'), true)) ||
+      (now < began && ((stage = 'APPROVAL_CLOCK'), true)) ||
+      (now >= (reconciliation ? record.reconcileByMs : record.maintenanceEndsAtMs) &&
+        ((stage = 'APPROVAL_DEADLINE'), true)) ||
       typeof record.operatorRef !== 'string' ||
       !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(record.operatorRef)
     )
       throw new Error('binding');
+    stage = 'APPROVAL_RISK';
     const risk =
       record.schemaVersion === 2 ? { riskDigest: cutoverLegacyInterruptionRisk(record) } : {};
     return {
@@ -3816,8 +3826,8 @@ async function readProtectedFirstCutoverApproval(options, io, reconciliation) {
       ...risk,
       approvalDigest: createHash('sha256').update(bytes).digest('hex'),
     };
-  } catch {
-    throw new Error('CUTOVER_APPROVAL_UNPROVEN');
+  } catch (error) {
+    throw ingressDiagnosticError('CUTOVER_APPROVAL_UNPROVEN', stage, error);
   } finally {
     await handle?.close();
   }

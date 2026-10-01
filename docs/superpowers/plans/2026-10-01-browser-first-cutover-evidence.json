@@ -1068,5 +1068,13 @@
     "/private/tmp/holaday-migration-payments-review-rejection.md"
   ],
   "sourceFreeze": "2026-10-01-browser-first-cutover-source-freeze.json",
-  "resourcePause": "owned heavy work stopped under cumulative Docker residency/swap risk; no proven OOM root cause/no permission blocker"
+  "resourcePause": "owned heavy work stopped under cumulative Docker residency/swap risk; no proven OOM root cause/no permission blocker",
+  "resumedMatrix": {
+    "ledger": "2026-10-02-browser-first-cutover-resumed-matrix-evidence.json",
+    "passed": 9,
+    "total": 9,
+    "releaseAcceptance": false,
+    "fixedCumulativeSwapBaselineMiB": 3473.62,
+    "note": "Each independent fresh attempt retains its own source manifest, exit and cleanup; historical failures are preserved and unknown roots are not claimed fixed."
+  }
 }

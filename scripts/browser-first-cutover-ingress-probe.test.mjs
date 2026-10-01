@@ -281,3 +281,68 @@ test('clock reversal above the start time still refuses the observation', async 
   await assert.rejects(fence.probeCutoverIngress(f.approval, 'orders', f.io), /UNPROVEN/);
   assert.equal(f.count(), 0);
 });
+
+async function diagnosticRefusal(action, stage) {
+  const { ingressDiagnosticStage } = await import(
+    './browser-first-cutover-ingress-diagnostics.mjs'
+  );
+  await assert.rejects(action, (error) => {
+    assert.equal(error.message, 'CUTOVER_INGRESS_PROBE_UNPROVEN');
+    assert.equal(ingressDiagnosticStage(error), stage);
+    assert.deepEqual(error.cause, { ingressStage: stage });
+    return true;
+  });
+}
+test('probe diagnostics preserve request-stage clock rejection without raw request errors', async (t) => {
+  const f = await fixture(t);
+  let clocks = 0;
+  f.io.now = () => (++clocks <= 2 ? 1000 : 999);
+  await diagnosticRefusal(fence.probeCutoverIngress(f.approval, 'orders', f.io), 'PROBE_CLOCK');
+  assert.equal(f.count(), 0);
+});
+test('probe diagnostics distinguish writer observation, drift and request failure without retry', async (t) => {
+  for (const mode of ['read', 'shape', 'drift', 'request']) {
+    const f = await fixture(t);
+    const original = f.io.observeWriters;
+    let reads = 0;
+    f.io.observeWriters = async () => {
+      if (mode === 'read') throw new Error('private writer payload');
+      const value = await original();
+      reads++;
+      if (mode === 'shape') value.internalWriters = -1;
+      if (mode === 'drift' && reads === 2) value.internalWriters = 1;
+      return value;
+    };
+    if (mode === 'request')
+      f.io.request = () => {
+        throw new Error('private URL/header');
+      };
+    await diagnosticRefusal(
+      fence.probeCutoverIngress(f.approval, 'orders', f.io),
+      {
+        read: 'PROBE_WRITER_READ',
+        shape: 'PROBE_WRITER_SHAPE',
+        drift: 'PROBE_WRITER_DRIFT',
+        request: 'PROBE_REQUEST',
+      }[mode],
+    );
+  }
+});
+test(
+  'probe diagnostics retain body limit and bounded timeout categories after all requests settle',
+  { timeout: 12000 },
+  async (t) => {
+    for (const mode of ['body', 'timeout']) {
+      const f = await fixture(t, (_req, res) => {
+        res.writeHead(503, { 'cache-control': 'no-store' });
+        if (mode === 'body') res.end('x'.repeat(65537));
+        else res.write('unfinished');
+      });
+      await diagnosticRefusal(
+        fence.probeCutoverIngress(f.approval, 'orders', f.io),
+        mode === 'body' ? 'PROBE_BODY' : 'PROBE_TIMEOUT',
+      );
+      assert.equal(f.count(), 20);
+    }
+  },
+);

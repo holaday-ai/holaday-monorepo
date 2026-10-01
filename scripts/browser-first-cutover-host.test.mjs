@@ -2616,3 +2616,180 @@ for (const fault of [
     await fs.stat(join(f.directory, 'release.lock'));
   });
 }
+
+test('source diagnostics distinguish approval clock, deadline and real file metadata for both schemas', async (t) => {
+  const { ingressDiagnosticStage } = await import(
+    './browser-first-cutover-ingress-diagnostics.mjs'
+  );
+  for (const schemaVersion of [1, 2]) {
+    const record = {
+      ...approved,
+      schemaVersion,
+      ...(schemaVersion === 2
+        ? {
+            legacyInterruption: {
+              mode: 'controlled-interruption',
+              scope: 'legacy-non-payment-memory',
+              approvalRef: 'legacy-interruption-20260928',
+              capabilityDigest: '7'.repeat(64),
+              observeUntilMs: 1800,
+              noAutomaticReplay: true,
+            },
+          }
+        : {}),
+    };
+    for (const mode of [
+      'clock',
+      'deadline',
+      'folder',
+      'file',
+      'replacement',
+      'json',
+      'binding',
+      'read',
+    ]) {
+      const f = await fixture(t, record);
+      assert.equal(
+        (await readFirstCutoverApproval({ attempt: approved.attempt }, f.io)).schemaVersion,
+        schemaVersion,
+      );
+      if (mode === 'clock') {
+        let reads = 0;
+        f.io.now = () => (++reads === 1 ? 1000 : 999);
+      }
+      if (mode === 'deadline') f.io.now = () => 2000;
+      if (mode === 'folder') await fs.chmod(f.directory, 0o755);
+      if (mode === 'file') await fs.chmod(f.file, 0o660);
+      if (mode === 'json') await fs.writeFile(f.file, '{');
+      if (mode === 'binding')
+        await fs.writeFile(f.file, JSON.stringify({ ...record, candidate: 'bad' }));
+      if (mode === 'replacement' || mode === 'read') {
+        const open = f.io.open;
+        f.io.open = async (...args) => {
+          const h = await open(...args);
+          const read = h.readFile;
+          h.readFile = async () => {
+            if (mode === 'read') throw Error('PRIVATE_PAYLOAD');
+            const bytes = await read();
+            await fs.rename(f.file, f.file + '.old');
+            await fs.writeFile(f.file, bytes, { mode: 0o600 });
+            return bytes;
+          };
+          return h;
+        };
+      }
+      await assert.rejects(
+        readFirstCutoverApproval({ attempt: approved.attempt }, f.io),
+        (error) => {
+          assert.equal(error.message, 'CUTOVER_APPROVAL_UNPROVEN');
+          assert.equal(
+            ingressDiagnosticStage(error),
+            {
+              clock: 'APPROVAL_CLOCK',
+              deadline: 'APPROVAL_DEADLINE',
+              folder: 'APPROVAL_FOLDER',
+              file: 'APPROVAL_FILE',
+              replacement: 'APPROVAL_CHANGED',
+              json: 'APPROVAL_JSON',
+              binding: 'APPROVAL_BINDING',
+              read: 'APPROVAL_CONTENT',
+            }[mode],
+          );
+          assert.ok(!JSON.stringify(error.cause).includes('PRIVATE'));
+          return true;
+        },
+      );
+    }
+  }
+});
+
+test('source diagnostics compose both schema approval files with the actual protected execution-site reader', async (t) => {
+  const { readFirstCutoverExecutionSiteScope } = await import(
+    './browser-first-cutover-ingress-session.mjs'
+  );
+  const { ingressDiagnosticStage } = await import(
+    './browser-first-cutover-ingress-diagnostics.mjs'
+  );
+  for (const schemaVersion of [1, 2]) {
+    const record = {
+      ...approved,
+      schemaVersion,
+      ...(schemaVersion === 2
+        ? {
+            legacyInterruption: {
+              mode: 'controlled-interruption',
+              scope: 'legacy-non-payment-memory',
+              approvalRef: 'legacy-interruption-20260928',
+              capabilityDigest: '7'.repeat(64),
+              observeUntilMs: 1800,
+              noAutomaticReplay: true,
+            },
+          }
+        : {}),
+    };
+    const f = await fixture(t, record);
+    const binding = Object.fromEntries(
+      ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map((k) => [
+        k,
+        record[k],
+      ]),
+    );
+    const scope = {
+      schemaVersion: 1,
+      host: 'vultr',
+      binding,
+      maintenanceEndsAtMs: record.maintenanceEndsAtMs,
+      site: {
+        legacyDigest: record.legacyDigest,
+        reviews: { vultr: {}, aliyun: {} },
+        gatewaySiteDigest: 'f'.repeat(64),
+        ingress: {
+          inventoryDigest: binding.inventoryDigest,
+          unknownIngress: [],
+          remoteSiteDigest: 'e'.repeat(64),
+          files: [
+            ['holaday', 'vultr-20260926'],
+            ['hd-app.orangebench.tech', 'aliyun-app-20260926'],
+            ['hd-pay.orangebench.tech', 'aliyun-pay-20260926'],
+          ].map(([name, profile]) => ({ path: '/etc/nginx/sites-available/' + name, profile })),
+        },
+        producerStartupFiles: ['dump.pm2', 'dump.pm2.bak'].map((name) => ({
+          path: '/root/.pm2/' + name,
+          digest: '1'.repeat(64),
+          remove: [{ name: 'holaday-orchestrator', entryDigest: '2'.repeat(64) }],
+        })),
+      },
+    };
+    const file = join(f.directory, 'first-cutover-execution-approved.json');
+    await fs.writeFile(file, JSON.stringify(scope), { mode: 0o600 });
+    const io = {
+      platform: 'linux',
+      uid: 0,
+      now: f.io.now,
+      readApproval: (options) => firstHost.readFirstCutoverReconciliationApproval(options, f.io),
+      fs: {
+        lstat: async (p) =>
+          Object.assign(await fs.lstat(p === root ? f.directory : file), { uid: 0 }),
+        realpath: async (p) => (p === root ? root : p),
+        open: async (_p, flags) => {
+          const h = await fs.open(file, flags);
+          const stat = h.stat.bind(h);
+          h.stat = async () => Object.assign(await stat(), { uid: 0 });
+          return h;
+        },
+      },
+    };
+    const result = await readFirstCutoverExecutionSiteScope({ attempt: record.attempt }, io);
+    assert.deepEqual(result.binding, binding);
+    assert.equal(result.reconcileByMs, record.reconcileByMs);
+    f.io.now = () => record.reconcileByMs;
+    await assert.rejects(
+      readFirstCutoverExecutionSiteScope({ attempt: record.attempt }, io),
+      (error) => {
+        assert.equal(error.message, 'CUTOVER_INGRESS_SESSION_UNPROVEN');
+        assert.equal(ingressDiagnosticStage(error), 'APPROVAL_DEADLINE');
+        return true;
+      },
+    );
+  }
+});

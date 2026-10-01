@@ -359,3 +359,35 @@ test('deadline expiry and a missing actual writer reader cannot start a local li
   await assert.rejects(f.start(), /CUTOVER_INGRESS_LIFECYCLE_UNPROVEN/);
   assert.deepEqual(f.effects, []);
 });
+
+test('fence refusal keeps fixed probe cause through the real local lifecycle and retains public error', async (t) => {
+  const { ingressDiagnosticError, ingressDiagnosticStage } = await import(
+    './browser-first-cutover-ingress-diagnostics.mjs'
+  );
+  const f = await fixture(t);
+  const original = f.io.probeIngress;
+  let failProbe = false;
+  f.io.probeIngress = async (...args) => {
+    if (failProbe)
+      throw ingressDiagnosticError(
+        'CUTOVER_INGRESS_PROBE_UNPROVEN',
+        'PROBE_TIMEOUT',
+        new Error('private raw'),
+      );
+    return original(...args);
+  };
+  const ingress = await f.start();
+  await f.advance('orders_fenced');
+  await ingress.fenceOrders();
+  await f.advance('all_fenced');
+  await ingress.fenceAll();
+  const effects = [...f.effects];
+  failProbe = true;
+  await assert.rejects(ingress.verifyFence(), (error) => {
+    assert.equal(error.message, 'CUTOVER_INGRESS_LIFECYCLE_UNPROVEN');
+    assert.equal(ingressDiagnosticStage(error), 'PROBE_TIMEOUT');
+    assert.deepEqual(error.cause, { ingressStage: 'PROBE_TIMEOUT' });
+    return true;
+  });
+  assert.deepEqual(f.effects, effects);
+});
