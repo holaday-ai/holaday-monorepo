@@ -2389,5 +2389,17 @@
     "implementationCommit": "1db69145115a7580a7e4e746b0c37c91539b085d",
     "draftPullRequest": "https://github.com/holaday-ai/holaday-monorepo/pull/238",
     "deliveryStatus": "committed and pushed; draft PR open; not merged or deployed; release acceptance false"
+  },
+  "firstCutoverConsolidatedDeliveryReceipt": {
+    "date": "2026-10-02",
+    "sourceCommit": "f52d3c4d1a43e5e9c5a7ddd6d270a53308a66886",
+    "draftPullRequest": "https://github.com/holaday-ai/holaday-monorepo/pull/238",
+    "isolatedMatrixPassed": 9,
+    "isolatedMatrixTotal": 9,
+    "privateDurableEvidenceFiles": 85,
+    "evidenceLedger": "docs/superpowers/plans/2026-10-02-browser-first-cutover-resumed-matrix-evidence.json",
+    "releaseAcceptance": false,
+    "deliveryStatus": "committed and pushed; draft PR open; not merged or deployed",
+    "originalSelection": "included/excluded and original historical boundaries preserved"
   }
 }

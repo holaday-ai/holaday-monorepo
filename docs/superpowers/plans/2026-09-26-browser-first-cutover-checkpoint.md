@@ -1,3 +1,9 @@
+## 当前源码交付回执 / 2026-10-02
+
+集中修复源码已提交并推送：`f52d3c4d1a43e5e9c5a7ddd6d270a53308a66886`（28文件）。固定隔离host矩阵9/9通过；14次运行记录含历史失败，85份明确验收日志/结果/清理与采样证据已私有持久保存并校hash。PR238仍draft，未合并、未生产部署，releaseAcceptance=false。下方fa443fe0及“未提交脚本”描述为该提交之前的历史恢复点。
+
+非PayPal前置材料仍缺可重验的实际恢复/对应既有结算与不重复权益原文：transcriptDigest及settlementDigest（query-and-existing-settlement-proven路径）或真实retryDigest；旧四笔微信签名核查已完成，但两份provider-results原文当前不可复验。不能由历史文字、单次结算快照或合同测试制造这些证明。不新增付款或单一重投要求；最终窗口按默认精确范围执行必要新鲜只读查询、停写与备份是已授权执行步骤。九笔历史支付宝单独延期、PayPal全部延期保持。
+
 当前完整逐场账与私有持久证据指针：[续跑矩阵机器账](2026-10-02-browser-first-cutover-resumed-matrix-evidence.json)。最后所有本例数据库均stopped/OOMfalse，角色均无残留；不再运行重型。
 
 ## 当前集中修复与验收恢复点 / 2026-10-02
