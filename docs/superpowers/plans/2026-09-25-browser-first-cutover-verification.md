@@ -1,5 +1,14 @@
 # 浏览器首次切换验收记录
 
+### 2026-10-01 v4已执行；拒绝点推进到启动环境条件，3599字节诊断待具体授权
+
+用户对479654字节/SHAeb9be5...94c68e明确“授权”后正常审批放行。session88418实际退出1/stderr0；live-source-reader-v4.json记录source阶段runtime519→620拒绝，manager读取通过，前轮.local缺失检查已越过。519含多个启动环境条件，尚不能确定具体字段；没有实现改动或猜测性放宽。现场当前source完整证明仍unproven。
+
+已准备独立launch-shape-probe.mjs：3599字节，SHA256 ce1c492c0ab364bdf03a1fba653628abdc1e69e057492a32f33c77f552d65faf，经原严格SSH跳板到同一root@207.148.70.106，调用一次现存PM2 socket，只输出固定条件标签/枚举/计数，不输出环境值/配置内容或秘密，不传仓库模块，无启停/恢复/远端落盘或业务修改。正常审批执行前拒绝，理由是现有授权仅具体覆盖v4，新探针需明确批准。没有SSH执行或结果文件，没有重试/换通道。精确范围qa/native-vnc-resume-20260930/launch-shape-approval.md。
+
+实现仍3dcf5c25，其1227回归及真实联合验证保持已记录范围，未重跑；原__pycache__保留。仅更新现场事实与恢复点。下一步批准该探针后取得具体条件，再沿原方案修复或确认真实前置限制。整项Task4–6/新鲜窗口/部署未完成；无push/PR/merge/deploy、无运行中测试、单路无代理、自动化暂停。旧“v4未执行”恢复点被本段取代；项目授权没有失效。
+
+
 ### 2026-10-01 精确Python用户路径修复3dcf5c25已验证；v4现场复核受系统审批阻塞
 
 已批准v3实际执行，manager通过、source因要求整个/root/.local缺失而拒绝。获准标准stat仅采七个固定路径元数据：.local是root:root755目录，lib和其下Python user-site、zip及pyvenv.cfg均ENOENT。官方缓存Ubuntu Python3.10.12 site.py证实真实用户包点为.local/lib/python3.10/site-packages，.local其他应用数据不进入该搜索点。
