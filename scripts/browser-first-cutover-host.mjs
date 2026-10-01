@@ -38,6 +38,7 @@ import {
   readFirstCutoverCloudManagers,
   readFirstCutoverCloudRecoveryCensus,
   readFirstCutoverCloudRecoverySources,
+  readFirstCutoverCloudRecoveryVacancy,
   retireLegacyRuntime,
   validateLegacyWorkBoundary,
   validateOwnedLegacyFence,
@@ -1543,6 +1544,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
     readCloudManagers: readFirstCutoverCloudManagers,
     readCloudRecoveryCensus: readFirstCutoverCloudRecoveryCensus,
     readCloudRecoverySources: readFirstCutoverCloudRecoverySources,
+    readCloudRecoveryVacancy: readFirstCutoverCloudRecoveryVacancy,
     readFenceReceipts: async () => [],
     // Trusted live session handles, never a CLI/uploaded process allowlist.
     readExecutionIdentities: async () => [],
@@ -1571,6 +1573,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           'CUTOVER_CLOUD_VNC_NATIVE_SOURCE_UNPROVEN',
           'CUTOVER_CLOUD_RECOVERY_CENSUS_UNPROVEN',
           'CUTOVER_CLOUD_SOURCES_UNPROVEN',
+          'CUTOVER_CLOUD_VACANCY_UNPROVEN',
         ].includes(value)
       )
         code = value;
@@ -1711,7 +1714,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         approved[0].digest !== createHash('sha256').update(JSON.stringify(metadata)).digest('hex')
       )
         reject();
-      return observed.observedAtMs;
+      return observed;
     };
     const bindCloudRows = (rows, pair, captureStoppedPmId) => {
       if (!originalCloudScope) return [];
@@ -1827,13 +1830,14 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         const raw = structuredClone(await io.readCloudManagers());
         const pair = structuredClone(await io.readPair());
         bindCloudRows(raw, pair);
-        const observedAtMs = await compareSources(raw, pair);
+        const observed = await compareSources(raw, pair);
+        const observedAtMs = observed.observedAtMs;
         bindCloudRows(structuredClone(await io.readCloudManagers()), pair);
         if (!isDeepStrictEqual(before, await effects())) fail();
         const now = checkClock();
         const age = now - observedAtMs;
         if (age < 0 || age > 60000 || now >= executionSite.maintenanceEndsAtMs) fail();
-        return observedAtMs;
+        return observed;
       } catch (error) {
         await report(error, 'cloud-sources', 'native-source-gate');
         fail();
@@ -2056,8 +2060,33 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           )
             fail();
           step = 'recovery-native-prerequisites';
-          await sourceGate();
-          // INCOMPLETE: there is no native BOTH-role source/display/capability
+          const sources = await sourceGate();
+          const vacancyBegan = checkClock();
+          const vacancy = structuredClone(
+            await io.readCloudRecoveryVacancy({ sources, maintenanceEndsAtMs }),
+          );
+          const { observedAtMs: _sourceTime, ...sourceMaterial } = sources;
+          if (
+            !vacancy ||
+            Object.keys(vacancy).sort().join(',') !==
+              'bootId,contextDigest,hostname,observationDigest,observedAtMs,purpose,sourcesDigest' ||
+            vacancy.purpose !== 'cloud-recovery-vacancy-observation' ||
+            vacancy.hostname !== originalHost.hostname ||
+            vacancy.bootId !== originalHost.bootId ||
+            !fresh(vacancy.observedAtMs) ||
+            vacancy.observedAtMs < vacancyBegan ||
+            vacancy.sourcesDigest !==
+              createHash('sha256').update(JSON.stringify(sourceMaterial)).digest('hex') ||
+            !/^[a-f0-9]{64}$/.test(vacancy.contextDigest ?? '') ||
+            !/^[a-f0-9]{64}$/.test(vacancy.observationDigest ?? '') ||
+            !isDeepStrictEqual(record, await effects()) ||
+            checkClock() >= maintenanceEndsAtMs
+          )
+            throw new Error('CUTOVER_CLOUD_VACANCY_UNPROVEN');
+          // INCOMPLETE: vacancy is not a reservation or complete capability
+          // preflight. It cannot authorize either intent or replace a source
+          // loader audit, old-tree ownership, or subsequent native recovery ACK.
+          // There is no complete native BOTH-role source/display/capability
           // preflight yet. Post-restoration readers cannot supply that fact on
           // stopped services. Keep BOTH intents/effects closed; do not treat the
           // census, an injected boolean or a current executable as authorization.
@@ -2094,7 +2123,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           // A bounded native hash read can still consume the fence's whole
           // freshness window. Read the fence afterwards, then age both proofs
           // after the last asynchronous journal check, immediately before use.
-          const sourceTime = refreshSources ? await sourceGate() : null;
+          const sourceTime = refreshSources ? (await sourceGate()).observedAtMs : null;
           const fence = await operations.verifyFence();
           const interrupted = await validateOwnedLegacyFence(fence, {
             now: checkClock,

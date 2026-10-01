@@ -484,6 +484,130 @@ for (const [name, environment, allowed] of [
     }
   });
 }
+async function recoveryVacancyFixture() {
+  const f = await recoveryContextFixture();
+  for (const c of f.input.configs) c.config.status = 'stopped';
+  f.sources = await firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io);
+  const rows = f.input.configs.map((c) => ({
+    name: c.name,
+    pm_id: c.pmId,
+    pid: 0,
+    pm2_env: structuredClone(c.config),
+  }));
+  f.io.rpc = async (method) => {
+    assert.equal(method, 'getMonitorData');
+    return structuredClone(rows);
+  };
+  for (const ns of ['mnt', 'net', 'user']) f.namespaces.set(`/proc/self/ns/${ns}`, `${ns}:[10]`);
+  f.dirs.add('/tmp');
+  f.dirs.add('/tmp/.X11-unix');
+  f.modes.set('/tmp', 0o41777);
+  f.modes.set('/tmp/.X11-unix', 0o41777);
+  f.add(
+    '/proc/self/net/unix',
+    'Num RefCount Protocol Flags Type St Inode Path\n00000000: 00000002 00000000 00010000 0001 01 123 @unrelated-private-name\n',
+  );
+  const header =
+    '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n';
+  f.add('/proc/self/net/tcp', header);
+  f.add('/proc/self/net/tcp6', header);
+  const tcp = (port, ipv6 = false, state = '0A') =>
+    `0: ${'0'.repeat(ipv6 ? 32 : 8)}:${port.toString(16).toUpperCase().padStart(4, '0')} ${'0'.repeat(ipv6 ? 32 : 8)}:0000 ${state} 00000000:00000000 00:00000000 00000000 0 0 123 1\n`;
+  return { ...f, rows, header, tcp, request: { sources: f.sources, maintenanceEndsAtMs: 15000 } };
+}
+test('cloud recovery vacancy observes both stopped roles and fixed native endpoints without effects', async () => {
+  const f = await recoveryVacancyFixture();
+  f.data.set('/proc/self/net/tcp', Buffer.from(f.header + f.tcp(8080)));
+  const result = await firstRuntime.readFirstCutoverCloudRecoveryVacancy(f.request, f.io);
+  assert.equal(result.purpose, 'cloud-recovery-vacancy-observation');
+  assert.equal(result.hostname, f.sources.hostname);
+  assert.equal(result.bootId, f.sources.bootId);
+  assert.match(result.observationDigest, /^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(result).includes('private-name'), false);
+  assert.equal(Object.hasOwn(result, 'recoveryReady'), false);
+});
+for (const fault of [
+  'platform',
+  'extra',
+  'missing-deadline',
+  'expired',
+  'manager-live',
+  'manager-status',
+  'manager-id',
+  'manager-config',
+  'manager-drift',
+  'self-net',
+  'self-mount',
+  'daemon-drift',
+  'lock',
+  'lock-symlink',
+  'socket',
+  'tmp-symlink',
+  'tmp-writable',
+  'abstract',
+  'filesystem-unix',
+  'tcp-5901',
+  'tcp-6080',
+  'tcp-9223',
+  'tcp6',
+  'tcp-timewait',
+  'tcp-malformed',
+  'unix-malformed',
+  'missing-net-table',
+  'net-oversized',
+  'endpoint-drift',
+  'clock-backward',
+]) {
+  test(`cloud recovery vacancy refuses ${fault} without dispatch`, async () => {
+    const f = await recoveryVacancyFixture();
+    if (fault === 'platform') f.io.platform = 'darwin';
+    if (fault === 'extra') f.request.approved = true;
+    if (fault === 'missing-deadline') Reflect.deleteProperty(f.request, 'maintenanceEndsAtMs');
+    if (fault === 'expired') f.request.maintenanceEndsAtMs = 1000;
+    if (fault === 'manager-live') f.rows[0].pid = 41;
+    if (fault === 'manager-status') f.rows[0].pm2_env.status = 'online';
+    if (fault === 'manager-id') f.rows[0].pm_id = f.rows[0].pm2_env.pm_id = 9;
+    if (fault === 'manager-config') f.rows[0].pm2_env.env.PRIVATE_VALUE = 'drift';
+    if (fault === 'self-net') f.namespaces.set('/proc/self/ns/net', 'net:[11]');
+    if (fault === 'self-mount') f.namespaces.set('/proc/self/ns/mnt', 'mnt:[11]');
+    if (fault === 'daemon-drift') f.data.set('/proc/40/attr/current', Buffer.from('restricted'));
+    if (fault === 'lock') f.add('/tmp/.X98-lock', '42\n');
+    if (fault === 'lock-symlink') f.links.set('/tmp/.X98-lock', '/nonexistent');
+    if (fault === 'socket') f.add('/tmp/.X11-unix/X98', 'occupied');
+    if (fault === 'tmp-symlink') f.links.set('/tmp/.X11-unix', '/other');
+    if (fault === 'tmp-writable') f.modes.set('/tmp', 0o40777);
+    if (['abstract', 'filesystem-unix'].includes(fault))
+      f.add(
+        '/proc/self/net/unix',
+        `Num RefCount Protocol Flags Type St Inode Path\n00000000: 00000002 00000000 00010000 0001 01 123 ${fault === 'abstract' ? '@' : ''}/tmp/.X11-unix/X98\n`,
+      );
+    if (/^tcp-\d+$/.test(fault))
+      f.add('/proc/self/net/tcp', f.header + f.tcp(Number(fault.slice(4))));
+    if (fault === 'tcp6') f.add('/proc/self/net/tcp6', f.header + f.tcp(6080, true));
+    if (fault === 'tcp-timewait') f.add('/proc/self/net/tcp', f.header + f.tcp(9223, false, '06'));
+    if (fault === 'tcp-malformed') f.add('/proc/self/net/tcp', `${f.header}0: truncated\n`);
+    if (fault === 'unix-malformed') f.add('/proc/self/net/unix', 'invalid table\n');
+    if (fault === 'missing-net-table') f.data.delete('/proc/self/net/tcp6');
+    if (fault === 'net-oversized') f.add('/proc/self/net/unix', 'x'.repeat(1048577));
+    let calls = 0;
+    const rpc = f.io.rpc;
+    f.io.rpc = async (...a) => {
+      calls++;
+      if (calls === 2 && fault === 'manager-drift') f.rows[1].pm2_env.restart_time++;
+      if (calls === 2 && fault === 'endpoint-drift') f.add('/tmp/.X98-lock', '43\n');
+      return rpc(...a);
+    };
+    if (fault === 'clock-backward') {
+      let now = 1000;
+      f.io.now = () => now--;
+    }
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudRecoveryVacancy(f.request, f.io),
+      /CUTOVER_CLOUD_VACANCY_UNPROVEN/,
+    );
+  });
+}
+
 async function privatePolicyFixture() {
   const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'cloud-policy-')));
   const physical = (p) => join(root, p);

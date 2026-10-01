@@ -930,6 +930,253 @@ export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}
   }
 }
 
+/** Read-only fixed-endpoint vacancy in the daemon's initial namespaces. This
+ * observes two stopped registrations and bounded empty endpoint samples; it is
+ * not a reservation, old-process census, dynamic-loader audit or restore permit.
+ */
+export async function readFirstCutoverCloudRecoveryVacancy(input, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_VACANCY_UNPROVEN');
+  };
+  try {
+    if (
+      Object.keys(input ?? {})
+        .sort()
+        .join(',') !== 'maintenanceEndsAtMs,sources' ||
+      io.platform !== 'linux' ||
+      io.uid !== 0
+    )
+      reject();
+    const { sources, maintenanceEndsAtMs } = structuredClone(input);
+    if (!Number.isSafeInteger(maintenanceEndsAtMs)) reject();
+    validateFirstCutoverCloudSources(sources, { scope: sources.roles, observed: true });
+    const sha = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+    const began = io.now();
+    let last = began;
+    const clock = () => {
+      const now = io.now();
+      if (
+        !Number.isSafeInteger(now) ||
+        now < 0 ||
+        now < last ||
+        now - began > 15000 ||
+        now >= maintenanceEndsAtMs ||
+        sources.observedAtMs > now ||
+        now - sources.observedAtMs > 60000
+      )
+        reject();
+      last = now;
+      return now;
+    };
+    clock();
+    const context = await readFirstCutoverCloudRecoveryContext({ sources }, io);
+    clock();
+    const managers = async () => {
+      const rows = await readFirstCutoverCloudManagers(io);
+      clock();
+      if (
+        rows.some(
+          (r, i) =>
+            r.name !== sources.roles[i].name ||
+            r.pm_id !== sources.roles[i].pmId ||
+            r.pid !== 0 ||
+            r.pm2_env.status !== 'stopped' ||
+            cutoverRegistrationConfigDigest(r.pm2_env) !== sources.roles[i].configDigest,
+        )
+      )
+        reject();
+      return rows;
+    };
+    const before = await managers();
+    const namespaces = async () => {
+      const result = {};
+      for (const name of ['mnt', 'net', 'user']) {
+        clock();
+        const own = await io.readlink(`/proc/self/ns/${name}`);
+        if (
+          !new RegExp(`^${name}:\\[\\d+\\]$`).test(own) ||
+          own !== (await io.readlink(`/proc/${context.daemon.pid}/ns/${name}`)) ||
+          own !== (await io.readlink(`/proc/1/ns/${name}`))
+        )
+          reject();
+        result[name] = own;
+      }
+      return result;
+    };
+    const metadata = (s) =>
+      Object.fromEntries(['dev', 'ino', 'uid', 'gid', 'mode'].map((k) => [k, s[k]]));
+    const absent = async (path) => {
+      clock();
+      try {
+        await io.lstat(path);
+      } catch (e) {
+        if (e.code === 'ENOENT') return;
+        throw e;
+      }
+      reject();
+    };
+    const parents = async () => {
+      const result = [];
+      for (const path of ['/tmp', '/tmp/.X11-unix']) {
+        clock();
+        let st;
+        try {
+          st = await io.lstat(path);
+        } catch (e) {
+          if (path === '/tmp/.X11-unix' && e.code === 'ENOENT') {
+            result.push({ path, absent: true });
+            continue;
+          }
+          throw e;
+        }
+        const mode = st.mode & 0o7777;
+        if (
+          !st.isDirectory() ||
+          st.uid !== 0 ||
+          mode & 0o6000 ||
+          (mode & 0o022 && !(mode & 0o1000)) ||
+          (await io.realpath(path)) !== path
+        )
+          reject();
+        result.push({ path, ...metadata(st) });
+      }
+      return result;
+    };
+    const bounded = async (path) => {
+      clock();
+      const h = await io.open(
+        path,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      try {
+        const before = await h.stat();
+        if (
+          !before.isFile() ||
+          before.uid !== 0 ||
+          !isDeepStrictEqual(metadata(before), metadata(await io.lstat(path)))
+        )
+          reject();
+        const bytes = Buffer.alloc(1048577);
+        let size = 0;
+        while (size < bytes.length) {
+          clock();
+          const { bytesRead: n } = await h.read(bytes, size, bytes.length - size, size);
+          if (!Number.isSafeInteger(n) || n < 0 || n > bytes.length - size) reject();
+          if (!n) break;
+          size += n;
+        }
+        if (
+          size > 1048576 ||
+          !isDeepStrictEqual(metadata(before), metadata(await h.stat())) ||
+          !isDeepStrictEqual(metadata(before), metadata(await io.lstat(path)))
+        )
+          reject();
+        const raw = bytes.subarray(0, size);
+        const text = raw.toString('utf8');
+        if (!Buffer.from(text).equals(raw) || text.includes('\0') || !text.endsWith('\n')) reject();
+        return text;
+      } finally {
+        await h.close();
+      }
+    };
+    const sample = async () => {
+      const namespace = await namespaces();
+      const directories = await parents();
+      await absent('/tmp/.X98-lock');
+      await absent('/tmp/.X11-unix/X98');
+      const tables = {};
+      for (const name of ['unix', 'tcp', 'tcp6']) {
+        const text = await bounded(`/proc/self/net/${name}`);
+        const rows = text.trimEnd().split('\n');
+        if (rows.length > 16385) reject();
+        const header = rows.shift().trim().split(/\s+/).join(' ');
+        if (name === 'unix') {
+          if (header !== 'Num RefCount Protocol Flags Type St Inode Path') reject();
+          for (const row of rows) {
+            const m =
+              /^\s*[0-9a-fA-F]{1,16}:\s+[0-9a-fA-F]{8}\s+[0-9a-fA-F]{8}\s+[0-9a-fA-F]{8}\s+[0-9a-fA-F]{4}\s+[0-9a-fA-F]{2}\s+\d+(?:\s+(.*))?$/.exec(
+                row,
+              );
+            if (!m || ['/tmp/.X11-unix/X98', '@/tmp/.X11-unix/X98'].includes(m[1])) reject();
+          }
+        } else {
+          if (
+            !/^sl local_address (?:rem_address|remote_address) st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode$/.test(
+              header,
+            )
+          )
+            reject();
+          const address = new RegExp(`^[0-9a-fA-F]{${name === 'tcp' ? 8 : 32}}:([0-9a-fA-F]{4})$`);
+          for (const row of rows) {
+            const c = row.trim().split(/\s+/);
+            const local = address.exec(c[1] ?? '');
+            if (
+              c.length < 10 ||
+              !/^\d+:$/.test(c[0]) ||
+              !local ||
+              !address.test(c[2]) ||
+              !/^[0-9a-fA-F]{2}$/.test(c[3]) ||
+              !/^[0-9a-fA-F]{8}:[0-9a-fA-F]{8}$/.test(c[4]) ||
+              !/^[0-9a-fA-F]{2}:[0-9a-fA-F]{8}$/.test(c[5]) ||
+              !/^[0-9a-fA-F]{8}$/.test(c[6]) ||
+              !c.slice(7, 10).every((v) => /^\d+$/.test(v))
+            )
+              reject();
+            // Any local row counts, including TIME_WAIT. No assumed reuse flag,
+            // listener-only interpretation, or IPv4-only vacancy shortcut.
+            if ([5901, 6080, 9223].includes(Number.parseInt(local[1], 16))) reject();
+          }
+        }
+        tables[name] = sha(text);
+      }
+      if (
+        !isDeepStrictEqual(namespace, await namespaces()) ||
+        !isDeepStrictEqual(directories, await parents())
+      )
+        reject();
+      await absent('/tmp/.X98-lock');
+      await absent('/tmp/.X11-unix/X98');
+      return { namespace, directories, tables };
+    };
+    const first = await sample();
+    if (!isDeepStrictEqual(before, await managers())) reject();
+    const afterContext = await readFirstCutoverCloudRecoveryContext({ sources }, io);
+    const { observedAtMs: _beforeTime, ...beforeIdentity } = context;
+    const { observedAtMs: _afterTime, ...afterIdentity } = afterContext;
+    if (!isDeepStrictEqual(beforeIdentity, afterIdentity)) reject();
+    const second = await sample();
+    if (
+      !isDeepStrictEqual(first.namespace, second.namespace) ||
+      !isDeepStrictEqual(first.directories, second.directories) ||
+      !isDeepStrictEqual(before, await managers())
+    )
+      reject();
+    return {
+      purpose: 'cloud-recovery-vacancy-observation',
+      hostname: sources.hostname,
+      bootId: sources.bootId,
+      sourcesDigest: context.sourcesDigest,
+      contextDigest: context.daemon.contextDigest,
+      observationDigest: sha({
+        context: beforeIdentity,
+        managersDigest: sha(before),
+        first,
+        second,
+      }),
+      observedAtMs: clock(),
+    };
+  } catch {
+    reject();
+  }
+}
+
 /** Prepare only the approved private policy artifact under the owned attempt.
  * Never alter global policy or a profile, adopt an existing attempt directory,
  * or retry/clean up a partial write. The original stage guard owns this effect;

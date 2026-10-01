@@ -1564,6 +1564,10 @@ async function candidateFixture(
 
 for (const fault of [
   'native-unavailable',
+  'vacancy-boolean',
+  'vacancy-stale',
+  'vacancy-source',
+  'vacancy-error',
   'census',
   'caller-proof',
   'concurrent',
@@ -1574,6 +1578,7 @@ for (const fault of [
   test(`original cloud recovery preflight refuses ${fault} before either restore intent or effect`, async (t) => {
     let censusReads = 0;
     let nativeReads = 0;
+    let vacancyReads = 0;
     const interrupted = fault.startsWith('v2-');
     const workFor = (record) => ({
       inventoryDigest: digest,
@@ -1627,6 +1632,26 @@ for (const fault of [
                   ]),
                 ),
               })),
+            };
+          },
+          readCloudRecoveryVacancy: async ({ sources, maintenanceEndsAtMs }) => {
+            vacancyReads++;
+            assert.equal(maintenanceEndsAtMs, 8000);
+            assert.equal(sources.roles.length, 2);
+            if (fault === 'vacancy-error') throw Error('CUTOVER_CLOUD_VACANCY_UNPROVEN');
+            if (fault === 'vacancy-boolean') return true;
+            const { observedAtMs: _time, ...material } = sources;
+            return {
+              purpose: 'cloud-recovery-vacancy-observation',
+              hostname: sources.hostname,
+              bootId: sources.bootId,
+              observedAtMs: fault === 'vacancy-stale' ? -60000 : 1000,
+              sourcesDigest:
+                fault === 'vacancy-source'
+                  ? '0'.repeat(64)
+                  : createHash('sha256').update(JSON.stringify(material)).digest('hex'),
+              contextDigest: '1'.repeat(64),
+              observationDigest: '2'.repeat(64),
             };
           },
           readCloudRecovery: async () => {
@@ -1692,6 +1717,7 @@ for (const fault of [
     assert.equal(leafReads, fault === 'caller-proof' ? 0 : 1);
     const expectedCensusReads = ['caller-proof', 'v2-replay'].includes(fault) ? 0 : 1;
     assert.equal(censusReads, expectedCensusReads);
+    assert.equal(vacancyReads, expectedCensusReads && fault !== 'census' ? 1 : 0);
     assert.equal(nativeReads, 0, 'post-effect proof is not pre-dispatch readiness');
     assert.equal(
       recoverySourceReads,
@@ -1709,7 +1735,12 @@ for (const fault of [
             : 'recovery-native-prerequisites',
     );
     if (expectedCensusReads && fault !== 'census')
-      assert.equal(r.f.rejections.at(-1).code, 'CUTOVER_CLOUD_VNC_NATIVE_SOURCE_UNPROVEN');
+      assert.equal(
+        r.f.rejections.at(-1).code,
+        fault.startsWith('vacancy-')
+          ? 'CUTOVER_CLOUD_VACANCY_UNPROVEN'
+          : 'CUTOVER_CLOUD_VNC_NATIVE_SOURCE_UNPROVEN',
+      );
     await nested();
     assert.equal(
       censusReads,

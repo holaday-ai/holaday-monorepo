@@ -25,6 +25,7 @@ import { once } from 'node:events';
 import * as fs from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
+import { createServer as createTcpServer } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import {
@@ -39,6 +40,7 @@ import {
   readFirstCutoverCloudRecovery,
   readFirstCutoverCloudRecoveryCensus,
   readFirstCutoverCloudRecoveryContext,
+  readFirstCutoverCloudRecoveryVacancy,
   restoreFirstCutoverCloudBrowser,
 } from '../browser-first-cutover-runtime.mjs';
 import { acquireReleaseJournal } from '../browser-maintenance-journal.mjs';
@@ -325,7 +327,7 @@ async function restoreSameRegistration(recovery) {
     attempt,
     pmId: stoppedManager.pm_id,
     stoppedConfigDigest: cutoverRegistrationConfigDigest(stoppedManager.pm2_env),
-    maintenanceEndsAtMs: Date.now() + (jointRecovery ? 120000 : 60000),
+    maintenanceEndsAtMs: Date.now() + (jointRecovery ? 240000 : 60000),
   };
   const io = {
     journal: restoreJournal,
@@ -355,8 +357,81 @@ async function restoreSameRegistration(recovery) {
   };
   restoreMaintenanceEndsAtMs = input.maintenanceEndsAtMs;
   if (jointRecovery) {
-    const sources = await readJointSources(attempt);
+    let sources = await readJointSources(attempt);
     const context = await readFirstCutoverCloudRecoveryContext({ sources });
+    // Occupancy refusal uses an actual disposable listener, before either
+    // recovery intent. Closing this canary never touches an old service.
+    const busy = createTcpServer();
+    await new Promise((resolve, reject) => {
+      busy.once('error', reject);
+      busy.listen(9223, '127.0.0.1', resolve);
+    });
+    try {
+      await assert.rejects(
+        readFirstCutoverCloudRecoveryVacancy({
+          sources,
+          maintenanceEndsAtMs: input.maintenanceEndsAtMs,
+        }),
+        /CUTOVER_CLOUD_VACANCY_UNPROVEN/,
+      );
+    } finally {
+      await new Promise((resolve, reject) =>
+        busy.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+    // The old QA CDP connection can leave a kernel TIME_WAIT row after the
+    // process is gone. Keep the product refusal; wait only for that known
+    // passive state inside this disposable fixture, before any restore intent.
+    const vacancyWaitBegan = Date.now();
+    const vacancyWaitUntil = Math.min(vacancyWaitBegan + 75000, input.maintenanceEndsAtMs - 120000);
+    let observedTimeWait = false;
+    for (;;) {
+      const retained = [];
+      for (const table of ['tcp', 'tcp6']) {
+        const raw = await fs.readFile(`/proc/self/net/${table}`, 'utf8');
+        assert.ok(Buffer.byteLength(raw) <= 1048576);
+        for (const line of raw.trim().split('\n').slice(1)) {
+          const row = line.trim().split(/\s+/);
+          const port = Number.parseInt(row[1].split(':').at(-1), 16);
+          if ([5901, 6080, 9223].includes(port))
+            retained.push({ port, state: row[3], inode: row[9] });
+        }
+      }
+      if (!retained.length) break;
+      assert.ok(
+        retained.every((row) => row.state === '06' && row.inode === '0'),
+        'only kernel TIME_WAIT may be awaited',
+      );
+      observedTimeWait = true;
+      assert.ok(
+        Date.now() < vacancyWaitUntil,
+        'fixed passive expiry budget; never extend the original window',
+      );
+      await sleep(500);
+    }
+    sources = await readJointSources(attempt);
+    console.log(
+      JSON.stringify({
+        marker: 'QA_KERNEL_TIMEWAIT_EXPIRED',
+        observedTimeWait,
+        elapsedMs: Date.now() - vacancyWaitBegan,
+        productionWaitOrPermission: false,
+      }),
+    );
+    const vacancy = await readFirstCutoverCloudRecoveryVacancy({
+      sources,
+      maintenanceEndsAtMs: input.maintenanceEndsAtMs,
+    });
+    assert.equal(vacancy.contextDigest, context.daemon.contextDigest);
+    assert.equal(vacancy.sourcesDigest, context.sourcesDigest);
+    console.log(
+      JSON.stringify({
+        marker: 'CLOUD_NATIVE_RECOVERY_VACANCY_OBSERVED',
+        actualOccupiedTcpRefused: true,
+        beforeRecoveryIntent: true,
+        productionPreflight: false,
+      }),
+    );
     assert.equal(context.hostname, sources.hostname);
     assert.equal(context.bootId, sources.bootId);
     assert.equal((await restoreJournal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 4);
