@@ -11,6 +11,7 @@
 // the browser runs with all capability sets cleared and no-new-privileges.
 // --scoped-pm2 adds real numeric PM2 stops before and after recovery. Its daemon
 // and unrelated app are disposable; production startup scripts are NOT executed.
+// --scoped-pm2-vnc additionally measures real VNC recovery against the retained headed proof.
 // --scoped-pm2-denied requires a container WITHOUT SYS_ADMIN and checks that
 // failed recovery stays failed, with no PM2 restart or direct-browser fallback.
 // --scoped-pm2-display-occupied uses a QA-owned foreign :98 after old-group stop;
@@ -32,12 +33,18 @@ import {
 } from '../browser-cutover-evidence.mjs';
 import {
   firstCutoverCloudBrowserRecoveryLaunch,
+  firstCutoverCloudVncRecoveryMaterial,
   readFirstCutoverCloudBrowserRecovery,
   readFirstCutoverCloudRecovery,
   readFirstCutoverCloudRecoveryCensus,
   restoreFirstCutoverCloudBrowser,
 } from '../browser-first-cutover-runtime.mjs';
 import { acquireReleaseJournal } from '../browser-maintenance-journal.mjs';
+import {
+  observeJointVnc,
+  prepareJointVnc,
+  readJointSources,
+} from './browser-cloud-joint-recovery-linux.mjs';
 await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
 assert.ok(
@@ -48,6 +55,7 @@ assert.ok(
         '--policy-probe',
         '--scoped-policy',
         '--scoped-pm2',
+        '--scoped-pm2-vnc',
         '--scoped-pm2-denied',
         '--scoped-pm2-display-occupied',
         '--orphan-handoff-failures',
@@ -83,7 +91,9 @@ const appBlank = process.argv[2] === '--app-blank';
 const policyProbe = process.argv[2] === '--policy-probe';
 const deniedRecovery = process.argv[2] === '--scoped-pm2-denied';
 const occupiedDisplay = process.argv[2] === '--scoped-pm2-display-occupied';
-const scopedPm2 = process.argv[2] === '--scoped-pm2' || deniedRecovery || occupiedDisplay;
+const jointRecovery = process.argv[2] === '--scoped-pm2-vnc';
+const scopedPm2 =
+  process.argv[2] === '--scoped-pm2' || jointRecovery || deniedRecovery || occupiedDisplay;
 const scopedPolicy = process.argv[2] === '--scoped-policy' || scopedPm2;
 if (deniedRecovery) {
   const status = await fs.readFile('/proc/self/status', 'utf8');
@@ -167,7 +177,13 @@ let physicalStops = 0;
 let recoveryVisits;
 const retiredIdentities = [];
 const qaCrashpadCleanup = new Map();
-const pm2Home = scopedPm2 ? await fs.mkdtemp('/tmp/holaday-browser-pm2-') : undefined;
+const pm2Home = jointRecovery
+  ? '/root/.pm2'
+  : scopedPm2
+    ? await fs.mkdtemp('/tmp/holaday-browser-pm2-')
+    : undefined;
+if (jointRecovery) await fs.mkdir(pm2Home, { mode: 0o700 });
+let jointVnc;
 if (scopedPm2) {
   // An absent daemon must stay absent. The default product reader, with only
   // the disposable socket path selected, may not create a PM2 pid/socket/file.
@@ -189,7 +205,21 @@ const pm2 = async (...argv) =>
     await promisify(execFile)(
       '/opt/node22/bin/node',
       ['/opt/node22/lib/node_modules/pm2/bin/pm2', ...argv],
-      { env: { ...process.env, PM2_HOME: pm2Home, DISPLAY: ':98' }, maxBuffer: 8 * 1024 * 1024 },
+      {
+        env: {
+          ...(jointRecovery
+            ? {
+                PATH: '/usr/bin:/bin',
+                HOME: '/root',
+                NODE_OPTIONS: '--max-old-space-size=192',
+                UV_THREADPOOL_SIZE: '1',
+              }
+            : process.env),
+          PM2_HOME: pm2Home,
+          DISPLAY: ':98',
+        },
+        maxBuffer: 8 * 1024 * 1024,
+      },
     )
   ).stdout;
 let managed;
@@ -227,9 +257,11 @@ async function restoreSameRegistration(recovery) {
   const scope = [
     {
       name: 'holaday-vnc',
-      pmId: stoppedManager.pm_id + 100,
-      scopeDigest: '1'.repeat(64),
-      recoveryDigest: '2'.repeat(64),
+      pmId: jointVnc?.stopped.pm_id ?? stoppedManager.pm_id + 100,
+      scopeDigest: jointVnc ? sha(jointVnc.oldTree) : '1'.repeat(64),
+      recoveryDigest: jointVnc
+        ? sha(firstCutoverCloudVncRecoveryMaterial({ attempt }))
+        : '2'.repeat(64),
     },
     {
       name: stoppedManager.name,
@@ -273,7 +305,7 @@ async function restoreSameRegistration(recovery) {
     attempt,
     pmId: stoppedManager.pm_id,
     stoppedConfigDigest: cutoverRegistrationConfigDigest(stoppedManager.pm2_env),
-    maintenanceEndsAtMs: Date.now() + 60000,
+    maintenanceEndsAtMs: Date.now() + (jointRecovery ? 120000 : 60000),
   };
   const io = {
     journal: restoreJournal,
@@ -897,6 +929,24 @@ async function launch(extra, privatePolicy, usePm2 = false) {
       (r) => r.name === 'holaday-chromium-headed',
     );
     assert.equal(matches.length, 1);
+    if (jointRecovery && matches[0].pm2_env.status !== 'online') {
+      const c = matches[0].pm2_env;
+      // This entire fixture owns only synthetic data in a disposable container.
+      // Capture bounded launch failures before --rm removes their evidence.
+      const log = await fs.readFile(c.pm_err_log_path, 'utf8').catch(() => 'unavailable');
+      const memory = await fs
+        .readFile('/sys/fs/cgroup/memory.events', 'utf8')
+        .catch(() => 'unavailable');
+      console.error(
+        JSON.stringify({
+          marker: 'QA_JOINT_HEADED_LAUNCH_FAILED',
+          status: c.status,
+          exitCode: c.exit_code,
+          errorTail: log.slice(-4096),
+          memoryEvents: memory,
+        }),
+      );
+    }
     assert.equal(matches[0].pm2_env.status, 'online');
     assert.equal(matches[0].pm2_env.autorestart, !privatePolicy);
     if (recovery) {
@@ -1104,6 +1154,7 @@ try {
     const row = JSON.parse(await pm2('jlist')).find((r) => r.name === 'qa-unrelated');
     unrelated = await processIdentity(row.pid);
     assert.ok(unrelated);
+    if (jointRecovery) jointVnc = await prepareJointVnc(pm2);
   }
   await until(async () =>
     fs.access('/tmp/.X11-unix/X98').then(
@@ -1178,6 +1229,7 @@ try {
   if (scopedPolicy && !scopedPm2) await retirePrimingDisplay();
   const before = visits;
   recoveryVisits = before;
+  if (jointRecovery) await readJointSources(attempt);
   if (policyProbe) {
     // Characterize policy in a disposable container ONLY. This is a global
     // location, not a production-safe per-service solution.
@@ -1413,6 +1465,31 @@ try {
         }),
       );
     }
+    if (jointRecovery) {
+      const headed = await readFirstCutoverCloudRecovery(
+        {
+          attempt,
+          name: 'holaday-chromium-headed',
+          pmId: managed.pmId,
+          beforeCensus: beforeRecoveryCensus,
+          restoreStartedAtMs,
+        },
+        observationIo,
+      );
+      await observeJointVnc({
+        attempt,
+        pm2,
+        journal: restoreJournal,
+        headed,
+        stoppedVnc: jointVnc.stopped,
+        maintenanceEndsAtMs: restoreMaintenanceEndsAtMs,
+        checkOutside: async () => {
+          await assertIndependentDisplay();
+          assert.equal(await sameLive(unrelated), true);
+          assert.equal(visits, before, 'joint VNC observation must not replay old HTTP action');
+        },
+      });
+    }
     const policyFile = `${privatePolicy}/recovery.json`;
     const originalMode = (await fs.stat(policyFile)).mode & 0o777;
     await fs.chmod(policyFile, 0o666);
@@ -1427,7 +1504,9 @@ try {
       browser.pid,
     );
     console.log(
-      'CLOUD_SAME_ID_RESTORE_PASS: original journal intent, single default RPC, same numeric registration and restart count; independent procfs/private policy observation. No physical-recovery ACK or candidate open.',
+      jointRecovery
+        ? 'CLOUD_JOINT_COMPONENT_ONLY: fixture headed ACK follows actual native proof; no full-site acceptance, VNC ACK or candidate open.'
+        : 'CLOUD_SAME_ID_RESTORE_PASS: original journal intent, single default RPC, same numeric registration and restart count; independent procfs/private policy observation. No physical-recovery ACK or candidate open.',
     );
   }
   const initial = await cdp('Target.getTargets');

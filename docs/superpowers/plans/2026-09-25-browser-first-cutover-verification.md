@@ -1,5 +1,18 @@
 # 浏览器首次切换验收记录
 
+### 2026-10-01 原默认来源与headed+VNC真实联合观察通过；整项仍未验收
+
+本轮基于41dfaf24，补齐精确root:root mount4755、procps pkill→/usr/bin/pgrep及websockify角色cwd三个真实兼容缺口。保留来源字节/权限/路径/漂移、完整进程树、原始census、加载inode、双采样socket和新鲜度约束；仅websockify及直接handler使用固定/usr/share/novnc，bash/x11vnc保持原注册cwd。新增17个source及5个cwd拒绝测试；cwd旧实现4个正例RED，修复后定向49/49 GREEN。最终原七模块Linux回归1207/1207、零失败零跳过；五文件Biome及git diff --check通过。仅作者范围审查，不是整分支独立审查。
+
+原headed夹具新增--scoped-pm2-vnc，真实PM2/Brave/Xvfb/x11vnc/Python websockify，真实默认source与两角色观察器，真实WS/RFB 0→1 handler，headed和VNC分别跨35秒Worker周期，完整树/注册/原始census及外部QA服务保持，原页面不重放，私有策略与持久QA cookie保留，两次实际停止/清理完成。最终joint-native-final.log退出0；前一轮带定位日志版本亦完整通过。临时dataURL/行号诊断已删除；只保留有界QA启动错误采样。整站备份/业务/candidate前提仍为合成；fixture ACK6只基于实际headed证明，不写VNC ACK8、不开放候选。
+
+QA限额：原ff58ba97镜像、network none、1CPU，回归512MiB/物理768MiB。已审Python源码及缓存体与公开包一致，包内mtime不同；只在一次性QA容器固定源码mtime，再由真实3.10.12生成并逐字节验证225字节cache。产品指纹规则未放宽，生产文件未改。Debian Xvfb/x11vnc与Ubuntu现场不宣称完全相同。保留一次headed启动status=stopped失败（joint-native-role-cwd.log）；其根因未证明，后加启动stderr/memory.events诊断，随后两轮通过，未引入自动重试。
+
+证据统一在.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/native-vnc-resume-20260930/native-packages/：native-joint-verification.json含五文件/最终日志SHA，author-review.md、linux-regression-final.log、joint-native-final.log和各轮RED/失败日志保留。原scripts/__pycache__保留。
+
+人类既有授权继续有效。远端473698字节诊断（SHA eac571d8...f7bdfe）仍遭系统自动审批阻塞，本轮未重试/换通道；现场manager/source仍unproven。两角色执行前能力/排他归属、原host恢复消费者/完整ACK及Task4–6整体演练、整分支审查和新鲜发布窗口仍未完成；host/classifier/CLI保持关闭。没有push/PR/merge/deploy/上线成功，自动化保持暂停，单路无代理。下一项须沿原方案补齐原生前置与现场事实，不得把本地组件通过当作允许发布。
+
+
 ## 当前结论：未完成，不能执行生产切换
 
 ### 2026-10-01 修正版已获准执行；manager仍拒绝，固定诊断载荷被系统阻止

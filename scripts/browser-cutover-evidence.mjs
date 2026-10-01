@@ -166,6 +166,14 @@ export function validateFirstCutoverCloudSources(value, { scope, observed = fals
     let total = 0;
     const paths = new Set();
     for (const file of value.files) {
+      // The fixed root bootstrap uses this exact tool before dropping caps.
+      // Preserve the measured mode; do not normalise it to an ordinary 0755 file.
+      const rootMount =
+        file?.path === '/usr/bin/mount' &&
+        file.resolvedPath === '/usr/bin/mount' &&
+        file.uid === 0 &&
+        file.gid === 0 &&
+        file.mode === 0o4755;
       if (
         !cloudSourceKeys(file, ['path', 'resolvedPath', 'uid', 'gid', 'mode', 'size', 'digest']) ||
         typeof file.path !== 'string' ||
@@ -176,7 +184,7 @@ export function validateFirstCutoverCloudSources(value, { scope, observed = fals
         file.gid < 0 ||
         !Number.isSafeInteger(file.mode) ||
         file.mode < 0 ||
-        file.mode > 0o777 ||
+        (file.mode > 0o777 && !rootMount) ||
         file.mode & 0o022 ||
         !Number.isSafeInteger(file.size) ||
         file.size < 0 ||
@@ -220,7 +228,9 @@ export function validateFirstCutoverCloudSources(value, { scope, observed = fals
           ? ['/bin/sh', '/usr/bin/sh', '/usr/bin/dash', '/usr/bin/bash']
           : file.path === '/usr/bin/python3'
             ? ['/usr/bin/python3', '/usr/bin/python3.10']
-            : [file.path];
+            : file.path === '/usr/bin/pkill'
+              ? ['/usr/bin/pkill', '/usr/bin/pgrep']
+              : [file.path];
       if (!allowedTargets.includes(file.resolvedPath)) reject();
       if (
         (packageFile ||

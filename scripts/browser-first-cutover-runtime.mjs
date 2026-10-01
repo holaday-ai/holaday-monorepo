@@ -59,7 +59,19 @@ export async function readFirstCutoverCloudRecoverySources(input, overrides = {}
   const stat = async (p) => {
     clock();
     const s = await io.lstat(p);
-    if (s.uid !== 0 || (!s.isSymbolicLink() && ((s.mode & 0o022) !== 0 || (s.mode & 0o7000) !== 0)))
+    // The fixed bootstrap invokes this root-owned mount as root BEFORE
+    // setpriv clears capabilities. Retain its distro setuid bit in the evidence;
+    // it does not change the caller UID. No other special mode/path is admitted.
+    const rootMount =
+      p === '/usr/bin/mount' &&
+      s.isFile() &&
+      s.uid === 0 &&
+      s.gid === 0 &&
+      (s.mode & 0o7777) === 0o4755;
+    if (
+      s.uid !== 0 ||
+      (!s.isSymbolicLink() && ((s.mode & 0o022) !== 0 || ((s.mode & 0o7000) !== 0 && !rootMount)))
+    )
       reject();
     const old = records.get(p);
     if (old && !sameStat(old, s)) reject();
@@ -178,7 +190,9 @@ export async function readFirstCutoverCloudRecoverySources(input, overrides = {}
         ? ['/bin/sh', '/usr/bin/sh', '/usr/bin/dash', '/usr/bin/bash']
         : p === '/usr/bin/python3'
           ? ['/usr/bin/python3', '/usr/bin/python3.10']
-          : [p];
+          : p === '/usr/bin/pkill'
+            ? ['/usr/bin/pkill', '/usr/bin/pgrep']
+            : [p];
     if (!allowed.includes(real)) reject();
     const before = await stat(real);
     if (
@@ -531,7 +545,9 @@ export async function readFirstCutoverCloudRecoverySources(input, overrides = {}
               absentPaths.push(p);
             }
           }
-          if (found !== `/usr/bin/${name}`) reject();
+          // PATH must select the exact executable already measured above.
+          if (found !== files.find((file) => file.path === `/usr/bin/${name}`)?.resolvedPath)
+            reject();
           selected.push([name, found]);
         }
       const args = i
@@ -1955,8 +1971,7 @@ async function readCloudVncRecovery(copy, io, context) {
       p.state !== 'live' ||
       !isDeepStrictEqual(p.uids, [0, 0, 0, 0]) ||
       p.cgroup !== root.cgroup ||
-      p.mountNamespace !== root.mountNamespace ||
-      p.cwd !== vnc.pm2_env.pm_cwd
+      p.mountNamespace !== root.mountNamespace
     )
       reject();
   const python = sources.files.find((f) => f.path === '/usr/bin/python3')?.resolvedPath;
@@ -1971,6 +1986,11 @@ async function readCloudVncRecovery(copy, io, context) {
   const web = one((p) => p.ppid === root.pid && p.exe === python);
   const handlers = processes.filter((p) => p.ppid === web.pid && p.exe === python);
   if (processes.length !== 4 + handlers.length) reject();
+  // websockify 0.10.0 chdirs to its fixed --web root before serving;
+  // forked handlers inherit it. Shell/x11vnc retain the registration cwd.
+  for (const p of processes)
+    if (p.cwd !== (p === web || handlers.includes(p) ? '/usr/share/novnc' : vnc.pm2_env.pm_cwd))
+      reject();
   const args = new Map([
     [root.pid, ['bash', material.command]],
     [supervisor.pid, ['bash', material.command]],

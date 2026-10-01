@@ -4,7 +4,10 @@ import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { cutoverRegistrationConfigDigest } from './browser-cutover-evidence.mjs';
+import {
+  cutoverRegistrationConfigDigest,
+  validateFirstCutoverCloudSources,
+} from './browser-cutover-evidence.mjs';
 import {
   captureLegacyRuntime,
   createLegacyProducerEffects,
@@ -191,6 +194,120 @@ async function sourceNativeFixture() {
     add,
   };
 }
+test('cloud source schema preserves exact compatibility facts and refuses forged special targets', async () => {
+  const f = await sourceNativeFixture();
+  f.modes.set('/usr/bin/mount', 0o104755);
+  f.add('/usr/bin/pgrep', 'reviewed procps executable');
+  f.links.set('/usr/bin/pkill', '/usr/bin/pgrep');
+  const result = await firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io);
+  const options = {
+    scope: f.input.configs.map(({ name, pmId }) => ({ name, pmId })),
+    observed: true,
+  };
+  assert.doesNotThrow(() => validateFirstCutoverCloudSources(result, options));
+  for (const [path, changes] of [
+    ['/usr/bin/pkill', { resolvedPath: '/usr/local/bin/pgrep' }],
+    ['/usr/bin/mount', { resolvedPath: '/tmp/mount' }],
+    ['/usr/bin/mount', { gid: 1 }],
+    ['/usr/bin/mount', { mode: 0o6755 }],
+    ['/usr/bin/unshare', { mode: 0o4755 }],
+  ]) {
+    const forged = structuredClone(result);
+    Object.assign(
+      forged.files.find((row) => row.path === path),
+      changes,
+    );
+    assert.throws(
+      () => validateFirstCutoverCloudSources(forged, options),
+      /CUTOVER_CLOUD_SOURCES_UNPROVEN/,
+    );
+  }
+});
+
+test('cloud sources binds the procps pkill symlink to its exact pgrep executable', async () => {
+  const f = await sourceNativeFixture();
+  f.add('/usr/bin/pgrep', 'reviewed procps executable');
+  f.links.set('/usr/bin/pkill', '/usr/bin/pgrep');
+  const result = await firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io);
+  const tool = result.files.find((row) => row.path === '/usr/bin/pkill');
+  assert.equal(tool.resolvedPath, '/usr/bin/pgrep');
+  assert.equal(
+    tool.digest,
+    createHash('sha256').update('reviewed procps executable').digest('hex'),
+  );
+});
+for (const path of ['/usr/local/bin/pgrep', '/tmp/pgrep', '/usr/bin/pgrep.other']) {
+  test(`cloud sources refuses pkill redirected to ${path}`, async () => {
+    const f = await sourceNativeFixture();
+    f.add(path, 'other executable');
+    f.links.set('/usr/bin/pkill', path);
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io),
+      /CUTOVER_CLOUD_SOURCES_UNPROVEN/,
+    );
+  });
+}
+
+test('cloud sources retains exact root-owned setuid mount metadata for the fixed root bootstrap', async () => {
+  const f = await sourceNativeFixture();
+  f.modes.set('/usr/bin/mount', 0o104755);
+  const result = await firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io);
+  const mount = result.files.find((row) => row.path === '/usr/bin/mount');
+  assert.equal(mount.mode, 0o4755);
+  assert.equal(mount.uid, 0);
+  assert.equal(mount.gid, 0);
+  assert.equal(mount.resolvedPath, '/usr/bin/mount');
+});
+
+for (const [path, mode] of [
+  ['/usr/bin/mount', 0o102755],
+  ['/usr/bin/mount', 0o106755],
+  ['/usr/bin/mount', 0o105755],
+  ['/usr/bin/mount', 0o104775],
+  ['/usr/bin/mount', 0o104744],
+  ['/usr/bin/unshare', 0o104755],
+  ['/usr/bin/python3.10', 0o104755],
+  ['/usr/bin', 0o44755],
+]) {
+  test(`cloud sources still refuses special permission ${path} ${mode.toString(8)}`, async () => {
+    const f = await sourceNativeFixture();
+    f.modes.set(path, mode);
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io),
+      /CUTOVER_CLOUD_SOURCES_UNPROVEN/,
+    );
+  });
+}
+for (const field of ['uid', 'gid']) {
+  test(`cloud sources refuses setuid mount with non-root ${field}`, async () => {
+    const f = await sourceNativeFixture();
+    f.modes.set('/usr/bin/mount', 0o104755);
+    const read = f.io.lstat;
+    f.io.lstat = async (path) => {
+      const stat = await read(path);
+      return path === '/usr/bin/mount' ? { ...stat, [field]: 1 } : stat;
+    };
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io),
+      /CUTOVER_CLOUD_SOURCES_UNPROVEN/,
+    );
+  });
+}
+test('cloud sources refuses setuid mount permission drift during observation', async () => {
+  const f = await sourceNativeFixture();
+  f.modes.set('/usr/bin/mount', 0o104755);
+  const read = f.io.lstat;
+  let visits = 0;
+  f.io.lstat = async (path) => {
+    if (path === '/usr/bin/mount' && ++visits === 3) f.modes.set(path, 0o100755);
+    return read(path);
+  };
+  await assert.rejects(
+    firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io),
+    /CUTOVER_CLOUD_SOURCES_UNPROVEN/,
+  );
+});
+
 async function reviewedPythonHooksFixture() {
   const f = await sourceNativeFixture();
   const fixture = JSON.parse(
@@ -2341,7 +2458,7 @@ async function vncNativeObservationFixture(handlerCount = 1) {
       ppid,
       start: String(pid * 10),
       exe,
-      cwd: '/root',
+      cwd: exe === '/usr/bin/python3.10' ? '/usr/share/novnc' : '/root',
       argvDigest: sha(cmd),
       // Actual VNC need not inherit headed hardening or private namespace.
       noNewPrivs: 0,
@@ -2494,6 +2611,11 @@ for (const count of [0, 1, 2]) {
 }
 
 for (const mode of [
+  'root-cwd',
+  'supervisor-cwd',
+  'x11-cwd',
+  'web-cwd',
+  'handler-cwd',
   'missing-headed',
   'missing-sources',
   'forged-headed',
@@ -2521,6 +2643,14 @@ for (const mode of [
   test(`native VNC observation refuses ${mode}`, async () => {
     const f = await vncNativeObservationFixture();
     const row = (pid) => f.current.processes.find((p) => p.pid === pid);
+    const cwdPid = {
+      'root-cwd': 70,
+      'supervisor-cwd': 71,
+      'x11-cwd': 72,
+      'web-cwd': 73,
+      'handler-cwd': 74,
+    }[mode];
+    if (cwdPid) row(cwdPid).cwd = cwdPid >= 73 ? '/root' : '/usr/share/novnc';
     if (mode === 'missing-headed') Reflect.deleteProperty(f.input, 'headedRecovery');
     if (mode === 'missing-sources') Reflect.deleteProperty(f.input, 'sources');
     if (mode === 'forged-headed') f.input.headedRecovery.policyDigest = 'f'.repeat(64);
