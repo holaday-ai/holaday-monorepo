@@ -1,5 +1,15 @@
 # 首次切换实施断点：同次迁移和真实候选启动已接通，开放前后仍待验收
 
+### 2026-10-01 e72c2101原生上下文组件完成；现场来源+上下文通过，无Node属主修复任务
+
+当前实现提交e72c2101a7e12ab4ee4be69c0f04cda729b0512e；新增readFirstCutoverCloudRecoveryContext只读叶子，实际root权限/初始命名空间/加载Node inode、已审PM2源码字节及早于daemon的时间、加载器环境与漂移约束，安全标签不可用必须显式unknown。51定向测试（含IPC精确FD3/json引导对、nonroot文件/祖先、错误/漂移）通过；七模块1291/1291零失败零跳过，session71540；三文件Biome/diff通过。原真实joint-native-context-protected-node.log/session92751 EXIT0，恢复intent前原生context、真实来源、两角色完整树与Worker周期、真实WS/RFB连接、无旧页面重放及两次清理均通过。QA仅在一次性容器把原归档Node两路径安装为root:root；QA标签保持unavailable/EINVAL，不能当生产全部安全约束证明。作者组件验证，非整项验收。
+
+用户已明确批准固定207.148.70.106经原47.99.169.186跳板上的runtime/evidence及必要只读诊断连续范围；后续正常审批已放行，无新增用户授权提问。v5/session56131已通过54来源；当前live-source-context-v3.mjs 494894字节/SHA372c9d7014b20b2c007d5b1f7b11aafe7b35f688a53ab7057d7ce55cf1599511，与e72c2101逐字节一致（仅import嵌入），session78858 EXIT0/stderr0，source-context-observed，54files，生产PM2安全标签observed/unconfined，两个注册前后稳定。productionPreflight/capability/recovery仍false。
+
+重要更正：/opt/node22/bin及node在QA归档属于1001、生产属于1000，但实际生产PM2加载的是root:root的/usr/bin/node！此前把非root/opt当作实际PM2阻塞的判断错误。read-daemon-executable-shape.sh/session13414明确systemMatchesLoaded=true、bundledMatchesLoaded=false。node-owner-snapshot只读/session80331在加载inode绑定处拒绝，mayHaveChanged=false。node-runtime-owner.mjs及node-owner-repair-test.mjs草稿仅容器测试，未在生产执行；禁止将它视为下一步生产修复。详细node-owner-repair-not-applicable.md。没有生产权限、文件内容、PM2服务或业务改动。
+
+尚未完成：原双角色完整执行前能力/排他归属、host有序恢复/配置比较/完整ACK6/8消费、Task4–6其他备份写入隔离/Mac/非PayPal/整项演练/审查及新鲜发布窗口。context不证明动态库闭包、停机或显示排他，更不授权副作用；host/classifier>4/ACK/CLI保持关闭。无push/PR/merge/deploy/上线。单路无代理，自动化暂停，原scripts/__pycache__保留；本轮无仍运行的重型QA或远端动作。后续从实际剩余消费者缺口继续，不重跑本批已验证项，不做无关Node属主修复，不读取旧全文。
+
 ### 2026-10-01 VNC缺省DISPLAY修复032c0b20已通过组件验证；v5现场复核被系统拒绝
 
 用户对3599字节/SHAce1c49...d65faf明确授权后，正常审批放行，session61626 EXIT0/stderr0。launch-shape-probe.json显示仅VNC缺DISPLAY，其他启动条件及headed全部通过；不输出原值、无生产服务改动。
