@@ -484,6 +484,254 @@ for (const [name, environment, allowed] of [
     }
   });
 }
+async function ownedDisplayFixture() {
+  const f = await recoveryContextFixture();
+  const sha = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+  const exe = new Map([
+    [40, '/opt/node22/bin/node'],
+    [41, '/usr/bin/bash'],
+    [42, '/usr/bin/bash'],
+    [43, '/usr/bin/Xvfb'],
+    [44, '/usr/bin/openbox'],
+    [45, '/usr/bin/x11vnc'],
+    [46, '/opt/brave.com/brave/brave'],
+    [99, '/usr/bin/other'],
+  ]);
+  f.add('/usr/bin/openbox', 'window manager');
+  const displayCmd = `${['Xvfb', ':98', '-screen', '0', '1280x800x24', '-nolisten', 'tcp'].join('\0')}\0`;
+  const census = {
+    hostname: f.sources.hostname,
+    bootId: f.sources.bootId,
+    observedAtMs: 1000,
+    processes: [...exe].map(([pid, path]) => ({
+      pid,
+      ppid: pid === 40 || pid === 99 ? 1 : pid === 41 || pid === 42 ? 40 : pid === 45 ? 41 : 42,
+      start: pid === 40 ? '50' : String(pid * 10),
+      uids: [0, 0, 0, 0],
+      exe: path,
+      cwd: '/root',
+      argvDigest: sha(pid === 43 ? displayCmd : `synthetic-${pid}`),
+      cgroup: '0::/qa',
+      mountNamespace: 'mnt:[10]',
+      state: 'live',
+      noNewPrivs: 0,
+      capabilities: Object.fromEntries(
+        ['CapEff', 'CapPrm', 'CapBnd', 'CapInh', 'CapAmb'].map((k) => [k, '0000000000000000']),
+      ),
+    })),
+  };
+  const rows = f.input.configs.map((c, i) => ({
+    name: c.name,
+    pm_id: c.pmId,
+    pid: 41 + i,
+    pm2_env: structuredClone(c.config),
+  }));
+  f.io.rpc = async (method) => {
+    assert.equal(method, 'getMonitorData');
+    return structuredClone(rows);
+  };
+  f.io.readCensus = async () => structuredClone(census);
+  for (const p of census.processes) {
+    f.namespaces.set(`/proc/${p.pid}/exe`, p.exe);
+    for (const ns of ['mnt', 'net', 'user'])
+      f.namespaces.set(`/proc/${p.pid}/ns/${ns}`, `${ns}:[10]`);
+    if (p.pid !== 40)
+      f.add(
+        `/proc/${p.pid}/stat`,
+        `${p.pid} (qa) S ${p.ppid} ${Array(17).fill('0').join(' ')} ${p.start}\n`,
+      );
+  }
+  f.add('/proc/43/cmdline', displayCmd);
+  f.io.stat = (p) => f.io.lstat(f.namespaces.get(p) ?? p);
+  const connections = [
+    { pid: 45, fd: 8, inode: '202', server: '102', serverFd: 7 },
+    { pid: 46, fd: 8, inode: '203', server: '103', serverFd: 8 },
+    { pid: 44, fd: 8, inode: '204', server: '104', serverFd: 9 },
+  ];
+  const sockets = () => {
+    f.namespaces.set('/proc/43/fd/5', 'socket:[100]');
+    f.namespaces.set('/proc/43/fd/6', 'socket:[101]');
+    const lines = [
+      'u_str LISTEN 0 128 /tmp/.X11-unix/X98 100 * 0 users:(("Xvfb",pid=43,fd=5))',
+      'u_str LISTEN 0 128 @/tmp/.X11-unix/X98 101 * 0 users:(("Xvfb",pid=43,fd=6))',
+    ];
+    for (const c of connections) {
+      f.namespaces.set(`/proc/43/fd/${c.serverFd}`, `socket:[${c.server}]`);
+      f.namespaces.set(`/proc/${c.pid}/fd/${c.fd}`, `socket:[${c.inode}]`);
+      lines.push(
+        `u_str ESTAB 0 0 /tmp/.X11-unix/X98 ${c.server} * ${c.inode} users:(("Xvfb",pid=43,fd=${c.serverFd}))`,
+        `u_str ESTAB 0 0 * ${c.inode} * ${c.server} users:(("client",pid=${c.pid},fd=${c.fd}))`,
+      );
+    }
+    return `${lines.join('\n')}\n`;
+  };
+  let unix = sockets;
+  let tcp = '';
+  f.io.exec = async (command, args) => {
+    assert.equal(command, '/usr/bin/ss');
+    if (args.join(' ') === '-H -xapn') return unix();
+    assert.equal(args.join(' '), '-H -tanp');
+    return tcp;
+  };
+  return {
+    ...f,
+    census,
+    rows,
+    connections,
+    sha,
+    sockets,
+    setUnix: (v) => {
+      unix = v;
+    },
+    setTcp: (v) => {
+      tcp = v;
+    },
+    request: { sources: f.sources, maintenanceEndsAtMs: 15000 },
+  };
+}
+test('owned cloud display measures scoped Xvfb, window manager and both roles actual peer ownership', async () => {
+  const f = await ownedDisplayFixture();
+  const result = await firstRuntime.readFirstCutoverCloudOwnedDisplay(f.request, f.io);
+  assert.equal(result.purpose, 'cloud-owned-display-observation');
+  assert.deepEqual(
+    result.members.map((p) => p.pid),
+    [43, 44],
+  );
+  assert.equal(result.display.pid, 43);
+  assert.equal(result.display.ppid, 42);
+  assert.equal(result.clients.length, 3);
+  assert.match(result.censusDigest, /^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(result).includes('never-export-this'), false);
+  assert.equal(Object.hasOwn(result, 'stopAuthorized'), false);
+});
+for (const state of ['no-window-manager', 'vnc-stopped']) {
+  test(`owned cloud display accepts bounded original state ${state}`, async () => {
+    const f = await ownedDisplayFixture();
+    if (state === 'no-window-manager') {
+      f.census.processes = f.census.processes.filter((p) => p.pid !== 44);
+      f.connections.splice(2, 1);
+    } else {
+      f.rows[0].pid = 0;
+      f.rows[0].pm2_env.status = 'stopped';
+      f.input.configs[0].config = structuredClone(f.rows[0].pm2_env);
+      f.sources = await firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io);
+      f.request.sources = f.sources;
+      f.census.processes = f.census.processes.filter((p) => ![41, 45].includes(p.pid));
+      f.connections.splice(0, 1);
+    }
+    const result = await firstRuntime.readFirstCutoverCloudOwnedDisplay(f.request, f.io);
+    assert.equal(result.roots[1].pid, 42);
+    assert.equal(result.members.length, state === 'no-window-manager' ? 1 : 2);
+    if (state === 'vnc-stopped') {
+      assert.equal(result.roots[0].pid, 0);
+      assert.equal(result.roots[0].start, null);
+      assert(result.clients.every((p) => p.role === 'holaday-chromium-headed'));
+    }
+  });
+}
+for (const fault of [
+  'extra',
+  'expired',
+  'manager-pid',
+  'manager-config',
+  'headed-stopped',
+  'display-outside',
+  'display-wrong-parent',
+  'second-display',
+  'xorg',
+  'window-manager-outside',
+  'unconnected-window-manager',
+  'outside-client',
+  'unknown-client',
+  'no-listeners',
+  'server-owner',
+  'peer-missing',
+  'fd-mismatch',
+  'display-tcp',
+  'loaded-inode',
+  'source-bytes',
+  'display-command',
+  'census-drift',
+  'manager-drift',
+  'socket-drift',
+]) {
+  test(`owned cloud display refuses ${fault}`, async () => {
+    const f = await ownedDisplayFixture();
+    const p = (id) => f.census.processes.find((p) => p.pid === id);
+    if (fault === 'extra') f.request.trusted = true;
+    if (fault === 'expired') f.request.maintenanceEndsAtMs = 1000;
+    if (fault === 'manager-pid') f.rows[1].pid = 99;
+    if (fault === 'manager-config') f.rows[1].pm2_env.env.PRIVATE_VALUE = 'changed';
+    if (fault === 'headed-stopped') {
+      f.rows[1].pid = 0;
+      f.rows[1].pm2_env.status = 'stopped';
+    }
+    if (fault === 'display-outside') p(43).ppid = 1;
+    if (fault === 'display-wrong-parent') p(43).ppid = 46;
+    if (fault === 'second-display') p(46).exe = '/usr/bin/Xvfb';
+    if (fault === 'xorg') p(46).exe = '/usr/bin/Xorg';
+    if (fault === 'window-manager-outside') p(44).ppid = 1;
+    if (fault === 'unconnected-window-manager') f.connections.splice(2, 1);
+    if (fault === 'outside-client') f.connections[0].pid = 99;
+    if (fault === 'unknown-client') f.connections[0].pid = 999;
+    if (fault === 'no-listeners')
+      f.setUnix(() =>
+        f
+          .sockets()
+          .split('\n')
+          .filter((l) => !l.includes('LISTEN'))
+          .join('\n'),
+      );
+    if (fault === 'server-owner')
+      f.setUnix(() => f.sockets().replace('pid=43,fd=5', 'pid=99,fd=5'));
+    if (fault === 'peer-missing')
+      f.setUnix(() =>
+        f
+          .sockets()
+          .split('\n')
+          .filter((l) => !l.includes('* 202 * 102'))
+          .join('\n'),
+      );
+    if (fault === 'fd-mismatch') {
+      const readlink = f.io.readlink;
+      f.io.readlink = (p) =>
+        p === '/proc/45/fd/8' ? Promise.resolve('socket:[999]') : readlink(p);
+    }
+    if (fault === 'display-tcp')
+      f.setTcp('LISTEN 0 128 0.0.0.0:6098 0.0.0.0:* users:(("Xvfb",pid=43,fd=20))\n');
+    if (fault === 'loaded-inode') {
+      const stat = f.io.stat;
+      f.io.stat = async (path) =>
+        Object.assign(await stat(path), path === '/proc/43/exe' ? { ino: 'changed' } : {});
+    }
+    if (fault === 'source-bytes') f.data.set('/usr/bin/Xvfb', Buffer.from('changed'));
+    if (fault === 'display-command') f.data.set('/proc/43/cmdline', Buffer.from('Xvfb\0:99\0'));
+    let censusReads = 0;
+    const census = f.io.readCensus;
+    f.io.readCensus = async () => {
+      if (++censusReads === 2 && fault === 'census-drift') p(46).start = '999';
+      return census();
+    };
+    let managerReads = 0;
+    const rpc = f.io.rpc;
+    f.io.rpc = async (...a) => {
+      if (++managerReads === 2 && fault === 'manager-drift') f.rows[0].pm2_env.restart_time++;
+      return rpc(...a);
+    };
+    if (fault === 'socket-drift') {
+      let reads = 0;
+      f.setUnix(() => {
+        if (++reads === 2) f.connections.pop();
+        return f.sockets();
+      });
+    }
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudOwnedDisplay(f.request, f.io),
+      /CUTOVER_CLOUD_DISPLAY_SCOPE_UNPROVEN/,
+    );
+  });
+}
+
 async function recoveryVacancyFixture() {
   const f = await recoveryContextFixture();
   for (const c of f.input.configs) c.config.status = 'stopped';

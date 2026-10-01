@@ -41,7 +41,7 @@ async function webReady() {
     rows.some((fields) => fields[1] === address && fields[3] === '0A'),
   );
 }
-export async function prepareJointVnc(pm2) {
+export async function prepareJointVnc(pm2, { deferStop = false } = {}) {
   await fs.access('/.dockerenv');
   assert.equal(process.getuid(), 0);
   assert.equal(await fs.realpath('/usr/bin/python3'), '/usr/bin/python3.10');
@@ -84,24 +84,42 @@ done
   assert.ok(row?.pid > 1);
   assert.equal(Object.hasOwn(row.pm2_env, 'DISPLAY'), false);
   assert.equal(Object.hasOwn(row.pm2_env.env, 'DISPLAY'), false);
-  const census = await readFirstCutoverCloudRecoveryCensus();
-  const ids = new Set([row.pid]);
-  for (let i = 0; i < census.processes.length; i++)
-    for (const p of census.processes) if (ids.has(p.ppid)) ids.add(p.pid);
-  const oldTree = census.processes.filter((p) => ids.has(p.pid));
-  assert.ok(oldTree.some((p) => p.exe === '/usr/bin/x11vnc'));
-  assert.ok(oldTree.some((p) => p.exe === '/usr/bin/python3.10'));
-  await pm2('stop', String(row.pm_id));
-  await until(async () => {
-    const after = await readFirstCutoverCloudRecoveryCensus();
-    return oldTree.every(
-      (old) => !after.processes.some((p) => p.pid === old.pid && p.start === old.start),
+  const firstCensus = await readFirstCutoverCloudRecoveryCensus();
+  const originalRoot = firstCensus.processes.find((p) => p.pid === row.pid);
+  assert.ok(originalRoot);
+  const stop = async (beforeStop) => {
+    await until(webReady);
+    const live = JSON.parse(await pm2('jlist')).find((r) => r.pm_id === row.pm_id);
+    assert.equal(live.pid, row.pid);
+    assert.equal(
+      cutoverRegistrationConfigDigest(live.pm2_env),
+      cutoverRegistrationConfigDigest(row.pm2_env),
     );
-  });
-  const stopped = JSON.parse(await pm2('jlist')).find((r) => r.pm_id === row.pm_id);
-  assert.equal(stopped.pid, 0);
-  assert.equal(await webReady(), false);
-  return { stopped, oldTree };
+    await beforeStop?.();
+    const census = await readFirstCutoverCloudRecoveryCensus();
+    assert.deepEqual(
+      census.processes.find((p) => p.pid === row.pid),
+      originalRoot,
+    );
+    const ids = new Set([row.pid]);
+    for (let i = 0; i < census.processes.length; i++)
+      for (const p of census.processes) if (ids.has(p.ppid)) ids.add(p.pid);
+    const oldTree = census.processes.filter((p) => ids.has(p.pid));
+    assert.ok(oldTree.some((p) => p.exe === '/usr/bin/x11vnc'));
+    assert.ok(oldTree.some((p) => p.exe === '/usr/bin/python3.10'));
+    await pm2('stop', String(row.pm_id));
+    await until(async () => {
+      const after = await readFirstCutoverCloudRecoveryCensus();
+      return oldTree.every(
+        (old) => !after.processes.some((p) => p.pid === old.pid && p.start === old.start),
+      );
+    });
+    const stopped = JSON.parse(await pm2('jlist')).find((r) => r.pm_id === row.pm_id);
+    assert.equal(stopped.pid, 0);
+    assert.equal(await webReady(), false);
+    return { stopped, oldTree };
+  };
+  return deferStop ? { stop } : stop();
 }
 
 export async function observeJointVnc({

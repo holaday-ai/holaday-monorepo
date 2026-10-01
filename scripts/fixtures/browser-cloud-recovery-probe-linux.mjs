@@ -37,6 +37,7 @@ import {
   firstCutoverCloudVncRecoveryMaterial,
   prepareFirstCutoverCloudBrowserPolicy,
   readFirstCutoverCloudBrowserRecovery,
+  readFirstCutoverCloudOwnedDisplay,
   readFirstCutoverCloudRecovery,
   readFirstCutoverCloudRecoveryCensus,
   readFirstCutoverCloudRecoveryContext,
@@ -1131,6 +1132,29 @@ function cdp(method, params = {}) {
 }
 async function close() {
   if (managed) {
+    if (jointVnc?.stop) {
+      const observeOwnedDisplay = async () => {
+        const sources = await readJointSources(attempt);
+        const proof = await readFirstCutoverCloudOwnedDisplay({
+          sources,
+          maintenanceEndsAtMs: Date.now() + 15000,
+        });
+        assert.equal(proof.display.pid, oldDisplay.identity.pid);
+        assert.equal(proof.display.ppid, managed.identity.pid);
+        assert.ok(proof.members.some((p) => p.pid === oldDisplay.identity.pid));
+        console.log(
+          JSON.stringify({
+            marker: 'CLOUD_OLD_DISPLAY_NATIVE_OWNERSHIP_OBSERVED',
+            vncStatus: proof.roots[0].status,
+            scopedClientCount: proof.clients.length,
+            displayMemberCount: proof.members.length,
+            productionStopPermission: false,
+          }),
+        );
+      };
+      jointVnc = await jointVnc.stop(observeOwnedDisplay);
+      await observeOwnedDisplay();
+    }
     // Observe descendants plus real IPC-associated handlers, retaining every
     // PID/start before stop. No profile-argv association or signal-based help.
     const observed = await ownedProcesses(managed.identity);
@@ -1264,7 +1288,7 @@ try {
     const row = JSON.parse(await pm2('jlist')).find((r) => r.name === 'qa-unrelated');
     unrelated = await processIdentity(row.pid);
     assert.ok(unrelated);
-    if (jointRecovery) jointVnc = await prepareJointVnc(pm2);
+    if (jointRecovery) jointVnc = await prepareJointVnc(pm2, { deferStop: true });
   }
   await until(async () =>
     fs.access('/tmp/.X11-unix/X98').then(

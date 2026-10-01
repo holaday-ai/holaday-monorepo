@@ -930,6 +930,343 @@ export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}
   }
 }
 
+/** Native ownership of the old fixed display before scoped service stops.
+ * Roots come from the real PM2 registrations, never an uploaded PID allowlist.
+ * All display peers must belong to those roots; this is an observation, not a
+ * stop permit, a reservation against later clients, or recovery readiness.
+ */
+export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_DISPLAY_SCOPE_UNPROVEN');
+  };
+  try {
+    if (
+      Object.keys(input ?? {})
+        .sort()
+        .join(',') !== 'maintenanceEndsAtMs,sources' ||
+      io.platform !== 'linux' ||
+      io.uid !== 0
+    )
+      reject();
+    const { sources, maintenanceEndsAtMs } = structuredClone(input);
+    validateFirstCutoverCloudSources(sources, { scope: sources.roles, observed: true });
+    if (!Number.isSafeInteger(maintenanceEndsAtMs)) reject();
+    const sha = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+    const began = io.now();
+    let last = began;
+    const clock = () => {
+      const now = io.now();
+      if (
+        !Number.isSafeInteger(now) ||
+        now < 0 ||
+        now < last ||
+        now - began > 15000 ||
+        now >= maintenanceEndsAtMs ||
+        sources.observedAtMs > now ||
+        now - sources.observedAtMs > 60000
+      )
+        reject();
+      last = now;
+      return now;
+    };
+    clock();
+    const context = await readFirstCutoverCloudRecoveryContext({ sources }, io);
+    const managers = async () => {
+      const rows = await readFirstCutoverCloudManagers(io);
+      clock();
+      if (
+        rows.some(
+          (r, i) =>
+            r.name !== sources.roles[i].name ||
+            r.pm_id !== sources.roles[i].pmId ||
+            cutoverRegistrationConfigDigest(r.pm2_env) !== sources.roles[i].configDigest ||
+            !(
+              (r.pm2_env.status === 'online' && r.pid > 1) ||
+              (i === 0 && r.pm2_env.status === 'stopped' && r.pid === 0)
+            ),
+        )
+      )
+        reject();
+      return rows;
+    };
+    const rows = await managers();
+    const readCensus = io.readCensus ?? (() => readFirstCutoverCloudRecoveryCensus(io));
+    const census = structuredClone(await readCensus());
+    const validateCensus = (c) => {
+      clock();
+      if (
+        c.hostname !== sources.hostname ||
+        c.bootId !== sources.bootId ||
+        !Number.isSafeInteger(c.observedAtMs) ||
+        c.observedAtMs < began ||
+        c.observedAtMs > last ||
+        !Array.isArray(c.processes) ||
+        c.processes.length > 16384 ||
+        new Set(c.processes.map((p) => p.pid)).size !== c.processes.length ||
+        c.processes.some(
+          (p) =>
+            !Number.isSafeInteger(p.pid) ||
+            p.pid <= 0 ||
+            !Number.isSafeInteger(p.ppid) ||
+            p.ppid < 0 ||
+            p.pid === p.ppid ||
+            !/^\d+$/.test(p.start) ||
+            !hash(p.argvDigest),
+        )
+      )
+        reject();
+    };
+    validateCensus(census);
+    const byPid = new Map(census.processes.map((p) => [p.pid, p]));
+    const daemon = byPid.get(context.daemon.pid);
+    if (!daemon || daemon.start !== context.daemon.start) reject();
+    const children = new Map();
+    for (const p of census.processes) {
+      const group = children.get(p.ppid) ?? [];
+      group.push(p);
+      children.set(p.ppid, group);
+    }
+    const trees = rows.map((r) => {
+      if (!r.pid) return [];
+      const root = byPid.get(r.pid);
+      if (!root || root.ppid !== daemon.pid) reject();
+      const queue = [root];
+      const ids = new Set();
+      for (let at = 0; at < queue.length; at++) {
+        const p = queue[at];
+        if (ids.has(p.pid) || queue.length > 16384) reject();
+        ids.add(p.pid);
+        queue.push(...(children.get(p.pid) ?? []));
+      }
+      if (
+        queue.some(
+          (p) =>
+            p.state !== 'live' ||
+            !Array.isArray(p.uids) ||
+            p.uids.length !== 4 ||
+            p.uids.some((u) => u !== 0),
+        )
+      )
+        reject();
+      return queue.sort((a, b) => a.pid - b.pid);
+    });
+    const groups = trees.map((tree) => new Set(tree.map((p) => p.pid)));
+    if (
+      trees[0].some((p) => groups[1].has(p.pid) || /\/(?:Xvfb|Xorg|openbox)$/.test(p.exe)) ||
+      trees[1].some((p) => p.exe === '/usr/bin/Xorg')
+    )
+      reject();
+    const displays = trees[1].filter((p) => p.exe === '/usr/bin/Xvfb');
+    if (displays.length !== 1) reject();
+    const display = displays[0];
+    if (
+      display.ppid !== rows[1].pid ||
+      display.mountNamespace !== byPid.get(rows[1].pid).mountNamespace ||
+      display.mountNamespace !== daemon.mountNamespace
+    )
+      reject();
+    const members = trees[1].filter((p) => ['/usr/bin/Xvfb', '/usr/bin/openbox'].includes(p.exe));
+    const project = (p) =>
+      Object.fromEntries(
+        ['pid', 'ppid', 'start', 'uids', 'exe', 'cwd', 'argvDigest', 'cgroup'].map((k) => [
+          k,
+          p[k],
+        ]),
+      );
+    const statKeys = ['dev', 'ino', 'uid', 'gid', 'mode', 'size', 'mtimeMs', 'ctimeMs'];
+    const sameStat = (a, b) => statKeys.every((k) => a[k] === b[k]);
+    const bounded = async (path, limit) => {
+      clock();
+      const h = await io.open(
+        path,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      try {
+        const bytes = Buffer.alloc(limit + 1);
+        let size = 0;
+        while (size < bytes.length) {
+          const { bytesRead: n } = await h.read(bytes, size, bytes.length - size, size);
+          if (!Number.isSafeInteger(n) || n < 0 || n > bytes.length - size) reject();
+          if (!n) break;
+          size += n;
+          clock();
+        }
+        if (size > limit) reject();
+        return bytes.subarray(0, size);
+      } finally {
+        await h.close();
+      }
+    };
+    const displaySample = async () => {
+      clock();
+      const cmd = (await bounded(`/proc/${display.pid}/cmdline`, 16384)).toString('utf8');
+      const argv = cmd.split('\0');
+      if (
+        sha(cmd) !== display.argvDigest ||
+        !cmd.endsWith('\0') ||
+        argv.filter((a) => /^:\d+$/.test(a)).join(',') !== ':98' ||
+        argv.some((a) => ['-query', '-broadcast', '-indirect'].includes(a)) ||
+        (await io.readlink(`/proc/${display.pid}/exe`)) !== display.exe
+      )
+        reject();
+      const loaded = await io.stat(`/proc/${display.pid}/exe`);
+      const disk = await io.stat(display.exe);
+      const source = sources.files.find(
+        (f) => f.path === display.exe && f.resolvedPath === display.exe,
+      );
+      if (
+        !source ||
+        !disk.isFile() ||
+        !Number.isSafeInteger(disk.size) ||
+        disk.size < 0 ||
+        disk.size > 64 * 1024 * 1024 ||
+        disk.uid !== 0 ||
+        disk.mode & 0o7022 ||
+        !sameStat(loaded, disk) ||
+        source.uid !== disk.uid ||
+        source.gid !== disk.gid ||
+        source.mode !== (disk.mode & 0o7777) ||
+        source.size !== disk.size
+      )
+        reject();
+      const bytes = await bounded(display.exe, disk.size);
+      if (
+        createHash('sha256').update(bytes).digest('hex') !== source.digest ||
+        !sameStat(disk, await io.stat(display.exe)) ||
+        !sameStat(loaded, await io.stat(`/proc/${display.pid}/exe`))
+      )
+        reject();
+    };
+    await displaySample();
+    const sockets = async () => {
+      const exec = io.exec ?? execFixed;
+      const read = async (args) => {
+        clock();
+        const text = await exec('/usr/bin/ss', args, {
+          env: fixedEnv,
+          timeout: 5000,
+          maxBuffer: 1048576,
+        });
+        if (typeof text !== 'string' || Buffer.byteLength(text) > 1048576) reject();
+        const lines = text.trim() ? text.trim().split('\n') : [];
+        if (lines.length > 16384) reject();
+        return lines;
+      };
+      const all = (await read(['-H', '-xapn'])).map((line) => {
+        const c = line.trim().split(/\s+/);
+        if (c.length < 8) reject();
+        return { line, kind: c[0], state: c[1], path: c[4], inode: c[5], peer: c[7] };
+      });
+      const paths = ['/tmp/.X11-unix/X98', '@/tmp/.X11-unix/X98'];
+      const named = all.filter((r) => paths.includes(r.path));
+      const listeners = named.filter((r) => r.state === 'LISTEN');
+      if (
+        listeners.length !== 2 ||
+        paths.some((path) => listeners.filter((r) => r.path === path).length !== 1)
+      )
+        reject();
+      const owners = async (row) => {
+        const tuples = [...row.line.matchAll(/\("[^"\n]*",pid=(\d+),fd=(\d+)\)/g)];
+        if (
+          !/^[1-9]\d{0,19}$/.test(row.inode) ||
+          all.filter((r) => r.inode === row.inode).length !== 1 ||
+          !tuples.length ||
+          tuples.length > 512 ||
+          tuples.length !== [...row.line.matchAll(/\bpid=/g)].length
+        )
+          reject();
+        const result = [];
+        for (const t of tuples) {
+          clock();
+          const pid = Number(t[1]);
+          const fd = Number(t[2]);
+          const p = byPid.get(pid);
+          if (
+            !p ||
+            !Number.isSafeInteger(fd) ||
+            !Number.isSafeInteger(pid) ||
+            result.some((r) => r.pid === pid && r.fd === fd) ||
+            (await io.readlink(`/proc/${pid}/fd/${fd}`)) !== `socket:[${row.inode}]`
+          )
+            reject();
+          result.push({ pid, start: p.start, fd, inode: row.inode });
+        }
+        return result.sort((a, b) => a.pid - b.pid || a.fd - b.fd);
+      };
+      const clients = [];
+      const servers = [];
+      for (const r of named) {
+        if (r.kind !== 'u_str' || !['LISTEN', 'ESTAB'].includes(r.state)) reject();
+        const held = await owners(r);
+        if (held.some((p) => p.pid !== display.pid)) reject();
+        servers.push({ path: r.path, state: r.state, owners: held });
+        if (r.state === 'ESTAB') {
+          const matches = all.filter(
+            (p) =>
+              p.inode === r.peer && p.peer === r.inode && p.kind === 'u_str' && p.state === 'ESTAB',
+          );
+          if (matches.length !== 1) reject();
+          for (const p of await owners(matches[0])) {
+            const role = groups.findIndex((ids) => ids.has(p.pid));
+            if (role < 0) reject();
+            clients.push({ ...p, role: rows[role].name, serverInode: r.inode });
+          }
+        }
+      }
+      if (
+        members.some((p) => p.exe === '/usr/bin/openbox' && !clients.some((c) => c.pid === p.pid))
+      )
+        reject();
+      const tcp = await read(['-H', '-tanp']);
+      if (tcp.some((line) => new RegExp(`\\bpid=${display.pid}(?:,|\\))`).test(line))) reject();
+      const sort = (a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b));
+      return { servers: servers.sort(sort), clients: clients.sort(sort) };
+    };
+    const network = await sockets();
+    await displaySample();
+    if (!isDeepStrictEqual(rows, await managers()) || !isDeepStrictEqual(network, await sockets()))
+      reject();
+    const after = structuredClone(await readCensus());
+    validateCensus(after);
+    const stable = (c) => ({ hostname: c.hostname, bootId: c.bootId, processes: c.processes });
+    if (!isDeepStrictEqual(stable(census), stable(after))) reject();
+    const nextContext = await readFirstCutoverCloudRecoveryContext({ sources }, io);
+    const { observedAtMs: _oldTime, ...oldContext } = context;
+    const { observedAtMs: _newTime, ...newContext } = nextContext;
+    if (!isDeepStrictEqual(oldContext, newContext)) reject();
+    return {
+      purpose: 'cloud-owned-display-observation',
+      hostname: census.hostname,
+      bootId: census.bootId,
+      sourcesDigest: context.sourcesDigest,
+      contextDigest: context.daemon.contextDigest,
+      censusDigest: sha(stable(census)),
+      roots: rows.map((r) => ({
+        name: r.name,
+        pmId: r.pm_id,
+        pid: r.pid,
+        start: r.pid ? byPid.get(r.pid).start : null,
+        status: r.pm2_env.status,
+        configDigest: cutoverRegistrationConfigDigest(r.pm2_env),
+      })),
+      display: { ...project(display), mountNamespace: display.mountNamespace },
+      members: members.map(project),
+      clients: network.clients,
+      socketDigest: sha(network),
+      observedAtMs: clock(),
+    };
+  } catch {
+    reject();
+  }
+}
+
 /** Read-only fixed-endpoint vacancy in the daemon's initial namespaces. This
  * observes two stopped registrations and bounded empty endpoint samples; it is
  * not a reservation, old-process census, dynamic-loader audit or restore permit.
