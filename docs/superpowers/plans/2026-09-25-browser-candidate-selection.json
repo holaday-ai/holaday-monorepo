@@ -2385,6 +2385,9 @@
       "executionConditions": "Actual acceptance, a fresh approved release window, bound source/ownership and normal system approval remain required; this source record is not a production release approval",
       "historicalBoundaries": "The original boundaries object remains an unchanged dated candidate-selection record"
     },
-    "sourceFreezeManifestSha256": "a53e5c6f8050b1a78dedb2761985d72438894fea53bd3ec1e326cee693ecc8e6"
+    "sourceFreezeManifestSha256": "a53e5c6f8050b1a78dedb2761985d72438894fea53bd3ec1e326cee693ecc8e6",
+    "implementationCommit": "1db69145115a7580a7e4e746b0c37c91539b085d",
+    "draftPullRequest": "https://github.com/holaday-ai/holaday-monorepo/pull/238",
+    "deliveryStatus": "committed and pushed; draft PR open; not merged or deployed; release acceptance false"
   }
 }
