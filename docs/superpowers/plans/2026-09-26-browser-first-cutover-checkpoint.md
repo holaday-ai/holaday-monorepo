@@ -1,5 +1,14 @@
 # 首次切换实施断点：同次迁移和真实候选启动已接通，开放前后仍待验收
 
+### 2026-10-01 原固定诊断已获准执行；新结构探针待系统所需的具体授权
+
+用户在上一条固定载荷阻塞说明后明确“授权 继续”。正常审批现已允许原473698字节/SHA eac571d833fc2b38a1f7856267c3dc357216f239c3ffe0f2c12d58de52f7bdfe载荷，经原严格SSH路径实际执行：session58462退出1，stderr0，managers-diagnostic.json记录M6→M9→unproven/read-managers。它已通过socket/RPC到达PM2记录结构校验；尚不能确定M6多个条件中的哪一个，现场manager/source仍未证明。未停止/恢复/更改任何生产服务或业务。
+
+随后准备2582字节独立manager-shape-probe.mjs（SHA256 72a8ad0072432d56d64cee39066d93238e52dde65245e8ae1a3b1a9840b10224）：同目标root@207.148.70.106/原47.99.169.186跳板，只调用已有socket的getMonitorData一次，输出固定失败字段标签与两个固定角色/other，不输出实际配置值或任意服务名、不导入仓库模块。正常审批在执行前拒绝，理由是新探针未被原473698字节的具体授权覆盖。没有SSH执行/探针结果文件，没有换通道或重试。精确范围存qa/native-vnc-resume-20260930/manager-shape-approval.md；需明确允许该新探针传输后再走系统审批。
+
+fb1fcb60的本地联合验证/1207回归仍有效，未重做；本轮没有猜测性实现改动，原__pycache__保留。下一步是取得M6具体字段形态后补实际缺口，仍须完成双角色前置与原host/完整整项验收；未push/PR/merge/deploy，自动化暂停，单路无代理。旧的“原473698字节未执行”断点已被本段取代，人类项目授权持续有效。
+
+
 ### 2026-10-01 原默认来源与headed+VNC真实联合观察通过；整项仍未验收
 
 本轮基于41dfaf24，补齐精确root:root mount4755、procps pkill→/usr/bin/pgrep及websockify角色cwd三个真实兼容缺口。保留来源字节/权限/路径/漂移、完整进程树、原始census、加载inode、双采样socket和新鲜度约束；仅websockify及直接handler使用固定/usr/share/novnc，bash/x11vnc保持原注册cwd。新增17个source及5个cwd拒绝测试；cwd旧实现4个正例RED，修复后定向49/49 GREEN。最终原七模块Linux回归1207/1207、零失败零跳过；五文件Biome及git diff --check通过。仅作者范围审查，不是整分支独立审查。
