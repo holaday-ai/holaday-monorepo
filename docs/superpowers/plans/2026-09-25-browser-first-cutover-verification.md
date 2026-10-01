@@ -1,5 +1,15 @@
 # 浏览器首次切换验收记录
 
+### 2026-10-01 原生空闲端点及原host消费37c70ae9完成组件验证，继续核对现场显示归属
+
+实现37c70ae9新增只读readFirstCutoverCloudRecoveryVacancy并由原恢复观察器在intent前消费：真实双stopped配置/source/context、自身与PM2/PID1三命名空间、X98锁/Unix端点、IPv4/IPv6的5901/6080/9223全部本地行双采样；布尔、陈旧、错来源或漂移拒绝。它不是预约、完整能力或旧树退出证明；原完整恢复硬门/ACK/CLI保持关闭。
+
+31叶子定向+11原host门测试通过；最终七模块1364/1364零失败零跳过，session66326/vacancy-host-linux.log；五文件Biome和diff通过。原真实joint最终session95237 EXIT0（native-packages/joint-native-vacancy-final.log），实际占端口拒绝、自然等待TIME_WAIT62408ms后刷新来源、原生vacancy、完整两角色树/Worker周期/真实WS-RFB/不重放/两次清理均通过。初次32967拒绝与诊断44544证实9223为TIME_WAIT(06)；没有放宽生产门。仅一次性QA预设240秒窗口内最多75秒等待被确认的state06/inode0自然到期，生产不执行该等待或延长窗口。前批557ff8e5私有策略/staging通过保持有效。
+
+当前从真实现场拓扑继续：拟确认:98的Xvfb是否属于批准的两项服务及是否有范围外客户端，不能从QA专属子进程模型推断生产归属。仅连续授权范围内的只读6434字节display-topology探针session11059已执行，返回unproven/stderr0，无现场变更；v2增加固定错误枚举，6717字节/SHA da9ba8068d4fc48022f6eb8bf78c6297ab7efc17d9ced34db2a2d0fdb4a398a0，session77622正在执行，仍原跳板/固定主机/15秒192MiB。先收集v2，不把unproven猜成共享或专属，不重跑已完成组件，不重做Node属主。
+
+整项Task4–6/完整恢复消费/审查及新鲜窗口仍未完成；无push/PR/merge/deploy/上线成功，现场零写入/启停。原__pycache__保留，自动化暂停，单路无代理，既有授权持续有效。
+
 ### 2026-10-01 私有恢复策略及原staging接入557ff8e5完成组件验证
 
 实现提交557ff8e5。prepareFirstCutoverCloudBrowserPolicy已接入原host stage：site attach绑定scope后、readiness前，在原journal所有权和批准维护截止内独占创建attempt/cloud-browser-policy，复制受保护原策略原字节并增加RestoreOnStartup=5。目录已有/部分失败不采用不覆盖不重试；源漂移、链接/硬链、不安全模式、错误scope、锁丢失和过期拒绝。正式生产路径仍未执行。
