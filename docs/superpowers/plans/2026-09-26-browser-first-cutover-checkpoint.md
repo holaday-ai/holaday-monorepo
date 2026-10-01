@@ -1,5 +1,16 @@
 # 首次切换实施断点：同次迁移和真实候选启动已接通，开放前后仍待验收
 
+### 2026-10-01 旧浏览器关联孤儿确实漏采，434f1b16完成只读库存修复
+
+当前HEAD 434f1b16（前批显示消费03df6d38、文档b5a0db2f）。旧IPC只读诊断old-browser-ipc-topology.mjs：7326字节/SHA b919168c2496178180db8323b59abb75abeaafed9851dc983bbfa46a5ecc0c85，session29579 EXIT0；v3 7692字节/SHA 2f618bd4ea1c7259a1139aafed13b03f5417c36136bede0a1de0b5d049e23205，session49500 EXIT0/stderr0。现场两个crashpad均PPID1：主handler实际initial socket对端为headed内Brave，次handler对端为主handler；两者collectorSelected:false。仅证明双采样初始IPC边，不是完整排他归属/停止许可。标识会变，禁止硬编码现场PID。v2/session49415因诊断自身UID正则少一个字段拒绝，已用两项本地检查修正为四字段，不是生产异常。准备首版本地诊断的一次自动审核超时，按明确允许重试一次后通过；后续正常审批均通过，无待授权动作/绕过/生产写入。
+
+434f1b16仅修复原readHostProcesses：确切加载路径/opt/brave.com/brave/chrome_crashpad_handler及其deleted加载态进入候选与后代闭包；不按相似basename/进程标题推定关联，不添加owner/stop许可。3定向用例（2RED→GREEN），七模块session29621为1426/1426零失败零跳过，/private/tmp/holaday-crashpad-collector-regression.log；两文件Biome及diff通过。原完整census本来无过滤，不受这条候选选择改变影响；不重跑已经完成且行为未改的原生组件。
+
+下一步是原生旧浏览器完整IPC归属及原host消费，尚未写新生产接口：可复用原fixture ownedProcesses的已验证规则（browser-cloud-recovery-probe-linux.mjs约700–978行），须实际initial fd→reciprocal socket→原Brave树/主handler、全部相关fd的peer组、唯一PM2继承stdio例外、loaded inode/来源、PID/start/cgroup/namespace及重复全census稳定；不是只靠初始边、进程名、argv profile或副作用后PID。现有readFirstCutoverCloudRecovery用新独立mnt namespace证明恢复后孤儿，不能直接套到旧共享namespace。原库存scopeDigest仍只PPID树，后续须把已实证且原审查包含的关联成员纳入原批准范围与退出账，严禁事后采纳。显示/全树消费已完成，不重做。
+
+当前无运行中的QA/SSH，原__pycache__保留；完整恢复硬门/ACK>4/CLI及Task4–6整项验收仍未解除，未push/PR/merge/deploy/上线，自动化暂停、单路无代理、持续授权有效。
+
+
 ### 2026-10-01 显示归属及原host消费组件03df6d38完成，继续双角色完整恢复前置
 
 已提交3414e447原生显示归属、03df6d38原host/inventory消费：真实Xvfb/Openbox成员、Unix reciprocal peer/fd客户端、原两角色完整树摘要与PM2上下文都绑定到私有原审查事实；每次读/intent前/dispatch前重新观察，拒绝新增非显示子进程、未知共享客户端、上下文或PID/start漂移，原成员仍存活不写ACK。双方停止后只用原事实做退出账，不采纳副作用后的新PID。源数据、旧树保护、完整恢复硬拒绝/ACK>4/CLI门仍未解除。
