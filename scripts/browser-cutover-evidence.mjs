@@ -1633,7 +1633,11 @@ async function readHostProcesses(io, complete = false) {
       if (
         uids.includes(998) ||
         /holaday|(?:^|\/)node(?:\0|$)/i.test(cmdline) ||
-        /\/node(?: \(deleted\))?$/.test(exe)
+        /\/node(?: \(deleted\))?$/.test(exe) ||
+        // Crashpad reparents to PID 1 and may have no project marker in argv.
+        // Retain exact executable candidates for review, including deleted
+        // loaded images. Selection does NOT associate or authorize a stop.
+        /^\/opt\/brave\.com\/brave\/chrome_crashpad_handler(?: \(deleted\))?$/.test(exe)
       )
         included.add(pid);
       all.push({

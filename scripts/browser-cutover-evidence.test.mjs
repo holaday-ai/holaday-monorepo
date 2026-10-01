@@ -3313,3 +3313,38 @@ test('historical rehearsal must reference protected raw artifacts with matching 
     /MAINTENANCE_REHEARSAL_UNPROVEN/,
   );
 });
+
+for (const deleted of [false, true]) {
+  test(`host snapshot retains untagged orphan Brave crashpad candidate deleted=${deleted} without assigning ownership`, async () => {
+    const f = hostTreeFixture();
+    const exe = `/opt/brave.com/brave/chrome_crashpad_handler${deleted ? ' (deleted)' : ''}`;
+    f.add(
+      60,
+      1,
+      exe,
+      'crashpad --database=/root/.config/BraveSoftware/CrashReports --initial-client-fd=6',
+    );
+    f.add(61, 60, '/usr/bin/dash', 'helper-without-project-marker');
+    const result = await readCutoverHostSnapshot(f.io);
+    const candidate = result.processes.find((p) => p.pid === 60);
+    assert.ok(candidate, 'root-reparented handler must be visible to the original review');
+    assert.equal(candidate.ppid, 1);
+    assert.equal(candidate.exe, exe);
+    assert.ok(
+      result.processes.some((p) => p.pid === 61),
+      'candidate descendants remain visible',
+    );
+    assert.equal(Object.hasOwn(candidate, 'owner'), false);
+    assert.equal(Object.hasOwn(candidate, 'stopAuthorized'), false);
+    assert.equal(JSON.stringify(result.processes).includes('initial-client-fd'), false);
+  });
+}
+test('host snapshot does not infer Brave association from a crashpad process title or basename', async () => {
+  const f = hostTreeFixture();
+  f.add(60, 1, '/tmp/chrome_crashpad_handler', 'chrome_crashpad_handler --initial-client-fd=6');
+  const result = await readCutoverHostSnapshot(f.io);
+  assert.equal(
+    result.processes.some((p) => p.pid === 60),
+    false,
+  );
+});
