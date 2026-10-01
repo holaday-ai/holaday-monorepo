@@ -194,6 +194,47 @@ async function sourceNativeFixture() {
     add,
   };
 }
+for (const mode of ['missing', 'top-level', 'nested-overrides']) {
+  test(`cloud sources VNC display accepts ${mode} without changing retained config`, async () => {
+    const f = await sourceNativeFixture();
+    const baseline = await firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io);
+    const config = f.input.configs[0].config;
+    if (mode === 'missing' || mode === 'top-level') Reflect.deleteProperty(config.env, 'DISPLAY');
+    if (mode === 'top-level') config.DISPLAY = ':98';
+    if (mode === 'nested-overrides') config.DISPLAY = ':0';
+    const retained = structuredClone(f.input);
+    const observed = await firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io);
+    assert.deepEqual(f.input, retained);
+    assert.equal(observed.roles[0].configDigest, cutoverRegistrationConfigDigest(config));
+    assert.equal(observed.roles[1].selectionDigest, baseline.roles[1].selectionDigest);
+    if (mode === 'missing') {
+      assert.notEqual(observed.roles[0].selectionDigest, baseline.roles[0].selectionDigest);
+      assert.equal(Object.hasOwn(config, 'DISPLAY'), false);
+      assert.equal(Object.hasOwn(config.env, 'DISPLAY'), false);
+    } else {
+      assert.equal(observed.roles[0].selectionDigest, baseline.roles[0].selectionDigest);
+    }
+  });
+}
+for (const location of ['top-level', 'nested']) {
+  for (const value of [':0', '', null, 98, ':98\0']) {
+    test(`cloud sources VNC display refuses ${location} ${JSON.stringify(value)}`, async () => {
+      const f = await sourceNativeFixture();
+      const config = f.input.configs[0].config;
+      if (location === 'top-level') {
+        Reflect.deleteProperty(config.env, 'DISPLAY');
+        config.DISPLAY = value;
+      } else {
+        config.DISPLAY = ':98';
+        config.env.DISPLAY = value;
+      }
+      await assert.rejects(
+        firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io),
+        /CUTOVER_CLOUD_SOURCES_UNPROVEN/,
+      );
+    });
+  }
+}
 const pythonUserSitePaths = [
   '/root/.local',
   '/root/.local/lib',

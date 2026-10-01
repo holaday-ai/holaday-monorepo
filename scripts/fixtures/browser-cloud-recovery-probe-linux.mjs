@@ -216,7 +216,7 @@ const pm2 = async (...argv) =>
               }
             : process.env),
           PM2_HOME: pm2Home,
-          DISPLAY: ':98',
+          ...(jointRecovery && argv.includes('holaday-vnc') ? {} : { DISPLAY: ':98' }),
         },
         maxBuffer: 8 * 1024 * 1024,
       },

@@ -82,6 +82,8 @@ done
   await until(webReady);
   const row = JSON.parse(await pm2('jlist')).find((r) => r.name === 'holaday-vnc');
   assert.ok(row?.pid > 1);
+  assert.equal(Object.hasOwn(row.pm2_env, 'DISPLAY'), false);
+  assert.equal(Object.hasOwn(row.pm2_env.env, 'DISPLAY'), false);
   const census = await readFirstCutoverCloudRecoveryCensus();
   const ids = new Set([row.pid]);
   for (let i = 0; i < census.processes.length; i++)

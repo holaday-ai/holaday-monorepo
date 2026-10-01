@@ -508,7 +508,9 @@ export async function readFirstCutoverCloudRecoverySources(input, overrides = {}
         config.autostart !== true ||
         config.increment_var ||
         (config.instance_var && config.instance_var !== 'NODE_APP_INSTANCE') ||
-        config.DISPLAY !== ':98' ||
+        // Headed recovery sets DISPLAY; VNC selects X via the checked x11vnc argv.
+        // A missing VNC variable is distinct from a conflicting retained value.
+        ((i || Object.hasOwn(config, 'DISPLAY')) && config.DISPLAY !== ':98') ||
         config.HOME !== '/root' ||
         (config.uid && config.uid !== 0) ||
         (config.gid && config.gid !== 0) ||
