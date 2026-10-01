@@ -728,7 +728,7 @@ export async function readFirstCutoverCloudManagers(overrides = {}) {
       if (
         !row ||
         Object.getPrototypeOf(row) !== Object.prototype ||
-        ['pm_id', 'name', 'pid', 'pm2_env'].some(
+        ['pm_id', 'name', 'pm2_env'].some(
           (key) => !Object.hasOwn(Object.getOwnPropertyDescriptor(row, key) ?? {}, 'value'),
         ) ||
         !Number.isSafeInteger(row.pm_id) ||
@@ -737,13 +737,21 @@ export async function readFirstCutoverCloudManagers(overrides = {}) {
         ids.has(row.pm_id) ||
         typeof row.name !== 'string' ||
         !row.name ||
-        !Number.isSafeInteger(row.pid) ||
-        Object.is(row.pid, -0) ||
-        row.pid < 0 ||
         !row.pm2_env ||
         Object.getPrototypeOf(row.pm2_env) !== Object.prototype ||
         row.pm2_env.pm_id !== row.pm_id ||
         row.pm2_env.name !== row.name
+      )
+        reject();
+      // PM2 may omit pid on unrelated registrations. They still participate
+      // in full name/ID collision checks; a present pid must remain valid data.
+      const pid = Object.getOwnPropertyDescriptor(row, 'pid');
+      if (
+        pid &&
+        (!Object.hasOwn(pid, 'value') ||
+          !Number.isSafeInteger(pid.value) ||
+          Object.is(pid.value, -0) ||
+          pid.value < 0)
       )
         reject();
       ids.add(row.pm_id);
@@ -752,6 +760,8 @@ export async function readFirstCutoverCloudManagers(overrides = {}) {
       const selected = rows.filter((row) => row.name === name);
       if (selected.length !== 1) reject();
       const row = selected[0];
+      // Neither selected role may lose its explicit PID or be normalised to 0.
+      if (!Object.hasOwn(row, 'pid')) reject();
       jsonData(row.pm2_env);
       const pm2_env = JSON.parse(JSON.stringify(row.pm2_env));
       if (!isDeepStrictEqual(pm2_env, row.pm2_env)) reject();

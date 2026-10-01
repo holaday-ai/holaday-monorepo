@@ -801,6 +801,51 @@ test('cloud managers privately returns only the ordered fixed pair with lossless
   assert.deepEqual(f.vnc.pm2_env.args, ['--retained', 'literal value']);
 });
 
+test('cloud managers preserves fixed-pair facts when unrelated PM2 records omit pid', async () => {
+  const f = cloudManagersFixture();
+  Reflect.deleteProperty(f.unrelated, 'pid');
+  const result = await firstRuntime.readFirstCutoverCloudManagers(f.io);
+  assert.deepEqual(
+    result.map(({ name, pid }) => ({ name, pid })),
+    [
+      { name: 'holaday-vnc', pid: 40 },
+      { name: 'holaday-chromium-headed', pid: 41 },
+    ],
+  );
+  assert.equal(Object.hasOwn(f.unrelated, 'pid'), false, 'never infer a stopped pid');
+  assert.deepEqual(f.calls, [{ method: 'getMonitorData', payload: {} }]);
+});
+for (const role of ['vnc', 'headed']) {
+  test(`cloud managers still refuses omitted pid on the fixed ${role} role`, async () => {
+    const f = cloudManagersFixture();
+    Reflect.deleteProperty(f[role], 'pid');
+    await assert.rejects(firstRuntime.readFirstCutoverCloudManagers(f.io), /MANAGERS_UNPROVEN/);
+  });
+}
+for (const fault of ['duplicate-id', 'role-mismatch', 'accessor-pid', 'invalid-present-pid']) {
+  test(`cloud managers refuses unrelated ${fault} despite optional pid`, async () => {
+    const f = cloudManagersFixture();
+    Reflect.deleteProperty(f.unrelated, 'pid');
+    let getterCalled = false;
+    if (fault === 'duplicate-id') {
+      f.unrelated.pm_id = f.vnc.pm_id;
+      f.unrelated.pm2_env.pm_id = f.vnc.pm_id;
+    }
+    if (fault === 'role-mismatch') f.unrelated.pm2_env.name = f.vnc.name;
+    if (fault === 'invalid-present-pid') f.unrelated.pid = undefined;
+    if (fault === 'accessor-pid')
+      Object.defineProperty(f.unrelated, 'pid', {
+        enumerable: true,
+        get() {
+          getterCalled = true;
+          throw Error('must not execute a getter');
+        },
+      });
+    await assert.rejects(firstRuntime.readFirstCutoverCloudManagers(f.io), /MANAGERS_UNPROVEN/);
+    assert.equal(getterCalled, false);
+  });
+}
+
 test('cloud managers reads the stopped pair without interpreting it as recovery proof', async () => {
   const f = cloudManagersFixture();
   for (const row of [f.vnc, f.headed]) {
