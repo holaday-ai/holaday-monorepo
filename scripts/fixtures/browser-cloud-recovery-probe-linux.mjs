@@ -328,7 +328,8 @@ async function processIdentity(pid) {
       .split(/\s+/);
     return { pid, ppid: Number(fields[1]), state: fields[0], start: fields[19] };
   } catch (error) {
-    if (error.code === 'ENOENT') return null;
+    // procfs may open successfully, then return ESRCH after this exact process exits.
+    if (error.code === 'ENOENT' || error.code === 'ESRCH') return null;
     throw error;
   }
 }
