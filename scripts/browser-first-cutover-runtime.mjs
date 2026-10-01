@@ -623,6 +623,313 @@ export async function readFirstCutoverCloudRecoverySources(input, overrides = {}
   }
 }
 
+/** Native daemon execution context for the existing recovery gate. This binds
+ * current kernel restrictions, the loaded Node inode and audited PM2 source
+ * chronology. It does not prove stopped services, display exclusivity, dynamic
+ * library closure or successful recovery, and never authorizes an effect.
+ * An unavailable security label remains explicit unknown evidence.
+ */
+export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    arch: process.arch,
+    uid: process.getuid?.(),
+    now: Date.now,
+    hostname,
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_CONTEXT_UNPROVEN');
+  };
+  try {
+    if (
+      Object.keys(input ?? {}).join(',') !== 'sources' ||
+      io.platform !== 'linux' ||
+      !['arm64', 'x64'].includes(io.arch) ||
+      io.uid !== 0
+    )
+      reject();
+    const sources = structuredClone(input.sources);
+    validateFirstCutoverCloudSources(sources, { scope: sources.roles, observed: true });
+    const sha = (v) =>
+      createHash('sha256')
+        .update(Buffer.isBuffer(v) ? v : JSON.stringify(v))
+        .digest('hex');
+    const began = io.now();
+    let last = began;
+    const clock = () => {
+      const now = io.now();
+      if (
+        !Number.isSafeInteger(now) ||
+        now < 0 ||
+        now < last ||
+        now - began > 15000 ||
+        sources.observedAtMs > now ||
+        now - sources.observedAtMs > 60000
+      )
+        reject();
+      last = now;
+      return now;
+    };
+    clock();
+    const sameStat = (a, b) =>
+      ['dev', 'ino', 'uid', 'gid', 'mode', 'size', 'mtimeMs', 'ctimeMs'].every(
+        (k) => a[k] === b[k],
+      );
+    const records = new Map();
+    const bounded = async (path, limit = 65536) => {
+      clock();
+      const handle = await io.open(
+        path,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      try {
+        const before = await handle.stat();
+        const bytes = Buffer.alloc(limit + 1);
+        let size = 0;
+        while (size < bytes.length) {
+          const { bytesRead } = await handle.read(bytes, size, bytes.length - size, size);
+          if (!Number.isSafeInteger(bytesRead) || bytesRead < 0 || bytesRead > bytes.length - size)
+            reject();
+          if (!bytesRead) break;
+          size += bytesRead;
+        }
+        if (
+          size > limit ||
+          !sameStat(before, await handle.stat()) ||
+          !sameStat(before, await io.lstat(path))
+        )
+          reject();
+        return bytes.subarray(0, size);
+      } finally {
+        await handle.close();
+      }
+    };
+    const text = async (path, limit) => {
+      const bytes = await bounded(path, limit);
+      const value = bytes.toString('utf8');
+      if (!Buffer.from(value).equals(bytes)) reject();
+      return value;
+    };
+    const optional = async (path) => {
+      try {
+        return await text(path);
+      } catch (error) {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      }
+    };
+    const protectedPath = async (path) => {
+      if (!path.startsWith('/') || posix.normalize(path) !== path) reject();
+      const parts = path.slice(1).split('/');
+      let current = '';
+      for (let i = -1; i < parts.length; i++) {
+        current = i < 0 ? '/' : posix.join(current, parts[i]);
+        const st = await io.lstat(current);
+        if (
+          st.uid !== 0 ||
+          st.gid !== 0 ||
+          st.mode & 0o7022 ||
+          (i < parts.length - 1 ? !st.isDirectory() : !st.isFile()) ||
+          (await io.realpath(current)) !== current
+        )
+          reject();
+        if (records.has(current) && !sameStat(records.get(current), st)) reject();
+        records.set(current, st);
+      }
+      return records.get(path);
+    };
+    const boot = await text('/proc/sys/kernel/random/boot_id', 128);
+    if (boot.trim() !== sources.bootId || io.hostname() !== sources.hostname) reject();
+    const rawPid = await text('/root/.pm2/pm2.pid', 64);
+    if (!/^[1-9][0-9]*\n?$/.test(rawPid)) reject();
+    const pid = Number(rawPid.trim());
+    if (!Number.isSafeInteger(pid) || pid <= 1) reject();
+    const root = `/proc/${pid}`;
+    const field = (status, key) => {
+      const rows = status.split('\n').filter((line) => line.startsWith(`${key}:`));
+      if (rows.length !== 1) reject();
+      return rows[0].slice(key.length + 1).trim();
+    };
+    const sample = async () => {
+      const raw = await text(`${root}/stat`);
+      const parts = raw
+        .slice(raw.lastIndexOf(')') + 2)
+        .trim()
+        .split(/\s+/);
+      if (
+        !raw.startsWith(`${pid} (`) ||
+        !['R', 'S', 'D', 'I'].includes(parts[0]) ||
+        !/^[0-9]+$/.test(parts[19])
+      )
+        reject();
+      const cmd = await text(`${root}/cmdline`);
+      if (cmd.replace(/\0+$/, '') !== 'PM2 v6.0.14: God Daemon (/root/.pm2)') reject();
+      const status = await text(`${root}/status`);
+      const selected = {};
+      for (const key of [
+        'Uid',
+        'Gid',
+        'CapEff',
+        'CapPrm',
+        'CapBnd',
+        'CapInh',
+        'CapAmb',
+        'NoNewPrivs',
+        'Seccomp',
+      ])
+        selected[key] = field(status, key);
+      for (const key of ['Uid', 'Gid']) if (!/^0\s+0\s+0\s+0$/.test(selected[key])) reject();
+      if (selected.NoNewPrivs !== '0' || selected.Seccomp !== '0') reject();
+      for (const key of ['CapEff', 'CapPrm', 'CapBnd', 'CapInh', 'CapAmb']) {
+        if (!/^[a-f0-9]{1,16}$/.test(selected[key])) reject();
+        if (
+          ['CapEff', 'CapPrm', 'CapBnd'].includes(key) &&
+          (BigInt(`0x${selected[key]}`) & 0x200100n) !== 0x200100n
+        )
+          reject();
+      }
+      // getprocattr may have no label provider. Preserve unavailability as
+      // unknown evidence; consumers must never equate it with unconfined.
+      let securityLabel;
+      try {
+        const label = await text(`${root}/attr/current`);
+        if (label.trim() !== 'unconfined') reject();
+        securityLabel = { kind: 'observed', value: 'unconfined' };
+      } catch (error) {
+        if (!['ENOENT', 'EINVAL'].includes(error.code)) throw error;
+        securityLabel = { kind: 'unavailable', reason: error.code };
+      }
+      const selinux = await optional('/sys/fs/selinux/enforce');
+      if (selinux !== null && selinux.trim() !== '0') reject();
+      const namespaces = {};
+      for (const name of ['mnt', 'user', 'net']) {
+        const value = await io.readlink(`${root}/ns/${name}`);
+        if (
+          !new RegExp(`^${name}:\\[\\d+\\]$`).test(value) ||
+          value !== (await io.readlink(`/proc/1/ns/${name}`))
+        )
+          reject();
+        namespaces[name] = value;
+      }
+      const node = await io.readlink(`${root}/exe`);
+      if (!['/opt/node22/bin/node', '/usr/bin/node'].includes(node)) reject();
+      const disk = await protectedPath(node);
+      if (!(disk.mode & 0o111) || !sameStat(disk, await io.stat(`${root}/exe`))) reject();
+      const controls = [];
+      for (const entry of (await text(`${root}/environ`, 262144)).split('\0')) {
+        const at = entry.indexOf('=');
+        const key = entry.slice(0, at);
+        if (!/^(?:LD_|NODE_|PM2_NODE_OPTIONS$)/.test(key)) continue;
+        const value = entry.slice(at + 1);
+        if (controls.some(([old]) => old === key)) reject();
+        if (
+          value &&
+          !(key === 'NODE_OPTIONS' && /^--max-old-space-size=[1-9][0-9]{0,5}$/.test(value)) &&
+          !(key === 'NODE_CHANNEL_FD' && value === '3') &&
+          !(key === 'NODE_CHANNEL_SERIALIZATION_MODE' && value === 'json')
+        )
+          reject();
+        controls.push([key, value]);
+      }
+      // PM2 6.0.14 starts its daemon with stdio [null, out, err, 'ipc'].
+      // /proc retains Node's original bootstrap pair after JS removes it from
+      // process.env. This is not a module-loader option or live-FD ownership proof.
+      const ipc = Object.fromEntries(controls);
+      if (
+        (Object.hasOwn(ipc, 'NODE_CHANNEL_FD') ||
+          Object.hasOwn(ipc, 'NODE_CHANNEL_SERIALIZATION_MODE')) &&
+        (ipc.NODE_CHANNEL_FD !== '3' || ipc.NODE_CHANNEL_SERIALIZATION_MODE !== 'json')
+      )
+        reject();
+      return {
+        start: parts[19],
+        selected,
+        namespaces,
+        node,
+        nodeStat: Object.fromEntries(
+          ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].map((k) => [k, disk[k]]),
+        ),
+        controls,
+        securityLabel,
+        selinux,
+      };
+    };
+    const before = await sample();
+    const auxv = await bounded('/proc/self/auxv', 8192);
+    if (auxv.length % 16) reject();
+    let hz;
+    let terminated = false;
+    for (let i = 0; i < auxv.length; i += 16) {
+      const key = auxv.readBigUInt64LE(i);
+      const value = auxv.readBigUInt64LE(i + 8);
+      if (terminated) {
+        if (key !== 0n || value !== 0n) reject();
+        continue;
+      }
+      if (key === 0n) {
+        if (value !== 0n) reject();
+        terminated = true;
+      }
+      if (key === 17n) {
+        if (hz !== undefined || value <= 0n || value > 1000000n) reject();
+        hz = Number(value);
+      }
+    }
+    if (!terminated || hz === undefined) reject();
+    const btime = (await text('/proc/stat')).match(/^btime ([0-9]+)$/gm);
+    if (btime?.length !== 1) reject();
+    const startedAtMs = (Number(btime[0].slice(6)) + Number(before.start) / hz) * 1000;
+    if (!Number.isFinite(startedAtMs) || startedAtMs < 0 || startedAtMs > began) reject();
+    const chronology = [];
+    for (const suffix of [
+      'package.json',
+      'lib/God.js',
+      'lib/God/ForkMode.js',
+      'lib/Utility.js',
+      'lib/God/ActionMethods.js',
+    ]) {
+      const path = `/usr/lib/node_modules/pm2/${suffix}`;
+      const st = await protectedPath(path);
+      const approved = sources.files.find((f) => f.path === path);
+      if (
+        !approved ||
+        approved.resolvedPath !== path ||
+        st.mtimeMs >= startedAtMs ||
+        st.ctimeMs >= startedAtMs ||
+        st.size !== approved.size ||
+        sha(await bounded(path, 524288)) !== approved.digest
+      )
+        reject();
+      chronology.push([path, st.dev, st.ino, st.mtimeMs, st.ctimeMs]);
+    }
+    if (
+      !isDeepStrictEqual(before, await sample()) ||
+      rawPid !== (await text('/root/.pm2/pm2.pid', 64)) ||
+      boot !== (await text('/proc/sys/kernel/random/boot_id', 128)) ||
+      io.hostname() !== sources.hostname
+    )
+      reject();
+    for (const [path, st] of records) if (!sameStat(st, await io.lstat(path))) reject();
+    const { observedAtMs: _time, ...material } = sources;
+    return {
+      hostname: sources.hostname,
+      bootId: sources.bootId,
+      observedAtMs: clock(),
+      sourcesDigest: sha(material),
+      daemon: {
+        pid,
+        start: before.start,
+        securityLabel: before.securityLabel,
+        contextDigest: sha({ before, chronology }),
+      },
+    };
+  } catch {
+    reject();
+  }
+}
+
 const hash = (x) => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
 
 // executeApp flattens nested env after current_conf. Preserve matching and

@@ -235,6 +235,254 @@ for (const location of ['top-level', 'nested']) {
     });
   }
 }
+async function recoveryContextFixture() {
+  const f = await sourceNativeFixture();
+  f.add('/proc/40/stat', `40 (PM2 daemon) S 1 ${Array(17).fill('0').join(' ')} 50\n`);
+  f.add(
+    '/proc/40/status',
+    'Uid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nCapEff:\t0000000000200100\nCapPrm:\t0000000000200100\nCapBnd:\t0000000000200100\nCapInh:\t0000000000000000\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\n',
+  );
+  f.add('/proc/40/attr/current', 'unconfined\n');
+  f.add('/proc/stat', 'btime 0\n');
+  const auxv = Buffer.alloc(32);
+  auxv.writeBigUInt64LE(17n, 0);
+  auxv.writeBigUInt64LE(100n, 8);
+  f.add('/proc/self/auxv', auxv);
+  f.add('/opt/node22/bin/node', 'synthetic node');
+  const namespaces = new Map();
+  for (const pid of [1, 40])
+    for (const ns of ['mnt', 'user', 'net']) namespaces.set(`/proc/${pid}/ns/${ns}`, `${ns}:[10]`);
+  namespaces.set('/proc/40/exe', '/opt/node22/bin/node');
+  f.io.readlink = async (p) => {
+    assert.ok(namespaces.has(p), p);
+    return namespaces.get(p);
+  };
+  f.io.stat = (p) => f.io.lstat(p === '/proc/40/exe' ? '/opt/node22/bin/node' : p);
+  f.io.arch = 'arm64';
+  const sources = await firstRuntime.readFirstCutoverCloudRecoverySources(f.input, f.io);
+  return { ...f, sources, namespaces };
+}
+test('cloud recovery context binds native daemon and source chronology without exposing environment', async () => {
+  const f = await recoveryContextFixture();
+  const original = structuredClone(f.sources);
+  const proof = await firstRuntime.readFirstCutoverCloudRecoveryContext(
+    { sources: f.sources },
+    f.io,
+  );
+  assert.equal(proof.daemon.pid, 40);
+  assert.equal(proof.daemon.start, '50');
+  assert.deepEqual(proof.daemon.securityLabel, { kind: 'observed', value: 'unconfined' });
+  assert.equal(proof.hostname, f.sources.hostname);
+  assert.equal(proof.bootId, f.sources.bootId);
+  assert.match(proof.sourcesDigest, /^[a-f0-9]{64}$/);
+  assert.match(proof.daemon.contextDigest, /^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(proof).includes('never-export-this'), false);
+  assert.equal(Object.hasOwn(proof, 'recoveryReady'), false);
+  assert.deepEqual(f.sources, original);
+});
+for (const fault of [
+  'platform',
+  'arch',
+  'uid',
+  'stale',
+  'future',
+  'hostname',
+  'boot',
+  'extra',
+  'cap-effective',
+  'cap-permitted',
+  'cap-bounding',
+  'setpcap',
+  'uid-row',
+  'seccomp',
+  'nnp',
+  'apparmor',
+  'selinux',
+  'namespace',
+  'deleted-node',
+  'node-inode',
+  'node-writable',
+  'loader-env',
+  'node-path',
+  'duplicate-env',
+  'source-ctime',
+  'source-bytes',
+  'clock-ticks',
+  'daemon-drift',
+  'source-drift',
+  'clock-backward',
+]) {
+  test(`cloud recovery context refuses ${fault}`, async () => {
+    const f = await recoveryContextFixture();
+    const input = { sources: f.sources };
+    const replace = (p, a, b) => f.data.set(p, Buffer.from(f.data.get(p).toString().replace(a, b)));
+    if (fault === 'platform') f.io.platform = 'darwin';
+    if (fault === 'arch') f.io.arch = 'unknown';
+    if (fault === 'uid') f.io.uid = 1;
+    if (fault === 'stale') f.io.now = () => 62000;
+    if (fault === 'future') f.sources.observedAtMs = 1001;
+    if (fault === 'hostname') f.io.hostname = () => 'other';
+    if (fault === 'boot')
+      f.data.set(
+        '/proc/sys/kernel/random/boot_id',
+        Buffer.from('22222222-2222-4222-8222-222222222222\n'),
+      );
+    if (fault === 'extra') input.trusted = true;
+    for (const [label, key] of [
+      ['cap-effective', 'CapEff'],
+      ['cap-permitted', 'CapPrm'],
+      ['cap-bounding', 'CapBnd'],
+    ])
+      if (fault === label)
+        replace('/proc/40/status', `${key}:\t0000000000200100`, `${key}:\t0000000000000100`);
+    if (fault === 'setpcap')
+      replace('/proc/40/status', 'CapEff:\t0000000000200100', 'CapEff:\t0000000000200000');
+    if (fault === 'uid-row') replace('/proc/40/status', 'Uid:\t0\t0\t0\t0', 'Uid:\t0\t1\t0\t0');
+    if (fault === 'seccomp') replace('/proc/40/status', 'Seccomp:\t0', 'Seccomp:\t2');
+    if (fault === 'nnp') replace('/proc/40/status', 'NoNewPrivs:\t0', 'NoNewPrivs:\t1');
+    if (fault === 'apparmor') f.add('/proc/40/attr/current', 'unreviewed-profile\n');
+    if (fault === 'selinux') f.add('/sys/fs/selinux/enforce', '1\n');
+    if (fault === 'namespace') f.namespaces.set('/proc/40/ns/mnt', 'mnt:[11]');
+    if (fault === 'deleted-node')
+      f.namespaces.set('/proc/40/exe', '/opt/node22/bin/node (deleted)');
+    if (fault === 'node-inode') {
+      const stat = f.io.stat;
+      f.io.stat = async (p) => ({ ...(await stat(p)), ino: p });
+    }
+    if (fault === 'node-writable') f.modes.set('/opt/node22/bin/node', 0o100777);
+    if (fault === 'loader-env') f.add('/proc/40/environ', 'NODE_OPTIONS=--require=/private.js\0');
+    if (fault === 'node-path') f.add('/proc/40/environ', 'NODE_PATH=/private\0');
+    if (fault === 'duplicate-env') f.add('/proc/40/environ', 'NODE_OPTIONS=\0NODE_OPTIONS=\0');
+    const source = '/usr/lib/node_modules/pm2/lib/God.js';
+    if (fault === 'source-ctime') {
+      const stat = f.io.lstat;
+      f.io.lstat = async (p) => ({ ...(await stat(p)), ...(p === source ? { ctimeMs: 900 } : {}) });
+    }
+    if (fault === 'source-bytes') f.add(source, 'changed');
+    if (fault === 'clock-ticks') f.data.get('/proc/self/auxv').writeBigUInt64LE(0n, 8);
+    if (fault === 'daemon-drift') {
+      const readlink = f.io.readlink;
+      let n = 0;
+      f.io.readlink = async (p) =>
+        p === '/proc/40/exe' && ++n > 1 ? '/usr/bin/node' : readlink(p);
+    }
+    if (fault === 'source-drift') {
+      const stat = f.io.lstat;
+      let n = 0;
+      f.io.lstat = async (p) => ({
+        ...(await stat(p)),
+        ...(p === source && ++n > 1 ? { mtimeMs: 2 } : {}),
+      });
+    }
+    if (fault === 'clock-backward') {
+      let n = 0;
+      f.io.now = () => (++n < 3 ? 1000 : 999);
+    }
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudRecoveryContext(input, f.io),
+      /CUTOVER_CLOUD_CONTEXT_UNPROVEN/,
+    );
+  });
+}
+for (const code of ['EINVAL', 'ENOENT']) {
+  test(`cloud recovery context preserves unavailable label ${code} as unknown`, async () => {
+    const f = await recoveryContextFixture();
+    const open = f.io.open;
+    f.io.open = async (p, ...args) => {
+      if (p === '/proc/40/attr/current') throw Object.assign(new Error('unavailable'), { code });
+      return open(p, ...args);
+    };
+    const result = await firstRuntime.readFirstCutoverCloudRecoveryContext(
+      { sources: f.sources },
+      f.io,
+    );
+    assert.deepEqual(result.daemon.securityLabel, { kind: 'unavailable', reason: code });
+    assert.equal(Object.hasOwn(result, 'recoveryReady'), false);
+  });
+}
+for (const [path, code] of [
+  ['/proc/40/attr/current', 'EACCES'],
+  ['/proc/40/environ', 'EINVAL'],
+  ['/usr/lib/node_modules/pm2/lib/God.js', 'EINVAL'],
+]) {
+  test(`cloud recovery context refuses ${code} outside missing-label observation ${path}`, async () => {
+    const f = await recoveryContextFixture();
+    const open = f.io.open;
+    f.io.open = async (p, ...args) => {
+      if (p === path) throw Object.assign(new Error('unreadable'), { code });
+      return open(p, ...args);
+    };
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudRecoveryContext({ sources: f.sources }, f.io),
+      /CUTOVER_CLOUD_CONTEXT_UNPROVEN/,
+    );
+  });
+}
+test('cloud recovery context refuses a changing security-label availability', async () => {
+  const f = await recoveryContextFixture();
+  const open = f.io.open;
+  let labels = 0;
+  f.io.open = async (p, ...args) => {
+    if (p === '/proc/40/attr/current' && ++labels > 1)
+      throw Object.assign(new Error('unavailable'), { code: 'EINVAL' });
+    return open(p, ...args);
+  };
+  await assert.rejects(
+    firstRuntime.readFirstCutoverCloudRecoveryContext({ sources: f.sources }, f.io),
+    /CUTOVER_CLOUD_CONTEXT_UNPROVEN/,
+  );
+});
+for (const path of ['/opt/node22/bin', '/opt/node22/bin/node']) {
+  for (const owner of ['uid', 'gid']) {
+    test(`cloud recovery context refuses unprotected Node ${owner} at ${path}`, async () => {
+      const f = await recoveryContextFixture();
+      const lstat = f.io.lstat;
+      f.io.lstat = async (p) => ({ ...(await lstat(p)), ...(p === path ? { [owner]: 1000 } : {}) });
+      await assert.rejects(
+        firstRuntime.readFirstCutoverCloudRecoveryContext({ sources: f.sources }, f.io),
+        /CUTOVER_CLOUD_CONTEXT_UNPROVEN/,
+      );
+    });
+  }
+}
+for (const [name, environment, allowed] of [
+  ['native-pair', 'NODE_CHANNEL_FD=3\0NODE_CHANNEL_SERIALIZATION_MODE=json\0', true],
+  ['missing-mode', 'NODE_CHANNEL_FD=3\0', false],
+  ['missing-fd', 'NODE_CHANNEL_SERIALIZATION_MODE=json\0', false],
+  ['wrong-fd', 'NODE_CHANNEL_FD=4\0NODE_CHANNEL_SERIALIZATION_MODE=json\0', false],
+  ['invalid-fd', 'NODE_CHANNEL_FD=3x\0NODE_CHANNEL_SERIALIZATION_MODE=json\0', false],
+  ['empty-fd', 'NODE_CHANNEL_FD=\0NODE_CHANNEL_SERIALIZATION_MODE=json\0', false],
+  ['other-mode', 'NODE_CHANNEL_FD=3\0NODE_CHANNEL_SERIALIZATION_MODE=advanced\0', false],
+  ['empty-mode', 'NODE_CHANNEL_FD=3\0NODE_CHANNEL_SERIALIZATION_MODE=\0', false],
+  [
+    'duplicate-fd',
+    'NODE_CHANNEL_FD=3\0NODE_CHANNEL_FD=3\0NODE_CHANNEL_SERIALIZATION_MODE=json\0',
+    false,
+  ],
+  [
+    'loader-alongside-ipc',
+    'NODE_CHANNEL_FD=3\0NODE_CHANNEL_SERIALIZATION_MODE=json\0NODE_OPTIONS=--require=/private.js\0',
+    false,
+  ],
+]) {
+  test(`cloud recovery context PM2 bootstrap IPC ${name}`, async () => {
+    const f = await recoveryContextFixture();
+    f.add('/proc/40/environ', environment);
+    if (allowed) {
+      const result = await firstRuntime.readFirstCutoverCloudRecoveryContext(
+        { sources: f.sources },
+        f.io,
+      );
+      assert.equal(result.daemon.pid, 40);
+      assert.equal(JSON.stringify(result).includes('NODE_CHANNEL'), false);
+    } else {
+      await assert.rejects(
+        firstRuntime.readFirstCutoverCloudRecoveryContext({ sources: f.sources }, f.io),
+        /CUTOVER_CLOUD_CONTEXT_UNPROVEN/,
+      );
+    }
+  });
+}
 const pythonUserSitePaths = [
   '/root/.local',
   '/root/.local/lib',

@@ -37,6 +37,7 @@ import {
   readFirstCutoverCloudBrowserRecovery,
   readFirstCutoverCloudRecovery,
   readFirstCutoverCloudRecoveryCensus,
+  readFirstCutoverCloudRecoveryContext,
   restoreFirstCutoverCloudBrowser,
 } from '../browser-first-cutover-runtime.mjs';
 import { acquireReleaseJournal } from '../browser-maintenance-journal.mjs';
@@ -334,6 +335,21 @@ async function restoreSameRegistration(recovery) {
     },
   };
   restoreMaintenanceEndsAtMs = input.maintenanceEndsAtMs;
+  if (jointRecovery) {
+    const sources = await readJointSources(attempt);
+    const context = await readFirstCutoverCloudRecoveryContext({ sources });
+    assert.equal(context.hostname, sources.hostname);
+    assert.equal(context.bootId, sources.bootId);
+    assert.equal((await restoreJournal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 4);
+    console.log(
+      JSON.stringify({
+        marker: 'CLOUD_NATIVE_RECOVERY_CONTEXT_OBSERVED',
+        securityLabel: context.daemon.securityLabel,
+        beforeRecoveryIntent: true,
+        productionPreflight: false,
+      }),
+    );
+  }
   if (!deniedRecovery) {
     // Capture AFTER the original lifetime was proved stopped, before the one
     // product dispatch. Never seed this baseline from the recovered process set.
