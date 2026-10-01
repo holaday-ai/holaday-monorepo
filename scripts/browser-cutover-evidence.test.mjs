@@ -573,6 +573,22 @@ test('scope changing during provider requests cannot publish a partial success',
   await assert.rejects(collectCutoverEvidence(f.input, f.io), /MAINTENANCE_PAYMENT_SCOPE_CHANGED/);
   assert.deepEqual(f.published, []);
 });
+for (const mutation of ['added-order', 'removed-order']) {
+  test(`order set ${mutation} during provider requests cannot publish partial success`, async () => {
+    const f = fixture();
+    f.io.queryOrders = async () => {
+      if (mutation === 'added-order')
+        f.scope.orders.push({ ...f.scope.orders[0], orderRef: '9'.repeat(64) });
+      else f.scope.orders.pop();
+      return f.observations;
+    };
+    await assert.rejects(
+      collectCutoverEvidence(f.input, f.io),
+      /MAINTENANCE_PAYMENT_SCOPE_CHANGED/,
+    );
+    assert.deepEqual(f.published, []);
+  });
+}
 function preparingWithProducer() {
   const f = fixture();
   const producer = { host: 'vultr', pid: 501, start: '2000', role: 'main', ports: [4001, 4002] };
@@ -1157,7 +1173,10 @@ test('first site database connection preserves both exact deferrals and never re
     binding,
     approval: { ...binding, maintenanceEndsAtMs: 200_000 },
     root: `/opt/holaday-releases/${binding.candidate}`,
-    journal: { assertOwnership: async () => binding },
+    journal: {
+      assertOwnership: async () => binding,
+      readFirstCutoverEffects: async () => ({ ...binding, phase: 'prepared' }),
+    },
   };
   let closed = 0;
   const io = {
@@ -3157,6 +3176,7 @@ test('nginx malformed, duplicate, oversized and failed observations never become
 });
 
 async function publisherFixture(t) {
+  const applicationGid = process.getgid() || 998; // Explicit synthetic application group on root Linux QA.
   const directory = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'holaday-cutover-publish-')));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   await fs.mkdir(join(directory, 'evidence'), { mode: 0o750 });
@@ -3167,6 +3187,7 @@ async function publisherFixture(t) {
     new Proxy(s, {
       get(target, key) {
         if (key === 'uid') return 0;
+        if (key === 'gid') return applicationGid;
         const value = Reflect.get(target, key);
         return typeof value === 'function' ? value.bind(target) : value;
       },
@@ -3190,7 +3211,7 @@ async function publisherFixture(t) {
         },
         chown: async (uid, gid) => {
           assert.equal(uid, 0);
-          assert.equal(gid, process.getgid());
+          assert.equal(gid, applicationGid);
         },
         chmod: (mode) => handle.chmod(mode),
         close: () => handle.close(),
@@ -3205,7 +3226,7 @@ async function publisherFixture(t) {
   const report = await collectCutoverEvidence(f.input, f.io);
   const evidence = f.published[0];
   const options = {
-    applicationGid: process.getgid(),
+    applicationGid,
     assertJournalOwnership: async () => f.binding,
   };
   return { directory, io, events, report, evidence, options };
@@ -3347,4 +3368,49 @@ test('host snapshot does not infer Brave association from a crashpad process tit
     result.processes.some((p) => p.pid === 60),
     false,
   );
+});
+
+test('recovery census recollects the complete pair after one transient ENOENT without dropping a userspace process', async () => {
+  const { readFirstCutoverCloudRecoveryCensus: read } = await import(
+    './browser-first-cutover-runtime.mjs'
+  );
+  const f = recoveryCensusFixture();
+  const open = f.io.open;
+  let failures = 0;
+  let enumerations = 0;
+  f.io.readdir = async () => {
+    enumerations++;
+    return [...f.names];
+  };
+  f.io.open = async (path, ...args) => {
+    if (path === '/proc/40/status' && failures++ === 0)
+      throw Object.assign(new Error('gone'), { code: 'ENOENT' });
+    return open(path, ...args);
+  };
+  const value = await read(f.io);
+  assert.ok(enumerations >= 3);
+  assert.deepEqual(
+    value.processes.map((p) => p.pid),
+    [1, 20, 40],
+  );
+});
+
+test('recovery census limits complete recollection and never retries permission or identity faults', async () => {
+  const { readFirstCutoverCloudRecoveryCensus: read } = await import(
+    './browser-first-cutover-runtime.mjs'
+  );
+  for (const code of ['ENOENT', 'EACCES']) {
+    const f = recoveryCensusFixture();
+    const open = f.io.open;
+    let failures = 0;
+    f.io.open = async (path, ...args) => {
+      if (path === '/proc/40/status') {
+        failures++;
+        throw Object.assign(new Error('unavailable'), { code });
+      }
+      return open(path, ...args);
+    };
+    await assert.rejects(read(f.io), /CUTOVER_CLOUD_RECOVERY_CENSUS_UNPROVEN/);
+    assert.equal(failures, code === 'ENOENT' ? 3 : 1);
+  }
 });

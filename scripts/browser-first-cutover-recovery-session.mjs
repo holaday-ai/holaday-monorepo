@@ -1,3 +1,4 @@
+import { ingressDiagnosticError } from './browser-first-cutover-ingress-diagnostics.mjs';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
@@ -10,8 +11,8 @@ import {
 } from './browser-first-cutover-backup.mjs';
 import { createFirstCutoverSessionWire } from './browser-first-cutover-ingress-session.mjs';
 
-const fail = () => {
-  throw new Error('CUTOVER_RECOVERY_SESSION_UNPROVEN');
+const fail = (stage, previous) => {
+  throw ingressDiagnosticError('CUTOVER_RECOVERY_SESSION_UNPROVEN', stage, previous);
 };
 const hash = (v) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
 const uuid = (v) =>
@@ -106,6 +107,7 @@ function optionsValid(v, attempt) {
  */
 export async function readFirstCutoverRecoveryScope(request) {
   let handle;
+  let stage = 'RECOVERY_SCOPE_ENTRY';
   try {
     if (
       !keys(request, ['directory', 'attempt', 'scopeDigest']) ||
@@ -125,11 +127,14 @@ export async function readFirstCutoverRecoveryScope(request) {
       s.nlink === 1 &&
       s.size > 0 &&
       s.size <= 1024 * 1024;
+    stage = 'RECOVERY_SCOPE_FOLDER';
     const beforeDirectory = await fs.lstat(directory);
     if (!privateDir(beforeDirectory) || (await fs.realpath(directory)) !== directory) fail();
+    stage = 'RECOVERY_SCOPE_FILE';
     handle = await fs.open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const before = await handle.stat();
     if (!privateFile(before)) fail();
+    stage = 'RECOVERY_SCOPE_CONTENT';
     const bytes = await handle.readFile();
     const after = await handle.stat();
     const current = await fs.lstat(path);
@@ -148,6 +153,7 @@ export async function readFirstCutoverRecoveryScope(request) {
       createHash('sha256').update(bytes).digest('hex') !== request.scopeDigest
     )
       fail();
+    stage = 'RECOVERY_SCOPE_SHAPE';
     const scope = JSON.parse(bytes.toString('utf8'));
     if (
       !keys(scope, [
@@ -166,12 +172,14 @@ export async function readFirstCutoverRecoveryScope(request) {
       !absolute(scope.identityFile)
     )
       fail();
+    stage = 'RECOVERY_SCOPE_RUNTIME';
     if (
       Object.hasOwn(scope, 'runtime') &&
       (!keys(scope.runtime, ['manifestDigest', 'nodeDigest', 'toolDigest']) ||
         !Object.values(scope.runtime).every(hash))
     )
       fail();
+    stage = 'RECOVERY_SCOPE_TARGET';
     const target = scope.target;
     if (
       !keys(target, ['containerId', 'imageId', 'volume', 'attempt', 'identity']) ||
@@ -181,14 +189,18 @@ export async function readFirstCutoverRecoveryScope(request) {
       target.volume !== `holaday-cutover-restore-${request.attempt}`
     )
       fail();
+    stage = 'RECOVERY_SCOPE_PUBLIC';
     publicValid(publicScope(scope, request.scopeDigest), Date.now());
+    stage = 'RECOVERY_SCOPE_SOURCE_OPTIONS';
     optionsValid(scope.sourceOptions, request.attempt);
+    stage = 'RECOVERY_SCOPE_DESTINATION_OPTIONS';
     optionsValid(scope.destination, request.attempt);
+    stage = 'RECOVERY_SCOPE_RECIPIENT';
     if (scope.sourceOptions.facility.recipientDigest !== scope.destination.facility.recipientDigest)
       fail();
     return scope;
-  } catch {
-    fail();
+  } catch (error) {
+    fail(stage, error);
   } finally {
     await handle?.close();
   }
@@ -208,14 +220,19 @@ export async function serveFirstCutoverRecoverySession(request, overrides = {}) 
     ...overrides,
   };
   let channel;
+  let stage = 'RECOVERY_SERVER_ENTRY';
   try {
+    stage = 'RECOVERY_SERVER_SCOPE_READ';
     const scope = structuredClone(await io.readScope(request));
     const approved = publicScope(scope, request.scopeDigest);
+    stage = 'RECOVERY_SERVER_PUBLIC';
     publicValid(approved, io.now());
     channel = createFirstCutoverSessionWire(io.input, io.output, scope.maintenanceEndsAtMs, io.now);
     const guardLocal = async () => {
       channel.assert();
+      stage = 'RECOVERY_SERVER_SCOPE_RECHECK';
       if (!equal(await io.readScope(request), scope)) fail();
+      stage = 'RECOVERY_SERVER_PUBLIC';
       publicValid(approved, io.now());
     };
     let sequence = 0;
@@ -225,7 +242,9 @@ export async function serveFirstCutoverRecoverySession(request, overrides = {}) 
     let migrationAttempted = false;
     let migrated = false;
     for (;;) {
+      stage = 'RECOVERY_SERVER_READ';
       const message = await channel.read();
+      stage = 'RECOVERY_SERVER_ENVELOPE';
       const seq = ++sequence;
       if (
         !keys(message, ['protocol', 'type', 'seq', 'name', 'value']) ||
@@ -243,6 +262,7 @@ export async function serveFirstCutoverRecoverySession(request, overrides = {}) 
       const assertScope = async () => {
         await guardLocal();
         const check = ++scopeSeq;
+        stage = 'RECOVERY_SERVER_SCOPE_SEND';
         await channel.write({
           protocol: 1,
           type: 'scope',
@@ -250,7 +270,9 @@ export async function serveFirstCutoverRecoverySession(request, overrides = {}) 
           scopeSeq: check,
           binding: approved.binding,
         });
+        stage = 'RECOVERY_SERVER_SCOPE_READ_ANSWER';
         const answer = await channel.read();
+        stage = 'RECOVERY_SERVER_SCOPE_ANSWER';
         if (
           !keys(answer, ['protocol', 'type', 'seq', 'scopeSeq', 'binding']) ||
           answer.protocol !== 1 ||
@@ -264,6 +286,7 @@ export async function serveFirstCutoverRecoverySession(request, overrides = {}) 
       };
       let value;
       if (message.name === 'attach') {
+        stage = 'RECOVERY_SERVER_ATTACH_VALUE';
         if (!equal(message.value, approved)) fail();
         await assertScope();
         value = approved;
@@ -333,6 +356,7 @@ export async function serveFirstCutoverRecoverySession(request, overrides = {}) 
         await assertScope();
       }
       await guardLocal();
+      stage = 'RECOVERY_SERVER_RESULT';
       await channel.write({ protocol: 1, type: 'result', seq, value });
       if (message.name === 'detach') {
         // Do not let the owning Mac process close coordinator stdin while its
@@ -342,9 +366,9 @@ export async function serveFirstCutoverRecoverySession(request, overrides = {}) 
         return;
       }
     }
-  } catch {
+  } catch (error) {
     channel?.close();
-    fail();
+    fail(stage, error);
   }
 }
 
@@ -354,6 +378,7 @@ export async function serveFirstCutoverRecoverySession(request, overrides = {}) 
 export async function connectFirstCutoverRecoverySession(input, overrides = {}) {
   const io = { now: Date.now, ...overrides };
   let channel;
+  let stage = 'RECOVERY_CLIENT_ENTRY';
   try {
     const approved = structuredClone(input);
     publicValid(approved, io.now());
@@ -374,22 +399,29 @@ export async function connectFirstCutoverRecoverySession(input, overrides = {}) 
         if (active || failed || closed) fail();
         active = true;
         publicValid(approved, io.now());
+        stage = 'RECOVERY_CLIENT_SCOPE_INITIAL';
         await io.assertScope();
         const seq = ++sequence;
+        stage = 'RECOVERY_CLIENT_SEND';
         await channel.write({ protocol: 1, type: 'operation', seq, name, value });
         let scopeSeq = 0;
         for (;;) {
+          stage = 'RECOVERY_CLIENT_READ';
           const answer = await channel.read();
+          stage = 'RECOVERY_CLIENT_ENVELOPE';
           if (answer?.protocol !== 1 || answer.seq !== seq) fail();
           if (answer.type === 'scope') {
+            stage = 'RECOVERY_CLIENT_SCOPE_MESSAGE';
             if (
               !keys(answer, ['protocol', 'type', 'seq', 'scopeSeq', 'binding']) ||
               answer.scopeSeq !== ++scopeSeq ||
               !equal(answer.binding, approved.binding)
             )
               fail();
+            stage = 'RECOVERY_CLIENT_SCOPE_CHECK';
             await io.assertScope();
             channel.assert();
+            stage = 'RECOVERY_CLIENT_SCOPE_SEND';
             await channel.write({
               protocol: 1,
               type: 'scope-result',
@@ -399,20 +431,22 @@ export async function connectFirstCutoverRecoverySession(input, overrides = {}) 
             });
             continue;
           }
+          stage = 'RECOVERY_CLIENT_RESULT';
           if (
             !keys(answer, ['protocol', 'type', 'seq', 'value']) ||
             answer.type !== 'result' ||
             !resultValid(name, answer.value, approved)
           )
             fail();
+          stage = 'RECOVERY_CLIENT_SCOPE_FINAL';
           await io.assertScope();
           channel.assert();
           return structuredClone(answer.value);
         }
-      } catch {
+      } catch (error) {
         failed = true;
         channel.close();
-        fail();
+        fail(stage, error);
       } finally {
         active = false;
       }
@@ -439,8 +473,8 @@ export async function connectFirstCutoverRecoverySession(input, overrides = {}) 
         channel.close();
       },
     };
-  } catch {
+  } catch (error) {
     channel?.close();
-    fail();
+    fail(stage, error);
   }
 }

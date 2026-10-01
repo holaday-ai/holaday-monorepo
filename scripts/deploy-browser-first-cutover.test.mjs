@@ -30,7 +30,11 @@ async function fixture(t) {
 const fs=require('node:fs');
 fs.appendFileSync(process.env.TEST_EVENTS,JSON.stringify(process.argv.slice(2))+'\\n');
 if(process.env.TEST_CASE==='failed')process.exit(44);
-const value={kind:'coordinator-source-inspection',candidate:'c'.repeat(40),toolDigest:'d'.repeat(64),releaseReady:false};
+const executing=process.argv.at(-1).includes('--execute');
+const value=executing?{kind:'first-cutover-execution-result',candidate:'c'.repeat(40),attempt:'12345678-1234-4234-8234-123456789abc',ok:true,phase:'reconciled'}:{kind:'coordinator-source-inspection',candidate:'c'.repeat(40),toolDigest:'d'.repeat(64),releaseReady:false};
+if(process.env.TEST_CASE==='wrong-attempt')value.attempt='invalid';
+if(process.env.TEST_CASE==='wrong-phase')value.phase='verified';
+if(process.env.TEST_CASE==='unsuccessful')value.ok=false;
 if(process.env.TEST_CASE==='false-ready')value.releaseReady=true;
 if(process.env.TEST_CASE==='wrong-candidate')value.candidate='a'.repeat(40);
 if(process.env.TEST_CASE==='malformed'){console.log('not-json');process.exit(0);}
@@ -66,7 +70,6 @@ for (const args of [
   [candidate],
   [`${candidate};id`, attempt],
   [candidate, 'invalid'],
-  [candidate, attempt, '--execute'],
   [candidate, attempt, '--pid', '910'],
 ]) {
   test(`first entry refuses unsupported target before credentials or SSH: ${args.join(' ')}`, async (t) => {
@@ -103,5 +106,37 @@ for (const mode of ['failed', 'malformed', 'false-ready', 'wrong-candidate']) {
     assert.equal(r.stdout, '');
     assert.equal((await f.events()).length, 2);
     assert.match(r.stderr, /CUTOVER_COORDINATOR_CHECK_UNPROVEN/);
+  });
+}
+
+for (const mode of [
+  'success',
+  'failed',
+  'malformed',
+  'wrong-candidate',
+  'wrong-attempt',
+  'wrong-phase',
+  'unsuccessful',
+]) {
+  test(`execute binds one protected request and never replays unknown result ${mode}`, async (t) => {
+    const f = await fixture(t);
+    const result = f.run([candidate, attempt, '--execute'], mode);
+    assert.equal((await f.events()).length, 2);
+    const argv = JSON.parse((await f.events())[1]);
+    assert(argv.at(-1).includes(` --execute '${attempt}'`));
+    assert.equal(result.status, mode === 'success' ? 0 : 1, result.stderr);
+    if (mode === 'success')
+      assert.deepEqual(JSON.parse(result.stdout), {
+        kind: 'first-cutover-execution-result',
+        candidate,
+        attempt,
+        ok: true,
+        phase: 'reconciled',
+      });
+    else {
+      assert.equal(result.stdout, '');
+      assert.match(result.stderr, /CUTOVER_COORDINATOR_EXECUTION_RESULT_UNKNOWN/);
+    }
+    assert.doesNotMatch(result.stdout + result.stderr, /synthetic-never-print/);
   });
 }

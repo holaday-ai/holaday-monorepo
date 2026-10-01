@@ -21,7 +21,7 @@ test(
     : knownEffect
       ? 'identified lost external effect blocks retirement without replay'
       : 'lost legacy response remains unknown through retirement and restore failure',
-  { timeout: fullHost ? 720000 : 90000 },
+  { timeout: fullHost ? 720000 : 240000 },
   async () => {
     assert.equal(process.platform, 'linux', 'requires the existing isolated Linux QA image');
     assert.ok(
@@ -37,7 +37,7 @@ test(
         knownEffect ? '--execution-site-known-effect' : '--execution-site-lost-effect',
       ],
       {
-        timeout: fullHost ? 660000 : 80000,
+        timeout: fullHost ? 660000 : 220000,
         maxBuffer: 1024 * 1024,
         env: { ...process.env, CUTOVER_QA_HOST: fullHost ? '1' : '0' },
       },

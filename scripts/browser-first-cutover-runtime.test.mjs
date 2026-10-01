@@ -5202,3 +5202,358 @@ test('unmanaged command target is JSON stdin, never a shell argument or PM2 stop
   assert.equal(calls[0][1].at(-1), '--stdin');
   assert.deepEqual(JSON.parse(calls[0][2].input), p);
 });
+
+async function oldBrowserAssociationFixture() {
+  const f = await ownedDisplayFixture();
+  const handler = '/opt/brave.com/brave/chrome_crashpad_handler';
+  const directories = new Map();
+  const handlerRows = [];
+  const addHandler = (pid, fd, inode, peerPid, peerFd, peerInode) => {
+    const cmd = `${handler}\0--initial-client-fd=${fd}\0`;
+    const p = {
+      ...f.census.processes.find((p) => p.pid === 46),
+      pid,
+      ppid: 1,
+      start: String(pid * 10),
+      exe: handler,
+      argvDigest: f.sha(cmd),
+    };
+    f.census.processes.push(p);
+    f.add(`/proc/${pid}/cmdline`, cmd);
+    f.namespaces.set(`/proc/${pid}/exe`, handler);
+    f.namespaces.set(`/proc/${pid}/fd/${fd}`, `socket:[${inode}]`);
+    f.namespaces.set(`/proc/${peerPid}/fd/${peerFd}`, `socket:[${peerInode}]`);
+    directories.set(pid, [String(fd)]);
+    handlerRows.push(
+      `u_str ESTAB 0 0 * ${inode} * ${peerInode} users:(("handler",pid=${pid},fd=${fd}))`,
+      `u_str ESTAB 0 0 * ${peerInode} * ${inode} users:(("peer",pid=${peerPid},fd=${peerFd}))`,
+    );
+    return p;
+  };
+  addHandler(47, 6, '300', 46, 10, '400');
+  addHandler(48, 4, '301', 47, 3, '401');
+  directories.get(47).push('3');
+  for (const fd of [0, 1, 2])
+    f.namespaces.set(`/proc/42/fd/${fd}`, fd === 0 ? '/dev/null' : `pipe:[${fd + 10}]`);
+  const readdir = f.io.readdir;
+  f.io.readdir = async (path) => {
+    const match = /^\/proc\/(\d+)\/fd$/.exec(path);
+    return match ? [...(directories.get(Number(match[1])) ?? [])] : readdir(path);
+  };
+  f.setUnix(() => `${f.sockets()}${handlerRows.join('\n')}\n`);
+  const displayObservation = await firstRuntime.readFirstCutoverCloudOwnedDisplay(f.request, f.io);
+  return {
+    ...f,
+    handler,
+    directories,
+    handlerRows,
+    addHandler,
+    request: { sources: f.sources, displayObservation, maintenanceEndsAtMs: 15000 },
+  };
+}
+test('old browser association observes primary and secondary orphan IPC without profile argv ownership', async () => {
+  const f = await oldBrowserAssociationFixture();
+  assert.equal(typeof firstRuntime.readFirstCutoverCloudOldBrowserAssociations, 'function');
+  const result = await firstRuntime.readFirstCutoverCloudOldBrowserAssociations(f.request, f.io);
+  assert.equal(result.purpose, 'cloud-old-browser-association-observation');
+  assert.deepEqual(
+    result.members.map((p) => p.pid),
+    [47, 48],
+  );
+  assert(result.members.every((p) => p.ppid === 1));
+  assert.match(result.socketDigest, /^[a-f0-9]{64}$/);
+  assert.equal(result.displayObservationDigest, f.sha(f.request.displayObservation));
+  assert.equal(Object.hasOwn(result, 'stopAuthorized'), false);
+  assert.equal(JSON.stringify(result).includes('initial-client-fd'), false);
+});
+for (const fault of [
+  'extra',
+  'expired',
+  'wrong-display',
+  'wrong-sources',
+  'census-drift',
+  'initial-fd',
+  'missing-peer',
+  'foreign-primary-peer',
+  'mixed-primary-peer',
+  'foreign-secondary-peer',
+  'extra-foreign-socket',
+  'changed-loaded-image',
+]) {
+  test(`old browser association refuses ${fault}`, async () => {
+    const f = await oldBrowserAssociationFixture();
+    if (fault === 'extra') f.request.ready = true;
+    if (fault === 'expired') f.request.maintenanceEndsAtMs = 1000;
+    if (fault === 'wrong-display') f.request.displayObservation.purpose = 'ready';
+    if (fault === 'wrong-sources') f.request.displayObservation.sourcesDigest = 'f'.repeat(64);
+    if (fault === 'census-drift') f.census.processes.find((p) => p.pid === 47).start = '999';
+    if (fault === 'initial-fd') f.namespaces.set('/proc/47/fd/6', 'socket:[999]');
+    if (fault === 'missing-peer') f.handlerRows.splice(1, 1);
+    if (fault === 'foreign-primary-peer') {
+      f.handlerRows[1] = f.handlerRows[1].replace('pid=46,fd=10', 'pid=99,fd=10');
+      f.namespaces.set('/proc/99/fd/10', 'socket:[400]');
+    }
+    if (fault === 'mixed-primary-peer') {
+      f.handlerRows[1] = f.handlerRows[1].replace('))', '),("foreign",pid=99,fd=10))');
+      f.namespaces.set('/proc/99/fd/10', 'socket:[400]');
+    }
+    if (fault === 'foreign-secondary-peer') {
+      f.handlerRows[3] = f.handlerRows[3].replace('pid=47,fd=3', 'pid=99,fd=3');
+      f.namespaces.set('/proc/99/fd/3', 'socket:[401]');
+    }
+    if (fault === 'extra-foreign-socket') {
+      f.directories.get(47).push('8');
+      f.namespaces.set('/proc/47/fd/8', 'socket:[302]');
+      f.namespaces.set('/proc/99/fd/11', 'socket:[402]');
+      f.handlerRows.push(
+        'u_str ESTAB 0 0 * 302 * 402 users:(("handler",pid=47,fd=8))',
+        'u_str ESTAB 0 0 * 402 * 302 users:(("foreign",pid=99,fd=11))',
+      );
+    }
+    if (fault === 'changed-loaded-image') {
+      const stat = f.io.stat;
+      f.io.stat = async (path) => {
+        const s = await stat(path);
+        return path === '/proc/47/exe' ? { ...s, ino: s.ino + 1 } : s;
+      };
+    }
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudOldBrowserAssociations(f.request, f.io),
+      /CUTOVER_CLOUD_OLD_BROWSER_ASSOCIATION_UNPROVEN/,
+    );
+  });
+}
+
+async function refreshAssociationDisplay(f) {
+  f.request.displayObservation = await firstRuntime.readFirstCutoverCloudOwnedDisplay(
+    { sources: f.sources, maintenanceEndsAtMs: 15000 },
+    f.io,
+  );
+}
+test('old browser association leaves an independently connected unrelated handler outside admitted members', async () => {
+  const f = await oldBrowserAssociationFixture();
+  f.addHandler(49, 6, '303', 99, 12, '403');
+  await refreshAssociationDisplay(f);
+  const result = await firstRuntime.readFirstCutoverCloudOldBrowserAssociations(f.request, f.io);
+  assert.deepEqual(
+    result.members.map((p) => p.pid),
+    [47, 48],
+  );
+});
+for (const mode of ['exact', 'wrong-root-fd', 'foreign-daemon-peer']) {
+  test(`old browser association admits only exact inherited PM2 stdio ${mode}`, async () => {
+    const f = await oldBrowserAssociationFixture();
+    f.directories.get(47).push('1');
+    f.namespaces.set('/proc/47/fd/1', 'socket:[500]');
+    f.namespaces.set('/proc/42/fd/1', 'socket:[500]');
+    f.namespaces.set('/proc/40/fd/9', 'socket:[600]');
+    f.handlerRows.push(
+      'u_str ESTAB 0 0 * 500 * 600 users:(("handler",pid=47,fd=1),("root",pid=42,fd=1))',
+      'u_str ESTAB 0 0 * 600 * 500 users:(("PM2",pid=40,fd=9))',
+    );
+    if (mode === 'wrong-root-fd') f.namespaces.set('/proc/42/fd/1', 'pipe:[11]');
+    if (mode === 'foreign-daemon-peer') {
+      f.namespaces.set('/proc/99/fd/9', 'socket:[600]');
+      f.handlerRows[5] = f.handlerRows[5].replace('pid=40,fd=9', 'pid=99,fd=9');
+    }
+    if (mode === 'exact')
+      assert.deepEqual(
+        (
+          await firstRuntime.readFirstCutoverCloudOldBrowserAssociations(f.request, f.io)
+        ).members.map((p) => p.pid),
+        [47, 48],
+      );
+    else
+      await assert.rejects(
+        firstRuntime.readFirstCutoverCloudOldBrowserAssociations(f.request, f.io),
+        /CUTOVER_CLOUD_OLD_BROWSER_ASSOCIATION_UNPROVEN/,
+      );
+  });
+}
+for (const fault of [
+  'deleted-loaded-handlers',
+  'uid',
+  'namespace',
+  'cgroup',
+  'outside-parent',
+  'source-bytes',
+  'manager-drift',
+  'closing-manager-drift',
+  'closing-census-time',
+  'closing-census-pid',
+  'closing-fd-drift',
+  'monotonic-nan',
+]) {
+  test(`old browser association refuses retained identity boundary ${fault}`, async () => {
+    const f = await oldBrowserAssociationFixture();
+    if (fault === 'deleted-loaded-handlers') {
+      for (const pid of [47, 48]) {
+        f.census.processes.find((p) => p.pid === pid).exe = `${f.handler} (deleted)`;
+        f.namespaces.set(`/proc/${pid}/exe`, `${f.handler} (deleted)`);
+      }
+      await refreshAssociationDisplay(f);
+    }
+    if (['uid', 'namespace', 'cgroup', 'outside-parent'].includes(fault)) {
+      const p = f.census.processes.find((p) => p.pid === 47);
+      if (fault === 'uid') p.uids = [998, 998, 998, 998];
+      if (fault === 'namespace') p.mountNamespace = 'mnt:[99]';
+      if (fault === 'cgroup') p.cgroup = '0::/other';
+      if (fault === 'outside-parent') p.ppid = 99;
+      await refreshAssociationDisplay(f);
+    }
+    if (fault === 'source-bytes') f.data.set(f.handler, Buffer.from('changed public source'));
+    if (fault === 'manager-drift') f.rows[1].pm2_env.restart_time++;
+    if (fault === 'closing-manager-drift') {
+      const rpc = f.io.rpc;
+      let calls = 0;
+      f.io.rpc = async (...args) => {
+        if (++calls === 2) f.rows[1].pm2_env.restart_time++;
+        return rpc(...args);
+      };
+    }
+    if (fault === 'closing-census-time' || fault === 'closing-census-pid') {
+      const read = f.io.readCensus;
+      let calls = 0;
+      f.io.readCensus = async () => {
+        const c = await read();
+        if (++calls === 2) {
+          if (fault === 'closing-census-time') c.observedAtMs = 'not-time';
+          else c.processes.find((p) => p.pid === 47).start = '999';
+        }
+        return c;
+      };
+    }
+    if (fault === 'closing-fd-drift') {
+      const readdir = f.io.readdir;
+      let calls = 0;
+      f.io.readdir = async (path) => {
+        if (path === '/proc/47/fd' && ++calls === 2)
+          f.namespaces.set('/proc/47/fd/6', 'socket:[999]');
+        return readdir(path);
+      };
+    }
+    if (fault === 'monotonic-nan') f.io.monotonic = () => Number.NaN;
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudOldBrowserAssociations(f.request, f.io),
+      /CUTOVER_CLOUD_OLD_BROWSER_ASSOCIATION_UNPROVEN/,
+    );
+  });
+}
+
+test('old browser association accepts reciprocal sequenced packets and binds their type', async () => {
+  const f = await oldBrowserAssociationFixture();
+  const stream = await firstRuntime.readFirstCutoverCloudOldBrowserAssociations(f.request, f.io);
+  f.handlerRows.splice(
+    0,
+    f.handlerRows.length,
+    ...f.handlerRows.map((r) => r.replace('u_str ', 'u_seq ')),
+  );
+  const sequenced = await firstRuntime.readFirstCutoverCloudOldBrowserAssociations(f.request, f.io);
+  assert.deepEqual(sequenced.members, stream.members);
+  assert.notEqual(sequenced.socketDigest, stream.socketDigest);
+});
+for (const fault of ['mixed-peer-type', 'datagram', 'unconnected', 'type-drift']) {
+  test(`old browser association refuses socket ${fault}`, async () => {
+    const f = await oldBrowserAssociationFixture();
+    const seq = f.handlerRows.map((r) => r.replace('u_str ', 'u_seq '));
+    if (fault === 'mixed-peer-type') seq[0] = seq[0].replace('u_seq ', 'u_str ');
+    if (fault === 'datagram')
+      seq.splice(0, seq.length, ...seq.map((r) => r.replace('u_seq ', 'u_dgr ')));
+    if (fault === 'unconnected') seq[0] = seq[0].replace('ESTAB', 'UNCONN');
+    let calls = 0;
+    f.setUnix(
+      () =>
+        `${f.sockets()}${(fault === 'type-drift' && ++calls > 1 ? f.handlerRows : seq).join('\n')}\n`,
+    );
+    await assert.rejects(
+      firstRuntime.readFirstCutoverCloudOldBrowserAssociations(f.request, f.io),
+      /^Error: CUTOVER_CLOUD_OLD_BROWSER_ASSOCIATION_UNPROVEN$/,
+    );
+  });
+}
+
+for (const fault of [
+  'valid',
+  'replayed-census',
+  'forged-anchor',
+  'new-root',
+  'source-config',
+  'namespace',
+  'unknown-member',
+]) {
+  test(`fresh native reobservation keeps the historical anchor and refuses ${fault}`, async () => {
+    const f = cloudNativeRecoveryFixture();
+    const origin = await firstRuntime.readFirstCutoverCloudRecovery(f.input, f.io);
+    const historical = structuredClone(origin);
+    let time = 70000;
+    f.io.now = () => time;
+    f.current.observedAtMs = time;
+    const baseRead = f.io.readFile;
+    // This clock moves only the actual new reads, never the anchor timestamp.
+    f.io.readFile = async (...args) => baseRead(...args);
+    if (fault === 'replayed-census') f.current.observedAtMs = 1000;
+    if (fault === 'forged-anchor') origin.pid = 41;
+    if (fault === 'new-root') f.current.processes.find((p) => p.pid === 40).start = '9999';
+    if (fault === 'namespace')
+      f.current.processes.find((p) => p.pid === 40).mountNamespace = 'mnt:[8]';
+    if (fault === 'source-config') f.manager.pm2_env.restart_time++;
+    if (fault === 'unknown-member')
+      f.current.processes.push({
+        ...f.current.processes.find((p) => p.pid === 41),
+        pid: 80,
+        exe: '/bin/sleep',
+      });
+    if (fault !== 'valid')
+      await assert.rejects(
+        firstRuntime.reobserveFirstCutoverCloudRecovery(f.input, origin, f.io),
+        /CUTOVER_CLOUD_RECOVERY_UNPROVEN/,
+      );
+    else {
+      const observation = await firstRuntime.reobserveFirstCutoverCloudRecovery(
+        f.input,
+        origin,
+        f.io,
+      );
+      assert.equal(observation.pid, historical.pid);
+      assert.equal(observation.observedAtMs, time);
+      assert.deepEqual(origin, historical);
+    }
+  });
+}
+
+for (const fault of ['valid', 'stale-current', 'drift-root', 'anchor-replay', 'untrusted-member']) {
+  test(`VNC fresh native reobservation refuses ${fault} after the origin expires`, async () => {
+    const f = await vncNativeObservationFixture();
+    const origin = await firstRuntime.readFirstCutoverCloudRecovery(f.input, f.io);
+    const historical = structuredClone(origin);
+    f.setNow(70000);
+    f.current.observedAtMs = 70000;
+    f.input.sources = await firstRuntime.readFirstCutoverCloudRecoverySources(
+      {
+        attempt: f.input.attempt,
+        configs: f.managers.map((r) => ({ name: r.name, pmId: r.pm_id, config: r.pm2_env })),
+      },
+      f.io,
+    );
+    if (fault === 'stale-current') f.current.observedAtMs = 1200;
+    if (fault === 'drift-root') f.current.processes.find((p) => p.pid === origin.pid).start = '999';
+    if (fault === 'anchor-replay') origin.beforeCensusDigest = 'a'.repeat(64);
+    if (fault === 'untrusted-member')
+      f.current.processes.push({
+        ...f.current.processes.at(-1),
+        pid: 99,
+        ppid: origin.pid,
+        exe: '/bin/sleep',
+      });
+    if (fault !== 'valid')
+      await assert.rejects(
+        firstRuntime.reobserveFirstCutoverCloudRecovery(f.input, origin, f.io),
+        /CUTOVER_CLOUD_RECOVERY_UNPROVEN/,
+      );
+    else {
+      const fresh = await firstRuntime.reobserveFirstCutoverCloudRecovery(f.input, origin, f.io);
+      assert.equal(fresh.observedAtMs, 70000);
+      assert.deepEqual(origin, historical);
+    }
+  });
+}

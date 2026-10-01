@@ -1,3 +1,4 @@
+import { ingressDiagnosticStage } from '/source/browser-first-cutover-ingress-diagnostics.mjs';
 // Disposable private-PID/network QA only. Extracted from browser-site-fence-linux.
 // The caller owns the real application, journal, window and writer observations.
 import assert from 'node:assert/strict';
@@ -221,6 +222,7 @@ export async function createQaNginxSites({ fencedCallbackPort } = {}) {
       const site = {
         binding,
         maintenanceEndsAtMs,
+        ...(Object.hasOwn(input, 'reconcileByMs') ? { reconcileByMs: input.reconcileByMs } : {}),
         siteDigest: remoteSiteDigest,
         ingress: {
           inventoryDigest: binding.inventoryDigest,
@@ -266,13 +268,31 @@ export async function createQaNginxSites({ fencedCallbackPort } = {}) {
             child = spawn(
               '/usr/bin/node',
               ['/source/fixtures/browser-ingress-session-child.mjs', `${root}/session.json`],
-              { stdio: ['pipe', 'pipe', 'inherit'] },
+              { cwd: '/', stdio: ['pipe', 'pipe', 'inherit'] },
             );
+            child.once('exit', (code, signal) => {
+              console.error('QA_INGRESS_CHILD_EXIT', JSON.stringify({ code, signal }));
+            });
             completion = new Promise((resolve) => child.once('close', (code) => resolve({ code })));
             return { input: child.stdout, output: child.stdin, completion };
           },
         },
       });
+      const originalRead = pair.readFenceReceipts;
+      pair.readFenceReceipts = async (...args) => {
+        try {
+          return await originalRead(...args);
+        } catch (error) {
+          console.error(
+            'QA_INGRESS_REJECTION',
+            JSON.stringify({
+              component: 'pair',
+              stage: ingressDiagnosticStage(error) ?? 'PAIR_ENTRY',
+            }),
+          );
+          throw error;
+        }
+      };
       return pair;
     },
     async assertRestored(identity) {

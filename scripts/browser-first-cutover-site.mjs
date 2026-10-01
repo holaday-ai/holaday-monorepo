@@ -1,3 +1,5 @@
+import { ingressDiagnosticError } from './browser-first-cutover-ingress-diagnostics.mjs';
+import { createFirstCutoverProductionFacts } from './browser-first-cutover-production-facts.mjs';
 import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { isDeepStrictEqual as equal } from 'node:util';
@@ -13,6 +15,8 @@ import {
 } from './browser-first-cutover-backup.mjs';
 import { connectFirstCutoverGatewaySession } from './browser-first-cutover-gateway-session.mjs';
 import {
+  createFirstCutoverCoordinatorIdentity,
+  assertFirstCutoverReconciliationRead,
   createFirstCutoverRetirementObserver,
   exportFirstCutoverSourceBackup,
   readFirstCutoverAttributedWriters,
@@ -40,8 +44,15 @@ import {
 } from './browser-first-cutover-runtime.mjs';
 
 const bindingKeys = ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'];
-const fail = () => {
-  throw new Error('CUTOVER_SITE_UNPROVEN');
+const fail = (stage, previous) => {
+  throw ingressDiagnosticError('CUTOVER_SITE_UNPROVEN', stage, previous);
+};
+const diagnosticRead = async (stage, operation) => {
+  try {
+    return await operation();
+  } catch (error) {
+    fail(stage, error);
+  }
 };
 
 /** Wire the existing physical operations into the original host's lifecycle.
@@ -51,7 +62,23 @@ const fail = () => {
  * and runtime observer. This module does not install tools or enable the CLI.
  */
 export function createFirstCutoverExecutionSite(options, overrides = {}) {
+  let coordinator;
   const io = {
+    readCoordinatorIdentity: async () => {
+      coordinator ??= await createFirstCutoverCoordinatorIdentity(
+        {
+          attempt: options.attempt,
+          mode: process.argv[2] === '--execute' ? 'execute' : 'check',
+        },
+        {
+          readReconciliationJournal: async () => {
+            if (!context) fail();
+            return context.journal;
+          },
+        },
+      );
+      return coordinator.readExecutionIdentity();
+    },
     platform: process.platform,
     uid: process.getuid?.(),
     now: Date.now,
@@ -87,12 +114,53 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       options.attempt ?? '',
     ) ||
     ['readSite', 'readCoordinatorIdentity'].some((k) => typeof io[k] !== 'function') ||
-    ['observeWriters', 'observeWork', 'settleLegacy', 'reconcile'].some(
-      (k) => typeof io.facts?.[k] !== 'function',
-    )
+    (io.facts !== undefined &&
+      ['observeWriters', 'observeWork', 'settleLegacy', 'reconcile'].some(
+        (k) => typeof io.facts?.[k] !== 'function',
+      ))
   )
     fail();
-  const facts = { ...io.facts };
+  const facts = io.facts
+    ? { ...io.facts }
+    : createFirstCutoverProductionFacts(
+        {
+          readInventory: async () => approvedInventory(),
+          readCoordinator: () => io.readCoordinatorIdentity(),
+          readState: async () => {
+            if (!observer || !context) fail();
+            const record = await context.journal.readFirstCutoverEffects();
+            if (record.identity) return observer.readWithCandidate(record.identity);
+            return (await observer.readFenceProgress()).pair;
+          },
+          queryOrders: async (ctx, identity, payments) => {
+            const record = await guard(ctx, ['reconciled']);
+            if (!gateway || !equal(record.identity, identity)) fail();
+            const result = await gateway.queryOrders({
+              stage: 'postopen',
+              identity,
+              orders: payments.orders,
+              observedAtMs: payments.observedAtMs,
+            });
+            if (!equal(record, await guard(ctx, ['reconciled']))) fail();
+            return result;
+          },
+          probeBrowser: async (ctx, identity) => {
+            const record = await guard(ctx, ['reconciled']);
+            if (!equal(record.identity, identity)) fail();
+            const result = await observer.probeBrowser(identity);
+            if (!equal(record, await guard(ctx, ['reconciled']))) fail();
+            return result;
+          },
+        },
+        {
+          now: io.now,
+          readPersisted: io.readPersistedWork,
+          readDatabase: io.readAdministrativeWriters,
+          readCandidate: io.readCandidateRuntime,
+          readPayments: io.readPaymentScope,
+          readRehearsal: io.readRehearsal,
+        },
+      );
   const observeWork = async () => {
     const work = structuredClone(await facts.observeWork(context));
     const persisted = await io.readPersistedWork(context);
@@ -141,6 +209,9 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
   let recoveryRecord;
   let recovery;
   let recoveryStarted = false;
+  let recoveryCloseStarted = false;
+  let recoveryCloseAcknowledged = false;
+  let closingRecovery = false;
   let sourceArtifact;
   let sourceTransfer;
   let backupStage;
@@ -156,6 +227,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       !equal(value.binding, binding) ||
       value.legacyDigest !== approval.legacyDigest ||
       value.maintenanceEndsAtMs !== approval.maintenanceEndsAtMs ||
+      (Object.hasOwn(value, 'reconcileByMs') && value.reconcileByMs !== approval.reconcileByMs) ||
       !value.reviews ||
       !value.ingress ||
       !Array.isArray(value.producerStartupFiles) ||
@@ -191,30 +263,48 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       !equal(ctx.binding, context.binding) ||
       !equal(ctx.approval, context.approval)
     )
-      fail();
+      fail('RECOVERY_SITE_CONTEXT');
     const now = io.now();
-    if (!Number.isSafeInteger(now) || now < 0 || now < last || now >= scope.maintenanceEndsAtMs)
-      fail();
+    if (!Number.isSafeInteger(now) || now < 0 || now < last) fail('RECOVERY_SITE_CLOCK');
+    if (now >= scope.maintenanceEndsAtMs)
+      await assertFirstCutoverReconciliationRead(
+        {
+          binding: context.binding,
+          maintenanceEndsAtMs: scope.maintenanceEndsAtMs,
+          reconcileByMs: context.approval.reconcileByMs,
+        },
+        context.journal,
+        now,
+      );
+
     last = now;
     if (
-      !equal(await context.journal.assertOwnership(), context.binding) ||
-      !equal(await readScope(context.approval), scope)
+      !equal(
+        await diagnosticRead('RECOVERY_SITE_OWNER', () => context.journal.assertOwnership()),
+        context.binding,
+      )
     )
-      fail();
-    const record = await context.journal.readFirstCutoverEffects();
+      fail('RECOVERY_SITE_OWNER');
+    if (
+      !equal(await diagnosticRead('RECOVERY_SITE_SOURCE', () => readScope(context.approval)), scope)
+    )
+      fail('RECOVERY_SITE_SOURCE');
+    const record = await diagnosticRead('RECOVERY_SITE_RECORD', () =>
+      context.journal.readFirstCutoverEffects(),
+    );
     if (
       context.approval.schemaVersion === 2 &&
       (record.schemaVersion !== 2 ||
         record.riskDigest !== cutoverLegacyInterruptionRisk(context.approval))
     )
-      fail();
+      fail('RECOVERY_SITE_PHASE');
     if (
       !bindingKeys.every((k) => record[k] === context.binding[k]) ||
       record.legacyDigest !== scope.legacyDigest ||
       record.executionSiteDigest !== executionSiteDigest ||
       (phases && !phases.includes(record.phase))
     )
-      fail();
+      fail('RECOVERY_SITE_PHASE');
     return record;
   };
   const identities = async () => {
@@ -318,7 +408,12 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
         !Number.isSafeInteger(database.counts.sessions) ||
         database.counts.sessions < 0 ||
         database.counts.sessions > 10000 ||
-        active.some((key) => database.counts[key] !== 0)
+        active.some(
+          (key) =>
+            !Number.isSafeInteger(database.counts[key]) ||
+            database.counts[key] < 0 ||
+            database.counts[key] > 10000,
+        )
       )
         fail();
       const attribution = database.sessionAttribution;
@@ -352,6 +447,14 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
         !fresh(result?.observedAtMs)
       )
         fail();
+      const activeCount = [
+        'transactions',
+        'enabledEvents',
+        'replicationReceivers',
+        'replicationAppliers',
+      ].reduce((n, k) => n + database.counts[k], 0);
+      if (!Number.isSafeInteger(result.internalWriters) || result.internalWriters < 0) fail();
+      result.internalWriters = Math.max(result.internalWriters, activeCount);
       result.observedAtMs = Math.min(
         result.observedAtMs,
         database.startedAtMs,
@@ -371,7 +474,8 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
   const boundary = async (identity) => {
     const record = await guard(context);
     if (identity !== undefined) {
-      if (!['candidate_started', 'verified'].includes(record.phase)) fail();
+      if (!['candidate_started', 'verified'].includes(record.phase))
+        fail('RECOVERY_SITE_BOUNDARY_VALIDATION');
       checkIdentity(identity, record);
     }
     const orders = [
@@ -380,18 +484,27 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       'legacy_interruption_accepted',
       'producers_stopped',
     ].includes(record.phase);
-    const { work, persisted } = await observeWork();
-    const fence = await ingress[orders ? 'verifyOrders' : 'verifyFence']();
+    const { work, persisted } = await diagnosticRead('RECOVERY_SITE_BOUNDARY_WORK', () =>
+      observeWork(),
+    );
+    const fence = await diagnosticRead('RECOVERY_SITE_BOUNDARY_FENCE', () =>
+      ingress[orders ? 'verifyOrders' : 'verifyFence'](),
+    );
     let actual;
     if (identity !== undefined) {
       actual = await observer.readWithCandidate(identity);
       closedCandidate(actual, identity);
     } else {
-      const progress = await observer.readFenceProgress();
-      if (progress?.purpose !== 'fence-progress') fail();
+      const progress = await diagnosticRead('RECOVERY_SITE_BOUNDARY_PROGRESS', () =>
+        observer.readFenceProgress(),
+      );
+      if (progress?.purpose !== 'fence-progress') fail('RECOVERY_SITE_BOUNDARY_VALIDATION');
       actual = progress.pair;
     }
-    const { work: after, persisted: persistedAfter } = await observeWork();
+    const { work: after, persisted: persistedAfter } = await diagnosticRead(
+      'RECOVERY_SITE_BOUNDARY_AFTER_WORK',
+      () => observeWork(),
+    );
     checkLegacyCapability(actual);
     const counts = ['unsettledWork', 'externalWork', 'activeRequests', 'unknownWriters'];
     const workPhase = identity ? 'preopen' : orders ? 'before-stop' : 'after-stop';
@@ -424,7 +537,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       actual.unknownLaunchers.length ||
       !equal(disposition, afterDisposition)
     )
-      fail();
+      fail('RECOVERY_SITE_BOUNDARY_VALIDATION');
     const runningProducers = actual.hosts
       .flatMap((h) => [...h.registered.processes, ...h.unmanaged.processes])
       .filter((p) => ['main', 'worker'].includes(p.role));
@@ -441,10 +554,11 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
             !/^[a-f0-9]{64}$/.test(tcp.sourceDigest ?? ''),
         ))
     )
-      fail();
+      fail('RECOVERY_SITE_BOUNDARY_VALIDATION');
     if (fence.producersRunning !== runningProducers.length || (!orders && runningProducers.length))
-      fail();
-    if (!equal(record, await guard(context, [record.phase]))) fail();
+      fail('RECOVERY_SITE_BOUNDARY_VALIDATION');
+    if (!equal(record, await guard(context, [record.phase])))
+      fail('RECOVERY_SITE_BOUNDARY_VALIDATION');
     return {
       ...fence,
       ...Object.fromEntries(counts.map((k) => [k, work[k]])),
@@ -474,8 +588,8 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     };
   };
   const stopped = async () => {
-    const actual = await observer.read();
-    const fence = await boundary();
+    const actual = await diagnosticRead('RECOVERY_SITE_STOPPED_OBSERVER', () => observer.read());
+    const fence = await diagnosticRead('RECOVERY_SITE_STOPPED_BOUNDARY', () => boundary());
     const scopes = actual.hosts.flatMap((h) => [h.registered, h.unmanaged]);
     const proof = {
       inventoryDigest: actual.inventoryDigest,
@@ -491,7 +605,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       proof.listeners.length ||
       proof.unknownLaunchers.length
     )
-      fail();
+      fail('RECOVERY_SITE_STOPPED_SHAPE');
     return proof;
   };
   const detach = async (ctx) => {
@@ -501,9 +615,9 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       return;
     }
     closed = true;
-    for (const handle of [recovery, gateway, ingress]) {
+    for (const close of [closeRecovery, () => gateway?.close(), () => ingress?.close()]) {
       try {
-        await handle?.close();
+        await close();
       } catch {
         closeFailed = true;
       }
@@ -518,9 +632,9 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       const result = await operation();
       await guard(ctx, phases);
       return result;
-    } catch {
+    } catch (error) {
       failed = true;
-      fail();
+      fail('RECOVERY_SITE_RUN', error);
     }
   };
   const backupContext = () => ({
@@ -528,8 +642,11 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     binding: context.binding,
     maintenanceEndsAtMs: context.approval.maintenanceEndsAtMs,
   });
-  const recoveryScope = () => ({ ...backupContext(), scopeDigest: scope.backupRecoveryDigest });
-  const assertRecoveryScope = (input) =>
+  const recoveryScope = () => ({
+    ...backupContext(),
+    scopeDigest: scope.backupRecoveryDigest,
+  });
+  const assertActiveRecoveryScope = (input) =>
     run(
       'recovery-scope',
       context,
@@ -539,20 +656,83 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
           !/^[a-f0-9]{64}$/.test(scope.backupRecoveryDigest ?? '') ||
           !equal(input, recoveryScope())
         )
-          fail();
+          fail('RECOVERY_SITE_SCOPE');
         await guard(context, ['backup_verified']);
-        const record = await context.journal.readFirstCutoverEffects({ forBackupRecovery: true });
-        if (recoveryRecord && !equal(recoveryRecord, record)) fail();
+        const record = await context.journal.readFirstCutoverEffects({
+          forBackupRecovery: true,
+        });
+        if (recoveryRecord && !equal(recoveryRecord, record)) fail('RECOVERY_SITE_RECORD_ANCHOR');
         await stopped();
         await guard(context, ['backup_verified']);
         if (
-          !equal(record, await context.journal.readFirstCutoverEffects({ forBackupRecovery: true }))
+          !equal(
+            record,
+            await context.journal.readFirstCutoverEffects({
+              forBackupRecovery: true,
+            }),
+          )
         )
-          fail();
+          fail('RECOVERY_SITE_SCOPE');
         recoveryRecord = structuredClone(record);
       },
       false,
     );
+  // Detach only closes an already-bound channel. Business failure never grants
+  // restore/migrate permission; the original scope, ownership and stopped facts
+  // are checked before and after this single cleanup operation.
+  const recoveryAnchor = (record) => {
+    const { recordDigest, failureObservation, ...anchor } = record;
+    return anchor;
+  };
+  const assertRecoveryScope = async (input) => {
+    if (!closingRecovery) return assertActiveRecoveryScope(input);
+    if (!recoveryCloseStarted || !recovery || !equal(input, recoveryScope())) fail();
+    await guard(context, ['backup_verified']);
+    const record = await context.journal.readFirstCutoverEffects({
+      forBackupRecovery: true,
+    });
+    const failure = record.failureObservation;
+    if (
+      !recoveryRecord ||
+      !equal(recoveryAnchor(record), recoveryAnchor(recoveryRecord)) ||
+      (failure &&
+        (failure.phase !== record.phase ||
+          failure.operatorRef !== context.approval.operatorRef ||
+          failure.reconcileByMs !== context.approval.reconcileByMs ||
+          !Number.isSafeInteger(failure.observedAtMs) ||
+          failure.observedAtMs < 0 ||
+          failure.observedAtMs > io.now() ||
+          !equal(failure.identity, record.identity)))
+    )
+      fail();
+    await stopped();
+    await guard(context, ['backup_verified']);
+    if (
+      !equal(
+        record,
+        await context.journal.readFirstCutoverEffects({
+          forBackupRecovery: true,
+        }),
+      )
+    )
+      fail();
+  };
+  const closeRecovery = async () => {
+    if (!recovery) return;
+    if (recoveryCloseStarted) {
+      if (!recoveryCloseAcknowledged) fail();
+      return;
+    }
+    recoveryCloseStarted = true;
+    closingRecovery = true;
+    try {
+      await recovery.close();
+      recoveryCloseAcknowledged = true;
+      recovery = undefined;
+    } finally {
+      closingRecovery = false;
+    }
+  };
   const recoveryConnection = async () => {
     if (recovery) return recovery;
     if (recoveryStarted) fail();
@@ -594,6 +774,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
           binding: structuredClone(ctx.binding),
           approval: structuredClone(ctx.approval),
         };
+        io.bindCoordinatorJournal?.(context.journal);
         scope = await readScope(context.approval);
         if (inspectedScope && !equal(inspectedScope, scope)) fail();
         await guard(ctx, ['preflight']);
@@ -601,7 +782,11 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
         await context.journal.bindExecutionSite(digest, scope.cloudMaintenanceScope);
         executionSiteDigest = digest;
         await guard(ctx, ['preflight']);
-        const args = { binding: context.binding, maintenanceEndsAtMs: scope.maintenanceEndsAtMs };
+        const args = {
+          binding: context.binding,
+          maintenanceEndsAtMs: scope.maintenanceEndsAtMs,
+          reconcileByMs: context.approval.reconcileByMs,
+        };
         ingress = await io.createIngress(args, {
           ...io.ingress,
           platform: io.platform,
@@ -726,7 +911,10 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
         await boundary();
         await io.retireProducers(
           {
-            binding: { attempt, inventoryDigest: context.binding.inventoryDigest },
+            binding: {
+              attempt,
+              inventoryDigest: context.binding.inventoryDigest,
+            },
             files: scope.producerStartupFiles,
             maintenanceEndsAtMs: scope.maintenanceEndsAtMs,
           },
@@ -800,7 +988,10 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
         };
         if (
           (await observer.restoreCloudServices(
-            { identity: structuredClone(identity), maintenanceEndsAtMs: scope.maintenanceEndsAtMs },
+            {
+              identity: structuredClone(identity),
+              maintenanceEndsAtMs: scope.maintenanceEndsAtMs,
+            },
             { readRecoveryFacts },
           )) !== undefined
         )
@@ -856,8 +1047,10 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     // Host owns reconciliation's longer deadline and protective close. Neither
     // callback reopens sessions or performs an implicit ingress restoration.
     reconcile: (ctx, id) => {
-      if (!closed || closeFailed || ctx.journal !== context?.journal) fail();
-      return facts.reconcile(context, id);
+      return run('reconcile', ctx, ['reconciled'], async () => {
+        if (closeFailed || !equal((await guard(ctx, ['reconciled'])).identity, id)) fail();
+        return facts.reconcile(context, id);
+      });
     },
     holdMaintenance: (ctx, result) => {
       if (ctx.journal !== context?.journal) fail();
@@ -958,7 +1151,11 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
               digest !== context.binding.migrationDigest
             )
               fail();
-            if (!equal(await (await recoveryConnection()).migrate(), { migrationDigest: digest }))
+            if (
+              !equal(await (await recoveryConnection()).migrate(), {
+                migrationDigest: digest,
+              })
+            )
               fail();
             backupStage = 'migrated';
           },
@@ -981,16 +1178,19 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
         backupRead('backup-source-digest', async (inventory, verify) => {
           if (backupStage !== 'verified' || !equal(source, inventory.backupPlan?.sourceIdentity))
             fail();
-          return (await io.readSourceSnapshot(context, inventory, { assertWritersStopped: verify }))
-            .sourceDigest;
+          return (
+            await io.readSourceSnapshot(context, inventory, {
+              assertWritersStopped: verify,
+            })
+          ).sourceDigest;
         }),
       finishRecovery: (ctx) =>
         backupRead(
           'backup-finish',
           async () => {
             if (backupStage !== 'verified' || ctx.journal !== context.journal) fail();
-            await (await recoveryConnection()).close();
-            recovery = undefined;
+            await recoveryConnection();
+            await closeRecovery();
             backupStage = 'finished';
           },
           true,

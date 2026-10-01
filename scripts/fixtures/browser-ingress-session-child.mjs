@@ -1,3 +1,4 @@
+import { ingressDiagnosticStage } from '/source/browser-first-cutover-ingress-diagnostics.mjs';
 // Isolated network fixture child only, never a production entry or uploaded code.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
@@ -167,7 +168,14 @@ try {
       },
     },
   );
-} catch {
+} catch (error) {
+  console.error(
+    'QA_INGRESS_REJECTION',
+    JSON.stringify({
+      component: 'receiver',
+      stage: ingressDiagnosticStage(error) ?? 'RECEIVER_ENTRY',
+    }),
+  );
   process.stderr.write('QA_INGRESS_SESSION_FAILED\n');
   process.exitCode = 1;
 }

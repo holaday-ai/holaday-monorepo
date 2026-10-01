@@ -1651,8 +1651,12 @@ async function readHostProcesses(io, complete = false) {
         cgroup,
         ...(complete ? meta.extra : {}),
       });
-    } catch {
-      // Process churn is not a stable, exhaustive observation; recollect once externally.
+    } catch (error) {
+      // Preserve only an actual missing /proc entry for bounded COMPLETE
+      // recollection. Never skip this PID or turn permission/identity errors
+      // into process exit. All partial rows from this pass are discarded.
+      if (complete && error?.code === 'ENOENT')
+        throw Object.assign(new Error('PROCESS_SAMPLE_DISAPPEARED'), { code: 'ENOENT' });
       throw new Error('MAINTENANCE_HOST_OBSERVATION_UNPROVEN');
     }
   }
@@ -1737,14 +1741,29 @@ export async function readFirstCutoverCloudRecoveryCensus(overrides = {}) {
     )
       throw new Error('identity');
     const sampling = { ...io, readFile };
-    const first = await readHostProcesses(sampling, true);
-    if (
-      !same(first, await readHostProcesses(sampling, true)) ||
-      machine !== io.hostname() ||
-      bootId !== (await readFile('/proc/sys/kernel/random/boot_id')).trim()
-    )
-      throw new Error('changed');
-    return { hostname: machine, bootId, observedAtMs: clock(), processes: first.processes };
+    // Three complete attempts share one time/byte budget. Only a genuine
+    // disappearing /proc entry can restart the read; two unequal successful
+    // samples, changed identity, malformed data and permissions remain fatal.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const first = await readHostProcesses(sampling, true);
+        if (
+          !same(first, await readHostProcesses(sampling, true)) ||
+          machine !== io.hostname() ||
+          bootId !== (await readFile('/proc/sys/kernel/random/boot_id')).trim()
+        )
+          throw new Error('changed');
+        return { hostname: machine, bootId, observedAtMs: clock(), processes: first.processes };
+      } catch (error) {
+        if (error?.code !== 'ENOENT' || attempt === 2) throw error;
+        clock();
+        if (
+          machine !== io.hostname() ||
+          bootId !== (await readFile('/proc/sys/kernel/random/boot_id')).trim()
+        )
+          throw new Error('changed');
+      }
+    }
   } catch {
     throw new Error('CUTOVER_CLOUD_RECOVERY_CENSUS_UNPROVEN');
   }
@@ -2679,6 +2698,7 @@ export async function readCutoverDatabaseScope(
   db,
   {
     windowStartMs,
+    windowEndMs,
     now = Date.now,
     resolveMerchant,
     deferredSandboxPayment,
@@ -2686,6 +2706,11 @@ export async function readCutoverDatabaseScope(
   } = {},
 ) {
   if (!Number.isSafeInteger(windowStartMs) || windowStartMs < 0 || windowStartMs > now())
+    fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
+  if (
+    windowEndMs !== undefined &&
+    (!Number.isSafeInteger(windowEndMs) || windowEndMs < windowStartMs || windowEndMs > now())
+  )
     fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
   let transaction = false;
   try {
@@ -2702,10 +2727,15 @@ export async function readCutoverDatabaseScope(
       const amountColumn = table === 'payments' ? 'amount_cents' : 'amount_cny_cents';
       const currencyColumn = table === 'payments' ? 'currency' : "'CNY'";
       const where =
-        "(status NOT IN ('completed','failed','refunded','cancelled') OR created_at >= ? OR updated_at >= ?)";
+        "(status NOT IN ('completed','failed','refunded','cancelled') OR created_at >= ? OR updated_at >= ?)" +
+        (windowEndMs !== undefined ? ' AND created_at < ?' : '');
+      const scopeParams = [
+        since,
+        since,
+        ...(windowEndMs !== undefined ? [new Date(windowEndMs)] : []),
+      ];
       const [countRows] = await db.query(`SELECT COUNT(*) AS total FROM ${table} WHERE ${where}`, [
-        since,
-        since,
+        ...scopeParams,
       ]);
       const count = Number(countRows?.[0]?.total);
       if (
@@ -2721,7 +2751,7 @@ export async function readCutoverDatabaseScope(
       for (let page = 0; page < 100; page++) {
         const [rows] = await db.query(
           `SELECT id, external_id, provider, provider_order_id, provider_capture_id, ${amountColumn} AS amount_cents, ${currencyColumn} AS currency, status, metadata, created_at, updated_at FROM ${table} WHERE ${where} AND id > ? ORDER BY id LIMIT 100`,
-          [since, since, cursor],
+          [...scopeParams, cursor],
         );
         if (!Array.isArray(rows) || rows.length > 100) fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
         for (const row of rows) {

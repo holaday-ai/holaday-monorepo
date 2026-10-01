@@ -206,6 +206,69 @@ export function validateFirstCutoverOwnedDisplayObservation({ observation, snaps
     fail();
 }
 
+// One canonical original stop range for approval producers and every consumer.
+// Detached members require private native IPC facts AND original review entries.
+export function firstCutoverCloudStopScope({ snapshot, name, association, display, review, now }) {
+  const managers = snapshot.managers.filter((m) => m.name === name);
+  if (managers.length !== 1) fail();
+  const manager = managers[0];
+  const ids = new Set([manager.pid]);
+  for (let i = 0; i < snapshot.processes.length; i++)
+    for (const p of snapshot.processes) if (ids.has(p.ppid)) ids.add(p.pid);
+  let associationDigest;
+  if (association !== undefined) {
+    const o = association;
+    if (
+      name !== 'holaday-chromium-headed' ||
+      !display ||
+      !o ||
+      Object.keys(o).sort().join(',') !==
+        'bootId,censusDigest,contextDigest,displayObservationDigest,hostname,members,observedAtMs,purpose,socketDigest,sourcesDigest' ||
+      o.purpose !== 'cloud-old-browser-association-observation' ||
+      o.hostname !== snapshot.hostname ||
+      o.bootId !== snapshot.bootId ||
+      o.sourcesDigest !== display.sourcesDigest ||
+      o.contextDigest !== display.contextDigest ||
+      o.displayObservationDigest !== digest(display) ||
+      ![o.censusDigest, o.socketDigest, o.sourcesDigest, o.contextDigest].every(hash) ||
+      !Number.isSafeInteger(now) ||
+      !Number.isSafeInteger(o.observedAtMs) ||
+      o.observedAtMs < 0 ||
+      o.observedAtMs > now ||
+      now - o.observedAtMs > 60000 ||
+      !Array.isArray(o.members) ||
+      o.members.length > 32 ||
+      new Set(o.members.map((p) => p.pid)).size !== o.members.length
+    )
+      fail();
+    for (const member of o.members) {
+      const p = snapshot.processes.find((p) => p.pid === member.pid);
+      if (
+        !p ||
+        !equal(p, member) ||
+        !review?.processes.some(
+          (r) => r.pid === p.pid && r.disposition === 'preserve' && r.identityDigest === digest(p),
+        )
+      )
+        fail();
+      ids.add(p.pid);
+    }
+    if (o.members.length) associationDigest = digest(o);
+  }
+  const processes = snapshot.processes.filter((p) => ids.has(p.pid)).sort((a, b) => a.pid - b.pid);
+  const daemon = snapshot.processes.find((p) => p.pid === snapshot.pm2Runtime.pid);
+  return {
+    host: 'vultr',
+    hostname: snapshot.hostname,
+    bootId: snapshot.bootId,
+    pm2Runtime: snapshot.pm2Runtime,
+    daemon,
+    manager,
+    processes,
+    ...(associationDigest ? { associationDigest } : {}),
+  };
+}
+
 // Temporary stop accounting stays separate from permanent retirement. Compare
 // with the original protected process review, never create a new allowlist from
 // whatever happens to be running after an effect. Recovery is not inferred here.
@@ -217,6 +280,9 @@ function observeCloudStops({
   inventoryDigest,
   progress,
   cloudDisplay,
+  cloudAssociations,
+  cloudCensus,
+  cloudRecovery,
   now,
 }) {
   const scope = effects.cloudMaintenanceScope;
@@ -232,7 +298,7 @@ function observeCloudStops({
     scope.length !== 2 ||
     new Set(scope.map((s) => s.pmId)).size !== 2 ||
     !Array.isArray(events) ||
-    events.length > 4 ||
+    events.length > 8 ||
     (events.length &&
       ![
         'producers_stopped',
@@ -242,8 +308,11 @@ function observeCloudStops({
         'migration_started',
         'candidate_started',
         'verified',
+        'opened',
+        'reconciled',
       ].includes(effects.phase)) ||
-    (events.length % 2 && (!progress || effects.phase !== 'producers_stopped'))
+    (events.length % 2 &&
+      (!progress || effects.phase !== (events.length < 4 ? 'producers_stopped' : 'verified')))
   )
     fail();
   const before = baseline.hosts.find((h) => h.host === 'vultr')?.snapshot;
@@ -273,7 +342,7 @@ function observeCloudStops({
       now: original.observedAtMs,
     });
     const headed = current.managers.find((m) => m.name === names[1]);
-    if (headed?.status === 'online') {
+    if (headed?.status === 'online' && !cloudRecovery?.[names[1]]) {
       validateFirstCutoverOwnedDisplayObservation({
         observation: cloudDisplay.current,
         snapshot: current,
@@ -319,7 +388,15 @@ function observeCloudStops({
       review.registrations.find((r) => r.pmId === manager.pmId)?.disposition !== 'preserve'
     )
       fail();
-    const processes = tree(before, manager.pid);
+    const stopScope = firstCutoverCloudStopScope({
+      snapshot: before,
+      name: manager.name,
+      association: i === 1 ? cloudAssociations?.original : undefined,
+      display: cloudDisplay?.original,
+      review,
+      now: cloudAssociations?.original?.observedAtMs ?? now,
+    });
+    const processes = stopScope.processes;
     const daemon = before.processes.find((p) => p.pid === before.pm2Runtime.pid);
     if (
       !processes.length ||
@@ -331,16 +408,7 @@ function observeCloudStops({
             !approvedDisplay.some((member) => equal(member, p))) ||
           review.processes.find((r) => r.pid === p.pid)?.disposition !== 'preserve',
       ) ||
-      declaration.scopeDigest !==
-        digest({
-          host: 'vultr',
-          hostname: before.hostname,
-          bootId: before.bootId,
-          pm2Runtime: before.pm2Runtime,
-          daemon,
-          manager,
-          processes,
-        })
+      declaration.scopeDigest !== digest(stopScope)
     )
       fail();
     const liveMatches = current.managers.filter(
@@ -349,19 +417,115 @@ function observeCloudStops({
     if (liveMatches.length !== 1) fail();
     const live = liveMatches[0];
     const base = { attempt: effects.attempt, inventoryDigest, host: 'vultr', ...declaration };
+    const recovery = cloudRecovery?.[declaration.name];
+    const restoreIndex = i === 1 ? 4 : 6;
+    const restoreIntent = events[restoreIndex];
+    const restoreAck = events[restoreIndex + 1];
+    if (restoreIntent && !equal(restoreIntent, { ...base, phase: 'cloud-restore-intent' })) fail();
+    if (restoreAck && !equal(restoreAck, { ...base, phase: 'cloud-restored' })) fail();
+    if (recovery) {
+      const { native, configuration } = recovery;
+      if (
+        !restoreIntent ||
+        (!restoreAck && !progress) ||
+        !native ||
+        !configuration ||
+        native.purpose !== 'cloud-recovery-native-observation' ||
+        native.name !== manager.name ||
+        native.pmId !== manager.pmId ||
+        native.hostname !== current.hostname ||
+        native.bootId !== current.bootId ||
+        native.launchDigest !== declaration.recoveryDigest ||
+        !Number.isSafeInteger(native.observedAtMs) ||
+        native.observedAtMs > now ||
+        now - native.observedAtMs > 60000 ||
+        !hash(configuration.stoppedConfigDigest) ||
+        configuration.recoveredConfigDigest !== native.configDigest ||
+        configuration.restartCount !== manager.restartCount ||
+        live.restartCount !== manager.restartCount ||
+        live.configDigest !== native.configDigest ||
+        live.pid !== native.pid ||
+        live.status !== 'online' ||
+        !Array.isArray(native.processes) ||
+        !native.processes.length ||
+        native.processes.length > 16384 ||
+        !cloudCensus ||
+        cloudCensus.processes.some((p) => processes.some((old) => old.pid === p.pid))
+      )
+        fail();
+      const project = (p) =>
+        Object.fromEntries(
+          ['pid', 'ppid', 'start', 'uids', 'exe', 'cwd', 'argvDigest', 'cgroup'].map((k) => [
+            k,
+            p[k],
+          ]),
+        );
+      const ids = new Set();
+      for (const p of native.processes) {
+        const actual = current.processes.find((row) => row.pid === p.pid);
+        if (
+          !actual ||
+          !equal(actual, project(p)) ||
+          ids.has(p.pid) ||
+          before.processes.some((old) => old.pid === p.pid) ||
+          p.mountNamespace !== native.mountNamespace ||
+          !equal(p.uids, [0, 0, 0, 0])
+        )
+          fail();
+        ids.add(p.pid);
+      }
+      const root = current.processes.find((p) => p.pid === native.pid);
+      if (
+        !root ||
+        root.start !== native.start ||
+        root.ppid !== native.ppid ||
+        root.ppid !== current.pm2Runtime.pid ||
+        cloudCensus.processes.some(
+          (p) => p.mountNamespace === native.mountNamespace && !ids.has(p.pid),
+        )
+      )
+        fail();
+      review.processes = review.processes.filter((r) => !processes.some((p) => p.pid === r.pid));
+      for (const p of native.processes)
+        review.processes.push({
+          pid: p.pid,
+          identityDigest: digest(project(p)),
+          disposition: 'preserve',
+          reason: 'bound native cloud recovery',
+        });
+      review.registrations.find((r) => r.pmId === manager.pmId).configDigest = live.configDigest;
+      return { ...declaration, status: 'recovered' };
+    }
+    if (restoreAck) fail();
     const intent = events[i * 2];
     const ack = events[i * 2 + 1];
     if (intent && !equal(intent, { ...base, phase: 'cloud-stop-intent' })) fail();
     if (ack && !equal(ack, { ...base, phase: 'cloud-stopped' })) fail();
     if (!intent || (!ack && live.status === 'online')) {
-      if (!equal(live, manager) || !equal(tree(current, manager.pid), processes)) fail();
+      if (
+        !equal(live, manager) ||
+        !equal(
+          [
+            ...tree(current, manager.pid),
+            ...(i === 1
+              ? (cloudAssociations?.original?.members ?? [])
+                  .filter((p) => !tree(current, manager.pid).some((row) => row.pid === p.pid))
+                  .map((p) => current.processes.find((row) => row.pid === p.pid))
+              : []),
+          ].sort((a, b) => a?.pid - b?.pid),
+          processes,
+        )
+      )
+        fail();
       return { ...declaration, status: 'online' };
     }
     if (
       !hash(live.configDigest) ||
       live.stopConfigDigest !== manager.stopConfigDigest ||
       !equal(live, { ...manager, pid: 0, status: 'stopped', configDigest: live.configDigest }) ||
-      current.processes.some((p) => processes.some((old) => old.pid === p.pid))
+      current.processes.some((p) => processes.some((old) => old.pid === p.pid)) ||
+      (cloudCensus !== undefined &&
+        cloudCensus.processes.some((p) => processes.some((old) => old.pid === p.pid)))
     )
       fail();
     const ports = i === 0 ? [5901, 6080] : [9223];
@@ -403,6 +567,9 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
     execution = [],
     cloudProgress = false,
     cloudDisplay,
+    cloudAssociations,
+    cloudCensus,
+    cloudRecovery,
   } = structuredClone(input);
   if (
     effects?.phase === 'legacy_interruption_accepted' &&
@@ -520,6 +687,9 @@ export function classifyFirstCutoverRetirementPair(input, io = { now: Date.now }
     inventoryDigest,
     progress: cloudProgress,
     cloudDisplay,
+    cloudAssociations,
+    cloudCensus,
+    cloudRecovery,
     now: io.now(),
   });
   const actualSources = new Map(

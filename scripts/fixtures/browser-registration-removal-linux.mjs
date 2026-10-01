@@ -1,3 +1,4 @@
+import { ingressDiagnosticStage } from '/source/browser-first-cutover-ingress-diagnostics.mjs';
 // Disposable, private-PID Linux QA. No production access or credentials.
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
@@ -44,13 +45,67 @@ import { candidatePreparationSystem } from '/source/browser-maintenance-host.mjs
 import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 import { buildMaintenanceMigrationManifest } from '/source/browser-maintenance-manifest.mjs';
 import { createQaNginxSites } from '/source/fixtures/browser-nginx-sites-qa.mjs';
+// Fixed QA-only kernel counters. Unavailable interfaces remain unavailable.
+async function qaMemoryState(stage) {
+  const state = {};
+  for (const name of ['memory.current', 'memory.peak', 'memory.events']) {
+    try {
+      const raw = await fs.readFile(`/sys/fs/cgroup/${name}`, 'utf8');
+      if (raw.length > 4096) continue;
+      if (name === 'memory.events') {
+        state.events = Object.fromEntries(
+          raw
+            .trim()
+            .split('\n')
+            .flatMap((line) => {
+              const [key, value] = line.split(' ');
+              return ['oom', 'oom_kill', 'max', 'high'].includes(key) && /^\d+$/.test(value)
+                ? [[key, Number(value)]]
+                : [];
+            }),
+        );
+      } else if (/^\d+\s*$/.test(raw)) {
+        state[name === 'memory.current' ? 'currentBytes' : 'peakBytes'] = Number(raw.trim());
+      }
+    } catch {
+      /* Do not invent a zero or relax a platform contract. */
+    }
+  }
+  console.error('QA_CGROUP_MEMORY_STATE', stage, JSON.stringify(state));
+}
+// QA diagnostics expose only fixed stages and error codes, never database rows.
+async function qaBackupStage(stage, operation) {
+  console.error('QA_BACKUP_STAGE', stage, 'start');
+  await qaMemoryState(`${stage}-start`);
+  try {
+    const result = await operation();
+    console.error('QA_BACKUP_STAGE', stage, 'done');
+    await qaMemoryState(`${stage}-done`);
+    return result;
+  } catch (error) {
+    const code = /^(CUTOVER|MAINTENANCE)_[A-Z_]+$/.test(error?.message ?? '')
+      ? error.message
+      : 'UNCLASSIFIED_ERROR';
+    console.error('QA_BACKUP_STAGE', stage, 'failed', code);
+    const cause = ingressDiagnosticStage(error);
+    if (cause)
+      console.error('QA_RECOVERY_REJECTION', JSON.stringify({ component: 'client', stage: cause }));
+    await qaMemoryState(`${stage}-failed`);
+    throw error;
+  }
+}
 await fs.access('/.dockerenv');
 assert.equal(process.getuid(), 0);
 await fs.copyFile('/opt/node22/bin/node', '/usr/bin/node');
 await fs.mkdir('/usr/lib/node_modules', { recursive: true });
 await fs.symlink('/opt/node22/lib/node_modules/pm2', '/usr/lib/node_modules/pm2');
 const exec = async (file, argv) =>
-  (await promisify(execFile)(file, argv, { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 })).stdout;
+  (
+    await promisify(execFile)(file, argv, {
+      encoding: 'utf8',
+      maxBuffer: 8 * 1024 * 1024,
+    })
+  ).stdout;
 const pm2 = (...args) => exec('/usr/bin/node', ['/usr/lib/node_modules/pm2/bin/pm2', ...args]);
 const rows = async () => JSON.parse(await pm2('jlist'));
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -82,7 +137,10 @@ const successfulCutover = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'suc
 const lostOpenAck = process.env.CUTOVER_QA_LOST_OPEN_ACK === '1';
 assert.ok(!lostOpenAck || successfulCutover);
 const enabledWorker = process.env.CUTOVER_QA_ENABLED_WORKER === '1';
-assert.ok(!enabledWorker || (successfulCutover && !lostOpenAck));
+assert.ok(
+  !enabledWorker ||
+    ((successfulCutover || process.env.CUTOVER_QA_HOST_FAULT === 'after-worker') && !lostOpenAck),
+);
 const afterWorker = fullHost && process.env.CUTOVER_QA_HOST_FAULT === 'after-worker';
 const nativeWorker = afterWorker || successfulCutover || lateKnownEffect;
 const nativeIngress = afterIngress || nativeWorker || repeatSiteFence;
@@ -143,7 +201,10 @@ assert.ok(!sourceQa || (recoveryLink && !recoveryDrift));
 let sourceIo;
 if (sourceQa) {
   assert.equal(sha(sourceQa.config), recoveryScope.binding.configDigest);
-  await fs.mkdir(sourceQa.sourceOptions.directory, { recursive: true, mode: 0o700 });
+  await fs.mkdir(sourceQa.sourceOptions.directory, {
+    recursive: true,
+    mode: 0o700,
+  });
   await fs.chmod(sourceQa.sourceOptions.directory, 0o700);
   await fs.writeFile(sourceQa.sourceOptions.facility.recipientFile, sourceQa.recipient, {
     mode: 0o600,
@@ -200,6 +261,9 @@ assert.ok(
 );
 const lostAck = process.argv[2] === '--gateways-lost-ack';
 const siteMode = process.argv[2]?.startsWith('--execution-site');
+// Every execution-site branch owns an actual ingress pair. Candidate/open/worker
+// fault selection remains independent; a missing transport is never synthesized.
+const physicalIngress = siteMode;
 const siteLostAck = process.argv[2] === '--execution-site-lost-ack';
 const lostEffect = [
   '--execution-site-lost-effect',
@@ -238,7 +302,12 @@ if (lostEffect) {
       response.end(
         JSON.stringify(
           effectCount === 1
-            ? [{ privateEvidenceRef: sha('known QA action'), outcome: 'unknown' }]
+            ? [
+                {
+                  privateEvidenceRef: sha('known QA action'),
+                  outcome: 'unknown',
+                },
+              ]
             : [],
         ),
       );
@@ -258,7 +327,7 @@ if (lostEffect) {
 }
 // Only the QA payment callback boundary is simulated; it belongs to the real
 // retired gateway process. Never create an unclassified legacy origin listener.
-const legacyHttpHandler = nativeIngress
+const legacyHttpHandler = physicalIngress
   ? `(q,r)=>{r.statusCode=/\\/(notify|webhook|confirm)(\\?|$)/.test(q.url)?401:200;r.end('qa');}`
   : `(q,r)=>r.end('qa')`;
 const legacyHttpStart = `http.createServer(${legacyHttpHandler}).listen(${mainPort});`;
@@ -293,8 +362,14 @@ if (repeatSiteFence) {
   const recipientFile = `${directory}/qa-recipient.txt`;
   await fs.writeFile(recipientFile, recipient, { mode: 0o600, flag: 'wx' });
   readinessInventory.backupPlan = {
-    sourceIdentity: { serverUuid: '11111111-1111-4111-8111-111111111111', database: 'source_qa' },
-    isolatedTarget: { serverUuid: '22222222-2222-4222-8222-222222222222', database: 'restore_qa' },
+    sourceIdentity: {
+      serverUuid: '11111111-1111-4111-8111-111111111111',
+      database: 'source_qa',
+    },
+    isolatedTarget: {
+      serverUuid: '22222222-2222-4222-8222-222222222222',
+      database: 'restore_qa',
+    },
   };
   readinessInventory.backupSource = {
     facility: {
@@ -371,7 +446,11 @@ try {
   for (let n = 0; ; n++) {
     try {
       assert.equal(
-        (await fetch(`http://127.0.0.1:${mainPort}`, { headers: { connection: 'close' } })).status,
+        (
+          await fetch(`http://127.0.0.1:${mainPort}`, {
+            headers: { connection: 'close' },
+          })
+        ).status,
         200,
       );
       break;
@@ -380,7 +459,7 @@ try {
       await sleep(100);
     }
   }
-  if (nativeIngress) {
+  if (physicalIngress) {
     for (const port of [mainPort])
       assert.equal(
         (
@@ -511,7 +590,10 @@ try {
       const cron = raw.filter((_r, i) => saved[i].name === 'holaday-files-cron');
       assert.equal(cron.length, 1);
       const original = `${preserved.trim().slice(0, -1)},${cron[0]}]\n`;
-      await fs.writeFile(`${vultrStartupRoot}/${suffix}`, original, { mode: 0o600, flag: 'wx' });
+      await fs.writeFile(`${vultrStartupRoot}/${suffix}`, original, {
+        mode: 0o600,
+        flag: 'wx',
+      });
       vultrStartupFiles.push({
         path,
         digest: sha(original),
@@ -554,7 +636,11 @@ try {
   for (let n = 0; ; n++) {
     try {
       assert.equal(
-        (await fetch('http://127.0.0.1:4011', { headers: { connection: 'close' } })).status,
+        (
+          await fetch('http://127.0.0.1:4011', {
+            headers: { connection: 'close' },
+          })
+        ).status,
         200,
       );
       break;
@@ -733,7 +819,7 @@ try {
       ],
     };
   };
-  if (nativeIngress) {
+  if (physicalIngress) {
     nginxFixture = await createQaNginxSites({ fencedCallbackPort: 4010 });
     await nginxFixture.start();
   }
@@ -789,7 +875,7 @@ try {
   );
   const maintenanceEndsAtMs =
     recoveryScope?.maintenanceEndsAtMs ??
-    Date.now() + (fullHost || repeatSiteFence ? 600000 : 60000);
+    Date.now() + (fullHost || repeatSiteFence ? 600000 : siteMode ? 180000 : 60000);
   const interruptionMetadata = interruption
     ? {
         schemaVersion: 2,
@@ -841,7 +927,11 @@ try {
     });
   const createObserver = async () =>
     createFirstCutoverRetirementObserver(
-      { reviews, binding: await journal.assertOwnership(), legacyDigest: proof.legacyDigest },
+      {
+        reviews,
+        binding: await journal.assertOwnership(),
+        legacyDigest: proof.legacyDigest,
+      },
       {
         journal,
         readPair,
@@ -921,7 +1011,7 @@ try {
         receiver = spawn(
           '/usr/bin/node',
           ['/source/browser-first-cutover-gateway-session.mjs', binding.attempt],
-          { stdio: ['pipe', 'pipe', 'pipe'] },
+          { cwd: '/', stdio: ['pipe', 'pipe', 'pipe'] },
         );
         receiver.stderr.resume();
         receiverCompletion = new Promise((resolve) =>
@@ -982,7 +1072,7 @@ try {
                 inventory: readinessInventory,
                 reviews,
                 gatewaySiteDigest: sha(siteBytes),
-                ingress: nativeIngress
+                ingress: physicalIngress
                   ? nginxFixture.approval(binding.inventoryDigest)
                   : {
                       inventoryDigest: binding.inventoryDigest,
@@ -1003,7 +1093,10 @@ try {
                       path: `/root/.pm2/${name}`,
                       digest: sha('synthetic other host'),
                       remove: [
-                        { name: 'holaday-orchestrator', entryDigest: sha('synthetic producer') },
+                        {
+                          name: 'holaday-orchestrator',
+                          entryDigest: sha('synthetic producer'),
+                        },
                       ],
                     })),
               },
@@ -1019,9 +1112,31 @@ try {
                     readBackupPlan: (ctx, inventory) =>
                       readFirstCutoverBackupPlan(ctx, inventory, sourceIo),
                     exportSourceBackup: (ctx, inventory, deps) =>
-                      exportFirstCutoverSourceBackup(ctx, inventory, { ...sourceIo, ...deps }),
+                      exportFirstCutoverSourceBackup(ctx, inventory, {
+                        ...sourceIo,
+                        ...deps,
+                      }),
                     readSourceSnapshot: (ctx, inventory, deps) =>
-                      readFirstCutoverSourceSnapshot(ctx, inventory, { ...sourceIo, ...deps }),
+                      qaBackupStage('source-snapshot', () =>
+                        readFirstCutoverSourceSnapshot(ctx, inventory, {
+                          ...sourceIo,
+                          ...deps,
+                        }),
+                      ),
+                    connectRecovery: async (scope, options) => {
+                      const client = await qaBackupStage('recovery-attach', () =>
+                        connectFirstCutoverRecoverySession(scope, options),
+                      );
+                      return Object.fromEntries(
+                        ['inspect', 'restore', 'snapshot', 'migrate', 'verify', 'close'].map(
+                          (method) => [
+                            method,
+                            (...args) =>
+                              qaBackupStage(`recovery-${method}`, () => client[method](...args)),
+                          ],
+                        ),
+                      );
+                    },
                   }
                 : {}),
               // Persisted-work/other-host facts remain explicitly synthetic.
@@ -1030,7 +1145,10 @@ try {
                 observedAtMs: Date.now(),
                 unsettled: [],
                 ...(interruption
-                  ? { pendingReplay: 0, replaySourcesDigest: sha('synthetic QA persisted source') }
+                  ? {
+                      pendingReplay: 0,
+                      replaySourcesDigest: sha('synthetic QA persisted source'),
+                    }
                   : {}),
               }),
               readPair,
@@ -1188,10 +1306,21 @@ try {
                   ...(interruption
                     ? {
                         schemaVersion: 2,
-                        activeRequests: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
-                        externalWork: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+                        activeRequests: {
+                          kind: 'unobservable',
+                          reason: 'legacy-no-inflight-api',
+                        },
+                        externalWork: {
+                          kind: 'unobservable',
+                          reason: 'legacy-no-inflight-api',
+                        },
                         knownExternalWork: knownEffectVisible
-                          ? [{ privateEvidenceRef: sha('known QA action'), outcome: 'unknown' }]
+                          ? [
+                              {
+                                privateEvidenceRef: sha('known QA action'),
+                                outcome: 'unknown',
+                              },
+                            ]
                           : [],
                         capabilityDigest: interruptionMetadata.legacyInterruption.capabilityDigest,
                         replaySourcesDigest: sha('synthetic QA replay source'),
@@ -1294,7 +1423,10 @@ try {
                       assert.equal(discovery.status, 200);
                       const known = await discovery.json();
                       assert.deepEqual(known, [
-                        { privateEvidenceRef: sha('known QA action'), outcome: 'unknown' },
+                        {
+                          privateEvidenceRef: sha('known QA action'),
+                          outcome: 'unknown',
+                        },
                       ]);
                       knownEffectVisible = known.length > 0;
                     }
@@ -1313,36 +1445,31 @@ try {
                       },
                     }),
               },
-              createIngress: async (_input, deps) =>
-                nativeIngress
-                  ? nginxFixture.connect(_input, deps)
-                  : {
-                      verifyOrders: async () => fence('orders'),
-                      verifyFence: async () => fence('all-writers'),
-                      fenceOrders: async () => {},
-                      fenceAll: async () => {},
-                      readFenceReceipts: async () => [],
-                      restoreIngress: async (identity) => {
-                        if (!afterOpen) throw new Error('not exercised');
-                        // Actual original site checks serving/dirty identity AND the
-                        // physical retirement observer before this explicit failure.
-                        const actual = await deps.verifyOpenedIdentity(identity);
-                        assert.deepEqual(actual.identity, identity);
-                        assert.equal(actual.mode, 'serving');
-                        assert.equal(actual.needsReconciliation, true);
-                        assert.equal(actual.idle, false);
-                        assert.equal(hostOpenCommands, 1);
-                        assert.equal(hostPreopenReadiness, 2);
-                        const response = await fetch('http://127.0.0.1:4001/qa-admission-probe', {
-                          headers: { connection: 'close' },
-                        });
-                        await response.text();
-                        assert.equal(response.status, 404); // Unknown read-only route, NOT a task.
-                        hostStartFaults++;
-                        throw new Error('CUTOVER_QA_INGRESS_FAULT');
-                      },
-                      close: async () => {},
-                    },
+              createIngress: async (_input, deps) => {
+                assert(physicalIngress && nginxFixture);
+                const pair = await nginxFixture.connect(_input, deps);
+                if (afterOpen) {
+                  pair.restoreIngress = async (identity) => {
+                    // Actual original site checks serving/dirty identity AND the
+                    // physical retirement observer before this explicit failure.
+                    const actual = await deps.verifyOpenedIdentity(identity);
+                    assert.deepEqual(actual.identity, identity);
+                    assert.equal(actual.mode, 'serving');
+                    assert.equal(actual.needsReconciliation, true);
+                    assert.equal(actual.idle, false);
+                    assert.equal(hostOpenCommands, 1);
+                    assert.equal(hostPreopenReadiness, 2);
+                    const response = await fetch('http://127.0.0.1:4001/qa-admission-probe', {
+                      headers: { connection: 'close' },
+                    });
+                    await response.text();
+                    assert.equal(response.status, 404); // Unknown read-only route, NOT a task.
+                    hostStartFaults++;
+                    throw new Error('CUTOVER_QA_INGRESS_FAULT');
+                  };
+                }
+                return pair;
+              },
               connectGateway: async (args, deps) => {
                 client = await connectFirstCutoverGatewaySession(args, {
                   ...deps,
@@ -1411,6 +1538,23 @@ try {
                         return await original(...args);
                       } catch (error) {
                         console.error('QA_OBSERVER_FAILED', name, error.message);
+                        await qaMemoryState('observer-failed');
+                        try {
+                          const record = await journal.readFirstCutoverEffects();
+                          console.error(
+                            'QA_FAILURE_JOURNAL_STATE',
+                            JSON.stringify({
+                              phase: record.phase,
+                              recordDigest: record.recordDigest,
+                              startupCount: record.startupEvents?.length ?? 0,
+                              registrationCount: record.registrationEvents?.length ?? 0,
+                              unmanagedCount: record.unmanagedEvents?.length ?? 0,
+                              hasFailureObservation: Boolean(record.failureObservation),
+                            }),
+                          );
+                        } catch {
+                          console.error('QA_FAILURE_JOURNAL_STATE_UNAVAILABLE');
+                        }
                         // Diagnostic replay of already observed synthetic inputs.
                         // Never substitute its result or reread/retry a side effect.
                         if (
@@ -1452,7 +1596,9 @@ try {
               },
               retireProducers: async (input, deps) => {
                 if (nativeWorker) {
-                  await retireLocalFirstCutoverProducers(input, deps, { fs: startupFs });
+                  await retireLocalFirstCutoverProducers(input, deps, {
+                    fs: startupFs,
+                  });
                   assert.equal(
                     (await rows()).some((r) => r.name === 'holaday-files-cron'),
                     false,
@@ -1652,7 +1798,38 @@ try {
               hostMigrationFaults++;
               throw new Error('QA_INJECTED_MIGRATION_FAILURE');
             }
-            const value = await system.exec(command, args, options);
+            const compileBudget =
+              process.env.CUTOVER_QA_COMPILE_BUDGET === '1' &&
+              command === 'pnpm' &&
+              args.join(' ') === '--filter @holaday/orchestrator build';
+            const value = await system.exec(
+              command,
+              args,
+              compileBudget
+                ? {
+                    ...options,
+                    env: {
+                      ...options?.env,
+                      NODE_OPTIONS: '--max-old-space-size=1536 --v8-pool-size=1',
+                      UV_THREADPOOL_SIZE: '1',
+                    },
+                  }
+                : options,
+            );
+            if (compileBudget) {
+              // This marker manages only the owned disposable test container.
+              // It is never a functional or release-success receipt.
+              console.error('QA_COMPILE_COMPLETE_REDUCE_MEMORY');
+              const deadline = performance.now() + 15000;
+              while (
+                (await fs.readFile('/sys/fs/cgroup/memory.max', 'utf8')).trim() !== '805306368'
+              ) {
+                if (performance.now() >= deadline)
+                  throw new Error('QA_COMPILE_BUDGET_REDUCTION_UNPROVEN');
+                await sleep(100);
+              }
+              console.error('QA_COMPILE_BUDGET_CGROUP_768_CONFIRMED');
+            }
             // Lose only the already-completed control reply. The real candidate
             // and journal remain live; production must inspect, not send open again.
             if (lostOpenAck && command === 'runuser' && args.includes('open')) {
@@ -2026,7 +2203,13 @@ try {
           assert.equal(effects.failureObservation.status.needsReconciliation, true);
         }
         assert.equal((await rows()).find((r) => r.name === 'qa-unrelated').pid, unrelated.pid);
+        let heldLock;
         if (fullHost) {
+          if (!successfulCutover) {
+            assert.deepEqual(await journal.assertOwnership(), siteContext.binding);
+            const path = `${journal.path.slice(0, journal.path.lastIndexOf('/'))}/release.lock`;
+            heldLock = { path, stat: await fs.lstat(path), bytes: await fs.readFile(path) };
+          }
           await hostAdapter.finish(result);
           hostFinished = true;
           if (successfulCutover)
@@ -2034,17 +2217,71 @@ try {
               fs.access(`${journal.path.slice(0, journal.path.lastIndexOf('/'))}/release.lock`),
               { code: 'ENOENT' },
             );
-          if (lateKnownEffect)
+          if (!successfulCutover) {
             await fs.access(`${journal.path.slice(0, journal.path.lastIndexOf('/'))}/release.lock`);
+            const stat = await fs.lstat(heldLock.path);
+            assert.equal(stat.ino, heldLock.stat.ino);
+            assert.equal(stat.dev, heldLock.stat.dev);
+            assert.equal(stat.uid, 0);
+            assert.equal(stat.mode & 0o7777, 0o600);
+            assert.equal(stat.nlink, 1);
+            assert.deepEqual(await fs.readFile(heldLock.path), heldLock.bytes);
+          }
         } else await executionSite.lifecycle.detach(siteContext);
         assert.equal((await receiverCompletion).code, 0);
-        if (!knownEffect && !successfulCutover) {
+        if (fullHost && !successfulCutover && afterStart && !lateKnownEffect)
+          assert.equal(hostStartFaults, 1, 'the selected failure is injected once');
+        if (
+          !knownEffect &&
+          !successfulCutover &&
+          (!fullHost ||
+            effects.candidateStartupEvents === undefined ||
+            !effects.candidateStartupEvents.length)
+        ) {
           await pm2('kill');
           await pm2('resurrect');
           assert.deepEqual(
             (await rows()).map((r) => r.name),
             ['qa-unrelated'],
           );
+        }
+        if (
+          fullHost &&
+          !successfulCutover &&
+          effects.candidateStartupEvents !== undefined &&
+          effects.candidateStartupEvents.length
+        ) {
+          assert.equal(effects.candidateStartupEvents.length, 6);
+          const durable = effects;
+          for (const f of vultrStartupFiles) {
+            const bytes = await fs.readFile(mapStartup(f.path));
+            const pinned = durable.candidateStartupEvents[1].files.find((x) => x.path === f.path);
+            assert.ok(pinned);
+            // The complete file digest binds argv/env/source and retained rows.
+            assert.equal(sha(bytes), pinned.afterDigest);
+            const entries = JSON.parse(bytes.toString());
+            for (const entry of entries.filter((row) => row.name !== 'qa-unrelated')) {
+              assert.equal(entry.pm_cwd, `${siteContext.root}/apps/orchestrator`);
+              assert.equal(entry.autorestart, false);
+              assert.equal(String(entry.uid), '998');
+            }
+          }
+          const saved = JSON.parse(await fs.readFile('/root/.pm2/dump.pm2', 'utf8'));
+          assert.deepEqual(
+            saved.map((row) => row.name).sort(),
+            [
+              ...(enabledWorker ? ['holaday-account-closure-worker'] : []),
+              'holaday-orchestrator',
+              'qa-unrelated',
+            ].sort(),
+          );
+          assert.equal(saved.filter((row) => row.name === 'holaday-orchestrator').length, 1);
+          assert.equal(
+            saved.find((row) => row.name === 'holaday-orchestrator').pm_cwd,
+            `${siteContext.root}/apps/orchestrator`,
+          );
+          // Do not resurrect a committed candidate to test legacy retirement:
+          // that would create an extra boot after the observed failure.
         }
         assert.equal(effectCount, 1, 'no retry, old startup replay, or business compensation');
         console.log(
@@ -2058,10 +2295,18 @@ try {
               ? { qaFlowPassed: true, reconciliationChecks, lockReleased: true }
               : {}),
             ...(lostOpenAck
-              ? { openAckLost: true, openCommands: hostOpenCommands, statusAfterLostAck: true }
+              ? {
+                  openAckLost: true,
+                  openCommands: hostOpenCommands,
+                  statusAfterLostAck: true,
+                }
               : {}),
             ...(lateKnownEffect
-              ? { lateKnownEffectBlocked: true, reconciliationChecks, lockRetained: true }
+              ? {
+                  lateKnownEffectBlocked: true,
+                  reconciliationChecks,
+                  lockRetained: true,
+                }
               : {}),
             knownEffect,
             phase: result.phase,
@@ -2079,12 +2324,19 @@ try {
               : {}),
             ...(preopenGate ? { nativePreopenVerified: true } : {}),
             ...(openedCandidate
-              ? { candidateOpened: true, needsReconciliation: true, ingressRestored: nativeIngress }
+              ? {
+                  candidateOpened: true,
+                  needsReconciliation: true,
+                  ingressRestored: nativeIngress,
+                }
               : {}),
             ...(nativeWorker ? { nativeStartupPersisted: true, workerEnabled: enabledWorker } : {}),
             ...(enabledWorker ? { workerTickObserved: true } : {}),
             ...(recoveryLink
-              ? { recoveryLinked: !recoveryDrift, recoveryRejected: recoveryDrift }
+              ? {
+                  recoveryLinked: !recoveryDrift,
+                  recoveryRejected: recoveryDrift,
+                }
               : {}),
             ...(sourceQa
               ? {
@@ -2135,11 +2387,19 @@ try {
             }
           if (phase === 'producers_stopped') {
             assert.equal(
-              (await fetch('http://127.0.0.1:4010', { headers: { connection: 'close' } })).status,
+              (
+                await fetch('http://127.0.0.1:4010', {
+                  headers: { connection: 'close' },
+                })
+              ).status,
               200,
             );
             assert.equal(
-              (await fetch('http://127.0.0.1:4011', { headers: { connection: 'close' } })).status,
+              (
+                await fetch('http://127.0.0.1:4011', {
+                  headers: { connection: 'close' },
+                })
+              ).status,
               200,
             );
           }
@@ -2163,7 +2423,9 @@ try {
             // private approval reads and the unchanged owned journal. Repeating
             // only standalone ingress reads does not exercise this composition.
             // No database, recovery receipt, migration or candidate is simulated.
-            await journal.persist('backup_verified', { candidate: siteContext.binding.candidate });
+            await journal.persist('backup_verified', {
+              candidate: siteContext.binding.candidate,
+            });
             const before = await journal.readFirstCutoverEffects();
             const input = {
               ...readinessInventory.backupPlan,

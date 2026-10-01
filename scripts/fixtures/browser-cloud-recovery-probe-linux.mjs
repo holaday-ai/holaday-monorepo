@@ -1,3 +1,4 @@
+import { readFirstCutoverCloudNativePreflight } from '../browser-first-cutover-native-preflight.mjs';
 // Diagnostic for the approved cloud-browser recovery boundary, NOT a release gate.
 // Historical silent/app/global-policy modes retain their failed hypotheses.
 // Run only in a disposable network-none Linux container, never with a real profile.
@@ -39,6 +40,7 @@ import {
   prepareFirstCutoverCloudBrowserPolicy,
   readFirstCutoverCloudBrowserRecovery,
   readFirstCutoverCloudManagers,
+  readFirstCutoverCloudOldBrowserAssociations,
   readFirstCutoverCloudOwnedDisplay,
   readFirstCutoverCloudRecovery,
   readFirstCutoverCloudRecoveryCensus,
@@ -173,6 +175,7 @@ function observeDisplayDiagnostics(child) {
 observeDisplayDiagnostics(xvfb);
 let independentDisplay;
 let oldDisplay;
+let originalAssociations;
 let recoveredDisplay;
 let conflictDisplay;
 let conflictDisplayProof;
@@ -427,6 +430,24 @@ async function restoreSameRegistration(recovery) {
     });
     assert.equal(vacancy.contextDigest, context.daemon.contextDigest);
     assert.equal(vacancy.sourcesDigest, context.sourcesDigest);
+    const preflightBegan = Date.now();
+    const nativePreflight = await readFirstCutoverCloudNativePreflight({
+      attempt,
+      sources,
+      vacancy,
+      maintenanceEndsAtMs: input.maintenanceEndsAtMs,
+    });
+    assert.deepEqual(nativePreflight.roles, ['holaday-chromium-headed', 'holaday-vnc']);
+    assert.equal(nativePreflight.contextDigest, context.daemon.contextDigest);
+    assert.equal((await restoreJournal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 4);
+    console.log(
+      JSON.stringify({
+        marker: 'CLOUD_BOTH_NATIVE_PREFLIGHT_PASS',
+        elapsedMs: Date.now() - preflightBegan,
+        beforeEitherRestoreIntent: true,
+        actualDefaultReaders: true,
+      }),
+    );
     console.log(
       JSON.stringify({
         marker: 'CLOUD_NATIVE_RECOVERY_VACANCY_OBSERVED',
@@ -1161,6 +1182,24 @@ async function close() {
             })),
           },
         });
+        const associations = await readFirstCutoverCloudOldBrowserAssociations({
+          sources,
+          displayObservation: proof,
+          maintenanceEndsAtMs: Date.now() + 15000,
+        });
+        assert.equal(associations.members.length, 2, 'both actual old IPC-associated crashpads');
+        assert(
+          associations.members.every((p) => p.ppid === 1),
+          'actual original handlers reparent to PID 1',
+        );
+        originalAssociations = associations;
+        console.log(
+          JSON.stringify({
+            marker: 'CLOUD_OLD_BROWSER_IPC_NATIVE_ASSOCIATION_OBSERVED',
+            members: associations.members.length,
+            productionStopPermission: false,
+          }),
+        );
         assert.equal(proof.display.pid, oldDisplay.identity.pid);
         assert.equal(proof.display.ppid, managed.identity.pid);
         assert.ok(proof.members.some((p) => p.pid === oldDisplay.identity.pid));
@@ -1240,6 +1279,14 @@ async function close() {
     // PID/start before stop. No profile-argv association or signal-based help.
     const observed = await ownedProcesses(managed.identity);
     assert.ok(observed.length > 1, 'real browser children were observed');
+    if (originalAssociations && !recoveredDisplay)
+      for (const p of originalAssociations.members)
+        assert(
+          observed.some(
+            (actual) => actual.pid === p.pid && actual.start === p.start && actual.ppid === p.ppid,
+          ),
+          'native original association agrees with independent QA IPC capture',
+        );
     const ownedDisplay = recoveredDisplay ?? oldDisplay;
     assert.ok(ownedDisplay);
     assert.ok(
@@ -1396,7 +1443,7 @@ try {
   await close();
   console.log(
     (
-      await promisify(execFile)('/usr/local/bin/python3', [
+      await promisify(execFile)('/usr/bin/python3', [
         '-c',
         'import pathlib,sqlite3,sys,json; p=pathlib.Path(sys.argv[1]); files=[p/"Default"/"Cookies",p/"Default"/"Network"/"Cookies"]; f=next(f for f in files if f.exists()); c=sqlite3.connect("file:"+str(f)+"?mode=ro",uri=True); print(json.dumps({"afterCloseSyntheticCookieMetadata":c.execute("SELECT name,is_persistent,has_expires FROM cookies").fetchall()}))',
         profile,
@@ -1661,6 +1708,24 @@ try {
         'same complete display/browser tree across actual Worker interval',
       );
       assert.deepEqual(stableNative.display, native.display);
+      if (jointRecovery) {
+        const { probeFirstCutoverRecoveredBrowser } = await import(
+          '../browser-first-cutover-browser-probe.mjs'
+        );
+        const browserProbe = await probeFirstCutoverRecoveredBrowser(
+          stableNative,
+          restoreMaintenanceEndsAtMs,
+        );
+        assert.equal(browserProbe.kind, 'browser-minimum-execution-result');
+        console.log(
+          JSON.stringify({
+            marker: 'CLOUD_OWN_TARGET_BROWSER_EXECUTION_PASS',
+            foundationalExecutionOnly: true,
+            existingTargetsRead: false,
+            ownTargetClosed: true,
+          }),
+        );
+      }
       assert.deepEqual(await displayProof(98, recoveredDisplay.identity), recoveredDisplay);
       assert.equal(await sameLive(oldDisplay.identity), false);
       await assertIndependentDisplay();
@@ -1727,7 +1792,7 @@ try {
     );
     console.log(
       jointRecovery
-        ? 'CLOUD_JOINT_COMPONENT_ONLY: fixture headed ACK follows actual native proof; no full-site acceptance, VNC ACK or candidate open.'
+        ? 'CLOUD_JOINT_COMPONENT_ONLY: fixture headed ACK follows actual native proof; actual eight recovery events; no full-site acceptance or candidate open.'
         : 'CLOUD_SAME_ID_RESTORE_PASS: original journal intent, single default RPC, same numeric registration and restart count; independent procfs/private policy observation. No physical-recovery ACK or candidate open.',
     );
   }

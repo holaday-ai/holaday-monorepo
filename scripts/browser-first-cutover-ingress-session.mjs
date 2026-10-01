@@ -1,3 +1,4 @@
+import { ingressDiagnosticError } from './browser-first-cutover-ingress-diagnostics.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -11,11 +12,14 @@ import {
 import {
   createFirstCutoverIngressLifecycle,
   readFirstCutoverApproval,
+  readFirstCutoverReconciliationApproval,
+  assertFirstCutoverReconciliationRead,
 } from './browser-first-cutover-host.mjs';
 
-const error = () => new Error('CUTOVER_INGRESS_SESSION_UNPROVEN');
-const fail = () => {
-  throw error();
+const error = (stage, previous) =>
+  ingressDiagnosticError('CUTOVER_INGRESS_SESSION_UNPROVEN', stage, previous);
+const fail = (stage, previous) => {
+  throw error(stage, previous);
 };
 const hash = (v) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
 const uuid = (v) =>
@@ -129,7 +133,12 @@ export async function readFirstCutoverGatewaySite(options, overrides = {}) {
 
 export async function readFirstCutoverExecutionSiteScope(options, overrides = {}) {
   const value = await readProtectedSite(options, overrides, 'execution');
-  return { ...value.site, binding: value.binding, maintenanceEndsAtMs: value.maintenanceEndsAtMs };
+  return {
+    ...value.site,
+    binding: value.binding,
+    maintenanceEndsAtMs: value.maintenanceEndsAtMs,
+    ...(Object.hasOwn(value, 'reconcileByMs') ? { reconcileByMs: value.reconcileByMs } : {}),
+  };
 }
 
 async function readProtectedSite(options, overrides, kind) {
@@ -138,7 +147,7 @@ async function readProtectedSite(options, overrides, kind) {
     platform: process.platform,
     uid: process.getuid?.(),
     now: Date.now,
-    readApproval: readFirstCutoverApproval,
+    readApproval: readFirstCutoverReconciliationApproval,
     ...overrides,
   };
   const folder = '/var/lib/holaday-deploy/maintenance';
@@ -344,6 +353,9 @@ async function readProtectedSite(options, overrides, kind) {
     const result = {
       binding: value.binding,
       maintenanceEndsAtMs: value.maintenanceEndsAtMs,
+      ...(Number.isSafeInteger(beforeApproval.reconcileByMs)
+        ? { reconcileByMs: beforeApproval.reconcileByMs }
+        : {}),
       [scopeKey]: value[scopeKey],
       siteDigest: createHash('sha256').update(bytes).digest('hex'),
       ...(kind === 'gateway' && Object.hasOwn(value, 'payments')
@@ -352,7 +364,10 @@ async function readProtectedSite(options, overrides, kind) {
     };
     const now = io.now();
     if (now < began || !isDeepStrictEqual(beforeApproval, await io.readApproval(options))) fail();
-    validate(result, now);
+    validate(
+      { ...result, maintenanceEndsAtMs: result.reconcileByMs ?? result.maintenanceEndsAtMs },
+      now,
+    );
     return result;
   } catch {
     fail();
@@ -372,12 +387,13 @@ export function createFirstCutoverSessionWire(input, output, deadline, now) {
   const queue = [];
   const clock = () => {
     const time = now();
-    if (!Number.isSafeInteger(time) || time < 0 || time < last || time >= deadline) fail();
+    if (!Number.isSafeInteger(time) || time < 0 || time < last || time >= deadline)
+      fail('WIRE_CLOCK');
     last = time;
     return time;
   };
   const poison = () => {
-    failure = error();
+    failure = error('WIRE_READ');
     if (pending) {
       const p = pending;
       pending = undefined;
@@ -421,7 +437,7 @@ export function createFirstCutoverSessionWire(input, output, deadline, now) {
   return {
     async read() {
       const left = Math.min(2147483647, deadline - clock());
-      if (failure || pending) fail();
+      if (failure || pending) fail('WIRE_READ', failure);
       if (queue.length) return queue.shift();
       return new Promise((resolve, reject) => {
         pending = { resolve, reject, timer: setTimeout(poison, left) };
@@ -429,7 +445,7 @@ export function createFirstCutoverSessionWire(input, output, deadline, now) {
     },
     async write(value) {
       const left = Math.min(2147483647, deadline - clock());
-      if (failure || output.destroyed || output.writableEnded) fail();
+      if (failure || output.destroyed || output.writableEnded) fail('WIRE_WRITE', failure);
       const text = `${JSON.stringify(value)}\n`;
       if (Buffer.byteLength(text) > limit) fail();
       await new Promise((resolve, reject) => {
@@ -486,6 +502,7 @@ export async function serveFirstCutoverIngressSession({ attempt }, overrides = {
     createLifecycle: createFirstCutoverIngressLifecycle,
     ...overrides,
   };
+  let stage = 'RECEIVER_ENTRY';
   let channel;
   try {
     if (!uuid(attempt)) fail();
@@ -494,7 +511,7 @@ export async function serveFirstCutoverIngressSession({ attempt }, overrides = {
     if (site.binding.attempt !== attempt) fail();
     const execution = await io.readIdentity({ role: 'ingress', attempt });
     assertFirstCutoverSessionIdentity(execution, 'ingress');
-    channel = wire(io.input, io.output, site.maintenanceEndsAtMs, io.now);
+    channel = wire(io.input, io.output, site.reconcileByMs ?? site.maintenanceEndsAtMs, io.now);
     let lifecycle;
     let sequence = 0;
     const used = new Set();
@@ -515,11 +532,14 @@ export async function serveFirstCutoverIngressSession({ attempt }, overrides = {
       )
         fail();
       used.add(name);
-      if (!isDeepStrictEqual(await io.readSite({ attempt }), site)) fail();
+      stage = 'RECEIVER_SCOPE';
+      if (!isDeepStrictEqual(await io.readSite({ attempt }), site)) fail(stage);
+      stage = 'RECEIVER_IDENTITY';
       if (!isDeepStrictEqual(await io.readIdentity({ role: 'ingress', attempt }), execution))
         fail();
       let factSequence = 0;
       const fact = async (name, value = null) => {
+        stage = 'RECEIVER_FACT';
         const factSeq = ++factSequence;
         channel.assert();
         await channel.write({ protocol: 1, type: 'fact', seq, factSeq, name, value });
@@ -532,6 +552,17 @@ export async function serveFirstCutoverIngressSession({ attempt }, overrides = {
           fail();
         return response.value;
       };
+      if (io.now() >= site.maintenanceEndsAtMs) {
+        if (!['readFenceReceipt', 'detach'].includes(name)) fail();
+        await assertFirstCutoverReconciliationRead(
+          site,
+          {
+            assertOwnership: () => fact('ownership'),
+            readFirstCutoverEffects: () => fact('effects'),
+          },
+          io.now(),
+        );
+      }
       // Refresh closures for the current request; no journal snapshot is cached.
       let value;
       if (name === 'attach') {
@@ -547,7 +578,13 @@ export async function serveFirstCutoverIngressSession({ attempt }, overrides = {
         lifecycle = {
           facts,
           methods: await io.createLifecycle(
-            { binding: site.binding, maintenanceEndsAtMs: site.maintenanceEndsAtMs },
+            {
+              binding: site.binding,
+              maintenanceEndsAtMs: site.maintenanceEndsAtMs,
+              ...(Object.hasOwn(site, 'reconcileByMs')
+                ? { reconcileByMs: site.reconcileByMs }
+                : {}),
+            },
             {
               ...io.lifecycleIO,
               now: io.now,
@@ -567,6 +604,7 @@ export async function serveFirstCutoverIngressSession({ attempt }, overrides = {
           host: 'aliyun',
           binding: site.binding,
           maintenanceEndsAtMs: site.maintenanceEndsAtMs,
+          ...(Object.hasOwn(site, 'reconcileByMs') ? { reconcileByMs: site.reconcileByMs } : {}),
           siteDigest: site.siteDigest,
           execution,
         };
@@ -575,17 +613,20 @@ export async function serveFirstCutoverIngressSession({ attempt }, overrides = {
         return;
       } else {
         lifecycle.facts.call = fact;
+        stage = 'RECEIVER_LOCAL';
         value =
           name === 'restoreIngress'
             ? await lifecycle.methods.restoreIngress(message.value)
             : await lifecycle.methods[name]();
       }
+      stage = 'RECEIVER_RESULT';
       channel.assert();
-      if (!isDeepStrictEqual(await io.readSite({ attempt }), site)) fail();
+      stage = 'RECEIVER_SCOPE';
+      if (!isDeepStrictEqual(await io.readSite({ attempt }), site)) fail(stage);
       await channel.write({ protocol: 1, type: 'result', seq, value: value ?? null });
     }
-  } catch {
-    fail();
+  } catch (error) {
+    fail(stage, error);
   } finally {
     if (channel) channel.close();
     else io.output.end();
@@ -699,7 +740,12 @@ export async function connectFirstCutoverIngressSession(input, overrides = {}) {
     const expected = structuredClone(input);
     validate(expected, io.now());
     if (
-      !keys(expected, ['binding', 'maintenanceEndsAtMs', 'siteDigest']) ||
+      !keys(expected, [
+        'binding',
+        'maintenanceEndsAtMs',
+        'siteDigest',
+        ...(Object.hasOwn(expected, 'reconcileByMs') ? ['reconcileByMs'] : []),
+      ]) ||
       io.platform !== 'linux' ||
       io.uid !== 0 ||
       ['assertOwnership', 'readFirstCutoverEffects'].some(
@@ -713,8 +759,20 @@ export async function connectFirstCutoverIngressSession(input, overrides = {}) {
       readFirstCutoverEffects: io.journal.readFirstCutoverEffects.bind(io.journal),
     };
     const ownership = async () => {
-      const value = await journal.assertOwnership();
-      if (!isDeepStrictEqual(value, expected.binding)) fail();
+      let value;
+      try {
+        value = await journal.assertOwnership();
+      } catch (error) {
+        fail('REMOTE_OWNER', error);
+      }
+      if (!isDeepStrictEqual(value, expected.binding)) fail('REMOTE_OWNER');
+      if (io.now() >= expected.maintenanceEndsAtMs) {
+        try {
+          await assertFirstCutoverReconciliationRead(expected, io.journal, io.now());
+        } catch (error) {
+          fail('REMOTE_OWNER', error);
+        }
+      }
       return value;
     };
     await ownership();
@@ -761,20 +819,39 @@ export async function connectFirstCutoverIngressSession(input, overrides = {}) {
       ],
       { shell: false, env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin', LANG: 'C' } },
     );
-    channel = wire(connection.input, connection.output, expected.maintenanceEndsAtMs, io.now);
+    channel = wire(
+      connection.input,
+      connection.output,
+      expected.reconcileByMs ?? expected.maintenanceEndsAtMs,
+      io.now,
+    );
     const used = new Set();
     const run = async (name, value = null) => {
       const mutation = ['fenceOrders', 'fenceAll', 'restoreIngress'].includes(name);
-      if (busy || failed || (mutation && used.has(name))) fail();
+      if (busy || failed || (mutation && used.has(name))) fail('REMOTE_ENTRY');
       if (mutation) used.add(name);
       busy = true;
       try {
         await ownership();
+        if (
+          io.now() >= expected.maintenanceEndsAtMs &&
+          !['readFenceReceipt', 'detach'].includes(name)
+        )
+          fail();
         const seq = ++sequence;
-        await channel.write({ protocol: 1, type: 'operation', seq, name, value });
+        try {
+          await channel.write({ protocol: 1, type: 'operation', seq, name, value });
+        } catch (error) {
+          fail('REMOTE_SEND', error);
+        }
         let factSequence = 0;
         for (;;) {
-          const response = await channel.read();
+          let response;
+          try {
+            response = await channel.read();
+          } catch (error) {
+            fail('REMOTE_READ', error);
+          }
           if (response.type === 'result') {
             envelope(response, 'result', seq);
             if (!keys(response, ['protocol', 'type', 'seq', 'value'])) fail();
@@ -873,10 +950,10 @@ export async function connectFirstCutoverIngressSession(input, overrides = {}) {
             value: fact,
           });
         }
-      } catch {
+      } catch (error) {
         failed = true;
         channel.close();
-        fail();
+        fail('REMOTE_RESULT', error);
       } finally {
         busy = false;
       }
@@ -932,7 +1009,7 @@ export async function connectFirstCutoverIngressSession(input, overrides = {}) {
         if ((await run('detach')) !== null) fail();
         failed = true;
         channel.close();
-        const left = expected.maintenanceEndsAtMs - io.now();
+        const left = (expected.reconcileByMs ?? expected.maintenanceEndsAtMs) - io.now();
         if (left <= 0) fail();
         let timer;
         try {
@@ -948,12 +1025,12 @@ export async function connectFirstCutoverIngressSession(input, overrides = {}) {
         }
       },
     };
-  } catch {
+  } catch (error) {
     failed = true;
     channel?.close();
     // No signal, retry, new SSH connection, old-config restoration or lock clear.
     connection?.output.end();
-    fail();
+    fail('REMOTE_ENTRY', error);
   }
 }
 
@@ -971,14 +1048,18 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
     connectRemote: connectFirstCutoverIngressSession,
     ...overrides,
   };
-  const reject = () => {
-    throw new Error('CUTOVER_INGRESS_PAIR_UNPROVEN');
+  const reject = (stage = 'PAIR_ENTRY', previous) => {
+    throw ingressDiagnosticError('CUTOVER_INGRESS_PAIR_UNPROVEN', stage, previous);
   };
   let remote;
   try {
     const args = structuredClone(input);
     if (
-      !keys(args, ['binding', 'maintenanceEndsAtMs']) ||
+      !keys(args, [
+        'binding',
+        'maintenanceEndsAtMs',
+        ...(Object.hasOwn(args, 'reconcileByMs') ? ['reconcileByMs'] : []),
+      ]) ||
       io.platform !== 'linux' ||
       io.uid !== 0 ||
       ['assertOwnership', 'readFirstCutoverEffects'].some(
@@ -1022,28 +1103,55 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
     };
     const clock = () => {
       const now = io.now();
-      if (!Number.isSafeInteger(now) || now < 0 || now < last || now >= args.maintenanceEndsAtMs)
-        reject();
+      if (
+        !Number.isSafeInteger(now) ||
+        now < 0 ||
+        now < last ||
+        now >= (args.reconcileByMs ?? args.maintenanceEndsAtMs)
+      )
+        reject('PAIR_CLOCK');
       last = now;
       return now;
     };
     const guard = async (phases) => {
       clock();
-      if (!isDeepStrictEqual(await journal.assertOwnership(), args.binding)) reject();
-      const record = await journal.readFirstCutoverEffects();
+      let owner;
+      try {
+        owner = await journal.assertOwnership();
+      } catch (error) {
+        reject('PAIR_OWNER', error);
+      }
+      if (!isDeepStrictEqual(owner, args.binding)) reject('PAIR_OWNER');
+      let record;
+      try {
+        record = await journal.readFirstCutoverEffects();
+      } catch (error) {
+        reject('PAIR_EFFECTS', error);
+      }
+      if (
+        io.now() >= args.maintenanceEndsAtMs &&
+        !isDeepStrictEqual(
+          record,
+          await assertFirstCutoverReconciliationRead(args, journal, io.now()),
+        )
+      )
+        reject();
       if (
         record.phase === 'legacy_interruption_accepted' &&
         (record.schemaVersion !== 2 || record.riskDigest !== cutoverLegacyInterruptionRisk(record))
       )
         reject();
-      if (
-        !bindingKeys.every((k) => record?.[k] === args.binding[k]) ||
-        !hash(record.recordDigest) ||
-        (revision !== undefined && revision !== record.recordDigest) ||
-        (phases && !phases.includes(record.phase)) ||
-        !isDeepStrictEqual(await io.readApprovedPair(), scope)
-      )
-        reject();
+      if (!bindingKeys.every((k) => record?.[k] === args.binding[k]) || !hash(record.recordDigest))
+        reject('PAIR_EFFECTS');
+      if (revision !== undefined && revision !== record.recordDigest) reject('PAIR_REVISION');
+      if (phases && !phases.includes(record.phase)) reject('PAIR_PHASE');
+      let approved;
+      try {
+        approved = await io.readApprovedPair();
+      } catch (error) {
+        reject('PAIR_SCOPE', error);
+      }
+      if (!isDeepStrictEqual(approved, scope)) reject('PAIR_SCOPE');
       clock();
       return record;
     };
@@ -1105,7 +1213,12 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
       const result = [];
       for (const host of ['vultr', 'aliyun']) {
         await guard();
-        const receipt = await endpoints[host].readFenceReceipt();
+        let receipt;
+        try {
+          receipt = await endpoints[host].readFenceReceipt();
+        } catch (error) {
+          reject(host === 'vultr' ? 'PAIR_LOCAL_RECEIPT' : 'PAIR_REMOTE_RECEIPT', error);
+        }
         if (receipt !== undefined) {
           const files = scope.files.filter(
             (f) => (f.profile === 'vultr-20260926') === (host === 'vultr'),
@@ -1143,7 +1256,7 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
                 receipt.identity?.candidate !== args.binding.candidate ||
                 !/^[a-f0-9]{32}$/.test(receipt.identity?.bootId ?? '')))
           )
-            reject();
+            reject('PAIR_RECEIPT_SHAPE');
           result.push({ host, receipt: structuredClone(receipt) });
         }
         await guard();
@@ -1177,7 +1290,13 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
       return { ...results[0], observedAtMs: Math.min(...results.map((r) => r.observedAtMs)) };
     };
     const run = async (name, phases, operation, mutation = false) => {
-      if (busy || closed || (mutation && (failed || used.has(name)))) reject();
+      if (
+        busy ||
+        closed ||
+        (name !== 'receipts' && io.now() >= args.maintenanceEndsAtMs) ||
+        (mutation && (failed || used.has(name)))
+      )
+        reject('PAIR_ENTRY');
       busy = true;
       if (mutation) used.add(name);
       try {
@@ -1185,9 +1304,9 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
         const result = await operation();
         await guard(phases);
         return result;
-      } catch {
+      } catch (error) {
         failed = true;
-        reject();
+        reject('PAIR_ENTRY', error);
       } finally {
         revision = undefined;
         busy = false;
@@ -1344,14 +1463,14 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
         }
       },
     };
-  } catch {
+  } catch (error) {
     // Detach is not a retry of an uncertain effect, and never clears the lock.
     try {
       await remote?.close();
     } catch {
       /* Preserve the original failure. */
     }
-    reject();
+    reject('PAIR_ENTRY', error);
   }
 }
 

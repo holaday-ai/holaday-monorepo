@@ -256,7 +256,9 @@ test('persisted-work host reader owns and closes a dedicated approved database c
     };
     if (kind === 'config') changes.readConfig = async () => Buffer.from('wrong');
     if (kind === 'ownership')
-      ctx.journal = { assertOwnership: async () => ({ ...binding, attempt: 'wrong' }) };
+      ctx.journal = {
+        assertOwnership: async () => ({ ...binding, attempt: 'wrong' }),
+      };
     if (kind === 'root') ctx.root = '/wrong';
     if (kind === 'deadline') changes.now = () => approved.maintenanceEndsAtMs;
     await assert.rejects(
@@ -278,7 +280,10 @@ test('database writer host observation is bound, closes its connection, and reje
     ]),
   );
   binding.configDigest = createHash('sha256').update(config).digest('hex');
-  const identity = { database: 'qa', serverUuid: '11111111-1111-4111-8111-111111111111' };
+  const identity = {
+    database: 'qa',
+    serverUuid: '11111111-1111-4111-8111-111111111111',
+  };
   const context = {
     binding,
     approval: { ...approved, ...binding },
@@ -300,7 +305,14 @@ test('database writer host observation is bound, closes its connection, and reje
           query: async ({ sql }) => {
             if (sql.includes('@@server_uuid'))
               return [
-                [{ ...identity, version: '8.0.46', performanceSchema: 1, partialRevokes: 0 }],
+                [
+                  {
+                    ...identity,
+                    version: '8.0.46',
+                    performanceSchema: 1,
+                    partialRevokes: 0,
+                  },
+                ],
               ];
             if (sql === 'SHOW GRANTS FOR CURRENT_USER')
               return [
@@ -322,7 +334,9 @@ test('database writer host observation is bound, closes its connection, and reje
     const ctx = { ...context };
     if (fault === 'root') ctx.root = '/wrong';
     if (fault === 'ownership')
-      ctx.journal = { assertOwnership: async () => ({ ...binding, attempt: 'wrong' }) };
+      ctx.journal = {
+        assertOwnership: async () => ({ ...binding, attempt: 'wrong' }),
+      };
     if (fault === 'none') {
       const result = await firstHost.readFirstCutoverDatabaseWriters(ctx, identity, io);
       assert.equal(result.scope, 'mysql-server-observation-only');
@@ -361,7 +375,10 @@ test('administrative writer observation binds a private config without promoting
       const folder = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'holaday-admin-writer-')));
       t.after(() => fs.rm(folder, { recursive: true, force: true }));
       const path = join(folder, 'debian.cnf');
-      const identity = { database: 'qa', serverUuid: '11111111-1111-4111-8111-111111111111' };
+      const identity = {
+        database: 'qa',
+        serverUuid: '11111111-1111-4111-8111-111111111111',
+      };
       let text =
         '[client]\nhost = localhost\nuser = qa-observer\npassword = synthetic-private\nsocket = /var/run/mysqld/mysqld.sock\n[mysql_upgrade]\nuser = qa-observer\n';
       if (fault === 'include') text += '!include /private/other\n';
@@ -369,7 +386,9 @@ test('administrative writer observation binds a private config without promoting
         text = text.replace('[mysql_upgrade]', 'user = second\n[mysql_upgrade]');
       if (fault === 'quoted') text = text.replace('synthetic-private', '"synthetic-private"');
       const bytes = Buffer.from(text);
-      await fs.writeFile(path, bytes, { mode: fault === 'mode' ? 0o644 : 0o600 });
+      await fs.writeFile(path, bytes, {
+        mode: fault === 'mode' ? 0o644 : 0o600,
+      });
       if (fault === 'symlink') {
         await fs.rename(path, join(folder, 'target'));
         await fs.symlink(join(folder, 'target'), path);
@@ -528,7 +547,9 @@ test('backup plan reads the actual source identity and never treats a configured
     'query',
     'close',
   ]) {
-    const inventory = { backupPlan: { sourceIdentity, isolatedTarget: { ...isolatedTarget } } };
+    const inventory = {
+      backupPlan: { sourceIdentity, isolatedTarget: { ...isolatedTarget } },
+    };
     if (fault === 'target-same-server')
       inventory.backupPlan.isolatedTarget.serverUuid = sourceIdentity.serverUuid;
     const binding = {
@@ -542,7 +563,10 @@ test('backup plan reads the actual source identity and never treats a configured
       inventoryDigest: createHash('sha256').update(JSON.stringify(inventory)).digest('hex'),
     };
     if (fault === 'inventory')
-      inventory.backupPlan.sourceIdentity = { ...sourceIdentity, database: 'other' };
+      inventory.backupPlan.sourceIdentity = {
+        ...sourceIdentity,
+        database: 'other',
+      };
     let phase = fault === 'phase' ? 'preflight' : 'backup_verified';
     const context = {
       binding,
@@ -560,7 +584,9 @@ test('backup plan reads the actual source identity and never treats a configured
       uid: 0,
       now: () => 1000,
       readConfig: async () => config,
-      parseConfig: () => ({ DATABASE_URL: 'mysql://synthetic@127.0.0.1/source_qa' }),
+      parseConfig: () => ({
+        DATABASE_URL: 'mysql://synthetic@127.0.0.1/source_qa',
+      }),
       connectWorkDatabase: async () => ({
         query: async (sql) => {
           queries.push(sql);
@@ -568,7 +594,12 @@ test('backup plan reads the actual source identity and never treats a configured
           if (fault === 'query') throw new Error('private database error');
           if (fault === 'phase-drift') phase = 'migration_started';
           return [
-            [{ ...sourceIdentity, ...(fault === 'source' ? { database: 'wrong' } : {}) }],
+            [
+              {
+                ...sourceIdentity,
+                ...(fault === 'source' ? { database: 'wrong' } : {}),
+              },
+            ],
             [],
           ];
         },
@@ -651,7 +682,9 @@ test('source full snapshot reuses original reader under approved config, journal
       uid: 0,
       now: () => 1000,
       readConfig: async () => (drift && fault === 'config-drift' ? Buffer.from('changed') : config),
-      parseConfig: () => ({ DATABASE_URL: 'mysql://synthetic@127.0.0.1/source_qa' }),
+      parseConfig: () => ({
+        DATABASE_URL: 'mysql://synthetic@127.0.0.1/source_qa',
+      }),
       assertWritersStopped: async () => {
         guards++;
         if (fault === 'busy') throw new Error('active writer');
@@ -672,9 +705,24 @@ test('source full snapshot reuses original reader under approved config, journal
             if (sql.includes('information_schema.TABLES'))
               return [[{ name: 'sample', kind: 'BASE TABLE', engine: 'InnoDB' }]];
             if (sql.includes('information_schema.COLUMNS'))
-              return [[{ COLUMN_NAME: 'note', ORDINAL_POSITION: 1, COLUMN_TYPE: 'text' }]];
+              return [
+                [
+                  {
+                    COLUMN_NAME: 'note',
+                    ORDINAL_POSITION: 1,
+                    COLUMN_TYPE: 'text',
+                  },
+                ],
+              ];
             if (sql.startsWith('SHOW CREATE'))
-              return [[{ Table: 'sample', 'Create Table': 'CREATE TABLE `sample` (`note` text)' }]];
+              return [
+                [
+                  {
+                    Table: 'sample',
+                    'Create Table': 'CREATE TABLE `sample` (`note` text)',
+                  },
+                ],
+              ];
             if (sql.startsWith('SELECT COUNT')) return [[{ rowCount: 1 }]];
             if (sql === 'SELECT `note` FROM `sample`') {
               if (fault === 'query') throw new Error('private SQL');
@@ -813,7 +861,10 @@ test('source export binds the original plan, private config, live journal and st
         drift = true;
         if (fault === 'export') throw new Error('sensitive mysql diagnostic');
         await verify();
-        return { reference: 'encrypted-qa', encryptionProfileDigest: '1'.repeat(64) };
+        return {
+          reference: 'encrypted-qa',
+          encryptionProfileDigest: '1'.repeat(64),
+        };
       },
     };
     if (fault === 'missing-stop') io.assertWritersStopped = undefined;
@@ -840,7 +891,13 @@ test('payment database site reader reuses approved connection and original read-
   const config = Buffer.from('DATABASE_URL=mysql://synthetic@127.0.0.1/qa');
   const inventory = {
     paymentWindowStartMs: 500,
-    merchants: [{ provider: 'wechat', environment: 'production', merchantDigest: '9'.repeat(64) }],
+    merchants: [
+      {
+        provider: 'wechat',
+        environment: 'production',
+        merchantDigest: '9'.repeat(64),
+      },
+    ],
   };
   const binding = Object.fromEntries(
     ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map((k) => [
@@ -867,7 +924,10 @@ test('payment database site reader reuses approved connection and original read-
     binding,
     approval: { ...approved, ...binding },
     root: `/opt/holaday-releases/${binding.candidate}`,
-    journal: { assertOwnership: async () => binding },
+    journal: {
+      assertOwnership: async () => binding,
+      readFirstCutoverEffects: async () => ({ ...binding, phase: 'prepared' }),
+    },
   };
   const rebind = () => {
     binding.inventoryDigest = createHash('sha256').update(JSON.stringify(inventory)).digest('hex');
@@ -903,7 +963,11 @@ test('payment database site reader reuses approved connection and original read-
   assert.equal(closed, 1);
   for (const fault of ['window', 'digest', 'ambiguous', 'paypal', 'row-env', 'config', 'close']) {
     const inv = structuredClone(inventory);
-    const ctx = { ...context, binding: { ...binding }, approval: { ...context.approval } };
+    const ctx = {
+      ...context,
+      binding: { ...binding },
+      approval: { ...context.approval },
+    };
     const deps = { ...io };
     if (fault === 'window') inv.paymentWindowStartMs = undefined;
     if (fault === 'ambiguous') inv.merchants.push({ ...inv.merchants[0] });
@@ -987,7 +1051,10 @@ async function preparationFixture(t, changes = {}) {
       journal = await acquireReleaseJournal(f.directory, metadata);
       return journal;
     },
-    manifest: () => ({ sha256: approval.migrationDigest, manifest: migrationManifest }),
+    manifest: () => ({
+      sha256: approval.migrationDigest,
+      manifest: migrationManifest,
+    }),
     stageConfig: async () => events.push('config'),
     exec: async (command, args) => {
       events.push([command, ...args].join(' '));
@@ -1021,7 +1088,11 @@ async function preparationFixture(t, changes = {}) {
 // bootstrap files. Remote processes/DB/providers are deliberately synthetic: this
 // tests wiring, NOT a two-host production rehearsal or payment recovery proof.
 async function lifecycleFixture(t, fault) {
-  const inventory = { configurationDigests: ['1'.repeat(64)], merchants: [], targets: [] };
+  const inventory = {
+    configurationDigests: ['1'.repeat(64)],
+    merchants: [],
+    targets: [],
+  };
   const f = await preparationFixture(t, {
     inventoryDigest: createHash('sha256').update(JSON.stringify(inventory)).digest('hex'),
   });
@@ -1118,7 +1189,10 @@ async function lifecycleFixture(t, fault) {
       return { closeAcknowledged: value.closeAcknowledged };
     },
     readBackupPlan: async () => ({
-      sourceIdentity: { serverUuid: '11111111-1111-1111-1111-111111111111', database: 'source_qa' },
+      sourceIdentity: {
+        serverUuid: '11111111-1111-1111-1111-111111111111',
+        database: 'source_qa',
+      },
       isolatedTarget: {
         serverUuid: '22222222-2222-2222-2222-222222222222',
         database: 'restore_qa',
@@ -1127,10 +1201,15 @@ async function lifecycleFixture(t, fault) {
   };
   f.io.backup = {
     readDatabaseIdentity: async (v) => structuredClone(v),
-    inspectBackupFacility: async () => ({ encryptionProfileDigest: 'e'.repeat(64) }),
+    inspectBackupFacility: async () => ({
+      encryptionProfileDigest: 'e'.repeat(64),
+    }),
     exportDatabase: async () => {
       await expectPhase('backup_verified', 'backup');
-      return { reference: 'synthetic-artifact', encryptionProfileDigest: 'e'.repeat(64) };
+      return {
+        reference: 'synthetic-artifact',
+        encryptionProfileDigest: 'e'.repeat(64),
+      };
     },
     hashArtifact: async () => 'f'.repeat(64),
     restoreIsolated: async () => expectPhase('backup_verified', 'restore-db'),
@@ -1140,7 +1219,10 @@ async function lifecycleFixture(t, fault) {
       businessDigest: '3'.repeat(64),
     }),
     runApprovedMigrations: async () => expectPhase('backup_verified', 'restore-migrate'),
-    verifySchema: async () => ({ schemaDigest: '4'.repeat(64), businessDigest: '3'.repeat(64) }),
+    verifySchema: async () => ({
+      schemaDigest: '4'.repeat(64),
+      businessDigest: '3'.repeat(64),
+    }),
     readSourceDigest: async () => '2'.repeat(64),
     finishRecovery: async () => {},
   };
@@ -1152,7 +1234,11 @@ async function lifecycleFixture(t, fault) {
       externalWork: [],
       producersRunning: [],
     }),
-    readDatabaseScope: async () => ({ observedAtMs: f.io.now(), orders: [], unsettled: [] }),
+    readDatabaseScope: async () => ({
+      observedAtMs: f.io.now(),
+      orders: [],
+      unsettled: [],
+    }),
     queryOrders: async () => [],
     readRehearsalArtifacts: async () => ({
       ...binding,
@@ -1538,7 +1624,10 @@ for (const fault of [undefined, 'candidate-observation', 'opened-observation']) 
           return originalEvidence.readDatabaseScope();
         },
         readRehearsal: (input) => {
-          assert.deepEqual(input, { binding: f.binding, merchants: f.inventory.merchants });
+          assert.deepEqual(input, {
+            binding: f.binding,
+            merchants: f.inventory.merchants,
+          });
           return originalEvidence.readRehearsalArtifacts();
         },
         facts: {
@@ -1562,7 +1651,10 @@ for (const fault of [undefined, 'candidate-observation', 'opened-observation']) 
           readTransportIdentity: async () => ({ binding: f.binding }),
           fenceOrders: () => original.fenceOrders(context),
           fenceAll: () => original.fenceAll(context),
-          verifyOrders: async () => ({ ...(await original.verifyFence(context)), stage: 'orders' }),
+          verifyOrders: async () => ({
+            ...(await original.verifyFence(context)),
+            stage: 'orders',
+          }),
           verifyFence: () => original.verifyFence(context),
           restoreIngress: async (identity) => {
             await deps.verifyOpenedIdentity(identity);
@@ -1585,7 +1677,10 @@ for (const fault of [undefined, 'candidate-observation', 'opened-observation']) 
         }),
         createObserver: async () => ({
           read: async () => pair(),
-          readFenceProgress: async () => ({ purpose: 'fence-progress', pair: pair() }),
+          readFenceProgress: async () => ({
+            purpose: 'fence-progress',
+            pair: pair(),
+          }),
           readWithCandidate: async (identity) => {
             assert.deepEqual(identity, f.identity);
             const record = await f.record();
@@ -1717,7 +1812,9 @@ test('first host connects real journal, backup receipt and bootstrap before exac
   );
   assert.equal(f.events.filter((v) => v === 'evidence:preopen').length, 2);
   await adapter.finish(result);
-  await assert.rejects(fs.stat(join(f.directory, 'release.lock')), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(join(f.directory, 'release.lock')), {
+    code: 'ENOENT',
+  });
 });
 
 for (const fault of ['none', 'no-scope', 'policy-failure', 'policy-expiry', 'attach-expiry']) {
@@ -1773,15 +1870,16 @@ for (const fault of ['none', 'no-scope', 'policy-failure', 'policy-expiry', 'att
   });
 }
 
-test('site attaches to owned journal before readiness and detaches before reconciliation', async (t) => {
+test('site attaches before readiness and remains attached through reconciliation', async (t) => {
   const f = await lifecycleFixture(t);
   const { adapter, result } = await runLifecycle(f);
   assert.equal(result.ok, true);
   assert(f.events.indexOf('lock') < f.events.indexOf('site-attach'));
   assert(f.events.indexOf('site-attach') < f.events.indexOf('evidence:prepare'));
-  assert(f.events.indexOf('resume-worker') < f.events.indexOf('site-detach'));
-  assert(f.events.indexOf('site-detach') < f.events.indexOf('reconcile'));
+  assert(f.events.indexOf('resume-worker') < f.events.indexOf('reconcile'));
+  assert.equal(f.events.includes('site-detach'), false);
   await adapter.finish(result);
+  assert(f.events.indexOf('reconcile') < f.events.indexOf('site-detach'));
   assert.equal(f.events.filter((e) => e === 'site-detach').length, 1);
 });
 
@@ -1796,14 +1894,14 @@ test('failed read-only site attach never fences and still closes resources with 
   await fs.stat(join(f.directory, 'release.lock'));
 });
 
-test('uncertain detach closes candidate, keeps journal and is never repeated by finish', async (t) => {
+test('uncertain final detach closes candidate, retains lock and never replays', async (t) => {
   const f = await lifecycleFixture(t, 'site-detach');
   const { adapter, result } = await runLifecycle(f);
-  assert.equal(result.ok, false);
-  assert.equal(result.closeAcknowledged, true);
-  assert(!f.events.includes('reconcile'));
-  await adapter.finish(result);
+  assert.equal(result.ok, true);
+  assert(f.events.includes('reconcile'));
+  await assert.rejects(adapter.finish(result), /CUTOVER_TEST_FAILURE/);
   assert.equal(f.events.filter((e) => e === 'site-detach').length, 1);
+  assert.equal(f.events.filter((e) => e === 'control:close').length, 1);
   await fs.stat(join(f.directory, 'release.lock'));
 });
 
@@ -1912,7 +2010,10 @@ for (const change of [{ observedAtMs: -60000 }, { existingSockets: 1 }, { intern
   test(`backup refuses incomplete global isolation: ${JSON.stringify(change)}`, async (t) => {
     const f = await lifecycleFixture(t);
     const read = f.io.lifecycle.verifyFence;
-    f.io.lifecycle.verifyFence = async (...args) => ({ ...(await read(...args)), ...change });
+    f.io.lifecycle.verifyFence = async (...args) => ({
+      ...(await read(...args)),
+      ...change,
+    });
     const { adapter, result } = await runLifecycle(f);
     assert.equal(result.ok, false);
     assert.ok(!f.events.includes('backup'));
@@ -1936,7 +2037,10 @@ test('candidate known from dirty startup is closed even before transition receiv
   f.io.exec = async (command, args, settings) => {
     const value = await exec(command, args, settings);
     if (args.includes('status'))
-      return JSON.stringify({ ...JSON.parse(value), needsReconciliation: true });
+      return JSON.stringify({
+        ...JSON.parse(value),
+        needsReconciliation: true,
+      });
     return value;
   };
   const { adapter, result } = await runLifecycle(f);
@@ -1947,17 +2051,16 @@ test('candidate known from dirty startup is closed even before transition receiv
   await adapter.finish(result);
 });
 
-test('host does not report a clean close when independent hold observation is unknown', async (t) => {
+test('failed final detach cannot release journal when hold acknowledgement is unknown', async (t) => {
   const f = await lifecycleFixture(t, 'site-detach');
   f.io.lifecycle.holdMaintenance = async () => ({ closeAcknowledged: false });
   const { adapter, result } = await runLifecycle(f);
-  assert.equal(result.ok, false);
-  assert.equal(result.closeAcknowledged, false);
+  assert.equal(result.ok, true);
+  await assert.rejects(adapter.finish(result), /CUTOVER_TEST_FAILURE/);
   assert(f.events.includes('control:close'));
-  await adapter.finish(result);
+  await fs.stat(join(f.directory, 'release.lock'));
 });
-
-test('lost close response is observed but never repeated by hold or finish', async (t) => {
+test('lost protective close after failed final detach is never replayed', async (t) => {
   const f = await lifecycleFixture(t, 'site-detach');
   const exec = f.io.exec;
   let closes = 0;
@@ -1965,15 +2068,13 @@ test('lost close response is observed but never repeated by hold or finish', asy
     const value = await exec(command, args, options);
     if (args.includes('close')) {
       closes++;
-      throw new Error('lost close response after side effect');
+      throw Error('lost response');
     }
     return value;
   };
   const { adapter, result } = await runLifecycle(f);
-  assert.equal(result.ok, false);
-  assert.equal(result.closeAcknowledged, false);
-  assert.equal(closes, 1);
-  await adapter.finish(result);
+  assert.equal(result.ok, true);
+  await assert.rejects(adapter.finish(result), /CUTOVER_TEST_FAILURE/);
   assert.equal(closes, 1);
   await fs.stat(join(f.directory, 'release.lock'));
 });
@@ -2020,7 +2121,9 @@ test('reconciliation can finish after maintenance deadline but before separately
   const { adapter, result } = await runLifecycle(f);
   assert.equal(result.ok, true, JSON.stringify(result));
   await adapter.finish(result);
-  await assert.rejects(fs.stat(join(f.directory, 'release.lock')), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(join(f.directory, 'release.lock')), {
+    code: 'ENOENT',
+  });
 });
 
 test('reconciled intent without successful effect cannot release the actual journal', async (t) => {
@@ -2254,7 +2357,10 @@ test('first worker resume uses the pinned candidate once and never global PM2 sa
           runtime: {
             identity,
             root: ctx.root,
-            main: { pid: worker && fault === 'worker-main-drift' ? 201 : 101, start: '10' },
+            main: {
+              pid: worker && fault === 'worker-main-drift' ? 201 : 101,
+              start: '10',
+            },
             worker: worker ? { pid: 102, start: '11' } : null,
           },
         };
@@ -2272,7 +2378,11 @@ test('first worker resume uses the pinned candidate once and never global PM2 sa
         }
         if (command === 'pm2' && args[0] === 'jlist')
           return JSON.stringify([
-            { name: 'holaday-orchestrator', pid: 101, pm2_env: { name: 'holaday-orchestrator' } },
+            {
+              name: 'holaday-orchestrator',
+              pid: 101,
+              pm2_env: { name: 'holaday-orchestrator' },
+            },
             ...(worker
               ? [
                   {
@@ -2454,3 +2564,55 @@ test('malformed or extra approval fields cannot silently widen the operation', a
     );
   }
 });
+
+for (const fault of [
+  'known',
+  'lost-hold-ack',
+  'missing-record',
+  'foreign-ownership',
+  'record-drift',
+]) {
+  test(`failed finish preserves the first real journal hold without replay: ${fault}`, async (t) => {
+    const f = await lifecycleFixture(t, 'backup');
+    let holds = 0;
+    f.io.lifecycle.holdMaintenance = async (ctx, result) => {
+      holds++;
+      if (fault === 'missing-record') throw Error('CUTOVER_TEST_ACK_LOST');
+      const held = await firstHost.recordFirstCutoverFailure(ctx, result, f.io);
+      if (fault === 'lost-hold-ack') throw Error('CUTOVER_TEST_ACK_LOST');
+      return held;
+    };
+    f.io.lifecycle.detach = async () => {
+      throw Error('CUTOVER_TEST_DETACH_FAILED');
+    };
+    const { adapter, result } = await runLifecycle(f);
+    assert.equal(result.ok, false);
+    assert.equal(holds, 1);
+    const path = f.journal().path;
+    const first = JSON.parse(await fs.readFile(path, 'utf8'));
+    if (fault === 'missing-record') assert.equal(first.failureObservation, undefined);
+    else assert.equal(first.failureObservation.errorCode, 'CUTOVER_BACKUP_UNPROVEN');
+    if (fault === 'foreign-ownership') {
+      f.journal().assertOwnership = async () => ({
+        ...f.binding,
+        inventoryDigest: 'f'.repeat(64),
+      });
+    }
+    if (fault === 'record-drift') {
+      first.failureObservation.operatorRef = 'foreign-owner';
+      await fs.writeFile(path, JSON.stringify(first));
+    }
+    const bytes = await fs.readFile(path, 'utf8');
+    await assert.rejects(
+      adapter.finish(result),
+      fault === 'known' || fault === 'lost-hold-ack' ? /CUTOVER_TEST_DETACH_FAILED/ : /UNPROVEN/,
+    );
+    // Repeated failed finish is inert: it cannot acknowledge release, retry
+    // detach/hold, or remove the retained lock.
+    assert.equal(await adapter.finish(result), undefined);
+    assert.equal(holds, 1);
+    assert.equal(await fs.readFile(path, 'utf8'), bytes);
+    assert.equal(f.events.filter((value) => value === 'control:close').length, 0);
+    await fs.stat(join(f.directory, 'release.lock'));
+  });
+}

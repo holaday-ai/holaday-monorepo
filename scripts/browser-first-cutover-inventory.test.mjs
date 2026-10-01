@@ -1,3 +1,4 @@
+import * as recoveryRuntime from './browser-first-cutover-runtime.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -368,6 +369,10 @@ async function retirementFixture(
     {
       journal: {
         ...journal,
+        recordCloudMaintenanceEvent: async (event) => {
+          await journal.recordCloudMaintenanceEvent(event);
+          await f.onCloudEvent?.(event);
+        },
         readFirstCutoverEffects: async () => {
           const record = await journal.readFirstCutoverEffects();
           await f.onEffectsRead?.();
@@ -377,6 +382,15 @@ async function retirementFixture(
       readPair: async () => {
         await f.onRead?.();
         return structuredClone(f.pair);
+      },
+      readCloudRecoveryCensus: async () => {
+        const snapshot = f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+        return {
+          hostname: snapshot.hostname,
+          bootId: snapshot.bootId,
+          observedAtMs: f.now ?? 1000,
+          processes: structuredClone(f.fullCensusProcesses ?? snapshot.processes),
+        };
       },
       readCloudManagers: async () => {
         await f.onCloudRead?.(journal);
@@ -887,6 +901,7 @@ test('cloud raw baseline detects native drift before first intent and does not e
   assert.deepEqual(
     Object.keys(r.observer).sort(),
     [
+      'probeBrowser',
       'read',
       'readFenceProgress',
       'readRegistrationProgress',
@@ -1505,7 +1520,7 @@ async function candidateFixture(
   beforeCandidate = async () => {},
   interrupted = false,
 ) {
-  const r = await retirementFixture(t, setup, undefined, interrupted);
+  const r = await retirementFixture(t, setup, (f, binding) => f.onBinding?.(binding), interrupted);
   await beforeCandidate(r);
   await r.remove();
   for (const phase of ['all_fenced', 'stopped', 'backup_verified'])
@@ -1611,6 +1626,15 @@ for (const fault of [
         addCloudPair(f);
         f.recoveryIO = {
           readCloudRecoveryCensus: async () => {
+            if (!f.recoveryTesting) {
+              const snapshot = f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+              return {
+                hostname: snapshot.hostname,
+                bootId: snapshot.bootId,
+                observedAtMs: f.now ?? 1000,
+                processes: structuredClone(snapshot.processes),
+              };
+            }
             censusReads++;
             if (fault === 'census') throw Error('CUTOVER_CLOUD_RECOVERY_CENSUS_UNPROVEN');
             if (fault === 'concurrent') await nested();
@@ -1683,6 +1707,7 @@ for (const fault of [
       },
       interrupted,
     );
+    r.f.recoveryTesting = true;
     await r.journal.persist('verified', { candidate: r.binding.candidate, identity: r.identity });
     assert.equal(typeof r.observer.restoreCloudServices, 'function');
     let leafReads = 0;
@@ -1715,7 +1740,11 @@ for (const fault of [
       assert.rejects(r.observer.restoreCloudServices(input, operations), /UNPROVEN/);
     await assert.rejects(r.observer.restoreCloudServices(input, operations), /UNPROVEN/);
     assert.equal(leafReads, fault === 'caller-proof' ? 0 : 1);
-    const expectedCensusReads = ['caller-proof', 'v2-replay'].includes(fault) ? 0 : 1;
+    const expectedCensusReads = ['caller-proof', 'v2-replay'].includes(fault)
+      ? 0
+      : fault === 'census'
+        ? 1
+        : 2;
     assert.equal(censusReads, expectedCensusReads);
     assert.equal(vacancyReads, expectedCensusReads && fault !== 'census' ? 1 : 0);
     assert.equal(nativeReads, 0, 'post-effect proof is not pre-dispatch readiness');
@@ -1731,15 +1760,17 @@ for (const fault of [
         : fault === 'v2-replay'
           ? 'recovery-leaves'
           : fault === 'census'
-            ? 'recovery-census'
-            : 'recovery-native-prerequisites',
+            ? 'recovery-stopped-baseline'
+            : fault.startsWith('vacancy-')
+              ? 'recovery-native-prerequisites'
+              : 'recovery-native-preflight',
     );
     if (expectedCensusReads && fault !== 'census')
       assert.equal(
         r.f.rejections.at(-1).code,
         fault.startsWith('vacancy-')
           ? 'CUTOVER_CLOUD_VACANCY_UNPROVEN'
-          : 'CUTOVER_CLOUD_VNC_NATIVE_SOURCE_UNPROVEN',
+          : 'CUTOVER_CLOUD_NATIVE_PREFLIGHT_UNPROVEN',
       );
     await nested();
     assert.equal(
@@ -1748,6 +1779,7 @@ for (const fault of [
       'a failed attempt cannot acquire a new baseline',
     );
     assert.equal((await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 4);
+    r.f.recoveryTesting = false;
     assert.equal((await r.observer.readWithCandidate(r.identity)).unknownLaunchers.length, 0);
   });
 }
@@ -3117,3 +3149,371 @@ test('native display whole tree drift during final pre-dispatch source gate pres
   assert.equal(commands, 0);
   assert.equal((await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 1);
 });
+
+test('cloud stop scope binds the originally reviewed detached handlers and refuses substituted identities', async () => {
+  const { firstCutoverCloudStopScope } = await import('./browser-first-cutover-inventory.mjs');
+  assert.equal(typeof firstCutoverCloudStopScope, 'function');
+  const snapshot = {
+    hostname: 'qa',
+    bootId: 'boot',
+    pm2Runtime: { pid: 10 },
+    managers: [{ name: 'holaday-chromium-headed', pid: 20 }],
+    processes: [
+      { pid: 10, ppid: 1, start: '10' },
+      { pid: 20, ppid: 10, start: '20' },
+      { pid: 21, ppid: 20, start: '21' },
+      { pid: 40, ppid: 1, start: '40' },
+    ],
+  };
+  const display = {
+    hostname: 'qa',
+    bootId: 'boot',
+    sourcesDigest: hash('source'),
+    contextDigest: hash('context'),
+  };
+  const observation = {
+    purpose: 'cloud-old-browser-association-observation',
+    hostname: 'qa',
+    bootId: 'boot',
+    sourcesDigest: display.sourcesDigest,
+    contextDigest: display.contextDigest,
+    displayObservationDigest: hash(display),
+    censusDigest: hash('census'),
+    socketDigest: hash('sockets'),
+    observedAtMs: 1000,
+    members: [snapshot.processes[3]],
+  };
+  const review = {
+    processes: snapshot.processes.map((p) => ({
+      pid: p.pid,
+      identityDigest: hash(p),
+      disposition: 'preserve',
+    })),
+  };
+  const scope = firstCutoverCloudStopScope({
+    snapshot,
+    name: 'holaday-chromium-headed',
+    association: observation,
+    display,
+    review,
+    now: 1000,
+  });
+  assert.deepEqual(
+    scope.processes.map((p) => p.pid),
+    [20, 21, 40],
+  );
+  assert.equal(scope.associationDigest, hash(observation));
+  const bad = structuredClone(observation);
+  bad.members[0].start = '41';
+  assert.throws(
+    () =>
+      firstCutoverCloudStopScope({
+        snapshot,
+        name: 'holaday-chromium-headed',
+        association: bad,
+        display,
+        review,
+        now: 1000,
+      }),
+    /UNPROVEN/,
+  );
+  const unreviewed = structuredClone(review);
+  unreviewed.processes.pop();
+  assert.throws(
+    () =>
+      firstCutoverCloudStopScope({
+        snapshot,
+        name: 'holaday-chromium-headed',
+        association: observation,
+        display,
+        review: unreviewed,
+        now: 1000,
+      }),
+    /UNPROVEN/,
+  );
+});
+
+test('cloud stop exit ACK reads complete census and refuses an original PID that execs outside the filtered inventory', async (t) => {
+  const r = await retirementFixture(t, addCloudPair);
+  const original = structuredClone(
+    r.f.pair.hosts.find((h) => h.host === 'vultr').snapshot.processes,
+  );
+  r.f.fullCensusProcesses = original.map((p) =>
+    p.pid === 40 ? { ...p, exe: '/bin/sleep', argvDigest: hash('changed') } : p,
+  );
+  let calls = 0;
+  await assert.rejects(
+    r.observer.stopCloudServices(
+      { maintenanceEndsAtMs: 8000 },
+      cloudStopOperations(r, () => calls++),
+    ),
+    /UNPROVEN/,
+  );
+  assert.equal(calls, 1);
+  assert.equal((await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 1);
+});
+
+// Actual original observer + restore leaves + durable journal. Only procfs,
+// native readers and PM2 transport are synthetic; no production services.
+for (const fault of [
+  'success',
+  'headed-rpc-unknown',
+  'headed-proof',
+  'headed-ack-lost',
+  'vnc-rpc-unknown',
+  'vnc-proof',
+  'vnc-ack-lost',
+]) {
+  test(`complete original eight-event recovery handles ${fault} without replay`, async (t) => {
+    const calls = [];
+    let binding;
+    const r = await candidateFixture(
+      t,
+      (f) => {
+        addCloudPair(f);
+        const snapshot = f.pair.hosts.find((h) => h.host === 'vultr').snapshot;
+        for (const row of f.cloudManagers) {
+          Object.assign(row.pm2_env, {
+            exec_mode: 'fork_mode',
+            autostart: true,
+            exec_interpreter: 'bash',
+            pm_exec_path:
+              row.name === 'holaday-vnc'
+                ? '/opt/holaday-vnc/start.sh'
+                : '/opt/holaday-headed/start.sh',
+            args: [],
+            PRIVATE_KEY: row.pm2_env.env.PRIVATE_KEY,
+          });
+          const manager = snapshot.managers.find((m) => m.pmId === row.pm_id);
+          manager.configDigest = cutoverRegistrationConfigDigest(row.pm2_env);
+          manager.stopConfigDigest = cutoverCloudStopConfigDigest(row.pm2_env);
+          f.reviews.vultr.review.registrations.find((m) => m.pmId === row.pm_id).configDigest =
+            manager.configDigest;
+          f.cloudScope.find((m) => m.pmId === row.pm_id).scopeDigest = hash(
+            inventory.firstCutoverCloudStopScope({
+              snapshot,
+              name: row.name,
+              review: f.reviews.vultr.review,
+              now: 1000,
+            }),
+          );
+        }
+        f.onBinding = (b) => {
+          binding = b;
+          for (const entry of f.cloudScope)
+            entry.recoveryDigest = hash(
+              entry.name === 'holaday-vnc'
+                ? recoveryRuntime.firstCutoverCloudVncRecoveryMaterial({ attempt: b.attempt })
+                : recoveryRuntime.firstCutoverCloudBrowserRecoveryLaunch({ attempt: b.attempt }),
+            );
+        };
+        f.onCloudEvent = (e) => {
+          if (
+            e.phase === 'cloud-restored' &&
+            fault === (e.name === 'holaday-vnc' ? 'vnc-ack-lost' : 'headed-ack-lost')
+          )
+            throw Error('QA_LOST_DURABLE_ACK');
+        };
+        const nativeByName = {};
+        const liveCensus = () => ({
+          hostname: snapshot.hostname,
+          bootId: snapshot.bootId,
+          observedAtMs: 1000,
+          processes: snapshot.processes.map((p) => ({
+            ...p,
+            mountNamespace: p.pid === 90 ? 'mnt:[2]' : p.pid === 100 ? 'mnt:[3]' : 'mnt:[1]',
+            state: 'live',
+            noNewPrivs: 1,
+            capabilities: { CapInh: '0', CapPrm: '0', CapEff: '0', CapBnd: '0', CapAmb: '0' },
+          })),
+        });
+        const leaf = (role) => async (input, io) => {
+          return (
+            role === 'headed'
+              ? recoveryRuntime.restoreFirstCutoverCloudBrowser
+              : recoveryRuntime.restoreFirstCutoverCloudVnc
+          )(input, {
+            ...io,
+            platform: 'linux',
+            uid: 0,
+            rpc: async (method, args, beforeSend) => {
+              if (method === 'getMonitorData') return structuredClone(f.cloudManagers);
+              await beforeSend?.();
+              calls.push(role);
+              const row = f.cloudManagers.find((m) => m.pm_id === input.pmId),
+                config = row.pm2_env;
+              if (role === 'headed') {
+                const launch = recoveryRuntime.firstCutoverCloudBrowserRecoveryLaunch({
+                  attempt: input.attempt,
+                });
+                Object.assign(config, {
+                  pm_exec_path: launch.command,
+                  args: launch.args,
+                  exec_interpreter: 'none',
+                  DISPLAY: ':98',
+                });
+                config.env.DISPLAY = ':98';
+              }
+              Object.assign(config, {
+                autorestart: false,
+                watch: false,
+                cron_restart: '',
+                created_at: 1000,
+                unstable_restarts: 0,
+                prev_restart_delay: 0,
+                status: 'online',
+                pm_uptime: 1000,
+                axm_actions: [],
+                axm_monitor: {},
+                axm_options: {},
+                axm_dynamic: {},
+                vizion_running: false,
+                version: 'N/A',
+              });
+              delete config.max_memory_restart;
+              row.pid = role === 'headed' ? 90 : 100;
+              const manager = snapshot.managers.find((m) => m.pmId === row.pm_id);
+              Object.assign(manager, {
+                pid: row.pid,
+                status: 'online',
+                configDigest: cutoverRegistrationConfigDigest(config),
+                stopConfigDigest: cutoverCloudStopConfigDigest(config),
+              });
+              const process = {
+                ...snapshot.processes.find((p) => p.pid === 10),
+                pid: row.pid,
+                ppid: 10,
+                start: String(row.pid * 100),
+                cwd: '/',
+                exe: role === 'headed' ? '/opt/brave.com/brave/brave' : '/usr/bin/bash',
+              };
+              snapshot.processes.push(process);
+              if (fault === `${role}-rpc-unknown`) throw Error('QA_RPC_RESPONSE_UNKNOWN');
+              return {};
+            },
+          });
+        };
+        f.recoveryIO = {
+          readCloudRecoveryCensus: async () => liveCensus(),
+          restoreCloudBrowser: leaf('headed'),
+          restoreCloudVnc: leaf('vnc'),
+          readCloudRecoveryVacancy: async ({ sources }) => {
+            const { observedAtMs, ...material } = sources;
+            return {
+              purpose: 'cloud-recovery-vacancy-observation',
+              hostname: sources.hostname,
+              bootId: sources.bootId,
+              observedAtMs: 1000,
+              sourcesDigest: hash(material),
+              contextDigest: '1'.repeat(64),
+              observationDigest: '2'.repeat(64),
+            };
+          },
+          readCloudNativePreflight: async ({ sources, vacancy }) => ({
+            purpose: 'cloud-recovery-native-preflight-observation',
+            hostname: sources.hostname,
+            bootId: sources.bootId,
+            observedAtMs: 1000,
+            sourcesDigest: vacancy.sourcesDigest,
+            contextDigest: vacancy.contextDigest,
+            vacancyDigest: vacancy.observationDigest,
+            observationDigest: '3'.repeat(64),
+            roles: ['holaday-chromium-headed', 'holaday-vnc'],
+          }),
+          readCloudRecovery: async (input) => {
+            const role = input.name === 'holaday-vnc' ? 'vnc' : 'headed';
+            if (fault === `${role}-proof`) throw Error('QA_NATIVE_UNKNOWN');
+            const row = f.cloudManagers.find((m) => m.pm_id === input.pmId),
+              p = liveCensus().processes.find((p) => p.pid === row.pid);
+            const native = {
+              purpose: 'cloud-recovery-native-observation',
+              name: row.name,
+              pmId: row.pm_id,
+              hostname: snapshot.hostname,
+              bootId: snapshot.bootId,
+              pid: p.pid,
+              start: p.start,
+              ppid: p.ppid,
+              configDigest: cutoverRegistrationConfigDigest(row.pm2_env),
+              restartCount: row.pm2_env.restart_time,
+              launchDigest: f.cloudScope.find((m) => m.pmId === input.pmId).recoveryDigest,
+              observedAtMs: 1000,
+              beforeCensusDigest: hash(input.beforeCensus),
+              censusDigest: hash(liveCensus()),
+              processes: [p],
+              mountNamespace: p.mountNamespace,
+              display: { pid: 91, start: '9100', listeners: [] },
+            };
+            nativeByName[input.name] = structuredClone(native);
+            return native;
+          },
+          reobserveCloudRecovery: async (input, origin) => {
+            assert.deepEqual(origin, nativeByName[input.name]);
+            return structuredClone(origin);
+          },
+        };
+      },
+      async (r) => {
+        await r.observer.stopCloudServices({ maintenanceEndsAtMs: 8000 }, cloudStopOperations(r));
+        await r.remove('aliyun');
+      },
+    );
+    await r.journal.persist('verified', { candidate: r.binding.candidate, identity: r.identity });
+    const input = { identity: r.identity, maintenanceEndsAtMs: 8000 };
+    const operations = {
+      readRecoveryFacts: async () => ({
+        work: {
+          inventoryDigest: digest,
+          observedAtMs: 1000,
+          unsettledWork: 0,
+          unknownWriters: 0,
+          activeRequests: 0,
+          externalWork: 0,
+        },
+        persisted: { observedAtMs: 1000, unsettled: [] },
+        fence: {
+          inventoryDigest: digest,
+          observedAtMs: 1000,
+          stage: 'all-writers',
+          existingSockets: 0,
+          internalWriters: 0,
+          producersRunning: 0,
+        },
+      }),
+    };
+    if (fault === 'success') {
+      await r.observer.restoreCloudServices(input, operations);
+      assert.equal((await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 8);
+      assert.deepEqual(calls, ['headed', 'vnc']);
+      const current = await r.observer.readWithCandidate(r.identity);
+      assert(current.cloudMaintenance.every((m) => m.status === 'recovered'));
+      r.f.candidate.mode = 'serving';
+      r.f.candidate.idle = false;
+      r.f.candidate.needsReconciliation = true;
+      for (const phase of ['opened', 'reconciled']) {
+        await r.journal.persist(phase, { candidate: r.binding.candidate, identity: r.identity });
+        assert(
+          (await r.observer.readWithCandidate(r.identity)).cloudMaintenance.every(
+            (m) => m.status === 'recovered',
+          ),
+        );
+      }
+    } else {
+      await assert.rejects(r.observer.restoreCloudServices(input, operations), /UNPROVEN/);
+      assert.equal(
+        (await r.journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length,
+        fault.startsWith('headed')
+          ? fault.endsWith('ack-lost')
+            ? 6
+            : 5
+          : fault.endsWith('ack-lost')
+            ? 8
+            : 7,
+      );
+    }
+    const prior = structuredClone(calls);
+    await assert.rejects(r.observer.restoreCloudServices(input, operations), /UNPROVEN/);
+    assert.deepEqual(calls, prior);
+    assert(!JSON.stringify(r.f.rejections).includes('PRIVATE_CLOUD_BASELINE'));
+  });
+}

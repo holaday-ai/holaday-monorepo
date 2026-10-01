@@ -1,5 +1,43 @@
 # 浏览器首次切换验收记录
 
+## 当前冻结交付 / 2026-10-01
+
+代码集中实现完成，生产验收仍未满足。原树HEAD/QA应用candidate `b43dd031`；最终协调器/测试/QA源码逐文件SHA见 `2026-10-01-browser-first-cutover-source-freeze.json`，应用build不冒称本次dirty脚本提交验收。root接手统一review/commit/push/draft PR；尚未合并或部署。
+
+真实隔离full-host成功场exit0/673s（QA业务facts），unknown/known原入口均exit0；最新真实物理retirement→site scope→recovery attach/inspect/close短链exit0/98.24s，无dump/迁移/候选。历史fullhost attach/两次fences拒绝根因未解释；本次未复现不能写作已修根因。
+
+固定9场 before-migration/after-start/before-open/after-open/after-ingress/after-worker/lost-open-ack/enabled-worker/late-known-effect **均未取得最终完整故障验收**。before-migration早期真实注入已到达，但整场exit1来自QA闭句柄断言；另一场早于注入attach拒绝；最新777c场主动资源取消，功能未验收。QA尾部schema1/2可选candidate事件已按真实journal返回修正并补2条真实reader回归。所有旧attempt/卷/日志保留，不重放。
+
+本次新重型已暂停：宿主Docker约9GiB驻留及累计swap约3.7GiB风险下主动停止精确本方role和两个DB，未证明OOM根因，非权限拒绝；用户mysql/redis与未知进程未动。无重型仍在跑。下一恢复先核对宿主/Docker资源与累计swap趋势，再以新fresh pair/预设窗口按固定9场串行继续；普通CPU1/512MiB，host768MiB/900s，编译2GiB/180s，pressure/swap取消阈值保留，不重跑已通过正常应用/原生验证。
+
+普通应用8584pass/1helper skip、cn-payment103、类型/build/ordinary7/MySQL3及原生两角色均已有独立账；脚本2013总1979pass34条件skip+独立age35，非PayPalops组合证据保持原整条exit1。最终受影响轻量7合同exit0；40个触及JS格式/语法、5个Python无pycache语法、3个bash -n、diffcheck均0。完整命令/日志SHA见evidence。
+
+生产外部工作/非PayPal恢复和重复权益、默认production facts整项、完整浏览器路由/成功率、真实批准/来源/锁/新鲜窗口仍缺；PayPal全部延期。既有必要交付授权有效，但授权不是现场事实或放行证据。
+
+下文保留历史dated记录；旧运行/硬拒绝/计数不是当前结论。
+
+
+
+## 当前结论：代码集中接通，生产仍blocked
+
+本批HEAD/QA应用candidate为 `b43dd031`，协调器/fixture是未提交独立源码包。证据以 [机器账](2026-10-01-browser-first-cutover-evidence.json)、[应用完整文件账](2026-10-01-browser-first-cutover-application-coverage.json) 和 [可复现QA入口](2026-10-01-browser-first-cutover-qa-reproduction.md) 为准；各次运行不能相加成同一次端到端验收。
+
+| 检查 | 本次实际结论 | 层级/限制 |
+|---|---|---|
+| 双角色默认原生前置/恢复/8事件 | exit0，真实Brave+x11vnc/Python与最小独有about:blank结果 | 隔离Linux，pyc真实缺席只读；非生产同次证明/完整任务路由 |
+| 脚本统一回归 | 2013总/1979pass/0fail/34条件skip；独立age补跑35pass | 合同；保留初次skip和独立运行边界 |
+| failure-tail/默认facts/probe/preflight | 315pass；新模块31pass；安全QA日志1pass | 真实journal合同；实际SQL实现+合成查询后端/签名SDK响应，非真实支付方 |
+| 正常应用 | 非PayPal506文件8584pass/1原child-only helper skip；cn-payment103pass | 固定Node22.23.2；完整文件/CLI名称并集见机器账。已发生18个PayPal离线单元单列，不重跑 |
+| 类型/build/普通维护/MySQL | cn-payment类型、orchestrator build/全量noEmit、ordinary7与MySQL3分别exit0 | 独立真实运行；资源失败历史保留；非整站release |
+| nonPayPal ops | 原整条exit1保留；SSH环境修正后Python12/Node1340通过，17fixture缺项 | 原真实失败保留；明确16非PayPal补跑exit0，剩余PayPal1延期，未宣称整条exit0 |
+| QA源准备 | 原61SQL当前基线90表/92对象、原行与trigger/event通过；原reader真实mysql2 exit0 | 不是旧schema升级证据；helper仅本例新空源，目标仍空 |
+| 真实full-host整链 | fresh成功场exit0/约673s，真实新boot/open/nginx/reconcile/锁释放；unknown/known原入口分别exit0 | 原host/停止/备份/61SQL/open协议真实，业务facts为明确QA-only；不替代默认production facts整项 |
+| 原Task6故障矩阵/生产 | [14类分层矩阵](2026-10-01-browser-first-cutover-failure-matrix.md)；9场固定故障/ACK/worker矩阵未完成，因累计宿主资源风险主动暂停，生产未执行 | 真实外部工作/非PayPal恢复/重复权益、新鲜批准/来源/锁/窗口未齐；PayPal全部延期 |
+
+下面是历史dated过程；其中旧缺实现/旧not-run不代表当前代码状态。root已独立风险审查关键应用实现、接口和证据；继承651文件未逐行全审，最终包仍待收口。
+
+## 历史过程与逐项审计
+
 ### 2026-10-01 显示归属及原host消费组件03df6d38完成，继续双角色完整恢复前置
 
 已提交3414e447原生显示归属、03df6d38原host/inventory消费：真实Xvfb/Openbox成员、Unix reciprocal peer/fd客户端、原两角色完整树摘要与PM2上下文都绑定到私有原审查事实；每次读/intent前/dispatch前重新观察，拒绝新增非显示子进程、未知共享客户端、上下文或PID/start漂移，原成员仍存活不写ACK。双方停止后只用原事实做退出账，不采纳副作用后的新PID。源数据、旧树保护、完整恢复硬拒绝/ACK>4/CLI门仍未解除。

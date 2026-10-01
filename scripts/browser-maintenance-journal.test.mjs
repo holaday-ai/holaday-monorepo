@@ -1204,3 +1204,86 @@ test('candidate-start intent precedes creation of its real boot identity', async
     identity: { candidate: metadata.candidate, bootId: '6'.repeat(32) },
   });
 });
+
+for (const success of [true, false]) {
+  test(`QA finish capture validates persisted lock after handles close success=${success}`, async (t) => {
+    const directory = await fixture(t);
+    const journal = await acquireReleaseJournal(directory, success ? metadata : firstMetadata);
+    await journal.bindManifest(manifest);
+    const binding = await journal.assertOwnership();
+    const lockPath = join(directory, 'release.lock');
+    const before = { stat: await fs.lstat(lockPath), bytes: await fs.readFile(lockPath) };
+    if (success) {
+      const identity = { candidate: metadata.candidate, bootId: 'd'.repeat(32) };
+      await journal.persist('opened', { candidate: metadata.candidate, identity });
+      await journal.finish();
+      await assert.rejects(fs.lstat(lockPath), { code: 'ENOENT' });
+    } else {
+      assert.deepEqual(await journal.assertOwnership(), binding);
+      await journal.close();
+      const after = await fs.lstat(lockPath);
+      assert.equal(after.ino, before.stat.ino);
+      assert.equal(after.dev, before.stat.dev);
+      assert.equal(after.uid, process.getuid());
+      assert.equal(after.mode & 0o7777, 0o600);
+      assert.equal(after.nlink, 1);
+      assert.deepEqual(await fs.readFile(lockPath), before.bytes);
+      await assert.rejects(
+        acquireReleaseJournal(directory, firstMetadata),
+        /MAINTENANCE_RELEASE_LOCKED/,
+      );
+    }
+    await assert.rejects(journal.assertOwnership(), /MAINTENANCE_JOURNAL_UNPROVEN/);
+  });
+}
+
+for (const schemaVersion of [1, 2])
+  test(`QA fixture reads actual optional candidate events schema=${schemaVersion}`, async (t) => {
+    const input =
+      schemaVersion === 1
+        ? firstMetadata
+        : {
+            ...firstMetadata,
+            schemaVersion: 2,
+            attempt: '12345678-1234-4234-8234-123456789abc',
+            maintenanceEndsAtMs: 2000,
+            reconcileByMs: 3000,
+            operatorRef: 'qa-operator',
+            legacyInterruption: {
+              mode: 'controlled-interruption',
+              scope: 'legacy-non-payment-memory',
+              approvalRef: 'legacy-interruption-20260928',
+              capabilityDigest: '7'.repeat(64),
+              observeUntilMs: 1800,
+              noAutomaticReplay: true,
+            },
+          };
+    const journal = await acquireReleaseJournal(await fixture(t), input);
+    t.after(() => journal.close());
+    await journal.bindManifest(manifest);
+    const effects = await journal.readFirstCutoverEffects();
+    assert.equal(Object.hasOwn(effects, 'candidateStartupEvents'), false);
+    const source = await fs.readFile(
+      new URL('./fixtures/browser-registration-removal-linux.mjs', import.meta.url),
+      'utf8',
+    );
+    const first = source.match(
+      /if \(\s*(!knownEffect &&[\s\S]*?)\s*\) \{\s*await pm2\('kill'\)/,
+    )[1];
+    const second = source.match(
+      /if \(\s*(fullHost &&\s*!successfulCutover &&\s*effects\.candidateStartupEvents !== undefined &&\s*effects\.candidateStartupEvents\.length)\s*\)/,
+    )[1];
+    for (const knownEffect of [false, true]) {
+      const params = [knownEffect, false, schemaVersion === 2, effects];
+      const evaluate = (e) =>
+        Function(
+          'knownEffect',
+          'successfulCutover',
+          'fullHost',
+          'effects',
+          `return Boolean(${e})`,
+        )(...params);
+      assert.equal(evaluate(first), !knownEffect);
+      assert.equal(evaluate(second), false);
+    }
+  });

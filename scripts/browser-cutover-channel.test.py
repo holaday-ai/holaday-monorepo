@@ -117,6 +117,14 @@ class ChannelTest(unittest.TestCase):
             manifest.chmod(0o600)
             entry = channel.verify_ingress_bundle(root, os.geteuid())
             self.assertEqual(entry, root / 'browser-first-cutover-ingress-session.mjs')
+            helper = root / 'browser-first-cutover-ingress-diagnostics.mjs'
+            self.assertIn(helper.name, channel.INGRESS_MODULES)
+            original_helper = helper.read_bytes()
+            helper.write_bytes(b'altered diagnostic helper')
+            with self.assertRaises(RuntimeError):
+                channel.verify_ingress_bundle(root, os.geteuid())
+            helper.write_bytes(original_helper)
+            self.assertEqual(channel.verify_ingress_bundle(root, os.geteuid()), entry)
             (root / 'browser-first-cutover-host.mjs').write_text('modified dependency')
             with self.assertRaises(RuntimeError):
                 channel.verify_ingress_bundle(root, os.geteuid())

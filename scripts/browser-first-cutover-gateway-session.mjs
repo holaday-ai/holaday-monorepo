@@ -9,6 +9,7 @@ import {
   readFirstCutoverSessionIdentity,
   readFirstCutoverTransportIdentity,
 } from './browser-first-cutover-ingress-session.mjs';
+import { assertFirstCutoverReconciliationRead } from './browser-first-cutover-host.mjs';
 import { queryFirstCutoverOrders } from './browser-first-cutover-payments.mjs';
 import {
   prepareLocalFirstCutoverGateway,
@@ -92,7 +93,12 @@ export async function serveFirstCutoverGatewaySession({ attempt }, overrides = {
     if (site.binding.attempt !== attempt) fail();
     const execution = await io.readIdentity({ role: 'gateway', attempt });
     assertFirstCutoverSessionIdentity(execution, 'gateway');
-    channel = createFirstCutoverSessionWire(io.input, io.output, site.maintenanceEndsAtMs, io.now);
+    channel = createFirstCutoverSessionWire(
+      io.input,
+      io.output,
+      site.reconcileByMs ?? site.maintenanceEndsAtMs,
+      io.now,
+    );
     const used = new Set();
     let sequence = 0;
     for (;;) {
@@ -152,6 +158,22 @@ export async function serveFirstCutoverGatewaySession({ attempt }, overrides = {
           return reply.value;
         }
       };
+      if (io.now() >= site.maintenanceEndsAtMs) {
+        if (
+          !['query', 'detach'].includes(request.name) ||
+          (request.name === 'query' && request.value?.stage !== 'postopen')
+        )
+          fail();
+        await assertFirstCutoverReconciliationRead(
+          site,
+          {
+            assertOwnership: () => fact('ownership'),
+            readFirstCutoverEffects: () => fact('effects'),
+          },
+          io.now(),
+          request.value?.identity,
+        );
+      }
       let value;
       if (request.name === 'attach') {
         const owner = await fact('ownership');
@@ -160,6 +182,7 @@ export async function serveFirstCutoverGatewaySession({ attempt }, overrides = {
           host: 'aliyun',
           binding: site.binding,
           maintenanceEndsAtMs: site.maintenanceEndsAtMs,
+          ...(Object.hasOwn(site, 'reconcileByMs') ? { reconcileByMs: site.reconcileByMs } : {}),
           siteDigest: site.siteDigest,
           execution,
         };
@@ -244,7 +267,12 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
     const expected = structuredClone(input);
     validate(expected, io.now());
     if (
-      !keys(expected, ['binding', 'maintenanceEndsAtMs', 'siteDigest']) ||
+      !keys(expected, [
+        'binding',
+        'maintenanceEndsAtMs',
+        'siteDigest',
+        ...(Object.hasOwn(expected, 'reconcileByMs') ? ['reconcileByMs'] : []),
+      ]) ||
       io.platform !== 'linux' ||
       io.uid !== 0 ||
       [
@@ -262,6 +290,8 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
     const ownership = async () => {
       const b = await io.journal.assertOwnership();
       if (!equal(b, expected.binding)) fail();
+      if (io.now() >= expected.maintenanceEndsAtMs)
+        await assertFirstCutoverReconciliationRead(expected, io.journal, io.now());
       return b;
     };
     await ownership();
@@ -311,7 +341,7 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
     channel = createFirstCutoverSessionWire(
       connection.input,
       connection.output,
-      expected.maintenanceEndsAtMs,
+      expected.reconcileByMs ?? expected.maintenanceEndsAtMs,
       io.now,
     );
     let sequence = 0;
@@ -323,6 +353,13 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
       busy = true;
       try {
         await ownership();
+        if (io.now() >= expected.maintenanceEndsAtMs && !['query', 'detach'].includes(name)) fail();
+        if (
+          name === 'query' &&
+          io.now() >= expected.maintenanceEndsAtMs &&
+          payload?.stage !== 'postopen'
+        )
+          fail();
         const seq = ++sequence;
         let factSequence = 0;
         let signalSequence = 0;
@@ -336,7 +373,7 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
             'orders',
             ...(input?.identity ? ['identity'] : []),
           ]) ||
-            !['prepare', 'preopen'].includes(input.stage) ||
+            !['prepare', 'preopen', 'postopen'].includes(input.stage) ||
             !Array.isArray(input.orders))
         )
           fail();
@@ -579,7 +616,7 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
         await run('detach');
         failed = true;
         channel.close();
-        const left = expected.maintenanceEndsAtMs - io.now();
+        const left = (expected.reconcileByMs ?? expected.maintenanceEndsAtMs) - io.now();
         if (left <= 0) fail();
         let timer;
         try {

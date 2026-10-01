@@ -55,7 +55,11 @@ function syntheticCloudSources(scope) {
       size: 1,
       digest: '1'.repeat(64),
     })),
-    roles: scope.map(({ name, pmId }) => ({ name, pmId, selectionDigest: '2'.repeat(64) })),
+    roles: scope.map(({ name, pmId }) => ({
+      name,
+      pmId,
+      selectionDigest: '2'.repeat(64),
+    })),
     pythonEntry: {
       metadataPath,
       name: 'websockify',
@@ -81,7 +85,15 @@ async function fixture(t, extraInventory = {}, interrupted = false) {
   const inventory = {
     configurationDigests: ['b'.repeat(64)],
     merchants: [],
-    targets: [{ host: 'vultr', pid: 10, start: '1000', role: 'main', ports: [4001, 4002] }],
+    targets: [
+      {
+        host: 'vultr',
+        pid: 10,
+        start: '1000',
+        role: 'main',
+        ports: [4001, 4002],
+      },
+    ],
     ...extraInventory,
   };
   const binding = {
@@ -144,7 +156,11 @@ async function fixture(t, extraInventory = {}, interrupted = false) {
     foreign: false,
     failedPrepare: false,
     failedClose: false,
-    tcp: { observedAtMs: 1000, existingSockets: 0, sourceDigest: '6'.repeat(64) },
+    tcp: {
+      observedAtMs: 1000,
+      existingSockets: 0,
+      sourceDigest: '6'.repeat(64),
+    },
     capability: {
       schemaVersion: 1,
       sourceCandidate: '107857fe70503e30691073f267d87275596edb20',
@@ -154,14 +170,22 @@ async function fixture(t, extraInventory = {}, interrupted = false) {
     legacyWork: {
       schemaVersion: 2,
       knownExternalWork: [],
-      activeRequests: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
+      activeRequests: {
+        kind: 'unobservable',
+        reason: 'legacy-no-inflight-api',
+      },
       externalWork: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
       capabilityDigest,
       replaySourcesDigest: '8'.repeat(64),
       pendingReplay: 0,
     },
   };
-  const receipt = (host, role, pid) => ({ binding, host, role, process: { pid } });
+  const receipt = (host, role, pid) => ({
+    binding,
+    host,
+    role,
+    process: { pid },
+  });
   const classified = () => ({
     legacyCapability: structuredClone(state.capability),
     observedAtMs: state.now,
@@ -202,7 +226,10 @@ async function fixture(t, extraInventory = {}, interrupted = false) {
         (await deps.readExecutionIdentities()).map((r) => r.role),
         ['coordinator'],
       );
-      return { legacyDigest: approval.legacyDigest, sourceCandidate: '9'.repeat(40) };
+      return {
+        legacyDigest: approval.legacyDigest,
+        sourceCandidate: '9'.repeat(40),
+      };
     },
     facts: {
       observeWriters: async () => ({
@@ -234,7 +261,10 @@ async function fixture(t, extraInventory = {}, interrupted = false) {
       assert.equal(deps.journal, journal);
       assert.deepEqual(input.binding, binding);
       events.push('attach-ingress');
-      const verify = async (stage) => ({ ...(await deps.observeWriters()), stage });
+      const verify = async (stage) => ({
+        ...(await deps.observeWriters()),
+        stage,
+      });
       return {
         readExecutionIdentities: () => [receipt('aliyun', 'ingress', 101)],
         readTransportIdentity: async () => receipt('vultr', 'ingress-ssh', 102),
@@ -291,7 +321,10 @@ async function fixture(t, extraInventory = {}, interrupted = false) {
       events.push('baseline');
       activeObserver = {
         read: async () => classified(),
-        readFenceProgress: async () => ({ purpose: 'fence-progress', pair: classified() }),
+        readFenceProgress: async () => ({
+          purpose: 'fence-progress',
+          pair: classified(),
+        }),
         readRegistrationProgress: async () => {},
         readUnmanagedProgress: async () => {},
         retireUnmanaged: async () => {},
@@ -340,7 +373,9 @@ test('site binds the packaged recovery recipe as part of the actual durable scop
   f.scope.cloudBrowserRecoveryDigest = createHash('sha256')
     .update(
       JSON.stringify(
-        runtimeModule.firstCutoverCloudBrowserRecoveryLaunch({ attempt: f.binding.attempt }),
+        runtimeModule.firstCutoverCloudBrowserRecoveryLaunch({
+          attempt: f.binding.attempt,
+        }),
       ),
     )
     .digest('hex');
@@ -357,7 +392,9 @@ function bindCloudRecoveryScope(f) {
   const recipe = createHash('sha256')
     .update(
       JSON.stringify(
-        runtimeModule.firstCutoverCloudBrowserRecoveryLaunch({ attempt: f.binding.attempt }),
+        runtimeModule.firstCutoverCloudBrowserRecoveryLaunch({
+          attempt: f.binding.attempt,
+        }),
       ),
     )
     .digest('hex');
@@ -370,7 +407,9 @@ function bindCloudRecoveryScope(f) {
       recoveryDigest: createHash('sha256')
         .update(
           JSON.stringify(
-            runtimeModule.firstCutoverCloudVncRecoveryMaterial({ attempt: f.binding.attempt }),
+            runtimeModule.firstCutoverCloudVncRecoveryMaterial({
+              attempt: f.binding.attempt,
+            }),
           ),
         )
         .digest('hex'),
@@ -624,7 +663,7 @@ test('independent connected TCP blocks interruption even when writer callback cl
     await site.lifecycle.detach(f.context);
   }
 });
-test('approved administrative observation feeds writer facts and independently blocks active database sources', async (t) => {
+test('administrative observation reports known active sources before producer stop and blocks invalid attribution', async (t) => {
   for (const fault of [
     'none',
     'older-attribution',
@@ -646,7 +685,10 @@ test('approved administrative observation feeds writer facts and independently b
     await t.test(fault, async (t) => {
       const databaseObserver = {
         configDigest: 'd'.repeat(64),
-        sourceIdentity: { database: 'qa', serverUuid: '11111111-1111-4111-8111-111111111111' },
+        sourceIdentity: {
+          database: 'qa',
+          serverUuid: '11111111-1111-4111-8111-111111111111',
+        },
       };
       const f = await fixture(t, { databaseObserver }, true);
       const proof = {
@@ -715,6 +757,15 @@ test('approved administrative observation feeds writer facts and independently b
           observeWriters: async () => {
             const result = await deps.observeWriters();
             if (fault === 'older-attribution') assert.equal(result.observedAtMs, 900);
+            if (
+              [
+                'transactions',
+                'enabledEvents',
+                'replicationReceivers',
+                'replicationAppliers',
+              ].includes(fault)
+            )
+              assert.equal(result.internalWriters, 1);
             return result;
           },
         });
@@ -722,7 +773,16 @@ test('approved administrative observation feeds writer facts and independently b
       await site.lifecycle.attach(f.context);
       for (const phase of ['prepared', 'orders_fenced', 'legacy_interruption_accepted'])
         await f.journal.persist(phase, { candidate: f.binding.candidate });
-      if (['none', 'older-attribution'].includes(fault)) {
+      if (
+        [
+          'none',
+          'older-attribution',
+          'transactions',
+          'enabledEvents',
+          'replicationReceivers',
+          'replicationAppliers',
+        ].includes(fault)
+      ) {
         await site.lifecycle.acceptLegacyInterruption(f.context);
         assert.ok(delivered > 0);
       } else await assert.rejects(site.lifecycle.acceptLegacyInterruption(f.context), /UNPROVEN/);
@@ -779,7 +839,12 @@ async function candidateFixture(t, customize = async () => {}, extraInventory = 
     mode,
     idle: mode === 'closed',
     needsReconciliation: mode === 'serving',
-    runtime: { identity, root: f.context.root, main: { pid: 70 }, worker: null },
+    runtime: {
+      identity,
+      root: f.context.root,
+      main: { pid: 70 },
+      worker: null,
+    },
   });
   f.io.readCandidateRuntime = async (asked) => {
     assert.deepEqual(asked, identity);
@@ -864,7 +929,10 @@ async function cloudRecoverySiteFixture(t) {
   await persist('migration_started', { candidate: f.binding.candidate });
   await f.journal.bindBootstrapSeed('8'.repeat(32));
   for (const phase of ['candidate_started', 'verified'])
-    await persist(phase, { candidate: f.binding.candidate, identity: f.identity });
+    await persist(phase, {
+      candidate: f.binding.candidate,
+      identity: f.identity,
+    });
   return f;
 }
 
@@ -878,7 +946,10 @@ test('site cloud recovery supplies only nonrecursive work/persisted/fence leaves
   let calls = 0;
   f.observer().restoreCloudServices = async (input, operations) => {
     calls++;
-    assert.deepEqual(input, { identity: f.identity, maintenanceEndsAtMs: 9000 });
+    assert.deepEqual(input, {
+      identity: f.identity,
+      maintenanceEndsAtMs: 9000,
+    });
     assert.deepEqual(Object.keys(operations), ['readRecoveryFacts']);
     const facts = await operations.readRecoveryFacts();
     assert.deepEqual(Object.keys(facts).sort(), ['fence', 'persisted', 'work']);
@@ -1003,13 +1074,17 @@ test('readiness cannot omit its approved independent database writer source', as
         );
         if (stage === 'preopen') {
           await f.advance();
-          await f.journal.persist('migration_started', { candidate: f.binding.candidate });
+          await f.journal.persist('migration_started', {
+            candidate: f.binding.candidate,
+          });
           await f.journal.bindBootstrapSeed('8'.repeat(32));
-          await f.journal.persist('candidate_started', { candidate: f.binding.candidate });
+          await f.journal.persist('candidate_started', {
+            candidate: f.binding.candidate,
+          });
         }
         if (
           ['none', 'older'].includes(fault) ||
-          (stage === 'prepare' && ['sockets', 'internal'].includes(fault))
+          (stage === 'prepare' && ['sockets', 'internal', 'active', 'late-active'].includes(fault))
         ) {
           const result = await f.site.evidence.readHostInventory(f.request(stage));
           assert.equal(reads, 2);
@@ -1032,7 +1107,13 @@ test('host inventory preserves approved bytes but derives live producers from fr
     inventory: f.scope.inventory,
     observedAtMs: 1000,
     producersRunning: [
-      { host: 'vultr', pid: 10, start: '1000', role: 'main', ports: [4001, 4002] },
+      {
+        host: 'vultr',
+        pid: 10,
+        start: '1000',
+        role: 'main',
+        ports: [4001, 4002],
+      },
     ],
     unknownWriters: [],
     externalWork: [],
@@ -1043,9 +1124,13 @@ test('host inventory preserves approved bytes but derives live producers from fr
     [],
   );
   await f.advance();
-  await f.journal.persist('migration_started', { candidate: f.binding.candidate });
+  await f.journal.persist('migration_started', {
+    candidate: f.binding.candidate,
+  });
   await f.journal.bindBootstrapSeed('8'.repeat(32));
-  await f.journal.persist('candidate_started', { candidate: f.binding.candidate });
+  await f.journal.persist('candidate_started', {
+    candidate: f.binding.candidate,
+  });
   assert.deepEqual((await f.site.evidence.readHostInventory(f.request())).producersRunning, []);
   assert.equal((await f.journal.readFirstCutoverEffects()).identity, undefined);
   await f.site.lifecycle.detach(f.context);
@@ -1136,9 +1221,13 @@ for (const fault of [
     if (fault === 'changed-inventory') f.scope.inventory.merchants.push({ forged: true });
     if (fault === 'serving') {
       await f.advance();
-      await f.journal.persist('migration_started', { candidate: f.binding.candidate });
+      await f.journal.persist('migration_started', {
+        candidate: f.binding.candidate,
+      });
       await f.journal.bindBootstrapSeed('8'.repeat(32));
-      await f.journal.persist('candidate_started', { candidate: f.binding.candidate });
+      await f.journal.persist('candidate_started', {
+        candidate: f.binding.candidate,
+      });
       f.setMode('serving');
       input = f.request();
     }
@@ -1160,10 +1249,17 @@ test('site worker default uses the same live serving observer and rejects regene
       };
     });
     await f.advance();
-    await f.journal.persist('migration_started', { candidate: f.binding.candidate });
+    await f.journal.persist('migration_started', {
+      candidate: f.binding.candidate,
+    });
     await f.journal.bindBootstrapSeed('8'.repeat(32));
-    await f.journal.persist('candidate_started', { candidate: f.binding.candidate });
-    await f.journal.persist('verified', { candidate: f.binding.candidate, identity: f.identity });
+    await f.journal.persist('candidate_started', {
+      candidate: f.binding.candidate,
+    });
+    await f.journal.persist('verified', {
+      candidate: f.binding.candidate,
+      identity: f.identity,
+    });
     f.setMode('serving');
     f.state.foreign = foreign;
     if (foreign)
@@ -1188,9 +1284,14 @@ test('site defaults failure recording to the held journal even after the window 
   await site.lifecycle.attach(f.context);
   await site.lifecycle.detach(f.context);
   f.state.now = 20000;
-  assert.deepEqual(await site.lifecycle.holdMaintenance(f.context, { closeAcknowledged: true }), {
-    closeAcknowledged: false,
-  });
+  assert.deepEqual(
+    await site.lifecycle.holdMaintenance(f.context, {
+      closeAcknowledged: true,
+    }),
+    {
+      closeAcknowledged: false,
+    },
+  );
   assert.equal(calls, 1);
 });
 
@@ -1255,10 +1356,14 @@ for (const fault of [
   test(`candidate readiness refuses ${fault} without advancing the journal or restoring ingress`, async (t) => {
     const f = await candidateFixture(t);
     await f.advance();
-    await f.journal.persist('migration_started', { candidate: f.binding.candidate });
+    await f.journal.persist('migration_started', {
+      candidate: f.binding.candidate,
+    });
     await f.journal.bindBootstrapSeed('8'.repeat(32));
     if (fault !== 'phase')
-      await f.journal.persist('candidate_started', { candidate: f.binding.candidate });
+      await f.journal.persist('candidate_started', {
+        candidate: f.binding.candidate,
+      });
     const input = structuredClone(f.request());
     if (fault === 'binding') input.binding.configDigest = '0'.repeat(64);
     if (fault === 'window') input.window.maintenanceEndsAtMs++;
@@ -1317,9 +1422,13 @@ test('interruption cannot accept a zero work observation without actual persiste
     const site = f.make();
     await site.lifecycle.attach(f.context);
     await f.journal.persist('prepared', { candidate: f.binding.candidate });
-    await f.journal.persist('orders_fenced', { candidate: f.binding.candidate });
+    await f.journal.persist('orders_fenced', {
+      candidate: f.binding.candidate,
+    });
     await site.lifecycle.fenceOrders(f.context);
-    await f.journal.persist('legacy_interruption_accepted', { candidate: f.binding.candidate });
+    await f.journal.persist('legacy_interruption_accepted', {
+      candidate: f.binding.candidate,
+    });
     await assert.rejects(site.lifecycle.acceptLegacyInterruption(f.context), /UNPROVEN/);
     assert.equal((await f.journal.readFirstCutoverEffects()).interruptionObservation, undefined);
     assert(!f.events.includes('stop-producers'));
@@ -1347,9 +1456,13 @@ for (const kind of ['stale', 'future', 'after-busy', 'missing', 'failed']) {
     const site = f.make();
     await site.lifecycle.attach(f.context);
     await f.journal.persist('prepared', { candidate: f.binding.candidate });
-    await f.journal.persist('orders_fenced', { candidate: f.binding.candidate });
+    await f.journal.persist('orders_fenced', {
+      candidate: f.binding.candidate,
+    });
     await site.lifecycle.fenceOrders(f.context);
-    await f.journal.persist('legacy_settled', { candidate: f.binding.candidate });
+    await f.journal.persist('legacy_settled', {
+      candidate: f.binding.candidate,
+    });
     await assert.rejects(site.lifecycle.settleLegacy(f.context));
     assert(!f.events.includes('stop-producers'));
     await site.lifecycle.detach(f.context);
@@ -1445,9 +1558,13 @@ test('site routes prepare and preopen database scope through the same held journ
     unsettled: [],
   });
   await f.advance();
-  await f.journal.persist('migration_started', { candidate: f.binding.candidate });
+  await f.journal.persist('migration_started', {
+    candidate: f.binding.candidate,
+  });
   await f.journal.bindBootstrapSeed('8'.repeat(32));
-  await f.journal.persist('candidate_started', { candidate: f.binding.candidate });
+  await f.journal.persist('candidate_started', {
+    candidate: f.binding.candidate,
+  });
   assert.deepEqual(await f.site.evidence.readDatabaseScope(f.request()), {
     observedAtMs: f.state.now,
     orders: [],
@@ -1480,7 +1597,11 @@ test('site sends selected orders through the existing gateway only within the sa
   const scope = {
     binding: f.binding,
     stage: 'prepare',
-    window: { maintenanceEndsAtMs: 9000, reconcileByMs: 12000, operatorRef: 'synthetic-qa' },
+    window: {
+      maintenanceEndsAtMs: 9000,
+      reconcileByMs: 12000,
+      operatorRef: 'synthetic-qa',
+    },
   };
   assert.equal(typeof site.evidence.queryOrders, 'function');
   assert.deepEqual(
@@ -1620,7 +1741,10 @@ test('site source export refuses a different source or binding before invoking a
       scope,
     );
     if (fault === 'none')
-      assert.deepEqual(await action, { reference: 'encrypted-only', ...facility });
+      assert.deepEqual(await action, {
+        reference: 'encrypted-only',
+        ...facility,
+      });
     else await assert.rejects(action, /UNPROVEN/);
     assert.equal(exports, ['none', 'returned-profile'].includes(fault) ? 1 : 0);
     await site.lifecycle.detach(f.context);
@@ -1629,12 +1753,21 @@ test('site source export refuses a different source or binding before invoking a
 
 test('original backup coordinator can consume site source export without reshaping its contract', async (t) => {
   const plan = {
-    sourceIdentity: { serverUuid: '11111111-1111-4111-8111-111111111111', database: 'source_qa' },
-    isolatedTarget: { serverUuid: '22222222-2222-4222-8222-222222222222', database: 'restore_qa' },
+    sourceIdentity: {
+      serverUuid: '11111111-1111-4111-8111-111111111111',
+      database: 'source_qa',
+    },
+    isolatedTarget: {
+      serverUuid: '22222222-2222-4222-8222-222222222222',
+      database: 'restore_qa',
+    },
   };
   const facility = { encryptionProfileDigest: '4'.repeat(64) };
   const profile = { synthetic: 'approved-source-profile' };
-  const f = await fixture(t, { backupPlan: plan, backupSource: { facility: profile } });
+  const f = await fixture(t, {
+    backupPlan: plan,
+    backupSource: { facility: profile },
+  });
   f.io.inspectSourceFacility = async (input) => {
     assert.deepEqual(input, profile);
     return facility;
@@ -1678,7 +1811,10 @@ test('original backup coordinator can consume site source export without reshapi
       runApprovedMigrations: async () => {
         f.events.push('migrate-synthetic');
       },
-      verifySchema: async () => ({ schemaDigest: '6'.repeat(64), businessDigest: '5'.repeat(64) }),
+      verifySchema: async () => ({
+        schemaDigest: '6'.repeat(64),
+        businessDigest: '5'.repeat(64),
+      }),
       readSourceDigest: async () => '3'.repeat(64),
       sealReceipt: (value) => f.journal.bindBackupReceipt(value),
     },
@@ -1697,13 +1833,18 @@ test('original backup coordinator consumes the full site adapter and closes reco
     'target-identity',
     'artifact-drift',
     'target-data',
+    'failure-owner-drift',
+    'failure-deadline-drift',
     'migration-ack',
     'business-drift',
     'source-drift',
     'close-unknown',
   ]) {
     const plan = {
-      sourceIdentity: { serverUuid: '11111111-1111-4111-8111-111111111111', database: 'source_qa' },
+      sourceIdentity: {
+        serverUuid: '11111111-1111-4111-8111-111111111111',
+        database: 'source_qa',
+      },
       isolatedTarget: {
         serverUuid: '22222222-2222-4222-8222-222222222222',
         database: 'restore_qa',
@@ -1718,7 +1859,10 @@ test('original backup coordinator consumes the full site adapter and closes reco
     };
     const f = await fixture(t, { backupPlan: plan, backupSource: source });
     f.scope.backupRecoveryDigest = '8'.repeat(64);
-    const artifact = { reference: `${source.directory}/${f.binding.attempt}.sql.age`, ...facility };
+    const artifact = {
+      reference: `${source.directory}/${f.binding.attempt}.sql.age`,
+      ...facility,
+    };
     const sourceSnapshot = {
       identity: plan.sourceIdentity,
       objects: [
@@ -1805,7 +1949,9 @@ test('original backup coordinator consumes the full site adapter and closes reco
                 ...structuredClone(sourceSnapshot),
                 identity: plan.isolatedTarget,
                 sourceDigest:
-                  fault === 'target-data' ? '9'.repeat(64) : sourceSnapshot.sourceDigest,
+                  fault === 'target-data' || fault.startsWith('failure-')
+                    ? '9'.repeat(64)
+                    : sourceSnapshot.sourceDigest,
               };
             if (name === 'migrate')
               return {
@@ -1857,9 +2003,30 @@ test('original backup coordinator consumes the full site adapter and closes reco
       assert(operations.filter((name) => name === 'migrate').length <= 1, fault);
       if (['target-identity', 'artifact-drift', 'target-data'].includes(fault))
         assert(!operations.includes('migrate'), fault);
-      // A failed site cannot acknowledge a successful recovery close; keep the
-      // uncertainty visible instead of treating cleanup as a successful release.
-      await assert.rejects(site.lifecycle.detach(f.context), /UNPROVEN/);
+      await f.journal.recordFirstCutoverFailure({
+        phase: 'backup_verified',
+        observedAtMs: f.state.now,
+        operatorRef: fault === 'failure-owner-drift' ? 'foreign-owner' : f.approval.operatorRef,
+        reconcileByMs: f.approval.reconcileByMs + (fault === 'failure-deadline-drift' ? 1 : 0),
+        errorCode: 'CUTOVER_BACKUP_UNPROVEN',
+        status: { mode: 'not-started', closeAcknowledged: false },
+      });
+      // A channel can acknowledge its own detach while the backup remains
+      // failed. No restore/migrate retry or release follows that acknowledgement.
+      if (fault.startsWith('failure-')) {
+        await assert.rejects(site.lifecycle.detach(f.context), /UNPROVEN/);
+        await assert.rejects(site.lifecycle.detach(f.context), /UNPROVEN/);
+        assert.equal(operations.filter((name) => name === 'close').length, 0, fault);
+      } else {
+        await site.lifecycle.detach(f.context);
+        assert.equal(operations.filter((name) => name === 'close').length, 1, fault);
+      }
+      await assert.rejects(site.backup.restoreIsolated(artifact, plan.isolatedTarget), /UNPROVEN/);
+      await assert.rejects(
+        site.backup.runApprovedMigrations(plan.isolatedTarget, f.binding.migrationDigest),
+        /UNPROVEN/,
+      );
+      await fs.stat(join(f.root, 'release.lock'));
       continue;
     }
     const receipt = await pending;
@@ -1872,6 +2039,8 @@ test('original backup coordinator consumes the full site adapter and closes reco
       await assert.rejects(site.backup.finishRecovery(f.context), /UNPROVEN/);
       await assert.rejects(site.backup.finishRecovery(f.context), /UNPROVEN/);
       assert.equal(operations.filter((name) => name === 'migrate').length, 1);
+      assert.equal(operations.filter((name) => name === 'close').length, 1);
+      await assert.rejects(site.lifecycle.detach(f.context), /UNPROVEN/);
       assert.equal(operations.filter((name) => name === 'close').length, 1);
       continue;
     }
@@ -1888,7 +2057,10 @@ test('original backup coordinator consumes the full site adapter and closes reco
 test('recovery callback uses the original held site journal, approved target and physical stopped facts', async (t) => {
   for (const fault of ['none', 'digest', 'target', 'busy', 'deadline']) {
     const plan = {
-      sourceIdentity: { serverUuid: '11111111-1111-4111-8111-111111111111', database: 'source_qa' },
+      sourceIdentity: {
+        serverUuid: '11111111-1111-4111-8111-111111111111',
+        database: 'source_qa',
+      },
       isolatedTarget: {
         serverUuid: '22222222-2222-4222-8222-222222222222',
         database: 'restore_qa',
@@ -1935,3 +2107,114 @@ test('site refuses missing independent business facts before opening either sess
   assert.throws(() => f.make(), /UNPROVEN/);
   assert.deepEqual(f.events, []);
 });
+
+for (const afterDeadline of [false, true])
+  test(`default site facts reconcile real SQL with resumed candidate (${afterDeadline})`, async (t) => {
+    const merchant = {
+      provider: 'wechat',
+      environment: 'production',
+      merchantDigest: 'e'.repeat(64),
+      codeDigest: 'f'.repeat(64),
+    };
+    const { readCutoverDatabaseScope } = await import('./browser-cutover-evidence.mjs');
+    const f = await candidateFixture(
+      t,
+      async (f) => {
+        delete f.io.facts;
+        f.io.readPaymentScope = async () =>
+          readCutoverDatabaseScope(
+            {
+              query: async (sql) => {
+                if (sql.includes('FROM payments '))
+                  return [
+                    sql.includes('COUNT')
+                      ? [{ total: 1 }]
+                      : [
+                          {
+                            id: 1,
+                            external_id: 'QA',
+                            provider: 'wechat',
+                            provider_order_id: 'QA_ORDER',
+                            provider_capture_id: null,
+                            amount_cents: 100,
+                            currency: 'CNY',
+                            status: 'pending',
+                            metadata: null,
+                          },
+                        ],
+                    [],
+                  ];
+                if (sql.includes('FROM partner_recharge_orders '))
+                  return [sql.includes('COUNT') ? [{ total: 0 }] : [], []];
+                if (sql.includes('FROM tasks ')) return [[{ id: 99, status: 'running' }], []];
+                return [[], []];
+              },
+            },
+            {
+              windowStartMs: 0,
+              windowEndMs: Math.min(9000, f.state.now),
+              now: () => f.state.now,
+              resolveMerchant: () => merchant,
+            },
+          );
+        f.io.readRehearsal = async () => ({
+          ...f.binding,
+          observedAtMs: 0,
+          recoveryUntilMs: 12000,
+          recovery: 'retry-proven',
+          artifacts: [
+            {
+              ...merchant,
+              transcriptDigest: '1'.repeat(64),
+              retryDigest: '2'.repeat(64),
+            },
+          ],
+        });
+        const connect = f.io.connectGateway;
+        f.io.connectGateway = async (...args) => ({
+          ...(await connect(...args)),
+          queryOrders: async (request) => {
+            f.events.push('postopen-query');
+            assert.equal(request.stage, 'postopen');
+            assert.equal(request.orders.length, 1);
+            return request.orders.map((o) => ({
+              provider: o.provider,
+              environment: o.environment,
+              merchantDigest: o.merchantDigest,
+              orderRef: o.orderRef,
+              observedAtMs: f.state.now,
+              rawDigest: '3'.repeat(64),
+              state: 'unpaid-valid',
+            }));
+          },
+        });
+      },
+      { merchants: [merchant] },
+    );
+    await f.advance();
+    await f.journal.persist('migration_started', {
+      candidate: f.binding.candidate,
+    });
+    await f.journal.bindBootstrapSeed('8'.repeat(32));
+    for (const phase of ['candidate_started', 'verified', 'opened', 'reconciled'])
+      await f.journal.persist(phase, {
+        candidate: f.binding.candidate,
+        identity: f.identity,
+      });
+    f.setMode('serving');
+    f.state.now = afterDeadline ? 9500 : 4000;
+    f.observer().probeBrowser = async () => ({
+      kind: 'browser-minimum-execution-result',
+      targetDigest: '4'.repeat(64),
+      resultDigest: '5'.repeat(64),
+      observedAtMs: f.state.now,
+    });
+    assert.deepEqual(
+      (await f.site.lifecycle.reconcile(f.context, f.identity)).identity,
+      f.identity,
+    );
+    assert(!f.events.includes('close-gateway'));
+    assert(f.events.includes('postopen-query'));
+    await f.site.lifecycle.detach(f.context);
+    assert.equal(f.events.filter((e) => e === 'close-gateway').length, 1);
+  });

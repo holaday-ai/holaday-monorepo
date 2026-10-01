@@ -335,3 +335,26 @@ test('uncertain query retains evidence but is never retried or reported as ready
   assert.equal(f.calls.length, 1);
   assert.equal((await fs.readdir(f.root + evidence)).length, 1);
 });
+
+for (const time of [150000, 210000])
+  test(`real signed postopen query retains original deadline at ${time}`, async (t) => {
+    const f = await fixture(t);
+    const identity = { candidate: f.site.binding.candidate, bootId: '2'.repeat(32) };
+    f.site.reconcileByMs = 250000;
+    f.input.stage = 'postopen';
+    f.input.identity = identity;
+    f.input.observedAtMs = time;
+    f.io.now = () => time;
+    f.io.journal.readFirstCutoverEffects = async () => ({
+      ...f.site.binding,
+      phase: 'reconciled',
+      identity,
+      bootstrapSeed: '1'.repeat(32),
+    });
+    const result = await api.queryFirstCutoverOrders(f.site, f.input, f.io);
+    assert.equal(result[0].state, 'unpaid-valid');
+    assert.equal(f.calls.length, 1);
+    f.io.now = () => 250000;
+    await assert.rejects(api.queryFirstCutoverOrders(f.site, f.input, f.io), /UNPROVEN/);
+    assert.equal(f.calls.length, 1);
+  });

@@ -102,7 +102,7 @@ export async function queryFirstCutoverOrders(value, request, overrides = {}) {
       !['configDigest', 'migrationDigest', 'inventoryDigest'].every((k) =>
         digest(site.binding[k]),
       ) ||
-      !['prepare', 'preopen'].includes(input?.stage) ||
+      !['prepare', 'preopen', 'postopen'].includes(input?.stage) ||
       !Array.isArray(input.orders) ||
       input.orders.length >= 10000
     )
@@ -116,7 +116,10 @@ export async function queryFirstCutoverOrders(value, request, overrides = {}) {
         !Number.isSafeInteger(now) ||
         now < previousTime ||
         !Number.isSafeInteger(site.maintenanceEndsAtMs) ||
-        now >= site.maintenanceEndsAtMs ||
+        now >= (input.stage === 'postopen' ? site.reconcileByMs : site.maintenanceEndsAtMs) ||
+        (input.stage === 'postopen' &&
+          (!Number.isSafeInteger(site.reconcileByMs) ||
+            site.reconcileByMs < site.maintenanceEndsAtMs)) ||
         !Number.isSafeInteger(input.observedAtMs) ||
         input.observedAtMs < 0 ||
         input.observedAtMs > now ||
@@ -130,7 +133,11 @@ export async function queryFirstCutoverOrders(value, request, overrides = {}) {
       if (
         !bindingKeys.every((k) => next[k] === site.binding[k]) ||
         !(
-          input.stage === 'prepare' ? ['preflight', 'prepared'] : ['candidate_started', 'verified']
+          input.stage === 'prepare'
+            ? ['preflight', 'prepared']
+            : input.stage === 'postopen'
+              ? ['reconciled']
+              : ['candidate_started', 'verified']
         ).includes(next.phase) ||
         (record && !equal(next, record))
       )

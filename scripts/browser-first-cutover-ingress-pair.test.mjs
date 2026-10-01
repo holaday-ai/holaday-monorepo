@@ -10,7 +10,7 @@ import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 
 const sha = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const identity = { candidate: 'a'.repeat(40), bootId: 'b'.repeat(32) };
-async function fixture(t, interrupted = false) {
+async function fixture(t, interrupted = false, reconciliation = false) {
   const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'holaday-ingress-pair-')));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const manifest = { synthetic: 'two-host-ingress-wiring' };
@@ -218,6 +218,8 @@ async function fixture(t, interrupted = false) {
     'migration_started',
     'candidate_started',
     'verified',
+    'opened',
+    'reconciled',
   ];
   let at = -1;
   const advance = async (phase) => {
@@ -257,7 +259,10 @@ async function fixture(t, interrupted = false) {
     },
     start: () => {
       assert.equal(typeof session.createFirstCutoverIngressPair, 'function');
-      return session.createFirstCutoverIngressPair({ binding, maintenanceEndsAtMs: 9000 }, io);
+      return session.createFirstCutoverIngressPair(
+        { binding, maintenanceEndsAtMs: 9000, ...(reconciliation ? { reconcileByMs: 12000 } : {}) },
+        io,
+      );
     },
   };
 }
@@ -529,3 +534,23 @@ test('wrong host receipt cannot substitute for successful endpoint response', as
   await assert.rejects(pair.fenceOrders(), /CUTOVER_INGRESS_PAIR_UNPROVEN/);
   await pair.close();
 });
+
+for (const fault of ['none', 'phase', 'deadline', 'late-effect']) {
+  test(`same ingress pair late receipts ${fault} preserve original reconciliation permission`, async (t) => {
+    const f = await fixture(t, false, true);
+    const pair = await f.start();
+    await f.advance('orders_fenced');
+    await pair.fenceOrders();
+    Object.assign(f.counts, { existingSockets: 0, internalWriters: 0, producersRunning: 0 });
+    await f.advance('all_fenced');
+    await pair.fenceAll();
+    await f.advance('verified');
+    await pair.restoreIngress(identity);
+    if (fault !== 'phase') await f.advance('reconciled');
+    f.setTime(fault === 'deadline' ? 12000 : 9500);
+    if (fault === 'late-effect') await assert.rejects(pair.fenceAll(), /UNPROVEN/);
+    else if (fault === 'none')
+      assert((await pair.readFenceReceipts()).every((r) => r.receipt.phase === 'restored'));
+    else await assert.rejects(pair.readFenceReceipts(), /UNPROVEN/);
+  });
+}

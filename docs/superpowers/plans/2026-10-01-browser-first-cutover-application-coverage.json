@@ -1,0 +1,3107 @@
+{
+  "sourceCandidate": "b43dd03132658d9c13875f050e2c27e584b61e33",
+  "node": "22.23.2",
+  "configFileCount": 507,
+  "nonPaypalCompletedFiles": 506,
+  "nonPaypalPassed": 8584,
+  "nonPaypalSkipped": 1,
+  "paypalOfflineAlreadyExecuted": {
+    "files": [
+      "scripts/paypal-cutover-query.test.ts"
+    ],
+    "passed": 18,
+    "externalAccess": false,
+    "repeat": false
+  },
+  "files": {
+    "src/browser-pool/broker-pool-runtime.test.ts": {
+      "totalTests": 116,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/browser-pool-stop.test.ts": {
+      "totalTests": 26,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/egress-proxy.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/browser-pool.test.ts": {
+      "totalTests": 26,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/broker-client.test.ts": {
+      "totalTests": 17,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/background-work.test.ts": {
+      "totalTests": 19,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/browser-pool-process.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/broker-boot-session.test.ts": {
+      "totalTests": 17,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/broker-egress-connections.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/cdp-readiness.test.ts": {
+      "totalTests": 31,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/broker-native-loader.test.ts": {
+      "totalTests": 26,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/broker-endpoints.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/owned-pool-process.test.ts": {
+      "totalTests": 20,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/broker-native-control.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/broker-data-protocol.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/broker-egress-listener.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/browser-session-recovery.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/broker-control-protocol.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/spawn.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/broker-boot-protocol.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/reaper.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/vnc-proxy.control.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/browser-pool/log-url.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-full-native.log",
+      "sha256": "015e5626759dd714286e5590f674989fc8b9f7f6cccad91faa48857c79b5fa5a"
+    },
+    "src/agent/a-share/ashare-qa-runner.test.ts": {
+      "totalTests": 48,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/agent/a-share/briefing-renderer.test.ts": {
+      "totalTests": 37,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "scripts/qwen-core-measurement.test.ts": {
+      "totalTests": 32,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/worker.test.ts": {
+      "totalTests": 18,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/service.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/handlers/team-work-items.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/agent/a-share/ashare-qa.test.ts": {
+      "totalTests": 23,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/agent/a-share/ashare-qa-gate.test.ts": {
+      "totalTests": 53,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/agent/a-share/akshare-http-client.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/handlers/team-workspace.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/receipt-service.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/agent/a-share/prewarm-drain.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/agent/a-share/annotation-engine.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/agent/a-share/briefing-service.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "scripts/browser-maintenance-readiness.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "scripts/paypal-cutover-query.test.ts": {
+      "totalTests": 18,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/agent/a-share/perf-trend-engine.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/handler-contract.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/admin/learning-helpers.test.ts": {
+      "totalTests": 20,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "scripts/apply-numbered-migrations.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/handlers/financial-retention.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/agent/a-share/briefing-dispatch.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/sms-gateway-client.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/table-ownership.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/agent/a-share/ashare-intent-judge.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/worker-maintenance.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/handler-release-contract.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/worker-entry-maintenance.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/agent/a-share/ashare-qa-lane-gate.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/handler-registry.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/worker-process-smoke.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/state-machine.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/agent/a-share/circuit-breaker.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/immediate-effects.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/account-closure/types.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/agent/a-share/ashare-format.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "scripts/fixtures/account-closure-shadowed-import.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "scripts/fixtures/account-closure-fake-run-to-completion.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "scripts/fixtures/account-closure-unrelated-run.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-00.log",
+      "sha256": "db55249cbc908bc012645ca2bb0b5b202f8b66e403e756c904c841f0c9d1df76"
+    },
+    "src/agent/batch-executor.test.ts": {
+      "totalTests": 18,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-00.log",
+      "sha256": "4295229b2e4644fc35dff164633c964b83894e82ceaf7d554e9a5945a3b0329a"
+    },
+    "src/agent/core-legacy-plan.test.ts": {
+      "totalTests": 33,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-00.log",
+      "sha256": "4295229b2e4644fc35dff164633c964b83894e82ceaf7d554e9a5945a3b0329a"
+    },
+    "src/agent/a-share/risk-radar-engine.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-00.log",
+      "sha256": "4295229b2e4644fc35dff164633c964b83894e82ceaf7d554e9a5945a3b0329a"
+    },
+    "src/agent/a-share/prewarm-io-drain.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-00.log",
+      "sha256": "4295229b2e4644fc35dff164633c964b83894e82ceaf7d554e9a5945a3b0329a"
+    },
+    "src/agent/core-task-admission.test.ts": {
+      "totalTests": 32,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-00.log",
+      "sha256": "4295229b2e4644fc35dff164633c964b83894e82ceaf7d554e9a5945a3b0329a"
+    },
+    "src/agent/browser-network-policy.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-00.log",
+      "sha256": "4295229b2e4644fc35dff164633c964b83894e82ceaf7d554e9a5945a3b0329a"
+    },
+    "src/agent/blank-page-detector.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-00.log",
+      "sha256": "4295229b2e4644fc35dff164633c964b83894e82ceaf7d554e9a5945a3b0329a"
+    },
+    "src/agent/a-share/prewarm-scheduler.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-00.log",
+      "sha256": "4295229b2e4644fc35dff164633c964b83894e82ceaf7d554e9a5945a3b0329a"
+    },
+    "src/agent/browser-failure-copy.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-00.log",
+      "sha256": "4295229b2e4644fc35dff164633c964b83894e82ceaf7d554e9a5945a3b0329a"
+    },
+    "src/agent/core-task-recovery.test.ts": {
+      "totalTests": 64,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-01.log",
+      "sha256": "3035b35e55d867a45ec72d1d4143f2117fa4bd2918a4092c48b73f39dff6534f"
+    },
+    "src/agent/core-task-execution.test.ts": {
+      "totalTests": 41,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-01.log",
+      "sha256": "3035b35e55d867a45ec72d1d4143f2117fa4bd2918a4092c48b73f39dff6534f"
+    },
+    "src/agent/core-task-repository.test.ts": {
+      "totalTests": 48,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-01.log",
+      "sha256": "3035b35e55d867a45ec72d1d4143f2117fa4bd2918a4092c48b73f39dff6534f"
+    },
+    "src/agent/core-task-settlement.test.ts": {
+      "totalTests": 38,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-01.log",
+      "sha256": "3035b35e55d867a45ec72d1d4143f2117fa4bd2918a4092c48b73f39dff6534f"
+    },
+    "src/agent/core-task-continuation.test.ts": {
+      "totalTests": 18,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-01.log",
+      "sha256": "3035b35e55d867a45ec72d1d4143f2117fa4bd2918a4092c48b73f39dff6534f"
+    },
+    "src/agent/core-task-requirements.test.ts": {
+      "totalTests": 24,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-01.log",
+      "sha256": "3035b35e55d867a45ec72d1d4143f2117fa4bd2918a4092c48b73f39dff6534f"
+    },
+    "src/agent/core-task-suggestions.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-01.log",
+      "sha256": "3035b35e55d867a45ec72d1d4143f2117fa4bd2918a4092c48b73f39dff6534f"
+    },
+    "src/agent/direct-open.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-01.log",
+      "sha256": "3035b35e55d867a45ec72d1d4143f2117fa4bd2918a4092c48b73f39dff6534f"
+    },
+    "src/agent/core-task-plan.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-01.log",
+      "sha256": "3035b35e55d867a45ec72d1d4143f2117fa4bd2918a4092c48b73f39dff6534f"
+    },
+    "src/agent/core-task-record.test.ts": {
+      "totalTests": 29,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-01.log",
+      "sha256": "3035b35e55d867a45ec72d1d4143f2117fa4bd2918a4092c48b73f39dff6534f"
+    },
+    "src/agent/intent-classifier.test.ts": {
+      "totalTests": 112,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-02.log",
+      "sha256": "50c44c1d7d761c61955a235c0bd84ce14a6445f028a068c3d2747602a28aa310"
+    },
+    "src/agent/generate-runner.test.ts": {
+      "totalTests": 61,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-02.log",
+      "sha256": "50c44c1d7d761c61955a235c0bd84ce14a6445f028a068c3d2747602a28aa310"
+    },
+    "src/agent/image/image-runner.test.ts": {
+      "totalTests": 26,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-02.log",
+      "sha256": "50c44c1d7d761c61955a235c0bd84ce14a6445f028a068c3d2747602a28aa310"
+    },
+    "src/agent/image/gemini-image-client.test.ts": {
+      "totalTests": 18,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-02.log",
+      "sha256": "50c44c1d7d761c61955a235c0bd84ce14a6445f028a068c3d2747602a28aa310"
+    },
+    "src/agent/generate-stream-liveness.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-02.log",
+      "sha256": "50c44c1d7d761c61955a235c0bd84ce14a6445f028a068c3d2747602a28aa310"
+    },
+    "src/agent/llm-call-recorder.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-02.log",
+      "sha256": "50c44c1d7d761c61955a235c0bd84ce14a6445f028a068c3d2747602a28aa310"
+    },
+    "src/agent/image/model-router.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-02.log",
+      "sha256": "50c44c1d7d761c61955a235c0bd84ce14a6445f028a068c3d2747602a28aa310"
+    },
+    "src/agent/intent-classifier.image.test.ts": {
+      "totalTests": 34,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-02.log",
+      "sha256": "50c44c1d7d761c61955a235c0bd84ce14a6445f028a068c3d2747602a28aa310"
+    },
+    "src/agent/image/image-subject-verifier.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-02.log",
+      "sha256": "50c44c1d7d761c61955a235c0bd84ce14a6445f028a068c3d2747602a28aa310"
+    },
+    "src/agent/image/image-input-order.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-02.log",
+      "sha256": "50c44c1d7d761c61955a235c0bd84ce14a6445f028a068c3d2747602a28aa310"
+    },
+    "src/agent/scheduled-runner.test.ts": {
+      "totalTests": 30,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-03.log",
+      "sha256": "a3147b0fedca78079d242a197b43fde818908013e896b8819d7282f05d61cb16"
+    },
+    "src/agent/scheduled-runner-drain.test.ts": {
+      "totalTests": 39,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-03.log",
+      "sha256": "a3147b0fedca78079d242a197b43fde818908013e896b8819d7282f05d61cb16"
+    },
+    "src/agent/planners/anthropic.test.ts": {
+      "totalTests": 16,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-03.log",
+      "sha256": "a3147b0fedca78079d242a197b43fde818908013e896b8819d7282f05d61cb16"
+    },
+    "src/agent/login-detector.test.ts": {
+      "totalTests": 50,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-03.log",
+      "sha256": "a3147b0fedca78079d242a197b43fde818908013e896b8819d7282f05d61cb16"
+    },
+    "src/agent/scrape-runner.test.ts": {
+      "totalTests": 18,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-03.log",
+      "sha256": "a3147b0fedca78079d242a197b43fde818908013e896b8819d7282f05d61cb16"
+    },
+    "src/agent/nav-failure-detector.test.ts": {
+      "totalTests": 16,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-03.log",
+      "sha256": "a3147b0fedca78079d242a197b43fde818908013e896b8819d7282f05d61cb16"
+    },
+    "src/agent/site-configs/apply.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-03.log",
+      "sha256": "a3147b0fedca78079d242a197b43fde818908013e896b8819d7282f05d61cb16"
+    },
+    "src/agent/nav-error-translator.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-03.log",
+      "sha256": "a3147b0fedca78079d242a197b43fde818908013e896b8819d7282f05d61cb16"
+    },
+    "src/agent/plan-mode.test.ts": {
+      "totalTests": 20,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-03.log",
+      "sha256": "a3147b0fedca78079d242a197b43fde818908013e896b8819d7282f05d61cb16"
+    },
+    "src/agent/planners/stub.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-03.log",
+      "sha256": "a3147b0fedca78079d242a197b43fde818908013e896b8819d7282f05d61cb16"
+    },
+    "src/agent/supercar/agent-loop.browser-control.test.ts": {
+      "totalTests": 21,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-04.log",
+      "sha256": "0749b1a1f0ec0f6229a015639b348b5b389d1e8d5aeb6dd1ed8b198f96d5dc58"
+    },
+    "src/agent/supercar/agent-loop.apify-tools.test.ts": {
+      "totalTests": 16,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-04.log",
+      "sha256": "0749b1a1f0ec0f6229a015639b348b5b389d1e8d5aeb6dd1ed8b198f96d5dc58"
+    },
+    "src/agent/supercar/agent-loop.stuck-nudge.test.ts": {
+      "totalTests": 15,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-04.log",
+      "sha256": "0749b1a1f0ec0f6229a015639b348b5b389d1e8d5aeb6dd1ed8b198f96d5dc58"
+    },
+    "src/agent/supercar/agent-loop.orphan-tool-result.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-04.log",
+      "sha256": "0749b1a1f0ec0f6229a015639b348b5b389d1e8d5aeb6dd1ed8b198f96d5dc58"
+    },
+    "src/agent/supercar/agent-loop.takeover-prompt.test.ts": {
+      "totalTests": 23,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-04.log",
+      "sha256": "0749b1a1f0ec0f6229a015639b348b5b389d1e8d5aeb6dd1ed8b198f96d5dc58"
+    },
+    "src/agent/supercar/agent-loop.reconcile.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-04.log",
+      "sha256": "0749b1a1f0ec0f6229a015639b348b5b389d1e8d5aeb6dd1ed8b198f96d5dc58"
+    },
+    "src/agent/site-configs/registry.test.ts": {
+      "totalTests": 18,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-04.log",
+      "sha256": "0749b1a1f0ec0f6229a015639b348b5b389d1e8d5aeb6dd1ed8b198f96d5dc58"
+    },
+    "src/agent/suggestions-provider.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-04.log",
+      "sha256": "0749b1a1f0ec0f6229a015639b348b5b389d1e8d5aeb6dd1ed8b198f96d5dc58"
+    },
+    "src/agent/suggestions-generator.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-04.log",
+      "sha256": "0749b1a1f0ec0f6229a015639b348b5b389d1e8d5aeb6dd1ed8b198f96d5dc58"
+    },
+    "src/agent/smoke-plans.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-04.log",
+      "sha256": "0749b1a1f0ec0f6229a015639b348b5b389d1e8d5aeb6dd1ed8b198f96d5dc58"
+    },
+    "src/agent/supercar/agent-loop.takeover-replay.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-05.log",
+      "sha256": "0074dcf3604793c1b2aefda8726e2b2a6d1bcf2a72829551cd4db467c72293b2"
+    },
+    "src/agent/supercar/ctrip-hotel-extractor.test.ts": {
+      "totalTests": 49,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-05.log",
+      "sha256": "0074dcf3604793c1b2aefda8726e2b2a6d1bcf2a72829551cd4db467c72293b2"
+    },
+    "src/agent/supercar/browser-control.test.ts": {
+      "totalTests": 17,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-05.log",
+      "sha256": "0074dcf3604793c1b2aefda8726e2b2a6d1bcf2a72829551cd4db467c72293b2"
+    },
+    "src/agent/supercar/execution-router.test.ts": {
+      "totalTests": 147,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-05.log",
+      "sha256": "0074dcf3604793c1b2aefda8726e2b2a6d1bcf2a72829551cd4db467c72293b2"
+    },
+    "src/agent/supercar/browser-messages.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-05.log",
+      "sha256": "0074dcf3604793c1b2aefda8726e2b2a6d1bcf2a72829551cd4db467c72293b2"
+    },
+    "src/agent/supercar/ctrip-flight-extractor.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-05.log",
+      "sha256": "0074dcf3604793c1b2aefda8726e2b2a6d1bcf2a72829551cd4db467c72293b2"
+    },
+    "src/agent/supercar/browser-control-sessions.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-05.log",
+      "sha256": "0074dcf3604793c1b2aefda8726e2b2a6d1bcf2a72829551cd4db467c72293b2"
+    },
+    "src/agent/supercar/expert-workflows.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-05.log",
+      "sha256": "0074dcf3604793c1b2aefda8726e2b2a6d1bcf2a72829551cd4db467c72293b2"
+    },
+    "src/agent/supercar/browser-coordinates.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-05.log",
+      "sha256": "0074dcf3604793c1b2aefda8726e2b2a6d1bcf2a72829551cd4db467c72293b2"
+    },
+    "src/agent/supercar/agent-loop.veto-kind.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-05.log",
+      "sha256": "0074dcf3604793c1b2aefda8726e2b2a6d1bcf2a72829551cd4db467c72293b2"
+    },
+    "src/agent/supercar/prompt-layers.test.ts": {
+      "totalTests": 203,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-06.log",
+      "sha256": "1d172a9168e46c92fc3d5fca3092cc77785c3ed1f7e8b60686ccf3400ef005aa"
+    },
+    "src/agent/supercar/ota-user-browser-policy.test.ts": {
+      "totalTests": 37,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-06.log",
+      "sha256": "1d172a9168e46c92fc3d5fca3092cc77785c3ed1f7e8b60686ccf3400ef005aa"
+    },
+    "src/agent/supercar/ota-user-browser-runner.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-06.log",
+      "sha256": "1d172a9168e46c92fc3d5fca3092cc77785c3ed1f7e8b60686ccf3400ef005aa"
+    },
+    "src/agent/supercar/playbook-service.test.ts": {
+      "totalTests": 35,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-06.log",
+      "sha256": "1d172a9168e46c92fc3d5fca3092cc77785c3ed1f7e8b60686ccf3400ef005aa"
+    },
+    "src/agent/supercar/plan-service.test.ts": {
+      "totalTests": 16,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-06.log",
+      "sha256": "1d172a9168e46c92fc3d5fca3092cc77785c3ed1f7e8b60686ccf3400ef005aa"
+    },
+    "src/agent/supercar/plan-runner.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-06.log",
+      "sha256": "1d172a9168e46c92fc3d5fca3092cc77785c3ed1f7e8b60686ccf3400ef005aa"
+    },
+    "src/agent/supercar/prompt-layers.model-tier.test.ts": {
+      "totalTests": 16,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-06.log",
+      "sha256": "1d172a9168e46c92fc3d5fca3092cc77785c3ed1f7e8b60686ccf3400ef005aa"
+    },
+    "src/agent/supercar/recorded-browser-adapter.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-06.log",
+      "sha256": "1d172a9168e46c92fc3d5fca3092cc77785c3ed1f7e8b60686ccf3400ef005aa"
+    },
+    "src/agent/supercar/plan-provider.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-06.log",
+      "sha256": "1d172a9168e46c92fc3d5fca3092cc77785c3ed1f7e8b60686ccf3400ef005aa"
+    },
+    "src/agent/supercar/local-chrome-task-session.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-06.log",
+      "sha256": "1d172a9168e46c92fc3d5fca3092cc77785c3ed1f7e8b60686ccf3400ef005aa"
+    },
+    "src/agent/supercar/selected-chrome-runner.test.ts": {
+      "totalTests": 76,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-07.log",
+      "sha256": "427f70fa34dc34be1cf9e6c8acbb3d27bd5fc1fde822ba1e151a5bd613a6d41a"
+    },
+    "src/agent/task-controller.test.ts": {
+      "totalTests": 34,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-07.log",
+      "sha256": "427f70fa34dc34be1cf9e6c8acbb3d27bd5fc1fde822ba1e151a5bd613a6d41a"
+    },
+    "src/agent/supercar/selected-chrome-client.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-07.log",
+      "sha256": "427f70fa34dc34be1cf9e6c8acbb3d27bd5fc1fde822ba1e151a5bd613a6d41a"
+    },
+    "src/agent/task-maintenance.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-07.log",
+      "sha256": "427f70fa34dc34be1cf9e6c8acbb3d27bd5fc1fde822ba1e151a5bd613a6d41a"
+    },
+    "src/agent/task-failure-copy.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-07.log",
+      "sha256": "427f70fa34dc34be1cf9e6c8acbb3d27bd5fc1fde822ba1e151a5bd613a6d41a"
+    },
+    "src/agent/task-heartbeat.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-07.log",
+      "sha256": "427f70fa34dc34be1cf9e6c8acbb3d27bd5fc1fde822ba1e151a5bd613a6d41a"
+    },
+    "src/agent/supercar/system-prompt.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-07.log",
+      "sha256": "427f70fa34dc34be1cf9e6c8acbb3d27bd5fc1fde822ba1e151a5bd613a6d41a"
+    },
+    "src/agent/supercar/task-state-machine.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-07.log",
+      "sha256": "427f70fa34dc34be1cf9e6c8acbb3d27bd5fc1fde822ba1e151a5bd613a6d41a"
+    },
+    "src/agent/supercar/runtime-action-policy.test.ts": {
+      "totalTests": 20,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-07.log",
+      "sha256": "427f70fa34dc34be1cf9e6c8acbb3d27bd5fc1fde822ba1e151a5bd613a6d41a"
+    },
+    "src/agent/supercar/stats-service.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-07.log",
+      "sha256": "427f70fa34dc34be1cf9e6c8acbb3d27bd5fc1fde822ba1e151a5bd613a6d41a"
+    },
+    "src/agent/task-repository.test.ts": {
+      "totalTests": 102,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-08.log",
+      "sha256": "552db14c932d0522cfb48f628fc0f96bc9ca1490e89de0e585b756cc3ebef17d"
+    },
+    "src/agent/text-sanitizer.test.ts": {
+      "totalTests": 67,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-08.log",
+      "sha256": "552db14c932d0522cfb48f628fc0f96bc9ca1490e89de0e585b756cc3ebef17d"
+    },
+    "src/agent/template/template-fill-runner.test.ts": {
+      "totalTests": 22,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-08.log",
+      "sha256": "552db14c932d0522cfb48f628fc0f96bc9ca1490e89de0e585b756cc3ebef17d"
+    },
+    "src/agent/template/placeholder-schema.test.ts": {
+      "totalTests": 26,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-08.log",
+      "sha256": "552db14c932d0522cfb48f628fc0f96bc9ca1490e89de0e585b756cc3ebef17d"
+    },
+    "src/agent/template/template-safety.test.ts": {
+      "totalTests": 30,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-08.log",
+      "sha256": "552db14c932d0522cfb48f628fc0f96bc9ca1490e89de0e585b756cc3ebef17d"
+    },
+    "src/agent/template/xlsx-template-engine.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-08.log",
+      "sha256": "552db14c932d0522cfb48f628fc0f96bc9ca1490e89de0e585b756cc3ebef17d"
+    },
+    "src/agent/task-queue-persistence.test.ts": {
+      "totalTests": 54,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-08.log",
+      "sha256": "552db14c932d0522cfb48f628fc0f96bc9ca1490e89de0e585b756cc3ebef17d"
+    },
+    "src/agent/template/template-fill-e2e.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-08.log",
+      "sha256": "552db14c932d0522cfb48f628fc0f96bc9ca1490e89de0e585b756cc3ebef17d"
+    },
+    "src/agent/template/docx-template-engine.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-08.log",
+      "sha256": "552db14c932d0522cfb48f628fc0f96bc9ca1490e89de0e585b756cc3ebef17d"
+    },
+    "src/agent/template/derivation-check.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-08.log",
+      "sha256": "552db14c932d0522cfb48f628fc0f96bc9ca1490e89de0e585b756cc3ebef17d"
+    },
+    "src/agent/video/veo-client.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-09.log",
+      "sha256": "cd24e1a40d1e10cca05420403c543873d049fc0499073dde350cc0e32b1feac8"
+    },
+    "src/agent/video/ffmpeg-exec.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-09.log",
+      "sha256": "cd24e1a40d1e10cca05420403c543873d049fc0499073dde350cc0e32b1feac8"
+    },
+    "src/agent/video/fal-lipsync-client.test.ts": {
+      "totalTests": 17,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-09.log",
+      "sha256": "cd24e1a40d1e10cca05420403c543873d049fc0499073dde350cc0e32b1feac8"
+    },
+    "src/agent/url-resolver.test.ts": {
+      "totalTests": 25,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-09.log",
+      "sha256": "cd24e1a40d1e10cca05420403c543873d049fc0499073dde350cc0e32b1feac8"
+    },
+    "src/agent/video/qwen-voice-clone-client.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-09.log",
+      "sha256": "cd24e1a40d1e10cca05420403c543873d049fc0499073dde350cc0e32b1feac8"
+    },
+    "src/agent/tool-registry.test.ts": {
+      "totalTests": 102,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-09.log",
+      "sha256": "cd24e1a40d1e10cca05420403c543873d049fc0499073dde350cc0e32b1feac8"
+    },
+    "src/agent/video/timeline.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-09.log",
+      "sha256": "cd24e1a40d1e10cca05420403c543873d049fc0499073dde350cc0e32b1feac8"
+    },
+    "src/agent/video/gemini-tts-client.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-09.log",
+      "sha256": "cd24e1a40d1e10cca05420403c543873d049fc0499073dde350cc0e32b1feac8"
+    },
+    "src/agent/video/media-capability.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-09.log",
+      "sha256": "cd24e1a40d1e10cca05420403c543873d049fc0499073dde350cc0e32b1feac8"
+    },
+    "src/agent/video/video-access.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-09.log",
+      "sha256": "cd24e1a40d1e10cca05420403c543873d049fc0499073dde350cc0e32b1feac8"
+    },
+    "src/agent/video/video-lane-simple.test.ts": {
+      "totalTests": 41,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-10.log",
+      "sha256": "a55cd0f47edf7965fcccc44d87c6f8c5c06975d51d28686a04c38a68f375477c"
+    },
+    "src/agent/video/video-clone.test.ts": {
+      "totalTests": 15,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-10.log",
+      "sha256": "a55cd0f47edf7965fcccc44d87c6f8c5c06975d51d28686a04c38a68f375477c"
+    },
+    "src/agent/video/video-ip-lipsync.test.ts": {
+      "totalTests": 16,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-10.log",
+      "sha256": "a55cd0f47edf7965fcccc44d87c6f8c5c06975d51d28686a04c38a68f375477c"
+    },
+    "src/agent/video/video-confirm-meta.test.ts": {
+      "totalTests": 29,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-10.log",
+      "sha256": "a55cd0f47edf7965fcccc44d87c6f8c5c06975d51d28686a04c38a68f375477c"
+    },
+    "src/agent/video/video-confirm.test.ts": {
+      "totalTests": 29,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-10.log",
+      "sha256": "a55cd0f47edf7965fcccc44d87c6f8c5c06975d51d28686a04c38a68f375477c"
+    },
+    "src/agent/video/video-clone-compatibility.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-10.log",
+      "sha256": "a55cd0f47edf7965fcccc44d87c6f8c5c06975d51d28686a04c38a68f375477c"
+    },
+    "src/agent/video/video-compose.test.ts": {
+      "totalTests": 16,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-10.log",
+      "sha256": "a55cd0f47edf7965fcccc44d87c6f8c5c06975d51d28686a04c38a68f375477c"
+    },
+    "src/agent/video/video-av-sync-verifier.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-10.log",
+      "sha256": "a55cd0f47edf7965fcccc44d87c6f8c5c06975d51d28686a04c38a68f375477c"
+    },
+    "src/agent/video/video-http.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-10.log",
+      "sha256": "a55cd0f47edf7965fcccc44d87c6f8c5c06975d51d28686a04c38a68f375477c"
+    },
+    "src/agent/video/video-clone-reference.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-10.log",
+      "sha256": "a55cd0f47edf7965fcccc44d87c6f8c5c06975d51d28686a04c38a68f375477c"
+    },
+    "src/agent/video/video-quality-verifier.test.ts": {
+      "totalTests": 24,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-11.log",
+      "sha256": "61879a2867c2537feeb92a88bd37a5130604934a69df99baee7a367287bb0e93"
+    },
+    "src/agent/video/video-script.test.ts": {
+      "totalTests": 27,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-11.log",
+      "sha256": "61879a2867c2537feeb92a88bd37a5130604934a69df99baee7a367287bb0e93"
+    },
+    "src/agent/video/wanxiang-client.test.ts": {
+      "totalTests": 18,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-11.log",
+      "sha256": "61879a2867c2537feeb92a88bd37a5130604934a69df99baee7a367287bb0e93"
+    },
+    "src/agent/video/video-pet-i2v.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-11.log",
+      "sha256": "61879a2867c2537feeb92a88bd37a5130604934a69df99baee7a367287bb0e93"
+    },
+    "src/agent/vision-loop/actions.test.ts": {
+      "totalTests": 22,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-11.log",
+      "sha256": "61879a2867c2537feeb92a88bd37a5130604934a69df99baee7a367287bb0e93"
+    },
+    "src/agent/video/video-pipeline.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-11.log",
+      "sha256": "61879a2867c2537feeb92a88bd37a5130604934a69df99baee7a367287bb0e93"
+    },
+    "src/agent/video/video-lane.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-11.log",
+      "sha256": "61879a2867c2537feeb92a88bd37a5130604934a69df99baee7a367287bb0e93"
+    },
+    "src/agent/vision-loop/actions-a11y.test.ts": {
+      "totalTests": 19,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-11.log",
+      "sha256": "61879a2867c2537feeb92a88bd37a5130604934a69df99baee7a367287bb0e93"
+    },
+    "src/agent/video/wan-animate-mix-client.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-11.log",
+      "sha256": "61879a2867c2537feeb92a88bd37a5130604934a69df99baee7a367287bb0e93"
+    },
+    "src/agent/video/video-poster.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-11.log",
+      "sha256": "61879a2867c2537feeb92a88bd37a5130604934a69df99baee7a367287bb0e93"
+    },
+    "src/agent/vision-loop/browser-route-events.test.ts": {
+      "totalTests": 50,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-12.log",
+      "sha256": "ef076c10bdfadfdc2067531c0151e565292fdbf5b4e6e3602b1e74f5861777ce"
+    },
+    "src/agent/vision-loop/commander.test.ts": {
+      "totalTests": 29,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-12.log",
+      "sha256": "ef076c10bdfadfdc2067531c0151e565292fdbf5b4e6e3602b1e74f5861777ce"
+    },
+    "src/agent/vision-loop/browser-close-receipt.test.ts": {
+      "totalTests": 34,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-12.log",
+      "sha256": "ef076c10bdfadfdc2067531c0151e565292fdbf5b4e6e3602b1e74f5861777ce"
+    },
+    "src/agent/vision-loop/degradation-chain.test.ts": {
+      "totalTests": 17,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-12.log",
+      "sha256": "ef076c10bdfadfdc2067531c0151e565292fdbf5b4e6e3602b1e74f5861777ce"
+    },
+    "src/agent/vision-loop/humanize.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-12.log",
+      "sha256": "ef076c10bdfadfdc2067531c0151e565292fdbf5b4e6e3602b1e74f5861777ce"
+    },
+    "src/agent/vision-loop/image.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-12.log",
+      "sha256": "ef076c10bdfadfdc2067531c0151e565292fdbf5b4e6e3602b1e74f5861777ce"
+    },
+    "src/agent/vision-loop/browser-operation.settlement.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-12.log",
+      "sha256": "ef076c10bdfadfdc2067531c0151e565292fdbf5b4e6e3602b1e74f5861777ce"
+    },
+    "src/agent/vision-loop/anti-bot-detector.test.ts": {
+      "totalTests": 31,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-12.log",
+      "sha256": "ef076c10bdfadfdc2067531c0151e565292fdbf5b4e6e3602b1e74f5861777ce"
+    },
+    "src/agent/vision-loop/domain/classifier.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-12.log",
+      "sha256": "ef076c10bdfadfdc2067531c0151e565292fdbf5b4e6e3602b1e74f5861777ce"
+    },
+    "src/agent/vision-loop/domain/enricher.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-12.log",
+      "sha256": "ef076c10bdfadfdc2067531c0151e565292fdbf5b4e6e3602b1e74f5861777ce"
+    },
+    "src/agent/vision-loop/playwright-executor.test.ts": {
+      "totalTests": 47,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-13.log",
+      "sha256": "4d4d40a1611a03ae1eb17b8ea8e7d662cef5ac4d8217b5590752ad0874f419ba"
+    },
+    "src/agent/vision-loop/playwright-executor.context-resource.test.ts": {
+      "totalTests": 37,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-13.log",
+      "sha256": "4d4d40a1611a03ae1eb17b8ea8e7d662cef5ac4d8217b5590752ad0874f419ba"
+    },
+    "src/agent/vision-loop/playwright-executor.cdp-resource.test.ts": {
+      "totalTests": 27,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-13.log",
+      "sha256": "4d4d40a1611a03ae1eb17b8ea8e7d662cef5ac4d8217b5590752ad0874f419ba"
+    },
+    "src/agent/vision-loop/playwright-executor.drain.test.ts": {
+      "totalTests": 46,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-13.log",
+      "sha256": "4d4d40a1611a03ae1eb17b8ea8e7d662cef5ac4d8217b5590752ad0874f419ba"
+    },
+    "src/agent/vision-loop/playwright-executor.request-lifecycle.test.ts": {
+      "totalTests": 33,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-13.log",
+      "sha256": "4d4d40a1611a03ae1eb17b8ea8e7d662cef5ac4d8217b5590752ad0874f419ba"
+    },
+    "src/agent/vision-loop/playwright-executor.managed-resource.test.ts": {
+      "totalTests": 22,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-13.log",
+      "sha256": "4d4d40a1611a03ae1eb17b8ea8e7d662cef5ac4d8217b5590752ad0874f419ba"
+    },
+    "src/agent/vision-loop/playwright-executor.cdp-auth.test.ts": {
+      "totalTests": 10,
+      "skipped": 1,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-13.log",
+      "sha256": "4d4d40a1611a03ae1eb17b8ea8e7d662cef5ac4d8217b5590752ad0874f419ba"
+    },
+    "src/agent/vision-loop/playwright-executor.connection-drain.test.ts": {
+      "totalTests": 40,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-13.log",
+      "sha256": "4d4d40a1611a03ae1eb17b8ea8e7d662cef5ac4d8217b5590752ad0874f419ba"
+    },
+    "src/agent/vision-loop/page-understanding.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-13.log",
+      "sha256": "4d4d40a1611a03ae1eb17b8ea8e7d662cef5ac4d8217b5590752ad0874f419ba"
+    },
+    "src/agent/vision-loop/playwright-executor.clean-context.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-13.log",
+      "sha256": "4d4d40a1611a03ae1eb17b8ea8e7d662cef5ac4d8217b5590752ad0874f419ba"
+    },
+    "src/api-keys/webhook-handler.test.ts": {
+      "totalTests": 38,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-14.log",
+      "sha256": "38fd61110822e03cdcb44b70200e4dae75791c8a45e9b8f0736cd777a14f60dc"
+    },
+    "src/agent/vision-loop/task-runner.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-14.log",
+      "sha256": "38fd61110822e03cdcb44b70200e4dae75791c8a45e9b8f0736cd777a14f60dc"
+    },
+    "src/api-keys/webhook-handler-drain.test.ts": {
+      "totalTests": 41,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-14.log",
+      "sha256": "38fd61110822e03cdcb44b70200e4dae75791c8a45e9b8f0736cd777a14f60dc"
+    },
+    "src/agent/vision-loop/runner.test.ts": {
+      "totalTests": 17,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-14.log",
+      "sha256": "38fd61110822e03cdcb44b70200e4dae75791c8a45e9b8f0736cd777a14f60dc"
+    },
+    "src/agent/vision-outcome-persistence.test.ts": {
+      "totalTests": 46,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-14.log",
+      "sha256": "38fd61110822e03cdcb44b70200e4dae75791c8a45e9b8f0736cd777a14f60dc"
+    },
+    "src/agent/vision-loop/stealth-scripts.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-14.log",
+      "sha256": "38fd61110822e03cdcb44b70200e4dae75791c8a45e9b8f0736cd777a14f60dc"
+    },
+    "src/agent/vision-loop/vision-mode.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-14.log",
+      "sha256": "38fd61110822e03cdcb44b70200e4dae75791c8a45e9b8f0736cd777a14f60dc"
+    },
+    "src/agent/vision-loop/task-queue.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-14.log",
+      "sha256": "38fd61110822e03cdcb44b70200e4dae75791c8a45e9b8f0736cd777a14f60dc"
+    },
+    "src/api-keys/api-key-service.test.ts": {
+      "totalTests": 19,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-14.log",
+      "sha256": "38fd61110822e03cdcb44b70200e4dae75791c8a45e9b8f0736cd777a14f60dc"
+    },
+    "src/agent/vision-loop/retry.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-14.log",
+      "sha256": "38fd61110822e03cdcb44b70200e4dae75791c8a45e9b8f0736cd777a14f60dc"
+    },
+    "src/astrology/service.test.ts": {
+      "totalTests": 31,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-15.log",
+      "sha256": "5d9b62369aea09c27d8c71fa9df49befe5213172fd31d2259a8864066967b07b"
+    },
+    "src/api-keys/webhook-idempotency-service.test.ts": {
+      "totalTests": 25,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-15.log",
+      "sha256": "5d9b62369aea09c27d8c71fa9df49befe5213172fd31d2259a8864066967b07b"
+    },
+    "src/application-main.wiring.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-15.log",
+      "sha256": "5d9b62369aea09c27d8c71fa9df49befe5213172fd31d2259a8864066967b07b"
+    },
+    "src/auth/browser-proxy-session-revalidation.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-15.log",
+      "sha256": "5d9b62369aea09c27d8c71fa9df49befe5213172fd31d2259a8864066967b07b"
+    },
+    "src/auth/email-code.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-15.log",
+      "sha256": "5d9b62369aea09c27d8c71fa9df49befe5213172fd31d2259a8864066967b07b"
+    },
+    "src/application-entry.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-15.log",
+      "sha256": "5d9b62369aea09c27d8c71fa9df49befe5213172fd31d2259a8864066967b07b"
+    },
+    "src/auth/jwt.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-15.log",
+      "sha256": "5d9b62369aea09c27d8c71fa9df49befe5213172fd31d2259a8864066967b07b"
+    },
+    "src/auth/mfa-service.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-15.log",
+      "sha256": "5d9b62369aea09c27d8c71fa9df49befe5213172fd31d2259a8864066967b07b"
+    },
+    "src/auth/mfa.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-15.log",
+      "sha256": "5d9b62369aea09c27d8c71fa9df49befe5213172fd31d2259a8864066967b07b"
+    },
+    "src/astrology/divine-api-contract.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-15.log",
+      "sha256": "5d9b62369aea09c27d8c71fa9df49befe5213172fd31d2259a8864066967b07b"
+    },
+    "src/auth/service.test.ts": {
+      "totalTests": 56,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-16.log",
+      "sha256": "66767aaeb20d788690277b523f617ceab9e8e7e0ae1cd17ab9d3e777c51a38e7"
+    },
+    "src/auth/middleware.test.ts": {
+      "totalTests": 16,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-16.log",
+      "sha256": "66767aaeb20d788690277b523f617ceab9e8e7e0ae1cd17ab9d3e777c51a38e7"
+    },
+    "src/auth/middleware-drain.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-16.log",
+      "sha256": "66767aaeb20d788690277b523f617ceab9e8e7e0ae1cd17ab9d3e777c51a38e7"
+    },
+    "src/browsing-history/service.test.ts": {
+      "totalTests": 21,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-16.log",
+      "sha256": "66767aaeb20d788690277b523f617ceab9e8e7e0ae1cd17ab9d3e777c51a38e7"
+    },
+    "src/config/env.qwen-region.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-16.log",
+      "sha256": "66767aaeb20d788690277b523f617ceab9e8e7e0ae1cd17ab9d3e777c51a38e7"
+    },
+    "src/config/env.account-closure.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-16.log",
+      "sha256": "66767aaeb20d788690277b523f617ceab9e8e7e0ae1cd17ab9d3e777c51a38e7"
+    },
+    "src/config/env.energy-analytics.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-16.log",
+      "sha256": "66767aaeb20d788690277b523f617ceab9e8e7e0ae1cd17ab9d3e777c51a38e7"
+    },
+    "src/config/env.video-editing.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-16.log",
+      "sha256": "66767aaeb20d788690277b523f617ceab9e8e7e0ae1cd17ab9d3e777c51a38e7"
+    },
+    "src/config/env.public-origin.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-16.log",
+      "sha256": "66767aaeb20d788690277b523f617ceab9e8e7e0ae1cd17ab9d3e777c51a38e7"
+    },
+    "src/auth/password.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-16.log",
+      "sha256": "66767aaeb20d788690277b523f617ceab9e8e7e0ae1cd17ab9d3e777c51a38e7"
+    },
+    "src/data-governance/audit.test.ts": {
+      "totalTests": 67,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-17.log",
+      "sha256": "fc1ae79dbc7e853b0dd580b3a31758c501aec7375d8e44de98d2823c5b0f2d50"
+    },
+    "src/cookies/sync-service.drain.test.ts": {
+      "totalTests": 55,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-17.log",
+      "sha256": "fc1ae79dbc7e853b0dd580b3a31758c501aec7375d8e44de98d2823c5b0f2d50"
+    },
+    "src/data-governance/lifecycle-registry.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-17.log",
+      "sha256": "fc1ae79dbc7e853b0dd580b3a31758c501aec7375d8e44de98d2823c5b0f2d50"
+    },
+    "src/cookies/cookie-crypto.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-17.log",
+      "sha256": "fc1ae79dbc7e853b0dd580b3a31758c501aec7375d8e44de98d2823c5b0f2d50"
+    },
+    "src/config/logger.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-17.log",
+      "sha256": "fc1ae79dbc7e853b0dd580b3a31758c501aec7375d8e44de98d2823c5b0f2d50"
+    },
+    "src/data-governance/processors.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-17.log",
+      "sha256": "fc1ae79dbc7e853b0dd580b3a31758c501aec7375d8e44de98d2823c5b0f2d50"
+    },
+    "src/cookies/sync-service.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-17.log",
+      "sha256": "fc1ae79dbc7e853b0dd580b3a31758c501aec7375d8e44de98d2823c5b0f2d50"
+    },
+    "src/db/schema/team-project-workspace.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-18.log",
+      "sha256": "5067ec57dfba210e72560a772ce2db94f2561572a9015b6d94c13dc83c3a0ebb"
+    },
+    "src/db/schema/energy-analytics.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-18.log",
+      "sha256": "5067ec57dfba210e72560a772ce2db94f2561572a9015b6d94c13dc83c3a0ebb"
+    },
+    "src/db/mysql-result.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-18.log",
+      "sha256": "5067ec57dfba210e72560a772ce2db94f2561572a9015b6d94c13dc83c3a0ebb"
+    },
+    "src/data-governance/task-execution-export.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-18.log",
+      "sha256": "5067ec57dfba210e72560a772ce2db94f2561572a9015b6d94c13dc83c3a0ebb"
+    },
+    "src/db/schema/stock-preferences.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-18.log",
+      "sha256": "5067ec57dfba210e72560a772ce2db94f2561572a9015b6d94c13dc83c3a0ebb"
+    },
+    "src/db/schema/stock-risk-monitors.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-18.log",
+      "sha256": "5067ec57dfba210e72560a772ce2db94f2561572a9015b6d94c13dc83c3a0ebb"
+    },
+    "src/db/schema/planned-tasks.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-18.log",
+      "sha256": "5067ec57dfba210e72560a772ce2db94f2561572a9015b6d94c13dc83c3a0ebb"
+    },
+    "src/db/schema/model-data-regions.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-18.log",
+      "sha256": "5067ec57dfba210e72560a772ce2db94f2561572a9015b6d94c13dc83c3a0ebb"
+    },
+    "src/db/schema/team-work-item-reviews.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-18.log",
+      "sha256": "5067ec57dfba210e72560a772ce2db94f2561572a9015b6d94c13dc83c3a0ebb"
+    },
+    "src/db/schema/stock-task-source-context.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-18.log",
+      "sha256": "5067ec57dfba210e72560a772ce2db94f2561572a9015b6d94c13dc83c3a0ebb"
+    },
+    "src/energy/analytics-write-service.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-19.log",
+      "sha256": "d5093c6458b1c7e7cae3c5dd6682e2abbbe9f2264e22760815115551a0f83b0d"
+    },
+    "src/energy/analytics-bucket.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-19.log",
+      "sha256": "d5093c6458b1c7e7cae3c5dd6682e2abbbe9f2264e22760815115551a0f83b0d"
+    },
+    "src/energy/analytics-cleanup.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-19.log",
+      "sha256": "d5093c6458b1c7e7cae3c5dd6682e2abbbe9f2264e22760815115551a0f83b0d"
+    },
+    "src/eval/trusted-eval-suites.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-19.log",
+      "sha256": "d5093c6458b1c7e7cae3c5dd6682e2abbbe9f2264e22760815115551a0f83b0d"
+    },
+    "src/energy/analytics-metrics-service.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-19.log",
+      "sha256": "d5093c6458b1c7e7cae3c5dd6682e2abbbe9f2264e22760815115551a0f83b0d"
+    },
+    "src/db/schema/video-editing.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-19.log",
+      "sha256": "d5093c6458b1c7e7cae3c5dd6682e2abbbe9f2264e22760815115551a0f83b0d"
+    },
+    "src/eval/eval-expectations.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-19.log",
+      "sha256": "d5093c6458b1c7e7cae3c5dd6682e2abbbe9f2264e22760815115551a0f83b0d"
+    },
+    "src/eval/eval-acceptance-snapshot.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-19.log",
+      "sha256": "d5093c6458b1c7e7cae3c5dd6682e2abbbe9f2264e22760815115551a0f83b0d"
+    },
+    "src/eval/release-gate-suite.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-19.log",
+      "sha256": "d5093c6458b1c7e7cae3c5dd6682e2abbbe9f2264e22760815115551a0f83b0d"
+    },
+    "src/energy/catalog.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-19.log",
+      "sha256": "d5093c6458b1c7e7cae3c5dd6682e2abbbe9f2264e22760815115551a0f83b0d"
+    },
+    "src/execution/answer-verifier.test.ts": {
+      "totalTests": 70,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-20.log",
+      "sha256": "570d21bc854aba7022093111322a96c74c1423e2650cf05fb47c366190371870"
+    },
+    "src/execution/auto-fix.test.ts": {
+      "totalTests": 24,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-20.log",
+      "sha256": "570d21bc854aba7022093111322a96c74c1423e2650cf05fb47c366190371870"
+    },
+    "src/evidence/pack-b-services.test.ts": {
+      "totalTests": 16,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-20.log",
+      "sha256": "570d21bc854aba7022093111322a96c74c1423e2650cf05fb47c366190371870"
+    },
+    "src/execution/application-boot.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-20.log",
+      "sha256": "570d21bc854aba7022093111322a96c74c1423e2650cf05fb47c366190371870"
+    },
+    "src/execution/cleanup-drain.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-20.log",
+      "sha256": "570d21bc854aba7022093111322a96c74c1423e2650cf05fb47c366190371870"
+    },
+    "src/execution/core-execution-pipeline.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-20.log",
+      "sha256": "570d21bc854aba7022093111322a96c74c1423e2650cf05fb47c366190371870"
+    },
+    "src/evidence/evidence-repositories.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-20.log",
+      "sha256": "570d21bc854aba7022093111322a96c74c1423e2650cf05fb47c366190371870"
+    },
+    "src/execution/core-execution-registry.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-20.log",
+      "sha256": "570d21bc854aba7022093111322a96c74c1423e2650cf05fb47c366190371870"
+    },
+    "src/evidence/r2-keys.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-20.log",
+      "sha256": "570d21bc854aba7022093111322a96c74c1423e2650cf05fb47c366190371870"
+    },
+    "src/execution/auxiliary-database.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-20.log",
+      "sha256": "570d21bc854aba7022093111322a96c74c1423e2650cf05fb47c366190371870"
+    },
+    "src/execution/drain-controller.test.ts": {
+      "totalTests": 52,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-21.log",
+      "sha256": "dc0d3b0bb2cc973fabea571ce2219f010dd18216784c763c3e8d289a220f8f4c"
+    },
+    "src/execution/core-generation-review.test.ts": {
+      "totalTests": 19,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-21.log",
+      "sha256": "dc0d3b0bb2cc973fabea571ce2219f010dd18216784c763c3e8d289a220f8f4c"
+    },
+    "src/execution/core-intermediate-review.test.ts": {
+      "totalTests": 28,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-21.log",
+      "sha256": "dc0d3b0bb2cc973fabea571ce2219f010dd18216784c763c3e8d289a220f8f4c"
+    },
+    "src/execution/execution-contract.test.ts": {
+      "totalTests": 37,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-21.log",
+      "sha256": "dc0d3b0bb2cc973fabea571ce2219f010dd18216784c763c3e8d289a220f8f4c"
+    },
+    "src/execution/drain-state-store.test.ts": {
+      "totalTests": 40,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-21.log",
+      "sha256": "dc0d3b0bb2cc973fabea571ce2219f010dd18216784c763c3e8d289a220f8f4c"
+    },
+    "src/execution/drain-control-server.test.ts": {
+      "totalTests": 18,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-21.log",
+      "sha256": "dc0d3b0bb2cc973fabea571ce2219f010dd18216784c763c3e8d289a220f8f4c"
+    },
+    "src/execution/execution-drain.test.ts": {
+      "totalTests": 20,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-21.log",
+      "sha256": "dc0d3b0bb2cc973fabea571ce2219f010dd18216784c763c3e8d289a220f8f4c"
+    },
+    "src/execution/evidence-ledger.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-21.log",
+      "sha256": "dc0d3b0bb2cc973fabea571ce2219f010dd18216784c763c3e8d289a220f8f4c"
+    },
+    "src/execution/deterministic-answer.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-21.log",
+      "sha256": "dc0d3b0bb2cc973fabea571ce2219f010dd18216784c763c3e8d289a220f8f4c"
+    },
+    "src/execution/execution-contract-output-scope.test.ts": {
+      "totalTests": 29,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-21.log",
+      "sha256": "dc0d3b0bb2cc973fabea571ce2219f010dd18216784c763c3e8d289a220f8f4c"
+    },
+    "src/execution/execution-pipeline.test.ts": {
+      "totalTests": 60,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-22.log",
+      "sha256": "bd855216a662488206d09a32b266d45e04baf6236537d7b85d3aa409b7f6a9ba"
+    },
+    "src/execution/file-artifact-consistency.test.ts": {
+      "totalTests": 37,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-22.log",
+      "sha256": "bd855216a662488206d09a32b266d45e04baf6236537d7b85d3aa409b7f6a9ba"
+    },
+    "src/execution/expert-workflow-registry.test.ts": {
+      "totalTests": 30,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-22.log",
+      "sha256": "bd855216a662488206d09a32b266d45e04baf6236537d7b85d3aa409b7f6a9ba"
+    },
+    "src/execution/expert-workflow-parser.test.ts": {
+      "totalTests": 25,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-22.log",
+      "sha256": "bd855216a662488206d09a32b266d45e04baf6236537d7b85d3aa409b7f6a9ba"
+    },
+    "src/execution/expert-workflow-ecom-daily.test.ts": {
+      "totalTests": 19,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-22.log",
+      "sha256": "bd855216a662488206d09a32b266d45e04baf6236537d7b85d3aa409b7f6a9ba"
+    },
+    "src/execution/expert-workflow-content-topic.test.ts": {
+      "totalTests": 19,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-22.log",
+      "sha256": "bd855216a662488206d09a32b266d45e04baf6236537d7b85d3aa409b7f6a9ba"
+    },
+    "src/execution/expert-workflow-douyin.test.ts": {
+      "totalTests": 25,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-22.log",
+      "sha256": "bd855216a662488206d09a32b266d45e04baf6236537d7b85d3aa409b7f6a9ba"
+    },
+    "src/execution/expert-workflow-intake.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-22.log",
+      "sha256": "bd855216a662488206d09a32b266d45e04baf6236537d7b85d3aa409b7f6a9ba"
+    },
+    "src/execution/expert-workflow-prompt.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-22.log",
+      "sha256": "bd855216a662488206d09a32b266d45e04baf6236537d7b85d3aa409b7f6a9ba"
+    },
+    "src/execution/general-task-intake.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-22.log",
+      "sha256": "bd855216a662488206d09a32b266d45e04baf6236537d7b85d3aa409b7f6a9ba"
+    },
+    "src/execution/http-drain.test.ts": {
+      "totalTests": 26,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-23.log",
+      "sha256": "59b8f3a785c600cc854ecc79b20b318d611ab2cfd92b6125480f5b003480d74e"
+    },
+    "src/execution/llm-verifier.test.ts": {
+      "totalTests": 19,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-23.log",
+      "sha256": "59b8f3a785c600cc854ecc79b20b318d611ab2cfd92b6125480f5b003480d74e"
+    },
+    "src/execution/generate-outcome-review.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-23.log",
+      "sha256": "59b8f3a785c600cc854ecc79b20b318d611ab2cfd92b6125480f5b003480d74e"
+    },
+    "src/execution/ordinary-maintenance-entry.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-23.log",
+      "sha256": "59b8f3a785c600cc854ecc79b20b318d611ab2cfd92b6125480f5b003480d74e"
+    },
+    "src/execution/ordinary-maintenance-control.test.ts": {
+      "totalTests": 15,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-23.log",
+      "sha256": "59b8f3a785c600cc854ecc79b20b318d611ab2cfd92b6125480f5b003480d74e"
+    },
+    "src/execution/lightweight-task.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-23.log",
+      "sha256": "59b8f3a785c600cc854ecc79b20b318d611ab2cfd92b6125480f5b003480d74e"
+    },
+    "src/execution/ordinary-application.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-23.log",
+      "sha256": "59b8f3a785c600cc854ecc79b20b318d611ab2cfd92b6125480f5b003480d74e"
+    },
+    "src/execution/ordinary-maintenance-mode.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-23.log",
+      "sha256": "59b8f3a785c600cc854ecc79b20b318d611ab2cfd92b6125480f5b003480d74e"
+    },
+    "src/execution/ordinary-maintenance-background.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-23.log",
+      "sha256": "59b8f3a785c600cc854ecc79b20b318d611ab2cfd92b6125480f5b003480d74e"
+    },
+    "src/execution/http-listener.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-23.log",
+      "sha256": "59b8f3a785c600cc854ecc79b20b318d611ab2cfd92b6125480f5b003480d74e"
+    },
+    "src/execution/ordinary-maintenance-services.test.ts": {
+      "totalTests": 45,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-24.log",
+      "sha256": "ad1687ecf7d1ca5e3ba2e5eab3d5397b19dc0f7555a87474c26850a0c15f6a14"
+    },
+    "src/execution/ordinary-maintenance.test.ts": {
+      "totalTests": 26,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-24.log",
+      "sha256": "ad1687ecf7d1ca5e3ba2e5eab3d5397b19dc0f7555a87474c26850a0c15f6a14"
+    },
+    "src/execution/owned-operation.test.ts": {
+      "totalTests": 16,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-24.log",
+      "sha256": "ad1687ecf7d1ca5e3ba2e5eab3d5397b19dc0f7555a87474c26850a0c15f6a14"
+    },
+    "src/execution/task-verification-context.test.ts": {
+      "totalTests": 27,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-24.log",
+      "sha256": "ad1687ecf7d1ca5e3ba2e5eab3d5397b19dc0f7555a87474c26850a0c15f6a14"
+    },
+    "src/execution/ordinary-maintenance-store.test.ts": {
+      "totalTests": 15,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-24.log",
+      "sha256": "ad1687ecf7d1ca5e3ba2e5eab3d5397b19dc0f7555a87474c26850a0c15f6a14"
+    },
+    "src/execution/source-domain-consistency.test.ts": {
+      "totalTests": 15,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-24.log",
+      "sha256": "ad1687ecf7d1ca5e3ba2e5eab3d5397b19dc0f7555a87474c26850a0c15f6a14"
+    },
+    "src/execution/poller-stop.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-24.log",
+      "sha256": "ad1687ecf7d1ca5e3ba2e5eab3d5397b19dc0f7555a87474c26850a0c15f6a14"
+    },
+    "src/execution/ordinary-maintenance-readiness.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-24.log",
+      "sha256": "ad1687ecf7d1ca5e3ba2e5eab3d5397b19dc0f7555a87474c26850a0c15f6a14"
+    },
+    "src/execution/template-fill-consistency.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-24.log",
+      "sha256": "ad1687ecf7d1ca5e3ba2e5eab3d5397b19dc0f7555a87474c26850a0c15f6a14"
+    },
+    "src/execution/search-source-references.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-24.log",
+      "sha256": "ad1687ecf7d1ca5e3ba2e5eab3d5397b19dc0f7555a87474c26850a0c15f6a14"
+    },
+    "src/files/storage-provider.test.ts": {
+      "totalTests": 17,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-25.log",
+      "sha256": "92033efc816ead8af6731f3e5674ce1428430b7ff7b286c5fb56520c494fb746"
+    },
+    "src/files/output-file-ttl.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-25.log",
+      "sha256": "92033efc816ead8af6731f3e5674ce1428430b7ff7b286c5fb56520c494fb746"
+    },
+    "src/files/file-service-account-closure.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-25.log",
+      "sha256": "92033efc816ead8af6731f3e5674ce1428430b7ff7b286c5fb56520c494fb746"
+    },
+    "src/files/presigned-upload.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-25.log",
+      "sha256": "92033efc816ead8af6731f3e5674ce1428430b7ff7b286c5fb56520c494fb746"
+    },
+    "src/files/download-manager.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-25.log",
+      "sha256": "92033efc816ead8af6731f3e5674ce1428430b7ff7b286c5fb56520c494fb746"
+    },
+    "src/files/file-service-storage-integration.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-25.log",
+      "sha256": "92033efc816ead8af6731f3e5674ce1428430b7ff7b286c5fb56520c494fb746"
+    },
+    "src/files/parsers.core.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-25.log",
+      "sha256": "92033efc816ead8af6731f3e5674ce1428430b7ff7b286c5fb56520c494fb746"
+    },
+    "src/files/client-video-output.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-25.log",
+      "sha256": "92033efc816ead8af6731f3e5674ce1428430b7ff7b286c5fb56520c494fb746"
+    },
+    "src/files/file-service-library.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-25.log",
+      "sha256": "92033efc816ead8af6731f3e5674ce1428430b7ff7b286c5fb56520c494fb746"
+    },
+    "src/execution/verification-input-budget.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-25.log",
+      "sha256": "92033efc816ead8af6731f3e5674ce1428430b7ff7b286c5fb56520c494fb746"
+    },
+    "src/llm/messages-adapter.test.ts": {
+      "totalTests": 21,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-26.log",
+      "sha256": "0ae715497787c62be0cfefec2c6127e1e63785bdf192754446d53a96f2913a66"
+    },
+    "src/files/upload-allowlist.test.ts": {
+      "totalTests": 34,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-26.log",
+      "sha256": "0ae715497787c62be0cfefec2c6127e1e63785bdf192754446d53a96f2913a66"
+    },
+    "src/http.payment.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-26.log",
+      "sha256": "0ae715497787c62be0cfefec2c6127e1e63785bdf192754446d53a96f2913a66"
+    },
+    "src/llm/core-model-runtime.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-26.log",
+      "sha256": "0ae715497787c62be0cfefec2c6127e1e63785bdf192754446d53a96f2913a66"
+    },
+    "src/llm/model-data-region-assignment.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-26.log",
+      "sha256": "0ae715497787c62be0cfefec2c6127e1e63785bdf192754446d53a96f2913a66"
+    },
+    "src/firecrawl/firecrawl-lane.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-26.log",
+      "sha256": "0ae715497787c62be0cfefec2c6127e1e63785bdf192754446d53a96f2913a66"
+    },
+    "src/files/writers.test.ts": {
+      "totalTests": 24,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-26.log",
+      "sha256": "0ae715497787c62be0cfefec2c6127e1e63785bdf192754446d53a96f2913a66"
+    },
+    "src/http.execution-drain-wiring.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-26.log",
+      "sha256": "0ae715497787c62be0cfefec2c6127e1e63785bdf192754446d53a96f2913a66"
+    },
+    "src/http.account-closure.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-26.log",
+      "sha256": "0ae715497787c62be0cfefec2c6127e1e63785bdf192754446d53a96f2913a66"
+    },
+    "src/llm/core-model-observation.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-26.log",
+      "sha256": "0ae715497787c62be0cfefec2c6127e1e63785bdf192754446d53a96f2913a66"
+    },
+    "src/llm/model-transport-drain.test.ts": {
+      "totalTests": 23,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-27.log",
+      "sha256": "ec0e4f14c2c2b2223098b0b5f2883b3c744cc060e8af7373ff3fcecda2344db4"
+    },
+    "src/llm/responses-adapter.test.ts": {
+      "totalTests": 17,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-27.log",
+      "sha256": "ec0e4f14c2c2b2223098b0b5f2883b3c744cc060e8af7373ff3fcecda2344db4"
+    },
+    "src/notifications/notification-service.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-27.log",
+      "sha256": "ec0e4f14c2c2b2223098b0b5f2883b3c744cc060e8af7373ff3fcecda2344db4"
+    },
+    "src/llm/qwen-route.test.ts": {
+      "totalTests": 33,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-27.log",
+      "sha256": "ec0e4f14c2c2b2223098b0b5f2883b3c744cc060e8af7373ff3fcecda2344db4"
+    },
+    "src/llm/qwen-messages-transport.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-27.log",
+      "sha256": "ec0e4f14c2c2b2223098b0b5f2883b3c744cc060e8af7373ff3fcecda2344db4"
+    },
+    "src/llm/qwen-shadow-evaluator.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-27.log",
+      "sha256": "ec0e4f14c2c2b2223098b0b5f2883b3c744cc060e8af7373ff3fcecda2344db4"
+    },
+    "src/llm/model-runtime-wiring.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-27.log",
+      "sha256": "ec0e4f14c2c2b2223098b0b5f2883b3c744cc060e8af7373ff3fcecda2344db4"
+    },
+    "src/llm/model-runtime-policy.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-27.log",
+      "sha256": "ec0e4f14c2c2b2223098b0b5f2883b3c744cc060e8af7373ff3fcecda2344db4"
+    },
+    "src/llm/model-operation.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-27.log",
+      "sha256": "ec0e4f14c2c2b2223098b0b5f2883b3c744cc060e8af7373ff3fcecda2344db4"
+    },
+    "src/llm/model-data-region.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-27.log",
+      "sha256": "ec0e4f14c2c2b2223098b0b5f2883b3c744cc060e8af7373ff3fcecda2344db4"
+    },
+    "src/organizations/organization-service.test.ts": {
+      "totalTests": 33,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-28.log",
+      "sha256": "3f6a8d6d7ae846e316b4726895a6ef57cc74bb7d7f7e54b3788536452a9ff4dc"
+    },
+    "src/partner/allocation-service.test.ts": {
+      "totalTests": 20,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-28.log",
+      "sha256": "3f6a8d6d7ae846e316b4726895a6ef57cc74bb7d7f7e54b3788536452a9ff4dc"
+    },
+    "src/organizations/organization-invitation-service.test.ts": {
+      "totalTests": 31,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-28.log",
+      "sha256": "3f6a8d6d7ae846e316b4726895a6ef57cc74bb7d7f7e54b3788536452a9ff4dc"
+    },
+    "src/organizations/organization-permissions.test.ts": {
+      "totalTests": 60,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-28.log",
+      "sha256": "3f6a8d6d7ae846e316b4726895a6ef57cc74bb7d7f7e54b3788536452a9ff4dc"
+    },
+    "src/notifications/webhook-sender.test.ts": {
+      "totalTests": 49,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-28.log",
+      "sha256": "3f6a8d6d7ae846e316b4726895a6ef57cc74bb7d7f7e54b3788536452a9ff4dc"
+    },
+    "src/partner/activity-service.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-28.log",
+      "sha256": "3f6a8d6d7ae846e316b4726895a6ef57cc74bb7d7f7e54b3788536452a9ff4dc"
+    },
+    "src/organizations/team-project-access.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-28.log",
+      "sha256": "3f6a8d6d7ae846e316b4726895a6ef57cc74bb7d7f7e54b3788536452a9ff4dc"
+    },
+    "src/notifications/scheduled-copy.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-28.log",
+      "sha256": "3f6a8d6d7ae846e316b4726895a6ef57cc74bb7d7f7e54b3788536452a9ff4dc"
+    },
+    "src/organizations/invitation-link-release-contract.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-28.log",
+      "sha256": "3f6a8d6d7ae846e316b4726895a6ef57cc74bb7d7f7e54b3788536452a9ff4dc"
+    },
+    "src/organizations/team-workspace-ids.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-28.log",
+      "sha256": "3f6a8d6d7ae846e316b4726895a6ef57cc74bb7d7f7e54b3788536452a9ff4dc"
+    },
+    "src/partner/payment-confirm-service.test.ts": {
+      "totalTests": 30,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-29.log",
+      "sha256": "449dc87748f4cab148e0f4016e1be1decb710ad5ff4411fbcb60eedf517d6d3a"
+    },
+    "src/partner/release-service.test.ts": {
+      "totalTests": 17,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-29.log",
+      "sha256": "449dc87748f4cab148e0f4016e1be1decb710ad5ff4411fbcb60eedf517d6d3a"
+    },
+    "src/partner/recharge-service.test.ts": {
+      "totalTests": 27,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-29.log",
+      "sha256": "449dc87748f4cab148e0f4016e1be1decb710ad5ff4411fbcb60eedf517d6d3a"
+    },
+    "src/partner/referral-service.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-29.log",
+      "sha256": "449dc87748f4cab148e0f4016e1be1decb710ad5ff4411fbcb60eedf517d6d3a"
+    },
+    "src/partner/kyc-service.test.ts": {
+      "totalTests": 17,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-29.log",
+      "sha256": "449dc87748f4cab148e0f4016e1be1decb710ad5ff4411fbcb60eedf517d6d3a"
+    },
+    "src/partner/membership-service.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-29.log",
+      "sha256": "449dc87748f4cab148e0f4016e1be1decb710ad5ff4411fbcb60eedf517d6d3a"
+    },
+    "src/partner/risk-lot-service.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-29.log",
+      "sha256": "449dc87748f4cab148e0f4016e1be1decb710ad5ff4411fbcb60eedf517d6d3a"
+    },
+    "src/partner/credit-ledger-service.test.ts": {
+      "totalTests": 18,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-29.log",
+      "sha256": "449dc87748f4cab148e0f4016e1be1decb710ad5ff4411fbcb60eedf517d6d3a"
+    },
+    "src/partner/partner-rules.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-29.log",
+      "sha256": "449dc87748f4cab148e0f4016e1be1decb710ad5ff4411fbcb60eedf517d6d3a"
+    },
+    "src/partner/payment-intent-service.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-29.log",
+      "sha256": "449dc87748f4cab148e0f4016e1be1decb710ad5ff4411fbcb60eedf517d6d3a"
+    },
+    "src/partner/withdrawal-service.test.ts": {
+      "totalTests": 55,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-30.log",
+      "sha256": "d8b3512126a39bf757c589868f635f28a592a7a9bdc6855fc65c46a6831c06b0"
+    },
+    "src/planned/planned-runner-drain.test.ts": {
+      "totalTests": 40,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-30.log",
+      "sha256": "d8b3512126a39bf757c589868f635f28a592a7a9bdc6855fc65c46a6831c06b0"
+    },
+    "src/planned/planned-poller-drain.test.ts": {
+      "totalTests": 37,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-30.log",
+      "sha256": "d8b3512126a39bf757c589868f635f28a592a7a9bdc6855fc65c46a6831c06b0"
+    },
+    "src/planned/planned-runner.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-30.log",
+      "sha256": "d8b3512126a39bf757c589868f635f28a592a7a9bdc6855fc65c46a6831c06b0"
+    },
+    "src/partner/schedulers.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-30.log",
+      "sha256": "d8b3512126a39bf757c589868f635f28a592a7a9bdc6855fc65c46a6831c06b0"
+    },
+    "src/planned/planned-executor.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-30.log",
+      "sha256": "d8b3512126a39bf757c589868f635f28a592a7a9bdc6855fc65c46a6831c06b0"
+    },
+    "src/partner/schema-contract.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-30.log",
+      "sha256": "d8b3512126a39bf757c589868f635f28a592a7a9bdc6855fc65c46a6831c06b0"
+    },
+    "src/planned/planned-task-input.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-30.log",
+      "sha256": "d8b3512126a39bf757c589868f635f28a592a7a9bdc6855fc65c46a6831c06b0"
+    },
+    "src/planned/planned-task-dates.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-30.log",
+      "sha256": "d8b3512126a39bf757c589868f635f28a592a7a9bdc6855fc65c46a6831c06b0"
+    },
+    "src/payment/plans.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-30.log",
+      "sha256": "d8b3512126a39bf757c589868f635f28a592a7a9bdc6855fc65c46a6831c06b0"
+    },
+    "src/projects/project-access.test.ts": {
+      "totalTests": 23,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-31.log",
+      "sha256": "819a8a065c253e120525493d305c59d8a00c75af080d77b092fcf4b174aed87c"
+    },
+    "src/playbook/explorer/explorer.test.ts": {
+      "totalTests": 47,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-31.log",
+      "sha256": "819a8a065c253e120525493d305c59d8a00c75af080d77b092fcf4b174aed87c"
+    },
+    "src/playbook/explorer/explorer-browse-runner.test.ts": {
+      "totalTests": 26,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-31.log",
+      "sha256": "819a8a065c253e120525493d305c59d8a00c75af080d77b092fcf4b174aed87c"
+    },
+    "src/playbook/explorer/explorer-browse.test.ts": {
+      "totalTests": 25,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-31.log",
+      "sha256": "819a8a065c253e120525493d305c59d8a00c75af080d77b092fcf4b174aed87c"
+    },
+    "src/playbook/crystallizer.test.ts": {
+      "totalTests": 21,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-31.log",
+      "sha256": "819a8a065c253e120525493d305c59d8a00c75af080d77b092fcf4b174aed87c"
+    },
+    "src/playbook/playbook-repositories.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-31.log",
+      "sha256": "819a8a065c253e120525493d305c59d8a00c75af080d77b092fcf4b174aed87c"
+    },
+    "src/planned/planned-task-rules.test.ts": {
+      "totalTests": 16,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-31.log",
+      "sha256": "819a8a065c253e120525493d305c59d8a00c75af080d77b092fcf4b174aed87c"
+    },
+    "src/playbook/explorer/explorer-layer-c.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-31.log",
+      "sha256": "819a8a065c253e120525493d305c59d8a00c75af080d77b092fcf4b174aed87c"
+    },
+    "src/playbook/action-capture-redaction.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-31.log",
+      "sha256": "819a8a065c253e120525493d305c59d8a00c75af080d77b092fcf4b174aed87c"
+    },
+    "src/playbook/explorer/cost-accumulating-recorder.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-31.log",
+      "sha256": "819a8a065c253e120525493d305c59d8a00c75af080d77b092fcf4b174aed87c"
+    },
+    "src/projects/team-project-race-harness.test.ts": {
+      "totalTests": 57,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-32.log",
+      "sha256": "6800755ad38d38bfc37eec45abd00bf3ab1b2616f29d7e6d866eb072cec31702"
+    },
+    "src/projects/team-project-integration-safety.test.ts": {
+      "totalTests": 56,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-32.log",
+      "sha256": "6800755ad38d38bfc37eec45abd00bf3ab1b2616f29d7e6d866eb072cec31702"
+    },
+    "src/queue/task-queue-drain.test.ts": {
+      "totalTests": 43,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-32.log",
+      "sha256": "6800755ad38d38bfc37eec45abd00bf3ab1b2616f29d7e6d866eb072cec31702"
+    },
+    "src/queue/task-queue.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-32.log",
+      "sha256": "6800755ad38d38bfc37eec45abd00bf3ab1b2616f29d7e6d866eb072cec31702"
+    },
+    "src/projects/team-project-invitation-race-harness.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-32.log",
+      "sha256": "6800755ad38d38bfc37eec45abd00bf3ab1b2616f29d7e6d866eb072cec31702"
+    },
+    "src/projects/team-project-persistence-harness.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-32.log",
+      "sha256": "6800755ad38d38bfc37eec45abd00bf3ab1b2616f29d7e6d866eb072cec31702"
+    },
+    "src/projects/team-project-race-fixtures.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-32.log",
+      "sha256": "6800755ad38d38bfc37eec45abd00bf3ab1b2616f29d7e6d866eb072cec31702"
+    },
+    "src/projects/team-project-organization-race-harness.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-32.log",
+      "sha256": "6800755ad38d38bfc37eec45abd00bf3ab1b2616f29d7e6d866eb072cec31702"
+    },
+    "src/projects/team-project-terminal-state-harness.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-32.log",
+      "sha256": "6800755ad38d38bfc37eec45abd00bf3ab1b2616f29d7e6d866eb072cec31702"
+    },
+    "src/quota/quota-mode.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-32.log",
+      "sha256": "6800755ad38d38bfc37eec45abd00bf3ab1b2616f29d7e6d866eb072cec31702"
+    },
+    "src/quota/quota-service.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-33.log",
+      "sha256": "133d2628131b12d71838d1201b7812437ad939de224848bd199aab5ea7315ab3"
+    },
+    "src/stocks/stock-preference-repository.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-33.log",
+      "sha256": "133d2628131b12d71838d1201b7812437ad939de224848bd199aab5ea7315ab3"
+    },
+    "src/stocks/stock-preference-profile.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-33.log",
+      "sha256": "133d2628131b12d71838d1201b7812437ad939de224848bd199aab5ea7315ab3"
+    },
+    "src/stocks/screening-criteria.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-33.log",
+      "sha256": "133d2628131b12d71838d1201b7812437ad939de224848bd199aab5ea7315ab3"
+    },
+    "src/stock-news/article-detail.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-33.log",
+      "sha256": "133d2628131b12d71838d1201b7812437ad939de224848bd199aab5ea7315ab3"
+    },
+    "src/stock-news/source-cover.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-33.log",
+      "sha256": "133d2628131b12d71838d1201b7812437ad939de224848bd199aab5ea7315ab3"
+    },
+    "src/stocks/snapshot-akshare-client.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-33.log",
+      "sha256": "133d2628131b12d71838d1201b7812437ad939de224848bd199aab5ea7315ab3"
+    },
+    "src/response-layer/openai-verifier-fallback.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-33.log",
+      "sha256": "133d2628131b12d71838d1201b7812437ad939de224848bd199aab5ea7315ab3"
+    },
+    "src/response-layer/lane-integration.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-33.log",
+      "sha256": "133d2628131b12d71838d1201b7812437ad939de224848bd199aab5ea7315ab3"
+    },
+    "src/quota/rate-limiter.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-33.log",
+      "sha256": "133d2628131b12d71838d1201b7812437ad939de224848bd199aab5ea7315ab3"
+    },
+    "src/streaming/cdp-streamer.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-34.log",
+      "sha256": "7eadac47f4f22fb30871083d85fc0a7e0d769ab7b313cdd29ba4f9b25d326e3f"
+    },
+    "src/stocks/stock-screening-service.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-34.log",
+      "sha256": "7eadac47f4f22fb30871083d85fc0a7e0d769ab7b313cdd29ba4f9b25d326e3f"
+    },
+    "src/streaming/cdp-input.test.ts": {
+      "totalTests": 16,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-34.log",
+      "sha256": "7eadac47f4f22fb30871083d85fc0a7e0d769ab7b313cdd29ba4f9b25d326e3f"
+    },
+    "src/stocks/stock-risk-monitor-service.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-34.log",
+      "sha256": "7eadac47f4f22fb30871083d85fc0a7e0d769ab7b313cdd29ba4f9b25d326e3f"
+    },
+    "src/stocks/stock-risk-monitor-executor.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-34.log",
+      "sha256": "7eadac47f4f22fb30871083d85fc0a7e0d769ab7b313cdd29ba4f9b25d326e3f"
+    },
+    "src/stocks/stock-risk-radar-service.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-34.log",
+      "sha256": "7eadac47f4f22fb30871083d85fc0a7e0d769ab7b313cdd29ba4f9b25d326e3f"
+    },
+    "src/stocks/stock-trust.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-34.log",
+      "sha256": "7eadac47f4f22fb30871083d85fc0a7e0d769ab7b313cdd29ba4f9b25d326e3f"
+    },
+    "src/stocks/stock-task-context.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-34.log",
+      "sha256": "7eadac47f4f22fb30871083d85fc0a7e0d769ab7b313cdd29ba4f9b25d326e3f"
+    },
+    "src/stocks/stock-risk-monitor-state.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-34.log",
+      "sha256": "7eadac47f4f22fb30871083d85fc0a7e0d769ab7b313cdd29ba4f9b25d326e3f"
+    },
+    "src/streaming/owned-screencast-input.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-34.log",
+      "sha256": "7eadac47f4f22fb30871083d85fc0a7e0d769ab7b313cdd29ba4f9b25d326e3f"
+    },
+    "src/team-work-items/team-task-evidence-service.test.ts": {
+      "totalTests": 70,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-35.log",
+      "sha256": "cbc11e8b677b10cd44911182390c04e21f2be003ee922b0f3f6f80b7f53170a6"
+    },
+    "src/team-work-items/team-task-appeal-service.test.ts": {
+      "totalTests": 31,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-35.log",
+      "sha256": "cbc11e8b677b10cd44911182390c04e21f2be003ee922b0f3f6f80b7f53170a6"
+    },
+    "src/team-work-items/team-task-lifecycle-canary-runner.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-35.log",
+      "sha256": "cbc11e8b677b10cd44911182390c04e21f2be003ee922b0f3f6f80b7f53170a6"
+    },
+    "src/team-work-items/acceptance-contract.test.ts": {
+      "totalTests": 72,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-35.log",
+      "sha256": "cbc11e8b677b10cd44911182390c04e21f2be003ee922b0f3f6f80b7f53170a6"
+    },
+    "src/streaming/screencast-input-bridge.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-35.log",
+      "sha256": "cbc11e8b677b10cd44911182390c04e21f2be003ee922b0f3f6f80b7f53170a6"
+    },
+    "src/streaming/screencast-proxy.route-pick.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-35.log",
+      "sha256": "cbc11e8b677b10cd44911182390c04e21f2be003ee922b0f3f6f80b7f53170a6"
+    },
+    "src/streaming/screencast-maintenance.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-35.log",
+      "sha256": "cbc11e8b677b10cd44911182390c04e21f2be003ee922b0f3f6f80b7f53170a6"
+    },
+    "src/team-work-items/team-task-lifecycle-canary-cli.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-35.log",
+      "sha256": "cbc11e8b677b10cd44911182390c04e21f2be003ee922b0f3f6f80b7f53170a6"
+    },
+    "src/team-work-items/team-task-access.test.ts": {
+      "totalTests": 15,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-35.log",
+      "sha256": "cbc11e8b677b10cd44911182390c04e21f2be003ee922b0f3f6f80b7f53170a6"
+    },
+    "src/task-status.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-35.log",
+      "sha256": "cbc11e8b677b10cd44911182390c04e21f2be003ee922b0f3f6f80b7f53170a6"
+    },
+    "src/team-work-items/team-task-planning-service.test.ts": {
+      "totalTests": 50,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-36.log",
+      "sha256": "20eeca4a79a4a70e0e6ca943de1d8a102aa4f722fc78c4c6a2b2353bd80fe434"
+    },
+    "src/team-work-items/team-task-service.test.ts": {
+      "totalTests": 34,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-36.log",
+      "sha256": "20eeca4a79a4a70e0e6ca943de1d8a102aa4f722fc78c4c6a2b2353bd80fe434"
+    },
+    "src/team-work-items/team-task-review-service.test.ts": {
+      "totalTests": 22,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-36.log",
+      "sha256": "20eeca4a79a4a70e0e6ca943de1d8a102aa4f722fc78c4c6a2b2353bd80fe434"
+    },
+    "src/team-work-items/team-task-state-machine.test.ts": {
+      "totalTests": 109,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-36.log",
+      "sha256": "20eeca4a79a4a70e0e6ca943de1d8a102aa4f722fc78c4c6a2b2353bd80fe434"
+    },
+    "src/team-work-items/team-task-query-service.test.ts": {
+      "totalTests": 21,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-36.log",
+      "sha256": "20eeca4a79a4a70e0e6ca943de1d8a102aa4f722fc78c4c6a2b2353bd80fe434"
+    },
+    "src/team-work-items/team-task-lifecycle-production-canary.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-36.log",
+      "sha256": "20eeca4a79a4a70e0e6ca943de1d8a102aa4f722fc78c4c6a2b2353bd80fe434"
+    },
+    "src/team-work-items/team-task-permissions.test.ts": {
+      "totalTests": 34,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-36.log",
+      "sha256": "20eeca4a79a4a70e0e6ca943de1d8a102aa4f722fc78c4c6a2b2353bd80fe434"
+    },
+    "src/test/db-helper.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-36.log",
+      "sha256": "20eeca4a79a4a70e0e6ca943de1d8a102aa4f722fc78c4c6a2b2353bd80fe434"
+    },
+    "src/team-work-items/team-work-item-ids.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-36.log",
+      "sha256": "20eeca4a79a4a70e0e6ca943de1d8a102aa4f722fc78c4c6a2b2353bd80fe434"
+    },
+    "src/trpc/context.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-36.log",
+      "sha256": "20eeca4a79a4a70e0e6ca943de1d8a102aa4f722fc78c4c6a2b2353bd80fe434"
+    },
+    "src/trpc/routers/admin-partner.test.ts": {
+      "totalTests": 17,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-37.log",
+      "sha256": "83e174b1f6e52404378e1239a7a2b66815662037a7ce99c91c6f1e737033a18c"
+    },
+    "src/trpc/routers/admin.test.ts": {
+      "totalTests": 17,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-37.log",
+      "sha256": "83e174b1f6e52404378e1239a7a2b66815662037a7ce99c91c6f1e737033a18c"
+    },
+    "src/trpc/routers/admin-learning.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-37.log",
+      "sha256": "83e174b1f6e52404378e1239a7a2b66815662037a7ce99c91c6f1e737033a18c"
+    },
+    "src/trpc/routers/account-closure.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-37.log",
+      "sha256": "83e174b1f6e52404378e1239a7a2b66815662037a7ce99c91c6f1e737033a18c"
+    },
+    "src/trpc/routers/auth.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-37.log",
+      "sha256": "83e174b1f6e52404378e1239a7a2b66815662037a7ce99c91c6f1e737033a18c"
+    },
+    "src/trpc/routers/admin-finance.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-37.log",
+      "sha256": "83e174b1f6e52404378e1239a7a2b66815662037a7ce99c91c6f1e737033a18c"
+    },
+    "src/trpc/routers/batch-tasks-pagination.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-37.log",
+      "sha256": "83e174b1f6e52404378e1239a7a2b66815662037a7ce99c91c6f1e737033a18c"
+    },
+    "src/trpc/routers/batch-tasks.maintenance.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-37.log",
+      "sha256": "83e174b1f6e52404378e1239a7a2b66815662037a7ce99c91c6f1e737033a18c"
+    },
+    "src/trpc/routers/auth.model-data-region.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-37.log",
+      "sha256": "83e174b1f6e52404378e1239a7a2b66815662037a7ce99c91c6f1e737033a18c"
+    },
+    "src/trpc/routers/astrology.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-37.log",
+      "sha256": "83e174b1f6e52404378e1239a7a2b66815662037a7ce99c91c6f1e737033a18c"
+    },
+    "src/trpc/routers/partner-mutations.test.ts": {
+      "totalTests": 21,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-38.log",
+      "sha256": "14b95abc84d0e0d491443353330bc4e9bc0b3e665ba6a72d30198e0d3e385f76"
+    },
+    "src/trpc/routers/organizations.test.ts": {
+      "totalTests": 15,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-38.log",
+      "sha256": "14b95abc84d0e0d491443353330bc4e9bc0b3e665ba6a72d30198e0d3e385f76"
+    },
+    "src/trpc/routers/notifications.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-38.log",
+      "sha256": "14b95abc84d0e0d491443353330bc4e9bc0b3e665ba6a72d30198e0d3e385f76"
+    },
+    "src/trpc/routers/energy.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-38.log",
+      "sha256": "14b95abc84d0e0d491443353330bc4e9bc0b3e665ba6a72d30198e0d3e385f76"
+    },
+    "src/trpc/routers/browser-control.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-38.log",
+      "sha256": "14b95abc84d0e0d491443353330bc4e9bc0b3e665ba6a72d30198e0d3e385f76"
+    },
+    "src/trpc/routers/classify-reply-intent.test.ts": {
+      "totalTests": 34,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-38.log",
+      "sha256": "14b95abc84d0e0d491443353330bc4e9bc0b3e665ba6a72d30198e0d3e385f76"
+    },
+    "src/trpc/routers/files.test.ts": {
+      "totalTests": 15,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-38.log",
+      "sha256": "14b95abc84d0e0d491443353330bc4e9bc0b3e665ba6a72d30198e0d3e385f76"
+    },
+    "src/trpc/routers/llm-cost-completeness.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-38.log",
+      "sha256": "14b95abc84d0e0d491443353330bc4e9bc0b3e665ba6a72d30198e0d3e385f76"
+    },
+    "src/trpc/routers/feedback.account-closure.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-38.log",
+      "sha256": "14b95abc84d0e0d491443353330bc4e9bc0b3e665ba6a72d30198e0d3e385f76"
+    },
+    "src/trpc/routers/local-chrome-selection.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-38.log",
+      "sha256": "14b95abc84d0e0d491443353330bc4e9bc0b3e665ba6a72d30198e0d3e385f76"
+    },
+    "src/trpc/routers/projects.team.test.ts": {
+      "totalTests": 31,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-39.log",
+      "sha256": "c26042e0b64ee58f08d8aaf46efc21fe5a59ff2cf0e2be8bb90d148668214632"
+    },
+    "src/trpc/routers/payment.test.ts": {
+      "totalTests": 33,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-39.log",
+      "sha256": "c26042e0b64ee58f08d8aaf46efc21fe5a59ff2cf0e2be8bb90d148668214632"
+    },
+    "src/trpc/routers/partner.test.ts": {
+      "totalTests": 15,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-39.log",
+      "sha256": "c26042e0b64ee58f08d8aaf46efc21fe5a59ff2cf0e2be8bb90d148668214632"
+    },
+    "src/trpc/routers/scheduled-tasks.test.ts": {
+      "totalTests": 23,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-39.log",
+      "sha256": "c26042e0b64ee58f08d8aaf46efc21fe5a59ff2cf0e2be8bb90d148668214632"
+    },
+    "src/trpc/routers/planned-tasks.mutations.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-39.log",
+      "sha256": "c26042e0b64ee58f08d8aaf46efc21fe5a59ff2cf0e2be8bb90d148668214632"
+    },
+    "src/trpc/routers/stocks-screening.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-39.log",
+      "sha256": "c26042e0b64ee58f08d8aaf46efc21fe5a59ff2cf0e2be8bb90d148668214632"
+    },
+    "src/trpc/routers/stocks-risk-radar.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-39.log",
+      "sha256": "c26042e0b64ee58f08d8aaf46efc21fe5a59ff2cf0e2be8bb90d148668214632"
+    },
+    "src/trpc/routers/skills.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-39.log",
+      "sha256": "c26042e0b64ee58f08d8aaf46efc21fe5a59ff2cf0e2be8bb90d148668214632"
+    },
+    "src/trpc/routers/stocks-preferences.test.ts": {
+      "totalTests": 6,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-39.log",
+      "sha256": "c26042e0b64ee58f08d8aaf46efc21fe5a59ff2cf0e2be8bb90d148668214632"
+    },
+    "src/trpc/routers/stocks-risk-monitor.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-39.log",
+      "sha256": "c26042e0b64ee58f08d8aaf46efc21fe5a59ff2cf0e2be8bb90d148668214632"
+    },
+    "src/trpc/routers/stocks.test.ts": {
+      "totalTests": 49,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-40.log",
+      "sha256": "0794f1d35d748ca3fdc61e3c650e3d0b0e5a4f531a03ab0524a2ff1a07e5ef05"
+    },
+    "src/trpc/routers/task-queue-execution.test.ts": {
+      "totalTests": 23,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-40.log",
+      "sha256": "0794f1d35d748ca3fdc61e3c650e3d0b0e5a4f531a03ab0524a2ff1a07e5ef05"
+    },
+    "src/trpc/routers/task-followup-copy.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-40.log",
+      "sha256": "0794f1d35d748ca3fdc61e3c650e3d0b0e5a4f531a03ab0524a2ff1a07e5ef05"
+    },
+    "src/trpc/routers/task-terminal-recovery.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-40.log",
+      "sha256": "0794f1d35d748ca3fdc61e3c650e3d0b0e5a4f531a03ab0524a2ff1a07e5ef05"
+    },
+    "src/trpc/routers/tasks-create-idempotency.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-40.log",
+      "sha256": "0794f1d35d748ca3fdc61e3c650e3d0b0e5a4f531a03ab0524a2ff1a07e5ef05"
+    },
+    "src/trpc/routers/tasks-attachment-availability.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-40.log",
+      "sha256": "0794f1d35d748ca3fdc61e3c650e3d0b0e5a4f531a03ab0524a2ff1a07e5ef05"
+    },
+    "src/trpc/routers/task-background.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-40.log",
+      "sha256": "0794f1d35d748ca3fdc61e3c650e3d0b0e5a4f531a03ab0524a2ff1a07e5ef05"
+    },
+    "src/trpc/routers/task-tick-receipt.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-40.log",
+      "sha256": "0794f1d35d748ca3fdc61e3c650e3d0b0e5a4f531a03ab0524a2ff1a07e5ef05"
+    },
+    "src/trpc/routers/task-queue-start.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-40.log",
+      "sha256": "0794f1d35d748ca3fdc61e3c650e3d0b0e5a4f531a03ab0524a2ff1a07e5ef05"
+    },
+    "src/trpc/routers/stocks.news-detail.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-40.log",
+      "sha256": "0794f1d35d748ca3fdc61e3c650e3d0b0e5a4f531a03ab0524a2ff1a07e5ef05"
+    },
+    "src/trpc/routers/tasks.core-continuation.test.ts": {
+      "totalTests": 49,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-41.log",
+      "sha256": "87cda3140958245a4ae5e1f54d25698578419ea7b918e16229e19454c6bb6ae7"
+    },
+    "src/trpc/routers/tasks.plan-mode.test.ts": {
+      "totalTests": 66,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-41.log",
+      "sha256": "87cda3140958245a4ae5e1f54d25698578419ea7b918e16229e19454c6bb6ae7"
+    },
+    "src/trpc/routers/tasks.browser-qwen.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-41.log",
+      "sha256": "87cda3140958245a4ae5e1f54d25698578419ea7b918e16229e19454c6bb6ae7"
+    },
+    "src/trpc/routers/tasks.core-suggestions.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-41.log",
+      "sha256": "87cda3140958245a4ae5e1f54d25698578419ea7b918e16229e19454c6bb6ae7"
+    },
+    "src/trpc/routers/tasks.billing-state.test.ts": {
+      "totalTests": 15,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-41.log",
+      "sha256": "87cda3140958245a4ae5e1f54d25698578419ea7b918e16229e19454c6bb6ae7"
+    },
+    "src/trpc/routers/tasks.core-plan.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-41.log",
+      "sha256": "87cda3140958245a4ae5e1f54d25698578419ea7b918e16229e19454c6bb6ae7"
+    },
+    "src/trpc/routers/tasks.drain.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-41.log",
+      "sha256": "87cda3140958245a4ae5e1f54d25698578419ea7b918e16229e19454c6bb6ae7"
+    },
+    "src/trpc/routers/tasks.execution-detail.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-41.log",
+      "sha256": "87cda3140958245a4ae5e1f54d25698578419ea7b918e16229e19454c6bb6ae7"
+    },
+    "src/trpc/routers/tasks-image-options.test.ts": {
+      "totalTests": 5,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-41.log",
+      "sha256": "87cda3140958245a4ae5e1f54d25698578419ea7b918e16229e19454c6bb6ae7"
+    },
+    "src/trpc/routers/tasks-project-boundary.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-41.log",
+      "sha256": "87cda3140958245a4ae5e1f54d25698578419ea7b918e16229e19454c6bb6ae7"
+    },
+    "src/trpc/routers/video-editing.test.ts": {
+      "totalTests": 17,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-42.log",
+      "sha256": "2e498a077f1af22d7c03b438b337dfe053b252d170931f105c2a06db27224047"
+    },
+    "src/trpc/routers/team-tasks.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-42.log",
+      "sha256": "2e498a077f1af22d7c03b438b337dfe053b252d170931f105c2a06db27224047"
+    },
+    "src/trpc/routers/tasks.resume-verifier.test.ts": {
+      "totalTests": 16,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-42.log",
+      "sha256": "2e498a077f1af22d7c03b438b337dfe053b252d170931f105c2a06db27224047"
+    },
+    "src/trpc/routers/watchlists.test.ts": {
+      "totalTests": 9,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-42.log",
+      "sha256": "2e498a077f1af22d7c03b438b337dfe053b252d170931f105c2a06db27224047"
+    },
+    "src/trpc/routers/tasks.skill-selection.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-42.log",
+      "sha256": "2e498a077f1af22d7c03b438b337dfe053b252d170931f105c2a06db27224047"
+    },
+    "src/trpc/routers/watchlists-briefing.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-42.log",
+      "sha256": "2e498a077f1af22d7c03b438b337dfe053b252d170931f105c2a06db27224047"
+    },
+    "src/trpc/routers/video-onboarding.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-42.log",
+      "sha256": "2e498a077f1af22d7c03b438b337dfe053b252d170931f105c2a06db27224047"
+    },
+    "src/video-editing/feature-access.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-42.log",
+      "sha256": "2e498a077f1af22d7c03b438b337dfe053b252d170931f105c2a06db27224047"
+    },
+    "src/trpc/routers/usage.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-42.log",
+      "sha256": "2e498a077f1af22d7c03b438b337dfe053b252d170931f105c2a06db27224047"
+    },
+    "src/video-editing/external-ids.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-42.log",
+      "sha256": "2e498a077f1af22d7c03b438b337dfe053b252d170931f105c2a06db27224047"
+    },
+    "src/ws/extension-tool-call.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-43.log",
+      "sha256": "2bcff254437096e3debb5c1ff8acf881eab8ed11c67f8b1d9ab52534cc6147c0"
+    },
+    "src/video-editing/project-repository.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-43.log",
+      "sha256": "2bcff254437096e3debb5c1ff8acf881eab8ed11c67f8b1d9ab52534cc6147c0"
+    },
+    "src/video-editing/render-service.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-43.log",
+      "sha256": "2bcff254437096e3debb5c1ff8acf881eab8ed11c67f8b1d9ab52534cc6147c0"
+    },
+    "src/ws/extension-login-states.test.ts": {
+      "totalTests": 20,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-43.log",
+      "sha256": "2bcff254437096e3debb5c1ff8acf881eab8ed11c67f8b1d9ab52534cc6147c0"
+    },
+    "src/video-editing/source-import.test.ts": {
+      "totalTests": 14,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-43.log",
+      "sha256": "2bcff254437096e3debb5c1ff8acf881eab8ed11c67f8b1d9ab52534cc6147c0"
+    },
+    "src/ws/extension-tool-call.selected-tab.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-43.log",
+      "sha256": "2bcff254437096e3debb5c1ff8acf881eab8ed11c67f8b1d9ab52534cc6147c0"
+    },
+    "src/video-editing/quote-service.test.ts": {
+      "totalTests": 11,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-43.log",
+      "sha256": "2bcff254437096e3debb5c1ff8acf881eab8ed11c67f8b1d9ab52534cc6147c0"
+    },
+    "src/video-editing/instruction-planner.test.ts": {
+      "totalTests": 7,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-43.log",
+      "sha256": "2bcff254437096e3debb5c1ff8acf881eab8ed11c67f8b1d9ab52534cc6147c0"
+    },
+    "src/video-editing/operation-schema.test.ts": {
+      "totalTests": 13,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-43.log",
+      "sha256": "2bcff254437096e3debb5c1ff8acf881eab8ed11c67f8b1d9ab52534cc6147c0"
+    },
+    "src/ws/extension-hello-race.test.ts": {
+      "totalTests": 1,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-43.log",
+      "sha256": "2bcff254437096e3debb5c1ff8acf881eab8ed11c67f8b1d9ab52534cc6147c0"
+    },
+    "src/ws/server-drain.test.ts": {
+      "totalTests": 25,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-44.log",
+      "sha256": "bfdf18e9ea6b77f46705a849515268f09e2571b530f9155105731f29f615360d"
+    },
+    "src/ws/user-input.test.ts": {
+      "totalTests": 12,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-44.log",
+      "sha256": "bfdf18e9ea6b77f46705a849515268f09e2571b530f9155105731f29f615360d"
+    },
+    "src/ws/ordinary-maintenance-receipts.test.ts": {
+      "totalTests": 2,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-44.log",
+      "sha256": "bfdf18e9ea6b77f46705a849515268f09e2571b530f9155105731f29f615360d"
+    },
+    "src/ws/server-message-schema.test.ts": {
+      "totalTests": 4,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-44.log",
+      "sha256": "bfdf18e9ea6b77f46705a849515268f09e2571b530f9155105731f29f615360d"
+    },
+    "src/ws/extension-tool-copy.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-mac-node22-ordinary-replanned-44.log",
+      "sha256": "bfdf18e9ea6b77f46705a849515268f09e2571b530f9155105731f29f615360d"
+    },
+    "scripts/governance-audit.account-closure.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-governance-budget-2g-0.log",
+      "sha256": "f5be4a5a649cb9fb480ac3a6d630e349a6641b557261b07feba3b7b98ef5dfbf"
+    },
+    "src/data-governance/data-categories.test.ts": {
+      "totalTests": 8,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-governance-budget-2g-1.log",
+      "sha256": "3307daeaad961c07bf4f70dd784bf1f06dc47afec121a50a72aa959fef4f2ce4"
+    },
+    "src/data-governance/public-disclosure-map.test.ts": {
+      "totalTests": 3,
+      "skipped": 0,
+      "log": "/private/tmp/holaday-governance-budget-2g-3.log",
+      "sha256": "5fa83d079641e1ca377f26aeedd2dfa0360f731042eac5dfa8d315385cbb7aa1"
+    },
+    "src/data-governance/governance-audit-cli.test.ts": {
+      "totalTests": 10,
+      "skipped": 0,
+      "logicalSelectionGroups": [
+        {
+          "index": 0,
+          "selected": [
+            "prints aggregate text and explicit gap ids without raw data"
+          ],
+          "exit": 0,
+          "statePath": "/private/tmp/holaday-governance-cli-group-0-state.json"
+        },
+        {
+          "index": 1,
+          "selected": [
+            "emits valid JSON containing only summaries and issues"
+          ],
+          "exit": 0,
+          "statePath": "/private/tmp/holaday-governance-cli-group-1-state.json"
+        },
+        {
+          "index": 2,
+          "selected": [
+            "turns explicit gaps into a strict-mode failure without changing normal mode"
+          ],
+          "exit": 0,
+          "statePath": "/private/tmp/holaday-governance-cli-group-2-state.json"
+        },
+        {
+          "index": 3,
+          "selected": [
+            "returns 2 for unsupported arguments",
+            "sanitizes unsafe audit issue fields before text and JSON output",
+            "redacts dangling escapes at the end of unclosed quoted assignments in JSON and text",
+            "redacts credential assignments while preserving uppercase configuration key names",
+            "sanitizes report-construction exception messages before writing stderr",
+            "redacts PEM private keys from JSON and text while retaining safe registry ids"
+          ],
+          "exit": 0,
+          "statePath": "/private/tmp/holaday-governance-cli-group-3-state.json"
+        },
+        {
+          "index": 4,
+          "selected": [
+            "runs directly with console-compatible output handlers"
+          ],
+          "exit": 0,
+          "statePath": "/private/tmp/holaday-governance-cli-group-4-state.json"
+        }
+      ],
+      "unselectedSkips": 40
+    }
+  },
+  "releaseAcceptance": false
+}

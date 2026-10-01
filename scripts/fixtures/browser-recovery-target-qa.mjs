@@ -1,3 +1,4 @@
+import { ingressDiagnosticStage } from '../browser-first-cutover-ingress-diagnostics.mjs';
 // Actual recovery-machine Docker/age/import exercise. The caller creates the
 // dedicated no-network container/volume; this fixture never stops/removes one.
 // Payload and key are synthetic. Optional separate source container exercises
@@ -7,12 +8,15 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { closeSync, fsyncSync, openSync, writeSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
+import { setTimeout as delay } from 'node:timers/promises';
+import { pathToFileURL } from 'node:url';
 import {
   encryptAgeBackup,
   inspectFirstCutoverRecoveryTarget,
@@ -20,6 +24,7 @@ import {
   restoreFirstCutoverAgeBackup,
 } from '../browser-first-cutover-backup.mjs';
 import { serveFirstCutoverRecoverySession } from '../browser-first-cutover-recovery-session.mjs';
+import { verifyFirstCutoverQaRuntimeMaterials } from './browser-first-cutover-runtime-materials.qa.mjs';
 import { buildMaintenanceMigrationManifest } from '../browser-maintenance-manifest.mjs';
 
 const [containerId, imageId, attempt, runtimeRoot, sourceContainerId, sourceAttempt] =
@@ -29,11 +34,21 @@ assert.match(imageId ?? '', /^sha256:[a-f0-9]{64}$/);
 assert.match(attempt ?? '', /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/);
 const fullSource = Boolean(sourceContainerId);
 const retirementLink = process.env.CUTOVER_QA_RETIREMENT === '1';
+// This branch launches an execution-site role even without a candidate tail.
+const physicalIngress = retirementLink;
 const recoveryDrift = process.env.CUTOVER_QA_RECOVERY_DRIFT === '1';
 assert.ok(!recoveryDrift || retirementLink);
 assert.ok(!retirementLink || fullSource || !runtimeRoot);
 const stoppedSource = retirementLink && fullSource;
 const fullHost = process.env.CUTOVER_QA_HOST === '1';
+const compileBudget = process.env.CUTOVER_QA_COMPILE_BUDGET === '1';
+assert.ok(
+  !compileBudget || (fullHost && /^[a-f0-9]{32}$/.test(process.env.CUTOVER_QA_RUNNER_TOKEN ?? '')),
+);
+if (process.env.CUTOVER_QA_HOST_IMAGE)
+  assert.match(process.env.CUTOVER_QA_HOST_IMAGE, /^sha256:[a-f0-9]{64}$/);
+if (process.env.CUTOVER_QA_RUNNER_TOKEN)
+  assert.match(process.env.CUTOVER_QA_RUNNER_TOKEN, /^[a-f0-9]{32}$/);
 const hostFault = process.env.CUTOVER_QA_HOST_FAULT ?? 'before-migration';
 assert.ok(
   [
@@ -52,7 +67,10 @@ const successfulCutover = hostFault === 'success';
 const lostOpenAck = process.env.CUTOVER_QA_LOST_OPEN_ACK === '1';
 assert.ok(!lostOpenAck || (fullHost && successfulCutover));
 const enabledWorker = process.env.CUTOVER_QA_ENABLED_WORKER === '1';
-assert.ok(!enabledWorker || (fullHost && successfulCutover && !lostOpenAck));
+assert.ok(
+  !enabledWorker ||
+    (fullHost && (successfulCutover || hostFault === 'after-worker') && !lostOpenAck),
+);
 const lateKnownEffect = hostFault === 'late-known-effect';
 const nativeIngress = ['after-ingress', 'after-worker', 'success', 'late-known-effect'].includes(
   hostFault,
@@ -94,21 +112,54 @@ const run = promisify(execFile);
 const hash = (v) => createHash('sha256').update(v).digest('hex');
 const queryAt = async (container, sql) =>
   (
-    await run('docker', [
-      'exec',
-      container,
-      '/usr/bin/mysql',
-      '--no-defaults',
-      '-uroot',
-      '--database=restore_qa',
-      '--batch',
-      '--raw',
-      '--skip-column-names',
-      '--execute',
-      sql,
-    ])
+    await run(
+      'docker',
+      [
+        'exec',
+        container,
+        '/usr/bin/mysql',
+        '--no-defaults',
+        '-uroot',
+        '--database=restore_qa',
+        '--batch',
+        '--raw',
+        '--skip-column-names',
+        '--execute',
+        sql,
+      ],
+      { timeout: 5000, maxBuffer: 1024 * 1024 },
+    )
   ).stdout.trim();
 const query = (sql) => queryAt(containerId, sql);
+// Readiness is a bounded read-only preflight, before any coordinator effects.
+const waitReady = async (id, approvedAttempt) => {
+  const resource = JSON.parse(
+    (await run('docker', ['inspect', id], { timeout: 5000, maxBuffer: 1024 * 1024 })).stdout,
+  )[0];
+  assert.equal(resource.Id, id);
+  assert.equal(resource.Image, imageId);
+  assert.equal(resource.Config.Labels['holaday.cutover.attempt'], approvedAttempt);
+  assert.equal(resource.HostConfig.NetworkMode, 'none');
+  assert.equal(resource.HostConfig.IpcMode, 'private');
+  assert.deepEqual(resource.HostConfig.Binds ?? [], []);
+  assert.equal(resource.Mounts.length, 1);
+  assert.equal(resource.Mounts[0].Name, `holaday-cutover-restore-${approvedAttempt}`);
+  const deadline = performance.now() + 30000;
+  let ready = false;
+  while (performance.now() < deadline) {
+    try {
+      ready = (await queryAt(id, 'SELECT 1')) === '1';
+    } catch {
+      ready = false;
+    }
+    if (ready) break;
+    await delay(500);
+  }
+  assert.ok(ready && performance.now() < deadline, 'QA_DATABASE_READINESS_UNPROVEN');
+  assert.equal(await queryAt(id, 'SELECT @@global.event_scheduler'), 'OFF');
+};
+await waitReady(containerId, attempt);
+if (fullSource) await waitReady(sourceContainerId, sourceAttempt);
 const identity = JSON.parse(
   await query("SELECT JSON_OBJECT('serverUuid',@@server_uuid,'database',DATABASE())"),
 );
@@ -137,6 +188,36 @@ const sourceTarget = fullSource
 if (sourceTarget) {
   assert.notEqual(sourceTarget.identity.serverUuid, identity.serverUuid);
   await inspectFirstCutoverRecoveryTarget(sourceTarget, { requireEmpty: false });
+  if (fullHost) {
+    // Fail before compilation/retirement when the explicitly prepared fresh
+    // source is missing the original fixture or current application baseline.
+    assert.equal(
+      await queryAt(
+        sourceContainerId,
+        'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()',
+      ),
+      candidateTail ? '90' : '2',
+    );
+    assert.equal(
+      await queryAt(
+        sourceContainerId,
+        'SELECT HEX(text_value), HEX(payload), optional_value IS NULL FROM sample',
+      ),
+      'E6B5B7E8BEB9\t00FF5C27\t1',
+    );
+    for (const [catalog, field] of [
+      ['TRIGGERS', 'TRIGGER_SCHEMA'],
+      ['EVENTS', 'EVENT_SCHEMA'],
+    ]) {
+      assert.equal(
+        await queryAt(
+          sourceContainerId,
+          `SELECT COUNT(*) FROM information_schema.${catalog} WHERE ${field}=DATABASE()`,
+        ),
+        '1',
+      );
+    }
+  }
 }
 const directory = await realpath(await mkdtemp(join(tmpdir(), 'holaday-recovery-target-')));
 await chmod(directory, 0o700);
@@ -172,11 +253,16 @@ if (stoppedSource) {
     `${sourceContainerId}:/usr/bin/mysqldump`,
     join(clientDirectory, 'mysqldump'),
   ]);
-  const { build } = await import(
-    '../../node_modules/.pnpm/esbuild@0.25.12/node_modules/esbuild/lib/main.js'
-  );
+  // Compiler and dependency overrides belong only to this synthetic QA driver.
+  const compiler = process.env.CUTOVER_QA_ESBUILD
+    ? pathToFileURL(await realpath(process.env.CUTOVER_QA_ESBUILD)).href
+    : '../../node_modules/.pnpm/esbuild@0.25.12/node_modules/esbuild/lib/main.js';
+  const moduleRoot = process.env.CUTOVER_QA_MODULE_ROOT
+    ? await realpath(process.env.CUTOVER_QA_MODULE_ROOT)
+    : process.cwd();
+  const { build } = await import(compiler);
   await build({
-    entryPoints: [resolve('apps/orchestrator/node_modules/mysql2/promise.js')],
+    entryPoints: [join(moduleRoot, 'apps/orchestrator/node_modules/mysql2/promise.js')],
     outfile: join(clientDirectory, 'mysql2.cjs'),
     bundle: true,
     platform: 'node',
@@ -324,7 +410,7 @@ const scope = {
   binding,
   // New QA approval only: measured real ingress proofs exceeded the old 10m
   // fixture window. Never extend an existing attempt or production approval.
-  maintenanceEndsAtMs: Date.now() + (nativeIngress ? 900000 : fullHost ? 600000 : 120000),
+  maintenanceEndsAtMs: Date.now() + (nativeIngress || fullHost ? 900000 : 120000),
   sourceOptions,
   destination,
   identityFile,
@@ -332,6 +418,9 @@ const scope = {
   sourceIdentity,
 };
 if (runtimeRoot) {
+  await verifyFirstCutoverQaRuntimeMaterials({ ...target, root: runtimeRoot });
+  if (sourceTarget)
+    await verifyFirstCutoverQaRuntimeMaterials({ ...sourceTarget, root: runtimeRoot });
   const bytes = await readFile(join(runtimeRoot, 'runtime.json'));
   const runtime = JSON.parse(bytes);
   assert.equal(runtime.migrationDigest, binding.migrationDigest);
@@ -460,6 +549,128 @@ try {
   assert(checks>=8);
 } finally { await journal.close(); }
 `;
+// QA-only fixed metadata, synchronously persisted before container removal.
+const safeDiagnosticPath = join(directory, 'safe-stage-diagnostics.log');
+const safeDiagnosticFd = openSync(safeDiagnosticPath, 'wx', 0o600);
+let safeDiagnosticBytes = 0;
+let safeDiagnosticFailed = false;
+let safeDiagnosticBuffer = '';
+const count = (value) => Number.isSafeInteger(value) && value >= 0;
+const safeLine = (line) => {
+  if (
+    /^QA_BACKUP_STAGE (?:source-snapshot|recovery-(?:attach|inspect|restore|snapshot|migrate|verify|close)) (?:start|done|failed)(?: (?:UNCLASSIFIED_ERROR|(?:CUTOVER|MAINTENANCE)_[A-Z_]+))?$/.test(
+      line,
+    )
+  )
+    return true;
+  const match = line.match(
+    /^(QA_CGROUP_MEMORY_STATE|QA_FAILURE_JOURNAL_STATE|QA_INGRESS_CHILD_EXIT|QA_INGRESS_REJECTION|QA_RECOVERY_REJECTION)(?: ([a-z-]+))? (\{.*\})$/,
+  );
+  if (!match) return false;
+  try {
+    const value = JSON.parse(match[3]);
+    const names = Object.keys(value);
+    if (match[1] === 'QA_CGROUP_MEMORY_STATE') {
+      if (
+        !/^(?:observer-failed|(?:source-snapshot|recovery-(?:attach|inspect|restore|snapshot|migrate|verify|close))-(?:start|done|failed))$/.test(
+          match[2] ?? '',
+        )
+      )
+        return false;
+      return (
+        names.every((key) => ['currentBytes', 'peakBytes', 'events'].includes(key)) &&
+        names.every((key) =>
+          key === 'events'
+            ? Object.entries(value.events).every(
+                ([name, amount]) =>
+                  ['oom', 'oom_kill', 'max', 'high'].includes(name) && count(amount),
+              )
+            : count(value[key]),
+        )
+      );
+    }
+    if (match[2] !== undefined) return false;
+    if (match[1] === 'QA_RECOVERY_REJECTION')
+      return (
+        names.length === 2 &&
+        names.every((key) => ['component', 'stage'].includes(key)) &&
+        ['client', 'server'].includes(value.component) &&
+        typeof value.stage === 'string' &&
+        /^(?:RECOVERY_SCOPE_ENTRY|RECOVERY_SCOPE_FOLDER|RECOVERY_SCOPE_FILE|RECOVERY_SCOPE_CONTENT|RECOVERY_SCOPE_SHAPE|RECOVERY_SCOPE_RUNTIME|RECOVERY_SCOPE_TARGET|RECOVERY_SCOPE_PUBLIC|RECOVERY_SCOPE_SOURCE_OPTIONS|RECOVERY_SCOPE_DESTINATION_OPTIONS|RECOVERY_SCOPE_RECIPIENT|RECOVERY_SERVER_ENTRY|RECOVERY_SERVER_SCOPE_READ|RECOVERY_SERVER_PUBLIC|RECOVERY_SERVER_SCOPE_RECHECK|RECOVERY_SERVER_READ|RECOVERY_SERVER_ENVELOPE|RECOVERY_SERVER_ATTACH_VALUE|RECOVERY_SERVER_SCOPE_SEND|RECOVERY_SERVER_SCOPE_READ_ANSWER|RECOVERY_SERVER_SCOPE_ANSWER|RECOVERY_SERVER_RESULT|RECOVERY_SERVER_FINAL_SCOPE|RECOVERY_CLIENT_ENTRY|RECOVERY_CLIENT_SCOPE_INITIAL|RECOVERY_CLIENT_SEND|RECOVERY_CLIENT_READ|RECOVERY_CLIENT_ENVELOPE|RECOVERY_CLIENT_SCOPE_MESSAGE|RECOVERY_CLIENT_SCOPE_CHECK|RECOVERY_CLIENT_SCOPE_SEND|RECOVERY_CLIENT_RESULT|RECOVERY_CLIENT_SCOPE_FINAL|RECOVERY_SITE_CONTEXT|RECOVERY_SITE_CLOCK|RECOVERY_SITE_OWNER|RECOVERY_SITE_SOURCE|RECOVERY_SITE_RECORD|RECOVERY_SITE_PHASE|RECOVERY_SITE_RUN|RECOVERY_SITE_SCOPE|RECOVERY_SITE_RECORD_ANCHOR|RECOVERY_SITE_STOPPED_OBSERVER|RECOVERY_SITE_STOPPED_BOUNDARY|RECOVERY_SITE_STOPPED_SHAPE|RECOVERY_SITE_BOUNDARY_WORK|RECOVERY_SITE_BOUNDARY_FENCE|RECOVERY_SITE_BOUNDARY_PROGRESS|RECOVERY_SITE_BOUNDARY_AFTER_WORK|RECOVERY_SITE_BOUNDARY_VALIDATION|PAIR_ENTRY|PAIR_CLOCK|PAIR_OWNER|PAIR_EFFECTS|PAIR_REVISION|PAIR_PHASE|PAIR_SCOPE|PAIR_LOCAL_RECEIPT|PAIR_REMOTE_RECEIPT|PAIR_RECEIPT_SHAPE|LOCAL_ENTRY|LOCAL_CLOCK|LOCAL_OWNER|LOCAL_EFFECTS|LOCAL_REVISION|LOCAL_PHASE|LOCAL_SCOPE|LOCAL_RECEIPT|STORE_CLOCK|STORE_OWNER|STORE_FOLDER|STORE_ABSENCE|STORE_FILE|STORE_CONTENT|STORE_READ|REMOTE_ENTRY|REMOTE_OWNER|REMOTE_SEND|REMOTE_READ|REMOTE_RESULT|REMOTE_FACT|WIRE_CLOCK|WIRE_READ|WIRE_WRITE|RECEIVER_ENTRY|RECEIVER_SCOPE|RECEIVER_IDENTITY|RECEIVER_FACT|RECEIVER_LOCAL|RECEIVER_RESULT)$/.test(
+          value.stage,
+        )
+      );
+    if (match[1] === 'QA_INGRESS_REJECTION')
+      return (
+        names.length === 2 &&
+        names.every((key) => ['component', 'stage'].includes(key)) &&
+        ['pair', 'receiver'].includes(value.component) &&
+        typeof value.stage === 'string' &&
+        /^(?:PAIR_ENTRY|PAIR_CLOCK|PAIR_OWNER|PAIR_EFFECTS|PAIR_REVISION|PAIR_PHASE|PAIR_SCOPE|PAIR_LOCAL_RECEIPT|PAIR_REMOTE_RECEIPT|PAIR_RECEIPT_SHAPE|LOCAL_ENTRY|LOCAL_CLOCK|LOCAL_OWNER|LOCAL_EFFECTS|LOCAL_REVISION|LOCAL_PHASE|LOCAL_SCOPE|LOCAL_RECEIPT|STORE_CLOCK|STORE_OWNER|STORE_FOLDER|STORE_ABSENCE|STORE_FILE|STORE_CONTENT|STORE_READ|REMOTE_ENTRY|REMOTE_OWNER|REMOTE_SEND|REMOTE_READ|REMOTE_RESULT|REMOTE_FACT|WIRE_CLOCK|WIRE_READ|WIRE_WRITE|RECEIVER_ENTRY|RECEIVER_SCOPE|RECEIVER_IDENTITY|RECEIVER_FACT|RECEIVER_LOCAL|RECEIVER_RESULT)$/.test(
+          value.stage,
+        )
+      );
+    if (match[1] === 'QA_INGRESS_CHILD_EXIT')
+      return (
+        names.length === 2 &&
+        names.every((key) => ['code', 'signal'].includes(key)) &&
+        (value.code === null || (count(value.code) && value.code <= 255)) &&
+        [null, 'SIGKILL', 'SIGTERM', 'SIGABRT', 'SIGSEGV', 'SIGINT'].includes(value.signal)
+      );
+    return (
+      names.length === 6 &&
+      names.every((key) =>
+        [
+          'phase',
+          'recordDigest',
+          'startupCount',
+          'registrationCount',
+          'unmanagedCount',
+          'hasFailureObservation',
+        ].includes(key),
+      ) &&
+      /^(?:preflight|prepared|orders_fenced|legacy_settled|legacy_interruption_accepted|producers_stopped|all_fenced|stopped|backup_verified|migration_started|candidate_started|verified|opened|reconciled)$/.test(
+        value.phase,
+      ) &&
+      /^[a-f0-9]{64}$/.test(value.recordDigest) &&
+      ['startupCount', 'registrationCount', 'unmanagedCount'].every(
+        (key) => count(value[key]) && value[key] <= 65536,
+      ) &&
+      typeof value.hasFailureObservation === 'boolean'
+    );
+  } catch {
+    return false;
+  }
+};
+const persistSafeDiagnostics = (chunk) => {
+  if (safeDiagnosticFailed) return;
+  safeDiagnosticBuffer += chunk.toString();
+  const lines = safeDiagnosticBuffer.split('\n');
+  safeDiagnosticBuffer = lines.pop();
+  if (safeDiagnosticBuffer.length > 8192) safeDiagnosticBuffer = '';
+  for (const line of lines) {
+    if (line.length > 8192 || !safeLine(line)) continue;
+    const bytes = Buffer.from(`${line}\n`);
+    if (safeDiagnosticBytes + bytes.length > 65536) {
+      safeDiagnosticFailed = true;
+      return;
+    }
+    try {
+      let written = 0;
+      while (written < bytes.length) {
+        const amount = writeSync(safeDiagnosticFd, bytes, written);
+        if (!Number.isSafeInteger(amount) || amount <= 0)
+          throw new Error('QA_DIAGNOSTIC_WRITE_FAILED');
+        written += amount;
+      }
+      fsyncSync(safeDiagnosticFd);
+      safeDiagnosticBytes += bytes.length;
+    } catch {
+      safeDiagnosticFailed = true;
+      return;
+    }
+  }
+};
 const child = retirementLink
   ? spawn(
       'docker',
@@ -472,16 +683,24 @@ const child = retirementLink
         '--network',
         stoppedSource ? `container:${sourceContainerId}` : 'none',
         '--cpus=1',
-        fullHost ? '--memory=3g' : '--memory=512m',
+        compileBudget ? '--memory=2g' : '--memory=768m',
         '--pids-limit=256',
         '--cap-add=SYS_PTRACE',
-        ...(nativeIngress ? ['--cap-add=NET_ADMIN'] : []),
+        ...(physicalIngress ? ['--cap-add=NET_ADMIN'] : []),
         '--label',
         `holaday.cutover.attempt=${attempt}`,
+        ...(process.env.CUTOVER_QA_RUNNER_TOKEN
+          ? ['--label', `holaday.qa.runner=${process.env.CUTOVER_QA_RUNNER_TOKEN}`]
+          : []),
         '--mount',
         `type=bind,src=${resolve('scripts')},dst=/source,readonly`,
         '--mount',
         `type=bind,src=${resolve('ops')},dst=/ops,readonly`,
+        '--env',
+        'NODE_OPTIONS=--max-old-space-size=192 --v8-pool-size=1',
+        '--env',
+        'UV_THREADPOOL_SIZE=1',
+        ...(compileBudget ? ['--env', 'CUTOVER_QA_COMPILE_BUDGET=1'] : []),
         '--env',
         `CUTOVER_QA_RECOVERY_SCOPE=${JSON.stringify(publicScope)}`,
         '--env',
@@ -510,7 +729,8 @@ const child = retirementLink
               `CUTOVER_QA_SOURCE=${JSON.stringify({ ...sourceQa, clientDirectory: undefined, migrationManifest, omitReceipt })}`,
             ]
           : []),
-        nativeIngress ? 'holaday-first-cutover-network:qa' : 'holaday-first-cutover-age:qa',
+        process.env.CUTOVER_QA_HOST_IMAGE ??
+          (physicalIngress ? 'holaday-first-cutover-network:qa' : 'holaday-first-cutover-age:qa'),
         '/opt/node22/bin/node',
         '--input-type=module',
         '-e',
@@ -519,22 +739,28 @@ const child = retirementLink
             ? `
           import assert from 'node:assert/strict';
           import * as fs from 'node:fs/promises';
+          import {existsSync} from 'node:fs';
+          import {createHash} from 'node:crypto';
           import {execFileSync} from 'node:child_process';
           await fs.access('/.dockerenv'); assert.equal(process.getuid(),0);
           const profile=JSON.parse(await fs.readFile('/qa-build/cache.json','utf8'));
           const call=(command,args,options={})=>execFileSync(command,args,{stdio:['ignore',2,2],...options});
-          call('cp',['-a','/qa-build/git','/usr/bin/git']);
-          ${nativeIngress ? "call('cp',['-a','/qa-build/age','/usr/bin/age']);" : ''}
-          call('cp',['-a','/qa-build/git-core','/usr/lib/git-core']);
-          call('cp',['-a','/qa-build/pnpm','/opt/node22/lib/node_modules/pnpm']);
-          await fs.symlink('/opt/node22/lib/node_modules/pnpm/bin/pnpm.cjs','/opt/node22/bin/pnpm');
+          const file=(name,target)=>{if(existsSync(target)){assert.equal(createHash('sha256').update(requireBytes(target)).digest('hex'),createHash('sha256').update(requireBytes('/qa-build/'+name)).digest('hex'));}else call('cp',['-a','/qa-build/'+name,target]);};
+          const {readFileSync:requireBytes}=await import('node:fs');
+          file('git','/usr/bin/git');
+          ${physicalIngress ? "file('age','/usr/bin/age');" : ''}
+          if(!existsSync('/usr/lib/git-core'))call('cp',['-a','/qa-build/git-core','/usr/lib/git-core']);
+          if(!existsSync('/opt/node22/lib/node_modules/pnpm'))call('cp',['-a','/qa-build/pnpm','/opt/node22/lib/node_modules/pnpm']);
+          assert.equal(JSON.parse(await fs.readFile('/opt/node22/lib/node_modules/pnpm/package.json','utf8')).version,'10.33.0');
+          if(!existsSync('/opt/node22/bin/pnpm'))await fs.symlink('/opt/node22/lib/node_modules/pnpm/bin/pnpm.cjs','/opt/node22/bin/pnpm');
+          assert.equal(await fs.realpath('/opt/node22/bin/pnpm'),'/opt/node22/lib/node_modules/pnpm/bin/pnpm.cjs');
           await fs.mkdir('/var/lib/holaday/.local/share/pnpm',{recursive:true});
           call('cp',['-a','/qa-build/store','/var/lib/holaday/.local/share/pnpm/store']);
-          call('mv',['/opt/holaday-monorepo','/qa-image-original-source']);
+          if (existsSync('/opt/holaday-monorepo')) call('mv',['/opt/holaday-monorepo','/qa-image-original-source']);
           call('git',['clone','--no-hardlinks','/qa-origin.git','/opt/holaday-monorepo']);
           call('git',['-C','/opt/holaday-monorepo','checkout','--detach',profile.sourceCandidate]);
           call('/opt/node22/bin/pnpm',['install','--frozen-lockfile','--offline'],{
-            cwd:'/opt/holaday-monorepo',env:{PATH:'/opt/node22/bin:/usr/bin:/bin',HOME:'/var/lib/holaday'}
+            cwd:'/opt/holaday-monorepo',env:{PATH:'/opt/node22/bin:/usr/bin:/bin',HOME:'/var/lib/holaday',NODE_OPTIONS:'--max-old-space-size=192 --v8-pool-size=1',UV_THREADPOOL_SIZE:'1'}
           });
         `
             : ''
@@ -546,10 +772,52 @@ const child = retirementLink
   : spawn(process.execPath, ['--input-type=module', '-e', script], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+child.once('close', () => closeSync(safeDiagnosticFd));
 let diagnostic = '';
+let budgetReduction;
+const reduceCompileBudget = async () => {
+  const name = `holaday-retirement-recovery-${attempt}`;
+  const rows = JSON.parse((await run('docker', ['inspect', name])).stdout);
+  assert.equal(rows.length, 1);
+  const before = rows[0];
+  assert.match(before.Id, /^[a-f0-9]{64}$/);
+  assert.equal(before.Image, process.env.CUTOVER_QA_HOST_IMAGE);
+  assert.equal(before.Config.Labels['holaday.qa.runner'], process.env.CUTOVER_QA_RUNNER_TOKEN);
+  assert.equal(before.Config.Labels['holaday.cutover.attempt'], attempt);
+  assert.equal(before.HostConfig.Memory, 2147483648);
+  assert.equal(before.HostConfig.NanoCpus, 1000000000);
+  await run('docker', ['update', '--memory', '768m', '--memory-swap', '1g', before.Id]);
+  const after = JSON.parse((await run('docker', ['inspect', before.Id])).stdout)[0];
+  assert.equal(after.Id, before.Id);
+  assert.equal(after.Image, before.Image);
+  assert.equal(after.Config.Labels['holaday.qa.runner'], process.env.CUTOVER_QA_RUNNER_TOKEN);
+  assert.equal(after.Config.Labels['holaday.cutover.attempt'], attempt);
+  assert.equal(after.HostConfig.Memory, 805306368);
+  await writeFile(
+    join(directory, 'qa-compile-budget-reduction.json'),
+    JSON.stringify({
+      containerId: before.Id,
+      imageId: before.Image,
+      attempt,
+      beforeMemory: before.HostConfig.Memory,
+      afterMemory: after.HostConfig.Memory,
+      resourceManagementOnly: true,
+    }),
+    { mode: 0o600, flag: 'wx' },
+  );
+};
 child.stderr.on('data', (chunk) => {
+  persistSafeDiagnostics(chunk);
   // QA-only child diagnostics; emit codes, never snapshot rows or key material.
   diagnostic += chunk.toString();
+  if (
+    compileBudget &&
+    !budgetReduction &&
+    diagnostic.includes('QA_COMPILE_COMPLETE_REDUCE_MEMORY\n')
+  ) {
+    budgetReduction = reduceCompileBudget();
+    budgetReduction.catch(() => {});
+  }
   if (diagnostic.length > 16384) diagnostic = diagnostic.slice(-16384);
 });
 const exited = new Promise((resolve, reject) => {
@@ -578,11 +846,22 @@ try {
   );
 } catch (error) {
   servingError = error;
+  const cause = ingressDiagnosticStage(error);
+  if (cause) {
+    const line =
+      'QA_RECOVERY_REJECTION ' + JSON.stringify({ component: 'server', stage: cause }) + '\n';
+    persistSafeDiagnostics(Buffer.from(line));
+    console.error(line.trimEnd());
+  }
 } finally {
   child.stdin.end();
 }
 try {
   await exited;
+  if (compileBudget) {
+    assert.ok(budgetReduction);
+    await budgetReduction;
+  }
 } catch (error) {
   // This fixture contains synthetic QA material only; keep bounded diagnostics
   // in its private directory, never print database rows or key material.
@@ -590,6 +869,10 @@ try {
   await writeFile(diagnosticPath, diagnostic, { mode: 0o600, flag: 'wx' });
   console.error('QA diagnostic path:', diagnosticPath);
   throw error;
+}
+if (fullHost) {
+  assert.equal(safeDiagnosticFailed, false, 'bounded QA metadata persistence failed');
+  assert.ok(safeDiagnosticBytes > 0, 'QA metadata missing');
 }
 if (servingError && !(retirementLink && recoveryDrift)) throw servingError;
 if (retirementLink) {

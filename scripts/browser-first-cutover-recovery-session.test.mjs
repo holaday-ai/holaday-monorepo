@@ -1,3 +1,4 @@
+import { ingressDiagnosticStage } from './browser-first-cutover-ingress-diagnostics.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
@@ -77,6 +78,9 @@ for (const fault of [
   'repeat-migration',
   'migration-failed',
   'business-drift',
+  'full-90-table-projection',
+  'oversized-snapshot',
+  'snapshot-identity-drift',
 ])
   test(`recovery runtime session ${fault}: ordered snapshot, single migration and original projection`, async (t) => {
     const f = await fixture(t);
@@ -115,6 +119,19 @@ for (const fault of [
       sourceDigest: '9'.repeat(64),
       businessDigest: 'a'.repeat(64),
     };
+    if (fault === 'full-90-table-projection') {
+      snapshot.objects = Array.from({ length: 90 }, (_, i) => ({
+        ...snapshot.objects[0],
+        name: `table_${i}`,
+      }));
+      snapshot.projection = snapshot.objects.map((object) => ({
+        table: object.name,
+        columns: Array.from({ length: 20 }, (_, i) => `column_${i}`),
+      }));
+      assert.ok(Buffer.byteLength(JSON.stringify(snapshot)) < 256 * 1024);
+    }
+    if (fault === 'oversized-snapshot') snapshot.objects[0].name = 'x'.repeat(256 * 1024);
+    if (fault === 'snapshot-identity-drift') snapshot.identity = f.scope.sourceIdentity;
     const serving = session
       .serveFirstCutoverRecoverySession(f.request, {
         input: toMac,
@@ -177,6 +194,8 @@ for (const fault of [
     };
     if (fault === 'runtime-absent') return rejects(client.snapshot, 0);
     if (fault === 'early-migration') return rejects(client.migrate, 0);
+    if (['oversized-snapshot', 'snapshot-identity-drift'].includes(fault))
+      return rejects(client.snapshot, 0);
     assert.deepEqual(await client.snapshot(), snapshot);
     if (fault === 'migration-failed') return rejects(client.migrate, 1);
     assert.deepEqual(await client.migrate(), { migrationDigest: binding.migrationDigest });
@@ -291,5 +310,113 @@ for (const fault of ['none', 'scope', 'metadata', 'source', 'ack', 'identity']) 
     assert(!sent.join('').includes(f.scope.identityFile));
     assert(!sent.join('').includes('private raw details'));
     assert(!sent.join('').includes('private journal details'));
+  });
+}
+
+for (const fault of ['initial', 'challenge', 'final']) {
+  test(`recovery attach diagnostic client ${fault} preserves guard order and public refusal`, async (t) => {
+    const f = await fixture(t);
+    const input = new PassThrough();
+    const output = new PassThrough();
+    t.after(() => {
+      input.destroy();
+      output.destroy();
+    });
+    const approved = {
+      binding,
+      maintenanceEndsAtMs: f.scope.maintenanceEndsAtMs,
+      scopeDigest: f.request.scopeDigest,
+      sourceIdentity: f.scope.sourceIdentity,
+      isolatedTarget: f.scope.target.identity,
+    };
+    let calls = 0;
+    let operations = 0;
+    output.on('data', (chunk) => {
+      const frame = JSON.parse(chunk.toString());
+      if (frame.type === 'operation') {
+        operations++;
+        input.write(
+          JSON.stringify({ protocol: 1, type: 'scope', seq: 1, scopeSeq: 1, binding }) + '\n',
+        );
+      } else
+        input.write(
+          JSON.stringify({ protocol: 1, type: 'result', seq: 1, value: approved }) + '\n',
+        );
+    });
+    const at = { initial: 1, challenge: 2, final: 3 }[fault];
+    const expected = {
+      initial: 'RECOVERY_CLIENT_SCOPE_INITIAL',
+      challenge: 'RECOVERY_CLIENT_SCOPE_CHECK',
+      final: 'RECOVERY_CLIENT_SCOPE_FINAL',
+    }[fault];
+    await assert.rejects(
+      session.connectFirstCutoverRecoverySession(approved, {
+        input,
+        output,
+        assertScope: async () => {
+          if (++calls === at) throw new Error('private row/path/key');
+        },
+      }),
+      (error) => {
+        assert.equal(error.message, 'CUTOVER_RECOVERY_SESSION_UNPROVEN');
+        assert.equal(ingressDiagnosticStage(error), expected);
+        assert(!JSON.stringify(error.cause).includes('private'));
+        return true;
+      },
+    );
+    assert.equal(calls, at);
+    assert.equal(operations, fault === 'initial' ? 0 : 1);
+  });
+}
+for (const fault of ['scope-read', 'scope-recheck', 'attach-value']) {
+  test(`recovery attach diagnostic server ${fault} reports fixed cause without payload`, async (t) => {
+    const f = await fixture(t);
+    const input = new PassThrough();
+    const output = new PassThrough();
+    t.after(() => {
+      input.destroy();
+      output.destroy();
+    });
+    const approved = {
+      binding,
+      maintenanceEndsAtMs: f.scope.maintenanceEndsAtMs,
+      scopeDigest: f.request.scopeDigest,
+      sourceIdentity: f.scope.sourceIdentity,
+      isolatedTarget: f.scope.target.identity,
+    };
+    input.write(
+      JSON.stringify({
+        protocol: 1,
+        type: 'operation',
+        seq: 1,
+        name: 'attach',
+        value: fault === 'attach-value' ? {} : approved,
+      }) + '\n',
+    );
+    let reads = 0;
+    const stages = {
+      'scope-read': 'RECOVERY_SERVER_SCOPE_READ',
+      'scope-recheck': 'RECOVERY_SERVER_SCOPE_RECHECK',
+      'attach-value': 'RECOVERY_SERVER_ATTACH_VALUE',
+    };
+    await assert.rejects(
+      session.serveFirstCutoverRecoverySession(f.request, {
+        input,
+        output,
+        readScope: async () => {
+          reads++;
+          if ((fault === 'scope-read' && reads === 1) || (fault === 'scope-recheck' && reads === 2))
+            throw new Error('private row/path/key');
+          return f.scope;
+        },
+      }),
+      (error) => {
+        assert.equal(error.message, 'CUTOVER_RECOVERY_SESSION_UNPROVEN');
+        assert.equal(ingressDiagnosticStage(error), stages[fault]);
+        assert(!JSON.stringify(error.cause).includes('private'));
+        return true;
+      },
+    );
+    assert.equal(reads, fault === 'scope-read' ? 1 : 2);
   });
 }

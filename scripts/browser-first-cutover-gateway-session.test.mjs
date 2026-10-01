@@ -52,6 +52,7 @@ test('protected gateway scope pins startup paths, file mode and independent atte
   const save = () => fs.writeFile(root + path, JSON.stringify(value), { mode: 0o600 });
   await save();
   const io = {
+    now: Date.now,
     platform: 'linux',
     uid: 0,
     readApproval: async () => ({ ...binding, maintenanceEndsAtMs: deadline }),
@@ -98,7 +99,8 @@ test('protected gateway scope pins startup paths, file mode and independent atte
   await fs.chmod(root + path, 0o644);
   await assert.rejects(read());
 });
-async function pair(t, mode = '') {
+async function pair(t, mode = '', timing = {}) {
+  const now = timing.now ?? Date.now;
   assert.equal(typeof api.connectFirstCutoverGatewaySession, 'function');
   assert.equal(typeof api.serveFirstCutoverGatewaySession, 'function');
   const upstream = new PassThrough();
@@ -107,7 +109,12 @@ async function pair(t, mode = '') {
     upstream.destroy();
     downstream.destroy();
   });
-  const input = { binding, maintenanceEndsAtMs: Date.now() + 30000, siteDigest: 'e'.repeat(64) };
+  const input = {
+    binding,
+    maintenanceEndsAtMs: now() + 30000,
+    siteDigest: 'e'.repeat(64),
+    ...(timing.reconcileByMs !== undefined ? { reconcileByMs: timing.reconcileByMs } : {}),
+  };
   const site = { ...input, startupFiles: [] };
   let siteChanged = false;
   let identityReads = 0;
@@ -115,11 +122,17 @@ async function pair(t, mode = '') {
   const events = [];
   const actions = [];
   const target = { pid: 123, role: 'gateway' };
-  const record = () => ({ ...binding, phase });
+  const identity = { candidate: binding.candidate, bootId: '2'.repeat(32) };
+  const record = () => ({
+    ...binding,
+    phase,
+    ...(phase === 'reconciled' ? { identity, bootstrapSeed: '1'.repeat(32) } : {}),
+  });
   const serving = api
     .serveFirstCutoverGatewaySession(
       { attempt: binding.attempt },
       {
+        now,
         input: upstream,
         output: downstream,
         readIdentity: async () => {
@@ -273,6 +286,7 @@ async function pair(t, mode = '') {
   };
   return {
     input,
+    identity,
     io,
     actions,
     events,
@@ -469,3 +483,67 @@ test('changed receiver approval is checked again before the next owned effect', 
   await assert.rejects(client.prepare(), /CUTOVER_GATEWAY_SESSION_UNPROVEN/);
   assert.deepEqual(f.actions, []);
 });
+
+for (const fault of [
+  'none',
+  'phase',
+  'candidate',
+  'deadline',
+  'query-ack',
+  'detach-ack',
+  'late-effect',
+]) {
+  test(`same gateway postopen ${fault} uses original deadline and never replays`, async (t) => {
+    const initial = Date.now();
+    let time = initial;
+    const f = await pair(t, '', { now: () => time, reconcileByMs: initial + 90000 });
+    const client = await f.connect();
+    f.phase(fault === 'phase' ? 'verified' : 'reconciled');
+    time = initial + 31000;
+    const request = {
+      stage: 'postopen',
+      observedAtMs: time,
+      identity: structuredClone(f.identity),
+      orders: [],
+    };
+    if (fault === 'candidate') request.identity.bootId = '3'.repeat(32);
+    if (fault === 'deadline') time = initial + 90000;
+    if (fault === 'query-ack') {
+      const write = f.downstream.write.bind(f.downstream);
+      f.downstream.write = (chunk, ...args) => {
+        const frame = JSON.parse(chunk.toString());
+        if (frame.type === 'result' && frame.seq === 2) {
+          f.downstream.destroy();
+          return false;
+        }
+        return write(chunk, ...args);
+      };
+    }
+    if (fault === 'late-effect') {
+      await assert.rejects(client.prepare(), /UNPROVEN/);
+      assert.equal(f.actions.length, 0);
+      return;
+    }
+    if (['phase', 'candidate', 'deadline', 'query-ack'].includes(fault)) {
+      await assert.rejects(client.queryOrders(request), /UNPROVEN/);
+      await assert.rejects(client.queryOrders(request), /UNPROVEN/);
+      assert(f.actions.filter((a) => a === 'query').length <= 1);
+      return;
+    }
+    assert.deepEqual(await client.queryOrders(request), []);
+    if (fault === 'detach-ack') {
+      const write = f.downstream.write.bind(f.downstream);
+      f.downstream.write = (chunk, ...args) => {
+        const frame = JSON.parse(chunk.toString());
+        if (frame.type === 'result' && frame.seq === 3) {
+          f.downstream.destroy();
+          return false;
+        }
+        return write(chunk, ...args);
+      };
+      await assert.rejects(client.close(), /UNPROVEN/);
+      await assert.rejects(client.close(), /UNPROVEN/);
+    } else await client.close();
+    assert.deepEqual(f.actions, ['query']);
+  });
+}

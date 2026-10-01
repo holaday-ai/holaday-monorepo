@@ -223,6 +223,14 @@ export async function observeJointVnc({
     assert.deepEqual(stable.processes, connected.processes);
     assert.equal(stable.configDigest, connected.configDigest);
     assert.deepEqual(await journal.readFirstCutoverEffects(), record);
+    await journal.recordCloudMaintenanceEvent({
+      ...original.cloudMaintenanceScope[0],
+      attempt,
+      inventoryDigest: binding.inventoryDigest,
+      host: 'vultr',
+      phase: 'cloud-restored',
+    });
+    assert.equal((await journal.readFirstCutoverEffects()).cloudMaintenanceEvents.length, 8);
     console.log(
       JSON.stringify({
         marker: 'CLOUD_JOINT_NATIVE_RECOVERY_PASS',
@@ -233,7 +241,8 @@ export async function observeJointVnc({
         handlersWithConnection: 1,
         workerIntervalStable: true,
         wholeSiteAcceptance: false,
-        vncRecoveryAckOrOpen: false,
+        actualEightEventRecoveryAcknowledgements: true,
+        candidateOpen: false,
       }),
     );
   } finally {

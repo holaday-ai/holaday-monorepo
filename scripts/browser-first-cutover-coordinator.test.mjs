@@ -16,12 +16,17 @@ const modules = [
   'browser-first-cutover-fence.mjs',
   'browser-first-cutover-gateway-session.mjs',
   'browser-first-cutover-host.mjs',
+  'browser-first-cutover-ingress-diagnostics.mjs',
   'browser-first-cutover-ingress-files.mjs',
   'browser-first-cutover-ingress-session.mjs',
   'browser-first-cutover-inventory.mjs',
   'browser-first-cutover-mysql.mjs',
   'browser-first-cutover-nginx.mjs',
   'browser-first-cutover-payments.mjs',
+  'browser-first-cutover-browser-probe.mjs',
+  'browser-first-cutover-native-preflight.mjs',
+  'browser-first-cutover-native-preflight.py',
+  'browser-first-cutover-production-facts.mjs',
   'browser-first-cutover-recovery-session.mjs',
   'browser-first-cutover-registrations.mjs',
   'browser-first-cutover-runtime.mjs',
@@ -78,7 +83,7 @@ for (const args of [
     );
     assert.notEqual(result.status, 0);
     assert.equal(result.stdout, '');
-    assert.match(result.stderr, /CUTOVER_COORDINATOR_(USAGE|SITE_UNAVAILABLE)/);
+    assert.match(result.stderr, /CUTOVER_COORDINATOR_(USAGE|UNPROVEN)/);
   });
 }
 
@@ -203,6 +208,8 @@ for (const fault of [
   'candidate-bytes',
   'missing-module',
   'missing-site',
+  'missing-diagnostics',
+  'changed-diagnostics',
   'writable-file',
   'wrong-entry',
   'wrong-argv',
@@ -228,6 +235,13 @@ for (const fault of [
     if (fault === 'missing-module') await fs.unlink(path);
     if (fault === 'missing-site')
       await fs.unlink(f.local(`${f.folder}/browser-first-cutover-site.mjs`));
+    if (fault === 'missing-diagnostics')
+      await fs.unlink(f.local(`${f.folder}/browser-first-cutover-ingress-diagnostics.mjs`));
+    if (fault === 'changed-diagnostics')
+      await fs.writeFile(
+        f.local(`${f.folder}/browser-first-cutover-ingress-diagnostics.mjs`),
+        'altered diagnostic helper',
+      );
     if (fault === 'writable-file') await fs.chmod(path, 0o644);
     if (fault === 'wrong-entry')
       await fs.writeFile(f.local('/proc/910/cmdline'), 'node\0arbitrary.mjs\0');

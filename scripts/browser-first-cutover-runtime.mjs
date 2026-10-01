@@ -1268,6 +1268,404 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
   }
 }
 
+/** Read-only OLD browser association. Executable names select candidates only;
+ * actual initial IPC and every socket peer must prove association. This does
+ * not extend an approved review or grant permission to stop any process. */
+export async function readFirstCutoverCloudOldBrowserAssociations(input, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    monotonic: () => performance.now(),
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_OLD_BROWSER_ASSOCIATION_UNPROVEN');
+  };
+  try {
+    if (
+      Object.keys(input ?? {})
+        .sort()
+        .join(',') !== 'displayObservation,maintenanceEndsAtMs,sources' ||
+      io.platform !== 'linux' ||
+      io.uid !== 0
+    )
+      reject();
+    const { sources, displayObservation: display, maintenanceEndsAtMs } = structuredClone(input);
+    validateFirstCutoverCloudSources(sources, { scope: sources.roles, observed: true });
+    const sha = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+    const began = io.now();
+    const tick = io.monotonic();
+    let last = began;
+    const clock = () => {
+      const now = io.now();
+      const elapsed = io.monotonic() - tick;
+      if (
+        !Number.isSafeInteger(began) ||
+        began < 0 ||
+        !Number.isFinite(elapsed) ||
+        !Number.isSafeInteger(now) ||
+        now < 0 ||
+        now < last ||
+        now - began > 15000 ||
+        elapsed < 0 ||
+        elapsed > 15000 ||
+        !Number.isSafeInteger(maintenanceEndsAtMs) ||
+        now >= maintenanceEndsAtMs ||
+        !Number.isSafeInteger(display?.observedAtMs) ||
+        display.observedAtMs > now ||
+        now - display.observedAtMs > 60000 ||
+        sources.observedAtMs > now ||
+        now - sources.observedAtMs > 60000
+      )
+        reject();
+      last = now;
+      return now;
+    };
+    clock();
+    const { observedAtMs: _time, ...material } = sources;
+    if (
+      display?.purpose !== 'cloud-owned-display-observation' ||
+      display.sourcesDigest !== sha(material) ||
+      display.hostname !== sources.hostname ||
+      display.bootId !== sources.bootId ||
+      !Array.isArray(display.roots) ||
+      display.roots.length !== 2 ||
+      !Array.isArray(display.treeDigests) ||
+      display.treeDigests.length !== 2
+    )
+      reject();
+    const context = await readFirstCutoverCloudRecoveryContext({ sources }, io);
+    if (context.daemon.contextDigest !== display.contextDigest) reject();
+    const readCensus = io.readCensus ?? (() => readFirstCutoverCloudRecoveryCensus(io));
+    const census = structuredClone(await readCensus());
+    const stable = (c) => ({ hostname: c.hostname, bootId: c.bootId, processes: c.processes });
+    if (
+      census.hostname !== sources.hostname ||
+      census.bootId !== sources.bootId ||
+      !Number.isSafeInteger(census.observedAtMs) ||
+      census.observedAtMs < began ||
+      census.observedAtMs > clock() ||
+      !Array.isArray(census.processes) ||
+      census.processes.length > 16384 ||
+      new Set(census.processes.map((p) => p.pid)).size !== census.processes.length ||
+      sha(stable(census)) !== display.censusDigest
+    )
+      reject();
+    const byPid = new Map(census.processes.map((p) => [p.pid, p]));
+    const headed = display.roots[1];
+    const root = byPid.get(headed?.pid);
+    const daemon = byPid.get(context.daemon.pid);
+    if (
+      headed?.name !== 'holaday-chromium-headed' ||
+      headed.status !== 'online' ||
+      headed.configDigest !== sources.roles[1].configDigest ||
+      !root ||
+      root.start !== headed.start ||
+      root.ppid !== daemon?.pid ||
+      daemon.start !== context.daemon.start
+    )
+      reject();
+    const managers = async () => {
+      const rows = await readFirstCutoverCloudManagers(io);
+      const projected = rows.map((r) => ({
+        name: r.name,
+        pmId: r.pm_id,
+        pid: r.pid,
+        start: r.pid ? byPid.get(r.pid)?.start : null,
+        status: r.pm2_env.status,
+        configDigest: cutoverRegistrationConfigDigest(r.pm2_env),
+      }));
+      if (
+        !isDeepStrictEqual(projected, display.roots) ||
+        projected.some((r, i) => r.configDigest !== sources.roles[i].configDigest)
+      )
+        reject();
+      clock();
+      return projected;
+    };
+    const beforeManagers = await managers();
+    const ids = new Set([root.pid]);
+    for (let i = 0; i < census.processes.length; i++)
+      for (const p of census.processes) if (ids.has(p.ppid)) ids.add(p.pid);
+    const project = (p) =>
+      Object.fromEntries(
+        ['pid', 'ppid', 'start', 'uids', 'exe', 'cwd', 'argvDigest', 'cgroup'].map((k) => [
+          k,
+          p[k],
+        ]),
+      );
+    const tree = census.processes.filter((p) => ids.has(p.pid)).sort((a, b) => a.pid - b.pid);
+    if (sha(tree.map(project)) !== display.treeDigests[1]) reject();
+    const brave = new Set(
+      tree.filter((p) => p.exe === '/opt/brave.com/brave/brave').map((p) => p.pid),
+    );
+    if (!brave.size) reject();
+    const executable = '/opt/brave.com/brave/chrome_crashpad_handler';
+    const candidates = census.processes.filter(
+      (p) => p.exe === executable || p.exe === `${executable} (deleted)`,
+    );
+    if (candidates.length > 32) reject();
+    const bounded = async (path, limit) => {
+      clock();
+      const h = await io.open(
+        path,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      try {
+        const b = Buffer.alloc(limit + 1);
+        let size = 0;
+        while (size < b.length) {
+          const { bytesRead: n } = await h.read(b, size, b.length - size, size);
+          if (!Number.isSafeInteger(n) || n < 0 || n > b.length - size) reject();
+          if (!n) break;
+          size += n;
+          clock();
+        }
+        if (size > limit) reject();
+        return b.subarray(0, size);
+      } finally {
+        await h.close();
+      }
+    };
+    const statKeys = ['dev', 'ino', 'uid', 'gid', 'mode', 'size', 'mtimeMs', 'ctimeMs'];
+    const sameStat = (a, b) => statKeys.every((k) => a[k] === b[k]);
+    const image = async () => {
+      if (!candidates.length) return;
+      const source = sources.files.find(
+        (f) => f.path === executable && f.resolvedPath === executable,
+      );
+      const disk = await io.stat(executable);
+      if (
+        !source ||
+        !disk.isFile() ||
+        disk.uid !== 0 ||
+        disk.mode & 0o7022 ||
+        !Number.isSafeInteger(disk.size) ||
+        disk.size < 1 ||
+        disk.size > 64 * 1024 * 1024 ||
+        source.uid !== disk.uid ||
+        source.gid !== disk.gid ||
+        source.mode !== (disk.mode & 0o7777) ||
+        source.size !== disk.size
+      )
+        reject();
+      if (
+        createHash('sha256')
+          .update(await bounded(executable, disk.size))
+          .digest('hex') !== source.digest ||
+        !sameStat(disk, await io.stat(executable))
+      )
+        reject();
+      for (const p of candidates)
+        if (
+          (await io.readlink(`/proc/${p.pid}/exe`)) !== executable ||
+          !sameStat(disk, await io.stat(`/proc/${p.pid}/exe`))
+        )
+          reject();
+    };
+    await image();
+    const sample = async () => {
+      clock();
+      const out = await (io.exec ?? execFixed)('/usr/bin/ss', ['-H', '-xapn'], {
+        env: fixedEnv,
+        timeout: 5000,
+        maxBuffer: 1048576,
+      });
+      if (typeof out !== 'string' || Buffer.byteLength(out) > 1048576) reject();
+      const rows = (out.trim() ? out.trim().split('\n') : []).map((line) => {
+        const c = line.trim().split(/\s+/);
+        if (c.length < 8) reject();
+        return { line, kind: c[0], state: c[1], inode: c[5], peer: c[7] };
+      });
+      if (rows.length > 16384) reject();
+      const held = async (row) => {
+        const tuples = [...row.line.matchAll(/\("[^"\n]*",pid=(\d+),fd=(\d+)\)/g)];
+        if (
+          !/^[1-9]\d{0,19}$/.test(row.inode) ||
+          tuples.length < 1 ||
+          tuples.length > 512 ||
+          tuples.length !== [...row.line.matchAll(/\bpid=/g)].length
+        )
+          reject();
+        const owners = [];
+        for (const t of tuples) {
+          clock();
+          const pid = Number(t[1]);
+          const fd = Number(t[2]);
+          const p = byPid.get(pid);
+          if (
+            !p ||
+            !Number.isSafeInteger(fd) ||
+            owners.some((o) => o.pid === pid && o.fd === fd) ||
+            (await io.readlink(`/proc/${pid}/fd/${fd}`)) !== `socket:[${row.inode}]`
+          )
+            reject();
+          owners.push({ pid, start: p.start, fd });
+        }
+        return owners.sort((a, b) => a.pid - b.pid || a.fd - b.fd);
+      };
+      const graph = new Map();
+      const edge = async (inode, pid, localGroup) => {
+        const matches = rows.filter((r) => r.inode === inode);
+        if (
+          matches.length !== 1 ||
+          !['u_str', 'u_seq'].includes(matches[0].kind) ||
+          matches[0].state !== 'ESTAB'
+        )
+          reject();
+        const row = matches[0];
+        const owners = await held(row);
+        if (
+          !owners.some((o) => o.pid === pid) ||
+          (localGroup
+            ? owners.some((o) => !localGroup.has(o.pid))
+            : owners.length !== 1 || owners[0].pid !== pid)
+        )
+          reject();
+        const peers = rows.filter(
+          (r) =>
+            r.inode === row.peer &&
+            r.peer === row.inode &&
+            r.kind === row.kind &&
+            r.state === 'ESTAB',
+        );
+        if (peers.length !== 1) reject();
+        const peer = peers[0];
+        const peerOwners = await held(peer);
+        graph.set(inode, { inode, kind: row.kind, peer: row.peer, owners });
+        graph.set(peer.inode, {
+          inode: peer.inode,
+          kind: peer.kind,
+          peer: peer.peer,
+          owners: peerOwners,
+        });
+        return { inode: peer.inode, owners: peerOwners };
+      };
+      const fdSockets = async (pid) => {
+        const names = await io.readdir(`/proc/${pid}/fd`);
+        if (
+          names.length > 256 ||
+          new Set(names).size !== names.length ||
+          names.some((n) => !/^\d+$/.test(n))
+        )
+          reject();
+        const sockets = [];
+        for (const name of names) {
+          clock();
+          const match = /^socket:\[(\d+)\]$/.exec(await io.readlink(`/proc/${pid}/fd/${name}`));
+          if (match) sockets.push({ fd: Number(name), inode: match[1] });
+        }
+        return sockets.sort((a, b) => a.fd - b.fd);
+      };
+      const inspected = [];
+      for (const p of candidates) {
+        const bytes = await bounded(`/proc/${p.pid}/cmdline`, 16384);
+        const cmd = bytes.toString('utf8');
+        if (!Buffer.from(cmd).equals(bytes) || sha(cmd) !== p.argvDigest) reject();
+        const flags = cmd.split('\0').filter((a) => a.startsWith('--initial-client-fd='));
+        if (flags.length !== 1 || !/^--initial-client-fd=\d{1,6}$/.test(flags[0])) reject();
+        const initialFd = Number(flags[0].split('=')[1]);
+        const sockets = await fdSockets(p.pid);
+        const initial = sockets.find((s) => s.fd === initialFd);
+        if (!initial) reject();
+        inspected.push({ p, initialFd, sockets, peer: await edge(initial.inode, p.pid) });
+      }
+      const primary = new Set();
+      for (const c of inspected) {
+        if (!c.peer.owners.some((o) => brave.has(o.pid))) continue;
+        if (c.peer.owners.some((o) => !brave.has(o.pid))) reject();
+        primary.add(c.p.pid);
+      }
+      if (candidates.length && !primary.size) reject();
+      const associated = inspected.filter((c) => {
+        if (primary.has(c.p.pid)) return true;
+        if (!c.peer.owners.some((o) => primary.has(o.pid))) return false;
+        if (c.peer.owners.length !== 1) reject();
+        const parent = inspected.find((p) => p.p.pid === c.peer.owners[0].pid);
+        if (!parent.sockets.some((s) => s.fd !== parent.initialFd && s.inode === c.peer.inode))
+          reject();
+        return true;
+      });
+      for (const c of inspected) if (ids.has(c.p.pid) && !associated.includes(c)) reject();
+      const group = new Set([...brave, ...associated.map((c) => c.p.pid)]);
+      const stdioGroup = new Set([...ids, ...associated.map((c) => c.p.pid)]);
+      const rootStdio = new Map();
+      for (const c of associated) {
+        const p = c.p;
+        if (
+          p.state !== 'live' ||
+          p.uids?.length !== 4 ||
+          p.uids.some((u) => u !== 0) ||
+          p.cgroup !== root.cgroup ||
+          p.mountNamespace !== root.mountNamespace ||
+          (p.ppid !== 1 && !ids.has(p.ppid) && !group.has(p.ppid))
+        )
+          reject();
+        for (const socket of c.sockets) {
+          let inherited = false;
+          if (socket.fd !== c.initialFd && [0, 1, 2].includes(socket.fd)) {
+            const link = await io.readlink(`/proc/${root.pid}/fd/${socket.fd}`);
+            rootStdio.set(socket.fd, link);
+            inherited = link === `socket:[${socket.inode}]`;
+          }
+          const peer = await edge(socket.inode, p.pid, inherited ? stdioGroup : group);
+          if (
+            inherited
+              ? peer.owners.length !== 1 || peer.owners[0].pid !== daemon.pid
+              : peer.owners.some((o) => !group.has(o.pid))
+          )
+            reject();
+        }
+        if (
+          !isDeepStrictEqual(c.sockets, await fdSockets(p.pid)) ||
+          sha((await bounded(`/proc/${p.pid}/cmdline`, 16384)).toString('utf8')) !== p.argvDigest
+        )
+          reject();
+      }
+      for (const [fd, link] of rootStdio)
+        if ((await io.readlink(`/proc/${root.pid}/fd/${fd}`)) !== link) reject();
+      return {
+        members: associated.map((c) => project(c.p)).sort((a, b) => a.pid - b.pid),
+        graph: [...graph.values()].sort((a, b) => a.inode.localeCompare(b.inode)),
+        rootStdio: [...rootStdio].sort((a, b) => a[0] - b[0]),
+      };
+    };
+    const first = await sample();
+    if (!isDeepStrictEqual(first, await sample())) reject();
+    await image();
+    const after = structuredClone(await readCensus());
+    if (
+      !Number.isSafeInteger(after.observedAtMs) ||
+      !isDeepStrictEqual(stable(census), stable(after)) ||
+      after.observedAtMs < census.observedAtMs ||
+      after.observedAtMs > clock()
+    )
+      reject();
+    const closing = await readFirstCutoverCloudRecoveryContext({ sources }, io);
+    if (
+      closing.daemon.contextDigest !== context.daemon.contextDigest ||
+      !isDeepStrictEqual(beforeManagers, await managers())
+    )
+      reject();
+    return {
+      purpose: 'cloud-old-browser-association-observation',
+      hostname: census.hostname,
+      bootId: census.bootId,
+      sourcesDigest: display.sourcesDigest,
+      contextDigest: context.daemon.contextDigest,
+      displayObservationDigest: sha(display),
+      censusDigest: sha(stable(census)),
+      members: first.members,
+      socketDigest: sha(first),
+      observedAtMs: clock(),
+    };
+  } catch {
+    reject();
+  }
+}
+
 /** Read-only fixed-endpoint vacancy in the daemon's initial namespaces. This
  * observes two stopped registrations and bounded empty endpoint samples; it is
  * not a reservation, old-process census, dynamic-loader audit or restore permit.
@@ -2634,6 +3032,66 @@ export async function readFirstCutoverCloudBrowserRecovery(input, overrides = {}
  * No production restore may dispatch without those native prerequisites.
  */
 export async function readFirstCutoverCloudRecovery(input, overrides = {}) {
+  return readCloudRecoveryObservation(input, overrides);
+}
+
+/** Only the original observer's private ledger supplies this historical anchor.
+ * The anchor never gets a new timestamp. Every returned field is remeasured by
+ * the same actual native readers, under a fresh bounded full-census bracket.
+ * This API performs no intent, launch, PM2 mutation or origin assignment.
+ */
+export async function reobserveFirstCutoverCloudRecovery(input, origin, overrides = {}) {
+  const fail = () => {
+    throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+  };
+  const keys = Object.keys(origin ?? {})
+    .sort()
+    .join(',');
+  const expected =
+    input?.name === 'holaday-vnc'
+      ? 'beforeCensusDigest,bootId,censusDigest,configDigest,display,hostname,launchDigest,mountNamespace,name,observedAtMs,pid,pmId,ppid,processes,purpose,restartCount,start,vnc'
+      : 'beforeCensusDigest,bootId,censusDigest,configDigest,display,hostname,launchDigest,mountNamespace,name,observedAtMs,pid,pmId,policyDigest,ppid,processes,purpose,restartCount,start';
+  const sha = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+  if (
+    keys !== expected ||
+    origin.purpose !== 'cloud-recovery-native-observation' ||
+    origin.name !== input.name ||
+    origin.pmId !== input.pmId ||
+    origin.hostname !== input.beforeCensus?.hostname ||
+    origin.bootId !== input.beforeCensus?.bootId ||
+    origin.beforeCensusDigest !== sha(input.beforeCensus) ||
+    !Number.isSafeInteger(origin.observedAtMs) ||
+    origin.observedAtMs < input.restoreStartedAtMs ||
+    origin.observedAtMs - input.beforeCensus.observedAtMs > 60000 ||
+    !Array.isArray(origin.processes) ||
+    !origin.processes.some((p) => p.pid === origin.pid && p.start === origin.start)
+  )
+    fail();
+  const current = await readCloudRecoveryObservation(input, overrides, structuredClone(origin));
+  for (const key of [
+    'name',
+    'pmId',
+    'hostname',
+    'bootId',
+    'pid',
+    'start',
+    'ppid',
+    'configDigest',
+    'restartCount',
+    'launchDigest',
+    'beforeCensusDigest',
+    'mountNamespace',
+    'policyDigest',
+  ])
+    if (current[key] !== origin[key]) fail();
+  if (!isDeepStrictEqual(current.display, origin.display)) fail();
+  const oldRoot = origin.processes.find((p) => p.pid === origin.pid),
+    newRoot = current.processes.find((p) => p.pid === origin.pid);
+  if (!isDeepStrictEqual(oldRoot, newRoot)) fail();
+  return current;
+}
+
+async function readCloudRecoveryObservation(input, overrides = {}, origin) {
   if (input?.name === 'holaday-vnc' && (!input.headedRecovery || !input.sources))
     throw new Error('CUTOVER_CLOUD_VNC_NATIVE_SOURCE_UNPROVEN');
   const io = {
@@ -2724,12 +3182,13 @@ export async function readFirstCutoverCloudRecovery(input, overrides = {}) {
       !Number.isSafeInteger(began) ||
       beforeCensus.observedAtMs > restoreStartedAtMs ||
       restoreStartedAtMs > began ||
-      began - beforeCensus.observedAtMs > 60000
+      (origin ? began - origin.observedAtMs < 0 : began - beforeCensus.observedAtMs > 60000)
     )
       reject();
     const readCensus = io.readCensus ?? (() => readFirstCutoverCloudRecoveryCensus(io));
     const current = structuredClone(await readCensus());
     census(current);
+    if (origin && current.observedAtMs < began) reject();
     if (name === 'holaday-vnc')
       return await readCloudVncRecovery(copy, io, {
         reject,
@@ -2739,6 +3198,7 @@ export async function readFirstCutoverCloudRecovery(input, overrides = {}) {
         began,
         current,
         readCensus,
+        origin,
       });
     const runtime = await readFirstCutoverCloudBrowserRecovery({ attempt, pmId }, io);
     const displays = current.processes.filter(
@@ -2784,7 +3244,7 @@ export async function readFirstCutoverCloudRecovery(input, overrides = {}) {
     if (
       !Number.isSafeInteger(now) ||
       now < began ||
-      now - beforeCensus.observedAtMs > 60000 ||
+      (origin ? now - began > 60000 : now - beforeCensus.observedAtMs > 60000) ||
       current.observedAtMs < restoreStartedAtMs ||
       current.observedAtMs > runtime.observedAtMs ||
       after.observedAtMs < runtime.observedAtMs ||
@@ -2843,6 +3303,7 @@ export async function readFirstCutoverCloudRecovery(input, overrides = {}) {
         reject();
     }
     if (
+      !origin &&
       !isDeepStrictEqual(
         current.processes.filter((p) => !ids.has(p.pid)),
         beforeCensus.processes,
@@ -2877,7 +3338,7 @@ export async function readFirstCutoverCloudRecovery(input, overrides = {}) {
 /** Read-only VNC facts. Sources and the retained headed observation are
  * remeasured here; neither their shape nor this result authorizes a restart. */
 async function readCloudVncRecovery(copy, io, context) {
-  const { reject, census, sha, keys, began, current, readCensus } = context;
+  const { reject, census, sha, keys, began, current, readCensus, origin } = context;
   const {
     attempt,
     name,
@@ -2895,7 +3356,7 @@ async function readCloudVncRecovery(copy, io, context) {
     if (
       !Number.isSafeInteger(now) ||
       now < highWater ||
-      now - beforeCensus.observedAtMs > 60000 ||
+      (origin ? now - began > 60000 : now - beforeCensus.observedAtMs > 60000) ||
       performance.now() - started > 60000
     )
       reject();
@@ -2919,7 +3380,7 @@ async function readCloudVncRecovery(copy, io, context) {
     !hash(headed.censusDigest)
   )
     reject();
-  fresh(headed.observedAtMs);
+  if (!origin) fresh(headed.observedAtMs);
   const scope = [
     { name, pmId },
     { name: headed.name, pmId: headed.pmId },
@@ -3112,10 +3573,11 @@ async function readCloudVncRecovery(copy, io, context) {
     !root ||
     processes.length < 4 ||
     processes.length > 512 ||
-    !isDeepStrictEqual(
-      current.processes.filter((p) => !ids.has(p.pid)),
-      beforeCensus.processes,
-    )
+    (!origin &&
+      !isDeepStrictEqual(
+        current.processes.filter((p) => !ids.has(p.pid)),
+        beforeCensus.processes,
+      ))
   )
     reject();
   const daemonPidText = (await io.readFile('/root/.pm2/pm2.pid', 'utf8')).trim();

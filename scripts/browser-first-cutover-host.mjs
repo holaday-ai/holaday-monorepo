@@ -4,8 +4,12 @@ import * as fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import { ingressDiagnosticError } from './browser-first-cutover-ingress-diagnostics.mjs';
+import { probeFirstCutoverRecoveredBrowser } from './browser-first-cutover-browser-probe.mjs';
 import {
   collectCutoverEvidence,
+  compareCutoverCloudBrowserRecoveryConfig,
+  compareCutoverCloudVncRecoveryConfig,
   cutoverCloudStopConfigDigest,
   cutoverLegacyInterruptionRisk,
   cutoverRegistrationConfigDigest,
@@ -24,6 +28,7 @@ import { createCutoverIngressFiles } from './browser-first-cutover-ingress-files
 import {
   classifyFirstCutoverHostPair,
   classifyFirstCutoverRetirementPair,
+  firstCutoverCloudStopScope,
   validateFirstCutoverOwnedDisplayObservation,
 } from './browser-first-cutover-inventory.mjs';
 import {
@@ -33,11 +38,18 @@ import {
 } from './browser-first-cutover-mysql.mjs';
 import {
   captureLegacyRuntime,
+  firstCutoverCloudBrowserRecoveryLaunch,
+  firstCutoverCloudVncRecoveryMaterial,
+  readFirstCutoverCloudRecovery,
+  reobserveFirstCutoverCloudRecovery,
+  restoreFirstCutoverCloudBrowser,
+  restoreFirstCutoverCloudVnc,
   initializeFirstMaintenanceState,
   prepareFirstCutoverCloudBrowserPolicy,
   readFirstCutoverCloudBrowserRecovery,
   readFirstCutoverCloudManagers,
   readFirstCutoverCloudOwnedDisplay,
+  readFirstCutoverCloudOldBrowserAssociations,
   readFirstCutoverCloudRecoveryCensus,
   readFirstCutoverCloudRecoverySources,
   readFirstCutoverCloudRecoveryVacancy,
@@ -53,7 +65,14 @@ import {
   stageReleaseCandidate,
 } from './browser-maintenance-host.mjs';
 
-const system = { ...fs, platform: process.platform, uid: process.getuid?.(), now: Date.now };
+import { readFirstCutoverCloudNativePreflight } from './browser-first-cutover-native-preflight.mjs';
+
+const system = {
+  ...fs,
+  platform: process.platform,
+  uid: process.getuid?.(),
+  now: Date.now,
+};
 const directory = '/var/lib/holaday-deploy/maintenance';
 const approvalPath = `${directory}/first-cutover-approved.json`;
 const uuid = (value) =>
@@ -89,12 +108,17 @@ const coordinatorModules = [
   'browser-first-cutover-fence.mjs',
   'browser-first-cutover-gateway-session.mjs',
   'browser-first-cutover-host.mjs',
+  'browser-first-cutover-ingress-diagnostics.mjs',
   'browser-first-cutover-ingress-files.mjs',
   'browser-first-cutover-ingress-session.mjs',
   'browser-first-cutover-inventory.mjs',
   'browser-first-cutover-mysql.mjs',
+  'browser-first-cutover-native-preflight.mjs',
+  'browser-first-cutover-native-preflight.py',
   'browser-first-cutover-nginx.mjs',
   'browser-first-cutover-payments.mjs',
+  'browser-first-cutover-production-facts.mjs',
+  'browser-first-cutover-browser-probe.mjs',
   'browser-first-cutover-recovery-session.mjs',
   'browser-first-cutover-registrations.mjs',
   'browser-first-cutover-runtime.mjs',
@@ -146,12 +170,32 @@ export async function createFirstCutoverCoordinatorIdentity(input, overrides = {
         !input ||
         Object.keys(input).length !== 2 ||
         !uuid(input.attempt) ||
-        input.mode !== 'check' ||
+        !['check', 'execute'].includes(input.mode) ||
         !Number.isSafeInteger(io.pid) ||
         io.pid <= 1
       )
         reject();
-      const approval = await io.readApproval({ attempt: input.attempt });
+      const late = originalApproval && io.now() >= originalApproval.maintenanceEndsAtMs;
+      let reconciliationRecord;
+      if (late) {
+        if (typeof io.readReconciliationJournal !== 'function') reject();
+        reconciliationRecord = await assertFirstCutoverReconciliationRead(
+          {
+            binding: Object.fromEntries(
+              ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map(
+                (k) => [k, originalApproval[k]],
+              ),
+            ),
+            ...originalApproval,
+          },
+          await io.readReconciliationJournal(),
+          io.now(),
+        );
+      }
+      const approval = await (late
+        ? (io.readReconciliationApproval ?? readFirstCutoverReconciliationApproval)
+        : io.readApproval)({ attempt: input.attempt });
+      const identityDeadline = late ? approval.reconcileByMs : approval.maintenanceEndsAtMs;
       const now = io.now();
       if (
         (originalApproval && !isDeepStrictEqual(originalApproval, approval)) ||
@@ -165,7 +209,7 @@ export async function createFirstCutoverCoordinatorIdentity(input, overrides = {
         now < 0 ||
         now < lastTime ||
         !Number.isSafeInteger(approval.maintenanceEndsAtMs) ||
-        now >= approval.maintenanceEndsAtMs
+        now >= identityDeadline
       )
         reject();
       const folder = `/var/lib/holaday-deploy/first-cutover/${approval.candidate}`;
@@ -290,9 +334,9 @@ export async function createFirstCutoverCoordinatorIdentity(input, overrides = {
           !isDeepStrictEqual(uids, [0, 0, 0, 0]) ||
           process.cwd !== '/' ||
           process.exe !== '/opt/node22/bin/node' ||
-          !Buffer.from(`/opt/node22/bin/node\0${entry}\0--check\0${input.attempt}\0`).equals(
-            cmdline,
-          ) ||
+          !Buffer.from(
+            `/opt/node22/bin/node\0${entry}\0--${input.mode}\0${input.attempt}\0`,
+          ).equals(cmdline) ||
           !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(bootId) ||
           !process.cgroup ||
           process.cgroup.length > 65536
@@ -303,9 +347,14 @@ export async function createFirstCutoverCoordinatorIdentity(input, overrides = {
       const self = await processIdentity();
       if (
         !isDeepStrictEqual(self, await processIdentity()) ||
-        !isDeepStrictEqual(approval, await io.readApproval({ attempt: input.attempt })) ||
+        !isDeepStrictEqual(
+          approval,
+          await (late
+            ? (io.readReconciliationApproval ?? readFirstCutoverReconciliationApproval)
+            : io.readApproval)({ attempt: input.attempt }),
+        ) ||
         io.now() < now ||
-        io.now() >= approval.maintenanceEndsAtMs
+        io.now() >= identityDeadline
       )
         reject();
       const finished = io.now();
@@ -313,7 +362,26 @@ export async function createFirstCutoverCoordinatorIdentity(input, overrides = {
         closed ||
         !Number.isSafeInteger(finished) ||
         finished < now ||
-        finished >= approval.maintenanceEndsAtMs
+        finished >= identityDeadline
+      )
+        reject();
+      if (
+        late &&
+        !isDeepStrictEqual(
+          reconciliationRecord,
+          await assertFirstCutoverReconciliationRead(
+            {
+              binding: Object.fromEntries(
+                ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].map(
+                  (k) => [k, approval[k]],
+                ),
+              ),
+              ...approval,
+            },
+            await io.readReconciliationJournal(),
+            io.now(),
+          ),
+        )
       )
         reject();
       const result = {
@@ -346,20 +414,58 @@ export async function createFirstCutoverCoordinatorIdentity(input, overrides = {
   };
 }
 
-// Explicit inspection only. Until the original full site is wired, --execute
-// must fail; source identity must never be reported as release readiness.
+// Check inspects source identity only. Execute uses the same protected binding,
+// original site, journal lock, independent observations and absolute deadlines.
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   try {
     const [mode, attempt, ...extra] = process.argv.slice(2);
     if (extra.length || !uuid(attempt) || !['--check', '--execute'].includes(mode))
       throw new Error('CUTOVER_COORDINATOR_USAGE');
-    if (mode === '--execute') throw new Error('CUTOVER_COORDINATOR_SITE_UNAVAILABLE');
-    const handle = await createFirstCutoverCoordinatorIdentity({ mode: 'check', attempt });
+    let executionJournal;
+    const handle = await createFirstCutoverCoordinatorIdentity(
+      { mode: mode.slice(2), attempt },
+      {
+        readReconciliationJournal: async () => {
+          if (!executionJournal) throw new Error('CUTOVER_COORDINATOR_UNPROVEN');
+          return executionJournal;
+        },
+      },
+    );
     try {
       const value = await handle.readExecutionIdentity();
-      process.stdout.write(
-        `${JSON.stringify({ kind: 'coordinator-source-inspection', candidate: value.binding.candidate, toolDigest: value.toolDigest, releaseReady: false })}\n`,
-      );
+      if (mode === '--check') {
+        process.stdout.write(
+          `${JSON.stringify({ kind: 'coordinator-source-inspection', candidate: value.binding.candidate, toolDigest: value.toolDigest, releaseReady: false })}\n`,
+        );
+      } else {
+        const approval = await readFirstCutoverApproval({ attempt });
+        const { createFirstCutoverExecutionSite } = await import(
+          './browser-first-cutover-site.mjs'
+        );
+        const { performFirstCutover } = await import('./browser-first-cutover-transition.mjs');
+        const site = createFirstCutoverExecutionSite(
+          { attempt },
+          {
+            readCoordinatorIdentity: () => handle.readExecutionIdentity(),
+            bindCoordinatorJournal: (journal) => {
+              if (executionJournal && executionJournal !== journal)
+                throw new Error('CUTOVER_COORDINATOR_UNPROVEN');
+              executionJournal = journal;
+            },
+          },
+        );
+        const adapter = createFirstCutoverHostAdapter({ attempt }, site);
+        const result = await performFirstCutover({
+          candidate: value.binding.candidate,
+          adapter,
+          window: approval,
+        });
+        await adapter.finish(result);
+        process.stdout.write(
+          `${JSON.stringify({ kind: 'first-cutover-execution-result', candidate: value.binding.candidate, attempt, ok: result.ok === true, phase: result.phase })}\n`,
+        );
+        if (!result.ok) process.exitCode = 1;
+      }
     } finally {
       handle.close();
     }
@@ -461,7 +567,11 @@ export async function readFirstCutoverHostPair(overrides = {}) {
               `holaday-cutover-v1 observe ${requestId}`,
             ],
           },
-          { host: 'vultr', command: '/opt/node22/bin/node', args: ['--input-type=module'] },
+          {
+            host: 'vultr',
+            command: '/opt/node22/bin/node',
+            args: ['--input-type=module'],
+          },
         ]
       : [
           {
@@ -518,7 +628,11 @@ export async function readFirstCutoverHostPair(overrides = {}) {
           : result.sourceCandidate !== null)
       )
         throw new Error('response');
-      return { host, sourceCandidate: result.sourceCandidate, snapshot: result.snapshot };
+      return {
+        host,
+        sourceCandidate: result.sourceCandidate,
+        snapshot: result.snapshot,
+      };
     };
     const results = [];
     if (rootChannel) {
@@ -906,11 +1020,18 @@ export async function resumeFirstCutoverCandidateWorker(
       const change = backed[0]?.files[i];
       if (change && (change.path !== f.path || change.beforeDigest !== f.digest)) fail();
       if (!change && f.remove?.length) fail();
-      return { path: f.path, digest: change ? change.afterDigest : f.digest, remove: [] };
+      return {
+        path: f.path,
+        digest: change ? change.afterDigest : f.digest,
+        remove: [],
+      };
     });
     await io.persistStartup(
       {
-        binding: { attempt: binding.attempt, inventoryDigest: binding.inventoryDigest },
+        binding: {
+          attempt: binding.attempt,
+          inventoryDigest: binding.inventoryDigest,
+        },
         identity,
         applicationGid,
         workerEnabled: enabled,
@@ -924,7 +1045,10 @@ export async function resumeFirstCutoverCandidateWorker(
         now: io.now,
         assertOwnership: async () => {
           await guard();
-          return { attempt: binding.attempt, inventoryDigest: binding.inventoryDigest };
+          return {
+            attempt: binding.attempt,
+            inventoryDigest: binding.inventoryDigest,
+          };
         },
         assertCandidate: async () => (await registrations()).rows,
         persist: (event) => context.journal.recordCandidateStartupEvent(event),
@@ -1281,12 +1405,29 @@ export async function readFirstCutoverPaymentScope(context, input, overrides = {
         merchants.has(m.provider)
       )
         throw new Error(code);
-      merchants.set(m.provider, { merchantDigest: m.merchantDigest, environment: m.environment });
+      merchants.set(m.provider, {
+        merchantDigest: m.merchantDigest,
+        environment: m.environment,
+      });
     }
+    const paymentRecord = await context.journal.readFirstCutoverEffects();
+    const afterOpen = paymentRecord.phase === 'reconciled';
+    if (afterOpen)
+      await assertFirstCutoverReconciliationRead(
+        { binding: context.binding, ...context.approval },
+        context.journal,
+        (overrides.now ?? Date.now)(),
+        paymentRecord.identity,
+      );
     return await withApprovedCutoverDatabase(context, overrides, code, (connection, io) =>
       readCutoverDatabaseScope(connection, {
         now: io.now,
         windowStartMs: inventory.paymentWindowStartMs,
+        ...(afterOpen
+          ? {
+              windowEndMs: Math.min(context.approval.maintenanceEndsAtMs, io.now()),
+            }
+          : {}),
         deferredSandboxPayment: inventory.deferredSandboxPayment,
         deferredAlipayPayments: inventory.deferredAlipayPayments,
         resolveMerchant: (provider, row) => {
@@ -1492,6 +1633,13 @@ async function withApprovedCutoverDatabase(context, overrides, errorCode, read) 
     const binding = structuredClone(context?.binding);
     const guard = async () => {
       const now = io.now();
+      const maintenanceDeadline = context.approval.maintenanceEndsAtMs;
+      const deadline =
+        now < maintenanceDeadline
+          ? maintenanceDeadline
+          : (await context.journal.readFirstCutoverEffects?.())?.phase === 'reconciled'
+            ? context.approval.reconcileByMs
+            : maintenanceDeadline;
       if (
         io.platform !== 'linux' ||
         io.uid !== 0 ||
@@ -1505,7 +1653,8 @@ async function withApprovedCutoverDatabase(context, overrides, errorCode, read) 
         now < 0 ||
         (firstTime !== undefined && now < firstTime) ||
         !Number.isSafeInteger(context.approval.maintenanceEndsAtMs) ||
-        now >= context.approval.maintenanceEndsAtMs ||
+        !Number.isSafeInteger(deadline) ||
+        now >= deadline ||
         !isDeepStrictEqual(await context.journal.assertOwnership(), binding)
       )
         fail();
@@ -1548,6 +1697,12 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
     readCloudRecoveryCensus: readFirstCutoverCloudRecoveryCensus,
     readCloudRecoverySources: readFirstCutoverCloudRecoverySources,
     readCloudRecoveryVacancy: readFirstCutoverCloudRecoveryVacancy,
+    readCloudOldBrowserAssociations: readFirstCutoverCloudOldBrowserAssociations,
+    readCloudNativePreflight: readFirstCutoverCloudNativePreflight,
+    readCloudRecovery: readFirstCutoverCloudRecovery,
+    reobserveCloudRecovery: reobserveFirstCutoverCloudRecovery,
+    restoreCloudBrowser: restoreFirstCutoverCloudBrowser,
+    restoreCloudVnc: restoreFirstCutoverCloudVnc,
     readFenceReceipts: async () => [],
     // Trusted live session handles, never a CLI/uploaded process allowlist.
     readExecutionIdentities: async () => [],
@@ -1574,6 +1729,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           'CUTOVER_INVENTORY_UNPROVEN',
           'CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN',
           'CUTOVER_CLOUD_VNC_NATIVE_SOURCE_UNPROVEN',
+          'CUTOVER_CLOUD_NATIVE_PREFLIGHT_UNPROVEN',
           'CUTOVER_CLOUD_RECOVERY_CENSUS_UNPROVEN',
           'CUTOVER_CLOUD_SOURCES_UNPROVEN',
           'CUTOVER_CLOUD_VACANCY_UNPROVEN',
@@ -1663,20 +1819,32 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
     // or recovered-state recapture. A lost observer must re-establish the
     // original pre-effect review, never adopt a post-effect registration.
     const cloudConfigs = new Map();
+    const cloudRecoveries = {};
     const compareSources = async (rows, pair) => {
       const reject = () => {
         throw new Error('CUTOVER_CLOUD_SOURCES_UNPROVEN');
       };
       const began = checkClock();
+      const late = began >= executionSite.maintenanceEndsAtMs;
+      const reconciliation = late
+        ? await assertFirstCutoverReconciliationRead(executionSite, io.journal, began)
+        : undefined;
+      const sourceDeadline = late ? executionSite.reconcileByMs : executionSite.maintenanceEndsAtMs;
       const configs = rows.map((row) => ({
         name: row.name,
         pmId: row.pm_id,
         config: structuredClone(row.pm2_env),
       }));
       const observed = structuredClone(
-        await io.readCloudRecoverySources({ attempt: binding.attempt, configs }),
+        await io.readCloudRecoverySources({
+          attempt: binding.attempt,
+          configs,
+        }),
       );
-      validateFirstCutoverCloudSources(observed, { scope: originalCloudScope, observed: true });
+      validateFirstCutoverCloudSources(observed, {
+        scope: originalCloudScope,
+        observed: true,
+      });
       const now = checkClock();
       const host = pair.hosts.find((h) => h.host === 'vultr').snapshot;
       if (
@@ -1684,7 +1852,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         began < 0 ||
         !Number.isSafeInteger(now) ||
         now < began ||
-        now >= executionSite.maintenanceEndsAtMs ||
+        now >= sourceDeadline ||
         observed.observedAtMs < began ||
         observed.observedAtMs > now ||
         now - observed.observedAtMs > 60000 ||
@@ -1718,6 +1886,14 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         approved[0].digest !== createHash('sha256').update(JSON.stringify(metadata)).digest('hex')
       )
         reject();
+      if (
+        late &&
+        !isDeepStrictEqual(
+          reconciliation,
+          await assertFirstCutoverReconciliationRead(executionSite, io.journal, checkClock()),
+        )
+      )
+        reject();
       return observed;
     };
     const bindCloudRows = (rows, pair, captureStoppedPmId) => {
@@ -1745,6 +1921,24 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         const row = rows[i];
         const config = row?.pm2_env;
         const manager = live[0];
+        const retainedRecovery = cloudConfigs.get(declaration.pmId)?.recovered;
+        if (retainedRecovery) {
+          if (
+            row?.name !== name ||
+            row.pm_id !== declaration.pmId ||
+            row.pid !== manager?.pid ||
+            config?.status !== 'online' ||
+            manager.status !== 'online' ||
+            cutoverRegistrationConfigDigest(config) !==
+              cutoverRegistrationConfigDigest(retainedRecovery) ||
+            manager.configDigest !== cutoverRegistrationConfigDigest(config) ||
+            manager.stopConfigDigest !== cutoverCloudStopConfigDigest(config) ||
+            manager.restartCount !== old[0].restartCount ||
+            config.restart_time !== old[0].restartCount
+          )
+            fail();
+          return { pmId: declaration.pmId, config: structuredClone(config) };
+        }
         if (
           declaration.name !== name ||
           old.length !== 1 ||
@@ -1785,10 +1979,43 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
     };
     let displayRequired = false;
     let originalDisplayObservation;
+    let originalAssociationObservation;
+    let associationsRequired = false;
+    const observeAssociations = async (sources, display, pair) => {
+      if (!associationsRequired) return undefined;
+      const snapshot = pair.hosts.find((h) => h.host === 'vultr').snapshot;
+      const headed = snapshot.managers.find((m) => m.name === 'holaday-chromium-headed');
+      if (headed?.status === 'stopped' || cloudConfigs.get(headed?.pmId)?.recovered)
+        return undefined;
+      const value = structuredClone(
+        await io.readCloudOldBrowserAssociations({
+          sources,
+          displayObservation: display,
+          maintenanceEndsAtMs: executionSite.maintenanceEndsAtMs,
+        }),
+      );
+      firstCutoverCloudStopScope({
+        snapshot,
+        name: 'holaday-chromium-headed',
+        association: value,
+        display,
+        review: reviews.vultr.review,
+        now: checkClock(),
+      });
+      if (
+        originalAssociationObservation &&
+        (!isDeepStrictEqual(value.members, originalAssociationObservation.members) ||
+          value.contextDigest !== originalAssociationObservation.contextDigest ||
+          value.socketDigest !== originalAssociationObservation.socketDigest)
+      )
+        fail();
+      return value;
+    };
     const observeDisplay = async (sources, pair) => {
       if (!displayRequired) return undefined;
       const snapshot = pair.hosts.find((h) => h.host === 'vultr').snapshot;
-      if (snapshot.managers.find((m) => m.name === 'holaday-chromium-headed')?.status === 'stopped')
+      const headed = snapshot.managers.find((m) => m.name === 'holaday-chromium-headed');
+      if (headed?.status === 'stopped' || cloudConfigs.get(headed?.pmId)?.recovered)
         return undefined;
       const observation = structuredClone(
         await io.readCloudOwnedDisplay({
@@ -1802,7 +2029,11 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         createHash('sha256').update(JSON.stringify(material)).digest('hex')
       )
         fail();
-      validateFirstCutoverOwnedDisplayObservation({ observation, snapshot, now: checkClock() });
+      validateFirstCutoverOwnedDisplayObservation({
+        observation,
+        snapshot,
+        now: checkClock(),
+      });
       if (
         originalDisplayObservation &&
         (observation.contextDigest !== originalDisplayObservation.contextDigest ||
@@ -1843,6 +2074,35 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
                 (p) => roots.has(p.pid) && /\/(?:Xvfb|Xorg|openbox)$/.test(p.exe),
               );
               originalDisplayObservation = await observeDisplay(sources, baseline);
+              associationsRequired = snapshot.processes.some((p) =>
+                /^\/opt\/brave\.com\/brave\/chrome_crashpad_handler(?: \(deleted\))?$/.test(p.exe),
+              );
+              if (associationsRequired && !displayRequired) fail();
+              originalAssociationObservation = await observeAssociations(
+                sources,
+                originalDisplayObservation,
+                baseline,
+              );
+              // The protected scope must already include these exact reviewed members.
+              if (
+                associationsRequired &&
+                originalCloudScope[1].scopeDigest !==
+                  createHash('sha256')
+                    .update(
+                      JSON.stringify(
+                        firstCutoverCloudStopScope({
+                          snapshot,
+                          name: 'holaday-chromium-headed',
+                          association: originalAssociationObservation,
+                          display: originalDisplayObservation,
+                          review: reviews.vultr.review,
+                          now: checkClock(),
+                        }),
+                      ),
+                    )
+                    .digest('hex')
+              )
+                fail();
             } catch (error) {
               await report(error, 'initialization', 'cloud-sources');
               throw error;
@@ -1880,7 +2140,8 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         const pair = structuredClone(await io.readPair());
         bindCloudRows(raw, pair);
         const observed = await compareSources(raw, pair);
-        await observeDisplay(observed, pair);
+        const display = await observeDisplay(observed, pair);
+        await observeAssociations(observed, display, pair);
         const observedAtMs = observed.observedAtMs;
         bindCloudRows(structuredClone(await io.readCloudManagers()), pair);
         if (!isDeepStrictEqual(before, await effects())) fail();
@@ -1946,6 +2207,8 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
         const pair = structuredClone(await io.readPair());
         let captured;
         let currentDisplayObservation;
+        let currentAssociationObservation;
+        let cloudCensus;
         if (originalCloudScope) {
           step = 'cloud-config';
           bindCloudRows(raw, pair, captureStoppedPmId);
@@ -1957,13 +2220,76 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
               'online'
           ) {
             step = 'cloud-display';
-            currentDisplayObservation = await observeDisplay(await compareSources(raw, pair), pair);
+            const sources = await compareSources(raw, pair);
+            currentDisplayObservation = await observeDisplay(sources, pair);
+            currentAssociationObservation = await observeAssociations(
+              sources,
+              currentDisplayObservation,
+              pair,
+            );
           }
           captured = bindCloudRows(
             structuredClone(await io.readCloudManagers()),
             pair,
             captureStoppedPmId,
           );
+        }
+        if (Object.keys(cloudRecoveries).length) {
+          step = 'cloud-recovery-current-native';
+          const sources = await compareSources(raw, pair);
+          for (const index of [1, 0]) {
+            const declaration = originalCloudScope[index],
+              retained = cloudRecoveries[declaration.name];
+            if (!retained) continue;
+            const observed = await io.reobserveCloudRecovery(
+              {
+                attempt: binding.attempt,
+                name: declaration.name,
+                pmId: declaration.pmId,
+                beforeCensus: retained.beforeCensus,
+                restoreStartedAtMs: retained.restoreStartedAtMs,
+                ...(index
+                  ? {}
+                  : {
+                      headedRecovery: cloudRecoveries[originalCloudScope[1].name].origin,
+                      sources,
+                    }),
+              },
+              structuredClone(retained.origin),
+            );
+            if (
+              !observed ||
+              observed.observedAtMs < checkClock() - 60000 ||
+              observed.observedAtMs > checkClock()
+            )
+              fail();
+            retained.native = structuredClone(observed);
+          }
+        }
+        if (
+          originalCloudScope &&
+          pair.hosts
+            .find((h) => h.host === 'vultr')
+            .snapshot.managers.some(
+              (m) =>
+                originalCloudScope.some((d) => d.pmId === m.pmId) &&
+                (m.status === 'stopped' || cloudConfigs.get(m.pmId)?.recovered),
+            )
+        ) {
+          cloudCensus = structuredClone(await io.readCloudRecoveryCensus());
+          const host = pair.hosts.find((h) => h.host === 'vultr').snapshot;
+          const now = checkClock();
+          if (
+            cloudCensus.hostname !== host.hostname ||
+            cloudCensus.bootId !== host.bootId ||
+            !Number.isSafeInteger(cloudCensus.observedAtMs) ||
+            cloudCensus.observedAtMs > now ||
+            now - cloudCensus.observedAtMs > 60000 ||
+            !Array.isArray(cloudCensus.processes) ||
+            cloudCensus.processes.length > 16384 ||
+            new Set(cloudCensus.processes.map((p) => p.pid)).size !== cloudCensus.processes.length
+          )
+            fail();
         }
         step = 'stability';
         if (
@@ -1996,6 +2322,16 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             candidate,
             execution,
             cloudProgress: cloudProgress || (fenceProgress && before.phase === 'producers_stopped'),
+            ...(cloudCensus ? { cloudCensus } : {}),
+            ...(Object.keys(cloudRecoveries).length ? { cloudRecovery: cloudRecoveries } : {}),
+            ...(associationsRequired
+              ? {
+                  cloudAssociations: {
+                    original: originalAssociationObservation,
+                    current: currentAssociationObservation,
+                  },
+                }
+              : {}),
             ...(displayRequired
               ? {
                   cloudDisplay: {
@@ -2045,6 +2381,44 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       readRegistrationProgress: (host) => read(host ?? 'invalid'),
       readUnmanagedProgress: (host) => read(undefined, host ?? 'invalid'),
       readWithCandidate: (identity) => read(undefined, undefined, structuredClone(identity ?? {})),
+      probeBrowser: async (identity) => {
+        const record = await assertFirstCutoverReconciliationRead(
+          executionSite,
+          io.journal,
+          checkClock(),
+          identity,
+        );
+        const before = await read(undefined, undefined, structuredClone(identity));
+        const headed = cloudRecoveries['holaday-chromium-headed'];
+        if (
+          !headed ||
+          before.unknownLaunchers.length ||
+          record.cloudMaintenanceEvents?.length !== 8
+        )
+          fail();
+        const anchor = structuredClone(headed.origin);
+        const result = await (io.probeBrowser ?? probeFirstCutoverRecoveredBrowser)(
+          structuredClone(headed.native),
+          executionSite.reconcileByMs,
+        );
+        const after = await read(undefined, undefined, structuredClone(identity));
+        if (
+          !isDeepStrictEqual(anchor, headed.origin) ||
+          after.unknownLaunchers.length ||
+          !isDeepStrictEqual(before.candidate, after.candidate) ||
+          !isDeepStrictEqual(
+            record,
+            await assertFirstCutoverReconciliationRead(
+              executionSite,
+              io.journal,
+              checkClock(),
+              identity,
+            ),
+          )
+        )
+          fail();
+        return result;
+      },
       restoreCloudServices: async (input, operations = {}) => {
         if (cloudRecoveryAttempted) fail();
         cloudRecoveryAttempted = true;
@@ -2152,14 +2526,157 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             checkClock() >= maintenanceEndsAtMs
           )
             throw new Error('CUTOVER_CLOUD_VACANCY_UNPROVEN');
-          // INCOMPLETE: vacancy is not a reservation or complete capability
-          // preflight. It cannot authorize either intent or replace a source
-          // loader audit, old-tree ownership, or subsequent native recovery ACK.
-          // There is no complete native BOTH-role source/display/capability
-          // preflight yet. Post-restoration readers cannot supply that fact on
-          // stopped services. Keep BOTH intents/effects closed; do not treat the
-          // census, an injected boolean or a current executable as authorization.
-          throw new Error('CUTOVER_CLOUD_VNC_NATIVE_SOURCE_UNPROVEN');
+          step = 'recovery-native-preflight';
+          const nativeBegan = checkClock();
+          const preflight = await io.readCloudNativePreflight({
+            attempt: binding.attempt,
+            sources,
+            vacancy,
+            maintenanceEndsAtMs,
+          });
+          if (
+            !preflight ||
+            Object.keys(preflight).sort().join(',') !==
+              'bootId,contextDigest,hostname,observationDigest,observedAtMs,purpose,roles,sourcesDigest,vacancyDigest' ||
+            preflight.purpose !== 'cloud-recovery-native-preflight-observation' ||
+            preflight.hostname !== originalHost.hostname ||
+            preflight.bootId !== originalHost.bootId ||
+            preflight.sourcesDigest !== vacancy.sourcesDigest ||
+            preflight.contextDigest !== vacancy.contextDigest ||
+            preflight.vacancyDigest !== vacancy.observationDigest ||
+            !/^[a-f0-9]{64}$/.test(preflight.observationDigest ?? '') ||
+            !isDeepStrictEqual(preflight.roles, ['holaday-chromium-headed', 'holaday-vnc']) ||
+            !fresh(preflight.observedAtMs) ||
+            preflight.observedAtMs < nativeBegan ||
+            !isDeepStrictEqual(record, await effects())
+          )
+            fail();
+          const recoverGuard = async () => {
+            const before = await effects();
+            if (
+              before.phase !== 'verified' ||
+              before.failureObservation ||
+              !isDeepStrictEqual(before.identity, identity) ||
+              checkClock() >= maintenanceEndsAtMs
+            )
+              fail();
+            const { work, persisted, fence } = await operations.readRecoveryFacts();
+            validateLegacyWorkBoundary({
+              observation: work,
+              approval: before,
+              phase: 'preopen',
+              nowMs: checkClock(),
+            });
+            if (
+              !fresh(work.observedAtMs) ||
+              !fresh(persisted?.observedAtMs) ||
+              !Array.isArray(persisted.unsettled) ||
+              persisted.unsettled.length ||
+              !fresh(fence?.observedAtMs) ||
+              fence.inventoryDigest !== binding.inventoryDigest ||
+              fence.stage !== 'all-writers' ||
+              ['existingSockets', 'internalWriters', 'producersRunning'].some((k) => fence[k] !== 0)
+            )
+              fail();
+            await read(undefined, undefined, identity, false, true);
+            await sourceGate();
+            if (!isDeepStrictEqual(before, await effects()) || checkClock() >= maintenanceEndsAtMs)
+              fail();
+          };
+          for (const index of [1, 0]) {
+            const declaration = originalCloudScope[index];
+            step = `recovery-${index ? 'headed' : 'vnc'}-intent`;
+            await recoverGuard();
+            const census = structuredClone(await io.readCloudRecoveryCensus());
+            const restoreStartedAtMs = checkClock();
+            if (
+              census.hostname !== originalHost.hostname ||
+              census.bootId !== originalHost.bootId ||
+              !fresh(census.observedAtMs)
+            )
+              fail();
+            const stoppedConfig = cloudConfigs.get(declaration.pmId).stopped;
+            const payload = {
+              attempt: binding.attempt,
+              pmId: declaration.pmId,
+              stoppedConfigDigest: cutoverRegistrationConfigDigest(stoppedConfig),
+              maintenanceEndsAtMs,
+            };
+            await (index ? io.restoreCloudBrowser : io.restoreCloudVnc)(payload, {
+              journal: io.journal,
+              now: checkClock,
+              assertRecoveryScope: recoverGuard,
+            });
+            step = `recovery-${index ? 'headed' : 'vnc'}-native-proof`;
+            const native = await io.readCloudRecovery({
+              attempt: binding.attempt,
+              name: declaration.name,
+              pmId: declaration.pmId,
+              beforeCensus: census,
+              restoreStartedAtMs,
+              ...(index
+                ? {}
+                : {
+                    headedRecovery: cloudRecoveries[originalCloudScope[1].name].native,
+                    sources: await compareSources(
+                      structuredClone(await io.readCloudManagers()),
+                      structuredClone(await io.readPair()),
+                    ),
+                  }),
+            });
+            const rows = structuredClone(await io.readCloudManagers());
+            const matches = rows.filter(
+              (r) => r.pm_id === declaration.pmId || r.name === declaration.name,
+            );
+            if (matches.length !== 1) fail();
+            const config = matches[0].pm2_env;
+            const configuration = (
+              index
+                ? compareCutoverCloudBrowserRecoveryConfig
+                : compareCutoverCloudVncRecoveryConfig
+            )({
+              attempt: binding.attempt,
+              pmId: declaration.pmId,
+              pm2Version: '6.0.14',
+              stoppedConfig,
+              recoveredConfig: config,
+              launch: index
+                ? firstCutoverCloudBrowserRecoveryLaunch({
+                    attempt: binding.attempt,
+                  })
+                : firstCutoverCloudVncRecoveryMaterial({
+                    attempt: binding.attempt,
+                  }),
+              expectedLaunchDigest: declaration.recoveryDigest,
+              restoreStartedAtMs,
+              observedAtMs: checkClock(),
+            });
+            if (
+              native.configDigest !== configuration.recoveredConfigDigest ||
+              native.restartCount !== configuration.restartCount ||
+              native.beforeCensusDigest !==
+                createHash('sha256').update(JSON.stringify(census)).digest('hex')
+            )
+              fail();
+            cloudConfigs.get(declaration.pmId).recovered = structuredClone(config);
+            cloudRecoveries[declaration.name] = {
+              native: structuredClone(native),
+              origin: structuredClone(native),
+              configuration,
+              beforeCensus: census,
+              restoreStartedAtMs,
+            };
+            await recoverGuard();
+            await io.journal.recordCloudMaintenanceEvent({
+              ...declaration,
+              attempt: binding.attempt,
+              inventoryDigest: binding.inventoryDigest,
+              host: 'vultr',
+              phase: 'cloud-restored',
+            });
+            await read(undefined, undefined, identity);
+          }
+          if ((await effects()).cloudMaintenanceEvents?.length !== 8) fail();
         } catch (error) {
           await report(error, 'cloud-recovery', step);
           fail();
@@ -2232,7 +2749,10 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             host: 'vultr',
             ...declaration,
           };
-          await io.journal.recordCloudMaintenanceEvent({ ...base, phase: 'cloud-stop-intent' });
+          await io.journal.recordCloudMaintenanceEvent({
+            ...base,
+            phase: 'cloud-stop-intent',
+          });
           const recorded = await guard();
           const checked = await read(undefined, undefined, undefined, false, true);
           if (
@@ -2277,7 +2797,10 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           await read(undefined, undefined, undefined, false, true);
           if (!isDeepStrictEqual(beforeAck, await effects()) || checkClock() >= maintenanceEndsAtMs)
             fail();
-          await io.journal.recordCloudMaintenanceEvent({ ...base, phase: 'cloud-stopped' });
+          await io.journal.recordCloudMaintenanceEvent({
+            ...base,
+            phase: 'cloud-stopped',
+          });
           await read();
         }
       },
@@ -2314,7 +2837,10 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             }))
             .sort((a, b) => a.pid - b.pid),
         };
-        await io.journal.recordUnmanagedEvent({ ...base, phase: 'unmanaged-stop-intent' });
+        await io.journal.recordUnmanagedEvent({
+          ...base,
+          phase: 'unmanaged-stop-intent',
+        });
         const left = maintenanceEndsAtMs - checkClock();
         if (left <= 0) fail();
         const result = await retireLegacyRuntime(
@@ -2329,7 +2855,10 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             readInventory: async () => (await read(undefined, 'aliyun')).inventory,
           },
         );
-        await io.journal.recordUnmanagedEvent({ ...base, phase: 'unmanaged-stopped' });
+        await io.journal.recordUnmanagedEvent({
+          ...base,
+          phase: 'unmanaged-stopped',
+        });
         await read();
         return result;
       },
@@ -2420,6 +2949,7 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
   let siteDetached = false;
   let lastTime = -1;
   const attempted = new Set();
+  let holdAttempt;
   const reject = () => {
     throw new Error('CUTOVER_HOST_STATE_UNPROVEN');
   };
@@ -2587,7 +3117,10 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
     ];
     if (!discovery) args.push(target.candidate, target.bootId);
     const value = JSON.parse(
-      await io.exec('runuser', args, { cwd: `${prepared.root}/apps/orchestrator`, env }),
+      await io.exec('runuser', args, {
+        cwd: `${prepared.root}/apps/orchestrator`,
+        env,
+      }),
     );
     if (
       value?.protocol !== 1 ||
@@ -2603,7 +3136,10 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
     const scope = {
       binding: { ...binding },
       ...(approval.schemaVersion === 2
-        ? { kind: 'first-cutover', riskDigest: cutoverLegacyInterruptionRisk(approval) }
+        ? {
+            kind: 'first-cutover',
+            riskDigest: cutoverLegacyInterruptionRisk(approval),
+          }
         : {}),
       stage: target ? 'preopen' : 'prepare',
       window: {
@@ -2703,7 +3239,12 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
               attempt: prepared.binding.attempt,
               maintenanceEndsAtMs: approval.maintenanceEndsAtMs,
             },
-            { journal: prepared.journal, now: io.now, platform: io.platform, uid: io.uid },
+            {
+              journal: prepared.journal,
+              now: io.now,
+              platform: io.platform,
+              uid: io.uid,
+            },
           );
           await guard();
         }
@@ -2756,7 +3297,11 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
         )
           throw new Error('CUTOVER_BACKUP_UNPROVEN');
         await backupAndRestoreCheck(
-          { ...plan, binding: prepared.binding, maintenanceEndsAtMs: approval.maintenanceEndsAtMs },
+          {
+            ...plan,
+            binding: prepared.binding,
+            maintenanceEndsAtMs: approval.maintenanceEndsAtMs,
+          },
           {
             ...io.backup,
             now: io.now,
@@ -2788,7 +3333,11 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
         if (!migrated) reject();
         stoppedEvidence = await assertStopped();
         const result = await initializeFirstMaintenanceState(
-          { candidate: approval.candidate, attempt: approval.attempt, stoppedEvidence },
+          {
+            candidate: approval.candidate,
+            attempt: approval.attempt,
+            stoppedEvidence,
+          },
           {
             platform: io.platform,
             uid: io.uid,
@@ -2900,7 +3449,6 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
       once('resumeWorker', 'verified', async () => {
         await io.lifecycle.resumeWorker(context(), target);
         await guard();
-        await detachSite();
       }),
     reconcile: (target) =>
       once(
@@ -2914,6 +3462,47 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
         true,
       ),
     holdMaintenance: async (result) => {
+      const persistedHold = async () => {
+        if (!prepared || !holdAttempt) reject();
+        await ownership();
+        const record = await prepared.journal.readFirstCutoverEffects();
+        const observation = record.failureObservation;
+        if (
+          !observation ||
+          observation.phase !== holdAttempt.phase ||
+          observation.operatorRef !== approval.operatorRef ||
+          observation.reconcileByMs !== approval.reconcileByMs ||
+          observation.errorCode !== holdAttempt.errorCode ||
+          !isDeepStrictEqual(observation.identity, holdAttempt.identity) ||
+          !Number.isSafeInteger(observation.observedAtMs) ||
+          observation.observedAtMs < holdAttempt.startedAtMs ||
+          observation.observedAtMs > io.now() ||
+          (holdAttempt.record && !isDeepStrictEqual(record, holdAttempt.record))
+        )
+          reject();
+        await ownership();
+        if (!isDeepStrictEqual(record, await prepared.journal.readFirstCutoverEffects())) reject();
+        return record;
+      };
+      if (holdAttempt) {
+        const record = await persistedHold();
+        // Observe the original acknowledgement; never resend close or replace
+        // the first durable failure observation after a lost response.
+        return {
+          closeAcknowledged: record.failureObservation.status.closeAcknowledged,
+        };
+      }
+      const before = prepared ? await prepared.journal.readFirstCutoverEffects() : undefined;
+      if (before?.failureObservation) reject();
+      const code = result.errorCode ?? result.code;
+      holdAttempt = {
+        phase: before?.phase,
+        identity: identity ? structuredClone(identity) : undefined,
+        startedAtMs: io.now(),
+        errorCode: /^(CUTOVER|MAINTENANCE)_[A-Z_]{1,100}$/.test(code ?? '')
+          ? code
+          : 'CUTOVER_FAILED',
+      };
       let closeAcknowledged = result.closeAcknowledged === true;
       if (identity && !closeAcknowledged) {
         try {
@@ -2923,12 +3512,20 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
         }
       }
       if (prepared) {
-        const held = await io.lifecycle.holdMaintenance(context(), {
-          ...result,
-          identity,
-          closeAcknowledged,
-        });
-        closeAcknowledged = held?.closeAcknowledged === true;
+        try {
+          const held = await io.lifecycle.holdMaintenance(context(), {
+            ...result,
+            identity,
+            closeAcknowledged,
+          });
+          closeAcknowledged = held?.closeAcknowledged === true;
+        } finally {
+          try {
+            holdAttempt.record = structuredClone(await persistedHold());
+          } catch {
+            // Missing/foreign/unknown persistence cannot authorize a retry.
+          }
+        }
       }
       return { closeAcknowledged };
     },
@@ -3078,7 +3675,14 @@ export async function prepareFirstCutoverCandidate(options, overrides = {}) {
         },
       },
     );
-    return { approval, binding, root, sourceCandidate, applicationGid: gid, journal };
+    return {
+      approval,
+      binding,
+      root,
+      sourceCandidate,
+      applicationGid: gid,
+      journal,
+    };
   } catch (error) {
     await journal?.close();
     throw error;
@@ -3088,7 +3692,53 @@ export async function prepareFirstCutoverCandidate(options, overrides = {}) {
 /** Read-only approval metadata, not evidence that hosts/payments are safe.
  * The future host adapter must still collect live facts under its real journal.
  * Importing this module never starts a service, opens a database, or reads secrets. */
-export async function readFirstCutoverApproval(options, io = system) {
+export async function assertFirstCutoverReconciliationRead(
+  { binding, maintenanceEndsAtMs, reconcileByMs },
+  journal,
+  now,
+  identity,
+) {
+  const reject = () => {
+    throw new Error('CUTOVER_RECONCILIATION_READ_UNPROVEN');
+  };
+  if (
+    !Number.isSafeInteger(reconcileByMs) ||
+    reconcileByMs < maintenanceEndsAtMs ||
+    !Number.isSafeInteger(now) ||
+    now < 0 ||
+    now >= reconcileByMs ||
+    !isDeepStrictEqual(await journal.assertOwnership(), binding)
+  )
+    reject();
+  const record = await journal.readFirstCutoverEffects();
+  if (
+    !binding ||
+    !['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'].every(
+      (k) => record[k] === binding[k],
+    ) ||
+    record.phase !== 'reconciled' ||
+    !record.identity ||
+    record.identity.candidate !== binding.candidate ||
+    !/^[a-f0-9]{32}$/.test(record.identity.bootId ?? '') ||
+    record.identity.bootId === record.bootstrapSeed ||
+    (identity && !isDeepStrictEqual(record.identity, identity)) ||
+    (record.schemaVersion === 2 &&
+      (record.maintenanceEndsAtMs !== maintenanceEndsAtMs ||
+        record.reconcileByMs !== reconcileByMs))
+  )
+    reject();
+  return structuredClone(record);
+}
+
+// Protected approval reread only. This does not authorize effects or extend a
+// deadline; live reconciliation callers separately prove owned journal identity.
+export function readFirstCutoverReconciliationApproval(options, io = system) {
+  return readProtectedFirstCutoverApproval(options, io, true);
+}
+export function readFirstCutoverApproval(options, io = system) {
+  return readProtectedFirstCutoverApproval(options, io, false);
+}
+async function readProtectedFirstCutoverApproval(options, io, reconciliation) {
   let handle;
   try {
     if (
@@ -3154,14 +3804,18 @@ export async function readFirstCutoverApproval(options, io = system) {
       record.reconcileByMs < record.maintenanceEndsAtMs ||
       !Number.isSafeInteger(now) ||
       now < began ||
-      now >= record.maintenanceEndsAtMs ||
+      now >= (reconciliation ? record.reconcileByMs : record.maintenanceEndsAtMs) ||
       typeof record.operatorRef !== 'string' ||
       !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(record.operatorRef)
     )
       throw new Error('binding');
     const risk =
       record.schemaVersion === 2 ? { riskDigest: cutoverLegacyInterruptionRisk(record) } : {};
-    return { ...record, ...risk, approvalDigest: createHash('sha256').update(bytes).digest('hex') };
+    return {
+      ...record,
+      ...risk,
+      approvalDigest: createHash('sha256').update(bytes).digest('hex'),
+    };
   } catch {
     throw new Error('CUTOVER_APPROVAL_UNPROVEN');
   } finally {
@@ -3178,12 +3832,17 @@ export async function readFirstCutoverApproval(options, io = system) {
  * This does not replace business settlement, stop proof, or cross-host transport.
  */
 export async function createFirstCutoverIngressLifecycle(input, overrides = {}) {
-  const reject = () => {
-    throw new Error('CUTOVER_INGRESS_LIFECYCLE_UNPROVEN');
+  const reject = (stage = 'LOCAL_ENTRY', previous) => {
+    throw ingressDiagnosticError('CUTOVER_INGRESS_LIFECYCLE_UNPROVEN', stage, previous);
   };
   try {
-    const io = { platform: process.platform, uid: process.getuid?.(), now: Date.now, ...overrides };
-    const { binding, maintenanceEndsAtMs } = structuredClone(input);
+    const io = {
+      platform: process.platform,
+      uid: process.getuid?.(),
+      now: Date.now,
+      ...overrides,
+    };
+    const { binding, maintenanceEndsAtMs, reconcileByMs } = structuredClone(input);
     if (
       io.platform !== 'linux' ||
       io.uid !== 0 ||
@@ -3206,32 +3865,61 @@ export async function createFirstCutoverIngressLifecycle(input, overrides = {}) 
     let busy = false;
     let failed = false;
     const attempted = new Set();
-    const clock = () => {
+    const clock = (readOnly = false) => {
       const now = io.now();
-      if (!Number.isSafeInteger(now) || now < 0 || now < last || now >= maintenanceEndsAtMs)
-        reject();
+      if (
+        !Number.isSafeInteger(now) ||
+        now < 0 ||
+        now < last ||
+        now >= (readOnly ? (reconcileByMs ?? maintenanceEndsAtMs) : maintenanceEndsAtMs)
+      )
+        reject('LOCAL_CLOCK');
       last = now;
     };
-    const guard = async (phases) => {
-      clock();
-      if (!isDeepStrictEqual(await journal.assertOwnership(), binding)) reject();
-      const record = await journal.readFirstCutoverEffects();
+    const guard = async (phases, readOnly = false) => {
+      let reconciliation;
+      if (readOnly && io.now() >= maintenanceEndsAtMs)
+        reconciliation = await assertFirstCutoverReconciliationRead(
+          { binding, maintenanceEndsAtMs, reconcileByMs },
+          journal,
+          io.now(),
+        );
+      clock(readOnly);
+      let owner;
+      try {
+        owner = await journal.assertOwnership();
+      } catch (error) {
+        reject('LOCAL_OWNER', error);
+      }
+      if (!isDeepStrictEqual(owner, binding)) reject('LOCAL_OWNER');
+      let record;
+      try {
+        record = await journal.readFirstCutoverEffects();
+      } catch (error) {
+        reject('LOCAL_EFFECTS', error);
+      }
       if (
         !Object.entries(binding).every(([key, value]) => record[key] === value) ||
         !/^[a-f0-9]{64}$/.test(record.recordDigest ?? '') ||
-        (revision !== undefined && revision !== record.recordDigest) ||
-        (phases && !phases.includes(record.phase))
+        (revision !== undefined && revision !== record.recordDigest)
       )
-        reject();
-      const current = structuredClone(await io.readApprovedIngress());
+        reject('LOCAL_REVISION');
+      if (phases && !phases.includes(record.phase)) reject('LOCAL_PHASE');
+      if (reconciliation && !isDeepStrictEqual(record, reconciliation)) reject();
+      let current;
+      try {
+        current = structuredClone(await io.readApprovedIngress());
+      } catch (error) {
+        reject('LOCAL_SCOPE', error);
+      }
       if (
         current?.inventoryDigest !== binding.inventoryDigest ||
         !Array.isArray(current.unknownIngress) ||
         current.unknownIngress.length ||
         (approval && !isDeepStrictEqual(current, approval))
       )
-        reject();
-      clock();
+        reject('LOCAL_SCOPE');
+      clock(readOnly);
       return { record, current };
     };
     const initial = await guard(['preflight', 'prepared']);
@@ -3244,6 +3932,10 @@ export async function createFirstCutoverIngressLifecycle(input, overrides = {}) 
     const dependencies = {
       ...io,
       assertJournalOwnership,
+      assertReconciliationRead: async () => {
+        await guard(undefined, true);
+        return structuredClone(binding);
+      },
       readApprovedIngress: async () => {
         await guard();
         return structuredClone(approval);
@@ -3269,7 +3961,12 @@ export async function createFirstCutoverIngressLifecycle(input, overrides = {}) 
         return opened;
       },
     };
-    const args = { binding, files: approval.files, maintenanceEndsAtMs };
+    const args = {
+      binding,
+      files: approval.files,
+      maintenanceEndsAtMs,
+      ...(reconcileByMs !== undefined ? { reconcileByMs } : {}),
+    };
     Object.assign(dependencies, await createFirstCutoverFenceStore(args, dependencies));
     Object.assign(dependencies, await createCutoverIngressFiles(args, dependencies));
     await guard(['preflight', 'prepared']);
@@ -3279,14 +3976,15 @@ export async function createFirstCutoverIngressLifecycle(input, overrides = {}) 
       busy = true;
       if (mutation) attempted.add(name);
       try {
-        const { record } = await guard(phases);
+        const readOnly = name === 'receipt';
+        const { record } = await guard(phases, readOnly);
         revision = record.recordDigest;
         const value = await operation();
-        await guard(phases);
+        await guard(phases, readOnly);
         return value;
-      } catch {
+      } catch (error) {
         if (mutation) failed = true;
-        reject();
+        reject(name === 'receipt' ? 'LOCAL_RECEIPT' : 'LOCAL_ENTRY', error);
       } finally {
         revision = undefined;
         busy = false;
@@ -3318,7 +4016,10 @@ export async function createFirstCutoverIngressLifecycle(input, overrides = {}) 
           ['all_fenced'],
           () =>
             applyCutoverFence(
-              { inventoryDigest: binding.inventoryDigest, stage: 'all-writers' },
+              {
+                inventoryDigest: binding.inventoryDigest,
+                stage: 'all-writers',
+              },
               dependencies,
             ),
           true,
@@ -3346,7 +4047,10 @@ export async function createFirstCutoverIngressLifecycle(input, overrides = {}) 
           ['verified'],
           () =>
             restoreCutoverIngress(
-              { inventoryDigest: binding.inventoryDigest, identity: structuredClone(identity) },
+              {
+                inventoryDigest: binding.inventoryDigest,
+                identity: structuredClone(identity),
+              },
               dependencies,
             ),
           true,
@@ -3355,8 +4059,8 @@ export async function createFirstCutoverIngressLifecycle(input, overrides = {}) 
       // it is diagnostic evidence, never an instruction to replay the operation.
       readFenceReceipt: () => run('receipt', undefined, () => dependencies.readFenceReceipt()),
     };
-  } catch {
-    reject();
+  } catch (error) {
+    reject('LOCAL_ENTRY', error);
   }
 }
 
@@ -3367,20 +4071,27 @@ export async function createFirstCutoverIngressLifecycle(input, overrides = {}) 
  */
 export async function createFirstCutoverFenceStore(input, io) {
   const disk = io.fs ?? fs;
-  const reject = () => {
-    throw new Error('CUTOVER_FENCE_RECORD_UNPROVEN');
+  const reject = (stage = 'STORE_READ', previous) => {
+    throw ingressDiagnosticError('CUTOVER_FENCE_RECORD_UNPROVEN', stage, previous);
+  };
+  const observe = async (stage, operation) => {
+    try {
+      return await operation();
+    } catch (error) {
+      reject(stage, error);
+    }
   };
   const wrap =
     (operation) =>
     async (...args) => {
       try {
         return await operation(...args);
-      } catch {
-        reject();
+      } catch (error) {
+        reject('STORE_READ', error);
       }
     };
   return wrap(async () => {
-    const { binding, files, maintenanceEndsAtMs } = structuredClone(input);
+    const { binding, files, maintenanceEndsAtMs, reconcileByMs } = structuredClone(input);
     const bindingKeys = [
       'attempt',
       'candidate',
@@ -3421,37 +4132,43 @@ export async function createFirstCutoverFenceStore(input, io) {
       ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'].every(
         (key) => a[key] === b[key],
       );
-    const guard = async () => {
+    const guard = async (readOnly = false) => {
       const now = io.now();
       if (
         failed ||
         !Number.isSafeInteger(now) ||
         now < 0 ||
         now < lastTime ||
-        now >= maintenanceEndsAtMs
+        now >= (readOnly ? (reconcileByMs ?? maintenanceEndsAtMs) : maintenanceEndsAtMs)
       )
-        reject();
-      const owner = await io.assertJournalOwnership();
+        reject('STORE_CLOCK');
+      const owner = await observe('STORE_OWNER', () =>
+        readOnly && now >= maintenanceEndsAtMs
+          ? typeof io.assertReconciliationRead === 'function'
+            ? io.assertReconciliationRead()
+            : reject('STORE_OWNER')
+          : io.assertJournalOwnership(),
+      );
       const after = io.now();
       if (
         !bindingKeys.every((key) => owner?.[key] === binding[key]) ||
         !Number.isSafeInteger(after) ||
         after < now ||
-        after >= maintenanceEndsAtMs
+        after >= (readOnly ? (reconcileByMs ?? maintenanceEndsAtMs) : maintenanceEndsAtMs)
       )
-        reject();
+        reject('STORE_OWNER');
       lastTime = after;
     };
     await guard();
-    const folder = await disk.lstat(directory);
+    const folder = await observe('STORE_FOLDER', () => disk.lstat(directory));
     const checkFolder = async () => {
-      const current = await disk.lstat(directory);
+      const current = await observe('STORE_FOLDER', () => disk.lstat(directory));
       if (
         !privateDirectory(current) ||
         !sameFile(folder, current) ||
-        (await disk.realpath(directory)) !== directory
+        (await observe('STORE_FOLDER', () => disk.realpath(directory))) !== directory
       )
-        reject();
+        reject('STORE_FOLDER');
     };
     await checkFolder();
     const absent = async () => {
@@ -3459,38 +4176,37 @@ export async function createFirstCutoverFenceStore(input, io) {
         await disk.lstat(path);
       } catch (error) {
         if (error.code === 'ENOENT') return;
-        throw error;
+        reject('STORE_ABSENCE', error);
       }
-      reject();
+      reject('STORE_ABSENCE');
     };
     await absent(); // A partial/historical record is never an invitation to resume.
     const read = async () => {
-      await guard();
+      await guard(true);
       await checkFolder();
       if (!current) {
         await absent();
         return undefined;
       }
-      const h = await disk.open(
-        path,
-        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      const h = await observe('STORE_FILE', () =>
+        disk.open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK),
       );
       try {
-        const before = await h.stat();
+        const before = await observe('STORE_FILE', () => h.stat());
         if (!privateFile(before) || !sameStat(currentStat, before) || before.size > 16 * 1024)
-          reject();
-        const bytes = await h.readFile();
+          reject('STORE_FILE');
+        const bytes = await observe('STORE_CONTENT', () => h.readFile());
         if (
           !bytes.equals(currentBytes) ||
-          !sameStat(before, await h.stat()) ||
-          !sameStat(before, await disk.lstat(path))
+          !sameStat(before, await observe('STORE_FILE', () => h.stat())) ||
+          !sameStat(before, await observe('STORE_FILE', () => disk.lstat(path)))
         )
-          reject();
+          reject('STORE_CONTENT');
       } finally {
-        await h.close();
+        await observe('STORE_FILE', () => h.close());
       }
       await checkFolder();
-      await guard();
+      await guard(true);
       return structuredClone(current);
     };
     const phase = (r) => (r ? `${r.stage}:${r.phase}` : 'new');

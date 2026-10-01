@@ -1,5 +1,61 @@
 # 首次切换实施断点：同次迁移和真实候选启动已接通，开放前后仍待验收
 
+## 当前冻结交付 / 2026-10-01
+
+代码集中实现完成，生产验收仍未满足。原树HEAD/QA应用candidate `b43dd031`；最终协调器/测试/QA源码逐文件SHA见 `2026-10-01-browser-first-cutover-source-freeze.json`，应用build不冒称本次dirty脚本提交验收。root接手统一review/commit/push/draft PR；尚未合并或部署。
+
+真实隔离full-host成功场exit0/673s（QA业务facts），unknown/known原入口均exit0；最新真实物理retirement→site scope→recovery attach/inspect/close短链exit0/98.24s，无dump/迁移/候选。历史fullhost attach/两次fences拒绝根因未解释；本次未复现不能写作已修根因。
+
+固定9场 before-migration/after-start/before-open/after-open/after-ingress/after-worker/lost-open-ack/enabled-worker/late-known-effect **均未取得最终完整故障验收**。before-migration早期真实注入已到达，但整场exit1来自QA闭句柄断言；另一场早于注入attach拒绝；最新777c场主动资源取消，功能未验收。QA尾部schema1/2可选candidate事件已按真实journal返回修正并补2条真实reader回归。所有旧attempt/卷/日志保留，不重放。
+
+本次新重型已暂停：宿主Docker约9GiB驻留及累计swap约3.7GiB风险下主动停止精确本方role和两个DB，未证明OOM根因，非权限拒绝；用户mysql/redis与未知进程未动。无重型仍在跑。下一恢复先核对宿主/Docker资源与累计swap趋势，再以新fresh pair/预设窗口按固定9场串行继续；普通CPU1/512MiB，host768MiB/900s，编译2GiB/180s，pressure/swap取消阈值保留，不重跑已通过正常应用/原生验证。
+
+普通应用8584pass/1helper skip、cn-payment103、类型/build/ordinary7/MySQL3及原生两角色均已有独立账；脚本2013总1979pass34条件skip+独立age35，非PayPalops组合证据保持原整条exit1。最终受影响轻量7合同exit0；40个触及JS格式/语法、5个Python无pycache语法、3个bash -n、diffcheck均0。完整命令/日志SHA见evidence。
+
+生产外部工作/非PayPal恢复和重复权益、默认production facts整项、完整浏览器路由/成功率、真实批准/来源/锁/新鲜窗口仍缺；PayPal全部延期。既有必要交付授权有效，但授权不是现场事实或放行证据。
+
+下文保留历史dated记录；旧运行/硬拒绝/计数不是当前结论。
+
+
+
+## 当前恢复点：2026-10-01 集中修改包
+
+原树/分支 HEAD `b43dd03132658d9c13875f050e2c27e584b61e33`，本批协调器脚本、测试、QA入口与文档仍为未提交修改；`__pycache__`保留。唯一实现代理集中完成scope/完整census、双角色原生前置、八事件/未知结果、默认facts/CLI、postopen期限和失败收尾代码接线。root独立审查关键接口与证据，不并行改代码或重型验证。
+
+本次隔离原生两角色默认preflight+真实Brave/x11vnc恢复/八事件/最小独有about:blank执行已exit0；脚本套件2013总/1979通过/34条件跳过；独立age35通过。固定Node22.23.2应用账见 [application coverage](2026-10-01-browser-first-cutover-application-coverage.json)：非PayPal506文件8584pass/1原helper skip；cn-payment103pass、类型/真实orchestrator build/typecheck、ordinary维护与opt-in MySQL已分别通过。新facts使用实际SQL实现+合成后端/签名响应的组合契约，生产支付方未验收。
+
+实际full-host已修复晚期receipts、失败hold/detach和QA源空库缺项。新准备器真实固定61SQL当前基线90表、原binary/Unicode/NULL/trigger/event与完整92对象snapshot均通过；这不替代旧schema升级或生产事实。当前真实full-host成功场已exit0；固定9场故障矩阵尚未最终验收，本次因宿主累计swap风险主动暂停。日志/证据与复现见 [统一审计](2026-10-01-browser-first-cutover-consolidated-audit.md) 和 [QA入口](2026-10-01-browser-first-cutover-qa-reproduction.md)。
+
+生产外部工作/非PayPal真实恢复与重复权益、完整验收及新鲜批准/来源/锁/窗口尚未齐。PayPal延期，自动化未恢复，无生产效果、提交、push、PR、合并或部署。下面均为历史dated恢复过程，旧硬拒绝/测试计数不代表当前实现。
+
+## 历史恢复记录
+
+### 2026-10-01 原路径从归档恢复；u_seq真实缺口已修，1460回归通过，现场完整显示观察仍拒绝
+
+原目录曾在14:52:04 +0900被archive-cleanup移除，快照refs/codex/snapshots/ddb66c8d185b13688b9328201bd0446a862180d8=cc5c813d（父b43dd031）保留四个未提交文件和两份__pycache__。本轮在同一原路径重新挂接原分支b43dd031并仅恢复快照差异，保持草稿未提交、__pycache__未跟踪；没有创建替代开发分支或修改2612工作树。应用附件为空并非Git恢复不可行，上轮因此停止过早，已纠正。原忽略目录.superpowers、node_modules及native-packages缓存未随快照恢复；下面进展是本轮重新建立的记录，不能假称旧日志仍在。
+
+固定只读socket类型探针2255字节/SHA256 7a68b5647c52b2d36972daa01e6ebbd74755ccefd5142b4f2f8609a3b84514a0，经原47.99.169.186跳板至207.148.70.106实际EXIT0：两个crashpad初始socket及其双向对端均u_seq/ESTAB，单行匹配，两次类型稳定。仅证明这次类型观察，不是排他归属/停止许可。它确认旧草稿只接受u_str的真实兼容缺口。
+
+runtime现在只接受已连接u_str/u_seq，双向类型必须相同，类型纳入socket图与摘要，双采样类型漂移拒绝。新增5项回归含真实u_seq正例、摘要区分、混型/数据报/未连接/类型漂移；正例旧实现RED→GREEN。34定向通过；固定原Linux镜像1CPU/512MiB/heap256/UV1/单测试并发，七模块session26531 EXIT0：1460/1460零失败零跳过，/private/tmp/holaday-ipc-type-linux-regression.log。三文件Biome与git diff --check通过。原未完成helper/fixture继续保留草稿，未提交本批。
+
+完整原始只读runtime/evidence载荷411935字节/SHA256 2ee7255c6258443ba2f50bb28b6595fa2dc908096d3d94b7d13eb51733f72f42（仅静态import嵌入，无逻辑插桩），75秒/192MiB/V8及UV单线程：session7633在display阶段拒绝，未进入old-associations。诊断91500只见display catch；91781确认底层CUTOVER_CLOUD_RECOVERY_CENSUS_UNPROVEN。独立原生census诊断89107 EXIT0，138进程；合并诊断32097 EXIT1，记录某进程读取时ENOENT，完整census→display逐层拒绝。该诊断仅增加受限错误码/PID，没有改变判断。回归后最终未插桩session19477 EXIT1，仍在display阶段拒绝；不能断言其内部原因也必然是同一个进程退出。详细摘要和载荷留本轮QA目录及/private/tmp。没有生产落盘、服务启停、信号、历史数据或秘密输出。
+
+真实阻塞：当前完整显示/进程观察无法取得被接口接受的新鲜稳定事实，新OLD IPC接口的完整现场验证尚未到达。不得忽略ENOENT、过滤未知进程、重试写动作或放宽停止门。原本地真实joint的98827/89546均已EXIT1（不是运行中）；其旧缓存和日志未在恢复目录找到，修正后完整joint仍待恢复依赖并验证。34/1460属于组件检查，不是整项验收、部署或上线成功。
+
+下一步仍沿原任务：恢复必要的隔离native依赖，从真实socket缺口完成原joint；在可取得稳定事实时复核完整只读接口；然后才将原审批绑定的关联成员接入scopeDigest/退出账（退出必须用未过滤census防止旧PID exec后漏判），完成双方恢复前置/host有序ACK6/8及Task4–6验收/独立审查/新鲜发布窗口。当前host/inventory尚未消费新关联事实，恢复hardthrow/ACK>4/CLI门保持。没有push、PR、合并、部署或上线。已有授权持续有效，正常系统审核全部放行；本轮没有再次询问授权。单路无代理，未恢复自动化，PayPal全部延期。
+
+
+### 2026-10-01 旧浏览器完整socket归属草稿29定向/1455回归通过，原生联合98827运行中
+
+当前HEAD b43dd031（434f1b16旧crashpad漏采修复已提交）；三份未提交文件runtime/test、原browser-cloud-recovery-probe-linux fixture。新增只读readFirstCutoverCloudOldBrowserAssociations({sources,displayObservation,maintenanceEndsAtMs})，绑定实采display的source/context/完整census/原headed树、当前双角色manager前后匹配；只从实际初始fd→reciprocal socket识别主/次handler，再逐项检查所有socket FD的已关联peer组。唯一特殊项为0/1/2与原PM2根实际同一socket且对端仅真实daemon的继承stdio；原uids/cgroup/ns/ppid、加载inode/源码与两次socket/完整census/context稳定均检查。确切deleted加载态必须拒绝，不视为无候选；结束时间和单调时钟须有效。返回成员身份/哈希，不返回stopAuthorized，不授予停止许可。
+
+29定向通过：无关独立handler不采纳、精确stdio允许/外部或错继承拒绝、混合/外部初始peer、额外外部socket、源码/加载inode、deleted、UID/ns/cgroup/父系、manager/closing census/fd、时钟边界等。七模块session11322 EXIT0：1455/1455零失败零跳过，/private/tmp/holaday-old-browser-association-regression.log；三文件Biome/diff通过。初版13定向通过后补边界复现3个缺口，均修复。一次长本地写入审核超时未执行；先在允许临时目录保存可审草稿，再正常require_escalated重试写原工作树，通过；没有绕过或待用户批准动作。
+
+正在唯一重型验证session98827：native-packages/run-joint-old-associations.sh，日志joint-native-old-associations.log，固定离线1CPU/768MiB镜像原夹具。新增真实两个PPID1 handler观察，并与原独立QA IPC capture交叉核对；仍保留真实范围外X客户端对照、两角色恢复/Worker/WS-RFB/无旧URL/两次清理。先收结果，尚未宣称原生通过或提交。本新接口尚未在生产运行。
+
+原host/inventory尚未消费关联成员；scopeDigest与停止退出账仍仅PPID树，完整恢复hardthrow/ACK>4/CLI门关闭。下一步先原生验证/审查，必要时用既有授权固定目标进行同原runtime/evidence载荷的只读关联观察，再把实证且原审查已包含的关联成员接入原批准scope和退出账，不能副作用后采纳PID。之后仍有双角色恢复能力/加载审计、host有序恢复/ACK6/8及Task4–6整项验收/新鲜窗口。原__pycache__保留；自动化暂停，单路无代理，无push/PR/merge/deploy/上线。
+
+
 ### 2026-10-01 旧浏览器关联孤儿确实漏采，434f1b16完成只读库存修复
 
 当前HEAD 434f1b16（前批显示消费03df6d38、文档b5a0db2f）。旧IPC只读诊断old-browser-ipc-topology.mjs：7326字节/SHA b919168c2496178180db8323b59abb75abeaafed9851dc983bbfa46a5ecc0c85，session29579 EXIT0；v3 7692字节/SHA 2f618bd4ea1c7259a1139aafed13b03f5417c36136bede0a1de0b5d049e23205，session49500 EXIT0/stderr0。现场两个crashpad均PPID1：主handler实际initial socket对端为headed内Brave，次handler对端为主handler；两者collectorSelected:false。仅证明双采样初始IPC边，不是完整排他归属/停止许可。标识会变，禁止硬编码现场PID。v2/session49415因诊断自身UID正则少一个字段拒绝，已用两项本地检查修正为四字段，不是生产异常。准备首版本地诊断的一次自动审核超时，按明确允许重试一次后通过；后续正常审批均通过，无待授权动作/绕过/生产写入。
