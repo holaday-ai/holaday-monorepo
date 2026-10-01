@@ -1281,6 +1281,7 @@ for (const observed of [
       scopeDigest: '6'.repeat(64),
       recoveryDigest: '7'.repeat(64),
     }));
+    f.io.prepareCloudBrowserPolicy = async () => {}; // synthetic private-file boundary
     const attach = f.io.lifecycle.attach;
     f.io.lifecycle.attach = async (ctx) => {
       await attach(ctx);
@@ -1718,6 +1719,59 @@ test('first host connects real journal, backup receipt and bootstrap before exac
   await adapter.finish(result);
   await assert.rejects(fs.stat(join(f.directory, 'release.lock')), { code: 'ENOENT' });
 });
+
+for (const fault of ['none', 'no-scope', 'policy-failure', 'policy-expiry', 'attach-expiry']) {
+  test(`cloud private policy staging is owned and ordered: ${fault}`, async (t) => {
+    const f = await lifecycleFixture(t);
+    const attach = f.io.lifecycle.attach;
+    f.io.lifecycle.attach = async (ctx) => {
+      await attach(ctx);
+      if (fault !== 'no-scope')
+        await ctx.journal.bindExecutionSite(
+          '5'.repeat(64),
+          ['holaday-vnc', 'holaday-chromium-headed'].map((name, i) => ({
+            name,
+            pmId: i + 7,
+            scopeDigest: '6'.repeat(64),
+            recoveryDigest: '7'.repeat(64),
+          })),
+        );
+      if (fault === 'attach-expiry') f.setTime(f.approval.maintenanceEndsAtMs);
+    };
+    let calls = 0;
+    f.io.prepareCloudBrowserPolicy = async (input, settings) => {
+      calls++;
+      assert.deepEqual(input, {
+        attempt: f.binding.attempt,
+        maintenanceEndsAtMs: f.approval.maintenanceEndsAtMs,
+      });
+      assert.equal(settings.journal, f.journal());
+      assert.equal(settings.now, f.io.now);
+      assert.equal((await settings.journal.readFirstCutoverEffects()).phase, 'preflight');
+      assert(!f.events.includes('evidence:prepare'));
+      f.events.push('private-policy');
+      if (fault === 'policy-failure') throw new Error('CUTOVER_CLOUD_POLICY_UNPROVEN');
+      if (fault === 'policy-expiry') f.setTime(f.approval.maintenanceEndsAtMs);
+    };
+    const adapter = firstHost.createFirstCutoverHostAdapter({ attempt: approved.attempt }, f.io);
+    await adapter.preflight(approved.candidate);
+    if (['none', 'no-scope'].includes(fault)) await adapter.stage();
+    else
+      await assert.rejects(
+        adapter.stage(),
+        /CUTOVER_CLOUD_POLICY_UNPROVEN|CUTOVER_DEADLINE_UNPROVEN/,
+      );
+    assert.equal(calls, ['no-scope', 'attach-expiry'].includes(fault) ? 0 : 1);
+    if (fault === 'none')
+      assert(f.events.indexOf('site-attach') < f.events.indexOf('private-policy'));
+    assert.equal(f.events.includes('evidence:prepare'), ['none', 'no-scope'].includes(fault));
+    await assert.rejects(adapter.stage(), /CUTOVER_HOST_STATE_UNPROVEN/);
+    assert.equal(calls, ['no-scope', 'attach-expiry'].includes(fault) ? 0 : 1);
+    assert.equal(f.events.includes('fence-orders'), false);
+    await adapter.finish({ ok: false });
+    await fs.stat(join(f.directory, 'release.lock'));
+  });
+}
 
 test('site attaches to owned journal before readiness and detaches before reconciliation', async (t) => {
   const f = await lifecycleFixture(t);

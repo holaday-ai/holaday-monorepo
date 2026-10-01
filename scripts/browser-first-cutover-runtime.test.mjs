@@ -17,6 +17,7 @@ import {
   retireLegacyRuntime,
 } from './browser-first-cutover-runtime.mjs';
 import * as firstRuntime from './browser-first-cutover-runtime.mjs';
+import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 import { retireMaintenanceRuntime } from './browser-maintenance-runtime.mjs';
 
 test('cloud sources native leaf exists and refuses unsupported input without effects', async () => {
@@ -480,6 +481,291 @@ for (const [name, environment, allowed] of [
         firstRuntime.readFirstCutoverCloudRecoveryContext({ sources: f.sources }, f.io),
         /CUTOVER_CLOUD_CONTEXT_UNPROVEN/,
       );
+    }
+  });
+}
+async function privatePolicyFixture() {
+  const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'cloud-policy-')));
+  const physical = (p) => join(root, p);
+  const logical = (p) => (p === root ? '/' : p.startsWith(`${root}/`) ? p.slice(root.length) : p);
+  const source = '/etc/brave/policies/managed';
+  const parent = '/var/lib/holaday-deploy/maintenance';
+  const attempt = '22222222-2222-4222-8222-222222222222';
+  const target = `${parent}/${attempt}/cloud-browser-policy`;
+  await fs.mkdir(physical(source), { recursive: true, mode: 0o755 });
+  await fs.mkdir(physical(parent), { recursive: true, mode: 0o700 });
+  const original = '{"HomepageLocation":"about:blank","PrivateQA":"not-returned"}\n';
+  await fs.writeFile(physical(`${source}/existing.json`), original, { mode: 0o600 });
+  const binding = {
+    attempt,
+    candidate: 'a'.repeat(40),
+    configDigest: 'b'.repeat(64),
+    migrationDigest: 'c'.repeat(64),
+    inventoryDigest: 'd'.repeat(64),
+  };
+  const hash = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+  const record = {
+    ...binding,
+    kind: 'first-cutover',
+    phase: 'preflight',
+    startupEvents: [],
+    registrationEvents: [],
+    unmanagedEvents: [],
+    cloudMaintenanceEvents: [],
+    executionSiteDigest: 'e'.repeat(64),
+    cloudMaintenanceScope: [
+      {
+        name: 'holaday-vnc',
+        pmId: 6,
+        scopeDigest: 'f'.repeat(64),
+        recoveryDigest: hash(firstRuntime.firstCutoverCloudVncRecoveryMaterial({ attempt })),
+      },
+      {
+        name: 'holaday-chromium-headed',
+        pmId: 7,
+        scopeDigest: 'f'.repeat(64),
+        recoveryDigest: hash(firstRuntime.firstCutoverCloudBrowserRecoveryLaunch({ attempt })),
+      },
+    ],
+  };
+  // Logical fixed paths mapped to real isolated files. Root identity is synthetic
+  // only on non-root developer machines; the Linux suite uses actual root IO.
+  const metadata = (st) => (process.getuid?.() === 0 ? st : Object.assign(st, { uid: 0 }));
+  const io = {
+    platform: 'linux',
+    uid: 0,
+    now: () => 1000,
+    journal: {
+      assertOwnership: async () => structuredClone(binding),
+      readFirstCutoverEffects: async () => structuredClone(record),
+    },
+    lstat: async (p) => metadata(await fs.lstat(physical(p))),
+    realpath: async (p) => logical(await fs.realpath(physical(p))),
+    readdir: (p) => fs.readdir(physical(p)),
+    mkdir: (p, o) => fs.mkdir(physical(p), o),
+    open: async (p, ...args) => {
+      const h = await fs.open(physical(p), ...args);
+      return {
+        stat: async () => metadata(await h.stat()),
+        read: (...a) => h.read(...a),
+        writeFile: (...a) => h.writeFile(...a),
+        sync: () => h.sync(),
+        close: () => h.close(),
+      };
+    },
+  };
+  return {
+    root,
+    physical,
+    source,
+    parent,
+    target,
+    attempt,
+    original,
+    binding,
+    record,
+    io,
+    cleanup: () => fs.rm(root, { recursive: true, force: true }),
+  };
+}
+test('private cloud policy preparation copies protected bytes under owned attempt and refuses reuse', async () => {
+  const f = await privatePolicyFixture();
+  try {
+    const result = await firstRuntime.prepareFirstCutoverCloudBrowserPolicy(
+      { attempt: f.attempt, maintenanceEndsAtMs: 15000 },
+      f.io,
+    );
+    assert.equal(result.attempt, f.attempt);
+    assert.match(result.originalDigest, /^[a-f0-9]{64}$/);
+    assert.match(result.privateDigest, /^[a-f0-9]{64}$/);
+    assert.equal(JSON.stringify(result).includes('not-returned'), false);
+    assert.equal(await fs.readFile(f.physical(`${f.source}/existing.json`), 'utf8'), f.original);
+    assert.equal(await fs.readFile(f.physical(`${f.target}/existing.json`), 'utf8'), f.original);
+    assert.deepEqual(
+      JSON.parse(await fs.readFile(f.physical(`${f.target}/recovery.json`), 'utf8')),
+      { RestoreOnStartup: 5 },
+    );
+    assert.equal((await fs.stat(f.physical(f.target))).mode & 0o7777, 0o700);
+    for (const name of ['existing.json', 'recovery.json'])
+      assert.equal((await fs.stat(f.physical(`${f.target}/${name}`))).mode & 0o7777, 0o600);
+    await assert.rejects(
+      firstRuntime.prepareFirstCutoverCloudBrowserPolicy(
+        { attempt: f.attempt, maintenanceEndsAtMs: 15000 },
+        f.io,
+      ),
+      /CUTOVER_CLOUD_POLICY_UNPROVEN/,
+    );
+    assert.equal(await fs.readFile(f.physical(`${f.target}/existing.json`), 'utf8'), f.original);
+  } finally {
+    await f.cleanup();
+  }
+});
+test('private cloud policy preparation consumes the actual v1 first-cutover journal projection', async () => {
+  const f = await privatePolicyFixture();
+  let journal;
+  try {
+    const manifest = {
+      replaysNumberedSql: true,
+      runnerSha256: 'a'.repeat(64),
+      migrations: [{ name: '0042_qa.sql', sha256: 'b'.repeat(64) }],
+    };
+    journal = await acquireReleaseJournal(f.physical(f.parent), {
+      ...f.binding,
+      kind: 'first-cutover',
+      legacyDigest: 'c'.repeat(64),
+      migrationDigest: createHash('sha256').update(JSON.stringify(manifest)).digest('hex'),
+    });
+    await journal.bindManifest(manifest);
+    await journal.bindExecutionSite(f.record.executionSiteDigest, f.record.cloudMaintenanceScope);
+    const before = await journal.readFirstCutoverEffects();
+    assert.equal(before.kind, undefined);
+    assert.equal(before.cloudMaintenanceEvents, undefined);
+    const result = await firstRuntime.prepareFirstCutoverCloudBrowserPolicy(
+      { attempt: f.attempt, maintenanceEndsAtMs: 15000 },
+      { ...f.io, journal },
+    );
+    assert.match(result.privateDigest, /^[a-f0-9]{64}$/);
+    assert.deepEqual(await journal.readFirstCutoverEffects(), before);
+  } finally {
+    await journal?.close();
+    await f.cleanup();
+  }
+});
+for (const fault of [
+  'platform',
+  'uid',
+  'extra',
+  'wrong-attempt',
+  'phase',
+  'wrong-kind',
+  'null-cloud-events',
+  'missing-deadline',
+  'expired-deadline',
+  'deadline-drift',
+  'journal-deadline',
+  'scope-launch',
+  'scope-role',
+  'scope-id',
+  'failure',
+  'prior-cloud-event',
+  'no-journal',
+  'unowned',
+  'unsafe-parent',
+  'source-writable',
+  'source-symlink',
+  'file-symlink',
+  'file-hardlink',
+  'reserved-name',
+  'startup-key',
+  'invalid-json',
+  'invalid-name',
+  'existing-attempt',
+  'source-drift',
+  'lost-lock',
+  'write-failure',
+]) {
+  test(`private cloud policy preparation refuses ${fault} and preserves originals`, async () => {
+    const f = await privatePolicyFixture();
+    const input = {
+      attempt: f.attempt,
+      ...(fault === 'missing-deadline' ? {} : { maintenanceEndsAtMs: 15000 }),
+    };
+    try {
+      if (fault === 'platform') f.io.platform = 'darwin';
+      if (fault === 'uid') f.io.uid = 1;
+      if (fault === 'extra') input.overwrite = true;
+      if (fault === 'wrong-attempt') input.attempt = '33333333-3333-4333-8333-333333333333';
+      if (fault === 'wrong-kind') f.record.kind = 'ordinary';
+      if (fault === 'null-cloud-events') f.record.cloudMaintenanceEvents = null;
+      if (fault === 'expired-deadline') input.maintenanceEndsAtMs = 1000;
+      if (fault === 'journal-deadline') f.record.maintenanceEndsAtMs = 16000;
+      if (fault === 'phase') f.record.phase = 'verified';
+      if (fault === 'scope-launch')
+        f.record.cloudMaintenanceScope[1].recoveryDigest = '0'.repeat(64);
+      if (fault === 'scope-role') f.record.cloudMaintenanceScope[1].name = 'other';
+      if (fault === 'scope-id')
+        f.record.cloudMaintenanceScope[1].pmId = f.record.cloudMaintenanceScope[0].pmId;
+      if (fault === 'failure') f.record.failureObservation = { code: 'prior' };
+      if (fault === 'prior-cloud-event')
+        f.record.cloudMaintenanceEvents.push({ phase: 'cloud-stop-intent' });
+      if (fault === 'no-journal') f.io.journal = undefined;
+      if (fault === 'unowned')
+        f.io.journal.assertOwnership = async () => {
+          throw Error('not owned');
+        };
+      if (fault === 'unsafe-parent') await fs.chmod(f.physical(f.parent), 0o777);
+      if (fault === 'source-writable')
+        await fs.chmod(f.physical(`${f.source}/existing.json`), 0o666);
+      if (fault === 'source-symlink') {
+        await fs.rename(f.physical(f.source), f.physical(`${f.source}-moved`));
+        await fs.symlink(f.physical(`${f.source}-moved`), f.physical(f.source));
+      }
+      if (fault === 'file-symlink') {
+        await fs.rename(f.physical(`${f.source}/existing.json`), f.physical('/original.json'));
+        await fs.symlink(f.physical('/original.json'), f.physical(`${f.source}/existing.json`));
+      }
+      if (fault === 'file-hardlink')
+        await fs.link(f.physical(`${f.source}/existing.json`), f.physical('/linked.json'));
+      if (fault === 'reserved-name')
+        await fs.writeFile(f.physical(`${f.source}/recovery.json`), '{}');
+      if (fault === 'startup-key')
+        await fs.writeFile(f.physical(`${f.source}/existing.json`), '{"RestoreOnStartup":1}');
+      if (fault === 'invalid-json')
+        await fs.writeFile(f.physical(`${f.source}/existing.json`), 'invalid');
+      if (fault === 'invalid-name') await fs.writeFile(f.physical(`${f.source}/unrecognized`), 'x');
+      if (fault === 'existing-attempt') {
+        await fs.mkdir(f.physical(`${f.parent}/${f.attempt}`), { mode: 0o700 });
+        await fs.writeFile(f.physical(`${f.parent}/${f.attempt}/sentinel`), 'preserve');
+      }
+      let created = false;
+      let clock = 1000;
+      if (fault === 'deadline-drift') f.io.now = () => clock;
+      const mkdir = f.io.mkdir;
+      f.io.mkdir = async (...args) => {
+        const v = await mkdir(...args);
+        created = true;
+        if (fault === 'deadline-drift') clock = 15000;
+        if (fault === 'source-drift')
+          await fs.writeFile(f.physical(`${f.source}/existing.json`), '{"changed":true}');
+        return v;
+      };
+      if (fault === 'lost-lock') {
+        const ownership = f.io.journal.assertOwnership;
+        f.io.journal.assertOwnership = async () => {
+          if (created) throw Error('lost');
+          return ownership();
+        };
+      }
+      if (fault === 'write-failure') {
+        const open = f.io.open;
+        f.io.open = async (p, ...args) => {
+          if (p.startsWith(f.target)) throw Error('write failed');
+          return open(p, ...args);
+        };
+      }
+      const baseline = await fs.readFile(f.physical(`${f.source}/existing.json`), 'utf8');
+      await assert.rejects(
+        firstRuntime.prepareFirstCutoverCloudBrowserPolicy(input, f.io),
+        /CUTOVER_CLOUD_POLICY_UNPROVEN/,
+      );
+      assert.equal(
+        await fs.readFile(f.physical(`${f.source}/existing.json`), 'utf8'),
+        fault === 'source-drift' && created ? '{"changed":true}' : baseline,
+      );
+      if (fault === 'existing-attempt')
+        assert.equal(
+          await fs.readFile(f.physical(`${f.parent}/${f.attempt}/sentinel`), 'utf8'),
+          'preserve',
+        );
+      if (['source-drift', 'lost-lock', 'write-failure'].includes(fault)) {
+        assert.equal(created, true);
+        await assert.rejects(
+          firstRuntime.prepareFirstCutoverCloudBrowserPolicy(input, f.io),
+          /CUTOVER_CLOUD_POLICY_UNPROVEN/,
+        );
+      }
+    } finally {
+      await f.cleanup();
     }
   });
 }

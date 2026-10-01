@@ -930,6 +930,259 @@ export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}
   }
 }
 
+/** Prepare only the approved private policy artifact under the owned attempt.
+ * Never alter global policy or a profile, adopt an existing attempt directory,
+ * or retry/clean up a partial write. The original stage guard owns this effect;
+ * this artifact alone is not recovery readiness or a recovery acknowledgement.
+ */
+export async function prepareFirstCutoverCloudBrowserPolicy(input, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_POLICY_UNPROVEN');
+  };
+  try {
+    if (
+      Object.keys(input ?? {})
+        .sort()
+        .join(',') !== 'attempt,maintenanceEndsAtMs' ||
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      !io.journal
+    )
+      reject();
+    const { attempt, maintenanceEndsAtMs } = input;
+    if (!Number.isSafeInteger(maintenanceEndsAtMs) || maintenanceEndsAtMs < 0) reject();
+    const launch = firstCutoverCloudBrowserRecoveryLaunch({ attempt });
+    const sha = (v) =>
+      createHash('sha256')
+        .update(Buffer.isBuffer(v) ? v : JSON.stringify(v))
+        .digest('hex');
+    const binding = structuredClone(await io.journal.assertOwnership());
+    const record = structuredClone(await io.journal.readFirstCutoverEffects());
+    const scope = record.cloudMaintenanceScope;
+    if (
+      binding.attempt !== attempt ||
+      (record.kind !== undefined && record.kind !== 'first-cutover') ||
+      !Object.entries(binding).every(([k, v]) => isDeepStrictEqual(record[k], v)) ||
+      !['preflight', 'prepared'].includes(record.phase) ||
+      record.failureObservation ||
+      (record.maintenanceEndsAtMs !== undefined &&
+        record.maintenanceEndsAtMs !== maintenanceEndsAtMs) ||
+      !hash(record.executionSiteDigest) ||
+      !Array.isArray(scope) ||
+      scope.length !== 2 ||
+      scope[0].name !== 'holaday-vnc' ||
+      scope[1].name !== 'holaday-chromium-headed' ||
+      scope[0].pmId === scope[1].pmId ||
+      scope.some((s) => !Number.isSafeInteger(s.pmId) || s.pmId < 0 || !hash(s.scopeDigest)) ||
+      scope[0].recoveryDigest !== sha(firstCutoverCloudVncRecoveryMaterial({ attempt })) ||
+      scope[1].recoveryDigest !== sha(launch) ||
+      ['startupEvents', 'registrationEvents', 'unmanagedEvents'].some(
+        (k) => !Array.isArray(record[k]) || record[k].length,
+      ) ||
+      (record.cloudMaintenanceEvents !== undefined &&
+        (!Array.isArray(record.cloudMaintenanceEvents) || record.cloudMaintenanceEvents.length))
+    )
+      reject();
+    const began = io.now();
+    let last = began;
+    const guard = async () => {
+      const now = io.now();
+      if (
+        !Number.isSafeInteger(now) ||
+        now < 0 ||
+        now < last ||
+        now - began > 15000 ||
+        now >= maintenanceEndsAtMs ||
+        !isDeepStrictEqual(binding, await io.journal.assertOwnership()) ||
+        !isDeepStrictEqual(record, await io.journal.readFirstCutoverEffects())
+      )
+        reject();
+      last = now;
+    };
+    const metadata = (s) =>
+      Object.fromEntries(
+        ['dev', 'ino', 'uid', 'gid', 'mode', 'size', 'mtimeMs', 'ctimeMs', 'nlink'].map((k) => [
+          k,
+          s[k],
+        ]),
+      );
+    const protectedPath = async (path, privateDirectory = false) => {
+      let current = '/';
+      for (const part of ['', ...path.slice(1).split('/')]) {
+        if (part) current = posix.join(current, part);
+        const s = await io.lstat(current);
+        if (
+          !s.isDirectory() ||
+          s.uid !== 0 ||
+          s.mode & 0o7022 ||
+          (await io.realpath(current)) !== current
+        )
+          reject();
+        if (current === path && privateDirectory && (s.mode & 0o7777) !== 0o700) reject();
+      }
+      return metadata(await io.lstat(path));
+    };
+    const root = '/etc/brave/policies/managed';
+    const storage = '/var/lib/holaday-deploy/maintenance';
+    const attemptPath = `${storage}/${attempt}`;
+    const target = `${attemptPath}/cloud-browser-policy`;
+    await guard();
+    await protectedPath(storage, true);
+    const capture = async (directory) => {
+      await guard();
+      const before = await protectedPath(directory, directory === target);
+      const names = (await io.readdir(directory)).sort();
+      if (names.length > 64 || names.some((n) => !/^[A-Za-z0-9_-]+\.json$/.test(n))) reject();
+      let total = 0;
+      const entries = [];
+      for (const name of names) {
+        const path = `${directory}/${name}`;
+        const handle = await io.open(
+          path,
+          constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        );
+        try {
+          const st = await handle.stat();
+          if (
+            !st.isFile() ||
+            st.uid !== 0 ||
+            st.mode & 0o7022 ||
+            st.nlink !== 1 ||
+            st.size > 1048576 ||
+            !isDeepStrictEqual(metadata(st), metadata(await io.lstat(path)))
+          )
+            reject();
+          const bytes = Buffer.alloc(1048577);
+          let size = 0;
+          while (size < bytes.length) {
+            const { bytesRead: n } = await handle.read(bytes, size, bytes.length - size, size);
+            if (!Number.isSafeInteger(n) || n < 0 || n > bytes.length - size) reject();
+            if (!n) break;
+            size += n;
+          }
+          total += size;
+          if (size !== st.size || size > 1048576 || total > 16 * 1048576) reject();
+          const raw = bytes.subarray(0, size);
+          const text = raw.toString('utf8');
+          if (!Buffer.from(text).equals(raw)) reject();
+          const parsed = JSON.parse(text);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) reject();
+          if (
+            directory === root &&
+            (name === 'recovery.json' || Object.hasOwn(parsed, 'RestoreOnStartup'))
+          )
+            reject();
+          if (
+            !isDeepStrictEqual(metadata(st), metadata(await handle.stat())) ||
+            !isDeepStrictEqual(metadata(st), metadata(await io.lstat(path)))
+          )
+            reject();
+          entries.push({ name, stat: metadata(st), digest: sha(raw), bytes: Buffer.from(raw) });
+        } finally {
+          await handle.close();
+        }
+      }
+      if (
+        !isDeepStrictEqual(names, (await io.readdir(directory)).sort()) ||
+        !isDeepStrictEqual(before, await protectedPath(directory, directory === target))
+      )
+        reject();
+      return { directory: before, entries };
+    };
+    const original = await capture(root);
+    const originalMaterial = (v) => ({
+      directory: v.directory,
+      entries: v.entries.map(({ bytes: _bytes, ...e }) => e),
+    });
+    const originalDigest = sha(originalMaterial(original));
+    const storageBefore = await protectedPath(storage, true);
+    const sameDirectory = async (path, old) => {
+      const s = await protectedPath(path, true);
+      if (['dev', 'ino', 'uid', 'gid', 'mode'].some((k) => s[k] !== old[k])) reject();
+    };
+    // Both mkdir operations are exclusive. An existing or partial attempt is
+    // deliberately not resumed, removed, or overwritten by this preparation.
+    await guard();
+    await io.mkdir(attemptPath, { mode: 0o700 });
+    await sameDirectory(storage, storageBefore);
+    const attemptStat = await protectedPath(attemptPath, true);
+    await guard();
+    await io.mkdir(target, { mode: 0o700 });
+    await sameDirectory(attemptPath, attemptStat);
+    const targetStat = await protectedPath(target, true);
+    const files = [
+      ...original.entries.map(({ name, bytes }) => ({ name, bytes })),
+      { name: 'recovery.json', bytes: Buffer.from(JSON.stringify({ RestoreOnStartup: 5 })) },
+    ];
+    for (const { name, bytes } of files) {
+      await guard();
+      await sameDirectory(storage, storageBefore);
+      await sameDirectory(attemptPath, attemptStat);
+      await sameDirectory(target, targetStat);
+      const file = await io.open(
+        `${target}/${name}`,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        0o600,
+      );
+      try {
+        const st = await file.stat();
+        if (!st.isFile() || st.uid !== 0 || (st.mode & 0o7777) !== 0o600 || st.nlink !== 1)
+          reject();
+        await guard();
+        await file.writeFile(bytes);
+        await file.sync();
+      } finally {
+        await file.close();
+      }
+    }
+    for (const path of [target, attemptPath, storage]) {
+      await guard();
+      const h = await io.open(
+        path,
+        constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+      );
+      try {
+        await h.sync();
+      } finally {
+        await h.close();
+      }
+    }
+    const current = await capture(root);
+    if (originalDigest !== sha(originalMaterial(current))) reject();
+    const prepared = await capture(target);
+    const expected = files
+      .map(({ name, bytes }) => ({ name, digest: sha(bytes) }))
+      .sort((a, b) => (a.name < b.name ? -1 : 1));
+    if (
+      !isDeepStrictEqual(
+        prepared.entries.map(({ name, digest }) => ({ name, digest })),
+        expected,
+      ) ||
+      prepared.entries.some((e) => (e.stat.mode & 0o7777) !== 0o600)
+    )
+      reject();
+    await guard();
+    await sameDirectory(storage, storageBefore);
+    await sameDirectory(attemptPath, attemptStat);
+    await sameDirectory(target, targetStat);
+    return {
+      attempt,
+      originalDigest,
+      privateDigest: sha({ attempt, originalDigest, files: expected }),
+      observedAtMs: last,
+    };
+  } catch {
+    reject();
+  }
+}
+
 const hash = (x) => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
 
 // executeApp flattens nested env after current_conf. Preserve matching and

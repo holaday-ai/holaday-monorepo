@@ -33,6 +33,7 @@ import {
 import {
   captureLegacyRuntime,
   initializeFirstMaintenanceState,
+  prepareFirstCutoverCloudBrowserPolicy,
   readFirstCutoverCloudBrowserRecovery,
   readFirstCutoverCloudManagers,
   readFirstCutoverCloudRecoveryCensus,
@@ -2253,6 +2254,7 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
     now: Date.now,
     readApproval: readFirstCutoverApproval,
     readCloudBrowserRecovery: readFirstCutoverCloudBrowserRecovery,
+    prepareCloudBrowserPolicy: prepareFirstCutoverCloudBrowserPolicy,
     ...overrides,
   };
   if (io.platform !== 'linux' || io.uid !== 0) throw new Error('MAINTENANCE_LINUX_ROOT_REQUIRED');
@@ -2595,6 +2597,18 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
         siteAttachStarted = true;
         await io.lifecycle.attach(context());
         await guard();
+        if ((await prepared.journal.readFirstCutoverEffects()).cloudMaintenanceScope) {
+          // Site attachment binds the approved recovery material before this
+          // attempt-private write. The stage is single-use, including failures.
+          await io.prepareCloudBrowserPolicy(
+            {
+              attempt: prepared.binding.attempt,
+              maintenanceEndsAtMs: approval.maintenanceEndsAtMs,
+            },
+            { journal: prepared.journal, now: io.now, platform: io.platform, uid: io.uid },
+          );
+          await guard();
+        }
         await readiness();
       }),
     persist: async (next, detail) => {

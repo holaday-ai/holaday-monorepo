@@ -34,6 +34,7 @@ import {
 import {
   firstCutoverCloudBrowserRecoveryLaunch,
   firstCutoverCloudVncRecoveryMaterial,
+  prepareFirstCutoverCloudBrowserPolicy,
   readFirstCutoverCloudBrowserRecovery,
   readFirstCutoverCloudRecovery,
   readFirstCutoverCloudRecoveryCensus,
@@ -241,7 +242,9 @@ async function restoreSameRegistration(recovery) {
     runnerSha256: 'b'.repeat(64),
     migrations: [{ name: '0042_qa.sql', sha256: 'c'.repeat(64) }],
   };
-  const directory = await fs.mkdtemp('/tmp/holaday-cloud-restore-journal-');
+  const directory = jointRecovery
+    ? '/var/lib/holaday-deploy/maintenance'
+    : await fs.mkdtemp('/tmp/holaday-cloud-restore-journal-');
   await fs.chmod(directory, 0o700);
   restoreJournal = await acquireReleaseJournal(directory, {
     kind: 'first-cutover',
@@ -272,6 +275,22 @@ async function restoreSameRegistration(recovery) {
     },
   ];
   await restoreJournal.bindExecutionSite('3'.repeat(64), scope);
+  if (jointRecovery) {
+    const policy = await prepareFirstCutoverCloudBrowserPolicy(
+      { attempt, maintenanceEndsAtMs: Date.now() + 15000 },
+      { journal: restoreJournal },
+    );
+    assert.equal(policy.attempt, attempt);
+    assert.match(policy.originalDigest, /^[a-f0-9]{64}$/);
+    assert.match(policy.privateDigest, /^[a-f0-9]{64}$/);
+    console.log(
+      JSON.stringify({
+        marker: 'CLOUD_PRIVATE_POLICY_PREPARED',
+        ownedJournal: true,
+        productionPreflight: false,
+      }),
+    );
+  }
   for (const phase of ['prepared', 'orders_fenced', 'legacy_settled', 'producers_stopped'])
     await restoreJournal.persist(phase, { candidate });
   const binding = await restoreJournal.assertOwnership();
@@ -1258,16 +1277,23 @@ try {
   }
   let privatePolicy;
   if (scopedPolicy) {
-    await fs.mkdir(`/var/lib/holaday-deploy/maintenance/${attempt}`, {
-      recursive: true,
-      mode: 0o700,
-    });
     privatePolicy = `/var/lib/holaday-deploy/maintenance/${attempt}/cloud-browser-policy`;
-    await fs.mkdir(privatePolicy, { mode: 0o700 });
-    await fs.writeFile(`${privatePolicy}/existing.json`, originalPolicy, { flag: 'wx' });
-    await fs.writeFile(`${privatePolicy}/recovery.json`, JSON.stringify({ RestoreOnStartup: 5 }), {
-      flag: 'wx',
-    });
+    if (jointRecovery) {
+      // The real journal and product policy preparer create the attempt below.
+      await fs.mkdir('/var/lib/holaday-deploy/maintenance', { recursive: true, mode: 0o700 });
+    } else {
+      await fs.mkdir(`/var/lib/holaday-deploy/maintenance/${attempt}`, {
+        recursive: true,
+        mode: 0o700,
+      });
+      await fs.mkdir(privatePolicy, { mode: 0o700 });
+      await fs.writeFile(`${privatePolicy}/existing.json`, originalPolicy, { flag: 'wx' });
+      await fs.writeFile(
+        `${privatePolicy}/recovery.json`,
+        JSON.stringify({ RestoreOnStartup: 5 }),
+        { flag: 'wx' },
+      );
+    }
   }
   if (occupiedDisplay) {
     conflictDisplay = spawn('/usr/bin/Xvfb', displayArgs(98), { stdio: 'ignore' });
