@@ -11,6 +11,7 @@ describe('HTTP request logging', () => {
     const authorization = 'Bearer production-token-value';
     const cookie = 'session=private-cookie-value';
     const apiKey = 'private-api-key-value';
+    const internalSecret = 'private-internal-shared-secret-value';
     const alternateApiKey = 'private-alternate-api-key-value';
     const proxyAuthorization = 'Basic private-proxy-credentials';
     const setCookie = 'session=private-response-cookie';
@@ -47,6 +48,7 @@ describe('HTTP request logging', () => {
               'api-key': alternateApiKey,
               'proxy-authorization': proxyAuthorization,
               'x-api-key': apiKey,
+              'x-internal-secret': internalSecret,
             },
           },
           (res) => {
@@ -67,6 +69,7 @@ describe('HTTP request logging', () => {
     expect(output).not.toContain(authorization);
     expect(output).not.toContain(cookie);
     expect(output).not.toContain(apiKey);
+    expect(output).not.toContain(internalSecret);
     expect(output).not.toContain(alternateApiKey);
     expect(output).not.toContain(proxyAuthorization);
     expect(output).not.toContain(setCookie);
@@ -82,6 +85,7 @@ describe('HTTP request logging', () => {
     expect(entry.req.headers['api-key']).toBe('[Redacted]');
     expect(entry.req.headers['proxy-authorization']).toBe('[Redacted]');
     expect(entry.req.headers['x-api-key']).toBe('[Redacted]');
+    expect(entry.req.headers['x-internal-secret']).toBe('[Redacted]');
     expect(entry.res.headers['set-cookie']).toBe('[Redacted]');
     expect(entry.res.headers.location).toBe('[Redacted]');
   });

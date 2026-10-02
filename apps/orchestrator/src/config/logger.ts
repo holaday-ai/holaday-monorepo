@@ -11,6 +11,7 @@ export const loggerOptions = {
       'req.headers.cookie',
       'req.headers["proxy-authorization"]',
       'req.headers["x-api-key"]',
+      'req.headers["x-internal-secret"]',
       'req.headers["api-key"]',
       'res.headers["set-cookie"]',
       'res.headers.location',
