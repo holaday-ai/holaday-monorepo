@@ -161,6 +161,46 @@ class ChannelTest(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 channel.append_authorization(prior, key)
 
+    def test_actual_observe_program_keeps_linux_single_argument_headroom(self):
+        import hashlib
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        source = pathlib.Path(__file__).with_name('browser-cutover-evidence.mjs').read_bytes()
+        digest = hashlib.sha256(source).hexdigest()
+        def read(path, *args, **kwargs):
+            if path.name == 'observer.sha256':
+                return digest.encode()
+            if path.name == 'browser-cutover-evidence.mjs':
+                self.assertEqual(kwargs['limit'], 128 * 1024)
+                return source
+            return b'entry'
+        env = {'SSH_CONNECTION': channel.SOURCE_IP + ' 1234 127.0.0.1 22',
+               'SSH_ORIGINAL_COMMAND': 'holaday-cutover-v1 observe ' + 'a' * 32}
+        with patch.object(pathlib.Path, 'resolve', lambda self: self), patch.object(channel.sys, 'platform', 'linux'), patch.dict(os.environ, env, clear=True), patch.object(channel.os, 'geteuid', return_value=0), patch.object(pathlib.Path, 'lstat', return_value=SimpleNamespace(st_mode=0o40700, st_uid=0)), patch.object(channel, 'read_verified_file', side_effect=read), patch.object(channel.os, 'chdir'), patch.object(channel.os, 'execve') as execute:
+            channel.main()
+        exe, argv, environment = execute.call_args.args
+        self.assertEqual(exe, '/usr/bin/node')
+        self.assertEqual(argv[:3], ['/usr/bin/node', '--input-type=module', '--eval'])
+        self.assertLess(len(argv[3].encode()) + 1, 128 * 1024)
+        self.assertIn(digest, argv[3])
+        self.assertEqual(environment['GIT_OPTIONAL_LOCKS'], '0')
+
+    def test_actual_collector_source_fits_fixed_observe_limit_and_oversize_refuses(self):
+        import hashlib
+        source = pathlib.Path(__file__).with_name('browser-cutover-evidence.mjs').read_bytes()
+        self.assertGreater(len(source), 96 * 1024)
+        self.assertLess(len(source), 128 * 1024)
+        with tempfile.TemporaryDirectory() as folder:
+            file = pathlib.Path(folder) / 'observer.mjs'
+            file.write_bytes(source)
+            file.chmod(0o600)
+            digest = hashlib.sha256(source).hexdigest()
+            self.assertEqual(channel.read_verified_file(file, digest, os.geteuid(), limit=128 * 1024), source)
+            oversized = b'x' * (128 * 1024 + 1)
+            file.write_bytes(oversized)
+            with self.assertRaises(RuntimeError):
+                channel.read_verified_file(file, hashlib.sha256(oversized).hexdigest(), os.geteuid(), limit=128 * 1024)
+
     def test_bundle_hash_and_file_permissions_are_checked_before_execution(self):
         import hashlib
         with tempfile.TemporaryDirectory() as folder:

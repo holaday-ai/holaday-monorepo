@@ -1,3 +1,17 @@
+## 2026-10-02 来源入口真实恢复点
+
+精确导航延期包已交付 `8f1671c6b91cb7f7ac941649292b2d6cf7304f4b`。本来源小包已接通唯一已验 logger 差分的显式 pair/legacy-source/digest 身份；新候选 clean gate及其他 tracked 改动拒绝保持。首次双机 session50441 实际退出1：Aliyun退出0但聚合失败未保留原始 partial，故不能认定完整 pair 通过。单 Vultr session63528 定位为额外加入全部 untracked 的门槛回归：tracked只有精确 logger，1064个历史 artifact不在原 tracked-source gate 中。现已恢复 `--untracked-files=no`，不宣称整个工作目录无 untracked；不删除或修改 artifact，实际启动/config/进程归属独立守卫保持。真实隔离 Git RED1失败→GREEN1通过，其他 tracked 变更仍拒绝。
+
+修正后单 Vultr session78187 实际退出0（result SHA `7669f068ca68c6faf70e0070c1304352569f7b8d276b79ff8726d1af5f672759`），sourceBefore/snapshot/capability/sourceAfter/observer齐全，31进程/9管理项。`/etc/cron.yearly` ENOENT是原观察器允许缺席，整体观察成功。此前332/332、channel14/14、定向12/12保留，不重跑。两轮私有档案分别位于本任务 `qa/legacy-logger-source-entry-20261002`（23件）与 `qa/legacy-logger-source-attempts-20261002`（22件）；全部0700/0600及SHA核验。来源小包待 root 最终提交，未部署现场channel或重启服务。最终发布窗口仍需原流程新鲜完整pair、真实 inventory/site/rehearsal与候选/config/批准窗口绑定；整项releaseAcceptance=false，PR238仍draft。以下旧恢复点保留为历史。
+
+## 2026-10-02 来源入口修正接续
+
+精确十条导航延期包已由 root 独立审查、提交并推送 `8f1671c6b91cb7f7ac941649292b2d6cf7304f4b`。十条仍保留未验证结果及禁止自动重放，其他原门槛不变；PR238 仍 draft，整候选未合并或部署。
+
+本次实际来源入口已接通精确旧 HEAD `107857fe70503e30691073f267d87275596edb20` 与唯一已验收 logger 差分（旧 `62fba7e8…`、新 `6267b117…`），显式 patch 身份进入双机 pair、legacy-source proof 及 digest；前后 HEAD/status/文件身份/内容稳定，其他脏文件及新候选脏树继续拒绝。既有 root:root/0644/nlink1 元数据来自真实前置。受保护 Aliyun collector 固定读取上限从96提升至128KiB，以容纳当前120989字节源码，SHA及权限验证保持；实际程序封装体低于 Linux 单参数128KiB边界，超限拒绝。无现场 channel 安装或服务变更。
+
+隔离验证保留 RED 8失败→GREEN 8通过、原 observer/inventory 332通过、channel最终14通过及最终非历史对象依赖定向12通过；中间平台 mock 失败保留，不合并成单次全通过。来源入口七文件已正常审核应用，待 root 提交；固定 Node22 双机只读脚本由 root 单次执行（session50441）实际退出1：Aliyun 退出0/无 stderr，Vultr 退出1，仅公开 CUTOVER_HOST_PAIR_UNPROVEN；整对采集未通过，不能由外壳判断根因。只准备单 Vultr 分阶段只读诊断，尚未执行；不重复 Aliyun、不重放旧 attempt，不把诊断当验收。以下旧恢复点保留为历史。
+
 ## 2026-10-02 精确历史导航延期实现恢复点
 
 用户已批准十条精确历史导航延期，集合指纹 `192900b8bbd82d0456952f07f66cffe145f7131e738ab1c74f97ee327205f446`，只读来源 `653d441102e3ef314816d94165dea9daf633d01d0923c36e7d31bc7d589ed727`。这十条仍是未验证执行结果，不修改历史记录、不认定已完成、不自动重放。延期只适用于本次受保护首次切换；普通维护不豁免。实际旧记录全字段指纹、父状态、来源及批准窗口绑定；历史候选记录新增、缺失或变化均拒绝。新候选正常工作另存非延期范围，开放前仍阻断，开放后遵循原正常生产者语义。

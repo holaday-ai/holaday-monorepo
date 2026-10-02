@@ -17,6 +17,7 @@ import {
   cutoverRegistrationConfigDigest,
   readCutoverDatabaseScope,
   readCutoverHostSnapshot,
+  validateReviewedLegacyLoggerPatch,
   readCutoverWorkScope,
   validateFirstCutoverCloudSources,
 } from './browser-cutover-evidence.mjs';
@@ -597,21 +598,16 @@ export async function readFirstCutoverHostPair(overrides = {}) {
       const envelope = { protocol: 1, requestId, host, sourceDigest };
       const input = `${source.toString('utf8')}\ntry {
   process.env.GIT_OPTIONAL_LOCKS = '0';
-  const readSource = async () => {
-    if (${JSON.stringify(host)} !== 'vultr') return null;
-    const head = (await hostSystem.exec('git', ['-C', '/opt/holaday-monorepo', 'rev-parse', '--verify', 'HEAD^{commit}'])).trim();
-    if (!/^[a-f0-9]{40}$/.test(head)) throw new Error('checkout');
-    await hostSystem.exec('git', ['-C', '/opt/holaday-monorepo', 'diff', '--no-ext-diff', '--no-textconv', '--quiet', 'HEAD', '--']);
-    return head;
-  };
-  const sourceCandidate = await readSource();
+  const readSource = async () => ${JSON.stringify(host)} === 'vultr' ? readReviewedLegacyCheckout() : {sourceCandidate:null};
+  const sourceProof = await readSource();
+  const {sourceCandidate} = sourceProof;
   const snapshot = await readCutoverHostSnapshot();
   if (sourceCandidate === legacyCapability.sourceCandidate) {
     snapshot.legacyCapability = await readCutoverLegacyCapability({ sourceCandidate });
   }
   snapshot.observer = snapshot.processes.find(row => row.pid === process.pid);
-  if (!snapshot.observer || await readSource() !== sourceCandidate) throw new Error('observer');
-  process.stdout.write(JSON.stringify({...${JSON.stringify(envelope)}, sourceCandidate, snapshot}));
+  if (!snapshot.observer || !isDeepStrictEqual(await readSource(), sourceProof)) throw new Error('observer');
+  process.stdout.write(JSON.stringify({...${JSON.stringify(envelope)}, sourceCandidate, ...(sourceProof.reviewedPatch ? {reviewedPatch:sourceProof.reviewedPatch} : {}), snapshot}));
 } catch {
   process.stderr.write('CUTOVER_HOST_PAIR_UNPROVEN\\n'); process.exitCode = 1;
 }\n`;
@@ -630,8 +626,10 @@ export async function readFirstCutoverHostPair(overrides = {}) {
           : result.sourceCandidate !== null)
       )
         throw new Error('response');
+      validateReviewedLegacyLoggerPatch(result.reviewedPatch, result.sourceCandidate);
       return {
         host,
+        ...(result.reviewedPatch ? { reviewedPatch: result.reviewedPatch } : {}),
         sourceCandidate: result.sourceCandidate,
         snapshot: result.snapshot,
       };
@@ -670,6 +668,9 @@ export async function readFirstCutoverHostPair(overrides = {}) {
     return {
       sourceDigest,
       sourceCandidate: hosts.find(({ host }) => host === 'vultr').sourceCandidate,
+      ...(hosts.find(({ host }) => host === 'vultr').reviewedPatch
+        ? { reviewedPatch: hosts.find(({ host }) => host === 'vultr').reviewedPatch }
+        : {}),
       observedAtMs: Math.min(...hosts.map(({ snapshot }) => snapshot.observedAtMs)),
       hosts,
     };
@@ -729,6 +730,15 @@ export async function readReviewedFirstCutoverLegacySource(input, overrides = {}
       pair.hosts?.find((h) => h.host === 'aliyun')?.sourceCandidate !== null
     )
       throw new Error('source');
+    validateReviewedLegacyLoggerPatch(pair.reviewedPatch, pair.sourceCandidate);
+    if (
+      !isDeepStrictEqual(
+        pair.reviewedPatch,
+        pair.hosts.find((h) => h.host === 'vultr')?.reviewedPatch,
+      ) ||
+      pair.hosts.find((h) => h.host === 'aliyun')?.reviewedPatch !== undefined
+    )
+      throw new Error('patch');
     const actual = classifyFirstCutoverHostPair(
       { pair, reviews, inventoryDigest, execution },
       { now: () => now },
@@ -768,6 +778,7 @@ export async function readReviewedFirstCutoverLegacySource(input, overrides = {}
             inventoryDigest,
             sourceCandidate: pair.sourceCandidate,
             collectorDigest: pair.sourceDigest,
+            ...(pair.reviewedPatch ? { reviewedPatch: pair.reviewedPatch } : {}),
             hosts: physical,
           }),
         ),
@@ -776,6 +787,7 @@ export async function readReviewedFirstCutoverLegacySource(input, overrides = {}
     return {
       sourceCandidate: pair.sourceCandidate,
       legacyDigest,
+      ...(pair.reviewedPatch ? { reviewedPatch: pair.reviewedPatch } : {}),
       observedAtMs: actual.observedAtMs,
     };
   } catch {

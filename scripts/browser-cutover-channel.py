@@ -435,7 +435,7 @@ def main():
     if not re.fullmatch("[a-f0-9]{64}", expected):
         raise RuntimeError(ERROR)
     source = read_verified_file(
-        ROOT / "browser-cutover-evidence.mjs", expected, limit=96 * 1024
+        ROOT / "browser-cutover-evidence.mjs", expected, limit=128 * 1024
     ).decode("utf-8")
     program = (
         source

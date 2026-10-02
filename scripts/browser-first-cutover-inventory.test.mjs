@@ -3517,3 +3517,18 @@ for (const fault of [
     assert(!JSON.stringify(r.f.rejections).includes('PRIVATE_CLOUD_BASELINE'));
   });
 }
+
+test('reviewed legacy logger identity remains in the default source proof and digest', async () => {
+  const { reviewedLegacyLoggerPatch: patch } = await import('./browser-cutover-evidence.mjs');
+  const f = pairFixture();
+  f.pair.sourceCandidate = f.pair.hosts.find((h) => h.host === 'vultr').sourceCandidate =
+    patch.sourceCandidate;
+  const plain = await readLegacy(f);
+  f.pair.reviewedPatch = structuredClone(patch);
+  f.pair.hosts.find((h) => h.host === 'vultr').reviewedPatch = structuredClone(patch);
+  const patched = await readLegacy(f);
+  assert.deepEqual(patched.reviewedPatch, patch);
+  assert.notEqual(patched.legacyDigest, plain.legacyDigest);
+  delete f.pair.hosts.find((h) => h.host === 'vultr').reviewedPatch;
+  await assert.rejects(readLegacy(f), /UNPROVEN/);
+});

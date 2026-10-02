@@ -315,6 +315,9 @@ test('the actual stdin payload invokes the collector and checks the old checkout
   assert.equal(typeof host.readFirstCutoverHostPair, 'function');
   const payloads = [];
   const code = Buffer.from(`
+import {readReviewedLegacyCheckout as actualCheckout} from ${JSON.stringify(new URL('./browser-cutover-evidence.mjs', import.meta.url).href)};
+import {isDeepStrictEqual} from 'node:util';
+const readReviewedLegacyCheckout = () => actualCheckout(hostSystem);
 const legacyCapability = {sourceCandidate:'107857fe70503e30691073f267d87275596edb20'};
 let capabilityRead = false;
 async function readCutoverLegacyCapability({sourceCandidate}) {
@@ -325,7 +328,7 @@ async function readCutoverLegacyCapability({sourceCandidate}) {
 const hostSystem = {exec: async (command, args) => {
   if (command !== 'git' || args[0] !== '-C' || args[1] !== '/opt/holaday-monorepo') throw Error('bad command');
   if (args.includes('rev-parse')) return legacyCapability.sourceCandidate+'\\n';
-  if (args.includes('diff')) return '';
+  if (args.includes('diff') || args.includes('status')) return '';
   throw Error('unexpected effect');
 }};
 async function readCutoverHostSnapshot() {
@@ -381,5 +384,38 @@ test('malformed or oversized transport output is refused', async () => {
     const f = fixture();
     f.io.exec = async () => output;
     await assert.rejects(host.readFirstCutoverHostPair(f.io), /CUTOVER_HOST_PAIR_UNPROVEN/);
+  }
+});
+
+test('actual pair reader preserves only the fixed accepted Vultr logger patch', async () => {
+  const { reviewedLegacyLoggerPatch: patch } = await import('./browser-cutover-evidence.mjs');
+  const f = fixture((reply) => {
+    if (reply.host === 'vultr') {
+      reply.sourceCandidate = patch.sourceCandidate;
+      reply.reviewedPatch = structuredClone(patch);
+    }
+  });
+  const value = await host.readFirstCutoverHostPair(f.io);
+  assert.deepEqual(value.reviewedPatch, patch);
+  assert.deepEqual(value.hosts.find((h) => h.host === 'vultr').reviewedPatch, patch);
+  for (const change of [
+    (r) => {
+      r.reviewedPatch.newSha256 = 'a'.repeat(64);
+    },
+    (r) => {
+      r.reviewedPatch.extra = true;
+    },
+    (r) => {
+      r.sourceCandidate = 'a'.repeat(40);
+    },
+  ]) {
+    const bad = fixture((reply) => {
+      if (reply.host === 'vultr') {
+        reply.sourceCandidate = patch.sourceCandidate;
+        reply.reviewedPatch = structuredClone(patch);
+        change(reply);
+      }
+    });
+    await assert.rejects(host.readFirstCutoverHostPair(bad.io), /UNPROVEN/);
   }
 });

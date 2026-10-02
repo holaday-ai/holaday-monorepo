@@ -1177,6 +1177,101 @@ export async function publishCutoverEvidence(evidence, options, io = publication
 }
 
 const execFileAsync = promisify(execFile);
+// This is the separately accepted legacy logger patch, never candidate dirty-tree permission.
+export const reviewedLegacyLoggerPatch = Object.freeze({
+  sourceCandidate: '107857fe70503e30691073f267d87275596edb20',
+  path: 'apps/orchestrator/src/config/logger.ts',
+  oldSha256: '62fba7e8e9bb31424a31a16e5ec7e3fcc3c26f0f247e04e3c5323710fdd8b30f',
+  newSha256: '6267b11797b532cfa6469e977c53bf894d834dd1a360af92ddee0d7e07f59451',
+  implementationCommit: '7b53058d',
+  postObservationSha256: '79e7efb7173bbebe74aedb6c8f273fe880698ab2f7bd4964336184a307281719',
+  acceptanceSha256: '670e7f39f580486bc0dc5a18bf9bc2a4fd1c7de307ee65dc0b5b51dbcac00a7c',
+  configurationWitnessSha256: '8ce4fc2941b7d8952749dd051e40e32999f5b59b39cf9492b4d433fd6f042b72',
+});
+
+export function validateReviewedLegacyLoggerPatch(proof, sourceCandidate) {
+  if (proof === undefined) return;
+  if (
+    sourceCandidate !== reviewedLegacyLoggerPatch.sourceCandidate ||
+    !isDeepStrictEqual(proof, reviewedLegacyLoggerPatch)
+  )
+    throw new Error('CUTOVER_LEGACY_PATCH_UNPROVEN');
+}
+
+export async function readReviewedLegacyCheckout(io = hostSystem) {
+  const root = '/opt/holaday-monorepo';
+  const git = (args) => io.exec('git', ['-C', root, ...args]);
+  const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+  const stableStat = (s) => [
+    s.dev,
+    s.ino,
+    s.uid,
+    s.gid,
+    s.mode,
+    s.nlink,
+    s.size,
+    s.mtimeMs,
+    s.ctimeMs,
+  ];
+  const head = () => git(['rev-parse', '--verify', 'HEAD^{commit}']);
+  // Preserve the original tracked-source gate; unrelated historical artifacts are not a clean-workdir claim.
+  const status = () => git(['status', '--porcelain=v1', '--untracked-files=no']);
+  try {
+    const candidate = (await head()).trim();
+    if (!/^[a-f0-9]{40}$/.test(candidate)) throw new Error('head');
+    const beforeStatus = await status();
+    if (beforeStatus === '') {
+      await git(['diff', '--no-ext-diff', '--no-textconv', '--quiet', 'HEAD', '--']);
+      if ((await head()).trim() !== candidate || (await status()) !== beforeStatus)
+        throw new Error('changed');
+      return { sourceCandidate: candidate };
+    }
+    const policy = reviewedLegacyLoggerPatch;
+    if (candidate !== policy.sourceCandidate || beforeStatus !== ` M ${policy.path}\n`)
+      throw new Error('scope');
+    const path = `${root}/${policy.path}`;
+    const before = await io.lstat(path);
+    if (
+      !before.isFile() ||
+      before.isSymbolicLink() ||
+      before.uid !== 0 ||
+      before.gid !== 0 ||
+      before.nlink !== 1 ||
+      (before.mode & 0o777) !== 0o644 ||
+      before.size < 1 ||
+      before.size > 65536
+    )
+      throw new Error('file');
+    const handle = await io.open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    let bytes;
+    try {
+      if (!isDeepStrictEqual(stableStat(before), stableStat(await handle.stat())))
+        throw new Error('opened');
+      bytes = await handle.readFile();
+      if (
+        bytes.length !== before.size ||
+        digest(bytes) !== policy.newSha256 ||
+        !isDeepStrictEqual(stableStat(before), stableStat(await handle.stat()))
+      )
+        throw new Error('content');
+    } finally {
+      await handle.close();
+    }
+    const original = await git(['show', `HEAD:${policy.path}`]);
+    if (
+      Buffer.byteLength(original) > 65536 ||
+      digest(original) !== policy.oldSha256 ||
+      !isDeepStrictEqual(stableStat(before), stableStat(await io.lstat(path))) ||
+      (await head()).trim() !== candidate ||
+      (await status()) !== beforeStatus
+    )
+      throw new Error('changed');
+    return { sourceCandidate: candidate, reviewedPatch: structuredClone(policy) };
+  } catch {
+    throw new Error('CUTOVER_LEGACY_CHECKOUT_UNPROVEN');
+  }
+}
+
 const hostSystem = {
   ...fs,
   platform: process.platform,
