@@ -1,3 +1,26 @@
+## 当前生产只读观察恢复点 / 2026-10-02
+
+源码交付仍为 `f52d3c4d1a43e5e9c5a7ddd6d270a53308a66886`，文档回执为 `7db9a7ae`；固定隔离矩阵9/9及85份验收证据不变。PR238仍draft，未合并、未部署；releaseAcceptance=false。旧权限等待已由本轮正常审批后的实际执行取代，不再作为当前阻塞。以下观察没有调用provider、confirm或写入业务，也没有重新核查商户/密钥。
+
+| 实际session | exit | 结果与SHA256 |
+| --- | --- | --- |
+| 81691 | 1 | `holaday-payment-startup-readonly-result.json`：`65ad4566de3db19b72a8f291eb9e568652e497768264368fe82a885123227b1b`；PROCESS_SOURCE_SCOPE，未读源码/连接DB |
+| 83860 | 0 | `holaday-payment-startup-readonly-fixed-startup-paths-result.json`：`dcc291aa39607b5526b07a3ede8941bf4cc065898dd791fc971bd707cf25d001`；两个实际角色、九份启动/应用源码 |
+| 57043 | 1 | `holaday-payment-completed-readonly-result.json`：`0e789c09b064972a453976db89b3a00c74a6a738eb6ad7bda5cc20406d8fa7ce`；18份源码读取完成，声明配置路径symlink拒绝，DB未连接 |
+| 2435 | 0 | `holaday-payment-completed-readonly-config-links-result.json`：`c4f895b71bee637481ed914992617bca149aa4f67e0036ae8c23059ab749d38e`；18份源码、声明配置稳定链接检查及数据库READ ONLY事务完成 |
+
+最后快照：微信completed=1/pending=3，支付宝completed=0/pending=9；微信captureUnique及candidateFieldsPreliminary为true。计数9不证明与批准延期的九笔精确身份/字段集合匹配；初步字段检查不等于确认请求就绪。启动身份、源码磁盘摘要与配置来源前后稳定，不单独证明内存加载源码版本，也不证明候选已部署。
+
+上述11份明确观察证据及manifest共12份私有文件已持久保存在本原树 `.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/payment-readonly-resume-20261002/`（父0700、文件0600、摘要核验、ignored）；清单为 `holaday-payment-readonly-resume-evidence-20261002.json`。结果原路径均为 `/private/tmp/` 下对应文件；私有原行/源码不加入Git。
+
+尚未完成的是原要求的实际非PayPal恢复能力及对应既有结算、不重复权益证据：`retry-proven` 的真实transcript/retry材料，或 `query-and-existing-settlement-proven` 的真实transcript/query/settlement材料，并绑定候选、配置、清单及窗口。旧微信provider-results与幂等日志原文缺失仍保留历史结论，不能由新只读快照替代。原设计第68–70行仅延期九笔支付宝订单，未豁免恢复能力；非延期集合为空可据实记录，但空集合不证明恢复能力。支付宝completed=0不是新增付款门槛，不要求新付款或重投延期历史单。
+
+微信已有完成记录提供进一步审查no-op的候选；执行前仍须独立绑定完整请求字段，确认实际加载源码及completed终态/删除竞态边界，并核对原完成分支前后支付、权益、额度不变。当前未执行确认，不将其记为恢复证明。最终新鲜发布窗口按默认精确范围做必要只读queryOrders、停写、备份及后续核对是既有授权步骤，不新增泛化授权要求。
+
+指定恢复材料目录的补充观察：session90228实际exit1，结果 `holaday-payment-rehearsal-metadata-result.json` SHA256 `c4203f7c63fe8ac45fc58f591c86a4208b743643126620c61bdbb905b78c79bd`，固定原因DIRECTORY/ENOENT；生产 `/var/lib/holaday-deploy/evidence-private` 当时不存在，未读取任何artifact。这是实际执行结果，非权限拒绝；仅证明该精确目录缺席，不声称其它来源已穷尽。payload/result及独立supplemental manifest另存上述私有证据目录，合计15份，原12份清单不覆盖。原非PayPal实际恢复及结算/不重复权益材料缺口仍未完成；不增加“必须新付款”条件。
+
+下方保留历史恢复点与历史结论；当前状态以本节为准。
+
 ## 当前源码交付回执 / 2026-10-02
 
 集中修复源码已提交并推送：`f52d3c4d1a43e5e9c5a7ddd6d270a53308a66886`（28文件）。固定隔离host矩阵9/9通过；14次运行记录含历史失败，85份明确验收日志/结果/清理与采样证据已私有持久保存并校hash。PR238仍draft，未合并、未生产部署，releaseAcceptance=false。下方fa443fe0及“未提交脚本”描述为该提交之前的历史恢复点。
