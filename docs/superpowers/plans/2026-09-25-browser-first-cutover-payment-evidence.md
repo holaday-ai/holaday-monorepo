@@ -1,3 +1,15 @@
+## 当前微信既有completed内部no-op已验证 / 2026-10-02
+
+session47822实际exit0；`holaday-wechat-existing-completed-noop-v3-result.json` SHA256 `a5eedfd4c692e6430a70a50298ffd200c5fa1e9639bd5dbc230a8a16e0280925`。只发送一次既有微信完成记录的内部确认：confirmCalls=1，HTTP200/ok=true/deduped=true，reviewRequired=false/retained=false；确认前后payment、user完整行及全部quota行仅在内存比较完全不变（私有回执记录安全HMAC/权益字段），internalNoopProven=true。未访问provider、未新付款、未重投延期支付宝、未改历史记录；禁止重发本次请求，远端固定operation `wechat-existing-completed-20261002-noop-01` 的单次intent/回执保留。
+
+先前v2 session15499实际exit1、confirmCalls=0，在LOADED_SOURCE_BINDING拒绝，未连接DB/创建远端intent/发HTTP：worker三份dist磁盘时间晚于worker启动，不能冒称其为已加载版本。v3明确loadedScope仅main，workerLoadedUnproven=true；已绑定主进程PID1176716/start574742934及实际http/env/DB/schema/logger源码，worker保持进程身份观察，未宣称worker磁盘代码已加载。worker或其它并发业务变化若影响精确目标全行会使快照不一致并拒绝成功。本次局部范围不放行浏览器整项。
+
+独立logger补丁及既有9/9隔离矩阵不重做。本轮14份明确证据及manifest共15个文件已持久保存于 `.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/wechat-existing-completed-noop-20261002/`，root已独立核验0700目录、0600文件和全部摘要；manifest SHA256 `62f6013fb335aa2b0eb39db53b5308d2720bdc14207bb70e7efa7c33c6e11b45`。原失败attempt、payload、wrapper、result、stderr、本地独占intent均不覆盖。
+
+本次补齐的是这条已完成微信结算的真实重复内部确认不重复权益/额度证据，可成为原query-and-existing-settlement-proven的settlement/transcript材料一部分；不是支付方通知重试、provider查询或gateway整体恢复实证。仍缺原恢复包中可重验的真实provider query及恢复transcript与当前候选/config/inventory、merchant/environment/code、原reconcile期限的绑定；支付宝对应实际恢复材料未齐，completed=0不新增付款门槛。默认facts仍要求受保护rehearsal清单及各商户transcriptDigest/queryDigest/settlementDigest（或retry路径），不能用本次微信一条记录替代支付宝或全清单。
+
+旧明确原文路径仍是 `/private/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-wechat-readonly-6IIU4v/provider-results.json`、同父目录 `holaday-wechat-readonly-BpLN76/provider-results.json`，以及 `/tmp/holaday-wechat-closed-settlement-final.log`、`/tmp/holaday-cutover-payment-idempotency.log`；前轮已核这些原文缺失，不重复广扫。指定 `/var/lib/holaday-deploy/evidence-private` 前轮ENOENT只证明该精确目录缺席，不称所有来源穷尽。后续原授权的新鲜精确provider只读观察与材料组装需按真实范围审查，不重查密钥/商户、不制造历史写入或虚假时间。PR238仍draft未合并，整browser未部署，recoveryProven=false、releaseAcceptance=false。下方为历史恢复点，以本节为当前状态。
+
 ## 当前独立logger补丁已部署验收 / 2026-10-02
 
 用户明确批准本次精确顺序例外：先独立发布 `7b53058d` 最小脱敏补丁并受控重启旧主服务一次，再继续支付恢复验证；这不批准整browser候选提前部署或跳过其余门槛。实际效果session93862只执行一次stop与一次start，两RPC ACK均true，logger已替换为SHA256 `6267b11797b532cfa6469e977c53bf894d834dd1a360af92ddee0d7e07f59451`。新主进程PID1176716/start574742934、UID998、原TSX入口与cmd摘要不变；4001归属该主进程且health200，worker及其他四个共享进程身份保持。发布与观察工具未直接执行业务写SQL，未调用confirm/provider。
