@@ -329,7 +329,7 @@ export async function createFirstCutoverCoordinatorIdentity(input, overrides = {
           uids,
           cwd: await io.fs.readlink(`${root}/cwd`),
           exe: await io.fs.readlink(`${root}/exe`),
-          argvDigest: sha(cmdline),
+          argvDigest: sha(JSON.stringify(cmdline.toString('utf8'))),
           cgroup: await io.fs.readFile(`${root}/cgroup`, 'utf8'),
         };
         if (

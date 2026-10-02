@@ -1,12 +1,22 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
+import { runInNewContext } from 'node:vm';
+import { readCutoverHostSnapshot } from './browser-cutover-evidence.mjs';
 import * as host from './browser-first-cutover-host.mjs';
+import * as ingress from './browser-first-cutover-ingress-session.mjs';
+import {
+  classifyFirstCutoverHost,
+  firstCutoverSourceBindings,
+} from './browser-first-cutover-inventory.mjs';
 
 // Scope comes from the already-approved closure, independently listed here.
 const modules = [
@@ -285,4 +295,240 @@ for (const mode of ['check', 'execute', 'diagnose-prepare']) {
     }
     reader.close();
   });
+}
+
+async function collectCoordinatorFixture(f) {
+  const ids = [800, 910, 920];
+  await fs.writeFile(
+    f.local('/proc/910/stat'),
+    `910 (node) S 901 ${Array(17).fill('0').join(' ')} 100 0\n`,
+  );
+  await fs.writeFile(f.local('/proc/910/status'), 'Uid:\t0\t0\t0\t0\nPPid:\t901\n');
+  for (const pid of [800, 920]) {
+    await fs.mkdir(f.local(`/proc/${pid}`));
+    const parent = pid === 800 ? 1 : 910;
+    await fs.writeFile(
+      f.local(`/proc/${pid}/stat`),
+      `${pid} (node) S ${parent} ${Array(17).fill('0').join(' ')} ${pid} 0\n`,
+    );
+    await fs.writeFile(f.local(`/proc/${pid}/status`), `Uid:\t0\t0\t0\t0\nPPid:\t${parent}\n`);
+    await fs.writeFile(
+      f.local(`/proc/${pid}/cmdline`),
+      `/opt/node22/bin/node\0fixture-${pid}.mjs\0`,
+    );
+    await fs.writeFile(f.local(`/proc/${pid}/cgroup`), '0::/qa\n');
+  }
+  return () =>
+    readCutoverHostSnapshot({
+      platform: 'linux',
+      uid: 0,
+      now: () => 1000,
+      hostname: () => 'qa-vultr',
+      readdir: async () => ids.map(String),
+      readFile: f.io.fs.readFile,
+      readlink: f.io.fs.readlink,
+      pm2RuntimeSnapshot: async () => ({
+        pid: 800,
+        version: '6.0.14',
+        killSignal: 'SIGINT',
+        killTimeoutMs: 1600,
+        sourceDigest: 'a'.repeat(64),
+      }),
+      startupSnapshot: async () => ({
+        observedAtMs: 1000,
+        files: [],
+        directories: [],
+        pm2Unit: {},
+      }),
+      nginxSnapshot: async () => ({ observedAtMs: 1000, dump: '', files: [] }),
+      exec: async (command) => (command === 'pm2' ? '[]' : ''),
+    });
+}
+
+for (const changed of [false, true]) {
+  test(`actual collector and coordinator identity preserve argv binding (changed=${changed})`, async (t) => {
+    const f = await fixture(t);
+    const collect = await collectCoordinatorFixture(f);
+    const reader = await host.createFirstCutoverCoordinatorIdentity(
+      { attempt: binding.attempt, mode: 'check' },
+      f.io,
+    );
+    t.after(() => reader.close());
+    const receipt = await reader.readExecutionIdentity();
+    if (changed)
+      await fs.writeFile(
+        f.local('/proc/910/cmdline'),
+        `/opt/node22/bin/node\0${f.entry}\0--execute\0${binding.attempt}\0`,
+      );
+    const snapshot = await collect();
+    snapshot.observer = snapshot.processes.find((p) => p.pid === 920);
+    const input = {
+      snapshot,
+      host: 'vultr',
+      ports: [4001, 4002],
+      inventoryDigest: binding.inventoryDigest,
+      review: {
+        processes: [],
+        registrations: [],
+        sources: firstCutoverSourceBindings(snapshot).map((row) => ({
+          ...row,
+          reason: 'isolated collector fixture',
+        })),
+      },
+      execution: [receipt],
+    };
+    if (changed) {
+      assert.throws(
+        () => classifyFirstCutoverHost(input, { now: () => 1000 }),
+        /CUTOVER_INVENTORY_UNPROVEN/,
+      );
+      await assert.rejects(reader.readExecutionIdentity(), /CUTOVER_COORDINATOR_UNPROVEN/);
+    } else {
+      const actual = classifyFirstCutoverHost(input, { now: () => 1000 });
+      assert.deepEqual(actual.unknownLaunchers, []);
+      assert.deepEqual(
+        actual.executionProcesses.map((p) => p.pid),
+        [910],
+      );
+    }
+  });
+}
+
+// Execute the actual exported identity functions with isolated OS dependencies.
+// Only import.meta.url is fixed to the real module URL; guards/body are unchanged.
+for (const role of ['ingress', 'gateway', 'ingress-ssh', 'gateway-ssh']) {
+  for (const changed of [false, true]) {
+    test(`actual collector and ${role} identity preserve argv binding (changed=${changed})`, async (t) => {
+      const f = await fixture(t);
+      await collectCoordinatorFixture(f);
+      const transport = role.endsWith('-ssh');
+      const exe = transport ? '/usr/bin/ssh' : '/usr/bin/node';
+      const args = transport
+        ? ['-T', 'root@example.invalid', 'holaday-cutover-v1 fixed-command']
+        : [
+            fileURLToPath(new URL(`browser-first-cutover-${role}-session.mjs`, import.meta.url)),
+            binding.attempt,
+          ];
+      const command = `${[exe, ...args].join('\0')}\0`;
+      await fs.writeFile(f.local('/proc/910/cmdline'), command);
+      const disk = {
+        ...f.io.fs,
+        readlink: async (p) => (p === '/proc/910/exe' ? exe : f.io.fs.readlink(p)),
+      };
+      const context = {
+        fs: disk,
+        process: { platform: 'linux', getuid: () => 0, pid: transport ? 901 : 910 },
+        Buffer,
+        URL,
+        structuredClone,
+        createHash,
+        fileURLToPath,
+        isDeepStrictEqual,
+        uuid: (value) => value === binding.attempt,
+        fail: () => {
+          throw Error('CUTOVER_INGRESS_SESSION_UNPROVEN');
+        },
+        assertFirstCutoverSessionIdentity: (value, role) =>
+          ingress.assertFirstCutoverSessionIdentity(structuredClone(value), role),
+      };
+      let read;
+      if (transport) {
+        const child = new EventEmitter();
+        Object.assign(child, {
+          pid: 910,
+          exitCode: null,
+          signalCode: null,
+          stdout: new PassThrough(),
+          stdin: new PassThrough(),
+          stderr: new PassThrough(),
+        });
+        t.after(() => {
+          child.emit('close', 0, null);
+          child.stdout.destroy();
+          child.stdin.destroy();
+          child.stderr.destroy();
+        });
+        context.spawn = () => child;
+        const open = runInNewContext(`(${ingress.openFirstCutoverSsh.toString()})`, context);
+        const connection = open(exe, args, {});
+        read = connection.readIdentity;
+      } else {
+        const body = ingress.readFirstCutoverSessionIdentity
+          .toString()
+          .replaceAll(
+            'import.meta.url',
+            JSON.stringify(
+              new URL('browser-first-cutover-ingress-session.mjs', import.meta.url).href,
+            ),
+          );
+        const actual = runInNewContext(`(${body})`, context);
+        read = () => actual({ role, attempt: binding.attempt });
+      }
+      const value = await read();
+      const receipt = {
+        host: transport ? 'vultr' : 'aliyun',
+        role,
+        binding,
+        siteDigest: 'f'.repeat(64),
+        bootId: value.bootId,
+        process: value.process,
+      };
+      if (changed)
+        await fs.writeFile(f.local('/proc/910/cmdline'), `${command}unexpected-argument\0`);
+      const snapshot = await readCutoverHostSnapshot({
+        platform: 'linux',
+        uid: 0,
+        now: () => 1000,
+        hostname: () => 'qa-host',
+        readdir: async () => ['800', '910', '920'],
+        readFile: disk.readFile,
+        readlink: disk.readlink,
+        pm2RuntimeSnapshot: async () => ({
+          pid: 800,
+          version: '6.0.14',
+          killSignal: 'SIGINT',
+          killTimeoutMs: 1600,
+          sourceDigest: 'a'.repeat(64),
+        }),
+        startupSnapshot: async () => ({
+          observedAtMs: 1000,
+          files: [],
+          directories: [],
+          pm2Unit: {},
+        }),
+        nginxSnapshot: async () => ({ observedAtMs: 1000, dump: '', files: [] }),
+        exec: async (command) => (command === 'pm2' ? '[]' : ''),
+      });
+      snapshot.observer = snapshot.processes.find((p) => p.pid === 920);
+      const input = {
+        snapshot,
+        host: receipt.host,
+        ports: transport ? [4001, 4002] : [4010, 4011],
+        inventoryDigest: binding.inventoryDigest,
+        review: {
+          processes: [],
+          registrations: [],
+          sources: firstCutoverSourceBindings(snapshot).map((row) => ({
+            ...row,
+            reason: 'isolated collector fixture',
+          })),
+        },
+        execution: [receipt],
+      };
+      if (changed) {
+        assert.throws(
+          () => classifyFirstCutoverHost(input, { now: () => 1000 }),
+          /CUTOVER_INVENTORY_UNPROVEN/,
+        );
+        await assert.rejects(read(), /CUTOVER_INGRESS_SESSION_UNPROVEN/);
+      } else {
+        const actual = classifyFirstCutoverHost(input, { now: () => 1000 });
+        assert.deepEqual(actual.unknownLaunchers, []);
+        assert.deepEqual(
+          actual.executionProcesses.map((p) => p.pid),
+          [910],
+        );
+      }
+    });
+  }
 }

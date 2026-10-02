@@ -68,7 +68,9 @@ export async function readFirstCutoverSessionIdentity({ role, attempt }) {
         uids,
         cwd: await fs.readlink(`${root}/cwd`),
         exe: await fs.readlink(`${root}/exe`),
-        argvDigest: createHash('sha256').update(cmdline).digest('hex'),
+        argvDigest: createHash('sha256')
+          .update(JSON.stringify(cmdline.toString('utf8')))
+          .digest('hex'),
         cgroup: await fs.readFile(`${root}/cgroup`, 'utf8'),
       },
     };
@@ -686,7 +688,9 @@ export function openFirstCutoverSsh(file, args, options) {
         uids: /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m.exec(status)?.slice(1).map(Number),
         cwd: await fs.readlink(`${root}/cwd`),
         exe: await fs.readlink(`${root}/exe`),
-        argvDigest: createHash('sha256').update(cmdline).digest('hex'),
+        argvDigest: createHash('sha256')
+          .update(JSON.stringify(cmdline.toString('utf8')))
+          .digest('hex'),
         cgroup: await fs.readFile(`${root}/cgroup`, 'utf8'),
       },
     };
