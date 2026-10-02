@@ -1,3 +1,13 @@
+## 当前独立logger补丁已部署验收 / 2026-10-02
+
+用户明确批准本次精确顺序例外：先独立发布 `7b53058d` 最小脱敏补丁并受控重启旧主服务一次，再继续支付恢复验证；这不批准整browser候选提前部署或跳过其余门槛。实际效果session93862只执行一次stop与一次start，两RPC ACK均true，logger已替换为SHA256 `6267b11797b532cfa6469e977c53bf894d834dd1a360af92ddee0d7e07f59451`。新主进程PID1176716/start574742934、UID998、原TSX入口与cmd摘要不变；4001归属该主进程且health200，worker及其他四个共享进程身份保持。发布与观察工具未直接执行业务写SQL，未调用confirm/provider。
+
+原效果器exit1停在NEW_IDENTITY：合并配置摘要由旧c9f773变为b51093，不能仅凭该拒绝声称发布失败或配置值改变。后置session17126实际完成源码10/config3/Git同107857fe且仅logger脏/共享身份/端口归属及一次非秘密header日志探针；唯一对应请求已脱敏为[Redacted]且fake值不在该行。session79138的实际PM2 fclone见证全部九字段及env深度相等，复制后摘要精确复原旧c9f773，只有env键枚举顺序不同；root组合审查确认独立补丁验收成立。后置结果SHA256 `79e7efb7173bbebe74aedb6c8f273fe880698ab2f7bd4964336184a307281719`，clone结果SHA256 `8ce4fc2941b7d8952749dd051e40e32999f5b59b39cf9492b4d433fd6f042b72`。旧零副作用失败及实际stop/start后的raw失败回执均保留，不改写退出码，不重复重启或日志探针。
+
+本轮明确私有证据存放于 `.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/logger-independent-release-20261002/`（不入Git）；远端唯一attempt `logger-redaction-3a0cc0c9affd4902878d80659c1ac9d9` 的旧文件备份与journal保留。旧9/9隔离矩阵仍仅是已记载源码的既有脚本验收，未重跑且不冒称当前完整应用验收。PR238仍draft、未合并，整browser候选未部署，`releaseAcceptance=false`。
+
+下一步仅准备微信既有completed记录的精确单次内部幂等确认草稿，供root审查；新鲜完整body/记录及当前loaded源码绑定、确认前后支付/用户权益/额度一致须由本次执行独立证明。内部no-op不等同provider恢复能力或整项验收。支付宝真实恢复材料仍未齐，completed=0不是新增付款门槛；不触碰延期九笔支付宝、PayPal、新付款或密钥商户重复核查。下方原“未修logger/不得提前重启”状态保留为历史，已被本次明确例外与实测结果取代。
+
 ## 当前微信no-op前置与logger修复恢复点 / 2026-10-02
 
 本轮session60614实际exit1，私有结果 `holaday-wechat-noop-readonly-preflight-result.json` SHA256 `702035c70f8cecb59b98cf96bc004fec6df6c3aadf7e3bae55e75bad91314c46`。部分只读前置取得19份文件，确证实际线上 `config/logger.ts` 缺少 `x-internal-secret` 脱敏；随后pino库读取在SOURCE_STAT拒绝，具体文件metadata原因尚未证明。完整前置未通过，尚未连接DB、调用confirm或provider，也未完成本轮精确body/实际loaded版本证明，不能把此前快照与本轮部分读取拼成完整成功。三份本轮payload/result/manifest已私有持久保存于 `.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/wechat-noop-preflight-20261002/`（0700/0600、hash核验）；旧15份支付观察证据保持。
