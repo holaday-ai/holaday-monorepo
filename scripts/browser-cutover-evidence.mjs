@@ -2571,7 +2571,7 @@ async function readPersistedCutoverWork(db) {
     [
       'task_steps',
       'status',
-      "status NOT IN ('completed','partial_success','failed','cancelled','skipped','pending','awaiting_user')",
+      "status NOT IN ('completed','partial_success','failed','cancelled','skipped','pending','awaiting_user') AND NOT (status = 'done' AND started_at IS NOT NULL AND completed_at IS NOT NULL AND completed_at >= started_at)",
     ],
     ['scheduled_tasks', 'status', "status NOT IN ('active','paused','completed','failed')"],
     [

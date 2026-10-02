@@ -1,3 +1,13 @@
+## 当前独立查询能力材料已补齐，10条历史导航仍阻断 / 2026-10-02
+
+微信单次签名查询session54325 exit0（result SHA256 `03e06c7ffc45fcb45598e419417eac158c4a4b8d6742a645930d43ddda9d9095`）verified=true/settled，与已验收精确completed内部no-op绑定；支付宝仅一条历史timeout订单的签名查询session83640 exit0（SHA256 `a08cefce9a730dc4c2475be8cec47480b4562030368d79cf2538615cedba4233`）verified=true/state=unknown，证明查询能力，未证明订单风险已清。响应无seller字段，仅签名请求app与原历史merchant材料绑定，不声称支付宝真实结算。原§5.2独立query+现有补结算替代路径的能力材料经root裁定足够（`holaday-query-existing-path-capability-root-review-20261002.json`），不额外要求gateway故障重投或新付款；protectedRehearsalManifestPublished/fullReleaseAcceptance仍false，候选/config/inventory/最终窗口与受保护清单仍待实际绑定。PayPal全部延期，九笔历史支付宝延期不变。
+
+只读task观察session4954 exit0（SHA256 `653d441102e3ef314816d94165dea9daf633d01d0923c36e7d31bc7d589ed727`）：4475条done均有start/complete；真实onTickEnd成功写done，reader现补最小兼容，仅done且两时间非空、结束不早于开始视为结束。真实隔离MySQL单文件RED断言失败→GREEN1/1，相关work-reader9/9；首次QA初始化socket连接失败另保留，未冒称语义RED。未修改任何历史业务记录。
+
+10条executing均为百度首页goto，7条父cancelled、3条父failed（2重启/1超时），output/error/completed均NULL，缺少独立效果结束回执，仍按原§0.1/0.4阻断。终态父任务与低风险导航都不等于效果已完成；用户已明确批准这10条精确历史导航延期（原提案SHA256 `2d8c0eab99081ded7790cfb1074bffe15ccdb689c1399c9de3a44e55a3a8c7fa`；精确集合fingerprint `192900b8bbd82d0456952f07f66cffe145f7131e738ab1c74f97ee327205f446`）。实现尚未接入，生产仍未放行；必须绑定10条完整行/父状态/input/结束字段及candidate/config/inventory/attempt/绝对窗口，新增/漂移/缺失拒绝，不重放、不伪称已完成。原未批准提案文件保留为历史。独立logger已部署、既有9/9隔离矩阵复用；PR238仍draft，浏览器候选未合并/部署。
+
+私有证据：`qa/provider-query-evidence-20261002` 52件/root校验manifest SHA256 `52df516e162ef4391424dd596c054e6f4cccd9fda9ef1acd0915f54d7ad06334`；本次task观察/源码裁定/历史提案/RED-GREEN及精确归属QA清理收于 `qa/task-step-semantics-20261002/holaday-task-step-semantics-evidence-20261002.json`（0700/0600）。以下为历史恢复点，当前结论以上述为准。
+
 当前完整逐场账与私有持久证据指针：[续跑矩阵机器账](2026-10-02-browser-first-cutover-resumed-matrix-evidence.json)。最后所有本例数据库均stopped/OOMfalse，角色均无残留；不再运行重型。
 
 # 浏览器首次切换：部署放行清单
