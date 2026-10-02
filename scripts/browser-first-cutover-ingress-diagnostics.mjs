@@ -181,3 +181,127 @@ export function ingressDiagnosticError(message, stage, previous) {
     ? new Error(message, { cause: Object.freeze({ ingressStage: selected }) })
     : new Error(message);
 }
+
+// One fixed diagnostic line on stderr, never a session/business message.
+export function firstCutoverReceiverFailureLine(error, role) {
+  if (!['ingress', 'gateway'].includes(role)) return '';
+  return `${JSON.stringify({
+    kind: 'first-cutover-receiver-failure',
+    role,
+    stage: ingressDiagnosticStage(error) ?? 'RECEIVER_ENTRY',
+  })}\n`;
+}
+
+export function firstCutoverSshCompletion(child, role) {
+  const limit = 4096;
+  let bytes = Buffer.alloc(0);
+  let discarded = !['ingress', 'gateway'].includes(role);
+  let closed = false;
+  let stderrEnded = false;
+  child.stderr.on('error', () => {
+    discarded = true;
+    bytes = Buffer.alloc(0);
+  });
+  child.stderr.once('end', () => {
+    stderrEnded = true;
+  });
+  child.stderr.on('data', (chunk) => {
+    if (discarded || closed) return;
+    if (!Buffer.isBuffer(chunk) || bytes.length + chunk.length > limit) {
+      discarded = true;
+      bytes = Buffer.alloc(0);
+      return;
+    }
+    bytes = Buffer.concat([bytes, chunk]);
+  });
+  const diagnostic = () => {
+    if (discarded || !stderrEnded || !bytes.length) return undefined;
+    try {
+      const text = bytes.toString('utf8');
+      if (!Buffer.from(text).equals(bytes) || !text.endsWith('\n')) return undefined;
+      const value = JSON.parse(text.slice(0, -1));
+      if (
+        !value ||
+        Array.isArray(value) ||
+        Object.keys(value).length !== 3 ||
+        !['kind', 'role', 'stage'].every((key) => Object.hasOwn(value, key)) ||
+        value.kind !== 'first-cutover-receiver-failure' ||
+        value.role !== role ||
+        !stages.has(value.stage) ||
+        firstCutoverReceiverFailureLine(
+          ingressDiagnosticError('CUTOVER_INGRESS_SESSION_UNPROVEN', value.stage),
+          role,
+        ) !== text
+      )
+        return undefined;
+      return value.stage;
+    } catch {
+      return undefined;
+    }
+  };
+  return new Promise((resolve) => {
+    child.once('error', () => {
+      closed = true;
+      bytes = Buffer.alloc(0);
+      child.stdout.destroy();
+      child.stdin.destroy();
+      resolve({ code: 1 });
+    });
+    child.once('close', (code, signal) => {
+      const result = { code: signal ? 1 : code };
+      const selected = result.code !== 0 ? diagnostic() : undefined;
+      if (selected) result.receiverStage = selected;
+      closed = true;
+      bytes = Buffer.alloc(0);
+      resolve(result);
+    });
+  });
+}
+
+// A failed connection gets one observation budget, shared by nested catches.
+const receiverFailureObservations = new WeakMap();
+async function observeReceiverFailure(connection, deadline, now) {
+  let timer;
+  try {
+    const left = deadline - now();
+    if (!Number.isFinite(left) || left <= 0 || !connection.completion) return undefined;
+    return await Promise.race([
+      connection.completion,
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(undefined), Math.min(1000, left));
+      }),
+    ]);
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Called only after the original failure cleanup. No success or retry path.
+export async function firstCutoverReceiverFailure(error, connection, deadline, now) {
+  const current = ingressDiagnosticStage(error);
+  if (current && !['WIRE_READ', 'WIRE_WRITE', 'WIRE_CLOCK'].includes(current)) return error;
+  try {
+    if (!connection || (typeof connection !== 'object' && typeof connection !== 'function'))
+      return error;
+    let observation = receiverFailureObservations.get(connection);
+    if (!observation) {
+      observation = observeReceiverFailure(connection, deadline, now);
+      receiverFailureObservations.set(connection, observation);
+    }
+    const result = await observation;
+    const stage = Object.getOwnPropertyDescriptor(result, 'receiverStage')?.value;
+    const code = Object.getOwnPropertyDescriptor(result, 'code')?.value;
+    if (code === 0 || !Number.isInteger(code) || !stages.has(stage)) return error;
+    const message = Object.getOwnPropertyDescriptor(error, 'message')?.value;
+    return ingressDiagnosticError(
+      ['CUTOVER_INGRESS_SESSION_UNPROVEN', 'CUTOVER_GATEWAY_SESSION_UNPROVEN'].includes(message)
+        ? message
+        : 'CUTOVER_INGRESS_SESSION_UNPROVEN',
+      stage,
+    );
+  } catch {
+    return error;
+  }
+}

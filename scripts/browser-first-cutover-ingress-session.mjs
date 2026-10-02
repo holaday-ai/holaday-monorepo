@@ -1,5 +1,3 @@
-import { validateFirstCutoverIngressDescriptors } from './browser-first-cutover-ingress-files.mjs';
-import { ingressDiagnosticError } from './browser-first-cutover-ingress-diagnostics.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -11,11 +9,18 @@ import {
   validateFirstCutoverCloudSources,
 } from './browser-cutover-evidence.mjs';
 import {
+  assertFirstCutoverReconciliationRead,
   createFirstCutoverIngressLifecycle,
   readFirstCutoverApproval,
   readFirstCutoverReconciliationApproval,
-  assertFirstCutoverReconciliationRead,
 } from './browser-first-cutover-host.mjs';
+import {
+  firstCutoverReceiverFailure,
+  firstCutoverReceiverFailureLine,
+  firstCutoverSshCompletion,
+  ingressDiagnosticError,
+} from './browser-first-cutover-ingress-diagnostics.mjs';
+import { validateFirstCutoverIngressDescriptors } from './browser-first-cutover-ingress-files.mjs';
 
 const error = (stage, previous) =>
   ingressDiagnosticError('CUTOVER_INGRESS_SESSION_UNPROVEN', stage, previous);
@@ -522,9 +527,11 @@ export async function serveFirstCutoverIngressSession({ attempt }, overrides = {
   let channel;
   try {
     if (!uuid(attempt)) fail();
+    stage = 'RECEIVER_SCOPE';
     const site = structuredClone(await io.readSite({ attempt }));
     validate(site, io.now());
     if (site.binding.attempt !== attempt) fail();
+    stage = 'RECEIVER_IDENTITY';
     const execution = await io.readIdentity({ role: 'ingress', attempt });
     assertFirstCutoverSessionIdentity(execution, 'ingress');
     channel = wire(io.input, io.output, site.reconcileByMs ?? site.maintenanceEndsAtMs, io.now);
@@ -657,19 +664,12 @@ export function openFirstCutoverSsh(file, args, options) {
   const child = spawn(file, args, { ...options, cwd: '/', stdio: ['pipe', 'pipe', 'pipe'] });
   let ended = false;
   let identity;
-  // Drain diagnostics without exposing credentials/configuration to the caller.
-  child.stderr.resume();
-  const completion = new Promise((resolve) => {
-    child.once('error', () => {
-      ended = true;
-      child.stdout.destroy();
-      child.stdin.destroy();
-      resolve({ code: 1 });
-    });
-    child.once('close', (code, signal) => {
-      ended = true;
-      resolve({ code: signal ? 1 : code });
-    });
+  const completion = firstCutoverSshCompletion(child, args.at(-1)?.split(' ')[1]);
+  child.once('error', () => {
+    ended = true;
+  });
+  child.once('close', () => {
+    ended = true;
   });
   const read = async () => {
     if (ended || !child.pid || child.exitCode !== null || child.signalCode !== null) fail();
@@ -971,7 +971,15 @@ export async function connectFirstCutoverIngressSession(input, overrides = {}) {
       } catch (error) {
         failed = true;
         channel.close();
-        fail('REMOTE_RESULT', error);
+        fail(
+          'REMOTE_RESULT',
+          await firstCutoverReceiverFailure(
+            error,
+            connection,
+            expected.reconcileByMs ?? expected.maintenanceEndsAtMs,
+            io.now,
+          ),
+        );
       } finally {
         busy = false;
       }
@@ -1048,7 +1056,15 @@ export async function connectFirstCutoverIngressSession(input, overrides = {}) {
     channel?.close();
     // No signal, retry, new SSH connection, old-config restoration or lock clear.
     connection?.output.end();
-    fail('REMOTE_ENTRY', error);
+    fail(
+      'REMOTE_ENTRY',
+      await firstCutoverReceiverFailure(
+        error,
+        connection,
+        input?.reconcileByMs ?? input?.maintenanceEndsAtMs,
+        io.now,
+      ),
+    );
   }
 }
 
@@ -1500,8 +1516,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (process.platform !== 'linux' || process.getuid?.() !== 0 || process.argv.length !== 3)
       fail();
     await serveFirstCutoverIngressSession({ attempt: process.argv[2] });
-  } catch {
-    process.stderr.write('CUTOVER_INGRESS_SESSION_UNPROVEN\n');
+  } catch (error) {
+    process.stderr.write(firstCutoverReceiverFailureLine(error, 'ingress'));
     process.exitCode = 1;
   }
 }

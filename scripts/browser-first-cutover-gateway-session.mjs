@@ -2,7 +2,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { assertFirstCutoverReconciliationRead } from './browser-first-cutover-host.mjs';
-import { ingressDiagnosticError } from './browser-first-cutover-ingress-diagnostics.mjs';
+import {
+  firstCutoverReceiverFailure,
+  firstCutoverReceiverFailureLine,
+  ingressDiagnosticError,
+} from './browser-first-cutover-ingress-diagnostics.mjs';
 import {
   assertFirstCutoverSessionIdentity,
   createFirstCutoverSessionWire,
@@ -86,12 +90,15 @@ export async function serveFirstCutoverGatewaySession({ attempt }, overrides = {
     query: queryFirstCutoverOrders,
     ...overrides,
   };
+  let stage = 'RECEIVER_ENTRY';
   let channel;
   try {
     if (!uuid(attempt)) fail();
+    stage = 'RECEIVER_SCOPE';
     const site = structuredClone(await io.readSite({ attempt }));
     validate(site, io.now());
     if (site.binding.attempt !== attempt) fail();
+    stage = 'RECEIVER_IDENTITY';
     const execution = await io.readIdentity({ role: 'gateway', attempt });
     assertFirstCutoverSessionIdentity(execution, 'gateway');
     channel = createFirstCutoverSessionWire(
@@ -103,6 +110,7 @@ export async function serveFirstCutoverGatewaySession({ attempt }, overrides = {
     const used = new Set();
     let sequence = 0;
     for (;;) {
+      stage = 'RECEIVER_ENTRY';
       const request = await channel.read();
       const seq = ++sequence;
       envelope(request, 'operation', seq);
@@ -117,11 +125,14 @@ export async function serveFirstCutoverGatewaySession({ attempt }, overrides = {
       )
         fail();
       if (request.name !== 'query') used.add(request.name);
+      stage = 'RECEIVER_SCOPE';
       if (!equal(await io.readSite({ attempt }), site)) fail();
+      stage = 'RECEIVER_IDENTITY';
       if (!equal(await io.readIdentity({ role: 'gateway', attempt }), execution)) fail();
       let factSequence = 0;
       let signalSequence = 0;
       const fact = async (name, value = null, signal = undefined) => {
+        stage = 'RECEIVER_FACT';
         channel.assert();
         if (!equal(await io.readSite({ attempt }), site)) fail();
         const factSeq = ++factSequence;
@@ -234,17 +245,20 @@ export async function serveFirstCutoverGatewaySession({ attempt }, overrides = {
           binding: { attempt, inventoryDigest: site.binding.inventoryDigest },
           maintenanceEndsAtMs: site.maintenanceEndsAtMs,
         };
+        stage = 'RECEIVER_LOCAL';
         value =
           request.name === 'prepare'
             ? await io.prepare({ ...args, files: site.startupFiles }, hostIO)
             : await io.retire(args, hostIO);
       }
+      stage = 'RECEIVER_RESULT';
       channel.assert();
+      stage = 'RECEIVER_SCOPE';
       if (!equal(await io.readSite({ attempt }), site)) fail();
       await channel.write({ protocol: 1, type: 'result', seq, value });
     }
-  } catch {
-    fail();
+  } catch (error) {
+    throw ingressDiagnosticError('CUTOVER_GATEWAY_SESSION_UNPROVEN', stage, error);
   } finally {
     if (channel) channel.close();
     else io.output.end();
@@ -581,7 +595,12 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
         throw ingressDiagnosticError(
           'CUTOVER_GATEWAY_SESSION_UNPROVEN',
           name === 'attach' ? 'GATEWAY_HANDSHAKE' : 'GATEWAY_COMMAND',
-          error,
+          await firstCutoverReceiverFailure(
+            error,
+            connection,
+            expected.reconcileByMs ?? expected.maintenanceEndsAtMs,
+            io.now,
+          ),
         );
       } finally {
         busy = false;
@@ -649,7 +668,16 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
     failed = true;
     channel?.close();
     connection?.output.end();
-    throw ingressDiagnosticError('CUTOVER_GATEWAY_SESSION_UNPROVEN', connectionStage, error);
+    throw ingressDiagnosticError(
+      'CUTOVER_GATEWAY_SESSION_UNPROVEN',
+      connectionStage,
+      await firstCutoverReceiverFailure(
+        error,
+        connection,
+        input?.reconcileByMs ?? input?.maintenanceEndsAtMs,
+        io.now,
+      ),
+    );
   }
 }
 
@@ -658,8 +686,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (process.platform !== 'linux' || process.getuid?.() !== 0 || process.argv.length !== 3)
       fail();
     await serveFirstCutoverGatewaySession({ attempt: process.argv[2] });
-  } catch {
-    process.stderr.write('CUTOVER_GATEWAY_SESSION_UNPROVEN\n');
+  } catch (error) {
+    process.stderr.write(firstCutoverReceiverFailureLine(error, 'gateway'));
     process.exitCode = 1;
   }
 }
