@@ -68,6 +68,14 @@ function syntheticCloudSources(scope) {
   };
 }
 
+const descriptorFixtures = JSON.parse(
+  await fs.readFile(
+    new URL('./fixtures/browser-first-cutover-ingress-descriptors.json', import.meta.url),
+  ),
+);
+const descriptor = (path, profile) =>
+  structuredClone(descriptorFixtures.find((f) => f.path === path && f.profile === profile));
+
 const session = await import('./browser-first-cutover-ingress-session.mjs').catch(() => ({}));
 const binding = {
   attempt: '12345678-1234-4234-8234-123456789abc',
@@ -375,14 +383,8 @@ test('receiver approval uses an actual protected file bound to the first-cutover
       inventoryDigest: binding.inventoryDigest,
       unknownIngress: [],
       files: [
-        {
-          path: '/etc/nginx/sites-available/hd-app.orangebench.tech',
-          profile: 'aliyun-app-20260926',
-        },
-        {
-          path: '/etc/nginx/sites-available/hd-pay.orangebench.tech',
-          profile: 'aliyun-pay-20260926',
-        },
+        descriptor('/etc/nginx/sites-available/hd-app.orangebench.tech', 'aliyun-app-20260926'),
+        descriptor('/etc/nginx/sites-available/hd-pay.orangebench.tech', 'aliyun-pay-20260926'),
       ],
     },
   };
@@ -453,15 +455,9 @@ test('coordinator site scope reads the fixed protected file and binds both hosts
         unknownIngress: [],
         remoteSiteDigest: 'e'.repeat(64),
         files: [
-          { path: '/etc/nginx/sites-available/holaday', profile: 'vultr-20260926' },
-          {
-            path: '/etc/nginx/sites-available/hd-app.orangebench.tech',
-            profile: 'aliyun-app-20260926',
-          },
-          {
-            path: '/etc/nginx/sites-available/hd-pay.orangebench.tech',
-            profile: 'aliyun-pay-20260926',
-          },
+          descriptor('/etc/nginx/sites-available/holaday', 'vultr-20260926'),
+          descriptor('/etc/nginx/sites-available/hd-app.orangebench.tech', 'aliyun-app-20260926'),
+          descriptor('/etc/nginx/sites-available/hd-pay.orangebench.tech', 'aliyun-pay-20260926'),
         ],
       },
       producerStartupFiles: ['dump.pm2', 'dump.pm2.bak'].map((name) => ({
@@ -749,15 +745,9 @@ test('source diagnostics bind actual site reader IO, approval and clock refusals
         unknownIngress: [],
         remoteSiteDigest: 'e'.repeat(64),
         files: [
-          { path: '/etc/nginx/sites-available/holaday', profile: 'vultr-20260926' },
-          {
-            path: '/etc/nginx/sites-available/hd-app.orangebench.tech',
-            profile: 'aliyun-app-20260926',
-          },
-          {
-            path: '/etc/nginx/sites-available/hd-pay.orangebench.tech',
-            profile: 'aliyun-pay-20260926',
-          },
+          descriptor('/etc/nginx/sites-available/holaday', 'vultr-20260926'),
+          descriptor('/etc/nginx/sites-available/hd-app.orangebench.tech', 'aliyun-app-20260926'),
+          descriptor('/etc/nginx/sites-available/hd-pay.orangebench.tech', 'aliyun-pay-20260926'),
         ],
       },
       producerStartupFiles: ['dump.pm2', 'dump.pm2.bak'].map((name) => ({

@@ -3,7 +3,7 @@ import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { posix } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { describeCutoverSite } from './browser-first-cutover-fence.mjs';
+import { describeCutoverSite, validateSiteDescription } from './browser-first-cutover-fence.mjs';
 
 const archive = '/var/lib/holaday-deploy/maintenance';
 const generatedRoot = '/etc/nginx/holaday-maintenance';
@@ -20,6 +20,78 @@ const same = (a, b) =>
   );
 const sameNode = (a, b) => a.dev === b.dev && a.ino === b.ino;
 const names = ['holaday', 'hd-app.orangebench.tech', 'hd-pay.orangebench.tech'];
+
+/** Pure protected-material shape check. Live file/link ownership remains below. */
+export function validateFirstCutoverIngressDescriptors(files, kind) {
+  const profiles =
+    kind === 'execution'
+      ? [
+          ['holaday', 'vultr-20260926'],
+          ['hd-app.orangebench.tech', 'aliyun-app-20260926'],
+          ['hd-pay.orangebench.tech', 'aliyun-pay-20260926'],
+        ]
+      : kind === 'ingress'
+        ? [
+            ['hd-app.orangebench.tech', 'aliyun-app-20260926'],
+            ['hd-pay.orangebench.tech', 'aliyun-pay-20260926'],
+          ]
+        : null;
+  const fields = [
+    'path',
+    'profile',
+    'enabledPath',
+    'sourcePath',
+    'sourceUid',
+    'sourceGid',
+    'sourceMode',
+    'links',
+    'locations',
+    'digest',
+  ];
+  if (!profiles || !Array.isArray(files) || files.length !== profiles.length) fail();
+  for (const [name, profile] of profiles) {
+    const matches = files.filter(
+      (f) => f?.path === `${availableRoot}/${name}` && f.profile === profile,
+    );
+    if (matches.length !== 1) fail();
+    const f = matches[0];
+    if (
+      !isDeepStrictEqual(Object.keys(f).sort(), [...fields].sort()) ||
+      f.enabledPath !== `${enabledRoot}/${name}` ||
+      !Number.isSafeInteger(f.sourceUid) ||
+      f.sourceUid < 0 ||
+      !Number.isSafeInteger(f.sourceGid) ||
+      f.sourceGid < 0 ||
+      f.sourceMode !== 0o644 ||
+      !Array.isArray(f.links)
+    )
+      fail();
+    const release =
+      name === 'hd-app.orangebench.tech' &&
+      /^\/opt\/holaday-edge\/releases\/[0-9]{14}-[a-zA-Z0-9]+\/ops\/aliyun-edge\/nginx-hd-app\.conf$/.test(
+        f.sourcePath,
+      );
+    if (!(f.sourcePath === f.path || release) || f.links.length !== (release ? 2 : 1)) fail();
+    for (let i = 0; i < f.links.length; i++) {
+      const item = f.links[i];
+      const next = f.links[i + 1]?.path ?? f.sourcePath;
+      if (
+        !item ||
+        typeof item !== 'object' ||
+        Array.isArray(item) ||
+        Object.keys(item).some((k) => !['path', 'target', 'stat'].includes(k)) ||
+        item.path !== (i ? f.path : f.enabledPath) ||
+        typeof item.target !== 'string' ||
+        /[\r\n\0]/.test(item.target) ||
+        posix.resolve(posix.dirname(item.path), item.target) !== next
+      )
+        fail();
+    }
+    // Reuse the original exact SHA-bound profile and complete location comparison.
+    // Any optional observed link stat is replaced by the live constructor.
+    validateSiteDescription(f);
+  }
+}
 
 /** Filesystem methods for the EXISTING apply/verify/restore fence protocol.
  * Host supplies protected approval/journal/receipt readers and the full ingress

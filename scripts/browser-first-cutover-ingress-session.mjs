@@ -1,3 +1,4 @@
+import { validateFirstCutoverIngressDescriptors } from './browser-first-cutover-ingress-files.mjs';
 import { ingressDiagnosticError } from './browser-first-cutover-ingress-diagnostics.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -307,6 +308,7 @@ async function readProtectedSite(options, overrides, kind) {
         !s.producerStartupFiles.some((f) => f.remove.length)
       )
         fail();
+      validateFirstCutoverIngressDescriptors(s.ingress.files, 'execution');
       if (Object.hasOwn(s, 'cloudMaintenanceScope'))
         validateFirstCutoverCloudSources(s.cloudRecoverySources, {
           scope: s.cloudMaintenanceScope,
@@ -374,6 +376,7 @@ async function readProtectedSite(options, overrides, kind) {
     stage = 'SITE_CLOCK';
     const now = io.now();
     if (now < began) fail(stage);
+    if (kind === 'ingress') validateFirstCutoverIngressDescriptors(value.ingress.files, 'ingress');
     stage = 'SITE_APPROVAL_AFTER';
     if (!isDeepStrictEqual(beforeApproval, await io.readApproval(options))) fail(stage);
     stage = 'SITE_VALIDATE';

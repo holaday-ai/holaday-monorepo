@@ -1,0 +1,348 @@
+[
+  {
+    "path": "/etc/nginx/sites-available/holaday",
+    "profile": "vultr-20260926",
+    "enabledPath": "/etc/nginx/sites-enabled/holaday",
+    "sourcePath": "/etc/nginx/sites-available/holaday",
+    "sourceUid": 0,
+    "sourceGid": 0,
+    "sourceMode": 420,
+    "links": [
+      {
+        "path": "/etc/nginx/sites-enabled/holaday",
+        "target": "/etc/nginx/sites-available/holaday"
+      }
+    ],
+    "locations": [
+      {
+        "serverName": "holaday.ai",
+        "listen": "[::]:443 ssl ipv6only=on default_server",
+        "selector": "/api/",
+        "kind": "business"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "[::]:443 ssl ipv6only=on default_server",
+        "selector": "/trpc/",
+        "kind": "business"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "[::]:443 ssl ipv6only=on default_server",
+        "selector": "/healthz",
+        "kind": "business"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "[::]:443 ssl ipv6only=on default_server",
+        "selector": "/ws",
+        "kind": "business"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "[::]:443 ssl ipv6only=on default_server",
+        "selector": "/screencast-ws/",
+        "kind": "business"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "[::]:443 ssl ipv6only=on default_server",
+        "selector": "/vnc-ws/",
+        "kind": "business"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "[::]:443 ssl ipv6only=on default_server",
+        "selector": "/vnc/",
+        "kind": "business"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "[::]:443 ssl ipv6only=on default_server",
+        "selector": "= /api/payment/paypal/webhook",
+        "kind": "callback"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "[::]:443 ssl ipv6only=on default_server",
+        "selector": "= /api/internal/payment/confirm",
+        "kind": "callback"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "[::]:443 ssl ipv6only=on default_server",
+        "selector": "= /api/internal/partner-payment/confirm",
+        "kind": "callback"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "[::]:443 ssl ipv6only=on default_server",
+        "selector": "= /api/healthz",
+        "kind": "health"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "[::]:443 ssl ipv6only=on default_server",
+        "selector": "= /api/internal/payment/health",
+        "kind": "health"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "[::]:443 ssl ipv6only=on default_server",
+        "selector": "= /healthz",
+        "kind": "health"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "443 ssl default_server",
+        "selector": "/api/",
+        "kind": "business"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "443 ssl default_server",
+        "selector": "/trpc/",
+        "kind": "business"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "443 ssl default_server",
+        "selector": "/healthz",
+        "kind": "business"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "443 ssl default_server",
+        "selector": "/ws",
+        "kind": "business"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "443 ssl default_server",
+        "selector": "/screencast-ws/",
+        "kind": "business"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "443 ssl default_server",
+        "selector": "/vnc-ws/",
+        "kind": "business"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "443 ssl default_server",
+        "selector": "/vnc/",
+        "kind": "business"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "443 ssl default_server",
+        "selector": "= /api/payment/paypal/webhook",
+        "kind": "callback"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "443 ssl default_server",
+        "selector": "= /api/internal/payment/confirm",
+        "kind": "callback"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "443 ssl default_server",
+        "selector": "= /api/internal/partner-payment/confirm",
+        "kind": "callback"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "443 ssl default_server",
+        "selector": "= /api/healthz",
+        "kind": "health"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "443 ssl default_server",
+        "selector": "= /api/internal/payment/health",
+        "kind": "health"
+      },
+      {
+        "serverName": "holaday.ai",
+        "listen": "443 ssl default_server",
+        "selector": "= /healthz",
+        "kind": "health"
+      }
+    ],
+    "digest": "c2372d3ed03847c794e3e49501ee5890a12e9c2c876b95dfadeeee585340897f"
+  },
+  {
+    "path": "/etc/nginx/sites-available/hd-app.orangebench.tech",
+    "profile": "aliyun-app-20260926",
+    "enabledPath": "/etc/nginx/sites-enabled/hd-app.orangebench.tech",
+    "sourcePath": "/opt/holaday-edge/releases/20260905035410-30748/ops/aliyun-edge/nginx-hd-app.conf",
+    "sourceUid": 501,
+    "sourceGid": 50,
+    "sourceMode": 420,
+    "links": [
+      {
+        "path": "/etc/nginx/sites-enabled/hd-app.orangebench.tech",
+        "target": "/etc/nginx/sites-available/hd-app.orangebench.tech"
+      },
+      {
+        "path": "/etc/nginx/sites-available/hd-app.orangebench.tech",
+        "target": "/opt/holaday-edge/releases/20260905035410-30748/ops/aliyun-edge/nginx-hd-app.conf"
+      }
+    ],
+    "locations": [
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "443 ssl http2",
+        "selector": "/api/",
+        "kind": "business"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "443 ssl http2",
+        "selector": "^~ /screencast-ws/",
+        "kind": "business"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "443 ssl http2",
+        "selector": "^~ /vnc-ws/",
+        "kind": "business"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "443 ssl http2",
+        "selector": "= /ws",
+        "kind": "business"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "443 ssl http2",
+        "selector": "= /api/payment/paypal/webhook",
+        "kind": "callback"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "443 ssl http2",
+        "selector": "= /api/internal/payment/confirm",
+        "kind": "callback"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "443 ssl http2",
+        "selector": "= /api/internal/partner-payment/confirm",
+        "kind": "callback"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "443 ssl http2",
+        "selector": "= /api/healthz",
+        "kind": "health"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "443 ssl http2",
+        "selector": "= /api/internal/payment/health",
+        "kind": "health"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "[::]:443 ssl http2",
+        "selector": "/api/",
+        "kind": "business"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "[::]:443 ssl http2",
+        "selector": "^~ /screencast-ws/",
+        "kind": "business"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "[::]:443 ssl http2",
+        "selector": "^~ /vnc-ws/",
+        "kind": "business"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "[::]:443 ssl http2",
+        "selector": "= /ws",
+        "kind": "business"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "[::]:443 ssl http2",
+        "selector": "= /api/payment/paypal/webhook",
+        "kind": "callback"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "[::]:443 ssl http2",
+        "selector": "= /api/internal/payment/confirm",
+        "kind": "callback"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "[::]:443 ssl http2",
+        "selector": "= /api/internal/partner-payment/confirm",
+        "kind": "callback"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "[::]:443 ssl http2",
+        "selector": "= /api/healthz",
+        "kind": "health"
+      },
+      {
+        "serverName": "hd-app.orangebench.tech",
+        "listen": "[::]:443 ssl http2",
+        "selector": "= /api/internal/payment/health",
+        "kind": "health"
+      }
+    ],
+    "digest": "65973c9afc53c484ce7e2becbe013de3622adeb6d77723a29cefd1ef6dfcec4c"
+  },
+  {
+    "path": "/etc/nginx/sites-available/hd-pay.orangebench.tech",
+    "profile": "aliyun-pay-20260926",
+    "enabledPath": "/etc/nginx/sites-enabled/hd-pay.orangebench.tech",
+    "sourcePath": "/etc/nginx/sites-available/hd-pay.orangebench.tech",
+    "sourceUid": 0,
+    "sourceGid": 0,
+    "sourceMode": 420,
+    "links": [
+      {
+        "path": "/etc/nginx/sites-enabled/hd-pay.orangebench.tech",
+        "target": "/etc/nginx/sites-available/hd-pay.orangebench.tech"
+      }
+    ],
+    "locations": [
+      {
+        "serverName": "hd-pay.orangebench.tech",
+        "listen": "443 ssl http2",
+        "selector": "/",
+        "kind": "business"
+      },
+      {
+        "serverName": "hd-pay.orangebench.tech",
+        "listen": "443 ssl http2",
+        "selector": "= /payment/wechat/notify",
+        "kind": "callback"
+      },
+      {
+        "serverName": "hd-pay.orangebench.tech",
+        "listen": "443 ssl http2",
+        "selector": "= /payment/alipay/notify",
+        "kind": "callback"
+      },
+      {
+        "serverName": "hd-pay.orangebench.tech",
+        "listen": "443 ssl http2",
+        "selector": "= /healthz",
+        "kind": "health"
+      }
+    ],
+    "digest": "ffe595e8fc106be4fc4148bc054e348dcc05d59c773efe30e7b090bdad590261"
+  }
+]

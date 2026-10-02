@@ -73,7 +73,7 @@ export function describeCutoverSite(bytes, profile) {
   if (typeof bytes !== 'string' || digest(bytes) !== description.digest) fail();
   return description;
 }
-function validateSiteDescription(file) {
+export function validateSiteDescription(file) {
   const expected = siteDescription(file.profile);
   if (file.digest !== expected.digest || !isDeepStrictEqual(file.locations, expected.locations))
     fail();
