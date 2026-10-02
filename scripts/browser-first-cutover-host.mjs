@@ -5,31 +5,32 @@ import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import {
-  ingressDiagnosticError,
-  ingressDiagnosticStage,
-} from './browser-first-cutover-ingress-diagnostics.mjs';
-import { probeFirstCutoverRecoveredBrowser } from './browser-first-cutover-browser-probe.mjs';
-import {
   collectCutoverEvidence,
-  cutoverExactNavigationDeferral,
-  cutoverWorkScopeReady,
   compareCutoverCloudBrowserRecoveryConfig,
   compareCutoverCloudVncRecoveryConfig,
   cutoverCloudStopConfigDigest,
+  cutoverExactNavigationDeferral,
   cutoverLegacyInterruptionRisk,
   cutoverRegistrationConfigDigest,
+  cutoverWorkScopeReady,
+  readCutoverCloudObservationDiagnostic,
   readCutoverDatabaseScope,
   readCutoverHostSnapshot,
-  validateReviewedLegacyLoggerPatch,
   readCutoverWorkScope,
   validateFirstCutoverCloudSources,
+  validateReviewedLegacyLoggerPatch,
 } from './browser-cutover-evidence.mjs';
 import { backupAndRestoreCheck, encryptMysqlAgeBackup } from './browser-first-cutover-backup.mjs';
+import { probeFirstCutoverRecoveredBrowser } from './browser-first-cutover-browser-probe.mjs';
 import {
   applyCutoverFence,
   restoreCutoverIngress,
   verifyCutoverFence,
 } from './browser-first-cutover-fence.mjs';
+import {
+  ingressDiagnosticError,
+  ingressDiagnosticStage,
+} from './browser-first-cutover-ingress-diagnostics.mjs';
 import { createCutoverIngressFiles } from './browser-first-cutover-ingress-files.mjs';
 import {
   classifyFirstCutoverHostPair,
@@ -46,19 +47,19 @@ import {
   captureLegacyRuntime,
   firstCutoverCloudBrowserRecoveryLaunch,
   firstCutoverCloudVncRecoveryMaterial,
-  readFirstCutoverCloudRecovery,
-  reobserveFirstCutoverCloudRecovery,
-  restoreFirstCutoverCloudBrowser,
-  restoreFirstCutoverCloudVnc,
   initializeFirstMaintenanceState,
   prepareFirstCutoverCloudBrowserPolicy,
   readFirstCutoverCloudBrowserRecovery,
   readFirstCutoverCloudManagers,
-  readFirstCutoverCloudOwnedDisplay,
   readFirstCutoverCloudOldBrowserAssociations,
+  readFirstCutoverCloudOwnedDisplay,
+  readFirstCutoverCloudRecovery,
   readFirstCutoverCloudRecoveryCensus,
   readFirstCutoverCloudRecoverySources,
   readFirstCutoverCloudRecoveryVacancy,
+  reobserveFirstCutoverCloudRecovery,
+  restoreFirstCutoverCloudBrowser,
+  restoreFirstCutoverCloudVnc,
   retireLegacyRuntime,
   validateLegacyWorkBoundary,
   validateOwnedLegacyFence,
@@ -1993,12 +1994,14 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
       // Do not invoke error getters or serialize arbitrary thrown objects.
     }
     try {
+      const diagnostic = readCutoverCloudObservationDiagnostic(error);
       await io.reportRejection({
         schemaVersion: 1,
         component: 'cutover-retirement-observer',
         operation,
         step,
         code,
+        ...(diagnostic ? { cloudDiagnostic: diagnostic } : {}),
       });
     } catch {
       // A broken diagnostic sink cannot suppress or replace the original refusal.

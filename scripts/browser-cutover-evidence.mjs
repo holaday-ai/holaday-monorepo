@@ -6,6 +6,262 @@ import { readFile, readdir, readlink } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { posix } from 'node:path';
 import { isDeepStrictEqual, promisify } from 'node:util';
+const cloudObservationStages = new Set([
+  'CENSUS_ENTRY',
+  'CENSUS_IO_01',
+  'CENSUS_IO_02',
+  'CENSUS_IO_03',
+  'CENSUS_IO_04',
+  'CENSUS_IO_05',
+  'CENSUS_IO_06',
+  'CENSUS_IO_07',
+  'CENSUS_IO_08',
+  'CENSUS_T01',
+  'CENSUS_T02',
+  'CENSUS_T03',
+  'CENSUS_T04',
+  'CENSUS_T05',
+  'CENSUS_T06',
+  'CENSUS_T07',
+  'CENSUS_T08',
+  'CENSUS_T09',
+  'CONTEXT_ENTRY',
+  'CONTEXT_IO_01',
+  'CONTEXT_IO_02',
+  'CONTEXT_IO_03',
+  'CONTEXT_IO_04',
+  'CONTEXT_IO_05',
+  'CONTEXT_IO_06',
+  'CONTEXT_IO_07',
+  'CONTEXT_IO_08',
+  'CONTEXT_IO_09',
+  'CONTEXT_IO_10',
+  'CONTEXT_IO_11',
+  'CONTEXT_IO_12',
+  'CONTEXT_IO_13',
+  'CONTEXT_IO_14',
+  'CONTEXT_IO_15',
+  'CONTEXT_IO_16',
+  'CONTEXT_IO_17',
+  'CONTEXT_IO_18',
+  'CONTEXT_IO_19',
+  'CONTEXT_IO_20',
+  'CONTEXT_IO_21',
+  'CONTEXT_IO_22',
+  'CONTEXT_IO_23',
+  'CONTEXT_IO_24',
+  'CONTEXT_IO_25',
+  'CONTEXT_IO_26',
+  'CONTEXT_IO_27',
+  'CONTEXT_IO_28',
+  'CONTEXT_IO_29',
+  'CONTEXT_IO_30',
+  'CONTEXT_IO_31',
+  'CONTEXT_IO_32',
+  'CONTEXT_R01',
+  'CONTEXT_R02',
+  'CONTEXT_R03',
+  'CONTEXT_R04',
+  'CONTEXT_R05',
+  'CONTEXT_R06',
+  'CONTEXT_R07',
+  'CONTEXT_R08',
+  'CONTEXT_R09',
+  'CONTEXT_R10',
+  'CONTEXT_R11',
+  'CONTEXT_R12',
+  'CONTEXT_R13',
+  'CONTEXT_R14',
+  'CONTEXT_R15',
+  'CONTEXT_R16',
+  'CONTEXT_R17',
+  'CONTEXT_R18',
+  'CONTEXT_R19',
+  'CONTEXT_R20',
+  'CONTEXT_R21',
+  'CONTEXT_R22',
+  'CONTEXT_R23',
+  'CONTEXT_R24',
+  'CONTEXT_R25',
+  'CONTEXT_R26',
+  'CONTEXT_R27',
+  'CONTEXT_R28',
+  'CONTEXT_R29',
+  'CONTEXT_R30',
+  'CONTEXT_R31',
+  'CONTEXT_R32',
+  'CONTEXT_R33',
+  'CONTEXT_R34',
+  'CONTEXT_R35',
+  'CONTEXT_R36',
+  'CONTEXT_R37',
+  'DISPLAY_ENTRY',
+  'DISPLAY_IO_01',
+  'DISPLAY_IO_02',
+  'DISPLAY_IO_03',
+  'DISPLAY_IO_04',
+  'DISPLAY_IO_05',
+  'DISPLAY_IO_06',
+  'DISPLAY_IO_07',
+  'DISPLAY_IO_08',
+  'DISPLAY_IO_09',
+  'DISPLAY_IO_10',
+  'DISPLAY_IO_11',
+  'DISPLAY_IO_12',
+  'DISPLAY_IO_13',
+  'DISPLAY_IO_14',
+  'DISPLAY_IO_15',
+  'DISPLAY_IO_16',
+  'DISPLAY_IO_17',
+  'DISPLAY_IO_18',
+  'DISPLAY_IO_19',
+  'DISPLAY_IO_20',
+  'DISPLAY_IO_21',
+  'DISPLAY_IO_22',
+  'DISPLAY_IO_23',
+  'DISPLAY_IO_24',
+  'DISPLAY_IO_25',
+  'DISPLAY_IO_26',
+  'DISPLAY_IO_27',
+  'DISPLAY_R01',
+  'DISPLAY_R02',
+  'DISPLAY_R03',
+  'DISPLAY_R04',
+  'DISPLAY_R05',
+  'DISPLAY_R06',
+  'DISPLAY_R07',
+  'DISPLAY_R08',
+  'DISPLAY_R09',
+  'DISPLAY_R10',
+  'DISPLAY_R11',
+  'DISPLAY_R12',
+  'DISPLAY_R13',
+  'DISPLAY_R14',
+  'DISPLAY_R15',
+  'DISPLAY_R16',
+  'DISPLAY_R17',
+  'DISPLAY_R18',
+  'DISPLAY_R19',
+  'DISPLAY_R20',
+  'DISPLAY_R21',
+  'DISPLAY_R22',
+  'DISPLAY_R23',
+  'DISPLAY_R24',
+  'DISPLAY_R25',
+  'DISPLAY_R26',
+  'DISPLAY_R27',
+  'DISPLAY_R28',
+  'DISPLAY_R29',
+  'DISPLAY_R30',
+  'DISPLAY_R31',
+  'DISPLAY_R32',
+  'DISPLAY_R33',
+  'HOST_ENTRY',
+  'HOST_IO_01',
+  'HOST_IO_02',
+  'HOST_IO_03',
+  'HOST_IO_04',
+  'HOST_IO_05',
+  'HOST_IO_06',
+  'HOST_IO_07',
+  'HOST_IO_08',
+  'HOST_IO_09',
+  'HOST_IO_10',
+  'HOST_IO_11',
+  'HOST_IO_12',
+  'HOST_IO_13',
+  'HOST_IO_14',
+  'HOST_IO_15',
+  'HOST_IO_16',
+  'HOST_IO_17',
+  'HOST_IO_18',
+  'HOST_IO_19',
+  'HOST_T01',
+  'HOST_T02',
+  'HOST_T03',
+  'HOST_T04',
+  'HOST_T05',
+  'HOST_T06',
+  'HOST_T07',
+  'HOST_T08',
+  'HOST_T09',
+  'HOST_T10',
+  'HOST_T11',
+  'HOST_T12',
+  'HOST_T13',
+  'HOST_T14',
+  'HOST_T15',
+  'HOST_T16',
+  'MANAGERS_ENTRY',
+  'MANAGERS_IO_01',
+  'MANAGERS_R01',
+  'MANAGERS_R02',
+  'MANAGERS_R03',
+  'MANAGERS_R04',
+  'MANAGERS_R05',
+  'MANAGERS_R06',
+  'MANAGERS_R07',
+  'MANAGERS_R08',
+  'MANAGERS_R09',
+  'MANAGERS_R10',
+  'MANAGERS_R11',
+  'UNKNOWN',
+]);
+const cloudObservationErrnos = new Set([
+  'ENOENT',
+  'EACCES',
+  'EPERM',
+  'EINVAL',
+  'EBADF',
+  'ENOTDIR',
+  'ELOOP',
+  'ETIMEDOUT',
+  'ECONNRESET',
+]);
+const cloudObservationErrors = new WeakMap();
+function cloudObservationOwnData(value, key) {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value ?? {}, key);
+    return descriptor && Object.hasOwn(descriptor, 'value') ? descriptor.value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+/** Non-authoritative fixed failure metadata. Never used by a guard or retry decision. */
+export function cutoverCloudObservationError(message, stage, cause) {
+  const error = new Error(message);
+  const safeStage = cloudObservationStages.has(stage) ? stage : 'UNKNOWN';
+  const inherited = cloudObservationErrors.get(cause);
+  const errno = inherited?.errno ?? cloudObservationOwnData(cause, 'code');
+  cloudObservationErrors.set(
+    error,
+    Object.freeze({
+      ...(inherited
+        ? inherited
+        : /_(T|R)\d+$/.test(safeStage)
+          ? { failureStage: safeStage }
+          : { lastEnteredStage: safeStage }),
+      errno: cloudObservationErrnos.has(errno) ? errno : null,
+    }),
+  );
+  return error;
+}
+export function rememberCutoverCloudObservationFailure(error, stage) {
+  if ((typeof error !== 'object' || error === null) && typeof error !== 'function') return;
+  if (cloudObservationErrors.has(error)) return;
+  const errno = cloudObservationOwnData(error, 'code');
+  cloudObservationErrors.set(
+    error,
+    Object.freeze({
+      failureStage: cloudObservationStages.has(stage) ? stage : 'UNKNOWN',
+      errno: cloudObservationErrnos.has(errno) ? errno : null,
+    }),
+  );
+}
+export function readCutoverCloudObservationDiagnostic(error) {
+  const value = cloudObservationErrors.get(error);
+  return value ? { ...value } : undefined;
+}
 
 // Finite source material, not capability, loaded-code equality or authorization.
 const cloudSourceTools = [
@@ -1618,24 +1874,31 @@ export async function readCutoverNginxSnapshot(io = hostSystem) {
 // Shared collector; ordinary host snapshots keep their original filtered shape.
 // Complete mode is private recovery evidence, never a new process allowlist.
 async function readHostProcesses(io, complete = false) {
+  let cloudDiagnosticStage = 'HOST_ENTRY';
+  const atStage = (stage, read) => {
+    cloudDiagnosticStage = stage;
+    return read();
+  };
   const start = (raw, pid) => {
     const value = String(raw);
-    if (!value.startsWith(`${pid} (`)) throw new Error('pid');
+    if (!value.startsWith(`${pid} (`)) throw cutoverCloudObservationError('pid', 'HOST_T01');
     const stamp = value
       .slice(value.lastIndexOf(')') + 2)
       .trim()
       .split(/\s+/)[19];
-    if (!/^\d+$/.test(stamp ?? '')) throw new Error('start');
+    if (!/^\d+$/.test(stamp ?? '')) throw cutoverCloudObservationError('start', 'HOST_T02');
     return stamp;
   };
   const all = [];
   const excluded = [];
   const included = new Set();
-  const names = (await io.readdir('/proc')).filter((p) => /^[1-9]\d*$/.test(p)).sort();
+  const names = (await atStage('HOST_IO_01', () => io.readdir('/proc')))
+    .filter((p) => /^[1-9]\d*$/.test(p))
+    .sort();
   if (complete && (names.length > 16384 || new Set(names).size !== names.length))
-    throw new Error('count');
+    throw cutoverCloudObservationError('count', 'HOST_T03');
   const metadata = async (pid) => {
-    const raw = String(await io.readFile(`/proc/${pid}/stat`, 'utf8'));
+    const raw = String(await atStage('HOST_IO_02', () => io.readFile(`/proc/${pid}/stat`, 'utf8')));
     const stamp = start(raw, pid);
     const fields = raw
       .slice(raw.lastIndexOf(')') + 2)
@@ -1651,7 +1914,7 @@ async function readHostProcesses(io, complete = false) {
       flags < 0 ||
       flags > 0xffffffff
     )
-      throw new Error('stat');
+      throw cutoverCloudObservationError('stat', 'HOST_T04');
     // PF_KTHREAD is a kernel fact, not an inference from empty cmdline. Zombies
     // cannot execute; retain their identity privately across both census passes.
     if ((flags & 0x00200000) !== 0 || fields[0] === 'Z')
@@ -1668,73 +1931,94 @@ async function readHostProcesses(io, complete = false) {
       : ['T', 't'].includes(fields[0])
         ? 'stopped'
         : null;
-    if (!state) throw new Error('state');
-    const status = String(await io.readFile(`/proc/${pid}/status`, 'utf8'));
-    if (Number(/^PPid:\s+(\d+)/m.exec(status)?.[1]) !== ppid) throw new Error('parent');
+    if (!state) throw cutoverCloudObservationError('state', 'HOST_T05');
+    const status = String(
+      await atStage('HOST_IO_03', () => io.readFile(`/proc/${pid}/status`, 'utf8')),
+    );
+    if (Number(/^PPid:\s+(\d+)/m.exec(status)?.[1]) !== ppid)
+      throw cutoverCloudObservationError('parent', 'HOST_T06');
     const noNewPrivs = Number(/^NoNewPrivs:\s+([01])\s*$/m.exec(status)?.[1]);
-    if (![0, 1].includes(noNewPrivs)) throw new Error('privileges');
+    if (![0, 1].includes(noNewPrivs)) throw cutoverCloudObservationError('privileges', 'HOST_T07');
     const capabilities = {};
     for (const key of ['CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb']) {
       const value = new RegExp(`^${key}:\\s+([0-9a-f]{1,16})\\s*$`, 'm').exec(status)?.[1];
-      if (!value) throw new Error('capability');
+      if (!value) throw cutoverCloudObservationError('capability', 'HOST_T08');
       capabilities[key] = value;
     }
-    const mountNamespace = await io.readlink(`/proc/${pid}/ns/mnt`);
-    if (!/^mnt:\[\d+\]$/.test(mountNamespace)) throw new Error('namespace');
+    const mountNamespace = await atStage('HOST_IO_04', () => io.readlink(`/proc/${pid}/ns/mnt`));
+    if (!/^mnt:\[\d+\]$/.test(mountNamespace))
+      throw cutoverCloudObservationError('namespace', 'HOST_T09');
     return { start: stamp, ppid, extra: { mountNamespace, state, noNewPrivs, capabilities } };
   };
   for (const name of names) {
     const pid = Number(name);
     const root = `/proc/${pid}`;
     try {
-      const meta = complete ? await metadata(pid) : null;
+      const meta = complete ? await atStage('HOST_IO_05', () => metadata(pid)) : null;
       if (meta?.excluded) {
-        if (!same(meta, await metadata(pid))) throw new Error('changed');
+        if (!same(meta, await atStage('HOST_IO_06', () => metadata(pid))))
+          throw cutoverCloudObservationError('changed', 'HOST_T10');
         excluded.push(meta);
         continue;
       }
-      const cmdline = String(await io.readFile(`${root}/cmdline`, 'utf8'));
+      const cmdline = String(
+        await atStage('HOST_IO_07', () => io.readFile(`${root}/cmdline`, 'utf8')),
+      );
       if (!cmdline) {
-        if (complete) throw new Error('empty userspace command');
+        if (complete) throw cutoverCloudObservationError('empty userspace command', 'HOST_T11');
         continue;
       }
-      const status = String(await io.readFile(`${root}/status`, 'utf8'));
+      const status = String(
+        await atStage('HOST_IO_08', () => io.readFile(`${root}/status`, 'utf8')),
+      );
       const match = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m.exec(status);
-      if (!match) throw new Error('uid');
+      if (!match) throw cutoverCloudObservationError('uid', 'HOST_T12');
       const uids = match.slice(1).map(Number);
-      const before = start(await io.readFile(`${root}/stat`, 'utf8'), pid);
-      const cwd = await io.readlink(`${root}/cwd`);
-      const exe = await io.readlink(`${root}/exe`);
-      const cgroup = String(await io.readFile(`${root}/cgroup`, 'utf8'));
-      const after = start(await io.readFile(`${root}/stat`, 'utf8'), pid);
+      const before = start(
+        await atStage('HOST_IO_09', () => io.readFile(`${root}/stat`, 'utf8')),
+        pid,
+      );
+      const cwd = await atStage('HOST_IO_10', () => io.readlink(`${root}/cwd`));
+      const exe = await atStage('HOST_IO_11', () => io.readlink(`${root}/exe`));
+      const cgroup = String(
+        await atStage('HOST_IO_12', () => io.readFile(`${root}/cgroup`, 'utf8')),
+      );
+      const after = start(
+        await atStage('HOST_IO_13', () => io.readFile(`${root}/stat`, 'utf8')),
+        pid,
+      );
       const ppid = Number(/^PPid:\s+(\d+)/m.exec(status)?.[1]);
-      if (!Number.isSafeInteger(ppid) || ppid < 0) throw new Error('parent');
+      if (!Number.isSafeInteger(ppid) || ppid < 0)
+        throw cutoverCloudObservationError('parent', 'HOST_T13');
       if (
         complete &&
         (meta.start !== before ||
           meta.ppid !== ppid ||
-          !same(meta, await metadata(pid)) ||
+          !same(meta, await atStage('HOST_IO_14', () => metadata(pid))) ||
           uids.some((uid) => !Number.isSafeInteger(uid) || uid < 0) ||
           ![cwd, exe].every(
             (path) => typeof path === 'string' && path.startsWith('/') && path.length <= 4096,
           ))
       )
-        throw new Error('identity');
-      const afterStatus = String(await io.readFile(`${root}/status`, 'utf8'));
+        throw cutoverCloudObservationError('identity', 'HOST_T14');
+      const afterStatus = String(
+        await atStage('HOST_IO_15', () => io.readFile(`${root}/status`, 'utf8')),
+      );
       const afterUids = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m
         .exec(afterStatus)
         ?.slice(1)
         .map(Number);
       if (
         before !== after ||
-        cmdline !== String(await io.readFile(`${root}/cmdline`, 'utf8')) ||
+        cmdline !==
+          String(await atStage('HOST_IO_16', () => io.readFile(`${root}/cmdline`, 'utf8'))) ||
         !same(uids, afterUids) ||
         ppid !== Number(/^PPid:\s+(\d+)/m.exec(afterStatus)?.[1]) ||
-        cwd !== (await io.readlink(`${root}/cwd`)) ||
-        exe !== (await io.readlink(`${root}/exe`)) ||
-        cgroup !== String(await io.readFile(`${root}/cgroup`, 'utf8'))
+        cwd !== (await atStage('HOST_IO_17', () => io.readlink(`${root}/cwd`))) ||
+        exe !== (await atStage('HOST_IO_18', () => io.readlink(`${root}/exe`))) ||
+        cgroup !== String(await atStage('HOST_IO_19', () => io.readFile(`${root}/cgroup`, 'utf8')))
       )
-        throw new Error('changed');
+        throw cutoverCloudObservationError('changed', 'HOST_T15');
       if (
         uids.includes(998) ||
         /holaday|(?:^|\/)node(?:\0|$)/i.test(cmdline) ||
@@ -1761,8 +2045,15 @@ async function readHostProcesses(io, complete = false) {
       // recollection. Never skip this PID or turn permission/identity errors
       // into process exit. All partial rows from this pass are discarded.
       if (complete && error?.code === 'ENOENT')
-        throw Object.assign(new Error('PROCESS_SAMPLE_DISAPPEARED'), { code: 'ENOENT' });
-      throw new Error('MAINTENANCE_HOST_OBSERVATION_UNPROVEN');
+        throw Object.assign(
+          cutoverCloudObservationError('PROCESS_SAMPLE_DISAPPEARED', cloudDiagnosticStage, error),
+          { code: 'ENOENT' },
+        );
+      throw cutoverCloudObservationError(
+        'MAINTENANCE_HOST_OBSERVATION_UNPROVEN',
+        cloudDiagnosticStage,
+        error,
+      );
     }
   }
   if (complete) return { processes: all.sort((a, b) => a.pid - b.pid), excluded };
@@ -1786,6 +2077,11 @@ async function readHostProcesses(io, complete = false) {
  * Two equal samples bound observation, not continuous lineage or past effects.
  */
 export async function readFirstCutoverCloudRecoveryCensus(overrides = {}) {
+  let cloudDiagnosticStage = 'CENSUS_ENTRY';
+  const atStage = (stage, read) => {
+    cloudDiagnosticStage = stage;
+    return read();
+  };
   const io = {
     ...fs,
     platform: process.platform,
@@ -1795,7 +2091,8 @@ export async function readFirstCutoverCloudRecoveryCensus(overrides = {}) {
     ...overrides,
   };
   try {
-    if (io.platform !== 'linux' || io.uid !== 0) throw new Error('host');
+    if (io.platform !== 'linux' || io.uid !== 0)
+      throw cutoverCloudObservationError('host', 'CENSUS_T01');
     const began = io.now();
     let last = began;
     let budget = 64 * 1024 * 1024;
@@ -1808,69 +2105,86 @@ export async function readFirstCutoverCloudRecoveryCensus(overrides = {}) {
         now < last ||
         now - began > 60000
       )
-        throw new Error('clock');
+        throw cutoverCloudObservationError('clock', 'CENSUS_T02');
       last = now;
       return now;
     };
     const readFile = async (path) => {
       clock();
-      const handle = await io.open(
-        path,
-        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      const handle = await atStage('CENSUS_IO_01', () =>
+        io.open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK),
       );
       try {
         const buffer = Buffer.alloc(262145);
         let size = 0;
         while (size < buffer.length) {
-          const { bytesRead } = await handle.read(buffer, size, buffer.length - size, size);
+          const { bytesRead } = await atStage('CENSUS_IO_02', () =>
+            handle.read(buffer, size, buffer.length - size, size),
+          );
           if (!Number.isSafeInteger(bytesRead) || bytesRead < 0 || bytesRead > buffer.length - size)
-            throw new Error('read');
+            throw cutoverCloudObservationError('read', 'CENSUS_T03');
           if (!bytesRead) break;
           size += bytesRead;
         }
         budget -= size;
-        if (size > 262144 || budget < 0) throw new Error('size');
+        if (size > 262144 || budget < 0) throw cutoverCloudObservationError('size', 'CENSUS_T04');
         const bytes = buffer.subarray(0, size);
         const value = bytes.toString('utf8');
-        if (!Buffer.from(value).equals(bytes)) throw new Error('encoding');
+        if (!Buffer.from(value).equals(bytes))
+          throw cutoverCloudObservationError('encoding', 'CENSUS_T05');
         return value;
+      } catch (error) {
+        rememberCutoverCloudObservationFailure(error, cloudDiagnosticStage);
+        throw error;
       } finally {
-        await handle.close();
+        await atStage('CENSUS_IO_03', () => handle.close());
       }
     };
     const machine = io.hostname();
-    const bootId = (await readFile('/proc/sys/kernel/random/boot_id')).trim();
+    const bootId = (
+      await atStage('CENSUS_IO_04', () => readFile('/proc/sys/kernel/random/boot_id'))
+    ).trim();
     if (
       !/^[a-zA-Z0-9.-]{1,128}$/.test(machine) ||
       !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(bootId)
     )
-      throw new Error('identity');
+      throw cutoverCloudObservationError('identity', 'CENSUS_T06');
     const sampling = { ...io, readFile };
     // Three complete attempts share one time/byte budget. Only a genuine
     // disappearing /proc entry can restart the read; two unequal successful
     // samples, changed identity, malformed data and permissions remain fatal.
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const first = await readHostProcesses(sampling, true);
+        const first = await atStage('CENSUS_IO_05', () => readHostProcesses(sampling, true));
         if (
-          !same(first, await readHostProcesses(sampling, true)) ||
+          !same(first, await atStage('CENSUS_IO_06', () => readHostProcesses(sampling, true))) ||
           machine !== io.hostname() ||
-          bootId !== (await readFile('/proc/sys/kernel/random/boot_id')).trim()
+          bootId !==
+            (
+              await atStage('CENSUS_IO_07', () => readFile('/proc/sys/kernel/random/boot_id'))
+            ).trim()
         )
-          throw new Error('changed');
+          throw cutoverCloudObservationError('changed', 'CENSUS_T07');
         return { hostname: machine, bootId, observedAtMs: clock(), processes: first.processes };
       } catch (error) {
         if (error?.code !== 'ENOENT' || attempt === 2) throw error;
         clock();
         if (
           machine !== io.hostname() ||
-          bootId !== (await readFile('/proc/sys/kernel/random/boot_id')).trim()
+          bootId !==
+            (
+              await atStage('CENSUS_IO_08', () => readFile('/proc/sys/kernel/random/boot_id'))
+            ).trim()
         )
-          throw new Error('changed');
+          throw cutoverCloudObservationError('changed', 'CENSUS_T08');
       }
     }
-  } catch {
-    throw new Error('CUTOVER_CLOUD_RECOVERY_CENSUS_UNPROVEN');
+  } catch (error) {
+    throw cutoverCloudObservationError(
+      'CUTOVER_CLOUD_RECOVERY_CENSUS_UNPROVEN',
+      cloudDiagnosticStage,
+      error,
+    );
   }
 }
 

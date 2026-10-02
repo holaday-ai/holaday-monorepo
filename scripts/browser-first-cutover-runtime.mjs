@@ -8,12 +8,14 @@ import { posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import {
+  cutoverCloudObservationError,
   cutoverLegacyInterruptionRisk,
   cutoverRegistrationConfigDigest,
   firstCutoverCloudDisplayBootstrap,
   firstCutoverCloudReviewedPythonStartup,
   readFirstCutoverCloudDisplayListeners,
   readFirstCutoverCloudRecoveryCensus,
+  rememberCutoverCloudObservationFailure,
   validateFirstCutoverCloudSources,
   validateLegacyWorkBoundary as validateWork,
 } from './browser-cutover-evidence.mjs';
@@ -630,6 +632,11 @@ export async function readFirstCutoverCloudRecoverySources(input, overrides = {}
  * An unavailable security label remains explicit unknown evidence.
  */
 export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}) {
+  let cloudDiagnosticStage = 'CONTEXT_ENTRY';
+  const atStage = (stage, read) => {
+    cloudDiagnosticStage = stage;
+    return read();
+  };
   const io = {
     ...fs,
     platform: process.platform,
@@ -639,8 +646,8 @@ export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}
     hostname,
     ...overrides,
   };
-  const reject = () => {
-    throw new Error('CUTOVER_CLOUD_CONTEXT_UNPROVEN');
+  const reject = (stage, cause) => {
+    throw cutoverCloudObservationError('CUTOVER_CLOUD_CONTEXT_UNPROVEN', stage, cause);
   };
   try {
     if (
@@ -649,7 +656,7 @@ export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}
       !['arm64', 'x64'].includes(io.arch) ||
       io.uid !== 0
     )
-      reject();
+      reject('CONTEXT_R01');
     const sources = structuredClone(input.sources);
     validateFirstCutoverCloudSources(sources, { scope: sources.roles, observed: true });
     const sha = (v) =>
@@ -668,7 +675,7 @@ export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}
         sources.observedAtMs > now ||
         now - sources.observedAtMs > 60000
       )
-        reject();
+        reject('CONTEXT_R02');
       last = now;
       return now;
     };
@@ -680,80 +687,84 @@ export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}
     const records = new Map();
     const bounded = async (path, limit = 65536) => {
       clock();
-      const handle = await io.open(
-        path,
-        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      const handle = await atStage('CONTEXT_IO_01', () =>
+        io.open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK),
       );
       try {
-        const before = await handle.stat();
+        const before = await atStage('CONTEXT_IO_02', () => handle.stat());
         const bytes = Buffer.alloc(limit + 1);
         let size = 0;
         while (size < bytes.length) {
-          const { bytesRead } = await handle.read(bytes, size, bytes.length - size, size);
+          const { bytesRead } = await atStage('CONTEXT_IO_03', () =>
+            handle.read(bytes, size, bytes.length - size, size),
+          );
           if (!Number.isSafeInteger(bytesRead) || bytesRead < 0 || bytesRead > bytes.length - size)
-            reject();
+            reject('CONTEXT_R03');
           if (!bytesRead) break;
           size += bytesRead;
         }
         if (
           size > limit ||
-          !sameStat(before, await handle.stat()) ||
-          !sameStat(before, await io.lstat(path))
+          !sameStat(before, await atStage('CONTEXT_IO_04', () => handle.stat())) ||
+          !sameStat(before, await atStage('CONTEXT_IO_05', () => io.lstat(path)))
         )
-          reject();
+          reject('CONTEXT_R04');
         return bytes.subarray(0, size);
+      } catch (error) {
+        rememberCutoverCloudObservationFailure(error, cloudDiagnosticStage);
+        throw error;
       } finally {
-        await handle.close();
+        await atStage('CONTEXT_IO_06', () => handle.close());
       }
     };
     const text = async (path, limit) => {
-      const bytes = await bounded(path, limit);
+      const bytes = await atStage('CONTEXT_IO_07', () => bounded(path, limit));
       const value = bytes.toString('utf8');
-      if (!Buffer.from(value).equals(bytes)) reject();
+      if (!Buffer.from(value).equals(bytes)) reject('CONTEXT_R05');
       return value;
     };
     const optional = async (path) => {
       try {
-        return await text(path);
+        return await atStage('CONTEXT_IO_08', () => text(path));
       } catch (error) {
         if (error.code === 'ENOENT') return null;
         throw error;
       }
     };
     const protectedPath = async (path) => {
-      if (!path.startsWith('/') || posix.normalize(path) !== path) reject();
+      if (!path.startsWith('/') || posix.normalize(path) !== path) reject('CONTEXT_R06');
       const parts = path.slice(1).split('/');
       let current = '';
       for (let i = -1; i < parts.length; i++) {
         current = i < 0 ? '/' : posix.join(current, parts[i]);
-        const st = await io.lstat(current);
+        const st = await atStage('CONTEXT_IO_09', () => io.lstat(current));
         if (
           st.uid !== 0 ||
           st.gid !== 0 ||
           st.mode & 0o7022 ||
           (i < parts.length - 1 ? !st.isDirectory() : !st.isFile()) ||
-          (await io.realpath(current)) !== current
+          (await atStage('CONTEXT_IO_10', () => io.realpath(current))) !== current
         )
-          reject();
-        if (records.has(current) && !sameStat(records.get(current), st)) reject();
+          reject('CONTEXT_R07');
+        if (records.has(current) && !sameStat(records.get(current), st)) reject('CONTEXT_R08');
         records.set(current, st);
       }
       return records.get(path);
     };
-    const boot = await text('/proc/sys/kernel/random/boot_id', 128);
-    if (boot.trim() !== sources.bootId || io.hostname() !== sources.hostname) reject();
-    const rawPid = await text('/root/.pm2/pm2.pid', 64);
-    if (!/^[1-9][0-9]*\n?$/.test(rawPid)) reject();
+    const boot = await atStage('CONTEXT_IO_11', () => text('/proc/sys/kernel/random/boot_id', 128));
+    if (boot.trim() !== sources.bootId || io.hostname() !== sources.hostname) reject('CONTEXT_R09');
+    const rawPid = await atStage('CONTEXT_IO_12', () => text('/root/.pm2/pm2.pid', 64));
+    if (!/^[1-9][0-9]*\n?$/.test(rawPid)) reject('CONTEXT_R10');
     const pid = Number(rawPid.trim());
-    if (!Number.isSafeInteger(pid) || pid <= 1) reject();
+    if (!Number.isSafeInteger(pid) || pid <= 1) reject('CONTEXT_R11');
     const root = `/proc/${pid}`;
     const field = (status, key) => {
       const rows = status.split('\n').filter((line) => line.startsWith(`${key}:`));
-      if (rows.length !== 1) reject();
+      if (rows.length !== 1) reject('CONTEXT_R12');
       return rows[0].slice(key.length + 1).trim();
     };
     const sample = async () => {
-      const raw = await text(`${root}/stat`);
+      const raw = await atStage('CONTEXT_IO_13', () => text(`${root}/stat`));
       const parts = raw
         .slice(raw.lastIndexOf(')') + 2)
         .trim()
@@ -763,10 +774,10 @@ export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}
         !['R', 'S', 'D', 'I'].includes(parts[0]) ||
         !/^[0-9]+$/.test(parts[19])
       )
-        reject();
-      const cmd = await text(`${root}/cmdline`);
-      if (cmd.replace(/\0+$/, '') !== 'PM2 v6.0.14: God Daemon (/root/.pm2)') reject();
-      const status = await text(`${root}/status`);
+        reject('CONTEXT_R13');
+      const cmd = await atStage('CONTEXT_IO_14', () => text(`${root}/cmdline`));
+      if (cmd.replace(/\0+$/, '') !== 'PM2 v6.0.14: God Daemon (/root/.pm2)') reject('CONTEXT_R14');
+      const status = await atStage('CONTEXT_IO_15', () => text(`${root}/status`));
       const selected = {};
       for (const key of [
         'Uid',
@@ -780,57 +791,64 @@ export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}
         'Seccomp',
       ])
         selected[key] = field(status, key);
-      for (const key of ['Uid', 'Gid']) if (!/^0\s+0\s+0\s+0$/.test(selected[key])) reject();
-      if (selected.NoNewPrivs !== '0' || selected.Seccomp !== '0') reject();
+      for (const key of ['Uid', 'Gid'])
+        if (!/^0\s+0\s+0\s+0$/.test(selected[key])) reject('CONTEXT_R15');
+      if (selected.NoNewPrivs !== '0' || selected.Seccomp !== '0') reject('CONTEXT_R16');
       for (const key of ['CapEff', 'CapPrm', 'CapBnd', 'CapInh', 'CapAmb']) {
-        if (!/^[a-f0-9]{1,16}$/.test(selected[key])) reject();
+        if (!/^[a-f0-9]{1,16}$/.test(selected[key])) reject('CONTEXT_R17');
         if (
           ['CapEff', 'CapPrm', 'CapBnd'].includes(key) &&
           (BigInt(`0x${selected[key]}`) & 0x200100n) !== 0x200100n
         )
-          reject();
+          reject('CONTEXT_R18');
       }
       // getprocattr may have no label provider. Preserve unavailability as
       // unknown evidence; consumers must never equate it with unconfined.
       let securityLabel;
       try {
-        const label = await text(`${root}/attr/current`);
-        if (label.trim() !== 'unconfined') reject();
+        const label = await atStage('CONTEXT_IO_16', () => text(`${root}/attr/current`));
+        if (label.trim() !== 'unconfined') reject('CONTEXT_R19');
         securityLabel = { kind: 'observed', value: 'unconfined' };
       } catch (error) {
         if (!['ENOENT', 'EINVAL'].includes(error.code)) throw error;
         securityLabel = { kind: 'unavailable', reason: error.code };
       }
-      const selinux = await optional('/sys/fs/selinux/enforce');
-      if (selinux !== null && selinux.trim() !== '0') reject();
+      const selinux = await atStage('CONTEXT_IO_17', () => optional('/sys/fs/selinux/enforce'));
+      if (selinux !== null && selinux.trim() !== '0') reject('CONTEXT_R20');
       const namespaces = {};
       for (const name of ['mnt', 'user', 'net']) {
-        const value = await io.readlink(`${root}/ns/${name}`);
+        const value = await atStage('CONTEXT_IO_18', () => io.readlink(`${root}/ns/${name}`));
         if (
           !new RegExp(`^${name}:\\[\\d+\\]$`).test(value) ||
-          value !== (await io.readlink(`/proc/1/ns/${name}`))
+          value !== (await atStage('CONTEXT_IO_19', () => io.readlink(`/proc/1/ns/${name}`)))
         )
-          reject();
+          reject('CONTEXT_R21');
         namespaces[name] = value;
       }
-      const node = await io.readlink(`${root}/exe`);
-      if (!['/opt/node22/bin/node', '/usr/bin/node'].includes(node)) reject();
-      const disk = await protectedPath(node);
-      if (!(disk.mode & 0o111) || !sameStat(disk, await io.stat(`${root}/exe`))) reject();
+      const node = await atStage('CONTEXT_IO_20', () => io.readlink(`${root}/exe`));
+      if (!['/opt/node22/bin/node', '/usr/bin/node'].includes(node)) reject('CONTEXT_R22');
+      const disk = await atStage('CONTEXT_IO_21', () => protectedPath(node));
+      if (
+        !(disk.mode & 0o111) ||
+        !sameStat(disk, await atStage('CONTEXT_IO_22', () => io.stat(`${root}/exe`)))
+      )
+        reject('CONTEXT_R23');
       const controls = [];
-      for (const entry of (await text(`${root}/environ`, 262144)).split('\0')) {
+      for (const entry of (
+        await atStage('CONTEXT_IO_23', () => text(`${root}/environ`, 262144))
+      ).split('\0')) {
         const at = entry.indexOf('=');
         const key = entry.slice(0, at);
         if (!/^(?:LD_|NODE_|PM2_NODE_OPTIONS$)/.test(key)) continue;
         const value = entry.slice(at + 1);
-        if (controls.some(([old]) => old === key)) reject();
+        if (controls.some(([old]) => old === key)) reject('CONTEXT_R24');
         if (
           value &&
           !(key === 'NODE_OPTIONS' && /^--max-old-space-size=[1-9][0-9]{0,5}$/.test(value)) &&
           !(key === 'NODE_CHANNEL_FD' && value === '3') &&
           !(key === 'NODE_CHANNEL_SERIALIZATION_MODE' && value === 'json')
         )
-          reject();
+          reject('CONTEXT_R25');
         controls.push([key, value]);
       }
       // PM2 6.0.14 starts its daemon with stdio [null, out, err, 'ipc'].
@@ -842,7 +860,7 @@ export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}
           Object.hasOwn(ipc, 'NODE_CHANNEL_SERIALIZATION_MODE')) &&
         (ipc.NODE_CHANNEL_FD !== '3' || ipc.NODE_CHANNEL_SERIALIZATION_MODE !== 'json')
       )
-        reject();
+        reject('CONTEXT_R26');
       return {
         start: parts[19],
         selected,
@@ -856,32 +874,35 @@ export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}
         selinux,
       };
     };
-    const before = await sample();
-    const auxv = await bounded('/proc/self/auxv', 8192);
-    if (auxv.length % 16) reject();
+    const before = await atStage('CONTEXT_IO_24', () => sample());
+    const auxv = await atStage('CONTEXT_IO_25', () => bounded('/proc/self/auxv', 8192));
+    if (auxv.length % 16) reject('CONTEXT_R27');
     let hz;
     let terminated = false;
     for (let i = 0; i < auxv.length; i += 16) {
       const key = auxv.readBigUInt64LE(i);
       const value = auxv.readBigUInt64LE(i + 8);
       if (terminated) {
-        if (key !== 0n || value !== 0n) reject();
+        if (key !== 0n || value !== 0n) reject('CONTEXT_R28');
         continue;
       }
       if (key === 0n) {
-        if (value !== 0n) reject();
+        if (value !== 0n) reject('CONTEXT_R29');
         terminated = true;
       }
       if (key === 17n) {
-        if (hz !== undefined || value <= 0n || value > 1000000n) reject();
+        if (hz !== undefined || value <= 0n || value > 1000000n) reject('CONTEXT_R30');
         hz = Number(value);
       }
     }
-    if (!terminated || hz === undefined) reject();
-    const btime = (await text('/proc/stat')).match(/^btime ([0-9]+)$/gm);
-    if (btime?.length !== 1) reject();
+    if (!terminated || hz === undefined) reject('CONTEXT_R31');
+    const btime = (await atStage('CONTEXT_IO_26', () => text('/proc/stat'))).match(
+      /^btime ([0-9]+)$/gm,
+    );
+    if (btime?.length !== 1) reject('CONTEXT_R32');
     const startedAtMs = (Number(btime[0].slice(6)) + Number(before.start) / hz) * 1000;
-    if (!Number.isFinite(startedAtMs) || startedAtMs < 0 || startedAtMs > began) reject();
+    if (!Number.isFinite(startedAtMs) || startedAtMs < 0 || startedAtMs > began)
+      reject('CONTEXT_R33');
     const chronology = [];
     for (const suffix of [
       'package.json',
@@ -891,7 +912,7 @@ export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}
       'lib/God/ActionMethods.js',
     ]) {
       const path = `/usr/lib/node_modules/pm2/${suffix}`;
-      const st = await protectedPath(path);
+      const st = await atStage('CONTEXT_IO_27', () => protectedPath(path));
       const approved = sources.files.find((f) => f.path === path);
       if (
         !approved ||
@@ -899,19 +920,22 @@ export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}
         st.mtimeMs >= startedAtMs ||
         st.ctimeMs >= startedAtMs ||
         st.size !== approved.size ||
-        sha(await bounded(path, 524288)) !== approved.digest
+        sha(await atStage('CONTEXT_IO_28', () => bounded(path, 524288))) !== approved.digest
       )
-        reject();
+        reject('CONTEXT_R34');
       chronology.push([path, st.dev, st.ino, st.mtimeMs, st.ctimeMs]);
     }
     if (
-      !isDeepStrictEqual(before, await sample()) ||
-      rawPid !== (await text('/root/.pm2/pm2.pid', 64)) ||
-      boot !== (await text('/proc/sys/kernel/random/boot_id', 128)) ||
+      !isDeepStrictEqual(before, await atStage('CONTEXT_IO_29', () => sample())) ||
+      rawPid !== (await atStage('CONTEXT_IO_30', () => text('/root/.pm2/pm2.pid', 64))) ||
+      boot !==
+        (await atStage('CONTEXT_IO_31', () => text('/proc/sys/kernel/random/boot_id', 128))) ||
       io.hostname() !== sources.hostname
     )
-      reject();
-    for (const [path, st] of records) if (!sameStat(st, await io.lstat(path))) reject();
+      reject('CONTEXT_R35');
+    for (const [path, st] of records)
+      if (!sameStat(st, await atStage('CONTEXT_IO_32', () => io.lstat(path))))
+        reject('CONTEXT_R36');
     const { observedAtMs: _time, ...material } = sources;
     return {
       hostname: sources.hostname,
@@ -925,8 +949,8 @@ export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}
         contextDigest: sha({ before, chronology }),
       },
     };
-  } catch {
-    reject();
+  } catch (error) {
+    reject(cloudDiagnosticStage, error);
   }
 }
 
@@ -936,6 +960,11 @@ export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}
  * stop permit, a reservation against later clients, or recovery readiness.
  */
 export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
+  let cloudDiagnosticStage = 'DISPLAY_ENTRY';
+  const atStage = (stage, read) => {
+    cloudDiagnosticStage = stage;
+    return read();
+  };
   const io = {
     ...fs,
     platform: process.platform,
@@ -943,8 +972,8 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
     now: Date.now,
     ...overrides,
   };
-  const reject = () => {
-    throw new Error('CUTOVER_CLOUD_DISPLAY_SCOPE_UNPROVEN');
+  const reject = (stage, cause) => {
+    throw cutoverCloudObservationError('CUTOVER_CLOUD_DISPLAY_SCOPE_UNPROVEN', stage, cause);
   };
   try {
     if (
@@ -954,10 +983,10 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
       io.platform !== 'linux' ||
       io.uid !== 0
     )
-      reject();
+      reject('DISPLAY_R01');
     const { sources, maintenanceEndsAtMs } = structuredClone(input);
     validateFirstCutoverCloudSources(sources, { scope: sources.roles, observed: true });
-    if (!Number.isSafeInteger(maintenanceEndsAtMs)) reject();
+    if (!Number.isSafeInteger(maintenanceEndsAtMs)) reject('DISPLAY_R02');
     const sha = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
     const began = io.now();
     let last = began;
@@ -972,14 +1001,16 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
         sources.observedAtMs > now ||
         now - sources.observedAtMs > 60000
       )
-        reject();
+        reject('DISPLAY_R03');
       last = now;
       return now;
     };
     clock();
-    const context = await readFirstCutoverCloudRecoveryContext({ sources }, io);
+    const context = await atStage('DISPLAY_IO_01', () =>
+      readFirstCutoverCloudRecoveryContext({ sources }, io),
+    );
     const managers = async () => {
-      const rows = await readFirstCutoverCloudManagers(io);
+      const rows = await atStage('DISPLAY_IO_02', () => readFirstCutoverCloudManagers(io));
       clock();
       if (
         rows.some(
@@ -993,12 +1024,12 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
             ),
         )
       )
-        reject();
+        reject('DISPLAY_R04');
       return rows;
     };
-    const rows = await managers();
+    const rows = await atStage('DISPLAY_IO_03', () => managers());
     const readCensus = io.readCensus ?? (() => readFirstCutoverCloudRecoveryCensus(io));
-    const census = structuredClone(await readCensus());
+    const census = structuredClone(await atStage('DISPLAY_IO_04', () => readCensus()));
     const validateCensus = (c) => {
       clock();
       if (
@@ -1021,12 +1052,12 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
             !hash(p.argvDigest),
         )
       )
-        reject();
+        reject('DISPLAY_R05');
     };
     validateCensus(census);
     const byPid = new Map(census.processes.map((p) => [p.pid, p]));
     const daemon = byPid.get(context.daemon.pid);
-    if (!daemon || daemon.start !== context.daemon.start) reject();
+    if (!daemon || daemon.start !== context.daemon.start) reject('DISPLAY_R06');
     const children = new Map();
     for (const p of census.processes) {
       const group = children.get(p.ppid) ?? [];
@@ -1036,12 +1067,12 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
     const trees = rows.map((r) => {
       if (!r.pid) return [];
       const root = byPid.get(r.pid);
-      if (!root || root.ppid !== daemon.pid) reject();
+      if (!root || root.ppid !== daemon.pid) reject('DISPLAY_R07');
       const queue = [root];
       const ids = new Set();
       for (let at = 0; at < queue.length; at++) {
         const p = queue[at];
-        if (ids.has(p.pid) || queue.length > 16384) reject();
+        if (ids.has(p.pid) || queue.length > 16384) reject('DISPLAY_R08');
         ids.add(p.pid);
         queue.push(...(children.get(p.pid) ?? []));
       }
@@ -1054,7 +1085,7 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
             p.uids.some((u) => u !== 0),
         )
       )
-        reject();
+        reject('DISPLAY_R09');
       return queue.sort((a, b) => a.pid - b.pid);
     });
     const groups = trees.map((tree) => new Set(tree.map((p) => p.pid)));
@@ -1062,16 +1093,16 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
       trees[0].some((p) => groups[1].has(p.pid) || /\/(?:Xvfb|Xorg|openbox)$/.test(p.exe)) ||
       trees[1].some((p) => p.exe === '/usr/bin/Xorg')
     )
-      reject();
+      reject('DISPLAY_R10');
     const displays = trees[1].filter((p) => p.exe === '/usr/bin/Xvfb');
-    if (displays.length !== 1) reject();
+    if (displays.length !== 1) reject('DISPLAY_R11');
     const display = displays[0];
     if (
       display.ppid !== rows[1].pid ||
       display.mountNamespace !== byPid.get(rows[1].pid).mountNamespace ||
       display.mountNamespace !== daemon.mountNamespace
     )
-      reject();
+      reject('DISPLAY_R12');
     const members = trees[1].filter((p) => ['/usr/bin/Xvfb', '/usr/bin/openbox'].includes(p.exe));
     const project = (p) =>
       Object.fromEntries(
@@ -1084,40 +1115,47 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
     const sameStat = (a, b) => statKeys.every((k) => a[k] === b[k]);
     const bounded = async (path, limit) => {
       clock();
-      const h = await io.open(
-        path,
-        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      const h = await atStage('DISPLAY_IO_05', () =>
+        io.open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK),
       );
       try {
         const bytes = Buffer.alloc(limit + 1);
         let size = 0;
         while (size < bytes.length) {
-          const { bytesRead: n } = await h.read(bytes, size, bytes.length - size, size);
-          if (!Number.isSafeInteger(n) || n < 0 || n > bytes.length - size) reject();
+          const { bytesRead: n } = await atStage('DISPLAY_IO_06', () =>
+            h.read(bytes, size, bytes.length - size, size),
+          );
+          if (!Number.isSafeInteger(n) || n < 0 || n > bytes.length - size) reject('DISPLAY_R13');
           if (!n) break;
           size += n;
           clock();
         }
-        if (size > limit) reject();
+        if (size > limit) reject('DISPLAY_R14');
         return bytes.subarray(0, size);
+      } catch (error) {
+        rememberCutoverCloudObservationFailure(error, cloudDiagnosticStage);
+        throw error;
       } finally {
-        await h.close();
+        await atStage('DISPLAY_IO_07', () => h.close());
       }
     };
     const displaySample = async () => {
       clock();
-      const cmd = (await bounded(`/proc/${display.pid}/cmdline`, 16384)).toString('utf8');
+      const cmd = (
+        await atStage('DISPLAY_IO_08', () => bounded(`/proc/${display.pid}/cmdline`, 16384))
+      ).toString('utf8');
       const argv = cmd.split('\0');
       if (
         sha(cmd) !== display.argvDigest ||
         !cmd.endsWith('\0') ||
         argv.filter((a) => /^:\d+$/.test(a)).join(',') !== ':98' ||
         argv.some((a) => ['-query', '-broadcast', '-indirect'].includes(a)) ||
-        (await io.readlink(`/proc/${display.pid}/exe`)) !== display.exe
+        (await atStage('DISPLAY_IO_09', () => io.readlink(`/proc/${display.pid}/exe`))) !==
+          display.exe
       )
-        reject();
-      const loaded = await io.stat(`/proc/${display.pid}/exe`);
-      const disk = await io.stat(display.exe);
+        reject('DISPLAY_R15');
+      const loaded = await atStage('DISPLAY_IO_10', () => io.stat(`/proc/${display.pid}/exe`));
+      const disk = await atStage('DISPLAY_IO_11', () => io.stat(display.exe));
       const source = sources.files.find(
         (f) => f.path === display.exe && f.resolvedPath === display.exe,
       );
@@ -1135,33 +1173,35 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
         source.mode !== (disk.mode & 0o7777) ||
         source.size !== disk.size
       )
-        reject();
-      const bytes = await bounded(display.exe, disk.size);
+        reject('DISPLAY_R16');
+      const bytes = await atStage('DISPLAY_IO_12', () => bounded(display.exe, disk.size));
       if (
         createHash('sha256').update(bytes).digest('hex') !== source.digest ||
-        !sameStat(disk, await io.stat(display.exe)) ||
-        !sameStat(loaded, await io.stat(`/proc/${display.pid}/exe`))
+        !sameStat(disk, await atStage('DISPLAY_IO_13', () => io.stat(display.exe))) ||
+        !sameStat(loaded, await atStage('DISPLAY_IO_14', () => io.stat(`/proc/${display.pid}/exe`)))
       )
-        reject();
+        reject('DISPLAY_R17');
     };
-    await displaySample();
+    await atStage('DISPLAY_IO_15', () => displaySample());
     const sockets = async () => {
       const exec = io.exec ?? execFixed;
       const read = async (args) => {
         clock();
-        const text = await exec('/usr/bin/ss', args, {
-          env: fixedEnv,
-          timeout: 5000,
-          maxBuffer: 1048576,
-        });
-        if (typeof text !== 'string' || Buffer.byteLength(text) > 1048576) reject();
+        const text = await atStage('DISPLAY_IO_16', () =>
+          exec('/usr/bin/ss', args, {
+            env: fixedEnv,
+            timeout: 5000,
+            maxBuffer: 1048576,
+          }),
+        );
+        if (typeof text !== 'string' || Buffer.byteLength(text) > 1048576) reject('DISPLAY_R18');
         const lines = text.trim() ? text.trim().split('\n') : [];
-        if (lines.length > 16384) reject();
+        if (lines.length > 16384) reject('DISPLAY_R19');
         return lines;
       };
-      const all = (await read(['-H', '-xapn'])).map((line) => {
+      const all = (await atStage('DISPLAY_IO_17', () => read(['-H', '-xapn']))).map((line) => {
         const c = line.trim().split(/\s+/);
-        if (c.length < 8) reject();
+        if (c.length < 8) reject('DISPLAY_R20');
         return { line, kind: c[0], state: c[1], path: c[4], inode: c[5], peer: c[7] };
       });
       const paths = ['/tmp/.X11-unix/X98', '@/tmp/.X11-unix/X98'];
@@ -1171,7 +1211,7 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
         listeners.length !== 2 ||
         paths.some((path) => listeners.filter((r) => r.path === path).length !== 1)
       )
-        reject();
+        reject('DISPLAY_R21');
       const owners = async (row) => {
         const tuples = [...row.line.matchAll(/\("[^"\n]*",pid=(\d+),fd=(\d+)\)/g)];
         if (
@@ -1181,7 +1221,7 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
           tuples.length > 512 ||
           tuples.length !== [...row.line.matchAll(/\bpid=/g)].length
         )
-          reject();
+          reject('DISPLAY_R22');
         const result = [];
         for (const t of tuples) {
           clock();
@@ -1193,9 +1233,10 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
             !Number.isSafeInteger(fd) ||
             !Number.isSafeInteger(pid) ||
             result.some((r) => r.pid === pid && r.fd === fd) ||
-            (await io.readlink(`/proc/${pid}/fd/${fd}`)) !== `socket:[${row.inode}]`
+            (await atStage('DISPLAY_IO_18', () => io.readlink(`/proc/${pid}/fd/${fd}`))) !==
+              `socket:[${row.inode}]`
           )
-            reject();
+            reject('DISPLAY_R23');
           result.push({ pid, start: p.start, fd, inode: row.inode });
         }
         return result.sort((a, b) => a.pid - b.pid || a.fd - b.fd);
@@ -1203,19 +1244,19 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
       const clients = [];
       const servers = [];
       for (const r of named) {
-        if (r.kind !== 'u_str' || !['LISTEN', 'ESTAB'].includes(r.state)) reject();
-        const held = await owners(r);
-        if (held.some((p) => p.pid !== display.pid)) reject();
+        if (r.kind !== 'u_str' || !['LISTEN', 'ESTAB'].includes(r.state)) reject('DISPLAY_R24');
+        const held = await atStage('DISPLAY_IO_19', () => owners(r));
+        if (held.some((p) => p.pid !== display.pid)) reject('DISPLAY_R25');
         servers.push({ path: r.path, state: r.state, owners: held });
         if (r.state === 'ESTAB') {
           const matches = all.filter(
             (p) =>
               p.inode === r.peer && p.peer === r.inode && p.kind === 'u_str' && p.state === 'ESTAB',
           );
-          if (matches.length !== 1) reject();
-          for (const p of await owners(matches[0])) {
+          if (matches.length !== 1) reject('DISPLAY_R26');
+          for (const p of await atStage('DISPLAY_IO_20', () => owners(matches[0]))) {
             const role = groups.findIndex((ids) => ids.has(p.pid));
-            if (role < 0) reject();
+            if (role < 0) reject('DISPLAY_R27');
             clients.push({ ...p, role: rows[role].name, serverInode: r.inode });
           }
         }
@@ -1223,24 +1264,30 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
       if (
         members.some((p) => p.exe === '/usr/bin/openbox' && !clients.some((c) => c.pid === p.pid))
       )
-        reject();
-      const tcp = await read(['-H', '-tanp']);
-      if (tcp.some((line) => new RegExp(`\\bpid=${display.pid}(?:,|\\))`).test(line))) reject();
+        reject('DISPLAY_R28');
+      const tcp = await atStage('DISPLAY_IO_21', () => read(['-H', '-tanp']));
+      if (tcp.some((line) => new RegExp(`\\bpid=${display.pid}(?:,|\\))`).test(line)))
+        reject('DISPLAY_R29');
       const sort = (a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b));
       return { servers: servers.sort(sort), clients: clients.sort(sort) };
     };
-    const network = await sockets();
-    await displaySample();
-    if (!isDeepStrictEqual(rows, await managers()) || !isDeepStrictEqual(network, await sockets()))
-      reject();
-    const after = structuredClone(await readCensus());
+    const network = await atStage('DISPLAY_IO_22', () => sockets());
+    await atStage('DISPLAY_IO_23', () => displaySample());
+    if (
+      !isDeepStrictEqual(rows, await atStage('DISPLAY_IO_24', () => managers())) ||
+      !isDeepStrictEqual(network, await atStage('DISPLAY_IO_25', () => sockets()))
+    )
+      reject('DISPLAY_R30');
+    const after = structuredClone(await atStage('DISPLAY_IO_26', () => readCensus()));
     validateCensus(after);
     const stable = (c) => ({ hostname: c.hostname, bootId: c.bootId, processes: c.processes });
-    if (!isDeepStrictEqual(stable(census), stable(after))) reject();
-    const nextContext = await readFirstCutoverCloudRecoveryContext({ sources }, io);
+    if (!isDeepStrictEqual(stable(census), stable(after))) reject('DISPLAY_R31');
+    const nextContext = await atStage('DISPLAY_IO_27', () =>
+      readFirstCutoverCloudRecoveryContext({ sources }, io),
+    );
     const { observedAtMs: _oldTime, ...oldContext } = context;
     const { observedAtMs: _newTime, ...newContext } = nextContext;
-    if (!isDeepStrictEqual(oldContext, newContext)) reject();
+    if (!isDeepStrictEqual(oldContext, newContext)) reject('DISPLAY_R32');
     return {
       purpose: 'cloud-owned-display-observation',
       hostname: census.hostname,
@@ -1263,8 +1310,8 @@ export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
       socketDigest: sha(network),
       observedAtMs: clock(),
     };
-  } catch {
-    reject();
+  } catch (error) {
+    reject(cloudDiagnosticStage, error);
   }
 }
 
@@ -2235,6 +2282,11 @@ async function cloudPm2Rpc(method, payload, io, beforeSend) {
  * evidence or treat a successful read as stop/recovery permission.
  */
 export async function readFirstCutoverCloudManagers(overrides = {}) {
+  let cloudDiagnosticStage = 'MANAGERS_ENTRY';
+  const atStage = (stage, read) => {
+    cloudDiagnosticStage = stage;
+    return read();
+  };
   const io = {
     ...fs,
     platform: process.platform,
@@ -2242,8 +2294,8 @@ export async function readFirstCutoverCloudManagers(overrides = {}) {
     rpcSocket: '/root/.pm2/rpc.sock',
     ...overrides,
   };
-  const reject = () => {
-    throw new Error('CUTOVER_CLOUD_MANAGERS_UNPROVEN');
+  const reject = (stage, cause) => {
+    throw cutoverCloudObservationError('CUTOVER_CLOUD_MANAGERS_UNPROVEN', stage, cause);
   };
   // Refuse values whose JSON/RPC representation could silently lose data. Do
   // not normalise unknown fields, monitor values or environment into a proof.
@@ -2255,7 +2307,7 @@ export async function readFirstCutoverCloudManagers(overrides = {}) {
         Object.is(value, -0) ||
         (Number.isInteger(value) && !Number.isSafeInteger(value))
       )
-        reject();
+        reject('MANAGERS_R01');
       return;
     }
     if (
@@ -2264,22 +2316,22 @@ export async function readFirstCutoverCloudManagers(overrides = {}) {
         (Array.isArray(value) ? Array.prototype : Object.prototype) ||
       ancestors.has(value)
     )
-      reject();
+      reject('MANAGERS_R02');
     ancestors.add(value);
     for (const key of Reflect.ownKeys(value)) {
       if (Array.isArray(value) && key === 'length') continue;
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (typeof key !== 'string' || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value'))
-        reject();
+        reject('MANAGERS_R03');
       jsonData(descriptor.value, ancestors);
     }
     ancestors.delete(value);
   };
   try {
-    if (io.platform !== 'linux' || io.uid !== 0) reject();
+    if (io.platform !== 'linux' || io.uid !== 0) reject('MANAGERS_R04');
     const rpc = io.rpc ?? ((method, payload) => cloudPm2Rpc(method, payload, io));
-    const rows = await rpc('getMonitorData', {});
-    if (!Array.isArray(rows)) reject();
+    const rows = await atStage('MANAGERS_IO_01', () => rpc('getMonitorData', {}));
+    if (!Array.isArray(rows)) reject('MANAGERS_R05');
     const ids = new Set();
     for (const row of rows) {
       if (
@@ -2299,7 +2351,7 @@ export async function readFirstCutoverCloudManagers(overrides = {}) {
         row.pm2_env.pm_id !== row.pm_id ||
         row.pm2_env.name !== row.name
       )
-        reject();
+        reject('MANAGERS_R06');
       // PM2 may omit pid on unrelated registrations. They still participate
       // in full name/ID collision checks; a present pid must remain valid data.
       const pid = Object.getOwnPropertyDescriptor(row, 'pid');
@@ -2310,22 +2362,22 @@ export async function readFirstCutoverCloudManagers(overrides = {}) {
           Object.is(pid.value, -0) ||
           pid.value < 0)
       )
-        reject();
+        reject('MANAGERS_R07');
       ids.add(row.pm_id);
     }
     return ['holaday-vnc', 'holaday-chromium-headed'].map((name) => {
       const selected = rows.filter((row) => row.name === name);
-      if (selected.length !== 1) reject();
+      if (selected.length !== 1) reject('MANAGERS_R08');
       const row = selected[0];
       // Neither selected role may lose its explicit PID or be normalised to 0.
-      if (!Object.hasOwn(row, 'pid')) reject();
+      if (!Object.hasOwn(row, 'pid')) reject('MANAGERS_R09');
       jsonData(row.pm2_env);
       const pm2_env = JSON.parse(JSON.stringify(row.pm2_env));
-      if (!isDeepStrictEqual(pm2_env, row.pm2_env)) reject();
+      if (!isDeepStrictEqual(pm2_env, row.pm2_env)) reject('MANAGERS_R10');
       return { pm_id: row.pm_id, name, pid: row.pid, pm2_env };
     });
-  } catch {
-    reject();
+  } catch (error) {
+    reject(cloudDiagnosticStage, error);
   }
 }
 
