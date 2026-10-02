@@ -3151,7 +3151,9 @@ test('native display whole tree drift during final pre-dispatch source gate pres
 });
 
 test('cloud stop scope binds the originally reviewed detached handlers and refuses substituted identities', async () => {
-  const { firstCutoverCloudStopScope } = await import('./browser-first-cutover-inventory.mjs');
+  const { firstCutoverCloudStopScope } = await import(
+    './browser-first-cutover-inventory.mjs'
+  );
   assert.equal(typeof firstCutoverCloudStopScope, 'function');
   const snapshot = {
     hostname: 'qa',
@@ -3202,7 +3204,47 @@ test('cloud stop scope binds the originally reviewed detached handlers and refus
     scope.processes.map((p) => p.pid),
     [20, 21, 40],
   );
-  assert.equal(scope.associationDigest, hash(observation));
+  assert.match(scope.associationDigest, /^[a-f0-9]{64}$/);
+  const renewedDisplay = { ...display, observedAtMs: 1001 };
+  const renewed = {
+    ...observation,
+    observedAtMs: 1001,
+    displayObservationDigest: hash(renewedDisplay),
+  };
+  const observe = (association, currentDisplay = display, now = 1001) =>
+    firstCutoverCloudStopScope({
+      snapshot,
+      name: 'holaday-chromium-headed',
+      association,
+      display: currentDisplay,
+      review,
+      now,
+    });
+  assert.deepEqual(observe(renewed, renewedDisplay), scope);
+  assert.notEqual(
+    observe({ ...renewed, socketDigest: hash('changed-socket') }, renewedDisplay).associationDigest,
+    scope.associationDigest,
+  );
+  const changedDisplay = { ...renewedDisplay, treeDigests: [hash('changed-tree')] };
+  assert.notEqual(
+    observe({ ...renewed, displayObservationDigest: hash(changedDisplay) }, changedDisplay)
+      .associationDigest,
+    scope.associationDigest,
+  );
+  assert.throws(() => observe(observation, display, 61001), /UNPROVEN/);
+  assert.throws(() => observe(renewed, renewedDisplay, 1000), /UNPROVEN/);
+  const changedSource = { ...renewedDisplay, sourcesDigest: hash('changed-source') };
+  assert.notEqual(
+    observe(
+      {
+        ...renewed,
+        sourcesDigest: changedSource.sourcesDigest,
+        displayObservationDigest: hash(changedSource),
+      },
+      changedSource,
+    ).associationDigest,
+    scope.associationDigest,
+  );
   const bad = structuredClone(observation);
   bad.members[0].start = '41';
   assert.throws(

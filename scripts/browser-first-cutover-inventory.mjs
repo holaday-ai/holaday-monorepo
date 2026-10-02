@@ -253,7 +253,25 @@ export function firstCutoverCloudStopScope({ snapshot, name, association, displa
         fail();
       ids.add(p.pid);
     }
-    if (o.members.length) associationDigest = digest(o);
+    if (o.members.length) {
+      // Scope binds authorized identities and topology; freshness is checked above.
+      // Census and full-observation digests prove each read, not stable stop membership.
+      associationDigest = digest({
+        purpose: o.purpose,
+        hostname: o.hostname,
+        bootId: o.bootId,
+        sourcesDigest: o.sourcesDigest,
+        contextDigest: o.contextDigest,
+        socketDigest: o.socketDigest,
+        members: o.members,
+        display: Object.fromEntries(
+          [
+            'purpose', 'hostname', 'bootId', 'sourcesDigest', 'contextDigest',
+            'roots', 'display', 'members', 'treeDigests', 'clients', 'socketDigest',
+          ].map((key) => [key, display[key]]),
+        ),
+      });
+    }
   }
   const processes = snapshot.processes.filter((p) => ids.has(p.pid)).sort((a, b) => a.pid - b.pid);
   const daemon = snapshot.processes.find((p) => p.pid === snapshot.pm2Runtime.pid);

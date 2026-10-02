@@ -1,3 +1,25 @@
+## 2026-10-02 两处真实发布缺陷集中修复并验收
+
+真实恢复会话关闭stdout会吞掉host最终回执，已改为只结束协议writer；真实云浏览器观察有2个关联成员，原stop scope包含observedAt/full display摘要使同组进程的后续观察必然不匹配，现稳定绑定精确身份、来源及拓扑，原新鲜度、完整观察关联及review守卫保留。原树单路Node22/256MiB验收：5/5真实pipe与scope定向、434/434三个相关模块；实际私有fixture12/12漂移/陈旧/未来/未review反例。归档qa/scope-output-fixes-20261002；修复待本次统一提交并以新SHA重绑，禁止冒称628原字节已含修复。
+
+Mac既有66文件runtime的340/119 bundle输入均无site/inventory，已核原始结果，可复用而不重建容器。双机工具628已安装；新candidate仅新建coordinator目录，精确更新Aliyun ingress/gateway的inventory与manifest，不重做channel身份。session85190的两地backup目录、session7149的final81来源及session81455的stop-scope真实观察均已齐；观察不是新鲜发布窗口。下一步新candidate工具及完整inventory/site/rehearsal绑定，然后按原顺序真实停写、备份恢复、迁移和切换验收。尚未合并、整候选部署或上线成功，自动化仍暂停。
+
+## 2026-10-02 Mac隔离恢复环境与双机工具实际准备完成
+
+用户批准后，Mac v4实际session7920已创建并启动唯一容器，READINESS失败源于跨UID读取PID1 exe无权限；只读核实原mysql用户可读取正式mysqld且数据库就绪。v5仅接续检查/安装，session62253退出0、stderr0；原target inspector验证空库和隔离，66文件摘要/权限与Node v22.20.0通过。目标5656f4a775ab304ed6c88cbea19276aa3494cbb787257b615865a7b533d3c46a，DB e86a59bd-be2a-11f1-9f7e-5a29be400454/holaday；runtime摘要18c56085f4dac6a2c0f862cb9d19595e353bc557ab9acdb639c5e8e23f9726b0。禁止重建/重启/重跑原准备。
+
+已复用2026-09-27安装的通道身份，仅升级工具：session82191双机退出0/stderr0，Aliyun原3文件备份后精确替换并装ingress/gateway/query包，Vultr安装候选628的coordinator闭包；逐文件读回、原closure校验通过，serviceEffects/providerCalls均0。结果摘要分别55a22ab8bf7789a1b22caaa1d3b277e74a4b8f2a94631d68da7aa2db3e7348a0、56657c34fd96d0c1114875453ebf7b9ce0fbc6851798b1ff9ff62b1ceeba900d。密钥、授权、SSH配置未改；禁止重复升级。证据归档qa/runtime-and-tools-prepared-20261002。
+
+配置23f20与candidate628不变，checkpoint仍未提交以保持候选冻结。下一步备份source/destination实际目录、final81云恢复范围与完整清单/session接线；最后才发新鲜绝对窗口。尚未停写、真实备份/恢复/迁移、合并、候选部署或上线验收。旧失败/审核超时记录保留为历史，当前不再受此前Mac权限超时阻塞。
+
+## 2026-10-02 实际配置准备完成；Mac接续被系统审核超时阻断
+
+实时候选为 `6280384aa866a33772c1723e0d51229dffd2eb62`，已提交推送，原未跟踪 `scripts/__pycache__/` 保留。维护候选配置v2实际session87909退出0，排他创建及同步、摘要校验完成：`23f20f8c0b9667d7d50d45cf7477c92c0defbbb3aa2656c06886a86b8085c884`。未重启服务或写业务。十条精确导航延期已交付，不再等待此批准。
+
+Mac v3在RUNTIME打包阶段退出1，未创建容器、未启动/恢复/迁移；精确相对mysql2依赖路径已定位，v4只接续原空runtime目录并使用已核同锁模块，两bundle内存构建通过。v4执行cell603自动权限审核超时，系统允许的一次原样重试cell604再次超时，均CreateProcess未启动；v4 intent/result/err均不存在。不得自动第三次重试或换壳绕过审核。这是系统审核未完成，不是不安全判定，也不是业务授权缺失。精确待执行入口 `/private/tmp/holaday-run-resume-mac-recovery-628-v4.sh`。
+
+v5实际材料16件全摘要/0600核验、三份inventory一致并绑定真实config；Aliyun旧gateway 965039/965055按真实身份归为unmanaged retire，仅离线角色审查，非新鲜停止放行。最终target、同attempt cloud选择、清单摘要及绝对窗口仍未齐；安装pack已生成但安装脚本未最终审，禁止执行。私有证据位于本任务 `qa/protected-preparation-20261002/`。最新短接续仍在 `/private/tmp/holaday-low-memory-resume-20260930.md`。尚未合并、整项部署或上线验收；既有自动化保持暂停。
+
 ## 2026-10-02 来源入口真实恢复点
 
 精确导航延期包已交付 `8f1671c6b91cb7f7ac941649292b2d6cf7304f4b`。本来源小包已接通唯一已验 logger 差分的显式 pair/legacy-source/digest 身份；新候选 clean gate及其他 tracked 改动拒绝保持。首次双机 session50441 实际退出1：Aliyun退出0但聚合失败未保留原始 partial，故不能认定完整 pair 通过。单 Vultr session63528 定位为额外加入全部 untracked 的门槛回归：tracked只有精确 logger，1064个历史 artifact不在原 tracked-source gate 中。现已恢复 `--untracked-files=no`，不宣称整个工作目录无 untracked；不删除或修改 artifact，实际启动/config/进程归属独立守卫保持。真实隔离 Git RED1失败→GREEN1通过，其他 tracked 变更仍拒绝。

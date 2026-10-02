@@ -1,3 +1,4 @@
+import { Writable } from 'node:stream';
 import { ingressDiagnosticError } from './browser-first-cutover-ingress-diagnostics.mjs';
 import { createFirstCutoverProductionFacts } from './browser-first-cutover-production-facts.mjs';
 import { createHash } from 'node:crypto';
@@ -740,7 +741,12 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     const approved = recoveryScope();
     recovery = await io.connectRecovery(approved, {
       input: process.stdin,
-      output: process.stdout,
+      // Detach ends only this protocol writer; the host emits its final result afterward.
+      output: new Writable({
+        write(chunk, encoding, callback) {
+          process.stdout.write(chunk, encoding, callback);
+        },
+      }),
       assertScope: () => assertRecoveryScope(approved),
     });
     return recovery;
