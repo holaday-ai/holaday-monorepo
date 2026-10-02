@@ -3017,3 +3017,46 @@ test('preparation diagnostic callback failure preserves the original error and c
   );
   assert.equal(closes, 1);
 });
+
+test('read-only preparation diagnostic defaults to the real wall clock without a now override', async (t) => {
+  const f = await lifecycleFixture(t);
+  const began = Date.now();
+  f.changeApproval({ maintenanceEndsAtMs: began + 30000, reconcileByMs: began + 60000 });
+  delete f.io.now;
+  f.io.inspectLegacySource = async () => ({
+    sourceCandidate: f.sourceCandidate,
+    legacyDigest: approved.legacyDigest,
+    observedAtMs: Date.now(),
+  });
+  let acquisitions = 0,
+    staged = 0,
+    serviceEffects = 0;
+  f.io.journal = async () => {
+    acquisitions++;
+    throw new Error('UNEXPECTED_JOURNAL');
+  };
+  f.io.stageConfig = async () => {
+    staged++;
+  };
+  for (const name of Object.keys(f.io.lifecycle)) {
+    const original = f.io.lifecycle[name];
+    f.io.lifecycle[name] = (...args) => {
+      serviceEffects++;
+      return original(...args);
+    };
+  }
+  const report = await firstHost.diagnoseFirstCutoverPreparation(
+    { attempt: approved.attempt },
+    f.io,
+    f.io,
+  );
+  assert.equal(report.preparationPrefixPassed, true, JSON.stringify(report));
+  assert.equal(report.barrierReached, true);
+  assert.equal(report.code, 'CUTOVER_PREPARATION_READONLY_BARRIER');
+  assert.deepEqual(
+    { acquisitions, staged, serviceEffects },
+    { acquisitions: 0, staged: 0, serviceEffects: 0 },
+  );
+  await assert.rejects(fs.stat(join(f.directory, 'release.lock')), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(join(f.directory, `${approved.attempt}.json`)), { code: 'ENOENT' });
+});

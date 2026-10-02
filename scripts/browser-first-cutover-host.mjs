@@ -469,6 +469,7 @@ export async function diagnoseFirstCutoverPreparation(options, site, overrides =
   };
   const original = {
     ...candidatePreparationSystem(),
+    now: Date.now,
     readApproval: readFirstCutoverApproval,
     ...site,
     ...overrides,
