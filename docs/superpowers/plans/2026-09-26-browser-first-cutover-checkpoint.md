@@ -1,3 +1,15 @@
+## 当前微信no-op前置与logger修复恢复点 / 2026-10-02
+
+本轮session60614实际exit1，私有结果 `holaday-wechat-noop-readonly-preflight-result.json` SHA256 `702035c70f8cecb59b98cf96bc004fec6df6c3aadf7e3bae55e75bad91314c46`。部分只读前置取得19份文件，确证实际线上 `config/logger.ts` 缺少 `x-internal-secret` 脱敏；随后pino库读取在SOURCE_STAT拒绝，具体文件metadata原因尚未证明。完整前置未通过，尚未连接DB、调用confirm或provider，也未完成本轮精确body/实际loaded版本证明，不能把此前快照与本轮部分读取拼成完整成功。三份本轮payload/result/manifest已私有持久保存于 `.superpowers/sdd/2026-09-25-browser-first-cutover-implementation/qa/wechat-noop-preflight-20261002/`（0700/0600、hash核验）；旧15份支付观察证据保持。
+
+候选最小logger修复已独立review并提交 `7b53058d`：仅 `apps/orchestrator/src/config/logger.ts` 新增一个敏感header脱敏项，以及现有 `logger.test.ts` 的真实HTTP日志断言。固定Node22.23.2、单worker、heap192、60秒/512MiB本方进程组预算下，RED为1项失败（fake共享header原值进入日志），GREEN为1项通过；GREEN实际0.66秒、峰值RSS160816KiB。两文件Biome和diffcheck通过。测试日志/回执 `/private/tmp/holaday-logger-{red,green}.log` 与对应 `-receipt.json` 已由root校验源码/日志摘要并私有持久保存；独立清单为 `holaday-logger-redaction-test-evidence-20261002.json`，上述qa/wechat-noop-preflight-20261002目录现为8份文件（原3份加测试4份及清单1份），0700/0600及hash均已核验。
+
+旧9/9矩阵及既有应用验证仍是各自已记录源码的隔离证据；当前候选应用logger字节已改变，不再声称应用字节仍与b43基线完全相同，也不把旧结果称为本次全部应用重验。此次仅运行上述有意义的logger单文件RED/GREEN，不重跑旧矩阵或应用全套。
+
+当前具体依赖冲突：已观察的liveconfirm请求先经过未修线上logger，敏感header可能进入请求日志，因此不能发送共享密钥。候选修复需由实际运行进程加载才生效；原spec第17/23/48行及prepare阶段readRehearsalArtifacts仍要求支付恢复前置，不允许为取得证明先跳过门槛补丁重启旧服务。当前原query-and-existing-settlement-proven路径尚未找到已审可替代微信入口或完整真实材料；这不是永久不可实现结论，后续应解决该具体顺序/材料问题，不能用跳过logger、改日志等级、直接调用handler或未审热修制造证明。支付宝completed=0仍不是新付款门槛，不新增付款或重投延期历史单。
+
+PR238仍draft，未合并、未部署，releaseAcceptance=false；本轮无生产配置/业务写入、服务重启、provider或确认调用。下方保留各历史来源与状态，当前以本节为准。
+
 ## 当前生产只读观察恢复点 / 2026-10-02
 
 源码交付仍为 `f52d3c4d1a43e5e9c5a7ddd6d270a53308a66886`，文档回执为 `7db9a7ae`；固定隔离矩阵9/9及85份验收证据不变。PR238仍draft，未合并、未部署；releaseAcceptance=false。旧权限等待已由本轮正常审批后的实际执行取代，不再作为当前阻塞。以下观察没有调用provider、confirm或写入业务，也没有重新核查商户/密钥。
