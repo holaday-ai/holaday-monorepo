@@ -2076,6 +2076,20 @@ async function readHostProcesses(io, complete = false) {
  * cmdline/status never escape; errors intentionally contain no private bytes.
  * Two equal samples bound observation, not continuous lineage or past effects.
  */
+function sameExecutableCensus(first, second) {
+  const firstPids = new Set(first.excluded.map((row) => row.pid));
+  const secondPids = new Set(second.excluded.map((row) => row.pid));
+  // Every excluded identity has already passed its original metadata double read.
+  // Ignore only unshared, PF_KTHREAD-proven kernel additions/removals. Shared
+  // identities and zombies retain every original field in the strict comparison.
+  const retained = (row, otherPids) =>
+    otherPids.has(row.pid) || row.state !== 'kernel' || (row.flags & 0x00200000) === 0;
+  return same(
+    { ...first, excluded: first.excluded.filter((row) => retained(row, secondPids)) },
+    { ...second, excluded: second.excluded.filter((row) => retained(row, firstPids)) },
+  );
+}
+
 export async function readFirstCutoverCloudRecoveryCensus(overrides = {}) {
   let cloudDiagnosticStage = 'CENSUS_ENTRY';
   const atStage = (stage, read) => {
@@ -2157,7 +2171,10 @@ export async function readFirstCutoverCloudRecoveryCensus(overrides = {}) {
       try {
         const first = await atStage('CENSUS_IO_05', () => readHostProcesses(sampling, true));
         if (
-          !same(first, await atStage('CENSUS_IO_06', () => readHostProcesses(sampling, true))) ||
+          !sameExecutableCensus(
+            first,
+            await atStage('CENSUS_IO_06', () => readHostProcesses(sampling, true)),
+          ) ||
           machine !== io.hostname() ||
           bootId !==
             (

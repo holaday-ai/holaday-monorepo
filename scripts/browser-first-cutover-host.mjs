@@ -1987,6 +1987,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           'CUTOVER_CLOUD_SOURCES_UNPROVEN',
           'CUTOVER_CLOUD_VACANCY_UNPROVEN',
           'CUTOVER_CLOUD_DISPLAY_SCOPE_UNPROVEN',
+          'CUTOVER_CLOUD_OLD_BROWSER_ASSOCIATION_UNPROVEN',
         ].includes(value)
       )
         code = value;
