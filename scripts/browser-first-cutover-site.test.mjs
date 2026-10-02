@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { ingressDiagnosticStage } from './browser-first-cutover-ingress-diagnostics.mjs';
 
 // SYNTHETIC protected material: no production disk or package proof.
 function syntheticCloudSources(scope) {
@@ -2348,4 +2349,24 @@ test('site carries exact deferred unknown navigation and keeps pendingReplay req
   omit = true;
   await assert.rejects(() => site.evidence.readHostInventory(input), /UNPROVEN/);
   await site.lifecycle.detach(f.context);
+});
+
+test('attach preserves fixed consumer failure stages and discards private errors', async (t) => {
+  for (const [consumer, stage] of [
+    ['createIngress', 'ATTACH_INGRESS'],
+    ['connectGateway', 'ATTACH_GATEWAY'],
+    ['createObserver', 'ATTACH_OBSERVER'],
+  ]) {
+    const f = await fixture(t);
+    f.io[consumer] = async () => {
+      throw Error('PRIVATE_AUTHENTICATION_TEXT');
+    };
+    await assert.rejects(f.make().lifecycle.attach(f.context), (error) => {
+      assert.equal(error.message, 'CUTOVER_SITE_UNPROVEN');
+      assert.equal(ingressDiagnosticStage(error), stage);
+      assert.equal(JSON.stringify(error.cause).includes('PRIVATE_'), false);
+      return true;
+    });
+    assert.equal(f.events.includes('orders'), false);
+  }
 });

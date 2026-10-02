@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { ingressDiagnosticError } from './browser-first-cutover-ingress-diagnostics.mjs';
 import { performFirstCutover } from './browser-first-cutover-transition.mjs';
 const candidate = 'c'.repeat(40);
 const identity = { candidate, bootId: 'd'.repeat(32) };
@@ -298,4 +299,19 @@ test('post-open reconciliation uses its own deadline and expiry still permits a 
     assert.equal(f.events.includes('reconcile'), nowAfterOpen === 2500);
     if (nowAfterOpen === 3000) assert.equal(f.events.at(-1), 'hold');
   }
+});
+
+test('fixed attach stage survives transition without leaking a cause message', async () => {
+  const f = fixture();
+  f.adapter.stage = async () => {
+    throw ingressDiagnosticError(
+      'CUTOVER_SITE_UNPROVEN',
+      'ATTACH_GATEWAY',
+      Error('PRIVATE_SECRET'),
+    );
+  };
+  const result = await run(f);
+  assert.equal(result.ok, false);
+  assert.equal(result.ingressStage, 'ATTACH_GATEWAY');
+  assert.equal(JSON.stringify(result).includes('PRIVATE_SECRET'), false);
 });

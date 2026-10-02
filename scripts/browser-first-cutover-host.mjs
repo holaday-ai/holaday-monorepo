@@ -583,6 +583,10 @@ export function firstCutoverExecutionFailureFields(result) {
     if (key === 'action' && ['abort_without_mutation', 'hold_maintenance'].includes(value))
       fields.action = value;
   }
+  const ingressStage = ingressDiagnosticStage({
+    cause: { ingressStage: Object.getOwnPropertyDescriptor(result ?? {}, 'ingressStage')?.value },
+  });
+  if (ingressStage) fields.ingressStage = ingressStage;
   return fields;
 }
 

@@ -777,6 +777,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     );
   const lifecycle = {
     attach: async (ctx) => {
+      let attachStage = 'ATTACH_SCOPE';
       try {
         if (attaching || closed) fail();
         attaching = true;
@@ -788,16 +789,20 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
         io.bindCoordinatorJournal?.(context.journal);
         scope = await readScope(context.approval);
         if (inspectedScope && !equal(inspectedScope, scope)) fail();
+        attachStage = 'ATTACH_GUARD';
         await guard(ctx, ['preflight']);
         const digest = createHash('sha256').update(JSON.stringify(scope)).digest('hex');
+        attachStage = 'ATTACH_BIND';
         await context.journal.bindExecutionSite(digest, scope.cloudMaintenanceScope);
         executionSiteDigest = digest;
+        attachStage = 'ATTACH_GUARD';
         await guard(ctx, ['preflight']);
         const args = {
           binding: context.binding,
           maintenanceEndsAtMs: scope.maintenanceEndsAtMs,
           reconcileByMs: context.approval.reconcileByMs,
         };
+        attachStage = 'ATTACH_INGRESS';
         ingress = await io.createIngress(args, {
           ...io.ingress,
           platform: io.platform,
@@ -842,6 +847,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
             ],
           ),
         );
+        attachStage = 'ATTACH_GATEWAY';
         gateway = await io.connectGateway(
           { ...args, siteDigest: scope.gatewaySiteDigest },
           {
@@ -855,6 +861,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
             verifyFence: boundary,
           },
         );
+        attachStage = 'ATTACH_OBSERVER';
         observer = await io.createObserver(
           {
             reviews: scope.reviews,
@@ -871,16 +878,17 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
             ...(io.readCandidateRuntime ? { readCandidateRuntime: io.readCandidateRuntime } : {}),
           },
         );
+        attachStage = 'ATTACH_FINAL_GUARD';
         await guard(ctx, ['preflight', 'prepared']);
         attached = true;
-      } catch {
+      } catch (error) {
         failed = true;
         try {
           await detach(ctx);
         } catch {
           /* Both handles were attempted once; preserve failure. */
         }
-        fail();
+        fail(attachStage, error);
       }
     },
     detach,

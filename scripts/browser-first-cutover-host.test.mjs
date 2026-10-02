@@ -2710,6 +2710,31 @@ test('source diagnostics compose both schema approval files with the actual prot
   const { ingressDiagnosticStage } = await import(
     './browser-first-cutover-ingress-diagnostics.mjs'
   );
+  const { describeCutoverSite } = await import('./browser-first-cutover-fence.mjs');
+  const files = await Promise.all(
+    [
+      ['holaday', 'vultr-20260926'],
+      ['hd-app.orangebench.tech', 'aliyun-app-20260926'],
+      ['hd-pay.orangebench.tech', 'aliyun-pay-20260926'],
+    ].map(async ([name, profile]) => {
+      const path = `/etc/nginx/sites-available/${name}`;
+      const enabledPath = `/etc/nginx/sites-enabled/${name}`;
+      const bytes = await fs.readFile(
+        new URL(`./fixtures/cutover-nginx/${name}.conf`, import.meta.url),
+        'utf8',
+      );
+      return {
+        ...describeCutoverSite(bytes, profile),
+        path,
+        enabledPath,
+        sourcePath: path,
+        sourceUid: 0,
+        sourceGid: 0,
+        sourceMode: 0o644,
+        links: [{ path: enabledPath, target: path }],
+      };
+    }),
+  );
   for (const schemaVersion of [1, 2]) {
     const record = {
       ...approved,
@@ -2747,11 +2772,7 @@ test('source diagnostics compose both schema approval files with the actual prot
           inventoryDigest: binding.inventoryDigest,
           unknownIngress: [],
           remoteSiteDigest: 'e'.repeat(64),
-          files: [
-            ['holaday', 'vultr-20260926'],
-            ['hd-app.orangebench.tech', 'aliyun-app-20260926'],
-            ['hd-pay.orangebench.tech', 'aliyun-pay-20260926'],
-          ].map(([name, profile]) => ({ path: '/etc/nginx/sites-available/' + name, profile })),
+          files,
         },
         producerStartupFiles: ['dump.pm2', 'dump.pm2.bak'].map((name) => ({
           path: '/root/.pm2/' + name,
@@ -3059,4 +3080,28 @@ test('read-only preparation diagnostic defaults to the real wall clock without a
   );
   await assert.rejects(fs.stat(join(f.directory, 'release.lock')), { code: 'ENOENT' });
   await assert.rejects(fs.stat(join(f.directory, `${approved.attempt}.json`)), { code: 'ENOENT' });
+});
+
+test('CLI failure summary retains only fixed stage values', async () => {
+  const { firstCutoverExecutionFailureFields } = await import('./browser-first-cutover-host.mjs');
+  assert.deepEqual(
+    firstCutoverExecutionFailureFields({
+      code: 'CUTOVER_SITE_UNPROVEN',
+      ingressStage: 'ATTACH_GATEWAY',
+      action: 'abort_without_mutation',
+    }),
+    {
+      code: 'CUTOVER_SITE_UNPROVEN',
+      action: 'abort_without_mutation',
+      ingressStage: 'ATTACH_GATEWAY',
+    },
+  );
+  assert.deepEqual(
+    firstCutoverExecutionFailureFields({
+      ingressStage: 'PRIVATE_SECRET',
+      message: 'PRIVATE_SECRET',
+      stack: 'PRIVATE_SECRET',
+    }),
+    {},
+  );
 });

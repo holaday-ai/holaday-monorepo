@@ -1070,6 +1070,7 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
     throw ingressDiagnosticError('CUTOVER_INGRESS_PAIR_UNPROVEN', stage, previous);
   };
   let remote;
+  let pairStage = 'PAIR_ENTRY';
   try {
     const args = structuredClone(input);
     if (
@@ -1205,6 +1206,7 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
       observeWriters: io.observeWriters,
       verifyOpenedIdentity: verifyOpened,
     };
+    pairStage = 'PAIR_LOCAL_CONSTRUCTOR';
     const local = await io.createLocal(args, {
       ...io.local,
       ...shared,
@@ -1220,6 +1222,7 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
       },
     });
     await guard(['preflight', 'prepared']);
+    pairStage = 'PAIR_REMOTE_CONNECT';
     remote = await io.connectRemote(
       { ...args, siteDigest: scope.remoteSiteDigest },
       { ...io.remote, ...shared, platform: io.platform, uid: io.uid },
@@ -1488,7 +1491,7 @@ export async function createFirstCutoverIngressPair(input, overrides = {}) {
     } catch {
       /* Preserve the original failure. */
     }
-    reject('PAIR_ENTRY', error);
+    reject(pairStage, error);
   }
 }
 

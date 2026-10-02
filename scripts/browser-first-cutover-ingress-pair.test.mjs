@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { describeCutoverSite } from './browser-first-cutover-fence.mjs';
+import { ingressDiagnosticStage } from './browser-first-cutover-ingress-diagnostics.mjs';
 import * as session from './browser-first-cutover-ingress-session.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 
@@ -552,5 +553,24 @@ for (const fault of ['none', 'phase', 'deadline', 'late-effect']) {
     else if (fault === 'none')
       assert((await pair.readFenceReceipts()).every((r) => r.receipt.phase === 'restored'));
     else await assert.rejects(pair.readFenceReceipts(), /UNPROVEN/);
+  });
+}
+
+for (const [method, stage] of [
+  ['createLocal', 'PAIR_LOCAL_CONSTRUCTOR'],
+  ['connectRemote', 'PAIR_REMOTE_CONNECT'],
+]) {
+  test(`pair preserves ${method} constructor refusal and original cleanup boundary`, async (t) => {
+    const f = await fixture(t);
+    f.io[method] = async () => {
+      throw Error('PRIVATE_CONNECTION_TEXT');
+    };
+    await assert.rejects(f.start(), (error) => {
+      assert.equal(error.message, 'CUTOVER_INGRESS_PAIR_UNPROVEN');
+      assert.equal(ingressDiagnosticStage(error), stage);
+      assert.equal(JSON.stringify(error.cause).includes('PRIVATE_'), false);
+      return true;
+    });
+    assert.deepEqual(f.calls, []);
   });
 }

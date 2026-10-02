@@ -1,6 +1,8 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual as equal } from 'node:util';
+import { assertFirstCutoverReconciliationRead } from './browser-first-cutover-host.mjs';
+import { ingressDiagnosticError } from './browser-first-cutover-ingress-diagnostics.mjs';
 import {
   assertFirstCutoverSessionIdentity,
   createFirstCutoverSessionWire,
@@ -9,7 +11,6 @@ import {
   readFirstCutoverSessionIdentity,
   readFirstCutoverTransportIdentity,
 } from './browser-first-cutover-ingress-session.mjs';
-import { assertFirstCutoverReconciliationRead } from './browser-first-cutover-host.mjs';
 import { queryFirstCutoverOrders } from './browser-first-cutover-payments.mjs';
 import {
   prepareLocalFirstCutoverGateway,
@@ -259,6 +260,7 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
     open: openFirstCutoverSsh,
     ...overrides,
   };
+  let connectionStage = 'GATEWAY_ENTRY';
   let channel;
   let connection;
   let failed = false;
@@ -294,7 +296,9 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
         await assertFirstCutoverReconciliationRead(expected, io.journal, io.now());
       return b;
     };
+    connectionStage = 'GATEWAY_OWNER';
     await ownership();
+    connectionStage = 'GATEWAY_OPEN';
     connection = await io.open(
       '/usr/bin/ssh',
       [
@@ -571,14 +575,19 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
             fail();
           return r;
         }
-      } catch {
+      } catch (error) {
         failed = true;
         channel.close();
-        fail();
+        throw ingressDiagnosticError(
+          'CUTOVER_GATEWAY_SESSION_UNPROVEN',
+          name === 'attach' ? 'GATEWAY_HANDSHAKE' : 'GATEWAY_COMMAND',
+          error,
+        );
       } finally {
         busy = false;
       }
     };
+    connectionStage = 'GATEWAY_HANDSHAKE';
     await run('attach');
     return {
       readTransportIdentity: async () => {
@@ -593,10 +602,14 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
           if (failed) fail();
           channel.assert();
           return value;
-        } catch {
+        } catch (error) {
           failed = true;
           channel.close();
-          fail();
+          throw ingressDiagnosticError(
+            'CUTOVER_GATEWAY_SESSION_UNPROVEN',
+            'GATEWAY_TRANSPORT_IDENTITY',
+            error,
+          );
         }
       },
       readExecutionIdentity: () => {
@@ -632,11 +645,11 @@ export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
         }
       },
     };
-  } catch {
+  } catch (error) {
     failed = true;
     channel?.close();
     connection?.output.end();
-    fail();
+    throw ingressDiagnosticError('CUTOVER_GATEWAY_SESSION_UNPROVEN', connectionStage, error);
   }
 }
 

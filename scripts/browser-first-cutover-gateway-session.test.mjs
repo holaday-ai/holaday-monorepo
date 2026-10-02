@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
+import { ingressDiagnosticStage } from './browser-first-cutover-ingress-diagnostics.mjs';
 const api = await import('./browser-first-cutover-gateway-session.mjs').catch(() => ({}));
 const binding = {
   attempt: '12345678-1234-4234-8234-123456789abc',
@@ -547,3 +548,24 @@ for (const fault of [
     assert.deepEqual(f.actions, ['query']);
   });
 }
+
+test('gateway connection preserves owner and open refusal stages without secret text', async (t) => {
+  for (const stage of ['GATEWAY_OWNER', 'GATEWAY_OPEN']) {
+    const f = await pair(t);
+    if (stage === 'GATEWAY_OWNER')
+      f.io.journal.assertOwnership = async () => {
+        throw Error('PRIVATE_SECRET');
+      };
+    else
+      f.io.open = async () => {
+        throw Error('PRIVATE_SECRET');
+      };
+    await assert.rejects(f.connect(), (error) => {
+      assert.equal(error.message, 'CUTOVER_GATEWAY_SESSION_UNPROVEN');
+      assert.equal(ingressDiagnosticStage(error), stage);
+      assert.equal(JSON.stringify(error.cause).includes('PRIVATE_SECRET'), false);
+      return true;
+    });
+    assert.deepEqual(f.events, []);
+  }
+});
