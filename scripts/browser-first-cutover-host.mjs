@@ -419,7 +419,7 @@ export async function createFirstCutoverCoordinatorIdentity(input, overrides = {
 
 // Check inspects source identity only. Execute uses the same protected binding,
 // original site, journal lock, independent observations and absolute deadlines.
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+async function runFirstCutoverCoordinatorCli() {
   try {
     const [mode, attempt, ...extra] = process.argv.slice(2);
     if (extra.length || !uuid(attempt) || !['--check', '--execute'].includes(mode))
@@ -478,6 +478,11 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
     );
     process.exitCode = 1;
   }
+}
+
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  // Finish module evaluation before the site imports this host back.
+  void runFirstCutoverCoordinatorCli();
 }
 
 /** Real read-only transport for the two reviewed deployment hosts. Linux root
