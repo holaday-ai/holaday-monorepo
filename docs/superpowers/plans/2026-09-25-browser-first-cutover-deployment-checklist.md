@@ -1,3 +1,11 @@
+## 2026-10-02 精确历史导航延期实现恢复点
+
+用户已批准十条精确历史导航延期，集合指纹 `192900b8bbd82d0456952f07f66cffe145f7131e738ab1c74f97ee327205f446`，只读来源 `653d441102e3ef314816d94165dea9daf633d01d0923c36e7d31bc7d589ed727`。这十条仍是未验证执行结果，不修改历史记录、不认定已完成、不自动重放。延期只适用于本次受保护首次切换；普通维护不豁免。实际旧记录全字段指纹、父状态、来源及批准窗口绑定；历史候选记录新增、缺失或变化均拒绝。新候选正常工作另存非延期范围，开放前仍阻断，开放后遵循原正常生产者语义。
+
+本包已接通只读 SQL→approval/journal→facts/site/host→collector/index→first-only CLI→应用严格报告消费，独立保留 `deferredUnverifiedWork` 十条、总未决数与零可重派发数。真实 MySQL 原十行正例及漂移/缺失/新增历史反例通过；新候选条目保持非延期。应用报告缺字段、普通上下文、错集合拒绝，真实 host argv 到 CLI/context/report 合同通过。应用启动重建先筛 active 父任务，failed/cancelled 不进入重派发；首次维护启动也不调用普通重建分支。当前尚待 root 最终审查提交，未执行现场切换。
+
+独立微信签名查询及既有 completed 内部 no-op、支付宝签名查询与共享幂等分支/既有合同的能力材料已由 root 裁定可用；支付宝响应仍为 unknown，未证明其真实成功结算或九延期订单已清除风险。query+existing 路径不额外要求 gateway 故障重投。受保护 rehearsal 清单及最终候选/配置/inventory/新鲜批准窗口绑定仍待真实发布准备，整项 `releaseAcceptance=false`。独立 logger 补丁已单独验收；旧九场矩阵为此前源码的隔离证据，不冒称本次应用字节已现场验收。PR238 仍 draft，未合并或部署整候选。以下旧恢复点保留为历史。
+
 ## 当前独立查询能力材料已补齐，10条历史导航仍阻断 / 2026-10-02
 
 微信单次签名查询session54325 exit0（result SHA256 `03e06c7ffc45fcb45598e419417eac158c4a4b8d6742a645930d43ddda9d9095`）verified=true/settled，与已验收精确completed内部no-op绑定；支付宝仅一条历史timeout订单的签名查询session83640 exit0（SHA256 `a08cefce9a730dc4c2475be8cec47480b4562030368d79cf2538615cedba4233`）verified=true/state=unknown，证明查询能力，未证明订单风险已清。响应无seller字段，仅签名请求app与原历史merchant材料绑定，不声称支付宝真实结算。原§5.2独立query+现有补结算替代路径的能力材料经root裁定足够（`holaday-query-existing-path-capability-root-review-20261002.json`），不额外要求gateway故障重投或新付款；protectedRehearsalManifestPublished/fullReleaseAcceptance仍false，候选/config/inventory/最终窗口与受保护清单仍待实际绑定。PayPal全部延期，九笔历史支付宝延期不变。

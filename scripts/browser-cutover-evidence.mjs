@@ -1034,12 +1034,16 @@ export async function publishCutoverEvidence(evidence, options, io = publication
           identity: report.identity,
           kind: report.kind,
           riskDigest: report.legacyInterruption?.riskDigest,
+          ...(report.host.deferredUnverifiedWork
+            ? { deferredWorkSetFingerprint: navigationSet }
+            : {}),
           window: report,
         },
         evidence.raw,
         io.now(),
       );
       if (projection) {
+        validateCutoverDeferredWork({ ...report.host, unsettled: [] }, first);
         if (
           report.schemaVersion !== 2 ||
           !same(projection, report.legacyInterruption) ||
@@ -1150,7 +1154,13 @@ export async function publishCutoverEvidence(evidence, options, io = publication
     const index = {
       ...binding,
       ...(report.schemaVersion === 2
-        ? { kind: 'first-cutover', riskDigest: report.legacyInterruption.riskDigest }
+        ? {
+            kind: 'first-cutover',
+            riskDigest: report.legacyInterruption.riskDigest,
+            ...(report.host.deferredUnverifiedWork
+              ? { deferredWorkSetFingerprint: navigationSet }
+              : {}),
+          }
         : {}),
       stage: report.stage,
       ...(report.identity ? { identity: report.identity } : {}),
@@ -2058,6 +2068,139 @@ function sandboxRecordDigest(row, table, windowStartMs) {
     updated,
   ]);
 }
+// User-approved exact historical navigation exception. Full row fingerprints
+// retain unknown outcomes; neither terminal parents nor low-risk URLs suffice.
+const navigationSource = '653d441102e3ef314816d94165dea9daf633d01d0923c36e7d31bc7d589ed727';
+const navigationSet = '192900b8bbd82d0456952f07f66cffe145f7131e738ab1c74f97ee327205f446';
+const navigationFingerprints = [
+  '029963afa7b27f4fc0ec9e7289aebc636c8b890c7672c733931d6cddd19dae18',
+  '13df21db0a1a7fb34d60940fdca443533798a782331109f6e92524f183d06779',
+  '16a0d3cd0c433214a3b768a4ffc562571681322fe1e6fafa44d6ab6088097a15',
+  '3b82a649a25a426a20bcd94834b12de2803a556b4c39e662e0eaedb7e4e8747e',
+  '43dfb2616214e972bd20abdd6567e05771addc8e6bf1a1d83d94544a0f4ce6ea',
+  '93f0b00043eec228c8c066d7c86a4d4f623caf874b6109be24b409fa899c6e04',
+  'abb03cb495fbe99ff332a2efdc0b5fd6fa75ee2d4c767dae4d7c0cc9e4a3792c',
+  'c14af57146be89e84c250d9e250f9ff9d50fe5b9cdf57f05ba18ac074bc8d8bf',
+  'd00f2b41837dced30a1d45ae9c8c43743521ec61e7a23b898ecab9ee78067ca7',
+  'e5d3f7f2bc421528e90d34b1d4d823cd8e2895c105c5498f372c89a0e3051fd7',
+];
+const canonicalNavigationJSON = (value) => {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return '[' + value.map(canonicalNavigationJSON).join(',') + ']';
+  return (
+    '{' +
+    Object.keys(value)
+      .sort()
+      .map((k) => JSON.stringify(k) + ':' + canonicalNavigationJSON(value[k]))
+      .join(',') +
+    '}'
+  );
+};
+const navigationDigest = (value) =>
+  createHash('sha256').update(canonicalNavigationJSON(value)).digest('hex');
+export function cutoverExactNavigationDeferral(approval) {
+  const value = approval?.exactLegacyNavigationDeferral;
+  if (value === undefined) return undefined;
+  checkBinding(Object.fromEntries(bindingKeys.map((k) => [k, approval[k]])));
+  if (
+    approval.schemaVersion !== 2 ||
+    approval.kind !== 'first-cutover' ||
+    !Number.isSafeInteger(approval.maintenanceEndsAtMs) ||
+    !Number.isSafeInteger(approval.reconcileByMs) ||
+    approval.reconcileByMs < approval.maintenanceEndsAtMs ||
+    !same(value, {
+      approvalRef: 'exact-legacy-navigation-deferral-20261002',
+      sourceResultSha256: navigationSource,
+      setFingerprint: navigationSet,
+      noAutomaticReplay: true,
+    })
+  )
+    fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+  return value;
+}
+export function validateCutoverDeferredWork(value, approval) {
+  const policy = cutoverExactNavigationDeferral(approval);
+  if (!policy) {
+    if (
+      value?.deferredUnverifiedWork !== undefined ||
+      value?.unresolvedWorkCount !== undefined ||
+      value?.eligibleReplay !== undefined
+    )
+      fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+    return;
+  }
+  const expected = navigationFingerprints.map((recordFingerprint) => ({
+    table: 'task_steps',
+    status: 'executing',
+    recordFingerprint,
+    approvalRef: policy.approvalRef,
+    outcome: 'unverified',
+    automaticReplay: false,
+  }));
+  if (
+    !value ||
+    !same(value.deferredUnverifiedWork, expected) ||
+    value.unresolvedWorkCount !== 10 + (value.unsettled?.length ?? 0) ||
+    value.eligibleReplay !== (value.unsettled?.length ?? 0)
+  )
+    fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+}
+export function cutoverWorkScopeReady(value, approval, { requireReplay = false } = {}) {
+  validateCutoverDeferredWork(value, approval);
+  return (
+    Array.isArray(value?.unsettled) &&
+    value.unsettled.length === 0 &&
+    ((!requireReplay && value.pendingReplay === undefined) ||
+      value.pendingReplay === (cutoverExactNavigationDeferral(approval) ? 10 : 0))
+  );
+}
+async function readExactNavigationDeferral(db, approval, nowMs) {
+  const policy = cutoverExactNavigationDeferral(approval);
+  if (!policy) return undefined;
+  if (!Number.isSafeInteger(nowMs) || nowMs >= approval.reconcileByMs)
+    fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+  const [sizes] = await db.query(
+    "SELECT COUNT(*) AS count, MAX(OCTET_LENGTH(input)) AS inputBytes, MAX(OCTET_LENGTH(output)) AS outputBytes, MAX(OCTET_LENGTH(error_message)) AS errorBytes FROM task_steps WHERE status='executing' AND created_at <= '2026-08-30 13:29:21.615'",
+  );
+  if (
+    !Array.isArray(sizes) ||
+    sizes.length !== 1 ||
+    Number(sizes[0].count) !== 10 ||
+    ['inputBytes', 'outputBytes', 'errorBytes'].some((k) => Number(sizes[0][k] ?? 0) > 65536)
+  )
+    fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+  const [rows] = await db.query(
+    "SELECT s.id,s.external_id,s.task_id,s.parent_step_id,s.seq,s.kind,s.status,s.risk_level,s.retry_count,s.input,s.output,s.error_code,s.error_message,s.created_at,s.started_at,s.completed_at,t.status AS parentStatus,t.error_code AS parentErrorCode,t.created_at AS parentCreatedAt,t.updated_at AS parentUpdatedAt,t.completed_at AS parentCompletedAt FROM task_steps s JOIN tasks t ON t.id=s.task_id WHERE s.status='executing' AND s.created_at <= '2026-08-30 13:29:21.615' ORDER BY s.id LIMIT 100",
+  );
+  if (!Array.isArray(rows) || rows.length !== 10) fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+  const fingerprints = rows.map(navigationDigest).sort();
+  if (
+    !same(fingerprints, navigationFingerprints) ||
+    navigationDigest(fingerprints) !== navigationSet ||
+    rows.some(
+      (r) =>
+        r.kind !== 'goto' ||
+        !['failed', 'cancelled'].includes(r.parentStatus) ||
+        r.output !== null ||
+        r.completed_at !== null ||
+        r.error_code !== null ||
+        r.error_message !== null,
+    )
+  )
+    fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
+  return {
+    ids: new Set(rows.map((r) => Number(r.id))),
+    deferredUnverifiedWork: fingerprints.map((recordFingerprint) => ({
+      table: 'task_steps',
+      status: 'executing',
+      recordFingerprint,
+      approvalRef: policy.approvalRef,
+      outcome: 'unverified',
+      automaticReplay: false,
+    })),
+  };
+}
+
 const bindingKeys = ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'];
 /** First-release exception only. This digest is separate from inventory, so
  * neither the approval nor its later receipt introduces a circular binding. */
@@ -2105,6 +2248,9 @@ export function cutoverLegacyInterruptionRisk(approval) {
         reconcileByMs: approval.reconcileByMs,
         operatorRef: approval.operatorRef,
         legacyInterruption: Object.fromEntries(keys.map((key) => [key, policy[key]])),
+        ...(cutoverExactNavigationDeferral(approval)
+          ? { exactLegacyNavigationDeferral: approval.exactLegacyNavigationDeferral }
+          : {}),
       }),
     )
     .digest('hex');
@@ -2155,6 +2301,8 @@ export function validateLegacyWorkBoundary({ observation, approval, phase, nowMs
       return { mode: 'drained' };
     }
     const riskDigest = cutoverLegacyInterruptionRisk(approval);
+    const deferral = cutoverExactNavigationDeferral(approval);
+    if (deferral) validateCutoverDeferredWork({ ...observation, unsettled: [] }, approval);
     const keys = [
       'schemaVersion',
       'inventoryDigest',
@@ -2167,6 +2315,7 @@ export function validateLegacyWorkBoundary({ observation, approval, phase, nowMs
       'capabilityDigest',
       'replaySourcesDigest',
       'pendingReplay',
+      ...(deferral ? ['deferredUnverifiedWork', 'unresolvedWorkCount', 'eligibleReplay'] : []),
     ];
     if (
       Object.keys(observation).length !== keys.length ||
@@ -2174,9 +2323,9 @@ export function validateLegacyWorkBoundary({ observation, approval, phase, nowMs
       observation.schemaVersion !== 2 ||
       observation.capabilityDigest !== approval.legacyInterruption.capabilityDigest ||
       !hash(observation.replaySourcesDigest) ||
-      observation.pendingReplay !== 0 ||
+      observation.pendingReplay !== (deferral ? 10 : 0) ||
       !Array.isArray(observation.knownExternalWork) ||
-      observation.knownExternalWork.length ||
+      !same(observation.knownExternalWork, deferral ? observation.deferredUnverifiedWork : []) ||
       (approval.riskDigest !== undefined && approval.riskDigest !== riskDigest) ||
       nowMs >= approval.maintenanceEndsAtMs ||
       (phase === 'before-stop' && nowMs > approval.legacyInterruption.observeUntilMs)
@@ -2198,7 +2347,17 @@ export function validateLegacyWorkBoundary({ observation, approval, phase, nowMs
         fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
     }
     // A currently observed zero cannot erase accepted historical uncertainty.
-    return { mode: 'controlled-interruption', riskDigest };
+    return {
+      mode: 'controlled-interruption',
+      riskDigest,
+      ...(deferral
+        ? {
+            deferredUnverifiedWork: observation.deferredUnverifiedWork,
+            unresolvedWorkCount: 10,
+            eligibleReplay: 0,
+          }
+        : {}),
+    };
   } catch {
     fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
   }
@@ -2209,6 +2368,7 @@ function firstInterruptionProjection(first, input, raw, now) {
     if (
       input.kind !== undefined ||
       input.riskDigest !== undefined ||
+      input.deferredWorkSetFingerprint !== undefined ||
       [raw?.host, raw?.lastHost, raw?.fence].some(
         (value) => value?.riskDigest !== undefined || value?.legacyWork !== undefined,
       ) ||
@@ -2224,6 +2384,7 @@ function firstInterruptionProjection(first, input, raw, now) {
     !bindingKeys.every((key) => first[key] === binding[key]) ||
     first.riskDigest !== cutoverLegacyInterruptionRisk(first) ||
     input.riskDigest !== first.riskDigest ||
+    input.deferredWorkSetFingerprint !== cutoverExactNavigationDeferral(first)?.setFingerprint ||
     !['maintenanceEndsAtMs', 'reconcileByMs', 'operatorRef'].every(
       (key) => first[key] === window[key],
     ) ||
@@ -2252,8 +2413,13 @@ function firstInterruptionProjection(first, input, raw, now) {
         value &&
         fresh(value.observedAtMs, now) &&
         digest(value.inventory) === binding.inventoryDigest &&
-        ['unknownWriters', 'externalWork'].every(
-          (key) => Array.isArray(value[key]) && value[key].length === 0,
+        Array.isArray(value.unknownWriters) &&
+        value.unknownWriters.length === 0 &&
+        same(
+          value.externalWork,
+          cutoverExactNavigationDeferral(first)
+            ? value.legacyWork?.before?.deferredUnverifiedWork
+            : [],
         ),
     ) ||
     !fence ||
@@ -2295,7 +2461,8 @@ function firstInterruptionProjection(first, input, raw, now) {
 }
 const orderKey = (row) =>
   JSON.stringify([row.provider, row.environment, row.merchantDigest, row.orderRef]);
-function checkScope(scope, now) {
+function checkScope(scope, now, approval) {
+  validateCutoverDeferredWork(scope, approval);
   if (
     !scope ||
     !fresh(scope.observedAtMs, now) ||
@@ -2343,15 +2510,16 @@ export async function collectCutoverEvidence(input, io) {
   firstInterruptionProjection(firstCutover, input, undefined, io.now());
   const host = structuredClone(await io.readHostInventory());
   const before = structuredClone(await io.readDatabaseScope());
-  checkScope(before, io.now());
+  checkScope(before, io.now(), firstCutover);
   checkDeferredScope(before, host.inventory);
   const observations = structuredClone(await io.queryOrders(before));
   const after = structuredClone(await io.readDatabaseScope());
-  checkScope(after, io.now());
+  checkScope(after, io.now(), firstCutover);
   checkDeferredScope(after, host.inventory);
   if (
     !same(before.orders, after.orders) ||
     !same(before.unsettled, after.unsettled) ||
+    !same(before.deferredUnverifiedWork, after.deferredUnverifiedWork) ||
     !same(before.deferredUnverified ?? [], after.deferredUnverified ?? [])
   )
     fail('MAINTENANCE_PAYMENT_SCOPE_CHANGED');
@@ -2363,8 +2531,13 @@ export async function collectCutoverEvidence(input, io) {
     if (
       !fresh(snapshot?.observedAtMs, now) ||
       digest(snapshot.inventory) !== binding.inventoryDigest ||
-      !['unknownWriters', 'externalWork'].every(
-        (k) => Array.isArray(snapshot[k]) && snapshot[k].length === 0,
+      !(
+        Array.isArray(snapshot.unknownWriters) &&
+        snapshot.unknownWriters.length === 0 &&
+        same(
+          snapshot.externalWork,
+          cutoverExactNavigationDeferral(firstCutover) ? before.deferredUnverifiedWork : [],
+        )
       ) ||
       !Array.isArray(snapshot.producersRunning) ||
       (stage === 'preopen' && snapshot.producersRunning.length !== 0)
@@ -2517,6 +2690,13 @@ export async function collectCutoverEvidence(input, io) {
       inventoryDigest: binding.inventoryDigest,
       unknownWriters: 0,
       unsettledWork: 0,
+      ...(before.deferredUnverifiedWork
+        ? {
+            deferredUnverifiedWork: before.deferredUnverifiedWork,
+            unresolvedWorkCount: before.unresolvedWorkCount,
+            eligibleReplay: before.eligibleReplay,
+          }
+        : {}),
       phase: stage === 'prepare' ? 'prepared' : 'fenced-stopped',
     },
     payments: {
@@ -2558,7 +2738,8 @@ export async function collectCutoverEvidence(input, io) {
 // These are persisted work observations, not proof that memory-only requests or
 // provider-side work have drained. The site must still independently observe
 // those facts. Never expire/cancel a row or swallow a missing-table error here.
-async function readPersistedCutoverWork(db) {
+async function readPersistedCutoverWork(db, approval, nowMs) {
+  const deferred = await readExactNavigationDeferral(db, approval, nowMs);
   const scopes = [
     [
       'tasks',
@@ -2633,7 +2814,8 @@ async function readPersistedCutoverWork(db) {
       )
         fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
       previous = id;
-      unsettled.push({ table, id, status: row.status });
+      if (!(table === 'task_steps' && deferred?.ids.has(id)))
+        unsettled.push({ table, id, status: row.status });
     }
     sources.push({
       table,
@@ -2641,7 +2823,17 @@ async function readPersistedCutoverWork(db) {
       rows: unsettled.filter((row) => row.table === table),
     });
   }
-  return { unsettled, sources };
+  return {
+    unsettled,
+    sources,
+    ...(deferred
+      ? {
+          deferredUnverifiedWork: deferred.deferredUnverifiedWork,
+          unresolvedWorkCount: unsettled.length + 10,
+          eligibleReplay: unsettled.length,
+        }
+      : {}),
+  };
 }
 
 /** Frequent business checks need no payment credentials or provider queries.
@@ -2650,7 +2842,7 @@ async function readPersistedCutoverWork(db) {
  */
 export async function readCutoverWorkScope(
   db,
-  { now = Date.now, includeReplaySources = false } = {},
+  { now = Date.now, includeReplaySources = false, firstCutoverApproval } = {},
 ) {
   let transaction = false;
   try {
@@ -2659,25 +2851,32 @@ export async function readCutoverWorkScope(
     await db.query('START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY');
     transaction = true;
     const observedAtMs = now();
-    const { unsettled, sources } = await readPersistedCutoverWork(db);
+    const { unsettled, sources, ...deferred } = await readPersistedCutoverWork(
+      db,
+      firstCutoverApproval,
+      observedAtMs,
+    );
     const finishedAtMs = now();
     if (
       !Number.isSafeInteger(observedAtMs) ||
       observedAtMs < 0 ||
       !Number.isSafeInteger(finishedAtMs) ||
       finishedAtMs < observedAtMs ||
-      finishedAtMs - observedAtMs > 60000
+      finishedAtMs - observedAtMs > 60000 ||
+      (firstCutoverApproval?.exactLegacyNavigationDeferral &&
+        finishedAtMs >= firstCutoverApproval.reconcileByMs)
     )
       fail('MAINTENANCE_WORK_SCOPE_UNPROVEN');
     return {
       observedAtMs,
       unsettled,
+      ...deferred,
       ...(includeReplaySources
         ? {
             // Conservative persisted recovery blockers, not a claim about memory
             // or provider-side effects. Unknown statuses remain blockers as well.
-            pendingReplay: unsettled.length,
-            replaySourcesDigest: digest({ schemaVersion: 1, observedAtMs, sources }),
+            pendingReplay: deferred.unresolvedWorkCount ?? unsettled.length,
+            replaySourcesDigest: digest({ schemaVersion: 1, observedAtMs, sources, ...deferred }),
           }
         : {}),
     };
@@ -2703,6 +2902,7 @@ export async function readCutoverDatabaseScope(
     resolveMerchant,
     deferredSandboxPayment,
     deferredAlipayPayments,
+    firstCutoverApproval,
   } = {},
 ) {
   if (!Number.isSafeInteger(windowStartMs) || windowStartMs < 0 || windowStartMs > now())
@@ -2827,11 +3027,16 @@ export async function readCutoverDatabaseScope(
       deferredUnverified.filter((row) => row.approvalRef === alipayDeferralRef).length !== 9
     )
       fail('MAINTENANCE_PAYMENT_SCOPE_UNPROVEN');
-    const { unsettled } = await readPersistedCutoverWork(db);
+    const {
+      unsettled,
+      sources: _sources,
+      ...deferred
+    } = await readPersistedCutoverWork(db, firstCutoverApproval, observedAtMs);
     return {
       observedAtMs,
       orders,
       unsettled,
+      ...deferred,
       ...(deferredSandboxPayment !== undefined || deferredAlipayPayments !== undefined
         ? { deferredUnverified }
         : {}),

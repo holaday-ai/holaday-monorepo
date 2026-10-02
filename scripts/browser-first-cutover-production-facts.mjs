@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual as equal } from 'node:util';
 import {
   readCutoverHostSnapshot,
+  validateCutoverDeferredWork,
   validateCutoverLegacyCapability,
   validateLegacyWorkBoundary,
   readCutoverRehearsalArtifacts,
@@ -169,6 +170,7 @@ export function createFirstCutoverProductionFacts(options, overrides = {}) {
     const persisted = await io.readPersisted(ctx);
     const writer = await writers(ctx);
     if (!fresh(persisted?.observedAtMs) || !Array.isArray(persisted.unsettled)) fail();
+    validateCutoverDeferredWork(persisted, ctx.approval);
     // Only the already-approved unavailable API can retain memory uncertainty.
     // Strict-drain first cutover has no API in this legacy source and refuses.
     if (ctx.approval.schemaVersion !== 2)
@@ -189,12 +191,22 @@ export function createFirstCutoverProductionFacts(options, overrides = {}) {
       observedAtMs: Math.min(state.observedAtMs, persisted.observedAtMs, writer.observedAtMs),
       unsettledWork: persisted.unsettled.length,
       unknownWriters: state.unknownLaunchers.length,
-      knownExternalWork: structuredClone(persisted.unsettled),
+      knownExternalWork: structuredClone([
+        ...persisted.unsettled,
+        ...(persisted.deferredUnverifiedWork ?? []),
+      ]),
       activeRequests: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
       externalWork: { kind: 'unobservable', reason: 'legacy-no-inflight-api' },
       capabilityDigest: ctx.approval.legacyInterruption.capabilityDigest,
       replaySourcesDigest: persisted.replaySourcesDigest,
       pendingReplay: persisted.pendingReplay,
+      ...(persisted.deferredUnverifiedWork
+        ? {
+            deferredUnverifiedWork: structuredClone(persisted.deferredUnverifiedWork),
+            unresolvedWorkCount: persisted.unresolvedWorkCount,
+            eligibleReplay: persisted.eligibleReplay,
+          }
+        : {}),
     };
     if (!equal(record, await guard(ctx))) fail();
     return result;
@@ -231,6 +243,7 @@ export function createFirstCutoverProductionFacts(options, overrides = {}) {
       )
         fail();
       const payments = await io.readPayments(ctx, inventory);
+      validateCutoverDeferredWork(payments, ctx.approval);
       const observations = await options.queryOrders(ctx, identity, payments);
       const rehearsal = await io.readRehearsal({
         binding: ctx.binding,
@@ -247,7 +260,8 @@ export function createFirstCutoverProductionFacts(options, overrides = {}) {
         !rehearsal.artifacts.length
       )
         fail();
-      // The original stop/preopen checks already proved no legacy persisted work.
+      // Stop/preopen checked all blocking work; the exact approved historical
+      // deferred unknown navigation is retained independently, never called completed.
       // Opened candidate producers can now legitimately create tasks/replay work;
       // that unrelated work is not a payment failure or a second drain obligation.
       const key = (r) => JSON.stringify([r.provider, r.environment, r.merchantDigest, r.orderRef]);

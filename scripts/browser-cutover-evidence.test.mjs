@@ -412,7 +412,7 @@ test('collects twice, binds all sources, and only publishes redacted facts', asy
   assert.equal(JSON.stringify(result).includes('vultr'), false);
   assert.equal(JSON.stringify(result).includes('4011'), false);
 });
-async function interruptionFixture(t) {
+async function interruptionFixture(t, exactNavigationPolicy) {
   const f = fixture();
   const manifest = {
     replaysNumberedSql: true,
@@ -428,6 +428,7 @@ async function interruptionFixture(t) {
     schemaVersion: 2,
     kind: 'first-cutover',
     legacyDigest: 'a'.repeat(64),
+    ...(exactNavigationPolicy ? { exactLegacyNavigationDeferral: exactNavigationPolicy } : {}),
     legacyInterruption: {
       mode: 'controlled-interruption',
       scope: 'legacy-non-payment-memory',
@@ -442,6 +443,8 @@ async function interruptionFixture(t) {
   f.io.assertJournalOwnership = j.assertOwnership;
   f.io.readFirstCutoverEffects = j.readFirstCutoverEffects;
   f.input.kind = 'first-cutover';
+  if (exactNavigationPolicy)
+    f.input.deferredWorkSetFingerprint = exactNavigationPolicy.setFingerprint;
   f.input.riskDigest = (await j.readFirstCutoverEffects()).riskDigest;
   const work = {
     schemaVersion: 2,
@@ -3413,4 +3416,78 @@ test('recovery census limits complete recollection and never retries permission 
     await assert.rejects(read(f.io), /CUTOVER_CLOUD_RECOVERY_CENSUS_UNPROVEN/);
     assert.equal(failures, code === 'ENOENT' ? 3 : 1);
   }
+});
+
+test('work readiness keeps required replay evidence distinct from payment-only scope', async () => {
+  const { cutoverWorkScopeReady } = await import('./browser-cutover-evidence.mjs');
+  assert.equal(cutoverWorkScopeReady({ unsettled: [] }, {}), true);
+  assert.equal(cutoverWorkScopeReady({ unsettled: [] }, {}, { requireReplay: true }), false);
+  assert.equal(
+    cutoverWorkScopeReady({ unsettled: [], pendingReplay: 0 }, {}, { requireReplay: true }),
+    true,
+  );
+});
+
+test('collector and publisher retain ten unknown navigation records with protected exact context', async (t) => {
+  const policy = {
+    approvalRef: 'exact-legacy-navigation-deferral-20261002',
+    sourceResultSha256: '653d441102e3ef314816d94165dea9daf633d01d0923c36e7d31bc7d589ed727',
+    setFingerprint: '192900b8bbd82d0456952f07f66cffe145f7131e738ab1c74f97ee327205f446',
+    noAutomaticReplay: true,
+  };
+  const f = await interruptionFixture(t, policy);
+  const retained = [
+    '029963afa7b27f4fc0ec9e7289aebc636c8b890c7672c733931d6cddd19dae18',
+    '13df21db0a1a7fb34d60940fdca443533798a782331109f6e92524f183d06779',
+    '16a0d3cd0c433214a3b768a4ffc562571681322fe1e6fafa44d6ab6088097a15',
+    '3b82a649a25a426a20bcd94834b12de2803a556b4c39e662e0eaedb7e4e8747e',
+    '43dfb2616214e972bd20abdd6567e05771addc8e6bf1a1d83d94544a0f4ce6ea',
+    '93f0b00043eec228c8c066d7c86a4d4f623caf874b6109be24b409fa899c6e04',
+    'abb03cb495fbe99ff332a2efdc0b5fd6fa75ee2d4c767dae4d7c0cc9e4a3792c',
+    'c14af57146be89e84c250d9e250f9ff9d50fe5b9cdf57f05ba18ac074bc8d8bf',
+    'd00f2b41837dced30a1d45ae9c8c43743521ec61e7a23b898ecab9ee78067ca7',
+    'e5d3f7f2bc421528e90d34b1d4d823cd8e2895c105c5498f372c89a0e3051fd7',
+  ].map((recordFingerprint) => ({
+    table: 'task_steps',
+    status: 'executing',
+    recordFingerprint,
+    approvalRef: policy.approvalRef,
+    outcome: 'unverified',
+    automaticReplay: false,
+  }));
+  for (const work of Object.values(f.host.legacyWork))
+    Object.assign(work, {
+      pendingReplay: 10,
+      knownExternalWork: retained,
+      deferredUnverifiedWork: retained,
+      unresolvedWorkCount: 10,
+      eligibleReplay: 0,
+    });
+  f.host.externalWork = retained;
+  Object.assign(f.scope, {
+    deferredUnverifiedWork: retained,
+    unresolvedWorkCount: 10,
+    eligibleReplay: 0,
+  });
+  const report = await collectCutoverEvidence(f.input, f.io);
+  assert.equal(report.host.unresolvedWorkCount, 10);
+  assert.equal(report.host.deferredUnverifiedWork.length, 10);
+  assert.equal(report.host.eligibleReplay, 0);
+  const p = await publisherFixture(t);
+  await publishCutoverEvidence(
+    f.published[0],
+    {
+      ...p.options,
+      assertJournalOwnership: f.j.assertOwnership,
+      readFirstCutoverEffects: f.j.readFirstCutoverEffects,
+    },
+    p.io,
+  );
+  assert.equal(
+    JSON.parse(await fs.readFile(join(p.directory, 'evidence', 'active.json'), 'utf8'))
+      .deferredWorkSetFingerprint,
+    policy.setFingerprint,
+  );
+  f.scope.deferredUnverifiedWork = retained.slice(1);
+  await assert.rejects(() => collectCutoverEvidence(f.input, f.io), /UNPROVEN/);
 });

@@ -8,6 +8,8 @@ import { ingressDiagnosticError } from './browser-first-cutover-ingress-diagnost
 import { probeFirstCutoverRecoveredBrowser } from './browser-first-cutover-browser-probe.mjs';
 import {
   collectCutoverEvidence,
+  cutoverExactNavigationDeferral,
+  cutoverWorkScopeReady,
   compareCutoverCloudBrowserRecoveryConfig,
   compareCutoverCloudVncRecoveryConfig,
   cutoverCloudStopConfigDigest,
@@ -1191,6 +1193,28 @@ export async function recordFirstCutoverFailure(context, result, overrides = {})
  * read owns one dedicated connection, never a pool or an application's session.
  * No dotenv auto-loading, provider API call, lease cleanup or status mutation.
  */
+export function firstCutoverReadinessArguments(scope, binding, target) {
+  const first = scope.kind === 'first-cutover';
+  if (
+    scope.deferredWorkSetFingerprint !== undefined &&
+    (!first ||
+      scope.deferredWorkSetFingerprint !==
+        '192900b8bbd82d0456952f07f66cffe145f7131e738ab1c74f97ee327205f446')
+  )
+    throw new Error('MAINTENANCE_READINESS_INPUT');
+  return [
+    `${target ? 'verify' : 'services'}${first ? '-first-cutover' : ''}`,
+    binding.attempt,
+    binding.candidate,
+    binding.configDigest,
+    binding.migrationDigest,
+    binding.inventoryDigest,
+    ...(target ? [target.bootId] : []),
+    ...(first ? [scope.riskDigest] : []),
+    ...(scope.deferredWorkSetFingerprint ? [scope.deferredWorkSetFingerprint] : []),
+  ];
+}
+
 export async function readFirstCutoverPersistedWork(context, overrides = {}) {
   return withApprovedCutoverDatabase(
     context,
@@ -1200,6 +1224,7 @@ export async function readFirstCutoverPersistedWork(context, overrides = {}) {
       readCutoverWorkScope(connection, {
         now: io.now,
         includeReplaySources: context.approval.schemaVersion === 2,
+        firstCutoverApproval: context.approval,
       }),
   );
 }
@@ -1430,6 +1455,7 @@ export async function readFirstCutoverPaymentScope(context, input, overrides = {
           : {}),
         deferredSandboxPayment: inventory.deferredSandboxPayment,
         deferredAlipayPayments: inventory.deferredAlipayPayments,
+        firstCutoverApproval: context.approval,
         resolveMerchant: (provider, row) => {
           const merchant = merchants.get(provider);
           const metadata =
@@ -2471,8 +2497,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             work?.inventoryDigest !== binding.inventoryDigest ||
             !fresh(work.observedAtMs) ||
             !fresh(persisted?.observedAtMs) ||
-            !Array.isArray(persisted.unsettled) ||
-            persisted.unsettled.length ||
+            !cutoverWorkScopeReady(persisted, record) ||
             fence?.inventoryDigest !== binding.inventoryDigest ||
             !fresh(fence.observedAtMs) ||
             fence.stage !== 'all-writers' ||
@@ -2570,8 +2595,7 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
             if (
               !fresh(work.observedAtMs) ||
               !fresh(persisted?.observedAtMs) ||
-              !Array.isArray(persisted.unsettled) ||
-              persisted.unsettled.length ||
+              !cutoverWorkScopeReady(persisted, before) ||
               !fresh(fence?.observedAtMs) ||
               fence.inventoryDigest !== binding.inventoryDigest ||
               fence.stage !== 'all-writers' ||
@@ -3139,6 +3163,12 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
         ? {
             kind: 'first-cutover',
             riskDigest: cutoverLegacyInterruptionRisk(approval),
+            ...(cutoverExactNavigationDeferral(approval)
+              ? {
+                  deferredWorkSetFingerprint:
+                    cutoverExactNavigationDeferral(approval).setFingerprint,
+                }
+              : {}),
           }
         : {}),
       stage: target ? 'preopen' : 'prepare',
@@ -3177,14 +3207,7 @@ export function createFirstCutoverHostAdapter(options, overrides = {}) {
         '--import',
         'tsx',
         `${root}/apps/orchestrator/scripts/browser-maintenance-readiness.ts`,
-        `${target ? 'verify' : 'services'}${approval.schemaVersion === 2 ? '-first-cutover' : ''}`,
-        binding.attempt,
-        binding.candidate,
-        binding.configDigest,
-        binding.migrationDigest,
-        binding.inventoryDigest,
-        ...(target ? [target.bootId] : []),
-        ...(approval.schemaVersion === 2 ? [scope.riskDigest] : []),
+        ...firstCutoverReadinessArguments(scope, binding, target),
       ],
       { cwd: `${root}/apps/orchestrator`, env },
     );
@@ -3639,6 +3662,9 @@ export async function prepareFirstCutoverCandidate(options, overrides = {}) {
         ? {
             schemaVersion: 2,
             legacyInterruption: approval.legacyInterruption,
+            ...(approval.exactLegacyNavigationDeferral
+              ? { exactLegacyNavigationDeferral: approval.exactLegacyNavigationDeferral }
+              : {}),
             maintenanceEndsAtMs: approval.maintenanceEndsAtMs,
             reconcileByMs: approval.reconcileByMs,
             operatorRef: approval.operatorRef,
@@ -3792,7 +3818,16 @@ async function readProtectedFirstCutoverApproval(options, io, reconciliation) {
     const record = JSON.parse(bytes.toString('utf8'));
     const now = io.now();
     stage = 'APPROVAL_BINDING';
-    const expectedFields = record?.schemaVersion === 2 ? [...fields, 'legacyInterruption'] : fields;
+    const expectedFields =
+      record?.schemaVersion === 2
+        ? [
+            ...fields,
+            'legacyInterruption',
+            ...(record.exactLegacyNavigationDeferral !== undefined
+              ? ['exactLegacyNavigationDeferral']
+              : []),
+          ]
+        : fields;
     if (
       !record ||
       Object.keys(record).length !== expectedFields.length ||

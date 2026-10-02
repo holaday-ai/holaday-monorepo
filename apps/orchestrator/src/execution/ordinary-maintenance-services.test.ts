@@ -601,3 +601,100 @@ it.each([
     };
   await expect(readServicesEvidence(context)).rejects.toThrow(denied);
 });
+
+it('retains exact approved historical unknown navigation in first-cutover context and rejects dropped or changed declaration', async () => {
+  const first = {
+    ...context,
+    kind: 'first-cutover' as const,
+    riskDigest: '7'.repeat(64),
+    deferredWorkSetFingerprint:
+      '192900b8bbd82d0456952f07f66cffe145f7131e738ab1c74f97ee327205f446' as const,
+  };
+  const deferred = [
+    '029963afa7b27f4fc0ec9e7289aebc636c8b890c7672c733931d6cddd19dae18',
+    '13df21db0a1a7fb34d60940fdca443533798a782331109f6e92524f183d06779',
+    '16a0d3cd0c433214a3b768a4ffc562571681322fe1e6fafa44d6ab6088097a15',
+    '3b82a649a25a426a20bcd94834b12de2803a556b4c39e662e0eaedb7e4e8747e',
+    '43dfb2616214e972bd20abdd6567e05771addc8e6bf1a1d83d94544a0f4ce6ea',
+    '93f0b00043eec228c8c066d7c86a4d4f623caf874b6109be24b409fa899c6e04',
+    'abb03cb495fbe99ff332a2efdc0b5fd6fa75ee2d4c767dae4d7c0cc9e4a3792c',
+    'c14af57146be89e84c250d9e250f9ff9d50fe5b9cdf57f05ba18ac074bc8d8bf',
+    'd00f2b41837dced30a1d45ae9c8c43743521ec61e7a23b898ecab9ee78067ca7',
+    'e5d3f7f2bc421528e90d34b1d4d823cd8e2895c105c5498f372c89a0e3051fd7',
+  ].map((recordFingerprint) => ({
+    table: 'task_steps',
+    status: 'executing',
+    recordFingerprint,
+    approvalRef: 'exact-legacy-navigation-deferral-20261002',
+    outcome: 'unverified',
+    automaticReplay: false,
+  }));
+  const original = evidence();
+  const report = {
+    ...original,
+    schemaVersion: 2,
+    kind: 'first-cutover',
+    legacyInterruption: {
+      riskDigest: first.riskDigest,
+      capabilityDigest: '8'.repeat(64),
+      sourceDigest: '9'.repeat(64),
+      status: 'authorized-not-stopped',
+    },
+    host: {
+      ...original.host,
+      deferredUnverifiedWork: deferred,
+      unresolvedWorkCount: 10,
+      eligibleReplay: 0,
+    },
+  };
+  expect(() => validateServicesEvidence(report, first)).not.toThrow();
+  expect(() => validateServicesEvidence({ ...report, host: original.host }, first)).toThrow(denied);
+  expect(() => validateServicesEvidence(report, context)).toThrow(denied);
+  expect(() =>
+    validateServicesEvidence(
+      {
+        ...report,
+        host: {
+          ...report.host,
+          deferredUnverifiedWork: deferred.map((r, i) =>
+            i ? r : { ...r, recordFingerprint: '0'.repeat(64) },
+          ),
+        },
+      },
+      first,
+    ),
+  ).toThrow(denied);
+  expect(() =>
+    validateServicesEvidence(
+      { ...report, host: { ...report.host, unresolvedWorkCount: 0 } },
+      first,
+    ),
+  ).toThrow(denied);
+  await writeReport(report as CutoverEvidence);
+  const path = join(disk.root, 'active.json');
+  const index = JSON.parse(await realFs.readFile(path, 'utf8'));
+  await realFs.writeFile(
+    path,
+    JSON.stringify({
+      ...index,
+      kind: 'first-cutover',
+      riskDigest: first.riskDigest,
+      deferredWorkSetFingerprint: first.deferredWorkSetFingerprint,
+    }),
+  );
+  await expect(readServicesEvidence(first)).resolves.toMatchObject({
+    host: { unresolvedWorkCount: 10 },
+  });
+  await writeReport({ ...report, host: original.host } as CutoverEvidence);
+  const strippedIndex = JSON.parse(await realFs.readFile(path, 'utf8'));
+  await realFs.writeFile(
+    path,
+    JSON.stringify({
+      ...strippedIndex,
+      kind: 'first-cutover',
+      riskDigest: first.riskDigest,
+      deferredWorkSetFingerprint: first.deferredWorkSetFingerprint,
+    }),
+  );
+  await expect(readServicesEvidence(first)).rejects.toThrow(denied);
+});

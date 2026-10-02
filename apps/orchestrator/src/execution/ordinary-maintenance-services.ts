@@ -8,6 +8,17 @@ const directory = '/var/lib/holaday-deploy/evidence';
 const maxBytes = 256 * 1024;
 const denied = () => new Error('MAINTENANCE_PAYMENT_BOUNDARY_UNPROVEN');
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
+const deferredNavigationSchema = z
+  .object({
+    table: z.literal('task_steps'),
+    status: z.literal('executing'),
+    recordFingerprint: hash,
+    approvalRef: z.literal('exact-legacy-navigation-deferral-20261002'),
+    outcome: z.literal('unverified'),
+    automaticReplay: z.literal(false),
+  })
+  .strict();
+const navigationSet = '192900b8bbd82d0456952f07f66cffe145f7131e738ab1c74f97ee327205f446';
 const candidate = z.string().regex(/^[a-f0-9]{40}$/);
 const timestamp = z.number().int().safe().nonnegative();
 const count = z.number().int().safe().nonnegative();
@@ -31,7 +42,11 @@ const ordinaryContextSchema = bindingSchema
     identity: identitySchema.optional(),
   })
   .strict();
-const firstContextFields = { kind: z.literal('first-cutover'), riskDigest: hash };
+const firstContextFields = {
+  kind: z.literal('first-cutover'),
+  riskDigest: hash,
+  deferredWorkSetFingerprint: z.literal(navigationSet).optional(),
+};
 const contextSchema = z.union([
   ordinaryContextSchema,
   ordinaryContextSchema.extend(firstContextFields).strict(),
@@ -59,6 +74,9 @@ const ordinaryReportSchema = bindingSchema
         inventoryDigest: hash,
         unknownWriters: count,
         unsettledWork: count,
+        deferredUnverifiedWork: z.array(deferredNavigationSchema).length(10).optional(),
+        unresolvedWorkCount: count.optional(),
+        eligibleReplay: count.optional(),
         phase: z.enum(['prepared', 'fenced-stopped']),
       })
       .strict(),
@@ -196,6 +214,29 @@ export function validateServicesEvidence(value: unknown, expected: ServicesConte
     report.payments.scopeDigest !== report.payments.queriedScopeDigest
   )
     throw denied();
+  const deferredNavigation = report.host.deferredUnverifiedWork;
+  if (
+    ('deferredWorkSetFingerprint' in context &&
+      context.deferredWorkSetFingerprint !== undefined) !==
+    (deferredNavigation !== undefined)
+  )
+    throw denied();
+  if (deferredNavigation) {
+    if (
+      report.schemaVersion !== 2 ||
+      !('kind' in context) ||
+      report.host.unresolvedWorkCount !== 10 ||
+      report.host.eligibleReplay !== 0 ||
+      createHash('sha256')
+        .update(JSON.stringify(deferredNavigation.map((r) => r.recordFingerprint).sort()))
+        .digest('hex') !== navigationSet
+    )
+      throw denied();
+  } else if (
+    report.host.unresolvedWorkCount !== undefined ||
+    report.host.eligibleReplay !== undefined
+  )
+    throw denied();
   if (new Set(report.sources.map((source) => source.kind)).size !== 4) throw denied();
   const deferred = report.payments.deferredUnverified;
   if (deferred) {
@@ -327,7 +368,9 @@ async function readBoundReport(
   if (
     !sameBinding(index, context) ||
     ('kind' in index
-      ? !('kind' in context) || index.riskDigest !== context.riskDigest
+      ? !('kind' in context) ||
+        index.riskDigest !== context.riskDigest ||
+        index.deferredWorkSetFingerprint !== context.deferredWorkSetFingerprint
       : 'kind' in context) ||
     index.stage !== context.stage ||
     !sameIdentity(index.identity, context.identity)

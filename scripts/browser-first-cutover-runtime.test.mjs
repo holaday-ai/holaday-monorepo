@@ -5557,3 +5557,49 @@ for (const fault of ['valid', 'stale-current', 'drift-root', 'anchor-replay', 'u
     }
   });
 }
+
+test('runtime first-only work boundary retains exact ten unknown outcomes and refuses ordinary or changed declarations', () => {
+  const input = interruptionWork();
+  input.approval.exactLegacyNavigationDeferral = {
+    approvalRef: 'exact-legacy-navigation-deferral-20261002',
+    sourceResultSha256: '653d441102e3ef314816d94165dea9daf633d01d0923c36e7d31bc7d589ed727',
+    setFingerprint: '192900b8bbd82d0456952f07f66cffe145f7131e738ab1c74f97ee327205f446',
+    noAutomaticReplay: true,
+  };
+  const retained = [
+    '029963afa7b27f4fc0ec9e7289aebc636c8b890c7672c733931d6cddd19dae18',
+    '13df21db0a1a7fb34d60940fdca443533798a782331109f6e92524f183d06779',
+    '16a0d3cd0c433214a3b768a4ffc562571681322fe1e6fafa44d6ab6088097a15',
+    '3b82a649a25a426a20bcd94834b12de2803a556b4c39e662e0eaedb7e4e8747e',
+    '43dfb2616214e972bd20abdd6567e05771addc8e6bf1a1d83d94544a0f4ce6ea',
+    '93f0b00043eec228c8c066d7c86a4d4f623caf874b6109be24b409fa899c6e04',
+    'abb03cb495fbe99ff332a2efdc0b5fd6fa75ee2d4c767dae4d7c0cc9e4a3792c',
+    'c14af57146be89e84c250d9e250f9ff9d50fe5b9cdf57f05ba18ac074bc8d8bf',
+    'd00f2b41837dced30a1d45ae9c8c43743521ec61e7a23b898ecab9ee78067ca7',
+    'e5d3f7f2bc421528e90d34b1d4d823cd8e2895c105c5498f372c89a0e3051fd7',
+  ].map((recordFingerprint) => ({
+    table: 'task_steps',
+    status: 'executing',
+    recordFingerprint,
+    approvalRef: input.approval.exactLegacyNavigationDeferral.approvalRef,
+    outcome: 'unverified',
+    automaticReplay: false,
+  }));
+  Object.assign(input.observation, {
+    knownExternalWork: retained,
+    deferredUnverifiedWork: retained,
+    unresolvedWorkCount: 10,
+    eligibleReplay: 0,
+    pendingReplay: 10,
+  });
+  assert.equal(firstRuntime.validateLegacyWorkBoundary(input).mode, 'controlled-interruption');
+  const missing = structuredClone(input);
+  delete missing.observation.deferredUnverifiedWork;
+  assert.throws(() => firstRuntime.validateLegacyWorkBoundary(missing));
+  const ordinary = structuredClone(input);
+  ordinary.approval.schemaVersion = 1;
+  assert.throws(() => firstRuntime.validateLegacyWorkBoundary(ordinary));
+  const changed = structuredClone(input);
+  changed.approval.exactLegacyNavigationDeferral.sourceResultSha256 = '0'.repeat(64);
+  assert.throws(() => firstRuntime.validateLegacyWorkBoundary(changed));
+});

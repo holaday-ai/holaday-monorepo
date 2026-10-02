@@ -79,7 +79,7 @@ import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 import { finishStoppedRelease } from './browser-maintenance-release-tail.mjs';
 const capabilityDigest = '8eae2e6ebcaab8d92eb5694bb6f8f89923a23005888342309278fcc35ac35a72';
 
-async function fixture(t, extraInventory = {}, interrupted = false) {
+async function fixture(t, extraInventory = {}, interrupted = false, exactNavigationPolicy) {
   const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'cutover-site-')));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const inventory = {
@@ -106,6 +106,7 @@ async function fixture(t, extraInventory = {}, interrupted = false) {
   const approval = {
     ...binding,
     legacyDigest: 'e'.repeat(64),
+    ...(exactNavigationPolicy ? { exactLegacyNavigationDeferral: exactNavigationPolicy } : {}),
     maintenanceEndsAtMs: 9000,
     reconcileByMs: 12000,
     operatorRef: 'synthetic-qa',
@@ -2279,4 +2280,72 @@ test('real site reconciliation normalizes inner known external work refusal and 
   });
   assert.equal(refusals, 1, 'no replay after refusal');
   await f.site.lifecycle.detach(f.context);
+});
+
+test('site carries exact deferred unknown navigation and keeps pendingReplay required', async (t) => {
+  const policy = {
+    approvalRef: 'exact-legacy-navigation-deferral-20261002',
+    sourceResultSha256: '653d441102e3ef314816d94165dea9daf633d01d0923c36e7d31bc7d589ed727',
+    setFingerprint: '192900b8bbd82d0456952f07f66cffe145f7131e738ab1c74f97ee327205f446',
+    noAutomaticReplay: true,
+  };
+  const f = await fixture(t, {}, true, policy);
+  const { cutoverLegacyInterruptionRisk } = await import('./browser-cutover-evidence.mjs');
+  const hashes = [
+    '029963afa7b27f4fc0ec9e7289aebc636c8b890c7672c733931d6cddd19dae18',
+    '13df21db0a1a7fb34d60940fdca443533798a782331109f6e92524f183d06779',
+    '16a0d3cd0c433214a3b768a4ffc562571681322fe1e6fafa44d6ab6088097a15',
+    '3b82a649a25a426a20bcd94834b12de2803a556b4c39e662e0eaedb7e4e8747e',
+    '43dfb2616214e972bd20abdd6567e05771addc8e6bf1a1d83d94544a0f4ce6ea',
+    '93f0b00043eec228c8c066d7c86a4d4f623caf874b6109be24b409fa899c6e04',
+    'abb03cb495fbe99ff332a2efdc0b5fd6fa75ee2d4c767dae4d7c0cc9e4a3792c',
+    'c14af57146be89e84c250d9e250f9ff9d50fe5b9cdf57f05ba18ac074bc8d8bf',
+    'd00f2b41837dced30a1d45ae9c8c43743521ec61e7a23b898ecab9ee78067ca7',
+    'e5d3f7f2bc421528e90d34b1d4d823cd8e2895c105c5498f372c89a0e3051fd7',
+  ];
+  const retained = hashes.map((recordFingerprint) => ({
+    table: 'task_steps',
+    status: 'executing',
+    recordFingerprint,
+    approvalRef: policy.approvalRef,
+    outcome: 'unverified',
+    automaticReplay: false,
+  }));
+  Object.assign(f.state.legacyWork, {
+    knownExternalWork: retained,
+    deferredUnverifiedWork: retained,
+    unresolvedWorkCount: 10,
+    eligibleReplay: 0,
+    pendingReplay: 10,
+  });
+  let omit = false;
+  f.io.readPersistedWork = async () => ({
+    observedAtMs: f.state.now,
+    unsettled: [],
+    deferredUnverifiedWork: structuredClone(retained),
+    unresolvedWorkCount: 10,
+    eligibleReplay: 0,
+    ...(omit ? {} : { pendingReplay: 10 }),
+    replaySourcesDigest: '9'.repeat(64),
+  });
+  const site = f.make();
+  await site.lifecycle.attach(f.context);
+  const input = {
+    binding: f.binding,
+    stage: 'prepare',
+    kind: 'first-cutover',
+    riskDigest: cutoverLegacyInterruptionRisk(f.approval),
+    window: {
+      maintenanceEndsAtMs: f.approval.maintenanceEndsAtMs,
+      reconcileByMs: f.approval.reconcileByMs,
+      operatorRef: f.approval.operatorRef,
+    },
+  };
+  const proof = await site.evidence.readHostInventory(input);
+  assert.equal(proof.externalWork.length, 10);
+  assert.equal(proof.legacyWork.before.pendingReplay, 10);
+  assert.equal(proof.legacyWork.after.unresolvedWorkCount, 10);
+  omit = true;
+  await assert.rejects(() => site.evidence.readHostInventory(input), /UNPROVEN/);
+  await site.lifecycle.detach(f.context);
 });

@@ -5,6 +5,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { isDeepStrictEqual as equal } from 'node:util';
 import {
   cutoverLegacyInterruptionRisk,
+  cutoverWorkScopeReady,
   readCutoverRehearsalArtifacts,
   validateCutoverLegacyCapability,
   validateFirstCutoverCloudSources,
@@ -175,9 +176,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       });
       if (
         !fresh(persisted?.observedAtMs) ||
-        !Array.isArray(persisted.unsettled) ||
-        persisted.unsettled.length ||
-        persisted.pendingReplay !== 0 ||
+        !cutoverWorkScopeReady(persisted, context.approval, { requireReplay: true }) ||
         !/^[a-f0-9]{64}$/.test(persisted.replaySourcesDigest ?? '')
       )
         fail();
@@ -527,10 +526,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     if (
       !fresh(work.observedAtMs) ||
       ![persisted, persistedAfter].every(
-        (value) =>
-          fresh(value?.observedAtMs) &&
-          Array.isArray(value.unsettled) &&
-          value.unsettled.length === 0,
+        (value) => fresh(value?.observedAtMs) && cutoverWorkScopeReady(value, context.approval),
       ) ||
       !fresh(after?.observedAtMs) ||
       !fresh(fence.observedAtMs) ||
@@ -977,8 +973,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
             !fresh(work.observedAtMs) ||
             work.inventoryDigest !== context.binding.inventoryDigest ||
             !fresh(persisted?.observedAtMs) ||
-            !Array.isArray(persisted.unsettled) ||
-            persisted.unsettled.length ||
+            !cutoverWorkScopeReady(persisted, context.approval) ||
             !fresh(fence?.observedAtMs) ||
             fence.inventoryDigest !== context.binding.inventoryDigest ||
             fence.stage !== 'all-writers' ||
@@ -1251,8 +1246,7 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
             if (
               !fresh(selected?.observedAtMs) ||
               !Array.isArray(selected.orders) ||
-              !Array.isArray(selected.unsettled) ||
-              selected.unsettled.length
+              !cutoverWorkScopeReady(selected, context.approval)
             )
               fail();
             const result = await gateway.queryOrders({

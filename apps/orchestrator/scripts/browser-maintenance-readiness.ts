@@ -30,12 +30,13 @@ export async function runMaintenanceReadinessCommand(
   const verify = command === 'verify' || command === 'verify-first-cutover';
   const bootId = verify ? args[6] : undefined;
   const riskDigest = first ? args[verify ? 7 : 6] : undefined;
+  const deferredWorkSetFingerprint = first ? args[verify ? 8 : 7] : undefined;
   if (
     !(
       (command === 'services' && args.length === 6) ||
       (command === 'verify' && args.length === 7) ||
-      (command === 'services-first-cutover' && args.length === 7) ||
-      (command === 'verify-first-cutover' && args.length === 8)
+      (command === 'services-first-cutover' && [7, 8].includes(args.length)) ||
+      (command === 'verify-first-cutover' && [8, 9].includes(args.length))
     )
   )
     throw new Error('MAINTENANCE_READINESS_INPUT');
@@ -50,7 +51,13 @@ export async function runMaintenanceReadinessCommand(
       stage: verify ? 'preopen' : 'prepare',
       nowMs: Date.now(),
       ...(verify ? { identity: { candidate, bootId } } : {}),
-      ...(first ? { kind: 'first-cutover', riskDigest } : {}),
+      ...(first
+        ? {
+            kind: 'first-cutover',
+            riskDigest,
+            ...(deferredWorkSetFingerprint !== undefined ? { deferredWorkSetFingerprint } : {}),
+          }
+        : {}),
     });
   } catch {
     throw new Error('MAINTENANCE_READINESS_INPUT');

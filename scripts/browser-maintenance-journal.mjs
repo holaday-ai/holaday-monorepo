@@ -78,6 +78,13 @@ export async function acquireReleaseJournal(directory, metadata, io = fs) {
         reconcileByMs: metadata.reconcileByMs,
         operatorRef: metadata.operatorRef,
         legacyInterruption: structuredClone(metadata.legacyInterruption),
+        ...(metadata.exactLegacyNavigationDeferral
+          ? {
+              exactLegacyNavigationDeferral: structuredClone(
+                metadata.exactLegacyNavigationDeferral,
+              ),
+            }
+          : {}),
         riskDigest: cutoverLegacyInterruptionRisk(metadata),
       };
       if (
