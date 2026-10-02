@@ -80,3 +80,10 @@ test('invalid CLI mode still rejects before coordinator or lifecycle work', asyn
   assert.equal(child.stdout, '');
   assert.equal(child.stderr, 'CUTOVER_COORDINATOR_USAGE\n');
 });
+
+test('diagnose preparation CLI resolves the actual site before any diagnostic lifecycle work', async (t) => {
+  const child = (await cliFixture(t))('--diagnose-prepare');
+  assert.equal(child.error, undefined);
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(child.stdout, 'CLI_IMPORT_READY\n');
+});

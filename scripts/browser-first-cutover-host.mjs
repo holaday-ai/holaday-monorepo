@@ -4,7 +4,10 @@ import * as fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { ingressDiagnosticError } from './browser-first-cutover-ingress-diagnostics.mjs';
+import {
+  ingressDiagnosticError,
+  ingressDiagnosticStage,
+} from './browser-first-cutover-ingress-diagnostics.mjs';
 import { probeFirstCutoverRecoveredBrowser } from './browser-first-cutover-browser-probe.mjs';
 import {
   collectCutoverEvidence,
@@ -173,7 +176,7 @@ export async function createFirstCutoverCoordinatorIdentity(input, overrides = {
         !input ||
         Object.keys(input).length !== 2 ||
         !uuid(input.attempt) ||
-        !['check', 'execute'].includes(input.mode) ||
+        !['check', 'execute', 'diagnose-prepare'].includes(input.mode) ||
         !Number.isSafeInteger(io.pid) ||
         io.pid <= 1
       )
@@ -417,12 +420,181 @@ export async function createFirstCutoverCoordinatorIdentity(input, overrides = {
   };
 }
 
+/** Diagnostic identities only: no command, environment or source text. */
+export function summarizeLegacySourceUnknowns(rows) {
+  if (!Array.isArray(rows)) return [];
+  const kinds = [
+    'invalid-process-review',
+    'listener',
+    'listener-owner',
+    'manager-root',
+    'missing-registration',
+    'missing-source',
+    'preserved-writer',
+    'process',
+    'registration',
+    'retirement',
+    'source',
+    'unapproved-port',
+  ];
+  return rows.slice(0, 256).flatMap((row) => {
+    const own = (key) => Object.getOwnPropertyDescriptor(row ?? {}, key)?.value;
+    const host = own('host'),
+      kind = own('kind'),
+      id = own('id'),
+      keySha256 = own('keySha256');
+    if (!['aliyun', 'vultr'].includes(host) || !kinds.includes(kind)) return [];
+    if (Number.isSafeInteger(id) && id >= 0) return [{ host, kind, id }];
+    if (typeof keySha256 === 'string' && /^[a-f0-9]{64}$/.test(keySha256))
+      return [{ host, kind, keySha256 }];
+    return typeof id === 'string'
+      ? [{ host, kind, keySha256: createHash('sha256').update(id).digest('hex') }]
+      : [];
+  });
+}
+
+/** Runs the original read-only prefix, with a non-overridable journal barrier.
+ * A successful diagnosis means only that preparation reached this barrier. */
+export async function diagnoseFirstCutoverPreparation(options, site, overrides = {}) {
+  const report = {
+    kind: 'first-cutover-preparation-diagnostic',
+    attempt: options.attempt,
+    observationOnly: true,
+    releaseAcceptance: false,
+    journalAcquisitions: 0,
+    stageCalls: 0,
+    serviceEffects: 0,
+    barrierReached: false,
+    steps: [],
+  };
+  const original = {
+    ...candidatePreparationSystem(),
+    readApproval: readFirstCutoverApproval,
+    ...site,
+    ...overrides,
+  };
+  const code = (error) => {
+    const value = Object.getOwnPropertyDescriptor(error ?? {}, 'message')?.value;
+    return typeof value === 'string' && /^(?:CUTOVER|MAINTENANCE)_[A-Z_]+$/.test(value)
+      ? value
+      : 'CUTOVER_PREPARATION_DIAGNOSTIC_UNPROVEN';
+  };
+  const trace = async (stage, fn) => {
+    const row = { stage };
+    report.steps.push(row);
+    try {
+      const value = await fn();
+      row.passed = true;
+      return value;
+    } catch (error) {
+      row.passed = false;
+      row.code = code(error);
+      const cause = Object.getOwnPropertyDescriptor(error ?? {}, 'cause')?.value;
+      const step = Object.getOwnPropertyDescriptor(cause ?? {}, 'legacySourceStage')?.value;
+      if (
+        [
+          'REVIEW',
+          'IDENTITY_BEFORE',
+          'PAIR',
+          'IDENTITY_AFTER',
+          'EXECUTION',
+          'SOURCE',
+          'PATCH',
+          'CLASSIFY',
+          'UNREVIEWED',
+          'DIGEST',
+        ].includes(step)
+      )
+        row.legacySourceStage = step;
+      const unknowns = Object.getOwnPropertyDescriptor(cause ?? {}, 'legacySourceUnknowns')?.value;
+      if (Array.isArray(unknowns)) row.unknownLaunchers = summarizeLegacySourceUnknowns(unknowns);
+      const ingress = ingressDiagnosticStage(error);
+      if (ingress) row.cause = ingress;
+      throw error;
+    }
+  };
+  const io = {
+    ...original,
+    readApproval: (...args) => trace('APPROVAL', () => original.readApproval(...args)),
+    inspectLegacySource: (...args) =>
+      trace('LEGACY_SOURCE', () => original.inspectLegacySource(...args)),
+    readConfig: (...args) => trace('CONFIG', () => original.readConfig(...args)),
+    parseConfig: (...args) => {
+      const row = { stage: 'CONFIG_PARSE' };
+      report.steps.push(row);
+      try {
+        const value = original.parseConfig(...args);
+        row.passed = true;
+        return value;
+      } catch (error) {
+        row.passed = false;
+        row.code = code(error);
+        throw error;
+      }
+    },
+    exec: (command, args, settings) =>
+      trace('USER', async () => {
+        if (
+          command !== 'id' ||
+          !['-u', '-g'].includes(args?.[0]) ||
+          args?.[1] !== 'holaday' ||
+          args.length !== 2
+        )
+          throw new Error('CUTOVER_PREPARATION_DIAGNOSTIC_UNPROVEN');
+        return original.exec(command, args, settings);
+      }),
+    targetAbsent: (...args) => trace('TARGET_ABSENT', () => original.targetAbsent(...args)),
+    onPreparationFailure: (stage, error) => {
+      report.failedPreparationStage = stage;
+      report.failedPreparationCode = code(error);
+    },
+    journal: async () => {
+      report.barrierReached = true;
+      throw new Error('CUTOVER_PREPARATION_READONLY_BARRIER');
+    },
+  };
+  try {
+    const approval = await io.readApproval(options);
+    report.candidate = approval.candidate;
+    const adapter = createFirstCutoverHostAdapter(options, io);
+    await trace('PREFLIGHT', () => adapter.preflight(approval.candidate));
+    await prepareFirstCutoverCandidate(options, io);
+    throw new Error('CUTOVER_PREPARATION_DIAGNOSTIC_UNPROVEN');
+  } catch (error) {
+    report.code = code(error);
+    report.preparationPrefixPassed =
+      report.barrierReached && report.code === 'CUTOVER_PREPARATION_READONLY_BARRIER';
+  }
+  return report;
+}
+
+/** Public failure details are fixed protocol codes/actions only. */
+export function firstCutoverExecutionFailureFields(result) {
+  const fields = {};
+  for (const key of ['code', 'action']) {
+    const value = Object.getOwnPropertyDescriptor(result ?? {}, key)?.value;
+    if (
+      key === 'code' &&
+      typeof value === 'string' &&
+      /^(?:CUTOVER|MAINTENANCE)_[A-Z_]+$/.test(value)
+    )
+      fields.code = value;
+    if (key === 'action' && ['abort_without_mutation', 'hold_maintenance'].includes(value))
+      fields.action = value;
+  }
+  return fields;
+}
+
 // Check inspects source identity only. Execute uses the same protected binding,
 // original site, journal lock, independent observations and absolute deadlines.
 async function runFirstCutoverCoordinatorCli() {
   try {
     const [mode, attempt, ...extra] = process.argv.slice(2);
-    if (extra.length || !uuid(attempt) || !['--check', '--execute'].includes(mode))
+    if (
+      extra.length ||
+      !uuid(attempt) ||
+      !['--check', '--execute', '--diagnose-prepare'].includes(mode)
+    )
       throw new Error('CUTOVER_COORDINATOR_USAGE');
     let executionJournal;
     const handle = await createFirstCutoverCoordinatorIdentity(
@@ -457,6 +629,12 @@ async function runFirstCutoverCoordinatorCli() {
             },
           },
         );
+        if (mode === '--diagnose-prepare') {
+          const diagnostic = await diagnoseFirstCutoverPreparation({ attempt }, site);
+          process.stdout.write(`${JSON.stringify(diagnostic)}\n`);
+          if (!diagnostic.preparationPrefixPassed) process.exitCode = 1;
+          return;
+        }
         const adapter = createFirstCutoverHostAdapter({ attempt }, site);
         const result = await performFirstCutover({
           candidate: value.binding.candidate,
@@ -465,7 +643,7 @@ async function runFirstCutoverCoordinatorCli() {
         });
         await adapter.finish(result);
         process.stdout.write(
-          `${JSON.stringify({ kind: 'first-cutover-execution-result', candidate: value.binding.candidate, attempt, ok: result.ok === true, phase: result.phase })}\n`,
+          `${JSON.stringify({ kind: 'first-cutover-execution-result', candidate: value.binding.candidate, attempt, ok: result.ok === true, phase: result.phase, ...firstCutoverExecutionFailureFields(result) })}\n`,
         );
         if (!result.ok) process.exitCode = 1;
       }
@@ -698,6 +876,8 @@ export async function readReviewedFirstCutoverLegacySource(input, overrides = {}
     now: Date.now,
     ...overrides,
   };
+  let legacySourceStage = 'REVIEW';
+  let legacySourceUnknowns;
   try {
     const { reviews, inventoryDigest, binding } = structuredClone(input);
     if (
@@ -709,11 +889,22 @@ export async function readReviewedFirstCutoverLegacySource(input, overrides = {}
     )
       throw new Error('review');
     const began = io.now();
+    legacySourceStage = 'IDENTITY_BEFORE';
     const execution = structuredClone(await io.readExecutionIdentities());
+    legacySourceStage = 'PAIR';
     const pair = await io.readPair();
+    legacySourceStage = 'EXECUTION';
     if (
       !Array.isArray(execution) ||
-      !isDeepStrictEqual(execution, await io.readExecutionIdentities()) ||
+      !isDeepStrictEqual(
+        execution,
+        await (async () => {
+          legacySourceStage = 'IDENTITY_AFTER';
+          const value = await io.readExecutionIdentities();
+          legacySourceStage = 'EXECUTION';
+          return value;
+        })(),
+      ) ||
       execution.some((receipt) => !binding || !isDeepStrictEqual(receipt.binding, binding)) ||
       (execution.length &&
         (Object.keys(binding).length !== 5 ||
@@ -724,6 +915,7 @@ export async function readReviewedFirstCutoverLegacySource(input, overrides = {}
           binding.inventoryDigest !== inventoryDigest))
     )
       throw new Error('execution');
+    legacySourceStage = 'SOURCE';
     const now = io.now();
     if (
       !Number.isSafeInteger(began) ||
@@ -735,6 +927,7 @@ export async function readReviewedFirstCutoverLegacySource(input, overrides = {}
       pair.hosts?.find((h) => h.host === 'aliyun')?.sourceCandidate !== null
     )
       throw new Error('source');
+    legacySourceStage = 'PATCH';
     validateReviewedLegacyLoggerPatch(pair.reviewedPatch, pair.sourceCandidate);
     if (
       !isDeepStrictEqual(
@@ -744,11 +937,17 @@ export async function readReviewedFirstCutoverLegacySource(input, overrides = {}
       pair.hosts.find((h) => h.host === 'aliyun')?.reviewedPatch !== undefined
     )
       throw new Error('patch');
+    legacySourceStage = 'CLASSIFY';
     const actual = classifyFirstCutoverHostPair(
       { pair, reviews, inventoryDigest, execution },
       { now: () => now },
     );
-    if (actual.unknownLaunchers.length) throw new Error('unreviewed');
+    legacySourceStage = 'UNREVIEWED';
+    if (actual.unknownLaunchers.length) {
+      legacySourceUnknowns = summarizeLegacySourceUnknowns(actual.unknownLaunchers);
+      throw new Error('unreviewed');
+    }
+    legacySourceStage = 'DIGEST';
     const byNumber = (key) => (a, b) => a[key] - b[key];
     const canonical = (value) =>
       Array.isArray(value)
@@ -796,7 +995,12 @@ export async function readReviewedFirstCutoverLegacySource(input, overrides = {}
       observedAtMs: actual.observedAtMs,
     };
   } catch {
-    throw new Error('CUTOVER_LEGACY_SOURCE_UNPROVEN');
+    throw new Error('CUTOVER_LEGACY_SOURCE_UNPROVEN', {
+      cause: Object.freeze({
+        legacySourceStage,
+        ...(legacySourceUnknowns ? { legacySourceUnknowns } : {}),
+      }),
+    });
   }
 }
 
@@ -3622,6 +3826,7 @@ export async function prepareFirstCutoverCandidate(options, overrides = {}) {
   const root = `/opt/holaday-releases/${approval.candidate}`;
   const sourceRoot = '/opt/holaday-monorepo';
   let journal;
+  let preparationStage = 'APPROVAL';
   let lastTime = -1;
   const guard = async () => {
     const now = io.now();
@@ -3643,7 +3848,9 @@ export async function prepareFirstCutoverCandidate(options, overrides = {}) {
     lastTime = after;
   };
   const source = async () => {
+    preparationStage = 'LEGACY_SOURCE';
     const observed = await io.inspectLegacySource(structuredClone(approval));
+    preparationStage = 'SOURCE_RESULT';
     const now = io.now();
     if (
       !/^[a-f0-9]{40}$/.test(observed?.sourceCandidate ?? '') ||
@@ -3657,20 +3864,29 @@ export async function prepareFirstCutoverCandidate(options, overrides = {}) {
     return observed.sourceCandidate;
   };
   try {
+    preparationStage = 'INITIAL_GUARD';
     await guard();
     const sourceCandidate = await source();
+    preparationStage = 'CONFIG_READ';
     const config = Buffer.from(await io.readConfig());
+    preparationStage = 'CONFIG_DIGEST';
     if (createHash('sha256').update(config).digest('hex') !== approval.configDigest)
       throw new Error('MAINTENANCE_CONFIG_UNPROVEN');
+    preparationStage = 'CONFIG_POLICY';
     const parsed = parseMaintenanceCandidateConfig(config, sourceRoot, io);
+    preparationStage = 'USER_UID';
     if ((await io.exec('id', ['-u', 'holaday'])).trim() !== '998')
       throw new Error('MAINTENANCE_RUNTIME_UNPROVEN');
+    preparationStage = 'USER_GID';
     const gidText = (await io.exec('id', ['-g', 'holaday'])).trim();
     const gid = Number(gidText);
     if (!/^[1-9][0-9]*$/.test(gidText) || !Number.isSafeInteger(gid))
       throw new Error('MAINTENANCE_RUNTIME_UNPROVEN');
+    preparationStage = 'TARGET_ABSENT';
     await io.targetAbsent(root);
+    preparationStage = 'FINAL_GUARD';
     await guard();
+    preparationStage = 'JOURNAL_BOUNDARY';
     journal = await io.journal(directory, {
       ...binding,
       kind: 'first-cutover',
@@ -3727,7 +3943,14 @@ export async function prepareFirstCutoverCandidate(options, overrides = {}) {
       journal,
     };
   } catch (error) {
-    await journal?.close();
+    try {
+      if (typeof io.onPreparationFailure === 'function')
+        io.onPreparationFailure(preparationStage, error);
+    } catch {
+      // Diagnostic callbacks cannot replace the preparation failure.
+    } finally {
+      await journal?.close();
+    }
     throw error;
   }
 }

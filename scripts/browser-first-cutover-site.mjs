@@ -70,7 +70,12 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       coordinator ??= await createFirstCutoverCoordinatorIdentity(
         {
           attempt: options.attempt,
-          mode: process.argv[2] === '--execute' ? 'execute' : 'check',
+          mode:
+            process.argv[2] === '--diagnose-prepare'
+              ? 'diagnose-prepare'
+              : process.argv[2] === '--execute'
+                ? 'execute'
+                : 'check',
         },
         {
           readReconciliationJournal: async () => {

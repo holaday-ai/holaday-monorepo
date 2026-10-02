@@ -264,3 +264,25 @@ for (const fault of [
     await assert.rejects(reader.readExecutionIdentity(), /UNPROVEN/);
   });
 }
+
+for (const mode of ['check', 'execute', 'diagnose-prepare']) {
+  test(`coordinator ${mode} binds the exact kernel mode and rejects every other mode`, async (t) => {
+    const f = await fixture(t);
+    const command = (m) =>
+      Buffer.from(`/opt/node22/bin/node\0${f.entry}\0--${m}\0${binding.attempt}\0`);
+    await fs.writeFile(f.local('/proc/910/cmdline'), command(mode));
+    const reader = await host.createFirstCutoverCoordinatorIdentity(
+      { attempt: binding.attempt, mode },
+      f.io,
+    );
+    assert.equal((await reader.readExecutionIdentity()).role, 'coordinator');
+    for (const wrong of ['check', 'execute', 'diagnose-prepare'].filter((m) => m !== mode)) {
+      await fs.writeFile(f.local('/proc/910/cmdline'), command(wrong));
+      await assert.rejects(
+        host.createFirstCutoverCoordinatorIdentity({ attempt: binding.attempt, mode }, f.io),
+        /CUTOVER_COORDINATOR_UNPROVEN/,
+      );
+    }
+    reader.close();
+  });
+}

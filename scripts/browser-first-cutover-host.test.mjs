@@ -2793,3 +2793,227 @@ test('source diagnostics compose both schema approval files with the actual prot
     );
   }
 });
+
+test('read-only preparation diagnostic reaches only the hard journal barrier', async (t) => {
+  const f = await lifecycleFixture(t);
+  let acquired = 0,
+    staged = 0,
+    serviceEffects = 0;
+  f.io.journal = async () => {
+    acquired++;
+    throw Error('unexpected acquisition');
+  };
+  f.io.stageConfig = async () => {
+    staged++;
+  };
+  for (const name of Object.keys(f.io.lifecycle)) {
+    const original = f.io.lifecycle[name];
+    f.io.lifecycle[name] = (...args) => {
+      serviceEffects++;
+      return original(...args);
+    };
+  }
+  const report = await firstHost.diagnoseFirstCutoverPreparation(
+    { attempt: approved.attempt },
+    f.io,
+    f.io,
+  );
+  assert.equal(report.preparationPrefixPassed, true, JSON.stringify(report));
+  assert.equal(report.barrierReached, true);
+  assert.equal(report.code, 'CUTOVER_PREPARATION_READONLY_BARRIER');
+  assert.equal(report.journalAcquisitions, 0);
+  assert.equal(report.stageCalls, 0);
+  assert.equal(report.serviceEffects, 0);
+  assert.deepEqual(
+    { acquired, staged, serviceEffects },
+    { acquired: 0, staged: 0, serviceEffects: 0 },
+  );
+  assert.ok(f.events.includes('absent'));
+  assert.ok(!f.events.includes('lock'));
+  assert.ok(f.events.every((e) => !/clone|fetch|checkout|pm2|nginx|migrate|control/.test(e)));
+  await assert.rejects(fs.stat(join(f.directory, 'release.lock')), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(join(f.directory, `${approved.attempt}.json`)), { code: 'ENOENT' });
+});
+
+for (const fault of ['approval', 'deadline', 'source', 'config', 'parse', 'uid', 'gid', 'target']) {
+  test(`read-only preparation diagnostic retains ${fault} rejection without effects`, async (t) => {
+    const f = await lifecycleFixture(t);
+    if (fault === 'approval')
+      f.io.readApproval = async () => {
+        throw Error('CUTOVER_APPROVAL_UNPROVEN');
+      };
+    if (fault === 'deadline') f.setTime(2000);
+    if (fault === 'source')
+      f.io.inspectLegacySource = async () => {
+        throw Error('CUTOVER_LEGACY_SOURCE_UNPROVEN');
+      };
+    if (fault === 'config') f.io.readConfig = async () => Buffer.from('changed');
+    if (fault === 'parse') f.io.parseConfig = () => ({});
+    if (fault === 'uid' || fault === 'gid') {
+      const exec = f.io.exec;
+      f.io.exec = (c, args, o) =>
+        c === 'id' && args[0] === (fault === 'uid' ? '-u' : '-g')
+          ? Promise.resolve('0\n')
+          : exec(c, args, o);
+    }
+    if (fault === 'target')
+      f.io.targetAbsent = async () => {
+        throw Error('MAINTENANCE_TARGET_EXISTS');
+      };
+    let acquired = 0,
+      staged = 0,
+      serviceEffects = 0;
+    f.io.journal = async () => {
+      acquired++;
+      throw Error('unexpected acquisition');
+    };
+    f.io.stageConfig = async () => {
+      staged++;
+    };
+    for (const name of Object.keys(f.io.lifecycle)) {
+      const original = f.io.lifecycle[name];
+      f.io.lifecycle[name] = (...args) => {
+        serviceEffects++;
+        return original(...args);
+      };
+    }
+    const report = await firstHost.diagnoseFirstCutoverPreparation(
+      { attempt: approved.attempt },
+      f.io,
+      f.io,
+    );
+    assert.deepEqual(
+      { acquired, staged, serviceEffects },
+      { acquired: 0, staged: 0, serviceEffects: 0 },
+    );
+    assert.equal(report.preparationPrefixPassed, false, JSON.stringify(report));
+    assert.equal(report.barrierReached, false);
+    assert.equal(report.journalAcquisitions, 0);
+    assert.equal(report.stageCalls, 0);
+    assert.ok(!f.events.includes('lock'));
+    assert.ok(!f.events.some((e) => /clone|pm2|nginx|migrate/.test(e)));
+    assert.equal(JSON.stringify(report).includes('synthetic'), false);
+    await assert.rejects(fs.stat(join(f.directory, 'release.lock')), { code: 'ENOENT' });
+  });
+}
+
+test('execution final admits fixed failure code and action, never getters or raw payloads', () => {
+  assert.deepEqual(
+    firstHost.firstCutoverExecutionFailureFields({
+      code: 'CUTOVER_FAILED',
+      action: 'abort_without_mutation',
+      secret: 'hidden',
+    }),
+    { code: 'CUTOVER_FAILED', action: 'abort_without_mutation' },
+  );
+  assert.deepEqual(
+    firstHost.firstCutoverExecutionFailureFields({
+      code: 'hidden',
+      action: 'execute',
+      get raw() {
+        throw Error('getter');
+      },
+    }),
+    {},
+  );
+  assert.deepEqual(
+    firstHost.firstCutoverExecutionFailureFields({
+      get code() {
+        throw Error('getter');
+      },
+    }),
+    {},
+  );
+});
+
+test('legacy source diagnostics retain the exact failed reader step and original short circuit', async () => {
+  const input = { reviews: { aliyun: {}, vultr: {} }, inventoryDigest: 'd'.repeat(64) };
+  const pair = {
+    sourceCandidate: 'f'.repeat(40),
+    hosts: [
+      { host: 'aliyun', sourceCandidate: null },
+      { host: 'vultr', sourceCandidate: 'f'.repeat(40) },
+    ],
+  };
+  for (const fault of [
+    'REVIEW',
+    'IDENTITY_BEFORE',
+    'PAIR',
+    'IDENTITY_AFTER',
+    'EXECUTION',
+    'SOURCE',
+    'CLASSIFY',
+  ]) {
+    let identities = 0,
+      pairs = 0;
+    const request = fault === 'REVIEW' ? {} : input;
+    const io = {
+      now: () => 1000,
+      readExecutionIdentities: async () => {
+        identities++;
+        if (fault === 'IDENTITY_BEFORE' || (fault === 'IDENTITY_AFTER' && identities === 2))
+          throw Error('PRIVATE_SECRET');
+        return fault === 'EXECUTION' ? {} : [];
+      },
+      readPair: async () => {
+        pairs++;
+        if (fault === 'PAIR') throw Error('PRIVATE_SECRET');
+        return fault === 'SOURCE' ? {} : pair;
+      },
+    };
+    await assert.rejects(firstHost.readReviewedFirstCutoverLegacySource(request, io), (error) => {
+      assert.equal(error.message, 'CUTOVER_LEGACY_SOURCE_UNPROVEN');
+      assert.equal(error.cause.legacySourceStage, fault);
+      assert.equal(JSON.stringify(error.cause).includes('PRIVATE_SECRET'), false);
+      return true;
+    });
+    if (fault === 'REVIEW') assert.deepEqual([identities, pairs], [0, 0]);
+    if (fault === 'EXECUTION') assert.deepEqual([identities, pairs], [1, 1]);
+  }
+});
+
+test('legacy unknown diagnostics retain numeric identities and only source-key digests', () => {
+  const rows = firstHost.summarizeLegacySourceUnknowns([
+    { host: 'vultr', kind: 'process', id: 123, env: 'PRIVATE_SECRET' },
+    { host: 'aliyun', kind: 'source', id: 'PRIVATE_SOURCE_NAME' },
+    {
+      host: 'vultr',
+      kind: 'source',
+      get id() {
+        throw Error('getter');
+      },
+    },
+    { host: 'PRIVATE_SECRET', kind: 'process', id: 123 },
+  ]);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows[0], { host: 'vultr', kind: 'process', id: 123 });
+  assert.match(rows[1].keySha256, /^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(rows).includes('PRIVATE'), false);
+  assert.deepEqual(firstHost.summarizeLegacySourceUnknowns(rows), rows);
+});
+
+test('preparation diagnostic callback failure preserves the original error and closes its journal', async (t) => {
+  const f = await preparationFixture(t);
+  const acquire = f.io.journal;
+  let closes = 0;
+  f.io.journal = async (...args) => {
+    const journal = await acquire(...args);
+    const close = journal.close.bind(journal);
+    journal.close = async () => {
+      closes++;
+      return close();
+    };
+    return journal;
+  };
+  f.io.stageConfig = async () => {
+    throw new Error('ORIGINAL_PREPARATION_FAILURE');
+  };
+  f.io.onPreparationFailure = () => {
+    throw new Error('CALLBACK_FAILURE');
+  };
+  await assert.rejects(
+    firstHost.prepareFirstCutoverCandidate({ attempt: approved.attempt }, f.io),
+    /ORIGINAL_PREPARATION_FAILURE/,
+  );
+  assert.equal(closes, 1);
+});
