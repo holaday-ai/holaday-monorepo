@@ -79,6 +79,13 @@ export interface StartVisionLoopTaskOptions {
    */
   messagesAdapter?: import('../../llm/messages-adapter.js').MessagesAdapter;
   webSearch?: import('../browser-tools/unified-browser-loop.js').UnifiedBrowserLoopInput['webSearch'];
+  /** Batch 06 self-evolution hooks (each flag-gated, all no-ops when off). */
+  evolution?: {
+    db: import('../../db/client.js').DB;
+    taskDbId: number;
+    generateAdapter: import('../../llm/messages-adapter.js').MessagesAdapter | null;
+    logger: import('pino').Logger;
+  };
   /**
    * Optional per-tick observer hook — called after the commander
    * returns a decision but before the action is dispatched. Used

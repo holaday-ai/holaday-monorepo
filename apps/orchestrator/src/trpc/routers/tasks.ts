@@ -254,6 +254,10 @@ import {
   type ModelTaskUnavailableReason,
   createProductionModelRuntimeWiring,
 } from '../../llm/model-runtime-wiring.js';
+import {
+  extractTaskMemoryAfterSuccess,
+  resolveUserGenerateAdapter,
+} from '../../playbook/evolution/executor-hooks.js';
 import { TaskActionCaptureRepository } from '../../playbook/task-action-capture-repository.js';
 import { isQuotaBypassUser } from '../../quota/quota-mode.js';
 import {
@@ -6134,6 +6138,23 @@ export const tasksRouter = router({
               );
               return;
             }
+            // Batch 06 — cross-task memory: model-catalog generate lane, only site
+            // operations + user preferences. MEMORY_EXTRACTION_ENABLED (default off).
+            if (outcome.status === 'completed' && outcome.summary) {
+              void extractTaskMemoryAfterSuccess({
+                db: ctx.db,
+                logger: ctx.logger,
+                adapter: resolveUserGenerateAdapter({
+                  wiring: modelRuntimeWiring,
+                  actorExternalId: ctx.userId,
+                  modelDataRegion: userRow.modelDataRegion,
+                }),
+                userIdInternal: userRow.id,
+                intent: input.intent,
+                summary: outcome.summary,
+                taskExternalId: taskId,
+              }).catch(() => {});
+            }
             // F1 — handoff to generate. User replied with manual data
             // (numeric metrics, "数据如下:", etc.); supercar exited
             // without continuing the browser loop. Run generate against
@@ -7326,6 +7347,20 @@ export const tasksRouter = router({
       const runTaskFn = () =>
         startVisionLoopTask({
           ...unifiedBrowser,
+          ...(taskDbId
+            ? {
+                evolution: {
+                  db: ctx.db,
+                  taskDbId,
+                  generateAdapter: resolveUserGenerateAdapter({
+                    wiring: modelRuntimeWiring,
+                    actorExternalId: ctx.userId,
+                    modelDataRegion: userRow.modelDataRegion,
+                  }),
+                  logger: ctx.logger,
+                },
+              }
+            : {}),
           userId: ctx.userId,
           taskId,
           // Pass the URL-enriched intent to the vision loop. The
