@@ -1,10 +1,7 @@
 import { resolve } from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 import { z } from 'zod';
-import {
-  assertProductionModelRuntimePolicy,
-  parseCoreModelLaneCsv,
-} from '../llm/model-runtime-policy.js';
+import { parseCoreModelLaneCsv } from '../llm/model-runtime-policy.js';
 import {
   type ModelDataRegion,
   type QwenProtocol,
@@ -128,6 +125,9 @@ const baseEnvSchema = z.object({
     .default(''),
 
   ANTHROPIC_API_KEY: z.string().optional().default(''),
+  /** Catalog-gated GPT brain (admin "模型管理"). Key and base URL only. */
+  OPENAI_API_KEY: z.string().optional().default(''),
+  OPENAI_BASE_URL: z.string().optional().default(''),
 
   /**
    * Phase 24 RC follow-up — Firecrawl API key. When set, the
@@ -225,25 +225,27 @@ const baseEnvSchema = z.object({
   QWEN_VERIFY_STRICT_MODEL: z.string().min(1).default('qwen3.8-max'),
   QWEN_VISION_MODEL: z.string().min(1).default('qwen3.8-max'),
   MODEL_RUNTIME_POLICY: z.enum(['qwen_only', 'legacy_fixture']).default('qwen_only'),
-  QWEN_CORE_ROLLOUT_MODE: z.enum(['off', 'synthetic', 'internal', 'all']).default('off'),
+  /**
+   * Qwen lanes run by default. QWEN_CORE_ROLLOUT_MODE / QWEN_CORE_ENABLED_LANES /
+   * QWEN_*_ADAPTER_ENABLED are emergency kill switches only: 'off', 'false' or a
+   * narrower lane list can disable lanes; none is a prerequisite for Qwen to work.
+   */
+  QWEN_CORE_ROLLOUT_MODE: z.enum(['off', 'synthetic', 'internal', 'all']).default('all'),
   QWEN_CORE_ENABLED_LANES: z.string().default(''),
   QWEN_CORE_ALLOWLIST: z.string().default(''),
   QWEN_RESPONSES_ADAPTER_ENABLED: z
     .enum(['true', 'false'])
-    .default('false')
+    .default('true')
     .transform((value) => value === 'true'),
   /** Synthetic benchmark lane only. It is not wired to production task execution. */
   QWEN_SHADOW_EVAL_ENABLED: z
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
-  /**
-   * Provider-neutral Messages/Tools adapter construction gate. Each production
-   * callsite also requires its own disabled-by-default canary and allowlist.
-   */
+  /** Provider-neutral Messages/Tools adapter gate. On by default; 'false' is an emergency off. */
   QWEN_MESSAGES_ADAPTER_ENABLED: z
     .enum(['true', 'false'])
-    .default('false')
+    .default('true')
     .transform((value) => value === 'true'),
   /**
    * Post-task suggestions canary. Both Qwen flags and
@@ -610,19 +612,8 @@ const baseEnvSchema = z.object({
 
 export const envSchema = baseEnvSchema
   .superRefine((environment, ctx) => {
-    try {
-      assertProductionModelRuntimePolicy(environment.NODE_ENV, environment.MODEL_RUNTIME_POLICY);
-    } catch (error) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['MODEL_RUNTIME_POLICY'],
-        message:
-          error instanceof Error
-            ? error.message
-            : 'MODEL_RUNTIME_POLICY must be qwen_only in production',
-      });
-    }
-
+    // MODEL_RUNTIME_POLICY no longer blocks startup: the admin model catalog
+    // decides which brain runs (assertProductionModelRuntimePolicy is retained).
     try {
       parseCoreModelLaneCsv(environment.QWEN_CORE_ENABLED_LANES);
     } catch (error) {

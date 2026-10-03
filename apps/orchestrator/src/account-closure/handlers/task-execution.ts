@@ -103,6 +103,13 @@ const taskExecutionRelationalClosureHandler = createRelationalDeleteHandler({
       parentTableName: 'tasks',
       childParentColumn: 'task_id',
     }),
+    // Which brain each task ran with; keyed by the task's external id.
+    rowsOwnedThroughParent({
+      tableName: 'task_model_selections',
+      parentTableName: 'tasks',
+      childParentColumn: 'task_external_id',
+      parentJoinColumn: 'external_id',
+    }),
     // A crystallized path stores full sourceTaskIntent/externalId in JSON.
     // Delete its children while the source-task ownership edge still exists.
     rowsOwnedThroughGrandparent({

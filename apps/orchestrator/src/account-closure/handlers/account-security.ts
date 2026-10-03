@@ -18,6 +18,7 @@ export const accountSecurityClosureHandler = createRelationalDeleteHandler({
     }),
     directUserRows('user_mfa_recovery_codes'),
     directUserRows('webhook_idempotency'),
+    directUserRows('model_catalog_events', 'actor_user_id'),
     directUserRows('api_keys'),
     directUserRows('sessions'),
     directUserRows('user_profiles'),

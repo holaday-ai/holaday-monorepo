@@ -8,11 +8,24 @@ export const FORBIDDEN_MODEL_PATTERNS = Object.freeze({
   google_model_endpoint: /generativelanguage\.googleapis\.com/g,
 });
 
+/**
+ * 2026-10-03 product decision: the admin model catalog (模型管理) may route
+ * lanes to Claude / GPT. Only these catalog-gated adapters may construct
+ * non-Qwen clients from production code; everything else stays Qwen-only.
+ */
+export const CATALOG_PROVIDER_ADAPTERS = Object.freeze([
+  'src/llm/dormant/anthropic-messages-adapter.ts',
+  'src/llm/providers/openai-messages-adapter.ts',
+  'src/llm/providers/openai-responses-adapter.ts',
+]);
+
 export function scanProductionModelImports({
   files,
   roots = ['src/index.ts'],
   inventory = { entries: [] },
+  catalogProviderAdapters = CATALOG_PROVIDER_ADAPTERS,
 }) {
+  const catalogAdapters = new Set(catalogProviderAdapters.map(normalizePath));
   const fileMap = new Map(files.map((file) => [normalizePath(file.path), file.text]));
   const inventoryEntries = new Map(
     (inventory.entries ?? []).map((entry) => [normalizePath(entry.path), entry]),
@@ -21,6 +34,7 @@ export function scanProductionModelImports({
   const violations = [];
 
   for (const path of [...reachable].sort()) {
+    if (catalogAdapters.has(path)) continue;
     if (inventoryEntries.has(path)) {
       violations.push({ path, rule: 'production_reaches_legacy_inventory' });
     } else if (isDormantPath(path)) {
@@ -29,7 +43,7 @@ export function scanProductionModelImports({
   }
 
   for (const [path, text] of [...fileMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    if (isExcludedSource(path)) continue;
+    if (isExcludedSource(path) || catalogAdapters.has(path)) continue;
     const counts = countForbiddenPatterns(text);
     const activePatterns = Object.entries(counts).filter(([, count]) => count > 0);
     const inventoryEntry = inventoryEntries.get(path);

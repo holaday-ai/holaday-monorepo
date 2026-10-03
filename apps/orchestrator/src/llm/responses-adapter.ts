@@ -36,9 +36,21 @@ export interface NeutralResponseSource {
   provenance: 'web_search';
 }
 
+/** Non-Qwen brains carry no Alibaba region or endpoint identity. */
+export interface ExternalResponsesMetadata {
+  provider: 'anthropic' | 'openai';
+  model: string;
+  protocol: 'responses';
+  region?: undefined;
+  deploymentScope?: undefined;
+  endpointKind?: undefined;
+}
+
+export type ResponsesProviderMetadata = SafeQwenRouteMetadata | ExternalResponsesMetadata;
+
 export interface NeutralResponsesResult {
   id: string;
-  metadata: SafeQwenRouteMetadata;
+  metadata: ResponsesProviderMetadata;
   text: string;
   sources: NeutralResponseSource[];
   usage: {
@@ -50,7 +62,7 @@ export interface NeutralResponsesResult {
 }
 
 export interface ResponsesAdapter {
-  readonly metadata: SafeQwenRouteMetadata;
+  readonly metadata: ResponsesProviderMetadata;
   stream(
     request: NeutralResponsesRequest,
     options?: {
