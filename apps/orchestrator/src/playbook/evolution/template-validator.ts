@@ -139,7 +139,10 @@ function bindStep(
   }
   switch (tpl.op) {
     case 'navigate':
-      if (!cap.url || !bindString(decodeUrlForCompare(tpl.url), decodeUrlForCompare(cap.url), binding))
+      if (
+        !cap.url ||
+        !bindString(decodeUrlForCompare(tpl.url), decodeUrlForCompare(cap.url), binding)
+      )
         errors.push(`${where}: url does not reproduce the captured url`);
       break;
     case 'click':
@@ -183,7 +186,10 @@ export function validateTemplateAgainstTrajectories(
 ): ValidationResult {
   const parsed = pathTemplateSchema.safeParse(candidate);
   if (!parsed.success)
-    return { ok: false, errors: parsed.error.issues.map((i) => `schema: ${i.path.join('.')} ${i.message}`) };
+    return {
+      ok: false,
+      errors: parsed.error.issues.map((i) => `schema: ${i.path.join('.')} ${i.message}`),
+    };
   const template = parsed.data;
   const errors: string[] = [];
 
@@ -191,12 +197,14 @@ export function validateTemplateAgainstTrajectories(
   const declared = template.params.map((p) => p.name);
   if (new Set(declared).size !== declared.length) errors.push('duplicate param names');
   const used = templatePlaceholders(template);
-  for (const name of used) if (!declared.includes(name)) errors.push(`undeclared param {{${name}}}`);
+  for (const name of used)
+    if (!declared.includes(name)) errors.push(`undeclared param {{${name}}}`);
   for (const name of declared) if (!used.has(name)) errors.push(`unused param ${name}`);
 
   const bindings: ParamValues[] = [];
   trajectories.forEach((t, ti) => {
-    if (t.siteDomain !== template.siteDomain) errors.push(`trajectory ${ti}: site ${t.siteDomain} ≠ ${template.siteDomain}`);
+    if (t.siteDomain !== template.siteDomain)
+      errors.push(`trajectory ${ti}: site ${t.siteDomain} ≠ ${template.siteDomain}`);
     for (const step of t.steps) {
       const reason = stepIsSensitive(step);
       if (reason) errors.push(`trajectory ${ti}: sensitive step (${reason})`);
@@ -209,7 +217,8 @@ export function validateTemplateAgainstTrajectories(
     template.steps.forEach((step, si) => {
       bindStep(step, t.steps[si] as TrajectoryStep, binding, `trajectory ${ti} step ${si}`, errors);
     });
-    for (const name of declared) if (binding[name] === undefined) errors.push(`trajectory ${ti}: param ${name} unbound`);
+    for (const name of declared)
+      if (binding[name] === undefined) errors.push(`trajectory ${ti}: param ${name} unbound`);
     const evidence = t.outcome?.evidenceTexts ?? [];
     for (const text of template.success?.textContains ?? []) {
       if (evidence.length === 0) continue; // no captured evidence to check against
@@ -225,5 +234,7 @@ export function validateTemplateAgainstTrajectories(
     bindings.push(binding);
   });
 
-  return errors.length > 0 ? { ok: false, errors: [...new Set(errors)] } : { ok: true, template, bindings };
+  return errors.length > 0
+    ? { ok: false, errors: [...new Set(errors)] }
+    : { ok: true, template, bindings };
 }

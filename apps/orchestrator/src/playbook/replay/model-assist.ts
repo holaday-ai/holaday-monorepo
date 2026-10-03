@@ -91,7 +91,10 @@ export function acceptPathMatch(
   if (typeof o.pathId !== 'number') return null;
   const candidate = candidates.find((c) => c.pathId === o.pathId);
   if (!candidate) return null;
-  const given = (o.params && typeof o.params === 'object' ? o.params : {}) as Record<string, unknown>;
+  const given = (o.params && typeof o.params === 'object' ? o.params : {}) as Record<
+    string,
+    unknown
+  >;
   const params: Record<string, string> = {};
   for (const spec of candidate.params) {
     const v = given[spec.name];
@@ -131,7 +134,10 @@ export function createModelPathMatcher(
         },
         { timeoutMs: opts.timeoutMs ?? 15_000, maxRetries: 1 },
       );
-      return { match: acceptPathMatch(parseJsonObject(textOf(response)), candidates), modelCalls: 1 };
+      return {
+        match: acceptPathMatch(parseJsonObject(textOf(response)), candidates),
+        modelCalls: 1,
+      };
     },
   };
 }

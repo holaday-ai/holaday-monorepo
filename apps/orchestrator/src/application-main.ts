@@ -61,7 +61,10 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
   if (
     boot &&
     (process.env.RETENTION_REAPER_ENABLED === 'true' ||
-      process.env.USER_TASK_CRYSTALLIZE_ENABLED === 'true')
+      process.env.USER_TASK_CRYSTALLIZE_ENABLED === 'true' ||
+      process.env.PLAYBOOK_SEDIMENT_ENABLED === 'true' ||
+      process.env.PLAYBOOK_CANARY_ENABLED === 'true' ||
+      process.env.PLAYBOOK_EXPLORER_SCHEDULE_ENABLED === 'true')
   )
     throw new Error('CONTROLLED_BACKGROUND_UNPROVEN');
   const resources = boot ? createApplicationResources(boot) : undefined;
@@ -1122,6 +1125,62 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
         })();
       const userCrystallizeTimer = setInterval(runSweep, USER_CRYSTALLIZE_INTERVAL_MS);
       userCrystallizeTimer.unref?.();
+    }
+
+    // Batch 06 — playbook self-evolution loop (sediment / canary / scheduled
+    // explorer) on BullMQ. Every switch defaults OFF; with all off nothing is
+    // imported and no Redis connection is opened. See
+    // playbook/evolution/evolution-config.ts for the switches.
+    {
+      const { readEvolutionConfig, anyEvolutionBackgroundEnabled } = await import(
+        './playbook/evolution/evolution-config.js'
+      );
+      const evolutionConfig = readEvolutionConfig();
+      if (anyEvolutionBackgroundEnabled(evolutionConfig)) {
+        const [{ createEvolutionScheduler, createBullmqFactories }, { createEvolutionJobHandlers }] =
+          await Promise.all([
+            import('./playbook/evolution/evolution-scheduler.js'),
+            import('./playbook/evolution/evolution-runtime.js'),
+          ]);
+        const [{ createProductionModelRuntimeWiring }, { modelCatalogService }] = await Promise.all([
+          import('./llm/model-runtime-wiring.js'),
+          import('./llm/model-catalog-runtime.js'),
+        ]);
+        const evolutionLogger = logger.child({ component: 'playbook-evolution' });
+        const evolutionScheduler = createEvolutionScheduler({
+          config: evolutionConfig,
+          handlers: createEvolutionJobHandlers({
+            db,
+            config: evolutionConfig,
+            wiring: createProductionModelRuntimeWiring(env, {}, {
+              catalog: () => modelCatalogService.snapshot(),
+            }),
+            ...(firecrawlLane
+              ? {
+                  scrapeDoc: async (url: string) => {
+                    const r = await firecrawlLane.scrape(url);
+                    return r.ok ? { markdown: r.markdown, title: r.title ?? '' } : null;
+                  },
+                }
+              : {}),
+            logger: evolutionLogger,
+          }),
+          factories: () => createBullmqFactories(env.REDIS_URL),
+          logger: evolutionLogger,
+        });
+        registerProducer(
+          'playbook-evolution',
+          () => {
+            void evolutionScheduler.start().catch((err: unknown) =>
+              evolutionLogger.warn(
+                { err: err instanceof Error ? err.message : String(err) },
+                'playbook evolution: scheduler failed to start (non-fatal)',
+              ),
+            );
+          },
+          () => evolutionScheduler.stop(),
+        );
+      }
     }
 
     if (!boot && !ordinary) {

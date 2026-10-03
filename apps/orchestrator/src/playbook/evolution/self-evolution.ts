@@ -161,7 +161,7 @@ export async function runCanaryForPath(deps: {
   const passed = failure === undefined;
   await deps.store.recordCanaryResult(path.id, {
     passed,
-    failureType: passed ? null : (failure ?? 'unknown').split(':')[0] ?? 'unknown',
+    failureType: passed ? null : ((failure ?? 'unknown').split(':')[0] ?? 'unknown'),
     evidence: {
       stepsTotal: result?.stepsTotal ?? path.template.steps.length,
       stepsDeterministic: result?.stepsDeterministic ?? 0,
@@ -257,7 +257,11 @@ export async function tryReuseVerifiedPath(input: ReuseInput): Promise<ReuseResu
 
   const { match, modelCalls: matchCalls } = await input.matcher.match(
     input.intent,
-    verified.map((p) => ({ pathId: p.id, description: p.template.description, params: p.template.params })),
+    verified.map((p) => ({
+      pathId: p.id,
+      description: p.template.description,
+      params: p.template.params,
+    })),
   );
   const path = match ? verified.find((p) => p.id === match.pathId) : undefined;
   if (!match || !path) return { status: 'no_match', handled: false, modelCalls: matchCalls };
@@ -291,7 +295,10 @@ export async function tryReuseVerifiedPath(input: ReuseInput): Promise<ReuseResu
       status: 'stale',
       staleReason: `superseded_by_repair:${next.id}`,
     });
-    logger.info({ pathId: path.id, newVersionPathId }, 'playbook reuse: repaired path saved as new version');
+    logger.info(
+      { pathId: path.id, newVersionPathId },
+      'playbook reuse: repaired path saved as new version',
+    );
   }
 
   await input.store.recordReplay({

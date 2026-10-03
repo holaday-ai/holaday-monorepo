@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { REDACTED_INPUT_VALUE } from '../action-capture-redaction.js';
+import { normaliseRole, normaliseText } from './locator.js';
 import {
   type Locator,
   type TemplateOp,
@@ -7,7 +8,6 @@ import {
   locatorSchema,
   waitConditionSchema,
 } from './path-template.js';
-import { normaliseRole, normaliseText } from './locator.js';
 
 /**
  * Batch 06 — a successful task's captured browser trajectory in the shape the
@@ -98,7 +98,9 @@ function parseOutcome(raw: unknown): TrajectoryOutcome | null {
   const out: TrajectoryOutcome = {};
   if (typeof o.finalUrl === 'string') out.finalUrl = o.finalUrl;
   if (Array.isArray(o.evidenceTexts))
-    out.evidenceTexts = o.evidenceTexts.filter((t): t is string => typeof t === 'string').slice(0, 5);
+    out.evidenceTexts = o.evidenceTexts
+      .filter((t): t is string => typeof t === 'string')
+      .slice(0, 5);
   return out;
 }
 
@@ -131,7 +133,10 @@ export function buildTrajectory(
   }
   const siteDomain = ordered.find((r) => r.siteDomain?.trim())?.siteDomain?.trim();
   if (!siteDomain) return { ok: false, reason: 'no_site_domain' };
-  return { ok: true, trajectory: { taskId: task.id, siteDomain, intent: task.intent, steps, outcome } };
+  return {
+    ok: true,
+    trajectory: { taskId: task.id, siteDomain, intent: task.intent, steps, outcome },
+  };
 }
 
 const TYPED_TOKEN = '‹v›';
@@ -186,7 +191,10 @@ export interface TrajectoryGroup {
 }
 
 /** Group by (site, skeleton); only groups with ≥ minSupport distinct tasks qualify. */
-export function groupTrajectories(trajectories: readonly Trajectory[], minSupport = 2): TrajectoryGroup[] {
+export function groupTrajectories(
+  trajectories: readonly Trajectory[],
+  minSupport = 2,
+): TrajectoryGroup[] {
   const groups = new Map<string, TrajectoryGroup>();
   for (const t of trajectories) {
     const skeleton = trajectorySkeleton(t);

@@ -26,7 +26,12 @@ export interface EvolutionConfig {
 
 const HOUR = 60 * 60 * 1000;
 
-function positiveInt(raw: string | undefined, fallback: number, min = 1, max = Number.MAX_SAFE_INTEGER): number {
+function positiveInt(
+  raw: string | undefined,
+  fallback: number,
+  min = 1,
+  max = Number.MAX_SAFE_INTEGER,
+): number {
   const n = Number(raw);
   return Number.isInteger(n) && n >= min && n <= max ? n : fallback;
 }

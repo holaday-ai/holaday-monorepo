@@ -6,10 +6,10 @@ import type {
   NeutralMessagesRequest,
   NeutralMessagesResponse,
 } from '../../llm/messages-adapter.js';
-import type { CreateActionCaptureInput } from '../task-action-capture-repository.js';
 import type { PlaybookBrowserTools } from '../replay/browser-tools.js';
 import { createModelPathMatcher, createModelStepRepairer } from '../replay/model-assist.js';
 import { PlaywrightBrowserTools } from '../replay/playwright-browser-tools.js';
+import type { CreateActionCaptureInput } from '../task-action-capture-repository.js';
 import { type ShopFixture, startShopFixture } from './__fixtures__/shop-fixture.js';
 import { BrowserActionCaptureRecorder, type CaptureSink } from './capture-recorder.js';
 import { InMemoryEvolutionStore } from './evolution-store.js';
@@ -128,7 +128,12 @@ describe.skipIf(!hasChromium)('playbook self-evolution loop (local fixture, head
       const box = resolveLocator(snap, { role: 'textbox', name: '搜索商品' });
       if (box.kind !== 'found') throw new Error('fixture: search box missing');
       await tools.type(box.element.ref, query);
-      await recorder.recordToolCall({ op: 'type', ref: box.element.ref, snapshot: snap, text: query });
+      await recorder.recordToolCall({
+        op: 'type',
+        ref: box.element.ref,
+        snapshot: snap,
+        text: query,
+      });
 
       snap = await tools.snapshot();
       const btn = resolveLocator(snap, { role: 'button', name: '搜索' });
@@ -195,7 +200,10 @@ describe.skipIf(!hasChromium)('playbook self-evolution loop (local fixture, head
     expect(sink.rows).toHaveLength(8);
     expect(sink.rows.every((r) => r.executorSource === 'cloud')).toBe(true);
     const typeRow = sink.rows.find((r) => r.stepType === 'type');
-    expect(typeRow?.replayJson).toMatchObject({ op: 'type', locator: { role: 'textbox', name: '搜索商品' } });
+    expect(typeRow?.replayJson).toMatchObject({
+      op: 'type',
+      locator: { role: 'textbox', name: '搜索商品' },
+    });
     expect(typeRow?.inputValue).toBe('降噪耳机'); // type=search, not sensitive
 
     const intents: Record<number, string> = { 101: '帮我找降噪耳机', 102: '帮我找机械键盘' };
@@ -250,7 +258,10 @@ describe.skipIf(!hasChromium)('playbook self-evolution loop (local fixture, head
     // ---- 4a. 复用: deterministic replay; only the matcher call hits the model --
     const matcherModel = new FakeAdapter((req) => {
       const query = userText(req).includes('无线鼠标') ? '无线鼠标' : '蓝牙音箱';
-      return JSON.stringify({ pathId: store.paths.find((p) => p.status === 'verified')?.id, params: { query } });
+      return JSON.stringify({
+        pathId: store.paths.find((p) => p.status === 'verified')?.id,
+        params: { query },
+      });
     });
     const repairModel = new FakeAdapter(() => '{"ref":null}');
     {
@@ -278,7 +289,11 @@ describe.skipIf(!hasChromium)('playbook self-evolution loop (local fixture, head
         await session.close();
       }
     }
-    expect(store.replays[0]).toMatchObject({ outcome: 'success', modelCalls: 1, modelCallsSaved: 4 });
+    expect(store.replays[0]).toMatchObject({
+      outcome: 'success',
+      modelCalls: 1,
+      modelCallsSaved: 4,
+    });
 
     // ---- 4b. 站点改版: one step breaks → snapshot to the model → local repair --
     shop.variant = 'v2';
@@ -316,14 +331,23 @@ describe.skipIf(!hasChromium)('playbook self-evolution loop (local fixture, head
     }
     // The repair is recorded as a NEW VERSION; the old version is retired.
     const old = store.paths.find((p) => p.id === verifiedBefore?.id);
-    const next = store.paths.find((p) => p.parentPathId === verifiedBefore?.id && p.generalizer === 'repair');
+    const next = store.paths.find(
+      (p) => p.parentPathId === verifiedBefore?.id && p.generalizer === 'repair',
+    );
     expect(old?.status).toBe('stale');
     expect(next?.status).toBe('verified');
     expect(next?.version).toBe((old?.version ?? 0) + 1);
-    expect(next?.template.steps[2]).toMatchObject({ op: 'click', target: { role: 'button', name: '查找' } });
+    expect(next?.template.steps[2]).toMatchObject({
+      op: 'click',
+      target: { role: 'button', name: '查找' },
+    });
     // Param placeholders survive the repair (the template stays generic).
     expect(next?.template.steps[3]).toMatchObject({ target: { name: '{{query}} 详情' } });
-    expect(store.replays[1]).toMatchObject({ outcome: 'repaired', repairedPathId: next?.id, modelCallsSaved: 3 });
+    expect(store.replays[1]).toMatchObject({
+      outcome: 'repaired',
+      repairedPathId: next?.id,
+      modelCallsSaved: 3,
+    });
 
     // ---- 4c. The new version replays deterministically (no repair needed) ----
     {
@@ -336,7 +360,9 @@ describe.skipIf(!hasChromium)('playbook self-evolution loop (local fixture, head
           siteDomain: '127.0.0.1',
           taskId: 203,
           matcher: createModelPathMatcher(
-            new FakeAdapter(() => JSON.stringify({ pathId: next?.id, params: { query: '蓝牙音箱' } })),
+            new FakeAdapter(() =>
+              JSON.stringify({ pathId: next?.id, params: { query: '蓝牙音箱' } }),
+            ),
           ),
           repairer: createModelStepRepairer(repairModel),
           locatorWaitMs: STEP_WAIT_MS,
@@ -373,9 +399,17 @@ describe.skipIf(!hasChromium)('playbook self-evolution loop (local fixture, head
       status: 'verified',
       canaryPassStreak: 5,
     });
-    const [report] = await runCanaryRound({ store, openBrowser, passThreshold: 3, locatorWaitMs: 300 });
+    const [report] = await runCanaryRound({
+      store,
+      openBrowser,
+      passThreshold: 3,
+      locatorWaitMs: 300,
+    });
     expect(report?.passed).toBe(false);
     expect(report?.failureReason).toMatch(/locator_not_found/);
-    expect(store.paths.find((p) => p.id === path.id)).toMatchObject({ status: 'stale', canaryPassStreak: 0 });
+    expect(store.paths.find((p) => p.id === path.id)).toMatchObject({
+      status: 'stale',
+      canaryPassStreak: 0,
+    });
   }, 60_000);
 });

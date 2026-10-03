@@ -125,7 +125,9 @@ export class InMemoryEvolutionStore implements EvolutionStore {
   }
 
   async listCanaryPaths(limit: number): Promise<StoredPath[]> {
-    return this.paths.filter((p) => p.status === 'draft' || p.status === 'verified').slice(0, limit);
+    return this.paths
+      .filter((p) => p.status === 'draft' || p.status === 'verified')
+      .slice(0, limit);
   }
 
   async recordCanaryResult(pathId: number, record: CanaryRecord): Promise<void> {

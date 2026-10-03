@@ -1,4 +1,3 @@
-import { classifyExplorerAction } from '../explorer/explorer-guards.js';
 import { locatorForElement, normaliseText, resolveLocator } from '../evolution/locator.js';
 import {
   type Locator,
@@ -9,6 +8,7 @@ import {
   fillPlaceholders,
   instantiateStep,
 } from '../evolution/path-template.js';
+import { classifyExplorerAction } from '../explorer/explorer-guards.js';
 import type { BrowserSnapshot, PlaybookBrowserTools, SnapshotElement } from './browser-tools.js';
 
 /**
@@ -117,7 +117,11 @@ async function performWait(
   }
 }
 
-async function actOnRef(tools: PlaybookBrowserTools, step: TemplateStep, ref: string): Promise<void> {
+async function actOnRef(
+  tools: PlaybookBrowserTools,
+  step: TemplateStep,
+  ref: string,
+): Promise<void> {
   try {
     if (step.op === 'click') await tools.click(ref);
     else if (step.op === 'type') await tools.type(ref, step.text, step.submit);
@@ -127,7 +131,11 @@ async function actOnRef(tools: PlaybookBrowserTools, step: TemplateStep, ref: st
   }
 }
 
-async function runStep(tools: PlaybookBrowserTools, step: TemplateStep, waitMs: number): Promise<void> {
+async function runStep(
+  tools: PlaybookBrowserTools,
+  step: TemplateStep,
+  waitMs: number,
+): Promise<void> {
   switch (step.op) {
     case 'navigate':
       try {
@@ -144,7 +152,10 @@ async function runStep(tools: PlaybookBrowserTools, step: TemplateStep, waitMs: 
       break;
     }
     case 'scroll':
-      await tools.scroll({ direction: step.direction, ...(step.amount ? { amount: step.amount } : {}) });
+      await tools.scroll({
+        direction: step.direction,
+        ...(step.amount ? { amount: step.amount } : {}),
+      });
       break;
     case 'back':
       await tools.back();
@@ -186,7 +197,12 @@ async function checkSuccess(
       await tools.wait_for({ text, timeoutMs: waitMs });
       matched.push(text);
     } catch {
-      return { ok: false, finalUrl: snapshot.url, matched, reason: `success text "${text}" not found` };
+      return {
+        ok: false,
+        finalUrl: snapshot.url,
+        matched,
+        reason: `success text "${text}" not found`,
+      };
     }
   }
   if (template.success?.urlContains) {
@@ -208,7 +224,11 @@ export async function executePathTemplate(input: ExecuteTemplateInput): Promise<
   let stepsRepaired = 0;
   const patchedSteps: TemplateStep[] = [...template.steps];
 
-  const fail = (stepIndex: number, reason: string, finalUrl: string | null = null): ReplayResult => ({
+  const fail = (
+    stepIndex: number,
+    reason: string,
+    finalUrl: string | null = null,
+  ): ReplayResult => ({
     outcome: 'failed',
     stepsTotal: template.steps.length,
     stepsDeterministic,
@@ -231,11 +251,12 @@ export async function executePathTemplate(input: ExecuteTemplateInput): Promise<
     try {
       await runStep(tools, step, waitMs);
       stepsDeterministic += 1;
-      continue;
     } catch (err) {
-      const failure = err instanceof StepFailure ? err : new StepFailure('action_failed', errText(err));
+      const failure =
+        err instanceof StepFailure ? err : new StepFailure('action_failed', errText(err));
       const repairable =
-        isTargetStep(step) && (failure.kind === 'locator_not_found' || failure.kind === 'action_failed');
+        isTargetStep(step) &&
+        (failure.kind === 'locator_not_found' || failure.kind === 'action_failed');
       if (!repairable || !input.repairer || modelCalls >= maxRepairs)
         return fail(i, `${failure.kind}: ${failure.message}`);
 
@@ -260,7 +281,8 @@ export async function executePathTemplate(input: ExecuteTemplateInput): Promise<
         kind: step.op === 'click' ? 'click' : 'type',
         label: element.name,
       });
-      if (!verdict.allowed) return fail(i, `repair_rejected_sensitive: ${verdict.reason}`, snapshot.url);
+      if (!verdict.allowed)
+        return fail(i, `repair_rejected_sensitive: ${verdict.reason}`, snapshot.url);
       try {
         await actOnRef(tools, step, element.ref);
         await performWait(tools, step.wait, waitMs);
@@ -278,7 +300,12 @@ export async function executePathTemplate(input: ExecuteTemplateInput): Promise<
   }
 
   const success = await checkSuccess(tools, template, params, waitMs);
-  if (!success.ok) return fail(template.steps.length, `success_evidence_missing: ${success.reason}`, success.finalUrl);
+  if (!success.ok)
+    return fail(
+      template.steps.length,
+      `success_evidence_missing: ${success.reason}`,
+      success.finalUrl,
+    );
 
   const repaired = stepsRepaired > 0;
   return {
@@ -306,6 +333,9 @@ export function estimateModelCallsSaved(stepsTotal: number, modelCallsUsed: numb
 export function snapshotForPrompt(snapshot: BrowserSnapshot, max = 150): string {
   return snapshot.elements
     .slice(0, max)
-    .map((e) => `${e.ref} ${e.role} "${e.name}"${e.text && normaliseText(e.text) !== normaliseText(e.name) ? ` text="${e.text.slice(0, 80)}"` : ''}`)
+    .map(
+      (e) =>
+        `${e.ref} ${e.role} "${e.name}"${e.text && normaliseText(e.text) !== normaliseText(e.name) ? ` text="${e.text.slice(0, 80)}"` : ''}`,
+    )
     .join('\n');
 }

@@ -135,7 +135,9 @@ export class PlaywrightBrowserTools implements PlaybookBrowserTools {
   }
 
   async snapshot(): Promise<BrowserSnapshot> {
-    const elements = (await this.page.evaluate(snapshotScript(REF_ATTR, MAX_ELEMENTS))) as unknown[];
+    const elements = (await this.page.evaluate(
+      snapshotScript(REF_ATTR, MAX_ELEMENTS),
+    )) as unknown[];
     return {
       url: this.page.url(),
       title: await this.page.title(),

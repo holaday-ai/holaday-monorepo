@@ -44,7 +44,9 @@ export function resolveLocator(snapshot: BrowserSnapshot, locator: Locator): Loc
   const exact = sameRole.filter((el) => normaliseText(el.name) === name);
   if (exact.length > 0) {
     const element = exact[nth];
-    return element ? { kind: 'found', element, matchedBy: 'exact' } : { kind: 'out_of_range', candidates: exact.length };
+    return element
+      ? { kind: 'found', element, matchedBy: 'exact' }
+      : { kind: 'out_of_range', candidates: exact.length };
   }
   // A name-less locator (role/text only) never falls through to `contains`.
   if (!name) return { kind: 'not_found' };
@@ -62,7 +64,8 @@ export function resolveLocator(snapshot: BrowserSnapshot, locator: Locator): Loc
 export function locatorForElement(snapshot: BrowserSnapshot, element: SnapshotElement): Locator {
   const role = normaliseRole(element.role);
   const peers = snapshot.elements.filter(
-    (el) => normaliseRole(el.role) === role && normaliseText(el.name) === normaliseText(element.name),
+    (el) =>
+      normaliseRole(el.role) === role && normaliseText(el.name) === normaliseText(element.name),
   );
   const nth = peers.findIndex((el) => el.ref === element.ref);
   return {

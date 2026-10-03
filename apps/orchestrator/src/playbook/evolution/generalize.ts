@@ -51,17 +51,15 @@ interface TypedParam {
   values: string[];
 }
 
-function templatise(
-  values: readonly string[],
-  typed: readonly TypedParam[],
-): string | null {
+function templatise(values: readonly string[], typed: readonly TypedParam[]): string | null {
   const first = values[0] ?? '';
   if (values.every((v) => normaliseText(v) === normaliseText(first))) return first;
   // Differs across trajectories: must be explained by typed params.
   let candidate = first;
   for (const p of typed) {
     const v = p.values[0];
-    if (v && v.trim().length >= 1) candidate = replaceCaseInsensitive(candidate, v, `{{${p.name}}}`);
+    if (v && v.trim().length >= 1)
+      candidate = replaceCaseInsensitive(candidate, v, `{{${p.name}}}`);
   }
   return candidate === first ? null : candidate;
 }
@@ -130,7 +128,9 @@ function templatiseUrl(
       parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(firstVal)}`);
       continue;
     }
-    const typedHit = typed.find((p) => p.values.every((v, i) => normaliseText(v) === normaliseText(vals[i] ?? '')));
+    const typedHit = typed.find((p) =>
+      p.values.every((v, i) => normaliseText(v) === normaliseText(vals[i] ?? '')),
+    );
     if (typedHit) {
       parts.push(`${encodeURIComponent(key)}={{${typedHit.name}}}`);
       continue;
@@ -201,7 +201,14 @@ export function generalizeDeterministically(group: TrajectoryGroup): PathTemplat
         );
         const p = typed.find((tp) => tp.stepIndex === i);
         if (!target || !p) return null;
-        steps.push(withWait({ op: 'type', target, text: `{{${p.name}}}`, ...(s.submit ? { submit: true } : {}) }));
+        steps.push(
+          withWait({
+            op: 'type',
+            target,
+            text: `{{${p.name}}}`,
+            ...(s.submit ? { submit: true } : {}),
+          }),
+        );
         break;
       }
       case 'select': {
@@ -239,7 +246,8 @@ export function generalizeDeterministically(group: TrajectoryGroup): PathTemplat
   const successTexts: string[] = [];
   for (const text of first.outcome?.evidenceTexts ?? []) {
     let candidate = text;
-    for (const p of typed) if (p.values[0]) candidate = replaceCaseInsensitive(candidate, p.values[0], `{{${p.name}}}`);
+    for (const p of typed)
+      if (p.values[0]) candidate = replaceCaseInsensitive(candidate, p.values[0], `{{${p.name}}}`);
     successTexts.push(candidate);
     if (successTexts.length >= 2) break;
   }
@@ -347,14 +355,22 @@ export async function generalizeGroup(
       modelCalls += 1;
       const proposal = await proposeTemplateWithModel(deps.adapter, group);
       const checked = validateTemplateAgainstTrajectories(proposal, group.trajectories);
-      if (checked.ok) return { ok: true, template: checked.template, generalizer: 'qwen', modelCalls };
+      if (checked.ok)
+        return { ok: true, template: checked.template, generalizer: 'qwen', modelCalls };
       modelErrors = checked.errors.slice(0, 10);
     } catch (err) {
       modelErrors = [err instanceof Error ? err.message : String(err)];
     }
   }
   const fallback = generalizeDeterministically(group);
-  if (fallback) return { ok: true, template: fallback, generalizer: 'deterministic', modelCalls, ...(modelErrors ? { modelErrors } : {}) };
+  if (fallback)
+    return {
+      ok: true,
+      template: fallback,
+      generalizer: 'deterministic',
+      modelCalls,
+      ...(modelErrors ? { modelErrors } : {}),
+    };
   return {
     ok: false,
     modelCalls,

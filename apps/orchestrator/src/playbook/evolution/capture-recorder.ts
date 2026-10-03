@@ -1,6 +1,6 @@
 import { REDACTED_INPUT_VALUE, redactTypedValue } from '../action-capture-redaction.js';
-import type { CreateActionCaptureInput } from '../task-action-capture-repository.js';
 import type { BrowserSnapshot, SnapshotElement } from '../replay/browser-tools.js';
+import type { CreateActionCaptureInput } from '../task-action-capture-repository.js';
 import { locatorForElement } from './locator.js';
 import type { WaitCondition } from './path-template.js';
 import type { CaptureReplayDescriptor, TrajectoryOutcome } from './trajectory.js';
@@ -90,7 +90,9 @@ export function describeToolCall(
   if (call.op === 'type') inputValue = redactForElement(element, call.text ?? '');
   if (call.op === 'select') inputValue = call.value ?? null;
   return {
-    siteDomain: siteDomainOf(call.op === 'navigate' ? call.url : (call.pageUrl ?? call.snapshot?.url)),
+    siteDomain: siteDomainOf(
+      call.op === 'navigate' ? call.url : (call.pageUrl ?? call.snapshot?.url),
+    ),
     stepType: call.op,
     visibleText: element?.name ?? null,
     entryUrl: call.op === 'navigate' ? (call.url ?? null) : null,

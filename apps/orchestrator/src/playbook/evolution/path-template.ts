@@ -147,8 +147,10 @@ export function stepStrings(step: TemplateStep): string[] {
 
 export function templatePlaceholders(template: PathTemplate): Set<string> {
   const used = new Set<string>();
-  for (const step of template.steps) for (const s of stepStrings(step)) for (const p of placeholdersIn(s)) used.add(p);
-  for (const t of template.success?.textContains ?? []) for (const p of placeholdersIn(t)) used.add(p);
+  for (const step of template.steps)
+    for (const s of stepStrings(step)) for (const p of placeholdersIn(s)) used.add(p);
+  for (const t of template.success?.textContains ?? [])
+    for (const p of placeholdersIn(t)) used.add(p);
   if (template.success?.urlContains)
     for (const p of placeholdersIn(template.success.urlContains)) used.add(p);
   return used;
@@ -177,7 +179,9 @@ function fillLocator(l: Locator, params: ParamValues): Locator {
   return {
     ...l,
     name: fillPlaceholders(l.name, params),
-    ...(l.textContains ? { textContains: l.textContains.map((t) => fillPlaceholders(t, params)) } : {}),
+    ...(l.textContains
+      ? { textContains: l.textContains.map((t) => fillPlaceholders(t, params)) }
+      : {}),
   };
 }
 
