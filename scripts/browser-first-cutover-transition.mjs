@@ -1,4 +1,7 @@
-import { ingressDiagnosticStage } from './browser-first-cutover-ingress-diagnostics.mjs';
+import {
+  ingressDiagnosticStage,
+  readinessDiagnosticFields,
+} from './browser-first-cutover-ingress-diagnostics.mjs';
 import { finishStoppedRelease } from './browser-maintenance-release-tail.mjs';
 
 /** Explicit first bootstrap only. It does not infer a legacy protocol identity. */
@@ -177,6 +180,7 @@ export async function performFirstCutover({ candidate, adapter, window, clock = 
       identity,
       code,
       ...(ingressDiagnosticStage(error) ? { ingressStage: ingressDiagnosticStage(error) } : {}),
+      ...readinessDiagnosticFields(error, true),
       action: phase === 'preflight' ? 'abort_without_mutation' : 'hold_maintenance',
       closeAcknowledged: false,
     };

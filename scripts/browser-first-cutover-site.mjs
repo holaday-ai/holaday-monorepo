@@ -1,5 +1,8 @@
 import { Writable } from 'node:stream';
-import { ingressDiagnosticError } from './browser-first-cutover-ingress-diagnostics.mjs';
+import {
+  ingressDiagnosticError,
+  readinessDiagnosticError,
+} from './browser-first-cutover-ingress-diagnostics.mjs';
 import { createFirstCutoverProductionFacts } from './browser-first-cutover-production-facts.mjs';
 import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -168,36 +171,43 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
           readRehearsal: io.readRehearsal,
         },
       );
-  const observeWork = async () => {
-    const work = structuredClone(await facts.observeWork(context));
-    const persisted = await io.readPersistedWork(context);
-    if (context.approval.schemaVersion === 2) {
-      // Validate the independent observation before combining digests: a missing
-      // external proof must never become a valid hash of an undefined field.
-      validateLegacyWorkBoundary({
-        observation: work,
-        approval: context.approval,
-        phase: 'prepare',
-        nowMs: io.now(),
-      });
-      if (
-        !fresh(persisted?.observedAtMs) ||
-        !cutoverWorkScopeReady(persisted, context.approval, { requireReplay: true }) ||
-        !/^[a-f0-9]{64}$/.test(persisted.replaySourcesDigest ?? '')
-      )
-        fail();
-      work.replaySourcesDigest = createHash('sha256')
-        .update(
-          JSON.stringify({
-            candidate: context.binding.candidate,
-            independent: work.replaySourcesDigest,
-            persisted: persisted.replaySourcesDigest,
-          }),
+  const observeWork = async (prefix = undefined) => {
+    let stage = `${prefix}_FACTS`;
+    try {
+      const work = structuredClone(await facts.observeWork(context));
+      stage = `${prefix}_PERSISTED`;
+      const persisted = await io.readPersistedWork(context);
+      stage = `${prefix}_VALIDATION`;
+      if (context.approval.schemaVersion === 2) {
+        // Validate the independent observation before combining digests: a missing
+        // external proof must never become a valid hash of an undefined field.
+        validateLegacyWorkBoundary({
+          observation: work,
+          approval: context.approval,
+          phase: 'prepare',
+          nowMs: io.now(),
+        });
+        if (
+          !fresh(persisted?.observedAtMs) ||
+          !cutoverWorkScopeReady(persisted, context.approval, { requireReplay: true }) ||
+          !/^[a-f0-9]{64}$/.test(persisted.replaySourcesDigest ?? '')
         )
-        .digest('hex');
-      work.observedAtMs = Math.min(work.observedAtMs, persisted.observedAtMs);
+          fail();
+        work.replaySourcesDigest = createHash('sha256')
+          .update(
+            JSON.stringify({
+              candidate: context.binding.candidate,
+              independent: work.replaySourcesDigest,
+              persisted: persisted.replaySourcesDigest,
+            }),
+          )
+          .digest('hex');
+        work.observedAtMs = Math.min(work.observedAtMs, persisted.observedAtMs);
+      }
+      return { work, persisted };
+    } catch (error) {
+      throw prefix ? readinessDiagnosticError(error, stage) : error;
     }
-    return { work, persisted };
   };
   const attempt = options.attempt;
   let context;
@@ -391,86 +401,98 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
       fail();
     return structuredClone(inventory);
   };
-  const observeWriters = async () => {
-    const record = await guard(context);
-    const inventory = approvedInventory();
-    let database;
-    // This is an explicit, separately approved source, never a privilege
-    // fallback for the original application reader or independent classifier.
-    if (Object.hasOwn(inventory, 'databaseObserver')) {
-      database = structuredClone(await io.readAdministrativeWriters(context, inventory));
-      const active = [
-        'transactions',
-        'enabledEvents',
-        'replicationReceivers',
-        'replicationAppliers',
-      ];
-      if (
-        database?.schemaVersion !== 1 ||
-        database.scope !== 'mysql-server-observation-only' ||
-        !fresh(database.startedAtMs) ||
-        !fresh(database.observedAtMs) ||
-        database.startedAtMs > database.observedAtMs ||
-        !/^[a-f0-9]{64}$/.test(database.sourceDigest ?? '') ||
-        !database.counts ||
-        !equal(Object.keys(database.counts).sort(), [...active, 'sessions'].sort()) ||
-        !Number.isSafeInteger(database.counts.sessions) ||
-        database.counts.sessions < 0 ||
-        database.counts.sessions > 10000 ||
-        active.some(
-          (key) =>
-            !Number.isSafeInteger(database.counts[key]) ||
-            database.counts[key] < 0 ||
-            database.counts[key] > 10000,
+  const observeWriters = async (prefix = undefined) => {
+    let stage = `${prefix}_PRE_GUARD`;
+    try {
+      const record = await guard(context);
+      stage = `${prefix}_INVENTORY`;
+      const inventory = approvedInventory();
+      let database;
+      // This is an explicit, separately approved source, never a privilege
+      // fallback for the original application reader or independent classifier.
+      if (Object.hasOwn(inventory, 'databaseObserver')) {
+        stage = `${prefix}_DATABASE`;
+        database = structuredClone(await io.readAdministrativeWriters(context, inventory));
+        stage = `${prefix}_DATABASE_VALIDATION`;
+        const active = [
+          'transactions',
+          'enabledEvents',
+          'replicationReceivers',
+          'replicationAppliers',
+        ];
+        if (
+          database?.schemaVersion !== 1 ||
+          database.scope !== 'mysql-server-observation-only' ||
+          !fresh(database.startedAtMs) ||
+          !fresh(database.observedAtMs) ||
+          database.startedAtMs > database.observedAtMs ||
+          !/^[a-f0-9]{64}$/.test(database.sourceDigest ?? '') ||
+          !database.counts ||
+          !equal(Object.keys(database.counts).sort(), [...active, 'sessions'].sort()) ||
+          !Number.isSafeInteger(database.counts.sessions) ||
+          database.counts.sessions < 0 ||
+          database.counts.sessions > 10000 ||
+          active.some(
+            (key) =>
+              !Number.isSafeInteger(database.counts[key]) ||
+              database.counts[key] < 0 ||
+              database.counts[key] > 10000,
+          )
         )
-      )
-        fail();
-      const attribution = database.sessionAttribution;
-      if (
-        attribution?.scope !== 'current-session-attribution-only' ||
-        !fresh(attribution.observedAtMs) ||
-        attribution.sessions !== database.counts.sessions ||
-        attribution.unattributed !== 0 ||
-        attribution.unknownWritersZeroProven !== false ||
-        !/^[a-f0-9]{64}$/.test(attribution.sourceDigest ?? '') ||
-        !Number.isSafeInteger(attribution.eventSchedulers) ||
-        attribution.eventSchedulers < 0 ||
-        attribution.eventSchedulers > 1 ||
-        !Array.isArray(attribution.processes)
-      )
-        fail();
-      // Sessions require separate attribution/exclusion; five idle sessions
-      // neither mean five active writers nor prove zero unknown writers.
-      if (!equal(record, await guard(context))) fail();
-    }
-    const result = structuredClone(
-      await facts.observeWriters(context, {
-        ...(database ? { database: structuredClone(database) } : {}),
-      }),
-    );
-    if (!equal(record, await guard(context))) fail();
-    if (database) {
-      if (
-        !fresh(database.observedAtMs) ||
-        !fresh(database.sessionAttribution.observedAtMs) ||
-        !fresh(result?.observedAtMs)
-      )
-        fail();
-      const activeCount = [
-        'transactions',
-        'enabledEvents',
-        'replicationReceivers',
-        'replicationAppliers',
-      ].reduce((n, k) => n + database.counts[k], 0);
-      if (!Number.isSafeInteger(result.internalWriters) || result.internalWriters < 0) fail();
-      result.internalWriters = Math.max(result.internalWriters, activeCount);
-      result.observedAtMs = Math.min(
-        result.observedAtMs,
-        database.startedAtMs,
-        database.sessionAttribution.observedAtMs,
+          fail();
+        const attribution = database.sessionAttribution;
+        if (
+          attribution?.scope !== 'current-session-attribution-only' ||
+          !fresh(attribution.observedAtMs) ||
+          attribution.sessions !== database.counts.sessions ||
+          attribution.unattributed !== 0 ||
+          attribution.unknownWritersZeroProven !== false ||
+          !/^[a-f0-9]{64}$/.test(attribution.sourceDigest ?? '') ||
+          !Number.isSafeInteger(attribution.eventSchedulers) ||
+          attribution.eventSchedulers < 0 ||
+          attribution.eventSchedulers > 1 ||
+          !Array.isArray(attribution.processes)
+        )
+          fail();
+        // Sessions require separate attribution/exclusion; five idle sessions
+        // neither mean five active writers nor prove zero unknown writers.
+        stage = `${prefix}_DATABASE_POST_GUARD`;
+        if (!equal(record, await guard(context))) fail();
+      }
+      stage = `${prefix}_FACTS`;
+      const result = structuredClone(
+        await facts.observeWriters(context, {
+          ...(database ? { database: structuredClone(database) } : {}),
+        }),
       );
+      stage = `${prefix}_POST_GUARD`;
+      if (!equal(record, await guard(context))) fail();
+      stage = `${prefix}_VALIDATION`;
+      if (database) {
+        if (
+          !fresh(database.observedAtMs) ||
+          !fresh(database.sessionAttribution.observedAtMs) ||
+          !fresh(result?.observedAtMs)
+        )
+          fail();
+        const activeCount = [
+          'transactions',
+          'enabledEvents',
+          'replicationReceivers',
+          'replicationAppliers',
+        ].reduce((n, k) => n + database.counts[k], 0);
+        if (!Number.isSafeInteger(result.internalWriters) || result.internalWriters < 0) fail();
+        result.internalWriters = Math.max(result.internalWriters, activeCount);
+        result.observedAtMs = Math.min(
+          result.observedAtMs,
+          database.startedAtMs,
+          database.sessionAttribution.observedAtMs,
+        );
+      }
+      return result;
+    } catch (error) {
+      throw prefix ? readinessDiagnosticError(error, stage) : error;
     }
-    return result;
   };
   const checkLegacyCapability = (actual) => {
     if (context.approval.schemaVersion !== 2) return;
@@ -631,16 +653,31 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
     if (closeFailed) fail();
   };
   const run = async (name, ctx, phases, operation, once = true) => {
+    const operationLabel = {
+      'readiness-host': 'HOST',
+      'readiness-database': 'DATABASE',
+      'readiness-rehearsal': 'REHEARSAL',
+      'readiness-fence': 'FENCE',
+      'readiness-query': 'ORDERS',
+    }[name];
+    let position = 'PRE_GUARD';
     try {
       if (!attached || closed || failed || (once && used.has(name))) fail();
       if (once) used.add(name);
       await guard(ctx, phases);
+      position = 'BODY';
       const result = await operation();
+      position = 'POST_GUARD';
       await guard(ctx, phases);
       return result;
     } catch (error) {
       failed = true;
-      fail('RECOVERY_SITE_RUN', error);
+      fail(
+        'RECOVERY_SITE_RUN',
+        operationLabel
+          ? readinessDiagnosticError(error, `READINESS_${operationLabel}_${position}`)
+          : error,
+      );
     }
   };
   const backupContext = () => ({
@@ -1332,113 +1369,133 @@ export function createFirstCutoverExecutionSite(options, overrides = {}) {
           context,
           undefined,
           async () => {
-            const request = readinessScope(input);
-            const record = await guard(
-              context,
-              request.stage === 'prepare'
-                ? ['preflight', 'prepared']
-                : ['candidate_started', 'verified'],
-            );
-            const inventory = approvedInventory();
-            if (request.stage === 'prepare') {
-              if (request.identity !== undefined) fail();
-            } else checkIdentity(request.identity, record);
-            const { work: before } = await observeWork();
-            // The separately approved database source must also participate in
-            // readiness, not only the ingress callback. Bracket the host read;
-            // do not publish a clean report over a newly active database writer.
-            const writerBefore = Object.hasOwn(inventory, 'databaseObserver')
-              ? await observeWriters()
-              : undefined;
-            const actual =
-              request.stage === 'prepare'
-                ? await observer.read()
-                : await observer.readWithCandidate(request.identity);
-            if (request.stage === 'preopen') closedCandidate(actual, request.identity);
-            const writerAfter = writerBefore === undefined ? undefined : await observeWriters();
-            const { work: after } = await observeWork();
-            checkLegacyCapability(actual);
-            const disposition = validateLegacyWorkBoundary({
-              observation: before,
-              approval: context.approval,
-              phase: request.stage,
-              nowMs: io.now(),
-            });
-            const afterDisposition = validateLegacyWorkBoundary({
-              observation: after,
-              approval: context.approval,
-              phase: request.stage,
-              nowMs: io.now(),
-            });
-            if (
-              !equal(disposition, afterDisposition) ||
-              !fresh(actual.observedAtMs) ||
-              actual.inventoryDigest !== context.binding.inventoryDigest ||
-              actual.unknownLaunchers.length
-            )
-              fail();
-            const producersRunning = [];
-            const seen = new Set();
-            for (const host of actual.hosts) {
-              for (const process of [...host.registered.processes, ...host.unmanaged.processes]) {
-                if (!['main', 'worker'].includes(process.role)) continue;
-                const matches = inventory.targets.filter(
-                  (target) =>
-                    target.host === host.host &&
-                    target.pid === process.pid &&
-                    target.start === process.start &&
-                    target.role === process.role,
-                );
-                const key = `${host.host}:${process.pid}`;
-                if (matches.length !== 1 || seen.has(key)) fail();
-                seen.add(key);
-                producersRunning.push(structuredClone(matches[0]));
+            let stage = 'READINESS_HOST_SCOPE';
+            try {
+              const request = readinessScope(input);
+              stage = 'READINESS_HOST_RECORD';
+              const record = await guard(
+                context,
+                request.stage === 'prepare'
+                  ? ['preflight', 'prepared']
+                  : ['candidate_started', 'verified'],
+              );
+              stage = 'READINESS_HOST_INVENTORY';
+              const inventory = approvedInventory();
+              if (request.stage === 'prepare') {
+                if (request.identity !== undefined) fail();
+              } else checkIdentity(request.identity, record);
+              stage = 'READINESS_HOST_WORK_BEFORE';
+              const { work: before } = await observeWork('READINESS_HOST_WORK_BEFORE');
+              stage = 'READINESS_HOST_DB_WRITERS_BEFORE';
+              // The separately approved database source must also participate in
+              // readiness, not only the ingress callback. Bracket the host read;
+              // do not publish a clean report over a newly active database writer.
+              const writerBefore = Object.hasOwn(inventory, 'databaseObserver')
+                ? await observeWriters('READINESS_HOST_DB_WRITERS_BEFORE')
+                : undefined;
+              stage = 'READINESS_HOST_OBSERVER';
+              const actual =
+                request.stage === 'prepare'
+                  ? await observer.read()
+                  : await observer.readWithCandidate(request.identity);
+              if (request.stage === 'preopen') closedCandidate(actual, request.identity);
+              stage = 'READINESS_HOST_DB_WRITERS_AFTER';
+              const writerAfter =
+                writerBefore === undefined
+                  ? undefined
+                  : await observeWriters('READINESS_HOST_DB_WRITERS_AFTER');
+              stage = 'READINESS_HOST_WORK_AFTER';
+              const { work: after } = await observeWork('READINESS_HOST_WORK_AFTER');
+              stage = 'READINESS_HOST_LEGACY_VALIDATION';
+              checkLegacyCapability(actual);
+              const disposition = validateLegacyWorkBoundary({
+                observation: before,
+                approval: context.approval,
+                phase: request.stage,
+                nowMs: io.now(),
+              });
+              const afterDisposition = validateLegacyWorkBoundary({
+                observation: after,
+                approval: context.approval,
+                phase: request.stage,
+                nowMs: io.now(),
+              });
+              if (
+                !equal(disposition, afterDisposition) ||
+                !fresh(actual.observedAtMs) ||
+                actual.inventoryDigest !== context.binding.inventoryDigest ||
+                actual.unknownLaunchers.length
+              )
+                fail();
+              stage = 'READINESS_HOST_PRODUCERS';
+              const producersRunning = [];
+              const seen = new Set();
+              for (const host of actual.hosts) {
+                for (const process of [...host.registered.processes, ...host.unmanaged.processes]) {
+                  if (!['main', 'worker'].includes(process.role)) continue;
+                  const matches = inventory.targets.filter(
+                    (target) =>
+                      target.host === host.host &&
+                      target.pid === process.pid &&
+                      target.start === process.start &&
+                      target.role === process.role,
+                  );
+                  const key = `${host.host}:${process.pid}`;
+                  if (matches.length !== 1 || seen.has(key)) fail();
+                  seen.add(key);
+                  producersRunning.push(structuredClone(matches[0]));
+                }
               }
-            }
-            const writerTimes = [];
-            if (Object.hasOwn(inventory, 'databaseObserver')) {
-              for (const writer of [writerBefore, writerAfter]) {
-                if (
-                  !fresh(writer?.observedAtMs) ||
-                  writer.inventoryDigest !== context.binding.inventoryDigest ||
-                  !Number.isSafeInteger(writer.internalWriters) ||
-                  writer.internalWriters < 0 ||
-                  writer.producersRunning !== producersRunning.length ||
-                  !Number.isSafeInteger(writer.existingSockets) ||
-                  writer.existingSockets < 0 ||
-                  (request.stage === 'preopen' &&
-                    (writer.existingSockets !== 0 || writer.internalWriters !== 0))
-                )
-                  fail();
-                writerTimes.push(writer.observedAtMs);
+              stage = 'READINESS_HOST_WRITER_VALIDATION';
+              const writerTimes = [];
+              if (Object.hasOwn(inventory, 'databaseObserver')) {
+                for (const writer of [writerBefore, writerAfter]) {
+                  if (
+                    !fresh(writer?.observedAtMs) ||
+                    writer.inventoryDigest !== context.binding.inventoryDigest ||
+                    !Number.isSafeInteger(writer.internalWriters) ||
+                    writer.internalWriters < 0 ||
+                    writer.producersRunning !== producersRunning.length ||
+                    !Number.isSafeInteger(writer.existingSockets) ||
+                    writer.existingSockets < 0 ||
+                    (request.stage === 'preopen' &&
+                      (writer.existingSockets !== 0 || writer.internalWriters !== 0))
+                  )
+                    fail();
+                  writerTimes.push(writer.observedAtMs);
+                }
               }
+              stage = 'READINESS_HOST_FINAL_GUARD';
+              if (!equal(record, await guard(context, [record.phase]))) fail();
+              stage = 'READINESS_HOST_RESULT';
+              return {
+                inventory: structuredClone(inventory),
+                observedAtMs: Math.min(
+                  before.observedAtMs,
+                  actual.observedAtMs,
+                  after.observedAtMs,
+                  ...writerTimes,
+                  ...(context.approval.schemaVersion === 2
+                    ? [actual.legacyCapability.observedAtMs]
+                    : []),
+                ),
+                producersRunning,
+                unknownWriters: [],
+                externalWork:
+                  disposition.mode === 'controlled-interruption'
+                    ? structuredClone(before.knownExternalWork)
+                    : [],
+                ...(disposition.mode === 'controlled-interruption'
+                  ? {
+                      riskDigest: disposition.riskDigest,
+                      legacyWork: structuredClone({ before, after }),
+                      legacyCapability: structuredClone(actual.legacyCapability),
+                    }
+                  : {}),
+              };
+            } catch (error) {
+              throw readinessDiagnosticError(error, stage);
             }
-            if (!equal(record, await guard(context, [record.phase]))) fail();
-            return {
-              inventory: structuredClone(inventory),
-              observedAtMs: Math.min(
-                before.observedAtMs,
-                actual.observedAtMs,
-                after.observedAtMs,
-                ...writerTimes,
-                ...(context.approval.schemaVersion === 2
-                  ? [actual.legacyCapability.observedAtMs]
-                  : []),
-              ),
-              producersRunning,
-              unknownWriters: [],
-              externalWork:
-                disposition.mode === 'controlled-interruption'
-                  ? structuredClone(before.knownExternalWork)
-                  : [],
-              ...(disposition.mode === 'controlled-interruption'
-                ? {
-                    riskDigest: disposition.riskDigest,
-                    legacyWork: structuredClone({ before, after }),
-                    legacyCapability: structuredClone(actual.legacyCapability),
-                  }
-                : {}),
-            };
           },
           false,
         ),

@@ -2370,3 +2370,269 @@ test('attach preserves fixed consumer failure stages and discards private errors
     assert.equal(f.events.includes('orders'), false);
   }
 });
+
+// Synthetic adjacent site/real journal fixture; never a production lease.
+const diagnosticDatabase = () => ({
+  schemaVersion: 1,
+  scope: 'mysql-server-observation-only',
+  startedAtMs: 1000,
+  observedAtMs: 1000,
+  counts: {
+    sessions: 1,
+    transactions: 0,
+    enabledEvents: 0,
+    replicationReceivers: 0,
+    replicationAppliers: 0,
+  },
+  sourceDigest: '3'.repeat(64),
+  sessionAttribution: {
+    scope: 'current-session-attribution-only',
+    observedAtMs: 1000,
+    sessions: 1,
+    unattributed: 0,
+    eventSchedulers: 1,
+    processes: [],
+    sourceDigest: '5'.repeat(64),
+    unknownWritersZeroProven: false,
+  },
+});
+const diagnosticInventory = {
+  databaseObserver: {
+    configDigest: 'd'.repeat(64),
+    sourceIdentity: { database: 'qa', serverUuid: '11111111-1111-4111-8111-111111111111' },
+  },
+};
+for (const [fault, expected, publicCode] of [
+  ['facts-before', 'READINESS_HOST_WORK_BEFORE_FACTS', 'CUTOVER_WORK_OBSERVATION_UNPROVEN'],
+  ['facts-after', 'READINESS_HOST_WORK_AFTER_FACTS', 'CUTOVER_WORK_OBSERVATION_UNPROVEN'],
+  ['persisted-before', 'READINESS_HOST_WORK_BEFORE_PERSISTED', 'CUTOVER_WORK_OBSERVATION_UNPROVEN'],
+  ['persisted-after', 'READINESS_HOST_WORK_AFTER_PERSISTED', 'CUTOVER_WORK_OBSERVATION_UNPROVEN'],
+  ['db-before', 'READINESS_HOST_DB_WRITERS_BEFORE_DATABASE', 'CUTOVER_DATABASE_WRITERS_UNPROVEN'],
+  ['db-after', 'READINESS_HOST_DB_WRITERS_AFTER_DATABASE', 'CUTOVER_DATABASE_WRITERS_UNPROVEN'],
+  ['writers-before', 'READINESS_HOST_DB_WRITERS_BEFORE_FACTS', 'CUTOVER_DATABASE_WRITERS_UNPROVEN'],
+  ['writers-after', 'READINESS_HOST_DB_WRITERS_AFTER_FACTS', 'CUTOVER_DATABASE_WRITERS_UNPROVEN'],
+  ['observer', 'READINESS_HOST_OBSERVER', 'CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN'],
+  ['legacy', 'READINESS_HOST_LEGACY_VALIDATION', 'UNCLASSIFIED'],
+]) {
+  test(`readiness diagnostic exact host boundary ${fault}`, async (t) => {
+    const trace = [];
+    const f = await candidateFixture(
+      t,
+      async (f) => {
+        for (const [owner, key, label] of [
+          [f.io.facts, 'observeWork', 'facts'],
+          [f.io, 'readPersistedWork', 'persisted'],
+          [f.io.facts, 'observeWriters', 'writers'],
+        ]) {
+          const original = owner[key];
+          let count = 0;
+          owner[key] = async (...args) => {
+            count++;
+            trace.push(`${label}${count}`);
+            if (fault === `${label}-${count === 1 ? 'before' : 'after'}`) throw Error(publicCode);
+            return original(...args);
+          };
+        }
+        let count = 0;
+        f.io.readAdministrativeWriters = async () => {
+          count++;
+          trace.push(`db${count}`);
+          if (fault === `db-${count === 1 ? 'before' : 'after'}`) throw Error(publicCode);
+          return diagnosticDatabase();
+        };
+      },
+      diagnosticInventory,
+    );
+    const original = f.observer().read;
+    f.observer().read = async () => {
+      trace.push('observer');
+      if (fault === 'observer') throw Error(publicCode);
+      const value = await original();
+      if (fault === 'legacy') value.observedAtMs = -1;
+      return value;
+    };
+    let refusal;
+    try {
+      await f.site.evidence.readHostInventory(f.request('prepare'));
+    } catch (error) {
+      refusal = error;
+    }
+    assert(refusal);
+    assert.equal(refusal.message, 'CUTOVER_SITE_UNPROVEN');
+    assert.equal(refusal.cause.readinessStage, expected);
+    assert.equal(refusal.cause.ingressCause, publicCode);
+    const beforeRetry = trace.slice();
+    await assert.rejects(
+      f.site.evidence.readHostInventory(f.request('prepare')),
+      /CUTOVER_SITE_UNPROVEN/,
+    );
+    assert.deepEqual(trace, beforeRetry, 'failed=true blocks all subsequent IO');
+    const whole = [
+      'facts1',
+      'persisted1',
+      'db1',
+      'writers1',
+      'observer',
+      'db2',
+      'writers2',
+      'facts2',
+      'persisted2',
+    ];
+    assert.deepEqual(trace, whole.slice(0, whole.indexOf(trace.at(-1)) + 1));
+    const record = await f.journal.readFirstCutoverEffects();
+    assert.equal(record.phase, 'preflight');
+    assert.equal(record.identity, undefined);
+    assert.equal(record.backupReceipt, undefined);
+    assert.equal(f.events.includes('stop-producers'), false);
+    await f.site.lifecycle.detach(f.context);
+  });
+}
+
+test('readiness diagnostic actual outer pre/body/post guards remain distinguishable', async (t) => {
+  const baseline = await candidateFixture(t);
+  let calls = 0;
+  const original = baseline.journal.assertOwnership;
+  baseline.journal.assertOwnership = async (...args) => {
+    calls++;
+    return original(...args);
+  };
+  await baseline.site.evidence.readHostInventory(baseline.request('prepare'));
+  const total = calls;
+  assert(total > 2);
+  await baseline.site.lifecycle.detach(baseline.context);
+  for (const [index, expected] of [
+    [1, 'READINESS_HOST_PRE_GUARD'],
+    [total, 'READINESS_HOST_POST_GUARD'],
+  ]) {
+    const f = await candidateFixture(t);
+    const original = f.journal.assertOwnership;
+    let count = 0;
+    f.journal.assertOwnership = async (...args) => {
+      if (++count === index) throw Error('secret SQL must never be retained');
+      return original(...args);
+    };
+    let error;
+    try {
+      await f.site.evidence.readHostInventory(f.request('prepare'));
+    } catch (e) {
+      error = e;
+    }
+    assert.equal(error?.cause?.readinessStage, expected);
+    assert.equal(error?.cause?.ingressStage, 'RECOVERY_SITE_OWNER');
+    assert.equal(error?.cause?.ingressCause, 'UNCLASSIFIED');
+    assert.equal(count, index);
+    await f.site.lifecycle.detach(f.context);
+  }
+  const f = await candidateFixture(t);
+  let error;
+  try {
+    await f.site.evidence.readHostInventory({ ...f.request('prepare'), binding: {} });
+  } catch (e) {
+    error = e;
+  }
+  assert.equal(error?.cause?.readinessStage, 'READINESS_HOST_SCOPE');
+  await f.site.lifecycle.detach(f.context);
+});
+
+for (const [method, label, code, key] of [
+  ['readDatabaseScope', 'DATABASE', 'CUTOVER_PAYMENT_OBSERVATION_UNPROVEN', 'readPaymentScope'],
+  ['readRehearsalArtifacts', 'REHEARSAL', 'MAINTENANCE_REHEARSAL_UNPROVEN', 'readRehearsal'],
+  ['readFenceState', 'FENCE', 'CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN', 'observer'],
+  ['queryOrders', 'ORDERS', 'CUTOVER_PAYMENT_OBSERVATION_UNPROVEN', 'gateway'],
+]) {
+  test(`readiness diagnostic actual ${label} body keeps original rejection`, async (t) => {
+    let reads = 0;
+    const reject = async () => {
+      reads++;
+      throw Error(code);
+    };
+    const f = await candidateFixture(t, async (f) => {
+      if (!['observer', 'gateway'].includes(key)) f.io[key] = reject;
+      if (key === 'gateway') {
+        const connect = f.io.connectGateway;
+        f.io.connectGateway = async (...args) => ({
+          ...(await connect(...args)),
+          queryOrders: reject,
+        });
+      }
+    });
+    if (key === 'observer') f.observer().read = reject;
+    let refusal;
+    try {
+      await f.site.evidence[method](
+        ...(method === 'queryOrders'
+          ? [{ observedAtMs: 1000, orders: [], unsettled: [] }, f.request('prepare')]
+          : [f.request('prepare')]),
+      );
+    } catch (error) {
+      refusal = error;
+    }
+    assert.equal(refusal?.message, 'CUTOVER_SITE_UNPROVEN');
+    assert.equal(refusal?.cause?.readinessStage, `READINESS_${label}_BODY`);
+    assert.equal(refusal?.cause?.ingressCause, code);
+    assert.equal(reads, 1);
+    assert.equal((await f.journal.readFirstCutoverEffects()).phase, 'preflight');
+    await f.site.lifecycle.detach(f.context);
+  });
+}
+
+test('readiness diagnostic success trace records original IO and now calls', async (t) => {
+  const trace = [];
+  let clocks = 0;
+  const f = await candidateFixture(
+    t,
+    async (f) => {
+      const now = f.io.now;
+      f.io.now = () => {
+        clocks++;
+        return now();
+      };
+      for (const [owner, key, label] of [
+        [f.io.facts, 'observeWork', 'work'],
+        [f.io, 'readPersistedWork', 'persisted'],
+        [f.io.facts, 'observeWriters', 'writers'],
+      ]) {
+        const original = owner[key];
+        owner[key] = async (...args) => {
+          trace.push(label);
+          return original(...args);
+        };
+      }
+      f.io.readAdministrativeWriters = async () => {
+        trace.push('database');
+        return diagnosticDatabase();
+      };
+    },
+    diagnosticInventory,
+  );
+  const read = f.observer().read;
+  f.observer().read = async (...args) => {
+    trace.push('observer');
+    return read(...args);
+  };
+  clocks = 0;
+  const result = await f.site.evidence.readHostInventory(f.request('prepare'));
+  assert.deepEqual(trace, [
+    'work',
+    'persisted',
+    'database',
+    'writers',
+    'observer',
+    'database',
+    'writers',
+    'work',
+    'persisted',
+  ]);
+  const record = await f.journal.readFirstCutoverEffects();
+  console.log(
+    JSON.stringify({
+      kind: 'readiness-original-call-trace',
+      trace,
+      clocks,
+      phase: record.phase,
+      producers: result.producersRunning.length,
+      observedAtMs: result.observedAtMs,
+    }),
+  );
+  await f.site.lifecycle.detach(f.context);
+});

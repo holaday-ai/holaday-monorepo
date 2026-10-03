@@ -178,8 +178,120 @@ export function ingressDiagnosticStage(error) {
 export function ingressDiagnosticError(message, stage, previous) {
   const selected = ingressDiagnosticStage(previous) ?? (stages.has(stage) ? stage : undefined);
   return selected
-    ? new Error(message, { cause: Object.freeze({ ingressStage: selected }) })
+    ? new Error(message, {
+        cause: Object.freeze({
+          ingressStage: selected,
+          ...readinessDiagnosticFields(ownData(previous, 'cause')),
+        }),
+      })
     : new Error(message);
+}
+
+// Readiness diagnostics are fixed labels only, never evidence or permission.
+const readinessStages = new Set([
+  'READINESS_HOST_PRE_GUARD',
+  'READINESS_HOST_BODY',
+  'READINESS_HOST_POST_GUARD',
+  'READINESS_DATABASE_PRE_GUARD',
+  'READINESS_DATABASE_BODY',
+  'READINESS_DATABASE_POST_GUARD',
+  'READINESS_REHEARSAL_PRE_GUARD',
+  'READINESS_REHEARSAL_BODY',
+  'READINESS_REHEARSAL_POST_GUARD',
+  'READINESS_FENCE_PRE_GUARD',
+  'READINESS_FENCE_BODY',
+  'READINESS_FENCE_POST_GUARD',
+  'READINESS_ORDERS_PRE_GUARD',
+  'READINESS_ORDERS_BODY',
+  'READINESS_ORDERS_POST_GUARD',
+  'READINESS_HOST_SCOPE',
+  'READINESS_HOST_RECORD',
+  'READINESS_HOST_INVENTORY',
+  'READINESS_HOST_WORK_BEFORE',
+  'READINESS_HOST_DB_WRITERS_BEFORE',
+  'READINESS_HOST_OBSERVER',
+  'READINESS_HOST_DB_WRITERS_AFTER',
+  'READINESS_HOST_WORK_AFTER',
+  'READINESS_HOST_LEGACY_VALIDATION',
+  'READINESS_HOST_PRODUCERS',
+  'READINESS_HOST_WRITER_VALIDATION',
+  'READINESS_HOST_FINAL_GUARD',
+  'READINESS_HOST_RESULT',
+  'READINESS_WORK_FACTS',
+  'READINESS_WORK_PERSISTED',
+  'READINESS_WORK_VALIDATION',
+  'READINESS_HOST_WORK_BEFORE_FACTS',
+  'READINESS_HOST_WORK_BEFORE_PERSISTED',
+  'READINESS_HOST_WORK_BEFORE_VALIDATION',
+  'READINESS_HOST_WORK_AFTER_FACTS',
+  'READINESS_HOST_WORK_AFTER_PERSISTED',
+  'READINESS_HOST_WORK_AFTER_VALIDATION',
+  'READINESS_WRITERS_PRE_GUARD',
+  'READINESS_WRITERS_INVENTORY',
+  'READINESS_WRITERS_DATABASE',
+  'READINESS_WRITERS_DATABASE_VALIDATION',
+  'READINESS_WRITERS_DATABASE_POST_GUARD',
+  'READINESS_WRITERS_FACTS',
+  'READINESS_WRITERS_POST_GUARD',
+  'READINESS_WRITERS_VALIDATION',
+  'READINESS_HOST_DB_WRITERS_BEFORE_PRE_GUARD',
+  'READINESS_HOST_DB_WRITERS_BEFORE_INVENTORY',
+  'READINESS_HOST_DB_WRITERS_BEFORE_DATABASE',
+  'READINESS_HOST_DB_WRITERS_BEFORE_DATABASE_VALIDATION',
+  'READINESS_HOST_DB_WRITERS_BEFORE_DATABASE_POST_GUARD',
+  'READINESS_HOST_DB_WRITERS_BEFORE_FACTS',
+  'READINESS_HOST_DB_WRITERS_BEFORE_POST_GUARD',
+  'READINESS_HOST_DB_WRITERS_BEFORE_VALIDATION',
+  'READINESS_HOST_DB_WRITERS_AFTER_PRE_GUARD',
+  'READINESS_HOST_DB_WRITERS_AFTER_INVENTORY',
+  'READINESS_HOST_DB_WRITERS_AFTER_DATABASE',
+  'READINESS_HOST_DB_WRITERS_AFTER_DATABASE_VALIDATION',
+  'READINESS_HOST_DB_WRITERS_AFTER_DATABASE_POST_GUARD',
+  'READINESS_HOST_DB_WRITERS_AFTER_FACTS',
+  'READINESS_HOST_DB_WRITERS_AFTER_POST_GUARD',
+  'READINESS_HOST_DB_WRITERS_AFTER_VALIDATION',
+]);
+const readinessCauses = new Set([
+  'CUTOVER_WORK_OBSERVATION_UNPROVEN',
+  'CUTOVER_PRODUCTION_FACTS_UNPROVEN',
+  'CUTOVER_HOST_PAIR_UNPROVEN',
+  'CUTOVER_DATABASE_WRITERS_UNPROVEN',
+  'CUTOVER_RETIREMENT_OBSERVATION_UNPROVEN',
+  'CUTOVER_CLOUD_DISPLAY_SCOPE_UNPROVEN',
+  'CUTOVER_CLOUD_OLD_BROWSER_ASSOCIATION_UNPROVEN',
+  'CUTOVER_LEGACY_SOURCE_UNPROVEN',
+  'CUTOVER_INVENTORY_UNPROVEN',
+  'CUTOVER_PAYMENT_OBSERVATION_UNPROVEN',
+  'MAINTENANCE_REHEARSAL_UNPROVEN',
+  'UNCLASSIFIED',
+]);
+function ownData(value, key) {
+  try {
+    return Object.getOwnPropertyDescriptor(value, key)?.value;
+  } catch {
+    return undefined;
+  }
+}
+export function readinessDiagnosticFields(value, fromError = false) {
+  const record = fromError ? ownData(value, 'cause') : value;
+  const fields = {};
+  const stage = ownData(record, 'readinessStage');
+  const cause = ownData(record, 'ingressCause');
+  if (readinessStages.has(stage)) fields.readinessStage = stage;
+  if (readinessCauses.has(cause)) fields.ingressCause = cause;
+  return fields;
+}
+export function readinessDiagnosticError(error, stage) {
+  const previous = readinessDiagnosticFields(ownData(error, 'cause'));
+  const message = ownData(error, 'message');
+  return new Error('CUTOVER_SITE_UNPROVEN', {
+    cause: Object.freeze({
+      ingressStage: ingressDiagnosticStage(error) ?? 'RECOVERY_SITE_RUN',
+      readinessStage: previous.readinessStage ?? (readinessStages.has(stage) ? stage : undefined),
+      ingressCause:
+        previous.ingressCause ?? (readinessCauses.has(message) ? message : 'UNCLASSIFIED'),
+    }),
+  });
 }
 
 // One fixed diagnostic line on stderr, never a session/business message.

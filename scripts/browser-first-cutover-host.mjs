@@ -30,6 +30,7 @@ import {
 import {
   ingressDiagnosticError,
   ingressDiagnosticStage,
+  readinessDiagnosticFields,
 } from './browser-first-cutover-ingress-diagnostics.mjs';
 import { createCutoverIngressFiles } from './browser-first-cutover-ingress-files.mjs';
 import {
@@ -588,6 +589,7 @@ export function firstCutoverExecutionFailureFields(result) {
     cause: { ingressStage: Object.getOwnPropertyDescriptor(result ?? {}, 'ingressStage')?.value },
   });
   if (ingressStage) fields.ingressStage = ingressStage;
+  Object.assign(fields, readinessDiagnosticFields(result));
   return fields;
 }
 
