@@ -1,5 +1,6 @@
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
-import { sweepPlatformFailureRefunds } from './quota/platform-failure-refunds.js';
+import { setMediaFailureRefundHook } from './agent/video/media-failure-refund.js';
+import { refundTaskOnce, sweepPlatformFailureRefunds } from './quota/platform-failure-refunds.js';
 import { QuotaService } from './quota/quota-service.js';
 const _proxy = process.env.HTTPS_PROXY;
 if (_proxy) setGlobalDispatcher(new ProxyAgent(_proxy));
@@ -1082,6 +1083,17 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
         }, 60_000);
     refundSweepTimer?.unref?.();
     resources?.add(() => clearInterval(refundSweepTimer));
+    // Media lanes (batch 05) report their own platform failures for an
+    // immediate refund through the same exactly-once ledger.
+    setMediaFailureRefundHook(async (failure) => {
+      await refundTaskOnce(
+        db,
+        new QuotaService(db),
+        failure.taskId,
+        `MEDIA_${failure.lane.toUpperCase()}_FAILED`,
+      );
+    });
+    resources?.add(() => setMediaFailureRefundHook(null));
 
     // Phase 1 #3 Pack B — Evidence retention reaper. Nightly sweep of
     // expired evidence_artifacts (delete R2 object then MySQL row; skip

@@ -179,7 +179,7 @@ describe('task follow-up copy', () => {
       ).toBe('image');
     });
 
-    it('adds the deferred 配图 notice only while the media lane is closed', () => {
+    it('points to the media workbench, or says media is coming while it is closed', () => {
       expect(
         deferredMediaNotice({
           classifiedExecutionMode: 'image',
@@ -193,7 +193,7 @@ describe('task follow-up copy', () => {
           executionMode: 'generate',
           mediaLaneAvailable: true,
         }),
-      ).toBeNull();
+      ).toContain('请到「图片」页面提交');
       expect(
         deferredMediaNotice({
           classifiedExecutionMode: 'generate',

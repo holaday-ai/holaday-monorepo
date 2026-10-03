@@ -127,6 +127,31 @@ describe('createVideoTask — i2v 图生 (Phase 2 第二期)', () => {
     });
   });
 
+  it('wan2.7-i2v → input.media first_frame + resolution, no img_url/size', async () => {
+    const { fetchImpl, calls } = jsonQueue([
+      { body: { output: { task_id: 'v27', task_status: 'PENDING' } } },
+    ]);
+    await createVideoTask({
+      apiKey: KEY,
+      model: 'wan2.7-i2v',
+      prompt: '小猫眨眨眼',
+      imageUrl: 'https://r2/pet.jpg',
+      size: '1080*1920',
+      resolution: '720P',
+      durationSeconds: 5,
+      fetchImpl,
+    });
+    const body = JSON.parse((calls[0]?.init as RequestInit).body as string);
+    expect(body).toEqual({
+      model: 'wan2.7-i2v',
+      input: {
+        prompt: '小猫眨眨眼',
+        media: [{ type: 'first_frame', url: 'https://r2/pet.jpg' }],
+      },
+      parameters: { resolution: '720P', duration: 5 },
+    });
+  });
+
   it('t2v defaults to the pinned Wan 2.7 release and omits optional parameters', async () => {
     const { fetchImpl, calls } = jsonQueue([{ body: { output: { task_id: 'v2', task_status: 'PENDING' } } }]);
     await createVideoTask({ apiKey: KEY, prompt: 'a beach', fetchImpl });

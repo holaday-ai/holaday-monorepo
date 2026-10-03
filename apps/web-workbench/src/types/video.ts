@@ -81,10 +81,10 @@ export function estimatePerSegmentCny(
 
 /**
  * 宠物 i2v 每秒人民币(元/秒,原生 RMB,无汇率)。镜像后端 I2V_CNY_PER_SEC。
- * ⚠️ wan_i2v 720/1080 真实价待 console 核(当前 0.1 占位下限);happyhorse 高置信。
+ * wan_i2v = Wan 2.7 i2v(官方 720P ¥0.6 / 1080P ¥1 元/秒);happyhorse 高置信。
  */
 const I2V_CNY_PER_SEC: Record<PetModel, Record<VideoResolution, number>> = {
-  wan_i2v: { '720p': 0.1, '1080p': 0.1 },
+  wan_i2v: { '720p': 0.6, '1080p': 1 },
   happyhorse_i2v: { '720p': 0.9, '1080p': 1.6 },
 };
 

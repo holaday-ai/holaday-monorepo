@@ -18,6 +18,7 @@ import {
 } from '@/features/video-editing/video-edit-entry';
 import { revokeCreativePreviewUrls } from '@/lib/creative-preview-urls';
 import { createMediaActionGuard } from '@/lib/media-action-guard';
+import { filterAvailableOptions, useMediaModels } from '@/lib/media-models';
 import { normalizeTaskHubCursor } from '@/lib/task-hub-state';
 import { trpc } from '@/lib/trpc';
 import {
@@ -244,6 +245,14 @@ const CREATIVE_MODEL_OPTIONS: ReadonlyArray<CreativeModelOption> = [
     description: '画面稳定度和细节更高，适合正式成片前的高质量版本。',
     badges: ['文本成片', '高质量', '1080p'],
     tone: 'from-[#8A63FF] via-[#EA1F59] to-[#FFB23F]',
+  },
+  {
+    value: 'wanxiang',
+    name: 'Wan',
+    version: '2.7',
+    description: '万相 2.7 文生视频，支持 2–15 秒与 720p/1080p，国内直连、成本更低。',
+    badges: ['文本成片', '国内直连', '性价比'],
+    tone: 'from-[#2F6BFF] via-[#5C42E8] to-[#21C8B6]',
   },
   {
     value: 'happyhorse',
@@ -655,6 +664,20 @@ function CreativeStudioPage({
     () => videoCreationScenario('product_highlight').defaultPrompt,
   );
   const [model, setModel] = React.useState<VideoModel>('veo_fast');
+  const mediaModels = useMediaModels();
+  const normalModelOptions = React.useMemo(
+    () => filterAvailableOptions(CREATIVE_MODEL_OPTIONS, mediaModels?.video),
+    [mediaModels],
+  );
+  React.useEffect(() => {
+    // Hidden (unconfigured) normal-video model selected → move to the first usable one.
+    // Veo models need fal + DashScope, so the fallback is never a Veo-only constraint.
+    if (videoTab !== 'normal') return;
+    const first = normalModelOptions[0];
+    if (first && !normalModelOptions.some((option) => option.value === model)) {
+      setModel(first.value as VideoModel);
+    }
+  }, [model, normalModelOptions, videoTab]);
   const [modelPickerOpen, setModelPickerOpen] = React.useState(false);
   const [stylePickerOpen, setStylePickerOpen] = React.useState<CreativeStyleGroup | null>(null);
   const [referenceVideoDialogOpen, setReferenceVideoDialogOpen] = React.useState(false);
@@ -974,7 +997,7 @@ function CreativeStudioPage({
               ) : !isIpVideo ? (
                 <CreativeModelPicker
                   value={model}
-                  options={CREATIVE_MODEL_OPTIONS}
+                  options={normalModelOptions}
                   open={modelPickerOpen}
                   onOpenChange={setModelPickerOpen}
                   onChange={(value) => applyNormalVideoModel(value as NormalVideoModel)}
@@ -2815,6 +2838,7 @@ const MODEL_OPTIONS: ReadonlyArray<{ value: NormalVideoModel; label: string; hin
   { value: 'veo_fast', label: 'Veo 3.1 Fast', hint: '推荐 · 性价比' },
   { value: 'happyhorse', label: 'Happy Horse 1.1', hint: '自带音效' },
   { value: 'veo_standard', label: 'Veo 3.1 Standard', hint: '高质量' },
+  { value: 'wanxiang', label: 'Wan 2.7', hint: '国内直连 · 低成本' },
 ];
 const STYLE_OPTIONS: ReadonlyArray<{ value: VideoStyleOption; label: string }> = [
   { value: 'auto', label: '自动' },
@@ -2851,6 +2875,15 @@ export function NormalVideoForm({
 
   const [prompt, setPrompt] = React.useState('');
   const [model, setModel] = React.useState<NormalVideoModel>('veo_fast');
+  const mediaModels = useMediaModels();
+  const modelOptions = React.useMemo(
+    () => filterAvailableOptions(MODEL_OPTIONS, mediaModels?.video),
+    [mediaModels],
+  );
+  React.useEffect(() => {
+    const first = modelOptions[0];
+    if (first && !modelOptions.some((option) => option.value === model)) setModel(first.value);
+  }, [model, modelOptions]);
   const [style, setStyle] = React.useState<VideoStyleOption>('auto');
   const [aspectRatio, setAspectRatio] = React.useState<VideoAspect>('9:16');
   const [resolution, setResolution] = React.useState<VideoResolution>('1080p');
@@ -2919,7 +2952,7 @@ export function NormalVideoForm({
 
       <Section title="参数">
         <div className="space-y-5">
-          <SegGroup label="模型" value={model} options={MODEL_OPTIONS} onChange={setModel} />
+          <SegGroup label="模型" value={model} options={modelOptions} onChange={setModel} />
           <SegGroup label="风格" value={style} options={STYLE_OPTIONS} onChange={setStyle} />
           <SegGroup
             label="尺寸"

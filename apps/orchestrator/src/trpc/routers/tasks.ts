@@ -37,7 +37,6 @@ import {
   runImageTask,
 } from '../../agent/image/qwen-only-image-runner.js';
 import { orderImageAttachmentIds } from '../../agent/image/image-input-order.js';
-import { createAnthropicSubjectConsistencyVerifier } from '../../agent/image/image-subject-verifier.js';
 import { classifyExecutionMode } from '../../agent/intent-classifier.js';
 import { DrizzleLlmCallRecorder } from '../../agent/llm-call-recorder.js';
 // Phase 24 RC follow-up — nav-failure safety net. Catches the
@@ -127,6 +126,11 @@ import type { VideoScript } from '../../agent/video/types.js';
 import { VIDEO_CREATION_ALLOWLIST } from '../../agent/video/video-access.js';
 import { probeCloneReferenceQuoteFacts } from '../../agent/video/video-clone-reference.js';
 import { mediaCapabilityIssue } from '../../agent/video/media-capability.js';
+import { notifyMediaGenerationFailed } from '../../agent/video/media-failure-refund.js';
+import {
+  resolveMediaModelServices,
+  videoModelServicesReady,
+} from '../../agent/video/media-model-services.js';
 import {
   claimVideoConfirmAfterVerifierPreflight,
   deriveVideoType,
@@ -472,9 +476,7 @@ const ASHARE_QA_ALLOWLIST: ReadonlySet<string> = new Set(
 // agent/video/video-access.ts (single source shared with auth.me's
 // videoEnabled frontend gate — imported above; can't drift).
 
-// Anthropic model for the video优化/脚本 step.
-// TODO(env): 接进 env.ts (VIDEO_SCRIPT_MODEL) when the video lane env block lands.
-const VIDEO_SCRIPT_MODEL = 'claude-sonnet-4-6';
+// Video 优化/脚本 runs on the Qwen generate lane (agent/video/media-model-services.ts).
 
 /**
  * Build the simplified-video-lane config from env. Model ids / 音色 / 字体 use
@@ -561,10 +563,10 @@ function generateRuntimeUnavailableReason(reason: ModelTaskUnavailableReason): s
 }
 
 function unmigratedLaneForExecutionMode(
-  executionMode: string,
+  _executionMode: string,
 ): 'image' | 'video_generation' | null {
-  if (executionMode === 'image') return 'image';
-  if (executionMode === 'video_creation') return 'video_generation';
+  // Capability recovery: image runs on Qwen Image / Wan 2.7 Image / fal NB2,
+  // video on Wan 2.7 / fal Veo 3.1 / fal lip-sync (qwen-only-* runtimes).
   return null;
 }
 
@@ -585,7 +587,9 @@ export const stockTaskContextInput = z.object({
 });
 
 export const imageCreationOptionsInput = z.object({
-  model: z.enum(['nano_banana_2', 'nano_banana_pro']).optional(),
+  model: z
+    .enum(['auto', 'qwen_image', 'wan_image', 'nano_banana_2', 'nano_banana_pro'])
+    .optional(),
   style: z
     .enum([
       'random',
@@ -1953,6 +1957,10 @@ export const tasksRouter = router({
       executionMode === 'video_creation' ||
       input.roleId === 'video-creator' ||
       input.videoOptions?.tab !== undefined;
+    const mediaServices = resolveMediaModelServices({
+      generate: resolveGenerateRuntimeForUser(ctx.userId, userRow.modelDataRegion),
+      verifier: resolveVerifierRuntimeForUser(ctx.userId, userRow.modelDataRegion),
+    });
         const providerReadiness = {
           hasDashscope: Boolean(appEnv.DASHSCOPE_API_KEY),
           hasFal: Boolean(appEnv.FAL_KEY),
@@ -1977,7 +1985,7 @@ export const tasksRouter = router({
         if (
           executionMode === 'image' &&
           input.imageOptions?.mode === 'lock_subject' &&
-          !legacyMediaModelClient
+          !mediaServices.verifySubject
         ) {
           throw new TRPCError({
             code: 'PRECONDITION_FAILED',
@@ -1990,7 +1998,7 @@ export const tasksRouter = router({
         message: '视频生成功能尚未向当前账号开放，未创建任务或扣除额度。',
       });
     }
-    if (videoIntent && !legacyMediaModelClient) {
+    if (videoIntent && !videoModelServicesReady(mediaServices)) {
       throw new TRPCError({
         code: 'PRECONDITION_FAILED',
         message: '视频生成服务尚未就绪，未创建任务或扣除额度。',
@@ -1999,7 +2007,7 @@ export const tasksRouter = router({
     const willCreateVideoQuote =
       appEnv.VIDEO_CREATION_ENABLED &&
       videoAllowed &&
-      Boolean(legacyMediaModelClient) &&
+      videoModelServicesReady(mediaServices) &&
       videoIntent;
     if (!input.localChrome && appEnv.NODE_ENV === 'production' && executionMode === 'browser' && !ctx.browserPool) {
       // Server-side browser tasks must use the per-task pool because that
@@ -2361,20 +2369,12 @@ export const tasksRouter = router({
             flashModel: appEnv.GEMINI_IMAGE_MODEL,
             proModel: appEnv.GEMINI_IMAGE_MODEL_PRO,
             ...(input.imageOptions?.model
-              ? {
-                  preferredTier:
-                    input.imageOptions.model === 'nano_banana_pro'
-                      ? ('pro' as const)
-                      : ('flash' as const),
-                }
+              ? { preferredModel: input.imageOptions.model }
               : {}),
             save,
             logger: ctx.logger,
-                  ...(input.imageOptions?.mode === 'lock_subject' && legacyMediaModelClient
-                    ? {
-                        verifySubject:
-                          createAnthropicSubjectConsistencyVerifier(legacyMediaModelClient),
-                      }
+                  ...(input.imageOptions?.mode === 'lock_subject' && mediaServices.verifySubject
+                    ? { verifySubject: mediaServices.verifySubject }
                     : {}),
           });
         }
@@ -2421,6 +2421,18 @@ export const tasksRouter = router({
               metadata,
             });
             imagePersisted = persisted.persisted;
+            if (persisted.persisted) {
+              await notifyMediaGenerationFailed(
+                {
+                  taskId,
+                  userIdInternal: userRow.id,
+                  lane: 'image',
+                  reason: result.reason ?? '图片生成失败，请稍后重试。',
+                  nothingDelivered: result.attachments.length === 0,
+                },
+                ctx.logger,
+              );
+            }
           }
         } catch (err) {
           ctx.logger.error({ err, taskId }, 'image: persist failed');
@@ -2479,6 +2491,10 @@ export const tasksRouter = router({
               status: 'failed',
               reason,
             });
+            await notifyMediaGenerationFailed(
+              { taskId, userIdInternal: userRow.id, lane: 'image', reason, nothingDelivered: true },
+              ctx.logger,
+            );
           }
         } catch (persistErr) {
           ctx.logger.error(
@@ -2507,8 +2523,8 @@ export const tasksRouter = router({
       // 界面显式带了 videoOptions.tab(普通/宠物/IP)。后者是关键——宠物动作 prompt / IP 口播文案
       // 本身不含「视频」关键词,分类器会判 generate;只有 videoOptions.tab 这个显式信号能可靠把
       // 三类 tab 提交都送进视频 fork(只有视频界面会设它,其它 createTask 路径绝不带)。
-      if (willCreateVideoQuote && legacyMediaModelClient) {
-        const anthropicClient = legacyMediaModelClient;
+      if (willCreateVideoQuote && mediaServices.scriptLlm) {
+        const scriptLlm = mediaServices.scriptLlm;
             const { buildFallbackVideoScript, optimizeUserScript, segmentCapForText } =
               await import('../../agent/video/video-script.js');
         // Phase 2 第一期 — SPA「普通视频」面板把模型档/风格/画幅/画质/时长带上来。
@@ -2705,18 +2721,7 @@ export const tasksRouter = router({
           const segCap = segmentCapForText(input.intent);
           script = await optimizeUserScript(
             { userText: input.intent, maxSegments: segCap, ...(style ? { style } : {}) },
-            {
-              llm: async ({ system, user }) => {
-                const resp = await anthropicClient.messages.create({
-                  model: VIDEO_SCRIPT_MODEL,
-                  max_tokens: 2000,
-                  system,
-                  messages: [{ role: 'user', content: user }],
-                });
-                const b = resp.content[0];
-                return b && b.type === 'text' ? b.text : '';
-              },
-            },
+            { llm: scriptLlm },
           );
         } catch (err) {
           ctx.logger.warn(
@@ -3546,7 +3551,8 @@ export const tasksRouter = router({
         resultNotice: deferredMediaNotice({
           classifiedExecutionMode,
           executionMode,
-          mediaLaneAvailable: false,
+          // Batch 05 wired the image/video lanes back to real executors.
+          mediaLaneAvailable: true,
         }),
       });
     }
@@ -7894,6 +7900,8 @@ export const tasksRouter = router({
         .select({
           id: users.id,
           plan: users.plan,
+          // Qwen model region for the script / frame-QA runtimes.
+          modelDataRegion: users.modelDataRegion,
           // Phase 2 第三期 — IP 人物 lane 需要克隆声音 + 出镜底版 + 本人授权(合规硬闸)。
           qwenVoiceId: users.qwenVoiceId,
           baseVideoFileId: users.baseVideoFileId,
@@ -7963,73 +7971,8 @@ export const tasksRouter = router({
         return { taskId: input.taskId, status: 'awaiting_user' as const };
       }
 
-      // The quote may predate the Qwen-only cutover. A positive answer must
-      // not debit quota or create a generation child while the media lane is
-      // migration-unavailable. Settle the quote itself as an explicit failed
-      // terminal so repeated confirmation cannot spin or charge twice.
-      if (appEnv.MODEL_RUNTIME_POLICY === 'qwen_only') {
-        const unavailable = modelRuntimeWiring.resolveUnmigrated('video_generation');
-        const unavailableReason = modelTaskFailureReason(unavailable.reasonCode);
-        const previousResult =
-          row.result && typeof row.result === 'object'
-            ? (row.result as Record<string, unknown>)
-            : {};
-        const previousMetadata =
-          previousResult.metadata && typeof previousResult.metadata === 'object'
-            ? (previousResult.metadata as Record<string, unknown>)
-            : {};
-        const failed = await ctx.db.transaction(async (tx) => {
-        const updateResult = await tx
-          .update(tasksTable)
-          .set({
-            status: 'failed',
-            awaitingKind: null,
-            awaitingQuestion: null,
-            errorCode: unavailable.reasonCode,
-            errorMessage: unavailableReason,
-            completedAt: new Date(),
-            result: {
-              ...previousResult,
-              reason: unavailableReason,
-              metadata: {
-                ...previousMetadata,
-                reasonCode: unavailable.reasonCode,
-              },
-            },
-          })
-          .where(
-            and(
-              eq(tasksTable.id, row.id),
-              eq(tasksTable.status, 'awaiting_user'),
-              eq(tasksTable.awaitingKind, 'video_quote'),
-            ),
-          );
-        if (readAffectedRows(updateResult) !== 1) return false;
-        await tx.insert(taskEvents).values({
-          externalId: newExternalId('taskEvent'),
-          taskId: row.id,
-          type: 'task.failed',
-          actor: 'system',
-          payload: {
-            source: 'video_quote',
-            from: 'awaiting_user',
-            to: 'failed',
-            errorCode: unavailable.reasonCode,
-          },
-        });
-        return true;
-        });
-        if (!failed) {
-          throw new TRPCError({ code: 'NOT_FOUND', message: '找不到待确认的视频报价' });
-        }
-        broadcastToUser(ctx.userId, {
-          type: 'server.task.terminal',
-          taskId: input.taskId,
-          status: 'failed',
-          reason: unavailableReason,
-        });
-        return { taskId: input.taskId, status: 'failed' as const };
-      }
+      // Capability recovery: confirmed quotes generate on the Qwen-only media
+      // runtime (agent/video/qwen-only-video-runtime.ts); no migration gate.
 
       // Validate the quote payload before the atomic consume. A malformed
       // quote should not be marked completed before we know generation can
@@ -8143,8 +8086,12 @@ export const tasksRouter = router({
           message: ipPreflight.issue,
         });
       }
+      const confirmMediaServices = resolveMediaModelServices({
+        generate: resolveGenerateRuntimeForUser(ctx.userId, userRow.modelDataRegion),
+        verifier: resolveVerifierRuntimeForUser(ctx.userId, userRow.modelDataRegion),
+      });
       const preflight = await claimVideoConfirmAfterVerifierPreflight(
-        { choice, hasVerifier: Boolean(legacyMediaModelClient) },
+        { choice, hasVerifier: Boolean(confirmMediaServices.analyzeVideoQuality) },
         async () => true,
       );
       if (preflight.issue) {
@@ -8227,7 +8174,6 @@ export const tasksRouter = router({
       // generate_video | generate_image — 外部供应商调用只在事务提交后启动。
       broadcastSubStatus(ctx.userId, newTaskId, 'generating');
 
-      const anthropicClient = legacyMediaModelClient;
       const userExternalId = ctx.userId;
       const userInternalId = userRow.id;
       const ipVoiceId = userRow.qwenVoiceId; // Phase 2 第三期 IP lane
@@ -8252,7 +8198,7 @@ export const tasksRouter = router({
           '../../agent/video/qwen-only-video-runtime.js'
         );
         const { runFfmpeg } = await import('../../agent/video/ffmpeg-exec.js');
-        const { createAnthropicVideoQualityAnalyzer, verifyFinalVideoQuality } = await import(
+        const { verifyFinalVideoQuality } = await import(
           '../../agent/video/video-quality-verifier.js'
         );
         const { verifyAudioVisualSync } = await import(
@@ -8269,20 +8215,10 @@ export const tasksRouter = router({
         let finalAtt: ImageAttachment | null = null;
         // 首帧 poster 的下载 URL（poster 由 lane 在成片后抽帧存盘，再盖到 finalAtt 上）。
         let posterUrl: string | null = null;
-        const llm = async ({ system, user }: { system: string; user: string }) => {
-          if (!anthropicClient) return '';
-          const resp = await anthropicClient.messages.create({
-            model: VIDEO_SCRIPT_MODEL,
-            max_tokens: 2000,
-            system,
-            messages: [{ role: 'user', content: user }],
-          });
-          const b = resp.content[0];
-          return b && b.type === 'text' ? b.text : '';
-        };
-        const analyzeVideoQuality = anthropicClient
-          ? createAnthropicVideoQualityAnalyzer(anthropicClient)
-          : async () => '';
+        // Script: Qwen generate lane. Frame QA: Qwen vision (QWEN_VISION_MODEL).
+        const llm = confirmMediaServices.scriptLlm ?? (async () => '');
+        const analyzeVideoQuality =
+          confirmMediaServices.analyzeVideoQuality ?? (async () => '');
         const verifyFinalVideo = (qualityInput: Parameters<typeof verifyFinalVideoQuality>[0]) =>
           verifyFinalVideoQuality(qualityInput, {
             runFfmpeg,
@@ -8704,6 +8640,16 @@ export const tasksRouter = router({
               status: 'failed',
               reason: friendlyReason,
             });
+            await notifyMediaGenerationFailed(
+              {
+                taskId: newTaskId,
+                userIdInternal: userInternalId,
+                lane: 'video_creation',
+                reason: friendlyReason,
+                nothingDelivered: true,
+              },
+              logger,
+            );
           }
         } finally {
           await fsp.rm(workdir, { recursive: true, force: true }).catch(() => {});

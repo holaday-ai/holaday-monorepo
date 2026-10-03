@@ -24,17 +24,23 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { videoParameterIssue } from '@holaday/shared-types';
+import type {
+  ImageGenerateFn,
+  ImageGenerateResult as GenerateImagesResult,
+} from '../image/image-provider-types.js';
+import { ImageProviderError, imageErrorInfo } from '../image/image-provider-types.js';
 import {
-  GeminiImageError,
-  generateImages,
-  type GenerateImagesResult,
-} from '../image/gemini-image-client.js';
+  type ImageProviderConfig,
+  availableImageModels,
+  createProviderImageGenerate,
+} from '../image/image-providers.js';
+import { generateFalVeoVideo } from './fal-veo-client.js';
 import { ffprobeDurationMs, renderImageClip, renderVideoClip, runFfmpeg } from './ffmpeg-exec.js';
-import { synthesizeGeminiSpeech } from './gemini-tts-client.js';
+import type { synthesizeGeminiSpeech } from './gemini-tts-client.js';
 import { synthesizeSpeech } from './qwen-voice-clone-client.js';
 import { buildAss } from './timeline.js';
 import type { VideoScript } from './types.js';
-import { generateVeoVideo } from './veo-client.js';
+import { type GenerateVeoParams, VeoError, type VeoResult } from './veo-types.js';
 import { buildComposeCommand } from './video-compose.js';
 import { downloadToBuffer, downloadToFile } from './video-http.js';
 import { type PipelineLogger, type VideoPipelineDeps, runVideoPipeline } from './video-pipeline.js';
@@ -412,8 +418,22 @@ export interface SimpleVideoConfig {
   readonly falLipsyncModel?: string;
   /** Clone-video override; defaults independently to Sync Lipsync 3. */
   readonly falCloneLipsyncModel?: string;
-  /** Shared Google key (same one as #5 nano banana) — Veo video AND nano banana image. */
+  /**
+   * Dormant Google key (legacy Veo / nano banana / Gemini TTS). The Qwen-only
+   * production runtime leaves it empty; the Gemini clients are only reachable
+   * through `overrides`.
+   */
   readonly geminiApiKey?: string;
+  /**
+   * Veo 3.1 provider. 'fal' = production (FAL_KEY + fal endpoint ids in
+   * veo*Model). 'gemini' (default, legacy) needs an injected Gemini client.
+   */
+  readonly veoProvider?: 'gemini' | 'fal';
+  /**
+   * Production image providers (Qwen Image / Wan 2.7 Image / fal NB2) for the
+   * static-image visual mode and composition anchors. Absent → legacy Gemini.
+   */
+  readonly imageProviders?: ImageProviderConfig;
   readonly geminiBaseUrl?: string;
   /** Automatic narration fallback when DashScope TTS is unavailable. */
   readonly geminiTtsModel?: string;
@@ -458,9 +478,9 @@ export interface SimpleVideoOptions {
 interface SimpleFns {
   synthesizeSpeech: typeof synthesizeSpeech;
   synthesizeGeminiSpeech: typeof synthesizeGeminiSpeech;
-  generateImages: typeof generateImages; // nano banana (image source)
+  generateImages: ImageGenerateFn; // still-image source (providers or injected Gemini)
   generateBrollVideo: typeof generateBrollVideo; // wanxiang t2v (fallback)
-  generateVeoVideo: typeof generateVeoVideo;
+  generateVeoVideo: (params: GenerateVeoParams) => Promise<VeoResult>;
   downloadToBuffer: typeof downloadToBuffer;
   downloadToFile: typeof downloadToFile;
   ffprobeDurationMs: typeof ffprobeDurationMs;
@@ -474,14 +494,52 @@ interface SimpleFns {
 }
 
 function isRetryableCompositionAnchorError(err: unknown): boolean {
-  if (!(err instanceof GeminiImageError)) return false;
-  if (err.kind === 'timeout' || err.kind === 'network') return true;
-  return err.kind === 'http' && (err.status === 429 || err.status === 503);
+  const info = imageErrorInfo(err);
+  if (!info) return false;
+  if (info.kind === 'timeout' || info.kind === 'network') return true;
+  return info.kind === 'http' && (info.status === 429 || info.status === 503);
 }
 
 function compositionAnchorErrorKind(err: unknown): string {
-  return err instanceof GeminiImageError ? err.kind : 'unknown';
+  return imageErrorInfo(err)?.kind ?? 'unknown';
 }
+
+/** Still-image source usable (providers configured, or the legacy Gemini key). */
+function stillImageReady(cfg: SimpleVideoConfig): boolean {
+  return cfg.imageProviders
+    ? availableImageModels(cfg.imageProviders).length > 0
+    : Boolean(cfg.geminiApiKey);
+}
+
+function veoReady(cfg: SimpleVideoConfig): boolean {
+  return cfg.veoProvider === 'fal' ? Boolean(cfg.falApiKey) : Boolean(cfg.geminiApiKey);
+}
+
+function veoCredentials(cfg: SimpleVideoConfig): {
+  apiKey: string;
+  baseUrl?: string;
+  downloadHeaders?: Record<string, string>;
+} {
+  if (cfg.veoProvider === 'fal') {
+    return { apiKey: cfg.falApiKey ?? '', ...(cfg.falBaseUrl ? { baseUrl: cfg.falBaseUrl } : {}) };
+  }
+  return {
+    apiKey: cfg.geminiApiKey ?? '',
+    ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
+    // Gemini Veo result URIs need the key; fal returns a public CDN URL.
+    downloadHeaders: { 'x-goog-api-key': cfg.geminiApiKey ?? '' },
+  };
+}
+
+const dormantGeminiImages: ImageGenerateFn = async () => {
+  throw new ImageProviderError('legacy Gemini image client is not wired', 'no_api_key');
+};
+const dormantGeminiSpeech: typeof synthesizeGeminiSpeech = async () => {
+  throw new SimpleVideoError('legacy Gemini TTS client is not wired', 'config', false);
+};
+const dormantGeminiVeo = async (): Promise<VeoResult> => {
+  throw new VeoError('legacy Gemini Veo client is not wired', 'no_api_key', undefined, undefined, false);
+};
 
 async function generateRequiredHandCompositionAnchor(
   input: {
@@ -581,13 +639,20 @@ interface SimplePipelinePromptContext {
   readonly onAudioEngine?: (engine: 'qwen' | 'gemini') => void;
 }
 
-function realFns(): SimpleFns {
+/**
+ * Real model clients. Production wires DashScope (Qwen TTS, Wan 2.7 t2v),
+ * fal Veo 3.1 and the image providers from `cfg`; the Gemini clients are
+ * hidden behind the Qwen-only boundary and only usable through `overrides`.
+ */
+function realFns(cfg: SimpleVideoConfig): SimpleFns {
   return {
     synthesizeSpeech,
-    synthesizeGeminiSpeech,
-    generateImages,
+    synthesizeGeminiSpeech: dormantGeminiSpeech,
+    generateImages: cfg.imageProviders
+      ? createProviderImageGenerate(cfg.imageProviders)
+      : dormantGeminiImages,
     generateBrollVideo,
-    generateVeoVideo,
+    generateVeoVideo: cfg.veoProvider === 'fal' ? generateFalVeoVideo : dormantGeminiVeo,
     downloadToBuffer,
     downloadToFile,
     ffprobeDurationMs,
@@ -608,7 +673,7 @@ export function createSimplePipelineDeps(
   userText = '',
   promptContext: SimplePipelinePromptContext = {},
 ): VideoPipelineDeps {
-  const fns = { ...realFns(), ...(svc.overrides ?? {}) };
+  const fns = { ...realFns(cfg), ...(svc.overrides ?? {}) };
   const ws = cfg.dashscopeWorkspaceId ? { workspaceId: cfg.dashscopeWorkspaceId } : {};
   const ffOpts = cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {};
   const visualMode = opts.visualMode ?? 'video';
@@ -741,9 +806,10 @@ export function createSimplePipelineDeps(
           // Veo (default veo_fast). NOTE: the Gemini Developer API ALWAYS renders
           // an audio track — it can't be disabled (generateAudio:false → 400) and
           // there's no audio-off price tier. We discard it and dub with Qwen Cherry.
+          const veo = veoCredentials(cfg);
           const v = await fns.generateVeoVideo({
-            apiKey: cfg.geminiApiKey ?? '',
-            ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
+            apiKey: veo.apiKey,
+            ...(veo.baseUrl ? { baseUrl: veo.baseUrl } : {}),
             model: resolveVeoModel(videoSource, cfg),
             prompt: candidatePrompt,
             negativePrompt: scenePolicy.negativePrompt,
@@ -758,7 +824,7 @@ export function createSimplePipelineDeps(
             resolution,
           });
           url = v.videoUri;
-          headers = { 'x-goog-api-key': cfg.geminiApiKey ?? '' }; // Veo uri needs the key
+          headers = veo.downloadHeaders;
         } else {
           // wanxiang / happyhorse t2v — 同 DashScope video-synthesis 端点, 改 model + size.
           const isHH = videoSource === 'happyhorse';
@@ -993,14 +1059,11 @@ export async function runSimpleVideoCreation(
     throw new SimpleVideoError('Veo 1080p requires an 8-second duration', 'invalid_options');
   }
   const aspect = resolveAspect(opts.aspectRatio ?? '9:16');
-  // Veo (any tier) AND nano banana image both run on the shared Google key.
-  const needsGemini =
-    visualMode === 'image' || (visualMode === 'video' && isVeoSource(videoSource));
-  if (needsGemini && !cfg.geminiApiKey) {
-    throw new SimpleVideoError(
-      'Veo/nano banana selected but GEMINI_API_KEY not configured',
-      'config',
-    );
+  if (visualMode === 'image' && !stillImageReady(cfg)) {
+    throw new SimpleVideoError('Still-image source selected but no image provider is configured', 'config');
+  }
+  if (visualMode === 'video' && isVeoSource(videoSource) && !veoReady(cfg)) {
+    throw new SimpleVideoError('Veo selected but its provider key is not configured', 'config');
   }
   if (visualMode === 'video' && videoSource === 'wanxiang' && !cfg.dashscopeApiKey) {
     throw new SimpleVideoError(
@@ -1008,7 +1071,7 @@ export async function runSimpleVideoCreation(
       'config',
     );
   }
-  const fns = { ...realFns(), ...(svc.overrides ?? {}) };
+  const fns = { ...realFns(cfg), ...(svc.overrides ?? {}) };
   const ffOpts = cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {};
 
   // ① optimize the user's draft (faithful, no fabrication) — UNLESS a

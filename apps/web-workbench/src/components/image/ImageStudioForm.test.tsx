@@ -208,7 +208,7 @@ describe('image studio form', () => {
     const dialog = screen.getByRole('dialog', { name: '生成设置' });
     expect(
       within(dialog).getByRole('group', { name: '模型' }).querySelectorAll('button'),
-    ).toHaveLength(2);
+    ).toHaveLength(4);
     expect(
       within(dialog).getByRole('group', { name: '风格' }).querySelectorAll('button'),
     ).toHaveLength(16);

@@ -6,6 +6,7 @@ import {
   imageResultActions,
 } from '@/lib/image-history-row';
 import { trpc } from '@/lib/trpc';
+import { imageModelLabel } from '@/types/image';
 import type { UiTask } from '@/types/task';
 import {
   Archive,
@@ -136,7 +137,7 @@ export function ImageResultPanel({
           </div>
           <p className="mt-1 text-xs text-[#837985]">
             实际生成 {row.downloads.length} 张 · {row.imageOptions.aspectRatio} ·{' '}
-            {row.imageOptions.model === 'nano_banana_pro' ? 'Nano Banana Pro' : 'Nano Banana 2'}
+            {imageModelLabel(row.imageOptions.model)}
           </p>
         </div>
       </div>

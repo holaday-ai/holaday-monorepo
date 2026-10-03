@@ -108,3 +108,34 @@ export async function sweepPlatformFailureRefunds(
   }
   return refunded;
 }
+
+/**
+ * Immediate refund for a task whose own lane already knows the failure was on
+ * our side (e.g. media generation). Same exactly-once ledger as the sweeper.
+ */
+export async function refundTaskOnce(
+  db: DB,
+  quota: QuotaRefunder,
+  taskExternalId: string,
+  reason: string,
+  now: () => number = Date.now,
+): Promise<boolean> {
+  const [row] = await db
+    .select({
+      id: quotaRefunds.id,
+      userId: quotaRefunds.userId,
+      plan: quotaRefunds.plan,
+      isOpus: quotaRefunds.isOpus,
+    })
+    .from(quotaRefunds)
+    .where(and(eq(quotaRefunds.taskExternalId, taskExternalId), isNull(quotaRefunds.refundedAt)))
+    .limit(1);
+  if (!row) return false;
+  const claim = await db
+    .update(quotaRefunds)
+    .set({ refundedAt: new Date(now()), refundReason: reason.slice(0, 64) })
+    .where(and(eq(quotaRefunds.id, row.id), isNull(quotaRefunds.refundedAt)));
+  if (readAffectedRows(claim) !== 1) return false;
+  await quota.refund(row.userId, row.plan as PlanId, row.isOpus);
+  return true;
+}

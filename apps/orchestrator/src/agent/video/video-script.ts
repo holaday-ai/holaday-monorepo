@@ -18,9 +18,31 @@
  */
 
 import { z } from 'zod';
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import type { VideoScript } from './types.js';
 
 export type LlmComplete = (params: { system: string; user: string }) => Promise<string>;
+
+/**
+ * Script / optimize LLM over the model-catalog Messages adapter (Qwen
+ * `generate` lane, standard purpose). Replaces the legacy Anthropic call.
+ */
+export function createMessagesScriptLlm(adapter: MessagesAdapter): LlmComplete {
+  return async ({ system, user }) => {
+    const response = await adapter.create(
+      {
+        maxTokens: 2_000,
+        system,
+        messages: [{ role: 'user', content: user }],
+      },
+      { timeoutMs: 60_000, maxRetries: 2 },
+    );
+    return response.content
+      .filter((block) => block.type === 'text')
+      .map((block) => (block.type === 'text' ? block.text : ''))
+      .join('');
+  };
+}
 
 export interface GenerateScriptInput {
   readonly userPrompt: string;

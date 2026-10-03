@@ -159,15 +159,15 @@ export interface VideoQuote {
 // ---------------------------------------------------------------------------
 // BOSS 2026-06-16 核价:
 //   happyhorse-1.0-i2v: 720P 0.9 / 1080P 1.6 元/秒 (高置信, per-resolution, 与 t2v 同价).
-//   wan2.2-i2v-flash:   仅确认 floor「低至 0.1 元/秒」(约 480P);720/1080 官方价表 JS 渲染
-//     未能抓取 → TODO(pricing): 灰度前必须 console 核 wan i2v 720/1080 真实 元/秒,
-//     当前两档都用 0.1 为占位**下限**(不烧不计费阶段, 仅供预览,确认报价以实际为准).
+//   wan2.7-i2v (2026-10 capability recovery 默认): 720P ¥0.6 / 1080P ¥1 元/秒
+//     (官方模型页 https://help.aliyun.com/en/model-studio/wan2-7-i2v ,北京区价;
+//     新加坡区按 USD 计价,灰度前 console 复核).
 const I2V_CNY_PER_SEC: Record<PetI2vModel, Record<Resolution, number>> = {
-  wan_i2v: { '720p': 0.1, '1080p': 0.1 }, // ⚠️ 占位下限, 待 console 核
+  wan_i2v: { '720p': 0.6, '1080p': 1 },
   happyhorse_i2v: { '720p': 0.9, '1080p': 1.6 },
 };
 const I2V_LABEL: Record<PetI2vModel, string> = {
-  wan_i2v: '万相 i2v(省钱)',
+  wan_i2v: '万相 i2v(Wan 2.7)',
   happyhorse_i2v: '快马 i2v(高质量)',
 };
 

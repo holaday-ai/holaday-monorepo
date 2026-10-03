@@ -38,18 +38,22 @@ function isKeywordOnlyMedia(mode: ExecutionMode): boolean {
 
 /**
  * Appended to the text result when a keyword-only media request was answered
- * as text because media generation is not open yet. Null when not applicable.
+ * as text. Points to the media workbench (open or not yet). Null when not applicable.
  */
 export function deferredMediaNotice(input: {
   classifiedExecutionMode: ExecutionMode;
   executionMode: ExecutionMode;
   mediaLaneAvailable: boolean;
 }): string | null {
-  if (input.mediaLaneAvailable || input.executionMode !== 'generate') return null;
+  if (input.executionMode !== 'generate') return null;
   if (input.classifiedExecutionMode === 'image')
-    return '（配图生成即将开放，本次先完成文字部分。）';
+    return input.mediaLaneAvailable
+      ? '（本次先完成文字部分；如需生成配图，请到「图片」页面提交。）'
+      : '（配图生成即将开放，本次先完成文字部分。）';
   if (input.classifiedExecutionMode === 'video_creation')
-    return '（视频生成即将开放，本次先完成文字部分。）';
+    return input.mediaLaneAvailable
+      ? '（本次先完成文字部分；如需生成视频，请到「视频」页面提交。）'
+      : '（视频生成即将开放，本次先完成文字部分。）';
   return null;
 }
 

@@ -2,8 +2,15 @@
  * Image execution lane (sprint #5) — orchestrates a 文生图 / 图生图
  * task end-to-end:
  *
- *   intent → pickImageModel (NB2 vs Pro) → generateImages (Gemini)
+ *   intent → model route → generate (injected model client)
  *          → persist each PNG to R2 (injected `save`) → attachments[]
+ *
+ * Model clients are injected (`generate`). Production
+ * (`qwen-only-image-runner.ts`) wires the DashScope Qwen Image / Wan 2.7
+ * Image and fal Nano Banana 2 dispatcher plus a per-task `route`
+ * (`model-router.ts#pickImageModelForTask`). The dormant Gemini client
+ * (`gemini-image-client.ts#generateImages`) keeps the identical signature and
+ * can still be passed as `generate` with the legacy NB2/Pro routing.
  *
  * Persistence + DB are injected via `save` so this stays a pure,
  * unit-testable orchestrator — the tasks.ts branch wires the real
@@ -13,13 +20,18 @@
 
 import type { Logger } from 'pino';
 import {
-  generateImages,
-  GeminiImageError,
-  type GeminiApiVersion,
-  type GeminiImageInput,
-  type GeneratedImage,
-} from './gemini-image-client.js';
-import { pickImageModel, DEFAULT_FLASH_MODEL, type ImageModelTier } from './model-router.js';
+  type GeneratedImageOutput,
+  type ImageGenerateFn,
+  type ImageInput,
+  ImageProviderError,
+  imageErrorInfo,
+  isProviderUnavailableError,
+  isTransientImageError,
+} from './image-provider-types.js';
+import { DEFAULT_FLASH_MODEL, type ImageModelTier, pickImageModel } from './model-router.js';
+
+type GeminiImageInput = ImageInput;
+type GeneratedImage = GeneratedImageOutput;
 
 /** Matches the SPA's metadata.attachments entry shape (task-store.ts). */
 export interface ImageAttachment {
@@ -50,6 +62,8 @@ export interface RunImageTaskResult {
   /** The model id actually used. */
   model?: string;
   tier?: ImageModelTier;
+  /** Product model key actually used (route mode), e.g. 'qwen_image'. */
+  modelKey?: string;
   subjectConsistency?: {
     checked: number;
     passed: number;
@@ -88,6 +102,17 @@ export interface RunImageTaskOpts {
   proModel?: string;
   /** Explicit model tier selected by the image-task UI. */
   preferredTier?: ImageModelTier;
+  /**
+   * Product model key picked in the UI ('qwen_image' | 'wan_image' |
+   * 'nano_banana_2'); consumed by the production runner's router.
+   */
+  preferredModel?: string;
+  /**
+   * Precomputed per-task model route. When present it replaces the legacy
+   * Gemini NB2/Pro routing; fallbacks are tried in order on transient or
+   * provider-unavailable failures.
+   */
+  route?: ImageRoute;
   /** Per-call wall-clock; forwarded to the adapter. */
   timeoutMs?: number;
   /** Exact number of independently generated options requested by the UI. */
@@ -96,10 +121,57 @@ export interface RunImageTaskOpts {
   aspectRatio?: '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
   save: SaveImageFn;
   logger: Logger;
-  /** Injectable adapter for tests; defaults to the real Gemini client. */
-  generate?: typeof generateImages;
+  /** Model client. Required in production; missing → fails as "not configured". */
+  generate?: ImageGenerateFn;
   /** Required in lock_subject mode; generated candidates fail closed without it. */
   verifySubject?: VerifySubjectFn;
+}
+
+export interface ImageRouteChoice {
+  /** Provider model id sent to `generate`. */
+  readonly model: string;
+  /** Text-rendering grade ('pro' adds the marketing-copy constraint). */
+  readonly tier: ImageModelTier;
+  /** Human label for the summary. */
+  readonly label: string;
+  /** Product model key (e.g. 'qwen_image'). */
+  readonly key?: string;
+  /** Legacy Gemini API surface; omitted for other providers. */
+  readonly apiVersion?: string;
+  readonly resolution?: string;
+}
+
+export interface ImageRoute {
+  readonly primary: ImageRouteChoice;
+  readonly fallbacks: readonly ImageRouteChoice[];
+  readonly reason?: string;
+  /** Extra summary note (e.g. the selected model was unavailable). */
+  readonly note?: string;
+}
+
+const missingGenerate: ImageGenerateFn = async () => {
+  throw new ImageProviderError('image model client not configured', 'no_api_key');
+};
+
+function legacyRoute(intent: string, opts: RunImageTaskOpts): ImageRoute {
+  const decision = pickImageModel(intent, {
+    ...(opts.flashModel ? { flashModel: opts.flashModel } : {}),
+    ...(opts.proModel ? { proModel: opts.proModel } : {}),
+    ...(opts.preferredTier ? { preferredTier: opts.preferredTier } : {}),
+  });
+  const flashModel = opts.flashModel ?? DEFAULT_FLASH_MODEL;
+  const primary: ImageRouteChoice = {
+    model: decision.model,
+    tier: decision.tier,
+    label: decision.tier === 'pro' ? 'Nano Banana Pro' : 'Nano Banana 2',
+    apiVersion: decision.tier === 'pro' ? 'v1beta' : 'v1',
+    ...(decision.resolution ? { resolution: decision.resolution } : {}),
+  };
+  const fallbacks: ImageRouteChoice[] =
+    decision.tier === 'pro' && decision.model !== flashModel
+      ? [{ model: flashModel, tier: 'flash', label: 'Nano Banana 2', apiVersion: 'v1' }]
+      : [];
+  return { primary, fallbacks, reason: decision.reason };
 }
 
 export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTaskResult> {
@@ -125,112 +197,100 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
     return { status: 'failed', summary: '', reason: '请描述你想生成的图片。', attachments: [] };
   }
 
-  const decision = pickImageModel(intent, {
-    ...(opts.flashModel ? { flashModel: opts.flashModel } : {}),
-    ...(opts.proModel ? { proModel: opts.proModel } : {}),
-    ...(opts.preferredTier ? { preferredTier: opts.preferredTier } : {}),
-  });
-  const generate = opts.generate ?? generateImages;
-  const flashModel = opts.flashModel ?? DEFAULT_FLASH_MODEL;
+  const routed = Boolean(opts.route);
+  const route = opts.route ?? legacyRoute(intent, opts);
+  const generate = opts.generate ?? missingGenerate;
   // P0 compliance — marketing/poster images must NOT invent promo copy.
-  const promptText = buildImageExecutionPrompt(intent, decision.tier, opts.mode);
+  const promptText = buildImageExecutionPrompt(intent, route.primary.tier, opts.mode);
 
-  const apiVersionForTier = (tier: ImageModelTier): GeminiApiVersion =>
-    tier === 'pro' ? 'v1beta' : 'v1';
-  const runGenerate = (
-    model: string,
-    apiVersion: GeminiApiVersion,
-    resolution?: string,
-    prompt = promptText,
-  ) =>
+  const runGenerate = (choice: ImageRouteChoice, prompt = promptText, withResolution = true) =>
     generate({
       apiKey: opts.apiKey,
       prompt,
-      model,
-      apiVersion,
+      model: choice.model,
+      ...(choice.apiVersion ? { apiVersion: choice.apiVersion } : {}),
       ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
       ...(hasInputs ? { inputImages: opts.inputImages } : {}),
-      ...(resolution ? { resolution } : {}),
+      ...(withResolution && choice.resolution ? { resolution: choice.resolution } : {}),
       ...(opts.aspectRatio ? { aspectRatio: opts.aspectRatio } : {}),
       ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
     });
 
-  const isOverload = (err: unknown): boolean =>
-    err instanceof GeminiImageError &&
-    ((err.kind === 'http' && (err.status === 503 || err.status === 429)) ||
-      err.kind === 'timeout');
-
-  let result;
-  let effectiveTier = decision.tier;
-  let degraded = false;
-  try {
-    result = await runGenerate(
-      decision.model,
-      apiVersionForTier(decision.tier),
-      decision.resolution,
-    );
-  } catch (err) {
-    // Pro overloaded (503/429/timeout after the client's own retries)
-    // → degrade to NB2 so the user still gets an image (lower text
-    // fidelity) instead of a hard failure.
-    if (decision.tier === 'pro' && decision.model !== flashModel && isOverload(err)) {
-      opts.logger.warn(
-        { kind: err instanceof GeminiImageError ? err.kind : 'unknown', from: decision.model },
-        'image: Pro overloaded — degrading to NB2',
+  // Legacy Gemini routing only degraded Pro→NB2 on overload (503/429/timeout).
+  // Provider routes also move on when a provider is unconfigured/out of balance.
+  const shouldTryFallback = (err: unknown): boolean => {
+    if (!routed) {
+      const info = imageErrorInfo(err);
+      return (
+        !!info &&
+        ((info.kind === 'http' && (info.status === 503 || info.status === 429)) ||
+          info.kind === 'timeout')
       );
-      try {
-        result = await runGenerate(flashModel, 'v1'); // drop hi-res on the NB2 fallback
-        degraded = true;
-        effectiveTier = 'flash';
-      } catch (err2) {
+    }
+    return isTransientImageError(err) || isProviderUnavailableError(err);
+  };
+
+  let result: Awaited<ReturnType<ImageGenerateFn>> | undefined;
+  let used = route.primary;
+  let lastError: unknown;
+  const candidates = [route.primary, ...route.fallbacks];
+  for (const [index, choice] of candidates.entries()) {
+    try {
+      result = await runGenerate(choice, promptText, index === 0);
+      used = choice;
+      break;
+    } catch (err) {
+      lastError = err;
+      const info = imageErrorInfo(err);
+      const next = candidates[index + 1];
+      if (next && shouldTryFallback(err)) {
         opts.logger.warn(
-          {
-            err: err2 instanceof Error ? err2.message : String(err2),
-            status: err2 instanceof GeminiImageError ? err2.status : undefined,
-            detail: err2 instanceof GeminiImageError ? err2.detail : undefined,
-          },
-          'image: NB2 fallback also failed',
+          { kind: info?.kind ?? 'unknown', status: info?.status, from: choice.model, to: next.model },
+          routed
+            ? 'image: model unavailable — falling back to next routed model'
+            : 'image: Pro overloaded — degrading to NB2',
         );
-        return {
-          status: 'failed',
-          summary: '',
-          reason: mapImageError(err2),
-          attachments: [],
-          model: flashModel,
-          tier: 'flash',
-        };
+        continue;
       }
-    } else {
       opts.logger.warn(
         {
           err: err instanceof Error ? err.message : String(err),
-          kind: err instanceof GeminiImageError ? err.kind : 'unknown',
-          status: err instanceof GeminiImageError ? err.status : undefined,
-          detail: err instanceof GeminiImageError ? err.detail : undefined,
-          model: decision.model,
+          kind: info?.kind ?? 'unknown',
+          status: info?.status,
+          detail: info?.detail,
+          model: choice.model,
         },
-        'image: generate failed',
+        index === 0 ? 'image: generate failed' : 'image: fallback model also failed',
       );
       return {
         status: 'failed',
         summary: '',
         reason: mapImageError(err),
         attachments: [],
-        model: decision.model,
-        tier: decision.tier,
+        model: choice.model,
+        tier: choice.tier,
+        ...(choice.key ? { modelKey: choice.key } : {}),
       };
     }
   }
+  if (!result) {
+    return {
+      status: 'failed',
+      summary: '',
+      reason: mapImageError(lastError),
+      attachments: [],
+      model: route.primary.model,
+      tier: route.primary.tier,
+    };
+  }
+  const degraded = used !== route.primary;
+  const effectiveTier = used.tier;
 
   const requestedCount = opts.imageCount ?? Math.max(1, result.images.length);
   const generatedImages = result.images.slice(0, requestedCount);
   while (generatedImages.length < requestedCount) {
     try {
-      const next = await runGenerate(
-        degraded ? flashModel : decision.model,
-        degraded ? 'v1' : apiVersionForTier(decision.tier),
-        degraded ? undefined : decision.resolution,
-      );
+      const next = await runGenerate(used, promptText, !degraded);
       if (next.images.length === 0) break;
       generatedImages.push(...next.images.slice(0, requestedCount - generatedImages.length));
     } catch (err) {
@@ -287,10 +347,9 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
         if (attempt === 0) {
           try {
             const replacement = await runGenerate(
-              degraded ? flashModel : decision.model,
-              degraded ? 'v1' : apiVersionForTier(decision.tier),
-              degraded ? undefined : decision.resolution,
+              used,
               `${promptText}\n\n【重新生成】上一版未通过主体一致性复核。必须更严格保留第一张图中的身份、脸部/毛色/商品结构与关键标识，不得替换或重塑主角。`,
+              !degraded,
             );
             const nextImage = replacement.images[0];
             if (!nextImage) break;
@@ -333,8 +392,9 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
           ? '图片已生成，但主体一致性复核未通过，未交付可能换脸或换主体的结果。请换一张更清晰的主角图后重试。'
           : '图片已生成但保存失败，请重试。',
       attachments: [],
-      model: decision.model,
-      tier: decision.tier,
+      model: used.model,
+      tier: used.tier,
+      ...(used.key ? { modelKey: used.key } : {}),
       ...(subjectConsistency ? { subjectConsistency } : {}),
     };
   }
@@ -342,17 +402,22 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
   const isPartial = attachments.length < requestedCount;
   return {
     status: isPartial ? 'partial_success' : 'completed',
-    summary: buildSummary(
-      attachments.length,
+    summary: buildSummary({
+      count: attachments.length,
       requestedCount,
-      effectiveTier,
-      hasInputs,
-      degraded,
-      opts.mode === 'lock_subject',
-    ),
+      label: used.label,
+      isEdit: hasInputs,
+      degradeNote: degraded
+        ? routed
+          ? `（${route.primary.label} 暂不可用，已自动改用 ${used.label} 出图）`
+          : '（Pro 档繁忙，已自动改用 Nano Banana 2 出图）'
+        : (route.note ?? ''),
+      lockedSubject: opts.mode === 'lock_subject',
+    }),
     attachments,
-    model: result.model ?? decision.model,
+    model: result.model ?? used.model,
     tier: effectiveTier,
+    ...(used.key ? { modelKey: used.key } : {}),
     ...(subjectConsistency ? { subjectConsistency } : {}),
   };
 }
@@ -407,15 +472,16 @@ function buildImageExecutionPrompt(
   return `${prompt}\n\n${LOCK_SUBJECT_CONSTRAINT}`;
 }
 
-function buildSummary(
-  count: number,
-  requestedCount: number,
-  tier: ImageModelTier,
-  isEdit: boolean,
-  degraded: boolean,
-  lockedSubject: boolean,
-): string {
-  const modelLabel = tier === 'pro' ? 'Nano Banana Pro' : 'Nano Banana 2';
+function buildSummary(input: {
+  count: number;
+  requestedCount: number;
+  label: string;
+  isEdit: boolean;
+  degradeNote: string;
+  lockedSubject: boolean;
+}): string {
+  const { count, requestedCount, isEdit, lockedSubject } = input;
+  const modelLabel = input.label;
   const isPartial = count < requestedCount;
   const quantity = isPartial ? `${count}/${requestedCount} 张` : `${count} 张`;
   const action = lockedSubject
@@ -423,7 +489,7 @@ function buildSummary(
     : isEdit
       ? `已按你的要求生成 ${quantity}编辑图片`
       : `已生成 ${quantity}图片`;
-  const note = degraded ? '（Pro 档繁忙，已自动改用 Nano Banana 2 出图）' : '';
+  const note = input.degradeNote;
   const partialNote = isPartial
     ? '其余图片未完成；已生成图片可下载，可重新提交补齐。'
     : '下载链接见下方，24 小时内有效。';
@@ -432,10 +498,13 @@ function buildSummary(
 
 /** Map a thrown error → a clean, user-facing Chinese reason. */
 export function mapImageError(err: unknown): string {
-  if (err instanceof GeminiImageError) {
-    switch (err.kind) {
+  const info = imageErrorInfo(err);
+  if (info) {
+    switch (info.kind) {
       case 'no_api_key':
-        return '图片生成尚未配置（缺少 GEMINI_API_KEY），请联系管理员。';
+        return '图片生成尚未配置（缺少模型服务密钥），请联系管理员。';
+      case 'exhausted_balance':
+        return '图片服务账户余额不足，请联系管理员。';
       case 'blocked':
         return '该图片请求被内容安全策略拦截，请调整描述后重试。';
       case 'no_image':
@@ -443,7 +512,7 @@ export function mapImageError(err: unknown): string {
       case 'timeout':
         return '图片生成超时，请稍后重试。';
       case 'http':
-        return `图片服务返回错误（${err.status ?? '未知'}），请稍后重试。`;
+        return `图片服务返回错误（${info.status ?? '未知'}），请稍后重试。`;
       case 'network':
         return '图片服务连接失败，请稍后重试。';
       default:
