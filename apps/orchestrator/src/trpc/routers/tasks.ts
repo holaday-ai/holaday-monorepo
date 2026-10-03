@@ -165,6 +165,7 @@ import {
   restorableBrowserTarget,
 } from '../../browser-pool/browser-session-recovery.js';
 import { env as appEnv } from '../../config/env.js';
+import { recordQuotaCharge } from '../../quota/platform-failure-refunds.js';
 import {
   currentBrain,
   enterBrain,
@@ -279,6 +280,7 @@ import {
   followUpParentReasonLabel,
   followUpTerminalGuardMessage,
   resolveBrowserFollowUpContinuation,
+  deferredMediaNotice,
   resolveFollowUpExecutionMode,
   resolveWorkflowIdentities,
 } from './task-followup-copy.js';
@@ -1314,12 +1316,30 @@ export const tasksRouter = router({
     // accidentally fall back to the database's `user` default.
     const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
     const resolvedBrain = currentBrain();
-    if (resolvedBrain) {
+    // Set once this request consumed quota; the next task inserted carries the
+    // charge so a platform failure can be refunded exactly once.
+    let pendingQuotaCharge: { plan: PlanId; isOpus: boolean } | null = null;
+    {
       // Record which brain each task created by this request runs with.
       // Best-effort: a failed audit row never blocks task creation.
       const insertTask = repo.insertTask.bind(repo);
       repo.insertTask = (async (...args: Parameters<typeof insertTask>) => {
         const result = await insertTask(...args);
+        const charge = pendingQuotaCharge;
+        if (charge) {
+          pendingQuotaCharge = null;
+          void recordQuotaCharge(ctx.db, {
+            taskExternalId: args[0].taskId,
+            userId: userRow.id,
+            ...charge,
+          }).catch((err: unknown) => {
+            ctx.logger.warn(
+              { err: err instanceof Error ? err.message : String(err), taskId: args[0].taskId },
+              'quota: charge record not written (refund unavailable for this task)',
+            );
+          });
+        }
+        if (!resolvedBrain) return result;
         void recordTaskModelSelection(ctx.db, args[0].taskId, resolvedBrain).catch((err: unknown) => {
           ctx.logger.warn(
             { err: err instanceof Error ? err.message : String(err), taskId: args[0].taskId },
@@ -2154,6 +2174,7 @@ export const tasksRouter = router({
         }
       }
       opusActuallyConsumed = consume.ok && willConsumeOpus;
+      pendingQuotaCharge = { plan: planId, isOpus: opusActuallyConsumed };
     } else if (isFollowUp) {
       ctx.logger.info(
         {
@@ -3514,6 +3535,11 @@ export const tasksRouter = router({
         intent: input.intent,
         roleId: dispatchRoleId,
         opusUsed: opusActuallyConsumed,
+        resultNotice: deferredMediaNotice({
+          classifiedExecutionMode,
+          executionMode,
+          mediaLaneAvailable: false,
+        }),
       });
     }
 

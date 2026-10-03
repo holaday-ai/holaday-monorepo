@@ -28,6 +28,8 @@ export async function createCoreGenerateTask(args: {
   intent: string;
   roleId: string | null;
   opusUsed: boolean;
+  /** Fixed copy appended to a delivered text result (e.g. deferred 配图). */
+  resultNotice?: string | null;
 }) {
   const { ctx, requirements, blocks } = args;
   if (
@@ -112,6 +114,7 @@ export async function createCoreGenerateTask(args: {
     responsesAdapter: generation.kind === 'ready' ? generation.responses('standard') : null,
     semanticAdapter: semantic.kind === 'ready' ? semantic.messages('verify_strict') : undefined,
     publish: (event) => publishCoreExecutionEvent(ctx.userId, event),
+    ...(args.resultNotice ? { resultNotice: args.resultNotice } : {}),
     ...(requirements.phase === 'direct'
       ? {
           beforeGeneration: (op: CoreAdmission, isCurrent: () => boolean, deadline: number) =>

@@ -59,6 +59,7 @@ export const ACCOUNT_CLOSURE_TABLE_OWNERSHIP: readonly AccountClosureTableOwners
     'planned_tasks',
     'projects',
     'project_members',
+    'quota_refunds',
     'scheduled_tasks',
     'site_capabilities',
     'sites',

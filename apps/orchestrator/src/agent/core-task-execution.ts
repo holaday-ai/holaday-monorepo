@@ -43,6 +43,13 @@ import {
 } from './core-task-settlement.js';
 import { runGenerateTask } from './generate-runner.js';
 
+const CORE_IMAGE_MEDIA_TYPES: ReadonlySet<string> = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+]);
+
 type ExecutionIdentity = { taskId: string; executionId: string; executionRevision: number };
 /** Server-internal events. The router must project public fields into WS schemas. */
 export type CoreExecutionEvent = ExecutionIdentity &
@@ -75,6 +82,8 @@ export interface CoreExecutionInput {
     isCurrent: () => boolean,
     deadline: number,
   ) => Promise<'ready' | 'stale' | 'unconfirmed'>;
+  /** Fixed server copy appended to a delivered text result; never model input. */
+  resultNotice?: string;
   /** Optional follow-up channel; consumer must use settlement identity in its CAS. */
   afterSettlement?: (settlement: CoreSettlement) => Promise<void>;
   recoveryClock?: CoreRecoveryClock;
@@ -161,11 +170,24 @@ function prepareCoreExecution(input: CoreExecutionInput) {
     ...(admission.requirements.legacyWorkflow
       ? { legacyWorkflow: admission.requirements.legacyWorkflow }
       : {}),
-    materials: input.blocks.map((block, index) =>
-      block.type === 'text'
-        ? { kind: 'text', key: `file-block-${index}`, source: 'file', text: block.text }
-        : { kind: 'unavailable', key: `file-block-${index}`, source: 'file', reason: 'non_text' },
-    ),
+    materials: input.blocks.map((block, index) => {
+      const key = `file-block-${index}`;
+      if (block.type === 'text') return { kind: 'text', key, source: 'file', text: block.text };
+      // Uploaded images reach the generation model and the reviewer as images.
+      if (
+        block.type === 'image' &&
+        block.source.type === 'base64' &&
+        CORE_IMAGE_MEDIA_TYPES.has(block.source.media_type)
+      )
+        return {
+          kind: 'image',
+          key,
+          source: 'file',
+          mediaType: block.source.media_type,
+          data: block.source.data,
+        };
+      return { kind: 'unavailable', key, source: 'file', reason: 'non_text' };
+    }),
   });
   const identity = Object.freeze({
     taskId: admission.scope.taskId,
@@ -319,6 +341,13 @@ async function executeCoreTask(
       }
       if (!registry.read(handle)) throw new StaleRound();
       if (!verification || !outcome.generation) throw new Error('CORE_REVIEW_UNAVAILABLE');
+      if (
+        input.resultNotice &&
+        (status === 'completed' || status === 'partial_success') &&
+        summary.trim() &&
+        !summary.includes(input.resultNotice)
+      )
+        summary = `${summary.trimEnd()}\n\n${input.resultNotice}`;
       return settlementFor({
         admission,
         status,

@@ -24,11 +24,33 @@ export function resolveFollowUpExecutionMode(input: {
   // prompt keywords such as "上传", which otherwise look like browser actions.
   if (input.explicitMediaMode) return input.explicitMediaMode;
   if (input.parentHasBrowserContext) return 'browser';
-  return (
-    input.typedWorkflowOverride ??
-    input.expertRouteOverride ??
-    input.classifiedExecutionMode
-  );
+  const override = input.typedWorkflowOverride ?? input.expertRouteOverride;
+  if (override) return override;
+  // Keyword-only media intents ("写小红书笔记并配图") are text tasks first:
+  // image/video lanes run only from the explicit /image or /video workbench.
+  if (isKeywordOnlyMedia(input.classifiedExecutionMode)) return 'generate';
+  return input.classifiedExecutionMode;
+}
+
+function isKeywordOnlyMedia(mode: ExecutionMode): boolean {
+  return mode === 'image' || mode === 'video_creation';
+}
+
+/**
+ * Appended to the text result when a keyword-only media request was answered
+ * as text because media generation is not open yet. Null when not applicable.
+ */
+export function deferredMediaNotice(input: {
+  classifiedExecutionMode: ExecutionMode;
+  executionMode: ExecutionMode;
+  mediaLaneAvailable: boolean;
+}): string | null {
+  if (input.mediaLaneAvailable || input.executionMode !== 'generate') return null;
+  if (input.classifiedExecutionMode === 'image')
+    return '（配图生成即将开放，本次先完成文字部分。）';
+  if (input.classifiedExecutionMode === 'video_creation')
+    return '（视频生成即将开放，本次先完成文字部分。）';
+  return null;
 }
 
 /**
@@ -70,11 +92,7 @@ export function followUpParentHasBrowserContext(input: {
   return BROWSER_FOLLOW_UP_VERBS.some((verb) => input.intent.includes(verb));
 }
 
-export type BrowserFollowUpContinuation =
-  | 'fresh'
-  | 'adopted'
-  | 'restore'
-  | 'unavailable';
+export type BrowserFollowUpContinuation = 'fresh' | 'adopted' | 'restore' | 'unavailable';
 
 export function resolveBrowserFollowUpContinuation(input: {
   hasParentTask: boolean;

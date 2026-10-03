@@ -55,6 +55,7 @@ const REQUIRED_TABLES = [
   'planned_tasks',
   'projects',
   'project_members',
+  'quota_refunds',
   'team_milestones',
   'team_work_items',
   'team_work_item_assignments',

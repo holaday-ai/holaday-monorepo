@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  deferredMediaNotice,
   followUpParentHasBrowserContext,
   followUpParentReasonLabel,
   followUpTerminalGuardMessage,
@@ -142,6 +143,64 @@ describe('task follow-up copy', () => {
     ).toEqual({
       contractWorkflowId: 'content-topic',
       lineageWorkflowId: 'content-topic',
+    });
+  });
+
+  describe('keyword-only media requests', () => {
+    const base = {
+      parentHasBrowserContext: false,
+      typedWorkflowOverride: null,
+      expertRouteOverride: null,
+    } as const;
+
+    it.each(['image', 'video_creation'] as const)(
+      'answers a %s keyword match as text unless submitted from the media workbench',
+      (classified) => {
+        expect(resolveFollowUpExecutionMode({ ...base, classifiedExecutionMode: classified })).toBe(
+          'generate',
+        );
+        expect(
+          resolveFollowUpExecutionMode({
+            ...base,
+            classifiedExecutionMode: classified,
+            explicitMediaMode: classified,
+          }),
+        ).toBe(classified);
+      },
+    );
+
+    it('keeps explicit workflow routing overrides', () => {
+      expect(
+        resolveFollowUpExecutionMode({
+          ...base,
+          expertRouteOverride: 'image',
+          classifiedExecutionMode: 'generate',
+        }),
+      ).toBe('image');
+    });
+
+    it('adds the deferred 配图 notice only while the media lane is closed', () => {
+      expect(
+        deferredMediaNotice({
+          classifiedExecutionMode: 'image',
+          executionMode: 'generate',
+          mediaLaneAvailable: false,
+        }),
+      ).toContain('配图生成即将开放');
+      expect(
+        deferredMediaNotice({
+          classifiedExecutionMode: 'image',
+          executionMode: 'generate',
+          mediaLaneAvailable: true,
+        }),
+      ).toBeNull();
+      expect(
+        deferredMediaNotice({
+          classifiedExecutionMode: 'generate',
+          executionMode: 'generate',
+          mediaLaneAvailable: false,
+        }),
+      ).toBeNull();
     });
   });
 });

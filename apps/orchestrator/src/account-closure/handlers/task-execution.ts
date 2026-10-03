@@ -103,6 +103,8 @@ const taskExecutionRelationalClosureHandler = createRelationalDeleteHandler({
       parentTableName: 'tasks',
       childParentColumn: 'task_id',
     }),
+    // Per-task quota charge/refund ledger.
+    directUserRows('quota_refunds'),
     // Which brain each task ran with; keyed by the task's external id.
     rowsOwnedThroughParent({
       tableName: 'task_model_selections',

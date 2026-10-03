@@ -949,10 +949,8 @@ describe('transactional core execution with real runner and review', () => {
       if (mode === 'unreadable-material')
         f.input.blocks = [
           ...f.input.blocks,
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' },
-          },
+          // A remote-URL image cannot be admitted as material (only uploaded bytes are).
+          { type: 'image', source: { type: 'url', url: 'https://example.com/synthetic.png' } },
         ];
       const stream = f.responses.stream.bind(f.responses);
       f.responses.stream = async (request) => ({ ...(await stream(request)), text: PLAN });
@@ -995,5 +993,40 @@ describe('transactional core execution with real runner and review', () => {
       const result = await startCoreTaskExecution(f.input);
       expect(await result.completion).toBe('unconfirmed');
     });
+  });
+
+  it('appends a fixed server notice to a delivered text result', async () => {
+    const f = fixture();
+    f.input.resultNotice = '（配图生成即将开放，本次先完成文字部分。）';
+    const result = await startCoreTaskExecution(f.input);
+    expect(await result.completion).toBe('committed');
+    expect(
+      f.writes[0]?.result.summary?.endsWith('（配图生成即将开放，本次先完成文字部分。）'),
+    ).toBe(true);
+    // Never part of the model request.
+    expect(JSON.stringify(f.generation)).not.toContain('配图生成即将开放');
+  });
+
+  it('shows an uploaded image to the generation model and the reviewer instead of dropping it', async () => {
+    const f = fixture();
+    const png =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    f.input.blocks = [
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
+    ];
+    const result = await startCoreTaskExecution(f.input);
+    expect(await result.completion).toBe('committed');
+    const generationInput = JSON.stringify(f.generation[0]?.input);
+    expect(generationInput).toContain('input_image');
+    expect(generationInput).not.toContain('材料无法完整读取');
+    const review = f.semantic[0];
+    const content = review?.messages[0]?.content;
+    expect(Array.isArray(content) && content.some((block) => block.type === 'image')).toBe(true);
+    // The JSON context carries a descriptor, never the image bytes twice.
+    const text = Array.isArray(content) && content[0]?.type === 'text' ? content[0].text : '';
+    expect(text).not.toContain(png);
+    expect(f.writes[0]?.verification.issueCodes ?? []).not.toContain(
+      'VERIFICATION_MATERIALS_INCOMPLETE',
+    );
   });
 });
