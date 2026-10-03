@@ -168,6 +168,29 @@ const baseEnvSchema = z.object({
   GEMINI_VIDEO_REVIEW_MODEL: z.string().default('gemini-3.6-flash'),
 
   /**
+   * Image lane provider models (capability recovery, 2026-10). The production
+   * image runner routes per task between these; Gemini above stays dormant.
+   * Ids verified against the official docs (see agent/image/image-providers.ts):
+   *   Qwen Image  — help.aliyun.com/zh/model-studio/qwen-image-api (+ -edit-api)
+   *   Wan 2.7     — help.aliyun.com/zh/model-studio/wan-image-generation-and-editing-api-reference
+   *   NB2 on fal  — fal.ai/models/fal-ai/nano-banana-2 (+ /edit)
+   * Both DashScope models use DASHSCOPE_API_KEY / DASHSCOPE_BASE_URL; NB2 uses FAL_KEY.
+   */
+  QWEN_IMAGE_MODEL: z.string().min(1).default('qwen-image-2.0-pro'),
+  WAN_IMAGE_MODEL: z.string().min(1).default('wan2.7-image'),
+  FAL_NANO_BANANA_2_MODEL: z.string().min(1).default('fal-ai/nano-banana-2'),
+  FAL_NANO_BANANA_2_EDIT_MODEL: z.string().min(1).default('fal-ai/nano-banana-2/edit'),
+  /** General-purpose (no poster text, no edit) default image model. */
+  IMAGE_DEFAULT_MODEL: z.enum(['qwen_image', 'wan_image', 'nano_banana_2']).default('nano_banana_2'),
+  /**
+   * Veo 3.1 via fal (optional normal-video source; replaces the Gemini
+   * Developer API path). Ids from fal.ai/models/fal-ai/veo3.1{,/fast,/lite}.
+   */
+  FAL_VEO_FAST_MODEL: z.string().min(1).default('fal-ai/veo3.1/fast'),
+  FAL_VEO_LITE_MODEL: z.string().min(1).default('fal-ai/veo3.1/lite'),
+  FAL_VEO_STANDARD_MODEL: z.string().min(1).default('fal-ai/veo3.1'),
+
+  /**
    * Phase 1 #4 — video creation pipeline (script → Qwen3-TTS-VC voice
    * clone → Wanxiang B-roll → fal lip-sync → subtitles → FFmpeg vertical
    * compose). DASHSCOPE_API_KEY = Alibaba Cloud INTERNATIONAL (Singapore)
@@ -277,12 +300,14 @@ const baseEnvSchema = z.object({
   /** HappyHorse-1.1 文生视频(同 DashScope intl 端点/同 key,仅改 model). */
   HAPPYHORSE_T2V_MODEL: z.string().default('happyhorse-1.1-t2v'),
   /**
-   * 图生视频 i2v (Phase 2 第二期 宠物视频). 同 DashScope video-synthesis 端点,
-   * input.img_url 走单图. 默认 wan2.2-i2v-flash(更省 + 已证同 intl 端点/key);
+   * 图生视频 i2v (Phase 2 第二期 宠物视频). 同 DashScope video-synthesis 端点.
+   * 默认 wan2.7-i2v(Wan 2.7 首帧生视频, input.media[{type:'first_frame'}],
+   * 来源 help.aliyun.com/zh/model-studio/image-to-video-general-api-reference);
+   * 旧 wan2.2-i2v-flash 仍可经 env 指回(img_url 协议).
    * happyhorse-1.0-i2v 作高质量可选(⚠️ intl 区可达性未核,examples 用 CN host,
    * 灰度前需 console 核 region). 价表见 video-confirm.ts。
    */
-  WANXIANG_I2V_MODEL: z.string().default('wan2.2-i2v-flash'),
+  WANXIANG_I2V_MODEL: z.string().default('wan2.7-i2v'),
   HAPPYHORSE_I2V_MODEL: z.string().default('happyhorse-1.0-i2v'),
   FAL_LIPSYNC_MODEL: z.literal('fal-ai/sync-lipsync/v3').default('fal-ai/sync-lipsync/v3'),
   /**

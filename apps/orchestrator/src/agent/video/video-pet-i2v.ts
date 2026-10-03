@@ -9,7 +9,9 @@
  *     buildPetVideoCommand(静默单 clip 合成), storeOutput.
  *
  * 模型 (BOSS 2026-06-16 核价):
- *   - 'wan_i2v' (DEFAULT) = wan2.2-i2v-flash, 更省 + 已证同 dashscope-intl 端点/key.
+ *   - 'wan_i2v' (DEFAULT) = wan2.7-i2v (Wan 2.7 首帧生视频, input.media first_frame,
+ *     720P/1080P, 2–15s; capability recovery 2026-10). 旧 wan2.2-i2v-flash 可经
+ *     WANXIANG_I2V_MODEL 指回 (img_url + size 协议).
  *   - 'happyhorse_i2v' = happyhorse-1.0-i2v, 高质量可选 (720P 0.9/1080P 1.6 元/s);
  *     ⚠️ intl 区可达性未核(examples 用 CN host)→ 灰度前 console 核 region.
  *
@@ -34,7 +36,7 @@ import type { VerifyFinalVideoQualityInput, VideoQualityResult } from './video-q
 import { prepareVideoQualityReferenceImage } from './video-quality-verifier.js';
 import { generateBrollVideo } from './wanxiang-client.js';
 
-const DEFAULT_WAN_I2V_MODEL = 'wan2.2-i2v-flash';
+const DEFAULT_WAN_I2V_MODEL = 'wan2.7-i2v';
 const DEFAULT_HAPPYHORSE_I2V_MODEL = 'happyhorse-1.0-i2v';
 
 // 宠物 i2v 画面引导(轻):单主体、动作自然、不编乱码假字。宠物无人手解剖问题,suffix 比 t2v 短。
@@ -57,6 +59,8 @@ export interface PetVideoOptions {
   readonly aspectRatio?: AspectRatio;
   /** Clip length seconds → DashScope parameters.duration. Omit = model default. */
   readonly durationSeconds?: number;
+  /** Wan 2.7 i2v output tier. Default '1080p' (matches the quote default). */
+  readonly resolution?: '720p' | '1080p';
 }
 
 export interface PetVideoServices {
@@ -150,6 +154,8 @@ export async function runPetVideoCreation(
     prompt: input.motionPrompt + PET_I2V_SUFFIX,
     imageUrl: input.imageUrl,
     size: aspect.hhSize,
+    // Wan 2.7 i2v ignores size and reads the resolution tier instead.
+    resolution: (opts.resolution ?? '1080p') === '720p' ? '720P' : '1080P',
     ...(opts.durationSeconds !== undefined ? { durationSeconds: opts.durationSeconds } : {}),
   });
   if (!v.videoUrl) throw new SimpleVideoError('pet i2v task produced no video url', 'compose');

@@ -14,7 +14,7 @@ import {
   type VideoAvSyncReview,
   videoAvSyncAudit,
   videoAvSyncLogContext,
-} from './video-av-sync-verifier.js';
+} from './video-av-sync-audit.js';
 import type { VerifyCloneVideoCompatibilityInput } from './video-clone-compatibility.js';
 import { downloadToBuffer, downloadToFile } from './video-http.js';
 import { type SimpleVideoConfig, SimpleVideoError } from './video-lane-simple.js';
