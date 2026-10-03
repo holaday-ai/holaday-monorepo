@@ -64,10 +64,7 @@ function decodeDataUri(uri: string): { buffer: Buffer; mimeType: string } | null
 
 function toProviderError(err: unknown): unknown {
   if (err instanceof FalQueueError) {
-    const kind =
-      err.kind === 'job_failed' || err.kind === 'no_result'
-        ? 'no_image'
-        : err.kind;
+    const kind = err.kind === 'job_failed' || err.kind === 'no_result' ? 'no_image' : err.kind;
     return new ImageProviderError(err.message, kind, err.status, err.detail, 'fal');
   }
   return err;
@@ -75,7 +72,13 @@ function toProviderError(err: unknown): unknown {
 
 export async function generateFalImages(p: FalImageParams): Promise<ImageGenerateResult> {
   if (!p.apiKey || !p.apiKey.trim()) {
-    throw new ImageProviderError('FAL_KEY not configured', 'no_api_key', undefined, undefined, 'fal');
+    throw new ImageProviderError(
+      'FAL_KEY not configured',
+      'no_api_key',
+      undefined,
+      undefined,
+      'fal',
+    );
   }
   const hasInputs = (p.inputImages?.length ?? 0) > 0;
   const endpointId = hasInputs ? p.editModel : p.model;
@@ -100,7 +103,13 @@ export async function generateFalImages(p: FalImageParams): Promise<ImageGenerat
       typeof image.url === 'string' && image.url.length > 0,
   );
   if (files.length === 0) {
-    throw new ImageProviderError('fal returned no image', 'no_image', undefined, output.description, 'fal');
+    throw new ImageProviderError(
+      'fal returned no image',
+      'no_image',
+      undefined,
+      output.description,
+      'fal',
+    );
   }
   const download = p.download ?? downloadToBuffer;
   const images = [];
@@ -111,7 +120,10 @@ export async function generateFalImages(p: FalImageParams): Promise<ImageGenerat
       continue;
     }
     try {
-      const downloaded = await download(file.url, { maxBytes: MAX_RESULT_BYTES, timeoutMs: 60_000 });
+      const downloaded = await download(file.url, {
+        maxBytes: MAX_RESULT_BYTES,
+        timeoutMs: 60_000,
+      });
       images.push({
         buffer: downloaded.buffer,
         mimeType: file.content_type ?? downloaded.contentType ?? 'image/png',

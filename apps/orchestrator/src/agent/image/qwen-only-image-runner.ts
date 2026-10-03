@@ -64,10 +64,17 @@ export async function runImageTask(
     primary,
     fallbacks: route.fallbacks.map(choice),
     reason: route.reason,
-    ...(route.preferredUnavailable ? { note: `（所选模型暂不可用，已改用 ${primary.label}）` } : {}),
+    ...(route.preferredUnavailable
+      ? { note: `（所选模型暂不可用，已改用 ${primary.label}）` }
+      : {}),
   };
   opts.logger.info(
-    { model: primary.model, modelKey: primary.key, reason: route.reason, fallbacks: route.fallbacks },
+    {
+      model: primary.model,
+      modelKey: primary.key,
+      reason: route.reason,
+      fallbacks: route.fallbacks,
+    },
     'image: model routed',
   );
   return runImageTaskCore({

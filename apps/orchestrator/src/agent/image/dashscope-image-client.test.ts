@@ -64,9 +64,17 @@ describe('dashscope image request shape', () => {
   });
 
   it('builds a Wan 2.7 edit body: text first, up to 9 images', () => {
-    const images = Array.from({ length: 12 }, (_, i) => ({ data: `D${i}`, mimeType: 'image/jpeg' }));
-    const body = buildDashScopeImageBody({ model: 'wan2.7-image', prompt: '换背景', inputImages: images });
-    const content = (body.input as { messages: Array<{ content: unknown[] }> }).messages[0]?.content ?? [];
+    const images = Array.from({ length: 12 }, (_, i) => ({
+      data: `D${i}`,
+      mimeType: 'image/jpeg',
+    }));
+    const body = buildDashScopeImageBody({
+      model: 'wan2.7-image',
+      prompt: '换背景',
+      inputImages: images,
+    });
+    const content =
+      (body.input as { messages: Array<{ content: unknown[] }> }).messages[0]?.content ?? [];
     expect(content[0]).toEqual({ text: '换背景' });
     expect(content).toHaveLength(10);
     expect(body.parameters).toEqual({ n: 1, watermark: false });
@@ -105,7 +113,10 @@ describe('generateDashScopeImages', () => {
 
   it('maps moderation rejections to blocked', async () => {
     const fetchImpl = vi.fn(async () =>
-      response(400, { code: 'DataInspectionFailed', message: 'Input data may contain inappropriate content.' }),
+      response(400, {
+        code: 'DataInspectionFailed',
+        message: 'Input data may contain inappropriate content.',
+      }),
     );
     await expect(
       generateDashScopeImages({ apiKey: 'k', model: 'qwen-image-2.0-pro', prompt: 'x', fetchImpl }),

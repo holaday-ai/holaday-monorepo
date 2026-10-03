@@ -63,14 +63,23 @@ describe('fal Veo 3.1 adapter', () => {
   it('maps fal failures onto the VeoError vocabulary the lane already handles', async () => {
     const broke = vi
       .fn()
-      .mockResolvedValueOnce(new Response('User is locked. Reason: Exhausted balance', { status: 403 }));
+      .mockResolvedValueOnce(
+        new Response('User is locked. Reason: Exhausted balance', { status: 403 }),
+      );
     await expect(
       generateFalVeoVideo({ apiKey: 'fk', model: 'fal-ai/veo3.1', prompt: 'p', fetchImpl: broke }),
     ).rejects.toMatchObject({ name: 'VeoError', kind: 'quota_exhausted' });
 
-    const invalid = vi.fn().mockResolvedValueOnce(new Response('{"detail":"bad duration"}', { status: 422 }));
+    const invalid = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('{"detail":"bad duration"}', { status: 422 }));
     await expect(
-      generateFalVeoVideo({ apiKey: 'fk', model: 'fal-ai/veo3.1', prompt: 'p', fetchImpl: invalid }),
+      generateFalVeoVideo({
+        apiKey: 'fk',
+        model: 'fal-ai/veo3.1',
+        prompt: 'p',
+        fetchImpl: invalid,
+      }),
     ).rejects.toMatchObject({ name: 'VeoError', kind: 'invalid_argument' });
 
     await expect(

@@ -28,7 +28,12 @@ import { videoParameterIssue } from '@holaday/shared-types';
 import { type GenerateVeoParams, VeoError, type VeoResult } from './veo-types.js';
 import { VideoHttpError, fetchWithTimeout, safeText, sleep } from './video-http.js';
 
-export { type GenerateVeoParams, VeoError, type VeoErrorKind, type VeoResult } from './veo-types.js';
+export {
+  type GenerateVeoParams,
+  VeoError,
+  type VeoErrorKind,
+  type VeoResult,
+} from './veo-types.js';
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com';
 const DEFAULT_MODEL = 'veo-3.0-fast-generate-001';

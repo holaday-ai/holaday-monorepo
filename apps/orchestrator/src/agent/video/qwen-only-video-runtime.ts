@@ -108,12 +108,7 @@ export async function runSimpleVideoCreation(
   options: SimpleVideoOptions,
   services: SimpleVideoServices,
 ): Promise<SimpleVideoResult> {
-  return runSimpleVideoCreationImpl(
-    input,
-    withProductionVideoProviders(config),
-    options,
-    services,
-  );
+  return runSimpleVideoCreationImpl(input, withProductionVideoProviders(config), options, services);
 }
 
 export async function runCloneVideoCreation(

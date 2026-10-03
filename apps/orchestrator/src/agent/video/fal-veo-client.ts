@@ -82,7 +82,13 @@ export async function generateFalVeoVideo(p: GenerateVeoParams): Promise<VeoResu
     throw new VeoError('FAL_KEY not configured', 'no_api_key', undefined, undefined, false);
   }
   if (!p.model) {
-    throw new VeoError('fal Veo endpoint not configured', 'invalid_argument', undefined, undefined, false);
+    throw new VeoError(
+      'fal Veo endpoint not configured',
+      'invalid_argument',
+      undefined,
+      undefined,
+      false,
+    );
   }
   const endpointId = p.startImage ? `${p.model}/first-last-frame-to-video` : p.model;
   try {

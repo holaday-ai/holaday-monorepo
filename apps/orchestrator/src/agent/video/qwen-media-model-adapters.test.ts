@@ -103,7 +103,9 @@ describe('Qwen (Messages adapter) replacements for the legacy Anthropic media ca
         input: { same_subject: true, confidence: 0.4, reason: '模糊' },
       },
     ]);
-    await expect(createMessagesSubjectConsistencyVerifier(low.adapter)(input)).resolves.toMatchObject({
+    await expect(
+      createMessagesSubjectConsistencyVerifier(low.adapter)(input),
+    ).resolves.toMatchObject({
       status: 'fail',
     });
     const broken: MessagesAdapter = {

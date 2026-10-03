@@ -92,10 +92,23 @@ function trustedQueueUrl(value: string | undefined, p: FalQueueParams): string |
 
 export function falHttpError(prefix: string, status: number, body: string): FalQueueError {
   if (status === 403 && /exhausted balance|user is locked|top up/i.test(body)) {
-    return new FalQueueError('fal account balance exhausted', 'exhausted_balance', 403, body.slice(0, 400));
+    return new FalQueueError(
+      'fal account balance exhausted',
+      'exhausted_balance',
+      403,
+      body.slice(0, 400),
+    );
   }
-  if ((status === 400 || status === 422) && /content[_\s-]?policy|nsfw|safety|moderat/i.test(body)) {
-    return new FalQueueError(`${prefix} blocked by content policy`, 'blocked', status, body.slice(0, 400));
+  if (
+    (status === 400 || status === 422) &&
+    /content[_\s-]?policy|nsfw|safety|moderat/i.test(body)
+  ) {
+    return new FalQueueError(
+      `${prefix} blocked by content policy`,
+      'blocked',
+      status,
+      body.slice(0, 400),
+    );
   }
   if (status === 401) {
     return new FalQueueError(`${prefix} unauthorized`, 'no_api_key', 401, body.slice(0, 200));
@@ -120,7 +133,10 @@ async function readJson<T>(res: Response, label: string): Promise<T> {
   try {
     return (await res.json()) as T;
   } catch (err) {
-    throw new FalQueueError(`${label} response not JSON: ${(err as Error).message}`, 'bad_response');
+    throw new FalQueueError(
+      `${label} response not JSON: ${(err as Error).message}`,
+      'bad_response',
+    );
   }
 }
 
@@ -151,15 +167,27 @@ export async function runFalQueueJob<T = unknown>(
 
   for (;;) {
     const statusRes = await falFetch(statusUrl, { method: 'GET', headers }, p);
-    if (!statusRes.ok) throw falHttpError('fal status', statusRes.status, await safeText(statusRes));
-    const status = (await readJson<{ status?: string }>(statusRes, 'fal status')).status ?? 'UNKNOWN';
+    if (!statusRes.ok)
+      throw falHttpError('fal status', statusRes.status, await safeText(statusRes));
+    const status =
+      (await readJson<{ status?: string }>(statusRes, 'fal status')).status ?? 'UNKNOWN';
     p.onStatus?.(status, Date.now() - startedAt);
     if (status === 'COMPLETED') break;
     if (status !== 'IN_QUEUE' && status !== 'IN_PROGRESS') {
-      throw new FalQueueError(`fal job ended with status ${status}`, 'job_failed', undefined, requestId);
+      throw new FalQueueError(
+        `fal job ended with status ${status}`,
+        'job_failed',
+        undefined,
+        requestId,
+      );
     }
     if (Date.now() - startedAt > maxWaitMs) {
-      throw new FalQueueError(`fal job timed out after ${maxWaitMs}ms`, 'timeout', undefined, requestId);
+      throw new FalQueueError(
+        `fal job timed out after ${maxWaitMs}ms`,
+        'timeout',
+        undefined,
+        requestId,
+      );
     }
     await wait(p.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
   }

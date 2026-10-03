@@ -6,6 +6,7 @@ import {
   IMAGE_ASPECT_OPTIONS,
   IMAGE_MODEL_OPTIONS,
   IMAGE_STYLE_OPTIONS,
+  type ImageModelOption,
 } from './image-studio-options';
 import type { ImageStudioDraft, ImageStudioSettingKey } from './image-studio-state';
 
@@ -13,6 +14,8 @@ interface ImageGenerationSettingsProps {
   open: boolean;
   draft: ImageStudioDraft;
   returnFocusRef: React.RefObject<HTMLButtonElement>;
+  /** Models the backend can serve; defaults to every offered option. */
+  modelOptions?: readonly ImageModelOption[];
   onOpenChange(open: boolean): void;
   onSettingChange<K extends ImageStudioSettingKey>(key: K, value: ImageStudioDraft[K]): void;
 }
@@ -21,6 +24,7 @@ export function ImageGenerationSettings({
   open,
   draft,
   returnFocusRef,
+  modelOptions = IMAGE_MODEL_OPTIONS,
   onOpenChange,
   onSettingChange,
 }: ImageGenerationSettingsProps): JSX.Element {
@@ -60,7 +64,7 @@ export function ImageGenerationSettings({
           <div className="mt-7 space-y-7">
             <SettingGroup label="模型">
               <div className="grid gap-3 sm:grid-cols-2">
-                {IMAGE_MODEL_OPTIONS.map((option) => {
+                {modelOptions.map((option) => {
                   const selected = draft.model === option.value;
                   return (
                     <button
@@ -77,7 +81,7 @@ export function ImageGenerationSettings({
                     >
                       <span className="flex items-center justify-between gap-3">
                         <span className="font-semibold">
-                          {option.name} {option.version}
+                          {[option.name, option.version].filter(Boolean).join(' ')}
                         </span>
                         {selected ? <Check className="h-4 w-4 text-[#347AD6]" aria-hidden /> : null}
                       </span>

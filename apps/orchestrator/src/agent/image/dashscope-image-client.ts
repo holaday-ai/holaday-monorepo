@@ -23,13 +23,19 @@
  * model the product uses.
  */
 
-import { VideoHttpError, downloadToBuffer, fetchWithTimeout, safeText, sleep } from '../video/video-http.js';
+import {
+  VideoHttpError,
+  downloadToBuffer,
+  fetchWithTimeout,
+  safeText,
+  sleep,
+} from '../video/video-http.js';
 import {
   type ImageAspectRatio,
   type ImageGenerateParams,
   type ImageGenerateResult,
-  ImageProviderError,
   type ImageInput,
+  ImageProviderError,
 } from './image-provider-types.js';
 
 const DEFAULT_BASE_URL = 'https://dashscope-intl.aliyuncs.com';
@@ -159,7 +165,13 @@ export async function generateDashScopeImages(
   p: DashScopeImageParams,
 ): Promise<ImageGenerateResult> {
   if (!p.apiKey || !p.apiKey.trim()) {
-    throw new ImageProviderError('DASHSCOPE_API_KEY not configured', 'no_api_key', undefined, undefined, 'dashscope');
+    throw new ImageProviderError(
+      'DASHSCOPE_API_KEY not configured',
+      'no_api_key',
+      undefined,
+      undefined,
+      'dashscope',
+    );
   }
   const url = `${(p.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '')}${GENERATION_PATH}`;
   const fetchImpl = p.fetchImpl ?? fetch;
@@ -211,7 +223,13 @@ export async function generateDashScopeImages(
       // non-JSON body; keep raw detail
     }
     if (res.status === 400 && isModerationFailure(code, message)) {
-      throw new ImageProviderError('DashScope image request blocked', 'blocked', 400, code, 'dashscope');
+      throw new ImageProviderError(
+        'DashScope image request blocked',
+        'blocked',
+        400,
+        code,
+        'dashscope',
+      );
     }
     throw new ImageProviderError(
       `DashScope image returned ${res.status}`,
@@ -236,9 +254,21 @@ export async function generateDashScopeImages(
   }
   if (json.code && !json.output) {
     if (isModerationFailure(json.code, json.message)) {
-      throw new ImageProviderError('DashScope image request blocked', 'blocked', undefined, json.code, 'dashscope');
+      throw new ImageProviderError(
+        'DashScope image request blocked',
+        'blocked',
+        undefined,
+        json.code,
+        'dashscope',
+      );
     }
-    throw new ImageProviderError('DashScope image task failed', 'bad_response', undefined, json.code, 'dashscope');
+    throw new ImageProviderError(
+      'DashScope image task failed',
+      'bad_response',
+      undefined,
+      json.code,
+      'dashscope',
+    );
   }
   const urls = (json.output?.choices ?? [])
     .flatMap((choice) => choice.message?.content ?? [])
@@ -250,14 +280,26 @@ export async function generateDashScopeImages(
     .filter((value): value is string => typeof value === 'string' && value.length > 0)
     .join('\n');
   if (urls.length === 0) {
-    throw new ImageProviderError('DashScope returned no image', 'no_image', undefined, text || undefined, 'dashscope');
+    throw new ImageProviderError(
+      'DashScope returned no image',
+      'no_image',
+      undefined,
+      text || undefined,
+      'dashscope',
+    );
   }
   const download = p.download ?? downloadToBuffer;
   const images = [];
   for (const imageUrl of urls) {
     try {
-      const downloaded = await download(imageUrl, { maxBytes: MAX_RESULT_BYTES, timeoutMs: 60_000 });
-      images.push({ buffer: downloaded.buffer, mimeType: mimeFrom(downloaded.contentType, imageUrl) });
+      const downloaded = await download(imageUrl, {
+        maxBytes: MAX_RESULT_BYTES,
+        timeoutMs: 60_000,
+      });
+      images.push({
+        buffer: downloaded.buffer,
+        mimeType: mimeFrom(downloaded.contentType, imageUrl),
+      });
     } catch (err) {
       throw new ImageProviderError(
         `DashScope image download failed: ${err instanceof Error ? err.message : String(err)}`,

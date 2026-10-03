@@ -59,7 +59,10 @@ function services() {
       imageUrls: [],
       videoUrl: 'https://oss/wan.mp4',
     })),
-    generateVeoVideo: vi.fn(async () => ({ videoUri: 'https://v3.fal.media/veo.mp4', elapsedMs: 1 })),
+    generateVeoVideo: vi.fn(async () => ({
+      videoUri: 'https://v3.fal.media/veo.mp4',
+      elapsedMs: 1,
+    })),
     downloadToBuffer: vi.fn(async () => ({ buffer: Buffer.from('a'), sizeBytes: 1 })),
     downloadToFile: vi.fn(async () => ({ contentType: 'video/mp4', sizeBytes: 1000 })),
     ffprobeDurationMs: vi.fn(async () => 8000),
@@ -72,7 +75,10 @@ function services() {
     removeFile: vi.fn(async () => undefined),
   };
   const svc: SimpleVideoServices = {
-    storeOutput: vi.fn(async (i: { filename: string }) => ({ fileId: i.filename, storagePath: i.filename })),
+    storeOutput: vi.fn(async (i: { filename: string }) => ({
+      fileId: i.filename,
+      storagePath: i.filename,
+    })),
     storeOutputFile: vi.fn(async (i: { filename: string }) => ({
       fileId: i.filename,
       storagePath: i.filename,

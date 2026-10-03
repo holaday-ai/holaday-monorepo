@@ -4,9 +4,11 @@ import { ImageGoalPicker } from '@/components/image/ImageGoalPicker';
 import { ImageHistory } from '@/components/image/ImageHistory';
 import { ImageResultPanel } from '@/components/image/ImageResultPanel';
 import {
+  availableImageModelOptions,
   buildImageCreationOptions,
   buildImageFileOrder,
   buildImageIntentForSubmit,
+  usableImageModel,
 } from '@/components/image/image-studio-options';
 import {
   type ImageContinuationAction,
@@ -22,10 +24,11 @@ import { useToast } from '@/components/ui/toast';
 import { revokeCreativePreviewUrls } from '@/lib/creative-preview-urls';
 import { type ImageHistoryRow, toImageHistoryRow } from '@/lib/image-history-row';
 import { createMediaActionGuard } from '@/lib/media-action-guard';
+import { useMediaModels } from '@/lib/media-models';
 import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { useTaskStore } from '@/stores/task-store';
-import type { CommercialImageUse, ImageChangeTarget } from '@/types/image';
+import { type CommercialImageUse, type ImageChangeTarget, imageModelLabel } from '@/types/image';
 import { ArrowRight, Loader2, Settings2, Sparkles } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -38,6 +41,11 @@ export function ImagePage(): JSX.Element {
   const selectedTaskId = useTaskStore((state) => state.selectedTaskId);
   const refreshTasks = useTaskStore((state) => state.refreshTasks);
   const [draft, setDraft] = React.useState(() => createImageStudioDraft('inspiration'));
+  const mediaModels = useMediaModels();
+  const imageModelOptions = React.useMemo(
+    () => availableImageModelOptions(mediaModels?.image),
+    [mediaModels],
+  );
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
@@ -324,7 +332,10 @@ export function ImagePage(): JSX.Element {
         undefined,
         undefined,
         undefined,
-        buildImageCreationOptions(draft, subject?.fileId),
+        buildImageCreationOptions(
+          { ...draft, model: usableImageModel(draft.model, mediaModels?.image) },
+          subject?.fileId,
+        ),
       );
       if ('error' in result) {
         setInlineError(result.error || '提交失败，请重试');
@@ -440,7 +451,10 @@ export function ImagePage(): JSX.Element {
                       <span>
                         <span className="block text-sm font-semibold text-[#423A46]">生成设置</span>
                         <span className="mt-0.5 block text-xs text-[#7A707D]">
-                          {settingSummary(draft)}
+                          {settingSummary({
+                            ...draft,
+                            model: usableImageModel(draft.model, mediaModels?.image),
+                          })}
                         </span>
                       </span>
                     </button>
@@ -526,8 +540,9 @@ export function ImagePage(): JSX.Element {
 
       <ImageGenerationSettings
         open={settingsOpen}
-        draft={draft}
+        draft={{ ...draft, model: usableImageModel(draft.model, mediaModels?.image) }}
         returnFocusRef={settingsTriggerRef}
+        modelOptions={imageModelOptions}
         onOpenChange={setSettingsOpen}
         onSettingChange={changeSetting}
       />
@@ -536,7 +551,7 @@ export function ImagePage(): JSX.Element {
 }
 
 function settingSummary(draft: ImageStudioDraft): string {
-  const model = draft.model === 'nano_banana_pro' ? 'Nano Banana Pro' : 'Nano Banana 2';
+  const model = imageModelLabel(draft.model);
   return `${model} · ${draft.aspectRatio} · ${draft.imageCount} 张`;
 }
 

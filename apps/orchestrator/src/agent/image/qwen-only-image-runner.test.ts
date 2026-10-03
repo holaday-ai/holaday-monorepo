@@ -2,7 +2,7 @@ import type { Logger } from 'pino';
 import { describe, expect, it, vi } from 'vitest';
 import { ImageProviderError } from './image-provider-types.js';
 import { imageProviderConfigFromEnv } from './image-providers.js';
-import { mapImageError, type SaveImageFn } from './image-runner.js';
+import { type SaveImageFn, mapImageError } from './image-runner.js';
 import { runImageTask } from './qwen-only-image-runner.js';
 
 vi.mock('../../config/env.js', () => ({ env: {} }));

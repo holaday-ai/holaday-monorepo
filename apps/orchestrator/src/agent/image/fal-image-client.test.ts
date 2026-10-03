@@ -39,9 +39,10 @@ describe('fal Nano Banana 2 client', () => {
       output_format: 'png',
       image_urls: ['data:image/jpeg;base64,AAA'],
     });
-    expect(buildFalImageInput({ model: 'm', prompt: 'p', resolution: '4096x4096' })).toMatchObject(
-      { resolution: '1K', aspect_ratio: '1:1' },
-    );
+    expect(buildFalImageInput({ model: 'm', prompt: 'p', resolution: '4096x4096' })).toMatchObject({
+      resolution: '1K',
+      aspect_ratio: '1:1',
+    });
   });
 
   it('uses the text-to-image endpoint without inputs and the edit endpoint with inputs', async () => {
@@ -72,12 +73,18 @@ describe('fal Nano Banana 2 client', () => {
   });
 
   it('maps exhausted balance and content-policy failures to image error kinds', async () => {
-    const broke = vi.fn().mockResolvedValueOnce(
-      new Response('User is locked. Reason: Exhausted balance', { status: 403 }),
-    );
+    const broke = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response('User is locked. Reason: Exhausted balance', { status: 403 }),
+      );
     await expect(
       generateFalImages({ apiKey: 'k', model: 'm', editModel: 'e', prompt: 'p', fetchImpl: broke }),
-    ).rejects.toMatchObject({ name: 'ImageProviderError', kind: 'exhausted_balance', provider: 'fal' });
+    ).rejects.toMatchObject({
+      name: 'ImageProviderError',
+      kind: 'exhausted_balance',
+      provider: 'fal',
+    });
 
     const blocked = vi
       .fn()
@@ -87,7 +94,13 @@ describe('fal Nano Banana 2 client', () => {
         new Response('{"detail":[{"type":"content_policy_violation"}]}', { status: 422 }),
       );
     await expect(
-      generateFalImages({ apiKey: 'k', model: 'm', editModel: 'e', prompt: 'p', fetchImpl: blocked }),
+      generateFalImages({
+        apiKey: 'k',
+        model: 'm',
+        editModel: 'e',
+        prompt: 'p',
+        fetchImpl: blocked,
+      }),
     ).rejects.toMatchObject({ kind: 'blocked' });
   });
 

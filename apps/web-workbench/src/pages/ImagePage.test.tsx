@@ -508,7 +508,7 @@ describe('ImagePage task creation', () => {
       undefined,
       undefined,
       expect.objectContaining({
-        model: 'nano_banana_2',
+        model: 'auto',
         aspectRatio: '1:1',
         imageCount: 2,
         mode: 'lock_subject',

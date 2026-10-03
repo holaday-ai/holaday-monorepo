@@ -48,7 +48,12 @@ describe('image provider registry', () => {
       dashscope,
       fal,
     });
-    await generate({ apiKey: 'ignored-gemini-key', model: 'wan2.7-image', prompt: 'p', apiVersion: 'v1' });
+    await generate({
+      apiKey: 'ignored-gemini-key',
+      model: 'wan2.7-image',
+      prompt: 'p',
+      apiVersion: 'v1',
+    });
     expect(fal).not.toHaveBeenCalled();
     expect(dashscope).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -86,7 +91,9 @@ describe('image provider registry', () => {
       model: 'gemini-3.1-flash-image',
       prompt: 'p',
     });
-    expect(dashscope).toHaveBeenCalledWith(expect.objectContaining({ model: 'qwen-image-2.0-pro' }));
+    expect(dashscope).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'qwen-image-2.0-pro' }),
+    );
   });
 
   it('fails as not configured when the routed provider has no key', async () => {

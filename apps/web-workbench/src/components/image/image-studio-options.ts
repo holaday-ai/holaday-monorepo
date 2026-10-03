@@ -32,22 +32,64 @@ export interface ImageGoalPreset {
   imageCount: 1 | 2 | 3 | 4;
 }
 
+/**
+ * Offered models. 'auto' is always shown; the others are filtered by
+ * backend availability (auth.me → mediaModels.image) before rendering.
+ */
 export const IMAGE_MODEL_OPTIONS: readonly ImageModelOption[] = [
+  {
+    value: 'auto',
+    name: '智能选择',
+    version: '',
+    description: '按任务自动选模型：海报带字用千问，参考图编辑与锁定主角用万相，其余用默认模型。',
+    badges: ['默认', '按任务路由'],
+  },
+  {
+    value: 'qwen_image',
+    name: '千问 Qwen Image',
+    version: '',
+    description: '中文海报、带字图、排版与营销图，文字渲染最稳。',
+    badges: ['中文海报', '带字图', '排版'],
+  },
+  {
+    value: 'wan_image',
+    name: '万相 Wan',
+    version: '2.7 Image',
+    description: '主体一致与图像编辑，适合参考图改图、锁定主角和系列图。',
+    badges: ['主体一致', '编辑', '多参考图'],
+  },
   {
     value: 'nano_banana_2',
     name: 'Nano Banana',
     version: '2',
-    description: '适合日常文生图、图生图和主体一致性生成，优先快速稳定出图。',
-    badges: ['默认', '快速', '图生图'],
-  },
-  {
-    value: 'nano_banana_pro',
-    name: 'Nano Banana',
-    version: 'Pro',
-    description: '适合海报、带字图、营销图、复杂构图和更高保真的成片。',
-    badges: ['高质量', '带字图', '营销图'],
+    description: '日常文生图与图生图，快速稳定出图，国内外均可用。',
+    badges: ['快速', '图生图'],
   },
 ];
+
+/** Image models that are always selectable (not tied to a single provider). */
+export const ALWAYS_AVAILABLE_IMAGE_MODELS: readonly ImageModel[] = ['auto'];
+
+export function availableImageModelOptions(
+  available: readonly string[] | null | undefined,
+): ImageModelOption[] {
+  return IMAGE_MODEL_OPTIONS.filter(
+    (option) =>
+      ALWAYS_AVAILABLE_IMAGE_MODELS.includes(option.value) ||
+      !available ||
+      available.includes(option.value),
+  );
+}
+
+/** Coerce a draft model the backend cannot serve (or a legacy value) back to 'auto'. */
+export function usableImageModel(
+  model: ImageModel,
+  available: readonly string[] | null | undefined,
+): ImageModel {
+  if (model === 'nano_banana_pro') return 'auto';
+  if (ALWAYS_AVAILABLE_IMAGE_MODELS.includes(model)) return model;
+  return !available || available.includes(model) ? model : 'auto';
+}
 
 export const IMAGE_STYLE_OPTIONS: readonly ImageStyleOption[] = [
   { key: 'random', label: '智能匹配', description: '让模型按内容自动选择' },
@@ -102,32 +144,32 @@ export const IMAGE_GOAL_PRESETS: Readonly<{
   commercial: Readonly<Record<CommercialImageUse, ImageGoalPreset>>;
 }> = {
   inspiration: {
-    model: 'nano_banana_2',
+    model: 'auto',
     style: 'random',
     aspectRatio: '1:1',
     imageCount: 1,
   },
   lock_subject: {
-    model: 'nano_banana_2',
+    model: 'auto',
     style: 'random',
     aspectRatio: '1:1',
     imageCount: 2,
   },
   commercial: {
     product: {
-      model: 'nano_banana_2',
+      model: 'auto',
       style: 'product',
       aspectRatio: '4:3',
       imageCount: 2,
     },
     poster: {
-      model: 'nano_banana_pro',
+      model: 'qwen_image',
       style: 'random',
       aspectRatio: '3:4',
       imageCount: 1,
     },
     social_cover: {
-      model: 'nano_banana_2',
+      model: 'auto',
       style: 'vibrant',
       aspectRatio: '1:1',
       imageCount: 2,

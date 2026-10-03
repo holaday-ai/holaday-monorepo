@@ -82,7 +82,6 @@ function independentEvidence(evidence: VideoAvSyncEvidence[]): VideoAvSyncEviden
   return ordered;
 }
 
-
 function parseReview(text: string, model: string, durationMs: number): VideoAvSyncReview {
   let payload: ReviewPayload;
   try {

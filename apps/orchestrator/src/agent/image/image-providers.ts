@@ -22,8 +22,8 @@ import {
   type ImageGenerateFn,
   type ImageGenerateParams,
   type ImageModelKey,
-  type ImageProviderId,
   ImageProviderError,
+  type ImageProviderId,
 } from './image-provider-types.js';
 
 export interface ImageProviderConfig {
@@ -180,8 +180,12 @@ export function createProviderImageGenerate(
         spec.provider,
       );
     }
-    const { apiKey: _ignoredKey, baseUrl: _ignoredBase, apiVersion: _ignoredVersion, ...rest } =
-      params;
+    const {
+      apiKey: _ignoredKey,
+      baseUrl: _ignoredBase,
+      apiVersion: _ignoredVersion,
+      ...rest
+    } = params;
     if (spec.provider === 'dashscope') {
       return clients.dashscope({
         ...rest,

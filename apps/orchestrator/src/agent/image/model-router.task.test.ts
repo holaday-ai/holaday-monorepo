@@ -15,9 +15,9 @@ describe('pickImageModelForTask — route by task type', () => {
     expect(pickImageModelForTask('把背景换成海边', { ...base, hasInputs: true })?.primary).toBe(
       'wan_image',
     );
-    expect(
-      pickImageModelForTask('换个风格', { ...base, mode: 'lock_subject' })?.primary,
-    ).toBe('wan_image');
+    expect(pickImageModelForTask('换个风格', { ...base, mode: 'lock_subject' })?.primary).toBe(
+      'wan_image',
+    );
   });
 
   it('routes general asks to the configured default, then the rest', () => {
@@ -49,9 +49,9 @@ describe('pickImageModelForTask — route by task type', () => {
   });
 
   it('treats auto / legacy values as no preference', () => {
-    expect(
-      pickImageModelForTask('做一张海报', { ...base, preferredModel: 'auto' })?.primary,
-    ).toBe('qwen_image');
+    expect(pickImageModelForTask('做一张海报', { ...base, preferredModel: 'auto' })?.primary).toBe(
+      'qwen_image',
+    );
     expect(
       pickImageModelForTask('做一张海报', { ...base, preferredModel: 'nano_banana_pro' })
         ?.preferredUnavailable,

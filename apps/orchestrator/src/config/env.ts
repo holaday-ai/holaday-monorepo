@@ -181,7 +181,9 @@ const baseEnvSchema = z.object({
   FAL_NANO_BANANA_2_MODEL: z.string().min(1).default('fal-ai/nano-banana-2'),
   FAL_NANO_BANANA_2_EDIT_MODEL: z.string().min(1).default('fal-ai/nano-banana-2/edit'),
   /** General-purpose (no poster text, no edit) default image model. */
-  IMAGE_DEFAULT_MODEL: z.enum(['qwen_image', 'wan_image', 'nano_banana_2']).default('nano_banana_2'),
+  IMAGE_DEFAULT_MODEL: z
+    .enum(['qwen_image', 'wan_image', 'nano_banana_2'])
+    .default('nano_banana_2'),
   /**
    * Veo 3.1 via fal (optional normal-video source; replaces the Gemini
    * Developer API path). Ids from fal.ai/models/fal-ai/veo3.1{,/fast,/lite}.
