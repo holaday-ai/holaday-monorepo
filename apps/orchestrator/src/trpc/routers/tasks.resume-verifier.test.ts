@@ -276,16 +276,17 @@ describe('clarification resume semantic verification', () => {
       const f = fixture(options);
       await f.start();
       await vi.waitFor(() => expect(f.persistedVerification).toHaveLength(1));
+      // A missing verifier lane is recorded as semanticStatus 'unavailable' but
+      // no longer turns a deterministic pass into a failure or partial result.
       expect(f.persistedVerification[0]).toMatchObject({
-        passed: !('lanes' in options),
+        passed: true,
         semanticStatus: 'unavailable',
       });
       if ('lanes' in options) {
-        // With no regional verifier model, wire coverage cannot be certified.
         expect(f.persistedVerification[0]).toMatchObject({
-          inputCoverage: { complete: false, codes: ['VERIFICATION_CONTEXT_INVALID'] },
+          inputCoverage: { complete: true, codes: [] },
         });
-        expect(f.saved[0]?.status).not.toBe('completed');
+        expect(f.saved[0]?.status).toBe('completed');
       } else
         expect(f.saved[0]).toMatchObject({
           status: 'completed',

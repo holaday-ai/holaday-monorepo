@@ -22,6 +22,7 @@
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import type { SupercarOutcome } from './agent-loop.js';
 import {
   buildOtaAuditRecord,
@@ -50,8 +51,10 @@ export interface ExtensionNavigateResult {
 }
 
 export interface OtaReadonlyDeps {
-  /** Anthropic client — used to derive the query URL + extract hotels. */
-  readonly client: Anthropic;
+  /** Legacy Anthropic client; used only when no model-catalog adapter is given. */
+  readonly client?: Anthropic | null;
+  /** Model-catalog adapter (batch 04): the selected brain derives the URL + extracts hotels. */
+  readonly messagesAdapter?: MessagesAdapter;
   /** Dispatch a `navigate` tool call to the user's Chrome via the extension. */
   readonly dispatchNavigate: (
     url: string,
@@ -86,12 +89,24 @@ function textFromMessage(msg: Anthropic.Message): string {
 }
 
 async function ask(
-  client: Anthropic,
+  deps: Pick<OtaReadonlyDeps, 'client' | 'messagesAdapter'>,
   model: string,
   system: string,
   user: string,
   maxTokens = 1500,
 ): Promise<string> {
+  if (deps.messagesAdapter) {
+    const response = await deps.messagesAdapter.create(
+      { maxTokens, system, messages: [{ role: 'user', content: user }] },
+      { timeoutMs: 60_000, maxRetries: 2 },
+    );
+    return response.content
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join('')
+      .trim();
+  }
+  const client = deps.client;
+  if (!client) throw new Error('OTA model client unavailable');
   const msg = await client.messages.create({
     model,
     max_tokens: maxTokens,
@@ -342,7 +357,7 @@ export async function runOtaUserBrowserReadonly(opts: {
     const userMsg =
       `目标城市：${city}；价格上限：${filters.maxPriceCNY ?? '无'} 元；最多 ${filters.topN} 个。\n\n` +
       `页面可见文本：\n${bodyText.slice(0, 12000)}`;
-    modelText = await ask(deps.client, model, HOTEL_JSON_SYSTEM, userMsg, 2000);
+    modelText = await ask(deps, model, HOTEL_JSON_SYSTEM, userMsg, 2000);
   } catch (err) {
     deps.logger.warn({ taskId, err: err instanceof Error ? err.message : String(err) }, 'ota-readonly: hotel model extract failed');
     return { status: 'failed', reason: `已读取${city}携程酒店页面，但未能稳定识别符合条件的酒店名。`, iterations, toolsUsed };

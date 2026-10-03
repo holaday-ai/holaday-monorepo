@@ -212,3 +212,30 @@ describe('runOtaUserBrowserReadonly — hotels (Step 9 model-primary + validator
     expect(out.summary).not.toContain('圣丰索菲特'); // ¥892 > 800 → dropped
   });
 });
+
+describe('runOtaUserBrowserReadonly — model-catalog adapter (batch 04)', () => {
+  it('extracts hotels through the selected brain instead of a raw Anthropic client', async () => {
+    const create = vi.fn(async (_request: unknown, _options?: unknown) => ({
+      id: 'r1',
+      metadata: { provider: 'alibaba-model-studio' as const, model: 'qwen3.8-max', region: 'cn' as const, deploymentScope: 'china_mainland' as const, endpointKind: 'public' as const, protocol: 'messages' as const },
+      content: [{ type: 'text' as const, text: GOOD_JSON }],
+      stopReason: 'end_turn' as const,
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: null, cacheCreationInputTokens: null, complete: true },
+    }));
+    const out = await runOtaUserBrowserReadonly({
+      taskId: 'tsk_adapter',
+      intent: '打开携程查上海酒店，不要下单。筛选 4 星级、价格 800 元以内，给 5 个选项',
+      deps: {
+        messagesAdapter: { metadata: { provider: 'anthropic', model: 'unused' }, create },
+        dispatchNavigate: navOk({ finalUrl: 'https://hotels.ctrip.com/hotels/list?city=2', title: '酒店', bodyText: SH_PROMO_BODY }),
+        audit: () => {},
+        logger: silentLogger,
+      },
+      now: NOW,
+    });
+    expect(out.status).toBe('completed');
+    expect(out.summary).toContain('希尔顿花园');
+    expect(create).toHaveBeenCalled();
+    expect(create.mock.calls[0]?.[1]).toMatchObject({ maxRetries: 2 });
+  });
+});

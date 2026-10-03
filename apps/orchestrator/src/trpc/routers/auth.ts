@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { currentMediaModels } from '../../agent/video/media-models.js';
 import { isVideoEnabledFor } from '../../agent/video/video-access.js';
 import { EmailCodeError, createEmailCodeService } from '../../auth/email-code.js';
 import { MfaError, MfaService } from '../../auth/mfa-service.js';
@@ -469,6 +470,9 @@ export const authRouter = router({
       // this to show/hide the「视频任务」sidebar entry + guard /video.
       // Single source with the tasks.ts fork (agent/video/video-access.ts).
       videoEnabled: isVideoEnabledFor(ctx.userId),
+      // Capability recovery — image/video model choices this deployment can
+      // serve (credential presence only). The SPA hides everything else.
+      mediaModels: currentMediaModels(),
       teamProjectsEnabled: isTeamProjectsEnabledFor(ctx.userId),
       // Auth has no organization context, so expose only the nested
       // user/global eligibility. Organization-scoped callers additionally

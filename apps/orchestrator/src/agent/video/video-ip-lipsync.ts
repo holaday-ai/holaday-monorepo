@@ -23,7 +23,7 @@ import {
   type VideoAvSyncReview,
   videoAvSyncAudit,
   videoAvSyncLogContext,
-} from './video-av-sync-verifier.js';
+} from './video-av-sync-audit.js';
 import { buildComposeCommand } from './video-compose.js';
 import { downloadToBuffer, downloadToFile } from './video-http.js';
 import { type AspectRatio, resolveAspect } from './video-lane-simple.js';

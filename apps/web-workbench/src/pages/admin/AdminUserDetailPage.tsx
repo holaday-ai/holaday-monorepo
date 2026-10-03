@@ -237,6 +237,7 @@ export function AdminUserDetailPage(): JSX.Element {
               <tr className="border-b border-[#EFEFEF] text-left text-[11px] uppercase text-muted-foreground">
                 <th className="py-2 pr-3 font-medium">时间</th>
                 <th className="py-2 pr-3 font-medium">任务</th>
+                <th className="py-2 pr-3 font-medium">模型</th>
                 <th className="py-2 pr-3 font-medium">状态</th>
                 <th className="py-2 pr-3 font-medium">耗时</th>
               </tr>
@@ -244,7 +245,7 @@ export function AdminUserDetailPage(): JSX.Element {
             <tbody>
               {recentTasks.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="py-6 text-center text-muted-foreground">
+                  <td colSpan={5} className="py-6 text-center text-muted-foreground">
                     此用户暂无任务
                   </td>
                 </tr>
@@ -262,6 +263,7 @@ export function AdminUserDetailPage(): JSX.Element {
                       <td className="py-2 pr-3 text-foreground">
                         {truncate(row.title ?? row.intent, 70)}
                       </td>
+                      <td className="py-2 pr-3 text-muted-foreground">{row.model ?? '—'}</td>
                       <td className="py-2 pr-3">
                         <span
                           className={cn(
@@ -326,6 +328,7 @@ function normalizeUserDetail(value: DetailData) {
         intent: optionalText(row.intent),
         status: safeText(row.status, ''),
         durationMs: nullableFiniteNumber(row.durationMs),
+        model: optionalText(row.model),
       };
     }),
   };

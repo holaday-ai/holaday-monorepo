@@ -37,7 +37,6 @@ import {
   runImageTask,
 } from '../../agent/image/qwen-only-image-runner.js';
 import { orderImageAttachmentIds } from '../../agent/image/image-input-order.js';
-import { createAnthropicSubjectConsistencyVerifier } from '../../agent/image/image-subject-verifier.js';
 import { classifyExecutionMode } from '../../agent/intent-classifier.js';
 import { DrizzleLlmCallRecorder } from '../../agent/llm-call-recorder.js';
 // Phase 24 RC follow-up — nav-failure safety net. Catches the
@@ -127,6 +126,11 @@ import type { VideoScript } from '../../agent/video/types.js';
 import { VIDEO_CREATION_ALLOWLIST } from '../../agent/video/video-access.js';
 import { probeCloneReferenceQuoteFacts } from '../../agent/video/video-clone-reference.js';
 import { mediaCapabilityIssue } from '../../agent/video/media-capability.js';
+import { notifyMediaGenerationFailed } from '../../agent/video/media-failure-refund.js';
+import {
+  resolveMediaModelServices,
+  videoModelServicesReady,
+} from '../../agent/video/media-model-services.js';
 import {
   claimVideoConfirmAfterVerifierPreflight,
   deriveVideoType,
@@ -159,12 +163,25 @@ import type { WanAnimateMixMode } from '../../agent/video/wan-animate-mix-client
 import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
 import type { PageLike, PlaywrightExecutor } from '../../agent/vision-loop/playwright-executor.js';
+import { createResponsesWebSearch } from '../../agent/browser-tools/unified-browser-loop.js';
 import { startVisionLoopTask } from '../../agent/vision-loop/qwen-only-task-runner.js';
 import {
   BrowserSessionRestoreFlights,
   restorableBrowserTarget,
 } from '../../browser-pool/browser-session-recovery.js';
 import { env as appEnv } from '../../config/env.js';
+import { recordQuotaCharge } from '../../quota/platform-failure-refunds.js';
+import {
+  currentBrain,
+  enterBrain,
+  recordTaskModelSelection,
+  runWithBrain,
+} from '../../llm/model-catalog.js';
+import {
+  modelCatalogService,
+  resolveBrainForExistingTask,
+  resolveBrainForUser,
+} from '../../llm/model-catalog-runtime.js';
 import type { DB } from '../../db/client.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
 import { projects } from '../../db/schema/projects.js';
@@ -226,13 +243,21 @@ import {
 } from '../../execution/search-source-references.js';
 import { MAX_DOWNLOAD_BYTES } from '../../files/download-manager.js';
 import { FileService, taskInternalIdFor } from '../../files/file-service.js';
-import { parseFileForPrompt } from '../../files/parsers.js';
+import {
+  CONVERT_REQUIRED_COPY,
+  CoreFileInputError,
+  parseFileForPrompt,
+} from '../../files/parsers.js';
 import { getSharedStorageProvider } from '../../files/storage-provider.js';
 import { allowedFormatsForPlan, isCreateFileFormat, renderFile } from '../../files/writers.js';
 import {
   type ModelTaskUnavailableReason,
   createProductionModelRuntimeWiring,
 } from '../../llm/model-runtime-wiring.js';
+import {
+  extractTaskMemoryAfterSuccess,
+  resolveUserGenerateAdapter,
+} from '../../playbook/evolution/executor-hooks.js';
 import { TaskActionCaptureRepository } from '../../playbook/task-action-capture-repository.js';
 import { isQuotaBypassUser } from '../../quota/quota-mode.js';
 import {
@@ -268,6 +293,7 @@ import {
   followUpParentReasonLabel,
   followUpTerminalGuardMessage,
   resolveBrowserFollowUpContinuation,
+  deferredMediaNotice,
   resolveFollowUpExecutionMode,
   resolveWorkflowIdentities,
 } from './task-followup-copy.js';
@@ -454,9 +480,7 @@ const ASHARE_QA_ALLOWLIST: ReadonlySet<string> = new Set(
 // agent/video/video-access.ts (single source shared with auth.me's
 // videoEnabled frontend gate — imported above; can't drift).
 
-// Anthropic model for the video优化/脚本 step.
-// TODO(env): 接进 env.ts (VIDEO_SCRIPT_MODEL) when the video lane env block lands.
-const VIDEO_SCRIPT_MODEL = 'claude-sonnet-4-6';
+// Video 优化/脚本 runs on the Qwen generate lane (agent/video/media-model-services.ts).
 
 /**
  * Build the simplified-video-lane config from env. Model ids / 音色 / 字体 use
@@ -510,7 +534,9 @@ function dormantLegacyModelClient(): Anthropic | null {
 }
 const legacyMediaModelClient = dormantLegacyModelClient();
 
-const modelRuntimeWiring = createProductionModelRuntimeWiring(appEnv);
+const modelRuntimeWiring = createProductionModelRuntimeWiring(appEnv, {}, {
+  catalog: () => modelCatalogService.snapshot(),
+});
 
 function resolveGenerateRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
   return modelRuntimeWiring.resolveCore({
@@ -541,10 +567,10 @@ function generateRuntimeUnavailableReason(reason: ModelTaskUnavailableReason): s
 }
 
 function unmigratedLaneForExecutionMode(
-  executionMode: string,
+  _executionMode: string,
 ): 'image' | 'video_generation' | null {
-  if (executionMode === 'image') return 'image';
-  if (executionMode === 'video_creation') return 'video_generation';
+  // Capability recovery: image runs on Qwen Image / Wan 2.7 Image / fal NB2,
+  // video on Wan 2.7 / fal Veo 3.1 / fal lip-sync (qwen-only-* runtimes).
   return null;
 }
 
@@ -565,7 +591,9 @@ export const stockTaskContextInput = z.object({
 });
 
 export const imageCreationOptionsInput = z.object({
-  model: z.enum(['nano_banana_2', 'nano_banana_pro']).optional(),
+  model: z
+    .enum(['auto', 'qwen_image', 'wan_image', 'nano_banana_2', 'nano_banana_pro'])
+    .optional(),
   style: z
     .enum([
       'random',
@@ -601,6 +629,17 @@ export const imageCreationOptionsInput = z.object({
 
 const createInput = z.object({
   localChrome: localChromeSelectionSchema.optional(),
+  /**
+   * Model catalog brain the user picked (e.g. `qwen`). Validated server-side
+   * by `resolveBrain`; an unknown, hidden or unconfigured brain falls back to
+   * the catalog default and the fallback reason is recorded with the task.
+   */
+  brainId: z
+    .string()
+    .min(1)
+    .max(32)
+    .regex(/^[a-z0-9_-]+$/)
+    .optional(),
   intent: z.string().min(1).max(4_000),
   /**
    * Non-user-authored routing context from a dedicated product surface.
@@ -1201,7 +1240,13 @@ export const tasksRouter = router({
     }
     try { return await next({ ctx: { localChromeReservation } }); }
     finally { if (localChromeReservation) localChromeTaskSessions.releaseReservation(localChromeReservation); }
-  }).use(taskDrainMiddleware).mutation(async ({ ctx, input }) => {
+  }).use(taskDrainMiddleware).use(async ({ ctx, input, next }) => {
+    // After drain admission: bind the task's brain to everything this task
+    // starts, so every lane resolved downstream (generate, verifier, plan,
+    // browser…) uses it.
+    const brain = await resolveBrainForUser(ctx.db, ctx.userId, input.brainId);
+    return runWithBrain(brain, () => next());
+  }).mutation(async ({ ctx, input }) => {
     if (input.localChrome && (input.mode === 'plan' || input.fileIds?.length || input.imageOptions || input.videoOptions || input.stockContext || input.taskSource || input.replyToTaskId)) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: '本地 Chrome 当前支持新建网页操作任务，请移除附件并使用自动执行模式。' });
     }
@@ -1283,6 +1328,40 @@ export const tasksRouter = router({
     // instance is shared by every execution lane so no early-return branch can
     // accidentally fall back to the database's `user` default.
     const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
+    const resolvedBrain = currentBrain();
+    // Set once this request consumed quota; the next task inserted carries the
+    // charge so a platform failure can be refunded exactly once.
+    let pendingQuotaCharge: { plan: PlanId; isOpus: boolean } | null = null;
+    {
+      // Record which brain each task created by this request runs with.
+      // Best-effort: a failed audit row never blocks task creation.
+      const insertTask = repo.insertTask.bind(repo);
+      repo.insertTask = (async (...args: Parameters<typeof insertTask>) => {
+        const result = await insertTask(...args);
+        const charge = pendingQuotaCharge;
+        if (charge) {
+          pendingQuotaCharge = null;
+          void recordQuotaCharge(ctx.db, {
+            taskExternalId: args[0].taskId,
+            userId: userRow.id,
+            ...charge,
+          }).catch((err: unknown) => {
+            ctx.logger.warn(
+              { err: err instanceof Error ? err.message : String(err), taskId: args[0].taskId },
+              'quota: charge record not written (refund unavailable for this task)',
+            );
+          });
+        }
+        if (!resolvedBrain) return result;
+        void recordTaskModelSelection(ctx.db, args[0].taskId, resolvedBrain).catch((err: unknown) => {
+          ctx.logger.warn(
+            { err: err instanceof Error ? err.message : String(err), taskId: args[0].taskId },
+            'model catalog: task model selection not recorded',
+          );
+        });
+        return result;
+      }) as typeof repo.insertTask;
+    }
     let validatedStockContext: ValidatedStockTaskContext | null = null;
     if (input.taskSource === 'stock_dashboard') {
       if (!input.stockContext) {
@@ -1362,6 +1441,9 @@ export const tasksRouter = router({
           }
           attachmentBlocks.push(...parsed.blocks);
         } catch (err) {
+          if (err instanceof CoreFileInputError && err.code === 'CORE_FILE_CONVERT_REQUIRED') {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: CONVERT_REQUIRED_COPY });
+          }
           if (completeText) {
             throw new TRPCError({
               code: 'BAD_REQUEST',
@@ -1879,6 +1961,10 @@ export const tasksRouter = router({
       executionMode === 'video_creation' ||
       input.roleId === 'video-creator' ||
       input.videoOptions?.tab !== undefined;
+    const mediaServices = resolveMediaModelServices({
+      generate: resolveGenerateRuntimeForUser(ctx.userId, userRow.modelDataRegion),
+      verifier: resolveVerifierRuntimeForUser(ctx.userId, userRow.modelDataRegion),
+    });
         const providerReadiness = {
           hasDashscope: Boolean(appEnv.DASHSCOPE_API_KEY),
           hasFal: Boolean(appEnv.FAL_KEY),
@@ -1903,7 +1989,7 @@ export const tasksRouter = router({
         if (
           executionMode === 'image' &&
           input.imageOptions?.mode === 'lock_subject' &&
-          !legacyMediaModelClient
+          !mediaServices.verifySubject
         ) {
           throw new TRPCError({
             code: 'PRECONDITION_FAILED',
@@ -1916,7 +2002,7 @@ export const tasksRouter = router({
         message: '视频生成功能尚未向当前账号开放，未创建任务或扣除额度。',
       });
     }
-    if (videoIntent && !legacyMediaModelClient) {
+    if (videoIntent && !videoModelServicesReady(mediaServices)) {
       throw new TRPCError({
         code: 'PRECONDITION_FAILED',
         message: '视频生成服务尚未就绪，未创建任务或扣除额度。',
@@ -1925,7 +2011,7 @@ export const tasksRouter = router({
     const willCreateVideoQuote =
       appEnv.VIDEO_CREATION_ENABLED &&
       videoAllowed &&
-      Boolean(legacyMediaModelClient) &&
+      videoModelServicesReady(mediaServices) &&
       videoIntent;
     if (!input.localChrome && appEnv.NODE_ENV === 'production' && executionMode === 'browser' && !ctx.browserPool) {
       // Server-side browser tasks must use the per-task pool because that
@@ -2108,6 +2194,7 @@ export const tasksRouter = router({
         }
       }
       opusActuallyConsumed = consume.ok && willConsumeOpus;
+      pendingQuotaCharge = { plan: planId, isOpus: opusActuallyConsumed };
     } else if (isFollowUp) {
       ctx.logger.info(
         {
@@ -2286,20 +2373,12 @@ export const tasksRouter = router({
             flashModel: appEnv.GEMINI_IMAGE_MODEL,
             proModel: appEnv.GEMINI_IMAGE_MODEL_PRO,
             ...(input.imageOptions?.model
-              ? {
-                  preferredTier:
-                    input.imageOptions.model === 'nano_banana_pro'
-                      ? ('pro' as const)
-                      : ('flash' as const),
-                }
+              ? { preferredModel: input.imageOptions.model }
               : {}),
             save,
             logger: ctx.logger,
-                  ...(input.imageOptions?.mode === 'lock_subject' && legacyMediaModelClient
-                    ? {
-                        verifySubject:
-                          createAnthropicSubjectConsistencyVerifier(legacyMediaModelClient),
-                      }
+                  ...(input.imageOptions?.mode === 'lock_subject' && mediaServices.verifySubject
+                    ? { verifySubject: mediaServices.verifySubject }
                     : {}),
           });
         }
@@ -2346,6 +2425,18 @@ export const tasksRouter = router({
               metadata,
             });
             imagePersisted = persisted.persisted;
+            if (persisted.persisted) {
+              await notifyMediaGenerationFailed(
+                {
+                  taskId,
+                  userIdInternal: userRow.id,
+                  lane: 'image',
+                  reason: result.reason ?? '图片生成失败，请稍后重试。',
+                  nothingDelivered: result.attachments.length === 0,
+                },
+                ctx.logger,
+              );
+            }
           }
         } catch (err) {
           ctx.logger.error({ err, taskId }, 'image: persist failed');
@@ -2404,6 +2495,10 @@ export const tasksRouter = router({
               status: 'failed',
               reason,
             });
+            await notifyMediaGenerationFailed(
+              { taskId, userIdInternal: userRow.id, lane: 'image', reason, nothingDelivered: true },
+              ctx.logger,
+            );
           }
         } catch (persistErr) {
           ctx.logger.error(
@@ -2432,8 +2527,8 @@ export const tasksRouter = router({
       // 界面显式带了 videoOptions.tab(普通/宠物/IP)。后者是关键——宠物动作 prompt / IP 口播文案
       // 本身不含「视频」关键词,分类器会判 generate;只有 videoOptions.tab 这个显式信号能可靠把
       // 三类 tab 提交都送进视频 fork(只有视频界面会设它,其它 createTask 路径绝不带)。
-      if (willCreateVideoQuote && legacyMediaModelClient) {
-        const anthropicClient = legacyMediaModelClient;
+      if (willCreateVideoQuote && mediaServices.scriptLlm) {
+        const scriptLlm = mediaServices.scriptLlm;
             const { buildFallbackVideoScript, optimizeUserScript, segmentCapForText } =
               await import('../../agent/video/video-script.js');
         // Phase 2 第一期 — SPA「普通视频」面板把模型档/风格/画幅/画质/时长带上来。
@@ -2630,18 +2725,7 @@ export const tasksRouter = router({
           const segCap = segmentCapForText(input.intent);
           script = await optimizeUserScript(
             { userText: input.intent, maxSegments: segCap, ...(style ? { style } : {}) },
-            {
-              llm: async ({ system, user }) => {
-                const resp = await anthropicClient.messages.create({
-                  model: VIDEO_SCRIPT_MODEL,
-                  max_tokens: 2000,
-                  system,
-                  messages: [{ role: 'user', content: user }],
-                });
-                const b = resp.content[0];
-                return b && b.type === 'text' ? b.text : '';
-              },
-            },
+            { llm: scriptLlm },
           );
         } catch (err) {
           ctx.logger.warn(
@@ -3468,6 +3552,12 @@ export const tasksRouter = router({
         intent: input.intent,
         roleId: dispatchRoleId,
         opusUsed: opusActuallyConsumed,
+        resultNotice: deferredMediaNotice({
+          classifiedExecutionMode,
+          executionMode,
+          // Batch 05 wired the image/video lanes back to real executors.
+          mediaLaneAvailable: true,
+        }),
       });
     }
 
@@ -5978,7 +6068,17 @@ export const tasksRouter = router({
           taskId,
           intent: effectiveIntent,
           deps: {
-            client: legacyMediaModelClient!,
+            ...(() => {
+              // Batch 04: the OTA readonly lane uses the model-catalog brain.
+              const otaRuntime = modelRuntimeWiring.resolveCore({
+                actorExternalId: ctx.userId,
+                lane: 'browser',
+                ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
+              });
+              return otaRuntime.kind === 'ready'
+                ? { messagesAdapter: otaRuntime.messages('standard') }
+                : { client: legacyMediaModelClient };
+            })(),
             dispatchNavigate: async (url: string) => {
               const r = await sendExtensionToolCall(ctx.userId, {
                 taskId,
@@ -6037,6 +6137,23 @@ export const tasksRouter = router({
                 'supercar: late runner outcome ignored after watchdog terminal persist',
               );
               return;
+            }
+            // Batch 06 — cross-task memory: model-catalog generate lane, only site
+            // operations + user preferences. MEMORY_EXTRACTION_ENABLED (default off).
+            if (outcome.status === 'completed' && outcome.summary) {
+              void extractTaskMemoryAfterSuccess({
+                db: ctx.db,
+                logger: ctx.logger,
+                adapter: resolveUserGenerateAdapter({
+                  wiring: modelRuntimeWiring,
+                  actorExternalId: ctx.userId,
+                  modelDataRegion: userRow.modelDataRegion,
+                }),
+                userIdInternal: userRow.id,
+                intent: input.intent,
+                summary: outcome.summary,
+                taskExternalId: taskId,
+              }).catch(() => {});
             }
             // F1 — handoff to generate. User replied with manual data
             // (numeric metrics, "数据如下:", etc.); supercar exited
@@ -7213,8 +7330,37 @@ export const tasksRouter = router({
         .where(eq(tasksTable.externalId, taskId))
         .limit(1);
       const taskDbId = taskDbRow?.id;
+      // Batch 04: the browser lane's brain (model catalog) drives the unified
+      // tool set when a Playwright page is available.
+      const visionRuntime = modelRuntimeWiring.resolveCore({
+        actorExternalId: ctx.userId,
+        lane: 'browser',
+        ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
+      });
+      const unifiedBrowser =
+        visionRuntime.kind === 'ready'
+          ? {
+              messagesAdapter: visionRuntime.messages('vision'),
+              webSearch: createResponsesWebSearch(visionRuntime.responses('fast')),
+            }
+          : {};
       const runTaskFn = () =>
         startVisionLoopTask({
+          ...unifiedBrowser,
+          ...(taskDbId
+            ? {
+                evolution: {
+                  db: ctx.db,
+                  taskDbId,
+                  generateAdapter: resolveUserGenerateAdapter({
+                    wiring: modelRuntimeWiring,
+                    actorExternalId: ctx.userId,
+                    modelDataRegion: userRow.modelDataRegion,
+                  }),
+                  logger: ctx.logger,
+                },
+              }
+            : {}),
           userId: ctx.userId,
           taskId,
           // Pass the URL-enriched intent to the vision loop. The
@@ -7789,6 +7935,8 @@ export const tasksRouter = router({
         .select({
           id: users.id,
           plan: users.plan,
+          // Qwen model region for the script / frame-QA runtimes.
+          modelDataRegion: users.modelDataRegion,
           // Phase 2 第三期 — IP 人物 lane 需要克隆声音 + 出镜底版 + 本人授权(合规硬闸)。
           qwenVoiceId: users.qwenVoiceId,
           baseVideoFileId: users.baseVideoFileId,
@@ -7858,73 +8006,8 @@ export const tasksRouter = router({
         return { taskId: input.taskId, status: 'awaiting_user' as const };
       }
 
-      // The quote may predate the Qwen-only cutover. A positive answer must
-      // not debit quota or create a generation child while the media lane is
-      // migration-unavailable. Settle the quote itself as an explicit failed
-      // terminal so repeated confirmation cannot spin or charge twice.
-      if (appEnv.MODEL_RUNTIME_POLICY === 'qwen_only') {
-        const unavailable = modelRuntimeWiring.resolveUnmigrated('video_generation');
-        const unavailableReason = modelTaskFailureReason(unavailable.reasonCode);
-        const previousResult =
-          row.result && typeof row.result === 'object'
-            ? (row.result as Record<string, unknown>)
-            : {};
-        const previousMetadata =
-          previousResult.metadata && typeof previousResult.metadata === 'object'
-            ? (previousResult.metadata as Record<string, unknown>)
-            : {};
-        const failed = await ctx.db.transaction(async (tx) => {
-        const updateResult = await tx
-          .update(tasksTable)
-          .set({
-            status: 'failed',
-            awaitingKind: null,
-            awaitingQuestion: null,
-            errorCode: unavailable.reasonCode,
-            errorMessage: unavailableReason,
-            completedAt: new Date(),
-            result: {
-              ...previousResult,
-              reason: unavailableReason,
-              metadata: {
-                ...previousMetadata,
-                reasonCode: unavailable.reasonCode,
-              },
-            },
-          })
-          .where(
-            and(
-              eq(tasksTable.id, row.id),
-              eq(tasksTable.status, 'awaiting_user'),
-              eq(tasksTable.awaitingKind, 'video_quote'),
-            ),
-          );
-        if (readAffectedRows(updateResult) !== 1) return false;
-        await tx.insert(taskEvents).values({
-          externalId: newExternalId('taskEvent'),
-          taskId: row.id,
-          type: 'task.failed',
-          actor: 'system',
-          payload: {
-            source: 'video_quote',
-            from: 'awaiting_user',
-            to: 'failed',
-            errorCode: unavailable.reasonCode,
-          },
-        });
-        return true;
-        });
-        if (!failed) {
-          throw new TRPCError({ code: 'NOT_FOUND', message: '找不到待确认的视频报价' });
-        }
-        broadcastToUser(ctx.userId, {
-          type: 'server.task.terminal',
-          taskId: input.taskId,
-          status: 'failed',
-          reason: unavailableReason,
-        });
-        return { taskId: input.taskId, status: 'failed' as const };
-      }
+      // Capability recovery: confirmed quotes generate on the Qwen-only media
+      // runtime (agent/video/qwen-only-video-runtime.ts); no migration gate.
 
       // Validate the quote payload before the atomic consume. A malformed
       // quote should not be marked completed before we know generation can
@@ -8038,8 +8121,12 @@ export const tasksRouter = router({
           message: ipPreflight.issue,
         });
       }
+      const confirmMediaServices = resolveMediaModelServices({
+        generate: resolveGenerateRuntimeForUser(ctx.userId, userRow.modelDataRegion),
+        verifier: resolveVerifierRuntimeForUser(ctx.userId, userRow.modelDataRegion),
+      });
       const preflight = await claimVideoConfirmAfterVerifierPreflight(
-        { choice, hasVerifier: Boolean(legacyMediaModelClient) },
+        { choice, hasVerifier: Boolean(confirmMediaServices.analyzeVideoQuality) },
         async () => true,
       );
       if (preflight.issue) {
@@ -8122,7 +8209,6 @@ export const tasksRouter = router({
       // generate_video | generate_image — 外部供应商调用只在事务提交后启动。
       broadcastSubStatus(ctx.userId, newTaskId, 'generating');
 
-      const anthropicClient = legacyMediaModelClient;
       const userExternalId = ctx.userId;
       const userInternalId = userRow.id;
       const ipVoiceId = userRow.qwenVoiceId; // Phase 2 第三期 IP lane
@@ -8147,7 +8233,7 @@ export const tasksRouter = router({
           '../../agent/video/qwen-only-video-runtime.js'
         );
         const { runFfmpeg } = await import('../../agent/video/ffmpeg-exec.js');
-        const { createAnthropicVideoQualityAnalyzer, verifyFinalVideoQuality } = await import(
+        const { verifyFinalVideoQuality } = await import(
           '../../agent/video/video-quality-verifier.js'
         );
         const { verifyAudioVisualSync } = await import(
@@ -8164,20 +8250,10 @@ export const tasksRouter = router({
         let finalAtt: ImageAttachment | null = null;
         // 首帧 poster 的下载 URL（poster 由 lane 在成片后抽帧存盘，再盖到 finalAtt 上）。
         let posterUrl: string | null = null;
-        const llm = async ({ system, user }: { system: string; user: string }) => {
-          if (!anthropicClient) return '';
-          const resp = await anthropicClient.messages.create({
-            model: VIDEO_SCRIPT_MODEL,
-            max_tokens: 2000,
-            system,
-            messages: [{ role: 'user', content: user }],
-          });
-          const b = resp.content[0];
-          return b && b.type === 'text' ? b.text : '';
-        };
-        const analyzeVideoQuality = anthropicClient
-          ? createAnthropicVideoQualityAnalyzer(anthropicClient)
-          : async () => '';
+        // Script: Qwen generate lane. Frame QA: Qwen vision (QWEN_VISION_MODEL).
+        const llm = confirmMediaServices.scriptLlm ?? (async () => '');
+        const analyzeVideoQuality =
+          confirmMediaServices.analyzeVideoQuality ?? (async () => '');
         const verifyFinalVideo = (qualityInput: Parameters<typeof verifyFinalVideoQuality>[0]) =>
           verifyFinalVideoQuality(qualityInput, {
             runFfmpeg,
@@ -8599,6 +8675,16 @@ export const tasksRouter = router({
               status: 'failed',
               reason: friendlyReason,
             });
+            await notifyMediaGenerationFailed(
+              {
+                taskId: newTaskId,
+                userIdInternal: userInternalId,
+                lane: 'video_creation',
+                reason: friendlyReason,
+                nothingDelivered: true,
+              },
+              logger,
+            );
           }
         } finally {
           await fsp.rm(workdir, { recursive: true, force: true }).catch(() => {});
@@ -9129,6 +9215,9 @@ export const tasksRouter = router({
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
       }
+      // A follow-up keeps the brain its task started with. Resolved only after
+      // the user and task ownership checks so they stay the first lookups.
+      enterBrain(await resolveBrainForExistingTask(ctx.db, ctx.userId, input.taskId));
       const replyResult = normalizeOutput(taskRow.result) as Record<string, unknown> | null;
       const coreReply = await handleCoreTaskReply({ ctx, input, userId: userRow.id,
         modelDataRegion: userRow.modelDataRegion, wiring: modelRuntimeWiring,

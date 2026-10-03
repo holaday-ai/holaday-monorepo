@@ -51,6 +51,7 @@ export * from './evidence-artifacts.js';
 export * from './claims.js';
 export * from './claim-evidence-links.js';
 export * from './canary-results.js';
+export * from './operation-path-replays.js';
 // Phase 1 Playbook B 捕获层 — raw per-action capture (distillation source).
 export * from './task-action-captures.js';
 export * from './watchlists.js';
@@ -61,3 +62,5 @@ export * from './energy-analytics.js';
 export * from './account-closures.js';
 export * from './feedback-cases.js';
 export * from './video-editing.js';
+export * from './model-catalog.js';
+export * from './quota-refunds.js';

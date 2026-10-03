@@ -12,6 +12,8 @@ import {
   VerificationContextError,
   assessVerificationMaterials,
   createTaskVerificationContext,
+  verificationImages,
+  withoutImageData,
 } from './task-verification-context.js';
 import {
   type VerificationInputCoverage,
@@ -143,6 +145,7 @@ export function prepareLlmVerificationInput(inputs: LlmVerifierInputs): {
     ],
   };
   if (context) {
+    // Images are admitted under their own budget; the text budget covers the rest.
     const budget = checkVerificationCandidate(
       inputs.answerText,
       serializeMessagesRequest(request, inputs.adapter?.metadata ?? inputs.semanticMetadata),
@@ -152,6 +155,24 @@ export function prepareLlmVerificationInput(inputs: LlmVerifierInputs): {
         complete: false,
         codes: [...new Set([...(inputCoverage?.codes ?? []), budget.code])],
       };
+  }
+  const images = verificationImages(context);
+  if (images.length > 0) {
+    const [first] = request.messages;
+    if (first && typeof first.content === 'string') {
+      request.messages = [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: first.content },
+            ...images.map((image) => ({
+              type: 'image' as const,
+              source: { kind: 'base64' as const, mediaType: image.mediaType, data: image.data },
+            })),
+          ],
+        },
+      ];
+    }
   }
   return { request, ...(inputCoverage ? { inputCoverage } : {}) };
 }
@@ -170,7 +191,8 @@ export async function verifyWithLlm(inputs: LlmVerifierInputs): Promise<Semantic
       inputs.adapter.create(request, {
         signal: controller.signal,
         timeoutMs,
-        maxRetries: 0,
+        // One retry for transient 429/5xx; the verifier timeout still bounds it.
+        maxRetries: 1,
       }),
       timeoutMs,
       controller,
@@ -275,7 +297,9 @@ export function buildUserPayload(
       : inputs.answerText;
   return JSON.stringify({
     ...(inputs.deliveryStage ? { deliveryStage: inputs.deliveryStage } : {}),
-    ...(inputs.verificationContext ? { context: inputs.verificationContext } : {}),
+    ...(inputs.verificationContext
+      ? { context: withoutImageData(inputs.verificationContext) }
+      : {}),
     contract: {
       tier: inputs.contract.tier,
       goal: inputs.contract.goal,

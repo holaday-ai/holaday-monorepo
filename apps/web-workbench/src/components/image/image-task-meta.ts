@@ -1,9 +1,11 @@
-import type {
-  CommercialImageUse,
-  ImageChangeTarget,
-  ImageCreationGoal,
-  ImageCreationOptions,
-  ImageStyleKey,
+import {
+  type CommercialImageUse,
+  IMAGE_MODEL_VALUES,
+  type ImageChangeTarget,
+  type ImageCreationGoal,
+  type ImageCreationOptions,
+  type ImageModel,
+  type ImageStyleKey,
 } from '@/types/image';
 import type { VideoAspect } from '@/types/video';
 import {
@@ -20,6 +22,7 @@ export interface ImageTaskMeta {
 }
 
 const IMAGE_STYLE_KEYS = new Set(IMAGE_STYLE_OPTIONS.map(({ key }) => key));
+const IMAGE_MODELS = new Set<string>(IMAGE_MODEL_VALUES);
 const IMAGE_ASPECT_RATIOS = new Set(IMAGE_ASPECT_OPTIONS.map(({ value }) => value));
 const IMAGE_GOALS = new Set(IMAGE_CREATION_GOALS);
 const COMMERCIAL_USES = new Set(COMMERCIAL_IMAGE_USES);
@@ -92,7 +95,8 @@ function parseImageOptions(value: unknown): ImageCreationOptions | undefined {
   const changeTargets = asImageChangeTargets(value.changeTargets);
   const visiblePrompt = parseVisiblePrompt(value.visiblePrompt);
   if (
-    (model !== 'nano_banana_2' && model !== 'nano_banana_pro') ||
+    typeof model !== 'string' ||
+    !IMAGE_MODELS.has(model) ||
     mode === null ||
     style === null ||
     goal === null ||
@@ -108,7 +112,7 @@ function parseImageOptions(value: unknown): ImageCreationOptions | undefined {
   }
 
   return {
-    model,
+    model: model as ImageModel,
     style,
     aspectRatio: aspectRatio as VideoAspect,
     imageCount: imageCount as 1 | 2 | 3 | 4,

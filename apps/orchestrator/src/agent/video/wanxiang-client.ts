@@ -111,7 +111,7 @@ export interface CreateVideoTaskParams extends WanxiangBaseParams {
   readonly negativePrompt?: string;
   /** e.g. '1280*720'. Default omitted (model default). */
   readonly size?: string;
-  /** Wan 2.7 protocol resolution tier. */
+  /** Wan 2.7 protocol resolution tier (t2v and i2v). */
   readonly resolution?: '720P' | '1080P';
   /** Wan 2.7 protocol output ratio. */
   readonly ratio?: '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
@@ -256,15 +256,24 @@ export async function createVideoTask(
   const model = p.model ?? DEFAULT_VIDEO_MODEL;
   const parameters: Record<string, unknown> = {};
   const usesWan27TextProtocol = model.startsWith('wan2.7-t2v');
+  // Wan 2.7 i2v: input.media[{type:'first_frame', url}], parameters.resolution/duration;
+  // the output ratio follows the first frame (no size/ratio parameter).
+  // https://help.aliyun.com/zh/model-studio/image-to-video-general-api-reference
+  const usesWan27ImageProtocol = model.startsWith('wan2.7-i2v') && Boolean(p.imageUrl);
   if (usesWan27TextProtocol) {
     if (p.resolution) parameters.resolution = p.resolution;
     if (p.ratio) parameters.ratio = p.ratio;
+  } else if (usesWan27ImageProtocol) {
+    if (p.resolution) parameters.resolution = p.resolution;
   } else if (p.size) {
     parameters.size = p.size;
   }
   if (p.durationSeconds !== undefined) parameters.duration = p.durationSeconds;
   const input: Record<string, unknown> = { prompt: p.prompt };
-  if (p.imageUrl) input.img_url = p.imageUrl;
+  if (p.imageUrl) {
+    if (usesWan27ImageProtocol) input.media = [{ type: 'first_frame', url: p.imageUrl }];
+    else input.img_url = p.imageUrl;
+  }
   if (p.negativePrompt) input.negative_prompt = p.negativePrompt;
   const taskId = await postCreate(
     `${base(p)}/api/v1/services/aigc/video-generation/video-synthesis`,

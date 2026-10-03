@@ -103,6 +103,29 @@ const taskExecutionRelationalClosureHandler = createRelationalDeleteHandler({
       parentTableName: 'tasks',
       childParentColumn: 'task_id',
     }),
+    // Per-task quota charge/refund ledger.
+    directUserRows('quota_refunds'),
+    // Which brain each task ran with; keyed by the task's external id.
+    rowsOwnedThroughParent({
+      tableName: 'task_model_selections',
+      parentTableName: 'tasks',
+      childParentColumn: 'task_external_id',
+      parentJoinColumn: 'external_id',
+    }),
+    // Batch 06 reuse metrics: rows for the user's own task runs, then rows of
+    // paths crystallized from the user's tasks (before those paths go).
+    rowsOwnedThroughParent({
+      tableName: 'operation_path_replays',
+      parentTableName: 'tasks',
+      childParentColumn: 'task_id',
+    }),
+    rowsOwnedThroughGrandparent({
+      tableName: 'operation_path_replays',
+      parentTableName: 'operation_paths',
+      ownerTableName: 'tasks',
+      childParentColumn: 'path_id',
+      parentOwnerColumn: 'source_task_id',
+    }),
     // A crystallized path stores full sourceTaskIntent/externalId in JSON.
     // Delete its children while the source-task ownership edge still exists.
     rowsOwnedThroughGrandparent({
@@ -162,6 +185,14 @@ const taskExecutionRelationalClosureHandler = createRelationalDeleteHandler({
       parentTableName: 'exploration_runs',
       ownerTableName: 'sites',
       childParentColumn: 'exploration_run_id',
+      parentOwnerColumn: 'site_id',
+      ownerUserColumn: 'owner_user_id',
+    }),
+    rowsOwnedThroughGrandparent({
+      tableName: 'operation_path_replays',
+      parentTableName: 'operation_paths',
+      ownerTableName: 'sites',
+      childParentColumn: 'path_id',
       parentOwnerColumn: 'site_id',
       ownerUserColumn: 'owner_user_id',
     }),

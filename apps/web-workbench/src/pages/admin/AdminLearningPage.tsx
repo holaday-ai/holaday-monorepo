@@ -19,6 +19,7 @@ import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { learningEmptyCopy } from './admin-learning-copy';
+import { AdminLearningEvolution } from './AdminLearningEvolution';
 import {
   adminLoadErrorCopy,
   asRecord,
@@ -118,6 +119,8 @@ export function AdminLearningPage(): JSX.Element {
           hint="site_state 类型"
         />
       </div>
+
+      <AdminLearningEvolution />
 
       {data && normalized.coverage.truncated && (
         <div className="mt-4 rounded-[8px] border border-[#FFC910]/60 bg-[#FFC910]/10 px-4 py-3 text-[13px] text-[#595757]">

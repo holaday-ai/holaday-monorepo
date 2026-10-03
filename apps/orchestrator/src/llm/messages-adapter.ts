@@ -27,6 +27,7 @@ export class MessagesAdapterError extends Error {
 
 export type MessagesProviderMetadata =
   | { provider: 'anthropic'; model: string }
+  | { provider: 'openai'; model: string }
   | {
       provider: 'alibaba-model-studio';
       model: string;

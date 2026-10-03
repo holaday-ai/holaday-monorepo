@@ -1,3 +1,4 @@
+import { getSelectedBrainId } from '@/lib/brain-preference';
 import type { BrowserViewportProfile, ServerMessage } from '@holaday/shared-types';
 import { create } from 'zustand';
 import { batchConfirmQuestion, singleConfirmQuestion } from '@/lib/batch-confirm-copy';
@@ -1579,6 +1580,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         ...(replyToTaskId ? { replyToTaskId } : {}),
         ...(mode === 'plan' ? { mode } : {}),
         ...(expertMode && expertMode !== 'auto' ? { expertMode } : {}),
+        ...(getSelectedBrainId() ? { brainId: getSelectedBrainId() ?? undefined } : {}),
         ...(skillSelection?.skillId
           ? {
               skillId: skillSelection.skillId,

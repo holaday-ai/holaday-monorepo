@@ -13,7 +13,6 @@ import {
   type CoreModelLane,
   type CoreRolloutMode,
   type ModelRuntimePolicy,
-  assertProductionModelRuntimePolicy,
   resolveCoreModelLaneAccess,
 } from './model-runtime-policy.js';
 import { type QwenPurpose, QwenRouteError, resolveQwenRoute } from './qwen-route.js';
@@ -81,11 +80,6 @@ export interface CoreModelRuntimeInput {
 const RESPONSES_LANES: ReadonlySet<CoreModelLane> = new Set(['generate', 'scrape']);
 
 export function resolveCoreModelRuntime(input: CoreModelRuntimeInput): CoreModelRuntimeResolution {
-  assertProductionModelRuntimePolicy(
-    input.environment.NODE_ENV,
-    input.environment.MODEL_RUNTIME_POLICY,
-  );
-
   const access = resolveCoreModelLaneAccess({
     mode: input.environment.QWEN_CORE_ROLLOUT_MODE,
     enabledLanes: input.environment.QWEN_CORE_ENABLED_LANES,

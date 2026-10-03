@@ -1,4 +1,7 @@
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
+import { setMediaFailureRefundHook } from './agent/video/media-failure-refund.js';
+import { refundTaskOnce, sweepPlatformFailureRefunds } from './quota/platform-failure-refunds.js';
+import { QuotaService } from './quota/quota-service.js';
 const _proxy = process.env.HTTPS_PROXY;
 if (_proxy) setGlobalDispatcher(new ProxyAgent(_proxy));
 import { bootstrap } from 'global-agent';
@@ -25,7 +28,7 @@ import { createVncProxy } from './browser-pool/vnc-proxy.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { injectPendingCookies } from './cookies/sync-service.js';
-import { db, pool as databasePool } from './db/client.js';
+import { pool as databasePool, db } from './db/client.js';
 import {
   startEnergyAnalyticsCleanup,
   stopEnergyAnalyticsCleanup,
@@ -49,9 +52,9 @@ import { createWsServer, loadRehydratedTasks } from './ws/server.js';
 
 import type { ApplicationBoot } from './execution/application-boot.js';
 import { createApplicationResources } from './execution/application-resources.js';
-import { currentOperationLifetime } from './execution/owned-operation.js';
 import type { OrdinaryApplication } from './execution/ordinary-application.js';
 import { createMaintenanceBackground } from './execution/ordinary-maintenance-background.js';
+import { currentOperationLifetime } from './execution/owned-operation.js';
 import { createPeriodicWork } from './execution/periodic-work.js';
 
 export async function startApplication(boot?: ApplicationBoot, ordinary?: OrdinaryApplication) {
@@ -61,7 +64,10 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
   if (
     boot &&
     (process.env.RETENTION_REAPER_ENABLED === 'true' ||
-      process.env.USER_TASK_CRYSTALLIZE_ENABLED === 'true')
+      process.env.USER_TASK_CRYSTALLIZE_ENABLED === 'true' ||
+      process.env.PLAYBOOK_SEDIMENT_ENABLED === 'true' ||
+      process.env.PLAYBOOK_CANARY_ENABLED === 'true' ||
+      process.env.PLAYBOOK_EXPLORER_SCHEDULE_ENABLED === 'true')
   )
     throw new Error('CONTROLLED_BACKGROUND_UNPROVEN');
   const resources = boot ? createApplicationResources(boot) : undefined;
@@ -887,8 +893,11 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
         // CDP is always available. VNC is an explicit emergency-only
         // fallback because it exposes a full interactive desktop surface.
         // See streaming/screencast-proxy.ts for the protocol contract.
-        const screencastProxy = createScreencastProxy({ pool: browserPool, logger,
-          ...(ordinary ? { executionDrain: ordinary.coordinator } : {}) });
+        const screencastProxy = createScreencastProxy({
+          pool: browserPool,
+          logger,
+          ...(ordinary ? { executionDrain: ordinary.coordinator } : {}),
+        });
         httpServer.on('upgrade', (req, socket, head) => {
           // No auth/DB work from a streaming upgrade while controlled admission is closed.
           if (executionDrain && executionDrain.drain.snapshot().mode !== 'open') {
@@ -1057,6 +1066,38 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
     zombieReaperTimer?.unref?.();
     resources?.add(() => clearInterval(zombieReaperTimer));
 
+    // Platform-failure refunds: each charged task that failed on our side
+    // (provider error, timeout, restart, missing config) gets its quota back
+    // exactly once. Runs after the reaper so its EXECUTION_TIMEOUT rows count.
+    const refundSweepTimer = ordinary
+      ? undefined
+      : setInterval(() => {
+          if (boot) return;
+          void sweepPlatformFailureRefunds(db, new QuotaService(db))
+            .then((count) => {
+              if (count > 0) logger.info({ count }, 'quota: platform-failure refunds issued');
+            })
+            .catch((err: unknown) => {
+              logger.warn(
+                { err: err instanceof Error ? err.message : String(err) },
+                'quota: refund sweep failed (non-fatal)',
+              );
+            });
+        }, 60_000);
+    refundSweepTimer?.unref?.();
+    resources?.add(() => clearInterval(refundSweepTimer));
+    // Media lanes (batch 05) report their own platform failures for an
+    // immediate refund through the same exactly-once ledger.
+    setMediaFailureRefundHook(async (failure) => {
+      await refundTaskOnce(
+        db,
+        new QuotaService(db),
+        failure.taskId,
+        `MEDIA_${failure.lane.toUpperCase()}_FAILED`,
+      );
+    });
+    resources?.add(() => setMediaFailureRefundHook(null));
+
     // Phase 1 #3 Pack B — Evidence retention reaper. Nightly sweep of
     // expired evidence_artifacts (delete R2 object then MySQL row; skip
     // manual_hold). Gated by RETENTION_REAPER_ENABLED (default off: no
@@ -1122,6 +1163,62 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
         })();
       const userCrystallizeTimer = setInterval(runSweep, USER_CRYSTALLIZE_INTERVAL_MS);
       userCrystallizeTimer.unref?.();
+    }
+
+    // Batch 06 — playbook self-evolution loop (sediment / canary / scheduled
+    // explorer) on BullMQ. Every switch defaults OFF; with all off nothing is
+    // imported and no Redis connection is opened. See
+    // playbook/evolution/evolution-config.ts for the switches.
+    {
+      const { readEvolutionConfig, anyEvolutionBackgroundEnabled } = await import(
+        './playbook/evolution/evolution-config.js'
+      );
+      const evolutionConfig = readEvolutionConfig();
+      if (anyEvolutionBackgroundEnabled(evolutionConfig)) {
+        const [{ createEvolutionScheduler, createBullmqFactories }, { createEvolutionJobHandlers }] =
+          await Promise.all([
+            import('./playbook/evolution/evolution-scheduler.js'),
+            import('./playbook/evolution/evolution-runtime.js'),
+          ]);
+        const [{ createProductionModelRuntimeWiring }, { modelCatalogService }] = await Promise.all([
+          import('./llm/model-runtime-wiring.js'),
+          import('./llm/model-catalog-runtime.js'),
+        ]);
+        const evolutionLogger = logger.child({ component: 'playbook-evolution' });
+        const evolutionScheduler = createEvolutionScheduler({
+          config: evolutionConfig,
+          handlers: createEvolutionJobHandlers({
+            db,
+            config: evolutionConfig,
+            wiring: createProductionModelRuntimeWiring(env, {}, {
+              catalog: () => modelCatalogService.snapshot(),
+            }),
+            ...(firecrawlLane
+              ? {
+                  scrapeDoc: async (url: string) => {
+                    const r = await firecrawlLane.scrape(url);
+                    return r.ok ? { markdown: r.markdown, title: r.title ?? '' } : null;
+                  },
+                }
+              : {}),
+            logger: evolutionLogger,
+          }),
+          factories: () => createBullmqFactories(env.REDIS_URL),
+          logger: evolutionLogger,
+        });
+        registerProducer(
+          'playbook-evolution',
+          () => {
+            void evolutionScheduler.start().catch((err: unknown) =>
+              evolutionLogger.warn(
+                { err: err instanceof Error ? err.message : String(err) },
+                'playbook evolution: scheduler failed to start (non-fatal)',
+              ),
+            );
+          },
+          () => evolutionScheduler.stop(),
+        );
+      }
     }
 
     if (!boot && !ordinary) {

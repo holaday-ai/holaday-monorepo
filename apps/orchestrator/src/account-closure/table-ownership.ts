@@ -33,6 +33,8 @@ export const ACCOUNT_CLOSURE_TABLE_OWNERSHIP: readonly AccountClosureTableOwners
     'users',
     'verification_codes',
     'webhook_idempotency',
+    // Admin model-catalog audit rows keyed by the acting admin's users.id.
+    'model_catalog_events',
   ),
   ...own(
     'task_execution',
@@ -43,6 +45,9 @@ export const ACCOUNT_CLOSURE_TABLE_OWNERSHIP: readonly AccountClosureTableOwners
     'claims',
     'exploration_runs',
     'llm_calls',
+    // Global brain configuration; holds no user data (actors live in events).
+    'model_catalog',
+    'operation_path_replays',
     'operation_path_steps',
     'operation_paths',
     'organization_invitations',
@@ -55,12 +60,14 @@ export const ACCOUNT_CLOSURE_TABLE_OWNERSHIP: readonly AccountClosureTableOwners
     'planned_tasks',
     'projects',
     'project_members',
+    'quota_refunds',
     'scheduled_tasks',
     'site_capabilities',
     'sites',
     'skills',
     'task_action_captures',
     'task_events',
+    'task_model_selections',
     'task_steps',
     'tasks',
     'team_ai_contributions',

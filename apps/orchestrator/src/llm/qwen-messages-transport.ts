@@ -1,4 +1,5 @@
 import type { AnthropicCompatibleClient } from './messages-adapter.js';
+import { type ModelConcurrencyGate, modelConcurrencyGate } from './model-concurrency.js';
 import { runModelOperation } from './model-operation.js';
 import type { QwenRoute } from './qwen-route.js';
 
@@ -33,6 +34,7 @@ export function createQwenMessagesTransport(input: {
   route: QwenRoute;
   fetchImpl?: typeof fetch;
   retryBaseDelayMs?: number;
+  concurrencyGate?: ModelConcurrencyGate;
 }): AnthropicCompatibleClient {
   if (input.route.protocol !== 'messages') {
     throw new QwenTransportError('INVALID_ROUTE');
@@ -40,6 +42,7 @@ export function createQwenMessagesTransport(input: {
 
   const fetchImpl = input.fetchImpl ?? fetch;
   const retryBaseDelayMs = normalizeRetryBaseDelay(input.retryBaseDelayMs);
+  const gate = input.concurrencyGate ?? modelConcurrencyGate;
 
   return {
     messages: {
@@ -66,8 +69,14 @@ export function createQwenMessagesTransport(input: {
                 }, options.timeout)
               : undefined;
 
+          let releaseSlot: (() => void) | undefined;
           try {
             if (callerAborted) throw new QwenTransportError('REQUEST_ABORTED');
+            try {
+              releaseSlot = await gate.acquire(input.route.model, controller.signal);
+            } catch {
+              throwAbortError({ callerAborted, timedOut });
+            }
             let body: string;
             try {
               body = JSON.stringify(request);
@@ -143,6 +152,7 @@ export function createQwenMessagesTransport(input: {
               }));
             }
           } finally {
+            releaseSlot?.();
             if (timeoutId !== undefined) clearTimeout(timeoutId);
             options?.signal?.removeEventListener('abort', abortFromCaller);
           }

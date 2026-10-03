@@ -76,6 +76,7 @@ const AUTH_ME = {
   selectedRoles: [],
   role: 'user',
   videoEnabled: false,
+  mediaModels: { image: [], video: [], petVideo: [] },
   teamProjectsEnabled: true,
   teamTaskLifecycleEnabled: false,
   modelDataRegion: null,

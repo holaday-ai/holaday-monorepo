@@ -73,6 +73,20 @@ export interface StartVisionLoopTaskOptions {
    */
   playwrightExecutor?: PlaywrightExecutor | null;
   /**
+   * Batch 04: model-catalog adapter for the unified browser loop. When set
+   * together with `playwrightExecutor`, the task runs the unified tool set
+   * (snapshot/click/type…) on that page instead of the commander loop.
+   */
+  messagesAdapter?: import('../../llm/messages-adapter.js').MessagesAdapter;
+  webSearch?: import('../browser-tools/unified-browser-loop.js').UnifiedBrowserLoopInput['webSearch'];
+  /** Batch 06 self-evolution hooks (each flag-gated, all no-ops when off). */
+  evolution?: {
+    db: import('../../db/client.js').DB;
+    taskDbId: number;
+    generateAdapter: import('../../llm/messages-adapter.js').MessagesAdapter | null;
+    logger: import('pino').Logger;
+  };
+  /**
    * Optional per-tick observer hook — called after the commander
    * returns a decision but before the action is dispatched. Used
    * by Phase A Day 3 item 3 to write an `llm_calls` row per tick.

@@ -20,6 +20,7 @@
 import {
   AlertCircle,
   BarChart3,
+  Cpu,
   GraduationCap,
   LayoutDashboard,
   LogOut,
@@ -202,6 +203,12 @@ function AdminSideNav({ me }: { me: AdminMe }): JSX.Element {
           label="学习引擎"
           to="/admin/learning"
           active={pathname.startsWith('/admin/learning')}
+        />
+        <AdminNavItem
+          icon={Cpu}
+          label="模型管理"
+          to="/admin/models"
+          active={pathname.startsWith('/admin/models')}
         />
       </nav>
       <div className="border-t border-[#EFEFEF] px-2 py-3 sm:px-3">

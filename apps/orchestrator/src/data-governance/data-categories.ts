@@ -103,13 +103,15 @@ export const dataCategories: readonly DataCategoryDefinition[] = [
   {
     id: 'cross_task_memory',
     displayName: '跨任务 AI 记忆',
-    description: '从已完成任务摘要提取并用于后续相关任务的上下文。',
+    description: '从已完成任务摘要提取站点操作经验与用户偏好，并用于后续相关任务的上下文。',
     dataElements: ['偏好', '网站状态', '任务历史', '执行建议'],
     sources: ['已完成任务的任务指令与结果摘要'],
     purposes: ['在后续相关任务中提供个性化上下文'],
     sensitivity: 'sensitive',
     storageLocations: ['HOLA DAY 执行记忆存储'],
-    processorIds: ['holaday_internal', 'anthropic'],
+    // Extraction runs on the model runtime's generate lane: 千问 (DashScope) by
+    // default; the admin model catalog may route it to Claude.
+    processorIds: ['holaday_internal', 'dashscope', 'anthropic'],
     retentionPolicyId: 'memory_entry_lifecycle',
     rightsCapabilityId: 'memory_self_service',
     evidence: [

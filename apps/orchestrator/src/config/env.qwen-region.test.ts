@@ -8,7 +8,7 @@ const BASE_ENV = {
 };
 
 describe('Qwen dual-region environment contract', () => {
-  it('defines separate empty credentials and pinned regional endpoints without enabling routing', () => {
+  it('defines separate empty credentials and pinned regional endpoints with Qwen lanes on by default', () => {
     const parsed = envSchema.parse(BASE_ENV);
 
     expect(parsed).toMatchObject({
@@ -30,12 +30,12 @@ describe('Qwen dual-region environment contract', () => {
       QWEN_VERIFY_STRICT_MODEL: 'qwen3.8-max',
       QWEN_VISION_MODEL: 'qwen3.8-max',
       MODEL_RUNTIME_POLICY: 'qwen_only',
-      QWEN_CORE_ROLLOUT_MODE: 'off',
+      QWEN_CORE_ROLLOUT_MODE: 'all',
       QWEN_CORE_ENABLED_LANES: '',
       QWEN_CORE_ALLOWLIST: '',
-      QWEN_RESPONSES_ADAPTER_ENABLED: false,
+      QWEN_RESPONSES_ADAPTER_ENABLED: true,
       QWEN_SHADOW_EVAL_ENABLED: false,
-      QWEN_MESSAGES_ADAPTER_ENABLED: false,
+      QWEN_MESSAGES_ADAPTER_ENABLED: true,
       QWEN_SUGGESTIONS_CANARY_ENABLED: false,
       QWEN_SUGGESTIONS_SYNTHETIC_ALLOWLIST: '',
       QWEN_PLAN_CANARY_ENABLED: false,
@@ -70,26 +70,27 @@ describe('Qwen dual-region environment contract', () => {
     );
   });
 
-  it('enables the adapter only through an explicit true value', () => {
-    const parsed = envSchema.parse({ ...BASE_ENV, QWEN_MESSAGES_ADAPTER_ENABLED: 'true' });
+  it('keeps the Qwen env flags as emergency off switches only', () => {
+    const parsed = envSchema.parse({
+      ...BASE_ENV,
+      QWEN_CORE_ROLLOUT_MODE: 'off',
+      QWEN_MESSAGES_ADAPTER_ENABLED: 'false',
+      QWEN_RESPONSES_ADAPTER_ENABLED: 'false',
+    });
 
-    expect(parsed.QWEN_MESSAGES_ADAPTER_ENABLED).toBe(true);
+    expect(parsed.QWEN_CORE_ROLLOUT_MODE).toBe('off');
+    expect(parsed.QWEN_MESSAGES_ADAPTER_ENABLED).toBe(false);
+    expect(parsed.QWEN_RESPONSES_ADAPTER_ENABLED).toBe(false);
   });
 
-  it('enables the Responses adapter only through an explicit true value', () => {
-    const parsed = envSchema.parse({ ...BASE_ENV, QWEN_RESPONSES_ADAPTER_ENABLED: 'true' });
-
-    expect(parsed.QWEN_RESPONSES_ADAPTER_ENABLED).toBe(true);
-  });
-
-  it('rejects legacy_fixture as a production runtime policy', () => {
+  it('no longer blocks production startup on MODEL_RUNTIME_POLICY (the model catalog decides)', () => {
     expect(() =>
       envSchema.parse({
         ...BASE_ENV,
         NODE_ENV: 'production',
         MODEL_RUNTIME_POLICY: 'legacy_fixture',
       }),
-    ).toThrow('MODEL_RUNTIME_POLICY must be qwen_only in production');
+    ).not.toThrow('MODEL_RUNTIME_POLICY must be qwen_only in production');
   });
 
   it('rejects unknown core lane tokens', () => {

@@ -230,8 +230,8 @@ describe('resolveCoreModelRuntime', () => {
     ).toThrow('does not belong to the cn region');
   });
 
-  it('rejects legacy_fixture in production before evaluating rollout', () => {
-    expect(() =>
+  it('does not block production resolution on MODEL_RUNTIME_POLICY (the model catalog decides)', () => {
+    expect(
       resolveCoreModelRuntime(
         baseInput({
           environment: {
@@ -240,8 +240,27 @@ describe('resolveCoreModelRuntime', () => {
             MODEL_RUNTIME_POLICY: 'legacy_fixture',
           },
         }),
+      ).kind,
+    ).toBe('ready');
+  });
+
+  it('treats an empty enabled-lane list as every lane (env can only narrow)', () => {
+    expect(
+      resolveCoreModelRuntime(
+        baseInput({
+          environment: {
+            ...ENVIRONMENT,
+            QWEN_CORE_ROLLOUT_MODE: 'all',
+            QWEN_CORE_ENABLED_LANES: '',
+          },
+        }),
+      ).kind,
+    ).toBe('ready');
+    expect(
+      resolveCoreModelRuntime(
+        baseInput({ environment: { ...ENVIRONMENT, QWEN_CORE_ROLLOUT_MODE: 'off' } }),
       ),
-    ).toThrow('MODEL_RUNTIME_POLICY must be qwen_only in production');
+    ).toEqual({ kind: 'unavailable', reason: 'LANE_DISABLED' });
   });
 
   it('constructs only the requested adapter and records one bounded success observation', async () => {

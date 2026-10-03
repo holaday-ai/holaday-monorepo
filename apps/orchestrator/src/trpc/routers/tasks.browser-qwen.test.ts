@@ -42,9 +42,10 @@ it.each([
   Object.assign(env, {
     ANTHROPIC_API_KEY: '',
     AGENT_MODE: 'legacy',
-    QWEN_CORE_ROLLOUT_MODE: 'synthetic',
     QWEN_CORE_ALLOWLIST: 'usr_browser_qwen',
-    QWEN_CORE_ENABLED_LANES: scenario === 'disabled' ? '' : 'browser',
+    // Qwen is on by default; the env can only switch it off (kill switch).
+    QWEN_CORE_ROLLOUT_MODE: scenario === 'disabled' ? 'off' : 'synthetic',
+    QWEN_CORE_ENABLED_LANES: 'browser',
     QWEN_MESSAGES_ADAPTER_ENABLED: true,
     DASHSCOPE_CN_API_KEY: scenario === 'credentials' ? '' : 'synthetic-cn',
     DASHSCOPE_API_KEY: '',

@@ -329,6 +329,12 @@ export function mapVideoFailureReason(err: unknown): string {
     return VIDEO_FAILURE_REASONS.providerQuota;
   }
   if (
+    (name === 'ImageProviderError' || name === 'FalQueueError') &&
+    (kind === 'exhausted_balance' || e.status === 429)
+  ) {
+    return VIDEO_FAILURE_REASONS.providerQuota;
+  }
+  if (
     name === 'WanxiangError' &&
     (e.status === 429 ||
       (typeof e.detail === 'string' &&

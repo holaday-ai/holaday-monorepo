@@ -583,9 +583,10 @@ describe('real reply core routing and execution', () => {
       expect(f.frames.some((frame) => frame.type === 'server.task.progress')).toBe(true),
     );
     expect(f.planWrites).not.toHaveBeenCalled();
-    expect(f.requests).toHaveLength(0);
-    expect(f.settlements).toHaveLength(0);
     expect(f.frames.some((frame) => frame.type === 'server.task.plan')).toBe(false);
+    // The display-only plan is dropped; the main generation still runs and settles.
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(1));
+    expect(f.settlements[0]?.status).toBe('completed');
   });
   it.each(['plan', 'head'] as const)(
     'bounds a stalled advisory %s and ignores its late success',
@@ -627,9 +628,9 @@ describe('real reply core routing and execution', () => {
       finish();
       await vi.advanceTimersByTimeAsync(1);
       expect(f.planWrites).not.toHaveBeenCalled();
-      expect(f.requests).toHaveLength(0);
-      expect(f.settlements).toHaveLength(0);
       expect(f.frames.some((frame) => frame.type === 'server.task.plan')).toBe(false);
+      // A stalled display-only plan no longer blocks the main generation.
+      await vi.waitFor(() => expect(f.settlements).toHaveLength(1));
     },
   );
   it('rejects a shell success past the monotonic deadline before the timeout callback runs', async () => {
@@ -980,8 +981,8 @@ describe('real task route durable ownership', () => {
       close();
       await vi.waitFor(() => expect(controller.drain.snapshot().active).toBe(0));
       expect(controller.drain.snapshot().unknown).toBeGreaterThan(0);
-      expect(f.requests).toHaveLength(1);
-      expect(f.settlements).toHaveLength(0);
+      // The late plan stays uncertain, but the main generation is not blocked by it.
+      expect(f.requests.length).toBeGreaterThan(1);
     });
   });
 
@@ -999,8 +1000,8 @@ describe('real task route durable ownership', () => {
       close();
       await vi.waitFor(() => expect(controller.drain.snapshot().active).toBe(0));
       expect(controller.drain.snapshot().unknown).toBeGreaterThan(0);
-      expect(f.requests).toHaveLength(1);
-      expect(f.settlements).toHaveLength(0);
+      // The late plan stays uncertain, but the main generation is not blocked by it.
+      expect(f.requests.length).toBeGreaterThan(1);
     });
   });
 
@@ -1032,7 +1033,8 @@ describe('real task route durable ownership', () => {
         ).length;
         release();
         await vi.advanceTimersByTimeAsync(0);
-        expect(terminalCount).toBe(lane === 'plan' ? 0 : 1);
+        // Neither optional lane delays the terminal (the plan no longer blocks generation).
+        expect(terminalCount).toBe(1);
         expect(pending.byKind.model).toBe(1);
         expect(pending.unknown).toBeGreaterThan(0);
         expect(controller.drain.snapshot()).toMatchObject({ active: 0, idle: false });
@@ -1080,8 +1082,7 @@ describe('real task route durable ownership', () => {
         expect(pending.active).toBeGreaterThan(0);
         expect(pending.unknown).toBeGreaterThan(0);
         expect(controller.drain.snapshot()).toMatchObject({ active: 0, idle: false });
-        expect(f.requests).toHaveLength(1);
-        expect(f.settlements).toHaveLength(0);
+        expect(f.requests.length).toBeGreaterThan(1);
         expect(f.frames.some((frame) => frame.type === 'server.task.plan')).toBe(false);
       });
     },
