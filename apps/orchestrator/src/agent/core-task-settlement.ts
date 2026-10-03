@@ -6,6 +6,7 @@ import {
   deriveFinalStatus,
 } from '../execution/execution-pipeline.js';
 import type { GenerationCompletion } from '../execution/generation-completion.js';
+import { canDeliverUnverifiedIntermediate } from '../execution/intermediate-delivery.js';
 import type { SafeVerifierIssueCode } from '../execution/llm-verifier.js';
 import {
   VERIFICATION_INPUT_LIMITS,
@@ -154,8 +155,16 @@ const inputSchema = z
         failedChecks: z.array(z.object({ type: z.string() })),
       })
       .optional(),
+    localFailure: z.enum(['EXECUTION_BUSY', 'REVIEW_FAILED']).optional(),
   })
   .strict();
+
+/** Locally known failures (no uncertain database commit) with their user-facing copy. */
+export type CoreLocalFailure = 'EXECUTION_BUSY' | 'REVIEW_FAILED';
+export const CORE_LOCAL_FAILURE_COPY: Readonly<Record<CoreLocalFailure, string>> = Object.freeze({
+  EXECUTION_BUSY: '系统繁忙，任务未能开始执行，请稍后重试。',
+  REVIEW_FAILED: '结果核验过程出错，未能保存结果，请重试。',
+});
 const semanticCodes: Readonly<Record<string, SafeVerifierIssueCode>> = Object.freeze({
   'semantic.unsupported_conclusion': 'UNSUPPORTED_CONCLUSION',
   'semantic.missing_required_section': 'MISSING_REQUIRED_SECTION',
@@ -173,6 +182,8 @@ export function prepareCoreSettlement(
     generation: GenerationCompletion;
     verification: VerificationResult;
     sourceTrust?: ResearchSourceTrustReview;
+    /** Only with status 'failed': replaces the derived reason with fixed local copy. */
+    localFailure?: CoreLocalFailure;
   },
 ): CoreSettlement {
   const parsed = inputSchema.safeParse(input);
@@ -203,6 +214,8 @@ export function prepareCoreSettlement(
     sourceTrust,
   );
   const { status } = payload.data;
+  if (parsed.data.localFailure && status !== 'failed')
+    throw new CoreSettlementError('CORE_SETTLEMENT_INVALID');
   if (
     (status !== 'failed' && qualityStatus === 'failed') ||
     (status === 'completed' && qualityStatus !== 'completed') ||
@@ -241,7 +254,12 @@ export function prepareCoreSettlement(
         !verification.inputCoverage.complete ||
         waiting)) ||
     (status === 'awaiting_user' &&
-      (!waiting || !verification.passed || !verification.inputCoverage.complete)) ||
+      (!waiting ||
+        ((!verification.passed || !verification.inputCoverage.complete) &&
+          !canDeliverUnverifiedIntermediate({
+            ...verification,
+            checks: verification.checks.map((check) => ({ ...check, detail: '' })),
+          })))) ||
     (status === 'partial_success' && waiting)
   )
     throw new CoreSettlementError('CORE_SETTLEMENT_INVALID');
@@ -262,11 +280,13 @@ export function prepareCoreSettlement(
       !clarificationFailure &&
       failedChecks.length > 0 &&
       failedChecks.every(isGenerationFailureCheck);
-    result.reason = generationOnlyFailure
-      ? '生成未完成，请稍后重试'
-      : !verification.passed || hardFailure || qualityStatus === 'failed'
-        ? '质量校验未通过'
-        : '生成未完成，请稍后重试';
+    result.reason = parsed.data.localFailure
+      ? CORE_LOCAL_FAILURE_COPY[parsed.data.localFailure]
+      : generationOnlyFailure
+        ? '生成未完成，请稍后重试'
+        : !verification.passed || hardFailure || qualityStatus === 'failed'
+          ? '质量校验未通过'
+          : '生成未完成，请稍后重试';
   } else if (payload.data.status === 'awaiting_user') {
     awaitingQuestion = payload.data.result.question;
     if (payload.data.result.planText !== undefined) result.planText = payload.data.result.planText;

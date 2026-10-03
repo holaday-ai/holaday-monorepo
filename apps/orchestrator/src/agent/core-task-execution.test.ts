@@ -473,13 +473,37 @@ describe('transactional core execution with real runner and review', () => {
         });
       });
     const started = await startCoreTaskExecution(f.input);
-    expect(await started.completion).toBe('unconfirmed');
-    expect(f.generation).toHaveLength(0);
-    expect(f.writes).toHaveLength(0);
+    // A late display-only plan is dropped; the main generation still runs.
+    expect(await started.completion).toBe('committed');
+    expect(f.generation).toHaveLength(1);
+    expect(f.writes[0]?.status).toBe('completed');
     drain.finish(owner);
     drain.close();
     await vi.waitFor(() => expect(drain.snapshot().active).toBe(0));
-    expect(drain.snapshot()).toMatchObject({ unknown: 1, idle: false });
+    expect(drain.snapshot().active).toBe(0);
+  });
+  it.each(['unconfirmed', 'throws'] as const)(
+    'continues the main generation when the optional plan is %s',
+    async (mode) => {
+      const f = fixture();
+      f.input.beforeGeneration = async () => {
+        if (mode === 'throws') throw new Error('SYNTHETIC_PLAN_DB_ERROR');
+        return 'unconfirmed';
+      };
+      const started = await startCoreTaskExecution(f.input);
+      expect(await started.completion).toBe('committed');
+      expect(f.generation).toHaveLength(1);
+      expect(f.writes[0]?.status).toBe('completed');
+      expect(f.events.some((event) => event.type === 'unconfirmed')).toBe(false);
+    },
+  );
+  it('still stops when the optional plan reports a superseded round', async () => {
+    const f = fixture();
+    f.input.beforeGeneration = async () => 'stale';
+    const started = await startCoreTaskExecution(f.input);
+    expect(await started.completion).toBe('stale');
+    expect(f.generation).toHaveLength(0);
+    expect(f.writes).toHaveLength(0);
   });
   it('delivers the complete same-round request and materials to both channels then atomically settles', async () => {
     const f = fixture();
@@ -768,7 +792,7 @@ describe('transactional core execution with real runner and review', () => {
     ).not.toThrow();
   });
 
-  it('does not fabricate a terminal receipt or dispatch after registry capacity is exhausted', async () => {
+  it('settles a readable failure without dispatch after registry capacity is exhausted', async () => {
     const f = fixture();
     f.input.registry = new CoreExecutionRegistry(1);
     const existing = f.input.registry.begin({
@@ -786,10 +810,16 @@ describe('transactional core execution with real runner and review', () => {
       },
     });
     const result = await startCoreTaskExecution(f.input);
-    expect(result.ack.state).toBe('acceptedUnconfirmed');
-    expect(await result.completion).toBe('unconfirmed');
+    // A full local registry is a known failure: settle a readable failed
+    // result instead of leaving the task unconfirmed until the reaper runs.
+    expect(await result.completion).toBe('committed');
     expect(f.generation).toHaveLength(0);
-    expect(f.writes).toHaveLength(0);
+    expect(f.writes).toHaveLength(1);
+    expect(f.writes[0]).toMatchObject({
+      status: 'failed',
+      result: { reason: '系统繁忙，任务未能开始执行，请稍后重试。' },
+    });
+    expect(f.writes[0]?.result.summary).toBeUndefined();
     expect(f.input.registry.read(existing)).not.toBeNull();
   });
 
@@ -810,13 +840,14 @@ describe('transactional core execution with real runner and review', () => {
     });
   });
 
-  it('keeps missing regional semantic verification visible instead of certifying full delivery', async () => {
+  it('records missing regional semantic verification without downgrading delivery', async () => {
     const f = fixture();
     f.input.semanticAdapter = undefined;
     const result = await startCoreTaskExecution(f.input);
     expect(await result.completion).toBe('committed');
+    // Recorded as unavailable, but no longer downgraded to partial_success.
     expect(f.writes[0]?.verification.semanticStatus).toBe('unavailable');
-    expect(f.writes[0]?.verificationPassed).toBe(false);
+    expect(f.writes[0]?.status).toBe('completed');
   });
 
   it('absorbs asynchronous notification rejection instead of leaking an unhandled error', async () => {
@@ -895,5 +926,74 @@ describe('transactional core execution with real runner and review', () => {
     expect(f.writes[0]?.verification.issueCodes).toContain('VERIFICATION_INPUT_LIMIT');
     expect(f.writes[0]?.result.planText).toBeUndefined();
     expect(f.writes[0]?.awaitingQuestion).toBeNull();
+  });
+
+  describe('plan / clarification delivery when review cannot fully verify', () => {
+    const XHS_REQUEST =
+      '请做小红书内容选题策划：主题是办公桌收纳，目标人群是一线城市上班族。先给2至5步方案，等我确认后才交付。';
+    const PLAN = `1. 梳理办公桌收纳的常见痛点。\n2. 拆成 5 个选题方向并写出标题。\n3. 每个选题给出封面和正文结构。\n${'补充说明：选题以真实可落地为准。'.repeat(10)}`;
+
+    it.each([
+      ['semantic review unavailable', 'no-semantic'],
+      ['part of the materials unreadable', 'unreadable-material'],
+    ] as const)('delivers the 小红书 plan as awaiting_user when %s', async (_label, mode) => {
+      const f = fixture();
+      f.input.requirements = {
+        ...f.input.requirements,
+        initialRequest: XHS_REQUEST,
+        userTurns: [],
+        phase: 'draft',
+        referencePlan: null,
+      };
+      if (mode === 'no-semantic') f.input.semanticAdapter = undefined;
+      if (mode === 'unreadable-material')
+        f.input.blocks = [
+          ...f.input.blocks,
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' },
+          },
+        ];
+      const stream = f.responses.stream.bind(f.responses);
+      f.responses.stream = async (request) => ({ ...(await stream(request)), text: PLAN });
+      const result = await startCoreTaskExecution(f.input);
+      expect(await result.completion).toBe('committed');
+      expect(f.writes[0]?.status).toBe('awaiting_user');
+      expect(f.writes[0]?.result.planText).toContain('拆成 5 个选题方向');
+      expect(f.writes[0]?.awaitingQuestion).toContain('拆成 5 个选题方向');
+      // The notice accompanies exactly the plans delivered without a full pass.
+      expect(f.writes[0]?.result.planText?.includes('部分材料未能核验')).toBe(
+        f.writes[0]?.verificationPassed === false,
+      );
+      if (mode === 'unreadable-material') expect(f.writes[0]?.verificationPassed).toBe(false);
+    });
+
+    it('settles a readable failure when the local review itself crashes', async () => {
+      const f = fixture();
+      const review = await import('../execution/generate-outcome-review.js');
+      vi.spyOn(review, 'reviewGenerateOutcome').mockRejectedValueOnce(
+        new Error('SYNTHETIC_REVIEW_BUG'),
+      );
+      const result = await startCoreTaskExecution(f.input);
+      expect(await result.completion).toBe('committed');
+      expect(f.writes[0]).toMatchObject({
+        status: 'failed',
+        result: { reason: '结果核验过程出错，未能保存结果，请重试。' },
+      });
+      expect(JSON.stringify(f.writes[0])).not.toContain('SYNTHETIC_REVIEW_BUG');
+      expect(f.events.some((event) => event.type === 'unconfirmed')).toBe(false);
+    });
+
+    it('keeps a genuinely unknown database commit unconfirmed', async () => {
+      const f = fixture();
+      f.repo.settle = async () => {
+        throw new Error('SYNTHETIC_DB_LOST');
+      };
+      f.repo.readSettlement = async () => {
+        throw new Error('SYNTHETIC_DB_LOST');
+      };
+      const result = await startCoreTaskExecution(f.input);
+      expect(await result.completion).toBe('unconfirmed');
+    });
   });
 });

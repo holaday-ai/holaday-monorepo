@@ -13,6 +13,7 @@ import {
   type ReviewableGenerateOutcome,
   reviewGenerateOutcome,
 } from '../execution/generate-outcome-review.js';
+import { UNVERIFIED_INTERMEDIATE_NOTICE } from '../execution/intermediate-delivery.js';
 import { type OperationLifetime, startOwnedOperation } from '../execution/owned-operation.js';
 import {
   createTaskVerificationContext,
@@ -35,7 +36,11 @@ import {
   persistCoreSettlement,
 } from './core-task-recovery.js';
 import type { CoreTaskRepository } from './core-task-repository.js';
-import { type CoreSettlement, prepareCoreSettlement } from './core-task-settlement.js';
+import {
+  type CoreLocalFailure,
+  type CoreSettlement,
+  prepareCoreSettlement,
+} from './core-task-settlement.js';
 import { runGenerateTask } from './generate-runner.js';
 
 type ExecutionIdentity = { taskId: string; executionId: string; executionRevision: number };
@@ -197,12 +202,13 @@ async function executeCoreTask(
       hasAttachments: context.materials.length > 0,
     });
   } catch {
-    // Admission exists, but no owned execution can start. Do not invent a
-    // verification receipt, fall back to legacy, or replace another handle.
-    safelyPublish(input, { ...identity, type: 'unconfirmed' });
+    // Admission exists, but no owned execution can start (registry full or a
+    // conflicting local owner). That is a locally known failure: settle it as
+    // failed with readable copy instead of leaving the task unconfirmed. The
+    // settlement is version-checked, so it never replaces another round.
     return {
-      ack: { ...identity, state: 'acceptedUnconfirmed' },
-      completion: Promise.resolve('unconfirmed'),
+      ack: { ...identity, state: 'resumed' },
+      completion: settleLocalFailure(input, admission, identity, 'EXECUTION_BUSY'),
     };
   }
   const owned = registry.read(handle);
@@ -229,9 +235,12 @@ async function executeCoreTask(
         }
         if (!registry.read(handle) || readiness === 'stale') return 'stale';
         if (readiness !== 'ready' || performance.now() >= deadline) {
-          if (input.lifetime) input.lifetime.drain.markUnknown(input.lifetime.owner);
-          safelyPublish(input, { ...identity, type: 'unconfirmed' });
-          return 'unconfirmed';
+          // The plan is display-only: an unconfirmed or late plan is dropped and
+          // the main generation still runs. Only a superseded round stops here.
+          input.logger.warn(
+            { taskId: identity.taskId, readiness },
+            'core-task: advisory plan unconfirmed; continuing main generation',
+          );
         }
       }
       let outcome: ReviewableGenerateOutcome;
@@ -257,6 +266,30 @@ async function executeCoreTask(
         outcome = failedGeneration();
       }
       if (!registry.read(handle)) return 'stale';
+      let op: CoreSettlement;
+      try {
+        op = await reviewAndPrepareSettlement(outcome);
+      } catch (error) {
+        if (error instanceof StaleRound) return 'stale';
+        // A local review/preparation error is a known failure, not an
+        // uncertain database commit: settle it as failed with readable copy.
+        input.logger.warn(
+          { taskId: identity.taskId, err: error instanceof Error ? error.message : String(error) },
+          'core-task: review failed; settling as failed',
+        );
+        op = localFailureSettlement(admission, 'REVIEW_FAILED');
+      }
+      return await persistAndPublish(op);
+    } catch {
+      safelyPublish(input, { ...identity, type: 'unconfirmed' });
+      return 'unconfirmed';
+    } finally {
+      registry.release(handle);
+    }
+
+    async function reviewAndPrepareSettlement(
+      outcome: ReviewableGenerateOutcome,
+    ): Promise<CoreSettlement> {
       const reviewed = await reviewGenerateOutcome({
         taskId: identity.taskId,
         intent,
@@ -266,7 +299,7 @@ async function executeCoreTask(
         coreExecution: { handle, registry },
         onVerifying: () => safelyPublish(input, { ...identity, type: 'verifying' }),
       });
-      if (!registry.read(handle)) return 'stale';
+      if (!registry.read(handle)) throw new StaleRound();
       let verification = reviewed.verification;
       let summary = reviewed.outcome.summary;
       let status = reviewed.terminalStatus;
@@ -284,9 +317,9 @@ async function executeCoreTask(
         if (status === 'completed' && outcome.generation?.completeness === 'partial')
           status = 'partial_success';
       }
-      if (!registry.read(handle)) return 'stale';
+      if (!registry.read(handle)) throw new StaleRound();
       if (!verification || !outcome.generation) throw new Error('CORE_REVIEW_UNAVAILABLE');
-      const op = settlementFor({
+      return settlementFor({
         admission,
         status,
         summary,
@@ -294,6 +327,11 @@ async function executeCoreTask(
         verification,
         sourceTrust: reviewed.sourceTrust,
       });
+    }
+
+    async function persistAndPublish(
+      op: CoreSettlement,
+    ): Promise<'committed' | 'stale' | 'unconfirmed'> {
       const persisted = await persistCoreSettlement(
         input.repo,
         op,
@@ -322,11 +360,6 @@ async function executeCoreTask(
         }
       }
       return 'committed';
-    } catch {
-      safelyPublish(input, { ...identity, type: 'unconfirmed' });
-      return 'unconfirmed';
-    } finally {
-      registry.release(handle);
     }
   })();
   return { ack: { ...identity, state: 'resumed' }, completion };
@@ -407,10 +440,14 @@ function settlementFor(input: {
   if (status === 'awaiting_user') {
     const plan =
       admission.requirements.phase === 'draft' || admission.requirements.phase === 'revise';
+    // Delivered without a full verification pass: say so next to the plan.
+    const text = verification.passed
+      ? summary
+      : `${summary.trimEnd()}\n\n${UNVERIFIED_INTERMEDIATE_NOTICE}`;
     return prepareCoreSettlement({
       ...shared,
       status,
-      result: { question: summary, ...(plan ? { planText: summary } : {}) },
+      result: { question: text, ...(plan ? { planText: text } : {}) },
     });
   }
   if (status === 'completed' || status === 'partial_success')
@@ -420,4 +457,69 @@ function settlementFor(input: {
     status: 'failed',
     result: { reason: 'CORE_EXECUTION_FAILED' },
   });
+}
+
+/** Thrown inside review when a newer round replaced this one. */
+class StaleRound extends Error {}
+
+/** A controlled failure for a locally known error; no model text or raw error is kept. */
+function localFailureSettlement(
+  admission: CoreAdmission,
+  reason: CoreLocalFailure,
+): CoreSettlement {
+  return prepareCoreSettlement({
+    admission,
+    status: 'failed',
+    result: { reason },
+    localFailure: reason,
+    generation: { completeness: 'partial', stopReason: 'provider_error' },
+    verification: {
+      taskId: admission.scope.taskId,
+      executionId: admission.executionId,
+      executionRevision: admission.executionRevision,
+      passed: false,
+      tier: 'deterministic',
+      semanticStatus: 'unavailable',
+      inputCoverage: { complete: true, codes: [] },
+      failureLevel: 'fixable',
+      checks: [
+        {
+          criterionId: 'execution.local_failure',
+          criterionType: 'EXECUTION_LOCAL_FAILURE',
+          passed: false,
+          checker: 'deterministic',
+          severity: 'fixable',
+          detail: '',
+        },
+      ],
+    },
+  });
+}
+
+async function settleLocalFailure(
+  input: CoreExecutionInput,
+  admission: CoreAdmission,
+  identity: ExecutionIdentity,
+  reason: CoreLocalFailure,
+): Promise<'committed' | 'stale' | 'unconfirmed'> {
+  try {
+    const op = localFailureSettlement(admission, reason);
+    const persisted = await persistCoreSettlement(
+      input.repo,
+      op,
+      input.recoveryClock,
+      input.lifetime,
+    );
+    if (persisted.kind === 'stale') return 'stale';
+    if (persisted.kind !== 'committed') {
+      safelyPublish(input, { ...identity, type: 'unconfirmed' });
+      return 'unconfirmed';
+    }
+    safelyPublish(input, { ...identity, type: 'settled', settlement: op });
+    return 'committed';
+  } catch {
+    // Only a genuinely unknown database outcome stays unconfirmed.
+    safelyPublish(input, { ...identity, type: 'unconfirmed' });
+    return 'unconfirmed';
+  }
 }

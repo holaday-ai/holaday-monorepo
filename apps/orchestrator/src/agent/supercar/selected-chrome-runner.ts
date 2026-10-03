@@ -503,7 +503,8 @@ async function runLoop(input: {
             tools: taskTools(options),
             toolChoice: { type: 'auto' },
           },
-          { signal: input.modelAbort.signal, timeoutMs: remainingMs, maxRetries: 0 },
+          // Model turns have no side effects; retry 429/5xx within the remaining deadline.
+          { signal: input.modelAbort.signal, timeoutMs: remainingMs, maxRetries: 2 },
         ),
         input.modelAbort.signal,
       );

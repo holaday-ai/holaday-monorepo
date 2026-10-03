@@ -1941,6 +1941,8 @@ async function runSupercarTaskInternal(
       // SUPERCAR_TIMEOUT_MS deadline only fires between iterations,
       // never during an in-flight await).
       const API_TIMEOUT_MS = 120_000;
+      /** Transport retries per model turn (429/502/503/504) inside the turn deadline. */
+      const BROWSER_MODEL_MAX_RETRIES = 2;
       try {
         // Phase 10 Tier 1 betas: server-side compaction + advisory
         // task budgets. Each is appended only when the master flag is
@@ -2183,7 +2185,9 @@ async function runSupercarTaskInternal(
           response = await createBrowserMessage(recordedAdapter, apiRequest, {
             signal: lifecycle.modelAbort.signal,
             timeoutMs: Math.min(API_TIMEOUT_MS, Math.max(1, deadline - Date.now())),
-            maxRetries: 0,
+            // Model turns have no external side effects (tools run afterwards), so
+            // the shared transport may retry 429/5xx within the same deadline.
+            maxRetries: BROWSER_MODEL_MAX_RETRIES,
           });
         } else {
           if (!client) throw new Error('Legacy browser client unavailable');

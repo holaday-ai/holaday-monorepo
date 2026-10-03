@@ -170,7 +170,8 @@ export async function verifyWithLlm(inputs: LlmVerifierInputs): Promise<Semantic
       inputs.adapter.create(request, {
         signal: controller.signal,
         timeoutMs,
-        maxRetries: 0,
+        // One retry for transient 429/5xx; the verifier timeout still bounds it.
+        maxRetries: 1,
       }),
       timeoutMs,
       controller,

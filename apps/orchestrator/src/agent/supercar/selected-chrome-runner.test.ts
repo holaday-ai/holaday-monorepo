@@ -1193,7 +1193,7 @@ describe('runSelectedChromeTask', () => {
     expect(outcome).toMatchObject({ status: 'timeout' });
     expect(modelOptions?.timeoutMs).toBeGreaterThan(0);
     expect(modelOptions?.timeoutMs).toBeLessThanOrEqual(20);
-    expect(modelOptions?.maxRetries).toBe(0);
+    expect(modelOptions?.maxRetries).toBe(2);
     expect(h.control.snapshot().phase).toBe('closed');
     expect(h.commands.at(-1)?.op).toBe('close');
   });
