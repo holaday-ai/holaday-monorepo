@@ -239,7 +239,11 @@ import {
 } from '../../execution/search-source-references.js';
 import { MAX_DOWNLOAD_BYTES } from '../../files/download-manager.js';
 import { FileService, taskInternalIdFor } from '../../files/file-service.js';
-import { parseFileForPrompt } from '../../files/parsers.js';
+import {
+  CONVERT_REQUIRED_COPY,
+  CoreFileInputError,
+  parseFileForPrompt,
+} from '../../files/parsers.js';
 import { getSharedStorageProvider } from '../../files/storage-provider.js';
 import { allowedFormatsForPlan, isCreateFileFormat, renderFile } from '../../files/writers.js';
 import {
@@ -1429,6 +1433,9 @@ export const tasksRouter = router({
           }
           attachmentBlocks.push(...parsed.blocks);
         } catch (err) {
+          if (err instanceof CoreFileInputError && err.code === 'CORE_FILE_CONVERT_REQUIRED') {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: CONVERT_REQUIRED_COPY });
+          }
           if (completeText) {
             throw new TRPCError({
               code: 'BAD_REQUEST',
