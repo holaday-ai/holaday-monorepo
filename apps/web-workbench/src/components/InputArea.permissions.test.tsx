@@ -6,7 +6,27 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InputArea } from './InputArea';
 import { ToastProvider } from './ui/toast';
 
-vi.mock('@/lib/trpc', () => ({ trpc: { skills: { list: { query: async () => [] } } } }));
+vi.mock('@/lib/trpc', () => ({
+  trpc: {
+    skills: { list: { query: async () => [] } },
+    models: {
+      list: {
+        query: async () => ({
+          items: [
+            {
+              id: 'qwen',
+              label: '千问',
+              provider: 'alibaba-model-studio',
+              isDefault: true,
+              adminOnly: false,
+              configured: true,
+            },
+          ],
+        }),
+      },
+    },
+  },
+}));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -49,5 +69,12 @@ describe('composer task choices independent of attachment entitlement', () => {
     await user.click(screen.getByRole('menuitem', { name: '添加照片和文件' }));
     expect(open).toHaveBeenCalledOnce();
     expect(screen.queryByText(/免费版不支持附件/)).toBeNull();
+  });
+
+  it('shows 千问 as a static model label when it is the only brain', async () => {
+    const { user } = mount(true);
+    await user.click(screen.getByRole('button', { name: '附件与任务选项' }));
+    expect(await screen.findByText('模型')).toBeTruthy();
+    expect(screen.getByText('千问')).toBeTruthy();
   });
 });

@@ -1,5 +1,6 @@
 import {
   ArrowUp,
+  Cpu,
   ListChecks,
   Loader2,
   Paperclip,
@@ -48,6 +49,7 @@ import {
   stripSkillMention,
 } from '@/lib/skill-mention';
 import { trpc } from '@/lib/trpc';
+import { useBrainOptions } from '@/hooks/useBrainOptions';
 import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
 import type { UiSkill, UiSkillSelection } from '@/types/task';
@@ -298,6 +300,7 @@ export function InputArea({
   // on tasks.create as `expertMode`; the backend honours it when
   // not null.
   const [expertMode, setExpertMode] = React.useState<'normal' | 'expert' | 'auto'>('auto');
+  const brain = useBrainOptions();
   // New-task handoffs are consumed together so a task selected in the
   // Skill Center can arrive with several pre-uploaded attachments without
   // two effects racing to re-introduce each other's location state.
@@ -932,6 +935,55 @@ export function InputArea({
                     </DropdownMenuRadioGroup>
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
+                {brain.options.length > 1 ? (
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger className="gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 data-[state=open]:bg-[#EFEFEF]/70 dark:focus:bg-white/10 dark:data-[state=open]:bg-white/10">
+                      <Cpu className="h-4 w-4 text-[#595757]" />
+                      <span className="min-w-0 flex-1 font-medium text-foreground">模型</span>
+                      <span className="mr-1 text-[11px] text-muted-foreground">
+                        {brain.selected.label}
+                      </span>
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent sideOffset={8} className={cn('w-56', MODE_MENU_CLASS)}>
+                      <DropdownMenuRadioGroup
+                        value={brain.selected.id}
+                        onValueChange={(value) => brain.select(value)}
+                      >
+                        {brain.options.map((option) => (
+                          <DropdownMenuRadioItem
+                            key={option.id}
+                            value={option.id}
+                            disabled={!option.configured}
+                            className={MODE_MENU_ITEM_CLASS}
+                          >
+                            <span className="flex min-w-0 flex-1 flex-col">
+                              <span className="text-[12px] font-medium text-foreground">
+                                {option.label}
+                              </span>
+                              <span className="text-[11px] text-muted-foreground">
+                                {!option.configured
+                                  ? '服务未配置'
+                                  : option.adminOnly
+                                    ? '仅管理员可见'
+                                    : option.isDefault
+                                      ? '默认'
+                                      : '可选'}
+                              </span>
+                            </span>
+                          </DropdownMenuRadioItem>
+                        ))}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                ) : (
+                  <div className="flex items-center gap-2.5 px-2 py-2 text-[13px]">
+                    <Cpu className="h-4 w-4 text-[#595757]" />
+                    <span className="min-w-0 flex-1 font-medium text-foreground">模型</span>
+                    <span className="mr-1 text-[11px] text-muted-foreground">
+                      {brain.selected.label}
+                    </span>
+                  </div>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
         </div>
