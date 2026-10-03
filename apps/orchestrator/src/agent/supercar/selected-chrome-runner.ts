@@ -366,9 +366,9 @@ export async function runSelectedChromeTask(
   const timer = setTimeout(() => stop('timeout'), timeoutMs);
 
   try {
-    if (options.messagesAdapter.metadata.provider !== 'alibaba-model-studio') {
-      outcome = failed('本机 Chrome 任务只允许使用千问模型。', 0, toolsUsed);
-    } else if (externallyAborted) {
+    // Any catalog brain (千问 / Claude / GPT) may drive the selected tab; the
+    // admin model catalog decides which one is visible to users.
+    if (externallyAborted) {
       stop('abort');
       outcome = cancelled(0, toolsUsed);
     } else if (await cancellationRequested(options)) {

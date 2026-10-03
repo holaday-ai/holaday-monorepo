@@ -165,6 +165,17 @@ import {
   restorableBrowserTarget,
 } from '../../browser-pool/browser-session-recovery.js';
 import { env as appEnv } from '../../config/env.js';
+import {
+  currentBrain,
+  enterBrain,
+  recordTaskModelSelection,
+  runWithBrain,
+} from '../../llm/model-catalog.js';
+import {
+  modelCatalogService,
+  resolveBrainForExistingTask,
+  resolveBrainForUser,
+} from '../../llm/model-catalog-runtime.js';
 import type { DB } from '../../db/client.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
 import { projects } from '../../db/schema/projects.js';
@@ -510,7 +521,9 @@ function dormantLegacyModelClient(): Anthropic | null {
 }
 const legacyMediaModelClient = dormantLegacyModelClient();
 
-const modelRuntimeWiring = createProductionModelRuntimeWiring(appEnv);
+const modelRuntimeWiring = createProductionModelRuntimeWiring(appEnv, {}, {
+  catalog: () => modelCatalogService.snapshot(),
+});
 
 function resolveGenerateRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
   return modelRuntimeWiring.resolveCore({
@@ -601,6 +614,17 @@ export const imageCreationOptionsInput = z.object({
 
 const createInput = z.object({
   localChrome: localChromeSelectionSchema.optional(),
+  /**
+   * Model catalog brain the user picked (e.g. `qwen`). Validated server-side
+   * by `resolveBrain`; an unknown, hidden or unconfigured brain falls back to
+   * the catalog default and the fallback reason is recorded with the task.
+   */
+  brainId: z
+    .string()
+    .min(1)
+    .max(32)
+    .regex(/^[a-z0-9_-]+$/)
+    .optional(),
   intent: z.string().min(1).max(4_000),
   /**
    * Non-user-authored routing context from a dedicated product surface.
@@ -1201,7 +1225,13 @@ export const tasksRouter = router({
     }
     try { return await next({ ctx: { localChromeReservation } }); }
     finally { if (localChromeReservation) localChromeTaskSessions.releaseReservation(localChromeReservation); }
-  }).use(taskDrainMiddleware).mutation(async ({ ctx, input }) => {
+  }).use(taskDrainMiddleware).use(async ({ ctx, input, next }) => {
+    // After drain admission: bind the task's brain to everything this task
+    // starts, so every lane resolved downstream (generate, verifier, plan,
+    // browser…) uses it.
+    const brain = await resolveBrainForUser(ctx.db, ctx.userId, input.brainId);
+    return runWithBrain(brain, () => next());
+  }).mutation(async ({ ctx, input }) => {
     if (input.localChrome && (input.mode === 'plan' || input.fileIds?.length || input.imageOptions || input.videoOptions || input.stockContext || input.taskSource || input.replyToTaskId)) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: '本地 Chrome 当前支持新建网页操作任务，请移除附件并使用自动执行模式。' });
     }
@@ -1283,6 +1313,22 @@ export const tasksRouter = router({
     // instance is shared by every execution lane so no early-return branch can
     // accidentally fall back to the database's `user` default.
     const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
+    const resolvedBrain = currentBrain();
+    if (resolvedBrain) {
+      // Record which brain each task created by this request runs with.
+      // Best-effort: a failed audit row never blocks task creation.
+      const insertTask = repo.insertTask.bind(repo);
+      repo.insertTask = (async (...args: Parameters<typeof insertTask>) => {
+        const result = await insertTask(...args);
+        void recordTaskModelSelection(ctx.db, args[0].taskId, resolvedBrain).catch((err: unknown) => {
+          ctx.logger.warn(
+            { err: err instanceof Error ? err.message : String(err), taskId: args[0].taskId },
+            'model catalog: task model selection not recorded',
+          );
+        });
+        return result;
+      }) as typeof repo.insertTask;
+    }
     let validatedStockContext: ValidatedStockTaskContext | null = null;
     if (input.taskSource === 'stock_dashboard') {
       if (!input.stockContext) {
@@ -9129,6 +9175,9 @@ export const tasksRouter = router({
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
       }
+      // A follow-up keeps the brain its task started with. Resolved only after
+      // the user and task ownership checks so they stay the first lookups.
+      enterBrain(await resolveBrainForExistingTask(ctx.db, ctx.userId, input.taskId));
       const replyResult = normalizeOutput(taskRow.result) as Record<string, unknown> | null;
       const coreReply = await handleCoreTaskReply({ ctx, input, userId: userRow.id,
         modelDataRegion: userRow.modelDataRegion, wiring: modelRuntimeWiring,

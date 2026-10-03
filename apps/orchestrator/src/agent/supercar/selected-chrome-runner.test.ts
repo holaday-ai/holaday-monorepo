@@ -943,26 +943,26 @@ describe('runSelectedChromeTask', () => {
     );
   });
 
-  it('rejects a non-Qwen provider before any model or browser command', async () => {
-    const h = createHarness([]);
-    const create = vi.fn();
+  it('runs a catalog-selected non-Qwen brain through the same loop', async () => {
+    const h = createHarness([finish('Draft')]);
+    // The admin model catalog decides which brains exist; the runner no longer
+    // refuses Claude/GPT adapters resolved by the model runtime.
     const messagesAdapter: MessagesAdapter = {
       metadata: { provider: 'anthropic', model: 'claude-fixture' },
-      create,
+      create: (request, options) => h.messagesAdapter.create(request, options),
     };
 
     const outcome = await runSelectedChromeTask({
       taskId: 'provider-gate',
-      intent: 'Do not run',
+      intent: 'Find the draft',
       messagesAdapter,
       client: h.client,
       control: h.control,
       target,
     });
 
-    expect(outcome).toMatchObject({ status: 'failed', iterations: 0 });
-    expect(create).not.toHaveBeenCalled();
-    expect(h.send).not.toHaveBeenCalled();
+    expect(outcome).not.toMatchObject({ reason: '本机 Chrome 任务只允许使用千问模型。' });
+    expect(outcome.iterations).toBeGreaterThan(0);
   });
 
   it.each(['', 'Missing'])(

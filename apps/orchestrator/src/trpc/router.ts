@@ -10,6 +10,7 @@ import { feedbackRouter } from './routers/feedback.js';
 import { filesRouter } from './routers/files.js';
 import { llmCallsRouter } from './routers/llm-calls.js';
 import { memoryRouter } from './routers/memory.js';
+import { modelsRouter } from './routers/models.js';
 import { notificationChannelsRouter, notificationsRouter } from './routers/notifications.js';
 import { organizationsRouter } from './routers/organizations.js';
 import { partnerRouter } from './routers/partner.js';
@@ -61,6 +62,7 @@ export const appRouter = router({
   notificationChannels: notificationChannelsRouter,
   partner: partnerRouter,
   admin: adminRouter,
+  models: modelsRouter,
   watchlists: watchlistsRouter,
   videoOnboarding: videoOnboardingRouter,
   videoEditing: videoEditingRouter,

@@ -20,10 +20,11 @@ export {
   supercarAbort,
 } from './agent-loop.js';
 
-/** Production may use the shared executor only with an admitted Qwen adapter. */
+/** Production uses the shared executor with the adapter the model catalog resolved. */
 export async function runSupercarTask(opts: RunSupercarOptions): Promise<SupercarOutcome> {
-  if (opts.messagesAdapter?.metadata.provider === 'alibaba-model-studio')
-    return runBrowserTask(opts);
+  // Any catalog brain resolved through the model runtime (千问 / Claude / GPT)
+  // runs the shared executor; only an absent adapter is refused.
+  if (opts.messagesAdapter) return runBrowserTask(opts);
   return {
     status: 'failed',
     reason: '浏览器能力正在迁移到千问，暂时不可用。',

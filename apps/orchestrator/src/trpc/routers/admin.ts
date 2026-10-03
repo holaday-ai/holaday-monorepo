@@ -26,6 +26,7 @@ import type { DB } from '../../db/client.js';
 import { llmCalls } from '../../db/schema/llm-calls.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
+import { readTaskModelSelections } from '../../llm/model-catalog.js';
 import { adminProcedure, router } from '../trpc.js';
 import { adminFinanceRouter } from './admin-finance.js';
 import { adminLearningRouter } from './admin-learning.js';
@@ -526,6 +527,12 @@ export const adminRouter = router({
         .orderBy(desc(tasks.id))
         .limit(50);
 
+      // Pre-0061 databases have no selection table: the column then shows "—".
+      const taskModels = await readTaskModelSelections(
+        ctx.db,
+        recentTasks.map((r) => r.taskId),
+      ).catch(() => new Map<string, { brainId: string; label: string | null }>());
+
       const modelDist = await ctx.db
         .select({
           model: llmCalls.model,
@@ -564,6 +571,10 @@ export const adminRouter = router({
           title: r.title,
           status: r.status,
           createdAt: r.createdAt,
+          model: (() => {
+            const selection = taskModels.get(r.taskId);
+            return selection ? (selection.label ?? selection.brainId) : null;
+          })(),
           durationMs:
             r.startedAt && r.completedAt
               ? r.completedAt.getTime() - r.startedAt.getTime()

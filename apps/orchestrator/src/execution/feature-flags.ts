@@ -98,9 +98,12 @@ interface FeatureFlags {
 
 function readFlagsFromEnv(): FeatureFlags {
   return {
-    EXECUTION_CONTRACT: process.env.EXECUTION_CONTRACT_ENABLED === 'true',
-    EXECUTION_VERIFIER: process.env.EXECUTION_VERIFIER_ENABLED === 'true',
-    EVIDENCE_LEDGER: process.env.EVIDENCE_LEDGER_ENABLED === 'true',
+    // On by default (core text tasks require it); set 'false' only as an emergency off.
+    EXECUTION_CONTRACT: process.env.EXECUTION_CONTRACT_ENABLED !== 'false',
+    // On by default (core text tasks require it); set 'false' only as an emergency off.
+    EXECUTION_VERIFIER: process.env.EXECUTION_VERIFIER_ENABLED !== 'false',
+    // On by default (core text tasks require it); set 'false' only as an emergency off.
+    EVIDENCE_LEDGER: process.env.EVIDENCE_LEDGER_ENABLED !== 'false',
     EXPERT_WORKFLOW: process.env.EXPERT_WORKFLOW_ENABLED === 'true',
     OTA_USER_BROWSER: process.env.OTA_USER_BROWSER_ENABLED === 'true',
     LEDGER_DB_WRITE: process.env.LEDGER_DB_WRITE_ENABLED === 'true',
