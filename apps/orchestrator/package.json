@@ -55,6 +55,7 @@
     "@holaday/skill-sdk": "workspace:*",
     "@trpc/server": "11.0.0",
     "argon2": "0.41.1",
+    "bullmq": "6.3.11",
     "docx": "^9.6.1",
     "docxtemplater": "^3.68.7",
     "dotenv": "16.4.7",

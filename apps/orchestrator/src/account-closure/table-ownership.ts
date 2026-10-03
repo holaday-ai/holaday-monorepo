@@ -47,6 +47,7 @@ export const ACCOUNT_CLOSURE_TABLE_OWNERSHIP: readonly AccountClosureTableOwners
     'llm_calls',
     // Global brain configuration; holds no user data (actors live in events).
     'model_catalog',
+    'operation_path_replays',
     'operation_path_steps',
     'operation_paths',
     'organization_invitations',

@@ -43,6 +43,8 @@ const REQUIRED_TABLES = [
   'model_catalog_events',
   'notifications',
   'notification_channels',
+  'operation_path_replays',
+  'operation_paths',
   'organization_invitations',
   'organization_members',
   'organizations',
@@ -75,6 +77,7 @@ const REQUIRED_TABLES = [
   'stock_dashboard_snapshots',
   ...STOCK_PREFERENCE_REQUIRED_TABLES,
   'stock_risk_monitors',
+  'task_action_captures',
   'task_events',
   'task_files',
   'task_model_selections',
@@ -95,6 +98,25 @@ const REQUIRED_TABLES = [
 
 const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
   llm_calls: ['cost_status', 'usage_status', 'region', 'provider_request_id'],
+  // Batch 06 (0062) — playbook self-evolution loop.
+  task_action_captures: ['replay_json', 'outcome_json', 'executor_source'],
+  operation_paths: ['template_json', 'generalizer', 'canary_pass_streak'],
+  operation_path_replays: [
+    'external_id',
+    'path_id',
+    'task_id',
+    'outcome',
+    'steps_total',
+    'steps_deterministic',
+    'steps_repaired',
+    'model_calls',
+    'model_calls_saved',
+    'repaired_path_id',
+    'failed_step_index',
+    'failure_reason',
+    'duration_ms',
+    'created_at',
+  ],
   organizations: [
     'external_id',
     'name',
