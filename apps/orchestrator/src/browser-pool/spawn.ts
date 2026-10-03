@@ -19,8 +19,12 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { mkdirSync } from 'node:fs';
 import type { Logger } from 'pino';
 import { chromium } from 'playwright';
+import { currentOperationLifetime } from '../execution/owned-operation.js';
+import { type OwnedPoolProcess, spawnOwnedPoolProcess } from './owned-pool-process.js';
 
 export interface SpawnedProcess {
+  /** Present only for captured owned lifetimes; never inferred during cleanup. */
+  readonly lifecycle?: OwnedPoolProcess;
   pid: number;
   /** Raw ChildProcess for advanced callers; prefer the convenience methods. */
   child: ChildProcess;
@@ -119,6 +123,25 @@ function wrap(child: ChildProcess, logger: Logger, label: string): SpawnedProces
   };
 }
 
+function spawnTracked(
+  command: string,
+  args: string[],
+  options: SpawnOptions,
+  logger: Logger,
+  label: string,
+): SpawnedProcess {
+  if (!currentOperationLifetime()) return wrap(spawn(command, args, options), logger, label);
+  const lifecycle = spawnOwnedPoolProcess(command, args, options);
+  return Object.freeze({
+    pid: lifecycle.pid,
+    child: lifecycle.child,
+    lifecycle,
+    kill: () => {
+      throw new Error('POOL_PROCESS_USE_BOUND_TERMINATE');
+    },
+  });
+}
+
 /**
  * Launch an Xvfb display.
  *
@@ -127,23 +150,10 @@ function wrap(child: ChildProcess, logger: Logger, label: string): SpawnedProces
  * `-ac` flag disables host-based access control — we rely on the
  * socket perms for isolation.
  */
-export function spawnXvfb(
-  display: number,
-  screen: string,
-  logger: Logger,
-): SpawnedProcess {
-  const args = [
-    `:${display}`,
-    '-screen',
-    '0',
-    screen,
-    '-nolisten',
-    'tcp',
-    '-ac',
-  ];
+export function spawnXvfb(display: number, screen: string, logger: Logger): SpawnedProcess {
+  const args = [`:${display}`, '-screen', '0', screen, '-nolisten', 'tcp', '-ac'];
   const label = `xvfb:${display}`;
-  const child = spawn('Xvfb', args, baseSpawnOptions(label));
-  return wrap(child, logger, label);
+  return spawnTracked('Xvfb', args, baseSpawnOptions(label), logger, label);
 }
 
 export interface SpawnBraveOptions {
@@ -166,10 +176,7 @@ export interface SpawnBraveOptions {
  * entry maps to a piece of Brave chrome we've seen reserve viewport
  * in production screenshots.
  */
-export function spawnBrave(
-  opts: SpawnBraveOptions,
-  logger: Logger,
-): SpawnedProcess {
+export function spawnBrave(opts: SpawnBraveOptions, logger: Logger): SpawnedProcess {
   assertSandboxedBrowserUser(process.getuid?.());
   mkdirSync(opts.userDataDir, { recursive: true });
   const args = buildBraveArgs(opts);
@@ -181,8 +188,7 @@ export function spawnBrave(
       HOLADAY_SPAWN_LABEL: label,
     }),
   } satisfies SpawnOptions;
-  const child = spawn('/usr/bin/brave-browser', args, options);
-  return wrap(child, logger, label);
+  return spawnTracked('/usr/bin/brave-browser', args, options, logger, label);
 }
 
 export function buildBraveArgs(opts: SpawnBraveOptions): string[] {
@@ -249,19 +255,21 @@ export function buildNativeChromiumArgs(opts: SpawnBraveOptions): string[] {
   ];
 }
 
-export function spawnNativeChromium(
-  opts: SpawnBraveOptions,
-  logger: Logger,
-): SpawnedProcess {
+export function spawnNativeChromium(opts: SpawnBraveOptions, logger: Logger): SpawnedProcess {
   assertSandboxedBrowserUser(process.getuid?.());
   mkdirSync(opts.userDataDir, { recursive: true });
   const args = buildNativeChromiumArgs(opts);
   const label = `chromium:${opts.cdpPort}`;
-  const child = spawn(chromium.executablePath(), args, {
-    ...baseSpawnOptions(label),
-    env: buildBrowserChildEnv(process.env, { HOLADAY_SPAWN_LABEL: label }),
-  });
-  return wrap(child, logger, label);
+  return spawnTracked(
+    chromium.executablePath(),
+    args,
+    {
+      ...baseSpawnOptions(label),
+      env: buildBrowserChildEnv(process.env, { HOLADAY_SPAWN_LABEL: label }),
+    },
+    logger,
+    label,
+  );
 }
 
 /**
@@ -270,11 +278,7 @@ export function spawnNativeChromium(
  * bind to loopback; nginx or the orchestrator WS proxy terminates
  * public traffic).
  */
-export function spawnX11vnc(
-  display: number,
-  rfbPort: number,
-  logger: Logger,
-): SpawnedProcess {
+export function spawnX11vnc(display: number, rfbPort: number, logger: Logger): SpawnedProcess {
   const args = [
     '-display',
     `:${display}`,
@@ -288,8 +292,7 @@ export function spawnX11vnc(
     String(rfbPort),
   ];
   const label = `x11vnc:${rfbPort}`;
-  const child = spawn('x11vnc', args, baseSpawnOptions(label));
-  return wrap(child, logger, label);
+  return spawnTracked('x11vnc', args, baseSpawnOptions(label), logger, label);
 }
 
 /**
@@ -300,54 +303,10 @@ export function spawnX11vnc(
  * we want it). Either way, a zero-auth websockify must not be
  * reachable from the Internet directly.
  */
-export function spawnWebsockify(
-  wsPort: number,
-  rfbPort: number,
-  logger: Logger,
-): SpawnedProcess {
+export function spawnWebsockify(wsPort: number, rfbPort: number, logger: Logger): SpawnedProcess {
   const args = [`127.0.0.1:${wsPort}`, `127.0.0.1:${rfbPort}`];
   const label = `websockify:${wsPort}`;
-  const child = spawn('websockify', args, baseSpawnOptions(label));
-  return wrap(child, logger, label);
+  return spawnTracked('websockify', args, baseSpawnOptions(label), logger, label);
 }
 
-/**
- * Poll the CDP /json/version endpoint until Brave is accepting
- * connections, or the timeout elapses. Brave typically takes
- * 500-1500ms cold-start; headful Brave with a fresh profile is on the
- * slower end, so the default is 10s.
- *
- * Returns the version string on success; throws otherwise. Uses the
- * plain global fetch (Node 20+) and an AbortController for the
- * per-request timeout.
- */
-export async function waitForCdpReady(
-  cdpPort: number,
-  timeoutMs = 10_000,
-): Promise<string> {
-  const deadline = Date.now() + timeoutMs;
-  let lastErr: unknown = null;
-  while (Date.now() < deadline) {
-    try {
-      const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), 2_000);
-      const res = await fetch(`http://127.0.0.1:${cdpPort}/json/version`, {
-        signal: controller.signal,
-      });
-      clearTimeout(t);
-      if (res.ok) {
-        const body = (await res.json()) as { Browser?: string };
-        return body.Browser ?? 'unknown';
-      }
-      lastErr = new Error(`HTTP ${res.status}`);
-    } catch (err) {
-      lastErr = err;
-    }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  throw new Error(
-    `waitForCdpReady(${cdpPort}): timed out after ${timeoutMs}ms (last err: ${
-      lastErr instanceof Error ? lastErr.message : String(lastErr)
-    })`,
-  );
-}
+export { waitForCdpReady } from './cdp-readiness.js';

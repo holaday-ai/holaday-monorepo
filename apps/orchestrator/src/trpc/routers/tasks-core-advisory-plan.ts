@@ -2,6 +2,12 @@ import type { Logger } from 'pino';
 import type { CoreAdmission } from '../../agent/core-task-admission.js';
 import { prepareCoreTaskPlan } from '../../agent/core-task-plan.js';
 import type { CoreTaskRepository } from '../../agent/core-task-repository.js';
+import { runAuxiliaryDatabase } from '../../execution/auxiliary-database.js';
+import {
+  currentOperationLifetime,
+  startOwnedOperation,
+  withOperationDispatchScope,
+} from '../../execution/owned-operation.js';
 import type { ProductionModelRuntimeWiring } from '../../llm/model-runtime-wiring.js';
 import { broadcastToUser } from '../../ws/server.js';
 
@@ -17,6 +23,19 @@ export async function prepareCoreAdvisoryPlan(args: {
   modelDataRegion: unknown;
   logger: Logger;
 }): Promise<'ready' | 'stale' | 'unconfirmed'> {
+  const parent = currentOperationLifetime();
+  if (!parent) return runAdvisoryPlan(args);
+  // The final logical deadline decision must outlive the raw work's release.
+  return startOwnedOperation(parent.drain, 'execution', () => runAdvisoryPlan(args), {
+    parent: parent.owner,
+    errorOutcome: 'unknown',
+    dispatch: 'immediate',
+  }).result;
+}
+
+async function runAdvisoryPlan(
+  args: Parameters<typeof prepareCoreAdvisoryPlan>[0],
+): Promise<'ready' | 'stale' | 'unconfirmed'> {
   const { deadline } = args;
   let open = true;
   const current = () => open && performance.now() < deadline && args.isCurrent();
@@ -31,13 +50,15 @@ export async function prepareCoreAdvisoryPlan(args: {
       intent: args.op.requirements.initialRequest,
       eligibilityIntent: args.rawIntent,
       logger: args.logger,
-      persist: async (text) => current() && (await args.repo.persistAdvisoryPlan(args.op, text)),
+      persist: async (text) =>
+        current() &&
+        (await runAuxiliaryDatabase(() => args.repo.persistAdvisoryPlan(args.op, text))),
       publish: (planText) => {
         if (current()) savedPlan = planText;
       },
     });
     if (!current()) return 'unconfirmed';
-    const head = await args.repo.readHead(args.op.scope);
+    const head = await runAuxiliaryDatabase(() => args.repo.readHead(args.op.scope));
     if (!current() || !head) return 'unconfirmed';
     const sameRound =
       head.status === 'executing' &&
@@ -61,16 +82,38 @@ export async function prepareCoreAdvisoryPlan(args: {
     }
     return 'ready';
   };
+  const parent = currentOperationLifetime();
+  let seal = () => {};
+  const trackedWork = async () => {
+    return withOperationDispatchScope(async (closeScope) => {
+      seal = closeScope;
+      try {
+        return await work();
+      } finally {
+        closeScope();
+      }
+    });
+  };
+  const owned = parent
+    ? startOwnedOperation(parent.drain, 'execution', trackedWork, {
+        parent: parent.owner,
+        errorOutcome: 'unknown',
+        dispatch: 'immediate',
+      })
+    : undefined;
   try {
     const result = await Promise.race([
-      work().catch(() => 'unconfirmed' as const),
+      (owned?.result ?? trackedWork()).catch(() => 'unconfirmed' as const),
       new Promise<'unconfirmed'>((resolve) => {
         timer = setTimeout(() => resolve('unconfirmed'), Math.max(0, deadline - performance.now()));
       }),
     ]);
-    return current() ? result : 'unconfirmed';
+    const readiness = current() ? result : 'unconfirmed';
+    if (readiness === 'unconfirmed' && parent) parent.drain.markUnknown(parent.owner);
+    return readiness;
   } finally {
     open = false;
+    seal();
     clearTimeout(timer);
   }
 }

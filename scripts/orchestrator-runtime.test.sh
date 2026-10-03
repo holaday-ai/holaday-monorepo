@@ -2,6 +2,11 @@
 
 set -euo pipefail
 
+# Ordinary-maintenance mode must not enter legacy forced-stop behavior.
+node --test "$(dirname "${BASH_SOURCE[0]}")"/browser-maintenance-shell.test.mjs \
+  "$(dirname "${BASH_SOURCE[0]}")"/browser-maintenance-start.test.mjs \
+  "$(dirname "${BASH_SOURCE[0]}")"/browser-maintenance-runtime.test.mjs
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_SCRIPT="$SCRIPT_DIR/orchestrator-runtime.sh"
 START_SCRIPT="$SCRIPT_DIR/start-orchestrator-production.sh"

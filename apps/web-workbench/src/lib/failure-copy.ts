@@ -7,6 +7,13 @@ export interface FriendlyFailure {
   nextStep: string;
 }
 
+function unsupportedOutputFormats(errorText: string): string | undefined {
+  // Recognize the server's explicit format failure, not an input filename or plan restriction.
+  const match = /^FILE_FORMAT_UNSUPPORTED:([a-z0-9]+(?:,[a-z0-9]+)*)$/i.exec(errorText.trim())
+    ?? /^任务未完成：当前文件生成工具不支持 ([a-z0-9]+(?:、[a-z0-9]+)*) 格式，升级套餐无法解决。/i.exec(errorText.trim());
+  return match?.[1]?.toUpperCase().replaceAll(',', '、');
+}
+
 /**
  * Map a raw terminal failure message to the two-line headline shown
  * at the top of the result card. The task is already terminal here,
@@ -14,6 +21,14 @@ export interface FriendlyFailure {
  * flows that only exist while the agent is still awaiting_user.
  */
 export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
+  const unsupportedFormats = unsupportedOutputFormats(errorText ?? '');
+  if (unsupportedFormats) {
+    return {
+      title: `暂不支持 ${unsupportedFormats} 文件`,
+      subtitle: '当前文件生成工具不支持该格式，升级套餐无法解决。',
+      nextStep: '请确认是否接受其他可用格式，或使用支持该格式的工具。',
+    };
+  }
   const haystack = (errorText ?? '').toLowerCase();
   const browserKind = classifyBrowserErrorKind(errorText);
   if (/ORCHESTRATOR_RESTART|orchestrator_restart|服务重启导致任务中断|orchestrator restarted/i.test(errorText)) {
@@ -224,8 +239,9 @@ export function failureResultCopyText(errorText: string): string {
  * at re-running in their recovery copy ("重新执行当前任务" / "需要继续
  * 时可以重新执行这个任务"), so both must actually surface the button —
  * otherwise the guidance is a dead end. Re-running always starts a
- * fresh task (createTask), never replays completed steps.
+ * fresh task (createTask), never replays completed steps. An unsupported
+ * output format requires a changed request/tool, so it does not offer a re-run.
  */
-export function terminalAllowsRerun(status: string): boolean {
-  return status === 'failed' || status === 'cancelled';
+export function terminalAllowsRerun(status: string, errorText = ''): boolean {
+  return status === 'cancelled' || (status === 'failed' && !unsupportedOutputFormats(errorText));
 }

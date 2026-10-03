@@ -1,0 +1,4683 @@
+import { execFile } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
+import { constants } from 'node:fs';
+import * as fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { hostname } from 'node:os';
+import { posix } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
+import {
+  cutoverCloudObservationError,
+  cutoverLegacyInterruptionRisk,
+  cutoverRegistrationConfigDigest,
+  firstCutoverCloudDisplayBootstrap,
+  firstCutoverCloudReviewedPythonStartup,
+  readFirstCutoverCloudDisplayListeners,
+  readFirstCutoverCloudRecoveryCensus,
+  rememberCutoverCloudObservationFailure,
+  validateFirstCutoverCloudSources,
+  validateLegacyWorkBoundary as validateWork,
+} from './browser-cutover-evidence.mjs';
+export { readFirstCutoverCloudRecoveryCensus };
+
+/** Private, read-only current-disk/launch selection. Does not prove capability,
+ * daemon loaded bytes, Python dynamic closure or authorize either effect. */
+export async function readFirstCutoverCloudRecoverySources(input, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    hostname,
+    now: Date.now,
+    monotonic: () => performance.now(),
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_SOURCES_UNPROVEN');
+  };
+  const digest = (value) =>
+    createHash('sha256')
+      .update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value))
+      .digest('hex');
+  const started = io.monotonic();
+  const clock = () => {
+    const elapsed = io.monotonic() - started;
+    if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > 60000) reject();
+  };
+  const records = new Map();
+  const directories = new Map();
+  const files = [];
+  const texts = new Map();
+  let total = 0;
+  const sameStat = (a, b) =>
+    ['dev', 'ino', 'mode', 'uid', 'gid', 'size', 'mtimeMs', 'ctimeMs'].every((k) => a[k] === b[k]);
+  const absolute = (p) =>
+    typeof p === 'string' &&
+    p.startsWith('/') &&
+    posix.normalize(p) === p &&
+    !p.includes('\0') &&
+    p.length <= 4096;
+  const stat = async (p) => {
+    clock();
+    const s = await io.lstat(p);
+    // The fixed bootstrap invokes this root-owned mount as root BEFORE
+    // setpriv clears capabilities. Retain its distro setuid bit in the evidence;
+    // it does not change the caller UID. No other special mode/path is admitted.
+    const rootMount =
+      p === '/usr/bin/mount' &&
+      s.isFile() &&
+      s.uid === 0 &&
+      s.gid === 0 &&
+      (s.mode & 0o7777) === 0o4755;
+    if (
+      s.uid !== 0 ||
+      (!s.isSymbolicLink() && ((s.mode & 0o022) !== 0 || ((s.mode & 0o7000) !== 0 && !rootMount)))
+    )
+      reject();
+    const old = records.get(p);
+    if (old && !sameStat(old, s)) reject();
+    records.set(p, s);
+    return s;
+  };
+  const chain = async (p) => {
+    if (!absolute(p)) reject();
+    let current = '/';
+    await stat(current);
+    for (const part of p.slice(1).split('/').filter(Boolean)) {
+      current = posix.join(current, part);
+      await stat(current);
+    }
+    const resolved = await io.realpath(p);
+    if (!absolute(resolved)) reject();
+    if (resolved !== p) {
+      let c = '/';
+      for (const part of resolved.slice(1).split('/')) {
+        c = posix.join(c, part);
+        await stat(c);
+      }
+    }
+    return resolved;
+  };
+  const directory = async (p) => {
+    const real = await chain(p);
+    if (real !== p || !(await stat(p)).isDirectory()) reject();
+    const names = (await io.readdir(p)).sort();
+    if (
+      names.length > 512 ||
+      names.some((n) => typeof n !== 'string' || !n || n.includes('/') || n.includes('\0'))
+    )
+      reject();
+    const old = directories.get(p);
+    if (old && !isDeepStrictEqual(old, names)) reject();
+    directories.set(p, names);
+    clock();
+    return names;
+  };
+  const absent = async (p) => {
+    try {
+      await io.lstat(p);
+      reject();
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+    }
+  };
+  // The script directory precedes system packages for this non-isolated entry.
+  // Stream names only: /usr/bin may legitimately contain far more than 512
+  // unrelated commands. Never inspect/import candidate contents to accept one.
+  const checkEntryDirectory = async () => {
+    const path = '/usr/bin';
+    if ((await chain(path)) !== path || !(await stat(path)).isDirectory()) reject();
+    const handle = await io.opendir(path);
+    let count = 0;
+    let entrySeen = false;
+    try {
+      for (;;) {
+        clock();
+        const entry = await handle.read();
+        if (!entry) break;
+        if (
+          ++count > 16384 ||
+          typeof entry.name !== 'string' ||
+          !entry.name ||
+          Buffer.byteLength(entry.name) > 255 ||
+          /[\0/]/.test(entry.name)
+        )
+          reject();
+        const normalized = entry.name.toLowerCase().replace(/[-_.]+/g, '-');
+        if (
+          !/^(?:websockify|sitecustomize|usercustomize|apport-python-hook|re|importlib)(?:-|$)/.test(
+            normalized,
+          )
+        )
+          continue;
+        if (entry.name !== 'websockify' || entrySeen) reject();
+        entrySeen = true;
+      }
+      if (!entrySeen) reject();
+    } finally {
+      await handle.close();
+    }
+    clock();
+  };
+  const bounded = async (p, limit) => {
+    const handle = await io.open(
+      p,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    try {
+      const chunks = [];
+      let size = 0;
+      while (size <= limit) {
+        clock();
+        const buffer = Buffer.alloc(Math.min(65536, limit + 1 - size));
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+        if (!bytesRead) break;
+        chunks.push(buffer.subarray(0, bytesRead));
+        size += bytesRead;
+      }
+      if (size > limit) reject();
+      return Buffer.concat(chunks).toString('utf8');
+    } finally {
+      await handle.close();
+    }
+  };
+  const source = async (p, text = false) => {
+    if (files.length >= 128) reject();
+    const real = await chain(p);
+    const startupFile = firstCutoverCloudReviewedPythonStartup.find((row) => row.path === p);
+    const allowed = startupFile
+      ? [startupFile.resolvedPath]
+      : p === '/bin/sh'
+        ? ['/bin/sh', '/usr/bin/sh', '/usr/bin/dash', '/usr/bin/bash']
+        : p === '/usr/bin/python3'
+          ? ['/usr/bin/python3', '/usr/bin/python3.10']
+          : p === '/usr/bin/pkill'
+            ? ['/usr/bin/pkill', '/usr/bin/pgrep']
+            : [p];
+    if (!allowed.includes(real)) reject();
+    const before = await stat(real);
+    if (
+      !before.isFile() ||
+      before.size < 0 ||
+      before.size > (text ? 256 * 1024 : 512 * 1024 * 1024) ||
+      total + before.size > 1024 * 1024 * 1024
+    )
+      reject();
+    const handle = await io.open(
+      real,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    const h = createHash('sha256');
+    const chunks = [];
+    let size = 0;
+    try {
+      if (!sameStat(before, await handle.stat())) reject();
+      const buf = Buffer.alloc(65536);
+      for (;;) {
+        clock();
+        const { bytesRead } = await handle.read(buf, 0, buf.length, null);
+        if (!bytesRead) break;
+        size += bytesRead;
+        if (size > before.size) reject();
+        h.update(buf.subarray(0, bytesRead));
+        if (text) chunks.push(Buffer.from(buf.subarray(0, bytesRead)));
+      }
+      if (
+        size !== before.size ||
+        !sameStat(before, await handle.stat()) ||
+        !sameStat(before, await stat(real)) ||
+        (await io.realpath(p)) !== real
+      )
+        reject();
+    } finally {
+      await handle.close();
+    }
+    total += size;
+    const row = {
+      path: p,
+      resolvedPath: real,
+      uid: before.uid,
+      gid: before.gid,
+      mode: before.mode & 0o7777,
+      size,
+      digest: h.digest('hex'),
+    };
+    files.push(row);
+    if (text) texts.set(p, Buffer.concat(chunks).toString('utf8'));
+    return row;
+  };
+  const startupDirectory = async (path, names) => {
+    const known = new Set(firstCutoverCloudReviewedPythonStartup.map((row) => row.path));
+    const selected = names.filter((n) =>
+      /\.pth$|^(?:sitecustomize|usercustomize|apport_python_hook)(?:[.-]|$)/.test(n),
+    );
+    for (const name of selected) {
+      const file = posix.join(path, name);
+      if (!known.has(file)) reject();
+      await source(file, true);
+    }
+    if (names.includes('__pycache__')) {
+      const directoryPath = posix.join(path, '__pycache__');
+      for (const name of await directory(directoryPath)) {
+        if (!/^(?:sitecustomize|usercustomize|apport_python_hook)(?:[.-]|$)/.test(name)) continue;
+        const file = posix.join(directoryPath, name);
+        if (!known.has(file)) reject();
+        await source(file, true);
+      }
+    }
+  };
+  try {
+    if (
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      !input ||
+      Object.keys(input).sort().join(',') !== 'attempt,configs'
+    )
+      reject();
+    const { attempt, configs } = input;
+    const launch = firstCutoverCloudBrowserRecoveryLaunch({ attempt });
+    const material = firstCutoverCloudVncRecoveryMaterial({ attempt });
+    if (!Array.isArray(configs) || configs.length !== 2) reject();
+    const scope = configs.map(({ name, pmId }) => ({ name, pmId }));
+    const bootId = (await bounded('/proc/sys/kernel/random/boot_id', 128)).trim();
+    const observedAtMs = io.now();
+    const daemon = async () => {
+      const pidText = (await bounded('/root/.pm2/pm2.pid', 32)).trim();
+      if (!/^[1-9]\d*$/.test(pidText) || Number(pidText) <= 1) reject();
+      const pid = Number(pidText);
+      const raw = await bounded(`/proc/${pid}/stat`, 4096);
+      const parts = raw
+        .slice(raw.lastIndexOf(')') + 2)
+        .trim()
+        .split(/\s+/);
+      if (!/^\d+$/.test(parts[19]) || ['Z', 'X'].includes(parts[0])) reject();
+      if (
+        (await bounded(`/proc/${pid}/cmdline`, 4096)).replace(/\0+$/, '') !==
+        'PM2 v6.0.14: God Daemon (/root/.pm2)'
+      )
+        reject();
+      const entries = (await bounded(`/proc/${pid}/environ`, 256 * 1024))
+        .split('\0')
+        .filter((s) => s.startsWith('PM2_NODE_OPTIONS='));
+      if (entries.length > 1 || entries.some((s) => s !== 'PM2_NODE_OPTIONS=')) reject();
+      const status = await bounded(`/proc/${pid}/status`, 65536);
+      if (!/^Uid:\s+0\s+0\s+0\s+0\s*$/m.test(status) || !/^Gid:\s+0\s+0\s+0\s+0\s*$/m.test(status))
+        reject();
+      return { pid, start: parts[19], optionsPresent: entries.length === 1 };
+    };
+    const daemonBefore = await daemon();
+    const fixed = [
+      '/usr/bin/unshare',
+      '/bin/sh',
+      '/usr/bin/mount',
+      '/usr/bin/setpriv',
+      '/usr/bin/python3',
+      '/usr/bin/Xvfb',
+      '/opt/brave.com/brave/brave',
+      '/opt/brave.com/brave/chrome_crashpad_handler',
+      '/opt/holaday-vnc/start.sh',
+      '/usr/bin/bash',
+      '/usr/bin/x11vnc',
+      '/usr/bin/websockify',
+      '/usr/bin/pkill',
+      '/usr/bin/sleep',
+      '/usr/bin/date',
+      ...[
+        'package.json',
+        'lib/God.js',
+        'lib/God/ForkMode.js',
+        'lib/Utility.js',
+        'lib/God/ActionMethods.js',
+      ].map((p) => `/usr/lib/node_modules/pm2/${p}`),
+      '/usr/lib/python3.10/site.py',
+      '/usr/lib/python3.10/importlib/metadata/__init__.py',
+    ];
+    for (const p of fixed)
+      await source(p, /\.(?:json|js|py|sh)$/.test(p) || p === '/usr/bin/websockify');
+    if (
+      JSON.parse(texts.get('/usr/lib/node_modules/pm2/package.json')).version !== '6.0.14' ||
+      files.find((f) => f.path === '/usr/bin/python3').resolvedPath !== '/usr/bin/python3.10'
+    )
+      reject();
+    const pm2Hashes = {
+      'lib/God.js': 'a43594c030138c6db8d308ee1647903a72a49fc3ae781e600cc56338aa85ba90',
+      'lib/God/ForkMode.js': '3d1f57dee19060862b4856b15cd61ca406047e658071609e545ac5e1e7755cb4',
+      'lib/Utility.js': '97dc35e42a3ca1fdb4d79829346e8dbc693f1b180a764c99f202abc3328f3129',
+      'lib/God/ActionMethods.js':
+        'fac3eb453287059b94461cff459209c2d0a7c10bcb94ebf0f86aad8d087f82f8',
+    };
+    for (const [p, h] of Object.entries(pm2Hashes))
+      if (files.find((f) => f.path === `/usr/lib/node_modules/pm2/${p}`).digest !== h) reject();
+    // Exact reviewed Ubuntu entry shape; metadata is still independently read.
+    if (
+      files.find((f) => f.path === '/usr/bin/websockify').digest !==
+      '1a14abe56973818410c2a504f66496645dcb0df1b5a3d499a7b6f0cf0c848388'
+    )
+      reject();
+    const root = '/usr/lib/python3/dist-packages';
+    const system = await directory(root);
+    await startupDirectory(root, system);
+    const metas = system.filter((n) => /^websockify.*\.(?:egg|dist)-info$/i.test(n));
+    if (
+      metas.some((n) => !/^websockify(?:-[0-9][a-zA-Z0-9._+-]{0,63})?\.(?:egg|dist)-info$/.test(n))
+    )
+      reject();
+    if (
+      metas.length !== 1 ||
+      system.filter((n) => !metas.includes(n) && /^websockify(?:\.|$)/.test(n)).join(',') !==
+        'websockify'
+    )
+      reject();
+    const metadataPath = `${root}/${metas[0]}`;
+    const packagePath = `${root}/websockify`;
+    const modules = await directory(packagePath);
+    for (const n of modules) {
+      if (n === '__pycache__') continue;
+      if (!/^[a-zA-Z_][a-zA-Z0-9_]*\.py$/.test(n)) reject();
+      await source(`${packagePath}/${n}`, true);
+    }
+    if (modules.includes('__pycache__'))
+      for (const n of await directory(`${packagePath}/__pycache__`)) {
+        const match = /^([a-zA-Z_][a-zA-Z0-9_]*)\.cpython-310(?:\.opt-[12])?\.pyc$/.exec(n);
+        if (!match || !modules.includes(`${match[1]}.py`)) reject();
+        await source(`${packagePath}/__pycache__/${n}`, true);
+      }
+    for (const n of await directory(metadataPath)) {
+      if (
+        ![
+          'PKG-INFO',
+          'METADATA',
+          'entry_points.txt',
+          'top_level.txt',
+          'SOURCES.txt',
+          'installed-files.txt',
+          'dependency_links.txt',
+          'requires.txt',
+          'RECORD',
+          'WHEEL',
+          'INSTALLER',
+          'not-zip-safe',
+        ].includes(n)
+      )
+        reject();
+      const row = await source(`${metadataPath}/${n}`, true);
+      if (
+        n === 'not-zip-safe' &&
+        (row.size !== 1 ||
+          row.digest !== '01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b')
+      )
+        reject();
+    }
+    const meta = texts.get(`${metadataPath}/PKG-INFO`) ?? texts.get(`${metadataPath}/METADATA`);
+    const version = /^Version: (.+)$/m.exec(meta ?? '')?.[1];
+    if (
+      (meta?.match(/^Name: websockify$/gm) ?? []).length !== 1 ||
+      (meta?.match(/^Version: /gm) ?? []).length !== 1
+    )
+      reject();
+    const entryText = texts.get(`${metadataPath}/entry_points.txt`);
+    if (
+      !/^\[console_scripts\]\s*\nwebsockify\s*=\s*websockify\.websocketproxy:websockify_init\s*$/.test(
+        entryText ?? '',
+      )
+    )
+      reject();
+    // Finite Ubuntu search model. Never import Python or scan arbitrary homes.
+    await checkEntryDirectory();
+    const absentPaths = ['/usr/lib/python310.zip', '/usr/bin/pyvenv.cfg', '/usr/pyvenv.cfg'];
+    // Ubuntu Python 3.10 searches this user site, not all of ~/.local.
+    // Permit unrelated application data under protected real ancestors, while
+    // binding the first missing component before/after the complete read.
+    if ((await chain('/root')) !== '/root' || !(await stat('/root')).isDirectory()) reject();
+    const userSite = '/root/.local/lib/python3.10/site-packages';
+    for (const p of ['/root/.local', '/root/.local/lib', '/root/.local/lib/python3.10', userSite]) {
+      let metadata;
+      try {
+        metadata = await stat(p);
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+        absentPaths.push(p);
+        break;
+      }
+      // Check lstat type first: a dangling link must never count as absence.
+      if (!metadata.isDirectory() || (await chain(p)) !== p || p === userSite) reject();
+    }
+    for (const p of [
+      '/usr/lib/python3.10',
+      '/usr/lib/python3.10/lib-dynload',
+      '/usr/local/lib/python3.10/dist-packages',
+      '/usr/local/lib/python3.10/site-packages',
+    ]) {
+      let names;
+      try {
+        names = await directory(p);
+      } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+        absentPaths.push(p);
+        continue;
+      }
+      await startupDirectory(p, names);
+      if (names.some((n) => /^websockify(?:[.-]|$)/.test(n))) reject();
+      if (p.includes('/usr/local/') && names.length) reject();
+    }
+    for (const p of absentPaths) await absent(p);
+    const roles = [];
+    for (const [i, row] of configs.entries()) {
+      if (
+        !row ||
+        Object.keys(row).sort().join(',') !== 'config,name,pmId' ||
+        row.name !== ['holaday-vnc', 'holaday-chromium-headed'][i] ||
+        row.config?.name !== row.name ||
+        row.config.pm_id !== row.pmId ||
+        !isDeepStrictEqual(row.config, JSON.parse(JSON.stringify(row.config)))
+      )
+        reject();
+      const config = structuredClone(row.config);
+      const nested = config.env;
+      if (
+        !nested ||
+        Object.getPrototypeOf(nested) !== Object.prototype ||
+        config.exec_mode !== 'fork_mode' ||
+        config.autostart !== true ||
+        config.increment_var ||
+        (config.instance_var && config.instance_var !== 'NODE_APP_INSTANCE')
+      )
+        reject();
+      const fixedFields = {
+        ...(i
+          ? { pm_exec_path: launch.command, args: launch.args, exec_interpreter: 'none' }
+          : { pm_exec_path: material.command, args: config.args, exec_interpreter: 'bash' }),
+        exec_mode: 'fork_mode',
+        autorestart: false,
+        watch: false,
+        cron_restart: '',
+      };
+      if (
+        unsafeCloudRecoveryEnvironment(nested, fixedFields) ||
+        (!i && (config.pm_exec_path !== material.command || config.exec_interpreter !== 'bash'))
+      )
+        reject();
+      if (i) nested.DISPLAY = ':98';
+      Object.assign(config, fixedFields);
+      Reflect.deleteProperty(config, 'max_memory_restart');
+      for (const [k, v] of Object.entries(nested)) {
+        // biome-ignore lint/suspicious/noDoubleEquals: actual PM2 Utility.extend.
+        if (v != '[object Object]') config[k] = v;
+      }
+      if (
+        config.exec_mode !== 'fork_mode' ||
+        config.autostart !== true ||
+        config.increment_var ||
+        (config.instance_var && config.instance_var !== 'NODE_APP_INSTANCE') ||
+        // Headed recovery sets DISPLAY; VNC selects X via the checked x11vnc argv.
+        // A missing VNC variable is distinct from a conflicting retained value.
+        ((i || Object.hasOwn(config, 'DISPLAY')) && config.DISPLAY !== ':98') ||
+        config.HOME !== '/root' ||
+        (config.uid && config.uid !== 0) ||
+        (config.gid && config.gid !== 0) ||
+        !absolute(config.pm_cwd) ||
+        !config.PATH ||
+        typeof config.PATH !== 'string'
+      )
+        reject();
+      if (!i && Array.isArray(config.node_args) && config.node_args.length) reject();
+      const controls = [];
+      for (const k of Object.keys(config).sort())
+        if (
+          /^(?:LD_|PYTHON|BASH_FUNC_)|^(?:PATH|HOME|SHELL|BASH_ENV|ENV|SHELLOPTS|BASHOPTS|DISPLAY|XAUTHORITY|TMPDIR)$/.test(
+            k,
+          )
+        ) {
+          const v = config[k];
+          if (typeof v !== 'string' || v.includes('\0')) reject();
+          if (
+            /^(?:LD_|BASH_FUNC_)|^(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|XAUTHORITY|TMPDIR)$/.test(k) &&
+            v !== ''
+          )
+            reject();
+          if (!i && k.startsWith('PYTHON') && v !== '') reject();
+          controls.push([k, digest(v)]);
+        }
+      await chain(config.pm_cwd);
+      if (!(await stat(await io.realpath(config.pm_cwd))).isDirectory()) reject();
+      const dirs = config.PATH.split(':');
+      if (dirs.length > 16 || dirs.some((p) => !absolute(p))) reject();
+      for (const p of dirs) if (!(await stat(await chain(p))).isDirectory()) reject();
+      const selected = [];
+      if (!i)
+        for (const name of ['bash', 'x11vnc', 'websockify', 'pkill', 'sleep', 'date']) {
+          let found;
+          for (const dir of dirs) {
+            const p = posix.join(dir, name);
+            try {
+              const real = await chain(p);
+              const s = await stat(real);
+              if (!s.isFile() || !(s.mode & 0o111)) reject();
+              found = real;
+              break;
+            } catch (e) {
+              if (e.code !== 'ENOENT') throw e;
+              absentPaths.push(p);
+            }
+          }
+          // PATH must select the exact executable already measured above.
+          if (found !== files.find((file) => file.path === `/usr/bin/${name}`)?.resolvedPath)
+            reject();
+          selected.push([name, found]);
+        }
+      const args = i
+        ? launch.args
+        : [
+            material.command,
+            ...(config.args ? (Array.isArray(config.args) ? config.args : [config.args]) : []),
+          ];
+      if (args.some((a) => typeof a !== 'string' || a.includes('\0'))) reject();
+      roles.push({
+        name: row.name,
+        pmId: row.pmId,
+        configDigest: cutoverRegistrationConfigDigest(row.config),
+        selectionDigest: digest({
+          material: i ? launch : material,
+          command: i ? launch.command : 'bash',
+          args,
+          cwd: config.pm_cwd,
+          uid: config.uid ?? null,
+          gid: config.gid ?? null,
+          controls,
+          selected,
+          daemon: daemonBefore,
+        }),
+      });
+    }
+    for (const [p, s] of records) if (!sameStat(s, await io.lstat(p))) reject();
+    for (const [p, names] of directories)
+      if (!isDeepStrictEqual(names, (await io.readdir(p)).sort())) reject();
+    for (const f of files) if ((await io.realpath(f.path)) !== f.resolvedPath) reject();
+    for (const p of absentPaths) await absent(p);
+    if (
+      !isDeepStrictEqual(daemonBefore, await daemon()) ||
+      (await bounded('/proc/sys/kernel/random/boot_id', 128)).trim() !== bootId
+    )
+      reject();
+    await checkEntryDirectory();
+    clock();
+    const result = {
+      host: 'vultr',
+      hostname: io.hostname(),
+      bootId,
+      observedAtMs,
+      files: files.sort((a, b) => (a.path < b.path ? -1 : 1)),
+      roles,
+      pythonEntry: {
+        metadataPath,
+        name: 'websockify',
+        version,
+        group: 'console_scripts',
+        entry: 'websockify',
+        target: 'websockify.websocketproxy:websockify_init',
+      },
+    };
+    validateFirstCutoverCloudSources(result, { scope, observed: true });
+    return result;
+  } catch {
+    reject();
+  }
+}
+
+/** Native daemon execution context for the existing recovery gate. This binds
+ * current kernel restrictions, the loaded Node inode and audited PM2 source
+ * chronology. It does not prove stopped services, display exclusivity, dynamic
+ * library closure or successful recovery, and never authorizes an effect.
+ * An unavailable security label remains explicit unknown evidence.
+ */
+export async function readFirstCutoverCloudRecoveryContext(input, overrides = {}) {
+  let cloudDiagnosticStage = 'CONTEXT_ENTRY';
+  const atStage = (stage, read) => {
+    cloudDiagnosticStage = stage;
+    return read();
+  };
+  const io = {
+    ...fs,
+    platform: process.platform,
+    arch: process.arch,
+    uid: process.getuid?.(),
+    now: Date.now,
+    hostname,
+    ...overrides,
+  };
+  const reject = (stage, cause) => {
+    throw cutoverCloudObservationError('CUTOVER_CLOUD_CONTEXT_UNPROVEN', stage, cause);
+  };
+  try {
+    if (
+      Object.keys(input ?? {}).join(',') !== 'sources' ||
+      io.platform !== 'linux' ||
+      !['arm64', 'x64'].includes(io.arch) ||
+      io.uid !== 0
+    )
+      reject('CONTEXT_R01');
+    const sources = structuredClone(input.sources);
+    validateFirstCutoverCloudSources(sources, { scope: sources.roles, observed: true });
+    const sha = (v) =>
+      createHash('sha256')
+        .update(Buffer.isBuffer(v) ? v : JSON.stringify(v))
+        .digest('hex');
+    const began = io.now();
+    let last = began;
+    const clock = () => {
+      const now = io.now();
+      if (
+        !Number.isSafeInteger(now) ||
+        now < 0 ||
+        now < last ||
+        now - began > 15000 ||
+        sources.observedAtMs > now ||
+        now - sources.observedAtMs > 60000
+      )
+        reject('CONTEXT_R02');
+      last = now;
+      return now;
+    };
+    clock();
+    const sameStat = (a, b) =>
+      ['dev', 'ino', 'uid', 'gid', 'mode', 'size', 'mtimeMs', 'ctimeMs'].every(
+        (k) => a[k] === b[k],
+      );
+    const records = new Map();
+    const bounded = async (path, limit = 65536) => {
+      clock();
+      const handle = await atStage('CONTEXT_IO_01', () =>
+        io.open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK),
+      );
+      try {
+        const before = await atStage('CONTEXT_IO_02', () => handle.stat());
+        const bytes = Buffer.alloc(limit + 1);
+        let size = 0;
+        while (size < bytes.length) {
+          const { bytesRead } = await atStage('CONTEXT_IO_03', () =>
+            handle.read(bytes, size, bytes.length - size, size),
+          );
+          if (!Number.isSafeInteger(bytesRead) || bytesRead < 0 || bytesRead > bytes.length - size)
+            reject('CONTEXT_R03');
+          if (!bytesRead) break;
+          size += bytesRead;
+        }
+        if (
+          size > limit ||
+          !sameStat(before, await atStage('CONTEXT_IO_04', () => handle.stat())) ||
+          !sameStat(before, await atStage('CONTEXT_IO_05', () => io.lstat(path)))
+        )
+          reject('CONTEXT_R04');
+        return bytes.subarray(0, size);
+      } catch (error) {
+        rememberCutoverCloudObservationFailure(error, cloudDiagnosticStage);
+        throw error;
+      } finally {
+        await atStage('CONTEXT_IO_06', () => handle.close());
+      }
+    };
+    const text = async (path, limit) => {
+      const bytes = await atStage('CONTEXT_IO_07', () => bounded(path, limit));
+      const value = bytes.toString('utf8');
+      if (!Buffer.from(value).equals(bytes)) reject('CONTEXT_R05');
+      return value;
+    };
+    const optional = async (path) => {
+      try {
+        return await atStage('CONTEXT_IO_08', () => text(path));
+      } catch (error) {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      }
+    };
+    const protectedPath = async (path) => {
+      if (!path.startsWith('/') || posix.normalize(path) !== path) reject('CONTEXT_R06');
+      const parts = path.slice(1).split('/');
+      let current = '';
+      for (let i = -1; i < parts.length; i++) {
+        current = i < 0 ? '/' : posix.join(current, parts[i]);
+        const st = await atStage('CONTEXT_IO_09', () => io.lstat(current));
+        if (
+          st.uid !== 0 ||
+          st.gid !== 0 ||
+          st.mode & 0o7022 ||
+          (i < parts.length - 1 ? !st.isDirectory() : !st.isFile()) ||
+          (await atStage('CONTEXT_IO_10', () => io.realpath(current))) !== current
+        )
+          reject('CONTEXT_R07');
+        if (records.has(current) && !sameStat(records.get(current), st)) reject('CONTEXT_R08');
+        records.set(current, st);
+      }
+      return records.get(path);
+    };
+    const boot = await atStage('CONTEXT_IO_11', () => text('/proc/sys/kernel/random/boot_id', 128));
+    if (boot.trim() !== sources.bootId || io.hostname() !== sources.hostname) reject('CONTEXT_R09');
+    const rawPid = await atStage('CONTEXT_IO_12', () => text('/root/.pm2/pm2.pid', 64));
+    if (!/^[1-9][0-9]*\n?$/.test(rawPid)) reject('CONTEXT_R10');
+    const pid = Number(rawPid.trim());
+    if (!Number.isSafeInteger(pid) || pid <= 1) reject('CONTEXT_R11');
+    const root = `/proc/${pid}`;
+    const field = (status, key) => {
+      const rows = status.split('\n').filter((line) => line.startsWith(`${key}:`));
+      if (rows.length !== 1) reject('CONTEXT_R12');
+      return rows[0].slice(key.length + 1).trim();
+    };
+    const sample = async () => {
+      const raw = await atStage('CONTEXT_IO_13', () => text(`${root}/stat`));
+      const parts = raw
+        .slice(raw.lastIndexOf(')') + 2)
+        .trim()
+        .split(/\s+/);
+      if (
+        !raw.startsWith(`${pid} (`) ||
+        !['R', 'S', 'D', 'I'].includes(parts[0]) ||
+        !/^[0-9]+$/.test(parts[19])
+      )
+        reject('CONTEXT_R13');
+      const cmd = await atStage('CONTEXT_IO_14', () => text(`${root}/cmdline`));
+      if (cmd.replace(/\0+$/, '') !== 'PM2 v6.0.14: God Daemon (/root/.pm2)') reject('CONTEXT_R14');
+      const status = await atStage('CONTEXT_IO_15', () => text(`${root}/status`));
+      const selected = {};
+      for (const key of [
+        'Uid',
+        'Gid',
+        'CapEff',
+        'CapPrm',
+        'CapBnd',
+        'CapInh',
+        'CapAmb',
+        'NoNewPrivs',
+        'Seccomp',
+      ])
+        selected[key] = field(status, key);
+      for (const key of ['Uid', 'Gid'])
+        if (!/^0\s+0\s+0\s+0$/.test(selected[key])) reject('CONTEXT_R15');
+      if (selected.NoNewPrivs !== '0' || selected.Seccomp !== '0') reject('CONTEXT_R16');
+      for (const key of ['CapEff', 'CapPrm', 'CapBnd', 'CapInh', 'CapAmb']) {
+        if (!/^[a-f0-9]{1,16}$/.test(selected[key])) reject('CONTEXT_R17');
+        if (
+          ['CapEff', 'CapPrm', 'CapBnd'].includes(key) &&
+          (BigInt(`0x${selected[key]}`) & 0x200100n) !== 0x200100n
+        )
+          reject('CONTEXT_R18');
+      }
+      // getprocattr may have no label provider. Preserve unavailability as
+      // unknown evidence; consumers must never equate it with unconfined.
+      let securityLabel;
+      try {
+        const label = await atStage('CONTEXT_IO_16', () => text(`${root}/attr/current`));
+        if (label.trim() !== 'unconfined') reject('CONTEXT_R19');
+        securityLabel = { kind: 'observed', value: 'unconfined' };
+      } catch (error) {
+        if (!['ENOENT', 'EINVAL'].includes(error.code)) throw error;
+        securityLabel = { kind: 'unavailable', reason: error.code };
+      }
+      const selinux = await atStage('CONTEXT_IO_17', () => optional('/sys/fs/selinux/enforce'));
+      if (selinux !== null && selinux.trim() !== '0') reject('CONTEXT_R20');
+      const namespaces = {};
+      for (const name of ['mnt', 'user', 'net']) {
+        const value = await atStage('CONTEXT_IO_18', () => io.readlink(`${root}/ns/${name}`));
+        if (
+          !new RegExp(`^${name}:\\[\\d+\\]$`).test(value) ||
+          value !== (await atStage('CONTEXT_IO_19', () => io.readlink(`/proc/1/ns/${name}`)))
+        )
+          reject('CONTEXT_R21');
+        namespaces[name] = value;
+      }
+      const node = await atStage('CONTEXT_IO_20', () => io.readlink(`${root}/exe`));
+      if (!['/opt/node22/bin/node', '/usr/bin/node'].includes(node)) reject('CONTEXT_R22');
+      const disk = await atStage('CONTEXT_IO_21', () => protectedPath(node));
+      if (
+        !(disk.mode & 0o111) ||
+        !sameStat(disk, await atStage('CONTEXT_IO_22', () => io.stat(`${root}/exe`)))
+      )
+        reject('CONTEXT_R23');
+      const controls = [];
+      for (const entry of (
+        await atStage('CONTEXT_IO_23', () => text(`${root}/environ`, 262144))
+      ).split('\0')) {
+        const at = entry.indexOf('=');
+        const key = entry.slice(0, at);
+        if (!/^(?:LD_|NODE_|PM2_NODE_OPTIONS$)/.test(key)) continue;
+        const value = entry.slice(at + 1);
+        if (controls.some(([old]) => old === key)) reject('CONTEXT_R24');
+        if (
+          value &&
+          !(key === 'NODE_OPTIONS' && /^--max-old-space-size=[1-9][0-9]{0,5}$/.test(value)) &&
+          !(key === 'NODE_CHANNEL_FD' && value === '3') &&
+          !(key === 'NODE_CHANNEL_SERIALIZATION_MODE' && value === 'json')
+        )
+          reject('CONTEXT_R25');
+        controls.push([key, value]);
+      }
+      // PM2 6.0.14 starts its daemon with stdio [null, out, err, 'ipc'].
+      // /proc retains Node's original bootstrap pair after JS removes it from
+      // process.env. This is not a module-loader option or live-FD ownership proof.
+      const ipc = Object.fromEntries(controls);
+      if (
+        (Object.hasOwn(ipc, 'NODE_CHANNEL_FD') ||
+          Object.hasOwn(ipc, 'NODE_CHANNEL_SERIALIZATION_MODE')) &&
+        (ipc.NODE_CHANNEL_FD !== '3' || ipc.NODE_CHANNEL_SERIALIZATION_MODE !== 'json')
+      )
+        reject('CONTEXT_R26');
+      return {
+        start: parts[19],
+        selected,
+        namespaces,
+        node,
+        nodeStat: Object.fromEntries(
+          ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].map((k) => [k, disk[k]]),
+        ),
+        controls,
+        securityLabel,
+        selinux,
+      };
+    };
+    const before = await atStage('CONTEXT_IO_24', () => sample());
+    const auxv = await atStage('CONTEXT_IO_25', () => bounded('/proc/self/auxv', 8192));
+    if (auxv.length % 16) reject('CONTEXT_R27');
+    let hz;
+    let terminated = false;
+    for (let i = 0; i < auxv.length; i += 16) {
+      const key = auxv.readBigUInt64LE(i);
+      const value = auxv.readBigUInt64LE(i + 8);
+      if (terminated) {
+        if (key !== 0n || value !== 0n) reject('CONTEXT_R28');
+        continue;
+      }
+      if (key === 0n) {
+        if (value !== 0n) reject('CONTEXT_R29');
+        terminated = true;
+      }
+      if (key === 17n) {
+        if (hz !== undefined || value <= 0n || value > 1000000n) reject('CONTEXT_R30');
+        hz = Number(value);
+      }
+    }
+    if (!terminated || hz === undefined) reject('CONTEXT_R31');
+    const btime = (await atStage('CONTEXT_IO_26', () => text('/proc/stat'))).match(
+      /^btime ([0-9]+)$/gm,
+    );
+    if (btime?.length !== 1) reject('CONTEXT_R32');
+    const startedAtMs = (Number(btime[0].slice(6)) + Number(before.start) / hz) * 1000;
+    if (!Number.isFinite(startedAtMs) || startedAtMs < 0 || startedAtMs > began)
+      reject('CONTEXT_R33');
+    const chronology = [];
+    for (const suffix of [
+      'package.json',
+      'lib/God.js',
+      'lib/God/ForkMode.js',
+      'lib/Utility.js',
+      'lib/God/ActionMethods.js',
+    ]) {
+      const path = `/usr/lib/node_modules/pm2/${suffix}`;
+      const st = await atStage('CONTEXT_IO_27', () => protectedPath(path));
+      const approved = sources.files.find((f) => f.path === path);
+      if (
+        !approved ||
+        approved.resolvedPath !== path ||
+        st.mtimeMs >= startedAtMs ||
+        st.ctimeMs >= startedAtMs ||
+        st.size !== approved.size ||
+        sha(await atStage('CONTEXT_IO_28', () => bounded(path, 524288))) !== approved.digest
+      )
+        reject('CONTEXT_R34');
+      chronology.push([path, st.dev, st.ino, st.mtimeMs, st.ctimeMs]);
+    }
+    if (
+      !isDeepStrictEqual(before, await atStage('CONTEXT_IO_29', () => sample())) ||
+      rawPid !== (await atStage('CONTEXT_IO_30', () => text('/root/.pm2/pm2.pid', 64))) ||
+      boot !==
+        (await atStage('CONTEXT_IO_31', () => text('/proc/sys/kernel/random/boot_id', 128))) ||
+      io.hostname() !== sources.hostname
+    )
+      reject('CONTEXT_R35');
+    for (const [path, st] of records)
+      if (!sameStat(st, await atStage('CONTEXT_IO_32', () => io.lstat(path))))
+        reject('CONTEXT_R36');
+    const { observedAtMs: _time, ...material } = sources;
+    return {
+      hostname: sources.hostname,
+      bootId: sources.bootId,
+      observedAtMs: clock(),
+      sourcesDigest: sha(material),
+      daemon: {
+        pid,
+        start: before.start,
+        securityLabel: before.securityLabel,
+        contextDigest: sha({ before, chronology }),
+      },
+    };
+  } catch (error) {
+    reject(cloudDiagnosticStage, error);
+  }
+}
+
+/** Native ownership of the old fixed display before scoped service stops.
+ * Roots come from the real PM2 registrations, never an uploaded PID allowlist.
+ * All display peers must belong to those roots; this is an observation, not a
+ * stop permit, a reservation against later clients, or recovery readiness.
+ */
+export async function readFirstCutoverCloudOwnedDisplay(input, overrides = {}) {
+  let cloudDiagnosticStage = 'DISPLAY_ENTRY';
+  const atStage = (stage, read) => {
+    cloudDiagnosticStage = stage;
+    return read();
+  };
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    ...overrides,
+  };
+  const reject = (stage, cause) => {
+    throw cutoverCloudObservationError('CUTOVER_CLOUD_DISPLAY_SCOPE_UNPROVEN', stage, cause);
+  };
+  try {
+    if (
+      Object.keys(input ?? {})
+        .sort()
+        .join(',') !== 'maintenanceEndsAtMs,sources' ||
+      io.platform !== 'linux' ||
+      io.uid !== 0
+    )
+      reject('DISPLAY_R01');
+    const { sources, maintenanceEndsAtMs } = structuredClone(input);
+    validateFirstCutoverCloudSources(sources, { scope: sources.roles, observed: true });
+    if (!Number.isSafeInteger(maintenanceEndsAtMs)) reject('DISPLAY_R02');
+    const sha = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+    const began = io.now();
+    let last = began;
+    const clock = () => {
+      const now = io.now();
+      if (
+        !Number.isSafeInteger(now) ||
+        now < 0 ||
+        now < last ||
+        now - began > 15000 ||
+        now >= maintenanceEndsAtMs ||
+        sources.observedAtMs > now ||
+        now - sources.observedAtMs > 60000
+      )
+        reject('DISPLAY_R03');
+      last = now;
+      return now;
+    };
+    clock();
+    const context = await atStage('DISPLAY_IO_01', () =>
+      readFirstCutoverCloudRecoveryContext({ sources }, io),
+    );
+    const managers = async () => {
+      const rows = await atStage('DISPLAY_IO_02', () => readFirstCutoverCloudManagers(io));
+      clock();
+      if (
+        rows.some(
+          (r, i) =>
+            r.name !== sources.roles[i].name ||
+            r.pm_id !== sources.roles[i].pmId ||
+            cutoverRegistrationConfigDigest(r.pm2_env) !== sources.roles[i].configDigest ||
+            !(
+              (r.pm2_env.status === 'online' && r.pid > 1) ||
+              (i === 0 && r.pm2_env.status === 'stopped' && r.pid === 0)
+            ),
+        )
+      )
+        reject('DISPLAY_R04');
+      return rows;
+    };
+    const rows = await atStage('DISPLAY_IO_03', () => managers());
+    const readCensus = io.readCensus ?? (() => readFirstCutoverCloudRecoveryCensus(io));
+    const census = structuredClone(await atStage('DISPLAY_IO_04', () => readCensus()));
+    const validateCensus = (c) => {
+      clock();
+      if (
+        c.hostname !== sources.hostname ||
+        c.bootId !== sources.bootId ||
+        !Number.isSafeInteger(c.observedAtMs) ||
+        c.observedAtMs < began ||
+        c.observedAtMs > last ||
+        !Array.isArray(c.processes) ||
+        c.processes.length > 16384 ||
+        new Set(c.processes.map((p) => p.pid)).size !== c.processes.length ||
+        c.processes.some(
+          (p) =>
+            !Number.isSafeInteger(p.pid) ||
+            p.pid <= 0 ||
+            !Number.isSafeInteger(p.ppid) ||
+            p.ppid < 0 ||
+            p.pid === p.ppid ||
+            !/^\d+$/.test(p.start) ||
+            !hash(p.argvDigest),
+        )
+      )
+        reject('DISPLAY_R05');
+    };
+    validateCensus(census);
+    const byPid = new Map(census.processes.map((p) => [p.pid, p]));
+    const daemon = byPid.get(context.daemon.pid);
+    if (!daemon || daemon.start !== context.daemon.start) reject('DISPLAY_R06');
+    const children = new Map();
+    for (const p of census.processes) {
+      const group = children.get(p.ppid) ?? [];
+      group.push(p);
+      children.set(p.ppid, group);
+    }
+    const trees = rows.map((r) => {
+      if (!r.pid) return [];
+      const root = byPid.get(r.pid);
+      if (!root || root.ppid !== daemon.pid) reject('DISPLAY_R07');
+      const queue = [root];
+      const ids = new Set();
+      for (let at = 0; at < queue.length; at++) {
+        const p = queue[at];
+        if (ids.has(p.pid) || queue.length > 16384) reject('DISPLAY_R08');
+        ids.add(p.pid);
+        queue.push(...(children.get(p.pid) ?? []));
+      }
+      if (
+        queue.some(
+          (p) =>
+            p.state !== 'live' ||
+            !Array.isArray(p.uids) ||
+            p.uids.length !== 4 ||
+            p.uids.some((u) => u !== 0),
+        )
+      )
+        reject('DISPLAY_R09');
+      return queue.sort((a, b) => a.pid - b.pid);
+    });
+    const groups = trees.map((tree) => new Set(tree.map((p) => p.pid)));
+    if (
+      trees[0].some((p) => groups[1].has(p.pid) || /\/(?:Xvfb|Xorg|openbox)$/.test(p.exe)) ||
+      trees[1].some((p) => p.exe === '/usr/bin/Xorg')
+    )
+      reject('DISPLAY_R10');
+    const displays = trees[1].filter((p) => p.exe === '/usr/bin/Xvfb');
+    if (displays.length !== 1) reject('DISPLAY_R11');
+    const display = displays[0];
+    if (
+      display.ppid !== rows[1].pid ||
+      display.mountNamespace !== byPid.get(rows[1].pid).mountNamespace ||
+      display.mountNamespace !== daemon.mountNamespace
+    )
+      reject('DISPLAY_R12');
+    const members = trees[1].filter((p) => ['/usr/bin/Xvfb', '/usr/bin/openbox'].includes(p.exe));
+    const project = (p) =>
+      Object.fromEntries(
+        ['pid', 'ppid', 'start', 'uids', 'exe', 'cwd', 'argvDigest', 'cgroup'].map((k) => [
+          k,
+          p[k],
+        ]),
+      );
+    const statKeys = ['dev', 'ino', 'uid', 'gid', 'mode', 'size', 'mtimeMs', 'ctimeMs'];
+    const sameStat = (a, b) => statKeys.every((k) => a[k] === b[k]);
+    const bounded = async (path, limit) => {
+      clock();
+      const h = await atStage('DISPLAY_IO_05', () =>
+        io.open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK),
+      );
+      try {
+        const bytes = Buffer.alloc(limit + 1);
+        let size = 0;
+        while (size < bytes.length) {
+          const { bytesRead: n } = await atStage('DISPLAY_IO_06', () =>
+            h.read(bytes, size, bytes.length - size, size),
+          );
+          if (!Number.isSafeInteger(n) || n < 0 || n > bytes.length - size) reject('DISPLAY_R13');
+          if (!n) break;
+          size += n;
+          clock();
+        }
+        if (size > limit) reject('DISPLAY_R14');
+        return bytes.subarray(0, size);
+      } catch (error) {
+        rememberCutoverCloudObservationFailure(error, cloudDiagnosticStage);
+        throw error;
+      } finally {
+        await atStage('DISPLAY_IO_07', () => h.close());
+      }
+    };
+    const displaySample = async () => {
+      clock();
+      const cmd = (
+        await atStage('DISPLAY_IO_08', () => bounded(`/proc/${display.pid}/cmdline`, 16384))
+      ).toString('utf8');
+      const argv = cmd.split('\0');
+      if (
+        sha(cmd) !== display.argvDigest ||
+        !cmd.endsWith('\0') ||
+        argv.filter((a) => /^:\d+$/.test(a)).join(',') !== ':98' ||
+        argv.some((a) => ['-query', '-broadcast', '-indirect'].includes(a)) ||
+        (await atStage('DISPLAY_IO_09', () => io.readlink(`/proc/${display.pid}/exe`))) !==
+          display.exe
+      )
+        reject('DISPLAY_R15');
+      const loaded = await atStage('DISPLAY_IO_10', () => io.stat(`/proc/${display.pid}/exe`));
+      const disk = await atStage('DISPLAY_IO_11', () => io.stat(display.exe));
+      const source = sources.files.find(
+        (f) => f.path === display.exe && f.resolvedPath === display.exe,
+      );
+      if (
+        !source ||
+        !disk.isFile() ||
+        !Number.isSafeInteger(disk.size) ||
+        disk.size < 0 ||
+        disk.size > 64 * 1024 * 1024 ||
+        disk.uid !== 0 ||
+        disk.mode & 0o7022 ||
+        !sameStat(loaded, disk) ||
+        source.uid !== disk.uid ||
+        source.gid !== disk.gid ||
+        source.mode !== (disk.mode & 0o7777) ||
+        source.size !== disk.size
+      )
+        reject('DISPLAY_R16');
+      const bytes = await atStage('DISPLAY_IO_12', () => bounded(display.exe, disk.size));
+      if (
+        createHash('sha256').update(bytes).digest('hex') !== source.digest ||
+        !sameStat(disk, await atStage('DISPLAY_IO_13', () => io.stat(display.exe))) ||
+        !sameStat(loaded, await atStage('DISPLAY_IO_14', () => io.stat(`/proc/${display.pid}/exe`)))
+      )
+        reject('DISPLAY_R17');
+    };
+    await atStage('DISPLAY_IO_15', () => displaySample());
+    const sockets = async () => {
+      const exec = io.exec ?? execFixed;
+      const read = async (args) => {
+        clock();
+        const text = await atStage('DISPLAY_IO_16', () =>
+          exec('/usr/bin/ss', args, {
+            env: fixedEnv,
+            timeout: 5000,
+            maxBuffer: 1048576,
+          }),
+        );
+        if (typeof text !== 'string' || Buffer.byteLength(text) > 1048576) reject('DISPLAY_R18');
+        const lines = text.trim() ? text.trim().split('\n') : [];
+        if (lines.length > 16384) reject('DISPLAY_R19');
+        return lines;
+      };
+      const all = (await atStage('DISPLAY_IO_17', () => read(['-H', '-xapn']))).map((line) => {
+        const c = line.trim().split(/\s+/);
+        if (c.length < 8) reject('DISPLAY_R20');
+        return { line, kind: c[0], state: c[1], path: c[4], inode: c[5], peer: c[7] };
+      });
+      const paths = ['/tmp/.X11-unix/X98', '@/tmp/.X11-unix/X98'];
+      const named = all.filter((r) => paths.includes(r.path));
+      const listeners = named.filter((r) => r.state === 'LISTEN');
+      if (
+        listeners.length !== 2 ||
+        paths.some((path) => listeners.filter((r) => r.path === path).length !== 1)
+      )
+        reject('DISPLAY_R21');
+      const owners = async (row) => {
+        const tuples = [...row.line.matchAll(/\("[^"\n]*",pid=(\d+),fd=(\d+)\)/g)];
+        if (
+          !/^[1-9]\d{0,19}$/.test(row.inode) ||
+          all.filter((r) => r.inode === row.inode).length !== 1 ||
+          !tuples.length ||
+          tuples.length > 512 ||
+          tuples.length !== [...row.line.matchAll(/\bpid=/g)].length
+        )
+          reject('DISPLAY_R22');
+        const result = [];
+        for (const t of tuples) {
+          clock();
+          const pid = Number(t[1]);
+          const fd = Number(t[2]);
+          const p = byPid.get(pid);
+          if (
+            !p ||
+            !Number.isSafeInteger(fd) ||
+            !Number.isSafeInteger(pid) ||
+            result.some((r) => r.pid === pid && r.fd === fd) ||
+            (await atStage('DISPLAY_IO_18', () => io.readlink(`/proc/${pid}/fd/${fd}`))) !==
+              `socket:[${row.inode}]`
+          )
+            reject('DISPLAY_R23');
+          result.push({ pid, start: p.start, fd, inode: row.inode });
+        }
+        return result.sort((a, b) => a.pid - b.pid || a.fd - b.fd);
+      };
+      const clients = [];
+      const servers = [];
+      for (const r of named) {
+        if (r.kind !== 'u_str' || !['LISTEN', 'ESTAB'].includes(r.state)) reject('DISPLAY_R24');
+        const held = await atStage('DISPLAY_IO_19', () => owners(r));
+        if (held.some((p) => p.pid !== display.pid)) reject('DISPLAY_R25');
+        servers.push({ path: r.path, state: r.state, owners: held });
+        if (r.state === 'ESTAB') {
+          const matches = all.filter(
+            (p) =>
+              p.inode === r.peer && p.peer === r.inode && p.kind === 'u_str' && p.state === 'ESTAB',
+          );
+          if (matches.length !== 1) reject('DISPLAY_R26');
+          for (const p of await atStage('DISPLAY_IO_20', () => owners(matches[0]))) {
+            const role = groups.findIndex((ids) => ids.has(p.pid));
+            if (role < 0) reject('DISPLAY_R27');
+            clients.push({ ...p, role: rows[role].name, serverInode: r.inode });
+          }
+        }
+      }
+      if (
+        members.some((p) => p.exe === '/usr/bin/openbox' && !clients.some((c) => c.pid === p.pid))
+      )
+        reject('DISPLAY_R28');
+      const tcp = await atStage('DISPLAY_IO_21', () => read(['-H', '-tanp']));
+      if (tcp.some((line) => new RegExp(`\\bpid=${display.pid}(?:,|\\))`).test(line)))
+        reject('DISPLAY_R29');
+      const sort = (a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b));
+      return { servers: servers.sort(sort), clients: clients.sort(sort) };
+    };
+    const network = await atStage('DISPLAY_IO_22', () => sockets());
+    await atStage('DISPLAY_IO_23', () => displaySample());
+    if (
+      !isDeepStrictEqual(rows, await atStage('DISPLAY_IO_24', () => managers())) ||
+      !isDeepStrictEqual(network, await atStage('DISPLAY_IO_25', () => sockets()))
+    )
+      reject('DISPLAY_R30');
+    const after = structuredClone(await atStage('DISPLAY_IO_26', () => readCensus()));
+    validateCensus(after);
+    const stable = (c) => ({ hostname: c.hostname, bootId: c.bootId, processes: c.processes });
+    if (!isDeepStrictEqual(stable(census), stable(after))) reject('DISPLAY_R31');
+    const nextContext = await atStage('DISPLAY_IO_27', () =>
+      readFirstCutoverCloudRecoveryContext({ sources }, io),
+    );
+    const { observedAtMs: _oldTime, ...oldContext } = context;
+    const { observedAtMs: _newTime, ...newContext } = nextContext;
+    if (!isDeepStrictEqual(oldContext, newContext)) reject('DISPLAY_R32');
+    return {
+      purpose: 'cloud-owned-display-observation',
+      hostname: census.hostname,
+      bootId: census.bootId,
+      sourcesDigest: context.sourcesDigest,
+      contextDigest: context.daemon.contextDigest,
+      censusDigest: sha(stable(census)),
+      roots: rows.map((r) => ({
+        name: r.name,
+        pmId: r.pm_id,
+        pid: r.pid,
+        start: r.pid ? byPid.get(r.pid).start : null,
+        status: r.pm2_env.status,
+        configDigest: cutoverRegistrationConfigDigest(r.pm2_env),
+      })),
+      display: { ...project(display), mountNamespace: display.mountNamespace },
+      members: members.map(project),
+      treeDigests: trees.map((tree) => sha(tree.map(project))),
+      clients: network.clients,
+      socketDigest: sha(network),
+      observedAtMs: clock(),
+    };
+  } catch (error) {
+    reject(cloudDiagnosticStage, error);
+  }
+}
+
+/** Read-only OLD browser association. Executable names select candidates only;
+ * actual initial IPC and every socket peer must prove association. This does
+ * not extend an approved review or grant permission to stop any process. */
+export async function readFirstCutoverCloudOldBrowserAssociations(input, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    monotonic: () => performance.now(),
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_OLD_BROWSER_ASSOCIATION_UNPROVEN');
+  };
+  try {
+    if (
+      Object.keys(input ?? {})
+        .sort()
+        .join(',') !== 'displayObservation,maintenanceEndsAtMs,sources' ||
+      io.platform !== 'linux' ||
+      io.uid !== 0
+    )
+      reject();
+    const { sources, displayObservation: display, maintenanceEndsAtMs } = structuredClone(input);
+    validateFirstCutoverCloudSources(sources, { scope: sources.roles, observed: true });
+    const sha = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+    const began = io.now();
+    const tick = io.monotonic();
+    let last = began;
+    const clock = () => {
+      const now = io.now();
+      const elapsed = io.monotonic() - tick;
+      if (
+        !Number.isSafeInteger(began) ||
+        began < 0 ||
+        !Number.isFinite(elapsed) ||
+        !Number.isSafeInteger(now) ||
+        now < 0 ||
+        now < last ||
+        now - began > 15000 ||
+        elapsed < 0 ||
+        elapsed > 15000 ||
+        !Number.isSafeInteger(maintenanceEndsAtMs) ||
+        now >= maintenanceEndsAtMs ||
+        !Number.isSafeInteger(display?.observedAtMs) ||
+        display.observedAtMs > now ||
+        now - display.observedAtMs > 60000 ||
+        sources.observedAtMs > now ||
+        now - sources.observedAtMs > 60000
+      )
+        reject();
+      last = now;
+      return now;
+    };
+    clock();
+    const { observedAtMs: _time, ...material } = sources;
+    if (
+      display?.purpose !== 'cloud-owned-display-observation' ||
+      display.sourcesDigest !== sha(material) ||
+      display.hostname !== sources.hostname ||
+      display.bootId !== sources.bootId ||
+      !Array.isArray(display.roots) ||
+      display.roots.length !== 2 ||
+      !Array.isArray(display.treeDigests) ||
+      display.treeDigests.length !== 2
+    )
+      reject();
+    const context = await readFirstCutoverCloudRecoveryContext({ sources }, io);
+    if (context.daemon.contextDigest !== display.contextDigest) reject();
+    const readCensus = io.readCensus ?? (() => readFirstCutoverCloudRecoveryCensus(io));
+    const census = structuredClone(await readCensus());
+    const stable = (c) => ({ hostname: c.hostname, bootId: c.bootId, processes: c.processes });
+    if (
+      census.hostname !== sources.hostname ||
+      census.bootId !== sources.bootId ||
+      !Number.isSafeInteger(census.observedAtMs) ||
+      census.observedAtMs < began ||
+      census.observedAtMs > clock() ||
+      !Array.isArray(census.processes) ||
+      census.processes.length > 16384 ||
+      new Set(census.processes.map((p) => p.pid)).size !== census.processes.length ||
+      sha(stable(census)) !== display.censusDigest
+    )
+      reject();
+    const byPid = new Map(census.processes.map((p) => [p.pid, p]));
+    const headed = display.roots[1];
+    const root = byPid.get(headed?.pid);
+    const daemon = byPid.get(context.daemon.pid);
+    if (
+      headed?.name !== 'holaday-chromium-headed' ||
+      headed.status !== 'online' ||
+      headed.configDigest !== sources.roles[1].configDigest ||
+      !root ||
+      root.start !== headed.start ||
+      root.ppid !== daemon?.pid ||
+      daemon.start !== context.daemon.start
+    )
+      reject();
+    const managers = async () => {
+      const rows = await readFirstCutoverCloudManagers(io);
+      const projected = rows.map((r) => ({
+        name: r.name,
+        pmId: r.pm_id,
+        pid: r.pid,
+        start: r.pid ? byPid.get(r.pid)?.start : null,
+        status: r.pm2_env.status,
+        configDigest: cutoverRegistrationConfigDigest(r.pm2_env),
+      }));
+      if (
+        !isDeepStrictEqual(projected, display.roots) ||
+        projected.some((r, i) => r.configDigest !== sources.roles[i].configDigest)
+      )
+        reject();
+      clock();
+      return projected;
+    };
+    const beforeManagers = await managers();
+    const ids = new Set([root.pid]);
+    for (let i = 0; i < census.processes.length; i++)
+      for (const p of census.processes) if (ids.has(p.ppid)) ids.add(p.pid);
+    const project = (p) =>
+      Object.fromEntries(
+        ['pid', 'ppid', 'start', 'uids', 'exe', 'cwd', 'argvDigest', 'cgroup'].map((k) => [
+          k,
+          p[k],
+        ]),
+      );
+    const tree = census.processes.filter((p) => ids.has(p.pid)).sort((a, b) => a.pid - b.pid);
+    if (sha(tree.map(project)) !== display.treeDigests[1]) reject();
+    const brave = new Set(
+      tree.filter((p) => p.exe === '/opt/brave.com/brave/brave').map((p) => p.pid),
+    );
+    if (!brave.size) reject();
+    const executable = '/opt/brave.com/brave/chrome_crashpad_handler';
+    const candidates = census.processes.filter(
+      (p) => p.exe === executable || p.exe === `${executable} (deleted)`,
+    );
+    if (candidates.length > 32) reject();
+    const bounded = async (path, limit) => {
+      clock();
+      const h = await io.open(
+        path,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      try {
+        const b = Buffer.alloc(limit + 1);
+        let size = 0;
+        while (size < b.length) {
+          const { bytesRead: n } = await h.read(b, size, b.length - size, size);
+          if (!Number.isSafeInteger(n) || n < 0 || n > b.length - size) reject();
+          if (!n) break;
+          size += n;
+          clock();
+        }
+        if (size > limit) reject();
+        return b.subarray(0, size);
+      } finally {
+        await h.close();
+      }
+    };
+    const statKeys = ['dev', 'ino', 'uid', 'gid', 'mode', 'size', 'mtimeMs', 'ctimeMs'];
+    const sameStat = (a, b) => statKeys.every((k) => a[k] === b[k]);
+    const image = async () => {
+      if (!candidates.length) return;
+      const source = sources.files.find(
+        (f) => f.path === executable && f.resolvedPath === executable,
+      );
+      const disk = await io.stat(executable);
+      if (
+        !source ||
+        !disk.isFile() ||
+        disk.uid !== 0 ||
+        disk.mode & 0o7022 ||
+        !Number.isSafeInteger(disk.size) ||
+        disk.size < 1 ||
+        disk.size > 64 * 1024 * 1024 ||
+        source.uid !== disk.uid ||
+        source.gid !== disk.gid ||
+        source.mode !== (disk.mode & 0o7777) ||
+        source.size !== disk.size
+      )
+        reject();
+      if (
+        createHash('sha256')
+          .update(await bounded(executable, disk.size))
+          .digest('hex') !== source.digest ||
+        !sameStat(disk, await io.stat(executable))
+      )
+        reject();
+      for (const p of candidates)
+        if (
+          (await io.readlink(`/proc/${p.pid}/exe`)) !== executable ||
+          !sameStat(disk, await io.stat(`/proc/${p.pid}/exe`))
+        )
+          reject();
+    };
+    await image();
+    const sample = async () => {
+      clock();
+      const out = await (io.exec ?? execFixed)('/usr/bin/ss', ['-H', '-xapn'], {
+        env: fixedEnv,
+        timeout: 5000,
+        maxBuffer: 1048576,
+      });
+      if (typeof out !== 'string' || Buffer.byteLength(out) > 1048576) reject();
+      const rows = (out.trim() ? out.trim().split('\n') : []).map((line) => {
+        const c = line.trim().split(/\s+/);
+        if (c.length < 8) reject();
+        return { line, kind: c[0], state: c[1], inode: c[5], peer: c[7] };
+      });
+      if (rows.length > 16384) reject();
+      const held = async (row) => {
+        const tuples = [...row.line.matchAll(/\("[^"\n]*",pid=(\d+),fd=(\d+)\)/g)];
+        if (
+          !/^[1-9]\d{0,19}$/.test(row.inode) ||
+          tuples.length < 1 ||
+          tuples.length > 512 ||
+          tuples.length !== [...row.line.matchAll(/\bpid=/g)].length
+        )
+          reject();
+        const owners = [];
+        for (const t of tuples) {
+          clock();
+          const pid = Number(t[1]);
+          const fd = Number(t[2]);
+          const p = byPid.get(pid);
+          if (
+            !p ||
+            !Number.isSafeInteger(fd) ||
+            owners.some((o) => o.pid === pid && o.fd === fd) ||
+            (await io.readlink(`/proc/${pid}/fd/${fd}`)) !== `socket:[${row.inode}]`
+          )
+            reject();
+          owners.push({ pid, start: p.start, fd });
+        }
+        return owners.sort((a, b) => a.pid - b.pid || a.fd - b.fd);
+      };
+      const graph = new Map();
+      const edge = async (inode, pid, localGroup) => {
+        const matches = rows.filter((r) => r.inode === inode);
+        if (
+          matches.length !== 1 ||
+          !['u_str', 'u_seq'].includes(matches[0].kind) ||
+          matches[0].state !== 'ESTAB'
+        )
+          reject();
+        const row = matches[0];
+        const owners = await held(row);
+        if (
+          !owners.some((o) => o.pid === pid) ||
+          (localGroup
+            ? owners.some((o) => !localGroup.has(o.pid))
+            : owners.length !== 1 || owners[0].pid !== pid)
+        )
+          reject();
+        const peers = rows.filter(
+          (r) =>
+            r.inode === row.peer &&
+            r.peer === row.inode &&
+            r.kind === row.kind &&
+            r.state === 'ESTAB',
+        );
+        if (peers.length !== 1) reject();
+        const peer = peers[0];
+        const peerOwners = await held(peer);
+        graph.set(inode, { inode, kind: row.kind, peer: row.peer, owners });
+        graph.set(peer.inode, {
+          inode: peer.inode,
+          kind: peer.kind,
+          peer: peer.peer,
+          owners: peerOwners,
+        });
+        return { inode: peer.inode, owners: peerOwners };
+      };
+      const fdSockets = async (pid) => {
+        const names = await io.readdir(`/proc/${pid}/fd`);
+        if (
+          names.length > 256 ||
+          new Set(names).size !== names.length ||
+          names.some((n) => !/^\d+$/.test(n))
+        )
+          reject();
+        const sockets = [];
+        for (const name of names) {
+          clock();
+          const match = /^socket:\[(\d+)\]$/.exec(await io.readlink(`/proc/${pid}/fd/${name}`));
+          if (match) sockets.push({ fd: Number(name), inode: match[1] });
+        }
+        return sockets.sort((a, b) => a.fd - b.fd);
+      };
+      const inspected = [];
+      for (const p of candidates) {
+        const bytes = await bounded(`/proc/${p.pid}/cmdline`, 16384);
+        const cmd = bytes.toString('utf8');
+        if (!Buffer.from(cmd).equals(bytes) || sha(cmd) !== p.argvDigest) reject();
+        const flags = cmd.split('\0').filter((a) => a.startsWith('--initial-client-fd='));
+        if (flags.length !== 1 || !/^--initial-client-fd=\d{1,6}$/.test(flags[0])) reject();
+        const initialFd = Number(flags[0].split('=')[1]);
+        const sockets = await fdSockets(p.pid);
+        const initial = sockets.find((s) => s.fd === initialFd);
+        if (!initial) reject();
+        inspected.push({ p, initialFd, sockets, peer: await edge(initial.inode, p.pid) });
+      }
+      const primary = new Set();
+      for (const c of inspected) {
+        if (!c.peer.owners.some((o) => brave.has(o.pid))) continue;
+        if (c.peer.owners.some((o) => !brave.has(o.pid))) reject();
+        primary.add(c.p.pid);
+      }
+      if (candidates.length && !primary.size) reject();
+      const associated = inspected.filter((c) => {
+        if (primary.has(c.p.pid)) return true;
+        if (!c.peer.owners.some((o) => primary.has(o.pid))) return false;
+        if (c.peer.owners.length !== 1) reject();
+        const parent = inspected.find((p) => p.p.pid === c.peer.owners[0].pid);
+        if (!parent.sockets.some((s) => s.fd !== parent.initialFd && s.inode === c.peer.inode))
+          reject();
+        return true;
+      });
+      for (const c of inspected) if (ids.has(c.p.pid) && !associated.includes(c)) reject();
+      const group = new Set([...brave, ...associated.map((c) => c.p.pid)]);
+      const stdioGroup = new Set([...ids, ...associated.map((c) => c.p.pid)]);
+      const rootStdio = new Map();
+      for (const c of associated) {
+        const p = c.p;
+        if (
+          p.state !== 'live' ||
+          p.uids?.length !== 4 ||
+          p.uids.some((u) => u !== 0) ||
+          p.cgroup !== root.cgroup ||
+          p.mountNamespace !== root.mountNamespace ||
+          (p.ppid !== 1 && !ids.has(p.ppid) && !group.has(p.ppid))
+        )
+          reject();
+        for (const socket of c.sockets) {
+          let inherited = false;
+          if (socket.fd !== c.initialFd && [0, 1, 2].includes(socket.fd)) {
+            const link = await io.readlink(`/proc/${root.pid}/fd/${socket.fd}`);
+            rootStdio.set(socket.fd, link);
+            inherited = link === `socket:[${socket.inode}]`;
+          }
+          const peer = await edge(socket.inode, p.pid, inherited ? stdioGroup : group);
+          if (
+            inherited
+              ? peer.owners.length !== 1 || peer.owners[0].pid !== daemon.pid
+              : peer.owners.some((o) => !group.has(o.pid))
+          )
+            reject();
+        }
+        if (
+          !isDeepStrictEqual(c.sockets, await fdSockets(p.pid)) ||
+          sha((await bounded(`/proc/${p.pid}/cmdline`, 16384)).toString('utf8')) !== p.argvDigest
+        )
+          reject();
+      }
+      for (const [fd, link] of rootStdio)
+        if ((await io.readlink(`/proc/${root.pid}/fd/${fd}`)) !== link) reject();
+      return {
+        members: associated.map((c) => project(c.p)).sort((a, b) => a.pid - b.pid),
+        graph: [...graph.values()].sort((a, b) => a.inode.localeCompare(b.inode)),
+        rootStdio: [...rootStdio].sort((a, b) => a[0] - b[0]),
+      };
+    };
+    const first = await sample();
+    if (!isDeepStrictEqual(first, await sample())) reject();
+    await image();
+    const after = structuredClone(await readCensus());
+    if (
+      !Number.isSafeInteger(after.observedAtMs) ||
+      !isDeepStrictEqual(stable(census), stable(after)) ||
+      after.observedAtMs < census.observedAtMs ||
+      after.observedAtMs > clock()
+    )
+      reject();
+    const closing = await readFirstCutoverCloudRecoveryContext({ sources }, io);
+    if (
+      closing.daemon.contextDigest !== context.daemon.contextDigest ||
+      !isDeepStrictEqual(beforeManagers, await managers())
+    )
+      reject();
+    return {
+      purpose: 'cloud-old-browser-association-observation',
+      hostname: census.hostname,
+      bootId: census.bootId,
+      sourcesDigest: display.sourcesDigest,
+      contextDigest: context.daemon.contextDigest,
+      displayObservationDigest: sha(display),
+      censusDigest: sha(stable(census)),
+      members: first.members,
+      socketDigest: sha(first),
+      observedAtMs: clock(),
+    };
+  } catch {
+    reject();
+  }
+}
+
+/** Read-only fixed-endpoint vacancy in the daemon's initial namespaces. This
+ * observes two stopped registrations and bounded empty endpoint samples; it is
+ * not a reservation, old-process census, dynamic-loader audit or restore permit.
+ */
+export async function readFirstCutoverCloudRecoveryVacancy(input, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_VACANCY_UNPROVEN');
+  };
+  try {
+    if (
+      Object.keys(input ?? {})
+        .sort()
+        .join(',') !== 'maintenanceEndsAtMs,sources' ||
+      io.platform !== 'linux' ||
+      io.uid !== 0
+    )
+      reject();
+    const { sources, maintenanceEndsAtMs } = structuredClone(input);
+    if (!Number.isSafeInteger(maintenanceEndsAtMs)) reject();
+    validateFirstCutoverCloudSources(sources, { scope: sources.roles, observed: true });
+    const sha = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+    const began = io.now();
+    let last = began;
+    const clock = () => {
+      const now = io.now();
+      if (
+        !Number.isSafeInteger(now) ||
+        now < 0 ||
+        now < last ||
+        now - began > 15000 ||
+        now >= maintenanceEndsAtMs ||
+        sources.observedAtMs > now ||
+        now - sources.observedAtMs > 60000
+      )
+        reject();
+      last = now;
+      return now;
+    };
+    clock();
+    const context = await readFirstCutoverCloudRecoveryContext({ sources }, io);
+    clock();
+    const managers = async () => {
+      const rows = await readFirstCutoverCloudManagers(io);
+      clock();
+      if (
+        rows.some(
+          (r, i) =>
+            r.name !== sources.roles[i].name ||
+            r.pm_id !== sources.roles[i].pmId ||
+            r.pid !== 0 ||
+            r.pm2_env.status !== 'stopped' ||
+            cutoverRegistrationConfigDigest(r.pm2_env) !== sources.roles[i].configDigest,
+        )
+      )
+        reject();
+      return rows;
+    };
+    const before = await managers();
+    const namespaces = async () => {
+      const result = {};
+      for (const name of ['mnt', 'net', 'user']) {
+        clock();
+        const own = await io.readlink(`/proc/self/ns/${name}`);
+        if (
+          !new RegExp(`^${name}:\\[\\d+\\]$`).test(own) ||
+          own !== (await io.readlink(`/proc/${context.daemon.pid}/ns/${name}`)) ||
+          own !== (await io.readlink(`/proc/1/ns/${name}`))
+        )
+          reject();
+        result[name] = own;
+      }
+      return result;
+    };
+    const metadata = (s) =>
+      Object.fromEntries(['dev', 'ino', 'uid', 'gid', 'mode'].map((k) => [k, s[k]]));
+    const absent = async (path) => {
+      clock();
+      try {
+        await io.lstat(path);
+      } catch (e) {
+        if (e.code === 'ENOENT') return;
+        throw e;
+      }
+      reject();
+    };
+    const parents = async () => {
+      const result = [];
+      for (const path of ['/tmp', '/tmp/.X11-unix']) {
+        clock();
+        let st;
+        try {
+          st = await io.lstat(path);
+        } catch (e) {
+          if (path === '/tmp/.X11-unix' && e.code === 'ENOENT') {
+            result.push({ path, absent: true });
+            continue;
+          }
+          throw e;
+        }
+        const mode = st.mode & 0o7777;
+        if (
+          !st.isDirectory() ||
+          st.uid !== 0 ||
+          mode & 0o6000 ||
+          (mode & 0o022 && !(mode & 0o1000)) ||
+          (await io.realpath(path)) !== path
+        )
+          reject();
+        result.push({ path, ...metadata(st) });
+      }
+      return result;
+    };
+    const bounded = async (path) => {
+      clock();
+      const h = await io.open(
+        path,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      try {
+        const before = await h.stat();
+        if (
+          !before.isFile() ||
+          before.uid !== 0 ||
+          !isDeepStrictEqual(metadata(before), metadata(await io.lstat(path)))
+        )
+          reject();
+        const bytes = Buffer.alloc(1048577);
+        let size = 0;
+        while (size < bytes.length) {
+          clock();
+          const { bytesRead: n } = await h.read(bytes, size, bytes.length - size, size);
+          if (!Number.isSafeInteger(n) || n < 0 || n > bytes.length - size) reject();
+          if (!n) break;
+          size += n;
+        }
+        if (
+          size > 1048576 ||
+          !isDeepStrictEqual(metadata(before), metadata(await h.stat())) ||
+          !isDeepStrictEqual(metadata(before), metadata(await io.lstat(path)))
+        )
+          reject();
+        const raw = bytes.subarray(0, size);
+        const text = raw.toString('utf8');
+        if (!Buffer.from(text).equals(raw) || text.includes('\0') || !text.endsWith('\n')) reject();
+        return text;
+      } finally {
+        await h.close();
+      }
+    };
+    const sample = async () => {
+      const namespace = await namespaces();
+      const directories = await parents();
+      await absent('/tmp/.X98-lock');
+      await absent('/tmp/.X11-unix/X98');
+      const tables = {};
+      for (const name of ['unix', 'tcp', 'tcp6']) {
+        const text = await bounded(`/proc/self/net/${name}`);
+        const rows = text.trimEnd().split('\n');
+        if (rows.length > 16385) reject();
+        const header = rows.shift().trim().split(/\s+/).join(' ');
+        if (name === 'unix') {
+          if (header !== 'Num RefCount Protocol Flags Type St Inode Path') reject();
+          for (const row of rows) {
+            const m =
+              /^\s*[0-9a-fA-F]{1,16}:\s+[0-9a-fA-F]{8}\s+[0-9a-fA-F]{8}\s+[0-9a-fA-F]{8}\s+[0-9a-fA-F]{4}\s+[0-9a-fA-F]{2}\s+\d+(?:\s+(.*))?$/.exec(
+                row,
+              );
+            if (!m || ['/tmp/.X11-unix/X98', '@/tmp/.X11-unix/X98'].includes(m[1])) reject();
+          }
+        } else {
+          if (
+            !/^sl local_address (?:rem_address|remote_address) st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode$/.test(
+              header,
+            )
+          )
+            reject();
+          const address = new RegExp(`^[0-9a-fA-F]{${name === 'tcp' ? 8 : 32}}:([0-9a-fA-F]{4})$`);
+          for (const row of rows) {
+            const c = row.trim().split(/\s+/);
+            const local = address.exec(c[1] ?? '');
+            if (
+              c.length < 10 ||
+              !/^\d+:$/.test(c[0]) ||
+              !local ||
+              !address.test(c[2]) ||
+              !/^[0-9a-fA-F]{2}$/.test(c[3]) ||
+              !/^[0-9a-fA-F]{8}:[0-9a-fA-F]{8}$/.test(c[4]) ||
+              !/^[0-9a-fA-F]{2}:[0-9a-fA-F]{8}$/.test(c[5]) ||
+              !/^[0-9a-fA-F]{8}$/.test(c[6]) ||
+              !c.slice(7, 10).every((v) => /^\d+$/.test(v))
+            )
+              reject();
+            // Any local row counts, including TIME_WAIT. No assumed reuse flag,
+            // listener-only interpretation, or IPv4-only vacancy shortcut.
+            if ([5901, 6080, 9223].includes(Number.parseInt(local[1], 16))) reject();
+          }
+        }
+        tables[name] = sha(text);
+      }
+      if (
+        !isDeepStrictEqual(namespace, await namespaces()) ||
+        !isDeepStrictEqual(directories, await parents())
+      )
+        reject();
+      await absent('/tmp/.X98-lock');
+      await absent('/tmp/.X11-unix/X98');
+      return { namespace, directories, tables };
+    };
+    const first = await sample();
+    if (!isDeepStrictEqual(before, await managers())) reject();
+    const afterContext = await readFirstCutoverCloudRecoveryContext({ sources }, io);
+    const { observedAtMs: _beforeTime, ...beforeIdentity } = context;
+    const { observedAtMs: _afterTime, ...afterIdentity } = afterContext;
+    if (!isDeepStrictEqual(beforeIdentity, afterIdentity)) reject();
+    const second = await sample();
+    if (
+      !isDeepStrictEqual(first.namespace, second.namespace) ||
+      !isDeepStrictEqual(first.directories, second.directories) ||
+      !isDeepStrictEqual(before, await managers())
+    )
+      reject();
+    return {
+      purpose: 'cloud-recovery-vacancy-observation',
+      hostname: sources.hostname,
+      bootId: sources.bootId,
+      sourcesDigest: context.sourcesDigest,
+      contextDigest: context.daemon.contextDigest,
+      observationDigest: sha({
+        context: beforeIdentity,
+        managersDigest: sha(before),
+        first,
+        second,
+      }),
+      observedAtMs: clock(),
+    };
+  } catch {
+    reject();
+  }
+}
+
+/** Prepare only the approved private policy artifact under the owned attempt.
+ * Never alter global policy or a profile, adopt an existing attempt directory,
+ * or retry/clean up a partial write. The original stage guard owns this effect;
+ * this artifact alone is not recovery readiness or a recovery acknowledgement.
+ */
+export async function prepareFirstCutoverCloudBrowserPolicy(input, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_POLICY_UNPROVEN');
+  };
+  try {
+    if (
+      Object.keys(input ?? {})
+        .sort()
+        .join(',') !== 'attempt,maintenanceEndsAtMs' ||
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      !io.journal
+    )
+      reject();
+    const { attempt, maintenanceEndsAtMs } = input;
+    if (!Number.isSafeInteger(maintenanceEndsAtMs) || maintenanceEndsAtMs < 0) reject();
+    const launch = firstCutoverCloudBrowserRecoveryLaunch({ attempt });
+    const sha = (v) =>
+      createHash('sha256')
+        .update(Buffer.isBuffer(v) ? v : JSON.stringify(v))
+        .digest('hex');
+    const binding = structuredClone(await io.journal.assertOwnership());
+    const record = structuredClone(await io.journal.readFirstCutoverEffects());
+    const scope = record.cloudMaintenanceScope;
+    if (
+      binding.attempt !== attempt ||
+      (record.kind !== undefined && record.kind !== 'first-cutover') ||
+      !Object.entries(binding).every(([k, v]) => isDeepStrictEqual(record[k], v)) ||
+      !['preflight', 'prepared'].includes(record.phase) ||
+      record.failureObservation ||
+      (record.maintenanceEndsAtMs !== undefined &&
+        record.maintenanceEndsAtMs !== maintenanceEndsAtMs) ||
+      !hash(record.executionSiteDigest) ||
+      !Array.isArray(scope) ||
+      scope.length !== 2 ||
+      scope[0].name !== 'holaday-vnc' ||
+      scope[1].name !== 'holaday-chromium-headed' ||
+      scope[0].pmId === scope[1].pmId ||
+      scope.some((s) => !Number.isSafeInteger(s.pmId) || s.pmId < 0 || !hash(s.scopeDigest)) ||
+      scope[0].recoveryDigest !== sha(firstCutoverCloudVncRecoveryMaterial({ attempt })) ||
+      scope[1].recoveryDigest !== sha(launch) ||
+      ['startupEvents', 'registrationEvents', 'unmanagedEvents'].some(
+        (k) => !Array.isArray(record[k]) || record[k].length,
+      ) ||
+      (record.cloudMaintenanceEvents !== undefined &&
+        (!Array.isArray(record.cloudMaintenanceEvents) || record.cloudMaintenanceEvents.length))
+    )
+      reject();
+    const began = io.now();
+    let last = began;
+    const guard = async () => {
+      const now = io.now();
+      if (
+        !Number.isSafeInteger(now) ||
+        now < 0 ||
+        now < last ||
+        now - began > 15000 ||
+        now >= maintenanceEndsAtMs ||
+        !isDeepStrictEqual(binding, await io.journal.assertOwnership()) ||
+        !isDeepStrictEqual(record, await io.journal.readFirstCutoverEffects())
+      )
+        reject();
+      last = now;
+    };
+    const metadata = (s) =>
+      Object.fromEntries(
+        ['dev', 'ino', 'uid', 'gid', 'mode', 'size', 'mtimeMs', 'ctimeMs', 'nlink'].map((k) => [
+          k,
+          s[k],
+        ]),
+      );
+    const protectedPath = async (path, privateDirectory = false) => {
+      let current = '/';
+      for (const part of ['', ...path.slice(1).split('/')]) {
+        if (part) current = posix.join(current, part);
+        const s = await io.lstat(current);
+        if (
+          !s.isDirectory() ||
+          s.uid !== 0 ||
+          s.mode & 0o7022 ||
+          (await io.realpath(current)) !== current
+        )
+          reject();
+        if (current === path && privateDirectory && (s.mode & 0o7777) !== 0o700) reject();
+      }
+      return metadata(await io.lstat(path));
+    };
+    const root = '/etc/brave/policies/managed';
+    const storage = '/var/lib/holaday-deploy/maintenance';
+    const attemptPath = `${storage}/${attempt}`;
+    const target = `${attemptPath}/cloud-browser-policy`;
+    await guard();
+    await protectedPath(storage, true);
+    const capture = async (directory) => {
+      await guard();
+      const before = await protectedPath(directory, directory === target);
+      const names = (await io.readdir(directory)).sort();
+      if (names.length > 64 || names.some((n) => !/^[A-Za-z0-9_-]+\.json$/.test(n))) reject();
+      let total = 0;
+      const entries = [];
+      for (const name of names) {
+        const path = `${directory}/${name}`;
+        const handle = await io.open(
+          path,
+          constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        );
+        try {
+          const st = await handle.stat();
+          if (
+            !st.isFile() ||
+            st.uid !== 0 ||
+            st.mode & 0o7022 ||
+            st.nlink !== 1 ||
+            st.size > 1048576 ||
+            !isDeepStrictEqual(metadata(st), metadata(await io.lstat(path)))
+          )
+            reject();
+          const bytes = Buffer.alloc(1048577);
+          let size = 0;
+          while (size < bytes.length) {
+            const { bytesRead: n } = await handle.read(bytes, size, bytes.length - size, size);
+            if (!Number.isSafeInteger(n) || n < 0 || n > bytes.length - size) reject();
+            if (!n) break;
+            size += n;
+          }
+          total += size;
+          if (size !== st.size || size > 1048576 || total > 16 * 1048576) reject();
+          const raw = bytes.subarray(0, size);
+          const text = raw.toString('utf8');
+          if (!Buffer.from(text).equals(raw)) reject();
+          const parsed = JSON.parse(text);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) reject();
+          if (
+            directory === root &&
+            (name === 'recovery.json' || Object.hasOwn(parsed, 'RestoreOnStartup'))
+          )
+            reject();
+          if (
+            !isDeepStrictEqual(metadata(st), metadata(await handle.stat())) ||
+            !isDeepStrictEqual(metadata(st), metadata(await io.lstat(path)))
+          )
+            reject();
+          entries.push({ name, stat: metadata(st), digest: sha(raw), bytes: Buffer.from(raw) });
+        } finally {
+          await handle.close();
+        }
+      }
+      if (
+        !isDeepStrictEqual(names, (await io.readdir(directory)).sort()) ||
+        !isDeepStrictEqual(before, await protectedPath(directory, directory === target))
+      )
+        reject();
+      return { directory: before, entries };
+    };
+    const original = await capture(root);
+    const originalMaterial = (v) => ({
+      directory: v.directory,
+      entries: v.entries.map(({ bytes: _bytes, ...e }) => e),
+    });
+    const originalDigest = sha(originalMaterial(original));
+    const storageBefore = await protectedPath(storage, true);
+    const sameDirectory = async (path, old) => {
+      const s = await protectedPath(path, true);
+      if (['dev', 'ino', 'uid', 'gid', 'mode'].some((k) => s[k] !== old[k])) reject();
+    };
+    // Both mkdir operations are exclusive. An existing or partial attempt is
+    // deliberately not resumed, removed, or overwritten by this preparation.
+    await guard();
+    await io.mkdir(attemptPath, { mode: 0o700 });
+    await sameDirectory(storage, storageBefore);
+    const attemptStat = await protectedPath(attemptPath, true);
+    await guard();
+    await io.mkdir(target, { mode: 0o700 });
+    await sameDirectory(attemptPath, attemptStat);
+    const targetStat = await protectedPath(target, true);
+    const files = [
+      ...original.entries.map(({ name, bytes }) => ({ name, bytes })),
+      { name: 'recovery.json', bytes: Buffer.from(JSON.stringify({ RestoreOnStartup: 5 })) },
+    ];
+    for (const { name, bytes } of files) {
+      await guard();
+      await sameDirectory(storage, storageBefore);
+      await sameDirectory(attemptPath, attemptStat);
+      await sameDirectory(target, targetStat);
+      const file = await io.open(
+        `${target}/${name}`,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        0o600,
+      );
+      try {
+        const st = await file.stat();
+        if (!st.isFile() || st.uid !== 0 || (st.mode & 0o7777) !== 0o600 || st.nlink !== 1)
+          reject();
+        await guard();
+        await file.writeFile(bytes);
+        await file.sync();
+      } finally {
+        await file.close();
+      }
+    }
+    for (const path of [target, attemptPath, storage]) {
+      await guard();
+      const h = await io.open(
+        path,
+        constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+      );
+      try {
+        await h.sync();
+      } finally {
+        await h.close();
+      }
+    }
+    const current = await capture(root);
+    if (originalDigest !== sha(originalMaterial(current))) reject();
+    const prepared = await capture(target);
+    const expected = files
+      .map(({ name, bytes }) => ({ name, digest: sha(bytes) }))
+      .sort((a, b) => (a.name < b.name ? -1 : 1));
+    if (
+      !isDeepStrictEqual(
+        prepared.entries.map(({ name, digest }) => ({ name, digest })),
+        expected,
+      ) ||
+      prepared.entries.some((e) => (e.stat.mode & 0o7777) !== 0o600)
+    )
+      reject();
+    await guard();
+    await sameDirectory(storage, storageBefore);
+    await sameDirectory(attemptPath, attemptStat);
+    await sameDirectory(target, targetStat);
+    return {
+      attempt,
+      originalDigest,
+      privateDigest: sha({ attempt, originalDigest, files: expected }),
+      observedAtMs: last,
+    };
+  } catch {
+    reject();
+  }
+}
+
+const hash = (x) => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
+
+// executeApp flattens nested env after current_conf. Preserve matching and
+// unrelated values, but do not let them undo the fixed recovery settings.
+const unsafeCloudRecoveryEnvironment = (environment, fixed) =>
+  Object.hasOwn(environment ?? {}, 'max_memory_restart') ||
+  Object.entries(fixed).some(
+    ([key, value]) =>
+      Object.hasOwn(environment ?? {}, key) && !isDeepStrictEqual(environment[key], value),
+  );
+
+// Internal transport only. Do not construct the PM2 Client/API (it autostarts
+// a missing daemon). Never queue a request or reconnect and replay a write.
+async function cloudPm2Rpc(method, payload, io, beforeSend) {
+  if (!['getMonitorData', 'restartProcessId'].includes(method)) fail();
+  const before = await io.lstat(io.rpcSocket);
+  if (before.uid !== 0 || (before.mode & 0o170000) !== 0o140000) fail();
+  const require = createRequire('/usr/lib/node_modules/pm2/package.json');
+  const socket = require('pm2-axon').socket('req');
+  socket.set('retry timeout', 0);
+  socket.set('hwm', 0);
+  const client = new (require('pm2-axon-rpc').Client)(socket);
+  const result = await new Promise((resolve, reject) => {
+    let finished = false;
+    const done = (error, value) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      socket.close();
+      if (error) reject(error);
+      else resolve(value);
+    };
+    // This bounds only the transport. It neither kills the remote process nor
+    // means a write did not happen; the durable intent remains unresolved.
+    const timer = setTimeout(() => done(new Error('rpc unavailable')), 5000);
+    socket.once('error', (error) => done(error));
+    socket.once('close', () => done(new Error('rpc closed')));
+    socket.once('drop', () => done(new Error('rpc not connected')));
+    socket.once('connect', async () => {
+      if (finished) return;
+      try {
+        await beforeSend?.();
+        if (!finished) client.call(method, payload, done);
+      } catch (error) {
+        done(error);
+      }
+    });
+    try {
+      socket.connect(io.rpcSocket);
+    } catch (error) {
+      done(error);
+    }
+  });
+  const after = await io.lstat(io.rpcSocket);
+  if (
+    before.dev !== after.dev ||
+    before.ino !== after.ino ||
+    after.uid !== 0 ||
+    (after.mode & 0o170000) !== 0o140000
+  )
+    fail();
+  return result;
+}
+
+/** Private native leaf for the original observer's baseline bracket. Full raw
+ * configurations stay in trusted process memory; never publish this return as
+ * evidence or treat a successful read as stop/recovery permission.
+ */
+export async function readFirstCutoverCloudManagers(overrides = {}) {
+  let cloudDiagnosticStage = 'MANAGERS_ENTRY';
+  const atStage = (stage, read) => {
+    cloudDiagnosticStage = stage;
+    return read();
+  };
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    rpcSocket: '/root/.pm2/rpc.sock',
+    ...overrides,
+  };
+  const reject = (stage, cause) => {
+    throw cutoverCloudObservationError('CUTOVER_CLOUD_MANAGERS_UNPROVEN', stage, cause);
+  };
+  // Refuse values whose JSON/RPC representation could silently lose data. Do
+  // not normalise unknown fields, monitor values or environment into a proof.
+  const jsonData = (value, ancestors = new Set()) => {
+    if (value === null || ['string', 'boolean'].includes(typeof value)) return;
+    if (typeof value === 'number') {
+      if (
+        !Number.isFinite(value) ||
+        Object.is(value, -0) ||
+        (Number.isInteger(value) && !Number.isSafeInteger(value))
+      )
+        reject('MANAGERS_R01');
+      return;
+    }
+    if (
+      typeof value !== 'object' ||
+      Object.getPrototypeOf(value) !==
+        (Array.isArray(value) ? Array.prototype : Object.prototype) ||
+      ancestors.has(value)
+    )
+      reject('MANAGERS_R02');
+    ancestors.add(value);
+    for (const key of Reflect.ownKeys(value)) {
+      if (Array.isArray(value) && key === 'length') continue;
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (typeof key !== 'string' || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value'))
+        reject('MANAGERS_R03');
+      jsonData(descriptor.value, ancestors);
+    }
+    ancestors.delete(value);
+  };
+  try {
+    if (io.platform !== 'linux' || io.uid !== 0) reject('MANAGERS_R04');
+    const rpc = io.rpc ?? ((method, payload) => cloudPm2Rpc(method, payload, io));
+    const rows = await atStage('MANAGERS_IO_01', () => rpc('getMonitorData', {}));
+    if (!Array.isArray(rows)) reject('MANAGERS_R05');
+    const ids = new Set();
+    for (const row of rows) {
+      if (
+        !row ||
+        Object.getPrototypeOf(row) !== Object.prototype ||
+        ['pm_id', 'name', 'pm2_env'].some(
+          (key) => !Object.hasOwn(Object.getOwnPropertyDescriptor(row, key) ?? {}, 'value'),
+        ) ||
+        !Number.isSafeInteger(row.pm_id) ||
+        Object.is(row.pm_id, -0) ||
+        row.pm_id < 0 ||
+        ids.has(row.pm_id) ||
+        typeof row.name !== 'string' ||
+        !row.name ||
+        !row.pm2_env ||
+        Object.getPrototypeOf(row.pm2_env) !== Object.prototype ||
+        row.pm2_env.pm_id !== row.pm_id ||
+        row.pm2_env.name !== row.name
+      )
+        reject('MANAGERS_R06');
+      // PM2 may omit pid on unrelated registrations. They still participate
+      // in full name/ID collision checks; a present pid must remain valid data.
+      const pid = Object.getOwnPropertyDescriptor(row, 'pid');
+      if (
+        pid &&
+        (!Object.hasOwn(pid, 'value') ||
+          !Number.isSafeInteger(pid.value) ||
+          Object.is(pid.value, -0) ||
+          pid.value < 0)
+      )
+        reject('MANAGERS_R07');
+      ids.add(row.pm_id);
+    }
+    return ['holaday-vnc', 'holaday-chromium-headed'].map((name) => {
+      const selected = rows.filter((row) => row.name === name);
+      if (selected.length !== 1) reject('MANAGERS_R08');
+      const row = selected[0];
+      // Neither selected role may lose its explicit PID or be normalised to 0.
+      if (!Object.hasOwn(row, 'pid')) reject('MANAGERS_R09');
+      jsonData(row.pm2_env);
+      const pm2_env = JSON.parse(JSON.stringify(row.pm2_env));
+      if (!isDeepStrictEqual(pm2_env, row.pm2_env)) reject('MANAGERS_R10');
+      return { pm_id: row.pm_id, name, pid: row.pid, pm2_env };
+    });
+  } catch (error) {
+    reject(cloudDiagnosticStage, error);
+  }
+}
+
+/** One stopped registration's fixed restore EFFECT, not recovery acceptance.
+ * The original site must supply its live, exclusive scope guard: original tree
+ * absent, reviewed stopped config, unchanged daemon/tools, protected policies,
+ * display ownership and settled work/fences. There is deliberately no default
+ * guard and no CLI entrypoint. A successful RPC is NOT a cloud-restored event;
+ * the original observer must independently validate the complete new tree.
+ */
+export async function restoreFirstCutoverCloudBrowser(input, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    rpcSocket: '/root/.pm2/rpc.sock',
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+  };
+  let dispatched = false;
+  try {
+    const approved = structuredClone(input);
+    const { attempt, pmId, stoppedConfigDigest, maintenanceEndsAtMs } = approved;
+    const launch = firstCutoverCloudBrowserRecoveryLaunch({ attempt });
+    if (
+      Object.keys(approved).sort().join(',') !==
+        'attempt,maintenanceEndsAtMs,pmId,stoppedConfigDigest' ||
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      !Number.isSafeInteger(pmId) ||
+      pmId < 0 ||
+      !hash(stoppedConfigDigest) ||
+      !Number.isSafeInteger(maintenanceEndsAtMs) ||
+      typeof io.assertRecoveryScope !== 'function'
+    )
+      reject();
+    const launchDigest = createHash('sha256').update(JSON.stringify(launch)).digest('hex');
+    let last = io.now();
+    const clock = () => {
+      const now = io.now();
+      if (
+        !Number.isSafeInteger(last) ||
+        last < 0 ||
+        !Number.isSafeInteger(now) ||
+        now < last ||
+        maintenanceEndsAtMs - now <= 0 ||
+        maintenanceEndsAtMs - now > 900000
+      )
+        reject();
+      last = now;
+    };
+    const binding = structuredClone(await io.journal.assertOwnership());
+    if (binding.attempt !== attempt) reject();
+    const state = async (count) => {
+      clock();
+      if (!isDeepStrictEqual(await io.journal.assertOwnership(), binding)) reject();
+      const record = await io.journal.readFirstCutoverEffects();
+      const scope = record.cloudMaintenanceScope;
+      if (
+        !Object.entries(binding).every(([k, v]) => record[k] === v) ||
+        record.phase !== 'verified' ||
+        record.failureObservation ||
+        !hash(record.executionSiteDigest) ||
+        (record.maintenanceEndsAtMs !== undefined &&
+          record.maintenanceEndsAtMs !== maintenanceEndsAtMs) ||
+        !Array.isArray(scope) ||
+        scope.length !== 2 ||
+        scope[0].name !== 'holaday-vnc' ||
+        scope[1].name !== 'holaday-chromium-headed' ||
+        scope[1].pmId !== pmId ||
+        scope[0].pmId === pmId ||
+        scope[1].recoveryDigest !== launchDigest ||
+        scope.some((s) => !hash(s.scopeDigest) || !hash(s.recoveryDigest)) ||
+        record.cloudMaintenanceEvents?.length !== count
+      )
+        reject();
+      const base = (s) => ({
+        ...s,
+        attempt,
+        inventoryDigest: binding.inventoryDigest,
+        host: 'vultr',
+      });
+      const expected = scope.flatMap((s) =>
+        ['cloud-stop-intent', 'cloud-stopped'].map((phase) => ({ ...base(s), phase })),
+      );
+      if (count === 5) expected.push({ ...base(scope[1]), phase: 'cloud-restore-intent' });
+      if (!isDeepStrictEqual(record.cloudMaintenanceEvents, expected)) reject();
+      return structuredClone(record);
+    };
+    const rpc = io.rpc ?? ((method, args, beforeSend) => cloudPm2Rpc(method, args, io, beforeSend));
+    const stopped = async () => {
+      const rows = await rpc('getMonitorData', {});
+      if (!Array.isArray(rows)) reject();
+      const matches = rows.filter((r) => r.pm_id === pmId || r.name === 'holaday-chromium-headed');
+      const row = matches[0];
+      if (
+        matches.length !== 1 ||
+        row.pm_id !== pmId ||
+        row.name !== 'holaday-chromium-headed' ||
+        row.pid !== 0 ||
+        row.pm2_env?.pm_id !== pmId ||
+        row.pm2_env.name !== row.name ||
+        row.pm2_env.status !== 'stopped' ||
+        row.pm2_env.watch !== false ||
+        row.pm2_env.exec_mode !== 'fork_mode' ||
+        unsafeCloudRecoveryEnvironment(row.pm2_env.env, {
+          pm_exec_path: launch.command,
+          args: launch.args,
+          exec_interpreter: 'none',
+          exec_mode: 'fork_mode',
+          autorestart: false,
+          watch: false,
+          cron_restart: '',
+        }) ||
+        !Number.isSafeInteger(row.pm2_env.restart_time) ||
+        row.pm2_env.restart_time < 0 ||
+        cutoverRegistrationConfigDigest(row.pm2_env) !== stoppedConfigDigest
+      )
+        reject();
+    };
+    const guard = async (count) => {
+      const before = await state(count);
+      // Only a trusted local controller, not uploaded facts or booleans.
+      if ((await io.assertRecoveryScope(structuredClone(approved))) !== undefined) reject();
+      await stopped();
+      if (!isDeepStrictEqual(before, await state(count))) reject();
+      return before;
+    };
+    const before = await guard(4);
+    await io.journal.recordCloudMaintenanceEvent({
+      ...before.cloudMaintenanceScope[1],
+      attempt,
+      inventoryDigest: binding.inventoryDigest,
+      host: 'vultr',
+      phase: 'cloud-restore-intent',
+    });
+    await guard(5);
+    // No delete/recreate, name-wide restart, inherited startup script, fallback,
+    // retry, PM2 save or restart-counter reset. The stopped registration keeps
+    // its ID and existing environment; reviewed launch fields change explicitly.
+    dispatched = true;
+    await rpc(
+      'restartProcessId',
+      {
+        id: pmId,
+        env: {
+          DISPLAY: ':98',
+          current_conf: {
+            pm_exec_path: launch.command,
+            args: launch.args,
+            exec_interpreter: 'none',
+            exec_mode: 'fork_mode',
+            autorestart: false,
+            watch: false,
+            cron_restart: '',
+            // PM2 Worker treats zero as a threshold. Utility's literal string
+            // deletion marker survives JSON; executeApp must not restore it
+            // from nested env, which the stopped guard refuses above.
+            max_memory_restart: 'null',
+            DISPLAY: ':98',
+          },
+        },
+      },
+      () => guard(5),
+    );
+    await state(5);
+  } catch {
+    if (dispatched) throw new Error('CUTOVER_CLOUD_RESTORE_UNCERTAIN');
+    reject();
+  }
+}
+/** Fixed VNC restore EFFECT, not recovery acceptance. The original site's
+ * mandatory live guard must prove the approved VNC source digest, exact scope,
+ * display/tools, settled work and fences (including independent headed recovery).
+ * Preserves the stopped wrapper/argv/environment while applying ONLY the
+ * explicitly digest-bound PM2 safety override below. Approved VNC child
+ * supervision remains intact. Independent post-recovery config/tree proof is
+ * still required; RPC success never creates a restored event.
+ */
+export async function restoreFirstCutoverCloudVnc(input, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    rpcSocket: '/root/.pm2/rpc.sock',
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+  };
+  let dispatched = false;
+  try {
+    const approved = structuredClone(input);
+    if (!approved || typeof approved !== 'object' || Array.isArray(approved)) reject();
+    const { attempt, pmId, stoppedConfigDigest, maintenanceEndsAtMs } = approved;
+    const headedLaunch = firstCutoverCloudBrowserRecoveryLaunch({ attempt });
+    const material = firstCutoverCloudVncRecoveryMaterial({ attempt });
+    if (
+      Object.keys(approved).sort().join(',') !==
+        'attempt,maintenanceEndsAtMs,pmId,stoppedConfigDigest' ||
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      !Number.isSafeInteger(pmId) ||
+      pmId < 0 ||
+      !hash(stoppedConfigDigest) ||
+      !Number.isSafeInteger(maintenanceEndsAtMs) ||
+      typeof io.assertRecoveryScope !== 'function'
+    )
+      reject();
+    const headedLaunchDigest = createHash('sha256')
+      .update(JSON.stringify(headedLaunch))
+      .digest('hex');
+    const recoveryDigest = createHash('sha256').update(JSON.stringify(material)).digest('hex');
+    let last = io.now();
+    const clock = () => {
+      const now = io.now();
+      if (
+        !Number.isSafeInteger(last) ||
+        last < 0 ||
+        !Number.isSafeInteger(now) ||
+        now < last ||
+        maintenanceEndsAtMs - now <= 0 ||
+        maintenanceEndsAtMs - now > 900000
+      )
+        reject();
+      last = now;
+    };
+    const binding = structuredClone(await io.journal.assertOwnership());
+    if (binding.attempt !== attempt) reject();
+    let originalRecord;
+    const state = async (count) => {
+      clock();
+      if (!isDeepStrictEqual(await io.journal.assertOwnership(), binding)) reject();
+      const record = await io.journal.readFirstCutoverEffects();
+      const scope = record.cloudMaintenanceScope;
+      if (
+        !Object.entries(binding).every(([key, value]) => record[key] === value) ||
+        record.phase !== 'verified' ||
+        record.failureObservation ||
+        !hash(record.executionSiteDigest) ||
+        (record.maintenanceEndsAtMs !== undefined &&
+          record.maintenanceEndsAtMs !== maintenanceEndsAtMs) ||
+        !Array.isArray(scope) ||
+        scope.length !== 2 ||
+        scope.some(
+          (entry, index) =>
+            !entry ||
+            Object.keys(entry).sort().join(',') !== 'name,pmId,recoveryDigest,scopeDigest' ||
+            entry.name !== ['holaday-vnc', 'holaday-chromium-headed'][index] ||
+            !Number.isSafeInteger(entry.pmId) ||
+            entry.pmId < 0 ||
+            !hash(entry.scopeDigest) ||
+            !hash(entry.recoveryDigest),
+        ) ||
+        scope[0].pmId !== pmId ||
+        scope[0].recoveryDigest !== recoveryDigest ||
+        scope[1].pmId === pmId ||
+        scope[1].recoveryDigest !== headedLaunchDigest ||
+        record.cloudMaintenanceEvents?.length !== count
+      )
+        reject();
+      const base = (entry) => ({
+        ...entry,
+        attempt,
+        inventoryDigest: binding.inventoryDigest,
+        host: 'vultr',
+      });
+      const expected = scope.flatMap((entry) =>
+        ['cloud-stop-intent', 'cloud-stopped'].map((phase) => ({ ...base(entry), phase })),
+      );
+      expected.push(
+        { ...base(scope[1]), phase: 'cloud-restore-intent' },
+        { ...base(scope[1]), phase: 'cloud-restored' },
+      );
+      if (count === 7) expected.push({ ...base(scope[0]), phase: 'cloud-restore-intent' });
+      if (!isDeepStrictEqual(record.cloudMaintenanceEvents, expected)) reject();
+      // Only our seventh event and the resulting owned record digest may change
+      // across the append. Keep the original scope/site and all other facts pinned.
+      const stable = Object.fromEntries(
+        Object.entries(record).filter(
+          ([key]) => !['recordDigest', 'cloudMaintenanceEvents'].includes(key),
+        ),
+      );
+      if (originalRecord && !isDeepStrictEqual(stable, originalRecord)) reject();
+      originalRecord ??= structuredClone(stable);
+      if (!isDeepStrictEqual(await io.journal.assertOwnership(), binding)) reject();
+      clock();
+      return structuredClone(record);
+    };
+    const rpc = io.rpc ?? ((method, args, beforeSend) => cloudPm2Rpc(method, args, io, beforeSend));
+    const stopped = async () => {
+      const rows = await rpc('getMonitorData', {});
+      if (!Array.isArray(rows)) reject();
+      const matches = rows.filter((row) => row.pm_id === pmId || row.name === 'holaday-vnc');
+      const row = matches[0];
+      if (
+        matches.length !== 1 ||
+        row.pm_id !== pmId ||
+        row.name !== 'holaday-vnc' ||
+        row.pid !== 0 ||
+        row.pm2_env?.pm_id !== pmId ||
+        row.pm2_env.name !== row.name ||
+        row.pm2_env.status !== 'stopped' ||
+        row.pm2_env.pm_exec_path !== material.command ||
+        row.pm2_env.exec_interpreter !== material.exec_interpreter ||
+        row.pm2_env.exec_mode !== 'fork_mode' ||
+        row.pm2_env.watch !== false ||
+        unsafeCloudRecoveryEnvironment(row.pm2_env.env, {
+          ...material.current_conf,
+          pm_exec_path: material.command,
+          args: row.pm2_env.args,
+          exec_interpreter: material.exec_interpreter,
+          exec_mode: 'fork_mode',
+        }) ||
+        !Number.isSafeInteger(row.pm2_env.restart_time) ||
+        row.pm2_env.restart_time < 0 ||
+        cutoverRegistrationConfigDigest(row.pm2_env) !== stoppedConfigDigest
+      )
+        reject();
+    };
+    const guard = async (count) => {
+      const before = await state(count);
+      if ((await io.assertRecoveryScope(structuredClone(approved))) !== undefined) reject();
+      await stopped();
+      if (!isDeepStrictEqual(before, await state(count))) reject();
+      return before;
+    };
+    const before = await guard(6);
+    await io.journal.recordCloudMaintenanceEvent({
+      ...before.cloudMaintenanceScope[0],
+      attempt,
+      inventoryDigest: binding.inventoryDigest,
+      host: 'vultr',
+      phase: 'cloud-restore-intent',
+    });
+    await guard(7);
+    // No command/argv/environment-value replacement or restart-count reset.
+    // This explicit, pre-bound policy is the entire approved config override.
+    dispatched = true;
+    await rpc(
+      'restartProcessId',
+      { id: pmId, env: { current_conf: structuredClone(material.current_conf) } },
+      () => guard(7),
+    );
+    await state(7);
+  } catch {
+    if (dispatched) throw new Error('CUTOVER_CLOUD_RESTORE_UNCERTAIN');
+    reject();
+  }
+}
+/** Fixed VNC recovery MATERIAL, not permission or proof of recovery. Hash the
+ * exact JSON serialization for the original journal's VNC recoveryDigest. The
+ * original wrapper/source bytes and retained config still need independent
+ * native proof. Only these four PM2 safety fields may change by this payload.
+ */
+export function firstCutoverCloudVncRecoveryMaterial(input) {
+  if (
+    !input ||
+    typeof input !== 'object' ||
+    Array.isArray(input) ||
+    Object.keys(input).length !== 1 ||
+    typeof input.attempt !== 'string' ||
+    !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(input.attempt)
+  )
+    fail();
+  return {
+    attempt: input.attempt,
+    command: '/opt/holaday-vnc/start.sh',
+    exec_interpreter: 'bash',
+    current_conf: {
+      autorestart: false,
+      watch: false,
+      cron_restart: '',
+      max_memory_restart: 'null',
+    },
+  };
+}
+/** Fixed recovery MATERIAL, not permission to start a process. The site binds
+ * its digest in the existing journal; execution still needs fresh exclusive
+ * ownership, tool/policy bytes, stop and recovery facts. No caller argv, URL,
+ * executable, display or profile selection, and no unsafe old startup script.
+ * unshare/mount failure exits without a direct-browser fallback. */
+export function firstCutoverCloudBrowserRecoveryLaunch(input) {
+  if (
+    !input ||
+    typeof input !== 'object' ||
+    Array.isArray(input) ||
+    Object.keys(input).length !== 1 ||
+    typeof input.attempt !== 'string' ||
+    !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(input.attempt)
+  )
+    fail();
+  return {
+    command: '/usr/bin/unshare',
+    args: [
+      '--mount',
+      '--propagation',
+      'private',
+      '/bin/sh',
+      '-ceu',
+      '/usr/bin/mount --bind "$1" /etc/brave/policies/managed; /usr/bin/mount -o remount,bind,ro /etc/brave/policies/managed; shift; exec /usr/bin/setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs "$@"',
+      'holaday-private-browser-policy',
+      `/var/lib/holaday-deploy/maintenance/${input.attempt}/cloud-browser-policy`,
+      '/usr/bin/python3',
+      '-I',
+      '-S',
+      '-c',
+      firstCutoverCloudDisplayBootstrap,
+      '/opt/brave.com/brave/brave',
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--disable-extensions',
+      '--password-store=basic',
+      '--hide-crash-restore-bubble',
+      '--disable-session-crashed-bubble',
+      '--remote-debugging-address=127.0.0.1',
+      '--remote-debugging-port=9223',
+      '--user-data-dir=/var/lib/holaday-headed-brave',
+      '--no-startup-window',
+    ],
+    env: { DISPLAY: ':98' },
+    autorestart: false,
+  };
+}
+
+/** Independent, read-only observation of the fixed recovered browser. This is
+ * not stop/restore authorization, display exclusivity, a tool audit, or proof
+ * about all external work. Its caller must still prove those separately. Raw
+ * environment, policy and PM2 configuration never leave this boundary. */
+export async function readFirstCutoverCloudBrowserRecovery(input, overrides = {}) {
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    rpcSocket: '/root/.pm2/rpc.sock',
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+  };
+  const sha = (value) => createHash('sha256').update(value).digest('hex');
+  try {
+    const { attempt, pmId } = structuredClone(input);
+    if (
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      Object.keys(input).sort().join(',') !== 'attempt,pmId' ||
+      !Number.isSafeInteger(pmId) ||
+      pmId < 0
+    )
+      reject();
+    const launch = firstCutoverCloudBrowserRecoveryLaunch({ attempt });
+    const name = 'holaday-chromium-headed';
+    const startTime = io.now();
+    if (!Number.isSafeInteger(startTime) || startTime < 0) reject();
+    const readManagers =
+      io.readManagers ??
+      (async () => {
+        // The PM2 CLI and Client.start automatically spawn a missing daemon.
+        // Connect only to the existing socket with PM2's RPC dependencies; never
+        // construct its Client/API, initialize files, or invoke a launch method.
+        const before = await io.lstat(io.rpcSocket);
+        if (before.uid !== 0 || (before.mode & 0o170000) !== 0o140000) reject();
+        const require = createRequire('/usr/lib/node_modules/pm2/package.json');
+        const socket = require('pm2-axon').socket('req');
+        const client = new (require('pm2-axon-rpc').Client)(socket);
+        const rows = await new Promise((resolve, rejectRead) => {
+          let finished = false;
+          const done = (error, value) => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timer);
+            socket.close();
+            if (error) rejectRead(error);
+            else resolve(value);
+          };
+          const timer = setTimeout(() => done(new Error('timeout')), 5000);
+          socket.once('error', (error) => done(error));
+          socket.once('connect', () => client.call('getMonitorData', {}, done));
+          try {
+            socket.connect(io.rpcSocket);
+          } catch (error) {
+            done(error);
+          }
+        });
+        const after = await io.lstat(io.rpcSocket);
+        if (
+          before.dev !== after.dev ||
+          before.ino !== after.ino ||
+          after.uid !== 0 ||
+          (after.mode & 0o170000) !== 0o140000
+        )
+          reject();
+        return rows;
+      });
+    const manager = async () => {
+      const rows = await readManagers();
+      if (!Array.isArray(rows)) reject();
+      const matches = rows.filter((r) => r.name === name || r.pm_id === pmId);
+      const row = matches[0];
+      const env = row?.pm2_env;
+      if (
+        matches.length !== 1 ||
+        row.name !== name ||
+        row.pm_id !== pmId ||
+        !Number.isSafeInteger(row.pid) ||
+        row.pid <= 1 ||
+        env?.name !== name ||
+        env.status !== 'online' ||
+        env.pm_exec_path !== launch.command ||
+        !isDeepStrictEqual(env.args, launch.args) ||
+        env.exec_interpreter !== 'none' ||
+        env.exec_mode !== 'fork_mode' ||
+        env.autorestart !== false ||
+        env.watch !== false ||
+        env.cron_restart !== '' ||
+        Object.hasOwn(env, 'max_memory_restart') ||
+        Object.hasOwn(env.env ?? {}, 'max_memory_restart') ||
+        !Number.isSafeInteger(env.restart_time) ||
+        env.restart_time < 0 ||
+        env.DISPLAY !== ':98'
+      )
+        reject();
+      // Bind every registration field (including environment/unknown options)
+      // across these reads; only axm_monitor is excluded by the original digest.
+      // This is current stability, NOT preservation against the stopped baseline.
+      return {
+        pid: row.pid,
+        pmId: row.pm_id,
+        name: row.name,
+        configDigest: cutoverRegistrationConfigDigest(env),
+        launch: Object.fromEntries(
+          [
+            'name',
+            'status',
+            'pm_exec_path',
+            'args',
+            'exec_interpreter',
+            'autorestart',
+            'watch',
+            'restart_time',
+            'DISPLAY',
+          ].map((k) => [k, env[k]]),
+        ),
+      };
+    };
+    const selected = await manager();
+    const pid = selected.pid;
+    const root = '/etc/brave/policies/managed';
+    const source = `/var/lib/holaday-deploy/maintenance/${attempt}/cloud-browser-policy`;
+    const mounted = `/proc/${pid}/root${root}`;
+    const metadata = async (path, type) => {
+      const s = await io.lstat(path);
+      if (s.uid !== 0 || (s.mode & 0o170000) !== type || s.mode & 0o022) reject();
+      return Object.fromEntries(
+        ['dev', 'ino', 'uid', 'mode', 'size', 'mtimeMs', 'ctimeMs', 'nlink'].map((k) => [k, s[k]]),
+      );
+    };
+    const policies = async (path) => {
+      const directory = await metadata(path, 0o40000);
+      const names = (await io.readdir(path)).sort();
+      if (names.length > 64 || names.some((n) => !/^[A-Za-z0-9_-]+\.json$/.test(n))) reject();
+      const entries = [];
+      for (const name of names) {
+        const file = `${path}/${name}`;
+        const stat = await metadata(file, 0o100000);
+        if (stat.size > 1024 * 1024 || stat.nlink !== 1) reject();
+        const raw = await io.readFile(file, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (
+          !parsed ||
+          typeof parsed !== 'object' ||
+          Array.isArray(parsed) ||
+          Buffer.byteLength(raw) !== stat.size ||
+          !isDeepStrictEqual(stat, await metadata(file, 0o100000))
+        )
+          reject();
+        entries.push({ name, stat, digest: sha(raw), parsed });
+      }
+      if (
+        !isDeepStrictEqual(names, (await io.readdir(path)).sort()) ||
+        !isDeepStrictEqual(directory, await metadata(path, 0o40000))
+      )
+        reject();
+      return entries;
+    };
+    const sample = async () => {
+      const bootId = (await io.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim();
+      if (!/^[a-f0-9-]{36}$/.test(bootId)) reject();
+      const fields = await io.readFile(`/proc/${pid}/stat`, 'utf8');
+      if (!fields.startsWith(`${pid} (`)) reject();
+      const stat = fields
+        .slice(fields.lastIndexOf(')') + 2)
+        .trim()
+        .split(/\s+/);
+      if (!['R', 'S', 'D', 'I'].includes(stat[0]) || !/^\d+$/.test(stat[19] ?? '')) reject();
+      if ((await io.readlink(`/proc/${pid}/exe`)) !== '/opt/brave.com/brave/brave') reject();
+      const argv = (await io.readFile(`/proc/${pid}/cmdline`, 'utf8')).split('\0');
+      if (
+        argv.pop() !== '' ||
+        !isDeepStrictEqual(
+          argv,
+          launch.args.slice(launch.args.indexOf('/opt/brave.com/brave/brave')),
+        )
+      )
+        reject();
+      const displays = (await io.readFile(`/proc/${pid}/environ`, 'utf8'))
+        .split('\0')
+        .filter((value) => value.startsWith('DISPLAY='));
+      if (!isDeepStrictEqual(displays, ['DISPLAY=:98'])) reject();
+      const status = await io.readFile(`/proc/${pid}/status`, 'utf8');
+      if (!/^Uid:\s+0\s+0\s+0\s+0$/m.test(status) || !/^NoNewPrivs:\s+1$/m.test(status)) reject();
+      for (const key of ['CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb'])
+        if (!new RegExp(`^${key}:\\s+0+$`, 'm').test(status)) reject();
+      const namespace = await io.readlink(`/proc/${pid}/ns/mnt`);
+      if (
+        !/^mnt:\[\d+\]$/.test(namespace) ||
+        namespace === (await io.readlink('/proc/self/ns/mnt'))
+      )
+        reject();
+      const mounts = (await io.readFile(`/proc/${pid}/mountinfo`, 'utf8'))
+        .split('\n')
+        .map((line) => line.split(' '))
+        .filter((row) => row[4] === root);
+      if (
+        mounts.length !== 1 ||
+        !mounts[0][5].split(',').includes('ro') ||
+        mounts[0].some((field) => /^(shared|master|propagate_from):/.test(field))
+      )
+        reject();
+      const original = await policies(root);
+      const privateFiles = await policies(source);
+      const actual = await policies(mounted);
+      if (
+        !isDeepStrictEqual(privateFiles, actual) ||
+        original.some((p) => p.name === 'recovery.json') ||
+        !isDeepStrictEqual(
+          privateFiles.map((p) => p.name).sort(),
+          [...original.map((p) => p.name), 'recovery.json'].sort(),
+        ) ||
+        original.some(
+          (p) =>
+            !isDeepStrictEqual(p.parsed, privateFiles.find((f) => f.name === p.name)?.parsed) ||
+            p.digest !== privateFiles.find((f) => f.name === p.name)?.digest ||
+            Object.hasOwn(p.parsed, 'RestoreOnStartup'),
+        ) ||
+        !isDeepStrictEqual(privateFiles.find((p) => p.name === 'recovery.json')?.parsed, {
+          RestoreOnStartup: 5,
+        })
+      )
+        reject();
+      return {
+        bootId,
+        start: stat[19],
+        ppid: Number(stat[1]),
+        namespace,
+        policyDigest: sha(JSON.stringify({ original, privateFiles })),
+        mount: mounts[0],
+      };
+    };
+    const before = await sample();
+    if (!isDeepStrictEqual(before, await sample()) || !isDeepStrictEqual(selected, await manager()))
+      reject();
+    const observedAtMs = io.now();
+    if (
+      !Number.isSafeInteger(observedAtMs) ||
+      observedAtMs < startTime ||
+      observedAtMs - startTime > 60000
+    )
+      reject();
+    return {
+      purpose: 'cloud-browser-runtime-observation',
+      name,
+      pmId,
+      pid,
+      restartCount: selected.launch.restart_time,
+      configDigest: selected.configDigest,
+      bootId: before.bootId,
+      start: before.start,
+      ppid: before.ppid,
+      mountNamespace: before.namespace,
+      policyDigest: before.policyDigest,
+      launchDigest: sha(JSON.stringify(launch)),
+      observedAtMs,
+    };
+  } catch {
+    reject();
+  }
+}
+
+/** Post-effect native identity observation for the ORIGINAL observer. Its
+ * private pre-dispatch census is not an approval, and this reader is NOT a
+ * source/display/work preflight. The caller must independently bind the
+ * retained stopped configuration through the finite recovery comparator.
+ * No production restore may dispatch without those native prerequisites.
+ */
+export async function readFirstCutoverCloudRecovery(input, overrides = {}) {
+  return readCloudRecoveryObservation(input, overrides);
+}
+
+/** Only the original observer's private ledger supplies this historical anchor.
+ * The anchor never gets a new timestamp. Every returned field is remeasured by
+ * the same actual native readers, under a fresh bounded full-census bracket.
+ * This API performs no intent, launch, PM2 mutation or origin assignment.
+ */
+export async function reobserveFirstCutoverCloudRecovery(input, origin, overrides = {}) {
+  const fail = () => {
+    throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+  };
+  const keys = Object.keys(origin ?? {})
+    .sort()
+    .join(',');
+  const expected =
+    input?.name === 'holaday-vnc'
+      ? 'beforeCensusDigest,bootId,censusDigest,configDigest,display,hostname,launchDigest,mountNamespace,name,observedAtMs,pid,pmId,ppid,processes,purpose,restartCount,start,vnc'
+      : 'beforeCensusDigest,bootId,censusDigest,configDigest,display,hostname,launchDigest,mountNamespace,name,observedAtMs,pid,pmId,policyDigest,ppid,processes,purpose,restartCount,start';
+  const sha = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+  if (
+    keys !== expected ||
+    origin.purpose !== 'cloud-recovery-native-observation' ||
+    origin.name !== input.name ||
+    origin.pmId !== input.pmId ||
+    origin.hostname !== input.beforeCensus?.hostname ||
+    origin.bootId !== input.beforeCensus?.bootId ||
+    origin.beforeCensusDigest !== sha(input.beforeCensus) ||
+    !Number.isSafeInteger(origin.observedAtMs) ||
+    origin.observedAtMs < input.restoreStartedAtMs ||
+    origin.observedAtMs - input.beforeCensus.observedAtMs > 60000 ||
+    !Array.isArray(origin.processes) ||
+    !origin.processes.some((p) => p.pid === origin.pid && p.start === origin.start)
+  )
+    fail();
+  const current = await readCloudRecoveryObservation(input, overrides, structuredClone(origin));
+  for (const key of [
+    'name',
+    'pmId',
+    'hostname',
+    'bootId',
+    'pid',
+    'start',
+    'ppid',
+    'configDigest',
+    'restartCount',
+    'launchDigest',
+    'beforeCensusDigest',
+    'mountNamespace',
+    'policyDigest',
+  ])
+    if (current[key] !== origin[key]) fail();
+  if (!isDeepStrictEqual(current.display, origin.display)) fail();
+  const oldRoot = origin.processes.find((p) => p.pid === origin.pid),
+    newRoot = current.processes.find((p) => p.pid === origin.pid);
+  if (!isDeepStrictEqual(oldRoot, newRoot)) fail();
+  return current;
+}
+
+async function readCloudRecoveryObservation(input, overrides = {}, origin) {
+  if (input?.name === 'holaday-vnc' && (!input.headedRecovery || !input.sources))
+    throw new Error('CUTOVER_CLOUD_VNC_NATIVE_SOURCE_UNPROVEN');
+  const io = {
+    ...fs,
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    ...overrides,
+  };
+  const reject = () => {
+    throw new Error('CUTOVER_CLOUD_RECOVERY_UNPROVEN');
+  };
+  try {
+    const copy = structuredClone(input);
+    const { attempt, name, pmId, beforeCensus, restoreStartedAtMs } = copy;
+    if (
+      !isDeepStrictEqual(copy, JSON.parse(JSON.stringify(copy))) ||
+      Object.keys(copy).sort().join(',') !==
+        (name === 'holaday-vnc'
+          ? 'attempt,beforeCensus,headedRecovery,name,pmId,restoreStartedAtMs,sources'
+          : 'attempt,beforeCensus,name,pmId,restoreStartedAtMs') ||
+      !['holaday-chromium-headed', 'holaday-vnc'].includes(name) ||
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      !Number.isSafeInteger(pmId) ||
+      pmId < 0 ||
+      !Number.isSafeInteger(restoreStartedAtMs) ||
+      restoreStartedAtMs < 0
+    )
+      reject();
+    const launch = firstCutoverCloudBrowserRecoveryLaunch({ attempt });
+    const sha = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    const keys = (value, expected) =>
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      Object.keys(value).sort().join(',') === expected;
+    const census = (value) => {
+      if (
+        !keys(value, 'bootId,hostname,observedAtMs,processes') ||
+        !/^[a-zA-Z0-9.-]{1,128}$/.test(value.hostname) ||
+        !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value.bootId) ||
+        !Number.isSafeInteger(value.observedAtMs) ||
+        value.observedAtMs < 0 ||
+        !Array.isArray(value.processes) ||
+        !value.processes.length ||
+        value.processes.length > 16384
+      )
+        reject();
+      let previous = 0;
+      for (const p of value.processes) {
+        if (
+          !keys(
+            p,
+            'argvDigest,capabilities,cgroup,cwd,exe,mountNamespace,noNewPrivs,pid,ppid,start,state,uids',
+          ) ||
+          !Number.isSafeInteger(p.pid) ||
+          p.pid <= previous ||
+          !Number.isSafeInteger(p.ppid) ||
+          p.ppid < 0 ||
+          p.ppid === p.pid ||
+          !/^\d+$/.test(p.start) ||
+          !hash(p.argvDigest) ||
+          !Array.isArray(p.uids) ||
+          p.uids.length !== 4 ||
+          p.uids.some((uid) => !Number.isSafeInteger(uid) || uid < 0) ||
+          ![p.cwd, p.exe].every(
+            (path) => typeof path === 'string' && path.startsWith('/') && path.length <= 4096,
+          ) ||
+          typeof p.cgroup !== 'string' ||
+          !p.cgroup ||
+          p.cgroup.length > 262144 ||
+          !/^mnt:\[\d+\]$/.test(p.mountNamespace) ||
+          !['live', 'stopped'].includes(p.state) ||
+          ![0, 1].includes(p.noNewPrivs) ||
+          !keys(p.capabilities, 'CapAmb,CapBnd,CapEff,CapInh,CapPrm') ||
+          Object.values(p.capabilities).some(
+            (cap) => typeof cap !== 'string' || !/^[0-9a-f]{1,16}$/.test(cap),
+          )
+        )
+          reject();
+        previous = p.pid;
+      }
+    };
+    census(beforeCensus);
+    const began = io.now();
+    if (
+      !Number.isSafeInteger(began) ||
+      beforeCensus.observedAtMs > restoreStartedAtMs ||
+      restoreStartedAtMs > began ||
+      (origin ? began - origin.observedAtMs < 0 : began - beforeCensus.observedAtMs > 60000)
+    )
+      reject();
+    const readCensus = io.readCensus ?? (() => readFirstCutoverCloudRecoveryCensus(io));
+    const current = structuredClone(await readCensus());
+    census(current);
+    if (origin && current.observedAtMs < began) reject();
+    if (name === 'holaday-vnc')
+      return await readCloudVncRecovery(copy, io, {
+        reject,
+        census,
+        sha,
+        keys,
+        began,
+        current,
+        readCensus,
+        origin,
+      });
+    const runtime = await readFirstCutoverCloudBrowserRecovery({ attempt, pmId }, io);
+    const displays = current.processes.filter(
+      (p) => p.exe === '/usr/bin/Xvfb' && p.mountNamespace === runtime.mountNamespace,
+    );
+    if (displays.length !== 1) reject();
+    const display = displays[0];
+    if (
+      display.ppid !== runtime.pid ||
+      display.argvDigest !==
+        sha(
+          `${['/usr/bin/Xvfb', ':98', '-screen', '0', '1280x800x24', '-nolisten', 'tcp'].join('\0')}\0`,
+        )
+    )
+      reject();
+    const displayIdentity = {
+      pid: display.pid,
+      start: display.start,
+      mountNamespace: display.mountNamespace,
+    };
+    const readDisplay =
+      io.readDisplayListeners ??
+      ((identity) => readFirstCutoverCloudDisplayListeners(identity, io));
+    const listeners = structuredClone(await readDisplay(displayIdentity));
+    if (
+      !Array.isArray(listeners) ||
+      listeners.length !== 2 ||
+      listeners.some(
+        (row, i) =>
+          !keys(row, 'inode,path') ||
+          row.path !== ['/tmp/.X11-unix/X98', '@/tmp/.X11-unix/X98'][i] ||
+          !/^[1-9][0-9]{0,19}$/.test(row.inode),
+      ) ||
+      listeners[0].inode === listeners[1].inode
+    )
+      reject();
+    const after = structuredClone(await readCensus());
+    census(after);
+    const repeated = await readFirstCutoverCloudBrowserRecovery({ attempt, pmId }, io);
+    if (!isDeepStrictEqual(listeners, await readDisplay(displayIdentity))) reject();
+    const stable = ({ observedAtMs: _time, ...value }) => value;
+    const now = io.now();
+    if (
+      !Number.isSafeInteger(now) ||
+      now < began ||
+      (origin ? now - began > 60000 : now - beforeCensus.observedAtMs > 60000) ||
+      current.observedAtMs < restoreStartedAtMs ||
+      current.observedAtMs > runtime.observedAtMs ||
+      after.observedAtMs < runtime.observedAtMs ||
+      after.observedAtMs > repeated.observedAtMs ||
+      repeated.observedAtMs > now ||
+      !isDeepStrictEqual(stable(current), stable(after)) ||
+      !isDeepStrictEqual(stable(runtime), stable(repeated)) ||
+      current.bootId !== beforeCensus.bootId ||
+      runtime.bootId !== current.bootId ||
+      current.hostname !== beforeCensus.hostname
+    )
+      reject();
+    const root = current.processes.find((p) => p.pid === runtime.pid);
+    if (
+      !root ||
+      root.start !== runtime.start ||
+      root.ppid !== runtime.ppid ||
+      root.mountNamespace !== runtime.mountNamespace ||
+      root.exe !== '/opt/brave.com/brave/brave' ||
+      root.argvDigest !==
+        sha(
+          `${launch.args.slice(launch.args.indexOf('/opt/brave.com/brave/brave')).join('\0')}\0`,
+        ) ||
+      !beforeCensus.processes.some((p) => p.pid === root.ppid) ||
+      beforeCensus.processes.some((p) => p.mountNamespace === root.mountNamespace)
+    )
+      reject();
+    const ids = new Set([root.pid]);
+    for (let pass = 0; pass < current.processes.length; pass++) {
+      let changed = false;
+      for (const p of current.processes) {
+        if ((ids.has(p.ppid) || p.mountNamespace === root.mountNamespace) && !ids.has(p.pid)) {
+          ids.add(p.pid);
+          changed = true;
+        }
+      }
+      if (!changed) break;
+    }
+    const processes = current.processes.filter((p) => ids.has(p.pid));
+    for (const p of processes) {
+      if (
+        beforeCensus.processes.some((old) => old.pid === p.pid) ||
+        p.mountNamespace !== root.mountNamespace ||
+        p.cgroup !== root.cgroup ||
+        ![
+          '/opt/brave.com/brave/brave',
+          '/opt/brave.com/brave/chrome_crashpad_handler',
+          '/usr/bin/Xvfb',
+        ].includes(p.exe) ||
+        !isDeepStrictEqual(p.uids, [0, 0, 0, 0]) ||
+        p.state !== 'live' ||
+        p.noNewPrivs !== 1 ||
+        Object.values(p.capabilities).some((cap) => !/^0+$/.test(cap)) ||
+        (p.pid !== root.pid && p.ppid !== 1 && !ids.has(p.ppid))
+      )
+        reject();
+    }
+    if (
+      !origin &&
+      !isDeepStrictEqual(
+        current.processes.filter((p) => !ids.has(p.pid)),
+        beforeCensus.processes,
+      )
+    )
+      reject();
+    return {
+      purpose: 'cloud-recovery-native-observation',
+      name,
+      pmId,
+      hostname: current.hostname,
+      bootId: runtime.bootId,
+      pid: runtime.pid,
+      start: runtime.start,
+      ppid: runtime.ppid,
+      configDigest: runtime.configDigest,
+      restartCount: runtime.restartCount,
+      launchDigest: runtime.launchDigest,
+      observedAtMs: now,
+      beforeCensusDigest: sha(beforeCensus),
+      censusDigest: sha(after),
+      processes,
+      display: { pid: display.pid, start: display.start, listeners },
+      policyDigest: runtime.policyDigest,
+      mountNamespace: runtime.mountNamespace,
+    };
+  } catch {
+    reject();
+  }
+}
+
+/** Read-only VNC facts. Sources and the retained headed observation are
+ * remeasured here; neither their shape nor this result authorizes a restart. */
+async function readCloudVncRecovery(copy, io, context) {
+  const { reject, census, sha, keys, began, current, readCensus, origin } = context;
+  const {
+    attempt,
+    name,
+    pmId,
+    beforeCensus,
+    restoreStartedAtMs,
+    headedRecovery: headed,
+    sources,
+  } = copy;
+  const stable = ({ observedAtMs: _time, ...value }) => value;
+  let highWater = began;
+  const started = performance.now();
+  const clock = () => {
+    const now = io.now();
+    if (
+      !Number.isSafeInteger(now) ||
+      now < highWater ||
+      (origin ? now - began > 60000 : now - beforeCensus.observedAtMs > 60000) ||
+      performance.now() - started > 60000
+    )
+      reject();
+    highWater = now;
+    return now;
+  };
+  const fresh = (time) => {
+    if (!Number.isSafeInteger(time) || time < 0 || time > clock() || highWater - time > 60000)
+      reject();
+  };
+  if (
+    !keys(
+      headed,
+      'beforeCensusDigest,bootId,censusDigest,configDigest,display,hostname,launchDigest,mountNamespace,name,observedAtMs,pid,pmId,policyDigest,ppid,processes,purpose,restartCount,start',
+    ) ||
+    headed.purpose !== 'cloud-recovery-native-observation' ||
+    headed.name !== 'holaday-chromium-headed' ||
+    headed.pmId === pmId ||
+    headed.observedAtMs > beforeCensus.observedAtMs ||
+    !hash(headed.beforeCensusDigest) ||
+    !hash(headed.censusDigest)
+  )
+    reject();
+  if (!origin) fresh(headed.observedAtMs);
+  const scope = [
+    { name, pmId },
+    { name: headed.name, pmId: headed.pmId },
+  ];
+  validateFirstCutoverCloudSources(sources, { scope, observed: true });
+  fresh(sources.observedAtMs);
+  if (
+    current.hostname !== beforeCensus.hostname ||
+    current.bootId !== beforeCensus.bootId ||
+    headed.hostname !== current.hostname ||
+    headed.bootId !== current.bootId ||
+    sources.hostname !== current.hostname ||
+    sources.bootId !== current.bootId ||
+    current.observedAtMs < restoreStartedAtMs
+  )
+    reject();
+  fresh(current.observedAtMs);
+  census({
+    hostname: current.hostname,
+    bootId: current.bootId,
+    observedAtMs: headed.observedAtMs,
+    processes: headed.processes,
+  });
+  const byPid = new Map(current.processes.map((p) => [p.pid, p]));
+  const headedIds = new Set(headed.processes.map((p) => p.pid));
+  if (
+    !headedIds.has(headed.pid) ||
+    !headedIds.has(headed.display?.pid) ||
+    !isDeepStrictEqual(
+      current.processes.filter((p) => headedIds.has(p.pid)),
+      headed.processes,
+    ) ||
+    !isDeepStrictEqual(
+      beforeCensus.processes.filter((p) => headedIds.has(p.pid)),
+      headed.processes,
+    )
+  )
+    reject();
+  for (const p of headed.processes) {
+    if (
+      p.mountNamespace !== headed.mountNamespace ||
+      p.state !== 'live' ||
+      p.noNewPrivs !== 1 ||
+      !isDeepStrictEqual(p.uids, [0, 0, 0, 0]) ||
+      Object.values(p.capabilities).some((v) => !/^0+$/.test(v)) ||
+      ![
+        '/opt/brave.com/brave/brave',
+        '/opt/brave.com/brave/chrome_crashpad_handler',
+        '/usr/bin/Xvfb',
+      ].includes(p.exe) ||
+      p.cgroup !== byPid.get(headed.pid).cgroup ||
+      (p.pid !== headed.pid && p.ppid !== 1 && !headedIds.has(p.ppid))
+    )
+      reject();
+  }
+  if (
+    current.processes.some(
+      (p) => p.mountNamespace === headed.mountNamespace && !headedIds.has(p.pid),
+    )
+  )
+    reject();
+  const material = firstCutoverCloudVncRecoveryMaterial({ attempt });
+  const launch = firstCutoverCloudBrowserRecoveryLaunch({ attempt });
+  const readManagers = io.readManagers ?? (() => readFirstCutoverCloudManagers(io));
+  const managerSample = async () => {
+    clock();
+    const rows = await readManagers();
+    if (!Array.isArray(rows) || rows.length > 16384) reject();
+    return scope.map((role) => {
+      const matches = rows.filter((r) => r.name === role.name || r.pm_id === role.pmId);
+      const r = matches[0];
+      if (
+        matches.length !== 1 ||
+        r.name !== role.name ||
+        r.pm_id !== role.pmId ||
+        !Number.isSafeInteger(r.pid) ||
+        r.pid <= 1 ||
+        r.pm2_env?.pm_id !== role.pmId ||
+        r.pm2_env.name !== role.name ||
+        r.pm2_env.status !== 'online' ||
+        r.pm2_env.exec_mode !== 'fork_mode' ||
+        r.pm2_env.autorestart !== false ||
+        r.pm2_env.watch !== false ||
+        r.pm2_env.cron_restart !== '' ||
+        Object.hasOwn(r.pm2_env, 'max_memory_restart') ||
+        Object.hasOwn(r.pm2_env.env ?? {}, 'max_memory_restart') ||
+        !Number.isSafeInteger(r.pm2_env.restart_time) ||
+        r.pm2_env.restart_time < 0
+      )
+        reject();
+      return structuredClone({ name: r.name, pm_id: r.pm_id, pid: r.pid, pm2_env: r.pm2_env });
+    });
+  };
+  const managers = await managerSample();
+  const vnc = managers[0];
+  if (
+    vnc.pm2_env.pm_exec_path !== material.command ||
+    vnc.pm2_env.exec_interpreter !== 'bash' ||
+    (vnc.pm2_env.args != null && !isDeepStrictEqual(vnc.pm2_env.args, [])) ||
+    managers[1].pid !== headed.pid
+  )
+    reject();
+  const configs = managers.map((r) => ({ name: r.name, pmId: r.pm_id, config: r.pm2_env }));
+  const sourceSample = async () => {
+    clock();
+    const measured = await readFirstCutoverCloudRecoverySources({ attempt, configs }, io);
+    fresh(measured.observedAtMs);
+    if (!isDeepStrictEqual(stable(measured), stable(sources))) reject();
+    return measured;
+  };
+  await sourceSample();
+  const readHeaded = async () => {
+    clock();
+    const measured = await readFirstCutoverCloudBrowserRecovery({ attempt, pmId: headed.pmId }, io);
+    fresh(measured.observedAtMs);
+    for (const k of [
+      'name',
+      'pmId',
+      'pid',
+      'start',
+      'ppid',
+      'bootId',
+      'configDigest',
+      'restartCount',
+      'launchDigest',
+      'mountNamespace',
+      'policyDigest',
+    ])
+      if (measured[k] !== headed[k]) reject();
+    const root = byPid.get(headed.pid);
+    if (
+      root.exe !== '/opt/brave.com/brave/brave' ||
+      root.start !== measured.start ||
+      root.ppid !== measured.ppid ||
+      root.argvDigest !==
+        sha(`${launch.args.slice(launch.args.indexOf('/opt/brave.com/brave/brave')).join('\0')}\0`)
+    )
+      reject();
+  };
+  await readHeaded();
+  const display = byPid.get(headed.display.pid);
+  if (
+    !keys(headed.display, 'listeners,pid,start') ||
+    display.exe !== '/usr/bin/Xvfb' ||
+    display.start !== headed.display.start ||
+    display.ppid !== headed.pid ||
+    headed.processes.filter((p) => p.exe === '/usr/bin/Xvfb').length !== 1 ||
+    display.argvDigest !==
+      sha(
+        `${['/usr/bin/Xvfb', ':98', '-screen', '0', '1280x800x24', '-nolisten', 'tcp'].join('\0')}\0`,
+      )
+  )
+    reject();
+  const readDisplay =
+    io.readDisplayListeners ?? ((identity) => readFirstCutoverCloudDisplayListeners(identity, io));
+  const displaySample = async () => {
+    const listeners = await readDisplay({
+      pid: display.pid,
+      start: display.start,
+      mountNamespace: display.mountNamespace,
+    });
+    if (
+      !Array.isArray(listeners) ||
+      listeners.length !== 2 ||
+      listeners.some(
+        (r, i) =>
+          !keys(r, 'inode,path') ||
+          r.path !== ['/tmp/.X11-unix/X98', '@/tmp/.X11-unix/X98'][i] ||
+          !/^[1-9]\d{0,19}$/.test(r.inode),
+      ) ||
+      listeners[0].inode === listeners[1].inode ||
+      !isDeepStrictEqual(listeners, headed.display.listeners)
+    )
+      reject();
+  };
+  await displaySample();
+  const root = byPid.get(vnc.pid);
+  const ids = new Set([vnc.pid]);
+  for (let pass = 0; pass < current.processes.length; pass++) {
+    let added = false;
+    for (const p of current.processes)
+      if (ids.has(p.ppid) && !ids.has(p.pid)) {
+        ids.add(p.pid);
+        added = true;
+      }
+    if (!added) break;
+  }
+  const processes = current.processes.filter((p) => ids.has(p.pid));
+  if (
+    !root ||
+    processes.length < 4 ||
+    processes.length > 512 ||
+    (!origin &&
+      !isDeepStrictEqual(
+        current.processes.filter((p) => !ids.has(p.pid)),
+        beforeCensus.processes,
+      ))
+  )
+    reject();
+  const daemonPidText = (await io.readFile('/root/.pm2/pm2.pid', 'utf8')).trim();
+  const daemon = byPid.get(Number(daemonPidText));
+  const daemonStat = await io.readFile(`/proc/${Number(daemonPidText)}/stat`, 'utf8');
+  const daemonParts = daemonStat
+    .slice(daemonStat.lastIndexOf(')') + 2)
+    .trim()
+    .split(/\s+/);
+  if (
+    !/^[1-9]\d*$/.test(daemonPidText) ||
+    !daemon ||
+    daemon.start !== daemonParts[19] ||
+    root.ppid !== daemon.pid ||
+    headed.ppid !== daemon.pid ||
+    root.mountNamespace === headed.mountNamespace
+  )
+    reject();
+  for (const p of processes)
+    if (
+      beforeCensus.processes.some((old) => old.pid === p.pid) ||
+      p.state !== 'live' ||
+      !isDeepStrictEqual(p.uids, [0, 0, 0, 0]) ||
+      p.cgroup !== root.cgroup ||
+      p.mountNamespace !== root.mountNamespace
+    )
+      reject();
+  const python = sources.files.find((f) => f.path === '/usr/bin/python3')?.resolvedPath;
+  const one = (predicate) => {
+    const rows = processes.filter(predicate);
+    if (rows.length !== 1) reject();
+    return rows[0];
+  };
+  if (root.exe !== '/usr/bin/bash') reject();
+  const supervisor = one((p) => p.ppid === root.pid && p.exe === '/usr/bin/bash');
+  const x11 = one((p) => p.ppid === supervisor.pid && p.exe === '/usr/bin/x11vnc');
+  const web = one((p) => p.ppid === root.pid && p.exe === python);
+  const handlers = processes.filter((p) => p.ppid === web.pid && p.exe === python);
+  if (processes.length !== 4 + handlers.length) reject();
+  // websockify 0.10.0 chdirs to its fixed --web root before serving;
+  // forked handlers inherit it. Shell/x11vnc retain the registration cwd.
+  for (const p of processes)
+    if (p.cwd !== (p === web || handlers.includes(p) ? '/usr/share/novnc' : vnc.pm2_env.pm_cwd))
+      reject();
+  const args = new Map([
+    [root.pid, ['bash', material.command]],
+    [supervisor.pid, ['bash', material.command]],
+    [
+      x11.pid,
+      [
+        'x11vnc',
+        '-display',
+        ':98',
+        '-forever',
+        '-nopw',
+        '-shared',
+        '-noxdamage',
+        '-listen',
+        '127.0.0.1',
+        '-rfbport',
+        '5901',
+      ],
+    ],
+    ...[web, ...handlers].map((p) => [
+      p.pid,
+      [
+        '/usr/bin/python3',
+        '/usr/bin/websockify',
+        '--heartbeat',
+        '30',
+        '--web',
+        '/usr/share/novnc',
+        '127.0.0.1:6080',
+        '127.0.0.1:5901',
+      ],
+    ]),
+  ]);
+  const processSample = async () => {
+    for (const p of processes) {
+      clock();
+      const cmd = await io.readFile(`/proc/${p.pid}/cmdline`, 'utf8');
+      if (
+        cmd !== `${args.get(p.pid).join('\0')}\0` ||
+        sha(cmd) !== p.argvDigest ||
+        (await io.readlink(`/proc/${p.pid}/exe`)) !== p.exe
+      )
+        reject();
+      const loaded = await io.stat(`/proc/${p.pid}/exe`);
+      const disk = await io.stat(p.exe);
+      if (
+        !sources.files.some((f) => f.resolvedPath === p.exe) ||
+        ['dev', 'ino', 'mode', 'uid', 'gid', 'size', 'mtimeMs', 'ctimeMs'].some(
+          (k) => loaded[k] !== disk[k],
+        ) ||
+        !disk.isFile()
+      )
+        reject();
+    }
+  };
+  await processSample();
+  const socketSample = async () => {
+    const exec = io.exec ?? execFixed;
+    const read = async (argv) => {
+      clock();
+      const out = await exec('/usr/bin/ss', argv, {
+        env: fixedEnv,
+        timeout: 5000,
+        maxBuffer: 1024 * 1024,
+      });
+      if (typeof out !== 'string' || Buffer.byteLength(out) > 1024 * 1024) reject();
+      const rows = out.trim() ? out.trim().split('\n') : [];
+      if (rows.length > 16384) reject();
+      return rows;
+    };
+    const fds = new Map();
+    const fdSet = async (pid) => {
+      if (!fds.has(pid)) {
+        const names = await io.readdir(`/proc/${pid}/fd`);
+        if (names.length > 4096 || names.some((n) => !/^\d+$/.test(n))) reject();
+        const map = new Map();
+        for (const fd of names) {
+          clock();
+          const link = await io.readlink(`/proc/${pid}/fd/${fd}`);
+          const m = /^socket:\[(\d+)\]$/.exec(link);
+          if (m) map.set(Number(fd), m[1]);
+        }
+        fds.set(pid, map);
+      }
+      return fds.get(pid);
+    };
+    const owners = async (line, inode) => {
+      const tuples = [...line.matchAll(/\("[^"\n]*",pid=(\d+),fd=(\d+)\)/g)];
+      if (
+        !tuples.length ||
+        tuples.length > 512 ||
+        tuples.length !== [...line.matchAll(/\bpid=/g)].length
+      )
+        reject();
+      const result = [];
+      for (const m of tuples) {
+        const pid = Number(m[1]);
+        const fd = Number(m[2]);
+        const p = byPid.get(pid);
+        if (
+          !p ||
+          !Number.isSafeInteger(fd) ||
+          (await fdSet(pid)).get(fd) !== inode ||
+          result.some((r) => r.pid === pid && r.fd === fd)
+        )
+          reject();
+        result.push({ pid, start: p.start, fd });
+      }
+      return result.sort((a, b) => a.pid - b.pid || a.fd - b.fd);
+    };
+    const unix = (await read(['-H', '-xapn'])).map((line) => {
+      const c = line.trim().split(/\s+/);
+      if (c.length < 8) reject();
+      return { line, kind: c[0], state: c[1], path: c[4], inode: c[5], peer: c[7] };
+    });
+    const addresses = ['/tmp/.X11-unix/X98', '@/tmp/.X11-unix/X98'];
+    const relevant = unix.filter((r) => addresses.includes(r.path));
+    const listeners = relevant.filter((r) => r.state === 'LISTEN');
+    if (
+      listeners.length !== 2 ||
+      relevant.some((r) => r.kind !== 'u_str' || !['LISTEN', 'ESTAB'].includes(r.state))
+    )
+      reject();
+    const peers = [];
+    const allPeers = [];
+    for (const r of relevant) {
+      if (!/^[1-9]\d{0,19}$/.test(r.inode) || unix.filter((q) => q.inode === r.inode).length !== 1)
+        reject();
+      const serverOwners = await owners(r.line, r.inode);
+      if (serverOwners.length !== 1 || serverOwners[0].pid !== display.pid) reject();
+      if (r.state === 'LISTEN') {
+        if (
+          !headed.display.listeners.some((q) => q.path === r.path && q.inode === r.inode) ||
+          listeners.filter((q) => q.path === r.path).length !== 1
+        )
+          reject();
+        continue;
+      }
+      const matches = unix.filter((q) => q.inode === r.peer);
+      const peer = matches[0];
+      if (
+        matches.length !== 1 ||
+        peer.state !== 'ESTAB' ||
+        peer.kind !== 'u_str' ||
+        peer.peer !== r.inode
+      )
+        reject();
+      const clientOwners = await owners(peer.line, peer.inode);
+      if (clientOwners.some((p) => !headedIds.has(p.pid) && !ids.has(p.pid))) reject();
+      const edge = {
+        server: { ...serverOwners[0], inode: r.inode },
+        clients: clientOwners.map((p) => ({ ...p, inode: peer.inode })),
+      };
+      allPeers.push(edge);
+      for (const p of clientOwners)
+        if (p.pid === x11.pid)
+          peers.push({
+            client: { ...p, inode: peer.inode },
+            server: { ...serverOwners[0], inode: r.inode },
+          });
+    }
+    if (!peers.length) reject();
+    const tcp = [];
+    for (const family of ['ipv4', 'ipv6'])
+      for (const line of await read(['-H', family === 'ipv4' ? '-4' : '-6', '-ltnpe'])) {
+        const c = line.trim().split(/\s+/);
+        const endpoint = /^(?:\[([^\]]+)\]|(.+)):(\d+)$/.exec(c[3] ?? '');
+        if (c[0] !== 'LISTEN' || !endpoint) reject();
+        const port = Number(endpoint[3]);
+        const ownerIds = [...line.matchAll(/\bpid=(\d+)/g)].map((m) => Number(m[1]));
+        if (![5900, 5901, 6080].includes(port) && !ownerIds.some((pid) => ids.has(pid))) continue;
+        const inode = /\bino:([1-9]\d{0,19})(?:\s|$)/.exec(line)?.[1];
+        if (!inode || port > 65535 || tcp.some((r) => r.inode === inode)) reject();
+        tcp.push({
+          family,
+          address: endpoint[1] ?? endpoint[2],
+          port,
+          inode,
+          owners: await owners(line, inode),
+        });
+      }
+    for (const [port, owner] of [
+      [5901, x11],
+      [6080, web],
+    ]) {
+      const rows = tcp.filter(
+        (r) => r.family === 'ipv4' && r.address === '127.0.0.1' && r.port === port,
+      );
+      const allowed = port === 5901 ? [x11.pid] : [web.pid, ...handlers.map((p) => p.pid)];
+      if (
+        rows.length !== 1 ||
+        !rows[0].owners.some((p) => p.pid === owner.pid) ||
+        rows[0].owners.some((p) => !allowed.includes(p.pid))
+      )
+        reject();
+    }
+    const sort = (a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b));
+    return {
+      listeners: tcp.sort(sort),
+      displayPeers: peers.sort(sort),
+      allPeers: allPeers.sort(sort),
+    };
+  };
+  const sockets = await socketSample();
+  await sourceSample();
+  await processSample();
+  await readHeaded();
+  await displaySample();
+  if (
+    !isDeepStrictEqual(managers, await managerSample()) ||
+    !isDeepStrictEqual(sockets, await socketSample())
+  )
+    reject();
+  const after = structuredClone(await readCensus());
+  census(after);
+  fresh(after.observedAtMs);
+  if (
+    after.observedAtMs < current.observedAtMs ||
+    !isDeepStrictEqual(stable(current), stable(after))
+  )
+    reject();
+  const identity = (p) => ({ pid: p.pid, start: p.start });
+  return {
+    purpose: 'cloud-recovery-native-observation',
+    name,
+    pmId,
+    hostname: current.hostname,
+    bootId: current.bootId,
+    ...identity(root),
+    ppid: root.ppid,
+    configDigest: cutoverRegistrationConfigDigest(vnc.pm2_env),
+    restartCount: vnc.pm2_env.restart_time,
+    launchDigest: sha(material),
+    observedAtMs: clock(),
+    beforeCensusDigest: sha(beforeCensus),
+    censusDigest: sha(after),
+    processes,
+    mountNamespace: root.mountNamespace,
+    display: structuredClone(headed.display),
+    vnc: {
+      supervisor: identity(supervisor),
+      x11vnc: identity(x11),
+      websockify: identity(web),
+      handlers: handlers.map(identity),
+      listeners: sockets.listeners,
+      displayPeers: sockets.displayPeers,
+    },
+  };
+}
+
+export function validateLegacyWorkBoundary(input) {
+  try {
+    return validateWork(input);
+  } catch {
+    fail();
+  }
+}
+const producerReceipts = new WeakMap();
+/** A tagged observation is usable for stopping only under the live owned first
+ * journal's durable receipt. Never normalize unknown requests into zero. */
+export async function validateOwnedLegacyFence(fence, io) {
+  const binding = await io.assertJournalOwnership();
+  const record = await io.readFirstCutoverEffects?.();
+  if (record?.schemaVersion !== 2) {
+    if (
+      fence?.riskDigest !== undefined ||
+      fence?.legacyWork !== undefined ||
+      record?.riskDigest !== undefined ||
+      record?.legacyInterruption !== undefined
+    )
+      fail();
+    return false;
+  }
+  const riskDigest = cutoverLegacyInterruptionRisk(record);
+  const receipt = record.interruptionObservation;
+  const orders = fence?.stage === 'orders';
+  if (
+    !binding ||
+    Object.keys(binding).some((key) => record[key] !== binding[key]) ||
+    binding.inventoryDigest !== record.inventoryDigest ||
+    fence?.inventoryDigest !== record.inventoryDigest ||
+    record.riskDigest !== riskDigest ||
+    fence.riskDigest !== riskDigest ||
+    !hash(record.recordDigest) ||
+    record.failureObservation !== undefined ||
+    !(
+      orders
+        ? ['producers_stopped']
+        : [
+            'all_fenced',
+            'stopped',
+            'backup_verified',
+            'migration_started',
+            'candidate_started',
+            'verified',
+          ]
+    ).includes(record.phase) ||
+    (!orders && fence.stage !== 'all-writers') ||
+    !receipt ||
+    Object.keys(receipt).length !== 4 ||
+    receipt.riskDigest !== riskDigest ||
+    !hash(receipt.sourceDigest) ||
+    !hash(receipt.fenceDigest) ||
+    !Number.isSafeInteger(receipt.observedAtMs) ||
+    receipt.observedAtMs < 0 ||
+    receipt.observedAtMs > record.legacyInterruption.observeUntilMs ||
+    receipt.observedAtMs > io.now() ||
+    !fence.legacyWork ||
+    Object.keys(fence.legacyWork).length !== 2 ||
+    !Number.isSafeInteger(fence.observedAtMs) ||
+    fence.observedAtMs < 0 ||
+    fence.observedAtMs > io.now() ||
+    io.now() - fence.observedAtMs > 60000
+  )
+    fail();
+  for (const observation of [fence.legacyWork.before, fence.legacyWork.after]) {
+    validateLegacyWorkBoundary({
+      observation,
+      approval: record,
+      phase: orders ? 'before-stop' : 'after-stop',
+      nowMs: io.now(),
+    });
+  }
+  if (
+    !['unsettledWork', 'unknownWriters', 'activeRequests', 'externalWork'].every((key) =>
+      isDeepStrictEqual(fence[key], fence.legacyWork.before[key]),
+    ) ||
+    !isDeepStrictEqual(record, await io.readFirstCutoverEffects()) ||
+    !isDeepStrictEqual(binding, await io.assertJournalOwnership())
+  )
+    fail();
+  return true;
+}
+function producerScope(captured) {
+  if (
+    !captured?.targets?.length ||
+    captured.targets.some((p) => !['main', 'worker'].includes(p.role))
+  )
+    fail();
+  for (const target of captured.targets) checkTarget(target);
+}
+function verifyProducerFence(fence, snapshot, captured, now, interrupted = false) {
+  producerScope(captured);
+  checkSnapshot(snapshot, captured, now);
+  if (
+    fence?.inventoryDigest !== captured.inventoryDigest ||
+    fence.stage !== 'orders' ||
+    !Number.isSafeInteger(fence.observedAtMs) ||
+    fence.observedAtMs > now ||
+    now - fence.observedAtMs > 60000 ||
+    fence.unsettledWork !== 0 ||
+    (!interrupted && fence.externalWork !== 0) ||
+    (!interrupted && fence.activeRequests !== 0) ||
+    fence.unknownWriters !== 0 ||
+    !Array.isArray(fence.runningProducers) ||
+    fence.producersRunning !== fence.runningProducers.length ||
+    fence.runningProducers.length !== snapshot.processes.length ||
+    new Set(fence.runningProducers.map((p) => p.pid)).size !== fence.runningProducers.length ||
+    snapshot.processes.some((p) => !captured.targets.some((t) => sameProcess(p, t))) ||
+    snapshot.processes.some((p) => !fence.runningProducers.some((t) => sameProcess(p, t)))
+  )
+    fail();
+}
+export async function retireLegacyProducers(input, io) {
+  producerScope(input?.captured);
+  if (input.producerReceipt !== undefined) fail();
+  const receipt = await retireCapturedRuntime(input, io, true);
+  producerReceipts.set(receipt, {
+    receipt: structuredClone(receipt),
+    captured: structuredClone(input.captured),
+  });
+  return receipt;
+}
+export function createLegacyProducerEffects(observation, captured, system = {}) {
+  producerScope(captured);
+  return runtimeEffects(observation, system, structuredClone(captured));
+}
+const fail = () => {
+  throw new Error('CUTOVER_RUNTIME_UNPROVEN');
+};
+const processKeys = [
+  'host',
+  'bootId',
+  'pid',
+  'ppid',
+  'start',
+  'uids',
+  'exe',
+  'cwd',
+  'argvDigest',
+  'role',
+  'managerIdentity',
+];
+const sameProcess = (a, b) => processKeys.every((k) => isDeepStrictEqual(a?.[k], b?.[k]));
+const managerKeys = [
+  'kind',
+  'pid',
+  'start',
+  'exe',
+  'argvDigest',
+  'pm2Home',
+  'version',
+  'pmId',
+  'name',
+  'configDigest',
+  'killTimeoutMs',
+  'killSignal',
+  'watch',
+  'cron',
+  'memoryRestart',
+];
+const sameManager = (a, b) => managerKeys.every((k) => isDeepStrictEqual(a?.[k], b?.[k]));
+function isRootGateway(p) {
+  if (p.role !== 'gateway' || !isDeepStrictEqual(p.uids, [0, 0, 0, 0])) return false;
+  const release =
+    /^(\/opt\/holaday-cn-payment\/releases\/[a-f0-9]{12}-[0-9]{14})\/apps\/cn-payment$/.exec(
+      p.cwd ?? '',
+    );
+  if (!release) return false;
+  if (p.exe === '/usr/bin/node') return true;
+  // Only the audited managed gateway wrappers, never arbitrary root executables.
+  return (
+    p.managerIdentity?.kind === 'pm2' &&
+    (p.exe === '/usr/bin/dash' ||
+      p.exe ===
+        `${release[1]}/node_modules/.pnpm/@esbuild+linux-x64@0.27.7/node_modules/@esbuild/linux-x64/bin/esbuild`)
+  );
+}
+function checkTarget(p, registration = false) {
+  if (
+    !p ||
+    !/^[a-zA-Z0-9.-]{1,128}$/.test(p.host ?? '') ||
+    !/^[a-f0-9]{32}$/.test(p.bootId ?? '') ||
+    !Number.isSafeInteger(p.pid) ||
+    p.pid <= 1 ||
+    !Number.isSafeInteger(p.ppid) ||
+    p.ppid < 1 ||
+    !/^[0-9]+$/.test(p.start ?? '') ||
+    !hash(p.argvDigest)
+  )
+    fail();
+  if (
+    !(isDeepStrictEqual(p.uids, [998, 998, 998, 998]) && p.exe === '/opt/node22/bin/node') &&
+    !isRootGateway(p)
+  )
+    fail();
+  if (['main', 'worker'].includes(p.role)) {
+    if (p.cwd !== '/opt/holaday-monorepo/apps/orchestrator') fail();
+  } else if (p.role === 'gateway') {
+    if (
+      !/^\/opt\/holaday-cn-payment\/releases\/[a-f0-9]{12}-[0-9]{14}(?:\/apps\/cn-payment)?$/.test(
+        p.cwd ?? '',
+      )
+    )
+      fail();
+  } else fail();
+  const m = p.managerIdentity;
+  if (m?.kind === 'unmanaged') {
+    if (Object.keys(m).length !== 1) fail();
+  } else if (m?.kind === 'pm2') {
+    checkManager(m, registration);
+    if (
+      (isRootGateway(p) && m.name !== 'holaday-cn-payment') ||
+      (registration &&
+        m.name !==
+          {
+            main: 'holaday-orchestrator',
+            worker: 'holaday-account-closure-worker',
+            gateway: 'holaday-cn-payment',
+          }[p.role])
+    )
+      fail();
+  } else fail();
+}
+function checkManager(m, registration = false) {
+  if (
+    m?.kind !== 'pm2' ||
+    !Number.isSafeInteger(m.pid) ||
+    m.pid <= 1 ||
+    !/^[0-9]+$/.test(m.start ?? '') ||
+    !['/opt/node22/bin/node', '/usr/bin/node'].includes(m.exe) ||
+    !hash(m.argvDigest) ||
+    m.pm2Home !== '/root/.pm2' ||
+    !/^\d+\.\d+\.\d+$/.test(m.version ?? '') ||
+    !Number.isSafeInteger(m.pmId) ||
+    m.pmId < 0 ||
+    !/^[a-zA-Z0-9_-]{1,80}$/.test(m.name ?? '') ||
+    !hash(m.configDigest) ||
+    !Number.isSafeInteger(m.killTimeoutMs) ||
+    m.killTimeoutMs < 1 ||
+    m.killTimeoutMs > 660000 ||
+    !['SIGINT', 'SIGTERM'].includes(m.killSignal) ||
+    m.watch !== false ||
+    (!registration && (m.cron !== false || m.memoryRestart !== 0)) ||
+    (registration &&
+      (m.version !== '6.0.14' ||
+        ![
+          'holaday-orchestrator',
+          'holaday-account-closure-worker',
+          'holaday-files-cron',
+          'holaday-cn-payment',
+        ].includes(m.name) ||
+        !Number.isSafeInteger(m.memoryRestart) ||
+        m.memoryRestart < 0 ||
+        m.memoryRestart > 1024 ** 4 ||
+        (m.cron !== false && !(m.name === 'holaday-files-cron' && m.cron === '0 * * * *'))))
+  )
+    fail();
+}
+function checkSnapshot(s, base, now) {
+  if (
+    !s ||
+    !hash(s.inventoryDigest) ||
+    s.inventoryDigest !== base.inventoryDigest ||
+    s.host !== base.host ||
+    s.bootId !== base.bootId ||
+    !Number.isSafeInteger(s.observedAtMs) ||
+    s.observedAtMs > now ||
+    now - s.observedAtMs > 60000 ||
+    !Array.isArray(s.processes) ||
+    !Array.isArray(s.managers) ||
+    !Array.isArray(s.listeners) ||
+    !Array.isArray(s.unknownLaunchers) ||
+    s.unknownLaunchers.length !== 0 ||
+    !Array.isArray(s.ports) ||
+    !s.ports.length ||
+    !s.ports.every((p) => Number.isSafeInteger(p) && p > 0 && p <= 65535) ||
+    new Set(s.processes.map((p) => p.pid)).size !== s.processes.length
+  )
+    fail();
+}
+
+/** Inventory is a complete, classified host scope, not just PM2's selected pid.
+ * Unknown launcher/process records must be retained by the live observer. */
+export async function captureLegacyRuntime({ inventory, approvedTargets }, io) {
+  return captureRuntime({ inventory, approvedTargets }, io, false);
+}
+export async function captureLegacyRegistrations(input, io) {
+  return captureRuntime(input, io, true);
+}
+async function captureRuntime(
+  { inventory, approvedTargets, approvedRegistrations },
+  io,
+  registration,
+) {
+  checkSnapshot(inventory, inventory, io.now());
+  if (
+    !Array.isArray(approvedTargets) ||
+    (!registration && !approvedTargets.length) ||
+    approvedTargets.length !== inventory.processes.length
+  )
+    fail();
+  const targets = structuredClone(approvedTargets);
+  for (const p of targets) {
+    checkTarget(p, registration);
+    if (
+      p.host !== inventory.host ||
+      p.bootId !== inventory.bootId ||
+      inventory.processes.filter((actual) => sameProcess(actual, p)).length !== 1
+    )
+      fail();
+  }
+  if (new Set(targets.map((p) => p.pid)).size !== targets.length) fail();
+  const groups = targets.filter((p) => p.managerIdentity.kind === 'pm2');
+  if (registration) {
+    if (
+      !Array.isArray(approvedRegistrations) ||
+      !approvedRegistrations.length ||
+      !isDeepStrictEqual(approvedRegistrations, inventory.managers) ||
+      new Set(inventory.managers.map((m) => m.pmId)).size !== inventory.managers.length ||
+      new Set(inventory.managers.map((m) => m.name)).size !== inventory.managers.length ||
+      targets.some((p) => p.managerIdentity.kind !== 'pm2')
+    )
+      fail();
+    for (const m of inventory.managers) {
+      checkManager(m, true);
+      if (m.name === 'holaday-files-cron') {
+        if (
+          m.status !== 'stopped' ||
+          m.rootPid !== 0 ||
+          groups.some((p) => sameManager(p.managerIdentity, m))
+        )
+          fail();
+      } else if (
+        m.status !== 'online' ||
+        !groups.some((p) => p.pid === m.rootPid && sameManager(p.managerIdentity, m))
+      )
+        fail();
+    }
+  }
+  for (const p of groups) {
+    const matches = inventory.managers.filter((m) => sameManager(m, p.managerIdentity));
+    if (matches.length !== 1 || matches[0].status !== 'online') fail();
+    let ancestor = p;
+    const seen = new Set();
+    while (ancestor.pid !== matches[0].rootPid) {
+      if (seen.has(ancestor.pid)) fail();
+      seen.add(ancestor.pid);
+      ancestor = targets.find((x) => x.pid === ancestor.ppid);
+      if (
+        !ancestor ||
+        !sameManager(ancestor.managerIdentity, p.managerIdentity) ||
+        (isRootGateway(p) && (!isRootGateway(ancestor) || ancestor.cwd !== p.cwd))
+      )
+        fail();
+    }
+    if (ancestor.ppid !== p.managerIdentity.pid) fail();
+    if (isRootGateway(p) !== isRootGateway(ancestor)) fail();
+    if (isRootGateway(p) && ancestor.exe !== '/usr/bin/node') fail();
+  }
+  if (
+    inventory.managers.some(
+      (m) =>
+        !(registration && m.name === 'holaday-files-cron' && m.rootPid === 0) &&
+        !groups.some((p) => sameManager(m, p.managerIdentity)),
+    )
+  )
+    fail();
+  if (
+    inventory.listeners.some(
+      (l) => !inventory.ports.includes(l.port) || !targets.some((p) => p.pid === l.pid),
+    )
+  )
+    fail();
+  return structuredClone({
+    ...(registration ? { retirement: 'delete-registration' } : {}),
+    inventoryDigest: inventory.inventoryDigest,
+    host: inventory.host,
+    bootId: inventory.bootId,
+    targets,
+    ports: inventory.ports,
+    managers: inventory.managers,
+  });
+}
+
+export async function retireLegacyRuntime(input, io) {
+  return retireCapturedRuntime(input, io, false);
+}
+async function retireCapturedRuntime({ captured, deadlineMs, producerReceipt }, io, producers) {
+  if (
+    captured?.retirement !== undefined ||
+    !captured?.targets?.length ||
+    !Number.isSafeInteger(deadlineMs) ||
+    deadlineMs < 1 ||
+    deadlineMs > 900000
+  )
+    fail();
+  const start = io.now();
+  const deadline = start + deadlineMs;
+  const c = structuredClone(captured);
+  const prior = producerReceipt && producerReceipts.get(producerReceipt);
+  if (
+    producerReceipt !== undefined &&
+    (!prior ||
+      !isDeepStrictEqual(prior.receipt, producerReceipt) ||
+      !isDeepStrictEqual(prior.captured, c))
+  )
+    fail();
+  async function guard() {
+    const now = io.now();
+    if (now < start || now >= deadline) throw new Error('CUTOVER_STOP_TIMEOUT');
+    if ((await io.assertJournalOwnership()).inventoryDigest !== c.inventoryDigest) fail();
+    const fence = await io.verifyFence();
+    const interrupted = await validateOwnedLegacyFence(fence, io);
+    if (producers) {
+      verifyProducerFence(fence, await io.readInventory(), c, io.now(), interrupted);
+      return;
+    }
+    if (
+      fence?.inventoryDigest !== c.inventoryDigest ||
+      fence.stage !== 'all-writers' ||
+      fence.unsettledWork !== 0 ||
+      (!interrupted && fence.externalWork !== 0) ||
+      fence.producersRunning !== 0
+    )
+      fail();
+  }
+  async function read() {
+    const s = await io.readInventory();
+    checkSnapshot(s, c, io.now());
+    if (!isDeepStrictEqual(s.ports, c.ports)) fail();
+    for (const p of s.processes) if (!c.targets.some((t) => sameProcess(p, t))) fail();
+    if (
+      s.managers.length !== c.managers.length ||
+      s.managers.some((m) => !c.managers.some((old) => sameManager(m, old)))
+    )
+      fail();
+    return s;
+  }
+  await guard();
+  const before = await read();
+  // Revalidate the entire captured tree immediately before the first effect.
+  if (prior) {
+    if (
+      before.processes.length ||
+      before.listeners.length ||
+      before.managers.some((m) => m.status !== 'stopped' || m.rootPid !== 0)
+    )
+      fail();
+  } else await captureLegacyRuntime({ inventory: before, approvedTargets: c.targets }, io);
+  const managedRoots = c.managers.map((m) => c.targets.find((p) => p.pid === m.rootPid));
+  const unmanaged = c.targets.filter((p) => p.managerIdentity.kind === 'unmanaged');
+  // Reserve every manager's actual stop allowance and the two physical observations
+  // before making any stop. A too-short approved window must not cause partial stop.
+  if (
+    !prior &&
+    io.now() + managedRoots.reduce((total, p) => total + p.managerIdentity.killTimeoutMs, 100) >=
+      deadline
+  )
+    fail();
+  // Children first for unmanaged trees. Cycles/orphans are rejected by the live inventory classifier.
+  const depth = (p) => {
+    let n = 0;
+    let parent = p;
+    const seen = new Set();
+    while (unmanaged.some((x) => x.pid === parent.ppid)) {
+      if (seen.has(parent.pid)) fail();
+      seen.add(parent.pid);
+      parent = unmanaged.find((x) => x.pid === parent.ppid);
+      n++;
+    }
+    return n;
+  };
+  for (const p of prior
+    ? []
+    : [...managedRoots, ...unmanaged.sort((a, b) => depth(b) - depth(a))]) {
+    await guard();
+    const s = await read();
+    if (!s.processes.some((actual) => sameProcess(actual, p))) fail();
+    if (p.managerIdentity.kind === 'pm2') {
+      if (
+        io.now() + p.managerIdentity.killTimeoutMs >= deadline ||
+        !s.managers.some(
+          (m) => sameManager(m, p.managerIdentity) && m.status === 'online' && m.rootPid === p.pid,
+        )
+      )
+        fail();
+      await io.pm2Stop(
+        p,
+        c.targets.filter((t) => sameManager(t.managerIdentity, p.managerIdentity)),
+      );
+    } else await io.signalPinned(p);
+  }
+  let emptyObservations = 0;
+  for (;;) {
+    await guard();
+    const s = await read();
+    if (!s.processes.length) {
+      if (s.listeners.length || s.managers.some((m) => m.status !== 'stopped' || m.rootPid !== 0))
+        fail();
+      if (++emptyObservations === 2)
+        return {
+          inventoryDigest: c.inventoryDigest,
+          host: c.host,
+          bootId: c.bootId,
+          observedAtMs: io.now(),
+          phase: producers ? 'producers-stopped' : 'stopped',
+          targets: c.targets,
+        };
+    } else emptyObservations = 0;
+    await io.sleep(100);
+  }
+}
+/** No overwrite or cleanup on failure: a partial directory requires inspection.
+ * Callbacks are owned by the host adapter holding the release journal. */
+export async function initializeFirstMaintenanceState({ candidate, attempt, stoppedEvidence }, io) {
+  const disk = io.fs ?? fs;
+  const parent = '/var/lib/holaday';
+  const directory = `${parent}/ordinary-maintenance`;
+  let parentHandle;
+  let directoryHandle;
+  let file;
+  const sameFile = (a, b) => a.ino === b.ino && a.dev === b.dev;
+  try {
+    if (
+      (io.platform ?? process.platform) !== 'linux' ||
+      (io.uid ?? process.getuid()) !== 0 ||
+      !/^[a-f0-9]{40}$/.test(candidate ?? '') ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(
+        attempt ?? '',
+      ) ||
+      !Number.isSafeInteger(io.applicationGid) ||
+      io.applicationGid < 1
+    )
+      fail();
+    const now = io.now();
+    const scope = stoppedEvidence?.inventoryDigest;
+    if (
+      !hash(scope) ||
+      stoppedEvidence.phase !== 'stopped' ||
+      !Number.isSafeInteger(stoppedEvidence.observedAtMs) ||
+      stoppedEvidence.observedAtMs > now ||
+      now - stoppedEvidence.observedAtMs > 60000
+    )
+      fail();
+    async function guard() {
+      const binding = await io.assertJournalOwnership();
+      if (
+        binding.attempt !== attempt ||
+        binding.candidate !== candidate ||
+        binding.inventoryDigest !== scope
+      )
+        fail();
+      const stopped = await io.assertStopped(stoppedEvidence);
+      if (
+        stopped?.inventoryDigest !== scope ||
+        stopped.phase !== 'stopped' ||
+        !Number.isSafeInteger(stopped.observedAtMs) ||
+        stopped.observedAtMs > io.now() ||
+        io.now() - stopped.observedAtMs > 60000 ||
+        !['survivors', 'listeners', 'unknownLaunchers'].every(
+          (k) => Array.isArray(stopped[k]) && stopped[k].length === 0,
+        )
+      )
+        fail();
+      const fence = await io.verifyFence();
+      const interrupted = await validateOwnedLegacyFence(fence, io);
+      if (
+        fence?.inventoryDigest !== scope ||
+        fence.stage !== 'all-writers' ||
+        fence.unsettledWork !== 0 ||
+        (!interrupted && fence.externalWork !== 0) ||
+        fence.producersRunning !== 0
+      )
+        fail();
+    }
+    await guard();
+    const root = await disk.lstat(parent);
+    if (
+      !root.isDirectory() ||
+      root.uid !== 998 ||
+      root.mode & 0o022 ||
+      (await disk.realpath(parent)) !== parent
+    )
+      fail();
+    try {
+      await disk.lstat(directory);
+      throw new Error('exists');
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    parentHandle = await disk.open(
+      parent,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+    );
+    if (!sameFile(root, await parentHandle.stat())) fail();
+    const bootstrapSeed = randomBytes(16).toString('hex');
+    await io.recordBootstrap(bootstrapSeed);
+    await guard();
+    if (!sameFile(root, await disk.lstat(parent)) || (await disk.realpath(parent)) !== parent)
+      fail();
+    await disk.mkdir(directory, { mode: 0o700 }); // exclusive; a crash leaves a visible blocker
+    const created = await disk.lstat(directory);
+    directoryHandle = await disk.open(
+      directory,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+    );
+    if (
+      !sameFile(created, await directoryHandle.stat()) ||
+      (await disk.realpath(directory)) !== directory
+    )
+      fail();
+    file = await disk.open(
+      `${directory}/state.json`,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
+    );
+    await file.writeFile(
+      `${JSON.stringify({ schemaVersion: 1, candidate, bootId: bootstrapSeed, mode: 'closed', needsReconciliation: false })}\n`,
+    );
+    await file.chmod(0o600);
+    await file.chown(998, io.applicationGid);
+    await file.sync();
+    await guard();
+    if (
+      !sameFile(created, await disk.lstat(directory)) ||
+      !sameFile(root, await disk.lstat(parent))
+    )
+      fail();
+    await disk.chown(directory, 998, io.applicationGid);
+    await directoryHandle.sync();
+    await parentHandle.sync();
+    return { bootstrapSeed };
+  } catch {
+    throw new Error('CUTOVER_STATE_UNPROVEN');
+  } finally {
+    try {
+      await file?.close();
+    } finally {
+      try {
+        await directoryHandle?.close();
+      } finally {
+        await parentHandle?.close();
+      }
+    }
+  }
+}
+
+const fixedEnv = {
+  PATH: '/opt/node22/bin:/usr/local/bin:/usr/bin:/bin',
+  HOME: '/root',
+  PM2_HOME: '/root/.pm2',
+  LC_ALL: 'C',
+};
+const execFixed = (command, args, options) =>
+  new Promise((resolve, reject) => {
+    const child = execFile(
+      command,
+      args,
+      { ...options, encoding: 'utf8', maxBuffer: 1024 * 1024 },
+      (error, stdout) => (error ? reject(new Error('CUTOVER_STOP_UNCERTAIN')) : resolve(stdout)),
+    );
+    child.stdin.on('error', () => {});
+    child.stdin.end(options.input ?? '');
+  });
+export function createLegacyRuntimeEffects(observation, system = {}) {
+  return runtimeEffects(observation, system);
+}
+function runtimeEffects(observation, system, producerCapture) {
+  const exec = system.exec ?? execFixed;
+  async function recheck(p, tree, managed) {
+    if ((system.platform ?? process.platform) !== 'linux' || (system.uid ?? process.getuid()) !== 0)
+      fail();
+    checkTarget(p);
+    const binding = await observation.assertJournalOwnership();
+    const fence = await observation.verifyFence();
+    const interrupted = await validateOwnedLegacyFence(fence, observation);
+    const snapshot = await observation.readInventory();
+    if (producerCapture) {
+      if (
+        binding.inventoryDigest !== producerCapture.inventoryDigest ||
+        !producerCapture.targets.some((t) => sameProcess(t, p))
+      )
+        fail();
+      verifyProducerFence(fence, snapshot, producerCapture, observation.now(), interrupted);
+    } else if (
+      !hash(binding.inventoryDigest) ||
+      fence?.inventoryDigest !== binding.inventoryDigest ||
+      fence.stage !== 'all-writers' ||
+      fence.unsettledWork !== 0 ||
+      (!interrupted && fence.externalWork !== 0) ||
+      fence.producersRunning !== 0
+    )
+      fail();
+    checkSnapshot(
+      snapshot,
+      { inventoryDigest: binding.inventoryDigest, host: p.host, bootId: p.bootId },
+      observation.now(),
+    );
+    if (!snapshot.processes.some((actual) => sameProcess(actual, p))) fail();
+    if (managed) {
+      if (p.managerIdentity.kind !== 'pm2') fail();
+      const rows = snapshot.managers.filter((m) => sameManager(m, p.managerIdentity));
+      if (rows.length !== 1 || rows[0].status !== 'online' || rows[0].rootPid !== p.pid) fail();
+      const observedTree = snapshot.processes.filter((s) =>
+        sameManager(s.managerIdentity, p.managerIdentity),
+      );
+      if (
+        observedTree.length !== tree.length ||
+        tree.some((t) => !observedTree.some((s) => sameProcess(s, t)))
+      )
+        fail();
+      for (const child of tree) {
+        checkTarget(child);
+        if (isRootGateway(p) && (!isRootGateway(child) || child.cwd !== p.cwd)) fail();
+        let ancestor = child;
+        const seen = new Set();
+        while (ancestor.pid !== p.pid) {
+          if (seen.has(ancestor.pid)) fail();
+          seen.add(ancestor.pid);
+          ancestor = tree.find((t) => t.pid === ancestor.ppid);
+          if (!ancestor) fail();
+        }
+      }
+      if (p.ppid !== p.managerIdentity.pid) fail();
+      if (isRootGateway(p) && p.exe !== '/usr/bin/node') fail();
+    } else if (p.managerIdentity.kind !== 'unmanaged') fail();
+  }
+  return {
+    ...observation,
+    pm2Stop: async (p, tree = [p]) => {
+      await recheck(p, tree, true);
+      try {
+        // Deliberately no timeout-kill of the CLI: its daemon may still be stopping
+        // the approved target. Any error is uncertain and must not be retried.
+        await exec('pm2', ['stop', String(p.managerIdentity.pmId), '--watch'], {
+          env: fixedEnv,
+          cwd: p.cwd,
+        });
+      } catch {
+        throw new Error('CUTOVER_STOP_UNCERTAIN');
+      }
+    },
+    signalPinned: async (p) => {
+      await recheck(p, [p], false);
+      try {
+        await exec(
+          '/usr/bin/python3',
+          [fileURLToPath(new URL('./browser-first-cutover-signal.py', import.meta.url)), '--stdin'],
+          { env: fixedEnv, cwd: p.cwd, input: JSON.stringify(p) },
+        );
+      } catch {
+        throw new Error('CUTOVER_STOP_UNCERTAIN');
+      }
+    },
+  };
+}

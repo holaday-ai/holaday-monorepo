@@ -19,7 +19,9 @@ import {
   X,
 } from 'lucide-react';
 import * as React from 'react';
+import { useBrowserOwnership } from '@/hooks/useBrowserOwnership';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { LocalChromeTaskPanel } from '@/components/LocalChromeTaskPanel';
 import { Button } from '@/components/ui/button';
 import {
   browserLiveOverlayCopy,
@@ -277,7 +279,13 @@ interface Props {
  * agent missed, or plain "I want to browse this site from HOLA DAY's
  * headless Chrome" free-drive.
  */
-export function BrowserPanel({
+export function BrowserPanel(props: Props): JSX.Element | null {
+  const local = useTaskStore(state => state.tasks.find(task => task.taskId === props.activeTaskId)?.browserSource === 'local-chrome');
+  if (local && props.activeTaskId) return props.open === false ? null : <div className={props.layout === 'sheet' ? 'fixed inset-x-0 bottom-0 z-[75] h-[calc(100dvh-56px)] bg-background' : 'h-full w-full min-w-0'}><LocalChromeTaskPanel key={props.activeTaskId} taskId={props.activeTaskId} status={props.taskStatus} onClose={props.onClose} /></div>;
+  return <CloudBrowserPanel {...props} />;
+}
+
+function CloudBrowserPanel({
   frame,
   taskStatus,
   awaitingUser,
@@ -357,7 +365,7 @@ export function BrowserPanel({
   }, [isSheet]);
   // Interactive mode is in the global store so the TaskStream's
   // "Continue in browser" button can flip it on from the left panel.
-  const interactive = useTaskStore((s) => s.browserInteractive);
+  const requestedInteractive = useTaskStore((s) => s.browserInteractive);
   const setInteractive = useTaskStore((s) => s.setBrowserInteractive);
 
   const activeTask = useTaskStore((s) =>
@@ -547,6 +555,24 @@ export function BrowserPanel({
     });
   }, [screencastUrlForCdp, activeTaskId, taskTerminal, isNonPoolTask]);
   const [vncStatus, setVncStatus] = React.useState<VncStatus>('idle');
+  const ownership = useBrowserOwnership(usingCdp ? activeTaskId ?? null : null, vncStatus === 'connected');
+  const requestOwnership = ownership.request;
+  const interactive = Boolean(ownership.lease);
+  const previousIntent = React.useRef(false);
+  React.useEffect(() => {
+    if (previousIntent.current === requestedInteractive) return;
+    if (vncStatus !== 'connected' || !ownership.supported || ownership.pending) return;
+    previousIntent.current = requestedInteractive;
+    if (requestedInteractive && !interactive) void requestOwnership('takeover');
+    else if (!requestedInteractive && interactive) void requestOwnership('return');
+  }, [requestedInteractive, interactive, requestOwnership, vncStatus, ownership.supported, ownership.pending]);
+  React.useEffect(() => {
+    if (previousIntent.current !== requestedInteractive || ownership.pending) return;
+    if (ownership.state?.phase === 'human' || ownership.state?.phase === 'agent' || ownership.state?.phase === 'closed') {
+      previousIntent.current = interactive;
+      setInteractive(interactive);
+    }
+  }, [ownership.state?.phase, ownership.pending, requestedInteractive, interactive, setInteractive]);
   // P3 hibernation detection: count consecutive failed attempts. The
   // pool's idle GC reaps after 5 min, after which /vnc-ws/ rejects
   // with HTTP 409 ("browser not allocated") which surfaces in noVNC
@@ -872,21 +898,23 @@ export function BrowserPanel({
       'about:blank');
   const displayUrlIsPendingTarget =
     startupTargetUrl != null && displayUrl === startupTargetUrl;
-  // When the agent parks on awaiting-user (captcha, login wall, user
-  // question the model injected), auto-flip the panel to interactive
-  // mode — the user almost certainly needs to click into the browser
-  // to unblock it. Only auto-enable; never auto-disable, so a user who
-  // deliberately toggled off stays in view-only mode on their next
-  // task's captcha. Trigger condition covers both rendering lanes:
-  //   - VNC: live connection present.
-  //   - JPEG fallback: a real frame (not about:blank).
+  // Request once per browser-wait episode. A stale login banner must not
+  // immediately retake the browser after the user deliberately hands it back.
+  const autoTakeoverEpisode = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (!browserAwaiting || interactive) return;
+    if (!browserAwaiting) { autoTakeoverEpisode.current = null; return; }
+    const episode = `${activeTaskId}:${awaitingKind}`;
+    if (autoTakeoverEpisode.current === episode) return;
+    if (interactive) { autoTakeoverEpisode.current = episode; return; }
+    if (!usingCdp || !browserAwaiting || interactive) return;
     const hasLiveViewport = useVnc
       ? vncStatus === 'connected' || vncStatus === 'connecting'
       : Boolean(frame) && !isBlankUrl(frame?.url);
-    if (hasLiveViewport) setInteractive(true);
-  }, [browserAwaiting, interactive, useVnc, vncStatus, frame, setInteractive]);
+    if (hasLiveViewport) {
+      autoTakeoverEpisode.current = episode;
+      setInteractive(true);
+    }
+  }, [usingCdp, browserAwaiting, interactive, activeTaskId, awaitingKind, useVnc, vncStatus, frame, setInteractive]);
   // Recent steps for the in-panel activity overlay. Select WITHOUT a
   // fresh-array fallback — zustand treats each new `[]` as a changed
   // snapshot and infinite-loops the component (getSnapshot cache warn,
@@ -1037,12 +1065,25 @@ export function BrowserPanel({
         taskStatus,
         finalEvidenceFrame?.url ?? persistedFinalUrl,
       )
-    : headerStatus;
+    : usingCdp && !workspaceIdle ? {
+        ...headerStatus,
+        label: ownership.error === 'input_outcome_unknown' ? '会话异常'
+          : ownership.pending ? (ownership.state?.phase === 'human' ? '正在交还' : '正在交接')
+          : ownership.state?.phase === 'requested' ? '正在交接'
+          : ownership.state?.phase === 'resuming' ? '正在交还'
+          : ownership.error === 'observation_failed' ? '观察失败，可重试交还'
+          : interactive ? '你在操作' : !ownership.supported ? '仅观察' : taskIsTerminal ? '浏览器就绪' : 'AI 正在操作',
+        tooltip: ownership.error ? '暂未恢复 AI 操作，请检查连接或重试交还。' : headerStatus.tooltip,
+        showLabel: true,
+      } : headerStatus;
 
   const browserControl = browserControlAction({
     interactive,
     taskIsTerminal,
   });
+  const controlDisabled = !usingCdp || ownership.pending || ownership.state?.phase === 'requested' || ownership.state?.phase === 'resuming' ||
+    (!ownership.supported && !terminalSessionUnavailable) || ownership.error === 'input_outcome_unknown' ||
+    (ownership.state?.phase === 'closed' && !taskIsTerminal);
   const inputFallbackMode = browserInputFallbackMode({
     interactiveActive,
     usingCdp,
@@ -1053,6 +1094,7 @@ export function BrowserPanel({
     setCjkFallbackOpen(false);
   }, [activeTaskId]);
   const handleUserTakeoverClick = React.useCallback(() => {
+    if (controlDisabled) return;
     const next = browserControl.nextInteractive;
     if (next) {
       // If a terminal process was released, takeover first restores the same
@@ -1061,11 +1103,14 @@ export function BrowserPanel({
         void restoreTerminalSession(true).then((restored) => {
           if (!restored || !mountedRef.current) return;
           setInteractive(true);
+          void requestOwnership('takeover');
         });
         return;
       }
     }
     setInteractive(next);
+    previousIntent.current = next;
+    void requestOwnership(next ? 'takeover' : 'return');
     if (browserControl.focusFollowUp) onRequestAgentHelp?.();
   }, [
     browserControl,
@@ -1073,6 +1118,8 @@ export function BrowserPanel({
     restoreTerminalSession,
     terminalSessionUnavailable,
     setInteractive,
+    controlDisabled,
+    requestOwnership,
   ]);
 
   // Codex P2 — hide the address bar / nav / takeover chrome when
@@ -1095,13 +1142,14 @@ export function BrowserPanel({
 
   const sendInput = React.useCallback(
     (payload: Omit<UserInputEvent, 'type' | 'taskId'>) => {
+      if (!interactive || usingCdp) return;
       wsSend({
         type: 'client.vision.user_input',
         ...(activeTaskId ? { taskId: activeTaskId } : {}),
         ...payload,
       } as never);
     },
-    [activeTaskId],
+    [activeTaskId, interactive, usingCdp],
   );
 
   const mapToViewport = React.useCallback(
@@ -1358,6 +1406,8 @@ export function BrowserPanel({
                 interactiveActive={interactiveActive}
                 interactive={interactive}
                 controlAction={browserControl}
+                controlLease={ownership.lease}
+                controlDisabled={controlDisabled}
                 onToggleInteractive={handleUserTakeoverClick}
                 navTaskId={evidenceHeaderActive ? null : activeTaskId ?? null}
                 controlsEnabled={!evidenceHeaderActive}
@@ -1409,17 +1459,18 @@ export function BrowserPanel({
                   button when a page hangs. */}
               {!evidenceHeaderActive && !workspaceIdle && !isNarrow && !isSheet && (
                 <div className="hidden items-center gap-1 sm:flex">
-                  <NavButton direction="back" title="后退" navTaskId={activeTaskId ?? null} />
-                  <NavButton direction="forward" title="前进" navTaskId={activeTaskId ?? null} />
+                  <NavButton direction="back" title="后退" navTaskId={activeTaskId ?? null} controlLease={ownership.lease} />
+                  <NavButton direction="forward" title="前进" navTaskId={activeTaskId ?? null} controlLease={ownership.lease} />
                 </div>
               )}
               {!evidenceHeaderActive && !workspaceIdle && (
-                <NavButton direction="reload" title="刷新" navTaskId={activeTaskId ?? null} />
+                <NavButton direction="reload" title="刷新" navTaskId={activeTaskId ?? null} controlLease={ownership.lease} />
               )}
               <UrlBar
                 displayUrl={workspaceIdle ? '' : displayUrl}
                 interactiveActive={interactiveActive}
                 navTaskId={evidenceHeaderActive ? null : activeTaskId ?? null}
+                controlLease={ownership.lease}
                 readOnly={evidenceHeaderActive}
                 pendingTarget={displayUrlIsPendingTarget}
                 onLaunchTask={workspaceIdle ? onStartWorkspaceTask : undefined}
@@ -1446,6 +1497,7 @@ export function BrowserPanel({
                 <button
                   type="button"
                   onClick={handleUserTakeoverClick}
+                  disabled={controlDisabled}
                   title={browserControl.title}
                   aria-label={browserControl.ariaLabel}
                   aria-pressed={interactive}
@@ -1610,6 +1662,7 @@ export function BrowserPanel({
                     streamToken={streamToken}
                     reconnectSignal={reconnectEpoch}
                     viewOnly={!interactiveActive}
+                    controlLease={ownership.lease}
                     fitMode={isSheet ? 'readable' : 'contain'}
                     onStatusChange={(s: CdpScreencastStatus) =>
                       // Reuse the VNC status state — the enum values
@@ -2805,6 +2858,7 @@ function UrlBar({
   displayUrl,
   interactiveActive,
   navTaskId,
+  controlLease,
   readOnly = false,
   pendingTarget = false,
   onLaunchTask,
@@ -2819,6 +2873,7 @@ function UrlBar({
    * backend falls through to peekActiveForUser.
    */
   navTaskId: string | null;
+  controlLease: string | null;
   readOnly?: boolean;
   /** Requested destination shown before the first observed page URL arrives. */
   pendingTarget?: boolean;
@@ -2850,7 +2905,7 @@ function UrlBar({
   const UrlIcon = pending || pendingTarget ? RotateCw : isSecurePage ? LockKeyhole : Globe;
 
   const submit = async (): Promise<void> => {
-    if (readOnly) return;
+    if (readOnly || (!onLaunchTask && !controlLease)) return;
     if (pending) return;
     const target = draft.trim();
     if (!target || (!onLaunchTask && target === displayUrl)) {
@@ -2871,6 +2926,7 @@ function UrlBar({
       }
       const res = await trpc.tasks.browserNav.mutate({
         direction: 'goto',
+        controlLease: controlLease ?? undefined,
         url: target,
         ...(navTaskId ? { taskId: navTaskId } : {}),
       });
@@ -2920,7 +2976,7 @@ function UrlBar({
         autoComplete="off"
         value={draft}
         placeholder={onLaunchTask ? '输入网址或搜索内容' : '输入网址回车跳转'}
-        readOnly={readOnly}
+        readOnly={readOnly || (!onLaunchTask && !controlLease)}
         onFocus={() => {
           if (!readOnly) setEditing(true);
         }}
@@ -2985,11 +3041,13 @@ function NavButton({
   direction,
   title,
   navTaskId,
+  controlLease,
 }: {
   direction: 'back' | 'forward' | 'reload';
   title: string;
   /** F3 — same as UrlBar's navTaskId. Null falls through to user-pick. */
   navTaskId: string | null;
+  controlLease: string | null;
 }): JSX.Element {
   const toast = useToast();
   const [pending, setPending] = React.useState(false);
@@ -3006,13 +3064,14 @@ function NavButton({
       type="button"
       title={title}
       aria-label={title}
-      disabled={pending}
+      disabled={pending || !controlLease}
       onClick={async () => {
-        if (pending) return;
+        if (pending || !controlLease) return;
         setPending(true);
         try {
           const res = await trpc.tasks.browserNav.mutate({
             direction,
+            controlLease,
             ...(navTaskId ? { taskId: navTaskId } : {}),
           });
           if (!res.ok) {
@@ -3073,6 +3132,8 @@ function FullscreenFloatingToolbar({
   interactiveActive,
   interactive,
   controlAction,
+  controlLease,
+  controlDisabled,
   onToggleInteractive,
   navTaskId,
   controlsEnabled,
@@ -3086,6 +3147,8 @@ function FullscreenFloatingToolbar({
   interactiveActive: boolean;
   interactive: boolean;
   controlAction: BrowserControlAction;
+  controlLease: string | null;
+  controlDisabled: boolean;
   onToggleInteractive: () => void;
   navTaskId: string | null;
   controlsEnabled: boolean;
@@ -3145,15 +3208,16 @@ function FullscreenFloatingToolbar({
       <BrowserConnectionChip state={status} compact={false} />
       {controlsEnabled && (
         <>
-          <NavButton direction="back" title="后退" navTaskId={navTaskId} />
-          <NavButton direction="forward" title="前进" navTaskId={navTaskId} />
-          <NavButton direction="reload" title="刷新" navTaskId={navTaskId} />
+          <NavButton direction="back" title="后退" navTaskId={navTaskId} controlLease={controlLease} />
+          <NavButton direction="forward" title="前进" navTaskId={navTaskId} controlLease={controlLease} />
+          <NavButton direction="reload" title="刷新" navTaskId={navTaskId} controlLease={controlLease} />
         </>
       )}
       <UrlBar
         displayUrl={displayUrl}
         interactiveActive={interactiveActive}
         navTaskId={navTaskId}
+        controlLease={controlLease}
         readOnly={!controlsEnabled}
         pendingTarget={pendingTarget}
       />
@@ -3178,6 +3242,7 @@ function FullscreenFloatingToolbar({
         <button
           type="button"
           onClick={onToggleInteractive}
+          disabled={controlDisabled}
           title={controlAction.title}
           aria-label={controlAction.ariaLabel}
           className={cn(

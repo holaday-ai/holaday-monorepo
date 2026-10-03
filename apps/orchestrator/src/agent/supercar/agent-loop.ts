@@ -32,6 +32,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createHash } from 'node:crypto';
+import type { BrowserControl } from './browser-control.js';
 import {
   type AntiBotSignal,
   describeSignal,
@@ -51,6 +52,11 @@ import {
 } from '../../files/writers.js';
 import type { DomainName } from '../vision-loop/domain/classifier.js';
 import type { LlmCallRecorder } from '../llm-call-recorder.js';
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { MessagesAdapterError } from '../../llm/messages-adapter.js';
+import { createBrowserMessage, type BrowserModelResponse } from './browser-messages.js';
+import { toBrowserPixels } from './browser-coordinates.js';
+import { recordedBrowserAdapter } from './recorded-browser-adapter.js';
 import type { ApifyAdapter } from './adapters/apify.js';
 import type { ZapierAdapter } from './adapters/zapier.js';
 import { translateError } from '../error-translator.js';
@@ -631,6 +637,13 @@ export interface SupercarOutcome {
 }
 
 export interface SupercarTickEvent {
+  /** Selected Chrome emits receipt-backed records, not optimistic model ticks. */
+  execution?: {
+    actionKind: string;
+    actionSummary: string;
+    ok: boolean;
+    message?: string;
+  };
   iteration: number;
   /**
    * All tool names the model invoked in THIS iteration. Typically 0 or
@@ -749,6 +762,11 @@ export interface SupercarEvidenceEvent {
 }
 
 export interface RunSupercarOptions {
+  /** Region-resolved production model. Omission retains the legacy fixture path. */
+  messagesAdapter?: MessagesAdapter;
+  /** Opt-in until navigation and input channels share the same owner receipt. */
+  browserControl?: BrowserControl;
+  browserControlFactory?: () => { control: BrowserControl; finish: () => void };
   /** External task id (task_…). Correlates hooks and WS frames. */
   taskId: string;
   /** Free-form user intent — the first user message. */
@@ -1162,11 +1180,14 @@ const COMPUTER_USE_BETA = 'computer-use-2025-11-24';
 
 interface SupercarRunLifecycle {
   cancelled: boolean;
+  modelAbort: AbortController;
   handle: RunHandle;
 }
 
 export function runSupercarTask(opts: RunSupercarOptions): Promise<SupercarOutcome> {
-  const lifecycle = { cancelled: false } as SupercarRunLifecycle;
+  const binding = opts.browserControlFactory?.();
+  if (binding) opts = { ...opts, browserControl: binding.control };
+  const lifecycle = { cancelled: false, modelAbort: new AbortController() } as SupercarRunLifecycle;
   const handle: RunHandle = {
     resolveReply: null,
     handoffMessage: null,
@@ -1174,6 +1195,8 @@ export function runSupercarTask(opts: RunSupercarOptions): Promise<SupercarOutco
     pendingAttachmentBlocks: null,
     abort: () => {
       lifecycle.cancelled = true;
+      lifecycle.modelAbort.abort();
+      opts.browserControl?.close();
       if (handle.resolveReply) {
         const resolve = handle.resolveReply;
         handle.resolveReply = null;
@@ -1183,7 +1206,10 @@ export function runSupercarTask(opts: RunSupercarOptions): Promise<SupercarOutco
   };
   lifecycle.handle = handle;
   handles.set(opts.taskId, handle);
-  return runSupercarTaskInternal(opts, lifecycle).finally(() => {
+  return runSupercarTaskInternal(opts, lifecycle).finally(async () => {
+    opts.browserControl?.close();
+    await opts.browserControl?.settled();
+    binding?.finish();
     if (handles.get(opts.taskId) === handle) handles.delete(opts.taskId);
   });
 }
@@ -1194,6 +1220,7 @@ async function runSupercarTaskInternal(
 ): Promise<SupercarOutcome> {
   const handle = lifecycle.handle;
   const cancellationRequested = async (): Promise<boolean> => {
+    if (opts.browserControl?.snapshot().phase === 'closed') lifecycle.cancelled = true;
     if (lifecycle.cancelled) return true;
     const durablyCancelled = await opts.isTaskCancelled?.();
     if (lifecycle.cancelled || durablyCancelled) {
@@ -1208,7 +1235,7 @@ async function runSupercarTaskInternal(
     toolsUsed: [],
   });
   const apiKey = opts.apiKey ?? process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
+  if (!opts.messagesAdapter && !apiKey) {
     return {
       status: 'failed',
       reason: 'missing ANTHROPIC_API_KEY',
@@ -1220,7 +1247,7 @@ async function runSupercarTaskInternal(
   // Phase 10 Tier 1 — visibility log up-front. Fires for EVERY supercar
   // entry, including ones that exit via the Zapier short-circuit
   // below before the model loop ever runs.
-  const tier1Diag = appEnv.PHASE10_TIER1;
+  const tier1Diag = !opts.messagesAdapter && appEnv.PHASE10_TIER1;
   if (tier1Diag) {
     // Honour the gated role override here too — the diag log should
     // reflect what the loop will actually use, not the raw classifier
@@ -1329,12 +1356,12 @@ async function runSupercarTaskInternal(
     };
   }
 
-  const client = new Anthropic({ apiKey });
+  const client = opts.messagesAdapter ? null : new Anthropic({ apiKey });
   // Phase 10 Tier 1: route model + effort + task_budget per (intent, role).
   // When the env flag is off the legacy fixed-model path runs, identical to
   // pre-Tier-1 behaviour. `roleId` also drives which Role layer the prompt
   // composer injects below.
-  const tier1 = appEnv.PHASE10_TIER1;
+  const tier1 = !opts.messagesAdapter && appEnv.PHASE10_TIER1;
   // Use the caller's gated role when supplied; only fall back to
   // classifying the raw intent for legacy callers (tests, the smoke
   // path) that don't have a user context. The gate matters because
@@ -1365,7 +1392,7 @@ async function runSupercarTaskInternal(
       'supercar: upgraded Haiku → Sonnet (adaptive-thinking compatibility)',
     );
   }
-  const model = routed.model;
+  const model = opts.messagesAdapter?.metadata.model ?? routed.model;
   const effort: Effort = routed.effort;
   const taskBudget = tier1 ? getTaskBudget(opts.intent, roleId) : null;
   // Opus 4.7 has a more expensive tokenizer (1-1.35× input bytes/token);
@@ -1379,7 +1406,7 @@ async function runSupercarTaskInternal(
     opts.maxIterations ?? Number.parseInt(process.env.SUPERCAR_MAX_ITERATIONS ?? '50', 10);
   const timeoutMs =
     opts.timeoutMs ?? Number.parseInt(process.env.SUPERCAR_TIMEOUT_MS ?? '600000', 10);
-  const deadline = Date.now() + timeoutMs;
+  let deadline = Date.now() + timeoutMs;
   let lastSearchEcommerceResultText: string | null = null;
 
   // Browser executor is LET, not const — Phase 6-2 swaps it to the
@@ -1487,8 +1514,8 @@ async function runSupercarTaskInternal(
       toolsUsed: [],
     };
   }
-  const displayWidth = initialShot.viewportWidth ?? 1280;
-  const displayHeight = initialShot.viewportHeight ?? 800;
+  let displayWidth = initialShot.viewportWidth ?? 1280;
+  let displayHeight = initialShot.viewportHeight ?? 800;
 
   // Fire the first screencast so the UI gets a frame before Claude's
   // first response lands.
@@ -1509,6 +1536,7 @@ async function runSupercarTaskInternal(
   // the lean Base + Role + Style layout. Layered prompts cache better
   // (Base is identical across all tasks) and are cheaper per request.
   const systemPrompt = buildSupercarSystemPrompt({
+    normalizedCoordinates: opts.messagesAdapter?.metadata.provider === 'alibaba-model-studio',
     domain: opts.domain ?? null,
     intent: opts.intent,
     roleId,
@@ -1634,25 +1662,13 @@ async function runSupercarTaskInternal(
       const question =
         verdict.question ??
         '即将执行可能产生外部影响的操作。请明确回复“确认执行”后继续。';
-      let waitTimer: NodeJS.Timeout | null = null;
-      const replyPromise = new Promise<string>((resolve) => {
-        handle.resolveReply = resolve;
-      });
-      await safeCall(opts.onAwaitingUser, {
+      const waiting = await waitForUser({
         question,
         at: new Date(),
         currentUrl: action.pageUrl ?? action.url ?? null,
         awaitingKind: 'browser_action',
-      });
-      const timeoutPromise = new Promise<string>((resolve) => {
-        waitTimer = setTimeout(
-          () => resolve('__SUPERCAR_AWAITING_TIMEOUT__'),
-          AWAITING_USER_TIMEOUT_TAKEOVER_MS,
-        );
-      });
-      const reply = await Promise.race([replyPromise, timeoutPromise]);
-      if (waitTimer) clearTimeout(waitTimer);
-      handle.resolveReply = null;
+      }, AWAITING_USER_TIMEOUT_TAKEOVER_MS);
+      const reply = waiting.reply;
       if (reply === '__SUPERCAR_ABORT__' || lifecycle.cancelled) {
         return {
           status: 'cancelled',
@@ -1668,6 +1684,7 @@ async function runSupercarTaskInternal(
           toolsUsed: Array.from(toolsUsed),
         };
       }
+      if (waiting.observation) return { kind: 'skip_pending_action', content: waiting.observation };
       const { isAffirmativeActionConfirmation } = await import(
         './runtime-action-policy.js'
       );
@@ -1767,16 +1784,12 @@ async function runSupercarTaskInternal(
     url: string | null,
   ): Promise<SupercarOutcome | AuthWallResume> {
     const question = buildAuthParkQuestion(kind, url);
-    let waitTimer: NodeJS.Timeout | null = null;
-    const replyPromise = new Promise<string>((resolve) => {
-      handle.resolveReply = resolve;
-    });
-    await safeCall(opts.onAwaitingUser, {
+    const waiting = await waitForUser({
       question,
       at: new Date(),
       currentUrl: url,
       awaitingKind: kind,
-    });
+    }, AWAITING_USER_TIMEOUT_TAKEOVER_MS);
     if (lifecycle.cancelled) {
       return {
         status: 'cancelled',
@@ -1784,15 +1797,7 @@ async function runSupercarTaskInternal(
         toolsUsed: Array.from(toolsUsed),
       };
     }
-    const timeoutPromise = new Promise<string>((resolve) => {
-      waitTimer = setTimeout(
-        () => resolve('__SUPERCAR_AWAITING_TIMEOUT__'),
-        AWAITING_USER_TIMEOUT_TAKEOVER_MS,
-      );
-    });
-    const replyOrAbort = await Promise.race([replyPromise, timeoutPromise]);
-    if (waitTimer) clearTimeout(waitTimer);
-    handle.resolveReply = null;
+    const replyOrAbort = waiting.reply;
     if (handle.handoffMessage !== null) {
       const handoffMsg = handle.handoffMessage;
       handle.handoffMessage = null;
@@ -1838,11 +1843,79 @@ async function runSupercarTaskInternal(
     } else {
       content = [{ type: 'text', text: replyOrAbort }];
     }
+    if (waiting.observation) content.push(...waiting.observation);
     return { kind: 'auth_wall_resumed', content };
+  }
+
+  // Called only between complete logical tools, never from an unjoined
+  // browser-operation timeout. The transport must not grant user input until
+  // this checkpoint has published a human lease.
+  const observeBrowser = async (): Promise<ContentBlockParam[]> => {
+      const currentPage = (await executor.getPage()) as unknown as PageLike;
+      const shot = await executor.screenshot(currentPage);
+      if (shot.error || !shot.base64) throw new Error('browser_control_observation_failed');
+      page = currentPage;
+      displayWidth = shot.viewportWidth ?? displayWidth;
+      displayHeight = shot.viewportHeight ?? displayHeight;
+      lastScreenshotHash = createHash('md5').update(shot.base64).digest('hex');
+      stuckCount = 0;
+      activeAntiBotSignal = null;
+      const observation: ContentBlockParam[] = [
+        { type: 'text', text: `浏览器控制权或窗口尺寸已更新。请根据当前页面重新规划，不要重放更新前的旧动作。当前 URL：${currentPage.url()}` },
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: shot.base64 } },
+      ];
+      await safeCall(opts.onScreencast, {
+        iteration, imageBase64: shot.base64, url: currentPage.url(),
+        viewportWidth: shot.viewportWidth ?? displayWidth,
+        viewportHeight: shot.viewportHeight ?? displayHeight,
+      });
+      return observation;
+  };
+  const manualCheckpoint = async (): Promise<ContentBlockParam[] | null> => {
+    const control = opts.browserControl;
+    if (!control) return null;
+    let observation: ContentBlockParam[] | null = null;
+    const receipt = await control.checkpoint(async () => { observation = await observeBrowser(); });
+    deadline += receipt.waitedMs;
+    return receipt.resumed ? observation : null;
+  };
+
+  async function waitForUser(
+    event: Parameters<NonNullable<RunSupercarOptions['onAwaitingUser']>>[0],
+    timeoutMs: number,
+  ): Promise<{ reply: string; observation: ContentBlockParam[] | null }> {
+    let resolveReply!: (reply: string) => void;
+    const reply = new Promise<string>((resolve) => { resolveReply = resolve; });
+    handle.resolveReply = resolveReply;
+    let timer: NodeJS.Timeout | undefined;
+    let observation: ContentBlockParam[] | null = null;
+    try {
+      await safeCall(opts.onAwaitingUser, event);
+      if (lifecycle.cancelled) return { reply: '__SUPERCAR_ABORT__', observation };
+      if (opts.browserControl) {
+        const receipt = await opts.browserControl.waitForReply(reply, async () => {
+          observation = await observeBrowser();
+        }, timeoutMs);
+        deadline += receipt.waitedMs;
+        return {
+          reply: receipt.reason === 'closed' ? '__SUPERCAR_ABORT__'
+            : receipt.reason === 'timeout' ? '__SUPERCAR_AWAITING_TIMEOUT__' : receipt.value ?? '',
+          observation,
+        };
+      }
+      return { reply: await Promise.race([reply, new Promise<string>((resolve) => {
+        timer = setTimeout(() => resolve('__SUPERCAR_AWAITING_TIMEOUT__'), timeoutMs);
+      })]), observation };
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (handle.resolveReply === resolveReply) handle.resolveReply = null;
+    }
   }
 
   try {
     while (iteration < maxIterations && Date.now() < deadline && !lifecycle.cancelled) {
+      const manualObservation = await manualCheckpoint();
+      if (manualObservation) messages.push({ role: 'user', content: manualObservation });
       if (await cancellationRequested()) {
         return {
           status: 'cancelled',
@@ -1859,7 +1932,9 @@ async function runSupercarTaskInternal(
       // experienced this iteration. Used by onStatsRecord below.
       const iterationStart = Date.now();
       const apiStart = Date.now();
-      let response: Anthropic.Beta.BetaMessage;
+      // Bind this response's coordinates to the frame sent with its request.
+      const modelViewport = { width: displayWidth, height: displayHeight };
+      let response: BrowserModelResponse;
       // Phase 10 follow-up: bound each API call at 120s and retry
       // once on timeout. Without this, a stalled Anthropic backend
       // can leave the task in 'executing' indefinitely (the outer
@@ -1900,8 +1975,8 @@ async function runSupercarTaskInternal(
         // when the registry adds new task types, the filter will
         // gate accordingly. BANNED_TOOLS (bash, shell, ...) can never
         // reach the model regardless of how the array was assembled.
-        const supercarTaskType = classifyTaskType(opts.intent);
-        const buildApiCall = () => client.beta.messages.create({
+        const supercarTaskType = opts.messagesAdapter ? 'browser' : classifyTaskType(opts.intent);
+        const apiRequest: Anthropic.Beta.MessageCreateParamsNonStreaming = {
           model,
           max_tokens: maxTokens,
           // Top-level cache_control auto-places the breakpoint on the
@@ -2094,28 +2169,46 @@ async function runSupercarTaskInternal(
           // Pin the same sandbox container across turns when the model
           // used code_execution on a prior turn; null on the first call.
           ...(containerId ? { container: containerId } : {}),
-        });
+        };
 
-        try {
-          response = await callWithTimeout(buildApiCall(), API_TIMEOUT_MS, `iter ${iteration} api`);
-        } catch (firstErr) {
-          if (!(firstErr instanceof IterationTimeoutError)) throw firstErr;
-          logger.warn(
-            { taskId: opts.taskId, iteration, apiTimeoutMs: API_TIMEOUT_MS },
-            'supercar: api call timed out, retrying once',
-          );
-          // Reissue the same args. Anthropic API is stateless from our
-          // side; a retry restarts the model from scratch with the
-          // identical messages history.
-          response = await callWithTimeout(buildApiCall(), API_TIMEOUT_MS, `iter ${iteration} api retry`);
+        if (opts.messagesAdapter) {
+          // The shared transport owns timeout, retry, abort and response disposal.
+          const recordedAdapter = recordedBrowserAdapter(opts.messagesAdapter, {
+            recorder: opts.recorder,
+            userExternalId: opts.userExternalId,
+            taskId: opts.taskId,
+            iteration,
+            onRecordError: () => logger.error({ taskId: opts.taskId, iteration }, 'supercar: usage persistence failed'),
+          });
+          response = await createBrowserMessage(recordedAdapter, apiRequest, {
+            signal: lifecycle.modelAbort.signal,
+            timeoutMs: Math.min(API_TIMEOUT_MS, Math.max(1, deadline - Date.now())),
+            maxRetries: 0,
+          });
+        } else {
+          if (!client) throw new Error('Legacy browser client unavailable');
+          const buildApiCall = () => client.beta.messages.create(apiRequest);
+
+          try {
+            response = await callWithTimeout(buildApiCall(), API_TIMEOUT_MS, `iter ${iteration} api`);
+          } catch (firstErr) {
+            if (!(firstErr instanceof IterationTimeoutError)) throw firstErr;
+            logger.warn(
+              { taskId: opts.taskId, iteration, apiTimeoutMs: API_TIMEOUT_MS },
+              'supercar: api call timed out, retrying once',
+            );
+            response = await callWithTimeout(buildApiCall(), API_TIMEOUT_MS, `iter ${iteration} api retry`);
+          }
         }
       } catch (err) {
+        if (await cancellationRequested()) return cancelledOutcome();
         const message = err instanceof Error ? err.message : String(err);
-        const isTimeout = err instanceof IterationTimeoutError;
+        const qwenTimeout = err instanceof MessagesAdapterError && err.code === 'REQUEST_TIMEOUT';
+        const isTimeout = qwenTimeout || err instanceof IterationTimeoutError;
         logger.error(
           { taskId: opts.taskId, iteration, err: message, isTimeout },
           isTimeout
-            ? 'supercar: api call timed out twice — failing task'
+            ? 'supercar: api call timed out — stopping task'
             : 'supercar: messages.create threw',
         );
         // User-facing reason goes through translateError so technical
@@ -2123,11 +2216,13 @@ async function runSupercarTaskInternal(
         // "ETIMEDOUT") never reach the SSE stream / task summary.
         // Original message is preserved in the logger.error above for
         // ops debugging.
-        const friendly = isTimeout
-          ? '请求处理时间过长，正在重试。'
-          : translateError(message, opts.intent);
+        const friendly = qwenTimeout
+          ? '模型响应超时，本次执行已停止；已完成动作不会自动重放。'
+          : isTimeout
+            ? '请求处理时间过长，正在重试。'
+            : translateError(message, opts.intent);
         return {
-          status: 'failed',
+          status: qwenTimeout ? 'timeout' : 'failed',
           reason: friendly,
           iterations: iteration,
           toolsUsed: Array.from(toolsUsed),
@@ -2154,10 +2249,11 @@ async function runSupercarTaskInternal(
           taskId: opts.taskId,
           iteration,
           model,
-          inputTokens: response.usage?.input_tokens ?? 0,
-          outputTokens: response.usage?.output_tokens ?? 0,
-          cacheReadInputTokens: response.usage?.cache_read_input_tokens ?? 0,
-          cacheCreationInputTokens: response.usage?.cache_creation_input_tokens ?? 0,
+          provider: opts.messagesAdapter?.metadata.provider ?? 'anthropic',
+          inputTokens: response.usage?.input_tokens ?? null,
+          outputTokens: response.usage?.output_tokens ?? null,
+          cacheReadInputTokens: response.usage?.cache_read_input_tokens ?? null,
+          cacheCreationInputTokens: response.usage?.cache_creation_input_tokens ?? null,
           apiLatencyMs,
           // stop_reason + block counts let us tell at a glance why the
           // loop will exit / continue. Critical for diagnosing the
@@ -2178,7 +2274,9 @@ async function runSupercarTaskInternal(
       // block or break the browse loop (same discipline as the B-series
       // captures). Recorded on the SUCCESS path only (the API-failure branch
       // above returns before here), once per iteration, so no double-count.
-      if (opts.recorder && opts.userExternalId) {
+      // Qwen is recorded once at the adapter boundary (including failed attempts).
+      // Keep the legacy success path separate to avoid double recording.
+      if (!opts.messagesAdapter && opts.recorder && opts.userExternalId) {
         const usage = response.usage;
         void opts.recorder
           .record({
@@ -2197,6 +2295,15 @@ async function runSupercarTaskInternal(
           .catch(() => {
             /* fire-and-forget: a billing-write failure never breaks browsing */
           });
+      }
+
+      // A response generated before manual control was returned is stale.
+      // Discard the entire unappended turn, including its tool requests.
+      const postModelObservation = await manualCheckpoint();
+      if (await cancellationRequested()) return cancelledOutcome();
+      if (postModelObservation) {
+        messages.push({ role: 'user', content: postModelObservation });
+        continue;
       }
 
       // Append the full assistant content — NEVER just the text, and
@@ -2543,25 +2650,14 @@ async function runSupercarTaskInternal(
           // <1ms costs nothing but the value can't have changed in
           // between (no I/O between the two checks).
           const currentParkUrl: string | null = preParkUrl;
-          let waitTimer: NodeJS.Timeout | null = null;
-          const replyPromise = new Promise<string>((resolve) => {
-            handle.resolveReply = resolve;
-          });
-          await safeCall(opts.onAwaitingUser, {
+          const waiting = await waitForUser({
             question: visibleQuestion,
             at: new Date(),
             currentUrl: currentParkUrl,
             awaitingKind: parkAwaitingKind,
-          });
-          const timeoutPromise = new Promise<string>((resolve) => {
-            waitTimer = setTimeout(
-              () => resolve('__SUPERCAR_AWAITING_TIMEOUT__'),
-              AWAITING_USER_TIMEOUT_MS,
-            );
-          });
-          const replyOrAbort = await Promise.race([replyPromise, timeoutPromise]);
-          if (waitTimer) clearTimeout(waitTimer);
-          handle.resolveReply = null;
+          }, AWAITING_USER_TIMEOUT_MS);
+          const replyOrAbort = waiting.reply;
+          if (waiting.observation) messages.push({ role: 'user', content: waiting.observation });
           // F1 — `supercarHandoffToGenerate` set handle.handoffMessage
           // before resolving the promise. Exit the loop now so the
           // dispatcher can run runGenerateTask with the user's data
@@ -2727,6 +2823,8 @@ async function runSupercarTaskInternal(
           });
           return;
         }
+        displayWidth = resumedShot.viewportWidth ?? displayWidth;
+        displayHeight = resumedShot.viewportHeight ?? displayHeight;
         const resumedHash = createHash('md5').update(resumedShot.base64).digest('hex');
         if (lastScreenshotHash !== resumedHash) {
           turnChangedScreenshot = true;
@@ -2755,7 +2853,23 @@ async function runSupercarTaskInternal(
           ],
         });
       };
+      const yieldCurrentTool = async (toolUseId: string): Promise<void> => {
+        const observation = await manualCheckpoint();
+        if (observation) deferredUserContent.push(...observation);
+        skipRemainingToolUses = true;
+        resumedAfterTakeover = true;
+        toolResults.push({
+          type: 'tool_result', tool_use_id: toolUseId,
+          content: [{ type: 'text', text: '用户请求接管，尚未开始的旧动作已取消。请根据交还后的当前页面重新规划。' }],
+        });
+      };
       for (const toolUse of toolUseBlocks) {
+        const manualObservation = await manualCheckpoint();
+        if (manualObservation) {
+          skipRemainingToolUses = true;
+          resumedAfterTakeover = true;
+          deferredUserContent.push(...manualObservation);
+        }
         if (await cancellationRequested()) {
           return {
             status: 'cancelled',
@@ -2856,6 +2970,12 @@ async function runSupercarTaskInternal(
           // friendly message is appended to the tool_result so the
           // model + user see what went wrong in plain language.
           let navErrorFriendly: string | null = null;
+          // No await between this final admission check and starting goto.
+          // Policy, veto and getPage awaits above can all receive a takeover.
+          if (opts.browserControl && !opts.browserControl.canAgentAct()) {
+            await yieldCurrentTool(toolUse.id);
+            continue;
+          }
           try {
             await navPage.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
           } catch (err) {
@@ -2992,6 +3112,8 @@ async function runSupercarTaskInternal(
             // the URL loaded normally.
             extraStatusText = navErrorFriendly;
           }
+          displayWidth = navShot.viewportWidth ?? displayWidth;
+          displayHeight = navShot.viewportHeight ?? displayHeight;
           const navHash = createHash('md5').update(navShot.base64).digest('hex');
           if (lastScreenshotHash !== navHash) {
             turnChangedScreenshot = true;
@@ -3604,7 +3726,29 @@ async function runSupercarTaskInternal(
         }
 
         // Execute the computer use action and return a fresh screenshot.
-        const computerInput = toolUse.input as ComputerActionInput;
+        let computerInput = toolUse.input as ComputerActionInput;
+        if (opts.messagesAdapter?.metadata.provider === 'alibaba-model-studio') {
+          if (
+            (computerInput.coordinate !== undefined || computerInput.start_coordinate !== undefined)
+            && (displayWidth !== modelViewport.width || displayHeight !== modelViewport.height)
+          ) {
+            toolResults.push({
+              type: 'tool_result', tool_use_id: toolUse.id,
+              content: [{ type: 'text', text: 'coordinate viewport changed; reobserve before retrying' }],
+              is_error: true,
+            });
+            continue;
+          }
+          const converted = toBrowserPixels(computerInput, modelViewport.width, modelViewport.height);
+          if (!converted.ok) {
+            toolResults.push({
+              type: 'tool_result', tool_use_id: toolUse.id,
+              content: [{ type: 'text', text: converted.reason }], is_error: true,
+            });
+            continue;
+          }
+          computerInput = converted.input;
+        }
         // Phase 1 Playbook B2 — best-effort per-action capture, taken BEFORE
         // the action so a click/type target reflects the page the model saw.
         // Gated by opts.onAction (wired only when ACTION_CAPTURE is on), so
@@ -3714,7 +3858,12 @@ async function runSupercarTaskInternal(
           executor,
           computerInput,
           cancellationRequested,
+          opts.browserControl ? () => opts.browserControl?.canAgentAct() === true : undefined,
         );
+        if (execResult.controlYielded) {
+          await yieldCurrentTool(toolUse.id);
+          continue;
+        }
         if (execResult.cancelled) {
           return {
             status: 'cancelled',
@@ -3754,6 +3903,8 @@ async function runSupercarTaskInternal(
         // Hash this frame; if it differs from the last we showed Claude
         // the page moved, and we're not stuck. Only flag the turn if at
         // least ONE action moved the page.
+        displayWidth = shot.viewportWidth ?? displayWidth;
+        displayHeight = shot.viewportHeight ?? displayHeight;
         const shotHash = createHash('md5').update(shot.base64).digest('hex');
         if (lastScreenshotHash !== shotHash) {
           turnChangedScreenshot = true;
@@ -4258,6 +4409,7 @@ interface ActionResult {
   ok: boolean;
   summary: string;
   cancelled?: true;
+  controlYielded?: true;
 }
 
 /**
@@ -4308,10 +4460,15 @@ async function executeComputerAction(
   executor: PlaywrightExecutor,
   input: ComputerActionInput,
   cancellationRequested: () => Promise<boolean>,
+  agentMayStart?: () => boolean,
 ): Promise<ActionResult> {
   const page = (await executor.getPage()) as unknown as PageLike;
   if (await cancellationRequested()) {
     return { ok: false, summary: 'cancelled before computer action', cancelled: true };
+  }
+  // Reserve this logical action synchronously after all async preflight work.
+  if (agentMayStart && !agentMayStart()) {
+    return { ok: false, summary: 'yielded before computer action', controlYielded: true };
   }
   const action = input.action;
 

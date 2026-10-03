@@ -7,6 +7,10 @@ import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executo
 import type { BrowserPool } from '../browser-pool/index.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
+import type { ExecutionAdmission } from '../execution/execution-admission.js';
+import { originalHttpLifetime } from '../execution/http-drain.js';
+import type { OrdinaryMaintenance } from '../execution/ordinary-maintenance.js';
+import type { OperationLifetime } from '../execution/owned-operation.js';
 import type { DownloadManager } from '../files/download-manager.js';
 import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
 import type { PayPalAdapter } from '../payment/index.js';
@@ -25,6 +29,9 @@ import type { TaskQueue } from '../queue/task-queue.js';
  * round-trip.
  */
 export interface AppContextDeps {
+  /** Explicit boot injection only; absence preserves the pre-drain deployment. */
+  executionDrain?: ExecutionAdmission;
+  ordinaryMaintenance?: OrdinaryMaintenance;
   planner: Planner;
   visionCommander?: VisionLoopCommander;
   playwrightExecutor?: PlaywrightExecutor | null;
@@ -74,8 +81,21 @@ export interface AppContextDeps {
 }
 
 export function makeCreateContext(deps: AppContextDeps) {
+  const executionDrain = deps.executionDrain;
+  const ordinaryMaintenance = deps.ordinaryMaintenance;
+  if (ordinaryMaintenance && ordinaryMaintenance !== executionDrain)
+    throw new Error('MAINTENANCE_CONTROLLER_MISMATCH');
   return async function createContext({ req, res }: { req: Request; res: Response }) {
+    const executionLifetime = originalHttpLifetime(req);
+    if (executionLifetime) {
+      if (!executionDrain || executionLifetime.drain !== executionDrain.drain)
+        throw new Error('HTTP_DRAIN_CONTEXT_MISMATCH');
+      executionDrain.drain.assertDispatch(executionLifetime.owner);
+    }
     return {
+      ...(executionDrain ? { executionDrain } : {}),
+      ...(ordinaryMaintenance ? { ordinaryMaintenance } : {}),
+      ...(executionLifetime ? { executionLifetime } : {}),
       db,
       logger,
       req,
@@ -95,4 +115,7 @@ export function makeCreateContext(deps: AppContextDeps) {
   };
 }
 
-export type Context = Awaited<ReturnType<ReturnType<typeof makeCreateContext>>>;
+export type Context = Awaited<ReturnType<ReturnType<typeof makeCreateContext>>> & {
+  /** Internal nested-call ownership, never parsed from request data. */
+  executionLifetime?: OperationLifetime;
+};

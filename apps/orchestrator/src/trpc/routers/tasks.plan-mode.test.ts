@@ -34,6 +34,7 @@ function fixture({
   jsonResult = false,
   parentIntent = '',
   parentSummary = '合成父任务提纲',
+  parentBrowserSource = undefined as 'local-chrome' | undefined,
   expertMode = 'normal' as 'normal' | 'auto',
   ownerSnapshotStatus = undefined as string | undefined,
   ownerSnapshotLegacy = false,
@@ -89,6 +90,7 @@ function fixture({
                 intent: parentIntent,
                 status: 'completed',
                 result: { summary: parentSummary },
+                ...('sourceContext' in projection ? { sourceContext: { browserSource: parentBrowserSource } } : {}),
                 opusUsed: false,
                 roleId: null,
               }
@@ -229,6 +231,13 @@ function fixture({
 }
 
 describe('generate plan mode durable approval boundary', () => {
+  it('refuses a local Chrome follow-up before creating or dispatching a default-browser task', async () => {
+    const f = fixture({ parentIntent: '在选定的 Chrome 页面读取资料', parentBrowserSource: 'local-chrome' });
+    await expect(f.create()).rejects.toMatchObject({ code: 'BAD_REQUEST', message: expect.stringMatching(/重新选择.*Chrome/) });
+    expect(f.insert).not.toHaveBeenCalled();
+    expect(f.charge).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
   it('does not promote a parent model example into user-supplied legacy data', async () => {
     const f = fixture({ expertMode: 'auto', parentIntent: '展示指标示例', parentSummary: '仅为模型示例\nGMV: 100\nUV: 200' });
     f.state.intent = '复盘昨天抖音直播';

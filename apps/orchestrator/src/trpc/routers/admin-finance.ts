@@ -23,6 +23,7 @@
 import { TRPCError } from '@trpc/server';
 import { and, desc, eq, gte, inArray, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { costCoverageSelection, summarizeCost } from '../../agent/llm-cost-summary.js';
 import { llmCalls } from '../../db/schema/llm-calls.js';
 import { payments } from '../../db/schema/payments.js';
 import { tasks } from '../../db/schema/tasks.js';
@@ -185,6 +186,7 @@ export const adminFinanceRouter = router({
     const [llmRow] = await ctx.db
       .select({
         sumUsd: sql<string>`COALESCE(SUM(${llmCalls.costUsd}), 0)`,
+        ...costCoverageSelection(),
       })
       .from(llmCalls)
       .where(gte(llmCalls.createdAt, monthStart));
@@ -192,13 +194,16 @@ export const adminFinanceRouter = router({
 
     const totalCostCnyCents = llmCostCnyCents + SERVER_FIXED_CNY_CENTS_MONTHLY;
     const profitCnyCents = monthRevenueCnyCents - totalCostCnyCents;
+    const coverage = summarizeCost(llmRow?.sumUsd, llmRow?.unknownCostCalls);
 
     return {
       monthRevenueCnyCents,
-      monthCostCnyCents: totalCostCnyCents,
-      monthLlmCostCnyCents: llmCostCnyCents,
+      monthCostCnyCents: coverage.totalCostUsd === null ? null : totalCostCnyCents,
+      monthLlmCostCnyCents: coverage.totalCostUsd === null ? null : llmCostCnyCents,
+      monthKnownLlmCostCnyCents: llmCostCnyCents,
+      unknownCostCalls: coverage.unknownCostCalls,
       monthServerCostCnyCents: SERVER_FIXED_CNY_CENTS_MONTHLY,
-      monthProfitCnyCents: profitCnyCents,
+      monthProfitCnyCents: coverage.totalCostUsd === null ? null : profitCnyCents,
     };
   }),
 
@@ -381,6 +386,7 @@ export const adminFinanceRouter = router({
         cacheReadTokens: sql<number>`COALESCE(SUM(${llmCalls.cacheReadTokens}), 0)`,
         cacheWriteTokens: sql<number>`COALESCE(SUM(${llmCalls.cacheWriteTokens}), 0)`,
         costUsd: sql<string>`COALESCE(SUM(${llmCalls.costUsd}), 0)`,
+        ...costCoverageSelection(),
       })
       .from(llmCalls)
       .where(gte(llmCalls.createdAt, monthStart))
@@ -389,12 +395,14 @@ export const adminFinanceRouter = router({
 
     return {
       models: rows.map((r) => {
-        const costUsd = Number(r.costUsd) || 0;
+        const coverage = summarizeCost(r.costUsd, r.unknownCostCalls);
+        const costUsd = coverage.totalCostUsd;
         return {
           model: r.model,
           provider: r.provider,
           callCount: Number(r.callCount),
-          totalTokens:
+          incompleteUsageCalls: Number(r.incompleteUsageCalls ?? 0),
+          totalTokens: Number(r.incompleteUsageCalls ?? 0) > 0 ? null :
             Number(r.promptTokens) +
             Number(r.completionTokens) +
             Number(r.cacheReadTokens) +
@@ -402,7 +410,10 @@ export const adminFinanceRouter = router({
           promptTokens: Number(r.promptTokens),
           completionTokens: Number(r.completionTokens),
           costUsd,
-          costCnyCents: usdToCnyCents(costUsd),
+          knownCostUsd: coverage.knownCostUsd,
+          unknownCostCalls: coverage.unknownCostCalls,
+          knownCostCnyCents: usdToCnyCents(coverage.knownCostUsd),
+          costCnyCents: costUsd === null ? null : usdToCnyCents(costUsd),
         };
       }),
     };
@@ -422,22 +433,27 @@ export const adminFinanceRouter = router({
           day: dayExpr,
           callCount: sql<number>`COUNT(*)`,
           costUsd: sql<string>`COALESCE(SUM(${llmCalls.costUsd}), 0)`,
+          ...costCoverageSelection(),
         })
         .from(llmCalls)
         .where(gte(llmCalls.createdAt, startUtc))
         .groupBy(dayExpr);
 
-      const byDay = new Map<string, { callCount: number; costCnyCents: number }>();
+      type DayCost = { callCount: number; costCnyCents: number | null; knownCostCnyCents: number; unknownCostCalls: number };
+      const byDay = new Map<string, DayCost>();
       for (const r of rows) {
+        const coverage = summarizeCost(r.costUsd, r.unknownCostCalls);
         byDay.set(String(r.day), {
           callCount: Number(r.callCount),
-          costCnyCents: usdToCnyCents(r.costUsd),
+          costCnyCents: coverage.totalCostUsd === null ? null : usdToCnyCents(coverage.totalCostUsd),
+          knownCostCnyCents: usdToCnyCents(coverage.knownCostUsd),
+          unknownCostCalls: coverage.unknownCostCalls,
         });
       }
-      const series: Array<{ date: string; callCount: number; costCnyCents: number }> = [];
+      const series: Array<{ date: string } & DayCost> = [];
       for (let i = days - 1; i >= 0; i--) {
         const date = beijingDayString(now, i);
-        const v = byDay.get(date) ?? { callCount: 0, costCnyCents: 0 };
+        const v = byDay.get(date) ?? { callCount: 0, costCnyCents: 0, knownCostCnyCents: 0, unknownCostCalls: 0 };
         series.push({ date, ...v });
       }
       return { series };
@@ -456,8 +472,9 @@ export const adminFinanceRouter = router({
         .select({
           taskId: llmCalls.taskId,
           callCount: sql<number>`COUNT(*)`,
-          totalTokens: sql<number>`COALESCE(SUM(${llmCalls.promptTokens} + ${llmCalls.completionTokens} + ${llmCalls.cacheReadTokens} + ${llmCalls.cacheWriteTokens}), 0)`,
+          totalTokens: sql<number>`COALESCE(SUM(COALESCE(${llmCalls.promptTokens}, 0) + COALESCE(${llmCalls.completionTokens}, 0) + COALESCE(${llmCalls.cacheReadTokens}, 0) + COALESCE(${llmCalls.cacheWriteTokens}, 0)), 0)`,
           costUsd: sql<string>`COALESCE(SUM(${llmCalls.costUsd}), 0)`,
+          ...costCoverageSelection(),
         })
         .from(llmCalls)
         .where(
@@ -524,7 +541,8 @@ export const adminFinanceRouter = router({
         tasks: aggregateRows.map((agg) => {
           const id = agg.taskId == null ? null : Number(agg.taskId);
           const task = id == null ? null : taskById.get(id) ?? null;
-          const costUsd = Number(agg.costUsd) || 0;
+          const coverage = summarizeCost(agg.costUsd, agg.unknownCostCalls);
+          const costUsd = coverage.totalCostUsd;
           return {
             taskId: task?.taskId ?? null,
             intent: task?.intent ?? null,
@@ -532,9 +550,13 @@ export const adminFinanceRouter = router({
             status: task?.status ?? null,
             model: id == null ? null : modelByTask.get(id) ?? null,
             callCount: Number(agg.callCount),
-            totalTokens: Number(agg.totalTokens),
+            totalTokens: Number(agg.incompleteUsageCalls ?? 0) > 0 ? null : Number(agg.totalTokens),
+            incompleteUsageCalls: Number(agg.incompleteUsageCalls ?? 0),
             costUsd,
-            costCnyCents: usdToCnyCents(costUsd),
+            knownCostUsd: coverage.knownCostUsd,
+            knownCostCnyCents: usdToCnyCents(coverage.knownCostUsd),
+            unknownCostCalls: coverage.unknownCostCalls,
+            costCnyCents: costUsd === null ? null : usdToCnyCents(costUsd),
             user: task
               ? {
                   userId: task.userExternalId,

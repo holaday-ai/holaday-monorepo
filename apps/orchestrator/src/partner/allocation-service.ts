@@ -139,9 +139,10 @@ export function capDailyBonus(input: {
   return Math.min(targetCreditCents, remainingBonusCreditCents);
 }
 
-function sumUsdCostMicros(rows: ReadonlyArray<{ costUsd: string | number }>): number {
+function sumUsdCostMicros(rows: ReadonlyArray<{ costUsd: string | number | null }>): number {
   let total = 0n;
   for (const row of rows) {
+    if (row.costUsd === null) throw new RangeError('API cost pool incomplete: unpriced or missing usage');
     total += BigInt(parseUsdCostMicros(row.costUsd));
   }
   return toSafeInteger(total, 'costUsdMicros');

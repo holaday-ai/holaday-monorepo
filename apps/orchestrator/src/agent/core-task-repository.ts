@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { DB } from '../db/client.js';
 import { taskEvents } from '../db/schema/task-events.js';
 import { tasks } from '../db/schema/tasks.js';
+import { retainAuxiliaryDatabaseUncertainty } from '../execution/auxiliary-database.js';
 import {
   type CoreAdmission,
   CoreAdmissionError,
@@ -28,6 +29,16 @@ const receiptSchema = z
   })
   .strict();
 
+function confirmedAuxiliaryUpdate(updated: unknown): boolean {
+  const header = Array.isArray(updated) ? updated[0] : updated;
+  if (header && typeof header === 'object' && 'affectedRows' in header) {
+    if (header.affectedRows === 0) return false;
+    if (header.affectedRows === 1) return true;
+  }
+  retainAuxiliaryDatabaseUncertainty();
+  return false;
+}
+
 /** Core text persistence only. No scheduling, model, quota, or automatic retries. */
 export class CoreTaskRepository {
   constructor(private readonly db: DB) {}
@@ -48,14 +59,9 @@ export class CoreTaskRepository {
             eq(tasks.coreRecordVersion, op.recordVersion),
           ),
         );
-      const header = Array.isArray(updated) ? updated[0] : updated;
-      return (
-        !!header &&
-        typeof header === 'object' &&
-        'affectedRows' in header &&
-        header.affectedRows === 1
-      );
+      return confirmedAuxiliaryUpdate(updated);
     } catch {
+      retainAuxiliaryDatabaseUncertainty();
       return false;
     }
   }
@@ -85,14 +91,9 @@ export class CoreTaskRepository {
             eq(tasks.coreRecordVersion, op.recordVersion),
           ),
         );
-      const header = Array.isArray(updated) ? updated[0] : updated;
-      return (
-        !!header &&
-        typeof header === 'object' &&
-        'affectedRows' in header &&
-        header.affectedRows === 1
-      );
+      return confirmedAuxiliaryUpdate(updated);
     } catch {
+      retainAuxiliaryDatabaseUncertainty();
       return false;
     }
   }

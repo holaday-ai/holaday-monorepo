@@ -13,6 +13,7 @@ import * as React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AttachmentChip, type DraftAttachment } from '@/components/AttachmentChip';
 import { SkillLogo } from '@/components/SkillLogo';
+import { LocalChromePicker } from '@/components/LocalChromePicker';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -776,6 +777,7 @@ export function InputArea({
             ) : null}
           </div>
         )}
+        {!replyMode && !followUpTarget ? <LocalChromePicker disabled={disabled} /> : null}
         <Textarea
           ref={setTextareaRef}
           value={value}

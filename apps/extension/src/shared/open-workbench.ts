@@ -27,6 +27,7 @@
  */
 
 import { withDeadline } from './deadline.js';
+import { isLocalQaWorkbenchUrl, LOCAL_CHROME_QA, WORKBENCH_URL } from './config.js';
 
 export const WORKBENCH_TAB_MATCH_PATTERNS: readonly string[] = [
   '*://hd-app.orangebench.tech/*',
@@ -39,6 +40,7 @@ const MAX_WORKBENCH_URL_LENGTH = 2_048;
 
 export function isWorkbenchTabUrl(url: string | undefined): boolean {
   if (!url) return false;
+  if (LOCAL_CHROME_QA) return isLocalQaWorkbenchUrl(url);
   try {
     const parsed = new URL(url);
     return (
@@ -61,12 +63,12 @@ export function isWorkbenchTabUrl(url: string | undefined): boolean {
  * chrome.tabs.query when no active/recent signal differentiates.
  */
 export async function openOrFocusWorkbench(fallbackUrl: string): Promise<void> {
-  const createUrl = normalizeWorkbenchOpenUrl(fallbackUrl);
+  const createUrl = normalizeWorkbenchOpenUrl(LOCAL_CHROME_QA ? WORKBENCH_URL : fallbackUrl);
   let tabs: chrome.tabs.Tab[] = [];
   try {
     tabs = filterWorkbenchTabs(
       await withDeadline(
-        chrome.tabs.query({ url: WORKBENCH_TAB_MATCH_PATTERNS as string[] }),
+        chrome.tabs.query(LOCAL_CHROME_QA ? {} : { url: WORKBENCH_TAB_MATCH_PATTERNS as string[] }),
         WORKBENCH_TAB_QUERY_TIMEOUT_MS,
         'workbench_tab_query_timeout',
       ),

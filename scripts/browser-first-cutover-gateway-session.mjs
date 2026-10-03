@@ -1,0 +1,693 @@
+import { setTimeout as sleep } from 'node:timers/promises';
+import { pathToFileURL } from 'node:url';
+import { isDeepStrictEqual as equal } from 'node:util';
+import { assertFirstCutoverReconciliationRead } from './browser-first-cutover-host.mjs';
+import {
+  firstCutoverReceiverFailure,
+  firstCutoverReceiverFailureLine,
+  ingressDiagnosticError,
+} from './browser-first-cutover-ingress-diagnostics.mjs';
+import {
+  assertFirstCutoverSessionIdentity,
+  createFirstCutoverSessionWire,
+  openFirstCutoverSsh,
+  readFirstCutoverGatewaySite,
+  readFirstCutoverSessionIdentity,
+  readFirstCutoverTransportIdentity,
+} from './browser-first-cutover-ingress-session.mjs';
+import { queryFirstCutoverOrders } from './browser-first-cutover-payments.mjs';
+import {
+  prepareLocalFirstCutoverGateway,
+  retireLocalFirstCutoverGateways,
+} from './browser-first-cutover-registrations.mjs';
+export { readFirstCutoverGatewaySite };
+const fail = () => {
+  throw new Error('CUTOVER_GATEWAY_SESSION_UNPROVEN');
+};
+const keys = (v, k) =>
+  v &&
+  typeof v === 'object' &&
+  !Array.isArray(v) &&
+  Object.keys(v).length === k.length &&
+  k.every((x) => Object.hasOwn(v, x));
+const hash = (v) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
+const digestObservation = (row, now) =>
+  ['wechat', 'alipay'].includes(row.provider) &&
+  hash(row.merchantDigest) &&
+  hash(row.orderRef) &&
+  hash(row.rawDigest) &&
+  Number.isSafeInteger(row.observedAtMs) &&
+  row.observedAtMs >= 0 &&
+  row.observedAtMs <= now &&
+  now - row.observedAtMs <= 60000 &&
+  ['settled', 'closed', 'unpaid-valid', 'paid-unsettled', 'unknown'].includes(row.state);
+const uuid = (v) =>
+  typeof v === 'string' &&
+  /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(v);
+const bindingKeys = ['attempt', 'candidate', 'configDigest', 'migrationDigest', 'inventoryDigest'];
+function validate(v, now) {
+  if (
+    !keys(v.binding, bindingKeys) ||
+    !uuid(v.binding.attempt) ||
+    !/^[a-f0-9]{40}$/.test(v.binding.candidate) ||
+    !['configDigest', 'migrationDigest', 'inventoryDigest'].every((k) => hash(v.binding[k])) ||
+    !hash(v.siteDigest) ||
+    !Number.isSafeInteger(now) ||
+    now < 0 ||
+    !Number.isSafeInteger(v.maintenanceEndsAtMs) ||
+    now >= v.maintenanceEndsAtMs
+  )
+    fail();
+}
+const factNames = [
+  'ownership',
+  'effects',
+  'read',
+  'registered',
+  'unmanaged',
+  'fence',
+  'startupEvent',
+  'registrationEvent',
+  'retireUnmanaged',
+];
+const envelope = (v, type, seq) => {
+  if (v?.protocol !== 1 || v.type !== type || v.seq !== seq) fail();
+};
+
+/** Separate from ingress: the original observer can safely read ingress receipts
+ * while a gateway operation is in flight. Only the original coordinator writes
+ * its journal. Nested signal requests are permitted solely inside retireUnmanaged. */
+export async function serveFirstCutoverGatewaySession({ attempt }, overrides = {}) {
+  const io = {
+    input: process.stdin,
+    output: process.stdout,
+    now: Date.now,
+    sleep,
+    readSite: readFirstCutoverGatewaySite,
+    readIdentity: readFirstCutoverSessionIdentity,
+    prepare: prepareLocalFirstCutoverGateway,
+    retire: retireLocalFirstCutoverGateways,
+    query: queryFirstCutoverOrders,
+    ...overrides,
+  };
+  let stage = 'RECEIVER_ENTRY';
+  let channel;
+  try {
+    if (!uuid(attempt)) fail();
+    stage = 'RECEIVER_SCOPE';
+    const site = structuredClone(await io.readSite({ attempt }));
+    validate(site, io.now());
+    if (site.binding.attempt !== attempt) fail();
+    stage = 'RECEIVER_IDENTITY';
+    const execution = await io.readIdentity({ role: 'gateway', attempt });
+    assertFirstCutoverSessionIdentity(execution, 'gateway');
+    channel = createFirstCutoverSessionWire(
+      io.input,
+      io.output,
+      site.reconcileByMs ?? site.maintenanceEndsAtMs,
+      io.now,
+    );
+    const used = new Set();
+    let sequence = 0;
+    for (;;) {
+      stage = 'RECEIVER_ENTRY';
+      const request = await channel.read();
+      const seq = ++sequence;
+      envelope(request, 'operation', seq);
+      if (
+        !keys(request, ['protocol', 'type', 'seq', 'name', 'value']) ||
+        (request.name === 'query'
+          ? !request.value || typeof request.value !== 'object'
+          : request.value !== null) ||
+        !['attach', 'prepare', 'retire', 'detach', 'query'].includes(request.name) ||
+        (seq === 1 ? request.name !== 'attach' : request.name === 'attach') ||
+        (request.name !== 'query' && used.has(request.name))
+      )
+        fail();
+      if (request.name !== 'query') used.add(request.name);
+      stage = 'RECEIVER_SCOPE';
+      if (!equal(await io.readSite({ attempt }), site)) fail();
+      stage = 'RECEIVER_IDENTITY';
+      if (!equal(await io.readIdentity({ role: 'gateway', attempt }), execution)) fail();
+      let factSequence = 0;
+      let signalSequence = 0;
+      const fact = async (name, value = null, signal = undefined) => {
+        stage = 'RECEIVER_FACT';
+        channel.assert();
+        if (!equal(await io.readSite({ attempt }), site)) fail();
+        const factSeq = ++factSequence;
+        await channel.write({ protocol: 1, type: 'fact', seq, factSeq, name, value });
+        for (;;) {
+          const reply = await channel.read();
+          if (reply.type === 'signal') {
+            envelope(reply, 'signal', seq);
+            if (
+              name !== 'retireUnmanaged' ||
+              !signal ||
+              !keys(reply, ['protocol', 'type', 'seq', 'signalSeq', 'value']) ||
+              reply.signalSeq !== ++signalSequence ||
+              !reply.value ||
+              typeof reply.value !== 'object'
+            )
+              fail();
+            if (!equal(await io.readSite({ attempt }), site)) fail();
+            await signal(structuredClone(reply.value));
+            await channel.write({
+              protocol: 1,
+              type: 'signal-result',
+              seq,
+              signalSeq: reply.signalSeq,
+              value: null,
+            });
+            continue;
+          }
+          envelope(reply, 'fact-result', seq);
+          if (
+            !keys(reply, ['protocol', 'type', 'seq', 'factSeq', 'value']) ||
+            reply.factSeq !== factSeq
+          )
+            fail();
+          return reply.value;
+        }
+      };
+      if (io.now() >= site.maintenanceEndsAtMs) {
+        if (
+          !['query', 'detach'].includes(request.name) ||
+          (request.name === 'query' && request.value?.stage !== 'postopen')
+        )
+          fail();
+        await assertFirstCutoverReconciliationRead(
+          site,
+          {
+            assertOwnership: () => fact('ownership'),
+            readFirstCutoverEffects: () => fact('effects'),
+          },
+          io.now(),
+          request.value?.identity,
+        );
+      }
+      let value;
+      if (request.name === 'attach') {
+        const owner = await fact('ownership');
+        if (!equal(owner, site.binding)) fail();
+        value = {
+          host: 'aliyun',
+          binding: site.binding,
+          maintenanceEndsAtMs: site.maintenanceEndsAtMs,
+          ...(Object.hasOwn(site, 'reconcileByMs') ? { reconcileByMs: site.reconcileByMs } : {}),
+          siteDigest: site.siteDigest,
+          execution,
+        };
+      } else if (request.name === 'query') {
+        value = await io.query(site, request.value, {
+          now: io.now,
+          assertScope: () => io.readSite({ attempt }),
+          journal: {
+            assertOwnership: () => fact('ownership'),
+            readFirstCutoverEffects: () => fact('effects'),
+          },
+        });
+      } else if (request.name === 'detach') {
+        await channel.write({ protocol: 1, type: 'result', seq, value: null });
+        return;
+      } else {
+        const hostIO = {
+          now: io.now,
+          sleep: io.sleep,
+          journal: {
+            assertOwnership: () => fact('ownership'),
+            readFirstCutoverEffects: () => fact('effects'),
+            recordStartupEvent: (e) => fact('startupEvent', e),
+            recordRegistrationEvent: (e) => fact('registrationEvent', e),
+          },
+          observer: {
+            read: () => fact('read'),
+            readRegistrationProgress: (host) => {
+              if (host !== 'aliyun') fail();
+              return fact('registered');
+            },
+            readUnmanagedProgress: (host) => {
+              if (host !== 'aliyun') fail();
+              return fact('unmanaged');
+            },
+            retireUnmanaged: (args, ops) => {
+              if (
+                !equal(args, { maintenanceEndsAtMs: site.maintenanceEndsAtMs }) ||
+                typeof ops?.signalPinned !== 'function'
+              )
+                fail();
+              return fact('retireUnmanaged', null, ops.signalPinned);
+            },
+          },
+          verifyFence: () => fact('fence'),
+        };
+        const args = {
+          binding: { attempt, inventoryDigest: site.binding.inventoryDigest },
+          maintenanceEndsAtMs: site.maintenanceEndsAtMs,
+        };
+        stage = 'RECEIVER_LOCAL';
+        value =
+          request.name === 'prepare'
+            ? await io.prepare({ ...args, files: site.startupFiles }, hostIO)
+            : await io.retire(args, hostIO);
+      }
+      stage = 'RECEIVER_RESULT';
+      channel.assert();
+      stage = 'RECEIVER_SCOPE';
+      if (!equal(await io.readSite({ attempt }), site)) fail();
+      await channel.write({ protocol: 1, type: 'result', seq, value });
+    }
+  } catch (error) {
+    throw ingressDiagnosticError('CUTOVER_GATEWAY_SESSION_UNPROVEN', stage, error);
+  } finally {
+    if (channel) channel.close();
+    else io.output.end();
+  }
+}
+
+export async function connectFirstCutoverGatewaySession(input, overrides = {}) {
+  const io = {
+    platform: process.platform,
+    uid: process.getuid?.(),
+    now: Date.now,
+    sleep,
+    open: openFirstCutoverSsh,
+    ...overrides,
+  };
+  let connectionStage = 'GATEWAY_ENTRY';
+  let channel;
+  let connection;
+  let failed = false;
+  let busy = false;
+  try {
+    const expected = structuredClone(input);
+    validate(expected, io.now());
+    if (
+      !keys(expected, [
+        'binding',
+        'maintenanceEndsAtMs',
+        'siteDigest',
+        ...(Object.hasOwn(expected, 'reconcileByMs') ? ['reconcileByMs'] : []),
+      ]) ||
+      io.platform !== 'linux' ||
+      io.uid !== 0 ||
+      [
+        'assertOwnership',
+        'readFirstCutoverEffects',
+        'recordStartupEvent',
+        'recordRegistrationEvent',
+      ].some((k) => typeof io.journal?.[k] !== 'function') ||
+      ['read', 'readRegistrationProgress', 'readUnmanagedProgress', 'retireUnmanaged'].some(
+        (k) => typeof io.observer?.[k] !== 'function',
+      ) ||
+      typeof io.verifyFence !== 'function'
+    )
+      fail();
+    const ownership = async () => {
+      const b = await io.journal.assertOwnership();
+      if (!equal(b, expected.binding)) fail();
+      if (io.now() >= expected.maintenanceEndsAtMs)
+        await assertFirstCutoverReconciliationRead(expected, io.journal, io.now());
+      return b;
+    };
+    connectionStage = 'GATEWAY_OWNER';
+    await ownership();
+    connectionStage = 'GATEWAY_OPEN';
+    connection = await io.open(
+      '/usr/bin/ssh',
+      [
+        '-F',
+        '/dev/null',
+        '-T',
+        '-o',
+        'StrictHostKeyChecking=yes',
+        '-o',
+        'ForwardAgent=no',
+        '-o',
+        'ClearAllForwardings=yes',
+        '-o',
+        'ConnectTimeout=15',
+        '-o',
+        'ServerAliveInterval=10',
+        '-o',
+        'ServerAliveCountMax=2',
+        '-o',
+        'BatchMode=yes',
+        '-o',
+        'IdentitiesOnly=yes',
+        '-o',
+        'IdentityAgent=none',
+        '-o',
+        'PreferredAuthentications=publickey',
+        '-o',
+        'PasswordAuthentication=no',
+        '-o',
+        'KbdInteractiveAuthentication=no',
+        '-o',
+        'UserKnownHostsFile=/var/lib/holaday-deploy/channel/known_hosts',
+        '-o',
+        'GlobalKnownHostsFile=/dev/null',
+        '-o',
+        'HostKeyAlgorithms=ssh-ed25519',
+        '-i',
+        '/var/lib/holaday-deploy/channel/identity',
+        'root@47.99.169.186',
+        `holaday-cutover-v1 gateway ${expected.binding.attempt}`,
+      ],
+      { shell: false, env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin', LANG: 'C' } },
+    );
+    channel = createFirstCutoverSessionWire(
+      connection.input,
+      connection.output,
+      expected.reconcileByMs ?? expected.maintenanceEndsAtMs,
+      io.now,
+    );
+    let sequence = 0;
+    let execution;
+    const used = new Set();
+    const run = async (name, payload = null) => {
+      if (failed || busy || (name !== 'query' && used.has(name))) fail();
+      if (name !== 'query') used.add(name);
+      busy = true;
+      try {
+        await ownership();
+        if (io.now() >= expected.maintenanceEndsAtMs && !['query', 'detach'].includes(name)) fail();
+        if (
+          name === 'query' &&
+          io.now() >= expected.maintenanceEndsAtMs &&
+          payload?.stage !== 'postopen'
+        )
+          fail();
+        const seq = ++sequence;
+        let factSequence = 0;
+        let signalSequence = 0;
+        let unmanagedStarted = false;
+        const input = structuredClone(payload);
+        if (
+          name === 'query' &&
+          (!keys(input, [
+            'stage',
+            'observedAtMs',
+            'orders',
+            ...(input?.identity ? ['identity'] : []),
+          ]) ||
+            !['prepare', 'preopen', 'postopen'].includes(input.stage) ||
+            !Array.isArray(input.orders))
+        )
+          fail();
+        await channel.write({ protocol: 1, type: 'operation', seq, name, value: input });
+        const service = async (request, nested = false) => {
+          envelope(request, 'fact', seq);
+          if (
+            !keys(request, ['protocol', 'type', 'seq', 'factSeq', 'name', 'value']) ||
+            request.factSeq !== ++factSequence ||
+            !factNames.includes(request.name) ||
+            (name === 'query' && !['ownership', 'effects'].includes(request.name)) ||
+            (nested && !['ownership', 'effects', 'unmanaged', 'fence'].includes(request.name)) ||
+            (!['startupEvent', 'registrationEvent'].includes(request.name) &&
+              request.value !== null) ||
+            (request.name === 'startupEvent' && name !== 'prepare') ||
+            (['registrationEvent', 'retireUnmanaged'].includes(request.name) && name !== 'retire')
+          )
+            fail();
+          await ownership();
+          let value;
+          switch (request.name) {
+            case 'ownership':
+              value = await ownership();
+              break;
+            case 'effects':
+              value = await io.journal.readFirstCutoverEffects();
+              if (!bindingKeys.every((k) => value?.[k] === expected.binding[k])) fail();
+              break;
+            case 'read':
+              value = await io.observer.read();
+              break;
+            case 'registered':
+              value = await io.observer.readRegistrationProgress('aliyun');
+              break;
+            case 'unmanaged':
+              value = await io.observer.readUnmanagedProgress('aliyun');
+              break;
+            case 'fence':
+              value = await io.verifyFence();
+              break;
+            case 'startupEvent':
+            case 'registrationEvent': {
+              const event = request.value;
+              if (
+                event?.host !== 'aliyun' ||
+                event.attempt !== expected.binding.attempt ||
+                event.inventoryDigest !== expected.binding.inventoryDigest
+              )
+                fail();
+              await io.journal[
+                request.name === 'startupEvent' ? 'recordStartupEvent' : 'recordRegistrationEvent'
+              ](event);
+              value = null;
+              break;
+            }
+            case 'retireUnmanaged':
+              if (unmanagedStarted) fail();
+              unmanagedStarted = true;
+              value = await io.observer.retireUnmanaged(
+                { maintenanceEndsAtMs: expected.maintenanceEndsAtMs },
+                {
+                  sleep: io.sleep,
+                  verifyFence: io.verifyFence,
+                  signalPinned: async (target) => {
+                    const signalSeq = ++signalSequence;
+                    await ownership();
+                    await channel.write({
+                      protocol: 1,
+                      type: 'signal',
+                      seq,
+                      signalSeq,
+                      value: target,
+                    });
+                    for (;;) {
+                      const answer = await channel.read();
+                      if (answer.type === 'fact') {
+                        await service(answer, true);
+                        continue;
+                      }
+                      envelope(answer, 'signal-result', seq);
+                      if (
+                        !keys(answer, ['protocol', 'type', 'seq', 'signalSeq', 'value']) ||
+                        answer.signalSeq !== signalSeq ||
+                        answer.value !== null
+                      )
+                        fail();
+                      await ownership();
+                      return;
+                    }
+                  },
+                },
+              );
+              break;
+          }
+          await ownership();
+          await channel.write({
+            protocol: 1,
+            type: 'fact-result',
+            seq,
+            factSeq: request.factSeq,
+            value: value ?? null,
+          });
+        };
+        for (;;) {
+          const response = await channel.read();
+          if (response.type === 'fact') {
+            await service(response);
+            continue;
+          }
+          envelope(response, 'result', seq);
+          if (!keys(response, ['protocol', 'type', 'seq', 'value'])) fail();
+          await ownership();
+          const r = response.value;
+          if (name === 'query') {
+            if (
+              !Array.isArray(r) ||
+              r.length !== input.orders.length ||
+              r.some(
+                (row, index) =>
+                  !keys(row, [
+                    'provider',
+                    'environment',
+                    'merchantDigest',
+                    'orderRef',
+                    'observedAtMs',
+                    'rawDigest',
+                    'state',
+                  ]) ||
+                  !['provider', 'environment', 'merchantDigest', 'orderRef'].every(
+                    (k) => row[k] === input.orders[index][k],
+                  ) ||
+                  !digestObservation(row, io.now()),
+              )
+            )
+              fail();
+          }
+          if (name === 'attach') {
+            if (
+              !keys(r, ['host', ...Object.keys(expected), 'execution']) ||
+              !equal(
+                { ...r, execution: undefined },
+                { host: 'aliyun', ...expected, execution: undefined },
+              )
+            )
+              fail();
+            assertFirstCutoverSessionIdentity(r.execution, 'gateway');
+            execution = structuredClone(r.execution);
+          }
+          if (name === 'detach' && r !== null) fail();
+          if (
+            name === 'prepare' &&
+            (!keys(r, ['attempt', 'inventoryDigest', 'host', 'phase', 'files']) ||
+              !Array.isArray(r.files) ||
+              r.files.length !== 2 ||
+              r.files.some(
+                (f, i) =>
+                  !keys(f, ['path', 'beforeDigest', 'afterDigest']) ||
+                  f.path !== `/root/.pm2/${i ? 'dump.pm2.bak' : 'dump.pm2'}` ||
+                  !(
+                    (f.beforeDigest === null && f.afterDigest === null) ||
+                    (hash(f.beforeDigest) && hash(f.afterDigest))
+                  ),
+              ) ||
+              !r.files.some((f) => f.beforeDigest !== f.afterDigest))
+          )
+            fail();
+          if (
+            name === 'retire' &&
+            (!keys(r, [
+              'attempt',
+              'inventoryDigest',
+              'host',
+              'phase',
+              'observedAtMs',
+              'survivors',
+              'listeners',
+              'unknownLaunchers',
+            ]) ||
+              !Number.isSafeInteger(r.observedAtMs) ||
+              r.observedAtMs < 0 ||
+              r.observedAtMs > io.now() ||
+              io.now() - r.observedAtMs > 60000 ||
+              ['survivors', 'listeners', 'unknownLaunchers'].some(
+                (k) => !Array.isArray(r[k]) || r[k].length,
+              ))
+          )
+            fail();
+          if (
+            ['prepare', 'retire'].includes(name) &&
+            (r.attempt !== expected.binding.attempt ||
+              r.inventoryDigest !== expected.binding.inventoryDigest ||
+              r.host !== 'aliyun' ||
+              r.phase !== (name === 'prepare' ? 'startup_prepared' : 'stopped'))
+          )
+            fail();
+          return r;
+        }
+      } catch (error) {
+        failed = true;
+        channel.close();
+        throw ingressDiagnosticError(
+          'CUTOVER_GATEWAY_SESSION_UNPROVEN',
+          name === 'attach' ? 'GATEWAY_HANDSHAKE' : 'GATEWAY_COMMAND',
+          await firstCutoverReceiverFailure(
+            error,
+            connection,
+            expected.reconcileByMs ?? expected.maintenanceEndsAtMs,
+            io.now,
+          ),
+        );
+      } finally {
+        busy = false;
+      }
+    };
+    connectionStage = 'GATEWAY_HANDSHAKE';
+    await run('attach');
+    return {
+      readTransportIdentity: async () => {
+        try {
+          if (failed) fail();
+          channel.assert();
+          const value = await readFirstCutoverTransportIdentity(
+            connection,
+            expected,
+            'gateway-ssh',
+          );
+          if (failed) fail();
+          channel.assert();
+          return value;
+        } catch (error) {
+          failed = true;
+          channel.close();
+          throw ingressDiagnosticError(
+            'CUTOVER_GATEWAY_SESSION_UNPROVEN',
+            'GATEWAY_TRANSPORT_IDENTITY',
+            error,
+          );
+        }
+      },
+      readExecutionIdentity: () => {
+        if (failed) fail();
+        channel.assert();
+        return structuredClone({
+          host: 'aliyun',
+          binding: expected.binding,
+          siteDigest: expected.siteDigest,
+          ...execution,
+        });
+      },
+      prepare: () => run('prepare'),
+      retire: () => run('retire'),
+      queryOrders: (request) => run('query', request),
+      close: async () => {
+        await run('detach');
+        failed = true;
+        channel.close();
+        const left = (expected.reconcileByMs ?? expected.maintenanceEndsAtMs) - io.now();
+        if (left <= 0) fail();
+        let timer;
+        try {
+          const result = await Promise.race([
+            connection.completion,
+            new Promise((resolve) => {
+              timer = setTimeout(() => resolve({ code: 1 }), Math.min(left, 2147483647));
+            }),
+          ]);
+          if (result?.code !== 0) fail();
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+    };
+  } catch (error) {
+    failed = true;
+    channel?.close();
+    connection?.output.end();
+    throw ingressDiagnosticError(
+      'CUTOVER_GATEWAY_SESSION_UNPROVEN',
+      connectionStage,
+      await firstCutoverReceiverFailure(
+        error,
+        connection,
+        input?.reconcileByMs ?? input?.maintenanceEndsAtMs,
+        io.now,
+      ),
+    );
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    if (process.platform !== 'linux' || process.getuid?.() !== 0 || process.argv.length !== 3)
+      fail();
+    await serveFirstCutoverGatewaySession({ attempt: process.argv[2] });
+  } catch (error) {
+    process.stderr.write(firstCutoverReceiverFailureLine(error, 'gateway'));
+    process.exitCode = 1;
+  }
+}

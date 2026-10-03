@@ -31,6 +31,44 @@ describe('step-card-state', () => {
     });
   });
 
+  it('counts selected Chrome actions separately from evidence and non-action records', () => {
+    expect(
+      stepDetailSummary([
+        { actionKind: 'selected_chrome_action', status: 'done' },
+        { actionKind: 'selected_chrome_action', status: 'failed' },
+        { actionKind: 'selected_chrome_observe', status: 'done' },
+        { actionKind: 'selected_chrome_finish', status: 'done' },
+        { actionKind: 'selected_chrome_plan_discarded', status: 'done' },
+        { actionKind: 'selected_chrome_handoff', status: 'done' },
+        { actionKind: 'browser_act', status: 'done' },
+        { actionKind: 'browser_observe', status: 'done' },
+        { actionKind: 'browser_finish', status: 'done' },
+      ]),
+    ).toMatchObject({
+      total: 9,
+      done: 8,
+      failed: 1,
+      running: 0,
+      cancelled: 0,
+      label:
+        '1 项操作已应用 · 1 项操作未确认完成 · 1 次页面观察 · 1 次验证通过 · 1 项计划未执行 · 1 次人工交还 · 3 条历史轮次（未验证）',
+      tone: 'failed',
+    });
+  });
+
+  it('keeps informational selected Chrome records neutral when their record status is done', () => {
+    expect(
+      stepDetailSummary([
+        { actionKind: 'selected_chrome_observe', status: 'done' },
+        { actionKind: 'selected_chrome_plan_discarded', status: 'done' },
+        { actionKind: 'selected_chrome_handoff', status: 'done' },
+      ]),
+    ).toMatchObject({
+      label: '1 次页面观察 · 1 项计划未执行 · 1 次人工交还',
+      tone: 'idle',
+    });
+  });
+
   it('treats a cancelled-only terminal list as cancelled, not failed', () => {
     expect(
       stepDetailSummary([
@@ -77,6 +115,36 @@ describe('step-card-state', () => {
     ).toEqual(['cancelled', 'done']);
   });
 
+  it('does not infer selected Chrome receipt completion from the parent task status', () => {
+    const steps = stepDisplayStepsForTask(
+      [
+        { actionKind: 'selected_chrome_action', status: 'running' as const },
+        { actionKind: 'selected_chrome_observe', status: 'running' as const },
+        { actionKind: 'selected_chrome_finish', status: 'running' as const },
+        {
+          actionKind: 'selected_chrome_plan_discarded',
+          status: 'running' as const,
+        },
+        { actionKind: 'selected_chrome_handoff', status: 'running' as const },
+        { actionKind: 'navigate', status: 'running' as const },
+        { actionKind: 'browser_act', status: 'running' as const },
+      ],
+      'completed',
+    );
+
+    expect(steps.map((step) => step.status)).toEqual([
+      'cancelled',
+      'cancelled',
+      'cancelled',
+      'cancelled',
+      'cancelled',
+      'done',
+      'done',
+    ]);
+    expect(stepDetailSummary(steps).label).toContain('1 项操作未确认完成');
+    expect(stepDetailSummary(steps).label).toContain('1 次验证未确认');
+  });
+
   it('provides localized status labels for step badges', () => {
     expect(stepStatusText('running')).toBe('执行中');
     expect(stepStatusLabel('failed', 2)).toBe('步骤 3 · 失败');
@@ -103,6 +171,36 @@ describe('step-card-state', () => {
     expect(stepDisplayTitle({ actionKind: 'unknown_tool', tickIndex: 3 })).toBe(
       '任务步骤',
     );
+  });
+
+  it('names selected Chrome records by evidence type and marks historical ticks unverified', () => {
+    expect(
+      stepDisplayTitle({ actionKind: 'selected_chrome_action', tickIndex: 0 }),
+    ).toBe('浏览器操作结果');
+    expect(
+      stepDisplayTitle({ actionKind: 'selected_chrome_observe', tickIndex: 1 }),
+    ).toBe('页面观察记录');
+    expect(
+      stepDisplayTitle({ actionKind: 'selected_chrome_finish', tickIndex: 2 }),
+    ).toBe('结果验证记录');
+    expect(
+      stepDisplayTitle({
+        actionKind: 'selected_chrome_plan_discarded',
+        tickIndex: 3,
+      }),
+    ).toBe('未执行计划');
+    expect(
+      stepDisplayTitle({ actionKind: 'selected_chrome_handoff', tickIndex: 4 }),
+    ).toBe('人工交还记录');
+    expect(stepDisplayTitle({ actionKind: 'browser_act', tickIndex: 5 })).toBe(
+      '历史浏览器轮次（未验证）',
+    );
+    expect(
+      stepDisplayTitle({ actionKind: 'browser_observe', tickIndex: 6 }),
+    ).toBe('历史页面观察（未验证）');
+    expect(
+      stepDisplayTitle({ actionKind: 'browser_finish', tickIndex: 7 }),
+    ).toBe('历史结束轮次（未验证）');
   });
 
   it('hides label-only step summaries but keeps useful descriptions', () => {

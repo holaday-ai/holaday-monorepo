@@ -30,6 +30,7 @@
  */
 
 import { decideObservedTokenAction, TOKEN_KEY } from './auth-bridge-core.js';
+import { isLocalQaWorkbenchUrl, LOCAL_CHROME_QA } from '../shared/config.js';
 
 /**
  * Poll cadence. Chosen so:
@@ -174,6 +175,9 @@ function isRetryableSwFailure(response: unknown): boolean {
 }
 
 function observe(): void {
+  // Chrome content-script patterns cannot restrict localhost ports.
+  // Reject other local apps before even reading their token storage.
+  if (LOCAL_CHROME_QA && !isLocalQaWorkbenchUrl(window.location.href)) return;
   const current = readToken();
   if (current === undefined) return;
   const decision = decideObservedTokenAction(state.lastSent, current);

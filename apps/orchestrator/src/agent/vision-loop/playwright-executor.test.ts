@@ -1,6 +1,11 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type PageLike, PlaywrightExecutor, annotateAriaSnapshot } from './playwright-executor.js';
 
+// Isolates executor policy behavior; real SDK events are covered in browser-route-events.test.ts.
+vi.mock('./browser-route-events.js', () => ({
+  createRouteEventBoundary: () => ({ seal() {}, settled: async () => {} }),
+}));
+
 beforeAll(() => {
   process.env.JWT_SECRET ??= 'test-secret-must-be-at-least-32-characters-long-yes';
   process.env.DATABASE_URL ??= 'mysql://test:test@127.0.0.1:3306/test';
@@ -267,7 +272,7 @@ describe('PlaywrightExecutor.launchManaged', () => {
 });
 
 describe('PlaywrightExecutor.disconnect', () => {
-  it('releases an attached CDP handle without closing the external browser', async () => {
+  it('awaits the SDK close of an attached CDP transport handle', async () => {
     let closeCalls = 0;
     const exec = new PlaywrightExecutor({
       chromium: {
@@ -284,7 +289,7 @@ describe('PlaywrightExecutor.disconnect', () => {
     await exec.connect('http://127.0.0.1:9222');
     await exec.disconnect();
 
-    expect(closeCalls).toBe(0);
+    expect(closeCalls).toBe(1);
   });
 });
 

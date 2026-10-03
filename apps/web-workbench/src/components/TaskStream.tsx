@@ -593,6 +593,7 @@ function AgentBlock({
          *  copy so the next-step is obvious. */}
         {terminal && !task.resultText && !hasTerminalArtifacts && (
           <EmptyTerminalCard
+            taskId={task.taskId}
             status={task.status}
             intent={task.intent}
             // Defer the re-run button to the verification banner when
@@ -676,7 +677,7 @@ function TrustSummaryCard({
 }): JSX.Element {
   const toast = useToast();
   const mountedRef = useMountedRef();
-  const createTask = useTaskStore((s) => s.createTask);
+  const rerunTask = useTaskStore((s) => s.rerunTask);
   const [retrying, setRetrying] = React.useState(false);
   const summary = React.useMemo(
     () =>
@@ -735,7 +736,7 @@ function TrustSummaryCard({
       if (!task.intent || retrying) return;
       setRetrying(true);
       try {
-        const res = await createTask(task.intent, []);
+        const res = await rerunTask(task.taskId);
         if (!mountedRef.current) return;
         if ('error' in res) {
           toast.show(taskActionError('重新执行失败', res.error), 'error');
@@ -746,7 +747,7 @@ function TrustSummaryCard({
         if (mountedRef.current) setRetrying(false);
       }
     },
-    [createTask, mountedRef, onSuggestionPick, retrying, task.intent, toast],
+    [rerunTask, mountedRef, onSuggestionPick, retrying, task.intent, task.taskId, toast],
   );
   const Icon = trustToneIcon(summary.tone);
   return (
@@ -1839,10 +1840,12 @@ export function sanitizeMarkdownTrailingPunctuation(text: string): string {
  * packages/shared-types.
  */
 function EmptyTerminalCard({
+  taskId,
   status,
   intent,
   verificationBannerPresent = false,
 }: {
+  taskId: string;
   status: UiTask['status'];
   intent?: string;
   verificationBannerPresent?: boolean;
@@ -1855,14 +1858,14 @@ function EmptyTerminalCard({
   // "重新执行" action — avoid rendering a duplicate here.
   const retryable = terminalEmptyAllowsRerun(status) && !verificationBannerPresent;
   const toast = useToast();
-  const createTask = useTaskStore((s) => s.createTask);
+  const rerunTask = useTaskStore((s) => s.rerunTask);
   const mountedRef = useMountedRef();
   const [retrying, setRetrying] = React.useState(false);
   const handleRetry = React.useCallback(async (): Promise<void> => {
     if (!intent || retrying) return;
     setRetrying(true);
     try {
-      const result = await createTask(intent, []);
+      const result = await rerunTask(taskId);
       if (!mountedRef.current) return;
       if ('error' in result) {
         toast.show(taskActionError('重新执行失败', result.error), 'error');
@@ -1874,7 +1877,7 @@ function EmptyTerminalCard({
         setRetrying(false);
       }
     }
-  }, [createTask, intent, mountedRef, retrying, toast]);
+  }, [rerunTask, taskId, intent, mountedRef, retrying, toast]);
 
   return (
     <div
@@ -2548,14 +2551,14 @@ function TerminalSummary({
   // server.task.* WS events that the AppShell's URL effect uses to
   // navigate to the new task automatically — no manual route push
   // needed here.
-  const createTask = useTaskStore((s) => s.createTask);
+  const rerunTask = useTaskStore((s) => s.rerunTask);
   const [retryingIntent, setRetryingIntent] = React.useState<string | null>(null);
   const handleRetry = React.useCallback(
     async (retryIntent: string): Promise<void> => {
-      if (retryingIntent) return;
+      if (retryingIntent || !taskId) return;
       setRetryingIntent(retryIntent);
       try {
-        const result = await createTask(retryIntent, []);
+        const result = await rerunTask(taskId);
         if (!mountedRef.current) return;
         if ('error' in result) {
           toast.show(taskActionError('重新执行失败', result.error), 'error');
@@ -2568,7 +2571,7 @@ function TerminalSummary({
         }
       }
     },
-    [createTask, mountedRef, retryingIntent, toast],
+    [rerunTask, taskId, mountedRef, retryingIntent, toast],
   );
   // Codex IA close-out — the result card no longer hosts the
   // browser-panel entry. That moved to TaskToolbar at the top of the
@@ -2580,11 +2583,11 @@ function TerminalSummary({
           status={status}
           errorText={status === 'failed' ? displayText ?? '' : ''}
           onRetry={
-            terminalAllowsRerun(status) && intent
+            terminalAllowsRerun(status, displayText ?? '') && intent
               ? () => void handleRetry(intent)
               : undefined
           }
-          retrying={terminalAllowsRerun(status) && retryingIntent != null}
+          retrying={terminalAllowsRerun(status, displayText ?? '') && retryingIntent != null}
         />
       )}
       {!isFailedLike && endedOnBrowserErrorPage && (

@@ -1,0 +1,269 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "b43dd03132658d9c13875f050e2c27e584b61e33",
+  "applicationQaCandidate": "b43dd03132658d9c13875f050e2c27e584b61e33",
+  "scope": "same 51 sources after QA-only exact site-normalized late-known rejection, fixed oracle/inner-refusal markers and lightweight contracts; production bytes unchanged from parent; prior eight accepted cases retain their own freezes",
+  "releaseAcceptance": false,
+  "files": [
+    {
+      "path": "scripts/browser-cutover-channel.py",
+      "bytes": 17396,
+      "sha256": "ee53ec426156799dc302732756713c7f0585fa467ee77522690b0b2def4da823"
+    },
+    {
+      "path": "scripts/browser-cutover-channel.test.py",
+      "bytes": 12786,
+      "sha256": "b0cf3302a5106248e585116c3fd8e67f0f3ec8a5e070f7c754d1742090334d99"
+    },
+    {
+      "path": "scripts/browser-cutover-evidence.mjs",
+      "bytes": 108694,
+      "sha256": "bea5a2ae1e9f6e702d496234cc0f1ad878dda745cd60257a9545e1bd132be526"
+    },
+    {
+      "path": "scripts/browser-cutover-evidence.test.mjs",
+      "bytes": 124962,
+      "sha256": "6a008678788275f48f903ceaf10ee89d1ba670fc4af5b0a9704c3eedbf002804"
+    },
+    {
+      "path": "scripts/browser-first-cutover-browser-probe.mjs",
+      "bytes": 6212,
+      "sha256": "2efbefdcd0a98b3f37a5f4e101c080cce93f1352d3283a67fda782f82bb2894f"
+    },
+    {
+      "path": "scripts/browser-first-cutover-browser-probe.test.mjs",
+      "bytes": 3521,
+      "sha256": "104faa26d26000a0db504d580fc495de2912bcb75a6d6e2702505b698c448a0b"
+    },
+    {
+      "path": "scripts/browser-first-cutover-coordinator.test.mjs",
+      "bytes": 10903,
+      "sha256": "532e9d41f06f1ac8147d49e36c41f9a9330029294512d85ffc67f265bb52c59e"
+    },
+    {
+      "path": "scripts/browser-first-cutover-gateway-session.mjs",
+      "bytes": 22455,
+      "sha256": "b2c88a44d3d2736c125398dbb8c5e87dee2a4657407a23eccb48050aa28ad9a4"
+    },
+    {
+      "path": "scripts/browser-first-cutover-gateway-session.test.mjs",
+      "bytes": 20334,
+      "sha256": "ba245ae1fe6ee4c82329d3777e4ed6ec7dcfa71c042cb9224c2c5f948a1dc647"
+    },
+    {
+      "path": "scripts/browser-first-cutover-host.mjs",
+      "bytes": 164574,
+      "sha256": "0a71ea338a16c2c9b53f02a207aa6eb89f49b02340587d08f47bfbbfb755a110"
+    },
+    {
+      "path": "scripts/browser-first-cutover-host.test.mjs",
+      "bytes": 101562,
+      "sha256": "1e5197b92787337a01254ef946f170d16158b5d09bbbdcfb2451df239a6e7b18"
+    },
+    {
+      "path": "scripts/browser-first-cutover-ingress-diagnostics.mjs",
+      "bytes": 4094,
+      "sha256": "99486c35e6a62eeae49d6ea644721ee60c110775659798c1d8b8270fb70fe513"
+    },
+    {
+      "path": "scripts/browser-first-cutover-ingress-diagnostics.test.mjs",
+      "bytes": 1623,
+      "sha256": "72971df0472367964911b1e775b52ba82677479874c37728bcc8b56828c85f9e"
+    },
+    {
+      "path": "scripts/browser-first-cutover-ingress-pair.test.mjs",
+      "bytes": 19910,
+      "sha256": "9d7848e0232a97e29e27346573cc2601d976225574a7ba6ae73e38c5b0d23b70"
+    },
+    {
+      "path": "scripts/browser-first-cutover-ingress-session.mjs",
+      "bytes": 53401,
+      "sha256": "882ff5e79a30fa087e0fbda406b8dcd49a7cb597a389614a76653c299c3d9062"
+    },
+    {
+      "path": "scripts/browser-first-cutover-inventory.mjs",
+      "bytes": 56113,
+      "sha256": "cf139603a15fcc4abc0a9637a627c3428f8a672231e0855adfa258335cb453fb"
+    },
+    {
+      "path": "scripts/browser-first-cutover-inventory.test.mjs",
+      "bytes": 129585,
+      "sha256": "55120c2d63180bcf9fabfb91b8eb7bf4b744037f205c3fbb0bb5f9b8e0785e93"
+    },
+    {
+      "path": "scripts/browser-first-cutover-native-preflight.mjs",
+      "bytes": 11587,
+      "sha256": "14a63f89a013c9ce38931f3c40a04d4dd96def645ac3ad2ba267fe9772cddf5b"
+    },
+    {
+      "path": "scripts/browser-first-cutover-native-preflight.py",
+      "bytes": 3837,
+      "sha256": "e08445a4c3fc0edd4210a6efbb4238373ab1949268121f63c87f8ffcaaf3b586"
+    },
+    {
+      "path": "scripts/browser-first-cutover-native-preflight.test.mjs",
+      "bytes": 7290,
+      "sha256": "30cb7b491b0ab8e0dcc8f025bbb1eef4a1e4fee482521b7ab3491b034c1e391d"
+    },
+    {
+      "path": "scripts/browser-first-cutover-payments.mjs",
+      "bytes": 13607,
+      "sha256": "af9f49945b8d40ceebe444041415a006b395664ec170814e2707bd446216117d"
+    },
+    {
+      "path": "scripts/browser-first-cutover-payments.test.mjs",
+      "bytes": 12782,
+      "sha256": "84e980efd68ca9386ce9002e59eeeb9e8fe540b08e9b48d103c838aed0dffa21"
+    },
+    {
+      "path": "scripts/browser-first-cutover-production-facts.mjs",
+      "bytes": 12664,
+      "sha256": "f066a52c2ca3eed6a848ea7abb5e4f085726de00de987e39b040f918bdfb466b"
+    },
+    {
+      "path": "scripts/browser-first-cutover-production-facts.test.mjs",
+      "bytes": 12657,
+      "sha256": "cad95e204a312ba44f3f91890bb32a5c5492bccd0238901cd2d5a1061d84c286"
+    },
+    {
+      "path": "scripts/browser-first-cutover-qa-diagnostics.test.mjs",
+      "bytes": 13503,
+      "sha256": "6babc2a6909c64b14dacfde4b561fd8aef10558f8a7e2ecd0eb01b25e49c7e4c"
+    },
+    {
+      "path": "scripts/browser-first-cutover-recovery-session.mjs",
+      "bytes": 17416,
+      "sha256": "0fcf0af1fdfb7d4131b00eeb4f34123ad398f1ea2646d3ba2b2a6bb4625dc4cd"
+    },
+    {
+      "path": "scripts/browser-first-cutover-recovery-session.test.mjs",
+      "bytes": 15689,
+      "sha256": "c5fd893551bd32e0a6b16281ec0ef56f2b797fc00af7810863bd8ebf14a0f217"
+    },
+    {
+      "path": "scripts/browser-first-cutover-runtime.mjs",
+      "bytes": 167622,
+      "sha256": "98572ef9dd134380175b37d7c44f36a5136e7677cbcdab172b762284d943c97b"
+    },
+    {
+      "path": "scripts/browser-first-cutover-runtime.test.mjs",
+      "bytes": 214054,
+      "sha256": "cd0686f7bdc90dd34b803be2cebd4a758ced000d6fabc3cffe49612762891622"
+    },
+    {
+      "path": "scripts/browser-first-cutover-site.mjs",
+      "bytes": 56350,
+      "sha256": "d669b4de78ff0c344b5d484aa6e3809bd22293e0c1e43eafff69360683afb46b"
+    },
+    {
+      "path": "scripts/browser-first-cutover-site.test.mjs",
+      "bytes": 85880,
+      "sha256": "945ca4b3fa8617858988bea4ac44f65b40626ff81f066086e998bee9812581d1"
+    },
+    {
+      "path": "scripts/browser-first-cutover.integration.test.mjs",
+      "bytes": 2747,
+      "sha256": "8aead16ac86343bbecc2bf0b955dc7d04349e6345bd6c9528c17db3abb566c96"
+    },
+    {
+      "path": "scripts/browser-maintenance-journal.test.mjs",
+      "bytes": 54351,
+      "sha256": "947115ef5fa24da08e35d2677774b059f22f99fb085d7856b09fb31fdfd6707c"
+    },
+    {
+      "path": "scripts/browser-payment-port-fence.mjs",
+      "bytes": 7194,
+      "sha256": "8037f247ecc52128242b7897b0dbdf3d00508eddc60594220efe188038e4c7aa"
+    },
+    {
+      "path": "scripts/deploy-browser-first-cutover.sh",
+      "bytes": 2557,
+      "sha256": "3f0f6c2e881f433d7a81a62338e624dafdda106293d91cadb59c8c168a0654dc"
+    },
+    {
+      "path": "scripts/deploy-browser-first-cutover.test.mjs",
+      "bytes": 5451,
+      "sha256": "be304a8de4b19568ef4067d2095f2b8d065bff5ca04e7ff3a5c5d580d09a31e1"
+    },
+    {
+      "path": "scripts/deploy-migration-gate.test.sh",
+      "bytes": 1817,
+      "sha256": "6b2298a7aa998f26d2963902fc1ac75153905793d6f16b00f7797318685839b8"
+    },
+    {
+      "path": "scripts/fixtures/browser-cloud-joint-recovery-linux.mjs",
+      "bytes": 13388,
+      "sha256": "c17de97de025acc88217e8b0b8eefe132bc621b6e64e35bb6cb6ed17c7f39405"
+    },
+    {
+      "path": "scripts/fixtures/browser-cloud-recovery-probe-linux.mjs",
+      "bytes": 84020,
+      "sha256": "3ca4d4c629ea4f035e6161b3e4facecb04c9e6773a303e7eee696da650eda76e"
+    },
+    {
+      "path": "scripts/fixtures/browser-coordinator-linux.mjs",
+      "bytes": 6184,
+      "sha256": "402d7604eda5f74269b91382c29326f462a29a42926d58839b16c96d0ad3db2c"
+    },
+    {
+      "path": "scripts/fixtures/browser-first-cutover-network.qa.Dockerfile",
+      "bytes": 1328,
+      "sha256": "4f36e3aa602ec694fdbd8071fdc7637269e0b046ac8fb965fb4363070327e511"
+    },
+    {
+      "path": "scripts/fixtures/browser-first-cutover-runtime-materials.qa.mjs",
+      "bytes": 2661,
+      "sha256": "97b1e05f657469f47d290985d4da5a3d9d6561c49d0c0ad5dbd723bf995b9bec"
+    },
+    {
+      "path": "scripts/fixtures/browser-full-host-deps.qa.Dockerfile",
+      "bytes": 920,
+      "sha256": "a19b38714ce86b36831ac4191cec33644142725caf3ba4e286f266a37e9926af"
+    },
+    {
+      "path": "scripts/fixtures/browser-ingress-session-child.mjs",
+      "bytes": 7395,
+      "sha256": "7f977fddd7d2cf814ee0d035b4030844e0d0ffa933102ddb72408d9dfcd11c90"
+    },
+    {
+      "path": "scripts/fixtures/browser-native-recovery.qa.Dockerfile",
+      "bytes": 2648,
+      "sha256": "b4472a710f055aa5f09d09cdd1f4433fa64a0a1868f8ff3203203df9446e7122"
+    },
+    {
+      "path": "scripts/fixtures/browser-nginx-sites-qa.mjs",
+      "bytes": 12626,
+      "sha256": "c217e2bf0034a097ef1ac45fb780f7906ec8377c72846a083dafefece56c9fcc"
+    },
+    {
+      "path": "scripts/fixtures/browser-recovery-target-qa.mjs",
+      "bytes": 50366,
+      "sha256": "e9340e26e80809be06eb6f6140d7b7fd07d6c969f393c057a21d9e8fe049755a"
+    },
+    {
+      "path": "scripts/fixtures/browser-registration-removal-linux.mjs",
+      "bytes": 117380,
+      "sha256": "d83276b7bdbc8c89aef4d4798607bfbf1fe30da5a4025ec392953136d50cdf91"
+    },
+    {
+      "path": "scripts/fixtures/prepare-browser-first-cutover-source-qa.mjs",
+      "bytes": 5283,
+      "sha256": "f52dcc85b5d3a522e13ac3fec1f6bea78e25c511bf2c4468578f4b09e63756c2"
+    },
+    {
+      "path": "scripts/prepare-browser-first-cutover-qa-cache.py",
+      "bytes": 5056,
+      "sha256": "fd369cbef75194dc68baafb9ca1177ca353cb83b2da8a871fb78fc5e9a4e122a"
+    },
+    {
+      "path": "scripts/run-browser-first-cutover-qa.py",
+      "bytes": 16209,
+      "sha256": "439bd41e9907c937b6dded4bd64c3d088aebd7bb81b4722e342c224f2ae87a65"
+    }
+  ],
+  "manifestSha256": "5502ff51eefab5489d425678ef0bcf2e72c31125e6699aa1c92c8b70a39f7387",
+  "coordinatorBaseCommit": "fa443fe092dd106e7612186e7038c070e5035765",
+  "manifestHashAlgorithm": "sha256(UTF-8 json.dumps(files, separators=(comma,colon), sort_keys=True))",
+  "parentFreezeFileSha256": "83eeece51c1e18e8fd8c1325accaffdca25a981a621dc3e2150f2ff950ea20b8",
+  "parentManifestContentSha256": "35f2be1b0d4948d402f02fc9fa1921f57597b7ed7a64f065a8624de7aa64225b"
+}

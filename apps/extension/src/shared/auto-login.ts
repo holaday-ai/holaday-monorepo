@@ -21,6 +21,7 @@
  */
 
 import { normalizeAccessToken } from './storage.js';
+import { isLocalQaWorkbenchUrl, LOCAL_CHROME_QA, WORKBENCH_URL } from './config.js';
 import { withDeadline } from './deadline.js';
 import { compactLogErrorReason } from './log-error.js';
 import { sanitizePageContextUrl } from './page-context.js';
@@ -49,6 +50,7 @@ const MIN_TOKEN_LENGTH = 10;
 
 function isWorkbenchUrl(url: string | undefined): boolean {
   if (!url) return false;
+  if (LOCAL_CHROME_QA) return isLocalQaWorkbenchUrl(url);
   return WORKBENCH_URL_PATTERNS.some((re) => re.test(url));
 }
 
@@ -100,8 +102,10 @@ function readTokenResultFromTabOnce(
   return withDeadline(
     chrome.scripting.executeScript({
       target: { tabId },
-      func: () => {
+      args: [LOCAL_CHROME_QA ? new URL(WORKBENCH_URL).origin : null],
+      func: (expectedOrigin: string | null) => {
         try {
+          if (expectedOrigin && window.location.origin !== expectedOrigin) return null;
           return window.localStorage.getItem('holaday.access_token');
         } catch {
           return null;

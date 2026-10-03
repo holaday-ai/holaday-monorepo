@@ -89,6 +89,7 @@ export async function runAccountClosureWorkerRuntime(input: {
   signals: AccountClosureWorkerSignalSource;
   pollMs: number;
   onSignal?: (signal: 'SIGTERM' | 'SIGINT') => void;
+  maintenanceRequested?: () => boolean;
 }): Promise<void> {
   if (!Number.isSafeInteger(input.pollMs) || input.pollMs <= 0) {
     throw new Error('Invalid account closure worker poll interval');
@@ -108,7 +109,9 @@ export async function runAccountClosureWorkerRuntime(input: {
   try {
     await runAccountClosureWorkerLoop({
       tick: input.tick,
-      shouldStop: () => stopping,
+      // Checked both before a claim and after its original durable page settles.
+      // A read/validation error rejects the runtime; it never falls back to work.
+      shouldStop: () => stopping || input.maintenanceRequested?.() === true,
       wait: () =>
         new Promise<void>((resolve) => {
           const finish = () => {

@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
+import { localChromeTaskSessions } from '../../agent/supercar/local-chrome-task-session.js';
+import { runSelectedChromeTask } from '../../agent/supercar/selected-chrome-runner.js';
+import { startOwnedOperation } from '../../execution/owned-operation.js';
+import { runTaskBackground } from './task-background.js';
+import { assertLocalChromeSelection, localChromeSelectionSchema, localChromeTabsProcedure } from './local-chrome-selection.js';
+import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
+import { browserControlProcedure, browserControlStateProcedure, browserNavProcedure } from './browser-control.js';
 import type Anthropic from '@anthropic-ai/sdk';
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import {
   BASIC_ROLE_PICK_LIMIT,
   HOLADAY_SKILLS,
@@ -18,7 +26,6 @@ import { ashareQaHandlesMode } from '../../agent/a-share/ashare-qa-lane-gate.js'
 import { defaultBrowserNetworkPolicy } from '../../agent/browser-network-policy.js';
 import {
   extractRunnableDirectOpenUrl,
-  offlineBrowserUnavailableMessage,
   runDirectOpen,
   verifyDirectOpenUrlSafety,
 } from '../../agent/direct-open.js';
@@ -45,6 +52,7 @@ import { prepareCoreTaskPlan } from '../../agent/core-task-plan.js';
 import { assertCoreTaskInput } from '../../agent/core-task-input.js';
 import { assertLegacyReplyRecord } from './tasks-reply-record.js';
 import { handleCoreTaskReply } from './tasks-core-reply.js';
+import { taskTickReceipt } from './task-tick-receipt.js';
 import { createCoreGenerateTask } from './tasks-core-create.js';
 import { restoreCoreLegacyWorkflow } from '../../agent/core-legacy-workflow.js';
 import type { CoreAcceptedRequirements } from '../../agent/core-task-requirements.js';
@@ -253,7 +261,8 @@ import {
   sendExtensionToolCall,
   updateTaskStateForUser,
 } from '../../ws/server.js';
-import { protectedProcedure, router } from '../trpc.js';
+import { protectedProcedure, pureTaskInput, router } from '../trpc.js';
+import { taskDrainMiddleware } from '../task-drain.js';
 import {
   followUpParentHasBrowserContext,
   followUpParentReasonLabel,
@@ -263,6 +272,7 @@ import {
   resolveWorkflowIdentities,
 } from './task-followup-copy.js';
 import { markQueuedTaskExecutingOrThrow } from './task-queue-start.js';
+import { enqueueTaskExecution } from './task-queue-execution.js';
 import { annotateTaskResultAttachmentAvailability } from './task-result-attachment-availability.js';
 import {
   type CapturedBrowserFinalState as CapturedFinalState,
@@ -532,14 +542,14 @@ function generateRuntimeUnavailableReason(reason: ModelTaskUnavailableReason): s
 
 function unmigratedLaneForExecutionMode(
   executionMode: string,
-): 'browser' | 'image' | 'video_generation' | null {
-  if (executionMode === 'browser') return 'browser';
+): 'image' | 'video_generation' | null {
   if (executionMode === 'image') return 'image';
   if (executionMode === 'video_creation') return 'video_generation';
   return null;
 }
 
-function coreLaneForExecutionMode(executionMode: string): 'generate' | 'scrape' | null {
+function coreLaneForExecutionMode(executionMode: string): 'generate' | 'scrape' | 'browser' | null {
+  if (executionMode === 'browser') return 'browser';
   if (executionMode === 'generate' || executionMode === 'template_fill') return 'generate';
   if (executionMode === 'scrape') return 'scrape';
   return null;
@@ -590,6 +600,7 @@ export const imageCreationOptionsInput = z.object({
 });
 
 const createInput = z.object({
+  localChrome: localChromeSelectionSchema.optional(),
   intent: z.string().min(1).max(4_000),
   /**
    * Non-user-authored routing context from a dedicated product surface.
@@ -1181,7 +1192,19 @@ function isTaskCreateReplay(value: unknown): value is TaskCreateReplay {
 }
 
 export const tasksRouter = router({
-  create: protectedProcedure.input(createInput).mutation(async ({ ctx, input }) => {
+  create: protectedProcedure.input(pureTaskInput(createInput)).use(async ({ ctx, input, next }) => {
+    let localChromeReservation;
+    try {
+      localChromeReservation = input.localChrome ? localChromeTaskSessions.reserve(ctx.userId, input.localChrome) : undefined;
+    } catch {
+      throw new TRPCError({ code: 'CONFLICT', message: '这个 Chrome 连接正在执行另一项任务，请等待完成后重试。未扣除额度。' });
+    }
+    try { return await next({ ctx: { localChromeReservation } }); }
+    finally { if (localChromeReservation) localChromeTaskSessions.releaseReservation(localChromeReservation); }
+  }).use(taskDrainMiddleware).mutation(async ({ ctx, input }) => {
+    if (input.localChrome && (input.mode === 'plan' || input.fileIds?.length || input.imageOptions || input.videoOptions || input.stockContext || input.taskSource || input.replyToTaskId)) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: '本地 Chrome 当前支持新建网页操作任务，请移除附件并使用自动执行模式。' });
+    }
     // O15 — code-task refusal lands BEFORE user lookup so even an
     // unauthenticated-token-in-fail-path doesn't get scaffolding.
     //
@@ -1248,12 +1271,14 @@ export const tasksRouter = router({
           taskCreateIdempotencyKey!,
         ),
       onFinalizeFailure: () => {
+        ctx.executionLifetime?.drain.markUnknown(ctx.executionLifetime.owner);
         ctx.logger.error(
           { userId: ctx.userId, clientRequestId: input.clientRequestId },
           'tasks.create: task created but idempotency claim did not finalize',
         );
       },
       run: async () => {
+    type TaskExecutionContext = typeof ctx;
     // The authenticated request carries a server-signed origin. One repository
     // instance is shared by every execution lane so no early-return branch can
     // accidentally fall back to the database's `user` default.
@@ -1391,6 +1416,7 @@ export const tasksRouter = router({
           status: tasksTable.status,
           result: tasksTable.result,
           errorMessage: tasksTable.errorMessage,
+          sourceContext: tasksTable.sourceContext,
         })
         .from(tasksTable)
         .where(
@@ -1411,6 +1437,14 @@ export const tasksRouter = router({
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: followUpTerminalGuardMessage(),
+        });
+      }
+      // A finished local session cannot be adopted by the cloud follow-up path.
+      // Require a new explicit selection before creating or charging a task.
+      if (z.object({ browserSource: z.literal('local-chrome') }).safeParse(parent.sourceContext).success) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '本地 Chrome 会话已结束，请新建任务并重新选择 Chrome 页面后发送。',
         });
       }
       const parentResult = (parent.result ?? null) as {
@@ -1579,7 +1613,6 @@ export const tasksRouter = router({
     // pro-exclusive. So in practice isOpus is true only for Pro
     // users — but defend against future config drift by clamping
     // here rather than relying on prompt-layers' invariants.
-    const willConsumeOpus = isOpus && planId === 'pro';
 
     const quotaService = new QuotaService(ctx.db);
     const isBypass = isQuotaBypassUser(ctx.userId);
@@ -1645,7 +1678,7 @@ export const tasksRouter = router({
       routingWorkflowId: typedRoutingWorkflow?.workflowId,
       legacyWorkflowId: expertWorkflow?.id,
     });
-    const executionMode = resolveFollowUpExecutionMode({
+    const executionMode = input.localChrome ? 'browser' as const : resolveFollowUpExecutionMode({
       parentHasBrowserContext,
       typedWorkflowOverride,
       expertRouteOverride: expertWorkflow?.routeOverride,
@@ -1716,7 +1749,9 @@ export const tasksRouter = router({
       });
     }
 
-    // Qwen-only rollout boundary: browser/media lanes still depend on
+    const willConsumeOpus = executionMode !== 'browser' && isOpus && planId === 'pro';
+
+    // Qwen-only rollout boundary: media lanes still depend on
     // legacy model controllers. Persist an honest terminal task before
     // quota consumption instead of throwing a transient precondition or
     // leaving an accepted task in `executing` forever.
@@ -1771,6 +1806,7 @@ export const tasksRouter = router({
     // consumption. An unavailable core lane is a deployment/rollout state,
     // not a billable task attempt.
     const coreLane = coreLaneForExecutionMode(executionMode);
+    let browserMessagesAdapter: MessagesAdapter | undefined;
     if (coreLane) {
       const preflight = modelRuntimeWiring.resolveCore({
         actorExternalId: ctx.userId,
@@ -1821,6 +1857,22 @@ export const tasksRouter = router({
           steps: [],
           executionMode,
         };
+      }
+      if (coreLane === 'browser') {
+        browserMessagesAdapter = preflight.messages('vision');
+        if (input.localChrome) await assertLocalChromeSelection(ctx.userId, input.localChrome);
+        if (
+          !input.localChrome &&
+          !ctx.playwrightExecutor &&
+          !ctx.executionRouter?.getExecutor('headed') &&
+          !ctx.executionRouter?.getExecutor('headless') &&
+          !(ctx.browserPool && shouldUseBrowserPool(ctx.userId))
+        ) {
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: '浏览器执行器尚未就绪，未扣除额度。请稍后重试。',
+          });
+        }
       }
     }
     const videoIntent =
@@ -1875,7 +1927,7 @@ export const tasksRouter = router({
       videoAllowed &&
       Boolean(legacyMediaModelClient) &&
       videoIntent;
-    if (appEnv.NODE_ENV === 'production' && executionMode === 'browser' && !ctx.browserPool) {
+    if (!input.localChrome && appEnv.NODE_ENV === 'production' && executionMode === 'browser' && !ctx.browserPool) {
       // Server-side browser tasks must use the per-task pool because that
       // path is pinned to BrowserEgressProxy. A shared CDP fallback can only
       // apply app-level URL checks and cannot eliminate DNS rebinding or
@@ -1886,7 +1938,7 @@ export const tasksRouter = router({
       });
     }
     const directOpenUrl =
-          executionMode === 'browser'
+          !input.localChrome && executionMode === 'browser'
             ? extractRunnableDirectOpenUrl(input.intent, input.mode)
             : null;
     const directOpenSafetyError = directOpenUrl
@@ -1913,19 +1965,6 @@ export const tasksRouter = router({
       throw new TRPCError({
         code: 'PRECONDITION_FAILED',
         message: '浏览器执行器尚未就绪，未创建空白任务。请稍后重试。',
-      });
-    }
-    const offlineUnavailable =
-      executionMode === 'browser' && !directOpenUrl
-        ? offlineBrowserUnavailableMessage(Boolean(appEnv.ANTHROPIC_API_KEY))
-        : null;
-    if (offlineUnavailable) {
-      // Reject before quota consumption and before inserting a row.
-      // A missing model controller is deployment readiness, not a
-      // user task attempt, and must never become a 20-minute zombie.
-      throw new TRPCError({
-        code: 'PRECONDITION_FAILED',
-        message: offlineUnavailable,
       });
     }
     // Codex Round 2 P1-7 — explicit observability log at the dispatch
@@ -2151,7 +2190,7 @@ export const tasksRouter = router({
       }
 
       const imageStartedAt = Date.now();
-      void (async () => {
+      void runTaskBackground(ctx, async (ctx) => (async () => {
         const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
             const imageHeartbeat =
               taskInternalId == null
@@ -2372,7 +2411,7 @@ export const tasksRouter = router({
             'image: detached failure could not be persisted',
           );
         }
-      });
+      }));
 
       return {
         taskId,
@@ -2826,7 +2865,7 @@ export const tasksRouter = router({
           };
         }
 
-        void (async () => {
+        void runTaskBackground(ctx, async (ctx) => (async () => {
           const { runAshareQa, runAsharePanorama } = await import(
             '../../agent/a-share/ashare-qa-runner.js'
           );
@@ -2961,7 +3000,7 @@ export const tasksRouter = router({
           } catch (err) {
             ctx.logger.error({ err, taskId }, 'ashare-qa: persist/broadcast failed');
           }
-        })();
+        })());
 
         return {
           taskId,
@@ -2990,7 +3029,7 @@ export const tasksRouter = router({
           'task: executor lane selected',
         );
         broadcastSubStatus(ctx.userId, taskId, 'generating');
-        void (async () => {
+        void runTaskBackground(ctx, async (ctx) => (async () => {
           let answer: string;
           let terminalStatus: 'completed' | 'failed' = 'completed';
           try {
@@ -3052,7 +3091,7 @@ export const tasksRouter = router({
           } catch (err) {
             ctx.logger.error({ err, taskId }, 'ashare-index: persist/broadcast failed');
           }
-        })();
+        })());
         return {
           taskId,
           status: 'executing' as const,
@@ -3081,7 +3120,7 @@ export const tasksRouter = router({
           { taskId, userId: ctx.userId, executorLane: 'ashare_qa_guidance' },
           'task: executor lane selected',
         );
-        void (async () => {
+        void runTaskBackground(ctx, async (ctx) => (async () => {
           try {
             let guidancePersisted = false;
             const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
@@ -3111,7 +3150,7 @@ export const tasksRouter = router({
           } catch (err) {
             ctx.logger.error({ err, taskId }, 'ashare-qa-guidance: persist/broadcast failed');
           }
-        })();
+        })());
         return {
           taskId,
           status: 'executing' as const,
@@ -3207,7 +3246,7 @@ export const tasksRouter = router({
         };
       }
 
-      void (async () => {
+      void runTaskBackground(ctx, async (ctx) => (async () => {
         const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
         let result: RunTemplateFillResult;
         if (taskInternalId == null) {
@@ -3406,7 +3445,7 @@ export const tasksRouter = router({
         } catch (err) {
           ctx.logger.warn({ err, taskId }, 'template-fill: broadcast terminal failed');
         }
-      })();
+      })());
 
       return {
         taskId,
@@ -3495,7 +3534,7 @@ export const tasksRouter = router({
       // there's no per-user FIFO queue to enqueue into. Concurrent
       // generate tasks parallelize on the selected regional Qwen endpoint.
       const generateStartedAt = Date.now();
-      void (async () => {
+      void runTaskBackground(ctx, async (ctx) => (async () => {
         // A2 deferred — generate→browser fallback would re-enter the
         // supercar branch which needs pool slots, queueing, and a
         // distinct outcome shape. Tracked as fallbackChain=['generate']
@@ -3861,7 +3900,7 @@ export const tasksRouter = router({
           outcome.status === 'completed'
         ) {
           const summary = outcome.summary;
-          void publishCoreTaskSuggestions({
+          void runTaskBackground(ctx, async (ctx) => publishCoreTaskSuggestions({
             wiring: modelRuntimeWiring,
             actorExternalId: ctx.userId,
             modelDataRegion: userRow.modelDataRegion,
@@ -3874,14 +3913,14 @@ export const tasksRouter = router({
               broadcastToUser(ctx.userId, {
                 type: 'server.supercar.suggestions', taskId, suggestions,
               }),
-          });
+          }));
         }
 
         // Phase 1 Day 5 — fire-and-forget execution-pipeline persist
         // + always cleanup the in-memory contract / ledger registries
         // even when persist is a no-op (flags off) so the maps don't
         // leak across long-running PM2 lifetimes.
-        void persistExecution({
+        void runTaskBackground(ctx, async (ctx) => persistExecution({
           taskId,
           verification: executionVerification,
           db: ctx.db,
@@ -3897,8 +3936,8 @@ export const tasksRouter = router({
                 })
               : null,
           )
-          .finally(() => disposeExecution(taskId));
-      })();
+          .finally(() => disposeExecution(taskId)));
+      })());
 
       return {
         taskId,
@@ -4015,7 +4054,7 @@ export const tasksRouter = router({
 
       const firecrawl = ctx.firecrawl;
       const scrapeStartedAt = Date.now();
-      void (async () => {
+      void runTaskBackground(ctx, async (ctx) => (async () => {
         // Fallback chain (A4) — every lane the dispatcher actually
         // tried for this task. Logged + persisted under
         // result.metadata.fallbackChain so the eval pipeline can see
@@ -4497,7 +4536,7 @@ export const tasksRouter = router({
           outcome.status === 'completed'
         ) {
           const summary = outcome.summary;
-          void publishCoreTaskSuggestions({
+          void runTaskBackground(ctx, async (ctx) => publishCoreTaskSuggestions({
             wiring: modelRuntimeWiring,
             actorExternalId: ctx.userId,
             modelDataRegion: userRow.modelDataRegion,
@@ -4510,12 +4549,12 @@ export const tasksRouter = router({
               broadcastToUser(ctx.userId, {
                 type: 'server.supercar.suggestions', taskId, suggestions,
               }),
-          });
+          }));
         }
 
         // Phase 1 Day 5 — fire-and-forget execution-pipeline persist
         // + cleanup. Same pattern as the generate fork.
-        void persistExecution({
+        void runTaskBackground(ctx, async (ctx) => persistExecution({
           taskId,
           verification: executionVerification,
           db: ctx.db,
@@ -4531,8 +4570,8 @@ export const tasksRouter = router({
                 })
               : null,
           )
-          .finally(() => disposeExecution(taskId));
-      })();
+          .finally(() => disposeExecution(taskId)));
+      })());
 
       return {
         taskId,
@@ -4566,7 +4605,7 @@ export const tasksRouter = router({
         },
       );
 
-      const dispatchDirectOpen = async (): Promise<void> => {
+      const dispatchDirectOpen = async (ctx: TaskExecutionContext): Promise<void> => {
         let executor = directOpenFallbackExecutor;
         let allocatedPool = false;
         let adoptedBrowserSession = false;
@@ -4665,14 +4704,14 @@ export const tasksRouter = router({
       };
 
       if (willQueueDirectOpen && ctx.taskQueue) {
-        const enqueueResult = ctx.taskQueue.enqueue({
+        const enqueueResult = enqueueTaskExecution(ctx, {
           taskId,
           userId: ctx.userId,
           runFn: dispatchDirectOpen,
-          onStart: async (): Promise<void> => {
+          onStart: async (ctx): Promise<void> => {
             await markQueuedTaskExecutingOrThrow({ repo, taskId, logger: ctx.logger });
           },
-          onTimeout: async (): Promise<void> => {
+          onTimeout: async (ctx): Promise<void> => {
             const reason = '排队等待时间过长，任务已自动停止。请稍后重新执行。';
             try {
                   const failed = await repo.markQueuedTaskFailed(
@@ -4726,9 +4765,9 @@ export const tasksRouter = router({
         };
       }
 
-      void dispatchDirectOpen().catch((err) => {
+      void runTaskBackground(ctx, async (ctx) => dispatchDirectOpen(ctx).catch((err) => {
         ctx.logger.error({ err, taskId }, 'direct-open: detached dispatch rejected');
-      });
+      }));
 
       return {
         taskId,
@@ -4746,27 +4785,18 @@ export const tasksRouter = router({
         gate: 'supercar-vs-legacy',
         AGENT_MODE: appEnv.AGENT_MODE,
         playwrightExecutorPresent: Boolean(ctx.playwrightExecutor),
-        anthropicKeyPresent: Boolean(appEnv.ANTHROPIC_API_KEY),
+        browserModel: browserMessagesAdapter?.metadata.model ?? null,
         isSimpleSearchIntent,
         browserPoolEligible,
         willUseSupercar:
-          appEnv.AGENT_MODE === 'supercar' &&
-          Boolean(appEnv.ANTHROPIC_API_KEY) &&
-          (Boolean(ctx.playwrightExecutor) || browserPoolEligible),
+          Boolean(browserMessagesAdapter),
       },
       'tasks.create: control-plane decision',
     );
 
-    // Supercar path — Anthropic's official computer_20251124 +
-    // web_search_20260209 tools driving Playwright directly, with
-    // adaptive thinking + prompt caching. This is the default starting
-    // with the superstar rewrite; flip AGENT_MODE=legacy to fall back
-    // to the hand-rolled vision-loop.
-    if (
-      appEnv.AGENT_MODE === 'supercar' &&
-      appEnv.ANTHROPIC_API_KEY &&
-      (ctx.playwrightExecutor || browserPoolEligible)
-    ) {
+    // Production browser execution uses the admitted regional Qwen adapter.
+    // AGENT_MODE and Anthropic credentials cannot redirect this lane.
+    if (browserMessagesAdapter) {
       const taskId = newExternalId('task');
 
       // Phase 13 Dim 1 — first-frame plan. Skipped for simple-search and
@@ -4775,7 +4805,7 @@ export const tasksRouter = router({
       // user's persisted model-data region. All invalid/configuration/provider
       // failures become no-plan, so task execution remains available. Run in
       // parallel with memory retrieval to avoid adding serial create latency.
-      const skipPlan = isSimpleSearchIntent || shouldSkipPlan(input.intent);
+      const skipPlan = Boolean(input.localChrome) || isSimpleSearchIntent || shouldSkipPlan(input.intent);
       const memoryService = new MemoryService(ctx.db, ctx.logger);
       const [planResult, relevantMemories] = await Promise.all([
         skipPlan
@@ -4817,7 +4847,7 @@ export const tasksRouter = router({
       // boot without MULTI_USER) we fall back to the historical
       // 'executing' seed.
       const willQueueDispatch = Boolean(
-        ctx.taskQueue && executionMode === 'browser' && shouldUseBrowserPool(ctx.userId),
+        !input.localChrome && ctx.taskQueue && executionMode === 'browser' && shouldUseBrowserPool(ctx.userId),
       );
       await repo.insertTask(
         {
@@ -4832,6 +4862,7 @@ export const tasksRouter = router({
           intent: input.intent,
           roleId: dispatchRoleId,
           opusUsed: opusActuallyConsumed,
+          ...(input.localChrome ? { sourceContext: { browserSource: 'local-chrome' } } : {}),
         },
       );
       // Phase 13 Dim 1 — persist plan onto the task row and broadcast
@@ -4930,10 +4961,11 @@ export const tasksRouter = router({
       // can hold it past the 10-slot pool cap. Body unchanged from
       // the pre-queue flow; only outer scheduling differs (taskQueue
       // .enqueue vs `void runFn()`).
-      const dispatchToBrave = async (): Promise<void> => {
+      const dispatchToBrave = async (ctx: TaskExecutionContext): Promise<void> => {
       let perUserExec = null;
       let adoptedBrowserSession = false;
             if (
+              !input.localChrome &&
               ctx.browserPool &&
               shouldUseBrowserPool(ctx.userId) &&
               executionMode === 'browser'
@@ -5067,7 +5099,7 @@ export const tasksRouter = router({
       // singleton lane is the exception, not the rule). Helps
       // future "agent operates on a different browser than the
       // user is watching" reports get diagnosed in one log line.
-      const executorLane = perUserExec
+      const executorLane = input.localChrome ? 'local-chrome' : perUserExec
         ? 'per-user-pool'
         : primaryExecutor === headedExec
           ? 'singleton-headed-fallback'
@@ -5236,7 +5268,15 @@ export const tasksRouter = router({
           ),
       });
       const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
+          messagesAdapter: browserMessagesAdapter,
           taskId,
+          ...(primaryExecutor && ctx.browserPool?.peek(taskId)?.executor === primaryExecutor ? { browserControlFactory: () => {
+            const instance = ctx.browserPool?.peek(taskId);
+            if (!instance || instance.userId !== ctx.userId || instance.executor !== primaryExecutor || instance.status !== 'ready') {
+              throw new Error('browser_control_instance_unavailable');
+            }
+            return browserControlSessions.start(instance);
+          } } : {}),
           isTaskCancelled: () => repo.isTaskCancelled(taskId),
           // Phase 1 Playbook ④ prerequisite — cost accounting for the browse
           // loop (recorder + the external user id llm_calls.user_id needs).
@@ -5260,7 +5300,7 @@ export const tasksRouter = router({
           // effort: a DB blip or broadcast failure logs and continues
           // (the loop already has the up-to-date state in memory).
           onPlanStepUpdate: (steps) => {
-            void (async () => {
+            void runTaskBackground(ctx, async (ctx) => (async () => {
               const persisted = await repo.persistActivePlanStatus(taskId, steps);
               if (!persisted.persisted) {
                 ctx.logger.info({ taskId }, 'plan-step skipped stale update');
@@ -5275,10 +5315,10 @@ export const tasksRouter = router({
               } catch (err) {
                 ctx.logger.warn({ err, taskId }, 'plan-step broadcast failed');
               }
-            })().catch((err) => ctx.logger.warn({ err, taskId }, 'plan-step persist failed'));
+            })().catch((err) => ctx.logger.warn({ err, taskId }, 'plan-step persist failed')));
           },
           onStatsRecord: ({ laneUsed, targetSite, success, latencyMs, errorType }) => {
-            void statsService.record({
+            void runTaskBackground(ctx, async () => statsService.record({
               userIdInternal: userRow.id,
               taskExternalId: taskId,
               taskType: taskTypeForStats,
@@ -5287,7 +5327,7 @@ export const tasksRouter = router({
               success,
               latencyMs,
               errorType,
-            });
+            }));
           },
           onEvidence: (ev) => {
             try {
@@ -5312,7 +5352,7 @@ export const tasksRouter = router({
                   // Fire-and-forget (mirrors the onTick consumer): a DB
                   // failure only drops this capture row + logs; the browse
                   // action is never awaited on it.
-                  void (async () => {
+                  void runTaskBackground(ctx, async (ctx) => (async () => {
                     try {
                       const capture = await taskActionCaptureRepo.create({
                         taskId: taskDbId,
@@ -5389,7 +5429,7 @@ export const tasksRouter = router({
                         'supercar: persist action capture failed',
                       );
                     }
-                  })();
+                  })());
                 },
               }
             : {}),
@@ -5518,11 +5558,8 @@ export const tasksRouter = router({
             }
           },
           onTick(ev) {
-            // Synthesise a tick.start + tick.end pair per iteration so
-            // the existing UI step cards light up without frontend
-            // changes. actionKind is the first client-side tool the
-            // model invoked this turn, or "text" when Claude just
-            // spoke (e.g. mid-turn thinking → commentary).
+            // Selected Chrome supplies receipt-backed records; other
+            // runners retain their existing per-iteration projection.
             //
             // Also bump the per-user pool's lastActiveAt so an active
             // task never trips the 30-min idle GC — pool.touch is a
@@ -5530,10 +5567,11 @@ export const tasksRouter = router({
             if (ctx.browserPool && perUserExec) {
               ctx.browserPool.touch(taskId);
             }
-            const actionKind = ev.toolsInTurn[0] ?? 'text';
-            const actionSummary = ev.textPreamble
+            const fallbackSummary = ev.textPreamble
               ? truncateString(stripPlanTrackerMarkers(ev.textPreamble), 80)
               : ev.toolsInTurn.join(', ') || 'thinking';
+            const receipt = taskTickReceipt(ev, fallbackSummary);
+            const { actionKind, actionSummary } = receipt;
             const now = Date.now();
             try {
               broadcastToUser(userId, {
@@ -5550,7 +5588,8 @@ export const tasksRouter = router({
                 actionKind,
                 actionSummary,
                 durationMs: ev.apiLatencyMs,
-                ok: true,
+                ok: receipt.ok,
+                ...(receipt.message ? { message: receipt.message } : {}),
               });
             } catch (err) {
               ctx.logger.warn({ err, taskId }, 'supercar: broadcast tick failed');
@@ -5563,19 +5602,20 @@ export const tasksRouter = router({
             const webSearches = pendingWebSearches;
             pendingWebSearches = [];
             if (taskDbId) {
-              void (async () => {
+              void runTaskBackground(ctx, async (ctx) => (async () => {
                 try {
                   await ctx.db.insert(taskSteps).values({
                     externalId: newExternalId('taskStep'),
                     taskId: taskDbId,
                     seq: ev.iteration,
                     kind: actionKind,
-                    status: 'done',
+                    status: receipt.status,
                     riskLevel: 'low',
                     input: { summary: actionSummary },
                     output: {
                       apiLatencyMs: ev.apiLatencyMs,
                       tools: ev.toolsInTurn,
+                      ...(ev.execution ? { execution: ev.execution } : {}),
                       ...(webSearches.length > 0 ? { webSearches } : {}),
                     },
                     startedAt: new Date(now - ev.apiLatencyMs),
@@ -5587,7 +5627,7 @@ export const tasksRouter = router({
                     'supercar: persist step failed',
                   );
                 }
-              })();
+              })());
             }
           },
           onScreencast(ev) {
@@ -5676,7 +5716,7 @@ export const tasksRouter = router({
             // result.executionMode; without this, login parks fall
             // through to lane='unknown'.
             const parkUrl = ev.currentUrl;
-            void (async () => {
+            void runTaskBackground(ctx, async (ctx) => (async () => {
               try {
                 // Capture a screenshot off the per-task Brave. This
                 // shares the captureFinalState helper used at terminal
@@ -5731,7 +5771,7 @@ export const tasksRouter = router({
               } catch (err) {
                 ctx.logger.warn({ err, taskId }, 'supercar: persist park metadata failed');
               }
-            })();
+            })());
           },
           onThinking(summary) {
             try {
@@ -5830,6 +5870,7 @@ export const tasksRouter = router({
         // state (between API calls / tool steps) it'll exit cleanly
         // and the .finally below still fires the regular release.
         try {
+          localChromeTaskSessions.abort(ctx.userId, taskId);
           supercarAbort(taskId);
         } catch {
           /* swallow — abort is best-effort */
@@ -5839,7 +5880,7 @@ export const tasksRouter = router({
         // wedged, the DB row remained `executing` until the next
         // orchestrator restart boot-sweep. That looked like an
         // endless task to the user and kept quota/concurrency noisy.
-        void (async (): Promise<void> => {
+        void runTaskBackground(ctx, async (ctx) => (async (): Promise<void> => {
           const reason = '任务执行超时，已自动停止。建议：简化任务描述后重试。';
           try {
             const persisted = await repo.persistVisionOutcome(taskId, {
@@ -5865,17 +5906,18 @@ export const tasksRouter = router({
               'supercar: watchdog failed to persist terminal timeout',
             );
           }
-        })();
+        })());
         // Step 3: force-release the per-task Brave even if abort
         // didn't take. The pool's release method is idempotent: a
         // second call when the slot is already torn down no-ops.
         if (didAllocatePool && ctx.browserPool) {
-            void ctx.browserPool.release(taskId, 'watchdog-force-release').catch((relErr) => {
+            const releasingPool = ctx.browserPool;
+            void runTaskBackground(ctx, async (ctx) => releasingPool.release(taskId, 'watchdog-force-release').catch((relErr) => {
               ctx.logger.warn(
                 { err: relErr, taskId, userId: ctx.userId },
                 'pool: watchdog force-release failed',
               );
-            });
+            }));
         }
       }, SUPERCAR_TIMEOUT_MS + WATCHDOG_GRACE_MS);
       // Mark the timer as unref'd so it doesn't keep the Node process
@@ -5959,8 +6001,23 @@ export const tasksRouter = router({
             allowedDomains: otaAllowedDomains,
           },
         });
+      const runLocalChrome = async () => {
+        if (!input.localChrome) throw new Error('chrome_selection_required');
+        const session = localChromeTaskSessions.get(userId, taskId);
+        if (!session) throw new Error('chrome_session_unavailable');
+        const { extensionClientId: _connection, ...target } = input.localChrome;
+        return runSelectedChromeTask({
+            taskId, intent: effectiveIntent, messagesAdapter: browserMessagesAdapter,
+            client: session.client, control: session.control, target,
+            signal: session.cancellation.signal, isTaskCancelled: supercarArgs.isTaskCancelled,
+            recorder: llmCallRecorder, userExternalId: userId,
+            onTick: supercarArgs.onTick, onThinking: supercarArgs.onThinking,
+            createFileFormats: supercarArgs.createFileFormats,
+            onCreateFile: supercarArgs.onCreateFile,
+        });
+      };
       const runFn = () =>
-        (useOtaUserBrowser
+        (input.localChrome ? runLocalChrome() : useOtaUserBrowser
           ? runUserBrowserReadonly()
           : runSupercarWithRetry(supercarArgs, { userId, taskId, logger: ctx.logger })
         )
@@ -6135,7 +6192,7 @@ export const tasksRouter = router({
                   // PlanCard catches up. Best-effort: a DB blip
                   // can't block terminal broadcast.
                   if (persisted.persisted) {
-                    void convergePlanStatusOnSuccess(ctx, taskId, userId);
+                    void runTaskBackground(ctx, async (ctx) => convergePlanStatusOnSuccess(ctx, taskId, userId));
                     broadcastToUser(userId, {
                       type: 'server.task.terminal',
                       taskId,
@@ -6214,12 +6271,13 @@ export const tasksRouter = router({
             // downstream parsing is uniform.
             const elapsedMs = Date.now() - browserStartedAt;
             const metadata: Record<string, unknown> = {
+              ...(input.localChrome ? { browserSource: 'local-chrome' } : {}),
               executionMode: executionMode === 'browser' ? 'browser' : executionMode,
               finalExecutionMode: executionMode === 'browser' ? 'browser' : executionMode,
               expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
               expertMode: expertModeOverride,
               selectedRole: dispatchRoleId,
-              model: opusActuallyConsumed ? 'claude-opus-4-7' : 'claude-sonnet-4-6',
+              ...browserMessagesAdapter.metadata,
               fallbackChain: ['browser'],
               elapsedMs,
               iterations: outcome.iterations,
@@ -6790,10 +6848,11 @@ export const tasksRouter = router({
                   },
                   'suggestions: Qwen selected',
                 );
-                void generateSuggestions({
+                const completedSummary = outcome.summary;
+                void runTaskBackground(ctx, async (ctx) => generateSuggestions({
                   messagesAdapter,
                   intent: input.intent,
-                  summary: outcome.summary,
+                  summary: completedSummary,
                 })
                   .then((suggestions) => {
                     if (suggestions.length === 0) return;
@@ -6809,7 +6868,7 @@ export const tasksRouter = router({
                   })
                   .catch((err) =>
                     ctx.logger.warn({ err, taskId }, 'suggestions: generate crashed'),
-                  );
+                  ));
               }
             }
           })
@@ -6899,14 +6958,15 @@ export const tasksRouter = router({
                 'terminal-review',
               );
               if (!retained) {
-                      void ctx.browserPool
+                      const releasingPool = ctx.browserPool;
+                      void runTaskBackground(ctx, async (ctx) => releasingPool
                         .release(taskId, `task-${taskId}-done`)
                         .catch((relErr) => {
                     ctx.logger.warn(
                       { err: relErr, taskId, userId: ctx.userId },
                       'pool: post-task release failed',
                     );
-                  });
+                  }));
               }
             }
             // Phase 24 RC follow-up — wake the TaskQueue worker so
@@ -6919,7 +6979,7 @@ export const tasksRouter = router({
             // scrape lanes. Always runs (then OR catch path), so
             // even a runner exception still serialises the contract
             // + ledger that were inited at task start.
-            void persistExecution({
+            const finalPersistence = persistExecution({
               taskId,
               verification: executionVerification,
               db: ctx.db,
@@ -6936,6 +6996,7 @@ export const tasksRouter = router({
               : null,
           )
           .finally(() => disposeExecution(taskId));
+            if (input.localChrome || ctx.ordinaryMaintenance) return finalPersistence;
           });
 
       // Phase 24 — fire the runFn directly (pre-queue path). Per-task
@@ -6955,11 +7016,11 @@ export const tasksRouter = router({
       // holds overflow in 'queued' status until pool capacity frees,
       // then dispatches FIFO.
       if (willQueueDispatch && ctx.taskQueue) {
-        const enqueueResult = ctx.taskQueue.enqueue({
+        const enqueueResult = enqueueTaskExecution(ctx, {
           taskId,
           userId: ctx.userId,
           runFn: dispatchToBrave,
-          onStart: async (): Promise<void> => {
+          onStart: async (ctx): Promise<void> => {
             await markQueuedTaskExecutingOrThrow({ repo, taskId, logger: ctx.logger });
             // No queued→executing WS frame — supercar's own
             // `server.task.plan` / step events fire next from the
@@ -6968,7 +7029,7 @@ export const tasksRouter = router({
             // new message type for a transition that's already
             // observable via the next event.
           },
-          onTimeout: async (): Promise<void> => {
+          onTimeout: async (ctx): Promise<void> => {
             ctx.logger.warn(
               { taskId, userId: ctx.userId },
               'task-queue: queue timeout — marking failed',
@@ -7044,13 +7105,32 @@ export const tasksRouter = router({
       }
 
       // Legacy / non-pool path — fire directly without queue gating.
-      void dispatchToBrave();
+      const dispatchLocalChrome = async (executionContext: TaskExecutionContext) => {
+        if (!input.localChrome) throw new Error('chrome_selection_required');
+        localChromeTaskSessions.start(ctx.userId, taskId, input.localChrome, sendExtensionToolCall, ctx.localChromeReservation);
+        try { await dispatchToBrave(executionContext); }
+        finally {
+          const receipt = await localChromeTaskSessions.finish(ctx.userId, taskId);
+          if (receipt && !receipt.ok && executionContext.executionLifetime) executionContext.executionLifetime.drain.markUnknown(executionContext.executionLifetime.owner);
+        }
+      };
+      if (ctx.ordinaryMaintenance) {
+        void runTaskBackground(ctx, async (ctx) => input.localChrome ? dispatchLocalChrome(ctx) : dispatchToBrave(ctx))
+          .catch(error => ctx.logger.error({ error, taskId }, 'browser execution failed'));
+      } else if (input.localChrome && ctx.executionLifetime) {
+        const { drain, owner } = ctx.executionLifetime;
+        const operation = startOwnedOperation(drain, 'execution', child => dispatchLocalChrome({ ...ctx, executionLifetime: { drain, owner: child } }), { parent: owner, errorOutcome: 'unknown', dispatch: 'immediate' });
+        void operation.result.catch(error => ctx.logger.error({ error, taskId }, 'local Chrome execution failed'));
+      } else {
+        void runTaskBackground(ctx, async (ctx) => (input.localChrome ? dispatchLocalChrome(ctx) : dispatchToBrave(ctx)));
+      }
 
       return {
         taskId,
         status: 'executing' as const,
         steps: [],
         executionMode: 'browser' as const,
+        ...(input.localChrome ? { browserSource: 'local-chrome' as const } : {}),
       };
     }
 
@@ -7171,7 +7251,7 @@ export const tasksRouter = router({
             // tasks. Fire-and-forget: DB failure logs but must not
             // stall the loop.
             if (taskDbId) {
-              void (async () => {
+              void runTaskBackground(ctx, async (ctx) => (async () => {
                 try {
                   await ctx.db.insert(taskSteps).values({
                       externalId: newExternalId('taskStep'),
@@ -7205,7 +7285,7 @@ export const tasksRouter = router({
                     'persist step row failed',
                   );
                 }
-              })();
+              })());
             }
             try {
               broadcastToUser(userId, {
@@ -7412,7 +7492,7 @@ export const tasksRouter = router({
       // Phase 24 — fire directly (no per-user FIFO queue). Per-task
       // isolation removes the need for serialisation; per-user
       // concurrency is gated upstream at admit time.
-      void runTaskFn();
+      void runTaskBackground(ctx, async () => runTaskFn());
       return {
         taskId,
         status: 'executing' as const,
@@ -8051,7 +8131,7 @@ export const tasksRouter = router({
       const logger = ctx.logger;
       const db = ctx.db;
       const intentText = row.intent;
-      void (async () => {
+      void runTaskBackground(ctx, async () => (async () => {
         const taskInternalId = await taskInternalIdFor(db, newTaskId);
         if (taskInternalId == null) return;
         const taskHeartbeat = startTaskHeartbeat(db, newTaskId, {
@@ -8526,7 +8606,7 @@ export const tasksRouter = router({
         } finally {
           taskHeartbeat.stop();
         }
-      })();
+      })());
       return { taskId: newTaskId, status: 'executing' as const };
     }),
 
@@ -8826,6 +8906,7 @@ export const tasksRouter = router({
           verificationPassed: r.verificationPassed,
           failureLevel: r.failureLevel,
           stockContext: publicStockTaskContext(r.sourceContext),
+          ...(z.object({ browserSource: z.literal('local-chrome') }).safeParse(r.sourceContext).success ? { browserSource: 'local-chrome' as const } : {}),
         })),
         nextCursor:
           rows.length === input.limit
@@ -8944,6 +9025,7 @@ export const tasksRouter = router({
         starredAt: taskRow.starredAt,
         projectId: projectExternalId,
         stockContext: publicStockTaskContext(taskRow.sourceContext),
+        ...(z.object({ browserSource: z.literal('local-chrome') }).safeParse(taskRow.sourceContext).success ? { browserSource: 'local-chrome' as const } : {}),
         result: annotateTaskResultAttachmentAvailability(
           normalizeOutput(taskRow.result),
           availableAttachmentIds,
@@ -8990,7 +9072,7 @@ export const tasksRouter = router({
    */
   reply: protectedProcedure
     .input(
-      z.object({
+      pureTaskInput(z.object({
         taskId: z.string().min(1),
         message: z.string().min(1).max(4_000),
         // F2 — attachments uploaded with the reply. Same shape as
@@ -8998,8 +9080,9 @@ export const tasksRouter = router({
         // content blocks, then plumbed through `supercarReply`'s
         // attachmentBlocks param. Cap mirrors create.
         fileIds: z.array(z.string()).max(5).optional(),
-      }),
+      })),
     )
+    .use(taskDrainMiddleware)
     // Explicit return-type annotation breaks the circular type
     // inference: this handler calls `tasksRouter.createCaller` (F4
     // backend handoff), which references the very router this
@@ -9603,7 +9686,7 @@ export const tasksRouter = router({
         hasAttachments: generateAttachmentBlocks.length > 0,
       });
       const resumeStartedAt = Date.now();
-      void (async () => {
+      void runTaskBackground(ctx, async (ctx) => (async () => {
         let executionVerification: VerificationResult | null = null;
         try {
           let outcome: GenerateOutcome;
@@ -9731,7 +9814,7 @@ export const tasksRouter = router({
                 ...(outcome.summary ? { summary: outcome.summary } : {}),
               });
               const summary = outcome.summary;
-              void publishCoreTaskSuggestions({
+              void runTaskBackground(ctx, async (ctx) => publishCoreTaskSuggestions({
                 wiring: modelRuntimeWiring,
                 actorExternalId: ctx.userId,
                 modelDataRegion: userRow.modelDataRegion,
@@ -9745,7 +9828,7 @@ export const tasksRouter = router({
                   taskId: input.taskId,
                   suggestions,
                 }),
-              });
+              }));
             }
           } else if (
             reviewed.terminalStatus === 'partial_success' &&
@@ -9848,7 +9931,7 @@ export const tasksRouter = router({
             disposeExecution(input.taskId);
           }
         }
-      })();
+      })());
       return { ok: true, state: 'resumed' as const };
     },
   ),
@@ -9883,7 +9966,7 @@ export const tasksRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
       }
       const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
-      const aborted = supercarAbort(input.taskId);
+      const aborted = localChromeTaskSessions.abort(ctx.userId, input.taskId) || supercarAbort(input.taskId);
       if (aborted) {
         try {
           await repo.recordCancelRequested(input.taskId, taskRow.status as TaskState['status']);
@@ -10219,113 +10302,10 @@ export const tasksRouter = router({
    * `{ok:false, reason}` so the UI can show a subtle toast rather
    * than a TRPC error banner for something as cheap as "no page yet".
    */
-  browserNav: protectedProcedure
-    .input(
-      z.object({
-        direction: z.enum(['back', 'forward', 'reload', 'goto']),
-        // For direction='goto': the URL to navigate to. Required for
-        // goto, ignored otherwise. Cap at 2KB to keep the request
-        // body bounded; longer URLs are almost certainly someone
-        // shoving form data into the address bar.
-        url: z.string().max(2048).optional(),
-        // F3 — when the SPA's BrowserPanel is showing a SPECIFIC
-        // task's screencast, it passes that task's id so the nav
-        // routes to the right Brave. Without this, peekActiveForUser
-        // picked the most-recently-active instance, which races when
-        // the user has multiple concurrent tasks. Optional so the
-        // explicit "browser live" entrypoint (sidebar globe, no
-        // task selected) still falls through to the userId pick.
-        taskId: z.string().optional(),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      // Resolve the executor in two layers: prefer the per-task pool
-      // instance when the SPA passed a taskId — that uniquely binds
-      // the nav to whichever Brave the panel is actually streaming.
-      // Owner check is non-negotiable: pool.peek returns by taskId
-      // alone, so without verifying `inst.userId === ctx.userId` a
-      // user could navigate someone ELSE's browser by guessing a
-      // task id. Fall through to peekActiveForUser only when no
-      // taskId is supplied (sidebar globe entry / legacy path).
-      let poolInstance = null;
-      if (ctx.browserPool && shouldUseBrowserPool(ctx.userId)) {
-        if (input.taskId) {
-          const inst = ctx.browserPool.peek(input.taskId);
-          if (inst && inst.userId === ctx.userId) {
-            poolInstance = inst;
-          } else if (inst) {
-            ctx.logger.warn(
-              { taskId: input.taskId, ownerMismatch: true },
-              'tasks.browserNav: peek returned non-owner instance — ignoring',
-            );
-          }
-        } else {
-          poolInstance = ctx.browserPool.peekActiveForUser(ctx.userId);
-        }
-      }
-      const exec =
-        poolInstance?.executor ??
-        (appEnv.NODE_ENV === 'production'
-          ? null
-          : (ctx.executionRouter?.getExecutor('headed') ??
-            ctx.executionRouter?.getExecutor('headless') ??
-            ctx.playwrightExecutor ??
-            null));
-      if (!exec) return { ok: false as const, reason: 'no_executor' };
-      try {
-        const page = await exec.getPage();
-        // waitUntil: 'domcontentloaded' — the default 'load' waits for
-        // every sub-resource and times out on heavy SPAs (ctrip /
-        // jd homepage can easily break 30s). Back/forward on a fresh
-        // tab with no history returns null (not an error) — the
-        // caller silently gets ok:true which is fine.
-        const navOpts = { timeout: 15_000, waitUntil: 'domcontentloaded' as const };
-        if (input.direction === 'back') {
-          const r = await page.goBack(navOpts);
-          if (!r) return { ok: false as const, reason: 'no_history' };
-        } else if (input.direction === 'forward') {
-          const r = await page.goForward(navOpts);
-          if (!r) return { ok: false as const, reason: 'no_history' };
-        } else if (input.direction === 'goto') {
-          if (!input.url) {
-            return { ok: false as const, reason: 'missing_url' };
-          }
-          // Normalise: bare hostname → https; anything else passes
-          // through. Reject schemes other than http(s) so users can't
-          // emit `javascript:` / `file:` / `data:` URLs at the remote
-          // browser via the panel address bar.
-          let target = input.url.trim();
-          if (!/^[a-z][a-z0-9+.-]*:/i.test(target)) {
-            target = `https://${target}`;
-          }
-          if (!/^https?:\/\//i.test(target)) {
-            return { ok: false as const, reason: 'bad_scheme' };
-          }
-          const networkDecision = await defaultBrowserNetworkPolicy.check(target);
-          if (!networkDecision.allowed) {
-            ctx.logger.warn(
-              {
-                target,
-                reason: networkDecision.reason,
-                userId: ctx.userId,
-              },
-              'tasks.browserNav: target blocked by browser network policy',
-            );
-            return { ok: false as const, reason: 'blocked_target' };
-          }
-          await page.goto(target, navOpts);
-        } else {
-          await page.reload(navOpts);
-        }
-        return { ok: true as const };
-      } catch (err) {
-        ctx.logger.warn(
-          { err: err instanceof Error ? err.message : String(err), direction: input.direction },
-          'tasks.browserNav: nav failed (non-fatal)',
-        );
-        return { ok: false as const, reason: 'nav_failed' };
-      }
-    }),
+  browserControlState: browserControlStateProcedure,
+  localChromeTabs: localChromeTabsProcedure,
+  browserControl: browserControlProcedure,
+  browserNav: browserNavProcedure,
 
   /**
    * Remove one of the caller's tasks. Cascades to task_steps / task_events
@@ -11199,7 +11179,9 @@ async function runSupercarWithRetry(
   meta: { userId: string; taskId: string; logger: import('pino').Logger },
 ): Promise<Awaited<ReturnType<typeof runSupercarTask>>> {
   const first = await runSupercarTask(args);
-  if (!shouldAutoRetry(first)) return first;
+  // A Qwen continuation must never restart a browser task after possible
+  // side effects. Transport retries, if enabled, stay within one model call.
+  if (args.messagesAdapter || !shouldAutoRetry(first)) return first;
   meta.logger.info(
     { taskId: meta.taskId, iterations: first.iterations, reason: first.reason },
     'supercar: auto-retrying once after flaky failure',

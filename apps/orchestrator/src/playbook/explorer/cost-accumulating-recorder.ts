@@ -1,4 +1,4 @@
-import { estimateCostUsd } from '../../agent/llm-call-recorder.js';
+import { accountLlmCall } from '../../agent/llm-call-recorder.js';
 import type { LlmCallRecord, LlmCallRecorder } from '../../agent/llm-call-recorder.js';
 
 /**
@@ -30,13 +30,8 @@ export class CostAccumulatingRecorder implements LlmCallRecorder {
   async record(call: LlmCallRecord): Promise<void> {
     // SYNCHRONOUS first — before any await — so a fire-and-forget invocation still lands
     // its cost into the total even if the loop returns immediately after.
-    this._total += estimateCostUsd(
-      call.model,
-      call.inputTokens,
-      call.outputTokens,
-      call.cacheReadInputTokens ?? 0,
-      call.cacheCreationInputTokens ?? 0,
-    );
+    const cost = accountLlmCall(call).costUsd;
+    this._total = cost === null ? Number.POSITIVE_INFINITY : this._total + cost;
     if (this.inner) {
       try {
         await this.inner.record(call);

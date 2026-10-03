@@ -32,6 +32,7 @@ export interface UiStockTaskContext {
 }
 
 export interface UiTask {
+  browserSource?: 'local-chrome';
   taskId: string;
   executionId?: string;
   executionRevision?: number;

@@ -38,6 +38,7 @@ const REQUIRED_TABLES = [
   'energy_daily_visitors',
   'energy_event_receipts',
   'feedback_cases',
+  'llm_calls',
   'notifications',
   'notification_channels',
   'organization_invitations',
@@ -90,6 +91,7 @@ const REQUIRED_TABLES = [
 ] as const;
 
 const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
+  llm_calls: ['cost_status', 'usage_status', 'region', 'provider_request_id'],
   organizations: [
     'external_id',
     'name',
@@ -984,12 +986,17 @@ async function main(): Promise<void> {
       indexes: indexRows,
       foreignKeys: foreignKeyRows,
     });
+    const nullableUsageColumns = ['prompt_tokens', 'completion_tokens', 'cache_read_tokens', 'cache_write_tokens', 'cost_usd'];
+    const accountingViolations = nullableUsageColumns.filter((column) => !columnRows.some((row) =>
+      row.table_name === 'llm_calls' && row.column_name === column && row.is_nullable === 'YES' && row.column_default === null,
+    ));
 
     if (
       missingTables.length > 0 ||
       missingColumns.length > 0 ||
       missingIndexes.length > 0 ||
-      lifecycleViolations.length > 0
+      lifecycleViolations.length > 0 ||
+      accountingViolations.length > 0
     ) {
       console.error(`Database schema verification failed for ${database}.`);
       if (missingTables.length > 0) {
@@ -1003,6 +1010,9 @@ async function main(): Promise<void> {
       }
       if (lifecycleViolations.length > 0) {
         console.error(`Invalid lifecycle schema: ${lifecycleViolations.join('; ')}`);
+      }
+      if (accountingViolations.length > 0) {
+        console.error(`LLM accounting columns must allow NULL without zero defaults: ${accountingViolations.join(', ')}`);
       }
       console.error('Run the numbered migrations or drizzle push before starting orchestrator.');
       process.exitCode = 1;

@@ -1,3 +1,5 @@
+import type { ExecutionAdmission } from '../execution/execution-admission.js';
+import { createPeriodicWork } from '../execution/periodic-work.js';
 import type { EnergyAnalyticsCleanupStore } from './analytics-store.js';
 
 const CLEANUP_BATCH_SIZE = 500;
@@ -20,6 +22,7 @@ interface StartCleanupOptions {
   store: EnergyAnalyticsCleanupStore;
   logger: CleanupLogger;
   now?: () => Date;
+  executionDrain?: ExecutionAdmission;
 }
 
 interface CleanupResult {
@@ -31,6 +34,7 @@ interface CleanupResult {
 let cleanupInterval: ReturnType<typeof setInterval> | null = null;
 let cleanupBacklogTimer: ReturnType<typeof setTimeout> | null = null;
 let cleanupGeneration = 0;
+let cleanupWork: ReturnType<typeof createPeriodicWork> | undefined;
 
 export async function cleanupEnergyAnalytics({
   store,
@@ -66,13 +70,17 @@ export function startEnergyAnalyticsCleanup({
   store,
   logger,
   now = () => new Date(),
+  executionDrain,
 }: StartCleanupOptions): void {
   if (cleanupInterval) return;
+  if (cleanupWork?.stopping && !cleanupWork.settled) throw new Error('CLEANUP_STOPPING');
+  const work = createPeriodicWork(executionDrain);
+  cleanupWork = work;
   const generation = ++cleanupGeneration;
   let running = false;
   let rerunRequested = false;
 
-  async function run(): Promise<void> {
+  async function perform(): Promise<void> {
     if (generation !== cleanupGeneration) return;
     if (running) {
       rerunRequested = true;
@@ -94,6 +102,17 @@ export function startEnergyAnalyticsCleanup({
     }
   }
 
+  function run(): void {
+    if (generation !== cleanupGeneration) return;
+    if (running) {
+      rerunRequested = true;
+      return;
+    }
+    const original = work.run(perform);
+    // User-facing cleanup errors are already sanitized. The original work retains failure.
+    void original?.catch(() => {});
+  }
+
   function scheduleBacklogPass(): void {
     if (generation !== cleanupGeneration || cleanupBacklogTimer) return;
     cleanupBacklogTimer = setTimeout(() => {
@@ -103,12 +122,13 @@ export function startEnergyAnalyticsCleanup({
     cleanupBacklogTimer.unref?.();
   }
 
-  void run();
   cleanupInterval = setInterval(() => void run(), CLEANUP_INTERVAL_MS);
   cleanupInterval.unref?.();
+  run();
 }
 
-export function stopEnergyAnalyticsCleanup(): void {
+export function stopEnergyAnalyticsCleanup(): Promise<void> {
+  const stopped = cleanupWork?.stop() ?? Promise.resolve();
   cleanupGeneration += 1;
   if (cleanupInterval) {
     clearInterval(cleanupInterval);
@@ -118,6 +138,7 @@ export function stopEnergyAnalyticsCleanup(): void {
     clearTimeout(cleanupBacklogTimer);
     cleanupBacklogTimer = null;
   }
+  return stopped;
 }
 
 async function sweepTable(

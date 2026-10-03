@@ -7,24 +7,34 @@ import {
   type ServerMessage,
   WS_SUBPROTOCOL,
   parseClientMessage,
+  selectedChromeSessionCommandSchema,
 } from '@holaday/shared-types';
-import { WebSocket, WebSocketServer } from 'ws';
+import { type RawData, WebSocket, WebSocketServer } from 'ws';
 import type { Planner } from '../agent/planner.js';
+import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import { TaskController, type TaskState } from '../agent/task-controller.js';
-import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
-import type { BrowserPool } from '../browser-pool/browser-pool.js';
-import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js';
 import { failTaskWithEventIfStatus } from '../agent/task-maintenance.js';
+import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js';
+import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 import { authenticateAccessToken } from '../auth/middleware.js';
+import type { BrowserPool } from '../browser-pool/browser-pool.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
+import type { ExecutionAdmission } from '../execution/execution-admission.js';
+import type { OrdinaryMaintenance } from '../execution/ordinary-maintenance.js';
+import {
+  captureOperationScopeVeto,
+  currentOperationLifetime,
+} from '../execution/owned-operation.js';
 import {
   extensionNoClientMessage,
   extensionSocketClosedMessage,
   extensionToolTimeoutMessage,
 } from './extension-tool-copy.js';
+import { type WsWork, createWsWork } from './server-work.js';
 
 interface ClientState {
+  work: WsWork;
   id: string;
   userId: string | null;
   authToken: string | null;
@@ -88,10 +98,11 @@ export async function loadRehydratedTasks(): Promise<{ userCount: number; taskCo
  * through every function signature.
  */
 let injectedPlanner: Planner | null = null;
-let injectedExecutor: PlaywrightExecutor | null = null;
-let injectedBrowserPool: BrowserPool | null = null;
+let injectedBrowserSources: Pick<WsServerOpts, 'playwrightExecutor' | 'browserPool'> = {};
 
 export interface WsServerOpts {
+  executionDrain?: ExecutionAdmission;
+  ordinaryMaintenance?: OrdinaryMaintenance;
   planner?: Planner | null;
   /**
    * When wired, the WS handler can dispatch `client.vision.user_input`
@@ -117,15 +128,19 @@ export interface WsServerOpts {
 }
 
 export function createWsServer(port: number, opts: WsServerOpts = {}) {
+  const work = createWsWork(opts.executionDrain, opts.ordinaryMaintenance);
   injectedPlanner = opts.planner ?? null;
-  injectedExecutor = opts.playwrightExecutor ?? null;
-  injectedBrowserPool = opts.browserPool ?? null;
+  injectedBrowserSources = opts;
   const configuredAuthenticateToken =
     opts.authenticateToken ?? ((token: string) => authenticateAccessToken(db, token));
   const authenticateToken = async (token: string): Promise<string | null> => {
     try {
       return await configuredAuthenticateToken(token);
     } catch (err) {
+      if (work.controller) {
+        const lifetime = currentOperationLifetime();
+        if (lifetime?.drain === work.controller.drain) lifetime.drain.markUnknown(lifetime.owner);
+      }
       logger.warn(
         { err: err instanceof Error ? err.message : String(err) },
         'websocket authentication failed closed',
@@ -135,10 +150,24 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
   };
 
   const wss = new WebSocketServer({ port, handleProtocols });
+  // ws forwards its owned HTTP listener's asynchronous bind events. Attach in
+  // this same turn, before Node can emit listening/error on the next tick.
+  const ready = new Promise<void>((resolve, reject) => {
+    wss.once('listening', resolve);
+    wss.on('error', () => {
+      work.controller?.drain.block();
+      reject(new Error('WS_LISTEN_UNPROVEN'));
+    });
+  });
+  void ready.catch(() => {});
   const clientStates = new WeakMap<WebSocket, ClientState>();
 
   wss.on('connection', (socket, req) => {
-    void handleConnection(socket, req, authenticateToken, clientStates);
+    const pending = work.run(() =>
+      handleConnection(socket, req, authenticateToken, clientStates, work),
+    );
+    if (!pending) socket.close(1013, 'service unavailable');
+    else void pending.catch(() => socket.close(1011, 'request failed'));
   });
 
   const heartbeat = setInterval(() => sweep(wss), HEARTBEAT_INTERVAL_MS);
@@ -149,12 +178,29 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
   );
   sessionRevalidation.unref();
 
+  let closing: Promise<void> | undefined;
   return {
     wss,
+    ready,
     close: () => {
+      const settled = work.stop();
+      if (closing) return closing;
       clearInterval(heartbeat);
       clearInterval(sessionRevalidation);
-      return new Promise<void>((resolve) => wss.close(() => resolve()));
+      const workResults = Promise.allSettled([settled]);
+      closing = (async () => {
+        // ws.close removes its underlying HTTP event forwarding; retain that
+        // original bind receipt first, including the asynchronous failure case.
+        await ready.catch(() => {});
+        const listener = new Promise<boolean>((resolve) => wss.close((error) => resolve(!error)));
+        const [workResult] = await workResults;
+        // Stop accepting immediately, but retain the existing result channels
+        // until their original work has settled. Idle clients need not leave first.
+        for (const socket of wss.clients) socket.close(1001, 'server stopping');
+        const listenerClosed = await listener;
+        if (workResult?.status === 'rejected' || !listenerClosed) throw new Error('WS_STOP_FAILED');
+      })();
+      return closing;
     },
   };
 }
@@ -259,6 +305,9 @@ async function applyRehydrationForUser(state: ClientState): Promise<void> {
     }
 
     if (entry.state.status === 'executing') {
+      // A durable old step is not the original physical operation's authority.
+      // Strict mode cannot recreate it under this new authentication root.
+      if (state.work.controller) continue;
       const step = entry.state.plan[entry.state.cursor];
       if (!step) {
         logger.warn(
@@ -319,7 +368,11 @@ async function applyRehydrationForUser(state: ClientState): Promise<void> {
       const reason = '服务重启导致任务中断，重新发送一次即可。';
       let failedPersisted = false;
       try {
-        const result = await failRehydratedTaskIfStatus(entry.state.taskId, entry.state.status, reason);
+        const result = await failRehydratedTaskIfStatus(
+          entry.state.taskId,
+          entry.state.status,
+          reason,
+        );
         failedPersisted = result.persisted;
       } catch (err) {
         logger.warn(
@@ -486,14 +539,22 @@ export function hasConnectedExtension(userId: string): boolean {
   return pickExtensionClientForUser(userId) !== null;
 }
 
+export function getConnectedExtensionClientIds(userId: string): string[] {
+  return [...(clientsByUser.get(userId) ?? [])]
+    .filter(client => client.isExtension && client.socket.readyState === WebSocket.OPEN)
+    .map(client => client.id);
+}
+
 function pickExtensionClientForUser(
   userId: string,
   excludedClientIds: ReadonlySet<string> = new Set(),
+  extensionClientId?: string,
 ): ClientState | null {
   const set = clientsByUser.get(userId);
   if (!set) return null;
   let target: ClientState | null = null;
   for (const client of set) {
+    if (extensionClientId !== undefined && client.id !== extensionClientId) continue;
     if (excludedClientIds.has(client.id)) continue;
     if (!client.isExtension || client.socket.readyState !== WebSocket.OPEN) continue;
     if (!target || client.lastPongAt > target.lastPongAt) target = client;
@@ -557,8 +618,10 @@ function settlePendingExtensionCallsForClient(clientId: string): number {
 
 export interface ExtensionToolCallOptions {
   taskId: string;
-  kind: 'navigate' | 'screenshot';
-  args?: { url?: string; waitMs?: number };
+  kind: Extract<ServerMessage, { type: 'server.extension.tool_call' }>['kind'];
+  args?: Extract<ServerMessage, { type: 'server.extension.tool_call' }>['args'];
+  /** A tab ID is meaningful only inside this authenticated extension connection. */
+  extensionClientId?: string;
   /** Per-call deadline; clamped to [1s, 60s]. Default 30s. */
   timeoutMs?: number;
 }
@@ -566,6 +629,8 @@ export interface ExtensionToolCallOptions {
 export interface ExtensionToolCallOutcome {
   ok: boolean;
   result?: unknown;
+  /** Server-owned identity, never derived from extension/page result content. */
+  extensionClientId?: string;
   error?: { message: string; code?: string };
 }
 
@@ -578,8 +643,8 @@ export interface ExtensionToolCallOutcome {
  *   - Timeout                            (code: 'timeout')
  *   - Socket closed mid-flight           (code: 'socket_closed')
  * so callers don't need a try/catch — the result already carries the
- * failure path. Programmer errors (invalid args, etc.) DO throw via
- * the schema check downstream.
+ * failure path. Reads require an explicit connection and tab; discovery returns
+ * the connection identity for subsequent reads. Neither tool migrates login data.
  */
 export async function sendExtensionToolCall(
   userId: string,
@@ -588,15 +653,50 @@ export async function sendExtensionToolCall(
   const requestId = randomUUID();
   const timeoutMs = Math.max(1000, Math.min(60_000, opts.timeoutMs ?? 30_000));
 
-  const target = pickExtensionClientForUser(userId);
+  if (opts.kind === 'read' && (!opts.extensionClientId || !opts.args?.target)) {
+    return { ok: false, error: { code: 'target_required', message: '请先选择 Chrome 连接和标签页' } };
+  }
+  if (opts.kind === 'session') {
+    if (!opts.extensionClientId || !opts.args?.session)
+      return { ok: false, error: { code: 'target_required', message: '请先选择 Chrome 连接和会话' } };
+    if (!selectedChromeSessionCommandSchema.safeParse(opts.args.session).success)
+      return { ok: false, error: { code: 'invalid_session_command', message: '浏览器会话操作无效' } };
+  }
+  // An explicitly targeted operation must never fall through to the legacy
+  // active-tab tools, even if a caller accidentally chooses the wrong kind.
+  if (opts.args?.target && opts.kind !== 'read') {
+    return { ok: false, error: { code: 'target_unsupported', message: '此工具暂不支持指定标签页' } };
+  }
+  const target = pickExtensionClientForUser(userId, new Set(), opts.extensionClientId);
   if (!target) {
+    if (opts.extensionClientId !== undefined) {
+      return {
+        ok: false,
+        error: { code: 'target_extension_unavailable', message: '所选 Chrome 连接已断开，请重新选择' },
+      };
+    }
     return { ok: false, error: { message: extensionNoClientMessage(), code: 'no_extension' } };
+  }
+  const withConnectionIdentity = (outcome: ExtensionToolCallOutcome, clientId: string) =>
+    outcome.ok && (opts.kind === 'tabs' || opts.kind === 'read' || opts.extensionClientId !== undefined)
+      ? { ...outcome, extensionClientId: clientId }
+      : outcome;
+
+  const inherited = currentOperationLifetime();
+  if (target.work.controller || inherited) {
+    if (!inherited || !target.work.controller) return extensionUnavailable();
+    const pending = target.work.child(inherited, (originalVeto) =>
+      sendOwnedExtensionToolCall(target, userId, opts, originalVeto),
+    );
+    return pending
+      ? pending.then((outcome) => withConnectionIdentity(outcome, target.id))
+      : extensionUnavailable();
   }
 
   return new Promise<ExtensionToolCallOutcome>((resolve) => {
     const excludedClientIds = new Set<string>();
     const trySend = (): void => {
-      const target = pickExtensionClientForUser(userId, excludedClientIds);
+      const target = pickExtensionClientForUser(userId, excludedClientIds, opts.extensionClientId);
       if (!target) {
         resolve({
           ok: false,
@@ -626,7 +726,7 @@ export async function sendExtensionToolCall(
       pendingExtensionCalls.set(requestId, {
         clientId: target.id,
         taskId: opts.taskId,
-        resolve,
+        resolve: (outcome) => resolve(withConnectionIdentity(outcome, target.id)),
         timer,
       });
       const sent = send(target.socket, {
@@ -647,6 +747,103 @@ export async function sendExtensionToolCall(
 
     trySend();
   });
+}
+
+function extensionUnavailable(): ExtensionToolCallOutcome {
+  return {
+    ok: false,
+    error: { code: 'service_unavailable', message: '服务正在维护，请稍后再试。' },
+  };
+}
+
+/** One original socket and child; no retry/failover after attempted submission.
+ * Receipt timeout/transport close is not proof of remote action completion. */
+async function sendOwnedExtensionToolCall(
+  target: ClientState,
+  userId: string,
+  opts: ExtensionToolCallOptions,
+  originalVeto: () => void,
+): Promise<ExtensionToolCallOutcome> {
+  const lifetime = currentOperationLifetime();
+  if (!lifetime || lifetime.drain !== target.work.controller?.drain)
+    throw new Error('WS_SCOPE_MISSING');
+  const veto = captureOperationScopeVeto();
+  const requestId = randomUUID();
+  const taskId = opts.taskId;
+  const timeoutMs = Math.max(1000, Math.min(60000, opts.timeoutMs ?? 30000));
+  let rawDone!: () => void;
+  const raw = new Promise<void>((resolve) => {
+    rawDone = resolve;
+  });
+  let complete!: (outcome: ExtensionToolCallOutcome) => void;
+  const outcome = new Promise<ExtensionToolCallOutcome>((resolve) => {
+    complete = resolve;
+  });
+  let settled = false;
+  // biome-ignore lint/style/useConst: Settlement must tolerate reentry before timer assignment.
+  let timer: NodeJS.Timeout | undefined;
+  const settle = (result: ExtensionToolCallOutcome) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    pendingExtensionCalls.delete(requestId);
+    rememberSettledExtensionCall(requestId, target.id, taskId);
+    if (!result.ok) lifetime.drain.markUnknown(lifetime.owner);
+    complete(result);
+  };
+  timer = setTimeout(
+    () =>
+      settle({
+        ok: false,
+        error: {
+          code: 'timeout',
+          message: extensionToolTimeoutMessage(timeoutMs),
+        },
+      }),
+    timeoutMs,
+  );
+  timer.unref();
+  pendingExtensionCalls.set(requestId, { clientId: target.id, taskId, resolve: settle, timer });
+  try {
+    const payload = JSON.stringify({
+      type: 'server.extension.tool_call',
+      requestId,
+      taskId,
+      kind: opts.kind,
+      ...(opts.args ? { args: opts.args } : {}),
+      timeoutMs,
+    });
+    if (
+      target.socket.readyState !== WebSocket.OPEN ||
+      !target.authed ||
+      target.userId !== userId ||
+      target.work.stopping
+    )
+      throw new Error('WS_CHANNEL_CHANGED');
+    lifetime.drain.assertDispatch(lifetime.owner);
+    veto();
+    originalVeto();
+    if (target.work.stopping) throw new Error('WS_STOPPING');
+    target.socket.send(payload, (error) => {
+      if (error) {
+        lifetime.drain.markUnknown(lifetime.owner);
+        settle({
+          ok: false,
+          error: { code: 'socket_closed', message: extensionSocketClosedMessage() },
+        });
+      }
+      rawDone();
+    });
+  } catch {
+    settle({
+      ok: false,
+      error: { code: 'socket_closed', message: extensionSocketClosedMessage() },
+    });
+    rawDone();
+  }
+  const result = await outcome;
+  await raw;
+  return result;
 }
 
 /**
@@ -719,8 +916,10 @@ async function handleConnection(
   req: IncomingMessage,
   authenticateToken: (token: string) => Promise<string | null>,
   clientStates: WeakMap<WebSocket, ClientState>,
+  work: WsWork,
 ) {
   const state: ClientState = {
+    work,
     id: randomUUID(),
     userId: null,
     authToken: null,
@@ -733,6 +932,23 @@ async function handleConnection(
     isExtension: false,
   };
   clientStates.set(socket, state);
+  // biome-ignore lint/style/useConst: The close callback is installed before authentication awaits and timer assignment.
+  let authTimer: NodeJS.Timeout | undefined;
+  // Install cleanup before authentication's first await, not after it.
+  socket.on('close', () => {
+    clearTimeout(authTimer);
+    socket.off('message', onMessage);
+    state.authed = false;
+    state.authToken = null;
+    clientStates.delete(socket);
+    const settledExtensionCalls = settlePendingExtensionCallsForClient(state.id);
+    if (state.userId) removeClientForUser(state.userId, state);
+    logger.info(
+      { clientId: state.id, userId: state.userId, settledExtensionCalls },
+      'ws client closed',
+    );
+  });
+  socket.on('error', (err) => logger.warn({ clientId: state.id, err }, 'ws error'));
 
   const requestedProtos = (req.headers['sec-websocket-protocol'] ?? '')
     .toString()
@@ -741,9 +957,13 @@ async function handleConnection(
     .filter(Boolean);
 
   const jwtProto = requestedProtos.find((p) => p.startsWith('jwt.'));
-  if (jwtProto) {
+  // Start header authentication without delaying listener registration. Chrome
+  // sends hello as soon as the socket opens, while database auth is still pending.
+  const headerAuthentication = (async () => {
+    if (!jwtProto) return;
     const token = jwtProto.slice('jwt.'.length);
     const userId = await authenticateToken(token);
+    if (socket.readyState !== WebSocket.OPEN || work.stopping) return;
     if (userId) {
       state.userId = userId;
       state.authToken = token;
@@ -755,10 +975,10 @@ async function handleConnection(
         heartbeatMs: HEARTBEAT_INTERVAL_MS,
       });
     }
-  }
+  })();
 
   // Give the client 10s to prove auth via first-frame `client.hello` if header path failed.
-  const authTimer = setTimeout(() => {
+  authTimer = setTimeout(() => {
     if (!state.authed) {
       send(socket, { type: 'server.error', code: 'UNAUTHORIZED', message: 'auth timeout' });
       socket.close(4401, 'unauthorized');
@@ -766,7 +986,10 @@ async function handleConnection(
   }, 10_000);
   authTimer.unref();
 
-  socket.on('message', async (raw) => {
+  socket.on('message', onMessage);
+  async function onMessage(raw: RawData) {
+    await headerAuthentication;
+    if (socket.readyState !== WebSocket.OPEN || work.stopping) return;
     const result = parseClientMessage(raw.toString());
     if (!result.success) {
       send(socket, {
@@ -776,39 +999,63 @@ async function handleConnection(
       });
       return;
     }
-    await handleClientMessage(state, result.data, authTimer, authenticateToken);
-  });
+    const action = () => handleClientMessage(state, result.data, authTimer, authenticateToken);
+    if (work.controller && result.data.type === 'client.step.result') {
+      // Strict execution never emits legacy server.task.dispatch (the broadcast
+      // gate suppresses it). A message id cannot recreate an original owner.
+      send(socket, {
+        type: 'server.error',
+        code: 'UNEXPECTED_RESULT',
+        message: '没有对应的执行回执。',
+      });
+      return;
+    }
+    if (isReceiptOrMemoryMessage(result.data) &&
+      !(work.ordinaryMaintenance && result.data.type === 'client.extension.login_states')) {
+      // Matching a pre-existing resolver is not admission of a new operation.
+      await action();
+      return;
+    }
+    const pending = work.run(action);
+    if (!pending)
+      send(socket, {
+        type: 'server.error',
+        code: 'SERVICE_UNAVAILABLE',
+        message: '服务正在维护，请稍后再试。',
+      });
+    else
+      await pending.catch(() =>
+        send(socket, { type: 'server.error', code: 'REQUEST_FAILED', message: '请求未完成。' }),
+      );
+  }
 
   socket.on('pong', () => {
     state.lastPongAt = Date.now();
   });
+  await headerAuthentication;
+}
 
-  socket.on('close', () => {
-    clearTimeout(authTimer);
-    state.authed = false;
-    state.authToken = null;
-    clientStates.delete(socket);
-    const settledExtensionCalls = settlePendingExtensionCallsForClient(state.id);
-    if (state.userId) removeClientForUser(state.userId, state);
-    logger.info(
-      { clientId: state.id, userId: state.userId, settledExtensionCalls },
-      'ws client closed',
-    );
-  });
-
-  socket.on('error', (err) => {
-    logger.warn({ clientId: state.id, err }, 'ws error');
-  });
+function isReceiptOrMemoryMessage(msg: ClientMessage): boolean {
+  return (
+    msg.type === 'client.pong' ||
+    msg.type === 'client.task.ack' ||
+    msg.type === 'client.screenshot' ||
+    msg.type === 'client.extension.login_states' ||
+    msg.type === 'client.extension.tool_result' ||
+    msg.type === 'client.vision.observation' ||
+    msg.type === 'client.vision.acted'
+  );
 }
 
 async function handleClientMessage(
   state: ClientState,
   msg: ClientMessage,
-  authTimer: NodeJS.Timeout,
+  authTimer: NodeJS.Timeout | undefined,
   authenticateToken: (token: string) => Promise<string | null>,
 ) {
   if (msg.type === 'client.hello') {
     const userId = await authenticateToken(msg.token);
+    if (state.socket.readyState !== WebSocket.OPEN || state.work.stopping) return;
     if (!userId) {
       send(state.socket, { type: 'server.error', code: 'UNAUTHORIZED', message: 'bad token' });
       state.socket.close(4401, 'unauthorized');
@@ -860,7 +1107,7 @@ async function handleClientMessage(
   }
 
   if (msg.type === 'client.step.result') {
-    void runStepResult(state, msg);
+    await runStepResult(state, msg);
     return;
   }
 
@@ -917,6 +1164,8 @@ async function handleClientMessage(
     //   3. injectedExecutor — last-resort singleton, only when no
     //      pool is wired (legacy boot / tests).
     let exec: PlaywrightExecutor | null = null;
+    const injectedBrowserPool = injectedBrowserSources.browserPool ?? null;
+    const injectedExecutor = injectedBrowserSources.playwrightExecutor ?? null;
     if (state.userId && injectedBrowserPool) {
       if (msg.taskId) {
         const inst = injectedBrowserPool.peek(msg.taskId);
@@ -1017,7 +1266,9 @@ export async function dispatchUserInput(
     );
     return;
   }
+  let releaseLegacyInput: (() => void) | undefined;
   try {
+    releaseLegacyInput = browserControlSessions.beginLegacyInput(executor);
     // PlaywrightExecutor's action methods take our internal PageLike.
     // `getPage()` returns a real `Page`, but the shapes diverge on
     // optional-arg signatures that TS rejects at the union level; the
@@ -1114,6 +1365,8 @@ export async function dispatchUserInput(
       },
       'handleUserInput failed',
     );
+  } finally {
+    releaseLegacyInput?.();
   }
 }
 
@@ -1483,15 +1736,11 @@ function revalidateSessions(
   for (const socket of wss.clients) {
     if (socket.readyState !== WebSocket.OPEN) continue;
     const state = clientStates.get(socket);
-    if (
-      !state?.authed ||
-      !state.userId ||
-      !state.authToken ||
-      state.sessionRevalidationInFlight
-    ) {
+    if (!state?.authed || !state.userId || !state.authToken || state.sessionRevalidationInFlight) {
       continue;
     }
-    void revalidateSession(state, authenticateToken);
+    const pending = state.work.run(() => revalidateSession(state, authenticateToken));
+    if (pending) void pending.catch(() => state.socket.close(1011, 'session check failed'));
   }
 }
 

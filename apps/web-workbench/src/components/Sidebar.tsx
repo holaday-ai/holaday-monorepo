@@ -88,7 +88,7 @@ interface Props {
    */
   onDeleteTasks?(taskIds: string[]): void;
   onRenameTask?(taskId: string, title: string): void | Promise<void>;
-  onRetryTask?(intent: string): void | Promise<void>;
+  onRetryTask?(taskId: string): void | Promise<void>;
   /**
    * Phase 16b — projects available for the right-click "移到项目"
    * submenu. Empty array hides the menu item; absent prop also hides
@@ -654,7 +654,7 @@ export function Sidebar({
           onRetryTask
             ? () => {
                 if (!menu) return;
-                void onRetryTask(menu.intent);
+                void onRetryTask(menu.taskId);
               }
             : undefined
         }

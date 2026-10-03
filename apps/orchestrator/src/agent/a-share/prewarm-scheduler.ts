@@ -12,7 +12,14 @@
  * 检查北京 HH:MM，命中即预热；同一分钟只发一次。失败仅记日志，不影响任何任务。
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
+import type { ExecutionAdmission } from '../../execution/execution-admission.js';
+import {
+  captureOperationScopeVeto,
+  currentOperationLifetime,
+} from '../../execution/owned-operation.js';
 import type { AkshareClient } from './akshare-client.js';
+import { readWarmResponse, runMarketRequest } from './market-request-lifetime.js';
 
 /** 预热时刻（北京 HH:MM），分别比 08:30 / 15:30 简报早 5 分钟。 */
 export const PREWARM_TIMES_HM = ['08:25', '15:25'] as const;
@@ -33,6 +40,7 @@ interface PrewarmLogger {
 }
 
 export interface PrewarmSchedulerDeps {
+  executionDrain?: ExecutionAdmission;
   /** 预热动作（命中时调）。 */
   warm: () => Promise<void>;
   logger: PrewarmLogger;
@@ -43,34 +51,85 @@ export interface PrewarmSchedulerDeps {
 }
 
 /**
- * 启动预热调度器。返回停止函数（clearInterval）。同一(日期+时刻)只触发一次。
+ * 启动预热调度器。停止拒绝新工作并等待原预热Promise；不代表远端取消。
  */
-export function startPrewarmScheduler(deps: PrewarmSchedulerDeps): () => void {
+export function startPrewarmScheduler(deps: PrewarmSchedulerDeps): () => Promise<void> {
   const now = deps.now ?? (() => new Date());
+  const controller = deps.executionDrain;
+  const warm = deps.warm.bind(deps);
+  const logger = deps.logger;
+  const inside = new AsyncLocalStorage<boolean>();
   let lastKey = '';
+  let pending: Promise<void> | undefined;
+  let stopping = false;
+  let failed = false;
+  let stopped: Promise<void> | undefined;
 
-  const tick = async (): Promise<void> => {
+  const tick = (): void => {
+    if (stopping || pending || (controller && controller.drain.snapshot().unknown > 0)) return;
     const d = now();
     const hm = beijingHm(d);
     if (!PREWARM_TIMES_HM.includes(hm as (typeof PREWARM_TIMES_HM)[number])) return;
     const key = `${d.toISOString().slice(0, 10)}#${hm}`; // 同一分钟只发一次
-    if (key === lastKey) return;
-    lastKey = key;
-    deps.logger.info({ hm }, 'prewarm: 触发简报缓存预热');
+    if (key === lastKey || stopping) return;
+    const invoke = async () => {
+      // Register the original promise before application callbacks may reenter.
+      await Promise.resolve();
+      if (stopping) return;
+      await inside.run(true, async () => {
+        const lifetime = currentOperationLifetime();
+        const veto = lifetime ? captureOperationScopeVeto() : undefined;
+        logger.info({ hm }, 'prewarm: 触发简报缓存预热');
+        if (controller) {
+          if (lifetime?.drain !== controller.drain) throw new Error('PREWARM_SCOPE_MISSING');
+          controller.drain.assertDispatch(lifetime.owner);
+          veto?.();
+        }
+        if (stopping) return;
+        lastKey = key;
+        await warm();
+        logger.info({ hm }, 'prewarm: 完成');
+      });
+    };
+    // Publish acquisition before runRoot: its synchronous persistence/guards
+    // can reenter stop before it returns the original owned promise.
+    let settle!: () => void;
+    pending = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const finish = () => {
+      pending = undefined;
+      settle();
+    };
     try {
-      await deps.warm();
-      deps.logger.info({ hm }, 'prewarm: 完成');
-    } catch (e) {
-      deps.logger.warn(
-        { hm, err: e instanceof Error ? e.message : String(e) },
-        'prewarm: 失败（非阻塞）',
-      );
+      const original = controller ? controller.runRoot(invoke).result : invoke();
+      void original.then(finish, () => {
+        failed = true;
+        finish();
+        try {
+          logger.warn({ hm, errorCode: 'PREWARM_FAILED' }, 'prewarm: 失败（非阻塞）');
+        } catch {
+          // Logging cannot erase the original failed operation or strand stop.
+        }
+      });
+    } catch {
+      // Closed admission is not a dispatched operation. Never open it here.
+      finish();
     }
   };
 
-  const id = setInterval(() => void tick(), deps.intervalMs ?? 60_000);
+  const id = setInterval(tick, deps.intervalMs ?? 60_000);
   // 不阻塞 boot；首 tick 交给 interval。
-  return () => clearInterval(id);
+  return () => {
+    if (inside.getStore()) throw new Error('PREWARM_STOP_REENTRY');
+    if (stopped) return stopped;
+    stopping = true;
+    clearInterval(id);
+    stopped = Promise.allSettled(pending ? [pending] : []).then(() => {
+      if (failed) throw new Error('PREWARM_OUTCOME_UNKNOWN');
+    });
+    return stopped;
+  };
 }
 
 /**
@@ -78,11 +137,16 @@ export function startPrewarmScheduler(deps: PrewarmSchedulerDeps): () => void {
  * 传入**长超时**客户端（让冷取数有时间完成）。任一失败忽略（Promise.allSettled）。
  */
 export async function warmSharedCaches(client: AkshareClient): Promise<void> {
-  await Promise.allSettled([
-    client.getIndexQuote('us'),
-    client.getIndexQuote('hk'),
-    client.getIndexQuote('cn'),
-  ]);
+  await Promise.allSettled(
+    (['us', 'hk', 'cn'] as const).map((market) =>
+      runMarketRequest(async (beforeDispatch) => {
+        const quote = client.getIndexQuote.bind(client);
+        beforeDispatch();
+        const result = await quote(market);
+        if (result.error) throw new Error('PREWARM_UPSTREAM_FAILED');
+      }),
+    ),
+  );
 }
 
 /**
@@ -94,9 +158,12 @@ export async function warmSymbolTable(baseUrl: string, timeoutMs = 120_000): Pro
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    await fetch(`${baseUrl.replace(/\/+$/, '')}/symbol-table/warm`, {
-      method: 'POST',
-      signal: controller.signal,
+    const url = `${baseUrl.replace(/\/+$/, '')}/symbol-table/warm`;
+    const transport = globalThis.fetch;
+    await runMarketRequest(async (beforeDispatch) => {
+      beforeDispatch();
+      const response = await transport(url, { method: 'POST', signal: controller.signal });
+      await readWarmResponse(response);
     });
   } catch {
     // 预热失败忽略

@@ -31,7 +31,10 @@ export interface BrowserSlot {
   wsPort: number;
 }
 
-export interface BrowserInstance extends BrowserSlot {
+export interface BrowserInstance extends Partial<BrowserSlot> {
+  index: number;
+  /** Broker instances intentionally have no host PID, path or bare port. */
+  transport?: 'broker';
   /**
    * Phase 24 — instances are now keyed by taskId (one task = one
    * Brave). userId is retained as the OWNER reference: cookie-sync
@@ -41,12 +44,12 @@ export interface BrowserInstance extends BrowserSlot {
    */
   taskId: string;
   userId: string;
-  userDataDir: string;
+  userDataDir?: string;
   executor: PlaywrightExecutor;
-  xvfbPid: number;
-  bravePid: number;
-  x11vncPid: number;
-  websockifyPid: number;
+  xvfbPid?: number;
+  bravePid?: number;
+  x11vncPid?: number;
+  websockifyPid?: number;
   /** Epoch ms — fresh on every task that uses this instance. */
   lastActiveAt: number;
   createdAt: number;
@@ -122,7 +125,7 @@ export interface PoolStats {
   byUser: Array<{
     taskId: string;
     userId: string;
-    cdpPort: number;
+    cdpPort?: number;
     status: InstanceStatus;
     lastActiveAt: number;
     createdAt: number;

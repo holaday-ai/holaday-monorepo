@@ -13,6 +13,7 @@ import {
   type ReviewableGenerateOutcome,
   reviewGenerateOutcome,
 } from '../execution/generate-outcome-review.js';
+import { type OperationLifetime, startOwnedOperation } from '../execution/owned-operation.js';
 import {
   createTaskVerificationContext,
   renderVerificationUserIntent,
@@ -72,6 +73,8 @@ export interface CoreExecutionInput {
   /** Optional follow-up channel; consumer must use settlement identity in its CAS. */
   afterSettlement?: (settlement: CoreSettlement) => Promise<void>;
   recoveryClock?: CoreRecoveryClock;
+  /** Internal integration seam, not a process-wide drain proof or client field. */
+  lifetime?: OperationLifetime;
 }
 export interface CoreExecutionStart {
   ack: ExecutionIdentity & { state: 'resumed' | 'acceptedUnconfirmed' | 'notAdmitted' };
@@ -86,6 +89,35 @@ export interface CoreExecutionStart {
 export async function startCoreTaskExecution(
   input: CoreExecutionInput,
 ): Promise<CoreExecutionStart> {
+  // Pure validation and freezing happen before any side-effect owner is created.
+  const prepared = prepareCoreExecution(input);
+  if (!input.lifetime) return executeCoreTask(input, prepared);
+  const { drain, owner: parent } = input.lifetime;
+  let acknowledge!: (started: CoreExecutionStart) => void;
+  let reject!: (error: unknown) => void;
+  const ack = new Promise<CoreExecutionStart>((resolve, fail) => {
+    acknowledge = resolve;
+    reject = fail;
+  });
+  const operation = startOwnedOperation(
+    drain,
+    'execution',
+    async (owner) => {
+      const started = await executeCoreTask(
+        { ...input, lifetime: Object.freeze({ drain, owner }) },
+        prepared,
+      );
+      acknowledge(started);
+      await started.completion;
+    },
+    { parent, errorOutcome: 'unknown', dispatch: 'immediate' },
+  );
+  // ACK is deliberately independent of completion. The private pinned owner is not.
+  void operation.result.catch(reject);
+  return ack;
+}
+
+function prepareCoreExecution(input: CoreExecutionInput) {
   const requirements = {
     ...input.requirements,
     resume: input.requirements.resume ?? {
@@ -135,7 +167,14 @@ export async function startCoreTaskExecution(
     executionId: admission.executionId,
     executionRevision: admission.executionRevision,
   });
-  const accepted = await admitCoreTask(input.repo, admission, input.recoveryClock);
+  return { admission, context, identity, resume };
+}
+
+async function executeCoreTask(
+  input: CoreExecutionInput,
+  { admission, context, identity, resume }: ReturnType<typeof prepareCoreExecution>,
+): Promise<CoreExecutionStart> {
+  const accepted = await admitCoreTask(input.repo, admission, input.recoveryClock, input.lifetime);
   if (!accepted.dispatchAllowed) {
     return {
       ack: {
@@ -190,6 +229,7 @@ export async function startCoreTaskExecution(
         }
         if (!registry.read(handle) || readiness === 'stale') return 'stale';
         if (readiness !== 'ready' || performance.now() >= deadline) {
+          if (input.lifetime) input.lifetime.drain.markUnknown(input.lifetime.owner);
           safelyPublish(input, { ...identity, type: 'unconfirmed' });
           return 'unconfirmed';
         }
@@ -254,7 +294,12 @@ export async function startCoreTaskExecution(
         verification,
         sourceTrust: reviewed.sourceTrust,
       });
-      const persisted = await persistCoreSettlement(input.repo, op, input.recoveryClock);
+      const persisted = await persistCoreSettlement(
+        input.repo,
+        op,
+        input.recoveryClock,
+        input.lifetime,
+      );
       if (persisted.kind === 'stale') return 'stale';
       if (persisted.kind !== 'committed') {
         safelyPublish(input, { ...identity, type: 'unconfirmed' });
@@ -270,7 +315,8 @@ export async function startCoreTaskExecution(
         try {
           // Start while ownership is still current. A delayed microtask would
           // run after finally releases this handle or after another admission.
-          void Promise.resolve(input.afterSettlement(op)).catch(() => {});
+          const followup = input.afterSettlement;
+          detachOwned(input.lifetime, 'suggestions', () => followup(op));
         } catch {
           /* Synchronous optional callbacks are isolated too. */
         }
@@ -288,10 +334,27 @@ export async function startCoreTaskExecution(
 
 function safelyPublish(input: CoreExecutionInput, event: CoreExecutionEvent): void {
   try {
-    void Promise.resolve(input.publish(event)).catch(() => {});
+    detachOwned(input.lifetime, 'request', () => input.publish(event));
   } catch {
     /* Notification transport cannot undo persistence. */
   }
+}
+
+function detachOwned(
+  lifetime: OperationLifetime | undefined,
+  kind: 'suggestions' | 'request',
+  action: () => void | Promise<void>,
+): void {
+  if (!lifetime) {
+    void Promise.resolve(action()).catch(() => {});
+    return;
+  }
+  const operation = startOwnedOperation(lifetime.drain, kind, async () => action(), {
+    parent: lifetime.owner,
+    errorOutcome: 'unknown',
+    dispatch: 'immediate',
+  });
+  void operation.result.catch(() => {});
 }
 
 function failedGeneration(): ReviewableGenerateOutcome {

@@ -1,3 +1,4 @@
+import { recordCoreModelObservation } from './core-model-observation.js';
 import {
   type MessagesAdapter,
   type QwenMessagesEnvironment,
@@ -17,7 +18,6 @@ import {
 } from './model-runtime-policy.js';
 import { type QwenPurpose, QwenRouteError, resolveQwenRoute } from './qwen-route.js';
 import { type ResponsesAdapter, createQwenResponsesAdapter } from './responses-adapter.js';
-import { recordCoreModelObservation } from './core-model-observation.js';
 
 export interface CoreModelRuntimeEnvironment extends QwenMessagesEnvironment {
   NODE_ENV: 'development' | 'test' | 'production';
@@ -113,8 +113,12 @@ export function resolveCoreModelRuntime(input: CoreModelRuntimeInput): CoreModel
   }
 
   try {
-    resolveQwenRoute(input.environment, region, 'standard', 'messages');
-    resolveQwenRoute(input.environment, region, 'standard', 'responses');
+    if (input.lane === 'browser') {
+      resolveQwenRoute(input.environment, region, 'vision', 'messages');
+    } else {
+      resolveQwenRoute(input.environment, region, 'standard', 'messages');
+      resolveQwenRoute(input.environment, region, 'standard', 'responses');
+    }
   } catch (error) {
     if (error instanceof QwenRouteError && error.code === 'MISSING_REGION_CREDENTIALS') {
       return { kind: 'unavailable', reason: 'REGION_SERVICE_NOT_CONFIGURED' };
@@ -165,7 +169,9 @@ function observeMessagesAdapter(
       try {
         const result = await adapter.create(request, options);
         emitObservation(observe, {
-          ...observationIdentity(adapter, purpose), lane, protocol: 'messages',
+          ...observationIdentity(adapter, purpose),
+          lane,
+          protocol: 'messages',
           outcome: 'success',
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
@@ -174,7 +180,9 @@ function observeMessagesAdapter(
         return result;
       } catch (error) {
         emitObservation(observe, {
-          ...observationIdentity(adapter, purpose), lane, protocol: 'messages',
+          ...observationIdentity(adapter, purpose),
+          lane,
+          protocol: 'messages',
           outcome: 'error',
           inputTokens: null,
           outputTokens: null,
@@ -200,7 +208,9 @@ function observeResponsesAdapter(
       try {
         const result = await adapter.stream(request, options);
         emitObservation(observe, {
-          ...observationIdentity(adapter, purpose), lane, protocol: 'responses',
+          ...observationIdentity(adapter, purpose),
+          lane,
+          protocol: 'responses',
           outcome: result.status === 'incomplete' ? 'incomplete' : 'success',
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
@@ -209,7 +219,9 @@ function observeResponsesAdapter(
         return result;
       } catch (error) {
         emitObservation(observe, {
-          ...observationIdentity(adapter, purpose), lane, protocol: 'responses',
+          ...observationIdentity(adapter, purpose),
+          lane,
+          protocol: 'responses',
           outcome: 'error',
           inputTokens: null,
           outputTokens: null,

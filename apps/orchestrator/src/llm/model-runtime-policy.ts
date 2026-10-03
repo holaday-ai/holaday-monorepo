@@ -5,6 +5,7 @@ export const CORE_MODEL_LANES = [
   'scrape',
   'video_edit_planner',
   'verifier',
+  'browser',
 ] as const;
 
 export type ModelRuntimePolicy = 'qwen_only' | 'legacy_fixture';
@@ -14,7 +15,7 @@ export type CoreModelLaneAccess =
   | { kind: 'enabled' }
   | { kind: 'unavailable'; reason: 'LANE_DISABLED' | 'ROLLOUT_NOT_ALLOWED' };
 
-export type UnmigratedModelLane = 'browser' | 'image' | 'video_generation' | 'voice' | 'memory';
+export type UnmigratedModelLane = 'image' | 'video_generation' | 'voice' | 'memory';
 export type UnmigratedModelLaneAccess = {
   kind: 'unavailable';
   reason: 'MIGRATION_IN_PROGRESS';
@@ -70,8 +71,6 @@ export function resolveCoreModelLaneAccess(input: {
     : { kind: 'unavailable', reason: 'ROLLOUT_NOT_ALLOWED' };
 }
 
-export function resolveUnmigratedModelLane(
-  _lane: UnmigratedModelLane,
-): UnmigratedModelLaneAccess {
+export function resolveUnmigratedModelLane(_lane: UnmigratedModelLane): UnmigratedModelLaneAccess {
   return { kind: 'unavailable', reason: 'MIGRATION_IN_PROGRESS' };
 }

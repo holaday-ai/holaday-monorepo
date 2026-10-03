@@ -27,11 +27,16 @@
  * Mode A.
  */
 
-import type { ClientMessage, ServerMessage } from '@holaday/shared-types';
+import type {
+  ClientMessage,
+  SelectedChromeSessionCommand,
+  ServerMessage,
+} from '@holaday/shared-types';
 import { withDeadline } from '../shared/deadline.js';
 import { compactLogErrorReason } from '../shared/log-error.js';
 import { sanitizePageContextUrl } from '../shared/page-context.js';
 import { sendCriticalClientMessage } from './critical-send.js';
+import { listReadableTabs, readSelectedTab, resetTabSelectionsForTests } from './selected-tab-read.js';
 import { getCurrentWsToken } from './ws-client.js';
 
 type ExtensionToolCall = Extract<ServerMessage, { type: 'server.extension.tool_call' }>;
@@ -65,6 +70,29 @@ type ExtensionToolResultPayload = Omit<
 >;
 type ExtensionToolResultMessage = Extract<ClientMessage, { type: 'client.extension.tool_result' }>;
 
+type SelectedChromeReply =
+  | { ok: true; [key: string]: unknown }
+  | { ok: false; error: string; actionOutcome?: 'applied' | 'not_applied' | 'unknown' };
+type RunLegacyBrowserOperation = <T>(run: () => Promise<T>) => Promise<T>;
+interface ExtensionToolRuntime {
+  transport: {
+    handle(taskId: string, command: SelectedChromeSessionCommand): Promise<SelectedChromeReply>;
+    stopTask(taskId: string): Promise<void>;
+  } | null;
+  runLegacy: RunLegacyBrowserOperation;
+}
+
+const directLegacyBrowserOperation: RunLegacyBrowserOperation = (run) => run();
+let extensionToolRuntime: ExtensionToolRuntime = {
+  transport: null,
+  runLegacy: directLegacyBrowserOperation,
+};
+
+/** Injected by background/index.ts so Node tests never import the CRX bridge. */
+export function configureExtensionToolRuntime(runtime: ExtensionToolRuntime): void {
+  extensionToolRuntime = runtime;
+}
+
 const recentToolCallResults = new Map<
   string,
   { at: number; generation: number; ownerToken: string | null; payload: ExtensionToolResultPayload }
@@ -85,6 +113,14 @@ export function setExtensionToolTaskStopped(taskId: string, stopped: boolean): v
     generation: (current?.generation ?? 0) + 1,
     stopped,
   });
+  if (stopped && extensionToolRuntime.transport) {
+    void extensionToolRuntime.transport.stopTask(taskId).catch((error) => {
+      console.warn('[holaday] selected Chrome task cleanup failed', {
+        taskId,
+        reason: compactLogErrorReason(error),
+      });
+    });
+  }
 }
 
 function getControlledTaskState(taskId: string): { generation: number; stopped: boolean } {
@@ -630,6 +666,26 @@ export function extensionToolErrorPayload(
   err: unknown,
 ): { message: string; code: string } {
   const msg = err instanceof Error ? err.message : String(err);
+  const selectedTabErrors: Record<string, string> = {
+    target_required: '请先选择要读取的 Chrome 标签页',
+    target_changed: '所选标签页已跳转，请重新选择后继续',
+    target_closed: '所选标签页已关闭，请重新选择',
+    read_unavailable: '未能读取所选页面，请确认页面已加载后重试',
+    target_unsupported: '此工具暂不支持指定标签页，请勿回退到当前活动页',
+    browser_busy: '浏览器正在执行另一项操作，请稍后重试',
+    session_unavailable: '所选浏览器会话不可用，请重新选择标签页',
+    observation_required: '操作前需要重新读取当前页面状态',
+    input_outcome_unknown: '浏览器输入结果不确定，请先重新读取页面状态',
+    unsupported_action: '所选浏览器会话不支持此操作',
+    invalid_url: '导航地址无效，请检查后重试',
+    wait_failed: '等待页面状态失败，请重新读取后重试',
+    session_stopped: '所选浏览器会话已停止',
+    attach_failed: '无法连接所选标签页，请重新选择后重试',
+    observation_failed: '无法读取所选标签页，请稍后重试',
+    legacy_cleanup_failed: '旧浏览器连接清理失败，未连接所选标签页',
+    session_cleanup_failed: '浏览器会话清理尚未完成，请重试关闭',
+  };
+  if (selectedTabErrors[msg]) return { message: selectedTabErrors[msg], code: msg };
   const lower = msg.toLowerCase();
   if (msg.startsWith('no_active_tab')) {
     return { message: '浏览器当前没有活动标签页', code: 'no_active_tab' };
@@ -774,6 +830,7 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
 
   let trackedPromise: Promise<ExtensionToolResultPayload>;
   const promise = computeExtensionToolResult(
+    taskId,
     kind,
     args,
     waitMs,
@@ -796,6 +853,7 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
 }
 
 async function computeExtensionToolResult(
+  taskId: string,
   kind: ExtensionToolCall['kind'],
   args: ExtensionToolCall['args'],
   waitMs: number,
@@ -803,10 +861,42 @@ async function computeExtensionToolResult(
   operationBudgetMs: number,
 ): Promise<ExtensionToolResultPayload> {
   try {
+    if (kind === 'session') {
+      const command = args?.session;
+      const transport = extensionToolRuntime.transport;
+      const reply: SelectedChromeReply =
+        command && transport
+          ? await transport.handle(taskId, command)
+          : { ok: false, error: 'session_unavailable' };
+      if (reply.ok) return { ok: true, result: reply };
+      const sanitized = extensionToolErrorPayload(new Error(reply.error));
+      return {
+        ok: false,
+        result: reply,
+        error: { message: sanitized.message, code: reply.error },
+      };
+    }
+    if (args?.target && kind !== 'read') throw new Error('target_unsupported');
+    if (kind === 'tabs' || kind === 'read') {
+      const result = await withDeadline<unknown>(
+        kind === 'tabs' ? listReadableTabs() : readSelectedTab(args?.target),
+        operationBudgetMs,
+        'extension_tool_timeout',
+      );
+      return {
+        ok: true,
+        result: {
+          ...(typeof result === 'object' && result !== null ? result : {}),
+          selectedSessionVersion: extensionToolRuntime.transport ? 1 : 0,
+        },
+      };
+    }
     if (kind === 'navigate') {
       const url = normalizeNavigateUrl(args?.url);
       const result = await withDeadline(
-        executeNavigate(url, waitMs, navigateLoadTimeoutMs),
+        extensionToolRuntime.runLegacy(() =>
+          executeNavigate(url, waitMs, navigateLoadTimeoutMs),
+        ),
         operationBudgetMs,
         'extension_tool_timeout',
       );
@@ -814,7 +904,7 @@ async function computeExtensionToolResult(
     }
     if (kind === 'screenshot') {
       const result = await withDeadline(
-        executeScreenshot(),
+        extensionToolRuntime.runLegacy(() => executeScreenshot()),
         operationBudgetMs,
         'extension_tool_timeout',
       );
@@ -830,9 +920,14 @@ async function computeExtensionToolResult(
 }
 
 export function _resetExtensionToolInFlightForTests(): void {
+  resetTabSelectionsForTests();
   inFlightToolCallResults.clear();
   recentToolCallResults.clear();
   controlledTaskState.clear();
+  extensionToolRuntime = {
+    transport: null,
+    runLegacy: directLegacyBrowserOperation,
+  };
 }
 
 function sendExtensionToolResult(

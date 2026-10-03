@@ -27,4 +27,5 @@ unset PM2_HOME
 }
 
 cd "$ORCHESTRATOR_DIR"
+"$NODE_BIN" --import tsx "$REPO_ROOT/scripts/browser-maintenance-start.mjs" worker "$REPO_ROOT"
 exec "$NODE_BIN" --import tsx "$BUILT_ENTRY"

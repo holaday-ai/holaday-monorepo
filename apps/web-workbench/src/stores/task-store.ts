@@ -51,6 +51,7 @@ export interface StockTaskContextInput {
  * surface is small and the hot path is a single selector.
  */
 export interface TaskStore {
+  localChromeSelection: { extensionClientId: string; tabId: number; expectedUrl: string; selectionId: string; title: string } | null;
   tasks: UiTask[];
   selectedTaskId: string | null;
   /**
@@ -230,6 +231,8 @@ export interface TaskStore {
     taskId: string,
     projectId: string | null,
   ): Promise<{ ok: true } | { error: string }>;
+  /** Retry by identity, never by text alone: browser selection is task-specific. */
+  rerunTask(taskId: string, rebuiltIntent?: string): Promise<{ taskId: string } | { error: string }>;
   createTask(
     intent: string,
     fileIds?: string[],
@@ -882,6 +885,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                     ...(finalViewport ? { finalViewport } : {}),
                     ...(awaitingKind ? { awaitingKind } : {}),
                     ...(executionMode ? { executionMode } : {}),
+                    ...(detail.browserSource === 'local-chrome' || metadata.browserSource === 'local-chrome' ? { browserSource: 'local-chrome' as const } : {}),
                     ...(attachments ? { attachments } : {}),
                     ...(expertWorkflowId ? { expertWorkflowId } : {}),
                     ...(expertMode ? { expertMode } : {}),
@@ -916,6 +920,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             ...(finalViewport ? { finalViewport } : {}),
             ...(awaitingKind ? { awaitingKind } : {}),
             ...(executionMode ? { executionMode } : {}),
+            ...(detail.browserSource === 'local-chrome' || metadata.browserSource === 'local-chrome' ? { browserSource: 'local-chrome' as const } : {}),
             ...(attachments ? { attachments } : {}),
             ...(expertWorkflowId ? { expertWorkflowId } : {}),
             ...(expertMode ? { expertMode } : {}),
@@ -976,6 +981,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   return {
   tasks: [],
   selectedTaskId: null,
+  localChromeSelection: null,
   composerMode: 'new',
   loading: false,
   error: null,
@@ -1497,6 +1503,20 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
   },
 
+  async rerunTask(taskId, rebuiltIntent) {
+    const task = get().tasks.find((item) => item.taskId === taskId);
+    if (!task) return { error: '无法确认原任务的执行方式，请重新打开任务后再试。' };
+    // Selections are short-lived and cleared on creation. Reusing another
+    // composer selection or omitting the target would silently change browsers.
+    if (task.browserSource === 'local-chrome') {
+      return { error: '请点击“新任务”，填入原描述并重新选择 Chrome 页面后发送；不会自动改用云端执行。' };
+    }
+    if (get().localChromeSelection) {
+      return { error: '输入框已选择 Chrome 页面，请先移除该选择，再重新执行原任务。' };
+    }
+    return get().createTask(rebuiltIntent ?? task.intent, []);
+  },
+
   async createTask(
     intent,
     fileIds,
@@ -1520,7 +1540,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       return { error: msg };
     }
     const generation = captureSessionGeneration();
-    const creationKey = JSON.stringify([intent, fileIds ?? [], replyToTaskId, mode, expertMode, videoOptions, skillSelection, imageOptions, taskSource, stockContext]);
+    const chromeSelection = get().localChromeSelection;
+    if (replyToTaskId && get().tasks.find((task) => task.taskId === replyToTaskId)?.browserSource === 'local-chrome') {
+      return { error: '本地 Chrome 会话已结束，请新建任务并重新选择 Chrome 页面后发送。' };
+    }
+    if (chromeSelection && (mode === 'plan' || fileIds?.length || replyToTaskId || videoOptions || imageOptions || taskSource || stockContext)) return { error: '本地 Chrome 当前支持新建网页操作任务，请移除附件并使用自动执行模式。' };
+    const creationKey = JSON.stringify([intent, fileIds ?? [], replyToTaskId, mode, expertMode, videoOptions, skillSelection, imageOptions, taskSource, stockContext, chromeSelection]);
     if (uncertainCreations.has(creationKey)) return { error: uncertainWriteMessage };
     const pickedViewportProfile =
       viewportProfile ??
@@ -1547,6 +1572,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }));
     try {
       const res = await trpc.tasks.create.mutate({
+        ...(chromeSelection ? { localChrome: { extensionClientId: chromeSelection.extensionClientId, tabId: chromeSelection.tabId, expectedUrl: chromeSelection.expectedUrl, selectionId: chromeSelection.selectionId } } : {}),
         intent,
         clientRequestId: localTaskId,
         ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
@@ -1590,6 +1616,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       const serverExecutionMode = (res as { executionMode?: UiTask['executionMode'] })
         .executionMode;
       const optimistic: UiTask = {
+        ...((res as { browserSource?: string }).browserSource === 'local-chrome' ? { browserSource: 'local-chrome' as const } : {}),
         taskId: res.taskId,
         intent,
         title: null,
@@ -1618,6 +1645,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           ),
         ],
         selectedTaskId: res.taskId,
+        ...(prev.localChromeSelection === chromeSelection ? { localChromeSelection: null } : {}),
         composerMode: 'task' as const,
         browserInteractive: false,
         ...(creationUnconfirmed ? { error: uncertainWriteMessage } : {}),
@@ -2475,6 +2503,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     failedLocalReplies.clear();
     abortInFlightHydrate();
     set({
+      localChromeSelection: null,
       tasks: [],
       selectedTaskId: null,
       loading: false,
@@ -2935,6 +2964,7 @@ export function toUiTask(row: ListRow): UiTask {
     tickCount: 0,
     ...(resultText ? { resultText } : {}),
     ...(executionMode ? { executionMode } : {}),
+    ...((row as { browserSource?: string }).browserSource === 'local-chrome' || (isTaskListRecord(rowResult) && isTaskListRecord(rowResult.metadata) && rowResult.metadata.browserSource === 'local-chrome') ? { browserSource: 'local-chrome' as const } : {}),
     ...(videoType ? { videoType } : {}),
     ...(attachments ? { attachments } : {}),
     ...(expertWorkflowId ? { expertWorkflowId } : {}),

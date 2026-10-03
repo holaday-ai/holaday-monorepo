@@ -18,8 +18,9 @@
  * the long-standing "VNC eats Chinese characters" bug.
  */
 
-import type { CDPSession } from 'playwright';
 import type { Logger } from 'pino';
+import type { CDPSession } from 'playwright';
+import { BrowserInputOutcomeUnknownError } from '../agent/supercar/browser-control.js';
 
 export type InputMessage =
   | { type: 'mouseMove'; x: number; y: number }
@@ -123,6 +124,15 @@ function editingCommands(m: {
 export class CdpInputHandler {
   private activeModifiers = 0;
   private activeSession: CDPSession | null = null;
+  private readonly interruptedSessions = new WeakSet<CDPSession>();
+  private readonly pressedKeys = new Map<
+    string,
+    Extract<InputMessage, { type: 'keyDown' | 'keyUp' }>
+  >();
+  private readonly pressedButtons = new Map<
+    string,
+    Extract<InputMessage, { type: 'mouseDown' | 'mouseUp' }>
+  >();
 
   /**
    * @param getSession Returns the streamer's CURRENT CDP session,
@@ -134,24 +144,51 @@ export class CdpInputHandler {
     private readonly getSession: () => CDPSession | null,
     private readonly logger: Logger,
     private readonly onInputDispatched?: (message: InputMessage) => void,
+    /** Revoke ownership immediately; this is NOT a physical-stop receipt. */
+    private readonly onInputUncertain?: () => void,
   ) {}
 
   /**
    * Dispatch a single input message. Per-message errors are logged
    * + swallowed so one malformed event from the SPA can't kill the
-   * input pipeline. Drops the message silently if the streamer's
-   * session is currently torn down (mid-restart).
+   * input pipeline on legacy connections. With an ownership signal, failures
+   * propagate and cancellation interrupts the real CDP session. We still await
+   * the original send: detach failure must not manufacture a settled action.
    */
-  async handle(msg: InputMessage): Promise<void> {
+  async handle(msg: InputMessage, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     const session = this.getSession();
     if (!session) {
+      if (signal) throw new Error('browser_input_session_unavailable');
       this.logger.debug({ type: msg.type }, 'cdp-input: no session, dropping');
       return;
     }
+    if (this.interruptedSessions.has(session)) throw new BrowserInputOutcomeUnknownError();
     if (session !== this.activeSession) {
       this.activeSession = session;
       this.activeModifiers = 0;
     }
+    let interrupted = false;
+    const interrupt = (): void => {
+      if (interrupted) return;
+      interrupted = true;
+      this.interruptedSessions.add(session);
+      // Do not wait for Page.stopScreencast on the already-stalled session.
+      // Detach rejects pending CDP requests when its transport is reachable.
+      void session.detach().catch((err: unknown) => {
+        this.logger.debug({ err }, 'cdp-input: interruption unconfirmed');
+      });
+      this.onInputUncertain?.();
+    };
+    signal?.addEventListener('abort', interrupt, { once: true });
+    const timer = signal ? setTimeout(interrupt, 10_000) : null;
+    timer?.unref();
+    const send: CDPSession['send'] = async (method, params) => {
+      if (interrupted) throw new BrowserInputOutcomeUnknownError();
+      const result = await session.send(method, params);
+      if (interrupted) throw new BrowserInputOutcomeUnknownError();
+      return result;
+    };
     try {
       switch (msg.type) {
         case 'viewport': {
@@ -167,7 +204,7 @@ export class CdpInputHandler {
           }
           const width = Math.round(msg.width);
           const height = Math.round(msg.height);
-          await session.send('Emulation.setDeviceMetricsOverride', {
+          await send('Emulation.setDeviceMetricsOverride', {
             width,
             height,
             deviceScaleFactor: 1,
@@ -178,32 +215,34 @@ export class CdpInputHandler {
           break;
         }
         case 'mouseMove':
-          await session.send('Input.dispatchMouseEvent', {
+          await send('Input.dispatchMouseEvent', {
             type: 'mouseMoved',
             x: msg.x,
             y: msg.y,
           });
           break;
         case 'mouseDown':
-          await session.send('Input.dispatchMouseEvent', {
+          await send('Input.dispatchMouseEvent', {
             type: 'mousePressed',
             x: msg.x,
             y: msg.y,
             button: msg.button ?? 'left',
             clickCount: msg.clickCount ?? 1,
           });
+          this.pressedButtons.set(msg.button ?? 'left', msg);
           break;
         case 'mouseUp':
-          await session.send('Input.dispatchMouseEvent', {
+          await send('Input.dispatchMouseEvent', {
             type: 'mouseReleased',
             x: msg.x,
             y: msg.y,
             button: msg.button ?? 'left',
             clickCount: msg.clickCount ?? 1,
           });
+          this.pressedButtons.delete(msg.button ?? 'left');
           break;
         case 'scroll':
-          await session.send('Input.dispatchMouseEvent', {
+          await send('Input.dispatchMouseEvent', {
             type: 'mouseWheel',
             x: msg.x,
             y: msg.y,
@@ -213,10 +252,10 @@ export class CdpInputHandler {
           break;
         case 'keyDown': {
           const reportedModifiers = modifiersBitmask(msg) | modifierBit(msg);
-          await this.releaseStaleModifiers(session, reportedModifiers);
+          await this.releaseStaleModifiers(send, reportedModifiers);
           const text = printableKeyText(msg);
           const commands = editingCommands(msg);
-          await session.send('Input.dispatchKeyEvent', {
+          await send('Input.dispatchKeyEvent', {
             type: 'keyDown',
             ...(msg.key ? { key: msg.key } : {}),
             ...(msg.code ? { code: msg.code } : {}),
@@ -226,17 +265,14 @@ export class CdpInputHandler {
             ...(commands ? { commands } : {}),
           });
           this.activeModifiers = reportedModifiers;
+          this.pressedKeys.set(msg.code ?? msg.key ?? String(msg.keyCode), msg);
           break;
         }
         case 'keyUp': {
           const releasedModifier = modifierBit(msg);
           const reportedModifiers = keyUpModifiersBitmask(msg);
-          await this.releaseStaleModifiers(
-            session,
-            reportedModifiers,
-            releasedModifier,
-          );
-          await session.send('Input.dispatchKeyEvent', {
+          await this.releaseStaleModifiers(send, reportedModifiers, releasedModifier);
+          await send('Input.dispatchKeyEvent', {
             type: 'keyUp',
             ...(msg.key ? { key: msg.key } : {}),
             ...(msg.code ? { code: msg.code } : {}),
@@ -244,10 +280,11 @@ export class CdpInputHandler {
             modifiers: reportedModifiers,
           });
           this.activeModifiers = reportedModifiers;
+          this.pressedKeys.delete(msg.code ?? msg.key ?? String(msg.keyCode));
           break;
         }
         case 'insertText':
-          await session.send('Input.insertText', { text: msg.text });
+          await send('Input.insertText', { text: msg.text });
           break;
       }
       this.onInputDispatched?.(msg);
@@ -256,11 +293,39 @@ export class CdpInputHandler {
         { err: err instanceof Error ? err.message : String(err), type: msg.type },
         'cdp-input: dispatch failed',
       );
+      if (signal) {
+        interrupt();
+        throw new BrowserInputOutcomeUnknownError();
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener('abort', interrupt);
+    }
+  }
+
+  async releasePressed(signal: AbortSignal): Promise<void> {
+    if (!this.pressedKeys.size && !this.pressedButtons.size && !this.activeModifiers) return;
+    if (!this.getSession()) {
+      this.onInputUncertain?.();
+      throw new BrowserInputOutcomeUnknownError();
+    }
+    for (const key of [...this.pressedKeys.values()]) {
+      await this.handle(
+        { ...key, type: 'keyUp', altKey: false, ctrlKey: false, metaKey: false, shiftKey: false },
+        signal,
+      );
+    }
+    for (const modifier of MODIFIER_KEYS) {
+      if (this.activeModifiers & modifier.bit)
+        await this.handle({ type: 'keyUp', ...modifier }, signal);
+    }
+    for (const button of [...this.pressedButtons.values()]) {
+      await this.handle({ ...button, type: 'mouseUp' }, signal);
     }
   }
 
   private async releaseStaleModifiers(
-    session: CDPSession,
+    send: CDPSession['send'],
     reportedModifiers: number,
     modifierHandledByCurrentKeyUp = 0,
   ): Promise<void> {
@@ -271,7 +336,7 @@ export class CdpInputHandler {
       if (!(staleModifiers & modifier.bit)) continue;
 
       const nextModifiers = this.activeModifiers & ~modifier.bit;
-      await session.send('Input.dispatchKeyEvent', {
+      await send('Input.dispatchKeyEvent', {
         type: 'keyUp',
         key: modifier.key,
         code: modifier.code,

@@ -57,11 +57,22 @@ import {
   detachAll,
   executeCdpAction,
   getActiveTabId,
+  prepareSelectedChromeCdp,
 } from './cdp-actions.js';
 import { buildLoginStatesMessage, readLoginStates } from './cookie-bridge.js';
 import { runCookieSync } from './cookie-sync.js';
 import { runHistorySync } from './history-sync.js';
-import { handleExtensionToolCall, setExtensionToolTaskStopped } from './extension-tools.js';
+import {
+  configureExtensionToolRuntime,
+  handleExtensionToolCall,
+  setExtensionToolTaskStopped,
+} from './extension-tools.js';
+import {
+  BrowserExecutionBusyError,
+  browserExecutionOwnership,
+} from './browser-execution-ownership.js';
+import { createSelectedChromeBridge } from './selected-chrome-bridge.js';
+import { createSelectedChromeTransport } from './selected-chrome-transport.js';
 import { isTrustedAuthBridgeSender } from './auth-bridge-trust.js';
 import {
   decideAuthTokenAction,
@@ -71,15 +82,15 @@ import { sendCriticalClientMessage } from './critical-send.js';
 import { withDeadline } from '../shared/deadline.js';
 import { compactLogErrorReason } from '../shared/log-error.js';
 import {
-  connect,
-  disconnect,
+  connect as connectWs,
+  disconnect as disconnectWs,
   getWsConnectionStatus,
   getCurrentWsToken,
   isConnected,
   isReconnectCapped,
   onServerMessage,
   onUnauthorized,
-  reconnect,
+  reconnect as reconnectWs,
   resetWsReconnectAttempts,
   send,
 } from './ws-client.js';
@@ -156,6 +167,57 @@ async function getDriver(): Promise<HolaDayBrowserDriver> {
     driverPromise = null;
   });
   return driverPromise;
+}
+
+/** Runs only while selected ownership is already reserved and before the
+ * selected bridge attaches. Any cleanup failure blocks the new attachment. */
+async function prepareIdleLegacyBrowserExecution(): Promise<void> {
+  const pendingDriver = driverPromise;
+  if (pendingDriver) {
+    const driver = await pendingDriver;
+    await driver.dispose();
+    if (driverPromise === pendingDriver) driverPromise = null;
+  }
+  await prepareSelectedChromeCdp();
+}
+
+const selectedChromeTransport = createSelectedChromeTransport({
+  bridge: createSelectedChromeBridge(),
+  ownership: browserExecutionOwnership,
+  prepareLegacy: prepareIdleLegacyBrowserExecution,
+  currentOwner: getCurrentWsToken,
+});
+
+configureExtensionToolRuntime({
+  transport: selectedChromeTransport,
+  runLegacy: (run) => browserExecutionOwnership.runLegacy(run),
+});
+
+// Every local auth/disconnect entry point passes this boundary, including
+// storage changes, explicit logout, rejected auth, reset and account switch.
+// Stop admission before changing WS owner. Auth itself need not wait on a
+// stuck Chrome detach; the transport retains ownership until cleanup settles.
+function stopSelectedForOwner(nextOwner: string | null): void {
+  void selectedChromeTransport.stopOnOwnerChange(nextOwner).catch((error) => {
+    console.warn('[holaday] selected session auth cleanup unconfirmed', {
+      reason: compactLogErrorReason(error),
+    });
+  });
+}
+
+function connect(...args: Parameters<typeof connectWs>): ReturnType<typeof connectWs> {
+  stopSelectedForOwner(args[0]);
+  return connectWs(...args);
+}
+
+function reconnect(...args: Parameters<typeof reconnectWs>): ReturnType<typeof reconnectWs> {
+  stopSelectedForOwner(args[0]);
+  return reconnectWs(...args);
+}
+
+function disconnect(): void {
+  stopSelectedForOwner(null);
+  disconnectWs();
 }
 
 type StepStatus = 'pending' | 'executing' | 'completed' | 'failed' | 'awaiting_user' | 'skipped';
@@ -374,6 +436,7 @@ onServerMessage((msg) => {
  * isn't in state.tasks yet, create it with the final status.
  */
 function onTaskTerminal(msg: Extract<ServerMessage, { type: 'server.task.terminal' }>): void {
+  setExtensionToolTaskStopped(msg.taskId, true);
   const detail = msg.summary ?? msg.reason ?? '';
   const statusMap: Record<
     'completed' | 'partial_success' | 'failed' | 'paused' | 'cancelled',
@@ -494,30 +557,46 @@ async function computeVisionObservationPayload(
   msg: Extract<ServerMessage, { type: 'server.vision.observe' }>,
 ): Promise<VisionObservationPayload> {
   trackVisionTask(msg.taskId, 'observing', { tickIndex: msg.tickIndex });
-  const tabId = await getActiveTabId({ allowErrorPage: true });
-  if (tabId === null) {
-    return {
-      screenshotBase64: '',
-      viewportWidth: 0,
-      viewportHeight: 0,
-      url: '',
-      title: '',
-      error: 'no active tab (window may have been backgrounded before task started)',
-    };
+  try {
+    return await browserExecutionOwnership.runLegacy(async () => {
+      const tabId = await getActiveTabId({ allowErrorPage: true });
+      if (tabId === null) {
+        return {
+          screenshotBase64: '',
+          viewportWidth: 0,
+          viewportHeight: 0,
+          url: '',
+          title: '',
+          error: 'no active tab (window may have been backgrounded before task started)',
+        };
+      }
+      const obs = await captureVisionObservation(tabId);
+      // After sending observation → orchestrator is calling Claude next.
+      if (!isControlledTaskStopped(msg.taskId)) {
+        trackVisionTask(msg.taskId, 'deciding', { tickIndex: msg.tickIndex });
+      }
+      return {
+        screenshotBase64: obs.screenshotBase64,
+        viewportWidth: obs.viewportWidth,
+        viewportHeight: obs.viewportHeight,
+        url: obs.url,
+        title: obs.title,
+        ...(obs.error ? { error: obs.error } : {}),
+      };
+    });
+  } catch (error) {
+    if (error instanceof BrowserExecutionBusyError) {
+      return {
+        screenshotBase64: '',
+        viewportWidth: 0,
+        viewportHeight: 0,
+        url: '',
+        title: '',
+        error: 'browser_busy',
+      };
+    }
+    throw error;
   }
-  const obs = await captureVisionObservation(tabId);
-  // After sending observation → orchestrator is calling Claude next.
-  if (!isControlledTaskStopped(msg.taskId)) {
-    trackVisionTask(msg.taskId, 'deciding', { tickIndex: msg.tickIndex });
-  }
-  return {
-    screenshotBase64: obs.screenshotBase64,
-    viewportWidth: obs.viewportWidth,
-    viewportHeight: obs.viewportHeight,
-    url: obs.url,
-    title: obs.title,
-    ...(obs.error ? { error: obs.error } : {}),
-  };
 }
 
 function sendVisionObservation(
@@ -624,23 +703,30 @@ async function computeVisionActResult(
       message: `${msg.action.kind} terminal; no driver work`,
     };
   }
-  const tabId = await getActiveTabId({ allowErrorPage: msg.action.kind === 'navigate' });
-  if (tabId === null) {
-    return {
-      ok: false,
-      message: 'no active tab',
-    };
+  try {
+    return await browserExecutionOwnership.runLegacy(async () => {
+      const tabId = await getActiveTabId({ allowErrorPage: msg.action.kind === 'navigate' });
+      if (tabId === null) {
+        return {
+          ok: false,
+          message: 'no active tab',
+        };
+      }
+      const result = await executeCdpAction(tabId, msg.action);
+      // After action executed → orchestrator takes another observation
+      // next. Signal "deciding" so the popup doesn't look frozen.
+      if (!isControlledTaskStopped(msg.taskId)) {
+        trackVisionTask(msg.taskId, 'deciding', { tickIndex: msg.tickIndex });
+      }
+      return {
+        ok: result.ok,
+        ...(result.message ? { message: result.message } : {}),
+      };
+    });
+  } catch (error) {
+    if (error instanceof BrowserExecutionBusyError) return { ok: false, message: 'browser_busy' };
+    throw error;
   }
-  const result = await executeCdpAction(tabId, msg.action);
-  // After action executed → orchestrator takes another observation
-  // next. Signal "deciding" so the popup doesn't look frozen.
-  if (!isControlledTaskStopped(msg.taskId)) {
-    trackVisionTask(msg.taskId, 'deciding', { tickIndex: msg.tickIndex });
-  }
-  return {
-    ok: result.ok,
-    ...(result.message ? { message: result.message } : {}),
-  };
 }
 
 function sendVisionActed(
@@ -770,7 +856,8 @@ function finaliseVisionTask(taskId: string, status: 'completed' | 'failed', deta
 }
 
 function releaseVisionDebugger(taskId: string): void {
-  void detachAll().catch((err) => {
+  void browserExecutionOwnership.runLegacy(() => detachAll()).catch((err) => {
+    if (err instanceof BrowserExecutionBusyError) return;
     console.warn('[holaday] vision debugger release failed', {
       taskId,
       reason: compactLogErrorReason(err),
@@ -914,8 +1001,10 @@ async function computeStepResult(
   };
   const startedAt = Date.now();
   try {
-    const driver = await getDriver();
-    const result = await driver.execute(action);
+    const result = await browserExecutionOwnership.runLegacy(async () => {
+      const driver = await getDriver();
+      return driver.execute(action);
+    });
     const elapsed = Date.now() - startedAt;
     console.info('[holaday] step done', {
       taskId: msg.taskId,
@@ -961,8 +1050,13 @@ async function computeStepResult(
     return {
       status: 'error',
       error: {
-        code: 'DRIVER_CRASH',
-        message: err instanceof Error ? err.message : String(err),
+        code: err instanceof BrowserExecutionBusyError ? 'browser_busy' : 'DRIVER_CRASH',
+        message:
+          err instanceof BrowserExecutionBusyError
+            ? '浏览器正在执行另一项操作，请稍后重试'
+            : err instanceof Error
+              ? err.message
+              : String(err),
       },
     };
   }

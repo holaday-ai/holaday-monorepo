@@ -13,6 +13,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Context } from '../context.js';
 
 const { applyAddonPackSpy, grantFirstMonthBonusSpy } = vi.hoisted(() => ({
   applyAddonPackSpy: vi.fn(async () => {}),
@@ -441,15 +442,18 @@ function makeCreateCtx(opts: {
       debug: vi.fn(),
       child: vi.fn(),
     },
-  } as unknown as Parameters<typeof paymentRouter.createCaller>[0];
+  } as unknown as Context;
   return { ctx, inserted, paypalAdapter };
 }
 
 describe('first-month checkout serialization', () => {
   beforeEach(() => {
+    vi.stubEnv('PAYPAL_CHECKOUT_ENABLED', 'true');
     applyAddonPackSpy.mockReset().mockResolvedValue(undefined);
     grantFirstMonthBonusSpy.mockReset().mockResolvedValue(undefined);
   });
+
+  afterEach(() => vi.unstubAllEnvs());
 
   it('reuses an existing pending PayPal first-month checkout instead of pre-creating another', async () => {
     const existing = {
@@ -490,6 +494,89 @@ describe('first-month checkout serialization', () => {
 
     expect(inserted).toHaveLength(1);
     expect(inserted[0]?.metadata).toMatchObject({ cycle: 'yearly', firstMonth: false });
+  });
+});
+
+describe('PayPal checkout pause preserves existing transactions', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([undefined, 'false', '', 'invalid'])(
+    'hides PayPal and rejects new orders when checkout is %s',
+    async (value) => {
+      vi.stubEnv('PAYPAL_CHECKOUT_ENABLED', value);
+      vi.stubEnv('PAYPAL_CLIENT_ID', 'public-client-id');
+      const { ctx, inserted, paypalAdapter } = makeCreateCtx({ userRow: proUser });
+      const transaction = vi.spyOn(ctx.db, 'transaction');
+      const select = vi.spyOn(ctx.db, 'select');
+      const caller = paymentRouter.createCaller(ctx);
+      await expect(caller.createOrder({ plan: 'pro', cycle: 'monthly' })).rejects.toMatchObject({
+        code: 'PRECONDITION_FAILED',
+      });
+      await expect(caller.createAddonOrder({ packId: 'pack-20' })).rejects.toMatchObject({
+        code: 'PRECONDITION_FAILED',
+      });
+      expect(transaction).not.toHaveBeenCalled();
+      expect(select).not.toHaveBeenCalled();
+      expect(inserted).toHaveLength(0);
+      expect(paypalAdapter.createOrder).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not advertise SDK configuration while checkout is paused', async () => {
+    vi.stubEnv('PAYPAL_CHECKOUT_ENABLED', 'false');
+    vi.stubEnv('PAYPAL_CLIENT_ID', 'public-client-id');
+    const { ctx } = makeCreateCtx({});
+    expect(await paymentRouter.createCaller(ctx).options()).toEqual({
+      paypal: false,
+      paypalEnv: null,
+      paypalClientId: null,
+    });
+  });
+
+  it('rejects a direct addon checkout before querying the database or creating a provider order', async () => {
+    vi.stubEnv('PAYPAL_CHECKOUT_ENABLED', 'false');
+    const { ctx, inserted, paypalAdapter } = makeCreateCtx({ userRow: proUser });
+    const select = vi.spyOn(ctx.db, 'select');
+    await expect(
+      paymentRouter.createCaller(ctx).createAddonOrder({ packId: 'pack-20' }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    expect(select).not.toHaveBeenCalled();
+    expect(inserted).toHaveLength(0);
+    expect(paypalAdapter.createOrder).not.toHaveBeenCalled();
+  });
+
+  it('requires both explicit checkout opt-in and an available adapter to advertise PayPal', async () => {
+    vi.stubEnv('PAYPAL_CHECKOUT_ENABLED', 'true');
+    vi.stubEnv('PAYPAL_CLIENT_ID', 'public-client-id');
+    const { ctx } = makeCreateCtx({});
+    expect(await paymentRouter.createCaller(ctx).options()).toEqual({
+      paypal: true,
+      paypalEnv: 'sandbox',
+      paypalClientId: 'public-client-id',
+    });
+    ctx.paypalAdapter = null;
+    expect(await paymentRouter.createCaller(ctx).options()).toEqual({
+      paypal: false,
+      paypalEnv: null,
+      paypalClientId: null,
+    });
+  });
+
+  it('still captures and fulfills an existing approved order while new checkout is paused', async () => {
+    vi.stubEnv('PAYPAL_CHECKOUT_ENABLED', 'false');
+    applyAddonPackSpy.mockClear();
+    const { ctx, updates } = makeCtx({
+      orderRow: { ...addonOrder },
+      userRow: proUser,
+      gateAffected: 1,
+    });
+    expect(
+      await paymentRouter
+        .createCaller(ctx)
+        .captureOrder({ paymentId: 'pay_addon', orderId: 'ord_addon' }),
+    ).toEqual({ ok: true, plan: 'pack-20' });
+    expect(updates.some((u) => u.table === 'payments' && u.set.status === 'completed')).toBe(true);
+    expect(applyAddonPackSpy).toHaveBeenCalledWith(42, 'pro', 'pack-20');
   });
 });
 

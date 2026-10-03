@@ -53,6 +53,59 @@ type ResolveLocatorResult = { locator: Locator } | { failures: StrategyFailure[]
 
 /** Cap on error_message length to keep MySQL TEXT column from ballooning. */
 const ERROR_MESSAGE_CAP = 2000;
+const OBSERVATION_TITLE_CAP = 512;
+const OBSERVATION_BODY_TEXT_CAP = 8_000;
+const OBSERVATION_ARIA_SNAPSHOT_CAP = 16_000;
+const OBSERVATION_TIMEOUT_MS = 5_000;
+
+interface NativeSelectState {
+  disabled: boolean;
+  multiple: boolean;
+  options: Array<{
+    index: number;
+    label: string;
+    value: string;
+    selected: boolean;
+    disabled: boolean;
+  }>;
+}
+
+function readNativeSelectState(
+  locator: Locator,
+  timeout: number,
+): Promise<NativeSelectState | null> {
+  return locator.evaluate<NativeSelectState | null, undefined>(
+    (element: Element) => {
+      if (element.tagName !== 'SELECT') return null;
+      const select = element as HTMLSelectElement;
+      return {
+        disabled: select.disabled,
+        multiple: select.multiple,
+        options: Array.from(select.options, (option) => ({
+          index: option.index,
+          label: option.label,
+          value: option.value,
+          selected: option.selected,
+          disabled:
+            option.disabled ||
+            (option.parentElement?.tagName === 'OPTGROUP' &&
+              (option.parentElement as HTMLOptGroupElement).disabled),
+        })),
+      };
+    },
+    undefined,
+    { timeout },
+  );
+}
+
+export interface CurrentPageObservation {
+  tabId: number;
+  origin: string;
+  title: string;
+  bodyText: string;
+  ariaSnapshot: string;
+  truncated: boolean;
+}
 
 export interface PlaywrightCrxAdapterOptions {
   /** Origin allowlist from the active Skill's `allowedOrigins`. */
@@ -66,6 +119,8 @@ export interface PlaywrightCrxAdapterOptions {
 export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   private app: CrxApplication | null = null;
   private page: Page | null = null;
+  private selectedAttachedListener: ((data: { page: Page; tabId: number }) => void) | null = null;
+  private selectedDisposeRequested = false;
   /**
    * Chrome tab id of the page this adapter is driving. Populated from
    * `CrxApplication.on('attached', {page, tabId})` during ensureApp(),
@@ -85,7 +140,122 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     };
   }
 
+  async attachExistingTab(): Promise<DriverResult> {
+    const requestedTabId = this.opts.attachToTabId;
+    if (
+      typeof requestedTabId !== 'number' ||
+      !Number.isInteger(requestedTabId) ||
+      requestedTabId < 0
+    ) {
+      return driverError(
+        DRIVER_ERRORS.NOT_ATTACHED,
+        'attachExistingTab requires a valid constructor attachToTabId',
+      );
+    }
+    if (this.selectedDisposeRequested) {
+      return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'selected-tab adapter is disposing');
+    }
+
+    const existingPage = this.getLivePage();
+    try {
+      const page = existingPage ?? (await this.ensurePage());
+      const currentUrl = page.url();
+      if (!isOriginAllowed(currentUrl, this.opts.allowedOrigins)) {
+        if (!existingPage) {
+          try {
+            await this.detachExplicitPage(page);
+          } catch {
+            // Preserve the origin-denied result. dispose() can retry the detach.
+          }
+        }
+        return driverError(
+          DRIVER_ERRORS.ORIGIN_BLOCKED,
+          `current origin ${httpUrlOrigin(currentUrl) ?? '<invalid>'} not in Skill allowedOrigins: [${this.opts.allowedOrigins.join(', ')}]`,
+        );
+      }
+      return { status: 'ok', data: { tabId: requestedTabId } };
+    } catch (err) {
+      if (!existingPage && this.page) {
+        try {
+          await this.detachExplicitPage(this.page);
+        } catch {
+          // The attach/read failure remains the primary error; dispose() can retry.
+        }
+      }
+      return driverError(
+        DRIVER_ERRORS.NOT_ATTACHED,
+        `failed to attach tab ${requestedTabId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  async observeCurrentPage(): Promise<DriverResult> {
+    if (this.selectedDisposeRequested) {
+      return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'selected-tab adapter is disposing');
+    }
+    const page = this.getLivePage();
+    if (!page || this.tabId === null) {
+      return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'observeCurrentPage requires an attached tab');
+    }
+
+    try {
+      const currentUrl = page.url();
+      if (!isOriginAllowed(currentUrl, this.opts.allowedOrigins)) {
+        return driverError(
+          DRIVER_ERRORS.ORIGIN_BLOCKED,
+          `current origin ${httpUrlOrigin(currentUrl) ?? '<invalid>'} not in Skill allowedOrigins: [${this.opts.allowedOrigins.join(', ')}]`,
+        );
+      }
+      const origin = httpUrlOrigin(currentUrl);
+      if (!origin) {
+        return driverError(
+          DRIVER_ERRORS.EXTRACT_FAILED,
+          'current page URL is not HTTP(S) observation metadata',
+        );
+      }
+
+      const body = page.locator('body');
+      const [title, bodyText, ariaSnapshot] = await Promise.all([
+        page.title(),
+        body.innerText({ timeout: OBSERVATION_TIMEOUT_MS }),
+        body.ariaSnapshot({ timeout: OBSERVATION_TIMEOUT_MS }),
+      ]);
+      if (page.isClosed()) {
+        this.page = null;
+        this.tabId = null;
+        return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'selected tab closed during observation');
+      }
+      if (page.url() !== currentUrl) {
+        return driverError(
+          DRIVER_ERRORS.EXTRACT_FAILED,
+          'selected tab URL changed during observation',
+        );
+      }
+
+      const data: CurrentPageObservation = {
+        tabId: this.tabId,
+        origin,
+        title: title.slice(0, OBSERVATION_TITLE_CAP),
+        bodyText: bodyText.slice(0, OBSERVATION_BODY_TEXT_CAP),
+        ariaSnapshot: ariaSnapshot.slice(0, OBSERVATION_ARIA_SNAPSHOT_CAP),
+        truncated:
+          title.length > OBSERVATION_TITLE_CAP ||
+          bodyText.length > OBSERVATION_BODY_TEXT_CAP ||
+          ariaSnapshot.length > OBSERVATION_ARIA_SNAPSHOT_CAP,
+      };
+      return { status: 'ok', data };
+    } catch (err) {
+      return driverError(
+        DRIVER_ERRORS.EXTRACT_FAILED,
+        `failed to observe attached tab: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   async execute(action: DriverAction): Promise<DriverResult> {
+    if (this.opts.attachToTabId !== null && this.selectedDisposeRequested) {
+      return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'selected-tab adapter is disposing');
+    }
     try {
       // Pre-step origin guard for NON-goto actions. `goto` handles its
       // own validation inside doGoto (we need to check payload.url,
@@ -143,6 +313,23 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   }
 
   async dispose(): Promise<void> {
+    if (this.opts.attachToTabId !== null) {
+      this.selectedDisposeRequested = true;
+      const app = this.app;
+      const page = this.getLivePage();
+      this.removeSelectedAttachedListener(app);
+      if (app && page) {
+        // Clear the owned handles only after CRX confirms this exact page
+        // detached. If detach rejects, retain them for a later dispose retry
+        // while selectedDisposeRequested keeps all browser operations closed.
+        await app.detach(page);
+      }
+      this.app = null;
+      this.page = null;
+      this.tabId = null;
+      return;
+    }
+
     try {
       await this.app?.close();
     } finally {
@@ -184,8 +371,8 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     if (!page) return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'wait before any goto');
 
     if (action.selector) {
-      const locator = await this.resolveLocator(page, action);
-      if (!locator) {
+      const resolved = await this.resolveLocator(page, action);
+      if ('failures' in resolved) {
         return driverError(
           DRIVER_ERRORS.WAIT_TIMEOUT,
           `wait: no strategy matched (${action.selector.description})`,
@@ -263,6 +450,57 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
       return this.buildSelectorNotFoundResult(page, action, 'type', resolved.failures);
     }
     try {
+      const timeout = action.deadlineMs ?? 5_000;
+      const select = await readNativeSelectState(resolved.locator, timeout);
+      if (select) {
+        if (select.disabled || select.multiple) {
+          return driverError(
+            DRIVER_ERRORS.TYPE_FAILED,
+            'Native select must be enabled and single-choice',
+          );
+        }
+        // Use exact visible label or exact value, never a substring/first match.
+        const matches = select.options.filter(
+          (option) => option.label === text || option.value === text,
+        );
+        const option = matches.length === 1 ? matches[0] : undefined;
+        if (!option || option.disabled) {
+          return driverError(
+            DRIVER_ERRORS.TYPE_FAILED,
+            'Native select requires one enabled exact label or value match',
+          );
+        }
+        // Pin the identity as well as the index in case options change after observation.
+        await resolved.locator.selectOption(
+          { index: option.index, label: option.label, value: option.value },
+          { timeout },
+        );
+        const after = await readNativeSelectState(resolved.locator, timeout);
+        const selected = after?.options.filter((item) => item.selected);
+        if (
+          !after ||
+          after.disabled ||
+          after.multiple ||
+          selected?.length !== 1 ||
+          selected[0]?.value !== option.value ||
+          selected[0]?.label !== option.label ||
+          selected[0]?.disabled
+        ) {
+          return driverError(
+            DRIVER_ERRORS.TYPE_FAILED,
+            'Native select value did not match after selection',
+          );
+        }
+        return {
+          status: 'ok',
+          data: {
+            control: 'select',
+            selectedValue: selected[0].value,
+            selectedLabel: selected[0].label,
+            verified: true,
+          },
+        };
+      }
       // `fill` works for <input>/<textarea>. For contenteditable (Douyin
       // reply editor) fill fails → we fall back to focus+type. The Skill's
       // SKILL.md caveat marks those step kinds explicitly.
@@ -516,16 +754,21 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
 
   private async ensureApp(): Promise<CrxApplication> {
     if (this.app) return this.app;
-    this.app = await crx.start();
+    // A selected adapter deliberately leaves the shared CRX application
+    // alive after detaching its page. Both adapter modes must therefore
+    // reuse that singleton before attempting start(), which rejects when
+    // an application already exists.
+    this.app = (await crx.get()) ?? (await crx.start());
     // `attached` fires on both app.newPage() and app.attach() paths per
     // playwright-crx types.d.ts, and carries the chrome tabId — the
     // one identifier our fallback screenshot paths need.
-    (this.app as unknown as { on: (ev: string, cb: (d: { tabId: number }) => void) => void }).on(
-      'attached',
-      ({ tabId }) => {
+    const attachedListener = ({ tabId }: { page: Page; tabId: number }) => {
+      if (this.opts.attachToTabId === null || tabId === this.opts.attachToTabId) {
         this.tabId = tabId;
-      },
-    );
+      }
+    };
+    this.app.on('attached', attachedListener);
+    if (this.opts.attachToTabId !== null) this.selectedAttachedListener = attachedListener;
     return this.app;
   }
 
@@ -559,6 +802,21 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
       return null;
     }
     return this.page;
+  }
+
+  private async detachExplicitPage(page: Page): Promise<void> {
+    if (!this.app) return;
+    await this.app.detach(page);
+    if (this.page === page) {
+      this.page = null;
+      this.tabId = null;
+    }
+  }
+
+  private removeSelectedAttachedListener(app: CrxApplication | null): void {
+    if (!app || !this.selectedAttachedListener) return;
+    app.off('attached', this.selectedAttachedListener);
+    this.selectedAttachedListener = null;
   }
 
   private async resolveLocator(page: Page, action: DriverAction): Promise<ResolveLocatorResult> {
@@ -664,6 +922,16 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
       data,
       error: { code: DRIVER_ERRORS.SELECTOR_NOT_FOUND, message },
     };
+  }
+}
+
+function httpUrlOrigin(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.origin;
+  } catch {
+    return null;
   }
 }
 
@@ -830,19 +1098,21 @@ async function captureViaRawCdp(tabId: number | null): Promise<ScreenshotResult>
         quality: 40,
         captureBeyondViewport: false,
       }) as Promise<unknown>
-    ).then((r: unknown): ScreenshotResult => {
-      const data = (r as { data?: unknown })?.data;
-      if (typeof data !== 'string' || data.length === 0) {
-        return {
-          base64: null,
-          error: `Page.captureScreenshot returned non-string data (${typeof data})`,
-        };
-      }
-      return { base64: data, error: null };
-    }).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      return { base64: null, error: message.slice(0, 500) };
-    });
+    )
+      .then((r: unknown): ScreenshotResult => {
+        const data = (r as { data?: unknown })?.data;
+        if (typeof data !== 'string' || data.length === 0) {
+          return {
+            base64: null,
+            error: `Page.captureScreenshot returned non-string data (${typeof data})`,
+          };
+        }
+        return { base64: data, error: null };
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        return { base64: null, error: message.slice(0, 500) };
+      });
     const hardCap = new Promise<ScreenshotResult>((resolve) => {
       hardTimer = setTimeout(
         () =>

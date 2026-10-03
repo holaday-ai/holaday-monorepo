@@ -1,7 +1,281 @@
-import { describe, expect, it, vi } from 'vitest';
 import { pino } from 'pino';
 import type { CDPSession } from 'playwright';
+import { describe, expect, it, vi } from 'vitest';
+import { BrowserControl } from '../agent/supercar/browser-control.js';
 import { CdpInputHandler } from './cdp-input.js';
+import { DeferredScreencastInputBridge } from './screencast-input-bridge.js';
+
+describe('CdpInputHandler owned cancellation', () => {
+  it('quarantines a rejected owned dispatch without waiting for a timeout', async () => {
+    const quarantine = vi.fn();
+    const session = {
+      send: vi.fn().mockRejectedValue(new Error('connection lost')),
+      detach: vi.fn().mockResolvedValue(undefined),
+    } as unknown as CDPSession;
+    const handler = new CdpInputHandler(
+      () => session,
+      pino({ level: 'silent' }),
+      undefined,
+      quarantine,
+    );
+    await expect(
+      handler.handle({ type: 'insertText', text: 'x' }, new AbortController().signal),
+    ).rejects.toThrow('browser_input_outcome_unknown');
+    expect(quarantine).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases held keys and mouse buttons before AI can observe the handed-back page', async () => {
+    const effects: string[] = [];
+    const session = {
+      send: async (_method: string, params: { type?: string }) => {
+        effects.push(params.type ?? 'other');
+      },
+      detach: async () => undefined,
+    } as unknown as CDPSession;
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const control = new BrowserControl();
+    control.requestHuman();
+    const parked = control.checkpoint(async () => {
+      effects.push('observe');
+    });
+    control.beforeHandback((signal) => handler.releasePressed(signal));
+    const lease = control.snapshot().lease ?? '';
+    await control.runHuman(lease, (signal) =>
+      handler.handle({ type: 'keyDown', key: 'a', code: 'KeyA' }, signal),
+    );
+    await control.runHuman(lease, (signal) =>
+      handler.handle({ type: 'mouseDown', x: 20, y: 30 }, signal),
+    );
+    control.returnToAgent(lease);
+    await parked;
+    expect(effects).toEqual(['keyDown', 'mousePressed', 'keyUp', 'mouseReleased', 'observe']);
+  });
+  it('revokes the lease at timeout even when the transport cannot confirm detach', async () => {
+    vi.useFakeTimers();
+    const control = new BrowserControl();
+    let rejectSend!: (error: Error) => void;
+    const pending = new Promise<void>((_, reject) => {
+      rejectSend = reject;
+    });
+    const session = {
+      send: () => pending,
+      detach: async () => {
+        throw new Error('transport lost');
+      },
+    } as unknown as CDPSession;
+    const handler = new CdpInputHandler(
+      () => session,
+      pino({ level: 'silent' }),
+      undefined,
+      () => control.close('input_outcome_unknown'),
+    );
+    control.requestHuman();
+    let observed = false;
+    const parked = control.checkpoint(async () => {
+      observed = true;
+    });
+    const token = control.snapshot().lease ?? '';
+    const input = control.runHuman(token, (signal) =>
+      handler.handle({ type: 'insertText', text: 'x' }, signal),
+    );
+    let settled = false;
+    const result = input.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    try {
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(control.snapshot()).toMatchObject({
+        phase: 'closed',
+        lease: null,
+        error: 'input_outcome_unknown',
+      });
+      expect(settled).toBe(false);
+      expect(observed).toBe(false);
+      await expect(control.runHuman(token, async () => undefined)).rejects.toThrow(
+        'browser_control_not_owned',
+      );
+    } finally {
+      control.close();
+      rejectSend(new Error('test transport closed'));
+      await result;
+      await parked;
+      vi.useRealTimers();
+    }
+  });
+
+  it('interrupts a hung owned input after its deadline without reporting success', async () => {
+    vi.useFakeTimers();
+    const effects: string[] = [];
+    let rejectSend!: (error: Error) => void;
+    const pending = new Promise<void>((_, reject) => {
+      rejectSend = reject;
+    });
+    const session = {
+      send: () => {
+        effects.push('dispatch');
+        return pending;
+      },
+      detach: async () => {
+        effects.push('detach');
+        rejectSend(new Error('session closed'));
+      },
+    } as unknown as CDPSession;
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const result = handler
+      .handle({ type: 'insertText', text: 'x' }, new AbortController().signal)
+      .then(
+        () => 'success',
+        (err: Error) => err.message,
+      );
+    try {
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(effects).toEqual(['dispatch', 'detach']);
+      expect(await result).toBe('browser_input_outcome_unknown');
+    } finally {
+      rejectSend(new Error('test cleanup'));
+      await result;
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not dispatch an already cancelled input', async () => {
+    const effects: string[] = [];
+    const session = {
+      send: async () => {
+        effects.push('input');
+      },
+    } as unknown as CDPSession;
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const abort = new AbortController();
+    abort.abort();
+    await expect(handler.handle({ type: 'insertText', text: 'x' }, abort.signal)).rejects.toThrow();
+    expect(effects).toEqual([]);
+  });
+
+  it('interrupts the actual pending CDP call and reports unknown outcome instead of success', async () => {
+    const effects: string[] = [];
+    let rejectSend!: (error: Error) => void;
+    const pending = new Promise<void>((_, reject) => {
+      rejectSend = reject;
+    });
+    const session = {
+      send: () => {
+        effects.push('dispatch');
+        return pending;
+      },
+      detach: async () => {
+        effects.push('detached');
+        rejectSend(new Error('session closed'));
+      },
+    } as unknown as CDPSession;
+    const handler = new CdpInputHandler(
+      () => session,
+      pino({ level: 'silent' }),
+      () => effects.push('success'),
+    );
+    const control = new BrowserControl();
+    const bridge = new DeferredScreencastInputBridge({
+      runOwnedInput: (lease, action) => control.runHuman(lease ?? '', action),
+    });
+    await bridge.attach(handler);
+    control.requestHuman();
+    const parked = control.checkpoint(async () => {
+      effects.push('observe');
+    });
+    const input = bridge.receive(
+      JSON.stringify({
+        type: 'input',
+        controlLease: control.snapshot().lease,
+        payload: { type: 'insertText', text: 'x' },
+      }),
+    );
+    const rejected = input.then(
+      () => 'success',
+      (error: Error) => error.message,
+    );
+    await vi.waitFor(() => expect(effects).toContain('dispatch'));
+    control.close();
+    try {
+      await vi.waitFor(() => expect(effects).toContain('detached'));
+      expect(await rejected).toBe('browser_input_outcome_unknown');
+      expect(await parked).toMatchObject({ resumed: false });
+      expect(effects).toEqual(['dispatch', 'detached']);
+      expect(control.snapshot().error).toBe('input_outcome_unknown');
+    } finally {
+      rejectSend(new Error('test cleanup'));
+      await rejected;
+      await parked;
+    }
+  });
+
+  it('does not fake settlement when transport interruption fails', async () => {
+    const effects: string[] = [];
+    let rejectSend!: (error: Error) => void;
+    const pending = new Promise<void>((_, reject) => {
+      rejectSend = reject;
+    });
+    const session = {
+      send: () => {
+        effects.push('dispatch');
+        return pending;
+      },
+      detach: async () => {
+        effects.push('detach-failed');
+        throw new Error('transport lost');
+      },
+    } as unknown as CDPSession;
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const abort = new AbortController();
+    let settled = false;
+    const result = handler.handle({ type: 'insertText', text: 'x' }, abort.signal).then(
+      () => {
+        settled = true;
+        return 'success';
+      },
+      (err: Error) => {
+        settled = true;
+        return err.message;
+      },
+    );
+    abort.abort();
+    try {
+      await vi.waitFor(() => expect(effects).toContain('detach-failed'));
+      expect(settled).toBe(false);
+    } finally {
+      rejectSend(new Error('transport eventually closed'));
+    }
+    expect(await result).toBe('browser_input_outcome_unknown');
+    await expect(
+      handler.handle({ type: 'insertText', text: 'retry' }, new AbortController().signal),
+    ).rejects.toThrow();
+    expect(effects).toEqual(['dispatch', 'detach-failed']);
+  });
+
+  it('does not send the rest of a multi-command key event after cancellation', async () => {
+    const effects: string[] = [];
+    const abort = new AbortController();
+    const session = {
+      send: async (_method: string, params: { type: string; key: string }) => {
+        effects.push(`${params.type}:${params.key}`);
+        if (params.type === 'keyUp') abort.abort();
+      },
+      detach: async () => {
+        effects.push('detach');
+      },
+    } as unknown as CDPSession;
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    await handler.handle({ type: 'keyDown', key: 'Meta', metaKey: true });
+    await expect(handler.handle({ type: 'keyDown', key: 'x' }, abort.signal)).rejects.toThrow(
+      'browser_input_outcome_unknown',
+    );
+    expect(effects).toEqual(['keyDown:Meta', 'keyUp:Meta', 'detach']);
+  });
+});
 
 function handlerWithSend() {
   const send = vi.fn().mockResolvedValue(undefined);

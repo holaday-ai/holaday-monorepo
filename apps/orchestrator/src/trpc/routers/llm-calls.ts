@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, gte, lt, sum } from 'drizzle-orm';
+import { and, count, desc, eq, gte, lt, sql, sum } from 'drizzle-orm';
 import { z } from 'zod';
+import { costCoverageSelection, summarizeCost } from '../../agent/llm-cost-summary.js';
 import { llmCalls } from '../../db/schema/llm-calls.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
@@ -73,6 +74,10 @@ export const llmCallsRouter = router({
         cacheReadTokens: llmCalls.cacheReadTokens,
         cacheWriteTokens: llmCalls.cacheWriteTokens,
         costUsd: llmCalls.costUsd,
+        costStatus: llmCalls.costStatus,
+        usageStatus: llmCalls.usageStatus,
+        region: llmCalls.region,
+        providerRequestId: llmCalls.providerRequestId,
         latencyMs: llmCalls.latencyMs,
         status: llmCalls.status,
         errorMessage: llmCalls.errorMessage,
@@ -87,7 +92,7 @@ export const llmCallsRouter = router({
     const rows = rowsRaw.map((r) => ({
       ...r,
       // MySQL DECIMAL comes back as string; normalize to number for clients.
-      costUsd: Number(r.costUsd),
+      costUsd: r.costUsd === null ? null : Number(r.costUsd),
     }));
 
     // Totals are across the full filter (not paged), so the UI can show
@@ -100,6 +105,11 @@ export const llmCallsRouter = router({
         totalCacheReadTokens: sum(llmCalls.cacheReadTokens),
         totalCacheWriteTokens: sum(llmCalls.cacheWriteTokens),
         totalCostUsd: sum(llmCalls.costUsd),
+        ...costCoverageSelection(),
+        unknownInputCalls: sql<number>`COUNT(*) - COUNT(${llmCalls.promptTokens})`,
+        unknownOutputCalls: sql<number>`COUNT(*) - COUNT(${llmCalls.completionTokens})`,
+        unknownCacheReadCalls: sql<number>`COUNT(*) - COUNT(${llmCalls.cacheReadTokens})`,
+        unknownCacheWriteCalls: sql<number>`COUNT(*) - COUNT(${llmCalls.cacheWriteTokens})`,
       })
       .from(llmCalls)
       .where(and(...baseConditions));
@@ -110,11 +120,22 @@ export const llmCallsRouter = router({
       rows,
       totals: {
         totalCalls: totalsRow?.totalCalls ?? 0,
-        totalInputTokens: toNum(totalsRow?.totalInputTokens),
-        totalOutputTokens: toNum(totalsRow?.totalOutputTokens),
-        totalCacheReadTokens: toNum(totalsRow?.totalCacheReadTokens),
-        totalCacheWriteTokens: toNum(totalsRow?.totalCacheWriteTokens),
-        totalCostUsd: toNum(totalsRow?.totalCostUsd),
+        totalInputTokens:
+          Number(totalsRow?.unknownInputCalls ?? 0) > 0 ? null : toNum(totalsRow?.totalInputTokens),
+        totalOutputTokens:
+          Number(totalsRow?.unknownOutputCalls ?? 0) > 0
+            ? null
+            : toNum(totalsRow?.totalOutputTokens),
+        totalCacheReadTokens:
+          Number(totalsRow?.unknownCacheReadCalls ?? 0) > 0
+            ? null
+            : toNum(totalsRow?.totalCacheReadTokens),
+        totalCacheWriteTokens:
+          Number(totalsRow?.unknownCacheWriteCalls ?? 0) > 0
+            ? null
+            : toNum(totalsRow?.totalCacheWriteTokens),
+        incompleteUsageCalls: Number(totalsRow?.incompleteUsageCalls ?? 0),
+        ...summarizeCost(totalsRow?.totalCostUsd, totalsRow?.unknownCostCalls),
       },
       nextCursor,
     };
@@ -135,5 +156,8 @@ function zeroTotals() {
     totalCacheReadTokens: 0,
     totalCacheWriteTokens: 0,
     totalCostUsd: 0,
+    knownCostUsd: 0,
+    unknownCostCalls: 0,
+    incompleteUsageCalls: 0,
   };
 }

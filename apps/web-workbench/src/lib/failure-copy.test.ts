@@ -7,6 +7,27 @@ import {
 } from './failure-copy';
 
 describe('classifyFriendlyFailure', () => {
+  const unsupportedZip = '任务未完成：当前文件生成工具不支持 ZIP 格式，升级套餐无法解决。请确认是否接受其他可用格式，或使用支持该格式的工具。';
+
+  it.each([unsupportedZip, 'FILE_FORMAT_UNSUPPORTED:zip'])('surfaces unsupported output formats instead of generic retry advice: %s', (reason) => {
+    const copy = classifyFriendlyFailure(reason);
+    expect(copy.title).toContain('ZIP');
+    expect(copy.subtitle).toContain('升级套餐无法解决');
+    expect(copy.nextStep).toContain('其他可用格式');
+    expect(failureResultCopyText(reason)).not.toMatch(/重试|重新执行|更具体/);
+    expect(terminalAllowsRerun('failed', reason)).toBe(false);
+  });
+
+  it('shows every unsupported requested format', () => {
+    expect(classifyFriendlyFailure('FILE_FORMAT_UNSUPPORTED:zip,psd').title).toContain('ZIP、PSD');
+  });
+
+  it('does not confuse unsupported output with a plan restriction or a source filename', () => {
+    expect(terminalAllowsRerun('failed', '当前套餐不支持 PDF，请升级套餐')).toBe(true);
+    expect(terminalAllowsRerun('failed', '读取 input.zip 时网络异常')).toBe(true);
+    expect(terminalAllowsRerun('cancelled', unsupportedZip)).toBe(true);
+  });
+
   it('separates system-stopped task failures from website failures', () => {
     expect(classifyFriendlyFailure('ORCHESTRATOR_RESTART')).toEqual({
       title: '服务重启中断了任务',

@@ -208,7 +208,7 @@ export function AppShell(): JSX.Element {
   const enterNewTaskMode = useTaskStore((s) => s.enterNewTaskMode);
   const composerMode = useTaskStore((s) => s.composerMode);
   const refreshTaskList = useTaskStore((s) => s.refreshTaskList);
-  const createTask = useTaskStore((s) => s.createTask);
+  const rerunTask = useTaskStore((s) => s.rerunTask);
   const deleteTask = useTaskStore((s) => s.deleteTask);
   const renameTask = useTaskStore((s) => s.renameTask);
   const moveTaskToProject = useTaskStore((s) => s.moveTaskToProject);
@@ -785,8 +785,8 @@ export function AppShell(): JSX.Element {
           if (taskIds.length === 0) return;
           setConfirmBulkDelete(taskIds);
         }}
-        onRetryTask={async (intent) => {
-          const res = await createTask(intent);
+        onRetryTask={async (taskId) => {
+          const res = await rerunTask(taskId);
           if (!mountedRef.current) return;
           if ('error' in res) {
             toast.show(taskActionError('重新执行失败', res.error), 'error');

@@ -22,7 +22,7 @@
  */
 
 import { getAccessToken } from '../shared/storage.js';
-import { ORCHESTRATOR_HTTP } from '../shared/config.js';
+import { LOCAL_CHROME_QA, ORCHESTRATOR_HTTP } from '../shared/config.js';
 import { withDeadline } from '../shared/deadline.js';
 import {
   fetchWithDeadline,
@@ -136,6 +136,7 @@ export function aggregateBrowsingHistoryItems(
  * the caller's catch path stays simple (sync is non-critical).
  */
 export async function collectBrowsingHistory(): Promise<BrowsingHostEntry[]> {
+  if (LOCAL_CHROME_QA) return [];
   const startTime = Date.now() - LOOKBACK_MS;
   let items: chrome.history.HistoryItem[] = [];
   try {
@@ -253,6 +254,7 @@ export async function readHistorySyncSummary(): Promise<HistorySyncSummary | nul
 export async function syncHistoryToServer(
   entries: readonly BrowsingHostEntry[],
 ): Promise<BrowsingSyncResponse | null> {
+  if (LOCAL_CHROME_QA) return null;
   const token = await getAccessToken();
   if (!token) return null;
   const res = await fetchWithDeadline(

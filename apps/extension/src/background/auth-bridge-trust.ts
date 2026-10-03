@@ -20,8 +20,11 @@
  *
  * Falsy / malformed URLs are untrusted.
  */
+import { isLocalQaWorkbenchUrl, LOCAL_CHROME_QA } from '../shared/config.js';
+
 export function isTrustedAuthBridgeSender(senderUrl: string | undefined): boolean {
   if (!senderUrl) return false;
+  if (LOCAL_CHROME_QA) return isLocalQaWorkbenchUrl(senderUrl);
   let parsed: URL;
   try {
     parsed = new URL(senderUrl);

@@ -1,4 +1,10 @@
 import { describe, expect, it } from 'vitest';
+
+it.each([Number.POSITIVE_INFINITY, Number.NaN, -1])('keeps invalid/unknown runner spend fail-closed (%s)', async (costUsd) => {
+  const explore = makeBrowseExploreSite({ runBrowseTask: async () => ({ status: 'completed', costUsd }) });
+  const result = await explore('example.com');
+  expect(Number.isFinite(result.costUsd)).toBe(false);
+});
 import {
   type BrowseAction,
   type BrowseRunResult,

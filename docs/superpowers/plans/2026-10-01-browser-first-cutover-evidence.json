@@ -1,0 +1,1080 @@
+{
+  "schemaVersion": 1,
+  "applicationCandidate": "b43dd03132658d9c13875f050e2c27e584b61e33",
+  "coordinator": "uncommitted dirty scripts separately hashed at finalhandoff",
+  "applicationCoverage": "2026-10-01-browser-first-cutover-application-coverage.json",
+  "releaseAcceptance": false,
+  "records": [
+    {
+      "id": "native",
+      "log": "/private/tmp/holaday-native-both-role-final.log",
+      "logSha256": "b148ffa2ea5372cd962c0a3ff18b1b42d8c41f70bb7e5c6bc154d83588eb90f2",
+      "exitCode": 0,
+      "scope": "real-isolated-two-role-native",
+      "passed": "default preflight, real browser+VNC recovery,8events, own about:blank target",
+      "validationEntry": "python3 scripts/run-browser-first-cutover-qa.py native --image sha256:9e621ebc26bb61a71c514889adfd297c8286db70f8d95d66460ce6c942f500f3 --timeout 600"
+    },
+    {
+      "id": "scripts",
+      "log": "/private/tmp/holaday-consolidated-final-unit-results.log",
+      "logSha256": "0b55ca7e5972a137d70b26b4ee157e6cbe2f145444930d6a34d15c29f9bad942",
+      "exitCode": 0,
+      "tests": 2013,
+      "pass": 1979,
+      "fail": 0,
+      "skip": 34,
+      "validationEntry": "node --test --test-concurrency=1 scripts/browser-maintenance-*.test.mjs scripts/browser-first-cutover-*.test.mjs scripts/browser-cutover-evidence.test.mjs scripts/deploy-browser-maintenance.test.mjs scripts/deploy-browser-first-cutover.test.mjs (explicit non-integration file set)"
+    },
+    {
+      "id": "age",
+      "log": "/private/tmp/holaday-consolidated-age-results.log",
+      "logSha256": "3a6f1b6373aad8eea8788583da4a45408c019bcad00d12539b61d6bb0766ab52",
+      "exitCode": 0,
+      "tests": 35,
+      "pass": 35,
+      "fail": 0,
+      "skip": 0,
+      "validationEntry": "CUTOVER_TEST_AGE_EXECUTABLE=/usr/bin/age node --test --test-concurrency=1 scripts/browser-first-cutover-age.test.mjs"
+    },
+    {
+      "id": "failure-tail",
+      "log": "/private/tmp/holaday-tail-contracts-stage-final.log",
+      "logSha256": "a1e8cc2246e15d4e4ce461165fbd3ec9d8188d75b4df0d28f12886b509e6efb0",
+      "exitCode": 0,
+      "tests": 315,
+      "pass": 315,
+      "fail": 0,
+      "skip": 0,
+      "validationEntry": "node --test --test-concurrency=1 browser-first-cutover-site.test.mjs browser-first-cutover-host.test.mjs browser-first-cutover-recovery-session.test.mjs browser-maintenance-journal.test.mjs browser-maintenance-release-tail.test.mjs",
+      "command": [
+        "docker",
+        "run",
+        "--name",
+        "holaday-tail-contracts-2b975606f235",
+        "--label",
+        "holaday.qa.owner=0ff902c29cf5401484f353070a9fdab5",
+        "--network",
+        "none",
+        "--cpus",
+        "1",
+        "--memory",
+        "512m",
+        "--pids-limit",
+        "256",
+        "-v",
+        "/private/tmp/holaday-failure-tail-stage/scripts:/source:ro",
+        "-v",
+        "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/ops:/ops:ro",
+        "-v",
+        "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/apps:/apps:ro",
+        "-e",
+        "NODE_OPTIONS=--max-old-space-size=192 --v8-pool-size=1",
+        "-e",
+        "UV_THREADPOOL_SIZE=1",
+        "-w",
+        "/source",
+        "sha256:36e1b69474228ea587f0930047a41a69dd6b660944c767bee67e21482bf92154",
+        "/opt/node22/bin/node",
+        "--test",
+        "--test-concurrency=1",
+        "browser-first-cutover-site.test.mjs",
+        "browser-first-cutover-host.test.mjs",
+        "browser-first-cutover-recovery-session.test.mjs",
+        "browser-maintenance-journal.test.mjs",
+        "browser-maintenance-release-tail.test.mjs"
+      ]
+    },
+    {
+      "id": "qa-diagnostics",
+      "log": "/private/tmp/holaday-qa-diagnostics-contract.log",
+      "logSha256": "74df629447144b4c62a4079484a3569d34b62bddc702edc034969bc8f19e709c",
+      "exitCode": 0,
+      "tests": 1,
+      "pass": 1,
+      "fail": 0,
+      "skip": 0,
+      "validationEntry": "node --test --test-concurrency=1 scripts/browser-first-cutover-qa-diagnostics.test.mjs"
+    },
+    {
+      "id": "source-current61",
+      "log": "/private/tmp/holaday-fresh-source-current61-root-owned-prepare.log",
+      "logSha256": "b4e8119b856f1e91760aff8676f0c5089384275d4c0a5cd107a5aaee27cf34e4",
+      "exitCode": 0,
+      "scope": "fresh-QA-source-current61",
+      "tables": 90,
+      "objects": 92,
+      "migrations": 61,
+      "validationEntry": "See exact command in receipt",
+      "command": [
+        "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+        "scripts/fixtures/prepare-browser-first-cutover-source-qa.mjs",
+        "075b216be6aea3f2940fc0e244c2d5017cbe7f3042651284087b9519b448211e",
+        "sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b",
+        "fe46aca9-bdd4-4c47-b716-a3b7f72efe90",
+        "/private/tmp/holaday-runtime-output/holaday-recovery-pack-CL9jEt",
+        "current-61"
+      ]
+    },
+    {
+      "id": "source-reader",
+      "log": "/private/tmp/holaday-source-snapshot-small-repro.log",
+      "logSha256": "a56258a70a03fc1c39376c42c115fbb1e621f503f20d266e88fadea9016c7d8f",
+      "exitCode": 0,
+      "scope": "actual-mysql2+original-reader-on-QA-current61-source",
+      "objects": 92,
+      "validationEntry": "python3 /private/tmp/holaday-source-snapshot-small-run.py",
+      "command": [
+        "python3",
+        "/private/tmp/holaday-source-snapshot-small-run.py"
+      ],
+      "commandFilesSha256": {
+        "/private/tmp/holaday-source-snapshot-small-run.py": "e95fa075b9d2e46379e25babcc348ce1b120283bee1c16c07b99208a1b56ffe1",
+        "/private/tmp/holaday-source-snapshot-small-repro.mjs": "8639db682bae822ae6dabdbd453a13f7e8b2918b95bd0cb8bc1eebe16ff7fc73"
+      },
+      "readerSha256": "dcc4834908f2ef8fb71d78adc1731d07409386b8d183392e8000985b27647360"
+    },
+    {
+      "id": "cn-payment",
+      "log": "/private/tmp/holaday-cn-payment-test.log",
+      "logSha256": "1d68b5b6cc24f8163a16e68e198188f7dcbfaca3fe9311f8a4b88a75813d8a13",
+      "exitCode": 0,
+      "files": 8,
+      "pass": 103,
+      "validationEntry": "pnpm --filter @holaday/cn-payment test (single-worker QA execution)"
+    },
+    {
+      "id": "cn-payment-types",
+      "log": "/private/tmp/holaday-cn-payment-typecheck.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exitCode": 0,
+      "validationEntry": "pnpm --filter @holaday/cn-payment typecheck"
+    },
+    {
+      "id": "orchestrator-build",
+      "log": "/private/tmp/holaday-orchestrator-build-budget-2g.log",
+      "logSha256": "9fb3ccaa8f9038091ea45e56326bb35a1d11c95788640800197d1907585e4b25",
+      "exitCode": 0,
+      "cpu": 1,
+      "hardMiB": 2048,
+      "heapMiB": 1536,
+      "timeoutSeconds": 180,
+      "validationEntry": "pnpm --filter @holaday/orchestrator build"
+    },
+    {
+      "id": "orchestrator-types",
+      "log": "/private/tmp/holaday-orchestrator-typecheck-budget-3g.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exitCode": 0,
+      "cpu": 1,
+      "hardMiB": 3072,
+      "heapMiB": 2304,
+      "timeoutSeconds": 180,
+      "validationEntry": "pnpm exec tsc --noEmit (cwd apps/orchestrator, entire original configuration)"
+    },
+    {
+      "id": "ordinary-maintenance",
+      "log": "/private/tmp/holaday-ordinary-maintenance-integration.log",
+      "logSha256": "26659439ed3c7a0e0eaf1659e7db502fb9b7115f2b4fe09d5214fb24b26763ca",
+      "exitCode": 0,
+      "files": 1,
+      "pass": 7,
+      "validationEntry": "vitest run --config vitest.integration.config.ts --maxWorkers=1 --minWorkers=1 --fileParallelism=false src/execution/ordinary-maintenance.integration.test.ts"
+    },
+    {
+      "id": "mysql",
+      "log": "/private/tmp/holaday-task6-mysql-integration.log",
+      "logSha256": "587401d35e049048b4a24b8834af472b7777b817264eaf7983eca7789db7b6cb",
+      "exitCode": 0,
+      "files": [
+        "src/execution/ordinary-maintenance-readiness.mysql.integration.test.ts",
+        "src/execution/ordinary-first-cutover.mysql.integration.test.ts"
+      ],
+      "pass": 3,
+      "validationEntry": "node node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts --maxWorkers=1 --minWorkers=1 --fileParallelism=false src/execution/ordinary-maintenance-readiness.mysql.integration.test.ts src/execution/ordinary-first-cutover.mysql.integration.test.ts",
+      "receipt": "/private/tmp/holaday-task6-mysql-integration.json"
+    },
+    {
+      "id": "non-paypal-ops",
+      "log": "/private/tmp/holaday-non-paypal-ops.log",
+      "logSha256": "1744262b3bfb2c5db9e7d616f628589957ae395dad269815ca9d825b37000ba7",
+      "exitCode": 1,
+      "note": "prior stages passed; last migration-gate stopped at absent ssh-keygen; wholeexit1 retained",
+      "validationEntry": "explicit non-PayPal root test:ops stages; root test:ops not run"
+    },
+    {
+      "id": "migration-gate",
+      "log": "/private/tmp/holaday-non-paypal-migration-gate.log",
+      "logSha256": "97b13ff1b14dc5909e69cdf22e3fc0980e52a68ece0d352408bb749a3bee7cf8",
+      "exitCode": 1,
+      "pythonPass": 12,
+      "nodeTests": 1357,
+      "nodePass": 1340,
+      "nodeFail": 17,
+      "note": "17 query-fixture environment failures; standalone explicitnonPayPal16 supplement below,PayPal1 deferred; no single wholeexit0 claim",
+      "validationEntry": "bash scripts/deploy-migration-gate.test.sh"
+    },
+    {
+      "id": "new-module-contracts",
+      "receipt": "/private/tmp/holaday-final-new-module-contracts.json",
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-gfs8ahrc/run.log",
+      "logSha256": "eeae22b758a73c1069e30e663f68a911eea3777ee4b58fbf3c2ed98c40f8d98b",
+      "exitCode": 0,
+      "passCount": 31,
+      "image": "sha256:36e1b69474228ea587f0930047a41a69dd6b660944c767bee67e21482bf92154",
+      "scope": "contract/actualSDK+synthetic signedbackend; no externalprovider",
+      "validationEntry": "python3 scripts/run-browser-first-cutover-qa.py unit --test-file browser-first-cutover-production-facts.test.mjs --test-file browser-first-cutover-browser-probe.test.mjs --test-file browser-first-cutover-native-preflight.test.mjs"
+    },
+    {
+      "id": "non-paypal-query-supplement",
+      "receipt": "/private/tmp/holaday-non-paypal-migration-payments-whitelist.json",
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-ww319f3n/run.log",
+      "logSha256": "d852294f11780c7750e98eeef159c5326fc6441c6aedef43f5385219f35c002d",
+      "exitCode": 0,
+      "passCount": 16,
+      "image": "sha256:36e1b69474228ea587f0930047a41a69dd6b660944c767bee67e21482bf92154",
+      "scope": "contract/actualSDK+synthetic signedbackend; no externalprovider",
+      "validationEntry": "runner unit --test-file browser-first-cutover-payments.test.mjs --query-bundle <fixed originalSDK bundle> --test-name-pattern <16 audited positive nonPayPal names>",
+      "selectedNames": [
+        "fixed payment site uses real signed query and exclusively retains private evidence",
+        "payment site duplicate refuses before any provider request",
+        "payment site order-change refuses before any provider request",
+        "payment site credential-drift refuses before any provider request",
+        "payment site stale refuses before any provider request",
+        "payment site deadline refuses before any provider request",
+        "payment site phase refuses before any provider request",
+        "payment site ownership refuses before any provider request",
+        "payment site bundle refuses before any provider request",
+        "payment site merchant refuses before any provider request",
+        "payment site oversize-bundle refuses before any provider request",
+        "payment site oversize-config refuses before any provider request",
+        "WeChat uses reviewed original certificate files and verifies signed closed responses",
+        "uncertain query retains evidence but is never retried or reported as ready",
+        "real signed postopen query retains original deadline at 150000",
+        "real signed postopen query retains original deadline at 210000"
+      ],
+      "deferredNames": [
+        "PayPal parameterized case"
+      ],
+      "sdkBundleSha256": "1a16affac7f6a8a5faac9774ee9c91ced3af063ab4a5a19adc83b54586c18abb"
+    },
+    {
+      "id": "browser-maintenance-signal.test.py",
+      "log": "/private/tmp/holaday-final-browser-maintenance-signal.test.py.log",
+      "logSha256": "e6ec182765cd965f2837d8eeaef5a64af48a104f245cd1a0b7281559194c57c1",
+      "exitCode": 0,
+      "image": "sha256:004b7838c0c6b055c41181e306d361ec42f7429e00ab9259e75f5ee033b7fc7c",
+      "scope": "signal/filecontracts; channelwrongmount failure separately corrected",
+      "validationEntry": "python3 scripts/browser-maintenance-signal.test.py"
+    },
+    {
+      "id": "browser-first-cutover-signal.test.py",
+      "log": "/private/tmp/holaday-final-browser-first-cutover-signal.test.py.log",
+      "logSha256": "698d16d7b93c4bd9707d3cfacda6fb1e0fea99ed0cda6e69bedc42772940540a",
+      "exitCode": 0,
+      "image": "sha256:004b7838c0c6b055c41181e306d361ec42f7429e00ab9259e75f5ee033b7fc7c",
+      "scope": "signal/filecontracts; channelwrongmount failure separately corrected",
+      "validationEntry": "python3 scripts/browser-first-cutover-signal.test.py"
+    },
+    {
+      "id": "browser-cutover-channel.test.py",
+      "log": "/private/tmp/holaday-final-browser-cutover-channel.test.py.log",
+      "logSha256": "dbfc7d23c04e0bc0cec76861ac5c85ae3f3b221d55539d23ed70f6ddbec6b0b8",
+      "exitCode": 1,
+      "image": "sha256:004b7838c0c6b055c41181e306d361ec42f7429e00ab9259e75f5ee033b7fc7c",
+      "scope": "signal/filecontracts; channelwrongmount failure separately corrected",
+      "validationEntry": "python3 scripts/browser-cutover-channel.test.py"
+    },
+    {
+      "id": "channel-corrected-layout",
+      "log": "/private/tmp/holaday-final-layout-fixed-browser-cutover-channel.test.py.log",
+      "logSha256": "cdbfa131bcea388381d783713677acb1540463705844051d5979a9dc7f0c1c3d",
+      "exitCode": 0,
+      "passCount": 12,
+      "validationEntry": "python3 scripts/browser-cutover-channel.test.py (fixed owned SSH QA image, /source + /ops read-only mounts)",
+      "receipt": "/private/tmp/holaday-final-channel-layout-fixed.json"
+    },
+    {
+      "id": "real90-protocol",
+      "exitCode": 0,
+      "log": "/private/tmp/holaday-real90-backup-recovery-protocol.log",
+      "logSha256": "a43b8dafe25861f6186f66cfa36f8049cae0b86daf1eb826b6538921dc934c00",
+      "scope": "actualdump/age/restore/full90comparison/61SQL/sourceunchanged/sealedreceipt; physicalstopfacts synthetic",
+      "receipt": "/private/tmp/holaday-real90-backup-recovery-protocol.json"
+    },
+    {
+      "id": "real90-wire-contracts",
+      "exitCode": 0,
+      "log": "/private/tmp/holaday-real90-recovery-wire-contracts.log",
+      "logSha256": "19cc78a530cf4b76d02dab4d7c6c6676b66869287758601ddee07b6082d4ba00",
+      "tests": 16,
+      "pass": 16,
+      "fail": 0,
+      "skip": 0,
+      "command": [
+        "node22.23.2",
+        "--test",
+        "--test-concurrency=1",
+        "scripts/browser-first-cutover-recovery-session.test.mjs"
+      ]
+    },
+    {
+      "id": "full-host-tool-preflight",
+      "exitCode": 0,
+      "log": "/private/tmp/holaday-full-host-tools-preflight.log",
+      "logSha256": "74ecb5914af0556425a8548c59a078fc09242e21c01cb14c9bb2af9fd49cf6ca",
+      "scope": "read-onlymetadata/executable17tools;no daemon/network;CPU1/128MiB",
+      "receipt": "/private/tmp/holaday-full-host-tools-preflight.json"
+    },
+    {
+      "id": "real90-source-material",
+      "exitCode": 0,
+      "log": "/private/tmp/holaday-real90-protocol-source-prepare.log",
+      "logSha256": "5038b27194731f5b8d44ffa8eca0a2b65dcaac6fc4c2414a1fca879a852a7e88",
+      "scope": "fresh current61 baseline;50365byte snapshot frame/20137byte verifytoolrequest",
+      "receipt": "/private/tmp/holaday-real90-protocol-prepare.json"
+    },
+    {
+      "id": "empty-target-material",
+      "exitCode": 0,
+      "log": "/private/tmp/holaday-real90-protocol-target-prepare.log",
+      "logSha256": "8e89c7ccc76e74d69d0c39d19c1886e7efd5fecb6a6cc588083c4976d83fa52e",
+      "scope": "fresh empty target;allruntime files actualSHA/root/mode/link;no restore",
+      "receipt": "/private/tmp/holaday-real90-protocol-prepare.json"
+    },
+    {
+      "id": "full-host-success-fixed-cause-768",
+      "receipt": "/private/tmp/holaday-full-success-fixed-cause-768.json",
+      "command": "python3 scripts/run-browser-first-cutover-qa.py connected --connected-config /private/tmp/holaday-full-success-config.json --image sha256:36e1b69474228ea587f0930047a41a69dd6b660944c767bee67e21482bf92154 --timeout 900 --compile-budget",
+      "exitCode": 0,
+      "elapsedFinalSampleSeconds": 672.86,
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-_me6h07b/run.log",
+      "logSha256": "b1b741d058c039eed9cb336d485825461bde6c1552fb2c708bcc7c43f2f20dfc",
+      "scope": "actual host/retirement/backup/recovery protocol/61SQL/candidate boot/open/nginx/startup and actual QA DB identity reconciliation, with synthetic QA business facts",
+      "releaseAcceptance": false,
+      "previousFenceRefusalRootCause": "not established; not reproduced in this fresh attempt",
+      "maxSampledRssKiB": 1630228,
+      "maxSwapDeltaMiB": 0.0,
+      "hostImage": "sha256:36e1b69474228ea587f0930047a41a69dd6b660944c767bee67e21482bf92154",
+      "dbImage": "sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b",
+      "ownedStopReceipt": "/private/tmp/holaday-full-success-fixed-cause-768-stopped.json"
+    },
+    {
+      "command": [
+        "docker",
+        "run",
+        "--name",
+        "holaday-original-entry-549b81eebc4b476ab22ad6f77a19952c",
+        "--label",
+        "holaday.qa.runner=549b81eebc4b476ab22ad6f77a19952c",
+        "--network",
+        "none",
+        "--ipc",
+        "private",
+        "--cpus",
+        "1",
+        "--memory",
+        "512m",
+        "--pids-limit",
+        "256",
+        "--cap-add",
+        "SYS_PTRACE",
+        "--cap-add",
+        "NET_ADMIN",
+        "-e",
+        "NODE_OPTIONS=--max-old-space-size=192 --v8-pool-size=1",
+        "-e",
+        "UV_THREADPOOL_SIZE=1",
+        "-e",
+        "CUTOVER_QA_LOST_EFFECT_CASE=unknown",
+        "-v",
+        "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/scripts:/source:ro",
+        "-v",
+        "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/ops:/ops:ro",
+        "-v",
+        "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/apps:/apps:ro",
+        "-w",
+        "/",
+        "sha256:36e1b69474228ea587f0930047a41a69dd6b660944c767bee67e21482bf92154",
+        "/opt/node22/bin/node",
+        "--test",
+        "--test-concurrency=1",
+        "/source/browser-first-cutover.integration.test.mjs"
+      ],
+      "case": "unknown",
+      "exitCode": 0,
+      "reason": null,
+      "elapsedSeconds": 67.44,
+      "image": "sha256:36e1b69474228ea587f0930047a41a69dd6b660944c767bee67e21482bf92154",
+      "log": "/private/tmp/holaday-first-cutover-original-entry-unknown-549b81eebc4b476ab22ad6f77a19952c.log",
+      "state": {
+        "containerId": "b8bf263e33f222abca67c612d5b701238c64ed02e4bdb96e94d47e183dbca3c7",
+        "oomKilled": false,
+        "memoryLimit": 536870912,
+        "nanoCpus": 1000000000
+      },
+      "scope": "retirement-and-failure-only",
+      "releaseAcceptance": false,
+      "id": "task6-original-unknown",
+      "receipt": "/private/tmp/holaday-first-cutover-original-entry-unknown-549b81eebc4b476ab22ad6f77a19952c.json",
+      "logSha256": "fb0e96ec616f06f9f6e55cd596da9d430d1edcff49539c283c83aecdff009a7d",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0,
+      "budgets": {
+        "scopeSeconds": 180,
+        "fixtureChildSeconds": 220,
+        "testSeconds": 240,
+        "runnerSeconds": 260
+      }
+    },
+    {
+      "command": [
+        "docker",
+        "run",
+        "--name",
+        "holaday-original-entry-b2069da1b20443579475f176269d9507",
+        "--label",
+        "holaday.qa.runner=b2069da1b20443579475f176269d9507",
+        "--network",
+        "none",
+        "--ipc",
+        "private",
+        "--cpus",
+        "1",
+        "--memory",
+        "512m",
+        "--pids-limit",
+        "256",
+        "--cap-add",
+        "SYS_PTRACE",
+        "--cap-add",
+        "NET_ADMIN",
+        "-e",
+        "NODE_OPTIONS=--max-old-space-size=192 --v8-pool-size=1",
+        "-e",
+        "UV_THREADPOOL_SIZE=1",
+        "-e",
+        "CUTOVER_QA_LOST_EFFECT_CASE=known",
+        "-v",
+        "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/scripts:/source:ro",
+        "-v",
+        "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/ops:/ops:ro",
+        "-v",
+        "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo/apps:/apps:ro",
+        "-w",
+        "/",
+        "sha256:36e1b69474228ea587f0930047a41a69dd6b660944c767bee67e21482bf92154",
+        "/opt/node22/bin/node",
+        "--test",
+        "--test-concurrency=1",
+        "/source/browser-first-cutover.integration.test.mjs"
+      ],
+      "case": "known",
+      "exitCode": 0,
+      "reason": null,
+      "elapsedSeconds": 11.29,
+      "image": "sha256:36e1b69474228ea587f0930047a41a69dd6b660944c767bee67e21482bf92154",
+      "log": "/private/tmp/holaday-first-cutover-original-entry-known-b2069da1b20443579475f176269d9507.log",
+      "state": {
+        "containerId": "6082de04381f7922d643a465463c20a1785eb9e709741d6cc92b5b7f4f25dd6d",
+        "oomKilled": false,
+        "memoryLimit": 536870912,
+        "nanoCpus": 1000000000
+      },
+      "scope": "retirement-and-failure-only",
+      "releaseAcceptance": false,
+      "id": "task6-original-known",
+      "receipt": "/private/tmp/holaday-first-cutover-original-entry-known-b2069da1b20443579475f176269d9507.json",
+      "logSha256": "55dd7b7134d31b65eb56739333881c9395646e71d014a453183500091a8ee977",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0,
+      "budgets": {
+        "scopeSeconds": 180,
+        "fixtureChildSeconds": 220,
+        "testSeconds": 240,
+        "runnerSeconds": 260
+      }
+    },
+    {
+      "command": [
+        "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+        "--max-old-space-size=192",
+        "--v8-pool-size=1",
+        "--test",
+        "--test-concurrency=1",
+        "--test-name-pattern=^(order set (added-order|removed-order) during provider requests cannot publish partial success|QA finish capture validates persisted lock after handles close success=(true|false))$",
+        "scripts/browser-cutover-evidence.test.mjs",
+        "scripts/browser-maintenance-journal.test.mjs"
+      ],
+      "workdir": "/Users/yaleiqi/.codex/worktrees/browser-release-candidate/holaday-monorepo",
+      "exitCode": 0,
+      "pass": 4,
+      "fail": 0,
+      "skip": 0,
+      "log": "/private/tmp/holaday-order-set-finish-four-contracts.log",
+      "logSha256": "ca45ee2c47a1926e673d94e4acdacbe222973ad683c47143c9030355657b4420",
+      "sourceSha256": {
+        "scripts/browser-cutover-evidence.test.mjs": "c3c95fbd2ca715142630e772b80aeff7b494805dc93c2af24ad6903f69d04c7a",
+        "scripts/browser-maintenance-journal.test.mjs": "49995238ffab1e6d9bee81c8d4146d654802254bdb6619165ef8fd2635d2c6d7",
+        "scripts/browser-maintenance-journal.mjs": "ff2ce23cbcf18012f5e1d4471f7ba831998896e450803db16a4a169fb150514e",
+        "scripts/browser-cutover-evidence.mjs": "bea5a2ae1e9f6e702d496234cc0f1ad878dda745cd60257a9545e1bd132be526"
+      },
+      "scope": "actual private journal local filesystem plus synthetic read-only order observations, four positive-whitelisted names only; no provider/PayPal execution",
+      "id": "order-set-finish-capture",
+      "receipt": "/private/tmp/holaday-order-set-finish-four-contracts-receipt.json"
+    },
+    {
+      "id": "recovery-diagnostic-contracts-retained-filter-failure",
+      "log": "/private/tmp/holaday-recovery-attach-diagnostic-reviewed-contracts.log",
+      "logSha256": "8f748469b9c76dd4862e8dc3179e5b48448a152bb8c90b67e13996e99a30869f",
+      "exitCode": 1,
+      "passCount": 140,
+      "fail": 1,
+      "scope": "staged production guards unchanged; fixed private diagnostic metadata; independently corrected filter, not one all-pass run",
+      "receipt": "/private/tmp/holaday-recovery-attach-diagnostic-stage/validation-receipt.json"
+    },
+    {
+      "id": "recovery-diagnostic-filter-corrected",
+      "log": "/private/tmp/holaday-recovery-attach-diagnostic-filter-corrected.log",
+      "logSha256": "13b1e3a1243dc5812d9f09e30b7a83d891d9a893a73f95f6094523c5a64416d7",
+      "exitCode": 0,
+      "passCount": 1,
+      "fail": 0,
+      "scope": "staged production guards unchanged; fixed private diagnostic metadata; independently corrected filter, not one all-pass run",
+      "receipt": "/private/tmp/holaday-recovery-attach-diagnostic-stage/validation-receipt.json"
+    },
+    {
+      "id": "physical-recovery-short-07eb58f67bbb4a6ca9c6b957ba077ad1",
+      "receipt": "/private/tmp/holaday-real-retirement-recovery-short-07eb58f67bbb4a6ca9c6b957ba077ad1.json",
+      "exitCode": 1,
+      "seconds": 99.4513722499978,
+      "log": "/private/tmp/holaday-real-retirement-recovery-short-07eb58f67bbb4a6ca9c6b957ba077ad1.log",
+      "logSha256": "3a7623632c36b642957059df7ba6378df7c6ec19b835b8f51868892eae7dfceb",
+      "command": [
+        "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+        "scripts/fixtures/browser-recovery-target-qa.mjs",
+        "2fd439037c52b192fcd542691dc20871828758fc8dc2687a70e36d526a251e28",
+        "sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b",
+        "ea273ba6-3a6c-45e6-91ba-13b86838c279"
+      ],
+      "scope": "real physical retirement/site assertScope plus attach/inspect/close; no dump/migration/candidate",
+      "sourceRecordCaveat": "receipt sourceHashes record reviewed diagnostic base; registration additionally has QA schema1 guard correction /private/tmp/holaday-short-schema1.diff; final source freeze is separately pinned"
+    },
+    {
+      "id": "physical-recovery-short-1dd575188fe54e3da7597fead9a28515",
+      "receipt": "/private/tmp/holaday-real-retirement-recovery-short-1dd575188fe54e3da7597fead9a28515.json",
+      "exitCode": 0,
+      "seconds": 98.24379166700237,
+      "log": "/private/tmp/holaday-real-retirement-recovery-short-1dd575188fe54e3da7597fead9a28515.log",
+      "logSha256": "50043e182319d39f30982230b0958462a3086f7c35a82b16ea6bc3b24ef1a174",
+      "command": [
+        "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+        "scripts/fixtures/browser-recovery-target-qa.mjs",
+        "b05cdf2fa63687e2c6e0456fc39b79d6b70ebe59b4e307b9ac9702fa9e82ddbb",
+        "sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b",
+        "19ccd4df-8f58-4710-b903-06744953212f"
+      ],
+      "scope": "real physical retirement/site assertScope plus attach/inspect/close; no dump/migration/candidate",
+      "sourceRecordCaveat": "receipt sourceHashes record reviewed diagnostic base; registration additionally has QA schema1 guard correction /private/tmp/holaday-short-schema1.diff; final source freeze is separately pinned"
+    },
+    {
+      "id": "final-affected-light-contracts",
+      "exitCode": 0,
+      "passCount": 7,
+      "fail": 0,
+      "log": "/private/tmp/holaday-final-affected-quick-contracts.log",
+      "logSha256": "82de94591103be2352d2d534047afd645cd0ea18edfc0ec0ceaf5cb583ad5456",
+      "validationEntry": "Node22.23.2 --test --test-concurrency=1 --test-name-pattern exact 7 order-set/finish/schema/filter names, scripts/browser-cutover-evidence.test.mjs scripts/browser-maintenance-journal.test.mjs scripts/browser-first-cutover-qa-diagnostics.test.mjs",
+      "scope": "actual local journal+synthetic read-only order backend+private QA metadata parser; no provider",
+      "command": [
+        "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+        "--test",
+        "--test-concurrency=1",
+        "--test-name-pattern=^(order set (added-order|removed-order) during provider requests cannot publish partial success|QA finish capture validates persisted lock after handles close success=(true|false)|QA fixture reads actual optional candidate events schema=(1|2)|QA diagnostics persist only bounded private whitelisted metadata across chunks)$",
+        "scripts/browser-cutover-evidence.test.mjs",
+        "scripts/browser-maintenance-journal.test.mjs",
+        "scripts/browser-first-cutover-qa-diagnostics.test.mjs"
+      ],
+      "environment": {
+        "NODE_OPTIONS": "--max-old-space-size=192 --v8-pool-size=1",
+        "UV_THREADPOOL_SIZE": "1"
+      }
+    },
+    {
+      "id": "final-syntax-format",
+      "exitCode": 0,
+      "checks": [
+        {
+          "command": [
+            "python3",
+            "ast.parse",
+            "scripts/browser-cutover-channel.py"
+          ],
+          "exitCode": 0,
+          "pycacheWritten": false
+        },
+        {
+          "command": [
+            "python3",
+            "ast.parse",
+            "scripts/browser-cutover-channel.test.py"
+          ],
+          "exitCode": 0,
+          "pycacheWritten": false
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-cutover-evidence.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-cutover-evidence.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-coordinator.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-gateway-session.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-gateway-session.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-host.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-host.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-ingress-pair.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-ingress-session.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-inventory.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-inventory.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-payments.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-payments.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-recovery-session.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-recovery-session.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-runtime.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-runtime.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-site.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-site.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover.integration.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-maintenance-journal.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/deploy-browser-first-cutover.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/fixtures/browser-cloud-joint-recovery-linux.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/fixtures/browser-cloud-recovery-probe-linux.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/fixtures/browser-coordinator-linux.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/fixtures/browser-ingress-session-child.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/fixtures/browser-nginx-sites-qa.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/fixtures/browser-recovery-target-qa.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/fixtures/browser-registration-removal-linux.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-browser-probe.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-browser-probe.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-ingress-diagnostics.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-ingress-diagnostics.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-native-preflight.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "python3",
+            "ast.parse",
+            "scripts/browser-first-cutover-native-preflight.py"
+          ],
+          "exitCode": 0,
+          "pycacheWritten": false
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-native-preflight.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-production-facts.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-production-facts.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/browser-first-cutover-qa-diagnostics.test.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/fixtures/browser-first-cutover-runtime-materials.qa.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "/private/tmp/holaday-node22-darwin-qa/node-v22.23.2-darwin-arm64/bin/node",
+            "--check",
+            "scripts/fixtures/prepare-browser-first-cutover-source-qa.mjs"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "python3",
+            "ast.parse",
+            "scripts/prepare-browser-first-cutover-qa-cache.py"
+          ],
+          "exitCode": 0,
+          "pycacheWritten": false
+        },
+        {
+          "command": [
+            "python3",
+            "ast.parse",
+            "scripts/run-browser-first-cutover-qa.py"
+          ],
+          "exitCode": 0,
+          "pycacheWritten": false
+        },
+        {
+          "command": [
+            "bash",
+            "-n",
+            "scripts/deploy-browser-first-cutover.sh"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "-n",
+            "scripts/deploy-orchestrator.sh"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "-n",
+            "scripts/deploy-migration-gate.test.sh"
+          ],
+          "exitCode": 0
+        },
+        {
+          "command": [
+            "biome",
+            "format",
+            "touched40mjs"
+          ],
+          "exitCode": 0,
+          "output": "Checked 40 files in 84ms. No fixes applied."
+        },
+        {
+          "command": [
+            "git",
+            "diff",
+            "--check"
+          ],
+          "exitCode": 0
+        }
+      ],
+      "receipt": "/private/tmp/holaday-final-syntax-format-checks.json"
+    },
+    {
+      "id": "matrix-before-migration-1e0fc8c734c742dfbf68b564510d3e1a",
+      "exitCode": 1,
+      "receipt": "/private/tmp/holaday-matrix-before-migration-1e0fc8c734c742dfbf68b564510d3e1a.json",
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-gw9gk_4l/run.log",
+      "logSha256": "ede9aeb6764e5ca91de6649fa8f92e79a2d9f47f3fb4ffb3c4af13df88bb9e3a",
+      "scope": "real before-migration injection reached; QA postfinish closed-handle assertion exit1, not complete pass",
+      "releaseAcceptance": false,
+      "sourceReceipt": "/private/tmp/holaday-matrix-before-migration-1e0fc8c734c742dfbf68b564510d3e1a-source.json",
+      "resourceCancellationReceipt": null
+    },
+    {
+      "id": "matrix-before-migration-27a811cfbb254f759dfd23fddd4b048f",
+      "exitCode": 1,
+      "receipt": "/private/tmp/holaday-matrix-before-migration-27a811cfbb254f759dfd23fddd4b048f.json",
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-0xbxwm3r/run.log",
+      "logSha256": "69a657a9adc0186dede6dcbd56af4195fdf9976c062a31f4b584d6968d1ce3f3",
+      "scope": "earlier recovery attach refusal before injection; exact original cause unestablished",
+      "releaseAcceptance": false,
+      "sourceReceipt": "/private/tmp/holaday-matrix-before-migration-27a811cfbb254f759dfd23fddd4b048f-source.json",
+      "resourceCancellationReceipt": null
+    },
+    {
+      "id": "matrix-before-migration-777c4774df314968a69ee79923123c87",
+      "exitCode": 1,
+      "receipt": "/private/tmp/holaday-matrix-before-migration-777c4774df314968a69ee79923123c87.json",
+      "log": "/var/folders/mg/xmy8dhk57jdfc5xc_cfm063r0000gn/T/holaday-cutover-qa-avdamjoz/run.log",
+      "logSha256": "4b538acff21b6cd14bf11bbb333f3acb2c6460d2308c547a7e0ec03a4ff133a1",
+      "scope": "parent cumulative host/Docker resource-risk cancellation; not functional failure/acceptance",
+      "releaseAcceptance": false,
+      "sourceReceipt": "/private/tmp/holaday-matrix-before-migration-777c4774df314968a69ee79923123c87-source.json",
+      "resourceCancellationReceipt": "/private/tmp/holaday-matrix-before-migration-777c4774df314968a69ee79923123c87-resource-cancel.json"
+    }
+  ],
+  "pending": [
+    "fixed nine-scene real host failure matrix",
+    "historical attach/fences rejection root cause unestablished",
+    "production external work/nonPayPal recovery/duplicate entitlement/default-facts complete acceptance",
+    "fresh actual approval/source/ownership/release window"
+  ],
+  "externalConditions": [
+    "production same-attempt externalfacts/providerrestore/duplicateentitlements",
+    "production complete backup/open acceptance",
+    "fresh approval/source/lock/window"
+  ],
+  "deferred": [
+    "PayPal all;1 query case not supplemented",
+    "root test:ops not run"
+  ],
+  "rejections": [
+    "/private/tmp/holaday-approved-python-cache-review-rejection.md",
+    "/private/tmp/holaday-migration-payments-review-rejection.md"
+  ],
+  "sourceFreeze": "2026-10-01-browser-first-cutover-source-freeze.json",
+  "resourcePause": "owned heavy work stopped under cumulative Docker residency/swap risk; no proven OOM root cause/no permission blocker",
+  "resumedMatrix": {
+    "ledger": "2026-10-02-browser-first-cutover-resumed-matrix-evidence.json",
+    "passed": 9,
+    "total": 9,
+    "releaseAcceptance": false,
+    "fixedCumulativeSwapBaselineMiB": 3473.62,
+    "note": "Each independent fresh attempt retains its own source manifest, exit and cleanup; historical failures are preserved and unknown roots are not claimed fixed."
+  }
+}
