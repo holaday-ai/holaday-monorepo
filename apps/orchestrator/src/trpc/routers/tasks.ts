@@ -159,6 +159,7 @@ import type { WanAnimateMixMode } from '../../agent/video/wan-animate-mix-client
 import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
 import type { PageLike, PlaywrightExecutor } from '../../agent/vision-loop/playwright-executor.js';
+import { createResponsesWebSearch } from '../../agent/browser-tools/unified-browser-loop.js';
 import { startVisionLoopTask } from '../../agent/vision-loop/qwen-only-task-runner.js';
 import {
   BrowserSessionRestoreFlights,
@@ -6050,7 +6051,17 @@ export const tasksRouter = router({
           taskId,
           intent: effectiveIntent,
           deps: {
-            client: legacyMediaModelClient!,
+            ...(() => {
+              // Batch 04: the OTA readonly lane uses the model-catalog brain.
+              const otaRuntime = modelRuntimeWiring.resolveCore({
+                actorExternalId: ctx.userId,
+                lane: 'browser',
+                ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
+              });
+              return otaRuntime.kind === 'ready'
+                ? { messagesAdapter: otaRuntime.messages('standard') }
+                : { client: legacyMediaModelClient };
+            })(),
             dispatchNavigate: async (url: string) => {
               const r = await sendExtensionToolCall(ctx.userId, {
                 taskId,
@@ -7285,8 +7296,23 @@ export const tasksRouter = router({
         .where(eq(tasksTable.externalId, taskId))
         .limit(1);
       const taskDbId = taskDbRow?.id;
+      // Batch 04: the browser lane's brain (model catalog) drives the unified
+      // tool set when a Playwright page is available.
+      const visionRuntime = modelRuntimeWiring.resolveCore({
+        actorExternalId: ctx.userId,
+        lane: 'browser',
+        ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
+      });
+      const unifiedBrowser =
+        visionRuntime.kind === 'ready'
+          ? {
+              messagesAdapter: visionRuntime.messages('vision'),
+              webSearch: createResponsesWebSearch(visionRuntime.responses('fast')),
+            }
+          : {};
       const runTaskFn = () =>
         startVisionLoopTask({
+          ...unifiedBrowser,
           userId: ctx.userId,
           taskId,
           // Pass the URL-enriched intent to the vision loop. The
