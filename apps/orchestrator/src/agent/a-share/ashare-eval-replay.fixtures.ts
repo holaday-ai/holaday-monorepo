@@ -376,8 +376,8 @@ export const SKILL_COMMAND_CASES: readonly SkillCommandCase[] = [
     interpretOutput: '- DCF 内在价值约 260 元，目标价 300 元\n以上因素与股价变动的关联未经证实',
     expectDegradedReason: 'advice',
   },
-  { skill: 'dcf', intent: '用 DCF 算一下宁德时代的合理估值', route: 'general' },
+  { skill: 'dcf', intent: '用 DCF 算一下宁德时代的合理估值', route: 'ashare_qa_guidance' },
   { skill: 'earnings', intent: '/财报 600519', route: 'ashare_qa' },
-  { skill: 'sector', intent: '/行业 白酒', route: 'general' },
+  { skill: 'sector', intent: '/行业 白酒', route: 'ashare_qa_guidance' },
   { skill: 'thesis', intent: '/论点 茅台', route: 'ashare_qa' },
 ];
