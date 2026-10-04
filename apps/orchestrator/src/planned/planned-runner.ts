@@ -73,6 +73,88 @@ export type PlannedRunSpecialDispatcher = (input: {
 
 let configuredSpecialDispatcher: PlannedRunSpecialDispatcher | null = null;
 
+/**
+ * Batch 10.3 — outcome hook for planned runs (inbox + IM webhook policy is
+ * applied by the caller with `decideTaskOutcomeNotification`). Module-level
+ * like the special dispatcher because runs are dispatched from contexts that
+ * do not carry the runner deps.
+ */
+export interface PlannedOutcomeNotifyInput {
+  userInternalId: number;
+  plannedTaskInternalId: number;
+  title: string;
+  outcome: 'success' | 'failed' | 'cancelled';
+  phase: 'dispatch' | 'task_terminal';
+  error: string | null;
+  consecutiveFailures: number;
+  failureNotifyThreshold: number;
+  notifyOnSuccess: boolean;
+}
+export type PlannedOutcomeNotifier = (input: PlannedOutcomeNotifyInput) => Promise<void>;
+let configuredOutcomeNotifier: PlannedOutcomeNotifier | null = null;
+
+export function configurePlannedOutcomeNotifier(notifier: PlannedOutcomeNotifier | null): void {
+  configuredOutcomeNotifier = notifier;
+}
+
+/** SQL fragment for the next failure streak of one planned outcome. */
+function plannedStreakUpdate(outcome: 'success' | 'failed' | 'cancelled') {
+  if (outcome === 'failed') {
+    return { consecutiveFailures: sql`${plannedTasks.consecutiveFailures} + 1` };
+  }
+  if (outcome === 'success') return { consecutiveFailures: 0 };
+  return {};
+}
+
+/**
+ * Read the plan's (already updated) streak + preferences and hand the
+ * outcome to the configured notifier. Never throws.
+ */
+async function notifyPlannedOutcome(
+  db: DB,
+  planId: number,
+  outcome: 'success' | 'failed' | 'cancelled',
+  phase: 'dispatch' | 'task_terminal',
+  error: string | null,
+): Promise<void> {
+  const notifier = configuredOutcomeNotifier;
+  if (!notifier) return;
+  try {
+    const [plan] = await runPlannedDatabase(async () =>
+      db
+        .select({
+          userId: plannedTasks.userId,
+          title: plannedTasks.title,
+          consecutiveFailures: plannedTasks.consecutiveFailures,
+          failureNotifyThreshold: plannedTasks.failureNotifyThreshold,
+          notifyOnSuccess: plannedTasks.notifyOnSuccess,
+        })
+        .from(plannedTasks)
+        .where(eq(plannedTasks.id, planId))
+        .limit(1),
+    );
+    if (!plan) return;
+    if (!(await plannedOwnerAllowsExecution(db, plan.userId, 'notification'))) return;
+    // Owned like every other planned hook so drain/stop waits for the push.
+    await callPlannedHook(notifier, {
+      userInternalId: plan.userId,
+      plannedTaskInternalId: planId,
+      title: plan.title,
+      outcome,
+      phase,
+      error: error ? error.slice(0, 2000) : null,
+      consecutiveFailures: Number(plan.consecutiveFailures ?? 0) || 0,
+      failureNotifyThreshold: Number(plan.failureNotifyThreshold ?? 1) || 1,
+      notifyOnSuccess: plan.notifyOnSuccess === true,
+    });
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err), planId },
+      'planned-runner: outcome notify failed — ignoring',
+    );
+  }
+}
+
 export function configurePlannedRunSpecialDispatcher(
   dispatcher: PlannedRunSpecialDispatcher | null,
 ): void {
@@ -562,16 +644,27 @@ async function updatePlanAfterDispatch(
   error: string | null,
   successfulStatus: 'running' | 'completed' = 'running',
 ): Promise<void> {
+  // Batch 10.3 — a dispatch failure or an inline completion is already the
+  // outcome; a queued task/batch is settled later by syncPlannedRuns.
+  const settledOutcome: 'success' | 'failed' | null = !ok
+    ? 'failed'
+    : successfulStatus === 'completed'
+      ? 'success'
+      : null;
   const base = {
     lastRunAt: new Date(),
     lastRunStatus: ok ? successfulStatus : 'failed',
     lastError: error,
+    ...(settledOutcome ? plannedStreakUpdate(settledOutcome) : {}),
   };
   if (run.trigger !== 'scheduled') {
     await runPlannedWrite(
       async () => db.update(plannedTasks).set(base).where(eq(plannedTasks.id, run.planId)),
       { maxRows: 1 },
     );
+    if (settledOutcome) {
+      await notifyPlannedOutcome(db, run.planId, settledOutcome, 'dispatch', error);
+    }
     return;
   }
   if (!(await plannedOwnerAllowsExecution(db, run.userId, 'schedule-advance'))) return;
@@ -586,7 +679,7 @@ async function updatePlanAfterDispatch(
       ? schedule.nextRunAt
       : null;
   const status = nextRunAt ? 'active' : schedule.status;
-  await runPlannedWrite(
+  const advanced = await runPlannedWrite(
     async () =>
       db
         .update(plannedTasks)
@@ -594,6 +687,18 @@ async function updatePlanAfterDispatch(
         .where(and(eq(plannedTasks.id, run.planId), eq(plannedTasks.status, 'running'))),
     { maxRows: 1 },
   );
+  if (settledOutcome && readAffectedRows(advanced) === 1) {
+    await notifyPlannedOutcome(db, run.planId, settledOutcome, 'dispatch', error);
+  }
+}
+
+/** completed / partial_success reset the streak; cancelled is neutral. */
+function plannedStreakOutcome(
+  status: 'completed' | 'partial_success' | 'failed' | 'cancelled',
+): 'success' | 'failed' | 'cancelled' {
+  if (status === 'failed') return 'failed';
+  if (status === 'cancelled') return 'cancelled';
+  return 'success';
 }
 
 export async function syncPlannedRuns(db: DB): Promise<number> {
@@ -627,6 +732,7 @@ export async function syncPlannedRuns(db: DB): Promise<number> {
       if (!outcome.terminal) continue;
       const failed = outcome.status === 'failed' || outcome.status === 'cancelled';
       const review = outcome.status === 'partial_success';
+      const streakOutcome = plannedStreakOutcome(outcome.status);
       await runPlannedDatabase(async () =>
         db.transaction(async (tx) => {
           await runPlannedWrite(
@@ -658,13 +764,24 @@ export async function syncPlannedRuns(db: DB): Promise<number> {
             async () =>
               tx
                 .update(plannedTasks)
-                .set({ lastRunStatus: outcome.status, lastError: task.errorMessage })
+                .set({
+                  lastRunStatus: outcome.status,
+                  lastError: task.errorMessage,
+                  ...plannedStreakUpdate(streakOutcome),
+                })
                 .where(eq(plannedTasks.id, run.planId)),
             { maxRows: 1 },
           );
         }),
       );
       settled += 1;
+      await notifyPlannedOutcome(
+        db,
+        run.planId,
+        streakOutcome,
+        'task_terminal',
+        task.errorMessage,
+      );
       continue;
     }
     if (batchTaskId === null) continue;
@@ -738,13 +855,24 @@ export async function syncPlannedRuns(db: DB): Promise<number> {
           async () =>
             tx
               .update(plannedTasks)
-              .set({ lastRunStatus: outcome.status, lastError: null })
+              .set({
+                lastRunStatus: outcome.status,
+                lastError: null,
+                ...plannedStreakUpdate(plannedStreakOutcome(outcome.status)),
+              })
               .where(eq(plannedTasks.id, run.planId)),
           { maxRows: 1 },
         );
       }),
     );
     settled += 1;
+    await notifyPlannedOutcome(
+      db,
+      run.planId,
+      plannedStreakOutcome(outcome.status),
+      'task_terminal',
+      batch.itemsFailed > 0 ? `${batch.itemsFailed}/${batch.itemsTotal} 项失败` : null,
+    );
   }
   return settled;
 }
@@ -1140,18 +1268,23 @@ export async function plannedTick(deps: PlannedRunnerDeps): Promise<void> {
     } catch (error) {
       // Admission failure is not a business failure: preserve the claim for reconciliation.
       if (!queueDispatched) throw error;
-      await runPlannedWrite(
+      const queueError = (error instanceof Error ? error.message : String(error)).slice(0, 2000);
+      const failedWrite = await runPlannedWrite(
         async () =>
           deps.db
             .update(plannedTasks)
             .set({
               status: 'failed',
               lastRunStatus: 'failed',
-              lastError: (error instanceof Error ? error.message : String(error)).slice(0, 2000),
+              lastError: queueError,
+              ...plannedStreakUpdate('failed'),
             })
             .where(and(eq(plannedTasks.id, plan.id), eq(plannedTasks.status, 'running'))),
         { maxRows: 1 },
       );
+      if (readAffectedRows(failedWrite) === 1) {
+        await notifyPlannedOutcome(deps.db, plan.id, 'failed', 'dispatch', queueError);
+      }
     }
   }
 }
@@ -1196,7 +1329,8 @@ async function plannedOwnerAllowsExecution(
     | 'batch-persist'
     | 'schedule-advance'
     | 'reminder'
-    | 'queue',
+    | 'queue'
+    | 'notification',
 ): Promise<boolean> {
   try {
     return await runPlannedDatabase(async () => accountClosureAllowsExecution(db, userId));

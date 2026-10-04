@@ -11,7 +11,9 @@ import {
 } from '@/pages/scheduled-calendar/time-helpers';
 import {
   buildScheduledCreatePayload,
+  FAILURE_NOTIFY_OPTIONS,
   REMINDER_OPTIONS,
+  scheduledNotifySummary,
   REPEAT_OPTIONS,
   scheduledDialogHasDraftChanges,
   scheduledCreateButtonLabel,
@@ -48,6 +50,8 @@ export function ScheduledTaskDialog({
   const [intent, setIntent] = React.useState(initialIntent ?? '');
   const [repeatType, setRepeatType] = React.useState<DialogRepeatType>('daily');
   const [reminderValue, setReminderValue] = React.useState('off');
+  const [notifyOnSuccess, setNotifyOnSuccess] = React.useState(false);
+  const [failureNotifyThreshold, setFailureNotifyThreshold] = React.useState(1);
   const [description, setDescription] = React.useState('');
   const [rrule, setRrule] = React.useState('');
   // Default: tomorrow morning 9:00 local. The datetime-local input
@@ -76,6 +80,8 @@ export function ScheduledTaskDialog({
     setIntent(initialIntent ?? '');
     setRepeatType('daily');
     setReminderValue('off');
+    setNotifyOnSuccess(false);
+    setFailureNotifyThreshold(1);
     setDescription('');
     setRrule('');
     const nextScheduledAt = defaultScheduledAtLocalInput();
@@ -100,8 +106,20 @@ export function ScheduledTaskDialog({
         description,
         rrule,
         scheduledAt,
+        notifyOnSuccess,
+        failureNotifyThreshold,
       }),
-    [description, initialIntent, intent, reminderValue, repeatType, rrule, scheduledAt],
+    [
+      description,
+      failureNotifyThreshold,
+      initialIntent,
+      intent,
+      notifyOnSuccess,
+      reminderValue,
+      repeatType,
+      rrule,
+      scheduledAt,
+    ],
   );
 
   const requestClose = React.useCallback(() => {
@@ -155,6 +173,8 @@ export function ScheduledTaskDialog({
         reminderValue,
         rrule,
         description,
+        notifyOnSuccess,
+        failureNotifyThreshold,
       });
       const res = await trpc.scheduledTasks.create.mutate(payload);
       if (!mountedRef.current) return;
@@ -197,7 +217,8 @@ export function ScheduledTaskDialog({
               新建定时任务
             </div>
             <div className="mt-1 text-xs text-[#595757]">
-              {scheduledRepeatSummary(repeatType)} · {scheduledReminderSummary(reminderValue)}
+              {scheduledRepeatSummary(repeatType)} · {scheduledReminderSummary(reminderValue)} ·{' '}
+              {scheduledNotifySummary({ failureNotifyThreshold, notifyOnSuccess })}
             </div>
           </div>
           <button
@@ -292,6 +313,38 @@ export function ScheduledTaskDialog({
                 </button>
               ))}
             </div>
+          </div>
+          <div>
+            <div className="mb-2 text-xs font-medium text-[#595757]">失败通知</div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {FAILURE_NOTIFY_OPTIONS.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  disabled={submitting}
+                  aria-pressed={failureNotifyThreshold === o.value}
+                  onClick={() => setFailureNotifyThreshold(o.value)}
+                  className={cn(
+                    'rounded-[8px] border px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                    failureNotifyThreshold === o.value
+                      ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
+                      : 'border-[#EFEFEF] bg-white text-[#595757] hover:border-[#DCDDDD] hover:bg-[#EFEFEF] hover:text-[#1f1f1f]',
+                  )}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <label className="mt-2 inline-flex items-center gap-2 text-sm text-[#595757]">
+              <input
+                type="checkbox"
+                checked={notifyOnSuccess}
+                disabled={submitting}
+                onChange={(e) => setNotifyOnSuccess(e.target.checked)}
+                className="h-4 w-4 accent-[#EA1F59]"
+              />
+              成功时也通知（站内 + 已配置的企业微信/飞书/钉钉）
+            </label>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-[#595757]">

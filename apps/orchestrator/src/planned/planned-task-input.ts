@@ -69,6 +69,9 @@ export const plannedTaskCreateInputSchema = z
     timezone: z.string().trim().min(1).max(64).default('Asia/Shanghai'),
     endsOn: plannedEndsOnInputSchema,
     reminderMinutes: z.number().int().min(0).max(60 * 24 * 7).nullable().optional(),
+    // Batch 10.3 — outcome notification preferences.
+    notifyOnSuccess: z.boolean().optional(),
+    failureNotifyThreshold: z.number().int().min(1).max(10).optional(),
   })
   .superRefine((value, ctx) => {
     if (!value.instruction && value.items.length === 0) {

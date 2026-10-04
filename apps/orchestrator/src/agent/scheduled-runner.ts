@@ -20,7 +20,7 @@
  * importing the full tasks router graph.
  */
 
-import { and, eq, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
 // rrule ships CJS-first (package.json main: dist/es5/rrule.js). Node 22's
 // ESM interop doesn't expose `rrulestr` as a named import on CJS modules
 // reliably — `import { rrulestr } from 'rrule'` crashes with
@@ -34,6 +34,7 @@ const { rrulestr } = rrule as {
 import { accountClosureAllowsExecution } from '../account-closure/repository.js';
 import { logger } from '../config/logger.js';
 import { scheduledTasks } from '../db/schema/scheduled-tasks.js';
+import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import type { OperationLifetime } from '../execution/owned-operation.js';
@@ -44,6 +45,31 @@ import {
 } from './scheduled-lifetime.js';
 
 const DEFAULT_POLL_MS = 60_000;
+const TERMINAL_TASK_STATUSES = ['completed', 'partial_success', 'failed', 'cancelled'] as const;
+
+/**
+ * Input of the `notify` hook.
+ *
+ * `phase: 'dispatch'` — the runner tried to start the task (ok = a task was
+ * created / an inline job finished; skipped = deliberately not started).
+ * `phase: 'task_terminal'` — Batch 10.3: the task created by a dispatch
+ * reached a terminal state (`outcome`). The streak / preference fields let
+ * the hook apply `decideTaskOutcomeNotification` without another DB read.
+ */
+export interface ScheduledOutcomeNotifyInput {
+  userInternalId: number;
+  scheduledTaskInternalId: number;
+  intent: string;
+  ok: boolean;
+  error: string | null;
+  skipped?: boolean;
+  phase?: 'dispatch' | 'task_terminal';
+  /** Set when phase='task_terminal' (or an inline job completed). */
+  outcome?: 'success' | 'failed' | 'cancelled';
+  consecutiveFailures?: number;
+  failureNotifyThreshold?: number;
+  notifyOnSuccess?: boolean;
+}
 
 export interface ScheduledRunnerDeps {
   /** Optional until closed boot and every producer are wired together. */
@@ -64,7 +90,7 @@ export interface ScheduledRunnerDeps {
       intent: string;
     },
     lifetime?: OperationLifetime,
-  ) => Promise<number | null | { skipped: true; note: string }>;
+  ) => Promise<number | null | { skipped: true; note: string } | { completed: true }>;
   /**
    * Phase 26B — optional notification hook. Called after every
    * terminal dispatch (success OR failure) so the user's inbox +
@@ -74,14 +100,7 @@ export interface ScheduledRunnerDeps {
    * compat with existing tests that don't care).
    */
   notify?: (
-    input: {
-      userInternalId: number;
-      scheduledTaskInternalId: number;
-      intent: string;
-      ok: boolean;
-      error: string | null;
-      skipped?: boolean;
-    },
+    input: ScheduledOutcomeNotifyInput,
     lifetime?: OperationLifetime,
   ) => Promise<void>;
   /**
@@ -103,6 +122,13 @@ export interface ScheduledRunnerDeps {
   ) => Promise<void>;
   /** Override poll interval (ms). Default 60_000. Tests pass smaller. */
   pollIntervalMs?: number;
+  /**
+   * Batch 10.3 — run the terminal-outcome settle pass at the end of every
+   * tick (fold finished tasks into the failure streak + `task_terminal`
+   * notifications). Production wiring enables it; off keeps the tick's DB
+   * footprint identical to the pre-10.3 runner.
+   */
+  settleTaskOutcomes?: boolean;
 }
 
 /**
@@ -468,6 +494,9 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
     intent: string;
     repeatType: string;
     rrule: string | null;
+    consecutiveFailures?: number | null;
+    failureNotifyThreshold?: number | null;
+    notifyOnSuccess?: boolean | null;
   }>;
   try {
     candidates = await runScheduledOperation('database', async () =>
@@ -480,6 +509,12 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
           // Phase 26A — when rrule is set, computeNextRunFromInputs uses
           // it instead of repeatType.
           rrule: scheduledTasks.rrule,
+          // Batch 10.3 — outcome notification preferences + streak. Only this
+          // runner mutates the streak while the row is claimed, so the
+          // finalize below can write the next value directly.
+          consecutiveFailures: scheduledTasks.consecutiveFailures,
+          failureNotifyThreshold: scheduledTasks.failureNotifyThreshold,
+          notifyOnSuccess: scheduledTasks.notifyOnSuccess,
         })
         .from(scheduledTasks)
         .where(and(eq(scheduledTasks.status, 'active'), lte(scheduledTasks.nextRunAt, now))),
@@ -488,7 +523,10 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
     logger.warn({ err: errMsg(err) }, 'scheduled-runner: scan failed');
     return;
   }
-  if (candidates.length === 0) return;
+  if (candidates.length === 0) {
+    await settleScheduledTaskOutcomes(deps);
+    return;
+  }
   logger.info({ count: candidates.length }, 'scheduled-runner: candidates found');
   for (const row of candidates) {
     // Phase 2 atomic claim.
@@ -538,6 +576,7 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
     let dispatchedTaskId: number | null = null;
     let dispatchError: string | null = null;
     let skipNote: string | null = null; // 「跳过」语义（如非交易日）→ last_run_status='skipped'
+    let completedInline = false; // 同步完成、无 task 行（如 A股简报）→ 直接计为成功
     try {
       const result = await callScheduledHook(deps.dispatch, {
         scheduledTaskId: row.id,
@@ -549,14 +588,22 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
         !(
           typeof result === 'object' &&
           result !== null &&
+          'skipped' in result &&
           result.skipped === true &&
           typeof result.note === 'string'
+        ) &&
+        !(
+          typeof result === 'object' &&
+          result !== null &&
+          'completed' in result &&
+          result.completed === true
         )
       ) {
         retainScheduledUncertainty();
       }
       if (typeof result === 'object' && result !== null) {
-        skipNote = result.note;
+        if ('skipped' in result) skipNote = result.note;
+        else completedInline = true;
       } else {
         dispatchedTaskId = result;
       }
@@ -568,7 +615,17 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
       );
     }
     const skipped = skipNote !== null;
-    const dispatchOk = skipped || (dispatchedTaskId !== null && dispatchError === null);
+    const dispatchOk =
+      skipped || completedInline || (dispatchedTaskId !== null && dispatchError === null);
+    // Batch 10.3 — failure streak. A dispatch failure extends it; an inline
+    // completion resets it; a created task leaves it untouched until the
+    // settle pass sees the task's terminal state (pending_task_id).
+    const previousStreak = Math.max(0, Number(row.consecutiveFailures ?? 0) || 0);
+    const nextStreak = !dispatchOk ? previousStreak + 1 : completedInline ? 0 : previousStreak;
+    const streakColumns = {
+      consecutiveFailures: nextStreak,
+      pendingTaskId: dispatchOk && !skipped && !completedInline ? dispatchedTaskId : null,
+    };
     const nextRun = computeNextRunFromInputs({
       from: now,
       rrule: row.rrule,
@@ -605,6 +662,7 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
                       lastRunStatus: skipped ? 'skipped' : dispatchOk ? 'success' : 'failed',
                       lastError: skipped ? skipNote : truncatedError,
                       ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
+                      ...streakColumns,
                     })
                     .where(
                       and(eq(scheduledTasks.id, row.id), eq(scheduledTasks.status, 'running')),
@@ -620,6 +678,7 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
                       lastRunStatus: skipped ? 'skipped' : dispatchOk ? 'success' : 'failed',
                       lastError: skipped ? skipNote : truncatedError,
                       ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
+                      ...streakColumns,
                     })
                     .where(
                       and(eq(scheduledTasks.id, row.id), eq(scheduledTasks.status, 'running')),
@@ -655,6 +714,12 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
           ok: dispatchOk && !skipped,
           error: skipped ? skipNote : truncatedError,
           ...(skipped ? { skipped: true } : {}),
+          phase: 'dispatch',
+          ...(completedInline ? { outcome: 'success' as const } : {}),
+          ...(!dispatchOk ? { outcome: 'failed' as const } : {}),
+          consecutiveFailures: nextStreak,
+          failureNotifyThreshold: Number(row.failureNotifyThreshold ?? 1) || 1,
+          notifyOnSuccess: row.notifyOnSuccess === true,
         });
       } catch (err) {
         logger.warn(
@@ -664,6 +729,123 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
       }
     }
   }
+  await settleScheduledTaskOutcomes(deps);
+}
+
+/**
+ * Batch 10.3 — fold the terminal state of tasks created by earlier dispatches
+ * into the failure streak and fire `task_terminal` notifications.
+ *
+ * A row is settled exactly once per dispatched task: the CAS UPDATE clears
+ * `pending_task_id` only while it still points at that task, so a concurrent
+ * re-dispatch (which overwrites the pointer) or a second runner cannot double
+ * count. The join also requires the task to belong to the schedule owner.
+ * Never throws — a settle failure must not wedge the dispatch tick.
+ */
+export async function settleScheduledTaskOutcomes(deps: ScheduledRunnerDeps): Promise<number> {
+  if (deps.settleTaskOutcomes !== true) return 0;
+  if (deps.executionDrain?.drain.snapshot().unknown) return 0;
+  let rows: Array<{
+    id: number;
+    userId: number;
+    intent: string;
+    pendingTaskId: number | null;
+    consecutiveFailures: number | null;
+    failureNotifyThreshold: number | null;
+    notifyOnSuccess: boolean | null;
+    taskStatus: string;
+    taskError: string | null;
+  }>;
+  try {
+    rows = await runScheduledOperation('database', async () =>
+      deps.db
+        .select({
+          id: scheduledTasks.id,
+          userId: scheduledTasks.userId,
+          intent: scheduledTasks.intent,
+          pendingTaskId: scheduledTasks.pendingTaskId,
+          consecutiveFailures: scheduledTasks.consecutiveFailures,
+          failureNotifyThreshold: scheduledTasks.failureNotifyThreshold,
+          notifyOnSuccess: scheduledTasks.notifyOnSuccess,
+          taskStatus: tasks.status,
+          taskError: tasks.errorMessage,
+        })
+        .from(scheduledTasks)
+        .innerJoin(
+          tasks,
+          and(eq(tasks.id, scheduledTasks.pendingTaskId), eq(tasks.userId, scheduledTasks.userId)),
+        )
+        .where(
+          and(
+            isNotNull(scheduledTasks.pendingTaskId),
+            inArray(tasks.status, [...TERMINAL_TASK_STATUSES]),
+          ),
+        )
+        .limit(100),
+    );
+  } catch (err) {
+    logger.warn({ err: errMsg(err) }, 'scheduled-runner: settle scan failed');
+    return 0;
+  }
+  let settled = 0;
+  for (const row of rows) {
+    if (row.pendingTaskId === null) continue;
+    const failed = row.taskStatus === 'failed';
+    const cancelled = row.taskStatus === 'cancelled';
+    const previousStreak = Math.max(0, Number(row.consecutiveFailures ?? 0) || 0);
+    const nextStreak = failed ? previousStreak + 1 : cancelled ? previousStreak : 0;
+    const error = failed ? (row.taskError ?? '任务执行失败').slice(0, 2000) : null;
+    let won = false;
+    try {
+      const result = await runScheduledOperation('database', async () =>
+        deps.db
+          .update(scheduledTasks)
+          .set({
+            pendingTaskId: null,
+            consecutiveFailures: nextStreak,
+            ...(failed ? { lastRunStatus: 'failed', lastError: error } : {}),
+          })
+          .where(
+            and(
+              eq(scheduledTasks.id, row.id),
+              eq(scheduledTasks.pendingTaskId, row.pendingTaskId as number),
+            ),
+          ),
+      );
+      won = extractMysqlAffectedRows(result, 1) === 1;
+    } catch (err) {
+      logger.warn({ err: errMsg(err), scheduledTaskId: row.id }, 'scheduled-runner: settle failed');
+      continue;
+    }
+    if (!won) continue;
+    settled += 1;
+    if (
+      !deps.notify ||
+      !(await scheduledOwnerAllowsExecution(deps, row.userId, row.id, 'notification'))
+    ) {
+      continue;
+    }
+    try {
+      await callScheduledHook(deps.notify, {
+        userInternalId: row.userId,
+        scheduledTaskInternalId: row.id,
+        intent: row.intent,
+        ok: !failed && !cancelled,
+        error,
+        phase: 'task_terminal',
+        outcome: failed ? 'failed' : cancelled ? 'cancelled' : 'success',
+        consecutiveFailures: nextStreak,
+        failureNotifyThreshold: Number(row.failureNotifyThreshold ?? 1) || 1,
+        notifyOnSuccess: row.notifyOnSuccess === true,
+      });
+    } catch (err) {
+      logger.warn(
+        { err: errMsg(err), scheduledTaskId: row.id },
+        'scheduled-runner: terminal notify hook threw — ignoring',
+      );
+    }
+  }
+  return settled;
 }
 
 async function scheduledOwnerAllowsExecution(

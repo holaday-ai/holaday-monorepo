@@ -40,6 +40,12 @@ export const plannedTasks = mysqlTable(
     lastRunAt: datetime('last_run_at', { mode: 'date', fsp: 3 }),
     lastRunStatus: varchar('last_run_status', { length: 24 }),
     lastError: text('last_error'),
+    /** Batch 10.3 (migration 0065) — outcome notification preferences. */
+    notifyOnSuccess: boolean('notify_on_success').notNull().default(false),
+    failureNotifyThreshold: int('failure_notify_threshold', { unsigned: true })
+      .notNull()
+      .default(1),
+    consecutiveFailures: int('consecutive_failures', { unsigned: true }).notNull().default(0),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
       .notNull()
       .default(sql`CURRENT_TIMESTAMP(3)`),

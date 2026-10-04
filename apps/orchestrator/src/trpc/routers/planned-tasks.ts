@@ -148,6 +148,9 @@ function planView(plan: typeof plannedTasks.$inferSelect, items: readonly string
     nextRunAt: plan.nextRunAt,
     timezone: plan.timezone,
     reminderMinutes: plan.reminderMinutes,
+    notifyOnSuccess: plan.notifyOnSuccess,
+    failureNotifyThreshold: plan.failureNotifyThreshold,
+    consecutiveFailures: plan.consecutiveFailures,
     status: plan.status,
     lastRunAt: plan.lastRunAt,
     lastRunStatus: plan.lastRunStatus,
@@ -361,6 +364,10 @@ export const plannedTasksRouter = router({
         nextRunAt: schedule.nextRunAt,
         timezone: input.timezone,
         reminderMinutes: input.reminderMinutes ?? null,
+        ...(input.notifyOnSuccess !== undefined ? { notifyOnSuccess: input.notifyOnSuccess } : {}),
+        ...(input.failureNotifyThreshold !== undefined
+          ? { failureNotifyThreshold: input.failureNotifyThreshold }
+          : {}),
         status: 'active',
         itemCount: prepared.items.length,
       });
@@ -384,6 +391,8 @@ export const plannedTasksRouter = router({
         timezone: z.string().trim().min(1).max(64).optional(),
         endsOn: plannedEndsOnInputSchema,
         reminderMinutes: z.number().int().min(0).max(60 * 24 * 7).nullable().optional(),
+        notifyOnSuccess: z.boolean().optional(),
+        failureNotifyThreshold: z.number().int().min(1).max(10).optional(),
         editScope: z.enum(['occurrence', 'future', 'series']).optional(),
         originalScheduledFor: z.string().datetime().optional(),
       }),
@@ -530,6 +539,8 @@ export const plannedTasksRouter = router({
               input.reminderMinutes !== undefined
                 ? input.reminderMinutes
                 : plan.reminderMinutes,
+            notifyOnSuccess: input.notifyOnSuccess ?? plan.notifyOnSuccess,
+            failureNotifyThreshold: input.failureNotifyThreshold ?? plan.failureNotifyThreshold,
             status: 'active',
             itemCount: prepared.items.length,
           });
@@ -548,6 +559,10 @@ export const plannedTasksRouter = router({
       if (input.reminderMinutes !== undefined) {
         updates.reminderMinutes = input.reminderMinutes;
         updates.lastReminderRun = null;
+      }
+      if (input.notifyOnSuccess !== undefined) updates.notifyOnSuccess = input.notifyOnSuccess;
+      if (input.failureNotifyThreshold !== undefined) {
+        updates.failureNotifyThreshold = input.failureNotifyThreshold;
       }
       if (input.scheduledAt !== undefined) {
         try {
@@ -718,6 +733,8 @@ export const plannedTasksRouter = router({
             nextRunAt: scheduledFor,
             timezone: plan.timezone,
             reminderMinutes: plan.reminderMinutes,
+            notifyOnSuccess: plan.notifyOnSuccess,
+            failureNotifyThreshold: plan.failureNotifyThreshold,
             status: 'active',
             itemCount: plan.itemCount,
           });

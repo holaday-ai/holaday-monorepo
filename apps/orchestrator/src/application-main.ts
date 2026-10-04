@@ -37,9 +37,14 @@ import { createEnergyAnalyticsStore } from './energy/analytics-store.js';
 import { runRetentionReaper } from './evidence/retention-reaper.js';
 import { createHttpListener } from './execution/http-listener.js';
 import { createHttpApp } from './http.js';
-import { buildScheduledDispatchNotification } from './notifications/scheduled-copy.js';
+import {
+  buildTaskOutcomeNotification,
+  scheduledOutcomeKind,
+} from './notifications/scheduled-copy.js';
+import { decideTaskOutcomeNotification } from './notifications/task-outcome-policy.js';
 import { createPayPalAdapter } from './payment/index.js';
 import {
+  configurePlannedOutcomeNotifier,
   configurePlannedRunSpecialDispatcher,
   queuePlannedRun,
   recoverStuckRunningPlannedTasks,
@@ -580,7 +585,9 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
                     // P1 非交易日：未投递，回带 skip → runner 记 last_run_status='skipped' + note。
                     if (r.skipped)
                       return { skipped: true as const, note: r.reason ?? '非交易日，未投递' };
-                    return scheduledTaskId; // 非 null = 成功（简报无 task 行）
+                    // 同步完成、无 task 行：不能把 scheduledTaskId 冒充 task id 写进
+                    // last_task_id（会链到别人的任务 / 被 settle 误结算）。
+                    return { completed: true as const };
                   } catch (err) {
                     const fails = (briefingFailCounts.get(scheduledTaskId) ?? 0) + 1;
                     briefingFailCounts.set(scheduledTaskId, fails);
@@ -680,27 +687,39 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
             // dispatch attempts land in the user's inbox + fire any
             // configured webhooks. The notify hook is best-effort; the
             // runner ignores its return value and never blocks on it.
-            notify: async ({
-              userInternalId,
-              scheduledTaskInternalId,
-              intent,
-              ok,
-              error,
-              skipped,
-            }) => {
+            // Batch 10.3 — fold finished dispatched tasks into the failure
+            // streak and emit task_terminal outcomes through `notify` below.
+            settleTaskOutcomes: true,
+            notify: async (input) => {
               // 简报 intent 的通知由 dispatch 分支自管（成功投递简报 + 3 连败错误）→ 跳过通用。
-              if (isBriefingIntent(intent)) return;
+              if (isBriefingIntent(input.intent)) return;
+              const kind = scheduledOutcomeKind(input);
+              // 失败按连续 N 次阈值推送；成功默认静默（按任务可开）；启动/跳过仅站内。
+              const decision = decideTaskOutcomeNotification(kind, {
+                consecutiveFailures: input.consecutiveFailures ?? (kind === 'failed' ? 1 : 0),
+                failureNotifyThreshold: input.failureNotifyThreshold,
+                notifyOnSuccess: input.notifyOnSuccess,
+              });
+              if (!decision.notify) return;
               const { notify } = await import('./notifications/notification-service.js');
-              const payload = buildScheduledDispatchNotification({ intent, ok, error, skipped });
+              const payload = buildTaskOutcomeNotification({
+                label: '定时任务',
+                name: input.intent,
+                kind,
+                phase: input.phase ?? 'dispatch',
+                error: input.error,
+                consecutiveFailures: input.consecutiveFailures,
+              });
               await notify(
                 { db, logger },
                 {
-                  userInternalId,
-                  scheduledTaskInternalId,
+                  userInternalId: input.userInternalId,
+                  scheduledTaskInternalId: input.scheduledTaskInternalId,
                   type: payload.type,
                   title: payload.title,
                   message: payload.message,
                   taskName: payload.taskName,
+                  delivery: decision.delivery,
                 },
               );
             },
@@ -799,6 +818,34 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
           }),
         }),
       );
+      // Batch 10.3 — planned-run outcomes (dispatch failure / task terminal)
+      // → inbox + IM webhook per the per-plan threshold & success opt-in.
+      configurePlannedOutcomeNotifier(async (input) => {
+        const decision = decideTaskOutcomeNotification(input.outcome, input);
+        if (!decision.notify) return;
+        const { notify } = await import('./notifications/notification-service.js');
+        const payload = buildTaskOutcomeNotification({
+          label: '规划任务',
+          name: input.title,
+          kind: input.outcome,
+          phase: input.phase,
+          error: input.error,
+          consecutiveFailures: input.consecutiveFailures,
+        });
+        await notify(
+          { db, logger },
+          {
+            userInternalId: input.userInternalId,
+            scheduledTaskInternalId: null,
+            plannedTaskInternalId: input.plannedTaskInternalId,
+            type: payload.type,
+            title: payload.title,
+            message: payload.message,
+            taskName: payload.taskName,
+            delivery: decision.delivery,
+          },
+        );
+      });
       const { plannedTasks: plannedTasksTable } = await import('./db/schema/planned-tasks.js');
       const { users: usersTable } = await import('./db/schema/users.js');
       const { eq } = await import('drizzle-orm');
