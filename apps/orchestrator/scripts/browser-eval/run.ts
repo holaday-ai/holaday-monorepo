@@ -26,7 +26,7 @@ import {
   createResponsesWebSearch,
   runUnifiedBrowserLoop,
 } from '../../src/agent/browser-tools/unified-browser-loop.js';
-import { runSupercarTask } from '../../src/agent/supercar/qwen-only-agent-loop.js';
+import { runSupercarTask, supercarAbort } from '../../src/agent/supercar/qwen-only-agent-loop.js';
 import { PlaywrightExecutor } from '../../src/agent/vision-loop/playwright-executor.js';
 import { env } from '../../src/config/env.js';
 import type { MessagesAdapter } from '../../src/llm/messages-adapter.js';
@@ -109,8 +109,9 @@ async function runLegacy(
   adapter: MessagesAdapter,
 ): Promise<UnifiedBrowserOutcome> {
   let awaiting: string | null = null;
+  const taskId = `eval_${task.id}_${Date.now()}`;
   const outcome = await runSupercarTask({
-    taskId: `eval_${task.id}_${Date.now()}`,
+    taskId,
     intent: `${task.instruction}\n（起始页面：${task.startUrl}）`,
     executor,
     preserveExistingPage: true,
@@ -120,6 +121,9 @@ async function runLegacy(
     isTaskCancelled: () => awaiting !== null,
     onAwaitingUser: (event) => {
       awaiting = event.question;
+      // A handoff is the scored outcome: release the parked task now instead
+      // of waiting out the 30-minute takeover window (no human in the eval).
+      setTimeout(() => supercarAbort(taskId), 0);
     },
   });
   const steps = outcome.iterations;
@@ -169,9 +173,25 @@ async function runUnified(
   }
 }
 
+/** --resume: keep finished runs from an existing --out CSV and skip them. */
+const resume = process.argv.includes('--resume');
+const previous = new Map<string, string>();
+if (resume) {
+  try {
+    const lines = readFileSync(out, 'utf8').trim().split('\n').slice(1);
+    for (const line of lines) {
+      const [id, , kind] = line.split(',');
+      if (id && kind) previous.set(`${id}|${kind}`, line);
+    }
+  } catch {
+    /* nothing to resume */
+  }
+}
+
 const rows = [
   'id,category,executor,brain,model,status,success,failureClass,steps,durationMs,inputTokens,outputTokens,modelCalls,quota403,reason,attempts',
 ];
+rows.push(...previous.values());
 const summary = { total: 0, modelLayer: 0, environment: 0, counted: 0, succeeded: 0 };
 const executor = new PlaywrightExecutor();
 const launched = await executor.launchManaged({ headless: true });
@@ -412,6 +432,27 @@ try {
         legacy: null,
         unified: null,
       };
+      const doneLegacy = previous.get(`${task.id}|legacy`);
+      const doneUnified = previous.get(`${task.id}|unified`);
+      if (doneLegacy && doneUnified) {
+        process.stdout.write(`${task.id} resumed: pair already recorded\n`);
+        continue;
+      }
+      if (doneLegacy) {
+        // Same model as the recorded legacy run keeps the pair fair.
+        const recordedModel = doneLegacy.split(',')[4] ?? model;
+        process.stdout.write(
+          `${task.id} resumed: legacy recorded, running unified on ${recordedModel}\n`,
+        );
+        budget[recordedModel] ??= { tokens: 0, exhausted: false };
+        pair.model = recordedModel;
+        pair.unified = await runTaskWithRetry(task, 'unified', recordedModel);
+        budget[recordedModel].tokens += pair.unified.tokens;
+        if (pair.unified.quota403) budget[recordedModel].exhausted = true;
+        saveBudget();
+        pairs.push(pair);
+        continue;
+      }
       pair.legacy = await runTaskWithRetry(task, 'legacy', model);
       entry.tokens += pair.legacy.tokens;
       if (pair.legacy.quota403) entry.exhausted = true;
