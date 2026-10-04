@@ -39,6 +39,7 @@ import {
   toNum,
   unavailableLine,
 } from './ashare-format.js';
+import { periodTag } from './ashare-period-check.js';
 import type { AshareQaMatch, ResolvedStock } from './ashare-qa-types.js';
 import type {
   AkEnvelope,
@@ -517,23 +518,34 @@ export function valuationLines(
   return out;
 }
 
-/** ④⑤ 喂 ⑦ LLM 的紧凑上下文（含 PE/PB/分位/行业中位 等原值，供闸门接地校验）。 */
+/**
+ * ④⑤ 喂 ⑦ LLM 的紧凑上下文（含 PE/PB/分位/行业中位 等原值，供闸门接地校验）。
+ * 批次 11.1：**每个财务数字前都标报告期**（「2026Q1 归母净利润」「2025年报 归母净利润」），并注明
+ * 累计口径——防 ⑦ 把年报扭亏说成「今年扭亏」这类期间混淆（生成后另有确定性期间核对）。
+ */
 function fundamentalsContext(env: AkEnvelope<FundamentalsRow> | undefined): string {
   const f = env?.data[0];
   if (!env || env.error || !f) return '④基本面：数据暂不可用';
-  const t = (f.trend3y ?? [])
+  const p = periodTag(f.report_period);
+  const trend = (f.trend3y ?? [])
     .filter((x) => x.report_period)
-    .map((x) => `${String(x.report_period).slice(0, 4)} ${fmtMoneyAuto(x.net_profit)}`)
-    .join('→');
+    .map((x) => `${periodTag(x.report_period)} 归母净利润 ${fmtMoneyAuto(x.net_profit)}`)
+    .join('；');
   const qoq = (v: number | null | undefined) => (v != null ? `,环比${fmtPct(v)}` : '');
+  const items = [
+    `${p} 营收 ${fmtMoneyAuto(f.revenue)}(同比${fmtPct(f.revenue_yoy)}${qoq(f.revenue_qoq)})`,
+    `${p} 归母净利润 ${fmtMoneyAuto(f.net_profit)}(同比${fmtPct(f.net_profit_yoy)}${qoq(f.net_profit_qoq)})`,
+    f.deduct_net_profit != null ? `${p} 扣非净利润 ${fmtMoneyAuto(f.deduct_net_profit)}` : '',
+    `${p} 毛利率${fmtPctPlain(f.gross_margin)}`,
+    `${p} 净利率${fmtPctPlain(f.net_margin)}`,
+    `${p} ROE${fmtPctPlain(f.roe)}`,
+    `${p} 资产负债率${fmtPctPlain(f.debt_ratio)}`,
+    f.ocf_per_share != null ? `${p} 每股经营现金流${fmtNum(f.ocf_per_share)}元` : '',
+    trend,
+  ].filter(Boolean);
   return [
-    `④基本面(基于${reportLabel(f.report_period)},CAS)：`,
-    `营收 ${fmtMoneyAuto(f.revenue)}(同比${fmtPct(f.revenue_yoy)}${qoq(f.revenue_qoq)})；`,
-    `归母净利 ${fmtMoneyAuto(f.net_profit)}(同比${fmtPct(f.net_profit_yoy)}${qoq(f.net_profit_qoq)})；`,
-    f.deduct_net_profit != null ? `扣非净利 ${fmtMoneyAuto(f.deduct_net_profit)}；` : '',
-    `毛利率${fmtPctPlain(f.gross_margin)}；净利率${fmtPctPlain(f.net_margin)}；ROE${fmtPctPlain(f.roe)}；资产负债率${fmtPctPlain(f.debt_ratio)}`,
-    f.ocf_per_share != null ? `；每股经营现金流${fmtNum(f.ocf_per_share)}元` : '',
-    t ? `；近年净利 ${t}` : '',
+    `④基本面(最新报告期 ${p},CAS；一季报/中报/三季报为当年累计值，年报为全年值，不同报告期不可混用)：`,
+    items.join('；'),
   ].join('');
 }
 
