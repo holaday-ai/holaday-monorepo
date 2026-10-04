@@ -102,4 +102,46 @@ describe('fal queue client', () => {
     ).rejects.toMatchObject({ kind: 'no_api_key' });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it('keeps polling a paid job through transient poll/result failures', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(json(200, { request_id: 'r2' }))
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(json(503, { detail: 'busy' }))
+      .mockResolvedValueOnce(json(200, { status: 'COMPLETED' }))
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(json(200, { images: [{ url: 'https://v3.fal.media/x.png' }] }));
+    const out = await runFalQueueJob<{ images: Array<{ url: string }> }>({
+      apiKey: 'id:secret',
+      endpointId: 'fal-ai/nano-banana-2',
+      input: { prompt: 'p' },
+      fetchImpl,
+      sleepImpl: async () => undefined,
+    });
+    expect(out.output.images[0]?.url).toBe('https://v3.fal.media/x.png');
+    // Submit happened exactly once: a retry there could pay twice.
+    expect(
+      fetchImpl.mock.calls.filter((call) => (call[1] as RequestInit).method === 'POST'),
+    ).toHaveLength(1);
+  });
+
+  it('gives up after repeated poll failures and never resubmits', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(json(200, { request_id: 'r3' }))
+      .mockRejectedValue(new TypeError('fetch failed'));
+    await expect(
+      runFalQueueJob({
+        apiKey: 'id:secret',
+        endpointId: 'fal-ai/nano-banana-2',
+        input: { prompt: 'p' },
+        fetchImpl,
+        sleepImpl: async () => undefined,
+      }),
+    ).rejects.toBeInstanceOf(FalQueueError);
+    expect(
+      fetchImpl.mock.calls.filter((call) => (call[1] as RequestInit).method === 'POST'),
+    ).toHaveLength(1);
+  });
 });

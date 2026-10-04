@@ -30,12 +30,13 @@
  * one-env-var fix, never a redeploy.
  */
 
-import { fetchWithTimeout, safeText, sleep, VideoHttpError } from './video-http.js';
+import { VideoHttpError, fetchWithTimeout, safeText, sleep } from './video-http.js';
 
 const DEFAULT_BASE_URL = 'https://dashscope-intl.aliyuncs.com';
 const DEFAULT_IMAGE_MODEL = 'wan2.2-t2i-flash';
 const DEFAULT_VIDEO_MODEL = 'wan2.7-t2v-2026-06-12';
 const DEFAULT_TIMEOUT_MS = 30_000;
+const CREATE_TIMEOUT_MS = 60_000;
 // Image gen is ~10-30s, video 1-5min — these are POLL ceilings, not the
 // per-HTTP timeout above.
 const DEFAULT_IMAGE_MAX_WAIT_MS = 120_000;
@@ -169,11 +170,7 @@ function isRetryableHttpStatus(status: number): boolean {
 }
 
 /** POST a create-task body with X-DashScope-Async, retrying transient 429/503. */
-async function postCreate(
-  url: string,
-  body: unknown,
-  p: WanxiangBaseParams,
-): Promise<string> {
+async function postCreate(url: string, body: unknown, p: WanxiangBaseParams): Promise<string> {
   const fetchImpl = p.fetchImpl ?? fetch;
   const maxRetries = p.maxRetries ?? 2;
   const retryBaseMs = p.retryBaseMs ?? 1000;
@@ -192,7 +189,13 @@ async function postCreate(
           },
           body: JSON.stringify(body),
         },
-        { timeoutMs: p.timeoutMs ?? DEFAULT_TIMEOUT_MS, ...(p.signal ? { signal: p.signal } : {}), fetchImpl },
+        // Create is not retried on a lost response (it may already be billed),
+        // so give the single attempt more room than a poll.
+        {
+          timeoutMs: p.timeoutMs ?? CREATE_TIMEOUT_MS,
+          ...(p.signal ? { signal: p.signal } : {}),
+          fetchImpl,
+        },
       );
     } catch (err) {
       if (err instanceof VideoHttpError) throw new WanxiangError(err.message, err.kind);
@@ -217,7 +220,10 @@ async function postCreate(
   try {
     json = (await res.json()) as DashScopeCreateResponse;
   } catch (err) {
-    throw new WanxiangError(`DashScope create response not JSON: ${(err as Error).message}`, 'bad_response');
+    throw new WanxiangError(
+      `DashScope create response not JSON: ${(err as Error).message}`,
+      'bad_response',
+    );
   }
   const taskId = json.output?.task_id;
   if (!taskId) {
@@ -299,7 +305,11 @@ export async function getTaskStatus(
           ...(p.workspaceId ? { 'x-dashscope-workspace': p.workspaceId } : {}),
         },
       },
-      { timeoutMs: p.timeoutMs ?? DEFAULT_TIMEOUT_MS, ...(p.signal ? { signal: p.signal } : {}), fetchImpl },
+      {
+        timeoutMs: p.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        ...(p.signal ? { signal: p.signal } : {}),
+        fetchImpl,
+      },
     );
   } catch (err) {
     if (err instanceof VideoHttpError) throw new WanxiangError(err.message, err.kind);
@@ -307,13 +317,21 @@ export async function getTaskStatus(
   }
   if (!res.ok) {
     const errBody = await safeText(res);
-    throw new WanxiangError(`DashScope task poll returned ${res.status}`, 'http', res.status, errBody.slice(0, 800));
+    throw new WanxiangError(
+      `DashScope task poll returned ${res.status}`,
+      'http',
+      res.status,
+      errBody.slice(0, 800),
+    );
   }
   let json: DashScopeTaskResponse;
   try {
     json = (await res.json()) as DashScopeTaskResponse;
   } catch (err) {
-    throw new WanxiangError(`DashScope task response not JSON: ${(err as Error).message}`, 'bad_response');
+    throw new WanxiangError(
+      `DashScope task response not JSON: ${(err as Error).message}`,
+      'bad_response',
+    );
   }
   const out = json.output ?? {};
   const taskStatus = (out.task_status ?? 'UNKNOWN') as WanxiangTaskStatus;
@@ -348,8 +366,26 @@ export async function waitForTask(p: WaitForTaskParams): Promise<WanxiangTaskRes
   const pollIntervalMs = p.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const maxWaitMs = p.maxWaitMs ?? DEFAULT_IMAGE_MAX_WAIT_MS;
   const startedAt = Date.now();
+  let consecutivePollFailures = 0;
   for (;;) {
-    const status = await getTaskStatus(p);
+    // Polling is an idempotent GET on an already-created (paid) task: transient
+    // timeouts / network errors / 429 / 5xx keep polling until maxWaitMs.
+    let status: WanxiangTaskResult;
+    try {
+      status = await getTaskStatus(p);
+      consecutivePollFailures = 0;
+    } catch (error) {
+      consecutivePollFailures += 1;
+      const transient =
+        error instanceof WanxiangError &&
+        (error.kind === 'timeout' ||
+          error.kind === 'network' ||
+          (error.kind === 'http' && ((error.status ?? 0) >= 500 || error.status === 429)));
+      if (!transient || consecutivePollFailures >= 5 || Date.now() - startedAt > maxWaitMs)
+        throw error;
+      await sleep(pollIntervalMs);
+      continue;
+    }
     p.onStatus?.(status);
     if (status.taskStatus === 'SUCCEEDED') return status;
     if (

@@ -120,10 +120,19 @@ export async function generateFalImages(p: FalImageParams): Promise<ImageGenerat
       continue;
     }
     try {
-      const downloaded = await download(file.url, {
-        maxBytes: MAX_RESULT_BYTES,
-        timeoutMs: 60_000,
-      });
+      // The image is already generated and paid for: retry the CDN download.
+      let downloaded!: Awaited<ReturnType<typeof downloadToBuffer>>;
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          downloaded = await download(file.url, { maxBytes: MAX_RESULT_BYTES, timeoutMs: 90_000 });
+          break;
+        } catch (error) {
+          const transient =
+            error instanceof VideoHttpError &&
+            (error.kind === 'timeout' || error.kind === 'network');
+          if (!transient || attempt >= 3) throw error;
+        }
+      }
       images.push({
         buffer: downloaded.buffer,
         mimeType: file.content_type ?? downloaded.contentType ?? 'image/png',

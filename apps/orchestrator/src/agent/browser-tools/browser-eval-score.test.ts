@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { type BrowserEvalTask, scoreBrowserEval } from '../../../scripts/browser-eval/score.js';
+import {
+  type BrowserEvalTask,
+  classifyFailure,
+  scoreBrowserEval,
+} from '../../../scripts/browser-eval/score.js';
 
 const suite = JSON.parse(
   readFileSync(new URL('../../../scripts/browser-eval/tasks.json', import.meta.url), 'utf8'),
@@ -46,5 +50,32 @@ describe('browser eval suite', () => {
         steps: 2,
       }),
     ).toBe(false);
+  });
+
+  it('excludes model-layer and environment failures from the success rate', () => {
+    const failed = {
+      status: 'failed' as const,
+      reason: '模型服务暂时不可用，请稍后重试。',
+      steps: 0,
+    };
+    expect(classifyFailure(false, failed, [{ type: 'model_error', code: 'PROVIDER_ERROR' }])).toBe(
+      'model_layer',
+    );
+    expect(
+      classifyFailure(
+        false,
+        { status: 'failed', reason: 'harness: page.goto timeout', steps: 0 },
+        [],
+      ),
+    ).toBe('environment');
+    expect(
+      classifyFailure(false, { status: 'failed', reason: '找不到按钮', steps: 6 }, [
+        { type: 'model' },
+        { type: 'model' },
+      ]),
+    ).toBe('browser');
+    expect(
+      classifyFailure(true, { status: 'completed', summary: 'x', evidence: 'x', steps: 2 }, []),
+    ).toBe('none');
   });
 });

@@ -116,6 +116,16 @@ export function falHttpError(prefix: string, status: number, body: string): FalQ
   return new FalQueueError(`${prefix} returned ${status}`, 'http', status, body.slice(0, 400));
 }
 
+const MAX_CONSECUTIVE_POLL_FAILURES = 5;
+const MAX_RESULT_ATTEMPTS = 3;
+
+/** Timeouts, network errors, 429 and 5xx on idempotent GETs are worth retrying. */
+export function isTransientFalError(error: unknown): boolean {
+  if (!(error instanceof FalQueueError)) return false;
+  if (error.kind === 'timeout' || error.kind === 'network') return true;
+  return error.kind === 'http' && (error.status === 429 || (error.status ?? 0) >= 500);
+}
+
 async function falFetch(url: string, init: RequestInit, p: FalQueueParams): Promise<Response> {
   try {
     return await fetchWithTimeout(url, init, {
@@ -165,12 +175,28 @@ export async function runFalQueueJob<T = unknown>(
   const responseUrl = trustedQueueUrl(submit.response_url, p) ?? appBase;
   const maxWaitMs = p.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
 
+  let consecutivePollFailures = 0;
   for (;;) {
-    const statusRes = await falFetch(statusUrl, { method: 'GET', headers }, p);
-    if (!statusRes.ok)
-      throw falHttpError('fal status', statusRes.status, await safeText(statusRes));
-    const status =
-      (await readJson<{ status?: string }>(statusRes, 'fal status')).status ?? 'UNKNOWN';
+    // Status polls are idempotent GETs: a transient timeout / network error /
+    // 429 / 5xx must not lose an already-paid job — keep polling until maxWait.
+    let status: string;
+    try {
+      const statusRes = await falFetch(statusUrl, { method: 'GET', headers }, p);
+      if (!statusRes.ok)
+        throw falHttpError('fal status', statusRes.status, await safeText(statusRes));
+      status = (await readJson<{ status?: string }>(statusRes, 'fal status')).status ?? 'UNKNOWN';
+      consecutivePollFailures = 0;
+    } catch (error) {
+      consecutivePollFailures += 1;
+      if (
+        !isTransientFalError(error) ||
+        consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES ||
+        Date.now() - startedAt > maxWaitMs
+      )
+        throw error;
+      await wait(p.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
+      continue;
+    }
     p.onStatus?.(status, Date.now() - startedAt);
     if (status === 'COMPLETED') break;
     if (status !== 'IN_QUEUE' && status !== 'IN_PROGRESS') {
@@ -192,8 +218,18 @@ export async function runFalQueueJob<T = unknown>(
     await wait(p.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
   }
 
-  const resultRes = await falFetch(responseUrl, { method: 'GET', headers }, p);
-  if (!resultRes.ok) throw falHttpError('fal result', resultRes.status, await safeText(resultRes));
-  const output = await readJson<T>(resultRes, 'fal result');
+  let output!: T;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const resultRes = await falFetch(responseUrl, { method: 'GET', headers }, p);
+      if (!resultRes.ok)
+        throw falHttpError('fal result', resultRes.status, await safeText(resultRes));
+      output = await readJson<T>(resultRes, 'fal result');
+      break;
+    } catch (error) {
+      if (!isTransientFalError(error) || attempt >= MAX_RESULT_ATTEMPTS) throw error;
+      await wait(p.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
+    }
+  }
   return { output, requestId, elapsedMs: Date.now() - startedAt };
 }

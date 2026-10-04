@@ -25,7 +25,7 @@ import { env } from '../../src/config/env.js';
 import type { MessagesAdapter } from '../../src/llm/messages-adapter.js';
 import { BUILTIN_MODEL_CATALOG } from '../../src/llm/model-catalog.js';
 import { createProductionModelRuntimeWiring } from '../../src/llm/model-runtime-wiring.js';
-import { type BrowserEvalTask, scoreBrowserEval } from './score.js';
+import { type BrowserEvalTask, classifyFailure, scoreBrowserEval } from './score.js';
 
 function arg(name: string): string | undefined {
   const index = process.argv.indexOf(`--${name}`);
@@ -44,8 +44,20 @@ const suite = JSON.parse(readFileSync(new URL('./tasks.json', import.meta.url), 
 };
 const ids = process.argv.includes('--smoke') ? suite.smokeIds : arg('ids')?.split(',');
 const tasks = ids ? suite.tasks.filter((task) => ids.includes(task.id)) : suite.tasks;
-const brain = BUILTIN_MODEL_CATALOG.find((entry) => entry.id === brainId);
-if (!brain) throw new Error(`unknown brain ${brainId}`);
+const catalogBrain = BUILTIN_MODEL_CATALOG.find((entry) => entry.id === brainId);
+if (!catalogBrain) throw new Error(`unknown brain ${brainId}`);
+// --model overrides the browser + vision lane model of the brain (e.g. qwen3.8-flash).
+const modelOverride = arg('model');
+const brain = modelOverride
+  ? {
+      ...catalogBrain,
+      laneModels: { ...catalogBrain.laneModels, browser: modelOverride, vision: modelOverride },
+    }
+  : catalogBrain;
+const concurrency = Number(arg('concurrency') ?? 1);
+if (concurrency !== 1)
+  throw new Error('--concurrency must be 1: executors and tasks run strictly one at a time');
+const delayMs = Number(arg('delay-ms') ?? 2_500);
 if (executorKind !== 'unified' && executorKind !== 'legacy')
   throw new Error('--executor must be unified or legacy');
 
@@ -128,8 +140,9 @@ async function runUnified(
 }
 
 const rows = [
-  'id,category,executor,brain,status,success,steps,durationMs,inputTokens,outputTokens,modelCalls,reason',
+  'id,category,executor,brain,model,status,success,failureClass,steps,durationMs,inputTokens,outputTokens,modelCalls,reason',
 ];
+const summary = { total: 0, modelLayer: 0, environment: 0, counted: 0, succeeded: 0 };
 const executor = new PlaywrightExecutor();
 const launched = await executor.launchManaged({ headless: true });
 if (!launched.ok) throw new Error('browser launch failed');
@@ -205,6 +218,14 @@ try {
       `${trace.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
     );
     const success = scoreBrowserEval(task, outcome);
+    const failureClass = classifyFailure(success, outcome, trace);
+    summary.total += 1;
+    if (failureClass === 'model_layer') summary.modelLayer += 1;
+    else if (failureClass === 'environment') summary.environment += 1;
+    else {
+      summary.counted += 1;
+      if (success) summary.succeeded += 1;
+    }
     const reason =
       outcome.status === 'failed'
         ? outcome.reason
@@ -217,8 +238,10 @@ try {
         task.category,
         executorKind,
         brainId,
+        brain.laneModels.browser ?? '',
         outcome.status,
         success,
+        failureClass,
         outcome.steps,
         Date.now() - started,
         inputTokens,
@@ -227,11 +250,18 @@ try {
         JSON.stringify(reason.replace(/\s+/g, ' ').slice(0, 120)),
       ].join(','),
     );
-    process.stdout.write(`${task.id} ${executorKind} ${outcome.status} success=${success}\n`);
+    process.stdout.write(
+      `${task.id} ${executorKind} ${outcome.status} success=${success} class=${failureClass}\n`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, `${rows.join('\n')}\n`);
   }
 } finally {
   await executor.disconnect().catch(() => {});
 }
+const rate = summary.counted ? ((summary.succeeded / summary.counted) * 100).toFixed(1) : 'n/a';
+process.stdout.write(
+  `summary executor=${executorKind} total=${summary.total} counted=${summary.counted} succeeded=${summary.succeeded} successRate=${rate}% excluded_model_layer=${summary.modelLayer} excluded_environment=${summary.environment}\n`,
+);
 process.stdout.write(`wrote ${out}\n`);

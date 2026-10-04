@@ -42,3 +42,22 @@ export function scoreBrowserEval(task: BrowserEvalTask, outcome: UnifiedBrowserO
     }
   }
 }
+
+/**
+ * Failure attribution for success-rate accounting:
+ *  - model_layer: a model call failed (403/429/timeouts/provider errors) — excluded;
+ *  - environment: the harness could not reach the start page — excluded;
+ *  - browser: everything else (counted; includes successes).
+ */
+export function classifyFailure(
+  success: boolean,
+  outcome: UnifiedBrowserOutcome,
+  trace: ReadonlyArray<Record<string, unknown>>,
+): 'none' | 'model_layer' | 'environment' | 'browser' {
+  if (success) return 'none';
+  if (outcome.status === 'failed' && outcome.reason.startsWith('harness:')) return 'environment';
+  const modelErrors = trace.filter((entry) => entry.type === 'model_error').length;
+  const modelOk = trace.filter((entry) => entry.type === 'model').length;
+  if (modelErrors > 0 && (modelOk === 0 || outcome.status !== 'completed')) return 'model_layer';
+  return 'browser';
+}
