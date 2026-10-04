@@ -202,4 +202,69 @@ describe('createProductionModelRuntimeWiring', () => {
       ).toEqual({ kind: 'unavailable', reasonCode: 'MODEL_PROVIDER_NOT_CONFIGURED' });
     });
   });
+
+  describe('Bailian MCP tools', () => {
+    const MCP_ENV = {
+      ...ENVIRONMENT,
+      QWEN_CORE_ROLLOUT_MODE: 'all' as const,
+      QWEN_CORE_ENABLED_LANES: '',
+    };
+    const ownership = { scope: 'personal' as const, userRegion: 'intl' };
+    const mcpTool = {
+      type: 'mcp' as const,
+      serverLabel: 'amap',
+      serverUrl: 'https://dashscope.example/amap/sse',
+    };
+
+    function setup() {
+      const stream = vi.fn(
+        async (_request: unknown) =>
+          ({
+            status: 'completed',
+            text: '',
+            sources: [],
+            usage: { inputTokens: 1, outputTokens: 1 },
+          }) as never,
+      );
+      const createResponses = vi.fn(() => ({
+        metadata: {
+          provider: 'alibaba-model-studio' as const,
+          model: 'qwen3.8-max',
+          region: 'intl' as const,
+          deploymentScope: 'international' as const,
+          endpointKind: 'public' as const,
+          protocol: 'responses' as const,
+        },
+        stream,
+      }));
+      const wiring = createProductionModelRuntimeWiring(
+        MCP_ENV,
+        { createResponses },
+        { mcpTools: () => [mcpTool] },
+      );
+      return { stream, wiring };
+    }
+
+    it.each(['generate', 'scrape'] as const)('appends MCP tools on the %s lane', async (lane) => {
+      const { stream, wiring } = setup();
+      const runtime = wiring.resolveCore({ actorExternalId: 'usr_any', lane, ownership });
+      if (runtime.kind !== 'ready') throw new Error('expected ready');
+      await runtime
+        .responses('standard')
+        .stream({ input: [{ role: 'user', content: 'x' }], tools: [{ type: 'web_search' }] });
+      expect(stream.mock.calls[0]?.[0]).toMatchObject({
+        tools: [{ type: 'web_search' }, mcpTool],
+      });
+    });
+
+    it('leaves other lanes untouched', async () => {
+      const { stream, wiring } = setup();
+      const runtime = wiring.resolveCore({ actorExternalId: 'usr_any', lane: 'plan', ownership });
+      if (runtime.kind !== 'ready') throw new Error('expected ready');
+      await runtime
+        .responses('standard')
+        .stream({ input: [{ role: 'user', content: 'x' }], tools: [{ type: 'web_search' }] });
+      expect(stream.mock.calls[0]?.[0]).toMatchObject({ tools: [{ type: 'web_search' }] });
+    });
+  });
 });

@@ -382,4 +382,34 @@ describe('createQwenResponsesAdapter', () => {
       code: 'INVALID_RESPONSE',
     });
   });
+
+  it('maps admin MCP servers to Bailian SSE tools authenticated with the route key only', async () => {
+    const body =
+      sseEvent({ type: 'response.output_text.delta', delta: 'ok' }) + sseEvent(completedEvent());
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      streamResponse([new TextEncoder().encode(body)]),
+    );
+    const adapter = createQwenResponsesAdapter({ route: INTL_RESPONSES_ROUTE, fetchImpl });
+
+    await adapter.stream({
+      input: [{ role: 'user', content: 'Use the map server.' }],
+      tools: [
+        { type: 'web_search' },
+        { type: 'mcp', serverLabel: 'amap', serverUrl: 'https://dashscope.example/amap/sse' },
+      ],
+    });
+
+    const [, init] = fetchImpl.mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body)).tools).toEqual([
+      { type: 'web_search' },
+      {
+        type: 'mcp',
+        server_protocol: 'sse',
+        server_label: 'amap',
+        server_url: 'https://dashscope.example/amap/sse',
+        headers: { Authorization: 'Bearer private-responses-key' },
+      },
+    ]);
+    expect(JSON.stringify(adapter.metadata)).not.toContain('private-responses-key');
+  });
 });

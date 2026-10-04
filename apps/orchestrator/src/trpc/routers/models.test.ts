@@ -20,8 +20,21 @@ vi.mock('../../llm/model-catalog-runtime.js', async () => {
     },
     isProviderConfigured: (provider) => provider !== 'openai',
   });
+  const { createCatalogSettingsService } = await import('../../llm/model-catalog-settings.js');
+  let mcpRows: { label: string; url: string }[] = [];
+  const catalogSettingsService = createCatalogSettingsService({
+    store: {
+      async loadMcpServers() {
+        return mcpRows;
+      },
+      async saveMcpServers(change) {
+        mcpRows = [...change.next];
+      },
+    },
+  });
   return {
     modelCatalogService,
+    catalogSettingsService,
     isAdminUser: async (_db: unknown, userId: string) => state.admins.has(userId),
   };
 });
@@ -79,6 +92,34 @@ describe('models router', () => {
       caller('usr_admin').adminUpdate({ id: 'qwen', userVisible: false }),
     ).rejects.toMatchObject({
       code: 'BAD_REQUEST',
+    });
+  });
+
+  describe('Bailian MCP servers', () => {
+    it('is admin only', async () => {
+      await expect(caller('usr_plain').adminMcpList()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(caller('usr_plain').adminMcpUpdate({ items: [] })).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+      });
+    });
+
+    it('lets admins add and delete servers', async () => {
+      state.admins.add('usr_admin');
+      const admin = caller('usr_admin');
+      await expect(admin.adminMcpList()).resolves.toEqual({ max: 10, items: [] });
+      const added = await admin.adminMcpUpdate({
+        items: [{ label: 'amap', url: 'https://dashscope.example/amap/sse' }],
+      });
+      expect(added.items).toEqual([{ label: 'amap', url: 'https://dashscope.example/amap/sse' }]);
+      await expect(admin.adminMcpList()).resolves.toMatchObject({ items: added.items });
+      await expect(admin.adminMcpUpdate({ items: [] })).resolves.toMatchObject({ items: [] });
+    });
+
+    it('rejects invalid servers as a bad request', async () => {
+      state.admins.add('usr_admin');
+      await expect(
+        caller('usr_admin').adminMcpUpdate({ items: [{ label: 'x', url: 'http://plain' }] }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     });
   });
 });

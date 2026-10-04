@@ -181,7 +181,9 @@ import {
   recordTaskModelSelection,
   runWithBrain,
 } from '../../llm/model-catalog.js';
+import { toMcpTools } from '../../llm/model-catalog-settings.js';
 import {
+  catalogSettingsService,
   modelCatalogService,
   resolveBrainForExistingTask,
   resolveBrainForUser,
@@ -540,6 +542,7 @@ const legacyMediaModelClient = dormantLegacyModelClient();
 
 const modelRuntimeWiring = createProductionModelRuntimeWiring(appEnv, {}, {
   catalog: () => modelCatalogService.snapshot(),
+  mcpTools: () => toMcpTools(catalogSettingsService.mcpServersSnapshot()),
 });
 
 function resolveGenerateRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {

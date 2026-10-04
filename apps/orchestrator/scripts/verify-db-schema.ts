@@ -41,6 +41,7 @@ const REQUIRED_TABLES = [
   'llm_calls',
   'model_catalog',
   'model_catalog_events',
+  'model_catalog_settings',
   'notifications',
   'notification_channels',
   'operation_path_replays',

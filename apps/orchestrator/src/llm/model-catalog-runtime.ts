@@ -4,6 +4,10 @@ import { env } from '../config/env.js';
 import { type DB, db } from '../db/client.js';
 import { users } from '../db/schema/users.js';
 import {
+  createCatalogSettingsService,
+  createDrizzleCatalogSettingsStore,
+} from './model-catalog-settings.js';
+import {
   type ResolvedBrain,
   createDrizzleModelCatalogStore,
   createModelCatalogService,
@@ -27,6 +31,11 @@ export const modelCatalogService = createModelCatalogService({
       'model catalog unavailable; using built-in defaults',
     );
   },
+});
+
+/** Global catalog settings (Bailian MCP servers). Empty until migration 0064. */
+export const catalogSettingsService = createCatalogSettingsService({
+  store: createDrizzleCatalogSettingsStore(db),
 });
 
 export async function isAdminUser(database: DB, userExternalId: string): Promise<boolean> {

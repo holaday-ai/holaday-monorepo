@@ -83,4 +83,13 @@ export const taskModelSelections = mysqlTable(
   (t) => [uniqueIndex('uk_task_model_selections_task').on(t.taskExternalId)],
 );
 
+/** Global catalog settings (migration 0064), e.g. `mcp_servers`. No user data. */
+export const modelCatalogSettings = mysqlTable('model_catalog_settings', {
+  id: varchar('id', { length: 64 }).primaryKey(),
+  value: json('value').notNull(),
+  updatedAt: datetime('updated_at', { mode: 'date', fsp: 3 })
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP(3)`),
+});
+
 export type ModelCatalogRow = typeof modelCatalog.$inferSelect;

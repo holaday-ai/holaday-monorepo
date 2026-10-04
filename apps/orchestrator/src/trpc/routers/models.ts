@@ -5,7 +5,12 @@
  */
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { isAdminUser, modelCatalogService } from '../../llm/model-catalog-runtime.js';
+import {
+  catalogSettingsService,
+  isAdminUser,
+  modelCatalogService,
+} from '../../llm/model-catalog-runtime.js';
+import { MAX_MCP_SERVERS } from '../../llm/model-catalog-settings.js';
 import {
   BRAIN_LANES,
   type BrainEntry,
@@ -89,6 +94,37 @@ export const modelsRouter = router({
             code: error.code === 'NOT_FOUND' ? 'NOT_FOUND' : 'BAD_REQUEST',
             message: error.message,
           });
+        }
+        throw error;
+      }
+    }),
+
+  /** Bailian MCP servers attached to the Qwen generate / scrape lanes. */
+  adminMcpList: adminProcedure.query(async () => ({
+    max: MAX_MCP_SERVERS,
+    items: [...(await catalogSettingsService.mcpServers())],
+  })),
+
+  adminMcpUpdate: adminProcedure
+    .input(
+      z
+        .object({
+          items: z
+            .array(z.object({ label: z.string().max(64), url: z.string().max(2048) }).strict())
+            .max(MAX_MCP_SERVERS),
+        })
+        .strict(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const items = await catalogSettingsService.updateMcpServers({
+          servers: input.items,
+          actorExternalId: ctx.userId,
+        });
+        return { max: MAX_MCP_SERVERS, items: [...items] };
+      } catch (error) {
+        if (error instanceof ModelCatalogError) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: error.message });
         }
         throw error;
       }

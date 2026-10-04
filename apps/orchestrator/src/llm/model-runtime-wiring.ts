@@ -20,7 +20,7 @@ import { createMessagesBackedResponsesAdapter } from './providers/messages-backe
 import { createOpenAIMessagesAdapter } from './providers/openai-messages-adapter.js';
 import { createOpenAIResponsesAdapter } from './providers/openai-responses-adapter.js';
 import type { QwenPurpose } from './qwen-route.js';
-import type { ResponsesAdapter } from './responses-adapter.js';
+import type { NeutralMcpTool, ResponsesAdapter } from './responses-adapter.js';
 
 export type ModelTaskUnavailableReason =
   | 'MODEL_DATA_REGION_UNASSIGNED'
@@ -86,9 +86,10 @@ export interface ProductionModelRuntimeWiring {
     /** Explicit brain; otherwise the task's bound brain, otherwise the catalog default. */
     brain?: BrainEntry;
   }): ProductionModelRuntimeResolution;
-  resolveUnmigrated(
-    lane: UnmigratedModelLane,
-  ): { kind: 'unavailable'; reasonCode: 'MODEL_MIGRATION_IN_PROGRESS' };
+  resolveUnmigrated(lane: UnmigratedModelLane): {
+    kind: 'unavailable';
+    reasonCode: 'MODEL_MIGRATION_IN_PROGRESS';
+  };
 }
 
 export function isExternalProviderConfigured(
@@ -103,7 +104,11 @@ export function isExternalProviderConfigured(
 export function createProductionModelRuntimeWiring(
   environment: ModelRuntimeEnvironment,
   factories: RuntimeFactories = {},
-  options: { catalog?: () => readonly BrainEntry[] } = {},
+  options: {
+    catalog?: () => readonly BrainEntry[];
+    /** Bailian MCP tools for the Qwen generate / scrape lanes (admin setting). */
+    mcpTools?: () => readonly NeutralMcpTool[];
+  } = {},
 ): ProductionModelRuntimeWiring {
   const catalog = options.catalog ?? (() => BUILTIN_MODEL_CATALOG);
   const { createExternalMessages, createExternalResponses, ...qwenFactories } = factories;
@@ -130,13 +135,16 @@ export function createProductionModelRuntimeWiring(
         ...qwenFactories,
       });
       if (resolution.kind === 'ready') {
+        const withMcp = MCP_LANES.has(input.lane) && options.mcpTools;
         return {
           kind: 'ready',
           brainId: brain.id,
           provider: 'alibaba-model-studio',
           region: resolution.region,
           messages: resolution.messages,
-          responses: resolution.responses,
+          responses: withMcp
+            ? (purpose) => withMcpTools(resolution.responses(purpose), options.mcpTools)
+            : resolution.responses,
         };
       }
       return { kind: 'unavailable', reasonCode: mapCoreUnavailableReason(resolution.reason) };
@@ -152,6 +160,23 @@ export function createProductionModelRuntimeWiring(
  * uses that lane's model; screenshots use the vision model. Missing entries
  * keep the env route default. Region selection is untouched.
  */
+const MCP_LANES: ReadonlySet<CoreModelLane> = new Set(['generate', 'scrape']);
+
+/** Appends the admin-configured Bailian MCP tools to every Responses request. */
+function withMcpTools(
+  adapter: ResponsesAdapter,
+  mcpTools: (() => readonly NeutralMcpTool[]) | undefined,
+): ResponsesAdapter {
+  return {
+    metadata: adapter.metadata,
+    stream(request, options) {
+      const tools = mcpTools?.() ?? [];
+      if (tools.length === 0) return adapter.stream(request, options);
+      return adapter.stream({ ...request, tools: [...(request.tools ?? []), ...tools] }, options);
+    },
+  };
+}
+
 function withBrainQwenModels(
   environment: CoreModelRuntimeEnvironment,
   brain: BrainEntry,
@@ -251,7 +276,10 @@ function defaultExternalResponses(input: {
       ...(input.environment.OPENAI_BASE_URL ? { baseURL: input.environment.OPENAI_BASE_URL } : {}),
     });
   }
-  return createMessagesBackedResponsesAdapter({ messages: input.messages(), provider: input.provider });
+  return createMessagesBackedResponsesAdapter({
+    messages: input.messages(),
+    provider: input.provider,
+  });
 }
 
 function mapCoreUnavailableReason(

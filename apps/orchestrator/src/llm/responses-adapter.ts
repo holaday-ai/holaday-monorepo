@@ -6,7 +6,19 @@ import { toSafeQwenRouteMetadata } from './qwen-route.js';
 export type NeutralBuiltinTool =
   | { type: 'web_search' }
   | { type: 'web_extractor' }
-  | { type: 'code_interpreter' };
+  | { type: 'code_interpreter' }
+  | NeutralMcpTool;
+
+/**
+ * Bailian (Model Studio) hosted MCP server over SSE. Authorization is added by
+ * the Qwen adapter from its own DashScope key at request time — never stored
+ * in config, never logged.
+ */
+export interface NeutralMcpTool {
+  type: 'mcp';
+  serverLabel: string;
+  serverUrl: string;
+}
 
 export interface NeutralResponseInputMessage {
   role: 'user' | 'assistant';
@@ -94,6 +106,7 @@ const ALLOWED_TOOL_TYPES = new Set<NeutralBuiltinTool['type']>([
   'web_search',
   'web_extractor',
   'code_interpreter',
+  'mcp',
 ]);
 
 export class ResponsesAdapterError extends Error {
@@ -161,7 +174,9 @@ export function createQwenResponsesAdapter(input: {
           if (callerAborted) throw new ResponsesAdapterError('REQUEST_ABORTED');
           let body: string;
           try {
-            body = JSON.stringify(toProviderRequest(request, input.route.model));
+            body = JSON.stringify(
+              toProviderRequest(request, input.route.model, input.route.apiKey),
+            );
           } catch {
             throw new ResponsesAdapterError('PROVIDER_ERROR');
           }
@@ -290,6 +305,7 @@ async function waitForRetry(
 function toProviderRequest(
   request: NeutralResponsesRequest,
   model: string,
+  apiKey = '',
 ): Record<string, unknown> {
   return {
     model,
@@ -301,7 +317,17 @@ function toProviderRequest(
       ? {
           tools: request.tools
             .filter((tool) => ALLOWED_TOOL_TYPES.has(tool.type))
-            .map((tool) => ({ type: tool.type })),
+            .map((tool) =>
+              tool.type === 'mcp'
+                ? {
+                    type: 'mcp',
+                    server_protocol: 'sse',
+                    server_label: tool.serverLabel,
+                    server_url: tool.serverUrl,
+                    headers: { Authorization: `Bearer ${apiKey}` },
+                  }
+                : { type: tool.type },
+            ),
         }
       : {}),
     ...(typeof request.temperature === 'number' && Number.isFinite(request.temperature)

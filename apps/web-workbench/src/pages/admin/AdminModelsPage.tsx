@@ -243,6 +243,129 @@ export function AdminModelsPage(): JSX.Element {
           </tbody>
         </table>
       </div>
+      <McpServersSection />
     </div>
+  );
+}
+
+type McpData = Awaited<ReturnType<typeof trpc.models.adminMcpList.query>>;
+
+/** 百炼 MCP 服务 — attached to the Qwen 生成 / 搜索抓取 lanes; auth reuses the DashScope key. */
+function McpServersSection(): JSX.Element {
+  const mountedRef = useMountedRef();
+  const [data, setData] = React.useState<McpData | null>(null);
+  const [message, setMessage] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [label, setLabel] = React.useState('');
+  const [url, setUrl] = React.useState('');
+
+  React.useEffect(() => {
+    trpc.models.adminMcpList
+      .query()
+      .then((next) => {
+        if (mountedRef.current) setData(next);
+      })
+      .catch((err: unknown) => {
+        if (mountedRef.current) setMessage(pageErrorMessage(err, 'MCP 服务加载失败'));
+      });
+  }, [mountedRef]);
+
+  const save = async (items: McpData['items'], success: string) => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const next = await trpc.models.adminMcpUpdate.mutate({ items: [...items] });
+      if (!mountedRef.current) return;
+      setData(next);
+      setMessage(`${success}，新任务立即生效。`);
+      setLabel('');
+      setUrl('');
+    } catch (err) {
+      if (mountedRef.current) setMessage(pageErrorMessage(err, '保存失败'));
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  };
+
+  const full = data ? data.items.length >= data.max : true;
+  const canAdd = !busy && !full && label.trim().length > 0 && url.trim().length > 0;
+
+  return (
+    <section className="space-y-3 rounded-[10px] border border-[#EFEFEF] bg-white p-4">
+      <div>
+        <h2 className="text-[15px] font-semibold text-foreground">百炼 MCP 服务</h2>
+        <p className="mt-1 text-[12px] text-muted-foreground">
+          千问的“生成”和“搜索抓取”通道会带上这些 MCP 工具，鉴权沿用百炼 API 密钥。最多{' '}
+          {data?.max ?? 10} 个，地址须为 https。
+        </p>
+      </div>
+      {message ? <div className="text-[12px] text-foreground">{message}</div> : null}
+      {!data ? (
+        <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> 加载中…
+        </div>
+      ) : (
+        <>
+          {data.items.length === 0 ? (
+            <div className="text-[12px] text-muted-foreground">暂未配置 MCP 服务。</div>
+          ) : (
+            <ul className="divide-y divide-[#EFEFEF] rounded-[8px] border border-[#EFEFEF]">
+              {data.items.map((item) => (
+                <li key={item.label} className="flex items-center gap-3 px-3 py-2 text-[12px]">
+                  <span className="w-32 shrink-0 font-medium text-foreground">{item.label}</span>
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">{item.url}</span>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      void save(
+                        data.items.filter((other) => other.label !== item.label),
+                        `已删除 ${item.label}`,
+                      )
+                    }
+                    className="text-[#EA1F59] hover:underline disabled:opacity-50"
+                  >
+                    删除
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              value={label}
+              onChange={(event) => setLabel(event.target.value)}
+              placeholder="名称（字母、数字、- 或 _）"
+              className="rounded-[6px] border border-[#DCDDDD] px-2 py-1 text-[12px] sm:w-48"
+            />
+            <input
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
+              placeholder="https://…/sse"
+              className="min-w-0 flex-1 rounded-[6px] border border-[#DCDDDD] px-2 py-1 text-[12px]"
+            />
+            <button
+              type="button"
+              disabled={!canAdd}
+              onClick={() =>
+                void save(
+                  [...data.items, { label: label.trim(), url: url.trim() }],
+                  `已添加 ${label.trim()}`,
+                )
+              }
+              className="rounded-[6px] bg-[#EA1F59] px-3 py-1 text-[12px] text-white disabled:opacity-50"
+            >
+              {busy ? (
+                <Loader2 className="inline h-3.5 w-3.5 animate-spin" />
+              ) : full ? (
+                '已达上限'
+              ) : (
+                '添加'
+              )}
+            </button>
+          </div>
+        </>
+      )}
+    </section>
   );
 }
