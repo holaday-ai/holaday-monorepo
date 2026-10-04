@@ -1,4 +1,5 @@
 import type { Page } from 'playwright';
+import { PageRedactionError, REDACTION_FAILED_COPY, redactPageText } from './page-redaction.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
 /** One tool result for the model: text always, an image only for `screenshot`. */
@@ -37,7 +38,11 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
   const byRef = (ref: string) => page.locator(`aria-ref=${ref}`);
 
   const snapshotText = async (): Promise<string> => {
-    const tree = await page.locator('body').ariaSnapshot({ mode: 'ai', timeout });
+    // Redact before truncating: a secret straddling the cut must not survive.
+    const tree = await redactPageText(
+      page as never,
+      await page.locator('body').ariaSnapshot({ mode: 'ai', timeout }),
+    );
     const header = `URL: ${page.url()}\n标题: ${await page.title()}\n`;
     const body = tree.length > maxSnapshot ? `${tree.slice(0, maxSnapshot)}\n…（已截断）` : tree;
     return `${header}${body}`;
@@ -81,7 +86,9 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           });
           return done(`已打开 ${page.url()}`);
         case 'extract': {
-          const content = (await page.locator('body').innerText({ timeout })).slice(0, maxExtract);
+          const content = (
+            await redactPageText(page as never, await page.locator('body').innerText({ timeout }))
+          ).slice(0, maxExtract);
           return {
             ok: true,
             text: JSON.stringify({
@@ -134,6 +141,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           return done(`已点击坐标 (${action.x}, ${action.y})`);
       }
     } catch (error) {
+      if (error instanceof PageRedactionError) return fail(REDACTION_FAILED_COPY);
       const message = error instanceof Error ? error.message : String(error);
       if (/aria-ref|not found|No node found/i.test(message))
         return fail('该 ref 已失效，请重新 snapshot 后再操作');

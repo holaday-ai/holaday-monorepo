@@ -38,6 +38,7 @@ import {
   withOperationDispatchScope,
 } from '../../execution/owned-operation.js';
 import type { BrowserNetworkPolicy } from '../browser-network-policy.js';
+import { REDACTION_FAILED_COPY, redactPageText } from '../browser-tools/page-redaction.js';
 import { runBrowserOperation } from './browser-operation.js';
 import type { BrowserRequestControl } from './browser-request-guard.js';
 import { humanClick, humanScroll, humanTypeText, isHumanizeEnabled } from './humanize.js';
@@ -1133,6 +1134,19 @@ export class PlaywrightExecutor {
         url: safeUrl(page),
         title: '',
         error: `ariaSnapshot failed: ${errMsg(err)}`,
+      };
+    }
+    // Batch 10 fixes: mask password / OTP values before the snapshot reaches
+    // the model; if they cannot be read, return no snapshot at all.
+    try {
+      yaml = await redactPageText(page, yaml);
+    } catch {
+      return {
+        text: '',
+        refs: [],
+        url: safeUrl(page),
+        title: '',
+        error: REDACTION_FAILED_COPY,
       };
     }
     const { text, refs } = annotateAriaSnapshot(yaml);
