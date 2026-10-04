@@ -66,20 +66,28 @@ async function requireUserId(
  * Returns null for repeatType='once' (caller must reject one-shots
  * in the past separately).
  */
+/** Matches the `scheduled_tasks.timezone` column default. */
+const DEFAULT_SCHEDULE_TIMEZONE = 'Asia/Shanghai';
+
 export function rollForwardToFuture(opts: {
   initial: Date;
   rrule: string | null;
   repeatType: 'once' | 'daily' | 'weekly' | 'monthly' | 'custom';
   now: Date;
+  /** Batch 10.3 — row timezone; rrule BYHOUR/BYDAY are its wall clock. */
+  timezone?: string | null;
 }): Date | null {
   if (opts.repeatType === 'once' && !opts.rrule) return null;
   if (opts.rrule) {
-    // rrule expansion is independent of `initial` — the rule itself
-    // anchors the schedule. Just ask for the next occurrence after now.
+    // Batch 10.3 — `initial` anchors a rule without DTSTART (time of day,
+    // INTERVAL phase); previously the parse instant did, so the stored time
+    // carried the request's seconds and drifted from what the user picked.
     return computeNextRunFromInputs({
       from: opts.now,
       rrule: opts.rrule,
       repeatType: opts.repeatType,
+      anchor: opts.initial,
+      timezone: opts.timezone ?? DEFAULT_SCHEDULE_TIMEZONE,
     });
   }
   // Enum-driven cadence. Start at `initial` so the time-of-day
@@ -296,6 +304,7 @@ export const scheduledTasksRouter = router({
           rrule,
           repeatType: input.repeatType,
           now,
+          timezone: input.timezone ?? DEFAULT_SCHEDULE_TIMEZONE,
         });
         if (!rolled) {
           throw new TRPCError({
@@ -378,6 +387,7 @@ export const scheduledTasksRouter = router({
           status: scheduledTasks.status,
           repeatType: scheduledTasks.repeatType,
           rrule: scheduledTasks.rrule,
+          timezone: scheduledTasks.timezone,
         })
         .from(scheduledTasks)
         .where(
@@ -434,6 +444,7 @@ export const scheduledTasksRouter = router({
             rrule: nextRrule,
             repeatType: nextRepeatType,
             now,
+            timezone: input.timezone ?? row.timezone,
           });
           if (!rolled) {
             throw new TRPCError({
@@ -602,6 +613,7 @@ export const scheduledTasksRouter = router({
           status: scheduledTasks.status,
           repeatType: scheduledTasks.repeatType,
           rrule: scheduledTasks.rrule,
+          timezone: scheduledTasks.timezone,
           nextRunAt: scheduledTasks.nextRunAt,
         })
         .from(scheduledTasks)
@@ -648,6 +660,7 @@ export const scheduledTasksRouter = router({
             rrule: row.rrule,
             repeatType,
             now,
+            timezone: row.timezone,
           });
           if (!rolled) {
             throw new TRPCError({

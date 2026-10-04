@@ -27,10 +27,7 @@ import { and, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-o
 // "does not provide an export named 'rrulestr'" at module load. Default
 // import + destructure works because the default IS the CJS module
 // object, and the property lookup happens at call time (not import time).
-import rrule from 'rrule';
-const { rrulestr } = rrule as {
-  rrulestr: (s: string) => { after: (d: Date, inc?: boolean) => Date | null };
-};
+import { nextZonedRruleOccurrence } from '../schedule/rrule-zoned.js';
 import { accountClosureAllowsExecution } from '../account-closure/repository.js';
 import { logger } from '../config/logger.js';
 import { scheduledTasks } from '../db/schema/scheduled-tasks.js';
@@ -189,13 +186,25 @@ export function computeNextRunFromInputs(opts: {
   from: Date;
   rrule: string | null;
   repeatType: 'once' | 'daily' | 'weekly' | 'monthly' | 'custom';
+  /**
+   * Batch 10.3 — the schedule's current occurrence. Anchors a rule without
+   * DTSTART (time-of-day, INTERVAL phase) and the legacy enum cadence, so
+   * runs no longer drift by the poll lag. Defaults to `from`.
+   */
+  anchor?: Date | null;
+  /** Batch 10.3 — IANA zone whose wall clock BYHOUR/BYDAY refer to. Default UTC. */
+  timezone?: string | null;
 }): Date | null {
   const { from, rrule, repeatType } = opts;
+  const anchor = opts.anchor && !Number.isNaN(opts.anchor.getTime()) ? opts.anchor : from;
   if (rrule && rrule.trim().length > 0) {
     try {
-      const rule = rrulestr(rrule);
-      const next = rule.after(from, false);
-      return next ?? null;
+      return nextZonedRruleOccurrence({
+        rrule,
+        anchor,
+        after: from,
+        timezone: opts.timezone || 'UTC',
+      });
     } catch (err) {
       logger.warn(
         { err: errMsg(err), rrule },
@@ -203,7 +212,14 @@ export function computeNextRunFromInputs(opts: {
       );
     }
   }
-  return computeNextRun(from, repeatType);
+  if (anchor.getTime() === from.getTime()) return computeNextRun(from, repeatType);
+  // Legacy enum cadence: step from the anchor (keeps 09:00 at 09:00) until
+  // strictly after `from`; capped so a corrupt anchor can't spin.
+  let candidate: Date | null = anchor;
+  for (let guard = 0; guard < 5_000 && candidate && candidate.getTime() <= from.getTime(); guard += 1) {
+    candidate = computeNextRun(candidate, repeatType);
+  }
+  return candidate && candidate.getTime() > from.getTime() ? candidate : computeNextRun(from, repeatType);
 }
 
 let runnerInterval: NodeJS.Timeout | null = null;
@@ -494,6 +510,8 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
     intent: string;
     repeatType: string;
     rrule: string | null;
+    nextRunAt?: Date | null;
+    timezone?: string | null;
     consecutiveFailures?: number | null;
     failureNotifyThreshold?: number | null;
     notifyOnSuccess?: boolean | null;
@@ -509,6 +527,10 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
           // Phase 26A — when rrule is set, computeNextRunFromInputs uses
           // it instead of repeatType.
           rrule: scheduledTasks.rrule,
+          // Batch 10.3 — the due occurrence anchors the next one (no poll-lag
+          // drift) and rrules are evaluated on the row's wall clock.
+          nextRunAt: scheduledTasks.nextRunAt,
+          timezone: scheduledTasks.timezone,
           // Batch 10.3 — outcome notification preferences + streak. Only this
           // runner mutates the streak while the row is claimed, so the
           // finalize below can write the next value directly.
@@ -630,6 +652,8 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
       from: now,
       rrule: row.rrule,
       repeatType: row.repeatType as 'once' | 'daily' | 'weekly' | 'monthly' | 'custom',
+      anchor: row.nextRunAt instanceof Date ? row.nextRunAt : null,
+      timezone: row.timezone ?? null,
     });
     // Truncate the error so it fits a TEXT column without an extra
     // type. 2KB is plenty for a TRPCError / stack-trace-first-line;

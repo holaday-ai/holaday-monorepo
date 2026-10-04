@@ -196,6 +196,8 @@ async function queuePlannedRunOwned(
         status: plannedTasks.status,
         userId: plannedTasks.userId,
         userStatus: users.status,
+        // Batch 10.3 — rrules are evaluated on the plan's wall clock.
+        timezone: plannedTasks.timezone,
       })
       .from(plannedTasks)
       .innerJoin(users, eq(users.id, plannedTasks.userId))
@@ -397,6 +399,8 @@ async function dispatchPlannedRunOwned(
         rrule: plannedTasks.rrule,
         endsAt: plannedTasks.endsAt,
         userId: plannedTasks.userId,
+        // Batch 10.3 — rrules are evaluated on the plan's wall clock.
+        timezone: plannedTasks.timezone,
       })
       .from(plannedTaskRuns)
       .innerJoin(plannedTasks, eq(plannedTasks.id, plannedTaskRuns.plannedTaskId))
@@ -639,6 +643,7 @@ async function updatePlanAfterDispatch(
     rrule: string | null;
     endsAt: Date | null;
     userId: number;
+    timezone?: string | null;
   },
   ok: boolean,
   error: string | null,
@@ -672,6 +677,7 @@ async function updatePlanAfterDispatch(
     firedAt: run.seriesScheduledFor,
     repeatType: run.repeatType as PlannedRepeatType,
     rrule: run.rrule,
+    timezone: run.timezone ?? null,
     dispatchSucceeded: ok,
   });
   const nextRunAt =
@@ -992,6 +998,8 @@ async function normalizePendingOccurrenceOverrides(db: DB): Promise<void> {
         repeatType: plannedTasks.repeatType,
         rrule: plannedTasks.rrule,
         endsAt: plannedTasks.endsAt,
+        // Batch 10.3 — rrules are evaluated on the plan's wall clock.
+        timezone: plannedTasks.timezone,
       })
       .from(plannedTasks)
       .where(eq(plannedTasks.status, 'active')),
@@ -1038,6 +1046,7 @@ async function normalizePendingOccurrenceOverrides(db: DB): Promise<void> {
       firedAt: planRunAt,
       repeatType: plan.repeatType as PlannedRepeatType,
       rrule: plan.rrule,
+      timezone: plan.timezone ?? null,
       dispatchSucceeded: true,
     });
     const nextRunAt =
@@ -1144,6 +1153,8 @@ export async function plannedTick(deps: PlannedRunnerDeps): Promise<void> {
         rrule: plannedTasks.rrule,
         endsAt: plannedTasks.endsAt,
         userId: plannedTasks.userId,
+        // Batch 10.3 — rrules are evaluated on the plan's wall clock.
+        timezone: plannedTasks.timezone,
       })
       .from(plannedTasks)
       .where(
@@ -1210,6 +1221,7 @@ export async function plannedTick(deps: PlannedRunnerDeps): Promise<void> {
         firedAt: resolution.seriesScheduledFor,
         repeatType: plan.repeatType as PlannedRepeatType,
         rrule: plan.rrule,
+        timezone: plan.timezone ?? null,
         dispatchSucceeded: true,
       });
       const nextRunAt =

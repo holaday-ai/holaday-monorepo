@@ -88,11 +88,15 @@ export function advancePlannedSchedule(input: {
   repeatType: PlannedRepeatType;
   rrule: string | null;
   dispatchSucceeded: boolean;
+  /** Batch 10.3 — plan timezone; BYDAY/BYHOUR are local wall-clock values. */
+  timezone?: string | null;
 }): { status: 'active' | 'completed' | 'failed'; nextRunAt: Date | null } {
   const nextRunAt = computeNextRunFromInputs({
     from: input.firedAt,
     rrule: input.rrule,
     repeatType: input.repeatType,
+    anchor: input.firedAt,
+    timezone: input.timezone ?? null,
   });
   if (nextRunAt) return { status: 'active', nextRunAt };
   return {
