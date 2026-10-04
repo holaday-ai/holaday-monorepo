@@ -56,6 +56,7 @@ function createHarness(
     actGate?: Promise<void>;
     unknownAct?: boolean;
     notAppliedAct?: boolean;
+    tabClosedAct?: boolean;
     appliedObservationFailure?: boolean;
     closeUnconfirmed?: boolean;
     closeGate?: Promise<void>;
@@ -94,6 +95,12 @@ function createHarness(
         return {
           ok: false,
           result: { ok: false, error: 'transport_timeout', actionOutcome: 'unknown' },
+        };
+      }
+      if (command.op === 'act' && config.tabClosedAct) {
+        return {
+          ok: false,
+          result: { ok: false, error: 'tab_closed', actionOutcome: 'not_applied' },
         };
       }
       if (command.op === 'act' && !config.notAppliedAct) bodyText = 'Saved';
@@ -642,6 +649,34 @@ describe('runSelectedChromeTask', () => {
       ]);
     },
   );
+
+  it('stops with a clear reason when the selected tab was closed', async () => {
+    const action = {
+      kind: 'click',
+      selector: {
+        description: 'Save',
+        strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
+      },
+    };
+    const h = createHarness(
+      [response('act', [{ type: 'tool_use', id: 'act', name: 'browser_act', input: { action } }])],
+      { tabClosedAct: true },
+    );
+    const outcome = await runSelectedChromeTask({
+      taskId: 'tab-closed',
+      intent: 'Save the draft',
+      messagesAdapter: h.messagesAdapter,
+      client: h.client,
+      control: h.control,
+      target,
+    });
+    expect(outcome).toMatchObject({
+      status: 'failed',
+      reason: expect.stringContaining('标签页已被关闭'),
+    });
+    // No further model round after the tab is gone.
+    expect(h.modelCreate).toHaveBeenCalledTimes(1);
+  });
 
   it('uses distinct receipt indexes for multiple tools in a single model round', async () => {
     const h = createHarness([

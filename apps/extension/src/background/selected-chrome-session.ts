@@ -22,6 +22,8 @@ interface Entry {
   ready: boolean;
   pending: Promise<SessionReply> | null;
   disposal?: Promise<void>;
+  /** The session's tab was closed (chrome.tabs.onRemoved). */
+  tabClosed: boolean;
 }
 
 const SUPPORTED = new Set(['click', 'type', 'key', 'goto', 'wait']);
@@ -61,6 +63,7 @@ export class SelectedChromeSession {
       quarantined: false,
       ready: false,
       pending: null,
+      tabClosed: false,
     };
     this.entry = entry;
     const result = await this.track(entry, async () => {
@@ -92,6 +95,11 @@ export class SelectedChromeSession {
     return result;
   }
 
+  /** Called from chrome.tabs.onRemoved: later actions fail fast with tab_closed. */
+  markTabClosed(tabId: number): void {
+    if (this.entry && this.entry.tabId === tabId) this.entry.tabClosed = true;
+  }
+
   async observe(taskId: string, sessionId: string): Promise<SessionReply> {
     const entry = this.find(taskId, sessionId);
     if (!entry) return { ok: false, error: 'session_unavailable' };
@@ -107,6 +115,7 @@ export class SelectedChromeSession {
     if (entry.quarantined)
       return { ok: false, error: 'input_outcome_unknown', actionOutcome: 'unknown' };
     if (entry.pending) return { ok: false, error: 'browser_busy' };
+    if (entry.tabClosed) return { ok: false, error: 'tab_closed', actionOutcome: 'not_applied' };
     if (!entry.ready) return { ok: false, error: 'observation_required' };
     if (!SUPPORTED.has(action.kind))
       return { ok: false, error: 'unsupported_action', actionOutcome: 'not_applied' };
@@ -129,7 +138,12 @@ export class SelectedChromeSession {
           if (action.kind === 'wait')
             return { ok: false, error: 'wait_failed', actionOutcome: 'not_applied' };
           if (result.error && NOT_APPLIED.has(result.error.code)) {
-            return { ok: false, error: result.error.code, actionOutcome: 'not_applied' };
+            // A selector "not found" because the tab went away is a closed tab, not a page change.
+            return {
+              ok: false,
+              error: entry.tabClosed ? 'tab_closed' : result.error.code,
+              actionOutcome: 'not_applied',
+            };
           }
           entry.quarantined = true;
           return { ok: false, error: 'input_outcome_unknown', actionOutcome: 'unknown' };
@@ -185,11 +199,12 @@ export class SelectedChromeSession {
   private async observeEntry(entry: Entry): Promise<SessionReply> {
     entry.ready = false;
     if (!this.current(entry) || !entry.driver) return { ok: false, error: 'session_unavailable' };
+    if (entry.tabClosed) return { ok: false, error: 'tab_closed' };
     let result: DriverResult;
     try {
       result = await entry.driver.observeCurrentPage();
     } catch {
-      return { ok: false, error: 'observation_failed' };
+      return { ok: false, error: entry.tabClosed ? 'tab_closed' : 'observation_failed' };
     }
     if (!this.current(entry)) return { ok: false, error: 'session_unavailable' };
     if (result.status === 'ok' && !identifiesTab(result.data, entry.tabId))
@@ -197,7 +212,7 @@ export class SelectedChromeSession {
     entry.ready = result.status === 'ok' && result.data !== undefined;
     return result.status === 'ok' && result.data !== undefined
       ? { ok: true, sessionId: entry.id, observation: result.data }
-      : { ok: false, error: 'observation_failed' };
+      : { ok: false, error: entry.tabClosed ? 'tab_closed' : 'observation_failed' };
   }
 
   private track(

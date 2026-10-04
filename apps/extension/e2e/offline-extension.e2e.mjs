@@ -283,12 +283,16 @@ test('extension offline e2e: connect → snapshot/click/type → reconnect → c
 
   await t.test('closing the session tab fails safely and frees the seat', async () => {
     await page.close();
+    const startedAt = Date.now();
     const clicked = await act(sessionId, {
       kind: 'click',
       selector: roleSelector('提交按钮', 'button', '提交'),
     });
     assert.equal(clicked.ok, false);
     assert.notEqual(clicked.result?.actionOutcome, 'applied');
+    // A closed tab is reported as such, without waiting out the selector timeout.
+    assert.equal(clicked.error?.code, 'tab_closed', JSON.stringify(clicked.error));
+    assert.ok(Date.now() - startedAt < 3_000, `tab_closed took ${Date.now() - startedAt}ms`);
     const closed = await server.call(TASK_ID, 'session', { session: { op: 'close', sessionId } });
     assert.equal(closed.ok, true, JSON.stringify(closed.error));
 

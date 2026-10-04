@@ -50,6 +50,7 @@ export interface RunSelectedChromeTaskOptions {
 }
 
 const DEFAULT_MAX_ITERATIONS = 24;
+const TAB_CLOSED_REASON = '所选 Chrome 标签页已被关闭，任务已停止。请重新选择标签页后再试。';
 const DEFAULT_TIMEOUT_MS = 600_000;
 const READ_ATTEMPTS = 2;
 const MAX_MODEL_TOKENS = 4096;
@@ -480,7 +481,9 @@ async function runLoop(input: {
     if (afterObservation) return afterObservation;
     if (!observationReply.ok || !observationReply.observation) {
       return failed(
-        `无法读取所选 Chrome 页面：${observationReply.ok ? 'missing_observation' : observationReply.error}`,
+        !observationReply.ok && observationReply.error === 'tab_closed'
+          ? TAB_CLOSED_REASON
+          : `无法读取所选 Chrome 页面：${observationReply.ok ? 'missing_observation' : observationReply.error}`,
         iterations,
         toolsUsed,
       );
@@ -696,6 +699,8 @@ async function processTools(
       }
       if (!observed.ok || !observed.observation) {
         await publish(errorResult(tool.id, observed.ok ? 'missing_observation' : observed.error));
+        if (!observed.ok && observed.error === 'tab_closed')
+          terminal = failed(TAB_CLOSED_REASON, iterations, toolsUsed);
       } else {
         await publish(
           successResult(tool.id, {
@@ -749,7 +754,9 @@ async function processTools(
             ...(acted.actionOutcome ? { actionOutcome: acted.actionOutcome } : {}),
           }),
         );
-        if (acted.actionOutcome === 'unknown') {
+        if (acted.error === 'tab_closed') {
+          terminal = failed(TAB_CLOSED_REASON, iterations, toolsUsed);
+        } else if (acted.actionOutcome === 'unknown') {
           terminal = failed(
             'Chrome 输入结果未知，已停止且不会自动重放该操作。',
             iterations,
@@ -823,6 +830,8 @@ async function processTools(
       }
       if (!observed.ok || !observed.observation) {
         await publish(errorResult(tool.id, observed.ok ? 'missing_observation' : observed.error));
+        if (!observed.ok && observed.error === 'tab_closed')
+          terminal = failed(TAB_CLOSED_REASON, iterations, toolsUsed);
         continue;
       }
       if (!containsEvidence(observed.observation, parsed.data.evidenceText)) {

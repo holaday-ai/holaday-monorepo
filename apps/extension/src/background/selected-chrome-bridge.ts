@@ -14,6 +14,9 @@ export function createSelectedChromeBridge() {
     makeDriver: (tabId) => new PlaywrightCrxAdapter({ attachToTabId: tabId }),
     owner: getCurrentWsToken,
   });
+  if (typeof chrome !== 'undefined') {
+    chrome.tabs?.onRemoved?.addListener?.((tabId) => session.markTabClosed(tabId));
+  }
   return {
     open: (taskId: string, target: Target) => {
       if (!target) return Promise.resolve({ ok: false as const, error: 'target_required' });
