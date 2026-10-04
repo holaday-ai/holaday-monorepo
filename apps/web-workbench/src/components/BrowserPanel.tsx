@@ -22,6 +22,7 @@ import * as React from 'react';
 import { useBrowserOwnership } from '@/hooks/useBrowserOwnership';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { LocalChromeTaskPanel } from '@/components/LocalChromeTaskPanel';
+import { useBrowserPanelDockInset } from '@/hooks/useBrowserPanelDockInset';
 import { Button } from '@/components/ui/button';
 import {
   browserLiveOverlayCopy,
@@ -281,8 +282,30 @@ interface Props {
  */
 export function BrowserPanel(props: Props): JSX.Element | null {
   const local = useTaskStore(state => state.tasks.find(task => task.taskId === props.activeTaskId)?.browserSource === 'local-chrome');
-  if (local && props.activeTaskId) return props.open === false ? null : <div className={props.layout === 'sheet' ? 'fixed inset-x-0 bottom-0 z-[75] h-[calc(100dvh-56px)] bg-background' : 'h-full w-full min-w-0'}><LocalChromeTaskPanel key={props.activeTaskId} taskId={props.activeTaskId} status={props.taskStatus} onClose={props.onClose} /></div>;
+  if (local && props.activeTaskId) return props.open === false ? null : <LocalChromePanelFrame {...props} activeTaskId={props.activeTaskId} />;
   return <CloudBrowserPanel {...props} />;
+}
+
+function LocalChromePanelFrame({
+  activeTaskId,
+  layout = 'rail',
+  taskStatus,
+  onClose,
+}: Props & { activeTaskId: string }): JSX.Element {
+  const frameRef = React.useRef<HTMLDivElement | null>(null);
+  const isSheet = layout === 'sheet';
+  // The rail panel must reserve its width for the fixed account dock too;
+  // without this the dock sat on top of the local panel's close button.
+  useBrowserPanelDockInset(frameRef, !isSheet);
+  return (
+    <div
+      ref={frameRef}
+      data-testid="local-chrome-panel-frame"
+      className={isSheet ? 'fixed inset-x-0 bottom-0 z-[75] h-[calc(100dvh-56px)] bg-background' : 'h-full w-full min-w-0'}
+    >
+      <LocalChromeTaskPanel key={activeTaskId} taskId={activeTaskId} status={taskStatus} onClose={onClose} />
+    </div>
+  );
 }
 
 function CloudBrowserPanel({
@@ -346,23 +369,14 @@ function CloudBrowserPanel({
     const el = panelRootRef.current;
     if (!el) return;
     if (typeof ResizeObserver === 'undefined') return;
-    const dockInsetProperty = '--holaday-browser-panel-inset';
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width ?? el.clientWidth;
       setIsNarrow(w > 0 && w < 500);
-      if (!isSheet && w > 0) {
-        document.documentElement.style.setProperty(
-          dockInsetProperty,
-          `${Math.ceil(w) + 16}px`,
-        );
-      }
     });
     ro.observe(el);
-    return () => {
-      ro.disconnect();
-      if (!isSheet) document.documentElement.style.removeProperty(dockInsetProperty);
-    };
-  }, [isSheet]);
+    return () => ro.disconnect();
+  }, []);
+  useBrowserPanelDockInset(panelRootRef, !isSheet);
   // Interactive mode is in the global store so the TaskStream's
   // "Continue in browser" button can flip it on from the left panel.
   const requestedInteractive = useTaskStore((s) => s.browserInteractive);
