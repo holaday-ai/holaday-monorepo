@@ -23,7 +23,7 @@ export type ReplayRoute =
   | 'ashare_qa_guidance'
   | 'general';
 
-export type ReplaySource = 'baseline' | 'repo-fixture' | 'mock';
+export type ReplaySource = 'baseline' | 'repo-fixture' | 'mock' | 'real-model';
 
 export interface ReplayCase {
   id: string;
@@ -57,6 +57,12 @@ export interface ReplayCase {
 // ── 迪生力 ⑦ 合规样本（repo-fixture：ashare-qa-runner.test.ts 既有原文）──
 export const DSL_SECTION7_OK =
   '迪生力是总市值34.47亿的小盘股，今天盘面活跃；2026Q1营收1.71亿、同比-33.43%，归母还亏1981.72万但亏损收窄；估值偏高，PE-TTM67.2、PB12.21都处历史高位，比行业中位31.63贵。以上为客观信息聚合，未经证实，不构成任何投资建议。';
+/**
+ * 批次 11.1 回归样本（real-model：batch 10 千问 qwen3.7-plus 真机冒烟对 E19 迪生力的 ⑦ 原文，逐字）。
+ * 当时合规闸门 + 判官都放行；问题是期间混淆：2026Q1 仍亏损，扭亏的是 2025 年报，却写「今年已扭亏为盈」。
+ */
+export const QWEN_SECTION7_PERIOD_MIXUP =
+  '34.47亿小盘股今天涨停活跃，成交额5.12亿元，龙虎榜当日无数据。公司还在亏钱，一季度净利负1981.72万元，自有资本赚钱能力为负，但相比前两年巨额亏损，今年已扭亏为盈。估值处于历史高位，PE和PB分位都在85%以上，比行业中位明显贵。股价大涨与业绩仍在亏损、估值高企并存，呈现明显的热度与基本面背离。以上为客观信息聚合，未经证实，不构成任何投资建议。';
 // SOFT 误杀样本（repo-fixture：过去式"跌到"被 regex 当预测）。
 export const DSL_SECTION7_SOFT =
   '股价已从高位跌到近期低点，估值仍处历史高位区间。以上为客观信息聚合，不构成投资建议。';
@@ -333,6 +339,47 @@ export const REPLAY_CASES: readonly ReplayCase[] = [
     interpretOutput: REDTEAM_SEMANTIC,
     judgeOutput: '无法判断',
     expect: { degraded: true, reason: 'predict', interpreted: false, judgeCalled: true },
+  },
+  {
+    id: 'E19-period',
+    title: '全景 ⑦ 期间混淆（千问真实输出：Q1 亏却说今年已扭亏）→ 报告期检查降级，判官不调用',
+    intent: '详细分析迪生力(603335)',
+    executionMode: 'generate',
+    skillEnabled: true,
+    scored: false,
+    route: 'ashare_panorama',
+    dataSource: 'repo-fixture',
+    modelSource: 'real-model',
+    interpretOutput: QWEN_SECTION7_PERIOD_MIXUP,
+    judgeOutput: JUDGE_PASS,
+    expect: {
+      degraded: true,
+      reason: 'ungrounded',
+      interpreted: false,
+      judgeCalled: false,
+      contains: ['**④ 基本面**', '「分析师视角」综合未通过合规校验'],
+      notContains: ['## ⑦ 分析师视角', '今年已扭亏为盈'],
+    },
+  },
+  {
+    id: 'E19-period-ok',
+    title: '全景 ⑦ 正确带期间（2025年报扭亏 / 2026Q1 仍亏）→ 不误降级',
+    intent: '详细分析迪生力(603335)',
+    executionMode: 'generate',
+    skillEnabled: true,
+    scored: false,
+    route: 'ashare_panorama',
+    dataSource: 'repo-fixture',
+    modelSource: 'mock',
+    interpretOutput:
+      '迪生力是总市值34.47亿的小盘股，今天涨停活跃。2025年报归母净利润4848万、已扭亏为盈，但2026Q1归母净利润-1981.72万，又亏了，盈利不稳。估值处于历史高位，比行业中位31.63贵。以上为客观信息聚合，未经证实，不构成任何投资建议。',
+    judgeOutput: JUDGE_PASS,
+    expect: {
+      degraded: false,
+      interpreted: true,
+      judgeCalled: true,
+      contains: ['## ⑦ 分析师视角', '2025年报归母净利润4848万'],
+    },
   },
   {
     id: 'E20',
