@@ -83,6 +83,7 @@ import { sendCriticalClientMessage } from './critical-send.js';
 import { withDeadline } from '../shared/deadline.js';
 import { compactLogErrorReason } from '../shared/log-error.js';
 import {
+  armCappedSlowRetry,
   connect as connectWs,
   disconnect as disconnectWs,
   getWsConnectionStatus,
@@ -1743,15 +1744,18 @@ onUnauthorized(() => {
 // kick off a fresh reconnect cycle EVERY tick after the in-memory
 // cap fired — defeating the persistent-cap fix in ws-client. With
 // it, three failed attempts → silence until the user explicitly
-// re-engages via the popup or chrome.runtime.onStartup.
+// re-engages via the popup or chrome.runtime.onStartup, except for one
+// slow probe per WS_CAPPED_RETRY_INTERVAL_MS (armCappedSlowRetry).
 chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: KEEPALIVE_PERIOD_MIN });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === KEEPALIVE_ALARM) {
     void (async () => {
-      if (await isReconnectCapped()) {
+      if ((await isReconnectCapped()) && !(await armCappedSlowRetry())) {
         // Persistent cap is hit — don't burn another connect cycle on
         // a known-unreachable orchestrator. The popup's manual retry
-        // path will clear the cap when the user is ready.
+        // path clears the cap immediately; otherwise one slow probe is
+        // allowed every WS_CAPPED_RETRY_INTERVAL_MS (self-heal after an
+        // orchestrator restart / network outage).
         return;
       }
       await ensureConnected();
