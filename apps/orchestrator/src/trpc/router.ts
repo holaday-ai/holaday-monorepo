@@ -20,6 +20,7 @@ import { projectsRouter } from './routers/projects.js';
 import { quotaRouter } from './routers/quota.js';
 import { rolesRouter } from './routers/roles.js';
 import { scheduledTasksRouter } from './routers/scheduled-tasks.js';
+import { selfCheckRouter } from './routers/self-check.js';
 import { skillsRouter } from './routers/skills.js';
 import { stocksRouter } from './routers/stocks.js';
 import { tasksRouter } from './routers/tasks.js';
@@ -63,6 +64,7 @@ export const appRouter = router({
   partner: partnerRouter,
   admin: adminRouter,
   models: modelsRouter,
+  selfCheck: selfCheckRouter,
   watchlists: watchlistsRouter,
   videoOnboarding: videoOnboardingRouter,
   videoEditing: videoEditingRouter,

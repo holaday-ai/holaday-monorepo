@@ -41,6 +41,10 @@ const AdminLearningPage = lazyRoute(
   'AdminLearningPage',
 );
 const AdminModelsPage = lazyRoute(() => import('@/pages/admin/AdminModelsPage'), 'AdminModelsPage');
+const AdminSelfCheckPage = lazyRoute(
+  () => import('@/pages/admin/AdminSelfCheckPage'),
+  'AdminSelfCheckPage',
+);
 const AdminPartnerReviewPage = lazyRoute(
   () => import('@/pages/admin/AdminPartnerReviewPage'),
   'AdminPartnerReviewPage',
@@ -175,6 +179,7 @@ export function App(): JSX.Element {
             <Route path="/admin/partners" element={lazyElement(<AdminPartnerReviewPage />)} />
             <Route path="/admin/learning" element={lazyElement(<AdminLearningPage />)} />
             <Route path="/admin/models" element={lazyElement(<AdminModelsPage />)} />
+            <Route path="/admin/self-check" element={lazyElement(<AdminSelfCheckPage />)} />
             <Route
               path="/admin/learning/:domain"
               element={lazyElement(<AdminLearningDomainPage />)}

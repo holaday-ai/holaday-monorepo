@@ -17,36 +17,34 @@
  * pages get the resolved `me` via `useOutletContext`.
  */
 
+import { BrandIcon, BrandWordmark } from '@/components/BrandLogo';
+import { Button } from '@/components/ui/button';
+import { clearAccessToken, getAccessToken } from '@/lib/auth';
 import {
+  type NormalizedAuthMeProfile,
+  normalizeAuthMeProfile,
+  preferredAuthDisplayName,
+} from '@/lib/auth-me-state';
+import { authGateFailureStatus } from '@/lib/auth-session';
+import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
+import {
+  Activity,
   AlertCircle,
   BarChart3,
   Cpu,
   GraduationCap,
   LayoutDashboard,
   LogOut,
+  type LucideIcon,
   RefreshCw,
   ShieldCheck,
   Users,
-  type LucideIcon,
 } from 'lucide-react';
 import * as React from 'react';
 import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
-import { BrandIcon, BrandWordmark } from '@/components/BrandLogo';
-import { Button } from '@/components/ui/button';
-import { getAccessToken, clearAccessToken } from '@/lib/auth';
-import {
-  normalizeAuthMeProfile,
-  preferredAuthDisplayName,
-  type NormalizedAuthMeProfile,
-} from '@/lib/auth-me-state';
-import { authGateFailureStatus } from '@/lib/auth-session';
-import { trpc } from '@/lib/trpc';
-import { cn } from '@/lib/utils';
 
-type AdminMe = Pick<
-  NormalizedAuthMeProfile,
-  'userId' | 'email' | 'phone' | 'displayName' | 'role'
->;
+type AdminMe = Pick<NormalizedAuthMeProfile, 'userId' | 'email' | 'phone' | 'displayName' | 'role'>;
 
 interface AdminOutletContext {
   me: AdminMe;
@@ -115,13 +113,8 @@ export function AdminLayout(): JSX.Element {
     return (
       <div className="flex h-svh items-center justify-center bg-background px-5">
         <div className="w-full max-w-sm rounded-[8px] border border-[#DCDDDD] bg-white p-6 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-          <AlertCircle
-            className="mx-auto h-5 w-5 text-[#EA1F59]"
-            aria-hidden
-          />
-          <h1 className="mt-3 text-sm font-semibold text-foreground">
-            管理后台暂时无法验证权限
-          </h1>
+          <AlertCircle className="mx-auto h-5 w-5 text-[#EA1F59]" aria-hidden />
+          <h1 className="mt-3 text-sm font-semibold text-foreground">管理后台暂时无法验证权限</h1>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
             登录状态仍保留。请检查网络后重试。
           </p>
@@ -167,9 +160,7 @@ function AdminSideNav({ me }: { me: AdminMe }): JSX.Element {
             <BrandIcon />
             <BrandWordmark className="hidden h-3 sm:block" />
           </div>
-          <div className="hidden text-xs font-medium text-foreground/80 sm:block">
-            管理后台
-          </div>
+          <div className="hidden text-xs font-medium text-foreground/80 sm:block">管理后台</div>
           <div className="mt-0.5 hidden text-[11px] text-muted-foreground sm:block">经营驾驶舱</div>
         </Link>
       </div>
@@ -209,6 +200,12 @@ function AdminSideNav({ me }: { me: AdminMe }): JSX.Element {
           label="模型管理"
           to="/admin/models"
           active={pathname.startsWith('/admin/models')}
+        />
+        <AdminNavItem
+          icon={Activity}
+          label="系统自检"
+          to="/admin/self-check"
+          active={pathname.startsWith('/admin/self-check')}
         />
       </nav>
       <div className="border-t border-[#EFEFEF] px-2 py-3 sm:px-3">
