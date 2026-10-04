@@ -19,6 +19,7 @@ import {
   type HolaDayBrowserDriver,
   driverError,
 } from './driver.js';
+import { collectSensitiveFieldValues, redactSensitiveValues } from './observation-redaction.js';
 import { isOriginAllowed } from './origin-guard.js';
 import { type LocatorSpec, buildSelectorPlan, renderLocatorSpec } from './selector-plan.js';
 
@@ -215,11 +216,25 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
       }
 
       const body = page.locator('body');
-      const [title, bodyText, ariaSnapshot] = await Promise.all([
+      // ariaSnapshot renders textbox values verbatim (password / OTP too).
+      // Collect sensitive field values alongside and mask them before the
+      // observation leaves the extension. Fail closed: if the values cannot
+      // be read, the catch below returns EXTRACT_FAILED, never raw text.
+      const [title, rawBodyText, rawAriaSnapshot, rawSensitiveValues] = await Promise.all([
         page.title(),
         body.innerText({ timeout: OBSERVATION_TIMEOUT_MS }),
         body.ariaSnapshot({ timeout: OBSERVATION_TIMEOUT_MS }),
+        page.evaluate(collectSensitiveFieldValues),
       ]);
+      if (
+        !Array.isArray(rawSensitiveValues) ||
+        !rawSensitiveValues.every((value) => typeof value === 'string')
+      ) {
+        throw new Error('sensitive field scan returned an unexpected shape');
+      }
+      const sensitiveValues = rawSensitiveValues as string[];
+      const bodyText = redactSensitiveValues(rawBodyText, sensitiveValues);
+      const ariaSnapshot = redactSensitiveValues(rawAriaSnapshot, sensitiveValues);
       if (page.isClosed()) {
         this.page = null;
         this.tabId = null;
