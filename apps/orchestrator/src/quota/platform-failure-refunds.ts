@@ -60,7 +60,8 @@ export async function recordQuotaCharge(
     .onDuplicateKeyUpdate({ set: { taskExternalId: charge.taskExternalId } });
 }
 
-const SWEEP_WINDOW_MS = 7 * 24 * 60 * 60_000;
+/** Failures older than this are no longer swept for automatic refunds. */
+export const SWEEP_WINDOW_MS = 7 * 24 * 60 * 60_000;
 
 /**
  * Refunds each charged task that failed for a platform reason exactly once.
