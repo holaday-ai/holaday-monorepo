@@ -292,7 +292,9 @@ describe('clarification resume semantic verification', () => {
           status: 'completed',
           summary: expect.stringContaining('语义复核暂不可用'),
         });
-      expect(f.calls).toHaveLength('lanes' in options ? 0 : 1);
+      // A network error before any response is retried once (llm-verifier
+      // maxRetries: 1); a bad JSON body is a real answer and is not retried.
+      expect(f.calls).toHaveLength('lanes' in options ? 0 : 'transportFailure' in options ? 2 : 1);
       expect(
         JSON.stringify({ saved: f.saved, frames: f.frames, logs: f.logger.error.mock.calls }),
       ).not.toMatch(/PRIVATE_PROVIDER_BODY|PRIVATE_INVALID_JSON/);
