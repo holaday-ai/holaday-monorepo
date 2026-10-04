@@ -213,7 +213,7 @@ describe('createProductionModelRuntimeWiring', () => {
     const mcpTool = {
       type: 'mcp' as const,
       serverLabel: 'amap',
-      serverUrl: 'https://dashscope.example/amap/sse',
+      serverUrl: 'https://dashscope.aliyuncs.com/api/v1/mcps/amap/sse',
     };
 
     function setup() {

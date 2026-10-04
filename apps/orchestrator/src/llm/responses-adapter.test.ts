@@ -395,7 +395,11 @@ describe('createQwenResponsesAdapter', () => {
       input: [{ role: 'user', content: 'Use the map server.' }],
       tools: [
         { type: 'web_search' },
-        { type: 'mcp', serverLabel: 'amap', serverUrl: 'https://dashscope.example/amap/sse' },
+        {
+          type: 'mcp',
+          serverLabel: 'amap',
+          serverUrl: 'https://dashscope.aliyuncs.com/api/v1/mcps/amap/sse',
+        },
       ],
     });
 
@@ -406,10 +410,37 @@ describe('createQwenResponsesAdapter', () => {
         type: 'mcp',
         server_protocol: 'sse',
         server_label: 'amap',
-        server_url: 'https://dashscope.example/amap/sse',
+        server_url: 'https://dashscope.aliyuncs.com/api/v1/mcps/amap/sse',
         headers: { Authorization: 'Bearer private-responses-key' },
       },
     ]);
     expect(JSON.stringify(adapter.metadata)).not.toContain('private-responses-key');
+  });
+
+  it('drops MCP tools pointing outside Bailian before the key is attached', async () => {
+    const body =
+      sseEvent({ type: 'response.output_text.delta', delta: 'ok' }) + sseEvent(completedEvent());
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      streamResponse([new TextEncoder().encode(body)]),
+    );
+    const adapter = createQwenResponsesAdapter({ route: INTL_RESPONSES_ROUTE, fetchImpl });
+
+    await adapter.stream({
+      input: [{ role: 'user', content: 'x' }],
+      tools: [
+        { type: 'mcp', serverLabel: 'evil', serverUrl: 'https://mcp.evil.com/sse' },
+        {
+          type: 'mcp',
+          serverLabel: 'spoof',
+          serverUrl: 'https://dashscope.aliyuncs.com.evil.com/sse',
+        },
+        { type: 'web_search' },
+      ],
+    });
+
+    const [, init] = fetchImpl.mock.calls[0] ?? [];
+    const sent = String(init?.body);
+    expect(JSON.parse(sent).tools).toEqual([{ type: 'web_search' }]);
+    expect(sent).not.toContain('evil.com');
   });
 });

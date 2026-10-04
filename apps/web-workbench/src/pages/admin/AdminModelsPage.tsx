@@ -296,7 +296,9 @@ function McpServersSection(): JSX.Element {
         <h2 className="text-[15px] font-semibold text-foreground">百炼 MCP 服务</h2>
         <p className="mt-1 text-[12px] text-muted-foreground">
           千问的“生成”和“搜索抓取”通道会带上这些 MCP 工具，鉴权沿用百炼 API 密钥。最多{' '}
-          {data?.max ?? 10} 个，地址须为 https。
+          {data?.max ?? 10} 个，地址须为阿里云百炼的 https
+          域名（dashscope.aliyuncs.com、dashscope-intl.aliyuncs.com 或
+          *.maas.aliyuncs.com），否则会拒绝保存。
         </p>
       </div>
       {message ? <div className="text-[12px] text-foreground">{message}</div> : null}
@@ -341,7 +343,7 @@ function McpServersSection(): JSX.Element {
             <input
               value={url}
               onChange={(event) => setUrl(event.target.value)}
-              placeholder="https://…/sse"
+              placeholder="https://dashscope.aliyuncs.com/…/sse"
               className="min-w-0 flex-1 rounded-[6px] border border-[#DCDDDD] px-2 py-1 text-[12px]"
             />
             <button

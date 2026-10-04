@@ -1,3 +1,5 @@
+import { pino } from 'pino';
+import { isAllowedMcpUrl } from './mcp-url-policy.js';
 import { type ModelConcurrencyGate, modelConcurrencyGate } from './model-concurrency.js';
 import { type ModelOperation, runModelOperation } from './model-operation.js';
 import type { QwenRoute, SafeQwenRouteMetadata } from './qwen-route.js';
@@ -102,6 +104,21 @@ const SAFE_ERROR_MESSAGES: Record<ResponsesAdapterErrorCode, string> = {
 };
 
 const MAX_PENDING_SSE_BYTES = 2 * 1024 * 1024;
+const mcpLog = pino({ level: 'warn', base: { service: 'orchestrator', module: 'responses-mcp' } });
+
+/** Second gate after config validation: never send the key to a non-Bailian host. */
+function isSafeMcpTool(tool: NeutralBuiltinTool): boolean {
+  if (tool.type !== 'mcp' || isAllowedMcpUrl(tool.serverUrl)) return true;
+  let host = 'invalid';
+  try {
+    host = new URL(tool.serverUrl).hostname;
+  } catch {
+    /* keep 'invalid' */
+  }
+  mcpLog.warn({ serverLabel: tool.serverLabel, host }, 'mcp tool dropped: host not allowed');
+  return false;
+}
+
 const ALLOWED_TOOL_TYPES = new Set<NeutralBuiltinTool['type']>([
   'web_search',
   'web_extractor',
@@ -316,7 +333,7 @@ function toProviderRequest(
     ...(Array.isArray(request.tools)
       ? {
           tools: request.tools
-            .filter((tool) => ALLOWED_TOOL_TYPES.has(tool.type))
+            .filter((tool) => ALLOWED_TOOL_TYPES.has(tool.type) && isSafeMcpTool(tool))
             .map((tool) =>
               tool.type === 'mcp'
                 ? {

@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { modelCatalogEvents, modelCatalogSettings } from '../db/schema/model-catalog.js';
 import { users } from '../db/schema/users.js';
+import { isAllowedMcpUrl } from './mcp-url-policy.js';
 import { ModelCatalogError } from './model-catalog.js';
 import type { NeutralMcpTool } from './responses-adapter.js';
 
@@ -39,6 +40,12 @@ export function validateMcpServers(value: unknown): McpServerConfig[] {
       throw new ModelCatalogError(
         'INVALID_UPDATE',
         `MCP 地址必须是不带凭据和参数的 https 地址：${label}`,
+      );
+    // The DashScope key is sent to this host: Alibaba Model Studio only.
+    if (!isAllowedMcpUrl(parsed.toString()))
+      throw new ModelCatalogError(
+        'INVALID_UPDATE',
+        `MCP 地址必须是阿里云百炼的域名（dashscope.aliyuncs.com、dashscope-intl.aliyuncs.com、*.dashscope.aliyuncs.com 或 *.maas.aliyuncs.com）：${label}`,
       );
     return { label, url: parsed.toString() };
   });

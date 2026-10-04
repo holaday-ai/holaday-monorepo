@@ -108,9 +108,11 @@ describe('models router', () => {
       const admin = caller('usr_admin');
       await expect(admin.adminMcpList()).resolves.toEqual({ max: 10, items: [] });
       const added = await admin.adminMcpUpdate({
-        items: [{ label: 'amap', url: 'https://dashscope.example/amap/sse' }],
+        items: [{ label: 'amap', url: 'https://dashscope.aliyuncs.com/api/v1/mcps/amap/sse' }],
       });
-      expect(added.items).toEqual([{ label: 'amap', url: 'https://dashscope.example/amap/sse' }]);
+      expect(added.items).toEqual([
+        { label: 'amap', url: 'https://dashscope.aliyuncs.com/api/v1/mcps/amap/sse' },
+      ]);
       await expect(admin.adminMcpList()).resolves.toMatchObject({ items: added.items });
       await expect(admin.adminMcpUpdate({ items: [] })).resolves.toMatchObject({ items: [] });
     });
