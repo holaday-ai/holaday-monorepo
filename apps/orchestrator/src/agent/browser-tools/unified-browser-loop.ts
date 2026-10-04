@@ -125,7 +125,7 @@ export async function runUnifiedBrowserLoop(
         {
           maxTokens: 4_096,
           system: UNIFIED_BROWSER_SYSTEM_PROMPT,
-          messages: trimImages(messages),
+          messages: trimImages(compactToolResults(messages)),
           tools: input.readPage ? [...UNIFIED_LOOP_TOOLS, READ_URL_TOOL] : UNIFIED_LOOP_TOOLS,
           toolChoice: { type: 'any' },
         },
@@ -299,6 +299,42 @@ function toolResult(toolUseId: string, content: string, isError = false): Neutra
 }
 
 /** Keep only the newest screenshots as images; older ones become a text marker. */
+const MAX_FULL_PAGE_RESULTS = 2;
+const LONG_RESULT_CHARS = 1_500;
+const COMPACT_PREFIX_CHARS = 300;
+
+/**
+ * Only the latest page-sized tool results (snapshot / extract / read_url) stay
+ * in full; older ones keep a short prefix. Without this every step re-sends
+ * every earlier snapshot and input tokens grow quadratically (batch 11.0: one
+ * task reached 916k input tokens). Pairing with tool_use blocks is preserved.
+ */
+export function compactToolResults(messages: readonly NeutralMessage[]): NeutralMessage[] {
+  let kept = 0;
+  const out: NeutralMessage[] = [];
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i] as NeutralMessage;
+    if (typeof message.content === 'string') {
+      out.unshift(message);
+      continue;
+    }
+    const content = [...message.content]
+      .reverse()
+      .map((block): NeutralInputContentBlock => {
+        if (block.type !== 'tool_result' || block.content.length <= LONG_RESULT_CHARS) return block;
+        kept += 1;
+        if (kept <= MAX_FULL_PAGE_RESULTS) return block;
+        return {
+          ...block,
+          content: `${block.content.slice(0, COMPACT_PREFIX_CHARS)}\n…[较早的页面内容已省略，需要时请重新 snapshot]`,
+        };
+      })
+      .reverse();
+    out.unshift({ ...message, content });
+  }
+  return out;
+}
+
 function trimImages(messages: readonly NeutralMessage[]): NeutralMessage[] {
   let kept = 0;
   const out: NeutralMessage[] = [];

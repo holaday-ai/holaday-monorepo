@@ -7,7 +7,11 @@ import type {
   NeutralOutputContentBlock,
 } from '../../llm/messages-adapter.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
-import { UNIFIED_LOOP_TOOLS, runUnifiedBrowserLoop } from './unified-browser-loop.js';
+import {
+  UNIFIED_LOOP_TOOLS,
+  compactToolResults,
+  runUnifiedBrowserLoop,
+} from './unified-browser-loop.js';
 
 const PAGE = `<!doctype html><html><head><title>合成商城</title></head><body>
 <label>关键词 <input id="q" /></label>
@@ -241,5 +245,57 @@ describe('unified browser loop', () => {
       }),
     });
     expect(outcome).toMatchObject({ status: 'completed', evidence: 'Alfreds Futterkiste' });
+  });
+});
+
+describe('unified loop context size (batch 11.0)', () => {
+  it('keeps only the two latest page-sized results in full, so request size stays bounded', async () => {
+    const page = (n: number) => `PAGE-${n} ${'x'.repeat(20_000)}`;
+    const steps = 12;
+    const turns: Script[] = Array.from({ length: steps }, (_, i) => () => [
+      call('snapshot', {}, `s${i}`),
+    ]);
+    turns.push(() => [call('finish', { summary: 'done', evidence: 'PAGE-11' }, 'f')]);
+    const adapter = scriptedAdapter(turns);
+    let n = 0;
+    await runUnifiedBrowserLoop({
+      intent: 'look around',
+      adapter,
+      maxSteps: steps + 1,
+      execute: async () => ({ ok: true, text: page(n++) }),
+    });
+    const sizes = adapter.requests.map((request) => JSON.stringify(request.messages).length);
+    // Without compaction the 13th request would carry ~12 × 20k chars.
+    expect(Math.max(...sizes)).toBeLessThan(3 * 20_000 + 10_000);
+    const last = JSON.stringify(adapter.requests.at(-1)?.messages);
+    expect(last).toContain('PAGE-11');
+    expect(last).toContain('PAGE-10');
+    expect(last).toContain('较早的页面内容已省略');
+  });
+
+  it('never touches short results or tool_use / tool_result pairing', () => {
+    const long = 'y'.repeat(5_000);
+    const messages = [
+      { role: 'user' as const, content: 'go' },
+      ...[0, 1, 2].flatMap((i) => [
+        { role: 'assistant' as const, content: [call('snapshot', {}, `t${i}`)] },
+        {
+          role: 'user' as const,
+          content: [
+            { type: 'tool_result' as const, toolUseId: `t${i}`, content: `${i}${long}` },
+            { type: 'tool_result' as const, toolUseId: `c${i}`, content: '已点击' },
+          ],
+        },
+      ]),
+    ];
+    const out = compactToolResults(messages as never);
+    const results = out.flatMap((m) =>
+      typeof m.content === 'string' ? [] : m.content.filter((b) => b.type === 'tool_result'),
+    ) as Array<{ toolUseId: string; content: string }>;
+    expect(results.map((r) => r.toolUseId)).toEqual(['t0', 'c0', 't1', 'c1', 't2', 'c2']);
+    expect(results[0]?.content).toContain('已省略');
+    expect(results[2]?.content.length).toBe(5_001);
+    expect(results[4]?.content.length).toBe(5_001);
+    expect(results.filter((r) => r.content === '已点击')).toHaveLength(3);
   });
 });
