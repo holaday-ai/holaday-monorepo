@@ -112,17 +112,21 @@ export async function preflightCloneVideoAssets(
 }
 
 // 报价:硬编码的只有官方单价表 + 汇率;动态部分 = 本次真实段数 + 选定档/画质/时长。
-// TODO(pricing): 价表/汇率为硬编码快照，Google/阿里 可能调价 → 需手动同步
-//   https://ai.google.dev/gemini-api/docs/pricing (Veo 每秒价 + nano banana 图片价)。
+// TODO(pricing): 价表/汇率为硬编码快照，fal/阿里 可能调价 → 需手动同步
+//   Veo 3.1（fal，2026-10-03 核实；本通道 generate_audio:false，按无音频价）：
+//     https://fal.ai/models/fal-ai/veo3.1        标准 720p/1080p $0.20/s
+//     https://fal.ai/models/fal-ai/veo3.1/fast   Fast 720p/1080p $0.10/s
+//     https://fal.ai/models/fal-ai/veo3.1/lite   Lite 720p $0.03/s · 1080p $0.05/s
+//   Nano Banana 2（fal）：https://fal.ai/models/fal-ai/nano-banana-2  1K $0.08/张。
 //   HappyHorse: 阿里 DashScope 控制台(720P ¥0.9/s · 1080P ¥1.6/s)。
 //   Wan 2.7: Alibaba Model Studio Singapore list price
 //   (720P $0.10/s · 1080P $0.15/s).
 type Resolution = '720p' | '1080p';
 /** 每秒美元单价 — 按档 × 画质。720p/1080p 影响真实计费,据此诚实定价(不一律按 1080p)。*/
 const VEO_USD_PER_SEC: Record<VideoSource, Record<Resolution, number>> = {
-  veo_fast: { '720p': 0.1, '1080p': 0.12 },
-  veo_lite: { '720p': 0.05, '1080p': 0.08 },
-  veo_standard: { '720p': 0.4, '1080p': 0.4 }, // 高质量档单价不随画质降
+  veo_fast: { '720p': 0.1, '1080p': 0.1 }, // fal Veo 3.1 Fast，无音频
+  veo_lite: { '720p': 0.03, '1080p': 0.05 }, // fal Veo 3.1 Lite，无音频
+  veo_standard: { '720p': 0.2, '1080p': 0.2 }, // fal Veo 3.1 标准，无音频；单价不随画质变
   happyhorse: { '720p': 0.9 / 7.3, '1080p': 1.6 / 7.3 }, // ¥/s → USD/s
   wanxiang: { '720p': 0.1, '1080p': 0.15 },
 };
@@ -134,7 +138,7 @@ const TIER_LABEL: Record<VideoSource, string> = {
   happyhorse: '快马 HappyHorse',
   wanxiang: 'Wan 2.7',
 };
-const NB_USD_PER_IMG = 0.067; // nano banana 1K/张
+const NB_USD_PER_IMG = 0.08; // fal Nano Banana 2，1K/张
 const USD_TO_CNY = 7.3;
 const DEFAULT_BILL_SEC = 8; // 每段默认按 8s 生成计费(成片那段按音频时长裁剪,计费仍按生成时长)
 
