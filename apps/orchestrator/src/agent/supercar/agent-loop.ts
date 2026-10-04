@@ -762,6 +762,10 @@ export interface SupercarEvidenceEvent {
 }
 
 export interface RunSupercarOptions {
+  /** BROWSER_EXECUTOR=unified only: web search (Qwen built-in, Firecrawl fallback). */
+  unifiedWebSearch?: (query: string) => Promise<Array<{ title: string; url: string }>>;
+  /** BROWSER_EXECUTOR=unified only: read-only page text (Firecrawl scrape). */
+  unifiedReadPage?: (url: string) => Promise<{ url: string; title: string; markdown: string }>;
   /** Region-resolved production model. Omission retains the legacy fixture path. */
   messagesAdapter?: MessagesAdapter;
   /** Opt-in until navigation and input channels share the same owner receipt. */

@@ -62,6 +62,18 @@ const CONTROL_TOOLS: ReadonlyArray<NeutralToolDefinition> = [
   },
 ];
 
+/** Offered only when a read-only page reader (Firecrawl) is configured. */
+export const READ_URL_TOOL: NeutralToolDefinition = {
+  name: 'read_url',
+  description: '浏览器打不开、被拦截或只需要读正文时，只读获取网页正文（不能点击、登录或提交）。',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: { url: { type: 'string', format: 'uri', maxLength: 2048 } },
+    required: ['url'],
+  },
+};
+
 export const UNIFIED_LOOP_TOOLS: ReadonlyArray<NeutralToolDefinition> = [
   ...UNIFIED_BROWSER_TOOLS,
   ...CONTROL_TOOLS,
@@ -78,6 +90,8 @@ export interface UnifiedBrowserLoopInput {
   execute: (action: UnifiedBrowserAction) => Promise<UnifiedToolResult>;
   /** Qwen Responses built-in web_search, or Firecrawl when configured. */
   webSearch?: (query: string) => Promise<WebSearchHit[]>;
+  /** Read-only page text (Firecrawl scrape) for pages the browser cannot open. */
+  readPage?: (url: string) => Promise<{ url: string; title: string; markdown: string }>;
   /** Resolves when the user finished the handoff; rejects/false to stop. */
   requestHuman?: (request: { reason: string; message: string }) => Promise<boolean>;
   maxSteps?: number;
@@ -112,7 +126,7 @@ export async function runUnifiedBrowserLoop(
           maxTokens: 4_096,
           system: UNIFIED_BROWSER_SYSTEM_PROMPT,
           messages: trimImages(messages),
-          tools: UNIFIED_LOOP_TOOLS,
+          tools: input.readPage ? [...UNIFIED_LOOP_TOOLS, READ_URL_TOOL] : UNIFIED_LOOP_TOOLS,
           toolChoice: { type: 'any' },
         },
         {
@@ -173,6 +187,19 @@ export async function runUnifiedBrowserLoop(
         results.push(
           toolResult(call.id, '用户已完成接管，请重新 snapshot 后继续；用户的操作不算你的操作。'),
         );
+        continue;
+      }
+      if (call.name === 'read_url' && input.readPage) {
+        const url = typeof args.url === 'string' ? args.url : '';
+        try {
+          const page = await input.readPage(url);
+          lastPageText = page.markdown;
+          results.push(
+            toolResult(call.id, `URL: ${page.url}\n标题: ${page.title}\n${page.markdown}`),
+          );
+        } catch {
+          results.push(toolResult(call.id, '读取失败，请换一个来源或用浏览器打开。', true));
+        }
         continue;
       }
       if (call.name === 'web_search') {

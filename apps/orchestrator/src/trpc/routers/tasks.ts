@@ -164,6 +164,10 @@ import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
 import type { PageLike, PlaywrightExecutor } from '../../agent/vision-loop/playwright-executor.js';
 import { createResponsesWebSearch } from '../../agent/browser-tools/unified-browser-loop.js';
+import {
+  createFallbackWebSearch,
+  createFirecrawlReadPage,
+} from '../../agent/browser-tools/web-search-fallback.js';
 import { startVisionLoopTask } from '../../agent/vision-loop/qwen-only-task-runner.js';
 import {
   BrowserSessionRestoreFlights,
@@ -5357,7 +5361,24 @@ export const tasksRouter = router({
             'supercar: llm_calls cost record failed (non-blocking)',
           ),
       });
+      // Batch 09: unified executor search (Qwen built-in first, Firecrawl
+      // fallback when FIRECRAWL_API_KEY is set) and read-only page reads.
+      const unifiedBrowserRuntime = modelRuntimeWiring.resolveCore({
+        actorExternalId: ctx.userId,
+        lane: 'browser',
+        ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
+      });
+      const unifiedWebSearch = createFallbackWebSearch({
+        primary:
+          unifiedBrowserRuntime.kind === 'ready'
+            ? createResponsesWebSearch(unifiedBrowserRuntime.responses('fast'))
+            : null,
+        firecrawl: ctx.firecrawl ?? null,
+      });
+      const unifiedReadPage = createFirecrawlReadPage(ctx.firecrawl);
       const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
+          ...(unifiedWebSearch ? { unifiedWebSearch } : {}),
+          ...(unifiedReadPage ? { unifiedReadPage } : {}),
           messagesAdapter: browserMessagesAdapter,
           taskId,
           ...(primaryExecutor && ctx.browserPool?.peek(taskId)?.executor === primaryExecutor ? { browserControlFactory: () => {
@@ -7341,7 +7362,10 @@ export const tasksRouter = router({
         visionRuntime.kind === 'ready'
           ? {
               messagesAdapter: visionRuntime.messages('vision'),
-              webSearch: createResponsesWebSearch(visionRuntime.responses('fast')),
+              webSearch: createFallbackWebSearch({
+                primary: createResponsesWebSearch(visionRuntime.responses('fast')),
+                firecrawl: ctx.firecrawl ?? null,
+              }),
             }
           : {};
       const runTaskFn = () =>

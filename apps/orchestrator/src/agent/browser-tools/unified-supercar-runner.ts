@@ -4,7 +4,7 @@ import type {
   SupercarOutcome,
 } from '../supercar/agent-loop.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
-import { type WebSearchHit, runUnifiedBrowserLoop } from './unified-browser-loop.js';
+import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
 /** Same takeover window as the legacy loop: a parked task waits this long for the user. */
@@ -92,11 +92,7 @@ function describe(action: UnifiedBrowserAction, label: string | null): string {
  * action capture, final evidence and human handoff (parked until the user
  * replies through `supercarReply`). Never throws.
  */
-export async function runUnifiedSupercarTask(
-  opts: RunSupercarOptions & {
-    unifiedWebSearch?: (query: string) => Promise<WebSearchHit[]>;
-  },
-): Promise<SupercarOutcome> {
+export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<SupercarOutcome> {
   if (!opts.executor || !opts.messagesAdapter) {
     return {
       status: 'failed',
@@ -145,6 +141,7 @@ export async function runUnifiedSupercarTask(
       intent: opts.intent,
       adapter: opts.messagesAdapter,
       ...(opts.unifiedWebSearch ? { webSearch: opts.unifiedWebSearch } : {}),
+      ...(opts.unifiedReadPage ? { readPage: opts.unifiedReadPage } : {}),
       maxSteps: opts.maxIterations ?? 40,
       signal: controller.signal,
       async execute(action) {
