@@ -199,15 +199,15 @@ export function NotificationsSection(): JSX.Element {
   };
 
   const handleSave = async (draft: ChannelDraft): Promise<void> => {
+    // Legacy custom channels can no longer be saved (Batch 10.3 allowlist);
+    // the modal already blocks this, the guard narrows the platform type.
+    if (draft.platform === 'custom') return;
     try {
       if (editingChannel) {
         await trpc.notificationChannels.update.mutate({
           channelId: editingChannel.channelId,
           platform: draft.platform,
           webhookUrl: draft.webhookUrl,
-          ...(draft.platform === 'custom'
-            ? { customTemplate: draft.customTemplate }
-            : {}),
         });
         if (!mountedRef.current) return;
         toast.show('已更新通知渠道', 'info');
@@ -215,9 +215,6 @@ export function NotificationsSection(): JSX.Element {
         await trpc.notificationChannels.create.mutate({
           platform: draft.platform,
           webhookUrl: draft.webhookUrl,
-          ...(draft.platform === 'custom'
-            ? { customTemplate: draft.customTemplate }
-            : {}),
         });
         if (!mountedRef.current) return;
         toast.show('已添加通知渠道', 'info');
