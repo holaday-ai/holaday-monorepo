@@ -24,7 +24,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { after, before, test } from 'node:test';
 import { MockOrchestrator } from './mock-orchestrator.mjs';
 
@@ -33,6 +33,20 @@ const require = createRequire(new URL('../../orchestrator/package.json', import.
 const { chromium } = require('playwright');
 
 const EXTENSION_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const ORCHESTRATOR_ROOT = fileURLToPath(new URL('../../orchestrator/', import.meta.url));
+
+/** The orchestrator's real SelectedChromeClient (the runner's side of the
+ *  selected-tab protocol), loaded through the workspace's tsx. */
+async function loadSelectedChromeClient() {
+  const { tsImport } = await import(
+    pathToFileURL(join(ORCHESTRATOR_ROOT, 'node_modules', 'tsx', 'dist', 'esm', 'api', 'index.mjs')).href
+  );
+  const mod = await tsImport(
+    pathToFileURL(join(ORCHESTRATOR_ROOT, 'src', 'agent', 'supercar', 'selected-chrome-client.ts')).href,
+    import.meta.url,
+  );
+  return mod.SelectedChromeClient;
+}
 const TOKEN = 'e2e-synthetic-token-0001';
 const TASK_ID = 'e2e-task-1';
 const SECRET_PASSWORD = 'hunter2-e2e-secret';
@@ -283,5 +297,79 @@ test('extension offline e2e: connect → snapshot/click/type → reconnect → c
     const { opened } = await openSession(fresh);
     assert.equal(opened.ok, true, `new session after tab close: ${JSON.stringify(opened.error)}`);
     await server.call(TASK_ID, 'session', { session: { op: 'close', sessionId: opened.result.sessionId } });
+  });
+  await t.test('orchestrator SelectedChromeClient accepts every extension receipt', async () => {
+    const SelectedChromeClient = await loadSelectedChromeClient();
+    const contractPage = await context.newPage();
+    await contractPage.goto(`${server.origin}/page.html`);
+    await contractPage.bringToFront();
+    const listed = await server.call(TASK_ID, 'tabs');
+    const tab = listed.result.tabs.find((entry) => entry.title === 'E2E 页面一' && entry.active);
+    assert.ok(tab, 'contract tab should be listed as active');
+    const control = {
+      canAgentAct: () => true,
+      close: () => undefined,
+      settled: async () => undefined,
+      checkpoint: async (refresh) => {
+        await refresh();
+        return { resumed: false, waitedMs: 0 };
+      },
+    };
+    const client = new SelectedChromeClient({
+      userId: 'e2e-user',
+      taskId: TASK_ID,
+      extensionClientId: 'e2e-client',
+      control,
+      // Same mapping as ws/server.ts: tool_result frame → ExtensionToolCallOutcome.
+      send: async (_userId, options) => {
+        const frame = await server.call(options.taskId, options.kind, options.args);
+        return {
+          ok: frame.ok,
+          ...(frame.result !== undefined ? { result: frame.result } : {}),
+          ...(frame.error ? { error: frame.error } : {}),
+        };
+      },
+    });
+
+    const opened = await client.open({
+      tabId: tab.tabId,
+      expectedUrl: contractPage.url(),
+      selectionId: tab.selectionId,
+    });
+    assert.equal(opened.ok, true, JSON.stringify(opened));
+    assert.equal(opened.revision, 1);
+
+    const clicked = await client.execute(
+      { kind: 'click', selector: roleSelector('提交按钮', 'button', '提交') },
+      client.revision,
+    );
+    assert.equal(clicked.ok, true, JSON.stringify(clicked));
+    assert.equal(clicked.actionOutcome, 'applied');
+
+    const typed = await client.execute(
+      {
+        kind: 'type',
+        selector: labelSelector('搜索词输入框', '搜索词'),
+        payload: { text: 'contract' },
+      },
+      client.revision,
+    );
+    assert.equal(typed.ok, true, JSON.stringify(typed));
+    assert.equal(await contractPage.inputValue('#query'), 'contract');
+
+    const missing = await client.execute(
+      { kind: 'click', selector: roleSelector('不存在的按钮', 'button', '不存在') },
+      client.revision,
+    );
+    assert.equal(missing.ok, false);
+    assert.equal(missing.actionOutcome, 'not_applied', JSON.stringify(missing));
+
+    await contractPage.fill('#pw', SECRET_PASSWORD);
+    const observed = await client.observe();
+    assert.equal(observed.ok, true, JSON.stringify(observed));
+    assert.ok(!JSON.stringify(observed).includes(SECRET_PASSWORD));
+
+    const closed = await client.close();
+    assert.deepEqual(closed, { ok: true, closed: true });
   });
 });
