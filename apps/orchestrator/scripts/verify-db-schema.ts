@@ -594,6 +594,10 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'description',
     'reminder_minutes',
     'last_reminder_run',
+    'notify_on_success',
+    'failure_notify_threshold',
+    'consecutive_failures',
+    'pending_task_id',
   ],
   planned_tasks: [
     'external_id',
@@ -609,6 +613,9 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'status',
     'item_count',
     'last_run_status',
+    'notify_on_success',
+    'failure_notify_threshold',
+    'consecutive_failures',
   ],
   planned_task_items: ['external_id', 'planned_task_id', 'seq', 'instruction', 'enabled'],
   planned_task_occurrence_overrides: [

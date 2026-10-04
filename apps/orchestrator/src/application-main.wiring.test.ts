@@ -157,6 +157,7 @@ vi.mock('./planned/planned-runner.js', () => ({
   startPlannedRunner: s.planned,
   stopPlannedRunner: async () => {},
   recoverStuckRunningPlannedTasks: s.recoverPlanned,
+  configurePlannedOutcomeNotifier() {},
   configurePlannedRunSpecialDispatcher() {},
   queuePlannedRun: vi.fn(),
 }));

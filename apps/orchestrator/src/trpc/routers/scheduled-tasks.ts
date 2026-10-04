@@ -22,6 +22,7 @@ import { and, between, desc, eq, gte, lte, or } from 'drizzle-orm';
 import rrule from 'rrule';
 import { z } from 'zod';
 import { computeNextRunFromInputs } from '../../agent/scheduled-runner.js';
+import { MAX_FAILURE_NOTIFY_THRESHOLD } from '../../notifications/task-outcome-policy.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
 import { scheduledTasks } from '../../db/schema/scheduled-tasks.js';
 
@@ -127,6 +128,21 @@ function validateRrule(input: string | null | undefined): string | null {
   }
 }
 
+/**
+ * Batch 10.3 — per-task outcome notification preferences. Failure pushes
+ * once the consecutive-failure streak reaches the threshold (then every N);
+ * success is silent unless `notifyOnSuccess`.
+ */
+const OUTCOME_NOTIFY_INPUT = {
+  notifyOnSuccess: z.boolean().optional(),
+  failureNotifyThreshold: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_FAILURE_NOTIFY_THRESHOLD)
+    .optional(),
+};
+
 export const scheduledTasksRouter = router({
   /**
    * Phase 26A — accepts an optional date-range filter for the
@@ -190,6 +206,9 @@ export const scheduledTasksRouter = router({
           // threw" and show the error in a tooltip.
           lastRunStatus: scheduledTasks.lastRunStatus,
           lastError: scheduledTasks.lastError,
+          notifyOnSuccess: scheduledTasks.notifyOnSuccess,
+          failureNotifyThreshold: scheduledTasks.failureNotifyThreshold,
+          consecutiveFailures: scheduledTasks.consecutiveFailures,
           createdAt: scheduledTasks.createdAt,
         })
         .from(scheduledTasks)
@@ -210,6 +229,9 @@ export const scheduledTasksRouter = router({
         status: r.status,
         lastRunStatus: r.lastRunStatus,
         lastError: r.lastError,
+        notifyOnSuccess: r.notifyOnSuccess,
+        failureNotifyThreshold: r.failureNotifyThreshold,
+        consecutiveFailures: r.consecutiveFailures,
         createdAt: r.createdAt,
       }));
     }),
@@ -237,6 +259,7 @@ export const scheduledTasksRouter = router({
         // Cap at 7 days so a user can't accidentally arm an absurdly
         // early reminder that fires on a different week.
         reminderMinutes: z.number().int().min(0).max(60 * 24 * 7).optional().nullable(),
+        ...OUTCOME_NOTIFY_INPUT,
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -301,6 +324,10 @@ export const scheduledTasksRouter = router({
         ...(input.reminderMinutes !== undefined
           ? { reminderMinutes: input.reminderMinutes }
           : {}),
+        ...(input.notifyOnSuccess !== undefined ? { notifyOnSuccess: input.notifyOnSuccess } : {}),
+        ...(input.failureNotifyThreshold !== undefined
+          ? { failureNotifyThreshold: input.failureNotifyThreshold }
+          : {}),
       });
       // Phase 26B follow-up #1 — return the effective next-run time
       // + the requested time so the SPA can toast "已调整到 X" when
@@ -341,6 +368,7 @@ export const scheduledTasksRouter = router({
         description: z.string().max(2000).optional().nullable(),
         // Phase 26B follow-up — explicit `null` clears the reminder.
         reminderMinutes: z.number().int().min(0).max(60 * 24 * 7).optional().nullable(),
+        ...OUTCOME_NOTIFY_INPUT,
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -433,6 +461,10 @@ export const scheduledTasksRouter = router({
       }
       if (input.timezone !== undefined) updates.timezone = input.timezone;
       if (input.description !== undefined) updates.description = input.description;
+      if (input.notifyOnSuccess !== undefined) updates.notifyOnSuccess = input.notifyOnSuccess;
+      if (input.failureNotifyThreshold !== undefined) {
+        updates.failureNotifyThreshold = input.failureNotifyThreshold;
+      }
       if (input.reminderMinutes !== undefined) {
         updates.reminderMinutes = input.reminderMinutes;
         shouldResetReminderClaim = true;

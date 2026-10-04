@@ -21,6 +21,29 @@ export const REMINDER_OPTIONS: ReadonlyArray<{
   { value: '60', minutes: 60, label: '1 小时前' },
 ];
 
+/**
+ * Batch 10.3 — failure notification threshold. Failures always land in the
+ * inbox + configured IM bots once the streak reaches N (then every N);
+ * success stays silent unless `notifyOnSuccess`.
+ */
+export const FAILURE_NOTIFY_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
+  { value: 1, label: '每次失败' },
+  { value: 2, label: '连续 2 次' },
+  { value: 3, label: '连续 3 次' },
+  { value: 5, label: '连续 5 次' },
+];
+
+export function scheduledNotifySummary(input: {
+  failureNotifyThreshold: number;
+  notifyOnSuccess: boolean;
+}): string {
+  const failure =
+    input.failureNotifyThreshold <= 1
+      ? '失败即通知'
+      : `连续失败 ${input.failureNotifyThreshold} 次通知`;
+  return input.notifyOnSuccess ? `${failure}，成功也通知` : failure;
+}
+
 export interface ScheduledCreatePayload {
   intent: string;
   repeatType: 'once' | 'daily' | 'weekly' | 'monthly';
@@ -28,6 +51,8 @@ export interface ScheduledCreatePayload {
   reminderMinutes: number | null;
   rrule?: string;
   description?: string;
+  notifyOnSuccess?: boolean;
+  failureNotifyThreshold?: number;
 }
 
 export function reminderMinutesForValue(value: string): number | null {
@@ -47,8 +72,12 @@ export function scheduledDialogHasDraftChanges(input: {
   readonly description: string;
   readonly rrule: string;
   readonly scheduledAt: string;
+  readonly notifyOnSuccess?: boolean;
+  readonly failureNotifyThreshold?: number;
 }): boolean {
   return (
+    input.notifyOnSuccess === true ||
+    (input.failureNotifyThreshold ?? 1) !== 1 ||
     input.intent.trim() !== input.initialIntent.trim() ||
     input.scheduledAt !== input.initialScheduledAt ||
     input.repeatType !== 'daily' ||
@@ -89,6 +118,8 @@ export function buildScheduledCreatePayload(input: {
   reminderValue: string;
   rrule: string;
   description: string;
+  notifyOnSuccess?: boolean;
+  failureNotifyThreshold?: number;
 }): ScheduledCreatePayload {
   const trimmedIntent = input.intent.trim();
   const trimmedRrule = input.rrule.trim();
@@ -103,5 +134,9 @@ export function buildScheduledCreatePayload(input: {
     reminderMinutes: reminderMinutesForValue(input.reminderValue),
     ...(input.repeatType === 'custom' ? { rrule: trimmedRrule } : {}),
     ...(trimmedDescription ? { description: trimmedDescription } : {}),
+    ...(input.notifyOnSuccess ? { notifyOnSuccess: true } : {}),
+    ...(input.failureNotifyThreshold && input.failureNotifyThreshold !== 1
+      ? { failureNotifyThreshold: input.failureNotifyThreshold }
+      : {}),
   };
 }

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildScheduledDispatchNotification } from './scheduled-copy.js';
+import {
+  buildScheduledDispatchNotification,
+  buildTaskOutcomeNotification,
+  scheduledOutcomeKind,
+} from './scheduled-copy.js';
 
 describe('buildScheduledDispatchNotification', () => {
   it('uses start copy for successful scheduled dispatches, not completion copy', () => {
@@ -60,5 +64,56 @@ describe('buildScheduledDispatchNotification', () => {
     expect(out.taskName).toHaveLength(61);
     expect(out.taskName.endsWith('…')).toBe(true);
     expect(out.message).toContain(`「${out.taskName}」`);
+  });
+});
+
+describe('Batch 10.3 — outcome kinds and copy', () => {
+  it('maps runner notify inputs to outcome kinds', () => {
+    expect(scheduledOutcomeKind({ ok: true, phase: 'dispatch' })).toBe('started');
+    expect(scheduledOutcomeKind({ ok: false, phase: 'dispatch' })).toBe('failed');
+    expect(scheduledOutcomeKind({ ok: false, skipped: true })).toBe('skipped');
+    expect(scheduledOutcomeKind({ ok: true, phase: 'dispatch', outcome: 'success' })).toBe('success');
+    expect(scheduledOutcomeKind({ ok: false, phase: 'task_terminal', outcome: 'cancelled' })).toBe(
+      'cancelled',
+    );
+    // Pre-10.3 callers without phase keep the old started / failed meaning.
+    expect(scheduledOutcomeKind({ ok: true })).toBe('started');
+  });
+
+  it('terminal failure copy names the streak once it exceeds one', () => {
+    const out = buildTaskOutcomeNotification({
+      label: '定时任务',
+      name: '抓取竞品价格',
+      kind: 'failed',
+      phase: 'task_terminal',
+      error: '页面超时',
+      consecutiveFailures: 3,
+    });
+    expect(out).toMatchObject({ type: 'task_failed', title: '定时任务执行失败' });
+    expect(out.message).toBe('「抓取竞品价格」执行失败：页面超时（已连续失败 3 次）');
+  });
+
+  it('dispatch failure keeps startup wording and omits a streak of one', () => {
+    const out = buildTaskOutcomeNotification({
+      label: '规划任务',
+      name: '周报',
+      kind: 'failed',
+      phase: 'dispatch',
+      error: null,
+      consecutiveFailures: 1,
+    });
+    expect(out.title).toBe('规划任务启动失败');
+    expect(out.message).toBe('「周报」未能开始执行：未知错误');
+  });
+
+  it('success copy is completion copy', () => {
+    const out = buildTaskOutcomeNotification({
+      label: '定时任务',
+      name: '日报',
+      kind: 'success',
+      phase: 'task_terminal',
+      error: null,
+    });
+    expect(out).toMatchObject({ type: 'task_complete', title: '定时任务已完成' });
   });
 });

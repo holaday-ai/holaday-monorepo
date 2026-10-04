@@ -536,6 +536,29 @@ export function ScheduledCalendarPage(): JSX.Element {
     [refresh, toast],
   );
 
+  const handleNotifyPrefsChange = React.useCallback(
+    async (
+      scheduledTaskId: string,
+      prefs: { notifyOnSuccess?: boolean; failureNotifyThreshold?: number },
+    ) => {
+      try {
+        await trpc.scheduledTasks.update.mutate({ scheduledTaskId, ...prefs });
+        if (!mountedRef.current) return;
+        setEventDetail((current) =>
+          current && current.row.scheduledTaskId === scheduledTaskId
+            ? { ...current, row: { ...current.row, ...prefs } }
+            : current,
+        );
+        toast.show('已更新通知设置', 'info');
+        await refresh();
+      } catch (err) {
+        if (!mountedRef.current) return;
+        toast.show(taskActionError('更新失败', errorMessage(err)), 'error');
+      }
+    },
+    [refresh, toast],
+  );
+
   const handleEventResize = React.useCallback(
     async (arg: EventResizeDoneArg) => {
       const id = arg.event.id;
@@ -954,6 +977,7 @@ export function ScheduledCalendarPage(): JSX.Element {
           onToggle={handleToggle}
           onRunNow={handleRunNow}
           onDeleteRequest={(id) => setConfirmDelete(id)}
+          onNotifyPrefsChange={handleNotifyPrefsChange}
         />
       )}
       <ScheduledTaskDialog

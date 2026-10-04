@@ -16,6 +16,10 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
+  FAILURE_NOTIFY_OPTIONS,
+  scheduledNotifySummary,
+} from '@/components/scheduled-dialog-state';
+import {
   describeScheduledEventReminder,
   describeScheduledEventRepeat,
   scheduledEventActionHint,
@@ -37,6 +41,11 @@ interface Props {
   onToggle(scheduledTaskId: string): Promise<void>;
   onRunNow(scheduledTaskId: string): Promise<void>;
   onDeleteRequest(scheduledTaskId: string): void;
+  /** Batch 10.3 — change per-task outcome notification preferences. */
+  onNotifyPrefsChange?(
+    scheduledTaskId: string,
+    prefs: { notifyOnSuccess?: boolean; failureNotifyThreshold?: number },
+  ): Promise<void>;
 }
 
 const POPOVER_WIDTH = 360;
@@ -50,8 +59,11 @@ export function EventDetailPopover({
   onToggle,
   onRunNow,
   onDeleteRequest,
+  onNotifyPrefsChange,
 }: Props): JSX.Element {
-  const [busy, setBusy] = React.useState<'toggle' | 'run' | null>(null);
+  const [busy, setBusy] = React.useState<'toggle' | 'run' | 'notify' | null>(null);
+  const failureNotifyThreshold = row.failureNotifyThreshold ?? 1;
+  const notifyOnSuccess = row.notifyOnSuccess === true;
   const rootRef = React.useRef<HTMLDivElement | null>(null);
 
   // Esc + outside-click dismissal. mousedown fires BEFORE FullCalendar's
@@ -74,7 +86,7 @@ export function EventDetailPopover({
     };
   }, [busy, onClose]);
 
-  const wrap = async (kind: 'toggle' | 'run', fn: () => Promise<void>) => {
+  const wrap = async (kind: 'toggle' | 'run' | 'notify', fn: () => Promise<void>) => {
     if (busy !== null) return;
     setBusy(kind);
     try {
@@ -160,6 +172,16 @@ export function EventDetailPopover({
         <span className="text-foreground">
           {describeScheduledEventReminder(row.reminderMinutes ?? null)}
         </span>
+        <span className="flex items-center gap-1">
+          <Bell className="h-3 w-3" />
+          通知
+        </span>
+        <span className="text-foreground">
+          {scheduledNotifySummary({ failureNotifyThreshold, notifyOnSuccess })}
+          {row.consecutiveFailures && row.consecutiveFailures > 0 ? (
+            <span className="text-[#EA1F59]"> · 已连续失败 {row.consecutiveFailures} 次</span>
+          ) : null}
+        </span>
         {row.lastRunAt && (
           <>
             <span className="flex items-center gap-1">
@@ -220,6 +242,47 @@ export function EventDetailPopover({
         >
           <div className="font-semibold text-foreground/85">{actionHint.title}</div>
           <div className="mt-0.5 leading-5">{actionHint.body}</div>
+        </div>
+      )}
+
+      {onNotifyPrefsChange && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[#595757]">
+          <label className="inline-flex items-center gap-1">
+            失败通知
+            <select
+              value={failureNotifyThreshold}
+              disabled={busy !== null}
+              aria-label="失败通知阈值"
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                void wrap('notify', async () => {
+                  await onNotifyPrefsChange(row.scheduledTaskId, { failureNotifyThreshold: next });
+                });
+              }}
+              className="rounded-[6px] border border-[#DCDDDD] bg-white px-1.5 py-1 text-xs"
+            >
+              {FAILURE_NOTIFY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="inline-flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={notifyOnSuccess}
+              disabled={busy !== null}
+              onChange={(e) => {
+                const next = e.target.checked;
+                void wrap('notify', async () => {
+                  await onNotifyPrefsChange(row.scheduledTaskId, { notifyOnSuccess: next });
+                });
+              }}
+              className="h-3.5 w-3.5 accent-[#EA1F59]"
+            />
+            成功也通知
+          </label>
         </div>
       )}
 

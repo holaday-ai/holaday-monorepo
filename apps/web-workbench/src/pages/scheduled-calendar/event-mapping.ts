@@ -49,6 +49,10 @@ export interface ScheduledTaskRow {
   lastRunStatus: 'success' | 'failed' | 'skipped' | null;
   lastError: string | null;
   createdAt: string | Date;
+  /** Batch 10.3 — outcome notification preferences + current failure streak. */
+  notifyOnSuccess?: boolean;
+  failureNotifyThreshold?: number;
+  consecutiveFailures?: number;
 }
 
 const SCHEDULED_TASK_PRODUCT_TITLES: Readonly<Record<string, string>> = {
@@ -280,6 +284,15 @@ function normalizeScheduledTaskRow(value: unknown): ScheduledTaskRow | null {
     lastRunStatus: normalizeLastRunStatus(value.lastRunStatus),
     lastError: safeNullableText(value.lastError),
     createdAt: safeDateValue(value.createdAt) ?? '',
+    ...(typeof value.notifyOnSuccess === 'boolean'
+      ? { notifyOnSuccess: value.notifyOnSuccess }
+      : {}),
+    ...(safePositiveInteger(value.failureNotifyThreshold) !== undefined
+      ? { failureNotifyThreshold: safePositiveInteger(value.failureNotifyThreshold) }
+      : {}),
+    ...(safeNonNegativeInteger(value.consecutiveFailures) !== null
+      ? { consecutiveFailures: safeNonNegativeInteger(value.consecutiveFailures) as number }
+      : {}),
   };
 }
 
