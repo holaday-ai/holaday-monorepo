@@ -120,6 +120,8 @@ export function resolveRequestedSchedule(input: {
   repeatType: PlannedRepeatType;
   rrule: string | null;
   now?: Date;
+  /** Batch 10.3 — plan timezone for rrule wall-clock evaluation. */
+  timezone?: string | null;
 }): { firstRunAt: Date; nextRunAt: Date; adjusted: boolean } {
   const firstRunAt = new Date(input.scheduledAt);
   if (Number.isNaN(firstRunAt.getTime())) throw new Error('执行时间无效');
@@ -135,6 +137,8 @@ export function resolveRequestedSchedule(input: {
       from: input.rrule ? now : nextRunAt,
       rrule: input.rrule,
       repeatType: input.repeatType,
+      anchor: firstRunAt,
+      timezone: input.timezone ?? null,
     });
     if (!next) throw new Error('无法计算下次执行时间，请检查重复规则');
     nextRunAt = next;

@@ -1,10 +1,49 @@
 import { describe, expect, it } from 'vitest';
 import {
+  calendarRruleString,
   normalizeScheduledTaskRows,
   pickStatusColor,
   rowToEventInput,
   type ScheduledTaskRow,
 } from './event-mapping.js';
+
+function localStamp(date: Date): string {
+  const p = (value: number, width = 2) => String(value).padStart(width, '0');
+  return `${p(date.getFullYear(), 4)}${p(date.getMonth() + 1)}${p(date.getDate())}T${p(
+    date.getHours(),
+  )}${p(date.getMinutes())}${p(date.getSeconds())}`;
+}
+
+describe('calendarRruleString', () => {
+  const anchor = new Date('2026-10-05T01:30:00Z');
+
+  it('adds a floating DTSTART from the next run when the rule has none', () => {
+    expect(calendarRruleString('FREQ=DAILY;BYHOUR=9', anchor)).toBe(
+      `DTSTART:${localStamp(anchor)}\nRRULE:FREQ=DAILY;BYHOUR=9`,
+    );
+    expect(calendarRruleString('RRULE:FREQ=DAILY', anchor)).toBe(
+      `DTSTART:${localStamp(anchor)}\nRRULE:FREQ=DAILY`,
+    );
+  });
+
+  it('converts a UTC DTSTART to local wall clock so BYDAY means local weekdays', () => {
+    const out = calendarRruleString(
+      'DTSTART:20261004T230000Z\nRRULE:FREQ=WEEKLY;BYDAY=MO,WE',
+      anchor,
+    );
+    expect(out).toBe(
+      `DTSTART:${localStamp(new Date('2026-10-04T23:00:00Z'))}\nRRULE:FREQ=WEEKLY;BYDAY=MO,WE`,
+    );
+    expect(out).not.toMatch(/Z\n/);
+  });
+
+  it('passes floating / TZID starts through unchanged', () => {
+    const floating = 'DTSTART:20261005T090000\nRRULE:FREQ=DAILY';
+    expect(calendarRruleString(floating, anchor)).toBe(floating);
+    const tzid = 'DTSTART;TZID=Asia/Shanghai:20261005T090000\nRRULE:FREQ=DAILY';
+    expect(calendarRruleString(tzid, anchor)).toBe(tzid);
+  });
+});
 
 function makeRow(over: Partial<ScheduledTaskRow>): ScheduledTaskRow {
   return {
@@ -149,9 +188,20 @@ describe('rowToEventInput', () => {
     );
     expect(events).toHaveLength(1);
     const ev = events[0]!;
-    expect(ev.rrule).toBe('FREQ=WEEKLY;BYDAY=MO,WE,FR');
+    // Anchored at nextRunAt as a floating (local wall-clock) DTSTART.
+    expect(ev.rrule).toBe(
+      `DTSTART:${localStamp(new Date('2026-05-16T09:00:00Z'))}\nRRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR`,
+    );
     expect(ev.duration).toEqual({ minutes: 30 });
     expect(ev.start).toBeUndefined();
+    // Batch 10.3 — rule occurrences are not draggable, only resizable.
+    expect(ev.startEditable).toBe(false);
+    expect(ev.durationEditable).toBe(true);
+  });
+
+  it('one-shot rows stay draggable', () => {
+    const [ev] = rowToEventInput(makeRow({}), { now });
+    expect(ev).not.toHaveProperty('startEditable');
   });
 
   it('extendedProps carries the full color triple + description + reminder', () => {

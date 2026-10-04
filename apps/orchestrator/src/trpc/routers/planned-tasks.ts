@@ -29,6 +29,7 @@ import {
   parseOccurrenceContent,
   preparePlannedTaskCreate,
 } from '../../planned/planned-executor.js';
+import { rebaseRruleDtstart } from '../../schedule/rrule-zoned.js';
 import {
   expandPlannedOccurrences,
   plannedTaskCanRunNow,
@@ -260,6 +261,7 @@ export const plannedTasksRouter = router({
         endsAt: plan.endsAt,
         repeatType: plan.repeatType as PlannedRepeatType,
         rrule: plan.rrule,
+        timezone: plan.timezone,
         rangeStart,
         rangeEnd,
         exceptions: planOverrides.map((override) => ({
@@ -335,6 +337,7 @@ export const plannedTasksRouter = router({
         scheduledAt: input.scheduledAt,
         repeatType: input.repeatType,
         rrule: input.rrule,
+        timezone: input.timezone,
       });
       endsAt = resolvePlannedEndsAt({
         repeatType: input.repeatType,
@@ -450,6 +453,7 @@ export const plannedTasksRouter = router({
                 : input.rrule !== undefined
                   ? input.rrule
                   : plan.rrule,
+            timezone: input.timezone ?? plan.timezone,
           });
         } catch (error) {
           throw new TRPCError({
@@ -570,6 +574,7 @@ export const plannedTasksRouter = router({
             scheduledAt: input.scheduledAt,
             repeatType: (input.repeatType ?? plan.repeatType) as PlannedRepeatType,
             rrule: input.rrule !== undefined ? input.rrule : plan.rrule,
+            timezone: input.timezone ?? plan.timezone,
           });
           updates.firstRunAt = requestedSchedule.firstRunAt;
           updates.nextRunAt = requestedSchedule.nextRunAt;
@@ -727,7 +732,8 @@ export const plannedTasksRouter = router({
             notes: plan.notes,
             scope: plan.scope,
             repeatType: plan.repeatType,
-            rrule: plan.rrule,
+            // Batch 10.3 — the moved series starts at the dropped time.
+            rrule: rebaseRruleDtstart(plan.rrule, scheduledFor),
             firstRunAt: scheduledFor,
             endsAt: newSeriesEndsAt,
             nextRunAt: scheduledFor,
@@ -768,6 +774,8 @@ export const plannedTasksRouter = router({
         .set({
           firstRunAt: scheduledFor,
           nextRunAt: scheduledFor,
+          // Batch 10.3 — keep an embedded DTSTART in step with first_run_at.
+          rrule: rebaseRruleDtstart(plan.rrule, scheduledFor),
           endsAt: seriesEndsAt,
           status: 'active',
           lastReminderRun: null,
@@ -803,6 +811,8 @@ export const plannedTasksRouter = router({
             from: original,
             rrule: plan.rrule,
             repeatType: plan.repeatType as PlannedRepeatType,
+            anchor: original,
+            timezone: plan.timezone,
           });
           await ctx.db
             .update(plannedTasks)

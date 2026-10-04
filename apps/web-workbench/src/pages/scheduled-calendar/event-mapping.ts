@@ -176,6 +176,55 @@ export function pickStatusColor(
   };
 }
 
+function pad(value: number, width = 2): string {
+  return String(value).padStart(width, '0');
+}
+
+/** Browser-local wall clock as an RFC 5545 floating DATE-TIME (no `Z`). */
+function floatingStamp(date: Date): string {
+  return (
+    `${pad(date.getFullYear(), 4)}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
+    `T${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+  );
+}
+
+/**
+ * Batch 10.3 — give FullCalendar an explicit floating DTSTART so the rule is
+ * anchored at the task's next run (not at page-render time, which shifted
+ * minutes/seconds and hid nothing-before-now inconsistently) and BYHOUR /
+ * BYDAY are read as local wall-clock values — the same semantics the server
+ * runner now uses with the row timezone. A `…Z` DTSTART is converted to the
+ * local wall clock; floating / TZID starts are passed through unchanged.
+ */
+export function calendarRruleString(rrule: string, anchor: Date): string {
+  const lines = rrule
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const dtstart = lines.find((line) => /^DTSTART[;:]/i.test(line));
+  const rest = lines
+    .filter((line) => !/^DTSTART[;:]/i.test(line))
+    .map((line) => (/^[A-Z-]+[:;]/i.test(line) && !/^FREQ=/i.test(line) ? line : `RRULE:${line}`));
+  let start = anchor;
+  if (dtstart) {
+    const utc = /^DTSTART:(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/i.exec(dtstart);
+    if (!utc) return rrule.trim();
+    start = new Date(
+      Date.UTC(
+        Number(utc[1]),
+        Number(utc[2]) - 1,
+        Number(utc[3]),
+        Number(utc[4]),
+        Number(utc[5]),
+        Number(utc[6]),
+      ),
+    );
+  }
+  if (Number.isNaN(start.getTime())) return rrule.trim();
+  return [`DTSTART:${floatingStamp(start)}`, ...rest].join('\n');
+}
+
 /**
  * Convert a scheduled_tasks row to a FullCalendar `EventInput`. For
  * recurring rows with an rrule, we attach `rrule` so the
@@ -242,8 +291,14 @@ export function rowToEventInput(
     return [
       {
         ...baseProps,
-        rrule: row.rrule,
+        rrule: calendarRruleString(row.rrule, nextRunAt),
         duration: { minutes: durationMinutes },
+        // Batch 10.3 — dragging one occurrence of a rule cannot move the
+        // rule: the server only rewrote next_run_at (one stray run at the
+        // dropped time) while the calendar snapped back to the rule. Keep
+        // resize (duration) but edit recurrence through the dialog.
+        startEditable: false,
+        durationEditable: true,
       },
     ];
   }
