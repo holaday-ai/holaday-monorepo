@@ -256,6 +256,11 @@ const baseEnvSchema = z.object({
    * narrower lane list can disable lanes; none is a prerequisite for Qwen to work.
    */
   QWEN_CORE_ROLLOUT_MODE: z.enum(['off', 'synthetic', 'internal', 'all']).default('all'),
+  /**
+   * Cloud browser executor: 'legacy' = supercar coordinate protocol (default
+   * until the batch-08 eval passes), 'unified' = batch-04 unified tool loop.
+   */
+  BROWSER_EXECUTOR: z.enum(['legacy', 'unified']).default('legacy'),
   QWEN_CORE_ENABLED_LANES: z.string().default(''),
   QWEN_CORE_ALLOWLIST: z.string().default(''),
   QWEN_RESPONSES_ADAPTER_ENABLED: z
