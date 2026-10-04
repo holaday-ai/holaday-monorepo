@@ -27,6 +27,8 @@ function browserBoundary() {
     isClosed: () => false,
     url: () => url,
     title: async () => 'Projects',
+    // Sensitive-field scan used by observation redaction (no secrets here).
+    evaluate: async () => [],
     locator: () => ({
       innerText: async () => (saved ? 'Saved' : 'Draft'),
       ariaSnapshot: async () => (saved ? '- status "Saved"' : '- button "Save"'),
