@@ -16,7 +16,7 @@ import {
  * Batch 10.1 — 能力自检. One click (or `scripts/self-check.ts`) probes every
  * model lane of the current brain with a 1-token call, media/search
  * credentials without generating anything, the infrastructure, the feature
- * switches and migrations 0059–0064. Each item is ✅/⚠️/❌ with one line of
+ * switches and migrations 0059–0065. Each item is ✅/⚠️/❌ with one line of
  * Chinese reason + advice. Keys never appear in items, logs or responses.
  */
 
@@ -621,6 +621,11 @@ export const MIGRATION_MARKERS: ReadonlyArray<{
   { id: '0062_playbook_self_evolution', table: 'task_action_captures', column: 'replay_json' },
   { id: '0063_quota_refunds', table: 'quota_refunds' },
   { id: '0064_model_catalog_settings', table: 'model_catalog_settings' },
+  {
+    id: '0065_task_outcome_notifications',
+    table: 'scheduled_tasks',
+    column: 'consecutive_failures',
+  },
 ];
 
 export async function checkMigrations(deps: SelfCheckDeps): Promise<SelfCheckItem[]> {
@@ -634,7 +639,7 @@ export async function checkMigrations(deps: SelfCheckDeps): Promise<SelfCheckIte
   } catch {
     return [
       item(
-        { id: 'migrations', group: 'migrations', label: '迁移 0059–0064' },
+        { id: 'migrations', group: 'migrations', label: '迁移 0059–0065' },
         { status: 'fail', reason: '无法读取数据库结构', advice: '先修复 MySQL 连接' },
       ),
     ];
