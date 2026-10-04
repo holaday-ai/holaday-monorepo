@@ -3,7 +3,6 @@ import type { IncomingMessage } from 'node:http';
 import {
   type ClientMessage,
   HEARTBEAT_INTERVAL_MS,
-  HEARTBEAT_TIMEOUT_MS,
   type ServerMessage,
   WS_SUBPROTOCOL,
   parseClientMessage,
@@ -31,6 +30,7 @@ import {
   extensionSocketClosedMessage,
   extensionToolTimeoutMessage,
 } from './extension-tool-copy.js';
+import { sweepHeartbeats } from './heartbeat-sweep.js';
 import { type WsWork, createWsWork } from './server-work.js';
 
 interface ClientState {
@@ -67,8 +67,6 @@ interface ClientState {
 
 const taskController = new TaskController();
 const taskRepository = new TaskRepository(db);
-
-const lastPingAt = new WeakMap<WebSocket, number>();
 
 /**
  * Per-user rehydrated TaskStates loaded at boot from MySQL. When a WS client
@@ -170,7 +168,10 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
     else void pending.catch(() => socket.close(1011, 'request failed'));
   });
 
-  const heartbeat = setInterval(() => sweep(wss), HEARTBEAT_INTERVAL_MS);
+  const heartbeat = setInterval(
+    () => sweepHeartbeats(wss.clients, (client) => clientStates.get(client)?.lastPongAt),
+    HEARTBEAT_INTERVAL_MS,
+  );
   heartbeat.unref();
   const sessionRevalidation = setInterval(
     () => revalidateSessions(wss, clientStates, authenticateToken),
@@ -1712,20 +1713,6 @@ function send(socket: WebSocket, msg: ServerMessage): boolean {
     }
   }
   return false;
-}
-
-function sweep(wss: WebSocketServer) {
-  const now = Date.now();
-  for (const client of wss.clients) {
-    if (client.readyState !== WebSocket.OPEN) continue;
-    const previous = lastPingAt.get(client) ?? now;
-    if (now - previous > HEARTBEAT_TIMEOUT_MS) {
-      client.terminate();
-      continue;
-    }
-    client.ping();
-    lastPingAt.set(client, now);
-  }
 }
 
 function revalidateSessions(
