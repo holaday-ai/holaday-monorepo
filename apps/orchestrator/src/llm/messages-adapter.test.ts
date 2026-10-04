@@ -8,6 +8,7 @@ import {
   createQwenMessagesAdapter,
   serializeMessagesRequest,
 } from './messages-adapter.js';
+import { QwenTransportError } from './qwen-messages-transport.js';
 import type { QwenRuntimeEnvironment } from './qwen-route.js';
 
 const QWEN_ENVIRONMENT: QwenRuntimeEnvironment & {
@@ -346,6 +347,27 @@ describe('createAnthropicCompatibleMessagesAdapter', () => {
 
     const request = vi.mocked(client.messages.create).mock.calls[0]?.[0];
     expect(request).toMatchObject({ tool_choice: { type: 'none' } });
+  });
+
+  it('keeps the provider HTTP status (e.g. 403 quota exhausted) on a sanitized error', async () => {
+    const client: AnthropicCompatibleClient = {
+      messages: {
+        create: vi.fn().mockRejectedValue(new QwenTransportError('PROVIDER_ERROR', 403)),
+      },
+    };
+    const adapter = createAnthropicCompatibleMessagesAdapter({
+      client,
+      metadata: { provider: 'anthropic', model: 'claude-haiku-4-5' },
+    });
+    await expect(
+      adapter.create({ maxTokens: 8, messages: [{ role: 'user', content: 'test' }] }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: 'PROVIDER_ERROR',
+        status: 403,
+        message: 'Message provider request failed',
+      }),
+    );
   });
 
   it('fails closed with sanitized errors for provider failures and malformed payloads', async () => {

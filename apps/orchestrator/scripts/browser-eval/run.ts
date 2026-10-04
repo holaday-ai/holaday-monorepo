@@ -9,6 +9,13 @@
  *   --executor unified (default) — batch-04 unified tool loop
  *   --executor legacy            — production supercar agent-loop (coordinate protocol)
  *
+ * Paired mode (batch 11.0): every task runs legacy then unified on the SAME
+ * model. Models rotate in order when one returns 403 (free quota exhausted) or
+ * reaches --token-budget (default 900k, tracked across runs in --budget-state):
+ *
+ *   ... run.ts --paired --models qwen3.7-plus,qwen3.6-plus --region intl \
+ *       --budget-state results/budget.json --out results/paired.csv
+ *
  * Needs the provider key in the environment. Never prints env values.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -37,7 +44,8 @@ const executorKind = (arg('executor') ?? 'unified') as 'unified' | 'legacy';
 const region = arg('region') ?? 'cn';
 const taskTimeoutMs = Number(arg('task-timeout-ms') ?? 240_000);
 const out =
-  arg('out') ?? `scripts/browser-eval/results/${executorKind}-${brainId}-${Date.now()}.csv`;
+  arg('out') ??
+  `scripts/browser-eval/results/${process.argv.includes('--paired') ? 'paired' : executorKind}-${brainId}-${Date.now()}.csv`;
 const suite = JSON.parse(readFileSync(new URL('./tasks.json', import.meta.url), 'utf8')) as {
   smokeIds: string[];
   tasks: BrowserEvalTask[];
@@ -48,12 +56,22 @@ const catalogBrain = BUILTIN_MODEL_CATALOG.find((entry) => entry.id === brainId)
 if (!catalogBrain) throw new Error(`unknown brain ${brainId}`);
 // --model overrides the browser + vision lane model of the brain (e.g. qwen3.8-flash).
 const modelOverride = arg('model');
-const brain = modelOverride
-  ? {
-      ...catalogBrain,
-      laneModels: { ...catalogBrain.laneModels, browser: modelOverride, vision: modelOverride },
-    }
-  : catalogBrain;
+function brainFor(model: string | undefined) {
+  return model
+    ? {
+        ...(catalogBrain as NonNullable<typeof catalogBrain>),
+        laneModels: { ...catalogBrain?.laneModels, browser: model, vision: model },
+      }
+    : (catalogBrain as NonNullable<typeof catalogBrain>);
+}
+const paired = process.argv.includes('--paired');
+const pairedModels = (arg('models') ?? '')
+  .split(',')
+  .map((model) => model.trim())
+  .filter(Boolean);
+if (paired && pairedModels.length === 0) throw new Error('--paired needs --models a,b,c');
+const tokenBudget = Number(arg('token-budget') ?? 900_000);
+const budgetStatePath = arg('budget-state');
 const concurrency = Number(arg('concurrency') ?? 1);
 if (concurrency !== 1)
   throw new Error('--concurrency must be 1: executors and tasks run strictly one at a time');
@@ -61,14 +79,27 @@ const delayMs = Number(arg('delay-ms') ?? 2_500);
 if (executorKind !== 'unified' && executorKind !== 'legacy')
   throw new Error('--executor must be unified or legacy');
 
-const runtime = createProductionModelRuntimeWiring(env).resolveCore({
-  actorExternalId: 'browser-eval',
-  lane: 'browser',
-  ownership: { scope: 'personal', userRegion: region },
-  brain,
-});
-if (runtime.kind !== 'ready')
-  throw new Error(`brain ${brainId} unavailable: ${runtime.reasonCode}`);
+type ReadyRuntime = Extract<
+  ReturnType<ReturnType<typeof createProductionModelRuntimeWiring>['resolveCore']>,
+  { kind: 'ready' }
+>;
+const runtimes = new Map<string, ReadyRuntime>();
+function runtimeFor(model: string | undefined): ReadyRuntime {
+  const key = model ?? '';
+  const cached = runtimes.get(key);
+  if (cached) return cached;
+  const resolved = createProductionModelRuntimeWiring(env).resolveCore({
+    actorExternalId: 'browser-eval',
+    lane: 'browser',
+    ownership: { scope: 'personal', userRegion: region },
+    brain: brainFor(model),
+  });
+  if (resolved.kind !== 'ready')
+    throw new Error(`brain ${brainId} unavailable: ${resolved.reasonCode}`);
+  runtimes.set(key, resolved);
+  return resolved;
+}
+runtimeFor(paired ? pairedModels[0] : modelOverride);
 
 const HANDOFF_RE = /登录|登陆|扫码|验证码|captcha|log ?in|sign ?in|支付|付款|实名/i;
 
@@ -111,6 +142,7 @@ async function runUnified(
   task: BrowserEvalTask,
   adapter: MessagesAdapter,
   trace: Array<Record<string, unknown>>,
+  runtime: ReadyRuntime,
 ): Promise<UnifiedBrowserOutcome> {
   const page = await executor.getPage();
   const unified = createPlaywrightUnifiedExecutor(page);
@@ -128,9 +160,7 @@ async function runUnified(
       intent: task.instruction,
       adapter,
       execute: tools.execute,
-      webSearch: createResponsesWebSearch(
-        runtime.kind === 'ready' ? runtime.responses('fast') : (null as never),
-      ),
+      webSearch: createResponsesWebSearch(runtime.responses('fast')),
       maxSteps: 30,
       signal: controller.signal,
     });
@@ -140,128 +170,227 @@ async function runUnified(
 }
 
 const rows = [
-  'id,category,executor,brain,model,status,success,failureClass,steps,durationMs,inputTokens,outputTokens,modelCalls,reason',
+  'id,category,executor,brain,model,status,success,failureClass,steps,durationMs,inputTokens,outputTokens,modelCalls,quota403,reason',
 ];
 const summary = { total: 0, modelLayer: 0, environment: 0, counted: 0, succeeded: 0 };
 const executor = new PlaywrightExecutor();
 const launched = await executor.launchManaged({ headless: true });
 if (!launched.ok) throw new Error('browser launch failed');
-try {
-  for (const task of tasks) {
-    const trace: Array<Record<string, unknown>> = [];
-    let inputTokens = 0;
-    let outputTokens = 0;
-    let modelCalls = 0;
-    const base = runtime.messages('vision');
-    const adapter: MessagesAdapter = {
-      metadata: base.metadata,
-      async create(request, options) {
-        modelCalls += 1;
-        const startedCall = Date.now();
-        let response: Awaited<ReturnType<MessagesAdapter['create']>>;
-        try {
-          response = await base.create(request, options);
-        } catch (error) {
-          const code = (error as { code?: string }).code ?? (error as Error).name;
-          trace.push({
-            type: 'model_error',
-            code,
-            ms: Date.now() - startedCall,
-            bytes: JSON.stringify(request).length,
-          });
-          throw error;
-        }
+
+interface TaskRun {
+  success: boolean;
+  failureClass: ReturnType<typeof classifyFailure>;
+  tokens: number;
+  quota403: boolean;
+}
+
+async function runTask(
+  task: BrowserEvalTask,
+  kind: 'legacy' | 'unified',
+  model: string | undefined,
+): Promise<TaskRun> {
+  const runtime = runtimeFor(model);
+  const trace: Array<Record<string, unknown>> = [];
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let modelCalls = 0;
+  let quota403 = false;
+  const base = runtime.messages('vision');
+  const adapter: MessagesAdapter = {
+    metadata: base.metadata,
+    async create(request, options) {
+      modelCalls += 1;
+      const startedCall = Date.now();
+      let response: Awaited<ReturnType<MessagesAdapter['create']>>;
+      try {
+        response = await base.create(request, options);
+      } catch (error) {
+        const code = (error as { code?: string }).code ?? (error as Error).name;
+        const status = (error as { status?: number | null }).status ?? null;
+        if (status === 403) quota403 = true;
         trace.push({
-          type: 'model',
+          type: 'model_error',
+          code,
+          status,
           ms: Date.now() - startedCall,
-          stop: response.stopReason,
-          calls: response.content.flatMap((block) =>
-            block.type === 'tool_use'
-              ? [{ name: block.name, input: JSON.stringify(block.input).slice(0, 300) }]
-              : [],
-          ),
+          bytes: JSON.stringify(request).length,
         });
-        inputTokens += response.usage.inputTokens ?? 0;
-        outputTokens += response.usage.outputTokens ?? 0;
-        return response;
-      },
-    };
-    const started = Date.now();
-    let outcome: UnifiedBrowserOutcome;
-    try {
-      await executor.resetPageForTask().catch(() => {});
-      const page = await executor.getPage();
-      // Start-page navigation is harness work, not the executor under test:
-      // retry transient timeouts / interrupted navigations a few times.
-      for (let attempt = 1; ; attempt += 1) {
-        try {
-          await page.goto(task.startUrl, { timeout: 45_000, waitUntil: 'domcontentloaded' });
-          break;
-        } catch (error) {
-          trace.push({ type: 'goto_retry', attempt, error: (error as Error).message.slice(0, 80) });
-          if (attempt >= 3) throw error;
-          await new Promise((resolve) => setTimeout(resolve, 2_000));
-        }
+        throw error;
       }
-      outcome =
-        executorKind === 'legacy'
-          ? await runLegacy(executor, task, adapter)
-          : await runUnified(executor, task, adapter, trace);
-    } catch (error) {
-      const message = error instanceof Error ? error.message.slice(0, 80) : 'error';
-      outcome = { status: 'failed', reason: `harness: ${message}`, steps: 0 };
+      trace.push({
+        type: 'model',
+        ms: Date.now() - startedCall,
+        stop: response.stopReason,
+        calls: response.content.flatMap((block) =>
+          block.type === 'tool_use'
+            ? [{ name: block.name, input: JSON.stringify(block.input).slice(0, 300) }]
+            : [],
+        ),
+      });
+      inputTokens += response.usage.inputTokens ?? 0;
+      outputTokens += response.usage.outputTokens ?? 0;
+      return response;
+    },
+  };
+  const started = Date.now();
+  let outcome: UnifiedBrowserOutcome;
+  try {
+    await executor.resetPageForTask().catch(() => {});
+    const page = await executor.getPage();
+    // Start-page navigation is harness work, not the executor under test:
+    // retry transient timeouts / interrupted navigations a few times.
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await page.goto(task.startUrl, { timeout: 45_000, waitUntil: 'domcontentloaded' });
+        break;
+      } catch (error) {
+        trace.push({ type: 'goto_retry', attempt, error: (error as Error).message.slice(0, 80) });
+        if (attempt >= 3) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+      }
     }
-    trace.push({ type: 'outcome', outcome });
-    mkdirSync(`${dirname(out)}/traces`, { recursive: true });
-    writeFileSync(
-      `${dirname(out)}/traces/${executorKind}-${task.id}.jsonl`,
-      `${trace.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
-    );
-    const success = scoreBrowserEval(task, outcome);
-    const failureClass = classifyFailure(success, outcome, trace);
-    summary.total += 1;
-    if (failureClass === 'model_layer') summary.modelLayer += 1;
-    else if (failureClass === 'environment') summary.environment += 1;
-    else {
-      summary.counted += 1;
-      if (success) summary.succeeded += 1;
+    outcome =
+      kind === 'legacy'
+        ? await runLegacy(executor, task, adapter)
+        : await runUnified(executor, task, adapter, trace, runtime);
+  } catch (error) {
+    const message = error instanceof Error ? error.message.slice(0, 80) : 'error';
+    outcome = { status: 'failed', reason: `harness: ${message}`, steps: 0 };
+  }
+  trace.push({ type: 'outcome', outcome });
+  mkdirSync(`${dirname(out)}/traces`, { recursive: true });
+  writeFileSync(
+    `${dirname(out)}/traces/${kind}-${task.id}.jsonl`,
+    `${trace.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+  );
+  const success = scoreBrowserEval(task, outcome);
+  const failureClass = classifyFailure(success, outcome, trace);
+  summary.total += 1;
+  if (failureClass === 'model_layer') summary.modelLayer += 1;
+  else if (failureClass === 'environment') summary.environment += 1;
+  else {
+    summary.counted += 1;
+    if (success) summary.succeeded += 1;
+  }
+  const reason =
+    outcome.status === 'failed'
+      ? outcome.reason
+      : outcome.status === 'awaiting_user'
+        ? `handoff:${outcome.reason}`
+        : '';
+  rows.push(
+    [
+      task.id,
+      task.category,
+      kind,
+      brainId,
+      brainFor(model).laneModels.browser ?? '',
+      outcome.status,
+      success,
+      failureClass,
+      outcome.steps,
+      Date.now() - started,
+      inputTokens,
+      outputTokens,
+      modelCalls,
+      quota403,
+      JSON.stringify(reason.replace(/\s+/g, ' ').slice(0, 120)),
+    ].join(','),
+  );
+  process.stdout.write(
+    `${task.id} ${kind} ${model ?? ''} ${outcome.status} success=${success} class=${failureClass} tokens=${inputTokens + outputTokens}${quota403 ? ' 403' : ''}\n`,
+  );
+  mkdirSync(dirname(out), { recursive: true });
+  writeFileSync(out, `${rows.join('\n')}\n`);
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  return { success, failureClass, tokens: inputTokens + outputTokens, quota403 };
+}
+
+/** Per-model token use, persisted so the full run continues the smoke run's count. */
+function loadBudget(): Record<string, { tokens: number; exhausted: boolean }> {
+  if (!budgetStatePath) return {};
+  try {
+    return JSON.parse(readFileSync(budgetStatePath, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+interface PairResult {
+  id: string;
+  category: string;
+  model: string;
+  legacy: TaskRun | null;
+  unified: TaskRun | null;
+}
+
+try {
+  if (!paired) {
+    for (const task of tasks) await runTask(task, executorKind, modelOverride);
+  } else {
+    const budget = loadBudget();
+    const saveBudget = () => {
+      if (budgetStatePath) writeFileSync(budgetStatePath, JSON.stringify(budget, null, 2));
+    };
+    const usable = () =>
+      pairedModels.find(
+        (model) => !budget[model]?.exhausted && (budget[model]?.tokens ?? 0) < tokenBudget,
+      );
+    const pairs: PairResult[] = [];
+    for (const task of tasks) {
+      const model = usable();
+      if (!model) {
+        process.stdout.write(`${task.id} not run: every model is out of budget\n`);
+        pairs.push({
+          id: task.id,
+          category: task.category,
+          model: '',
+          legacy: null,
+          unified: null,
+        });
+        continue;
+      }
+      budget[model] ??= { tokens: 0, exhausted: false };
+      const entry = budget[model];
+      const pair: PairResult = {
+        id: task.id,
+        category: task.category,
+        model,
+        legacy: null,
+        unified: null,
+      };
+      pair.legacy = await runTask(task, 'legacy', model);
+      entry.tokens += pair.legacy.tokens;
+      if (pair.legacy.quota403) entry.exhausted = true;
+      else {
+        pair.unified = await runTask(task, 'unified', model);
+        entry.tokens += pair.unified.tokens;
+        if (pair.unified.quota403) entry.exhausted = true;
+      }
+      saveBudget();
+      pairs.push(pair);
     }
-    const reason =
-      outcome.status === 'failed'
-        ? outcome.reason
-        : outcome.status === 'awaiting_user'
-          ? `handoff:${outcome.reason}`
-          : '';
-    rows.push(
-      [
-        task.id,
-        task.category,
-        executorKind,
-        brainId,
-        brain.laneModels.browser ?? '',
-        outcome.status,
-        success,
-        failureClass,
-        outcome.steps,
-        Date.now() - started,
-        inputTokens,
-        outputTokens,
-        modelCalls,
-        JSON.stringify(reason.replace(/\s+/g, ' ').slice(0, 120)),
-      ].join(','),
+    writeFileSync(`${out.replace(/\.csv$/, '')}.pairs.json`, JSON.stringify(pairs, null, 2));
+    const comparable = pairs.filter(
+      (pair) =>
+        pair.legacy &&
+        pair.unified &&
+        pair.legacy.failureClass !== 'model_layer' &&
+        pair.unified.failureClass !== 'model_layer' &&
+        pair.legacy.failureClass !== 'environment' &&
+        pair.unified.failureClass !== 'environment',
     );
+    const ok = (kind: 'legacy' | 'unified') =>
+      comparable.filter((pair) => pair[kind]?.success).length;
     process.stdout.write(
-      `${task.id} ${executorKind} ${outcome.status} success=${success} class=${failureClass}\n`,
+      `paired summary: pairs=${pairs.length} comparable=${comparable.length} legacy=${ok('legacy')} unified=${ok('unified')}\n`,
     );
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-    mkdirSync(dirname(out), { recursive: true });
-    writeFileSync(out, `${rows.join('\n')}\n`);
   }
 } finally {
   await executor.disconnect().catch(() => {});
 }
 const rate = summary.counted ? ((summary.succeeded / summary.counted) * 100).toFixed(1) : 'n/a';
 process.stdout.write(
-  `summary executor=${executorKind} total=${summary.total} counted=${summary.counted} succeeded=${summary.succeeded} successRate=${rate}% excluded_model_layer=${summary.modelLayer} excluded_environment=${summary.environment}\n`,
+  `summary executor=${paired ? 'paired' : executorKind} total=${summary.total} counted=${summary.counted} succeeded=${summary.succeeded} successRate=${rate}% excluded_model_layer=${summary.modelLayer} excluded_environment=${summary.environment}\n`,
 );
 process.stdout.write(`wrote ${out}\n`);

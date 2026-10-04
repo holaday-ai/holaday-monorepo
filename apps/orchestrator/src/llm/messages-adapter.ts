@@ -19,6 +19,8 @@ export class MessagesAdapterError extends Error {
   constructor(
     public readonly code: MessagesAdapterErrorCode,
     message: string,
+    /** Provider HTTP status when known (e.g. 403 quota exhausted); diagnostics only. */
+    public readonly status: number | null = null,
   ) {
     super(message);
     this.name = 'MessagesAdapterError';
@@ -475,7 +477,11 @@ function normalizeProviderError(
         return new MessagesAdapterError('INVALID_RESPONSE', 'Message provider response is invalid');
       case 'INVALID_ROUTE':
       case 'PROVIDER_ERROR':
-        return new MessagesAdapterError('PROVIDER_ERROR', 'Message provider request failed');
+        return new MessagesAdapterError(
+          'PROVIDER_ERROR',
+          'Message provider request failed',
+          error.status,
+        );
     }
   }
   if (options?.signal?.aborted || name === 'AbortError' || name === 'APIUserAbortError') {
