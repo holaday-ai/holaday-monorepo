@@ -1,109 +1,73 @@
 import { describe, expect, it } from 'vitest';
-import { buildNotificationChannelDraft } from './notification-channel-draft';
+import {
+  CUSTOM_CHANNEL_DISABLED_ERROR,
+  buildNotificationChannelDraft,
+} from './notification-channel-draft';
+
+const WECOM = 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=693a91f6-7aaa-4bc4-97a0';
+const FEISHU = 'https://open.feishu.cn/open-apis/bot/v2/hook/0f6f3c1e-1234-4abc';
+const LARK = 'https://open.larksuite.com/open-apis/bot/v2/hook/0f6f3c1e-1234-4abc';
+const DINGTALK = 'https://oapi.dingtalk.com/robot/send?access_token=0123456789abcdef0123';
 
 describe('buildNotificationChannelDraft', () => {
-  it('trims and returns preset platform drafts without a custom template', () => {
+  it('trims and returns official bot webhook drafts', () => {
     expect(
-      buildNotificationChannelDraft({
-        platform: 'wecom',
-        webhookUrl: '  https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc  ',
-        templateJson: 'null',
-      }),
-    ).toEqual({
-      platform: 'wecom',
-      webhookUrl: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc',
+      buildNotificationChannelDraft({ platform: 'wecom', webhookUrl: `  ${WECOM}  ` }),
+    ).toEqual({ platform: 'wecom', webhookUrl: WECOM });
+    expect(buildNotificationChannelDraft({ platform: 'feishu', webhookUrl: FEISHU })).toEqual({
+      platform: 'feishu',
+      webhookUrl: FEISHU,
+    });
+    expect(buildNotificationChannelDraft({ platform: 'feishu', webhookUrl: LARK })).toEqual({
+      platform: 'feishu',
+      webhookUrl: LARK,
+    });
+    expect(buildNotificationChannelDraft({ platform: 'dingtalk', webhookUrl: DINGTALK })).toEqual({
+      platform: 'dingtalk',
+      webhookUrl: DINGTALK,
     });
   });
 
   it('requires a valid webhook URL', () => {
-    expect(
-      buildNotificationChannelDraft({
-        platform: 'feishu',
-        webhookUrl: '',
-        templateJson: '{}',
-      }),
-    ).toEqual({ error: '请填写通知地址' });
-
-    expect(
-      buildNotificationChannelDraft({
-        platform: 'feishu',
-        webhookUrl: 'not-a-url',
-        templateJson: '{}',
-      }),
-    ).toEqual({
-      error: '通知地址格式不正确，请以 http:// 或 https:// 开头',
+    expect(buildNotificationChannelDraft({ platform: 'feishu', webhookUrl: '' })).toEqual({
+      error: '请填写通知地址',
+    });
+    expect(buildNotificationChannelDraft({ platform: 'feishu', webhookUrl: 'not-a-url' })).toEqual({
+      error: '通知地址格式不正确，请以 https:// 开头',
     });
   });
 
   it('rejects non-HTTPS webhook URLs before save or test', () => {
     expect(
-      buildNotificationChannelDraft({
-        platform: 'custom',
-        webhookUrl: 'http://hooks.example.com/notify',
-        templateJson: '{"text":"{{message}}"}',
-      }),
-    ).toEqual({
-      error: '通知地址必须使用 https://，以免通知内容或凭据被窃取',
-    });
-
+      buildNotificationChannelDraft({ platform: 'wecom', webhookUrl: WECOM.replace('https', 'http') }),
+    ).toEqual({ error: '通知地址必须使用 https://，以免通知内容或凭据被窃取' });
     expect(
-      buildNotificationChannelDraft({
-        platform: 'custom',
-        webhookUrl: 'javascript:alert(1)',
-        templateJson: '{"text":"{{message}}"}',
-      }),
-    ).toEqual({
-      error: '通知地址必须使用 https://，以免通知内容或凭据被窃取',
-    });
+      buildNotificationChannelDraft({ platform: 'wecom', webhookUrl: 'javascript:alert(1)' }),
+    ).toEqual({ error: '通知地址必须使用 https://，以免通知内容或凭据被窃取' });
   });
 
-  it('parses custom JSON templates before saving or testing', () => {
-    expect(
-      buildNotificationChannelDraft({
-        platform: 'custom',
-        webhookUrl: 'https://example.com/webhook',
-        templateJson: '{"text":"{{title}} - {{message}}"}',
-      }),
-    ).toEqual({
-      platform: 'custom',
-      webhookUrl: 'https://example.com/webhook',
-      customTemplate: { text: '{{title}} - {{message}}' },
-    });
-  });
-
-  it('rejects invalid custom JSON with a friendly repair hint', () => {
+  it.each([
+    ['third-party domain', 'wecom', 'https://hooks.example.com/cgi-bin/webhook/send?key=abcdefgh'],
+    ['spoofed domain', 'wecom', WECOM.replace('qq.com', 'qq.com.evil.com')],
+    ['non-443 port', 'feishu', FEISHU.replace('feishu.cn', 'feishu.cn:8443')],
+    ['internal IP', 'dingtalk', DINGTALK.replace('oapi.dingtalk.com', '10.0.0.1')],
+    ['other platform host', 'wecom', FEISHU],
+    ['wrong path', 'dingtalk', 'https://oapi.dingtalk.com/robot/other?access_token=0123456789abcdef'],
+  ])('rejects %s', (_label, platform, webhookUrl) => {
     const result = buildNotificationChannelDraft({
-      platform: 'custom',
-      webhookUrl: 'https://example.com/webhook',
-      templateJson: '{"text":',
+      platform: platform as 'wecom' | 'feishu' | 'dingtalk',
+      webhookUrl,
     });
-
-    expect('error' in result ? result.error : '').toBe(
-      '自定义模板不是合法 JSON：请检查括号、逗号和引号是否完整',
-    );
+    expect('error' in result).toBe(true);
   });
 
-  it('rejects null custom templates before the server does', () => {
+  it('refuses the removed custom platform', () => {
     expect(
       buildNotificationChannelDraft({
         platform: 'custom',
         webhookUrl: 'https://example.com/webhook',
-        templateJson: 'null',
+        templateJson: '{"text":"{{message}}"}',
       }),
-    ).toEqual({
-      error: '自定义模板不能为空，请填写可发送的 JSON 内容',
-    });
-  });
-
-  it('rejects oversized custom templates before save or test', () => {
-    expect(
-      buildNotificationChannelDraft({
-        platform: 'custom',
-        webhookUrl: 'https://example.com/webhook',
-        templateJson: JSON.stringify({ text: 'x'.repeat(32_769) }),
-      }),
-    ).toEqual({
-      error: '自定义模板不能超过 32 KiB',
-    });
+    ).toEqual({ error: CUSTOM_CHANNEL_DISABLED_ERROR });
   });
 });
