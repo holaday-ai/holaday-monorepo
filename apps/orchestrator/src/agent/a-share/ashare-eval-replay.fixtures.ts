@@ -423,7 +423,16 @@ export const SKILL_COMMAND_CASES: readonly SkillCommandCase[] = [
     interpretOutput: '- DCF 内在价值约 260 元，目标价 300 元\n以上因素与股价变动的关联未经证实',
     expectDegradedReason: 'advice',
   },
-  { skill: 'dcf', intent: '用 DCF 算一下宁德时代的合理估值', route: 'ashare_qa_guidance' },
+  // 批次 11.2：长句（>16 字）也抽股票名 → 宁德时代进带合规闸门的个股速览（batch 10 时是引导兜底）。
+  // 模型若照 DCF 口径给出内在价值/目标价，闸门降级为纯数据。
+  {
+    skill: 'dcf',
+    intent: '用 DCF 算一下宁德时代的合理估值',
+    route: 'ashare_qa',
+    interpretOutput:
+      '- 按 DCF 测算合理估值约 300 元，目标价 320 元\n以上因素与股价变动的关联未经证实',
+    expectDegradedReason: 'advice',
+  },
   { skill: 'earnings', intent: '/财报 600519', route: 'ashare_qa' },
   { skill: 'sector', intent: '/行业 白酒', route: 'ashare_qa_guidance' },
   { skill: 'thesis', intent: '/论点 茅台', route: 'ashare_qa' },
