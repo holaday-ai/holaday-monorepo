@@ -26,6 +26,7 @@
 
 import type { VisionAction } from '@holaday/shared-types';
 import { withDeadline } from '../shared/deadline.js';
+import { compactLogErrorReason } from '../shared/log-error.js';
 import { sanitizePageContextUrl } from '../shared/page-context.js';
 
 export interface ActionResult {
@@ -139,12 +140,50 @@ if (typeof chrome !== 'undefined') {
   });
 }
 
+const STALE_DEBUGGER_RELEASE_TIMEOUT_MS = 5_000;
+let staleDebuggerRelease: Promise<void> = Promise.resolve();
+
+/**
+ * MV3 service-worker recycle does NOT release chrome.debugger sessions the
+ * previous worker attached (verified in the offline e2e: the next
+ * `chrome.debugger.attach` on that tab fails with "Another debugger is already
+ * attached" until the extension reloads or the tab closes). A fresh worker
+ * owns no debugger session by definition, so on boot release every
+ * extension-owned attachment left behind. `chrome.debugger.detach` only
+ * touches this extension's own session; tabs attached by DevTools or other
+ * clients reject with "not attached" and are left alone. Attach paths
+ * (`ensureAttached`, `prepareSelectedChromeCdp`) wait for this to settle.
+ */
+export function releaseStaleDebuggerAttachments(): Promise<void> {
+  staleDebuggerRelease = withDeadline(
+    (async () => {
+      const getTargets = chrome.debugger?.getTargets;
+      if (typeof getTargets !== 'function') return;
+      const targets = await getTargets();
+      const tabIds = targets
+        .filter((target) => target.attached && typeof target.tabId === 'number')
+        .map((target) => target.tabId as number);
+      await Promise.allSettled(
+        tabIds.map((tabId) =>
+          trackDebuggerNativeOperation(tabId, 'detach', chrome.debugger.detach({ tabId })),
+        ),
+      );
+    })(),
+    STALE_DEBUGGER_RELEASE_TIMEOUT_MS,
+    'stale_debugger_release_timeout',
+  ).catch((error) => {
+    console.warn('[holaday] stale debugger release skipped', compactLogErrorReason(error));
+  });
+  return staleDebuggerRelease;
+}
+
 /**
  * Idempotently attach the debugger to the target tab. Returns quietly
  * if already attached; throws if the user denied the permission dialog
  * or the tab vanished.
  */
 async function ensureAttached(tabId: number): Promise<void> {
+  await staleDebuggerRelease;
   if (attachedTabs.has(tabId)) return;
   const pending = pendingAttachByTab.get(tabId);
   if (pending) {
@@ -175,7 +214,8 @@ async function ensureAttached(tabId: number): Promise<void> {
  * Public escape hatch — release the debugger from a specific tab (or
  * all tabs this SW has attached). Callers should invoke on task
  * teardown. Failure to detach is not fatal — Chrome auto-detaches
- * when the tab closes or the SW is torn down.
+ * when the tab closes; a SW teardown does NOT detach, which
+ * `releaseStaleDebuggerAttachments` covers on the next worker boot.
  */
 export async function detachFromTab(tabId: number): Promise<void> {
   const pending = pendingAttachByTab.get(tabId);
@@ -220,6 +260,7 @@ async function waitForDebuggerNativeOperations(): Promise<void> {
  * cannot transition while an older native operation may still be active.
  */
 export async function prepareSelectedChromeCdp(): Promise<void> {
+  await staleDebuggerRelease;
   await waitForDebuggerNativeOperations();
 
   const ids = new Set([...possiblyAttachedTabs, ...attachedTabs]);
@@ -871,6 +912,7 @@ function resolveKey(name: string): KeyInfo {
  * each scenario starts with no attachments assumed.
  */
 export function _resetAttachedTabsForTests(): void {
+  staleDebuggerRelease = Promise.resolve();
   debuggerTrackingGeneration += 1;
   attachedTabs.clear();
   pendingAttachByTab.clear();

@@ -58,6 +58,7 @@ import {
   executeCdpAction,
   getActiveTabId,
   prepareSelectedChromeCdp,
+  releaseStaleDebuggerAttachments,
 } from './cdp-actions.js';
 import { buildLoginStatesMessage, readLoginStates } from './cookie-bridge.js';
 import { runCookieSync } from './cookie-sync.js';
@@ -168,6 +169,11 @@ async function getDriver(): Promise<HolaDayBrowserDriver> {
   });
   return driverPromise;
 }
+
+// A (re)started worker owns no debugger session; release any the previous
+// worker left attached so selected-tab / vision attaches do not fail with
+// "Another debugger is already attached" after an MV3 recycle.
+void releaseStaleDebuggerAttachments();
 
 /** Runs only while selected ownership is already reserved and before the
  * selected bridge attaches. Any cleanup failure blocks the new attachment. */

@@ -10,6 +10,7 @@ import {
   getActiveTabId,
   normalizeCdpNavigateUrl,
   prepareSelectedChromeCdp,
+  releaseStaleDebuggerAttachments,
   sanitizeVisionObservationCapture,
 } from './cdp-actions.js';
 
@@ -1651,5 +1652,63 @@ describe('getActiveTabId', () => {
     await expect(pending).resolves.toBe(78);
     expect(query).toHaveBeenNthCalledWith(1, { active: true, currentWindow: true });
     expect(query).toHaveBeenNthCalledWith(2, { active: true, lastFocusedWindow: true });
+  });
+});
+
+describe('releaseStaleDebuggerAttachments', () => {
+  it('detaches every attached tab target left by a previous worker', async () => {
+    const detach = vi.fn(async ({ tabId }: { tabId: number }) => {
+      if (tabId === 8) throw new Error('Debugger is not attached to the tab with id: 8.');
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).chrome = {
+      debugger: {
+        getTargets: vi.fn(async () => [
+          { attached: true, tabId: 7, type: 'page' },
+          { attached: true, tabId: 8, type: 'page' },
+          { attached: false, tabId: 9, type: 'page' },
+          { attached: true, type: 'worker' },
+        ]),
+        detach,
+      },
+    };
+
+    await expect(releaseStaleDebuggerAttachments()).resolves.toBeUndefined();
+
+    expect(detach.mock.calls.map(([target]) => target)).toEqual([{ tabId: 7 }, { tabId: 8 }]);
+  });
+
+  it('holds selected-mode preparation until the stale release settles', async () => {
+    let finishDetach: (() => void) | undefined;
+    const detach = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDetach = resolve;
+        }),
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).chrome = {
+      debugger: {
+        getTargets: vi.fn(async () => [{ attached: true, tabId: 7, type: 'page' }]),
+        detach,
+      },
+    };
+    void releaseStaleDebuggerAttachments();
+    let prepared = false;
+    const preparation = prepareSelectedChromeCdp().then(() => {
+      prepared = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(prepared).toBe(false);
+
+    finishDetach?.();
+    await preparation;
+    expect(prepared).toBe(true);
+  });
+
+  it('never blocks boot when the debugger API is unavailable', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).chrome = {};
+    await expect(releaseStaleDebuggerAttachments()).resolves.toBeUndefined();
   });
 });
