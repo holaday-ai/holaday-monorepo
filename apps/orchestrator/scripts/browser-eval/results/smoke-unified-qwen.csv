@@ -1,0 +1,6 @@
+id,category,executor,brain,status,success,steps,durationMs,inputTokens,outputTokens,modelCalls,reason
+be-06,form,unified,qwen,completed,true,12,130605,14276,6536,12,""
+be-10,form,unified,qwen,completed,true,8,218293,12831,12784,8,""
+be-12,table,unified,qwen,completed,true,3,25682,5201,862,3,""
+be-14,table,unified,qwen,failed,false,0,31724,0,0,0,"harness: page.goto: Navigation to \"https://quotes.toscrape.com/\" is interrupted by anothe"
+be-15,table,unified,qwen,cancelled,false,4,242119,3403,6266,5,""
