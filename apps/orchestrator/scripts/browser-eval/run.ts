@@ -98,9 +98,17 @@ async function runUnified(
   executor: PlaywrightExecutor,
   task: BrowserEvalTask,
   adapter: MessagesAdapter,
+  trace: Array<Record<string, unknown>>,
 ): Promise<UnifiedBrowserOutcome> {
   const page = await executor.getPage();
-  const tools = createPlaywrightUnifiedExecutor(page);
+  const unified = createPlaywrightUnifiedExecutor(page);
+  const tools = {
+    execute: async (action: Parameters<typeof unified.execute>[0]) => {
+      const result = await unified.execute(action);
+      trace.push({ type: 'tool', action, ok: result.ok, text: result.text.slice(0, 200) });
+      return result;
+    },
+  };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), taskTimeoutMs);
   try {
@@ -127,6 +135,7 @@ const launched = await executor.launchManaged({ headless: true });
 if (!launched.ok) throw new Error('browser launch failed');
 try {
   for (const task of tasks) {
+    const trace: Array<Record<string, unknown>> = [];
     let inputTokens = 0;
     let outputTokens = 0;
     let modelCalls = 0;
@@ -135,7 +144,30 @@ try {
       metadata: base.metadata,
       async create(request, options) {
         modelCalls += 1;
-        const response = await base.create(request, options);
+        const startedCall = Date.now();
+        let response: Awaited<ReturnType<MessagesAdapter['create']>>;
+        try {
+          response = await base.create(request, options);
+        } catch (error) {
+          const code = (error as { code?: string }).code ?? (error as Error).name;
+          trace.push({
+            type: 'model_error',
+            code,
+            ms: Date.now() - startedCall,
+            bytes: JSON.stringify(request).length,
+          });
+          throw error;
+        }
+        trace.push({
+          type: 'model',
+          ms: Date.now() - startedCall,
+          stop: response.stopReason,
+          calls: response.content.flatMap((block) =>
+            block.type === 'tool_use'
+              ? [{ name: block.name, input: JSON.stringify(block.input).slice(0, 300) }]
+              : [],
+          ),
+        });
         inputTokens += response.usage.inputTokens ?? 0;
         outputTokens += response.usage.outputTokens ?? 0;
         return response;
@@ -146,15 +178,32 @@ try {
     try {
       await executor.resetPageForTask().catch(() => {});
       const page = await executor.getPage();
-      await page.goto(task.startUrl, { timeout: 45_000, waitUntil: 'domcontentloaded' });
+      // Start-page navigation is harness work, not the executor under test:
+      // retry transient timeouts / interrupted navigations a few times.
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          await page.goto(task.startUrl, { timeout: 45_000, waitUntil: 'domcontentloaded' });
+          break;
+        } catch (error) {
+          trace.push({ type: 'goto_retry', attempt, error: (error as Error).message.slice(0, 80) });
+          if (attempt >= 3) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 2_000));
+        }
+      }
       outcome =
         executorKind === 'legacy'
           ? await runLegacy(executor, task, adapter)
-          : await runUnified(executor, task, adapter);
+          : await runUnified(executor, task, adapter, trace);
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 80) : 'error';
       outcome = { status: 'failed', reason: `harness: ${message}`, steps: 0 };
     }
+    trace.push({ type: 'outcome', outcome });
+    mkdirSync(`${dirname(out)}/traces`, { recursive: true });
+    writeFileSync(
+      `${dirname(out)}/traces/${executorKind}-${task.id}.jsonl`,
+      `${trace.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
     const success = scoreBrowserEval(task, outcome);
     const reason =
       outcome.status === 'failed'

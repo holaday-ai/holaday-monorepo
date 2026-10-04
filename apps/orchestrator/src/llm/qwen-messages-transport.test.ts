@@ -162,4 +162,29 @@ describe('createQwenMessagesTransport', () => {
       status: 200,
     });
   });
+
+  it('retries a network error before any response, then gives up after maxRetries', async () => {
+    const recovered = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(successfulResponse());
+    await createQwenMessagesTransport({
+      route: INTL_ROUTE,
+      fetchImpl: recovered,
+      retryBaseDelayMs: 0,
+    }).messages.create(REQUEST);
+    expect(recovered).toHaveBeenCalledTimes(2);
+
+    const down = vi.fn<typeof fetch>(async () => {
+      throw new TypeError('fetch failed');
+    });
+    await expect(
+      createQwenMessagesTransport({
+        route: INTL_ROUTE,
+        fetchImpl: down,
+        retryBaseDelayMs: 0,
+      }).messages.create(REQUEST, { maxRetries: 2 }),
+    ).rejects.toMatchObject({ code: 'PROVIDER_ERROR' });
+    expect(down).toHaveBeenCalledTimes(3);
+  });
 });

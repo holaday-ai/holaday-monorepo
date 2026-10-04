@@ -109,7 +109,14 @@ export function createQwenMessagesTransport(input: {
                     timedOut && !callerAborted ? 'REQUEST_TIMEOUT' : 'REQUEST_ABORTED',
                   );
                 }
-                throw new QwenTransportError('PROVIDER_ERROR');
+                // A network error before any response (reset, refused, TLS
+                // failure) is retried like a 502/503 within the same deadline.
+                if (attempt >= maxRetries) throw new QwenTransportError('PROVIDER_ERROR');
+                await waitForRetry(retryBaseDelayMs * 2 ** attempt, controller.signal, () => ({
+                  callerAborted,
+                  timedOut,
+                }));
+                continue;
               }
 
               if (controller.signal.aborted) {

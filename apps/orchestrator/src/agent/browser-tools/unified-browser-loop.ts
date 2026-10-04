@@ -101,13 +101,15 @@ export async function runUnifiedBrowserLoop(
 ): Promise<UnifiedBrowserOutcome> {
   const maxSteps = input.maxSteps ?? 40;
   const messages: NeutralMessage[] = [{ role: 'user', content: input.intent }];
+  /** Latest page text seen by snapshot/extract; evidence must come from it. */
+  let lastPageText = '';
   for (let step = 0; step < maxSteps; step += 1) {
     if (input.signal?.aborted) return { status: 'cancelled', steps: step };
     let response: Awaited<ReturnType<MessagesAdapter['create']>>;
     try {
       response = await input.adapter.create(
         {
-          maxTokens: 2_048,
+          maxTokens: 4_096,
           system: UNIFIED_BROWSER_SYSTEM_PROMPT,
           messages: trimImages(messages),
           tools: UNIFIED_LOOP_TOOLS,
@@ -134,13 +136,27 @@ export async function runUnifiedBrowserLoop(
     const images: NeutralInputContentBlock[] = [];
     for (const call of calls) {
       if (call.type !== 'tool_use') continue;
-      const args = (call.input ?? {}) as Record<string, unknown>;
+      const normalized = normalizeToolInput(call.input);
+      if (normalized === INVALID_ARGUMENTS) {
+        results.push(
+          toolResult(call.id, `${call.name} 的参数不是合法 JSON，请缩短内容后重新调用。`, true),
+        );
+        continue;
+      }
+      const args = normalized;
       if (call.name === 'finish') {
         const summary = typeof args.summary === 'string' ? args.summary : '';
         if (args.status === 'completed') {
-          const evidence = typeof args.evidence === 'string' ? args.evidence.trim() : '';
+          const given = typeof args.evidence === 'string' ? args.evidence.trim() : '';
+          const evidence = given || deriveEvidence(summary, lastPageText);
           if (!evidence) {
-            results.push(toolResult(call.id, 'completed 需要附上摘自最新页面的 evidence。', true));
+            results.push(
+              toolResult(
+                call.id,
+                'completed 需要 evidence：从最新页面原样复制一小段能证明结果的文字（例如表格第一行），再调用 finish。',
+                true,
+              ),
+            );
             continue;
           }
           return { status: 'completed', summary, evidence, steps: step + 1 };
@@ -190,6 +206,8 @@ export async function runUnifiedBrowserLoop(
       }
       const outcome = await input.execute(action);
       input.onStep?.({ index: step, tool: action.tool, ok: outcome.ok });
+      if (outcome.ok && (action.tool === 'snapshot' || action.tool === 'extract'))
+        lastPageText = outcome.text;
       results.push(toolResult(call.id, outcome.text, !outcome.ok));
       if (outcome.image)
         images.push({
@@ -204,6 +222,49 @@ export async function runUnifiedBrowserLoop(
     reason: '超过最大步数仍未完成，请把任务拆小一些再试。',
     steps: maxSteps,
   };
+}
+
+const INVALID_ARGUMENTS = Symbol('invalid-arguments');
+
+/**
+ * Some compatible providers return long tool arguments unparsed as
+ * `{ raw_arguments: "<json>" }`. Parse them instead of treating the call as empty.
+ */
+export function normalizeToolInput(
+  input: unknown,
+): Record<string, unknown> | typeof INVALID_ARGUMENTS {
+  const record = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.length === 1 && typeof record.raw_arguments === 'string') {
+    try {
+      const parsed = JSON.parse(record.raw_arguments);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : INVALID_ARGUMENTS;
+    } catch {
+      return INVALID_ARGUMENTS;
+    }
+  }
+  return record;
+}
+
+/**
+ * Evidence fallback: a line of the model's summary (or a table cell run) that
+ * literally appears in the latest page text. Never invents text.
+ */
+export function deriveEvidence(summary: string, pageText: string): string {
+  if (!pageText) return '';
+  const normalizedPage = pageText.replace(/\s+/g, ' ');
+  const candidates = summary
+    .split(/\n|\|/)
+    .map((part) => part.replace(/[*`#>-]/g, '').trim())
+    .filter((part) => part.length >= 4)
+    .sort((a, b) => b.length - a.length);
+  for (const candidate of candidates) {
+    const needle = candidate.replace(/\s+/g, ' ');
+    if (normalizedPage.includes(needle)) return needle.slice(0, 200);
+  }
+  return '';
 }
 
 function toolResult(toolUseId: string, content: string, isError = false): NeutralInputContentBlock {

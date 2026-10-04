@@ -179,4 +179,67 @@ describe('unified browser loop', () => {
     });
     expect(outcome).toMatchObject({ status: 'failed', reason: '模型服务暂时不可用，请稍后重试。' });
   });
+
+  it('parses raw_arguments tool input instead of treating finish as empty', async () => {
+    const adapter = scriptedAdapter([
+      () => [call('snapshot', {}, 's1')],
+      () => [
+        call(
+          'finish',
+          {
+            raw_arguments: JSON.stringify({
+              status: 'completed',
+              summary: '价格 29 元',
+              evidence: '结果：收纳盒 ￥29',
+            }),
+          },
+          'f1',
+        ),
+      ],
+    ]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: 'x',
+      adapter,
+      execute: async () => ({ ok: true, text: '结果：收纳盒 ￥29' }),
+    });
+    expect(outcome).toMatchObject({ status: 'completed', evidence: '结果：收纳盒 ￥29' });
+  });
+
+  it('asks again when raw_arguments are not valid JSON', async () => {
+    const adapter = scriptedAdapter([
+      () => [call('finish', { raw_arguments: '{"status": "completed", "summary": "trunc' }, 'f0')],
+      (request) => {
+        expect(JSON.stringify(request.messages.at(-1))).toContain('不是合法 JSON');
+        return [call('finish', { status: 'failed', summary: '放弃' }, 'f1')];
+      },
+    ]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: 'x',
+      adapter,
+      execute: async () => ({ ok: true, text: '' }),
+    });
+    expect(outcome.status).toBe('failed');
+  });
+
+  it('derives evidence only from text that is really on the latest page', async () => {
+    const adapter = scriptedAdapter([
+      () => [call('extract', { instruction: '表格' }, 'e1')],
+      () => [
+        call(
+          'finish',
+          { status: 'completed', summary: '| Alfreds Futterkiste | Germany |\n共 6 行' },
+          'f1',
+        ),
+      ],
+    ]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: 'x',
+      adapter,
+      execute: async () => ({
+        ok: true,
+        text: 'Company Contact Country Alfreds Futterkiste Maria Anders Germany',
+      }),
+    });
+    expect(outcome).toMatchObject({ status: 'completed', evidence: 'Alfreds Futterkiste' });
+  });
 });

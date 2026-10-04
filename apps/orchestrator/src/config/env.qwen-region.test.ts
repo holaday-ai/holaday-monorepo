@@ -133,4 +133,21 @@ describe('Qwen dual-region environment contract', () => {
     expect(parsed.DASHSCOPE_BASE_URL).toBe('https://dashscope-intl.aliyuncs.com');
     expect(parsed.DASHSCOPE_WORKSPACE_ID).toBe('');
   });
+
+  it('lets media clients use the intl key when the legacy DASHSCOPE_API_KEY is unset', () => {
+    const parsed = envSchema.parse({
+      ...BASE_ENV,
+      DASHSCOPE_INTL_API_KEY: 'synthetic-intl',
+      DASHSCOPE_INTL_WORKSPACE_ID: 'ws-intl',
+    });
+    expect(parsed.DASHSCOPE_API_KEY).toBe('synthetic-intl');
+    expect(parsed.DASHSCOPE_WORKSPACE_ID).toBe('ws-intl');
+    const explicit = envSchema.parse({
+      ...BASE_ENV,
+      DASHSCOPE_API_KEY: 'synthetic-legacy',
+      DASHSCOPE_INTL_API_KEY: 'synthetic-intl',
+    });
+    expect(explicit.DASHSCOPE_API_KEY).toBe('synthetic-legacy');
+  });
 });
+

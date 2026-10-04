@@ -716,6 +716,12 @@ export const envSchema = baseEnvSchema
   })
   .transform((environment) => ({
     ...environment,
+    // Media clients (images, Wanxiang video, voice clone) call the Singapore
+    // DashScope endpoint with DASHSCOPE_API_KEY. That key is the legacy alias of
+    // the intl key (see qwen-route), so an intl-only deployment works for media too.
+    DASHSCOPE_API_KEY: environment.DASHSCOPE_API_KEY || environment.DASHSCOPE_INTL_API_KEY,
+    DASHSCOPE_WORKSPACE_ID:
+      environment.DASHSCOPE_WORKSPACE_ID || environment.DASHSCOPE_INTL_WORKSPACE_ID,
     HOLADAY_PUBLIC_BASE_URL: parseHoladayPublicBaseUrl(
       environment.HOLADAY_PUBLIC_BASE_URL,
       environment.NODE_ENV,
