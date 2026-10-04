@@ -233,7 +233,15 @@ export interface TaskStore {
     projectId: string | null,
   ): Promise<{ ok: true } | { error: string }>;
   /** Retry by identity, never by text alone: browser selection is task-specific. */
-  rerunTask(taskId: string, rebuiltIntent?: string): Promise<{ taskId: string } | { error: string }>;
+  rerunTask(
+    taskId: string,
+    rebuiltIntent?: string,
+    /**
+     * Batch 10.2 — original input attachments (from
+     * `taskRecovery.failureContext`) so a retry resends the same files.
+     */
+    options?: { fileIds?: readonly string[] },
+  ): Promise<{ taskId: string } | { error: string }>;
   createTask(
     intent: string,
     fileIds?: string[],
@@ -1504,7 +1512,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
   },
 
-  async rerunTask(taskId, rebuiltIntent) {
+  async rerunTask(taskId, rebuiltIntent, options) {
     const task = get().tasks.find((item) => item.taskId === taskId);
     if (!task) return { error: '无法确认原任务的执行方式，请重新打开任务后再试。' };
     // Selections are short-lived and cleared on creation. Reusing another
@@ -1515,7 +1523,22 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     if (get().localChromeSelection) {
       return { error: '输入框已选择 Chrome 页面，请先移除该选择，再重新执行原任务。' };
     }
-    return get().createTask(rebuiltIntent ?? task.intent, []);
+    const fileIds = [...new Set(options?.fileIds ?? [])].slice(0, 5);
+    // Image tasks route on imageOptions, not intent text: without them a
+    // retry would silently fall into the generic lane.
+    const imageOptions =
+      task.executionMode === 'image' && task.imageOptions ? task.imageOptions : undefined;
+    return get().createTask(
+      rebuiltIntent ?? task.intent,
+      fileIds,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      imageOptions,
+    );
   },
 
   async createTask(

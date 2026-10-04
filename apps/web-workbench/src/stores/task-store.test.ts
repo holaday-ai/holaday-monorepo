@@ -97,6 +97,26 @@ describe('rerun execution target', () => {
     expect(createMutate.mock.calls[0]?.[0]?.localChrome).toBeUndefined();
   });
 
+  it('resends the original input attachments on retry (batch 10.2)', async () => {
+    useTaskStore.setState({ tasks: [original] });
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_retry_files', status: 'pending' } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValueOnce({ taskId: 'tsk_retry_files', status: 'pending', steps: [], result: null } as never);
+    await useTaskStore.getState().rerunTask(original.taskId, undefined, { fileIds: ['fil_a', 'fil_b', 'fil_a'] });
+    expect(createMutate.mock.calls[0]?.[0]).toMatchObject({ intent: '读取选定页面', fileIds: ['fil_a', 'fil_b'] });
+    expect(createMutate.mock.calls[0]?.[0]?.imageOptions).toBeUndefined();
+  });
+
+  it('keeps image routing options when retrying a failed image task', async () => {
+    const imageOptions = { goal: 'free', model: 'auto', aspectRatio: '1:1', imageCount: 1, mode: 'free' } as unknown as NonNullable<UiTask['imageOptions']>;
+    useTaskStore.setState({ tasks: [{ ...original, executionMode: 'image', imageOptions }] });
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_retry_image', status: 'pending' } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValueOnce({ taskId: 'tsk_retry_image', status: 'pending', steps: [], result: null } as never);
+    await useTaskStore.getState().rerunTask(original.taskId, undefined, { fileIds: ['fil_subject'] });
+    expect(createMutate.mock.calls[0]?.[0]).toMatchObject({ fileIds: ['fil_subject'], imageOptions });
+  });
+
   it('preserves the combined user context when rebuilding an ordinary interrupted task', async () => {
     useTaskStore.setState({ tasks: [original] });
     createMutate.mockResolvedValueOnce({ taskId: 'tsk_rebuilt', status: 'pending' } as never);

@@ -22,6 +22,7 @@ import { rolesRouter } from './routers/roles.js';
 import { scheduledTasksRouter } from './routers/scheduled-tasks.js';
 import { skillsRouter } from './routers/skills.js';
 import { stocksRouter } from './routers/stocks.js';
+import { taskRecoveryRouter } from './routers/task-recovery.js';
 import { tasksRouter } from './routers/tasks.js';
 import { teamTasksRouter } from './routers/team-tasks.js';
 import { usageRouter } from './routers/usage.js';
@@ -40,6 +41,7 @@ export const appRouter = router({
   energy: energyRouter,
   auth: authRouter,
   tasks: tasksRouter,
+  taskRecovery: taskRecoveryRouter,
   teamTasks: teamTasksRouter,
   llmCalls: llmCallsRouter,
   feedback: feedbackRouter,
