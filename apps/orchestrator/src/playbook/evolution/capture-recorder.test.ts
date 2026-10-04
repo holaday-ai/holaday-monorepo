@@ -109,3 +109,28 @@ describe('capture recorder (batch 06 捕获)', () => {
     expect(siteDomainOf('not a url')).toBeNull();
   });
 });
+
+describe('describeToolCall with an explicit locator (extension executor)', () => {
+  it('uses the explicit role+name locator and redacts typed text without a known input type', () => {
+    const row = describeToolCall({
+      op: 'type',
+      locator: { role: 'textbox', name: '邮箱' },
+      text: 'a@example.com',
+      pageUrl: 'https://www.shop.example',
+    });
+    expect(row.replayJson).toEqual({ op: 'type', locator: { role: 'textbox', name: '邮箱' } });
+    expect(row.visibleText).toBe('邮箱');
+    expect(row.inputValue).toBe(REDACTED_INPUT_VALUE);
+    expect(row.siteDomain).toBe('shop.example');
+  });
+
+  it('prefers the snapshot-derived locator when a ref is present', () => {
+    const row = describeToolCall({
+      op: 'click',
+      ref: 'e3',
+      snapshot,
+      locator: { role: 'button', name: 'ignored' },
+    });
+    expect((row.replayJson as { locator?: { name: string } }).locator?.name).toBe('备注');
+  });
+});

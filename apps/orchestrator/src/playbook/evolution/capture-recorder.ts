@@ -2,7 +2,7 @@ import { REDACTED_INPUT_VALUE, redactTypedValue } from '../action-capture-redact
 import type { BrowserSnapshot, SnapshotElement } from '../replay/browser-tools.js';
 import type { CreateActionCaptureInput } from '../task-action-capture-repository.js';
 import { locatorForElement } from './locator.js';
-import type { WaitCondition } from './path-template.js';
+import type { Locator, WaitCondition } from './path-template.js';
 import type { CaptureReplayDescriptor, TrajectoryOutcome } from './trajectory.js';
 
 /**
@@ -37,6 +37,11 @@ export interface CapturedToolCall {
   wait?: WaitCondition;
   /** Page URL at call time (site attribution for non-navigate steps). */
   pageUrl?: string;
+  /**
+   * Explicit role+name locator, for executors without snapshot refs (the
+   * extension's semantic selectors). Used only when no snapshot locator exists.
+   */
+  locator?: Locator;
 }
 
 export interface CaptureSink {
@@ -79,7 +84,8 @@ export function describeToolCall(
 ): Omit<CreateActionCaptureInput, 'taskId' | 'actionIndex'> {
   const element =
     call.ref && call.snapshot ? call.snapshot.elements.find((e) => e.ref === call.ref) : undefined;
-  const locator = element && call.snapshot ? locatorForElement(call.snapshot, element) : undefined;
+  const locator =
+    element && call.snapshot ? locatorForElement(call.snapshot, element) : call.locator;
   const descriptor: CaptureReplayDescriptor = {
     op: call.op,
     ...(locator ? { locator } : {}),
@@ -94,7 +100,7 @@ export function describeToolCall(
       call.op === 'navigate' ? call.url : (call.pageUrl ?? call.snapshot?.url),
     ),
     stepType: call.op,
-    visibleText: element?.name ?? null,
+    visibleText: element?.name ?? (call.locator?.name || null),
     entryUrl: call.op === 'navigate' ? (call.url ?? null) : null,
     inputValue,
     replayJson: descriptor,

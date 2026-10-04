@@ -13,6 +13,10 @@ import {
   type NeutralToolResultBlock,
   type NeutralToolUseBlock,
 } from '../../llm/messages-adapter.js';
+import type {
+  BrowserActionCaptureRecorder,
+  CapturedToolCall,
+} from '../../playbook/evolution/capture-recorder.js';
 import type { LlmCallRecorder } from '../llm-call-recorder.js';
 import type { RunSupercarOptions, SupercarOutcome, SupercarTickEvent } from './agent-loop.js';
 import type { BrowserControl } from './browser-control.js';
@@ -41,6 +45,8 @@ export interface RunSelectedChromeTaskOptions {
   onThinking?: (text: string) => void | Promise<void>;
   createFileFormats?: RunSupercarOptions['createFileFormats'];
   onCreateFile?: RunSupercarOptions['onCreateFile'];
+  /** Batch 09 — self-evolution capture (ACTION_CAPTURE); best-effort, never awaited by the task. */
+  capture?: Pick<BrowserActionCaptureRecorder, 'recordToolCall' | 'recordOutcome'>;
 }
 
 const DEFAULT_MAX_ITERATIONS = 24;
@@ -751,6 +757,8 @@ async function processTools(
           );
         }
       } else {
+        const captured = toCapturedToolCall(parsed.action, acted.observation?.origin);
+        if (options.capture && captured) void options.capture.recordToolCall(captured);
         await publish(
           successResult(tool.id, {
             actionOutcome: acted.actionOutcome,
@@ -824,6 +832,10 @@ async function processTools(
       await publish(
         successResult(tool.id, { completed: true, evidenceText: parsed.data.evidenceText }),
       );
+      void options.capture?.recordOutcome({
+        finalUrl: observed.observation.origin,
+        evidenceTexts: [parsed.data.evidenceText],
+      });
       terminal = {
         status: 'completed',
         summary: [
@@ -925,6 +937,43 @@ function parseAction(input: unknown): { ok: true; action: SelectedChromeAction }
   });
   if (!parsed.success || parsed.data.op !== 'act') return { ok: false };
   return { ok: true, action: parsed.data.action };
+}
+
+/**
+ * Semantic selector → capture row: the first role strategy with a name becomes
+ * the replay locator (role+name); label/placeholder strategies map to a named
+ * textbox. Without either the step is still recorded, just without a locator.
+ */
+export function toCapturedToolCall(
+  action: SelectedChromeAction,
+  pageUrl: string | undefined,
+): CapturedToolCall | null {
+  if (action.kind === 'goto') return { op: 'navigate', url: action.payload.url };
+  if (action.kind !== 'click' && action.kind !== 'type') return null;
+  const strategies = action.selector.strategies;
+  const role = strategies.find(
+    (strategy) => strategy.kind === 'role' && isNonEmptyString(strategy.role),
+  );
+  const field = strategies.find(
+    (strategy) =>
+      (strategy.kind === 'label' || strategy.kind === 'placeholder') &&
+      isNonEmptyString(strategy.value),
+  );
+  const locator = role?.role
+    ? {
+        role: role.role.trim().slice(0, 40),
+        name: (role.name ?? '').trim().slice(0, 200),
+        ...(action.selector.scope?.nth ? { nth: Math.min(action.selector.scope.nth, 50) } : {}),
+      }
+    : action.kind === 'type' && field?.value
+      ? { role: 'textbox', name: field.value.trim().slice(0, 200) }
+      : undefined;
+  return {
+    op: action.kind,
+    ...(locator ? { locator } : {}),
+    ...(action.kind === 'type' ? { text: action.payload.text } : {}),
+    ...(pageUrl ? { pageUrl } : {}),
+  };
 }
 
 function toRuntimeAction(action: SelectedChromeAction): RuntimeAction {

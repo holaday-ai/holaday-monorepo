@@ -96,7 +96,21 @@ export function playbookToolsFromUnifiedExecutor(
         ...(result.download?.path ? { path: result.download.path } : {}),
       };
     },
-    upload: async (ref, filePaths) =>
-      void (await run({ tool: 'upload', ref, fileIds: [...filePaths] })),
+    // Replay hands host-resolved file paths, not task attachment ids: set them
+    // on the ref'd input directly. The model-facing `upload` tool stays
+    // fileId-only, so a model can never name a local path.
+    upload: async (ref, filePaths) => {
+      if (filePaths.length === 0) throw new Error('upload 需要文件');
+      try {
+        await page.locator(`aria-ref=${ref}`).setInputFiles([...filePaths], { timeout: 10_000 });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          /aria-ref|not found|No node found/i.test(message)
+            ? '该 ref 已失效，请重新 snapshot 后再操作'
+            : `上传失败：${message.slice(0, 200)}`,
+        );
+      }
+    },
   };
 }

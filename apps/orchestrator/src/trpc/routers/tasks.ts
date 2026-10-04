@@ -261,6 +261,7 @@ import {
   createProductionModelRuntimeWiring,
 } from '../../llm/model-runtime-wiring.js';
 import {
+  createTaskCaptureRecorder,
   extractTaskMemoryAfterSuccess,
   resolveUserGenerateAdapter,
 } from '../../playbook/evolution/executor-hooks.js';
@@ -6130,7 +6131,17 @@ export const tasksRouter = router({
         const session = localChromeTaskSessions.get(userId, taskId);
         if (!session) throw new Error('chrome_session_unavailable');
         const { extensionClientId: _connection, ...target } = input.localChrome;
+        // Batch 09 — extension executor capture (ACTION_CAPTURE, default off).
+        const capture = taskDbId
+          ? createTaskCaptureRecorder({
+              db: ctx.db,
+              taskId: taskDbId,
+              executorSource: 'extension',
+              logger: ctx.logger,
+            })
+          : null;
         return runSelectedChromeTask({
+            ...(capture ? { capture } : {}),
             taskId, intent: effectiveIntent, messagesAdapter: browserMessagesAdapter,
             client: session.client, control: session.control, target,
             signal: session.cancellation.signal, isTaskCancelled: supercarArgs.isTaskCancelled,
@@ -7594,6 +7605,23 @@ export const tasksRouter = router({
                   tickCount: outcome.history.length,
                 });
                 visionPersisted = persisted.persisted;
+                // Batch 09 — same cross-task memory as the supercar branch
+                // (MEMORY_EXTRACTION_ENABLED, default off; never blocks).
+                if (persisted.persisted && outcome.summary) {
+                  void extractTaskMemoryAfterSuccess({
+                    db: ctx.db,
+                    logger: ctx.logger,
+                    adapter: resolveUserGenerateAdapter({
+                      wiring: modelRuntimeWiring,
+                      actorExternalId: ctx.userId,
+                      modelDataRegion: userRow.modelDataRegion,
+                    }),
+                    userIdInternal: userRow.id,
+                    intent: input.intent,
+                    summary: outcome.summary,
+                    taskExternalId: taskId,
+                  }).catch(() => {});
+                }
               } else if (outcome.status === 'failed') {
                 const persisted = await repo.persistVisionOutcome(taskId, {
                   status: 'failed',

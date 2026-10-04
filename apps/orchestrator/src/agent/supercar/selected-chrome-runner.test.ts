@@ -11,7 +11,7 @@ import type { LlmCallRecord, LlmCallRecorder } from '../llm-call-recorder.js';
 import { friendlyTaskFailureReason } from '../task-failure-copy.js';
 import { BrowserControl } from './browser-control.js';
 import { SelectedChromeClient } from './selected-chrome-client.js';
-import { runSelectedChromeTask } from './selected-chrome-runner.js';
+import { runSelectedChromeTask, toCapturedToolCall } from './selected-chrome-runner.js';
 
 const sessionId = 'a249b41c-fd70-47fb-883d-2b70f033234f';
 const selectionId = '5d09732c-d41d-421b-a61f-287093fc440b';
@@ -1569,5 +1569,57 @@ describe('runSelectedChromeTask', () => {
 
     expect(outcome.status).toBe('failed');
     expect(outcome.reason).toContain('关闭未确认');
+  });
+});
+
+describe('toCapturedToolCall (extension capture)', () => {
+  const selector = (strategies: Record<string, unknown>[], nth?: number) =>
+    ({
+      description: 'd',
+      strategies,
+      scope: { timeoutMs: 5_000, ...(nth ? { nth } : {}) },
+      selfHeal: true,
+    }) as never;
+
+  it('turns a role strategy into a role+name replay locator', () => {
+    expect(
+      toCapturedToolCall(
+        {
+          kind: 'click',
+          selector: selector(
+            [
+              { kind: 'css', value: '#x' },
+              { kind: 'role', role: 'button', name: '搜索' },
+            ],
+            2,
+          ),
+        },
+        'https://shop.example',
+      ),
+    ).toEqual({
+      op: 'click',
+      locator: { role: 'button', name: '搜索', nth: 2 },
+      pageUrl: 'https://shop.example',
+    });
+  });
+
+  it('maps a labelled field to a named textbox and keeps the typed text for redaction', () => {
+    expect(
+      toCapturedToolCall(
+        {
+          kind: 'type',
+          selector: selector([{ kind: 'label', value: '邮箱' }]),
+          payload: { text: 'a@example.com' },
+        },
+        undefined,
+      ),
+    ).toEqual({ op: 'type', locator: { role: 'textbox', name: '邮箱' }, text: 'a@example.com' });
+  });
+
+  it('records navigation and skips non-replayable actions', () => {
+    expect(
+      toCapturedToolCall({ kind: 'goto', payload: { url: 'https://a.example/' } }, undefined),
+    ).toEqual({ op: 'navigate', url: 'https://a.example/' });
+    expect(toCapturedToolCall({ kind: 'wait', payload: { ms: 10 } }, undefined)).toBeNull();
   });
 });
