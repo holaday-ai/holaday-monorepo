@@ -1480,8 +1480,10 @@ async function runSupercarTaskInternal(
   const SCREENSHOT_MAX_ATTEMPTS = 3;
   const SCREENSHOT_RETRY_GAP_MS = 2_000;
   let initialShot: Awaited<ReturnType<typeof executor.screenshot>> | null = null;
+  let lastShotError: string | undefined;
   for (let attempt = 1; attempt <= SCREENSHOT_MAX_ATTEMPTS; attempt++) {
     const shot = await executor.screenshot(page);
+    lastShotError = shot.error ?? (shot.base64 ? undefined : 'empty screenshot');
     if (!shot.error && shot.base64) {
       if (attempt > 1) {
         logger.info(
@@ -1513,7 +1515,7 @@ async function runSupercarTaskInternal(
   if (!initialShot || initialShot.error || !initialShot.base64) {
     return {
       status: 'failed',
-      reason: `initial screenshot failed after ${SCREENSHOT_MAX_ATTEMPTS} attempts: ${initialShot?.error ?? 'unknown'}`,
+      reason: `initial screenshot failed after ${SCREENSHOT_MAX_ATTEMPTS} attempts: ${initialShot?.error ?? lastShotError ?? 'unknown'}`,
       iterations: 0,
       toolsUsed: [],
     };

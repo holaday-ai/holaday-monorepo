@@ -43,6 +43,48 @@ function buildClient(response: unknown): AnthropicCompatibleClient {
   };
 }
 
+describe('forced tool choice on Qwen hybrid reasoning models', () => {
+  const qwenMeta = (model: string) =>
+    ({
+      provider: 'alibaba-model-studio',
+      model,
+      region: 'intl',
+      deploymentScope: 'international',
+      endpointKind: 'public',
+      protocol: 'messages',
+    }) as const;
+  const tools = [{ name: 'act', description: 'x', inputSchema: { type: 'object' } }];
+  const base = { maxTokens: 64, messages: [{ role: 'user' as const, content: 'go' }], tools };
+
+  it.each([
+    [{ type: 'any' as const }, { type: 'disabled' }],
+    [{ type: 'tool' as const, name: 'act' }, { type: 'disabled' }],
+    [{ type: 'auto' as const }, undefined],
+  ])(
+    'tool_choice %j → thinking %j (DashScope rejects forced tools while thinking)',
+    (toolChoice, thinking) => {
+      const wire = JSON.parse(
+        serializeMessagesRequest({ ...base, toolChoice }, qwenMeta('qwen3.7-plus')),
+      );
+      expect(wire.thinking).toEqual(thinking);
+    },
+  );
+
+  it('keeps an explicit thinking choice and never adds it for models without the switch', () => {
+    const explicit = JSON.parse(
+      serializeMessagesRequest(
+        { ...base, toolChoice: { type: 'any' }, thinking: { type: 'enabled' } as never },
+        qwenMeta('qwen3.7-plus'),
+      ),
+    );
+    expect(explicit.thinking).toEqual({ type: 'enabled' });
+    const noSwitch = JSON.parse(
+      serializeMessagesRequest({ ...base, toolChoice: { type: 'any' } }, qwenMeta('qwen-max')),
+    );
+    expect(noSwitch.thinking).toBeUndefined();
+  });
+});
+
 describe('semantic wire budget serialization', () => {
   it('uses the same serialization as the compatible adapter for Qwen metadata', async () => {
     const client = buildClient({

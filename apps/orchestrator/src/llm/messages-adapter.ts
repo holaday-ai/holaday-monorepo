@@ -277,6 +277,15 @@ function buildMessagesProviderRequest(
   ) {
     const { thinking: _unsupportedThinking, ...rest } = request;
     supportedRequest = rest;
+  } else if (
+    metadata?.provider === 'alibaba-model-studio' &&
+    request.thinking === undefined &&
+    (request.toolChoice?.type === 'any' || request.toolChoice?.type === 'tool')
+  ) {
+    // Hybrid reasoning models (e.g. qwen3.6/3.7-plus) think by default, and
+    // DashScope rejects a forced tool choice in thinking mode (400
+    // InvalidParameter). A forced tool call never needs the thinking pass.
+    supportedRequest = { ...request, thinking: { type: 'disabled' } };
   }
   // Without an adapter only known input can be sized; no request will be sent.
   return toAnthropicCompatibleRequest(supportedRequest, metadata?.model ?? '');
