@@ -1,0 +1,7 @@
+id,category,executor,brain,model,status,success,failureClass,steps,durationMs,inputTokens,outputTokens,modelCalls,quota403,reason
+be-01,ecommerce,legacy,qwen,qwen3-vl-235b-a22b-instruct,completed,false,browser,4,67278,26777,149,4,false,""
+be-01,ecommerce,unified,qwen,qwen3-vl-235b-a22b-instruct,failed,false,model_layer,1,152323,2084,23,2,false,"模型服务暂时不可用，请稍后重试。"
+be-02,ecommerce,legacy,qwen,qwen3-vl-235b-a22b-instruct,completed,true,none,4,96638,26773,136,4,false,""
+be-02,ecommerce,unified,qwen,qwen3-vl-235b-a22b-instruct,failed,false,model_layer,7,22243,85742,166,8,false,"模型服务暂时不可用，请稍后重试。"
+be-03,ecommerce,legacy,qwen,qwen3-vl-235b-a22b-instruct,failed,false,model_layer,1,11034,0,0,1,false,"任务执行中遇到了问题，正在尝试其他方式完成。如果持续失败，请尝试换一种方式描述您的需求。"
+be-03,ecommerce,unified,qwen,qwen3-vl-235b-a22b-instruct,failed,false,model_layer,0,6107,0,0,1,false,"模型服务暂时不可用，请稍后重试。"

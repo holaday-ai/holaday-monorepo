@@ -1,0 +1,33 @@
+id,category,executor,brain,model,status,success,failureClass,steps,durationMs,inputTokens,outputTokens,modelCalls,quota403,reason,attempts
+be-01,ecommerce,legacy,qwen,qwen3-vl-235b-a22b-instruct,failed,false,model_layer,1,227277,0,0,1,false,"模型响应超时，本次执行已停止；已完成动作不会自动重放。",1
+be-01,ecommerce,unified,qwen,qwen3-vl-235b-a22b-instruct,failed,false,model_layer,1,149804,2084,23,2,false,"模型服务暂时不可用，请稍后重试。",1
+be-02,ecommerce,legacy,qwen,qwen3-vl-235b-a22b-instruct,awaiting_user,true,none,7,1948065,51838,246,7,false,"handoff:login",1
+be-02,ecommerce,unified,qwen,qwen3-vl-235b-a22b-instruct,cancelled,false,model_layer,7,249687,125010,164,8,false,"",1
+be-03,ecommerce,legacy,qwen,qwen3-vl-235b-a22b-instruct,failed,false,model_layer,2,131855,5245,23,2,false,"模型响应超时，本次执行已停止；已完成动作不会自动重放。",1
+be-03,ecommerce,unified,qwen,qwen3-vl-235b-a22b-instruct,cancelled,false,model_layer,4,242085,40635,92,5,false,"",1
+be-04,ecommerce,legacy,qwen,qwen3-vl-235b-a22b-instruct,failed,false,model_layer,6,264226,35044,142,6,false,"模型响应超时，本次执行已停止；已完成动作不会自动重放。",1
+be-04,ecommerce,unified,qwen,qwen3-vl-235b-a22b-instruct,cancelled,false,model_layer,6,299597,26601,148,7,false,"",1
+be-05,ecommerce,legacy,qwen,qwen3-vl-235b-a22b-instruct,failed,false,browser,0,69723,0,0,0,false,"initial screenshot failed after 3 attempts: screenshot failed: page.screenshot: Timeout 10000ms exceeded. Call log: - ta",1
+be-05,ecommerce,unified,qwen,qwen3-vl-235b-a22b-instruct,failed,false,model_layer,9,162472,181175,246,10,false,"模型服务暂时不可用，请稍后重试。",2
+be-06,form,legacy,qwen,qwen3-vl-235b-a22b-instruct,failed,false,environment,0,95101,0,0,0,false,"harness: page.goto: net::ERR_TIMED_OUT at https://httpbin.org/forms/post Call log: - na",1
+be-06,form,unified,qwen,qwen3-vl-235b-a22b-instruct,failed,false,model_layer,0,154600,0,0,1,false,"模型服务暂时不可用，请稍后重试。",1
+be-07,form,legacy,qwen,qwen3-vl-235b-a22b-instruct,failed,false,model_layer,1,18773,0,0,1,true,"任务执行中遇到了问题，正在尝试其他方式完成。如果持续失败，请尝试换一种方式描述您的需求。",1
+be-08,form,legacy,qwen,qwen3.6-flash,completed,true,none,13,78894,103830,1186,13,false,"",1
+be-08,form,unified,qwen,qwen3.6-flash,failed,false,model_layer,3,283518,6737,149,4,false,"模型服务暂时不可用，请稍后重试。",1
+be-09,form,legacy,qwen,qwen3.6-flash,failed,false,model_layer,2,125442,5072,228,2,false,"模型响应超时，本次执行已停止；已完成动作不会自动重放。",1
+be-07,form,unified,qwen,qwen3-vl-235b-a22b-instruct,failed,false,model_layer,0,7584,0,0,1,true,"模型服务暂时不可用，请稍后重试。",1
+be-09,form,unified,qwen,qwen3.6-flash,failed,false,model_layer,5,180937,18781,157,6,false,"模型服务暂时不可用，请稍后重试。",1
+be-10,form,legacy,qwen,qwen3.6-flash,failed,false,model_layer,6,303981,34253,927,6,false,"模型响应超时，本次执行已停止；已完成动作不会自动重放。",1
+be-10,form,unified,qwen,qwen3.6-flash,completed,true,none,5,24961,12635,202,5,false,"",1
+be-11,table,legacy,qwen,qwen3.6-flash,failed,false,model_layer,1,68484,0,0,1,false,"任务执行中遇到了问题，正在尝试其他方式完成。如果持续失败，请尝试换一种方式描述您的需求。",1
+be-11,table,unified,qwen,qwen3.6-flash,completed,false,browser,30,230901,541126,2054,30,false,"",1
+be-12,table,legacy,qwen,qwen3.6-flash,completed,true,none,5,40277,34781,826,5,false,"",1
+be-12,table,unified,qwen,qwen3.6-flash,failed,false,model_layer,2,128321,17447,157,3,false,"模型服务暂时不可用，请稍后重试。",1
+be-13,table,legacy,qwen,qwen3.6-flash,failed,false,model_layer,1,244827,0,0,1,false,"模型响应超时，本次执行已停止；已完成动作不会自动重放。",1
+be-13,table,unified,qwen,qwen3.6-flash,completed,true,none,3,16433,11382,533,3,false,"",1
+be-14,table,legacy,qwen,qwen3.6-flash,failed,false,model_layer,3,139165,11106,453,3,false,"模型响应超时，本次执行已停止；已完成动作不会自动重放。",1
+be-14,table,unified,qwen,qwen3.6-flash,cancelled,false,browser,10,274645,24619,305,10,false,"",1
+be-15,table,legacy,qwen,qwen3.6-flash,failed,false,model_layer,2,161672,5069,75,2,false,"模型响应超时，本次执行已停止；已完成动作不会自动重放。",1
+be-15,table,unified,qwen,qwen3.6-flash,cancelled,false,model_layer,6,240134,28694,291,7,false,"",1
+be-16,multipage,legacy,qwen,qwen3.6-flash,completed,true,none,6,104398,42624,964,6,false,"",1
+be-16,multipage,unified,qwen,qwen3.6-flash,failed,false,model_layer,0,14062,0,0,1,true,"模型服务暂时不可用，请稍后重试。",1

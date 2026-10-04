@@ -1,0 +1,11 @@
+id,category,executor,brain,model,status,success,failureClass,steps,durationMs,inputTokens,outputTokens,modelCalls,quota403,reason
+be-06,form,legacy,qwen,qwen3.7-plus,failed,false,model_layer,8,232957,30330,923,8,false,"模型响应超时，本次执行已停止；已完成动作不会自动重放。"
+be-06,form,unified,qwen,qwen3.7-plus,failed,false,environment,0,139116,0,0,0,false,"harness: page.goto: Timeout 45000ms exceeded. Call log: - navigating to \"https://httpbi"
+be-10,form,legacy,qwen,qwen3.7-plus,failed,false,browser,30,198508,127851,3677,30,false,"exhausted maxIterations=30 without completion"
+be-10,form,unified,qwen,qwen3.7-plus,failed,false,model_layer,0,65383,0,0,1,false,"模型服务暂时不可用，请稍后重试。"
+be-12,table,legacy,qwen,qwen3.7-plus,completed,true,none,3,19795,4500,448,3,false,""
+be-12,table,unified,qwen,qwen3.7-plus,failed,false,model_layer,0,1294,0,0,1,false,"模型服务暂时不可用，请稍后重试。"
+be-14,table,legacy,qwen,qwen3.7-plus,failed,false,browser,0,35635,0,0,0,false,"initial screenshot failed after 3 attempts: unknown"
+be-14,table,unified,qwen,qwen3.7-plus,failed,false,model_layer,0,16664,0,0,1,false,"模型服务暂时不可用，请稍后重试。"
+be-15,table,legacy,qwen,qwen3.7-plus,completed,true,none,3,35701,4339,685,3,false,""
+be-15,table,unified,qwen,qwen3.7-plus,failed,false,model_layer,0,1235,0,0,1,false,"模型服务暂时不可用，请稍后重试。"
