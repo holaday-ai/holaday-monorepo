@@ -1,6 +1,7 @@
 import { CircleSlash, Clock3, Download, File, FileSpreadsheet, FileText, Film, Image as ImageIcon, Loader2, Presentation, RotateCcw } from 'lucide-react';
 import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
+import { useNearViewport } from '@/hooks/useNearViewport';
 import {
   blobToDataUrl,
   downloadFailureMessage,
@@ -83,6 +84,10 @@ export function FileDownloadCard({
   const expired = knownAvailability === 'expired';
   const unavailable = knownUnavailable || registryUnavailable;
   const inactive = expired || unavailable;
+  const mediaPreview = showPreview && (kind === 'image' || kind === 'video');
+  // Batch 10.2 — history lists render many cards; only fetch a preview
+  // blob (up to a full 5MB video) once the card nears the viewport.
+  const [cardRef, nearViewport] = useNearViewport<HTMLDivElement>(mediaPreview && !inactive);
   const metaLabel = downloadFileMetaLabel({
     filename: payload.filename,
     formattedSize: formatFileSize(payload.size),
@@ -127,6 +132,11 @@ export function FileDownloadCard({
       return;
     }
     if (kind !== 'image' && kind !== 'video') {
+      setPreviewUrl(null);
+      setPreviewState('idle');
+      return;
+    }
+    if (!nearViewport) {
       setPreviewUrl(null);
       setPreviewState('idle');
       return;
@@ -181,6 +191,7 @@ export function FileDownloadCard({
     kind,
     fileReference,
     knownAvailability,
+    nearViewport,
     payload.downloadUrl,
     previewRetryKey,
     showPreview,
@@ -209,6 +220,8 @@ export function FileDownloadCard({
 
   return (
     <div
+      ref={cardRef}
+      data-preview-deferred={mediaPreview && !inactive && !nearViewport ? 'true' : undefined}
       className={cn(
         'group my-2 flex w-full max-w-md flex-col gap-2 rounded-[8px] border bg-white px-3 py-3 text-left text-sm shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors dark:bg-card/85 sm:px-4',
         inactive
@@ -253,6 +266,13 @@ export function FileDownloadCard({
         >
           <Loader2 className="h-4 w-4 animate-spin text-[#57479C]" />
           {kind === 'video' ? '视频加载中…' : '图片加载中…'}
+        </span>
+      ) : mediaPreview && !nearViewport ? (
+        <span
+          aria-label={kind === 'video' ? '视频预览待加载' : '图片预览待加载'}
+          className="flex h-40 w-full items-center justify-center rounded-[6px] border border-[#DCDDDD] bg-[#EFEFEF]/50 text-muted-foreground/50 dark:border-white/10 dark:bg-white/5"
+        >
+          {kind === 'video' ? <Film className="h-5 w-5" aria-hidden /> : <ImageIcon className="h-5 w-5" aria-hidden />}
         </span>
       ) : showPreview && previewState === 'failed' ? (
         <div className="flex h-40 w-full flex-col items-center justify-center gap-3 rounded-[6px] border border-dashed border-[#DCDDDD] bg-[#EFEFEF]/35 px-4 text-center text-[11px] leading-5 text-muted-foreground dark:border-white/10 dark:bg-white/5">
