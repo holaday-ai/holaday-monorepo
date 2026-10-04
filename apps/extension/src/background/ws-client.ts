@@ -512,6 +512,7 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
     // Fire-and-forget: best-effort, and we don't want to delay 'hello'
     // on a chrome.storage write.
     void persistReconnectAttempts(0);
+    void persistCappedAt(null);
     // Header path may have been stripped by some proxies; fallback hello.
     send({ type: 'client.hello', token, extensionVersion: chrome.runtime.getManifest().version });
 
@@ -593,7 +594,16 @@ const MAX_NETWORK_RECONNECTS = 3;
 const BACKOFF_SCHEDULE_MS = [1_000, 2_000, 4_000] as const;
 const WS_RECONNECT_KEY = 'holaday.ws.reconnectAttempts';
 const WS_PREFERRED_ENDPOINT_KEY = 'holaday.ws.preferredEndpoint';
+const WS_CAPPED_AT_KEY = 'holaday.ws.cappedAt';
 const WS_STORAGE_TIMEOUT_MS = 1_500;
+/**
+ * Once capped, the keepalive alarm still allows ONE probe attempt per this
+ * interval. Without it an orchestrator restart longer than the 1/2/4 s
+ * (+15 s single-endpoint cooldown) window left every extension offline until
+ * the user opened the popup — mid-task tool calls then had no client. One
+ * attempt per 5 min keeps the "no reconnect storm" intent of the cap.
+ */
+export const WS_CAPPED_RETRY_INTERVAL_MS = 5 * 60 * 1000;
 
 /**
  * Hydrate `state.reconnectAttempt` from chrome.storage on module load
@@ -732,7 +742,54 @@ export async function resetWsReconnectAttempts(): Promise<void> {
   clearReconnectTimer();
   state.reconnectAttempt = 0;
   endpointCooldownUntil.clear();
-  await persistReconnectAttempts(0);
+  await Promise.all([persistReconnectAttempts(0), persistCappedAt(null)]);
+}
+
+/**
+ * Slow self-heal for the capped state, called by the keepalive alarm only
+ * when `isReconnectCapped()` is true. Returns true when this tick may make
+ * exactly one connection attempt: the counter is set to the cap so a single
+ * failure re-caps (and restarts the interval), while success resets it.
+ */
+export async function armCappedSlowRetry(now: number = Date.now()): Promise<boolean> {
+  try {
+    const out = await withDeadline(
+      chrome.storage.local.get([WS_RECONNECT_KEY, WS_CAPPED_AT_KEY]),
+      WS_STORAGE_TIMEOUT_MS,
+      'ws_capped_retry_read_timeout',
+    );
+    const attempts = out[WS_RECONNECT_KEY];
+    if (typeof attempts !== 'number' || attempts <= MAX_NETWORK_RECONNECTS) return false;
+    const cappedAt = out[WS_CAPPED_AT_KEY];
+    if (
+      typeof cappedAt === 'number' &&
+      Number.isFinite(cappedAt) &&
+      cappedAt <= now &&
+      now - cappedAt < WS_CAPPED_RETRY_INTERVAL_MS
+    ) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+  clearReconnectTimer();
+  state.reconnectAttempt = MAX_NETWORK_RECONNECTS;
+  await persistReconnectAttempts(MAX_NETWORK_RECONNECTS);
+  return true;
+}
+
+async function persistCappedAt(at: number | null): Promise<void> {
+  try {
+    await withDeadline(
+      at === null
+        ? chrome.storage.local.remove(WS_CAPPED_AT_KEY)
+        : chrome.storage.local.set({ [WS_CAPPED_AT_KEY]: at }),
+      WS_STORAGE_TIMEOUT_MS,
+      'ws_capped_at_write_timeout',
+    );
+  } catch {
+    /* non-fatal: a missing timestamp only makes the next slow retry earlier */
+  }
 }
 
 function clearReconnectTimer(): void {
@@ -748,8 +805,9 @@ function scheduleReconnect(token: string): void {
   void persistReconnectAttempts(state.reconnectAttempt);
   if (state.reconnectAttempt > MAX_NETWORK_RECONNECTS) {
     state.nextRetryAt = null;
+    void persistCappedAt(Date.now());
     console.warn(
-      `[holaday] ws: ${MAX_NETWORK_RECONNECTS} reconnects failed, pausing until user action (popup open or 重试连接)`,
+      `[holaday] ws: ${MAX_NETWORK_RECONNECTS} reconnects failed, pausing until user action (popup open or 重试连接) or the 5-min slow retry`,
     );
     return;
   }
