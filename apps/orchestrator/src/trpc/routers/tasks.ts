@@ -2834,8 +2834,10 @@ export const tasksRouter = router({
     // 非空 = 仅名单内（灰度）。
     if (specializedStockLaneEligible) {
       const stockRuntime = resolveGenerateRuntimeForUser(ctx.userId, userRow.modelDataRegion);
-      const stockMessagesAdapter =
-        stockRuntime.kind === 'ready' ? stockRuntime.messages('standard') : null;
+      const { ashareMessagesAdapter, createAshareModelCallers } = await import(
+        '../../agent/a-share/ashare-model-callers.js'
+      );
+      const stockMessagesAdapter = ashareMessagesAdapter(stockRuntime);
       const { resolveAshareQa, resolveAshareInContext } = await import(
         '../../agent/a-share/ashare-qa-matcher.js'
       );
@@ -2988,36 +2990,11 @@ export const tasksRouter = router({
               {
                 client: aksClient,
                 skillMarkdown: skillMarkdown ?? FALLBACK_PERSONA,
-                interpret: async ({ system, user }) => {
-                  const resp = await stockMessagesAdapter.create({
-                    maxTokens: 700,
-                    // 低温：③/⑦ 更忠实照抄数字（降低 ungrounded 误降级），措辞仍自然。
-                    temperature: 0.3,
-                    system,
-                    messages: [{ role: 'user', content: user }],
-                    thinking: { type: 'disabled' },
-                  });
-                  return resp.content
-                    .filter((block) => block.type === 'text')
-                    .map((block) => block.text)
-                    .join('\n');
-                },
-                // Phase2 ⑦ 意图判官（第二层，flag 控制）：温度0 求确定性（同股同文同判，治"时好时降级"）。
-                judge: appEnv.ASHARE_INTENT_JUDGE_ENABLED
-                  ? async ({ system, user }) => {
-                      const resp = await stockMessagesAdapter.create({
-                        maxTokens: 160,
-                        temperature: 0,
-                        system,
-                        messages: [{ role: 'user', content: user }],
-                        thinking: { type: 'disabled' },
-                      });
-                      return resp.content
-                        .filter((block) => block.type === 'text')
-                        .map((block) => block.text)
-                        .join('\n');
-                    }
-                  : undefined,
+                // 模型目录 generate 通道（standard 档）：③/⑦ 解读温度0.3；⑦ 意图判官（第二层，
+                // ASHARE_INTENT_JUDGE_ENABLED 控制）温度0。参数见 ashare-model-callers.ts。
+                ...createAshareModelCallers(stockMessagesAdapter, {
+                  judgeEnabled: appEnv.ASHARE_INTENT_JUDGE_ENABLED,
+                }),
                 // Phase 2「看懂层」P1：腿A 逐指标注解开关（默认 OFF，零新增 LLM）。
                 seethrough: appEnv.ASHARE_SEETHROUGH_ENABLED,
                 // ④ 风险信号雷达 P1：腿A 确定性检测开关（默认 OFF，零新增 LLM）。
