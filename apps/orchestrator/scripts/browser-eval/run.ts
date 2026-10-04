@@ -170,7 +170,7 @@ async function runUnified(
 }
 
 const rows = [
-  'id,category,executor,brain,model,status,success,failureClass,steps,durationMs,inputTokens,outputTokens,modelCalls,quota403,reason',
+  'id,category,executor,brain,model,status,success,failureClass,steps,durationMs,inputTokens,outputTokens,modelCalls,quota403,reason,attempts',
 ];
 const summary = { total: 0, modelLayer: 0, environment: 0, counted: 0, succeeded: 0 };
 const executor = new PlaywrightExecutor();
@@ -182,6 +182,64 @@ interface TaskRun {
   failureClass: ReturnType<typeof classifyFailure>;
   tokens: number;
   quota403: boolean;
+  rateLimited: boolean;
+  row: Array<string | number | boolean>;
+}
+
+const RATE_LIMIT_WAIT_MS = Number(arg('rate-limit-wait-ms') ?? 60_000);
+const MAX_ATTEMPTS = 3;
+
+/**
+ * Free-tier models enforce low RPM/TPM limits; the adapter's sub-second 429
+ * backoff is too short for them. A run that failed at the model layer because
+ * of a 429 is retried after a pause, at most 3 attempts in all; only the final
+ * attempt is recorded, every attempt's tokens count toward the budget.
+ */
+async function runTaskWithRetry(
+  task: BrowserEvalTask,
+  kind: 'legacy' | 'unified',
+  model: string | undefined,
+): Promise<TaskRun> {
+  let tokens = 0;
+  for (let attempt = 1; ; attempt += 1) {
+    const run = await runTask(task, kind, model);
+    tokens += run.tokens;
+    const retry =
+      run.failureClass === 'model_layer' &&
+      run.rateLimited &&
+      !run.quota403 &&
+      attempt < MAX_ATTEMPTS;
+    if (!retry) {
+      recordRun(task, kind, model, run, attempt);
+      return { ...run, tokens };
+    }
+    process.stdout.write(
+      `${task.id} ${kind} rate-limited (429), retry ${attempt + 1}/${MAX_ATTEMPTS} in ${RATE_LIMIT_WAIT_MS}ms\n`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_WAIT_MS));
+  }
+}
+
+function recordRun(
+  task: BrowserEvalTask,
+  kind: 'legacy' | 'unified',
+  model: string | undefined,
+  run: TaskRun,
+  attempts: number,
+): void {
+  summary.total += 1;
+  if (run.failureClass === 'model_layer') summary.modelLayer += 1;
+  else if (run.failureClass === 'environment') summary.environment += 1;
+  else {
+    summary.counted += 1;
+    if (run.success) summary.succeeded += 1;
+  }
+  rows.push([...run.row, attempts].join(','));
+  process.stdout.write(
+    `${task.id} ${kind} ${model ?? ''} success=${run.success} class=${run.failureClass} attempts=${attempts}${run.quota403 ? ' 403' : ''}\n`,
+  );
+  mkdirSync(dirname(out), { recursive: true });
+  writeFileSync(out, `${rows.join('\n')}\n`);
 }
 
 async function runTask(
@@ -195,6 +253,7 @@ async function runTask(
   let outputTokens = 0;
   let modelCalls = 0;
   let quota403 = false;
+  let rateLimited = false;
   const base = runtime.messages('vision');
   const adapter: MessagesAdapter = {
     metadata: base.metadata,
@@ -208,6 +267,7 @@ async function runTask(
         const code = (error as { code?: string }).code ?? (error as Error).name;
         const status = (error as { status?: number | null }).status ?? null;
         if (status === 403) quota403 = true;
+        if (status === 429) rateLimited = true;
         trace.push({
           type: 'model_error',
           code,
@@ -265,45 +325,38 @@ async function runTask(
   );
   const success = scoreBrowserEval(task, outcome);
   const failureClass = classifyFailure(success, outcome, trace);
-  summary.total += 1;
-  if (failureClass === 'model_layer') summary.modelLayer += 1;
-  else if (failureClass === 'environment') summary.environment += 1;
-  else {
-    summary.counted += 1;
-    if (success) summary.succeeded += 1;
-  }
   const reason =
     outcome.status === 'failed'
       ? outcome.reason
       : outcome.status === 'awaiting_user'
         ? `handoff:${outcome.reason}`
         : '';
-  rows.push(
-    [
-      task.id,
-      task.category,
-      kind,
-      brainId,
-      brainFor(model).laneModels.browser ?? '',
-      outcome.status,
-      success,
-      failureClass,
-      outcome.steps,
-      Date.now() - started,
-      inputTokens,
-      outputTokens,
-      modelCalls,
-      quota403,
-      JSON.stringify(reason.replace(/\s+/g, ' ').slice(0, 120)),
-    ].join(','),
-  );
-  process.stdout.write(
-    `${task.id} ${kind} ${model ?? ''} ${outcome.status} success=${success} class=${failureClass} tokens=${inputTokens + outputTokens}${quota403 ? ' 403' : ''}\n`,
-  );
-  mkdirSync(dirname(out), { recursive: true });
-  writeFileSync(out, `${rows.join('\n')}\n`);
+  const row = [
+    task.id,
+    task.category,
+    kind,
+    brainId,
+    brainFor(model).laneModels.browser ?? '',
+    outcome.status,
+    success,
+    failureClass,
+    outcome.steps,
+    Date.now() - started,
+    inputTokens,
+    outputTokens,
+    modelCalls,
+    quota403,
+    JSON.stringify(reason.replace(/\s+/g, ' ').slice(0, 120)),
+  ];
   await new Promise((resolve) => setTimeout(resolve, delayMs));
-  return { success, failureClass, tokens: inputTokens + outputTokens, quota403 };
+  return {
+    success,
+    failureClass,
+    tokens: inputTokens + outputTokens,
+    quota403,
+    rateLimited,
+    row,
+  };
 }
 
 /** Per-model token use, persisted so the full run continues the smoke run's count. */
@@ -326,7 +379,7 @@ interface PairResult {
 
 try {
   if (!paired) {
-    for (const task of tasks) await runTask(task, executorKind, modelOverride);
+    for (const task of tasks) await runTaskWithRetry(task, executorKind, modelOverride);
   } else {
     const budget = loadBudget();
     const saveBudget = () => {
@@ -359,11 +412,11 @@ try {
         legacy: null,
         unified: null,
       };
-      pair.legacy = await runTask(task, 'legacy', model);
+      pair.legacy = await runTaskWithRetry(task, 'legacy', model);
       entry.tokens += pair.legacy.tokens;
       if (pair.legacy.quota403) entry.exhausted = true;
       else {
-        pair.unified = await runTask(task, 'unified', model);
+        pair.unified = await runTaskWithRetry(task, 'unified', model);
         entry.tokens += pair.unified.tokens;
         if (pair.unified.quota403) entry.exhausted = true;
       }
