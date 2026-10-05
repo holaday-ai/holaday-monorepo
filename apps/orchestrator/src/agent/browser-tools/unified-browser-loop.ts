@@ -95,6 +95,8 @@ export interface UnifiedBrowserLoopInput {
   /** Resolves when the user finished the handoff; rejects/false to stop. */
   requestHuman?: (request: { reason: string; message: string }) => Promise<boolean>;
   maxSteps?: number;
+  /** How many latest page-sized tool results stay in full (default 1). */
+  fullPageResults?: number;
   signal?: AbortSignal;
   /** Per model-turn timeout; the shared transport retries 429/5xx within it. */
   turnTimeoutMs?: number;
@@ -125,7 +127,7 @@ export async function runUnifiedBrowserLoop(
         {
           maxTokens: 4_096,
           system: UNIFIED_BROWSER_SYSTEM_PROMPT,
-          messages: trimImages(compactToolResults(messages)),
+          messages: trimImages(compactToolResults(messages, input.fullPageResults)),
           tools: input.readPage ? [...UNIFIED_LOOP_TOOLS, READ_URL_TOOL] : UNIFIED_LOOP_TOOLS,
           toolChoice: { type: 'any' },
         },
@@ -298,8 +300,12 @@ function toolResult(toolUseId: string, content: string, isError = false): Neutra
   return { type: 'tool_result', toolUseId, content, ...(isError ? { isError: true } : {}) };
 }
 
-/** Keep only the newest screenshots as images; older ones become a text marker. */
-const MAX_FULL_PAGE_RESULTS = 2;
+/**
+ * Page-sized tool results kept in full. Batch 12: 1 (was 2) — refs in older
+ * snapshots are stale anyway, and every extra full snapshot is ~10k tokens per
+ * model turn. Older results keep a short prefix.
+ */
+export const DEFAULT_FULL_PAGE_RESULTS = 1;
 const LONG_RESULT_CHARS = 1_500;
 const COMPACT_PREFIX_CHARS = 300;
 
@@ -309,8 +315,12 @@ const COMPACT_PREFIX_CHARS = 300;
  * every earlier snapshot and input tokens grow quadratically (batch 11.0: one
  * task reached 916k input tokens). Pairing with tool_use blocks is preserved.
  */
-export function compactToolResults(messages: readonly NeutralMessage[]): NeutralMessage[] {
+export function compactToolResults(
+  messages: readonly NeutralMessage[],
+  fullPageResults = DEFAULT_FULL_PAGE_RESULTS,
+): NeutralMessage[] {
   let kept = 0;
+  const seen = new Set<string>();
   const out: NeutralMessage[] = [];
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i] as NeutralMessage;
@@ -322,8 +332,11 @@ export function compactToolResults(messages: readonly NeutralMessage[]): Neutral
       .reverse()
       .map((block): NeutralInputContentBlock => {
         if (block.type !== 'tool_result' || block.content.length <= LONG_RESULT_CHARS) return block;
+        // An unchanged page re-sent later carries no new information.
+        if (seen.has(block.content)) return { ...block, content: '[与之后的页面结果相同，已省略]' };
+        seen.add(block.content);
         kept += 1;
-        if (kept <= MAX_FULL_PAGE_RESULTS) return block;
+        if (kept <= fullPageResults) return block;
         return {
           ...block,
           content: `${block.content.slice(0, COMPACT_PREFIX_CHARS)}\n…[较早的页面内容已省略，需要时请重新 snapshot]`,

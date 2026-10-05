@@ -1,0 +1,6 @@
+id,category,executor,brain,model,status,success,failureClass,steps,durationMs,inputTokens,outputTokens,modelCalls,quota403,reason,attempts
+be-02,ecommerce,unified,qwen,qwen3.8-max,failed,false,model_layer,5,158816,10688,156,6,false,"模型服务暂时不可用，请稍后重试。",1
+be-12,table,unified,qwen,qwen3.8-max,completed,true,none,3,26507,15729,340,3,false,"",1
+be-18,multipage,unified,qwen,qwen3.8-max,failed,false,model_layer,20,46419,135657,450,21,false,"模型服务暂时不可用，请稍后重试。",1
+be-19,multipage,unified,qwen,qwen3.8-max,completed,true,none,3,19114,13519,452,3,false,"",1
+be-22,login_wall,unified,qwen,qwen3.8-max,failed,false,browser,16,183103,55277,585,16,false,"无法完成任务。在小红书搜索\"办公桌收纳\"时，网站持续触发IP安全限制（错误码300012），提示\"IP存在风险，请切换可靠网络环境后重试\"，导致搜索结果页无法正常加载。尝试通过web_search搜索也未获得任何小红书相关链接。需要更换网络",1

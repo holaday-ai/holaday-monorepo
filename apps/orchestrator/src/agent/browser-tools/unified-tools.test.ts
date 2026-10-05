@@ -1,6 +1,9 @@
 import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
+import {
+  createPlaywrightUnifiedExecutor,
+  shortenSnapshotUrls,
+} from './playwright-unified-executor.js';
 import {
   UNIFIED_BROWSER_TOOLS,
   UNIFIED_BROWSER_TOOL_NAMES,
@@ -103,4 +106,21 @@ describe('Playwright unified executor (local static page)', () => {
       await page.close();
     }
   }, 30_000);
+});
+
+describe('snapshot URL shortening (batch 12)', () => {
+  it('cuts long link URLs and leaves everything else alone', () => {
+    const long = `https://example.com/item?${'utm=x&'.repeat(40)}`;
+    const tree = [
+      '- link "商品" [ref=e3]:',
+      `  - /url: ${long}`,
+      '  - /url: https://example.com/short',
+      '- text: /url: not a url line',
+    ].join('\n');
+    const out = shortenSnapshotUrls(tree, 40).split('\n');
+    expect(out[1]).toBe(`  - /url: ${long.slice(0, 40)}…`);
+    expect(out[2]).toBe('  - /url: https://example.com/short');
+    expect(out[3]).toBe('- text: /url: not a url line');
+    expect(shortenSnapshotUrls(tree, 0)).toBe(tree);
+  });
 });

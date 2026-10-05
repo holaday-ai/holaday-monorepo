@@ -19,11 +19,32 @@ export interface UnifiedExecutorOptions {
   actionTimeoutMs?: number;
   maxSnapshotChars?: number;
   maxExtractChars?: number;
+  /** Link URLs in snapshots are cut to this many characters (default 100, 0 = off). */
+  maxUrlChars?: number;
 }
 
 const DEFAULT_ACTION_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_SNAPSHOT_CHARS = 40_000;
 const DEFAULT_MAX_EXTRACT_CHARS = 20_000;
+const DEFAULT_MAX_URL_CHARS = 100;
+const URL_LINE = /^(\s*- \/url: )(.*)$/;
+
+/**
+ * Link URLs are 20–35% of a real page's AI snapshot (batch 12, eval sites),
+ * mostly tracking parameters. Clicks go by ref, so a shortened URL keeps the
+ * page readable at a fraction of the tokens.
+ */
+export function shortenSnapshotUrls(tree: string, maxUrlChars: number): string {
+  if (maxUrlChars <= 0) return tree;
+  return tree
+    .split('\n')
+    .map((line) => {
+      const match = URL_LINE.exec(line);
+      if (!match || (match[2] ?? '').length <= maxUrlChars) return line;
+      return `${match[1]}${(match[2] ?? '').slice(0, maxUrlChars)}…`;
+    })
+    .join('\n');
+}
 
 /**
  * Executes unified tool calls on a Playwright page. Refs come from
@@ -35,13 +56,17 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
   const timeout = options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
   const maxSnapshot = options.maxSnapshotChars ?? DEFAULT_MAX_SNAPSHOT_CHARS;
   const maxExtract = options.maxExtractChars ?? DEFAULT_MAX_EXTRACT_CHARS;
+  const maxUrlChars = options.maxUrlChars ?? DEFAULT_MAX_URL_CHARS;
   const byRef = (ref: string) => page.locator(`aria-ref=${ref}`);
 
   const snapshotText = async (): Promise<string> => {
     // Redact before truncating: a secret straddling the cut must not survive.
-    const tree = await redactPageText(
-      page as never,
-      await page.locator('body').ariaSnapshot({ mode: 'ai', timeout }),
+    const tree = shortenSnapshotUrls(
+      await redactPageText(
+        page as never,
+        await page.locator('body').ariaSnapshot({ mode: 'ai', timeout }),
+      ),
+      maxUrlChars,
     );
     const header = `URL: ${page.url()}\n标题: ${await page.title()}\n`;
     const body = tree.length > maxSnapshot ? `${tree.slice(0, maxSnapshot)}\n…（已截断）` : tree;

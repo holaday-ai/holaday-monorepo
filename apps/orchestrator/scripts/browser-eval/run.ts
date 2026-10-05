@@ -72,6 +72,11 @@ const pairedModels = (arg('models') ?? '')
 if (paired && pairedModels.length === 0) throw new Error('--paired needs --models a,b,c');
 const tokenBudget = Number(arg('token-budget') ?? 900_000);
 const budgetStatePath = arg('budget-state');
+/** --context baseline reproduces the pre-batch-12 unified context (2 full results, full URLs). */
+const contextMode = arg('context') ?? 'default';
+if (contextMode !== 'default' && contextMode !== 'baseline')
+  throw new Error('--context must be default or baseline');
+const unifiedContext = contextMode === 'baseline' ? { fullPageResults: 2, maxUrlChars: 0 } : {};
 const concurrency = Number(arg('concurrency') ?? 1);
 if (concurrency !== 1)
   throw new Error('--concurrency must be 1: executors and tasks run strictly one at a time');
@@ -149,7 +154,11 @@ async function runUnified(
   runtime: ReadyRuntime,
 ): Promise<UnifiedBrowserOutcome> {
   const page = await executor.getPage();
-  const unified = createPlaywrightUnifiedExecutor(page);
+  const unified = createPlaywrightUnifiedExecutor(page, {
+    ...(unifiedContext.maxUrlChars !== undefined
+      ? { maxUrlChars: unifiedContext.maxUrlChars }
+      : {}),
+  });
   const tools = {
     execute: async (action: Parameters<typeof unified.execute>[0]) => {
       const result = await unified.execute(action);
@@ -166,6 +175,9 @@ async function runUnified(
       execute: tools.execute,
       webSearch: createResponsesWebSearch(runtime.responses('fast')),
       maxSteps: 30,
+      ...(unifiedContext.fullPageResults !== undefined
+        ? { fullPageResults: unifiedContext.fullPageResults }
+        : {}),
       signal: controller.signal,
     });
   } finally {

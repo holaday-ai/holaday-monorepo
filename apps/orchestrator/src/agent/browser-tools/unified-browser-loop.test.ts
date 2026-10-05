@@ -293,9 +293,31 @@ describe('unified loop context size (batch 11.0)', () => {
       typeof m.content === 'string' ? [] : m.content.filter((b) => b.type === 'tool_result'),
     ) as Array<{ toolUseId: string; content: string }>;
     expect(results.map((r) => r.toolUseId)).toEqual(['t0', 'c0', 't1', 'c1', 't2', 'c2']);
+    // Default keeps only the latest page result in full.
     expect(results[0]?.content).toContain('已省略');
-    expect(results[2]?.content.length).toBe(5_001);
+    expect(results[2]?.content).toContain('已省略');
     expect(results[4]?.content.length).toBe(5_001);
     expect(results.filter((r) => r.content === '已点击')).toHaveLength(3);
+    // The pre-batch-12 setting (2 full results) is still available.
+    const two = compactToolResults(messages as never, 2).flatMap((m) =>
+      typeof m.content === 'string' ? [] : m.content.filter((b) => b.type === 'tool_result'),
+    ) as Array<{ content: string }>;
+    expect(two[2]?.content.length).toBe(5_001);
+  });
+
+  it('collapses an older page result identical to a newer one', () => {
+    const page = `same ${'z'.repeat(3_000)}`;
+    const messages = [0, 1].flatMap((i) => [
+      { role: 'assistant' as const, content: [call('snapshot', {}, `s${i}`)] },
+      {
+        role: 'user' as const,
+        content: [{ type: 'tool_result' as const, toolUseId: `s${i}`, content: page }],
+      },
+    ]);
+    const results = compactToolResults(messages as never, 2).flatMap((m) =>
+      typeof m.content === 'string' ? [] : m.content.filter((b) => b.type === 'tool_result'),
+    ) as Array<{ content: string }>;
+    expect(results[0]?.content).toBe('[与之后的页面结果相同，已省略]');
+    expect(results[1]?.content).toBe(page);
   });
 });
