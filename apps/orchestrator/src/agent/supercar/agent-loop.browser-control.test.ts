@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 const { createMessage } = vi.hoisted(() => ({ createMessage: vi.fn() }));
 vi.mock('@anthropic-ai/sdk', () => ({
   default: class {
@@ -94,6 +94,16 @@ function qwenTransport(fetchImpl: typeof fetch) {
 }
 
 describe('Supercar browser ownership checkpoints', () => {
+  // These cover the legacy coordinate loop behind the production entry; the
+  // default executor is unified since batch 08, so pin the rollback mode.
+  const executorBefore = env.BROWSER_EXECUTOR;
+  beforeAll(() => {
+    Object.assign(env, { BROWSER_EXECUTOR: 'legacy' });
+  });
+  afterAll(() => {
+    Object.assign(env, { BROWSER_EXECUTOR: executorBefore });
+  });
+
   it.each([
     { provider: 'qwen', coordinate: [500, 500], pixels: [640, 360] },
     { provider: 'anthropic', coordinate: [500, 500], pixels: [500, 500] },

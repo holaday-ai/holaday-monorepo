@@ -340,7 +340,7 @@ ALTER TABLE task_action_captures DROP COLUMN executor_source, DROP COLUMN outcom
 | `USER_TASK_CRYSTALLIZE_ENABLED` | 旧的结晶清扫，与本次无关 |
 | `PLAYBOOK_EXPLORER_SCHEDULE_ENABLED`、`EXPLORER_ENABLED` | 站点清单 `EXPLORER_SCHEDULED_SITES` 还是空的；会产生 Firecrawl 费用 |
 | `B4_SCREENSHOT_ANCHOR_ENABLED` | 和捕获一起开时会产生 `manual_hold` 截图，没有自动删除期限 |
-| `BROWSER_EXECUTOR` | 评测结论出来之前**显式写 `legacy`**。批次 11.0 如果把代码默认值改成 `unified`（标注"待 3.8-max 复核"），不写这个变量就会跟着代码默认值切过去。要切到 `unified`，等 qwen3.8-max 复核通过并经 BOSS 拍板后再改 |
+| `BROWSER_EXECUTOR` | **代码默认值已改为 `unified`**（batch 08 用 qwen3.8-max 跑 30 条：unified 85.7%，legacy 60.7%）。上线时不写这个变量即为 unified；出问题时写 `BROWSER_EXECUTOR=legacy` 并重启，即可回到旧的坐标循环。线上 `.env` 里如果已经显式写了 `legacy`，要删掉或改成 `unified` 才会切换 |
 | `ASTROLOGY_ENABLED` | 由 codex 占星线决定，本次不动 |
 | `OTA_USER_BROWSER_ENABLED` 及其 allowlist | 保持现有 canary，不扩大 |
 | Claude / GPT 大脑 | 后台"模型管理"里保持隐藏；要打开，先配好对应的 key |

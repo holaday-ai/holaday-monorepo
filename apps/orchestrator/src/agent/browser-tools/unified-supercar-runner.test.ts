@@ -80,8 +80,9 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
     legacy.run.mockClear();
   });
 
-  it('defaults to the legacy coordinate loop', async () => {
-    expect(original).toBe('legacy');
+  it('defaults to unified; BROWSER_EXECUTOR=legacy rolls back to the coordinate loop', async () => {
+    expect(original).toBe('unified');
+    Object.assign(env, { BROWSER_EXECUTOR: 'legacy' });
     const outcome = await runSupercarTask({
       taskId: 't_legacy',
       intent: 'x',

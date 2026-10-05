@@ -29,7 +29,7 @@ import {
 
 export { supercarHandoffToGenerate } from './agent-loop.js';
 
-/** BROWSER_EXECUTOR: 'legacy' (default, coordinate protocol) | 'unified' (batch-04 tools). */
+/** BROWSER_EXECUTOR: 'unified' (default, batch-04 tools) | 'legacy' (coordinate protocol, rollback). */
 export function browserExecutorMode(): 'legacy' | 'unified' {
   return env.BROWSER_EXECUTOR === 'unified' ? 'unified' : 'legacy';
 }

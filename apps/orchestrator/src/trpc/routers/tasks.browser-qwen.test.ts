@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as classifier from '../../agent/intent-classifier.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { env } from '../../config/env.js';
@@ -20,6 +20,11 @@ import type { Context } from '../context.js';
 import { tasksRouter } from './tasks.js';
 
 const original = { ...env };
+// The scripted Qwen fixture speaks the legacy coordinate protocol; the default
+// executor is unified since batch 08, so pin the rollback mode here.
+beforeEach(() => {
+  Object.assign(env, { BROWSER_EXECUTOR: 'legacy' });
+});
 afterEach(() => {
   vi.unstubAllEnvs();
   reloadFeatureFlagsForTest();
