@@ -16,3 +16,4 @@ test('starts original scripts as UID998 with production secrets only in child en
 test('missing production config refuses before process changes',()=>{const r=run({missing:true});assert.notEqual(r.code,0);assert.equal(r.calls.length,0);});
 test('mismatched runtime identity refuses before process changes',()=>{const r=run({uid:0});assert.notEqual(r.code,0);assert.equal(r.calls.length,0);});
 test('start failure immediately stops both named services',()=>{const r=run({failStart:true});assert.notEqual(r.code,0);assert.deepEqual(Array.from(r.calls.at(-1).args),['stop','holaday-orchestrator','holaday-account-closure-worker']);});
+test('binds external startup wrappers to the application checkout and Node22',()=>{const r=run();assert.equal(r.code,0);for(const c of r.calls.filter(x=>x.args[0]==='start')){assert.equal(c.opts.env.ORCHESTRATOR_REPO_ROOT,'/opt/holaday-monorepo');assert.equal(c.opts.env.ORCHESTRATOR_NODE_BIN,'/opt/node22/bin/node');}});

@@ -39,7 +39,7 @@ try {
   fs.accessSync(scripts[i],fs.constants.X_OK);
  }
  for(const file of ['dist/index.js','dist/account-closure/worker-entry.js'])fs.accessSync(path.join(dir,file),fs.constants.R_OK);
- const appEnv={...context,...env,PATH:controlEnv.PATH,PM2_HOME:controlEnv.PM2_HOME,HTTP_PORT:'4001',WS_PORT:'4002'};
+ const appEnv={...context,...env,PATH:controlEnv.PATH,PM2_HOME:controlEnv.PM2_HOME,ORCHESTRATOR_REPO_ROOT:root,ORCHESTRATOR_NODE_BIN:'/opt/node22/bin/node',HTTP_PORT:'4001',WS_PORT:'4002'};
  // Recreate only the two application definitions so removed flags do not linger
  // in PM2's merge-on-restart environment. Keep their original scripts and uid/gid.
  for(const name of names)if(rows.some(p=>p.name===name)&&!command(['delete',name],controlEnv))fail('DELETE_FAILED');
