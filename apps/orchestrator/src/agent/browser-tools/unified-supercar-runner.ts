@@ -1,8 +1,10 @@
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import type {
   RunSupercarOptions,
   SupercarAwaitingKind,
   SupercarOutcome,
 } from '../supercar/agent-loop.js';
+import { recordedBrowserAdapter } from '../supercar/recorded-browser-adapter.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
@@ -113,6 +115,22 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     };
   }
   const tools = createPlaywrightUnifiedExecutor(page);
+  // Same llm_calls accounting as the legacy loop (cost, usage, per-task totals).
+  const baseAdapter = opts.messagesAdapter;
+  let modelTurn = 0;
+  const adapter: MessagesAdapter = {
+    metadata: baseAdapter.metadata,
+    create(request, options) {
+      modelTurn += 1;
+      return recordedBrowserAdapter(baseAdapter, {
+        recorder: opts.recorder,
+        userExternalId: opts.userExternalId,
+        taskId: opts.taskId,
+        iteration: modelTurn,
+        onRecordError: () => {},
+      }).create(request, options);
+    },
+  };
   const controller = new AbortController();
   running.set(opts.taskId, controller);
   const timeout = opts.timeoutMs ? setTimeout(() => controller.abort(), opts.timeoutMs) : undefined;
@@ -139,7 +157,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   try {
     const outcome = await runUnifiedBrowserLoop({
       intent: opts.intent,
-      adapter: opts.messagesAdapter,
+      adapter,
       ...(opts.unifiedWebSearch ? { webSearch: opts.unifiedWebSearch } : {}),
       ...(opts.unifiedReadPage ? { readPage: opts.unifiedReadPage } : {}),
       maxSteps: opts.maxIterations ?? 40,
