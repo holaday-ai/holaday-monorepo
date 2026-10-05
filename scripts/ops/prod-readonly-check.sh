@@ -70,6 +70,10 @@ for f in "$DIR/.env" "$DIR/.env.local" "$DIR/apps/orchestrator/.env" "$DIR/apps/
   if [ -f "$f" ]; then
     has() { grep -qE "^$1=" "$f" && echo yes || echo no; }
     echo "  $f: exists; DATABASE_URL=$(has DATABASE_URL) BROWSER_EXECUTOR=$(has BROWSER_EXECUTOR) FIRECRAWL_API_KEY=$(has FIRECRAWL_API_KEY) FAL_KEY=$(has FAL_KEY) DASHSCOPE_INTL_API_KEY=$(has DASHSCOPE_INTL_API_KEY) DASHSCOPE_CN_API_KEY=$(has DASHSCOPE_CN_API_KEY)"
+    # BROWSER_EXECUTOR is an enum, not a secret: print its value (letters only).
+    if grep -qE '^BROWSER_EXECUTOR=' "$f"; then
+      echo "    BROWSER_EXECUTOR value: $(grep -E '^BROWSER_EXECUTOR=' "$f" | tail -1 | cut -d= -f2- | tr -cd 'a-z')"
+    fi
   else echo "  $f: absent"; fi
 done
 
