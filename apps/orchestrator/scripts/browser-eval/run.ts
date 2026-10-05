@@ -344,7 +344,10 @@ async function runTask(
     `${trace.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
   );
   const success = scoreBrowserEval(task, outcome);
-  const failureClass = classifyFailure(success, outcome, trace);
+  const failureClass = classifyFailure(success, outcome, trace, {
+    durationMs: Date.now() - started,
+    taskTimeoutMs,
+  });
   const reason =
     outcome.status === 'failed'
       ? outcome.reason

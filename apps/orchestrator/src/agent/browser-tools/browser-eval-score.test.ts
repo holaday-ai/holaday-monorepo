@@ -78,4 +78,25 @@ describe('browser eval suite', () => {
       classifyFailure(true, { status: 'completed', summary: 'x', evidence: 'x', steps: 2 }, []),
     ).toBe('none');
   });
+
+  it('counts a model timeout at the task deadline as the task running out of time', () => {
+    const failed = { status: 'failed' as const, reason: '模型响应超时', steps: 19 };
+    const trace = [{ type: 'model' }, { type: 'model_error', code: 'REQUEST_TIMEOUT' }];
+    expect(
+      classifyFailure(false, failed, trace, { durationMs: 244_199, taskTimeoutMs: 240_000 }),
+    ).toBe('browser');
+    // A timeout well before the deadline is still a model-layer failure.
+    expect(
+      classifyFailure(false, failed, trace, { durationMs: 130_000, taskTimeoutMs: 240_000 }),
+    ).toBe('model_layer');
+    // Provider errors are never re-attributed.
+    expect(
+      classifyFailure(
+        false,
+        failed,
+        [{ type: 'model' }, { type: 'model_error', code: 'PROVIDER_ERROR' }],
+        { durationMs: 240_000, taskTimeoutMs: 240_000 },
+      ),
+    ).toBe('model_layer');
+  });
 });

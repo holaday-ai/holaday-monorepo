@@ -48,15 +48,31 @@ export function scoreBrowserEval(task: BrowserEvalTask, outcome: UnifiedBrowserO
  *  - model_layer: a model call failed (403/429/timeouts/provider errors) — excluded;
  *  - environment: the harness could not reach the start page — excluded;
  *  - browser: everything else (counted; includes successes).
+ *
+ * A model-call timeout that coincides with the task deadline is the task
+ * running out of time (the loop caps each call at the remaining budget), not a
+ * broken model call: it is a counted `browser` failure when `timing` shows the
+ * run lasted at least the task timeout minus 15 s.
  */
+export const DEADLINE_SLACK_MS = 15_000;
+
 export function classifyFailure(
   success: boolean,
   outcome: UnifiedBrowserOutcome,
   trace: ReadonlyArray<Record<string, unknown>>,
+  timing?: { durationMs: number; taskTimeoutMs: number },
 ): 'none' | 'model_layer' | 'environment' | 'browser' {
   if (success) return 'none';
   if (outcome.status === 'failed' && outcome.reason.startsWith('harness:')) return 'environment';
-  const modelErrors = trace.filter((entry) => entry.type === 'model_error').length;
+  const errors = trace.filter((entry) => entry.type === 'model_error');
+  if (
+    timing &&
+    errors.length > 0 &&
+    errors.every((entry) => entry.code === 'REQUEST_TIMEOUT' || entry.code === 'REQUEST_ABORTED') &&
+    timing.durationMs >= timing.taskTimeoutMs - DEADLINE_SLACK_MS
+  )
+    return 'browser';
+  const modelErrors = errors.length;
   const modelOk = trace.filter((entry) => entry.type === 'model').length;
   if (modelErrors > 0 && (modelOk === 0 || outcome.status !== 'completed')) return 'model_layer';
   return 'browser';
