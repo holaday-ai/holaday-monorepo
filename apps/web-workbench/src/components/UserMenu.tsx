@@ -15,11 +15,13 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { CharacterAvatar } from '@/components/CharacterAvatar';
 import { cn } from '@/lib/utils';
 import { type ThemeMode, useTheme } from '@/stores/theme-store';
 
 interface Props {
   displayName: string;
+  avatarUrl?: string | null;
   email: string | null;
   plan: string;
   onLogout(): void;
@@ -45,6 +47,7 @@ interface Props {
  */
 export function UserMenu({
   displayName,
+  avatarUrl,
   email,
   plan,
   onLogout,
@@ -83,7 +86,6 @@ export function UserMenu({
     };
   }, [open]);
 
-  const initial = (displayName || email || '?').slice(0, 1).toUpperCase();
   const planLabel = friendlyPlan(plan);
   const topbar = placement === 'topbar';
 
@@ -106,16 +108,7 @@ export function UserMenu({
             'border-[#EA1F59]/25 bg-[#EA1F59]/5 shadow-[0_10px_26px_rgba(234,31,89,0.08)] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
         )}
       >
-        <div
-          className={cn(
-            'flex shrink-0 items-center justify-center bg-[#EA1F59] font-semibold text-white shadow-[0_3px_10px_rgba(234,31,89,0.14)]',
-            topbar
-              ? 'h-10 w-10 rounded-full ring-2 ring-white'
-              : 'h-7 w-7 rounded-[9px] text-[13px]',
-          )}
-        >
-          {initial}
-        </div>
+        <CharacterAvatar name={displayName || email || '用户'} seed={email || displayName} src={avatarUrl} className={topbar ? 'h-10 w-10' : 'h-7 w-7'} />
         {topbar ? (
           <ChevronDown
             className={cn(
@@ -147,9 +140,7 @@ export function UserMenu({
         >
           {topbar ? (
             <div className="mb-3 flex items-center gap-3 px-1 pb-2">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#EA1F59] text-base font-semibold text-white ring-2 ring-[#F4D7E2]">
-                {initial}
-              </div>
+              <CharacterAvatar name={displayName || email || '用户'} seed={email || displayName} src={avatarUrl} className="h-11 w-11" />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold text-[#111827]">
                   {displayName || email || '未命名'}

@@ -687,7 +687,7 @@ export function InputArea({
     >
       <div
         className={cn(
-          'relative overflow-hidden border transition-[border-color,box-shadow]',
+          'hd-task-composer relative overflow-hidden border transition-[border-color,box-shadow]',
           fullBleed
             ? compact
               ? 'rounded-[22px] border-[#F8CAD7] bg-[#FFF9FC] shadow-[0_14px_32px_rgba(234,31,89,0.065)]'

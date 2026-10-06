@@ -1,5 +1,6 @@
 import {
   Check,
+  ChevronDown,
   CalendarClock,
   Clapperboard,
   Clipboard,
@@ -25,7 +26,7 @@ import {
   X,
 } from 'lucide-react';
 import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { BrandIcon, BrandWordmark } from '@/components/BrandLogo';
 import { QuotaIndicator } from '@/components/QuotaIndicator';
 import {
@@ -50,6 +51,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  SidebarTrigger,
   useSidebar,
 } from '@/components/ui/sidebar';
 import { TaskListItem } from '@/components/TaskListItem';
@@ -310,6 +312,7 @@ export function Sidebar({
   // `mobileOpen` prop continues to drive the Sheet from
   // WorkbenchApp's hamburger button.
   const { setOpenMobile } = useSidebar();
+  const { pathname: sidebarPath } = useLocation();
   React.useEffect(() => {
     setOpenMobile(!!mobileOpen);
   }, [mobileOpen, setOpenMobile]);
@@ -340,16 +343,17 @@ export function Sidebar({
 
   return (
     <>
-      <SidebarShell collapsible="icon" forceCollapsed={adaptiveCollapsed}>
+      <SidebarShell className={cn("holaday-sidebar", /^\/(video|image)\/?$/.test(sidebarPath) && "dark")} variant="floating" collapsible="icon" forceCollapsed={adaptiveCollapsed}>
         {/* Codex info-architecture rework: the Sidebar reads as four
             stable segments. Header / SidebarNav / SidebarFooter are
             pinned; only the task list scrolls. The visual centre of
             gravity sits on "新任务" + the feature shortcuts; task
             history is a scroll surface, not a status board. */}
         <SidebarHeader className={cn('shrink-0 gap-2 border-b bg-white/60 backdrop-blur dark:bg-card/70', SIDEBAR_BORDER)}>
-          <div className="flex items-center gap-2 px-1 py-1">
+          <div className="holaday-brand flex items-center gap-2 px-1 py-1">
             <BrandIcon />
             <BrandWordmark className="group-data-[collapsible=icon]:hidden" />
+            <SidebarTrigger className="ml-auto shrink-0 group-data-[collapsible=icon]:hidden" />
           </div>
           {/* Brand magenta only on the primary action. */}
           <SidebarMenu>
@@ -358,9 +362,10 @@ export function Sidebar({
                 tooltip="新任务 (/)"
                 onClick={() => {
                   onNewTask();
+                  setOpenMobile(false);
                   onMobileClose?.();
                 }}
-                className="rounded-[8px] bg-[#EA1F59] font-medium text-white shadow-[0_3px_10px_rgba(234,31,89,0.14)] hover:bg-[#EA1F59]/90 hover:text-white data-[active=true]:bg-[#EA1F59] data-[active=true]:text-white"
+                className="holaday-new-task rounded-[8px] bg-[#EA1F59] font-medium text-white shadow-[0_3px_10px_rgba(234,31,89,0.14)] hover:bg-[#EA1F59]/90 hover:text-white data-[active=true]:bg-[#EA1F59] data-[active=true]:text-white"
               >
                 <Plus />
                 <span>新任务</span>
@@ -395,7 +400,7 @@ export function Sidebar({
             list when space is tight; tall windows behave identically
             because the content fits and there's no scroll. */}
         <SidebarContent className="px-0 bg-white/45 dark:bg-transparent">
-            <FeatureNav userRole={userRole} />
+            <FeatureNav userRole={userRole} projects={projectsProp ?? []} onCreateProject={onCreateProject} onNavigate={() => { setOpenMobile(false); onMobileClose?.(); }} />
             {projectFilter && (
               <div
                 className={cn(
@@ -454,7 +459,8 @@ export function Sidebar({
                       renaming={renamingId === t.taskId}
                       onSelect={(id) => {
                         onSelectTask(id);
-                        onMobileClose?.();
+                        setOpenMobile(false);
+                  onMobileClose?.();
                       }}
                       onContextMenu={(id, e) => {
                         e.preventDefault();
@@ -493,7 +499,8 @@ export function Sidebar({
                       renaming={renamingId === t.taskId}
                       onSelect={(id) => {
                         onSelectTask(id);
-                        onMobileClose?.();
+                        setOpenMobile(false);
+                  onMobileClose?.();
                       }}
                       onContextMenu={(id, e) => {
                         e.preventDefault();
@@ -1009,16 +1016,20 @@ const FEATURES: readonly FeatureItem[] = [
  * routes render as clickable nav links; disabled rows keep a neutral
  * unavailable label. Compact density (32px row).
  */
-function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
+function FeatureNav({ userRole, projects, onCreateProject, onNavigate }: {
+  userRole: 'user' | 'admin';
+  projects: readonly UiProject[];
+  onCreateProject?: () => void;
+  onNavigate?: () => void;
+}): JSX.Element {
   const navigate = useNavigate();
-  // Read pathname directly so the active highlight updates on route
-  // switch without forcing a re-render through props. The shrink-0
-  // wrapper keeps this segment pinned below SidebarHeader while
-  // SidebarContent (the task list) takes the remaining height.
-  const pathname =
-    typeof window !== 'undefined' ? window.location.pathname : '';
+  const { pathname, search } = useLocation();
+  const { setOpen } = useSidebar();
+  const [projectsExpanded, setProjectsExpanded] = React.useState(false);
+  const projectListId = React.useId();
+  const visit = (href: string): void => { navigate(href); onNavigate?.(); };
   return (
-    <SidebarGroup className="shrink-0 border-b border-[#DCDDDD]/70 dark:border-white/10">
+    <SidebarGroup className="holaday-feature-nav shrink-0">
       <SidebarGroupContent>
         <SidebarMenu>
           {filterSidebarFeatureNavItems(FEATURES, {
@@ -1027,7 +1038,8 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
           }).map((item) => {
             const { icon: Icon, label, href } = item;
             if (href) {
-              const isActive = pathname === href;
+              const isProjects = href === '/projects';
+              const isActive = pathname === href || pathname.startsWith(`${href}/`) || (href === '/skills' && pathname === '/plugins') || (isProjects && pathname === '/' && Boolean(new URLSearchParams(search).get('project')));
               return (
                 <SidebarMenuItem key={label}>
                 <SidebarMenuButton
@@ -1035,7 +1047,16 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
                   isActive={isActive}
                   onPointerEnter={() => preloadSidebarFeatureNavItem(item)}
                   onFocus={() => preloadSidebarFeatureNavItem(item)}
-                  onClick={() => navigate(href)}
+                  aria-current={isActive ? 'page' : undefined}
+                  aria-expanded={isProjects ? projectsExpanded : undefined}
+                  aria-controls={isProjects ? projectListId : undefined}
+                  onClick={() => {
+                    if (isProjects) {
+                      setOpen(true);
+                      setProjectsExpanded(isActive ? !projectsExpanded : true);
+                      if (!isActive) navigate(href);
+                    } else visit(href);
+                  }}
                   className={cn(
                     'rounded-[8px] border border-transparent text-[#595757] hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:text-foreground/75 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
                     isActive &&
@@ -1044,7 +1065,18 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
                 >
                     <Icon aria-hidden />
                     <span>{label}</span>
+                    {isProjects && <ChevronDown aria-hidden className={cn('ml-auto transition-transform group-data-[collapsible=icon]:hidden', projectsExpanded && 'rotate-180')} />}
                   </SidebarMenuButton>
+                  {isProjects && projectsExpanded && (
+                    <div id={projectListId} className="holaday-project-links group-data-[collapsible=icon]:hidden">
+                      {projects.map((project) => (
+                        <button key={project.projectId} type="button" onClick={() => visit(`/?project=${encodeURIComponent(project.projectId)}`)}>
+                          <FolderOpen aria-hidden /><span>{project.name}</span>
+                        </button>
+                      ))}
+                      {onCreateProject && <button type="button" onClick={() => { onCreateProject(); onNavigate?.(); }}><Plus aria-hidden /><span>新建项目</span></button>}
+                    </div>
+                  )}
                 </SidebarMenuItem>
               );
             }
@@ -1070,7 +1102,7 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
               <SidebarMenuButton
                 tooltip="管理后台"
                 isActive={pathname.startsWith('/admin')}
-                onClick={() => navigate('/admin')}
+                onClick={() => visit('/admin')}
                 className={cn(
                   'rounded-[8px] border border-transparent hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
                   pathname.startsWith('/admin') &&

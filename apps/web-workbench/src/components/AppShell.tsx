@@ -737,9 +737,10 @@ export function AppShell(): JSX.Element {
   return (
     <SidebarProvider
       defaultOpen={true}
+      className={`holaday-shell${/^\/(video|image)\/?$/.test(location.pathname) ? ' dark holaday-creative-shell' : ''}`}
       style={
         {
-          '--sidebar-width': '304px',
+          '--sidebar-width': '318px',
           '--sidebar-width-icon': '64px',
         } as React.CSSProperties
       }
@@ -834,7 +835,7 @@ export function AppShell(): JSX.Element {
           Pages that need internal scroll still get it via their own
           flex-1 + overflow-y-auto blocks (WorkbenchApp, scheduled
           calendar). */}
-      <SidebarInset className="h-svh overflow-y-auto bg-background">
+      <SidebarInset className="holaday-main h-svh overflow-y-auto bg-background">
         <Outlet context={ctx} />
       </SidebarInset>
       <DesktopAccountDock
@@ -842,6 +843,7 @@ export function AppShell(): JSX.Element {
         onToggleBrowserWorkbench={toggleBrowserWorkbench}
         taskSelected={Boolean(selectedTaskId)}
         displayName={displayName}
+        avatarUrl={me?.avatarUrl}
         email={me?.email ?? null}
         plan={me?.plan ?? 'free'}
         unsuccessfulTaskCount={serverUnsuccessfulCount}
@@ -1081,6 +1083,7 @@ function DesktopAccountDock({
   onToggleBrowserWorkbench,
   taskSelected,
   displayName,
+  avatarUrl,
   email,
   plan,
   unsuccessfulTaskCount,
@@ -1092,6 +1095,7 @@ function DesktopAccountDock({
   onToggleBrowserWorkbench(): void;
   taskSelected: boolean;
   displayName: string;
+  avatarUrl?: string | null;
   email: string | null;
   plan: string;
   unsuccessfulTaskCount: number;
@@ -1115,6 +1119,7 @@ function DesktopAccountDock({
       <UserMenu
         placement="topbar"
         displayName={displayName}
+        avatarUrl={avatarUrl}
         email={email}
         plan={plan}
         onLogout={onLogout}

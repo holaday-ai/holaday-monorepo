@@ -1,3 +1,4 @@
+import { CharacterAvatar } from '@/components/CharacterAvatar';
 import { Button } from '@/components/ui/button';
 import {
   type ProjectMemberRole,
@@ -35,6 +36,7 @@ interface WorkbenchMember {
   readonly userId: string;
   readonly organizationMemberId?: string;
   readonly displayName: string;
+  readonly avatarUrl?: string | null;
   readonly role: ProjectMemberRole;
 }
 
@@ -642,9 +644,7 @@ function MembersRail({
       <ul className="mt-4 space-y-3">
         {members.map((member) => (
           <li key={member.userId} className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FFF0F2] text-[11px] font-semibold text-[#D94255]">
-              {member.displayName.slice(0, 1)}
-            </span>
+            <CharacterAvatar name={member.displayName} seed={member.userId} src={member.avatarUrl} className="h-8 w-8" />
             <span className="min-w-0">
               <span className="block truncate text-[12px] font-medium text-[#3B3C42]">
                 {member.displayName}

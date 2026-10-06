@@ -661,7 +661,7 @@ export function StockTasksPage(): JSX.Element {
   }, [briefingBusy, briefingUnavailable, enabled, loadingDashboard]);
 
   return (
-    <div className="min-h-full bg-[#FFFCFA] text-[#25233A]">
+    <div className="hd-stocks-page min-h-full bg-[#FFFCFA] text-[#25233A]">
       <div
         data-stock-mobile-chrome=""
         aria-hidden

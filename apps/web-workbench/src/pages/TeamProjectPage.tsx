@@ -553,7 +553,7 @@ export function TeamProjectPage(): JSX.Element {
   const membersLoading = members.projectId === projectId && members.loading;
 
   return (
-    <PageContainer width="workspace">
+    <PageContainer width="workspace" className="hd-project-detail">
       <PageHeader
         title={detail.project.name}
         description={detail.project.description || '这个团队项目还没有添加说明。'}

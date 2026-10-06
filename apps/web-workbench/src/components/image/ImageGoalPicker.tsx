@@ -19,8 +19,8 @@ const IMAGE_GOALS: ReadonlyArray<{
     description: '自由发挥，把一个想法变成完整画面',
     image: '/design-ref/image-goal-inspiration.jpg',
     imagePosition: 'object-center',
-    tone: 'bg-[#FFF1EA] text-[#C8664C]',
-    selectedTone: 'border-[#EBA083] bg-[#FFFCFA] ring-[#F1B49D]/20',
+    tone: 'bg-[var(--creative-surface,#FFF1EA)] text-[var(--creative-muted,#C8664C)]',
+    selectedTone: 'border-[#EBA083] bg-[var(--creative-surface,#FFFCFA)] ring-[#F1B49D]/20',
     checkTone: 'bg-[#E98F72]',
     icon: Lightbulb,
   },
@@ -30,8 +30,8 @@ const IMAGE_GOALS: ReadonlyArray<{
     description: '保持主角不变，只改变你想改的部分',
     image: '/design-ref/image-goal-lock-subject.jpg',
     imagePosition: 'object-center',
-    tone: 'bg-[#EAF4FF] text-[#3678C6]',
-    selectedTone: 'border-[#72A9E9] bg-[#FBFDFF] ring-[#8FBAEB]/20',
+    tone: 'bg-[var(--creative-surface,#EAF4FF)] text-[var(--creative-muted,#3678C6)]',
+    selectedTone: 'border-[#72A9E9] bg-[var(--creative-surface,#FBFDFF)] ring-[#8FBAEB]/20',
     checkTone: 'bg-[#5E9DE4]',
     icon: LockKeyhole,
   },
@@ -41,8 +41,8 @@ const IMAGE_GOALS: ReadonlyArray<{
     description: '快速制作商品图、海报与社媒封面',
     image: '/design-ref/image-goal-commercial.jpg',
     imagePosition: 'object-center',
-    tone: 'bg-[#EAF8EE] text-[#4F9468]',
-    selectedTone: 'border-[#82C79A] bg-[#FCFFFD] ring-[#98D5AC]/20',
+    tone: 'bg-[var(--creative-surface,#EAF8EE)] text-[var(--creative-muted,#4F9468)]',
+    selectedTone: 'border-[#82C79A] bg-[var(--creative-surface,#FCFFFD)] ring-[#98D5AC]/20',
     checkTone: 'bg-[#63B27E]',
     icon: ShoppingBag,
   },
@@ -71,7 +71,7 @@ export function ImageGoalPicker({
 }: ImageGoalPickerProps): JSX.Element {
   return (
     <section>
-      <h2 className="text-xl font-semibold tracking-[-0.025em] text-[#312A37] sm:text-[24px]">
+      <h2 className="text-xl font-semibold tracking-[-0.025em] text-[var(--creative-ink,#312A37)] sm:text-[24px]">
         今天想做什么图？
       </h2>
 
@@ -90,10 +90,10 @@ export function ImageGoalPicker({
               disabled={disabled}
               onClick={() => onChange(goal.id)}
               className={cn(
-                'group relative min-h-[220px] overflow-hidden rounded-[20px] border bg-white text-left shadow-[0_8px_22px_rgba(58,45,64,0.045)] transition duration-200 disabled:cursor-wait disabled:opacity-70 motion-reduce:transform-none motion-reduce:transition-none',
+                'hd-scenario-card group relative min-h-[220px] overflow-hidden rounded-[20px] border bg-[var(--creative-surface,#fff)] text-left shadow-[0_8px_22px_rgba(58,45,64,0.045)] transition duration-200 disabled:cursor-wait disabled:opacity-70 motion-reduce:transform-none motion-reduce:transition-none',
                 selected
                   ? cn('ring-2', goal.selectedTone)
-                  : 'border-[#E9E1E8] hover:-translate-y-0.5 hover:border-[#CFC3D0] hover:shadow-[0_16px_34px_rgba(58,45,64,0.08)] motion-reduce:hover:translate-y-0',
+                  : 'border-[var(--creative-line,#E9E1E8)] hover:-translate-y-0.5 hover:border-[var(--creative-line,#CFC3D0)] hover:shadow-[0_16px_34px_rgba(58,45,64,0.08)] motion-reduce:hover:translate-y-0',
               )}
             >
               <img
@@ -123,10 +123,10 @@ export function ImageGoalPicker({
                   <Icon className="h-5 w-5" aria-hidden />
                 </span>
                 <span className="min-w-0">
-                  <span className="flex items-center gap-2 text-[16px] font-semibold text-[#302936]">
+                  <span className="flex items-center gap-2 text-[16px] font-semibold text-[var(--creative-ink,#302936)]">
                     {goal.title}
                   </span>
-                  <span className="mt-1 block text-xs leading-5 text-[#766D7B]">
+                  <span className="mt-1 block text-xs leading-5 text-[var(--creative-muted,#766D7B)]">
                     {goal.description}
                   </span>
                 </span>
@@ -139,9 +139,9 @@ export function ImageGoalPicker({
       {value === 'commercial' ? (
         <fieldset
           aria-label="选择成片用途"
-          className="mt-4 flex min-w-0 flex-wrap items-center gap-2 rounded-[18px] border border-[#F0DED1] bg-[#FFF8F2] p-2.5"
+          className="mt-4 flex min-w-0 flex-wrap items-center gap-2 rounded-[18px] border border-[var(--creative-line,#F0DED1)] bg-[var(--creative-surface,#FFF8F2)] p-2.5"
         >
-          <span className="px-2 text-xs font-semibold text-[#8A6A58]">选择成片用途</span>
+          <span className="px-2 text-xs font-semibold text-[var(--creative-muted,#8A6A58)]">选择成片用途</span>
           {COMMERCIAL_USES.map((use) => {
             const selected = (commercialUse ?? 'product') === use.id;
             return (
@@ -154,8 +154,8 @@ export function ImageGoalPicker({
                 className={cn(
                   'min-h-11 rounded-xl border px-4 text-sm font-semibold transition-colors disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none',
                   selected
-                    ? 'border-[#E9A98B] bg-white text-[#9B553F] shadow-sm'
-                    : 'border-transparent text-[#7D6A60] hover:bg-white/70',
+                    ? 'border-[#E9A98B] bg-[var(--creative-surface,#fff)] text-[var(--creative-muted,#9B553F)] shadow-sm'
+                    : 'border-transparent text-[var(--creative-muted,#7D6A60)] hover:bg-white/70',
                 )}
               >
                 {use.label}

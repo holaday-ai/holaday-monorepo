@@ -1497,6 +1497,7 @@ function renderEventContent(arg: EventContentArg): JSX.Element {
   return (
     <div
       className="planned-event"
+      data-status={arg.event.extendedProps.status}
       style={{ '--planned-event-accent': arg.event.extendedProps.accent } as React.CSSProperties}
     >
       <time>{arg.timeText}</time>

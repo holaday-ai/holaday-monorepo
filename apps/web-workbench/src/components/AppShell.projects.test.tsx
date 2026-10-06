@@ -199,3 +199,29 @@ describe('AppShell personal project collection isolation', () => {
     expect(screen.queryByRole('menuitem', { name: '团队增长' })).toBeNull();
   });
 });
+
+describe('approved sidebar disclosure', () => {
+ it('opens Projects from another page, toggles the whole row, and keeps global task history', async () => {
+  const user = userEvent.setup();
+  const router = createMemoryRouter([{ element: <AppShell />, children: [
+   { path: '/files', element: <main>文件库内容</main> },
+   { path: '/projects', element: <main>项目内容</main> },
+   { path: '/', element: <main>任务工作台</main> },
+  ] }], { initialEntries: ['/files'] });
+  render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+  const projects = await screen.findByRole('button', { name: '项目' });
+  await user.click(projects);
+  expect(router.state.location.pathname).toBe('/projects');
+  expect(projects.getAttribute('aria-expanded')).toBe('true');
+  expect(await screen.findByRole('button', { name: '个人研究' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '文件库' }).getAttribute('data-active')).toBe('false');
+  await user.click(projects);
+  expect(projects.getAttribute('aria-expanded')).toBe('false');
+  expect(screen.queryByRole('button', { name: '个人研究' })).toBeNull();
+  await user.click(projects);
+  expect(projects.getAttribute('aria-expanded')).toBe('true');
+  expect(screen.getByRole('button', { name: '个人项目任务' })).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: '个人研究' }));
+  expect(router.state.location.search).toBe('?project=prj_personal');
+ });
+});

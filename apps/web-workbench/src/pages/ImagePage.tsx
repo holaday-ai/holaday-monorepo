@@ -402,15 +402,15 @@ export function ImagePage(): JSX.Element {
   const draftLocked = uploading || submitting;
 
   return (
-    <main className="min-h-full bg-[#FBFAF7] px-4 py-5 text-[#342E39] sm:px-6 lg:px-8">
+    <main className="hd-creative-page hd-image-page min-h-full bg-[var(--creative-surface,#FBFAF7)] px-4 py-5 text-[var(--creative-ink,#342E39)] sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-[1220px]">
         <header className="mb-5 px-1">
-          <h1 className="text-[32px] font-semibold tracking-[-0.04em] text-[#27212D] sm:text-[38px]">
+          <h1 className="text-[32px] font-semibold tracking-[-0.04em] text-[var(--creative-ink,#27212D)] sm:text-[38px]">
             图片任务
           </h1>
         </header>
 
-        <div className="rounded-[26px] border border-[#E8E1E7] bg-white p-4 shadow-[0_14px_38px_rgba(62,48,69,0.05)] sm:p-5 lg:p-7">
+        <div className="hd-image-workspace rounded-[26px] border border-[var(--creative-line,#E8E1E7)] bg-[var(--creative-surface,#fff)] p-4 shadow-[0_14px_38px_rgba(62,48,69,0.05)] sm:p-5 lg:p-7">
           <ImageGoalPicker
             value={draft.goal}
             commercialUse={draft.commercialUse}
@@ -443,14 +443,14 @@ export function ImagePage(): JSX.Element {
                       type="button"
                       disabled={draftLocked}
                       onClick={() => setSettingsOpen(true)}
-                      className="inline-flex min-h-11 items-center gap-3 rounded-xl border border-[#E2DAE3] bg-[#FBF9FC] px-3 text-left transition-colors hover:border-[#CFC1D2] hover:bg-white disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
+                      className="inline-flex min-h-11 items-center gap-3 rounded-xl border border-[var(--creative-line,#E2DAE3)] bg-[var(--creative-surface,#FBF9FC)] px-3 text-left transition-colors hover:border-[var(--creative-line,#CFC1D2)] hover:bg-[var(--creative-surface,#fff)] disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
                     >
-                      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#F0E9FA] text-[#73529B]">
+                      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--creative-surface,#F0E9FA)] text-[var(--creative-muted,#73529B)]">
                         <Settings2 className="h-4 w-4" aria-hidden />
                       </span>
                       <span>
-                        <span className="block text-sm font-semibold text-[#423A46]">生成设置</span>
-                        <span className="mt-0.5 block text-xs text-[#7A707D]">
+                        <span className="block text-sm font-semibold text-[var(--creative-ink,#423A46)]">生成设置</span>
+                        <span className="mt-0.5 block text-xs text-[var(--creative-muted,#7A707D)]">
                           {settingSummary({
                             ...draft,
                             model: usableImageModel(draft.model, mediaModels?.image),
@@ -463,7 +463,7 @@ export function ImagePage(): JSX.Element {
                       type="button"
                       onClick={() => void handleSubmit()}
                       disabled={Boolean(validationMessage) || submitting}
-                      className="min-h-12 rounded-xl bg-[#D62958] px-8 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(214,41,88,0.2)] hover:bg-[#BE214B] sm:w-[48%]"
+                      className="hd-generate min-h-12 rounded-xl bg-[#D62958] px-8 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(214,41,88,0.2)] hover:bg-[#BE214B] sm:w-[48%]"
                     >
                       {submitting ? (
                         <Loader2
@@ -476,7 +476,7 @@ export function ImagePage(): JSX.Element {
                       {submitting ? '提交中…' : '开始生成'}
                     </Button>
                   </div>
-                  <p className="mt-2 min-h-5 text-right text-xs text-[#7D737F]" aria-live="polite">
+                  <p className="mt-2 min-h-5 text-right text-xs text-[var(--creative-muted,#7D737F)]" aria-live="polite">
                     {validationMessage ?? '设置已就绪，可以开始生成'}
                   </p>
                 </>
@@ -498,13 +498,13 @@ export function ImagePage(): JSX.Element {
           </div>
 
           {!currentTask ? (
-            <section className="mt-4 grid gap-4 rounded-[20px] border border-[#E8E1E8] bg-[#FCFBFD] px-5 py-4 sm:grid-cols-[minmax(240px,0.9fr)_minmax(320px,1.1fr)] sm:items-center">
+            <section className="mt-4 grid gap-4 rounded-[20px] border border-[var(--creative-line,#E8E1E8)] bg-[var(--creative-surface,#FCFBFD)] px-5 py-4 sm:grid-cols-[minmax(240px,0.9fr)_minmax(320px,1.1fr)] sm:items-center">
               <div className="min-w-0">
-                <h2 className="text-sm font-semibold text-[#433A47]">生成后可以继续修改</h2>
-                <p className="mt-1 text-xs leading-5 text-[#7B717F]">
+                <h2 className="text-sm font-semibold text-[var(--creative-ink,#433A47)]">生成后可以继续修改</h2>
+                <p className="mt-1 text-xs leading-5 text-[var(--creative-muted,#7B717F)]">
                   围绕同一张结果继续调整背景、风格、光线或构图，不必从头开始。
                 </p>
-                <span className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[#755990]">
+                <span className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[var(--creative-muted,#755990)]">
                   继续改这张 · 保持主角 · 复用设置
                   <ArrowRight className="h-4 w-4" aria-hidden />
                 </span>

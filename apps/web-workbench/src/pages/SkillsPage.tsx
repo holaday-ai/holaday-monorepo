@@ -232,7 +232,7 @@ export function SkillsPage(): JSX.Element {
   }
 
   return (
-    <PageContainer width="wide" className="max-w-[1180px]">
+    <PageContainer width="wide" className="hd-skills-page max-w-[1180px]">
       {loading ? (
         <>
           <PageHeader

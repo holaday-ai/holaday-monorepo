@@ -737,7 +737,7 @@ export function ProjectsPage(): JSX.Element {
   });
 
   return (
-    <PageContainer width="wide">
+    <PageContainer width="workspace" className="hd-projects-page">
       <PageHeader
         title="项目"
         description={
@@ -1080,7 +1080,7 @@ function ProjectCollection({
           {projects.map((project) => (
             <article
               key={project.projectId}
-              className="group flex flex-col gap-2 rounded-[8px] border border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-[transform,border-color,box-shadow] hover:-translate-y-px hover:border-[#ADADAD] hover:shadow-[0_5px_16px_rgba(15,23,42,0.055)]"
+              className="hd-project-card group flex flex-col gap-2 rounded-[8px] border border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-[transform,border-color,box-shadow] hover:-translate-y-px hover:border-[#ADADAD] hover:shadow-[0_5px_16px_rgba(15,23,42,0.055)]"
             >
               <div className="flex items-start gap-2">
                 <button

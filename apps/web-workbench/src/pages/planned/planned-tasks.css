@@ -1,8 +1,8 @@
 .planned-page {
-  --planned-border: #dcdcdc;
+  --planned-border: #eeebf0;
   --planned-muted: #77757a;
   --planned-soft: #f7f7f8;
-  --planned-pink: #ea1f59;
+  --planned-pink: var(--hd-rose, #ff0061);
 }
 
 @media (min-width: 900px) {
@@ -40,9 +40,9 @@
   overflow: hidden;
   min-height: 680px;
   border: 1px solid var(--planned-border);
-  border-radius: 8px;
+  border-radius: 18px;
   background: #fff;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  box-shadow: none;
 }
 
 .planned-workbench--editing {
@@ -232,15 +232,16 @@
   overflow: hidden;
   padding: 3px 5px 3px 8px;
   border-radius: 5px;
-  background: color-mix(in srgb, var(--planned-event-accent, #ea1f59) 8%, white);
+  background: transparent;
   color: #292727;
 }
 
 .planned-event::before {
   position: absolute;
-  inset: 4px auto 4px 0;
-  width: 3px;
-  border-radius: 0 2px 2px 0;
+  inset: 10px auto auto 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
   background: var(--planned-event-accent, #ea1f59);
   content: "";
 }

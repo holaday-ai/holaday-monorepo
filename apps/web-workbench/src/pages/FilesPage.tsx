@@ -1,14 +1,13 @@
 import {
   AlertCircle,
+  ChevronDown,
+  LayoutGrid,
+  List,
   Check,
   Download,
   Copy,
   Eye,
   File as FileIcon,
-  FileSpreadsheet,
-  FileText,
-  Film,
-  Image as ImageIcon,
   Loader2,
   MoreHorizontal,
   Plus,
@@ -18,6 +17,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { FileTypeBadge } from '@/components/FileTypeBadge';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import {
   FilePreviewModal,
@@ -91,6 +91,8 @@ export function FilesPage(): JSX.Element {
   const requestIdRef = React.useRef(0);
   const [filter, setFilter] = React.useState<Filter>('all');
   const [q, setQ] = React.useState('');
+  const [view, setView] = React.useState<'grid' | 'list'>('grid');
+  const [sort, setSort] = React.useState<'recent' | 'name'>('recent');
   const [files, setFiles] = React.useState<UiFile[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [loadingMore, setLoadingMore] = React.useState(false);
@@ -329,20 +331,23 @@ export function FilesPage(): JSX.Element {
     }
   }
 
+  const visibleFiles = React.useMemo(() => sort === 'name'
+    ? [...files].sort((a, b) => a.filename.localeCompare(b.filename, 'zh-CN', { numeric: true }))
+    : files, [files, sort]);
   return (
     <TooltipProvider delayDuration={120}>
-      <PageContainer width="wide">
+      <PageContainer width="workspace" className="hd-files-page">
         <PageHeader
           title="文件库"
-          description="管理你上传的文件和资料"
+          description="每一份资料，都可以成为下一个想法的起点。"
           action={
             <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
               {summary}
             </div>
           }
         />
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="inline-flex w-fit items-center gap-0.5 rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5">
+        <div className="hd-files-toolbar mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="hd-file-tabs inline-flex w-fit items-center gap-0.5 rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5">
             <FilterTab label="全部" active={filter === 'all'} onClick={() => setFilter('all')} />
             <FilterTab
               label="图片"
@@ -360,7 +365,19 @@ export function FilesPage(): JSX.Element {
               onClick={() => setFilter('documents')}
             />
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-wrap items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild><button type="button" className="hd-sort-trigger" aria-label="文件排序">{sort === 'recent' ? '最近添加' : '名称顺序'}<ChevronDown aria-hidden className="h-3.5 w-3.5" /></button></DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="rounded-xl p-1.5">
+                <DropdownMenuItem onSelect={() => setSort('recent')}>最近添加{sort === 'recent' && <Check className="ml-auto h-3.5 w-3.5" />}</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setSort('name')}>名称顺序{sort === 'name' && <Check className="ml-auto h-3.5 w-3.5" />}</DropdownMenuItem>
+                {nextCursor !== null && <p className="px-2 py-1.5 text-[11px] text-muted-foreground">排序应用于已加载的文件</p>}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <div className="hd-file-views" role="group" aria-label="文件视图">
+              <button type="button" aria-label="网格视图" aria-pressed={view === 'grid'} onClick={() => setView('grid')}><LayoutGrid aria-hidden /></button>
+              <button type="button" aria-label="列表视图" aria-pressed={view === 'list'} onClick={() => setView('list')}><List aria-hidden /></button>
+            </div>
             {videoEditingEnabled && filter === 'videos' ? (
               <Button
                 type="button"
@@ -438,15 +455,15 @@ export function FilesPage(): JSX.Element {
             </div>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-            <div className="hidden grid-cols-[1fr_auto_auto_auto] items-center gap-3 border-b border-[#EFEFEF] bg-white px-4 py-2 text-[11px] font-medium tracking-wider text-[#595757] sm:grid">
+          <div className="hd-file-collection" data-view={view}>
+            <div className="hd-file-columns hidden grid-cols-[1fr_auto_auto_auto] items-center gap-3 border-b border-[#EFEFEF] bg-white px-4 py-2 text-[11px] font-medium tracking-wider text-[#595757] sm:grid">
               <div>名称</div>
               <div>已修改</div>
               <div>大小</div>
               <div />
             </div>
-            <div className="divide-y divide-[#EFEFEF]">
-              {files.map((f) => (
+            <div className="hd-file-rows">
+              {visibleFiles.map((f) => (
                 <FileRow
                   key={f.fileId}
                   file={f}
@@ -540,6 +557,7 @@ function FilterTab({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={cn(
         'h-8 rounded-md px-3 text-xs font-medium transition-[background-color,box-shadow,color]',
         active
@@ -581,11 +599,10 @@ function FileRow({
   onCopyReference: () => void;
   onDelete: () => void;
 }): JSX.Element {
-  const Icon = iconForMime(file.mimetype);
   return (
     <div
       className={cn(
-        'flex flex-col gap-1.5 px-4 py-2.5 transition-colors sm:grid sm:grid-cols-[1fr_auto_auto_auto] sm:items-center sm:gap-3',
+        'hd-file-row flex flex-col gap-1.5 px-4 py-2.5 transition-colors sm:grid sm:grid-cols-[1fr_auto_auto_auto] sm:items-center sm:gap-3',
         unavailable ? 'bg-[#EFEFEF]/35' : 'hover:bg-[#EFEFEF]/35',
       )}
     >
@@ -597,16 +614,7 @@ function FileRow({
         title={unavailable ? `${file.filename} 已失效` : `预览 ${file.filename}`}
         className="group flex min-w-0 items-center gap-2.5 text-left disabled:cursor-not-allowed"
       >
-        <span
-          className={cn(
-            'flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white transition-colors',
-            unavailable
-              ? 'text-[#ADADAD]'
-              : 'text-[#595757] group-hover:border-[#ADADAD]',
-          )}
-        >
-          <Icon className="h-4 w-4" aria-hidden />
-        </span>
+        <span className="hd-file-preview"><FileTypeBadge filename={file.filename} mime={file.mimetype} /></span>
         <span className="flex min-w-0 items-center gap-2">
           <span
             className={cn(
@@ -742,17 +750,4 @@ function IconTooltip({
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
-}
-
-function iconForMime(mime: string): typeof FileIcon {
-  if (mime.startsWith('image/')) return ImageIcon;
-  if (mime.startsWith('video/')) return Film;
-  if (mime.includes('pdf')) return FileText;
-  if (mime.includes('sheet') || mime.includes('excel') || mime.includes('csv')) {
-    return FileSpreadsheet;
-  }
-  if (mime.includes('text') || mime.includes('word') || mime.includes('document')) {
-    return FileText;
-  }
-  return FileIcon;
 }

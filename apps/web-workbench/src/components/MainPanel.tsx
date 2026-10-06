@@ -212,7 +212,7 @@ export function MainPanel({
         <div className="flex-1 overflow-y-auto">
           <div
             className={cn(
-              'mx-auto w-full max-w-[1180px]',
+              'hd-new-task-home mx-auto w-full max-w-[1180px]',
               browserPanelOpen
                 ? 'px-6 pb-10 pt-16'
                 : 'px-6 pb-14 pt-[clamp(78px,10vh,92px)] sm:px-12 lg:px-14',

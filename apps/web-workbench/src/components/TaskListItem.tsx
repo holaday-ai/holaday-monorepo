@@ -117,6 +117,8 @@ export function TaskListItem({
       : `${taskDisplaySource(task)}\n${taskListItemSubtitle(task, liveSubStatus, elapsedNow)}`;
   return (
     <div
+      data-task-status={task.status}
+      data-selected={selected && !batchMode}
       onContextMenu={
         onContextMenu ? (e) => onContextMenu(task.taskId, e) : undefined
       }
@@ -129,7 +131,7 @@ export function TaskListItem({
       role={batchMode ? 'button' : undefined}
       title={rowTitle}
       className={cn(
-        'group relative flex w-full items-center gap-2 rounded-[8px] border border-transparent px-2.5 py-0.5 text-left transition-colors',
+        'holaday-task-row group relative flex w-full items-center gap-2 rounded-[8px] border border-transparent px-2.5 py-0.5 text-left transition-colors',
         'hover:border-[#EA1F59]/14 hover:bg-[#EA1F59]/[0.035] dark:hover:border-[#EA1F59]/30 dark:hover:bg-[#EA1F59]/10',
         selected && !batchMode && 'border-[#EA1F59]/22 bg-white/70 shadow-[0_8px_22px_rgba(234,31,89,0.06)] dark:bg-white/[0.05]',
         batchMode && batchChecked && 'border-[#57479C]/22 bg-[#57479C]/10 dark:bg-[#57479C]/20',
@@ -268,7 +270,7 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
   return (
     <span
       className={cn(
-        'inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/35',
+        'holaday-status-dot inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/35',
         status === 'queued' && 'animate-pulse-dot bg-[#FFC910]',
         status === 'executing' && 'animate-pulse-dot bg-[#42C0EF]',
         // Awaiting-user + failed stand out — these are the rows the
