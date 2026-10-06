@@ -42,7 +42,7 @@ import {
 type DetailData = Awaited<ReturnType<typeof trpc.admin.userDetail.query>>;
 
 const PIE_COLORS = [
-  '#EA1F59',
+  '#FF0061',
   '#FFC910',
   '#42C0EF',
   '#57479C',
@@ -87,12 +87,12 @@ export function AdminUserDetailPage(): JSX.Element {
       <div className="mx-auto max-w-5xl px-6 py-10">
         <Link
           to="/admin/users"
-          className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
+          className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#FF0061]"
         >
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
           返回用户列表
         </Link>
-        <div className="mt-4 rounded-[8px] border border-[#EA1F59]/25 border-l-[#EA1F59] bg-white px-4 py-3 text-sm text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
+        <div className="mt-4 rounded-[8px] border border-[#FF0061]/25 border-l-[#FF0061] bg-white px-4 py-3 text-sm text-[#FF0061] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
           <div className="font-medium">{copy.title}</div>
           <div className="mt-1 text-xs text-[#595757]">{copy.body}</div>
         </div>
@@ -115,7 +115,7 @@ export function AdminUserDetailPage(): JSX.Element {
     <div className="mx-auto max-w-6xl px-6 py-8">
       <Link
         to="/admin/users"
-        className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
+        className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#FF0061]"
       >
         <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
         返回用户列表
@@ -346,7 +346,7 @@ function Badge({
       className={cn(
         'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
         highlight
-          ? 'bg-[rgba(234,31,89,0.12)] text-[#EA1F59]'
+          ? 'bg-[rgba(255,0,97,0.12)] text-[#FF0061]'
           : 'border border-[#DCDDDD] bg-white text-muted-foreground',
       )}
     >
@@ -375,7 +375,7 @@ function Avatar({
   const letter = (fallback || '?').charAt(0).toUpperCase();
   return (
     <div
-      className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-xl font-semibold text-[#EA1F59]"
+      className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-xl font-semibold text-[#FF0061]"
       style={{
         backgroundImage: `linear-gradient(135deg, ${ADMIN_MAGENTA}18 0%, ${ADMIN_DIVIDER} 100%)`,
       }}

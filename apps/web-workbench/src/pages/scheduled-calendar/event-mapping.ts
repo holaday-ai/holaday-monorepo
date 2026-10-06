@@ -85,9 +85,9 @@ export type StatusColor = {
 };
 
 const COLORS = {
-  magenta: '#EA1F59',
-  magentaBg: 'rgba(234, 31, 89, 0.08)',
-  magentaBgHover: 'rgba(234, 31, 89, 0.15)',
+  magenta: '#FF0061',
+  magentaBg: 'rgba(255, 0, 97, 0.08)',
+  magentaBgHover: 'rgba(255, 0, 97, 0.15)',
   yellow: '#FFC910',
   yellowBg: 'rgba(255, 201, 16, 0.10)',
   yellowBgHover: 'rgba(255, 201, 16, 0.18)',

@@ -116,7 +116,7 @@ export function NewsDetailModal({
           <div className="flex min-w-0 items-center gap-2">
             <span className={cn(
               'rounded-full px-2.5 py-1 text-[12px] font-semibold',
-              type === '公告' ? 'bg-white text-[#344054] ring-1 ring-[#E1E3E8]' : 'bg-[#EA1F59] text-white',
+              type === '公告' ? 'bg-white text-[#344054] ring-1 ring-[#E1E3E8]' : 'bg-[#FF0061] text-white',
             )}>
               {type}
             </span>
@@ -129,7 +129,7 @@ export function NewsDetailModal({
               type="button"
               onClick={() => onChangeIndex(activeIndex - 1)}
               disabled={!hasPrevious}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E1E3E8] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E1E3E8] bg-white text-[#667085] transition hover:border-[#FF0061]/25 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="上一条"
               title="上一条"
             >
@@ -139,7 +139,7 @@ export function NewsDetailModal({
               type="button"
               onClick={() => onChangeIndex(activeIndex + 1)}
               disabled={!hasNext}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E1E3E8] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E1E3E8] bg-white text-[#667085] transition hover:border-[#FF0061]/25 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="下一条"
               title="下一条"
             >
@@ -225,7 +225,7 @@ export function NewsDetailModal({
                   <button
                     type="button"
                     onClick={() => setShowSourceUrl((visible) => !visible)}
-                    className="inline-flex h-8 items-center gap-2 text-[13px] font-medium text-[#4F5868] transition hover:text-[#EA1F59]"
+                    className="inline-flex h-8 items-center gap-2 text-[13px] font-medium text-[#4F5868] transition hover:text-[#FF0061]"
                     aria-expanded={showSourceUrl}
                   >
                     <FileText className="h-3.5 w-3.5" aria-hidden />
@@ -237,7 +237,7 @@ export function NewsDetailModal({
                       <button
                         type="button"
                         onClick={() => void copySourceUrl()}
-                        className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[7px] border border-[#E1E3E8] bg-white px-2.5 text-[12px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59]"
+                        className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[7px] border border-[#E1E3E8] bg-white px-2.5 text-[12px] font-medium text-[#4F5868] transition hover:border-[#FF0061]/25 hover:text-[#FF0061]"
                       >
                         {sourceUrlCopied ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
                         {sourceUrlCopied ? '已复制' : '复制链接'}

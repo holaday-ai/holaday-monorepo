@@ -367,7 +367,7 @@ export function FilesPage(): JSX.Element {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <DropdownMenu>
-              <DropdownMenuTrigger asChild><button type="button" className="hd-sort-trigger" aria-label="文件排序">{sort === 'recent' ? '最近添加' : '名称顺序'}<ChevronDown aria-hidden className="h-3.5 w-3.5" /></button></DropdownMenuTrigger>
+              <DropdownMenuTrigger asChild><button type="button" className="hd-sort-trigger" aria-label="文件排序" title="文件排序">{sort === 'recent' ? '最近添加' : '名称顺序'}<ChevronDown aria-hidden className="h-3.5 w-3.5" /></button></DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="rounded-xl p-1.5">
                 <DropdownMenuItem onSelect={() => setSort('recent')}>最近添加{sort === 'recent' && <Check className="ml-auto h-3.5 w-3.5" />}</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setSort('name')}>名称顺序{sort === 'name' && <Check className="ml-auto h-3.5 w-3.5" />}</DropdownMenuItem>
@@ -375,8 +375,8 @@ export function FilesPage(): JSX.Element {
               </DropdownMenuContent>
             </DropdownMenu>
             <div className="hd-file-views" role="group" aria-label="文件视图">
-              <button type="button" aria-label="网格视图" aria-pressed={view === 'grid'} onClick={() => setView('grid')}><LayoutGrid aria-hidden /></button>
-              <button type="button" aria-label="列表视图" aria-pressed={view === 'list'} onClick={() => setView('list')}><List aria-hidden /></button>
+              <button type="button" aria-label="网格视图" title="网格视图" aria-pressed={view === 'grid'} onClick={() => setView('grid')}><LayoutGrid aria-hidden /></button>
+              <button type="button" aria-label="列表视图" title="列表视图" aria-pressed={view === 'list'} onClick={() => setView('list')}><List aria-hidden /></button>
             </div>
             {videoEditingEnabled && filter === 'videos' ? (
               <Button
@@ -437,7 +437,7 @@ export function FilesPage(): JSX.Element {
           <PageLoadingPanel label="文件加载中" description="正在整理文件库" />
         ) : loadError && files.length === 0 ? (
           <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-            <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
+            <AlertCircle className="h-8 w-8 text-[#FF0061]" aria-hidden />
             <div className="text-sm font-medium text-foreground/80">文件暂时无法加载</div>
             <div className="max-w-md text-xs leading-5 text-muted-foreground">{loadError}</div>
             <Button type="button" size="sm" onClick={() => void refresh()}>
@@ -489,7 +489,7 @@ export function FilesPage(): JSX.Element {
               ))}
             </div>
             {loadError ? (
-              <div className="flex flex-col gap-2 border-t border-[#EFEFEF] bg-[#EA1F59]/[0.03] px-4 py-3 text-xs text-[#595757] sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-2 border-t border-[#EFEFEF] bg-[#FF0061]/[0.03] px-4 py-3 text-xs text-[#595757] sm:flex-row sm:items-center sm:justify-between">
                 <span>{loadError}</span>
                 <Button type="button" variant="outline" size="sm" onClick={() => void loadMore()}>
                   重试
@@ -621,7 +621,7 @@ function FileRow({
               'min-w-0 truncate text-sm font-medium',
               unavailable
                 ? 'text-[#8B93A6]'
-                : 'text-foreground group-hover:text-[#EA1F59]',
+                : 'text-foreground group-hover:text-[#FF0061]',
             )}
           >
             {file.filename}
@@ -655,8 +655,8 @@ function FileRow({
               className={cn(
                 'inline-flex h-8 w-8 items-center justify-center rounded-md border transition-colors',
                 selected
-                  ? 'border-[#EA1F59] bg-[#EA1F59] text-white'
-                  : 'border-[#DCDDDD] bg-white text-[#8B8390] hover:border-[#EA1F59]/40 hover:text-[#EA1F59]',
+                  ? 'border-[#FF0061] bg-[#FF0061] text-white'
+                  : 'border-[#DCDDDD] bg-white text-[#8B8390] hover:border-[#FF0061]/40 hover:text-[#FF0061]',
               )}
             >
               <Check className="h-3.5 w-3.5" aria-hidden />
@@ -671,7 +671,7 @@ function FileRow({
               disabled={editing}
               aria-label={`继续剪辑 ${file.filename}`}
               title={`继续剪辑 ${file.filename}`}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#7A6473] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] disabled:cursor-wait disabled:opacity-60"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#7A6473] transition-colors hover:border-[#FF0061]/35 hover:bg-[#FF0061]/5 hover:text-[#FF0061] disabled:cursor-wait disabled:opacity-60"
             >
               {editing ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -692,7 +692,7 @@ function FileRow({
                 ? `${file.filename} 已失效`
                 : `把 ${file.filename} 用于新任务`
             }
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:text-[#ADADAD] disabled:hover:border-[#DCDDDD] disabled:hover:bg-white"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors hover:border-[#FF0061]/35 hover:bg-[#FF0061]/5 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:text-[#ADADAD] disabled:hover:border-[#DCDDDD] disabled:hover:bg-white"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -725,7 +725,7 @@ function FileRow({
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={onDelete}
-              className="text-[#EA1F59] focus:bg-[#EA1F59]/[0.06] focus:text-[#EA1F59]"
+              className="text-[#FF0061] focus:bg-[#FF0061]/[0.06] focus:text-[#FF0061]"
             >
               <Trash2 />
               <span>删除</span>

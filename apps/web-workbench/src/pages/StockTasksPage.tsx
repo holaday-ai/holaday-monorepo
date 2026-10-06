@@ -694,7 +694,7 @@ export function StockTasksPage(): JSX.Element {
               type="button"
               onClick={() => void loadPageData('manual')}
               disabled={refreshingDashboard || loadingDashboard}
-              className="inline-flex h-11 min-[769px]:h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-11 min-[769px]:h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#FF0061]/30 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <RefreshCw className={cn('h-3.5 w-3.5', refreshingDashboard || loadingDashboard ? 'animate-spin' : '')} aria-hidden />
               刷新
@@ -704,7 +704,7 @@ export function StockTasksPage(): JSX.Element {
               onClick={toggleBriefing}
               disabled={briefingBusy || loadingDashboard || briefingUnavailable}
               title={briefingUnavailableTitle}
-              className="inline-flex h-11 min-[769px]:h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-11 min-[769px]:h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#FF0061]/30 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {briefingBusy ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -719,7 +719,7 @@ export function StockTasksPage(): JSX.Element {
         </header>
 
         {loadError ? (
-          <div className="rounded-[8px] border border-[#EA1F59]/25 bg-white px-4 py-3 text-[13px] text-[#EA1F59]">
+          <div className="rounded-[8px] border border-[#FF0061]/25 bg-white px-4 py-3 text-[13px] text-[#FF0061]">
             部分股票数据暂时无法加载：{loadError}
           </div>
         ) : null}
@@ -1040,7 +1040,7 @@ function DiscoveryPanel({
               className={cn(
                 'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12px] font-medium transition',
                 activeFeed === tab.label
-                  ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
+                  ? 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]'
                   : 'border-[#E1E3E8] bg-white text-[#667085] hover:border-[#C9CDD6] hover:text-[#121826]',
                 tab.count === 0 && 'cursor-not-allowed opacity-45',
               )}
@@ -1048,7 +1048,7 @@ function DiscoveryPanel({
               {tab.label}
               <span className={cn(
                 'tabular-nums',
-                activeFeed === tab.label ? 'text-[#EA1F59]/80' : 'text-[#8B92A1]',
+                activeFeed === tab.label ? 'text-[#FF0061]/80' : 'text-[#8B92A1]',
               )}>
                 {tab.count}
               </span>
@@ -1079,7 +1079,7 @@ function DiscoveryPanel({
             type="button"
             onClick={goPrevious}
             disabled={safePage === 0}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7E7EB] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7E7EB] bg-white text-[#667085] transition hover:border-[#FF0061]/25 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="上一页动态"
             title="上一页"
           >
@@ -1090,7 +1090,7 @@ function DiscoveryPanel({
               type="button"
               onClick={() => void requestMore()}
               disabled={loadingMore}
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-[#E7E7EB] bg-white px-3 text-[12px] font-medium text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-[#E7E7EB] bg-white px-3 text-[12px] font-medium text-[#667085] transition hover:border-[#FF0061]/25 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loadingMore ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
               {loadingMore ? '正在加载' : '加载更多'}
@@ -1119,7 +1119,7 @@ function DiscoveryPanel({
             type="button"
             onClick={goNext}
             disabled={(safePage >= pageCount - 1 && !hasMore) || loadingMore}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7E7EB] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7E7EB] bg-white text-[#667085] transition hover:border-[#FF0061]/25 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="下一页动态"
             title="下一页"
           >
@@ -1186,7 +1186,7 @@ function MarketHighlights({
             <button
               type="button"
               onClick={onEdit}
-              className="inline-flex h-9 shrink-0 items-center justify-center rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[12px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59]"
+              className="inline-flex h-9 shrink-0 items-center justify-center rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[12px] font-medium text-[#4F5868] transition hover:border-[#FF0061]/25 hover:text-[#FF0061]"
             >
               管理关注
             </button>
@@ -1225,7 +1225,7 @@ function MarketHighlights({
               <button
                 type="button"
                 onClick={onEdit}
-                className="inline-flex h-11 min-[769px]:h-8 items-center rounded-[7px] px-2 text-[10px] font-semibold text-[#7A5A8E] transition hover:bg-[#F8F3FA] hover:text-[#C9184A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 motion-reduce:transition-none"
+                className="inline-flex h-11 min-[769px]:h-8 items-center rounded-[7px] px-2 text-[10px] font-semibold text-[#7A5A8E] transition hover:bg-[#F8F3FA] hover:text-[#C9184A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 motion-reduce:transition-none"
               >
                 管理列表
               </button>
@@ -1396,7 +1396,7 @@ function StockHighlightCard({
                 type="button"
                 disabled={!canGenerateBriefing || briefingGenerating}
                 onClick={onGenerateBriefing}
-                className="mt-2 inline-flex h-11 min-[769px]:h-8 items-center justify-center rounded-[7px] border border-[#EA1F59]/20 bg-[#EA1F59]/10 px-2.5 text-[12px] font-medium text-[#EA1F59] transition hover:border-[#EA1F59]/40 hover:bg-[#EA1F59]/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
+                className="mt-2 inline-flex h-11 min-[769px]:h-8 items-center justify-center rounded-[7px] border border-[#FF0061]/20 bg-[#FF0061]/10 px-2.5 text-[12px] font-medium text-[#FF0061] transition hover:border-[#FF0061]/40 hover:bg-[#FF0061]/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
               >
                 {briefingGenerating ? '生成中…' : temporalCopy.briefingCommand}
               </button>
@@ -1616,7 +1616,7 @@ function WatchlistManagerSheet({
             <button
               type="submit"
               disabled={!canAdd}
-              className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-[8px] bg-[#EA1F59] px-3 text-[13px] font-semibold text-white shadow-[0_10px_24px_rgba(234,31,89,0.18)] transition disabled:cursor-not-allowed disabled:opacity-55"
+              className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-[8px] bg-[#FF0061] px-3 text-[13px] font-semibold text-white shadow-[0_10px_24px_rgba(255,0,97,0.18)] transition disabled:cursor-not-allowed disabled:opacity-55"
             >
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Plus className="h-3.5 w-3.5" aria-hidden />}
               {duplicateSymbol ? '已在关注列表' : '添加关注'}
@@ -1688,7 +1688,7 @@ function WatchlistManagerSheet({
                         type="button"
                         disabled={saving || !changed}
                         onClick={() => onUpdate(row.symbol, draft.displayName, draft.note)}
-                        className="inline-flex h-8 items-center justify-center rounded-[8px] border border-[#E1E3E8] px-2 text-[12px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex h-8 items-center justify-center rounded-[8px] border border-[#E1E3E8] px-2 text-[12px] font-medium text-[#4F5868] transition hover:border-[#FF0061]/30 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         保存
                       </button>
@@ -1696,7 +1696,7 @@ function WatchlistManagerSheet({
                         type="button"
                         disabled={saving}
                         onClick={() => onRemove(row.symbol)}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#E1E3E8] text-[#667085] transition hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#E1E3E8] text-[#667085] transition hover:border-[#FF0061]/30 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-50"
                         aria-label={`移除 ${row.symbol}`}
                         title={`移除 ${row.symbol}`}
                       >
@@ -1899,13 +1899,13 @@ function DailyBriefing({
       {briefing ? (
         <div className="mt-4 rounded-[8px] border border-[#ECEEF3] bg-[#FCFCFD] px-4 py-3">
           <div className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-[#121826]">
-            <FileText className="h-3.5 w-3.5 text-[#EA1F59]" aria-hidden />
+            <FileText className="h-3.5 w-3.5 text-[#FF0061]" aria-hidden />
             {briefing.title} · {formatUpdateTime(briefing.generatedAt)}
           </div>
           <ul className="space-y-1.5">
             {previewLines.map((line) => (
               <li key={line} className="flex gap-2 text-[12px] leading-relaxed text-[#344054]">
-                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#EA1F59]" />
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#FF0061]" />
                 <span>{line}</span>
               </li>
             ))}
@@ -2128,7 +2128,7 @@ function MarketTemperature({
       <div className="mt-4 flex items-center gap-4">
         <div className="relative h-[118px] w-[118px] shrink-0">
           <div className="absolute inset-0 rounded-full border-[11px] border-[#E8EBF0]" />
-          <div className="absolute inset-0 rounded-full border-[11px] border-transparent border-l-[#18A76F] border-t-[#E0B30C] border-r-[#EA1F59] rotate-45" />
+          <div className="absolute inset-0 rounded-full border-[11px] border-transparent border-l-[#18A76F] border-t-[#E0B30C] border-r-[#FF0061] rotate-45" />
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <div className="text-[34px] font-semibold tabular-nums text-[#121826]">{score}</div>
             <div className="text-[12px] font-medium text-[#4F5868]">{mood}</div>
@@ -2176,7 +2176,7 @@ function Leaderboard({
             className={cn(
               'border-b-2 px-0.5 pb-2 text-[12px] font-medium transition-colors',
               active === tab.label
-                ? 'border-[#EA1F59] text-[#EA1F59]'
+                ? 'border-[#FF0061] text-[#FF0061]'
                 : 'border-transparent text-[#667085] hover:text-[#121826]',
               !tab.enabled && 'cursor-not-allowed opacity-45 hover:text-[#667085]',
             )}
@@ -2197,7 +2197,7 @@ function Leaderboard({
             <span
               className={cn(
                 'flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-semibold',
-                leader.rank <= 3 ? 'bg-[#EA1F59] text-white' : 'bg-[#F2F3F6] text-[#667085]',
+                leader.rank <= 3 ? 'bg-[#FF0061] text-white' : 'bg-[#F2F3F6] text-[#667085]',
               )}
             >
               {leader.rank}
@@ -2217,7 +2217,7 @@ function Leaderboard({
         type="button"
         onClick={onInspect}
         disabled={leaders.length === 0}
-        className="mt-3 inline-flex w-full items-center justify-center gap-1 border-t border-[#F1F2F5] pt-3 text-[12px] font-medium text-[#4F5868] hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
+        className="mt-3 inline-flex w-full items-center justify-center gap-1 border-t border-[#F1F2F5] pt-3 text-[12px] font-medium text-[#4F5868] hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-50"
       >
         查看全部榜单
         <ChevronRight className="h-3.5 w-3.5" aria-hidden />
@@ -2254,7 +2254,7 @@ function SectionHeader({
           type="button"
           onClick={onAction}
           disabled={actionDisabled || actionBusy || !onAction}
-          className="inline-flex h-11 min-[769px]:h-8 shrink-0 items-center gap-1 rounded-[8px] px-2 text-[12px] font-medium text-[#4F5868] transition-colors hover:bg-[#FFF5F7] hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none"
+          className="inline-flex h-11 min-[769px]:h-8 shrink-0 items-center gap-1 rounded-[8px] px-2 text-[12px] font-medium text-[#4F5868] transition-colors hover:bg-[#FFF5F7] hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none"
         >
           {actionBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
           {action}
@@ -2314,7 +2314,7 @@ function BriefingLane({
   }[tone];
   const bulletClass = {
     green: 'bg-[#0E9F6E]',
-    red: 'bg-[#EA1F59]',
+    red: 'bg-[#FF0061]',
     blue: 'bg-[#175CD3]',
   }[tone];
   return (

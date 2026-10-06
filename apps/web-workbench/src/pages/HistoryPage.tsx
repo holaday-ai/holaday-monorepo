@@ -293,7 +293,7 @@ export function HistoryPage(): JSX.Element {
                 <button
                   type="button"
                   onClick={resetFilters}
-                  className="inline-flex h-8 items-center gap-1 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-xs text-[#595757] transition-colors hover:border-[#ADADAD] hover:text-[#EA1F59]"
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-xs text-[#595757] transition-colors hover:border-[#ADADAD] hover:text-[#FF0061]"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                   重置筛选
@@ -320,7 +320,7 @@ export function HistoryPage(): JSX.Element {
             </div>
           ) : error ? (
             <div className="flex h-56 flex-col items-center justify-center text-center">
-              <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
+              <AlertCircle className="h-8 w-8 text-[#FF0061]" aria-hidden />
               <div className="mt-3 text-sm font-medium text-foreground/80">
                 {pageErrorCopy.title}
               </div>
@@ -331,7 +331,7 @@ export function HistoryPage(): JSX.Element {
                 <Button
                   size="sm"
                   variant="outline"
-                  className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                  className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                   onClick={() => void fetchPage(null, false)}
                   disabled={loading}
                 >
@@ -341,7 +341,7 @@ export function HistoryPage(): JSX.Element {
                   asChild
                   size="sm"
                   variant="outline"
-                  className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                  className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                 >
                   <a
                     href={supportMailtoHref({
@@ -366,7 +366,7 @@ export function HistoryPage(): JSX.Element {
                 <Button
                   size="sm"
                   variant="outline"
-                  className="mt-3 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                  className="mt-3 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                   onClick={resetFilters}
                 >
                   重置筛选
@@ -398,7 +398,7 @@ export function HistoryPage(): JSX.Element {
                     >
                       <StatusIcon task={t} />
                       <div className="min-w-0 flex-1 px-1">
-                        <div className="truncate text-sm font-medium group-hover:text-[#EA1F59]">
+                        <div className="truncate text-sm font-medium group-hover:text-[#FF0061]">
                           {taskHubRowTitle(t)}
                         </div>
                         <div className="mt-0.5 text-[11px] text-muted-foreground">
@@ -414,7 +414,7 @@ export function HistoryPage(): JSX.Element {
                           )}
                         </div>
                       </div>
-                      <span className="shrink-0 self-center pr-2 text-[11px] text-[#595757] opacity-100 group-hover:text-[#EA1F59] sm:opacity-0 sm:group-hover:opacity-100">
+                      <span className="shrink-0 self-center pr-2 text-[11px] text-[#595757] opacity-100 group-hover:text-[#FF0061] sm:opacity-0 sm:group-hover:opacity-100">
                         查看 →
                       </span>
                     </button>
@@ -425,13 +425,13 @@ export function HistoryPage(): JSX.Element {
           )}
 
           {loadMoreError && !error && (
-            <div className="mx-4 mb-4 mt-4 flex flex-col items-center gap-2 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-3 py-2 text-center text-xs text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
+            <div className="mx-4 mb-4 mt-4 flex flex-col items-center gap-2 rounded-[8px] border border-[#DCDDDD] border-l-[#FF0061] bg-white px-3 py-2 text-center text-xs text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
               <div className="font-medium">{loadMoreErrorCopy.title}</div>
               <div className="max-w-md text-muted-foreground">{loadMoreErrorCopy.body}</div>
               <Button
                 variant="outline"
                 size="sm"
-                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                 onClick={() => void fetchPage(cursor, true)}
                 disabled={loading}
               >
@@ -445,7 +445,7 @@ export function HistoryPage(): JSX.Element {
               <Button
                 variant="outline"
                 size="sm"
-                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                 onClick={() => void fetchPage(cursor, true)}
                 disabled={loading}
               >
@@ -478,7 +478,7 @@ function FilterGroup<T extends string>({
           className={cn(
             'flex h-8 items-center rounded-md px-2.5 transition-colors',
             value === o.id
-              ? 'bg-white text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.06)]'
+              ? 'bg-white text-[#FF0061] shadow-[0_1px_2px_rgba(15,23,42,0.06)]'
               : 'text-[#595757] hover:text-foreground',
           )}
         >
@@ -498,12 +498,12 @@ function StatusIcon({ task }: { task: Pick<HistoryTask, 'awaitingKind' | 'status
     return <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#8A6A00]" />;
   }
   if (iconKind === 'failed') {
-    return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" />;
+    return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0061]" />;
   }
   if (iconKind === 'inactive') {
     return (
       <CircleSlash className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
     );
   }
-  return <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" />;
+  return <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#FF0061]" />;
 }

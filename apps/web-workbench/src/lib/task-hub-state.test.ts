@@ -23,7 +23,7 @@ import {
 
 describe('taskHubRowTone — P2-B resting tone', () => {
   it('failed / partial / cancelled get a subtle tone; others neutral', () => {
-    expect(taskHubRowTone('failed')).toContain('rgba(234,31,89');
+    expect(taskHubRowTone('failed')).toContain('rgba(255,0,97');
     expect(taskHubRowTone('partial_success')).toContain('rgba(255,201,16');
     expect(taskHubRowTone('cancelled')).toContain('rgba(89,87,87');
     expect(taskHubRowTone('completed')).toBe('');

@@ -196,7 +196,7 @@ export function MainPanel({
           onClick={onOpenSidebar}
           aria-label="打开任务列表"
           title="打开任务列表"
-          className="h-8 w-8 rounded-[8px] text-[#595757] hover:bg-[#EFEFEF]/70 hover:text-[#EA1F59] dark:text-foreground/75 dark:hover:bg-white/10"
+          className="h-8 w-8 rounded-[8px] text-[#595757] hover:bg-[#EFEFEF]/70 hover:text-[#FF0061] dark:text-foreground/75 dark:hover:bg-white/10"
         >
           <Menu className="h-4 w-4" />
         </Button>
@@ -220,7 +220,7 @@ export function MainPanel({
           >
             <div className="mx-auto w-full max-w-[1040px]">
               <h1 className="text-left text-[28px] font-semibold leading-tight tracking-tight text-foreground sm:text-[34px]">
-                Hello, <span className="text-[#EA1F59]">{greetingName || '今天想做点什么'}</span>~
+                Hello, <span className="text-[#FF0061]">{greetingName || '今天想做点什么'}</span>~
               </h1>
               <p className="mt-2 text-left text-[14px] font-medium text-[#8B93A6] sm:text-[16px]">
                 欢迎回来！ 今天又是高效的一天呢！ 🚀
@@ -512,8 +512,8 @@ function OnboardingHint(): JSX.Element | null {
   if (dismissed) return null;
 
   return (
-    <div className="flex items-center gap-2 rounded-[12px] border border-[#EA1F59]/25 bg-[#FFF7FA] px-3 py-1.5 text-[11px] text-[#595757] shadow-[0_6px_16px_rgba(234,31,89,0.12)] dark:border-[#EA1F59]/35 dark:bg-card dark:text-foreground/75">
-      <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[7px] text-[#EA1F59]">
+    <div className="flex items-center gap-2 rounded-[12px] border border-[#FF0061]/25 bg-[#FFF7FA] px-3 py-1.5 text-[11px] text-[#595757] shadow-[0_6px_16px_rgba(255,0,97,0.12)] dark:border-[#FF0061]/35 dark:bg-card dark:text-foreground/75">
+      <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[7px] text-[#FF0061]">
         <Sparkles className="h-3.5 w-3.5" />
       </span>
       <div className="min-w-0 flex-1 leading-4 sm:truncate">
@@ -559,8 +559,8 @@ function suggestionTone(label: string): { button: string; icon: string } {
     case '直播复盘':
     case '定时任务':
       return {
-        button: 'border-[#EA1F59]/[0.16] bg-[#EA1F59]/[0.09] text-[#EA1F59] hover:border-[#EA1F59]/[0.28] hover:bg-[#EA1F59]/[0.13]',
-        icon: 'text-[#EA1F59]',
+        button: 'border-[#FF0061]/[0.16] bg-[#FF0061]/[0.09] text-[#FF0061] hover:border-[#FF0061]/[0.28] hover:bg-[#FF0061]/[0.13]',
+        icon: 'text-[#FF0061]',
       };
     case '查资料':
     case '行情查询':
@@ -580,8 +580,8 @@ function suggestionTone(label: string): { button: string; icon: string } {
       };
     default:
       return {
-        button: 'border-[#DCDDDD]/75 bg-white/70 text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]',
-        icon: 'text-[#ADADAD] group-hover:text-[#EA1F59]',
+        button: 'border-[#DCDDDD]/75 bg-white/70 text-[#595757] hover:border-[#FF0061]/25 hover:bg-[#FF0061]/5 hover:text-[#FF0061]',
+        icon: 'text-[#ADADAD] group-hover:text-[#FF0061]',
       };
   }
 }

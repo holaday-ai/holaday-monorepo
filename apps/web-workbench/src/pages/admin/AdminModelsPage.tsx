@@ -79,7 +79,7 @@ export function AdminModelsPage(): JSX.Element {
   };
 
   if (error) {
-    return <div className="p-6 text-[13px] text-[#EA1F59]">{error}</div>;
+    return <div className="p-6 text-[13px] text-[#FF0061]">{error}</div>;
   }
   if (!data) {
     return (
@@ -153,7 +153,7 @@ export function AdminModelsPage(): JSX.Element {
                       }
                       className={cn(
                         'relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50',
-                        row.userVisible ? 'bg-[#EA1F59]' : 'bg-[#DCDDDD]',
+                        row.userVisible ? 'bg-[#FF0061]' : 'bg-[#DCDDDD]',
                       )}
                     >
                       <span
@@ -166,7 +166,7 @@ export function AdminModelsPage(): JSX.Element {
                   </td>
                   <td className="px-4 py-3">
                     {row.isDefault ? (
-                      <span className="rounded-[6px] bg-[#EA1F59]/10 px-2 py-0.5 text-[12px] text-[#EA1F59]">
+                      <span className="rounded-[6px] bg-[#FF0061]/10 px-2 py-0.5 text-[12px] text-[#FF0061]">
                         默认
                       </span>
                     ) : (
@@ -230,7 +230,7 @@ export function AdminModelsPage(): JSX.Element {
                               `已更新 ${row.label} 的通道模型`,
                             );
                           }}
-                          className="rounded-[6px] bg-[#EA1F59] px-3 py-1 text-[12px] text-white disabled:opacity-50"
+                          className="rounded-[6px] bg-[#FF0061] px-3 py-1 text-[12px] text-white disabled:opacity-50"
                         >
                           保存
                         </button>
@@ -325,7 +325,7 @@ function McpServersSection(): JSX.Element {
                         `已删除 ${item.label}`,
                       )
                     }
-                    className="text-[#EA1F59] hover:underline disabled:opacity-50"
+                    className="text-[#FF0061] hover:underline disabled:opacity-50"
                   >
                     删除
                   </button>
@@ -355,7 +355,7 @@ function McpServersSection(): JSX.Element {
                   `已添加 ${label.trim()}`,
                 )
               }
-              className="rounded-[6px] bg-[#EA1F59] px-3 py-1 text-[12px] text-white disabled:opacity-50"
+              className="rounded-[6px] bg-[#FF0061] px-3 py-1 text-[12px] text-white disabled:opacity-50"
             >
               {busy ? (
                 <Loader2 className="inline h-3.5 w-3.5 animate-spin" />

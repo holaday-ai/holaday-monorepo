@@ -212,7 +212,7 @@ export function PartnerPage(): JSX.Element {
       type="button"
       variant="outline"
       size="sm"
-      className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+      className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
       onClick={() => void refresh()}
       disabled={loading || isMutating}
     >
@@ -832,7 +832,7 @@ function PartnerWorkbench({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="shrink-0 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                className="shrink-0 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                 onClick={onCopyInviteCode}
                 disabled={!state.inviteCode}
                 aria-label="复制我的邀请码"
@@ -858,7 +858,7 @@ function PartnerWorkbench({
           <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
             <input
               type="checkbox"
-              className="h-4 w-4 rounded border-[#DCDDDD] accent-[#EA1F59]"
+              className="h-4 w-4 rounded border-[#DCDDDD] accent-[#FF0061]"
               checked={assistedInvite}
               disabled={isMutating}
               onChange={(event) => onAssistedInviteChange(event.target.checked)}
@@ -1061,7 +1061,7 @@ function PartnerWorkbench({
               </div>
             </div>
             <input
-              className="mt-4 h-2 w-full accent-[#EA1F59]"
+              className="mt-4 h-2 w-full accent-[#FF0061]"
               type="range"
               min={10000_00}
               max={200000_00}
@@ -1085,7 +1085,7 @@ function PartnerWorkbench({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                 onClick={onPreviewRecharge}
                 disabled={isMutating || rechargeGate.blocked}
               >
@@ -1134,7 +1134,7 @@ function PartnerPaymentProviderSelect({
 }): JSX.Element {
   return (
     <select
-      className="mt-1 h-9 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-sm text-foreground outline-none transition focus:border-[#EA1F59] disabled:cursor-not-allowed disabled:bg-[#F7F7F7] disabled:text-muted-foreground"
+      className="mt-1 h-9 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-sm text-foreground outline-none transition focus:border-[#FF0061] disabled:cursor-not-allowed disabled:bg-[#F7F7F7] disabled:text-muted-foreground"
       value={value}
       disabled={disabled}
       aria-label={ariaLabel}
@@ -1152,7 +1152,7 @@ function PartnerPaymentProviderSelect({
 function StatusValue({ icon, value }: { icon: React.ReactNode; value: string }): JSX.Element {
   return (
     <span className="inline-flex max-w-full items-center gap-1.5 text-sm font-medium text-foreground/85">
-      <span className="text-[#EA1F59]">{icon}</span>
+      <span className="text-[#FF0061]">{icon}</span>
       <span className="min-w-0 truncate">{value}</span>
     </span>
   );
@@ -1179,7 +1179,7 @@ function StatusPanel({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-start gap-2">
           <AlertCircle
-            className={`mt-0.5 h-4 w-4 shrink-0 ${tone === 'error' ? 'text-[#EA1F59]' : 'text-[#595757]'}`}
+            className={`mt-0.5 h-4 w-4 shrink-0 ${tone === 'error' ? 'text-[#FF0061]' : 'text-[#595757]'}`}
             aria-hidden
           />
           <div className="min-w-0">
@@ -1212,7 +1212,7 @@ function OrderSummary({
             type="button"
             variant="outline"
             size="sm"
-            className="w-fit border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+            className="w-fit border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
             onClick={onRefresh}
             disabled={refreshing}
           >

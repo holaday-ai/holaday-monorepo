@@ -43,7 +43,7 @@ export function FailureHeaderCard({
         'mb-3 rounded-md border px-3 py-2 text-sm',
         cancelled
           ? 'border-[#DCDDDD] bg-[#EFEFEF]/45 text-muted-foreground dark:border-white/10 dark:bg-white/5'
-          : 'border-[#EA1F59]/35 bg-[#EA1F59]/5 text-[#595757] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10 dark:text-foreground',
+          : 'border-[#FF0061]/35 bg-[#FF0061]/5 text-[#595757] dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10 dark:text-foreground',
       )}
       role="alert"
     >
@@ -86,7 +86,7 @@ export function FailureHeaderCard({
             disabled={retrying}
             aria-label={retrying ? '正在重新执行任务' : '重新执行任务'}
             title={retrying ? '正在重新执行' : '重新执行任务'}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-[#EA1F59]/25 bg-white px-3 text-[11px] font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/5 disabled:cursor-wait disabled:opacity-60 dark:border-[#EA1F59]/35 dark:bg-transparent dark:text-foreground dark:hover:bg-[#EA1F59]/10"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-[#FF0061]/25 bg-white px-3 text-[11px] font-medium text-[#FF0061] transition-colors hover:border-[#FF0061]/45 hover:bg-[#FF0061]/5 disabled:cursor-wait disabled:opacity-60 dark:border-[#FF0061]/35 dark:bg-transparent dark:text-foreground dark:hover:bg-[#FF0061]/10"
           >
             <RotateCcw className={cn('h-3.5 w-3.5', retrying && 'animate-spin')} aria-hidden />
             <span>{retrying ? '重新执行中…' : '重新执行'}</span>
@@ -101,7 +101,7 @@ export function FailureHeaderCard({
             aria-expanded={showTechnical}
             aria-label={showTechnical ? '收起失败详情' : '查看失败详情'}
             title={showTechnical ? '收起失败详情' : '查看失败详情'}
-            className="inline-flex h-8 items-center gap-1 rounded-[6px] px-2 text-[11px] font-medium text-[#595757] transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
+            className="inline-flex h-8 items-center gap-1 rounded-[6px] px-2 text-[11px] font-medium text-[#595757] transition-colors hover:bg-[#EFEFEF] hover:text-[#FF0061]"
           >
             {showTechnical ? (
               <ChevronDown className="h-3 w-3" aria-hidden />

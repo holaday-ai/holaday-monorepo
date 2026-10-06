@@ -229,14 +229,14 @@ export function AddChannelModal({
                   className={cn(
                     'rounded-md border px-2 py-2 text-left transition-colors',
                     platform === p.value
-                      ? 'border-[#EA1F59]/70 bg-[#EA1F59]/10 shadow-[0_1px_3px_rgba(17,24,39,0.05)]'
-                      : 'border-[#DCDDDD] bg-white hover:border-[#EA1F59]/45 hover:bg-[#EFEFEF]/30 dark:border-white/10 dark:bg-card/85 dark:hover:bg-white/10',
+                      ? 'border-[#FF0061]/70 bg-[#FF0061]/10 shadow-[0_1px_3px_rgba(17,24,39,0.05)]'
+                      : 'border-[#DCDDDD] bg-white hover:border-[#FF0061]/45 hover:bg-[#EFEFEF]/30 dark:border-white/10 dark:bg-card/85 dark:hover:bg-white/10',
                   )}
                 >
                   <div
                     className={cn(
                       'text-sm font-medium',
-                      platform === p.value ? 'text-[#EA1F59]' : 'text-foreground',
+                      platform === p.value ? 'text-[#FF0061]' : 'text-foreground',
                     )}
                   >
                     {p.label}
@@ -266,7 +266,7 @@ export function AddChannelModal({
               }}
               placeholder="https://..."
               disabled={saving || testing}
-              className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none placeholder:text-muted-foreground/55 focus:border-[#EA1F59]/45 focus:ring-2 focus:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
+              className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none placeholder:text-muted-foreground/55 focus:border-[#FF0061]/45 focus:ring-2 focus:ring-[#FF0061]/10 dark:border-white/10 dark:bg-card"
               maxLength={2000}
               autoFocus
             />
@@ -297,7 +297,7 @@ export function AddChannelModal({
                   'rounded-md border px-2.5 py-1.5',
                   testResult.ok
                     ? 'border-[#42C0EF]/35 bg-[#42C0EF]/10 text-[#595757] dark:text-foreground'
-                    : 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]',
+                    : 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]',
                 )}
               >
                 {testResult.ok ? (
@@ -323,7 +323,7 @@ export function AddChannelModal({
             <Button
               type="submit"
               disabled={saving || testing}
-              className="bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.16)] hover:bg-[#EA1F59]/90"
+              className="bg-[#FF0061] text-white shadow-[0_4px_12px_rgba(255,0,97,0.16)] hover:bg-[#FF0061]/90"
             >
               {saving ? (
                 <Loader2 className="mr-1 h-3 w-3 animate-spin" />

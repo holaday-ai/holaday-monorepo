@@ -45,12 +45,12 @@ import {
 type DomainDetail = Awaited<ReturnType<typeof trpc.admin.learning.domainDetail.query>>;
 
 const CAT_COLORS: Record<string, string> = {
-  dns_error: '#EA1F59',
+  dns_error: '#FF0061',
   timeout: '#FFC910',
   auth_required: '#42C0EF',
   captcha: '#57479C',
   not_found: '#595757',
-  page_structure: '#EA1F59',
+  page_structure: '#FF0061',
   quality: '#8A6A00',
   unknown: '#ADADAD',
 };
@@ -97,7 +97,7 @@ export function AdminLearningDomainPage(): JSX.Element {
     return (
       <div className="mx-auto max-w-5xl px-6 py-10">
         <BackLink />
-        <div className="mt-4 rounded-[8px] border border-[#EA1F59]/25 border-l-[#EA1F59] bg-white px-4 py-3 text-sm text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
+        <div className="mt-4 rounded-[8px] border border-[#FF0061]/25 border-l-[#FF0061] bg-white px-4 py-3 text-sm text-[#FF0061] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
           <div className="font-medium">{copy.title}</div>
           <div className="mt-1 text-xs text-[#595757]">{copy.body}</div>
         </div>
@@ -122,7 +122,7 @@ export function AdminLearningDomainPage(): JSX.Element {
       {/* Identity */}
       <header className="mt-4 flex items-start gap-4">
         <div
-          className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[8px] text-[#EA1F59]"
+          className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[8px] text-[#FF0061]"
           style={{
             backgroundImage: `linear-gradient(135deg, ${ADMIN_MAGENTA}18 0%, ${ADMIN_DIVIDER} 100%)`,
           }}
@@ -279,7 +279,7 @@ export function AdminLearningDomainPage(): JSX.Element {
                               onClick={() =>
                                 setExpandedTaskId(isExpanded ? null : t.taskId)
                               }
-                              className="inline-flex items-center gap-0.5 rounded-[8px] px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
+                              className="inline-flex items-center gap-0.5 rounded-[8px] px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#FF0061]"
                             >
                               {isExpanded ? (
                                 <ChevronDown className="h-3.5 w-3.5" aria-hidden />
@@ -441,7 +441,7 @@ function BackLink(): JSX.Element {
   return (
     <Link
       to="/admin/learning"
-      className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
+      className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#FF0061]"
     >
       <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
       返回学习引擎

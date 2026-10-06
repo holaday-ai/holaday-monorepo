@@ -74,7 +74,7 @@ export function SearchResultCard({ sources, initialVisible = 6 }: Props): JSX.El
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
-          className="mt-1.5 inline-flex h-7 items-center gap-1.5 self-start rounded-[8px] px-2 text-xs text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/15 dark:hover:bg-white/5"
+          className="mt-1.5 inline-flex h-7 items-center gap-1.5 self-start rounded-[8px] px-2 text-xs text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/15 dark:hover:bg-white/5"
           aria-label={expanded ? '收起来源' : `展开 ${hidden} 条更多来源`}
           title={expanded ? '收起来源' : `展开 ${hidden} 条更多来源`}
         >
@@ -128,7 +128,7 @@ function SourceRow({
         onOpen(link.href);
       }}
       aria-label={`打开搜索来源：${source.title}`}
-      className="group flex items-start gap-2.5 border-b border-[#EFEFEF] px-3 py-2.5 transition-colors last:border-b-0 hover:bg-[#EFEFEF]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#EA1F59]/15 dark:border-white/10 dark:hover:bg-white/[0.04]"
+      className="group flex items-start gap-2.5 border-b border-[#EFEFEF] px-3 py-2.5 transition-colors last:border-b-0 hover:bg-[#EFEFEF]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#FF0061]/15 dark:border-white/10 dark:hover:bg-white/[0.04]"
     >
       <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[#DCDDDD] bg-white text-[10px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.04)] dark:border-white/10 dark:bg-white/5 dark:text-foreground/70">
         {index}
@@ -143,10 +143,10 @@ function SourceRow({
           <span className="truncate text-muted-foreground/80">{link.pathLabel}</span>
         </div>
         <div className="mt-0.5 flex min-w-0 items-start gap-2">
-          <span className="line-clamp-2 flex-1 text-sm font-medium leading-snug text-foreground transition-colors group-hover:text-[#EA1F59]">
+          <span className="line-clamp-2 flex-1 text-sm font-medium leading-snug text-foreground transition-colors group-hover:text-[#FF0061]">
             {source.title}
           </span>
-          <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/55 transition-colors group-hover:text-[#EA1F59]" />
+          <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/55 transition-colors group-hover:text-[#FF0061]" />
         </div>
         {source.snippet && (
           <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">

@@ -36,7 +36,7 @@ export function DiscoveryNewsCard({
       onClick={onOpen}
       onKeyDown={onKeyDown}
       className={cn(
-        'group min-w-0 overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white text-left shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:-translate-y-0.5 hover:border-[#EA1F59]/25 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 motion-reduce:hover:translate-y-0',
+        'group min-w-0 overflow-hidden rounded-[8px] border border-[#E7E7EB] bg-white text-left shadow-[0_10px_24px_rgba(18,24,38,0.04)] transition hover:-translate-y-0.5 hover:border-[#FF0061]/25 hover:shadow-[0_16px_32px_rgba(18,24,38,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 motion-reduce:hover:translate-y-0',
         isLead ? (showImage ? 'flex flex-col lg:grid lg:min-h-[280px] lg:grid-cols-[minmax(0,1.12fr)_minmax(320px,0.88fr)]' : 'flex min-h-[240px] flex-col') : 'flex flex-col',
         isCompact ? 'min-h-[154px]' : isLead ? '' : 'min-h-[266px]',
       )}
@@ -61,7 +61,7 @@ export function DiscoveryNewsCard({
           <div className="absolute left-3 top-3 flex items-center gap-2">
             <span className={cn(
               'rounded-full px-2 py-1 text-[11px] font-semibold shadow-sm',
-              type === '公告' ? 'bg-white/92 text-[#344054]' : 'bg-[#EA1F59] text-white',
+              type === '公告' ? 'bg-white/92 text-[#344054]' : 'bg-[#FF0061] text-white',
             )}>
               {type}
             </span>
@@ -79,7 +79,7 @@ export function DiscoveryNewsCard({
           <div className="flex items-center gap-2">
             <span className={cn(
               'rounded-full px-2 py-1 text-[11px] font-semibold',
-              type === '公告' ? 'bg-white text-[#344054] ring-1 ring-[#E7EAF0]' : 'bg-[#EA1F59] text-white',
+              type === '公告' ? 'bg-white text-[#344054] ring-1 ring-[#E7EAF0]' : 'bg-[#FF0061] text-white',
             )}>
               {type}
             </span>
@@ -89,7 +89,7 @@ export function DiscoveryNewsCard({
             {relatedToWatchlist ? <WatchlistRelevanceBadge /> : null}
           </div>
           <p className={cn(
-            'mt-3 font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]',
+            'mt-3 font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#FF0061]',
             isLead ? 'line-clamp-4 text-[20px]' : isCompact ? 'line-clamp-2 text-[14px]' : 'line-clamp-3 text-[15px]',
           )}>
             {item.title}
@@ -103,7 +103,7 @@ export function DiscoveryNewsCard({
       )}>
         {showImage ? (
           <p className={cn(
-            'font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#EA1F59]',
+            'font-semibold leading-relaxed text-[#344054] transition group-hover:text-[#FF0061]',
             isLead ? 'line-clamp-3 text-[21px]' : isCompact ? 'line-clamp-2 text-[14px]' : 'line-clamp-2 min-h-[48px] text-[15px]',
           )}>
             {item.title}
@@ -127,7 +127,7 @@ export function DiscoveryNewsCard({
             <button
               type="button"
               onClick={(event) => event.stopPropagation()}
-              className="rounded-full p-1.5 text-[#8B92A1] transition hover:bg-[#F7F8FA] hover:text-[#EA1F59]"
+              className="rounded-full p-1.5 text-[#8B92A1] transition hover:bg-[#F7F8FA] hover:text-[#FF0061]"
               aria-label="收藏动态"
               title="收藏动态"
             >
@@ -151,7 +151,7 @@ export function DiscoveryNewsCard({
 
 function NewsSourceDots(): JSX.Element {
   return (
-    <span className="h-3 w-3 shrink-0 rounded-full bg-[#EA1F59]" aria-hidden />
+    <span className="h-3 w-3 shrink-0 rounded-full bg-[#FF0061]" aria-hidden />
   );
 }
 

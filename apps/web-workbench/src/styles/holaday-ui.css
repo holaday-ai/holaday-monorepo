@@ -5,9 +5,6 @@
   --hd-cyan: #42c0ef;
   --hd-yellow: #ffc910;
 }
-@supports (color: color(display-p3 1 0 0)) {
-  :root { --hd-rose: color(display-p3 0.94902 0.11373 0.39216); }
-}
 .holaday-shell { color: #48464b; background: #fff; }
 .holaday-shell.dark { color: #eeeef2; background: #17191f; }
 .holaday-sidebar { padding: 16px; }
@@ -115,11 +112,13 @@
  .hd-file-row .text-sm { font-size:12px; }
 }
 
-/* Image/video share the approved cinematic surface. No global theme preference is changed. */
-.holaday-creative-shell { background: linear-gradient(#0e141b68,#171a236b), url('/holaday-ui/coast-dusk.png') center / cover fixed; }
+/* Image/video share the approved cinematic surface; the stored theme preference is unchanged. */
+/* An absolute background layer avoids iOS background-attachment: fixed issues. */
+.holaday-shell.holaday-creative-shell { position:relative; isolation:isolate; background:#17191f; }
+.holaday-creative-shell::before { content:''; position:absolute; inset:0; z-index:-1; pointer-events:none; background:linear-gradient(#0e141b68,#171a236b),url('/holaday-ui/coast-dusk.webp') center / cover no-repeat; }
 .holaday-creative-shell .holaday-main { background: transparent; }
 .holaday-creative-shell .holaday-sidebar [data-sidebar="sidebar"] { background: #252a31b3; backdrop-filter: blur(24px); }
-.hd-creative-page,.hd-creative-dialog {
+.holaday-creative-theme,.hd-creative-page,.hd-creative-dialog {
  --creative-surface: #292c34; --creative-line: #ffffff24; --creative-ink: #eeeaf4; --creative-muted: #bcb6c5;
  color: var(--creative-ink); color-scheme: dark;
 }
@@ -160,7 +159,6 @@
 
 /* Higher specificity than the sidebar primitive's group/variant utilities. */
 .holaday-shell .holaday-sidebar [data-sidebar="sidebar"] { border-radius:24px; box-shadow:none; }
-.holaday-shell.holaday-creative-shell { background:linear-gradient(#0e141b68,#171a236b),url('/holaday-ui/coast-dusk.png') center / cover fixed; }
 .hd-creative-page [data-creative-composer] { display:flex; flex-direction:column; }
 .hd-storyboard-disclosure { order:2; padding:0 24px 18px; }
 .hd-storyboard-disclosure summary { color:#bcb5c8; cursor:pointer; font-size:12px; padding:10px 0; }
@@ -177,13 +175,9 @@
 .hd-creative-page #video-scenario-heading,.hd-image-workspace > section > h2 { font-size:17px; }
 .hd-image-workspace fieldset { margin-top:16px; }
 .hd-character-avatar { position:relative; }
-.hd-character-avatar img[data-character="true"] { width:250%; height:250%; max-width:none; position:absolute; left:-75%; top:-30%; object-fit:cover; }
 .hd-new-task-home .hd-task-composer { background:#fff; border-color:#e9e4ec; border-radius:24px; box-shadow:0 8px 35px #3a294807; }
 .hd-new-task-home .hd-task-composer:focus-within { border-color:#bfb0d2; box-shadow:0 8px 35px #3a294809; }
 .hd-skills-page > section { border-radius:24px; }
-/* Map legacy brand utilities to the approved bright rose inside the product shell only. */
-.holaday-shell [class~="bg-[#EA1F59]"]:not(:disabled) { background-color:var(--hd-rose); }
-.holaday-shell [class~="text-[#EA1F59]"] { color:var(--hd-rose); }
 @media (min-width:769px) and (max-height:820px) {
  .holaday-sidebar [data-sidebar="header"] { padding-top:12px; gap:8px; }
  .holaday-sidebar .holaday-brand { min-height:34px; }

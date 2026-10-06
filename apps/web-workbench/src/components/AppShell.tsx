@@ -72,6 +72,7 @@ import {
   useTaskStore,
 } from '@/stores/task-store';
 import type { UiProject, UiTask } from '@/types/task';
+import { useCreativePageTheme } from '@/stores/theme-store';
 import { applyHistoryRetention } from '@/utils/time-buckets';
 import { PLAN_CATALOGUE, type PlanId } from '@holaday/shared-types';
 
@@ -119,6 +120,7 @@ type ProjectRefreshResult =
 export function AppShell(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
+  const creativeTheme = useCreativePageTheme(location.pathname);
   const [searchParams] = useSearchParams();
   const toast = useToast();
 
@@ -737,7 +739,7 @@ export function AppShell(): JSX.Element {
   return (
     <SidebarProvider
       defaultOpen={true}
-      className={`holaday-shell${/^\/(video|image)\/?$/.test(location.pathname) ? ' dark holaday-creative-shell' : ''}`}
+      className={`holaday-shell${creativeTheme ? ' dark holaday-creative-shell' : ''}`}
       style={
         {
           '--sidebar-width': '318px',
@@ -1022,8 +1024,8 @@ export function AppShell(): JSX.Element {
           aria-live="polite"
           className="pointer-events-none fixed inset-x-0 bottom-20 z-[90] flex justify-center px-3 sm:bottom-4"
         >
-          <div className="inline-flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-[8px] border border-[#EA1F59]/20 bg-white/90 px-3 py-2 text-[12px] font-medium text-[#595757] shadow-[0_12px_30px_rgba(89,87,87,0.12)] backdrop-blur dark:border-[#EA1F59]/35 dark:bg-card/90 dark:text-foreground/85">
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] bg-[#EA1F59]/10 text-[#EA1F59]">
+          <div className="inline-flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-[8px] border border-[#FF0061]/20 bg-white/90 px-3 py-2 text-[12px] font-medium text-[#595757] shadow-[0_12px_30px_rgba(89,87,87,0.12)] backdrop-blur dark:border-[#FF0061]/35 dark:bg-card/90 dark:text-foreground/85">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] bg-[#FF0061]/10 text-[#FF0061]">
               <WifiOff className="h-3 w-3" aria-hidden />
             </span>
             <span className="truncate">当前离线，暂时无法创建新任务</span>
@@ -1047,7 +1049,7 @@ function MobileSubpageSidebarSlot(): JSX.Element | null {
         onClick={() => setOpenMobile(true)}
         aria-label="打开任务列表"
         title="打开任务列表"
-        className="h-9 w-9 rounded-[9px] border-[#DCDDDD] bg-white/92 text-[#595757] shadow-[0_1px_3px_rgba(17,24,39,0.05)] backdrop-blur hover:bg-[#EFEFEF] hover:text-[#EA1F59] dark:border-white/10 dark:bg-card/90 dark:text-foreground/75 dark:hover:bg-white/10"
+        className="h-9 w-9 rounded-[9px] border-[#DCDDDD] bg-white/92 text-[#595757] shadow-[0_1px_3px_rgba(17,24,39,0.05)] backdrop-blur hover:bg-[#EFEFEF] hover:text-[#FF0061] dark:border-white/10 dark:bg-card/90 dark:text-foreground/75 dark:hover:bg-white/10"
       >
         <Menu className="h-4 w-4" aria-hidden />
       </Button>

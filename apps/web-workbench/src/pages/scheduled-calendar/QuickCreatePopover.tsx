@@ -227,7 +227,7 @@ export function QuickCreatePopover({
             {quickCreateRepeatLabel(repeatType)}
           </div>
         </div>
-        <div className="rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2.5 focus-within:border-[#EA1F59]/50 focus-within:ring-2 focus-within:ring-[#EA1F59]/10">
+        <div className="rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2.5 focus-within:border-[#FF0061]/50 focus-within:ring-2 focus-within:ring-[#FF0061]/10">
           <label className="text-[11px] font-medium text-[#595757]">
             任务内容
           </label>
@@ -253,7 +253,7 @@ export function QuickCreatePopover({
               setSubmitError(null);
             }}
             disabled={submitting}
-            className="mt-2 inline-flex items-center gap-1 rounded-[8px] px-1 py-1 text-xs text-[#595757] hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-55"
+            className="mt-2 inline-flex items-center gap-1 rounded-[8px] px-1 py-1 text-xs text-[#595757] hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-55"
           >
             <Plus className="h-3 w-3" />
             添加备注
@@ -264,7 +264,7 @@ export function QuickCreatePopover({
             onChange={(e) => setDescription(e.target.value)}
             placeholder="补充说明…"
             rows={2}
-            className="hd-quick-create__input mt-2 w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none placeholder:text-[#ADADAD] focus:border-[#EA1F59]/50 focus:ring-2 focus:ring-[#EA1F59]/10"
+            className="hd-quick-create__input mt-2 w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none placeholder:text-[#ADADAD] focus:border-[#FF0061]/50 focus:ring-2 focus:ring-[#FF0061]/10"
             maxLength={2000}
             disabled={submitting}
           />
@@ -282,7 +282,7 @@ export function QuickCreatePopover({
                 setTimeStr(e.target.value);
                 setSubmitError(null);
               }}
-              className="hd-quick-create__time rounded-[8px] border border-[#DCDDDD] bg-white px-2.5 py-1.5 text-sm font-medium text-[#1f1f1f] outline-none focus:border-[#EA1F59]/50 focus:ring-2 focus:ring-[#EA1F59]/10"
+              className="hd-quick-create__time rounded-[8px] border border-[#DCDDDD] bg-white px-2.5 py-1.5 text-sm font-medium text-[#1f1f1f] outline-none focus:border-[#FF0061]/50 focus:ring-2 focus:ring-[#FF0061]/10"
               disabled={submitting}
             />
           </div>
@@ -304,7 +304,7 @@ export function QuickCreatePopover({
               className={cn(
                 'rounded-[8px] border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
                 repeatType === p.value
-                  ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
+                  ? 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]'
                   : 'border-[#EFEFEF] bg-white text-[#595757] hover:border-[#DCDDDD] hover:bg-[#EFEFEF]',
               )}
             >
@@ -327,7 +327,7 @@ export function QuickCreatePopover({
                 className={cn(
                   'rounded-[8px] border px-2 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
                   reminderMinutes === p.value
-                    ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
+                    ? 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]'
                     : 'border-[#EFEFEF] bg-white text-[#595757] hover:border-[#DCDDDD] hover:bg-[#EFEFEF]',
                 )}
               >
@@ -344,7 +344,7 @@ export function QuickCreatePopover({
               disabled={submitting}
               aria-label={showAdvanced ? '收起 RRULE' : '展开 RRULE'}
               title={showAdvanced ? '收起 RRULE' : '展开 RRULE'}
-              className="inline-flex h-8 items-center gap-1 rounded-[8px] px-2.5 text-xs font-medium text-[#595757] hover:bg-[#EFEFEF] hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-55"
+              className="inline-flex h-8 items-center gap-1 rounded-[8px] px-2.5 text-xs font-medium text-[#595757] hover:bg-[#EFEFEF] hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-55"
             >
               {showAdvanced ? (
                 <>
@@ -368,11 +368,11 @@ export function QuickCreatePopover({
                   }}
                   placeholder={'FREQ=WEEKLY;BYDAY=MO,WE,FR'}
                   rows={2}
-                  className="w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 font-mono text-xs outline-none placeholder:text-[#ADADAD] focus:border-[#EA1F59]/50 focus:ring-2 focus:ring-[#EA1F59]/10"
+                  className="w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 font-mono text-xs outline-none placeholder:text-[#ADADAD] focus:border-[#FF0061]/50 focus:ring-2 focus:ring-[#FF0061]/10"
                   disabled={submitting}
                 />
                 {customRuleMissing && (
-                  <div className="mt-1 text-[11px] text-[#EA1F59]">
+                  <div className="mt-1 text-[11px] text-[#FF0061]">
                     填写 RRULE 后才能创建，或切回预设频率。
                   </div>
                 )}
@@ -381,7 +381,7 @@ export function QuickCreatePopover({
           </div>
         )}
         {submitError && (
-          <div className="mt-3 rounded-md border border-[#EA1F59]/20 bg-[#EA1F59]/[0.06] px-3 py-2 text-xs text-[#EA1F59]">
+          <div className="mt-3 rounded-md border border-[#FF0061]/20 bg-[#FF0061]/[0.06] px-3 py-2 text-xs text-[#FF0061]">
             {submitError}
           </div>
         )}
@@ -391,7 +391,7 @@ export function QuickCreatePopover({
             variant="ghost"
             onClick={requestClose}
             disabled={submitting}
-            className="text-[#595757] hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
+            className="text-[#595757] hover:bg-[#EFEFEF] hover:text-[#FF0061]"
             style={{ borderRadius: 8 }}
           >
             取消
@@ -401,8 +401,8 @@ export function QuickCreatePopover({
             data-can-create={canCreate ? 'true' : 'false'}
             disabled={!canCreate}
             style={{
-              backgroundColor: '#EA1F59',
-              borderColor: '#EA1F59',
+              backgroundColor: '#FF0061',
+              borderColor: '#FF0061',
               borderRadius: 8,
             }}
             className="text-white hover:opacity-90"

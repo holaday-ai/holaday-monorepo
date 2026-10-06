@@ -33,8 +33,8 @@ export const RESULT_SOURCE_BADGES: Record<ResultSourceMarker, ResultSourceBadgeM
   '[外部来源]': {
     label: '外部基准',
     description: '来自网页、第三方页面或外部基准',
-    tone: 'border-[#EA1F59]/30 bg-[#EA1F59]/5 text-[#EA1F59] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
-    dotTone: 'bg-[#EA1F59]',
+    tone: 'border-[#FF0061]/30 bg-[#FF0061]/5 text-[#FF0061] dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10',
+    dotTone: 'bg-[#FF0061]',
   },
 };
 

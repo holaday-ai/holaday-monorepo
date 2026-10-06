@@ -236,7 +236,7 @@ const CREATIVE_MODEL_OPTIONS: ReadonlyArray<CreativeModelOption> = [
     version: '3.1 Fast',
     description: '快速生成，适合日常短视频草稿与轻量创意验证。',
     badges: ['文本成片', '图像参考', '性价比'],
-    tone: 'from-[#1E9BFF] via-[#735CFF] to-[#EA1F59]',
+    tone: 'from-[#1E9BFF] via-[#735CFF] to-[#FF0061]',
   },
   {
     value: 'veo_standard',
@@ -244,7 +244,7 @@ const CREATIVE_MODEL_OPTIONS: ReadonlyArray<CreativeModelOption> = [
     version: '3.1 Standard',
     description: '画面稳定度和细节更高，适合正式成片前的高质量版本。',
     badges: ['文本成片', '高质量', '1080p'],
-    tone: 'from-[#8A63FF] via-[#EA1F59] to-[#FFB23F]',
+    tone: 'from-[#8A63FF] via-[#FF0061] to-[#FFB23F]',
   },
   {
     value: 'wanxiang',
@@ -328,7 +328,7 @@ const STYLE_OPTIONS_BY_GROUP: Record<
       label: '标志化',
       description: '图形符号更强',
       prompt: '简洁标志化构图，图形感强，主体明确',
-      swatch: 'from-[#111827] via-[#FFFFFF] to-[#EA1F59]',
+      swatch: 'from-[#111827] via-[#FFFFFF] to-[#FF0061]',
     },
     {
       key: 'papercraft',
@@ -568,7 +568,7 @@ const STYLE_OPTIONS_BY_GROUP: Record<
       label: '鲜艳',
       description: '明快高饱和',
       prompt: '鲜艳明快，高饱和，画面有活力',
-      swatch: 'from-[#EA1F59] via-[#F97316] to-[#22C55E]',
+      swatch: 'from-[#FF0061] via-[#F97316] to-[#22C55E]',
     },
     {
       key: 'warm',
@@ -702,7 +702,7 @@ function CreativeStudioPage({
   const isCloneVideo = videoTab === 'pet';
   const isIpVideo = videoTab === 'ip';
   const accent = '#AF99F2';
-  const softBg = 'bg-[#EA1F59]/10';
+  const softBg = 'bg-[#FF0061]/10';
   const activeScenario = videoCreationScenario(scenarioId);
 
   React.useEffect(() => {
@@ -1120,7 +1120,7 @@ function CreativeStudioPage({
                         title="添加参考图"
                         aria-label="添加参考图"
                         onClick={() => imageInputRef.current?.click()}
-                        className="flex min-h-12 items-center gap-3 rounded-[14px] border border-[var(--creative-line,#E7DDE4)] bg-[var(--creative-surface,#FFF9FB)] px-3 text-left text-[var(--creative-muted,#A62B51)] outline-none transition-colors hover:border-[var(--creative-line,#D9BCCA)] hover:bg-[var(--creative-surface,#fff)] focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+                        className="flex min-h-12 items-center gap-3 rounded-[14px] border border-[var(--creative-line,#E7DDE4)] bg-[var(--creative-surface,#FFF9FB)] px-3 text-left text-[var(--creative-muted,#A62B51)] outline-none transition-colors hover:border-[var(--creative-line,#D9BCCA)] hover:bg-[var(--creative-surface,#fff)] focus-visible:ring-2 focus-visible:ring-[#FF0061]/20"
                       >
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[var(--creative-surface,#FBE6EC)]">
                           <ImagePlus className="h-4 w-4" aria-hidden />
@@ -1139,7 +1139,7 @@ function CreativeStudioPage({
                         title="添加参考视频"
                         aria-label="添加参考视频"
                         onClick={() => setReferenceVideoDialogOpen(true)}
-                        className="flex min-h-12 items-center gap-3 rounded-[14px] border border-[var(--creative-line,#DDE6E8)] bg-[var(--creative-surface,#F5FCFC)] px-3 text-left text-[var(--creative-muted,#347D83)] outline-none transition-colors hover:border-[var(--creative-line,#BFD6D8)] hover:bg-[var(--creative-surface,#fff)] focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+                        className="flex min-h-12 items-center gap-3 rounded-[14px] border border-[var(--creative-line,#DDE6E8)] bg-[var(--creative-surface,#F5FCFC)] px-3 text-left text-[var(--creative-muted,#347D83)] outline-none transition-colors hover:border-[var(--creative-line,#BFD6D8)] hover:bg-[var(--creative-surface,#fff)] focus-visible:ring-2 focus-visible:ring-[#FF0061]/20"
                       >
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[var(--creative-surface,#DFF3F2)]">
                           <VideoIcon className="h-4 w-4" aria-hidden />
@@ -1190,7 +1190,7 @@ function CreativeStudioPage({
                       type="button"
                       aria-expanded={settingsOpen}
                       onClick={() => setSettingsOpen((open) => !open)}
-                      className="inline-flex min-h-9 items-center gap-2 rounded-[10px] px-3 text-[11px] font-semibold text-[var(--creative-ink,#5E5362)] hover:bg-[var(--creative-surface,#fff)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+                      className="inline-flex min-h-9 items-center gap-2 rounded-[10px] px-3 text-[11px] font-semibold text-[var(--creative-ink,#5E5362)] hover:bg-[var(--creative-surface,#fff)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20"
                     >
                       <Settings2 className="h-3.5 w-3.5" aria-hidden />
                       {settingsOpen ? '收起生成设置' : '查看生成设置'}
@@ -1403,7 +1403,7 @@ function CreativeModelPicker({
       <button
         type="button"
         onClick={() => onOpenChange(true)}
-        className="flex h-11 w-full items-center gap-3 rounded-[10px] border border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] px-3 text-left outline-none transition-colors hover:border-[#ADADAD] focus:border-[#EA1F59]"
+        className="flex h-11 w-full items-center gap-3 rounded-[10px] border border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] px-3 text-left outline-none transition-colors hover:border-[#ADADAD] focus:border-[#FF0061]"
       >
         <img
           src={modelPreviewSrc(selected.value)}
@@ -1465,7 +1465,7 @@ function CreativeModelPicker({
                     className={cn(
                       'grid w-full grid-cols-[72px_1fr] gap-4 rounded-[20px] border p-3 text-left transition-colors',
                       active
-                        ? 'border-[#EA1F59]/55 bg-[#EA1F59]/5'
+                        ? 'border-[#FF0061]/55 bg-[#FF0061]/5'
                         : 'border-[var(--creative-line,#EFEFEF)] bg-[var(--creative-surface,#fff)] hover:border-[var(--creative-line,#DCDDDD)] hover:bg-[var(--creative-surface,#FAFAFA)]',
                     )}
                   >
@@ -1557,7 +1557,7 @@ function CreativeStyleSummaryPicker({
       <button
         type="button"
         onClick={() => onOpenGroupChange('vibe')}
-        className="flex h-11 w-full min-w-0 items-center gap-3 rounded-[10px] border border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] px-3 text-left transition-colors hover:border-[#ADADAD] focus:border-[#EA1F59] focus:outline-none"
+        className="flex h-11 w-full min-w-0 items-center gap-3 rounded-[10px] border border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] px-3 text-left transition-colors hover:border-[#ADADAD] focus:border-[#FF0061] focus:outline-none"
       >
         <CreativeStyleIcon />
         <span className="min-w-0 flex-1">
@@ -1589,7 +1589,7 @@ function CreativeStyleIcon(): JSX.Element {
   return (
     <span className="relative flex h-7 w-7 shrink-0 overflow-hidden rounded-[8px] bg-[#0F172A] shadow-[inset_0_1px_1px_rgba(255,255,255,0.42),0_8px_16px_rgba(17,24,39,0.16)]">
       <span
-        className="absolute inset-0 bg-[radial-gradient(circle_at_24%_22%,rgba(255,255,255,0.78)_0%,rgba(255,255,255,0.18)_18%,rgba(255,255,255,0)_34%),linear-gradient(135deg,#1E9BFF_0%,#6F5BFF_38%,#EA1F59_72%,#FFB23F_100%)]"
+        className="absolute inset-0 bg-[radial-gradient(circle_at_24%_22%,rgba(255,255,255,0.78)_0%,rgba(255,255,255,0.18)_18%,rgba(255,255,255,0)_34%),linear-gradient(135deg,#1E9BFF_0%,#6F5BFF_38%,#FF0061_72%,#FFB23F_100%)]"
         aria-hidden
       />
       <span
@@ -1763,7 +1763,7 @@ function ReferenceVideoUploadDialog({
         <div className="p-5">
           <div className="rounded-[20px] border border-[var(--creative-line,#EFEFEF)] bg-[var(--creative-surface,#FAFAFA)] p-4">
             <div className="flex items-start gap-3">
-              <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-[14px] bg-[linear-gradient(135deg,#EA1F59_0%,#8A63FF_55%,#1E9BFF_100%)] text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.48),0_10px_20px_rgba(234,31,89,0.16)]">
+              <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-[14px] bg-[linear-gradient(135deg,#FF0061_0%,#8A63FF_55%,#1E9BFF_100%)] text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.48),0_10px_20px_rgba(255,0,97,0.16)]">
                 <span
                   className="absolute inset-0 bg-[radial-gradient(circle_at_28%_18%,rgba(255,255,255,0.62),rgba(255,255,255,0)_35%)]"
                   aria-hidden
@@ -1802,7 +1802,7 @@ function ReferenceVideoUploadDialog({
               </Button>
               <Button
                 type="button"
-                className="h-9 rounded-full bg-[#EA1F59] px-4 text-[13px] hover:bg-[#EA1F59]/90"
+                className="h-9 rounded-full bg-[#FF0061] px-4 text-[13px] hover:bg-[#FF0061]/90"
                 onClick={onChoose}
               >
                 选择视频
@@ -1864,7 +1864,7 @@ function CreativeSelect({
         onClick={() => setOpen((current) => !current)}
         className={cn(
           'flex h-11 w-full items-center justify-between rounded-[10px] border bg-[var(--creative-surface,#fff)] px-4 text-left text-[14px] font-semibold text-[var(--creative-ink,#111827)] outline-none transition-colors',
-          open ? 'border-[#EA1F59]' : 'border-[var(--creative-line,#DCDDDD)] hover:border-[#ADADAD]',
+          open ? 'border-[#FF0061]' : 'border-[var(--creative-line,#DCDDDD)] hover:border-[#ADADAD]',
         )}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -1893,7 +1893,7 @@ function CreativeSelect({
                 }}
                 className={cn(
                   'flex h-9 w-full items-center justify-between rounded-[9px] px-3 text-left text-[13px] font-semibold transition-colors',
-                  active ? 'bg-[#EA1F59]/10 text-[var(--creative-muted,#EA1F59)]' : 'text-[var(--creative-ink,#111827)] hover:bg-[var(--creative-surface,#F7F7F7)]',
+                  active ? 'bg-[#FF0061]/10 text-[var(--creative-muted,#FF0061)]' : 'text-[var(--creative-ink,#111827)] hover:bg-[var(--creative-surface,#F7F7F7)]',
                 )}
               >
                 <span>{option}</span>
@@ -1955,8 +1955,8 @@ function CreativeSegment<T extends string | number>({
 }
 
 function VideoHistory({
-  accent = '#EA1F59',
-  softBg = 'bg-[#EA1F59]/10',
+  accent = '#FF0061',
+  softBg = 'bg-[#FF0061]/10',
   videoType = 'normal',
   refreshKey,
 }: {
@@ -2241,7 +2241,7 @@ function VideoHistory({
           role="status"
         >
           <span className="inline-flex items-center gap-2">
-            <AlertCircle className="h-4 w-4 shrink-0 text-[var(--creative-muted,#EA1F59)]" aria-hidden />
+            <AlertCircle className="h-4 w-4 shrink-0 text-[var(--creative-muted,#FF0061)]" aria-hidden />
             未能同步最新作品，当前展示上次已加载的内容。
           </span>
           <Button
@@ -2250,7 +2250,7 @@ function VideoHistory({
             variant="outline"
             onClick={() => void loadHistory()}
             disabled={loading}
-            className="h-8 border-[#F1B8C8] bg-[var(--creative-surface,#fff)] text-[var(--creative-ink,#595757)] hover:bg-[var(--creative-surface,#fff)] hover:text-[var(--creative-muted,#EA1F59)]"
+            className="h-8 border-[#F1B8C8] bg-[var(--creative-surface,#fff)] text-[var(--creative-ink,#595757)] hover:bg-[var(--creative-surface,#fff)] hover:text-[var(--creative-muted,#FF0061)]"
           >
             {loading ? '重试中…' : '重新加载'}
           </Button>
@@ -2262,7 +2262,7 @@ function VideoHistory({
             className="flex min-h-[260px] flex-col items-center justify-center rounded-[24px] border border-dashed border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] p-8 text-center"
             role="alert"
           >
-            <AlertCircle className="h-7 w-7 text-[var(--creative-muted,#EA1F59)]" aria-hidden />
+            <AlertCircle className="h-7 w-7 text-[var(--creative-muted,#FF0061)]" aria-hidden />
             <div className="mt-3 text-[14px] font-semibold text-[var(--creative-ink,#111827)]">
               历史生成暂时无法加载
             </div>
@@ -2275,7 +2275,7 @@ function VideoHistory({
               variant="outline"
               onClick={() => void loadHistory()}
               disabled={loading}
-              className="mt-4 border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] text-[var(--creative-ink,#595757)] hover:bg-[var(--creative-surface,#fff)] hover:text-[var(--creative-muted,#EA1F59)]"
+              className="mt-4 border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] text-[var(--creative-ink,#595757)] hover:bg-[var(--creative-surface,#fff)] hover:text-[var(--creative-muted,#FF0061)]"
             >
               {loading ? '重试中…' : '重新加载'}
             </Button>
@@ -2388,8 +2388,8 @@ function VideoHistory({
                         className={cn(
                           'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border transition-colors focus-visible:outline-none focus-visible:ring-2',
                           row.starred
-                            ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[var(--creative-muted,#EA1F59)] focus-visible:ring-[#EA1F59]/20'
-                            : 'border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] text-[var(--creative-muted,#ADADAD)] hover:border-[#EA1F59]/30 hover:text-[var(--creative-muted,#EA1F59)] focus-visible:ring-[#EA1F59]/20',
+                            ? 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[var(--creative-muted,#FF0061)] focus-visible:ring-[#FF0061]/20'
+                            : 'border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] text-[var(--creative-muted,#ADADAD)] hover:border-[#FF0061]/30 hover:text-[var(--creative-muted,#FF0061)] focus-visible:ring-[#FF0061]/20',
                         )}
                       >
                         {pinningTaskId === row.taskId ? (
@@ -2443,7 +2443,7 @@ function VideoHistory({
                         </span>
                       )}
                       {row.videoType ? (
-                        <span className="rounded-full bg-[#EA1F59]/10 px-3 py-1 text-[11px] font-medium text-[var(--creative-ink,#595757)]">
+                        <span className="rounded-full bg-[#FF0061]/10 px-3 py-1 text-[11px] font-medium text-[var(--creative-ink,#595757)]">
                           {videoTypeLabel(row.videoType)}
                         </span>
                       ) : null}
@@ -2499,7 +2499,7 @@ function VideoHistory({
         <div className="mt-6 flex flex-col items-center gap-3 border-t border-[var(--creative-line,#EFEFEF)] pt-5">
           {loadMoreError ? (
             <div className="inline-flex items-center gap-2 text-[13px] text-[var(--creative-muted,#8B93A6)]" role="alert">
-              <AlertCircle className="h-4 w-4 text-[var(--creative-muted,#EA1F59)]" aria-hidden />
+              <AlertCircle className="h-4 w-4 text-[var(--creative-muted,#FF0061)]" aria-hidden />
               更早作品暂时无法加载，当前内容已保留。
             </div>
           ) : null}
@@ -2760,8 +2760,8 @@ function CurrentVideoTaskPanel({
 
           {/* A2 — 失败态：透传后端白名单友好 reason（在 task.resultText 里）+ 重试入口。 */}
           {task.status === 'failed' && (
-            <div className="rounded-[8px] border border-[#EA1F59]/30 bg-[#EA1F59]/5 px-3 py-3 text-[12px]">
-              <div className="text-[13px] font-medium text-[var(--creative-muted,#EA1F59)]">生成失败</div>
+            <div className="rounded-[8px] border border-[#FF0061]/30 bg-[#FF0061]/5 px-3 py-3 text-[12px]">
+              <div className="text-[13px] font-medium text-[var(--creative-muted,#FF0061)]">生成失败</div>
               <p className="mt-1 whitespace-pre-wrap leading-relaxed text-[var(--creative-ink,#595757)]">
                 {task.resultText?.trim() || '生成失败，请重试。'}
               </p>
@@ -2982,7 +2982,7 @@ export function NormalVideoForm({
       <Section title="价格预览" className={CREATIVE_PRICE_SECTION_CLASS}>
         <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
           <div>
-            <span className="text-2xl font-semibold text-[var(--creative-muted,#EA1F59)]">约 ¥{estVideoCny}</span>
+            <span className="text-2xl font-semibold text-[var(--creative-muted,#FF0061)]">约 ¥{estVideoCny}</span>
             <span className="ml-2 text-[13px] text-muted-foreground">
               视频版 · 每段约 ¥{perSegCny} × {SEG_ESTIMATE} 段(估算)
             </span>
@@ -3232,7 +3232,7 @@ export function PetVideoForm({
                 <button
                   type="button"
                   onClick={removePhoto}
-                  className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-[12px] text-muted-foreground hover:text-[var(--creative-muted,#EA1F59)]"
+                  className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-[12px] text-muted-foreground hover:text-[var(--creative-muted,#FF0061)]"
                 >
                   <X className="h-3.5 w-3.5" />
                   移除
@@ -3245,7 +3245,7 @@ export function PetVideoForm({
             type="button"
             onClick={() => photoRef.current?.click()}
             disabled={uploadingPhoto}
-            className="flex w-full flex-col items-center justify-center gap-2 rounded-[20px] border border-dashed border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] py-10 text-muted-foreground transition-colors hover:border-[#EA1F59]/40 hover:text-[var(--creative-muted,#EA1F59)] disabled:opacity-60"
+            className="flex w-full flex-col items-center justify-center gap-2 rounded-[20px] border border-dashed border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] py-10 text-muted-foreground transition-colors hover:border-[#FF0061]/40 hover:text-[var(--creative-muted,#FF0061)] disabled:opacity-60"
           >
             {uploadingPhoto ? (
               <Loader2 className="h-6 w-6 animate-spin" />
@@ -3310,7 +3310,7 @@ export function PetVideoForm({
                 <button
                   type="button"
                   onClick={removeReferenceVideo}
-                  className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-[12px] text-muted-foreground hover:text-[var(--creative-muted,#EA1F59)]"
+                  className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-[12px] text-muted-foreground hover:text-[var(--creative-muted,#FF0061)]"
                 >
                   <X className="h-3.5 w-3.5" />
                   移除
@@ -3323,7 +3323,7 @@ export function PetVideoForm({
             type="button"
             onClick={() => videoRef.current?.click()}
             disabled={uploadingVideo}
-            className="flex w-full flex-col items-center justify-center gap-2 rounded-[20px] border border-dashed border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] py-10 text-muted-foreground transition-colors hover:border-[#EA1F59]/40 hover:text-[var(--creative-muted,#EA1F59)] disabled:opacity-60"
+            className="flex w-full flex-col items-center justify-center gap-2 rounded-[20px] border border-dashed border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] py-10 text-muted-foreground transition-colors hover:border-[#FF0061]/40 hover:text-[var(--creative-muted,#FF0061)] disabled:opacity-60"
           >
             {uploadingVideo ? (
               <Loader2 className="h-6 w-6 animate-spin" />
@@ -3354,7 +3354,7 @@ export function PetVideoForm({
 
       <Section title="价格预览" className={CREATIVE_PRICE_SECTION_CLASS}>
         <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
-          <span className="text-2xl font-semibold text-[var(--creative-muted,#EA1F59)]">
+          <span className="text-2xl font-semibold text-[var(--creative-muted,#FF0061)]">
             {estCny === null ? '上传视频后估价' : `约 ¥${estCny} 起`}
           </span>
           <span className="text-[13px] text-muted-foreground">
@@ -3424,8 +3424,8 @@ function SegGroup<T extends string | number>({
               className={cn(
                 'inline-flex min-h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-[8px] border border-transparent px-3 text-[13px] font-semibold transition-colors',
                 active
-                  ? 'bg-[var(--creative-surface,#fff)] text-[var(--creative-muted,#EA1F59)] shadow-[0_1px_4px_rgba(15,23,42,0.08)]'
-                  : 'text-[var(--creative-ink,#111827)] hover:bg-white/60 hover:text-[var(--creative-muted,#EA1F59)]',
+                  ? 'bg-[var(--creative-surface,#fff)] text-[var(--creative-muted,#FF0061)] shadow-[0_1px_4px_rgba(15,23,42,0.08)]'
+                  : 'text-[var(--creative-ink,#111827)] hover:bg-white/60 hover:text-[var(--creative-muted,#FF0061)]',
               )}
             >
               {o.label}
@@ -3433,7 +3433,7 @@ function SegGroup<T extends string | number>({
                 <span
                   className={cn(
                     'text-[11px]',
-                    active ? 'text-[var(--creative-muted,#EA1F59)]/70' : 'text-muted-foreground',
+                    active ? 'text-[var(--creative-muted,#FF0061)]/70' : 'text-muted-foreground',
                   )}
                 >
                   {o.hint}
@@ -3473,7 +3473,7 @@ function VideoStatusIcon({ status }: { status: string }): JSX.Element {
   }
   if (iconKind === 'failed') {
     return (
-      <span className={cn(base, 'border-[#EA1F59]/45 bg-[#EA1F59]/10 text-[var(--creative-muted,#EA1F59)]')}>
+      <span className={cn(base, 'border-[#FF0061]/45 bg-[#FF0061]/10 text-[var(--creative-muted,#FF0061)]')}>
         <XCircle className="h-3.5 w-3.5" />
       </span>
     );
@@ -3487,7 +3487,7 @@ function VideoStatusIcon({ status }: { status: string }): JSX.Element {
   }
   if (iconKind === 'success') {
     return (
-      <span className={cn(base, 'border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] text-[var(--creative-muted,#EA1F59)]')}>
+      <span className={cn(base, 'border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] text-[var(--creative-muted,#FF0061)]')}>
         <CheckCircle2 className="h-3.5 w-3.5" />
       </span>
     );
@@ -3825,7 +3825,7 @@ export function IpOnboardingWizard({
           size="sm"
           onClick={() => void handleClear()}
           disabled={!anyAsset || clearing || uploadingVoice || uploadingVideo}
-          className="border-[var(--creative-line,#DCDDDD)] text-[var(--creative-ink,#595757)] hover:border-[#EA1F59]/40 hover:text-[var(--creative-muted,#EA1F59)]"
+          className="border-[var(--creative-line,#DCDDDD)] text-[var(--creative-ink,#595757)] hover:border-[#FF0061]/40 hover:text-[var(--creative-muted,#FF0061)]"
         >
           {clearing ? (
             <>
@@ -3911,7 +3911,7 @@ function IpGenerateForm({
       >
         <div className="space-y-5">
           <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-            <CheckCircle2 className="h-4 w-4 text-[var(--creative-muted,#EA1F59)]" />
+            <CheckCircle2 className="h-4 w-4 text-[var(--creative-muted,#FF0061)]" />
             使用你已上传的声音 + 出镜底版(可在上方重传/清除)。
           </div>
           <Textarea
@@ -3923,7 +3923,7 @@ function IpGenerateForm({
           />
           <div className="rounded-[18px] border border-[var(--creative-line,#EFEFEF)] bg-[var(--creative-surface,#fff)] px-4 py-3">
             <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-              <span className="text-xl font-semibold text-[var(--creative-muted,#EA1F59)]">约 ¥{est.videoCny}</span>
+              <span className="text-xl font-semibold text-[var(--creative-muted,#FF0061)]">约 ¥{est.videoCny}</span>
               <span className="text-[13px] text-muted-foreground">
                 Qwen Voice + Sync Lipsync 3.0 · {IP_VIDEO_ASPECT_RATIO} · 约 {est.chars} 字
               </span>
@@ -3945,15 +3945,15 @@ function IpGenerateForm({
                 type="checkbox"
                 checked={consent}
                 onChange={(e) => setConsent(e.target.checked)}
-                className="mt-0.5 h-4 w-4 shrink-0 accent-[#EA1F59]"
+                className="mt-0.5 h-4 w-4 shrink-0 accent-[#FF0061]"
               />
               <span>
                 {IP_ASSET_AUTHORIZATION_COPY}
-                <Link to="/terms" target="_blank" className="text-[var(--creative-muted,#EA1F59)] underline">
+                <Link to="/terms" target="_blank" className="text-[var(--creative-muted,#FF0061)] underline">
                   《服务条款》
                 </Link>
                 与
-                <Link to="/privacy" target="_blank" className="text-[var(--creative-muted,#EA1F59)] underline">
+                <Link to="/privacy" target="_blank" className="text-[var(--creative-muted,#FF0061)] underline">
                   《隐私政策》
                 </Link>
                 。
@@ -4006,21 +4006,21 @@ function WizardStep({
     <div
       className={cn(
         'flex gap-3 rounded-[18px] border bg-[var(--creative-surface,#fff)] p-4',
-        done ? 'border-[#EA1F59]/30' : 'border-[var(--creative-line,#DCDDDD)]',
+        done ? 'border-[#FF0061]/30' : 'border-[var(--creative-line,#DCDDDD)]',
         locked && 'opacity-60',
       )}
     >
       <span
         className={cn(
           'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[13px] font-medium',
-          done ? 'bg-[#EA1F59] text-white' : 'bg-[var(--creative-surface,#EFEFEF)] text-[var(--creative-ink,#595757)]',
+          done ? 'bg-[#FF0061] text-white' : 'bg-[var(--creative-surface,#EFEFEF)] text-[var(--creative-ink,#595757)]',
         )}
       >
         {done ? <Check className="h-4 w-4" /> : index}
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 text-[14px] font-medium text-foreground">
-          <Icon className="h-4 w-4 text-[var(--creative-muted,#EA1F59)]" />
+          <Icon className="h-4 w-4 text-[var(--creative-muted,#FF0061)]" />
           {title}
           {locked && <Lock className="h-3 w-3 text-muted-foreground" />}
         </div>

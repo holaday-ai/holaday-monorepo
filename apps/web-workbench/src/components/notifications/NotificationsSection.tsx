@@ -53,7 +53,7 @@ export function NotificationToggle({
       className={cn(
         'flex h-8 w-12 cursor-pointer items-center rounded-full p-1 transition-colors',
         pending && 'cursor-wait opacity-70',
-        enabled ? 'bg-[#EA1F59]' : 'bg-muted-foreground/40',
+        enabled ? 'bg-[#FF0061]' : 'bg-muted-foreground/40',
       )}
       title={pending ? `正在更新${accessibleName}` : `${action}${accessibleName}`}
     >
@@ -294,9 +294,9 @@ export function NotificationsSection(): JSX.Element {
             </Button>
           </div>
           {loadError && !loading && (
-            <div className="mx-4 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#EA1F59]/25 bg-[#EA1F59]/5 px-3 py-2 text-xs text-muted-foreground">
+            <div className="mx-4 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#FF0061]/25 bg-[#FF0061]/5 px-3 py-2 text-xs text-muted-foreground">
               <span className="min-w-0 flex-1">
-                <span className="block font-medium text-[#EA1F59]">
+                <span className="block font-medium text-[#FF0061]">
                   {loadErrorCopy.title}
                 </span>
                 <span className="mt-1 block">{loadErrorCopy.body}</span>
@@ -373,7 +373,7 @@ export function NotificationsSection(): JSX.Element {
                     type="button"
                     onClick={() => setConfirmDelete(row.channelId)}
                     disabled={rowPending}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:pointer-events-none disabled:opacity-40"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#FF0061]/10 hover:text-[#FF0061] disabled:pointer-events-none disabled:opacity-40"
                     aria-label="删除渠道"
                     title={rowPending ? '正在更新' : '删除'}
                   >

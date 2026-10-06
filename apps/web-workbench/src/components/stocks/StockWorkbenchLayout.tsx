@@ -116,14 +116,14 @@ export function StockTaskWorkspaceLayout({
               onClick={() => activateTask(task.id)}
               onKeyDown={handleTabKeyDown}
               className={cn(
-                'group relative flex h-11 min-w-0 items-center justify-center gap-2 rounded-[13px] px-2 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 motion-reduce:transition-none sm:px-3',
+                'group relative flex h-11 min-w-0 items-center justify-center gap-2 rounded-[13px] px-2 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 motion-reduce:transition-none sm:px-3',
                 selected
                   ? 'bg-[#FFF0F4] text-[#C9184A] shadow-[0_6px_18px_rgba(220,48,93,0.08)]'
                   : 'text-[#566074] hover:bg-[#F7F4FC] hover:text-[#332842]',
               )}
             >
               <Icon
-                className={cn('h-4 w-4 shrink-0', selected ? 'text-[#EA1F59]' : 'text-[#7A8192]')}
+                className={cn('h-4 w-4 shrink-0', selected ? 'text-[#FF0061]' : 'text-[#7A8192]')}
                 aria-hidden
               />
               <span className="min-w-0">
@@ -141,7 +141,7 @@ export function StockTaskWorkspaceLayout({
         role="tabpanel"
         aria-labelledby={`stock-task-tab-${activeTask}`}
         tabIndex={0}
-        className="min-w-0 p-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#EA1F59]/20 sm:p-3"
+        className="min-w-0 p-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#FF0061]/20 sm:p-3"
       >
         {activeTask === 'watchlist' ? (
           <div className="min-w-0 space-y-3">
@@ -214,7 +214,7 @@ function NextStepRail({
                 if (action.task) onNavigate(action.task);
               }}
               className={cn(
-                'group inline-flex h-11 min-[769px]:h-9 min-w-0 items-center justify-center gap-2 rounded-[10px] border px-3 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 motion-reduce:transition-none sm:min-w-[154px]',
+                'group inline-flex h-11 min-[769px]:h-9 min-w-0 items-center justify-center gap-2 rounded-[10px] border px-3 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 motion-reduce:transition-none sm:min-w-[154px]',
                 isPrimary
                   ? 'border-[#F2CCD7] bg-[#FFF0F4] text-[#B4234D] hover:border-[#EBAFC0] hover:bg-[#FFE8EF]'
                   : 'border-[#DDE5F1] bg-[#F7FAFF] text-[#475467] hover:border-[#C7D6EA] hover:bg-[#EEF6FF]',
@@ -274,17 +274,17 @@ export function StockResearchTable({
                   selected ? 'bg-[#FFF1F5]' : 'bg-white hover:bg-[#FBF9FC]',
                 )}
               >
-                <td className={cn('px-3 py-2.5', selected ? 'shadow-[inset_3px_0_0_#EA1F59]' : '')}>
+                <td className={cn('px-3 py-2.5', selected ? 'shadow-[inset_3px_0_0_#FF0061]' : '')}>
                   <button
                     type="button"
                     aria-label={`查看${row.name}研究详情`}
                     title={row.note || `查看 ${row.name} 研究详情`}
                     aria-current={selected ? 'true' : undefined}
                     onClick={() => onSelect(row.symbol)}
-                    className="flex min-w-0 items-center gap-2.5 text-left transition hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25"
+                    className="flex min-w-0 items-center gap-2.5 text-left transition hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25"
                   >
                     {selected ? (
-                      <CircleDot className="h-4 w-4 shrink-0 text-[#EA1F59]" aria-hidden />
+                      <CircleDot className="h-4 w-4 shrink-0 text-[#FF0061]" aria-hidden />
                     ) : (
                       <Circle className="h-4 w-4 shrink-0 text-[#C9C5D1]" aria-hidden />
                     )}

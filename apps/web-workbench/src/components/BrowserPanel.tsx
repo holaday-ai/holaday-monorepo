@@ -1501,7 +1501,7 @@ function CloudBrowserPanel({
                     'border',
                     aborting
                       ? 'cursor-wait border-[#DCDDDD] bg-[#EFEFEF] text-muted-foreground dark:border-white/10 dark:bg-white/5'
-                      : 'border-[#EA1F59]/35 bg-white text-[#EA1F59] hover:bg-[#EA1F59]/10 dark:border-[#EA1F59]/35 dark:bg-transparent dark:hover:bg-[#EA1F59]/10',
+                      : 'border-[#FF0061]/35 bg-white text-[#FF0061] hover:bg-[#FF0061]/10 dark:border-[#FF0061]/35 dark:bg-transparent dark:hover:bg-[#FF0061]/10',
                   )}
                 >
                   <Square className="h-3 w-3" strokeWidth={2.5} />
@@ -1519,7 +1519,7 @@ function CloudBrowserPanel({
                     'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[9px] border transition-colors',
                     taskIsTerminal && !isNarrow && !isSheet ? 'px-2.5' : 'w-8',
                     interactive
-                      ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
+                      ? 'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061]'
                       : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5',
                   )}
                 >
@@ -1691,7 +1691,7 @@ function CloudBrowserPanel({
                       interactiveActive
                         ? fullscreen
                           ? 'border-black/[0.06]'
-                          : 'ring-1 ring-inset ring-[#EA1F59]/25'
+                          : 'ring-1 ring-inset ring-[#FF0061]/25'
                         : isSheet && 'border-black/[0.06]',
                     )}
                   />
@@ -1708,7 +1708,7 @@ function CloudBrowserPanel({
                       interactiveActive
                         ? fullscreen
                           ? 'border-black/[0.06]'
-                          : 'ring-1 ring-inset ring-[#EA1F59]/25'
+                          : 'ring-1 ring-inset ring-[#FF0061]/25'
                         : isSheet && 'border-black/[0.06]',
                     )}
                   />
@@ -1750,14 +1750,14 @@ function CloudBrowserPanel({
                       interactiveActive
                         ? fullscreen
                           ? 'cursor-pointer border-black/[0.06]'
-                          : 'cursor-pointer border-[#EA1F59]/30 ring-1 ring-[#EA1F59]/10'
+                          : 'cursor-pointer border-[#FF0061]/30 ring-1 ring-[#FF0061]/10'
                         : 'border-black/[0.06]',
                     )}
                   />
                   {ripple && (
                     <span
                       aria-hidden
-                      className="pointer-events-none absolute block h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#EA1F59]/70 animate-click-pulse"
+                      className="pointer-events-none absolute block h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#FF0061]/70 animate-click-pulse"
                       style={{ left: ripple.x, top: ripple.y }}
                     />
                   )}
@@ -2554,7 +2554,7 @@ function EmptyBrowserState({
   if (taskStatus === 'executing' && isBrowserTask) {
     return (
       <div className={cn('flex max-w-[320px] flex-col items-center gap-2.5 rounded-[18px] px-6 py-5 text-center', BROWSER_SURFACE)}>
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#EA1F59]/10 text-[#EA1F59]">
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#FF0061]/10 text-[#FF0061]">
           <Globe className="h-4 w-4 animate-pulse-dot" aria-hidden />
         </div>
         <div>
@@ -2792,7 +2792,7 @@ function StatusDot({
         'inline-block h-2 w-2 rounded-full',
         status === 'idle' && 'bg-muted-foreground/40',
         status === 'live' && 'animate-pulse-dot bg-[#42C0EF]',
-        status === 'error' && 'bg-[#EA1F59]',
+        status === 'error' && 'bg-[#FF0061]',
       )}
     />
   );
@@ -2843,9 +2843,9 @@ function BrowserConnectionChip({
         state.tone === 'attention' &&
           'border-[#FFC910]/60 bg-[#FFC910]/15 text-[#57479C] dark:border-[#FFC910]/35 dark:text-foreground',
         state.tone === 'takeover' &&
-          'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]',
+          'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061]',
         state.tone === 'error' &&
-          'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]',
+          'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061]',
       )}
     >
       {state.label}
@@ -2969,7 +2969,7 @@ function UrlBar({
         'group flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[10px] border px-2 transition-colors',
         'border-[#E6E7EB] bg-[#F6F7F9] text-muted-foreground hover:border-[#DCDDDD] hover:bg-white',
         'focus-within:border-[#ADADAD] focus-within:bg-white focus-within:text-foreground',
-        interactiveActive && 'border-[#EA1F59]/35 bg-[#EA1F59]/5',
+        interactiveActive && 'border-[#FF0061]/35 bg-[#FF0061]/5',
         readOnly && 'bg-white/70',
         pending && 'cursor-wait opacity-75',
       )}
@@ -3036,7 +3036,7 @@ function UrlBar({
           disabled={pending || !draft.trim()}
           title="开始浏览"
           aria-label="开始浏览"
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] bg-[#EA1F59] text-white transition-colors hover:bg-[#D71950] disabled:cursor-not-allowed disabled:bg-[#DCDDDD] disabled:text-white"
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] bg-[#FF0061] text-white transition-colors hover:bg-[#D71950] disabled:cursor-not-allowed disabled:bg-[#DCDDDD] disabled:text-white"
         >
           <ArrowRight className="h-3.5 w-3.5" />
         </button>
@@ -3246,7 +3246,7 @@ function FullscreenFloatingToolbar({
             'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors',
             aborting
               ? 'cursor-wait border-white/20 bg-white/10 text-white/60'
-              : 'border-[#EA1F59]/35 bg-[#EA1F59]/15 text-white hover:bg-[#EA1F59]/25',
+              : 'border-[#FF0061]/35 bg-[#FF0061]/15 text-white hover:bg-[#FF0061]/25',
           )}
         >
           <Square className="h-3 w-3" strokeWidth={2.5} />
@@ -3261,7 +3261,7 @@ function FullscreenFloatingToolbar({
           aria-label={controlAction.ariaLabel}
           className={cn(
             'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-white/85 transition-colors hover:bg-white/10',
-            interactive && 'bg-[#EA1F59]/35 text-white',
+            interactive && 'bg-[#FF0061]/35 text-white',
           )}
         >
           {interactive ? (

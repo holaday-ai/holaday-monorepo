@@ -233,7 +233,7 @@ export function BatchTaskDialog({
         >
           <header className="flex shrink-0 items-center justify-between border-b border-[#DCDDDD]/80 px-5 py-3 dark:border-white/10">
             <div className="flex items-center gap-2 text-sm font-semibold text-[#2F2F2F] dark:text-foreground">
-              <Layers className="h-4 w-4 text-[#EA1F59]" />
+              <Layers className="h-4 w-4 text-[#FF0061]" />
               新建批量任务
             </div>
             <button
@@ -259,7 +259,7 @@ export function BatchTaskDialog({
               disabled={submitting}
               onChange={(e) => setName(e.target.value)}
               placeholder="例如：10 个竞品最新动态"
-              className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
+              className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#FF0061]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/10 dark:border-white/10 dark:bg-card"
             />
           </div>
           <div>
@@ -276,7 +276,7 @@ export function BatchTaskDialog({
                 className={cn(
                   'shrink-0 rounded-md border px-2 py-1 text-[11px]',
                   parsedPrompts.overLimit
-                    ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
+                    ? 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]'
                     : 'border-[#DCDDDD] bg-white text-muted-foreground dark:border-white/10 dark:bg-card',
                 )}
               >
@@ -302,11 +302,11 @@ export function BatchTaskDialog({
                     className={cn(
                       'rounded-[8px] border bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-colors dark:bg-card/85',
                       missingGoal
-                        ? 'border-[#EA1F59]/40'
+                        ? 'border-[#FF0061]/40'
                         : duplicateDraft
                           ? 'border-[#FFC910]/60'
                           : isActive
-                            ? 'border-[#EA1F59]/25'
+                            ? 'border-[#FF0061]/25'
                             : 'border-[#DCDDDD] dark:border-white/10',
                     )}
                   >
@@ -316,10 +316,10 @@ export function BatchTaskDialog({
                         onClick={() => setActiveIndex(index)}
                         disabled={submitting}
                         aria-expanded={isActive}
-                        className="min-h-8 min-w-0 flex-1 rounded-md py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/15 disabled:pointer-events-none"
+                        className="min-h-8 min-w-0 flex-1 rounded-md py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/15 disabled:pointer-events-none"
                       >
                         <div className="flex items-center gap-2">
-                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#EA1F59] text-[11px] font-semibold text-white">
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#FF0061] text-[11px] font-semibold text-white">
                             {index + 1}
                           </span>
                           <span className="truncate text-xs font-medium text-[#2F2F2F] dark:text-foreground">
@@ -366,7 +366,7 @@ export function BatchTaskDialog({
                           disabled={submitting || items.length === 1}
                           aria-label={`删除任务 ${index + 1}`}
                           title={`删除任务 ${index + 1}`}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:pointer-events-none disabled:opacity-40"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#FF0061]/10 hover:text-[#FF0061] disabled:pointer-events-none disabled:opacity-40"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -387,14 +387,14 @@ export function BatchTaskDialog({
                             onChange={(e) => updateItem(index, 'goal', e.target.value)}
                             placeholder="例如：查 OpenAI 最新动态"
                             className={cn(
-                              'w-full rounded-md border bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:bg-card',
+                              'w-full rounded-md border bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#FF0061]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/10 dark:bg-card',
                               missingGoal
-                                ? 'border-[#EA1F59]/45'
+                                ? 'border-[#FF0061]/45'
                                 : 'border-[#DCDDDD] dark:border-white/10',
                             )}
                           />
                           {missingGoal && (
-                            <span className="text-[11px] leading-4 text-[#EA1F59]">
+                            <span className="text-[11px] leading-4 text-[#FF0061]">
                               这张任务卡已经填写了步骤或输出，请补充目标。
                             </span>
                           )}
@@ -423,7 +423,7 @@ export function BatchTaskDialog({
                               '2. 找官方来源',
                               '3. 总结成三条',
                             ].join('\n')}
-                            className="w-full resize-y rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm leading-6 placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
+                            className="w-full resize-y rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm leading-6 placeholder:text-muted-foreground/55 focus-visible:border-[#FF0061]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/10 dark:border-white/10 dark:bg-card"
                           />
                         </label>
                         <label className="grid gap-1">
@@ -435,7 +435,7 @@ export function BatchTaskDialog({
                             disabled={submitting}
                             onChange={(e) => updateItem(index, 'output', e.target.value)}
                             placeholder="例如：给出链接、三条摘要和判断"
-                            className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
+                            className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#FF0061]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/10 dark:border-white/10 dark:bg-card"
                           />
                         </label>
                       </div>
@@ -472,7 +472,7 @@ export function BatchTaskDialog({
             type="button"
             onClick={() => void submit()}
             disabled={submitDisabled}
-            className="inline-flex items-center gap-1.5 rounded-md bg-[#EA1F59] px-3 py-1.5 text-sm font-medium text-white shadow-[0_4px_12px_rgba(234,31,89,0.16)] transition hover:bg-[#EA1F59]/90 disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 rounded-md bg-[#FF0061] px-3 py-1.5 text-sm font-medium text-white shadow-[0_4px_12px_rgba(255,0,97,0.16)] transition hover:bg-[#FF0061]/90 disabled:opacity-60"
           >
             {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {batchCreateButtonLabel(submitting)}
@@ -514,7 +514,7 @@ function TaskDraftProgressPill({
       className={cn(
         'rounded-full border px-1.5 py-0.5 text-[10px] font-medium',
         missingGoal
-          ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
+          ? 'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061]'
           : duplicate
             ? 'border-[#FFC910]/55 bg-[#FFC910]/12 text-[#8A6A00]'
           : ready

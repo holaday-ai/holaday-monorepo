@@ -68,7 +68,7 @@ export function AdminSelfCheckPage(): JSX.Element {
             type="button"
             disabled={running}
             onClick={() => void run(false)}
-            className="rounded-[6px] bg-[#EA1F59] px-3 py-1.5 text-[13px] text-white disabled:opacity-50"
+            className="rounded-[6px] bg-[#FF0061] px-3 py-1.5 text-[13px] text-white disabled:opacity-50"
           >
             {running ? <Loader2 className="inline h-4 w-4 animate-spin" /> : '开始自检'}
           </button>
@@ -85,7 +85,7 @@ export function AdminSelfCheckPage(): JSX.Element {
         </div>
       </header>
 
-      {error ? <div className="text-[13px] text-[#EA1F59]">{error}</div> : null}
+      {error ? <div className="text-[13px] text-[#FF0061]">{error}</div> : null}
 
       {report ? (
         <>

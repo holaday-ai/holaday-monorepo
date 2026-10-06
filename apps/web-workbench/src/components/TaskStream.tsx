@@ -858,7 +858,7 @@ function TrustSummaryCard({
                       (action.kind === 'prefill' && !onSuggestionPick)
                     }
                     title={action.detail}
-                    className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white/75 px-3 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#EA1F59]/30 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:bg-white/10"
+                    className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white/75 px-3 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#FF0061]/30 hover:bg-[#FF0061]/5 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:bg-white/10"
                   >
                     {action.kind === 'retry' ? (
                       <RotateCcw className={cn('h-3.5 w-3.5', retrying && 'animate-spin')} />
@@ -922,13 +922,13 @@ function trustToneIcon(tone: TrustTone): React.ComponentType<{ className?: strin
 }
 
 function trustToneClass(tone: TrustTone): string {
-  if (tone === 'danger') return 'border-[#EA1F59]/35';
+  if (tone === 'danger') return 'border-[#FF0061]/35';
   if (tone === 'warning') return 'border-[#FFC910]/55';
   return 'border-[#DCDDDD]';
 }
 
 function trustToneIconClass(tone: TrustTone): string {
-  if (tone === 'danger') return 'text-[#EA1F59]';
+  if (tone === 'danger') return 'text-[#FF0061]';
   if (tone === 'warning') return 'text-[#57479C]';
   return 'text-[#2F9E6D]';
 }
@@ -1410,14 +1410,14 @@ function LiveStatus({
     <div
       className={cn(
         'flex items-center gap-2 text-[13px] leading-5',
-        red ? 'text-[#EA1F59]' : 'text-muted-foreground',
+        red ? 'text-[#FF0061]' : 'text-muted-foreground',
       )}
     >
       {red ? (
         <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
       ) : (
         <Loader2
-          className="h-3.5 w-3.5 shrink-0 animate-spin text-[#EA1F59]"
+          className="h-3.5 w-3.5 shrink-0 animate-spin text-[#FF0061]"
           aria-hidden
         />
       )}
@@ -1539,7 +1539,7 @@ function HumanLineList({ lines }: { lines: HumanLine[] }): JSX.Element {
           <span
             className={cn(
               'min-w-0 flex-1',
-              line.status === 'failed' ? 'text-[#EA1F59]' : 'text-foreground',
+              line.status === 'failed' ? 'text-[#FF0061]' : 'text-foreground',
               line.status === 'cancelled' && 'text-muted-foreground',
               line.status === 'running' && 'text-foreground',
             )}
@@ -1566,7 +1566,7 @@ function LineBadge({
   if (status === 'running') {
     return (
       <span
-        className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#EA1F59]"
+        className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#FF0061]"
         aria-label={label}
         title={label}
       >
@@ -1577,7 +1577,7 @@ function LineBadge({
   if (status === 'failed') {
     return (
       <span
-        className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#EA1F59]"
+        className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#FF0061]"
         aria-label={label}
         title={label}
       >
@@ -1658,8 +1658,8 @@ function DetailToggle({
 }
 
 function stepDetailToneClass(tone: StepDetailSummary['tone']): string {
-  if (tone === 'failed') return 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]';
-  if (tone === 'running') return 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]';
+  if (tone === 'failed') return 'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061]';
+  if (tone === 'running') return 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]';
   if (tone === 'done') return 'border-[#42C0EF]/45 bg-[#42C0EF]/10 text-[#42C0EF]';
   if (tone === 'cancelled') return 'border-[#ADADAD]/55 bg-[#EFEFEF]/70 text-[#595757]';
   return 'border-[#DCDDDD] bg-white text-[#595757]';
@@ -1732,9 +1732,9 @@ function ExecutorFallbackBanner({
     return (
       <div
         role="alert"
-        className="flex animate-fade-in items-start gap-3 rounded-lg border border-[#EA1F59]/35 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#EA1F59]/35 dark:bg-card/85"
+        className="flex animate-fade-in items-start gap-3 rounded-lg border border-[#FF0061]/35 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#FF0061]/35 dark:bg-card/85"
       >
-        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-[#EA1F59]" />
+        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-[#FF0061]" />
         <div className="min-w-0 flex-1 text-sm">
         <div className="font-semibold text-foreground">反爬保护触发，但扩展未连接</div>
         <div className="mt-1 text-xs text-muted-foreground">
@@ -1773,8 +1773,8 @@ function DegradeBanner({ event }: { event: UiDegradeEvent }): JSX.Element {
   const message =
     DEGRADE_LEVEL_COPY[event.level] ?? '正在尝试替代方案…';
   return (
-    <div className="flex animate-fade-in items-start gap-3 rounded-lg border border-[#EA1F59]/35 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#EA1F59]/35 dark:bg-card/85">
-      <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-[#EA1F59]" />
+    <div className="flex animate-fade-in items-start gap-3 rounded-lg border border-[#FF0061]/35 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#FF0061]/35 dark:bg-card/85">
+      <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-[#FF0061]" />
       <div className="min-w-0 flex-1 text-sm">
         <div className="font-medium text-foreground">
           {message}
@@ -1891,7 +1891,7 @@ function EmptyTerminalCard({
           : partial
             ? 'border-[#FFC910]/55 bg-white text-[#595757] dark:border-[#FFC910]/35 dark:bg-card/85 dark:text-foreground'
           : failed
-            ? 'border-[#EA1F59]/35 bg-white text-[#595757] dark:border-[#EA1F59]/35 dark:bg-card/85 dark:text-foreground'
+            ? 'border-[#FF0061]/35 bg-white text-[#595757] dark:border-[#FF0061]/35 dark:bg-card/85 dark:text-foreground'
             : 'border-[#DCDDDD] bg-white text-muted-foreground dark:border-white/10 dark:bg-card/85',
       )}
     >
@@ -1910,7 +1910,7 @@ function EmptyTerminalCard({
             'mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border bg-white/70 px-3 text-[11px] font-medium transition-colors hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:bg-transparent dark:hover:bg-white/10',
             partial
               ? 'border-[#FFC910]/60 text-[#57479C] dark:border-[#FFC910]/35 dark:text-foreground'
-              : 'border-[#EA1F59]/40 text-[#EA1F59] dark:border-[#EA1F59]/35',
+              : 'border-[#FF0061]/40 text-[#FF0061] dark:border-[#FF0061]/35',
           )}
         >
           <RotateCcw className={cn('h-3.5 w-3.5', retrying && 'animate-spin')} />
@@ -1933,9 +1933,9 @@ function ExpertReportHeader({ workflowId }: { workflowId: string }): JSX.Element
 
 function BrowserErrorFinalUrlBanner(): JSX.Element {
   return (
-    <div className="mb-3 rounded-md border border-[#EA1F59]/30 bg-[#EA1F59]/5 px-3 py-2 text-sm text-[#595757] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10 dark:text-foreground">
+    <div className="mb-3 rounded-md border border-[#FF0061]/30 bg-[#FF0061]/5 px-3 py-2 text-sm text-[#595757] dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10 dark:text-foreground">
       <div className="flex items-start gap-2">
-        <Globe className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" aria-hidden />
+        <Globe className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0061]" aria-hidden />
         <div className="min-w-0">
           <div className="font-medium">网页没有成功打开</div>
           <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
@@ -2001,10 +2001,10 @@ function FollowUpChips({
             key={`${i}-${a.slice(0, 12)}`}
             type="button"
             onClick={() => onPick(a)}
-            className="group inline-flex min-h-8 max-w-full items-start gap-2 rounded-[6px] border border-[#DCDDDD] bg-white px-2.5 py-1.5 text-left text-xs font-medium text-[#595757] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 sm:max-w-[280px] dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:bg-[#EA1F59]/10 dark:hover:text-foreground"
+            className="group inline-flex min-h-8 max-w-full items-start gap-2 rounded-[6px] border border-[#DCDDDD] bg-white px-2.5 py-1.5 text-left text-xs font-medium text-[#595757] transition-colors hover:border-[#FF0061]/35 hover:bg-[#FF0061]/5 hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 sm:max-w-[280px] dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:bg-[#FF0061]/10 dark:hover:text-foreground"
           >
             <ChevronRight
-              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#ADADAD] transition-transform group-hover:translate-x-0.5 group-hover:text-[#EA1F59]"
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#ADADAD] transition-transform group-hover:translate-x-0.5 group-hover:text-[#FF0061]"
               aria-hidden
             />
             <span className="min-w-0 flex-1 leading-5">{a}</span>
@@ -2147,7 +2147,7 @@ function ScreenshotThumbnailCard({
       className={cn(
         'group my-2 flex w-full max-w-md flex-col gap-2 overflow-hidden rounded-[8px] border bg-white p-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors dark:bg-card/85',
         downloadState === 'failed'
-          ? 'border-[#EA1F59]/40 bg-[#EA1F59]/5'
+          ? 'border-[#FF0061]/40 bg-[#FF0061]/5'
           : downloadState === 'loading'
             ? 'border-[#57479C]/40 bg-[#57479C]/5 opacity-90'
             : 'border-[#DCDDDD] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/35 dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/[0.04]',
@@ -2188,7 +2188,7 @@ function ScreenshotThumbnailCard({
             className={cn(
               'mt-0.5 text-[11px]',
               downloadState === 'failed'
-                ? 'text-[#EA1F59]'
+                ? 'text-[#FF0061]'
                 : 'text-muted-foreground',
             )}
           >
@@ -2200,14 +2200,14 @@ function ScreenshotThumbnailCard({
           </div>
         </div>
         {downloadState === 'loading' ? (
-          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" />
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#FF0061]" />
         ) : (
           <Download
             className={cn(
               'h-4 w-4 shrink-0 transition-colors',
               downloadState === 'failed'
-                ? 'text-[#EA1F59]'
-                : 'text-muted-foreground group-hover:text-[#EA1F59]',
+                ? 'text-[#FF0061]'
+                : 'text-muted-foreground group-hover:text-[#FF0061]',
             )}
           />
         )}
@@ -2295,7 +2295,7 @@ function MarkdownCodeBlock({
               meta.variant === 'diagram'
                 ? 'bg-[#42C0EF]'
                 : meta.variant === 'content'
-                  ? 'bg-[#EA1F59]'
+                  ? 'bg-[#FF0061]'
                   : 'bg-[#57479C]',
             )}
           />
@@ -2307,7 +2307,7 @@ function MarkdownCodeBlock({
           type="button"
           onClick={() => void handleCopy()}
           disabled={!text}
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-white hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10"
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-white hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10"
           aria-label={copied ? `${meta.copyLabel}已复制` : `复制${meta.copyLabel}`}
           title={copied ? '已复制' : `复制${meta.copyLabel}`}
         >
@@ -2661,7 +2661,7 @@ function TerminalSummary({
                     disabled={retryingIntent != null}
                     aria-label={retryingIntent ? '正在重新执行任务' : '重新执行任务'}
                     title={retryingIntent ? '正在重新执行' : '重新执行任务'}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#EA1F59]/25 bg-[#EA1F59]/5 px-3 text-[11px] font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/10 disabled:cursor-wait disabled:opacity-60 dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10 dark:text-foreground"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#FF0061]/25 bg-[#FF0061]/5 px-3 text-[11px] font-medium text-[#FF0061] transition-colors hover:border-[#FF0061]/45 hover:bg-[#FF0061]/10 disabled:cursor-wait disabled:opacity-60 dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10 dark:text-foreground"
                   >
                     <RotateCcw className={cn('h-3.5 w-3.5', retryingIntent && 'animate-spin')} />
                     <span>重新执行</span>
@@ -2806,7 +2806,7 @@ function TerminalSummary({
             onClick={() => void copyTo(plainText, '纯文本')}
             aria-label="复制纯文本结果"
             title="复制"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-[#DCDDDD] bg-white/75 font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.04)] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:border-[#EA1F59]/40 dark:hover:bg-[#EA1F59]/10 dark:hover:text-foreground"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-[#DCDDDD] bg-white/75 font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.04)] transition-colors hover:border-[#FF0061]/35 hover:bg-[#FF0061]/5 hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:border-[#FF0061]/40 dark:hover:bg-[#FF0061]/10 dark:hover:text-foreground"
           >
             <Copy className="h-3.5 w-3.5" />
           </button>
@@ -2829,7 +2829,7 @@ function TerminalSummary({
             >
               <DropdownMenuItem
                 onSelect={() => void copyTo(markdownText, '为 Markdown')}
-                className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
+                className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#FF0061] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
               >
                 <FileText className="text-[#ADADAD]" />
                 <span>复制为 Markdown</span>
@@ -2842,7 +2842,7 @@ function TerminalSummary({
                     toast.show('下载失败，请复制内容后手动保存', 'error');
                   }
                 }}
-                className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
+                className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#FF0061] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
               >
                 <Download className="text-[#ADADAD]" />
                 <span>下载 .md</span>
@@ -2857,7 +2857,7 @@ function TerminalSummary({
                       '任务链接',
                     );
                   }}
-                  className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
+                  className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#FF0061] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
                 >
                   <Link2 className="text-[#ADADAD]" />
                   <span>分享任务</span>
@@ -2866,7 +2866,7 @@ function TerminalSummary({
               {!isFailedLike && intent && (
                 <DropdownMenuItem
                   onSelect={() => setScheduleDialogOpen(true)}
-                  className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
+                  className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#FF0061] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
                 >
                   <Clock className="text-[#ADADAD]" />
                   <span>设为定时</span>
@@ -2901,9 +2901,9 @@ function TerminalSummary({
               key={`${i}-${s.slice(0, 10)}`}
               type="button"
               onClick={() => onSuggestionPick(s)}
-              className="group flex min-h-10 w-full items-start gap-2.5 rounded-[6px] px-2.5 py-2.5 text-left text-xs text-[#595757] transition-colors hover:bg-[#EFEFEF]/55 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 dark:text-foreground/75 dark:hover:bg-white/10 dark:hover:text-foreground"
+              className="group flex min-h-10 w-full items-start gap-2.5 rounded-[6px] px-2.5 py-2.5 text-left text-xs text-[#595757] transition-colors hover:bg-[#EFEFEF]/55 hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 dark:text-foreground/75 dark:hover:bg-white/10 dark:hover:text-foreground"
             >
-              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#DCDDDD] bg-[#EFEFEF]/55 text-[11px] font-medium text-[#595757] transition-colors group-hover:border-[#EA1F59]/35 group-hover:bg-[#EA1F59]/5 group-hover:text-[#EA1F59] dark:border-white/10 dark:bg-white/5 dark:text-foreground/70">
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#DCDDDD] bg-[#EFEFEF]/55 text-[11px] font-medium text-[#595757] transition-colors group-hover:border-[#FF0061]/35 group-hover:bg-[#FF0061]/5 group-hover:text-[#FF0061] dark:border-white/10 dark:bg-white/5 dark:text-foreground/70">
                 {i + 1}
               </span>
               <span className="min-w-0 flex-1 leading-5">{s}</span>
@@ -3078,7 +3078,7 @@ function makeMarkdownComponents(opts: {
                 }
               : undefined
           }
-          className="inline-flex min-h-7 items-center gap-1 rounded-[4px] px-0.5 align-middle text-[#EA1F59] underline decoration-[#EA1F59]/35 underline-offset-2 hover:text-[#EA1F59] dark:text-[#EA1F59] dark:hover:text-[#EA1F59]"
+          className="inline-flex min-h-7 items-center gap-1 rounded-[4px] px-0.5 align-middle text-[#FF0061] underline decoration-[#FF0061]/35 underline-offset-2 hover:text-[#FF0061] dark:text-[#FF0061] dark:hover:text-[#FF0061]"
           {...rest}
         >
           {children}

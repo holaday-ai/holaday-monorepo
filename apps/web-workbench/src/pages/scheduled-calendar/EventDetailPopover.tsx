@@ -126,7 +126,7 @@ export function EventDetailPopover({
             {statusIcon}
             {statusLabel}
             {row.lastRunStatus === 'failed' && row.status === 'active' && (
-              <span className="ml-1 rounded bg-[#EA1F59]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#EA1F59]">
+              <span className="ml-1 rounded bg-[#FF0061]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#FF0061]">
                 上次失败
               </span>
             )}
@@ -165,7 +165,7 @@ export function EventDetailPopover({
           {row.reminderMinutes == null ? (
             <BellOff className="h-3 w-3" />
           ) : (
-            <Bell className="h-3 w-3" style={{ color: '#EA1F59' }} />
+            <Bell className="h-3 w-3" style={{ color: '#FF0061' }} />
           )}
           提醒
         </span>
@@ -179,7 +179,7 @@ export function EventDetailPopover({
         <span className="text-foreground">
           {scheduledNotifySummary({ failureNotifyThreshold, notifyOnSuccess })}
           {row.consecutiveFailures && row.consecutiveFailures > 0 ? (
-            <span className="text-[#EA1F59]"> · 已连续失败 {row.consecutiveFailures} 次</span>
+            <span className="text-[#FF0061]"> · 已连续失败 {row.consecutiveFailures} 次</span>
           ) : null}
         </span>
         {row.lastRunAt && (
@@ -195,7 +195,7 @@ export function EventDetailPopover({
                   <span>成功</span>
                 </span>
               ) : row.lastRunStatus === 'failed' ? (
-                <span className="inline-flex items-center gap-1 text-[#EA1F59]">
+                <span className="inline-flex items-center gap-1 text-[#FF0061]">
                   <XCircle className="h-3 w-3" aria-hidden />
                   <span>失败</span>
                 </span>
@@ -214,7 +214,7 @@ export function EventDetailPopover({
       </div>
 
       {row.lastError && row.lastRunStatus === 'failed' && (
-        <div className="mt-3 rounded-[8px] border border-[#EA1F59]/20 bg-[#EA1F59]/[0.06] px-3 py-2 text-xs text-[#EA1F59]">
+        <div className="mt-3 rounded-[8px] border border-[#FF0061]/20 bg-[#FF0061]/[0.06] px-3 py-2 text-xs text-[#FF0061]">
           <div className="mb-0.5 font-semibold">上次失败详情</div>
           <div className="break-words text-[11px]">
             {scheduledEventFailureDetail(row.lastError)}
@@ -234,7 +234,7 @@ export function EventDetailPopover({
           className={cn(
             'mt-3 rounded-[8px] border px-3 py-2 text-xs',
             actionHint.tone === 'error'
-              ? 'border-[#EA1F59]/20 bg-[#EA1F59]/[0.06] text-[#9F153D]'
+              ? 'border-[#FF0061]/20 bg-[#FF0061]/[0.06] text-[#9F153D]'
               : actionHint.tone === 'attention'
                 ? 'border-[#FFC910]/35 bg-[#FFC910]/10 text-[#6F5700]'
                 : 'border-[#DCDDDD] bg-[#FAFAFA] text-[#595757]',
@@ -279,7 +279,7 @@ export function EventDetailPopover({
                   await onNotifyPrefsChange(row.scheduledTaskId, { notifyOnSuccess: next });
                 });
               }}
-              className="h-3.5 w-3.5 accent-[#EA1F59]"
+              className="h-3.5 w-3.5 accent-[#FF0061]"
             />
             成功也通知
           </label>
@@ -293,7 +293,7 @@ export function EventDetailPopover({
             variant="outline"
             size="sm"
             disabled={busy !== null}
-            className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+            className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
             onClick={() =>
               void wrap('toggle', async () => {
                 await onToggle(row.scheduledTaskId);
@@ -310,7 +310,7 @@ export function EventDetailPopover({
             variant="outline"
             size="sm"
             disabled={busy !== null}
-            className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+            className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
             onClick={() =>
               void wrap('run', async () => {
                 await onRunNow(row.scheduledTaskId);
@@ -333,7 +333,7 @@ export function EventDetailPopover({
             if (busy !== null) return;
             onDeleteRequest(row.scheduledTaskId);
           }}
-          className="h-8 w-8 text-[#EA1F59] hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:cursor-wait disabled:opacity-55"
+          className="h-8 w-8 text-[#FF0061] hover:bg-[#FF0061]/10 hover:text-[#FF0061] disabled:cursor-wait disabled:opacity-55"
         >
           <Trash2 className="h-3.5 w-3.5" aria-hidden />
         </Button>
@@ -371,11 +371,11 @@ const STATUS_LABEL: Partial<Record<ScheduledTaskRow['status'], string>> = {
 };
 
 const STATUS_ICON: Partial<Record<ScheduledTaskRow['status'], React.ReactNode>> = {
-  active: <Clock className="h-3 w-3" style={{ color: '#EA1F59' }} />,
+  active: <Clock className="h-3 w-3" style={{ color: '#FF0061' }} />,
   paused: <Pause className="h-3 w-3 text-[#ADADAD]" />,
   running: <Loader2 className="h-3 w-3 animate-spin text-[#FFC910]" />,
   completed: <CheckCircle2 className="h-3 w-3 text-[#42C0EF]" />,
-  failed: <XCircle className="h-3 w-3 text-[#EA1F59]" />,
+  failed: <XCircle className="h-3 w-3 text-[#FF0061]" />,
   unknown: <Clock className="h-3 w-3 text-[#ADADAD]" />,
 };
 

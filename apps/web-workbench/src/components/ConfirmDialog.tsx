@@ -118,9 +118,9 @@ export function ConfirmDialog({
             onClick={handleConfirm}
             disabled={busy}
             className={cn(
-              'shadow-[0_4px_12px_rgba(234,31,89,0.16)] focus-visible:ring-[#EA1F59]/25',
+              'shadow-[0_4px_12px_rgba(255,0,97,0.16)] focus-visible:ring-[#FF0061]/25',
               destructive
-                ? 'bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90'
+                ? 'bg-[#FF0061] text-white hover:bg-[#FF0061]/90'
                 : 'bg-[#57479C] text-white hover:bg-[#57479C]/90',
             )}
           >

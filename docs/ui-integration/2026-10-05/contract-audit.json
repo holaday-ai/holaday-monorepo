@@ -5,46 +5,55 @@
     {
       "file": "src/App.tsx",
       "unchanged": true,
+      "brandColorOnly": false,
       "sha256": "1a217e0378bca879bae94fab65fd30d7996cdfe0191455d7a4fd28b8ec793dcc"
     },
     {
       "file": "src/components/BrowserPanel.tsx",
-      "unchanged": true,
-      "sha256": "aa6470d2077ac8ce7a46b67f5b8f5651ce8412bb8713ee22914056e3826f620e"
+      "unchanged": false,
+      "brandColorOnly": true,
+      "sha256": "81b9482b8f23bf82d54616232ea3fbc14b05c971a4bd6429dc28c30bfea6039a"
     },
     {
       "file": "src/components/VncViewport.tsx",
       "unchanged": true,
+      "brandColorOnly": false,
       "sha256": "210a9fbb4337cf67f461dba848fd51104054d41c452f28c8171b1ef966aff762"
     },
     {
       "file": "src/components/FailureHeaderCard.tsx",
-      "unchanged": true,
-      "sha256": "9f66dc76101290133348d4bb08cc2235b1413f21e1a0ccee0f49e23b79fa9c59"
+      "unchanged": false,
+      "brandColorOnly": true,
+      "sha256": "12538d52a1fcdd6aaee09097fdb49fbfd0ebd918444fe3f555fc512d683b1f29"
     },
     {
       "file": "src/lib/task-failure-recovery.ts",
       "unchanged": true,
+      "brandColorOnly": false,
       "sha256": "528f86332e825319b6394723990ef49c3f18c2b0a717e580fd427bf76b37b3f6"
     },
     {
       "file": "src/pages/admin/AdminModelsPage.tsx",
-      "unchanged": true,
-      "sha256": "f55fc9d173d780793b69ccadc40cb0df2e3b266195307e93863ba2f85d602efa"
+      "unchanged": false,
+      "brandColorOnly": true,
+      "sha256": "b22820182fcf2407629bcd31278e2dfc689e055d29ee5677daea2a63780cc1ed"
     },
     {
       "file": "src/pages/admin/AdminSelfCheckPage.tsx",
-      "unchanged": true,
-      "sha256": "6e771f64a298ecd52a40d8243e4730fdc4007686f43b8275d3f3a03d05cf9fd2"
+      "unchanged": false,
+      "brandColorOnly": true,
+      "sha256": "b44d4752ab691929d8fa4f7ef05321f431e388755faadd169df7f3f4445db2d7"
     },
     {
       "file": "src/lib/trpc.ts",
       "unchanged": true,
+      "brandColorOnly": false,
       "sha256": "c9ca622702828039a1f890c0a0f065e1952a794699587c22f409ba5a7e14b2a6"
     },
     {
       "file": "src/lib/ws.ts",
       "unchanged": true,
+      "brandColorOnly": false,
       "sha256": "6f1bf62078cc27dcce475e945a1564aee6ddf465451c902a9ed3326bf85a7c6b"
     }
   ],

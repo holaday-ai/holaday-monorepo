@@ -20,9 +20,17 @@ const baseFiles = new Set(git('ls-tree', '-r', '--name-only', '85329cb3').trim()
 const changed=[];
 for(const file of files){const before=calls(baseFiles.has(file)?git('show','85329cb3:'+file):'');const after=calls(fs.readFileSync(path.join(root,file),'utf8'));if(JSON.stringify(before)!==JSON.stringify(after))changed.push(file);}
 const protectedFiles=['src/App.tsx','src/components/BrowserPanel.tsx','src/components/VncViewport.tsx','src/components/FailureHeaderCard.tsx','src/lib/task-failure-recovery.ts','src/pages/admin/AdminModelsPage.tsx','src/pages/admin/AdminSelfCheckPage.tsx','src/lib/trpc.ts','src/lib/ws.ts'];
-const protectedResult=protectedFiles.map(file=>{const full='apps/web-workbench/'+file;const before=git('show','85329cb3:'+full);const current=fs.readFileSync(path.join(root,full),'utf8');return {file,unchanged:before===current,sha256:crypto.createHash('sha256').update(current).digest('hex')};});
+// The review explicitly authorizes a repository-wide brand change. Derive the
+// legacy value from the baseline instead of retaining an obsolete color token.
+const legacyBrand = git('show', '85329cb3:apps/web-workbench/src/index.css').match(/brand pink \((#[\da-f]{6})\)/i)[1];
+const legacyRgb = legacyBrand.slice(1).match(/../g).map(part => parseInt(part, 16));
+function updateBrand(text) {
+  return text.replace(new RegExp(legacyBrand, 'ig'), '#FF0061')
+    .replace(new RegExp(legacyRgb.join('(\\s*,\\s*)'), 'g'), (_match, comma1, comma2) => `255${comma1}0${comma2}97`);
+}
+const protectedResult=protectedFiles.map(file=>{const full='apps/web-workbench/'+file;const before=git('show','85329cb3:'+full);const current=fs.readFileSync(path.join(root,full),'utf8');return {file,unchanged:before===current,brandColorOnly:before!==current&&updateBrand(before)===current,sha256:crypto.createHash('sha256').update(current).digest('hex')};});
 const excluded=git('diff','--name-only','85329cb3','--','apps/orchestrator','packages','scripts','.github','pnpm-lock.yaml').trim();
 const result={base:'85329cb3',apiCallsitesChanged:changed,protectedFiles:protectedResult,backendSharedOpsChanges:excluded?excluded.split('\n'):[]};
 if (process.env.UI_AUDIT_OUTPUT) fs.writeFileSync(process.env.UI_AUDIT_OUTPUT, JSON.stringify(result,null,2));
-console.log(JSON.stringify({apiCallsitesChanged:changed,protectedFilesUnchanged:protectedResult.every(f=>f.unchanged),backendSharedOpsChanges:result.backendSharedOpsChanges}));
-if(changed.length||excluded||protectedResult.some(f=>!f.unchanged))process.exitCode=1;
+console.log(JSON.stringify({apiCallsitesChanged:changed,protectedFilesUnchanged:protectedResult.every(f=>f.unchanged),protectedFilesUnchangedOrBrandColorOnly:protectedResult.every(f=>f.unchanged||f.brandColorOnly),backendSharedOpsChanges:result.backendSharedOpsChanges}));
+if(changed.length||excluded||protectedResult.some(f=>!f.unchanged&&!f.brandColorOnly))process.exitCode=1;
