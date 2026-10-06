@@ -39,7 +39,12 @@ export function SkillLogo({
   className,
 }: SkillLogoProps): JSX.Element {
   const known = KNOWN_LOGOS.has(logoId);
-  const theme = logoTheme(known ? logoId : 'fallback');
+  if (known) return (
+    <span role="img" aria-label={label} data-logo-id={logoId} data-logo-known="true" className={cn('inline-flex shrink-0 overflow-hidden', SIZE_CLASS[size], className)}>
+      <img src={`${import.meta.env.BASE_URL}holaday-ui/skill-logos/${logoId}.svg`} alt="" aria-hidden className="h-full w-full" />
+    </span>
+  );
+  const theme = logoTheme('fallback');
 
   return (
     <span

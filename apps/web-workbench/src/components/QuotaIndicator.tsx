@@ -68,7 +68,7 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
 
   if (loading && !snap) {
     return compact ? null : (
-      <div className="px-2 pb-2">
+      <div className="hd-sidebar-quota px-2 pb-2">
         <div className="rounded-[10px] border border-[#DCDDDD]/70 bg-white/60 px-3 py-2 text-[11px] text-[#ADADAD] shadow-[0_4px_12px_rgba(17,24,39,0.035)] dark:border-white/10 dark:bg-white/[0.04]">
           读取额度...
         </div>
@@ -79,7 +79,7 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
     if (compact) return null;
     const copy = quotaRefreshStatusCopy({ error, hasSnapshot: false });
     return (
-      <div className="px-2 pb-2">
+      <div className="hd-sidebar-quota px-2 pb-2">
         <div className="rounded-[10px] border border-[#DCDDDD]/75 bg-white/65 px-3 py-2 text-[11px] shadow-[0_4px_12px_rgba(17,24,39,0.035)] dark:border-white/10 dark:bg-white/5">
           <div className="flex items-start gap-2">
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FF0061]" aria-hidden />
@@ -138,7 +138,7 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
 
   if (snap.quotaMode === 'unmetered_test') {
     return (
-      <div className="px-2 pb-2">
+      <div className="hd-sidebar-quota px-2 pb-2">
         <button
           type="button"
           onClick={() => navigate('/usage')}
@@ -163,7 +163,7 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
   }
 
   return (
-    <div className="px-2 pb-2">
+    <div className="hd-sidebar-quota px-2 pb-2">
       <div
         className={cn(
           'rounded-[10px] border border-[#DCDDDD]/70 bg-white/72 px-3 py-2 text-left shadow-[0_4px_12px_rgba(17,24,39,0.035)] transition-colors dark:border-white/10 dark:bg-white/[0.04]',
@@ -173,11 +173,12 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
         <button
           type="button"
           onClick={() => navigate(quotaIndicatorHref(snap))}
+          title={`${periodLabel}额度，剩余 ${remaining} / ${totalLimit}${snap.opusRemaining != null ? `，Opus 剩余 ${snap.opusRemaining}` : ''}`}
           className="group flex w-full flex-col gap-1.5 text-left outline-none focus-visible:ring-1 focus-visible:ring-[#FF0061]/45"
         >
           <div className="flex items-center justify-between gap-2">
             <span className="truncate text-[10px] font-medium text-[#8B93A6]">
-              {periodLabel}额度
+              {planLabel(snap.plan)}
             </span>
             <span className="inline-flex items-center gap-1 rounded-[6px] text-[11px] font-semibold text-[#595757] dark:text-foreground">
               剩余 {remaining}
@@ -197,7 +198,7 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
               style={{ width: `${usedPct}%` }}
             />
           </div>
-          <div className="flex items-center justify-between gap-2 text-[10px] text-[#8B93A6] dark:text-foreground/60">
+          <div className="sr-only">
             <span className="truncate">
               {snap.bonusTasks > 0 ? (
                 <>

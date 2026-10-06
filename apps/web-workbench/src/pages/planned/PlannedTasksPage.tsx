@@ -26,6 +26,7 @@ import FullCalendar from '@fullcalendar/react';
 import * as Dialog from '@radix-ui/react-dialog';
 import {
   CalendarClock,
+  Search,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
@@ -209,6 +210,8 @@ export function PlannedTasksPage(): JSX.Element {
   );
   const [mobileInspector, setMobileInspector] = React.useState(matchMobileInspector);
   const [title, setTitle] = React.useState('');
+  const [calendarQuery, setCalendarQuery] = React.useState('');
+  const [selectedDay, setSelectedDay] = React.useState(() => new Date());
   const [range, setRange] = React.useState<{ start: Date; end: Date } | null>(null);
   const [occurrences, setOccurrences] = React.useState<PlannedCalendarOccurrence[]>([]);
   const [legacyEvents, setLegacyEvents] = React.useState<EventInput[]>([]);
@@ -409,8 +412,8 @@ export function PlannedTasksPage(): JSX.Element {
     () => [
       ...occurrences.map((occurrence) => calendarEventFromOccurrence(occurrence)),
       ...legacyEvents,
-    ],
-    [legacyEvents, occurrences],
+    ].filter(event => !calendarQuery.trim() || event.title?.toLocaleLowerCase().includes(calendarQuery.trim().toLocaleLowerCase())),
+    [legacyEvents, occurrences, calendarQuery],
   );
   const attentionCount = plans.filter(
     (plan) => plannedStatusGroup(plan).group === 'attention',
@@ -543,7 +546,7 @@ export function PlannedTasksPage(): JSX.Element {
   function handleDateClick(arg: DateClickArg): void {
     const date = new Date(arg.date);
     if (arg.allDay) date.setHours(9, 0, 0, 0);
-    openCreate(date);
+    setSelectedDay(date);
   }
 
   function handleEventClick(arg: EventClickArg): void {
@@ -734,16 +737,17 @@ export function PlannedTasksPage(): JSX.Element {
 
   return (
     <PageContainer width="wide" className="planned-page max-w-[1320px]">
+      <span className="hd-page-eyebrow">A LITTLE PLANNING. MORE POSSIBILITY.</span>
       <PageHeader
-        title="规划任务"
-        description="把未来一次或重复执行的工作放进日历；多个事项会作为一个规划分批启动。"
+        title="把时间，留给重要的事。"
+        description="安排一次，Holaday 在合适的时候开始。"
         action={
           <>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline">
+                <Button variant="outline" className="hd-legacy-plans" title="旧任务记录" aria-label="旧任务记录">
                   <History aria-hidden />
-                  旧任务记录
+                  <span className="sr-only">旧任务记录</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -757,7 +761,7 @@ export function PlannedTasksPage(): JSX.Element {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button onClick={() => openCreate()}>
+            <Button onClick={() => openCreate(selectedDay)}>
               <Plus aria-hidden />
               新建规划
             </Button>
@@ -765,6 +769,25 @@ export function PlannedTasksPage(): JSX.Element {
         }
       />
 
+      <div className="hd-planned-page-tabs">            <div className="planned-toolbar__views" aria-label="视图切换">
+              <button
+                type="button"
+                className={view === 'dayGridMonth' ? 'is-active' : ''}
+                aria-pressed={view === 'dayGridMonth'}
+                onClick={() => changeView('dayGridMonth')}
+              >
+                月历
+              </button>
+              <button
+                type="button"
+                className={view === 'listMonth' ? 'is-active' : ''}
+                aria-pressed={view === 'listMonth'}
+                onClick={() => changeView('listMonth')}
+              >
+                日程
+              </button>
+            </div>
+<label className="hd-planned-search"><Search /><input aria-label="查找规划" placeholder="查找规划" value={calendarQuery} onChange={event => setCalendarQuery(event.target.value)} /></label></div>
       <div
         className="planned-summary"
         aria-label="规划任务概览"
@@ -792,7 +815,7 @@ export function PlannedTasksPage(): JSX.Element {
         )}
       </div>
 
-      <div className={cn('planned-workbench', editor && 'planned-workbench--editing')}>
+      <div className={cn('planned-workbench hd-planned-workbench', editor && 'planned-workbench--editing')}>
         <section className="planned-calendar-panel" aria-label="规划日历">
           <div className="planned-toolbar">
             <div className="planned-toolbar__nav">
@@ -805,7 +828,7 @@ export function PlannedTasksPage(): JSX.Element {
               >
                 <ChevronLeft aria-hidden />
               </Button>
-              <Button variant="outline" onClick={() => calendarRef.current?.getApi().today()}>
+              <Button variant="outline" onClick={() => { calendarRef.current?.getApi().today(); setSelectedDay(new Date()); }}>
                 今天
               </Button>
               <Button
@@ -818,24 +841,6 @@ export function PlannedTasksPage(): JSX.Element {
                 <ChevronRight aria-hidden />
               </Button>
               <strong>{title}</strong>
-            </div>
-            <div className="planned-toolbar__views" aria-label="视图切换">
-              <button
-                type="button"
-                className={view === 'dayGridMonth' ? 'is-active' : ''}
-                aria-pressed={view === 'dayGridMonth'}
-                onClick={() => changeView('dayGridMonth')}
-              >
-                月历
-              </button>
-              <button
-                type="button"
-                className={view === 'listMonth' ? 'is-active' : ''}
-                aria-pressed={view === 'listMonth'}
-                onClick={() => changeView('listMonth')}
-              >
-                日程
-              </button>
             </div>
             {calendarLoading && (
               <span className="planned-toolbar__loading" role="status">
@@ -851,7 +856,10 @@ export function PlannedTasksPage(): JSX.Element {
             initialView={view}
             headerToolbar={false}
             height="auto"
-            dayMaxEvents={3}
+            dayMaxEvents={2}
+            fixedWeekCount={false}
+            eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
+            dayHeaderContent={arg => arg.text.replace('周', '')}
             moreLinkText={(count) => `还有 ${count} 项`}
             events={events}
             editable
@@ -865,6 +873,8 @@ export function PlannedTasksPage(): JSX.Element {
               );
               setView(arg.view.type as PlannedCalendarView);
             }}
+            dayCellContent={arg => String(arg.date.getDate())}
+            dayCellClassNames={arg => arg.date.toDateString() === selectedDay.toDateString() ? ['hd-selected-day'] : []}
             dateClick={handleDateClick}
             eventClick={handleEventClick}
             eventDrop={handleEventDrop}
@@ -894,6 +904,22 @@ export function PlannedTasksPage(): JSX.Element {
             </div>
           )}
         </section>
+
+        {!editor && <aside className="hd-day-agenda" aria-label="当天安排">
+          <header><div><span>{selectedDay.toDateString() === new Date().toDateString() ? 'TODAY' : 'SCHEDULE'}</span><h2>{selectedDay.toLocaleDateString('zh-CN', { month:'long', day:'numeric' })}</h2><small>{events.filter(event => event.start && new Date(event.start as string).toDateString() === selectedDay.toDateString()).length} 项安排 · 按各规划当地时间</small></div><button type="button" title="添加当天安排" aria-label="添加当天安排" onClick={() => openCreate(selectedDay)}><Plus /></button></header>
+          <div className="hd-agenda-events">
+            {events.filter(event => event.start && new Date(event.start as string).toDateString() === selectedDay.toDateString()).sort((a,b) => new Date(a.start as string).getTime() - new Date(b.start as string).getTime()).map(event => {
+              const props = event.extendedProps ?? {};
+              const occurrence = occurrences.find(row => row.occurrenceId === event.id);
+              return <button key={event.id} type="button" className="hd-agenda-item" data-status={props.status} onClick={() => {
+                if (props.legacy) { navigate('/planned/legacy-scheduled'); return; }
+                if (occurrence) void openPlan(occurrence.plannedTaskId, occurrence);
+              }}><i style={{ background: String(props.accent ?? '#ADADAD') }} /><time>{new Date(event.start as string).toLocaleTimeString('zh-CN', { hour:'2-digit',minute:'2-digit',hour12:false })}</time><strong>{event.title}</strong><small>{props.legacy ? '旧任务' : `${plannedRepeatLabel(String(props.repeatType))} · ${props.itemCount ?? 1} 个任务项`}</small></button>;
+            })}
+            {!events.some(event => event.start && new Date(event.start as string).toDateString() === selectedDay.toDateString()) && <p className="hd-agenda-empty">{calendarLoading ? '正在读取当天安排…' : '这一天还没有安排，留一点时间给新的想法。'}</p>}
+          </div>
+          <button className="hd-agenda-create" type="button" onClick={() => openCreate(selectedDay)}><Plus />安排一件事</button><p className="hd-agenda-note">定时开始，完成后通知你。<br />重复的小事，也可以从日常里腾出来。</p>
+        </aside>}
 
         {editor && (
           <PlannedInspectorSurface
@@ -1500,10 +1526,8 @@ function renderEventContent(arg: EventContentArg): JSX.Element {
       data-status={arg.event.extendedProps.status}
       style={{ '--planned-event-accent': arg.event.extendedProps.accent } as React.CSSProperties}
     >
-      <time>{arg.timeText}</time>
       <span>{arg.event.title}</span>
-      {legacy && <em className="planned-event__legacy">旧任务</em>}
-      {itemCount > 1 && <b>{itemCount}</b>}
+      <div className="hd-planned-event-meta"><time>{arg.timeText}</time><small>{legacy ? '旧任务' : arg.event.extendedProps.status === 'paused' ? '已暂停' : itemCount > 1 ? `${itemCount}项` : arg.event.extendedProps.repeatType === 'once' ? '单次' : '重复'}</small></div>
     </div>
   );
 }

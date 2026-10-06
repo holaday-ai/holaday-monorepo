@@ -1,3 +1,4 @@
+import { CreativePopover } from '@/components/CreativePopover';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Check, SlidersHorizontal, X } from 'lucide-react';
 import type * as React from 'react';
@@ -12,6 +13,7 @@ import type { ImageStudioDraft, ImageStudioSettingKey } from './image-studio-sta
 
 interface ImageGenerationSettingsProps {
   open: boolean;
+  mode?: 'models' | 'specs';
   draft: ImageStudioDraft;
   returnFocusRef: React.RefObject<HTMLButtonElement>;
   /** Models the backend can serve; defaults to every offered option. */
@@ -22,47 +24,16 @@ interface ImageGenerationSettingsProps {
 
 export function ImageGenerationSettings({
   open,
+  mode,
   draft,
   returnFocusRef,
   modelOptions = IMAGE_MODEL_OPTIONS,
   onOpenChange,
   onSettingChange,
 }: ImageGenerationSettingsProps): JSX.Element {
-  return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[90] bg-[#3D3645]/25 backdrop-blur-[2px] data-[state=open]:animate-fade-in motion-reduce:animate-none" />
-        <Dialog.Content
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            returnFocusRef.current?.focus();
-          }}
-          className="hd-creative-dialog fixed z-[91] overflow-y-auto border border-[var(--creative-line,#E7DEE7)] bg-[var(--creative-surface,#FFFDF8)] p-5 text-[var(--creative-ink,#342E39)] shadow-[0_28px_80px_rgba(52,38,59,0.18)] outline-none motion-reduce:transform-none motion-reduce:transition-none max-md:inset-x-0 max-md:bottom-0 max-md:max-h-[92vh] max-md:w-full max-md:rounded-t-[28px] max-md:rounded-b-none max-md:border-x-0 max-md:border-b-0 md:left-1/2 md:top-1/2 md:max-h-[88vh] md:w-[min(960px,calc(100vw-24px))] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-[28px] md:p-7"
-        >
-          <div className="flex items-start justify-between gap-4 pr-12">
-            <div>
-              <Dialog.Title className="flex items-center gap-2 text-xl font-semibold tracking-[-0.02em]">
-                <SlidersHorizontal className="h-5 w-5 text-[var(--creative-muted,#D62958)]" aria-hidden />
-                生成设置
-              </Dialog.Title>
-              <Dialog.Description className="mt-1.5 text-sm leading-6 text-[var(--creative-muted,#766C79)]">
-                推荐值已经配好；只有需要时再调整。
-              </Dialog.Description>
-            </div>
-          </div>
-          <Dialog.Close asChild>
-            <button
-              type="button"
-              aria-label="关闭生成设置"
-              title="关闭生成设置"
-              className="absolute right-5 top-5 flex h-11 w-11 items-center justify-center rounded-full border border-[var(--creative-line,#E3D9E4)] bg-[var(--creative-surface,#fff)] text-[var(--creative-muted,#716675)] transition-colors hover:bg-[var(--creative-surface,#F8F2F7)] motion-reduce:transition-none"
-            >
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-          </Dialog.Close>
-
+  const settingsContent = (
           <div className="mt-7 space-y-7">
-            <SettingGroup label="模型">
+            {mode !== 'specs' && <SettingGroup label="模型">
               <div className="grid gap-3 sm:grid-cols-2">
                 {modelOptions.map((option) => {
                   const selected = draft.model === option.value;
@@ -102,9 +73,9 @@ export function ImageGenerationSettings({
                   );
                 })}
               </div>
-            </SettingGroup>
+            </SettingGroup>}
 
-            <SettingGroup label="风格">
+            {mode !== 'models' && <SettingGroup label="风格">
               <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 lg:grid-cols-8">
                 {IMAGE_STYLE_OPTIONS.map((option) => {
                   const selected = draft.style === option.key;
@@ -137,9 +108,9 @@ export function ImageGenerationSettings({
                   );
                 })}
               </div>
-            </SettingGroup>
+            </SettingGroup>}
 
-            <div className="grid gap-6 md:grid-cols-2">
+            {mode !== 'models' && <div className="grid gap-6 md:grid-cols-2">
               <SettingGroup label="比例">
                 <div className="flex flex-wrap gap-2">
                   {IMAGE_ASPECT_OPTIONS.map((option) => (
@@ -166,8 +137,44 @@ export function ImageGenerationSettings({
                   ))}
                 </div>
               </SettingGroup>
+            </div>}
+          </div>
+  );
+  if (mode) return <CreativePopover open={open} onOpenChange={onOpenChange} anchorRef={returnFocusRef} title={mode === 'models' ? '选择图片模型' : '生成设置'}><div className="hd-image-compact-settings">{settingsContent}</div></CreativePopover>;
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-[90] bg-[#3D3645]/25 backdrop-blur-[2px] data-[state=open]:animate-fade-in motion-reduce:animate-none" />
+        <Dialog.Content
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            returnFocusRef.current?.focus();
+          }}
+          className="hd-creative-dialog fixed z-[91] overflow-y-auto border border-[var(--creative-line,#E7DEE7)] bg-[var(--creative-surface,#FFFDF8)] p-5 text-[var(--creative-ink,#342E39)] shadow-[0_28px_80px_rgba(52,38,59,0.18)] outline-none motion-reduce:transform-none motion-reduce:transition-none max-md:inset-x-0 max-md:bottom-0 max-md:max-h-[92vh] max-md:w-full max-md:rounded-t-[28px] max-md:rounded-b-none max-md:border-x-0 max-md:border-b-0 md:left-1/2 md:top-1/2 md:max-h-[88vh] md:w-[min(960px,calc(100vw-24px))] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-[28px] md:p-7"
+        >
+          <div className="flex items-start justify-between gap-4 pr-12">
+            <div>
+              <Dialog.Title className="flex items-center gap-2 text-xl font-semibold tracking-[-0.02em]">
+                <SlidersHorizontal className="h-5 w-5 text-[var(--creative-muted,#D62958)]" aria-hidden />
+                生成设置
+              </Dialog.Title>
+              <Dialog.Description className="mt-1.5 text-sm leading-6 text-[var(--creative-muted,#766C79)]">
+                推荐值已经配好；只有需要时再调整。
+              </Dialog.Description>
             </div>
           </div>
+          <Dialog.Close asChild>
+            <button
+              type="button"
+              aria-label="关闭生成设置"
+              title="关闭生成设置"
+              className="absolute right-5 top-5 flex h-11 w-11 items-center justify-center rounded-full border border-[var(--creative-line,#E3D9E4)] bg-[var(--creative-surface,#fff)] text-[var(--creative-muted,#716675)] transition-colors hover:bg-[var(--creative-surface,#F8F2F7)] motion-reduce:transition-none"
+            >
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          </Dialog.Close>
+
+          {settingsContent}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

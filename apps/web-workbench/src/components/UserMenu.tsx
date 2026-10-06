@@ -108,7 +108,7 @@ export function UserMenu({
             'border-[#FF0061]/25 bg-[#FF0061]/5 shadow-[0_10px_26px_rgba(255,0,97,0.08)] dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10',
         )}
       >
-        <CharacterAvatar name={displayName || email || '用户'} seed={email || displayName} src={avatarUrl} className={topbar ? 'h-10 w-10' : 'h-7 w-7'} />
+        <CharacterAvatar name={displayName || email || '用户'} seed={email || displayName} src={avatarUrl} className={topbar ? 'h-[30px] w-[30px]' : 'h-7 w-7'} />
         {topbar ? (
           <ChevronDown
             className={cn(

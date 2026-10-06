@@ -152,7 +152,7 @@ export function ImageHistory({
   );
 
   return (
-    <section className="mt-8 rounded-[28px] border border-[var(--creative-line,#E8E0E8)] bg-white/80 p-5 shadow-[0_16px_42px_rgba(62,48,69,0.045)] sm:p-6">
+    <section className="hd-media-history mt-8 rounded-[28px] border border-[var(--creative-line,#E8E0E8)] bg-white/80 p-5 shadow-[0_16px_42px_rgba(62,48,69,0.045)] sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <p className="text-xs font-semibold tracking-[0.08em] text-[var(--creative-muted,#8A659F)]">你的图片作品</p>

@@ -198,6 +198,10 @@ export function EnergyHome({
   };
 
   const handlePhaseChange = (nextPhase: ExperiencePhase): void => {
+    if (selectedExperience && phase === 'intro' && nextPhase === 'active') {
+      startedAtRef.current = Date.now();
+      reportEvent('energy_experience_started', selectedExperience.id, selectedLaunchTarget);
+    }
     if (selectedExperience && nextPhase === 'result' && phase !== 'result') {
       reportEvent(
         'energy_experience_completed',
@@ -414,7 +418,6 @@ export function EnergyHome({
         onStart={() => {
           if (!selectedExperience) return;
           startedAtRef.current = Date.now();
-          reportEvent('energy_experience_started', selectedExperience.id, selectedLaunchTarget);
           handlePhaseChange('active');
         }}
         onReplay={() => {

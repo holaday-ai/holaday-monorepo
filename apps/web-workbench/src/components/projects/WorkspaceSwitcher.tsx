@@ -1,7 +1,8 @@
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import type { UiOrganization } from '@/lib/organization-page-state';
 import { cn } from '@/lib/utils';
-import { Building2, Plus, RefreshCw, UserRound } from 'lucide-react';
+import { Building2, ChevronDown, Plus, RefreshCw, UserRound } from 'lucide-react';
 
 interface WorkspaceSwitcherProps {
   organizations: readonly UiOrganization[];
@@ -35,13 +36,13 @@ export function WorkspaceSwitcher({
   return (
     <section
       aria-label="工作区切换"
-      className="mb-5 rounded-[10px] border border-[#DCDDDD] bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+      className="hd-workspace-switcher"
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-sm font-semibold text-foreground">工作区</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">切换个人项目或你已加入的团队空间。</p>
-        </div>
+        <DropdownMenu><DropdownMenuTrigger asChild><button className="hd-workspace-trigger h-11" type="button" title="切换工作区"><Building2 /><span>{organizations.find(item => item.organizationId === selectedOrganizationId)?.name ?? '个人空间'}</span><ChevronDown /></button></DropdownMenuTrigger><DropdownMenuContent align="start">
+          <DropdownMenuItem className="h-11" onSelect={() => onSelectOrganization(null)}><UserRound />个人空间</DropdownMenuItem>
+          {organizations.map(organization => <DropdownMenuItem className="h-11" key={organization.organizationId} onSelect={() => onSelectOrganization(organization.organizationId)}><Building2 />{organization.name}<small>{ORGANIZATION_ROLE_LABEL[organization.role]}</small></DropdownMenuItem>)}
+        </DropdownMenuContent></DropdownMenu>
         <div className="flex items-center gap-1.5">
           <Button
             type="button"
@@ -67,33 +68,6 @@ export function WorkspaceSwitcher({
         </div>
       </div>
 
-      <div className="mt-3 flex gap-2 overflow-x-auto pb-0.5">
-        <button
-          type="button"
-          aria-pressed={selectedOrganizationId === null}
-          onClick={() => onSelectOrganization(null)}
-          className={workspaceButtonClass(selectedOrganizationId === null)}
-        >
-          <UserRound className="h-4 w-4" aria-hidden />
-          <span>个人空间</span>
-        </button>
-        {organizations.map((organization) => (
-          <button
-            type="button"
-            key={organization.organizationId}
-            aria-pressed={selectedOrganizationId === organization.organizationId}
-            onClick={() => onSelectOrganization(organization.organizationId)}
-            className={workspaceButtonClass(selectedOrganizationId === organization.organizationId)}
-          >
-            <Building2 className="h-4 w-4" aria-hidden />
-            <span>{organization.name}</span>
-            <span className="rounded-full bg-[#EFEFEF]/80 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-              {ORGANIZATION_ROLE_LABEL[organization.role]}
-            </span>
-          </button>
-        ))}
-      </div>
-
       {loading && !hasOrganizations ? (
         <p className="mt-3 text-xs text-muted-foreground" aria-live="polite">
           团队工作区加载中…
@@ -117,14 +91,5 @@ export function WorkspaceSwitcher({
         </output>
       ) : null}
     </section>
-  );
-}
-
-function workspaceButtonClass(active: boolean): string {
-  return cn(
-    'inline-flex h-11 shrink-0 items-center gap-2 rounded-[8px] border px-3 text-xs font-medium transition-colors',
-    active
-      ? 'border-[#FF0061]/35 bg-[#FF0061]/[0.055] text-[#FF0061]'
-      : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:text-foreground',
   );
 }

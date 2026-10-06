@@ -1,7 +1,6 @@
 import { cn } from '@/lib/utils';
 import {
   ArrowRight,
-  ChevronDown,
   Circle,
   CircleDot,
   ClipboardList,
@@ -13,7 +12,7 @@ import {
 import * as React from 'react';
 import type { StockScreeningViewState } from './StockScreeningWorkbench';
 
-type StockWorkspaceTask = 'watchlist' | 'screening' | 'risk' | 'briefing';
+export type StockWorkspaceTask = 'watchlist' | 'screening' | 'risk' | 'briefing';
 
 const STOCK_WORKSPACE_TASKS: ReadonlyArray<{
   id: StockWorkspaceTask;
@@ -34,6 +33,8 @@ export function StockTaskWorkspaceLayout({
   preferenceProfile,
   briefing,
   briefingLabel = '今日简报',
+  activeTask: controlledTask,
+  onTaskChange,
 }: {
   highlights: React.ReactNode;
   riskRadar: React.ReactNode;
@@ -42,8 +43,11 @@ export function StockTaskWorkspaceLayout({
   briefing: React.ReactNode;
   briefingLabel?: string;
   screeningView: StockScreeningViewState;
+  activeTask?: StockWorkspaceTask;
+  onTaskChange?(task: StockWorkspaceTask): void;
 }): JSX.Element {
-  const [activeTask, setActiveTask] = React.useState<StockWorkspaceTask>('watchlist');
+  const [internalTask, setActiveTask] = React.useState<StockWorkspaceTask>('watchlist');
+  const activeTask = controlledTask ?? internalTask;
   const [riskWarmed, setRiskWarmed] = React.useState(false);
   const tabRefs = React.useRef<Record<StockWorkspaceTask, HTMLButtonElement | null>>({
     watchlist: null,
@@ -59,10 +63,11 @@ export function StockTaskWorkspaceLayout({
 
   const activateTask = React.useCallback((task: StockWorkspaceTask, focusTab = false) => {
     setActiveTask(task);
+    onTaskChange?.(task);
     if (focusTab) {
       queueMicrotask(() => tabRefs.current[task]?.focus());
     }
-  }, []);
+  }, [onTaskChange]);
 
   const handleTabKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -88,8 +93,9 @@ export function StockTaskWorkspaceLayout({
   return (
     <section
       aria-label="核心股市任务"
-      className="min-w-0 overflow-hidden rounded-[22px] border border-[#E9E0EC] bg-[#FFFCFA] shadow-[0_18px_48px_rgba(103,75,121,0.07)]"
+      className="hd-stock-workspace min-w-0 overflow-hidden rounded-[22px] border border-[#E9E0EC] bg-[#FFFCFA] shadow-[0_18px_48px_rgba(103,75,121,0.07)]"
     >
+      <header className="hd-stock-section-heading"><span>RESEARCH</span><h2>关注研究</h2><p>从表现到原因</p></header>
       <nav
         aria-label="股市任务视图"
         role="tablist"
@@ -339,56 +345,8 @@ export function StockMarketContextLayout({
   marketTable: React.ReactNode;
   starStocks: React.ReactNode;
 }): JSX.Element {
-  const [expanded, setExpanded] = React.useState(false);
-  return (
-    <section
-      aria-labelledby="stock-market-context-title"
-      className="min-w-0 rounded-[18px] border border-[#E8E1EC] bg-[#FFFDFB] p-3.5 shadow-[0_10px_28px_rgba(91,70,118,0.045)]"
-    >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="px-0.5">
-          <h2
-            id="stock-market-context-title"
-            className="text-[15px] font-semibold tracking-[-0.015em] text-[#3E3154]"
-          >
-            市场背景
-          </h2>
-          <p className="mt-1 text-[11px] text-[#7D718A]">
-            需要横向参照时再展开，不打断当前研究任务
-          </p>
-        </div>
-        <button
-          type="button"
-          aria-label={expanded ? '收起市场背景' : '展开市场背景'}
-          title={expanded ? '收起市场背景' : '展开市场背景'}
-          aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
-          className="inline-flex h-11 min-[769px]:h-8 shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-[#DED5E6] bg-[#F8F5FC] px-3 text-[11px] font-medium text-[#6B587D] transition hover:border-[#CDBCD8] hover:bg-[#F2EBF8] motion-reduce:transition-none"
-        >
-          {expanded ? '收起资料' : '查看市场资料'}
-          <ChevronDown
-            className={cn(
-              'h-3.5 w-3.5 transition-transform motion-reduce:transition-none',
-              expanded ? 'rotate-180' : '',
-            )}
-            aria-hidden
-          />
-        </button>
-      </div>
-      {expanded ? (
-        <div className="mt-4 space-y-4 border-t border-[#EFEAF2] pt-4">
-          <div className="min-w-0">{discovery}</div>
-          <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="min-w-0 [&>section]:h-full">{temperature}</div>
-            <div className="min-w-0 [&>section]:h-full">{sectors}</div>
-            <div className="min-w-0 [&>section]:h-full">{leaderboard}</div>
-          </div>
-          <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className="min-w-0">{marketTable}</div>
-            <div className="min-w-0">{starStocks}</div>
-          </div>
-        </div>
-      ) : null}
-    </section>
-  );
+  return <div className="hd-stock-context">
+    <section id="stock-news" aria-label="新闻与公告"><header className="hd-stock-section-heading"><span>NEWSROOM</span><h2>新闻与公告</h2><p>先看与你关注的股票相关的变化</p></header>{discovery}</section>
+    <section id="stock-panorama" aria-label="市场全景"><header className="hd-stock-section-heading"><span>MARKET</span><h2>市场全景</h2><p>把个股放回市场背景里看</p></header><div className="hd-market-panorama-grid"><div>{temperature}</div><div>{sectors}</div><div>{leaderboard}</div><div>{marketTable}</div></div><div>{starStocks}</div></section>
+  </div>;
 }

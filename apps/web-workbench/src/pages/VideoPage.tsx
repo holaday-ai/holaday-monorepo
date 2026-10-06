@@ -1,10 +1,12 @@
+import { CreativeReferenceLibrary } from '@/components/CreativeReferenceLibrary';
+import { CreativePopover } from '@/components/CreativePopover';
+import { CreativeInspiration } from '@/components/CreativeInspiration';
 import { AttachmentChip, type DraftAttachment } from '@/components/AttachmentChip';
 import { FileDownloadCard, type FileDownloadPayload } from '@/components/FileDownloadCard';
 import { LazyPosterImg } from '@/components/LazyPosterImg';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
-import { VideoCreationScenarioPicker } from '@/components/video/VideoCreationScenarioPicker';
 import { VideoCreationStoryboard } from '@/components/video/VideoCreationStoryboard';
 import {
   type VideoCreationScenarioId,
@@ -85,6 +87,8 @@ import {
   Clapperboard,
   Clock,
   ImagePlus,
+  Files,
+  Plus,
   Lightbulb,
   Loader2,
   Lock,
@@ -93,7 +97,6 @@ import {
   Pin,
   Play,
   Scissors,
-  Settings2,
   Sparkles,
   Trash2,
   Video as VideoIcon,
@@ -660,9 +663,8 @@ function CreativeStudioPage({
   const [scenarioId, setScenarioId] = React.useState<VideoCreationScenarioId>(() =>
     scenarioForVideoTab(videoTab),
   );
-  const [prompt, setPrompt] = React.useState(
-    () => videoCreationScenario('product_highlight').defaultPrompt,
-  );
+  const [prompt, setPrompt] = React.useState('');
+  const [templateLabel, setTemplateLabel] = React.useState<string | null>('产品短片');
   const [model, setModel] = React.useState<VideoModel>('veo_fast');
   const mediaModels = useMediaModels();
   const normalModelOptions = React.useMemo(
@@ -682,6 +684,10 @@ function CreativeStudioPage({
   const [stylePickerOpen, setStylePickerOpen] = React.useState<CreativeStyleGroup | null>(null);
   const [referenceVideoDialogOpen, setReferenceVideoDialogOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [settingsKind, setSettingsKind] = React.useState<'model' | 'specs'>('model');
+  const settingsAnchor = React.useRef<HTMLButtonElement | null>(null);
+  const [libraryOpen, setLibraryOpen] = React.useState(false);
+  const libraryAnchor = React.useRef<HTMLButtonElement | null>(null);
   const [vibeStyle, setVibeStyle] = React.useState<CreativeStyleKey>('random');
   const [lightingStyle, setLightingStyle] = React.useState<CreativeStyleKey>('random');
   const [colorStyle, setColorStyle] = React.useState<CreativeStyleKey>('random');
@@ -769,14 +775,10 @@ function CreativeStudioPage({
   }, [videoTab]);
 
   function handleScenarioChange(nextScenarioId: VideoCreationScenarioId): void {
-    const nextScenario = videoCreationScenario(nextScenarioId);
     const nextTab = videoTabForScenario(nextScenarioId);
     setScenarioId(nextScenarioId);
     setSettingsOpen(false);
     if (nextTab === 'normal') {
-      setPrompt(nextScenario.defaultPrompt);
-      setAspectRatio(nextScenario.aspect === '9:16' ? '9:16' : '16:9');
-      applyNormalVideoDuration(8);
     }
     onVideoTabChange?.(nextTab);
   }
@@ -953,26 +955,17 @@ function CreativeStudioPage({
     <main className="hd-creative-page hd-video-page min-h-full bg-[var(--creative-surface,#FBFAF7)] text-[var(--creative-ink,#342E39)]">
       <PageContainer width="wide" className="hd-creative-container max-w-[1220px] pb-14 pt-7 md:px-10 md:pt-9">
         <div className="relative overflow-hidden rounded-none">
-          <header className="relative z-10 mb-5">
-            <h1 className="text-[32px] font-semibold leading-tight tracking-[-0.04em] text-[var(--creative-ink,#27212D)] md:text-[38px]">
-              视频创作
-            </h1>
-          </header>
-
-          {onVideoTabChange ? (
-            <div className="hd-scenario-surface relative z-10 rounded-[26px] border border-[var(--creative-line,#E8E1E7)] bg-[var(--creative-surface,#fff)] p-4 shadow-[0_14px_38px_rgba(62,48,69,0.05)] sm:p-5">
-              <VideoCreationScenarioPicker
-                value={scenarioId}
-                disabled={submitting}
-                onChange={handleScenarioChange}
-              />
-            </div>
-          ) : null}
+          <header className="hd-creative-heading"><span>HOLADAY VIDEO</span><h1>把想法，拍成画面。</h1><p>从一句描述、一张参考图开始。</p></header>
+          {onVideoTabChange && <div className="hd-creative-tabs" role="tablist" aria-label="视频创作模式" style={{ '--active-tab': videoTab === 'normal' ? 0 : videoTab === 'pet' ? 1 : 2 } as React.CSSProperties}>
+            {([{id:'normal', label:'自由创作', scenario:'product_highlight'},{id:'pet',label:'动作复刻',scenario:'action_remake'},{id:'ip',label:'人物口播',scenario:'ip_presenter'}] as const).map(tab => <button key={tab.id} type="button" role="tab" aria-selected={videoTab === tab.id} disabled={submitting} onClick={() => handleScenarioChange(tab.scenario)}>{tab.label}</button>)}
+          </div>}
+          {videoTab === 'normal' && <CreativeInspiration kind="video" disabled={submitting} onPick={idea => { setPrompt(idea.prompt); setAspectRatio(idea.image === 'vlog' ? '9:16' : '16:9'); }} />}
+          <div className="hd-composer-meta"><button className="hd-glass-pill" type="button" aria-expanded={settingsOpen} title="模型与生成设置" onClick={event => { settingsAnchor.current = event.currentTarget; setSettingsKind('model'); setSettingsOpen(true); }}><Clapperboard className="h-4 w-4" />{isCloneVideo ? modelOptionDisplayName(modelOptionFor(model, CLONE_MODEL_OPTIONS)) : isIpVideo ? '人物口播' : creativeModelDisplayName(model as NormalVideoModel)}<ChevronDown className="h-3 w-3" /></button>{videoTab === 'normal' && templateLabel && <button type="button" className="hd-glass-pill" title="移除模板" onClick={() => setTemplateLabel(null)}>{templateLabel}<X className="h-3 w-3" /></button>}</div>
 
           <div
             className={cn(
-              'relative z-40 mt-4 rounded-[20px] border border-[var(--creative-line,#E8E1E7)] bg-[var(--creative-surface,#fff)] px-5 py-4 shadow-[0_12px_32px_rgba(62,48,69,0.045)]',
-              videoTab === 'normal' && !settingsOpen && 'hidden',
+              'hd-video-settings relative z-40 mt-4 rounded-[20px] border border-[var(--creative-line,#E8E1E7)] bg-[var(--creative-surface,#fff)] px-5 py-4 shadow-[0_12px_32px_rgba(62,48,69,0.045)]',
+              videoTab === 'normal' && 'hidden',
             )}
           >
             <div
@@ -1062,10 +1055,19 @@ function CreativeStudioPage({
               ) : null}
             </div>
           </div>
+          <CreativeReferenceLibrary open={libraryOpen} onOpenChange={setLibraryOpen} anchorRef={libraryAnchor} disabled={submitting || attachments.length >= CREATIVE_MAX_ATTACHMENTS} selectedFileIds={attachments.map(file => file.fileId)} onChooseLocal={() => imageInputRef.current?.click()} onPick={file => { if (submitting) return; setAttachments(current => current.some(item => item.fileId === file.fileId) || current.length >= CREATIVE_MAX_ATTACHMENTS ? current : [...current, file]); }} />
+          <CreativePopover open={settingsOpen} onOpenChange={setSettingsOpen} anchorRef={settingsAnchor} title={settingsKind === 'model' ? '选择视频模型' : '视频规格'}>
+            {settingsKind === 'model' ? <div className="hd-model-options">{(isCloneVideo ? CLONE_MODEL_OPTIONS : normalModelOptions).map(option => <button key={option.value} type="button" aria-pressed={model === option.value} onClick={() => { if (isCloneVideo) setModel(option.value as VideoModel); else applyNormalVideoModel(option.value as NormalVideoModel); setSettingsOpen(false); }}><span><strong>{modelOptionDisplayName(option)}</strong><small>{option.description}</small></span>{model === option.value && <Check />}</button>)}</div> : <div className="hd-spec-options">
+              <CreativeSegment label="比例" value={aspectRatio} options={CREATIVE_ASPECT_OPTIONS} onChange={value => setAspectRatio(value as VideoAspect)} accent={accent} compact />
+              <CreativeSegment label="时长" value={durationSeconds} options={[{ value: 6, label: '6s' }, { value: 8, label: '8s' }]} onChange={value => applyNormalVideoDuration(value as VideoDuration)} accent={accent} compact />
+              <CreativeSelect label="画质" value={resolution === '1080p' ? '1080p 高清' : '720p 标清'} options={['1080p 高清', '720p 标清']} onPick={value => applyNormalVideoResolution(value.includes('720') ? '720p' : '1080p')} />
+              <CreativeStyleSummaryPicker vibe={vibeStyle} lighting={lightingStyle} color={colorStyle} previewSubject="default" openGroup={stylePickerOpen} onOpenGroupChange={setStylePickerOpen} onVibeChange={setVibeStyle} onLightingChange={setLightingStyle} onColorChange={setColorStyle} accent={accent} />
+            </div>}
+          </CreativePopover>
 
           {videoTab !== 'normal' ? (
             <>
-              <div className="relative z-10 mt-5 rounded-[26px] border border-[var(--creative-line,#EFEFEF)] bg-[var(--creative-surface,#fff)] p-5 shadow-[0_16px_42px_rgba(17,24,39,0.05)]">
+              <div className="hd-special-video relative z-10 mt-5 rounded-[26px] border border-[var(--creative-line,#EFEFEF)] bg-[var(--creative-surface,#fff)] p-5 shadow-[0_16px_42px_rgba(17,24,39,0.05)]">
                 {videoTab === 'pet' ? (
                   <PetVideoForm onTaskCreated={onTaskCreated} model={model} />
                 ) : (
@@ -1082,26 +1084,9 @@ function CreativeStudioPage({
             </>
           ) : (
             <>
-              <section
-                aria-label="视频创作工作台" data-creative-composer
-                className="relative z-10 mt-4 grid gap-0 overflow-hidden rounded-[26px] border border-[var(--creative-line,#E8E1E7)] bg-[var(--creative-surface,#fff)] shadow-[0_14px_38px_rgba(62,48,69,0.05)] xl:grid-cols-[1.08fr_0.92fr]"
-              >
-                <details className="hd-storyboard-disclosure">
-                  <summary>查看示例分镜</summary>
-                  <VideoCreationStoryboard scenario={activeScenario} />
-                </details>
-                <section aria-labelledby="video-brief-heading" className="p-5 sm:p-6">
-                  <h2 id="video-brief-heading" className="hd-brief-heading text-[16px] font-semibold text-[var(--creative-ink,#3C3440)]">
-                    告诉 HOLA DAY 你的重点
-                  </h2>
-                  <Textarea
-                    value={prompt}
-                    onChange={(event) => setPrompt(event.target.value)}
-                    placeholder="描述你想生成的视频内容、镜头和氛围…"
-                    rows={4}
-                    aria-label="告诉 HOLA DAY 你的重点"
-                    className="hd-brief-prompt mt-3 min-h-[128px] resize-none rounded-[16px] border-[var(--creative-line,#E8E1E7)] bg-[var(--creative-surface,#FFFEFF)] px-4 py-3 text-[14px] font-medium leading-6 text-[var(--creative-ink,#403744)] placeholder:text-[var(--creative-muted,#B5ABB7)] focus-visible:ring-[#D62958]/20"
-                  />
+              <section aria-label="视频创作工作台" data-creative-composer className="hd-video-brief">
+                <div className="hd-composer-source"><button type="button" title="添加参考素材" ref={libraryAnchor} onClick={() => setLibraryOpen(true)}><Files className="h-4 w-4" />参考资料</button></div>
+                <h2 id="video-brief-heading" className="sr-only">告诉 HOLA DAY 你的重点</h2>
                   {attachments.length > 0 ? (
                     <div className="hd-brief-chips mt-5 flex flex-wrap gap-2 border-t border-[var(--creative-line,#EFEFEF)] pt-4">
                       {attachments.map((attachment, index) => (
@@ -1113,46 +1098,13 @@ function CreativeStudioPage({
                       ))}
                     </div>
                   ) : null}
-                  <div className="hd-brief-uploads mt-4 flex items-end justify-between gap-4">
-                    <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">
-                      <button
-                        type="button"
-                        title="添加参考图"
-                        aria-label="添加参考图"
-                        onClick={() => imageInputRef.current?.click()}
-                        className="flex min-h-12 items-center gap-3 rounded-[14px] border border-[var(--creative-line,#E7DDE4)] bg-[var(--creative-surface,#FFF9FB)] px-3 text-left text-[var(--creative-muted,#A62B51)] outline-none transition-colors hover:border-[var(--creative-line,#D9BCCA)] hover:bg-[var(--creative-surface,#fff)] focus-visible:ring-2 focus-visible:ring-[#FF0061]/20"
-                      >
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[var(--creative-surface,#FBE6EC)]">
-                          <ImagePlus className="h-4 w-4" aria-hidden />
-                        </span>
-                        <span>
-                          <span className="block text-[12px] font-semibold text-[var(--creative-ink,#4B414D)]">
-                            产品或主角素材
-                          </span>
-                          <span className="mt-0.5 block text-[10px] text-[var(--creative-muted,#8B808D)]">
-                            最多 5 张图片
-                          </span>
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        title="添加参考视频"
-                        aria-label="添加参考视频"
-                        onClick={() => setReferenceVideoDialogOpen(true)}
-                        className="flex min-h-12 items-center gap-3 rounded-[14px] border border-[var(--creative-line,#DDE6E8)] bg-[var(--creative-surface,#F5FCFC)] px-3 text-left text-[var(--creative-muted,#347D83)] outline-none transition-colors hover:border-[var(--creative-line,#BFD6D8)] hover:bg-[var(--creative-surface,#fff)] focus-visible:ring-2 focus-visible:ring-[#FF0061]/20"
-                      >
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[var(--creative-surface,#DFF3F2)]">
-                          <VideoIcon className="h-4 w-4" aria-hidden />
-                        </span>
-                        <span>
-                          <span className="block text-[12px] font-semibold text-[var(--creative-ink,#4B414D)]">
-                            参考视频（可选）
-                          </span>
-                          <span className="mt-0.5 block text-[10px] text-[var(--creative-muted,#8B808D)]">
-                            动作或镜头参考
-                          </span>
-                        </span>
-                      </button>
+
+                <Textarea value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="描述你想拍出的画面，也可以添加产品或主角图片…" aria-label="告诉 HOLA DAY 你的重点" className="hd-media-prompt" />
+                <div className="hd-media-bottom"><div className="hd-media-tools"><button type="button" className="hd-media-add" title="添加本地资料" aria-label="添加本地资料" onClick={() => imageInputRef.current?.click()}><Plus className="h-4 w-4" /></button>
+                  <button className="hd-glass-pill" type="button" title="添加参考图" aria-label="添加参考图" onClick={() => imageInputRef.current?.click()}><ImagePlus className="h-4 w-4" />参考图</button>
+                  <button className="hd-glass-pill" type="button" title="添加参考视频" aria-label="添加参考视频" onClick={() => setReferenceVideoDialogOpen(true)}><VideoIcon className="h-4 w-4" />参考视频</button>
+                  <button className="hd-glass-pill" type="button" aria-expanded={settingsOpen} title="调整视频规格" onClick={event => { settingsAnchor.current = event.currentTarget; setSettingsKind('specs'); setSettingsOpen(true); }}>{aspectRatio} · {durationSeconds}秒 · {resolution}<ChevronDown className="h-3 w-3" /></button>
+                </div><div className="hd-creative-generation-actions"><button type="button" className="hd-generate" onClick={() => void handleSubmit()} disabled={submitting}>{submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}<span>{submitting ? '提交中…' : '准备生成'}</span></button><small className="hd-quote-hint">生成前确认积分</small></div></div>
                       <input
                         ref={imageInputRef}
                         type="file"
@@ -1179,42 +1131,9 @@ function CreativeStudioPage({
                           event.target.value = '';
                         }}
                       />
-                    </div>
-                  </div>
-                  <div className="hd-brief-settings mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[14px] bg-[var(--creative-surface,#F8F5F8)] px-3 py-2.5">
-                    <span className="inline-flex items-center gap-2 text-[11px] text-[var(--creative-muted,#746A77)]">
-                      <Sparkles className="h-3.5 w-3.5 text-[var(--creative-muted,#D62958)]" aria-hidden />
-                      AI 将自动安排镜头、节奏与转场
-                    </span>
-                    <button
-                      type="button"
-                      aria-expanded={settingsOpen}
-                      onClick={() => setSettingsOpen((open) => !open)}
-                      className="inline-flex min-h-9 items-center gap-2 rounded-[10px] px-3 text-[11px] font-semibold text-[var(--creative-ink,#5E5362)] hover:bg-[var(--creative-surface,#fff)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20"
-                    >
-                      <Settings2 className="h-3.5 w-3.5" aria-hidden />
-                      {settingsOpen ? '收起生成设置' : '查看生成设置'}
-                    </button>
-                  </div>
-                  <div className="hd-brief-submit mt-4 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => void handleSubmit()}
-                      disabled={submitting}
-                      className="hd-generate inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[13px] border border-[#D62958] bg-[#D62958] px-6 text-[14px] font-semibold text-white shadow-[0_10px_24px_rgba(214,41,88,0.2)] transition-all hover:bg-[#BE214B] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:min-w-[250px]"
-                    >
-                      {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
-                      {submitting ? '提交中…' : '生成这条视频'}
-                    </button>
-                  </div>
-                  {referenceVideoDialogOpen ? (
-                    <ReferenceVideoUploadDialog
-                      onClose={() => setReferenceVideoDialogOpen(false)}
-                      onChoose={() => fileInputRef.current?.click()}
-                    />
-                  ) : null}
-                </section>
+                {referenceVideoDialogOpen && <ReferenceVideoUploadDialog onClose={() => setReferenceVideoDialogOpen(false)} onChoose={() => fileInputRef.current?.click()} />}
               </section>
+              <details className="hd-storyboard-disclosure"><summary>示例分镜</summary><VideoCreationStoryboard scenario={activeScenario} /></details>
 
               {videoEditingEnabled ? (
                 <div className="relative z-10 mt-3 flex flex-col gap-3 rounded-[18px] border border-[var(--creative-line,#E9E1EA)] bg-[linear-gradient(120deg,#FFF9FB,#F7F8FF)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -2207,7 +2126,7 @@ function VideoHistory({
   );
 
   return (
-    <section className="relative z-10 mt-10 rounded-[28px] border border-[var(--creative-line,#EFEFEF)] bg-[var(--creative-surface,#fff)] p-5 shadow-[0_16px_40px_rgba(17,24,39,0.04)]">
+    <section className="hd-media-history relative z-10 mt-10 rounded-[28px] border border-[var(--creative-line,#EFEFEF)] bg-[var(--creative-surface,#fff)] p-5 shadow-[0_16px_40px_rgba(17,24,39,0.04)]">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div className="inline-flex items-center gap-2 text-[15px] font-semibold text-[var(--creative-ink,#111827)]">
           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: accent }} aria-hidden />
@@ -3198,7 +3117,8 @@ export function PetVideoForm({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="hd-clone-form space-y-6">
+      <header className="hd-mode-intro"><h2>让主角，走进这段画面。</h2><p>动作、镜头、节奏与音频跟随参考视频。</p></header>
       <Section
         title="主角照片"
         description="上传一位真人或写实虚构人物的清晰照片。当前模型仅支持单人换单人，照片应与参考视频人物的取景和身体比例相近；暂不支持宠物、物体或多人替换。"

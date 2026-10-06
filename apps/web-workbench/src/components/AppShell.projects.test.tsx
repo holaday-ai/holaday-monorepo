@@ -15,6 +15,11 @@ import { AppShell } from './AppShell';
 type Client = inferRouterClient<AppRouter>;
 type RouterOutputs = inferRouterOutputs<AppRouter>;
 
+async function chooseWorkspace(user: ReturnType<typeof userEvent.setup>, name: RegExp | string) {
+  await user.click(screen.getByTitle('切换工作区'));
+  await user.click(await screen.findByRole('menuitem', { name }));
+}
+
 const api = vi.hoisted(() => ({
   authMe: vi.fn<Client['auth']['me']['query']>(),
   unsuccessfulCount: vi.fn<Client['tasks']['unsuccessfulCount']['query']>(),
@@ -182,8 +187,8 @@ describe('AppShell personal project collection isolation', () => {
       </ToastProvider>,
     );
 
-    await screen.findByText('个人研究');
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await screen.findByRole('button', { name: '打开项目 个人研究' });
+    await chooseWorkspace(user, /设计团队/);
     await screen.findByText('团队增长');
 
     await act(async () => {

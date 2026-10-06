@@ -72,14 +72,9 @@ export function AstrologyDimensionGrid({ reading }: AstrologyDimensionGridProps)
                 <h4>{dimension.label}</h4>
                 {dimension.score === null ? null : <span>{dimension.score}%</span>}
               </header>
-              <p className="energy-astrology-dimension__preview">
-                {dimension.body.length > 22
-                  ? `${dimension.body.slice(0, 22)}…`
-                  : dimension.body}
+              <p className={openDimensionKey === dimension.key ? 'energy-dimension-full' : 'energy-astrology-dimension__preview'} data-dimension-body={openDimensionKey === dimension.key ? true : undefined}>
+                {dimension.body}
               </p>
-              {openDimensionKey === dimension.key ? (
-                <p data-dimension-body>{dimension.body}</p>
-              ) : null}
               <button
                 type="button"
                 aria-label={`${openDimensionKey === dimension.key ? '收起' : '展开'}${dimension.label}完整提示`}

@@ -5,7 +5,7 @@ import { trpc } from '@/lib/trpc';
 import { useTaskStore } from '@/stores/task-store';
 
 type Discovery = Awaited<ReturnType<typeof trpc.tasks.localChromeTabs.query>>;
-export function LocalChromePicker({ disabled = false }: { disabled?: boolean }) {
+export function LocalChromePicker({ disabled = false, compact = false }: { disabled?: boolean; compact?: boolean }) {
   const selected = useTaskStore(state => state.localChromeSelection);
   const [open, setOpen] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
@@ -22,11 +22,11 @@ export function LocalChromePicker({ disabled = false }: { disabled?: boolean }) 
     } catch { if (revision === sequence.current) setError(true); }
     finally { if (revision === sequence.current) setLoading(false); }
   }
-  return <div className="flex min-w-0 items-center gap-1 px-3 py-1 text-xs text-muted-foreground">
+  return <div className={compact ? 'hd-chrome-compact' : 'flex min-w-0 items-center gap-1 px-3 py-1 text-xs text-muted-foreground'}>
     <DropdownMenu open={open} onOpenChange={next => { setOpen(next); if (next) void discover(); }}>
       <DropdownMenuTrigger asChild>
         <button type="button" disabled={disabled} aria-label="选择 Chrome 页面" title="使用你已登录的 Chrome 页面执行任务" className="flex min-w-0 max-w-64 items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-foreground/5 disabled:opacity-50">
-          <Globe className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{selected ? selected.title || selected.expectedUrl : '连接 Chrome'}</span>
+          <Globe className="h-3.5 w-3.5 shrink-0" />{(!compact || selected) && <span className="truncate">{selected ? selected.title || selected.expectedUrl : '连接 Chrome'}</span>}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-80 max-w-[90vw] p-2">

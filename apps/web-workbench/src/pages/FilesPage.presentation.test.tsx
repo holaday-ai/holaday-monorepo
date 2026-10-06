@@ -26,7 +26,7 @@ describe('file library view integration',()=>{
   expect(screen.getByRole('button',{name:'列表视图'}).getAttribute('aria-pressed')).toBe('true');
   await user.click(screen.getByRole('button',{name:'文件排序'}));
   await user.click(await screen.findByRole('menuitem',{name:'名称顺序'}));
-  expect(screen.getAllByTitle(/^预览 /).map(el=>el.textContent)).toEqual(['EXCELA-notes.xlsx','PDFZ-notes.pdf']);
+  expect(screen.getAllByTitle(/^预览 /).map(el=>el.getAttribute('title'))).toEqual(['预览 A-notes.xlsx','预览 Z-notes.pdf']);
   await user.click(screen.getByRole('button',{name:'把 A-notes.xlsx 用于新任务'}));
   expect(router.state.location.pathname).toBe('/');
   expect(router.state.location.state).toMatchObject({newTask:true,attachFile:{fileId:'file_a',filename:'A-notes.xlsx'}});

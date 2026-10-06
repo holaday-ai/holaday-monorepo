@@ -9,14 +9,18 @@ import {
   FolderPlus,
   ImagePlus,
   Layers,
+  Files,
+  Folder,
   ListPlus,
   MoonStar,
+  MoreHorizontal,
   Pencil,
   Pin,
   PinOff,
   Plus,
   RotateCcw,
   Search,
+  SlidersHorizontal,
   Share2,
   Shield,
   Sparkles,
@@ -264,6 +268,8 @@ export function Sidebar({
   // The actual delete fans out through the parent's onDeleteTasks
   // entry which opens a single bulk-confirm modal and uses
   // Promise.allSettled for the network calls.
+  const [historyExpanded, setHistoryExpanded] = React.useState(true);
+  const historyId = React.useId();
   const [batchMode, setBatchMode] = React.useState(false);
   const [batchSelected, setBatchSelected] = React.useState<Set<string>>(new Set());
   const batchDeletableTaskIds = React.useMemo(
@@ -311,7 +317,8 @@ export function Sidebar({
   // We just bind mobile open via setOpenMobile so the legacy
   // `mobileOpen` prop continues to drive the Sheet from
   // WorkbenchApp's hamburger button.
-  const { setOpenMobile } = useSidebar();
+  const { setOpenMobile, state: sidebarState } = useSidebar();
+  const sidebarIsCompact = adaptiveCollapsed || sidebarState === 'collapsed';
   const { pathname: sidebarPath } = useLocation();
   React.useEffect(() => {
     setOpenMobile(!!mobileOpen);
@@ -352,8 +359,8 @@ export function Sidebar({
         <SidebarHeader className={cn('shrink-0 gap-2 border-b bg-white/60 backdrop-blur dark:bg-card/70', SIDEBAR_BORDER)}>
           <div className="holaday-brand flex items-center gap-2 px-1 py-1">
             <BrandIcon />
-            <BrandWordmark className="group-data-[collapsible=icon]:hidden" />
-            <SidebarTrigger className="ml-auto shrink-0 group-data-[collapsible=icon]:hidden" />
+            <BrandWordmark className="hd-sidebar-wordmark" />
+            <SidebarTrigger className="hd-sidebar-toggle ml-auto shrink-0" />
           </div>
           {/* Brand magenta only on the primary action. */}
           <SidebarMenu>
@@ -447,7 +454,9 @@ export function Sidebar({
               </div>
             )}
 
-            <div className="px-2 pb-4 group-data-[collapsible=icon]:hidden">
+            <div className="hd-history-section px-2 pb-4">
+              <div className="hd-history-heading"><button type="button" title={historyExpanded ? '收起任务列表' : '展开任务列表'} aria-expanded={historyExpanded} aria-controls={historyId} onClick={() => setHistoryExpanded(value => !value)}><ChevronDown aria-hidden />任务</button><button type="button" title={batchMode ? '退出批量管理' : '批量管理任务'} aria-pressed={batchMode} onClick={() => { setHistoryExpanded(true); setBatchMode(value => !value); }}><SlidersHorizontal aria-hidden /></button></div>
+              <div className="hd-history-fold" data-open={historyExpanded} {...(!historyExpanded ? { inert: '' } : {})} aria-hidden={!historyExpanded}><div id={historyId}>
               {pinnedTasks.length > 0 && (
                 <TaskGroup title="置顶">
                   {pinnedTasks.map((t) => (
@@ -553,16 +562,17 @@ export function Sidebar({
                   plan={userPlan}
                 />
               )}
+              </div></div>
             </div>
 
             </SidebarContent>
 
-            <SidebarFooter className={cn('shrink-0 border-t bg-white/70 px-0 py-2 backdrop-blur group-data-[collapsible=icon]:hidden dark:bg-card/70', SIDEBAR_BORDER)}>
+            <SidebarFooter className={cn('shrink-0 border-t bg-white/70 px-0 py-2 backdrop-blur dark:bg-card/70', SIDEBAR_BORDER)}>
               {/* O1 — batch action bar / batch entry. When batchMode
                   is on, render the count + 全选 / 删除选中 / 取消
                   controls; otherwise show a small "批量管理" entry
                   button alongside the quota indicator. */}
-              {batchMode ? (
+              {batchMode && !sidebarIsCompact ? (
                 <div className="mx-2 mb-2 flex items-center justify-between gap-2 rounded-[8px] border border-[#57479C]/18 bg-white/75 px-2 py-1.5 text-[11px] text-[#595757] shadow-[0_8px_22px_rgba(87,71,156,0.08)] dark:border-[#57479C]/35 dark:bg-white/[0.04] dark:text-[#DCDDDD]">
                   <span className="inline-flex items-center gap-1.5 font-medium">
                     <span className="flex h-4 min-w-4 items-center justify-center rounded-[5px] bg-[#57479C]/10 px-1 text-[10px] text-[#57479C] dark:bg-[#57479C]/25 dark:text-[#DCDDDD]">
@@ -600,20 +610,7 @@ export function Sidebar({
                     </button>
                   </div>
                 </div>
-              ) : (
-                onDeleteTasks && (
-                  <div className="mb-1 flex items-center justify-end px-2">
-                    <button
-                      type="button"
-                      onClick={() => setBatchMode(true)}
-                      className="inline-flex h-8 items-center gap-1 rounded-[7px] border border-transparent px-2 text-[11px] text-[#ADADAD] transition-colors hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 hover:text-[#FF0061] dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10"
-                    >
-                      <Layers className="h-3 w-3" />
-                      批量管理
-                    </button>
-                  </div>
-                )
-              )}
+              ) : null}
               {/* Quota strip first — the user's daily/monthly headroom
                   is the primary "what can I still do" signal. Refetch
                   key combines tasks.length (bumps on create/delete)
@@ -624,11 +621,18 @@ export function Sidebar({
                   the bar would stay stale at 57/100 until the next
                   create. */}
               <QuotaIndicator
+                compact={sidebarIsCompact}
                 refreshKey={`${tasks.length}|${quotaTerminalCount}`}
               />
-              <div className="px-2 pb-1 pt-1">
-                <ShareInviteRow />
-              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild><button type="button" className="hd-sidebar-more" title="更多操作"><MoreHorizontal /><span>更多</span><small>设置与帮助</small></button></DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="start" className="w-60">
+                  {onDeleteTasks && <DropdownMenuItem onSelect={() => setBatchMode(true)}><Layers className="h-4 w-4" />批量管理</DropdownMenuItem>}
+                  <DropdownMenuItem asChild><a href="/settings">设置</a></DropdownMenuItem>
+                  <DropdownMenuItem asChild><a href="/usage">本月用量</a></DropdownMenuItem>
+                  <ShareInviteRow />
+                </DropdownMenuContent>
+              </DropdownMenu>
             </SidebarFooter>
         {/* SidebarRail — invisible hairline on the right edge that
             users can click to toggle expand/collapse. Lets the icon
@@ -1003,8 +1007,8 @@ const FEATURES: readonly FeatureItem[] = [
   { icon: Clapperboard, label: '视频任务', href: '/video' },
   { icon: ImagePlus, label: '图片任务', href: '/image' },
   { icon: CalendarClock, label: '规划任务', href: '/planned' },
-  { icon: FolderOpen, label: '文件库', href: '/files' },
-  { icon: Layers, label: '项目', href: '/projects' },
+  { icon: Files, label: '文件库', href: '/files' },
+  { icon: Folder, label: '项目', href: '/projects' },
   // 收藏 was a top-level nav row but it duplicated what the sidebar
   // already shows: starred tasks bubble to the top of SidebarTasks
   // as the "收藏" group. The /starred route still exists for direct
@@ -1025,7 +1029,8 @@ function FeatureNav({ userRole, projects, onCreateProject, onNavigate }: {
   const navigate = useNavigate();
   const { pathname, search } = useLocation();
   const { setOpen } = useSidebar();
-  const [projectsExpanded, setProjectsExpanded] = React.useState(false);
+  const [projectsExpanded, setProjectsExpanded] = React.useState(() => { try { return sessionStorage.getItem('holaday-projects-expanded') === 'true'; } catch { return false; } });
+  React.useEffect(() => { try { sessionStorage.setItem('holaday-projects-expanded', String(projectsExpanded)); } catch { /* Storage can be disabled. */ } }, [projectsExpanded]);
   const projectListId = React.useId();
   const visit = (href: string): void => { navigate(href); onNavigate?.(); };
   return (
@@ -1067,15 +1072,15 @@ function FeatureNav({ userRole, projects, onCreateProject, onNavigate }: {
                     <span>{label}</span>
                     {isProjects && <ChevronDown aria-hidden className={cn('ml-auto transition-transform group-data-[collapsible=icon]:hidden', projectsExpanded && 'rotate-180')} />}
                   </SidebarMenuButton>
-                  {isProjects && projectsExpanded && (
-                    <div id={projectListId} className="holaday-project-links group-data-[collapsible=icon]:hidden">
+                  {isProjects && (
+                    <div className="hd-project-disclosure group-data-[collapsible=icon]:hidden" data-open={projectsExpanded} aria-hidden={!projectsExpanded}><div id={projectListId} className="holaday-project-links">
                       {projects.map((project) => (
-                        <button key={project.projectId} type="button" onClick={() => visit(`/?project=${encodeURIComponent(project.projectId)}`)}>
+                        <button key={project.projectId} type="button" tabIndex={projectsExpanded ? 0 : -1} onClick={() => visit(`/projects?project=${encodeURIComponent(project.projectId)}`)}>
                           <FolderOpen aria-hidden /><span>{project.name}</span>
                         </button>
                       ))}
-                      {onCreateProject && <button type="button" onClick={() => { onCreateProject(); onNavigate?.(); }}><Plus aria-hidden /><span>新建项目</span></button>}
-                    </div>
+                      {onCreateProject && <button type="button" tabIndex={projectsExpanded ? 0 : -1} onClick={() => { onCreateProject(); onNavigate?.(); }}><Plus aria-hidden /><span>新建项目</span></button>}
+                    </div></div>
                   )}
                 </SidebarMenuItem>
               );

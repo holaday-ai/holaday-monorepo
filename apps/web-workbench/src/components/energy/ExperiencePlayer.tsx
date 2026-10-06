@@ -47,15 +47,17 @@ export function ExperiencePlayer({
   const startRef = React.useRef<HTMLButtonElement>(null);
 
   if (!experience) return null;
+  const directEntry = ['recharge', 'tarot', 'light-test'].includes(experience.id);
 
   return (
     <Dialog.Root open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[90] bg-[#141218]/35 backdrop-blur-[2px] data-[state=open]:animate-fade-in motion-reduce:animate-none" />
         <Dialog.Content
-          className="fixed left-1/2 top-1/2 z-[91] flex max-h-[min(760px,calc(100dvh-24px))] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[24px] border border-white/70 bg-[#fffdfb] shadow-[0_28px_90px_rgba(49,40,58,0.24)] outline-none"
+          data-energy-experience={experience.id}
+          className="energy-approved-player fixed left-1/2 top-1/2 z-[91] flex max-h-[min(760px,calc(100dvh-24px))] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[24px] border border-white/70 bg-[#fffdfb] shadow-[0_28px_90px_rgba(49,40,58,0.24)] outline-none"
           onOpenAutoFocus={(event) => {
-            if (phase !== 'intro') return;
+            if (phase !== 'intro' || directEntry) return;
             event.preventDefault();
             startRef.current?.focus();
           }}
@@ -99,7 +101,7 @@ export function ExperiencePlayer({
           </Dialog.Close>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-            {phase === 'intro' ? (
+            {phase === 'intro' && !directEntry ? (
               <div className="flex min-h-56 flex-col items-center justify-center text-center">
                 <p className="max-w-md text-[15px] leading-7 text-[#5f5663]">
                   给自己留一点空白。准备好时再开始，没有标准答案。
@@ -115,7 +117,7 @@ export function ExperiencePlayer({
               </div>
             ) : null}
 
-            {phase === 'active' || phase === 'result' ? children : null}
+            {phase === 'active' || phase === 'result' || (phase === 'intro' && directEntry) ? children : null}
 
             {phase === 'error' ? (
               <div className="flex min-h-56 flex-col items-center justify-center text-center">

@@ -86,19 +86,19 @@ describe('image studio form', () => {
     render(<Harness />);
 
     expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
-    expect(screen.getByRole('heading', { level: 2, name: '今天想做什么图？' })).toBeTruthy();
-    expect(screen.getByRole('group', { name: '今天想做什么图' })).toBeTruthy();
+    expect(screen.getByRole('tablist', { name: '今天想做什么图' })).toBeTruthy();
+    expect(screen.getByRole('tablist', { name: '今天想做什么图' })).toBeTruthy();
   });
 
   it('presents three clear creation goals before technical settings', () => {
     render(<Harness />);
 
-    const goals = screen.getByRole('group', { name: '今天想做什么图' });
-    expect(within(goals).getAllByRole('button')).toHaveLength(3);
+    const goals = screen.getByRole('tablist', { name: '今天想做什么图' });
+    expect(within(goals).getAllByRole('tab')).toHaveLength(3);
     expect(
       within(goals)
-        .getByRole('button', { name: /灵感创作/ })
-        .getAttribute('aria-pressed'),
+        .getByRole('tab', { name: /灵感创作/ })
+        .getAttribute('aria-selected'),
     ).toBe('true');
   });
 
@@ -106,7 +106,7 @@ describe('image studio form', () => {
     const user = userEvent.setup();
     render(<Harness />);
 
-    await user.click(screen.getByRole('button', { name: /锁定主角/ }));
+    await user.click(screen.getByRole('tab', { name: /锁定主角/ }));
 
     expect(screen.getByRole('button', { name: '添加主角图' })).toBeTruthy();
     const targets = screen.getByRole('group', { name: '想改什么' });
@@ -189,7 +189,7 @@ describe('image studio form', () => {
     const user = userEvent.setup();
     render(<Harness />);
 
-    await user.click(screen.getByRole('button', { name: /商业成片/ }));
+    await user.click(screen.getByRole('tab', { name: /商业成片/ }));
 
     const uses = screen.getByRole('group', { name: '选择成片用途' });
     expect(within(uses).getAllByRole('button')).toHaveLength(3);

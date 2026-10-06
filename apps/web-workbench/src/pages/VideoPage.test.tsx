@@ -92,19 +92,20 @@ describe('VideoPage scenario-first production wiring', () => {
     renderPage();
 
     const prompt = await screen.findByRole('textbox', { name: '告诉 HOLA DAY 你的重点' });
-    expect((prompt as HTMLTextAreaElement).value).toContain('香水产品的高光短片');
+    expect((prompt as HTMLTextAreaElement).value).toBe('');
 
-    await user.click(screen.getByRole('button', { name: /生活方式 Vlog/ }));
+    await user.click(screen.getByRole('button', { name: /生活方式示例/ }));
+    await user.click(screen.getByRole('button', { name: '用这个灵感' }));
     expect(
       (screen.getByRole('textbox', { name: '告诉 HOLA DAY 你的重点' }) as HTMLTextAreaElement)
         .value,
-    ).toContain('清晨湖畔散步');
+    ).toContain('山间旅行');
 
-    await user.click(screen.getByRole('button', { name: /复刻一段动作/ }));
+    await user.click(screen.getByRole('tab', { name: '动作复刻' }));
     expect(screen.getByRole('heading', { name: '主角照片' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '参考视频' })).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: /IP 人物口播/ }));
+    await user.click(screen.getByRole('tab', { name: '人物口播' }));
     expect(await screen.findByRole('heading', { name: 'IP人物视频素材准备' })).toBeTruthy();
 
     expect(mocks.createTask).not.toHaveBeenCalled();
@@ -115,12 +116,13 @@ describe('VideoPage scenario-first production wiring', () => {
     renderPage();
 
     await screen.findByRole('textbox', { name: '告诉 HOLA DAY 你的重点' });
-    await user.click(screen.getByRole('button', { name: /生活方式 Vlog/ }));
-    await user.click(screen.getByRole('button', { name: '生成这条视频' }));
+    await user.click(screen.getByRole('button', { name: /生活方式示例/ }));
+    await user.click(screen.getByRole('button', { name: '用这个灵感' }));
+    await user.click(screen.getByRole('button', { name: '准备生成' }));
 
     await waitFor(() => expect(mocks.createTask).toHaveBeenCalledTimes(1));
     const call = mocks.createTask.mock.calls[0];
-    expect(call?.[0]).toContain('清晨湖畔散步');
+    expect(call?.[0]).toContain('山间旅行');
     expect(call?.[6]).toEqual({
       tab: 'normal',
       model: 'veo_fast',

@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileTypeBadge } from '@/components/FileTypeBadge';
+import { FileThumbnail } from '@/components/FileThumbnail';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import {
   FilePreviewModal,
@@ -46,7 +46,6 @@ import { formatFileSize } from '@/lib/file-size';
 import {
   canApplyFilesResponse,
   fileReferenceText,
-  formatFileRelativeDate,
   normalizeFilesListPage,
   type NormalizedFileRow,
 } from '@/lib/files-page-state';
@@ -337,15 +336,11 @@ export function FilesPage(): JSX.Element {
   return (
     <TooltipProvider delayDuration={120}>
       <PageContainer width="workspace" className="hd-files-page">
-        <PageHeader
-          title="文件库"
-          description="每一份资料，都可以成为下一个想法的起点。"
-          action={
-            <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-              {summary}
-            </div>
-          }
-        />
+        <span className="hd-page-eyebrow">YOUR CREATIVE LIBRARY</span>
+        <PageHeader title="文件库" description="每一份资料，都可以成为下一个想法的起点。" action={
+          <label className="hd-library-search"><Search aria-hidden className="h-4 w-4" /><input aria-label="搜索文件名" value={q} onChange={event => setQ(event.target.value)} placeholder="搜索文件名称" /></label>
+        } />
+        <span className="sr-only" role="status">{summary}</span>
         <div className="hd-files-toolbar mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="hd-file-tabs inline-flex w-fit items-center gap-0.5 rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5">
             <FilterTab label="全部" active={filter === 'all'} onClick={() => setFilter('all')} />
@@ -360,7 +355,7 @@ export function FilesPage(): JSX.Element {
               onClick={() => setFilter('videos')}
             />
             <FilterTab
-              label="文件"
+              label="文档"
               active={filter === 'documents'}
               onClick={() => setFilter('documents')}
             />
@@ -393,15 +388,7 @@ export function FilesPage(): JSX.Element {
                 {selectionMode ? '退出拼接' : '选择视频拼接'}
               </Button>
             ) : null}
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="搜索文件名…"
-                className="w-full rounded-[8px] border border-[#DCDDDD] bg-white py-1.5 pl-8 pr-3 text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)] focus-visible:border-[#ADADAD] focus-visible:outline-none sm:w-64"
-              />
-            </div>
+
           </div>
         </div>
 
@@ -456,14 +443,10 @@ export function FilesPage(): JSX.Element {
           </div>
         ) : (
           <div className="hd-file-collection" data-view={view}>
-            <div className="hd-file-columns hidden grid-cols-[1fr_auto_auto_auto] items-center gap-3 border-b border-[#EFEFEF] bg-white px-4 py-2 text-[11px] font-medium tracking-wider text-[#595757] sm:grid">
-              <div>名称</div>
-              <div>已修改</div>
-              <div>大小</div>
-              <div />
-            </div>
-            <div className="hd-file-rows">
-              {visibleFiles.map((f) => (
+            {groupFileDates(visibleFiles, sort).map(group => <section className="hd-file-date-group" key={group.label}>
+              <h2>{group.label}<span>{group.date}</span></h2>
+              <div className="hd-file-rows">
+              {group.files.map((f) => (
                 <FileRow
                   key={f.fileId}
                   file={f}
@@ -487,7 +470,8 @@ export function FilesPage(): JSX.Element {
                   onDelete={() => setPendingDelete(f)}
                 />
               ))}
-            </div>
+              </div>
+            </section>)}
             {loadError ? (
               <div className="flex flex-col gap-2 border-t border-[#EFEFEF] bg-[#FF0061]/[0.03] px-4 py-3 text-xs text-[#595757] sm:flex-row sm:items-center sm:justify-between">
                 <span>{loadError}</span>
@@ -614,7 +598,7 @@ function FileRow({
         title={unavailable ? `${file.filename} 已失效` : `预览 ${file.filename}`}
         className="group flex min-w-0 items-center gap-2.5 text-left disabled:cursor-not-allowed"
       >
-        <span className="hd-file-preview"><FileTypeBadge filename={file.filename} mime={file.mimetype} /></span>
+        <FileThumbnail fileId={file.fileId} filename={file.filename} mime={file.mimetype} sizeBytes={file.sizeBytes} unavailable={unavailable} />
         <span className="flex min-w-0 items-center gap-2">
           <span
             className={cn(
@@ -635,10 +619,8 @@ function FileRow({
       </button>
       {/* Size + time always rendered. Mobile shows them inline beneath
           the filename; sm+ snaps them into the grid columns. */}
-      <div className="flex items-center gap-3 text-xs text-muted-foreground sm:contents">
-        <span className="whitespace-nowrap sm:text-xs">
-          {formatFileRelativeDate(file.createdAt)}
-        </span>
+      <div className="hd-file-meta flex items-center gap-3 text-xs text-muted-foreground sm:contents">
+        <span className="whitespace-nowrap sm:text-xs">{file.filename.split('.').pop()?.toUpperCase() || 'FILE'}</span>
         <span className="whitespace-nowrap sm:text-xs">{formatFileSize(file.sizeBytes)}</span>
       </div>
       {/* Always-visible primary action + More menu. No hover-only
@@ -750,4 +732,21 @@ function IconTooltip({
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
+}
+
+/** Group real timestamps in the user's local calendar, never infer sample dates. */
+function groupFileDates(files: UiFile[], sort: 'recent' | 'name') {
+  const groups = new Map<string, { label: string; date: string; files: UiFile[] }>();
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
+  const week = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay() + 6) % 7).getTime();
+  for (const file of files) {
+    const at = new Date(file.createdAt).getTime();
+    const label = sort === 'name' ? '全部文件' : !Number.isFinite(at) ? '日期未知' : at >= start ? '今天' : at >= yesterday ? '昨天' : at >= week ? '本周' : '更早';
+    const date = label === '今天' || label === '昨天' ? new Date(at).toLocaleDateString('en-US', { month: 'short', day: '2-digit' }).toUpperCase() : '';
+    const group = groups.get(label) ?? { label, date, files: [] };
+    group.files.push(file); groups.set(label, group);
+  }
+  return [...groups.values()];
 }

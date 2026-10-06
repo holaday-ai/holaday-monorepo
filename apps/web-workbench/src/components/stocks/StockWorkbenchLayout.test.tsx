@@ -282,41 +282,10 @@ describe('StockResearchTable', () => {
 });
 
 describe('StockMarketContextLayout', () => {
-  it('keeps broad-market references available without forcing them into the default task flow', async () => {
-    const user = userEvent.setup();
-    render(
-      <StockMarketContextLayout
-        discovery={node('discovery')}
-        temperature={node('temperature')}
-        sectors={node('sectors')}
-        leaderboard={node('leaderboard')}
-        marketTable={node('market-table')}
-        starStocks={node('star-stocks')}
-      />,
-    );
-
-    expect(screen.getByRole('heading', { name: '市场背景' })).toBeTruthy();
-    expect(screen.queryByTestId('discovery')).toBeNull();
-    const expand = screen.getByRole('button', { name: '展开市场背景' });
-    expect(expand.className).toContain('h-11');
-    expect(expand.className).toContain('min-[769px]:h-8');
-    expect(expand.className).toContain('motion-reduce:transition-none');
-
-    await user.click(screen.getByRole('button', { name: '展开市场背景' }));
-    expect(
-      [...document.querySelectorAll('[data-testid]')].map((element) =>
-        element.getAttribute('data-testid'),
-      ),
-    ).toEqual([
-      'discovery',
-      'temperature',
-      'sectors',
-      'leaderboard',
-      'market-table',
-      'star-stocks',
-    ]);
-
-    await user.click(screen.getByRole('button', { name: '收起市场背景' }));
-    expect(screen.queryByTestId('discovery')).toBeNull();
+  it('keeps news and all market references in the approved editorial hierarchy', () => {
+    render(<StockMarketContextLayout discovery={node('discovery')} temperature={node('temperature')} sectors={node('sectors')} leaderboard={node('leaderboard')} marketTable={node('market-table')} starStocks={node('star-stocks')} />);
+    expect(screen.getByRole('heading', { name: '新闻与公告' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '市场全景' })).toBeTruthy();
+    expect([...document.querySelectorAll('[data-testid]')].map(element => element.getAttribute('data-testid'))).toEqual(['discovery','temperature','sectors','leaderboard','market-table','star-stocks']);
   });
 });
