@@ -16,8 +16,9 @@ function calls(text) {
   ts.forEachChild(node,walk);
  }; walk(source);return result.sort();
 }
+const baseFiles = new Set(git('ls-tree', '-r', '--name-only', '85329cb3').trim().split('\n'));
 const changed=[];
-for(const file of files){let old='';try{old=git('show','85329cb3:'+file);}catch{}const before=calls(old);const after=calls(fs.readFileSync(path.join(root,file),'utf8'));if(JSON.stringify(before)!==JSON.stringify(after))changed.push(file);}
+for(const file of files){const before=calls(baseFiles.has(file)?git('show','85329cb3:'+file):'');const after=calls(fs.readFileSync(path.join(root,file),'utf8'));if(JSON.stringify(before)!==JSON.stringify(after))changed.push(file);}
 const protectedFiles=['src/App.tsx','src/components/BrowserPanel.tsx','src/components/VncViewport.tsx','src/components/FailureHeaderCard.tsx','src/lib/task-failure-recovery.ts','src/pages/admin/AdminModelsPage.tsx','src/pages/admin/AdminSelfCheckPage.tsx','src/lib/trpc.ts','src/lib/ws.ts'];
 const protectedResult=protectedFiles.map(file=>{const full='apps/web-workbench/'+file;const before=git('show','85329cb3:'+full);const current=fs.readFileSync(path.join(root,full),'utf8');return {file,unchanged:before===current,sha256:crypto.createHash('sha256').update(current).digest('hex')};});
 const excluded=git('diff','--name-only','85329cb3','--','apps/orchestrator','packages','scripts','.github','pnpm-lock.yaml').trim();
