@@ -12,6 +12,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { runInNewContext } from 'node:vm';
 import { readCutoverHostSnapshot } from './browser-cutover-evidence.mjs';
 import * as host from './browser-first-cutover-host.mjs';
+import { firstCutoverSshCompletion } from './browser-first-cutover-ingress-diagnostics.mjs';
 import * as ingress from './browser-first-cutover-ingress-session.mjs';
 import {
   classifyFirstCutoverHost,
@@ -424,6 +425,7 @@ for (const role of ['ingress', 'gateway', 'ingress-ssh', 'gateway-ssh']) {
         createHash,
         fileURLToPath,
         isDeepStrictEqual,
+        firstCutoverSshCompletion,
         uuid: (value) => value === binding.attempt,
         fail: () => {
           throw Error('CUTOVER_INGRESS_SESSION_UNPROVEN');
