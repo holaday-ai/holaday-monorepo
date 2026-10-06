@@ -779,7 +779,7 @@ export function ScheduledCalendarPage(): JSX.Element {
               </div>
               <Button
                 onClick={() => setFullModalOpen(true)}
-                className="bg-[#EA1F59] text-white shadow-[0_1px_2px_rgba(15,23,42,0.06)] hover:bg-[#EA1F59]/90"
+                className="bg-[#FF0061] text-white shadow-[0_1px_2px_rgba(15,23,42,0.06)] hover:bg-[#FF0061]/90"
               >
                 <Plus className="mr-1 h-4 w-4" />
                 新建定时任务
@@ -847,15 +847,15 @@ export function ScheduledCalendarPage(): JSX.Element {
       </div>
       <div ref={shellRef} className="hd-calendar relative">
         {statusCopy && (
-          <div className="mb-3 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
+          <div className="mb-3 rounded-[8px] border border-[#DCDDDD] border-l-[#FF0061] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-start gap-2">
                 {loadError ? (
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" aria-hidden />
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0061]" aria-hidden />
                 ) : loading ? (
-                  <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" aria-hidden />
+                  <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#FF0061]" aria-hidden />
                 ) : (
-                  <Plus className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" aria-hidden />
+                  <Plus className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0061]" aria-hidden />
                 )}
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-foreground/85">{statusCopy.title}</div>
@@ -868,7 +868,7 @@ export function ScheduledCalendarPage(): JSX.Element {
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                     onClick={() => void refresh()}
                     disabled={loading}
                   >
@@ -879,7 +879,7 @@ export function ScheduledCalendarPage(): JSX.Element {
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                   >
                     <a
                       href={supportMailtoHref({

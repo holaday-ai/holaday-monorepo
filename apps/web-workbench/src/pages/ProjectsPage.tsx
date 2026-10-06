@@ -737,7 +737,7 @@ export function ProjectsPage(): JSX.Element {
   });
 
   return (
-    <PageContainer width="wide">
+    <PageContainer width="workspace" className="hd-projects-page">
       <PageHeader
         title="项目"
         description={
@@ -763,7 +763,7 @@ export function ProjectsPage(): JSX.Element {
                   type="button"
                   size="sm"
                   onClick={() => setCreateTeamProjectOpen(true)}
-                  className="h-11 bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90"
+                  className="h-11 bg-[#FF0061] text-white hover:bg-[#FF0061]/90"
                 >
                   <Plus className="h-4 w-4" />
                   新建团队项目
@@ -780,7 +780,7 @@ export function ProjectsPage(): JSX.Element {
                     setCreatingPersonal(true);
                     setPersonalNameTouched(false);
                   }}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#EA1F59] px-3 text-sm font-medium text-white shadow-[0_1px_2px_rgba(15,23,42,0.08)] transition hover:bg-[#EA1F59]/90"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#FF0061] px-3 text-sm font-medium text-white shadow-[0_1px_2px_rgba(15,23,42,0.08)] transition hover:bg-[#FF0061]/90"
                 >
                   <Plus className="h-4 w-4" />
                   新建项目
@@ -1023,13 +1023,13 @@ function ProjectCollection({
       ) : null}
 
       {error && hasProjects ? (
-        <div className="mb-3 flex items-center justify-between gap-3 rounded-[8px] border border-[#EA1F59]/20 bg-white px-3 py-2 text-xs text-[#595757]">
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-[8px] border border-[#FF0061]/20 bg-white px-3 py-2 text-xs text-[#595757]">
           <span>{staleTitle}</span>
           <button
             type="button"
             onClick={onRetry}
             className={cn(
-              'font-medium text-[#EA1F59]',
+              'font-medium text-[#FF0061]',
               isTeamCollection && 'inline-flex h-11 items-center justify-center px-3',
             )}
           >
@@ -1049,7 +1049,7 @@ function ProjectCollection({
             type="button"
             onClick={onRetry}
             className={cn(
-              'mt-1 inline-flex items-center rounded-md bg-[#EA1F59] px-3 text-xs font-medium text-white transition hover:bg-[#EA1F59]/90',
+              'mt-1 inline-flex items-center rounded-md bg-[#FF0061] px-3 text-xs font-medium text-white transition hover:bg-[#FF0061]/90',
               isTeamCollection ? 'h-11' : 'h-8',
             )}
           >
@@ -1066,7 +1066,7 @@ function ProjectCollection({
               type="button"
               onClick={onCreate}
               className={cn(
-                'mt-1 inline-flex items-center gap-1.5 rounded-md bg-[#EA1F59] px-3 text-xs font-medium text-white transition hover:bg-[#EA1F59]/90',
+                'mt-1 inline-flex items-center gap-1.5 rounded-md bg-[#FF0061] px-3 text-xs font-medium text-white transition hover:bg-[#FF0061]/90',
                 isTeamCollection ? 'h-11' : 'h-8',
               )}
             >
@@ -1080,7 +1080,7 @@ function ProjectCollection({
           {projects.map((project) => (
             <article
               key={project.projectId}
-              className="group flex flex-col gap-2 rounded-[8px] border border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-[transform,border-color,box-shadow] hover:-translate-y-px hover:border-[#ADADAD] hover:shadow-[0_5px_16px_rgba(15,23,42,0.055)]"
+              className="hd-project-card group flex flex-col gap-2 rounded-[8px] border border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-[transform,border-color,box-shadow] hover:-translate-y-px hover:border-[#ADADAD] hover:shadow-[0_5px_16px_rgba(15,23,42,0.055)]"
             >
               <div className="flex items-start gap-2">
                 <button
@@ -1096,7 +1096,7 @@ function ProjectCollection({
                     )}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-foreground hover:text-[#EA1F59]">
+                    <div className="truncate text-sm font-medium text-foreground hover:text-[#FF0061]">
                       {project.name}
                     </div>
                     {project.description ? (
@@ -1128,7 +1128,7 @@ function ProjectCollection({
                     {onDelete && canDeleteProject(project, organizationRole) ? (
                       <DropdownMenuItem
                         onSelect={() => onDelete(project)}
-                        className="text-[#EA1F59] focus:bg-[#EA1F59]/[0.06] focus:text-[#EA1F59]"
+                        className="text-[#FF0061] focus:bg-[#FF0061]/[0.06] focus:text-[#FF0061]"
                       >
                         <Trash2 />
                         <span>删除项目</span>
@@ -1207,7 +1207,7 @@ function PersonalCreateForm({
             id="project-name-help"
             className={cn(
               'mt-1 flex items-center justify-between gap-3 text-xs',
-              touched && error ? 'text-[#EA1F59]' : 'text-muted-foreground',
+              touched && error ? 'text-[#FF0061]' : 'text-muted-foreground',
             )}
           >
             <span role={touched && error ? 'alert' : undefined}>
@@ -1225,7 +1225,7 @@ function PersonalCreateForm({
             className={cn(
               'rounded-md px-3 py-1.5 text-xs font-medium transition-colors sm:h-8',
               canSubmit && !busy
-                ? 'bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90'
+                ? 'bg-[#FF0061] text-white hover:bg-[#FF0061]/90'
                 : 'cursor-not-allowed border border-[#DCDDDD] bg-[#EFEFEF]/60 text-muted-foreground',
             )}
           >
@@ -1376,7 +1376,7 @@ function CreateNameDialog({
             />
           </label>
           {touched && error ? (
-            <p role="alert" className="mt-2 text-xs text-[#EA1F59]">
+            <p role="alert" className="mt-2 text-xs text-[#FF0061]">
               {error}
             </p>
           ) : null}
@@ -1396,7 +1396,7 @@ function CreateNameDialog({
               size="sm"
               disabled={busy || Boolean(error)}
               onClick={() => void submit()}
-              className="h-11 bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90"
+              className="h-11 bg-[#FF0061] text-white hover:bg-[#FF0061]/90"
             >
               {busy ? '创建中…' : submitLabel}
             </Button>

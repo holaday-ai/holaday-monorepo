@@ -203,7 +203,7 @@ export function CapabilityCenterContent({
         </div>
         <a
           href="#all-skills"
-          className="inline-flex min-h-10 shrink-0 items-center gap-2 self-start rounded-xl px-3 text-[13px] font-medium text-[#3E3A3D] transition-colors hover:bg-[#F4F2F1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+          className="inline-flex min-h-10 shrink-0 items-center gap-2 self-start rounded-xl px-3 text-[13px] font-medium text-[#3E3A3D] transition-colors hover:bg-[#F4F2F1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20"
         >
           全部技能
           <Grid3X3 className="h-[18px] w-[18px] text-[#696369]" aria-hidden />
@@ -233,7 +233,7 @@ export function CapabilityCenterContent({
                     setSelectedTask(null);
                     setManualSkillId(null);
                   }}
-                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[#8D878B] transition-colors hover:bg-[#F2EFED] hover:text-[#4E494D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[#8D878B] transition-colors hover:bg-[#F2EFED] hover:text-[#4E494D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20"
                 >
                   <X className="h-3.5 w-3.5" aria-hidden />
                 </button>
@@ -322,7 +322,7 @@ export function CapabilityCenterContent({
                 manuallySelectedSkill ? 'manual' : 'suggested',
               )
             }
-            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 self-end rounded-[11px] bg-[#EA1F59] px-4 text-[12px] font-semibold text-white shadow-[0_8px_18px_rgba(234,31,89,0.18)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#D91A52] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/30 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-[#D8D3D5] disabled:shadow-none disabled:hover:translate-y-0 motion-reduce:transform-none"
+            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 self-end rounded-[11px] bg-[#FF0061] px-4 text-[12px] font-semibold text-white shadow-[0_8px_18px_rgba(255,0,97,0.18)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#D91A52] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/30 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-[#D8D3D5] disabled:shadow-none disabled:hover:translate-y-0 motion-reduce:transform-none"
           >
             {suggestionUnavailable || attachmentUploading ? (
               <Loader2 className="h-[18px] w-[18px] animate-spin" aria-hidden />
@@ -341,7 +341,7 @@ export function CapabilityCenterContent({
             title={attachmentsAllowed ? '添加照片或文件' : '当前套餐暂不支持文件上传'}
             disabled={!attachmentsAllowed}
             onClick={() => fileInputRef.current?.click()}
-            className="inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2 font-medium text-[#625C61] transition-colors hover:bg-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 disabled:cursor-not-allowed disabled:opacity-45"
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2 font-medium text-[#625C61] transition-colors hover:bg-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 disabled:cursor-not-allowed disabled:opacity-45"
           >
             <Paperclip className="h-3.5 w-3.5" aria-hidden />
             添加附件
@@ -357,7 +357,7 @@ export function CapabilityCenterContent({
                 aria-label={`选择技能：${manuallySelectedSkill?.name ?? '自动匹配'}`}
                 title="选择任务使用的技能"
                 className={cn(
-                  'inline-flex min-h-8 max-w-[15rem] items-center gap-1.5 rounded-lg px-2 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20',
+                  'inline-flex min-h-8 max-w-[15rem] items-center gap-1.5 rounded-lg px-2 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20',
                   manuallySelectedSkill
                     ? 'bg-white/80 text-[#403B3F] shadow-[0_1px_2px_rgba(37,35,38,0.06)]'
                     : 'text-[#625C61] hover:bg-white/70',
@@ -486,7 +486,7 @@ export function CapabilityCenterContent({
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-[#EA1F59] shadow-[0_0_0_5px_rgba(234,31,89,0.08)]" aria-hidden />
+                <span className="h-2 w-2 rounded-full bg-[#FF0061] shadow-[0_0_0_5px_rgba(255,0,97,0.08)]" aria-hidden />
                 <h2
                   id="intent-understanding-title"
                   className="text-[14px] font-semibold text-[#2F2B2E]"
@@ -502,7 +502,7 @@ export function CapabilityCenterContent({
                   .map(({ skill }, index) => (
                     <React.Fragment key={skill.id}>
                       {index > 0 && (
-                        <span className="h-1.5 w-1.5 rounded-full bg-[#EA1F59]" aria-hidden />
+                        <span className="h-1.5 w-1.5 rounded-full bg-[#FF0061]" aria-hidden />
                       )}
                       <button
                         type="button"
@@ -511,7 +511,7 @@ export function CapabilityCenterContent({
                         aria-pressed={skill.id === activeSkill.id}
                         onClick={() => selectSkill(skill)}
                         className={cn(
-                          'inline-flex min-h-9 items-center gap-2 rounded-xl px-2 py-1 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20',
+                          'inline-flex min-h-9 items-center gap-2 rounded-xl px-2 py-1 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20',
                           skill.id === activeSkill.id
                             ? 'bg-[#F6F3F2] text-[#2F2B2E]'
                             : 'text-[#625C61] hover:bg-[#F6F3F2]',
@@ -540,7 +540,7 @@ export function CapabilityCenterContent({
                 aria-checked={previewExpanded}
                 aria-controls="execution-preview-details"
                 onClick={() => setPreviewExpanded((current) => !current)}
-                className="inline-flex min-h-10 items-center gap-2 rounded-xl px-2 text-[12px] font-medium text-[#5E585C] transition-colors hover:bg-[#F6F3F2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+                className="inline-flex min-h-10 items-center gap-2 rounded-xl px-2 text-[12px] font-medium text-[#5E585C] transition-colors hover:bg-[#F6F3F2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20"
               >
                 执行预览
                 <span
@@ -571,7 +571,7 @@ export function CapabilityCenterContent({
               </p>
               {activeSkill.experience.deliverables.map((deliverable) => (
                 <span key={deliverable} className="inline-flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#EA1F59]" aria-hidden />
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#FF0061]" aria-hidden />
                   {deliverable}
                 </span>
               ))}
@@ -600,7 +600,7 @@ export function CapabilityCenterContent({
                 aria-pressed={itemIsActive}
                 onClick={() => selectTaskExample(item.skill, item.prompt)}
                 className={cn(
-                  'group flex min-h-[70px] w-full items-center gap-3 rounded-[14px] px-2 py-2 text-left transition-colors hover:bg-[#F7F5F3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/18',
+                  'group flex min-h-[70px] w-full items-center gap-3 rounded-[14px] px-2 py-2 text-left transition-colors hover:bg-[#F7F5F3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/18',
                   itemIsActive && 'bg-[#F7F5F3]',
                 )}
               >
@@ -640,7 +640,7 @@ export function CapabilityCenterContent({
               title={skill.name}
               onClick={() => selectSkill(skill)}
               className={cn(
-                'flex h-11 w-11 items-center justify-center rounded-[12px] transition duration-200 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 motion-reduce:transform-none',
+                'flex h-11 w-11 items-center justify-center rounded-[12px] transition duration-200 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 motion-reduce:transform-none',
                 skill.id === activeSkill.id ? 'bg-[#FFF0F4]' : 'bg-[#F5F3F1] hover:bg-[#EEEAE8]',
               )}
             >
@@ -692,7 +692,7 @@ export function CapabilityCenterContent({
                           title={`查看${skill.name}`}
                           aria-pressed={skill.id === activeSkill.id}
                           onClick={() => selectSkill(skill)}
-                          className="flex min-w-0 flex-1 items-center gap-3 rounded-[10px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/18"
+                          className="flex min-w-0 flex-1 items-center gap-3 rounded-[10px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/18"
                         >
                           <SkillLogo logoId={skill.logoId} label={skill.name} size="sm" />
                           <span className="min-w-0 flex-1">
@@ -719,7 +719,7 @@ export function CapabilityCenterContent({
                           aria-busy={pending}
                           disabled={pending || anotherPending}
                           onClick={() => onToggle(skill)}
-                          className="inline-flex min-h-10 shrink-0 items-center rounded-[10px] px-2 transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/18 disabled:cursor-not-allowed disabled:opacity-55"
+                          className="inline-flex min-h-10 shrink-0 items-center rounded-[10px] px-2 transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/18 disabled:cursor-not-allowed disabled:opacity-55"
                         >
                           <span
                             aria-hidden

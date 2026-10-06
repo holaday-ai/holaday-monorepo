@@ -261,7 +261,7 @@ export function ProfilePage(): JSX.Element {
         />
         {loadError ? (
           <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-            <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
+            <AlertCircle className="h-8 w-8 text-[#FF0061]" aria-hidden />
             <div className="text-sm font-medium text-foreground/80">{loadErrorCopy.title}</div>
             <div className="max-w-md text-xs leading-5 text-muted-foreground">
               {loadErrorCopy.body}
@@ -274,7 +274,7 @@ export function ProfilePage(): JSX.Element {
                 asChild
                 variant="outline"
                 size="sm"
-                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
               >
                 <a
                   href={supportMailtoHref({
@@ -289,7 +289,7 @@ export function ProfilePage(): JSX.Element {
           </div>
         ) : (
           <div className="flex h-64 items-center justify-center">
-            <Loader2 className="h-5 w-5 animate-spin text-[#EA1F59]" />
+            <Loader2 className="h-5 w-5 animate-spin text-[#FF0061]" />
           </div>
         )}
       </PageContainer>
@@ -310,7 +310,7 @@ export function ProfilePage(): JSX.Element {
       <div className="space-y-6">
         <Section className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <div className="flex flex-col items-start gap-6 md:flex-row md:items-center">
-            <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-[8px] border border-[#EA1F59]/35 bg-white text-2xl font-semibold text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+            <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-[8px] border border-[#FF0061]/35 bg-white text-2xl font-semibold text-[#FF0061] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
               {initial}
             </div>
             <div className="min-w-0 flex-1">
@@ -348,7 +348,7 @@ export function ProfilePage(): JSX.Element {
               asChild
               variant="outline"
               size="sm"
-              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
             >
               <a
                 href={supportMailtoHref({
@@ -385,7 +385,7 @@ export function ProfilePage(): JSX.Element {
                 setPasswordError(null);
                 setPasswordMessage(null);
               }}
-              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#EA1F59]/45 hover:bg-[#FFF7F9] hover:text-[#EA1F59]"
+              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#FF0061]/45 hover:bg-[#FFF7F9] hover:text-[#FF0061]"
             >
               <KeyRound className="h-3.5 w-3.5" aria-hidden />
               修改密码
@@ -396,10 +396,10 @@ export function ProfilePage(): JSX.Element {
               aria-label="修改密码"
               aria-busy={passwordPending === 'change'}
               onSubmit={changePassword}
-              className="mt-4 rounded-[8px] border border-[#EA1F59]/15 bg-[#FFF9FA] p-4"
+              className="mt-4 rounded-[8px] border border-[#FF0061]/15 bg-[#FFF9FA] p-4"
             >
               <div className="mb-4 flex items-start gap-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-white text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-white text-[#FF0061] shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
                   <ShieldCheck className="h-4 w-4" aria-hidden />
                 </div>
                 <div>
@@ -423,7 +423,7 @@ export function ProfilePage(): JSX.Element {
                       onChange={(event) =>
                         setPasswordCode(event.target.value.replace(/\D/g, '').slice(0, 6))
                       }
-                      className="min-w-0 flex-1 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#EA1F59]/60 focus:ring-2 focus:ring-[#EA1F59]/10"
+                      className="min-w-0 flex-1 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#FF0061]/60 focus:ring-2 focus:ring-[#FF0061]/10"
                     />
                     <Button
                       type="button"
@@ -431,7 +431,7 @@ export function ProfilePage(): JSX.Element {
                       size="sm"
                       disabled={passwordPending !== null || passwordCooldown > 0 || !email}
                       onClick={() => void sendPasswordCode()}
-                      className="shrink-0 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#EA1F59]/45 hover:bg-white hover:text-[#EA1F59]"
+                      className="shrink-0 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#FF0061]/45 hover:bg-white hover:text-[#FF0061]"
                     >
                       {passwordPending === 'send' ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -451,7 +451,7 @@ export function ProfilePage(): JSX.Element {
                     maxLength={128}
                     value={newPassword}
                     onChange={(event) => setNewPassword(event.target.value)}
-                    className="mt-1.5 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#EA1F59]/60 focus:ring-2 focus:ring-[#EA1F59]/10"
+                    className="mt-1.5 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#FF0061]/60 focus:ring-2 focus:ring-[#FF0061]/10"
                   />
                 </label>
                 <label className="text-xs font-medium text-[#595757]" htmlFor="confirm-password">
@@ -465,7 +465,7 @@ export function ProfilePage(): JSX.Element {
                     maxLength={128}
                     value={confirmPassword}
                     onChange={(event) => setConfirmPassword(event.target.value)}
-                    className="mt-1.5 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#EA1F59]/60 focus:ring-2 focus:ring-[#EA1F59]/10"
+                    className="mt-1.5 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#FF0061]/60 focus:ring-2 focus:ring-[#FF0061]/10"
                   />
                 </label>
               </div>
@@ -514,7 +514,7 @@ export function ProfilePage(): JSX.Element {
                 size="sm"
                 disabled={!mfaStatus || mfaBusy}
                 onClick={() => void beginMfaSetup()}
-                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#EA1F59]/45 hover:bg-[#FFF7F9] hover:text-[#EA1F59]"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#FF0061]/45 hover:bg-[#FFF7F9] hover:text-[#FF0061]"
               >
                 {mfaBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
                 开启双重验证
@@ -525,7 +525,7 @@ export function ProfilePage(): JSX.Element {
             <form
               aria-label="开启双重验证"
               onSubmit={confirmMfaSetup}
-              className="mt-4 rounded-[8px] border border-[#EA1F59]/15 bg-[#FFF9FA] p-4"
+              className="mt-4 rounded-[8px] border border-[#FF0061]/15 bg-[#FFF9FA] p-4"
             >
               <div className="grid gap-5 md:grid-cols-[208px_1fr] md:items-center">
                 <img
@@ -563,7 +563,7 @@ export function ProfilePage(): JSX.Element {
                       onChange={(event) =>
                         setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))
                       }
-                      className="mt-1.5 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#EA1F59]/60 focus:ring-2 focus:ring-[#EA1F59]/10"
+                      className="mt-1.5 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#FF0061]/60 focus:ring-2 focus:ring-[#FF0061]/10"
                     />
                   </label>
                   <div className="mt-4 flex flex-wrap justify-end gap-2">
@@ -601,7 +601,7 @@ export function ProfilePage(): JSX.Element {
                     maxLength={11}
                     value={mfaCode}
                     onChange={(event) => setMfaCode(event.target.value.slice(0, 11))}
-                    className="mt-1.5 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#EA1F59]/60 focus:ring-2 focus:ring-[#EA1F59]/10"
+                    className="mt-1.5 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#FF0061]/60 focus:ring-2 focus:ring-[#FF0061]/10"
                   />
                 </label>
                 <div className="flex flex-wrap gap-2">

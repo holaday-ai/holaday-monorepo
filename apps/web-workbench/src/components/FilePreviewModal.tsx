@@ -276,7 +276,7 @@ export function FilePreviewModal({
                 {unavailable ? (
                   <CircleSlash className="h-8 w-8 text-[#8B93A6]" />
                 ) : (
-                  <ExternalLink className="h-8 w-8 text-[#EA1F59]" />
+                  <ExternalLink className="h-8 w-8 text-[#FF0061]" />
                 )}
                 <div className="font-medium text-foreground/85">
                   {unavailable ? '文件已失效' : '无法加载预览'}

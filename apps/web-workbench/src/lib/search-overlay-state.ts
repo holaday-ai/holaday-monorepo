@@ -121,7 +121,7 @@ export function searchOverlayRowTone(input: SearchOverlayProductStateInput): str
   const state = toSearchOverlayProductState(input);
   if (state.lifecycle !== 'terminal') return '';
   if (state.outcome === 'failed') {
-    return 'bg-[#EA1F59]/[0.035] shadow-[inset_3px_0_0_rgba(234,31,89,0.4)]';
+    return 'bg-[#FF0061]/[0.035] shadow-[inset_3px_0_0_rgba(255,0,97,0.4)]';
   }
   if (state.outcome === 'partial_success') {
     return 'bg-[#FFC910]/[0.05] shadow-[inset_3px_0_0_rgba(255,201,16,0.5)]';
@@ -139,7 +139,7 @@ export function searchOverlayStatusTone(input: SearchOverlayProductStateInput): 
   if (state.lifecycle === 'unknown') return 'bg-[#EFEFEF] text-[#595757]';
   if (state.lifecycle !== 'terminal') return 'bg-[#57479C]/10 text-[#57479C]';
   if (state.outcome === 'completed') return 'bg-[#42C0EF]/10 text-[#1688AA]';
-  if (state.outcome === 'failed') return 'bg-[#EA1F59]/10 text-[#EA1F59]';
+  if (state.outcome === 'failed') return 'bg-[#FF0061]/10 text-[#FF0061]';
   if (state.outcome === 'partial_success') return 'bg-[#FFC910]/20 text-[#8A6A00]';
   if (state.outcome === 'cancelled') return 'bg-[#EFEFEF] text-[#595757]';
   return 'bg-[#EFEFEF] text-[#595757]';

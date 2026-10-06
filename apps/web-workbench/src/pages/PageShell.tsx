@@ -51,7 +51,7 @@ export function PageContainer({
   return (
     <div
       className={cn(
-        'mx-auto w-full px-4 pb-8 pt-14 sm:px-6 md:px-8 md:pb-10 min-[769px]:pt-20',
+        'holaday-page mx-auto w-full px-4 pb-8 pt-14 sm:px-6 md:px-8 md:pb-10 min-[769px]:pt-20',
         WIDTH_CLASS[width],
         className,
       )}
@@ -77,7 +77,7 @@ interface PageHeaderProps {
  */
 export function PageHeader({ title, description, action }: PageHeaderProps): JSX.Element {
   return (
-    <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <header className="holaday-page-header mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0">
         <h1 className="text-xl font-semibold leading-tight text-foreground">{title}</h1>
         {description && (
@@ -107,7 +107,7 @@ export function PageLoadingPanel({
       className="rounded-[8px] border border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)] animate-fade-in motion-reduce:animate-none"
     >
       <div className="flex items-center gap-3">
-        <div className="h-9 w-9 rounded-[8px] bg-[#EA1F59]/90 shadow-[0_8px_18px_rgba(234,31,89,0.16)]" />
+        <div className="h-9 w-9 rounded-[8px] bg-[#FF0061]/90 shadow-[0_8px_18px_rgba(255,0,97,0.16)]" />
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-[#595757]">{label}</div>
           <div className="mt-1 text-xs text-muted-foreground">{description}</div>

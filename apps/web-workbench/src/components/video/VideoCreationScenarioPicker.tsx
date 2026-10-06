@@ -15,7 +15,7 @@ export function VideoCreationScenarioPicker({
     <section aria-labelledby="video-scenario-heading">
       <h2
         id="video-scenario-heading"
-        className="text-[22px] font-semibold tracking-[-0.025em] text-[#2C2530] sm:text-[25px]"
+        className="text-[22px] font-semibold tracking-[-0.025em] text-[var(--creative-ink,#2C2530)] sm:text-[25px]"
       >
         这次想完成哪种视频？
       </h2>
@@ -30,10 +30,10 @@ export function VideoCreationScenarioPicker({
               disabled={disabled}
               onClick={() => onChange(scenario.id)}
               className={cn(
-                'group relative min-h-[218px] overflow-hidden rounded-[20px] border bg-white text-left shadow-[0_8px_22px_rgba(58,45,64,0.045)] outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-[#D62958]/25 disabled:cursor-wait disabled:opacity-60 motion-reduce:transform-none motion-reduce:transition-none',
+                'hd-scenario-card group relative min-h-[218px] overflow-hidden rounded-[20px] border bg-[var(--creative-surface,#fff)] text-left shadow-[0_8px_22px_rgba(58,45,64,0.045)] outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-[#D62958]/25 disabled:cursor-wait disabled:opacity-60 motion-reduce:transform-none motion-reduce:transition-none',
                 selected
                   ? 'border-[#DF315D] ring-2 ring-[#DF315D]/75'
-                  : 'border-[#E9E1E8] hover:-translate-y-0.5 hover:border-[#CFC3D0] hover:shadow-[0_16px_34px_rgba(58,45,64,0.08)] motion-reduce:hover:translate-y-0',
+                  : 'border-[var(--creative-line,#E9E1E8)] hover:-translate-y-0.5 hover:border-[var(--creative-line,#CFC3D0)] hover:shadow-[0_16px_34px_rgba(58,45,64,0.08)] motion-reduce:hover:translate-y-0',
               )}
             >
               <img
@@ -49,14 +49,14 @@ export function VideoCreationScenarioPicker({
                 </span>
               ) : null}
               <span className="block px-4 py-3.5">
-                <span className="mb-2 flex flex-wrap gap-1.5 text-[10px] font-semibold text-[#7C7380]">
-                  <span className="rounded-full bg-[#F6F2F6] px-2 py-1">{scenario.aspect}</span>
-                  <span className="rounded-full bg-[#F6F2F6] px-2 py-1">{scenario.duration}</span>
+                <span className="mb-2 flex flex-wrap gap-1.5 text-[10px] font-semibold text-[var(--creative-muted,#7C7380)]">
+                  <span className="rounded-full bg-[var(--creative-surface,#F6F2F6)] px-2 py-1">{scenario.aspect}</span>
+                  <span className="rounded-full bg-[var(--creative-surface,#F6F2F6)] px-2 py-1">{scenario.duration}</span>
                 </span>
-                <span className="block text-[16px] font-semibold text-[#302936]">
+                <span className="block text-[16px] font-semibold text-[var(--creative-ink,#302936)]">
                   {scenario.title}
                 </span>
-                <span className="mt-1 block text-xs leading-5 text-[#766D7B]">
+                <span className="mt-1 block text-xs leading-5 text-[var(--creative-muted,#766D7B)]">
                   {scenario.description}
                 </span>
               </span>

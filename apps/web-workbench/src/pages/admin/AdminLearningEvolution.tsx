@@ -45,7 +45,7 @@ export function AdminLearningEvolution(): JSX.Element {
         成功任务沉淀为路径 → 隔离回放验证 → 确定性复用 · 比率统计最近 {n.windowDays} 天
       </p>
       {error && (
-        <div className="mt-2 text-[12px] text-[#EA1F59]">学习引擎数据暂不可用：{error}</div>
+        <div className="mt-2 text-[12px] text-[#FF0061]">学习引擎数据暂不可用：{error}</div>
       )}
       <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile

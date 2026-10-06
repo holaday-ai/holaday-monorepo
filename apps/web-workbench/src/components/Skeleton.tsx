@@ -12,10 +12,10 @@ export function AppSkeleton(): JSX.Element {
         className="hidden h-full w-[260px] shrink-0 flex-col border-r border-[#DCDDDD]/70 bg-white/70 px-3 py-4 md:flex"
       >
         <div className="flex items-center gap-2 px-1">
-          <div className="h-5 w-8 rounded-[6px] bg-[#EA1F59]/90" />
+          <div className="h-5 w-8 rounded-[6px] bg-[#FF0061]/90" />
           <div className="hola-skel h-3.5 w-20 bg-[#DCDDDD]/80" />
         </div>
-        <div className="mt-5 h-9 rounded-[8px] bg-[#EA1F59]/90 shadow-[0_8px_20px_rgba(234,31,89,0.16)]" />
+        <div className="mt-5 h-9 rounded-[8px] bg-[#FF0061]/90 shadow-[0_8px_20px_rgba(255,0,97,0.16)]" />
         <div className="mt-3 hola-skel h-8 w-full bg-[#EFEFEF]/80" />
         <div className="mt-6 space-y-3">
           <div className="hola-skel h-3 w-16 bg-[#DCDDDD]/80" />
@@ -30,7 +30,7 @@ export function AppSkeleton(): JSX.Element {
           <div className="mt-2 hola-skel h-1.5 w-24 bg-[#42C0EF]/60" />
         </div>
         <div className="flex items-center gap-2 rounded-[8px] border border-[#DCDDDD]/70 bg-white/70 p-2">
-          <div className="h-8 w-8 rounded-[8px] bg-[#EA1F59]/90" />
+          <div className="h-8 w-8 rounded-[8px] bg-[#FF0061]/90" />
           <div className="flex-1 space-y-1">
             <div className="hola-skel h-3 w-24 bg-[#DCDDDD]/80" />
             <div className="hola-skel h-2 w-16 bg-[#EFEFEF]" />
@@ -50,7 +50,7 @@ export function AppSkeleton(): JSX.Element {
             <div className="mt-10 hola-skel h-5 w-5 bg-[#DCDDDD]/75" />
             <div className="mt-4 flex items-center justify-between">
               <div className="hola-skel h-4 w-8 bg-[#DCDDDD]/75" />
-              <div className="h-8 w-8 rounded-full bg-[#EA1F59]/55" />
+              <div className="h-8 w-8 rounded-full bg-[#FF0061]/55" />
             </div>
           </div>
           <div className="mt-5 flex flex-wrap items-center justify-center gap-1.5">

@@ -92,7 +92,7 @@ export function StockAiCommandComposer({
         <button
           type="submit"
           disabled={submitDisabled}
-          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#D95F83] text-white shadow-[0_8px_20px_rgba(217,95,131,0.2)] transition hover:bg-[#C9184A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/30 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#D95F83] text-white shadow-[0_8px_20px_rgba(217,95,131,0.2)] transition hover:bg-[#C9184A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/30 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
           aria-label="提交股市任务"
           title="交给 Holaday AI 研究"
         >
@@ -120,7 +120,7 @@ export function StockAiCommandComposer({
               title={commandTitle(command) ?? command}
               onClick={() => onCommand(command)}
               className={cn(
-                'flex min-h-11 min-w-[132px] items-center gap-2 rounded-[11px] border border-[#E5DEEB] bg-[#FCFAFF] px-2.5 text-left text-[11px] font-medium leading-4 text-[#5D5368] transition hover:border-[#E7BEC9] hover:bg-[#FFF0F4] hover:text-[#C9184A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none sm:min-w-0',
+                'flex min-h-11 min-w-[132px] items-center gap-2 rounded-[11px] border border-[#E5DEEB] bg-[#FCFAFF] px-2.5 text-left text-[11px] font-medium leading-4 text-[#5D5368] transition hover:border-[#E7BEC9] hover:bg-[#FFF0F4] hover:text-[#C9184A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none sm:min-w-0',
                 index === 0 && 'border-[#F0D1DA] bg-[#FFF7F9] text-[#9F3153]',
               )}
             >

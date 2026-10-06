@@ -185,7 +185,7 @@ export function taskHubRowTone(input: TaskHubProductStateInput): string {
   const state = toTaskHubProductState(input);
   if (state.lifecycle !== 'terminal') return '';
   if (state.outcome === 'failed') {
-    return 'bg-[#EA1F59]/[0.035] shadow-[inset_3px_0_0_rgba(234,31,89,0.4)]';
+    return 'bg-[#FF0061]/[0.035] shadow-[inset_3px_0_0_rgba(255,0,97,0.4)]';
   }
   if (state.outcome === 'partial_success') {
     return 'bg-[#FFC910]/[0.05] shadow-[inset_3px_0_0_rgba(255,201,16,0.5)]';

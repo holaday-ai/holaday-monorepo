@@ -326,7 +326,7 @@ export function StockRiskRadar({
           title="刷新风险雷达"
           disabled={!loadable || loading}
           onClick={() => void load(true)}
-          className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-[8px] border border-[#DADDE4] bg-white px-3 text-[12px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:bg-[#FFF7F9] hover:text-[#C72654] disabled:cursor-not-allowed disabled:opacity-50 sm:h-9"
+          className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-[8px] border border-[#DADDE4] bg-white px-3 text-[12px] font-medium text-[#4F5868] transition hover:border-[#FF0061]/30 hover:bg-[#FFF7F9] hover:text-[#C72654] disabled:cursor-not-allowed disabled:opacity-50 sm:h-9"
         >
           {loading ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden />

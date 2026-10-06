@@ -1,3 +1,4 @@
+import { CharacterAvatar } from '@/components/CharacterAvatar';
 import { Button } from '@/components/ui/button';
 import {
   type ProjectMemberRole,
@@ -35,6 +36,7 @@ interface WorkbenchMember {
   readonly userId: string;
   readonly organizationMemberId?: string;
   readonly displayName: string;
+  readonly avatarUrl?: string | null;
   readonly role: ProjectMemberRole;
 }
 
@@ -517,7 +519,7 @@ function TaskTable({
                     aria-label={`查看 ${row.title}`}
                     title={`查看 ${row.title}`}
                     onClick={() => onSelect(row.id)}
-                    className="flex h-11 w-11 items-center justify-center rounded-[8px] text-[#858892] hover:bg-[#F4F4F6] hover:text-[#EA1F59]"
+                    className="flex h-11 w-11 items-center justify-center rounded-[8px] text-[#858892] hover:bg-[#F4F4F6] hover:text-[#FF0061]"
                   >
                     <ChevronRight className="h-4 w-4" aria-hidden />
                   </button>
@@ -642,9 +644,7 @@ function MembersRail({
       <ul className="mt-4 space-y-3">
         {members.map((member) => (
           <li key={member.userId} className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FFF0F2] text-[11px] font-semibold text-[#D94255]">
-              {member.displayName.slice(0, 1)}
-            </span>
+            <CharacterAvatar name={member.displayName} seed={member.userId} src={member.avatarUrl} className="h-8 w-8" />
             <span className="min-w-0">
               <span className="block truncate text-[12px] font-medium text-[#3B3C42]">
                 {member.displayName}
@@ -988,7 +988,7 @@ function ContractSummary({ task }: { readonly task: TaskDetail }) {
   return (
     <section aria-label="验收契约">
       <div className="flex items-center gap-2">
-        <FileCheck2 className="h-4 w-4 text-[#EA1F59]" aria-hidden />
+        <FileCheck2 className="h-4 w-4 text-[#FF0061]" aria-hidden />
         <h3 className="text-[14px] font-semibold text-[#34353B]">验收契约</h3>
         <span className="text-[11px] text-[#898B94]">v{contract.version}</span>
       </div>
@@ -1096,7 +1096,7 @@ function ReviewPanel({
     <section aria-label="验收操作" className="border-t border-[#ECEEF2] pt-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <ClipboardCheck className="h-4 w-4 text-[#EA1F59]" aria-hidden />
+          <ClipboardCheck className="h-4 w-4 text-[#FF0061]" aria-hidden />
           <h3 className="text-[14px] font-semibold text-[#34353B]">验收操作</h3>
         </div>
         <span className="text-[11px] text-[#7D7F88]">修订轮次 {task.revisionRound} / 2</span>
@@ -1625,7 +1625,7 @@ function TaskError({
 function TaskEmpty({ scope }: { readonly scope: TaskScope }) {
   return (
     <div className="px-5 py-16 text-center">
-      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-[#FFF1F3] text-[#EA1F59]">
+      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-[#FFF1F3] text-[#FF0061]">
         <ClipboardCheck className="h-5 w-5" aria-hidden />
       </div>
       <h3 className="mt-3 text-[14px] font-semibold text-[#36373D]">这个分组还没有任务</h3>

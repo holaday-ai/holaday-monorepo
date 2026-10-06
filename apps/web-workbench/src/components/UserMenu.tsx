@@ -15,11 +15,13 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { CharacterAvatar } from '@/components/CharacterAvatar';
 import { cn } from '@/lib/utils';
 import { type ThemeMode, useTheme } from '@/stores/theme-store';
 
 interface Props {
   displayName: string;
+  avatarUrl?: string | null;
   email: string | null;
   plan: string;
   onLogout(): void;
@@ -45,6 +47,7 @@ interface Props {
  */
 export function UserMenu({
   displayName,
+  avatarUrl,
   email,
   plan,
   onLogout,
@@ -83,7 +86,6 @@ export function UserMenu({
     };
   }, [open]);
 
-  const initial = (displayName || email || '?').slice(0, 1).toUpperCase();
   const planLabel = friendlyPlan(plan);
   const topbar = placement === 'topbar';
 
@@ -98,28 +100,19 @@ export function UserMenu({
         title={compact ? displayName || email || '用户' : undefined}
         className={cn(
           topbar
-            ? 'flex h-11 items-center gap-2 rounded-full bg-transparent pl-0.5 pr-1 text-left transition-colors hover:bg-[#EFEFEF]/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 dark:hover:bg-white/10'
-            : 'flex items-center rounded-[10px] border border-[#DCDDDD]/60 bg-white/55 shadow-[0_4px_12px_rgba(17,24,39,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
+            ? 'flex h-11 items-center gap-2 rounded-full bg-transparent pl-0.5 pr-1 text-left transition-colors hover:bg-[#EFEFEF]/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 dark:hover:bg-white/10'
+            : 'flex items-center rounded-[10px] border border-[#DCDDDD]/60 bg-white/55 shadow-[0_4px_12px_rgba(17,24,39,0.035)] transition-colors hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10',
           !topbar && (compact ? 'h-9 w-9 justify-center' : 'h-11 w-full gap-2.5 px-2.5 text-left'),
           !topbar &&
             open &&
-            'border-[#EA1F59]/25 bg-[#EA1F59]/5 shadow-[0_10px_26px_rgba(234,31,89,0.08)] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
+            'border-[#FF0061]/25 bg-[#FF0061]/5 shadow-[0_10px_26px_rgba(255,0,97,0.08)] dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10',
         )}
       >
-        <div
-          className={cn(
-            'flex shrink-0 items-center justify-center bg-[#EA1F59] font-semibold text-white shadow-[0_3px_10px_rgba(234,31,89,0.14)]',
-            topbar
-              ? 'h-10 w-10 rounded-full ring-2 ring-white'
-              : 'h-7 w-7 rounded-[9px] text-[13px]',
-          )}
-        >
-          {initial}
-        </div>
+        <CharacterAvatar name={displayName || email || '用户'} seed={email || displayName} src={avatarUrl} className={topbar ? 'h-10 w-10' : 'h-7 w-7'} />
         {topbar ? (
           <ChevronDown
             className={cn(
-              'h-4 w-4 text-[#EA1F59] transition-transform',
+              'h-4 w-4 text-[#FF0061] transition-transform',
               open && 'rotate-180',
             )}
           />
@@ -147,14 +140,12 @@ export function UserMenu({
         >
           {topbar ? (
             <div className="mb-3 flex items-center gap-3 px-1 pb-2">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#EA1F59] text-base font-semibold text-white ring-2 ring-[#F4D7E2]">
-                {initial}
-              </div>
+              <CharacterAvatar name={displayName || email || '用户'} seed={email || displayName} src={avatarUrl} className="h-11 w-11" />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold text-[#111827]">
                   {displayName || email || '未命名'}
                 </div>
-                <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-[#EA1F59]/15 bg-[#EA1F59]/10 px-2 py-0.5 text-[10px] font-semibold text-[#EA1F59]">
+                <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-[#FF0061]/15 bg-[#FF0061]/10 px-2 py-0.5 text-[10px] font-semibold text-[#FF0061]">
                   <Crown className="h-3 w-3" />
                   {planLabel}
                 </div>
@@ -285,7 +276,7 @@ function ThemeOption({
         'flex items-center justify-center gap-1 px-1 text-[10px] transition-colors',
         topbar ? 'h-7 rounded-full font-semibold' : 'flex-col rounded-[6px] py-1.5',
         active
-          ? 'bg-white text-[#EA1F59] shadow-[0_1px_2px_rgba(17,24,39,0.05)] dark:bg-card dark:text-foreground'
+          ? 'bg-white text-[#FF0061] shadow-[0_1px_2px_rgba(17,24,39,0.05)] dark:bg-card dark:text-foreground'
           : 'text-[#595757] hover:bg-white/65 hover:text-foreground dark:text-foreground/65 dark:hover:bg-white/10',
       )}
     >
@@ -317,8 +308,8 @@ function MenuItem({
         'flex w-full items-center gap-2 text-left transition-colors',
         topbar ? 'h-9 rounded-[10px] px-2.5 text-[12px] font-medium' : 'rounded-[6px] px-2.5 py-1.5 text-sm',
         destructive
-          ? 'text-[#EA1F59] hover:bg-[#EA1F59]/10'
-          : 'text-[#595757] hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:text-foreground/75 dark:hover:bg-white/10 dark:hover:text-foreground',
+          ? 'text-[#FF0061] hover:bg-[#FF0061]/10'
+          : 'text-[#595757] hover:bg-[#FF0061]/5 hover:text-[#FF0061] dark:text-foreground/75 dark:hover:bg-white/10 dark:hover:text-foreground',
       )}
     >
       <span

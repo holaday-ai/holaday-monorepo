@@ -553,7 +553,7 @@ export function TeamProjectPage(): JSX.Element {
   const membersLoading = members.projectId === projectId && members.loading;
 
   return (
-    <PageContainer width="workspace">
+    <PageContainer width="workspace" className="hd-project-detail">
       <PageHeader
         title={detail.project.name}
         description={detail.project.description || '这个团队项目还没有添加说明。'}
@@ -612,7 +612,7 @@ function ProjectOverview({ project }: { readonly project: UiProject }): JSX.Elem
       className="flex flex-col gap-4 border-y border-[#ECEEF2] bg-white px-1 py-4 sm:flex-row sm:items-center"
     >
       <div className="flex min-w-0 items-center gap-3 sm:mr-auto">
-        <div className="rounded-[8px] bg-[#FFF0F4] p-2.5 text-[#EA1F59]">
+        <div className="rounded-[8px] bg-[#FFF0F4] p-2.5 text-[#FF0061]">
           <FolderKanban className="h-5 w-5" aria-hidden />
         </div>
         <div className="min-w-0">

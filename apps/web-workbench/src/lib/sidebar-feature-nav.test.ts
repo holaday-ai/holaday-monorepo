@@ -54,6 +54,7 @@ describe('filterSidebarFeatureNavItems', () => {
     expect(sidebarSource).toContain('void preloadStockTasksPageRoute()');
     expect(sidebarSource).toContain('onPointerEnter={() => preloadSidebarFeatureNavItem(item)}');
     expect(sidebarSource).toContain('onFocus={() => preloadSidebarFeatureNavItem(item)}');
-    expect(sidebarSource).toContain('onClick={() => navigate(href)}');
+    expect(sidebarSource).toContain('else visit(href)');
+    expect(sidebarSource).toContain('navigate(href); onNavigate?.()');
   });
 });

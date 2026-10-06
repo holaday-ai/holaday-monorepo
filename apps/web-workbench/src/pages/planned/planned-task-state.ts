@@ -173,10 +173,10 @@ export function buildCustomWeeklyRRule(days: readonly string[], startsAt?: Date)
 export function calendarEventFromOccurrence(occurrence: PlannedCalendarOccurrence): EventInput {
   const accent =
     occurrence.status === 'failed'
-      ? '#DC2626'
+      ? '#57479C'
       : occurrence.status === 'paused'
         ? '#ADADAD'
-        : '#EA1F59';
+        : occurrence.status === 'completed' ? '#ADADAD' : occurrence.status === 'running' ? '#FF0061' : '#42C0EF';
   return {
     id: occurrence.occurrenceId,
     title: occurrence.title,

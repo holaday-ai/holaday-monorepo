@@ -220,14 +220,14 @@ export function StockDiscoveryPage(): JSX.Element {
           <button
             type="button"
             onClick={() => navigate('/stocks')}
-            className="mt-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-[#E1E3E8] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59]"
+            className="mt-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-[#E1E3E8] bg-white text-[#667085] transition hover:border-[#FF0061]/25 hover:text-[#FF0061]"
             aria-label="返回股市任务"
             title="返回股市任务"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden />
           </button>
           <div className="min-w-0">
-            <p className="text-[12px] font-medium text-[#EA1F59]">市场发现</p>
+            <p className="text-[12px] font-medium text-[#FF0061]">市场发现</p>
             <h1 className="mt-1 text-[24px] font-semibold text-[#121826] sm:text-[28px]">新闻与公告</h1>
             <p className="mt-1 max-w-2xl text-[13px] leading-6 text-[#667085]">
               先看按关联标的、来源可读性与发布时间排序的优先阅读，再浏览完整来源流。详情在站内阅读，只展示来源返回或已验证提取的内容。
@@ -238,7 +238,7 @@ export function StockDiscoveryPage(): JSX.Element {
           type="button"
           onClick={() => void loadSnapshot('refresh')}
           disabled={refreshing}
-          className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[13px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-55"
+          className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[13px] font-medium text-[#4F5868] transition hover:border-[#FF0061]/25 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-55"
         >
           <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} aria-hidden />
           刷新来源
@@ -256,7 +256,7 @@ export function StockDiscoveryPage(): JSX.Element {
               className={cn(
                 'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium transition',
                 activeFeed === feed
-                  ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
+                  ? 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]'
                   : 'border-[#E1E3E8] bg-white text-[#667085] hover:border-[#C9CDD6] hover:text-[#121826]',
               )}
             >
@@ -284,7 +284,7 @@ export function StockDiscoveryPage(): JSX.Element {
           {leadNews ? (
             <section className="mt-6" aria-label="优先阅读">
               <div className="mb-3 flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-[#EA1F59]" aria-hidden />
+                <span className="h-2 w-2 rounded-full bg-[#FF0061]" aria-hidden />
                 <h2 className="text-[15px] font-semibold text-[#242424]">优先阅读</h2>
                 <span className="text-[12px] text-[#8B92A1]">按关联标的、来源可读性与发布时间排序</span>
               </div>
@@ -339,7 +339,7 @@ export function StockDiscoveryPage(): JSX.Element {
                 type="button"
                 onClick={showMore}
                 disabled={loadingMore}
-                className="inline-flex h-10 items-center gap-2 rounded-[8px] border border-[#E1E3E8] bg-white px-4 text-[13px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-55"
+                className="inline-flex h-10 items-center gap-2 rounded-[8px] border border-[#E1E3E8] bg-white px-4 text-[13px] font-medium text-[#4F5868] transition hover:border-[#FF0061]/25 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-55"
               >
                 {loadingMore ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
                 {loadingMore ? '正在加载来源内容' : '加载更多'}

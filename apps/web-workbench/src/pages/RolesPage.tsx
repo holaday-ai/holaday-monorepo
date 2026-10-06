@@ -238,7 +238,7 @@ export function RolesPage(): JSX.Element {
             <button
               type="button"
               onClick={() => navigate('/plan')}
-              className="ml-1 inline-flex font-medium underline underline-offset-2 hover:text-[#EA1F59]"
+              className="ml-1 inline-flex font-medium underline underline-offset-2 hover:text-[#FF0061]"
             >
               升级到基础版
             </button>
@@ -258,7 +258,7 @@ export function RolesPage(): JSX.Element {
             many draft picks)
       */}
       {isBasic && data.needsRoleRepair && (
-        <div className="mb-4 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-4 py-3 text-sm text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] animate-fade-in motion-reduce:animate-none [border-left-width:3px]">
+        <div className="mb-4 rounded-[8px] border border-[#DCDDDD] border-l-[#FF0061] bg-white px-4 py-3 text-sm text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] animate-fade-in motion-reduce:animate-none [border-left-width:3px]">
           {draft.length > BASIC_ROLE_PICK_LIMIT ? (
             <>
               检测到不适用于当前套餐的角色已被自动移除。请先取消勾选至
@@ -290,7 +290,7 @@ export function RolesPage(): JSX.Element {
               className={cn(
                 'text-sm font-medium',
                 draft.length > currentPickLimit
-                  ? 'text-[#EA1F59]'
+                  ? 'text-[#FF0061]'
                   : 'text-foreground',
               )}
             >
@@ -304,7 +304,7 @@ export function RolesPage(): JSX.Element {
               <div
                 className={cn(
                   'h-full rounded-full transition-[width] duration-300',
-                  draft.length > currentPickLimit ? 'bg-[#FFC910]' : 'bg-[#EA1F59]',
+                  draft.length > currentPickLimit ? 'bg-[#FFC910]' : 'bg-[#FF0061]',
                 )}
                 style={{
                   width: `${Math.min(100, Math.round((draft.length / currentPickLimit) * 100))}%`,
@@ -416,7 +416,7 @@ function RoleCard({ role, checked, locked, disabled, onClick }: CardProps): JSX.
             专业版
           </span>
         ) : checked ? (
-          <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[#EA1F59] bg-white text-[#EA1F59]">
+          <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[#FF0061] bg-white text-[#FF0061]">
             <Check className="h-2.5 w-2.5" />
           </span>
         ) : (

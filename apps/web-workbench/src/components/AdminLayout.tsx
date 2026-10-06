@@ -113,7 +113,7 @@ export function AdminLayout(): JSX.Element {
     return (
       <div className="flex h-svh items-center justify-center bg-background px-5">
         <div className="w-full max-w-sm rounded-[8px] border border-[#DCDDDD] bg-white p-6 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-          <AlertCircle className="mx-auto h-5 w-5 text-[#EA1F59]" aria-hidden />
+          <AlertCircle className="mx-auto h-5 w-5 text-[#FF0061]" aria-hidden />
           <h1 className="mt-3 text-sm font-semibold text-foreground">管理后台暂时无法验证权限</h1>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
             登录状态仍保留。请检查网络后重试。
@@ -218,7 +218,7 @@ function AdminSideNav({ me }: { me: AdminMe }): JSX.Element {
         <Link
           to="/"
           title="返回工作台"
-          className="mt-2 flex items-center justify-center gap-2 rounded-[8px] px-2 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59] sm:justify-start"
+          className="mt-2 flex items-center justify-center gap-2 rounded-[8px] px-2 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#FF0061] sm:justify-start"
         >
           <LogOut className="h-3.5 w-3.5" aria-hidden />
           <span className="hidden sm:inline">返回工作台</span>
@@ -246,7 +246,7 @@ function AdminNavItem({
   const cls = cn(
     'flex items-center justify-center gap-2 rounded-[8px] px-3 py-2 text-[13px] font-medium transition-colors sm:justify-start',
     active
-      ? 'bg-[rgba(234,31,89,0.10)] text-[#EA1F59]'
+      ? 'bg-[rgba(255,0,97,0.10)] text-[#FF0061]'
       : 'text-muted-foreground hover:bg-[#EFEFEF] hover:text-foreground',
     disabled && 'cursor-not-allowed opacity-50 hover:bg-transparent hover:text-muted-foreground',
   );

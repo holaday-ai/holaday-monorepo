@@ -23,7 +23,7 @@ export function MarketTemperatureDetails({
             className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-[#ECEFF3]"
           >
             <span className="bg-[#18A76F]" style={{ width: `${breadth.upPercent}%` }} aria-hidden />
-            <span className="flex-1 bg-[#EA1F59]" aria-hidden />
+            <span className="flex-1 bg-[#FF0061]" aria-hidden />
           </div>
         ) : null}
       </MarketTemperatureDetail>

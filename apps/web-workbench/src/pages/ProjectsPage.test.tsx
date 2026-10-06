@@ -734,7 +734,7 @@ describe('ProjectsPage organization workspace', () => {
 
     expect(document.activeElement).toBe(select);
     expect(select.classList.contains('focus-visible:ring-2')).toBe(true);
-    expect(select.classList.contains('focus-visible:ring-[#EA1F59]/30')).toBe(true);
+    expect(select.classList.contains('focus-visible:ring-[#FF0061]/30')).toBe(true);
   });
 
   it('keeps new workspace, member, invitation, and creation targets at least 44px tall', async () => {

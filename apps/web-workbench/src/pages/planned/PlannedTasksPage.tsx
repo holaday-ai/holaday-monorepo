@@ -1431,7 +1431,7 @@ function PlannedDiscardDialog({
             </Dialog.Close>
             <Button
               size="sm"
-              className="bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.16)] hover:bg-[#EA1F59]/90 focus-visible:ring-[#EA1F59]/25"
+              className="bg-[#FF0061] text-white shadow-[0_4px_12px_rgba(255,0,97,0.16)] hover:bg-[#FF0061]/90 focus-visible:ring-[#FF0061]/25"
               onClick={onConfirm}
             >
               放弃更改
@@ -1497,6 +1497,7 @@ function renderEventContent(arg: EventContentArg): JSX.Element {
   return (
     <div
       className="planned-event"
+      data-status={arg.event.extendedProps.status}
       style={{ '--planned-event-accent': arg.event.extendedProps.accent } as React.CSSProperties}
     >
       <time>{arg.timeText}</time>

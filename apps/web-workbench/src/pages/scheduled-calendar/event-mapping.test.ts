@@ -116,7 +116,7 @@ describe('pickStatusColor', () => {
       new Date('2026-05-16T08:00:00Z'),
       now,
     );
-    expect(c.accent).toBe('#EA1F59');
+    expect(c.accent).toBe('#FF0061');
     expect(c.opacity).toBe(1);
   });
 
@@ -126,7 +126,7 @@ describe('pickStatusColor', () => {
       new Date('2026-05-16T13:00:00Z'),
       now,
     );
-    expect(c.accent).toBe('#EA1F59');
+    expect(c.accent).toBe('#FF0061');
   });
 
   it('active in the future → magenta brand color, full opacity', () => {
@@ -135,8 +135,8 @@ describe('pickStatusColor', () => {
       new Date('2026-05-16T13:00:00Z'),
       now,
     );
-    expect(c.accent).toBe('#EA1F59');
-    expect(c.background).toContain('234, 31, 89');
+    expect(c.accent).toBe('#FF0061');
+    expect(c.background).toContain('255, 0, 97');
     expect(c.opacity).toBe(1);
   });
 
@@ -213,9 +213,9 @@ describe('rowToEventInput', () => {
       { now },
     );
     const ext = events[0]?.extendedProps as Record<string, unknown>;
-    expect(ext.accentColor).toBe('#EA1F59');
-    expect(ext.backgroundTint).toContain('234, 31, 89');
-    expect(ext.backgroundTintHover).toContain('234, 31, 89');
+    expect(ext.accentColor).toBe('#FF0061');
+    expect(ext.backgroundTint).toContain('255, 0, 97');
+    expect(ext.backgroundTintHover).toContain('255, 0, 97');
     expect(ext.description).toBe('产品同事每周看的报告');
     expect(ext.reminderMinutes).toBe(15);
     expect(ext.scheduledTaskInternalId).toBe(101);

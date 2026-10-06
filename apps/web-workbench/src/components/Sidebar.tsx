@@ -1,5 +1,6 @@
 import {
   Check,
+  ChevronDown,
   CalendarClock,
   Clapperboard,
   Clipboard,
@@ -25,7 +26,7 @@ import {
   X,
 } from 'lucide-react';
 import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { BrandIcon, BrandWordmark } from '@/components/BrandLogo';
 import { QuotaIndicator } from '@/components/QuotaIndicator';
 import {
@@ -50,6 +51,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  SidebarTrigger,
   useSidebar,
 } from '@/components/ui/sidebar';
 import { TaskListItem } from '@/components/TaskListItem';
@@ -310,6 +312,7 @@ export function Sidebar({
   // `mobileOpen` prop continues to drive the Sheet from
   // WorkbenchApp's hamburger button.
   const { setOpenMobile } = useSidebar();
+  const { pathname: sidebarPath } = useLocation();
   React.useEffect(() => {
     setOpenMobile(!!mobileOpen);
   }, [mobileOpen, setOpenMobile]);
@@ -340,16 +343,17 @@ export function Sidebar({
 
   return (
     <>
-      <SidebarShell collapsible="icon" forceCollapsed={adaptiveCollapsed}>
+      <SidebarShell className={cn("holaday-sidebar", /^\/(video|image)\/?$/.test(sidebarPath) && "dark")} variant="floating" collapsible="icon" forceCollapsed={adaptiveCollapsed}>
         {/* Codex info-architecture rework: the Sidebar reads as four
             stable segments. Header / SidebarNav / SidebarFooter are
             pinned; only the task list scrolls. The visual centre of
             gravity sits on "新任务" + the feature shortcuts; task
             history is a scroll surface, not a status board. */}
         <SidebarHeader className={cn('shrink-0 gap-2 border-b bg-white/60 backdrop-blur dark:bg-card/70', SIDEBAR_BORDER)}>
-          <div className="flex items-center gap-2 px-1 py-1">
+          <div className="holaday-brand flex items-center gap-2 px-1 py-1">
             <BrandIcon />
             <BrandWordmark className="group-data-[collapsible=icon]:hidden" />
+            <SidebarTrigger className="ml-auto shrink-0 group-data-[collapsible=icon]:hidden" />
           </div>
           {/* Brand magenta only on the primary action. */}
           <SidebarMenu>
@@ -358,9 +362,10 @@ export function Sidebar({
                 tooltip="新任务 (/)"
                 onClick={() => {
                   onNewTask();
+                  setOpenMobile(false);
                   onMobileClose?.();
                 }}
-                className="rounded-[8px] bg-[#EA1F59] font-medium text-white shadow-[0_3px_10px_rgba(234,31,89,0.14)] hover:bg-[#EA1F59]/90 hover:text-white data-[active=true]:bg-[#EA1F59] data-[active=true]:text-white"
+                className="holaday-new-task rounded-[8px] bg-[#FF0061] font-medium text-white shadow-[0_3px_10px_rgba(255,0,97,0.14)] hover:bg-[#FF0061]/90 hover:text-white data-[active=true]:bg-[#FF0061] data-[active=true]:text-white"
               >
                 <Plus />
                 <span>新任务</span>
@@ -371,7 +376,7 @@ export function Sidebar({
                 <SidebarMenuButton
                   tooltip="搜索任务 (⌘K)"
                   onClick={() => onOpenSearch()}
-                  className="rounded-[8px] border border-transparent text-[#595757] hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:text-foreground/70 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
+                  className="rounded-[8px] border border-transparent text-[#595757] hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 hover:text-[#FF0061] dark:text-foreground/70 dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10"
                 >
                   <Search />
                   <span className="flex flex-1 items-center justify-between">
@@ -395,13 +400,13 @@ export function Sidebar({
             list when space is tight; tall windows behave identically
             because the content fits and there's no scroll. */}
         <SidebarContent className="px-0 bg-white/45 dark:bg-transparent">
-            <FeatureNav userRole={userRole} />
+            <FeatureNav userRole={userRole} projects={projectsProp ?? []} onCreateProject={onCreateProject} onNavigate={() => { setOpenMobile(false); onMobileClose?.(); }} />
             {projectFilter && (
               <div
                 className={cn(
                   'mx-2 mb-2 flex items-start gap-2 rounded-md border px-2.5 py-1.5 text-[12px] group-data-[collapsible=icon]:hidden',
                   projectFilter.tone === 'error'
-                    ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 dark:border-[#EA1F59]/35'
+                    ? 'border-[#FF0061]/35 bg-[#FF0061]/10 dark:border-[#FF0061]/35'
                     : 'border-[#57479C]/25 bg-[#57479C]/10 dark:border-[#57479C]/40',
                 )}
               >
@@ -409,7 +414,7 @@ export function Sidebar({
                   className={cn(
                     'mt-0.5 h-3.5 w-3.5 shrink-0',
                     projectFilter.tone === 'error'
-                      ? 'text-[#EA1F59]'
+                      ? 'text-[#FF0061]'
                       : 'text-[#57479C]',
                   )}
                 />
@@ -422,7 +427,7 @@ export function Sidebar({
                       className={cn(
                         'mt-0.5 truncate text-[11px]',
                         projectFilter.tone === 'error'
-                          ? 'text-[#EA1F59]'
+                          ? 'text-[#FF0061]'
                           : 'text-muted-foreground',
                       )}
                     >
@@ -454,7 +459,8 @@ export function Sidebar({
                       renaming={renamingId === t.taskId}
                       onSelect={(id) => {
                         onSelectTask(id);
-                        onMobileClose?.();
+                        setOpenMobile(false);
+                  onMobileClose?.();
                       }}
                       onContextMenu={(id, e) => {
                         e.preventDefault();
@@ -493,7 +499,8 @@ export function Sidebar({
                       renaming={renamingId === t.taskId}
                       onSelect={(id) => {
                         onSelectTask(id);
-                        onMobileClose?.();
+                        setOpenMobile(false);
+                  onMobileClose?.();
                       }}
                       onContextMenu={(id, e) => {
                         e.preventDefault();
@@ -523,7 +530,7 @@ export function Sidebar({
               ))}
               {tasks.length === 0 && hiddenTaskCount === 0 && (
                 <div className="mx-1.5 my-4 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-3 py-5 text-center shadow-[0_8px_24px_rgba(89,87,87,0.04)] dark:border-white/10 dark:bg-white/[0.03]">
-                  <div className="mx-auto flex h-7 w-7 items-center justify-center rounded-[8px] border border-[#EA1F59]/15 bg-[#EA1F59]/10 text-[#EA1F59]">
+                  <div className="mx-auto flex h-7 w-7 items-center justify-center rounded-[8px] border border-[#FF0061]/15 bg-[#FF0061]/10 text-[#FF0061]">
                     <ListPlus className="h-3.5 w-3.5" />
                   </div>
                   <div className="mt-2 text-[12px] font-medium text-[#595757] dark:text-foreground/85">
@@ -579,7 +586,7 @@ export function Sidebar({
                         'inline-flex h-8 items-center rounded-[6px] px-2 font-medium transition-colors',
                         selectedBatchDeleteIds.length === 0
                           ? 'cursor-not-allowed opacity-50'
-                          : 'bg-[#EA1F59] text-white shadow-[0_3px_10px_rgba(234,31,89,0.12)] hover:bg-[#EA1F59]/90',
+                          : 'bg-[#FF0061] text-white shadow-[0_3px_10px_rgba(255,0,97,0.12)] hover:bg-[#FF0061]/90',
                       )}
                     >
                       删除
@@ -599,7 +606,7 @@ export function Sidebar({
                     <button
                       type="button"
                       onClick={() => setBatchMode(true)}
-                      className="inline-flex h-8 items-center gap-1 rounded-[7px] border border-transparent px-2 text-[11px] text-[#ADADAD] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
+                      className="inline-flex h-8 items-center gap-1 rounded-[7px] border border-transparent px-2 text-[11px] text-[#ADADAD] transition-colors hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 hover:text-[#FF0061] dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10"
                     >
                       <Layers className="h-3 w-3" />
                       批量管理
@@ -837,7 +844,7 @@ function TaskContextMenu({
             onSelect={onDelete}
             className={cn(
               menu.deletable &&
-                'text-[#EA1F59] focus:bg-[#EA1F59]/10 focus:text-[#EA1F59]',
+                'text-[#FF0061] focus:bg-[#FF0061]/10 focus:text-[#FF0061]',
             )}
           >
             <Trash2 className={menu.deletable ? '' : 'text-muted-foreground'} />
@@ -927,7 +934,7 @@ function LoadMoreTasksButton({
       type="button"
       onClick={onLoadMore}
       disabled={loadingMore}
-      className="mx-2 my-2 inline-flex h-8 w-[calc(100%-1rem)] items-center justify-center gap-1.5 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-2 text-center text-xs text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
+      className="mx-2 my-2 inline-flex h-8 w-[calc(100%-1rem)] items-center justify-center gap-1.5 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-2 text-center text-xs text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 hover:text-[#FF0061] disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10"
     >
       <RotateCcw className={cn('h-3 w-3', loadingMore && 'animate-spin')} aria-hidden />
       {loadingMore ? '加载中…' : '加载更多任务'}
@@ -955,9 +962,9 @@ function RetentionHint({
     <button
       type="button"
       onClick={() => navigate('/plan')}
-      className="group mx-2 mt-3 flex w-[calc(100%-1rem)] items-start gap-2 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-3 py-2 text-left text-[11px] text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
+      className="group mx-2 mt-3 flex w-[calc(100%-1rem)] items-start gap-2 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-3 py-2 text-left text-[11px] text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10"
     >
-      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] border border-[#EA1F59]/15 bg-[#EA1F59]/10 text-[#EA1F59]">
+      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] border border-[#FF0061]/15 bg-[#FF0061]/10 text-[#FF0061]">
         <Clock className="h-3 w-3" aria-hidden />
       </span>
       <div className="min-w-0 flex-1">
@@ -1009,16 +1016,20 @@ const FEATURES: readonly FeatureItem[] = [
  * routes render as clickable nav links; disabled rows keep a neutral
  * unavailable label. Compact density (32px row).
  */
-function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
+function FeatureNav({ userRole, projects, onCreateProject, onNavigate }: {
+  userRole: 'user' | 'admin';
+  projects: readonly UiProject[];
+  onCreateProject?: () => void;
+  onNavigate?: () => void;
+}): JSX.Element {
   const navigate = useNavigate();
-  // Read pathname directly so the active highlight updates on route
-  // switch without forcing a re-render through props. The shrink-0
-  // wrapper keeps this segment pinned below SidebarHeader while
-  // SidebarContent (the task list) takes the remaining height.
-  const pathname =
-    typeof window !== 'undefined' ? window.location.pathname : '';
+  const { pathname, search } = useLocation();
+  const { setOpen } = useSidebar();
+  const [projectsExpanded, setProjectsExpanded] = React.useState(false);
+  const projectListId = React.useId();
+  const visit = (href: string): void => { navigate(href); onNavigate?.(); };
   return (
-    <SidebarGroup className="shrink-0 border-b border-[#DCDDDD]/70 dark:border-white/10">
+    <SidebarGroup className="holaday-feature-nav shrink-0">
       <SidebarGroupContent>
         <SidebarMenu>
           {filterSidebarFeatureNavItems(FEATURES, {
@@ -1027,7 +1038,8 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
           }).map((item) => {
             const { icon: Icon, label, href } = item;
             if (href) {
-              const isActive = pathname === href;
+              const isProjects = href === '/projects';
+              const isActive = pathname === href || pathname.startsWith(`${href}/`) || (href === '/skills' && pathname === '/plugins') || (isProjects && pathname === '/' && Boolean(new URLSearchParams(search).get('project')));
               return (
                 <SidebarMenuItem key={label}>
                 <SidebarMenuButton
@@ -1035,16 +1047,36 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
                   isActive={isActive}
                   onPointerEnter={() => preloadSidebarFeatureNavItem(item)}
                   onFocus={() => preloadSidebarFeatureNavItem(item)}
-                  onClick={() => navigate(href)}
+                  aria-current={isActive ? 'page' : undefined}
+                  aria-expanded={isProjects ? projectsExpanded : undefined}
+                  aria-controls={isProjects ? projectListId : undefined}
+                  onClick={() => {
+                    if (isProjects) {
+                      setOpen(true);
+                      setProjectsExpanded(isActive ? !projectsExpanded : true);
+                      if (!isActive) navigate(href);
+                    } else visit(href);
+                  }}
                   className={cn(
-                    'rounded-[8px] border border-transparent text-[#595757] hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:text-foreground/75 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
+                    'rounded-[8px] border border-transparent text-[#595757] hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 hover:text-[#FF0061] dark:text-foreground/75 dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10',
                     isActive &&
-                      'border-[#EA1F59]/25 bg-[#EA1F59]/10 text-[#EA1F59] hover:bg-[#EA1F59]/10',
+                      'border-[#FF0061]/25 bg-[#FF0061]/10 text-[#FF0061] hover:bg-[#FF0061]/10',
                   )}
                 >
                     <Icon aria-hidden />
                     <span>{label}</span>
+                    {isProjects && <ChevronDown aria-hidden className={cn('ml-auto transition-transform group-data-[collapsible=icon]:hidden', projectsExpanded && 'rotate-180')} />}
                   </SidebarMenuButton>
+                  {isProjects && projectsExpanded && (
+                    <div id={projectListId} className="holaday-project-links group-data-[collapsible=icon]:hidden">
+                      {projects.map((project) => (
+                        <button key={project.projectId} type="button" onClick={() => visit(`/?project=${encodeURIComponent(project.projectId)}`)}>
+                          <FolderOpen aria-hidden /><span>{project.name}</span>
+                        </button>
+                      ))}
+                      {onCreateProject && <button type="button" onClick={() => { onCreateProject(); onNavigate?.(); }}><Plus aria-hidden /><span>新建项目</span></button>}
+                    </div>
+                  )}
                 </SidebarMenuItem>
               );
             }
@@ -1070,11 +1102,11 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
               <SidebarMenuButton
                 tooltip="管理后台"
                 isActive={pathname.startsWith('/admin')}
-                onClick={() => navigate('/admin')}
+                onClick={() => visit('/admin')}
                 className={cn(
-                  'rounded-[8px] border border-transparent hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
+                  'rounded-[8px] border border-transparent hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 hover:text-[#FF0061] dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10',
                   pathname.startsWith('/admin') &&
-                    'border-[#EA1F59]/25 bg-[#EA1F59]/10 text-[#EA1F59] hover:bg-[#EA1F59]/10',
+                    'border-[#FF0061]/25 bg-[#FF0061]/10 text-[#FF0061] hover:bg-[#FF0061]/10',
                 )}
               >
                 <Shield aria-hidden />
@@ -1110,9 +1142,9 @@ function ShareInviteRow(): JSX.Element {
       onClick={() => void onShare()}
       aria-label="复制邀请链接"
       title="复制邀请链接"
-      className="group flex w-full items-center gap-2.5 rounded-[8px] border border-[#DCDDDD]/60 bg-white/45 px-2.5 py-2 text-left text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:border-white/10 dark:bg-white/[0.04] dark:text-foreground/70 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
+      className="group flex w-full items-center gap-2.5 rounded-[8px] border border-[#DCDDDD]/60 bg-white/45 px-2.5 py-2 text-left text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 hover:text-[#FF0061] dark:border-white/10 dark:bg-white/[0.04] dark:text-foreground/70 dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10"
     >
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border border-[#EA1F59]/15 bg-[#EA1F59]/10 text-[#EA1F59]">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border border-[#FF0061]/15 bg-[#FF0061]/10 text-[#FF0061]">
         <Share2 className="h-3.5 w-3.5" aria-hidden />
       </span>
       <span className="min-w-0 truncate text-[12px] font-medium leading-4">

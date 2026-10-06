@@ -100,7 +100,7 @@ export function AdminDashboardPage(): JSX.Element {
     return (
       <div className="mx-auto max-w-5xl px-6 py-10">
         <h1 className="text-xl font-semibold">仪表盘</h1>
-        <div className="mt-4 rounded-[8px] border border-[#EA1F59]/25 border-l-[#EA1F59] bg-white px-4 py-3 text-sm text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
+        <div className="mt-4 rounded-[8px] border border-[#FF0061]/25 border-l-[#FF0061] bg-white px-4 py-3 text-sm text-[#FF0061] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
           <div className="font-medium">{copy.title}</div>
           <div className="mt-1 text-xs text-[#595757]">{copy.body}</div>
         </div>
@@ -294,7 +294,7 @@ export function AdminDashboardPage(): JSX.Element {
                         {row.user.userId ? (
                           <Link
                             to={`/admin/users/${row.user.userId}`}
-                            className="text-foreground hover:text-[#EA1F59] hover:underline"
+                            className="text-foreground hover:text-[#FF0061] hover:underline"
                           >
                             {truncate(userLabel, 20)}
                           </Link>
@@ -427,7 +427,7 @@ function MetricCard({
             'mt-1 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium',
             positive
               ? 'bg-[#42C0EF]/10 text-[#1688AA]'
-              : 'bg-[#EA1F59]/10 text-[#EA1F59]',
+              : 'bg-[#FF0061]/10 text-[#FF0061]',
           )}
         >
           {positive ? (

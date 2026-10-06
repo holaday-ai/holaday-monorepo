@@ -63,7 +63,7 @@ export function RouteLoadingFallback(): JSX.Element {
         <div className="hola-skel mx-auto mb-6 h-7 w-48 bg-[#DCDDDD]/80" />
         <div className="rounded-[8px] border border-[#DCDDDD]/75 bg-white/75 p-4 shadow-[0_8px_24px_rgba(89,87,87,0.06)]">
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-[8px] bg-[#EA1F59]/90 shadow-[0_8px_18px_rgba(234,31,89,0.16)]" />
+            <div className="h-9 w-9 rounded-[8px] bg-[#FF0061]/90 shadow-[0_8px_18px_rgba(255,0,97,0.16)]" />
             <div className="min-w-0 flex-1 space-y-2">
               <div className="hola-skel h-3.5 w-1/2 max-w-56 bg-[#DCDDDD]/80" />
               <div className="hola-skel h-2.5 w-1/3 max-w-40 bg-[#EFEFEF]" />
@@ -113,7 +113,7 @@ function LazyLoadFallback({
               <button
                 type="button"
                 onClick={() => window.location.reload()}
-                className="mt-2 inline-flex h-8 items-center justify-center rounded-[8px] bg-[#EA1F59] px-3 text-xs font-medium text-white shadow-[0_8px_18px_rgba(234,31,89,0.16)] transition-colors hover:bg-[#EA1F59]/90"
+                className="mt-2 inline-flex h-8 items-center justify-center rounded-[8px] bg-[#FF0061] px-3 text-xs font-medium text-white shadow-[0_8px_18px_rgba(255,0,97,0.16)] transition-colors hover:bg-[#FF0061]/90"
               >
                 {copy.actionLabel}
               </button>
@@ -127,7 +127,7 @@ function LazyLoadFallback({
   return (
     <div className="flex min-h-[260px] items-center justify-center px-4 py-8">
       <div className="w-full max-w-md rounded-[8px] border border-[#DCDDDD] bg-white px-5 py-4 text-center shadow-[0_12px_32px_rgba(89,87,87,0.10)] dark:border-border dark:bg-card">
-        <div className="mx-auto mb-3 flex h-9 w-9 items-center justify-center rounded-[8px] bg-[#EA1F59]/10 text-[#EA1F59]">
+        <div className="mx-auto mb-3 flex h-9 w-9 items-center justify-center rounded-[8px] bg-[#FF0061]/10 text-[#FF0061]">
           <RefreshCw className="h-4 w-4" aria-hidden />
         </div>
         <div className="text-sm font-semibold text-[#595757] dark:text-foreground">{copy.title}</div>
@@ -135,7 +135,7 @@ function LazyLoadFallback({
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="mt-4 inline-flex h-9 items-center justify-center rounded-[8px] bg-[#EA1F59] px-3 text-sm font-medium text-white shadow-[0_8px_18px_rgba(234,31,89,0.16)] transition-colors hover:bg-[#EA1F59]/90"
+          className="mt-4 inline-flex h-9 items-center justify-center rounded-[8px] bg-[#FF0061] px-3 text-sm font-medium text-white shadow-[0_8px_18px_rgba(255,0,97,0.16)] transition-colors hover:bg-[#FF0061]/90"
         >
           {copy.actionLabel}
         </button>

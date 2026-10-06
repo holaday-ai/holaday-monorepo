@@ -63,7 +63,7 @@ export function AttachmentChip({
       className={cn(
         'inline-flex max-w-full items-center gap-2 rounded-[8px] border bg-white px-2 py-1.5 text-xs shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-colors sm:max-w-[320px]',
         isError
-          ? 'border-[#EA1F59]/28 bg-[#EA1F59]/[0.04] text-foreground dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10'
+          ? 'border-[#FF0061]/28 bg-[#FF0061]/[0.04] text-foreground dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10'
           : isUploading
             ? 'border-[#42C0EF]/35 text-foreground dark:border-[#42C0EF]/35 dark:bg-white/[0.04]'
             : 'border-[#DCDDDD] text-foreground dark:border-white/10 dark:bg-white/[0.04]',
@@ -90,7 +90,7 @@ export function AttachmentChip({
         <span
           className={cn(
             'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] border bg-white',
-            isError ? 'border-[#EA1F59]/25 text-[#EA1F59]' : 'border-[#DCDDDD] text-[#595757]',
+            isError ? 'border-[#FF0061]/25 text-[#FF0061]' : 'border-[#DCDDDD] text-[#595757]',
           )}
         >
           <FileTypeIcon mimetype={attachment.mimetype} />
@@ -110,7 +110,7 @@ export function AttachmentChip({
         <span
           className={cn(
             'block truncate text-[10px] leading-4',
-            isError ? 'text-[#EA1F59]' : 'text-[#595757]',
+            isError ? 'text-[#FF0061]' : 'text-[#595757]',
           )}
         >
           {isUploading ? copy.statusText : copy.detailText}
