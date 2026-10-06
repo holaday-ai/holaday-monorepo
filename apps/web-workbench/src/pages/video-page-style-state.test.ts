@@ -211,8 +211,7 @@ describe('video creative style state', () => {
     const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
 
     expect(IP_VIDEO_ASPECT_RATIO).toBe('9:16');
-    expect(source).toContain('label="画幅"');
-    expect(source).toContain('value="9:16"');
-    expect(source).toContain('description="跟随竖屏底版"');
+    expect(source).toContain('9:16 · 随文案 · 底版规格');
+    expect(source).toContain('aspectRatio: IP_VIDEO_ASPECT_RATIO');
   });
 });

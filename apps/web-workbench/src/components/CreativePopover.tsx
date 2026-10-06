@@ -9,12 +9,14 @@ export function CreativePopover({
   anchorRef,
   title,
   children,
+  theme = 'dark',
 }: {
   open: boolean;
   onOpenChange(open: boolean): void;
   anchorRef: RefObject<HTMLButtonElement>;
   title: string;
   children: ReactNode;
+  theme?: 'light' | 'dark';
 }) {
   const [position, setPosition] = useState({ left: 20, top: 80 });
   useLayoutEffect(() => {
@@ -39,7 +41,7 @@ export function CreativePopover({
     <Dialog.Root open={open} onOpenChange={onOpenChange} modal={false}>
       <Dialog.Portal>
         <Dialog.Content
-          className="hd-creative-popover"
+          className={`hd-creative-popover${theme === 'light' ? ' hd-light-popover' : ''}`}
           style={position}
           aria-describedby={undefined}
           onCloseAutoFocus={(event) => {

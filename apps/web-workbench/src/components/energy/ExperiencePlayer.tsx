@@ -52,7 +52,7 @@ export function ExperiencePlayer({
   return (
     <Dialog.Root open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[90] bg-[#141218]/35 backdrop-blur-[2px] data-[state=open]:animate-fade-in motion-reduce:animate-none" />
+        <Dialog.Overlay className="energy-approved-overlay fixed inset-0 z-[90] bg-[#141218]/35 backdrop-blur-[2px] data-[state=open]:animate-fade-in motion-reduce:animate-none" />
         <Dialog.Content
           data-energy-experience={experience.id}
           className="energy-approved-player fixed left-1/2 top-1/2 z-[91] flex max-h-[min(760px,calc(100dvh-24px))] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[24px] border border-white/70 bg-[#fffdfb] shadow-[0_28px_90px_rgba(49,40,58,0.24)] outline-none"

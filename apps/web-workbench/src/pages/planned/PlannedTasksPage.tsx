@@ -9,7 +9,6 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
-import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
 import type {
   DatesSetArg,
@@ -815,7 +814,7 @@ export function PlannedTasksPage(): JSX.Element {
         )}
       </div>
 
-      <div className={cn('planned-workbench hd-planned-workbench', editor && 'planned-workbench--editing')}>
+      <div className="planned-workbench hd-planned-workbench">
         <section className="planned-calendar-panel" aria-label="规划日历">
           <div className="planned-toolbar">
             <div className="planned-toolbar__nav">
@@ -905,7 +904,7 @@ export function PlannedTasksPage(): JSX.Element {
           )}
         </section>
 
-        {!editor && <aside className="hd-day-agenda" aria-label="当天安排">
+        {<aside className="hd-day-agenda" aria-label="当天安排">
           <header><div><span>{selectedDay.toDateString() === new Date().toDateString() ? 'TODAY' : 'SCHEDULE'}</span><h2>{selectedDay.toLocaleDateString('zh-CN', { month:'long', day:'numeric' })}</h2><small>{events.filter(event => event.start && new Date(event.start as string).toDateString() === selectedDay.toDateString()).length} 项安排 · 按各规划当地时间</small></div><button type="button" title="添加当天安排" aria-label="添加当天安排" onClick={() => openCreate(selectedDay)}><Plus /></button></header>
           <div className="hd-agenda-events">
             {events.filter(event => event.start && new Date(event.start as string).toDateString() === selectedDay.toDateString()).sort((a,b) => new Date(a.start as string).getTime() - new Date(b.start as string).getTime()).map(event => {
@@ -1428,7 +1427,7 @@ function PlannedDiscardDialog({
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[80] bg-black/35 px-4 backdrop-blur-sm data-[state=open]:animate-fade-in" />
         <Dialog.Content
-          className="fixed left-1/2 top-1/2 z-[81] w-[calc(100vw-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-lg border border-[#DCDDDD] bg-white p-5 text-card-foreground shadow-[0_16px_48px_rgba(17,24,39,0.16)] outline-none dark:border-white/10 dark:bg-card"
+          className="hd-planned-discard fixed left-1/2 top-1/2 z-[81] w-[calc(100vw-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-lg border border-[#DCDDDD] bg-white p-5 text-card-foreground shadow-[0_16px_48px_rgba(17,24,39,0.16)] outline-none dark:border-white/10 dark:bg-card"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             cancelRef.current?.focus();
@@ -1477,20 +1476,13 @@ function PlannedInspectorSurface({
   onRequestClose,
   children,
 }: PlannedInspectorSurfaceProps): JSX.Element {
-  if (!modal) {
-    return (
-      <aside className="planned-inspector" aria-label={label}>
-        {children}
-      </aside>
-    );
-  }
-
   return (
     <Dialog.Root open onOpenChange={(open) => !open && onRequestClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="planned-inspector-overlay" />
         <Dialog.Content
           className="planned-inspector"
+          data-mobile={modal}
           aria-label={label}
           aria-modal="true"
           onOpenAutoFocus={(event) => {

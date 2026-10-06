@@ -81,3 +81,13 @@ it('ignores a slow response after closing and reopening the picker', async () =>
   expect(screen.queryByRole('button', { name: /参考图.png/ })).toBeNull();
   expect(screen.getByText(/暂无可用图片/)).toBeTruthy();
 });
+
+it('allows document references for stock research while preserving their file identity', async () => {
+  query.mockResolvedValue({ items: [{ ...file, fileId: 'file_report', filename: '财报.pdf', mimetype: 'application/pdf' }], nextCursor: null });
+  const p = props();
+  render(<CreativeReferenceLibrary {...p} fileType="all" theme="light" />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(201); });
+  expect(query).toHaveBeenCalledWith({ type: 'all', q: undefined, limit: 50 });
+  fireEvent.click(screen.getByRole('button', { name: /财报.pdf/ }));
+  expect(p.onPick).toHaveBeenCalledWith(expect.objectContaining({ fileId: 'file_report', mimetype: 'application/pdf', status: 'ready' }));
+});

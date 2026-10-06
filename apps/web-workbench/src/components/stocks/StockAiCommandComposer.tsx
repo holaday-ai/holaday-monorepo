@@ -1,3 +1,4 @@
+import { ApprovedStockComposer, type StockResearchDraft } from './ApprovedStockComposer';
 import {
   Circle,
   ChevronDown,
@@ -51,6 +52,7 @@ export function StockAiCommandComposer({
   approved = false,
   dataDateLabel,
   onManageWatchlist,
+  researchStocks,
 }: {
   approved?: boolean;
   dataDateLabel?: string;
@@ -62,13 +64,15 @@ export function StockAiCommandComposer({
   submitting: boolean;
   submitDisabled: boolean;
   onValueChange: (value: string) => void;
-  onSubmit: () => void;
+  onSubmit: (draft?: StockResearchDraft) => void;
+  researchStocks?: readonly {symbol:string;name:string}[];
   onCommand: (command: string) => void;
   isCommandDisabled?: (command: string) => boolean;
   commandTitle?: (command: string) => string | undefined;
 }): JSX.Element {
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  if (approved) return <ApprovedStockComposer {...{value,placeholder,assistantStatus,dataDateLabel,submitting,submitDisabled,onValueChange,onSubmit,onManageWatchlist,researchStocks,commands,onCommand,isCommandDisabled,commandTitle}} />;
   return (
     <section
       aria-label="Holaday AI 股市研究助手"

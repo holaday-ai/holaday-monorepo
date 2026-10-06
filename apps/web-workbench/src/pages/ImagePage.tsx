@@ -1,3 +1,4 @@
+import { useCreativeProject } from '@/components/CreativeProjectPicker';
 import { CreativeReferenceLibrary } from '@/components/CreativeReferenceLibrary';
 import { CreativeInspiration } from '@/components/CreativeInspiration';
 import { ImageBriefComposer } from '@/components/image/ImageBriefComposer';
@@ -36,6 +37,7 @@ import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 
 export function ImagePage(): JSX.Element {
+  const project = useCreativeProject();
   const navigate = useNavigate();
   const toast = useToast();
   const createTask = useTaskStore((state) => state.createTask);
@@ -346,6 +348,7 @@ export function ImagePage(): JSX.Element {
         setInlineError(result.error || '提交失败，请重试');
         return;
       }
+      await project.associate(result.taskId);
       const submittedAttachments = attachmentsRef.current;
       attachmentsRef.current = [];
       revokeCreativePreviewUrls(submittedAttachments);
@@ -433,7 +436,8 @@ export function ImagePage(): JSX.Element {
               className="sr-only"
               onChange={(event) => void handleFilesSelected(event)}
             />
-            <ImageBriefComposer settings={<div className="hd-composer-meta"><button ref={settingsTriggerRef} type="button" className="hd-glass-pill" title="选择图片模型" aria-label="选择图片模型" disabled={draftLocked} onClick={event => { settingsTriggerRef.current = event.currentTarget; setSettingsMode('models'); setSettingsOpen(true); }}><Settings2 className="h-4 w-4" />{imageModelLabel(usableImageModel(draft.model, mediaModels?.image))}<ChevronDown className="h-3 w-3" /></button><button type="button" className="hd-glass-pill" title="生成设置" aria-label="生成设置" onClick={event => { settingsTriggerRef.current = event.currentTarget; setSettingsMode('specs'); setSettingsOpen(true); }} disabled={draftLocked}>{settingSummary({ ...draft, model: usableImageModel(draft.model, mediaModels?.image) })}</button></div>} referenceAction={<button ref={libraryAnchor} type="button" title="添加参考资料" disabled={draftLocked} onClick={() => setLibraryOpen(true)}><Files className="h-4 w-4" />参考资料</button>}
+            {project.notice}
+            <ImageBriefComposer settings={<div className="hd-composer-meta"><button ref={settingsTriggerRef} type="button" className="hd-glass-pill" title="选择图片模型" aria-label="选择图片模型" disabled={draftLocked} onClick={event => { settingsTriggerRef.current = event.currentTarget; setSettingsMode('models'); setSettingsOpen(true); }}><Settings2 className="h-4 w-4" />{imageModelLabel(usableImageModel(draft.model, mediaModels?.image))}<ChevronDown className="h-3 w-3" /></button><button type="button" className="hd-glass-pill" title="生成设置" aria-label="生成设置" onClick={event => { settingsTriggerRef.current = event.currentTarget; setSettingsMode('specs'); setSettingsOpen(true); }} disabled={draftLocked}>{settingSummary({ ...draft, model: usableImageModel(draft.model, mediaModels?.image) })}</button></div>} referenceAction={<><button ref={libraryAnchor} type="button" title="添加参考资料" disabled={draftLocked} onClick={() => setLibraryOpen(true)}><Files className="h-4 w-4" />参考资料</button>{project.renderPicker(draftLocked)}</>}
               draft={draft}
               uploading={uploading}
               disabled={draftLocked}

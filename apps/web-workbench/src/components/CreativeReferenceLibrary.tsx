@@ -15,6 +15,8 @@ export function CreativeReferenceLibrary({
   onPick,
   onChooseLocal,
   selectedFileIds,
+  fileType = 'images',
+  theme = 'dark',
 }: {
   open: boolean;
   onOpenChange(open: boolean): void;
@@ -23,6 +25,8 @@ export function CreativeReferenceLibrary({
   onPick(file: DraftAttachment): void;
   onChooseLocal(): void;
   selectedFileIds: readonly string[];
+  fileType?: 'all' | 'images' | 'documents';
+  theme?: 'light' | 'dark';
 }) {
   const [query, setQuery] = useState('');
   const [files, setFiles] = useState<NormalizedFileRow[]>([]);
@@ -40,7 +44,7 @@ export function CreativeReferenceLibrary({
     setCursor(null);
     const timer = setTimeout(() => {
       void trpc.files.list
-        .query({ type: 'images', q: query.trim() || undefined, limit: 50 })
+        .query({ type: fileType, q: query.trim() || undefined, limit: 50 })
         .then((result) => {
           if (version.current !== id) return;
           const page = normalizeFilesListPage(result);
@@ -58,7 +62,7 @@ export function CreativeReferenceLibrary({
       clearTimeout(timer);
       version.current += 1;
     };
-  }, [open, query, retry]);
+  }, [open, query, retry, fileType]);
   async function more() {
     if (cursor === null || loading) return;
     const id = version.current;
@@ -67,7 +71,7 @@ export function CreativeReferenceLibrary({
     try {
       const page = normalizeFilesListPage(
         await trpc.files.list.query({
-          type: 'images',
+          type: fileType,
           q: query.trim() || undefined,
           limit: 50,
           cursor,
@@ -89,7 +93,7 @@ export function CreativeReferenceLibrary({
     }
   }
   return (
-    <CreativePopover open={open} onOpenChange={onOpenChange} anchorRef={anchorRef} title="参考资料">
+    <CreativePopover theme={theme} open={open} onOpenChange={onOpenChange} anchorRef={anchorRef} title="参考资料">
       <div className="hd-media-library">
         <input
           value={query}
@@ -131,7 +135,7 @@ export function CreativeReferenceLibrary({
           </button>
         ))}
         {loading && <p role="status">加载中…</p>}
-        {!loading && !error && files.length === 0 && <p>暂无可用图片，可从本地添加。</p>}
+        {!loading && !error && files.length === 0 && <p>{fileType === 'images' ? '暂无可用图片，可从本地添加。' : '暂无可用文件，可从本地添加。'}</p>}
         {cursor !== null && (
           <button type="button" disabled={loading} onClick={() => void more()}>
             加载更多

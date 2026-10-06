@@ -1271,6 +1271,14 @@ describe('selectTask detail hydration', () => {
     });
   });
 
+  it('keeps research attachments and the trusted snapshot when creating a stock task', async () => {
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_stock_files', status: 'executing', executionMode: 'generate' } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    const context = { snapshotId: 'stkshot_0123456789abcdef01234567', dataAsOf: '2026-08-11', trustMode: 'historical' as const, evidenceIds: ['quote:603528:2026-08-11'] };
+    await useTaskStore.getState().createStockTask('结合财报比较股票', context, ['file_report']);
+    expect(createMutate).toHaveBeenCalledWith(expect.objectContaining({ intent: '结合财报比较股票', fileIds: ['file_report'], taskSource: 'stock_dashboard', stockContext: context }));
+  });
+
   it('uses the current workbench viewport profile for direct retry entry points', async () => {
     createMutate.mockResolvedValueOnce({
       taskId: 'tsk_new',

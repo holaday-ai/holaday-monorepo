@@ -284,6 +284,7 @@ export interface TaskStore {
   createStockTask(
     intent: string,
     context: StockTaskContextInput,
+    fileIds?: string[],
   ): Promise<{ taskId: string } | { error: string }>;
   deleteTask(taskId: string): Promise<{ ok: true } | { error: string }>;
   renameTask(taskId: string, title: string): Promise<{ ok: true } | { error: string }>;
@@ -1700,10 +1701,10 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
   },
 
-  async createStockTask(intent, context) {
+  async createStockTask(intent, context, fileIds) {
     return get().createTask(
       intent,
-      undefined,
+      fileIds,
       undefined,
       undefined,
       undefined,

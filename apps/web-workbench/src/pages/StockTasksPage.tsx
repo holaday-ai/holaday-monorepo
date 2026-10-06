@@ -1,3 +1,4 @@
+import { stockResearchIntent, type StockResearchDraft } from '@/components/stocks/ApprovedStockComposer';
 import {
   ArrowRight,
   Bell,
@@ -625,7 +626,7 @@ export function StockTasksPage(): JSX.Element {
   }, [loadPageData, resetDiscoveryExtensions, toast, watchlistSaving]);
 
   const submitPrompt = React.useCallback(
-    async (value: string) => {
+    async (value: string, draft?: StockResearchDraft) => {
       const trimmed = value.trim();
       if (!trimmed || submitting) return;
       if (stockPromptUnavailable) {
@@ -637,7 +638,9 @@ export function StockTasksPage(): JSX.Element {
         return;
       }
       setSubmitting(true);
-      const result = await createStockTask(trimmed, stockTaskContext);
+      const fileIds = draft?.attachments.map(file => file.fileId) ?? [];
+      const intent = stockResearchIntent(trimmed, draft);
+      const result = fileIds.length ? await createStockTask(intent, stockTaskContext, fileIds) : draft?.changed ? await createStockTask(intent, stockTaskContext) : await createStockTask(trimmed, stockTaskContext);
       setSubmitting(false);
       if ('taskId' in result) {
         navigate(`/?task=${encodeURIComponent(result.taskId)}`);
@@ -742,6 +745,7 @@ export function StockTasksPage(): JSX.Element {
         <div className="hd-stock-dock">
         <StockAiCommandComposer
           approved
+          researchStocks={sampleWatchlist ? [] : stocks.map(stock=>({symbol:stock.symbol,name:stock.name}))}
           dataDateLabel={dashboardTrust.dataDateLabel}
           onManageWatchlist={() => setWatchlistSheetOpen(true)}
           value={prompt}
@@ -751,7 +755,7 @@ export function StockTasksPage(): JSX.Element {
           submitting={submitting}
           submitDisabled={submitting || !prompt.trim() || stockPromptUnavailable}
           onValueChange={setPrompt}
-          onSubmit={() => void submitPrompt(prompt)}
+          onSubmit={draft => void submitPrompt(prompt, draft)}
           onCommand={(command) => {
             setPrompt(command);
             if (command === temporalCopy.briefingCommand && dashboardTrust.tone === 'current') {

@@ -26,6 +26,8 @@ import {
   List,
   Plus,
   RefreshCw,
+  Search,
+  SlidersHorizontal,
   Sparkles,
   Users,
   X,
@@ -112,6 +114,9 @@ export type TeamTaskExecutionInput =
     };
 
 interface TeamTaskWorkbenchProps {
+  readonly approved?: boolean;
+  readonly projectDescription?: string | null;
+  readonly projectOverview?: React.ReactNode;
   readonly currentUserId: string;
   readonly role: ProjectMemberRole;
   readonly rows: readonly TeamTaskWorkbenchRow[];
@@ -161,6 +166,7 @@ const STATUS_TONE: Record<TeamTaskState, string> = {
 };
 
 export function TeamTaskWorkbench({
+  approved = false, projectDescription, projectOverview,
   currentUserId,
   role,
   rows,
@@ -188,7 +194,10 @@ export function TeamTaskWorkbench({
   const detailRequestRef = React.useRef(0);
   const restoreFocusRef = React.useRef<HTMLElement | null>(null);
   const selected = selectedDetail ?? rows.find((row) => row.id === selectedId);
-  const visibleRows = groups[scope];
+  const [phase, setPhase] = React.useState('all');
+  const [search, setSearch] = React.useState('');
+  const [detailed, setDetailed] = React.useState(false);
+  const visibleRows = groups[scope].filter(row => !approved || ((phase === 'all' || projectTaskPhase(row.state) === phase) && `${row.title} ${row.description ?? ''}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())));
 
   React.useEffect(() => {
     setScope(defaultTaskScope(role));
@@ -248,13 +257,15 @@ export function TeamTaskWorkbench({
   return (
     <section
       aria-label="团队任务工作台"
-      className="overflow-hidden rounded-[10px] border border-[#E2E4E9] bg-white"
+      className={approved ? "hd-approved-team-workbench" : "overflow-hidden rounded-[10px] border border-[#E2E4E9] bg-white"}
     >
-      <SummaryRail groups={groups} />
-      <div className="border-t border-[#ECEEF2]">
-        <TaskTabs scope={scope} groups={groups} onChange={setScope} />
-        <div className="flex min-h-[580px] min-w-0">
+      {!approved && <SummaryRail groups={groups} />}
+      <div className={approved ? undefined : "border-t border-[#ECEEF2]"}>
+        {!approved && <TaskTabs scope={scope} groups={groups} onChange={setScope} />}
+        <div className={approved ? "hd-project-detail-columns" : "flex min-h-[580px] min-w-0"}>
           <div className="min-w-0 flex-1">
+            {approved && <div className="hd-project-task-tabs"><div role="tablist" aria-label="项目任务状态">{[['all','全部任务'],['running','进行中'],['waiting','待确认'],['done','已完成']].map(([id,label])=><button type="button" key={id} role="tab" aria-selected={phase===id} onClick={()=>setPhase(id)}>{label}</button>)}</div><label><Search /><input aria-label="搜索项目任务" placeholder="搜索" value={search} onChange={e=>setSearch(e.target.value)} /></label></div>}
+            {approved && <div className="hd-team-secondary-tools"><details><summary><SlidersHorizontal />{SCOPE_META.find(item=>item.id===scope)?.label}</summary><div role="group" aria-label="任务分组">{SCOPE_META.map(item=><button type="button" key={item.id} aria-pressed={scope===item.id} onClick={()=>{setScope(item.id);setPhase('all');}}>{item.label}<small>{groups[item.id].length}</small></button>)}</div></details><button type="button" aria-pressed={detailed} onClick={()=>setDetailed(value=>!value)}>{detailed?'简洁列表':'验收表格'}</button></div>}
             <Toolbar
               view={view}
               onViewChange={setView}
@@ -269,13 +280,13 @@ export function TeamTaskWorkbench({
             {error ? <TaskError error={error} stale={stale} onRetry={onRetry} /> : null}
             {!loading && !error && visibleRows.length === 0 ? <TaskEmpty scope={scope} /> : null}
             {visibleRows.length > 0 && view === 'list' ? (
-              <TaskTable rows={visibleRows} onSelect={openDetail} />
+              approved && !detailed ? <ApprovedTaskList rows={visibleRows} onSelect={openDetail} /> : <TaskTable rows={visibleRows} onSelect={openDetail} />
             ) : null}
             {visibleRows.length > 0 && view === 'board' ? (
               <TaskBoard rows={visibleRows} onSelect={openDetail} />
             ) : null}
           </div>
-          <MembersRail members={members} loading={membersLoading} error={memberError} />
+          {approved ? <aside className="hd-project-info hd-team-info"><section><h2>项目说明</h2><p>{projectDescription || '还没有项目说明。'}</p></section><section><h2>参考资料</h2><p>项目资料关联尚未接入，已有文件可在文件库中查看。</p><a href="/files">查看文件库</a></section><MembersRail members={members} loading={membersLoading} error={memberError} /><details><summary>项目进展与权限</summary>{projectOverview}<SummaryRail groups={groups} /></details></aside> : <MembersRail members={members} loading={membersLoading} error={memberError} />}
         </div>
       </div>
       {selected ? (
@@ -304,6 +315,15 @@ export function TeamTaskWorkbench({
       ) : null}
     </section>
   );
+}
+
+function projectTaskPhase(state: TeamTaskState): string {
+  if (['completed','accepted','archived'].includes(state)) return 'done';
+  if (['in_progress','accepted_by_member'].includes(state)) return 'running';
+  return 'waiting';
+}
+function ApprovedTaskList({rows,onSelect}:{rows:readonly TeamTaskWorkbenchRow[];onSelect:(id:string)=>void}) {
+  return <div aria-label="团队任务列表">{rows.map(row=><button type="button" className="hd-project-task-item" key={row.id} data-status={projectTaskPhase(row.state)==='running'?'executing':projectTaskPhase(row.state)==='done'?'completed':'awaiting_user'} aria-label={`查看 ${row.title}`} title={`查看 ${row.title}`} onClick={()=>onSelect(row.id)}><i /><span><strong>{row.title}</strong><small>{row.description || `${row.responsibleDisplayName || '待认领'} · 截止 ${shortDate(row.dueAt)}${row.milestone ? ` · ${row.milestone}` : ''}`}</small></span><em>{taskStateLabel(row.state)}</em></button>)}</div>;
 }
 
 function SummaryRail({ groups }: { readonly groups: ReturnType<typeof groupTeamTasks> }) {

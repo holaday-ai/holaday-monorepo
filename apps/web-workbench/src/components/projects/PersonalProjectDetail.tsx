@@ -166,6 +166,7 @@ export function PersonalProjectDetail({ project }: { project: UiProject }) {
         <aside className="hd-project-info">
           <h2>项目说明</h2>
           <p>{project.description || '还没有添加项目说明。'}</p>
+          <h2>参考资料</h2><p>项目资料关联尚未接入，已有文件可在文件库中查看。</p><button type="button" className="hd-project-library-link" onClick={()=>navigate('/files')}>查看文件库</button>
           <h2>项目进展</h2>
           <p>{project.taskCount} 个任务</p>
           <small>更新于 {new Date(project.updatedAt).toLocaleDateString('zh-CN')}</small>
