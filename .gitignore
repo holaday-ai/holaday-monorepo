@@ -56,3 +56,9 @@ docker/data/
 
 # Redis dump — created wherever `redis-server` was launched. Never commit.
 dump.rdb
+
+# Browser audit auth and private artifacts
+apps/web-workbench/e2e/.auth/
+apps/web-workbench/e2e/artifacts/
+apps/web-workbench/test-results/
+apps/web-workbench/playwright-report/
