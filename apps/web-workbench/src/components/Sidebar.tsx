@@ -30,7 +30,7 @@ import {
   X,
 } from 'lucide-react';
 import * as React from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { BrandIcon, BrandWordmark } from '@/components/BrandLogo';
 import { QuotaIndicator } from '@/components/QuotaIndicator';
 import {
@@ -628,8 +628,8 @@ export function Sidebar({
                 <DropdownMenuTrigger asChild><button type="button" className="hd-sidebar-more" title="更多操作"><MoreHorizontal /><span>更多</span><small>设置与帮助</small></button></DropdownMenuTrigger>
                 <DropdownMenuContent side="top" align="start" className="w-60">
                   {onDeleteTasks && <DropdownMenuItem onSelect={() => setBatchMode(true)}><Layers className="h-4 w-4" />批量管理</DropdownMenuItem>}
-                  <DropdownMenuItem asChild><a href="/settings">设置</a></DropdownMenuItem>
-                  <DropdownMenuItem asChild><a href="/usage">本月用量</a></DropdownMenuItem>
+                  <DropdownMenuItem asChild><Link to="/settings">设置</Link></DropdownMenuItem>
+                  <DropdownMenuItem asChild><Link to="/usage">本月用量</Link></DropdownMenuItem>
                   <ShareInviteRow />
                 </DropdownMenuContent>
               </DropdownMenu>

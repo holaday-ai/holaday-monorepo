@@ -44,7 +44,7 @@ export function CreativeReferenceLibrary({
     setCursor(null);
     const timer = setTimeout(() => {
       void trpc.files.list
-        .query({ type: fileType, q: query.trim() || undefined, limit: 50 })
+        .query({ type: fileType, q: query.trim().slice(0, 100) || undefined, limit: 50 })
         .then((result) => {
           if (version.current !== id) return;
           const page = normalizeFilesListPage(result);
@@ -72,7 +72,7 @@ export function CreativeReferenceLibrary({
       const page = normalizeFilesListPage(
         await trpc.files.list.query({
           type: fileType,
-          q: query.trim() || undefined,
+          q: query.trim().slice(0, 100) || undefined,
           limit: 50,
           cursor,
         }),
@@ -103,6 +103,7 @@ export function CreativeReferenceLibrary({
       <div className="hd-media-library">
         <input
           value={query}
+          maxLength={100}
           onChange={(event) => setQuery(event.target.value)}
           placeholder={fileType === 'images' ? '搜索图片名称' : '搜索文件名称'}
           aria-label={fileType === 'images' ? '搜索参考图片' : '搜索参考文件'}

@@ -160,3 +160,12 @@
 - [资料库空态](screenshots/phase3-library-empty.png) / [错误态](screenshots/phase3-library-error.png)
 - [规划未保存确认](screenshots/phase3-planned-discard.png)
 - [能量本地抽卡结果](screenshots/phase3-energy-result.png)
+
+## PR #241 发布前复审修订
+
+- 侧栏“更多”内设置/本月用量使用 React Router Link，普通点击走应用内路由，不刷新整页。
+- 今日能量面包屑匹配实际 `/cosmic` 路由。
+- 参考资料库输入 `maxLength=100`，首次搜索和分页请求均先 trim 再截断到100个字符，与现有 `files.list` 校验一致。
+- 首页“第一次来？”提示条按 BOSS 确认保持删除，未恢复。无后端变更、合并或部署。
+- 新增4项回归先复现失败再修复，定向9项通过；全量前端273文件、2587项中 **2584通过、3项原基线失败、0新增失败**，退出码1。基线失败名称仍为上文三项。
+- 全量 ESLint、两份tsconfig的typecheck、Vite build均通过（退出码0）；保留原包体积提示。`git diff --check` 通过。

@@ -230,3 +230,29 @@ describe('approved sidebar disclosure', () => {
   expect(router.state.location.search).toBe('?project=prj_personal');
  });
 });
+
+
+describe('approved shell review navigation', () => {
+  it.each([['设置', '/settings'], ['本月用量', '/usage']])('routes %s through the application router', async (label, path) => {
+    const user = userEvent.setup();
+    const router = createMemoryRouter([{ element: <AppShell />, children: [
+      { path: '/files', element: <main>文件库内容</main> },
+      { path: '/settings', element: <main>设置内容</main> },
+      { path: '/usage', element: <main>用量内容</main> },
+    ] }], { initialEntries: ['/files'] });
+    render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+    await user.click(await screen.findByTitle('更多操作'));
+    await user.click(await screen.findByRole('menuitem', { name: label }));
+    expect(router.state.location.pathname).toBe(path);
+    expect(screen.queryByRole('menuitem', { name: label })).toBeNull();
+  });
+
+  it('shows the energy breadcrumb on the actual cosmic route', async () => {
+    const router = createMemoryRouter([{ element: <AppShell />, children: [
+      { path: '/cosmic', element: <main>能量内容</main> },
+    ] }], { initialEntries: ['/cosmic'] });
+    render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+    await screen.findByText('能量内容');
+    expect(screen.getByText('今日能量', { selector: '.hd-workbench-breadcrumb strong' })).toBeTruthy();
+  });
+});

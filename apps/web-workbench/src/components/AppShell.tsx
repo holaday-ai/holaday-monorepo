@@ -1176,7 +1176,7 @@ export function useAppShellContext(): OutletContext {
 
 function WorkbenchBreadcrumb() {
   const { pathname } = useLocation();
-  const labels: Record<string, string> = { '/': '新任务', '/skills': '技能', '/stocks': '股市任务', '/energy': '今日能量', '/video': '视频', '/image': '图片', '/planned': '规划任务', '/files': '文件库', '/projects': '项目' };
+  const labels: Record<string, string> = { '/': '新任务', '/skills': '技能', '/stocks': '股市任务', '/cosmic': '今日能量', '/video': '视频', '/image': '图片', '/planned': '规划任务', '/files': '文件库', '/projects': '项目' };
   const path = pathname.replace(/\/$/, '') || '/';
   if (!labels[path]) return null;
   return <div className="hd-workbench-breadcrumb"><span>{path === '/video' || path === '/image' ? '创作' : '个人空间'}</span><span>/</span><strong>{labels[path]}</strong></div>;
