@@ -37,12 +37,13 @@ describe('video creative style state', () => {
     const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain('视频创作');
-    expect(source).toContain('VideoCreationScenarioPicker');
+    expect(source).toContain('CreativeInspiration');
+    expect(source).toContain('aria-label="视频创作模式"');
     expect(source).toContain('VideoCreationStoryboard');
     expect(source).toContain('aria-label="视频创作工作台"');
     expect(source).toContain('告诉 HOLA DAY 你的重点');
-    expect(source).toContain('查看生成设置');
-    expect(source).toContain('生成这条视频');
+    expect(source).toContain('模型与生成设置');
+    expect(source).toContain('准备生成');
   });
 
   it('keeps unavailable editing honest instead of exposing a disabled production action', () => {
@@ -210,8 +211,7 @@ describe('video creative style state', () => {
     const source = readFileSync(new URL('./VideoPage.tsx', import.meta.url), 'utf8');
 
     expect(IP_VIDEO_ASPECT_RATIO).toBe('9:16');
-    expect(source).toContain('label="画幅"');
-    expect(source).toContain('value="9:16"');
-    expect(source).toContain('description="跟随竖屏底版"');
+    expect(source).toContain('9:16 · 随文案 · 底版规格');
+    expect(source).toContain('aspectRatio: IP_VIDEO_ASPECT_RATIO');
   });
 });

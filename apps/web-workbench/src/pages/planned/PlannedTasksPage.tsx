@@ -9,7 +9,6 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
-import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
 import type {
   DatesSetArg,
@@ -26,6 +25,7 @@ import FullCalendar from '@fullcalendar/react';
 import * as Dialog from '@radix-ui/react-dialog';
 import {
   CalendarClock,
+  Search,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
@@ -209,6 +209,8 @@ export function PlannedTasksPage(): JSX.Element {
   );
   const [mobileInspector, setMobileInspector] = React.useState(matchMobileInspector);
   const [title, setTitle] = React.useState('');
+  const [calendarQuery, setCalendarQuery] = React.useState('');
+  const [selectedDay, setSelectedDay] = React.useState(() => new Date());
   const [range, setRange] = React.useState<{ start: Date; end: Date } | null>(null);
   const [occurrences, setOccurrences] = React.useState<PlannedCalendarOccurrence[]>([]);
   const [legacyEvents, setLegacyEvents] = React.useState<EventInput[]>([]);
@@ -220,6 +222,10 @@ export function PlannedTasksPage(): JSX.Element {
   const [firstCalendarMs, setFirstCalendarMs] = React.useState<number | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [editor, setEditor] = React.useState<EditorState | null>(null);
+  // Keep the last form visible while Radix Presence completes the approved exit motion.
+  const lastEditor = React.useRef<EditorState | null>(null);
+  React.useLayoutEffect(() => { if (editor) lastEditor.current = editor; }, [editor]);
+  const displayEditor = editor ?? lastEditor.current;
   const [editorBaseline, setEditorBaseline] = React.useState<string | null>(null);
   const [editorErrors, setEditorErrors] = React.useState<PlannedEditorErrors>({});
   const [pendingEditorTransition, setPendingEditorTransition] =
@@ -409,8 +415,8 @@ export function PlannedTasksPage(): JSX.Element {
     () => [
       ...occurrences.map((occurrence) => calendarEventFromOccurrence(occurrence)),
       ...legacyEvents,
-    ],
-    [legacyEvents, occurrences],
+    ].filter(event => !calendarQuery.trim() || event.title?.toLocaleLowerCase().includes(calendarQuery.trim().toLocaleLowerCase())),
+    [legacyEvents, occurrences, calendarQuery],
   );
   const attentionCount = plans.filter(
     (plan) => plannedStatusGroup(plan).group === 'attention',
@@ -453,10 +459,7 @@ export function PlannedTasksPage(): JSX.Element {
   function closeEditor(): void {
     requestEditorTransition(() => {
       applyEditor(null);
-      window.requestAnimationFrame(() => {
-        if (editorReturnFocusRef.current?.isConnected) editorReturnFocusRef.current.focus();
-        editorReturnFocusRef.current = null;
-      });
+      // Radix restores focus after the 380ms exit, not before the retained form leaves.
     });
   }
 
@@ -543,7 +546,7 @@ export function PlannedTasksPage(): JSX.Element {
   function handleDateClick(arg: DateClickArg): void {
     const date = new Date(arg.date);
     if (arg.allDay) date.setHours(9, 0, 0, 0);
-    openCreate(date);
+    setSelectedDay(date);
   }
 
   function handleEventClick(arg: EventClickArg): void {
@@ -734,16 +737,17 @@ export function PlannedTasksPage(): JSX.Element {
 
   return (
     <PageContainer width="wide" className="planned-page max-w-[1320px]">
+      <span className="hd-page-eyebrow">A LITTLE PLANNING. MORE POSSIBILITY.</span>
       <PageHeader
-        title="规划任务"
-        description="把未来一次或重复执行的工作放进日历；多个事项会作为一个规划分批启动。"
+        title="把时间，留给重要的事。"
+        description="安排一次，Holaday 在合适的时候开始。"
         action={
           <>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline">
+                <Button variant="outline" className="hd-legacy-plans" title="旧任务记录" aria-label="旧任务记录">
                   <History aria-hidden />
-                  旧任务记录
+                  <span className="sr-only">旧任务记录</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -757,7 +761,7 @@ export function PlannedTasksPage(): JSX.Element {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button onClick={() => openCreate()}>
+            <Button onClick={() => openCreate(selectedDay)}>
               <Plus aria-hidden />
               新建规划
             </Button>
@@ -765,6 +769,25 @@ export function PlannedTasksPage(): JSX.Element {
         }
       />
 
+      <div className="hd-planned-page-tabs">            <div className="planned-toolbar__views" aria-label="视图切换">
+              <button
+                type="button"
+                className={view === 'dayGridMonth' ? 'is-active' : ''}
+                aria-pressed={view === 'dayGridMonth'}
+                onClick={() => changeView('dayGridMonth')}
+              >
+                月历
+              </button>
+              <button
+                type="button"
+                className={view === 'listMonth' ? 'is-active' : ''}
+                aria-pressed={view === 'listMonth'}
+                onClick={() => changeView('listMonth')}
+              >
+                日程
+              </button>
+            </div>
+<label className="hd-planned-search"><Search /><input aria-label="查找规划" placeholder="查找规划" value={calendarQuery} onChange={event => setCalendarQuery(event.target.value)} /></label></div>
       <div
         className="planned-summary"
         aria-label="规划任务概览"
@@ -792,7 +815,7 @@ export function PlannedTasksPage(): JSX.Element {
         )}
       </div>
 
-      <div className={cn('planned-workbench', editor && 'planned-workbench--editing')}>
+      <div className="planned-workbench hd-planned-workbench">
         <section className="planned-calendar-panel" aria-label="规划日历">
           <div className="planned-toolbar">
             <div className="planned-toolbar__nav">
@@ -805,7 +828,7 @@ export function PlannedTasksPage(): JSX.Element {
               >
                 <ChevronLeft aria-hidden />
               </Button>
-              <Button variant="outline" onClick={() => calendarRef.current?.getApi().today()}>
+              <Button variant="outline" onClick={() => { calendarRef.current?.getApi().today(); setSelectedDay(new Date()); }}>
                 今天
               </Button>
               <Button
@@ -818,24 +841,6 @@ export function PlannedTasksPage(): JSX.Element {
                 <ChevronRight aria-hidden />
               </Button>
               <strong>{title}</strong>
-            </div>
-            <div className="planned-toolbar__views" aria-label="视图切换">
-              <button
-                type="button"
-                className={view === 'dayGridMonth' ? 'is-active' : ''}
-                aria-pressed={view === 'dayGridMonth'}
-                onClick={() => changeView('dayGridMonth')}
-              >
-                月历
-              </button>
-              <button
-                type="button"
-                className={view === 'listMonth' ? 'is-active' : ''}
-                aria-pressed={view === 'listMonth'}
-                onClick={() => changeView('listMonth')}
-              >
-                日程
-              </button>
             </div>
             {calendarLoading && (
               <span className="planned-toolbar__loading" role="status">
@@ -851,7 +856,10 @@ export function PlannedTasksPage(): JSX.Element {
             initialView={view}
             headerToolbar={false}
             height="auto"
-            dayMaxEvents={3}
+            dayMaxEvents={2}
+            fixedWeekCount={false}
+            eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
+            dayHeaderContent={arg => arg.text.replace('周', '')}
             moreLinkText={(count) => `还有 ${count} 项`}
             events={events}
             editable
@@ -865,6 +873,8 @@ export function PlannedTasksPage(): JSX.Element {
               );
               setView(arg.view.type as PlannedCalendarView);
             }}
+            dayCellContent={arg => String(arg.date.getDate())}
+            dayCellClassNames={arg => arg.date.toDateString() === selectedDay.toDateString() ? ['hd-selected-day'] : []}
             dateClick={handleDateClick}
             eventClick={handleEventClick}
             eventDrop={handleEventDrop}
@@ -895,19 +905,36 @@ export function PlannedTasksPage(): JSX.Element {
           )}
         </section>
 
-        {editor && (
+        {<aside key={selectedDay.toDateString()} className="hd-day-agenda" aria-label="当天安排">
+          <header><div><span>{selectedDay.toDateString() === new Date().toDateString() ? 'TODAY' : 'SCHEDULE'}</span><h2>{selectedDay.toLocaleDateString('zh-CN', { month:'long', day:'numeric' })}</h2><small>{events.filter(event => event.start && new Date(event.start as string).toDateString() === selectedDay.toDateString()).length} 项安排 · 按各规划当地时间</small></div><button type="button" title="添加当天安排" aria-label="添加当天安排" onClick={() => openCreate(selectedDay)}><Plus /></button></header>
+          <div className="hd-agenda-events">
+            {events.filter(event => event.start && new Date(event.start as string).toDateString() === selectedDay.toDateString()).sort((a,b) => new Date(a.start as string).getTime() - new Date(b.start as string).getTime()).map(event => {
+              const props = event.extendedProps ?? {};
+              const occurrence = occurrences.find(row => row.occurrenceId === event.id);
+              return <button key={event.id} type="button" className="hd-agenda-item" data-status={props.status} onClick={() => {
+                if (props.legacy) { navigate('/planned/legacy-scheduled'); return; }
+                if (occurrence) void openPlan(occurrence.plannedTaskId, occurrence);
+              }}><i style={{ background: String(props.accent ?? '#ADADAD') }} /><time>{new Date(event.start as string).toLocaleTimeString('zh-CN', { hour:'2-digit',minute:'2-digit',hour12:false })}</time><strong>{event.title}</strong><small>{props.legacy ? '旧任务' : `${plannedRepeatLabel(String(props.repeatType))} · ${props.itemCount ?? 1} 个任务项`}</small></button>;
+            })}
+            {!events.some(event => event.start && new Date(event.start as string).toDateString() === selectedDay.toDateString()) && <p className="hd-agenda-empty">{calendarLoading ? '正在读取当天安排…' : '这一天还没有安排，留一点时间给新的想法。'}</p>}
+          </div>
+          <button className="hd-agenda-create" type="button" onClick={() => openCreate(selectedDay)}><Plus />安排一件事</button><p className="hd-agenda-note">定时开始，完成后通知你。<br />重复的小事，也可以从日常里腾出来。</p>
+        </aside>}
+
+        {displayEditor && (
           <PlannedInspectorSurface
+            open={Boolean(editor)}
             modal={mobileInspector}
-            label={editor.plannedTaskId ? '编辑规划' : '新建规划'}
-            initialFocusRef={editor.multiple ? firstItemRef : instructionRef}
+            label={displayEditor.plannedTaskId ? '编辑规划' : '新建规划'}
+            initialFocusRef={displayEditor.multiple ? firstItemRef : instructionRef}
             returnFocusRef={editorReturnFocusRef}
             onRequestClose={closeEditor}
           >
             <div className="planned-inspector__header">
               <div>
-                <span>{editor.plannedTaskId ? '规划详情' : '新建规划'}</span>
+                <span>{displayEditor.plannedTaskId ? '规划详情' : '新建规划'}</span>
                 <strong>
-                  {editor.plannedTaskId ? editor.title || '未命名规划' : '安排未来任务'}
+                  {displayEditor.plannedTaskId ? displayEditor.title || '未命名规划' : '安排未来任务'}
                 </strong>
               </div>
               <Button
@@ -925,20 +952,20 @@ export function PlannedTasksPage(): JSX.Element {
               <Field label="名称（选填）">
                 <Input
                   aria-label="名称"
-                  value={editor.title}
+                  value={displayEditor.title}
                   maxLength={200}
                   placeholder="例如：每周竞品价格检查"
-                  onChange={(event) => setEditor({ ...editor, title: event.target.value })}
+                  onChange={(event) => setEditor({ ...displayEditor, title: event.target.value })}
                 />
               </Field>
 
               <div className="planned-mode" aria-label="任务数量模式">
                 <button
                   type="button"
-                  className={!editor.multiple ? 'is-active' : ''}
-                  aria-pressed={!editor.multiple}
+                  className={!displayEditor.multiple ? 'is-active' : ''}
+                  aria-pressed={!displayEditor.multiple}
                   onClick={() => {
-                    setEditor({ ...editor, multiple: false });
+                    setEditor({ ...displayEditor, multiple: false });
                     clearEditorError('items');
                   }}
                 >
@@ -946,10 +973,10 @@ export function PlannedTasksPage(): JSX.Element {
                 </button>
                 <button
                   type="button"
-                  className={editor.multiple ? 'is-active' : ''}
-                  aria-pressed={editor.multiple}
+                  className={displayEditor.multiple ? 'is-active' : ''}
+                  aria-pressed={displayEditor.multiple}
                   onClick={() => {
-                    setEditor({ ...editor, multiple: true });
+                    setEditor({ ...displayEditor, multiple: true });
                     clearEditorError('instruction');
                   }}
                 >
@@ -957,11 +984,11 @@ export function PlannedTasksPage(): JSX.Element {
                 </button>
               </div>
 
-              {editor.multiple ? (
-                <Field label={`任务清单 · ${editor.items.filter((item) => item.trim()).length}/50`}>
+              {displayEditor.multiple ? (
+                <Field label={`任务清单 · ${displayEditor.items.filter((item) => item.trim()).length}/50`}>
                   <div className="planned-items">
-                    {editor.items.map((item, index) => (
-                      <div className="planned-item" key={`${index}-${editor.items.length}`}>
+                    {displayEditor.items.map((item, index) => (
+                      <div className="planned-item" key={`${index}-${displayEditor.items.length}`}>
                         <span>{index + 1}</span>
                         <Input
                           ref={index === 0 ? firstItemRef : undefined}
@@ -973,9 +1000,9 @@ export function PlannedTasksPage(): JSX.Element {
                           value={item}
                           placeholder="描述这个任务"
                           onChange={(event) => {
-                            const items = [...editor.items];
+                            const items = [...displayEditor.items];
                             items[index] = event.target.value;
-                            setEditor({ ...editor, items });
+                            setEditor({ ...displayEditor, items });
                             clearEditorError('items');
                           }}
                         />
@@ -984,11 +1011,11 @@ export function PlannedTasksPage(): JSX.Element {
                           size="icon"
                           title="移除任务"
                           aria-label={`移除任务 ${index + 1}`}
-                          disabled={editor.items.length === 1}
+                          disabled={displayEditor.items.length === 1}
                           onClick={() =>
                             setEditor({
-                              ...editor,
-                              items: editor.items.filter((_, itemIndex) => itemIndex !== index),
+                              ...displayEditor,
+                              items: displayEditor.items.filter((_, itemIndex) => itemIndex !== index),
                             })
                           }
                         >
@@ -999,8 +1026,8 @@ export function PlannedTasksPage(): JSX.Element {
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={editor.items.length >= 50}
-                      onClick={() => setEditor({ ...editor, items: [...editor.items, ''] })}
+                      disabled={displayEditor.items.length >= 50}
+                      onClick={() => setEditor({ ...displayEditor, items: [...displayEditor.items, ''] })}
                     >
                       <Plus aria-hidden />
                       添加任务
@@ -1021,11 +1048,11 @@ export function PlannedTasksPage(): JSX.Element {
                     aria-describedby={
                       editorErrors.instruction ? 'planned-error-instruction' : undefined
                     }
-                    value={editor.instruction}
+                    value={displayEditor.instruction}
                     rows={5}
                     placeholder="说清目标、范围和交付结果"
                     onChange={(event) => {
-                      setEditor({ ...editor, instruction: event.target.value });
+                      setEditor({ ...displayEditor, instruction: event.target.value });
                       clearEditorError('instruction');
                     }}
                   />
@@ -1041,14 +1068,14 @@ export function PlannedTasksPage(): JSX.Element {
                 </Field>
               )}
 
-              {editor.multiple && (
+              {displayEditor.multiple && (
                 <Field label="统一要求（可选）">
                   <Textarea
                     aria-label="统一要求（可选）"
-                    value={editor.instruction}
+                    value={displayEditor.instruction}
                     rows={3}
                     placeholder="例如：每项都给出来源链接"
-                    onChange={(event) => setEditor({ ...editor, instruction: event.target.value })}
+                    onChange={(event) => setEditor({ ...displayEditor, instruction: event.target.value })}
                   />
                 </Field>
               )}
@@ -1063,9 +1090,9 @@ export function PlannedTasksPage(): JSX.Element {
                       editorErrors.scheduledAt ? 'planned-error-scheduled-at' : undefined
                     }
                     type="date"
-                    value={editor.date}
+                    value={displayEditor.date}
                     onChange={(event) => {
-                      setEditor({ ...editor, date: event.target.value });
+                      setEditor({ ...displayEditor, date: event.target.value });
                       clearEditorError('scheduledAt');
                     }}
                   />
@@ -1078,9 +1105,9 @@ export function PlannedTasksPage(): JSX.Element {
                       editorErrors.scheduledAt ? 'planned-error-scheduled-at' : undefined
                     }
                     type="time"
-                    value={editor.time}
+                    value={displayEditor.time}
                     onChange={(event) => {
-                      setEditor({ ...editor, time: event.target.value });
+                      setEditor({ ...displayEditor, time: event.target.value });
                       clearEditorError('scheduledAt');
                     }}
                   />
@@ -1102,13 +1129,13 @@ export function PlannedTasksPage(): JSX.Element {
                     <button
                       type="button"
                       key={repeatType}
-                      className={editor.repeatType === repeatType ? 'is-active' : ''}
-                      aria-pressed={editor.repeatType === repeatType}
+                      className={displayEditor.repeatType === repeatType ? 'is-active' : ''}
+                      aria-pressed={displayEditor.repeatType === repeatType}
                       onClick={() => {
                         setEditor({
-                          ...editor,
+                          ...displayEditor,
                           repeatType,
-                          endsOn: nextPlannedEndState(repeatType, editor.endsOn),
+                          endsOn: nextPlannedEndState(repeatType, displayEditor.endsOn),
                         });
                         if (repeatType !== 'custom') clearEditorError('customDays');
                       }}
@@ -1118,7 +1145,7 @@ export function PlannedTasksPage(): JSX.Element {
                   ))}
                 </div>
               </Field>
-              {editor.repeatType === 'custom' && (
+              {displayEditor.repeatType === 'custom' && (
                 <Field label="每周执行日">
                   <div
                     ref={customDaysRef}
@@ -1134,14 +1161,14 @@ export function PlannedTasksPage(): JSX.Element {
                       <button
                         type="button"
                         key={value}
-                        className={editor.customDays.includes(value) ? 'is-active' : ''}
-                        aria-pressed={editor.customDays.includes(value)}
+                        className={displayEditor.customDays.includes(value) ? 'is-active' : ''}
+                        aria-pressed={displayEditor.customDays.includes(value)}
                         onClick={() => {
                           setEditor({
-                            ...editor,
-                            customDays: editor.customDays.includes(value)
-                              ? editor.customDays.filter((day) => day !== value)
-                              : [...editor.customDays, value],
+                            ...displayEditor,
+                            customDays: displayEditor.customDays.includes(value)
+                              ? displayEditor.customDays.filter((day) => day !== value)
+                              : [...displayEditor.customDays, value],
                           });
                           clearEditorError('customDays');
                         }}
@@ -1162,33 +1189,33 @@ export function PlannedTasksPage(): JSX.Element {
                 </Field>
               )}
 
-              {editor.repeatType !== 'once' && (
+              {displayEditor.repeatType !== 'once' && (
                 <Field label="结束">
                   <div className="planned-mode planned-end-mode">
                     <button
                       type="button"
-                      className={editor.endsOn === null ? 'is-active' : ''}
-                      aria-pressed={editor.endsOn === null}
-                      onClick={() => setEditor({ ...editor, endsOn: null })}
+                      className={displayEditor.endsOn === null ? 'is-active' : ''}
+                      aria-pressed={displayEditor.endsOn === null}
+                      onClick={() => setEditor({ ...displayEditor, endsOn: null })}
                     >
                       永不结束
                     </button>
                     <button
                       type="button"
-                      className={editor.endsOn !== null ? 'is-active' : ''}
-                      aria-pressed={editor.endsOn !== null}
-                      onClick={() => setEditor({ ...editor, endsOn: editor.endsOn ?? editor.date })}
+                      className={displayEditor.endsOn !== null ? 'is-active' : ''}
+                      aria-pressed={displayEditor.endsOn !== null}
+                      onClick={() => setEditor({ ...displayEditor, endsOn: displayEditor.endsOn ?? displayEditor.date })}
                     >
                       结束日期
                     </button>
                   </div>
-                  {editor.endsOn !== null && (
+                  {displayEditor.endsOn !== null && (
                     <Input
                       aria-label="结束日期"
                       className="planned-end-date"
                       type="date"
-                      value={editor.endsOn}
-                      onChange={(event) => setEditor({ ...editor, endsOn: event.target.value })}
+                      value={displayEditor.endsOn}
+                      onChange={(event) => setEditor({ ...displayEditor, endsOn: event.target.value })}
                     />
                   )}
                 </Field>
@@ -1198,8 +1225,8 @@ export function PlannedTasksPage(): JSX.Element {
                 <Field label="时区">
                   <select
                     aria-label="时区"
-                    value={editor.timezone}
-                    onChange={(event) => setEditor({ ...editor, timezone: event.target.value })}
+                    value={displayEditor.timezone}
+                    onChange={(event) => setEditor({ ...displayEditor, timezone: event.target.value })}
                   >
                     <option value="Asia/Shanghai">中国标准时间</option>
                     <option value="Asia/Tokyo">日本标准时间</option>
@@ -1210,9 +1237,9 @@ export function PlannedTasksPage(): JSX.Element {
                 <Field label="提前提醒">
                   <select
                     aria-label="提前提醒"
-                    value={editor.reminderMinutes}
+                    value={displayEditor.reminderMinutes}
                     onChange={(event) =>
-                      setEditor({ ...editor, reminderMinutes: event.target.value })
+                      setEditor({ ...displayEditor, reminderMinutes: event.target.value })
                     }
                   >
                     <option value="">不提醒</option>
@@ -1230,11 +1257,11 @@ export function PlannedTasksPage(): JSX.Element {
               <p className="planned-workload">
                 <Clock3 aria-hidden />
                 {workloadHint(
-                  editor.multiple ? editor.items.filter((item) => item.trim()).length : 1,
+                  displayEditor.multiple ? displayEditor.items.filter((item) => item.trim()).length : 1,
                 )}
               </p>
 
-              {editor.plannedTaskId && (
+              {displayEditor.plannedTaskId && (
                 <div className="planned-actions-row">
                   <Button variant="outline" size="sm" onClick={() => void runNow()}>
                     <Play aria-hidden />
@@ -1253,10 +1280,10 @@ export function PlannedTasksPage(): JSX.Element {
                     size="sm"
                     className="text-destructive"
                     onClick={() => {
-                      if (editor.occurrence && editor.occurrence.repeatType !== 'once') {
-                        openScopeDialog({ kind: 'remove', occurrence: editor.occurrence });
-                      } else if (editor.occurrence) {
-                        void removeOccurrence(editor.occurrence, 'series');
+                      if (displayEditor.occurrence && displayEditor.occurrence.repeatType !== 'once') {
+                        openScopeDialog({ kind: 'remove', occurrence: displayEditor.occurrence });
+                      } else if (displayEditor.occurrence) {
+                        void removeOccurrence(displayEditor.occurrence, 'series');
                       }
                     }}
                   >
@@ -1266,7 +1293,7 @@ export function PlannedTasksPage(): JSX.Element {
                 </div>
               )}
 
-              {editor.plannedTaskId && (
+              {displayEditor.plannedTaskId && (
                 <div className="planned-runs">
                   <h3>
                     <History aria-hidden />
@@ -1323,7 +1350,7 @@ export function PlannedTasksPage(): JSX.Element {
               </Button>
               <Button onClick={() => void saveEditor()} disabled={saving}>
                 {saving && <Loader2 className="animate-spin" aria-hidden />}
-                {editor.plannedTaskId ? '保存规划' : '创建规划'}
+                {displayEditor.plannedTaskId ? '保存规划' : '创建规划'}
               </Button>
             </div>
             <PlannedDiscardDialog
@@ -1374,6 +1401,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 interface PlannedInspectorSurfaceProps {
+  open: boolean;
   modal: boolean;
   label: string;
   initialFocusRef: React.RefObject<HTMLElement>;
@@ -1402,7 +1430,7 @@ function PlannedDiscardDialog({
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[80] bg-black/35 px-4 backdrop-blur-sm data-[state=open]:animate-fade-in" />
         <Dialog.Content
-          className="fixed left-1/2 top-1/2 z-[81] w-[calc(100vw-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-lg border border-[#DCDDDD] bg-white p-5 text-card-foreground shadow-[0_16px_48px_rgba(17,24,39,0.16)] outline-none dark:border-white/10 dark:bg-card"
+          className="hd-planned-discard fixed left-1/2 top-1/2 z-[81] w-[calc(100vw-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-lg border border-[#DCDDDD] bg-white p-5 text-card-foreground shadow-[0_16px_48px_rgba(17,24,39,0.16)] outline-none dark:border-white/10 dark:bg-card"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             cancelRef.current?.focus();
@@ -1444,6 +1472,7 @@ function PlannedDiscardDialog({
 }
 
 function PlannedInspectorSurface({
+  open,
   modal,
   label,
   initialFocusRef,
@@ -1451,20 +1480,13 @@ function PlannedInspectorSurface({
   onRequestClose,
   children,
 }: PlannedInspectorSurfaceProps): JSX.Element {
-  if (!modal) {
-    return (
-      <aside className="planned-inspector" aria-label={label}>
-        {children}
-      </aside>
-    );
-  }
-
   return (
-    <Dialog.Root open onOpenChange={(open) => !open && onRequestClose()}>
+    <Dialog.Root open={open} onOpenChange={(nextOpen) => !nextOpen && onRequestClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="planned-inspector-overlay" />
         <Dialog.Content
           className="planned-inspector"
+          data-mobile={modal}
           aria-label={label}
           aria-modal="true"
           onOpenAutoFocus={(event) => {
@@ -1500,10 +1522,8 @@ function renderEventContent(arg: EventContentArg): JSX.Element {
       data-status={arg.event.extendedProps.status}
       style={{ '--planned-event-accent': arg.event.extendedProps.accent } as React.CSSProperties}
     >
-      <time>{arg.timeText}</time>
       <span>{arg.event.title}</span>
-      {legacy && <em className="planned-event__legacy">旧任务</em>}
-      {itemCount > 1 && <b>{itemCount}</b>}
+      <div className="hd-planned-event-meta"><time>{arg.timeText}</time><small>{legacy ? '旧任务' : arg.event.extendedProps.status === 'paused' ? '已暂停' : itemCount > 1 ? `${itemCount}项` : arg.event.extendedProps.repeatType === 'once' ? '单次' : '重复'}</small></div>
     </div>
   );
 }

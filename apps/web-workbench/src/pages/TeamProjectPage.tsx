@@ -14,9 +14,9 @@ import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
 import type { UiProject } from '@/types/task';
 import type { inferRouterClient } from '@trpc/client';
-import { FolderKanban, RefreshCw } from 'lucide-react';
+import { ChevronLeft, FolderKanban, RefreshCw } from 'lucide-react';
 import * as React from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 
 type ProjectMemberRole = 'lead' | 'member' | 'viewer';
 
@@ -553,7 +553,8 @@ export function TeamProjectPage(): JSX.Element {
   const membersLoading = members.projectId === projectId && members.loading;
 
   return (
-    <PageContainer width="workspace" className="hd-project-detail">
+    <PageContainer width="workspace" className="hd-project-detail hd-personal-project-detail">
+      <Link to="/projects" className="hd-project-back"><ChevronLeft />全部项目</Link>
       <PageHeader
         title={detail.project.name}
         description={detail.project.description || '这个团队项目还没有添加说明。'}
@@ -577,9 +578,12 @@ export function TeamProjectPage(): JSX.Element {
 
       <div className="space-y-4">
         {detail.error ? <StaleNotice message={detail.error} /> : null}
-        <ProjectOverview project={detail.project} />
+        {!teamTaskLifecycleEnabled && <ProjectOverview project={detail.project} />}
         {teamTaskLifecycleEnabled ? (
           <TeamTaskWorkbench
+            approved
+            projectDescription={detail.project.description}
+            projectOverview={<ProjectOverview project={detail.project} />}
             currentUserId={me?.userId ?? ''}
             role={detail.project.memberRole ?? 'viewer'}
             rows={tasks.rows}

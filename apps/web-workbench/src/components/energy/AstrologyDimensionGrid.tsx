@@ -40,12 +40,9 @@ export function AstrologyDimensionGrid({ reading }: AstrologyDimensionGridProps)
   const [expanded, setExpanded] = React.useState(false);
   const [openDimensionKey, setOpenDimensionKey] = React.useState<string | null>(null);
   const sections = periodSections(reading);
-  const visibleSections = expanded ? sections : sections.slice(0, 3);
+  const [revealed, setRevealed] = React.useState(false);
 
-  return (
-    <section className="energy-astrology-dimensions" aria-label="六维星座提示">
-      <div className="energy-astrology-dimensions__grid">
-        {visibleSections.map((dimension) => {
+  const renderDimension = (dimension: (typeof sections)[number]) => {
           const visual = dimensionVisualFor(dimension.key);
           const Icon = ICON_COMPONENTS[visual.icon];
           return (
@@ -72,14 +69,7 @@ export function AstrologyDimensionGrid({ reading }: AstrologyDimensionGridProps)
                 <h4>{dimension.label}</h4>
                 {dimension.score === null ? null : <span>{dimension.score}%</span>}
               </header>
-              <p className="energy-astrology-dimension__preview">
-                {dimension.body.length > 22
-                  ? `${dimension.body.slice(0, 22)}…`
-                  : dimension.body}
-              </p>
-              {openDimensionKey === dimension.key ? (
-                <p data-dimension-body>{dimension.body}</p>
-              ) : null}
+              <DimensionText open={openDimensionKey === dimension.key} body={dimension.body} />
               <button
                 type="button"
                 aria-label={`${openDimensionKey === dimension.key ? '收起' : '展开'}${dimension.label}完整提示`}
@@ -94,13 +84,39 @@ export function AstrologyDimensionGrid({ reading }: AstrologyDimensionGridProps)
               </button>
             </article>
           );
-        })}
+        };
+  return (
+    <section className="energy-astrology-dimensions" aria-label="六维星座提示">
+      <div className="energy-astrology-dimensions__grid">{sections.slice(0, 3).map(renderDimension)}</div>
+      <div className="energy-dimensions-fold" data-open={expanded} aria-hidden={!expanded} {...(!expanded ? { inert: '' } : {})}>
+        <div><div className="energy-astrology-dimensions__grid">{revealed && sections.slice(3).map(renderDimension)}</div></div>
       </div>
       {sections.length > 3 ? (
-        <button type="button" onClick={() => setExpanded((value) => !value)}>
+        <button type="button" aria-expanded={expanded} onClick={() => { setRevealed(true); setExpanded((value) => !value); }}>
           {expanded ? '收起六项提示' : '展开全部六项'}
         </button>
       ) : null}
     </section>
   );
+}
+
+/** A single text node, measured at its actual width, prevents duplicated summaries. */
+function DimensionText({ open, body }: { open: boolean; body: string }): JSX.Element {
+  const text = React.useRef<HTMLParagraphElement>(null);
+  const [height, setHeight] = React.useState<number>();
+  React.useLayoutEffect(() => {
+    const element = text.current;
+    if (!element) return;
+    const measure = () => {
+      const lineHeight = Number.parseFloat(getComputedStyle(element).lineHeight) || 23.4;
+      setHeight(open ? element.scrollHeight : Math.min(element.scrollHeight, lineHeight * 2));
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(element);
+    return () => observer?.disconnect();
+  }, [open, body]);
+  return <div className="energy-dimension-text" data-open={open} style={{ height }}>
+    <p ref={text} data-dimension-body={open ? true : undefined}>{body}</p>
+  </div>;
 }

@@ -77,6 +77,9 @@ export function EnergyHome({
   const [experiences, setExperiences] = React.useState(localExperiences);
   const [selectedExperience, setSelectedExperience] =
     React.useState<EnergyExperienceRegistration | null>(null);
+  // Exit animations retain a frame briefly; stale child callbacks must not record completion.
+  const activeExperienceRef = React.useRef(selectedExperience);
+  React.useLayoutEffect(() => { activeExperienceRef.current = selectedExperience; }, [selectedExperience]);
   const [selectedLaunchTarget, setSelectedLaunchTarget] =
     React.useState<EnergyExperienceLaunchTarget | null>(null);
   const [phase, setPhase] = React.useState<ExperiencePhase>('intro');
@@ -198,6 +201,11 @@ export function EnergyHome({
   };
 
   const handlePhaseChange = (nextPhase: ExperiencePhase): void => {
+    if (!selectedExperience || activeExperienceRef.current !== selectedExperience) return;
+    if (selectedExperience && phase === 'intro' && nextPhase === 'active') {
+      startedAtRef.current = Date.now();
+      reportEvent('energy_experience_started', selectedExperience.id, selectedLaunchTarget);
+    }
     if (selectedExperience && nextPhase === 'result' && phase !== 'result') {
       reportEvent(
         'energy_experience_completed',
@@ -414,7 +422,6 @@ export function EnergyHome({
         onStart={() => {
           if (!selectedExperience) return;
           startedAtRef.current = Date.now();
-          reportEvent('energy_experience_started', selectedExperience.id, selectedLaunchTarget);
           handlePhaseChange('active');
         }}
         onReplay={() => {
@@ -472,7 +479,7 @@ export function EnergyHome({
               phase={phase}
               onPhaseChange={handlePhaseChange}
               onExperienceComplete={(kind) => {
-                if (!selectedExperience || selectedExperience.id === 'poll') return;
+                if (!selectedExperience || activeExperienceRef.current !== selectedExperience || selectedExperience.id === 'poll') return;
                 setProgress(
                   recordCompletedEnergyExperience(storageScope, {
                     experienceId: selectedExperience.id,

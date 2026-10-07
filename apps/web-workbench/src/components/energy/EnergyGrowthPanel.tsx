@@ -1,4 +1,4 @@
-import { Flame, FlaskConical, Gamepad2, MoonStar, Sparkles, Star, Zap } from 'lucide-react';
+import { Flame, FlaskConical, Gamepad2, MoonStar, Star, Zap } from 'lucide-react';
 import { type EnergyCompletionKind, type EnergyProgress, energyStreak } from './energy-progress';
 
 interface EnergyGrowthPanelProps {
@@ -21,7 +21,6 @@ export function EnergyGrowthPanel({ progress }: EnergyGrowthPanelProps): JSX.Ele
   const streak = energyStreak(progress);
   return (
     <section className="energy-growth-panel" aria-label="今日能量成长">
-      <img src="/energy/energy-capsules.jpg" alt="" aria-hidden="true" />
       <div className="energy-growth-panel__heading">
         <div>
           <p className="energy-kicker">只记录完成，不记录答案</p>
@@ -37,14 +36,11 @@ export function EnergyGrowthPanel({ progress }: EnergyGrowthPanelProps): JSX.Ele
         <span>/ {NODES.length} 枚今日能量</span>
       </div>
       <div className="energy-growth-nodes">
-        {NODES.map((node) => {
-          const Icon = node.icon;
+        {NODES.map((node, index) => {
           const collected = progress.collectedKinds.includes(node.kind);
           return (
             <span key={node.kind} data-collected={collected ? 'true' : 'false'}>
-              <span className="energy-growth-node__icon" aria-hidden="true">
-                {collected ? <Sparkles /> : <Icon />}
-              </span>
+              <span className="energy-approved-bottle" style={{ backgroundPosition: `${25 - [148, 278, 405, 536, 665][index] / 2}px -91px` }} aria-hidden="true" />
               {node.label}
             </span>
           );

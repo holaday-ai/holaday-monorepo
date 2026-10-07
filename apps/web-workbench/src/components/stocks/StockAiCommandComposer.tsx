@@ -1,5 +1,12 @@
+import { ApprovedStockComposer, type StockResearchDraft } from './ApprovedStockComposer';
 import {
   Circle,
+  ChevronDown,
+  Maximize2,
+  Minimize2,
+  Layers,
+  Clock3,
+  ArrowUp,
   ClipboardList,
   Loader2,
   Scale,
@@ -9,6 +16,7 @@ import {
   TrendingUp,
   type LucideIcon,
 } from 'lucide-react';
+import { useState } from 'react';
 import { cn } from '@/lib/utils';
 
 const COMMAND_ICONS: readonly LucideIcon[] = [ClipboardList, ShieldCheck, TrendingUp, Scale];
@@ -41,7 +49,14 @@ export function StockAiCommandComposer({
   onCommand,
   isCommandDisabled = () => false,
   commandTitle = () => undefined,
+  approved = false,
+  dataDateLabel,
+  onManageWatchlist,
+  researchStocks,
 }: {
+  approved?: boolean;
+  dataDateLabel?: string;
+  onManageWatchlist?: () => void;
   value: string;
   placeholder: string;
   assistantStatus: string;
@@ -49,14 +64,21 @@ export function StockAiCommandComposer({
   submitting: boolean;
   submitDisabled: boolean;
   onValueChange: (value: string) => void;
-  onSubmit: () => void;
+  onSubmit: (draft?: StockResearchDraft) => void;
+  researchStocks?: readonly {symbol:string;name:string}[];
   onCommand: (command: string) => void;
   isCommandDisabled?: (command: string) => boolean;
   commandTitle?: (command: string) => string | undefined;
 }): JSX.Element {
+  const [collapsed, setCollapsed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  if (approved) return <ApprovedStockComposer {...{value,placeholder,assistantStatus,dataDateLabel,submitting,submitDisabled,onValueChange,onSubmit,onManageWatchlist,researchStocks,commands,onCommand,isCommandDisabled,commandTitle}} />;
   return (
     <section
       aria-label="Holaday AI 股市研究助手"
+      data-approved={approved || undefined}
+      data-collapsed={collapsed}
+      data-expanded={expanded}
       className="overflow-hidden rounded-[18px] border border-[#E9E0EC] bg-[#FFFCFB] p-2.5 shadow-[0_14px_36px_rgba(102,74,119,0.055)] sm:p-4"
     >
       <div className="flex items-center justify-between gap-3 px-1">
@@ -75,6 +97,9 @@ export function StockAiCommandComposer({
         <Sparkles className="h-4 w-4 shrink-0 text-[#EAB8C6]" aria-hidden />
       </div>
 
+      {approved && <><div className="hd-stock-dock-meta"><button type="button" title="管理研究范围" onClick={onManageWatchlist}><Layers />我的关注<ChevronDown /></button><span><Clock3 />{dataDateLabel ?? '数据日期待核验'}</span><button type="button" className="hd-dock-collapse" title={collapsed ? '展开输入框' : '收起输入框'} aria-label={collapsed ? '展开输入框' : '收起输入框'} aria-expanded={!collapsed} onClick={() => setCollapsed(current => !current)}><ChevronDown /></button></div></>}
+      <div className={approved ? "hd-stock-dock-fold" : undefined} aria-hidden={approved && collapsed || undefined}><div>
+      {approved && <div className="hd-stock-source"><span>{assistantStatus}</span><small>A 股研究</small></div>}
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -82,13 +107,8 @@ export function StockAiCommandComposer({
         }}
         className="mt-2.5 flex min-h-[52px] items-end gap-2 rounded-[14px] bg-[#FFF7FA] px-3 py-2 shadow-[inset_0_-2px_0_#E8C8F5] transition-colors focus-within:bg-white motion-reduce:transition-none sm:mt-3 sm:min-h-[60px] sm:py-2.5"
       >
-        <input
-          value={value}
-          onChange={(event) => onValueChange(event.target.value)}
-          aria-label="交代股市研究任务"
-          placeholder={placeholder}
-          className="min-w-0 flex-1 self-stretch bg-transparent text-[14px] font-medium leading-6 text-[#332842] outline-none placeholder:text-[#968C9D] sm:text-[16px]"
-        />
+        {approved ? <textarea value={value} onChange={event => onValueChange(event.target.value)} aria-label="交代股市研究任务" placeholder={placeholder} rows={2} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!submitDisabled) onSubmit(); } }} /> : <input value={value} onChange={event => onValueChange(event.target.value)} aria-label="交代股市研究任务" placeholder={placeholder} className="min-w-0 flex-1 self-stretch bg-transparent text-[14px] font-medium leading-6 text-[#332842] outline-none placeholder:text-[#968C9D] sm:text-[16px]" />}
+        {approved && <div className="hd-stock-editor-tools"><span>Enter 发送</span><button type="button" title={expanded ? '收起编辑' : '展开编辑'} aria-label={expanded ? '收起编辑' : '展开编辑'} aria-expanded={expanded} onClick={() => setExpanded(current => !current)}>{expanded ? <Minimize2 /> : <Maximize2 />}</button></div>}
         <button
           type="submit"
           disabled={submitDisabled}
@@ -99,7 +119,7 @@ export function StockAiCommandComposer({
           {submitting ? (
             <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
           ) : (
-            <Send className="h-4 w-4" aria-hidden />
+            approved ? <ArrowUp className="h-4 w-4" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />
           )}
         </button>
       </form>
@@ -130,6 +150,7 @@ export function StockAiCommandComposer({
           );
         })}
       </div>
+      </div></div>
     </section>
   );
 }

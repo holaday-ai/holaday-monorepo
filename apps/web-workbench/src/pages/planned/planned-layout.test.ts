@@ -21,7 +21,7 @@ describe('planned task responsive layout', () => {
     expect(mobilePagePadding).toEqual([]);
   });
 
-  it('turns the editor into a focused full-screen sheet on narrow screens', () => {
+  it('keeps the floating editor inside the narrow viewport with a scrollable body', () => {
     const css = readFileSync(new URL('./planned-tasks.css', import.meta.url), 'utf8');
     const root = postcss.parse(css);
     const declarations = new Map<string, Map<string, string>>();
@@ -39,8 +39,8 @@ describe('planned task responsive layout', () => {
     });
 
     expect(declarations.get('.planned-inspector')?.get('position')).toBe('fixed');
-    expect(declarations.get('.planned-inspector')?.get('inset')).toBe('0');
-    expect(declarations.get('.planned-inspector')?.get('height')).toBe('100dvh');
+    expect(declarations.get('.planned-inspector')?.get('inset')).toBe('12px');
+    expect(declarations.get('.planned-inspector')?.get('height')).toBe('calc(100dvh - 24px)');
     expect(declarations.get('.planned-inspector__body')?.get('overflow-y')).toBe('auto');
     expect(declarations.get('.planned-inspector__footer')?.get('position')).toBe('sticky');
     expect(declarations.get('.planned-inspector__footer')?.get('bottom')).toBe('0');

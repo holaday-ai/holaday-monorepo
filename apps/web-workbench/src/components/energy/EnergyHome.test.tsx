@@ -178,7 +178,7 @@ describe('EnergyHome', () => {
 
     await user.click(screen.getByRole('button', { name: '放松' }));
     await user.click(screen.getByRole('button', { name: '开始 30 秒补给' }));
-    await user.click(screen.getByRole('button', { name: '开始体验' }));
+    await user.click(await screen.findByRole('button', { name: '开始30秒' }));
     await user.click(await screen.findByRole('button', { name: '立即完成' }));
 
     expect(screen.getByRole('heading', { name: '放松能量已点亮' })).toBeTruthy();
@@ -227,7 +227,7 @@ describe('EnergyHome', () => {
     await user.click(screen.getByRole('button', { name: '放松' }));
     const originalTrigger = screen.getByRole('button', { name: '开始 30 秒补给' });
     await user.click(originalTrigger);
-    await user.click(screen.getByRole('button', { name: '开始体验' }));
+    await user.click(await screen.findByRole('button', { name: '开始30秒' }));
     await user.click(await screen.findByRole('button', { name: '立即完成' }));
     await user.click(screen.getByRole('button', { name: '继续：呼吸节奏' }));
 
@@ -262,7 +262,6 @@ describe('EnergyHome', () => {
     render(<EnergyHome profileStorageScope="usr_energy" />);
 
     await user.click(screen.getByRole('button', { name: '抽一张能量卡' }));
-    await user.click(screen.getByRole('button', { name: '开始体验' }));
     await user.click(await screen.findByRole('button', { name: '模拟体验失败' }));
     await user.click(screen.getByRole('button', { name: '重新试试' }));
 
@@ -270,7 +269,6 @@ describe('EnergyHome', () => {
       .map(([event]) => event.type)
       .filter((type) => String(type).startsWith('energy_experience_'));
     expect(lifecycleTypes).toEqual([
-      'energy_experience_started',
       'energy_experience_failed',
       'energy_experience_replayed',
     ]);
@@ -296,7 +294,7 @@ describe('EnergyHome', () => {
 
     await user.click(screen.getByRole('button', { name: '放松' }));
     await user.click(screen.getByRole('button', { name: '开始 30 秒补给' }));
-    await user.click(screen.getByRole('button', { name: '开始体验' }));
+    await user.click(await screen.findByRole('button', { name: '开始30秒' }));
     await user.click(await screen.findByRole('button', { name: '立即完成' }));
 
     expect(screen.queryByRole('button', { name: '继续：呼吸节奏' })).toBeNull();

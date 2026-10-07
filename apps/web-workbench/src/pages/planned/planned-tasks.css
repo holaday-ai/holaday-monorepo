@@ -748,3 +748,29 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Final approved editor: a floating right drawer, not an inline calendar column. */
+.planned-inspector{position:fixed;inset:62px 16px 16px auto;z-index:61;width:460px;max-width:calc(100vw - 40px);height:calc(100dvh - 78px);border:1px solid #eee8ec;border-radius:26px;box-shadow:-12px 10px 60px #37263714;overflow:hidden;outline:none;background:#fff}
+.planned-inspector[data-state=open]{animation:hd-plan-drawer-in 620ms cubic-bezier(.4,0,.2,1)}
+.planned-inspector-overlay{position:fixed;inset:0;z-index:60;background:#30232e24;backdrop-filter:blur(3px);animation:hd-plan-backdrop-in 620ms ease}
+.planned-inspector__header{padding:24px 25px 20px;border:0}.planned-inspector__header strong{font-size:19px;font-weight:550;color:#40383f}.planned-inspector__header span{font-size:10px;color:#ad9fa8}
+.planned-inspector__body{padding:0 26px 24px;min-height:0;scrollbar-width:thin}.planned-inspector__footer{padding:17px 26px 22px;border-top:1px solid #f0eaf0;background:white;box-shadow:none}
+.planned-inspector .planned-field{margin-top:20px}.planned-inspector .planned-field>legend{color:#988a93;font-size:11px}
+.planned-inspector input:not([type=checkbox]),.planned-inspector textarea,.planned-inspector select{border:1px solid #e9e2e7;border-radius:13px;background:#fcfbfc;font-size:12px;line-height:1.6;color:#53454f;padding:10px 13px;min-height:40px}
+.planned-inspector textarea{min-height:96px;line-height:1.8}.planned-inspector input:focus,.planned-inspector textarea:focus,.planned-inspector select:focus{border-color:#ff006166;background:white;box-shadow:none}
+.planned-inspector .planned-mode,.planned-inspector .planned-repeat{display:flex;flex-wrap:wrap;gap:6px;padding:0;background:none}.planned-inspector .planned-mode button,.planned-inspector .planned-repeat button{border-radius:20px;padding:7px 12px;background:#f5f2f4;box-shadow:none;font-size:11px;min-height:32px;height:auto}.planned-inspector button[aria-pressed=true]{background:#ff00610d;color:#FF0061;box-shadow:inset 0 0 0 1px #ff006133}
+.planned-inspector__footer button{border-radius:22px;font-size:11px}
+.planned-scope-dialog{background:#30232e24;backdrop-filter:blur(3px)}.planned-scope-dialog__panel,.hd-planned-discard{width:390px;border:1px solid #eee5eb;border-radius:23px;padding:25px;color:#51404a;box-shadow:0 18px 65px #34232f20}.planned-scope-dialog__panel h2{font-size:19px;font-weight:550;margin:0 0 12px}.planned-scope-dialog__panel p{color:#a0909b;font-size:12px;line-height:1.8}.planned-scope-dialog__panel>button:not(.inline-flex){padding:13px;margin:7px 0;border:0;border-radius:13px;background:#faf6f8;font-size:12px}.planned-scope-dialog__panel>button span{margin-top:5px;color:#ac96a3}
+@keyframes hd-plan-drawer-in{from{opacity:0;transform:translateX(25px)}to{opacity:1;transform:translateX(0)}}
+@keyframes hd-plan-backdrop-in{from{opacity:0}to{opacity:1}}
+@media(max-width:600px){.planned-inspector{inset:12px;max-width:none;width:calc(100vw - 24px);height:calc(100dvh - 24px)}.planned-inspector__body{padding-inline:20px}}
+@media(prefers-reduced-motion:reduce){.planned-inspector[data-state=open],.planned-inspector-overlay{animation:none}}
+
+.planned-inspector[data-state=closed]{animation:hd-plan-drawer-out 380ms ease-in both;pointer-events:none}
+.planned-inspector-overlay[data-state=closed]{animation:hd-plan-backdrop-out 380ms ease-in both}
+.hd-day-agenda{animation:hd-plan-day-in 420ms ease-out}
+.planned-calendar .fc-popover{border-radius:16px;border:1px solid #eee5eb;box-shadow:0 12px 36px #34232f18;overflow:hidden}
+@keyframes hd-plan-drawer-out{to{opacity:0;transform:translateX(18px)}}
+@keyframes hd-plan-backdrop-out{to{opacity:0}}
+@keyframes hd-plan-day-in{from{opacity:.45;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.planned-inspector[data-state=closed],.planned-inspector-overlay[data-state=closed],.hd-day-agenda{animation:none}}

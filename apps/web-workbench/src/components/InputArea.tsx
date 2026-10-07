@@ -1,8 +1,12 @@
 import {
   ArrowUp,
+  ChevronDown,
   Cpu,
+  ImagePlus,
   ListChecks,
   Loader2,
+  Maximize2,
+  Minimize2,
   Paperclip,
   Plus,
   Puzzle,
@@ -123,6 +127,7 @@ interface Props {
   fullBleed?: boolean;
   /** Compact terminal follow-up composer so mobile result cards keep more room. */
   compact?: boolean;
+  approved?: boolean;
 }
 
 const ACCEPT_FILES = '.csv,.xlsx,.xls,.docx,.pdf,.txt,.json,.md';
@@ -195,6 +200,7 @@ export function InputArea({
   onPrefillConsumed,
   fullBleed,
   compact,
+  approved = false,
 }: Props): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
@@ -202,6 +208,8 @@ export function InputArea({
   const [value, setValue] = React.useState('');
   const [attachments, setAttachments] = React.useState<DraftAttachment[]>([]);
   const [dragActive, setDragActive] = React.useState(false);
+  const [expanded, setExpanded] = React.useState(false);
+  const imageInputRef = React.useRef<HTMLInputElement>(null);
   const mountedRef = React.useRef(false);
   // Local ref for the textarea so we can focus it from inside on
   // suggestion-chip prefill. The forwarded `inputRef` is also kept
@@ -657,6 +665,8 @@ export function InputArea({
     <div
       className={cn(
         'w-full',
+        approved && 'hd-approved-input',
+        approved && expanded && 'hd-input-expanded',
         fullBleed
           ? ''
           : 'mx-auto max-w-[760px] px-3 pb-4 sm:px-6 sm:pb-6',
@@ -780,7 +790,7 @@ export function InputArea({
             ) : null}
           </div>
         )}
-        {!replyMode && !followUpTarget ? <LocalChromePicker disabled={disabled} /> : null}
+        {!approved && !replyMode && !followUpTarget ? <LocalChromePicker disabled={disabled} /> : null}
         <Textarea
           ref={setTextareaRef}
           value={value}
@@ -793,7 +803,7 @@ export function InputArea({
                 ? '补充问题或下一步指令...'
                 : expertWorkflow
                   ? '补充直播场次、数据来源或你想要的报告形式...'
-                  : '描述你想让 HOLA DAY 做什么...'
+                  : approved ? '说说你想做的事...' : '描述你想让 HOLA DAY 做什么...'
           }
           rows={compact ? 1 : 2}
           className={cn(
@@ -822,7 +832,7 @@ export function InputArea({
             hand-rolled outside-click popover. Picks up focus
             management, escape-to-close, arrow-key navigation,
             and proper portal layering for free. */}
-        <div className={cn('absolute', fullBleed ? (compact ? 'bottom-7 left-7' : 'bottom-7 left-8') : 'bottom-2.5 left-2.5')}>
+        <div className={cn('hd-composer-tools absolute', fullBleed ? (compact ? 'bottom-7 left-7' : 'bottom-7 left-8') : 'bottom-2.5 left-2.5')}>
             <DropdownMenu open={plusMenuOpen} onOpenChange={setPlusMenuOpen}>
               <DropdownMenuTrigger asChild>
                 <button
@@ -835,7 +845,7 @@ export function InputArea({
                     plusMenuOpen && ATTACHMENT_TRIGGER_ACTIVE,
                   )}
                 >
-                  <Plus className="h-4 w-4" />
+                  {approved ? <Paperclip className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
@@ -986,7 +996,25 @@ export function InputArea({
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
+            {approved && <>
+              <button className="hd-prompt-icon" type="button" disabled={disabled || !attachmentsAllowed} title="添加图片" aria-label="添加图片" onClick={() => imageInputRef.current?.click()}><ImagePlus /></button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild><button className="hd-prompt-icon" type="button" title="选择技能" aria-label="选择技能"><Sparkles /></button></DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="start" className="max-h-72 w-64 overflow-y-auto">
+                  {mentionSkills.length ? mentionSkills.map(skill => <DropdownMenuItem key={skill.id} onSelect={() => applySkillMention(skill)}><Sparkles className="h-4 w-4" />{skill.name}</DropdownMenuItem>) : <p className="px-3 py-2 text-xs text-muted-foreground">暂无可用技能</p>}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {!replyMode && !followUpTarget && <LocalChromePicker disabled={disabled} compact />}
+            </>}
         </div>
+        {approved && <div className="hd-composer-actions">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><button type="button" className="hd-prompt-mode" title="执行模式" aria-label="执行模式"><ListChecks />{taskMode === 'plan' ? '规划' : '自动'}<ChevronDown /></button></DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="end"><DropdownMenuRadioGroup value={taskMode} onValueChange={mode => setTaskMode(mode as 'auto' | 'plan')}><DropdownMenuRadioItem value="auto">自动执行</DropdownMenuRadioItem><DropdownMenuRadioItem value="plan">先规划，再执行</DropdownMenuRadioItem></DropdownMenuRadioGroup></DropdownMenuContent>
+          </DropdownMenu>
+          <button className="hd-prompt-icon" type="button" title={expanded ? '收起输入框' : '展开输入框'} aria-label={expanded ? '收起输入框' : '展开输入框'} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? <Minimize2 /> : <Maximize2 />}</button>
+        </div>}
+        {approved && <input ref={imageInputRef} type="file" accept="image/*" multiple hidden onChange={event => { if (event.target.files) void ingestFiles(event.target.files); event.target.value = ''; }} />}
         <input
           ref={fileInputRef}
           type="file"
@@ -1003,7 +1031,7 @@ export function InputArea({
           onClick={() => void handleSubmit()}
           disabled={disabled || value.trim().length === 0}
           className={cn(
-            'absolute rounded-full focus-visible:ring-[#FF0061]/25',
+            'hd-prompt-send absolute rounded-full focus-visible:ring-[#FF0061]/25',
             fullBleed
               ? compact
                 ? 'bottom-5 right-5 h-11 w-[116px] justify-between border border-[#FF0061]/45 bg-white/60 px-5 pr-[50px] text-[#FF0061] shadow-[0_10px_22px_rgba(255,0,97,0.12)] backdrop-blur hover:bg-white/80'
@@ -1015,7 +1043,7 @@ export function InputArea({
         >
           {submitting ? (
             <Loader2 className="h-4 w-4 animate-spin" />
-          ) : fullBleed ? (
+          ) : fullBleed && !approved ? (
             <>
               <span className="text-[15px] font-medium leading-none">Enter</span>
               <span
@@ -1032,6 +1060,7 @@ export function InputArea({
           )}
         </Button>
       </div>
+      {approved && <div className="hd-prompt-bottom" aria-live="polite"><span>Enter 发送 · Shift + Enter 换行</span><span>{submitting ? submittingStatus : ''}</span></div>}
       {!fullBleed && (
         <div className="mt-2 flex min-h-[28px] items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground/70">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">

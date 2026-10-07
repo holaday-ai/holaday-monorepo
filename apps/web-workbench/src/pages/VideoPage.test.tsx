@@ -92,20 +92,21 @@ describe('VideoPage scenario-first production wiring', () => {
     renderPage();
 
     const prompt = await screen.findByRole('textbox', { name: '告诉 HOLA DAY 你的重点' });
-    expect((prompt as HTMLTextAreaElement).value).toContain('香水产品的高光短片');
+    expect((prompt as HTMLTextAreaElement).value).toBe('');
 
-    await user.click(screen.getByRole('button', { name: /生活方式 Vlog/ }));
+    await user.click(screen.getByRole('button', { name: /生活方式示例/ }));
+    await user.click(screen.getByRole('button', { name: '用这个灵感' }));
     expect(
       (screen.getByRole('textbox', { name: '告诉 HOLA DAY 你的重点' }) as HTMLTextAreaElement)
         .value,
-    ).toContain('清晨湖畔散步');
+    ).toContain('山间旅行');
 
-    await user.click(screen.getByRole('button', { name: /复刻一段动作/ }));
-    expect(screen.getByRole('heading', { name: '主角照片' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: '参考视频' })).toBeTruthy();
+    await user.click(screen.getByRole('tab', { name: '动作复刻' }));
+    expect(screen.getByRole('button', { name: /主角照片 单人清晰照片/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /参考视频 2–30秒/ })).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: /IP 人物口播/ }));
-    expect(await screen.findByRole('heading', { name: 'IP人物视频素材准备' })).toBeTruthy();
+    await user.click(screen.getByRole('tab', { name: '人物口播' }));
+    expect(await screen.findByRole('heading', { name: '让你的角色，开口表达。' })).toBeTruthy();
 
     expect(mocks.createTask).not.toHaveBeenCalled();
   });
@@ -115,12 +116,13 @@ describe('VideoPage scenario-first production wiring', () => {
     renderPage();
 
     await screen.findByRole('textbox', { name: '告诉 HOLA DAY 你的重点' });
-    await user.click(screen.getByRole('button', { name: /生活方式 Vlog/ }));
-    await user.click(screen.getByRole('button', { name: '生成这条视频' }));
+    await user.click(screen.getByRole('button', { name: /生活方式示例/ }));
+    await user.click(screen.getByRole('button', { name: '用这个灵感' }));
+    await user.click(screen.getByRole('button', { name: '准备生成' }));
 
     await waitFor(() => expect(mocks.createTask).toHaveBeenCalledTimes(1));
     const call = mocks.createTask.mock.calls[0];
-    expect(call?.[0]).toContain('清晨湖畔散步');
+    expect(call?.[0]).toContain('山间旅行');
     expect(call?.[6]).toEqual({
       tab: 'normal',
       model: 'veo_fast',
@@ -131,4 +133,43 @@ describe('VideoPage scenario-first production wiring', () => {
     });
     expect(mocks.toast).toHaveBeenCalledWith('已提交，请确认报价后开始制作', 'info', 3000);
   });
+  it('keeps an unfinished presenter draft across mode switches and never submits without assets', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole('tab', { name: '人物口播' }));
+    const copy = await screen.findByRole('textbox', { name: '口播文案' });
+    await user.type(copy, '今天来介绍我们的新产品');
+    await user.click(screen.getByRole('tab', { name: '自由创作' }));
+    await user.click(screen.getByRole('tab', { name: '人物口播' }));
+    expect((screen.getByRole('textbox', { name: '口播文案' }) as HTMLTextAreaElement).value).toBe('今天来介绍我们的新产品');
+    expect((screen.getByRole('button', { name: '准备生成' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mocks.createTask).not.toHaveBeenCalled();
+  });
+
+  it('still requires per-generation consent when presenter assets are ready', async () => {
+    mocks.onboardingStatusQuery.mockResolvedValue({hasVoice:true,hasBaseVideo:true,authorized:true,baseVideoIssue:null});
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole('tab', { name: '人物口播' }));
+    await user.type(await screen.findByRole('textbox', { name: '口播文案' }), '今天来介绍我们的新产品');
+    expect((screen.getByRole('button', { name: '准备生成' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole('checkbox', { name: /我确认：口播所用/ }));
+    await user.click(screen.getByRole('button', { name: '准备生成' }));
+    await waitFor(()=>expect(mocks.createTask).toHaveBeenCalledTimes(1));
+    expect(mocks.createTask.mock.calls[0]?.[6]).toEqual({tab:'ip_person',aspectRatio:'9:16'});
+    await waitFor(()=>expect((screen.getByRole('checkbox', { name: /我确认：口播所用/ }) as HTMLInputElement).checked).toBe(false));
+  });
+
+});
+
+it('closes the reference-video dialog with Escape and restores its trigger without submitting', async () => {
+  const user = userEvent.setup();
+  renderPage();
+  const trigger = await screen.findByRole('button', { name: '添加参考视频' });
+  await user.click(trigger);
+  expect(screen.getByRole('dialog', { name: '添加参考视频' })).toBeTruthy();
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '添加参考视频' })).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+  expect(mocks.createTask).not.toHaveBeenCalled();
 });

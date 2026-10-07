@@ -1,5 +1,5 @@
 import type { DraftAttachment } from '@/components/AttachmentChip';
-import { CapabilityCenterContent } from '@/components/skills/CapabilityCenterContent';
+import { ApprovedSkillsCatalog } from '@/components/skills/ApprovedSkillsCatalog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
@@ -295,7 +295,7 @@ export function SkillsPage(): JSX.Element {
           </div>
         </>
       ) : (
-        <CapabilityCenterContent
+        <ApprovedSkillsCatalog
           skills={skills}
           activeSkillId={activeSkillId}
           query={query}

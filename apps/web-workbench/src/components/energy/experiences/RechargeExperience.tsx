@@ -68,6 +68,10 @@ export function RechargeExperience({
     if (phase === 'active') setStep(0);
   }, [phase]);
 
+  if (phase === 'intro') {
+    return <div className="energy-recharge-flow energy-recharge-ready"><div className="energy-recharge-orb" aria-hidden="true"><Sparkles /></div><p className="energy-kicker">30 秒 · {content.label}补给</p><h3>{content.steps[0]}</h3><p>给自己留一点空白，准备好时再开始。</p><ol>{content.steps.map((step, index) => <li key={step}><span>0{index + 1}</span>{step}</li>)}</ol><Button type="button" onClick={() => onPhaseChange('active')}>开始30秒</Button></div>;
+  }
+
   if (phase === 'result') {
     return (
       <div className="energy-recharge-result" aria-live="polite">

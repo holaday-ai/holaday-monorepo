@@ -57,7 +57,7 @@ function Harness({
       </button>
       <ExperiencePlayer
         open={open}
-        experience={TAROT}
+        experience={open ? TAROT : null}
         phase={phase}
         returnFocusRef={triggerRef}
         onClose={() => {
@@ -94,8 +94,8 @@ describe('ExperiencePlayer', () => {
     await user.click(trigger);
 
     expect(screen.getByRole('dialog', { name: '抽张卡' })).toBeTruthy();
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: '开始体验' }));
-    expect(screen.queryByText('结果内容')).toBeNull();
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+    expect(screen.getByText('结果内容')).toBeTruthy();
 
     await user.keyboard('{Escape}');
 
@@ -104,14 +104,13 @@ describe('ExperiencePlayer', () => {
     expect(document.activeElement).toBe(trigger);
   });
 
-  it('shows the experience content only after start', async () => {
+  it('opens the approved card entry directly without a generic start screen', async () => {
     const user = userEvent.setup();
     render(<Harness />);
 
     await user.click(screen.getByRole('button', { name: '打开抽卡' }));
-    expect(screen.queryByText('结果内容')).toBeNull();
+    expect(screen.getByText('结果内容')).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: '开始体验' }));
 
     expect(screen.getByText('结果内容')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '开始体验' })).toBeNull();

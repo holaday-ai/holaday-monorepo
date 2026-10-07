@@ -5,6 +5,7 @@ import type { ImageChangeTarget } from '@/types/image';
 import {
   Crop,
   ImagePlus,
+  Files,
   Palette,
   PersonStanding,
   Sparkles,
@@ -36,6 +37,8 @@ export interface ImageBriefComposerProps {
   onPromptChange(value: string): void;
   onToggleChangeTarget(value: ImageChangeTarget): void;
   onChooseImages(): void;
+  referenceAction?: ReactNode;
+  settings?: ReactNode;
   onRemoveAttachment(clientId: string): void;
   onSetSubject(clientId: string): void;
 }
@@ -49,6 +52,8 @@ export function ImageBriefComposer({
   onPromptChange,
   onToggleChangeTarget,
   onChooseImages,
+  referenceAction,
+  settings,
   onRemoveAttachment,
   onSetSubject,
 }: ImageBriefComposerProps): JSX.Element {
@@ -61,16 +66,10 @@ export function ImageBriefComposer({
   );
 
   return (
-    <section
-      aria-label="图片创作区"
-      className={cn(
-        'grid overflow-hidden rounded-[22px] border border-[var(--creative-line,#E6DFE6)] bg-[var(--creative-surface,#fff)] shadow-[0_8px_24px_rgba(62,50,68,0.04)]',
-        lockSubject ? 'lg:grid-cols-[minmax(220px,270px)_minmax(0,1fr)]' : 'grid-cols-1',
-      )}
-    >
-      {lockSubject ? (
-        <div className="border-b border-[var(--creative-line,#E7DFE8)] bg-[var(--creative-surface,#FBFCFF)] p-4 lg:border-b-0 lg:border-r">
-          <div className="text-sm font-semibold text-[var(--creative-ink,#342E39)]">添加主角图</div>
+    <>
+      {lockSubject && <div className="hd-subject-setup">      {lockSubject ? (
+        <div className="hd-subject-card border-b border-[var(--creative-line,#E7DFE8)] bg-[var(--creative-surface,#FBFCFF)] p-4 lg:border-b-0 lg:border-r">
+          <div className="text-sm font-semibold text-[var(--creative-ink,#342E39)]">先认识你的主角</div>
           <p className="mt-1 text-xs leading-5 text-[var(--creative-muted,#7B717F)]">
             人物、宠物、商品或 IP；建议主体清晰。
           </p>
@@ -153,10 +152,9 @@ export function ImageBriefComposer({
         </div>
       ) : null}
 
-      <div className="p-4 sm:p-[18px]">
         {lockSubject ? (
-          <fieldset aria-label="想改什么" className="min-w-0 border-0 p-0">
-            <legend className="text-sm font-semibold text-[var(--creative-ink,#342E39)]">想改什么？</legend>
+          <fieldset aria-label="想改什么" className="hd-subject-targets min-w-0 border-0 p-0">
+            <legend className="text-sm font-semibold text-[var(--creative-ink,#342E39)]">只改变你选的部分</legend><p>保留主角身份与特征，把变化说清楚。</p>
             <div className="mt-2.5 flex flex-wrap gap-2">
               {CHANGE_TARGET_OPTIONS.map((option) => {
                 const selected = draft.changeTargets.includes(option.value);
@@ -184,7 +182,18 @@ export function ImageBriefComposer({
           </fieldset>
         ) : null}
 
-        <label htmlFor="image-studio-prompt" className={cn('block', lockSubject && 'mt-4')}>
+</div>}
+      {settings}
+    <section
+      aria-label="图片创作区"
+      className={cn(
+        'hd-image-brief grid overflow-hidden rounded-[22px] border border-[var(--creative-line,#E6DFE6)] bg-[var(--creative-surface,#fff)] shadow-[0_8px_24px_rgba(62,50,68,0.04)]',
+        'grid-cols-1',
+      )}
+    >
+      <div className="hd-image-prompt-body p-4 sm:p-[18px]">
+<div className="hd-composer-source">{referenceAction ?? <button type="button" disabled={disabled} onClick={onChooseImages} title="添加参考资料"><Files className="h-4 w-4" />参考资料</button>}</div>
+        <label htmlFor="image-studio-prompt" className="sr-only">
           <span className="flex items-center gap-2 text-sm font-semibold text-[var(--creative-ink,#342E39)]">
             <Sparkles className="h-4 w-4 text-[var(--creative-muted,#D62958)]" aria-hidden />
             描述你想要的最终画面
@@ -199,14 +208,14 @@ export function ImageBriefComposer({
           onChange={(event) => onPromptChange(event.target.value)}
           placeholder={
             lockSubject
-              ? '例如：保持主角不变，把背景换成傍晚海边，柔和逆光，半身构图'
+              ? '主角保持不变，你希望背景、光线或构图怎么变？'
               : draft.goal === 'commercial'
-                ? '例如：为新品香水制作一张夏日海报，留出标题空间，画面明亮精致'
-                : '例如：一间洒满午后阳光的治愈系客厅，奶油色沙发和绿植'
+                ? '写下商品卖点、画面用途，以及需要出现的文字…'
+                : '描述你想看到的画面，主体、场景、光线或氛围…'
           }
           className="mt-2.5 min-h-[132px] resize-y rounded-[16px] border-[var(--creative-line,#DED4DF)] bg-[var(--creative-surface,#fff)] px-4 py-3 text-[15px] leading-7 text-[var(--creative-ink,#342E39)] shadow-none placeholder:text-[var(--creative-muted,#A399A6)] focus-visible:ring-[#D62958]/20"
         />
-        <div className="mt-2 flex items-start justify-between gap-3 text-xs text-[var(--creative-muted,#887D8B)]">
+        <div className="hd-image-prompt-hint mt-2 flex items-start justify-between gap-3 text-xs text-[var(--creative-muted,#887D8B)]">
           <span>把重点说清楚即可，生成后还可以继续调整。</span>
           <span className="shrink-0">{draft.prompt.length} / 4000</span>
         </div>
@@ -216,7 +225,7 @@ export function ImageBriefComposer({
             type="button"
             onClick={onChooseImages}
             disabled={disabled}
-            className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--creative-line,#D8CFDA)] bg-[var(--creative-surface,#fff)] px-4 text-sm font-semibold text-[var(--creative-ink,#625666)] transition-colors hover:border-[#AF9AB5] hover:bg-[var(--creative-surface,#FBF8FC)] disabled:opacity-60 motion-reduce:transition-none"
+            className="hd-image-add-reference mt-4 inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--creative-line,#D8CFDA)] bg-[var(--creative-surface,#fff)] px-4 text-sm font-semibold text-[var(--creative-ink,#625666)] transition-colors hover:border-[#AF9AB5] hover:bg-[var(--creative-surface,#FBF8FC)] disabled:opacity-60 motion-reduce:transition-none"
           >
             <ImagePlus className="h-4 w-4" aria-hidden />
             {uploading ? '正在上传…' : '添加参考图'}
@@ -248,8 +257,9 @@ export function ImageBriefComposer({
           </p>
         ) : null}
 
-        {actions ? <div className="mt-4 border-t border-[var(--creative-line,#EEE8EE)] pt-4">{actions}</div> : null}
+        {actions ? <div className="hd-image-actions">{actions}</div> : null}
       </div>
     </section>
+    </>
   );
 }

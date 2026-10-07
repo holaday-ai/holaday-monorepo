@@ -1,3 +1,4 @@
+import { stockResearchIntent, type StockResearchDraft } from '@/components/stocks/ApprovedStockComposer';
 import {
   ArrowRight,
   Bell,
@@ -25,6 +26,7 @@ import {
 import type { StockScreeningViewState } from '@/components/stocks/StockScreeningWorkbench';
 import {
   StockMarketContextLayout,
+  type StockWorkspaceTask,
   StockResearchTable,
   StockTaskWorkspaceLayout,
 } from '@/components/stocks/StockWorkbenchLayout';
@@ -217,6 +219,7 @@ export function StockTasksPage(): JSX.Element {
   });
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [prompt, setPrompt] = React.useState('');
+  const [workspaceTask, setWorkspaceTask] = React.useState<StockWorkspaceTask>('watchlist');
   const [loadingDashboard, setLoadingDashboard] = React.useState(true);
   const [refreshingDashboard, setRefreshingDashboard] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
@@ -623,7 +626,7 @@ export function StockTasksPage(): JSX.Element {
   }, [loadPageData, resetDiscoveryExtensions, toast, watchlistSaving]);
 
   const submitPrompt = React.useCallback(
-    async (value: string) => {
+    async (value: string, draft?: StockResearchDraft) => {
       const trimmed = value.trim();
       if (!trimmed || submitting) return;
       if (stockPromptUnavailable) {
@@ -635,7 +638,9 @@ export function StockTasksPage(): JSX.Element {
         return;
       }
       setSubmitting(true);
-      const result = await createStockTask(trimmed, stockTaskContext);
+      const fileIds = draft?.attachments.map(file => file.fileId) ?? [];
+      const intent = stockResearchIntent(trimmed, draft);
+      const result = fileIds.length ? await createStockTask(intent, stockTaskContext, fileIds) : draft?.changed ? await createStockTask(intent, stockTaskContext) : await createStockTask(trimmed, stockTaskContext);
       setSubmitting(false);
       if ('taskId' in result) {
         navigate(`/?task=${encodeURIComponent(result.taskId)}`);
@@ -673,6 +678,7 @@ export function StockTasksPage(): JSX.Element {
             <h1 className="text-[22px] font-semibold tracking-[-0.025em] text-[#3E3154]">
               股市任务
             </h1>
+            <p className="hd-stock-heading-description">关注变化，也看清变化的背景。</p>
             <span
               className={cn(
                 'inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-medium',
@@ -729,7 +735,19 @@ export function StockTasksPage(): JSX.Element {
           </div>
         ) : null}
 
+        <section className="hd-market-lead" aria-label="市场概览">
+          <div><span className="hd-page-eyebrow">{dashboardTrust.dataDateLabel} / {dashboardTrust.statusLabel}</span><h2>{dashboardTrust.tone === 'unverified' ? '等待行情，先看清来源。' : '关注变化，核对每一个信号。'}</h2><p>{dashboardTrust.refreshLabel}。{sampleWatchlist ? '当前为示例关注列表。' : '以关注列表中的有效报价汇总涨跌，结合新闻、公告与风险证据继续研究。'}</p><div className="hd-market-lead-actions"><button type="button" onClick={() => setWorkspaceTask('risk')}>查看风险证据</button><button type="button" onClick={() => setWorkspaceTask('briefing')}>阅读{temporalCopy.briefingTabLabel}</button></div></div>
+          <div className="hd-market-breadth"><div><strong>{stocks.some(stock => stock.price !== '—') ? stocks.filter(stock => stock.price !== '—' && stock.changePct > 0).length : '—'}</strong><span>关注股上涨</span></div><div><strong>{stocks.some(stock => stock.price !== '—') ? stocks.filter(stock => stock.price !== '—' && stock.changePct < 0).length : '—'}</strong><span>关注股回落</span></div><small>{sampleWatchlist ? '示例关注列表' : '仅统计已有报价的关注股'}</small></div>
+        </section>
+        {marketIndices.length > 0 && <section className="hd-market-index-strip" aria-label="市场指数">{marketIndices.map(index => <button key={index.name} type="button" onClick={() => setInsightSheet(marketInsight(marketIndices, dashboardTrust.tone))}><span>{index.name}</span><strong>{index.price}</strong><small data-up={index.changePct > 0}>{index.changePct > 0 ? '+' : ''}{index.changePct.toFixed(2)}%</small></button>)}</section>}
+
+
+        <div className="hd-stock-dock">
         <StockAiCommandComposer
+          approved
+          researchStocks={sampleWatchlist ? [] : stocks.map(stock=>({symbol:stock.symbol,name:stock.name}))}
+          dataDateLabel={dashboardTrust.dataDateLabel}
+          onManageWatchlist={() => setWatchlistSheetOpen(true)}
           value={prompt}
           placeholder={temporalCopy.promptPlaceholder}
           assistantStatus={temporalCopy.assistantStatus}
@@ -737,7 +755,7 @@ export function StockTasksPage(): JSX.Element {
           submitting={submitting}
           submitDisabled={submitting || !prompt.trim() || stockPromptUnavailable}
           onValueChange={setPrompt}
-          onSubmit={() => void submitPrompt(prompt)}
+          onSubmit={draft => void submitPrompt(prompt, draft)}
           onCommand={(command) => {
             setPrompt(command);
             if (command === temporalCopy.briefingCommand && dashboardTrust.tone === 'current') {
@@ -754,12 +772,13 @@ export function StockTasksPage(): JSX.Element {
           commandTitle={(command) =>
             command === temporalCopy.briefingCommand ? briefingUnavailableTitle : undefined}
         />
+        </div>
 
         {initialDashboardLoading ? (
           <InitialDashboardSkeleton />
         ) : (
           <div className="min-w-0 space-y-5">
-            <StockTaskWorkspaceLayout
+            <StockTaskWorkspaceLayout activeTask={workspaceTask} onTaskChange={setWorkspaceTask}
               briefingLabel={temporalCopy.briefingTabLabel}
               highlights={<MarketHighlights
                 stocks={stocks}

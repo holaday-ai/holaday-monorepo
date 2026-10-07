@@ -1,19 +1,7 @@
-import {
-  CalendarClock,
-  Download,
-  Globe2,
-  Languages,
-  ListChecks,
-  Menu,
-  Radio,
-  Search,
-  Sparkles,
-  TrendingUp,
-  X,
-} from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { FileText, Image, Menu, PencilLine } from 'lucide-react';
 import * as React from 'react';
 import { BrandWordmark } from '@/components/BrandLogo';
+import { AmbientGrid } from '@/components/AmbientGrid';
 import { InputArea } from '@/components/InputArea';
 import { LazyLoadBoundary } from '@/components/LazyLoadBoundary';
 import { RoleNudgeBanner } from '@/components/RoleNudgeBanner';
@@ -21,7 +9,6 @@ import { TaskToolbar, isBrowserLikely } from '@/components/TaskToolbar';
 import { Button } from '@/components/ui/button';
 import type { ComposerSubmitResult } from '@/components/composer-submit';
 import { shouldResetComposerOnSelectionChange } from '@/components/composer-reset';
-import { cn } from '@/lib/utils';
 import { taskDisplayIntent, taskDisplaySource } from '@/lib/task-display-copy';
 import { taskStatusLabel } from '@/lib/task-status-copy';
 import { useTaskStore } from '@/stores/task-store';
@@ -99,7 +86,6 @@ export function MainPanel({
   onSubmit,
   busy,
   onOpenSidebar,
-  greetingName,
   inputRef,
   replyMode,
   replyKind,
@@ -112,7 +98,6 @@ export function MainPanel({
   sidePanelMode = 'closed',
   browserAttentionNeeded = false,
   onToggleSidePanel,
-  browserPanelOpen = false,
 }: Props): JSX.Element {
   // Suggestion-chip clicks (empty-state EmptyState picks + the
   // "继续探索" chips inside TaskStream) prefill the composer instead
@@ -209,87 +194,37 @@ export function MainPanel({
         </div>
       </div>
       {showEmptyHome ? (
-        <div className="flex-1 overflow-y-auto">
-          <div
-            className={cn(
-              'hd-new-task-home mx-auto w-full max-w-[1180px]',
-              browserPanelOpen
-                ? 'px-6 pb-10 pt-16'
-                : 'px-6 pb-14 pt-[clamp(78px,10vh,92px)] sm:px-12 lg:px-14',
-            )}
-          >
-            <div className="mx-auto w-full max-w-[1040px]">
-              <h1 className="text-left text-[28px] font-semibold leading-tight tracking-tight text-foreground sm:text-[34px]">
-                Hello, <span className="text-[#FF0061]">{greetingName || '今天想做点什么'}</span>~
-              </h1>
-              <p className="mt-2 text-left text-[14px] font-medium text-[#8B93A6] sm:text-[16px]">
-                欢迎回来！ 今天又是高效的一天呢！ 🚀
-              </p>
-              <div
-                className={cn(
-                  'mx-auto w-full max-w-[870px]',
-                  !browserPanelOpen && 'sm:ml-[56px] sm:mr-0 sm:w-[calc(100%-112px)]',
-                )}
-              >
-                <div
-                  className={cn(
-                    'relative mx-auto overflow-visible',
-                    browserPanelOpen
-                      ? 'mt-3 h-[152px]'
-                      : 'mt-4 h-[clamp(180px,15vw,209px)]',
-                  )}
-                >
-                  <div className="absolute inset-x-0 top-0 h-full overflow-hidden">
-                    <img
-                      src="/design-ref/home-hero.png?v=20260701"
-                      alt=""
-                      aria-hidden="true"
-                      loading="eager"
-                      className="pointer-events-none absolute bottom-0 left-1/2 h-auto w-[min(1160px,calc(100%+300px))] max-w-none -translate-x-1/2 select-none"
-                    />
-                  </div>
-                  <div
-                    className={cn(
-                      'absolute left-0 z-40 w-[min(390px,calc(100%-2rem))]',
-                      browserPanelOpen ? 'bottom-2' : 'bottom-4',
-                    )}
-                  >
-                    <OnboardingHint />
-                  </div>
-                </div>
-                <div className="relative z-30 mx-auto mt-0">
-                  <InputArea
-                    key={composerKey}
-                    onSubmit={onSubmit}
-                    busy={busy}
-                    inputRef={inputRef}
-                    replyMode={replyMode}
-                    replyKind={replyKind}
-                    followUpTarget={followUpTarget}
-                    quotaExhausted={quotaExhausted}
-                    quotaPlan={userPlan}
-                    attachmentsAllowed={attachmentsAllowed}
-                    attachmentByteCap={attachmentByteCap}
-                    prefillIntent={prefillIntent}
-                    onPrefillConsumed={() => setPrefillIntent(null)}
-                    fullBleed
-                    compact
-                  />
-                </div>
-                <SuggestionChips
-                  compact={browserPanelOpen}
-                  onPick={handlePickFromEmptyState}
-                />
-              </div>
-              {userPlan ? (
-                <div className="mx-auto mt-8 max-w-[900px]">
-                  <RoleNudgeBanner
-                    plan={userPlan}
-                    selectedRoles={userSelectedRoles ?? null}
-                  />
-                </div>
-              ) : null}
-            </div>
+        <div className="hd-new-task-stage">
+          <AmbientGrid />
+          <div className="hd-new-task-home">
+            <header className="hd-start-intro">
+              <span className="hd-start-eyebrow">YOUR NEXT IDEA</span>
+              <h1>今天，想完成什么？</h1>
+              <p>从一个想法开始，也可以带上你的资料。</p>
+            </header>
+            <InputArea
+              key={composerKey}
+              onSubmit={onSubmit}
+              busy={busy}
+              inputRef={inputRef}
+              replyMode={replyMode}
+              replyKind={replyKind}
+              followUpTarget={followUpTarget}
+              quotaExhausted={quotaExhausted}
+              quotaPlan={userPlan}
+              attachmentsAllowed={attachmentsAllowed}
+              attachmentByteCap={attachmentByteCap}
+              prefillIntent={prefillIntent}
+              onPrefillConsumed={() => setPrefillIntent(null)}
+              fullBleed
+              compact
+              approved
+            />
+            <SuggestionChips onPick={handlePickFromEmptyState} />
+            <p className="hd-starter-note">也可以直接拖入文件</p>
+            {userPlan ? <div className="hd-start-account-note">
+              <RoleNudgeBanner plan={userPlan} selectedRoles={userSelectedRoles ?? null} />
+            </div> : null}
           </div>
         </div>
       ) : (
@@ -446,183 +381,15 @@ function StaticTaskDetailFallback({ task }: { task: UiTask }): JSX.Element {
  * product jobs users understand first: web execution, expert work,
  * and task management. Click fills the composer (does NOT submit).
  */
-function SuggestionChips({
-  compact = false,
-  onPick,
-}: {
-  compact?: boolean;
-  onPick(intent: string): void;
-}): JSX.Element {
-  const allItems = SUGGESTION_GROUPS.flatMap((group) => group.items);
-  const primaryItems = HOME_SUGGESTION_LABELS.map((label) =>
-    allItems.find((item) => item.label === label),
-  ).filter((item): item is SuggestionItem => Boolean(item));
-
-  return (
-    <div className={cn('mx-auto max-w-[900px]', compact ? 'mt-8' : 'mt-14')}>
-      <div className={cn('flex flex-wrap items-center justify-center', compact ? 'gap-2' : 'gap-3')}>
-        {primaryItems.map((s) => {
-          const Icon = s.icon;
-          const tone = suggestionTone(s.label);
-          return (
-            <button
-              key={s.label}
-              type="button"
-              onClick={() => onPick(s.intent)}
-              aria-label={`用示例填入：${s.label}`}
-              className={cn(
-                'group inline-flex h-9 items-center justify-center gap-2 rounded-[7px] border font-semibold shadow-[0_7px_16px_rgba(17,24,39,0.035)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20',
-                compact ? 'min-w-[104px] px-3 text-[12px]' : 'min-w-[118px] px-4 text-[13px]',
-                tone.button,
-              )}
-            >
-              <Icon className={cn('h-3.5 w-3.5 transition-colors', tone.icon)} />
-              {s.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
+function SuggestionChips({ onPick }: { onPick(intent: string): void }): JSX.Element {
+  const items = [
+    { label: '整理资料', icon: FileText, intent: '帮我整理这些资料，提炼要点：' },
+    { label: '写点内容', icon: PencilLine, intent: '帮我写一段内容：' },
+    { label: '做张图片', icon: Image, intent: '帮我做一张图片：' },
+  ];
+  return <div className="hd-starter-row">{items.map(({ label, icon: Icon, intent }) => (
+    <button key={label} type="button" className="hd-starter" onClick={() => onPick(intent)} aria-label={`用示例填入：${label}`}>
+      <Icon aria-hidden="true" />{label}
+    </button>
+  ))}</div>;
 }
-
-/**
- * Chip seeds covering the common entry points. Label is the
- * short tap target; intent is the prefill text that lands in the
- * composer (user can edit before submitting).
- */
-/**
- * First-time-user hint above the composer. It belongs to the empty
- * home surface, so it should not disappear just because the sidebar
- * finishes loading historical tasks. ✕ closes for good
- * (localStorage).
- */
-const ONBOARDING_DISMISSED_KEY = 'holaday.onboarding.first-task.dismissed';
-
-function OnboardingHint(): JSX.Element | null {
-  const [dismissed, setDismissed] = React.useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    try {
-      return window.localStorage.getItem(ONBOARDING_DISMISSED_KEY) === '1';
-    } catch {
-      return false;
-    }
-  });
-
-  if (dismissed) return null;
-
-  return (
-    <div className="flex items-center gap-2 rounded-[12px] border border-[#FF0061]/25 bg-[#FFF7FA] px-3 py-1.5 text-[11px] text-[#595757] shadow-[0_6px_16px_rgba(255,0,97,0.12)] dark:border-[#FF0061]/35 dark:bg-card dark:text-foreground/75">
-      <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[7px] text-[#FF0061]">
-        <Sparkles className="h-3.5 w-3.5" />
-      </span>
-      <div className="min-w-0 flex-1 leading-4 sm:truncate">
-        第一次来？点击下方的任务示例，或直接输入你想做的事情。
-      </div>
-      <button
-        type="button"
-        onClick={() => {
-          try {
-            window.localStorage.setItem(ONBOARDING_DISMISSED_KEY, '1');
-          } catch {
-            /* localStorage disabled — still hide for this session */
-          }
-          setDismissed(true);
-        }}
-        className="-mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] text-[#595757]/70 transition-colors hover:bg-white/70 hover:text-[#595757] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:hover:bg-white/10 dark:hover:text-foreground"
-        aria-label="关闭引导"
-        title="关闭"
-      >
-        <X className="h-3 w-3" />
-      </button>
-    </div>
-  );
-}
-
-type SuggestionItem = {
-  label: string;
-  intent: string;
-  icon: LucideIcon;
-};
-
-const HOME_SUGGESTION_LABELS = [
-  '直播复盘',
-  '查资料',
-  '打开网页',
-  '行情查询',
-  '下载文件',
-  '定时任务',
-] as const;
-
-function suggestionTone(label: string): { button: string; icon: string } {
-  switch (label) {
-    case '直播复盘':
-    case '定时任务':
-      return {
-        button: 'border-[#FF0061]/[0.16] bg-[#FF0061]/[0.09] text-[#FF0061] hover:border-[#FF0061]/[0.28] hover:bg-[#FF0061]/[0.13]',
-        icon: 'text-[#FF0061]',
-      };
-    case '查资料':
-    case '行情查询':
-      return {
-        button: 'border-[#FFC910]/[0.22] bg-[#FFC910]/[0.12] text-[#7A5A00] hover:border-[#FFC910]/35 hover:bg-[#FFC910]/[0.18]',
-        icon: 'text-[#D29A00]',
-      };
-    case '打开网页':
-      return {
-        button: 'border-[#42C0EF]/20 bg-[#42C0EF]/[0.12] text-[#0F6F8D] hover:border-[#42C0EF]/35 hover:bg-[#42C0EF]/[0.18]',
-        icon: 'text-[#0F96BE]',
-      };
-    case '下载文件':
-      return {
-        button: 'border-[#57479C]/[0.18] bg-[#57479C]/10 text-[#57479C] hover:border-[#57479C]/30 hover:bg-[#57479C]/[0.14]',
-        icon: 'text-[#57479C]',
-      };
-    default:
-      return {
-        button: 'border-[#DCDDDD]/75 bg-white/70 text-[#595757] hover:border-[#FF0061]/25 hover:bg-[#FF0061]/5 hover:text-[#FF0061]',
-        icon: 'text-[#ADADAD] group-hover:text-[#FF0061]',
-      };
-  }
-}
-
-const SUGGESTION_GROUPS: ReadonlyArray<{
-  title: string;
-  items: readonly SuggestionItem[];
-}> = [
-  {
-    title: '网页执行',
-    items: [
-      { label: '查资料', intent: '帮我查一下今天的科技新闻', icon: Search },
-      { label: '打开网页', intent: '打开 GitHub 看看 trending 项目', icon: Globe2 },
-      { label: '下载文件', intent: '把这页内容保存成 PDF：', icon: Download },
-    ],
-  },
-  {
-    title: '专业任务',
-    items: [
-      {
-        label: '直播复盘',
-        intent: '帮我复盘昨天的抖音直播数据，做总结和优化策略',
-        icon: Radio,
-      },
-      { label: '行情查询', intent: '去东方财富查一下茅台最新股价', icon: TrendingUp },
-      { label: '翻译内容', intent: '帮我翻译这段内容：', icon: Languages },
-    ],
-  },
-  {
-    title: '任务管理',
-    items: [
-      {
-        label: '定时任务',
-        intent: '每天早上 9 点跑一次昨天的电商日报',
-        icon: CalendarClock,
-      },
-      {
-        label: '批量执行',
-        intent: '帮我对这些链接逐个执行抓取：\n',
-        icon: ListChecks,
-      },
-    ],
-  },
-];
