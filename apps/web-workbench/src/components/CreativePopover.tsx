@@ -1,3 +1,4 @@
+import { OverlayNestingContext, useExclusiveOverlay } from '@/lib/top-level-overlay';
 import * as Dialog from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { useLayoutEffect, useState, type ReactNode, type RefObject } from 'react';
@@ -18,6 +19,7 @@ export function CreativePopover({
   children: ReactNode;
   theme?: 'light' | 'dark';
 }) {
+  const changeOpen = useExclusiveOverlay(open, onOpenChange);
   const [position, setPosition] = useState({ left: 20, top: 80 });
   useLayoutEffect(() => {
     if (!open) return;
@@ -38,12 +40,13 @@ export function CreativePopover({
     };
   }, [open, anchorRef]);
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange} modal={false}>
+    <OverlayNestingContext.Provider value={true}><Dialog.Root open={open} onOpenChange={changeOpen} modal={false}>
       <Dialog.Portal>
         <Dialog.Content
           className={`hd-creative-popover${theme === 'light' ? ' hd-light-popover' : ''}`}
           style={position}
           aria-describedby={undefined}
+          onInteractOutside={event => { if (anchorRef.current?.contains(event.target as Node)) event.preventDefault(); }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             anchorRef.current?.focus();
@@ -60,6 +63,6 @@ export function CreativePopover({
           <div className="hd-creative-popover-body">{children}</div>
         </Dialog.Content>
       </Dialog.Portal>
-    </Dialog.Root>
+    </Dialog.Root></OverlayNestingContext.Provider>
   );
 }

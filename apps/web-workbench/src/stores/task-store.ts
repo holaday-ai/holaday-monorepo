@@ -217,7 +217,7 @@ export interface TaskStore {
    * pages. The store appends to `tasks` and stops setting
    * `tasksHasMore` once the server returns null.
    */
-  loadMoreTasks(): Promise<void>;
+  loadMoreTasks(visibleIds?: (tasks: UiTask[]) => ReadonlySet<string>): Promise<void>;
   /** Cursor for the NEXT page (server returns this as nextCursor). */
   tasksCursor: number | null;
   /** False once the server reports no more pages. */
@@ -1162,38 +1162,41 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     await get().refreshTaskList();
   },
 
-  async loadMoreTasks() {
+  async loadMoreTasks(visibleIds) {
     const generation = captureSessionGeneration();
     const versions = captureListVersions();
     const { tasksCursor, tasksHasMore, loadingMore } = get();
-    if (loadingMore) return;
-    if (!tasksHasMore || tasksCursor == null) return;
-    set({ loadingMore: true });
+    if (loadingMore || !tasksHasMore || tasksCursor == null) return;
+    const before = visibleIds?.(get().tasks);
+    const seenCursors = new Set<number>();
+    let cursor: number | null = tasksCursor;
+    set({ loadingMore: true, error: null });
     try {
-      const res = await trpc.tasks.list.query({ limit: 50, cursor: tasksCursor });
-      if (!isCurrentSession(generation)) return;
-      const moreTasks = preserveObservedListRows(normalizeTaskListRows(res?.tasks), versions);
-      set((prev) => {
-        // De-dupe defensively in case a row landed on both pages
-        // (e.g. a task whose id equals the cursor boundary). The
-        // freshly-fetched row replaces the stale copy in place so
-        // status/result updates land without the sidebar jumping.
-        const merged = mergeTaskPagesReplacingDuplicates(prev.tasks, moreTasks);
-        const roundPatch = adoptListRounds(prev, merged);
-        const current = { ...prev, ...roundPatch };
-        return {
-          ...roundPatch,
-          tasks: merged,
-          loadingMore: false,
-          tasksCursor: normalizeTaskListCursor(res?.nextCursor),
-          tasksHasMore: normalizeTaskListCursor(res?.nextCursor) != null,
-          ...pruneRuntimeStateForAwaitingUserTasks(current, merged),
-          ...pruneRuntimeStateForTerminalTasks(current, merged),
-        };
-      });
+      while (cursor !== null) {
+        seenCursors.add(cursor);
+        const res = await trpc.tasks.list.query({ limit: 50, cursor });
+        if (!isCurrentSession(generation)) return;
+        const moreTasks = preserveObservedListRows(normalizeTaskListRows(res?.tasks), versions);
+        const nextCursor = normalizeTaskListCursor(res?.nextCursor);
+        if (nextCursor !== null && seenCursors.has(nextCursor)) throw new Error('任务分页游标未推进，请稍后重试');
+        set((prev) => {
+          const merged = mergeTaskPagesReplacingDuplicates(prev.tasks, moreTasks);
+          const roundPatch = adoptListRounds(prev, merged);
+          const current = { ...prev, ...roundPatch };
+          return {
+            ...roundPatch, tasks: merged,
+            tasksCursor: nextCursor, tasksHasMore: nextCursor !== null,
+            ...pruneRuntimeStateForAwaitingUserTasks(current, merged),
+            ...pruneRuntimeStateForTerminalTasks(current, merged),
+          };
+        });
+        if (!before || !visibleIds || [...visibleIds(get().tasks)].some(id => !before.has(id))) break;
+        cursor = nextCursor;
+      }
     } catch (err) {
-      if (!isCurrentSession(generation)) return;
-      set({ loadingMore: false, error: taskStoreError(err) });
+      if (isCurrentSession(generation)) set({ error: taskStoreError(err) });
+    } finally {
+      if (isCurrentSession(generation)) set({ loadingMore: false });
     }
   },
 

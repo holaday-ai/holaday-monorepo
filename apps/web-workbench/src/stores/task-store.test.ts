@@ -1706,6 +1706,35 @@ describe('selectTask detail hydration', () => {
 });
 
 describe('loadMoreTasks', () => {
+  it('skips fully hidden pages until a new visible task arrives while holding one loading lock', async () => {
+    useTaskStore.setState({ tasks: [task({ taskId: 'visible_first' })], tasksCursor: 51, tasksHasMore: true });
+    listQuery.mockResolvedValueOnce({ tasks: [taskRow({ taskId: 'hidden_old' })], nextCursor: 101 } as never);
+    listQuery.mockImplementationOnce(async () => {
+      expect(useTaskStore.getState().loadingMore).toBe(true);
+      await useTaskStore.getState().loadMoreTasks();
+      return { tasks: [taskRow({ taskId: 'visible_next' })], nextCursor: 151 } as never;
+    });
+    await useTaskStore.getState().loadMoreTasks(rows => new Set(rows.filter(row => row.taskId.startsWith('visible')).map(row => row.taskId)));
+    expect(useTaskStore.getState().tasks.map(row => row.taskId)).toEqual(['visible_first', 'hidden_old', 'visible_next']);
+    expect(useTaskStore.getState().tasksCursor).toBe(151);
+    expect(useTaskStore.getState().loadingMore).toBe(false);
+    expect(listQuery).toHaveBeenCalledTimes(2);
+  });
+  it('exhausts hidden pages and terminates a repeated cursor without spinning', async () => {
+    useTaskStore.setState({ tasks: [], tasksCursor: 51, tasksHasMore: true });
+    listQuery.mockResolvedValueOnce({ tasks: [taskRow({ taskId: 'hidden_1' })], nextCursor: 101 } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [taskRow({ taskId: 'hidden_2' })], nextCursor: null } as never);
+    await useTaskStore.getState().loadMoreTasks(() => new Set());
+    expect(useTaskStore.getState().tasks).toHaveLength(2);
+    expect(useTaskStore.getState().tasksHasMore).toBe(false);
+    listQuery.mockReset().mockResolvedValue({ tasks: [], nextCursor: 51 } as never);
+    useTaskStore.setState({ tasksCursor: 51, tasksHasMore: true });
+    await useTaskStore.getState().loadMoreTasks(() => new Set());
+    expect(listQuery).toHaveBeenCalledTimes(1);
+    expect(useTaskStore.getState().error).toBeTruthy();
+    expect(useTaskStore.getState().loadingMore).toBe(false);
+  });
+
   it('does not let a rejected old page clear the current execution runtime', async () => {
     useTaskStore.setState({ tasks: [task({ taskId: 'tsk_page', status: 'executing', executionId: 'new', executionRevision: 2 })], tasksCursor: 51, tasksHasMore: true,
       streamingByTask: { tsk_page: '新输出' }, progressByTask: { tsk_page: '新进度' } });

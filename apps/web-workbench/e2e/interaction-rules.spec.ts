@@ -24,6 +24,7 @@ test('source-reviewed empty forms, breadcrumbs, back state and confirmation canc
   const receipt = { viewport: info.project.name, started: new Date().toISOString(), finished: '', findings: [] as Issue[], checks: [] as { page: string; rule: string; status: string }[], blocks: [] as string[], dynamicRoutes: {} as Record<string, string> };
   const context = await browser.newContext({ ...info.project.use, storageState: { cookies: [], origins: [{ origin, localStorage: authed.localStorage.filter(entry => entry.name === 'holaday.access_token') }] }, serviceWorkers: 'block' });
   await registerReadOnlyGuard(context, origin, reads, entry => receipt.blocks.push(entry));
+  context.setDefaultTimeout(8_000); context.setDefaultNavigationTimeout(30_000);
   const page = await context.newPage();
   trackAuditReads(page);
   const click = async (element: Locator) => { if (info.project.name === 'iphone-14') await element.tap(); else await element.click(); };
@@ -72,12 +73,13 @@ test('source-reviewed empty forms, breadcrumbs, back state and confirmation canc
       }
       await click(navigation);
       await page.waitForTimeout(250); await page.goBack({ waitUntil: 'domcontentloaded' });
+      await page.keyboard.press('Escape');
       await input.waitFor({ state: 'visible', timeout: 10_000 });
       if (await input.inputValue() !== '__holaday_audit_no_match__') await issue(page, label, '恢复跳转前的搜索输入和筛选状态', '浏览器后退后搜索内容丢失', 'P1', '输入临时搜索词，点击另一侧栏页面，再浏览器后退');
     });
     await probe('/video', '空必填项反馈（自由创作/动作复刻）', async () => {
       await open('/video');
-      const text = page.locator('textarea').first(); await text.fill('');
+      const text = page.getByRole('textbox', { name: '告诉 HOLA DAY 你的重点', exact: true }); await text.fill('');
       const before = receipt.blocks.filter(item => item.startsWith('POST')).length;
       await click(page.getByRole('button', { name: '准备生成', exact: true }));
       const feedback = page.getByText('请先描述想生成的视频内容', { exact: true });

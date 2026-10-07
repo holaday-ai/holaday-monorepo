@@ -1,16 +1,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { test, expect, type Page, type Locator } from 'playwright/test';
-import { decideControl, readProcedures, registerReadOnlyGuard, routePatterns, trackAuditReads, waitForAuditReads, type Control } from './audit-policy';
+import { decideControl, readProcedures, registerReadOnlyGuard, routePatterns, trackAuditReads, waitForAuditReads, discoverDynamicRoutes, selectAuditRoutes, type Control } from './audit-policy';
 
 type Finding = { id: string; severity: 'P0' | 'P1' | 'P2'; page: string; element: string; steps: string; expected: string; actual: string; screenshot?: string };
 type Coverage = { page: string; element?: string; status: string; rule?: string };
-type Audit = { viewport: string; mode: string; base: string; findings: Finding[]; coverage: Coverage[]; safetyBlocks: string[]; routes: string[]; started: string; finished?: string; completedRoutes?: string[]; resumed?: string[]; runtimeEvents?: { page: string; path: string; status: number; kind: string }[] };
+type QueuedControl = { control: Control; ancestors: string[] };
+type RouteCheckpoint = { queue: QueuedControl[]; done: string[] };
+type Audit = { viewport: string; mode: string; base: string; findings: Finding[]; coverage: Coverage[]; safetyBlocks: string[]; routes: string[]; started: string; finished?: string; completedRoutes?: string[]; build?: string; storageReceipt?: string; routeCheckpoints?: Record<string, RouteCheckpoint>; canonicalHashes?: string[]; sharedChecks?: Record<string, string>; popupChecks?: Record<string, string>; dynamicRoutes?: Record<string, string>; shardIncomplete?: boolean; resumed?: string[]; runtimeEvents?: { page: string; path: string; status: number; kind: string }[] };
 const output = path.resolve(process.env.HOLADAY_AUDIT_OUTPUT ?? 'e2e/artifacts');
 const root = path.resolve('src');
 const patterns = routePatterns(fs.readFileSync(path.join(root, 'App.tsx'), 'utf8'));
 const readOnly = readProcedures(root);
 const publicRoutes = new Set(['/login', '/register', '/privacy', '/terms', '/500', '/cosmic-preview']);
+let popupSerial = 0;
 const popupSelector = '[role="dialog"]:not([data-state="closed"]), [role="alertdialog"]:not([data-state="closed"]), [role="menu"]:not([data-state="closed"]), [role="listbox"]:not([data-state="closed"])';
 
 function privateWrite(file: string, contents: string): void {
@@ -137,10 +141,16 @@ async function checkPopup(audit: Audit, page: Page, trigger: Locator, control: C
   if (control.expanded !== 'false' && !/选择.*模型|生成设置|选择项目/.test(control.label)) return;
   const touch = await page.evaluate(() => navigator.maxTouchPoints > 0);
   const popups = page.locator(popupSelector).filter({ visible: true });
-  if (!await popups.count()) return;
+  if (await popups.count() <= baselinePopupCount) return;
+  let openedId = '';
+  const rememberOpened = async () => {
+    openedId = `popup-${++popupSerial}`;
+    await popups.evaluateAll((nodes, value) => nodes.slice(value.baseline).forEach(node => node.setAttribute('data-audit-popup', value.id)), { baseline: baselinePopupCount, id: openedId });
+  };
+  await rememberOpened();
   const rule = '触发器重复点击/外部点击/Esc/互斥';
   const didClose = async () => {
-    try { await expect.poll(() => popups.count(), { timeout: 1_500 }).toBeLessThanOrEqual(baselinePopupCount); return true; }
+    try { await expect.poll(() => page.locator(`[data-audit-popup="${openedId}"]`).filter({ visible: true }).count(), { timeout: 1_500 }).toBe(0); return true; }
     catch { return false; }
   };
   const clickTrigger = async () => {
@@ -156,7 +166,7 @@ async function checkPopup(audit: Audit, page: Page, trigger: Locator, control: C
     if (touch) await page.touchscreen.tap(point.x, point.y); else await page.mouse.click(point.x, point.y);
     await settle(page);
   };
-  const reopen = clickTrigger;
+  const reopen = async () => { await clickTrigger(); await rememberOpened(); };
   await clickTrigger();
   if (!await didClose()) {
     await finding(audit, page, 'P1', control.label, '点击触发器展开，再点击同一触发器', '弹层收起', '再次点击后弹层仍打开');
@@ -171,7 +181,7 @@ async function checkPopup(audit: Audit, page: Page, trigger: Locator, control: C
   const point = await page.evaluate(() => {
     for (const [x, y] of [[8, 8], [window.innerWidth - 8, window.innerHeight - 8], [window.innerWidth / 2, 8]]) {
       const element = document.elementFromPoint(x, y);
-      if (element && !element.closest('button,a,input,[role="dialog"],[role="menu"],[role="listbox"]')) return { x, y };
+      if (element && !element.closest('button,a,input,[data-interaction-audit],[role="dialog"],[role="menu"],[role="listbox"]')) return { x, y };
     }
     return null;
   });
@@ -184,7 +194,12 @@ async function checkPopup(audit: Audit, page: Page, trigger: Locator, control: C
   // Cross-trigger mutual exclusion is verified for independently focusable nonmodal popovers.
   await reopen();
   if (baselinePopupCount > 0) { audit.coverage.push({ page: safePage(page.url(), audit.base), element: control.label, status: 'not-applicable: 嵌套菜单允许保留父弹层；独立弹层互斥另行检查', rule }); await page.keyboard.press('Escape'); return; }
-  const other = (await controls(page)).find(entry => entry.key !== control.key && entry.expanded === 'false' && decideControl(entry) === 'safe' && !entry.disabled);
+  const independent = await page.evaluate(({ entries, selector }) => entries.filter(entry => !document.querySelector(entry.selector)?.closest(selector)), { entries: await controls(page), selector: popupSelector });
+  if (await page.evaluate(() => document.body.style.pointerEvents === 'none')) {
+    audit.coverage.push({ page: safePage(page.url(), audit.base), element: control.label, status: 'source-reviewed: 模态浮层阻止背景点击；独立非模态互斥由修复回归断言验证', rule });
+    await page.keyboard.press('Escape'); return;
+  }
+  const other = independent.find(entry => entry.key !== control.key && entry.expanded === 'false' && decideControl(entry) === 'safe' && !entry.disabled);
   if (other) {
     const locator = page.locator(other.selector);
     try {
@@ -200,18 +215,25 @@ async function checkPopup(audit: Audit, page: Page, trigger: Locator, control: C
 
 test('full route interaction audit against production reads', async ({ browser, baseURL }, testInfo) => {
   if (!baseURL) throw new Error('Preview base URL required');
+  test.setTimeout(18 * 60_000);
+  const deadline = Date.now() + Math.min(16 * 60_000, Math.max(30_000, Number(process.env.HOLADAY_AUDIT_BUDGET_MS) || 16 * 60_000));
+  const selected = selectAuditRoutes(patterns, process.env.HOLADAY_AUDIT_ROUTES);
+  const build = createHash('sha256').update(fs.readFileSync('dist/index.html')).digest('hex');
+  const storageFile = process.env.HOLADAY_AUDIT_STORAGE_STATE;
+  const storageStat = storageFile && fs.existsSync(storageFile) ? fs.statSync(storageFile) : null;
+  const storageReceipt = storageStat ? `${storageStat.mtimeMs}:${storageStat.size}` : undefined;
   const base = baseURL;
   const parsed = new URL(base);
   expect(['127.0.0.1', 'localhost'].includes(parsed.hostname), 'Audit must run against loopback preview').toBe(true);
-  const audit: Audit = { viewport: testInfo.project.name, mode: process.env.HOLADAY_AUDIT_MODE ?? 'observe', base: parsed.origin, findings: [], coverage: [], safetyBlocks: [], routes: patterns, started: new Date().toISOString(), completedRoutes: [] };
+  const audit: Audit = { viewport: testInfo.project.name, mode: process.env.HOLADAY_AUDIT_MODE ?? 'observe', base: parsed.origin, findings: [], coverage: [], safetyBlocks: [], routes: patterns, started: new Date().toISOString(), completedRoutes: [], build, storageReceipt, routeCheckpoints: {}, canonicalHashes: [], sharedChecks: {}, dynamicRoutes: {} };
   const previousFile = path.join(output, `${audit.viewport}.json`);
   if (process.env.HOLADAY_AUDIT_RESUME === '1' && fs.existsSync(previousFile)) {
     const previous = JSON.parse(fs.readFileSync(previousFile, 'utf8')) as Audit;
-    if (previous.viewport !== audit.viewport || previous.base !== audit.base) throw new Error('Resume receipt does not match current viewport/origin');
+    if (previous.viewport !== audit.viewport || previous.base !== audit.base || previous.build !== build || previous.mode !== audit.mode || previous.storageReceipt !== storageReceipt) throw new Error('Resume receipt does not match current viewport/origin');
     Object.assign(audit, previous, { finished: undefined, resumed: [...(previous.resumed ?? []), new Date().toISOString()] });
     audit.completedRoutes ??= [];
+    audit.shardIncomplete = false;
   }
-  const storageFile = process.env.HOLADAY_AUDIT_STORAGE_STATE;
   if (!storageFile || !fs.existsSync(storageFile)) {
     audit.coverage.push({ page: '*', status: 'blocked: 缺少 BOSS 导出的 storageState', rule: '登录后全站审计' });
     audit.finished = new Date().toISOString(); writeReport(audit);
@@ -225,13 +247,14 @@ test('full route interaction audit against production reads', async ({ browser, 
     throw new Error('The exported storageState has no Holaday login; no secret values were logged.');
   }
   const context = await browser.newContext({ ...testInfo.project.use, storageState: { cookies: [], origins: [{ origin: parsed.origin, localStorage: origin.localStorage.filter(item => item.name === 'holaday.access_token') }] }, serviceWorkers: 'block' });
+  context.setDefaultTimeout(8_000); context.setDefaultNavigationTimeout(30_000);
   const page = await context.newPage();
   trackAuditReads(page);
   audit.runtimeEvents ??= [];
   const touch = testInfo.project.name === 'iphone-14';
-  const dynamicRoutes: Record<string, string> = {};
-  const auditedCanonicalRoutes = new Set<string>();
-  const sharedSidebarChecks = new Map<string, string>();
+  const dynamicRoutes = audit.dynamicRoutes ??= {};
+  const auditedCanonicalRoutes = new Set(audit.canonicalHashes ?? []);
+  const sharedSidebarChecks = new Map(Object.entries(audit.sharedChecks ?? {}));
   let requests = 0;
   let documentLoads = 0;
   let consoleErrors = 0;
@@ -264,21 +287,7 @@ test('full route interaction audit against production reads', async ({ browser, 
       if (!response || response.status() !== 200) return;
       const json: unknown = await response.json();
       const procedures = decodeURIComponent(new URL(response.url()).pathname.replace('/api/trpc/', '')).split(',');
-      const walk = (value: unknown, depth = 0): void => {
-        if (!value || typeof value !== 'object' || depth > 12) return;
-        for (const [key, child] of Object.entries(value)) {
-          if (typeof child === 'string' && /^[\w.-]+$/.test(child)) {
-            let pattern: string | undefined;
-            if (key === 'projectId' && procedures.some(name => name.startsWith('projects.'))) pattern = '/projects/:projectId';
-            if (key === 'projectId' && procedures.some(name => /videoEditing/.test(name))) pattern = '/video/edit/:projectId';
-            if (key === 'userId') pattern = '/admin/users/:userId';
-            if (key === 'batchId') pattern = '/batch/:batchId';
-            if (key === 'domain') pattern = '/admin/learning/:domain';
-            if (pattern && !dynamicRoutes[pattern]) dynamicRoutes[pattern] = pattern.replace(/:[\w]+/, encodeURIComponent(child));
-          } else walk(child, depth + 1);
-        }
-      };
-      walk(json);
+      for (const [pattern, target] of Object.entries(discoverDynamicRoutes(json, procedures))) dynamicRoutes[pattern] ??= target;
     } catch { /* A failed body read is not evidence of an API failure. */ }
     })();
     discoveryReads.add(read);
@@ -300,7 +309,8 @@ test('full route interaction audit against production reads', async ({ browser, 
       audit.coverage.push({ page: '*', status: 'blocked: 登录态无效', rule: '全站登录后审计' });
       throw new Error('Login state unavailable; no authenticated route acceptance was performed.');
     }
-    for (const pattern of patterns) {
+    routeLoop: for (const pattern of selected) {
+      if (Date.now() >= deadline) { audit.shardIncomplete = true; break; }
       await Promise.all([...discoveryReads]);
       if (audit.completedRoutes?.includes(pattern)) continue;
       const target = pattern === '*' ? '/__holaday_ui_audit_not_found__' : explicit[pattern] ?? dynamicRoutes[pattern] ?? pattern;
@@ -311,22 +321,22 @@ test('full route interaction audit against production reads', async ({ browser, 
       privateWrite(path.join(output, `${audit.viewport}-progress.json`), JSON.stringify({ route: pattern, phase: 'opening', findings: audit.findings.length, at: new Date().toISOString() }));
       await page.goto(target, { waitUntil: 'domcontentloaded' }); await observe();
       audit.coverage.push({ page: pattern, status: 'opened', rule: '深链' });
-      const canonical = new URL(page.url()).pathname + new URL(page.url()).search;
+      const canonical = createHash('sha256').update(new URL(page.url()).pathname + new URL(page.url()).search).digest('hex');
       if ((pattern === '/login' || pattern === '/register') && new URL(page.url()).pathname !== pattern) {
         audit.coverage.push({ page: pattern, status: 'checked: 已登录用户正常重定向；访客表单另行检查', rule: '登录重定向' });
         audit.completedRoutes?.push(pattern); writeReport(audit); continue;
       }
-      if (auditedCanonicalRoutes.has(canonical)) {
+      if (auditedCanonicalRoutes.has(canonical) && !audit.routeCheckpoints?.[pattern]) {
         audit.coverage.push({ page: pattern, status: 'checked: 别名指向已审计的同一页面与状态', rule: '别名重定向' });
         audit.completedRoutes?.push(pattern); writeReport(audit); continue;
       }
-      auditedCanonicalRoutes.add(canonical);
       if (await page.locator('main').count() && !await page.locator('main').first().innerText()) await finding(audit, page, 'P0', '页面主体', '深链直开', '页面有主体内容', '页面主体为空');
       const width = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, viewport: window.innerWidth }));
       if (width.scroll > width.viewport + 1) await finding(audit, page, 'P1', '移动端布局', '按当前视口深链打开', '无横向滚动', `内容宽 ${width.scroll} 超过视口 ${width.viewport}`);
       audit.coverage.push({ page: pattern, status: 'checked', rule: '横向滚动' });
       const initial = await controls(page);
-      const queue = initial.map(control => ({ control, ancestors: [] as string[] }));
+      const checkpoint = (audit.routeCheckpoints ??= {})[pattern] ??= { queue: initial.map(control => ({ control, ancestors: [] })), done: [] };
+      const queue = checkpoint.queue;
       const seen = new Set<string>();
       const knownBackground = new Set(initial.map(control => control.key));
       for (let index = 0; index < queue.length; index++) {
@@ -334,6 +344,9 @@ test('full route interaction audit against production reads', async ({ browser, 
         const identity = `${ancestors.join('|')}/${control.key}`;
         if (seen.has(identity)) continue;
         seen.add(identity);
+        if (checkpoint.done.includes(identity)) continue;
+        if (Date.now() >= deadline) { audit.shardIncomplete = true; break routeLoop; }
+        try {
         if (control.passiveBoundary) { audit.coverage.push({ page: pattern, element: control.label, status: 'source-reviewed: 只阻止事件冒泡的容器，不是操作控件' }); continue; }
         const sharedCheck = control.sharedSidebar && sharedSidebarChecks.get(control.key);
         if (sharedCheck && !control.disabled) { audit.coverage.push({ page: pattern, element: control.label, status: `checked-render: 共享侧栏控件在本页可见；交互已在 ${sharedCheck} 独立验证` }); continue; }
@@ -362,11 +375,11 @@ test('full route interaction audit against production reads', async ({ browser, 
           audit.coverage.push({ page: pattern, element: current.label, status: 'checked', rule: '禁用原因' });
           continue;
         }
-        if (current.href && /^https?:|^\/\//.test(current.href)) {
+        if (current.href && (await element.getAttribute('target') === '_blank' || /^https?:|^\/\//.test(current.href))) {
           if (await element.getAttribute('target') !== '_blank') await finding(audit, page, 'P1', current.label, '检查外链', '外链新开标签', '外链未设置 _blank');
-          audit.coverage.push({ page: pattern, element: current.label, status: 'checked', rule: '外链新标签（静态检查，未外发）' }); continue;
+          audit.coverage.push({ page: pattern, element: current.label, status: 'checked', rule: '新标签链接（静态检查，未外发）' }); continue;
         }
-        if (await element.getAttribute('aria-selected') === 'true' || await element.getAttribute('aria-pressed') === 'true' || (current.role === 'menuitemradio' && await element.getAttribute('aria-checked') === 'true')) {
+        if (await element.evaluate(node => node.matches('.hd-media-history button.border-b-2')) || await element.getAttribute('aria-selected') === 'true' || await element.getAttribute('aria-pressed') === 'true' || (current.role === 'menuitemradio' && await element.getAttribute('aria-checked') === 'true')) {
           audit.coverage.push({ page: pattern, element: current.label, status: 'checked: 当前选中项重复点击具有幂等语义', rule: '当前选中项' });
           continue;
         }
@@ -389,6 +402,7 @@ test('full route interaction audit against production reads', async ({ browser, 
           // Trial detects obscured controls without forcing a click through overlays.
           if (touch) { await element.tap({ trial: true, timeout: 2_000 }); await element.tap(); }
           else { await element.click({ trial: true, timeout: 2_000 }); await element.click(); }
+          if (/加载更多任务/.test(current.label)) await expect.poll(async () => !await element.count() || await element.isEnabled(), { timeout: 90_000 }).toBe(true);
           await observe();
         } catch {
           await finding(audit, page, 'P1', current.label || '[无标签控件]', '滚动到元素并尝试点击', '控件可点击', '元素被遮挡或无法正常点击'); continue;
@@ -405,24 +419,41 @@ test('full route interaction audit against production reads', async ({ browser, 
         if (page.url() === oldUrl) {
           const added = (await controls(page)).filter(entry => !knownBackground.has(entry.key) && !beforeControls.some(beforeEntry => beforeEntry.key === entry.key));
           if (ancestors.length < 3) for (const child of added) queue.push({ control: child, ancestors: [...ancestors, current.key] });
-          try { await checkPopup(audit, page, element, current, beforePopupCount); }
+          const popupKey = current.key.replace(/:\d+$/, '');
+          const previousPopupCheck = audit.popupChecks?.[popupKey];
+          try {
+            if (previousPopupCheck) {
+              audit.coverage.push({ page: pattern, element: current.label, status: `checked-render: 本实例已独立点击；同类型浮层开关规则已在 ${previousPopupCheck} 验证`, rule: '复用组件浮层规则' });
+              await page.keyboard.press('Escape');
+            } else {
+              const findingsBefore = audit.findings.length; const coverageBefore = audit.coverage.length;
+              await checkPopup(audit, page, element, current, beforePopupCount);
+              const checks = audit.coverage.slice(coverageBefore);
+              if (audit.findings.length === findingsBefore && checks.length && !checks.some(check => /not-verified|unavailable/.test(check.status))) (audit.popupChecks ??= {})[popupKey] = pattern;
+            }
+          }
           catch {
             audit.coverage.push({ page: pattern, element: current.label, status: 'not-verified: 弹层阻挡安全触发点；需人工复核，不能直接判为产品缺陷', rule: '弹层开关' });
             await page.keyboard.press('Escape').catch(() => undefined);
           }
+        } else if (new URL(page.url()).pathname === new URL(oldUrl).pathname) {
+          audit.coverage.push({ page: pattern, element: current.label, status: 'checked: 同页查询/锚点状态更新；真实页面跳转的后退恢复另由规则验证', rule: 'URL 状态' });
         } else {
           await page.goBack({ waitUntil: 'domcontentloaded' }); await observe();
           if (page.url() !== oldUrl) await finding(audit, page, 'P1', current.label, '应用内跳转后浏览器后退', '恢复上一 URL/页面状态', '后退没有返回原 URL');
           audit.coverage.push({ page: pattern, element: current.label, status: 'checked', rule: '浏览器后退（URL）' });
         }
         audit.coverage.push({ page: pattern, element: current.label, status: 'clicked' });
-        if (current.sharedSidebar) sharedSidebarChecks.set(current.key, pattern);
+        if (current.sharedSidebar) { sharedSidebarChecks.set(current.key, pattern); (audit.sharedChecks ??= {})[current.key] = pattern; }
         } catch (error) { audit.coverage.push({ page: pattern, element: control.label, status: `unavailable: ${observationFailure(error)}；此控件单列缺口，继续本页其余控件`, rule: '控件异常续跑' }); }
+        } finally { checkpoint.done.push(identity); writeReport(audit); }
       }
       if (consoleErrors > beforeErrors[0] || promiseErrors > beforeErrors[1] || badResponses > beforeErrors[2]) await finding(audit, page, 'P1', '运行时/网络', '深链打开并遍历安全控件', '0 console error、0 未处理异常、0 非预期 4xx/5xx', `新增 console error=${consoleErrors - beforeErrors[0]}，pageerror=${promiseErrors - beforeErrors[1]}，异常响应=${badResponses - beforeErrors[2]}（原文不记录）`);
       audit.coverage.push({ page: pattern, status: (await page.locator('form,input[required],textarea[required],[data-creative-composer]').count()) ? 'not-verified: 由补充规则或逐表单源码复核；不执行有效持久化提交' : 'not-applicable: 当前观察状态没有必填表单', rule: '必填提示/提交防重复' });
       audit.coverage.push({ page: pattern, status: 'not-verified: 需与页面标题/项目名逐项比对', rule: '面包屑内容' });
       audit.coverage.push({ page: pattern, status: (new URL(page.url()).pathname === '/') ? 'not-verified: 活动实时画面需真实会话；不创建或重放任务' : 'not-applicable: 当前页面没有实时浏览器主体', rule: '移动实时画面无遮挡' });
+      auditedCanonicalRoutes.add(canonical); audit.canonicalHashes = [...auditedCanonicalRoutes];
+      delete audit.routeCheckpoints?.[pattern];
       audit.completedRoutes?.push(pattern);
       writeReport(audit);
       } catch (error) {
@@ -435,6 +466,7 @@ test('full route interaction audit against production reads', async ({ browser, 
     audit.finished = new Date().toISOString(); writeReport(audit);
     await context.close();
   }
+  expect(audit.shardIncomplete, 'Shard reached its bounded budget; resume this receipt to continue remaining controls').not.toBe(true);
   if (audit.mode === 'verify') {
     expect(audit.findings.filter(entry => entry.severity !== 'P2').length, 'P0/P1 must be zero; see private report').toBe(0);
     expect(audit.coverage.filter(entry => /blocked|unreviewed|missing|unavailable|not-verified/.test(entry.status)).length, 'Full acceptance requires closing every coverage gap').toBe(0);

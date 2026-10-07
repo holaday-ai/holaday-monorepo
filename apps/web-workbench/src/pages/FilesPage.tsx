@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useUrlState } from '@/lib/use-url-state';
 import { FileThumbnail } from '@/components/FileThumbnail';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import {
@@ -88,10 +89,10 @@ export function FilesPage(): JSX.Element {
   const navigate = useNavigate();
   const mountedRef = React.useRef(false);
   const requestIdRef = React.useRef(0);
-  const [filter, setFilter] = React.useState<Filter>('all');
-  const [q, setQ] = React.useState('');
-  const [view, setView] = React.useState<'grid' | 'list'>('grid');
-  const [sort, setSort] = React.useState<'recent' | 'name'>('recent');
+  const [filter, setFilter] = useUrlState<Filter>('type', 'all', ['all', 'images', 'videos', 'documents']);
+  const [q, setQ] = useUrlState<string>('q', '');
+  const [view, setView] = useUrlState<'grid' | 'list'>('view', 'grid', ['grid', 'list']);
+  const [sort, setSort] = useUrlState<'recent' | 'name'>('sort', 'recent', ['recent', 'name']);
   const [files, setFiles] = React.useState<UiFile[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [loadingMore, setLoadingMore] = React.useState(false);

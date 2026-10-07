@@ -2210,3 +2210,13 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     expect(screen.queryByRole('region', { name: '团队成员' })).toBeNull();
   });
 });
+
+it('hydrates project search from the URL and preserves other query parameters while typing', async () => {
+ const user=userEvent.setup();renderPage('/projects?q=研究&keep=1');
+ const input=screen.getByRole('textbox',{name:'搜索项目'});
+ expect((input as HTMLInputElement).value).toBe('研究');
+ await user.clear(input);await user.type(input,'保留');
+ const url=new URL(screen.getByTestId('location-probe').textContent!, 'https://example.test');
+ expect(url.searchParams.get('q')).toBe('保留');
+ expect(url.searchParams.get('keep')).toBe('1');
+});

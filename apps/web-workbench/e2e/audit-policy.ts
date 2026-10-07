@@ -70,13 +70,32 @@ const activeReads = new WeakMap<Page, Set<Request>>();
 const timedOutReads = new WeakSet<Request>();
 export function trackAuditReads(page: Page): void {
   const pending = new Set<Request>();
+  const generations = new WeakMap<Request, number>();
+  let generation = 0;
+  let ownershipReady = false;
+  const ownershipPoll = (request: Request): boolean => new URL(request.url()).pathname === '/api/trpc/tasks.browserControlState';
   activeReads.set(page, pending);
-  page.on('framenavigated', frame => { if (frame === page.mainFrame()) pending.clear(); });
-  page.on('request', request => {
-    if (request.method() === 'GET' && ['127.0.0.1', 'localhost'].includes(new URL(request.url()).hostname) && new URL(request.url()).pathname.startsWith('/api/trpc/')) pending.add(request);
+  page.on('framenavigated', frame => {
+    if (frame === page.mainFrame()) { generation++; pending.clear(); ownershipReady = false; }
   });
-  page.on('requestfinished', request => pending.delete(request));
-  page.on('requestfailed', request => pending.delete(request));
+  page.on('request', request => {
+    if (request.method() === 'GET' && ['127.0.0.1', 'localhost'].includes(new URL(request.url()).hostname) && new URL(request.url()).pathname.startsWith('/api/trpc/')) {
+      generations.set(request, generation);
+      if (!ownershipReady || !ownershipPoll(request)) pending.add(request);
+    }
+  });
+  page.on('requestfinished', request => {
+    pending.delete(request);
+    if (!ownershipPoll(request)) return;
+    void request.response().then(response => {
+      if (generations.get(request) !== generation || !response?.ok()) return;
+      ownershipReady = true;
+      // The successful first read covers overlapping polls already started.
+      // Response/error listeners still inspect every later poll independently.
+      for (const outstanding of pending) if (ownershipPoll(outstanding)) pending.delete(outstanding);
+    }).catch(() => undefined);
+  });
+  page.on('requestfailed', request => { pending.delete(request); if (ownershipPoll(request)) ownershipReady = false; });
 }
 export async function waitForAuditReads(page: Page, timeoutMs = 12_000): Promise<void> {
   const pending = activeReads.get(page);
@@ -129,4 +148,40 @@ export function allowRequest(method: string, url: URL, baseOrigin: string, proce
 
 export function routePatterns(appSource: string): string[] {
   return [...new Set([...appSource.matchAll(/<Route\s+(?:[^>]*?\s)?path="([^"]+)"/g)].map(match => match[1]))];
+}
+
+
+/** Select an explicit shard while retaining the complete route inventory in receipts. */
+export function selectAuditRoutes(patterns: string[], requested: string | undefined): string[] {
+  if (!requested) return patterns;
+  const routes: unknown = JSON.parse(requested);
+  if (!Array.isArray(routes) || !routes.length || routes.some(route => typeof route !== 'string')) throw new Error('Audit shard must be a nonempty JSON string array');
+  for (const route of routes) if (!patterns.includes(route)) throw new Error('Unknown audit route in shard');
+  return [...new Set(routes)];
+}
+
+/** Match each batch result to its procedure, never infer a team ID from a personal project. */
+export function discoverDynamicRoutes(payload: unknown, procedures: string[]): Record<string, string> {
+  const routes: Record<string, string> = {};
+  const responses = procedures.length > 1 && Array.isArray(payload) ? payload : [payload];
+  responses.forEach((response, index) => {
+    const procedure = procedures[index] ?? '';
+    const walk = (value: unknown, depth = 0): void => {
+      if (!value || typeof value !== 'object' || depth > 12) return;
+      const record = value as Record<string, unknown>;
+      for (const [key, child] of Object.entries(record)) {
+        if (typeof child === 'string' && /^[\w.-]+$/.test(child)) {
+          let pattern: string | undefined;
+          if (key === 'projectId' && procedure.startsWith('projects.') && (record.scope === 'organization' || typeof record.organizationId === 'string')) pattern = '/projects/:projectId';
+          if (key === 'projectId' && procedure.startsWith('videoEditing.')) pattern = '/video/edit/:projectId';
+          if (key === 'userId' && procedure.startsWith('admin.')) pattern = '/admin/users/:userId';
+          if (key === 'batchId' && procedure.startsWith('batchTasks.')) pattern = '/batch/:batchId';
+          if (key === 'domain' && procedure.startsWith('admin.')) pattern = '/admin/learning/:domain';
+          if (pattern && !routes[pattern]) routes[pattern] = pattern.replace(/:[\w]+/, encodeURIComponent(child));
+        } else walk(child, depth + 1);
+      }
+    };
+    walk(response);
+  });
+  return routes;
 }

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RouterProvider, createMemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,8 +14,8 @@ const files = [
 ];
 beforeEach(()=>{api.list.mockReset();api.list.mockResolvedValue({items:files,nextCursor:null});api.capability.mockResolvedValue({enabled:false});});
 afterEach(cleanup);
-function mount() {
- const router = createMemoryRouter([{path:'/files',element:<FilesPage/>},{path:'/',element:<main>新任务</main>}],{initialEntries:['/files']});
+function mount(entry = '/files') {
+ const router = createMemoryRouter([{path:'/files',element:<FilesPage/>},{path:'/',element:<main>新任务</main>}],{initialEntries:[entry]});
  render(<ToastProvider><RouterProvider router={router}/></ToastProvider>); return router;
 }
 describe('file library view integration',()=>{
@@ -37,4 +37,31 @@ describe('file library view integration',()=>{
   await user.click(screen.getByRole('button',{name:'文件排序'}));
   expect(await screen.findByText('排序应用于已加载的文件')).toBeTruthy();
  });
+});
+
+it('restores search, type, view and sort from the URL on back and refresh',async()=>{
+ const user=userEvent.setup();const router=mount();
+ await screen.findByRole('button',{name:'Z-notes.pdf'});
+ await user.type(screen.getByRole('textbox',{name:'搜索文件名'}),'notes');
+ await user.click(screen.getByRole('button',{name:'列表视图'}));
+ await user.click(screen.getByRole('button',{name:'文件排序'}));
+ await user.click(await screen.findByRole('menuitem',{name:'名称顺序'}));
+ const saved=router.state.location.search;
+ expect(new URLSearchParams(saved).get('q')).toBe('notes');
+ await act(async()=>{await router.navigate('/');await router.navigate(-1);});
+ expect((screen.getByRole('textbox',{name:'搜索文件名'}) as HTMLInputElement).value).toBe('notes');
+ expect(screen.getByRole('button',{name:'列表视图'}).getAttribute('aria-pressed')).toBe('true');
+ expect(screen.getByRole('button',{name:'文件排序'}).textContent).toContain('名称顺序');
+});
+
+it('hydrates search and all file filters after a fresh page mount, preserving unrelated query values',async()=>{
+ const router=mount('/files?q=notes&type=documents&view=list&sort=name&keep=1');
+ await screen.findByTitle('预览 A-notes.xlsx');
+ expect((screen.getByRole('textbox',{name:'搜索文件名'}) as HTMLInputElement).value).toBe('notes');
+ expect(screen.getByRole('button',{name:'列表视图'}).getAttribute('aria-pressed')).toBe('true');
+ expect(screen.getByRole('button',{name:'文件排序'}).textContent).toContain('名称顺序');
+ expect(new URLSearchParams(router.state.location.search).get('type')).toBe('documents');
+ const user=userEvent.setup(); await user.clear(screen.getByRole('textbox',{name:'搜索文件名'}));
+ expect(new URLSearchParams(router.state.location.search).get('keep')).toBe('1');
+ expect(new URLSearchParams(router.state.location.search).get('q')).toBe(null);
 });

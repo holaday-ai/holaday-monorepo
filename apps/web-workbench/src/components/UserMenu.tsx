@@ -1,3 +1,4 @@
+import { useExclusiveOverlay } from '@/lib/top-level-overlay';
 import {
   ChevronDown,
   ChevronRight,
@@ -57,7 +58,8 @@ export function UserMenu({
   compact = false,
   placement = 'sidebar',
 }: Props): JSX.Element {
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpenState] = React.useState(false);
+  const setOpen = useExclusiveOverlay(open, setOpenState);
   const ref = React.useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { mode, setMode } = useTheme();
@@ -67,24 +69,24 @@ export function UserMenu({
       setOpen(false);
       navigate(path);
     },
-    [navigate],
+    [navigate, setOpen],
   );
 
   React.useEffect(() => {
     if (!open) return;
-    const onClick = (e: MouseEvent): void => {
+    const onClick = (e: PointerEvent): void => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') setOpen(false);
     };
-    document.addEventListener('mousedown', onClick);
+    document.addEventListener('pointerdown', onClick, true);
     document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('pointerdown', onClick, true);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open]);
+  }, [open, setOpen]);
 
   const planLabel = friendlyPlan(plan);
   const topbar = placement === 'topbar';
@@ -93,7 +95,7 @@ export function UserMenu({
     <div ref={ref} className="relative">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={compact ? `用户菜单：${displayName || email || ''}` : undefined}

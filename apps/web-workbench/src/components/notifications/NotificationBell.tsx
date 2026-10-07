@@ -1,3 +1,4 @@
+import { useExclusiveOverlay } from '@/lib/top-level-overlay';
 /**
  * Phase 26B — global notification bell.
  *
@@ -67,7 +68,8 @@ export function NotificationBell({
 }: NotificationBellProps): JSX.Element {
   const navigate = useNavigate();
   const [unreadCount, setUnreadCount] = React.useState<number>(0);
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpenState] = React.useState(false);
+  const setOpen = useExclusiveOverlay(open, setOpenState);
   const [items, setItems] = React.useState<NotificationRow[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [loadingMore, setLoadingMore] = React.useState(false);
@@ -113,19 +115,19 @@ export function NotificationBell({
   // Outside-click + Esc dismissal when the dropdown is open.
   React.useEffect(() => {
     if (!open) return;
-    const onClick = (e: MouseEvent) => {
+    const onClick = (e: PointerEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
-    document.addEventListener('mousedown', onClick);
+    document.addEventListener('pointerdown', onClick, true);
     document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('pointerdown', onClick, true);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open]);
+  }, [open, setOpen]);
 
   const fetchList = React.useCallback(async (cursor: NotificationListCursor | null = null) => {
     const requestId = listRequestRef.current + 1;
@@ -165,12 +167,10 @@ export function NotificationBell({
   }, []);
 
   const handleToggle = React.useCallback(() => {
-    setOpen((prev) => {
-      const next = !prev;
-      if (next) void fetchList(null);
-      return next;
-    });
-  }, [fetchList]);
+    const next = !open;
+    setOpen(next);
+    if (next) void fetchList(null);
+  }, [fetchList, open, setOpen]);
 
   const handleItemClick = React.useCallback(
     async (row: NotificationRow) => {
@@ -203,7 +203,7 @@ export function NotificationBell({
         }
       }
     },
-    [fetchList, open, refreshCount],
+    [fetchList, open, refreshCount, setOpen],
   );
 
   const handleMarkAll = React.useCallback(async () => {

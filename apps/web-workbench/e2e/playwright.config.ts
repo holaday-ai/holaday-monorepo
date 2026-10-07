@@ -7,8 +7,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  timeout: 30 * 60_000,
-  globalTimeout: 2 * 60 * 60_000,
+  timeout: 18 * 60_000,
+  globalTimeout: 20 * 60_000,
   reporter: [['line']],
   outputDir: path.resolve(process.env.HOLADAY_AUDIT_OUTPUT ?? 'e2e/artifacts', 'runner'),
   use: {

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test, expect } from 'playwright/test';
-import { allowRequest, decideControl, registerReadOnlyGuard, trackAuditReads, waitForAuditReads, routePatterns, readProcedures, type Control } from './audit-policy';
+import { allowRequest, decideControl, registerReadOnlyGuard, trackAuditReads, waitForAuditReads, routePatterns, readProcedures, discoverDynamicRoutes, selectAuditRoutes, type Control } from './audit-policy';
 
 const base = 'http://127.0.0.1:4173';
 const control: Control = { key: '1', selector: 'button', label: '', tag: 'button', role: '', href: null, type: 'button', expanded: null, disabled: false, hasReason: false };
@@ -116,4 +116,43 @@ test('a timed-out read still fails without repeating the full wait; a new read g
     ]);
     expect(fresh).toBe('new read still waiting');
   } finally { release(); await context.close(); }
+});
+
+
+test('dynamic discovery respects team scope and each response in a mixed batch', () => {
+  const responses = [
+    {result:{data:[{projectId:'personal_real',name:'Personal'},{projectId:'team_real',scope:'organization',organizationId:'org_real'}]}},
+    {result:{data:[{batchId:'batch_real',projectId:'irrelevant'}]}},
+  ];
+  const routes = discoverDynamicRoutes(responses, ['projects.list','batchTasks.list']);
+  expect(routes['/projects/:projectId']).toBe('/projects/team_real');
+  expect(routes['/batch/:batchId']).toBe('/batch/batch_real');
+  expect(discoverDynamicRoutes({result:{data:[{projectId:'personal_real'}]}},['projects.list'])['/projects/:projectId']).toBeUndefined();
+  expect(discoverDynamicRoutes({result:{data:[{projectId:'unrelated'}]}},['tasks.list'])['/video/edit/:projectId']).toBeUndefined();
+});
+
+test('route shards reject unknown patterns instead of silently reducing coverage', () => {
+  const all=['/','/files','/batch/:batchId'];
+  expect(selectAuditRoutes(all, JSON.stringify(['/files','/batch/:batchId']))).toEqual(['/files','/batch/:batchId']);
+  expect(selectAuditRoutes(all, undefined)).toEqual(all);
+  expect(()=>selectAuditRoutes(all, JSON.stringify(['/imaginary']))).toThrow('Unknown audit route');
+  expect(()=>selectAuditRoutes(all, '[]')).toThrow('nonempty');
+});
+
+
+test('read readiness waits for the first ownership read, not perpetual successful background polls', async ({browser})=>{
+ const context=await browser.newContext();const page=await context.newPage();let completions=0;
+ await context.route('**/*',async route=>{
+  const name=new URL(route.request().url()).pathname;
+  if(name==='/api/trpc/tasks.browserControlState'){
+   await new Promise(resolve=>setTimeout(resolve,250));completions++;
+   await route.fulfill({contentType:'application/json',body:'{}'}).catch(()=>undefined);
+  }else await route.fulfill({contentType:'text/html',body:'<h1>Polling fixture</h1><script>const poll=()=>fetch("/api/trpc/tasks.browserControlState").catch(()=>{});poll();setInterval(poll,100)</script>'});
+ });
+ trackAuditReads(page);
+ try{
+  await page.goto(base,{waitUntil:'domcontentloaded'});
+  await waitForAuditReads(page,1500);
+  expect(completions).toBeGreaterThan(0);
+ }finally{await context.close();}
 });

@@ -29,9 +29,11 @@ signed-in normal Chrome session. Both production origins are supported. Never
 print that entry or collect Google cookies. Move the downloaded export into
 `e2e/.auth/storage-state.json`, chmod 600, and confirm Git ignores it.
 
-Set `HOLADAY_AUDIT_RESUME=1` to continue only the routes recorded as completed in
-that viewport's private JSON receipt. Do not reuse a receipt after changing the
-build, account, or viewport. Preserve incomplete calibration receipts separately.
+Set `HOLADAY_AUDIT_RESUME=1` to continue unfinished routes from the viewport’s private JSON receipt. Completed
+control identities, revealed child-control queues, and shared-sidebar checks are
+persisted after each control, so a bounded shard can continue without replaying
+already recorded checks. Do not reuse a receipt after changing the
+build, account, viewport, or mode. Build and mode mismatches are rejected. Preserve incomplete calibration receipts separately.
 
 Set `HOLADAY_AUDIT_FOCUSED_RETRY=1` to rerun only focused rules not already
 recorded as completed in `<viewport>-rules.json`. Main-route and focused-rule
@@ -52,7 +54,7 @@ origins. Expired/missing login state fails before authenticated route acceptance
 
 ```sh
 umask 022
-export NODE_OPTIONS='--max-old-space-size=1536 --v8-pool-size=1'
+export NODE_OPTIONS='--max-old-space-size=2048 --v8-pool-size=1'
 export UV_THREADPOOL_SIZE=1 GOMAXPROCS=1 RAYON_NUM_THREADS=1
 pnpm build > /private/tmp/holaday-ui-build.log 2>&1
 HOLADAY_AUDIT_API_ORIGIN=https://holaday.ai pnpm preview:interaction-audit
@@ -109,3 +111,51 @@ Reports and per-finding screenshots are private (600, directories 700). Screen
 captures can contain account content; do not attach them to a public PR. Include
 only a sanitized problem list and counts in the PR. Never merge or deploy from
 this workflow.
+
+
+## Bounded route shards and fix verification
+
+Run one viewport and one shard at a time. `HOLADAY_AUDIT_ROUTES` is a nonempty JSON
+array of exact patterns from `src/App.tsx`; unknown patterns fail before traversal.
+The main traversal stops at a soft budget of 16 minutes, saves its queue, and fails
+explicitly when incomplete. Each test has an 18-minute limit and each invocation
+a 20-minute global limit. Resume the same shard/receipt until complete; never treat
+a budget exit as a pass. `HOLADAY_AUDIT_BUDGET_MS` can shorten the soft budget.
+
+```sh
+HOLADAY_AUDIT_ROUTES='["/files"]' HOLADAY_AUDIT_RESUME=1 \
+HOLADAY_AUDIT_OUTPUT=/private/tmp/holaday-tasks/ui-audit-2/remaining \
+HOLADAY_AUDIT_STORAGE_STATE=/absolute/private/storage-state.json \
+pnpm exec playwright test --config e2e/playwright.config.ts --project=iphone-14 interaction-audit.spec.ts
+```
+
+Dynamic objects are discovered separately for each procedure in a batch. Only
+organization-scoped projects may populate `/projects/:projectId`; personal project
+cards use `/projects?project=…`. No list/get endpoint or accessible existing object
+means an explicit gap, never an invented ID or a new production record.
+
+`ui-regression.spec.ts` asserts the approved fixes on the current loopback build:
+media models, home/task model submenus, admin model editor expansion, viewport
+containment, retention pagination, notification dismissal/exclusivity, and URL
+search restoration after back and reload. Run desktop and iPhone separately.
+These assertions do not turn missing general-route coverage into full acceptance.
+
+The fix verification receipts contain the current `dist/index.html` SHA-256 and
+mode. A changed build requires new verification output; route observation receipts
+from before that change remain historical coverage, not current-build acceptance.
+The video style child dialog is portaled outside the scrolling/backdrop-filter
+parent, with a persistent header and independently scrolling options. Its rule
+checks viewport bounds, closing after scroll, Escape/outside dismissal and focus
+return. Video history checks transition between actual filters; legal links check
+the new tab rather than expecting the original page to change.
+
+Home/task model rules verify a submenu when multiple brains are available. If the
+account has one available brain, the UI intentionally renders a static model row;
+the receipt checks that row and does not imply a live multi-brain selection test.
+The administrator model screen uses expandable provider rows, not a model popup.
+
+Regression bootstrap reads have a bounded 30-second settlement window; every
+pending read remains tracked. Retention pagination waits up to 180 seconds for
+the entire hidden-page chain, within a five-minute case and twenty-minute run.
+The mobile delete rule opens an existing task confirmation and cancels it; it
+requires the sidebar Sheet to release pointer events and performs no deletion.
