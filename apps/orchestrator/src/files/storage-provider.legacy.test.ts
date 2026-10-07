@@ -21,7 +21,7 @@ describe('legacy storage handles', () => {
    return { Body: (async function* () { yield Buffer.from('original bytes'); })() };
   } } as unknown as S3Client;
   const provider = new R2StorageProvider(config, logger, { client });
-  await expect(provider.get('/tmp/holaday-files/usr_test/input/file_old/example.png')).resolves.toEqual(Buffer.from('original bytes'));
+  await expect(provider.get('/tmp/holaday-files/usr_test/input/file_old/example.png', { ownerExternalId: 'usr_test' })).resolves.toEqual(Buffer.from('original bytes'));
  });
  it.each(['../escape', '/etc/passwd', '/tmp/holaday-files/../../etc/passwd', '/tmp/holaday-files/usr_test/input/file_old/../secret'])('refuses invalid legacy handle %s', async handle => {
   const provider = new R2StorageProvider(config, logger, { client: { send: async () => ({ Body: (async function* () { yield Buffer.from('should not be returned'); })() }) } as unknown as S3Client });
@@ -31,5 +31,25 @@ describe('legacy storage handles', () => {
   vi.spyOn(fs, 'readFile').mockRejectedValue(Object.assign(new Error('denied'), { code: 'EACCES' }));
   const provider = new LocalStorageProvider('/tmp/test-only', logger);
   await expect(provider.get('/tmp/test-only/missing')).rejects.toMatchObject({ code: 'EACCES' });
+ });
+});
+
+describe('legacy R2 keys are bound to the file owner', () => {
+ const foreignPath = '/tmp/holaday-files/usr_bob/input/file_old/example.png';
+ function storage() {
+  const client = { send: async () => ({ ContentLength: 14, Body: (async function* () { yield Buffer.from('foreign bytes'); })() }) } as unknown as S3Client;
+  return new R2StorageProvider(config, logger, { client });
+ }
+ it.each(['usr_alice', 'usr_bo', '', undefined])('refuses foreign or missing owner %s before returning bytes', async ownerExternalId => {
+  await expect(storage().get(foreignPath, { ownerExternalId })).rejects.toThrow(/owner/i);
+ });
+ it('refuses HEAD of an object from another owner', async () => {
+  await expect(storage().stat(foreignPath, { ownerExternalId: 'usr_alice' })).rejects.toThrow(/owner/i);
+ });
+ it('does not issue a signed URL for a foreign legacy key', async () => {
+  await expect(new R2StorageProvider(config, logger).getSignedUrl(foreignPath, { ownerExternalId: 'usr_alice' })).resolves.toBeNull();
+ });
+ it('reads metadata when the full user segment matches the actual owner', async () => {
+  await expect(storage().stat(foreignPath, { ownerExternalId: 'usr_bob' })).resolves.toEqual({ sizeBytes: 14 });
  });
 });

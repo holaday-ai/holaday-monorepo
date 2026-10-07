@@ -85,6 +85,8 @@ export interface PutFileInput extends StorageObjectInput {
 }
 
 export interface GetSignedUrlOptions {
+  /** Actual file owner, required before reading a legacy local R2 handle. */
+  ownerExternalId?: string;
   /** TTL of the issued URL. Defaults to 1 hour. */
   expiresInSeconds?: number;
   /**
@@ -124,6 +126,12 @@ export interface DeleteStorageOptions {
 
 export const ACCOUNT_CLOSURE_STORAGE_DELETE_TIMEOUT_MS = 5_000;
 
+export interface StorageReadOptions {
+  /** Trusted database owner identity, never inferred from the storage path. */
+  ownerExternalId?: string;
+  signal?: AbortSignal;
+}
+
 export interface StorageProvider {
   /**
    * Resolve the exact path/key that a subsequent put will use. Temporary
@@ -136,7 +144,7 @@ export interface StorageProvider {
   /** Persist a local file without loading the whole artifact into memory. */
   putFile(input: PutFileInput): Promise<{ storagePath: StoragePath }>;
   /** Read bytes. Returns null when the path doesn't exist (caller decides 404 vs 500). */
-  get(storagePath: StoragePath): Promise<Buffer | null>;
+  get(storagePath: StoragePath, options?: StorageReadOptions): Promise<Buffer | null>;
   /** Remove. No-op when the path doesn't exist (idempotent — handles double-cleanup). */
   delete(storagePath: StoragePath, options?: DeleteStorageOptions): Promise<void>;
   /**
@@ -161,7 +169,7 @@ export interface StorageProvider {
    * declared size is untrusted). Returns `null` when the object is
    * missing.
    */
-  stat(storagePath: StoragePath, options?: { signal?: AbortSignal }): Promise<StatResult | null>;
+  stat(storagePath: StoragePath, options?: StorageReadOptions): Promise<StatResult | null>;
 }
 
 /**
@@ -330,14 +338,26 @@ export class R2StorageProvider implements StorageProvider {
       });
   }
 
-  private objectKey(storagePath: StoragePath): string {
+  private objectKey(
+    storagePath: StoragePath,
+    options?: { ownerExternalId?: string; requireLegacyOwner?: boolean },
+  ): string {
     if (storagePath.includes('\\') || storagePath.includes('\0') || storagePath.split('/').some(part => part === '.' || part === '..')) throw new Error('Invalid storage path');
-    if (!path.isAbsolute(storagePath)) return storagePath;
-    const roots = this.config.legacyLocalRoots ?? ['/tmp/holaday-files', '/opt/holaday-files'];
-    const root = roots.find(candidate => storagePath.startsWith(path.resolve(candidate) + '/'));
-    if (!root) throw new Error('Invalid legacy storage path');
-    const key = storagePath.slice(path.resolve(root).length + 1);
-    if (!/^usr_[\w-]+\/(input|output)\/file_[\w-]+\/[^/]+$/.test(key)) throw new Error('Invalid legacy storage path');
+    const legacy = path.isAbsolute(storagePath);
+    let key = storagePath;
+    if (legacy) {
+      const roots = this.config.legacyLocalRoots ?? ['/tmp/holaday-files', '/opt/holaday-files'];
+      const root = roots.find(candidate => storagePath.startsWith(path.resolve(candidate) + '/'));
+      if (!root) throw new Error('Invalid legacy storage path');
+      key = storagePath.slice(path.resolve(root).length + 1);
+      if (!/^usr_[\w-]+\/(input|output)\/file_[\w-]+\/[^/]+$/.test(key)) throw new Error('Invalid legacy storage path');
+    }
+    if ((legacy && options?.requireLegacyOwner) || options?.ownerExternalId !== undefined) {
+      const owner = options?.ownerExternalId;
+      if (!owner || !/^usr_[\w-]+$/.test(owner) || key.split('/')[0] !== owner) {
+        throw new Error('Storage path owner mismatch');
+      }
+    }
     return key;
   }
 
@@ -377,12 +397,12 @@ export class R2StorageProvider implements StorageProvider {
     return { storagePath: key };
   }
 
-  async get(storagePath: StoragePath): Promise<Buffer | null> {
+  async get(storagePath: StoragePath, options?: StorageReadOptions): Promise<Buffer | null> {
     try {
       const res = await this.client.send(
         new GetObjectCommand({
           Bucket: this.config.bucket,
-          Key: this.objectKey(storagePath),
+          Key: this.objectKey(storagePath, { ownerExternalId: options?.ownerExternalId, requireLegacyOwner: true }),
         }),
       );
       const body = res.Body as NodeJS.ReadableStream | undefined;
@@ -423,7 +443,7 @@ export class R2StorageProvider implements StorageProvider {
     try {
       const cmd = new GetObjectCommand({
         Bucket: this.config.bucket,
-        Key: this.objectKey(storagePath),
+        Key: this.objectKey(storagePath, { ownerExternalId: opts?.ownerExternalId, requireLegacyOwner: true }),
         ...(opts?.downloadFilename
           ? {
               ResponseContentDisposition: `attachment; filename="${opts.downloadFilename.replace(/"/g, '')}"`,
@@ -459,12 +479,12 @@ export class R2StorageProvider implements StorageProvider {
     }
   }
 
-  async stat(storagePath: StoragePath, options?: { signal?: AbortSignal }): Promise<StatResult | null> {
+  async stat(storagePath: StoragePath, options?: StorageReadOptions): Promise<StatResult | null> {
     try {
       const res = await this.client.send(
         new HeadObjectCommand({
           Bucket: this.config.bucket,
-          Key: this.objectKey(storagePath),
+          Key: this.objectKey(storagePath, { ownerExternalId: options?.ownerExternalId, requireLegacyOwner: true }),
         }),
         options?.signal ? { abortSignal: options.signal } : undefined,
       );

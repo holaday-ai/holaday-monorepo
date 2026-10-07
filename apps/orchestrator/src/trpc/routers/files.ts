@@ -70,7 +70,7 @@ async function saveLibraryOutput(
 }
 
 type Availability = 'available' | 'unavailable' | 'unknown';
-async function libraryAvailability(storage: StorageProvider, rows: Array<{ storagePath: string; status: string; expiresAt: Date | null }>): Promise<Availability[]> {
+async function libraryAvailability(storage: StorageProvider, rows: Array<{ storagePath: string; status: string; expiresAt: Date | null }>, ownerExternalId: string): Promise<Availability[]> {
   const result: Availability[] = rows.map(() => 'unknown');
   const signal = AbortSignal.timeout(2_000);
   let cursor = 0;
@@ -78,7 +78,7 @@ async function libraryAvailability(storage: StorageProvider, rows: Array<{ stora
     while (cursor < rows.length && !signal.aborted) {
       const index = cursor++; const row = rows[index]!;
       if (!fileIsAvailableInLibrary(row)) { result[index] = 'unavailable'; continue; }
-      try { result[index] = await storage.stat(row.storagePath, { signal }) ? 'available' : 'unavailable'; }
+      try { result[index] = await storage.stat(row.storagePath, { signal, ownerExternalId }) ? 'available' : 'unavailable'; }
       catch { result[index] = 'unknown'; }
     }
   }));
@@ -176,7 +176,7 @@ export const filesRouter = router({
         .limit(input.limit + 1);
       const hasMore = rows.length > input.limit;
       const page = rows.slice(0, input.limit);
-      const availability = await libraryAvailability(getSharedStorageProvider({ logger: ctx.logger }), page);
+      const availability = await libraryAvailability(getSharedStorageProvider({ logger: ctx.logger }), page, ctx.userId);
       return {
         items: page.map((r, index) => ({
           fileId: r.externalId,

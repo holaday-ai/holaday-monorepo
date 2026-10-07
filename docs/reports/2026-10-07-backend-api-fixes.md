@@ -42,3 +42,21 @@
 - 没有运行线上修复后的验收，也没有把本次结果标作整项发布/真实用户验收通过。
 
 只读线上/SQL/HEAD诊断是根因证据；模拟依赖的路由测试和构建是代码验证；这两者均不代表修复已部署或生产下载已恢复。无合并、部署、生产重启、存储迁移、历史业务写入、PayPal或商户核查。
+
+
+## PR #243 复审补丁（2026-10-07）
+
+- 风险监控的正式快照查询，在 SQL 中按当前用户及 `JSON_EXTRACT(snapshot_json, '$.kind') IS NULL` 过滤后，再按时间排序/LIMIT 20。过滤条件与 `stock-task-context.ts` 一致；短期签发记录不再占用正式快照的候选窗口。生产 dispatcher 使用同一个查询函数。
+- 新增真实 MySQL 回归：独立本机 `mysql:8.4`、CPU1/384MB、会话级临时表，插入1条较早正式快照及20条较新短期记录；先用无过滤的实际查询证实最近20行全为短期记录，再调用生产查询并断言返回正式快照。另测不同用户的数据不能替代当前用户的正式快照。不是 SQL 文本断言或查询返回值 mock。
+- R2 旧绝对路径的 GET、HEAD、签名读取必须提供可信文件所有者，并按完整 `usr_…` 段严格相等比较；缺失、空值、前缀相似或不匹配均拒绝。FileService 从 `task_files.userId` 对应的 `users.externalId` 取得所有者，不从路径反推；列表使用经过用户ID解析及SQL归属过滤的调用者身份。上传/本地存储/规范R2键的既有行为保持；R2 HEAD 原生取消信号继续传递。
+- 测试覆盖跨用户字节读取、HEAD、真实SDK签名（无网络）、合法所有者读取、所有者缺失，以及FileService单文件/批量/签名/预览消费。先观察原缺口RED，再确认修复GREEN；额外消费回归也能检出移除所有者保护。
+
+### 本次验证
+
+- 针对性后端6文件58项通过；额外所有者消费测试2文件21项通过。
+- **真实MySQL查询2/2通过**；使用已有 `vitest.integration.config.ts` 单独运行，按项目惯例不混入默认单测。命令：`HOLADAY_SNAPSHOT_TEST_PORT=<独立本机QA端口> pnpm exec vitest run --config vitest.integration.config.ts src/stocks/stock-risk-monitor-snapshot.mysql.integration.test.ts`。测试只使用固定的127.0.0.1/holaday_pr243_qa及临时表，不使用DATABASE_URL；临时容器已清理。
+- **后端全量：558文件、9101通过、1项既有跳过，exit0**；前置Node测试通过。单worker、1536MB V8上限、V8/UV线程数1、nice10，耗时761.0秒；日志存文件。
+- **后端typecheck通过，exit0**，串行执行、2048MB V8上限，耗时19.8秒。`git diff --check` 通过。
+- 未合并、未部署，未连接生产数据库或读取生产存储，未修复/改写历史业务内容；上述3个缺失文件仍需备份或原文件。
+
+`codex/ui-small-fixes` 已有独立草稿 PR [#244](https://github.com/holaday-ai/holaday-monorepo/pull/244)，目标 `claude/capability-recovery`，OPEN/draft；本次只确认，不修改该PR。
