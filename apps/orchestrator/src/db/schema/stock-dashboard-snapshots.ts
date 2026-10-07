@@ -16,6 +16,8 @@ import { users } from './users.js';
  * This is a display cache, not an analytics source of truth. It exists so
  * AkShare minute/quote outages or an orchestrator restart do not replace a
  * previously verified intraday chart with an empty state.
+ * Distinct hash keys also hold short-lived served-stock-context-v1 envelopes;
+ * these are ownership-scoped issued versions, not display cache replacements.
  */
 export const stockDashboardSnapshots = mysqlTable(
   'stock_dashboard_snapshots',

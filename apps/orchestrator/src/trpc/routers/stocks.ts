@@ -23,6 +23,7 @@ import type {
   StockRankingRow,
   WatchlistEntry,
 } from '../../agent/a-share/briefing-types.js';
+import { rememberServedStockSnapshot } from '../../stocks/served-stock-snapshot.js';
 import { stockDashboardSnapshots } from '../../db/schema/stock-dashboard-snapshots.js';
 import { users } from '../../db/schema/users.js';
 import { resolveNewsDetail } from '../../stock-news/article-detail.js';
@@ -1923,13 +1924,20 @@ export const stocksRouter = router({
     const userInternalId = await requireUserId(ctx.db, ctx.userId);
     const watchlistRows = await listWatchlistForUser(ctx.db, userInternalId);
     const effectiveWatchlist = watchlistRows;
-    return resolveDashboardSnapshot({
+    const snapshot = await resolveDashboardSnapshot({
       db: ctx.db,
       logger: ctx.logger,
       userInternalId,
       watchlistRows,
       effectiveWatchlist,
     });
+    try {
+      await rememberServedStockSnapshot({ db: ctx.db, userId: userInternalId, snapshot, logger: ctx.logger });
+    } catch {
+      ctx.logger.warn({ code: 'SERVED_STOCK_CONTEXT_WRITE_FAILED' }, 'stocks: cannot issue an unverifiable context');
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '股票快照暂时无法验证，请稍后重试。' });
+    }
+    return snapshot;
   }),
 
   discoveryFeed: protectedProcedure

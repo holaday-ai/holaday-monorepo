@@ -161,7 +161,7 @@ export interface StorageProvider {
    * declared size is untrusted). Returns `null` when the object is
    * missing.
    */
-  stat(storagePath: StoragePath): Promise<StatResult | null>;
+  stat(storagePath: StoragePath, options?: { signal?: AbortSignal }): Promise<StatResult | null>;
 }
 
 /**
@@ -237,7 +237,8 @@ export class LocalStorageProvider implements StorageProvider {
         { err: errMsg(err), path: storagePath },
         'storage:local: read failed (file deleted out-of-band?)',
       );
-      return null;
+      if (['ENOENT', 'ENOTDIR'].includes((err as NodeJS.ErrnoException).code ?? '')) return null;
+      throw err;
     }
   }
 
@@ -273,9 +274,9 @@ export class LocalStorageProvider implements StorageProvider {
       const s = await fs.stat(storagePath);
       return { sizeBytes: s.size };
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      if (['ENOENT', 'ENOTDIR'].includes((err as NodeJS.ErrnoException).code ?? '')) return null;
       this.logger.warn({ err: errMsg(err), path: storagePath }, 'storage:local: stat failed');
-      return null;
+      throw err;
     }
   }
 }
@@ -285,6 +286,8 @@ export class LocalStorageProvider implements StorageProvider {
 // ---------------------------------------------------------------------------
 
 export interface R2Config {
+  /** Previous trusted local roots; no disk reads or record rewrite. */
+  legacyLocalRoots?: string[];
   /** R2 endpoint: `https://<account_id>.r2.cloudflarestorage.com`. */
   endpoint: string;
   accessKeyId: string;
@@ -325,6 +328,17 @@ export class R2StorageProvider implements StorageProvider {
           secretAccessKey: config.secretAccessKey,
         },
       });
+  }
+
+  private objectKey(storagePath: StoragePath): string {
+    if (storagePath.includes('\\') || storagePath.includes('\0') || storagePath.split('/').some(part => part === '.' || part === '..')) throw new Error('Invalid storage path');
+    if (!path.isAbsolute(storagePath)) return storagePath;
+    const roots = this.config.legacyLocalRoots ?? ['/tmp/holaday-files', '/opt/holaday-files'];
+    const root = roots.find(candidate => storagePath.startsWith(path.resolve(candidate) + '/'));
+    if (!root) throw new Error('Invalid legacy storage path');
+    const key = storagePath.slice(path.resolve(root).length + 1);
+    if (!/^usr_[\w-]+\/(input|output)\/file_[\w-]+\/[^/]+$/.test(key)) throw new Error('Invalid legacy storage path');
+    return key;
   }
 
   pathFor(input: StorageObjectInput): StoragePath {
@@ -368,7 +382,7 @@ export class R2StorageProvider implements StorageProvider {
       const res = await this.client.send(
         new GetObjectCommand({
           Bucket: this.config.bucket,
-          Key: storagePath,
+          Key: this.objectKey(storagePath),
         }),
       );
       const body = res.Body as NodeJS.ReadableStream | undefined;
@@ -393,7 +407,7 @@ export class R2StorageProvider implements StorageProvider {
       await this.client.send(
         new DeleteObjectCommand({
           Bucket: this.config.bucket,
-          Key: storagePath,
+          Key: this.objectKey(storagePath),
         }),
         options?.signal ? { abortSignal: options.signal } : undefined,
       );
@@ -409,7 +423,7 @@ export class R2StorageProvider implements StorageProvider {
     try {
       const cmd = new GetObjectCommand({
         Bucket: this.config.bucket,
-        Key: storagePath,
+        Key: this.objectKey(storagePath),
         ...(opts?.downloadFilename
           ? {
               ResponseContentDisposition: `attachment; filename="${opts.downloadFilename.replace(/"/g, '')}"`,
@@ -445,13 +459,14 @@ export class R2StorageProvider implements StorageProvider {
     }
   }
 
-  async stat(storagePath: StoragePath): Promise<StatResult | null> {
+  async stat(storagePath: StoragePath, options?: { signal?: AbortSignal }): Promise<StatResult | null> {
     try {
       const res = await this.client.send(
         new HeadObjectCommand({
           Bucket: this.config.bucket,
-          Key: storagePath,
+          Key: this.objectKey(storagePath),
         }),
+        options?.signal ? { abortSignal: options.signal } : undefined,
       );
       return {
         sizeBytes: typeof res.ContentLength === 'number' ? res.ContentLength : 0,
@@ -462,7 +477,7 @@ export class R2StorageProvider implements StorageProvider {
       // NoSuchKey/NotFound is the HEAD 404 — object never landed.
       if (code === 'NoSuchKey' || code === 'NotFound') return null;
       this.logger.warn({ err: errMsg(err), path: storagePath, code }, 'storage:r2: stat failed');
-      return null;
+      throw err;
     }
   }
 }
@@ -539,6 +554,7 @@ export function createStorageProvider(opts: CreateStorageProviderOpts): StorageP
         accessKeyId,
         secretAccessKey,
         bucket,
+        legacyLocalRoots: [...new Set([opts.localRoot ?? process.env.HOLADAY_FILES_ROOT ?? '/tmp/holaday-files', '/tmp/holaday-files', '/opt/holaday-files'])],
         ...(process.env.R2_REGION ? { region: process.env.R2_REGION } : {}),
       },
       opts.logger,
