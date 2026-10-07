@@ -7,6 +7,7 @@ import {
   downloadFailureMessage,
   downloadFileAuthed,
   fetchFileBlobAuthed,
+  isUnavailableFileStatus,
 } from '@/lib/download-file';
 import {
   classifyDownloadFileKind,
@@ -210,12 +211,12 @@ export function FileDownloadCard({
       setState('idle');
     } else {
       markFileUnavailableFromStatus(fileReference, result.status);
-      setState('failed');
-      toast.show(downloadFailureMessage(result.status), 'error');
+      setState(isUnavailableFileStatus(result.status) ? 'idle' : 'failed');
+      if (!isUnavailableFileStatus(result.status)) toast.show(downloadFailureMessage(result.status), 'error');
     }
   };
   const actionLabel = inactive
-    ? `${kindLabel}${expired ? '已过期' : '已失效'} ${payload.filename}`
+    ? `${kindLabel}${expired ? '已过期' : '已不可用'} ${payload.filename}`
     : `下载${kindLabel} ${payload.filename}`;
 
   return (
@@ -235,7 +236,7 @@ export function FileDownloadCard({
     >
       {showPreview && inactive && (kind === 'image' || kind === 'video') ? (
         <span className="flex h-40 w-full items-center justify-center rounded-[6px] border border-dashed border-[#DCDDDD] bg-[#EFEFEF]/35 px-4 text-center text-[11px] leading-5 text-muted-foreground dark:border-white/10 dark:bg-white/5">
-          {expired ? '文件已过期，无法预览。' : '文件已失效，无法预览。'}
+          {expired ? '文件已过期，无法预览。' : '文件已不可用'}
         </span>
       ) : showPreview && previewState === 'ready' && previewUrl ? (
         kind === 'video' ? (

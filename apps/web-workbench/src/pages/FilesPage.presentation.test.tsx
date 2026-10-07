@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RouterProvider, createMemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '@/components/ui/toast';
 import { FilesPage } from './FilesPage';
+import { resetUnavailableFilesForTests } from '@/lib/unavailable-file-registry';
+const download = vi.hoisted(()=>vi.fn());
+vi.mock('@/lib/download-file', async (importOriginal)=>({...await importOriginal<typeof import('@/lib/download-file')>(),downloadFileAuthed:download}));
 const api = vi.hoisted(() => ({ list:vi.fn(), capability:vi.fn() }));
 vi.mock('@/lib/trpc', () => ({ trpc:{files:{list:{query:api.list}},videoEditing:{capability:{query:api.capability}}} }));
 vi.mock('@/components/FilePreviewModal', () => ({FilePreviewModal:()=>null}));
@@ -13,7 +16,7 @@ const files = [
  {fileId:'file_a',filename:'A-notes.xlsx',mimetype:'application/vnd.ms-excel',sizeBytes:2048,createdAt:'2026-10-04T08:00:00Z'},
 ];
 beforeEach(()=>{api.list.mockReset();api.list.mockResolvedValue({items:files,nextCursor:null});api.capability.mockResolvedValue({enabled:false});});
-afterEach(cleanup);
+afterEach(()=>{cleanup();resetUnavailableFilesForTests();download.mockReset();});
 function mount(entry = '/files') {
  const router = createMemoryRouter([{path:'/files',element:<FilesPage/>},{path:'/',element:<main>新任务</main>}],{initialEntries:[entry]});
  render(<ToastProvider><RouterProvider router={router}/></ToastProvider>); return router;
@@ -64,4 +67,19 @@ it('hydrates search and all file filters after a fresh page mount, preserving un
  const user=userEvent.setup(); await user.clear(screen.getByRole('textbox',{name:'搜索文件名'}));
  expect(new URLSearchParams(router.state.location.search).get('keep')).toBe('1');
  expect(new URLSearchParams(router.state.location.search).get('q')).toBe(null);
+});
+
+
+it.each([404,410])('shows a missing file as unavailable without an error or dead download action (%s)', async status=>{
+ download.mockResolvedValue({ok:false,status,message:'missing bytes'});
+ const user=userEvent.setup();mount();
+ const file=await screen.findByTitle('预览 Z-notes.pdf');
+ const row=file.closest('article, [data-file-id]') ?? file.parentElement!;
+ await user.click(within(row as HTMLElement).getByRole('button',{name:'更多操作'}));
+ await user.click(await screen.findByRole('menuitem',{name:'下载'}));
+ await waitFor(()=>expect(within(row as HTMLElement).getByText('文件已不可用')).toBeTruthy());
+ expect(screen.queryByRole('alert')).toBeNull();
+ await user.click(within(row as HTMLElement).getByRole('button',{name:'更多操作'}));
+ expect(screen.queryByRole('menuitem',{name:'下载'})).toBeNull();
+ expect(download).toHaveBeenCalledTimes(1);
 });

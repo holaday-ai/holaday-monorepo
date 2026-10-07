@@ -222,6 +222,8 @@ export interface TaskStore {
   tasksCursor: number | null;
   /** False once the server reports no more pages. */
   tasksHasMore: boolean;
+  /** Bounded retention scan found no new visible row; reset by list refresh. */
+  tasksVisiblePageLimitReached: boolean;
   /** Loading flag specific to the load-more action (so the button can spin without re-blanking the list). */
   loadingMore: boolean;
   /**
@@ -998,6 +1000,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   // Phase 24 RC follow-up — pagination state.
   tasksCursor: null,
   tasksHasMore: false,
+  tasksVisiblePageLimitReached: false,
   loadingMore: false,
   stepsByTask: {},
   screencastByTask: {},
@@ -1139,6 +1142,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           loading: false,
           tasksCursor: normalizeTaskListCursor(res?.nextCursor),
           tasksHasMore: normalizeTaskListCursor(res?.nextCursor) != null,
+          tasksVisiblePageLimitReached: false,
           ...pruneRuntimeStateForAwaitingUserTasks(current, tasks),
           ...pruneRuntimeStateForTerminalTasks(current, tasks),
         };
@@ -1165,14 +1169,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   async loadMoreTasks(visibleIds) {
     const generation = captureSessionGeneration();
     const versions = captureListVersions();
-    const { tasksCursor, tasksHasMore, loadingMore } = get();
-    if (loadingMore || !tasksHasMore || tasksCursor == null) return;
+    const { tasksCursor, tasksHasMore, tasksVisiblePageLimitReached, loadingMore } = get();
+    if (loadingMore || !tasksHasMore || tasksVisiblePageLimitReached || tasksCursor == null) return;
     const before = visibleIds?.(get().tasks);
     const seenCursors = new Set<number>();
     let cursor: number | null = tasksCursor;
     set({ loadingMore: true, error: null });
     try {
-      while (cursor !== null) {
+      for (let pages = 0; cursor !== null && pages < 5; pages += 1) {
         seenCursors.add(cursor);
         const res = await trpc.tasks.list.query({ limit: 50, cursor });
         if (!isCurrentSession(generation)) return;
@@ -1191,6 +1195,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           };
         });
         if (!before || !visibleIds || [...visibleIds(get().tasks)].some(id => !before.has(id))) break;
+        // Preserve the server cursor/hasMore truth, but stop scanning hidden pages.
+        if (pages === 4 && nextCursor !== null) set({ tasksVisiblePageLimitReached: true });
         cursor = nextCursor;
       }
     } catch (err) {
@@ -2539,6 +2545,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       error: null,
       tasksCursor: null,
       tasksHasMore: false,
+      tasksVisiblePageLimitReached: false,
       loadingMore: false,
       stepsByTask: {},
       screencastByTask: {},

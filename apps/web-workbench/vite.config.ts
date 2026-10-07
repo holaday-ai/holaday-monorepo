@@ -1,6 +1,7 @@
 import path from 'node:path';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig, type UserConfig } from 'vite';
+import { configDefaults, type UserConfig as VitestUserConfig } from 'vitest/config';
 import { resolveBrowserStreamProxyTarget } from './vite-browser-proxy';
 
 const devServerPort = Number(process.env.HOLADAY_WEB_PORT ?? 5173);
@@ -16,8 +17,10 @@ const browserStreamProxyTarget = resolveBrowserStreamProxyTarget(
 // consistent. /api and /ws are proxied to the orchestrator so the frontend
 // can talk to it with same-origin URLs — no CORS wrangling, no env var
 // plumbing for localhost.
-export default defineConfig({
+// Vite 6 owns plugin types; Vitest 2 supplies only its test options.
+const config: UserConfig & Pick<VitestUserConfig, 'test'> = {
   plugins: [react()],
+  test: { exclude: [...configDefaults.exclude, 'e2e/**'] },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -120,4 +123,6 @@ export default defineConfig({
       },
     },
   },
-});
+};
+
+export default defineConfig(config);

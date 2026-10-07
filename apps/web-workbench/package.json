@@ -9,7 +9,7 @@
     "preview": "vite preview --config vite.config.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "lint": "eslint 'src/**/*.{ts,tsx}'",
-    "test": "vitest run --exclude 'e2e/**'",
+    "test": "vitest run",
     "test:watch": "vitest",
     "test:interaction-audit": "playwright test --config e2e/playwright.config.ts interaction-audit.spec.ts interaction-rules.spec.ts",
     "preview:interaction-audit": "vite preview --config e2e/preview.config.ts",

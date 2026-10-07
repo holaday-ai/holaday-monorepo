@@ -256,3 +256,13 @@ describe('approved shell review navigation', () => {
     expect(screen.getByText('今日能量', { selector: '.hd-workbench-breadcrumb strong' })).toBeTruthy();
   });
 });
+
+
+it('replaces load more with an honest visible-task limit message', async () => {
+ const router = createMemoryRouter([{element:<AppShell/>,children:[{path:'/files',element:<main>文件库内容</main>}]}],{initialEntries:['/files']});
+ render(<ToastProvider><RouterProvider router={router}/></ToastProvider>);
+ await screen.findByText('文件库内容');
+ act(()=>useTaskStore.setState({ tasksHasMore:true, tasksCursor:301, tasksVisiblePageLimitReached:true }));
+ expect(screen.getByText('没有更多可见任务')).toBeTruthy();
+ expect(screen.queryByRole('button',{name:'加载更多任务'})).toBeNull();
+});

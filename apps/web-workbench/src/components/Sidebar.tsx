@@ -929,16 +929,18 @@ function LoadMoreTasksButton({
   // Hooks always run — even when an override is provided — so we
   // don't violate the hooks rules. Cheap reads when unused.
   const storeHasMore = useTaskStore((s) => s.tasksHasMore);
+  const storeLimitReached = useTaskStore((s) => s.tasksVisiblePageLimitReached);
   const storeLoadingMore = useTaskStore((s) => s.loadingMore);
   const storeLoadMore = useTaskStore((s) => s.loadMoreTasks);
-  const hasMore = override ? override.hasMore : storeHasMore;
+  const hasMore = override ? override.hasMore : storeHasMore && !storeLimitReached;
   const loadingMore = override ? override.loadingMore : storeLoadingMore;
   const onLoadMore = override
     ? override.onLoadMore
     : (): void => {
         void storeLoadMore();
       };
-  if (!hasMore) return override?.exhaustedCopy ? <p role="status" className="mx-3 my-2 text-xs text-muted-foreground">{override.exhaustedCopy}</p> : null;
+  const exhaustedCopy = override ? override.exhaustedCopy : storeLimitReached ? '没有更多可见任务' : undefined;
+  if (!hasMore) return exhaustedCopy ? <p role="status" className="mx-3 my-2 text-xs text-muted-foreground">{exhaustedCopy}</p> : null;
   return (
     <button
       type="button"

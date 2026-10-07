@@ -41,6 +41,7 @@ import { copyTextToClipboard } from '@/lib/copy-text';
 import { useToast } from '@/components/ui/toast';
 import {
   downloadFailureMessage,
+  isUnavailableFileStatus,
   downloadFileAuthed,
 } from '@/lib/download-file';
 import { formatFileSize } from '@/lib/file-size';
@@ -235,7 +236,7 @@ export function FilesPage(): JSX.Element {
     if (!mountedRef.current) return;
     if (!res.ok) {
       markFileUnavailableFromStatus(reference, res.status);
-      toast.show(downloadFailureMessage(res.status), 'error');
+      if (!isUnavailableFileStatus(res.status)) toast.show(downloadFailureMessage(res.status), 'error');
     }
   }
 
@@ -603,7 +604,7 @@ function FileRow({
         type="button"
         onClick={onPreview}
         disabled={unavailable}
-        title={unavailable ? `${file.filename} 已失效` : `预览 ${file.filename}`}
+        title={unavailable ? `${file.filename} 文件已不可用` : `预览 ${file.filename}`}
         className="group flex min-w-0 items-center gap-2.5 text-left disabled:cursor-not-allowed"
       >
         <FileThumbnail fileId={file.fileId} filename={file.filename} mime={file.mimetype} sizeBytes={file.sizeBytes} unavailable={unavailable} />
@@ -620,7 +621,7 @@ function FileRow({
           </span>
           {unavailable ? (
             <span className="shrink-0 rounded-full bg-[#EFEFEF] px-2 py-0.5 text-[10px] font-medium text-[#8B93A6]">
-              已失效
+              文件已不可用
             </span>
           ) : null}
         </span>
@@ -679,7 +680,7 @@ function FileRow({
             aria-label={`把 ${file.filename} 用于新任务`}
             title={
               unavailable
-                ? `${file.filename} 已失效`
+                ? `${file.filename} 文件已不可用`
                 : `把 ${file.filename} 用于新任务`
             }
             className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors hover:border-[#FF0061]/35 hover:bg-[#FF0061]/5 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:text-[#ADADAD] disabled:hover:border-[#DCDDDD] disabled:hover:bg-white"
@@ -705,10 +706,10 @@ function FileRow({
               <Eye className="text-muted-foreground" />
               <span>预览</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onDownload} disabled={unavailable}>
+            {!unavailable && <DropdownMenuItem onSelect={onDownload}>
               <Download className="text-muted-foreground" />
               <span>下载</span>
-            </DropdownMenuItem>
+            </DropdownMenuItem>}
             <DropdownMenuItem onSelect={onCopyReference} disabled={unavailable}>
               <Copy className="text-muted-foreground" />
               <span>复制引用</span>

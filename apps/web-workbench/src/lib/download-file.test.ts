@@ -43,8 +43,8 @@ describe('downloadFailureMessage', () => {
   it('keeps auth and unavailable-file failures specific', () => {
     expect(downloadFailureMessage(401)).toContain('刷新页面后重试');
     expect(downloadFailureMessage(403)).toContain('刷新页面后重试');
-    expect(downloadFailureMessage(404)).toBe('文件已失效，无法下载。');
-    expect(downloadFailureMessage(410)).toBe('文件已失效，无法下载。');
+    expect(downloadFailureMessage(404)).toBe('文件已不可用');
+    expect(downloadFailureMessage(410)).toBe('文件已不可用');
   });
 });
 
