@@ -1,5 +1,8 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { test, expect } from 'playwright/test';
-import { allowRequest, decideControl, registerReadOnlyGuard, routePatterns, type Control } from './audit-policy';
+import { allowRequest, decideControl, registerReadOnlyGuard, trackAuditReads, waitForAuditReads, routePatterns, readProcedures, type Control } from './audit-policy';
 
 const base = 'http://127.0.0.1:4173';
 const control: Control = { key: '1', selector: 'button', label: '', tag: 'button', role: '', href: null, type: 'button', expanded: null, disabled: false, hasReason: false };
@@ -15,6 +18,8 @@ test('live audit denies mutations, unknown API reads, external requests and unsa
   expect(decideControl({ ...control, label: '神秘按钮' })).toBe('unreviewed');
   expect(decideControl({ ...control, href: 'javascript:alert(1)' })).toBe('unreviewed');
   expect(decideControl({ ...control, label: '生成设置' })).toBe('safe');
+  expect(decideControl({ ...control, label: '显示密码', draftChoice: true })).toBe('final-action');
+  expect(decideControl({ ...control, label: '查看 API 密钥' })).toBe('final-action');
 });
 
 test('route inventory includes multiline, aliases and dynamic routes without inventing IDs', () => {
@@ -40,4 +45,75 @@ test('browser transport guard intercepts unsafe requests before any upstream han
   expect(statuses).toEqual([200, 409, 409]);
   expect(upstreamWrites).toBe(0);
   expect(blocks).toEqual(['POST /api/trpc/tasks.create', 'GET /api/trpc/admin.runSelfCheck']);
+});
+
+
+test('read inventory includes typed aliases and loader references but never mutations', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'holaday-audit-reads-'));
+  try {
+    fs.writeFileSync(path.join(directory, 'fixture.ts'), 'const typedClient: Client = trpc; typedClient.organizations.list.query(); typedClient.projects.get.query({}); typedClient.projects.create.mutate({}); load(trpc.projects.list.query); trpc.secret.queryExtra();');
+    expect([...readProcedures(directory)].sort()).toEqual(['organizations.list', 'projects.get', 'projects.list']);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+
+test('read readiness waits for API data while an unrelated image remains pending', async ({ browser }) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  let releaseAsset: () => void = () => undefined;
+  const assetSignal = new Promise<void>(resolve => { releaseAsset = resolve; });
+  let assetFinished = false;
+  const base = 'http://127.0.0.1:49199';
+  await context.route('**/*', async route => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === '/api/trpc/tasks.list') {
+      await new Promise(resolve => setTimeout(resolve, 450));
+      await route.fulfill({ contentType: 'application/json', body: '{}' });
+    } else if (pathname === '/slow-image') {
+      await assetSignal; assetFinished = true;
+      await route.fulfill({ contentType: 'image/png', body: '' }).catch(() => undefined);
+    } else {
+      await route.fulfill({ contentType: 'text/html', body: '<h1>Read fixture</h1><img src="/slow-image"><script>setTimeout(() => fetch("/api/trpc/tasks.list").then(r => r.json()).then(() => document.body.dataset.loaded = "true"), 30)</script>' });
+    }
+  });
+  trackAuditReads(page);
+  try {
+    await page.goto(base, { waitUntil: 'domcontentloaded' });
+    await waitForAuditReads(page);
+    expect(await page.locator('body').getAttribute('data-loaded')).toBe('true');
+    expect(assetFinished).toBe(false);
+  } finally { releaseAsset(); await context.close(); }
+});
+
+
+test('a timed-out read still fails without repeating the full wait; a new read gets its own window', async ({ browser }) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await context.route('**/*', async route => {
+    if (new URL(route.request().url()).pathname.startsWith('/api/trpc/')) await gate;
+    await route.fulfill({ contentType: 'text/html', body: '<h1>Read timeout fixture</h1>' }).catch(() => undefined);
+  });
+  trackAuditReads(page);
+  try {
+    await page.goto(base, { waitUntil: 'domcontentloaded' });
+    const first = page.waitForRequest(`${base}/api/trpc/tasks.list`);
+    await page.evaluate(() => { void fetch('/api/trpc/tasks.list').catch(() => undefined); }); await first;
+    await expect(waitForAuditReads(page, 150)).rejects.toThrow('read requests did not settle');
+    const repeat = await Promise.race([
+      waitForAuditReads(page, 5_000).then(() => 'incorrect success', () => 'recorded failure'),
+      page.waitForTimeout(400).then(() => 'repeated full wait'),
+    ]);
+    expect(repeat).toBe('recorded failure');
+    const second = page.waitForRequest(`${base}/api/trpc/projects.list`);
+    await page.evaluate(() => { void fetch('/api/trpc/projects.list').catch(() => undefined); }); await second;
+    const fresh = await Promise.race([
+      waitForAuditReads(page, 5_000).then(() => 'incorrect success', () => 'premature timeout'),
+      page.waitForTimeout(400).then(() => 'new read still waiting'),
+    ]);
+    expect(fresh).toBe('new read still waiting');
+  } finally { release(); await context.close(); }
 });

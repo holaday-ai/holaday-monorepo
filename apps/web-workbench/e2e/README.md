@@ -1,6 +1,6 @@
 # Production-read interaction audit
 
-Implementation status: initial audit harness; authenticated coverage calibration is pending the BOSS storageState export.
+Implementation status: read-only audit harness with serial route traversal and focused form, breadcrumb, back-state and confirmation checks. Findings and unresolved coverage remain separate from release acceptance.
 
 Run from `apps/web-workbench`. This is a staged audit, not a deployment command.
 The audit never logs credentials, request headers/bodies, console text, OAuth URLs,
@@ -18,9 +18,31 @@ sign in through the normal UI, then close the recorder:
 mkdir -p e2e/.auth
 chmod 700 e2e/.auth
 umask 077
-pnpm exec playwright codegen --save-storage=e2e/.auth/storage-state.json https://holaday.ai
+pnpm exec playwright codegen --save-storage=e2e/.auth/storage-state.json https://holaday.ai/login
 chmod 600 e2e/.auth/storage-state.json
 ```
+
+Google can reject the automation capture browser. Do not weaken browser security or
+retry that blocked OAuth flow. Use the site's supported password/email-code login,
+or have the user export only the Holaday access-token entry from their already
+signed-in normal Chrome session. Both production origins are supported. Never
+print that entry or collect Google cookies. Move the downloaded export into
+`e2e/.auth/storage-state.json`, chmod 600, and confirm Git ignores it.
+
+Set `HOLADAY_AUDIT_RESUME=1` to continue only the routes recorded as completed in
+that viewport's private JSON receipt. Do not reuse a receipt after changing the
+build, account, or viewport. Preserve incomplete calibration receipts separately.
+
+Set `HOLADAY_AUDIT_FOCUSED_RETRY=1` to rerun only focused rules not already
+recorded as completed in `<viewport>-rules.json`. Main-route and focused-rule
+receipts are separate; a completed traversal can still contain findings or gaps.
+
+Read readiness uses a bounded API wait, then DOM stability, rather than global
+`networkidle` or waiting for unrelated images. In observation mode, an API batch
+that exceeds this wait becomes an explicit `not-verified` receipt and observation
+continues on rendered UI. This is never a successful data/API acceptance check.
+Dynamic-ID payloads are read after `requestfinished`, never in an early response
+callback. Verification mode rejects unresolved data/readiness and coverage gaps.
 
 The audit imports only the Holaday access-token localStorage entry into the loopback
 preview context. It does not import unrelated cookies, Google credentials, or other
@@ -62,7 +84,14 @@ WebSocket traffic fail closed. External images/fonts/styles may load over HTTPS
 without Authorization. Final confirmation/immediate-save/paid buttons are excluded
 before click; unknown controls need source review before entering the safe list.
 
-Each control is independently replayed from its page; newly revealed menu/popup
+Readiness waits for bounded tRPC reads and DOM stability, rather than unrelated
+image/font requests. Already explained disabled controls are checked directly from
+the rendered inventory without repeated page reloads.
+
+Each page inventories all controls. Stable shared-sidebar controls are behavior-tested
+once per viewport and checked for rendering on later pages; receipts name the original
+route instead of claiming a repeat behavioral test. Page-specific controls are
+independently replayed from their page; newly revealed menu/popup
 controls are inventoried to a maximum depth of three. Deeper flows, forms requiring
 unsafe final submission, dynamic records without read access, breadcrumb semantic
 checks, and live stream occlusion are reported as gaps. **These are not accepted
