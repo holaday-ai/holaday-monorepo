@@ -939,6 +939,7 @@ export function ProjectsPage(): JSX.Element {
         />
       ) : null}
       <ConfirmDialog
+          overlayClassName="hd-approved-confirm"
         open={pendingDelete !== null && (pendingDelete.scope === 'personal' || teamSurfaceEnabled)}
         title="删除这个项目？"
         description={
@@ -957,6 +958,7 @@ export function ProjectsPage(): JSX.Element {
         }}
       />
       <ConfirmDialog
+          overlayClassName="hd-approved-confirm"
         open={teamSurfaceEnabled && selectedOrganization !== null && pendingMemberRemoval !== null}
         title="移除这位团队成员？"
         description={
@@ -1351,7 +1353,7 @@ function CreateNameDialog({
     <Dialog.Root open={open} onOpenChange={(nextOpen) => !nextOpen && close()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[78] bg-black/35 backdrop-blur-sm data-[state=open]:animate-fade-in" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-[79] w-[calc(100vw-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-[12px] border border-[#DCDDDD] bg-white p-5 shadow-[0_20px_60px_rgba(17,24,39,0.18)] focus:outline-none dark:border-white/10 dark:bg-card">
+        <Dialog.Content className="hd-project-name-dialog fixed left-1/2 top-1/2 z-[79] w-[calc(100vw-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-[12px] border border-[#DCDDDD] bg-white p-5 shadow-[0_20px_60px_rgba(17,24,39,0.18)] focus:outline-none dark:border-white/10 dark:bg-card">
           <div className="flex items-start justify-between gap-4">
             <div>
               <Dialog.Title className="text-base font-semibold text-foreground">

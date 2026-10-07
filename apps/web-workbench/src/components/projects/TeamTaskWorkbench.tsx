@@ -286,7 +286,7 @@ export function TeamTaskWorkbench({
               <TaskBoard rows={visibleRows} onSelect={openDetail} />
             ) : null}
           </div>
-          {approved ? <aside className="hd-project-info hd-team-info"><section><h2>项目说明</h2><p>{projectDescription || '还没有项目说明。'}</p></section><section><h2>参考资料</h2><p>项目资料关联尚未接入，已有文件可在文件库中查看。</p><a href="/files">查看文件库</a></section><MembersRail members={members} loading={membersLoading} error={memberError} /><details><summary>项目进展与权限</summary>{projectOverview}<SummaryRail groups={groups} /></details></aside> : <MembersRail members={members} loading={membersLoading} error={memberError} />}
+          {approved ? <aside className="hd-project-info hd-team-info"><section><h2>项目说明</h2><p>{projectDescription || '还没有项目说明。'}</p></section><section><h2>参考资料</h2><div className="hd-project-coming-soon"><span>即将上线</span><p>将文件集中到项目，随时供任务参考。</p></div></section><MembersRail members={members} loading={membersLoading} error={memberError} /><details><summary>项目进展与权限</summary>{projectOverview}<SummaryRail groups={groups} /></details></aside> : <MembersRail members={members} loading={membersLoading} error={memberError} />}
         </div>
       </div>
       {selected ? (

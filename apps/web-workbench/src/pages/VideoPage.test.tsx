@@ -161,3 +161,15 @@ describe('VideoPage scenario-first production wiring', () => {
   });
 
 });
+
+it('closes the reference-video dialog with Escape and restores its trigger without submitting', async () => {
+  const user = userEvent.setup();
+  renderPage();
+  const trigger = await screen.findByRole('button', { name: '添加参考视频' });
+  await user.click(trigger);
+  expect(screen.getByRole('dialog', { name: '添加参考视频' })).toBeTruthy();
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '添加参考视频' })).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+  expect(mocks.createTask).not.toHaveBeenCalled();
+});

@@ -503,9 +503,16 @@ export function FilesPage(): JSX.Element {
         )}
         <FilePreviewModal
           payload={previewing}
+          approved
+          createdAt={files.find(file => file.fileId === previewing?.fileId)?.createdAt}
+          onUse={previewing ? () => {
+            const file = files.find(item => item.fileId === previewing.fileId);
+            if (file) onUseInNewTask(file);
+          } : undefined}
           onClose={() => setPreviewing(null)}
         />
         <ConfirmDialog
+          overlayClassName="hd-approved-confirm"
           open={pendingDelete !== null}
           title="删除这个文件？"
           description={

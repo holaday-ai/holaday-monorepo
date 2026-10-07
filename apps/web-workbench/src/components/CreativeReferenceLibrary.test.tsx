@@ -86,6 +86,7 @@ it('allows document references for stock research while preserving their file id
   query.mockResolvedValue({ items: [{ ...file, fileId: 'file_report', filename: '财报.pdf', mimetype: 'application/pdf' }], nextCursor: null });
   const p = props();
   render(<CreativeReferenceLibrary {...p} fileType="all" theme="light" />);
+  expect(screen.getByRole('textbox', { name: '搜索参考文件' })).toBeTruthy();
   await act(async () => { await vi.advanceTimersByTimeAsync(201); });
   expect(query).toHaveBeenCalledWith({ type: 'all', q: undefined, limit: 50 });
   fireEvent.click(screen.getByRole('button', { name: /财报.pdf/ }));

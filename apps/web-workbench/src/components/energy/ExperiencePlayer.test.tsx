@@ -57,7 +57,7 @@ function Harness({
       </button>
       <ExperiencePlayer
         open={open}
-        experience={TAROT}
+        experience={open ? TAROT : null}
         phase={phase}
         returnFocusRef={triggerRef}
         onClose={() => {

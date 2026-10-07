@@ -765,3 +765,12 @@
 @keyframes hd-plan-backdrop-in{from{opacity:0}to{opacity:1}}
 @media(max-width:600px){.planned-inspector{inset:12px;max-width:none;width:calc(100vw - 24px);height:calc(100dvh - 24px)}.planned-inspector__body{padding-inline:20px}}
 @media(prefers-reduced-motion:reduce){.planned-inspector[data-state=open],.planned-inspector-overlay{animation:none}}
+
+.planned-inspector[data-state=closed]{animation:hd-plan-drawer-out 380ms ease-in both;pointer-events:none}
+.planned-inspector-overlay[data-state=closed]{animation:hd-plan-backdrop-out 380ms ease-in both}
+.hd-day-agenda{animation:hd-plan-day-in 420ms ease-out}
+.planned-calendar .fc-popover{border-radius:16px;border:1px solid #eee5eb;box-shadow:0 12px 36px #34232f18;overflow:hidden}
+@keyframes hd-plan-drawer-out{to{opacity:0;transform:translateX(18px)}}
+@keyframes hd-plan-backdrop-out{to{opacity:0}}
+@keyframes hd-plan-day-in{from{opacity:.45;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.planned-inspector[data-state=closed],.planned-inspector-overlay[data-state=closed],.hd-day-agenda{animation:none}}

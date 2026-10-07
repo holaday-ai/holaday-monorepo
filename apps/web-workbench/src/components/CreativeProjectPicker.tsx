@@ -71,6 +71,7 @@ function CreativeProjectPicker({
   async function load() {
     const id = ++version.current;
     setLoading(true);
+    setRows([]);
     setError(false);
     try {
       const result = await trpc.projects.list.query();
@@ -110,6 +111,7 @@ function CreativeProjectPicker({
         <div className="hd-model-options">
           <button
             type="button"
+            aria-pressed={!selected}
             onClick={() => {
               onSelect(null);
               setOpen(false);
@@ -122,6 +124,7 @@ function CreativeProjectPicker({
             <button
               type="button"
               key={project.projectId}
+              aria-pressed={selected?.projectId === project.projectId}
               onClick={() => {
                 onSelect(project);
                 setOpen(false);
@@ -132,7 +135,16 @@ function CreativeProjectPicker({
             </button>
           ))}
         </div>
-        {loading && <p role="status">加载中…</p>}
+        {loading && (
+          <p className="hd-picker-state" role="status">
+            加载中…
+          </p>
+        )}
+        {!loading && !error && rows.length === 0 && (
+          <p className="hd-picker-state" role="status">
+            还没有个人项目，可先在项目页创建。
+          </p>
+        )}
         {error && (
           <p role="alert">
             项目暂时无法加载{' '}

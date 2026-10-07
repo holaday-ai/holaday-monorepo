@@ -103,7 +103,8 @@ import {
   XCircle,
 } from 'lucide-react';
 import * as React from 'react';
-import { createPortal } from 'react-dom';
+import * as Dialog from '@radix-ui/react-dialog';
+import { CreativeDisclosure } from '@/components/CreativeDisclosure';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 /**
@@ -681,6 +682,7 @@ function CreativeStudioPage({
   }, [model, normalModelOptions, videoTab]);
   const [stylePickerOpen, setStylePickerOpen] = React.useState<CreativeStyleGroup | null>(null);
   const [referenceVideoDialogOpen, setReferenceVideoDialogOpen] = React.useState(false);
+  const referenceVideoTrigger = React.useRef<HTMLButtonElement>(null);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [settingsKind, setSettingsKind] = React.useState<'model' | 'specs'>('model');
   const settingsAnchor = React.useRef<HTMLButtonElement | null>(null);
@@ -1007,7 +1009,7 @@ function CreativeStudioPage({
                 <Textarea value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="描述你想拍出的画面，也可以添加产品或主角图片…" aria-label="告诉 HOLA DAY 你的重点" className="hd-media-prompt" />
                 <div className="hd-media-bottom"><div className="hd-media-tools"><button type="button" className="hd-media-add" title="添加本地资料" aria-label="添加本地资料" onClick={() => imageInputRef.current?.click()}><Plus className="h-4 w-4" /></button>
                   <button className="hd-glass-pill" type="button" title="添加参考图" aria-label="添加参考图" onClick={() => imageInputRef.current?.click()}><ImagePlus className="h-4 w-4" />参考图</button>
-                  <button className="hd-glass-pill" type="button" title="添加参考视频" aria-label="添加参考视频" onClick={() => setReferenceVideoDialogOpen(true)}><VideoIcon className="h-4 w-4" />参考视频</button>
+                  <button className="hd-glass-pill" type="button" title="添加参考视频" aria-label="添加参考视频" ref={referenceVideoTrigger} onClick={() => setReferenceVideoDialogOpen(true)}><VideoIcon className="h-4 w-4" />参考视频</button>
                   <button className="hd-glass-pill" type="button" aria-expanded={settingsOpen} title="调整视频规格" onClick={event => { settingsAnchor.current = event.currentTarget; setSettingsKind('specs'); setSettingsOpen(true); }}>{aspectRatio} · {durationSeconds}秒 · {resolution}<ChevronDown className="h-3 w-3" /></button>
                 </div><div className="hd-creative-generation-actions"><button type="button" className="hd-generate" onClick={() => void handleSubmit()} disabled={submitting}>{submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}<span>{submitting ? '提交中…' : '准备生成'}</span></button><small className="hd-quote-hint">生成前确认积分</small></div></div>
                       <input
@@ -1036,9 +1038,9 @@ function CreativeStudioPage({
                           event.target.value = '';
                         }}
                       />
-                {referenceVideoDialogOpen && <ReferenceVideoUploadDialog onClose={() => setReferenceVideoDialogOpen(false)} onChoose={() => fileInputRef.current?.click()} />}
+                <ReferenceVideoUploadDialog open={referenceVideoDialogOpen} returnFocusRef={referenceVideoTrigger} onClose={() => setReferenceVideoDialogOpen(false)} onChoose={() => fileInputRef.current?.click()} />
               </section>
-              <details className="hd-storyboard-disclosure"><summary>示例分镜</summary><VideoCreationStoryboard scenario={activeScenario} /></details>
+              <CreativeDisclosure label="示例分镜"><VideoCreationStoryboard scenario={activeScenario} /></CreativeDisclosure>
 
               {videoEditingEnabled ? (
                 <div className="relative z-10 mt-3 flex flex-col gap-3 rounded-[18px] border border-[var(--creative-line,#E9E1EA)] bg-[linear-gradient(120deg,#FFF9FB,#F7F8FF)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1412,97 +1414,25 @@ function CreativeStyleDialog({
   );
 }
 
-function ReferenceVideoUploadDialog({
-  onClose,
-  onChoose,
-}: {
+function ReferenceVideoUploadDialog({ open, onClose, onChoose, returnFocusRef }: {
+  open: boolean;
   onClose(): void;
   onChoose(): void;
-}): React.ReactPortal | null {
-  if (typeof document === 'undefined') return null;
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-[#111827]/28 px-4 py-8 backdrop-blur-[1px]"
-      onMouseDown={onClose}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="添加参考视频"
-        className="w-full max-w-[420px] overflow-hidden rounded-[24px] border border-white/70 bg-[var(--creative-surface,#fff)] shadow-[0_28px_80px_rgba(17,24,39,0.22)]"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-4 border-b border-[var(--creative-line,#EFEFEF)] px-5 py-4">
-          <div>
-            <h2 className="text-[17px] font-semibold text-[var(--creative-ink,#111827)]">添加参考视频</h2>
-            <p className="mt-1 text-[12px] leading-5 text-[var(--creative-muted,#8B93A6)]">
-              用于参考动作、节奏、镜头或构图。
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-[10px] p-2 text-[var(--creative-muted,#8B93A6)] hover:bg-[var(--creative-surface,#EFEFEF)] hover:text-[var(--creative-ink,#111827)]"
-            aria-label="关闭添加参考视频"
-            title="关闭添加参考视频"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="p-5">
-          <div className="rounded-[20px] border border-[var(--creative-line,#EFEFEF)] bg-[var(--creative-surface,#FAFAFA)] p-4">
-            <div className="flex items-start gap-3">
-              <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-[14px] bg-[linear-gradient(135deg,#FF0061_0%,#8A63FF_55%,#1E9BFF_100%)] text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.48),0_10px_20px_rgba(255,0,97,0.16)]">
-                <span
-                  className="absolute inset-0 bg-[radial-gradient(circle_at_28%_18%,rgba(255,255,255,0.62),rgba(255,255,255,0)_35%)]"
-                  aria-hidden
-                />
-                <Clapperboard className="relative h-5 w-5" aria-hidden />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-[14px] font-semibold text-[var(--creative-ink,#111827)]">参考视频文件</div>
-                <div className="mt-1 text-[12px] leading-5 text-[var(--creative-muted,#8B93A6)]">
-                  支持 MP4 / MOV。建议上传清晰、较短的视频片段，最终以生成结果为准。
-                </div>
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  <span className="rounded-full bg-[var(--creative-surface,#fff)] px-2 py-1 text-[11px] font-medium text-[var(--creative-ink,#595757)] ring-1 ring-[#EFEFEF]">
-                    MP4
-                  </span>
-                  <span className="rounded-full bg-[var(--creative-surface,#fff)] px-2 py-1 text-[11px] font-medium text-[var(--creative-ink,#595757)] ring-1 ring-[#EFEFEF]">
-                    MOV
-                  </span>
-                  <span className="rounded-full bg-[var(--creative-surface,#fff)] px-2 py-1 text-[11px] font-medium text-[var(--creative-ink,#595757)] ring-1 ring-[#EFEFEF]">
-                    动作参考
-                  </span>
-                  <span className="rounded-full bg-[var(--creative-surface,#fff)] px-2 py-1 text-[11px] font-medium text-[var(--creative-ink,#595757)] ring-1 ring-[#EFEFEF]">
-                    镜头参考
-                  </span>
-                </div>
-              </div>
-            </div>
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-full px-4 text-[13px]"
-                onClick={onClose}
-              >
-                取消
-              </Button>
-              <Button
-                type="button"
-                className="h-9 rounded-full bg-[#FF0061] px-4 text-[13px] hover:bg-[#FF0061]/90"
-                onClick={onChoose}
-              >
-                选择视频
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
+  returnFocusRef: React.RefObject<HTMLButtonElement>;
+}): JSX.Element {
+  return <Dialog.Root open={open} onOpenChange={next => !next && onClose()}>
+    <Dialog.Portal>
+      <Dialog.Overlay className="hd-creative-overlay" />
+      <Dialog.Content className="hd-inspiration-dialog hd-reference-video-dialog"
+        onCloseAutoFocus={event => { event.preventDefault(); returnFocusRef.current?.focus(); }}>
+        <Dialog.Title>添加参考视频</Dialog.Title>
+        <Dialog.Description>用于参考动作、节奏、镜头或构图。</Dialog.Description>
+        <Dialog.Close className="hd-dialog-close" title="关闭添加参考视频" aria-label="关闭添加参考视频"><X /></Dialog.Close>
+        <div className="hd-reference-video-hint"><Clapperboard aria-hidden /><div><strong>参考视频文件</strong><p>支持 MP4 / MOV。建议上传清晰、较短的视频片段。</p><small>文件添加后，可继续调整创作要求。</small></div></div>
+        <footer><Dialog.Close className="hd-glass-pill">取消</Dialog.Close><button type="button" className="hd-glass-pill" onClick={onChoose}>选择视频</button></footer>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>;
 }
 
 function CreativeSelect({

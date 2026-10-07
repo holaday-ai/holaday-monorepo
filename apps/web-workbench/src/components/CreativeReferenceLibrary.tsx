@@ -93,13 +93,19 @@ export function CreativeReferenceLibrary({
     }
   }
   return (
-    <CreativePopover theme={theme} open={open} onOpenChange={onOpenChange} anchorRef={anchorRef} title="参考资料">
+    <CreativePopover
+      theme={theme}
+      open={open}
+      onOpenChange={onOpenChange}
+      anchorRef={anchorRef}
+      title="参考资料"
+    >
       <div className="hd-media-library">
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="搜索图片名称"
-          aria-label="搜索参考图片"
+          placeholder={fileType === 'images' ? '搜索图片名称' : '搜索文件名称'}
+          aria-label={fileType === 'images' ? '搜索参考图片' : '搜索参考文件'}
         />
         {error && (
           <p role="alert">
@@ -134,8 +140,20 @@ export function CreativeReferenceLibrary({
             <small>{selectedFileIds.includes(file.fileId) ? '已添加' : '添加'}</small>
           </button>
         ))}
-        {loading && <p role="status">加载中…</p>}
-        {!loading && !error && files.length === 0 && <p>{fileType === 'images' ? '暂无可用图片，可从本地添加。' : '暂无可用文件，可从本地添加。'}</p>}
+        {loading && (
+          <p className="hd-picker-state" role="status">
+            加载中…
+          </p>
+        )}
+        {!loading && !error && files.length === 0 && (
+          <p className="hd-picker-state" role="status">
+            {query.trim()
+              ? '没有找到匹配的文件，试试其他名称。'
+              : fileType === 'images'
+                ? '暂无可用图片，可从本地添加。'
+                : '暂无可用文件，可从本地添加。'}
+          </p>
+        )}
         {cursor !== null && (
           <button type="button" disabled={loading} onClick={() => void more()}>
             加载更多
