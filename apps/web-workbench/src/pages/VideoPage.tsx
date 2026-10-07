@@ -953,7 +953,7 @@ function CreativeStudioPage({
 
   const project = useCreativeProject();
   async function handleCreated(taskId: string) { await project.associate(taskId); onTaskCreated(taskId); }
-  const modelControl = (<div className="hd-composer-meta"><button className="hd-glass-pill" type="button" aria-expanded={settingsOpen} title="模型与生成设置" onClick={event => { settingsAnchor.current = event.currentTarget; setSettingsKind(isIpVideo ? 'specs' : 'model'); setSettingsOpen(true); }}><Clapperboard className="h-4 w-4" />{isCloneVideo ? modelOptionDisplayName(modelOptionFor(model, CLONE_MODEL_OPTIONS)) : isIpVideo ? '人物口播' : creativeModelDisplayName(model as NormalVideoModel)}<ChevronDown className="h-3 w-3" /></button>{videoTab === 'normal' && templateLabel && <button type="button" className="hd-glass-pill" title="移除模板" onClick={() => setTemplateLabel(null)}>{templateLabel}<X className="h-3 w-3" /></button>}</div>);
+  const modelControl = (<div className="hd-composer-meta"><button className="hd-glass-pill" type="button" aria-expanded={settingsOpen} title="模型与生成设置" onClick={event => { settingsAnchor.current = event.currentTarget; const kind = isIpVideo ? 'specs' : 'model'; setSettingsKind(kind); setSettingsOpen(open => settingsKind === kind ? !open : true); }}><Clapperboard className="h-4 w-4" />{isCloneVideo ? modelOptionDisplayName(modelOptionFor(model, CLONE_MODEL_OPTIONS)) : isIpVideo ? '人物口播' : creativeModelDisplayName(model as NormalVideoModel)}<ChevronDown className="h-3 w-3" /></button>{videoTab === 'normal' && templateLabel && <button type="button" className="hd-glass-pill" title="移除模板" onClick={() => setTemplateLabel(null)}>{templateLabel}<X className="h-3 w-3" /></button>}</div>);
 
   return (
     <main className="hd-creative-page hd-video-page min-h-full bg-[var(--creative-surface,#FBFAF7)] text-[var(--creative-ink,#342E39)]">
@@ -992,7 +992,7 @@ function CreativeStudioPage({
           </div>
           <div className="hd-media-mode" hidden={videoTab !== 'normal'}>
               <section aria-label="视频创作工作台" data-creative-composer className="hd-video-brief">
-                <div className="hd-composer-source"><button type="button" title="添加参考素材" ref={libraryAnchor} onClick={() => setLibraryOpen(true)}><Files className="h-4 w-4" />参考资料</button>{project.renderPicker(submitting)}</div>
+                <div className="hd-composer-source"><button type="button" title="添加参考素材" ref={libraryAnchor} onClick={() => setLibraryOpen(open => !open)}><Files className="h-4 w-4" />参考资料</button>{project.renderPicker(submitting)}</div>
                 <h2 id="video-brief-heading" className="sr-only">告诉 HOLA DAY 你的重点</h2>
                   {attachments.length > 0 ? (
                     <div className="hd-brief-chips mt-5 flex flex-wrap gap-2 border-t border-[var(--creative-line,#EFEFEF)] pt-4">
@@ -1010,7 +1010,7 @@ function CreativeStudioPage({
                 <div className="hd-media-bottom"><div className="hd-media-tools"><button type="button" className="hd-media-add" title="添加本地资料" aria-label="添加本地资料" onClick={() => imageInputRef.current?.click()}><Plus className="h-4 w-4" /></button>
                   <button className="hd-glass-pill" type="button" title="添加参考图" aria-label="添加参考图" onClick={() => imageInputRef.current?.click()}><ImagePlus className="h-4 w-4" />参考图</button>
                   <button className="hd-glass-pill" type="button" title="添加参考视频" aria-label="添加参考视频" ref={referenceVideoTrigger} onClick={() => setReferenceVideoDialogOpen(true)}><VideoIcon className="h-4 w-4" />参考视频</button>
-                  <button className="hd-glass-pill" type="button" aria-expanded={settingsOpen} title="调整视频规格" onClick={event => { settingsAnchor.current = event.currentTarget; setSettingsKind('specs'); setSettingsOpen(true); }}>{aspectRatio} · {durationSeconds}秒 · {resolution}<ChevronDown className="h-3 w-3" /></button>
+                  <button className="hd-glass-pill" type="button" aria-expanded={settingsOpen} title="调整视频规格" onClick={event => { settingsAnchor.current = event.currentTarget; setSettingsKind('specs'); setSettingsOpen(open => settingsKind === 'specs' ? !open : true); }}>{aspectRatio} · {durationSeconds}秒 · {resolution}<ChevronDown className="h-3 w-3" /></button>
                 </div><div className="hd-creative-generation-actions"><button type="button" className="hd-generate" onClick={() => void handleSubmit()} disabled={submitting}>{submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}<span>{submitting ? '提交中…' : '准备生成'}</span></button><small className="hd-quote-hint">生成前确认积分</small></div></div>
                       <input
                         ref={imageInputRef}
@@ -1228,6 +1228,7 @@ function CreativeStyleSummaryPicker({
   onColorChange(value: CreativeStyleKey): void;
   accent: string;
 }): JSX.Element {
+  const styleTrigger = React.useRef<HTMLButtonElement>(null);
   const values: Record<CreativeStyleGroup, CreativeStyleKey> = {
     vibe,
     lighting,
@@ -1247,6 +1248,7 @@ function CreativeStyleSummaryPicker({
       <div className="mb-2 text-[13px] font-semibold text-[var(--creative-muted,#ADADAD)]">风格样式</div>
       <button
         type="button"
+        ref={styleTrigger}
         onClick={() => onOpenGroupChange('vibe')}
         className="flex h-11 w-full min-w-0 items-center gap-3 rounded-[10px] border border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] px-3 text-left transition-colors hover:border-[#ADADAD] focus:border-[#FF0061] focus:outline-none"
       >
@@ -1263,6 +1265,7 @@ function CreativeStyleSummaryPicker({
       </button>
       {openGroup ? (
         <CreativeStyleDialog
+          returnFocusRef={styleTrigger}
           activeGroup={openGroup}
           values={values}
           onActiveGroupChange={onOpenGroupChange}
@@ -1296,6 +1299,7 @@ function CreativeStyleIcon(): JSX.Element {
 }
 
 function CreativeStyleDialog({
+  returnFocusRef,
   activeGroup,
   values,
   onActiveGroupChange,
@@ -1304,6 +1308,7 @@ function CreativeStyleDialog({
   accent,
   previewSubject,
 }: {
+  returnFocusRef: React.RefObject<HTMLButtonElement>;
   activeGroup: CreativeStyleGroup;
   values: Record<CreativeStyleGroup, CreativeStyleKey>;
   onActiveGroupChange(group: CreativeStyleGroup): void;
@@ -1314,23 +1319,20 @@ function CreativeStyleDialog({
 }): JSX.Element {
   const title = STYLE_GROUPS[activeGroup].title;
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-8"
-      onMouseDown={onClose}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={`选择${title}`}
-        className="max-h-[min(760px,calc(100vh-56px))] w-full max-w-[560px] overflow-hidden rounded-[24px] border border-white/20 bg-[#151515] text-white shadow-[0_28px_80px_rgba(0,0,0,0.34)]"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-4 px-5 pb-3 pt-4">
+    <Dialog.Root open onOpenChange={next => { if (!next) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-[99] bg-black/35" />
+        <Dialog.Content
+          aria-label={`选择${title}`}
+          onCloseAutoFocus={event => { event.preventDefault(); returnFocusRef.current?.focus(); }}
+          className="fixed left-1/2 top-1/2 z-[100] flex max-h-[min(760px,calc(100dvh-32px))] w-[calc(100vw-32px)] max-w-[560px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[24px] border border-white/20 bg-[#151515] text-white shadow-[0_28px_80px_rgba(0,0,0,0.34)]"
+        >
+        <div className="flex shrink-0 items-start justify-between gap-4 px-5 pb-3 pt-4">
           <div>
-            <h2 className="text-[18px] font-semibold text-white">{title}</h2>
-            <p className="mt-1 text-[12px] text-white/55">
+            <Dialog.Title className="text-[18px] font-semibold text-white">{title}</Dialog.Title>
+            <Dialog.Description className="mt-1 text-[12px] text-white/55">
               选择会写进视频提示词；随机则交给模型自行判断。
-            </p>
+            </Dialog.Description>
           </div>
           <button
             type="button"
@@ -1342,7 +1344,7 @@ function CreativeStyleDialog({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="grid grid-cols-3 px-5 pt-2">
+        <div className="grid shrink-0 grid-cols-3 px-5 pt-2">
           {(Object.keys(STYLE_GROUPS) as CreativeStyleGroup[]).map((group) => {
             const active = group === activeGroup;
             return (
@@ -1364,7 +1366,7 @@ function CreativeStyleDialog({
             );
           })}
         </div>
-        <div className="max-h-[580px] overflow-y-auto p-5">
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {STYLE_OPTIONS_BY_GROUP[activeGroup].map((option) => {
               const active = option.key === values[activeGroup];
@@ -1409,8 +1411,9 @@ function CreativeStyleDialog({
             })}
           </div>
         </div>
-      </div>
-    </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 

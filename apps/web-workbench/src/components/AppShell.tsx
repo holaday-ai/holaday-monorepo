@@ -205,6 +205,9 @@ export function AppShell(): JSX.Element {
 
   // Task store selectors.
   const tasks = useTaskStore((s) => s.tasks);
+  const tasksHasMore = useTaskStore((s) => s.tasksHasMore);
+  const loadingMoreTasks = useTaskStore((s) => s.loadingMore);
+  const loadMoreTasks = useTaskStore((s) => s.loadMoreTasks);
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId);
   const selectTask = useTaskStore((s) => s.selectTask);
   const enterNewTaskMode = useTaskStore((s) => s.enterNewTaskMode);
@@ -714,6 +717,21 @@ export function AppShell(): JSX.Element {
     };
   }, [loadMoreProjectTasks, projectFilter, projectTaskFilter]);
 
+  const retentionPagerOverride = {
+    hasMore: tasksHasMore,
+    loadingMore: loadingMoreTasks,
+    onLoadMore: () => {
+      void loadMoreTasks(rows => {
+        const pinned = new Set(rows.filter(row => row.starred).map(row => row.taskId));
+        if (selectedTaskId) pinned.add(selectedTaskId);
+        return new Set(applyHistoryRetention(rows, historyDays, pinned).visible.map(row => row.taskId));
+      });
+    },
+    exhaustedCopy: hiddenByRetentionCount > 0
+      ? `没有更多可见任务（${hiddenByRetentionCount} 条已超出保留期）`
+      : undefined,
+  };
+
   if (!authed) {
     return (
       <LoginGate
@@ -755,7 +773,7 @@ export function AppShell(): JSX.Element {
           projectFilterChip
         }
         onClearProjectFilter={() => navigate('/')}
-        pagerOverride={projectPagerOverride}
+        pagerOverride={projectPagerOverride ?? retentionPagerOverride}
         selectedTaskId={selectedTaskId}
         onSelectTask={(taskId) => {
           if (location.pathname !== '/') {

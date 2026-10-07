@@ -237,9 +237,9 @@ describe('task hub state helpers', () => {
   });
 
   it('formats dates and errors defensively', () => {
-    const now = new Date('2026-05-24T12:00:00.000Z');
-    expect(formatTaskHubTime('2026-05-24T01:05:00.000Z', now)).toBe('今天 10:05');
-    expect(formatTaskHubTime('2026-05-20T01:05:00.000Z', now)).toBe('2026-05-20 10:05');
+    const now = new Date(2026, 4, 24, 12);
+    expect(formatTaskHubTime(new Date(2026, 4, 24, 10, 5), now)).toBe('今天 10:05');
+    expect(formatTaskHubTime(new Date(2026, 4, 20, 10, 5), now)).toBe('2026-05-20 10:05');
     expect(formatTaskHubTime('not-a-date', now)).toBe('—');
     expect(taskHubErrorMessage(new Error('offline'))).toBe(
       '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',

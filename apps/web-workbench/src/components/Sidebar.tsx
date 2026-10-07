@@ -157,6 +157,7 @@ interface Props {
     hasMore: boolean;
     loadingMore: boolean;
     onLoadMore: () => void;
+    exhaustedCopy?: string;
   };
 }
 
@@ -206,6 +207,7 @@ export function Sidebar({
   historyDays,
   pagerOverride,
 }: Props): JSX.Element {
+  const { setOpenMobile, state: sidebarState } = useSidebar();
   const togglePin = useTaskStore((s) => s.togglePin);
   const liveSubStatusByTask = useTaskStore((s) => s.subStatusByTask);
   // Belt-and-braces: collapse any duplicate taskId rows the store may
@@ -308,16 +310,17 @@ export function Sidebar({
   }, [batchDeletableTaskIds]);
   const deleteSelected = React.useCallback(() => {
     if (selectedBatchDeleteIds.length === 0 || !onDeleteTasks) return;
+    setOpenMobile(false);
+    onMobileClose?.();
     onDeleteTasks(selectedBatchDeleteIds);
     exitBatchMode();
-  }, [exitBatchMode, onDeleteTasks, selectedBatchDeleteIds]);
+  }, [exitBatchMode, onDeleteTasks, onMobileClose, selectedBatchDeleteIds, setOpenMobile]);
 
   // Optimization #4 — shadcn SidebarProvider owns the open/collapse
   // state (cookie-persisted + Cmd+B shortcut + smooth transitions).
   // We just bind mobile open via setOpenMobile so the legacy
   // `mobileOpen` prop continues to drive the Sheet from
   // WorkbenchApp's hamburger button.
-  const { setOpenMobile, state: sidebarState } = useSidebar();
   const sidebarIsCompact = adaptiveCollapsed || sidebarState === 'collapsed';
   const { pathname: sidebarPath } = useLocation();
   React.useEffect(() => {
@@ -382,7 +385,7 @@ export function Sidebar({
               <SidebarMenuItem>
                 <SidebarMenuButton
                   tooltip="搜索任务 (⌘K)"
-                  onClick={() => onOpenSearch()}
+                  onClick={() => { setOpenMobile(false); onMobileClose?.(); onOpenSearch(); }}
                   className="rounded-[8px] border border-transparent text-[#595757] hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 hover:text-[#FF0061] dark:text-foreground/70 dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10"
                 >
                   <Search />
@@ -691,6 +694,8 @@ export function Sidebar({
           onDeleteTask
             ? () => {
                 if (!menu || !menu.deletable) return;
+                setOpenMobile(false);
+                onMobileClose?.();
                 void onDeleteTask(menu.taskId);
               }
             : undefined
@@ -918,6 +923,7 @@ function LoadMoreTasksButton({
     hasMore: boolean;
     loadingMore: boolean;
     onLoadMore: () => void;
+    exhaustedCopy?: string;
   };
 }): JSX.Element | null {
   // Hooks always run — even when an override is provided — so we
@@ -932,7 +938,7 @@ function LoadMoreTasksButton({
     : (): void => {
         void storeLoadMore();
       };
-  if (!hasMore) return null;
+  if (!hasMore) return override?.exhaustedCopy ? <p role="status" className="mx-3 my-2 text-xs text-muted-foreground">{override.exhaustedCopy}</p> : null;
   return (
     <button
       type="button"

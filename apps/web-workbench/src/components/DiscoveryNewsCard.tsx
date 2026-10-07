@@ -1,4 +1,4 @@
-import { ExternalLink, Heart, MoreHorizontal } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import { useState, type KeyboardEvent } from 'react';
 import { newsDisplayType, newsTimeLabel, type StockNewsRow } from '@/lib/stock-news';
 import { cn } from '@/lib/utils';
@@ -123,26 +123,7 @@ export function DiscoveryNewsCard({
               {item.symbols.length > 0 ? ` · ${item.symbols.length} 个关联` : ''}
             </span>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              onClick={(event) => event.stopPropagation()}
-              className="rounded-full p-1.5 text-[#8B92A1] transition hover:bg-[#F7F8FA] hover:text-[#FF0061]"
-              aria-label="收藏动态"
-              title="收藏动态"
-            >
-              <Heart className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={(event) => event.stopPropagation()}
-              className="rounded-full p-1.5 text-[#8B92A1] transition hover:bg-[#F7F8FA] hover:text-[#344054]"
-              aria-label="更多动态操作"
-              title="更多动态操作"
-            >
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </button>
-          </div>
+
         </div>
       </div>
     </article>

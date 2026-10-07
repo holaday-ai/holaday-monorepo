@@ -48,6 +48,7 @@ import {
   X,
 } from 'lucide-react';
 import * as React from 'react';
+import { useUrlState } from '@/lib/use-url-state';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 interface ScopedCollectionState<T> {
@@ -89,7 +90,7 @@ export function ProjectsPage(): JSX.Element {
   const toast = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [projectQuery, setProjectQuery] = React.useState('');
+  const [projectQuery, setProjectQuery] = useUrlState<string>('q', '');
   const { me, projects: shellProjects, refreshProjects } = useAppShellContext();
   const teamProjectsEnabled = me?.teamProjectsEnabled === true;
   const mountedRef = React.useRef(false);
@@ -114,7 +115,7 @@ export function ProjectsPage(): JSX.Element {
   const [organizationsError, setOrganizationsError] = React.useState<string | null>(null);
   const [teamSurfaceRevoked, setTeamSurfaceRevoked] = React.useState(false);
   const [, setOrganizationAuthorityRevision] = React.useState(0);
-  const [selectedWorkspaceValue, setSelectedWorkspaceValue] = React.useState<string | null>(null);
+  const [selectedWorkspaceValue, setSelectedWorkspaceValue] = useUrlState<string>('workspace', '');
   const [teamProjects, setTeamProjects] =
     React.useState<ScopedCollectionState<UiProject>>(emptyScopedCollection);
   const [members, setMembers] =
@@ -183,7 +184,7 @@ export function ProjectsPage(): JSX.Element {
     setInviteOpen(false);
     setPendingDelete((current) => (current?.scope === 'organization' ? null : current));
     setPendingMemberRemoval(null);
-  }, []);
+  }, [setSelectedWorkspaceValue]);
 
   const invalidateWorkspace = React.useCallback(
     (organizationId: string, removeOrganization = true): void => {
@@ -221,7 +222,7 @@ export function ProjectsPage(): JSX.Element {
         });
       }
     },
-    [],
+    [setSelectedWorkspaceValue],
   );
 
   const markOrganizationAuthorityUncertain = React.useCallback((organizationId: string): void => {
@@ -495,7 +496,7 @@ export function ProjectsPage(): JSX.Element {
       setTeamProjects(emptyScopedCollection());
       setMembers(emptyScopedCollection());
     }
-  }, []);
+  }, [setSelectedWorkspaceValue]);
 
   const reconcileMembershipMutation = async (
     organizationId: string,
