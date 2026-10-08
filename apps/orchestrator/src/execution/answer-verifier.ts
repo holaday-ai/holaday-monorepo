@@ -1507,7 +1507,14 @@ function allowsConciseFactAnswer(contract: ExecutionContract): boolean {
     /报告|总结|分析|对比|列表|清单|多(个|条)|前\s*\d+|top\s*\d+|report|summary|analysis|compare|list/i.test(
       goal,
     );
-  return (asksForConciseAnswer || asksForSingleFact) && !asksForLongForm;
+  // A browser action ("打开订单并点击保存") is answered by a short confirmation
+  // such as "订单已保存。"; the 20-char floor is for retrieved content.
+  const asksForBrowserAction =
+    contract.tier === 'light' &&
+    /点击|提交|保存|填写|勾选|选中|切换|关闭|删除|上传|下载|发送|签到|关注|收藏|\b(?:click|submit|save|fill|toggle|upload|download)\b/i.test(
+      goal,
+    );
+  return (asksForConciseAnswer || asksForSingleFact || asksForBrowserAction) && !asksForLongForm;
 }
 
 function checkUrlGrounding(

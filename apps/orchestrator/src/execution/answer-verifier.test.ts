@@ -1819,7 +1819,7 @@ describe('list_item_sources + multi-line list rows (FIX-BATCH-A)', () => {
 
   it('passes distinct article links grounded by the snapshot, with dates', () => {
     const links = [1, 2, 3].map((i) => `https://36kr.com/p/40166389634213${i}`);
-    const result = verify(newsContract, news((i) => links[i - 1]!), links);
+    const result = verify(newsContract, news((i) => links[i - 1] ?? ''), links);
     expect(listCheck(result)).toMatchObject({ passed: true });
     expect(result.passed).toBe(true);
   });
@@ -1856,5 +1856,25 @@ describe('list_item_sources + multi-line list rows (FIX-BATCH-A)', () => {
     expect(failed.checks.find((check) => check.criterionType === 'ecommerce_rows')?.detail).toContain(
       '第 1、2、3 行使用了搜索页/品类页链接',
     );
+  });
+});
+
+describe('concise browser action confirmations (FIX-BATCH-A)', () => {
+  const verifyShort = (intent: string, answerText: string) => {
+    const contract = buildContract({ taskId: `t-${intent}`, intent, executionMode: 'browser' });
+    const ledger = new EvidenceLedger(contract.taskId);
+    ledger.add({ fact: '已保存', sourceType: 'browser_state', sourceDetail: 'page', confidence: 'observed' });
+    return verifyDeterministic({ contract, ledger, answerText }).checks.find(
+      (check) => check.criterionId === 'generic.empty_result',
+    );
+  };
+
+  it('accepts a short confirmation for a click/save task', () => {
+    expect(verifyShort('打开订单详情并点击保存', '订单已保存。')).toBeUndefined();
+  });
+
+  it('still rejects a stub and short answers to retrieval tasks', () => {
+    expect(verifyShort('打开订单详情并点击保存', '完成')).toMatchObject({ passed: false });
+    expect(verifyShort('打开36kr首页总结今天的新闻', '已打开。')).toMatchObject({ passed: false });
   });
 });

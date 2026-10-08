@@ -1586,3 +1586,48 @@ describe('extractFailedChecks — surfaces criterionType for SPA banner', () => 
     expect(out).toEqual([{ type: 'unknown', detail: 'something broke' }]);
   });
 });
+
+describe('persistence re-check after a failed verdict (FIX-BATCH-A)', () => {
+  const enable = () =>
+    setFeatureFlagsForTest({ EVIDENCE_LEDGER: true, EXECUTION_CONTRACT: true, EXECUTION_VERIFIER: true });
+
+  it('never turns the safety notice of a failed answer into a verified completion', async () => {
+    enable();
+    const taskId = 'tsk_notice_recheck';
+    initExecution({
+      taskId,
+      intent: '打开36kr首页，总结今天前三条新闻，提供原标题、发布日期和可核实链接。',
+      executionMode: 'browser',
+    });
+    recordEvidence(taskId, {
+      fact: 'final_url=https://36kr.com/',
+      sourceType: 'browser_state',
+      sourceDetail: 'terminal',
+      confidence: 'observed',
+    });
+    const answer = [1, 2, 3]
+      .map((i) => `${i}. 标题${i}\n   发布日期：2026-10-08\n   链接：https://36kr.com/`)
+      .join('\n');
+    const primary = await verifyAndFinalize({ taskId, answerText: answer });
+    expect(primary.verification?.passed).toBe(false);
+    expect(primary.finalText).toContain('未能给出可验证的结果');
+    const persisted = await finalizeAnswerForPersistence({
+      taskId,
+      answerText: primary.finalText,
+      priorVerification: primary.verification,
+    });
+    // Before: the notice itself re-verified as a pass → completed + verified.
+    expect(persisted.verification?.passed).toBe(false);
+    expect(deriveFinalStatus('completed', persisted.verification)).toBe('failed');
+    if (!persisted.verification) throw new Error('expected a verdict');
+    expect(extractFailedChecks(persisted.verification)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'list_item_sources',
+          detail: expect.stringContaining('第 1 条缺少独立来源链接'),
+        }),
+      ]),
+    );
+    disposeExecution(taskId);
+  });
+});
