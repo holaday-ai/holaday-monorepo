@@ -186,6 +186,9 @@ importers:
       js-yaml:
         specifier: ^4.1.1
         version: 4.1.1
+      lodash:
+        specifier: 4.18.1
+        version: 4.18.1
       mammoth:
         specifier: ^1.13.0
         version: 1.13.0
@@ -228,6 +231,9 @@ importers:
       sharp:
         specifier: ^0.34.5
         version: 0.34.5
+      typescript:
+        specifier: 5.7.3
+        version: 5.7.3
       undici:
         specifier: ^8.1.0
         version: 8.1.0
@@ -271,9 +277,6 @@ importers:
       tsx:
         specifier: 4.19.2
         version: 4.19.2
-      typescript:
-        specifier: 5.7.3
-        version: 5.7.3
       vitest:
         specifier: 2.1.8
         version: 2.1.8(@types/node@22.10.2)(happy-dom@20.11.2)
@@ -446,6 +449,9 @@ importers:
       '@holaday/shared-types':
         specifier: workspace:*
         version: link:../shared-types
+      playwright-crx:
+        specifier: 0.15.0
+        version: 0.15.0
     devDependencies:
       '@types/chrome':
         specifier: 0.0.287
@@ -453,9 +459,6 @@ importers:
       '@types/node':
         specifier: 22.10.2
         version: 22.10.2
-      playwright-crx:
-        specifier: 0.15.0
-        version: 0.15.0
       rimraf:
         specifier: 6.0.1
         version: 6.0.1
