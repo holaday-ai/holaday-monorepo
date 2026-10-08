@@ -21,7 +21,11 @@ import type { LlmCallRecorder } from '../llm-call-recorder.js';
 import type { RunSupercarOptions, SupercarOutcome, SupercarTickEvent } from './agent-loop.js';
 import type { BrowserControl } from './browser-control.js';
 import { recordedBrowserAdapter } from './recorded-browser-adapter.js';
-import { type RuntimeAction, classifyRuntimeAction } from './runtime-action-policy.js';
+import {
+  type RuntimeAction,
+  type RuntimeActionVerdict,
+  classifyRuntimeAction,
+} from './runtime-action-policy.js';
 import type { SelectedChromeClient, SelectedChromeClientReply } from './selected-chrome-client.js';
 
 type SelectedChromeAction = Extract<SelectedChromeSessionCommand, { op: 'act' }>['action'];
@@ -723,7 +727,7 @@ async function processTools(
         await publish(errorResult(tool.id, 'invalid_tool_input'));
         continue;
       }
-      const verdict = classifyRuntimeAction(toRuntimeAction(parsed.action));
+      const verdict = selectedChromeActionVerdict(parsed.action);
       if (!verdict.allowed) {
         options.control.requestHuman();
         await safelyCall(
@@ -983,6 +987,39 @@ export function toCapturedToolCall(
     ...(action.kind === 'type' ? { text: action.payload.text } : {}),
     ...(pageUrl ? { pageUrl } : {}),
   };
+}
+
+/** Keys that activate the focused control: they submit forms and press buttons. */
+const ACTIVATION_KEYS = new Set(['enter', 'numpadenter', 'return', ' ', 'space', 'spacebar']);
+
+/**
+ * The driver hands the key string to `keyboard.press`, whose syntax is
+ * `Modifier+…+Key` (`Control+Enter`, `Shift+Space`, `Control++`). The key that
+ * acts is the last segment; with any modifiers Enter / Space still activate.
+ */
+export function isActivationKey(raw: string): boolean {
+  const key = raw.endsWith('+') && raw.length > 1 ? '+' : (raw.split('+').pop() ?? raw);
+  const normalized = key === ' ' ? ' ' : key.trim().toLowerCase();
+  return ACTIVATION_KEYS.has(normalized === '' && raw.includes(' ') ? ' ' : normalized);
+}
+
+export const UNVERIFIED_TARGET_REASON =
+  '无法核实 Chrome 中要点击或提交的真实目标（只有模型给出的定位提示），为避免误触付款、删除、发送等操作，请在 Chrome 中亲自完成这一步。';
+
+/**
+ * Runtime safety verdict for a selected-Chrome action. The policy only sees
+ * model-provided selector hints here, not the element the extension will
+ * act on, so a click or an activating key (Enter / Space) is never assumed
+ * harmless: it goes to the same human handoff as an irreversible action
+ * (fail closed). Typing, waiting and navigation keep the policy verdict.
+ * A host-read, revision-bound target description replaces this in browser PR2.
+ */
+export function selectedChromeActionVerdict(action: SelectedChromeAction): RuntimeActionVerdict {
+  const verdict = classifyRuntimeAction(toRuntimeAction(action));
+  if (!verdict.allowed) return verdict;
+  const activates =
+    action.kind === 'click' || (action.kind === 'key' && isActivationKey(action.payload.key));
+  return activates ? { allowed: false, reason: UNVERIFIED_TARGET_REASON } : verdict;
 }
 
 function toRuntimeAction(action: SelectedChromeAction): RuntimeAction {
