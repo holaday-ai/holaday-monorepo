@@ -1,3 +1,4 @@
+import { observeMediaCall } from '../media-call-recorder.js';
 /**
  * Generic fal.ai queue client (submit → poll status → fetch result) shared by
  * the Nano Banana 2 image adapter and the Veo 3.1 video adapter.
@@ -151,7 +152,7 @@ async function readJson<T>(res: Response, label: string): Promise<T> {
 }
 
 /** Submit, poll to completion and return the endpoint's output JSON. */
-export async function runFalQueueJob<T = unknown>(
+async function runFalQueueJobImpl<T = unknown>(
   p: FalQueueParams,
 ): Promise<{ output: T; requestId: string; elapsedMs: number }> {
   if (!p.apiKey || !p.apiKey.trim()) {
@@ -232,4 +233,43 @@ export async function runFalQueueJob<T = unknown>(
     }
   }
   return { output, requestId, elapsedMs: Date.now() - startedAt };
+}
+
+/** Record the provider render before local download, composition or quality verification. */
+export async function runFalQueueJob<T = unknown>(
+  p: FalQueueParams,
+): Promise<{ output: T; requestId: string; elapsedMs: number }> {
+  const video = p.endpointId.includes('/veo');
+  return observeMediaCall(
+    { provider: 'fal', model: p.endpointId, purpose: video ? 'media.video' : 'media.image' },
+    () => runFalQueueJobImpl<T>(p),
+    (result) => {
+      const out = result.output as { video?: { duration?: number }; images?: unknown[] };
+      const duration = out.video?.duration ?? Number.parseFloat(String(p.input.duration ?? ''));
+      return {
+        providerRequestId: result.requestId,
+        ...(video && Number.isFinite(duration)
+          ? {
+              mediaUsage: {
+                unit: 'second' as const,
+                quantity: duration,
+                resolution: String(p.input.resolution ?? ''),
+                audio: p.input.generate_audio === true,
+                basis:
+                  out.video?.duration === undefined ? ('request' as const) : ('provider' as const),
+              },
+            }
+          : Array.isArray(out.images)
+            ? {
+                mediaUsage: {
+                  unit: 'image' as const,
+                  quantity: out.images.length,
+                  resolution: String(p.input.resolution ?? ''),
+                  basis: 'provider' as const,
+                },
+              }
+            : {}),
+      };
+    },
+  );
 }

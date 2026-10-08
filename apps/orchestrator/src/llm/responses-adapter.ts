@@ -71,6 +71,8 @@ export interface NeutralResponsesResult {
   usage: {
     inputTokens: number;
     outputTokens: number;
+    /** Responses input_tokens includes cache hits. */
+    cachedInputTokens?: number | null;
   };
   status: 'completed' | 'incomplete';
   incompleteReason?: 'max_output_tokens';
@@ -548,7 +550,17 @@ function normalizeCompletion(
     metadata,
     text,
     sources: extractToolSources(rawCompletion.output),
-    usage: { inputTokens, outputTokens },
+    usage: {
+      inputTokens,
+      outputTokens,
+      ...(isRecord(rawCompletion.usage.input_tokens_details)
+        ? {
+            cachedInputTokens: readTokenCount(
+              rawCompletion.usage.input_tokens_details.cached_tokens,
+            ),
+          }
+        : {}),
+    },
     status,
     ...(incompleteReason ? { incompleteReason } : {}),
   };

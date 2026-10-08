@@ -459,6 +459,19 @@ export const adminFinanceRouter = router({
       return { series };
     }),
 
+  /** Any task, including older/low-cost tasks outside the monthly top ten. */
+  taskCost: adminProcedure.input(z.object({ taskId: z.string().regex(/^tsk_[A-Za-z0-9_-]{1,100}$/) })).query(async ({ ctx, input }) => {
+    const [task] = await ctx.db.select({ id: tasks.id }).from(tasks).where(eq(tasks.externalId, input.taskId)).limit(1);
+    if (!task) throw new TRPCError({ code: 'NOT_FOUND', message: '任务不存在' });
+    const [row] = await ctx.db.select({ callCount: sql<number>`COUNT(*)`, costUsd: sql<string>`COALESCE(SUM(${llmCalls.costUsd}), 0)`, ...costCoverageSelection() }).from(llmCalls).where(eq(llmCalls.taskId, task.id));
+    const coverage = summarizeCost(row?.costUsd, row?.unknownCostCalls);
+    const callCount = Number(row?.callCount ?? 0);
+    return { taskId: input.taskId, callCount, ...coverage, totalCostUsd: callCount === 0 ? null : coverage.totalCostUsd,
+      costCnyCents: callCount === 0 || coverage.totalCostUsd === null ? null : usdToCnyCents(coverage.totalCostUsd),
+      knownCostCnyCents: usdToCnyCents(coverage.knownCostUsd),
+      accounting: 'official_list_estimate' as const };
+  }),
+
   // ──────────────────────────────────────────────── topCostlyTasks ──
   topCostlyTasks: adminProcedure
     .input(z.object({ limit: z.number().int().min(5).max(50).default(10) }).optional())

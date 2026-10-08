@@ -10,6 +10,7 @@ import { startOwnedOperation } from '../../execution/owned-operation.js';
 import type { parseFileForPrompt } from '../../files/parsers.js';
 import type { ProductionModelRuntimeWiring } from '../../llm/model-runtime-wiring.js';
 import type { Context } from '../context.js';
+import { withTaskCostContext } from './media-task-background.js';
 import { prepareCoreAdvisoryPlan } from './tasks-core-advisory-plan.js';
 import { publishCoreExecutionEvent } from './tasks-core-reply.js';
 import { publishCoreSettledSuggestions } from './tasks-core-suggestions.js';
@@ -102,46 +103,48 @@ export async function createCoreGenerateTask(args: {
     return unconfirmed;
   }
   const repo = new CoreTaskRepository(ctx.db);
-  const execution = await startCoreTaskExecution({
-    lifetime: ctx.executionLifetime,
-    scope: { taskId, userId: args.userId },
-    before: { status: 'executing', executionId: null, executionRevision: 0, recordVersion: 0 },
-    requirements,
-    blocks,
-    actorExternalId: ctx.userId,
-    logger: ctx.logger,
-    repo,
-    responsesAdapter: generation.kind === 'ready' ? generation.responses('standard') : null,
-    semanticAdapter: semantic.kind === 'ready' ? semantic.messages('verify_strict') : undefined,
-    publish: (event) => publishCoreExecutionEvent(ctx.userId, event),
-    ...(args.resultNotice ? { resultNotice: args.resultNotice } : {}),
-    ...(requirements.phase === 'direct'
-      ? {
-          beforeGeneration: (op: CoreAdmission, isCurrent: () => boolean, deadline: number) =>
-            prepareCoreAdvisoryPlan({
-              op,
-              deadline,
-              rawIntent: args.intent,
-              isCurrent,
-              repo,
-              wiring: args.wiring,
-              actorExternalId: ctx.userId,
-              modelDataRegion: args.modelDataRegion,
-              logger: ctx.logger,
-            }),
-          afterSettlement: (op: CoreSettlement) =>
-            publishCoreSettledSuggestions({
-              op,
-              requirements,
-              repo,
-              wiring: args.wiring,
-              actorExternalId: ctx.userId,
-              modelDataRegion: args.modelDataRegion,
-              rawIntent: args.intent,
-            }),
-        }
-      : {}),
-  });
+  const execution = await withTaskCostContext(ctx, taskId, () =>
+    startCoreTaskExecution({
+      lifetime: ctx.executionLifetime,
+      scope: { taskId, userId: args.userId },
+      before: { status: 'executing', executionId: null, executionRevision: 0, recordVersion: 0 },
+      requirements,
+      blocks,
+      actorExternalId: ctx.userId,
+      logger: ctx.logger,
+      repo,
+      responsesAdapter: generation.kind === 'ready' ? generation.responses('standard') : null,
+      semanticAdapter: semantic.kind === 'ready' ? semantic.messages('verify_strict') : undefined,
+      publish: (event) => publishCoreExecutionEvent(ctx.userId, event),
+      ...(args.resultNotice ? { resultNotice: args.resultNotice } : {}),
+      ...(requirements.phase === 'direct'
+        ? {
+            beforeGeneration: (op: CoreAdmission, isCurrent: () => boolean, deadline: number) =>
+              prepareCoreAdvisoryPlan({
+                op,
+                deadline,
+                rawIntent: args.intent,
+                isCurrent,
+                repo,
+                wiring: args.wiring,
+                actorExternalId: ctx.userId,
+                modelDataRegion: args.modelDataRegion,
+                logger: ctx.logger,
+              }),
+            afterSettlement: (op: CoreSettlement) =>
+              publishCoreSettledSuggestions({
+                op,
+                requirements,
+                repo,
+                wiring: args.wiring,
+                actorExternalId: ctx.userId,
+                modelDataRegion: args.modelDataRegion,
+                rawIntent: args.intent,
+              }),
+          }
+        : {}),
+    }),
+  );
   void execution.completion.catch(() => {});
   return {
     taskId,

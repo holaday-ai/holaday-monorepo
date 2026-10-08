@@ -1,3 +1,4 @@
+import { dashscopeCostRegion, observeMediaCall } from '../media-call-recorder.js';
 /**
  * Tongyi Wanxiang (通义万相 / Wan) B-roll client — DashScope async
  * image / video generation.
@@ -129,6 +130,7 @@ export interface WanxiangTaskResult {
   readonly videoUrl?: string;
   /** usage.image_count — the billable unit ($0.025/img on flash). */
   readonly imageCount?: number;
+  readonly videoDurationSeconds?: number;
   /** Provider error code/message on FAILED. */
   readonly code?: string;
   readonly message?: string;
@@ -150,7 +152,7 @@ interface DashScopeTaskResponse {
     code?: string;
     message?: string;
   };
-  usage?: { image_count?: number };
+  usage?: { image_count?: number; video_duration?: number };
   code?: string;
   message?: string;
 }
@@ -344,6 +346,9 @@ export async function getTaskStatus(
     imageUrls,
     ...(out.video_url ? { videoUrl: out.video_url } : {}),
     ...(json.usage?.image_count !== undefined ? { imageCount: json.usage.image_count } : {}),
+    ...(Number.isFinite(json.usage?.video_duration)
+      ? { videoDurationSeconds: json.usage?.video_duration }
+      : {}),
     ...(out.code ? { code: out.code } : {}),
     ...(out.message ? { message: out.message } : {}),
   };
@@ -433,7 +438,7 @@ export async function generateBrollImage(
 }
 
 /** Convenience: create a video task and poll to completion. */
-export async function generateBrollVideo(
+async function generateBrollVideoImpl(
   p: CreateVideoTaskParams & {
     pollIntervalMs?: number;
     maxWaitMs?: number;
@@ -455,4 +460,35 @@ export async function generateBrollVideo(
     throw new WanxiangError('Wanxiang video task succeeded with no result url', 'no_result');
   }
   return result;
+}
+
+export async function generateBrollVideo(
+  p: Parameters<typeof generateBrollVideoImpl>[0],
+): Promise<WanxiangTaskResult> {
+  const model = p.model ?? DEFAULT_VIDEO_MODEL;
+  return observeMediaCall(
+    {
+      provider: 'alibaba-model-studio',
+      model,
+      region: dashscopeCostRegion(p.baseUrl),
+      purpose: 'media.video',
+    },
+    () => generateBrollVideoImpl(p),
+    (result) => {
+      const duration = result.videoDurationSeconds ?? p.durationSeconds;
+      return {
+        providerRequestId: result.taskId,
+        ...(duration !== undefined
+          ? {
+              mediaUsage: {
+                unit: 'second',
+                quantity: duration,
+                resolution: p.resolution?.toLowerCase() ?? '1080p',
+                basis: result.videoDurationSeconds !== undefined ? 'provider' : 'request',
+              },
+            }
+          : {}),
+      };
+    },
+  );
 }

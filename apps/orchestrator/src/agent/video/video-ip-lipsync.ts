@@ -279,6 +279,7 @@ export async function runIpVideoCreation(
         // Provider queue time grows with output length. Keep the existing
         // conservative ceiling so in-spec clips do not surface false timeouts.
         maxWaitMs: lipSyncMaxWaitMs(audioMs),
+        billableDurationSeconds: audioMs / 1000,
       });
     } finally {
       try {

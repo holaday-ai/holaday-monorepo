@@ -173,3 +173,12 @@ it('closes the reference-video dialog with Escape and restores its trigger witho
   await waitFor(() => expect(document.activeElement).toBe(trigger));
   expect(mocks.createTask).not.toHaveBeenCalled();
 });
+
+it('offers pet image-to-video separately from human action remake', async () => {
+  renderPage();
+  await userEvent.click(await screen.findByRole('tab', {name:'宠物动起来'}));
+  expect(screen.getByLabelText('宠物照片')).toBeTruthy();
+  expect(screen.getByRole('button', {name:'获取宠物视频报价'})).toBeTruthy();
+  expect(screen.queryByRole('button', {name:/参考视频 2–30秒/})).toBeNull();
+  expect(mocks.createTask).not.toHaveBeenCalled();
+});

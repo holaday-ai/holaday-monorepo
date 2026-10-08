@@ -1,13 +1,5 @@
 import { createHash } from 'node:crypto';
-import { localChromeTaskSessions } from '../../agent/supercar/local-chrome-task-session.js';
-import { runSelectedChromeTask } from '../../agent/supercar/selected-chrome-runner.js';
-import { startOwnedOperation } from '../../execution/owned-operation.js';
-import { runTaskBackground } from './task-background.js';
-import { assertLocalChromeSelection, localChromeSelectionSchema, localChromeTabsProcedure } from './local-chrome-selection.js';
-import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
-import { browserControlProcedure, browserControlStateProcedure, browserNavProcedure } from './browser-control.js';
 import type Anthropic from '@anthropic-ai/sdk';
-import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import {
   BASIC_ROLE_PICK_LIMIT,
   HOLADAY_SKILLS,
@@ -24,19 +16,28 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, like, lt, lte, or, sql } 
 import { z } from 'zod';
 import { ashareQaHandlesMode } from '../../agent/a-share/ashare-qa-lane-gate.js';
 import { defaultBrowserNetworkPolicy } from '../../agent/browser-network-policy.js';
+import { createResponsesWebSearch } from '../../agent/browser-tools/unified-browser-loop.js';
+import {
+  createFallbackWebSearch,
+  createFirecrawlReadPage,
+} from '../../agent/browser-tools/web-search-fallback.js';
+import { restoreCoreLegacyWorkflow } from '../../agent/core-legacy-workflow.js';
+import { assertCoreTaskInput } from '../../agent/core-task-input.js';
+import { prepareCoreTaskPlan } from '../../agent/core-task-plan.js';
+import type { CoreAcceptedRequirements } from '../../agent/core-task-requirements.js';
+import { publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
 import {
   extractRunnableDirectOpenUrl,
   runDirectOpen,
   verifyDirectOpenUrlSafety,
 } from '../../agent/direct-open.js';
 import { type GenerateOutcome, runGenerateTask } from '../../agent/generate-runner.js';
-import { isExplicitPlanApproval, isPurePlanHold } from '../../agent/plan-mode.js';
+import { orderImageAttachmentIds } from '../../agent/image/image-input-order.js';
 import {
   type ImageAttachment,
   type RunImageTaskResult,
   runImageTask,
 } from '../../agent/image/qwen-only-image-runner.js';
-import { orderImageAttachmentIds } from '../../agent/image/image-input-order.js';
 import { classifyExecutionMode } from '../../agent/intent-classifier.js';
 import { DrizzleLlmCallRecorder } from '../../agent/llm-call-recorder.js';
 // Phase 24 RC follow-up — nav-failure safety net. Catches the
@@ -45,20 +46,13 @@ import { DrizzleLlmCallRecorder } from '../../agent/llm-call-recorder.js';
 // would otherwise label it "已完成" because the runner respected the
 // agent's terminal decision.
 import { detectNavFailure } from '../../agent/nav-failure-detector.js';
+import { isExplicitPlanApproval, isPurePlanHold } from '../../agent/plan-mode.js';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js';
-import { prepareCoreTaskPlan } from '../../agent/core-task-plan.js';
-import { assertCoreTaskInput } from '../../agent/core-task-input.js';
-import { assertLegacyReplyRecord } from './tasks-reply-record.js';
-import { handleCoreTaskReply } from './tasks-core-reply.js';
-import { taskTickReceipt } from './task-tick-receipt.js';
-import { createCoreGenerateTask } from './tasks-core-create.js';
-import { restoreCoreLegacyWorkflow } from '../../agent/core-legacy-workflow.js';
-import type { CoreAcceptedRequirements } from '../../agent/core-task-requirements.js';
-import { publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { generateSuggestions } from '../../agent/suggestions-generator.js';
 import { resolveSuggestionsProviderRoute } from '../../agent/suggestions-provider.js';
+import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
 import { matchExpertWorkflow } from '../../agent/supercar/expert-workflows.js';
 import {
   type SupercarActionCaptureEvent,
@@ -71,20 +65,22 @@ import {
   supercarHandoffToGenerate,
   supercarReply,
 } from '../../agent/supercar/index.js';
-import { MemoryService } from '../../agent/supercar/qwen-only-memory-service.js';
-import { generatePlanForUser } from '../../agent/supercar/plan-runner.js';
+import { localChromeTaskSessions } from '../../agent/supercar/local-chrome-task-session.js';
 import {
   parseOtaAllowlist,
   resolveOtaCanaryLane,
 } from '../../agent/supercar/ota-user-browser-policy.js';
 import { runOtaUserBrowserReadonly } from '../../agent/supercar/ota-user-browser-runner.js';
+import { generatePlanForUser } from '../../agent/supercar/plan-runner.js';
 import { shouldSkipPlan } from '../../agent/supercar/plan-service.js';
 import {
   formatForPrompt as formatPlaybooksForPrompt,
   matchPlaybooks,
 } from '../../agent/supercar/playbook-service.js';
 import { classifyRole, selectModelAndEffort } from '../../agent/supercar/prompt-layers.js';
+import { MemoryService } from '../../agent/supercar/qwen-only-memory-service.js';
 import { classifyRuntimeAction } from '../../agent/supercar/runtime-action-policy.js';
+import { runSelectedChromeTask } from '../../agent/supercar/selected-chrome-runner.js';
 import {
   StatsService,
   classifyTaskType,
@@ -122,25 +118,25 @@ import {
   resolveIntentUrl,
   toSafeUrlResolutionLog,
 } from '../../agent/url-resolver.js';
-import type { VideoScript } from '../../agent/video/types.js';
-import { VIDEO_CREATION_ALLOWLIST } from '../../agent/video/video-access.js';
-import { probeCloneReferenceQuoteFacts } from '../../agent/video/video-clone-reference.js';
 import { mediaCapabilityIssue } from '../../agent/video/media-capability.js';
 import { notifyMediaGenerationFailed } from '../../agent/video/media-failure-refund.js';
 import {
   resolveMediaModelServices,
   videoModelServicesReady,
 } from '../../agent/video/media-model-services.js';
+import type { VideoScript } from '../../agent/video/types.js';
+import { VIDEO_CREATION_ALLOWLIST } from '../../agent/video/video-access.js';
+import { probeCloneReferenceQuoteFacts } from '../../agent/video/video-clone-reference.js';
 import {
+  type VideoAudioVerificationCoverage,
+  type VideoAudioVisualSyncAudit,
+  type VideoType,
   claimVideoConfirmAfterVerifierPreflight,
   deriveVideoType,
   mapVideoFailureReason,
   videoAudioVerificationCoverage,
   videoQualityFailureOutcome,
   videoQualityVerificationMetadata,
-  type VideoAudioVisualSyncAudit,
-  type VideoAudioVerificationCoverage,
-  type VideoType,
 } from '../../agent/video/video-confirm-meta.js';
 import {
   decideVideoGate,
@@ -149,6 +145,7 @@ import {
   preflightIpVideoAssets,
   quoteCloneVideo,
   quoteIpVideo,
+  quotePetI2v,
   quoteVideo,
 } from '../../agent/video/video-confirm.js';
 import type { IpVideoConfig } from '../../agent/video/video-ip-lipsync.js';
@@ -163,31 +160,18 @@ import type { WanAnimateMixMode } from '../../agent/video/wan-animate-mix-client
 import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
 import type { PageLike, PlaywrightExecutor } from '../../agent/vision-loop/playwright-executor.js';
-import { createResponsesWebSearch } from '../../agent/browser-tools/unified-browser-loop.js';
-import {
-  createFallbackWebSearch,
-  createFirecrawlReadPage,
-} from '../../agent/browser-tools/web-search-fallback.js';
 import { startVisionLoopTask } from '../../agent/vision-loop/qwen-only-task-runner.js';
+import {
+  type ClaimResult as TaskCreateClaimResult,
+  recordClaim as claimTaskCreate,
+  finalizeClaim as finalizeTaskCreateClaim,
+  releaseClaim as releaseTaskCreateClaim,
+} from '../../api-keys/webhook-idempotency-service.js';
 import {
   BrowserSessionRestoreFlights,
   restorableBrowserTarget,
 } from '../../browser-pool/browser-session-recovery.js';
 import { env as appEnv } from '../../config/env.js';
-import { recordQuotaCharge } from '../../quota/platform-failure-refunds.js';
-import {
-  currentBrain,
-  enterBrain,
-  recordTaskModelSelection,
-  runWithBrain,
-} from '../../llm/model-catalog.js';
-import { toMcpTools } from '../../llm/model-catalog-settings.js';
-import {
-  catalogSettingsService,
-  modelCatalogService,
-  resolveBrainForExistingTask,
-  resolveBrainForUser,
-} from '../../llm/model-catalog-runtime.js';
 import type { DB } from '../../db/client.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
 import { projects } from '../../db/schema/projects.js';
@@ -201,18 +185,6 @@ import { users } from '../../db/schema/users.js';
 import { EvidenceArtifactRepository } from '../../evidence/evidence-artifact-repository.js';
 import { routeTaskEvidenceOnDelete } from '../../evidence/evidence-deletion-service.js';
 import { writeLedgerToDb } from '../../evidence/ledger-write-service.js';
-import { SnapshotAkshareClient } from '../../stocks/snapshot-akshare-client.js';
-import {
-  type ValidatedStockTaskContext,
-  publicStockTaskContext,
-  validateStockTaskContext,
-} from '../../stocks/stock-task-context.js';
-import {
-  finalizeClaim as finalizeTaskCreateClaim,
-  recordClaim as claimTaskCreate,
-  releaseClaim as releaseTaskCreateClaim,
-  type ClaimResult as TaskCreateClaimResult,
-} from '../../api-keys/webhook-idempotency-service.js';
 import type { VerificationResult } from '../../execution/answer-verifier.js';
 // Phase 1 Day 5 — execution-pipeline glue. All four entry points are
 // no-ops when the corresponding feature flag is off (default), so
@@ -232,9 +204,7 @@ import {
   summariseVerificationFailure,
   verifyAndFinalize,
 } from '../../execution/execution-pipeline.js';
-import { reviewGenerateOutcome } from '../../execution/generate-outcome-review.js';
 import { parseInputs } from '../../execution/expert-workflow-parser.js';
-import { assessGeneralTaskIntake } from '../../execution/general-task-intake.js';
 import {
   getExpertWorkflowById,
   matchExpertWorkflow as matchTypedExpertWorkflow,
@@ -243,6 +213,9 @@ import {
 } from '../../execution/expert-workflow-registry.js';
 import { getFeatureFlags as getExecutionFeatureFlags } from '../../execution/feature-flags.js';
 import { fencedFileIds, isDocumentOutput } from '../../execution/file-artifact-consistency.js';
+import { assessGeneralTaskIntake } from '../../execution/general-task-intake.js';
+import { reviewGenerateOutcome } from '../../execution/generate-outcome-review.js';
+import { startOwnedOperation } from '../../execution/owned-operation.js';
 import {
   appendSearchSourceReferences,
   collectSearchSourceReferences,
@@ -256,6 +229,20 @@ import {
 } from '../../files/parsers.js';
 import { getSharedStorageProvider } from '../../files/storage-provider.js';
 import { allowedFormatsForPlan, isCreateFileFormat, renderFile } from '../../files/writers.js';
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import {
+  catalogSettingsService,
+  modelCatalogService,
+  resolveBrainForExistingTask,
+  resolveBrainForUser,
+} from '../../llm/model-catalog-runtime.js';
+import { toMcpTools } from '../../llm/model-catalog-settings.js';
+import {
+  currentBrain,
+  enterBrain,
+  recordTaskModelSelection,
+  runWithBrain,
+} from '../../llm/model-catalog.js';
 import {
   type ModelTaskUnavailableReason,
   createProductionModelRuntimeWiring,
@@ -266,6 +253,7 @@ import {
   resolveUserGenerateAdapter,
 } from '../../playbook/evolution/executor-hooks.js';
 import { TaskActionCaptureRepository } from '../../playbook/task-action-capture-repository.js';
+import { recordQuotaCharge } from '../../quota/platform-failure-refunds.js';
 import { isQuotaBypassUser } from '../../quota/quota-mode.js';
 import {
   type ConsumeReason,
@@ -279,6 +267,12 @@ import {
   runResponseLayerForLane,
   stampResponseLayerColumns,
 } from '../../response-layer/lane-integration.js';
+import { SnapshotAkshareClient } from '../../stocks/snapshot-akshare-client.js';
+import {
+  type ValidatedStockTaskContext,
+  publicStockTaskContext,
+  validateStockTaskContext,
+} from '../../stocks/stock-task-context.js';
 import {
   TASK_ACTIVE_STATUSES,
   TASK_QUEUE_DEPTH_STATUSES,
@@ -293,19 +287,24 @@ import {
   sendExtensionToolCall,
   updateTaskStateForUser,
 } from '../../ws/server.js';
-import { protectedProcedure, pureTaskInput, router } from '../trpc.js';
 import { taskDrainMiddleware } from '../task-drain.js';
+import { protectedProcedure, pureTaskInput, router } from '../trpc.js';
+import { browserControlProcedure, browserControlStateProcedure, browserNavProcedure } from './browser-control.js';
+import { assertLocalChromeSelection, localChromeSelectionSchema, localChromeTabsProcedure } from './local-chrome-selection.js';
+import { deferredTaskCosts } from './media-task-background.js';
+import { runMediaTaskBackground } from './media-task-background.js';
+import { runTaskBackground } from './task-background.js';
 import {
+  deferredMediaNotice,
   followUpParentHasBrowserContext,
   followUpParentReasonLabel,
   followUpTerminalGuardMessage,
   resolveBrowserFollowUpContinuation,
-  deferredMediaNotice,
   resolveFollowUpExecutionMode,
   resolveWorkflowIdentities,
 } from './task-followup-copy.js';
-import { markQueuedTaskExecutingOrThrow } from './task-queue-start.js';
 import { enqueueTaskExecution } from './task-queue-execution.js';
+import { markQueuedTaskExecutingOrThrow } from './task-queue-start.js';
 import { annotateTaskResultAttachmentAvailability } from './task-result-attachment-availability.js';
 import {
   type CapturedBrowserFinalState as CapturedFinalState,
@@ -313,6 +312,10 @@ import {
   persistAndBroadcastBrowserDispatchFailure,
   persistAndBroadcastVisionLoopThrow,
 } from './task-terminal-recovery.js';
+import { taskTickReceipt } from './task-tick-receipt.js';
+import { createCoreGenerateTask } from './tasks-core-create.js';
+import { handleCoreTaskReply } from './tasks-core-reply.js';
+import { assertLegacyReplyRecord } from './tasks-reply-record.js';
 
 const taskController = new TaskController();
 const FAILURE_REVIEW_STATUSES = ['failed', 'partial_success'] as const;
@@ -444,13 +447,14 @@ function assertVideoImageChoiceAllowed(input: {
   choice: 'video' | 'image';
   isClone: boolean;
   isIp: boolean;
+  isPet?: boolean;
 }): void {
-  if (input.choice === 'image' && (input.isClone || input.isIp)) {
+  if (input.choice === 'image' && (input.isClone || input.isIp || input.isPet)) {
     throw new TRPCError({
       code: 'BAD_REQUEST',
       message: input.isClone
         ? '复刻视频不支持切换为图片版，请确认制作视频或取消。'
-        : 'IP 人物不支持切换为图片版，请确认制作视频或取消。',
+        : input.isPet ? '宠物动画不支持切换为图片版，请确认制作视频或取消。' : 'IP 人物不支持切换为图片版，请确认制作视频或取消。',
     });
   }
 }
@@ -1987,6 +1991,7 @@ export const tasksRouter = router({
                     kind: 'video',
                     tab: input.videoOptions?.tab ?? 'normal',
                     model: input.videoOptions?.model ?? 'veo_fast',
+                    petI2v: Boolean(input.videoOptions?.petModel && !input.videoOptions.referenceVideoFileId),
                   },
                   providerReadiness,
                 )
@@ -2285,7 +2290,7 @@ export const tasksRouter = router({
       }
 
       const imageStartedAt = Date.now();
-      void runTaskBackground(ctx, async (ctx) => (async () => {
+      void runMediaTaskBackground(ctx, taskId, async (ctx) => (async () => {
         const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
             const imageHeartbeat =
               taskInternalId == null
@@ -2542,6 +2547,27 @@ export const tasksRouter = router({
         // Phase 2 第一期 — SPA「普通视频」面板把模型档/风格/画幅/画质/时长带上来。
         const vOpts = input.videoOptions ?? {};
 
+        // Explicit pet i2v is separate from human character-swap. Never
+        // interpret a missing reference clip as an implicit clone fallback.
+        if (vOpts.tab === 'pet' && vOpts.petModel && !vOpts.referenceVideoFileId) {
+          if (!vOpts.petImageFileId || !await fileService.retainInputForUser(vOpts.petImageFileId, userRow.id)) {
+            throw new TRPCError({code:'BAD_REQUEST',message:'宠物照片不可用，请重新上传。'});
+          }
+          const [petPhoto] = await fileService.loadMany([vOpts.petImageFileId], userRow.id);
+          if (!petPhoto || !/^image\/(png|jpeg|webp)$/.test(petPhoto.row.mimetype)) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: '请上传 JPG / PNG / WebP 宠物照片。' });
+          }
+          const duration = vOpts.durationSeconds ?? 5;
+          if (![3,5].includes(duration)) throw new TRPCError({code:'BAD_REQUEST',message:'宠物视频请选择3秒或5秒。'});
+          const quote = quotePetI2v(duration, vOpts.petModel, vOpts.resolution ?? '1080p');
+          const taskId = newExternalId('task');
+          await repo.insertTask({taskId,status:'awaiting_user',plan:[],cursor:0,pendingConfirm:null}, {userId:userRow.id,intent:input.intent,roleId:'video-creator',opusUsed:false});
+          const initialized = await repo.persistInitialAwaitingUser({taskExternalId:taskId,question:quote.message,awaitingKind:'video_quote',result:{summary:quote.message,metadata:{lane:'video_creation_confirm',petImageFileId:vOpts.petImageFileId,petModel:vOpts.petModel,i2vPrompt:input.intent,videoOptions:{...vOpts,durationSeconds:duration}}}});
+          if(!initialized.persisted) throw new TRPCError({code:'INTERNAL_SERVER_ERROR',message:'视频报价初始化失败，请重试。'});
+          broadcastToUser(ctx.userId,{type:'server.supercar.awaiting_user',taskId,question:quote.message,awaitingKind:'video_quote'});
+          return {taskId,status:'awaiting_user' as const,steps:[],executionMode:'generate' as const};
+        }
+
         // ===== 复刻视频 — Wan Animate 2.2 真实角色替换 =====
         // 主角图片 + 参考视频均以独立 typed fileId 保存；确认后再签短期 URL
         // 调用 character-swap。没有参考视频时绝不降级为单图 i2v。
@@ -2725,16 +2751,18 @@ export const tasksRouter = router({
             message: 'Veo 1080p 仅支持 8 秒，请选择 8 秒或改用 720p 标清。',
           });
         }
+        const quoteTaskId = newExternalId('task');
+        const quoteCosts = deferredTaskCosts(ctx, quoteTaskId);
         let script: VideoScript | null = null;
         try {
           // optimize = LLM(~¥0.01),**非 Veo**。出真实段数以便动态报价;风格只调画面语气。
           // 段数按文案内容量定上限(segmentCapForText):一句话→1~2 段,长文案→6 段。
           // 避免短文案被硬凑成 6 段 48s、报价虚高(quoteVideo = 段数 × 每段秒数)。
           const segCap = segmentCapForText(input.intent);
-          script = await optimizeUserScript(
+          script = await quoteCosts.run(() => optimizeUserScript(
             { userText: input.intent, maxSegments: segCap, ...(style ? { style } : {}) },
             { llm: scriptLlm },
-          );
+          ));
         } catch (err) {
           ctx.logger.warn(
             { err, userId: ctx.userId },
@@ -2748,7 +2776,7 @@ export const tasksRouter = router({
             ...(vOpts.durationSeconds ? { durationSeconds: vOpts.durationSeconds } : {}),
             ...(vOpts.aspectRatio ? { aspectRatio: vOpts.aspectRatio } : {}),
           });
-          const taskId = newExternalId('task');
+          const taskId = quoteTaskId;
           await repo.insertTask(
             { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
                 {
@@ -2758,6 +2786,7 @@ export const tasksRouter = router({
                   opusUsed: false,
                 },
           );
+          await quoteCosts.flush();
           // Initial awaiting_user quote: stamp awaitingKind/result and
           // write the matching task.awaiting_user event in one repository call.
           // result.metadata 存 videoScript(确认后复用,保证段数=报价段数)+ lane(给
@@ -3609,7 +3638,7 @@ export const tasksRouter = router({
       // there's no per-user FIFO queue to enqueue into. Concurrent
       // generate tasks parallelize on the selected regional Qwen endpoint.
       const generateStartedAt = Date.now();
-      void runTaskBackground(ctx, async (ctx) => (async () => {
+      void runMediaTaskBackground(ctx, taskId, async (ctx) => (async () => {
         // A2 deferred — generate→browser fallback would re-enter the
         // supercar branch which needs pool slots, queueing, and a
         // distinct outcome shape. Tracked as fallbackChain=['generate']
@@ -4129,7 +4158,7 @@ export const tasksRouter = router({
 
       const firecrawl = ctx.firecrawl;
       const scrapeStartedAt = Date.now();
-      void runTaskBackground(ctx, async (ctx) => (async () => {
+      void runMediaTaskBackground(ctx, taskId, async (ctx) => (async () => {
         // Fallback chain (A4) — every lane the dispatcher actually
         // tried for this task. Logged + persisted under
         // result.metadata.fallbackChain so the eval pipeline can see
@@ -8076,7 +8105,7 @@ export const tasksRouter = router({
       const script = meta.videoScript;
       const tier: VideoSource = meta.videoTier ?? 'veo_fast';
       const vOpts = meta.videoOptions ?? {};
-      assertVideoImageChoiceAllowed({ choice, isClone, isIp });
+      assertVideoImageChoiceAllowed({ choice, isClone, isIp, isPet });
       const providerReadiness = {
         hasDashscope: Boolean(appEnv.DASHSCOPE_API_KEY),
         hasFal: Boolean(appEnv.FAL_KEY),
@@ -8090,6 +8119,7 @@ export const tasksRouter = router({
                 kind: 'video',
                 tab: isClone ? 'pet' : isIp ? 'ip_person' : (vOpts.tab ?? 'normal'),
                 model: tier,
+                petI2v: isPet && !isClone,
               },
               providerReadiness,
             );
@@ -8100,7 +8130,7 @@ export const tasksRouter = router({
         });
       }
       if (
-        choice === 'video' &&
+        choice === 'video' && !isPet && !isIp &&
         videoParameterIssue({
           model: tier,
           resolution: vOpts.resolution ?? '1080p',
@@ -8169,12 +8199,12 @@ export const tasksRouter = router({
       }
 
       const visualMode = choice === 'image' ? ('image' as const) : ('video' as const);
-      const executionMetadata = buildVideoExecutionMetadata({
+      const executionMetadata = { ...buildVideoExecutionMetadata({
         isPet,
         isIp,
         tab: vOpts.tab,
         visualMode,
-      });
+      }), videoOptions: vOpts, ...(isPet && !isClone ? { petModel: meta.petModel } : {}) };
       const newTaskId = newExternalId('task');
       const atomicCreate = await repo.consumeVideoConfirmAndInsertGeneration({
         quoteTaskExternalId: input.taskId,
@@ -8249,7 +8279,7 @@ export const tasksRouter = router({
       const logger = ctx.logger;
       const db = ctx.db;
       const intentText = row.intent;
-      void runTaskBackground(ctx, async () => (async () => {
+      void runMediaTaskBackground(ctx, newTaskId, async () => (async () => {
         const taskInternalId = await taskInternalIdFor(db, newTaskId);
         if (taskInternalId == null) return;
         const taskHeartbeat = startTaskHeartbeat(db, newTaskId, {
@@ -8286,8 +8316,8 @@ export const tasksRouter = router({
         const llm = confirmMediaServices.scriptLlm ?? (async () => '');
         const analyzeVideoQuality =
           confirmMediaServices.analyzeVideoQuality ?? (async () => '');
-        const verifyFinalVideo = (qualityInput: Parameters<typeof verifyFinalVideoQuality>[0]) =>
-          verifyFinalVideoQuality(qualityInput, {
+        const verifyFinalVideo = async (qualityInput: Parameters<typeof verifyFinalVideoQuality>[0]) => {
+          const verdict = await verifyFinalVideoQuality(qualityInput, {
             runFfmpeg,
             readFile: (filePath) => fsp.readFile(filePath),
             analyzeFrames: analyzeVideoQuality,
@@ -8298,6 +8328,17 @@ export const tasksRouter = router({
               );
             },
           });
+          if (verdict.status === 'fail') {
+            const { retainRejectedVideoFrames } = await import('../../agent/video/video-quality-audit.js');
+            try {
+              const auditId = await retainRejectedVideoFrames({ taskId: newTaskId, workdir: qualityInput.workdir, verdict });
+              logger.info({ taskId: newTaskId, auditId, failedChecks: verdict.failedChecks }, 'video: rejected frames retained for internal review');
+            } catch (error) {
+              logger.error({ taskId: newTaskId, err: error }, 'video: rejected frame retention failed');
+            }
+          }
+          return verdict;
+        };
         const verifyCloneInputs = (
           compatibilityInput: Parameters<typeof verifyCloneVideoCompatibility>[0],
         ) =>
@@ -8687,6 +8728,7 @@ export const tasksRouter = router({
             .persistVisionOutcome(newTaskId, {
               status: 'failed',
               reason: friendlyReason,
+              ...(qualityFailure.metadata ? { errorCode: 'MEDIA_VIDEO_QUALITY_REJECTED' } : {}),
               tickCount: 1,
               ...(typeof qualityFailure.verificationPassed === 'boolean'
                 ? { verificationPassed: qualityFailure.verificationPassed }
@@ -10088,7 +10130,7 @@ export const tasksRouter = router({
       }
       const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
       const aborted = localChromeTaskSessions.abort(ctx.userId, input.taskId) || supercarAbort(input.taskId);
-      if (aborted) {
+      if (aborted && taskRow.status !== 'awaiting_user') {
         try {
           await repo.recordCancelRequested(input.taskId, taskRow.status as TaskState['status']);
         } catch (err) {

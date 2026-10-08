@@ -1,14 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { trpc } from '@/lib/trpc';
 import { showImageOption } from '@/lib/video-history-row';
 import type { UiTask } from '@/types/task';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   mergeFirstPageWithPreservedSelection,
   mergeTaskPagesReplacingDuplicates,
+  normaliseDetailStepStatus,
   normalizeTaskDetailSteps,
   normalizeTaskListCursor,
   normalizeTaskListRows,
-  normaliseDetailStepStatus,
   pruneRuntimeStateForTerminalTasks,
   setStoreNavigate,
   toUiTask,
@@ -3600,3 +3600,20 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
   });
   return { promise, resolve };
 }
+
+it.each([false, true])('retains the existing pet i2v subtype after hydration while a reference clip remains clone (%s)', clone => {
+ const task = toUiTask({ taskId: 'tsk_pet_hydration', intent: '眨眼', status: 'awaiting_user', createdAt: new Date(), result: { metadata: { lane: 'video_creation_confirm', petModel: 'wan_i2v', videoOptions: { tab: 'pet', petModel: 'wan_i2v', ...(clone ? { referenceVideoFileId: 'file_clip' } : {}) } } } } as never);
+ expect(task.videoType).toBe('pet'); expect(task.videoCreationMode).toBe(clone ? undefined : 'pet_i2v');
+});
+
+it('restores the real generation lane from durable core requirements after failure refresh', () => {
+ const task = toUiTask({ taskId: 'tsk_core_fail', intent: '写短文', status: 'failed', createdAt: new Date(), result: { reason: '生成未完成', coreRequirements: { schemaVersion: 1, phase: 'direct' } } } as never);
+ expect(task.executionMode).toBe('generate');
+});
+
+it('keeps pet i2v selected before the server list hydrates the new quote', async () => {
+ createMutate.mockResolvedValueOnce({ taskId: 'tsk_pet_quote', status: 'awaiting_user', executionMode: 'generate' } as never);
+ listQuery.mockImplementationOnce(() => new Promise(() => {}));
+ await useTaskStore.getState().createTask('轻轻眨眼', undefined, undefined, undefined, undefined, undefined, { tab: 'pet', petModel: 'wan_i2v', petImageFileId: 'file_pet', durationSeconds: 5 });
+ expect(useTaskStore.getState().tasks[0]).toMatchObject({ taskId: 'tsk_pet_quote', videoType: 'pet', videoCreationMode: 'pet_i2v' });
+});

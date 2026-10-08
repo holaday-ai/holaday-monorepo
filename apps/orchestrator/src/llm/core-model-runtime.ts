@@ -1,3 +1,4 @@
+import { recordScopedModelCall } from '../agent/media-call-recorder.js';
 import { recordCoreModelObservation } from './core-model-observation.js';
 import {
   type MessagesAdapter,
@@ -162,6 +163,24 @@ function observeMessagesAdapter(
       const startedAt = now();
       try {
         const result = await adapter.create(request, options);
+        const latencyMs = elapsedMs(startedAt, now());
+        if (lane !== 'browser')
+          await recordScopedModelCall({
+            provider: adapter.metadata.provider,
+            model: adapter.metadata.model,
+            region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
+            purpose: 'supercar.turn',
+            ...result.usage,
+            cacheMode:
+              Array.isArray(request.system) &&
+              request.system.some((block) => block.cacheControl === 'ephemeral')
+                ? 'explicit'
+                : 'implicit',
+            providerRequestId: result.id,
+            latencyMs,
+            status: 'ok',
+            requestMeta: { lane, protocol: 'messages' },
+          });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),
           lane,
@@ -169,10 +188,23 @@ function observeMessagesAdapter(
           outcome: 'success',
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
-          latencyMs: elapsedMs(startedAt, now()),
+          latencyMs,
         });
         return result;
       } catch (error) {
+        const latencyMs = elapsedMs(startedAt, now());
+        if (lane !== 'browser')
+          await recordScopedModelCall({
+            provider: adapter.metadata.provider,
+            model: adapter.metadata.model,
+            region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
+            purpose: 'supercar.turn',
+            inputTokens: null,
+            outputTokens: null,
+            latencyMs,
+            status: 'error',
+            requestMeta: { lane },
+          });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),
           lane,
@@ -180,7 +212,7 @@ function observeMessagesAdapter(
           outcome: 'error',
           inputTokens: null,
           outputTokens: null,
-          latencyMs: elapsedMs(startedAt, now()),
+          latencyMs,
         });
         throw error;
       }
@@ -201,6 +233,24 @@ function observeResponsesAdapter(
       const startedAt = now();
       try {
         const result = await adapter.stream(request, options);
+        const latencyMs = elapsedMs(startedAt, now());
+        const cached = result.usage.cachedInputTokens ?? null;
+        if (lane !== 'browser')
+          await recordScopedModelCall({
+            provider: adapter.metadata.provider,
+            model: adapter.metadata.model,
+            region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
+            purpose: 'supercar.turn',
+            inputTokens:
+              cached === null ? result.usage.inputTokens : result.usage.inputTokens - cached,
+            outputTokens: result.usage.outputTokens,
+            cacheReadInputTokens: cached,
+            cacheCreationInputTokens: 0,
+            providerRequestId: result.id,
+            latencyMs,
+            status: 'ok',
+            requestMeta: { lane, protocol: 'responses' },
+          });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),
           lane,
@@ -208,10 +258,23 @@ function observeResponsesAdapter(
           outcome: result.status === 'incomplete' ? 'incomplete' : 'success',
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
-          latencyMs: elapsedMs(startedAt, now()),
+          latencyMs,
         });
         return result;
       } catch (error) {
+        const latencyMs = elapsedMs(startedAt, now());
+        if (lane !== 'browser')
+          await recordScopedModelCall({
+            provider: adapter.metadata.provider,
+            model: adapter.metadata.model,
+            region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
+            purpose: 'supercar.turn',
+            inputTokens: null,
+            outputTokens: null,
+            latencyMs,
+            status: 'error',
+            requestMeta: { lane },
+          });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),
           lane,
@@ -219,7 +282,7 @@ function observeResponsesAdapter(
           outcome: 'error',
           inputTokens: null,
           outputTokens: null,
-          latencyMs: elapsedMs(startedAt, now()),
+          latencyMs,
         });
         throw error;
       }

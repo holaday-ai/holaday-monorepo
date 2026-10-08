@@ -16,6 +16,9 @@
  * accents matching the calendar palette.
  */
 
+import { pageErrorMessage } from '@/lib/page-error-copy';
+import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
 import { Loader2, TrendingDown, TrendingUp } from 'lucide-react';
 import * as React from 'react';
 import {
@@ -31,9 +34,6 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { pageErrorMessage } from '@/lib/page-error-copy';
-import { trpc } from '@/lib/trpc';
-import { cn } from '@/lib/utils';
 import {
   ADMIN_BORDER,
   ADMIN_MAGENTA,
@@ -666,6 +666,7 @@ function CostTab(): JSX.Element {
       </div>
 
       {/* Top costly tasks */}
+      <TaskCostLookup />
       <Section title="高成本任务 TOP 10" hint="按已知估算排序 · 非完整排行">
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
@@ -822,4 +823,30 @@ function ErrorPane({ msg }: { msg: string }): JSX.Element {
       <div className="mt-1 text-xs text-[#595757]">{copy.body}</div>
     </div>
   );
+}
+
+function TaskCostLookup(): JSX.Element {
+  const mounted = useMountedRef();
+  const [taskId, setTaskId] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const [result, setResult] = React.useState<Awaited<ReturnType<typeof trpc.admin.finance.taskCost.query>> | null>(null);
+  async function lookup(event: React.FormEvent) {
+    event.preventDefault(); if (loading || !taskId.trim()) return;
+    setLoading(true); setError(''); setResult(null);
+    try { const value = await trpc.admin.finance.taskCost.query({ taskId: taskId.trim() }); if (mounted.current) setResult(value); }
+    catch { if (mounted.current) setError('未能读取任务成本，请确认任务 ID 后重试。'); }
+    finally { if (mounted.current) setLoading(false); }
+  }
+  return <Section title="查询任务成本" hint="按供应商用量与官方价目估算，包含未交付的生成尝试；不等于供应商实付账单。">
+    <form onSubmit={lookup} className="flex flex-wrap gap-2">
+      <input aria-label="成本查询任务 ID" value={taskId} onChange={event => setTaskId(event.target.value)} placeholder="tsk_…" disabled={loading} className="rounded border bg-transparent px-3 py-2 text-sm" />
+      <button type="submit" disabled={loading || !taskId.trim()} className="rounded border px-3 py-2 text-sm disabled:opacity-50">{loading ? '查询中…' : '查询成本'}</button>
+    </form>
+    {error && <p role="alert">{error}</p>}
+    {result && <output className="mt-3 block text-sm">
+      <p>{result.taskId} · {result.callCount} 次调用</p>
+      <p>{result.callCount === 0 ? '暂无费用回执' : result.unknownCostCalls > 0 ? `待核算 · 已知估算 ${formatYuan(result.knownCostCnyCents)} · ${result.unknownCostCalls} 次未知费用` : `官方价目估算 USD ${(result.totalCostUsd ?? 0).toFixed(6)} · ${formatYuan(result.costCnyCents ?? 0)}`}</p>
+    </output>}
+  </Section>;
 }

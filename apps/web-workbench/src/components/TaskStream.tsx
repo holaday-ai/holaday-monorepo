@@ -1,9 +1,115 @@
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { FailureHeaderCard } from '@/components/FailureHeaderCard';
+import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
+import { PlanCard } from '@/components/PlanCard';
+import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
+import { SearchResultCard } from '@/components/SearchResultCard';
+import { StepCard } from '@/components/StepCard';
+import { isBrowserErrorUrl } from '@/components/browser-panel-state';
+import {
+  taskCancelStateChangedMessage,
+  terminalResultContentInsufficient,
+} from '@/components/terminal-result-state';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { useToast } from '@/components/ui/toast';
+import { useTaskFailureContext } from '@/hooks/useTaskFailureContext';
+import { awaitingUserCopy, awaitingUserStreamMessage } from '@/lib/awaiting-user-copy';
+import {
+  type BatchConfirmDecision,
+  type SingleConfirmDecision,
+  batchConfirmActionLabel,
+  batchConfirmSummary,
+  singleConfirmActionLabel,
+  singleConfirmSummary,
+} from '@/lib/batch-confirm-copy';
+import { copyTextToClipboard, hasCopyableText } from '@/lib/copy-text';
+import {
+  downloadFailureMessage,
+  downloadFileAuthed,
+  fetchFileBlobAuthed,
+  isUnavailableFileStatus,
+} from '@/lib/download-file';
+import { taskActionError } from '@/lib/error-copy';
+import { EXPERT_RESULT_LABELS, expertResultUsageCopy } from '@/lib/expert-result-usage';
+import {
+  externalLinkConfirmDescription,
+  safeExternalHttpHref,
+} from '@/lib/external-link-copy';
+import { failureResultCopyText, terminalAllowsRerun } from '@/lib/failure-copy';
+import { downloadFileMetaLabel } from '@/lib/file-download-card-copy';
+import { formatFileSize } from '@/lib/file-size';
+import { hdDebug } from '@/lib/hd-debug';
+import { shouldRenderLiveSubStatus } from '@/lib/live-substatus';
+import { markdownCodeBlockMeta } from '@/lib/markdown-code-block-state';
+import { downloadMarkdownFile } from '@/lib/markdown-download';
+import { pageActionError } from '@/lib/page-error-copy';
+import {
+  RESULT_SOURCE_BADGES,
+  type ResultSourceMarker,
+  matchResultSourceBadgePrefix,
+} from '@/lib/result-source-badges';
+import { screenshotThumbnailPresentation } from '@/lib/screenshot-thumbnail-state';
+import {
+  type StepDetailSummary,
+  shouldShowStepCard,
+  stepDetailSummary,
+  stepDisplayStepsForTask,
+  stepStatusText,
+} from '@/lib/step-card-state';
+import { taskDisplayIntent } from '@/lib/task-display-copy';
+import { refundStatusCopy, retryAttachmentNote } from '@/lib/task-failure-recovery';
+import { pausedTaskNoticeCopy } from '@/lib/task-status-copy';
+import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
+import {
+  terminalEmptyAllowsRerun,
+  terminalEmptyCopy,
+  terminalInsufficientCopy,
+} from '@/lib/terminal-empty-copy';
+import { trpc } from '@/lib/trpc';
+import {
+  type RecoveryAction,
+  type TrustEvidenceStage,
+  type TrustTone,
+  buildRecoveryActions,
+  buildTrustSummary,
+  shouldShowTrustSummary,
+} from '@/lib/trust-summary';
+import { useFileUnavailable } from '@/lib/unavailable-file-registry';
+import { cn } from '@/lib/utils';
+import { shouldShowVerificationBanner } from '@/lib/verification-banner-copy';
+import { showImageOption } from '@/lib/video-history-row';
+import { useTaskStore } from '@/stores/task-store';
+import type {
+  UiAwaitingUser,
+  UiCaptchaWait,
+  UiDegradeEvent,
+  UiExecutorFallback,
+  UiStep,
+  UiTask,
+  UiTerminalAttachment,
+  UiWebSearchEvent,
+} from '@/types/task';
+import { isTerminalStatus } from '@/types/task';
+// Phase 1 follow-up — render-time defence-in-depth sanitiser. Strips
+// markdown image references that point at agent screenshots, agent
+// retry / reroute / login-wall narrative lines, lingering tool XML
+// envelopes, and image-magic-byte base64. Runs on EVERY summary
+// before ReactMarkdown — protects history rows that pre-date the
+// orchestrator-side sanitiser too.
+import { sanitizeForRender } from '@/utils/render-sanitizer';
+import { friendlyHost, humanizeStep, humanizedGlyph, liveStatusLabel } from '@/utils/step-humanize';
 import {
   AlertCircle,
   Check,
   ChevronDown,
   ChevronRight,
   CircleSlash,
+  Clapperboard,
   Clock,
   Copy,
   Download,
@@ -11,7 +117,6 @@ import {
   FileText,
   Globe,
   KeyRound,
-  Clapperboard,
   Link2,
   ListChecks,
   Loader2,
@@ -26,114 +131,9 @@ import {
   ShieldCheck,
   ShieldQuestion,
 } from 'lucide-react';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import * as React from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { useToast } from '@/components/ui/toast';
-import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
-import { awaitingUserCopy, awaitingUserStreamMessage } from '@/lib/awaiting-user-copy';
-import {
-  batchConfirmActionLabel,
-  batchConfirmSummary,
-  type BatchConfirmDecision,
-  singleConfirmActionLabel,
-  singleConfirmSummary,
-  type SingleConfirmDecision,
-} from '@/lib/batch-confirm-copy';
-import { isBrowserErrorUrl } from '@/components/browser-panel-state';
-import { copyTextToClipboard, hasCopyableText } from '@/lib/copy-text';
-import { shouldRenderLiveSubStatus } from '@/lib/live-substatus';
-import {
-  downloadFailureMessage,
-  isUnavailableFileStatus,
-  downloadFileAuthed,
-  fetchFileBlobAuthed,
-} from '@/lib/download-file';
-import { taskActionError } from '@/lib/error-copy';
-import { EXPERT_RESULT_LABELS, expertResultUsageCopy } from '@/lib/expert-result-usage';
-import { pageActionError } from '@/lib/page-error-copy';
-import {
-  externalLinkConfirmDescription,
-  safeExternalHttpHref,
-} from '@/lib/external-link-copy';
-import { failureResultCopyText, terminalAllowsRerun } from '@/lib/failure-copy';
-import { refundStatusCopy, retryAttachmentNote } from '@/lib/task-failure-recovery';
-import { useTaskFailureContext } from '@/hooks/useTaskFailureContext';
-import { FailureHeaderCard } from '@/components/FailureHeaderCard';
-import { formatFileSize } from '@/lib/file-size';
-import { downloadFileMetaLabel } from '@/lib/file-download-card-copy';
-import { downloadMarkdownFile } from '@/lib/markdown-download';
-import { screenshotThumbnailPresentation } from '@/lib/screenshot-thumbnail-state';
-import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
-import { useFileUnavailable } from '@/lib/unavailable-file-registry';
-import {
-  terminalEmptyAllowsRerun,
-  terminalEmptyCopy,
-  terminalInsufficientCopy,
-} from '@/lib/terminal-empty-copy';
-import {
-  shouldShowStepCard,
-  stepDetailSummary,
-  stepDisplayStepsForTask,
-  stepStatusText,
-  type StepDetailSummary,
-} from '@/lib/step-card-state';
-import {
-  matchResultSourceBadgePrefix,
-  RESULT_SOURCE_BADGES,
-  type ResultSourceMarker,
-} from '@/lib/result-source-badges';
-import { shouldShowVerificationBanner } from '@/lib/verification-banner-copy';
-import {
-  buildRecoveryActions,
-  buildTrustSummary,
-  shouldShowTrustSummary,
-  type RecoveryAction,
-  type TrustEvidenceStage,
-  type TrustTone,
-} from '@/lib/trust-summary';
-import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
-import { PlanCard } from '@/components/PlanCard';
-import { SearchResultCard } from '@/components/SearchResultCard';
-import { StepCard } from '@/components/StepCard';
-import {
-  taskCancelStateChangedMessage,
-  terminalResultContentInsufficient,
-} from '@/components/terminal-result-state';
-import { hdDebug } from '@/lib/hd-debug';
-import { markdownCodeBlockMeta } from '@/lib/markdown-code-block-state';
-import { pausedTaskNoticeCopy } from '@/lib/task-status-copy';
-import { trpc } from '@/lib/trpc';
-import { useTaskStore } from '@/stores/task-store';
-import { showImageOption } from '@/lib/video-history-row';
-import { cn } from '@/lib/utils';
-import { taskDisplayIntent } from '@/lib/task-display-copy';
-import type {
-  UiAwaitingUser,
-  UiCaptchaWait,
-  UiDegradeEvent,
-  UiExecutorFallback,
-  UiStep,
-  UiTask,
-  UiTerminalAttachment,
-  UiWebSearchEvent,
-} from '@/types/task';
-import { isTerminalStatus } from '@/types/task';
-import { friendlyHost, humanizeStep, humanizedGlyph, liveStatusLabel } from '@/utils/step-humanize';
-// Phase 1 follow-up — render-time defence-in-depth sanitiser. Strips
-// markdown image references that point at agent screenshots, agent
-// retry / reroute / login-wall narrative lines, lingering tool XML
-// envelopes, and image-magic-byte base64. Runs on EVERY summary
-// before ReactMarkdown — protects history rows that pre-date the
-// orchestrator-side sanitiser too.
-import { sanitizeForRender } from '@/utils/render-sanitizer';
 
 interface Props {
   task: UiTask;
@@ -1042,10 +1042,14 @@ function AwaitingUserBanner({
     if (cancelling) return;
     setCancelling(true);
     try {
-      const res = await trpc.tasks.abort.mutate({ taskId });
+      const res = await useTaskStore.getState().abortTask(taskId);
       if (!mountedRef.current) return;
+      if ('error' in res) {
+        toast.show(res.error, 'error');
+        return;
+      }
       if (!res.ok) {
-        toast.show(taskCancelStateChangedMessage(res.state), 'error');
+        toast.show(taskCancelStateChangedMessage(res.state ?? 'stale'), 'error');
         return;
       }
       toast.show('已取消任务', 'info', 2000);
@@ -2522,9 +2526,13 @@ function TerminalSummary({
   // card itself only ever shows the humanised version). Substitute the
   // same friendly summary the user reads. Other terminal states copy
   // their actual result text unchanged.
+  const failureExecutionMode = useTaskStore((state) => {
+    const task = state.tasks.find((item) => item.taskId === taskId);
+    return task?.videoType ? 'video_creation' : task?.executionMode;
+  });
   const copyBodyText = React.useMemo(
-    () => (status === 'failed' ? failureResultCopyText(displayText) : displayText),
-    [status, displayText],
+    () => (status === 'failed' ? failureResultCopyText(displayText, {executionMode: failureExecutionMode}) : displayText),
+    [status, displayText, failureExecutionMode],
   );
   const plainText = React.useMemo(
     () => stripMarkdown(copyBodyText) || fallbackPlainText,
@@ -2592,6 +2600,7 @@ function TerminalSummary({
       {isFailedLike && (
         <FailureHeaderCard
           status={status}
+          executionMode={failureExecutionMode}
           errorText={status === 'failed' ? displayText ?? '' : ''}
           onRetry={
             terminalAllowsRerun(status, displayText ?? '') && intent

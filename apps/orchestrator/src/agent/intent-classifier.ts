@@ -665,6 +665,20 @@ function decide(
     }
   }
 
+  // A downloadable writing artifact is a local output, not a website
+  // download. Keep real website actions ahead of this attachment shortcut.
+  if (ctx.hasFileAttachment &&
+      /(?:写|撰写|生成|整理).{0,24}(?:短文|文章|文案|故事|报告|文档)|\b(?:write|draft|compose|generate)\b.{0,48}\b(?:story|article|essay|report|document)\b/i.test(routingIntent)) {
+    const actions = routingIntent
+      .replace(/(?:不调用|不使用|禁止调用|不要调用)[^，。；,;！？!?\n]*/g, ' ')
+      .replace(/(?:我(?:本次)?上传的|已上传的|上传的)\s*[\w.-]+\.(?:png|jpe?g|webp|pdf|docx?|txt)\b/gi, '现有配图')
+      .replace(/\b[\w.-]+\.(?:png|jpe?g|webp|pdf|docx?|txt)\b/gi, '附件')
+      .replace(/(?:提供|生成|导出|呈现).{0,12}(?:可下载|下载的).{0,24}(?:文件|文档|文章|报告)/g, '');
+    if (!matchInteractionPattern(actions) && !matchSearchPattern(actions) && !matchSearchVerb(actions)) {
+      return { mode: 'generate', source: 'kw:attachment-writing' };
+    }
+  }
+
   // 0. Product-listing / comparison shopping tasks need the supercar
   // loop so it can use search_ecommerce and preserve source URLs.
   // Firecrawl/generate lanes repeatedly produced price rows with
@@ -791,6 +805,7 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
   const STRONG_SIGNAL_SOURCES = new Set([
     'kw:template_fill',
     'kw:template_fill_file',
+    'kw:attachment-writing',
     'kw:image',
     'kw:interaction',
     'kw:url',

@@ -1,9 +1,9 @@
-import { ChevronDown, ChevronRight, RotateCcw } from 'lucide-react';
-import * as React from 'react';
 import { classifyFriendlyFailure, friendlyFailureDetail } from '@/lib/failure-copy';
 import { type RefundStatusCopy } from '@/lib/task-failure-recovery';
 import { cn } from '@/lib/utils';
 import type { UiTask } from '@/types/task';
+import { ChevronDown, ChevronRight, RotateCcw } from 'lucide-react';
+import * as React from 'react';
 
 /**
  * Failure / cancellation header at the top of a terminal result card.
@@ -14,6 +14,7 @@ import type { UiTask } from '@/types/task';
 export function FailureHeaderCard({
   status,
   errorText,
+  executionMode,
   onRetry,
   retrying = false,
   refund = null,
@@ -21,6 +22,7 @@ export function FailureHeaderCard({
 }: {
   status: UiTask['status'];
   errorText: string;
+  executionMode?: string;
   onRetry?: () => void;
   retrying?: boolean;
   refund?: RefundStatusCopy | null;
@@ -33,7 +35,7 @@ export function FailureHeaderCard({
         subtitle: '任务已取消。下方保留了已生成的部分内容。',
         nextStep: '需要继续时可以重新执行这个任务。',
       }
-    : classifyFriendlyFailure(errorText);
+    : classifyFriendlyFailure(errorText, { executionMode });
   const hasTechnical = !cancelled && errorText.trim().length > 0;
   const detailText = friendlyFailureDetail(errorText);
   const [showTechnical, setShowTechnical] = React.useState(false);
@@ -84,12 +86,26 @@ export function FailureHeaderCard({
             type="button"
             onClick={onRetry}
             disabled={retrying}
-            aria-label={retrying ? '正在重新执行任务' : '重新执行任务'}
+            aria-label={
+              executionMode === 'video_creation' || executionMode === 'image'
+                ? retrying
+                  ? '正在重新生成'
+                  : '重新生成'
+                : retrying
+                  ? '正在重新执行任务'
+                  : '重新执行任务'
+            }
             title={retrying ? '正在重新执行' : '重新执行任务'}
             className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-[#FF0061]/25 bg-white px-3 text-[11px] font-medium text-[#FF0061] transition-colors hover:border-[#FF0061]/45 hover:bg-[#FF0061]/5 disabled:cursor-wait disabled:opacity-60 dark:border-[#FF0061]/35 dark:bg-transparent dark:text-foreground dark:hover:bg-[#FF0061]/10"
           >
             <RotateCcw className={cn('h-3.5 w-3.5', retrying && 'animate-spin')} aria-hidden />
-            <span>{retrying ? '重新执行中…' : '重新执行'}</span>
+            <span>
+              {retrying
+                ? '重新执行中…'
+                : executionMode === 'video_creation' || executionMode === 'image'
+                  ? '重新生成'
+                  : '重新执行'}
+            </span>
           </button>
         )}
       </div>

@@ -11,10 +11,10 @@
  * is caught at unit time.
  */
 
-import { describe, expect, it, vi } from 'vitest';
 import type { Logger } from 'pino';
-import { classifyExecutionMode } from './intent-classifier.js';
+import { describe, expect, it, vi } from 'vitest';
 import { classifyLightweightTask } from '../execution/lightweight-task.js';
+import { classifyExecutionMode } from './intent-classifier.js';
 
 function fakeLogger(): Logger {
   const noop = vi.fn();
@@ -1254,5 +1254,21 @@ describe('classifyExecutionMode — video_creation (Phase 1 #4)', () => {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
       expect(out, intent).not.toBe('video_creation');
     }
+  });
+});
+
+describe('attachment writing deliverables', () => {
+  it.each([
+    '用这张图写短文，并提供可下载的文章文件',
+    '写一篇约350字的短文，配图只能使用我上传的cat.png，不调用图片生成、浏览器或搜索，提供可下载的文章文件',
+    'Use the attached image to write a story and provide a downloadable document',
+  ])('uses the generate lane for attached writing: %s', async (intent) => {
+    expect(await classifyExecutionMode({intent, hasFileAttachment: true, logger: fakeLogger()})).toBe('generate');
+  });
+  it.each([
+    '用这张图写短文，并打开 https://example.com 上传文件',
+    'Use the attached image to write a story and upload it to github.com',
+  ])('preserves explicit website actions: %s', async (intent) => {
+    expect(await classifyExecutionMode({intent, hasFileAttachment: true, logger: fakeLogger()})).toBe('browser');
   });
 });

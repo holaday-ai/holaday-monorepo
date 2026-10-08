@@ -8,6 +8,10 @@ const ready = {
 };
 
 describe('mediaCapabilityIssue', () => {
+  it('pet i2v only requires its existing DashScope provider, not the clone lip-sync provider', () => {
+    expect(mediaCapabilityIssue({ kind: 'video', tab: 'pet', model: 'veo_fast', petI2v: true }, { ...ready, hasFal: false })).toBeNull();
+    expect(mediaCapabilityIssue({ kind: 'video', tab: 'pet', model: 'veo_fast', petI2v: true }, { ...ready, hasDashscope: false })).toContain('宠物');
+  });
   it('requires a production image provider (DashScope or fal) for image generation', () => {
     expect(
       mediaCapabilityIssue({ kind: 'image' }, { ...ready, hasDashscope: false, hasFal: false }),

@@ -1,11 +1,11 @@
+import { ToastProvider } from '@/components/ui/toast';
+import { resetUnavailableFilesForTests } from '@/lib/unavailable-file-registry';
 // @vitest-environment happy-dom
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RouterProvider, createMemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ToastProvider } from '@/components/ui/toast';
 import { FilesPage } from './FilesPage';
-import { resetUnavailableFilesForTests } from '@/lib/unavailable-file-registry';
 const download = vi.hoisted(()=>vi.fn());
 vi.mock('@/lib/download-file', async (importOriginal)=>({...await importOriginal<typeof import('@/lib/download-file')>(),downloadFileAuthed:download}));
 const api = vi.hoisted(() => ({ list:vi.fn(), capability:vi.fn() }));
@@ -25,7 +25,7 @@ describe('file library view integration',()=>{
  it('shows a listed file with missing bytes as unavailable before preview or attachment',async()=>{
   api.list.mockResolvedValue({items:[{...files[0],fileId:'file_storage_gone',filename:'Missing-photo.png',mimetype:'image/png',availability:'unavailable'}],nextCursor:null});mount();
   const button=(await screen.findByText('Missing-photo.png')).closest('button');
-  expect((button as HTMLButtonElement).disabled).toBe(true);expect(screen.getByText('已失效')).toBeTruthy();
+  expect((button as HTMLButtonElement).disabled).toBe(true);expect(screen.getByText('文件已不可用')).toBeTruthy();
  });
  it('keeps preview and task attachment actions available after switching view and sorting',async()=>{
   const user=userEvent.setup();const router=mount();

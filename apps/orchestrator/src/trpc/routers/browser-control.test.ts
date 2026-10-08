@@ -220,3 +220,37 @@ describe('browser control route integration', () => {
     });
   });
 });
+
+it('one cancellation durably cancels awaiting_user even while a runtime handle remains', async () => {
+  const f = fixture();
+  f.row.status = 'awaiting_user';
+  const id = f.instance.taskId;
+  const local = localChromeTaskSessions.start(
+    'usr_owner',
+    id,
+    {
+      extensionClientId: 'residual-connection',
+      tabId: 42,
+      expectedUrl: 'https://work.example',
+      selectionId: 'e2215e8d-7b6c-4711-ab15-460f51e558a4',
+    },
+    async () => ({ ok: false }),
+  );
+  vi.spyOn(TaskRepository.prototype, 'recordCancelRequested').mockResolvedValue({
+    persisted: true,
+  });
+  vi.spyOn(TaskRepository.prototype, 'applyControlTransition').mockImplementation(
+    async (prev, next) => {
+      if (f.row.status !== prev.status) return { persisted: false };
+      f.row.status = next.status;
+      return { persisted: true };
+    },
+  );
+  try {
+    expect(await f.caller.abort({ taskId: id })).toMatchObject({ ok: true, state: 'cancelled' });
+    expect(f.row.status).toBe('cancelled');
+    expect(local.cancellation.signal.aborted).toBe(true);
+  } finally {
+    await localChromeTaskSessions.finish('usr_owner', id);
+  }
+});
