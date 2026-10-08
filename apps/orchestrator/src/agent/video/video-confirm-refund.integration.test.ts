@@ -82,6 +82,17 @@ describe('video confirmation billing and rejected retry budget (real MySQL)', ()
       'reject_retry_limit',
     );
   });
+  it('strips zero-width and other invisible format characters before enforcing the budget', async () => {
+    const user = await actor();
+    const initial = await confirm(user.id, true, 1, '猫举爪 ABC');
+    await reject(initial.generated);
+    for (const variant of [
+      '猫\u200b举爪 ABC',
+      '\ufeff猫举\u2060爪 A\u200dBC',
+      '猫\u00ad举爪\u200f ABC',
+    ])
+      expect((await confirm(user.id, true, 1, variant)).result.kind).toBe('reject_retry_limit');
+  });
   it('reserves the last attempt under the owner lock for two concurrent confirmations', async () => {
     const user = await actor();
     for (let i = 0; i < 2; i++) {

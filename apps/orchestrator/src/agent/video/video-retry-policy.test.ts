@@ -12,3 +12,27 @@ describe('video rejection feedback', () => {
     expect(policy.videoRejectionReason('质量不合格', 0, 1)).toContain('请修改素材或描述');
   });
 });
+
+describe('invisible characters do not create a new retry budget (SMALL-FIXES-1)', () => {
+  it.each([
+    ['zero-width space', '猫​举爪'],
+    ['zero-width non-joiner', '猫‌举爪'],
+    ['zero-width joiner', '猫‍举爪'],
+    ['word joiner', '猫⁠举爪'],
+    ['byte order mark', '﻿猫举爪'],
+    ['soft hyphen', '猫­举爪'],
+    ['bidi mark', '猫‏举爪'],
+    ['variation selector', '猫️举爪'],
+    ['mixed with spaces', ' 猫​ 　举⁠爪。'],
+  ])('%s', (_label, variant) => {
+    expect(policy.normalizeVideoRetryIntent(variant)).toBe(
+      policy.normalizeVideoRetryIntent('猫举爪'),
+    );
+  });
+
+  it('keeps visible differences distinct', () => {
+    expect(policy.normalizeVideoRetryIntent('猫举左爪')).not.toBe(
+      policy.normalizeVideoRetryIntent('猫举爪'),
+    );
+  });
+});

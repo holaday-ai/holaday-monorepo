@@ -1294,3 +1294,24 @@ describe('live-source attachment writing precedence', () => {
   expect(await classifyExecutionMode({intent:'根据附件和 jd.com 写前5个商品价格和链接报告',hasFileAttachment:true,logger:fakeLogger()})).toBe('browser');
  });
 });
+
+describe('attachment references vs real uploads (SMALL-FIXES-1)', () => {
+  it.each([
+    '把附件上传到 Google Drive',
+    '把上传的文件上传到 github.com 的仓库',
+    '把附件上传到 github.com 的仓库',
+    '打开 https://example.com 上传附件',
+  ])('keeps a real upload destination on the browser lane: %s', async (intent) => {
+    expect(
+      await classifyExecutionMode({ intent, hasFileAttachment: true, logger: fakeLogger() }),
+    ).toBe('browser');
+  });
+  it.each(['上传文件到网盘', '把这份报告传到飞书'])(
+    'routes %s without an attachment to browser',
+    async (intent) => {
+      expect(
+        await classifyExecutionMode({ intent, hasFileAttachment: false, logger: fakeLogger() }),
+      ).toBe('browser');
+    },
+  );
+});
