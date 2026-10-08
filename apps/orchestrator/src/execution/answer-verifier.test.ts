@@ -1786,3 +1786,75 @@ describe('verifyDeterministic — lightweight Q&A passes with a concise answer',
     expect(result.passed).toBe(false);
   });
 });
+
+describe('list_item_sources + multi-line list rows (FIX-BATCH-A)', () => {
+  const newsContract = buildContract({
+    taskId: 't-news',
+    intent: '打开36kr首页，总结今天前三条新闻，提供原标题、发布日期和可核实链接。',
+    executionMode: 'browser',
+  });
+  const news = (link: (i: number) => string, date = true) =>
+    [1, 2, 3]
+      .map(
+        (i) =>
+          `${i}. **原标题**：标题${i}\n${date ? `   **发布日期**：2026年10月08日 1${i}:00\n` : ''}   **可核实链接**：${link(i)}`,
+      )
+      .join('\n\n');
+  const verify = (contract: ExecutionContract, answerText: string, urls: string[]) => {
+    const ledger = new EvidenceLedger(contract.taskId);
+    for (const url of urls)
+      ledger.add({ fact: `page_link=${url}`, sourceType: 'browser_state', sourceDetail: 'snapshot', confidence: 'observed' });
+    return verifyDeterministic({ contract, ledger, answerText });
+  };
+  const listCheck = (result: ReturnType<typeof verifyDeterministic>) =>
+    result.checks.find((check) => check.criterionType === 'list_item_sources');
+
+  it('fails the acceptance A2 answer: three items, one homepage link', () => {
+    const result = verify(newsContract, news(() => 'https://36kr.com/'), ['https://36kr.com/']);
+    expect(result.passed).toBe(false);
+    expect(listCheck(result)?.detail).toBe(
+      ['第 1 条', '第 2 条', '第 3 条'].map((n) => `${n}缺少独立来源链接（不能用首页或搜索页）`).join('；'),
+    );
+  });
+
+  it('passes distinct article links grounded by the snapshot, with dates', () => {
+    const links = [1, 2, 3].map((i) => `https://36kr.com/p/40166389634213${i}`);
+    const result = verify(newsContract, news((i) => links[i - 1]!), links);
+    expect(listCheck(result)).toMatchObject({ passed: true });
+    expect(result.passed).toBe(true);
+  });
+
+  it('names a reused link and a missing date', () => {
+    const result = verify(newsContract, news(() => 'https://36kr.com/p/1', false), ['https://36kr.com/p/1']);
+    expect(listCheck(result)?.detail).toContain('第 2 条缺少独立来源链接（与第 1 条相同）');
+    expect(listCheck(result)?.detail).toContain('第 1 条缺少发布日期/时间');
+  });
+
+  it('reads price and link from the lines under a numbered product (acceptance A1)', () => {
+    const answer = [1, 2, 3]
+      .map((i) => `${i}. **ESSONIO 耳机 ${i} 6.0蓝牙**  \n   价格：¥${i}498.00  \n   链接：https://item.jd.com/10${i}.html`)
+      .join('\n\n');
+    expect(extractStructuredItems(answer)).toEqual(
+      [1, 2, 3].map((i) =>
+        expect.objectContaining({
+          name: `**ESSONIO 耳机 ${i} 6.0蓝牙**`,
+          price: Number(`${i}498`),
+          url: `https://item.jd.com/10${i}.html`,
+        }),
+      ),
+    );
+    const contract = buildContract({
+      taskId: 't-jd',
+      intent: '去京东搜索降噪耳机，告诉我前三个商品的名称和价格，并附商品链接。',
+      executionMode: 'browser',
+    });
+    const urls = [1, 2, 3].map((i) => `https://item.jd.com/10${i}.html`);
+    expect(verify(contract, answer, urls).passed).toBe(true);
+    // The acceptance answer cited the re.jd.com landing page for every row.
+    const landing = answer.replace(/https:\/\/item\.jd\.com\/10\d\.html/g, 'https://re.jd.com/search?keyword=x');
+    const failed = verify(contract, landing, ['https://re.jd.com/search?keyword=x']);
+    expect(failed.checks.find((check) => check.criterionType === 'ecommerce_rows')?.detail).toContain(
+      '第 1、2、3 行使用了搜索页/品类页链接',
+    );
+  });
+});

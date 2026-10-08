@@ -101,6 +101,22 @@ export interface UnifiedBrowserLoopInput {
   /** Per model-turn timeout; the shared transport retries 429/5xx within it. */
   turnTimeoutMs?: number;
   onStep?: (step: { index: number; tool: string; ok: boolean }) => void;
+  /**
+   * Pre-delivery review of a completed answer (FIX-BATCH-A). Returns what the
+   * answer is missing (e.g. per-item links, prices), or null when it is fine.
+   * The first time it reports a gap the model gets one remediation turn; the
+   * second finish is returned as-is for the verifier to judge.
+   */
+  reviewFinish?: (summary: string) => string | null;
+}
+
+/** Remediation turn after the pre-delivery review found gaps in the answer. */
+export function remediationPrompt(gaps: string): string {
+  return [
+    `结果还不能交付：${gaps}。`,
+    '请补救一次：进入对应条目的详情页（文章页 / 商品详情页）拿到该条自己的链接和字段，或滚动页面后重新 snapshot 再提取。',
+    '确实拿不到时，再调用 finish 如实写明缺少哪几条、缺什么；不要用首页、搜索页或同一个链接代替。',
+  ].join('\n');
 }
 
 export type UnifiedBrowserOutcome =
@@ -119,6 +135,7 @@ export async function runUnifiedBrowserLoop(
   const messages: NeutralMessage[] = [{ role: 'user', content: input.intent }];
   /** Latest page text seen by snapshot/extract; evidence must come from it. */
   let lastPageText = '';
+  let remediationsLeft = input.reviewFinish ? 1 : 0;
   for (let step = 0; step < maxSteps; step += 1) {
     if (input.signal?.aborted) return { status: 'cancelled', steps: step };
     let response: Awaited<ReturnType<MessagesAdapter['create']>>;
@@ -173,6 +190,12 @@ export async function runUnifiedBrowserLoop(
                 true,
               ),
             );
+            continue;
+          }
+          const gaps = remediationsLeft > 0 ? (input.reviewFinish?.(summary) ?? null) : null;
+          if (gaps) {
+            remediationsLeft -= 1;
+            results.push(toolResult(call.id, remediationPrompt(gaps), true));
             continue;
           }
           return { status: 'completed', summary, evidence, steps: step + 1 };

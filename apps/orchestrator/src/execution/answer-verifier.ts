@@ -301,6 +301,8 @@ function checkCriterion(
       return checkPriceSort(criterion, answerText);
     case 'ecommerce_rows':
       return checkEcommerceRows(criterion, answerText);
+    case 'list_item_sources':
+      return checkListItemSources(criterion, answerText);
     case 'custom':
       return checkCustom(criterion, ledger, answerText, contract, contextInput);
     default: {
@@ -664,35 +666,62 @@ function tryExtractTableItems(answerText: string): ParsedItem[] {
 }
 
 const NUMBERED_LIST_RE = /^\s*\d+[.、)]\s+(.+)$/;
+/** "价格：¥1498" / "链接：https://…" / "- 发布时间：…" under a numbered item. */
+const ITEM_CONTINUATION_RE =
+  /^(?:\s+\S|\s*[-*+]\s+\S|\s*\**[\p{Script=Han}A-Za-z]{1,8}\**\s*[：:]\s*\S)/u;
 
+/**
+ * Numbered items, including multi-line items whose price / link / date sit on
+ * indented or labelled lines below the title (common model markdown):
+ *
+ *   1. **商品名**
+ *      价格：¥1498.00
+ *      链接：https://item.jd.com/1.html
+ *
+ * The name comes from the first line only; price and URL from the whole item.
+ */
 function tryExtractNumberedListItems(answerText: string): ParsedItem[] {
   const lines = answerText.split(/\r?\n/);
-  const items: ParsedItem[] = [];
+  const blocks: Array<{ first: string; rest: string[] }> = [];
+  let current: { first: string; rest: string[] } | null = null;
   for (const raw of lines) {
     const m = raw.match(NUMBERED_LIST_RE);
-    if (!m || !m[1]) continue;
-    const body = m[1].trim();
-    const url = extractUrlFromCell(body);
-    const price = parsePriceText(body);
-    let name: string | null = body;
-    if (url) name = name.replace(url, '').trim();
+    if (m?.[1]) {
+      current = { first: m[1].trim(), rest: [] };
+      blocks.push(current);
+      continue;
+    }
+    if (!current) continue;
+    if (raw.trim() === '') continue;
+    if (ITEM_CONTINUATION_RE.test(raw) && !/^\s*#/.test(raw) && !/^\s*\|/.test(raw)) {
+      current.rest.push(raw.trim());
+    } else {
+      current = null;
+    }
+  }
+  return blocks.map(({ first, rest }): ParsedItem => {
+    const body = [first, ...rest].join('\n');
+    const url = extractUrlFromCell(first) ?? extractUrlFromCell(body);
+    const price = parsePriceText(first) ?? parsePriceText(rest.join('\n'));
+    let name: string | null = first;
+    const firstUrl = extractUrlFromCell(first);
+    if (firstUrl) name = name.replace(firstUrl, '').trim();
     // Strip the price token off the name with a separate parse so
     // dropping ¥ doesn't catch random digits embedded in the name.
-    const priceMatch = body.match(
+    const priceMatch = first.match(
       /[¥￥$]\s*[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?\s*(?:元|RMB|人民币)/i,
     );
     if (priceMatch) name = name.replace(priceMatch[0], '').trim();
     // Trim residual punctuation (separators between fields).
     name = name.replace(/^[—\-·,，:：、\s]+|[—\-·,，:：、\s]+$/g, '').trim();
-    items.push({
+    return {
       name: name || null,
       price,
       url,
       raw: body,
       source: 'list',
-    });
-  }
-  return items;
+    };
+  });
 }
 
 const BULLET_LIST_RE = /^\s*[-*+]\s+(.+)$/;
@@ -966,11 +995,15 @@ function checkEcommerceRows(
 }
 
 function isLikelyEcommerceAggregateUrl(url: string): boolean {
+  if (isNonDetailUrl(url)) return true;
   try {
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
     const path = u.pathname.toLowerCase();
     if (host === 'search.jd.com') return true;
+    // re.jd.com landing pages and www.jd.com/jiage price digests list many products.
+    if (host === 're.jd.com') return true;
+    if (host.endsWith('jd.com') && path.startsWith('/jiage/')) return true;
     if (host.endsWith('.taobao.com')) {
       if (path.includes('/chanpin/')) return true;
       if (path.includes('/search')) return true;
@@ -984,6 +1017,101 @@ function isLikelyEcommerceAggregateUrl(url: string): boolean {
     return false;
   }
   return false;
+}
+
+/**
+ * A homepage, search page or listing page — never an item's own source.
+ * Exported so the auto-fix layer refuses to substitute one for an item link.
+ */
+export function isNonDetailUrl(raw: string): boolean {
+  try {
+    const url = new URL(stripTrailingPunct(raw));
+    const path = url.pathname.replace(/\/+$/, '').toLowerCase();
+    if (path === '' || /^\/(?:index|default|home)(?:\.(?:s?html?|php|aspx?))?$/.test(path)) {
+      return !/[?&](?:id|p|aid|itemid|item_id|article_id)=/i.test(url.search);
+    }
+    if (/(?:^|\/)(?:search|s|list|lists|category|categories|tag|tags)(?:\/|$)/.test(path)) return true;
+    return /[?&](?:q|query|keyword|keywords|wd|search)=/i.test(url.search);
+  } catch {
+    return true;
+  }
+}
+
+const LIST_KEY_FIELD_PATTERNS: Record<string, { label: string; re: RegExp }> = {
+  date: {
+    label: '发布日期/时间',
+    re: /\d{4}\s*[-/.年]\s*\d{1,2}(?:\s*[-/.月]\s*\d{1,2})?|\d{1,2}\s*月\s*\d{1,2}\s*日|\b\d{1,2}:\d{2}\b|\d+\s*(?:秒|分钟|小时|天)前|刚刚|今天|今日|昨天|\b\d+\s*(?:minutes?|hours?|days?)\s+ago\b/i,
+  },
+  price: { label: '价格', re: /[¥￥$]\s*\d|\d+(?:\.\d+)?\s*(?:元|RMB|人民币)/i },
+};
+
+/**
+ * FIX-BATCH-A — retrieved list items each need their own detail source and
+ * the requested key fields. A homepage / search page link, one link reused by
+ * every row, or a missing date/price fails: those answers cannot be checked
+ * item by item, even when the text itself reads well.
+ */
+function checkListItemSources(criterion: SuccessCriterion, answerText: string): CheckResult {
+  const minItems = Number(criterion.data?.minItems ?? 0);
+  const keyFields = ((criterion.data?.keyFields as string[] | undefined) ?? []).filter(
+    (field) => field in LIST_KEY_FIELD_PATTERNS,
+  );
+  const items = extractStructuredItems(answerText).slice(0, Math.max(minItems, 1));
+  const problems: string[] = [];
+  if (items.length < minItems) {
+    problems.push(`只解析到 ${items.length} 条，要求 ${minItems} 条`);
+  }
+  const seen = new Map<string, number>();
+  items.forEach((item, i) => {
+    const n = i + 1;
+    const missing: string[] = [];
+    const url = item.url ? stripTrailingPunct(item.url) : null;
+    if (!url) {
+      missing.push('来源链接');
+    } else if (isNonDetailUrl(url)) {
+      missing.push('独立来源链接（不能用首页或搜索页）');
+    } else if (seen.has(url)) {
+      missing.push(`独立来源链接（与第 ${seen.get(url)} 条相同）`);
+    } else {
+      seen.set(url, n);
+    }
+    for (const field of keyFields) {
+      const pattern = LIST_KEY_FIELD_PATTERNS[field];
+      if (pattern && !pattern.re.test(item.raw)) missing.push(pattern.label);
+    }
+    if (missing.length > 0) problems.push(`第 ${n} 条缺少${missing.join('、')}`);
+  });
+  const passed = problems.length === 0;
+  return {
+    criterionId: criterion.id,
+    criterionType: 'list_item_sources',
+    passed,
+    checker: 'deterministic',
+    detail: passed
+      ? `前 ${items.length} 条均有独立来源链接${keyFields.length > 0 ? '和所需字段' : ''}`
+      : problems.join('；'),
+    severity: passed ? undefined : 'fixable',
+  };
+}
+
+/**
+ * Pre-delivery review of a browser answer against the list requirements in its
+ * contract (list_item_sources / ecommerce_rows). Returns the gaps in Chinese,
+ * or null when the answer meets them. Deterministic and ledger-free, so the
+ * browser loop can ask the model for one targeted retry before it finishes.
+ */
+export function reviewListAnswer(contract: ExecutionContract, answerText: string): string | null {
+  const gaps: string[] = [];
+  for (const criterion of contract.successCriteria) {
+    const check =
+      criterion.type === 'list_item_sources'
+        ? checkListItemSources(criterion, answerText)
+        : criterion.type === 'ecommerce_rows'
+          ? checkEcommerceRows(criterion, answerText)
+          : null;
+    if (check && !check.passed) gaps.push(check.detail);
+  }
+  return gaps.length > 0 ? gaps.join('；') : null;
 }
 
 function checkDuplicateCandidateUrls(

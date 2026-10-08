@@ -1,8 +1,12 @@
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   createPlaywrightUnifiedExecutor,
   shortenSnapshotUrls,
+  shortenUrl,
+  snapshotLinks,
 } from './playwright-unified-executor.js';
 import {
   UNIFIED_BROWSER_TOOLS,
@@ -118,9 +122,93 @@ describe('snapshot URL shortening (batch 12)', () => {
       '- text: /url: not a url line',
     ].join('\n');
     const out = shortenSnapshotUrls(tree, 40).split('\n');
-    expect(out[1]).toBe(`  - /url: ${long.slice(0, 40)}…`);
+    // Tracking query dropped, the item link itself still works.
+    expect(out[1]).toBe('  - /url: https://example.com/item');
     expect(out[2]).toBe('  - /url: https://example.com/short');
     expect(out[3]).toBe('- text: /url: not a url line');
     expect(shortenSnapshotUrls(tree, 0)).toBe(tree);
   });
+});
+
+describe('snapshot links for grounding (FIX-BATCH-A)', () => {
+  it('keeps a usable link when only the query is long, cuts a long path with …', () => {
+    expect(shortenUrl(`https://item.jd.com/100.html?bbtf=1&ext=${'x'.repeat(200)}`, 40)).toBe(
+      'https://item.jd.com/100.html',
+    );
+    const longPath = `https://ccc-x.jd.com/dsp/${'a'.repeat(80)}`;
+    expect(shortenUrl(longPath, 40)).toBe(`${longPath.slice(0, 40)}…`);
+    // A bare host is not a usable item link, so the query stays (cut) instead.
+    expect(shortenUrl(`https://jd.com/?${'q'.repeat(80)}`, 40).endsWith('…')).toBe(true);
+    expect(shortenUrl('https://a.com/x', 0)).toBe('https://a.com/x');
+  });
+
+  it('resolves relative hrefs against the page and adds the form the model saw', () => {
+    const tree = [
+      '- link "文章" [ref=e3]:',
+      '  - /url: /p/4016638963421319',
+      '- link "商品" [ref=e4]:',
+      `  - /url: //item.jd.com/100.html?bbtf=${'1'.repeat(120)}`,
+      '- link "邮件" [ref=e5]:',
+      '  - /url: mailto:a@b.c',
+    ].join('\n');
+    expect(snapshotLinks(tree, 'https://36kr.com/', 100)).toEqual([
+      'https://36kr.com/p/4016638963421319',
+      `https://item.jd.com/100.html?bbtf=${'1'.repeat(120)}`,
+      'https://item.jd.com/100.html',
+    ]);
+  });
+});
+
+describe('unified executor on list pages (FIX-BATCH-A, real Chromium)', () => {
+  let browser: Browser;
+  const server = createServer((req, res) => {
+    res.setHeader('content-type', 'text/html; charset=utf-8');
+    res.end(
+      req.url === '/item/1'
+        ? '<!doctype html><title>商品 1</title><h1>商品 1 详情</h1><p>¥1498.00</p>'
+        : `<!doctype html><title>搜索结果</title>
+           <a href="/item/1" target="_blank">降噪耳机 A ¥1498.00</a>
+           <a href="/item/2">降噪耳机 B</a><a href="/hidden" style="display:none">隐藏</a>`,
+    );
+  });
+  let base = '';
+  beforeAll(async () => {
+    browser = await chromium.launch({ headless: true });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  }, 60_000);
+  afterAll(async () => {
+    await browser?.close();
+    await new Promise((resolve) => server.close(resolve));
+  });
+
+  it('follows a target=_blank click into the controlled page (acceptance A1)', async () => {
+    const page = await browser.newPage();
+    await page.goto(`${base}/`);
+    const tools = createPlaywrightUnifiedExecutor(page, { actionTimeoutMs: 5_000 });
+    const snapshot = await tools.execute({ tool: 'snapshot' });
+    expect(snapshot.links).toEqual(expect.arrayContaining([`${base}/item/1`, `${base}/item/2`]));
+    const ref = snapshot.text.match(/link "降噪耳机 A[^"]*" \[ref=(e\d+)\]/)?.[1];
+    expect(ref).toBeTruthy();
+    const clicked = await tools.execute({ tool: 'click', ref: ref as string });
+    expect(clicked).toMatchObject({ ok: true, url: `${base}/item/1` });
+    expect(clicked.text).toContain('新标签页内容已在当前页打开');
+    expect(page.context().pages()).toHaveLength(1);
+    expect(await page.title()).toBe('商品 1');
+    await page.close();
+  }, 60_000);
+
+  it('extract returns visible text links with their URLs', async () => {
+    const page = await browser.newPage();
+    await page.goto(`${base}/`);
+    const tools = createPlaywrightUnifiedExecutor(page, { actionTimeoutMs: 5_000 });
+    const extracted = await tools.execute({ tool: 'extract', instruction: '商品链接' });
+    const payload = JSON.parse(extracted.text) as { links: Array<{ text: string; url: string }> };
+    expect(payload.links).toEqual([
+      { text: '降噪耳机 A ¥1498.00', url: `${base}/item/1` },
+      { text: '降噪耳机 B', url: `${base}/item/2` },
+    ]);
+    expect(extracted.links).toEqual(expect.arrayContaining([`${base}/item/1`, `${base}/item/2`]));
+    await page.close();
+  }, 60_000);
 });

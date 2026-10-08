@@ -1,3 +1,6 @@
+import { reviewListAnswer } from '../../execution/answer-verifier.js';
+import { browserOutputGuidance } from '../../execution/execution-contract.js';
+import { getContract } from '../../execution/execution-pipeline.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import type {
   RunSupercarOptions,
@@ -9,6 +12,8 @@ import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.j
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
+/** Ledger entries are capped per task (MAX_ENTRIES_PER_TASK); links take at most this many. */
+const MAX_GROUNDED_LINKS = 600;
 /** Same takeover window as the legacy loop: a parked task waits this long for the user. */
 const HANDOFF_WAIT_MS = 30 * 60_000;
 const CANCEL_POLL_MS = 2_000;
@@ -144,6 +149,31 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
 
   const toolsUsed = new Set<string>();
   let lastSnapshot = '';
+  // FIX-BATCH-A — the contract the verifier will enforce is also the model's
+  // output requirement, and the loop gets one remediation turn when a
+  // completed list answer misses per-item sources or key fields.
+  const contract = getContract(opts.taskId);
+  const guidance = browserOutputGuidance(contract);
+  const groundedLinks = new Set<string>();
+  /**
+   * Links and pages the model actually saw ground its per-item citations in
+   * the evidence ledger. Without them only the final URL was grounded, and
+   * auto-fix rewrote every article link to the site root (acceptance A2).
+   */
+  const recordLinks = async (urls: readonly string[], detail: string) => {
+    for (const url of urls) {
+      if (groundedLinks.has(url) || groundedLinks.size >= MAX_GROUNDED_LINKS) continue;
+      groundedLinks.add(url);
+      await safe(() =>
+        opts.onEvidence?.({
+          fact: `page_link=${url}`,
+          sourceType: 'browser_state',
+          sourceDetail: detail,
+          confidence: 'observed',
+        }),
+      );
+    }
+  };
   let actionIndex = 0;
   let iteration = 0;
   const safe = async (fn: (() => void | Promise<void>) | undefined) => {
@@ -156,7 +186,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
 
   try {
     const outcome = await runUnifiedBrowserLoop({
-      intent: opts.intent,
+      intent: guidance ? `${opts.intent}\n\n【结果要求】\n${guidance}` : opts.intent,
+      ...(contract && guidance
+        ? { reviewFinish: (summary: string) => reviewListAnswer(contract, summary) }
+        : {}),
       adapter,
       ...(opts.unifiedWebSearch ? { webSearch: opts.unifiedWebSearch } : {}),
       ...(opts.unifiedReadPage ? { readPage: opts.unifiedReadPage } : {}),
@@ -167,6 +200,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         iteration += 1;
         toolsUsed.add(action.tool);
         if (action.tool === 'snapshot' && result.ok) lastSnapshot = result.text;
+        if (result.ok && result.url) await recordLinks([result.url], 'unified page url');
+        if (result.ok && result.links?.length)
+          await recordLinks(result.links, `unified snapshot of ${result.url ?? page.url()}`);
         const label = 'ref' in action && action.ref ? labelForRef(lastSnapshot, action.ref) : null;
         await safe(() =>
           opts.onTick?.({

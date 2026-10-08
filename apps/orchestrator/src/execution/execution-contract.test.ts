@@ -440,3 +440,54 @@ describe('SuccessCriterion id uniqueness', () => {
     }
   });
 });
+
+describe('list answers need per-item sources (FIX-BATCH-A)', () => {
+  it.each([
+    ['打开36kr首页，总结今天前三条新闻，提供原标题、发布日期和可核实链接。', 3, ['date']],
+    ['打开 Hacker News 首页，列出排名前三的帖子：标题、发布时间和讨论页链接。', 3, ['date']],
+    ['打开 GitHub Trending，列出今天排名前三的仓库：仓库名、今日新增 star 数和仓库链接。', 3, []],
+    ['给我5条关于AI的最新新闻和来源', 5, []],
+    ['top 3 posts on hacker news with links', 3, []],
+  ])('%s → %i items with fields %j', (intent, minItems, keyFields) => {
+    expect(classifyIntentForOutputRequirement(intent)).toEqual({
+      kind: 'list_with_sources',
+      requirement: { kind: 'list_sources', minItems, keyFields },
+    });
+  });
+
+  it.each([
+    '写三条小红书标题',
+    '帮我看看最近3天的新闻热点',
+    '总结一下这篇文章的前三段',
+    '前3天的天气',
+  ])('does not treat %s as a sourced list', (intent) => {
+    expect(classifyIntentForOutputRequirement(intent).kind).not.toBe('list_with_sources');
+  });
+
+  it('keeps ecommerce listings on the product-row contract (acceptance A1)', () => {
+    expect(
+      classifyIntentForOutputRequirement('去京东搜索降噪耳机，告诉我前三个商品的名称和价格，并附商品链接。'),
+    ).toMatchObject({ kind: 'ecommerce_listing', requirement: { minItems: 3 } });
+  });
+
+  it('turns the requirement into a per-item criterion and a model-facing instruction', () => {
+    const contract = buildContract({
+      taskId: 't',
+      intent: '打开36kr首页，总结今天前三条新闻，提供原标题、发布日期和可核实链接。',
+      executionMode: 'browser',
+    });
+    expect(contract.successCriteria).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'list_item_sources',
+          data: { minItems: 3, keyFields: ['date'] },
+        }),
+      ]),
+    );
+    // The one-URL guard no longer stands in for per-item sources.
+    expect(contract.successCriteria.some((criterion) => criterion.type === 'url_count')).toBe(false);
+    const suffix = buildPromptSchemaSuffix(contract.goal);
+    expect(suffix).toContain('该条自己的详情页链接');
+    expect(suffix).toContain('不能用网站首页、搜索结果页或列表页代替');
+  });
+});

@@ -25,7 +25,7 @@ export interface ListWithSourcesSpec {
   type: 'list_with_sources';
   minItems: number;
   /** Registrable domains an item source may live on, e.g. ["jd.com"]. */
-  domains: string[];
+  domains: readonly string[];
   keyField: 'price' | 'date' | 'stars' | null;
 }
 
@@ -99,7 +99,7 @@ const ITEM_START = /^\s*(?:#{1,6}\s*)?(?:\*\*)?\s*(?:\d{1,2}|[一二三四五六
 const KEY_FIELD: Record<NonNullable<ListWithSourcesSpec['keyField']>, RegExp> = {
   price: /[¥￥]\s*\d|\d+(?:\.\d+)?\s*元/,
   date: /\d{4}[-/.年]\d{1,2}(?:[-/.月]\d{1,2})?|\d{1,2}月\d{1,2}日|\d{1,2}:\d{2}|\d+\s*(?:分钟|小时|天)前|今天|昨天|\b\d+\s*(?:minutes?|hours?|days?)\s+ago\b/i,
-  stars: /\d[\d,.]*\s*[kK]?\s*(?:stars?|颗?星|star)/i,
+  stars: /(?:stars?|星)\D{0,8}\d|\d[\d,.]*\s*[kK]?\s*(?:stars?|颗?星)/i,
 };
 
 /** Item blocks: table rows, or numbered items with their continuation lines. */

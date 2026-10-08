@@ -395,7 +395,7 @@ export function deriveFinalStatus(
     const hasCriticalStructuralFailure = verification.checks.some(
       (check) =>
         !check.passed &&
-        ['url_count', 'ecommerce_rows', 'result_count'].includes(
+        ['url_count', 'ecommerce_rows', 'result_count', 'list_item_sources'].includes(
           check.criterionType ?? '',
         ),
     );
@@ -789,6 +789,17 @@ function finalizeResolvedExecution(
 ): VerifyOutput {
   const { priorVerification, semanticMetadata, ...verifyInputs } = inputs;
 
+  // The primary pass already replaced a failed answer with the safety boundary
+  // (which states the real reason). Re-verifying that notice would replace the
+  // reason with artefacts such as "只解析到 0 条" — keep the primary verdict.
+  if (
+    priorVerification &&
+    !priorVerification.passed &&
+    verifyInputs.answerText.startsWith(SAFE_BOUNDARY_HEADER)
+  ) {
+    return { verification: priorVerification, finalText: verifyInputs.answerText };
+  }
+
   const workflowContract = verificationWorkflow(contract, inputs.verificationContext);
   const deterministic = verifyDeterministic({
     contract,
@@ -1002,6 +1013,9 @@ function runFixLoop(
   };
 }
 
+/** First line of the text that replaces an answer which failed verification. */
+const SAFE_BOUNDARY_HEADER = '未能给出可验证的结果，本次不会把未通过校验的内容作为结论。';
+
 function buildSafeVerificationBoundary(
   verification: VerificationResult,
   answerText: string,
@@ -1015,7 +1029,7 @@ function buildSafeVerificationBoundary(
       (check) => !check.criterionType && check.severity !== 'hard_fail',
     );
   const parts = [
-    '未能给出可验证的结果，本次不会把未通过校验的内容作为结论。',
+    SAFE_BOUNDARY_HEADER,
     '',
     `原因：${reason}`,
     '',

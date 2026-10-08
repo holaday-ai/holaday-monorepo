@@ -9,6 +9,14 @@ export interface UnifiedToolResult {
   image?: { mediaType: 'image/jpeg'; data: string };
   /** Present on `download`: where the file was saved by the host. */
   download?: { filename: string; path: string };
+  /**
+   * Present on `snapshot`: absolute link targets on the page (full, before the
+   * model-facing shortening) and the shortened forms the model saw. Host-only
+   * evidence for grounding the answer's per-item links; never sent to the model.
+   */
+  links?: string[];
+  /** Page URL after the action. */
+  url?: string;
 }
 
 export interface UnifiedExecutorOptions {
@@ -27,6 +35,8 @@ const DEFAULT_ACTION_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_SNAPSHOT_CHARS = 40_000;
 const DEFAULT_MAX_EXTRACT_CHARS = 20_000;
 const DEFAULT_MAX_URL_CHARS = 100;
+/** How long a click waits to see whether it opened a new tab or navigated. */
+const POPUP_WAIT_MS = 1_500;
 const URL_LINE = /^(\s*- \/url: )(.*)$/;
 
 /**
@@ -40,10 +50,89 @@ export function shortenSnapshotUrls(tree: string, maxUrlChars: number): string {
     .split('\n')
     .map((line) => {
       const match = URL_LINE.exec(line);
-      if (!match || (match[2] ?? '').length <= maxUrlChars) return line;
-      return `${match[1]}${(match[2] ?? '').slice(0, maxUrlChars)}…`;
+      if (!match) return line;
+      const short = shortenUrl(match[2] ?? '', maxUrlChars);
+      return short === match[2] ? line : `${match[1]}${short}`;
     })
     .join('\n');
+}
+
+/**
+ * A long link keeps working when only its query/fragment (mostly tracking) is
+ * dropped: `https://item.jd.com/1.html?bbtf=…` → `https://item.jd.com/1.html`,
+ * which the model can still cite as the item's link. Only when the path itself
+ * is too long is it cut and marked with `…`.
+ */
+export function shortenUrl(url: string, maxUrlChars: number): string {
+  if (maxUrlChars <= 0 || url.length <= maxUrlChars) return url;
+  const bare = url.replace(/[?#].*$/, '');
+  if (bare !== url && bare.length <= maxUrlChars && !/^(?:https?:)?\/\/[^/]+\/?$/.test(bare)) {
+    return bare;
+  }
+  return `${url.slice(0, maxUrlChars)}…`;
+}
+
+const MAX_SNAPSHOT_LINKS = 400;
+const MAX_EXTRACT_LINKS = 150;
+const MAX_LINK_TEXT_CHARS = 60;
+
+/** Visible text links on the page (absolute http(s) hrefs, first occurrence wins). */
+async function pageLinks(
+  page: Page,
+  timeout: number,
+): Promise<Array<{ text: string; url: string }>> {
+  const collect = page
+    .locator('a[href]')
+    .evaluateAll(
+      (nodes, limits) => {
+        const seen = new Set<string>();
+        const out: Array<{ text: string; url: string }> = [];
+        for (const node of nodes) {
+          const anchor = node as HTMLAnchorElement;
+          const text = (anchor.innerText || anchor.getAttribute('title') || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, limits.text);
+          if (!text || !/^https?:/i.test(anchor.href) || seen.has(anchor.href)) continue;
+          if (anchor.getClientRects().length === 0) continue;
+          seen.add(anchor.href);
+          out.push({ text, url: anchor.href });
+          if (out.length >= limits.count) break;
+        }
+        return out;
+      },
+      { text: MAX_LINK_TEXT_CHARS, count: MAX_EXTRACT_LINKS },
+    )
+    .catch(() => []);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<Array<{ text: string; url: string }>>((resolve) => {
+    timer = setTimeout(() => resolve([]), timeout);
+  });
+  try {
+    return await Promise.race([collect, expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Absolute link targets in an AI aria snapshot, plus the forms the model saw. */
+export function snapshotLinks(tree: string, pageUrl: string, maxUrlChars: number): string[] {
+  const links = new Set<string>();
+  for (const line of tree.split('\n')) {
+    const href = URL_LINE.exec(line)?.[2]?.trim();
+    if (!href || links.size >= MAX_SNAPSHOT_LINKS) continue;
+    let absolute: string;
+    try {
+      absolute = new URL(href, pageUrl).toString();
+    } catch {
+      continue;
+    }
+    if (!/^https?:/i.test(absolute)) continue;
+    links.add(absolute);
+    const shown = shortenUrl(absolute, maxUrlChars);
+    if (!shown.endsWith('…')) links.add(shown);
+  }
+  return [...links];
 }
 
 /**
@@ -59,28 +148,55 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
   const maxUrlChars = options.maxUrlChars ?? DEFAULT_MAX_URL_CHARS;
   const byRef = (ref: string) => page.locator(`aria-ref=${ref}`);
 
-  const snapshotText = async (): Promise<string> => {
+  const snapshotWithLinks = async (): Promise<{ text: string; links: string[] }> => {
     // Redact before truncating: a secret straddling the cut must not survive.
-    const tree = shortenSnapshotUrls(
-      await redactPageText(
-        page as never,
-        await page.locator('body').ariaSnapshot({ mode: 'ai', timeout }),
-      ),
-      maxUrlChars,
+    const redacted = await redactPageText(
+      page as never,
+      await page.locator('body').ariaSnapshot({ mode: 'ai', timeout }),
     );
+    const tree = shortenSnapshotUrls(redacted, maxUrlChars);
     const header = `URL: ${page.url()}\n标题: ${await page.title()}\n`;
-    const body = tree.length > maxSnapshot ? `${tree.slice(0, maxSnapshot)}\n…（已截断）` : tree;
-    return `${header}${body}`;
+    const visible = tree.length > maxSnapshot ? tree.slice(0, maxSnapshot) : tree;
+    const body = visible === tree ? tree : `${visible}\n…（已截断）`;
+    // Shortening maps lines 1:1, so the visible lines of the full tree are the
+    // links the model saw; links past the cut ground nothing.
+    const seen = redacted.split('\n').slice(0, visible.split('\n').length).join('\n');
+    return { text: `${header}${body}`, links: snapshotLinks(seen, page.url(), maxUrlChars) };
+  };
+  const snapshotText = async (): Promise<string> => (await snapshotWithLinks()).text;
+
+  /**
+   * A link with target=_blank opens a tab the model never sees, so the page
+   * looked unchanged after clicking a product (acceptance A1). Load the new
+   * tab's URL in the controlled page and close the tab.
+   */
+  const clickFollowingNewTab = async (ref: string): Promise<UnifiedToolResult> => {
+    const before = page.url();
+    const popup = page.waitForEvent('popup', { timeout: POPUP_WAIT_MS }).catch(() => null);
+    const navigated = page
+      .waitForEvent('framenavigated', { timeout: POPUP_WAIT_MS })
+      .then(() => null)
+      .catch(() => null);
+    await byRef(ref).click({ timeout });
+    const opened = await Promise.race([popup, navigated]);
+    if (!opened) return done(`已点击 ${ref}`);
+    await opened.waitForLoadState('domcontentloaded', { timeout }).catch(() => {});
+    const target = opened.url();
+    await opened.close().catch(() => {});
+    if (!/^https?:/i.test(target) || target === before) return done(`已点击 ${ref}`);
+    await page.goto(target, { timeout: Math.max(timeout, 30_000), waitUntil: 'domcontentloaded' });
+    return done(`已点击 ${ref}，新标签页内容已在当前页打开：${page.url()}`);
   };
 
   async function execute(action: UnifiedBrowserAction): Promise<UnifiedToolResult> {
     try {
       switch (action.tool) {
-        case 'snapshot':
-          return { ok: true, text: await snapshotText() };
+        case 'snapshot': {
+          const snapshot = await snapshotWithLinks();
+          return { ok: true, text: snapshot.text, links: snapshot.links, url: page.url() };
+        }
         case 'click':
-          await byRef(action.ref).click({ timeout });
-          return done(`已点击 ${action.ref}`);
+          return { ...(await clickFollowingNewTab(action.ref)), url: page.url() };
         case 'type': {
           const target = byRef(action.ref);
           await target.fill(action.text, { timeout });
@@ -109,11 +225,18 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
             timeout: Math.max(timeout, 30_000),
             waitUntil: 'domcontentloaded',
           });
-          return done(`已打开 ${page.url()}`);
+          return { ...done(`已打开 ${page.url()}`), url: page.url() };
         case 'extract': {
           const content = (
             await redactPageText(page as never, await page.locator('body').innerText({ timeout }))
           ).slice(0, maxExtract);
+          // innerText drops hrefs; list answers need each item's own link.
+          const anchors = await pageLinks(page, timeout);
+          const links: Array<{ text: string; url: string }> = [];
+          for (const anchor of anchors) {
+            const text = await redactPageText(page as never, anchor.text);
+            if (text) links.push({ text, url: shortenUrl(anchor.url, maxUrlChars) });
+          }
           return {
             ok: true,
             text: JSON.stringify({
@@ -121,7 +244,13 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
               fields: action.fields ?? [],
               url: page.url(),
               content,
+              links,
             }),
+            links: [
+              ...anchors.map((anchor) => anchor.url),
+              ...links.map((link) => link.url).filter((url) => !url.endsWith('…')),
+            ],
+            url: page.url(),
           };
         }
         case 'screenshot': {
