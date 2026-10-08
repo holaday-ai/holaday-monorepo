@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { newExternalId } from '@holaday/shared-types';
 import { eq } from 'drizzle-orm';
@@ -73,6 +74,69 @@ describe('video confirmation billing and rejected retry budget (real MySQL)', ()
       verificationPassed: false,
     });
   }
+  it('normalizes internal/full-width spaces and case before enforcing the same request budget', async () => {
+    const user = await actor();
+    const initial = await confirm(user.id, true, 1, '猫举爪 ABC');
+    await reject(initial.generated);
+    expect((await confirm(user.id, true, 1, '  猫　举 爪　ａｂｃ  ')).result.kind).toBe(
+      'reject_retry_limit',
+    );
+  });
+  it('reserves the last attempt under the owner lock for two concurrent confirmations', async () => {
+    const user = await actor();
+    for (let i = 0; i < 2; i++) {
+      const prior = await confirm(user.id, false, 3);
+      await reject(prior.generated);
+      await refundTaskOnce(
+        db,
+        new QuotaService(db),
+        prior.generated,
+        'MEDIA_VIDEO_QUALITY_REJECTED',
+      );
+    }
+    const quota = new QuotaService(db);
+    const before = await quota.snapshot(user.id, 'pro');
+    const runs = await Promise.all([confirm(user.id), confirm(user.id)]);
+    expect(runs.map((run) => run.result.kind).sort()).toEqual(['created', 'reject_retry_limit']);
+    expect((await quota.snapshot(user.id, 'pro')).tasksRemaining).toBe(before.tasksRemaining - 1);
+    const denied = runs.find((run) => run.result.kind === 'reject_retry_limit');
+    if (!denied) throw new Error('Expected one denied confirmation');
+    expect(
+      await db.select().from(tasks).where(eq(tasks.externalId, denied.generated)),
+    ).toHaveLength(0);
+    const [quote] = await db.select().from(tasks).where(eq(tasks.externalId, denied.quote));
+    expect(quote?.status).toBe('awaiting_user');
+  });
+  it('reads a legacy fingerprint with normalized intent without rewriting the old record', async () => {
+    const user = await actor();
+    const legacyIntent = '猫举爪 ABC';
+    const retryKey = createHash('sha256')
+      .update(
+        JSON.stringify([
+          legacyIntent,
+          {
+            videoOptions: { model: 'veo_fast' },
+            visualMode: 'video',
+          },
+        ]),
+      )
+      .digest('hex');
+    const old = newExternalId('task');
+    const result = { metadata: { videoRetryKey: retryKey } };
+    await db.insert(tasks).values({
+      externalId: old,
+      userId: user.id,
+      intent: legacyIntent,
+      status: 'failed',
+      errorCode: 'MEDIA_VIDEO_QUALITY_REJECTED',
+      result,
+    });
+    expect((await confirm(user.id, true, 1, ' 猫 举 爪　ａｂｃ ')).result.kind).toBe(
+      'reject_retry_limit',
+    );
+    const [unchanged] = await db.select().from(tasks).where(eq(tasks.externalId, old));
+    expect(unchanged?.result).toEqual(result);
+  });
   it('confirmation writes the real charge, quality rejection refunds quota once, duplicate rejection/sweep do not credit twice', async () => {
     const user = await actor();
     const quota = new QuotaService(db);

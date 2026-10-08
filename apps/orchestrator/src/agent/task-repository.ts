@@ -5,7 +5,7 @@ import {
   type TaskOrigin,
   newExternalId,
 } from '@holaday/shared-types';
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { recordQuotaCharge } from '../quota/platform-failure-refunds.js';
 import { type ConsumeReason, QuotaService } from '../quota/quota-service.js';
@@ -36,6 +36,7 @@ import {
 } from '../task-status.js';
 import type { PendingConfirm, PlannedStep, TaskState } from './task-controller.js';
 import { runQueueDatabase, runQueueWrite } from './task-queue-persistence.js';
+import { normalizeVideoRetryIntent } from './video/video-retry-policy.js';
 
 // Compatibility writes must not mutate a core execution admitted after the
 // router's read. Keep the same owner/origin/legacy predicate on read and CAS.
@@ -986,9 +987,18 @@ export class TaskRepository {
     }
     // The creation fingerprint is host-owned and must survive terminal
     // settlement metadata replacement so later confirmations see rejects.
-    const priorRetryKey = (taskRow.result as { metadata?: { videoRetryKey?: unknown } } | null)?.metadata?.videoRetryKey;
+    const priorRetryKey = (taskRow.result as { metadata?: { videoRetryKey?: unknown } } | null)
+      ?.metadata?.videoRetryKey;
     if (typeof priorRetryKey === 'string' && /^[a-f0-9]{64}$/.test(priorRetryKey)) {
-      result.metadata = { ...(result.metadata as Record<string, unknown> | undefined), videoRetryKey: priorRetryKey };
+      result.metadata = {
+        ...(result.metadata as Record<string, unknown> | undefined),
+        videoRetryKey: priorRetryKey,
+      };
+      if (
+        (taskRow.result as { metadata?: { videoRetryVersion?: unknown } } | null)?.metadata
+          ?.videoRetryVersion === 2
+      )
+        result.metadata = { ...(result.metadata as Record<string, unknown>), videoRetryVersion: 2 };
     }
     update.result = result;
 
@@ -1267,26 +1277,75 @@ export class TaskRepository {
     const retryLimit = input.rejectRetryLimit ?? 3;
     if (!Number.isInteger(retryLimit) || retryLimit < 1 || retryLimit > 100)
       throw new Error('invalid video rejection retry limit');
-    const retryKey = createHash('sha256').update(JSON.stringify([
-      input.intent.trim(), canonicalVideoRequest(input.executionMetadata),
-    ])).digest('hex');
+    const normalizedIntent = normalizeVideoRetryIntent(input.intent);
+    const fingerprint = (intent: string) =>
+      createHash('sha256')
+        .update(JSON.stringify([intent, canonicalVideoRequest(input.executionMetadata)]))
+        .digest('hex');
+    const retryKey = fingerprint(normalizedIntent);
     try {
       return await this.db.transaction(async (tx) => {
         // Serialize confirmations per owner before inspecting failures and
         // debiting: concurrent clicks cannot race the durable rejection budget.
-        await tx.select({ id: users.id }).from(users).where(eq(users.id, input.userId)).for('update');
+        await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.id, input.userId))
+          .for('update');
         let priorQualityRejects = 0;
         if (input.executionMetadata.visualMode === 'video') {
-          const recent = await tx.select({ status: tasks.status, errorCode: tasks.errorCode })
-            .from(tasks).where(and(eq(tasks.userId, input.userId),
-              sql`JSON_UNQUOTE(JSON_EXTRACT(${tasks.result}, '$.metadata.videoRetryKey')) = ${retryKey}`,
-              inArray(tasks.status, ['failed', 'completed'])))
-            .orderBy(desc(tasks.id)).limit(retryLimit);
-          for (const task of recent) {
-            if (task.status !== 'failed' || task.errorCode !== 'MEDIA_VIDEO_QUALITY_REJECTED') break;
-            priorQualityRejects++;
+          let inFlight = 0;
+          let terminalSequenceEnded = false;
+          let cursor: number | undefined;
+          // Read old fingerprints without backfilling history: verify their hash
+          // against the row's original intent and these exact production options.
+          // Page rather than taking only N terminal rows: pending attempts reserve
+          // budget, and intervening unrelated requests must not hide old rejects.
+          for (;;) {
+            const recent = await tx
+              .select({
+                id: tasks.id,
+                intent: tasks.intent,
+                status: tasks.status,
+                errorCode: tasks.errorCode,
+                retryKey: sql<string>`JSON_UNQUOTE(JSON_EXTRACT(${tasks.result}, '$.metadata.videoRetryKey'))`,
+              })
+              .from(tasks)
+              .where(
+                and(
+                  eq(tasks.userId, input.userId),
+                  cursor === undefined ? undefined : lt(tasks.id, cursor),
+                  inArray(tasks.status, ['queued', 'executing', 'failed', 'completed']),
+                  sql`JSON_EXTRACT(${tasks.result}, '$.metadata.videoRetryKey') IS NOT NULL`,
+                  or(
+                    sql`JSON_UNQUOTE(JSON_EXTRACT(${tasks.result}, '$.metadata.videoRetryKey')) = ${retryKey}`,
+                    sql`JSON_EXTRACT(${tasks.result}, '$.metadata.videoRetryVersion') IS NULL`,
+                  ),
+                ),
+              )
+              .orderBy(desc(tasks.id))
+              .limit(100);
+            for (const task of recent) {
+              if (
+                task.retryKey !== retryKey &&
+                (normalizeVideoRetryIntent(task.intent) !== normalizedIntent ||
+                  task.retryKey !== fingerprint(task.intent.trim()))
+              )
+                continue;
+              if (task.status === 'queued' || task.status === 'executing') inFlight++;
+              else if (!terminalSequenceEnded) {
+                if (task.status === 'failed' && task.errorCode === 'MEDIA_VIDEO_QUALITY_REJECTED')
+                  priorQualityRejects++;
+                else terminalSequenceEnded = true;
+              }
+              if (inFlight + priorQualityRejects >= retryLimit)
+                return { kind: 'reject_retry_limit' as const };
+            }
+            if (recent.length < 100) break;
+            const last = recent.at(-1);
+            if (!last) break;
+            cursor = last.id;
           }
-          if (priorQualityRejects >= retryLimit) return { kind: 'reject_retry_limit' as const };
         }
         if (!input.isBypass) {
           const quota = new QuotaService(tx as unknown as DB);
@@ -1337,7 +1396,7 @@ export class TaskRepository {
           plan: [],
           roleId: 'video-creator',
           opusUsed: false,
-          result: { metadata: { ...input.executionMetadata, videoRetryKey: retryKey } },
+          result: { metadata: { ...input.executionMetadata, videoRetryKey: retryKey, videoRetryVersion: 2 } },
         });
         const taskInternalId = readInsertId(insert);
         if (!input.isBypass) {

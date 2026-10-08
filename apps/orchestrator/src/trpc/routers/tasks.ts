@@ -1785,7 +1785,7 @@ export const tasksRouter = router({
           : null,
     });
 
-    await parseCreateAttachments(executionMode === 'generate');
+    await parseCreateAttachments(executionMode === 'generate' || executionMode === 'scrape');
     // Preserve the existing specialized stock candidate path (including its
     // generic fallback) until the remaining first-create migration is done.
     const specializedStockLaneEligible =
@@ -4208,6 +4208,8 @@ export const tasksRouter = router({
                 skillId: dispatchSkillId,
                 expertMode: expertModeOverride,
                 responsesAdapter: scrapeResponsesAdapter,
+                fileIds: orderedFileIds,
+                ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
                 ...(executionPlan ? { executionPlan } : {}),
                 firecrawl,
                 logger: ctx.logger,
