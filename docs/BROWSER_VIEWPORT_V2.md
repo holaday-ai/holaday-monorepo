@@ -1,6 +1,6 @@
 # Browser viewport V2 (PR1)
 
-Default off. Build the frontend with `VITE_BROWSER_VIEWPORT_V2=true` and explicitly enable backend `BROWSER_VIEWPORT_V2=true` only in local/test environments. A V2 connection is rejected when the backend flag is off. This PR does not enable either flag in production.
+Default off. Build the frontend with `VITE_BROWSER_VIEWPORT_V2=true` and explicitly enable backend `BROWSER_VIEWPORT_V2=true` only in local/test environments. A V2 connection is rejected when the backend flag is off. When enabled, backend frame/action guards apply to every CDP connection, including legacy URLs, so omitting negotiation cannot downgrade control. This PR does not enable either flag in production.
 
 The visible panel owns the outer width. Default contain preserves the whole current remote viewport. Desktop rendering defaults to 1280×800 independently of portrait panel width; the caller may supply an explicit desktop profile. “按面板宽度渲染” explicitly requests a desktop (non-mobile) viewport matching the panel. Original/zoom and named pan buttons change only local display. Wheel/touch scrolling is sent to the remote page under its existing human control lease.
 
@@ -26,4 +26,4 @@ The harness uses actual Chromium, streamer, input handler, CDP component and Bro
 
 The matrix covers 390/430/760/1440 panels, 320/430/1280/1600 source widths, verified actual DPR 1/2, page-content CSS zoom 80/100/125/200%, compositor pinch scale 125/200%, original/local zoom/pan, explicit panel rendering, iframe, fixed overlay and Chinese composition. Native browser chrome zoom at 80% is not claimed by these CSS-zoom tests. A real BrowserPanel portrait assertion checks whole-frame bounds and equal client/scroll widths. VNC pointer precision is isolated in a local fixture; application V2 VNC writes remain disabled.
 
-Unit and real-proxy tests cover stale/forged frames, nonce mismatch/replay/expiry/clock rollback, queued input invalidation, resize requests, missing/throwing policy and sensitive writes without nonce. These are local/component results, not deployment or real-user acceptance.
+Unit and real-proxy tests cover stale/forged frames, nonce mismatch/replay/expiry/clock rollback, queued input invalidation, resize requests, legacy-query downgrade, missing/throwing policy and sensitive writes without nonce. These are local/component results, not deployment or real-user acceptance.

@@ -210,7 +210,9 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             logger: log,
             intervalMs: opts.sessionRevalidationIntervalMs,
           });
-          void wireUpClient({ ws, callerUserId, instance, viewportV2: process.env.BROWSER_VIEWPORT_V2 === 'true' && new URL(url, 'http://localhost').searchParams.get('viewportV2') === '1' }).then(resolve, rejectSetup);
+          // The server flag enforces V2 guards even for a legacy URL; dropping
+          // the negotiation parameter must never restore unguarded writes.
+          void wireUpClient({ ws, callerUserId, instance, viewportV2: process.env.BROWSER_VIEWPORT_V2 === 'true' }).then(resolve, rejectSetup);
         }));
       },
       (err: unknown) => {
