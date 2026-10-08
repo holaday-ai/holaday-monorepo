@@ -7,6 +7,7 @@ import {
   shortenSnapshotUrls,
   shortenUrl,
   snapshotLinks,
+  yamlScalar,
 } from './playwright-unified-executor.js';
 import {
   UNIFIED_BROWSER_TOOLS,
@@ -219,4 +220,66 @@ describe('unified executor on list pages (FIX-BATCH-A, real Chromium)', () => {
     expect(extracted.links).toEqual(expect.arrayContaining([`${base}/item/1`, `${base}/item/2`]));
     await page.close();
   }, 60_000);
+});
+
+describe('relative links resolve like the browser (PR #247 review 2, P1-2)', () => {
+  let browser: Browser;
+  const pages: Record<string, string> = {
+    '/news/index':
+      '<a href="article?id=42">目录内文章</a><a href="../about">上级页面</a><a href="?id=2">同页参数</a>',
+    '/based/page': '<base href="/library/"><a href="item?id=7">base 下的条目</a>',
+  };
+  const ok = new Set(['/news/article?id=42', '/about', '/news/index?id=2', '/library/item?id=7']);
+  const server = createServer((req, res) => {
+    res.setHeader('content-type', 'text/html; charset=utf-8');
+    const html = pages[req.url ?? ''];
+    if (html) res.end(`<!doctype html><title>fixture</title>${html}`);
+    else if (ok.has(req.url ?? '')) res.end('ok');
+    else {
+      res.statusCode = 404;
+      res.end('not found');
+    }
+  });
+  let base = '';
+  beforeAll(async () => {
+    browser = await chromium.launch({ headless: true });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  }, 60_000);
+  afterAll(async () => {
+    await browser?.close();
+    await new Promise((resolve) => server.close(resolve));
+  });
+
+  it.each([
+    ['/news/index', ['/news/article?id=42', '/about', '/news/index?id=2']],
+    ['/based/page', ['/library/item?id=7']],
+  ])(
+    'on %s the shown link, the evidence and the browser target agree',
+    async (path, expected) => {
+      const page = await browser.newPage();
+      await page.goto(`${base}${path}`);
+      const tools = createPlaywrightUnifiedExecutor(page, { actionTimeoutMs: 5_000 });
+      const snapshot = await tools.execute({ tool: 'snapshot' });
+      const shown = [...snapshot.text.matchAll(/- \/url: (\S+)/g)].map((match) => match[1]);
+      const browserTargets = await page.$$eval('a[href]', (anchors) =>
+        anchors.map((anchor) => (anchor as HTMLAnchorElement).href),
+      );
+      const want = expected.map((suffix) => `${base}${suffix}`);
+      expect(shown).toEqual(want);
+      expect(browserTargets).toEqual(want);
+      expect(snapshot.links).toEqual(want);
+      const extracted = await tools.execute({ tool: 'extract', instruction: '链接' });
+      expect(extracted.links).toEqual(want);
+      for (const url of want) expect((await fetch(url)).status).toBe(200);
+      await page.close();
+    },
+    60_000,
+  );
+});
+
+it('reads YAML-quoted snapshot URLs as their scalar value', () => {
+  expect(yamlScalar('"?id=2"')).toBe('?id=2');
+  expect(yamlScalar("'a''b'")).toBe("a'b");
+  expect(yamlScalar('/plain?x=1')).toBe('/plain?x=1');
 });

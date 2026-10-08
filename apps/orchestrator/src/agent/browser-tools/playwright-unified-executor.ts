@@ -44,18 +44,58 @@ const URL_LINE = /^(\s*- \/url: )(.*)$/;
  * Link URLs are 20–35% of a real page's AI snapshot (batch 12, eval sites),
  * mostly tracking parameters. Clicks go by ref, so a shortened URL keeps the
  * page readable at a fraction of the tokens.
+ *
+ * With `baseUrl` (the page's `document.baseURI`, which honours `<base href>`)
+ * every link is first resolved the way the browser resolves it, so the model
+ * sees the same absolute address that is recorded as observed evidence:
+ * `article?id=42` on `/news/index` reads `…/news/article?id=42`.
  */
-export function shortenSnapshotUrls(tree: string, maxUrlChars: number): string {
+export function shortenSnapshotUrls(tree: string, maxUrlChars: number, baseUrl?: string): string {
   if (maxUrlChars <= 0) return tree;
   return tree
     .split('\n')
     .map((line) => {
       const match = URL_LINE.exec(line);
       if (!match) return line;
-      const short = shortenUrl(match[2] ?? '', maxUrlChars);
-      return short === match[2] ? line : `${match[1]}${short}`;
+      const raw = match[2] ?? '';
+      const href = yamlScalar(raw);
+      const absolute = baseUrl ? resolveHref(href, baseUrl) : null;
+      const short = shortenUrl(absolute ?? href, maxUrlChars);
+      return short === href ? line : `${match[1]}${short}`;
     })
     .join('\n');
+}
+
+/**
+ * ariaSnapshot is YAML: a value such as `?id=2` or one containing `: ` is
+ * written quoted (`"?id=2"`). The link is the scalar, not the quotes.
+ */
+export function yamlScalar(raw: string): string {
+  const value = raw.trim();
+  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+    try {
+      return JSON.parse(value) as string;
+    } catch {
+      return value.slice(1, -1);
+    }
+  }
+  if (value.length >= 2 && value.startsWith("'") && value.endsWith("'"))
+    return value.slice(1, -1).replace(/''/g, "'");
+  return value;
+}
+
+/**
+ * The absolute http(s) address a link points at, resolved against the page's
+ * base URL exactly as the browser does (existing percent-escapes are kept).
+ * Null for other schemes (mailto:, javascript:) or unparseable hrefs.
+ */
+export function resolveHref(href: string, baseUrl: string): string | null {
+  try {
+    const absolute = new URL(href.trim(), baseUrl).href;
+    return /^https?:/i.test(absolute) ? absolute : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -124,20 +164,19 @@ async function pageLinks(
   }
 }
 
-/** Observed link targets in an AI aria snapshot (absolute, tracking parameters removed). */
-export function snapshotLinks(tree: string, pageUrl: string, maxUrlChars: number): string[] {
+/**
+ * Observed link targets in an AI aria snapshot: resolved against the page's
+ * base URL (`document.baseURI`), tracking tokens removed — the same address
+ * `shortenSnapshotUrls` shows the model whenever it fits.
+ */
+export function snapshotLinks(tree: string, baseUrl: string, maxUrlChars: number): string[] {
   const links = new Set<string>();
   for (const line of tree.split('\n')) {
-    const href = URL_LINE.exec(line)?.[2]?.trim();
+    const raw = URL_LINE.exec(line)?.[2];
+    const href = raw ? yamlScalar(raw) : '';
     if (!href || links.size >= MAX_SNAPSHOT_LINKS) continue;
-    let absolute: string;
-    try {
-      absolute = new URL(href, pageUrl).toString();
-    } catch {
-      continue;
-    }
-    if (!/^https?:/i.test(absolute)) continue;
-    links.add(observedLinkEvidence(absolute, maxUrlChars));
+    const absolute = resolveHref(href, baseUrl);
+    if (absolute) links.add(observedLinkEvidence(absolute, maxUrlChars));
   }
   return [...links];
 }
@@ -161,14 +200,16 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
       page as never,
       await page.locator('body').ariaSnapshot({ mode: 'ai', timeout }),
     );
-    const tree = shortenSnapshotUrls(redacted, maxUrlChars);
+    // Links resolve against document.baseURI (honours <base href>), not page.url().
+    const baseUrl = await page.evaluate(() => document.baseURI).catch(() => page.url());
+    const tree = shortenSnapshotUrls(redacted, maxUrlChars, baseUrl);
     const header = `URL: ${page.url()}\n标题: ${await page.title()}\n`;
     const visible = tree.length > maxSnapshot ? tree.slice(0, maxSnapshot) : tree;
     const body = visible === tree ? tree : `${visible}\n…（已截断）`;
     // Shortening maps lines 1:1, so the visible lines of the full tree are the
     // links the model saw; links past the cut ground nothing.
     const seen = redacted.split('\n').slice(0, visible.split('\n').length).join('\n');
-    return { text: `${header}${body}`, links: snapshotLinks(seen, page.url(), maxUrlChars) };
+    return { text: `${header}${body}`, links: snapshotLinks(seen, baseUrl, maxUrlChars) };
   };
   const snapshotText = async (): Promise<string> => (await snapshotWithLinks()).text;
 

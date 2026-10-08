@@ -35,7 +35,7 @@ import {
   type OutputFileDescriptor,
 } from './file-artifact-consistency.js';
 import { evaluateSourceDomain } from './source-domain-consistency.js';
-import { isHashRoute, urlResourceIdentity } from './url-identity.js';
+import { isNonDetailUrl, urlResourceIdentity } from './url-identity.js';
 import { evaluateTemplateFill } from './template-fill-consistency.js';
 import { classifyLightweightTask } from './lightweight-task.js';
 import type { VerificationInputCoverage } from './verification-input-budget.js';
@@ -1021,25 +1021,8 @@ function isLikelyEcommerceAggregateUrl(url: string): boolean {
   return false;
 }
 
-/**
- * A homepage, search page or listing page — never an item's own source.
- * Exported so the auto-fix layer refuses to substitute one for an item link.
- */
-export function isNonDetailUrl(raw: string): boolean {
-  try {
-    const url = new URL(stripTrailingPunct(raw));
-    // An SPA hash route (#/post/7) is the page's real path.
-    const route = isHashRoute(url.hash) ? url.hash.replace(/^#!?/, '').split('?')[0] ?? '' : '';
-    const path = (route && route !== '/' ? route : url.pathname).replace(/\/+$/, '').toLowerCase();
-    if (path === '' || /^\/(?:index|default|home)(?:\.(?:s?html?|php|aspx?))?$/.test(path)) {
-      return !/[?&](?:id|p|aid|itemid|item_id|article_id)=/i.test(url.search);
-    }
-    if (/(?:^|\/)(?:search|s|list|lists|category|categories|tag|tags)(?:\/|$)/.test(path)) return true;
-    return /[?&](?:q|query|keyword|keywords|wd|search)=/i.test(url.search);
-  } catch {
-    return true;
-  }
-}
+/** Shared with the auto-fix layer and the eval scorer (see url-identity.ts). */
+export { isNonDetailUrl } from './url-identity.js';
 
 const LIST_KEY_FIELD_PATTERNS: Record<string, { label: string; re: RegExp }> = {
   date: {

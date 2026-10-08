@@ -1908,7 +1908,8 @@ describe('distinct sources are distinct resources, not strings (PR #247 review P
       review([
         'https://news.example.test/article/42?utm_source=a',
         'https://www.news.example.test/article/42?spm=b',
-        'https://news.example.test/article/42/?gclid=c',
+        // A trailing slash would be a different resource (identity keeps it).
+        'https://news.example.test/article/42?gclid=c#top',
       ]),
     ).toContain('第 3 条缺少独立来源链接（与第 1 条相同）');
   });

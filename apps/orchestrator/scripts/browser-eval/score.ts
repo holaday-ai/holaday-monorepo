@@ -1,5 +1,5 @@
 import type { UnifiedBrowserOutcome } from '../../src/agent/browser-tools/unified-browser-loop.js';
-import { urlResourceIdentity } from '../../src/execution/url-identity.js';
+import { isNonDetailUrl, urlResourceIdentity } from '../../src/execution/url-identity.js';
 
 export interface BrowserEvalTask {
   id: string;
@@ -128,18 +128,8 @@ function hostMatches(host: string, domains: readonly string[]): boolean {
   return domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
 }
 
-/** True for a site homepage or a search / listing page rather than an item page. */
-export function isNonDetailUrl(raw: string): boolean {
-  try {
-    const url = new URL(raw);
-    const path = url.pathname.replace(/\/+$/, '').toLowerCase();
-    if (path === '' || /^\/(?:index\.(?:html?|php))?$/.test(path)) return true;
-    if (/(?:^|\/)(?:search|s|list|category|tag|tags)(?:\/|$)/.test(path)) return true;
-    return /[?&](?:q|query|keyword|keywords|wd|search)=/i.test(url.search);
-  } catch {
-    return true;
-  }
-}
+/** The verifier's detail-page judgement, shared so eval and production agree. */
+export { isNonDetailUrl } from '../../src/execution/url-identity.js';
 
 export function scoreListWithSources(
   answer: string,

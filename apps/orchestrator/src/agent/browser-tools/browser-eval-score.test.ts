@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { reviewListAnswer } from '../../execution/answer-verifier.js';
+import { buildContract } from '../../execution/execution-contract.js';
 import {
   type BrowserEvalTask,
   classifyFailure,
@@ -183,4 +185,52 @@ it('scores anchor variants of one article as one source', () => {
       keyField: 'date',
     }).problems,
   ).toEqual(['第 2 条与前面条目复用同一链接', '第 3 条与前面条目复用同一链接']);
+});
+
+describe('eval scorer and production verifier agree on detail sources (PR #247 review 2, P2-5)', () => {
+  const contract = buildContract({
+    taskId: 't-agree',
+    intent: '打开新闻首页，总结今天前三条新闻，提供原标题、发布日期和可核实链接。',
+    executionMode: 'browser',
+  });
+  const answer = (links: string[]) =>
+    links
+      .map((link, i) => `${i + 1}. 标题${i + 1}\n   发布日期：2026-10-08\n   链接：${link}`)
+      .join('\n');
+  it.each([
+    ['ordinary articles', [1, 2, 3].map((i) => `https://news.example.test/article/${i}`), true],
+    ['root query-id details', [1, 2, 3].map((i) => `https://news.example.test/?id=${i}`), true],
+    ['SPA details', [1, 2, 3].map((i) => `https://news.example.test/#/post/${i}`), true],
+    [
+      'SPA tracking variants',
+      [1, 2, 3].map((i) => `https://news.example.test/#/post/7?utm_source=f${i}`),
+      false,
+    ],
+    [
+      'SPA home',
+      [
+        'https://news.example.test/#/',
+        'https://news.example.test/#/',
+        'https://news.example.test/#/',
+      ],
+      false,
+    ],
+    ['SPA search', [1, 2, 3].map((i) => `https://news.example.test/#/search?q=${i}`), false],
+    [
+      'site homepage',
+      ['https://news.example.test/', 'https://news.example.test/', 'https://news.example.test/'],
+      false,
+    ],
+  ])('%s', (_label, links, accepted) => {
+    const text = answer(links);
+    expect(reviewListAnswer(contract, text) === null).toBe(accepted);
+    expect(
+      scoreListWithSources(text, {
+        type: 'list_with_sources',
+        minItems: 3,
+        domains: ['news.example.test'],
+        keyField: 'date',
+      }).ok,
+    ).toBe(accepted);
+  });
 });
